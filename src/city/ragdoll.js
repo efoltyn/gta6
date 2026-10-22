@@ -982,6 +982,7 @@
      head is), and the knockdown / KO clock that is already running gets
      him up. */
   const _ho = { dirX: 0, dirZ: 0, vx: 0, vz: 0, force: 0, landed: true, dead: false, hold: true };
+  const _hoMv = { posture: "down", baseY: 0, cars: false, out: { hit: false, nx: 0, nz: 0, c: null, pushed: false, landed: false, y: 0, floor: 0 } };
   function liveHandoff(s) {
     const t = s.ped, g = t && t.group, p = s.p;
     if (!t || !g || t.dead) { s.live = false; return; }
@@ -998,7 +999,12 @@
     releaseSlot(s);
     g.quaternion.identity();
     g.rotation.set(0, onBack ? Math.atan2(-hx, -hz) : Math.atan2(hx, hz), 0);
-    g.position.set(mhx, groundUnder(mhx, mhz, mhy + 0.3), mhz);
+    // the root to the hips through the one mover (systems/bodymove.js): the
+    // points were each swept, but the root sat off them and is not let
+    // across a face on the way back to them
+    if (CBZ.bodyMove) { _hoMv.baseY = mhy - 0.3; CBZ.bodyMove(g.position, mhx - g.position.x, 0, mhz - g.position.z, _hoMv); }
+    else { g.position.x = mhx; g.position.z = mhz; }
+    g.position.y = groundUnder(g.position.x, g.position.z, mhy + 0.3);
     const ph = CBZ.body && CBZ.body.phys ? CBZ.body.phys(t) : t._phys;
     if (ph) { ph.down = Math.max(0.6, t.ko || 0); ph.air = false; ph.vx = ph.vy = ph.vz = 0; ph.kx = ph.kz = 0; ph.settle = 1; }
     if (CBZ.bodyFall && CBZ.bodyFall.start) {

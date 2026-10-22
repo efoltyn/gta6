@@ -208,6 +208,28 @@
       B.ch.group.position.x = x; if (y != null) B.ch.group.position.y = y; B.ch.group.position.z = z;
     }
   }
+  /* MOVE a body to (x, y, z) through THE ONE MOVER (systems/bodymove.js
+     CBZ.bodyMove): swept from where it is, stopped on the first face it
+     meets (a wall, a shut door leaf), the rest of the step slid along it,
+     overlap cleared. setPos is the RELOCATION (an authored spot); this is
+     every move a verb makes. o: the mover's options ({posture, radius,
+     feet, height, clear}); returns its result (hit/pushed + normal). */
+  const _mvRes = { hit: false, nx: 0, nz: 0, c: null, pushed: false, landed: false, y: 0, floor: 0 };
+  const _mvO = { posture: "stand", radius: 0.3, feet: 0.42, height: 1.7, cars: true, clear: true, out: _mvRes };
+  const _holdO = { posture: "stand", radius: 0.3, feet: 0.42, height: 1.7, cars: true, clear: true, out: _mvRes };
+  function moveBody(B, x, y, z, posture, radius, feet, clear) {
+    const p = B.pos;
+    if (!p) return _mvRes;
+    if (!CBZ.bodyMove) { _mvRes.hit = _mvRes.pushed = false; setPos(B, x, y, z); return _mvRes; }
+    _mvO.posture = posture || "stand";
+    _mvO.radius = radius || (B.isPlayer ? 0.38 : B.radius * 0.9);
+    _mvO.feet = feet != null ? feet : (_mvO.posture === "stand" ? 0.42 : 0.2);
+    _mvO.height = _mvO.posture === "stand" ? 1.7 : 0.7;
+    _mvO.clear = clear !== false;
+    CBZ.bodyMove(p, x - p.x, 0, z - p.z, _mvO);
+    setPos(B, p.x, y, p.z);
+    return _mvRes;
+  }
   function groundY(x, z, fromY) {
     if (CBZ.groundAt) { const g = CBZ.groundAt(x, z, fromY); if (isFinite(g)) return g; }
     if (CBZ.floorAt) { const g = CBZ.floorAt(x, z, fromY); if (isFinite(g)) return g; }
@@ -802,14 +824,16 @@
         const sdt = dt / n;
         let landed = false;
         for (let s = 0; s < n && !landed; s++) {
-          const x0 = B.pos.x, z0 = B.pos.z;
-          _fp.set(x0 + f.vx * sdt, B.pos.y + f.vy * sdt, z0 + f.vz * sdt);
-          if (CBZ.collide) {
-            const bx = _fp.x, bz = _fp.z;
-            CBZ.collide(_fp, B.radius * 0.9, _fp.y + (f.clearY || 0.25), _fp.y + 1.6);
-            const cdx = _fp.x - bx, cdz = _fp.z - bz, cd = Math.hypot(cdx, cdz);
-            if (cd > 0.004) {
-              const nx = cdx / cd, nz = cdz / cd;
+          // the flight goes through the one mover: swept, so a thrown man
+          // stops on the face he meets instead of leaving by its far side.
+          // Over a RAIL he pivots on it: only his hips' line (a thin core)
+          // has to clear the top, the legs and shoulders fold round it
+          const y0 = B.pos.y;
+          const sw = moveBody(B, B.pos.x + f.vx * sdt, y0 + f.vy * sdt, B.pos.z + f.vz * sdt, "stand", f.kind === "rail" ? 0.12 : B.radius * 0.9, f.clearY || 0.25);
+          _fp.set(B.pos.x, B.pos.y, B.pos.z);
+          {
+            if (sw.hit || sw.pushed) {
+              const nx = sw.nx, nz = sw.nz;
               const into = -(f.vx * nx + f.vz * nz);
               if (into > 1) {
                 if (CBZ.trauma && CBZ.trauma.slam) CBZ.trauma.slam(a, into, { wall: true, dir: { x: nx, z: nz } });
@@ -823,9 +847,8 @@
           // a bed / table surface catches a body over it
           let floor;
           if (f.surface && Math.hypot(_fp.x - f.surface.x, _fp.z - f.surface.z) < f.surface.r) floor = f.surface.y;
-          else floor = groundY(_fp.x, _fp.z, Math.max(_fp.y, B.pos.y) + 0.05);
-          if (_fp.y <= floor && f.vy <= 0) { _fp.y = floor; landed = true; }
-          setPos(B, _fp.x, _fp.y, _fp.z);
+          else floor = groundY(_fp.x, _fp.z, Math.max(_fp.y, y0) + 0.05);
+          if (_fp.y <= floor && f.vy <= 0) { _fp.y = floor; landed = true; setPos(B, _fp.x, _fp.y, _fp.z); }
         }
         f.pitch += f.spin * dt;
         f.rollA += f.roll * dt;
@@ -1856,7 +1879,7 @@
     const dx = A.pos.x - T.pos.x, dz = A.pos.z - T.pos.z, d = Math.hypot(dx, dz) || 1;
     finish(S, false);
     if (typeof V.step === "function") { try { V.step(S.a, dx / d, dz / d, 0.45, 0.4); } catch (e) {} }
-    else setPos(A, A.pos.x + dx / d * 0.3, A.pos.y, A.pos.z + dz / d * 0.3);
+    else moveBody(A, A.pos.x + dx / d * 0.3, A.pos.y, A.pos.z + dz / d * 0.3, "stand");
     if (CBZ.sfx) CBZ.sfx("punch");
     if (CBZ.shake && T.isPlayer) CBZ.shake(0.3);
   }
@@ -1909,10 +1932,10 @@
   function lungeStep(S, dt) {
     const AR = CBZ.arrest, LU = AR.LUNGE, L = S.lunge, A = S.A, T = S.T;
     const step = Math.min(LU.SPEED * dt, Math.max(0, L.reach - L.travel));
-    _R.set(A.pos.x + L.dx * step, A.pos.y, A.pos.z + L.dz * step);
-    if (CBZ.collide) CBZ.collide(_R, A.radius * 0.9, A.pos.y + 0.42, A.pos.y + 1.7);
-    const moved = Math.hypot(_R.x - A.pos.x, _R.z - A.pos.z);
-    setPos(A, _R.x, groundY(_R.x, _R.z, A.pos.y + 0.45), _R.z);
+    const lx0 = A.pos.x, lz0 = A.pos.z;
+    moveBody(A, lx0 + L.dx * step, A.pos.y, lz0 + L.dz * step, "stand", A.radius * 0.9);
+    const moved = Math.hypot(A.pos.x - lx0, A.pos.z - lz0);
+    setPos(A, A.pos.x, groundY(A.pos.x, A.pos.z, A.pos.y + 0.45), A.pos.z);
     A.face(Math.atan2(L.dx, L.dz), 1 - Math.exp(-20 * dt));
     L.t += dt; L.travel += step;
     S.aSpeed = moved / Math.max(dt, 1e-4);
@@ -2306,7 +2329,7 @@
       const want = S.travel * smooth(S.k);
       const d = want - S.travelDone;
       S.travelDone = want;
-      setPos(A, A.pos.x + S.dir.x * d, A.pos.y, A.pos.z + S.dir.z * d);
+      moveBody(A, A.pos.x + S.dir.x * d, A.pos.y, A.pos.z + S.dir.z * d, "stand");
     }
 
     // ---- poses. The grabber's body first: HIS chest (where his lean put it)
@@ -2463,9 +2486,8 @@
     const dx = gx - B.pos.x, dz = gz - B.pos.z, d = Math.hypot(dx, dz);
     if (d < 1e-4) return 0;
     const st = Math.min(d, speed * dt);
-    _R.set(B.pos.x + dx / d * st, B.pos.y, B.pos.z + dz / d * st);
-    if (CBZ.collide) CBZ.collide(_R, B.isPlayer ? 0.38 : B.radius * 0.9, B.pos.y + 0.42, B.pos.y + 1.7);
-    setPos(B, _R.x, groundY(_R.x, _R.z, B.pos.y + 0.45), _R.z);
+    moveBody(B, B.pos.x + dx / d * st, B.pos.y, B.pos.z + dz / d * st, "stand");
+    setPos(B, B.pos.x, groundY(B.pos.x, B.pos.z, B.pos.y + 0.45), B.pos.z);
     B.face(face != null ? face : Math.atan2(dx, dz), 1 - Math.exp(-12 * dt));
     return st / Math.max(dt, 1e-4);
   }
@@ -2577,14 +2599,14 @@
       if (S.phase === "outcome") {
         if (S._m0x == null) { S._m0x = A.pos.x; S._m0y = A.pos.y; S._m0z = A.pos.z; }
         const kk = smooth(S.pt / 0.3);
-        setPos(A, lerp(S._m0x, mx, kk), lerp(S._m0y, my, kk), lerp(S._m0z, mz, kk));
+        moveBody(A, lerp(S._m0x, mx, kk), lerp(S._m0y, my, kk), lerp(S._m0z, mz, kk), "stand");
         orient(A, yawA, th * kk, 0);
       } else {
         // getting up off him: back onto your feet where your hips were (behind
         // a thicker belly by however much thicker, so your hips do not rise
         // through it)
         const kk = smooth(S.k), bk = 0.15 + fat + T.backX + (up - up0);
-        setPos(A, lerp(mx, hx - S.dir.x * bk, kk), lerp(my, groundY(hx, hz, gy + 0.45), kk), lerp(mz, hz - S.dir.z * bk, kk));
+        moveBody(A, lerp(mx, hx - S.dir.x * bk, kk), lerp(my, groundY(hx, hz, gy + 0.45), kk), lerp(mz, hz - S.dir.z * bk, kk), "stand");
         orient(A, yawA, th * (1 - kk), 0);
       }
     }
@@ -2669,14 +2691,24 @@
       yaw = yb;
       pitch = lerp(S.x0.pitch, pitch, k);
     }
-    // bodies do not go through walls: he is stopped, and the pair moves as one
-    if (CBZ.collide && !o.anchor && !o.ground) {
-      _R.set(x, y, z);
-      CBZ.collide(_R, T.radius * 0.85, y + 0.42, y + 1.7);
+    // bodies do not go through walls: THE ONE MOVER takes him from where he
+    // is to where the hold puts him, swept (a wall or a shut door between
+    // stops him on its near face, the rest slides along it), and the pair
+    // moves as one. A body on the floor (drag, pin, mount) sweeps low; one
+    // on the shoulder sweeps thin and is not shoved for overlap (he lies
+    // across the carrier's reach by design: only a crossing stops him).
+    if (CBZ.bodyMove && T.pos) {
+      _R.set(T.pos.x, y, T.pos.z);
+      _holdO.posture = o.ground || o.drag ? "down" : "stand";
+      _holdO.radius = o.anchor ? 0.15 : T.radius * 0.85;
+      _holdO.feet = o.ground || o.drag ? 0.2 : 0.42;
+      _holdO.height = o.ground || o.drag ? 0.7 : 1.7;
+      _holdO.clear = !o.anchor && !o.ground;
+      CBZ.bodyMove(_R, x - T.pos.x, 0, z - T.pos.z, _holdO);
       const ddx = _R.x - x, ddz = _R.z - z;
       if (Math.abs(ddx) + Math.abs(ddz) > 1e-4) {
         x = _R.x; z = _R.z;
-        if (S.phase !== "align") setPos(A, A.pos.x + ddx, A.pos.y, A.pos.z + ddz);
+        if (S.phase !== "align" && !o.ground) moveBody(A, A.pos.x + ddx, A.pos.y, A.pos.z + ddz, "stand");
       }
     }
     // how fast he is being walked (his legs walk at it)

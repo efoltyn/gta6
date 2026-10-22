@@ -14,6 +14,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  const _walkO = { posture: "stand", radius: 0.3, clearRadius: 0.5 };
   const g = CBZ.game;
 
   // ---- BOUNTY: a live dollar price on the player's head (PROG owns). Default 0,
@@ -1562,8 +1563,10 @@
     }
     const step = Math.min(d - 0.4, WALK_SPD * dt);
     const ux = dx / d, uz = dz / d;
-    P.pos.x += ux * step; P.pos.z += uz * step; P.vy = 0; P.grounded = true;
-    if (CBZ.collide) { try { CBZ.collide(P.pos, 0.5, 0, 1.7); } catch (e) {} }
+    // walked by the collar through the one mover (systems/bodymove.js)
+    if (CBZ.bodyMove) CBZ.bodyMove(P, ux * step, 0, uz * step, _walkO);
+    else { P.pos.x += ux * step; P.pos.z += uz * step; }
+    P.vy = 0; P.grounded = true;
     if (ch && ch.group) {
       ch.group.position.set(P.pos.x, 0, P.pos.z);
       ch.group.rotation.y = Math.atan2(ux, uz);

@@ -59,12 +59,8 @@
      arc's: its walk leg runs its own collideSlide and its settle beats
      deliberately do not collide. KO'd bodies were always skipped so you can
      step over them; a seated man earns the same treatment. */
-  function furnitureHeld(a) {
-    if (CBZ.CONFIG && CBZ.CONFIG.SIT_PHYS_V1 === false) return false;
-    return !!(a._propSeat || a._propBed || a._propLie
-      || (a.char && (a.char.sitting || a.char.lying))
-      || (CBZ.propArcActive && CBZ.propArcActive(a)));
-  }
+  // (the rule itself lives with the net, systems/bodymove.js, which obeys it too)
+  function furnitureHeld(a) { return CBZ.bodyFurnitureHeld ? CBZ.bodyFurnitureHeld(a) : false; }
 
   /* ---- THE BAND. CBZ.collide's FOUR-argument contract, honoured -----------
      Both clamps in this file called `CBZ.collide(pos, radius)` and stopped
@@ -109,32 +105,16 @@
      covered more than his radius plus half a wall in one tick (a sprint on a
      slow frame, a shove from humancontact on top of his own step) can end
      with his centre past the middle of a cell wall, and the shortest exit is
-     then out the far side. So a body that moved further than SWEEP_MIN since
-     last tick's settled spot (the same sample the vault reads, stamped at the
-     end of the previous tick) is swept along that step first
-     (CBZ.sweepCircle): stopped at the first wall it meets, keeping the part
-     of the step that runs along that wall. Steps longer than SWEEP_MAX, or a
-     sample older than one tick, are relocations (a respawn, a leash, a verb
-     that carried him), never swept. */
-  const SWEEP_MIN = R * 0.9, SWEEP_MAX = 2.5;
-  const _swFrom = { x: 0, z: 0 };
-  const _sw = { hit: false, t: 1, x: 0, z: 0, nx: 0, nz: 0, c: null };
+     then out the far side. So before the push-out the net (systems/
+     bodymove.js CBZ.bodyNet.settle) takes back whatever part of his move
+     since the last frame crossed a face: stopped on it, the rest slid along
+     it. Relocations (CBZ.bodyTeleported, a jump past the net's 6 m) are
+     left alone, as everywhere. */
   let tick = 0;
   function clampOut(a) {
     const p = posOf(a);
     const feet = (p.y || 0) + FOOT_CLEAR, head = (p.y || 0) + BODY_H;
-    if (!a._p && a._acF === tick - 1 && CBZ.sweepCircle) {
-      const dx = p.x - a._acX, dz = p.z - a._acZ, d2 = dx * dx + dz * dz;
-      if (d2 > SWEEP_MIN * SWEEP_MIN && d2 < SWEEP_MAX * SWEEP_MAX) {
-        _swFrom.x = a._acX; _swFrom.z = a._acZ;
-        if (CBZ.sweepCircle(_swFrom, p, radOf(a), feet, head, _sw)) {
-          const rest = 1 - _sw.t, rx = dx * rest, rz = dz * rest;
-          const into = rx * _sw.nx + rz * _sw.nz;
-          p.x = _sw.x; p.z = _sw.z;
-          if (into < 0) { p.x += rx - into * _sw.nx; p.z += rz - into * _sw.nz; }   // slide along it
-        }
-      }
-    }
+    if (CBZ.bodyNet) CBZ.bodyNet.settle(a._p ? CBZ.player : a);
     CBZ.collide(p, radOf(a), feet, head);
   }
 

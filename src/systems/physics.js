@@ -774,7 +774,11 @@
     else { SW.nx = nx; SW.nz = nz; }
     return true;
   }
-  function sweepCircle(from, to, radius, feetY, headY, out) {
+  // opts (optional) — { cars, self }: cars = the road cars are solid to this
+  // sweep too (an UPRIGHT body: the same cars collide() puts round it); self =
+  // the body's own position object, so it never meets the car it is in or
+  // boarding (carsNear's rules)
+  function sweepCircle(from, to, radius, feetY, headY, out, opts) {
     out = out || SWEEP;
     const ax = from.x, az = from.z, bx = to.x, bz = to.z;
     const vx = bx - ax, vz = bz - az;
@@ -804,6 +808,15 @@
         if (sweepBox(ax, az, vx, vz, radius, c, best)) { best = SW.t; bnx = SW.nx; bnz = SW.nz; bc = c; }
       }
     }
+    if (opts && opts.cars && CBZ.cityCars && (cityOn || !!(CBZ.vehicleModeOn && CBZ.vehicleModeOn()))) {
+      const n = carsNear(opts.self || from, (ax + bx) * 0.5, (az + bz) * 0.5, Math.sqrt(len2) * 0.5 + radius);
+      for (let i = 0; i < n; i++) {
+        const c = _carNear[i];
+        if (headY <= c.y0 || feetY - STEP_SOLID >= c.y1) continue;
+        if (sweepBox(ax, az, vx, vz, radius, c, best)) { best = SW.t; bnx = SW.nx; bnz = SW.nz; bc = c; }
+      }
+      _carNear.length = 0;
+    }
     if (!bc) return false;
     const tb = Math.max(0, best - SW_SKIN / Math.sqrt(len2));
     out.hit = true; out.t = best; out.c = bc;
@@ -811,40 +824,6 @@
     return true;
   }
   CBZ.sweepCircle = sweepCircle;
-
-  /* CBZ.sweepMove(pos, dx, dz, radius, feetY, headY, out?) -> out
-     A BODY THAT IS NOT WALKING STILL MEETS THE WALL. (OWNER: "when knocking
-     a person to the ground, they don't respect door or wall colliders.")
-     A knockback slide, a thrown body, a collapse's skid all moved the root
-     by its velocity and then asked collide() to push it out of whatever it
-     ended up inside. A push-out has no memory of the side the body came
-     from: a 5 cm door leaf or a 20 cm partition crossed past its middle in
-     one step is left by the FAR face, and the body is on the other side.
-     This moves pos by (dx,dz) as a swept circle (sweepCircle, the same
-     broadphase, bands and door leaves every walker collides with): it stops
-     on the first face met and spends the rest of the step sliding along it
-     (up to three faces: a corner). out = { hit, nx, nz, c } — the last face
-     met, so the caller can take the velocity into it away. pos.y is never
-     touched. */
-  const MOVE = { hit: false, nx: 0, nz: 0, c: null };
-  const _mvA = { x: 0, z: 0 }, _mvB = { x: 0, z: 0 };
-  const _mvS = { hit: false, t: 1, x: 0, z: 0, nx: 0, nz: 0, c: null };
-  CBZ.sweepMove = function (pos, dx, dz, radius, feetY, headY, out) {
-    out = out || MOVE;
-    out.hit = false; out.nx = 0; out.nz = 0; out.c = null;
-    _mvA.x = pos.x; _mvA.z = pos.z; _mvB.x = pos.x + dx; _mvB.z = pos.z + dz;
-    for (let k = 0; k < 3; k++) {
-      if (!sweepCircle(_mvA, _mvB, radius, feetY, headY, _mvS)) { pos.x = _mvB.x; pos.z = _mvB.z; return out; }
-      out.hit = true; out.nx = _mvS.nx; out.nz = _mvS.nz; out.c = _mvS.c;
-      const rx = _mvB.x - _mvS.x, rz = _mvB.z - _mvS.z;
-      const into = rx * _mvS.nx + rz * _mvS.nz;
-      _mvA.x = _mvS.x; _mvA.z = _mvS.z;
-      _mvB.x = _mvS.x + rx - (into < 0 ? into * _mvS.nx : 0);
-      _mvB.z = _mvS.z + rz - (into < 0 ? into * _mvS.nz : 0);
-    }
-    pos.x = _mvA.x; pos.z = _mvA.z;
-    return out;
-  };
 
   // ============================================================
   //  ONE RAY FOR THE COLLIDER WORLD — CBZ.rayColliders

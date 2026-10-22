@@ -92,6 +92,8 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // a body the wind drags (systems/bodymove.js: swept, slid, cleared at 0.45)
+  const WIND_O = { posture: "stand", radius: 0.3, clearRadius: 0.45 };
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   if (CBZ.tornado) return;                       // idempotent family guard
@@ -2519,9 +2521,9 @@
           if (a.isPlayer) dragPlayer(t, dt, drag);
           else {
             const inv = 1 / Math.max(1, _s.gust);
-            a.pos.x += _s.vx * inv * drag * dt;
-            a.pos.z += _s.vz * inv * drag * dt;
-            if (CBZ.collide) { try { CBZ.collide(a.pos, 0.5); } catch (e) {} }
+            // dragged by the wind through the one mover (systems/bodymove.js)
+            if (CBZ.bodyMove) CBZ.bodyMove(a.pos, _s.vx * inv * drag * dt, 0, _s.vz * inv * drag * dt, WIND_O);
+            else { a.pos.x += _s.vx * inv * drag * dt; a.pos.z += _s.vz * inv * drag * dt; }
           }
           // EXPOSURE, said for what it is: no invisible debris in it
           if (_s.gust > 30) { try { CBZ.surv.hurt(a, (_s.gust - 24) * 0.25 * dt, { cause: WIND_CAUSE }); } catch (e) {} }
@@ -2548,9 +2550,8 @@
           }
           const drag = Math.min(10, _s.gust * 0.12);
           const inv = 1 / Math.max(1, _s.gust);
-          p.pos.x += _s.vx * inv * drag * step;
-          p.pos.z += _s.vz * inv * drag * step;
-          if (CBZ.collideSlide) { try { CBZ.collideSlide(p.pos, 0.4, p.pos.y, p.pos.y + 1.7); } catch (e) {} }
+          if (CBZ.bodyMove) CBZ.bodyMove(p, _s.vx * inv * drag * step, 0, _s.vz * inv * drag * step, WIND_O);
+          else { p.pos.x += _s.vx * inv * drag * step; p.pos.z += _s.vz * inv * drag * step; }
         }
       }
     }
@@ -2595,10 +2596,8 @@
     if (!P || !P.pos) return;
     fieldInto(t, P.pos.x, P.pos.z, _s2, 1);
     const inv = 1 / Math.max(1, _s2.gust);
-    P.pos.x += _s2.vx * inv * drag * dt;
-    P.pos.z += _s2.vz * inv * drag * dt;
-    if (CBZ.collideSlide) { try { CBZ.collideSlide(P.pos, 0.45, P.pos.y, P.pos.y + 1.8); } catch (e) {} }
-    else if (CBZ.collide) { try { CBZ.collide(P.pos, 0.45); } catch (e) {} }
+    if (CBZ.bodyMove) CBZ.bodyMove(P, _s2.vx * inv * drag * dt, 0, _s2.vz * inv * drag * dt, WIND_O);
+    else { P.pos.x += _s2.vx * inv * drag * dt; P.pos.z += _s2.vz * inv * drag * dt; }
   }
   function shovePlayerCar(t, dt) {
     const car = CBZ.player && CBZ.player._vehicle;

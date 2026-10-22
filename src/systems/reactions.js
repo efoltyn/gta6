@@ -65,6 +65,8 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // a knocked-back body's slide (systems/bodymove.js), cleared at the old 0.5
+  const _kbO = { posture: "stand", radius: 0.3, clearRadius: 0.5, out: { hit: false, nx: 0, nz: 0, c: null, pushed: false, landed: false, y: 0, floor: 0 } };
   if (!CBZ) return;
 
   const damp = CBZ.damp || function (c, t, r, dt) { return c + (t - c) * (1 - Math.exp(-r * dt)); };
@@ -426,9 +428,13 @@
 
         const pp = a._phys;
         if (!isCity && pp && (Math.abs(pp.kx) > 0.02 || Math.abs(pp.kz) > 0.02)) {
-          a.group.position.x += pp.kx * dt; a.group.position.z += pp.kz * dt;
+          // the knockback slide through the one mover (systems/bodymove.js):
+          // swept, slid along the wall, and the wall takes its share of it
+          if (CBZ.bodyMove) {
+            const sw = CBZ.bodyMove(a, pp.kx * dt, 0, pp.kz * dt, _kbO);
+            if (sw.hit || sw.pushed) { const vn = pp.kx * sw.nx + pp.kz * sw.nz; if (vn < 0) { pp.kx -= vn * sw.nx; pp.kz -= vn * sw.nz; } }
+          } else { a.group.position.x += pp.kx * dt; a.group.position.z += pp.kz * dt; }
           const dec = Math.pow(0.0009, dt); pp.kx *= dec; pp.kz *= dec;
-          if (CBZ.collide) CBZ.collide(a.group.position, 0.5);
         }
 
         const r = rec(a);

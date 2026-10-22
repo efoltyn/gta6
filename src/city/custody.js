@@ -96,6 +96,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  const MARCH_O = { posture: "stand", radius: 0.3, clearRadius: 0.45 };
   if (!CBZ || CBZ.custody) return;
   const g = CBZ.game || (CBZ.game = {});
 
@@ -389,8 +390,10 @@
     if (d > stop) {
       const ex = wx - o.pos.x, ez = wz - o.pos.z, ed = Math.hypot(ex, ez) || 1;
       const s = Math.min(w ? ed : d - stop, spd * dt);
-      o.pos.x += ex / ed * s; o.pos.z += ez / ed * s;
-      if (CBZ.collide) safe(function () { CBZ.collide(o.pos, 0.45, 0, 1.7); });
+      // the march goes through the one mover (systems/bodymove.js): swept,
+      // so a walked prisoner or his officer never cuts a corner through a wall
+      if (CBZ.bodyMove) CBZ.bodyMove(o.pos, ex / ed * s, 0, ez / ed * s, MARCH_O);
+      else { o.pos.x += ex / ed * s; o.pos.z += ez / ed * s; }
       sp = dt > 0 ? s / dt : 0;
       faceTo(o, wx, wz);
     }

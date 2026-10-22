@@ -103,6 +103,8 @@ export function loadVerbsVM(opts = {}) {
   CBZ.playerChar = CBZ.makeCharacter({ skin: 0xd6a57e, torso: 0x335577, legs: 0x222222, arms: 0x335577, shoes: 0x111111, hair: 0x221100 });
   CBZ.playerChar.group.position.copy(CBZ.player.pos);
   run("src/systems/physics.js");
+  // the one mover every body move goes through, and its per-frame net
+  if (has("src/systems/bodymove.js")) run("src/systems/bodymove.js");
   const loaded = { physics: !!CBZ.groundAt, moves: !!(CBZ.moves && CBZ.moves.step), grapple: false, strike: false, meleePoses: false };
   if (opts.grapple !== false) { run("src/systems/grapple.js"); loaded.grapple = !!CBZ.body; }
   // the one body-state truth (down / ko / tased), when a check asks for it

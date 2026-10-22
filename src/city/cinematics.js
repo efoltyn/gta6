@@ -241,7 +241,7 @@
     const cx = CINE.ctx;
     if (cx && cx.car && cx.playerSeat && CBZ.playerChar) {
       const w = seatWorld(cx.car, cx.playerSeat);
-      CBZ.player.pos.set(w.x, 0, w.z); CBZ.player.vy = 0; CBZ.player.grounded = true; CBZ.player.speed = 0;
+      CBZ.player.pos.set(w.x, 0, w.z); CBZ.player.vy = 0; CBZ.player.grounded = true; CBZ.player.speed = 0; if (CBZ.bodyTeleported) CBZ.bodyTeleported(CBZ.player);
       CBZ.playerChar.group.position.set(w.x, -0.62, w.z);
       CBZ.playerChar.group.rotation.y = cx.car.heading;
     }
@@ -334,7 +334,7 @@
         // they leave with the car: park the rig far off-map and let the ped
         // pool's normal distance recycling reclaim it (campaign pattern —
         // actors are released back to the world, never spliced from cityPeds).
-        a.pos.set(a.pos.x, 0, a.pos.z + 4000);
+        a.pos.set(a.pos.x, 0, a.pos.z + 4000); if (CBZ.bodyTeleported) CBZ.bodyTeleported(a);
         if (a.group) { a.group.position.copy(a.pos); a.group.visible = false; }
         a._cineSeated = null; a.pause = 9999;
       } else {
@@ -402,7 +402,7 @@
 
   function seatRig(ped, car, seat) {                  // "sit" a rig: sink + face forward
     const w = seatWorld(car, seat);
-    ped.pos.set(w.x, -0.62, w.z);
+    ped.pos.set(w.x, -0.62, w.z); if (CBZ.bodyTeleported) CBZ.bodyTeleported(ped);
     if (ped.group) {
       ped.group.position.set(w.x, -0.62, w.z);
       ped.group.rotation.y = car.heading;
@@ -559,7 +559,7 @@
     // the player takes the chosen bench (rig seated, physics parked)
     const chosen = seat === "front" ? seatLocal.frontP : seatLocal.rearP;
     const w = seatWorld(car, chosen);
-    P.pos.set(w.x, 0, w.z); P.vy = 0; P.grounded = true;
+    P.pos.set(w.x, 0, w.z); P.vy = 0; P.grounded = true; if (CBZ.bodyTeleported) CBZ.bodyTeleported(P);
     if (CBZ.playerChar) {
       CBZ.playerChar.group.position.set(w.x, -0.62, w.z);
       CBZ.playerChar.group.rotation.y = car.heading;
@@ -658,7 +658,7 @@
   function finishRideSurvived(car) {
     const P = CBZ.player;
     const out = seatWorld(car, { x: -2.2, z: -0.78 });
-    P.pos.set(out.x, 0, out.z); P.grounded = true; P.vy = 0;
+    P.pos.set(out.x, 0, out.z); P.grounded = true; P.vy = 0; if (CBZ.bodyTeleported) CBZ.bodyTeleported(P);
     if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, car.heading, 0); }
     const pay = 900;
     g.cash = (g.cash || 0) + pay;
@@ -689,7 +689,7 @@
         // the ped update re-grounds rigs to the floor every frame — sink the
         // seated ones back into the bench after it (this runs later at 14.6)
         if (a._cineSeatAt && a.group) {
-          a.pos.set(a._cineSeatAt.x, -0.62, a._cineSeatAt.z);
+          a.pos.set(a._cineSeatAt.x, -0.62, a._cineSeatAt.z); if (CBZ.bodyTeleported) CBZ.bodyTeleported(a);
           a.group.position.set(a._cineSeatAt.x, -0.62, a._cineSeatAt.z);
           a.group.rotation.y = a._cineSeatYaw || 0;
         }
@@ -697,7 +697,7 @@
       }
       const an = a._campaignAnchor;
       if (an && Math.hypot(a.pos.x - an.x, a.pos.z - an.z) > 0.6) {
-        a.pos.set(an.x, floorY(an.x, an.z), an.z);
+        a.pos.set(an.x, floorY(an.x, an.z), an.z); if (CBZ.bodyTeleported) CBZ.bodyTeleported(a);
         if (a.group) a.group.position.copy(a.pos);
       }
     }

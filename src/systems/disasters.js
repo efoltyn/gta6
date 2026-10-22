@@ -104,6 +104,14 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // a body the water, the wind or the mud carries goes through the one mover
+  // (systems/bodymove.js): swept against the walls, slid, cleared at 0.5
+  const CARRY_O = { posture: "stand", radius: 0.3, clearRadius: 0.5 };
+  const FLOAT_O = { posture: "down", radius: 0.3, feet: -0.3, height: 0.6, cars: false };
+  function carry(pos, dx, dz, o) {
+    if (CBZ.bodyMove) CBZ.bodyMove(pos, dx, 0, dz, o || CARRY_O);
+    else { pos.x += dx; pos.z += dz; }
+  }
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const surv = () => CBZ.surv;
@@ -323,8 +331,7 @@
       if (surface - floor(b.pos.x, b.pos.z) > 1.4) {
         b.group.position.y = surface - 0.32 + Math.sin(CBZ.now * 0.003 + i) * 0.08;
         const fl = CBZ.groundWaterFlowAt ? CBZ.groundWaterFlowAt(b.group.position.x, b.group.position.z, _actFlow) : null;
-        b.group.position.x += (fl && fl.speed > 0.05 ? fl.x : wx * current) * 0.55 * dt;
-        b.group.position.z += (fl && fl.speed > 0.05 ? fl.z : wz * current) * 0.55 * dt;
+        carry(b.group.position, (fl && fl.speed > 0.05 ? fl.x : wx * current) * 0.55 * dt, (fl && fl.speed > 0.05 ? fl.z : wz * current) * 0.55 * dt, FLOAT_O);
       }
     }
   }
@@ -1173,8 +1180,7 @@
             const p = CBZ.player._phys || (CBZ.player._phys = { kx: 0, kz: 0 });
             p.kx = (p.kx || 0) + w.x * drag * dt; p.kz = (p.kz || 0) + w.z * drag * dt;
           } else {
-            a.pos.x += w.x * drag * dt; a.pos.z += w.z * drag * dt;
-            if (CBZ.collide) CBZ.collide(a.pos, 0.5);
+            carry(a.pos, w.x * drag * dt, w.z * drag * dt);
             if (!a._lift) a.pos.y = floor(a.pos.x, a.pos.z);   // a body on a floor keeps it (the mover re-stands it)
           }
           /* NO INVISIBLE DEBRIS. This used to roll a hidden "strike" on anyone
@@ -2413,8 +2419,7 @@
     const k = Math.min(1, depth / 1.2);
     const v = Math.min(3.2, Math.hypot(s.currentX || 0, s.currentZ || 0) * 0.32 * k) * dt;
     const dl = Math.hypot(s.currentX || 0, s.currentZ || 0) || 1;
-    P.pos.x += (s.currentX || 0) / dl * v;
-    P.pos.z += (s.currentZ || 0) / dl * v;
+    carry(P.pos, (s.currentX || 0) / dl * v, (s.currentZ || 0) / dl * v);
   }
 
   /* THE WRECKAGE IS THE BUILDING'S OWN WALLS. A swept house sheds no invented
@@ -3655,8 +3660,7 @@
         const m = LH.hitTest(ax, az);
         if (m) {
           if (CBZ.body) CBZ.body.hit(a, { dir: { x: m.dirx, z: m.dirz }, force: 4 + 6 * m.depth, fling: 0 });
-          a.pos.x += m.dirx * (2.2 + 3.4 * m.depth) * dt;
-          a.pos.z += m.dirz * (2.2 + 3.4 * m.depth) * dt;
+          carry(a.pos, m.dirx * (2.2 + 3.4 * m.depth) * dt, m.dirz * (2.2 + 3.4 * m.depth) * dt);
           surv().hurt(a, scale(26, ctx) * m.depth * dt, { cause: "crushed in the lahar", fromX: ax - m.dirx, fromZ: az - m.dirz });
           return;
         }

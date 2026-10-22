@@ -312,7 +312,9 @@
     if (isPlayer(target)) {
       const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
       const kx = px - by.group.position.x, kz = pz - by.group.position.z, kd = Math.hypot(kx, kz) || 1;
-      CBZ.player.pos.x += (kx / kd) * 0.6; CBZ.player.pos.z += (kz / kd) * 0.6;
+      // (the shove through the one mover, systems/bodymove.js: into the wall, not through it)
+      if (CBZ.bodyMove) CBZ.bodyMove(CBZ.player, (kx / kd) * 0.6, 0, (kz / kd) * 0.6, null);
+      else { CBZ.player.pos.x += (kx / kd) * 0.6; CBZ.player.pos.z += (kz / kd) * 0.6; }
       if (CBZ.playerHitReact) CBZ.playerHitReact(0.14);
       return true;
     }
