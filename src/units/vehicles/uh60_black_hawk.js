@@ -130,6 +130,9 @@
     gunLYaw: ["body", GUNS[0].pos], gunLPitch: ["gunLYaw", GUNS[0].pos], gunLKick: ["gunLPitch", GUNS[0].pos],
     gunRYaw: ["body", GUNS[1].pos], gunRPitch: ["gunRYaw", GUNS[1].pos], gunRKick: ["gunRPitch", GUNS[1].pos],
     gunnerL: ["body", [0.62, 0.80, 1.55]], gunnerR: ["body", [-0.62, 0.80, 1.55]],
+    // the two pilots, their own node so a host can empty a parked Black Hawk
+    // (the door gunners follow it: nobody aboard, nobody at the guns)
+    crew: ["body", [0, 0, 0]],
   };
 
   // ---- the hull: one smooth loft of superellipse sections ----------------------
@@ -464,7 +467,7 @@
     // the gunners' seats behind the windows
     [-1, 1].forEach(function (s) { put("body", [at(box(0.42, 0.06, 0.42), s * 0.62, 1.12, 1.55), at(box(0.06, 0.5, 0.42), s * 0.40, 1.38, 1.55)], C.canvas); });
     // the crew: two pilots in HGU-56 helmets
-    PILOTS.forEach(function (x) { put("body", figure("pilot", x, 1.10, 3.00, 0)); });
+    PILOTS.forEach(function (x) { put("crew", figure("pilot", x, 1.10, 3.00, 0)); });
 
     // ---- the doghouse, gearbox, engines, HIRSS ----------------------------------
     // the forward fairing from the cockpit roof up to the gearbox
@@ -891,6 +894,12 @@
     R.rig = rig;
     root.userData.rig = rig;
     root.userData.aircraftDims = { family: "UH-60M", length: DIM.length, span: DIM.rotorR * 2, height: DIM.height, bodyW: DIM.width, bodyL: DIM.fuselage };
+    // the host's handles (city/playeraircraft.js, cockpit.js): the crew figure
+    // a host shows when somebody flies it, the cockpit view's eye (the pilot
+    // in command's right-hand seat)
+    N.crew.userData.crewFigure = true;
+    root.userData.pilot = N.crew;
+    root.userData.cockpit = { eye: { x: -0.55, y: 1.86, z: 3.10 } };
     root.userData.crewSeats = [
       { job: "Pilot", x: -0.55, y: 1.10, z: 3.00, yaw: 0, cushionH: 0.42, floorBelow: 0.36 },
       { job: "Copilot", x: 0.55, y: 1.10, z: 3.00, yaw: 0, cushionH: 0.42, floorBelow: 0.36 },
@@ -1067,7 +1076,7 @@
       N[gi ? "gunRKick" : "gunLKick"].position.z = -0.05 * G.kick;
       // the gunner turns with his gun (inside the window he can)
       N[gi ? "gunnerR" : "gunnerL"].rotation.y = gd.s > 0 ? clamp(G.yaw, 0.6, 2.2) : clamp(G.yaw, -2.2, -0.6);
-      N[gi ? "gunnerR" : "gunnerL"].visible = !G.dead;
+      N[gi ? "gunnerR" : "gunnerL"].visible = !G.dead && N.crew.visible;
     }
 
     // ---- the insertion: doors, FRIES, ropes, the men on them ---------------------------

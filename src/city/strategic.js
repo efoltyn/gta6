@@ -321,6 +321,48 @@
       gp.worldToLocal(w);
       ud.bayLocal = new THREE.Vector3(0, w.y - 1.3, w.z);
     }
+    // ---- THE CREW HATCH + DROP LADDER, on the unit's own skin. Under the
+    // wing at local (-5.2, 1.25), outside the parked body collider (±4.6 m)
+    // so the aircraft_doors walk-up reaches it, under 2 m of wing so you can
+    // stand there. The hatch sits on the belly the airframe ACTUALLY has
+    // there (a ray up from the tarmac to the skin), hinged on its forward
+    // edge; the ladder drops out of it while the door arc is open (the
+    // HATCH EASING below).
+    {
+      const HX = -5.2, HZ = 1.25;
+      gp.updateMatrixWorld(true);
+      let belly = 2.0;
+      try {
+        const rc = new THREE.Raycaster(new THREE.Vector3(HX, 0.05, HZ).applyMatrix4(gp.matrixWorld), new THREE.Vector3(0, 1, 0), 0, 8);
+        const skin = [];
+        gp.traverse(function (o) { if (o.isMesh && o.visible && !(o.userData && o.userData.crewFigure)) skin.push(o); });
+        const hit = rc.intersectObjects(skin, false)[0];
+        if (hit) belly = gp.worldToLocal(hit.point.clone()).y;
+      } catch (e) {}
+      const HATCH_Y = belly - 0.07;
+      const hgeo = new THREE.BoxGeometry(1.05, 0.12, 1.55);
+      hgeo.translate(0, 0, -0.775);                   // hinge on the forward edge
+      const hatch = new THREE.Mesh(hgeo, cm(0x2c3035));
+      hatch.position.set(HX, HATCH_Y, HZ);
+      hatch.castShadow = true; gp.add(hatch);
+      const GEARM = cm(0x9aa0a6);
+      const ladder = new THREE.Group();
+      const drop = Math.max(0.8, HATCH_Y - 0.1), n = Math.max(3, Math.round(drop / 0.32));
+      for (let i = 0; i < n; i++) {
+        const rung = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.08, 0.1), GEARM);
+        rung.position.set(0, -0.3 - i * (drop - 0.3) / Math.max(1, n - 1), 0); ladder.add(rung);
+      }
+      for (let i = 0; i < 2; i++) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.08, drop, 0.08), GEARM);
+        rail.position.set(i ? 0.35 : -0.35, -drop / 2, 0); ladder.add(rail);
+      }
+      ladder.position.set(HX, HATCH_Y, HZ - 0.4);
+      ladder.visible = false;
+      gp.add(ladder);
+      ud.b2Hatch = hatch; ud.b2Ladder = ladder;
+      ud.b2HatchBase = { rx: hatch.rotation.x };
+      ud.doorRig = { panel: hatch, doorX: HX, doorZ: HZ - 0.75 };
+    }
     ud.cockpitClass = "bomber";
     const D = ud.aircraftDims || { family: "B-2-stealth", length: 20.9, span: 52.43, height: 5.18 };
     return { group: gp, dims: D };

@@ -704,7 +704,7 @@
     }
     // ---- the airframe's fittings (vertex-coloured, one draw) ----
     {
-      const parts = [];
+      const parts = [], crewParts = [];
       function add(g, col) { parts.push(paintG(g, col)); }
       [-1, 1].forEach(function (s) {
         // the boundary-layer splitter plate ahead of each inlet
@@ -725,7 +725,7 @@
         deck(x, 0.2, 4.45, 0.6, 0.16, 0.62, C.seat);                // ACES II seat pan
         deck(x, 0.66, 4.82, 0.6, 0.94, 0.14, C.seat, -0.14);        // seat back
         deck(x, 1.16, 4.88, 0.34, 0.22, 0.16, C.seat);              // headbox
-        crewman(parts, x, D + 0.28, APEX - 4.45);
+        crewman(crewParts, x, D + 0.28, APEX - 4.45);
       });
       // the four-pane frame: posts and cross frames seated on the skin
       const F = function (x0, t0, x1, t1, w) { add(bar(onTop(x0, zOf(x0, t0), 0.03), onTop(x1, zOf(x1, t1), 0.03), w || 0.08, 0.06), C.frame); };
@@ -737,6 +737,8 @@
         F(xc, 0.07, xc, 0.095); F(xc, 0.215, xc, 0.19);
       });
       G.parts = mergeG(parts);
+      // the two crew are their own mesh: a host empties a parked B-2
+      G.crew = mergeG(crewParts);
       const glow = [];
       const gl = function (x, y, z, w, h, d, rx) { glow.push(paintG(xf(new THREE.BoxGeometry(w, h, d), x, D + y, APEX - z, rx || 0), C.glow)); };
       gl(0, 0.52, 3.2, 1.72, 0.5, 0.09, 0.42);                      // the main panel (four MFDs)
@@ -902,6 +904,7 @@
     mesh(G.glass, M.glass, lean, false);
     mesh(G.mouth, M.mouth, lean, false);
     mesh(G.parts, M.vc, lean);
+    const crewMesh = mesh(G.crew, M.vc, lean, false);
     mesh(G.glow, M.glow, lean, false);
     // the outer panels hang off the outer notch so a kill can tear one away
     const wings = {};
@@ -990,6 +993,11 @@
     root.userData.rig = rig;
     root.userData.aircraftDims = { family: "B-2-stealth", length: LEN, span: HALF * 2, height: HEIGHT, bodyW: 9.2, bodyL: LEN };
     root.userData.bombBay = true;
+    // the host's handles (city/playeraircraft.js, cockpit.js): the crew figure
+    // a host shows when somebody flies it, and the cockpit view's eye (the
+    // pilot's, the left seat)
+    if (crewMesh) { crewMesh.userData.crewFigure = true; root.userData.pilot = crewMesh; }
+    root.userData.cockpit = { eye: { x: 0.62, y: topY(0, APEX - 6.0) - 1.27 + 0.84, z: APEX - 4.32 } };
     root.userData.crewSeats = [
       { job: "Pilot", x: 0.62, y: topY(0, APEX - 6.0) - 1.27, z: APEX - 4.5, yaw: 0, cushionH: 0.45, floorBelow: 0.28 },
       { job: "Mission Commander", x: -0.62, y: topY(0, APEX - 6.0) - 1.27, z: APEX - 4.5, yaw: 0, cushionH: 0.45, floorBelow: 0.28 },

@@ -68,6 +68,8 @@
     return rec;
   }
   CBZ.cityRegisterMilitaryVehicle = registerVehicle;
+  // a world taking its machines away (The Isles' motor pool leaving with its island)
+  CBZ.cityUnregisterMilitaryVehicle = function (rec) { const i = props.indexOf(rec); if (i >= 0) props.splice(i, 1); return i >= 0; };
 
   // Distance to the outside of a vehicle's oriented footprint. Centre-distance
   // made the airport fleet impossible to board: an airliner is ~30m across and
@@ -125,7 +127,7 @@
     let best = null, bd = _boardRay.far;
     for (let i = 0; i < props.length; i++) {
       const v = props[i];
-      if (!v || v.destroyed || !v.group || !v.group.parent || v.group.visible === false) continue;
+      if (!v || v.destroyed || !v.group || !v.group.parent || v.group.visible === false || !inWorld(v)) continue;
       if (vehicleSurfaceDistance(v, P.pos.x, P.pos.z, P.pos.y + 0.9) > (maxSurface == null ? 10.5 : maxSurface)) continue;
       _boardRay.far = bd;
       const hits = _boardRay.intersectObjects(vehicleRayMeshes(v), false);
@@ -144,7 +146,7 @@
     let best = null, bd = (maxd == null ? 5.5 : maxd);
     for (let i = 0; i < props.length; i++) {
       const v = props[i];
-      if (!v || v.taken || v.destroyed || !v.group || !v.group.parent) continue;
+      if (!v || v.taken || v.destroyed || !v.group || !v.group.parent || !inWorld(v)) continue;
       // The interaction scanner asks this at 12 Hz for every prop in the
       // world; the surface distance below builds a Box3 (and a stamp string)
       // per aircraft. Nothing whose CENTRE is more than its own half-span
@@ -216,12 +218,19 @@
     return b;
   }
   function clampToCity(pos, r) {
+    if (g.mode !== "city") return;                 // an island machine stays on its island by its own ground
     const A = CBZ.city && CBZ.city.arena;
     if (A && A.clampToCity) { try { A.clampToCity(pos, r); } catch (e) {} }
   }
   function wrapA(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
   function vehName(rec) { return (rec && rec.model && rec.model.name) || (rec && rec.name) || "Vehicle"; }
-  function activeCtx() { return g.mode === "city" && g.state === "playing"; }
+  /* EVERY VEHICLE WORLD (config.js CBZ.VEHICLE_MODES): Gang City's base and
+     airport machines, and the ones another world parks (The Isles' army
+     trucks, island_civic.js), each in its own world: a record tagged `_world`
+     belongs to that mode only, an untagged one is Gang City's. */
+  function vehicleWorld() { return CBZ.vehicleModeOn ? !!CBZ.vehicleModeOn(g.mode) : g.mode === "city"; }
+  function activeCtx() { return vehicleWorld() && g.state === "playing"; }
+  function inWorld(v) { return v._world ? v._world === g.mode : g.mode === "city"; }
   function aircraftFlying() { const P = CBZ.player; return !!(P && P._aircraft); }
 
   // ---- PARKED-COLLIDER BOOKKEEPING -----------------------------------------
@@ -441,6 +450,10 @@
     // have already detached it inside citySpawnFlyableFromProp).
     detachParkedCollider(rec);
     if (wasFreight) return true;                    // unloading, not stealing
+    // YOUR OWN ARMY'S TRUCK: a soldier of The Isles' army takes the motor
+    // pool's Humvee as issue (island_civic.js tags it `issuedTo`); anybody
+    // else is stealing it, like any machine
+    if (rec.issuedTo && rec.issuedTo()) return true;
     // THEFT + HEAT (mirror storage.js stealBaseJet): grand theft of military
     // hardware is instant, loud, and pins a hard manhunt. Ground = 3★, air = 4★.
     if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { type: rec.civilian ? "aircraft-hijacking" : "grand-theft-military", x: rec.pos.x, z: rec.pos.z, instant: true }); } catch (e) {} }
@@ -610,6 +623,8 @@
     // across the map can never be driven off the aeroplane again. A load you
     // strapped down yourself is not scenery, so it stays yours to take back.
     if (held && rec) rec.taken = false;
+    // a machine its world parks for you to use again (The Isles' motor pool)
+    if (rec && rec.reboard) rec.taken = false;
     if (_restoreChar && CBZ.playerChar && CBZ.playerChar.group && P) {
       CBZ.playerChar.group.visible = !P.dead;
       if (P) CBZ.playerChar.group.position.copy(P.pos);
@@ -1029,7 +1044,7 @@
     // SAFETY: if the world left "playing"/city, or the player died, force out so
     // a second system never inherits a half-owned player. (death.js takes over on
     // the ground.) Same fail-safe the aircraft sim uses for P.dead.
-    if (!P || g.mode !== "city" || g.state !== "playing" || P.dead) { exitArmor(); return; }
+    if (!P || !activeCtx() || !inWorld(rec) || P.dead) { exitArmor(); return; }
     // also bail if a sibling somehow grabbed the player for a car/plane
     if (P._vehicle || P._aircraft) { armor = null; P.driving = false; return; }
 

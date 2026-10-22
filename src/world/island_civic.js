@@ -47,8 +47,11 @@
    at the muster point: a Humvee and a JLTV nose-in in two free bays of the
    quay's car park, beside the lieutenant. They are NPC War's own units
    (units/vehicles/hmmwv.js, jltv.js, through city/unitmodels.js: the same
-   M1151 and JLTV Fort Brandt parks), solid, crew out. Their files load when
-   the island comes up; two hulls, shared geometry and materials per type.
+   M1151 and JLTV Fort Brandt parks), solid, crew out, and DRIVABLE through
+   the one machine driver (city/militaryvehicles.js, its own numbers and
+   rig): issue to a soldier of this island's army, theft to anybody else.
+   Their files load when the island comes up; two hulls, shared geometry and
+   materials per type.
    ============================================================ */
 (function () {
   "use strict";
@@ -658,10 +661,14 @@
   /* ---- THE MOTOR POOL ------------------------------------------------------ */
   const POOL_UNITS = ["hmmwv", "jltv"];
   const POOL = { arena: null, list: [], asked: false, t: 0 };
+  function islandOfArena(A) { return (A && A.id) || "isle"; }
   function poolClear() {
     for (const v of POOL.list) {
+      // driving it as the island goes: out first (the world switch never keeps you in it)
+      if (CBZ.cityArmorRec && CBZ.cityArmorRec() === v.rec && CBZ.cityExitArmor) { try { CBZ.cityExitArmor(); } catch (e) {} }
+      if (CBZ.cityUnregisterMilitaryVehicle) CBZ.cityUnregisterMilitaryVehicle(v.rec);
       if (v.group && v.group.parent) v.group.parent.remove(v.group);
-      const i = CBZ.colliders ? CBZ.colliders.indexOf(v.col) : -1;
+      const i = CBZ.colliders ? CBZ.colliders.indexOf(v.rec.collider) : -1;
       if (i >= 0) CBZ.colliders.splice(i, 1);
     }
     if (POOL.list.length && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
@@ -708,7 +715,20 @@
       const hw = (across ? made.footL : made.footW) / 2, hl = (across ? made.footW : made.footL) / 2;
       const col = { minX: bay.x - hw, maxX: bay.x + hw, minZ: bay.z - hl, maxZ: bay.z + hl, y0: y, y1: y + (made.height || 2), ref: gp, veh: gp };
       if (CBZ.colliders) CBZ.colliders.push(col);
-      POOL.list.push({ group: gp, col: col, unitId: made.unitId });
+      gp.userData.dynamic = true;                           // it drives off: never frozen or merged
+      gp.userData.milKind = "ground"; gp.userData.milName = made.name;
+      // DRIVABLE, through the one machine driver (city/militaryvehicles.js):
+      // this island's world only, boardable again after you leave it, and
+      // yours to take once you have enlisted (anybody else is stealing it)
+      const rec = {
+        group: gp, pos: gp.position, heading: yaw, kind: "ground", model: { name: made.name },
+        unitId: made.unitId, unit: made, collider: col, footW: made.footW, footL: made.footL,
+        modelYawOffset: 0, groundOffset: 0, taken: false, hot: false,
+        _world: "archipelago", reboard: true,
+        issuedTo: function () { const Ar = army(); return !!(Ar && Ar.island === islandOfArena(A)); },
+      };
+      if (CBZ.cityRegisterMilitaryVehicle) CBZ.cityRegisterMilitaryVehicle(rec);
+      POOL.list.push({ group: gp, rec: rec, unitId: made.unitId });
     }
     if (POOL.list.length && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }

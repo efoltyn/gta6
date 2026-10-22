@@ -4412,7 +4412,16 @@
         t0 = Math.max(t0, lo); t1 = Math.min(t1, hi);
         if (t1 - t0 >= 0.6) openings.push({ s: f.s, k: 0, t0: t0, t1: t1, y0: 0, y1: y1, style: "shop", bare: false, role: role, front: true });
       };
-      if (opts.garageGround) {
+      if (opts.garageGround && opts.hangarBay && opts.hangarBay.s === f.s) {
+        // THE HANGAR DOOR (the flagship's deck keeps an F-35A: 10.7 m span,
+        // 4.4 m tall): one opening as wide as the jet plus a metre a side and
+        // through TWO storeys (the deck is double height over the bay, see
+        // makeMegaTower), so the jet taxis out under nothing
+        const HB = opts.hangarBay, HW = Math.min(HB.w / 2, span / 2 - 1.5), HDR = FH - 0.85, post = 0.85;
+        bays.push({ s: f.s, t0: -HW, t1: HW, y1: HB.h, tall: true });
+        flank(-span / 2 + post, -HW - 0.2, HDR, "garage-front");
+        flank(HW + 0.2, span / 2 - post, HDR, "garage-front");
+      } else if (opts.garageGround) {
         const GW = Math.min(5.0, span * 0.52), HDR = FH - 0.85, post = 0.85;
         bays.push({ s: f.s, t0: -GW / 2, t1: GW / 2, y1: HDR });
         flank(-span / 2 + post, -GW / 2 - 0.2, HDR, "garage-front");
@@ -4458,6 +4467,15 @@
       const nlo = f.out > 0 ? f.halfN - WT : -f.halfN, nhi = nlo + WT;
       wallBoxes.push(f.horiz ? [a0, a1, y0, y1, nlo, nhi] : [nlo, nhi, y0, y1, a0, a1]);
     }
+    // a bay taller than its storey (the hangar door) takes the windows of the
+    // storeys it rises through
+    for (const bb of bays) {
+      if (!bb.tall) continue;
+      for (let i = openings.length - 1; i >= 0; i--) {
+        const op = openings[i];
+        if (op.s === bb.s && op.k > 0 && op.y0 < bb.y1 && op.t1 > bb.t0 - 0.3 && op.t0 < bb.t1 + 0.3) openings.splice(i, 1);
+      }
+    }
     const allHoles = [];                          // every hole cut, per face, for the veneer
     for (let k = 0; k < storeys; k++) {
       const fy0 = k * FH, fy1 = fy0 + FH;
@@ -4467,6 +4485,7 @@
         if (doorHole && k === 0 && f.s === doorSide) holes.push({ a0: doorHole.t0, a1: doorHole.t1, y0: -1, y1: doorTop });
         if (roller && k === 0 && f.s === roller.s) holes.push({ a0: roller.t0, a1: roller.t1, y0: -1, y1: roller.y1 });
         if (k === 0) for (const bb of bays) if (bb.s === f.s) holes.push({ a0: bb.t0, a1: bb.t1, y0: -1, y1: bb.y1 });
+        if (k > 0) for (const bb of bays) if (bb.tall && bb.s === f.s && bb.y1 > fy0) holes.push({ a0: bb.t0, a1: bb.t1, y0: fy0 - 1, y1: bb.y1 });
         if (k === 0 && sideDoor && sideDoor.s === f.s) holes.push({ a0: sideDoor.t - DOORW / 2, a1: sideDoor.t + DOORW / 2, y0: -1, y1: DOORH });
         const sp = faceSpan(f);
         for (const r of FO.solidRects(sp[0], sp[1], fy0, fy1, holes)) wallPiece(f, r[0], r[1], r[2], r[3]);
@@ -7750,9 +7769,30 @@
       bodyClear,
       { x0: -w / 2 - 0.35, x1: w / 2 + 0.35, z0: -d / 2 - 0.35, z1: d / 2 + 0.35, y0: execY + 0.5, y1: execY + FH - 0.4 },
     ] : [bodyClear];
-    const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side,
-      EXECF ? { garageGround: true, district: "core", glassKind: "clear", keepClear: execClear, reach: (lot.w - w) / 2 }
-            : { garageGround: true, district: "core", keepClear: execClear, reach: (lot.w - w) / 2 });
+    /* THE HANGAR BAY. The deck keeps the owner's F-35A (15.7 m long, 10.7 m
+       span, 4.4 m to the fin tips), on a storey 3.2 m tall: the jet stands in
+       a DOUBLE-HEIGHT bay (storey 1's slab is open over it, 6.4 m clear) that
+       runs out to a 13 m x 5.6 m hangar door on a street face, nose to the
+       door. The bay is on the z axis (faces 0/1): the stair strip and the lift
+       are on -x, the deck cars stand at |x| 7.6 (outside the 13 m slot). */
+    const HB_FACE = (side === 0 || side === 1) ? side : 1;
+    const HB = { s: HB_FACE, w: 13, h: 2 * FH - 0.8, slotW: 13, tail: 9.5 };
+    const shellOpts = { garageGround: true, district: "core", keepClear: execClear, reach: (lot.w - w) / 2, hangarBay: HB };
+    if (EXECF) shellOpts.glassKind = "clear";
+    const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side, shellOpts);
+    // storey 1 opens over the bay: from behind the jet's tail out to the door
+    const hbOut = HB_FACE === 1 ? 1 : -1;
+    const hz0 = hbOut > 0 ? -HB.tail : -(d / 2), hz1 = hbOut > 0 ? d / 2 : HB.tail;
+    if (CBZ.cityCarveShaft) {
+      CBZ.cityCarveShaft(b, lot.cx, lot.cz + (hz0 + hz1) / 2, HB.slotW / 2, (hz1 - hz0) / 2, { levels: [1] });
+    }
+    // a rail round the open edge upstairs (the three sides that are not the door)
+    {
+      const ry = FH + 0.55, rx = HB.slotW / 2 + 0.06, zIn = hbOut > 0 ? hz0 : hz1;
+      const zA = Math.min(hz0, hz1) + (hbOut > 0 ? 0 : WT), zB = Math.max(hz0, hz1) - (hbOut > 0 ? WT : 0);
+      for (const sx of [-1, 1]) b.lbox(sx * rx, ry, (zA + zB) / 2, 0.08, 1.0, zB - zA, 0x8a939c, { solid: true });
+      b.lbox(0, ry, zIn - hbOut * 0.06, HB.slotW + 0.2, 1.0, 0.08, 0x8a939c, { solid: true });
+    }
     const topY = (STOREYS - 1) * FH;                      // the top interior floor (penthouse)
     // PENTHOUSE — the apex home dressed across the whole top floor.
     furnishPenthouse(b, topY);
@@ -7764,6 +7804,7 @@
     // the mansion NATATORIUM (flag off; the pool then rides one lower);
     // every other floor is a dressed flat (merged tris; no extra draw calls).
     for (let k = 1; k < STOREYS - 1; k++) {
+      if (k === 1) continue;                               // the hangar's upper storey: the bay is open through it
       if (EXECF && k === STOREYS - 2) continue;           // the executive suite — dressed below
       if (k === STOREYS - (EXECF ? 3 : 2)) furnishPoolFloor(b, k * FH);
       else furnishApartmentFloor(b, k * FH, k);
@@ -7818,7 +7859,8 @@
     // the HANGAR: the ground/podium drive-in bay (a flagged WORLD-space zone). A
     // ground-level bay the size of the deck footprint, centred on the lot — Phase 3
     // reads this to place + roll out the F-22 once the hangar is bought.
-    lot.building.hangar = { x: lot.cx, z: lot.cz, w: w - 2 * WT, d: d - 2 * WT, y: 0 };
+    lot.building.hangar = { x: lot.cx, z: lot.cz, w: w - 2 * WT, d: d - 2 * WT, y: 0,
+      heading: hbOut > 0 ? 0 : Math.PI, clear: 2 * FH, door: { face: HB_FACE, w: HB.w, h: HB.h } };
 
     _megaTower = { lot, penthouseDoor };
     return { b, penthouseDoor };

@@ -489,6 +489,7 @@
   const _craftYawQ = new THREE.Quaternion();
   const _craftUp = new THREE.Vector3(0, 1, 0);
   const _milDrive = { thr: 0, agl: 0, speed: 0, vy: 0, pilot: "player" };
+  const _milExit = { thr: 0, agl: 0, speed: 0, vy: 0, pilot: null };
   // pitch + = nose UP, roll + = RIGHT wing down, heading about world Y: the
   // one convention every flight step (heliStep, planeStep), the bailout
   // spiral and the chase cam share. Euler order YXZ is the aircraft order
@@ -647,13 +648,18 @@
     if (!h) { return; }
     if (!jet) { jet = makeCraft("jet"); if (!jet) return; }
     if (_aircraftFlying() === jet) return;
-    const px = h.x, pz = h.z;
-    const py = (h.y != null ? h.y : floorY(px, pz)) + (jet.groundOffset != null ? jet.groundOffset : jet.belly + 0.4);
+    // the jet stands in the tower's double-height bay, nose to the hangar
+    // door (city/buildings.js makeMegaTower publishes the heading), wheels on
+    // the deck's own surface
+    const px = h.x, pz = h.z, hh = h.heading || 0;
+    let deck = h.y != null ? h.y : floorY(px, pz);
+    if (CBZ.surfaceTopAt) { const sy = CBZ.surfaceTopAt(px, pz, deck + 1.0, 0); if (sy != null && isFinite(sy) && sy > deck && sy < deck + 1.0) deck = sy; }
+    const py = deck + (jet.groundOffset != null ? jet.groundOffset : jet.belly + 0.4);
     jet.pos.set(px, py, pz);
-    jet.heading = 0; jet.pitch = 0; jet.roll = 0;
+    jet.heading = hh; jet.pitch = 0; jet.roll = 0;
     jet.vx = jet.vy = jet.vz = 0; jet.speed = JET_MIN; jet.throttle = JET_MIN;
     jet.airspeed = 0; jet.thr = null; jet.sag = 0; jet.onGround = true;
-    setCraftRotation(jet, 0, 0, 0);
+    setCraftRotation(jet, 0, hh, 0);
     if (RESUPPLY_AT_BASE) { jet.ammo = jet.maxAmmo; jet.hp = jet.maxHp; rearmRig(jet); }
   }
 
@@ -1498,6 +1504,12 @@
     // torso box, unmissable now that it is a body.
     if (craft && craft.group && craft.group.userData && craft.group.userData.pilot) {
       craft.group.userData.pilot.visible = false;
+      // a unit airframe re-poses its crew off that (the Black Hawk's door
+      // gunners leave their guns with the pilots)
+      if (craft.group.userData.unitDrive && CBZ.milAirDrive) {
+        _milExit.agl = Math.max(0, craft.pos.y - floorY(craft.pos.x, craft.pos.z) - (craft.groundOffset || 0));
+        try { CBZ.milAirDrive(craft.group, _milExit, 1 / 60); } catch (e) {}
+      }
     }
     if (craft && CBZ.cityBailOut && CBZ.cityBailOut(craft)) { P.driving = false; P._aircraft = null; return; }
     P.driving = false; P._aircraft = null;

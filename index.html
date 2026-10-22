@@ -1238,7 +1238,7 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=stutter1022"></script>
-<script src="src/city/buildings.js?v=isleclose1022"></script>
+<script src="src/city/buildings.js?v=f35two1022"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1419,7 +1419,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
 <script src="src/world/basekit.js?v=lodlight1012"></script>
 <!-- ONE ARMY (city/army.js): the door to NPC War's battle core, sim and unit kit. Only the API + loader ride the page; the unit files and the war engine load when a force or Fort Brandt's motor pool needs them. -->
-<script src="src/city/army.js?v=f35one1022"></script>
+<script src="src/city/army.js?v=f35two1022"></script>
 <!-- ONE UNIT, BUILT FOR THE CITY (city/unitmodels.js): CBZ.milModels, the one path that builds a units/vehicles machine outside the battle (Fort Brandt, the player's F-35, the airbase, The Isles' army). After army.js (its loader), before island_military. -->
 <script src="src/city/unitmodels.js?v=f35one1022"></script>
 <script src="src/city/island_military.js?v=f35one1022"></script>
@@ -1600,7 +1600,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/vehicles.js?v=mmisleotrunk1"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playerair.js?v=f35one1022"></script>
-<script src="src/city/playeraircraft.js?v=f35one1022"></script>
+<script src="src/city/playeraircraft.js?v=f35two1022"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1900,7 +1900,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_fitkit.js?v=stutter1022"></script>
 <script src="src/world/island_lots.js?v=stutter1022"></script>
 <script src="src/world/island_dealers.js?v=misleopisleso"></script>
-<script src="src/world/island_civic.js?v=f35one1022"></script>
+<script src="src/world/island_civic.js?v=f35two1022"></script>
 <script src="src/world/island_homes.js?v=mislesostutte"></script>
 <script src="src/world/island_offices.js?v=stutter1022"></script>
 <!-- THE ISLES REMEMBER (world/isles_save.js): the archipelago's slice of the one
@@ -1946,11 +1946,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/turf.js?v=news0930"></script>
 <script src="src/city/gangops.js?v=cd0929"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
-<script src="src/city/militaryvehicles.js?v=landblood1022"></script>
+<script src="src/city/militaryvehicles.js?v=f35two1022"></script>
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
      seam above), the bunker-buster and the nuke. Conventional blasts use the
      wrapped explosion chain; the nuke uses impactbus's analytic field. -->
-<script src="src/city/strategic.js?v=f35one1022"></script>
+<script src="src/city/strategic.js?v=f35two1022"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=cd0929"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
