@@ -1020,7 +1020,8 @@
     // the cabin, not the tail boom's full reach: walk round the tail, not into the cab
     const ex = (ca * wid / 2 + sa * len / 2) * 0.8, ez = (sa * wid / 2 + ca * len / 2) * 0.8;
     const base = craft.pos.y - (craft.groundOffset != null ? craft.groundOffset : craft.belly);
-    const c = craft._parkCol || (craft._parkCol = { minX: 0, maxX: 0, minZ: 0, maxZ: 0, y0: 0, y1: 0, ref: null, noAircraft: true });
+    const c = craft._parkCol || (craft._parkCol = { minX: 0, maxX: 0, minZ: 0, maxZ: 0, y0: 0, y1: 0, ref: null, noAircraft: true, veh: null });
+    c.veh = craft.group || craft.externalGroup || null;   // a box round a hull, not a wall (gore.js lands blood on the hull)
     c.minX = craft.pos.x - ex; c.maxX = craft.pos.x + ex;
     c.minZ = craft.pos.z - ez; c.maxZ = craft.pos.z + ez;
     c.y0 = base + 0.25; c.y1 = base + ht;

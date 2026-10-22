@@ -61,6 +61,9 @@
     if (rec.footW == null) rec.footW = 3;
     if (rec.footL == null) rec.footL = 5;
     if (!rec.model) rec.model = { name: rec.kind === "tank" ? "Tank" : rec.kind === "heli" ? "Helicopter" : rec.kind === "plane" ? "Aircraft" : "Vehicle" };
+    // a ref-less solid round the machine names it: the box is the AABB of a
+    // yawed hull, not a wall, and blood (gore.js) must land on the hull
+    if (rec.collider && !rec.collider.ref) rec.collider.veh = rec.group;
     props.push(rec);
     return rec;
   }

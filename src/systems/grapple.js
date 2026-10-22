@@ -55,6 +55,12 @@
 
   const BOT_R = 0.5;
   const _corpseC = { x: 0, z: 0 };   // scratch for the corpse-extent wall push
+  const _corpseA = { x: 0, z: 0 };
+  const _corpseSw = { hit: false, t: 1, x: 0, z: 0, nx: 0, nz: 0, c: null };
+  const _bodySw = { hit: false, nx: 0, nz: 0, c: null };
+  // the swept body's radius: a man's shoulders, so a shoved body still goes
+  // through an open doorway it is driven at (collide's BOT_R only clears overlap)
+  const SWEEP_R = 0.3;
   function G() { return (CBZ.TUNE && CBZ.TUNE.gravity) || 22; }
   /* THE FLOOR A BODY IS OVER. CBZ.groundAt counts platforms (roofs, decks,
      stairs, walkways) where floorAt only knew terrain + carvings, so a body
@@ -551,21 +557,31 @@
       const n = Math.max(1, Math.ceil(Math.hypot(p.vx, p.vy, p.vz) * dt / 0.3));
       const sdt = dt / n;
       for (let sub = 0; sub < n; sub++) {
-        grp.position.x += p.vx * sdt; grp.position.y += p.vy * sdt; grp.position.z += p.vz * sdt;
+        // THE FLIGHT IS SWEPT (CBZ.sweepMove): the body stops on the face it
+        // meets, door leaf or wall, instead of being pushed out of whichever
+        // side of it the step ended nearer. collide() then only clears overlap.
+        const sy = grp.position.y;
+        let swN = null;
+        if (CBZ.sweepMove) {
+          const sw = CBZ.sweepMove(grp.position, p.vx * sdt, p.vz * sdt, SWEEP_R, sy + 0.1, sy + 1.6, _bodySw);
+          if (sw.hit) swN = sw;
+        } else { grp.position.x += p.vx * sdt; grp.position.z += p.vz * sdt; }
+        grp.position.y += p.vy * sdt;
         if (CBZ.collide) {
-          // WHAT COLLIDE() PUSHED BACK IS WHAT YOU HIT. The substep above exists
-          // so a launched body can't tunnel through a wall; the delta it leaves
-          // behind is also the only evidence in this file that the body was
-          // DRIVEN INTO something — the owner's "pushed hard into something".
-          // Direction of the push is the surface normal, and the speed along it
-          // is the speed of the collision. Free: no ray, no extra query.
+          // WHAT THE WALL TOOK IS WHAT YOU HIT. The sweep's face (or what
+          // collide() pushed back) is the only evidence in this file that the
+          // body was DRIVEN INTO something — the owner's "pushed hard into
+          // something". Its normal is the surface, and the speed along it is
+          // the speed of the collision.
           const bx = grp.position.x, bz = grp.position.z;
           CBZ.collide(grp.position, BOT_R);
           const cdx = grp.position.x - bx, cdz = grp.position.z - bz;
           const cd = Math.hypot(cdx, cdz);
-          if (cd > 0.004) {
-            const nx = cdx / cd, nz = cdz / cd;
+          if (swN || cd > 0.004) {
+            const nx = swN ? swN.nx : cdx / cd, nz = swN ? swN.nz : cdz / cd;
             const into = -(p.vx * nx + p.vz * nz);      // closing speed on the face
+            // a soft contact just stops going INTO the face (a hard one rebounds below)
+            if (into > 0 && into <= 4) { p.vx += nx * into; p.vz += nz * into; }
             if (into > 1) {
               if (CBZ.trauma) CBZ.trauma.slam(a, into, { wall: true, dir: { x: nx, z: nz } });
               // and it actually STOPS you: the old path kept full velocity and
@@ -704,7 +720,14 @@
     // player's department (physics.js, which tracks platforms); bots ride the
     // ground field, so a slide just rides the slope down and settles.
     if (Math.abs(p.kx) > 0.02 || Math.abs(p.kz) > 0.02) {
-      grp.position.x += p.kx * dt; grp.position.z += p.kz * dt;
+      // the slide is SWEPT: a shoved body stops against the wall or the shut
+      // door it is driven into (and slides along it), never through it
+      if (CBZ.sweepMove) {
+        const flat = Math.min(1, Math.abs(grp.rotation.x) / 1.5708);
+        const fy = grp.position.y - (cityGround ? FLAT_LIFT * flat : 0);
+        const sw = CBZ.sweepMove(grp.position, p.kx * dt, p.kz * dt, SWEEP_R, fy + 0.2, fy + 0.5 + 1.2 * (1 - flat), _bodySw);
+        if (sw.hit) { const vn = p.kx * sw.nx + p.kz * sw.nz; if (vn < 0) { p.kx -= vn * sw.nx; p.kz -= vn * sw.nz; } }
+      } else { grp.position.x += p.kx * dt; grp.position.z += p.kz * dt; }
       const dec = Math.pow(0.0009, dt);
       p.kx *= dec; p.kz *= dec;
       if (CBZ.collide) CBZ.collide(grp.position, BOT_R);
@@ -731,6 +754,18 @@
         const ry = grp.rotation.y || 0, ext = 1.7 * flat;
         const hs = grp.rotation.x > 0 ? 1 : -1;                    // face down: head ahead of the feet
         const hx = hs * Math.sin(ry) * ext, hz = hs * Math.cos(ry) * ext;   // toward the head
+        // swept from the feet to the head: a head past a thin wall's middle
+        // is stopped on the near face (the side the body lies on), where a
+        // push-out of the head point alone would have left it on the far one
+        const fy = grp.position.y - FLAT_LIFT * flat;
+        if (CBZ.sweepCircle) {
+          _corpseA.x = grp.position.x; _corpseA.z = grp.position.z;
+          _corpseC.x = grp.position.x + hx; _corpseC.z = grp.position.z + hz;
+          if (CBZ.sweepCircle(_corpseA, _corpseC, SWEEP_R * 0.8, fy + 0.2, fy + 0.6, _corpseSw)) {
+            grp.position.x += _corpseSw.x - _corpseC.x;
+            grp.position.z += _corpseSw.z - _corpseC.z;
+          }
+        }
         _corpseC.x = grp.position.x + hx; _corpseC.z = grp.position.z + hz;
         CBZ.collide(_corpseC, BOT_R);
         grp.position.x += _corpseC.x - (grp.position.x + hx);        // shift body by the head's push

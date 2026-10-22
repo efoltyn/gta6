@@ -840,7 +840,7 @@
           R.dripT = Math.max(0.12, Math.min(2.5, 0.003 / r)) * (0.7 + rng() * 0.6);
           const b = R.bleeds.length ? R.bleeds[(rng() * R.bleeds.length) | 0] : null;
           const p = bleedPoint(R, b);
-          if (p && CBZ.goreDrip) { try { CBZ.goreDrip(p.x + (rng() - 0.5) * 0.12, p.z + (rng() - 0.5) * 0.12, 0.15 + Math.min(0.35, r * 25)); } catch (e) { /* gore off */ } }
+          if (p && CBZ.goreDrip) { try { CBZ.goreDrip(p.x + (rng() - 0.5) * 0.12, p.z + (rng() - 0.5) * 0.12, 0.15 + Math.min(0.35, r * 25), p.y); } catch (e) { /* gore off */ } }
         }
       }
     }
@@ -855,7 +855,7 @@
         const p = bleedPoint(R, worst);
         const size = Math.min(K.POOL_MAX, 0.45 + Math.sqrt(R.poured) * 3.2);
         if (p && CBZ.gorePool) {
-          try { CBZ.gorePool(p.x + (rng() - 0.5) * 0.15, p.z + (rng() - 0.5) * 0.15, size); R.poolN++; } catch (e) { /* gore off */ }
+          try { CBZ.gorePool(p.x + (rng() - 0.5) * 0.15, p.z + (rng() - 0.5) * 0.15, size, p.y); R.poolN++; } catch (e) { /* gore off */ }
         } else R.poolN++;
       }
     }

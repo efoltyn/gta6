@@ -124,6 +124,9 @@
   const splats = [];   // ground blood pools + tire-smear streaks
   const walls = [];    // vertical wall/surface splatter decals
   const later = [];    // delayed gore beats (arterial spurts, bleed-out pools)
+  // the height of the event being drawn — what decalFloorAt seats its marks
+  // FROM (the floor under it, not the street below it). null: ground level.
+  let seatY = null, seatSolid = false;
   // ARMED FOR THE DURATION OF ONE WET EVENT (and, via after(), of the delayed
   // beats it queues) — see THE WATER MEDIUM block. Declared up here with the
   // other module state so after() can never read it from the temporal dead
@@ -162,7 +165,7 @@
   // The beat remembers WHICH MEDIUM its kill happened in (see the water block
   // below) so a stump that keeps pumping two seconds after a drowning still
   // blooms instead of firing ballistic droplets at the seabed.
-  function after(t, fn) { if (later.length > 24) return; later.push({ t, fn, wet: wetEvent }); }
+  function after(t, fn) { if (later.length > 24) return; later.push({ t, fn, wet: wetEvent, sy: seatY }); }
 
   function scene() { return CBZ.scene; }
   function floorAt(x, z) { return CBZ.floorAt ? CBZ.floorAt(x, z) : 0; }
@@ -1687,7 +1690,7 @@
     AKIND[i] = 0; AMARK[i] = airMarkP >= 1 || Math.random() < airMarkP ? 1 : 0; AMG[i] = markR || 0; AMK[i] = airMarkK;
     AWP[i] = wp == null || wp < 0 ? -1 : wp; AWG[i] = wp == null || wp < 0 ? 0 : WP_GEN[wp];
     AVV[i] = airVV; AVG[i] = airVV < 0 ? 0 : VV_GEN[airVV];
-    AFL[i] = decalFloorAt(x, z); AFT[i] = 0.02 + Math.random() * 0.06; ASEA[i] = Math.random() * 0.18;
+    AFL[i] = decalFloorAt(x, z, y, true); AFT[i] = 0.02 + Math.random() * 0.06; ASEA[i] = Math.random() * 0.18;
     AIR_AUDIT.drops++;
     return i;
   }
@@ -1720,17 +1723,21 @@
   const WP_C = new Array(WP_MAX).fill(null);         // the collider struck: its mesh is what the drops ride
   let wpCursor = 0, airWallT = 3.4;
   function airWall(x, y, z, dx, dz) {
-    if (!(dx || dz)) return -1;
-    const f = wallFace(x, y, z, dx, dz, 3.4);
+    _vehNoted.length = 0;
+    const hl = Math.hypot(dx, dz);
+    if (!(hl > 1e-4)) return -1;
+    dx /= hl; dz /= hl;
+    let f = wallFace(x, y, z, dx, 0, dz, 3.4);
+    if (f && (f.top || f.stop)) f = null;
     airWallT = f ? f.t : 3.4;
     if (!f) return -1;
     const k = wpCursor; wpCursor = (wpCursor + 1) % WP_MAX;
-    const c = f.c, hx = x + dx * f.t, hz = z + dz * f.t;
-    const nx = f.face === "xmin" ? -1 : (f.face === "xmax" ? 1 : 0);
-    const nz = f.face === "zmin" ? -1 : (f.face === "zmax" ? 1 : 0);
-    WP_NX[k] = nx; WP_NZ[k] = nz; WP_D[k] = nx * hx + nz * hz;
-    if (nx) { WP_T0[k] = c.minZ; WP_T1[k] = c.maxZ; } else { WP_T0[k] = c.minX; WP_T1[k] = c.maxX; }
-    WP_Y0[k] = f.y0; WP_Y1[k] = f.y1; WP_C[k] = c;
+    // the plane of the face the ray proved, any yaw: d along its normal,
+    // t0..t1 along its tangent (-nz, nx)
+    const nx = f.nx, nz = f.nz;
+    WP_NX[k] = nx; WP_NZ[k] = nz; WP_D[k] = nx * f.x + nz * f.z;
+    WP_T0[k] = f.t0; WP_T1[k] = f.t1;
+    WP_Y0[k] = f.y0; WP_Y1[k] = f.y1; WP_C[k] = f.c;
     WP_GEN[k] = (WP_GEN[k] + 1) & 0xffff;
     return k;
   }
@@ -1741,7 +1748,7 @@
     const c = claimLand();
     if (!c) return false;
     const m = c.m;
-    const ry = nx ? (nx > 0 ? Math.PI / 2 : -Math.PI / 2) : (nz > 0 ? 0 : Math.PI);
+    const ry = Math.atan2(nx, nz);
     const tx = Math.cos(ry), tz = -Math.sin(ry);     // the face's local +x in world
     const u = vx * tx + vz * tz, w = vy;
     const sp = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
@@ -1774,7 +1781,9 @@
     _dropO.kind = sinA > 0.9 || hs < 0.3 ? "dot" : "drop";
     _dropO.dirX = hs > 0 ? vx / hs : 0; _dropO.dirZ = hs > 0 ? vz / hs : 0;
     _dropO.elong = 1 / Math.max(0.3, sinA);
-    if (spawnSplat(AX[i], AZ[i], g, BLOOD_D, false, _dropO)) AIR_AUDIT.lands++;
+    // the mark seats on the surface the drop came down on (AFL), not the street under it
+    const sy0 = seatY, ss0 = seatSolid; seatY = AY[i] + 0.02; seatSolid = true;
+    try { if (spawnSplat(AX[i], AZ[i], g, BLOOD_D, false, _dropO)) AIR_AUDIT.lands++; } finally { seatY = sy0; seatSolid = ss0; }
   }
 
   // ---- STREAMS: a jet that pulses, laid down drop by drop ---------------------
@@ -2038,7 +2047,7 @@
         else {
           const s = WP_NX[wp] * x + WP_NZ[wp] * z - WP_D[wp];
           if (s <= 0.01) {
-            const tan = WP_NX[wp] ? z : x;
+            const tan = WP_NX[wp] * z - WP_NZ[wp] * x;   // along the face (-nz, nx)
             if (tan >= WP_T0[wp] && tan <= WP_T1[wp] && y >= WP_Y0[wp] && y <= WP_Y1[wp]) {
               if (AMARK[i] && airLands < AIR_LAND_FRAME) {
                 airLands++;
@@ -2053,7 +2062,7 @@
       }
       // the floor: a slow field, re-read on a stagger, every frame near it
       AFT[i] -= dt;
-      if (AFT[i] <= 0 || y < AFL[i] + 0.3) { AFT[i] = 0.08; AFL[i] = decalFloorAt(x, z); }
+      if (AFT[i] <= 0 || y < AFL[i] + 0.3) { AFT[i] = 0.08; AFL[i] = decalFloorAt(x, z, y, true); }
       if (y <= AFL[i] && vy < 0) { AY[i] = AFL[i]; floorLand(i); killAir(i); continue; }
     }
     // ---- the instance buffers (live count only) ----
@@ -2327,10 +2336,37 @@
   //  NOTE the gradient in groundGrad() deliberately keeps sampling floorAt —
   //  the 2 cm slab steps are kerb edges, not slopes, and reading them as
   //  gradient would tip every pool at a block edge onto its side.
-  function decalFloorAt(x, z) {
+  //
+  //  A FLOOR IS GROUND TOO. (OWNER, President mode: "blood doesn't show
+  //  because the floor is a tiny bit over the ground.") Every shell pours a
+  //  foundation slab whose top is 0.14 (buildings.js), the helipad deck is a
+  //  0.15 slab, a stage is a riser, an upper storey is a slab 4 m up: all
+  //  CBZ.platforms, the surface the player, every ped and every body
+  //  (grapple.js, bodyfall.js, ragdoll.js) already stand on through
+  //  CBZ.groundAt. This asked only the terrain, so every pool, drop mark and
+  //  gib on a floor was laid UNDER the slab it lay on, and on an upper floor
+  //  fell to the street. It asks the same platform-aware ground now, from
+  //  the height the blood is at (fromY, else the event's seatY): the slab
+  //  you are on, never the one above you. `solids` (a falling drop, a slug)
+  //  also lands on the top of a solid it falls onto (CBZ.walkGroundAt: a
+  //  crate, a table, a step), which a pool spreading from a body must not.
+  //  FLOOR_FINISH: an interior's finish (fitout.js: boards, tile, carpet) is
+  //  laid up to ~1.8 cm proud of the slab top it stands on.
+  const FLOOR_FINISH = 0.012;
+  // (seatY: declared at the top of the file, beside `later`)
+  function decalFloorAt(x, z, fromY, solids) {
     const A = cityMode() && CBZ.city ? CBZ.city.arena : null;
-    if (A && A.groundDecalY) { const v = +A.groundDecalY(x, z); if (isFinite(v)) return v; }
-    return floorAt(x, z);
+    let g = NaN;
+    if (A && A.groundDecalY) g = +A.groundDecalY(x, z);
+    if (!isFinite(g)) g = floorAt(x, z);
+    const fy = fromY != null ? fromY : seatY;
+    const Q = (solids || (fromY == null && seatSolid)) && fy != null && CBZ.walkGroundAt ? CBZ.walkGroundAt : CBZ.groundAt;
+    if (Q) {
+      let s = NaN;
+      try { s = +Q(x, z, fy == null ? undefined : fy); } catch (e) { s = NaN; }
+      if (isFinite(s) && s > g + 0.004) return s + FLOOR_FINISH;
+    }
+    return g;
   }
 
   // the land decal budget (read live; the quality tier can move mid-run)
@@ -2553,91 +2589,216 @@
     if (y1 - y < 0.45) return true;                  // face too short above the splat seat
     return false;
   }
-  /* wallFace(x,y,z, dx,dz, maxD) — the nearest REAL wall face ahead along
-     (dx,dz): opaque, wall-sized, tall enough, the seat height inside its solid
-     band, not a shot-open window. Shared by the kill's wall splat and the
-     airborne spray (airWall), so both obey the one gate. Returns a reused
-     record { c, t, face, y0, y1 } or null. */
-  const _wf = { c: null, t: 0, face: null, y0: 0, y1: 0 };
-  function wallFace(x, y, z, dx, dz, MAXD) {
-    _vehNoted.length = 0;
-    const cols = CBZ.colliders;
-    if (!cols || !cols.length) return null;
-    let best = null, bestT = MAXD, by0 = -1e9, by1 = 1e9;
-    for (let i = 0; i < cols.length; i++) {
-      const c = cols[i]; if (!c || c.minX == null) continue;
-      // height-gated band: require the splat seat to land INSIDE the solid band
-      // (tight slack), not in open air above/below a window band. DECLARED
-      // bands are free to read, so they are tested here, before the ray.
-      if (c.y1 != null && bandRejects(c.y0 || 0, c.y1, y)) continue;
-      if (isSeeThroughCol(c)) continue;                      // intact glass pane / door vision — never a splat
-      // ray (x,z)+t*(dx,dz) vs AABB slab — find nearest forward face hit
-      let t0 = 0, t1 = bestT, face = null;
-      if (Math.abs(dx) > 1e-4) {
-        let ta = (c.minX - x) / dx, tb = (c.maxX - x) / dx, fa = dx > 0 ? "xmin" : "xmax";
-        if (ta > tb) { const s = ta; ta = tb; tb = s; fa = fa === "xmin" ? "xmax" : "xmin"; }
-        if (ta > t0) { t0 = ta; face = fa; } t1 = Math.min(t1, tb);
-      } else if (x < c.minX || x > c.maxX) { continue; }
-      if (Math.abs(dz) > 1e-4) {
-        let ta = (c.minZ - z) / dz, tb = (c.maxZ - z) / dz, fa = dz > 0 ? "zmin" : "zmax";
-        if (ta > tb) { const s = ta; ta = tb; tb = s; fa = fa === "zmin" ? "zmax" : "zmin"; }
-        if (ta > t0) { t0 = ta; face = fa; } t1 = Math.min(t1, tb);
-      } else if (z < c.minZ || z > c.maxZ) { continue; }
-      if (!(face && t0 >= 0 && t0 <= t1 && t0 < bestT)) continue;
-      // A VEHICLE'S COLLIDER IS A BOX ROUND THE CAR, NOT A WALL: blood on it
-      // was a flat sheet standing in the air beside the doors. The car's own
-      // meshes take it (vehicleSplat / vehicleSpray).
-      if (c.ref) { const vr = vehicleRootOf(c.ref); if (vr) { noteVehicle(vr); continue; } }
-      // WALL-SIZED face: the struck face spans the axis PERPENDICULAR to its
-      // normal. A blood plane needs a real wall behind it, so require that span
-      // (and enough height) — a thin hydrant/pole/meter/sign box never passes.
-      const faceX = face === "xmin" || face === "xmax";
-      const span = faceX ? (c.maxZ - c.minZ) : (c.maxX - c.minX);
-      if (span < MIN_DOOR) continue;                         // thin prop, not a wall
-      // NO DECLARED BAND: measure the thing that is drawn before believing it
-      // is a wall. This is where the table gets thrown out — 2.2 m wide, and
-      // 0.10 m tall. Placed after the slab test on purpose: the derive only
-      // ever runs on a collider the ray already hit inside 3.4 m.
-      let y0 = c.y1 != null ? (c.y0 || 0) : -1e9, y1 = c.y1 != null ? c.y1 : 1e9;
-      if (c.y1 == null) {
-        const band = drawnBand(c);
-        if (band && bandRejects(band.y0, band.y1, y)) continue;
-        if (band) { y0 = band.y0; y1 = band.y1; }
-      }
-      // a DOOR is narrower than a wall run (a 0.9 m leaf) but it is a full
-      // door-height opaque face; before this the leaf was skipped and the
-      // blood went through the closed door to whatever stood behind it
-      if (span < MIN_FACE && !(y1 - y0 >= 1.8 && y1 - y0 < 50)) continue;
-      // OPEN / SHATTERED WINDOW: the bullet flew through a hole — there is no
-      // surface to splat. Skip and keep scanning for a real wall behind it.
-      const hx = x + dx * t0, hz = z + dz * t0;
-      const nx = face === "xmin" ? -1 : face === "xmax" ? 1 : 0;
-      const nz = face === "zmin" ? -1 : face === "zmax" ? 1 : 0;
-      if (CBZ.cityShotHole && CBZ.cityShotHole(hx, y, hz, nx, nz)) continue;
-      bestT = t0; best = c; _wf.face = face; by0 = y0; by1 = y1;
+  /* ============================================================
+     BLOOD LANDS ONLY WHERE IT LANDS. (OWNER, on the President's helipad
+     lawn: a dark-red splat hanging upright in the air beside a guard, no
+     wall anywhere: "fix floating blood so it splashes with physics either
+     onto a surface or onto the ground farther away if no wall.")
+
+     ROOT CAUSE. The wall test was a level ray against every collider's
+     AXIS-ALIGNED min/max box, and the splat was stood on that box's face at
+     a guessed height. Two kinds of record lie about where their surface is:
+       * a box round something that is not a box. Executive One's collider
+         (motorcade.js) and every parked aircraft's (playeraircraft.js) is
+         the AABB of a yawed fuselage, ref-less, so it was not recognised as
+         a vehicle; at the pad's heading that box's face stands metres clear
+         of the hull, over open lawn. The splat went on the face.
+       * an ORIENTED collider (c.yaw) read as its min/max envelope, whose
+         faces are not the wall's faces at all.
+     And the slug never flew: it was stamped along a level line, so blood
+     "reached" a wall 3 m away at head height without ever falling.
+
+     NOW. The blood is a slug thrown from the wound along the hit at a real
+     speed, falling under AIR_G, marched in short chords. Each chord is a
+     CBZ.rayColliders ray (the broadphase grid, oriented boxes in their own
+     frame, bands, the same mode gate as every walker), and a face it enters
+     must pass the gates: opaque, wall-sized, the hit height inside the
+     solid band, not a shot-open hole, not a vehicle (a ref-less one says so
+     with c.veh; its drawn meshes take the blood, vehicleSplat), and, when
+     the collider names the mesh it stands for (c.ref), THAT MESH MUST BE
+     THERE: the chord is raycast against the drawn triangles, and a box
+     whose mesh is not under the hit (a fence run between its posts, a
+     group's envelope) is air, so the slug flies on. The splat goes where
+     the slug actually meets the face, at the height it has fallen to. If
+     it meets no face it comes down on the ground (decalFloorAt: the drawn
+     ground or the platform floor under it) further along its arc, and the
+     mark lies there, stretched the way it was going.
+     ============================================================ */
+  // a collider that names the vehicle it is round (militaryvehicles.js,
+  // playeraircraft.js tag their ref-less boxes with c.veh)
+  function vehOfCol(c) {
+    if (c.veh) return c.veh;
+    return c.ref ? vehicleRootOf(c.ref) : null;
+  }
+  // IS THE DRAWN THING THERE? Raycast the collider's own mesh along the
+  // chord near the box's face. 1 = yes (FACEHIT.d: distance along the
+  // chord), 0 = the mesh is not there (air inside the box), -1 = cannot
+  // tell (geometry freed after upload, too big a group): the box is
+  // trusted, as before.
+  const _fRay = new THREE.Raycaster(), _fO = new THREE.Vector3(), _fD = new THREE.Vector3();
+  const _fHits = [], _fMeshes = [];
+  const FACEHIT = { d: 0 };
+  function drawnFace(ref, ox, oy, oz, dx, dy, dz, t, len) {
+    _fMeshes.length = 0;
+    let unknown = false;
+    try {
+      ref.traverse(function (o) {
+        if (unknown || !o.isMesh || !o.geometry) return;
+        if (_fMeshes.length >= 64) { unknown = true; return; }
+        const P = o.geometry.attributes && o.geometry.attributes.position;
+        if (!P || !P.array) { unknown = true; return; }
+        _fMeshes.push(o);
+      });
+    } catch (e) { _fMeshes.length = 0; return -1; }
+    if (unknown || !_fMeshes.length) { _fMeshes.length = 0; return -1; }
+    const t0 = Math.max(0, t - 0.6);
+    _fO.set(ox + dx * t0, oy + dy * t0, oz + dz * t0); _fD.set(dx, dy, dz);
+    _fRay.set(_fO, _fD); _fRay.near = 0; _fRay.far = Math.max(0.05, Math.min(len, t + 0.9) - t0);
+    if (CBZ.camera) _fRay.camera = CBZ.camera;
+    let best = Infinity;
+    try { ref.updateWorldMatrix(true, true); } catch (e) { /* matrices as they are */ }
+    for (let i = 0; i < _fMeshes.length; i++) {
+      _fHits.length = 0;
+      try { _fMeshes[i].raycast(_fRay, _fHits); } catch (e) { _fMeshes.length = 0; _fHits.length = 0; return -1; }
+      for (let k = 0; k < _fHits.length; k++) if (_fHits[k].distance < best) best = _fHits[k].distance;
     }
-    if (!best) return null;
-    _wf.c = best; _wf.t = bestT; _wf.y0 = by0; _wf.y1 = by1;
-    return _wf;
+    _fHits.length = 0; _fMeshes.length = 0;
+    if (!(best < Infinity)) return 0;
+    FACEHIT.d = t0 + best;
+    return 1;
+  }
+  /* wallFace(x,y,z, dx,dy,dz, len) — the nearest REAL wall face on the
+     segment (x,y,z) + (dx,dy,dz)*t, t in [0,len], (dx,dy,dz) unit. Shared by
+     the kill's wall splat (per chord of its arc) and the airborne spray
+     (airWall), so both obey the one gate. -> a reused record
+     { c, t, x,y,z, nx,nz, y0,y1, t0,t1, top } (t0..t1: the face's extent
+     along its tangent (-nz, nx)); top:true when the chord came down on top
+     of a solid; null when it met nothing. Vehicles met on the way are noted
+     for the caller's vehicleSplat (_vehNoted; the caller clears it per
+     event). */
+  const _wf = { c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, nz: 0, y0: 0, y1: 0, t0: 0, t1: 0, top: false, stop: false };
+  const _wfHit = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
+  const _wfOpts = { minT: 0 };
+  function wallFace(x, y, z, dx, dy, dz, len) {
+    if (!CBZ.rayColliders || !(len > 0)) return null;
+    let minT = 0;
+    for (let k = 0; k < 10; k++) {
+      _wfOpts.minT = minT;
+      const c = CBZ.rayColliders(x, y, z, dx, dy, dz, len, _wfHit, _wfOpts);
+      if (!c) return null;
+      const H = _wfHit, t = H.t;
+      minT = t + 1e-4;
+      const vr = vehOfCol(c);
+      if (vr) { noteVehicle(vr); continue; }   // the car's own meshes take it
+      if (isSeeThroughCol(c)) continue;          // intact glass pane / door vision: flies through
+      if (H.ny > 0.5) {
+        // came down ON a solid's top (a crate, a step, a deck): it has landed
+        if (c.ref && drawnFace(c.ref, x, y, z, dx, dy, dz, t, len) === 0) continue;
+        // a post's or a rail's cap is too small to hold a splat: it just takes the slug
+        const narrow = c.yaw && c.hw != null ? (c.hw < 0.2 || c.hd < 0.2) : (c.maxX - c.minX < 0.4 || c.maxZ - c.minZ < 0.4);
+        _wf.top = !narrow; _wf.stop = narrow; _wf.c = c; _wf.t = t; _wf.x = H.x; _wf.y = H.y; _wf.z = H.z;
+        return _wf;
+      }
+      if (H.ny < -0.5) continue;                 // an underside: not where a slug stops
+      const nx = H.nx, nz = H.nz, hy = H.y;
+      // the face's span along its tangent, and its centre on that line
+      const tx = -nz, tz = nx;
+      let span, tc;
+      if (c.yaw && c.hw != null) {
+        const co = Math.cos(c.yaw), si = Math.sin(c.yaw);
+        span = 2 * (c.hw * Math.abs(tx * co - tz * si) + c.hd * Math.abs(tx * si + tz * co));
+        tc = tx * c.cx + tz * c.cz;
+      } else {
+        span = (c.maxX - c.minX) * Math.abs(tx) + (c.maxZ - c.minZ) * Math.abs(tz);
+        tc = tx * (c.minX + c.maxX) * 0.5 + tz * (c.minZ + c.maxZ) * 0.5;
+      }
+      // the solid height band: declared, else measured off the drawn mesh
+      let y0 = c.y1 != null ? (c.y0 || 0) : -1e9, y1 = c.y1 != null ? c.y1 : 1e9;
+      if (c.y1 == null) { const band = drawnBand(c); if (band) { y0 = band.y0; y1 = band.y1; } }
+      if (hy < y0 - 0.1 || hy > y1 + 0.1) continue;  // over / under what is drawn: air
+      // OPEN / SHATTERED WINDOW: the round flew through a hole
+      if (CBZ.cityShotHole && CBZ.cityShotHole(H.x, hy, H.z, nx, nz)) continue;
+      let hx = H.x, hz = H.z, hyy = hy, ht = t, proved = false;
+      if (c.ref) {
+        const r = drawnFace(c.ref, x, y, z, dx, dy, dz, t, len);
+        if (r === 0) continue;                   // the box is there, the thing is not: air
+        if (r === 1) { ht = FACEHIT.d; hx = x + dx * ht; hyy = y + dy * ht; hz = z + dz * ht; proved = true; }
+      }
+      // IT HIT SOMETHING SOLID. Not every solid wears a wall splat: a pole,
+      // a sign, a table's edge, the last few cm under a wall's top take the
+      // slug and show nothing (the drops leave their own marks). The slug
+      // stops there either way; it never flies on through a solid.
+      _wf.stop = (span < MIN_DOOR) ||
+        (y1 < 1e8 && (y1 - y0 < MIN_WALL_H || y1 - hyy < 0.45)) ||
+        // a DOOR is narrower than a wall run (a 0.9 m leaf) but a full
+        // door-height opaque face; anything else that narrow is a prop
+        (span < MIN_FACE && !(y1 - y0 >= 1.8 && y1 - y0 < 50));
+      const th = tx * hx + tz * hz;
+      _wf.top = false; _wf.c = c; _wf.t = ht; _wf.x = hx; _wf.y = hyy; _wf.z = hz; _wf.nx = nx; _wf.nz = nz;
+      _wf.y0 = y0; _wf.y1 = y1;
+      _wf.t0 = tc - span / 2; _wf.t1 = tc + span / 2;
+      // a face proved at one point by its mesh is only trusted near that point
+      if (proved) { if (_wf.t0 < th - 0.8) _wf.t0 = th - 0.8; if (_wf.t1 > th + 0.8) _wf.t1 = th + 0.8; }
+      return _wf;
+    }
+    return null;
+  }
+  /* slugArc(x,y,z, dx,dz, sp, up, reach) — a slug of blood thrown from the
+     wound along (dx,dz) at sp m/s (plus `up` m/s), falling under AIR_G,
+     marched in chords until it meets a face (SLUG.wall = the wallFace
+     record), comes down on the ground or a solid's top (SLUG.ground, at
+     SLUG.x/y/z), or has gone `reach` metres (null). */
+  const SLUG = { ground: false, x: 0, y: 0, z: 0, run: 0, wall: null };
+  function slugArc(x, y, z, dx, dz, sp, up, reach) {
+    let px = x, py = y, pz = z, vy = up, run = 0;
+    const vx = dx * sp, vz = dz * sp, DT = 0.035;
+    SLUG.ground = false; SLUG.wall = null; SLUG.run = 0;
+    for (let s = 0; s < 40 && run < reach; s++) {
+      const nx = px + vx * DT, ny = py + vy * DT - 0.5 * AIR_G * DT * DT, nz = pz + vz * DT;
+      const sx = nx - px, sy = ny - py, sz = nz - pz, sl = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1e-6;
+      const f = wallFace(px, py, pz, sx / sl, sy / sl, sz / sl, sl);
+      if (f && f.stop) return null;             // taken by a solid that wears no splat
+      if (f && !f.top) { SLUG.wall = f; SLUG.run = run + Math.hypot(sx, sz) * (f.t / sl); return SLUG; }
+      if (f && f.top) { SLUG.ground = true; SLUG.x = f.x; SLUG.y = f.y; SLUG.z = f.z; SLUG.run = run; return SLUG; }
+      const fl = decalFloorAt(nx, nz, ny + 0.3, true);
+      if (ny <= fl) { SLUG.ground = true; SLUG.x = nx; SLUG.y = fl; SLUG.z = nz; SLUG.run = run; return SLUG; }
+      run += Math.hypot(sx, sz);
+      vy -= AIR_G * DT; px = nx; py = ny; pz = nz;
+    }
+    return null;
   }
   function spawnWallSplat(x, y, z, dx, dz, amt, instant) {
     if (walls.length > 48) return;
-    const best = wallFace(x, y, z, dx, dz, 3.4);
+    const hl = Math.hypot(dx, dz);
+    if (!(hl > 1e-4)) return;
+    dx /= hl; dz /= hl;
+    _vehNoted.length = 0;
+    // the heavy slug leaves the wound at the speed of the hit: a round's exit
+    // (or a body driven into the wall, `instant`) fast and flat, else slower
+    const sp = instant ? 9 + Math.random() * 3 : 5.5 + Math.random() * 2.5;
+    const S0 = slugArc(x, y, z, dx, dz, sp, 0.5, 3.4);
+    const best = S0 && S0.wall;
     // a car between the wound and the wall wears it, where the slug lands
-    if (vehicleSplat(x, y, z, dx, 0.1, dz, best ? best.t : 3.4, amt, instant)) return;
-    if (!best) return;
-    const col = best.c;                                   // best is a reused record: hold the collider now
+    if (vehicleSplat(x, y, z, dx, 0.1, dz, best ? S0.run : 3.4, amt, instant)) return;
+    if (!S0) return;
+    if (!best) {
+      // NO WALL: it comes down on the ground (or the top it fell on) further
+      // along its arc, a torn splat stretched the way it was going
+      const g = (0.1 + Math.random() * 0.08) * (0.7 + amt * 0.4);
+      _splatO.dirX = dx; _splatO.dirZ = dz; _splatO.radial = false;
+      const sy0 = seatY, ss0 = seatSolid; seatY = S0.y + 0.05; seatSolid = true;
+      try { spawnSplat(S0.x, S0.z, g, BLOOD, false, _splatO); } finally { seatY = sy0; seatSolid = ss0; }
+      return;
+    }
+    const col = best.c;                                   // best is a reused record: hold it all now
+    const nx = best.nx, nz = best.nz, hx = best.x, hz = best.z, cy = best.y;
     const c = claimLand();
     if (!c) return;
-    const hx = x + dx * best.t, hz = z + dz * best.t;
-    let nx = 0, nz = 0;
-    if (best.face === "xmin") { nx = -1; } else if (best.face === "xmax") { nx = 1; }
-    else if (best.face === "zmin") { nz = -1; } else { nz = 1; }
     // 2 cm off the struck face: the collider box IS the drawn wall in the
     // prison (addBox registers both), polygonOffset wins the rest
-    const off = 0.02, ry = nx ? (nx > 0 ? Math.PI / 2 : -Math.PI / 2) : (nz > 0 ? 0 : Math.PI);
+    const off = 0.02, ry = Math.atan2(nx, nz);
+    const tx = -nz, tz = nx;                              // along the face
     const m = c.m;
-    const cy = y + 0.1 + Math.random() * 0.3;
     m.position.set(hx + nx * off, cy, hz + nz * off);
     m.rotation.set(0, ry, Math.random() * 6.28);
     // a wall is hit square-on, so the splat throws rays all round: a torn core
@@ -2649,17 +2810,21 @@
     const near = dist2Cam(hx, hz) < 24 * 24;
     walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 60 : 26, fade: 12 }, col));
     // the heavy part runs: 1-3 drips out of the core, each crawling down at a
-    // few cm a second and stopping where the blood runs out
+    // few cm a second and stopping where the blood runs out, never below the
+    // floor the wall stands on
     const drips = Math.min(3, 1 + Math.round(amt));
     const core = S * 0.18;
+    const floorY = decalFloorAt(hx + nx * 0.1, hz + nz * 0.1, cy, true);
     for (let d = 0; d < drips; d++) {
+      const top = cy - Math.random() * core * 0.6;
+      const L = Math.min(0.2 + Math.random() * 0.6, top - floorY - 0.02);
+      if (!(L > 0.05)) break;
       const dc = claimLand();
       if (!dc) break;
       const dm = dc.m;
-      const L = 0.2 + Math.random() * 0.6, wd = 0.03 + Math.random() * 0.03;
+      const wd = 0.03 + Math.random() * 0.03;
       const along = (Math.random() - 0.5) * core * 2;
-      const top = cy - Math.random() * core * 0.6;
-      dm.position.set(hx + nx * (off + 0.002) + (nx ? 0 : along), top - L * 0.5, hz + nz * (off + 0.002) + (nx ? along : 0));
+      dm.position.set(hx + nx * (off + 0.002) + tx * along, top - L * 0.5, hz + nz * (off + 0.002) + tz * along);
       dm.rotation.set(0, ry, 0);                          // local +y is world up: it runs DOWN
       dm.scale.set(wd / 0.42, L / 1.92, 1);
       ldWrite(dc.slot, dm, CELL_DRIP, 1, L / (0.06 + Math.random() * 0.1), 18 + Math.random() * 10, 0, 0.9, 0.05, 1,
@@ -3783,12 +3948,19 @@
   // A POOL LAYER under a body that is still bleeding (systems/vitals.js calls
   // this as blood leaves a lying man: each call a bigger layer, to its cap).
   // `grow` is spawnSplat's own pool size (0.3 small .. 2.4 a man bled out).
-  CBZ.gorePool = function (x, z, grow) {
+  // y (optional): the height of the body it comes out of, so it lands on the
+  // floor he is on (an upper storey, a deck), not on the street under it
+  CBZ.gorePool = function (x, z, grow, y) {
     if (!CBZ.scene || dist2Cam(x, z) > 60 * 60) return null;
-    return spawnSplat(x, z, Math.max(0.2, Math.min(2.4, grow || 0.6)) * POOL_K * 1.35, BLOOD_D, true);
+    const sy0 = seatY; if (y != null && isFinite(y)) seatY = y + 0.3;
+    try { return spawnSplat(x, z, Math.max(0.2, Math.min(2.4, grow || 0.6)) * POOL_K * 1.35, BLOOD_D, true); } finally { seatY = sy0; }
   };
-  CBZ.goreDrip = function (x, z, size) {
+  CBZ.goreDrip = function (x, z, size, y) {
     if (!CBZ.scene) return;
+    const sy0 = seatY; if (y != null && isFinite(y)) seatY = y + 0.3;
+    try { return drip(x, z, size); } finally { seatY = sy0; }
+  };
+  function drip(x, z, size) {
     const d2 = dist2Cam(x, z);
     if (d2 > 55 * 55) return;
     // `size` keeps its old scale (0.1-0.5); a walking drip lands 2-6 cm across
@@ -3801,7 +3973,7 @@
         0.0015 + g * 0.05, -1, 0, 0, g) >= 0) return;
     }
     spawnSplat(x, z, g, BLOOD_D, false, _dotO);
-  };
+  }
 
   // ============================================================
   //  REAL DISMEMBERMENT — the body that hits the ground is genuinely MISSING
@@ -4776,7 +4948,7 @@
     for (let i = later.length - 1; i >= 0; i--) {
       const L = later[i]; L.t -= dt;
       // the beat runs in the medium its kill happened in (see after())
-      if (L.t <= 0) { later.splice(i, 1); wetEvent = L.wet; try { L.fn(); } catch (e) {} wetEvent = false; }
+      if (L.t <= 0) { later.splice(i, 1); wetEvent = L.wet; seatY = L.sy; try { L.fn(); } catch (e) {} wetEvent = false; seatY = null; }
     }
 
     // water medium: the sustained bleed sources, then every live plume puff
@@ -4895,7 +5067,7 @@
       }
       // the DRAWN ground (see decalFloorAt) — a gib resting on floorAt=0 was
       // buried to its eyeballs in the 8 cm sidewalk slab, same bug as the pools
-      const fl = decalFloorAt(m.position.x, m.position.z);
+      const fl = decalFloorAt(m.position.x, m.position.z, m.position.y + 0.3, true);
       // rr = the bit's half-height. CITY adds a hair so the piece clears the
       // road paint; jail/survival keep the original bare radius.
       const rr = gibCity ? (b.rad || 0.06) + 0.012 : (b.rad || 0.06);
@@ -5070,6 +5242,20 @@
      Populations come along for free (a live budget read during a shootout). */
   const _RIM = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   const _rv = new THREE.Vector3();
+  // EVERY EVENT SEATS FROM ITS OWN HEIGHT: a kill or a blow at (x,y,z) lays
+  // its pools and splats on the floor under y (decalFloorAt), and the beats
+  // it schedules (after()) carry that height with them.
+  function seated(fn) {
+    const w = function (x, y, z, opts) {
+      const sy0 = seatY; seatY = (y != null && isFinite(y)) ? y : null;
+      try { return fn.call(this, x, y, z, opts); } finally { seatY = sy0; }
+    };
+    for (const k in fn) if (Object.prototype.hasOwnProperty.call(fn, k)) w[k] = fn[k];
+    return w;
+  }
+  CBZ.gore = seated(CBZ.gore);
+  CBZ.goreImpact = seated(CBZ.goreImpact);
+
   CBZ.goreAudit = function () {
     let pools = 0, streaks = 0, water = 0, worst = 0, worstAt = null;
     for (let i = 0; i < splats.length; i++) {
