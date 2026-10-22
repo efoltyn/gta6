@@ -1901,7 +1901,51 @@
      the shell as separate meshes; one that sits wholly on the part of the
      shell that is now the lid moves into the lid group, or it would hang in
      the air when the lid lifts. Run per instance, after the face. */
-  const _lidBox = new THREE.Box3();
+  const _lidBox = new THREE.Box3(), _lidV = new THREE.Vector3();
+  function moveToLid(o, lidG) {
+    o.position.x -= lidG.position.x; o.position.y -= lidG.position.y; o.position.z -= lidG.position.z;
+    lidG.add(o);
+  }
+  /* A LAMP ACROSS THE SHUT LINE IS TWO LAMPS, the way a real hatchback's are:
+     the inner half rides the tailgate, the outer half stays on the body's
+     corner post; the plate on a tailgate is the tailgate's. The brand face
+     comes MERGED per material (every lens of both ends in one mesh), so the
+     face is split triangle by triangle on where each one's middle lies (the
+     piece keeps its material, so the bake, the night glow and the brake
+     swap treat both halves as the one lamp they were). */
+  function splitAcross(o, lidG, test) {
+    const src = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry;
+    const P = src.attributes.position;
+    if (!P || P.count < 3) return false;
+    const names = Object.keys(src.attributes);
+    const inner = {}, outer = {};
+    names.forEach(function (k) { inner[k] = []; outer[k] = []; });
+    let nIn = 0, nOut = 0;
+    for (let t = 0; t + 2 < P.count; t += 3) {
+      _lidV.set((P.getX(t) + P.getX(t + 1) + P.getX(t + 2)) / 3, (P.getY(t) + P.getY(t + 1) + P.getY(t + 2)) / 3,
+        (P.getZ(t) + P.getZ(t + 1) + P.getZ(t + 2)) / 3).applyMatrix4(o.matrix);
+      const dst = test(_lidV) ? inner : outer;
+      if (dst === inner) nIn++; else nOut++;
+      names.forEach(function (k) {
+        const A = src.attributes[k], sz = A.itemSize, arr = dst[k];
+        for (let v = t; v < t + 3; v++) for (let c = 0; c < sz; c++) arr.push(A.array[v * sz + c]);
+      });
+    }
+    if (!nIn || !nOut) return false;
+    const build = function (parts) {
+      const g = new THREE.BufferGeometry();
+      names.forEach(function (k) { const A = src.attributes[k]; g.setAttribute(k, new THREE.Float32BufferAttribute(parts[k], A.itemSize, A.normalized)); });
+      g.computeBoundingSphere();
+      return g;
+    };
+    const m = new THREE.Mesh(build(inner), o.material);
+    m.position.copy(o.position); m.quaternion.copy(o.quaternion); m.scale.copy(o.scale);
+    m.castShadow = o.castShadow; m.receiveShadow = o.receiveShadow; m.renderOrder = o.renderOrder;
+    m.name = o.name; m.userData = Object.assign({}, o.userData);
+    o.geometry = build(outer);
+    moveToLid(m, lidG);
+    return true;
+  }
   function adoptLidParts(root) {
     let lidG = null;
     for (let i = 0; i < root.children.length; i++) {
@@ -1911,27 +1955,31 @@
     if (!lidG) return 0;
     const L = lidG.userData.carLid;
     const zTail = root.userData.partCtx && root.userData.partCtx.rearZ != null ? root.userData.partCtx.rearZ : -9;
+    const faceTest = function (c) { return c.z < zTail + 0.15 && c.y > L.cutY && Math.abs(c.x) <= L.halfX; };
     let n = 0;
     const kids = root.children.slice();
     for (let i = 0; i < kids.length; i++) {
       const o = kids[i];
-      if (o === lidG || !o.isMesh || !o.geometry) continue;
+      if (o === lidG || !o.isMesh || !o.geometry || o.isInstancedMesh || Array.isArray(o.material)) continue;
       const ud = o.userData || {};
-      if (ud.paintZone || ud.playerWheel || ud.carDoor || ud.carLid) continue;
+      if (ud.paintZone || ud.loftShell || ud.playerWheel || ud.carDoor || ud.carLid || /^cabin/.test(o.name || "")) continue;
       if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
       const gb = o.geometry.boundingBox;
       if (!gb || !isFinite(gb.min.x)) continue;
       o.updateMatrix();
       _lidBox.copy(gb).applyMatrix4(o.matrix);
       const B = _lidBox;
-      if (B.min.y < L.cutY - 0.01) continue;                       // reaches under the lip: the body's
-      if (B.max.z > L.hz + 0.06 || (B.min.z + B.max.z) / 2 > L.hz - 0.01) continue;   // ahead of the hinge
-      const ax = Math.max(Math.abs(B.min.x), Math.abs(B.max.x));
       const onFace = B.min.z < zTail + 0.15;
-      if (ax > (onFace ? L.halfX + 0.02 : L.deckHalfX + 0.08)) continue;   // a corner post's, or off the side
-      o.position.x -= lidG.position.x; o.position.y -= lidG.position.y; o.position.z -= lidG.position.z;
-      lidG.add(o);
-      n++;
+      // a face part reaching past the gate (the merged face, a lamp across
+      // the line): the triangles on the gate's panel go with it
+      if (onFace && B.max.y > L.cutY && splitAcross(o, lidG, faceTest)) { n++; continue; }
+      if (B.max.z > L.hz + 0.06 || (B.min.z + B.max.z) / 2 > L.hz - 0.01) continue;   // ahead of the hinge
+      const cy = (B.min.y + B.max.y) / 2;
+      // on the face: a plate or a badge mostly on the gate rides it whole;
+      // anything wholly under the lip is the bumper's
+      if (onFace ? (cy < L.cutY || B.min.y < L.cutY - 0.1) : B.min.y < L.cutY - 0.01) continue;
+      const ax = Math.max(Math.abs(B.min.x), Math.abs(B.max.x));
+      if (ax <= (onFace ? L.halfX + 0.02 : L.deckHalfX + 0.08)) { moveToLid(o, lidG); n++; }
     }
     return n;
   }
@@ -1943,6 +1991,7 @@
     const m = new THREE.Mesh(geo, mat);
     m.castShadow = false;
     m.userData.noSeal = true;
+    m.userData.loftShell = true;          // the shell itself: never re-homed onto a lid
     if (zone) m.userData.paintZone = zone;
     root.add(m);
     return m;

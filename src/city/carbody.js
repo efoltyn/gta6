@@ -453,9 +453,9 @@
          boot  the deck from the tail to the backlight base + the top of the
                tail face; hinged at the backlight base, the tail rises
          gate  the same deck + the backlight; hinged at the roof's rear edge
-       The tail face is cut ABOVE the tail lamps (the lamps stay on the body,
-       nothing is left hanging in the air when it opens) and, on a gate,
-       inside the D-pillars. */
+       A boot's tail face is cut ABOVE the tail lamps (a saloon's lamps stay
+       on the body); a gate runs down to the bumper inside the D-pillars and
+       carries the inner halves of the lamps (see the cut below). */
     const lid = (function () {
       const k = S.rearLid;
       if ((k !== "boot" && k !== "gate") || bed || S.flat || S.openTail || S.trunk === false) return null;
@@ -463,10 +463,15 @@
       const sT = SH.section(zT + 0.002), sL = SH.section(zT + 0.02);
       const lowT = sT.pts[P.R][1], topT = sT.pts[P.RC][1];
       const lampTop = lerp(sL.pts[P.R][1], sL.pts[P.RC][1], 0.68) + 0.09;     // carparts tailY + the tallest lens
-      let cutY = Math.max(lerp(lowT, sT.yEdge, k === "gate" ? 0.36 : 0.58), lampTop);
+      /* A BOOT lid stops above the tail lamps (a saloon's lamps are the
+         body's). A TAILGATE is a real door down to the bumper: its painted
+         lower panel carries the plate and the inner halves of the lamps, the
+         D-pillar posts beside it the outer halves (playercars.js
+         adoptLidParts splits each lamp at the line), as on a real hatch. */
+      let cutY = k === "gate" ? lerp(lowT, sT.yEdge, 0.30) : Math.max(lerp(lowT, sT.yEdge, 0.58), lampTop);
       cutY = Math.min(cutY, Math.min(sT.yEdge, topT) - 0.05);
-      const sx = sideXOf(sT, cutY);
-      const halfX = Math.max(0.2, k === "gate" ? sx * 0.62 : sx - 0.09);
+      const sx = sideXOf(sT, cutY), sxL = sideXOf(sT, lampTop - 0.09);
+      const halfX = Math.max(0.2, k === "gate" ? Math.max(0.35, Math.min(sx, sxL > 0 ? sxL : sx) - 0.22) : sx - 0.09);
       const zH = k === "gate" ? S.zRoofR : S.zDeck;
       const hs = SH.section(zH);
       return { kind: k, cutY: cutY, halfX: halfX, zHinge: zH, yHinge: hs.pts[P.RC][1], zDeck: S.zDeck };
