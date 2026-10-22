@@ -591,29 +591,9 @@
   //  No HUD is created here and none ever will be — the killfeed is the only
   //  popup this game has.
   // ============================================================
-  const HELLO = {
-    spouse:  ["“There you are.”", "“Hey, you.”", "“Ready?”", "“Missed you.”"],
-    parent:  ["“Come on, sweetheart.”", "“Stay close to me.”", "“You hungry?”", "“Hold my hand.”"],
-    child:   ["“Can we get ice cream?”", "“Look! Look!”", "“I'm tired.”", "“Wait for me!”"],
-    sibling: ["“Mom's asking about you.”", "“You're late. Again.”", "“Don't start.”"],
-    kin:     ["“How's the family?”", "“Been meaning to call.”", "“Say hi to your mother.”"],
-    friend:  ["“Ayy! Long time!”", "“Where you been?”", "“Yo!”", "“Look who it is.”"],
-    work:    ["“You on tonight?”", "“Rough shift?”", "“They got you working doubles too?”"],
-  };
-  const WARM = ["“I love you.”", "“You good?”", "“Come here.”", "“Almost home.”"];
-  const WIDOW = ["“It's still quiet at the house.”", "“Some days are alright.”", "“I keep setting two plates.”"];
-  // THE PAIR NOTICES YOU. social.js has spent this whole game writing
-  // `knowsHero` (how much of your name has reached this person) and `opinion`
-  // (what they think of it) and — grep the repo — NOTHING has ever read either
-  // one. They are the two scalars kinshipAudit() has to keep reporting as
-  // orphans, so here is the smallest honest body for them: two people out
-  // together, who know who you are, stop looking at each other and look at YOU.
-  // The line is `opinion`'s sign. That is a stat fiction retired with a beat
-  // that already existed, not a new system.
-  const NOTICE_UP = ["“That's them. That's really them.”", "“Told you they were real.”", "“Don't stare, but look.”"];
-  const NOTICE_DOWN = ["“Don't. Look. Up.”", "“That's the one from the news.”", "“Keep walking. Keep walking.”"];
-  function pick(a) { return a[(Math.random() * a.length) | 0]; }
-  function say(p, line, color, secs) { if (CBZ.citySay && line) CBZ.citySay(p, line, color, secs); }
+  // THE PAIR NOTICES YOU: two people out together, who know who you are,
+  // stop looking at each other and look at YOU. The look is the whole beat;
+  // nobody narrates it (owner 2026-10-22: no random dialogue).
 
   // face `p` at (x,z). We run after move(), so this write is the one that
   // renders — no lerp fight, no next-frame snap-back.
@@ -653,18 +633,8 @@
       b.pause = Math.max(b.pause || 0, b._kinBeat.t);
       b._kinGreetCD = _clock + GREET_CD + Math.random() * 70;
     }
-    // THE LINE. A widow does not say "long time!" — social.js has stamped
-    // `_widowed` on bereaved partners since the day it shipped and this is the
-    // first code in the game that has ever read the flag.
-    let openers = HELLO[rel] || HELLO.friend;
-    if (kind === "warm") openers = WARM;
-    if (kind === "notice") openers = ((a.opinion || 0) + (b.opinion || 0)) < 0 ? NOTICE_DOWN : NOTICE_UP;
-    else if (a._widowed && Math.random() < 0.6) openers = WIDOW;
-    // Two strangers-to-you catching up is BODY LANGUAGE, not words over their
-    // heads (owner 2026-09-27: no AI small talk on screen). A line is spoken
-    // only when it is aimed at the player, or is ABOUT the player (notice).
-    const col = (kind === "warm") ? "#ff9fd0" : (kind === "notice" ? "#ffd9a8" : "#cfe6ff");
-    if (withPlayer || kind === "notice") say(a, pick(openers), col, Math.min(2.6, t));
+    // A hello is BODY LANGUAGE (the chat hold, the turn, the pose), never a
+    // line over their heads: owner, 2026-10-22, "random dumb dialogue sucks".
     if (kind === "greet") _greetings++;
     // a real hello is a real (small) social event, so social.js's own `mood`
     // moves with it: the number the sim keeps and the thing you can see are
@@ -855,8 +825,6 @@
     if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(m.pos.x, m.pos.z, 0.8);
   }
 
-  const GRIEF_CRY = ["No. No!", "Somebody help!", "Please. Please.", "Oh God.", "Wake up. Wake up!"];
-  const GRIEF_KID = ["Mom? Mom!", "Get up. Please.", "Daddy?"];
   function tickGrief(m, dt) {
     const gr = m._kinGrief;
     if (!gr) return;
@@ -880,7 +848,7 @@
         gr.phase = "kneel"; gr.t = 0;
         m.state = "chat"; m.speed = 0; m.chatT = 2.6;
         if (m.char) { m.char.crouch = true; m._kinCrouch = true; }
-        say(m, pick(isKid(m) ? GRIEF_KID : GRIEF_CRY), "#9bb0ff", 2.6);
+        if (CBZ.voice) CBZ.voice.say(m, "grief", { role: isKid(m) ? "kid" : undefined, victim: v, force: true, secs: 2.6 });
       }
       return;
     }

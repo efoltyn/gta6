@@ -2092,7 +2092,7 @@
       p.poseCower = Math.max(p.poseCower || 0, 0.7);            // reactions.js animates the hunch/recoil
       p._scareT = 0.9;                                          // transient marker (rig may read it)
       p._scareCD = 22 + rng() * 10;                             // this hobo won't scare you again for ~25s
-      if (CBZ.citySay) CBZ.citySay(p, pick(["GET BACK!", "YOU SEE EM TOO?!", "DON'T TOUCH ME!", "THEY'RE WATCHING!", "I KNOW WHAT YOU ARE!"], rng()), "#ff7b6b", 1.6);
+      if (CBZ.voice) CBZ.voice.say(p, "leaveMe", { by: CBZ.city && CBZ.city.playerActor, force: true });
       if (CBZ.sfx) CBZ.sfx("punch");                           // a sharp startle stinger
       if (CBZ.shake) CBZ.shake(0.5);                            // the camera flinch
       // THE LUNGE IS GONE FROM HERE ON PURPOSE. It used to fire for any
@@ -3178,6 +3178,12 @@
     tgt.mem = att;                                     // who did it: the threat the brain reads
     const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
     if (!tgt.rage && dare && !tgt.restraint && (tgt.aggr || 0) >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back — never with wrists tied (restrain.js owns him)
+    // what he says (the body above is already decided), and the street that saw it
+    const V = CBZ.voice;
+    if (V) {
+      V.react(tgt, "hit", { by: att, how: tgt.rage === att ? "fight" : tgt.vip ? "call" : "backOff", topic: tgt.rage === att ? "hitBack" : tgt.vip ? "security" : "hit" });
+      V.witness(tgt.pos.x, tgt.pos.z, "seeHit", { by: att, victim: tgt }, 16);
+    }
   }
   CBZ.cityStruck = struck;
   function hurtActor(att, tgt, dmg, melee, res) {
@@ -4590,8 +4596,9 @@
           ped.offersDeal = 10; return true;
         }
         if (intent === "trade") { pedTrade(ped); return true; }
-        // talk / favor
-        sayTopic(ped, "approach", 2.0);
+        // talk / favor: he looked you over and thought better of it. No small
+        // talk (owner: random dialogue sucks); the look is the whole beat.
+        faceTo(ped, P.pos.x, P.pos.z, 1.2);
         return true;
       }
       return true;
@@ -4647,14 +4654,7 @@
       ped.reactCD = 16 + rng() * 10;
       ped.pause = Math.max(ped.pause, 0.8 + rng() * 0.7); ped.speed = 0;
       faceTo(ped, P.pos.x, P.pos.z, 1.5);
-      const title = CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : "big man";
-      // The greeting is picked by STANDING, not by a die (city/read.js): the
-      // same man says the same thing until how he feels about you changes. The
-      // street name still rides on it — that part was already right.
-      const gl = CBZ.cityLine && CBZ.cityLine(ped, "greet");
-      const line = gl ? gl.replace(/\.$/, "") + ", " + title + "."
-                      : pick(["Yo, " + title + "!", "Ayy, " + title + "!", title + "! You good?"], rng());
-      if (CBZ.citySay) CBZ.citySay(ped, line, "#7ed957", 2.2); else citySayBark(ped, line, 1.8);
+      // a nod from somebody who rates you: the stop and the look ARE the hello
       if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
       return true;
     }
@@ -4684,7 +4684,6 @@
         ped.reactCD = 12 + rng() * 8;
         faceTo(ped, P.pos.x, P.pos.z, 1.5);
         ped.pause = Math.max(ped.pause, 0.7 + rng() * 0.8); ped.speed = 0;
-        sayTopic(ped, fam ? "deferCrew" : "deferFame", 1.8);
         return true;
       }
     }
@@ -4799,8 +4798,6 @@
       // offer me jobs"). city/read.js sizes the pitch to the level gap and, if
       // the street knows you as somebody who takes work, offers work instead of
       // product. Falls back to the old flat line if read.js is absent.
-      const rl = CBZ.cityLine && CBZ.cityLine(ped, "trade");
-      citySayBark(ped, rl || "You buying or selling?", 2);
       return true;
     }
     if (picked === "deal") {
@@ -5143,7 +5140,9 @@
           return;
         }
         // bold + (usually armed): draw and fight back — a Mexican stand-off
+        const freshDraw = ped.state !== "fight";
         ped.rage = CBZ.city.playerActor; ped.state = "fight";
+        if (freshDraw && CBZ.voice) CBZ.voice.react(ped, "aimedAt", { by: CBZ.city.playerActor, how: "draw" });
         if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.4);
         return;
       }
@@ -5194,10 +5193,10 @@
     }
 
     // ---- being threatened (player aiming / hot / a witnessed crime nearby) ----
-    // ONE RUNNER SETS OTHERS RUNNING: a bystander with no threat of his own
-    // still reads the street — enough people bolting past him (the decaying
-    // panic field every flee raises) IS the threat, from where they came from.
-    const panicHere = (!ped.gang && !ped.guard && CBZ.cityPanicAt) ? CBZ.cityPanicAt(ped.pos.x, ped.pos.z) : 0;
+    // ONE RUNNER SETS OTHERS RUNNING — by SIGHT (systems/voice.js seeRun): a
+    // bystander who sees enough people bolting past him runs the way they ran,
+    // ring by ring. Without voice.js the old radius read still stands.
+    const panicHere = (!CBZ.voice && !ped.gang && !ped.guard && CBZ.cityPanicAt) ? CBZ.cityPanicAt(ped.pos.x, ped.pos.z) : 0;
     const threatened = ped.alarmed > 0 || (playerThreat && dpl < 14) || panicHere > 0.9;
     if (ped._reactHold > 0) ped._reactHold -= dt;
     if (threatened && CBZ.cityBrain) {
@@ -5351,8 +5350,13 @@
     //      danger — a brandished gun makes the meek edge away; otherwise the
     //      curious stop and gawk / film the armed stranger walking past (GTA vibe).
     if (active && !P.dead && dpl < 12 && (ped._notedT || 0) <= 0) {
-      if (playerArmed && dpl < 9 && (bnd === "meek" || (bnd === "wary" && rng() < 0.4))) {
-        // gun out and pointing-ish your way: the timid back off without a full panic
+      if (playerArmed && dpl < 11 && CBZ.voice && bnd !== "violent") {
+        // a gun out in view: a glance, a walk off, a hurry, a sprint, or a man
+        // who is ready squaring up — read off what he sees (systems/voice.js)
+        ped._notedT = 2.5 + rng() * 2;
+        const r = CBZ.voice.react(ped, "seeGun", { by: CBZ.city.playerActor });
+        if (r.how !== "ignore" && r.how !== "glance") { ped.fear = Math.min((ped.fear || 0) + 1.5, 6); return; }
+      } else if (playerArmed && dpl < 9 && (bnd === "meek" || (bnd === "wary" && rng() < 0.4))) {
         ped._notedT = 2.5 + rng() * 2;
         ped.state = "flee"; fleeFrom(ped, px, pz); ped.fear = Math.min(ped.fear + 1.5, 6);
         return;
@@ -5682,6 +5686,7 @@
     const B = A0();
     const boldEnough = ped.aggr >= (B.crook || 0.72) && (ped.armed || ped.aggr >= (B.violent || 0.88));
     if (ped.armed || boldEnough) return false;   // armed peds draw + aim back, never surrender
+    const fresh = !(ped.surrender && ped.poseHandsUp);   // the moment the hands go up (the sweep re-arms every frame)
     ped.surrenderT = Math.max(ped.surrenderT || 0, hold || 0.55);
     ped.surrender = true;
     ped.state = "surrender";
@@ -5699,6 +5704,8 @@
       const dx = CBZ.player.pos.x - ped.pos.x, dz = CBZ.player.pos.z - ped.pos.z;
       if (dx * dx + dz * dz > 0.04) faceYaw(ped, Math.atan2(dx, dz), 1.0);
     }
+    // "Okay! Okay!" — sometimes; the hands already said it
+    if (fresh && CBZ.voice && CBZ.city) CBZ.voice.react(ped, "aimedAt", { by: CBZ.city.playerActor || CBZ.player, how: "handsUp" });
     // NB: do NOT set ped.char.surrender/handsUp — that makes character.js ALSO
     // pose the arms (forward + a slight lean), fighting reactions.js and producing
     // the "bowing" look. reactions.js owns the city hands-up pose via poseHandsUp;
@@ -5708,6 +5715,129 @@
   CBZ.cityMarkGunpoint = markGunpoint;
   CBZ.cityFleeFrom = fleeFrom;     // sizeup.js: outclassed peds break and run
   CBZ.cityRallyGang = rallyGang;   // sizeup.js: hitting one ganger rallies the set
+
+  // ============================================================
+  //  THE CITY'S BODIES FOR CBZ.voice (systems/voice.js). voice decides HOW a
+  //  person answers what they see; this is how a city body does each one,
+  //  through the movement every ped already has (target / state / the motor's
+  //  face hold / fleeFrom / markGunpoint). The in-between bodies the street
+  //  never had live here: a glance (stop, look, carry on), a walk off at a
+  //  quicker clip, a hurry, a cross to the other kerb.
+  // ============================================================
+  function vAway(ped, sx, sz, ahead, side) {
+    let ax = ped.pos.x - sx, az = ped.pos.z - sz;
+    const am = Math.hypot(ax, az) || 1; ax /= am; az /= am;
+    const s = roleHash(ped, 0x51DE) < 0.5 ? 1 : -1;      // which kerb is a person's own habit
+    ped.path = null; ped.finalGoal = null;
+    ped.target.set(ped.pos.x + ax * ahead - az * s * side, 0, ped.pos.z + az * ahead + ax * s * side);
+    ped.state = "walk"; ped.pause = 0;
+    ped._notedT = Math.max(ped._notedT || 0, 5);          // own the next steps (no gawk/goal override)
+    ped._reactHold = Math.max(ped._reactHold || 0, 2.5);
+  }
+  function vHurry(ped, mul, secs) { ped._vHurryMul = mul; ped._vHurryT = Math.max(ped._vHurryT || 0, secs); }
+  function vActor(by) {
+    if (!by) return null;
+    if (by === CBZ.player || by.isPlayer) return (CBZ.city && CBZ.city.playerActor) || by;
+    return by;
+  }
+  function cityPerform(ped, how, ctx) {
+    if (!ped || !ped.pos || ped.dead || ped.ko > 0 || ped.controlled || ped.vendor || ped.inCar) return false;
+    const sx = ctx.sx, sz = ctx.sz;
+    const by = vActor(ctx.by);
+    switch (how) {
+      case "ignore": return true;
+      case "glance": {
+        if (ped.state === "flee" || ped.state === "fight" || ped.surrender) return false;
+        // stop, look, look away and carry on: the existing face-you hold
+        const f = ped._vFaceAt || (ped._vFaceAt = { x: 0, z: 0 });
+        f.x = sx; f.z = sz; ped._faceAt = f;
+        ped._faceT = Math.max(ped._faceT || 0, 0.55 + roleHash(ped, 0x61A7) * 0.6);
+        return true;
+      }
+      case "walkOff": vAway(ped, sx, sz, 6, 7); vHurry(ped, 1.3, 4); return true;
+      case "hurry": vAway(ped, sx, sz, 12, 5); vHurry(ped, 1.7, 5); ped.fear = Math.min(10, (ped.fear || 0) + 1.5); return true;
+      case "sprint": {
+        if (ped._npcAttached && CBZ.cityUnseat) { try { CBZ.cityUnseat(ped, { state: "flee" }); } catch (e) {} }
+        else if ((ped._propSeat || ped._deskAnchor) && CBZ.propStand) { try { CBZ.propStand(ped); } catch (e) {} }
+        ped.surrender = false; ped.surrenderT = 0; ped.poseHandsUp = false; ped.rage = null;
+        ped.fear = Math.max(ped.fear || 0, 8); ped.alarmed = Math.max(ped.alarmed || 0, 5);
+        fleeFrom(ped, sx, sz);
+        ped._reactHold = Math.max(ped._reactHold || 0, 2.2);
+        CBZ.cityPanicRaise(ped.pos.x, ped.pos.z, 0.5);
+        return true;
+      }
+      case "freeze": ped.speed = 0; ped.path = null; ped.state = "idle"; ped.pause = Math.max(ped.pause || 0, 1.2); faceTo(ped, sx, sz, 1.2); return true;
+      case "cower": ped.poseCower = Math.max(ped.poseCower || 0, 1.4); ped.speed = 0; ped.pause = Math.max(ped.pause || 0, 1.2); return true;
+      case "handsUp": return markGunpoint(ped, 1.6);
+      case "backOff": {
+        // a step or two back, still facing the trouble
+        let ax = ped.pos.x - sx, az = ped.pos.z - sz;
+        const am = Math.hypot(ax, az) || 1; ax /= am; az /= am;
+        ped.path = null; ped.finalGoal = null;
+        ped.target.set(ped.pos.x + ax * 2.6, 0, ped.pos.z + az * 2.6);
+        ped.state = "walk"; ped.pause = 0; ped._notedT = Math.max(ped._notedT || 0, 3);
+        faceTo(ped, sx, sz, 1.6);
+        vHurry(ped, 0.8, 1.6);
+        return true;
+      }
+      case "squareUp": case "call":
+        ped.speed = 0; ped.path = null; if (ped.state === "walk" || ped.state === "wander") ped.state = "idle";
+        ped.pause = Math.max(ped.pause || 0, 1.4);
+        faceTo(ped, sx, sz, 1.8);
+        return true;
+      case "draw":
+        faceTo(ped, sx, sz, 1.8);
+        ped.speed = 0; ped.pause = Math.max(ped.pause || 0, 1.2);
+        if (ped.armed || ped._holster) { ped.poseAimBack = true; ped.poseHandsUp = false; }
+        return true;
+      case "fight":
+        if (!by || ped.restraint) return false;
+        ped.rage = by; ped.state = "fight";
+        return true;
+      case "help": {
+        if (!by || ped.restraint) return false;
+        // a hard one goes in with his hands; the rest close and shout
+        if ((ped.aggr || 0) >= (A0().bold || 0.5) || ped.armed) { ped.rage = by; ped.state = "fight"; }
+        else { ped.state = "confront"; ped.path = null; ped.target.set(sx, 0, sz); }
+        return true;
+      }
+      case "holdFriend": {
+        // she takes his arm and they go the other way together
+        vAway(ped, sx, sz, 9, 6); vHurry(ped, 1.35, 4);
+        const f = ctx.friend;
+        if (f && !f.dead && !f.controlled && !f.companion && f.pos) {
+          f.rage = null; if (f.state === "confront" || f.state === "fight") f.state = "walk";
+          f.path = null; f.finalGoal = null; f.pause = 0; f._notedT = Math.max(f._notedT || 0, 5);
+          f.target.set(ped.target.x + 0.9, 0, ped.target.z + 0.9); f.state = "walk";
+          f._vHurryMul = 1.35; f._vHurryT = 4;
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+  const _vNearBuf = [];
+  function cityNear(x, z, r, out) {
+    const peds = CBZ.cityPeds || [];
+    const r2 = r * r;
+    if (_collect(_vNearBuf, x, z, r, 0)) {
+      for (let i = 0; i < _vNearBuf.length; i++) {
+        const p = _vNearBuf[i];
+        const dx = p.pos.x - x, dz = p.pos.z - z;
+        if (!p.dead && dx * dx + dz * dz < r2) out.push(p);
+      }
+      _vNearBuf.length = 0;
+      return out;
+    }
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (p.dead) continue;
+      const dx = p.pos.x - x, dz = p.pos.z - z;
+      if (dx * dx + dz * dz < r2) out.push(p);
+    }
+    return out;
+  }
+  if (CBZ.voice) { CBZ.voice.setPerform(cityPerform, "city"); CBZ.voice.setNear(cityNear, "city"); }
 
   // ============================================================
   //  CBZ.cityScare(actor, threat, opts) -> "bolt" | "freeze" | "hold"
@@ -5749,6 +5879,9 @@
   CBZ.cityPanicRaise = function (x, z, amt) {
     PANIC.push({ x: x, z: z, a: amt || 1, t: 0 });
     if (PANIC.length > 32) PANIC.shift();
+    // THE PEOPLE AROUND IT SEE IT (systems/voice.js): the field is nerve; who
+    // actually runs is decided by sight, ring by ring, from this spot
+    if (CBZ.voice) CBZ.voice.runnerAt(x, z, amt || 1);
   };
   CBZ.cityPanicAt = function (x, z) {
     let s = 0;
@@ -5824,6 +5957,8 @@
     a.fear = Math.max(a.fear || 0, 10);
     a.alarmed = Math.max(a.alarmed || 0, 6);
     if (tp) fleeFrom(a, tp.x, tp.z); else a.state = "flee";
+    // the first ring knows why ("He's got a gun!"), and is news to the next
+    if (CBZ.voice) CBZ.voice.react(a, attArmed ? "seeGun" : "seeRun", { by: threat || null, how: "sprint", why: attArmed ? "gun" : null, ring: 0 });
     CBZ.cityPanicRaise(a.pos.x, a.pos.z, 1);
     a._scareChoice = "bolt";
     return "bolt";
@@ -5865,7 +6000,9 @@
       // reads him through cityScare: bolt, or hands up)
       const drawsBack = ped.armed || !!ped._holster;
       if (drawsBack) {
+        const freshAim = !ped.poseAimBack;
         if (ped.state !== "fight") { ped.poseAimBack = true; ped.poseHandsUp = false; }
+        if (freshAim && CBZ.voice) CBZ.voice.react(ped, "aimedAt", { by: CBZ.city && CBZ.city.playerActor ? CBZ.city.playerActor : P, how: "draw" });
       } else if (ped._npcAttached || ped._propSeat || ped._deskAnchor || ped.state === "sit" || ped.aggr >= (B.violent || 0.88)) {
         // A HELD BODY GETS THE BRANCH, NOT THE FREEZE. Everyone in a seat used
         // to land on markGunpoint alone, which is why a stadium, a gate lounge
@@ -6221,6 +6358,12 @@
     // depenetration and animChar's own run layer all still run, which is the
     // whole reason this is a flag and not a bespoke locomotion path.
     if (ped._boardRun && spd > 0) spd = Math.max(spd, ped.baseSpeed * 1.9);
+    // WALKING OFF QUICKER (CBZ.voice): a man who saw something he wants no part
+    // of leaves at a brisker walk or a hurry, not a sprint, for a few seconds
+    if (ped._vHurryT > 0) {
+      ped._vHurryT -= dt;
+      if (spd > 0 && (st === "walk" || st === "wander")) spd = ped.baseSpeed * (ped._vHurryMul || 1.3);
+    }
 
     // ---- engagement ---------------------------------------------------------
     // WHY THIS LIVES IN move() AND NOT think(): think() is time-sliced (stride 4

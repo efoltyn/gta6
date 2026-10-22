@@ -659,30 +659,12 @@
     // answer a stray insult() from an old path
     wardenInsulted: ["Segregation. Tonight."],
     wardenIgnores: ["Noted."],
-    guardCaught: ["Hand off my belt!",
-                  "That's a shakedown. Wall.",
-                  "Hands on the wall!"],
     // he is on your payroll — that changes what happens, not just what he says
     guardCaughtBought: ["Off my belt. Don't.",
                         "Not my belt. Ever.",
                         "Once. Not twice."],
-    inmateCaught: ["Get off me.", "Try that again.",
-                   "Hands out of my pocket.",
-                   "Hands. Now."],
-    inmateCaughtNight: ["Quiet. CO's on the tier. Off me.",
-                        "You want the whole wing up? Off."],
     inmateSour: ["Nothing to say to you.",
                  "Walk."],
-    inmateWarm: ["You need something, ask.",
-                 "You're alright."],
-    // night in a cellblock is a whisper
-    nightTalk: ["Keep it down.",
-                "Can't sleep either, huh.",
-                "Hear him two cells down? Every night."],
-    yardTalk: ["Hot one today.",
-               "That court's ours. Don't.",
-               "Heard they're shipping ten guys out Friday.",
-               "Chow was bad this morning."],
     noStock: ["Got nothing on me.",
               "Sold out. Tomorrow."],
     notNow: ["Not now.",
@@ -723,11 +705,11 @@
     g.hasKey = true;
   }
 
-  // ---------- TALK: free flavour / hints ----------
-  // The hour picks the register. A block at night whispers about the night; a
-  // yard at ten in the morning talks business; a screw mid-count talks about
-  // the count. Same actor, same data.talk pool underneath — the schedule just
-  // decides whether this is an hour for their own words at all.
+  // ---------- TALK: walking up to a man ----------
+  // He answers the thing in front of him (the gun in your hand, the blood on
+  // you, systems/prisonvoice.js), a screw mid-count tells you so, a man who
+  // hates you says so. Anything else is nothing: no small talk, no flavour
+  // pools (owner, 2026-10-22: "random dumb dialogue sucks").
   function talk(actor) {
     const guardish = actor.kind === "guard" || actor.kind === "warden";
     if (guardish && counting()) {
@@ -740,13 +722,8 @@
     if (!guardish) {
       const S = socialRead(actor);
       if (S.standing === "enemy" || S.standing === "sour") return { ok: false, msg: pick(VOICE.inmateSour), sfx: null };
-      if (S.respect >= 62 && rng() < 0.45) return { ok: true, msg: pick(VOICE.inmateWarm), sfx: null };
-      if (afterDark() && rng() < 0.5) return { ok: true, msg: pick(VOICE.nightTalk), sfx: null };
-      if (yardTime() && rng() < 0.28) return { ok: true, msg: pick(VOICE.yardTalk), sfx: null };
     }
-    const lines = actor.data.talk || ["…"];
-    const line = lines[Math.floor(rng() * lines.length)];
-    return { ok: true, msg: line, sfx: null };
+    return { ok: true, msg: "", sfx: null };
   }
 
   /* THE PRICE TAG WAS THE SELLER READING HIS OWN SPREADSHEET OUT.
@@ -1271,7 +1248,7 @@
       addLoyalty(actor, -40);
       addRespect(actor, -8);
       caughtBody(actor);
-      return { ok: false, msg: pick(VOICE.guardCaught) };
+      return { ok: false, msg: caughtLine(actor) };
     }
     CBZ.reportCrime(16, { type: "steal", actorRole: g.role });
     actor.playerGrudge = (actor.playerGrudge || 0) + 2;
@@ -1281,7 +1258,11 @@
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "steal", 5, { source: "failed theft" });
     noteRead("snitch", 10, nm(actor), 14);
     caughtBody(actor);
-    return { ok: false, msg: pick(afterDark() ? VOICE.inmateCaughtNight : VOICE.inmateCaught) };
+    return { ok: false, msg: caughtLine(actor) };
+  }
+  // a hand caught in his pocket: the one picker (systems/voice.js), his role's words
+  function caughtLine(actor) {
+    return (CBZ.voice && CBZ.voice.line(actor, "caught", { by: CBZ.player })) || "";
   }
   /* A MAN WHO FEELS YOUR HAND IN HIS POCKET. This used to be an "!" over his
      head (CBZ.npcEmote, and systems/markers.js's disc once his grudge sent

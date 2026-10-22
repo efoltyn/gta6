@@ -446,6 +446,8 @@ let BOOK_TOPICS = 0;
   CBZ.cityHasGun = () => armed;
   CBZ.hash01 = (x, z, s) => { const h = Math.sin(x * 12.9898 + z * 78.233 + s * 0.013) * 43758.5453; return h - Math.floor(h); };
   const ctx = vm.createContext({ window: { CBZ }, Math, Date, String, Object, Array, JSON });
+  // the one picker (systems/voice.js) loads first, as on the page
+  vm.runInContext(fs.readFileSync(path.join(ROOT, "src/systems/voice.js"), "utf8"), ctx, { filename: "voice.js" });
   vm.runInContext(fs.readFileSync(path.join(ROOT, "src/city/read.js"), "utf8"), ctx, { filename: "read.js" });
   const book = CBZ.cityLineBook;
   const fails = [];
@@ -454,7 +456,7 @@ let BOOK_TOPICS = 0;
     const ped = (x) => ({ pos: { x: x, z: x * 3 }, name: "P" + x });
     for (const topic of Object.keys(book)) {
       const p = ped(7 + topic.length);
-      const a = CBZ.cityLine(p, topic, { vars: { place: "City Hospital", dir: "north", item: "hotdog" } });
+      const a = CBZ.cityLine(p, topic, { vars: { place: "City Hospital", dir: "north", item: "hotdog", title: "Mr. President", sir: "sir", Sir: "Sir" } });
       if (!a) { fails.push("topic " + topic + " answered nothing"); continue; }
       if (/\{\w+\}/.test(a)) fails.push("topic " + topic + " left a placeholder: " + a);
       const all = [];

@@ -110,7 +110,6 @@
   const cityList = [];
   const cityPlayer = { _p: true, isPlayer: true, pos: null, r: 0.55 };
   let clock = 0, hardHits = 0, blocks = 0, impacts = 0, downs = 0, crossings = 0, stepOvers = 0;
-  let speechT = -99;
 
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
   function smooth01(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
@@ -496,11 +495,9 @@
        3+ or force (a stumble, a man on the floor): assault on staff. The
           record, the hunt, the order and the cuffs (prisonlaw.js), and the
           warden hears of it. */
-  const STAFF_LINES = { bump: ["Watch it.", "Hey. Watch it."], push: ["Back off.", "Step back."] };
+  // the officer's words are CBZ.voice's (systems/voice.js), his role's pool
   function staffSay(a, kind) {
-    const L = STAFF_LINES[kind];
-    if (!L || !CBZ.prisonSay) return;
-    try { CBZ.prisonSay(a, L[(rng() * L.length) | 0], { secs: 1.5, force: true }); } catch (e) { /* no speaker */ }
+    if (CBZ.voice) CBZ.voice.say(a, kind === "push" ? "shoved" : "bumped", { by: CBZ.player, force: true, secs: 1.5 });
   }
   function staffContact(a, source, severity) {
     if (a.dead || (a.ko || 0) > 0 || a.asleep || a._escort || a.intimidMode === "scared" || (a.bribed || 0) > 0) return;
@@ -581,19 +578,10 @@
     fleeFrom(a, source);
   }
 
-  // short, real, rare; over the head only (speech.js). The city speaks
-  // through read.js instead.
-  const LINES = {
-    shoved: ["Hey!", "Watch it.", "Easy.", "What the hell?", "Hey, back off."],
-    "run-over": ["Ow!", "What's your problem?"],
-    sorry: ["Sorry.", "My bad.", "Whoa, sorry."],
-  };
-  function sayRare(a, kind, chance) {
-    const S = CBZ.speech;
-    if (!S || !S.say || clock - speechT < 5 || rng() >= chance) return;
-    const L = LINES[kind]; if (!L) return;
-    try { if (S.say(a, L[(rng() * L.length) | 0])) speechT = clock; } catch (e) { /* no speaker */ }
-  }
+  // WHAT HE DOES AND SAYS about it is CBZ.voice's (systems/voice.js): the
+  // threat he sees in you, who he is, what he carries. Bodies the game above
+  // already moved (a jail hunt, a flee) are passed as `how` and only speak.
+  const VOICE_EV = { bump: "bumped", shoved: "shoved", "repeated-shove": "repeated", "run-over": "runOver" };
 
   function react(a, event) {
     if (!a || a.dead) return;
@@ -612,10 +600,11 @@
     }
     // (an officer in the jail said his own line in staffContact)
     if (event.source && isPlayer(event.source) && !(m === "escape" && (a.kind === "guard" || a.kind === "warden"))) {
-      if (CBZ.cityContactReact) {
+      if (m === "city" && CBZ.cityContactReact) {
         try { CBZ.cityContactReact(a, event.kind || "bump", severity); } catch (e) { /* read.js off */ }
-      } else if (event.kind === "shoved" || event.kind === "repeated-shove") {
-        sayRare(a, "shoved", 0.35 + 0.3 * level);
+      } else if (CBZ.voice) {
+        const how = (a.huntPlayer || 0) > 0 ? "squareUp" : (a.aiState === "flee" || a.state === "flee") ? "hurry" : undefined;
+        CBZ.voice.react(a, VOICE_EV[event.kind] || "bumped", { by: src || event.source, severity: severity, how: how });
       }
     }
   }
@@ -767,7 +756,7 @@
     }
     react(victim, { mode: m, source: src, kind: KIND[tier], severity: sev });
     // an NPC who ran a man over and is not a brute says so
-    if (!isPlayer(src) && !src._remote && reactionLevel(src) < 0.5 && !src.dead && !CBZ.cityContactReact && (byPlayer || isPlayer(victim))) sayRare(src, "sorry", 0.3);
+    if (!isPlayer(src) && !src._remote && reactionLevel(src) < 0.5 && !src.dead && isPlayer(victim) && CBZ.voice && rng() < 0.3) CBZ.voice.say(src, "bumpSorry", { by: victim });
   }
 
   /* where the pair touches and how they are pushed apart */

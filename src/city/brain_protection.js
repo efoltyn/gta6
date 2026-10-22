@@ -762,6 +762,11 @@
         else line = "Shots fired! Cover!";
         A.say(sp, line);
         if (env.onShout) { try { env.onShout(sp, line); } catch (e) {} }
+        // "Security!" from the ward himself (never the player, never a corpse)
+        const pr = env.principal;
+        if (pr && !pr.dead && !isPlayer(pr) && CBZ.voice && D.phase === "alert") {
+          CBZ.voice.say(pr, "security", { by: t, force: true });
+        }
       }
     }
     // THE CP: hands on him in COVER ("down"), then moves him in EVAC ("with

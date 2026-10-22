@@ -2332,13 +2332,6 @@
       return pickOf([`${co(gd)} takes money. Heard it.`, `${co(gd)}'s bent. Maybe.`,
         `Heard ${co(gd)} sleeps on nights.`]);
     }
-    if (r < 0.46 && guards.length) {
-      const gd = pickOf(guards);
-      return pickOf([`${co(gd)} did two tours. Don't swing on him.`,
-        `${co(gd)}'s wife left him. He's mean this week.`,
-        `${co(gd)} writes everybody up. Everybody.`,
-        `${co(gd)} used to box. Watch the left.`]);
-    }
     if (r < 0.62 && cons.length) {
       const m = pickOf(cons);
       const snitchy = ((m.personality && m.personality.snitch) || 0) > 0.3;
@@ -2352,14 +2345,9 @@
       const heavy = load && (load.cigs || 0) >= 8;
       return heavy || rng() < 0.35 ? `${actorName(m)}'s holding. Heard it.` : `${actorName(m)}'s broke. Don't bother.`;
     }
-    return pickOf([
-      "Heard they're shipping ten guys out Friday.",
-      "Somebody got cut in the laundry last week.",
-      "New warden's worse. Wait and see.",
-      "Kitchen's watering the milk again.",
-      "They're gonna toss the whole tier. Soon.",
-      "Parole board's denying everybody this year.",
-    ]);
+    // nothing he knows about anybody here: he says nothing (the flavour pool
+    // of yard weather is gone, owner 2026-10-22)
+    return null;
   }
 
   /* WHAT A MAN TELLS YOU WHEN HE TELLS YOU SOMETHING. One fact, the way a
@@ -2376,8 +2364,7 @@
 
     if (n.gang >= 0 && debt > 0) return `You owe us ${debt}. Don't forget.`;
     if ((g.cigs || 0) >= 18) return "People see you carrying.";
-    if (rng() < 0.7) return hearsay(n);
-    return n.data.tip || (n.data.talk && n.data.talk[(rng() * n.data.talk.length) | 0]) || "Keep your head down.";
+    return hearsay(n) || n.data.tip || "";
   }
 
   function findCopTipSuspect(source) {
@@ -6436,7 +6423,7 @@
       clearApproach(n);
       addGangStanding(n.gang, n.gang >= 0 ? 2 : 0);
       // the +2 standing still lands above; it is felt, not read out loud
-      return { ok: true, msg: n.data.tip || n.data.talk[(rng() * n.data.talk.length) | 0] || "Keep your eyes open." };
+      return { ok: true, msg: n.data.tip || "" };
     }
 
     /* THE SYMMETRY, TAKEN. The player's own gang debt turning into the exact

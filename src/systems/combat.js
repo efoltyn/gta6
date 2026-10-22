@@ -331,6 +331,11 @@
     stamina = Math.min(1, stamina + 0.05);
     CBZ.sfx(blade ? "hit" : "punch");
     theLaw(actor, blade, guardish);
+    // his words (the yard's brains answer with his body), and the men who saw it
+    if (CBZ.voice) {
+      CBZ.voice.react(actor, "hit", { by: CBZ.player, bodyless: true });
+      CBZ.voice.witness(actor.group.position.x, actor.group.position.z, "seeHit", { by: CBZ.player, victim: actor, bodyless: true }, 12);
+    }
     if (blade) {
       bladeWounds++; stabHits++;
       /* THE POINT GOES IN (verbs_strike opens the slit at res.point). hp is

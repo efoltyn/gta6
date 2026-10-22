@@ -456,15 +456,7 @@
   //  cuffed pose lands on top of the anim pass and canShow gates (39) read
   //  fresh state.
   // ============================================================
-  let pleadCD = 0, copSuspectCD = 0;
-  const PLEADS = [
-    "Come on, man. These are too tight.",
-    "I got kids. Don't do this.",
-    "You ain't even wearing a badge.",
-    "Where are you taking me?!",
-    "Somebody call my sister.",
-    "I can't feel my hands.",
-  ];
+  let copSuspectCD = 0;
   CBZ.onUpdate(38.5, function (dt) {
     // Outside the city the NPC restraints die with the mode. The PLAYER's ties
     // are a different matter: systems/capture.js's haul scene puts them on in
@@ -479,7 +471,7 @@
     }
     if (!restrained.length) return;
     const P = CBZ.player;
-    pleadCD -= dt; copSuspectCD -= dt;
+    copSuspectCD -= dt;
 
     for (let i = restrained.length - 1; i >= 0; i--) {
       const ped = restrained[i];
@@ -572,9 +564,10 @@
         ped.speed = 0; ped.target.set(ped.pos.x, 0, ped.pos.z);
         if (CBZ.animChar && !held(ped) && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 70) CBZ.animChar(ped.char, 0, dt);
       }
-      if (pleadCD <= 0 && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 8 && Math.random() < 0.3) {
-        pleadCD = 9;
-        if (CBZ.citySay) CBZ.citySay(ped, PLEADS[(Math.random() * PLEADS.length) | 0], "#cfd6e6", 2.2);
+      // the ties went on: he says it once, to the man who did it (systems/voice.js)
+      if (!r._voiced && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 8 && CBZ.voice) {
+        r._voiced = true;
+        CBZ.voice.react(ped, "restrained", { by: CBZ.city && CBZ.city.playerActor });
       }
       // a working officer clocks a stranger marching a CLEAN citizen in ties —
       // a wanted gangster in cuffs gets a nod, not a call. Once per collar.
