@@ -616,16 +616,23 @@
 
   CBZ.onAlways(46, function () {
     build();
-    const show = g.mode === "city";
+    const city = g.mode === "city";
+    // the wallet and the stars are up wherever money is real (Gang City and
+    // the islands); the radar, the objective and the reticle are the city's
+    const show = city || !!(CBZ.economyMode && CBZ.economyMode(g.mode));
     // respect the [Shift+O] hide-HUD toggle (charpanel.js)
     const hudHidden = show && CBZ.cityCharPanel && CBZ.cityCharPanel.hudHidden && CBZ.cityCharPanel.hudHidden();
     const rDisp = (show && !hudHidden) ? "block" : "none";
     if (root._cbzDisp !== rDisp) { root._cbzDisp = rDisp; root.style.display = rDisp; }
-    if (document.body._cbzModeCity !== show) { document.body._cbzModeCity = show; document.body.classList.toggle("mode-city", show); }
+    if (document.body._cbzModeCity !== city) { document.body._cbzModeCity = city; document.body.classList.toggle("mode-city", city); }
     if (!show) return;
     const P = CBZ.player;
     showMoney();
     showStars();
+    const cityOnly = city ? "" : "none";
+    if (radar && radar._cbzDisp !== cityOnly) { radar._cbzDisp = cityOnly; radar.style.display = cityOnly; }
+    if (objEl && objEl._cbzDisp !== cityOnly) { objEl._cbzDisp = cityOnly; objEl.style.display = cityOnly; }
+    if (!city) { if (crossEl && crossEl._cbzDisp !== "none") { crossEl._cbzDisp = "none"; crossEl.style.display = "none"; } return; }
     if (dirty) dirty = false;
     // radar + objective poll, throttled (quality slider: tier0 7Hz, Best 14Hz)
     radarAcc += 1 / 60;

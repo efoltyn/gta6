@@ -185,6 +185,14 @@
   // same gate because key 1 is a permanent empty-hands slot. Ownership and the
   // selected gun remain intact while armed() returns false, so drawing it again
   // is a reversible physical action rather than deleting/re-adding inventory.
+  /* NO GUNPLAY: the island games (survival, the shark sim) give the pointer
+     to the grapple and the mount. The archipelago is an island world where
+     money is real (CBZ.economyMode): a gun bought there is a gun you shoot. */
+  function noGunplay(m) {
+    m = m || (CBZ.game && CBZ.game.mode);
+    if (!(CBZ.islandModeOn && CBZ.islandModeOn(m))) return false;
+    return !(CBZ.economyMode && CBZ.economyMode(m));
+  }
   function holstered() {
     if (CBZ.game.mode === "city") return !!CBZ.game.cityHolstered;
     if (CBZ.game.mode === "escape") return !!CBZ.game.prisonHolstered;
@@ -3195,7 +3203,7 @@
       }
     };
     if (CBZ.game.mode === "city") { scan(CBZ.cityPeds); scan(CBZ.cityCops); if (CBZ.cityMedics) scan(CBZ.cityMedics); if (CBZ.cityWildlife) scan(CBZ.cityWildlife); if (CBZ.cityArmy) scan(CBZ.cityArmy); }   // same gun, city targets (wildlife are huntable too)
-    else { scan(CBZ.guards); scan(CBZ.npcs); }
+    else { scan(CBZ.guards); scan(CBZ.npcs); if (islandShots()) scan(CBZ.bots); }   // the islands' people
     // multiplayer: remote player avatars + host-synced puppet NPCs are real targets
     if (CBZ.net && CBZ.net.active && CBZ.net.targetList) scan(CBZ.net.targetList());
     // THE CROWDS (entities/crowdstore.js): every rally, march and grandstand
@@ -3690,9 +3698,25 @@
     return { head: hit.head, down, dropped, dmg };
   }
 
+  // the archipelago's people are survival's (CBZ.bots): a round goes
+  // through the mode's own bus (archipelago.js hurt -> surv.hurt)
+  function islandShots() { return !!(CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode) && !noGunplay(CBZ.game.mode)); }
+  function islandGunHit(a, hit, w) {
+    const def = CBZ.modes && CBZ.modes[CBZ.game.mode];
+    const fall = CBZ.weaponFalloffMul ? CBZ.weaponFalloffMul(w, hit.dist)
+      : (hit.dist <= w.dropStart ? 1 : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage)));
+    const dmg = hit.head && !w.nonlethal ? 999 : Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
+    const P = CBZ.player;
+    const was = !!a.dead;
+    const imp = { fromX: P.pos.x, fromZ: P.pos.z, fling: Math.min(6, 1.5 + (w.knock || 1) * 1.2), cause: "shot", byPlayer: true };
+    if (CBZ.hurtWorldActor) CBZ.hurtWorldActor(a, dmg, imp);
+    else if (def && def.hurt) def.hurt(a, dmg, imp);
+    return { head: !!hit.head, down: !was && !!a.dead, dropped: false, dmg: dmg };
+  }
   function gunHit(hit, w, shotDir) {
     const a = hit.actor;
     if (CBZ.game.mode === "city") return cityGunHit(a, hit, w, shotDir);
+    if (islandShots() && CBZ.bots && CBZ.bots.indexOf(a) >= 0) return islandGunHit(a, hit, w);
     const guardish = a.kind === "guard" || a.kind === "warden";
     if (a.hp == null) a.hp = maxHpOf(a);
     // (e) same shared per-class falloff evaluator as cityGunHit above.
@@ -5206,7 +5230,7 @@
     if (cuffedHands()) return "tp";
     const g = CBZ.game;
     // the island games have no gunplay (fpsmode's trigger stands down there)
-    const guns = !(CBZ.islandModeOn && CBZ.islandModeOn(g && g.mode));
+    const guns = !noGunplay(g && g.mode);
     if (guns && armed()) {
       const w = weapon();
       return (w && w.melee) ? "tp" : "fp";
@@ -5335,7 +5359,7 @@
     if (CBZ.cuffedPlayer && cuffedHands()) fps.fp = CBZ.cuffedPlayer.clampPitch(true, fps.fp);
   });
   document.addEventListener("mousedown", (e) => {
-    if (CBZ.islandModeOn(CBZ.game.mode)) return;   // island games: grapple / the mount own the pointer, not gunplay
+    if (noGunplay(CBZ.game.mode)) return;   // island games: grapple / the mount own the pointer, not gunplay
     if ((fps.active || shoulderActive() || carGunEligible()) && CBZ.game.state === "playing" && document.pointerLockElement) {
       e.preventDefault();
       if (e.button === 0) fireControl(true);

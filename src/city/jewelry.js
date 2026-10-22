@@ -571,7 +571,7 @@
     if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
     fixturesWired = true;
     CBZ.interactions.registerFixtures({
-      id: "jewel-case", kind: "jewel-case", prio: 9,
+      id: "jewel-case", kind: "jewel-case", prio: 9, islands: true,
       list: function (ctx, px, pz) { return S.built && S.near && !S.pry && inStore(px, pz) ? S.cases : null; },
       reach: function () { return REACH; },
       dot: function () { return LOOK_DOT; },
@@ -610,7 +610,10 @@
 
   // ---- per-frame ---------------------------------------------------------------
   CBZ.onUpdate(38, function (dt) {
-    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; S.near = false; S.pry = null; return; }
+    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; S.pry = null; return; }
+    // (the islands: this store's island lot comes through CBZ.islandVenue; until then
+    //  Gang City's own lot is the only one, and it is never reached from the islands)
+    if (!(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; S.pry = null; return; }
     if (!ensure()) return;
     wireFixtures();
     const P = CBZ.player;

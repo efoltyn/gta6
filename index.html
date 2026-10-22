@@ -444,7 +444,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=misles1nopitc"></script>
+<script src="src/config.js?v=venue1022"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=peak1014c"></script>
@@ -728,7 +728,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=silt1020"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
-<script src="src/systems/economy.js?v=nopitch1022"></script>
+<script src="src/systems/economy.js?v=venue1022"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=slotkey1013"></script>
@@ -1060,7 +1060,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ijkl1022"></script>
-<script src="src/systems/fpsmode.js?v=hands1022"></script>
+<script src="src/systems/fpsmode.js?v=venue1022"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=voice1022"></script>
 
@@ -1086,11 +1086,13 @@ document.body.appendChild(b);}}catch(e){}})();
      roof as data (node-checkable by tools/island-stairs-check.mjs); the
      builder lays exactly what it says, so it loads first. -->
 <script src="src/world/island_roads.js?v=isles1023"></script>
-<script src="src/world/island_plan.js?v=isles1023"></script>
+<script src="src/world/island_plan.js?v=venue1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=isles1023"></script>
-<script src="src/world/island_dressing.js?v=isles1023"></script>
+<script src="src/world/disaster_arena.js?v=venue1022"></script>
+<script src="src/world/island_dressing.js?v=venue1022"></script>
+<!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
+<script src="src/world/island_venue.js?v=venue1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
 <script src="src/entities/survivorbot.js?v=misles1bodymo"></script>
 <script src="src/modes/survival.js?v=isles1022"></script>
@@ -1496,7 +1498,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/moves_posture.js?v=jailai1020"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=hands1022"></script>
-<script src="src/city/economy.js?v=vit3"></script>
+<script src="src/city/economy.js?v=venue1022"></script>
 <script src="src/city/clothes.js?v=shoulder1014"></script>
 <script src="src/city/outfits.js?v=armourm1011"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
@@ -1639,7 +1641,7 @@ document.body.appendChild(b);}}catch(e){}})();
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
 <script src="src/world/archipelago_map.js?v=isles1022"></script>
-<script src="src/world/archipelago.js?v=isles1023"></script>
+<script src="src/world/archipelago.js?v=venue1022"></script>
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the
@@ -1726,8 +1728,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/tornado.js?v=bodymove1022"></script>
 <script src="src/city/aircraftimpact.js?v=mrg10200048"></script>
 <script src="src/city/metro_promote.js?v=mrg10200048"></script>
-<script src="src/city/shops.js?v=vault1013"></script>
-<script src="src/city/gunstore.js?v=peak1014c"></script>
+<script src="src/city/shops.js?v=venue1022"></script>
+<script src="src/city/gunstore.js?v=venue1022"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <script src="src/city/gunmods.js?v=me6f1ee"></script>
@@ -1738,14 +1740,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
-<script src="src/city/jewelry.js?v=tap0929"></script>
+<script src="src/city/jewelry.js?v=venue1022"></script>
 <script src="src/city/careers.js?v=dismiss1014"></script>
 <script src="src/city/activities.js?v=nored0930"></script>
 <script src="src/city/heists.js?v=ijkl1022"></script>
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
 <script src="src/city/verbword.js?v=btn1011"></script>
-<script src="src/city/interactions.js?v=ijkl1022"></script>
+<script src="src/city/interactions.js?v=venue1022"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
@@ -1850,15 +1852,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/leaderboard.js?v=rg0929"></script>
 <script src="src/city/zillow.js?v=fac1009"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<script src="src/city/bank.js?v=verbs2b"></script>
-<script src="src/city/pawnshop.js?v=peak1014c"></script>
-<script src="src/city/clothingstore.js?v=peak1014c"></script>
+<script src="src/city/bank.js?v=venue1022"></script>
+<script src="src/city/pawnshop.js?v=venue1022"></script>
+<script src="src/city/clothingstore.js?v=venue1022"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
      near you, plus its real catalog stock as the real item models, buyable
      where they stand. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
-<script src="src/city/storegoods.js?v=cd0929"></script>
+<script src="src/city/storegoods.js?v=venue1022"></script>
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
      in or at the door of is fitted out for real (finished floors, bathrooms,
      kitchens, bedrooms, stockrooms, a gang's count room, baked light from
@@ -2011,7 +2013,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gigs.js?v=w09290250y"></script>
 <script src="src/city/gigfleet.js?v=nodash1"></script>
 <script src="src/city/giglife.js?v=w09290250y"></script>
-<script src="src/city/hud.js?v=hud1011"></script>
+<script src="src/city/hud.js?v=venue1022"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=bodymove1022"></script>

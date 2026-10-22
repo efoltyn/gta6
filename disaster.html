@@ -442,7 +442,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=misles1nopitc"></script>
+<script src="src/config.js?v=venue1022"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=peak1014c"></script>
@@ -981,11 +981,13 @@ document.body.appendChild(b);}}catch(e){}})();
      roof as data (node-checkable by tools/island-stairs-check.mjs); the
      builder lays exactly what it says, so it loads first. -->
 <script src="src/world/island_roads.js?v=isles1023"></script>
-<script src="src/world/island_plan.js?v=isles1023"></script>
+<script src="src/world/island_plan.js?v=venue1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=isles1023"></script>
-<script src="src/world/island_dressing.js?v=isles1023"></script>
+<script src="src/world/disaster_arena.js?v=venue1022"></script>
+<script src="src/world/island_dressing.js?v=venue1022"></script>
+<!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
+<script src="src/world/island_venue.js?v=venue1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
 <script src="src/entities/survivorbot.js?v=misles1bodymo"></script>
 <script src="src/modes/survival.js?v=isles1022"></script>
@@ -1314,7 +1316,7 @@ document.body.appendChild(b);}}catch(e){}})();
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=jailai1020"></script>
-<script src="src/city/economy.js?v=vit3"></script>
+<script src="src/city/economy.js?v=venue1022"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
@@ -1505,7 +1507,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
 <script src="src/city/verbword.js?v=btn1011"></script>
-<script src="src/city/interactions.js?v=ijkl1022"></script>
+<script src="src/city/interactions.js?v=venue1022"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
@@ -1595,7 +1597,7 @@ document.body.appendChild(b);}}catch(e){}})();
      near you, plus its real catalog stock as the real item models, buyable
      where they stand. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
-<script src="src/city/storegoods.js?v=cd0929"></script>
+<script src="src/city/storegoods.js?v=venue1022"></script>
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
      in or at the door of is fitted out for real (finished floors, bathrooms,
      kitchens, bedrooms, stockrooms, a gang's count room, baked light from

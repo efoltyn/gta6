@@ -538,7 +538,8 @@
       // both before the THREE guard skips the in-world branch entirely.
       ensureLoanSaveWraps();
       hydrateLoansFromLedger();
-      if (g.mode !== "city" || g.state !== "playing") return;
+      // (a loan accrues wherever the money is real: Gang City and the islands)
+      if (!(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city") || g.state !== "playing") return;
       tick(dt);
     });
   }
@@ -963,7 +964,7 @@
     if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
     fixturesWired = true;
     CBZ.interactions.registerFixtures({
-      id: "bank-station", kind: "bank-station", prio: 9,
+      id: "bank-station", kind: "bank-station", prio: 9, islands: true,
       list: function (ctx, px, pz) { return S.built && S.near && !S.panelOpen && inBank(px, pz) ? S.stations : null; },
       reach: function (st) { return st.reach || REACH; },
       dot: function () { return LOOK_DOT; },
@@ -1015,7 +1016,10 @@
 
   // ---- per-frame: vis-gate fixtures + drive the prompt -----------------------
   CBZ.onUpdate(38.4, function (dt) {
-    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; S.near = false; if (S.panelOpen) closePanel(); return; }
+    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; if (S.panelOpen) closePanel(); return; }
+    // (the islands: this store's island lot comes through CBZ.islandVenue; until then
+    //  Gang City's own lot is the only one, and it is never reached from the islands)
+    if (!(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; if (S.panelOpen) closePanel(); return; }
     if (!ensure()) return;
     wireFixtures();
     const P = CBZ.player;

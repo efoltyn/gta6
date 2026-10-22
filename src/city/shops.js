@@ -2060,9 +2060,11 @@
     //      this zone only surfaces over the gap they leave. Token is cached
     //      per lot so targeting hysteresis sees one stable candidate. ----
     I.registerZone({
-      id: "shop-counter-open", kind: "counter", radius: 4.2,
+      id: "shop-counter-open", kind: "counter", radius: 4.2, islands: true,
       find: function (px, pz) {
-        const A = CBZ.city && CBZ.city.arena; if (!A || !A.shopLots) return null;
+        // (the till runs wherever money is real; Gang City's counters are
+        //  only reachable in Gang City, an island's come through CBZ.islandVenue)
+        const A = CBZ.cityArenaLive ? CBZ.cityArenaLive() : (CBZ.city && CBZ.city.arena); if (!A || !A.shopLots) return null;
         let best = null, bd = 4.2 * 4.2;
         for (let i = 0; i < A.shopLots.length; i++) {
           const lot = A.shopLots[i], b = lot.building;

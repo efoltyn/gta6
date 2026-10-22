@@ -65,6 +65,14 @@
   "use strict";
   const CBZ = window.CBZ;
   const g = CBZ.game;
+  /* WHERE THE CARD RUNS: Gang City, and the archipelago (CBZ.economyMode).
+     On the islands only the sources and zones that say `islands: true` are
+     asked (a venue's counters, through registerFixtures({islands: true})):
+     the city's people, cars and doors are not there, and the islands' own
+     verbs (world/island_vehicles.js) keep their pins. */
+  function econ() { return g.mode === "city" || !!(CBZ.economyMode && CBZ.economyMode(g.mode)); }
+  const _islErr = new Set();
+  function islandFail(s, e) { if (_islErr.has(s)) return; _islErr.add(s); console.error("[interactions on the islands: " + (s.id || "?") + "]", e); }
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   /* ---- INTERACT_REACH_V2 — DISCOVERABILITY -------------------------------
@@ -225,15 +233,18 @@
         gunpoint: !!src.gunpoint, zone: (extra && extra.zone) || null, src, qx, qz,
       });
     };
+    const city = g.mode === "city";
     for (const s of sources) {
+      if (!city && !s.islands) continue;
       if (s.driving !== undefined && !!s.driving !== ctx.driving) continue;
       if (far && (s.gunpoint || s.kind === "vehicle:inside")) continue;
-      try { s.find(qx, qz, ctx, push(s)); } catch (e) { if (!far) throw e; }
+      try { s.find(qx, qz, ctx, push(s)); } catch (e) { if (!city) islandFail(s, e); else if (!far) throw e; }
     }
     for (const z of zones) {
+      if (!city && !z.islands) continue;
       if (z.driving !== undefined && !!z.driving !== ctx.driving) continue;
       let t = null;
-      try { t = z.find(qx, qz, ctx); } catch (e) { if (!far) throw e; }
+      try { t = z.find(qx, qz, ctx); } catch (e) { if (!city) islandFail(z, e); else if (!far) throw e; }
       if (!t) continue;
       const tx = t.pos ? t.pos.x : (t.x != null ? t.x : qx), tz = t.pos ? t.pos.z : (t.z != null ? t.z : qz);
       const d = Math.hypot(qx - tx, qz - tz);
@@ -275,6 +286,7 @@
     const dot = spec.dot || function () { return 0.55; };
     registerSource({
       id: spec.id, kind: kind, layers: [kind], prio: spec.prio || 8, driving: spec.driving != null ? spec.driving : false,
+      islands: !!spec.islands,
       find: function (px, pz, ctx, push) {
         const list = spec.list(ctx, px, pz);
         if (!list) return;
@@ -579,7 +591,7 @@
     optsEl = document.getElementById("interactOpts");
     // tap/click rows (mobile + mouse) — a click always fires, hold rows included
     if (optsEl) optsEl.addEventListener("click", function (e) {
-      if (g.mode !== "city") return;
+      if (!econ()) return;
       const rowEl = e.target.closest && e.target.closest(".iopt");
       if (!rowEl || rowEl.dataset.i == null) return;
       const r = shownRows[+rowEl.dataset.i];
@@ -766,7 +778,7 @@
   const cands = [];   // reused each pass (zero-alloc steady state)
   let insideCand = null;   // the car you are driving, as a wheel target
   CBZ.onUpdate(39, function (dt) {
-    if (g.mode !== "city") { if (current || (panel && panel.style.display)) releasePanel(); return; }
+    if (!econ()) { if (current || (panel && panel.style.display)) releasePanel(); return; }
     if (g.state !== "playing" || CBZ.cityMenuOpen || CBZ.player.dead) { if (current) hidePanel(); holdKey = ""; return; }
     // FLIGHT: nothing on the ground is in reach of a cockpit, so the card is
     // both useless and dangerous up here — every row it draws is a key the
@@ -955,7 +967,7 @@
   }
   function placeCard() {
     if (CBZ.touchMode && cardX === cardX) unplaceCard();   // went touch: mobile.css docks it
-    if (!panel || !current || !shownRows.length || CBZ.touchMode || g.mode !== "city") return;
+    if (!panel || !current || !shownRows.length || CBZ.touchMode || !econ()) return;
     if (!panel.classList.contains("show")) return;
     const cam = CBZ.camera;
     const a = cam && _cv ? cardAnchor(current) : null;
@@ -1035,7 +1047,7 @@
   }
   function cuffed() { return !!(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()); }
   addEventListener("keydown", function (e) {
-    if (g.mode !== "city" || g.state !== "playing") return;
+    if (!econ() || g.state !== "playing") return;
     if (CBZ.cityMenuOpen || CBZ.player.dead) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     // a panel that just used this press (shops.js closes on E) spent it
@@ -1082,7 +1094,7 @@
     holdKey = ""; holdT = 0; holdFired = false;
     // ...and never on the release of a key that was armed on the ground and let
     // go in the air (hold E on a horse, [F] into the aircraft beside it, release).
-    if (wasFired || g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen || pilotingAircraft()) return;
+    if (wasFired || !econ() || g.state !== "playing" || CBZ.cityMenuOpen || pilotingAircraft()) return;
     const tap = rowFor(k, false);
     if (tap) fire(tap);   // released before the threshold → the tap verb
   });
@@ -1093,7 +1105,7 @@
   // options win while you are looking at him.
   function hasSlot(key) {
     if (!current || !currentRows || !currentRows.length) return false;
-    if (g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen || (CBZ.player && CBZ.player.dead)) return false;
+    if (!econ() || g.state !== "playing" || CBZ.cityMenuOpen || (CBZ.player && CBZ.player.dead)) return false;
     key = String(key || "").toLowerCase();
     for (const r of currentRows) if (r.key === key) return true;
     return false;
@@ -1189,7 +1201,7 @@
     o = o || {};
     const cam = CBZ.camera, P = CBZ.player;
     if (!cam || !_pp || !P || !P.pos) return null;
-    if (g.mode !== "city" || pilotingAircraft()) return null;
+    if (!econ() || pilotingAircraft()) return null;
     cam.updateMatrixWorld();
     const ctx = buildCtx(); ctx.tap = true;
     const pool = _tapPool; pool.length = 0;
@@ -1277,7 +1289,7 @@
   CBZ.onUpdate(46.3, function () {
     const H = CBZ.handVerbs;
     if (!H || !H.dock) return;
-    if (g.mode !== "city" || !CBZ.touchMode) { handsDockOff(); return; }
+    if (!econ() || !CBZ.touchMode) { handsDockOff(); return; }
     const P = CBZ.player;
     const hk = H.game ? H.game() : null;
     if (g.state !== "playing" || !P || P.dead || CBZ.cityMenuOpen || pilotingAircraft() ||
@@ -1290,7 +1302,7 @@
     H.dock.show(r.set, { name: typeof nm === "string" ? nm : "", off: r.off });
     handDock = true;
   });
-  CBZ.onAlways(96.1, function () { if (handDock && (g.mode !== "city" || g.state !== "playing")) handsDockOff(); });
+  CBZ.onAlways(96.1, function () { if (handDock && (!econ() || g.state !== "playing")) handsDockOff(); });
 
   CBZ.interactions = {
     REACH,

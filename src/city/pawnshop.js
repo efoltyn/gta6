@@ -584,7 +584,7 @@
     if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
     fixturesWired = true;
     CBZ.interactions.registerFixtures({
-      id: "pawn-desk", kind: "pawn-desk", prio: 9,
+      id: "pawn-desk", kind: "pawn-desk", prio: 9, islands: true,
       list: function (ctx, px, pz) { return S.built && S.near && inStore(px, pz) ? [S.sellDesk, S.loanDesk] : null; },
       reach: function () { return REACH; },
       dot: function () { return LOOK_DOT; },
@@ -648,7 +648,10 @@
     // be swapped (load/respawn/MP-adopt) while we're outside the city too.
     ensurePawnSaveWraps();
     hydratePawnFromLedger();
-    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; S.near = false; return; }
+    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; return; }
+    // (the islands: this store's island lot comes through CBZ.islandVenue; until then
+    //  Gang City's own lot is the only one, and it is never reached from the islands)
+    if (!(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; return; }
     if (!ensure()) return;
     wireFixtures();
 

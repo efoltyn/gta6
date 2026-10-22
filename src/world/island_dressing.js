@@ -1399,19 +1399,28 @@
       const BG = [[0x1f3d2b, 0xf1ead8], [0x1d2a44, 0xf1ead8], [0x5a1e1e, 0xf1e6cf], [0xe9e2cf, 0x1d2328], [0x17191c, 0xe9d9a0], [0x2f4f4f, 0xf4efe2]];
       const list = [];
       const used = new Set();
-      for (const l of PL.lots) {
+      // an archipelago island's lots each have a use (island_plan.js
+      // assignUses) and a named one says it over the door: the places you
+      // can go into and do something first, then the town's trades
+      const VENUE = { police: 1, guns: 1, pawn: 1, loans: 1, jewelry: 1, eyewear: 1, clothing: 1, suits: 1, phones: 1,
+        motel: 1, recruit: 1, usedcars: 1, bank: 1, cityhall: 1, hotel: 1, cardealer: 1 };
+      const lots = PL.lots.some(function (l) { return l.use; })
+        ? PL.lots.filter(function (l) { return VENUE[l.use]; }).concat(PL.lots.filter(function (l) { return !VENUE[l.use]; }))
+        : PL.lots;
+      const CAP = lots === PL.lots ? 30 : 56;
+      for (const l of lots) {
         yield 0;
         if ((++__dn & 3) === 0) yield 0;
         let text = null;
         if (l.name && l.kind !== "station") text = l.name.toUpperCase();
-        else if (l.kind === "shop" && h01(l.x, l.z, 0x5c1) < 0.55) {
+        else if (l.kind === "shop" && !l.use && h01(l.x, l.z, 0x5c1) < 0.55) {
           let k = (h01(l.x, l.z, 0x5c2) * SHOPS.length) | 0;
           for (let n = 0; n < SHOPS.length && used.has(SHOPS[k]); n++) k = (k + 1) % SHOPS.length;
           if (used.has(SHOPS[k])) continue;
           text = SHOPS[k]; used.add(text);
         }
         if (text) list.push({ l: l, text: text });
-        if (list.length >= 30) break;
+        if (list.length >= CAP) break;
       }
       if (!list.length) return;
       const COLS = 4, ROWS = 16, SW = 256, SH2 = 64;

@@ -147,6 +147,16 @@
   // (archipelago: world/archipelago.js, many copies of the same island on one sea)
   CBZ.ISLAND_MODES = { survival: 1, sharksim: 1, archipelago: 1 };
   CBZ.islandModeOn = function (m) { return !!CBZ.ISLAND_MODES[m || (CBZ.game && CBZ.game.mode)]; };
+  /* WHERE MONEY IS REAL. Gang City and the archipelago (the world it is
+     folding into) share one wallet (g.cash), one pocket (g.cityInv), the
+     venues you buy from, the interaction card, the cops and the wanted
+     level: this is the one gate for all of it. Survival and the shark sim
+     are not in it. */
+  CBZ.ECONOMY_MODES = { city: 1, archipelago: 1 };
+  CBZ.economyMode = function (m) { return !!CBZ.ECONOMY_MODES[m || (CBZ.game && CBZ.game.mode)]; };
+  // Gang City's arena while you are IN Gang City (it outlives the mode, so a
+  // gate opened for the islands must never reach a city lot from them)
+  CBZ.cityArenaLive = function () { return (CBZ.game && CBZ.game.mode === "city" && CBZ.city && CBZ.city.arena) || null; };
   /* WHERE YOU CAN DRIVE AND FLY. The vehicle stack (city/vehicles.js's
      driven-car loop, city/playeraircraft.js's flight loop, the chase camera,
      the cars-are-solid resolver) was written for Gang City and gated on

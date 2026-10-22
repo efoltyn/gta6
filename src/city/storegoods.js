@@ -1328,7 +1328,9 @@
 
   CBZ.onUpdate(37.6, function (dt) {
     const g = CBZ.game;
-    if (!g || g.mode !== "city") { if (S.live.length) teardownAll(); return; }
+    // (the islands: their shelves come through CBZ.islandVenue; Gang City's
+    //  shelves stand only in Gang City)
+    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city") || !(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) { if (S.live.length) teardownAll(); return; }
     if (!PLANS.length) return;
     if (S.live.length) {
       const night = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
@@ -1450,10 +1452,10 @@
   const I = CBZ.interactions;
   if (I && I.registerZone) {
     I.registerZone({
-      id: "zone-store-goods", kind: "storegoods", prio: 8, driving: false,
+      id: "zone-store-goods", kind: "storegoods", prio: 8, driving: false, islands: true,
       find: function (px, pz) {
         const g = CBZ.game;
-        if (!g || g.mode !== "city" || CBZ.cityMenuOpen) return null;
+        if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city") || CBZ.cityMenuOpen) return null;
         return nearestSlot(px, pz);
       },
       options: [

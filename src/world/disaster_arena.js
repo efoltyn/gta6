@@ -951,7 +951,10 @@
     }
     // (a streamed copy lays its plan out in steps too)
     const planCfg = { cx: cx, cz: cz, R: R, facades: facadeIds, tall: facTall, low: facLow,
-      seed: ISL.seed, style: ISL.style, airstrip: !!ISL.airstrip };
+      seed: ISL.seed, style: ISL.style, airstrip: !!ISL.airstrip,
+      // an archipelago island's lots each have a use (the plan's assignUses);
+      // the disaster island's plan stays exactly as it was
+      venues: WORLD === "archipelago" };
     const PLAN = !CBZ.islandPlan ? null
       : (CBZ.islandPlan.makeSteps ? yield* CBZ.islandPlan.makeSteps(planCfg) : CBZ.islandPlan.make(planCfg));
 
@@ -2693,8 +2696,11 @@
         }
         return out;
       }
+      // how many index entries each bucket holds now: a floor's furniture is
+      // the run between two marks (world/island_venue.js clear() folds it away)
+      function mark() { const o = {}; for (const key in bk) o[key] = bk[key].i.length; return o; }
       return { quad: quad, box: box, hexa: hexa, disc: disc, plane: plane, light: light,
-        floorLit: floorLit, ceilLit: ceilLit, flush: flush, flushSteps: flushSteps, lights: lights };
+        floorLit: floorLit, ceilLit: ceilLit, flush: flush, flushSteps: flushSteps, lights: lights, mark: mark };
     }
 
     /* THE ROOM-SIDE SKIN OF ONE WALL FACE, one storey tall: painted plaster
@@ -2814,6 +2820,18 @@
       try { return name === "lamp" ? F.lamp(x, y, z, opts) : F[name](x, y, z, yaw || 0, opts); }
       catch (e) { return null; }
       finally { CBZ.propRegisterSeat = sSeat; CBZ.propRegisterBed = sBed; }
+    }
+
+    /* ONE FLOOR'S FURNITURE, remembered: the index runs it took in each
+       merged interior mesh, the colliders and the covers it added. An
+       island venue (world/island_venue.js clear) takes a floor's furniture
+       out again so a shop fit-out replaces the living room. */
+    function furnBegin(K, cols, covers) { return { m: K.mark(), c: cols.length, v: covers.length }; }
+    function furnEnd(out, L, s0, K, cols, covers) {
+      if (!out) return;
+      const m1 = K.mark(), runs = {};
+      for (const key in m1) { const a = s0.m[key] || 0; if (m1[key] > a) runs[key] = [a, m1[key]]; }
+      out.push({ L: L, runs: runs, cols: cols.slice(s0.c), covers: covers.slice(s0.v) });
     }
 
     /* A ROOM PLANNER, the size of the problem: a rectangle, the rectangles
@@ -2995,6 +3013,7 @@
       // foot of the stair: both stay clear.
       {
         const fy = fyOf(0);
+        const f0 = furnBegin(K, cols, covers);
         const R = { x0: hasStair ? sEdge + 0.35 : ixMin + 0.35, x1: ixMax, z0: izMin + 1.3, z1: izMax };
         const blocks = [{ x0: -DOORW / 2 - 0.7, x1: DOORW / 2 + 0.7, z0: izMin, z1: izMin + 2.4 }];
         const host = furnHost(K, ox, oz, gy, cols, fy, null);
@@ -3081,6 +3100,7 @@
         // the entry: a light inside the door
         fixtures.push({ kind: "dome", x: 0, z: izMin + 1.0, L: 0 });
         if (!sofa && !table) fixtures.push({ kind: "dome", x: (R.x0 + R.x1) / 2, z: (R.z0 + R.z1) / 2, L: 0 });
+        furnEnd(H.furn, 0, f0, K, cols, covers);
       }
       yield 0;
       // UPPER FLOORS: a bedroom, then a study. The landing and the way off
@@ -3088,6 +3108,7 @@
       for (let L = 1; L < storeys; L++) {
         yield 0;
         const fy = fyOf(L);
+        const fL = furnBegin(K, cols, covers);
         const R = { x0: sEdge + 0.12, x1: ixMax, z0: izMin, z1: izMax };
         const lg = landingAt(L);
         const blocks = lg ? [{ x0: sEdge, x1: sEdge + 1.25, z0: lg.z0 - 0.25, z1: lg.z1 + 0.25 }] : [];
@@ -3171,6 +3192,7 @@
           if (ac) { furnish("armchair", host, ac.x, fy, ac.z, ac.yaw, { tone: tone }); blocks.push(ac.use); }
         }
         fixtures.push({ kind: "dome", x: (R.x0 + R.x1) / 2, z: (R.z0 + R.z1) / 2, L: L });
+        furnEnd(H.furn, L, fL, K, cols, covers);
         yield 0;
       }
       // lay the ceiling fixtures (and their light) before the floors are laid
@@ -3829,8 +3851,9 @@
       // THE INSIDE (see THE INSIDE OF A BUILDING), then the shell pieces it
       // laid on the roof after the facade flushed
       yield 0;   // (a seam inside the building: see islandSteps)
+      const furn = [];
       const covers = yield* houseInterior({
-        group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, color: color,
+        group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, color: color, furn: furn,
         ixMin: ixMin, ixMax: ixMax, izMin: izMin, izMax: izMax,
         plan: PL, flights: PL.flights, landings: PL.landings, cols: cols, late: shellMerge,
         holes: dressed.holes, crown: dressed.crown, crownsRoof: dressed.crownsRoof,
@@ -3891,6 +3914,8 @@
             { x0: ixMin, x1: ixMax, z0: izMin, z1: izMin + 1.3, why: "front walk" },
           ]),
           covers: covers,
+          // each floor's furniture (see furnEnd): what island_venue clear() takes out
+          furn: furn, fyOf: [0.08, FH],
         },
       };
       b._wallMat = finishMat(color, gy);   // what its rubble is made of (disasters.js wallMatOf)
@@ -3946,6 +3971,7 @@
       const tone = { cloth: [0x4d5563, 0x6b7d8a, 0x3f4a44][(hh(0x2a03) * 3) | 0], wood: 0x3a2b1e, frame: 0x2e2620 };
       {
         const fy = fyOf(0);
+        const f0 = furnBegin(K, cols, covers);
         const host = furnHost(K, ox, oz, gy, cols, fy, null);
         const blocks = [liftZone, apron, doorWalk];
         // a table to wait at (and to get under)
@@ -3989,11 +4015,13 @@
         if (!done) covers.push({ x: ox, y: gy + fy, z: oz - so - 0.3, r: 0.6, kind: "doorframe" });
         const sofa = placeOnWalls(R, blocks, ["x0", "x1", "z1"], 1.8, 0.87, 0.8, holes, null, 0.5);
         if (sofa) { furnish("sofa", host, sofa.x, fy, sofa.z, sofa.yaw, { len: 1.8, tone: tone }); blocks.push(sofa.use); }
+        furnEnd(T.furn, 0, f0, K, cols, covers);
       }
       yield 0;
       for (let k = 1; k <= Math.min(2, storeys - 1); k++) {
         yield 0;
         const fy = fyOf(k);
+        const fk = furnBegin(K, cols, covers);
         const host = furnHost(K, ox, oz, gy, cols, fy, null);
         const blocks = [liftZone, apron];
         for (let n = 0; n < 3; n++) {
@@ -4005,6 +4033,7 @@
           blocks.push(dk.use);
           covers.push({ x: ox + dk.x, y: gy + fy, z: oz + dk.z, r: 0.75 });
         }
+        furnEnd(T.furn, k, fk, K, cols, covers);
       }
 
       /* ---- CEILING FIXTURES: troffers on a 2.4 m grid, clear of the shaft */
@@ -4355,8 +4384,9 @@
       }
       // THE INSIDE (see THE TOWER INTERIOR)
       yield 0;   // (a seam inside the building: see islandSteps)
+      const towerFurn = [];
       const towerCovers = yield* towerInterior({
-        group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, iw: iw, id: id, s: s, TW: TW,
+        group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, iw: iw, id: id, s: s, TW: TW, furn: towerFurn,
         DW: DW, DOORH: DOORH, lobbyTop: lobbyTop, cols: cols, holes: dressedT.holes, plant: plant,
       });
       // the deck, rail and headhouse are shell pieces queued AFTER the facade
@@ -4389,6 +4419,7 @@
             { x0: -DW / 2 - 0.6, x1: DW / 2 + 0.6, z0: -id, z1: 0, why: "door to lift" },
           ],
           covers: towerCovers,
+          furn: towerFurn, fyOf: [lobbyTop, FH, 0.1],
         },
       };
       fragile.push(b);
@@ -4690,7 +4721,7 @@
       onFloor(makeCar(ox - 4.6, oz + 1.6, true, 0xe24b4b));
       onFloor(makeCar(ox + 4.6, oz + 1.6, true, 0x3c6fd6));
       onFloor(makeCar(ox, oz + 4.2, false, 0xf2c43d));
-      const cols = [];
+      const cols = [], srFurn = [], srF0 = furnBegin(K, cols, srFurn);
       const host = furnHost(K, ox, oz, gy, cols, fy, null);
       const R = { x0: -w / 2 + T, x1: w / 2 - T, z0: -d / 2 + T, z1: d / 2 - T };
       const blocks = [{ x0: -5.9, x1: -3.3, z0: -0.9, z1: 4.1 }, { x0: 3.3, x1: 5.9, z0: -0.9, z1: 4.1 },
@@ -4699,6 +4730,7 @@
       if (dk) { furnish("desk", host, dk.x, fy, dk.z, dk.yaw + Math.PI, { len: 1.6, deep: 0.75 }); blocks.push(dk.use); }
       const sf = placeOnWalls(R, blocks, ["z1", "x0"], 2.0, 0.87, 0.9, holes, null, 0.1);
       if (sf) furnish("sofa", host, sf.x, fy, sf.z, sf.yaw, { len: 2.0, tone: { cloth: 0x2b2f35 } });
+      const srF = []; furnEnd(srF, 0, srF0, K, cols, srFurn);
       // flush: the shell per colour in the island finish, the rest in the kit
       const byCol = new Map();
       for (const r of shell) {
@@ -4717,6 +4749,12 @@
         if (col === CLAD || col === DARK) CBZ.losBlockers.push(m);
       });
       K.flush(grp, false);
+      // the site as a building record (NOT one of `fragile`: the quake, the
+      // far form and the roof audit never knew the showroom and still do
+      // not), so an island venue can find its floor (world/island_venue.js)
+      return { group: grp, ox: ox, oz: oz, gy: gy, x: ox, z: oz, w: w, d: d, lw: w, ld: d, rotY: 0, h: SH, storeys: 1,
+        floorTop: gy + fy, kind: "showroom", colliders: cols, fallen: false,
+        interior: { kind: "showroom", x0: -w / 2 + T, x1: w / 2 - T, z0: -d / 2 + T, z1: d / 2 - T, keepOut: blocks.slice(0, 3), covers: [], furn: srF, fyOf: [fy] } };
     }
 
     /* ---- THE TOWN: every lot the plan laid, built --------------------------
@@ -4732,6 +4770,8 @@
        sunk. The facade flag (SURV_FACADES) dresses or undresses; it never
        moves a building. */
     const placed = [];
+    // venue sites that are not `fragile` buildings (the showroom)
+    const sites = [];
     // the stations' forecourts report their driveways first (one a step)
     const stationSites = [];
     if (PLAN) for (const l of PLAN.stations) {
@@ -4747,8 +4787,9 @@
       const color = pal[(h01g(l.x, l.z, 0x7a1) * pal.length) | 0];
       let b = null;
       if (l.kind === "showroom") {
-        makeShowroom(l.x, l.z);
+        const sr = makeShowroom(l.x, l.z);
         dl1 = { x: l.x, z: l.z };
+        if (sr && l.use) { sr.use = l.use; sr.name = l.name || null; sr.district = l.district; sr.street = l.street ? l.street.name : null; sr.planId = l.id; sr.lot = l.lot; sites.push(sr); }
       } else if (l.kind === "tower" || l.kind === "hotel") {
         b = yield* makeTower(l.x, l.z, l.w, l.d, l.storeys * FH, color, l.style, l.lot, { helipad: !!l.helipad });
       } else {
@@ -4756,6 +4797,8 @@
       }
       if (b) {
         b.lot = l.lot; b.district = l.district; b.kind = l.kind; b.name = l.name || null; b.planId = l.id;
+        // what it is for (archipelago islands only: world/island_plan.js assignUses)
+        if (l.use) b.use = l.use;
         b.street = l.street ? l.street.name : null;
         built++;
       }
@@ -6056,6 +6099,8 @@
           return set(out[0] * 0.4 + 0.051, out[1] * 0.4 + 0.041, out[2] * 0.4 + 0.030);
         },
         buildings: fragile,
+        // venue sites outside `buildings` (the car showroom): world/island_venue.js
+        sites: sites,
         helipads: fragile.filter(function (b) { return b.helipadCandidate; }),
         roads: { pieces: pieces, junctions: roadPlan ? roadPlan.junctions.map(function (j) { return { x: j.x, z: j.z, n: j.n, N: j.N, S: j.S, E: j.E, W: j.W }; }) : [],
           lanes: lanes, bridges: harbourOut.bridges, segs: roadSegs,
@@ -6353,6 +6398,9 @@
       for (const m of O.losBlockers) (CBZ.losBlockers || (CBZ.losBlockers = [])).push(m);
       for (const c of O.camColliders) (CBZ.camColliders || (CBZ.camColliders = [])).push(c);
       if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+      // an archipelago island's venues fit out now: whole, in the world, and
+      // still hidden (world/island_venue.js; disposed with the island)
+      if (ISL.world === "archipelago" && CBZ.islandVenue && CBZ.islandVenue.fitSteps) yield* CBZ.islandVenue.fitSteps(job);
     };
     return job;
   };
@@ -6403,6 +6451,9 @@
     const A = job.arena;
     if (A && A === home) return false;       // the disaster island stays for the session
     job.disposed = true;
+    // its venues' fit-outs first (their own disposers; what they pushed onto
+    // the shared lists rides job.buses with the rest)
+    if (CBZ.islandVenue && CBZ.islandVenue.drop) { try { CBZ.islandVenue.drop(job); } catch (e) { console.error("[island venue drop]", e); } }
     if (A && arena === A) CBZ.islandActivate(null, null);
     if (A) {
       for (const e of A.elevators || []) if (e.rig && e.rig.release) { try { e.rig.release(); } catch (err) {} }

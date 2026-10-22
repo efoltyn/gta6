@@ -57,7 +57,8 @@
        plan.bridges            [{x0,x1,z0,z1, vertical, at}]
        plan.lots               [{id, x, z, w, d, yaw, door, lot:{x0,x1,z0,z1},
                                  bx0..bz1 (footprint, world), district, kind,
-                                 storeys, style, gyHint, driveway?, helipad?}]
+                                 storeys, style, gyHint, driveway?, helipad?,
+                                 use (cfg.venues only: see assignUses), name?}]
        plan.parking, plan.plaza, plan.showroom, plan.stations, plan.fields,
        plan.beaches, plan.trees, plan.cars, plan.districts, plan.lowGround
      check(plan) -> { overlaps, lotLine, onRoad, carsOffRoad, ... } pure audit
@@ -1006,6 +1007,8 @@
       { kind: "beach", r0: R, r1: R + 26 },
     ];
 
+    if (cfg.venues) assignUses(lots, cfg.style || "harbour", urban);
+
     return {
       cx: cx, cz: cz, R: R, K: K,
       plainAt: plainAt, plainBaseAt: plainBaseAt, landAt: landAt, padAt: padAt, pads: pads, madeAt: madeAt, ghautDist: ghautDist, hillAt: hillAt, onLand: onLand,
@@ -1020,6 +1023,151 @@
       districts: districts, lowGround: lowGround, rejects: why,
       airstrip: AIR, style: cfg.style || "harbour", seed: cfg.seed | 0,
     };
+  }
+
+  /* ======================================================================
+     WHAT EVERY BUILDING IS FOR (lot.use). An archipelago island
+     (cfg.venues) gives every lot a use, by the same position hash as the
+     rest of the plan, so an island is the same town on every boot. The
+     fixed places keep what they are (the town hall, the bank, the hotel,
+     the showroom); the island's style decides which trades it has, and
+     each trade takes the shop lot that suits it best: the jewellers and the
+     tailors downtown, the pawn shop and the cheque casher further out, the
+     used car lot on a yard with a forecourt, the motel on the ring road.
+     Every other shop is an ordinary trade with its name over the door, and
+     the tall ones are flats over a shop. A use with a name gets a sign
+     (world/island_dressing.js). The disaster island has no uses: it builds
+     exactly as it always did.
+     ====================================================================== */
+  const USE_NAMES = {
+    police: ["Police Station"],
+    guns: ["Island Arms", "Coast Firearms", "Harbour Guns"],
+    pawn: ["Harbour Pawn & Loan", "Island Pawn", "Quay Pawnbrokers"],
+    loans: ["Cash Advance", "Cheques Cashed", "Quick Cash Loans"],
+    jewelry: ["Coral Jewellers", "Gold & Pearl", "Harbour Jewellers"],
+    eyewear: ["Coastal Optics", "Island Eyewear", "Bay Opticians"],
+    clothing: ["Harbour Outfitters", "Trade Winds Clothing", "Island Clothing"],
+    suits: ["Bay Street Tailors", "Harbour Tailoring", "Fine Suits"],
+    phones: ["Island Mobile", "Bay Phones", "Cell Shop"],
+    motel: ["Ring Road Motel", "Sea Breeze Motel", "Palm Motel"],
+    recruit: ["Army Recruiting"],
+    usedcars: ["Used Cars", "Island Auto Sales", "Quay Motors"],
+    bankhq: ["Island Bank"],
+  };
+  // the ordinary trades a town's other shops are (the sign words the
+  // dressing always had), and where a dive shop makes sense
+  const TRADES = ["Bakery", "Chemist", "Hardware", "Cafe", "Grocer", "Barber", "Books", "Diner", "Deli",
+    "Florist", "Butcher", "Ice Cream", "Laundry", "Newsagent"];
+  const SEA_TRADES = ["Surf Shop", "Dive Shop"];
+  // what each kind of island has, in the order it chooses (the rarer and
+  // pickier first). [use, how many]
+  const WANT = {
+    harbour: [["police", 1], ["usedcars", 1], ["motel", 1], ["recruit", 1], ["guns", 1], ["pawn", 1], ["loans", 1],
+      ["jewelry", 1], ["suits", 1], ["eyewear", 1], ["clothing", 1], ["phones", 1], ["apartments", 3]],
+    downtown: [["bankhq", 1], ["police", 1], ["jewelry", 1], ["suits", 1], ["phones", 1], ["eyewear", 1],
+      ["clothing", 1], ["apartments", 3]],
+    estates: [["police", 1], ["motel", 1], ["boutiques", 1]],
+    works: [["police", 1], ["usedcars", 1], ["motel", 1], ["recruit", 1], ["guns", 1], ["pawn", 1], ["loans", 1]],
+  };
+  // the use a lot is by what was built there (the places the plan named)
+  function fixedUse(l) {
+    if (l.kind === "hotel") return "hotel";
+    if (l.kind === "showroom") return "cardealer";
+    if (l.kind === "station") return "fuel";
+    if (l.kind === "market") return "market";
+    if (l.kind === "shed") return "warehouse";
+    if (l.kind === "office") return "office";
+    if (l.kind === "civic") {
+      return { "Town Hall": "cityhall", "Bank": "bank", "St. Mary's": "church", "Mosque": "mosque", "School": "school" }[l.name] || "civic";
+    }
+    if (l.name === "Chandlery") return "chandlery";
+    return null;
+  }
+  function assignUses(lots, style, urban) {
+    const want = WANT[style] || WANT.harbour;
+    const h = function (l, s) { return wh(l.x, l.z, s); };
+    const nameOf = function (use, l) { const a = USE_NAMES[use]; return a ? a[(h(l, 0x7c1) * a.length) | 0] : null; };
+    for (const l of lots) { l.use = fixedUse(l); l.U = urban(l.x, l.z); }
+    const free = function (l) { return l.use == null; };
+    const sname = function (l) { return (l.street && l.street.name) || ""; };
+    const ring = function (l) { return /Ring/.test(sname(l)); };
+    // the best free lot by score (ties broken by the hash, never by list order)
+    function pick(ok, score) {
+      let best = null, bs = -1e9;
+      for (const l of lots) {
+        if (!free(l) || !ok(l)) continue;
+        const s = score(l) + h(l, 0x7c2) * 0.01;
+        if (s > bs) { bs = s; best = l; }
+      }
+      return best;
+    }
+    const shop = function (l) { return l.kind === "shop"; };
+    const shopOrWorks = function (l) { return l.kind === "shop" || l.kind === "works"; };
+    const SCORE = {
+      // a station house: two or three storeys, a main street, not the very centre
+      police: [shopOrWorks, function (l) { return (l.storeys >= 2 && l.storeys <= 4 ? 2 : 0) + (1 - Math.abs(l.U - 0.55)) + (l.w >= 11 ? 0.5 : 0) + (l.kind === "shop" ? 1.5 : 0); }],
+      // a yard with a forecourt: the works' sheds first, else the deepest setback
+      usedcars: [shopOrWorks, function (l) { return (l.kind === "works" ? 3 : 0) + (l.storeys === 1 ? 1 : 0) + (1 - l.U) + l.w * 0.05; }],
+      // long and low, out on the ring road
+      motel: [function (l) { return l.kind !== "villa" && l.kind !== "tower"; }, function (l) {
+        return (ring(l) ? 4 : 0) + (l.storeys === 2 ? 2 : l.storeys === 1 ? 1 : 0) + l.w * 0.15 + (1 - l.U); }],
+      recruit: [shop, function (l) { return (l.storeys <= 3 ? 1 : 0) + (1 - Math.abs(l.U - 0.5)); }],
+      guns: [shopOrWorks, function (l) { return (l.storeys <= 3 ? 1 : 0) + (1 - Math.abs(l.U - 0.4)) + (l.kind === "shop" ? 1.5 : 0); }],
+      pawn: [shopOrWorks, function (l) { return (1 - l.U) * 2 + (l.kind === "shop" ? 1 : 0); }],
+      loans: [shop, function (l) { return (1 - l.U) * 2; }],
+      jewelry: [shop, function (l) { return l.U * 3; }],
+      suits: [shop, function (l) { return l.U * 3; }],
+      eyewear: [shop, function (l) { return l.U * 2.5; }],
+      clothing: [shop, function (l) { return l.U * 2.5; }],
+      phones: [shop, function (l) { return l.U * 2; }],
+      apartments: [function (l) { return l.kind === "shop" && l.storeys >= 4; }, function (l) { return l.storeys; }],
+      bankhq: [function (l) { return l.kind === "tower"; }, function (l) { return l.storeys + l.U; }],
+    };
+    function place(use, n) {
+      const sc = SCORE[use];
+      for (let i = 0; i < n; i++) {
+        const l = pick(sc[0], sc[1]);
+        if (!l) return;
+        l.use = use === "bankhq" ? "bank" : use;
+        const nm = nameOf(use, l);
+        if (nm) l.name = nm;
+      }
+    }
+    for (const w of want) {
+      if (w[0] === "boutiques") {
+        // a row: the street with the most free shops, its three nearest the
+        // centre of town are the jewellers, the optician and the outfitter
+        const by = new Map();
+        for (const l of lots) if (free(l) && shop(l)) { const k = sname(l); by.set(k, (by.get(k) || []).concat([l])); }
+        let row = null;
+        by.forEach(function (ls) { if (!row || ls.length > row.length) row = ls; });
+        if (!row) continue;
+        row.sort(function (a, b) { return b.U - a.U; });
+        const uses = ["jewelry", "eyewear", "clothing"];
+        for (let i = 0; i < uses.length && i < row.length; i++) { row[i].use = uses[i]; row[i].name = nameOf(uses[i], row[i]); }
+        continue;
+      }
+      place(w[0], w[1]);
+    }
+    // everything else: towers are offices, tall shops are flats over a shop,
+    // the rest are the town's trades; houses, villas and yards are what they are
+    const usedTrade = new Set();
+    for (const l of lots) {
+      if (!free(l)) continue;
+      if (l.kind === "tower") { l.use = "office"; continue; }
+      if (l.kind === "house" || l.kind === "villa" || l.kind === "works") { l.use = l.kind; continue; }
+      if (l.kind !== "shop") { l.use = "shop"; continue; }
+      if (l.storeys >= 5) { l.use = "apartments"; continue; }
+      const sea = l.district === "waterfront";
+      const pool = sea ? SEA_TRADES.concat(TRADES) : TRADES;
+      let k = (h(l, 0x7c3) * pool.length) | 0;
+      for (let n = 0; n < pool.length && usedTrade.has(pool[k]); n++) k = (k + 1) % pool.length;
+      const t = pool[k];
+      // a trade a town has twice is unnamed the second time
+      if (!usedTrade.has(t)) { l.name = t; usedTrade.add(t); }
+      l.use = t.toLowerCase().replace(/\s+/g, "");
+    }
+    for (const l of lots) delete l.U;
   }
 
   /* ======================================================================

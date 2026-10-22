@@ -758,7 +758,7 @@
     if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
     fixturesWired = true;
     CBZ.interactions.registerFixtures({
-      id: "clothes-rack", kind: "clothes-rack", prio: 9,
+      id: "clothes-rack", kind: "clothes-rack", prio: 9, islands: true,
       list: function (ctx, px, pz) { return S.built && S.near && !S.panelOpen && inStore(px, pz) ? S.slots : null; },
       reach: function (s) { return s.reach || RACK_REACH; },
       dot: function (s) { return s.dot || RACK_DOT; },
@@ -932,7 +932,9 @@
 
   // ---- per-frame --------------------------------------------------------------
   CBZ.onUpdate(38.6, function (dt) {
-    if (!g || g.mode !== "city") {
+    // (the islands: this store's island lot comes through CBZ.islandVenue; until then
+    //  Gang City's own lot is the only one, and it is never reached from the islands)
+    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city") || !(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) {
       if (S.group && S.group.visible) S.group.visible = false;
       if (S.winGroup && S.winGroup.visible) S.winGroup.visible = false;
       S.near = false; if (S.panelOpen) closePanel(); return;

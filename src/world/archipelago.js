@@ -80,6 +80,7 @@
   const BUDGET_MAX = SMALL ? 8 : 12;
   const SWITCH_HYST = 250;         // m nearer another whole island must be to become THE island
   const PEOPLE = SMALL ? 14 : 28;
+  const ISLES_STAKE = 2500;        // $ in your pocket when you first land (see reset)
 
   const ST = {
     built: false,
@@ -708,6 +709,14 @@
         PC.group.scale.y = 1;
       }
       if (CBZ.cam) { CBZ.cam.yaw = sp.face + Math.PI; CBZ.cam.pitch = 0.42; }
+      // money is real here (CBZ.economyMode): the first time you land you
+      // carry enough for a pistol and a night in the motel. Once a session,
+      // never again on a respawn.
+      if (!g._islesStake) {
+        g._islesStake = true;
+        g.cash = Math.max(g.cash | 0, ISLES_STAKE);
+        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      }
       if (CBZ.resetZoom) CBZ.resetZoom();
       if (!(CBZ.bots && CBZ.bots.length)) { const it = populate(A); for (let r = it.next(); !r.done; r = it.next()) {} }
       if (CBZ.killFeedReset) CBZ.killFeedReset();

@@ -820,7 +820,8 @@
 
   // ---- market drift: recovery + boom/bust events + rolling hot tips --------
   CBZ.onUpdate(30, function (dt) {
-    if (g.mode !== "city") return;
+    // prices move wherever the money is real (Gang City and the islands)
+    if (!(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) return;
     if (!g.cityDrugDist) return;
     const drift = (E.drugDrift || 0.05) * dt;
     // every district recovers toward its demand-shaped fair level (≈1)
@@ -1294,7 +1295,7 @@
   };
 
   CBZ.onUpdate(30.2, function (dt) {
-    if (g.mode !== "city") return;
+    if (!(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) return;
     stepPropMarket(dt);
   });
 

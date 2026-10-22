@@ -1629,7 +1629,8 @@
   // (owner mandate "kill crafting", 2026-08-03); the accessor was the only
   // live organ in that file.
   function itemStore() {
-    if (g.mode === "city") {
+    // Gang City and the archipelago carry the one pocket (g.cityInv)
+    if (g.mode === "city" || (CBZ.economyMode && CBZ.economyMode(g.mode))) {
       const E = CBZ.cityEcon;
       return {
         count: function (n) { return E ? E.count(n) : 0; },
