@@ -177,51 +177,95 @@ check("still playing, alive, not captured after ~" + Math.round(STEPS / 60) + "s
 check("guards are not after the officer", s.hunted.length === 0 && (s.detection || 0) < 1, { hunted: s.hunted, detection: s.detection });
 
 // CUFF: walk up to the nearest plain inmate and run the card's verb.
+/* THE PRESS LANDS ON THE CARD THAT IS UP. CBZ.doInteract presses the verb on
+   the man the card is on at that moment, and this check used to read that
+   man once, BEFORE his hands went up, then press: a frame later the card
+   could be on somebody else (a man the sidearm happened to be holding at
+   gunpoint wins the card inside reach, systems/interact.js faced()), and the
+   index of "Cuff" on his card was pressed on that other man (a Search on the
+   dealer, the cuffs on a stranger). The officer was also dropped 1.2 m south
+   of the man whatever stood there (a bunk, a table, a wall), so his walk in
+   could not start. Now: the officer is set down on a clear spot beside him,
+   facing him, through the teleport seam; the card is confirmed on him after
+   his hands are up, on the frame of the press; a man whose card the officer
+   cannot get (another man in the sights) is passed over for the next. */
 const cuff = await ev(`(function(){
-  var p = CBZ.player, best = null, bd = 1e9;
+  var p = CBZ.player, V = CBZ.verbs;
   // a PLAIN inmate: not the dealer or a merchant with a stall, nobody collecting from you
+  var pool = [];
   (CBZ.npcs||[]).forEach(function(n){ if (n.dead || n.ko > 0 || n.escaped || !n.group || n.kind !== 'inmate') return;
     if (n.role === 'dealer' || n.role === 'merchant' || n._demand) return;
     // nobody a screw already has in hand (cuffed, or mid-order) from the 60 s above
-    if (n.cuffed || n._lawBy) return;
-
-    var d = Math.hypot(n.group.position.x - p.pos.x, n.group.position.z - p.pos.z); if (d < bd) { bd = d; best = n; } });
-  if (!best) return { err: 'no inmate' };
-  // stand him in front of the officer
-  // walk the officer up to him (the brain owns his feet, so move the player)
-  var on = null;
-  for (var k = 0; k < 30 && on !== best; k++) {
-    var gp = best.group.position;
-    p.pos.set(gp.x, p.pos.y, gp.z - 1.2);
-    if (CBZ.playerChar) CBZ.playerChar.group.position.copy(p.pos);
-    CBZ.stepSim(1/60);
-    on = CBZ.prisonInteractTarget ? CBZ.prisonInteractTarget() : null;
+    if (n.cuffed || n._lawBy || (V && V.busy && V.busy(n))) return;
+    if (Math.abs((n.group.position.y || 0) - (p.pos.y || 0)) > 1) return;      // his floor
+    pool.push({ n: n, d: Math.hypot(n.group.position.x - p.pos.x, n.group.position.z - p.pos.z) });
+  });
+  pool.sort(function (a, b) { return a.d - b.d; });
+  if (!pool.length) return { err: 'no inmate' };
+  // a clear spot 1.1 m from him, nothing between: the officer stands there, facing him
+  function spot(n) {
+    var q = n.group.position, y = p.pos.y || 0;
+    for (var k = 0; k < 8; k++) {
+      var a = Math.PI + k * Math.PI / 4, ox = Math.sin(a), oz = Math.cos(a);
+      var sx = q.x + ox * 1.1, sz = q.z + oz * 1.1;
+      if (V && V.lineBlocked && V.lineBlocked(q.x, y, q.z, sx + ox * 0.4, sz + oz * 0.4)) continue;
+      if (CBZ.collide) { var t = { x: sx, y: y, z: sz }; CBZ.collide(t, 0.38, y + 0.42, y + 1.7); if (Math.hypot(t.x - sx, t.z - sz) > 0.02) continue; }
+      return { x: sx, z: sz, yaw: Math.atan2(ox, oz) };
+    }
+    return { x: q.x, z: q.z - 1.2, yaw: Math.PI };
   }
-  // THE RULE (systems/arrest.js): a man on his feet who has not given up is
-  // not cuffed. Standing: no Cuff on his card. Then he puts his hands up (the
-  // surrender a drawn weapon gets out of him) and Cuff is there.
-  // The officer walks up with his sidearm out, and a man in its sights may
-  // already have put his hands up (systems/intimidate.js): that man HAS given
-  // up and Cuff is right for him. Let him go first, so "standing" is a man on
-  // his feet who has not surrendered, which is what this asks about.
-  var gaveUp = !!(CBZ.arrest && CBZ.arrest.surrendered && CBZ.arrest.surrendered(best));
-  var verbsOnApproach = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
-  if (CBZ.intimidateRelease) CBZ.intimidateRelease(best);
-  best.intimidMode = null; best.intimidT = 0; best.poseHandsUp = false; best.surrender = false;
-  if (best.char) { best.char.handsUp = false; best.char.surrender = false; }
-  if (best._brain) best._brain.responseT = -1e9;   // the answer he gave the muzzle is over (arrest.js: a decision is now)
-  best._verbs = null;
-  var standingVerbs = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
-  if (CBZ.arrest && CBZ.arrest.surrendered && CBZ.arrest.surrendered(best)) standingVerbs = ['(still surrendered: brain response)'].concat(standingVerbs || []);
-  best.intimidMode = 'scared'; best.poseHandsUp = true; if (best.char) best.char.handsUp = true;
-  best._verbs = null; CBZ.stepSim(1/60);
-  var verbs = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
-  var idx = verbs ? verbs.indexOf('detain') : -1;
-  var r = 'no detain on the card';
-  if (on !== best) r = 'card is on ' + (on ? (on.kind || '') + ' ' + (on.data && on.data.name) : 'nobody');
-  else if (idx >= 0) { try { CBZ.doInteract(idx); r = 'pressed'; } catch (e) { return { err: 'detain threw: ' + e.message, verbs: verbs }; } }
-  window.__copTarget = best;
-  return { name: best.data && best.data.name, dist: +bd.toFixed(1), gaveUpOnApproach: gaveUp, verbsOnApproach: verbsOnApproach, standingVerbs: standingVerbs, verbs: verbs, result: r };
+  function standAt(n) {
+    var s = spot(n);
+    p.pos.set(s.x, p.pos.y, s.z);
+    if (CBZ.playerChar) CBZ.playerChar.group.position.copy(p.pos);
+    if (CBZ.bodyTeleported) CBZ.bodyTeleported(p);
+    if (CBZ.cam) CBZ.cam.yaw = s.yaw;
+  }
+  function handsUp(n) { n.intimidMode = 'scared'; n.poseHandsUp = true; if (n.char) n.char.handsUp = true; n._verbs = null; }
+  var tries = [], out = null;
+  for (var c = 0; c < Math.min(6, pool.length) && !out; c++) {
+    var best = pool[c].n, on = null;
+    // walk the officer up to him (the brain owns his feet, so move the player)
+    for (var k = 0; k < 30 && on !== best; k++) {
+      standAt(best);
+      CBZ.stepSim(1/60);
+      on = CBZ.prisonInteractTarget ? CBZ.prisonInteractTarget() : null;
+    }
+    if (on !== best) { tries.push((best.data && best.data.name) + ': card on ' + (on ? (on.data && on.data.name) : 'nobody')); continue; }
+    // THE RULE (systems/arrest.js): a man on his feet who has not given up is
+    // not cuffed. Standing: no Cuff on his card. Then he puts his hands up (the
+    // surrender a drawn weapon gets out of him) and Cuff is there.
+    // The officer walks up with his sidearm out, and a man in its sights may
+    // already have put his hands up (systems/intimidate.js): that man HAS given
+    // up and Cuff is right for him. Let him go first, so "standing" is a man on
+    // his feet who has not surrendered, which is what this asks about.
+    var gaveUp = !!(CBZ.arrest && CBZ.arrest.surrendered && CBZ.arrest.surrendered(best));
+    var verbsOnApproach = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
+    if (CBZ.intimidateRelease) CBZ.intimidateRelease(best);
+    best.intimidMode = null; best.intimidT = 0; best.poseHandsUp = false; best.surrender = false;
+    if (best.char) { best.char.handsUp = false; best.char.surrender = false; }
+    if (best._brain) best._brain.responseT = -1e9;   // the answer he gave the muzzle is over (arrest.js: a decision is now)
+    best._verbs = null;
+    var standingVerbs = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
+    if (CBZ.arrest && CBZ.arrest.surrendered && CBZ.arrest.surrendered(best)) standingVerbs = ['(still surrendered: brain response)'].concat(standingVerbs || []);
+    // hands up; the card must still be on him on the frame of the press
+    var verbs = null, idx = -1;
+    for (var j = 0; j < 20; j++) {
+      handsUp(best); standAt(best);
+      CBZ.stepSim(1/60);
+      handsUp(best);
+      on = CBZ.prisonInteractTarget ? CBZ.prisonInteractTarget() : null;
+      verbs = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
+      idx = verbs ? verbs.indexOf('detain') : -1;
+      if (on === best && idx >= 0) break;
+    }
+    var r = 'no detain on the card';
+    if (on !== best) { tries.push((best.data && best.data.name) + ': hands up, card on ' + (on ? (on.data && on.data.name) : 'nobody')); continue; }
+    if (idx >= 0) { try { CBZ.doInteract(idx); r = 'pressed'; } catch (e) { return { err: 'detain threw: ' + e.message, verbs: verbs }; } }
+    window.__copTarget = best;
+    out = { name: best.data && best.data.name, dist: +pool[c].d.toFixed(1), gaveUpOnApproach: gaveUp, verbsOnApproach: verbsOnApproach, standingVerbs: standingVerbs, verbs: verbs, result: r, passedOver: tries };
+  }
+  return out || { err: 'no inmate whose card the officer could get', tries: tries };
 })()`);
 log("  cuff: " + JSON.stringify(cuff));
 for (let i = 0; i < 6; i++) await ev(`(function(){ for (var i=0;i<60;i++) CBZ.stepSim(1/60); return true; })()`);

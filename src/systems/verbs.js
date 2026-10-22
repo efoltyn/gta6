@@ -988,6 +988,8 @@
   const PH = ["approach", "align", "contact", "drive", "outcome", "hold", "release"];
   // verbs done standing in one spot (an NPC grabber is held there, see enterPhase)
   const STILL = { cuff: 1, uncuff: 1, frisk: 1, mug: 1, shove: 1, throw: 1, grab: 1, carry: 1 };
+  // the verbs a man who gave up stands still for, from the first step (S.stand)
+  const STAND = { cuff: 1, uncuff: 1, frisk: 1 };
   const sessions = [];
   const _pp = { k: 0, t: 0, phase: "", moving: false, sag: 0, crouch: 0, seed: 0, ground: false, verb: "", strain: 0, writhe: 0, knee: null, kneeSide: 1, twist: 0 };
   const _W = new THREE.Vector3(), _C = new THREE.Vector3(), _R = new THREE.Vector3(), _V = new THREE.Vector3();
@@ -2056,6 +2058,14 @@
     const hr0 = A.ch.hitReact;
     S._hrOn = !!(hr0 && hr0.on); S._hrT = hr0 ? hr0.t : 0;
     S.cancel = function () { cancel(S); };
+    /* A MAN WHO GAVE UP STANDS FOR THE HANDS. Hands up (or already in cuffs),
+       he does not walk on while the officer closes the last step: his own
+       game used to keep him wandering through the approach (he was only
+       the verb's from the align on), so the officer chased a man who had
+       surrendered, ran out of approach and the cuffs never went on. From
+       the press, he is the verb's (heldBy), standing where he gave up. */
+    S.stand = !!STAND[verb] && !T.isPlayer && !down && !from &&
+      (!!T.ch.cuffed || !!(CBZ.arrest && CBZ.arrest.surrendered && CBZ.arrest.surrendered(t)));
     S.work = def.work(S);
     // direction: the caller's, or the grabber's line to the target
     const lx = T.pos.x - A.pos.x, lz = T.pos.z - A.pos.z, ll = Math.hypot(lx, lz);
@@ -2298,6 +2308,9 @@
        being carried). */
     if (!A.isPlayer && CBZ.animChar && A.ch._animAt !== CBZ.now) CBZ.animChar(A.ch, S.aSpeed || 0, dt);
     if (!S.ground) A.ch._verbWalk = CBZ.now;
+    // the man standing for the hands (S.stand) is the verb's from the press:
+    // nobody else animates him while the officer steps in, so the verb does
+    if (S.phase === "approach" && S.stand && CBZ.animChar && T.ch._animAt !== CBZ.now) CBZ.animChar(T.ch, 0, dt);
     if (S.phase === "approach") return;
     // on the floor: he got up before the knee went down (his own clock ran
     // out on the walk over), or something else stood him up: not cuffed
@@ -2527,6 +2540,15 @@
     const rem = Math.hypot(gx - A.pos.x, gz - A.pos.z);
     const turned = face == null || Math.abs(angDiff(A.yaw(), face)) < 0.3;
     if (rem <= 0.04 && turned && !settling) { S.aSpeed = 0; return true; }
+    /* BLOCKED IN ARM'S REACH. A man standing for the hands (S.stand) with the
+       last step to him blocked (a bunk, a table, his own shoulder): the
+       grabber stopped gaining and used to stand there until the approach ran
+       out and the verb was "missed". Within reach, the hands go on from here;
+       the align squares him up and brings the man the rest of the way. */
+    if (S.stand && !S.ground) {
+      if (S._apRem == null || rem < S._apRem - 0.01) { S._apRem = rem; S._apT = 0; } else S._apT += dt;
+      if (S._apT > 0.3 && Math.hypot(T.pos.x - A.pos.x, T.pos.z - A.pos.z) <= S.work + 0.6) { S.aSpeed = 0; return true; }
+    }
     if (S.age > (S.opts.far ? (S.opts.far > 1 ? 1.6 + S.opts.far / 2.2 : 2.6) : 1.6) + (S.ground ? 1.4 : 0)) {
       // could not get there (blocked, or he backed off faster than we walk)
       if (rem > 0.35) { S.result = { outcome: "missed" }; finish(S, false); return false; }
@@ -3075,7 +3097,7 @@
   function heldBy(t) {
     t = norm(t);
     const S = sessionOf(t);
-    if (S && S.t === t && !S.tFree && S.phase !== "approach") return S.a;
+    if (S && S.t === t && !S.tFree && (S.phase !== "approach" || S.stand)) return S.a;
     return (t && t._apeHeld) || null;
   }
   function busy(a) {
