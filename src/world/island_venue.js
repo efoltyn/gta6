@@ -36,6 +36,10 @@
      CBZ.islandVenue.staff(b, lx, lz, face, opts)   a worker posted on b's
          ground floor (the clerk behind a counter); see THE PEOPLE WHO WORK
          THERE below
+     CBZ.islandVenue.on("*", fn)  a pass for EVERY building that has a use,
+         run after that building's own fit-outs (city/islandmoney.js puts a
+         safe in each one this way, so no venue has to ask for one)
+     CBZ.islandVenue.has(use)     does that use have a fit-out of its own
 
    Disaster mode never reaches this file: its island has no uses.
    ============================================================ */
@@ -238,8 +242,10 @@
     live.add(job);
     for (const b of recordsOf(job)) {
       const fns = b && b.use ? fits.get(b.use) : null;
-      if (!fns || !fns.length) continue;
-      for (const fn of fns.slice()) runOne(job, b, fn);
+      const all = b && b.use ? fits.get("*") : null;
+      if ((!fns || !fns.length) && (!all || !all.length)) continue;
+      if (fns) for (const fn of fns.slice()) runOne(job, b, fn);
+      if (all) for (const fn of all.slice()) runOne(job, b, fn);
       yield 0;
     }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
@@ -258,8 +264,9 @@
     l.push(fn);
     fits.set(use, l);
     // the islands already standing get it now
-    for (const job of live) for (const b of recordsOf(job)) if (b && b.use === use) runOne(job, b, fn);
+    for (const job of live) for (const b of recordsOf(job)) if (b && b.use && (use === "*" || b.use === use)) runOne(job, b, fn);
   }
+  function has(use) { const l = fits.get(use); return !!(l && l.length); }
   function list(use) {
     const out = [];
     for (const job of live) for (const b of recordsOf(job)) if (b && b.use && (!use || b.use === use)) out.push(b);
@@ -339,5 +346,5 @@
   });
 
   CBZ.islandVenue = { on: on, list: list, lotFor: lotFor, floor: floor, clear: clear, island: island,
-    staff: staff, fitSteps: fitSteps, drop: drop };
+    staff: staff, fitSteps: fitSteps, drop: drop, has: has };
 })();

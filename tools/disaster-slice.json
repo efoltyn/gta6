@@ -4126,6 +4126,7 @@
   "src/city/leaderboard.js",
   "src/city/zillow.js",
   "src/city/bank.js",
+  "src/city/islandmoney.js",
   "src/city/pawnshop.js",
   "src/city/clothingstore.js",
   "src/city/family.js",

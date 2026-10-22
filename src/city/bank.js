@@ -47,6 +47,8 @@
   function note(t, s, opts) { if (CBZ.city && CBZ.city.note) CBZ.city.note(t, s, opts); }
   function big(t) { if (CBZ.city && CBZ.city.big) CBZ.city.big(t); }
   function econ() { return CBZ.cityEcon || null; }
+  // money is real here (Gang City and the islands): the one gate
+  function econOn() { return CBZ.economyMode ? CBZ.economyMode(g && g.mode) : !!(g && g.mode === "city"); }
   // net worth drives underwriting (the engine's "income proxy"); fall back to
   // liquid cash+bank if the econ module hasn't booted yet.
   function netWorth() {
@@ -176,6 +178,18 @@
     return Math.max(0, Math.min(PERSONAL_HARD_CAP, Math.round(cap)));
   }
 
+  /* THE CREDIT CHECK. What makes a bank a bank and not the man in the back of
+     the cheque casher's: it looks at you first. A wanted man, a man with
+     nothing, and a man already behind on a street loan (city/islandmoney.js
+     CBZ.loanShark) walk out with nothing; the shark lends to all three. */
+  const BROKE = 1000;
+  function creditRefusal() {
+    if ((num(g.wanted, 0) | 0) > 0) return "not while the police want you";
+    const LS = CBZ.loanShark;
+    if (LS && typeof LS.inDefault === "function") { try { if (LS.inDefault()) return "you're behind on a street loan"; } catch (e) {} }
+    if (netWorth() < BROKE) return "nothing to lend against";
+    return null;
+  }
   // OFFER — a side-effect-free quote. purpose ∈ mortgage|personal|auto.
   // ctx (mortgage): { value, down, propertyId, category, kind, quote }.
   // Returns { approved, principal, rate, termTicks, payment, reason, purpose }.
@@ -213,6 +227,8 @@
     }
 
     if (purpose === "auto") {
+      const no = creditRefusal();
+      if (no) { base.reason = no; return base; }
       // SECURED by the vehicle: lend up to the car's value (ctx.value), the
       // ride is the collateral. Modest gate on net worth so it isn't free.
       const value = Math.max(0, num(ctx.value, principal));
@@ -228,6 +244,8 @@
 
     // PERSONAL — UNSECURED: underwrite against capacity (net worth − existing
     // personal debt). Decline cleanly if they're asking past their means.
+    const no = creditRefusal();
+    if (no) { base.reason = no; return base; }
     const cap = personalCapacity();
     if (cap < MIN_PRINCIPAL) { base.reason = "insufficient net worth for unsecured credit"; return base; }
     if (principal > cap) {
@@ -552,7 +570,13 @@
   const S = { lot: null, bk: null, group: null, stations: [], built: false,
               arena: null, noLotArena: null, near: false,
               cx: 0, cz: 0, panel: null, panelOpen: false, mode: "personal",
-              pAmt: 0, pTerm: TERMS.personal, vault: null };
+              pAmt: 0, pTerm: TERMS.personal, vault: null, at: null };
+  // THE ISLANDS' BRANCHES (city/islandmoney.js): every bank building on an
+  // island stands its own windows, ATM and loan desk and lists them here
+  // ({ kind: "teller"|"atm"|"loan", x, y, z, reach, name, box? }). An array on
+  // CBZ, so a fit-out's entries leave with its island by themselves.
+  const ISTATIONS = CBZ.bankStations = CBZ.bankStations || [];
+  function bankName() { return (S.at && S.at.name) || (S.bk && S.bk.name) || "Meridian Trust"; }
 
   // ---- shared materials (one each, _shared) ----------------------------------
   let M = null;
@@ -771,7 +795,7 @@
     if (c <= 0) { note("No cash on you to deposit.", 1.4); return; }
     g.cityBank = num(g.cityBank, 0) + c; g.cash = 0;
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Deposited " + fmt$(c) + ", balance " + fmt$(g.cityBank) + ".", 2.2, { from: "Meridian Trust", app: "bank" });
+    note("Deposited " + fmt$(c) + ", balance " + fmt$(g.cityBank) + ".", 2.2, { from: bankName(), app: "bank" });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
   }
@@ -813,23 +837,23 @@
     const day = (CBZ.paceDay ? CBZ.paceDay() : 0) | 0;
     if (box._atmSvc !== day) { box._atmSvc = day; box._atmBal = box._atmOf; }
   }
-  function withdraw(amount, atMachine) {
+  function withdraw(amount, atMachine, cassette) {
     let amt = Math.min(amount || 500, num(g.cityBank, 0));
     if (amt <= 0) { note("Bank's empty.", 1.4); return; }
     if (atMachine) {
-      const box = (CBZ.cityTill && CBZ.cityTill.take) ? atmCassette() : null;
+      const box = (CBZ.cityTill && CBZ.cityTill.take) ? (cassette || atmCassette()) : null;
       if (box) {
         atmService(box);
         const got = CBZ.cityTill.take(box, { max: amt, by: "player" });
-        if (!(got.taken > 0)) { note("Out of cash.", 2.2, { from: "Meridian Trust", app: "bank" }); return; }
-        if (got.taken < amt) note("Machine could only dispense " + fmt$(got.taken) + ".", 2, { from: "Meridian Trust", app: "bank" });
+        if (!(got.taken > 0)) { note("Out of cash.", 2.2, { from: bankName(), app: "bank" }); return; }
+        if (got.taken < amt) note("Machine could only dispense " + fmt$(got.taken) + ".", 2, { from: bankName(), app: "bank" });
         amt = got.taken;
       }
     }
     g.cityBank = num(g.cityBank, 0) - amt;
     if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(amt); else g.cash = num(g.cash, 0) + amt;
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Withdrew " + fmt$(amt) + ".", 1.6, { from: "Meridian Trust", app: "bank" });
+    note("Withdrew " + fmt$(amt) + ".", 1.6, { from: bankName(), app: "bank" });
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
   }
   function bribe() {
@@ -865,8 +889,9 @@
     S.panel = d;
     return d;
   }
-  function openPanel() {
+  function openPanel(st) {
     const el = panelEl(); if (!el) return;
+    S.at = st || null;
     S.panelOpen = true; CBZ.cityMenuOpen = true;
     S.mode = "personal"; S.pAmt = clampPersonalAmt(Math.max(PERSONAL_FLOOR, Math.round(personalCapacity() * 0.5)));
     S.pTerm = TERMS.personal;
@@ -901,7 +926,7 @@
       openRows += "</div>";
     }
     el.innerHTML =
-      "<div style='font-size:20px;font-weight:600;margin-bottom:2px'>Meridian Trust. Lending</div>" +
+      "<div style='font-size:20px;font-weight:600;margin-bottom:2px'>" + bankName() + "</div>" +
       "<div style='color:#7f8794;font-size:13px;margin-bottom:14px'>Net worth " + fmt$(netWorth()) +
         ", unsecured credit up to <span style='color:#bcffd0'>" + fmt$(cap) + "</span></div>" +
       "<div style='display:flex;gap:8px;margin-bottom:14px'>" +
@@ -940,7 +965,7 @@
   function takePersonal() {
     const amt = clampPersonalAmt(S.pAmt);
     const o = offer("personal", amt, {});
-    if (!o.approved || o.principal < MIN_PRINCIPAL) { note("Declined, " + (o.reason || "not approved") + ".", 2); return; }
+    if (!o.approved || o.principal < MIN_PRINCIPAL) { note("Declined, " + (o.reason || "not approved") + ".", 2, { from: bankName(), app: "bank" }); return; }
     o.purpose = "personal"; o.termTicks = S.pTerm; o.payment = paymentFor(o.principal, o.rate, S.pTerm);
     const id = take(o);
     if (id) {
@@ -960,24 +985,45 @@
   }
   const cash = () => num(g.cash, 0), bal = () => num(g.cityBank, 0), stars = () => num(g.wanted, 0) | 0;
   let fixturesWired = false;
+  const _stOut = [];
+  function stationsAt(ctx, px, pz) {
+    if (S.panelOpen) return null;
+    _stOut.length = 0;
+    if (g.mode === "city") {
+      if (S.built && S.near && inBank(px, pz)) for (let i = 0; i < S.stations.length; i++) _stOut.push(S.stations[i]);
+    } else if (ISTATIONS.length) {
+      const py = ctx && ctx.pos ? ctx.pos.y : (CBZ.player ? CBZ.player.pos.y : 0);
+      for (let i = 0; i < ISTATIONS.length; i++) {
+        const st = ISTATIONS[i];
+        if (st.y != null && Math.abs(st.y - py) > 2.2) continue;
+        if (Math.abs(st.x - px) > 8 || Math.abs(st.z - pz) > 8) continue;
+        _stOut.push(st);
+      }
+    }
+    return _stOut.length ? _stOut : null;
+  }
+  // an island window or desk is open while somebody is behind it
+  // (city/islandmoney.js gives its stations an ok()); the ATM always is
+  function staffed(st) { if (!st || typeof st.ok !== "function") return true; try { return !!st.ok(); } catch (e) { return true; } }
   function wireFixtures() {
     if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
     fixturesWired = true;
     CBZ.interactions.registerFixtures({
       id: "bank-station", kind: "bank-station", prio: 9, islands: true,
-      list: function (ctx, px, pz) { return S.built && S.near && !S.panelOpen && inBank(px, pz) ? S.stations : null; },
+      list: stationsAt,
+      name: function (st) { return st.name || bankName(); },
       reach: function (st) { return st.reach || REACH; },
       dot: function () { return LOOK_DOT; },
       verbs: [
         { id: "bank-deposit", slot: "e", prio: 6, label: () => "Deposit " + fmt$(cash()),
-          canShow: (st) => st.kind === "teller" && cash() > 0, onSelect: deposit },
+          canShow: (st) => staffed(st) && st.kind === "teller" && cash() > 0, onSelect: (st) => { S.at = st; deposit(); } },
         { id: "bank-payoff", prio: 5, label: "Pay off the heat",
-          canShow: (st) => st.kind === "teller" && stars() > 0, onSelect: bribe },
+          canShow: (st) => staffed(st) && st.kind === "teller" && stars() > 0, onSelect: bribe },
         { id: "bank-withdraw", slot: "e", prio: 6, label: "Withdraw " + fmt$(500),
-          canShow: (st) => (st.kind === "atm" || st.kind === "teller") && bal() > 0, onSelect: (st) => withdraw(500, st.kind === "atm") },
+          canShow: (st) => staffed(st) && (st.kind === "atm" || st.kind === "teller") && bal() > 0, onSelect: (st) => { S.at = st; withdraw(500, st.kind === "atm", st.box); } },
         { id: "bank-withdraw-small", prio: 4, label: "Withdraw " + fmt$(100),
-          canShow: (st) => (st.kind === "atm" || st.kind === "teller") && bal() > 0, onSelect: (st) => withdraw(100, st.kind === "atm") },
-        { id: "bank-loan", slot: "e", prio: 6, label: "Borrow", canShow: (st) => st.kind === "loan", onSelect: () => openPanel() },
+          canShow: (st) => staffed(st) && (st.kind === "atm" || st.kind === "teller") && bal() > 0, onSelect: (st) => { S.at = st; withdraw(100, st.kind === "atm", st.box); } },
+        { id: "bank-loan", slot: "e", prio: 6, label: "Borrow", canShow: (st) => staffed(st) && st.kind === "loan", onSelect: (st) => openPanel(st) },
       ],
     });
   }
@@ -1016,12 +1062,20 @@
 
   // ---- per-frame: vis-gate fixtures + drive the prompt -----------------------
   CBZ.onUpdate(38.4, function (dt) {
-    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; if (S.panelOpen) closePanel(); return; }
-    // (the islands: this store's island lot comes through CBZ.islandVenue; until then
-    //  Gang City's own lot is the only one, and it is never reached from the islands)
-    if (!(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; if (S.panelOpen) closePanel(); return; }
-    if (!ensure()) return;
+    if (!g || !econOn()) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; if (S.panelOpen) closePanel(); return; }
     wireFixtures();
+    // the islands: their branches are city/islandmoney.js's (ISTATIONS); the
+    // panel stays open while you stand at the desk you opened it from
+    if (!(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) {
+      if (S.group && S.group.visible) S.group.visible = false; S.near = false;
+      if (S.panelOpen) {
+        const P0 = CBZ.player, at = S.at;
+        const far = !at || !P0 || Math.hypot(P0.pos.x - at.x, P0.pos.z - at.z) > 5 || ISTATIONS.indexOf(at) < 0;
+        if (far || g.state !== "playing" || P0.dead || P0.driving) closePanel();
+      }
+      return;
+    }
+    if (!ensure()) return;
     const P = CBZ.player;
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
     const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
@@ -1485,10 +1539,21 @@
       open: false, swing: 0, opening: 0, breached: false, bagsOut: false,
       bags: [], y: floorY, glow: 0,
     };
-    v.x = ox + v.plx; v.z = oz + v.plz;
+    /* AN ISLAND BUILDING HAS ITS OWN FRAME. A Gang City building is axis-
+       aligned at (ox, oz); an island one is rotated a quarter turn and its
+       furniture lives under its own group (world/island_venue.js). Such a
+       lot hands its building as { ox: 0, oz: 0, frame: { toWorld }, gy,
+       group }: the room is laid out in the building's own coordinates (door
+       on local -z) and only the points other systems read (the door, the
+       room's middle, the collider) are carried into the world. */
+    const F = b.frame || null;
+    const W = function (lx, lz) { return F ? F.toWorld(lx, lz) : { x: ox + lx, z: oz + lz }; };
+    const gy0 = F ? (b.gy || 0) : 0;
+    const wd = W(v.plx, v.plz);
+    v.x = wd.x; v.z = wd.z; v.y = gy0 + floorY; v.framed = !!F;
     // the strongroom's own centre, for spawning bags and aiming a camera
-    v.rx = ox + v.plx + inx * (rd * 0.55);
-    v.rz = oz + v.plz + inz * (rd * 0.55);
+    const wr = W(v.plx + inx * (rd * 0.55), v.plz + inz * (rd * 0.55));
+    v.rx = wr.x; v.rz = wr.z;
 
     // room shell + fit-out, clamped to the building's inner faces by the same
     // planner every interior program runs through.
@@ -1497,9 +1562,9 @@
       else buildRoom(v, b, floorY);
     } catch (e) { /* a half-drawn strongroom still has a door */ }
 
-    // ---- the doorway: pivot + architrave, in world space so the leaf swings --
+    // ---- the doorway: pivot + architrave, so the leaf swings ----------------
     const grp = new THREE.Group();
-    grp.position.set(v.x, floorY, v.z);
+    grp.position.set(F ? v.plx : v.x, floorY, F ? v.plz : v.z);
     // local +Z must point OUT of the vault (back toward the hall) = -inward
     grp.rotation.y = Math.atan2(-inx, -inz);
     // the hash picks which edge hangs, so a city has left- and right-hung
@@ -1510,19 +1575,19 @@
     pivot.position.set(-v.hingeSign * dw / 2, 0, 0.02);
     grp.add(pivot);
     buildFrame(v, grp);
-    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+    const root = F ? b.group : ((CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene);
     if (root) root.add(grp);
     v.group = grp;
-    if (CBZ.interiorTrackFixture) { try { CBZ.interiorTrackFixture("bank-vault", b, grp); } catch (e) {} }
+    if (!F && CBZ.interiorTrackFixture) { try { CBZ.interiorTrackFixture("bank-vault", b, grp); } catch (e) {} }
 
     // THE COLLIDER IS WHAT "SHUT" MEANS. Removing it is the whole mechanical
     // difference between a locked vault and an open one — no flag anywhere else
     // has to be told.
-    v.col = { minX: v.x - Math.abs(tx) * dw / 2 - Math.abs(inx) * 0.3,
-              maxX: v.x + Math.abs(tx) * dw / 2 + Math.abs(inx) * 0.3,
-              minZ: v.z - Math.abs(tz) * dw / 2 - Math.abs(inz) * 0.3,
-              maxZ: v.z + Math.abs(tz) * dw / 2 + Math.abs(inz) * 0.3,
-              y0: floorY, y1: floorY + dh };
+    const ca = W(v.plx - Math.abs(tx) * dw / 2 - Math.abs(inx) * 0.3, v.plz - Math.abs(tz) * dw / 2 - Math.abs(inz) * 0.3);
+    const cb = W(v.plx + Math.abs(tx) * dw / 2 + Math.abs(inx) * 0.3, v.plz + Math.abs(tz) * dw / 2 + Math.abs(inz) * 0.3);
+    v.col = { minX: Math.min(ca.x, cb.x), maxX: Math.max(ca.x, cb.x),
+              minZ: Math.min(ca.z, cb.z), maxZ: Math.max(ca.z, cb.z),
+              y0: v.y, y1: v.y + dh };
     if (CBZ.colliders) CBZ.colliders.push(v.col);
 
     lot._vaultRoom = v;
@@ -1559,6 +1624,16 @@
     return v;
   };
 
+  // the people who can work a door: Gang City's peds, and on the islands the
+  // island's own people (entities/survivorbot.js), posted by city/islandmoney.js
+  const _staff = [];
+  function staffBodies() {
+    _staff.length = 0;
+    const a = CBZ.cityPeds, b = g && g.mode !== "city" ? CBZ.bots : null;
+    if (a && g && g.mode === "city") for (let i = 0; i < a.length; i++) _staff.push(a[i]);
+    if (b) for (let i = 0; i < b.length; i++) if (b[i] && b[i]._venueStaff) _staff.push(b[i]);
+    return _staff;
+  }
   // ---- WHO IS IN THE ROOM WITH YOU -------------------------------------------
   // "Only NPCs or physical bombs can open them." This is the NPC half: a member
   // of this bank's own staff, within reach of the door, with their hands up.
@@ -1566,13 +1641,13 @@
   // no vault-specific duress state, and shaking somebody down at a vault is the
   // same act as shaking them down on the street.
   function insiderAt(v) {
-    const list = CBZ.cityPeds;
-    if (!list) return null;
+    const list = staffBodies();
+    if (!list.length) return null;
     for (let i = 0; i < list.length; i++) {
       const p = list[i];
       if (!p || p.dead || p.isPlayer || p.controlled || !p.pos) continue;
       if (!(p._vaultStaff === v.id || p._venueStaff === "bank" || p._venueStaff === "casino")) continue;
-      if (!(p.surrender || p.gunpoint || p.poseHandsUp || (p.surrenderT || 0) > 0)) continue;
+      if (!(p.surrender || p.gunpoint || p.poseHandsUp || (p.surrenderT || 0) > 0 || (p.char && p.char.handsUp))) continue;
       const dx = p.pos.x - v.x, dz = p.pos.z - v.z;
       if (dx * dx + dz * dz > 9 * 9) continue;
       if (Math.abs((p.pos.y || 0) - v.y) > 2.6) continue;
@@ -1668,6 +1743,8 @@
         src: v.id, srcName: v.name, spread: Math.min(1.9, v.rw * 0.28),
         cap: v.tier === "reserve" ? 18 : 10,
         flash: v.kind === "casino" ? 0xc9a227 : 0x5b8bff,
+        // an island strongroom's floor is its building's slab, not the terrain
+        onFloor: v.framed ? false : undefined,
       });
       v.bags = r.bags; v.bagsOut = true;
       VTALLY.bags += r.bags.length; VTALLY.bagged += moved;
@@ -1726,7 +1803,7 @@
       const r = orig.apply(this, arguments);
       try {
         const damages = !opts || !opts.noDamage;
-        if (damages && VAULTS.length && g.mode === "city") {
+        if (damages && (VAULTS.length || SAFES.length) && econOn()) {
           const power = (opts && opts.power) || 1;
           const arm = VBLAST_RANGE * Math.max(1, power * 0.85);
           for (let i = 0; i < VAULTS.length; i++) {
@@ -1736,6 +1813,18 @@
             if (dd > arm) continue;
             const falloff = 1 - dd / (arm + 0.01);
             vaultBlast(v, VBLAST_TO_DOOR * power * Math.max(0.25, falloff), !!(opts && opts.byPlayer));
+          }
+          // a safe is a smaller door on the same physics: the charge has to be
+          // close (a safe is a box, not a room), and the same energy is spent
+          const sArm = SBLAST_RANGE * Math.max(1, power * 0.85);
+          for (let i = SAFES.length - 1; i >= 0; i--) {
+            const sf = SAFES[i];
+            if (sf.open || !(sf.hp0 > 0)) continue;
+            const dx = sf.x - x, dz = sf.z - z, dd = Math.hypot(dx, dz);
+            if (dd > sArm) continue;
+            if (opts && opts.y != null && Math.abs(opts.y - sf.y) > 3.5) continue;
+            sf.hp -= VBLAST_TO_DOOR * power * Math.max(0.25, 1 - dd / (sArm + 0.01));
+            if (sf.hp <= 0) safeOpen(sf, "blast");
           }
         }
       } catch (e) { /* a coupling failure must never break the shared blast chain */ }
@@ -1826,6 +1915,299 @@
              bags: v.bags.length, bagged: CBZ.cashBags ? CBZ.cashBags.heldFrom(v.id) : 0 };
   };
   CBZ.cityVaults = function () { return VAULTS.slice(); };
+  // TAKE A STRONGROOM DOWN with the building it stood in (an island leaving):
+  // the door's collider, its breach registration and its slot in the list.
+  // The room's own boxes went with the building's group.
+  CBZ.cityVaultDrop = function (v) {
+    if (!v) return false;
+    const i = VAULTS.indexOf(v);
+    if (i >= 0) VAULTS.splice(i, 1);
+    if (v._breachReg && CBZ.unregisterBreachTarget) { try { CBZ.unregisterBreachTarget(v._breachReg); } catch (e) {} }
+    v._breachReg = null;
+    if (v.col && CBZ.colliders) {
+      const k = CBZ.colliders.indexOf(v.col);
+      if (k >= 0) { CBZ.colliders.splice(k, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+    }
+    if (v.group && v.group.parent) v.group.parent.remove(v.group);
+    if (v.lot && v.lot._vaultRoom === v) v.lot._vaultRoom = null;
+    return true;
+  };
+
+  /* ==========================================================================
+     THE SAFE — a vault you can carry in a van. [CBZ.citySafe]
+
+     OWNER (2026-10-22): "There's vaults everywhere. Every place should have
+     some sort of vault, but banks have the big vaults with tons of money in
+     them." So the strongroom above has a little brother in every building
+     the islands give a use to: a cash box under a bed, a wall safe behind an
+     office desk, a floor safe in a shop's back room, a strongbox in a loan
+     shark's office.
+
+     It is the SAME door with the same two ways in (the owner's rule: no
+     drilling, no lockpicking): a charge against it (the blast coupling and
+     the contact-charge breach target above), or somebody who knows the
+     combination opening it for you with his hands up. A cash box has no lock
+     at all; you just take it. What is inside is a declared balance on the
+     ONE ledger (CBZ.cityTill), which refills at the rate the place earns,
+     and it comes out through the ONE physicalisation (CBZ.cashBags.payout):
+     a little is notes in your hand, a lot is a duffel on the floor.
+
+       CBZ.citySafe(spec) -> safe
+         spec: { parent (Object3D the safe stands in), lx, ly, lz (its base,
+                 parent-local), yaw (its front faces local (sin, cos)),
+                 toWorld(lx, lz) -> {x, z}, gy (world y of the parent),
+                 grade "box"|"wall"|"floor"|"office"|"strong",
+                 of ($ when full), refillDays (pace days to refill),
+                 name, venue (whose staff can open it), id }
+       CBZ.citySafeDrop(safe)   CBZ.citySafes()   CBZ.citySafeAt(x, z, r, y)
+     ========================================================================= */
+  const SAFES = [];
+  const SBLAST_RANGE = 4.5;
+  const SSWING = 1.9;
+  const SAFE_GRADE = {
+    box:    { w: 0.36, h: 0.16, d: 0.28, hp: 0,   lb: 0, solid: false, sev: 60,  bricks: 1 },
+    wall:   { w: 0.48, h: 0.48, d: 0.34, hp: 120, lb: 1, solid: false, sev: 120, bricks: 2 },
+    floor:  { w: 0.62, h: 0.80, d: 0.62, hp: 200, lb: 2, solid: true,  sev: 150, bricks: 3 },
+    office: { w: 0.84, h: 1.30, d: 0.74, hp: 300, lb: 3, solid: true,  sev: 180, bricks: 5 },
+    strong: { w: 1.30, h: 1.95, d: 1.00, hp: 560, lb: 5, solid: true,  sev: 240, bricks: 9 },
+  };
+  function paceNow() { return CBZ.paceTime ? CBZ.paceTime() : ((CBZ.now || 0) / 150); }
+  function safeHolds(sf) {
+    const TL = CBZ.cityTill;
+    if (TL && TL.holds) { try { return TL.holds(sf, {}).amount || 0; } catch (e) { return 0; } }
+    return sf._bal || 0;
+  }
+  function safeBalance(sf) {
+    // it fills back up at the rate the place earns: a full safe in refillDays
+    const t = paceNow();
+    if (sf._t == null) sf._t = t;
+    const dt = Math.max(0, t - sf._t);
+    if (dt > 0) {
+      sf._bal = Math.min(sf.of, sf._bal + sf.of * dt / Math.max(0.25, sf.refillDays));
+      sf._t = t;
+    }
+    return Math.floor(sf._bal);
+  }
+  CBZ.citySafe = function (spec) {
+    if (!spec || !spec.parent || !THREE) return null;
+    const G = SAFE_GRADE[spec.grade] || SAFE_GRADE.floor;
+    const M2 = vmats();
+    const yaw = spec.yaw || 0;
+    const toW = spec.toWorld || function (x, z) { return { x: x, z: z }; };
+    const grp = new THREE.Group();
+    grp.position.set(spec.lx, spec.ly, spec.lz);
+    grp.rotation.y = yaw;
+    grp.name = "safe-" + (spec.grade || "floor");
+    const w = G.w, h = G.h, d = G.d, t = Math.min(0.06, w * 0.12);
+    // a hollow body, so an open door shows the inside of a box, not a slab
+    vbox(grp, w, h, t, M2.steelD, 0, h / 2, -d / 2 + t / 2);
+    for (const sx of [-1, 1]) vbox(grp, t, h, d, M2.steel, sx * (w / 2 - t / 2), h / 2, 0);
+    vbox(grp, w, t, d, M2.steel, 0, h - t / 2, 0);
+    vbox(grp, w, t, d, M2.steel, 0, t / 2, 0);
+    // the money inside, visible the moment the door is off
+    const bricks = [];
+    const nB = G.bricks;
+    for (let i = 0; i < nB; i++) {
+      const bw = Math.min(0.2, (w - 2 * t) / Math.max(1, Math.min(3, nB)) - 0.02);
+      const col = i % 3, row = Math.floor(i / 3);
+      const bx = (col - (Math.min(3, nB) - 1) / 2) * (bw + 0.02);
+      const by = t + 0.06 + row * 0.12;
+      if (by + 0.1 > h - t) break;
+      let m = null;
+      if (CBZ.itemAssetBaked) { try { m = CBZ.itemAssetBaked(null, null, null, { kind: "cashbrick" }); } catch (e) { m = null; } }
+      if (m) { m.position.set(bx, by - 0.055, -d * 0.1); m.rotation.y = Math.PI / 2; grp.add(m); }
+      else m = vbox(grp, bw, 0.1, Math.min(0.16, d * 0.5), M2.note, bx, by, -d * 0.1);
+      bricks.push(m);
+    }
+    // the door, hung on its left edge
+    const pivot = new THREE.Group();
+    pivot.position.set(-w / 2, 0, d / 2);
+    grp.add(pivot);
+    vbox(pivot, w, h, 0.06, M2.steel, w / 2, h / 2, 0.03);
+    vbox(pivot, w * 0.9, h * 0.9, 0.012, M2.steelL, w / 2, h / 2, 0.066);
+    if (G.hp > 0) {
+      const dial = vcyl(pivot, Math.min(0.08, w * 0.14), Math.min(0.08, w * 0.14), 0.04, 16, M2.brass, w * 0.62, h * 0.58, 0.09, Math.PI / 2, 0, 0);
+      dial.castShadow = false;
+      vbox(pivot, 0.03, Math.min(0.22, h * 0.3), 0.04, M2.brass, w * 0.86, h * 0.45, 0.1);
+    } else {
+      vbox(pivot, w * 0.3, 0.025, 0.04, M2.brass, w * 0.5, h * 0.8, 0.09);
+    }
+    spec.parent.add(grp);
+    // where it is in the world
+    const c = toW(spec.lx, spec.lz);
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const fr = toW(spec.lx + fx * (d / 2 + 0.55), spec.lz + fz * (d / 2 + 0.55));
+    const sf = {
+      id: spec.id || ("safe:" + Math.round(c.x * 10) + "," + Math.round(c.z * 10)),
+      grade: spec.grade || "floor", name: spec.name || "safe", venue: spec.venue || null,
+      x: c.x, z: c.z, y: (spec.gy || 0) + spec.ly, h: h, fx: fr.x, fz: fr.z,
+      floorY: spec.floorY != null ? spec.floorY : (spec.gy || 0) + spec.ly,
+      of: Math.max(0, Math.round(spec.of || 0)), refillDays: spec.refillDays || 3,
+      _bal: Math.max(0, Math.round(spec.of || 0)), _t: null,
+      hp0: G.hp, hp: G.hp, sev: G.sev,
+      open: false, opening: 0, swing: 0, openT: 0,
+      group: grp, pivot: pivot, bricks: bricks, col: null, _breachReg: null,
+    };
+    if (G.solid) {
+      // its footprint in the world (a quarter-turn building, so a box stays a box)
+      let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const lx = spec.lx + (sx * w / 2) * Math.cos(yaw) + (sz * d / 2) * Math.sin(yaw);
+        const lz = spec.lz - (sx * w / 2) * Math.sin(yaw) + (sz * d / 2) * Math.cos(yaw);
+        const q = toW(lx, lz);
+        x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); z0 = Math.min(z0, q.z); z1 = Math.max(z1, q.z);
+      }
+      sf.col = { minX: x0, maxX: x1, minZ: z0, maxZ: z1, y0: sf.y, y1: sf.y + h };
+      if (CBZ.colliderAddMany) CBZ.colliderAddMany([sf.col]); else if (CBZ.colliders) CBZ.colliders.push(sf.col);
+    }
+    const TL = CBZ.cityTill;
+    if (TL && TL.declare) {
+      TL.declare(sf, {
+        name: sf.name, kind: "safe", point: "safe",
+        amount: function () { return safeBalance(sf); },
+        drain: function (n) { safeBalance(sf); sf._bal = Math.max(0, sf._bal - n); },
+      });
+    }
+    if (G.hp > 0 && CBZ.registerBreachTarget) {
+      sf._breachReg = CBZ.registerBreachTarget({
+        id: "safe-" + sf.grade, lb: G.lb, reach: 2.2,
+        at: function () { return { x: sf.x, y: sf.y + h * 0.5, z: sf.z }; },
+        done: function () { return !!sf.open; },
+        defeat: function () { safeOpen(sf, "blast"); },
+      });
+    }
+    SAFES.push(sf);
+    wireSafeFixtures();
+    return sf;
+  };
+  CBZ.citySafeDrop = function (sf) {
+    if (!sf) return false;
+    const i = SAFES.indexOf(sf);
+    if (i >= 0) SAFES.splice(i, 1);
+    if (sf._breachReg && CBZ.unregisterBreachTarget) { try { CBZ.unregisterBreachTarget(sf._breachReg); } catch (e) {} }
+    sf._breachReg = null;
+    if (sf.col && CBZ.colliders) {
+      const k = CBZ.colliders.indexOf(sf.col);
+      if (k >= 0) { CBZ.colliders.splice(k, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+    }
+    if (sf.group && sf.group.parent) sf.group.parent.remove(sf.group);
+    return true;
+  };
+  CBZ.citySafes = function () { return SAFES.slice(); };
+  CBZ.citySafeAt = function (px, pz, reach, py) {
+    const r2 = (reach || 2.4) * (reach || 2.4);
+    let best = null, bd = r2;
+    for (let i = 0; i < SAFES.length; i++) {
+      const sf = SAFES[i];
+      if (py != null && Math.abs(sf.y - py) > 2.2) continue;
+      const dx = sf.x - px, dz = sf.z - pz, dd = dx * dx + dz * dz;
+      if (dd < bd) { bd = dd; best = sf; }
+    }
+    return best;
+  };
+  // the man who knows the combination, with his hands up beside it
+  function safeInsider(sf) {
+    if (!sf.venue) return null;
+    const L = staffBodies();
+    for (let i = 0; i < L.length; i++) {
+      const p = L[i];
+      if (!p || p.dead || !p.pos || p._venueStaff !== sf.venue) continue;
+      if (!(p.surrender || p.gunpoint || p.poseHandsUp || (p.char && p.char.handsUp))) continue;
+      const dx = p.pos.x - sf.x, dz = p.pos.z - sf.z;
+      if (dx * dx + dz * dz > 6 * 6 || Math.abs(p.pos.y - sf.y) > 2.6) continue;
+      return p;
+    }
+    return null;
+  }
+  function safeRoute(sf) {
+    if (sf.open) return "open";
+    if (!(sf.hp0 > 0)) return "hand";
+    if (CBZ.cityKeys && CBZ.cityKeys.has && CBZ.cityKeys.has(sf.id)) return "key";
+    if (safeInsider(sf)) return "insider";
+    return null;
+  }
+  function safeOpen(sf, how) {
+    if (!sf) return false;
+    const was = sf.open;
+    if (!was) { sf.open = true; sf.opening = 1; sf.swing = 0; sf.openT = paceNow(); sf.hp = 0; }
+    const TL = CBZ.cityTill;
+    let moved = 0;
+    if (TL && TL.take) { try { moved = TL.take(sf, { by: "player", rob: true }).taken || 0; } catch (e) { moved = 0; } }
+    else { moved = safeBalance(sf); sf._bal = 0; }
+    if (moved > 0) {
+      for (let i = 0; i < sf.bricks.length; i++) if (sf.bricks[i]) sf.bricks[i].visible = false;
+      if (CBZ.cashBags && CBZ.cashBags.payout) {
+        CBZ.cashBags.payout(sf.fx, sf.floorY, sf.fz, moved, { src: sf.id, srcName: sf.name, spread: 0.5, cap: 4, onFloor: false });
+      } else if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(moved);
+      if (CBZ.sfx) CBZ.sfx("coin");
+    }
+    const loud = how === "blast";
+    if (loud) {
+      if (CBZ.cityAlarm && CBZ.city) { try { CBZ.cityAlarm(sf.x, sf.z, 30, 1.4, CBZ.city.playerActor); } catch (e) {} }
+      if (CBZ.cityCrime) { try { CBZ.cityCrime(sf.sev + 60, { instant: true, x: sf.x, z: sf.z, type: "burglary" }); } catch (e) {} }
+    } else if (how !== "owner" && moved > 0) {
+      // a quiet take is a crime somebody has to see
+      if (CBZ.cityCrime) { try { CBZ.cityCrime(sf.sev, { x: sf.x, z: sf.z, type: how === "insider" ? "armed-robbery" : "burglary" }); } catch (e) {} }
+    }
+    if (CBZ.cityPanicRaise && how !== "owner") CBZ.cityPanicRaise(sf.x, sf.z, loud ? 1.2 : 0.6);
+    if (CBZ.shake && loud) CBZ.shake(0.3);
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    if (CBZ.onSafeOpened) { try { CBZ.onSafeOpened(sf, how, moved); } catch (e) {} }
+    return moved > 0 || !was;
+  }
+  CBZ.citySafeOpen = function (sf, how) { return safeOpen(sf, how || "hand"); };
+  // a safe somebody opened stays open while you are near; past a pace day,
+  // with nobody looking, the owner shuts and spins it again
+  function safeRelock(px, pz) {
+    const t = paceNow();
+    for (let i = 0; i < SAFES.length; i++) {
+      const sf = SAFES[i];
+      if (!sf.open || sf.opening > 0 || t - sf.openT < 1) continue;
+      if (Math.abs(sf.x - px) < 60 && Math.abs(sf.z - pz) < 60) continue;
+      sf.open = false; sf.swing = 0; sf.hp = sf.hp0;
+      if (sf.pivot) sf.pivot.rotation.y = 0;
+      for (let k = 0; k < sf.bricks.length; k++) if (sf.bricks[k]) sf.bricks[k].visible = true;
+    }
+  }
+  let safeWired = false;
+  const _safeOut = [];
+  function wireSafeFixtures() {
+    if (safeWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
+    safeWired = true;
+    CBZ.interactions.registerFixtures({
+      id: "safe", kind: "safe", prio: 8, islands: true,
+      list: function (ctx, px, pz) {
+        if (!SAFES.length) return null;
+        const py = ctx && ctx.pos ? ctx.pos.y : (CBZ.player ? CBZ.player.pos.y : 0);
+        _safeOut.length = 0;
+        for (let i = 0; i < SAFES.length; i++) {
+          const sf = SAFES[i];
+          if (Math.abs(sf.y - py) > 2.2) continue;
+          if (Math.abs(sf.x - px) > 4 || Math.abs(sf.z - pz) > 4) continue;
+          _safeOut.push(sf);
+        }
+        return _safeOut.length ? _safeOut : null;
+      },
+      reach: function () { return 2.6; },
+      dot: function () { return 0.45; },
+      name: function (sf) { return sf.grade === "box" ? "Cash box" : "Safe"; },
+      verbs: [
+        { id: "safe-take", slot: "e", prio: 7, bad: true,
+          label: function (sf) { return "Take $" + safeHolds(sf).toLocaleString("en-US"); },
+          canShow: function (sf) { const r = safeRoute(sf); return (r === "open" || r === "hand" || r === "key") && safeHolds(sf) > 0; },
+          onSelect: function (sf) { safeOpen(sf, safeRoute(sf) === "key" ? "key" : "hand"); } },
+        { id: "safe-insider", slot: "e", prio: 8, bad: true,
+          label: "Open it",
+          canShow: function (sf) { return !sf.open && safeRoute(sf) === "insider"; },
+          onSelect: function (sf) {
+            const p = safeInsider(sf);
+            if (p && CBZ.speech && CBZ.speech.say) { try { CBZ.speech.say(p, "Okay. Okay.", { force: true }); } catch (e) {} }
+            safeOpen(sf, "insider");
+          } },
+      ],
+    });
+  }
+  wireSafeFixtures();
 
   /* ---- THE DRESS PASS --------------------------------------------------------
      Order 90, the same landmass slot city/casino.js dresses its floors in, so
@@ -1860,11 +2242,11 @@
   }
   // one declared cash point per teller window, so "some amount in the drawer"
   // is a real balance on the ONE ledger and not a per-teller constant.
-  function declareDrawer(lot, i, x, z) {
+  function declareDrawer(lot, i, x, z, float) {
     const TL = CBZ.cityTill;
     if (!TL || !TL.declare) return null;
     const box2 = { _drawX: x, _drawZ: z };
-    const of = tellerFloat(lot);
+    const of = float > 0 ? Math.round(float) : tellerFloat(lot);
     box2._drawOf = of; box2._drawBal = of; box2._drawDay = -1;
     TL.declare(box2, {
       name: "teller drawer", kind: "bank", point: "register",
@@ -1882,6 +2264,9 @@
 
   const DRAWERS = [];
   CBZ.cityBankDrawers = function () { return DRAWERS.slice(); };
+  // a teller's drawer anywhere (an island branch's window): a real balance on
+  // the ledger, counted out fresh each day, robbed through cityBankDrawerTake
+  CBZ.cityBankDrawerDeclare = function (lot, i, x, z, float) { return declareDrawer(lot, i, x, z, float); };
   // THE DRAWER IS A REAL BALANCE OR IT IS A STAT FICTION. "Real tellers with
   // some amount" only means anything if the amount can leave, so this is the
   // verb (city/interact.js registers the card). It runs the SAME consequence
@@ -1902,7 +2287,7 @@
     // notes in your hand, through the ONE physicalisation call: a drawer is
     // always under the bag threshold, so this is wallet cash and the rule that
     // decides that lives in exactly one place.
-    if (CBZ.cashBags && CBZ.cashBags.payout) CBZ.cashBags.payout(dr._drawX, 0, dr._drawZ, r.taken, { onFloor: false });
+    if (CBZ.cashBags && CBZ.cashBags.payout) CBZ.cashBags.payout(dr._drawX, dr.y || 0, dr._drawZ, r.taken, { onFloor: false });
     else if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(r.taken);
     // the person whose window it is makes the decision every clerk in this game
     // already makes: freeze or bolt.
@@ -2054,8 +2439,8 @@
      worth of doorways off the draw list until you are near one. */
   CBZ.onUpdate(38.45, function (dt) {
     installVaultBlastWrap();       // cheap idempotent re-check (load order + hot reload)
-    if (!VAULTS.length) return;
-    if (!g || g.mode !== "city") return;
+    if (!VAULTS.length && !SAFES.length) return;
+    if (!g || !econOn()) return;
     const P = CBZ.player;
     const px = P ? P.pos.x : 0, pz = P ? P.pos.z : 0;
     for (let i = 0; i < VAULTS.length; i++) {
@@ -2084,6 +2469,15 @@
         try { v.doorMat.emissive.setRGB(0.42 * a, 0.13 * a, 0); } catch (e) {}
       }
     }
+    // a safe door's swing: the same eased arc, a lighter door
+    for (let i = 0; i < SAFES.length; i++) {
+      const sf = SAFES[i];
+      if (!(sf.opening > 0) || !sf.pivot) continue;
+      sf.swing = Math.min(SSWING, sf.swing + dt * (1.3 + sf.swing));
+      sf.pivot.rotation.y = -sf.swing;
+      if (sf.swing >= SSWING) sf.opening = 0;
+    }
+    if (SAFES.length) safeRelock(px, pz);
   });
 
   /* THE RATCHET (CLAUDE.md BLOCK LAW #5). `refused` is the honest failure of a

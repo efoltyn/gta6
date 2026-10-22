@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 432
+     Natural Disaster Survival, standing alone: index.html minus the 433
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -472,7 +472,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
      in front of him (threat by sight, the one line picker, panic by sight).
      Before read.js / peds.js / prisonvoice.js, which all call it. -->
-<script src="src/systems/voice.js?v=ord1022b"></script>
+<script src="src/systems/voice.js?v=money1022"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -987,7 +987,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/disaster_arena.js?v=mvenue1night1"></script>
 <script src="src/world/island_dressing.js?v=venue1022"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
-<script src="src/world/island_venue.js?v=shops1022"></script>
+<script src="src/world/island_venue.js?v=money1022"></script>
 <script src="src/world/island_night.js?v=night1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
 <script src="src/entities/survivorbot.js?v=mislelashops1"></script>
@@ -1603,7 +1603,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ISLANDS' SHOPS (world/island_shops.js): every island outfitter, tailor,
      optician, phone shop and trade fitted with the store systems above, per
      building, through CBZ.islandVenue; a counter and a clerk in each. -->
-<script src="src/world/island_shops.js?v=shops1022"></script>
+<script src="src/world/island_shops.js?v=money1022"></script>
+<!-- THE ISLANDS' MONEY (city/islandmoney.js): every island bank a banking hall
+     with tellers, a manager's loan desk, an ATM, guards and the strongroom
+     (city/bank.js cityVaultRoom); a safe or a cash box in every building with
+     a use (city/bank.js citySafe); the loan shark's office and his collectors
+     (CBZ.loanShark, the demand ladder). After bank.js, island_venue.js,
+     interactions.js and island_shops.js (whose counters it gives a till). -->
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
      in or at the door of is fitted out for real (finished floors, bathrooms,
      kitchens, bedrooms, stockrooms, a gang's count room, baked light from

@@ -1569,6 +1569,8 @@
   const BAG_TALLY = { spawned: 0, value: 0, picked: 0, thrown: 0, deposited: 0, lost: 0, dyed: 0 };
 
   function bagsOn() { return CFGB.CASH_BAGS_V1 !== false; }
+  // where a duffel lies: Gang City's arena, or the island you are on
+  function bagRoot() { return (g.mode !== "city" && CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.root) || arenaRoot(); }
   function fmtB(n) { return "$" + Math.round(n || 0).toLocaleString("en-US"); }
 
   /* THE CARRY POSE, registered into the SHARED pose registry rather than
@@ -1734,7 +1736,7 @@
       carried: false, held: false, vy: 0, vx: 0, vz: 0, air: false, mesh: null,
     };
     bag.mesh = bagMesh(bag);
-    const root = arenaRoot() || CBZ.scene;
+    const root = bagRoot() || CBZ.scene;
     if (root) { root.add(bag.mesh); seatMesh(bag); }
     BAGS.push(bag);
     BAG_TALLY.spawned++; BAG_TALLY.value += amount;
@@ -1851,7 +1853,7 @@
     bag.carried = false;
     if (bag.mesh && bag.mesh.parent) bag.mesh.parent.remove(bag.mesh);
     if (bag.mesh) bag.mesh.visible = true;              // a take still reaching for it hid it
-    const root = arenaRoot() || CBZ.scene;
+    const root = bagRoot() || CBZ.scene;
     if (root && bag.mesh) root.add(bag.mesh);
     releasePose();
     if (vel) {
@@ -1929,7 +1931,8 @@
     const el = g.elapsed || 0;
     if (el + 0.001 < _bagElapsed) bagsClear();
     _bagElapsed = el;
-    if (g.mode !== "city") { if (BAGS.length) bagsClear(); return; }
+    // (money is real on the islands too: a vault there drops duffels, CBZ.economyMode)
+    if (!(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) { if (BAGS.length) bagsClear(); return; }
     if (!BAGS.length) return;
     const P = CBZ.player;
     // ---- the carried bag ----------------------------------------------------

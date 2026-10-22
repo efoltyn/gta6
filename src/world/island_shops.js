@@ -120,6 +120,8 @@
       return { x: P.pos.x, z: P.pos.z };
     };
     const post = IV.staff(b, cx, R.z1 - 0.5, Math.PI, { job: opts.job || "clerk", look: look });
+    // the register on the counter is a real balance (city/islandmoney.js IV.till)
+    if (IV.till) { try { IV.till(b, { lx: cx - cw / 2 + 0.5, ly: top, lz: cz - 0.12, clerk: post, draw: false }); } catch (e) {} }
     // the clerk the shop systems ask for (theft eyes, the ladder, a thank-you)
     Object.defineProperty(L, "vendor", { configurable: true, get: function () { return post ? post.body() : null; } });
     return { local: { x: cx, z: cz, w: cw, d: cd }, top: top, post: post };

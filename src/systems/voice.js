@@ -449,6 +449,10 @@
       debt: ["I'm not asking twice.", "Don't make me take it."],
     },
     show: { "*": ["See this?", "You see this?"], debt: ["Alright. Hard way.", "Last chance."] },
+    // a street loan collected (city/islandmoney.js): the last word, and the walk-off
+    act: { debt: ["Should've paid.", "You were warned."] },
+    left: { debt: ["We'll find you.", "Tomorrow, then."] },
+    fled: { debt: ["We'll find you.", "Run. We know your face."] },
     // the street book, folded in from city/read.js
     windupKill: { "*": ["You picked the wrong day.", "You shoulda kept walking."], gangster: ["Wrong block.", "You shoulda stayed home."] },
     windupBeat: { "*": ["You wanna do this?", "Square up, then.", "Walk away."] },
