@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "672e7af86904fb1032353d9ff635da8281b02fcf",
-  "createdAt": "2026-10-26T07:39:13.223Z",
+  "sourceCommit": "355a92f0b68a3847d274a40ffd8d2acb6e35ced6",
+  "createdAt": "2026-10-26T11:48:33.706Z",
   "fileCount": 1479,
-  "totalBytes": 53190688,
+  "totalBytes": 53190718,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -93,8 +93,8 @@
     },
     {
       "file": "src/battle/beasts.js",
-      "bytes": 4820,
-      "sha256": "32c50909ae68fe7f78b21038c2017a8e68daf41b49d2de5d98856fd1a4a250ba"
+      "bytes": 4660,
+      "sha256": "5d3fc8c03f04a5b479e73a121c0a01ec6079c81767ab932d1234f9542cd07e1a"
     },
     {
       "file": "src/battle/begin.js",
@@ -263,8 +263,8 @@
     },
     {
       "file": "src/battle/men.js",
-      "bytes": 4163,
-      "sha256": "0f3757357288bc0e97f70310258332d82bc8ac71eb13828df06d46c84a310f05"
+      "bytes": 4354,
+      "sha256": "1c50f6af346c838cc26c3061c55f2f28309b255aef07d5f7126549c3fab6e8a6"
     },
     {
       "file": "src/battle/menu.js",
@@ -3898,8 +3898,8 @@
     },
     {
       "file": "src/units/kit/felid.js",
-      "bytes": 46740,
-      "sha256": "de649c5d20422a013385bd0cbccf905bdef3b2eb7ffae5f3f4f7c6c97f3a67b2"
+      "bytes": 46742,
+      "sha256": "fb27ab9cb8f9a2a99abb744769b55c2dc4c19394f1bdc6e0339335c7347d4996"
     },
     {
       "file": "src/units/kit/gait.js",
@@ -3963,8 +3963,8 @@
     },
     {
       "file": "src/units/species/bison.js",
-      "bytes": 53213,
-      "sha256": "088ad00b6c7ba8237ab018e4e657e2be164852408ea5d83b8da6784a89098692"
+      "bytes": 53217,
+      "sha256": "c842a0d1fd3dc49942a0ea0cdfcc4f5263b89cdee9f4d807f80fa1b7d0b4c956"
     },
     {
       "file": "src/units/species/black_bear.js",
@@ -3973,8 +3973,8 @@
     },
     {
       "file": "src/units/species/brown_bear.js",
-      "bytes": 38383,
-      "sha256": "9e5d5fea7bfa5e7dae387f644a25685599b003e1002a47802f1becca35a6476d"
+      "bytes": 38382,
+      "sha256": "bfe1b25b9e19478ba65b92b771feac863178e2804d1cc95d0f7546777e1258d5"
     },
     {
       "file": "src/units/species/bull_shark.js",
@@ -4078,8 +4078,8 @@
     },
     {
       "file": "src/units/species/lion.js",
-      "bytes": 41150,
-      "sha256": "4f299765ae7e60b1dd8546d98de8078565c0714f6a7ee5593a45583ed5517a66"
+      "bytes": 41153,
+      "sha256": "4d70d27a4407ad18258fc1c7f38c7206dbf782b7cdd50e62ec7693c5894b2b43"
     },
     {
       "file": "src/units/species/manta_ray.js",
@@ -4168,8 +4168,8 @@
     },
     {
       "file": "src/units/species/white_rhino.js",
-      "bytes": 33633,
-      "sha256": "36fc439966bddeb61c16f38effd90c32310d7522336952f117e9619080800480"
+      "bytes": 33612,
+      "sha256": "651ce44763e585822d1081c75bbac5c91ad30c830ac274bc0e65aec507be9391"
     },
     {
       "file": "src/units/species/white_stag.js",
@@ -7303,8 +7303,8 @@
     },
     {
       "file": "games/battle.html",
-      "bytes": 13948,
-      "sha256": "ffef012d3035053e5e57abb1acd0adad829028f597391ccba94a70c48d1c4060"
+      "bytes": 13952,
+      "sha256": "13c216a68daff63adc56dfa64c38f4370d80c7c847aa1b7154f3bd4b7dbfdb5a"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -7313,8 +7313,8 @@
     },
     {
       "file": "games/bomb-survivor.html",
-      "bytes": 75969,
-      "sha256": "9e3ee96113c822b4515a18df215a48a82c2799fb0074dcaf3a1b4a4f6abf8c95"
+      "bytes": 75973,
+      "sha256": "3651856f8da6e453f25fe61f283d0a555d06c9b5e3a75ae98d5331dee68efa1b"
     },
     {
       "file": "games/dev.html",
@@ -7338,8 +7338,8 @@
     },
     {
       "file": "games/warlord.html",
-      "bytes": 73763,
-      "sha256": "649c9ca9310f04ee2f3782641b4e34399a8bb9e73f0cb14a7e30378c8a4836ae"
+      "bytes": 73767,
+      "sha256": "d1da1ed6202a98b072a5f03655ed86ca87e40f097eeba442c3b9b2283f0a64f9"
     },
     {
       "file": "thumbs/the-isles.jpg",
