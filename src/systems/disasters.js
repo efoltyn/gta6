@@ -5854,6 +5854,14 @@
       dir.calm = false; dir.chain = null; dir.link = null; dir.nextId = null;
       return true;
     },
+    // put `amount` of damage on one island building through the ONE structural
+    // ledger (glass -> spall -> collapse.js), the same door every disaster
+    // uses. A staging/verification aid beside force(): a storyboard or a
+    // capture can choose WHICH tower the live quake brings down in frame.
+    hit(b, amount, opts) {
+      if (!b) return 0;
+      return structureHit(b, amount != null ? +amount : 1, makeCtx(0), opts || { kind: dir.curId || "disaster" });
+    },
   };
 
   CBZ.disasterAudit = function () {
