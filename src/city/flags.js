@@ -194,6 +194,9 @@
     if (CUSTOM[id]) return Object.assign(clone(CUSTOM[id]), { ratio: ratioOf(id), custom: true });
     if (REGIME[id] && REGIMES[REGIME[id]]) return Object.assign(clone(REGIMES[REGIME[id]]), { ratio: ratioOf(id), regime: REGIME[id] });
     if (base) return clone(base);
+    // a real country or force (battle/core/countries.js)
+    const real = CBZ.countries && CBZ.countries.flag ? CBZ.countries.flag(id) : null;
+    if (real) return Object.assign(clone(real), { real: true });
     const rec = polRec(id);
     const gt = rec && rec.govType;
     if (gt === "insurgency") return Object.assign(clone(FACTIONS.rebels), { name: rec.name || "Liberation Front" });
@@ -206,6 +209,8 @@
   // them): a regime or a redesign paints into the same 10:19
   function ratioOf(id) {
     if (NATIONS[id]) return NATIONS[id].ratio.slice();
+    const real = CBZ.countries && CBZ.countries.flag ? CBZ.countries.flag(id) : null;
+    if (real && real.ratio) return real.ratio.slice();
     return [2, 3];
   }
   function ids() {
@@ -268,11 +273,14 @@
     for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + i * 2 * Math.PI / n; star(g, x + Math.cos(a) * rr, y + Math.sin(a) * rr, sr, col); }
     if (centre !== false) star(g, x, y, s * 0.23, col);
   }
-  function sun(g, x, y, s, col, col2) {
-    const R = s * 0.48, r = s * 0.2;
+  function sun(g, x, y, s, col, col2, nRays) {
+    const R = s * 0.48, r = s * 0.2, n = nRays || 16;
     g.fillStyle = col;
-    for (let i = 0; i < 16; i++) {
-      const a = i * Math.PI / 8, w = Math.PI / 22, L = i % 2 ? R * 0.78 : R;
+    for (let i = 0; i < n; i++) {
+      // sixteen rays alternate long and short; a counted sun (Kurdistan's
+      // twenty-one) has them all alike, one straight up
+      const a = nRays ? -Math.PI / 2 + i * 2 * Math.PI / n : i * Math.PI / 8;
+      const w = nRays ? Math.PI / n * 0.5 : Math.PI / 22, L = !nRays && i % 2 ? R * 0.78 : R;
       g.beginPath();
       g.moveTo(x + Math.cos(a - w) * r * 1.08, y + Math.sin(a - w) * r * 1.08);
       g.lineTo(x + Math.cos(a) * L, y + Math.sin(a) * L);
@@ -416,13 +424,256 @@
     star(g, x, y - s * 0.36, s * 0.12, col);
   }
   function diamond(g, x, y, s, col) { poly(g, [[x, y - s * 0.44], [x + s * 0.3, y], [x, y + s * 0.44], [x - s * 0.3, y]], col); }
-  function drawEmblem(g, e, x, y, s, bg) {
+  // ---- THE REAL FLAGS' EMBLEMS (battle/core/countries.js) -----------------
+  // These draw in FLAG coordinates through M.map(x, y) -> canvas point (the
+  // heading offset, or the transposed banner), so a star field or a set of
+  // trigrams lands where the flag's own construction sheet puts it.
+  // M = { W, H, map, fx, fy }: the flag's size, the mapping, the emblem's
+  // own spot in flag coordinates.
+  function mpoly(g, M, P, fill) {
+    g.beginPath();
+    for (let i = 0; i < P.length; i++) { const q = M.map(P[i][0], P[i][1]); if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); }
+    g.closePath(); g.fillStyle = fill; g.fill();
+  }
+  // a star whose first point aims along `aim` (radians, flag space)
+  function mstar(g, M, x, y, R, col, aim) {
+    const q = M.map(x, y);
+    let rot = 0;
+    if (aim != null) {
+      const q2 = M.map(x + Math.cos(aim), y + Math.sin(aim));
+      rot = Math.atan2(q2[1] - q[1], q2[0] - q[0]) + Math.PI / 2;
+    }
+    star(g, q[0], q[1], R, col, rot);
+  }
+  // the US canton: 50 stars, nine rows of six and five on an 11 x 9 grid
+  function starGrid(g, e, sp, M) {
+    const cw = sp.w || M.W * 0.4, ch = sp.h || M.H * 0.54, rows = e.rows || 9, cols = e.cols || 11;
+    const R = (e.r || 0.0308) * M.H;
+    for (let r = 1; r <= rows; r++) for (let c = 1; c <= cols; c++) {
+      if ((r + c) % 2) continue;
+      mstar(g, M, cw * c / (cols + 1), ch * r / (rows + 1), R, e.color || C.white, -Math.PI / 2);
+    }
+  }
+  // the PRC's five stars: the canton is 15 x 10 units of H/20; the four small
+  // stars each point one tip at the big star's centre
+  function prcStars(g, e, M) {
+    const u = M.H / 20, col = e.color || "#FFFF00";
+    mstar(g, M, 5 * u, 5 * u, 3 * u, col, -Math.PI / 2);
+    [[10, 2], [12, 4], [12, 7], [10, 9]].forEach(function (p) {
+      mstar(g, M, p[0] * u, p[1] * u, u, col, Math.atan2(5 - p[1], 5 - p[0]));
+    });
+  }
+  // the Star of David: two interlaced outlined triangles
+  function hexagram(g, e, x, y, s) {
+    const r = s * 0.5, lw = Math.max(1.5, s * 0.09);
+    g.strokeStyle = e.color || "#0038B8"; g.lineWidth = lw; g.lineJoin = "miter";
+    for (let k = 0; k < 2; k++) {
+      g.beginPath();
+      for (let i = 0; i < 3; i++) {
+        const a = (k ? Math.PI / 2 : -Math.PI / 2) + i * 2 * Math.PI / 3;
+        const px = x + Math.cos(a) * (r - lw / 2), py = y + Math.sin(a) * (r - lw / 2);
+        if (i) g.lineTo(px, py); else g.moveTo(px, py);
+      }
+      g.closePath(); g.stroke();
+    }
+  }
+  // the taegeuk and the four trigrams on the flag's diagonals
+  function taegeuk(g, e, x0, y0, s, M) {
+    const R = s * 0.5;
+    const c = M.map(x0, y0);
+    // the diagonal toward the upper hoist, as the canvas sees it
+    const d0 = M.map(x0 - M.W, y0 - M.H), dl = Math.hypot(d0[0] - c[0], d0[1] - c[1]) || 1;
+    const dx = (d0[0] - c[0]) / dl, dy = (d0[1] - c[1]) / dl, th = Math.atan2(dy, dx);
+    const red = e.color || "#CD2E3A", blue = e.color2 || "#0047A0";
+    g.fillStyle = blue; g.beginPath(); g.arc(c[0], c[1], R, 0, Math.PI * 2); g.fill();
+    g.fillStyle = red; g.beginPath(); g.arc(c[0], c[1], R, th, th + Math.PI); g.closePath(); g.fill();
+    g.fillStyle = red; g.beginPath(); g.arc(c[0] + dx * R / 2, c[1] + dy * R / 2, R / 2, 0, Math.PI * 2); g.fill();
+    g.fillStyle = blue; g.beginPath(); g.arc(c[0] - dx * R / 2, c[1] - dy * R / 2, R / 2, 0, Math.PI * 2); g.fill();
+    // trigrams: bars H/24 thick, H/48 apart, H/4 long, inner edge 3H/8 out
+    const H = M.H, bw = H / 24, gap = H / 48, L = H / 4, d1 = 3 * H / 8;
+    const dirs = [[-M.W, -M.H, [1, 1, 1]], [M.W, -M.H, [0, 1, 0]], [-M.W, M.H, [1, 0, 1]], [M.W, M.H, [0, 0, 0]]];
+    for (const D of dirs) {
+      const l = Math.hypot(D[0], D[1]), ux = D[0] / l, uy = D[1] / l, tx = -uy, ty = ux;
+      for (let b = 0; b < 3; b++) {
+        const r0 = d1 + b * (bw + gap), r1 = r0 + bw;
+        const segs = D[2][b] ? [[-L / 2, L / 2]] : [[-L / 2, -gap * 1.1], [gap * 1.1, L / 2]];
+        for (const sg of segs) {
+          mpoly(g, M, [
+            [x0 + ux * r0 + tx * sg[0], y0 + uy * r0 + ty * sg[0]], [x0 + ux * r0 + tx * sg[1], y0 + uy * r0 + ty * sg[1]],
+            [x0 + ux * r1 + tx * sg[1], y0 + uy * r1 + ty * sg[1]], [x0 + ux * r1 + tx * sg[0], y0 + uy * r1 + ty * sg[0]],
+          ], e.color3 || C.black);
+        }
+      }
+    }
+  }
+  // the Ashoka Chakra: rim, 24 spokes, hub
+  function chakra(g, e, x, y, s) {
+    const R = s * 0.5, col = e.color || "#000080";
+    g.strokeStyle = col; g.fillStyle = col;
+    g.lineWidth = Math.max(1, s * 0.05); g.beginPath(); g.arc(x, y, R - g.lineWidth / 2, 0, Math.PI * 2); g.stroke();
+    g.lineWidth = Math.max(0.8, s * 0.018);
+    for (let i = 0; i < 24; i++) {
+      const a = i * Math.PI / 12;
+      g.beginPath(); g.moveTo(x + Math.cos(a) * R * 0.12, y + Math.sin(a) * R * 0.12); g.lineTo(x + Math.cos(a) * R * 0.92, y + Math.sin(a) * R * 0.92); g.stroke();
+    }
+    g.beginPath(); g.arc(x, y, R * 0.16, 0, Math.PI * 2); g.fill();
+  }
+  // a crescent opening along `dir` (0 = toward the fly) and its star
+  function crescent(g, e, x, y, s, bg) {
+    const dir = e.dir || 0, cx = Math.cos(dir), cy = Math.sin(dir), col = e.color || C.white;
+    g.fillStyle = col; g.beginPath(); g.arc(x, y, s * 0.5, 0, Math.PI * 2); g.fill();
+    const off = (e.off != null ? e.off : 0.125) * s;
+    g.fillStyle = e.bg || bg || C.black; g.beginPath(); g.arc(x + cx * off, y + cy * off, (e.k || 0.4) * s, 0, Math.PI * 2); g.fill();
+    const sd = (e.starD != null ? e.starD : 0.66) * s;
+    star(g, x + cx * sd, y + cy * sd, (e.starR || 0.25) * s, col, dir + Math.PI + Math.PI / 2);
+  }
+  // pseudo-calligraphy: a deterministic line of joined letters, written right
+  // to left on a baseline, with risers, bowls, teeth and dots
+  function script(g, e, M) {
+    const at = e.at || [0.5, 0.5];
+    const wpx = (e.w || 0.6) * M.W, h = (e.h || 0.14) * M.H;
+    const x1 = at[0] * M.W + wpx / 2, x0 = at[0] * M.W - wpx / 2, base = at[1] * M.H + h * 0.18;
+    let st = h32(e.seed || "script") || 1;
+    const rnd = function () { st ^= st << 13; st ^= st >>> 17; st ^= st << 5; return ((st >>> 0) % 10007) / 10007; };
+    const lw = Math.max(1.2, h * 0.15);
+    g.strokeStyle = e.color || C.white; g.fillStyle = e.color || C.white;
+    g.lineWidth = lw; g.lineCap = "round"; g.lineJoin = "round";
+    const line = function (P) {
+      g.beginPath();
+      for (let i = 0; i < P.length; i++) { const q = M.map(P[i][0], P[i][1]); if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); }
+      g.stroke();
+    };
+    const dot = function (x, y) { const q = M.map(x, y); g.beginPath(); g.arc(q[0], q[1], lw * 0.75, 0, Math.PI * 2); g.fill(); };
+    let x = x1;
+    const letter = h * 0.3;
+    while (x > x0 + letter) {
+      // a word: two to five joined letters
+      const n = 2 + Math.floor(rnd() * 4);
+      for (let i = 0; i < n && x > x0 + letter; i++) {
+        const t = rnd(), lx = x - letter;
+        if (t < 0.3) {                      // a tall riser (alif, lam)
+          const top = base - h * (0.72 + rnd() * 0.28);
+          line([[x, base], [x - letter * 0.15, base], [x - letter * 0.2, top + h * 0.05], [x - letter * 0.12, top]]);
+        } else if (t < 0.52) {              // a bowl under the line
+          const P = [];
+          for (let k = 0; k <= 8; k++) { const a = k / 8 * Math.PI; P.push([x - letter * 0.5 - Math.cos(a) * letter * 0.5, base + Math.sin(a) * h * 0.32]); }
+          line(P);
+        } else if (t < 0.72) {              // teeth
+          line([[x, base], [x - letter * 0.2, base - h * 0.22], [x - letter * 0.4, base], [x - letter * 0.6, base - h * 0.22], [x - letter * 0.8, base]]);
+          if (rnd() < 0.6) dot(x - letter * 0.4, base - h * 0.45);
+        } else if (t < 0.86) {              // a closed loop on the line
+          const P = [];
+          for (let k = 0; k <= 10; k++) { const a = k / 10 * Math.PI * 2; P.push([x - letter * 0.45 + Math.cos(a) * letter * 0.32, base - h * 0.16 + Math.sin(a) * h * 0.16]); }
+          line(P);
+        } else {                            // a flat stroke with a dot below
+          dot(x - letter * 0.5, base + h * 0.3);
+        }
+        line([[x, base], [lx, base]]);
+        x = lx;
+      }
+      // the word's tail sweeps up, then a space
+      if (rnd() < 0.5) line([[x, base], [x - letter * 0.35, base - h * 0.12]]);
+      x -= letter * (0.45 + rnd() * 0.35);
+    }
+  }
+  // the Saudi sword: blade to the hoist, hilt and guard at the fly
+  function sword(g, e, M) {
+    const at = e.at || [0.5, 0.72], w = (e.w || 0.6) * M.W, H = M.H;
+    const x0 = at[0] * M.W - w / 2, x1 = at[0] * M.W + w / 2, y = at[1] * H, col = e.color || C.white;
+    const hilt = x1 - w * 0.16;
+    mpoly(g, M, [[x0, y + H * 0.006], [x0 + w * 0.06, y - H * 0.018], [hilt, y - H * 0.016], [hilt, y + H * 0.016], [x0 + w * 0.08, y + H * 0.014]], col);
+    mpoly(g, M, [[hilt - H * 0.008, y - H * 0.05], [hilt + H * 0.008, y - H * 0.05], [hilt + H * 0.008, y + H * 0.05], [hilt - H * 0.008, y + H * 0.05]], col);
+    mpoly(g, M, [[hilt, y - H * 0.012], [x1 - w * 0.02, y - H * 0.014], [x1, y - H * 0.03], [x1, y + H * 0.02], [hilt, y + H * 0.012]], col);
+  }
+  // the emblem of Iran: four crescents round a sword, the shadda above
+  function iranEmblem(g, e, x, y, s) {
+    const col = e.color || "#DA0000";
+    // a crescent: a ring section about the sword, tapering to a point at both
+    // horns and thickest at the waist
+    const moon = function (sd, R, w, a0, a1) {
+      const P = [], Q = [], N = 18;
+      for (let i = 0; i <= N; i++) {
+        const t = i / N, a = a0 + (a1 - a0) * t, th = w * Math.pow(Math.sin(Math.PI * t), 0.8);
+        const cx = -Math.cos(a) * sd, cy = Math.sin(a);
+        P.push([x + cx * R, y + s * 0.04 + cy * R]);
+        Q.push([x + cx * (R - th), y + s * 0.04 + cy * (R - th)]);
+      }
+      poly(g, P.concat(Q.reverse()), col);
+    };
+    for (let sd = -1; sd <= 1; sd += 2) {
+      // angles measured from the sword's side: PI is straight out to that side
+      moon(sd, s * 0.46, s * 0.12, Math.PI * 0.6, Math.PI * 1.5);
+      moon(sd, s * 0.30, s * 0.085, Math.PI * 0.64, Math.PI * 1.42);
+    }
+    // the sword, point up, its hilt at the foot
+    poly(g, [[x, y - s * 0.52], [x + s * 0.04, y - s * 0.34], [x + s * 0.028, y + s * 0.4], [x - s * 0.028, y + s * 0.4], [x - s * 0.04, y - s * 0.34]], col);
+    poly(g, [[x - s * 0.13, y + s * 0.4], [x + s * 0.13, y + s * 0.4], [x + s * 0.1, y + s * 0.48], [x - s * 0.1, y + s * 0.48]], col);
+    // the shadda over the point
+    g.strokeStyle = col; g.lineCap = "round"; g.lineJoin = "round"; g.lineWidth = Math.max(1, s * 0.045);
+    g.beginPath(); g.moveTo(x - s * 0.13, y - s * 0.5); g.quadraticCurveTo(x - s * 0.08, y - s * 0.6, x - s * 0.04, y - s * 0.52);
+    g.moveTo(x + s * 0.04, y - s * 0.52); g.quadraticCurveTo(x + s * 0.08, y - s * 0.6, x + s * 0.13, y - s * 0.5); g.stroke();
+  }
+  // Iran's takbir in Kufic, repeated along the edge of a band: `y` is the
+  // edge (share of the hoist), dir -1 = written up into the band above
+  function takbirBorder(g, e, M) {
+    const n = e.n || 11, H = M.H, hh = H * 0.032, ye = (e.y || 1 / 3) * H, dir = e.dir || -1;
+    const yb = ye + dir * H * 0.012, step = M.W / n, col = e.color || C.white;
+    const cols = [0.04, 0.2, 0.3, 0.52, 0.6, 0.8, 0.94];
+    for (let i = 0; i < n; i++) {
+      const x0 = i * step + step * 0.12, w = step * 0.76;
+      mpoly(g, M, [[x0, yb], [x0 + w, yb], [x0 + w, yb + dir * hh * 0.22], [x0, yb + dir * hh * 0.22]], col);
+      for (let k = 0; k < cols.length; k++) {
+        const t = cols[k], hk = k % 3 === 0 ? 1 : (k % 3 === 1 ? 0.62 : 0.8);
+        mpoly(g, M, [[x0 + w * t, yb], [x0 + w * t + w * 0.05, yb], [x0 + w * t + w * 0.05, yb + dir * hh * hk], [x0 + w * t, yb + dir * hh * hk]], col);
+      }
+    }
+  }
+  // an arm rising out of a globe, the fist closed on an upright rifle
+  function raisedRifle(g, e, x, y, s) {
+    const col = e.color || "#D9252A", rim = e.color2 || null;
+    const draw = function (fill, k) {
+      g.fillStyle = fill; g.strokeStyle = fill;
+      // the globe: a ring, the equator, a meridian
+      g.lineWidth = Math.max(1, s * 0.035 + k * 2);
+      const gy = y + s * 0.27, gr = s * 0.2;
+      g.beginPath(); g.arc(x, gy, gr, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.ellipse(x, gy, gr * 0.45, gr, 0, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.moveTo(x - gr, gy); g.lineTo(x + gr, gy); g.stroke();
+      // the forearm from the globe up to the fist
+      poly(g, [[x - s * 0.07 - k, gy - gr * 0.6], [x + s * 0.05 + k, gy - gr * 0.6], [x + s * 0.06 + k, y - s * 0.12], [x - s * 0.06 - k, y - s * 0.12]], fill);
+      // the fist
+      poly(g, [[x - s * 0.085 - k, y - s * 0.11], [x + s * 0.085 + k, y - s * 0.11], [x + s * 0.08 + k, y - s * 0.22 - k], [x - s * 0.08 - k, y - s * 0.22 - k]], fill);
+      // the rifle: barrel up out of the fist, the front sight, the curved magazine
+      poly(g, [[x - s * 0.018 - k, y - s * 0.2], [x + s * 0.018 + k, y - s * 0.2], [x + s * 0.014 + k, y - s * 0.52 - k], [x - s * 0.014 - k, y - s * 0.52 - k]], fill);
+      poly(g, [[x + s * 0.014, y - s * 0.44], [x + s * 0.05 + k, y - s * 0.46], [x + s * 0.05 + k, y - s * 0.42], [x + s * 0.014, y - s * 0.41]], fill);
+      poly(g, [[x + s * 0.03, y - s * 0.26], [x + s * 0.12 + k, y - s * 0.3], [x + s * 0.16 + k, y - s * 0.22], [x + s * 0.07, y - s * 0.2]], fill);
+      // leaves either side of the globe
+      for (let sd = -1; sd <= 1; sd += 2) {
+        for (let i = 0; i < 4; i++) {
+          const a = Math.PI / 2 + sd * (0.9 + i * 0.32), lr = gr * 1.35;
+          g.beginPath(); g.ellipse(x + Math.cos(a) * lr, gy + Math.sin(a) * lr * 0.9, s * 0.045 + k, s * 0.02 + k, a + sd * 1.1, 0, Math.PI * 2); g.fill();
+        }
+      }
+    };
+    if (rim) draw(rim, Math.max(1, s * 0.012));
+    draw(col, 0);
+  }
+  // the maple leaf, eleven points
+  const MAPLE_R = [[0, -0.92], [0.1, -0.7], [0.24, -0.76], [0.18, -0.36], [0.4, -0.56], [0.46, -0.44], [0.68, -0.5],
+    [0.6, -0.24], [0.72, -0.18], [0.42, 0.08], [0.48, 0.2], [0.06, 0.14], [0.07, 0.56], [0, 0.56]];
+  function maple(g, e, x, y, s) {
+    const k = s * 0.5, P = [];
+    for (let i = 0; i < MAPLE_R.length; i++) P.push([x + MAPLE_R[i][0] * k, y + MAPLE_R[i][1] * k]);
+    for (let i = MAPLE_R.length - 2; i >= 1; i--) P.push([x - MAPLE_R[i][0] * k, y + MAPLE_R[i][1] * k]);
+    poly(g, P, e.color || "#FF0000");
+  }
+  function drawEmblem(g, e, x, y, s, bg, M, sp) {
     if (!e || !e.kind || e.kind === "none" || !(s > 1)) return;
     const col = e.color || C.gold;
     switch (e.kind) {
       case "star": star(g, x, y, s * 0.46, col); break;
       case "star-ring": starRing(g, x, y, s, col, e.n || 13); break;
-      case "sun": sun(g, x, y, s, col, e.color2); break;
+      case "sun": sun(g, x, y, s, col, e.color2, e.n); break;
       case "crown": crown(g, x, y, s, col, e.color2); break;
       case "eagle": eagle(g, x, y, s, col); break;
       case "eagle-ring": starRing(g, x, y, s, e.color2 || C.white, e.n || 13, false); eagle(g, x, y + s * 0.03, s * 0.62, col); break;
@@ -436,6 +687,27 @@
       case "winged-sword": wingedSword(g, x, y, s, col); break;
       case "crossed-rifles": crossedRifles(g, x, y, s, col); break;
       case "diamond": diamond(g, x, y, s, col); break;
+      case "star-grid": if (M) starGrid(g, e, sp || {}, M); break;
+      case "prc-stars": if (M) prcStars(g, e, M); break;
+      case "hexagram": hexagram(g, e, x, y, s); break;
+      case "disc": g.fillStyle = col; g.beginPath(); g.arc(x, y, s * 0.5, 0, Math.PI * 2); g.fill(); break;
+      case "disc-star":
+        g.fillStyle = col; g.beginPath(); g.arc(x, y, s * 0.5, 0, Math.PI * 2); g.fill();
+        star(g, x, y, s * 0.47, e.color2 || C.scarlet); break;
+      case "taegeuk": if (M) taegeuk(g, e, M.fx, M.fy, s, M); break;
+      case "chakra": chakra(g, e, x, y, s); break;
+      case "crescent": crescent(g, e, x, y, s, bg); break;
+      case "stars-row": {
+        const n = e.n || 3, gx = (e.gapX || 0.22) * (M ? M.W : s * 3);
+        for (let i = 0; i < n; i++) star(g, x + (i - (n - 1) / 2) * gx, y, s * 0.5, col);
+        break;
+      }
+      case "script": if (M) script(g, e, M); break;
+      case "sword": if (M) sword(g, e, M); break;
+      case "iran": iranEmblem(g, e, x, y, s); break;
+      case "takbir-border": if (M) takbirBorder(g, e, M); break;
+      case "raised-rifle": raisedRifle(g, e, x, y, s); break;
+      case "maple": maple(g, e, x, y, s); break;
       default: star(g, x, y, s * 0.46, col);
     }
   }
@@ -472,7 +744,7 @@
       const ch = sh * (d.cantonStripes || 5), cw = W * (d.cantonW || 0.4);
       g.fillStyle = d.colors[2] || C.navy; g.fillRect(0, 0, cw, ch);
       seam(g, cw, 0, cw, ch); seam(g, 0, ch, cw, ch);
-      return { x: cw / 2, y: ch / 2, s: ch * 0.84, bg: d.colors[2] || C.navy };
+      return { x: cw / 2, y: ch / 2, s: ch * 0.84, bg: d.colors[2] || C.navy, w: cw, h: ch };
     },
     nordic: function (g, d, W, H) {
       // Norway's 6-1-2-1-12 x 6-1-2-1-6 (22 x 16); without an inner colour the
@@ -540,6 +812,51 @@
       g.fillStyle = d.colors[1] || C.white; g.beginPath(); g.arc(x, H / 2, r, 0, Math.PI * 2); g.fill();
       return { x: x, y: H / 2, s: r * 1.5, bg: d.colors[1] || C.white };
     },
+    // any number of horizontal bands at their real widths (`bands` weights):
+    // Russia, Germany, Israel's 15-25-80-25-15, North Korea's 6-1-22-1-6
+    "bands-h": function (g, d, W, H) {
+      bandsH(g, d.colors, d.bands, W, H);
+      return { x: W / 2, y: H / 2, s: H * 0.5, bg: d.colors[Math.floor(d.colors.length / 2)] };
+    },
+    // vertical bands at their weights: Pakistan's 1-3, Canada's 1-2-1
+    "bands-v": function (g, d, W, H) {
+      const cols = d.colors, rat = d.bands;
+      let tot = 0; for (let i = 0; i < cols.length; i++) tot += rat ? rat[i] : 1;
+      let x = 0;
+      for (let i = 0; i < cols.length; i++) {
+        const w = W * (rat ? rat[i] : 1) / tot;
+        g.fillStyle = cols[i]; g.fillRect(x, 0, w + 0.5, H);
+        if (i) seam(g, x, 0, x, H);
+        x += w;
+      }
+      return { x: W / 2, y: H / 2, s: H * 0.5, bg: cols[Math.floor(cols.length / 2)] };
+    },
+    // the Union Flag at 1:2 on a 30-unit hoist: the white saltire 6, the red
+    // saltire 2 COUNTERCHANGED (in each arm the red lies to one side of the
+    // centre line, so the broad white is uppermost at the hoist), the white
+    // cross 10, the red cross 6
+    union: function (g, d, W, H) {
+      const blue = d.colors[0], white = d.colors[1] || C.white, red = d.colors[2] || C.crimson, u = H / 30;
+      const cx = W / 2, cy = H / 2;
+      g.save();
+      g.beginPath(); g.rect(0, 0, W, H); g.clip();
+      g.fillStyle = blue; g.fillRect(0, 0, W, H);
+      g.strokeStyle = white; g.lineWidth = 6 * u; g.lineCap = "butt";
+      g.beginPath(); g.moveTo(-W * 0.1, -H * 0.1); g.lineTo(W * 1.1, H * 1.1); g.moveTo(W * 1.1, -H * 0.1); g.lineTo(-W * 0.1, H * 1.1); g.stroke();
+      [[0, 0], [W, 0], [W, H], [0, H]].forEach(function (c) {
+        const dx = c[0] - cx, dy = c[1] - cy, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+        const ox = uy * 2 * u, oy = -ux * 2 * u, fx = cx + ux * L * 1.2, fy = cy + uy * L * 1.2;
+        g.save();
+        g.beginPath(); g.rect(c[0] ? cx : 0, c[1] ? cy : 0, cx, cy); g.clip();
+        g.fillStyle = red;
+        g.beginPath(); g.moveTo(cx, cy); g.lineTo(fx, fy); g.lineTo(fx + ox, fy + oy); g.lineTo(cx + ox, cy + oy); g.closePath(); g.fill();
+        g.restore();
+      });
+      g.fillStyle = white; g.fillRect(cx - 5 * u, 0, 10 * u, H); g.fillRect(0, cy - 5 * u, W, 10 * u);
+      g.fillStyle = red; g.fillRect(cx - 3 * u, 0, 6 * u, H); g.fillRect(0, cy - 3 * u, W, 6 * u);
+      g.restore();
+      return { x: cx, y: cy, s: H * 0.5, bg: red };
+    },
     border: function (g, d, W, H) {
       g.fillStyle = d.colors[1] || C.gold; g.fillRect(0, 0, W, H);
       const b = H * 0.06;
@@ -596,12 +913,25 @@
     g.moveTo(FW - 4.5, 0); g.lineTo(FW - 4.5, FH); g.moveTo(FW - 8.5, 0); g.lineTo(FW - 8.5, FH);
     g.stroke(); g.setLineDash([]);
     g.restore();
-    // the emblem, upright in canvas space whatever the cloth's orientation
-    const e = emblemColour(d, spot.bg);
-    if (e && e.kind && e.kind !== "none") {
+    // the emblems, upright in canvas space whatever the cloth's orientation.
+    // `emblem` sits on the layout's spot (or at its own `at`); a real flag
+    // may carry more (`emblems`: Saudi Arabia's sword under its script,
+    // Iran's takbir along both bands)
+    const M = { W: FW, H: FH, fx: 0, fy: 0,
+      map: opts.vertical ? function (x, y) { return [y, x]; } : function (x, y) { return [x + ox, y]; } };
+    const list = [];
+    if (d.emblem && d.emblem.kind && d.emblem.kind !== "none") list.push(d.emblem);
+    if (Array.isArray(d.emblems)) for (let i = 0; i < d.emblems.length; i++) if (d.emblems[i] && d.emblems[i].kind) list.push(d.emblems[i]);
+    for (let i = 0; i < list.length; i++) {
+      const e0 = list[i];
+      const sp = e0.at ? { x: e0.at[0] * FW, y: e0.at[1] * FH, s: (e0.at[2] || 0.5) * FH, bg: spot.bg, w: spot.w, h: spot.h } : spot;
+      // the contrast fix is for a design somebody composed (the President's);
+      // an authored real flag keeps its own colours
+      const e = e0 === d.emblem && !e0.at ? emblemColour(d, sp.bg) : e0;
+      M.fx = sp.x; M.fy = sp.y;
+      const q = M.map(sp.x, sp.y);
       g.save();
-      const cx = opts.vertical ? spot.y : spot.x + ox, cy = opts.vertical ? spot.x : spot.y;
-      drawEmblem(g, e, cx, cy, spot.s, spot.bg);
+      drawEmblem(g, e, q[0], q[1], sp.s, sp.bg, M, sp);
       g.restore();
     }
     // the dye: a faint grain so a field is cloth, not a fill
@@ -738,7 +1068,7 @@
   // textures, all repainted in place when the design changes
   const T = Object.create(null);
   const A = { textures: 0, repaints: 0, poles: 0, staffs: 0, banners: 0, hands: 0, cars: 0, instanced: 0, buckets: 0, events: 0 };
-  function sig(d) { return JSON.stringify([d.layout, d.colors, d.emblem, d.stripes, d.cantonStripes, d.cantonW, d.points, d.bands]); }
+  function sig(d) { return JSON.stringify([d.layout, d.colors, d.emblem, d.emblems, d.stripes, d.cantonStripes, d.cantonW, d.points, d.bands]); }
   function texH(ratio) { return Math.max(64, Math.round(TEX_W * ratio[0] / ratio[1])); }
   function newTex(canvas) {
     const t = new THREE.CanvasTexture(canvas);
@@ -1526,7 +1856,7 @@
   }
 
   CBZ.flags = {
-    designFor: designFor, nationAt: nationAt, home: home, ids: ids,
+    designFor: designFor, nationAt: nationAt, home: home, ids: ids, ratioOf: ratioOf,
     paint: paint, dataURL: dataURL, material: material, texture: texture, bannerMaterial: bannerMaterial,
     pole: pole, staff: staff, banner: banner, hand: hand, car: car, flush: flush,
     setCustom: setCustom, setRegime: setRegime, custom: function (id) { return CUSTOM[id] ? clone(CUSTOM[id]) : null; },

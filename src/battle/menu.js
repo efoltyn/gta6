@@ -64,12 +64,16 @@ CBZ.npcwar.onBoot(function () {
   if (tierOf(SET.map) === "more") gDet.open = true;
   CBZ.studio.prefetch(MAPS[SET.map].packs);       // whatever was chosen last time
 });
-function fillGuns(sel, cur) {
+// the guns on the menu; the side's country names the row its service rifle
+// fires as by that rifle ("L85A3" on the carbine row for the UK)
+function fillGuns(sel, cur, nation) {
   let h = "";
+  const R = nation && CBZ.countries ? CBZ.countries.rifle(nation) : null;
   GUN_ORDER.forEach(function (id) {
     const w = CBZ.weaponById && CBZ.weaponById(id);
     if (!w) return;
-    h += "<option value=\"" + id + "\"" + (cur === id ? " selected" : "") + ">" + w.label + "</option>";
+    const label = R && R.gun === id ? R.name : w.label;
+    h += "<option value=\"" + id + "\"" + (cur === id ? " selected" : "") + ">" + label + "</option>";
   });
   h += "<option value=\"mixed\"" + (cur === "mixed" ? " selected" : "") + ">MIXED RIFLES</option>";
   h += "<option value=\"everything\"" + (cur === "everything" ? " selected" : "") + ">EVERYTHING</option>";
@@ -145,16 +149,74 @@ function fillKind(sel, cur) {
   sel.innerHTML = h;
   setKind(sel, cur);
 }
-// the nations an army can fight for (city/flags.js); hidden until it loads
+/* THE COUNTRY an army fights for (battle/core/countries.js): the select
+   holds the value and lists them by kind (countries, armed forces, armed
+   groups); the strip under it is the same choice as flags, one tap each.
+   A country brings its rifle and its training into the two rows above it;
+   both stay yours to change. An id the list does not hold (a URL naming one
+   of the city's nations) is added rather than dropped. */
 function fillFlag(sel, cur) {
-  const ids = CBZ.flags && CBZ.flags.ids ? CBZ.flags.ids() : [];
-  const f = sel.closest ? sel.closest(".f") : null;
-  if (!ids.length) { if (f) f.style.display = "none"; return; }
-  sel.innerHTML = ids.map(function (id) {
-    return "<option value=\"" + id + "\"" + (cur === id ? " selected" : "") + ">" +
-      String(CBZ.battleSides.nationName(id)).toUpperCase() + "</option>";
-  }).join("");
+  const C = CBZ.countries;
+  if (!C) return;
+  let h = "";
+  C.groups().forEach(function (G) {
+    h += "<optgroup label=\"" + G.title + "\">" + G.ids.map(function (id) {
+      return "<option value=\"" + id + "\"" + (cur === id ? " selected" : "") + ">" + esc(String(C.name(id)).toUpperCase()) + "</option>";
+    }).join("") + "</optgroup>";
+  });
+  sel.innerHTML = h;
   sel.value = cur;
+  if (cur && sel.value !== cur) {
+    const o = document.createElement("option");
+    o.value = cur; o.textContent = String(CBZ.battleSides.nationName(cur)).toUpperCase();
+    sel.insertBefore(o, sel.firstChild);
+    sel.value = cur;
+  }
+}
+const FLAG_TILE = {};
+function flagTile(id) {
+  if (FLAG_TILE[id] != null) return FLAG_TILE[id];
+  let u = "";
+  try { u = CBZ.flags && CBZ.flags.dataURL ? CBZ.flags.dataURL(id, 72) || "" : ""; } catch (e) {}
+  return (FLAG_TILE[id] = u);
+}
+function fillFlagStrip(team) {
+  const box = el(team + "FS"), C = CBZ.countries;
+  if (!box || !C) return;
+  box.innerHTML = "";
+  C.list().forEach(function (r) {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.id = r.id; b.title = r.name; b.setAttribute("aria-label", r.name);
+    const u = flagTile(r.id);
+    b.innerHTML = u ? "<img alt=\"\" src=\"" + u + "\">" : "<span>" + esc(r.short) + "</span>";
+    b.addEventListener("click", function () { pickCountry(team, r.id); menuTouched(); });
+    box.appendChild(b);
+  });
+  markFlagStrip(team);
+}
+function markFlagStrip(team) {
+  const box = el(team + "FS");
+  if (!box) return;
+  const cur = el(team + "F").value;
+  box.querySelectorAll("button").forEach(function (b) { b.classList.toggle("on", b.dataset.id === cur); });
+}
+// a country picked: its flag, and its rifle and training into the rows above
+function pickCountry(team, id, keep) {
+  const sel = el(team + "F");
+  if (sel.value !== id) {
+    sel.value = id;
+    if (sel.value !== id) fillFlag(sel, id);
+  }
+  const C = CBZ.countries;
+  const R = C ? C.rifle(id) : null;
+  const w = el(team + "W");
+  const cur = keep && keep.w ? keep.w : (R ? R.gun : w.value);
+  fillGuns(w, cur, id);
+  w.value = cur;
+  if (!(keep && keep.t) && C && C.training(id)) el(team + "T").value = C.training(id);
+  if (keep && keep.t) el(team + "T").value = keep.t;
+  markFlagStrip(team);
+  sumUp();
 }
 /* A MATCHUP MAY HAND THIS A ROSTER THE LIST DOES NOT OFFER (a mixed side, or
    a species a pack has not loaded yet). A select silently showing the wrong
@@ -184,6 +246,8 @@ function kindRows(team) {
     const f = s.closest(".f") || s;
     f.classList.toggle("off", r[1]);
   });
+  const fs = el(team + "FS");
+  if (fs) fs.classList.toggle("off", noArmy);
   sumUp();
 }
 function fillTraining(sel, cur) {
@@ -197,13 +261,15 @@ function fillSupport(sel, cur) {
   }).join("");
 }
 CBZ.npcwar.onBoot(function () {
-  fillGuns(el("redW"), SET.redW); fillGuns(el("blueW"), SET.blueW);
+  fillGuns(el("redW"), SET.redW, SET.nationA); fillGuns(el("blueW"), SET.blueW, SET.nationB);
   fillTraining(el("redT"), SET.redT); fillTraining(el("blueT"), SET.blueT);
   fillSupport(el("redS"), SET.redS); fillSupport(el("blueS"), SET.blueS);
   fillKind(el("redU"), SET.redU); fillKind(el("blueU"), SET.blueU);
   fillFlag(el("redF"), SET.nationA); fillFlag(el("blueF"), SET.nationB);
   ["red", "blue"].forEach(function (t) {
     el(t + "U").addEventListener("change", function () { kindRows(t); });
+    el(t + "F").addEventListener("change", function () { pickCountry(t, el(t + "F").value); });
+    fillFlagStrip(t);
     kindRows(t);
   });
   el("redN").value = SET.redN; el("blueN").value = SET.blueN;
@@ -237,6 +303,14 @@ CBZ.npcwar.onBoot(function () {
    LINE-UP is the animation test bed as a button: one of each shark with
    something to chase, for the STUDY camera (V, and [ ] to walk it). */
 const MATCHUPS = [
+  /* COUNTRIES. A side's `f` is its country (battle/core/countries.js): the
+     flag, the rifle (unless `w` says otherwise) and the kit come with it. */
+  { q: "100 US SOLDIERS v 1000 IRGC", sub: "M4s against ten times the AKs", map: "dunes",
+    r: { u: "men", n: 100, f: "usa", t: "elite" }, b: { u: "men", n: 1000, f: "irgc", t: "pro" } },
+  { q: "300 RUSSIANS v 300 UKRAINIANS", sub: "AK-12 against AK-74", map: "snow",
+    r: { u: "men", n: 300, f: "rus" }, b: { u: "men", n: 300, f: "ukr" } },
+  { q: "200 BRITISH v 200 CHINESE", sub: "two bullpups", map: "grass",
+    r: { u: "men", n: 200, f: "gbr" }, b: { u: "men", n: 200, f: "chn" } },
   { q: "100 MEN v A GORILLA", sub: "bare fists, nobody trained", map: "dunes",
     r: { u: "men", n: 100, w: "fists", t: "civ" }, b: { u: "gorilla", n: 1 } },
   { q: "A TIGER v A LION", sub: "one on one", map: "dunes",
@@ -289,7 +363,7 @@ function muMatches(mu) {
   return [["red", mu.r], ["blue", mu.b]].every(function (row) {
     const t = row[0], v = row[1];
     return el(t + "U").value === v.u && String(el(t + "N").value) === String(v.n) &&
-      (!v.w || el(t + "W").value === v.w) && (!v.t || el(t + "T").value === v.t);
+      (!v.w || el(t + "W").value === v.w) && (!v.t || el(t + "T").value === v.t) && (!v.f || el(t + "F").value === v.f);
   });
 }
 CBZ.npcwar.onBoot(function () {
@@ -308,6 +382,7 @@ CBZ.npcwar.onBoot(function () {
         const t = row[0], v = row[1];
         setKind(el(t + "U"), v.u);
         el(t + "N").value = v.n;
+        if (v.f) pickCountry(t, v.f, { w: v.w, t: v.t });
         if (v.w) el(t + "W").value = v.w;
         if (v.t) el(t + "T").value = v.t;
         kindRows(t);

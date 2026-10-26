@@ -50,6 +50,7 @@ const ARMOURY = [
   "weapons/appearances/sniper.js", "weapons/appearances/lmg.js",
   "weapons/appearances/bazooka.js", "weapons/appearances/taser.js",
   "weapons/appearances/glauncher.js",
+  "weapons/appearances/rifles.js", // the countries' own rifles: L85, Tavor, QBZ-95, the black AK-74M
   "systems/actorweapons.js",   // guns in hands + muzzle points + drop physics
   "systems/gunfx.js",          // tracers, flashes, impacts, holes, suppression
   "systems/combat_iq.js",      // HOW WELL A PERSON FIGHTS — the whole point

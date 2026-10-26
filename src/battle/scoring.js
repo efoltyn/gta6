@@ -82,8 +82,9 @@ function endWar(won) {
   over = true;
   winner = won;
   const h = el("endT");
-  h.textContent = won ? sideWins(won) : "NOBODY LEFT";
+  h.innerHTML = won ? flagImg(won) + " " + esc(sideWins(won)) : "NOBODY LEFT";
   h.className = won || "";
+  const tl = el("tally"); if (tl) tl.classList.remove("on");
   /* THE SERIES. This round goes on the score; a draw is replayed. The card
      says the score, and once a side has the rounds it needs, the series. */
   SERIES_AFTER = CBZ.battleSeries.record(SERIES, won);
@@ -94,8 +95,8 @@ function endWar(won) {
     es.textContent = t;
   }
   el("endAgain").textContent = SERIES_AFTER.bo > 1 && !SERIES_AFTER.over ? "NEXT ROUND" : "REMATCH";
-  el("endCallRed").textContent = sideName("red");
-  el("endCallBlue").textContent = sideName("blue");
+  el("endCallRed").innerHTML = flagImg("red") + " " + esc(sideName("red"));
+  el("endCallBlue").innerHTML = flagImg("blue") + " " + esc(sideName("blue"));
   // the call, scored once; the streak is only worth saying once it is one
   const ec = el("endCall");
   ec.className = ""; ec.textContent = "";

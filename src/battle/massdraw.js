@@ -13,8 +13,9 @@
               kit (entities/combatkit.js: the nation's helmet in its cover
               colour, the plate carrier, knee pads) on every man whose role
               wears it, and the rifle actorweapons.js puts in his hand
-              (one baked rifle: the side's first issue; the exact gun shows
-              on the rig)
+              (one baked rifle per side: each army's first issue in its
+              country's model, so the far ranks of an M4 army and an AK
+              army carry an M4 and an AK; the exact gun shows on the rig)
      pose     the soldier clips (rifleIdle / rifleWalk / rifleRun) by his
               speed, the gait phase carried per man and handed to the rig's
               own phase at promotion (and back at demotion), so the stride
@@ -62,12 +63,18 @@ CBZ.massDraw = (function () {
         if (onNeck && o.name !== "eyewear") { o.userData.cgGear = 1; o.userData.cgSlot = 8; }
       });
     }
-    // the rifle: actorweapons' own prop, seated by its own grip solve
+    // the rifles: actorweapons' own props, seated by their own grip solve.
+    // Side A's is gear class 2; side B's, when it is another gun, class 5.
     if (CBZ.syncActorWeapon && ch.sockets) {
-      const a = { char: ch, group: ch.group, armed: true, weapon: D.rifleName || "AK-47", isPlayer: false, dead: false, pos: ch.group.position };
-      let prop = null;
-      try { prop = CBZ.syncActorWeapon(a); } catch (e) { prop = null; }
-      if (prop) prop.traverse(function (o) { if (o.isMesh) o.userData.cgGear = 2; });
+      const hang = function (r, cls) {
+        if (!r) return;
+        const a = { char: ch, group: ch.group, armed: true, weapon: r.name, weaponLook: r.look, isPlayer: false, dead: false, pos: ch.group.position };
+        let prop = null;
+        try { prop = CBZ.syncActorWeapon(a); } catch (e) { prop = null; }
+        if (prop) prop.traverse(function (o) { if (o.isMesh) o.userData.cgGear = cls; });
+      };
+      hang(D.rifleA || { name: "AK-47", look: null }, 2);
+      if (D.rifleB) hang(D.rifleB, 5);
     }
   }
   /* the per-row arrays follow the store's capacity */
@@ -106,7 +113,8 @@ CBZ.massDraw = (function () {
     }
     D.look[r] = lk;
     const N = K && kitted ? (role === "swat" ? K.SWAT : K.nation(nat)) : null;
-    D.gear[r] = G.gearCode({ helmet: N && N.helmetHex != null ? K.lin(N.helmetHex) : null, rifle: u.wid && u.wid !== "fists", kit: kitted });
+    D.gear[r] = G.gearCode({ helmet: N && N.helmetHex != null ? K.lin(N.helmetHex) : null, rifle: u.wid && u.wid !== "fists", kit: kitted,
+      rifle2: !!D.rifleB && team === "blue" });
     D.ph[r] = (r * 0.618) % 1;
   }
   /* rows a host added after begin (MASS.addRows): their looks */
@@ -119,9 +127,16 @@ CBZ.massDraw = (function () {
     D.on = false;
     const G = CBZ.crowdGPU;
     if (!G || typeof document === "undefined") return false;
-    // the side's first issued gun is the one the crowd carries
-    const w0 = pickGun(SET.redW, 0);
-    D.rifleName = GUN_NAME[w0] || "AK-47";
+    // each side's first issued gun, in its country's model, is the one its
+    // crowd carries; side B bakes its own only when it differs from A's
+    const rifleOf = function (team) {
+      const w = pickGun(team === "red" ? SET.redW : SET.blueW, 0);
+      if (!GUN_NAME[w] || w === "fists") return null;
+      return { name: GUN_NAME[w], look: lookOf(team, w) };
+    };
+    D.rifleA = rifleOf("red") || { name: "AK-47", look: null };
+    const rb = rifleOf("blue");
+    D.rifleB = rb && (rb.name !== D.rifleA.name || rb.look !== D.rifleA.look) ? rb : null;
     G.gear(gearOn);
     if (!G.ok()) { D.why = G.audit().why; return false; }
     CL = {

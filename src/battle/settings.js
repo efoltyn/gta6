@@ -45,8 +45,9 @@ if (SET.call !== "red" && SET.call !== "blue") SET.call = null;
      n           "1v1", "100v1", or one number for both sides
      arena       the ground (alias of map)
      aw at as    side A's weapon, training, air  (side B: bw bt bs, as always)
-     af bf       the nation a side of men fights for (its flag + colours):
-                 an id city/flags.js knows (republic, kesh, veridia, solara, mbeya)
+     af bf       the country or force a side of men fights for (its flag, its
+                 rifle, its kit): a battle/core/countries.js id (usa, rus,
+                 chn, gbr, irn, irgc, prk ...), or a city/flags.js nation
      bo          best of 1, 3, 5 or 7; sa / sb the rounds already won
      cam         the lens: "a" | "b" | a unit id | "a:3" (side A's 4th body)
      freeze      1 = the clock is stopped once the field is up (visual checks)
@@ -66,11 +67,28 @@ if (SET.call !== "red" && SET.call !== "blue") SET.call = null;
     else if (/^\d+$/.test(n)) SET.redN = SET.blueN = Math.max(1, parseInt(n, 10));
   }
 })();
-// the nations two armies fight for by default: Kesh's crimson mark on the
-// first side and the Republic's blue on the second keep the field reading
-// the way it always did
-SET.nationA = Q.get("af") || saved.nationA || "kesh";
-SET.nationB = Q.get("bf") || saved.nationB || "republic";
+// the countries two armies fight for by default: Russia on the first side,
+// the United States on the second. A saved setup from before the real
+// countries (the city's invented nations) starts from these.
+const realSaved = function (id) { return id && CBZ.countries && CBZ.countries.has(id) ? id : null; };
+SET.nationA = Q.get("af") || realSaved(saved.nationA) || "rus";
+SET.nationB = Q.get("bf") || realSaved(saved.nationB) || "usa";
+/* A COUNTRY BRINGS ITS RIFLE AND ITS TRAINING. A side whose weapon or
+   training nobody named (a URL that names the country and not the gun, or
+   a first visit) gets the country's: ?af=usa&bf=irgc is M4s at SOLDIER
+   against AKs at TRAINED. A gun or training named in the URL wins, and the
+   war room's last setup stands when the URL names no country. */
+(function () {
+  const C = CBZ.countries;
+  if (!C) return;
+  [["red", "nationA", "rw", "aw", "rt", "at", "af"], ["blue", "nationB", "bw", "bw", "bt", "bt", "bf"]].forEach(function (r) {
+    const t = r[0], id = SET[r[1]];
+    if (!C.has(id)) return;
+    const fresh = !!Q.get(r[6]);
+    if (!Q.get(r[2]) && !Q.get(r[3]) && (fresh || !saved[t + "W"])) SET[t + "W"] = C.rifle(id).gun;
+    if (!Q.get(r[4]) && !Q.get(r[5]) && (fresh || !saved[t + "T"])) SET[t + "T"] = C.training(id);
+  });
+})();
 SET.cam = Q.get("cam") || null;
 SET.freeze = Q.get("freeze") === "1";
 /* THE CONVOY ORDER (src/battle/convoyhost.js, systems/convoy.js): ?ac=1 moves

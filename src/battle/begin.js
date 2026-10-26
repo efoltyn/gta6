@@ -157,7 +157,9 @@ function begin(asBench) {
      tiers (src/battle/mass.js): the rows are spawned now, the nearest
      squads get rigs as the lens reaches them. A smaller one never enters. */
   MASS.begin(asBench);
-  SETTINGS.apply();                     // shadows, the pixel ceiling, the crowd's bands (src/battle/settingspanel.js)
+  SETTINGS.apply();
+  // the colours: each army's flag bearers and the tally (src/battle/colours.js)
+  if (!asBench) COLOURS.begin();                     // shadows, the pixel ceiling, the crowd's bands (src/battle/settingspanel.js)
 
   cam.focus.set(MAP.cx, MAP.groundAt(MAP.cx, MAP.cz) + 2, MAP.cz);
   cam.wFocus.copy(cam.focus);
@@ -180,6 +182,7 @@ function begin(asBench) {
   if (AIR.on) spawnPlanes();
   paintCtl();
   CBZ.micro.onFrame(frame);
+  CBZ.micro.onFrame(COLOURS.frame);
   if (SET.cam || SET.freeze) CBZ.micro.onFrame(urlLens);
 }
 

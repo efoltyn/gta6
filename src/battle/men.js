@@ -69,7 +69,14 @@ function uniformFor(teamId, trId, i) {
 function nationOf(teamId) {
   const S = SIDES[teamId];
   if (S && S.nation) return S.nation;
-  return teamId === "red" ? "kesh" : "republic";
+  return teamId === "red" ? SET.nationA : SET.nationB;
+}
+/* HIS COUNTRY'S RIFLE, DRAWN: a country whose service rifle is not its row's
+   own model (battle/core/countries.js: the L85, the Tavor, the QBZ-95, the
+   black AK-74M) hands its men that look, on the row it is a look of only. */
+function lookOf(teamId, wid) {
+  const R = CBZ.countries ? CBZ.countries.rifle(nationOf(teamId)) : null;
+  return R && R.look && R.gun === wid ? R.look : null;
 }
 function kitUp(man, teamId, trId, wid, i) {
   const ch = man.char, K = CBZ.combatKit;
@@ -101,7 +108,7 @@ function makeMan(teamId, i) {
     target: V(),                            // combat_iq's posture() steers this
     yaw: group.rotation.y, speed: 0,
     hp: bench ? 1e9 : tr.hp, maxHp: bench ? 1e9 : tr.hp,
-    armed: !fists, weapon: fists ? null : GUN_NAME[wid], wid: wid,
+    armed: !fists, weapon: fists ? null : GUN_NAME[wid], wid: wid, weaponLook: fists ? null : lookOf(teamId, wid),
     /* AND NOBODY THROWS A HOOK WHILE TREADING WATER. A punch delivers a
        fixed impulse THROUGH THE GROUND — that is what bracing is — and a
        swimmer has no ground to push against. Without this a bare-handed

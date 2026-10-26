@@ -274,6 +274,28 @@
   #ctl button{position:relative}
   #ctl button.hide{display:none}
 
+  /* THE COUNTRY STRIP: every flag a side can fight under, one tap each */
+  .team{min-width:0}
+  .team .flagstrip{max-width:100%;display:flex;gap:6px;overflow-x:auto;padding:2px 2px 8px;margin:-2px 0 8px;scrollbar-width:thin;
+    -webkit-overflow-scrolling:touch;transition:opacity .15s}
+  .team .flagstrip.off{opacity:.25;pointer-events:none}
+  .team .flagstrip button{flex:0 0 auto;appearance:none;padding:2px;border:2px solid transparent;border-radius:6px;
+    background:rgba(255,255,255,.05);cursor:pointer;line-height:0}
+  .team .flagstrip button.on{border-color:#fff;background:rgba(255,255,255,.16)}
+  .team .flagstrip img{height:24px;width:auto;border-radius:2px;display:block}
+  .team .flagstrip span{display:block;font:700 9px/24px ui-sans-serif,system-ui,sans-serif;letter-spacing:.1em;padding:0 4px}
+  /* THE TALLY: the two armies under their flags, who is still standing */
+  #tally{position:fixed;left:50%;top:max(10px,env(safe-area-inset-top));transform:translateX(-50%);z-index:30;display:none;
+    align-items:center;gap:10px;padding:6px 12px;border-radius:999px;background:rgba(10,12,16,.58);
+    font:400 20px/1 "Bebas Neue","Oswald",Impact,ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em;color:#f2efe8;
+    pointer-events:none;white-space:nowrap}
+  #tally.on{display:flex}
+  #tally .ts{display:flex;align-items:center;gap:7px}
+  #tally img{height:18px;width:auto;border-radius:2px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+  #tally b{font-weight:400;min-width:2.2em;text-align:center}
+  #tally .tr b{color:rgb(var(--sc-red,255,90,61));filter:brightness(1.25)}
+  #tally .tb b{color:rgb(var(--sc-blue,63,168,255));filter:brightness(1.25)}
+  #tally i{font-style:normal;opacity:.5;font-size:14px}
   .flagimg{height:.72em;width:auto;vertical-align:.02em;border-radius:2px;box-shadow:0 1px 6px rgba(0,0,0,.55)}
   .art-snow{--art:radial-gradient(120% 55% at 28% 112%,#dfe6ec 58%,transparent 59%),
     radial-gradient(110% 50% at 88% 118%,#c9d3dc 58%,transparent 59%),

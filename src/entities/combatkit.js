@@ -103,7 +103,12 @@
     junta: { camo: "drab", kit: 0x4f5136, helmet: "pasgt", helmetHex: 0x4f5336, plates: "lvl3", soft: "iiia", boots: 0x1c1c1a, gloves: 0x2e2e28 },
     terror: { camo: "drab", kit: 0x2a2a26, helmet: null, plates: null, soft: null, boots: 0x1c1c1a, gloves: 0x1c1c1a, irregular: true },
   };
-  function nation(id) { return NATIONS[id] || NATIONS.republic; }
+  // a real country or force (battle/core/countries.js) brings its own row
+  function nation(id) {
+    if (NATIONS[id]) return NATIONS[id];
+    const C = CBZ.countries && CBZ.countries.kit ? CBZ.countries.kit(id) : null;
+    return C || NATIONS.republic;
+  }
 
   /* ---- THE LOADOUTS: who wears what --------------------------------------
      carrier: "plates" (a plate carrier) | "chest" (a chest rig, no plates) |
@@ -867,8 +872,9 @@
       } else if (spec.loadout === "militia") {
         // a militia wears what it has: an issue shirt or a drab one, its own trousers
         const camoShirt = (seed % 3) === 0 && N.camo;
-        const shirt = camoShirt ? camoMaterial(N.camo) : cm(MILITIA_SHIRTS[seed % MILITIA_SHIRTS.length]);
-        const legs = (seed % 2) === 0 && N.camo ? camoMaterial(N.camo) : cm(MILITIA_LEGS[(seed >> 2) % MILITIA_LEGS.length]);
+        const SH = N.shirts || MILITIA_SHIRTS, LG = N.legs || MILITIA_LEGS;
+        const shirt = camoShirt ? camoMaterial(N.camo) : cm(SH[seed % SH.length]);
+        const legs = (seed % 2) === 0 && N.camo ? camoMaterial(N.camo) : cm(LG[(seed >> 2) % LG.length]);
         paintUniform(ch, shirt, legs);
       } else if (N.camo) {
         const mt = camoMaterial(N.camo);
@@ -938,7 +944,7 @@
           const kind = N.helmetVariant ? N.helmet + ":" + N.helmetVariant : N.helmet;
           HW.wear(ch, kind, { owner: "armor", color: lin(N.helmetHex), accent: N.helmet === "b6b47" ? lin(tone(N.helmetHex, -0.3)) : undefined });
         } else if (spec.loadout === "militia") {
-          const h = MILITIA_HATS[seed % MILITIA_HATS.length];
+          const HT = N.hats || MILITIA_HATS, h = HT[seed % HT.length];
           HW.wear(ch, null, { owner: "outfit" });            // no issue cap on a militiaman
           if (h) HW.wear(ch, h[0], { owner: "armor", color: lin(h[1]), accent: h[2] != null ? lin(h[2]) : undefined });
         }

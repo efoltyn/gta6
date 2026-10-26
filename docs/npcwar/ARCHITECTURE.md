@@ -72,6 +72,7 @@ change it only in coordination.
 |---|---|---|
 | `src/battle/core/roster.js` | `CBZ.battleRoster`: the roster grammar (§6) | core |
 | `src/battle/core/sides.js` | `CBZ.battleSides`: a side's identity (name, nation, flag, colour) | core |
+| `src/battle/core/countries.js` | `CBZ.countries`: the real countries, forces and armed groups a side can be (flag design, service rifle + model look, default training, kit, mark) | core |
 | `src/battle/core/series.js` | `CBZ.battleSeries`: best of 1/3/5/7 | core |
 | `src/battle/core/host.js` | `CBZ.battleHost`: the host interface (§8): `fromArena` (NPC War), `fromCity` (Gang City) | core |
 | `src/battle/core/realm.js` | `CBZ.battleRealm`: the sim compiled into a second host's private scope; `SIM` (the files), `PAGE_NAMES` (what a host's page layer declares) (§8) | core |
@@ -81,6 +82,7 @@ change it only in coordination.
 | `src/battle/core/flow.js` | `CBZ.battleFlow`: the one flow-field solver | physics / scale |
 | `src/battle/core/simworker.js`, `simlink.js` | the sim worker and the page's end of it (§9) | performance / scale |
 | `src/battle/mass.js`, `massdraw.js` | tiered battles: rows, ghosts, promotion, the crowd draw (§9) | performance / scale |
+| `src/battle/colours.js` | `COLOURS`: each army's flag bearers (one in thirty, the flag on a back staff, down when he falls) and the top-of-screen tally | page |
 | `src/battle/settingspanel.js` | `SETTINGS`: the settings panel and AUTO quality (§9) | performance / scale |
 | `src/battle/core/tactics.js` | `CBZ.battleTactics`: THE SQUAD BRAIN — fire teams, formations, tasks, posts, threat/focus, squad morale, per-tier cost ledger (§9b) | AI |
 

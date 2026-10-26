@@ -23,8 +23,19 @@ const TEAMS = {
 };
 const SLOT_COLOR = { red: 0xff5a3d, blue: 0x3fa8ff };
 /* A NATION'S MARK: the ID tape on the arms, the collar, the HUD bar (never
-   the helmet). One per nation city/flags.js authors (a front spec brings its own). */
+   the helmet). A real country's comes off its flag (battle/core/countries.js
+   `mark`); the city's own nations (city/flags.js) keep theirs here, for a
+   Gang City war that fields them. */
 const NATION_MARK = { republic: 0x3f6fd0, kesh: 0xd23a3a, veridia: 0x2f9a55, solara: 0xe8721c, mbeya: 0xd39a1c };
+function markOf(nation) {
+  const m = CBZ.countries ? CBZ.countries.mark(nation) : null;
+  return m != null ? m : NATION_MARK[nation];
+}
+// two marks a viewer could not tell apart across a battlefield
+function marksClash(a, b) {
+  const d = function (s) { return Math.abs(((a >> s) & 255) - ((b >> s) & 255)); };
+  return d(16) + d(8) + d(0) < 90;
+}
 const SIDES = { red: null, blue: null };
 /* Recomputed whenever what is on a side can have changed (the war room's
    controls, readMenu, begin). */
@@ -37,13 +48,13 @@ function refreshSides(src) {
       tier: t === "red" ? O.redT : O.blueT, nation: nation,
     });
     let col = SLOT_COLOR[t];
-    if (S.army && NATION_MARK[S.nation] != null) col = NATION_MARK[S.nation];
+    if (S.army && markOf(S.nation) != null) col = markOf(S.nation);
     // two armies of the same nation keep the slot colours, or nobody can tell them apart
     S.color = col;
     SIDES[t] = S;
     TEAMS[t].color = col;
   });
-  if (SIDES.red.army && SIDES.blue.army && SIDES.red.nation === SIDES.blue.nation) {
+  if (SIDES.red.army && SIDES.blue.army && (SIDES.red.nation === SIDES.blue.nation || marksClash(SIDES.red.color, SIDES.blue.color))) {
     SIDES.red.color = TEAMS.red.color = SLOT_COLOR.red; SIDES.blue.color = TEAMS.blue.color = SLOT_COLOR.blue;
   }
   // the page's chrome wears the sides' colours (battle.css reads --sc-red/--sc-blue)

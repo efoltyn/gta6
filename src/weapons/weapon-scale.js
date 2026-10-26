@@ -226,9 +226,20 @@
   /* scalar for a prop socketed on a character rig (NPC or player hand, back/
      hip mounts) — the socket chain applies the rig's metre conversion, so it
      is divided back out here to land on the same world length. */
-  CBZ.weaponHeldScale = function (idOrName) {
-    const w = CBZ.weaponWorldScale(idOrName);
-    return w > 0 ? w / rigScale() : 0;
+  CBZ.weaponHeldScale = function (idOrName, look) {
+    const w = look ? CBZ.weaponLookScale(look) : 0;
+    const v = w > 0 ? w : CBZ.weaponWorldScale(idOrName);
+    return v > 0 ? v / rigScale() : 0;
+  };
+  /* A LOOK (weapons/appearances/rifles.js: CBZ.WEAPON_LOOKS) is another
+     model of a row's gun: an L85 fires as the carbine row. It is sized by
+     its OWN real length over its own measured model, under the same law. */
+  CBZ.weaponLookScale = function (look) {
+    if (CBZ.CONFIG.WEAPON_REAL_SCALE === false) return 0;
+    const L = CBZ.WEAPON_LOOKS && CBZ.WEAPON_LOOKS[look];
+    if (!L || !L.real || !(L.real.len > 0)) return 0;
+    const a = authoredLen(look);
+    return a > 0 ? L.real.len * READ.long / a : 0;
   };
 
   CBZ.weaponRealLen = function (idOrName) {
