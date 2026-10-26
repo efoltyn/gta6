@@ -503,6 +503,10 @@
     // the heavier man puts more of himself through the other
     const mass = massRatio(S.att, c);
     if (r === "dead" || r === "none") { /* the caller owns it */ }
+    // no human rig (an animal): no human fall to play, and a `ko` stamped on
+    // it would never wear off (nothing tracks a rigless fall) and blind it
+    // for good. The caller's damage is the whole answer.
+    else if (!tch) { /* the caller owns it */ }
     else if (r === "block") {
       if (tch) { tch.blockT = Math.max(tch.blockT || 0, 0.3); tch.blockHitT = 0.2; }
       if (res.parried) {
@@ -565,7 +569,7 @@
      never seeing it come (BLIND, from the side or behind, x1.25: nothing
      braced, the head is loose on the neck) — x what is in the hand.
 
-     THE BODY KEEPS THREE SHORT-TERM NUMBERS (a._mc, V.condition(a)):
+     THE BODY KEEPS THREE SHORT-TERM NUMBERS (a._mcond, V.condition(a)):
        daze  the head's: rocked. A clean one to the CHIN over his chin's
              tolerance switches him off (KO); a man already rocked goes down
              for a count off a good one (flash knockdown) and covers up.
@@ -596,8 +600,11 @@
   }
   function condOf(a) {
     const o = isPlayer(a) ? (CBZ.player || a) : a;
-    let c = o._mc;
-    if (!c) c = o._mc = { daze: 0, wind: 0, legs: 0, gst: 1, openT: 0, downs: 0, chin: chinOf(o), live: false };
+    // `_mcond`, not `_mc`: NPC War's morale stamps `_mc = 1` ("counted") on
+    // every man, and writing `.live` onto that number threw inside stepMan,
+    // which aborted the whole sim sub-step: every fist fight froze solid.
+    let c = o._mcond;
+    if (!c) c = o._mcond = { daze: 0, wind: 0, legs: 0, gst: 1, openT: 0, downs: 0, chin: chinOf(o), live: false };
     if (!c.live) { c.live = true; conds.push(c); }
     return c;
   }
@@ -810,7 +817,10 @@
       // rig to meet — an animal, a remote player — or a man on the ground)
       if (!S.beat && p >= beatP) { S.beat = true; S.landed = true; S.opts.onBeat(S); }
     } else if (!S.landed && !S.whiffed && p >= pLo && p <= pHi) {
-      if (ch) contact(S, ch, MP);
+      // a mark with no human rig (a gorilla, a bear) has no zones for the
+      // fist to find: contact() would whiff every blow, so 100 men punching a
+      // silverback never landed one. It is met on the beat, by distance.
+      if (ch && !riglessMark(S)) contact(S, ch, MP);
       else if (p >= beatP) virtualContact(S);
     }
     if (!S.landed && !S.whiffed && p > pHi) whiff(S);
@@ -884,7 +894,13 @@
     }
     resolveOn(S, hit, zone, _v, blocked);
   }
-  // no rig posed (far, culled): the beat decides by distance, as the old timers did
+  function riglessMark(S) {
+    const T = S.aimT;
+    if (!T) return false;
+    const B = bod(T);
+    return !!(B && B.pos && !B.ch);
+  }
+  // no rig posed (far, culled), or a mark with none: the beat decides by distance
   function virtualContact(S) {
     const T = S.aimT;
     if (!T) { whiff(S); return; }
@@ -892,7 +908,9 @@
     if (!Bt || !Bt.pos || Bt.dead() || Bt.down()) { whiff(S); return; }
     const ap = S.Ba.pos;
     const d = Math.hypot(Bt.pos.x - ap.x, Bt.pos.z - ap.z);
-    if (d > V.reachOf(S.kind, S.att) + 0.1) { whiff(S); return; }
+    // a body wider than a man is reached at its hide, not its middle
+    const extra = Bt.ch ? 0 : Math.max(0, (T.rad || 0.45) - 0.45);
+    if (d > V.reachOf(S.kind, S.att) + 0.1 + extra) { whiff(S); return; }
     _w.set(Bt.pos.x, (Bt.pos.y || 0) + (S.level === "body" ? 1.0 : S.level === "legs" ? 0.5 : 1.45), Bt.pos.z);
     resolveOn(S, T, S.level === "body" ? "body" : S.level === "legs" ? "legs" : "head", _w, false);
   }
