@@ -2660,7 +2660,12 @@
       /* A CHAINED WAVE COMES FROM ITS SOURCE: the quake's epicentre or the
          meteor's splash sits at `chainBearing` from the island, and the wave
          travels away from it (the front runs along +d). */
-      const a = st.chainBearing != null ? st.chainBearing + Math.PI : rnd() * Math.PI * 2;
+      let a = st.chainBearing != null ? st.chainBearing + Math.PI : rnd() * Math.PI * 2;
+      // window.__tsunamiBearingPin: the key-art staging pin for the TRAVEL
+      // bearing (radians, the front runs along cos/sin of it), same pattern as
+      // __tsunamiMagPin below; no game code sets it. The dice are still thrown.
+      const bpin = (typeof window !== "undefined") ? window.__tsunamiBearingPin : null;
+      if (Number.isFinite(bpin)) a = bpin;
       st.dx = Math.cos(a); st.dz = Math.sin(a);
       st.lee = tsuLeeGeom(ctx);    // the island's shadow on this bearing
       st.warnT = 0; st.phase = "warn";
