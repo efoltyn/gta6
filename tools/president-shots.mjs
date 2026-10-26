@@ -67,6 +67,14 @@ try {
   await rig.evl("CBZ.presOffice.back()"); await sleep(300);
   await rig.evl("CBZ.presOffice.focus('phone')"); await sleep(1600); await shot("6-phone");
   await rig.evl("CBZ.presOffice.back()"); await sleep(300);
+  // a phone-sized look at the treasury too
+  await rig.send("Emulation.setDeviceMetricsOverride", { width: 844, height: 390, deviceScaleFactor: 2, mobile: true });
+  await sleep(800);
+  await rig.evl("CBZ.presOffice.focus('map')"); await sleep(1800); await shot("7-phone-landscape-map");
+  await rig.evl("CBZ.presOffice.back()"); await sleep(300);
+  await shot("8-phone-landscape-office");
+  await rig.send("Emulation.setDeviceMetricsOverride", { width: Wd, height: Ht, deviceScaleFactor: 1, mobile: false });
+  await sleep(800);
   // the General walks in with an opening
   await rig.evl(`(() => { const S = CBZ.presGame.state(), me = CBZ.presGame.me(), PW = CBZ.presWorld;
     const t = S.c.find(o => o.alive && o.id !== me);
@@ -85,6 +93,8 @@ try {
   await sleep(1500);
   await rig.evl(`(() => { const S = CBZ.presGame.state(), me = CBZ.presGame.me(); const m = S.c[me].matters.find(q => q.kind === "bailoutOffer"); CBZ.presGame.ui.call = m.id; CBZ.presGame.ui.phoneTab = "calls"; CBZ.presOffice.redraw("phone"); })()`);
   await sleep(900); await shot("10-phone-call");
+  await rig.evl(`(() => { CBZ.presGame.ui.call = null; CBZ.presGame.ui.dial = null; CBZ.presOffice.redraw("phone"); })()`);
+  await sleep(900); await shot("10b-phone-contacts");
   await rig.evl("CBZ.presOffice.back()"); await sleep(400);
   // the man with the resignation and the pistol
   await rig.evl(`(() => { const S = CBZ.presGame.state(), me = CBZ.presGame.me(), PW = CBZ.presWorld;
@@ -99,12 +109,6 @@ try {
   // turned round: the windows
   const info = await rig.evl(`(() => ({ day: CBZ.presGame.state().day, fps: CBZ.micro.fps, calls: CBZ.renderer.info.render.calls, tris: CBZ.renderer.info.render.triangles, people: Object.keys(CBZ.presOffice.people).length }))()`);
   console.log("frame:", JSON.stringify(info));
-  // a phone-sized look at the treasury too
-  await rig.send("Emulation.setDeviceMetricsOverride", { width: 844, height: 390, deviceScaleFactor: 2, mobile: true });
-  await sleep(800);
-  await rig.evl("CBZ.presOffice.focus('map')"); await sleep(1800); await shot("7-phone-landscape-map");
-  await rig.evl("CBZ.presOffice.back()"); await sleep(300);
-  await shot("8-phone-landscape-office");
 } catch (e) {
   console.error("FAILED:", e.message);
 } finally {

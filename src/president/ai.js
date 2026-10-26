@@ -163,6 +163,13 @@
         const p = PW.biggestCity(S, e);
         if (p != null) act({ type: "nuke", t: e, p: p });
       }
+      // the world's problem: a country caught killing leaders, or that has
+      // already used the bomb, hated by everyone, gets it back
+      const pariah = E.heat.plot > 25 || S.log.some(function (ev) { return ev.k === "nuke" && ev.c === e && S.day - ev.d < 365; });
+      if (c.nukes > 0 && L.mad > 0.6 && pariah && S.rel[c.id][e] < -80 && once(S, c, "pariah" + e, 120)) {
+        const p = PW.biggestCity(S, e);
+        if (p != null) act({ type: "nuke", t: e, p: p });
+      }
       if (c.warDays > 200 && (occ > 0.25 || ratio < 0.7 || c.approval < 30) && once(S, c, "peace" + e, 60)) act({ type: "peace", t: e, terms: "white" });
       else if (c.warDays > 300 && ratio > 1.8 && c.gained > 2 && once(S, c, "peaceS" + e, 90)) act({ type: "peace", t: e, terms: "status" });
     }

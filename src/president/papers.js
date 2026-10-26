@@ -270,7 +270,11 @@
     // what the country is loud about
     const heat = c.heat, keys = Object.keys(heat).filter(function (k) { return heat[k] > 3; }).sort(function (a, b) { return heat[b] - heat[a]; });
     const word = { prices: "prices", war: "the war", crackdown: "the crackdown", scandal: "the scandal", plot: "the plot", pride: "the country, proudly" };
-    row(x, "They are talking about", keys.length ? keys.slice(0, 2).map(function (k) { return word[k]; }).join(", ") : "nothing much", y, INK); y += 40;
+    row(x, "They are talking about", keys.length ? keys.slice(0, 2).map(function (k) { return word[k]; }).join(", ") : "nothing much", y, INK); y += 50;
+    // the race that decides the game: who of the original presidents is left
+    const rivals = S.c.filter(function (o) { return o.id !== ui.me; });
+    const left = rivals.filter(function (o) { return o.alive && o.leader.original; }).length;
+    row(x, "Rivals still in office", left + " of " + rivals.length, y, left === 0 ? GREEN : INK); y += 40;
     rule(x, 64, p.W - 64, y, INK2, 1); y += 56;
 
     T(x, "THE CABINET", 64, y, "700 34px " + SERIF); T(x, "loyalty", 760, y, "26px " + MONO, INK2, "right"); y += 10;
@@ -366,7 +370,26 @@
         dbox(p, 50, p.H - 160, p.W - 100, 92, "Hang up", { fn: "hangup" }, "#3a3f4b");
         return;
       }
-      if (!ring.length) T(x, "No calls", p.W / 2, y + 80, "30px " + SANS, "#7d8494", "center");
+      // you call him: what you can put to him on the phone
+      if (ui.dial != null && S.c[ui.dial] && S.c[ui.dial].alive) {
+        const o = S.c[ui.dial], t = o.id;
+        T(x, o.leader.name, p.W / 2, y + 50, "700 38px " + SANS, "#fff", "center");
+        T(x, o.name + " · relations " + Math.round(S.rel[ui.me][t]), p.W / 2, y + 96, "26px " + SANS, "#9aa3b4", "center");
+        y += 140;
+        const me = S.c[ui.me], amt = Math.round(o.gdp * 0.12);
+        const opts = [];
+        if (me.war.indexOf(t) >= 0) opts.push(["Offer peace", { type: "peace", t: t, terms: "white" }, "#2f9e55"], ["Demand their land", { type: "peace", t: t, terms: "status" }, "#3a3f4b"]);
+        else {
+          if (me.deals.indexOf(t) < 0) opts.push(["Offer a trade deal", { type: "deal", t: t }, "#2a64d8"]);
+          if (me.allies.indexOf(t) < 0) opts.push(["Offer a defense pact", { type: "alliance", t: t }, "#2a64d8"]);
+          if (me.tariffs[t] || me.sanctions.indexOf(t) >= 0) opts.push(["Lift what we put on them", { type: "backDown", t: t }, "#3a3f4b"]);
+          opts.push(["Lend $" + amt + "bn for a pact", { type: "bailout", t: t, amt: amt, strings: "alliance" }, "#3a3f4b"]);
+        }
+        opts.push(["Threaten " + o.name, { type: "post", v: "threaten", t: t }, "#b3261e"]);
+        opts.forEach(function (q) { dbox(p, 50, y, p.W - 100, 88, q[0], { act: q[1], hangup: 1 }, q[2]); y += 104; });
+        dbox(p, 50, p.H - 160, p.W - 100, 92, "Hang up", { fn: "hangup" }, "#3a3f4b");
+        return;
+      }
       ring.forEach(function (m) {
         const who = callerName(S, ui.me, m);
         x.fillStyle = "#1b1f29"; x.fillRect(30, y, p.W - 60, 120);
@@ -375,6 +398,24 @@
         dbox(p, p.W - 230, y + 20, 170, 80, "Answer", { fn: "pickup", m: m.id }, "#2f9e55");
         y += 140;
       });
+      // the other presidents, to call: the ones that matter to you first
+      const me = S.c[ui.me];
+      const others = S.c.filter(function (o) { return o.alive && o.id !== ui.me; }).sort(function (a, b) {
+        const ka = (me.war.indexOf(a.id) >= 0 ? 300 : 0) + (me.allies.indexOf(a.id) >= 0 ? 150 : 0) + Math.abs(S.rel[ui.me][a.id]) + a.gdp / 500;
+        const kb = (me.war.indexOf(b.id) >= 0 ? 300 : 0) + (me.allies.indexOf(b.id) >= 0 ? 150 : 0) + Math.abs(S.rel[ui.me][b.id]) + b.gdp / 500;
+        return kb - ka;
+      });
+      T(x, "Call", 40, y + 26, "700 28px " + SANS, "#9fb7ff"); y += 44;
+      for (const o of others) {
+        if (y > p.H - 110) break;
+        x.fillStyle = "#151922"; x.fillRect(30, y, p.W - 60, 86);
+        x.fillStyle = o.color; x.fillRect(30, y, 10, 86);
+        T(x, o.leader.name, 60, y + 38, "700 28px " + SANS, "#fff");
+        const r = Math.round(S.rel[ui.me][o.id]);
+        T(x, o.name + (me.war.indexOf(o.id) >= 0 ? " · at war" : me.allies.indexOf(o.id) >= 0 ? " · ally" : "") + " · " + (r > 0 ? "+" : "") + r, 60, y + 72, "24px " + SANS, me.war.indexOf(o.id) >= 0 ? "#ff8a7a" : "#9aa3b4");
+        p.hits.push({ x: 30, y: y, w: p.W - 60, h: 86, fn: "dial", c: o.id });
+        y += 96;
+      }
       return;
     }
     if (ui.phoneTab === "texts") {

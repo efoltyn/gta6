@@ -56,11 +56,11 @@
      Representative by the fireplace, the Security Chief and the agents by
      the doors. `sit` puts the body in animChar's own seated pose. */
   const SPOTS = {
-    general: { x: 3.1, z: -1.55, face: -1.9, path: [[3.1, -1.55], [1.6, -0.9], [0.5, -1.0]] },
+    general: { x: 3.95, z: -0.75, face: -Math.PI / 2, path: [[3.95, -0.75], [3.6, -1.6], [1.9, -1.65], [0.5, -1.05]] },
     treasury: { x: -2.86, z: -0.2, face: Math.PI / 2, sit: true, path: [[-2.86, -0.2], [-2.05, -0.85], [-0.2, -0.95]] },
     bank: { x: -0.72, z: 1.4, face: -Math.PI / 2, sit: true, path: [[-0.72, 1.4], [-0.1, 1.6], [0.1, -0.9]] },
     trade: { x: 0.9, z: 3.35, face: -2.6, path: [[0.9, 3.35], [0.4, 2.0], [0.2, -0.9]] },
-    security: { x: 3.55, z: 1.75, face: -2.3, path: [[3.55, 1.75], [1.2, 1.1], [0.5, -0.9]] },
+    security: { x: 3.55, z: 1.75, face: -2.3, path: [[3.55, 1.75], [1.2, 1.1], [0.25, 0.4], [0.35, -0.9]] },
     agentL: { x: -4.25, z: 1.55, face: 2.0 },
     agentR: { x: 4.3, z: 0.85, face: -1.6 },
   };
@@ -249,7 +249,7 @@
     const fo = { box: hostBox, solid: false, tone: { cloth: 0xcfc4a2, linen: 0xe8dfc8, wood: 0x3f2616, frame: 0x3f2616 } };
     if (F) {
       try { F.sofa(-2.95, 0, 0.6, Math.PI / 2, fo); F.sofa(-0.65, 0, 0.6, -Math.PI / 2, fo); F.coffee(-1.8, 0, 0.6, 0, fo); } catch (e) { console.warn("[office] furnish", e); }
-      try { const fa = Object.assign({}, fo, { tone: { cloth: 0x9c7a32, wood: 0x3f2616, frame: 0x3f2616 } }); F.armchair(-1.75, 0, -1.25, Math.PI + 0.5, fa); F.armchair(1.25, 0, -1.05, Math.PI - 0.5, fa); } catch (e) {}
+      try { const fa = Object.assign({}, fo, { tone: { cloth: 0x9c7a32, wood: 0x3f2616, frame: 0x3f2616 } }); F.armchair(-1.75, 0, -1.25, Math.PI + 0.5, fa); F.armchair(0.95, 0, -0.3, Math.PI - 0.5, fa); } catch (e) {}
       try { F.credenza(-3.6, 0, -2.6, Math.PI / 2 + 0.5, fo); F.planter(-4.3, 0, 1.0, 0, fo); F.planter(4.3, 0, 1.0, 0, fo); } catch (e) {}
     } else {
       bx(-2.95, 0.25, 0.6, 0.9, 0.5, 2.0, 0xe7dcc0); bx(-0.65, 0.25, 0.6, 0.9, 0.5, 2.0, 0xe7dcc0); bx(-1.8, 0.22, 0.6, 0.7, 0.44, 1.2, 0x4a2d1a);
@@ -320,6 +320,7 @@
     it.tex.needsUpdate = true;
     it.drawn = S.day; it.dirty = false; it.t = 0;
   }
+  OF.paper = function (kind) { return P[kind] ? { ver: P[kind].paper.ver, drawn: P[kind].drawn, dirty: P[kind].dirty, t: P[kind].t } : null; };
   OF.redraw = function (kind) { if (kind) { if (P[kind]) P[kind].dirty = true; } else for (const k in P) P[k].dirty = true; };
 
   // ------------------------------------------------------------ the people
@@ -530,7 +531,7 @@
         walkTo(sp, [[1.6 - i * 3.2, -1.2]], function () { sp.faceCam = true; sp.aimAt = { pos: cam.position }; });
       }
     }
-    const path = kind === "coup" ? [[3.05, -1.55], [1.6, -0.9], [PETITION.x, PETITION.z]] : [[2.6, 1.2], [0.6, -0.6], [PETITION.x, PETITION.z]];
+    const path = kind === "coup" ? [[3.6, -1.6], [1.9, -1.65], [PETITION.x, PETITION.z]] : [[2.6, 1.2], [0.25, 0.4], [PETITION.x, PETITION.z]];
     walkTo(asker, path, function () {
       asker.faceCam = true; hintLook(asker);
       asker.armed = true; asker.weapon = "Pistol";
@@ -647,7 +648,7 @@
     mode = "seat"; focusKind = null; view.t = 0;
     if (k && P[k] && P[k].home) { P[k].mesh.position.copy(P[k].home.pos); P[k].mesh.quaternion.copy(P[k].home.quat); }
     if (k === "phone" && P.phone.group) { P.phone.group.add(P.phone.mesh); P.phone.mesh.position.set(0, 0.0048, 0); P.phone.mesh.rotation.set(-Math.PI / 2, 0, Math.PI); }
-    if (O.ui) O.ui.call = null;
+    if (O.ui) { O.ui.call = null; O.ui.dial = null; }
     if (O.onMode && !quiet) O.onMode(mode, null);
     else if (O.onMode) O.onMode(mode, null);
   };
@@ -751,9 +752,11 @@
       const a = JSON.parse(JSON.stringify(hit.act));
       O.submit(a);
       flashBox(kind, hit);
-    } else if (hit.fn === "tab") { ui.phoneTab = hit.tab; ui.call = null; }
+      if (hit.hangup) { ui.dial = null; ui.call = null; }
+    } else if (hit.fn === "tab") { ui.phoneTab = hit.tab; ui.call = null; ui.dial = null; }
+    else if (hit.fn === "dial") { ui.dial = hit.c; ui.call = null; }
     else if (hit.fn === "pickup") { ui.call = hit.m; ui.phoneTab = "calls"; }
-    else if (hit.fn === "hangup") { ui.call = null; }
+    else if (hit.fn === "hangup") { ui.call = null; ui.dial = null; }
     else if (hit.fn === "answer") { O.submit({ type: "answer", m: hit.m, o: hit.o }); ui.call = null; flashBox(kind, hit); }
     else if (hit.fn === "mapTap") {
       const M = CBZ.presWorld.geo(S.seed, S.nC);
