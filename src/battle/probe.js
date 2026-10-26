@@ -659,6 +659,7 @@ CBZ.npcwar.onBoot(function () {
       // all of them, now: a tool that asked for a matchup wants the matchup,
       // not ten of it per frame for the next four seconds
       if (o.now !== false) { let g = 0; while (spawnQueue.length && g++ < 4000) drainSpawns(); }
+      COLOURS.begin();
       return { red: SET.redN, blue: SET.blueN, ru: SET.redU, bu: SET.blueU, bodies: men.length };
     },
     reinforce: function (n) { queueMen(n || 10); },

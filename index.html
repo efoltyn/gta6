@@ -653,15 +653,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- SOLDIER KIT (entities/combatkit.js): plate carriers, helmets, eye pro,
      gloves, knee pads, real camouflage (warlord/camo.js, shared) fitted to the
      body; and what the kit stops (systems/armour.js, CBZ.armour.resolve). -->
-<script src="src/warlord/camo.js?v=arrive1022"></script>
+<script src="src/warlord/camo.js?v=nations1026"></script>
 <script src="src/systems/armour.js?v=armourm1011"></script>
-<script src="src/entities/combatkit.js?v=kitfix1013"></script>
+<script src="src/entities/combatkit.js?v=nations1026"></script>
 <script src="src/entities/soldier.js?v=drone1012"></script>
 <!-- THE REAL CROWD (entities/crowdgpu.js): the CBZ.human mesh GPU-instanced
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=protestcpu1022"></script>
+<script src="src/entities/crowdgpu.js?v=nations1026"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -732,7 +732,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=slotkey1013"></script>
 <script src="src/weapons/ballistics.js?v=strike1013m"></script>
-<script src="src/weapons/weapon-scale.js?v=w09290250"></script>
+<script src="src/weapons/weapon-scale.js?v=nations1026"></script>
 <script src="src/weapons/optics.js?v=anchor1"></script>
 <script src="src/weapons/appearances/sidearm.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/shotgun.js?v=mce86a5"></script>
@@ -755,7 +755,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <script src="src/weapons/flashlight.js?v=anchor1"></script>
-<script src="src/systems/actorweapons.js?v=hmove1011"></script>
+<script src="src/systems/actorweapons.js?v=nations1026"></script>
 <script src="src/city/weapon_thumbnails.js?v=stall1022"></script>
 <script src="src/systems/holsterprops.js?v=bodyfix1009b"></script>
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -1220,7 +1220,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/streetkit.js?v=metro0929"></script>
 <script src="src/city/world.js?v=onesea1022"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
-<script src="src/city/flags.js?v=borders1022"></script>
+<script src="src/city/flags.js?v=nations1026"></script>
 <script src="src/city/interior_programs.js?v=leave1014"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
@@ -1418,7 +1418,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
 <script src="src/world/basekit.js?v=lodlight1012"></script>
 <!-- ONE ARMY (city/army.js): the door to NPC War's battle core, sim and unit kit. Only the API + loader ride the page; the unit files and the war engine load when a force or Fort Brandt's motor pool needs them. -->
-<script src="src/city/army.js?v=f35two1022"></script>
+<script src="src/city/army.js?v=nations1026"></script>
 <!-- ONE UNIT, BUILT FOR THE CITY (city/unitmodels.js): CBZ.milModels, the one path that builds a units/vehicles machine outside the battle (Fort Brandt, the player's F-35, the airbase, The Isles' army). After army.js (its loader), before island_military. -->
 <script src="src/city/unitmodels.js?v=f35one1022"></script>
 <script src="src/city/island_military.js?v=f35one1022"></script>

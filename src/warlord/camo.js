@@ -350,6 +350,38 @@
       colors: [0x9C8F70, 0x7A7752, 0x5F5A3D, 0xB2A88A, 0x4B4330, 0x3C3322] },
     { id: "robe",      label: "Tribal robe",
       colors: [0xBFB294, 0x2B3A57, 0x8E3427, 0xD6CCB4] },
+    // THE REAL ARMIES' ISSUE (battle/core/countries.js): each is one of the
+    // geometries above in that army's own cloth colours (sRGB, daylight)
+    { id: "mtp",       label: "MTP",
+      colors: [0x9A8E6C, 0x6E6E48, 0x5B4E33, 0xAC9F80, 0x45412D, 0x3A3224] },
+    { id: "type07",    label: "Type 07 woodland",
+      colors: [0x6A7050, 0x4C5A36, 0x3E4A2E, 0x2C2E22] },
+    { id: "cce",       label: "CCE",
+      colors: [0x75704E, 0x4D5634, 0x5A4630, 0x2A2C20, 0x1A1B14] },
+    { id: "mm14",      label: "MM-14",
+      colors: [0x75765A, 0x56603A, 0x45402C, 0x2C2E22] },
+    { id: "zayit",     label: "IDF olive",
+      colors: [0x58593D, 0x4E4F36, 0x636447] },
+    { id: "irgc",      label: "IRGC digital",
+      colors: [0x7C7656, 0x585C3A, 0x4A3E2C, 0x2E2E24] },
+    { id: "irandes",   label: "Iranian desert digital",
+      colors: [0xA59572, 0x837152, 0x6A6A4C, 0x4E4232] },
+    { id: "kpa",       label: "KPA olive",
+      colors: [0x5C5A3E, 0x524F36, 0x67644A] },
+    { id: "rokdigi",   label: "ROK granite",
+      colors: [0x6E6D55, 0x4E5638, 0x3C3427, 0x24251E] },
+    { id: "jgsdf",     label: "JGSDF Type II",
+      colors: [0x707256, 0x4A6236, 0x5A4A32, 0x2E3A26, 0x1E201A] },
+    { id: "cadpat",    label: "CADPAT TW",
+      colors: [0x6C6E52, 0x4C5A36, 0x3A3C2A, 0x23241C] },
+    { id: "pantera",   label: "wz. 93 Pantera",
+      colors: [0x6E6A4C, 0x47502F, 0x553F2B, 0x2A2B20, 0x1B1C16] },
+    { id: "vegetato",  label: "Vegetato",
+      colors: [0x6F6D4E, 0x4E5A34, 0x5E4A34, 0x2E2E22, 0x1B1C16] },
+    { id: "turkdigi",  label: "Turkish digital",
+      colors: [0x72735A, 0x4E5838, 0x5A4A36, 0x2C2D24] },
+    { id: "inddigi",   label: "Indian digital",
+      colors: [0x75704F, 0x55603A, 0x5C4632, 0x2E3024] },
   ];
   const PAL_BY_ID = {};
   PALETTES.forEach(function (p) { PAL_BY_ID[p.id] = p; });
@@ -911,6 +943,31 @@
         wearPass(cc, N, rnd, 0.10, 0.10); weavePass(cc, N, 0.11);
       } },
   ];
+  /* THE REAL ARMIES' PATTERNS: a family's geometry (the record named in
+     `of`) in the army's own palette, at the army's own print scale. */
+  [
+    { id: "mtp", of: "multicam", label: "MTP", palette: "mtp", metres: 0.75 },
+    { id: "type07", of: "emr", label: "TYPE 07", palette: "type07", metres: 0.55 },
+    { id: "cce", of: "woodland", label: "CCE", palette: "cce", metres: 1.05 },
+    { id: "mm14", of: "emr", label: "MM-14", palette: "mm14", metres: 0.62 },
+    { id: "zayit", of: "drab", label: "IDF OLIVE", palette: "zayit", metres: 0.70 },
+    { id: "irgcdigi", of: "emr", label: "IRGC DIGITAL", palette: "irgc", metres: 0.58 },
+    { id: "irandes", of: "marpat", label: "IRANIAN DESERT", palette: "irandes", metres: 0.55 },
+    { id: "kpa", of: "drab", label: "KPA OLIVE", palette: "kpa", metres: 0.70 },
+    { id: "rokgranite", of: "urbandigi", label: "ROK GRANITE", palette: "rokdigi", metres: 0.55 },
+    { id: "jgsdf", of: "woodland", label: "JGSDF TYPE II", palette: "jgsdf", metres: 0.95 },
+    { id: "cadpat", of: "emr", label: "CADPAT", palette: "cadpat", metres: 0.55 },
+    { id: "pantera", of: "woodland", label: "PANTERA", palette: "pantera", metres: 1.10 },
+    { id: "vegetato", of: "woodland", label: "VEGETATO", palette: "vegetato", metres: 1.00 },
+    { id: "turkdigi", of: "emr", label: "TURKISH DIGITAL", palette: "turkdigi", metres: 0.58 },
+    { id: "inddigi", of: "emr", label: "INDIAN DIGITAL", palette: "inddigi", metres: 0.60 },
+  ].forEach(function (r) {
+    let base = null;
+    for (let i = 0; i < PATTERNS.length; i++) if (PATTERNS[i].id === r.of) base = PATTERNS[i];
+    if (!base) return;
+    PATTERNS.push({ id: r.id, label: r.label, family: base.family, palette: r.palette, metres: r.metres,
+      note: "issue " + r.label.toLowerCase() + ": " + base.label.toLowerCase() + " geometry in its own cloth", draw: base.draw });
+  });
   const PAT_BY_ID = {};
   PATTERNS.forEach(function (p) { PAT_BY_ID[p.id] = p; });
 

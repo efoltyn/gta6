@@ -216,7 +216,9 @@
      its men.js puts on a soldier, the rifle actorweapons.js puts in his hand)
      and tags each mesh: userData.cgGear = 1 shown with a helmet, 2 shown with
      a rifle, 3 shown WITHOUT a helmet (the hair a helmet would flatten), 4
-     shown with KIT (entities/combatkit.js's carrier, pouches, knee pads), and
+     shown with KIT (entities/combatkit.js's carrier, pouches, knee pads), 5
+     shown with the SECOND rifle (two armies, two service rifles: an M4 on
+     one side and an AK on the other; gearCode rifle2), and
      optionally userData.cgSlot (8 = the per-instance gear colour). Each
      instance says what it wears with gearCode({helmet: hex, rifle: true}).
      Register before the first bake; without any, the bake is what it was. */
@@ -436,10 +438,12 @@
   // rate-driven gait. Not in GLSL_SKIN: the atlas bake has no instances.
   const GLSL_VEL = "attribute vec4 iVel;\nvec3 cgBase() { return iPos.xyz + vec3(iVel.x, 0.0, iVel.y) * clamp(uTime - iVel.z, 0.0, 0.6); }";
   // WHAT THIS PERSON WEARS: iVel.w = gear code (bit 0 helmet, bit 1 rifle, bit 2 kit,
-  // bits 8..15 the helmet's palette index); a part's class is aPart.y / 16
+  // bit 3 the rifle is the second one, bits 8..15 the helmet's palette index);
+  // a part's class is aPart.y / 16
   const GLSL_GEAR = "bool cgWorn() {\n  float g = floor(aPart.y / 16.0 + 0.001);\n  if (g < 0.5) return true;\n" +
-    "  bool helm = mod(iVel.w, 2.0) > 0.5, gun = mod(floor(iVel.w / 2.0), 2.0) > 0.5;\n" +
-    "  if (g < 1.5) return helm;\n  if (g < 2.5) return gun;\n  if (g < 3.5) return !helm;\n  return mod(floor(iVel.w / 4.0), 2.0) > 0.5;\n}\n";
+    "  bool helm = mod(iVel.w, 2.0) > 0.5, gun = mod(floor(iVel.w / 2.0), 2.0) > 0.5, gun2 = mod(floor(iVel.w / 8.0), 2.0) > 0.5;\n" +
+    "  if (g < 1.5) return helm;\n  if (g < 2.5) return gun && !gun2;\n  if (g < 3.5) return !helm;\n" +
+    "  if (g < 4.5) return mod(floor(iVel.w / 4.0), 2.0) > 0.5;\n  return gun && gun2;\n}\n";
 
   function capsOk() {
     const R = CBZ.renderer;
@@ -571,7 +575,7 @@
         "void main() {\n  float r1, a; float r0 = cgFrame(r1, a); float c = aPart.x * 3.0;\n" +
         "  vec4 m0 = cgT(c, r0), m1 = cgT(c + 1.0, r0), m2 = cgT(c + 2.0, r0);\n  vec4 p = vec4(position, 1.0);\n" +
         "  vec3 wp = vec3(dot(m0, p), dot(m1, p), dot(m2, p));\n" +
-        "  float gc = floor(aPart.y / 16.0 + 0.001); if (gc > 0.5 && gc < 2.5) wp = vec3(0.0);\n" +
+        "  float gc = floor(aPart.y / 16.0 + 0.001); if ((gc > 0.5 && gc < 2.5) || gc > 4.5) wp = vec3(0.0);\n" +
         "  vN = normalize(normalMatrix * vec3(dot(m0.xyz, normal), dot(m1.xyz, normal), dot(m2.xyz, normal)));\n" +
         "  vSlot = mod(aPart.y, 16.0); vLum = dot(color, vec3(0.3, 0.59, 0.11));\n" +
         "  gl_Position = projectionMatrix * modelViewMatrix * vec4(wp, 1.0);\n}",
@@ -899,7 +903,8 @@
     // what one person wears, for layer.add's last argument
     gearCode: function (o) {
       if (!o) return 0;
-      return (o.helmet != null ? 1 : 0) + (o.rifle ? 2 : 0) + (o.kit ? 4 : 0) + (o.helmet != null ? 256 * palIndex(o.helmet) : 0);
+      return (o.helmet != null ? 1 : 0) + (o.rifle ? 2 : 0) + (o.kit ? 4 : 0) + (o.rifle && o.rifle2 ? 8 : 0) +
+        (o.helmet != null ? 256 * palIndex(o.helmet) : 0);
     },
     // the GPU clock (s) the shaders animate on: a caller that hands a moving
     // body's gait phase "as of now" converts it with this

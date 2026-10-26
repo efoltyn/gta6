@@ -1317,13 +1317,23 @@
     return g;
   }
 
-  function buildActorWeapon(name) {
+  /* `look` draws another model of the same row (weapons/appearances/rifles.js:
+     an L85 or a Tavor fires as the carbine). It applies only to the row it
+     is a look OF, so a man whose look is the Tavor still draws the M249 he
+     was handed. */
+  function lookFor(id, look) {
+    const L = look && CBZ.WEAPON_LOOKS && CBZ.WEAPON_LOOKS[look];
+    return L && L.base === id && CBZ.weaponAppearance && CBZ.weaponAppearance[look] ? look : null;
+  }
+  function buildActorWeapon(name, look) {
     const id = normalizeWeaponId(name);
     const meta = weaponMeta(id);
-    const builder = CBZ.weaponAppearance && CBZ.weaponAppearance[meta.appearanceFactory || meta.key || id];
+    look = lookFor(id, look);
+    const builder = CBZ.weaponAppearance && CBZ.weaponAppearance[look || meta.appearanceFactory || meta.key || id];
     // noHand: the first-person grip hand is a viewmodel prop; a body already has hands
     const model = builder ? builder({ THREE, box, cyl, mat, noHand: true }) : fallbackWeapon();
     model.userData.weaponId = id;
+    model.userData.weaponLook = look;
     model.userData.weaponSlot = meta.slot || "pistol";
     // Does this prop have a BARREL? Every consumer that reasons about aim —
     // muzzle direction, arm elevation, gunpoint reactions — has been able to
@@ -1338,7 +1348,7 @@
     // than the player's identical third-person gun ("guns feel small"). The
     // legacy pair stays as the fallback when the scale module is absent or
     // CBZ.CONFIG.WEAPON_REAL_SCALE=false.
-    const heldScale = (CBZ.weaponHeldScale && CBZ.weaponHeldScale(id)) ||
+    const heldScale = (CBZ.weaponHeldScale && CBZ.weaponHeldScale(id, look)) ||
       ((meta.slot === "pistol" || meta.slot === "utility") ? 0.92 : 0.82);
     model.scale.setScalar(heldScale);
     model.position.set(0.02, 0.02, 0.03);
@@ -1927,11 +1937,12 @@
     }
     const socket = socketOf(actor);
     if (!socket) return null;
-    if (!actor._weaponProp || actor._weaponPropId !== id) {
+    const key = actor.weaponLook ? id + "@" + actor.weaponLook : id;
+    if (!actor._weaponProp || actor._weaponPropId !== key) {
       if (actor._weaponProp && actor._weaponProp.parent) actor._weaponProp.parent.remove(actor._weaponProp);
       if (actor._weaponProp) disposeGroup(actor._weaponProp);
-      actor._weaponProp = buildActorWeapon(id);
-      actor._weaponPropId = id;
+      actor._weaponProp = buildActorWeapon(id, actor.weaponLook);
+      actor._weaponPropId = key;
     }
     if (actor._weaponProp.parent !== socket) socket.add(actor._weaponProp);
     actor._weaponProp.visible = true;
