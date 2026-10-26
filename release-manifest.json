@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "355a92f0b68a3847d274a40ffd8d2acb6e35ced6",
-  "createdAt": "2026-10-26T11:48:33.706Z",
+  "sourceCommit": "0e0935daf2dd6c933b8773e594384d349fa8b712",
+  "createdAt": "2026-10-26T12:20:44.498Z",
   "fileCount": 1479,
-  "totalBytes": 53190718,
+  "totalBytes": 53191115,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -248,8 +248,8 @@
     },
     {
       "file": "src/battle/mass.js",
-      "bytes": 24993,
-      "sha256": "c1646a28ecfdc7784f0a9e6ce6bd670c7b00e243c7856df218905a2e51687103"
+      "bytes": 25388,
+      "sha256": "cb7c3fc1fd14a587cf518cdd6dd8e9b38c7802761d33802f19870a5a3ec90c7c"
     },
     {
       "file": "src/battle/massdraw.js",
@@ -7303,8 +7303,8 @@
     },
     {
       "file": "games/battle.html",
-      "bytes": 13952,
-      "sha256": "13c216a68daff63adc56dfa64c38f4370d80c7c847aa1b7154f3bd4b7dbfdb5a"
+      "bytes": 13954,
+      "sha256": "67a73e1c4c430b9d33d535977fdb7c9ff635b1d4cc2abc3aa1217a53b1df4ee7"
     },
     {
       "file": "games/bomb-survivor-scene.js",
