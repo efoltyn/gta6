@@ -676,7 +676,25 @@ function massSchedule(dt) {
     Q2.men[q] = k;
     if (k) { Q2.cx[q] = x / k; Q2.cz[q] = z / k; }
   }
-  const cp = CBZ.camera ? CBZ.camera.position : { x: HOST.cx, z: HOST.cz };
+  /* AN ANIMAL IS ALWAYS FULL, and so is whoever is within reach of it. Its
+     fight (grabs, throws, the charge) lives only in the FULL sim; demoted to
+     a row it was squad arithmetic, and 1 gorilla v 350 men fell in 12 s
+     having killed one man. */
+  const BEAST_R2 = 40 * 40, bx = [], bz = [];
+  for (let q = 0; q < Q2.n; q++) {
+    for (let j = 0; j < Q2.cnt[q]; j++) {
+      const r = Q2.mem[q * 10 + j], l = C.life[r];
+      if (C.kind[r] === 1 && (l === 1 || l === 2)) { Q2.forced[q] = 1; bx.push(C.x[r]); bz.push(C.z[r]); break; }
+    }
+  }
+  if (bx.length) for (let q = 0; q < Q2.n; q++) {
+    if (Q2.forced[q] || !Q2.men[q]) continue;
+    for (let b = 0; b < bx.length; b++) {
+      const dx = Q2.cx[q] - bx[b], dz = Q2.cz[q] - bz[b];
+      if (dx * dx + dz * dz < BEAST_R2) { Q2.forced[q] = 1; break; }
+    }
+  }
+  const cp =CBZ.camera ? CBZ.camera.position : { x: HOST.cx, z: HOST.cz };
   CBZ.battleLod.schedule(Q2, cp.x, cp.z, dt, MASS.caps, { force: MASS.force, fullR: MASS.opt.fullr || 0, midR: MASS.opt.midr || 0 });
   for (let q = 0; q < Q2.n; q++) {
     const w = Q2.want[q], cur = Q2.tier[q];
