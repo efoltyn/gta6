@@ -40,6 +40,10 @@ const UNIFORM = {
   blue: { torso: 0x2f4a66, arms: 0x2b4460, legs: 0x363f4a, cap: 0x2a63a8, shoes: 0x1c1d20, belt: 0x23272c,
           shirt: 0x2f5f95, swatT: 0x1f2c3a },
 };
+// everyday shirt colours (linear-ish albedo): greys, denim, olive, tan, white,
+// navy, maroon, mustard, forest, charcoal, sand, brick
+const CIV_SHIRTS = [0x8a8d90, 0x3d5878, 0x5b6340, 0xa08866, 0xd8d6d0, 0x26324a, 0x6a2e33,
+  0xb08b3a, 0x2f4a36, 0x3a3c40, 0xc2b08e, 0x8a4a38, 0x6f7f8f, 0x4a3b33];
 function shade(hex, k) {
   const r = Math.min(255, ((hex >> 16) & 255) * k) | 0, g = Math.min(255, ((hex >> 8) & 255) * k) | 0,
     b = Math.min(255, (hex & 255) * k) | 0;
@@ -51,7 +55,14 @@ function uniformFor(teamId, trId, i) {
   const U = UNIFORM[teamId];
   // three fades of the same cloth: quantised so the material cache stays small
   const k = [0.9, 1, 1.09][(i * 7 + 3) % 3];
-  if (trId === "civ" || trId === "thug") return { torso: shade(U.shirt, k), collar: shade(U.shirt, k), arms: shade(U.shirt, k * 0.96) };
+  // NO TEAM SHIRTS (owner 2026-10-26: "I hate the red and blue team shit").
+  // Civilians and street men wear their own clothes, a different shirt each:
+  // a crowd, not a squad. Which side a man is on is where he stands and who
+  // he fights, never his colour.
+  if (trId === "civ" || trId === "thug") {
+    const c = CIV_SHIRTS[(i * 13 + (teamId === "red" ? 0 : 5)) % CIV_SHIRTS.length];
+    return { torso: shade(c, k), collar: shade(c, k * 0.95), arms: shade(c, k * 0.96) };
+  }
   if (trId === "swat") return { torso: shade(U.swatT, k), collar: shade(U.swatT, k), arms: shade(U.swatT, k),
     legs: shade(0x22252a, k), cap: U.cap, shoes: U.shoes, belt: U.belt };
   return { torso: shade(U.torso, k), collar: shade(U.torso, k * 0.95), arms: shade(U.arms, k), legs: shade(U.legs, k),

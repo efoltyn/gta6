@@ -1085,7 +1085,7 @@
     const THREE = W.THREE, g = m.group;
     for (let i = g.children.length - 1; i >= 0; i--) {
       const ch = g.children[i];
-      if (!ch.isMesh || ch === rig.mesh || (ch.userData && ch.userData.ungMarker)) continue;
+      if (!ch.isMesh || ch === rig.mesh || !(ch.userData && ch.userData.teamCollar)) continue;
       const D = rig.D, NK = D.NECK, mid = NK[Math.floor(NK.length * 0.45)];
       const rad = Math.max(mid[2], mid[3], mid[4]) * 1.02;
       const key = "ucollar" + rad.toFixed(3);

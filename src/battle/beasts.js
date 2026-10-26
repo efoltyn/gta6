@@ -129,12 +129,9 @@ function makeBeast(teamId, i, spIdIn) {
      genuinely longer than it is wide. */
   const noseR = Math.max(0.2, bb.max.x);
   noteBodyRadius(rad);
-  // the coat stays the animal's own — a thin team collar says whose side,
-  // seated on the neck line the box measured rather than a guessed height
-  const collar = new THREE.Mesh(CBZ.boxGeom(0.18 / s, 0.12 / s, Math.min(0.9, spanZ * 0.85) / s),
-    CBZ.cmat(T.color));
-  collar.position.set((bb.max.x * 0.55) / s, (H * 0.7) / s, 0);
-  group.add(collar);
+  // the coat stays the animal's own: no team block, no collar. Owner
+  // (2026-10-26): "I hate the red and blue team shit... remove that." Who
+  // an animal fights for is read from what it does, not paint on its back.
   const at = HOST.spawnAt(teamId, i, rad);
   group.position.set(at.x, HOST.groundAt(at.x, at.z), at.z);
   CBZ.scene.add(group);

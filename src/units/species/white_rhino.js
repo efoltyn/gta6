@@ -590,7 +590,7 @@
     if (!THREE) return;
     for (let i = 0; i < g.children.length; i++) {
       const c = g.children[i];
-      if (!c || !c.isMesh || c === R.mesh || c.userData.rhinoProxy || c.userData.rhinoBand) continue;
+      if (!c || !c.isMesh || c === R.mesh || !c.userData.teamCollar) continue;
       c.visible = false;
       const D = R.D, key = D.cls;
       let bg = _band.get(key);

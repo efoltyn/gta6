@@ -602,7 +602,7 @@
       const r = THREE.Group.prototype.add.apply(this, arguments);
       for (let i = 0; i < arguments.length; i++) {
         const o = arguments[i];
-        if (o && o.isMesh && !o.userData.felProxy && !R.collar) { seatCollar(R); break; }
+        if (o && o.isMesh && o.userData.teamCollar && !R.collar) { seatCollar(R); break; }
       }
       return r;
     };
@@ -655,7 +655,7 @@
     let col = null;
     for (let i = 0; i < g.children.length; i++) {
       const c = g.children[i];
-      if (c.isMesh && !c.userData.felProxy && c !== R.holder) { col = c; break; }
+      if (c.isMesh && c.userData.teamCollar && c !== R.holder) { col = c; break; }
     }
     if (!col) return;
     const r = (D.neckR[2][1] + D.neckR[2][2]) * 0.5 * 1.08;

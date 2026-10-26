@@ -494,7 +494,7 @@
       const kids = m.group.children;
       for (let i = 0; i < kids.length; i++) {
         const c = kids[i];
-        if (c.isMesh && c !== R.mesh && !c.userData.bearCollar) {
+        if (c.isMesh && c !== R.mesh && c.userData.teamCollar) {
           c.visible = false;
           const D = R.D;
           const key = "collar|" + D.key;

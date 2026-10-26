@@ -1050,7 +1050,7 @@
     const THREE = W.THREE, g = m.group;
     for (let i = g.children.length - 1; i >= 0; i--) {
       const ch = g.children[i];
-      if (!ch.isMesh || ch === rig.mesh || (ch.userData && ch.userData.lionMarker)) continue;
+      if (!ch.isMesh || ch === rig.mesh || !(ch.userData && ch.userData.teamCollar)) continue;
       const D = rig.D, ms = rig.mane ? rig.mane.size : 0;
       const rad = (rig.male ? 0.175 : 0.15) * D.H * D.Gt;
       const key = "collar" + rad.toFixed(3);
