@@ -1,0 +1,838 @@
+/* ============================================================
+   president/papers.js — EVERYTHING ON THE DESK IS PAPER.
+
+   Each object a president reads is a canvas drawn straight off the world
+   state: the Treasury brief (the economy and the budget you set), the
+   Commerce sheet (every good: what you make, what you use, what you trade,
+   what it costs), the Cabinet & Polls sheet (your people, your numbers, the
+   domestic decisions), a bill in its folder when Congress sends one, the
+   phone (Holler, calls, texts), and the map on the map table.
+
+   The decisions are ON the paper: a box you tap is an action (sign, veto,
+   +0.5% to the army, tariff their steel, strike that refinery). Nothing is
+   greyed out and nothing is locked; what you can afford, and who obeys,
+   decide what happens after you tap it.
+
+   THE MAP is drawn like openfront.io rather than an atlas: flat bold country
+   colour over a grid of square tiles, darker border tiles, borders that
+   visibly push tile by tile as a front advances, chunky unit counters and
+   attack arrows, and icons for capitals, cities, ports, silos, fields and
+   mines. One 160x96 ImageData scaled up with no smoothing is the whole fill,
+   so a redraw is a few milliseconds.
+
+   Canvas only, no THREE: papers.make(kind) -> paper { canvas, W, H, hits },
+   papers.draw(paper, S, ui), papers.hit(paper, x, y) -> { act } | { fn, ... }.
+   office.js puts these canvases on meshes and turns taps into world actions.
+
+   PUBLIC  CBZ.presPapers = { make, draw, hit, KINDS, fmtBn, fmtPct }
+============================================================ */
+(function () {
+  "use strict";
+  const CBZ = window.CBZ = window.CBZ || {};
+
+  const SIZES = {
+    treasury: [1024, 1448], commerce: [1024, 1448], cabinet: [1024, 1448], bill: [1024, 1448],
+    phone: [640, 1280], map: [2048, 1280],
+  };
+  const SERIF = "Georgia, 'Times New Roman', serif";
+  const MONO = "'Courier New', Courier, monospace";
+  const SANS = "Fredoka, 'Helvetica Neue', Arial, sans-serif";
+  const INK = "#1c1d22", INK2 = "#4a4c55", RED = "#a3201c", BLUE = "#1f3f7a", GREEN = "#2c6a34", PAPER = "#f2ede0";
+
+  function W() { return CBZ.presWorld; }
+  function H() { return CBZ.presHoller; }
+
+  // ------------------------------------------------------------ formatting
+  function fmtBn(v) {
+    const a = Math.abs(v);
+    if (a >= 1000) return (v < 0 ? "-" : "") + "$" + (a / 1000).toFixed(a >= 10000 ? 1 : 2) + " tn";
+    return (v < 0 ? "-" : "") + "$" + a.toFixed(a >= 100 ? 0 : 1) + " bn";
+  }
+  function fmtPct(v, d) { return (v >= 0 ? "" : "-") + Math.abs(v).toFixed(d == null ? 1 : d) + "%"; }
+  function sgn(v, d) { return (v >= 0 ? "+" : "-") + Math.abs(v).toFixed(d == null ? 1 : d); }
+  function fmtQ(g, q) {
+    const s = g.show || 1, v = q * s;
+    return (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
+  }
+  function fmtP(g, p) {
+    const v = p * (g.pshow || 1);
+    return "$" + (v >= 1000 ? Math.round(v).toLocaleString("en-US") : v >= 100 ? v.toFixed(0) : v.toFixed(2));
+  }
+
+  // ------------------------------------------------------------ paper stock
+  const GRAIN = {};
+  function grain(w, h, tone) {
+    const k = w + "x" + h + tone;
+    if (GRAIN[k]) return GRAIN[k];
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const x = c.getContext("2d");
+    x.fillStyle = tone; x.fillRect(0, 0, w, h);
+    // fibres: deterministic, faint
+    let s = 12345;
+    const rnd = function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    x.globalAlpha = 0.05;
+    for (let i = 0; i < 2400; i++) {
+      x.fillStyle = rnd() < 0.5 ? "#000" : "#fff";
+      x.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 3, 1);
+    }
+    x.globalAlpha = 1;
+    const g = x.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.75);
+    g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(90,70,30,0.10)");
+    x.fillStyle = g; x.fillRect(0, 0, w, h);
+    GRAIN[k] = c;
+    return c;
+  }
+  function make(kind) {
+    const sz = SIZES[kind];
+    const canvas = document.createElement("canvas");
+    canvas.width = sz[0]; canvas.height = sz[1];
+    return { kind: kind, canvas: canvas, ctx: canvas.getContext("2d"), W: sz[0], H: sz[1], hits: [], ver: 0 };
+  }
+  function hit(paper, x, y) {
+    for (let i = paper.hits.length - 1; i >= 0; i--) {
+      const h = paper.hits[i];
+      if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h;
+    }
+    return null;
+  }
+
+  // ------------------------------------------------------------ type helpers
+  function T(x, s, X, Y, font, col, align) {
+    x.font = font; x.fillStyle = col || INK; x.textAlign = align || "left"; x.textBaseline = "alphabetic";
+    x.fillText(s, X, Y);
+  }
+  function rule(x, X0, X1, Y, col, wd) { x.strokeStyle = col || INK; x.lineWidth = wd || 2; x.beginPath(); x.moveTo(X0, Y); x.lineTo(X1, Y); x.stroke(); }
+  function wrap(x, s, X, Y, maxW, lh, font, col) {
+    x.font = font; x.fillStyle = col || INK; x.textAlign = "left";
+    const words = String(s).split(" "); let line = "", y = Y;
+    for (const w of words) {
+      const t = line ? line + " " + w : w;
+      if (x.measureText(t).width > maxW && line) { x.fillText(line, X, y); line = w; y += lh; }
+      else line = t;
+    }
+    if (line) x.fillText(line, X, y);
+    return y + lh;
+  }
+  // a box you tick: the decision
+  function box(p, X, Y, w, h, label, hitData, style) {
+    const x = p.ctx;
+    const col = style === "war" ? RED : style === "go" ? GREEN : style === "dim" ? INK2 : BLUE;
+    x.save();
+    x.fillStyle = style === "on" ? "rgba(31,63,122,0.16)" : "rgba(255,255,255,0.35)";
+    x.fillRect(X, Y, w, h);
+    x.strokeStyle = col; x.lineWidth = 3;
+    x.strokeRect(X + 1.5, Y + 1.5, w - 3, h - 3);
+    if (label === "+" || label === "-") {
+      // a plus and a minus drawn, not typed: a glyph this small reads as a speck
+      x.strokeStyle = col; x.lineWidth = 6; x.lineCap = "round"; x.beginPath();
+      const cx = X + w / 2, cy = Y + h / 2, r = Math.min(w, h) * 0.24;
+      x.moveTo(cx - r, cy); x.lineTo(cx + r, cy);
+      if (label === "+") { x.moveTo(cx, cy - r); x.lineTo(cx, cy + r); }
+      x.stroke(); x.restore();
+      if (hitData) p.hits.push(Object.assign({ x: X, y: Y, w: w, h: h, label: label }, hitData));
+      return;
+    }
+    let fs = Math.min(34, Math.floor(h * 0.5));
+    x.font = "700 " + fs + "px " + SANS;
+    while (x.measureText(label).width > w - 20 && fs > 16) { fs -= 2; x.font = "700 " + fs + "px " + SANS; }
+    x.fillStyle = col; x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText(label, X + w / 2, Y + h / 2 + 1);
+    x.restore();
+    if (hitData) p.hits.push(Object.assign({ x: X, y: Y, w: w, h: h, label: label }, hitData));
+  }
+  function spark(x, arr, X, Y, w, h, col) {
+    if (!arr || arr.length < 2) return;
+    let lo = Infinity, hi = -Infinity;
+    for (const v of arr) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (hi - lo < 1e-6) { hi += 1; lo -= 1; }
+    x.strokeStyle = col || INK; x.lineWidth = 3; x.beginPath();
+    arr.forEach(function (v, i) {
+      const px = X + i / (arr.length - 1) * w, py = Y + h - (v - lo) / (hi - lo) * h;
+      if (i) x.lineTo(px, py); else x.moveTo(px, py);
+    });
+    x.stroke();
+  }
+  function header(p, title, sub, S) {
+    const x = p.ctx;
+    x.drawImage(grain(p.W, p.H, PAPER), 0, 0);
+    T(x, title, 64, 104, "700 58px " + SERIF, INK);
+    T(x, sub, 64, 150, "italic 30px " + SERIF, INK2);
+    T(x, W().date(S.day).text, p.W - 64, 150, "30px " + MONO, INK2, "right");
+    rule(x, 64, p.W - 64, 176, INK, 3);
+  }
+  function row(x, label, val, Y, col, sub) {
+    T(x, label, 64, Y, "32px " + SERIF, INK2);
+    T(x, val, 700, Y, "700 34px " + MONO, col || INK, "right");
+    if (sub) T(x, sub, 720, Y, "28px " + MONO, INK2);
+  }
+
+  // ============================================================ TREASURY
+  function treasury(p, S, ui) {
+    const x = p.ctx, c = S.c[ui.me], PW = W(), v = PW.view(S, ui.me);
+    header(p, "The Treasury", "Daily economic brief, " + c.name, S);
+    let y = 236;
+    const g = (c.growth || 0) * 100;
+    row(x, "Gross domestic product", fmtBn(c.gdp), y, INK, sgn(g) + "% a year"); y += 50;
+    row(x, "Unemployment", fmtPct(c.u), y, c.u > 9 ? RED : INK); y += 50;
+    row(x, "Inflation (prices, a year)", fmtPct(c.infl), y, c.infl > 6 ? RED : INK); y += 50;
+    row(x, "Central bank rate", fmtPct(c.rate, 2), y, INK, c.cbIndep < 0.5 ? "the bank is yours" : ""); y += 50;
+    row(x, "Ten-year bond yield", fmtPct(c.yld, 2), y, c.yld > 8 ? RED : INK, "rated " + c.rating); y += 14;
+    spark(x, c.hist && c.hist.y, 720, y - 2, 240, 30, c.yld > 8 ? RED : INK);
+    y += 36;
+    row(x, "Government debt", fmtPct(v.debtGdp, 0) + " of GDP", y, v.debtGdp > 100 ? RED : INK, fmtBn(c.debt)); y += 50;
+    const off = PW.official(c);
+    if (off > 0) { row(x, "Owed to governments", fmtBn(off), y, INK, c.loans.map(function (l) { return S.c[l.from].name; }).join(", ")); y += 50; }
+    row(x, "Currency", (c.fx * 100).toFixed(0), y, c.fx < 0.8 ? RED : INK, "index, world = 100"); y += 50;
+    if (c.crisis) { T(x, "The market is not buying our bonds.", 64, y, "italic 700 32px " + SERIF, RED); y += 46; }
+    if (c.defaulted > 0) { T(x, "In default.", 64, y, "italic 700 32px " + SERIF, RED); y += 46; }
+    rule(x, 64, p.W - 64, y, INK2, 1); y += 52;
+
+    // ---- the budget: what you sign
+    T(x, "THE BUDGET", 64, y, "700 34px " + SERIF); T(x, "% of GDP", 700, y, "28px " + MONO, INK2, "right"); y += 18;
+    const rows = PW.BUDGET;
+    for (const b of rows) {
+      y += 62;
+      T(x, b.name, 64, y, "32px " + SERIF, INK);
+      T(x, c.budget[b.id].toFixed(1), 700, y, "700 36px " + MONO, INK, "right");
+      const step = b.id === "welfare" ? 1 : 0.5;
+      box(p, 740, y - 44, 100, 56, "-", { act: { type: "budget", k: b.id, v: +(c.budget[b.id] - step).toFixed(2) } });
+      box(p, 856, y - 44, 100, 56, "+", { act: { type: "budget", k: b.id, v: +(c.budget[b.id] + step).toFixed(2) } });
+    }
+    y += 62;
+    T(x, "Everything else the state does", 64, y, "32px " + SERIF, INK2); T(x, PW.ADMIN.toFixed(1), 700, y, "36px " + MONO, INK2, "right");
+    y += 62;
+    T(x, "Tax take", 64, y, "700 32px " + SERIF, INK); T(x, c.tax.toFixed(0), 700, y, "700 36px " + MONO, INK, "right");
+    box(p, 740, y - 44, 100, 56, "-", { act: { type: "tax", v: c.tax - 1 } });
+    box(p, 856, y - 44, 100, 56, "+", { act: { type: "tax", v: c.tax + 1 } });
+    y += 62;
+    T(x, "Printing money", 64, y, "700 32px " + SERIF, c.print > 0 ? RED : INK); T(x, c.print.toFixed(1), 700, y, "700 36px " + MONO, c.print > 0 ? RED : INK, "right");
+    box(p, 740, y - 44, 100, 56, "-", { act: { type: "print", v: Math.max(0, c.print - 1) } });
+    box(p, 856, y - 44, 100, 56, "+", { act: { type: "print", v: c.print + 1 } });
+    y += 40;
+    rule(x, 64, p.W - 64, y, INK2, 1); y += 50;
+    row(x, "Revenue", fmtBn(c.rev), y); y += 46;
+    row(x, "Spending, with interest", fmtBn(c.spend), y, INK, "interest " + fmtBn(c.interest || 0)); y += 46;
+    const def = v.deficitGdp;
+    row(x, def < 0 ? "Deficit" : "Surplus", fmtBn(Math.abs(c.deficit)), y, def < -4 ? RED : def >= 0 ? GREEN : INK, fmtPct(Math.abs(def)) + " of GDP"); y += 60;
+    box(p, 64, y, 430, 66, "Default on the debt", { act: { type: "default" } }, "war");
+    if (c.loans.length) box(p, 530, y, 430, 66, "Stop paying governments", { act: { type: "defaultLoan" } }, "war");
+  }
+
+  // ============================================================ COMMERCE
+  function commerce(p, S, ui) {
+    const x = p.ctx, c = S.c[ui.me], PW = W();
+    header(p, "Commerce", "Goods, prices and trade, " + c.name, S);
+    let y = 230;
+    T(x, "GOOD", 64, y, "700 26px " + MONO, INK2);
+    T(x, "MAKE", 470, y, "700 26px " + MONO, INK2, "right");
+    T(x, "USE", 610, y, "700 26px " + MONO, INK2, "right");
+    T(x, "NET", 750, y, "700 26px " + MONO, INK2, "right");
+    T(x, "PRICE", 960, y, "700 26px " + MONO, INK2, "right");
+    y += 12; rule(x, 64, p.W - 64, y, INK, 2);
+    PW.GOODS.forEach(function (g, i) {
+      y += 74;
+      const net = c.sup[i] - c.dem[i];
+      const P = PW.worldPrice(S, g.id), d = (P / g.P0 - 1) * 100;
+      T(x, g.name, 64, y - 18, "700 32px " + SERIF, INK);
+      T(x, g.unit + " · " + g.pu, 64, y + 12, "22px " + MONO, INK2);
+      T(x, fmtQ(g, c.sup[i]), 470, y, "32px " + MONO, INK, "right");
+      T(x, fmtQ(g, c.dem[i]), 610, y, "32px " + MONO, INK, "right");
+      T(x, (net >= 0 ? "+" : "-") + fmtQ(g, Math.abs(net)), 750, y, "700 32px " + MONO, net >= 0 ? GREEN : RED, "right");
+      T(x, fmtP(g, c.pl[i]), 960, y - 14, "700 30px " + MONO, INK, "right");
+      T(x, "world " + fmtP(g, P) + " " + (d >= 0 ? "+" : "") + d.toFixed(0) + "%", 960, y + 16, "22px " + MONO, Math.abs(d) > 25 ? RED : INK2, "right");
+      if (c.fill[i] < 0.97) T(x, "short " + Math.round((1 - c.fill[i]) * 100) + "%", 470, y + 16, "700 22px " + MONO, RED, "right");
+    });
+    y += 46; rule(x, 64, p.W - 64, y, INK, 2); y += 50;
+    // partners: who you buy from and sell to, by value
+    const imp = [], exp = [];
+    S.c.forEach(function (o) {
+      if (!o.alive || o.id === c.id || !S.flow) return;
+      let vi = 0, ve = 0;
+      for (let g = 0; g < PW.GOODS.length; g++) { vi += S.flow[g][c.id][o.id] * S.P[g]; ve += S.flow[g][o.id][c.id] * S.P[g]; }
+      imp.push({ c: o, v: vi * 0.365 }); exp.push({ c: o, v: ve * 0.365 });
+    });
+    imp.sort(function (a, b) { return b.v - a.v; }); exp.sort(function (a, b) { return b.v - a.v; });
+    T(x, "WE BUY FROM", 64, y, "700 26px " + MONO, INK2); T(x, "WE SELL TO", 540, y, "700 26px " + MONO, INK2);
+    for (let k = 0; k < 4; k++) {
+      y += 44;
+      if (imp[k] && imp[k].v > 0.5) { T(x, imp[k].c.name, 64, y, "30px " + SERIF); T(x, fmtBn(imp[k].v), 470, y, "30px " + MONO, INK, "right"); }
+      if (exp[k] && exp[k].v > 0.5) { T(x, exp[k].c.name, 540, y, "30px " + SERIF); T(x, fmtBn(exp[k].v), 960, y, "30px " + MONO, INK, "right"); }
+    }
+    y += 54;
+    let ti = 0, te = 0; imp.forEach(function (a) { ti += a.v; }); exp.forEach(function (a) { te += a.v; });
+    row(x, "Trade balance", fmtBn(te - ti), y, te >= ti ? GREEN : RED, "a year");
+  }
+
+  // ============================================================ CABINET & POLLS
+  function cabinet(p, S, ui) {
+    const x = p.ctx, c = S.c[ui.me], PW = W();
+    header(p, "Cabinet & Polls", "Confidential, " + c.name, S);
+    let y = 236;
+    row(x, "Approval", fmtPct(c.approval, 0), y, c.approval < 40 ? RED : INK); spark(x, c.hist && c.hist.a, 760, y - 34, 200, 40, INK); y += 50;
+    if (c.elections) {
+      const days = c.nextElection - S.day;
+      row(x, "If the vote were today", fmtPct(PW.voteShare(S, c), 0), y, PW.voteShare(S, c) < 50 ? RED : GREEN); y += 50;
+      row(x, "Election", W().date(c.nextElection).text, y, INK, days + " days"); y += 50;
+    } else { row(x, "Elections", "none", y, RED); y += 50; }
+    row(x, "Unrest", fmtPct(c.unrest, 0), y, c.unrest > 50 ? RED : INK); y += 50;
+    row(x, "Freedom", c.freedom.toFixed(0) + " / 100", y, c.freedom < 40 ? RED : INK, c.regime); y += 50;
+    row(x, "The army's hold", c.armyPower.toFixed(0) + " / 100", y, c.armyPower > 60 ? RED : INK, c.martial ? "martial law" : ""); y += 50;
+    // what the country is loud about
+    const heat = c.heat, keys = Object.keys(heat).filter(function (k) { return heat[k] > 3; }).sort(function (a, b) { return heat[b] - heat[a]; });
+    const word = { prices: "prices", war: "the war", crackdown: "the crackdown", scandal: "the scandal", plot: "the plot", pride: "the country, proudly" };
+    row(x, "They are talking about", keys.length ? keys.slice(0, 2).map(function (k) { return word[k]; }).join(", ") : "nothing much", y, INK); y += 50;
+    // the race that decides the game: who of the original presidents is left
+    const rivals = S.c.filter(function (o) { return o.id !== ui.me; });
+    const left = rivals.filter(function (o) { return o.alive && o.leader.original; }).length;
+    row(x, "Rivals still in office", left + " of " + rivals.length, y, left === 0 ? GREEN : INK); y += 40;
+    rule(x, 64, p.W - 64, y, INK2, 1); y += 56;
+
+    T(x, "THE CABINET", 64, y, "700 34px " + SERIF); T(x, "loyalty", 760, y, "26px " + MONO, INK2, "right"); y += 10;
+    PW.ROLES.forEach(function (role) {
+      const m = c.cab[role];
+      y += 78;
+      T(x, PW.ROLE_TITLE[role], 64, y - 22, "26px " + SERIF, INK2);
+      T(x, m.name, 64, y + 12, "700 34px " + SERIF, INK);
+      // loyalty bar
+      const bw = 200;
+      x.fillStyle = "rgba(0,0,0,0.12)"; x.fillRect(560, y - 16, bw, 22);
+      x.fillStyle = m.loyalty < 30 ? RED : m.loyalty < 55 ? "#a87a18" : GREEN; x.fillRect(560, y - 16, bw * m.loyalty / 100, 22);
+      box(p, 800, y - 40, 160, 62, "Fire", { act: { type: "fire", role: role } }, "war");
+    });
+    y += 64;
+    rule(x, 64, p.W - 64, y, INK2, 1); y += 30;
+    T(x, "AT HOME", 64, y + 30, "700 34px " + SERIF); y += 56;
+    const bw2 = 430;
+    const A = [
+      c.elections ? { l: "Postpone the election", a: { type: "postpone" }, s: "war" } : { l: "Restore elections", a: { type: "restoreElections" }, s: "go" },
+      c.elections ? { l: "Cancel elections", a: { type: "cancelElections" }, s: "war" } : null,
+      { l: "Crack down", a: { type: "crackdown" }, s: "war" },
+      c.martial ? { l: "Lift martial law", a: { type: "martial", on: 0 }, s: "go" } : { l: "Declare martial law", a: { type: "martial", on: 1 }, s: "war" },
+      { l: "Free the press", a: { type: "freePress" }, s: "go" },
+      c.nukeProg > 0 ? null : { l: "Build the bomb", a: { type: "nukeProgram" }, s: "war" },
+    ].filter(Boolean);
+    A.forEach(function (o, i) {
+      const col = i % 2, X = 64 + col * (bw2 + 36), Y = y + Math.floor(i / 2) * 82;
+      box(p, X, Y, bw2, 66, o.l, { act: o.a }, o.s);
+    });
+    if (c.nukeProg > 0) T(x, "Bomb program: " + Math.round(c.nukeProg / 730 * 100) + "%", 64, y + Math.ceil(A.length / 2) * 82 + 40, "28px " + MONO, RED);
+  }
+
+  // ============================================================ BILL
+  function bill(p, S, ui) {
+    const x = p.ctx, c = S.c[ui.me];
+    x.drawImage(grain(p.W, p.H, "#f4efe3"), 0, 0);
+    const m = c.matters.find(function (q) { return q.kind === "bill"; });
+    if (!m) { T(x, "Filed.", p.W / 2, p.H / 2, "italic 48px " + SERIF, INK2, "center"); return; }
+    const b = m.data;
+    T(x, "AN ACT", p.W / 2, 150, "700 40px " + SERIF, INK, "center");
+    T(x, b.name, p.W / 2, 230, "700 56px " + SERIF, INK, "center");
+    rule(x, 200, p.W - 200, 270, INK, 2);
+    let y = 350;
+    y = wrap(x, "Be it enacted by the legislature of " + c.name + " assembled:", 90, y, p.W - 180, 46, "italic 34px " + SERIF, INK);
+    y += 20;
+    const B = W().BUDGET;
+    let n = 1;
+    for (const k in b.fx) {
+      const d = b.fx[k];
+      let s;
+      if (k === "tax") s = "The tax take moves from " + c.tax + "% to " + (c.tax + d) + "% of GDP.";
+      else if (k === "freedom") s = d > 0 ? "Press and assembly protections are written into law." : "The police may detain without charge for thirty days.";
+      else { const name = (B.find(function (q) { return q.id === k; }) || { name: k }).name; s = name + " spending moves from " + c.budget[k].toFixed(1) + "% to " + (c.budget[k] + d).toFixed(1) + "% of GDP."; }
+      y = wrap(x, "Sec. " + (++n) + ". " + s, 90, y, p.W - 180, 46, "34px " + SERIF, INK) + 16;
+    }
+    y += 30;
+    T(x, "Passed " + b.yes + " to " + b.no, 90, y, "700 34px " + MONO, INK);
+    T(x, "Before the President until " + W().date(m.expires).text, 90, y + 50, "28px " + MONO, INK2);
+    box(p, 120, p.H - 330, 360, 120, "Sign", { act: { type: "bill", sign: 1 } }, "go");
+    box(p, p.W - 480, p.H - 330, 360, 120, "Veto", { act: { type: "bill", sign: 0 } }, "war");
+    rule(x, 120, 480, p.H - 140, INK, 2);
+    T(x, "President", 300, p.H - 100, "italic 28px " + SERIF, INK2, "center");
+  }
+
+  // ============================================================ PHONE
+  function phone(p, S, ui) {
+    const x = p.ctx, c = S.c[ui.me], Hl = H();
+    x.fillStyle = "#0d0f14"; x.fillRect(0, 0, p.W, p.H);
+    // status bar
+    T(x, W().date(S.day).text, 40, 58, "600 28px " + SANS, "#cfd3dc");
+    T(x, c.name, p.W - 40, 58, "600 28px " + SANS, "#cfd3dc", "right");
+    const ring = c.matters.filter(function (m) { return isCall(m); });
+    const tabs = [["holler", "Holler"], ["calls", "Calls" + (ring.length ? " (" + ring.length + ")" : "")], ["texts", "Texts"]];
+    const tw = (p.W - 40) / 3;
+    tabs.forEach(function (t, i) {
+      const on = ui.phoneTab === t[0];
+      x.fillStyle = on ? "#2a64d8" : "#1b1f29"; x.fillRect(20 + i * tw + 4, 84, tw - 8, 70);
+      T(x, t[1], 20 + i * tw + tw / 2, 130, "700 30px " + SANS, on ? "#fff" : "#aab0bd", "center");
+      p.hits.push({ x: 20 + i * tw, y: 84, w: tw, h: 70, fn: "tab", tab: t[0] });
+    });
+    let y = 190;
+    if (ui.phoneTab === "calls") {
+      const live = ui.call != null ? c.matters.find(function (m) { return m.id === ui.call; }) : null;
+      if (live) {
+        const who = callerName(S, ui.me, live);
+        T(x, who, p.W / 2, y + 60, "700 40px " + SANS, "#fff", "center");
+        y = wrapC(x, Hl.line(S, ui.me, live), p.W / 2, y + 140, p.W - 100, 46, "34px " + SANS, "#dde2ec") + 40;
+        live.opts.forEach(function (o, i) {
+          dbox(p, 50, y, p.W - 100, 92, o.label, { fn: "answer", m: live.id, o: i }, o.fatal ? "#b3261e" : i === 0 ? "#2a64d8" : "#3a3f4b");
+          y += 112;
+        });
+        dbox(p, 50, p.H - 160, p.W - 100, 92, "Hang up", { fn: "hangup" }, "#3a3f4b");
+        return;
+      }
+      // you call him: what you can put to him on the phone
+      if (ui.dial != null && S.c[ui.dial] && S.c[ui.dial].alive) {
+        const o = S.c[ui.dial], t = o.id;
+        T(x, o.leader.name, p.W / 2, y + 50, "700 38px " + SANS, "#fff", "center");
+        T(x, o.name + " · relations " + Math.round(S.rel[ui.me][t]), p.W / 2, y + 96, "26px " + SANS, "#9aa3b4", "center");
+        y += 140;
+        const me = S.c[ui.me], amt = Math.round(o.gdp * 0.12);
+        const opts = [];
+        if (me.war.indexOf(t) >= 0) opts.push(["Offer peace", { type: "peace", t: t, terms: "white" }, "#2f9e55"], ["Demand their land", { type: "peace", t: t, terms: "status" }, "#3a3f4b"]);
+        else {
+          if (me.deals.indexOf(t) < 0) opts.push(["Offer a trade deal", { type: "deal", t: t }, "#2a64d8"]);
+          if (me.allies.indexOf(t) < 0) opts.push(["Offer a defense pact", { type: "alliance", t: t }, "#2a64d8"]);
+          if (me.tariffs[t] || me.sanctions.indexOf(t) >= 0) opts.push(["Lift what we put on them", { type: "backDown", t: t }, "#3a3f4b"]);
+          opts.push(["Lend $" + amt + "bn for a pact", { type: "bailout", t: t, amt: amt, strings: "alliance" }, "#3a3f4b"]);
+        }
+        opts.push(["Threaten " + o.name, { type: "post", v: "threaten", t: t }, "#b3261e"]);
+        opts.forEach(function (q) { dbox(p, 50, y, p.W - 100, 88, q[0], { act: q[1], hangup: 1 }, q[2]); y += 104; });
+        dbox(p, 50, p.H - 160, p.W - 100, 92, "Hang up", { fn: "hangup" }, "#3a3f4b");
+        return;
+      }
+      ring.forEach(function (m) {
+        const who = callerName(S, ui.me, m);
+        x.fillStyle = "#1b1f29"; x.fillRect(30, y, p.W - 60, 120);
+        T(x, who, 60, y + 52, "700 32px " + SANS, "#fff");
+        T(x, "ringing", 60, y + 94, "26px " + SANS, "#4fd07a");
+        dbox(p, p.W - 230, y + 20, 170, 80, "Answer", { fn: "pickup", m: m.id }, "#2f9e55");
+        y += 140;
+      });
+      // the other presidents, to call: the ones that matter to you first
+      const me = S.c[ui.me];
+      const others = S.c.filter(function (o) { return o.alive && o.id !== ui.me; }).sort(function (a, b) {
+        const ka = (me.war.indexOf(a.id) >= 0 ? 300 : 0) + (me.allies.indexOf(a.id) >= 0 ? 150 : 0) + Math.abs(S.rel[ui.me][a.id]) + a.gdp / 500;
+        const kb = (me.war.indexOf(b.id) >= 0 ? 300 : 0) + (me.allies.indexOf(b.id) >= 0 ? 150 : 0) + Math.abs(S.rel[ui.me][b.id]) + b.gdp / 500;
+        return kb - ka;
+      });
+      T(x, "Call", 40, y + 26, "700 28px " + SANS, "#9fb7ff"); y += 44;
+      for (const o of others) {
+        if (y > p.H - 110) break;
+        x.fillStyle = "#151922"; x.fillRect(30, y, p.W - 60, 86);
+        x.fillStyle = o.color; x.fillRect(30, y, 10, 86);
+        T(x, o.leader.name, 60, y + 38, "700 28px " + SANS, "#fff");
+        const r = Math.round(S.rel[ui.me][o.id]);
+        T(x, o.name + (me.war.indexOf(o.id) >= 0 ? " · at war" : me.allies.indexOf(o.id) >= 0 ? " · ally" : "") + " · " + (r > 0 ? "+" : "") + r, 60, y + 72, "24px " + SANS, me.war.indexOf(o.id) >= 0 ? "#ff8a7a" : "#9aa3b4");
+        p.hits.push({ x: 30, y: y, w: p.W - 60, h: 86, fn: "dial", c: o.id });
+        y += 96;
+      }
+      return;
+    }
+    if (ui.phoneTab === "texts") {
+      const msgs = Hl.messages(S, ui.me, 9);
+      if (!msgs.length) T(x, "No messages", p.W / 2, y + 80, "30px " + SANS, "#7d8494", "center");
+      for (const mm of msgs) {
+        x.fillStyle = "#1b1f29"; x.fillRect(30, y, p.W - 60, 112);
+        T(x, mm.from, 54, y + 40, "700 26px " + SANS, "#9fb7ff");
+        T(x, W().date(mm.d).text, p.W - 54, y + 40, "22px " + SANS, "#7d8494", "right");
+        wrap(x, mm.text, 54, y + 80, p.W - 110, 30, "28px " + SANS, "#e6e9f0");
+        y += 124;
+        if (y > p.H - 120) break;
+      }
+      return;
+    }
+    // HOLLER: the posts you can make, then the feed
+    const opts = Hl.options(S, ui.me);
+    T(x, "Post", 40, y + 12, "700 28px " + SANS, "#9fb7ff"); y += 30;
+    const ow = (p.W - 90) / 2;
+    opts.forEach(function (o, i) {
+      const X = 30 + (i % 2) * (ow + 30), Y = y + Math.floor(i / 2) * 78;
+      dbox(p, X, Y, ow, 66, o.label, { act: o.act }, "#25314a");
+    });
+    y += Math.ceil(opts.length / 2) * 78 + 18;
+    rule(x, 30, p.W - 30, y, "#2a2f3a", 2); y += 12;
+    const feed = Hl.feed(S, ui.me, 12);
+    for (const post of feed) {
+      const col = post.kind === "press" ? "#ffcf6a" : post.kind === "leader" ? "#ff8a7a" : "#9fb7ff";
+      T(x, post.who, 40, y + 34, "700 26px " + SANS, col);
+      T(x, post.handle, p.W - 40, y + 34, "22px " + SANS, "#6b7282", "right");
+      y = wrap(x, post.text, 40, y + 72, p.W - 80, 32, "28px " + SANS, "#e6e9f0") + 8;
+      rule(x, 30, p.W - 30, y, "#1f2430", 1);
+      y += 6;
+      if (y > p.H - 60) break;
+    }
+  }
+  function dbox(p, X, Y, w, h, label, hitData, bg) {
+    const x = p.ctx;
+    x.fillStyle = bg; x.beginPath();
+    const r = 18; x.moveTo(X + r, Y); x.arcTo(X + w, Y, X + w, Y + h, r); x.arcTo(X + w, Y + h, X, Y + h, r); x.arcTo(X, Y + h, X, Y, r); x.arcTo(X, Y, X + w, Y, r); x.fill();
+    let fs = Math.min(32, Math.floor(h * 0.42));
+    x.font = "700 " + fs + "px " + SANS;
+    while (x.measureText(label).width > w - 24 && fs > 16) { fs -= 2; x.font = "700 " + fs + "px " + SANS; }
+    x.fillStyle = "#fff"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(label, X + w / 2, Y + h / 2 + 1);
+    if (hitData) p.hits.push(Object.assign({ x: X, y: Y, w: w, h: h, label: label }, hitData));
+  }
+  function wrapC(x, s, cx, Y, maxW, lh, font, col) {
+    x.font = font; x.fillStyle = col; x.textAlign = "center";
+    const words = String(s).split(" "); let line = "", y = Y;
+    for (const w of words) { const t = line ? line + " " + w : w; if (x.measureText(t).width > maxW && line) { x.fillText(line, cx, y); line = w; y += lh; } else line = t; }
+    if (line) x.fillText(line, cx, y);
+    return y + lh;
+  }
+  // a matter that comes by phone: anything from abroad
+  function isCall(m) { return typeof m.from === "string" && m.from.indexOf("leader:") === 0; }
+  function callerName(S, me, m) {
+    if (isCall(m)) { const id = +m.from.split(":")[1]; return H().leader(S, id) + ", " + H().cname(S, id); }
+    const r = S.c[me].cab[m.from]; return r ? r.name : m.from;
+  }
+
+  // ============================================================ THE MAP
+  const MAPW = 1600, MAPH = 960, SIDE = 1600;
+  const GEOC = { key: "", img: null, terrain: null };
+  function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  function map(p, S, ui) {
+    const x = p.ctx, PW = W(), M = PW.geo(S.seed, S.nC), Wd = M.W, Ht = M.H;
+    const cs = MAPW / Wd;                         // 10 px a tile
+    // ---- terrain once per world
+    const key = S.seed + ":" + S.nC;
+    if (GEOC.key !== key) {
+      GEOC.key = key;
+      GEOC.img = document.createElement("canvas"); GEOC.img.width = Wd; GEOC.img.height = Ht;
+      GEOC.terrain = new Float32Array(Wd * Ht);
+      for (let i = 0; i < Wd * Ht; i++) GEOC.terrain[i] = M.h[i] - M.seaLevel;
+    }
+    const ic = GEOC.img.getContext("2d"), id = ic.createImageData(Wd, Ht), D = id.data;
+    const cols = S.c.map(function (c) { return hexRgb(c.color); });
+    // contested provinces: tiles nearest the attacker go first
+    const pushed = {};
+    for (const pr of S.p) if (pr.prog > 0 && pr.by >= 0) pushed[pr.id] = frontTiles(S, M, pr);
+    for (let i = 0; i < Wd * Ht; i++) {
+      const pv = M.cell[i], o = i * 4;
+      const tz = GEOC.terrain[i];
+      if (pv < 0) {
+        const deep = Math.max(0, Math.min(1, -tz * 2.2));
+        D[o] = 26 - deep * 10; D[o + 1] = 58 - deep * 18; D[o + 2] = 92 - deep * 22; D[o + 3] = 255;
+        continue;
+      }
+      const pr = S.p[pv];
+      let ci = pr.ctl;
+      const tx = i % Wd, ty = (i / Wd) | 0;
+      if (pushed[pv] && pushed[pv][i]) ci = pr.by;
+      else if (pr.owner !== pr.ctl && ((tx + ty) % 3 === 0)) ci = pr.owner;       // occupied: the owner's colour shows through
+      let col = ci >= 0 ? cols[ci] : [150, 150, 140];
+      // border tiles: a darker ring where control changes or the coast is
+      let border = false;
+      const nb = [tx > 0 ? i - 1 : -1, tx < Wd - 1 ? i + 1 : -1, ty > 0 ? i - Wd : -1, ty < Ht - 1 ? i + Wd : -1];
+      for (const t of nb) {
+        if (t < 0) continue;
+        const q = M.cell[t];
+        if (q < 0) { border = true; break; }
+        const qc = pushed[q] && pushed[q][t] ? S.p[q].by : S.p[q].ctl;
+        if (qc !== ci) { border = true; break; }
+      }
+      const shade = 1 + Math.max(-0.08, Math.min(0.12, tz * 0.35));
+      let k = border ? 0.62 : shade;
+      const dm = Math.max(pr.dmg.raw, pr.dmg.fact, pr.dmg.power) * 0.35 + pr.dmg.nuke * 0.6;
+      k *= 1 - dm;
+      D[o] = col[0] * k; D[o + 1] = col[1] * k; D[o + 2] = col[2] * k; D[o + 3] = 255;
+      if (pr.dmg.nuke > 0.3 && ((tx * 7 + ty * 13) % 5 === 0)) { D[o] = 90; D[o + 1] = 120; D[o + 2] = 40; }
+    }
+    ic.putImageData(id, 0, 0);
+    x.fillStyle = "#0e1622"; x.fillRect(0, 0, p.W, p.H);
+    x.imageSmoothingEnabled = false;
+    x.drawImage(GEOC.img, 0, 0, MAPW, MAPH);
+    x.imageSmoothingEnabled = true;
+    // faint province lines inside a country
+    x.strokeStyle = "rgba(0,0,0,0.18)"; x.lineWidth = 1.5; x.beginPath();
+    for (let ty = 0; ty < Ht; ty++) for (let tx = 0; tx < Wd; tx++) {
+      const i = ty * Wd + tx, a = M.cell[i]; if (a < 0) continue;
+      if (tx < Wd - 1) { const b = M.cell[i + 1]; if (b >= 0 && b !== a && S.p[a].ctl === S.p[b].ctl) { x.moveTo((tx + 1) * cs, ty * cs); x.lineTo((tx + 1) * cs, (ty + 1) * cs); } }
+      if (ty < Ht - 1) { const b = M.cell[i + Wd]; if (b >= 0 && b !== a && S.p[a].ctl === S.p[b].ctl) { x.moveTo(tx * cs, (ty + 1) * cs); x.lineTo((tx + 1) * cs, (ty + 1) * cs); } }
+    }
+    x.stroke();
+    // the selected country: a white outline round what it holds
+    if (ui.sel != null) {
+      x.strokeStyle = "#ffffff"; x.lineWidth = 4; x.beginPath();
+      for (let ty = 0; ty < Ht; ty++) for (let tx = 0; tx < Wd; tx++) {
+        const i = ty * Wd + tx, a = M.cell[i];
+        const ina = a >= 0 && S.p[a].ctl === ui.sel;
+        if (tx < Wd - 1) { const b = M.cell[i + 1]; const inb = b >= 0 && S.p[b].ctl === ui.sel; if (ina !== inb) { x.moveTo((tx + 1) * cs, ty * cs); x.lineTo((tx + 1) * cs, (ty + 1) * cs); } }
+        if (ty < Ht - 1) { const b = M.cell[i + Wd]; const inb = b >= 0 && S.p[b].ctl === ui.sel; if (ina !== inb) { x.moveTo(tx * cs, (ty + 1) * cs); x.lineTo((tx + 1) * cs, (ty + 1) * cs); } }
+      }
+      x.stroke();
+    }
+    if (ui.selP != null && S.p[ui.selP]) {
+      const g = M.provs[ui.selP];
+      x.strokeStyle = "#ffe066"; x.lineWidth = 4; x.setLineDash([10, 8]);
+      x.beginPath(); x.arc(g.lx * cs + cs / 2, g.ly * cs + cs / 2, 34, 0, Math.PI * 2); x.stroke(); x.setLineDash([]);
+    }
+    // ---- icons: fields and mines, cities, ports, silos, damage
+    const silos = siloProvs(S);
+    for (const pr of S.p) {
+      const g = M.provs[pr.id];
+      const X = g.lx * cs + cs / 2, Y = g.ly * cs + cs / 2;
+      const res = Object.keys(pr.fac).filter(function (k) { return k !== "grain" || pr.fac[k] > 3; }).sort(function (a, b) { return pr.fac[b] * PW.GOODS[PW.GI[b]].P0 * S.yield[PW.GI[b]] - pr.fac[a] * PW.GOODS[PW.GI[a]].P0 * S.yield[PW.GI[a]]; }).slice(0, 2);
+      res.forEach(function (r, k) { resIcon(x, r, X - 26 + k * 26, Y + 26); });
+      const capOf = S.c.find(function (c) { return c.alive && c.cap === pr.id; });
+      if (capOf) star(x, X, Y, 15, "#fff", "#111");
+      else if (pr.pop > 6) { x.fillStyle = "#fff"; x.strokeStyle = "#111"; x.lineWidth = 2; x.beginPath(); x.arc(X, Y, 6, 0, Math.PI * 2); x.fill(); x.stroke(); }
+      if (g.sea.length && g.coast > 6) anchor(x, X + 22, Y - 16);
+      if (silos[pr.id]) silo(x, X - 24, Y - 18);
+      if (Math.max(pr.dmg.raw, pr.dmg.fact, pr.dmg.power) > 0.2 && pr.dmg.nuke < 0.3) burst(x, X + 14, Y + 4, 13);
+      if (pr.dmg.nuke > 0.3) rad(x, X, Y, 20);
+    }
+    // ---- fronts: counters on the line, arrows where it is moving
+    for (const c of S.c) {
+      if (!c.alive || !c.war.length) continue;
+      const fronts = [];
+      for (const pr of S.p) {
+        if (pr.ctl !== c.id) continue;
+        const g = M.provs[pr.id];
+        if (g.adj.concat(g.sea).some(function (q) { return c.war.indexOf(S.p[q].ctl) >= 0; })) fronts.push(pr.id);
+      }
+      const per = c.div / Math.max(1, fronts.length);
+      fronts.slice(0, 10).forEach(function (pid) { const g = M.provs[pid]; counter(x, g.lx * cs + cs / 2 - 26, g.ly * cs - 34, cols[c.id], per); });
+    }
+    for (const pr of S.p) {
+      if (!(pr.prog > 0) || pr.by < 0) continue;
+      const g = M.provs[pr.id];
+      let best = null, bd = 1e9;
+      for (const q of g.adj.concat(g.sea)) {
+        if (S.p[q].ctl !== pr.by) continue;
+        const gq = M.provs[q], d = (gq.cx - g.cx) * (gq.cx - g.cx) + (gq.cy - g.cy) * (gq.cy - g.cy);
+        if (d < bd) { bd = d; best = gq; }
+      }
+      if (!best) continue;
+      const f = 0.35 + 0.65 * Math.min(1, pr.prog / 60);
+      arrow(x, best.lx * cs + cs / 2, best.ly * cs + cs / 2, best.lx * cs + (g.lx - best.lx) * cs * f + cs / 2, best.ly * cs + (g.ly - best.ly) * cs * f + cs / 2, cols[pr.by]);
+    }
+    // ---- names over their land, openfront style
+    const sum = S.c.map(function () { return { x: 0, y: 0, n: 0 }; });
+    for (let i = 0; i < Wd * Ht; i++) { const pv = M.cell[i]; if (pv < 0) continue; const s = sum[S.p[pv].ctl]; if (!s) continue; s.x += i % Wd; s.y += (i / Wd) | 0; s.n++; }
+    S.c.forEach(function (c, k) {
+      const s = sum[k]; if (!c.alive || !s.n) return;
+      const X = s.x / s.n * cs, Y = s.y / s.n * cs;
+      const fs = Math.max(24, Math.min(58, Math.sqrt(s.n) * 2.6));
+      x.font = "700 " + fs + "px " + SANS; x.textAlign = "center"; x.textBaseline = "middle";
+      x.lineWidth = 6; x.strokeStyle = "rgba(0,0,0,0.75)"; x.strokeText(c.name.toUpperCase(), X, Y);
+      x.fillStyle = "#fff"; x.fillText(c.name.toUpperCase(), X, Y);
+      const sub = (c.id === ui.me ? "YOU · " : c.human != null && !c.out ? "★ " : "") + H().surname(c.leader.name) + " · " + Math.round(c.div) + " div";
+      x.font = "600 " + Math.round(fs * 0.48) + "px " + SANS;
+      x.lineWidth = 4; x.strokeText(sub, X, Y + fs * 0.72); x.fillStyle = "#f3f3f3"; x.fillText(sub, X, Y + fs * 0.72);
+    });
+    // the map itself is a target: a tap picks a country and a province
+    p.hits.push({ x: 0, y: 0, w: MAPW, h: MAPH, fn: "mapTap" });
+    mapBottom(p, S, ui);
+    mapSide(p, S, ui);
+  }
+  // the tiles of a contested province that the attacker already holds,
+  // nearest his side first (the border pushes tile by tile)
+  function frontTiles(S, M, pr) {
+    const Wd = M.W, Ht = M.H, cells = [];
+    const dist = {};
+    const q = [];
+    for (let i = 0; i < Wd * Ht; i++) {
+      if (M.cell[i] !== pr.id) continue;
+      cells.push(i);
+      const tx = i % Wd, ty = (i / Wd) | 0;
+      const nb = [tx > 0 ? i - 1 : -1, tx < Wd - 1 ? i + 1 : -1, ty > 0 ? i - Wd : -1, ty < Ht - 1 ? i + Wd : -1];
+      for (const t of nb) if (t >= 0 && M.cell[t] >= 0 && M.cell[t] !== pr.id && S.p[M.cell[t]].ctl === pr.by) { dist[i] = 0; q.push(i); break; }
+    }
+    if (!q.length && cells.length) { dist[cells[0]] = 0; q.push(cells[0]); }   // a sea landing: from the shore
+    let k = 0;
+    while (k < q.length) {
+      const i = q[k++], tx = i % Wd, ty = (i / Wd) | 0;
+      const nb = [tx > 0 ? i - 1 : -1, tx < Wd - 1 ? i + 1 : -1, ty > 0 ? i - Wd : -1, ty < Ht - 1 ? i + Wd : -1];
+      for (const t of nb) if (t >= 0 && M.cell[t] === pr.id && dist[t] == null) { dist[t] = dist[i] + 1; q.push(t); }
+    }
+    const n = Math.floor(cells.length * Math.min(0.95, pr.prog / 60));
+    const out = {};
+    for (let j = 0; j < n && j < q.length; j++) out[q[j]] = 1;
+    return out;
+  }
+  function siloProvs(S) {
+    const out = {};
+    for (const c of S.c) {
+      if (!c.alive || c.nukes < 1) continue;
+      const mine = S.p.filter(function (p) { return p.ctl === c.id && p.owner === c.id && p.id !== c.cap; }).sort(function (a, b) { return a.pop - b.pop || a.id - b.id; });
+      mine.slice(0, c.nukes > 20 ? 2 : 1).forEach(function (p) { out[p.id] = 1; });
+    }
+    return out;
+  }
+  // ---- icon drawing
+  function star(x, X, Y, r, fill, stroke) {
+    x.beginPath();
+    for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; x.lineTo(X + Math.cos(a) * rr, Y + Math.sin(a) * rr); }
+    x.closePath(); x.fillStyle = fill; x.fill(); x.lineWidth = 3; x.strokeStyle = stroke; x.stroke();
+  }
+  function anchor(x, X, Y) {
+    x.strokeStyle = "#e8f1ff"; x.lineWidth = 3;
+    x.beginPath(); x.arc(X, Y - 7, 3.5, 0, Math.PI * 2); x.moveTo(X, Y - 3.5); x.lineTo(X, Y + 8); x.moveTo(X - 6, Y + 2); x.quadraticCurveTo(X, Y + 12, X + 6, Y + 2); x.stroke();
+  }
+  function silo(x, X, Y) {
+    x.fillStyle = "#ffdd33"; x.strokeStyle = "#111"; x.lineWidth = 2;
+    x.beginPath(); x.moveTo(X, Y - 11); x.lineTo(X + 10, Y + 8); x.lineTo(X - 10, Y + 8); x.closePath(); x.fill(); x.stroke();
+    x.fillStyle = "#111"; x.beginPath(); x.arc(X, Y + 2, 3, 0, Math.PI * 2); x.fill();
+  }
+  function burst(x, X, Y, r) {
+    x.beginPath();
+    for (let i = 0; i < 16; i++) { const a = i * Math.PI / 8, rr = i % 2 ? r * 0.5 : r; x.lineTo(X + Math.cos(a) * rr, Y + Math.sin(a) * rr); }
+    x.closePath(); x.fillStyle = "#ff7a1a"; x.fill(); x.strokeStyle = "#5a1500"; x.lineWidth = 2; x.stroke();
+  }
+  function rad(x, X, Y, r) {
+    x.fillStyle = "#ffe14a"; x.beginPath(); x.arc(X, Y, r, 0, Math.PI * 2); x.fill();
+    x.fillStyle = "#111";
+    for (let k = 0; k < 3; k++) { const a = -Math.PI / 2 + k * 2 * Math.PI / 3; x.beginPath(); x.moveTo(X, Y); x.arc(X, Y, r * 0.85, a - 0.5, a + 0.5); x.closePath(); x.fill(); }
+    x.fillStyle = "#ffe14a"; x.beginPath(); x.arc(X, Y, r * 0.22, 0, Math.PI * 2); x.fill();
+  }
+  const RES_COL = { oil: "#111111", gas: "#ff9a2e", iron: "#9aa3ad", copper: "#d07a3a", rare: "#b46ce0", grain: "#f1d04b", uranium: "#6cf04a" };
+  function resIcon(x, r, X, Y) {
+    x.fillStyle = RES_COL[r] || "#fff"; x.strokeStyle = "rgba(0,0,0,0.8)"; x.lineWidth = 2;
+    x.beginPath();
+    if (r === "oil") { x.moveTo(X, Y - 9); x.quadraticCurveTo(X + 8, Y + 2, X, Y + 8); x.quadraticCurveTo(X - 8, Y + 2, X, Y - 9); }
+    else if (r === "grain") { x.ellipse(X, Y, 4, 9, 0.3, 0, Math.PI * 2); }
+    else if (r === "gas") { x.moveTo(X, Y - 9); x.lineTo(X + 7, Y + 7); x.lineTo(X - 7, Y + 7); x.closePath(); }
+    else if (r === "rare") { x.moveTo(X, Y - 9); x.lineTo(X + 8, Y); x.lineTo(X, Y + 9); x.lineTo(X - 8, Y); x.closePath(); }
+    else x.rect(X - 7, Y - 7, 14, 14);
+    x.fill(); x.stroke();
+  }
+  function counter(x, X, Y, col, n) {
+    x.fillStyle = "rgb(" + col[0] + "," + col[1] + "," + col[2] + ")"; x.fillRect(X, Y, 64, 34);
+    x.strokeStyle = "#111"; x.lineWidth = 3; x.strokeRect(X, Y, 64, 34);
+    x.strokeStyle = "#111"; x.lineWidth = 2; x.strokeRect(X + 5, Y + 7, 22, 20);
+    x.beginPath(); x.moveTo(X + 5, Y + 7); x.lineTo(X + 27, Y + 27); x.moveTo(X + 27, Y + 7); x.lineTo(X + 5, Y + 27); x.stroke();
+    x.font = "700 20px " + SANS; x.fillStyle = "#111"; x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText(n >= 10 ? Math.round(n) : n.toFixed(1), X + 46, Y + 18);
+  }
+  function arrow(x, x0, y0, x1, y1, col) {
+    const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+    const w = 9, hw = 22, hl = 28;
+    const bx = x1 - ux * hl, by = y1 - uy * hl;
+    x.beginPath();
+    x.moveTo(x0 + nx * w, y0 + ny * w); x.lineTo(bx + nx * w, by + ny * w); x.lineTo(bx + nx * hw, by + ny * hw);
+    x.lineTo(x1, y1); x.lineTo(bx - nx * hw, by - ny * hw); x.lineTo(bx - nx * w, by - ny * w); x.lineTo(x0 - nx * w, y0 - ny * w); x.closePath();
+    x.fillStyle = "rgb(" + col[0] + "," + col[1] + "," + col[2] + ")"; x.fill();
+    x.strokeStyle = "#111"; x.lineWidth = 3; x.stroke();
+  }
+  // ---- the strip under the map: the world in one line each
+  function mapBottom(p, S, ui) {
+    const x = p.ctx, PW = W();
+    x.fillStyle = "#14202f"; x.fillRect(0, MAPH, MAPW, p.H - MAPH);
+    T(x, PW.date(S.day).text, 30, MAPH + 56, "700 40px " + SANS, "#fff");
+    const show = ["oil", "gas", "grain", "food", "steel", "chips", "arms"];
+    show.forEach(function (gid, k) {
+      const g = PW.GOODS[PW.GI[gid]], P = PW.worldPrice(S, gid), d = (P / g.P0 - 1) * 100;
+      const X = 30 + k * 222, Y = MAPH + 120;
+      T(x, g.name, X, Y, "600 26px " + SANS, "#9fb0c6");
+      T(x, fmtP(g, P), X, Y + 40, "700 32px " + SANS, "#fff");
+      T(x, (d >= 0 ? "+" : "") + d.toFixed(0) + "%", X + 150, Y + 40, "700 26px " + SANS, d > 15 ? "#ff7b6b" : d < -15 ? "#6be38f" : "#9fb0c6");
+    });
+    // the last few things that happened in the world
+    const evs = H().feed(S, ui.me, 30).filter(function (f) { return f.kind === "press"; }).slice(0, 3);
+    evs.forEach(function (f, k) { T(x, f.text, 30, MAPH + 230 + k * 34, "26px " + SANS, k ? "#9fb0c6" : "#ffe28a"); });
+    const wars = [];
+    S.c.forEach(function (c) { c.war.forEach(function (e) { if (c.id < e) wars.push(c.name + " – " + S.c[e].name); }); });
+    T(x, wars.length ? "AT WAR: " + wars.slice(0, 3).join(", ") + (wars.length > 3 ? " +" + (wars.length - 3) : "") : "No wars", MAPW - 30, MAPH + 56, "700 28px " + SANS, wars.length ? "#ff7b6b" : "#9fb0c6", "right");
+  }
+  // ---- the dossier: the country you picked, and what you can do to it
+  function mapSide(p, S, ui) {
+    const x = p.ctx, PW = W(), me = S.c[ui.me];
+    x.fillStyle = "#efe9da"; x.fillRect(SIDE, 0, p.W - SIDE, p.H);
+    x.drawImage(grain(p.W - SIDE, p.H, "#efe9da"), SIDE, 0);
+    const sel = ui.sel != null ? S.c[ui.sel] : me;
+    const X0 = SIDE + 26, Wd = p.W - SIDE - 52;
+    x.fillStyle = sel.color; x.fillRect(SIDE, 0, p.W - SIDE, 16);
+    T(x, sel.name, X0, 74, "700 46px " + SERIF, INK);
+    T(x, sel.leader.name + (sel.leader.original ? "" : ", new") + (sel.human != null && !sel.out ? " ★" : ""), X0, 114, "28px " + SERIF, INK2);
+    T(x, sel.regime + " · freedom " + Math.round(sel.freedom), X0, 150, "26px " + MONO, INK2);
+    let y = 200;
+    const kv = function (k, v, col) { T(x, k, X0, y, "26px " + SERIF, INK2); T(x, v, X0 + Wd, y, "700 28px " + MONO, col || INK, "right"); y += 34; };
+    kv("GDP", fmtBn(sel.gdp));
+    kv("Approval", fmtPct(sel.approval, 0), sel.approval < 35 ? RED : INK);
+    kv("Bond yield", fmtPct(sel.yld), sel.yld > 8 ? RED : INK);
+    kv("Army", Math.round(sel.div) + " div · " + Math.round(sel.planes) + " planes");
+    kv("Nuclear", sel.nukes > 0 ? sel.nukes + " warheads" : sel.nukeProg > 0 ? "building" : "none", sel.nukes > 0 ? RED : INK);
+    kv("Missile defense", Math.round(sel.md * 100) + "%");
+    if (sel.id !== me.id) {
+      const r = S.rel[me.id][sel.id];
+      kv("Relations", (r > 0 ? "+" : "") + Math.round(r), r < -30 ? RED : r > 30 ? GREEN : INK);
+      let vi = 0, ve = 0;
+      if (S.flow) for (let g = 0; g < PW.GOODS.length; g++) { vi += S.flow[g][me.id][sel.id] * S.P[g] * 0.365; ve += S.flow[g][sel.id][me.id] * S.P[g] * 0.365; }
+      kv("We buy", fmtBn(vi)); kv("We sell", fmtBn(ve));
+      const tags = [];
+      if (me.war.indexOf(sel.id) >= 0) tags.push("AT WAR");
+      if (me.allies.indexOf(sel.id) >= 0) tags.push("ALLY");
+      if (me.deals.indexOf(sel.id) >= 0) tags.push("TRADE DEAL");
+      if (me.sanctions.indexOf(sel.id) >= 0) tags.push("WE SANCTION");
+      if (sel.sanctions.indexOf(me.id) >= 0) tags.push("SANCTIONS US");
+      if (me.tariffs[sel.id]) tags.push("OUR TARIFFS");
+      if (sel.tariffs[me.id]) tags.push("THEIR TARIFFS");
+      if (sel.loans.some(function (l) { return l.from === me.id; })) tags.push("OWES US");
+      if (tags.length) { wrap(x, tags.join(" · "), X0, y + 4, Wd, 32, "700 24px " + SANS, RED); y += 40 * Math.ceil(tags.length / 3); }
+    }
+    y += 6; rule(x, X0, X0 + Wd, y, INK2, 1); y += 18;
+    const bw = (Wd - 16) / 2, bh = 54;
+    let k = 0;
+    const B = function (label, act, style, fn) {
+      const X = X0 + (k % 2) * (bw + 16), Y = y + Math.floor(k / 2) * (bh + 10);
+      box(p, X, Y, bw, bh, label, fn ? Object.assign({ fn: fn }, act) : { act: act }, style);
+      k++;
+    };
+    const section = function (name) { if (k % 2) k++; y += Math.ceil(k / 2) * (bh + 10); k = 0; T(x, name, X0, y + 28, "700 26px " + SANS, INK2); y += 36; };
+    if (sel.id === me.id) {
+      section("OUR FORCES");
+      const enemies = me.war;
+      if (!enemies.length) T(x, "At peace.", X0, y + 34, "italic 30px " + SERIF, INK2);
+      enemies.forEach(function (e) {
+        B((me.posture[e] === "attack" ? "Hold vs " : "Attack ") + S.c[e].name, { type: "posture", t: e, v: me.posture[e] === "attack" ? "hold" : "attack" }, me.posture[e] === "attack" ? "dim" : "war");
+        B("Offer peace to " + S.c[e].name, { type: "peace", t: e, terms: "white" }, "go");
+      });
+      return;
+    }
+    const t = sel.id;
+    const topExp = PW.topImport(S, me, t);          // what we buy most from them
+    const topImpG = PW.topImport(S, sel, me.id);    // what they buy most from us
+    const gname = function (g) { return PW.GOODS[PW.GI[g]].name.toLowerCase(); };
+    section("TRADE");
+    B("Tariff their " + gname(topExp) + " 25%", { type: "tariff", t: t, good: topExp, v: 0.25 });
+    B("Tariff everything 25%", { type: "tariff", t: t, good: "all", v: 0.25 });
+    if (me.tariffs[t]) B("Lift our tariffs", { type: "tariff", t: t, good: "all", v: 0 }, "go");
+    B("Stop " + gname(topImpG) + " to them", { type: "embargo", t: t, good: topImpG, on: 1 }, "war");
+    B(me.sanctions.indexOf(t) >= 0 ? "Lift sanctions" : "Sanction them", { type: "sanction", t: t, on: me.sanctions.indexOf(t) >= 0 ? 0 : 1 }, me.sanctions.indexOf(t) >= 0 ? "go" : "war");
+    if (me.deals.indexOf(t) < 0) B("Offer a trade deal", { type: "deal", t: t }, "go");
+    section("POWER");
+    B(me.allies.indexOf(t) >= 0 ? "Leave the pact" : "Offer a defense pact", me.allies.indexOf(t) >= 0 ? { type: "leaveAlliance", t: t } : { type: "alliance", t: t }, me.allies.indexOf(t) >= 0 ? "war" : "go");
+    const amt = Math.round(sel.gdp * 0.12);
+    B("Lend $" + amt + "bn for a pact", { type: "bailout", t: t, amt: amt, strings: "alliance" });
+    B("Lend $" + amt + "bn for bases", { type: "bailout", t: t, amt: amt, strings: "bases" });
+    B("Threaten " + sel.name, { type: "post", v: "threaten", t: t }, "war");
+    section("WAR");
+    const tgtP = ui.selP != null && S.p[ui.selP] && S.p[ui.selP].ctl === t ? ui.selP : (PW.bestTarget(S, t) || { p: PW.biggestCity(S, t) }).p;
+    const pn = tgtP != null ? S.p[tgtP].name : "";
+    if (me.war.indexOf(t) < 0) B("Declare war", { type: "war", t: t }, "war");
+    else {
+      B(me.posture[t] === "attack" ? "Hold the line" : "Attack", { type: "posture", t: t, v: me.posture[t] === "attack" ? "hold" : "attack" }, "war");
+      B("Offer peace", { type: "peace", t: t, terms: "white" }, "go");
+    }
+    if (tgtP != null) {
+      B("Bomb " + pn + " fields", { type: "strike", t: t, p: tgtP, what: "oil" }, "war");
+      B("Bomb " + pn + " plants", { type: "strike", t: t, p: tgtP, what: "factories" }, "war");
+      B("Bomb " + pn + " power", { type: "strike", t: t, p: tgtP, what: "power" }, "war");
+      B("Bomb " + pn + " city", { type: "strike", t: t, p: tgtP, what: "city" }, "war");
+      B("Nuke " + pn, { type: "nuke", t: t, p: tgtP }, "war");
+    }
+    B("Kill " + H().surname(sel.leader.name), { type: "assassinate", t: t }, "war");
+  }
+
+  const DRAW = { treasury: treasury, commerce: commerce, cabinet: cabinet, bill: bill, phone: phone, map: map };
+  function draw(p, S, ui) {
+    p.hits.length = 0;
+    const x = p.ctx;
+    x.save();
+    try { DRAW[p.kind](p, S, ui); } catch (e) { console.error("[papers]", p.kind, e); }
+    x.restore();
+    p.ver++;
+  }
+
+  CBZ.presPapers = { make: make, draw: draw, hit: hit, KINDS: Object.keys(SIZES), SIZES: SIZES, fmtBn: fmtBn, fmtPct: fmtPct, isCall: isCall, callerName: callerName, MAPW: MAPW, MAPH: MAPH };
+})();
