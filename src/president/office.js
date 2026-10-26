@@ -637,7 +637,7 @@
     if (SC) return;
     if (kind === "bill" && !hasBill()) return;
     if (kind === "map") { mode = "map"; focusKind = "map"; mapCam.x = TABLE.x; mapCam.z = TABLE.z; mapCam.h = fitMapH(); P.map.dirty = true; }
-    else { mode = "paper"; focusKind = kind; read.zoom = 1; read.px = 0; read.py = 0; read.t = 0; P[kind].dirty = true; }
+    else { mode = "paper"; focusKind = kind; read.zoom = 1; read.px = 0; read.py = 99; read.t = 0; P[kind].dirty = true; }   // a page is read from the top
     if (kind === "phone") { O.ui.phoneTab = ringing.length ? "calls" : O.ui.phoneTab || "holler"; }
     view.t = 0;
     if (O.onMode) O.onMode(mode, kind);

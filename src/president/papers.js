@@ -122,6 +122,16 @@
     x.fillRect(X, Y, w, h);
     x.strokeStyle = col; x.lineWidth = 3;
     x.strokeRect(X + 1.5, Y + 1.5, w - 3, h - 3);
+    if (label === "+" || label === "-") {
+      // a plus and a minus drawn, not typed: a glyph this small reads as a speck
+      x.strokeStyle = col; x.lineWidth = 6; x.lineCap = "round"; x.beginPath();
+      const cx = X + w / 2, cy = Y + h / 2, r = Math.min(w, h) * 0.24;
+      x.moveTo(cx - r, cy); x.lineTo(cx + r, cy);
+      if (label === "+") { x.moveTo(cx, cy - r); x.lineTo(cx, cy + r); }
+      x.stroke(); x.restore();
+      if (hitData) p.hits.push(Object.assign({ x: X, y: Y, w: w, h: h, label: label }, hitData));
+      return;
+    }
     let fs = Math.min(34, Math.floor(h * 0.5));
     x.font = "700 " + fs + "px " + SANS;
     while (x.measureText(label).width > w - 20 && fs > 16) { fs -= 2; x.font = "700 " + fs + "px " + SANS; }
@@ -167,7 +177,7 @@
     row(x, "Inflation (prices, a year)", fmtPct(c.infl), y, c.infl > 6 ? RED : INK); y += 50;
     row(x, "Central bank rate", fmtPct(c.rate, 2), y, INK, c.cbIndep < 0.5 ? "the bank is yours" : ""); y += 50;
     row(x, "Ten-year bond yield", fmtPct(c.yld, 2), y, c.yld > 8 ? RED : INK, "rated " + c.rating); y += 14;
-    spark(x, c.hist && c.hist.y, 760, y - 58, 200, 44, c.yld > 8 ? RED : INK);
+    spark(x, c.hist && c.hist.y, 720, y - 2, 240, 30, c.yld > 8 ? RED : INK);
     y += 36;
     row(x, "Government debt", fmtPct(v.debtGdp, 0) + " of GDP", y, v.debtGdp > 100 ? RED : INK, fmtBn(c.debt)); y += 50;
     const off = PW.official(c);

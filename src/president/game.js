@@ -269,7 +269,8 @@
     lastClock = now;
     if (S.over && S.over.final) return;
     if (NET && NET.role !== "host") return;
-    const paused = speed === 0 || (!NET && prompting) || (c() && c().out && !watching);
+    // a room never waits for one president: not for his question, not for his fall
+    const paused = speed === 0 || (!NET && prompting) || (!NET && c() && c().out && !watching);
     if (paused) {
       // a paused room still takes decisions: they land now, on every machine
       if (NET && PENDING.length) { const acts = PENDING.splice(0, PENDING.length); NET.tick(S.day, acts, true); for (const a of acts) PW.apply(S, a); afterStep(); }

@@ -72,6 +72,8 @@ try {
   await sleep(800);
   await rig.evl("CBZ.presOffice.focus('map')"); await sleep(1800); await shot("7-phone-landscape-map");
   await rig.evl("CBZ.presOffice.back()"); await sleep(300);
+  await rig.evl("CBZ.presOffice.focus('treasury')"); await sleep(1800); await shot("7b-phone-landscape-treasury");
+  await rig.evl("CBZ.presOffice.back()"); await sleep(300);
   await shot("8-phone-landscape-office");
   await rig.send("Emulation.setDeviceMetricsOverride", { width: Wd, height: Ht, deviceScaleFactor: 1, mobile: false });
   await sleep(800);
