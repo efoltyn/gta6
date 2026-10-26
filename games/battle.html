@@ -46,7 +46,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap">
-<link rel="stylesheet" href="../src/battle/battle.css?v=army1013m">
+<link rel="stylesheet" href="../src/battle/battle.css?v=nations1026">
 </head>
 <body>
 
@@ -85,7 +85,8 @@
         <label class="f"><span>WHO</span><select id="redU"></select></label>
         <label class="f"><span>ARMED WITH</span><select id="redW"></select></label>
         <label class="f"><span>TRAINING</span><select id="redT"></select></label>
-        <label class="f"><span>FLAG</span><select id="redF"></select></label>
+        <label class="f"><span>COUNTRY</span><select id="redF"></select></label>
+        <div class="flagstrip" id="redFS" aria-label="the first side's country"></div>
         <label class="f"><span>AIR SUPPORT</span><select id="redS"></select></label>
       </div>
       <div class="vs">V</div>
@@ -99,7 +100,8 @@
         <label class="f"><span>WHO</span><select id="blueU"></select></label>
         <label class="f"><span>ARMED WITH</span><select id="blueW"></select></label>
         <label class="f"><span>TRAINING</span><select id="blueT"></select></label>
-        <label class="f"><span>FLAG</span><select id="blueF"></select></label>
+        <label class="f"><span>COUNTRY</span><select id="blueF"></select></label>
+        <div class="flagstrip" id="blueFS" aria-label="the second side's country"></div>
         <label class="f"><span>AIR SUPPORT</span><select id="blueS"></select></label>
       </div>
     </div>
@@ -150,6 +152,7 @@
 <div id="banner"></div>
 <div id="nflash"></div>
 <div id="who"><i id="whoHp"><s></s></i><i id="whoMagT"><s></s></i></div>
+<div id="tally"></div>
 
 <div id="end"><div class="in">
   <button id="endWatch" class="x" aria-label="keep watching">&times;</button>
@@ -173,7 +176,7 @@
   skips files a page already carries, so the day a "guns" pack ships,
   these lines simply stop being needed.
 ============================================================ -->
-<script src="../src/core/studio.js?v=fists1026"></script>
+<script src="../src/core/studio.js?v=nf1026"></script>
 <!-- NPC WAR ITSELF: src/battle/, one shared scope, in this order. The
   file map and who owns what: docs/npcwar/ARCHITECTURE.md -->
 <script src="../src/battle/npcwar.js?v=npcw1011b"></script>
@@ -181,7 +184,8 @@
 <script src="../src/units/manifest.js?v=presboot3"></script>
 <script src="../src/units/kit/moves.js?v=take1011"></script>
 <script src="../src/battle/core/roster.js?v=army1013"></script>
-<script src="../src/battle/core/sides.js?v=army1013"></script>
+<script src="../src/battle/core/countries.js?v=nations1026"></script>
+<script src="../src/battle/core/sides.js?v=nations1026"></script>
 <script src="../src/battle/core/series.js?v=army1013"></script>
 <script src="../src/battle/core/host.js?v=curb1013"></script>
 <script src="../src/battle/core/store.js?v=army1013"></script>
@@ -190,13 +194,13 @@
 <script src="../src/battle/core/tiersim.js?v=army1013m"></script>
 <script src="../src/battle/core/simlink.js?v=army1013"></script>
 <script src="../src/battle/core/tactics.js?v=army1013m"></script>
-<script src="../src/battle/settings.js?v=convoy1013"></script>
+<script src="../src/battle/settings.js?v=nations1026"></script>
 <script src="../src/battle/arenas/maps.js?v=army1013"></script>
-<script src="../src/battle/teams.js?v=kitfix1013"></script>
+<script src="../src/battle/teams.js?v=nations1026"></script>
 <script src="../src/battle/arms.js?v=army1013"></script>
-<script src="../src/battle/load.js?v=army1013"></script>
+<script src="../src/battle/load.js?v=nations1026"></script>
 <script src="../src/battle/core.js?v=army1013"></script>
-<script src="../src/battle/menu.js?v=army1013m"></script>
+<script src="../src/battle/menu.js?v=nations1026"></script>
 <script src="../src/battle/state.js?v=army1013"></script>
 <script src="../src/battle/arenas/yard.js?v=army1013"></script>
 <script src="../src/battle/arenas/erg.js?v=army1013"></script>
@@ -208,7 +212,7 @@
 <script src="../src/battle/arenas/fields.js?v=army1013"></script>
 <script src="../src/battle/arenas/sea.js?v=army1013"></script>
 <script src="../src/battle/arenas/field.js?v=convoy1013"></script>
-<script src="../src/battle/men.js?v=kitfix1013"></script>
+<script src="../src/battle/men.js?v=nations1026"></script>
 <script src="../src/battle/beasts.js?v=army1013m"></script>
 <script src="../src/battle/damage.js?v=rounds1013m"></script>
 <script src="../src/battle/ai/morale.js?v=army1013m"></script>
@@ -236,13 +240,14 @@
 <script src="../src/battle/bench.js?v=army1013"></script>
 <script src="../src/battle/spawn.js?v=army1013m"></script>
 <script src="../src/battle/mass.js?v=rounds1013m"></script>
-<script src="../src/battle/massdraw.js?v=army1013m"></script>
+<script src="../src/battle/massdraw.js?v=nations1026"></script>
+<script src="../src/battle/colours.js?v=nations1026"></script>
 <script src="../src/battle/settingspanel.js?v=army1013"></script>
-<script src="../src/battle/scoring.js?v=army1013m"></script>
-<script src="../src/battle/begin.js?v=convoy1013"></script>
+<script src="../src/battle/scoring.js?v=nations1026"></script>
+<script src="../src/battle/begin.js?v=nations1026"></script>
 <script src="../src/battle/tick.js?v=kitfix1013"></script>
 <script src="../src/battle/loop.js?v=army1013m"></script>
-<script src="../src/battle/probe.js?v=convoy1013"></script>
+<script src="../src/battle/probe.js?v=nations1026"></script>
 <script src="../src/battle/main.js?v=army1013"></script>
 <a href="../" id="portalHome" style="position:fixed;left:12px;top:10px;z-index:2147483000;font:700 13px/1 Fredoka,Arial,sans-serif;letter-spacing:.08em;color:#fff;text-decoration:none;background:rgba(4,20,36,.55);padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.25)">◀ ALL GAMES</a>
 </body>
