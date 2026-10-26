@@ -77,7 +77,7 @@
     { id: "fuel", name: "Fuel", unit: "Mbbl/d", pu: "$/bbl", P0: 105, raw: 0, q: 95, fd: 95, el: 0.22, rec: { oil: 1.05 }, show: 1 },
     { id: "steel", name: "Steel", unit: "Mt/d", pu: "$/t", P0: 650, raw: 0, q: 5.2, fd: 5.05, el: 0.35, rec: { iron: 1.4, gas: 3 }, show: 1 },
     { id: "chips", name: "Electronics", unit: "M/d", pu: "$/unit", P0: 110, raw: 0, q: 40, fd: 38, el: 0.5, rec: { copper: 0.000875, rare: 0.000015, gas: 0.5 }, show: 1 },
-    { id: "food", name: "Food", unit: "Mt/d", pu: "$/t", P0: 520, raw: 0, q: 6.5, fd: 6.5, el: 0.16, rec: { grain: 1.1 }, show: 1 },
+    { id: "food", name: "Food", unit: "Mt/d", pu: "$/t", P0: 520, raw: 0, q: 6.5, fd: 6.5, el: 0.28, rec: { grain: 1.1 }, show: 1 },
     { id: "arms", name: "Arms", unit: "k/d", pu: "$k/unit", P0: 500000, raw: 0, q: 0.004, fd: 0.004, el: 0.6, rec: { steel: 37.5, chips: 500 }, show: 1000, pshow: 0.001 },
   ];
   const GI = {}; GOODS.forEach(function (g, i) { GI[g.id] = i; });
@@ -351,7 +351,7 @@
         posture: {}, tariffs: {}, sanctions: [], embargo: {}, allies: [], deals: [], war: [],
         stock: new Array(NG).fill(0), sup: new Array(NG).fill(0), dem: new Array(NG).fill(0),
         imp: new Array(NG).fill(0), exp: new Array(NG).fill(0), fill: new Array(NG).fill(1), pl: GOODS.map(function (g) { return g.P0; }),
-        dBase: new Array(NG).fill(0), util: new Array(NG).fill(0.95), cap0: new Array(NG).fill(0), gi0: 1,
+        dBase: new Array(NG).fill(0), util: new Array(NG).fill(0.85), cap0: new Array(NG).fill(0), gi0: 1,
         tradeIn: 0, tradeOut: 0, tariffRev: 0, rev: 0, spend: 0, deficit: 0,
         cab: {}, matters: [], memo: {}, gained: 0, lost: 0,
         // the army's hold on the state, the printing press, the currency,
@@ -436,16 +436,16 @@
       const tot = S.c.reduce(function (a, c) { return a + c.dBase[i]; }, 0) || 1;
       S.c.forEach(function (c) { c.dBase[i] *= g.fd / tot; });
       if (g.raw) return;
-      const wts = S.c.map(function (c) { return c.gdp * c.ind * (0.6 + r() * 0.8); });
+      const wts = S.c.map(function (c) { return Math.pow(c.gdp, 0.8) * c.ind * (0.6 + r() * 0.8); });
       const wt = wts.reduce(function (a, b) { return a + b; }, 0) || 1;
       S.c.forEach(function (c, k) {
-        const cap = g.q / 0.95 * wts[k] / wt;          // factories run at 95% in a normal year
+        const cap = g.q / 0.85 * wts[k] / wt;          // factories run at 85% in a normal year
         c.cap0[i] = cap;
         // place it in the country's biggest cities
         const mine = S.p.filter(function (p) { return p.owner === c.id; }).sort(function (a, b) { return b.pop - a.pop || a.id - b.id; });
-        const top = mine.slice(0, Math.max(1, Math.min(3, mine.length)));
-        const tp = top.reduce(function (a, p) { return a + p.pop; }, 0) || 1;
-        top.forEach(function (p) { p.fact[g.id] = cap * p.pop / tp; });
+        const top = mine.slice(0, Math.max(1, Math.min(6, mine.length)));
+        const tp = top.reduce(function (a, p) { return a + Math.sqrt(p.pop); }, 0) || 1;
+        top.forEach(function (p) { p.fact[g.id] = cap * Math.sqrt(p.pop) / tp; });
       });
     });
     // military from the budget, stocks from demand, services from what is left
@@ -515,7 +515,7 @@
     let t = 0;
     GOODS.forEach(function (m, mi) {
       if (!m.rec || !m.rec[id]) return;
-      t += m.rec[id] * factoryCap(S, c, mi) * (c.util ? c.util[mi] : 0.95);
+      t += m.rec[id] * factoryCap(S, c, mi) * (c.util ? c.util[mi] : 0.85);
     });
     return t;
   }
@@ -595,7 +595,8 @@
           let acc = 1, cost = 0;
           for (const r in gd.rec) { const ri = GI[r]; acc = Math.min(acc, c.fill[ri]); cost += gd.rec[r] * c.pl[ri]; }
           const margin = (c.pl[g] - cost) / Math.max(1e-9, c.pl[g]);
-          const want = clamp(acc * 0.95 * (0.5 + 0.5 * clamp(0.5 + margin * 3, 0, 1)), 0, 1);
+          // a supply curve: 85% in a normal year, flat out when the price is up a quarter, idling in a glut
+          const want = clamp(acc * clamp(0.85 + 0.6 * (c.pl[g] / gd.P0 - 1), 0.4, 1) * (margin < 0 ? 0.6 : 1), 0, 1);
           c.util[g] += (want - c.util[g]) * 0.15;
           c.sup[g] = factoryCap(S, c, g) * c.util[g];
         }
@@ -819,7 +820,7 @@
       if (c.nukeProg >= 730) { c.nukeProg = 0; c.nukes += 3; logEv(S, c.id, "bomb", {}); worldReacts(S, c, "bomb"); }
     }
     // repairs: infrastructure money fixes what was bombed
-    const fix = 0.0015 + c.budget.infra * 0.0012;
+    const fix = 0.003 + c.budget.infra * 0.0015;
     for (const p of S.p) if (p.owner === c.id && p.ctl === c.id) {
       p.dmg.raw = Math.max(0, p.dmg.raw - fix); p.dmg.fact = Math.max(0, p.dmg.fact - fix);
       p.dmg.power = Math.max(0, p.dmg.power - fix * 1.5); p.dmg.city = Math.max(0, p.dmg.city - fix * 0.5);
@@ -1134,7 +1135,7 @@
     for (let i = 0; i < missiles; i++) if (rnd(S) >= intercept * 1.2) mHit++;
     const hit = wing - lost + mHit * 0.6;
     c.planes = Math.max(0, c.planes - lost);
-    const dmg = clamp(hit * 0.05 * (0.8 + c.budget.research * 0.08), 0, 0.95);
+    const dmg = clamp(hit * 0.026 * (0.8 + c.budget.research * 0.08), 0, 0.95);
     if (what === "oil" || what === "raw") p.dmg.raw = clamp(p.dmg.raw + dmg, 0, 0.97);
     else if (what === "factories") p.dmg.fact = clamp(p.dmg.fact + dmg, 0, 0.97);
     else if (what === "power") p.dmg.power = clamp(p.dmg.power + dmg, 0, 0.97);
@@ -1796,6 +1797,9 @@
       case "seat": {
         // a human takes (or leaves) a country
         c.human = a.who == null ? null : String(a.who);
+        // a president who takes office at the start gets at least a first
+        // term's worth of runway before his first vote
+        if (c.human != null && S.day < 30 && c.elections) c.nextElection = Math.max(c.nextElection, 540 + (c.id * 37) % 300);
         return { ok: true };
       }
       default: return { ok: false, why: "unknown" };
@@ -1820,7 +1824,7 @@
 
   // ============================================================ the day
   function logEv(S, c, k, d) {
-    const e = { d: S.day, c: c, k: k };
+    const e = { d: S.day, c: c, k: k, n: (S.evN = (S.evN || 0) + 1) };
     for (const key in d) e[key] = d[key];
     S.log.push(e);
     if (S.log.length > 400) S.log.splice(0, S.log.length - 400);
@@ -1894,7 +1898,16 @@
     warDay(S);
     diplomacyDay(S);
     for (const c of S.c) if (c.alive) { politicsDay(S, c); peopleDay(S, c); mattersDay(S, c); }
-    if (S.day % 7 === 0) GOODS.forEach(function (g, i) { const h = S.PHist[i]; h.push(+S.P[i].toPrecision(5)); if (h.length > 104) h.shift(); });
+    if (S.day % 7 === 0) {
+      GOODS.forEach(function (g, i) { const h = S.PHist[i]; h.push(+S.P[i].toPrecision(5)); if (h.length > 104) h.shift(); });
+      // two years of weekly readings per country, for the papers' sparklines
+      for (const c of S.c) {
+        if (!c.alive) continue;
+        const H = c.hist || (c.hist = { y: [], a: [], i: [], g: [], u: [] });
+        H.y.push(+c.yld.toFixed(2)); H.a.push(+c.approval.toFixed(1)); H.i.push(+c.infl.toFixed(2)); H.g.push(Math.round(c.gdp)); H.u.push(+c.u.toFixed(2));
+        for (const k in H) if (H[k].length > 104) H[k].shift();
+      }
+    }
     S.day++;
     S._res = res;
     return S;

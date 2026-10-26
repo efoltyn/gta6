@@ -137,8 +137,10 @@
     );
   }
 
+  // games/president.html is a third world that talks through this card (its
+  // cabinet's questions are the cinematic three-answer prompt)
   function playableMode() {
-    return g.mode === "city" || g.mode === "escape";
+    return g.mode === "city" || g.mode === "escape" || g.mode === "president";
   }
 
   function livePlay() {
