@@ -192,6 +192,7 @@
     NET.on("tick", function (d) {
       if (!started) return;
       if (d.day !== S.day) { if (d.day > S.day) NET.need(); return; }
+      if (d.hold) { for (const a of d.acts || []) PW.apply(S, a); afterStep(); return; }
       PW.step(S, d.acts || []); afterStep();
     });
     NET.on("error", function (m) { el("netmsg").textContent = m; NET = null; });
@@ -234,6 +235,7 @@
       });
       document.body.classList.add("playing");
       CBZ.micro.onFrame(frame, { order: 10, id: "president" });
+      setInterval(clock, 100);
       hud();
     });
   }
@@ -257,26 +259,36 @@
       CBZ.presOffice.say(r.role, line);
     }
   }
+  /* THE CLOCK IS NOT THE FRAME. The world steps on a timer, so a host whose
+     tab is in the background (where requestAnimationFrame stops) still runs
+     the day for everybody; the frame only draws. */
+  let lastClock = 0;
+  function clock() {
+    if (!S) return;
+    const now = performance.now(), dt = lastClock ? Math.min(1.5, (now - lastClock) / 1000) : 0;
+    lastClock = now;
+    if (S.over && S.over.final) return;
+    if (NET && NET.role !== "host") return;
+    const paused = speed === 0 || (!NET && prompting) || (c() && c().out && !watching);
+    if (paused) {
+      // a paused room still takes decisions: they land now, on every machine
+      if (NET && PENDING.length) { const acts = PENDING.splice(0, PENDING.length); NET.tick(S.day, acts, true); for (const a of acts) PW.apply(S, a); afterStep(); }
+      return;
+    }
+    acc += dt * SPEEDS[speed];
+    let n = 0;
+    while (acc >= 1 && n < 30) {
+      acc -= 1; n++;
+      const acts = PENDING.splice(0, PENDING.length);
+      if (NET) NET.tick(S.day, acts);
+      PW.step(S, acts);
+      if (NET && S.day % 90 === 0) NET.snapshot(S, { seats: LOBBY.seats });
+      afterStep();
+    }
+    if (acc > 3) acc = 3;
+  }
   function frame(dt) {
     if (!S) return;
-    const run = !S.over || !S.over.final;
-    if (run && (!NET || NET.role === "host")) {
-      const paused = speed === 0 || (!NET && prompting) || (c() && c().out && !watching);
-      if (!paused) {
-        acc += Math.min(dt, 0.25) * SPEEDS[speed];
-        let n = 0;
-        while (acc >= 1 && n < 6) {
-          acc -= 1; n++;
-          const acts = PENDING.splice(0, PENDING.length);
-          if (NET) NET.tick(S.day, acts);
-          PW.step(S, acts);
-          if (NET && S.day % 90 === 0) NET.snapshot(S, { seats: LOBBY.seats });
-          afterStep();
-        }
-      } else if (NET && PENDING.length) {
-        // paused rooms still take decisions: they land on the next day
-      }
-    }
     CBZ.presOffice.update(Math.min(dt, 0.1));
     hudTick();
   }

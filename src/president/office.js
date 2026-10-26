@@ -41,7 +41,7 @@
   const RX = 5.4, RZ = 4.4, WALL_H = 3.6;
   const DESK = { x: 0, z: -2.8, top: 0.78 };
   const SEAT = new THREE.Vector3(0, 1.2, -3.32);
-  const PETITION = { x: 0.05, z: -1.72 };
+  const PETITION = { x: 0.05, z: -1.12 };
   const TABLE = { x: 2.55, z: -0.55, top: 0.905, w: 2.0, d: 1.25 };
   const PAPER_W = 0.30, PAPER_H = 0.424;
   const DESK_PAPERS = {
@@ -56,11 +56,11 @@
      Representative by the fireplace, the Security Chief and the agents by
      the doors. `sit` puts the body in animChar's own seated pose. */
   const SPOTS = {
-    general: { x: 3.1, z: -1.55, face: -1.9, path: [[3.1, -1.55], [0.6, -1.72]] },
-    treasury: { x: -2.86, z: -0.2, face: Math.PI / 2, sit: true, path: [[-2.86, -0.2], [-2.05, -0.85], [-0.1, -1.6]] },
-    bank: { x: -0.72, z: 1.4, face: -Math.PI / 2, sit: true, path: [[-0.72, 1.4], [-0.1, 1.6], [0.05, -1.5]] },
-    trade: { x: 0.9, z: 3.35, face: -2.6, path: [[0.9, 3.35], [0.4, 2.0], [0.15, -1.5]] },
-    security: { x: 3.55, z: 1.75, face: -2.3, path: [[3.55, 1.75], [1.2, 1.1], [0.6, -1.4]] },
+    general: { x: 3.1, z: -1.55, face: -1.9, path: [[3.1, -1.55], [1.6, -0.9], [0.5, -1.0]] },
+    treasury: { x: -2.86, z: -0.2, face: Math.PI / 2, sit: true, path: [[-2.86, -0.2], [-2.05, -0.85], [-0.2, -0.95]] },
+    bank: { x: -0.72, z: 1.4, face: -Math.PI / 2, sit: true, path: [[-0.72, 1.4], [-0.1, 1.6], [0.1, -0.9]] },
+    trade: { x: 0.9, z: 3.35, face: -2.6, path: [[0.9, 3.35], [0.4, 2.0], [0.2, -0.9]] },
+    security: { x: 3.55, z: 1.75, face: -2.3, path: [[3.55, 1.75], [1.2, 1.1], [0.5, -0.9]] },
     agentL: { x: -4.25, z: 1.55, face: 2.0 },
     agentR: { x: 4.3, z: 0.85, face: -1.6 },
   };
@@ -189,7 +189,7 @@
     wain.scale.set(RX, 1, RZ); wain.position.y = 0.475; root.add(wain);
     const corn = new THREE.Mesh(new THREE.CylinderGeometry(0.99, 0.99, 0.22, 64, 1, true), new THREE.MeshLambertMaterial({ color: 0xf6f1e4, side: THREE.BackSide }));
     corn.scale.set(RX, 1, RZ); corn.position.y = WALL_H - 0.11; root.add(corn);
-    const ceil = new THREE.Mesh(new THREE.CircleGeometry(1, 48), new THREE.MeshLambertMaterial({ color: 0xf3efe6 }));
+    const ceil = new THREE.Mesh(new THREE.CircleGeometry(1, 48), new THREE.MeshLambertMaterial({ color: 0xf3efe6, emissive: 0x8a857a }));
     ceil.scale.set(RX, RZ, 1); ceil.rotation.x = Math.PI / 2; ceil.position.y = WALL_H; root.add(ceil);
     // windows behind the desk, with drapes
     const viewTex = canvasTex(512, 1024, windowView);
@@ -387,6 +387,7 @@
     }
   }
   function goHome(pp) {
+    if (lookHint === pp) hintLook(null);
     pp.faceCam = false;
     const sp = pp.home;
     const path = (sp.path || [[sp.x, sp.z]]).slice().reverse();
@@ -425,6 +426,7 @@
   }
   function ask(m, pp) {
     asking = m;
+    if (pp) hintLook(pp);
     const S = O.state(), me = O.me();
     const line = CBZ.presHoller.line(S, me, m);
     const name = pp ? pp.name : CBZ.presPapers.callerName(S, me, m);
@@ -528,9 +530,9 @@
         walkTo(sp, [[1.6 - i * 3.2, -1.2]], function () { sp.faceCam = true; sp.aimAt = { pos: cam.position }; });
       }
     }
-    const path = kind === "coup" ? [[3.05, -1.75], [0.55, -1.75]] : [[2.6, 1.2], [0.6, -1.4], [PETITION.x, PETITION.z]];
+    const path = kind === "coup" ? [[3.05, -1.55], [1.6, -0.9], [PETITION.x, PETITION.z]] : [[2.6, 1.2], [0.6, -0.6], [PETITION.x, PETITION.z]];
     walkTo(asker, path, function () {
-      asker.faceCam = true;
+      asker.faceCam = true; hintLook(asker);
       asker.armed = true; asker.weapon = "Pistol";
       if (kind === "traitor") asker.aimAt = { pos: cam.position };
       const line = CBZ.presHoller.line(S, me, m);
@@ -551,6 +553,7 @@
     const fell = ev.k === "fall";
     if (!survived && !fell) return;
     const sc = SC; SC = null;
+    setTimeout(function () { hintLook(null); }, 2500);
     const a = sc.asker;
     if (survived) {
       const guard = people.agentL && !people.agentL.dead ? people.agentL : people.agentR;
@@ -651,7 +654,34 @@
   function hasBill() { const S = O.state(); return S.c[O.me()].matters.some(function (m) { return m.kind === "bill"; }); }
 
   const _cp = new THREE.Vector3(), _cq = new THREE.Quaternion();
+  /* WHO IS TALKING TO YOU, YOU LOOK AT. When somebody stands at the desk and
+     speaks, the seated eye lifts to his face (a standing man two metres away
+     is above a seated man's line of sight); when he goes, it settles back on
+     the desk. A drag always wins: the hint only eases while you are not
+     looking somewhere yourself. */
+  let lookHint = null, lookRest = null, userLookT = 0;
+  function hintLook(pp) {
+    if (!pp) { lookHint = null; return; }
+    if (!lookRest) lookRest = { yaw: look.yaw, pitch: look.pitch };
+    lookHint = pp;
+  }
+  function easeLook(dt) {
+    userLookT = Math.max(0, userLookT - dt);
+    if (mode !== "seat" || userLookT > 0) return;
+    let wy, wp;
+    if (lookHint && !lookHint.dead) {
+      const g = lookHint.group.position;
+      const dx = g.x - SEAT.x, dz = g.z - SEAT.z, dy = 1.62 - SEAT.y;
+      wy = Math.atan2(-dx, -dz); wp = Math.atan2(dy, Math.hypot(dx, dz)) - 0.22;
+    } else if (lookRest) { wy = lookRest.yaw; wp = lookRest.pitch; }
+    else return;
+    let d = wy - look.yaw; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+    const k = Math.min(1, dt * 2.5);
+    look.yaw += d * k; look.pitch += (wp - look.pitch) * k;
+    if (!lookHint && lookRest && Math.abs(d) < 0.01 && Math.abs(wp - look.pitch) < 0.01) lookRest = null;
+  }
   function updateCamera(dt) {
+    easeLook(dt);
     view.t = Math.min(1, view.t + dt * 3.2);
     const e = 1 - Math.pow(1 - view.t, 3);
     if (mode === "map") { mapPose(_cp, _cq); }
@@ -750,12 +780,12 @@
     const pending = c.matters.find(function (m) { return m.from === role; });
     if (pending) { OF.deliver(pending); return; }
     const line = CBZ.presHoller.standing(S, me, role);
-    pp.faceCam = true;
+    pp.faceCam = true; hintLook(pp);
     if (O.onPrompt) O.onPrompt(true);
     prompt(pp.name, line, [
       { id: "keep", label: "Keep him on", value: "keep", onSelect: function () {} },
       { id: "fire", label: "Fire him", value: "fire", onSelect: function () { O.submit({ type: "fire", role: role }); speak(pp, "You'll regret this.", 2.4); } },
-    ], pp, 8).then(function () { if (O.onPrompt) O.onPrompt(false); pp.faceCam = false; });
+    ], pp, 8).then(function () { if (O.onPrompt) O.onPrompt(false); pp.faceCam = false; hintLook(null); });
   }
   function bindInput(el) {
     el.addEventListener("pointerdown", function (e) {
@@ -779,7 +809,7 @@
       drag.moved += Math.abs(dx) + Math.abs(dy);
       if (drag.moved < 8) return;
       const s = 1 / (window.innerHeight || 600);
-      if (mode === "seat") { look.yaw -= dx * s * 2.2; look.pitch = Math.max(-1.25, Math.min(0.5, look.pitch - dy * s * 2.2)); }
+      if (mode === "seat") { userLookT = 1.5; look.yaw -= dx * s * 2.2; look.pitch = Math.max(-1.25, Math.min(0.5, look.pitch - dy * s * 2.2)); }
       else if (mode === "paper") { read.px += dx * s * read.d * 1.3; read.py -= dy * s * read.d * 1.3; }
       else if (mode === "map") { mapCam.x += dx * s * mapCam.h * 1.25; mapCam.z += dy * s * mapCam.h * 1.25; }
     });

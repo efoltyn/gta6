@@ -33,8 +33,9 @@
 
   function pid() {
     try {
-      let v = localStorage.getItem("pres_pid");
-      if (!v) { v = "p" + Math.random().toString(36).slice(2, 10); localStorage.setItem("pres_pid", v); }
+      // one per TAB (a reload is the same president; a second tab is another one)
+      let v = sessionStorage.getItem("pres_pid");
+      if (!v) { v = "p" + Math.random().toString(36).slice(2, 10); sessionStorage.setItem("pres_pid", v); }
       return v;
     } catch (e) { return "p" + Math.random().toString(36).slice(2, 10); }
   }
@@ -87,7 +88,8 @@
       }
     };
     // ---- host verbs
-    ses.tick = function (day, acts) { send({ t: "world", d: { k: "tick", day: day, acts: acts } }); };
+    // hold: apply these actions without advancing the day (a paused room)
+    ses.tick = function (day, acts, hold) { send({ t: "world", d: { k: "tick", day: day, acts: acts, hold: hold ? 1 : 0 } }); };
     ses.snapshot = function (S, extra) { send({ t: "world", d: Object.assign({ k: "snap", S: S }, extra || {}) }); };
     ses.lobby = function (info) { send({ t: "world", d: Object.assign({ k: "lobby" }, info) }); };
     ses.start = function (S, info) { send({ t: "world", d: Object.assign({ k: "start", S: S }, info || {}) }); };

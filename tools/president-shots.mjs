@@ -49,6 +49,7 @@ try {
       }
       PW.step(S, acts);
     }
+    S.c[me].matters = S.c[me].matters.filter(m => m.kind === "bill");
     CBZ.presOffice.redraw();
     return S.day;
   })()`);
@@ -71,10 +72,10 @@ try {
     const t = S.c.find(o => o.alive && o.id !== me);
     PW._matter(S, S.c[me], "opening", "general", { t: t.id, ratio: 2.1 }, [{ label: "Invade", act: { type: "war", t: t.id } }, { label: "Not now", act: { type: "noop" } }], 25);
     CBZ.presGame.submit({ type: "noop" }); })()`);
-  await sleep(5200); await shot("9-general-asks");
-  const cine = await rig.evl("CBZ.campaignUI && CBZ.campaignUI.cinematic ? JSON.stringify(CBZ.campaignUI.cinematic()) : 'none'");
-  console.log("prompt:", cine);
-  await rig.evl("CBZ.campaignUI && CBZ.campaignUI.pick && CBZ.campaignUI.pick('right')");
+  const ready = () => rig.wait("CBZ.campaignUI.cinematic() && CBZ.campaignUI.cinematic().ready", 60000, 300);
+  console.log("general's question up:", await ready());
+  await shot("9-general-asks");
+  await rig.evl("CBZ.campaignUI.pick('right')");
   await sleep(1500);
   // a foreign leader on the phone
   await rig.evl(`(() => { const S = CBZ.presGame.state(), me = CBZ.presGame.me(), PW = CBZ.presWorld;
@@ -89,7 +90,12 @@ try {
   await rig.evl(`(() => { const S = CBZ.presGame.state(), me = CBZ.presGame.me(), PW = CBZ.presWorld;
     PW._matter(S, S.c[me], "traitor", "security", { name: S.c[me].cab.security.name }, [{ label: "Sign it", act: { type: "resign" } }, { label: "Refuse", act: { type: "defy" }, fatal: 1 }], 2, true);
     CBZ.presGame.submit({ type: "noop" }); })()`);
-  await sleep(6500); await shot("11-traitor");
+  console.log("the traitor's question up:", await ready());
+  await shot("11-traitor");
+  await rig.evl("CBZ.campaignUI.pick('right')");
+  await rig.wait("CBZ.presGame.state().log.slice(-6).some(e => e.k === 'plotFoiled' || e.k === 'fall')", 20000, 200);
+  await sleep(1800); await shot("12-traitor-after");
+  console.log("after:", await rig.evl("JSON.stringify(CBZ.presGame.state().log.slice(-4).map(e => e.k + (e.why ? ':' + e.why : '')))"));
   // turned round: the windows
   const info = await rig.evl(`(() => ({ day: CBZ.presGame.state().day, fps: CBZ.micro.fps, calls: CBZ.renderer.info.render.calls, tris: CBZ.renderer.info.render.triangles, people: Object.keys(CBZ.presOffice.people).length }))()`);
   console.log("frame:", JSON.stringify(info));
