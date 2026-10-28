@@ -112,6 +112,11 @@ function camOutOfBodies(p) {
   }
 }
 function camApply(dt) {
+  // a NaN anywhere upstream (a body with no position, a zero-length axis)
+  // would poison the lens for good: the last good targets stand instead
+  if (!Number.isFinite(cam.wFocus.x + cam.wFocus.y + cam.wFocus.z + cam.wYaw + cam.wPitch + cam.wDist + cam.wFov)) {
+    cam.wFocus.copy(cam.focus); cam.wYaw = cam.yaw; cam.wPitch = cam.pitch; cam.wDist = cam.dist; cam.wFov = cam.fov;
+  }
   // THE LENS AT WAVE HEIGHT is a property of the SHOT
   cam.waveLock = cam.mode === "surface" && SEA.on && !SWIM_OLD;
   if (cam.snap) {
@@ -196,9 +201,31 @@ function heatAt(x, z, r) {
   }
   return h;
 }
-function hotspot() {
-  if (!shotsRing.length) return null;
-  const seed = shotsRing[(crand() * shotsRing.length) | 0];
+/* THE HOTTEST FIGHT, AND IT HOLDS STILL. This used to roll the camera's dice
+   on EVERY CALL for which recent shot seeds the cluster, and every wide shot
+   and the swimmers' lens call it every frame: with the core flying a whole
+   front's rounds (one in eight lands in shotsRing) the seed jumped kilometres
+   between frames and the lens shook 5-11 m a frame in the GENERAL and
+   ESTABLISH shots (tools/npcwar-camera-check.mjs). Now the densest knot of
+   recent fire is found by count, not dice, at most every 1.5 s of battle,
+   and the point every caller reads glides to it; a cut lands on it. */
+const HOT = { x: 0, z: 0, tx: 0, tz: 0, has: false, at: -9, t: -9 };
+function hotspotFind() {
+  let bi = -1, bn = 0;
+  for (let i = 0; i < shotsRing.length; i++) {
+    const a = shotsRing[i];
+    if (simT - a.t > 7) continue;
+    let n = 0;
+    for (let j = 0; j < shotsRing.length; j++) {
+      const b = shotsRing[j];
+      if (simT - b.t > 7) continue;
+      const dx = b.x - a.x, dz = b.z - a.z;
+      if (dx * dx + dz * dz < 46 * 46) n++;
+    }
+    if (n >= bn) { bn = n; bi = i; }           // ties go to the newer shot
+  }
+  if (bi < 0) return false;
+  const seed = shotsRing[bi];
   let x = 0, z = 0, n = 0;
   for (let i = 0; i < shotsRing.length; i++) {
     const s = shotsRing[i];
@@ -206,7 +233,22 @@ function hotspot() {
     if (Math.hypot(s.x - seed.x, s.z - seed.z) > 46) continue;
     x += s.x; z += s.z; n++;
   }
-  return n ? { x: x / n, z: z / n } : { x: seed.x, z: seed.z };
+  HOT.tx = x / n; HOT.tz = z / n;
+  return true;
+}
+function hotspot(snap) {
+  if (simT - HOT.at > 1.5 || simT < HOT.at) {
+    HOT.at = simT;
+    if (hotspotFind() && !HOT.has) { HOT.has = true; HOT.x = HOT.tx; HOT.z = HOT.tz; HOT.t = simT; }
+  }
+  if (!HOT.has) return null;
+  if (snap) { HOT.x = HOT.tx; HOT.z = HOT.tz; }
+  else {
+    const k = 1 - Math.exp(-Math.max(0, simT - HOT.t) * 0.9);
+    HOT.x += (HOT.tx - HOT.x) * k; HOT.z += (HOT.tz - HOT.z) * k;
+  }
+  HOT.t = simT;
+  return { x: HOT.x, z: HOT.z };
 }
 function hottestMan() {
   let best = null, bt = -1e9;
@@ -337,20 +379,39 @@ function clearYaw(fx, fz, want, dist, spread) {
   }
   return want;
 }
-// how far apart the war is: the arm a wide shot needs to hold all of it
-function warSpread() {
-  const a = teamCOM.red, b = teamCOM.blue;
-  const gap = Math.hypot(b.x - a.x, b.z - a.z);
-  const alive = aliveCount("red") + aliveCount("blue");
-  return Math.max(30, Math.min(260, gap * 0.75 + 18 + Math.sqrt(alive) * 2.2));
-}
-function warMid() {
+/* THE WAR'S MIDDLE AND ITS SPREAD, AS THE LENS SEES THEM. teamCOM is
+   re-counted every 0.6 s (tick.js) and a death or a rout moves it in a
+   step; the wide shots read these instead, which glide (a 1.2 s time
+   constant on battle time, no faster than a slow pan) and land exactly on
+   a cut (warSnap). */
+const WAR = { x: 0, z: 0, spread: 60, t: -9, has: false };
+function warRaw() {
   const a = teamCOM.red, b = teamCOM.blue;
   const hs = hotspot();
   let x = (a.x + b.x) / 2, z = (a.z + b.z) / 2;
   if (hs) { x = x * 0.5 + hs.x * 0.5; z = z * 0.5 + hs.z * 0.5; }
-  return { x: x, z: z };
+  const gap = Math.hypot(b.x - a.x, b.z - a.z);
+  const alive = aliveCount("red") + aliveCount("blue");
+  return { x: x, z: z, spread: Math.max(30, Math.min(260, gap * 0.75 + 18 + Math.sqrt(alive) * 2.2)) };
 }
+function warGlide(snap) {
+  if (snap) hotspot(true);
+  const r = warRaw();
+  if (snap || !WAR.has || simT < WAR.t) { WAR.x = r.x; WAR.z = r.z; WAR.spread = r.spread; WAR.has = true; }
+  else {
+    const dt = Math.max(0, simT - WAR.t), k = 1 - Math.exp(-dt / 1.2);
+    let mx = (r.x - WAR.x) * k, mz = (r.z - WAR.z) * k;
+    // a pan, never a swoop: at most a fifth of the frame's width a second
+    const cap = WAR.spread * 0.2 * dt, mv = Math.hypot(mx, mz);
+    if (mv > cap && mv > 0) { mx *= cap / mv; mz *= cap / mv; }
+    WAR.x += mx; WAR.z += mz; WAR.spread += (r.spread - WAR.spread) * k;
+  }
+  WAR.t = simT;
+}
+// how far apart the war is: the arm a wide shot needs to hold all of it
+function warSpread() { if (simT !== WAR.t) warGlide(false); return WAR.spread; }
+function warMid() { if (simT !== WAR.t) warGlide(false); return { x: WAR.x, z: WAR.z }; }
+function warSnap() { warGlide(true); }
 
 /* ============================================================ THE DIRECTOR
    A CUT IS A DECISION. Every 0.6 s the director scores the field; it cuts
@@ -382,6 +443,7 @@ function directorCut(force) {
   cam.holdT = 0;
   cam.cutAt = simT + (shot === "hero" ? 6 + crand() * 4 : shot === "charge" ? 4.5 + crand() * 2 : 4.5 + crand() * 2.5);
   cam.ease = shot === "general" || shot === "establish" ? 0.06 : 0.012;
+  warSnap();
   // place the shot once, then snap to it (a cut is a cut, not a flight)
   frameDirector(0);
   const moved = Math.hypot(cam.wFocus.x - cam.focus.x, cam.wFocus.z - cam.focus.z);
@@ -393,7 +455,15 @@ function frameDirector(dt) {
   const shot = cam.shot;
   if ((shot === "hero" || shot === "charge") && m) {
     const sz = bodySize(m);
-    const t = m.tgt && !m.tgt.dead ? m.tgt : null;
+    /* THE MARK HOLDS. A row of the core re-picks its mark every 0.1 s step
+       and the hero shot is framed on the bearing to it, so every flip swung
+       the lens round the man. The shot keeps its mark until that one is
+       down or gone, or he has been on another for 1.5 s. */
+    let t = m.tgt && !m.tgt.dead ? m.tgt : null;
+    const L = cam.mark;
+    if (L && L !== t && !L.dead && !L.fled && cam.markM === m && simT < cam.markUntil) t = L;
+    else if (t !== L || cam.markM !== m) { cam.mark = t; cam.markM = m; cam.markUntil = simT + 1.5; }
+    else cam.markUntil = Math.max(cam.markUntil, simT + 1.5);
     const h = m.vehicle ? m.h : m.beast ? Math.atan2(Math.cos(m.heading || 0), Math.sin(m.heading || 0)) : m.yaw;
     if (shot === "charge") {
       // LOW AND BEHIND, the ground rushing under the lens and the enemy ahead

@@ -974,6 +974,9 @@ function massSchedule(dt) {
   Q2.forced.fill(0);
   if (typeof STUDY !== "undefined" && STUDY.m && STUDY.m.row != null) { const q = C.squad[STUDY.m.row]; if (q >= 0 && q < Q2.n) Q2.forced[q] = 1; }
   if (typeof YOU !== "undefined" && YOU.m && YOU.m.row != null) { const q = C.squad[YOU.m.row]; if (q >= 0 && q < Q2.n) Q2.forced[q] = 1; }
+  // the man the lens is on keeps his rig: a demoted subject was a frozen
+  // picture the director kept framing until its next cut
+  if (typeof cam !== "undefined" && cam && cam.followM && cam.followM.row != null && !cam.followM.dead) { const q = C.squad[cam.followM.row]; if (q >= 0 && q < Q2.n) Q2.forced[q] = 1; }
   for (let q = 0; q < Q2.n; q++) {
     let x = 0, z = 0, k = 0;
     for (let j = 0; j < Q2.cnt[q]; j++) {
