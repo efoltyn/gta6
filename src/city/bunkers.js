@@ -507,10 +507,11 @@
        "Call a strike" without inventing a strike system. Every part of this is
        already in the game and stays there:
          the aimpoint   = fullmap.js's waypoint (CBZ.fullMap.waypoint())
-         the sortie     = city/strategic.js's CBZ.strategicCallStrike — the same
-                          bomb run the player flies, flown off-map
-         the impacts    = nukefx.js's CBZ.cityBombWalk in detonate mode, which
-                          fires each one through CBZ.detonate exactly once
+         the sortie     = city/strategic.js's CBZ.strategicCallStrike — a
+                          B-52 cell flown in by playerair.js's
+                          CBZ.cityStrikeFlight, the one strike flight
+         the impacts    = every Mk-82 a real store off its bay clip, through
+                          strategic.js's release and CBZ.detonate, once each
          the verb + pill= this registry
        Zero new bookkeeping, and the heat is the real cost: ordering a bombing
        run out of a stolen command shelter is a five-star act.               */
@@ -551,7 +552,7 @@
       const wp = waypoint();
       return {
         label: "Strike Console",
-        note: wp ? "Tasks the B-2 against your marked waypoint" : "Needs a map waypoint to task",
+        note: wp ? "Tasks a B-52 cell against your marked waypoint" : "Needs a map waypoint to task",
       };
     });
 

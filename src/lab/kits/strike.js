@@ -171,7 +171,7 @@ CBZ.lab.kit("strike", {
     W.camState = function () {
       const out = { bomber: null, lead: null, missiles: [] };
       const fl = CBZ.cityStrikeFlights ? CBZ.cityStrikeFlights() : [];
-      for (const f of fl) for (const jt of f.jets) if (jt.pos && !out.bomber) out.bomber = { x: jt.pos.x, y: jt.pos.y, z: jt.pos.z, hx: f.hx, hz: f.hz };
+      for (const f of fl) for (const jt of f.jets) if (jt.pos && !out.bomber) out.bomber = { x: jt.pos.x, y: jt.pos.y, z: jt.pos.z, hx: jt.hx != null ? jt.hx : f.hx, hz: jt.hz != null ? jt.hz : f.hz };
       const bs = CBZ.strategicBombsInAir ? CBZ.strategicBombsInAir() : [];
       for (const b of bs) if (!out.lead || b.y < out.lead.y) out.lead = { x: b.x, y: b.y, z: b.z };
       const ms = CBZ.cityMissilesInAir ? CBZ.cityMissilesInAir() : [];

@@ -105,21 +105,35 @@ if (!(await evl("typeof CBZ.strategicNuclearSortie === 'function' && typeof CBZ.
    with the region, so "no aircrew on the base" is a true refusal a long way
    away and a false negative for this probe. The release console is in the
    Fort Brandt shelter anyway, so this is also where a player would be. */
-await evl(`(() => { const P = CBZ.player.pos; P.set(-600, P.y, -600); if (CBZ.player.group) CBZ.player.group.position.copy(P); return true; })()`);
+// the pad rides the base (city/zoning.js publishes it since the layout dial
+// moved Fort Brandt); (-600,-600) is the old authored spot, kept as a fallback
+await evl(`(() => { const pad = CBZ.protectedSite && CBZ.protectedSite("b2-pad"); const P = CBZ.player.pos;
+  if (pad) P.set(pad.cx + 40, P.y, pad.cz + 40); else P.set(-600, P.y, -600);
+  if (CBZ.player.group) CBZ.player.group.position.copy(P); return true; })()`);
 let troops = 0;
 for (let w = 0; w < 12 && !troops; w++) {
   troops = +(await evl(`(() => { for (let i = 0; i < 30; i++) CBZ.stepSim(1/60); return (CBZ.cityMilitaryPersonnel || []).length; })()`)) || 0;
 }
 if (!troops) fail("no garrison roster streamed in at Fort Brandt");
+// THE B-2 ARRIVES WITH ITS FILE (strategic.js placeB2): the unit script loads
+// in real time, so give the page wall-clock time, not just sim frames
+let parked = false;
+for (let w = 0; w < 120 && !parked; w++) {
+  parked = !!(await evl(`(() => { for (let i = 0; i < 30; i++) CBZ.stepSim(1/60); return !!(CBZ.strategicB2Rec && CBZ.strategicB2Rec()); })()`));
+  if (!parked) await sleep(250);
+}
+if (!parked) fail("the B-2 never parked on its pad");
 
-const order = JSON.parse(await evl(`(() => {
+const order = JSON.parse(await evl(`(() => { try {
   const P = CBZ.player.pos, tx = P.x + 340, tz = P.z + 60;
   window.__T = { x: tx, z: tz };
   window.__L = { i: 0, released: null, det: null, minD: 1e9, maxEgress: 0 };
   const r = CBZ.strategicNuclearSortie({ x: tx, z: tz, byPlayer: true });
   const st = CBZ.strategicSortieState();
-  return JSON.stringify({ r: r, st: st, tx: tx, tz: tz,
+  // r.sortie is the live record (a three.js group inside): report the verdict only
+  return JSON.stringify({ r: { ok: !!(r && r.ok), why: r && r.why }, st: st, tx: tx, tz: tz,
     ingress: st.active ? Math.round(Math.hypot(st.x - tx, st.z - tz)) : null });
+  } catch (e) { return JSON.stringify({ r: { ok: false, why: "threw: " + String(e && e.stack || e).slice(0, 400) }, st: {} }); }
 })()`));
 if (!order.r || !order.r.ok) fail("order refused: " + (order.r && order.r.why));
 if (!order.st.active) fail("no sortie airborne after an accepted order");
@@ -136,6 +150,10 @@ for (let c = 0; c < Math.ceil(TICKS / 300) && !flight; c++) {
     for (let k = 0; k < 300; k++) {
       CBZ.stepSim(1/60); L.i++;
       const st = CBZ.strategicSortieState();
+      // the arc's phases, for a stalled run to say where it stalled
+      const ph = st.active ? st.phase : "ended";
+      if (ph !== L.ph) { L.ph = ph; (L.log = L.log || []).push((L.i / 60).toFixed(1) + "s " + ph + (st.active ? " @" + Math.round(st.x) + "," + Math.round(st.y) + "," + Math.round(st.z) : "")); }
+      if (st.active && L.i % 600 === 0) (L.log = L.log || []).push((L.i / 60).toFixed(0) + "s   " + st.phase + " @" + Math.round(st.x) + "," + Math.round(st.y) + "," + Math.round(st.z));
       if (st.active) {
         const d = Math.hypot(st.x - T.x, st.z - T.z);
         if (st.phase === "inbound" && d < L.minD) L.minD = d;
@@ -151,13 +169,13 @@ for (let c = 0; c < Math.ceil(TICKS / 300) && !flight; c++) {
         break;
       }
     }
-    return JSON.stringify({ i: L.i, released: L.released, det: L.det, minD: Math.round(L.minD) });
+    return JSON.stringify({ i: L.i, released: L.released, det: L.det, minD: Math.round(L.minD), log: L.log || [] });
   })()`));
   if (r.det) flight = r;
   else if (r.i >= TICKS) flight = r;
 }
 
-if (!flight || !flight.released) { fail("the weapon was never released"); }
+if (!flight || !flight.released) { fail("the weapon was never released" + (flight && flight.log ? "\n  arc: " + flight.log.join("\n       ") : "")); }
 else {
   const rel = flight.released;
   console.log(`released: t=${rel.t}s  ${rel.d}m short of the mark  alt=${rel.y}m`);
@@ -171,7 +189,7 @@ if (!flight || !flight.det) { fail("the weapon never detonated"); }
 else if (flight.released) {
   const d = flight.det, rel = flight.released;
   const fall = +(d.t - rel.t).toFixed(2);
-  const GRAV = 14;                                     // strategic.js's own constant
+  const GRAV = (await evl("CBZ.strategicGrav")) || 9.81;   // strategic.js's own constant, read live
   const freeFall = +Math.sqrt(2 * rel.y / GRAV).toFixed(2);
   console.log(`detonated: t=${d.t}s  fall=${fall}s (free fall would be ${freeFall}s)  bomber ${d.clear}m clear`);
   // THE CANOPY IS THE POINT. A retarded laydown must take materially longer

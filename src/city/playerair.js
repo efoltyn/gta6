@@ -21,11 +21,12 @@
    Everything reuses the existing explosion / crashfx machinery and is fully
    feature-detected. Wanted-air (police gunship/jets) lives in aircraft.js; this
    is the player's and the state's side: CBZ.cityStrikeFlight is the ONE
-   strike flight every bombing jet flies (your phone's F-35, a President's
-   strike package, an enemy air raid — city/warroom.js). The jets are the
-   F-35A (units/vehicles/f35.js, through city/unitmodels.js): the same
-   airframe your hangar keeps and Fort Brandt parks, its bays opening for the
-   release.
+   strike flight every bombing aeroplane flies (your phone's F-35, a
+   President's strike package, an enemy air raid — city/warroom.js — and the
+   bunker map table's B-52 cell, city/strategic.js CBZ.strategicCallStrike).
+   The aeroplanes are the units (units/vehicles/f35.js, b52.js,
+   b2_spirit.js, through city/unitmodels.js): the same airframes your hangar
+   keeps and Fort Brandt parks, their bays opening for the release.
 
    Exposes: CBZ.cityCallChopper, CBZ.cityCallAirstrike, CBZ.cityAirServices
             (status for the phone), CBZ.cityClearPlayerAir, CBZ.cityStrikeFlight.
@@ -375,61 +376,133 @@
     return { x: P.pos.x - Math.sin(y) * 34, z: P.pos.z - Math.cos(y) * 34, label: "your sights" };
   }
 
-  /* THE STRIKE JET IS THE F-35A (units/vehicles/f35.js through
-     city/unitmodels.js): one model per machine. null until the unit file is
-     on the page (wantJet asks for it; a flight's jets are built the frame it
-     lands, 1.4 km out, long before anyone can see them). The pilot is in it,
-     the gear is up, the bays carry a 2,000 lb JDAM each and open for the
-     release. */
-  function wantJet() {
-    const M = CBZ.milModels;
-    if (M && M.load && !(M.has && M.has("jet"))) { try { M.load(["jet"]); } catch (e) {} }
-  }
-  function buildStrikeJet() {
-    const M = CBZ.milModels;
-    if (!(M && M.has && M.has("jet"))) { wantJet(); return null; }
-    const made = M.jet();
-    if (!made || !made.group) return null;
-    const grp = made.group, ud = grp.userData;
-    if (ud.pilot) ud.pilot.visible = true;            // somebody is flying this one
-    const R = made.rig && made.rig.state;
-    if (R) R.load = "jdam";
-    return { grp: grp, rig: made.rig };
-  }
-
   /* ==========================================================================
-     STRIKE FLIGHTS — ONE system for every jet that bombs something.
+     STRIKE FLIGHTS — ONE system for every aeroplane that bombs something.
 
-     The phone's F-22, a President's strike package (city/warroom.js) and an
-     enemy air raid are the same thing: N real jets that run in along a
-     heading, release real stores over their aimpoints, and fly on out. There
-     used to be a hand-integrated bomb here (its own gravity, its own "near
-     enough" fuse, cityAirstrikeExplosion). It is gone: every store now leaves
-     the pylon through city/strategic.js's CBZ.strategicRelease — the B-2's own
-     release — so the fall is the solved arc, the mesh is the Mk-84 (or the
-     B61 under its parachute), and the impact is CBZ.detonate on the bus with
-     the structural ledger behind it. One release, three customers.
+     The phone's F-35, a President's strike package (city/warroom.js), an
+     enemy air raid and the bunker map table's B-52 cell (city/strategic.js's
+     CBZ.strategicCallStrike) are the same thing: N real aeroplanes that run
+     in along a heading, release real stores over their aimpoints, and fly on
+     out. Every store leaves its own station through city/strategic.js's
+     CBZ.strategicRelease — the B-2's own release — so the fall is the solved
+     arc (g = 9.81, light drag), the mesh is the real pooled round, and the
+     impact is CBZ.detonate on the bus with the structural ledger behind it.
+     There is no second bomb sim and no second flight sim here: a B-52 cell
+     is this same loop flying a different AIRFRAME row.
 
        CBZ.cityStrikeFlight(opts) -> flight | null
-         x, z         the aimpoint (required)
-         kind         "bomb" (default) | "jdam" | "nuke"
-         jets         1..4 in echelon (default 1)
-         bombs        stores per jet, walked along the track (default 2)
+         x, z         the aimpoint (required): the centre of the stick
+         airframe     "f35" (default) | "b52" | "b2"      (the AIRFRAME rows)
+         kind         the store: f35 "bomb" (default) | "jdam" | "nuke";
+                      b52 "mk82" (the bay, default) | "jdam" (the wing HSABs);
+                      b2 "bomb" (Mk-84 on the rotary launchers, default) | "jdam"
+         jets         aeroplanes: f35 1..4 in echelon (default 1); heavies
+                      1..3 in a loose trail, each stepped right/left and up
+         bombs        stores per aeroplane, walked along the track (f35
+                      default 2, max 6; b52 bay max 27; b2 max 16; heavies
+                      default to the full load)
+         stick        the stick's length along track, m (heavies: default
+                      ~25-30 m between impacts); the ripple interval is
+                      stick / ground speed / (bombs - 1)
          from {x,z}   where the flight comes from (sets the heading); else
          heading      radians; else from the arena centre outward
-         alt, speed   pass altitude AGL (default 95 m, 210 for a nuke) and m/s
+         alt, speed   pass altitude AGL (f35 95 m, 210 for a nuke; heavies
+                      900 m) and m/s (f35 140, heavies 200)
+         tot          s from now to the first impact, if there is room
          by/byPlayer  blame, forwarded to the release (byPlayer default true)
          stateAct     an act of state: no street crime billed for a nuke
          side         "ours" | "enemy" (bookkeeping for callers)
          onImpact(im, flight, n)  each store landing, n = 1 for the first
-         onDone(flight)           every jet is clear and every store has landed
-     The jets spawn RUNIN metres back down the heading (≈10 s out at 140 m/s),
-     so a strike across the map still has its aeroplanes: they fly there.  */
+         onDone(flight)           every aeroplane is clear and every store has landed
+     The aeroplanes spawn far enough back down the heading to be seen running
+     in (an F-35 RUNIN 1.4 km; a heavy its release lead plus ~10 s), so a
+     strike across the map still has its aeroplanes: they fly there.
+
+     THE LEAD IS SOLVED, PER AIMPOINT, OFF THE SAME SOLVER THE BOMB FLIES
+     (CBZ.strategicFall): the flight is straight and level at constant speed,
+     so a store let go at a station with the airframe's velocity lands a fixed
+     carry ahead — 13.6 s and ~2.5 km for a Mk-82 from 900 m at 200 m/s. Each
+     store goes the instant ITS station crosses ITS release point, sub-frame
+     (strategicRelease opts.age): a B-52's 27 Mk-82s ripple out in well under
+     a second and every one still lands on its mark.
+
+     THE BOMBS KEEP THE AEROPLANE'S VELOCITY ON A HEAVY. The F-35 path keeps
+     aircraft.js's BOMBS_DROP_STRAIGHT law (8% residual) exactly as it was. A
+     carpet from 900 m under that law would fall as a vertical curtain under
+     the bay; real iron carries the bomber's 200 m/s, streams out behind and
+     below it as drag bleeds it off, and lands 2.5 km downrange — which is
+     what a heavy's lead is solved for, and what this owner asked to SEE.    */
   const FLIGHT = { RUNIN: 1400, RUNOUT: 900, SPD: 140, ALT: 95, STICK: 18, MAX: 6, LIFE: 60 };
-  const FALL_G = 14;                 // strategic.js's GRAV: used only to LEAD the release
+  /* THE AIRFRAMES. A row is everything that differs between a fighter's two
+     JDAMs and a cell of B-52s; the loop below reads only the row.
+       model     how the aeroplane is built (unitmodels kind, or the B-2's adapter)
+       jets/per  caps; per0 the default load; lat/back/step the formation
+       spacing   default metres between impacts in a stick
+       residual  the release law's keep-fraction (null = aircraft.js's default)
+       eject     m/s the station pushes the store down (clip vs ejector)
+       radius    lock-on radius                                          */
+  const AIRFRAME = {
+    f35: { model: "jet", jets: 4, per: 6, per0: 2, alt: FLIGHT.ALT, spd: FLIGHT.SPD, lat: 18, back: 32, step: 3,
+      spacing: FLIGHT.STICK, residual: null, eject: null, radius: 3.2, heavy: false, kind: "bomb", label: "F-35A" },
+    // B-52H: 27 Mk-82 on the bay's clips (gravity release), 12 GBU-31 on the
+    // wing HSABs (ejector). A cell flies in trail; for the camera the trail is
+    // ~480 m, not the 1-2 km a real cell keeps.
+    b52: { model: "bomber", jets: 3, per: 27, perJdam: 12, per0: 27, alt: 900, spd: 200, lat: 55, back: 480, step: 45,
+      spacing: 25, residual: 1, eject: 0.6, ejectJdam: 2.5, radius: 26, heavy: true, kind: "mk82", label: "B-52H" },
+    // B-2A: two rotary launchers of eight 2,000 lb weapons each, ejected
+    b2:  { model: "b2", jets: 3, per: 16, per0: 16, alt: 900, spd: 200, lat: 60, back: 520, step: 45,
+      spacing: 30, residual: 1, eject: 2.0, radius: 24, heavy: true, kind: "bomb", label: "B-2A" },
+  };
+  const DOOR_LEAD = 5.5;             // s: a heavy's doors start to swing this long before its first release
+  const DOOR_HOLD = 1.5;             // s: and start to close this long after its last
+  /* THE BREAKAWAY. A heavy does not hold the bomb-run heading over its own
+     stick: a few seconds after its last store it rolls into the post-target
+     turn (b52.js tactics: "turns away on a 46 deg bank"; here a gentler 30
+     deg the camera can follow) and turns off the line at the coordinated rate
+     g·tan(bank)/v — 1.6 deg/s at 200 m/s — and rolls out on an egress
+     heading 50 deg off the run. The whole cell turns the same way, in trail. */
+  const BREAK = { DELAY: 3.0, BANK: 30 * Math.PI / 180, ROLL: 8 * Math.PI / 180, TURN: 50 * Math.PI / 180 };   // rolls out 50 deg off the run
+  const G_TURN = 9.81;               // a coordinated turn's g (aerodynamics, not the bombs' fall)
   const flights = [];
   const _relP = { x: 0, y: 0, z: 0 };
+  const _fall = { t: 0, x: 0, y: 0, z: 0, speed: 0 };
   if (CBZ.ordnanceSite) { try { CBZ.ordnanceSite("playerair:strike", "bomb"); } catch (e) {} }
+
+  /* THE STRIKE AEROPLANES ARE THE UNITS (units/vehicles/f35.js, b52.js,
+     b2_spirit.js, through city/unitmodels.js): one model per machine. null
+     until the unit file is on the page (wantModel asks for it; a flight's
+     aeroplanes are built the frame it lands, kilometres out, long before
+     anyone can see them). The F-35's pilot is in it and its bays carry a
+     2,000 lb JDAM each; the B-52's bay carries its Mk-82s; the B-2's two
+     rotary launchers their Mk-84s. */
+  function wantModel(af) {
+    const M = CBZ.milModels;
+    const kind = af && af.model === "bomber" ? "bomber" : af && af.model === "b2" ? "b2_spirit" : "jet";
+    if (M && M.load && !(M.has && M.has(kind))) { try { M.load([kind]); } catch (e) {} }
+  }
+  function buildStrikeJet(af) {
+    af = af || AIRFRAME.f35;
+    const M = CBZ.milModels;
+    if (af.model === "b2") {
+      // the B-2 adapter (city/strategic.js makeB2): doors, gear and the
+      // launcher spend are handles on its group; it asks for its own file
+      const S = CBZ.strategicModels;
+      const made = S && S.b2 ? S.b2() : null;
+      if (!made || !made.group) return null;
+      const ud = made.group.userData;
+      if (ud.pilot) ud.pilot.visible = true;
+      return { grp: made.group, rig: ud.rig || null, veh: ud.unitVeh || null };
+    }
+    const kind = af.model === "bomber" ? "bomber" : "jet";
+    if (!(M && M.has && M.has(kind))) { wantModel(af); return null; }
+    const made = M[kind]();
+    if (!made || !made.group) return null;
+    const grp = made.group, ud = grp.userData;
+    if (ud.pilot) ud.pilot.visible = true;            // somebody is flying this one
+    const R = made.rig && made.rig.state;
+    if (R && af.model === "jet") R.load = "jdam";
+    return { grp: grp, rig: made.rig, veh: made.veh || ud.unitVeh || null };
+  }
 
   function flightHeading(tx, tz, opts) {
     let hx, hz;
@@ -443,6 +516,24 @@
     return l > 1 ? { x: hx / l, z: hz / l } : { x: 0, z: 1 };
   }
 
+  // where a store released from height y over the ground near (ax,az) with
+  // velocity rv lands, as a carry (m along the heading) and a fall time — the
+  // bomb's own solve (city/strategic.js), sampled so the landing is ON the
+  // aimpoint (a roof there is a roof). Without strategic.js nothing falls:
+  // the degrade blast lands on the mark the moment the jet is over it.
+  function leadFor(kind, ax, az, y, rv, h) {
+    const F = CBZ.strategicFall;
+    if (!F) return { lead: 0, tf: 0 };
+    let L = 0, t = 0;
+    for (let i = 0; i < 2; i++) {
+      const x0 = ax - h.x * L, z0 = az - h.z * L;
+      F(kind, x0, y, z0, rv.vx, rv.vy, rv.vz, _fall);
+      t = _fall.t;
+      L = (_fall.x - x0) * h.x + (_fall.z - z0) * h.z;
+    }
+    return { lead: L, tf: t };
+  }
+
   function strikeFlight(opts) {
     opts = opts || {};
     if (g.mode !== "city") return null;
@@ -450,82 +541,223 @@
     const tx = +opts.x, tz = +opts.z;
     if (!isFinite(tx) || !isFinite(tz)) return null;
     if (flights.length >= FLIGHT.MAX) return null;
-    const kind = opts.kind || "bomb";
-    const nJets = Math.max(1, Math.min(4, (opts.jets | 0) || 1));
-    const per = Math.max(1, Math.min(6, (opts.bombs | 0) || 2));
-    const spd = opts.speed > 0 ? +opts.speed : FLIGHT.SPD;
+    const afId = AIRFRAME[opts.airframe] ? opts.airframe : "f35";
+    const af = AIRFRAME[afId];
+    let kind = opts.kind || af.kind;
+    // a heavy carries what its bays carry
+    if (afId === "b52" && kind !== "jdam") kind = "mk82";
+    if (afId === "b2" && kind !== "jdam" && kind !== "nuke" && kind !== "buster") kind = "bomb";
+    const hsab = afId === "b52" && kind === "jdam";
+    const nJets = Math.max(1, Math.min(af.jets, (opts.jets | 0) || 1));
+    const perMax = hsab ? af.perJdam : af.per;
+    const per = Math.max(1, Math.min(perMax, (opts.bombs | 0) || (af.heavy ? perMax : af.per0)));
+    const spd = opts.speed > 0 ? +opts.speed : af.spd;
     const h = flightHeading(tx, tz, opts);
-    const agl = opts.alt > 0 ? +opts.alt : (kind === "nuke" ? 210 : FLIGHT.ALT);
+    const agl = opts.alt > 0 ? +opts.alt : (kind === "nuke" && !af.heavy ? 210 : af.alt);
     const y = floorAt(tx, tz) + agl;
-    // THE LEAD, solved once: the flight is straight and level at constant
-    // speed, so every store leaves with the same velocity. aircraft.js's
-    // release law says what a store keeps of the airframe's speed; the fall
-    // time off the pass altitude says how far it carries that.
+    const stick = per > 1 ? (opts.stick > 0 ? +opts.stick : af.spacing * (per - 1)) : 0;
+    // THE RELEASE VELOCITY, once: the flight is straight and level, so every
+    // store leaves with the same velocity. aircraft.js's release law says what
+    // a store keeps of the airframe's speed (a heavy keeps all of it).
     const craft = { vx: h.x * spd, vy: 0, vz: h.z * spd };
+    const lawOpts = {};
+    if (af.residual != null) lawOpts.residual = af.residual;
+    const ej = hsab ? af.ejectJdam : af.eject;
+    if (ej != null) lawOpts.eject = ej;
     let rv = null;
-    if (CBZ.ordnanceDropVel) { try { rv = CBZ.ordnanceDropVel("playerair:strike", craft, { vx: 0, vy: 0, vz: 0 }); } catch (e) { rv = null; } }
-    if (!rv) rv = { vx: craft.vx, vy: -1.5, vz: craft.vz };
-    const tf = (rv.vy + Math.sqrt(rv.vy * rv.vy + 2 * FALL_G * agl)) / FALL_G;
+    if (CBZ.ordnanceDropVel) { try { rv = CBZ.ordnanceDropVel("playerair:strike", craft, { vx: 0, vy: 0, vz: 0 }, lawOpts); } catch (e) { rv = null; } }
+    if (!rv) rv = { vx: craft.vx * (af.residual != null ? af.residual : 1), vy: -(ej != null ? ej : 1.5), vz: craft.vz * (af.residual != null ? af.residual : 1) };
     const f = {
-      kind: kind, tx: tx, tz: tz, hx: h.x, hz: h.z, spd: spd, y: y, t: 0,
-      rv: { vx: rv.vx, vy: rv.vy, vz: rv.vz }, tf: tf, lead: Math.hypot(rv.vx, rv.vz) * tf,
+      kind: kind, airframe: afId, tx: tx, tz: tz, hx: h.x, hz: h.z, spd: spd, y: y, t: 0,
+      rv: { vx: rv.vx, vy: rv.vy, vz: rv.vz }, tf: 0, lead: 0, stick: stick,
+      interval: per > 1 ? stick / spd / (per - 1) : 0,
       jets: [], impacts: [], hits: 0, released: 0, total: nJets * per, sndT: 0,
       by: opts.by, byPlayer: opts.byPlayer !== false, stateAct: !!opts.stateAct,
       label: opts.label || "", side: opts.side || "ours", data: opts.data || null,
       onImpact: typeof opts.onImpact === "function" ? opts.onImpact : null,
       onDone: typeof opts.onDone === "function" ? opts.onDone : null,
+      finished: false, gone: false,
     };
-    f.yaw = Math.atan2(h.x, h.z); f.root = r; f.agl = agl;
-    wantJet();
+    f.yaw = Math.atan2(h.x, h.z); f.root = r; f.agl = agl; f.af = af; f.hsab = hsab; f.h = h;
+    // the formation. F-35s: echelon, the lead on the line, wingmen alternating
+    // right/left and back. Heavies: a loose trail — each one back down the
+    // track, stepped out to alternate sides and up — each laying its own
+    // stick under its own lane, so a cell lays a CARPET, not one line.
+    const lane = [];
     for (let j = 0; j < nJets; j++) {
-      // echelon: the lead on the line, wingmen alternating right/left and back
-      const lat = j === 0 ? 0 : (j % 2 ? 1 : -1) * Math.ceil(j / 2) * 18;
-      const back = Math.ceil(j / 2) * 32;
+      const side = j === 0 ? 0 : (j % 2 ? 1 : -1);
+      lane.push({ lat: side * Math.ceil(j / 2) * af.lat, back: (af.heavy ? j : Math.ceil(j / 2)) * af.back, up: j * af.step });
+    }
+    // the store's station sits a little below/above the airframe's origin
+    const relDy = af.heavy ? 1.6 : 0.6;
+    // the lead of the centre aimpoint at the lead aeroplane's height, solved
+    // first, sets how far back the run-in starts
+    const c0 = leadFor(kind, tx, tz, y + relDy, rv, h);
+    f.lead = c0.lead; f.tf = c0.tf;
+    let runin = FLIGHT.RUNIN;
+    if (af.heavy) {
+      // far enough back to see it run in: its doors swing ~DOOR_LEAD s before
+      // the first store goes, and it is seen straight-and-level before that
+      const minIn = c0.lead + stick / 2 + spd * (DOOR_LEAD + 4.5);
+      runin = minIn;
+      if (opts.tot > 0) runin = Math.max(minIn, (+opts.tot - c0.tf) * spd + c0.lead + stick / 2);
+    }
+    f.runin = runin;
+    f.runout = af.heavy ? 3200 : FLIGHT.RUNOUT;
+    let backMax = 0;
+    for (let j = 0; j < nJets; j++) {
+      const L = lane[j];
+      backMax = Math.max(backMax, L.back);
       // (hz, -hx) is the unit to the right of the heading
-      const pos = new THREE.Vector3(tx - h.x * (FLIGHT.RUNIN + back) + h.z * lat, y + j * 3, tz - h.z * (FLIGHT.RUNIN + back) - h.x * lat);
-      // this jet's stick: walked along the track through the aimpoint, under its own lane
+      const jy = y + L.up;
+      const pos = new THREE.Vector3(tx - h.x * (runin + L.back) + h.z * L.lat, jy, tz - h.z * (runin + L.back) - h.x * L.lat);
+      // this aeroplane's stick: walked along the track through the aimpoint,
+      // under its own lane, each with its OWN solved lead
       const aims = [];
       for (let k = 0; k < per; k++) {
-        const d = (k - (per - 1) / 2) * FLIGHT.STICK;
-        aims.push({ x: tx + h.x * d + h.z * lat, z: tz + h.z * d - h.x * lat });
+        const d = per > 1 ? (k / (per - 1) - 0.5) * stick : 0;
+        const ax = tx + h.x * d + h.z * L.lat, az = tz + h.z * d - h.x * L.lat;
+        const ld = leadFor(kind, ax, az, jy + relDy, rv, h);
+        aims.push({ x: ax, z: az, lead: ld.lead, tf: ld.tf });
       }
-      const jt = { group: null, rig: null, pos: pos, aims: aims, next: 0, flight: f };
+      const jt = { group: null, rig: null, veh: null, pos: pos, aims: aims, next: 0, flight: f, lat: L.lat,
+        door: 0, lastRel: -1e9, doorTgt: { pos: { x: tx, y: floorAt(tx, tz), z: tz }, dead: false },
+        yaw: f.yaw, hx: h.x, hz: h.z, bank: 0 };
       seatJet(jt);
       f.jets.push(jt);
     }
+    // the first store lands this long from now (the lead aeroplane's first)
+    const a0 = f.jets[0].aims[0];
+    f.eta = (runin - (stick / 2) - a0.lead) / spd + a0.tf;
+    f.life = af.heavy ? (runin + backMax + f.runout) / spd + c0.tf + 12 : FLIGHT.LIFE;
     flights.push(f);
     return f;
   }
+
   // the airframe on its track (now, or the frame its file lands)
   function seatJet(jt) {
     if (jt.group) return true;
-    const built = buildStrikeJet();
+    const f = jt.flight, af = f.af;
+    const built = buildStrikeJet(af);
     if (!built) return false;
-    const f = jt.flight;
     built.grp.position.copy(jt.pos);
     built.grp.rotation.order = "YXZ";
-    built.grp.rotation.y = f.yaw;
+    built.grp.rotation.set(0, jt.yaw != null ? jt.yaw : f.yaw, 0);
+    built.grp.userData.dynamic = true;
     f.root.add(built.grp);
-    jt.group = built.grp; jt.rig = built.rig; jt.pos = built.grp.position;
+    jt.group = built.grp; jt.rig = built.rig; jt.veh = built.veh; jt.pos = built.grp.position;
+    const R = jt.rig && jt.rig.state;
+    if (f.airframe === "b52") {
+      // the load: the bay's clips hold this stick (or nothing, if the stick
+      // is the wing JDAMs), the HSABs hold the JDAMs or nothing — what is
+      // drawn is exactly what is going to fall
+      const W = jt.veh && jt.veh.wpn;
+      const per = jt.aims.length - jt.next;
+      if (W) for (let i = 0; i < W.length; i++) {
+        if (W[i].w.id === "mk82_stick") W[i].ammo = f.hsab ? 0 : per;
+        if (W[i].w.id === "gbu31_jdam") W[i].ammo = f.hsab ? per : 0;
+      }
+      // the crew are aboard and the radar navigator calls the doors
+      // (b52.js: veh.you + a designated target opens the bay)
+      if (CBZ.cityUnitCrew && jt.veh) { try { CBZ.cityUnitCrew(jt.veh, true); } catch (e) {} }
+      if (jt.veh) jt.veh.tgt = null;
+      // cruise pose: gear up, wings at their 1 g shape, doors shut
+      if (jt.rig && jt.rig.settle) { try { jt.rig.settle({ agl: f.agl, speed: f.spd }); } catch (e) {} }
+    } else if (f.airframe === "b2") {
+      const ud = jt.group.userData;
+      // a load of fewer than sixteen: the launchers carry only what will
+      // fall, the port one the odd store (b2Spend starts on the port bay)
+      if (R && R.bays && R.bays.length === 2) {
+        const keep = jt.aims.length, nb = [Math.ceil(keep / 2), Math.floor(keep / 2)];
+        for (let i = 0; i < 2; i++) {
+          const B = R.bays[i], L = B.bombs.length, n = Math.min(L, nb[i]);
+          for (let k = 0; k < L; k++) B.bombs[k].mesh.visible = k >= L - n;
+          B.next = L - n; B.rot = -B.next * Math.PI / 4; B.rla.rotation.z = B.rot;
+        }
+      }
+      if (ud.setGear) ud.setGear(0);
+      if (ud.setBay) ud.setBay(0);
+    }
     return true;
   }
   const _drive = { thr: 0.8, agl: 95, speed: 140, vy: 0, pilot: null };
+  const _st = new THREE.Vector3(), _stM = new THREE.Matrix4();
+  const _stShot = { wid: "mk82_stick", wi: 0, n: 0, w: null, kind: "bombs", mount: null, target: null };
 
-  function releaseFrom(jt, a) {
+  /* THE STATION a store leaves from, world space.
+     B-52: its own clip in the bay (b52.js BAYSLOT: the bottom layer first,
+       aft to fore, alternating sides) or its HSAB ejector — read off the
+       rig's drawn stores (R.bay / R.jd instance k IS station k), because
+       rig.muzzleWorld refreshes the whole scene graph's matrices per call
+       and a stick asks 27 times a second.
+     B-2: the bottom of the launcher the next store comes off (`bay`, or the
+       port one when not given; the two sit side by side, so the along-track
+       trigger is the same either way).
+     F-35: under the belly (one JDAM a side). */
+  function stationOf(jt, out, bay) {
+    const f = jt.flight, rig = jt.rig, R = rig && rig.state;
+    if (jt.group) jt.group.updateMatrixWorld(true);
+    if (f.airframe === "b52" && R) {
+      const im = f.hsab ? (R.jd && ((12 - R.ammo[1]) & 1 ? R.jd.R : R.jd.L)) : R.bay;
+      if (im && im.count > 0) {
+        // the stores drawn are the stores left, and the next one to go is the last instance drawn
+        im.getMatrixAt(im.count - 1, _stM);
+        out.setFromMatrixPosition(_stM);
+        out.y -= 0.3;
+        return im.parent ? im.parent.localToWorld(out) : out;
+      }
+      if (rig.muzzleWorld) {
+        _stShot.wid = f.hsab ? "gbu31_jdam" : "mk82_stick";
+        _stShot.n = f.hsab ? 12 - R.ammo[1] : 27 - R.ammo[0];
+        try { const p = rig.muzzleWorld(out, _stShot); if (p && isFinite(p.x)) return out; } catch (e) {}
+      }
+    }
+    if (f.airframe === "b2" && R && R.bays && R.bays.length) {
+      const B = R.bays[bay != null && R.bays[bay] ? bay : 0];
+      if (B.bombs[0] && B.rla.parent) {
+        // the launcher's axle, then straight down its radius (in the bay's
+        // frame, not the drum's: the drum turns, the release point does not)
+        out.copy(B.rla.position); out.y -= B.bombs[0].home.length();
+        return B.rla.parent.localToWorld(out);
+      }
+    }
+    return out.set(jt.pos.x, jt.pos.y + (f.af.heavy ? 1.6 : 0.6), jt.pos.z);
+  }
+
+  // the store `a` leaves station `st`, `over` metres (along the track) after
+  // its release point — so it actually left over/spd seconds ago, from back there
+  function releaseFrom(jt, a, st, over) {
     const f = jt.flight;
-    // the store leaves its bay (the F-35 carries one JDAM a side; a longer
-    // stick keeps the doors open and walks the rest off the same racks)
+    const ago = over > 0 ? over / f.spd : 0;
+    // the store leaves its station: the drawn load is the load left
     const R = jt.rig && jt.rig.state;
-    if (R && R.nJ < 2) R.nJ++;
-    _relP.x = jt.pos.x; _relP.y = jt.pos.y + 0.6; _relP.z = jt.pos.z;
+    if (f.airframe === "b52") {
+      const W = jt.veh && jt.veh.wpn;
+      if (W) for (let i = 0; i < W.length; i++) if (W[i].w.id === (f.hsab ? "gbu31_jdam" : "mk82_stick")) W[i].ammo = Math.max(0, W[i].ammo - 1);
+      if (jt.rig && jt.rig.fire) { _stShot.wid = f.hsab ? "gbu31_jdam" : "mk82_stick"; _stShot.target = null; try { jt.rig.fire(_stShot); } catch (e) {} }
+    } else if (f.airframe === "b2") {
+      // the launcher spends its bottom weapon (makeB2's b2Spend alternates the
+      // bays); the store leaves from under THAT launcher
+      const ud = jt.group && jt.group.userData;
+      if (ud && ud.b2Spend && R && R.bays) {
+        let bi = -1;
+        const n0 = R.bays.map(function (B) { return B.next; });
+        ud.b2Spend();
+        for (let i = 0; i < R.bays.length; i++) if (R.bays[i].next !== n0[i]) bi = i;
+        if (bi >= 0) st = stationOf(jt, _st, bi);
+      }
+    } else if (R && R.nJ < 2) R.nJ++;      // the F-35 carries one JDAM a side; a longer stick walks the rest off the same racks
+    _relP.x = st.x - f.hx * over; _relP.y = st.y; _relP.z = st.z - f.hz * over;
     let b = null;
     if (CBZ.strategicRelease) {
-      try { b = CBZ.strategicRelease(f.kind, _relP, f.rv, { by: f.by, byPlayer: f.byPlayer, stateAct: f.stateAct }); } catch (e) { b = null; }
+      try { b = CBZ.strategicRelease(f.kind, _relP, f.rv, { by: f.by, byPlayer: f.byPlayer, stateAct: f.stateAct, age: ago }); } catch (e) { b = null; }
     }
-    if (b && b.sol) f.impacts.push({ at: f.t + (b.sol.t > 0 ? b.sol.t : f.tf), x: b.sol.x, z: b.sol.z, kind: f.kind });
-    else f.impacts.push({ at: f.t + f.tf, x: a.x, z: a.z, kind: f.kind, fallback: true });
+    if (b && b.sol) f.impacts.push({ at: f.t - ago + (b.sol.t > 0 ? b.sol.t : a.tf), x: b.sol.x, z: b.sol.z, kind: f.kind });
+    else f.impacts.push({ at: f.t - ago + a.tf, x: a.x, z: a.z, kind: f.kind, fallback: true });
     f.released++;
-    if (CBZ.sfx) CBZ.sfx("whoosh");
+    jt.lastRel = f.t;
+    // one release noise per beat: a B-52 rippling 27 in a second is a stick, not 27 whooshes
+    if (CBZ.sfx && (jt.sfxT == null || f.t - jt.sfxT > 0.35)) { jt.sfxT = f.t; CBZ.sfx("whoosh"); }
   }
 
   // degrade path only: strategic.js absent, so nothing is falling — the bus
@@ -539,14 +771,40 @@
   function despawnFlight(f) {
     for (let i = 0; i < f.jets.length; i++) {
       const jt = f.jets[i];
+      // a B-52's smoke trail is a world-space ribbon in the scene, not on the airframe
+      const T = jt.rig && jt.rig.state && jt.rig.state.trails;
+      if (T && T.mesh) {
+        if (T.mesh.parent) T.mesh.parent.remove(T.mesh);
+        if (T.g && T.g.dispose) { try { T.g.dispose(); } catch (e) {} }
+        T.added = true;                                // never re-added by a stray tick
+      }
+      // a skinned airframe (the B-52's nine bones) owns its skeleton's texture
+      if (jt.group) jt.group.traverse(function (o) { if (o.isSkinnedMesh && o.skeleton && o.skeleton.dispose) { try { o.skeleton.dispose(); } catch (e) {} } });
       if (jt.group && jt.group.parent) jt.group.parent.remove(jt.group);
       disposeGroup(jt.group);
       jt.group = null;
     }
+    f.gone = true;
     const i = flights.indexOf(f);
     if (i >= 0) flights.splice(i, 1);
   }
   function despawnAllFlights() { while (flights.length) despawnFlight(flights[flights.length - 1]); }
+
+  // a heavy's bay doors: open from DOOR_LEAD s before its first release until
+  // DOOR_HOLD s after its last (the B-52 rig swings them itself, ~2.2 s)
+  function doorsFor(jt, dt) {
+    const f = jt.flight;
+    let want = false;
+    if (jt.next < jt.aims.length) {
+      const a0 = jt.aims[jt.next];
+      const toRel = ((a0.x - f.hx * a0.lead) - jt.pos.x) * f.hx + ((a0.z - f.hz * a0.lead) - jt.pos.z) * f.hz;
+      want = toRel < f.spd * DOOR_LEAD;
+    } else want = f.t - jt.lastRel < DOOR_HOLD;
+    if (f.airframe === "b52") {
+      // b52.js opens the bay for a designated mark while it has bombs in it
+      if (jt.veh) jt.veh.tgt = want && !f.hsab ? jt.doorTgt : null;
+    } else jt.door = Math.max(0, Math.min(1, jt.door + (want ? 1 : -1) * dt / 2.2));
+  }
 
   // returns true when the flight is finished
   function tickFlight(f, dt) {
@@ -555,28 +813,52 @@
     let allOut = true;
     for (let j = 0; j < f.jets.length; j++) {
       const jt = f.jets[j];
-      jt.pos.x += f.hx * step; jt.pos.z += f.hz * step;
+      if (f.af.heavy) {
+        // the breakaway: roll in once the stick is gone, then turn at the rate the bank holds
+        const want = jt.next >= jt.aims.length && f.t - jt.lastRel > BREAK.DELAY && jt.yaw - f.yaw < BREAK.TURN ? BREAK.BANK : 0;
+        jt.bank += Math.max(-BREAK.ROLL * dt, Math.min(BREAK.ROLL * dt, want - jt.bank));
+        if (jt.bank !== 0) {
+          jt.yaw += G_TURN * Math.tan(jt.bank) / f.spd * dt;      // a port turn: the yaw grows
+          jt.hx = Math.sin(jt.yaw); jt.hz = Math.cos(jt.yaw);
+        }
+      }
+      jt.pos.x += jt.hx * step; jt.pos.z += jt.hz * step;
       if (!jt.group) seatJet(jt);
+      else if (f.af.heavy) {
+        // the B-52 banks its own airframe (port wing down: -z roll on a +Z
+        // nose); the B-2's rig leans into the coordinated angle off its yaw
+        // rate by itself
+        jt.group.rotation.set(0, jt.yaw, f.airframe === "b52" ? -jt.bank : 0);
+      }
       if (jt.group) {
-        // the bays open about two seconds before the first release and stay
-        // open through the stick (the unit's own doors, ~1 s to swing)
         const R = jt.rig && jt.rig.state;
-        if (R && jt.next < jt.aims.length) {
+        if (f.af.heavy) doorsFor(jt, dt);
+        else if (R && jt.next < jt.aims.length) {
+          // the F-35's bays open about two seconds before the first release
+          // and stay open through the stick (the unit's own doors, ~1 s to swing)
           const a0 = jt.aims[jt.next];
-          const toRel = ((a0.x - f.hx * f.lead) - jt.pos.x) * f.hx + ((a0.z - f.hz * f.lead) - jt.pos.z) * f.hz;
+          const toRel = ((a0.x - f.hx * a0.lead) - jt.pos.x) * f.hx + ((a0.z - f.hz * a0.lead) - jt.pos.z) * f.hz;
           if (toRel < f.spd * 2.2) R.bayHold = Math.max(R.bayHold, R.clock + 1.5);
         }
-        if (CBZ.milAirDrive) { _drive.agl = f.agl; _drive.speed = f.spd; CBZ.milAirDrive(jt.group, _drive, dt); }
+        if (CBZ.milAirDrive) { _drive.agl = jt.pos.y - floorAt(jt.pos.x, jt.pos.z); _drive.speed = f.spd; CBZ.milAirDrive(jt.group, _drive, dt); }
+        // the unit's tick leans on its own door state; ours has the last word
+        if (f.airframe === "b2" && jt.group.userData.setBay) jt.group.userData.setBay(jt.door);
       }
-      // release each store the instant the jet crosses its solved release point
+      // release each store the instant ITS station crosses ITS solved release point
       while (jt.next < jt.aims.length) {
         const a = jt.aims[jt.next];
-        const s = (jt.pos.x - (a.x - f.hx * f.lead)) * f.hx + (jt.pos.z - (a.z - f.hz * f.lead)) * f.hz;
-        if (s < 0) break;
-        releaseFrom(jt, a);
+        const trig = (a.x - f.hx * a.lead) * f.hx + (a.z - f.hz * a.lead) * f.hz;
+        if (jt.pos.x * f.hx + jt.pos.z * f.hz + 15 < trig) break;     // nowhere near (a station is within 15 m of the origin)
+        const st = stationOf(jt, _st);
+        // the exact carry from THIS station's height (the B-52's three clip
+        // layers span 0.8 m, worth a metre and a half on the ground)
+        const ld = leadFor(f.kind, a.x, a.z, st.y, f.rv, f.h);
+        const over = st.x * f.hx + st.z * f.hz - ((a.x - f.hx * ld.lead) * f.hx + (a.z - f.hz * ld.lead) * f.hz);
+        if (over < 0) break;
+        releaseFrom(jt, a, st, Math.min(over, step + 15));
         jt.next++;
       }
-      if ((jt.pos.x - f.tx) * f.hx + (jt.pos.z - f.tz) * f.hz < FLIGHT.RUNOUT) allOut = false;
+      if ((jt.pos.x - f.tx) * f.hx + (jt.pos.z - f.tz) * f.hz < f.runout) allOut = false;
     }
     for (let i = f.impacts.length - 1; i >= 0; i--) {
       const im = f.impacts[i];
@@ -586,20 +868,20 @@
       if (im.fallback) fallbackBlast(f, im);
       if (f.onImpact) { try { f.onImpact(im, f, f.hits); } catch (e) {} }
     }
-    // THE JETS ARE THE ALERT: a repeating engine roar keyed to the lead's true
-    // distance from the player — sfx's dist handling attenuates it and swaps to
-    // the muffled far-field bus, so it starts as a far-off rumble and swells
-    // into a hard overhead roar on the pass. force+ghost so the cadence never
-    // starves (or is starved by) other rumbles.
+    // THE AEROPLANES ARE THE ALERT: a repeating engine roar keyed to the lead's
+    // true distance from the player — sfx's dist handling attenuates it and
+    // swaps to the muffled far-field bus, so it starts as a far-off rumble and
+    // swells into a hard overhead roar on the pass. force+ghost so the cadence
+    // never starves (or is starved by) other rumbles.
     f.sndT -= dt;
     if (f.sndT <= 0 && CBZ.sfx && f.jets[0]) {
       f.sndT = 0.55;
       const P = CBZ.player, lp = f.jets[0].pos;
-      const d = P && P.pos ? Math.hypot(lp.x - P.pos.x, lp.z - P.pos.z) : 999;
-      CBZ.sfx("rumble", { dist: d, volume: 0.9, force: true, ghost: true });
+      const d = P && P.pos ? Math.hypot(lp.x - P.pos.x, lp.z - P.pos.z, f.af.heavy ? lp.y - P.pos.y : 0) : 999;
+      CBZ.sfx("rumble", { dist: d, volume: f.af.heavy ? 1.0 : 0.9, force: true, ghost: true });
       if (d < 55) CBZ.sfx("wind", { dist: d, volume: 1.0, force: true, ghost: true });  // close pass: the air itself tears
     }
-    return (allOut && !f.impacts.length && f.released >= f.total) || f.t > FLIGHT.LIFE;
+    return (allOut && !f.impacts.length && f.released >= f.total) || f.t > f.life;
   }
   function updateFlights(dt) {
     for (let i = flights.length - 1; i >= 0; i--) {
@@ -612,12 +894,14 @@
         if (im.fallback) fallbackBlast(f, im);
         if (f.onImpact) { try { f.onImpact(im, f, f.hits); } catch (e) {} }
       }
+      f.finished = true;
       despawnFlight(f);
       if (f.onDone) { try { f.onDone(f); } catch (e) {} }
     }
   }
   CBZ.cityStrikeFlight = strikeFlight;
   CBZ.cityStrikeFlights = function () { return flights.slice(); };
+  CBZ.cityStrikeAirframes = function () { return Object.keys(AIRFRAME); };
 
   // systems/lockon.js UNIVERSAL-acquisition seam: the summoned taxi chopper
   // and the airstrike jet are real craft in the sky, so they're lockable like
@@ -645,7 +929,7 @@
       for (let j = 0; j < js.length; j++) {
         const jt = js[j];
         if (!jt.group || !jt.group.parent) continue;
-        if (cb(jt, airLockSeek(jt), jt.pos.x, jt.pos.y, jt.pos.z, 3.2, "aircraft") === false) return;
+        if (cb(jt, airLockSeek(jt), jt.pos.x, jt.pos.y, jt.pos.z, (flights[i].af && flights[i].af.radius) || 3.2, "aircraft") === false) return;
       }
     }
   };
@@ -706,7 +990,7 @@
   // ---- studio hook: pure mesh builders for tools/studio.mjs expr shots ----
   CBZ.debugBuildPlayerAir = {
     chopper: function () { return buildChopperGroup().grp; },
-    strikeJet: function () { const b = buildStrikeJet(); return b ? b.grp : null; },
+    strikeJet: function (airframe) { const b = buildStrikeJet(AIRFRAME[airframe] || AIRFRAME.f35); return b ? b.grp : null; },
   };
 
   function teardown() { despawnChopper(); despawnAllFlights(); chopperCD = 0; strikeCD = 0; g.cityChopperRide = false; }

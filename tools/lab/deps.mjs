@@ -61,6 +61,23 @@ const SCANNER_VERSION = 8;
    Every entry carries its reason. */
 export const OVERRIDES = {
 };
+// A UNIT FILE'S BUILD KIT. src/units/manifest.js names the shared kit each
+// vehicle lofts on (`needs`: city/mil_air.js for the airframes,
+// units/kit/hull.js for the wheeled bodies); the unit files feature-detect it
+// (`CBZ.milAir && CBZ.milAir.kit`), so the scanner rightly treats it as
+// optional and never follows it, and a kit that names b52.js got a B-52 whose
+// build returned null. Read off the manifest, so the two cannot drift.
+(function unitNeeds() {
+  let src = "";
+  try { src = readFileSync(path.join(ROOT, "src/units/manifest.js"), "utf8"); } catch (e) { return; }
+  const re = /(\w+):\s*V\("[^"]*",\s*"[^"]*",\s*"\w+",\s*\[([^\]]*)\]/g;
+  let m;
+  while ((m = re.exec(src))) {
+    const needs = (m[2].match(/"([^"]+)"/g) || []).map((q) => "src/" + q.slice(1, -1));
+    const f = "src/units/vehicles/" + m[1] + ".js";
+    if (needs.length && !OVERRIDES[f] && existsSync(path.join(ROOT, f))) OVERRIDES[f] = { needs };
+  }
+})();
 
 /* ---- index.html order ---------------------------------------------------- */
 export function indexOrder() {
