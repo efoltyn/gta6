@@ -49,13 +49,28 @@ for (const g of geoms) {
   if (!g.arcs) continue;
   const polys = g.type === "Polygon" ? [g.arcs] : g.arcs;
   const rings = [];
-  for (const p of polys) for (const r of p) rings.push(ring(r));
+  // a ring that crosses the antimeridian (Chukotka, Fiji) is unwrapped into
+  // one continuous run of longitudes, or the even-odd test paints a band right
+  // round the world at its latitude; inside() tries lon, lon+360 and lon-360
+  for (const p of polys) for (const r of p) {
+    const pts = ring(r);
+    for (let i = 1; i < pts.length; i++) {
+      let x = pts[i][0];
+      while (x - pts[i - 1][0] > 180) x -= 360;
+      while (x - pts[i - 1][0] < -180) x += 360;
+      pts[i] = [x, pts[i][1]];
+    }
+    rings.push(pts);
+  }
   let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
   for (const r of rings) for (const [x, y] of r) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
   C.push({ id: String(g.id || ""), name: g.properties.name, rings, x0, x1, y0, y1 });
 }
 // even-odd over every ring of the country: holes (Lesotho in South Africa) fall out
 function inside(c, x, y) {
+  return inside1(c, x, y) || inside1(c, x + 360, y) || inside1(c, x - 360, y);
+}
+function inside1(c, x, y) {
   if (x < c.x0 || x > c.x1 || y < c.y0 || y > c.y1) return false;
   let ins = false;
   for (const r of c.rings) {
