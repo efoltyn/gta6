@@ -26,11 +26,23 @@ const FILES = ["src/weapons/weapon-data.js", "src/weapons/ballistics.js", "src/s
 let SB = null;
 export function ctx() {
   if (SB) return SB;
-  const sb = { console, Math, Date, performance: globalThis.performance, setTimeout, clearTimeout };
+  // (no Math, Date, typed arrays from this realm: a context has its own, and a
+  // cross-realm builtin is a call V8 will not inline: 10-20x slower sight lines)
+  const sb = { console, performance: globalThis.performance, setTimeout, clearTimeout };
   sb.window = sb; sb.self = sb; sb.globalThis = sb;
   vm.createContext(sb);
+  /* HARNESS TRAP: inside a vm context every read of a global (Math, Infinity,
+     Float32Array) goes through the sandbox's interceptor, ~100 ns a time: a
+     sight-line loop ran 10-20x slower than the same file in a browser or in
+     node's own realm. Each file (all of them are IIFEs that publish on CBZ)
+     runs inside a wrapper that binds those names as locals: the code is the
+     game's, unchanged; only the lookups are a browser's. */
+  const NAMES = ["Math", "Infinity", "NaN", "Float32Array", "Float64Array", "Int32Array", "Int16Array", "Uint8Array", "Uint16Array", "Uint32Array",
+    "Object", "Array", "JSON", "Number", "String", "isFinite", "isNaN", "parseInt", "parseFloat", "Error"];
   for (const f of FILES) {
-    try { vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), sb, { filename: f }); }
+    const src = fs.readFileSync(path.join(ROOT, f), "utf8");
+    const wrapped = "(function (" + NAMES.join(", ") + ") {\n" + src + "\n}).call(this, " + NAMES.join(", ") + ");";
+    try { vm.runInContext(wrapped, sb, { filename: f }); }
     catch (e) { if (!/weapon-data/.test(f)) throw e; }
   }
   SB = sb;

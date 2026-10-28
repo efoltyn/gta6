@@ -137,6 +137,7 @@
     [[0.30, 0.045], [0.18, 0.07]],                                    // prone (end-on)
   ];
   const EYE = [1.62, 1.05, 0.33];            // eye height by posture
+  const LOOK_ALL = [0.67, 0.32, 0.52];      // the most of him that can show, by posture (prone: side-on)
   const MUZ = [1.45, 0.98, 0.27];            // the muzzle
   const AIMY = [1.28, 0.80, 0.22];           // a centre-of-mass aim
   const HALF = [[0.20, 0.55], [0.20, 0.38], [0.22, 0.14]];   // half width, half height of the mass he aims at
@@ -162,7 +163,8 @@
       S.col("post", U8); S.col("postTo", U8); S.col("postT", F);
       S.col("mv", U8); S.col("gx", F); S.col("gz", F); S.col("rushT", F); S.col("face", F);
       S.col("tgt", I32, -1); S.col("tgtT", F); S.col("seenT", F, -99); S.col("lkx", F); S.col("lkz", F); S.col("lkT", F, -99);
-      S.col("cand", I32, -1); S.col("det", F); S.col("detN", F); S.col("expo", F);
+      S.col("cand", I32, -1); S.col("det", F); S.col("detN", F); S.col("expo", F); S.col("scan", U8); S.col("spotT", F); S.col("clT", F, -99); S.col("cl0", I32, -1); S.col("cl1", I32, -1); S.col("cl2", I32, -1); S.col("cl3", I32, -1);
+      for (const s of ["e0", "e1"]) { S.col(s + "o", I32, -1); S.col(s + "t", F); S.col(s + "v", F); S.col(s + "k", U8); S.col(s + "x", F); S.col(s + "z", F); S.col(s + "X", F); S.col(s + "Z", F); }
       S.col("acqT", F); S.col("aimT", F); S.col("cool", F); S.col("burst", U8);
       S.col("mag", I16); S.col("ammo", I16); S.col("reloadT", F); S.col("heat", F); S.col("rngE", F); S.col("rngTgt", I32, -1);
       S.col("supp", F); S.col("stress", F); S.col("cap", F); S.col("bleed", F); S.col("down", U8); S.col("aidBy", I32, -1); S.col("aidOn", I32, -1); S.col("aidEnd", F);
@@ -173,8 +175,25 @@
       S.col("vx", F); S.col("vz", F);
     }
     cols();
-    let G = S.cols;
-    S.onGrow(function () { G = S.cols; });
+    /* THE COLUMNS, AS A FAST OBJECT. The store's `cols` collects its ~90
+       columns one at a time, and an object grown that way is a hash table to
+       V8: every G.x[r] was a dictionary lookup. One literal naming them all
+       has a fixed shape. Rebuilt whenever the store grows. */
+    function bindG(c) {
+      return {
+        x: c.x, y: c.y, z: c.z, heading: c.heading, hp: c.hp, maxHp: c.maxHp, side: c.side, kind: c.kind, tier: c.tier, life: c.life, squad: c.squad,
+        typ: c.typ, sqd: c.sqd, slot: c.slot, post: c.post, postTo: c.postTo, postT: c.postT, mv: c.mv, gx: c.gx, gz: c.gz, rushT: c.rushT, face: c.face,
+        tgt: c.tgt, tgtT: c.tgtT, seenT: c.seenT, lkx: c.lkx, lkz: c.lkz, lkT: c.lkT, cand: c.cand, det: c.det, detN: c.detN, expo: c.expo, scan: c.scan, spotT: c.spotT, clT: c.clT, cl0: c.cl0, cl1: c.cl1, cl2: c.cl2, cl3: c.cl3,
+        e0o: c.e0o, e0t: c.e0t, e0v: c.e0v, e0k: c.e0k, e0x: c.e0x, e0z: c.e0z, e0X: c.e0X, e0Z: c.e0Z,
+        e1o: c.e1o, e1t: c.e1t, e1v: c.e1v, e1k: c.e1k, e1x: c.e1x, e1z: c.e1z, e1X: c.e1X, e1Z: c.e1Z,
+        acqT: c.acqT, aimT: c.aimT, cool: c.cool, burst: c.burst, mag: c.mag, ammo: c.ammo, reloadT: c.reloadT, heat: c.heat, rngE: c.rngE, rngTgt: c.rngTgt,
+        supp: c.supp, stress: c.stress, cap: c.cap, bleed: c.bleed, down: c.down, aidBy: c.aidBy, aidOn: c.aidOn, aidEnd: c.aidEnd, pin: c.pin,
+        flashT: c.flashT, thinkAt: c.thinkAt, contactT: c.contactT, crackT: c.crackT, hitX: c.hitX, hitZ: c.hitZ, shots: c.shots, hits: c.hits,
+        plF: c.plF, plB: c.plB, plS: c.plS, helm: c.helm, inF: c.inF, inB: c.inB, inS: c.inS, inH: c.inH, vx: c.vx, vz: c.vz,
+      };
+    }
+    let G = bindG(S.cols);
+    S.onGrow(function () { G = bindG(S.cols); });
 
     const I = {
       S: S, simT: 0, types: [], events: new F(4096 * 4), nEv: 0, shots: new F(1024 * SHOT_F), nShot: 0,
@@ -232,14 +251,18 @@
       lostT: new F(0), brkX: new F(0), brkZ: new F(0), brkT: new F(0), lastC: new F(0) };
     const TASK = { advance: 0, contact: 1, base: 2, bound: 3, assault: 4, hold: 5, breakc: 6, gone: 7 };
     I.TASK = TASK;
+    let sqCap = 0;
     function sqGrow(n) {
       if (n <= SQ.n) return;
-      const cap = Math.max(n, SQ.n * 2, 16);
-      for (const k in SQ) {
-        if (k === "n" || k === "mem") continue;
-        const a = new SQ[k].constructor(cap); a.set(SQ[k].subarray(0, Math.min(SQ[k].length, cap))); SQ[k] = a;
+      if (n > sqCap) {
+        const cap = Math.max(n, sqCap * 2, 16);
+        for (const k in SQ) {
+          if (k === "n" || k === "mem") continue;
+          const a = new SQ[k].constructor(cap); a.set(SQ[k].subarray(0, Math.min(SQ[k].length, cap))); SQ[k] = a;
+        }
+        const m = new I32(cap * 10).fill(-1); m.set(SQ.mem.subarray(0, Math.min(SQ.mem.length, cap * 10))); SQ.mem = m;
+        sqCap = cap;
       }
-      const m = new I32(cap * 10).fill(-1); m.set(SQ.mem.subarray(0, Math.min(SQ.mem.length, cap * 10))); SQ.mem = m;
       SQ.n = n;
     }
     I.squads = SQ;
@@ -250,6 +273,7 @@
       G.post[r] = POST.stand; G.postTo[r] = POST.stand; G.postT[r] = 0;
       G.mv[r] = MOVE.hold; G.gx[r] = G.x[r]; G.gz[r] = G.z[r]; G.rushT[r] = 0; G.face[r] = G.heading[r];
       G.tgt[r] = -1; G.tgtT[r] = 0; G.seenT[r] = -99; G.lkT[r] = -99; G.cand[r] = -1; G.det[r] = 0; G.expo[r] = 0;
+      G.e0o[r] = -1; G.e1o[r] = -1; G.scan[r] = 0; G.clT[r] = -99; G.spotT[r] = 0;
       G.acqT[r] = 0; G.aimT[r] = 0; G.cool[r] = 0; G.burst[r] = 0;
       G.mag[r] = t.armed ? t.magSize : 0; G.ammo[r] = t.armed ? t.carry : 0; G.reloadT[r] = 0; G.heat[r] = 0; G.rngE[r] = 0; G.rngTgt[r] = -1;
       G.supp[r] = 0; G.stress[r] = 0; G.cap[r] = 1; G.bleed[r] = 0; G.down[r] = 0; G.aidBy[r] = -1; G.aidOn[r] = -1; G.aidEnd[r] = 0;
@@ -276,17 +300,22 @@
 
     /* ------------------------------------------------------------ the ground and the cover */
     const ground = cfg.ground || null, groundFn = typeof cfg.groundAt === "function" ? cfg.groundAt : null;
+    // a height array made in another realm (a tool's, a worker's message) is
+    // adopted into this one: a foreign typed array makes every read polymorphic
+    if (ground && !(ground.hgt instanceof F)) ground.hgt = new F(ground.hgt);
+    const gX0 = ground ? ground.x0 : 0, gZ0 = ground ? ground.z0 : 0, gIC = ground ? 1 / ground.cell : 1;
+    const gW = ground ? ground.w : 0, gH = ground ? ground.h : 0, GH = ground ? ground.hgt : null;
     function hAt(x, z) {
-      if (!ground) return groundFn ? groundFn(x, z) : 0;
-      const fx = (x - ground.x0) / ground.cell, fz = (z - ground.z0) / ground.cell;
-      let ix = Math.floor(fx), iz = Math.floor(fz);
-      const w = ground.w, h = ground.h;
-      if (ix < 0) ix = 0; else if (ix > w - 2) ix = w - 2;
-      if (iz < 0) iz = 0; else if (iz > h - 2) iz = h - 2;
+      if (!GH) return groundFn ? groundFn(x, z) : 0;
+      const fx = (x - gX0) * gIC, fz = (z - gZ0) * gIC;
+      let ix = fx | 0, iz = fz | 0;                  // (the field is laid from its corner: no negatives inside it)
+      if (fx < 0) ix = 0; else if (ix > gW - 2) ix = gW - 2;
+      if (fz < 0) iz = 0; else if (iz > gH - 2) iz = gH - 2;
       let tx = fx - ix, tz = fz - iz;
       tx = tx < 0 ? 0 : tx > 1 ? 1 : tx; tz = tz < 0 ? 0 : tz > 1 ? 1 : tz;
-      const H = ground.hgt, k = iz * w + ix;
-      const a = H[k] + (H[k + 1] - H[k]) * tx, b = H[k + w] + (H[k + w + 1] - H[k + w]) * tx;
+      const k = iz * gW + ix;
+      const h0 = GH[k], h1 = GH[k + gW];
+      const a = h0 + (GH[k + 1] - h0) * tx, b = h1 + (GH[k + gW + 1] - h1) * tx;
       return a + (b - a) * tz;
     }
     I.groundAt = hAt;
@@ -306,18 +335,140 @@
     /* A SIGHT LINE over the ground and the cover. The ends are sampled fine
        (a lip of earth a stride in front of a prone man is what hides him)
        and the middle coarse. The two footings never count. */
+    /* THE HIGHEST POINT OF EACH 8 m CELL (ground + cover), so a sight line
+       or a round skips every cell it passes over clear of: the same answer
+       as sampling it, without the samples. Built once; a host that changes
+       the ground (a crater) calls I.groundChanged(x0, z0, x1, z1). */
+    const MIPC = 8;
+    let mip = null, slp = null, cov = null, mw = 0, mh = 0, mx0 = 0, mz0 = 0;
+    function mipCell(ix, iz) {
+      const x0 = mx0 + ix * MIPC, z0 = mz0 + iz * MIPC;
+      let m = -1e9;
+      const st = ground ? Math.min(MIPC, ground.cell) : MIPC;
+      for (let z = z0 - st; z <= z0 + MIPC + st + 1e-6; z += st) for (let x = x0 - st; x <= x0 + MIPC + st + 1e-6; x += st) {
+        const h = hAt(x, z) + (cover ? coverAt(x, z) : 0);
+        if (h > m) m = h;
+      }
+      return m;
+    }
+    // from the vertex array: every ground cell's four corners into each 8 m
+    // cell it overlaps (bilinear ground never rises above its corners), then
+    // the cover, conservatively (the cell's highest ground plus the cover's top)
+    function buildMip() {
+      if (!ground) return;
+      mx0 = ground.x0; mz0 = ground.z0;
+      const gc = ground.cell, gw = ground.w, gh = ground.h, H = ground.hgt;
+      mw = Math.ceil((gw - 1) * gc / MIPC) + 1; mh = Math.ceil((gh - 1) * gc / MIPC) + 1;
+      mip = new F(mw * mh).fill(-1e9);
+      slp = new F(mw * mh);
+      cov = new U8(mw * mh);
+      for (let iz = 0; iz < gh - 1; iz++) {
+        const c0 = Math.floor(iz * gc / MIPC), c1 = Math.min(mh - 1, Math.floor((iz + 1) * gc / MIPC));
+        for (let ix = 0; ix < gw - 1; ix++) {
+          const k = iz * gw + ix;
+          const h00 = H[k], h10 = H[k + 1], h01 = H[k + gw], h11 = H[k + gw + 1];
+          let m = h00; if (h10 > m) m = h10; if (h01 > m) m = h01; if (h11 > m) m = h11;
+          // the bilinear patch's steepest slope: its gradient's parts are the edge differences
+          const gx = Math.max(Math.abs(h10 - h00), Math.abs(h11 - h01)) / gc, gz = Math.max(Math.abs(h01 - h00), Math.abs(h11 - h10)) / gc;
+          const s = Math.sqrt(gx * gx + gz * gz);
+          const a0 = Math.floor(ix * gc / MIPC), a1 = Math.min(mw - 1, Math.floor((ix + 1) * gc / MIPC));
+          for (let cz = c0; cz <= c1; cz++) for (let cx = a0; cx <= a1; cx++) { const q = cz * mw + cx; if (m > mip[q]) mip[q] = m; if (s > slp[q]) slp[q] = s; }
+        }
+      }
+      if (cover) {
+        const top = new F(mw * mh);
+        for (let iz = 0; iz < cover.h; iz++) for (let ix = 0; ix < cover.w; ix++) {
+          const t = cover.top[iz * cover.w + ix];
+          if (!(t > 0)) continue;
+          const x0 = cover.x0 + ix * cover.cell, z0 = cover.z0 + iz * cover.cell;
+          const a0 = Math.max(0, Math.floor((x0 - mx0) / MIPC)), a1 = Math.min(mw - 1, Math.floor((x0 + cover.cell - mx0) / MIPC));
+          const c0 = Math.max(0, Math.floor((z0 - mz0) / MIPC)), c1 = Math.min(mh - 1, Math.floor((z0 + cover.cell - mz0) / MIPC));
+          for (let cz = c0; cz <= c1; cz++) for (let cx = a0; cx <= a1; cx++) { const q = cz * mw + cx; if (t > top[q]) top[q] = t; cov[q] = 1; }
+        }
+        for (let q = 0; q < mip.length; q++) mip[q] += top[q];
+      }
+    }
+    // one pyramid per field: battles fought on the same ground share it (the cover is part of it)
+    if (ground && ground._mip && ground._mipCover === cover) { mip = ground._mip; slp = ground._mipS; cov = ground._mipC; mx0 = ground.x0; mz0 = ground.z0; mw = ground._mipW; mh = ground._mipH; }
+    else { buildMip(); if (ground) { ground._mip = mip; ground._mipS = slp; ground._mipC = cov; ground._mipCover = cover; ground._mipW = mw; ground._mipH = mh; } }
+    I.groundChanged = function (x0, z0, x1, z1) {
+      if (!mip) return;
+      const a = Math.max(0, Math.floor((x0 - mx0) / MIPC) - 1), b = Math.min(mw - 1, Math.floor((x1 - mx0) / MIPC) + 1);
+      const c = Math.max(0, Math.floor((z0 - mz0) / MIPC) - 1), e = Math.min(mh - 1, Math.floor((z1 - mz0) / MIPC) + 1);
+      for (let iz = c; iz <= e; iz++) for (let ix = a; ix <= b; ix++) mip[iz * mw + ix] = mipCell(ix, iz);
+    };
+    /* A SIGHT LINE over the ground and the cover. The ends are sampled fine
+       (a lip of earth a stride in front of a prone man is what hides him),
+       the rest at the ground's own resolution, and only where the line is
+       not clear above the cell's highest point. The two footings never count. */
+    // who asked for a sight line (the cost ledger: I.stats.losBy)
+    const LOS_TAG = ["eye", "glance", "spot", "post", "area", "round"];
+    let losTag = 0;
+    I.stats.losBy = new F(LOS_TAG.length);
+    I.LOS_TAG = LOS_TAG;
     function lineClear(ax, ay, az, bx, by, bz) {
       I.stats.los++;
+      I.stats.losBy[losTag]++;
       const dx = bx - ax, dz = bz - az, d = Math.sqrt(dx * dx + dz * dz);
       if (d < 0.8) return true;
       const dy = by - ay;
-      const fine = Math.min(7, d * 0.5), coarse = Math.max(1.5, Math.min(4, d / 80));
-      let s = 0.35;
-      while (s < d - 0.35) {
-        const t = s / d, x = ax + dx * t, z = az + dz * t;
-        const top = hAt(x, z) + (cover ? coverAt(x, z) : 0);
-        if (top > ay + dy * t) return false;
-        s += (s < fine || s > d - fine) ? 0.5 : coarse;
+      const s0 = 0.35, s1 = d - 0.35;
+      const fine = Math.min(7, d * 0.5);
+      const coarse = ground ? Math.max(ground.cell * 0.8, Math.min(3, d / 100)) : Math.max(1.5, Math.min(4, d / 80));
+      if (!mip) {
+        let s = s0;
+        while (s < s1) {
+          const t = s / d, x = ax + dx * t, z = az + dz * t;
+          if (hAt(x, z) + (cover ? coverAt(x, z) : 0) > ay + dy * t) return false;
+          s += (s < fine || s > d - fine) ? 0.5 : coarse;
+        }
+        return true;
+      }
+      // walk the 8 m cells the line crosses (DDA), sampling only the ones it is not clear over
+      const ux = dx / d, uz = dz / d, slope = dy / d;
+      let s = s0;
+      while (s < s1) {
+        const x = ax + ux * s, z = az + uz * s;
+        let ix = Math.floor((x - mx0) / MIPC), iz = Math.floor((z - mz0) / MIPC);
+        // where the line leaves this cell
+        let sx = Infinity, sz = Infinity;
+        if (ux > 1e-9) sx = ((mx0 + (ix + 1) * MIPC) - x) / ux; else if (ux < -1e-9) sx = ((mx0 + ix * MIPC) - x) / ux;
+        if (uz > 1e-9) sz = ((mz0 + (iz + 1) * MIPC) - z) / uz; else if (uz < -1e-9) sz = ((mz0 + iz * MIPC) - z) / uz;
+        let se = s + Math.min(sx, sz) + 1e-4;
+        if (se > s1) se = s1;
+        if (ix < 0) ix = 0; else if (ix >= mw) ix = mw - 1;
+        if (iz < 0) iz = 0; else if (iz >= mh) iz = mh - 1;
+        const q = iz * mw + ix;
+        const lo = ay + slope * (slope > 0 ? s : se);
+        if (lo > mip[q]) { s = se; continue; }
+        if (cov[q]) {
+          // cover in this cell (walls are not slopes): sample it
+          while (s < se) {
+            const xx = ax + ux * s, zz = az + uz * s;
+            if (hAt(xx, zz) + coverAt(xx, zz) > ay + slope * s) return false;
+            s += (s < fine || s > d - fine) ? 0.5 : coarse;
+          }
+        } else {
+          /* bare ground: sphere-trace it. From a point where the line is c
+             over the ground, the ground (no steeper than slp) cannot reach
+             the line within c / (slp + |line slope|): step that far. */
+          const k = slp[q] + Math.abs(slope) + 1e-3;
+          while (s < se) {
+            // (the bilinear ground, inline: this loop is most of the sim's time)
+            const fx = (ax + ux * s - gX0) * gIC, fz = (az + uz * s - gZ0) * gIC;
+            let ix2 = fx | 0, iz2 = fz | 0;
+            if (fx < 0) ix2 = 0; else if (ix2 > gW - 2) ix2 = gW - 2;
+            if (fz < 0) iz2 = 0; else if (iz2 > gH - 2) iz2 = gH - 2;
+            let tx = fx - ix2, tz = fz - iz2;
+            tx = tx < 0 ? 0 : tx > 1 ? 1 : tx; tz = tz < 0 ? 0 : tz > 1 ? 1 : tz;
+            const kk = iz2 * gW + ix2, h0 = GH[kk], h1 = GH[kk + gW];
+            const ga = h0 + (GH[kk + 1] - h0) * tx, gb = h1 + (GH[kk + gW + 1] - h1) * tx;
+            const c = ay + slope * s - (ga + (gb - ga) * tz);
+            if (c < 0) return false;
+            s += c > 0.2 * k ? c / k : 0.2;
+          }
+        }
+        s = se;
       }
       return true;
     }
@@ -329,7 +480,7 @@
        miss rattles. The presence grid, 128 m cells per side: "is there any
        enemy within sight range at all" in one lookup (an exact shortcut). */
     function mkGrid(cell) { return { cell: cell, ic: 1 / cell, x0: 0, z0: 0, w: 0, h: 0, start: new I32(2), list: new I32(0), n: 0 }; }
-    const GE = [mkGrid(32), mkGrid(32)], GB = mkGrid(4), GP = [mkGrid(128), mkGrid(128)];
+    const GE = [mkGrid(32), mkGrid(32)], GP = [mkGrid(128), mkGrid(128)];
     let ext = { x0: -1000, z0: -1000, x1: 1000, z1: 1000 };
     let keys = new I32(0), fillA = new I32(0);
     function fitGrid(g) {
@@ -359,7 +510,8 @@
       g.n = n;
     }
     let live = [new I32(0), new I32(0)], liveN = [0, 0], all = new I32(0), allN = 0, gridAt = -1;
-    function rebuild() {
+    let eyeGridAt = -1, calmDt = -1, CALM_K = new F(0);
+    function rebuild(eyes) {
       const t0 = now();
       const n = I.nRows || 0;
       if (all.length < n) { all = new I32(Math.max(n, 1024)); live[0] = new I32(all.length); live[1] = new I32(all.length); }
@@ -380,12 +532,17 @@
         if (x0 - pad < ext.x0 || z0 - pad < ext.z0 || x1 + pad > ext.x1 || z1 + pad > ext.z1 || gridAt < 0) {
           ext = { x0: x0 - pad * 2, z0: z0 - pad * 2, x1: x1 + pad * 2, z1: z1 + pad * 2 };
           for (let s = 0; s < 2; s++) { fitGrid(GE[s]); fitGrid(GP[s]); }
-          fitGrid(GB);
+          eyes = true;
         }
       }
-      build(GE[0], live[0], n0); build(GE[1], live[1], n1);
-      build(GP[0], live[0], n0); build(GP[1], live[1], n1);
-      build(GB, all, na);
+      // who a man looks for (32 m cells) and whether anybody is there at all
+      // (128 m): a man walks 2 m in the half second these are kept
+      if (eyes) {
+        build(GE[0], live[0], n0); build(GE[1], live[1], n1);
+        build(GP[0], live[0], n0); build(GP[1], live[1], n1);
+        eyeGridAt = I.simT;
+      }
+      buildHB(all, na);
       gridAt = I.simT;
       I.ms.grid += now() - t0;
     }
@@ -401,6 +558,44 @@
       }
       return false;
     }
+    /* THE BODY GRID, hashed: 4 m cells keyed by (cx, cz) into a table twice
+       the number of bodies, so its memory follows the men and not the field
+       (a dense 4 m grid over a 1M-a-side front would be a quarter of a GB).
+       Two cells may share a bucket: every caller re-tests the distance, and a
+       bucket stamp keeps a walk from visiting one twice. */
+    const HB = { mask: 0, start: new I32(2), list: new I32(0), stamp: new I32(0), n: 0 };
+    let hbStamp = 1;
+    function hkey(cx, cz) { return (Math.imul(cx, 73856093) ^ Math.imul(cz, 19349663)) & HB.mask; }
+    function buildHB(rows, n) {
+      let sz = 1024; while (sz < n * 2) sz <<= 1;
+      if (HB.start.length !== sz + 1) { HB.start = new I32(sz + 1); HB.stamp = new I32(sz); }
+      HB.mask = sz - 1;
+      const st = HB.start; st.fill(0);
+      if (keys.length < n) keys = new I32(Math.max(n, keys.length * 2));
+      for (let i = 0; i < n; i++) { const r = rows[i]; const k = hkey(Math.floor(G.x[r] * 0.25), Math.floor(G.z[r] * 0.25)); keys[i] = k; st[k + 1]++; }
+      for (let k = 0; k < sz; k++) st[k + 1] += st[k];
+      if (fillA.length < sz) fillA = new I32(sz * 2);
+      fillA.set(st.subarray(0, sz));
+      if (HB.list.length < n) HB.list = new I32(Math.max(n, HB.list.length * 2));
+      const L = HB.list;
+      for (let i = 0; i < n; i++) L[fillA[keys[i]]++] = rows[i];
+      HB.n = n;
+    }
+    // the bodies in the cells round (x, z) out to W (fn(row) returns true to stop);
+    // `stamp` is the walk's: one bucket is visited once per stamp
+    function forCells(x, z, W, stamp, fn) {
+      const st = HB.start, L = HB.list, S = HB.stamp;
+      const cx0 = Math.floor((x - W) * 0.25), cx1 = Math.floor((x + W) * 0.25);
+      const cz0 = Math.floor((z - W) * 0.25), cz1 = Math.floor((z + W) * 0.25);
+      for (let cz = cz0; cz <= cz1; cz++) for (let cx = cx0; cx <= cx1; cx++) {
+        const k = hkey(cx, cz);
+        if (S[k] === stamp) continue;
+        S[k] = stamp;
+        for (let i = st[k], e = st[k + 1]; i < e; i++) if (fn(L[i]) === true) return true;
+      }
+      return false;
+    }
+    function forDiscB(x, z, R, fn) { forCells(x, z, R, ++hbStamp, fn); }
     // visit rows of a grid inside a disc (fn returns true to stop)
     function forDisc(g, x, z, R, fn) {
       const cx0 = Math.max(0, Math.floor((x - R - g.x0) * g.ic)), cx1 = Math.min(g.w - 1, Math.floor((x + R - g.x0) * g.ic));
@@ -453,6 +648,22 @@
         else if (i === 0 && p !== POST.prone) { /* head hidden: he is in defilade; check the rest anyway */ }
       }
       return area;
+    }
+    /* WHAT HE CAN SEE OF A MAN HE IS WATCHING, remembered: recomputed only
+       when either of them has moved 30 cm, changed posture, or 1.5 s have
+       passed. Two slots: his mark (0) and the man he is studying (1). Two men
+       lying still trading shots do not re-trace the same ground every think. */
+    function expoC(a, b, s) {
+      const O = s ? G.e1o : G.e0o, T = s ? G.e1t : G.e0t, V = s ? G.e1v : G.e0v, K = s ? G.e1k : G.e0k;
+      const X = s ? G.e1x : G.e0x, Z = s ? G.e1z : G.e0z, BX = s ? G.e1X : G.e0X, BZ = s ? G.e1Z : G.e0Z;
+      const key = G.post[a] * 3 + G.post[b];
+      if (O[a] === b && K[a] === key && I.simT - T[a] < 1.5) {
+        const dx = G.x[a] - X[a], dz = G.z[a] - Z[a], ex = G.x[b] - BX[a], ez = G.z[b] - BZ[a];
+        if (dx * dx + dz * dz < 0.09 && ex * ex + ez * ez < 0.09) return V[a];
+      }
+      const e = exposure(a, b);
+      O[a] = b; T[a] = I.simT; V[a] = e; K[a] = key; X[a] = G.x[a]; Z[a] = G.z[a]; BX[a] = G.x[b]; BZ[a] = G.z[b];
+      return e;
     }
     /* DETECTION HAZARD, per second, of b by a. 0.7 m2 is a standing man. */
     function hazard(a, b, d, area) {
@@ -548,8 +759,7 @@
       }
       const near = enemyNear(G.side[r], x, z, SIGHT_R);
       if (tg >= 0) {
-        const d = Math.hypot(G.x[tg] - x, G.z[tg] - z);
-        const e = exposure(r, tg);
+        const e = expoC(r, tg, 0);
         G.expo[r] = e;
         if (e > 0) {
           G.seenT[r] = I.simT; G.lkx[r] = G.x[tg]; G.lkz[r] = G.z[tg]; G.lkT[r] = I.simT;
@@ -557,30 +767,58 @@
           // lost: he keeps watching the spot, and looks for anybody else
           G.tgt[r] = tg = -1;
         }
-        void d;
       }
       if (near) {
-        // the search: the nearest few in his sector; detection accumulates
-        // on the best of them (a hazard: P(found in dt) = 1 - e^-h dt)
-        const n = candidates(r, SIGHT_R);
-        let bestH = 0, best = -1, bestE = 0;
-        const lim = Math.min(n, tg >= 0 ? 2 : 4);
-        for (let i = 0; i < lim; i++) {
-          const o = _cand[i];
-          if (o === tg) continue;
-          const d = Math.sqrt(_cd[i]);
-          const e = exposure(r, o);
-          const h = hazard(r, o, d, e);
-          if (h > bestH) { bestH = h; best = o; bestE = e; }
+        /* THE SEARCH, as an eye does it: he studies one man at a time (his
+           candidate) and glances at one more each think, round the nearest
+           few in his sector. Detection is a hazard on the one he studies:
+           P(found in dt) = 1 - e^(-h dt), against a fresh threshold drawn
+           when a new man comes under his eye. A glance that finds a man
+           far easier to see (moving, firing, closer) turns his eye to him. */
+        // his short list of the nearest few in his sector, kept for a scan
+        // cycle (1.5 s); the distances are the men's real ones every think
+        let n = 0;
+        if (I.simT - G.clT[r] < 1.5) {
+          const L4 = [G.cl0[r], G.cl1[r], G.cl2[r], G.cl3[r]];
+          for (let i = 0; i < 4; i++) {
+            const o = L4[i];
+            if (o < 0 || !fighting(o)) continue;
+            const dx = G.x[o] - x, dz = G.z[o] - z;
+            _cand[n] = o; _cd[n] = dx * dx + dz * dz; n++;
+          }
         }
-        if (best >= 0 && bestH > 0) {
-          // an exponential clock: a fresh threshold (-ln U) when a new man
-          // comes under his eye, the hazard integrated against it
-          if (G.cand[r] !== best) { G.cand[r] = best; G.det[r] = 0; G.detN[r] = -Math.log(1 - rnd() * 0.99999); }
-          G.det[r] += bestH * dt;
+        if (!n) {
+          n = candidates(r, SIGHT_R);
+          G.clT[r] = I.simT;
+          G.cl0[r] = n > 0 ? _cand[0] : -1; G.cl1[r] = n > 1 ? _cand[1] : -1; G.cl2[r] = n > 2 ? _cand[2] : -1; G.cl3[r] = n > 3 ? _cand[3] : -1;
+        }
+        let cur = G.cand[r];
+        if (cur >= 0 && (!fighting(cur) || cur === tg)) { cur = G.cand[r] = -1; }
+        let hCur = 0;
+        if (cur >= 0) {
+          const dc = Math.hypot(G.x[cur] - x, G.z[cur] - z);
+          if (dc > SIGHT_R) { cur = G.cand[r] = -1; }
+          else hCur = hazard(r, cur, dc, expoC(r, cur, 1));
+        }
+        const sc = G.scan[r]++;
+        if (n && ((sc & 1) === 0 || cur < 0)) {
+          const k = Math.min(n, 4), ki = (sc >> 1) % k;
+          const o = _cand[ki];
+          const d = Math.sqrt(_cd[ki]);
+          // a man he could not notice in hours even fully in the open is not looked at
+          if (o !== tg && o !== cur && hazard(r, o, d, LOOK_ALL[G.post[o]]) > 1e-4) {
+            losTag = 1; const h = hazard(r, o, d, exposure(r, o)); losTag = 0;
+            if (h > hCur * 1.5) {
+              cur = G.cand[r] = o; hCur = h; G.det[r] = 0; G.detN[r] = -Math.log(1 - rnd() * 0.99999);
+              G.e1o[r] = -1;
+            }
+          }
+        }
+        if (cur >= 0 && hCur > 0) {
+          G.det[r] += hCur * dt;
           if (G.det[r] >= G.detN[r]) {
-            const better = tg < 0 || (bestE > G.expo[r] * 1.5 && _cd[0] < 1e9);
-            if (better) acquire(r, best, bestE);
+            const ec = expoC(r, cur, 1);
+            if (tg < 0 || ec > G.expo[r] * 1.5) acquire(r, cur, ec);
             G.det[r] = 0; G.cand[r] = -1;
           }
         }
@@ -637,6 +875,9 @@
     // the best firing position within R of him against a threat: the lowest
     // posture that keeps a line, the least of him showing, the nearest
     function bestSpot(r, R, tx, tz) {
+      const tag0 = losTag; losTag = 2; try { return bestSpot_(r, R, tx, tz); } finally { losTag = tag0; }
+    }
+    function bestSpot_(r, R, tx, tz) {
       const x = G.x[r], z = G.z[r];
       let best = null, bs = 1e9;
       const pref = [POST.prone, POST.kneel];
@@ -787,7 +1028,8 @@
            and he is not pinned, a trained man crawls to the best spot within a
            few strides: lower behind a lip, still with the line. */
         if (G.postT[r] <= 0 && usesGround && !pinned && G.post[r] !== POST.stand && G.reloadT[r] <= 0 &&
-            (I.simT - G.seenT[r] > 2.5 || G.expo[r] <= 0) && I.simT - G.crackT[r] > 1.5) {
+            (I.simT - G.seenT[r] > 2.5 || G.expo[r] <= 0) && I.simT - G.crackT[r] > 1.5 && I.simT > G.spotT[r]) {
+          G.spotT[r] = I.simT + 6 + 4 * trait(r, 0x5907);           // he looked: not again for a while
           const sp = bestSpot(r, Math.min(5, D.coverR), tx, tz);
           if (sp && Math.hypot(sp.x - G.x[r], sp.z - G.z[r]) > 0.8) {
             G.gx[r] = sp.x; G.gz[r] = sp.z; G.mv[r] = MOVE.crawl;
@@ -802,6 +1044,9 @@
     // the lowest posture from which his eye still sees the threat; a man who
     // does not use the ground (habit 1) kneels or stands
     function firePost(r, tx, tz, habit) {
+      const tag0 = losTag; losTag = 3; try { return firePost_(r, tx, tz, habit); } finally { losTag = tag0; }
+    }
+    function firePost_(r, tx, tz, habit) {
       const x = G.x[r], z = G.z[r], gy = hAt(x, z), ty = hAt(tx, tz) + 0.9;
       if (habit) return lineClear(x, gy + EYE[1], z, tx, ty, tz) ? POST.kneel : POST.stand;
       if (lineClear(x, gy + EYE[2], z, tx, ty, tz)) return POST.prone;
@@ -897,7 +1142,8 @@
        seconds; an untrained one sprays toward the noise. The rounds are flown
        like any other and hit whoever is really there; their cracks keep heads
        down, which is the point. */
-    function areaFire(r, t, D) {
+    function areaFire(r, t, D) { losTag = 4; areaFire_(r, t, D); losTag = 0; }
+    function areaFire_(r, t, D) {
       if (G.cool[r] > 0 || G.mag[r] <= 0 || G.mv[r] !== MOVE.hold || G.post[r] === POST.stand && G.postT[r] > 0) return;
       if (I.simT - G.lkT[r] > 10) return;
       const sq = G.sqd[r];
@@ -1120,28 +1366,15 @@
       _hitList.length = 0; _hitA.length = 0;
       const ux = dx / hk, uz = dz / hk;
       const hEnd = stop * hk;
-      let stamp = ++_stampN;
-      for (let hs = 2; hs <= hEnd + 4; hs += 3) {
+      const stamp = ++_stampN, cst = ++hbStamp;
+      // the band of cells within 3.2 m of its path (a hit within 1.25 m, a crack
+      // within the cartridge's suppression radius), walked a cell at a time
+      _rv.o = o; _rv.sh = sh; _rv.ox = ox; _rv.oz = oz; _rv.ux = ux; _rv.uz = uz; _rv.hEnd = hEnd; _rv.hk = hk; _rv.stop = stop; _rv.t = t; _rv.stamp = stamp;
+      for (let hs = 2; hs <= hEnd + 4; hs += 4) {
         const x = ox + ux * hs, z = oz + uz * hs;
-        // the round high over the ground cannot hit anybody here
-        if (hs > 12) { const yy = roundY(o, hs / hk); if (yy - hAt(x, z) > 2.4) continue; }
-        const c = cellOf(GB, x, z);
-        const st = GB.start, L = GB.list;
-        for (let i = st[c], e = st[c + 1]; i < e; i++) {
-          const b = L[i];
-          if (b === sh || _stampA[b] === stamp) continue;
-          _stampA[b] = stamp;
-          const bx = G.x[b] - ox, bz = G.z[b] - oz;
-          const along = bx * ux + bz * uz;
-          if (along < 0.5 || along > hEnd + 1) continue;
-          const off = Math.abs(bx * uz - bz * ux);
-          if (off > 1.25) { if (off < 6) nearMiss(o, b, along, off, t); continue; }
-          // the line through his body, in his posture
-          const a = traceMan(o, b, along / hk);
-          if (a < 0) { nearMiss(o, b, along, off, t); continue; }
-          if (a >= stop) continue;
-          _hitList.push(b); _hitA.push(a);
-        }
+        // the round high over the ground cannot hit or rattle anybody here
+        if (hs > 12) { const yy = roundY(o, hs / hk); if (yy - hAt(x, z) > 4.5) continue; }
+        forCells(x, z, 3.2, cst, visitBody);
       }
       // in the order it meets them
       for (let i = 1; i < _hitList.length; i++) {
@@ -1173,7 +1406,7 @@
         }
         // it lands near somebody: the strike rattles him too
         const sx = ox + dx * stop, sz = oz + dz * stop;
-        forDisc(GB, sx, sz, 2.5, function (b) {
+        forDiscB(sx, sz, 2.5, function (b) {
           if (G.side[b] === sd || !alive(b)) return;
           const ddx = G.x[b] - sx, ddz = G.z[b] - sz, dd = Math.sqrt(ddx * ddx + ddz * ddz);
           if (dd < 2.5) crack(b, 0.5 * (1 - dd / 2.5), ox, oz);
@@ -1195,6 +1428,22 @@
       }
     }
     let _stampN = 1, _stampA = new I32(0);
+    const _rv = { o: 0, sh: 0, ox: 0, oz: 0, ux: 0, uz: 0, hEnd: 0, hk: 1, stop: 0, t: null, stamp: 0 };
+    function visitBody(b) {
+      const R = _rv;
+      if (b === R.sh || _stampA[b] === R.stamp) return;
+      _stampA[b] = R.stamp;
+      const bx = G.x[b] - R.ox, bz = G.z[b] - R.oz;
+      const along = bx * R.ux + bz * R.uz;
+      if (along < 0.5 || along > R.hEnd + 1) return;
+      const off = Math.abs(bx * R.uz - bz * R.ux);
+      if (off > 1.25) { if (off < 6) nearMiss(R.o, b, along, off, R.t); return; }
+      // the line through his body, in his posture
+      const a = traceMan(R.o, b, along / R.hk);
+      if (a < 0) { nearMiss(R.o, b, along, off, R.t); return; }
+      if (a >= R.stop) return;
+      _hitList.push(b); _hitA.push(a);
+    }
     // the zones the line crosses in man b (into _tr); returns the first entry (m along the line) or -1
     function traceMan(o, b, s0) {
       const ox = RB[o + 1], oy = RB[o + 2], oz = RB[o + 3], dx = RB[o + 4], dy = RB[o + 5], dz = RB[o + 6];
@@ -1337,7 +1586,7 @@
     // the men round a man who goes down feel it
     function shock(b, k) {
       const x = G.x[b], z = G.z[b], sd = G.side[b];
-      forDisc(GB, x, z, 15, function (o) {
+      forDiscB(x, z, 15, function (o) {
         if (o === b || G.side[o] !== sd || !fighting(o)) return;
         const dx = G.x[o] - x, dz = G.z[o] - z, d2 = dx * dx + dz * dz;
         if (d2 > 225) return;
@@ -1382,7 +1631,7 @@
     function blast(imp) {
       // the munition's charge W (kg TNT): overpressure and fragments by scaled distance
       const Wk = Math.max(0.01, imp.W || 0.2), Rk = 12 * Math.cbrt(Wk / 0.18);
-      forDisc(GB, imp.x, imp.z, Rk, function (b) {
+      forDiscB(imp.x, imp.z, Rk, function (b) {
         if (!alive(b)) return;
         const d = Math.hypot(G.x[b] - imp.x, G.z[b] - imp.z);
         if (d > Rk) return;
@@ -1399,17 +1648,22 @@
     }
 
     /* ============================================================ BODIES MOVE */
+    let moveN = 0;
     function moveAll(dt) {
       const t0 = now();
       const n = I.nRows || 0;
+      moveN++;
+      const LF = G.life, PT = G.postT, SU = G.supp, ST = G.stress, BL = G.bleed;
+      // the stress of it wears off over a minute or so (faster out of contact)
+      const kIn = Math.exp(-dt / 90), kOut = Math.exp(-dt / 30);
       for (let r = 0; r < n; r++) {
-        const l = G.life[r];
-        if (l !== LIFE.alive && l !== LIFE.routed) { G.vx[r] = 0; G.vz[r] = 0; continue; }
+        const l = LF[r];
+        if (l !== LIFE.alive && l !== LIFE.routed) continue;
         // the body's clocks
-        if (G.postT[r] > 0) { G.postT[r] -= dt; if (G.postT[r] <= 0) { G.postT[r] = 0; G.post[r] = G.postTo[r]; } }
-        if (G.supp[r] > 0) { const D = D_(r); G.supp[r] *= Math.exp(-dt / D.calm); if (G.supp[r] < 0.01) G.supp[r] = 0; }
-        // the stress of it wears off over a minute or so (faster out of contact)
-        if (G.stress[r] > 0) G.stress[r] *= Math.exp(-dt / (I.simT - G.contactT[r] < 10 ? 90 : 30));
+        if (PT[r] > 0) { PT[r] -= dt; if (PT[r] <= 0) { PT[r] = 0; G.post[r] = G.postTo[r]; } }
+        if (SU[r] > 0) { SU[r] *= CALM_K[G.typ[r]]; if (SU[r] < 0.01) SU[r] = 0; }
+        if (ST[r] > 0) ST[r] *= I.simT - G.contactT[r] < 10 ? kIn : kOut;
+        if (BL[r] <= 0 && G.mv[r] === MOVE.hold) { G.vx[r] = 0; G.vz[r] = 0; continue; }
         if (G.bleed[r] > 0) {
           G.cap[r] -= G.bleed[r] * dt;
           G.hp[r] = Math.max(0, G.cap[r] * 100);
@@ -1431,7 +1685,8 @@
         G.x[r] += dx / d * st; G.z[r] += dz / d * st;
         G.y[r] = hAt(G.x[r], G.z[r]);
         if (m === MOVE.rush) G.rushT[r] += dt;
-        G.heading[r] = Math.atan2(dx, dz);
+        // his facing follows his path (four times a second is all a body turns)
+        if (((r + moveN) & 1) === 0) G.heading[r] = Math.atan2(dx, dz);
       }
       I.ms.move += now() - t0;
     }
@@ -1620,7 +1875,12 @@
       I.simT += dt;
       const n = I.nRows || 0;
       if (_stampA.length < n) _stampA = new I32(Math.max(n, 1024));
-      if (gridAt < 0 || I.simT - gridAt >= 0.2) rebuild();
+      if (dt !== calmDt || CALM_K.length !== I.types.length) {
+        calmDt = dt; CALM_K = new F(I.types.length);
+        for (let i = 0; i < I.types.length; i++) CALM_K[i] = Math.exp(-dt / I.types[i].D.calm);
+      }
+      // the grids: the bodies every 0.2 s, who-can-see-whom every 0.5 s
+      if (gridAt < 0 || I.simT - gridAt >= 0.2) rebuild(gridAt < 0 || I.simT - eyeGridAt >= 0.5);
       // the squads, each once a second, staggered
       const t1 = now();
       if (SQ.n) {
@@ -1628,25 +1888,21 @@
         while (k-- > 0) { squadTick(sqCur); sqCur = (sqCur + 1) % SQ.n; }
       }
       const t2 = now(); I.ms.squad += t2 - t1;
-      // the men's thinks on their clocks
+      // the men: his think on his own clock, then his trigger
+      const LF = G.life, TA = G.thinkAt, TG = G.tgt, RT = G.reloadT, LK = G.lkT, simT = I.simT;
       for (let r = 0; r < n; r++) {
-        const l = G.life[r];
+        const l = LF[r];
         if (l !== LIFE.alive && l !== LIFE.routed) continue;
-        if (I.simT >= G.thinkAt[r]) {
-          const contact = I.simT - G.contactT[r] < 20;
+        if (simT >= TA[r]) {
+          const contact = simT - G.contactT[r] < 20;
           const step = contact ? 0.25 : 0.6;
           think(r, step);
-          G.thinkAt[r] = I.simT + step * (0.9 + 0.2 * trait(r, (I.simT * 4) | 0));
+          TA[r] = simT + step * (0.9 + 0.2 * trait(r, (simT * 4) | 0));
         }
-      }
-      const t3 = now(); I.ms.think += t3 - t2;
-      // the triggers
-      for (let r = 0; r < n; r++) {
-        if (G.life[r] !== LIFE.alive) continue;
-        if (G.tgt[r] < 0 && G.reloadT[r] <= 0 && I.simT - G.lkT[r] > 10) continue;
+        if (l !== LIFE.alive || (TG[r] < 0 && RT[r] <= 0 && simT - LK[r] > 10)) continue;
         trigger(r, dt);
       }
-      const t4 = now(); I.ms.fire += t4 - t3;
+      const t4 = now(); I.ms.think += t4 - t2;
       moveAll(dt);
       resolveRounds();
       I.ms.total += now() - T0;
