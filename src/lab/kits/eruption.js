@@ -32,7 +32,8 @@
         bombs landed, and a sim step stays under 4 ms mean. */
 CBZ.lab.kit("eruption", {
   about: "the volcano's eruption sequence on a slope with houses, trees and cars: lava path, fires, ash, bombs, frame cost",
-  files: ["src/world/volcanofx.js", "src/world/eruption.js", "src/systems/lightningfx.js", "src/systems/wildfire.js"],
+  // systems/volfx.js: the shared Perlin-Worley atlas the plume volume marches
+  files: ["src/systems/volfx.js", "src/world/volcanofx.js", "src/world/eruption.js", "src/systems/lightningfx.js", "src/systems/wildfire.js"],
   params: { mag: 0.8, q: 4, wind: 8 },
   duration: 48,
   setup: function (W, P) {
@@ -42,6 +43,9 @@ CBZ.lab.kit("eruption", {
     // first texture that asks it for anisotropy is not timed as eruption cost
     if (CBZ.labWorld && CBZ.labWorld.renderer) CBZ.labWorld.renderer();
     if (CBZ.labWorld && CBZ.labWorld.floor) CBZ.labWorld.floor.visible = false;
+    // the game builds the shared noise atlas in idle slices long before any
+    // eruption; the lab finishes it now so the plume is drawn as in play
+    if (CBZ.volNoise && CBZ.volNoise.finish && P.atlas !== "0") CBZ.volNoise.finish();
     const VX = 0, VZ = 0, PEAK = 30, VR = 36, RIM = 6.2, BOWL = 3.6, REGION = 140;
     /* the cone: concave (peak * t^1.65), a crater bowl, six V-shaped radial
        barrancos born under the rim and fading out at the foot — the same

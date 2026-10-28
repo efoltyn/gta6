@@ -1622,25 +1622,55 @@
      still: a thin white wisp leans off a vent on the crater wall and tears
      apart downwind. That one moving thing on the summit is what says
      "this is alive" before anything erupts. Steam, not ash: pale, very
-     thin, climbing a dozen metres and gone. One instanced draw for every
-     vent. It hands the sky over to the column while one stands (fades out)
-     and comes back when the eruption is over.
+     thin, climbing a dozen metres and gone. It hands the sky over to the
+     column while one stands (fades out) and comes back when the eruption is
+     over.
+
+     OWNER, 2026-10-28: "the smoke coming out of it looks so fake." It was
+     7-11 camera-facing puff cards a vent: a wisp drawn as a few stacked
+     blobs, each with its own baked lobes and a hard rim against the sky, so
+     the summit breathed coins. A wisp is a continuous thing, bent over by
+     the breeze and torn apart as it climbs, so it is drawn by the plume
+     volume now (THE PLUME VOLUME below) in its STEAM mode: a thin leaning
+     column with no crown, eroded by the Worley channel harder the higher it
+     gets, white in the sun and soft grey in its own shade, translucent at
+     rest and thickening as the unrest boils the groundwater off. Up to three
+     wisps a summit (nearby vents share one: what the eye sees there is one
+     merged plume), one draw each.
      ============================================================ */
   V.fumarole = function (o) {
     o = o || {};
     const vents = (o.vents && o.vents.length) ? o.vents : [{ x: +o.x || 0, y: +o.y || 0, z: +o.z || 0 }];
-    const PER = qi(7, 11);
-    const N = PER * vents.length;
-    const B = puffBatch(N, { map: puffAtlas(), tiles: 3, fog: true, parent: o.parent, renderOrder: 6 });
-    const C_DAY = new THREE.Color(screenHex(214, 212, 206));
-    const C_NIGHT = new THREE.Color(screenHex(62, 64, 70));
-    const col = new THREE.Color();
+    const parent = o.parent || CBZ.scene;
     let seed = ((o.salt | 0) ^ 0x3c6ef372) >>> 0;
     const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    const LIFE = 7.5;
-    const P = [];
-    for (let i = 0; i < N; i++) {
-      P.push({ v: vents[i % vents.length], life: (i / N) * LIFE, jx: 0, jz: 0, sz: 0.8 + 0.4 * rnd(), rot: (rnd() - 0.5) * 0.5, tile: i % 3, big: (i % vents.length) === 0 ? 1 : 0.7 });
+    // the vents, gathered into at most three wisps
+    const NG = Math.min(vents.length, 3);
+    const groups = [];
+    for (let g = 0; g < NG; g++) groups.push({ x: 0, y: 0, z: 0, n: 0, spread: 0, big: g === 0 ? 1 : 0.74 - 0.08 * g });
+    for (let i = 0; i < vents.length; i++) {
+      const G = groups[i % NG], v = vents[i];
+      G.x += +v.x || 0; G.y += +v.y || 0; G.z += +v.z || 0; G.n++;
+    }
+    for (let g = 0; g < NG; g++) { const G = groups[g]; G.x /= G.n; G.y /= G.n; G.z /= G.n; }
+    for (let i = 0; i < vents.length; i++) {
+      const G = groups[i % NG], v = vents[i];
+      G.spread = Math.max(G.spread, Math.hypot((+v.x || 0) - G.x, (+v.z || 0) - G.z));
+    }
+    const wisps = [];
+    for (let g = 0; g < NG; g++) {
+      const G = groups[g];
+      let vol = null;
+      try { vol = plumeVolume(parent); } catch (e) { vol = null; }
+      if (!vol) continue;
+      vol.steam = true;
+      vol.setVent(G.x, G.y + 0.3, G.z);
+      vol.groundLocal = G.y - 3;
+      const U = vol.U;
+      U.uSteam.value.set(1, 1, 0, 0);
+      U.uVentK.value = 0;
+      vol.acquire("fumarole");
+      wisps.push({ G: G, vol: vol, U: U, ph: rnd() * 6.28, gust: 0.9 + 0.2 * rnd() });
     }
     /* STRENGTH: 1 is the mountain at rest. The UNREST before an eruption is
        the same vents working harder — magma rising under the edifice boils
@@ -1648,13 +1678,14 @@
        lean less (more heat, more buoyancy). 4 is a summit steaming like a
        kettle in the last seconds before the phreatic blast. */
     let strength = o.strength > 0 ? +o.strength : 1;
-    let fade = 1, dead = false;
+    let fade = 1, dead = false, t = 0;
     const handle = {
-      kind: "fumarole", mesh: B.mesh,
+      kind: "fumarole", mesh: wisps.length ? wisps[0].vol.mesh : null, wisps: wisps.length,
       setStrength(k) { strength = clamp(+k || 1, 0.2, 5); return handle; },
       update(dt) {
         if (dead || !(dt > 0)) return handle;
         if (dt > 0.2) dt = 0.2;
+        t += dt;
         // the eruption column owns the summit while it stands
         const want = (LIVE.column.length && o.yieldToColumn !== false) ? 0 : 1;
         fade += (want - fade) * Math.min(1, dt * 0.8);
@@ -1664,29 +1695,31 @@
           if (w && w.speed > 0.2) { const L = Math.hypot(w.x, w.z) || 1; wx = w.x / L; wz = w.z / L; }
         } catch (e) { /* no weather: a light sea breeze */ }
         const night = clamp(1 - (0.5 + 2.2 * (CBZ.sunHeight != null ? CBZ.sunHeight : 0.5)), 0, 1);
-        col.copy(C_DAY).lerp(C_NIGHT, night);
-        for (let i = 0; i < N; i++) {
-          const p = P[i];
-          p.life += dt;
-          if (p.life >= LIFE) {
-            p.life -= LIFE;
-            p.jx = (rnd() - 0.5) * 0.8; p.jz = (rnd() - 0.5) * 0.8;
-            p.sz = 0.8 + 0.4 * rnd(); p.rot = (rnd() - 0.5) * 0.5;
-          }
-          const u = p.life / LIFE;
-          // rises fast off the vent, then the breeze takes it over
-          const S1 = strength - 1;
-          const rise = 11 * p.big * (1 - Math.pow(1 - u, 1.8)) * (1 + 0.9 * S1);
-          const lean = 9 * u * u * p.big * (1 + 0.3 * S1);
-          const s = (1.1 + 5.5 * u) * p.sz * p.big * (1 + 0.45 * S1);
-          const a = fade * Math.min(0.62, 0.26 * (1 + 0.4 * S1)) * Math.min(1, u / 0.12) * Math.pow(1 - u, 1.5);
-          B.set(i, p.v.x + p.jx + wx * lean, p.v.y + 0.6 + rise, p.v.z + p.jz + wz * lean,
-            s * 1.15, s, p.rot + u * 0.3, p.tile, col.r, col.g, col.b, a, 0);
+        const S1 = Math.max(0, strength - 1), S3 = Math.min(3, S1);
+        for (let i = 0; i < wisps.length; i++) {
+          const w = wisps[i], G = w.G, U = w.U, vol = w.vol;
+          vol.t += dt;
+          U.uTime.value = vol.t;
+          // the breeze is not steady: the wisp breathes taller and lies down again
+          const breathe = 0.88 + 0.12 * Math.sin(t * 0.27 + w.ph) * Math.sin(t * 0.11 + w.ph * 1.7);
+          const H = (13 + 10 * S1) * G.big * breathe;            // ~13 m at rest, ~40 m as a kettle
+          const r0 = (0.9 + 0.35 * S1) * (0.75 + 0.25 * G.big) + G.spread * 0.55;
+          U.uCol.value.set(H, r0, 0, fade);
+          // bent over by the breeze; a hotter, more buoyant plume leans less
+          U.uCol2.value.set(wx, wz, H * (1.15 - 0.13 * S3) * w.gust, 0);
+          U.uRise.value = 1.4 + 0.7 * strength;
+          U.uSigma.value = 2.0 + 0.7 * S3;                        // translucent at rest, thick as it boils
+          U.uSteam.value.y = 1.25 - 0.15 * S3;                    // a kettle tears less than a breath
+          vol.light(night, false);
+          vol.sync();
         }
-        B.commit();
         return handle;
       },
-      dispose() { if (dead) return; dead = true; B.dispose(); },
+      dispose() {
+        if (dead) return;
+        dead = true;
+        for (let i = 0; i < wisps.length; i++) { wisps[i].U.uCol.value.w = 0; wisps[i].vol.release("fumarole"); }
+      },
     };
     return handle;
   };
@@ -1795,6 +1828,15 @@
     "uniform vec3 uVentCol; uniform float uVentK; uniform float uVentReach; uniform float uDay;",
     "uniform vec4 uFlash; uniform float uFlashR; uniform vec3 uFlashCol;",
     "uniform vec4 uFog; uniform vec3 uFogCol;",
+    // STEAM (the fumaroles): x 1 = a thin wind-bent wisp instead of an ash
+    // jet (no crown, no swelling head, torn apart as it climbs), y how hard
+    // it tears (strength: a kettle tears less than a breath)
+    "uniform vec4 uSteam;",
+    // THE BASE SURGE (the phreatic blast's): front radius, head height,
+    // the body's inner edge, presence; and the cone it rolls down, fitted to
+    // the real ground: height of the vent over the plain, rim radius, foot
+    // radius, the profile's exponent
+    "uniform vec4 uSurge; uniform vec4 uCone;",
     "varying vec3 vWorld;",
     "",
     "float vnoise(vec3 x) {",
@@ -1804,6 +1846,28 @@
     "  vec2 uv = p.xy + vec2(37.0, 17.0) * p.z + f.xy;",
     "  vec2 rg = texture2D(uNoise, (uv + 0.5) / 256.0).yx;",
     "  return mix(rg.x, rg.y, f.z);",
+    "}",
+    /* THE BILLOWS. Value noise is soft blotches, and blotches are what made
+       the column read as a painted pillar: there is no cauliflower in it.
+       The shared 64^3 atlas (systems/volfx.js CBZ.volNoise, the one the nuke
+       and every blast march) is Perlin-Worley: R the big inverted-Worley
+       billows, G a Worley fbm that erodes their edges, B a fine Perlin fbm.
+       Until the atlas exists (it builds in idle slices) the old value noise
+       stands in on the same channels, so the program never changes. */
+    "uniform sampler2D uAtlas; uniform float uHasAtlas;",
+    "vec4 noiseA(vec3 p) {",
+    "  if (uHasAtlas > 0.5) {",
+    "    p = fract(p);",
+    "    float zf = p.z * 64.0; float z0 = floor(zf); float fz = zf - z0; float z1 = mod(z0 + 1.0, 64.0);",
+    "    vec2 inner = p.xy * 64.0 + 1.5;",
+    "    vec2 t0 = vec2(mod(z0, 8.0), floor(z0 / 8.0)) * 66.0;",
+    "    vec2 t1 = vec2(mod(z1, 8.0), floor(z1 / 8.0)) * 66.0;",
+    "    return mix(texture2D(uAtlas, (t0 + inner) / 528.0), texture2D(uAtlas, (t1 + inner) / 528.0), fz);",
+    "  }",
+    "  vec3 x = p * 2.4;",   // the old column's value-noise scale (c = q / sc)
+    "  float a = vnoise(x) * 0.64 + vnoise(x * 2.13 + vec3(3.1, 1.7, 5.3)) * 0.36;",
+    "  float b = vnoise(x * 1.71 + vec3(7.3, 2.9, 1.1));",
+    "  return vec4(a, b, vnoise(x * 4.37 + vec3(1.7, 0.4, 2.2)), 1.0);",
     "}",
     "float smax(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0); return mix(b, a, h) + k * h * (1.0 - h); }",
     /* gH: the height the column's ENVELOPE reaches. While a deck is up the
@@ -1815,7 +1879,8 @@
     "  float u = clamp(y / gH, 0.0, 1.0);",
     "  float us = clamp(y / gHs, 0.0, 1.0);",
     "  float r = uCol.y * (0.8 + 0.2 * smoothstep(0.0, 0.08, u)) + 0.2 * max(y, 0.0);",
-    "  r *= 1.0 + 0.4 * smoothstep(0.62, 1.0, u);",      // the head swells
+    "  r *= 1.0 + 0.4 * smoothstep(0.62, 1.0, u) * (1.0 - uSteam.x);",      // the head swells (an ash jet's, not a wisp's)
+    "  r *= 1.0 + 0.9 * uSteam.x * u;",                   // a bent wisp spreads as the wind mixes it
     "  r *= 1.0 + 1.4 * uCol.z * (1.0 - us);",           // a collapsing foot billows out
     "  return max(r, 0.5);",
     "}",
@@ -1828,6 +1893,8 @@
     "  float d = length(q.xz - c) / r;",
     "  float k = max(q.y - (H - 0.55 * r), 0.0) / (0.75 * r);",   // the rounded crown
     "  float e = 1.0 - length(vec2(d, k));",
+    // a wisp has no crown: it thins out with height until the air has it
+    "  e = mix(e, (1.0 - d) - smoothstep(0.3, 1.0, u) * 1.25, uSteam.x);",
     "  e = min(e, (q.y - uCol2.w + 1.5) / 3.0);",                  // rooted in the vent
     "  e -= uCol.z * 0.45 * smoothstep(gHs * 0.8, gH, q.y);",      // collapsing: a thinner neck, still joined
     "  return e - (1.0 - uCol.w) * 1.3;",
@@ -1863,7 +1930,27 @@
     "  float ev = 1.0 - abs(q.y - (top + bot) * 0.5) / hh;",
     "  return min(ev, (1.04 - rr - 0.07 * L.x) * 3.0) - (1.0 - uUmb2.z) * 1.3;",
     "}",
-    "float envAll(vec3 q) { return smax(colEnv(q), umbEnv(q), 0.6); }",
+    // the ground under a point, relative to the vent: the cone's own profile
+    "float coneY(float rho) {",
+    "  float k = clamp(1.0 - (rho - uCone.y) / max(uCone.z - uCone.y, 1.0), 0.0, 1.0);",
+    "  return uCone.x * pow(k, uCone.w) - uCone.x;",
+    "}",
+    /* the base surge: a ring of steam and grit leaving the crater sideways
+       and rolling DOWN the cone, a fat rolling head at its front and a low
+       sheet thinning behind it, every point measured off the ground under it */
+    "float surgeEnv(vec3 q) {",
+    "  if (uSurge.w <= 0.001) return -9.0;",
+    "  float rho = length(q.xz);",
+    "  float R = uSurge.x, th = max(uSurge.y, 0.5);",
+    "  float hag = q.y - coneY(rho);",
+    "  vec2 m = vec2((rho - (R - th * 1.1)) / (th * 1.35), (hag - th * 0.72) / (th * 0.85));",
+    "  float head = 1.0 - length(m);",
+    "  float body = min(min((rho - uSurge.z) / (th * 0.9), (R - rho) / (th * 0.6)), 1.0 - hag / (th * 0.6)) * 0.8;",
+    "  float e = max(head, body);",
+    "  e = min(e, (hag + 0.8) / 1.6);",
+    "  return e - (1.0 - uSurge.w) * 1.3;",
+    "}",
+    "float envAll(vec3 q) { return max(smax(colEnv(q), umbEnv(q), 0.6), surgeEnv(q)); }",
     // the fall streaks hanging under the downwind half of the deck
     "float fallDen(vec3 q) {",
     "  if (uUmb2.w <= 0.001) return 0.0;",
@@ -1875,6 +1962,18 @@
     "  float s = vnoise(vec3(q.x * 0.045, q.y * 0.004 + uTime * 0.06, q.z * 0.045));",
     "  float hgt = clamp((q.y - (uGround - uVent.y)) / max(top - (uGround - uVent.y), 1.0), 0.0, 1.0);",
     "  return uUmb2.w * (1.0 - smoothstep(0.55, 0.95, rr)) * dw * smoothstep(0.45, 0.8, s) * (0.25 + 0.75 * hgt) * smoothstep(0.0, 0.15, hgt);",
+    "}",
+    /* the advected billow coordinate at q: UP the column at the rise speed
+       (with a slow twist that grows with height), OUT with the deck, blended
+       by which body owns the point. One atlas period is ~2.4 local radii, so
+       the big billows are a little over half the column's radius across: a
+       burp and the big one are both cauliflower, never noise soup. */
+    "vec3 plumeCoord(vec3 q, float sc, float wU) {",
+    "  vec3 cc = vec3(q.x, q.y - uTime * uRise, q.z) / sc;",
+    "  float sw = uTime * 0.05 + q.y / (gH * 0.9 + 10.0);",
+    "  cc.xz = mat2(cos(sw), -sin(sw), sin(sw), cos(sw)) * cc.xz;",
+    "  vec3 cu = vec3(q.x - uUmbDir.x * uTime * 2.2, q.y * 1.15, q.z - uUmbDir.y * uTime * 2.2) / sc;",
+    "  return mix(cc, cu, wU) * 0.42;",
     "}",
     "",
     "void main() {",
@@ -1897,33 +1996,50 @@
     "  float th = max(uUmb2.y, 1.0);",
     "  float t = t0;",
     "  bool first = true;",
+    "  float fineK = 1.0;",
     "  for (int i = 0; i < PLUME_MAXI; i++) {",
     "    if (t > t1 || T < 0.03) break;",
     "    vec3 q = ro + rd * t - uVent;",
-    "    float ec = colEnv(q), eu = umbEnv(q);",
-    "    float e = smax(ec, eu, 0.6);",
+    "    float ec = colEnv(q), eu = umbEnv(q), es = surgeEnv(q);",
+    "    float e0 = smax(ec, eu, 0.6);",
+    "    float e = max(e0, es);",
     "    float fd = fallDen(q);",
     // the local billow scale: the column's own radius here, or the deck's thickness
     "    float wU = smoothstep(-0.25, 0.25, eu - ec);",
-    "    float sc = mix(colR(q.y) * 0.85 + 2.0, th * 0.9 + 2.0, wU);",
-    "    float stepL = clamp(sc * 0.3, baseL * 0.25, baseL * 2.0);",
+    "    float wS = smoothstep(-0.2, 0.2, es - e0);",
+    "    float sc = mix(mix(colR(q.y) * 0.85 + 2.0, th * 0.9 + 2.0, wU), uSurge.y * 0.9 + 1.5, wS);",
+    "    float stepL = clamp(sc * 0.3, baseL * 0.25, baseL * 2.0) * fineK;",
     "    if (first) { t += stepL * jit; first = false; continue; }",
-    "    if (e < -0.6 && fd <= 0.0) { t += stepL + (-e - 0.6) * sc * 0.7; continue; }",
+    "    if (e < -0.6 && fd <= 0.0) { fineK = 1.0; t += stepL + (-e - 0.6) * sc * 0.7; continue; }",
     // advected coordinates: up the column at the rise speed, out with the deck
-    "    vec3 cc = vec3(q.x, q.y - uTime * uRise, q.z) / sc;",
-    "    float sw = uTime * 0.05 + q.y / (H * 0.9 + 10.0);",
-    "    cc.xz = mat2(cos(sw), -sin(sw), sin(sw), cos(sw)) * cc.xz;",
-    "    vec3 cu = vec3(q.x - uUmbDir.x * uTime * 2.2, q.y * 1.15, q.z - uUmbDir.y * uTime * 2.2) / sc;",
-    "    vec3 c = mix(cc, cu, wU);",
-    "    float n1 = vnoise(c) * 0.64 + vnoise(c * 2.13 + vec3(3.1, 1.7, 5.3)) * 0.36;",
-    // the deck is eroded much harder than the column: billows, not a lens
-    "    float base = e + (n1 - 0.5) * mix(1.15, 1.6, wU);",
-    "    float d = 0.0;",
-    "    if (base > 0.0) {",
-    "      float n2 = vnoise(c * 4.37 + vec3(1.7, -uTime * 0.25, 0.4));",
-    "      d = base - (1.0 - n2) * mix(0.38, 0.62, wU) * (1.0 - clamp(base * 1.6, 0.0, 1.0));",
-    "      d = clamp(d * 1.8, 0.0, 1.0);",
+    "    vec3 c = plumeCoord(q, sc, wU);",
+    // the surge's billows roll OUT with it, off the ground
+    "    if (wS > 0.001) {",
+    "      float rho = length(q.xz); vec2 dir = rho > 1e-3 ? q.xz / rho : vec2(1.0, 0.0);",
+    "      vec3 cs = vec3(q.x - dir.x * uTime * 3.0, (q.y - coneY(rho)) * 1.25 + uTime * 0.8, q.z - dir.y * uTime * 3.0) / sc * 0.42;",
+    "      c = mix(c, cs, wS);",
     "    }",
+    "    vec4 A1 = noiseA(c);",
+    // the deck is eroded much harder than the column: billows, not a lens
+    "    float base = e + (A1.r - 0.5) * mix(1.05, 1.45, wU) + (A1.g - 0.5) * 0.3;",
+    // steam tears: the Worley channel cuts it into ragged wisps, harder with height
+    "    base -= uSteam.x * ((1.0 - A1.g) * (0.25 + 0.55 * smoothstep(0.05, 0.8, q.y / gH)) * uSteam.y + 0.06);",
+    "    float d = 0.0;",
+    /* THE SKIN: two more octaves, only near the surface (deep inside nothing
+       shows), behind a hard edge. The old ramp faded the density in over a
+       third of the column's radius, which is what a painted pillar looks like;
+       an ash column's skin is a few metres of turbulence over an opaque body. */
+    "    if (base > -0.08) {",
+    "      vec4 A2 = noiseA(c * 3.07 + vec3(0.37, 0.11 - uTime * 0.012, 0.73));",
+    "      float det = (A2.r - 0.5) * 0.34 + (A2.g - 0.5) * 0.2;",
+    "#if PLUME_DETAIL > 0",
+    "      if (base < 0.3) { vec4 A3 = noiseA(c * 8.7 + vec3(0.71, 0.29, 0.13)); det += (A3.g - 0.5) * 0.14 + (A3.b - 0.5) * 0.06; }",
+    "#endif",
+    "      float b2 = base + det * mix(1.0, 1.3, wU) * (1.0 - smoothstep(0.15, 0.7, base));",
+    "      d = smoothstep(-0.02, 0.15, b2) * (0.55 + 0.45 * smoothstep(0.08, 0.6, b2));",
+    "    }",
+    // walk the skin band at half the step: the edge is sampled, not skipped
+    "    fineK = (base > -0.12 && base < 0.3) ? 0.5 : 1.0;",
     "    float dd = d + fd * 0.22;",
     "    if (dd > 0.003) {",
     "      float a = 1.0 - exp(-dd * uSigma * mix(1.8, 1.25, wU) * stepL / sc);",
@@ -1934,8 +2050,25 @@
     "#else",
     "      float o2 = o1 - 0.2;",
     "#endif",
-    "      float od = max(o1 + 0.35, 0.0) + max(o2 + 0.35, 0.0) * 1.3 + d * 0.55;",
-    "      float Ts = exp(-od * 2.2);",
+    "      float od = max(o1 + 0.35, 0.0) + max(o2 + 0.35, 0.0) * 1.3 + d * 0.45;",
+    /* THE BILLOW'S OWN SHADOW: the real density one short step toward the
+       sun. The envelope taps above shade the column as a whole (the sun side
+       light, the far side dark); this one shades every billow under the next
+       one, which is what cauliflower IS: a lit crown and a dark crevice on
+       each lump, all the way up. */
+    "#if PLUME_DETAIL > 0",
+    "      vec3 q2 = q + uSunDir * sc * 0.32;",
+    "      vec4 B1 = noiseA(mix(plumeCoord(q2, sc, wU), c + uSunDir * (0.32 * 0.42), wS));",
+    "      float bl = envAll(q2) + (B1.r - 0.5) * mix(1.05, 1.45, wU) + (B1.g - 0.5) * 0.3;",
+    "      float loc = max(bl + 0.05, 0.0) * 2.4;",
+    "#else",
+    "      float loc = 0.0;",       // a phone: the billows and the skin, the column-scale shadow only
+    "#endif",
+    "      float Ts = exp(-od * 2.2 - loc);",
+    // what scatters round into the shade (an ash cloud is never black on its dark side)
+    "      float ms = 0.2 * exp(-od * 0.5 - loc * 0.35);",
+    // thin edges facing the light scatter less than the body (the powder term)
+    "      float powder = 1.0 - exp(-d * 3.0);",
     "      float up = envAll(q + vec3(0.0, L * 0.9, 0.0));",
     "      float occ = clamp(1.0 - max(up + 0.3, 0.0) * 1.1, 0.18, 1.0);",
     "      float hy = clamp(q.y / H, 0.0, 1.0);",
@@ -1943,11 +2076,13 @@
     "      float steam = (1.0 - smoothstep(0.05, 0.3, hy)) * (1.0 - smoothstep(0.0, 0.4, base)) * (1.0 - wU);",
     // and the jet's core is darkest: it is still mostly rock
     "      float deep = (1.0 - smoothstep(0.0, 0.35, hy)) * smoothstep(0.2, 0.7, base) * (1.0 - wU);",
+    "      steam = max(steam, wS * 0.65);",                 // the surge is steam and grit
+    "      deep *= 1.0 - wS;",
     "      vec3 lit = mix(uLit, uSteamLit, steam * 0.75);",
     "      vec3 sh = mix(mix(uShade, uSteamShade, steam * 0.7), uDeep, deep * 0.7);",
     "      lit = mix(lit, uDeep * 2.2, deep * 0.45);",
     "      lit *= 1.0 - 0.08 * wU;",
-    "      vec3 col = mix(sh * (0.55 + 0.45 * occ), lit, clamp(Ts * uDay * (0.6 + 0.4 * occ), 0.0, 1.0));",
+    "      vec3 col = mix(sh * (0.5 + 0.5 * occ), lit, clamp((Ts * (0.62 + 0.38 * powder) + ms) * uDay * (0.6 + 0.4 * occ), 0.0, 1.0));",
     /* the crater's light on the column's FOOT only: the bottom ~12% of the
        column, falling off fast. Ash is not fire; above that it is lit by the sun. */
     "      float vy = max(q.y, 0.0);",
@@ -1986,7 +2121,17 @@
      the mountain is only steaming, not in the frame the column is born. */
   function plumeTier() {
     const steps = Math.round(q(14, 30));
-    return { steps: steps, maxi: Math.round(q(40, 72)), taps: q(0, 1) > 0.5 ? 2 : 1 };
+    // the skin band walks at half step, so the loop gets more room to finish
+    return { steps: steps, maxi: Math.round(q(48, 96)), taps: q(0, 1) > 0.5 ? 2 : 1, detail: q(0, 1) > 0.45 ? 1 : 0 };
+  }
+  /* the shared Perlin-Worley atlas (systems/volfx.js): every plume material
+     takes it the moment it exists; until then the value-noise stand-in */
+  function plumeAtlas(U) {
+    const VN = CBZ.volNoise;
+    if (!VN) return;
+    if (VN.done && VN.tex) { U.uAtlas.value = VN.tex; U.uHasAtlas.value = 1; return; }
+    if (VN.onReady) VN.onReady(function (tex) { U.uAtlas.value = tex; U.uHasAtlas.value = 1; });
+    if (VN.arm) { try { VN.arm(); } catch (e) {} }
   }
   function plumeMaterial() {
     const R = CBZ.renderer;
@@ -2010,8 +2155,12 @@
       uVentCol: { value: C() }, uVentK: { value: 0 }, uVentReach: { value: 20 }, uDay: { value: 1 },
       uFlash: { value: new THREE.Vector4() }, uFlashR: { value: 20 }, uFlashCol: { value: C() },
       uFog: { value: new THREE.Vector4() }, uFogCol: { value: C() },
+      uAtlas: { value: null }, uHasAtlas: { value: 0 },
+      uSteam: { value: new THREE.Vector4(0, 1, 0, 0) },
+      uSurge: { value: new THREE.Vector4(1, 1, 0, 0) }, uCone: { value: new THREE.Vector4(0, 6, 36, 1.65) },
     };
-    const defs = { PLUME_MAXI: tier.maxi, PLUME_TAPS: tier.taps };
+    plumeAtlas(U);
+    const defs = { PLUME_MAXI: tier.maxi, PLUME_TAPS: tier.taps, PLUME_DETAIL: tier.detail };
     if (fragDepth) defs.HAS_FRAG_DEPTH = 1;
     const mat = new THREE.ShaderMaterial({
       uniforms: U, vertexShader: PLUME_VS, fragmentShader: PLUME_FS, defines: defs,
@@ -2084,6 +2233,8 @@
       litN: new THREE.Color(screenHex(30, 28, 27)), shadeN: new THREE.Color(screenHex(13, 12, 12)),
       deepN: new THREE.Color(screenHex(9, 8, 8)),
       steamN: new THREE.Color(screenHex(26, 25, 24)),
+      wispLitD: new THREE.Color(screenHex(226, 224, 218)), wispShadeD: new THREE.Color(screenHex(150, 150, 148)),
+      wispN: new THREE.Color(screenHex(58, 60, 64)),
     };
     U.uVentCol.value.setHex(screenHex(236, 112, 40));
     U.uFlashCol.value.setHex(screenHex(228, 230, 238));
@@ -2093,11 +2244,20 @@
       mesh: mesh, U: U, refs: 0, t: 0, owner: null, parent: parent,
       ventLocal: new THREE.Vector3(), groundLocal: 0,
       setVent(x, y, z) { vol.ventLocal.set(x, y, z); return vol; },
+      steam: false,
       light(night, fogless) {
         const k = night;
-        U.uLit.value.copy(P.litD).lerp(P.litN, k);
-        U.uShade.value.copy(P.shadeD).lerp(P.shadeN, k * 0.92);
-        U.uDeep.value.copy(P.deepD).lerp(P.deepN, k);
+        if (vol.steam) {
+          // a fumarole is condensed water: white where the sun has it, a
+          // soft blue-free grey in its own shade, never an ash colour
+          U.uLit.value.copy(P.wispLitD).lerp(P.wispN, k);
+          U.uShade.value.copy(P.wispShadeD).lerp(P.wispN, k * 0.92);
+          U.uDeep.value.copy(U.uShade.value);
+        } else {
+          U.uLit.value.copy(P.litD).lerp(P.litN, k);
+          U.uShade.value.copy(P.shadeD).lerp(P.shadeN, k * 0.92);
+          U.uDeep.value.copy(P.deepD).lerp(P.deepN, k);
+        }
         U.uSteamLit.value.copy(P.steamLitD).lerp(P.steamN, k);
         U.uSteamShade.value.copy(P.steamShadeD).lerp(P.steamN, k * 0.92);
         U.uDay.value = 1 - k;
@@ -2115,7 +2275,8 @@
         if (c.w > 0.001) {
           // the shader's gH: the column reaches the deck while one is up
           const H = Math.max(1, c.x, u2.z > 0.001 ? u2.x : 0);
-          const rT = (c.y + 0.2 * H) * 1.4 * (1 + 1.4 * c.z) * 1.6 + 2;
+          // (a steam wisp spreads ~1.9x as the wind mixes it: colR's uSteam term)
+          const rT = (c.y + 0.2 * H) * 1.4 * (1 + 1.4 * c.z) * 1.6 * (vol.steam ? 1.9 : 1) + 2;
           const lx = c2.x * c2.z, lz = c2.y * c2.z;
           x0 = Math.min(x0, Math.min(0, lx) - rT); x1 = Math.max(x1, Math.max(0, lx) + rT);
           z0 = Math.min(z0, Math.min(0, lz) - rT); z1 = Math.max(z1, Math.max(0, lz) + rT);
@@ -2128,6 +2289,14 @@
           z0 = Math.min(z0, um.y - ext); z1 = Math.max(z1, um.y + ext);
           const lowY = u2.w > 0.001 ? (vol.groundLocal - vol.ventLocal.y - 1) : (u2.x - u2.y * 1.5);
           y0 = Math.min(y0, lowY); y1 = Math.max(y1, u2.x + u2.y * 2.1);
+          any = true;
+        }
+        const sg = U.uSurge.value, cn = U.uCone.value;
+        if (sg.w > 0.001) {
+          const ext = sg.x + sg.y * 2 + 2;
+          x0 = Math.min(x0, -ext); x1 = Math.max(x1, ext);
+          z0 = Math.min(z0, -ext); z1 = Math.max(z1, ext);
+          y0 = Math.min(y0, -cn.x - 2); y1 = Math.max(y1, sg.y * 2.2 + 2);
           any = true;
         }
         mesh.visible = any;
@@ -2402,10 +2571,14 @@
                         rim sideways and rolls DOWN the cone faster than a
                         car, hugging the ground, thinning as it goes.
 
-     Both are particles with their own little physics (quadratic-ish drag
-     on the jets, buoyancy on the steam, a decelerating radial run on the
-     surge), all in ONE instanced draw. surgeAt(x, z) is the scalding steam
-     band for the caller's damage pass — what is drawn is what burns.
+     The fanned jets are particles with their own little physics (quadratic-
+     ish drag, buoyancy on the steam). The BASE SURGE and the central jet are
+     the plume volume now (2026-10-28, "the smoke looks so fake": the surge was
+     a ring of sixty lit puff cards, a necklace of grey marbles round the
+     summit): a rolling head and a thinning sheet measured off the cone's own
+     ground, fitted from groundAt, and a dirty jet whose foot slumps outward.
+     surgeAt(x, z) is the scalding steam band for the caller's damage pass —
+     the same front the volume draws.
      ============================================================ */
   V.phreatic = function (o) {
     o = o || {};
@@ -2416,8 +2589,29 @@
     const mag = clamp(o.mag != null ? +o.mag : 0.5, 0, 1);
     const rim = o.r > 0 ? +o.r : 6;
     const coneR = o.coneR > 0 ? +o.coneR : 36;
-    const N = qi(84, 156);
+    const N = qi(48, 90);           // the fanned jets only: the surge is the volume
     const B = puffBatch(N, { map: puffAtlas(), tiles: 3, fog: true, parent: parent, renderOrder: 7 });
+    // THE VOLUME: the central jet and the base surge, one body
+    let vol = null;
+    try { vol = plumeVolume(parent); } catch (e) { vol = null; }
+    if (vol) {
+      vol.setVent(x, y, z);
+      vol.groundLocal = groundAt(x + coneR * 1.6, z) - 1;
+      // the cone, fitted: height of the vent over the plain, the profile's
+      // exponent from the ground half way down the flank
+      let foot = 0, half = 0;
+      for (let k = 0; k < 8; k++) {
+        const a = k * 0.785;
+        foot += groundAt(x + Math.cos(a) * coneR * 1.05, z + Math.sin(a) * coneR * 1.05);
+        half += groundAt(x + Math.cos(a) * (rim + (coneR - rim) * 0.5), z + Math.sin(a) * (rim + (coneR - rim) * 0.5));
+      }
+      foot /= 8; half /= 8;
+      const A = Math.max(1, y - foot);
+      const hk = clamp((half - foot) / A, 0.02, 0.98);
+      vol.U.uCone.value.set(A, rim, coneR, clamp(Math.log(hk) / Math.log(0.5), 0.6, 3));
+      vol.U.uVentK.value = 0;
+      vol.acquire("phreatic");
+    }
     let seed = ((o.salt | 0) ^ 0x2545f491) >>> 0;
     const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
     const C_DIRT = new THREE.Color(screenHex(40, 37, 34));
@@ -2435,7 +2629,7 @@
     const SURGE_V = 16 + 14 * mag;
     const parts = [];
     for (let i = 0; i < N; i++) {
-      const surge = i % 5 >= 3;     // 40%: the base surge ring
+      const surge = !vol && i % 5 >= 3;     // the sprite ring only if the volume failed
       const p = { surge: surge, born: false, tb: 0, x: x, y: y, z: z, vx: 0, vy: 0, vz: 0, r: rim, vr: 0, a: 0,
         s0: 0, steam: rnd(), tile: i % 3, rot: (rnd() - 0.5) * 0.4, life: 0, maxL: 0 };
       if (surge) {
@@ -2520,6 +2714,27 @@
           const a = 0.8 * clamp(L / 0.12, 0, 1) * clamp((p.maxL - L) / 6, 0, 1);
           B.set(i, p.x, p.y, p.z, s, s * 0.95, p.rot, p.tile, col.r, col.g, col.b, a, 0);
         }
+        if (vol) {
+          // the surge: out of the crater at SURGE_V, decelerating on the apron
+          const R = Math.min(coneR * 1.35, rim + SURGE_V / 0.42 * (1 - Math.exp(-0.42 * t)));
+          if (t < 5) far = R;
+          const th = (2.6 + 3.4 * mag) * (1 + 0.55 * Math.sqrt(t));
+          const inner = rim + (R - rim) * 0.4 * Math.min(1, t / 3);
+          const pS = clamp(t / 0.35, 0, 1) * clamp((13 - t) / 7, 0, 1);
+          vol.U.uSurge.value.set(R, th, inner, pS);
+          // the central jet: up hard, then it hangs and its foot slumps out over the rim
+          const H = (34 + 58 * mag) * (1 - Math.exp(-t / 0.9));
+          const slump = clamp((t - 1.2) / 3, 0, 1);
+          const pJ = clamp(t / 0.15, 0, 1) * clamp((11 - t) / 6, 0, 1);
+          vol.U.uCol.value.set(Math.max(0.5, H), rim * 0.85, 0.55 * slump, pJ);
+          vol.U.uCol2.value.set(ww ? ww.windX || 0 : 0, ww ? ww.windZ || 0 : 0, H * 0.18, 0);
+          vol.U.uRise.value = 4 + 3 * mag;
+          vol.t += dt; vol.U.uTime.value = vol.t;
+          vol.light(night, false);
+          vol.sync();
+          if (t > 13) live = 0;
+          else live++;
+        }
         surgeR = far;
         B.commit();
         if (t > 1.5 && live === 0) done = true;
@@ -2529,6 +2744,7 @@
         if (dead) return;
         dead = true;
         B.dispose();
+        if (vol) { vol.U.uSurge.value.w = 0; vol.U.uCol.value.w = 0; vol.release("phreatic"); }
       },
     };
     return handle;
