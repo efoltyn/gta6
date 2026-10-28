@@ -1375,14 +1375,8 @@
     layoutFolders();
     if (CBZ.sfx) { try { CBZ.sfx("pickup", { vol: 0.35 }); } catch (e) {} }
     startReading(f);
-    // TOUCH: the page is up, so its verbs are too (Sign / Veto / Put down by
-    // the folder) without a second tap to ask for them
-    if (CBZ.touchMode) M.later.push({ at: CLOCK + 0.35, fn: function () {
-      const I = CBZ.interactions, VW = CBZ.verbWheel;
-      if (READ.f !== f || !f.tgt || !I || !I.candidateFor || !VW || !VW.openFor) return;
-      const c = I.candidateFor(f.tgt);
-      if (c) { try { VW.openFor(c); } catch (e) {} }
-    } });
+    // TOUCH: the page's verbs (Sign / Veto / Put down) are on the desk dock
+    // (deskVerbs below, drawn by city/president_game.js) the moment it opens
   }
   function signFolder() {
     const f = READ.f;
@@ -2649,8 +2643,40 @@
     if (sch) return sch;
     return "Nothing that can't wait, sir.";
   }
+  /* THE DESK UNDER THE THUMB (city/president_game.js's touch dock reads this).
+     On a phone held upright the eye in the chair sees about 40 degrees across:
+     the phone (0.8 m to his right) and the folder pile (0.8 m to his left) are
+     off the screen, so "tap the thing" had nothing to tap. These are the same
+     verbs the phone and the folders carry (the same functions E fires), listed
+     whether or not the thing is on screen. A dock is not on the thing, so its
+     words carry the noun. */
+  function deskVerbs() {
+    const out = [];
+    const rec = ROOM.rec, Pp = player();
+    if (!rec || !ROOM.desk || !Pp || !Pp.pos || Pp.dead || !inOffice(rec)) return out;
+    const f = READ.f;
+    if (f) {
+      if (f.state !== "open" || READ.closing) return out;
+      refreshBlocked(f);
+      if (f.blocked) { out.push({ id: "fold-down", label: "Put down", run: shutFolder }); return out; }
+      out.push({ id: "fold-yes", label: verbWord(f.m.yes.label, f.m.info ? "File" : "Sign"), lead: true, run: signFolder });
+      if (!f.m.info) out.push({ id: "fold-no", label: f.m.noVerb || verbWord(f.m.no.label, "Send back"), bad: true, run: returnFolder });
+      out.push({ id: "fold-down", label: "Put down", run: shutFolder });
+      return out;
+    }
+    if (M.onCall || AIDE.talking) return out;
+    if (M.ringing) out.push({ id: "phone-answer", label: "Answer phone", lead: true, ring: true, run: answer });
+    const dp = deskPoint();
+    const near = dp && Math.hypot(Pp.pos.x - dp.x, Pp.pos.z - dp.z) < 2.6;
+    if (!near) return out;
+    const top = topFolder();
+    if (top) out.push({ id: "fold-open", label: liveFolders() > 1 ? "Folders " + liveFolders() : "Folder", run: function () { openFolder(topFolder()); } });
+    if (!M.ringing && seated() && (M.phoneQ.length || waitingCalls().length)) out.push({ id: "phone-call", label: "Call back", run: placeCall });
+    return out;
+  }
   CBZ.presidentOffice = {
     offer: offer,
+    deskVerbs: deskVerbs,
     news: news,
     dayLine: dayLine,
     ringing: function () { return !!M.ringing; },
