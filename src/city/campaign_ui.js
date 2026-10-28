@@ -1422,13 +1422,22 @@
     // framed by the scene camera, the line is the subtitle; otherwise it is
     // said by the body that says it
     const spoke = framed && state.dialogue.text ? true : speakLine(metadata, speaker, state.dialogue.text, normalized.length > 0);
-    if (normalized.length && !cinematic && pinReplies(metadata, normalized)) {
+    /* ON A PHONE THE ANSWERS ARE BUTTONS. Pinned replies live in the verb
+       registry: a keyboard sees "[E] Sign", but a finger saw NOTHING until it
+       thought to tap the man (or the handset, which on a phone held upright
+       is off the screen) to open his wheel. Owner, on his phone: "I literally
+       can't interact with anything." So on touch every question puts its
+       answers on screen as the row of buttons (no timer unless the asker set
+       one: a pinned question never ran out either). */
+    const touchAsk = inputMode() === "touch";
+    if (normalized.length && !cinematic && !touchAsk && pinReplies(metadata, normalized)) {
       state.dialogue.pinned = true;
       return new Promise(function (resolve) { choiceResolve = resolve; });
     }
     if (normalized.length) {
       // a question that changes things, or one with nowhere to pin its answers
-      openCine(metadata, speaker, state.dialogue.text, normalized, framed);
+      const m2 = touchAsk && !cinematic ? Object.assign({ timeout: false }, metadata || {}) : metadata;
+      openCine(m2, speaker, state.dialogue.text, normalized, framed);
       state.dialogue.cinematic = true;
     } else if (framed && state.dialogue.text) {
       // a line said inside a framed scene is the subtitle too

@@ -31,7 +31,9 @@
   h1{margin:0 0 2px;font:700 clamp(40px,9vw,84px)/.9 Georgia,serif;letter-spacing:.06em;color:var(--paper)}
   .sub{opacity:.6;margin:0 0 14px}
   .wrap{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px;max-width:1300px}
-  @media (max-width:820px){.wrap{grid-template-columns:1fr}}
+  @media (max-width:820px){.wrap{grid-template-columns:1fr}
+    /* a phone: one page that scrolls, not a list scrolling inside it */
+    #clist{max-height:none;overflow:visible}}
   #preview{width:100%;height:auto;border-radius:10px;display:block;image-rendering:pixelated;cursor:pointer;border:1px solid #2a3a55}
   .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
   .row label{opacity:.65;font-size:13px}

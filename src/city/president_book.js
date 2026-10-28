@@ -201,7 +201,9 @@
     const vfov = (cam.fov || 60) * Math.PI / 180, asp = cam.aspect || 1.6, t2 = 2 * Math.tan(vfov / 2);
     const one = single();
     const w = one ? PAGE_W : PAGE_W * 2 + GUTTER, d = PAGE_H;
-    const h = Math.max(d / 0.9, w / (0.92 * asp)) / t2;
+    // one page on a phone held upright: the page fills the width edge to edge
+    // (every pixel of it is type size); the spread keeps a margin
+    const h = Math.max(d / (one ? 0.8 : 0.9), w / ((one ? 0.985 : 0.92) * asp)) / t2;
     const cx = OPEN_AT.x + (one ? (B.focus === 0 ? -1 : 1) * (PAGE_W / 2 + GUTTER / 2) : 0);
     const tilt = 0.16;                                 // a little from the chair's side, as a man leans over a book
     const look = deskWorld(cx, BLOTTER_TOP + 0.015, OPEN_AT.z);
@@ -465,6 +467,11 @@
   CBZ.presBook = {
     setSource: function (src) { SRC = src || null; if (!SRC) { close(); teardown(); } },
     open: open, close: close, isOpen: function () { return B.isOpen; }, turn: turn, goTo: goTo,
+    // the desk dock's Briefing button (city/president_dock.js): the book is on
+    // the desk and nobody has his attention
+    canOpen: function () { const p = PO(); return !!(SRC && B.closed && B.closed.visible && !B.isOpen && !(p && p.busy && p.busy())); },
+    // where the reader is: the dock greys the turn that goes nowhere
+    pageState: function () { const n = spreads(), one = single(); return { first: B.spread === 0 && (!one || B.focus === 0), last: B.spread >= n - 1 && (!one || B.focus === 1 || ids()[B.spread * 2 + 1] == null) }; },
     audit: function () {
       return { built: !!B.closed, open: B.isOpen, spread: B.spread, focus: B.focus, single: single(), pages: ids(), left: B.ids.L, right: B.ids.R,
         hitsL: B.hits.L.length, hitsR: B.hits.R.length, turning: B.turnT >= 0,
@@ -485,7 +492,11 @@
   // (the map in the corner, the money, the bar of things he carries)
   (function () {
     const st = document.createElement("style");
-    st.textContent = "html.pres-reading #cityHud, html.pres-reading #hotbar { visibility: hidden !important; }";
+    // (on a phone the stick, the fire button and Stand up too: they sat over
+    // the page and ate the taps meant for it; the dock's Back / Close / Next
+    // are the reader's buttons, city/president_dock.js)
+    st.textContent = "html.pres-reading #cityHud, html.pres-reading #hotbar { visibility: hidden !important; }" +
+      "html.pres-reading #touch, html.pres-reading #tExit, html.pres-reading #verbWheel { display: none !important; }";
     const host = document.head || document.documentElement || document.body;
     if (host && host.appendChild) host.appendChild(st);
   })();
