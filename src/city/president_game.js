@@ -118,12 +118,6 @@
       if (h && h.rec) { h.rec.name = S.c[ME].name; }
     } catch (e) {}
     if (CBZ.presBook) CBZ.presBook.setSource(bookSource());
-    // a man at his desk sees his desk, not the back of his own head: the day
-    // starts in his own eyes (after that the view follows his hands, as it
-    // does everywhere in the game: systems/fpsmode.js viewForHands)
-    if (CBZ.setFPS && !(CBZ.fpsActive && CBZ.fpsActive())) { try { CBZ.setFPS(true); } catch (e) {} }
-    if (CBZ.cam) CBZ.cam.pitch = Math.max(CBZ.cam.pitch || 0, 0.42);
-    if (CBZ.fps) CBZ.fps.fp = Math.min(CBZ.fps.fp || 0, -0.42);
     syncCabinet();
     A.ver++;
     news(S.c[ME].leader.title + " " + S.c[ME].leader.name + " starts the day in the Oval Office", { cat: S.c[ME].short.toUpperCase() });
@@ -379,6 +373,20 @@
     go();
   }
 
+  /* A MAN AT HIS DESK SEES HIS DESK, not the back of his own head (or his own
+     face from across it): once he is in the chair the day starts in his own
+     eyes, looking over the desk at the room. After that the view follows his
+     hands as it does everywhere (systems/fpsmode.js viewForHands). */
+  function eyes() {
+    if (A.eyes) return;
+    const P = CBZ.player, O = PO();
+    if (!P || !P._propSeat || (O && O.placing && O.placing())) return;
+    A.eyes = true;
+    const dp = O && O.deskPoint ? O.deskPoint() : null;
+    try { if (CBZ.setFPS) CBZ.setFPS(true); } catch (e) {}
+    if (CBZ.cam) { if (dp) CBZ.cam.yaw = dp.heading + Math.PI; CBZ.cam.pitch = 0.4; }
+    if (CBZ.fps) CBZ.fps.fp = -0.4;
+  }
   // ---- the clock (it is not the frame: a background tab still runs a room's day)
   let lastT = 0;
   setInterval(function () {
@@ -394,6 +402,7 @@
       return;
     }
     if (A.ended) return;
+    eyes();
     if (A.net && A.net.role !== "host") return;               // a guest steps on the host's ticks
     // the world waits while the game is paused or you are reading on the phone menu
     if (g.state !== "playing") return;

@@ -736,7 +736,8 @@
     if (a === CBZ.player) {
       if (a._aircraft || a._swim) return true;
       if (a._phys && (a._phys.air || (a._phys.down | 0) > 0)) return true;
-      if (CBZ.cineActive && CBZ.cineActive()) return true;
+      // a scene takes the body, unless it is a man reading at his desk (keepBody)
+      if (CBZ.cineActive && CBZ.cineActive() && !(CBZ.cineKeepsBody && CBZ.cineKeepsBody())) return true;
       if (R.seq && a._doorArcOwner && a._doorArcOwner !== "prop") return true;
       if (R.seq && CBZ.aircraftDoorArc && CBZ.aircraftDoorArc.active) return true;
     }

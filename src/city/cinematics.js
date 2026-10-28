@@ -65,6 +65,10 @@
   //   a step: { dur, cam, cut, track, hideRig, enter(ctx), tick(ctx, t, dt),
   //             until(ctx, t) }  until: hold the shot past dur until true
   //   opts.noHolster — DON'T disarm the player for this scene.
+  //   opts.keepBody  — the body keeps the posture it is in (a man reading at
+  //                    his desk stays in his chair: city/president_book.js and
+  //                    the office's folders). Without it a scene takes the body
+  //                    and moves_posture.js lets go of any seat.
   //
   // A QUESTION ASKED IN A SCENE (CBZ.campaignUI.say with answers while the
   // lens is ours) is the cinematic prompt: the line is the subtitle and the
@@ -95,6 +99,7 @@
     CINE.playing = steps; CINE.ctx = ctx || {}; CINE.step = -1; CINE.onEnd = onEnd || null;
     cineCam.active = true;
     CINE.noHolster = !!opts.noHolster;
+    CINE.keepBody = !!opts.keepBody;
     // the scene owns the hands: holster (restored on end) so a jumpy trigger
     // finger can't shoot the boss mid-sentence, and every witness system
     // reads the player as unarmed for the duration.
@@ -123,6 +128,7 @@
   }
 
   CBZ.cinePlay = startScene;
+  CBZ.cineKeepsBody = function () { return !!(CINE.playing && CINE.keepBody); };
 
   /* ---- THE WRONG ANSWER: he draws and shoots you (owner 2026-10-22: "one of
      the cinematic prompt answers might make the person immediately draw his

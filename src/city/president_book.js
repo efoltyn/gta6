@@ -208,7 +208,7 @@
     const eye = deskWorld(cx, BLOTTER_TOP + 0.015 + h * Math.cos(tilt), OPEN_AT.z + h * Math.sin(tilt));
     return { eye: eye, look: look };
   }
-  function holdCamera() {
+  function holdCamera(cut) {
     if (!CBZ.cinePlay) return;
     const p = framePose();
     // whoever held the lens (ours from the last page, or a scene that was
@@ -216,10 +216,10 @@
     if (CBZ.cineAbort && (B.cine || (CBZ.cineBusy && CBZ.cineBusy()))) { B.cine = false; try { CBZ.cineAbort(); } catch (e) {} }
     let ok = false;
     try {
-      ok = CBZ.cinePlay([{ cam: { pos: { x: p.eye.x, y: p.eye.y, z: p.eye.z }, look: { x: p.look.x, y: p.look.y, z: p.look.z } }, dur: 1e9 }], {}, function () {
+      ok = CBZ.cinePlay([{ cam: { pos: { x: p.eye.x, y: p.eye.y, z: p.eye.z }, look: { x: p.look.x, y: p.look.y, z: p.look.z } }, dur: 1e9, cut: !!cut }], {}, function () {
         // the scene ended from outside (death, a cut): the book is put down
         if (B.cine) { B.cine = false; if (B.isOpen) close(true); }
-      }) !== false;
+      }, { keepBody: true }) !== false;
     } catch (e) { ok = false; }
     B.cine = ok;
   }
@@ -234,7 +234,7 @@
     B.focus = 0;
     paintSpread();
     B.fpsWas = !!(CBZ.fpsActive && CBZ.fpsActive());
-    holdCamera();
+    holdCamera(true);                  // he looks down at it: a cut, not a swoop through his own head
     lastAspect = CBZ.camera ? CBZ.camera.aspect : 0;
     // the mouse is the reader's hand: let it go so it can point at the page
     if (document.pointerLockElement && document.exitPointerLock && !CBZ.touchMode) { try { document.exitPointerLock(); } catch (e) {} }

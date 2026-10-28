@@ -1450,7 +1450,7 @@
         if (READ.fpsWas && CBZ.setFPS) { try { CBZ.setFPS(true); } catch (e) {} }
         // the scene ended from outside (death, mode change): put the folder down
         if (READ.f && READ.f.state === "open") { READ.f.state = "closed"; READ.f = null; layoutFolders(); }
-      });
+      }, { keepBody: true });     // he reads it in his chair (moves_posture.js keeps the seat)
   }
   function endReading(quiet) {
     const f = READ.f;
