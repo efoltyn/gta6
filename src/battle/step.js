@@ -9,6 +9,10 @@
 function stepMan(m, sdt) {
   // a vehicle is its own body, brain and guns (src/battle/vehicles.js)
   if (m.vehicle) { stepVehicle(m, sdt); return; }
+  // A RIG THAT SHOWS A ROW OF THE INFANTRY CORE decides nothing and moves
+  // nothing: mass.js puts it where its row is, every frame (puppetSync).
+  // Only its fall is the page's (killMan: the topple, the ragdoll).
+  if (m.puppet && !m.dead) return;
   /* A BODY IN A GORILLA'S HAND IS NOT A MARCHER. systems/ape_combat.js owns
      this man's world transform outright while the flag is up — his position,
      his facing and his rig — exactly the way grapple.js's `heldBy` stands the

@@ -78,10 +78,9 @@ change it only in coordination.
 | `src/battle/core/realm.js` | `CBZ.battleRealm`: the sim compiled into a second host's private scope; `SIM` (the files), `PAGE_NAMES` (what a host's page layer declares) (§8) | core |
 | `src/battle/core/store.js` | `CBZ.battleStore`: the unit store, typed arrays, one row per unit (§9) | performance / scale |
 | `src/battle/core/lod.js` | `CBZ.battleLod`: tier rules, budgets, the squad scheduler (§9) | performance / scale |
-| `src/battle/core/tiersim.js` | `CBZ.battleTierSim`: the MID and FAR sims (§9) | performance / scale (brains: AI hooks) |
+| `src/battle/core/infantry.js` | `CBZ.battleInfantry`: THE INFANTRY: every rifleman at every scale (§9) | AI / weapons / scale |
 | `src/battle/core/flow.js` | `CBZ.battleFlow`: the one flow-field solver | physics / scale |
-| `src/battle/core/simworker.js`, `simlink.js` | the sim worker and the page's end of it (§9) | performance / scale |
-| `src/battle/mass.js`, `massdraw.js` | tiered battles: rows, ghosts, promotion, the crowd draw (§9) | performance / scale |
+| `src/battle/mass.js`, `massdraw.js` | the infantry core's host: rows, the host's bodies, the seam, the puppets, the crowd draw (§9) | performance / scale |
 | `src/battle/colours.js` | `COLOURS`: each army's flag bearers (one in thirty, the flag on a back staff, down when he falls) and the top-of-screen tally | page |
 | `src/battle/settingspanel.js` | `SETTINGS`: the settings panel and AUTO quality (§9) | performance / scale |
 | `src/battle/core/tactics.js` | `CBZ.battleTactics`: THE SQUAD BRAIN — fire teams, formations, tasks, posts, threat/focus, squad morale, per-tier cost ledger (§9b) | AI |
@@ -698,21 +697,21 @@ layer (or, better, move it into the sim).
 
 - **Lazy.** Only `city/army.js` (API + loader) is on index.html. `loadUnits(ids)` brings the unit
   kit and the unit files (Fort Brandt's motor pool, a force with hulls); `load()` brings the core
-  (`core/stage.js`, roster, sides, host, store, lod, flow, tiersim, tactics, realm) as scripts and
+  (`core/stage.js`, roster, sides, host, store, lod, flow, infantry, tactics, realm) as scripts and
   the sim + `city/armypage.js` + `city/armyrealm.js` as text, compiled into the realm. Every lazy
   file rides army.js's `?v=` key.
 - **Forces.** `spawnForce({ side, nation, hostile, stars, units, training, gun, at, heading, face,
   order })` -> a handle at once. A side is a belligerent (a nation id, or "coup"); a theatre holds
   two (slots red / blue). A force is a booked segment of its side (`SPAWN_BOOK`): its own roster,
   training, guns, crew plan (its men crew its hulls), formation (hulls on a leading line 14 m apart,
-  men behind in ranks of ten) and order. Its men are rows in the tier sim (FAR until the lens
-  comes, promoted to FULL rigs by `mass.js`, demoted when it goes); its vehicles and their crews
+  men behind in ranks of ten) and order. Its riflemen are rows of the infantry core (rigs only
+  near the lens, puppets of their rows: `mass.js`); its vehicles and their crews
   are FULL at once. Fresh forces rebase their side's morale books.
 - **Orders.** `orderForce(force, { type, at, heading, face, route })`: `attack` (march on `at`,
   not the enemy's centre: `objectiveOf`, `farObjective`), `hold` / `move` / `withdraw` (each
   unit's home is its formation slot round `at`: `holding()`), and `route`. FULL units read
   `m.order` (ai/orders.js, the squad adapter's `order(team, S)` / `enemyCOM(team, S)`); rows read
-  tiersim's `oK oX oZ` columns and their homes.
+  the infantry core's squad orders (`I.squadOrder`: advance / move / hold on a point).
 - **THE CONVOY SEAM.** A `route` order (`{ type: "route", route: [{x, z}, ...] }`) is handed to the
   driver registered with `CBZ.army.routeDriver(fn)`: `fn(force, order, api) -> { step(dt), stop() }`
   with `api = { move(at, o), hold(at), status(), units(), vehicles(), done() }`. With no driver the
@@ -737,80 +736,117 @@ layer (or, better, move it into the sim).
 
 ---
 
-## 9. Scale: 100,000 a side
+## 9. The infantry: one sim at every scale
 
-The goal is 100k men against 100k men without losing quality, logic or looks. It is built
-(branch npcwar-scale). A battle no bigger than the FULL cap is all FULL and never enters any of
-this: it is exactly the page it was.
+Every armed rifleman on the field is a row of the infantry core, `src/battle/core/infantry.js`
+(`CBZ.battleInfantry`), from a 1 v 1 to a million a side. There are no tiers of brain. A man near
+the lens and a man two kilometres off are the same sim, by the same rules. Scale comes from data
+layout and exact shortcuts. It never comes from simpler rules far from the lens.
+
+(Before 2026-10-28 there were three tiers. FULL was the page brain. MID and FAR were
+`core/tiersim.js`: a hit chance, a damage multiplier and a 12% head roll in place of rounds. A
+battle over 320 men was fought by MID and FAR. That system and its worker are deleted.)
 
 **The files**
 
 | file | what |
 |---|---|
-| `core/store.js` | `CBZ.battleStore`: one row per unit, typed columns; `S.col()` adds a tier's columns; SharedArrayBuffer-backed when the page is cross-origin isolated |
-| `core/lod.js` | `CBZ.battleLod`: tier rules, caps per device, budgets, and `schedule()` (per squad, nearest first, hysteresis + `DEMOTE_S` hold) |
-| `core/tiersim.js` | `CBZ.battleTierSim`: the MID and FAR sims (page-free; runs in the page, in node, in the worker) |
-| `core/flow.js` | `CBZ.battleFlow`: the one Dial flow-field solver (physics.js `navSolve` and the tier sim both call it) |
-| `core/simworker.js` / `core/simlink.js` | the Web Worker and the page's end of it |
-| `src/battle/mass.js` | the host half: spawns rows, keeps FULL rows current, runs the tiers, ghosts, promotion/demotion, blasts on rows |
-| `src/battle/massdraw.js` | every non-FULL man through `entities/crowdgpu.js` (near / far / dead layers) |
-| `src/battle/settingspanel.js` | `SETTINGS`: the panel, device defaults, AUTO quality |
+| `core/infantry.js` | the infantry core: doctrine, sight, posture, cover, the trigger, flown rounds, wounds, suppression, squads, army morale |
+| `core/store.js` | the unit store: typed columns, one row per unit (the core adds its own columns) |
+| `core/lod.js` | caps and the rig scheduler (who gets a rig near the lens; nothing else) |
+| `src/battle/mass.js` | the core's host on this page (and in Gang City's realm): rows, the host's bodies, the seam, the puppets, the rounds on screen |
+| `src/battle/massdraw.js` | every man without a rig, drawn by `entities/crowdgpu.js` in his posture (standing, kneeling, prone, crawling, running) |
 
-**The tiers.** Decided per squad (ten men), so a squad never straddles two brains.
-- **FULL**: a real `makeMan` / `makeBeast` object and the page's own brain. Rigs are built inside
-  a per-frame budget (`MASS.promoteMs`), hidden, and the whole squad flips on one frame.
-- **MID** (`tiersim` thinkMid): the page's rules on rows: combat_iq's fire gate (reaction beat, aim
-  settle, burst rhythm, derived damage, hit chance, the running-target and suppression penalties;
-  every profile comes from `CBZ.combatIQ.profile()`), the fire token (2 or 3 guns on a mark),
-  bearing slots, the band, the lane rule, the LOS check at every trigger pull, hull-down on the
-  dunes, stance, the hold, the hunt, the pursuit, morale (brain.js's constants and per-man formula;
-  the ARMY is stepped once by the host over every row), rout, cornered, rally, flight. Walked on a
-  0.1 s slice; a think on the page's own cadence.
-- **FAR** (`tiersim` thinkSquad / updFarMan): the squad's senior man looks for the war (one search
-  per squad per second); until it has contact the squad is a march column visited at the march
-  tick (1 s; the renderer carries each man along his velocity). With contact every man takes his
-  own mark, token, line (on a slower clock), rhythm, magazine, nerve and wounds, on a 0.25 s slice.
-- Shots from both tiers are resolved in a batch at the end of the step. Target search walks a
-  dense per-side grid (only the enemy's rows); separation, the lane and the anti-clump use a
-  hashed 2.4 m body grid of the rows that are doing something.
-- **Seams.** A FULL brain's `pickTarget` also gets rows (`MASS.cands`) as **ghosts**: plain objects
-  with the fields the fire path reads, synced every frame; `hurtMan` on a ghost lands on the row.
-  The tier sim's rounds on a FULL row come back as events and go through `hurtMan`. Kills, the
-  morale shock, the near-miss rattle, tracers and the director's `shotsRing` all follow.
-- **Hooks for the AI agent**: `MASS.T.brain.mid` / `.far` replace a tier's think
-  (`fn(T, row, now, dt)`), `BUDGET` (core/lod.js) sets each tier's tick and milliseconds.
+**What a man does** (`core/infantry.js` header has the full list):
+- **Sees.** Detection is a hazard: the enemy's exposed area (sight lines from the eye to points on
+  his body, over the real ground and cover, in his real posture), over the range squared, times
+  movement, his muzzle flash, the observer's skill and optic, and his own suppression.
+- **Reacts.** At contact he takes the lowest posture that still has the line. Close in he kneels
+  and shoots first. Later he crawls, or rushes, to a better spot when the line goes.
+- **Aims and fires.** Acquisition, then an aim that settles. The shot is pressed when the aim is
+  as settled as his discipline asks. Every round is flown on `weapons/ballistics.js`: the gun's
+  group, his hold in his posture, recoil not yet recovered, his range estimate (corrected after a
+  miss he sees strike), his lead on a mover, the wind (held off by what he reads), and suppression.
+- **Hits.** A round is traced through the ground and cover at launch. When it arrives it is traced
+  through the bodies near its line: ballistics zones in each man's posture, and real plate boxes
+  where plates are worn (`CBZ.armour.versus`). A near miss rattles everyone it passes.
+- **Is hurt.** He has capacity, not an hp bar. A wound takes what it takes now and then bleeds.
+  Under half capacity he is down. A mate gives buddy aid. Only a brain hit kills outright.
+- **Breaks.** Squad morale is its losses plus its men's stress. Army morale (`CBZ.brain.morale`,
+  the one every army shares) weighs on every squad in the army. A broken army (half of it
+  running, or its morale under 0.2 leaving out the shock of the last deaths) goes: a shaken
+  squad runs, a steady one pulls out by bounds and keeps going. A runner is off the field 400 m
+  from the enemy. Riflemen who see armour their rounds cannot go through take it as a threat,
+  not a mark, and it frightens them.
+- **The squad.** It has a leader and two fire teams. It advances in a wedge, uses bounding
+  overwatch inside 300 m of the enemy, and shares contact (with a bearing) on a hit and across
+  the platoon. It sets a base of fire before the first bound and makes no bound without one. It
+  uses fire and movement, assaults inside 45 m, flanks when it cannot fight from where it is,
+  breaks contact by bounds, and routs.
 
-**The proof** (`node tools/npcwar-fidelity.mjs [seeds] [case]`): the same engagement fought by
-the FULL page and with every squad forced MID, FAR, and MIXED (a FULL ring round the lens, MID
-round that, FAR beyond), over N seeds: the winner share within binomial noise, the loser's losses
-within 15 points, the time to decision within 25%. `tools/npcwar-worker-check.mjs` runs the
-worker on a real thread in both modes. `tools/npcwar-scale-bench.mjs` measures 1k/10k/100k a side.
+**Training is doctrine, not a multiplier.** `DOCTRINE` (one row per TRAININGS id) holds detection,
+acquisition, settle, hold by posture, recoil recovery, trigger discipline, burst habit, range
+estimation and correction, lead, drop and rise times, rush length, how far he looks for cover,
+how much a crack rattles him, when his head stays down, reload, nerve, buddy aid and fire on the
+move. Every body is 100 hp. A country's training, issue optic and kit are `core/countries.js`.
 
-**The worker.** MID + FAR + the grids + the hit batch run in `core/simworker.js` whenever the
-page can host a Worker (not under `?probe`/`?auto` tools unless `?worker=1`). Cross-origin
-isolated: the store is shared. GitHub Pages cannot send COOP/COEP, so the shipped path is
-**transfer**: the worker owns its copy, the page sends the FULL rows each step, the worker sends a
-packed snapshot of every row (ping-ponged transferables, 15 Hz) and the full state of rows the
-page is about to promote. A worker that dies hands the tiers back to the page.
+**The host's bodies.** Some bodies stay the page's own objects: animals, hulls and their crews,
+a man with bare hands, a launcher, a shotgun, the man YOU are, and Gang City's player. Each of
+them is an EXTERNAL row, written every step (`massSyncExt`). The core's men see them, shoot at
+them and are shot by them. The core's rounds that reach one come back in `I.extHits`, and
+`armsHit` (fire.js's own anatomy and armour) flies them into it. The page's rounds go through
+the rows by the core's rules (`resolveRound` -> `MASS.traceRows` -> `I.traceRound`). A bite, a
+crush or a blow on a man of the core lands as a wound (`I.wound`). A blast goes through
+`MASS.blast` to the core's own blast (charge W: overpressure inside Z 1.5, fragments by the area
+a man shows; calibrated on the M67).
 
-**The drawing.** Every non-FULL man is the real `CBZ.human` through crowdgpu: his skin and hair are
-studio.cast's heritage roll for his role and variant, his uniform men.js's `uniformFor`, and the
-rig's own kit is baked in (`CBZ.crowdGPU.gear()`: men.js's helmet dome, actorweapons' rifle, shown
-per instance by `gearCode`). Clips by speed (rifleIdle / rifleWalk / rifleRun / crouchRun / down);
-the gait phase is handed to the rig's phase at promotion and back at demotion. Impostors only
-past the quality preset's `d2`. Known gaps: one baked rifle (the side's first issue) for the
-crowd, the helmet sits on uncompressed hair, beasts and vehicles have no instanced body yet
-(beast rows are simulated by the MID/FAR melee brain and drawn only once promoted; vehicles and
-their crews are always FULL).
+**The puppets.** A rig near the lens (`makeMan`) shows its row and decides nothing: its place,
+facing, posture, the rifle on the mark, the shot (`massShots`: the muzzle, the report, the round
+drawn along the line it was really flown on, to where it stopped), the reload, the flinch and the
+fall (`killMan` with `imp.core`). A battle fought with no rigs at all comes out identical, to the
+round. `stepMan`, the separation and the page's rounds all skip puppets. YOU taking a man turns
+his rig into the page's own man (`MASS.release`), and handing him back gives him to the core
+where you left him (`MASS.adopt`).
 
-**Settings** (`SETTINGS`, saved as `cbz-npcwar-settings`): army cap, full bodies, near and mid
-range, mid brains, quality (crowd LOD bands/caps, far re-cut, pixel ceiling), shadows
-(off/near/all), draw distance, auto quality (gives back draw distance, the far re-cut, impostor
-range, MID brains, MID range, and the full rigs last). The render scale never drops below one
-pixel per CSS pixel. URL keys win for tools: `?tier=full|mid|far ?fullcap ?midcap ?fullr ?midr
-?worker=0|1`.
+**The clock.** The core steps on its own fixed clock (`MASS.DT`: 1/30 s up to 20,000 men, 0.05 s
+up to 200,000, 0.1 s past that; its rules run on their own timers, so the step only spreads the
+work). Each man thinks on his own clock (0.25 s in contact, 0.6 s out of it), each squad twice a
+second at a phase of its own. The draws carry each man along his velocity in between. A machine
+that cannot keep up runs the battle slower, never coarser.
 
----
+**Scale, measured** (`node tools/npcwar-infantry-bench.mjs`: fronts in contact, one core, node):
+
+| a side | ms per 0.1 s step | real time |
+|---|---|---|
+| 1,000 | 3 | 36x |
+| 10,000 | 11 | 9x |
+| 100,000 | 56 | 1.8x |
+| 1,000,000 | 379 | 0.26x |
+
+(2026-10-28, on a shared Mac at load 7; the 100k and 1M rows measured 45 and 276 ms on a
+quieter machine before the squads moved onto their own clocks.)
+
+How it gets there, all exact:
+- The store's columns are read through one fixed-shape literal.
+- The body grid is hashed, so it follows the men and not the field.
+- A round walks the band of cells within 3.2 m of its path.
+- Sight lines sphere-trace bare ground against a per-cell slope bound, and skip cells the line
+  clears.
+- A man's view of his mark is reused until something changed. He keeps his candidate list for a
+  1.5 s scan cycle and glances at one more man every half second.
+- One pass covers thinks and triggers, and men are walked in alternating order each step.
+
+**Checks.**
+- `tools/npcwar-duel-check.mjs`: 1 v 1 by range. `--ladder` isolates training. `--check` is the
+  gate.
+- `tools/npcwar-squad-check.mjs`: 10 / 30 / 100 a side, and ratios.
+- `tools/npcwar-infantry-bench.mjs`: 1k-1M.
+- `tools/npcwar-scale-bench.mjs`: the page around the core.
+- `tools/npcwar-headless.mjs` and `tools/army-headless.mjs`: the page and Gang City.
+
+**Settings** (`SETTINGS`, saved as `cbz-npcwar-settings`) cover the army cap, rigs near the
+lens, the radius, quality, shadows, draw distance and auto quality. URL keys win for tools:
+`?fullcap=N ?fullr=M`.
 
 ## 9a. Kit and armour (shared with Gang City)
 
@@ -925,7 +961,12 @@ skull and heart, the lion's lungs, hit odds by stance).
 
 ---
 
-## 9b. The squad brain (the AI's half of the tiers)
+## 9b. The squad brain (the page's own men)
+
+**Scope since 2026-10-28.** This brain drives only the page's own men: crews, dismounted
+riders, bare hands, launchers and shotguns. Every rifleman is a row of the infantry core
+(§9), with its own squad tactics in `core/infantry.js`. The tiers below were FULL / MID / FAR.
+The rows have none now, and a page man is always tier 0.
 
 Armed men fight as **squads** (the page's `squads[team][sq]`, ten men): a leader, two fire
 teams, and one task at a time decided on the squad's own clock. The brain is
@@ -1161,9 +1202,10 @@ node tools/npcwar-headless.mjs     the page's own sim in node: war room, hold, t
                                    series + URL.   node tools/npcwar-headless.mjs 3  runs one.
 node tools/units-kit-check.mjs     the animal kit: planted feet never slide; the dog bit for bit.
 node tools/combatkit-check.mjs     soldier kit fit (every body, every loadout, every carry) + armour rules.
-node tools/npcwar-fidelity.mjs     the tiers fight the page's war (see 9)
-node tools/npcwar-worker-check.mjs the sim worker, both modes
-node tools/npcwar-scale-bench.mjs  1k / 10k / 100k a side, ms per tier
+node tools/npcwar-duel-check.mjs    1 v 1 by range, N seeded duels (§9); --ladder: training alone; --check: the gate
+node tools/npcwar-squad-check.mjs   squads, platoons, companies (§9)
+node tools/npcwar-infantry-bench.mjs the core alone at 1k / 10k / 100k / 1M a side (§9)
+node tools/npcwar-scale-bench.mjs  the page around the core: 1k / 10k / 100k a side
 node tools/army-headless.mjs      Gang City's army: the core on the city host over stub terrain (§8).
 node tools/front-sim.mjs           the city's wars (polwar + frontline) over a stub army.
 node tools/npcwar-ai-metrics.mjs   the soldiers' dumb-behaviour numbers (§9b); --old = ?tac=old.

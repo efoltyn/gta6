@@ -130,8 +130,14 @@
   function roleFor(o) {
     o = o || {};
     if (o.tier === "civ") return "civilian";
-    if (o.tier === "thug") return "militia";
-    if (o.nation && NATIONS[o.nation] && NATIONS[o.nation].irregular && o.tier !== "swat") return "militia";
+    /* TRAINING IS SKILL, NOT A COSTUME. A real army's or force's men
+       (battle/core/countries.js) wear their issue kit at any training: an IRGC
+       conscript in his helmet and plates is still a conscript. Militia kit is
+       for irregulars, and for a street side of the city's own nations. */
+    const real = o.nation && CBZ.countries && CBZ.countries.get ? CBZ.countries.get(o.nation) : null;
+    const irregular = !!(real ? real.kit && real.kit.irregular : o.nation && NATIONS[o.nation] && NATIONS[o.nation].irregular);
+    if (irregular && o.tier !== "swat") return "militia";
+    if (o.tier === "thug" && !real) return "militia";
     if (o.tier === "swat") return "swat";
     if (o.wid === "lmg") return "gunner";
     if (o.wid === "sniper") return "marksman";
@@ -958,15 +964,8 @@
     }
     if (L.gloves && N.gloves != null) { gloves(ch, N.gloves); K.hands = true; }
     // ---- the armour this kit IS (systems/armour.js)
-    if (CBZ.armour && L.armour.length) {
-      const a = {};
-      for (const k of L.armour) {
-        if (k === "plates") { a.plates = spec.grade === "second" ? "lvl3pe" : N.plates; if (N.sides && spec.grade !== "second") a.sides = N.sides; }
-        else if (k === "soft") a.soft = N.soft;
-        else if (k === "helmet") a.helmet = N.helmet === "b6b47" ? "b6b47" : (N.helmet === "pasgt" ? "pasgt" : (N.helmet ? "ach" : null));
-      }
-      K.armour = CBZ.armour.issue(a);
-    }
+    // (the mapping is CBZ.armour.kitSpec's: the infantry core issues the same pieces)
+    if (CBZ.armour && L.armour.length) K.armour = CBZ.armour.issue(CBZ.armour.kitSpec(N, L.armour, spec.grade));
     K.weight = L.weight || (L.carrier === "plates" ? 0.94 : 1);
     return K;
   }

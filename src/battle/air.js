@@ -24,6 +24,8 @@ function densestCellOf(team) {
     }
     if (n > bn) { bn = n; best = { x: x / n, z: z / n, n: n }; }
   });
+  // the infantry core's men are rows, not page bodies (src/battle/mass.js)
+  if (MASS.on) { const r = MASS.densest(team); if (r && r.n > bn) best = r; }
   return best;
 }
 function spawnPlanes() {

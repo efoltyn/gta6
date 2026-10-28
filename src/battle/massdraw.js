@@ -142,6 +142,7 @@ CBZ.massDraw = (function () {
     CL = {
       idle: G.clip("rifleIdle"), walk: G.clip("rifleWalk"), run: G.clip("rifleRun"),
       crouch: G.clip("crouchRun"), down: G.clip("down"),
+      crawl: G.clip("proneCrawl"), prone: G.clip("rifleProne") || G.clip("proneCrawl"), kneel: G.clip("rifleKneel") || G.clip("rifleIdle"),
     };
     D.look = new Int32Array(0); D.gear = new Float32Array(0); D.ph = new Float32Array(0); D.clipOf = new Uint8Array(0);
     D.cache = new Map();
@@ -166,10 +167,14 @@ CBZ.massDraw = (function () {
     const T = CBZ.crowdGPU ? CBZ.crowdGPU.tier() : { d2: 78 };
     D.nearR = Math.max(fr, T.d2) + 14;
   };
-  // which clip and how fast, from how he is moving
+  // which clip and how fast: his posture (the core's: standing, kneeling,
+  // flat), and how he is moving in it (a walk, a run, a rush, a crawl)
   function clipFor(r, spd, C) {
+    const p = C.down && C.down[r] ? 2 : C.post ? (C.postT[r] > 0 ? C.postTo[r] : C.post[r]) : 0;
+    if (p === 2) return spd > 0.1 ? CL.crawl : CL.prone;
     if (C.life[r] === 2 || spd > 3.0) return CL.run;
-    if (spd > 0.35) return C.crouch[r] && spd > 1.2 ? CL.crouch : CL.walk;
+    if (p === 1) return spd > 0.35 ? CL.crouch : CL.kneel;
+    if (spd > 0.35) return CL.walk;
     return CL.idle;
   }
   function addRow(L, r, C, age, dt) {
@@ -188,7 +193,8 @@ CBZ.massDraw = (function () {
     const t0 = performance.now();
     const C = STORE.cols, cp = CBZ.camera.position, n = STORE.rows;
     const nr2 = D.nearR * D.nearR, inner = Math.max(0, D.nearR - 14), in2 = inner * inner;
-    const LT = C.lastT;
+    // (the core steps every 0.1 s: a man is carried along his velocity since)
+    const age0 = Math.max(0, simT - (MASS.lastStepT || simT));
     // NEAR: every frame
     D.near.begin();
     let cn = 0;
@@ -198,7 +204,7 @@ CBZ.massDraw = (function () {
       if (l !== 1 && l !== 2) continue;
       const dx = C.x[r] - cp.x, dz = C.z[r] - cp.z, d2 = dx * dx + dz * dz;
       if (d2 > nr2) continue;
-      addRow(D.near, r, C, simT - LT[r], dt);
+      addRow(D.near, r, C, age0, dt);
       cn++;
     }
     D.near.commit();
@@ -217,7 +223,7 @@ CBZ.massDraw = (function () {
         const dx = C.x[r] - cp.x, dz = C.z[r] - cp.z, d2 = dx * dx + dz * dz;
         // the band [inner, nearR] is in both: two identical impostors, never a gap
         if (d2 < in2) continue;
-        addRow(D.far, r, C, simT - LT[r], fdt);
+        addRow(D.far, r, C, age0, fdt);
         cf++;
       }
       D.far.commit();

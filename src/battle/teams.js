@@ -5,12 +5,24 @@
    to the other battle files. Anything that needs the loaded engine runs in
    CBZ.npcwar.onBoot(), in file order, once the armoury is in. */
 
+/* TRAINING IS WHAT A MAN CAN DO, NOT HOW MUCH HE CAN TAKE. Every row is the
+   same 100 hp body (the armour he wears is what protects him); what changes
+   is the infantry core's DOCTRINE row (src/battle/core/infantry.js): how fast
+   he finds a mark, settles his aim, holds still, reads range, uses ground,
+   takes fire. The labels say what each row is:
+     civ    UNTRAINED       a person holding a rifle
+     thug   BASIC           basic training and little live fire: a conscript,
+                            a militia, an irregular
+     pro    REGULAR         a regular army's trained infantryman
+     elite  PROFESSIONAL    a professional infantryman (live fire every year,
+                            small-unit drills): US, UK, French, German infantry
+     swat   SPECIAL FORCES  selected and trained beyond that */
 const TRAININGS = [
-  { id: "civ",   label: "UNTRAINED",  role: "civilian", hp: 90 },
-  { id: "thug",  label: "STREET",     role: "thug",     hp: 100 },
-  { id: "pro",   label: "TRAINED",    role: "guard",    hp: 120 },
-  { id: "elite", label: "SOLDIER",    role: "soldier",  hp: 140 },
-  { id: "swat",  label: "SWAT",       role: "agent",    hp: 160 },
+  { id: "civ",   label: "UNTRAINED",      role: "civilian", hp: 100 },
+  { id: "thug",  label: "BASIC",          role: "thug",     hp: 100 },
+  { id: "pro",   label: "REGULAR",        role: "guard",    hp: 100 },
+  { id: "elite", label: "PROFESSIONAL",   role: "soldier",  hp: 100 },
+  { id: "swat",  label: "SPECIAL FORCES", role: "agent",    hp: 100 },
 ];
 /* THE TWO SLOTS. "red" and "blue" are slot keys (side A, side B) that every
    ledger, the front's protocol and the node tools key on; they are never

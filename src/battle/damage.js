@@ -67,6 +67,8 @@ function hurtMan(m, dmg, imp) {
   if (m && m.hostActor) { if (dmg > 0 && m.hurt) m.hurt(dmg, imp || {}); return null; }
   // a ghost is a row in the tier sim (src/battle/mass.js): the round lands there
   if (m && m.ghost) { if (dmg > 0) MASS.hurtGhost(m, dmg, imp); return; }
+  // ...and so is a rig that shows one (mass.js puppets): the core wounds the man
+  if (m && m.puppet) { if (dmg > 0) MASS.hurtPuppet(m, dmg, imp); return; }
   // a hull answers with its armour first (src/battle/vehicles.js)
   if (m && m.vehicle) { hurtVehicle(m, dmg, imp); return null; }
   if (!m || m.dead || m.fled || !(dmg > 0) || over) return null;
@@ -143,7 +145,10 @@ function onItsFeet(m, dmg, imp) {
 const DEADN = { red: 0, blue: 0 };       // the dead, by side (corpses retire; this does not)
 function killMan(m, imp) {
   m.dead = true; m.hp = 0;
-  DEADN[m.team] = (DEADN[m.team] || 0) + 1;
+  // a man of the infantry core (imp.core): the core killed him and mass.js
+  // has kept the books (the dead, the kill, the shock); this is his fall
+  const core = !!(imp && imp.core);
+  if (!core) DEADN[m.team] = (DEADN[m.team] || 0) + 1;
   if (m.you) youDown(m);
   // a beast that dies mid-swing must let the pose go, or the strike offset
   // stays latched on the corpse — the exact leak creatureEndAttack exists for
@@ -154,12 +159,13 @@ function killMan(m, imp) {
     m.ordTgt = null;
   }
   const byT = (imp && imp.by && imp.by.team) || (imp && imp.byTeam) || null;
-  if (byT && byT !== m.team) { if (stats[byT]) stats[byT].kills++; }   // (a host actor, the city's player, is no side)
+  if (core) { /* (counted by mass.js) */ }
+  else if (byT && byT !== m.team) { if (stats[byT]) stats[byT].kills++; }   // (a host actor, the city's player, is no side)
   else if (!byT) stats[m.team === "red" ? "blue" : "red"].kills++;   // blast with no author still scores the other side
   // fratricide (a bomb is a blunt tool) credits nobody
   // and the man who did it keeps his own tally, with his gun
   const by = imp && imp.by;
-  if (by && by.team && by.team !== m.team && !by.hostActor) {
+  if (!core && by && by.team && by.team !== m.team && !by.hostActor) {
     by.kills = (by.kills || 0) + 1;
     if (by.wid) gunLedger(by.wid).kills++;
     // A MAN ON A RUN is a thing the HUD can point at
@@ -198,6 +204,7 @@ function killMan(m, imp) {
   killCam(m);
   corpses.push(m);
   if (corpses.length > (DEATH_OLD ? 260 : CORPSE_MAX)) retireOldestCorpse();
+  if (core) return;                       // the core's men take their shock in the core (and ARMY in mass.js)
   const aliveMine = aliveCount(m.team);
   moraleOnDeath(m, aliveMine);
 }

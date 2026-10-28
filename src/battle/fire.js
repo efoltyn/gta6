@@ -821,11 +821,12 @@ function gatherBodies(r, s0, s1, out) {
       const u = a[i];
       if (u._rs === _stamp) continue;
       u._rs = _stamp;
-      if (u.dead || u.fled || u === r.by) continue;
+      // (a rig that shows a row of the infantry core is hit as that row: MASS.traceRows)
+      if (u.dead || u.fled || u === r.by || u.puppet) continue;
       out.push(u);
     }
   }
-  if (r.tgt && r.tgt._rs !== _stamp && !r.tgt.dead && !r.tgt.fled) { r.tgt._rs = _stamp; out.push(r.tgt); }
+  if (r.tgt && r.tgt._rs !== _stamp && !r.tgt.dead && !r.tgt.fled && !r.tgt.puppet && !r.tgt.ghost) { r.tgt._rs = _stamp; out.push(r.tgt); }
   return out;
 }
 const _hits = [];
@@ -835,8 +836,12 @@ function resolveRound(r) {
   // the window of the line where bodies are asked: from well short of the
   // target plane to where the world stopped the round (or 40 m past it)
   const s0 = Math.max(1, r.sT - 30);
-  const s1 = Math.min(r.sStop, r.sT + 40);
-  let stopAt = r.sStop, stoppedInBody = false;
+  // THE INFANTRY'S MEN ON THE LINE: the core flies this round through its rows
+  // (the same zones, plates, wounds and cracks as its own) and says where one
+  // of them stopped it
+  const sRow = MASS.on ? MASS.traceRows(r, r.sStop) : r.sStop;
+  const s1 = Math.min(r.sStop, r.sT + 40, sRow);
+  let stopAt = Math.min(r.sStop, sRow), stoppedInBody = sRow < r.sStop;
   if (s1 > s0) {
     const cand = gatherBodies(r, s0, s1, _rCand);
     _hits.length = 0;
@@ -1306,10 +1311,22 @@ ARMS.band = function (m) {
 ARMS.audit = function () {
   let bleeding = 0;
   for (let i = 0; i < BLEEDERS.length; i++) if (!BLEEDERS[i].dead) bleeding++;
-  return { rounds: ARMS.rounds, inAir: ROUNDS.length, hits: ARMS.hits, pens: ARMS.pens, rics: ARMS.rics, jams: ARMS.jams,
+  const out = { rounds: ARMS.rounds, inAir: ROUNDS.length, hits: ARMS.hits, pens: ARMS.pens, rics: ARMS.rics, jams: ARMS.jams,
     nades: ARMS.nades, frags: ARMS.frags, bleeding: bleeding, bleedKills: ARMS.bleedKills, snaps: ARMS.snaps, tracers: ARMS.tracers,
     organs: Object.assign({}, ARMS.organs), plates: ARMS.plates, stoppedBy: Object.assign({}, ARMS.stoppedBy),
     shotsAt: ARMS.shotsAt.slice(0, 6), hitsAt: ARMS.hitsAt.slice(0, 6), area: ARMS.area, why: Object.assign({}, ARMS.why) };
+  /* THE INFANTRY'S OWN ROUNDS (src/battle/core/infantry.js) are in the same
+     ledger: rounds, hits by range, what they reached, plates, cracks */
+  if (MASS.on && MASS.I) {
+    const L = MASS.I.led, St = MASS.I.stats;
+    out.rounds += St.rounds; out.hits += St.hits[0] + St.hits[1]; out.area += L.area || 0; out.plates += L.plate - L.platePen;
+    for (let k = 0; k < 6; k++) { out.shotsAt[k] += L.shotsAt[k]; out.hitsAt[k] += L.hitsAt[k]; }
+    out.organs.brain += L.organs.brain; out.organs.spine += L.organs.spine; out.organs.vital += L.organs.vital;
+    out.organs.gut += L.organs.gut; out.organs.none += L.organs.torso + L.organs.limb + L.organs.head;
+    out.infantry = { downs: St.downs.slice(), kills: St.kills.slice(), fled: St.fled.slice(), cracks: L.cracks, aids: L.aids,
+      rushes: L.rushes, posts: L.posts, pins: L.pins, flanks: L.flanks || 0, firstShot: L.firstShot.slice(), firstHit: L.firstHit.slice() };
+  }
+  return out;
 };
 
 // where did the miss land: walk the line for the first collider, else the

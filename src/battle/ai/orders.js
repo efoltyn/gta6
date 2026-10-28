@@ -102,7 +102,8 @@ function updateCOM() {
   // the unit store's rows follow the full units on this slow tick (the fled
   // have been spliced out of `men` above and still owe their row a verdict)
   if (STORE) {
-    for (let i = 0; i < men.length; i++) if (men[i].row != null) STORE.sync(men[i].row, men[i]);
-    for (let i = 0; i < fledMen.length; i++) if (fledMen[i].row != null) STORE.sync(fledMen[i].row, fledMen[i]);
+    // (never a rig of the infantry core: its row is the truth and the rig its picture)
+    for (let i = 0; i < men.length; i++) if (men[i].row != null && !men[i].puppet) STORE.sync(men[i].row, men[i]);
+    for (let i = 0; i < fledMen.length; i++) if (fledMen[i].row != null && !fledMen[i].puppet) STORE.sync(fledMen[i].row, fledMen[i]);
   }
 }

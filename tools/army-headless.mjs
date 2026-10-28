@@ -202,7 +202,9 @@ scenario(2, "orders: hold, move, attack", async () => {
   A.orderForce(g, { type: "attack", at: { x: -300, z: 400 } });
   W.step(40);
   const sg = A.status(g), au = A.audit();
-  check(sg.z > 60, "ATTACK marches on its objective, far from the lens (centre z " + Math.round(sg.z) + ")");
+  // (a route march with kit is ~1.75 m/s, the squads forming their wedges first: 40 s is ~50 m,
+  //  not the old tier's 4.6 m/s run)
+  check(sg.z > 40, "ATTACK marches on its objective, far from the lens (centre z " + Math.round(sg.z) + ")");
   check(au.mass.tiers.far + au.mass.tiers.mid >= 30, "far from the lens it is fought by the tier sim, not rigs (" + JSON.stringify(au.mass.tiers) + ")");
 });
 
@@ -251,7 +253,10 @@ scenario(4, "armour in the city: an M1 Abrams with its riflemen", async () => {
   check(crew === 4, "its crew are the force's own men in their seats (" + crew + " of 4)");
   W.step(200, () => A.status(b).alive > 0);
   const sb2 = A.status(b);
-  check(sb2.dead > 10, "the hull and its infantry took the position (" + sb2.dead + " dead, " + sb2.alive + " left)");
+  // riflemen with no answer to armour break and go once it is killing them
+  // (the army's odds with A.noAnswer): the position is taken when nobody is
+  // left holding it, not when ten are dead
+  check(sb2.alive === 0 && sb2.dead >= 1, "the hull and its infantry took the position (" + sb2.dead + " dead, " + sb2.alive + " left)");
   check(hull && !hull.dead, "the tank came through rifle fire");
 });
 

@@ -133,7 +133,7 @@
   /* THE WAR ENGINE: the page-free core as scripts, then the sim compiled into
      its realm between the city's page layer and its glue. */
   const CORE = ["core/stage.js", "battle/core/roster.js", "battle/core/sides.js", "battle/core/host.js",
-    "battle/core/store.js", "battle/core/lod.js", "battle/core/flow.js", "battle/core/tiersim.js",
+    "battle/core/store.js", "battle/core/lod.js", "battle/core/flow.js", "battle/core/infantry.js",
     "battle/core/tactics.js", "battle/core/realm.js"];
   const PAGE = "city/armypage.js", GLUE = "city/armyrealm.js";
   let engineP = null, R = null;

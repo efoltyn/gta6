@@ -548,6 +548,12 @@ function vehPickTarget(u) {
     HOST.targets(u, range, _vh, null);
     for (let k = 0; k < _vh.length; k += 2) _vc.push(Math.sqrt(_vh[k + 1]), _vh[k]);
   }
+  // the infantry core's men (src/battle/mass.js): the nearest of them, as ghosts
+  if (MASS.on) {
+    _vh.length = 0;
+    MASS.nearRows(u.team === "red" ? "blue" : "red", u.pos.x, u.pos.z, range, _vh, 12);
+    for (let k = 0; k < _vh.length; k += 2) { const o = _vh[k]; _vc.push(Math.sqrt(_vh[k + 1]) - (o.wid === "lmg" ? 60 : 0), o); }
+  }
   if (!_vc.length) return null;
   let tries = 0, best = null;
   while (tries < 6) {
