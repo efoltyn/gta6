@@ -60,6 +60,12 @@ function inspect(label, id, hits) {
     if (footer) continue;
     if (t.x0 < M - 2 || t.x1 > PW_ - M + 2 || t.y0 < 0 || t.y1 > PH_ - M + 2) bad.push(label + " " + id + ": text off the page: \"" + t.s.slice(0, 40) + "\" x " + t.x0.toFixed(0) + ".." + t.x1.toFixed(0) + " y " + t.y0.toFixed(0) + ".." + t.y1.toFixed(0));
   }
+  // two lines of text on top of each other (a label run under its value)
+  const TX = REC.text;
+  for (let i = 0; i < TX.length; i++) for (let j = i + 1; j < TX.length; j++) {
+    const a = TX[i], b = TX[j];
+    if (a.x0 < b.x1 - 2 && b.x0 < a.x1 - 2 && a.y0 < b.y1 - 3 && b.y0 < a.y1 - 3) bad.push(label + " " + id + ": text on text: '" + a.s.slice(0, 24) + "' / '" + b.s.slice(0, 24) + "'");
+  }
   for (const h of hits) {
     boxes++;
     if (h.x < M - 1 || h.x + h.w > PW_ - M + 1 || h.y < 0 || h.y + h.h > PH_ - M + 1) bad.push(label + " " + id + ": box off the page: " + (h.label || h.fn) + " " + JSON.stringify([h.x, h.y, h.w, h.h].map(Math.round)));

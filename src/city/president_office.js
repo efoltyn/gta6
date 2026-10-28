@@ -2041,7 +2041,10 @@
       no: { label: "Decline", reply: "I hope it's loud, sir." },
     });
   }
+  // (the President game's foreign callers are the real leaders, city/president_game.js)
+  function foreignOff() { return !!(CBZ.presGame && CBZ.presGame.on); }
   function ambassadorWall() {
+    if (foreignOff()) return null;
     const f = foreignCaller();
     return offer({
       id: "p:foreign:wall", via: "phone", topic: "foreign", who: { name: "The ambassador of " + f.name, role: "foreign" }, expires: 150,
@@ -2053,6 +2056,7 @@
     });
   }
   function ambassadorAid() {
+    if (foreignOff()) return null;
     const f = foreignCaller();
     return offer({
       id: "p:foreign:aid:" + day(), via: "phone", topic: "aid", who: { name: "The ambassador of " + f.name, role: "foreign" }, expires: 120,

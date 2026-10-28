@@ -211,14 +211,17 @@
   function holdCamera() {
     if (!CBZ.cinePlay) return;
     const p = framePose();
-    if (B.cine && CBZ.cineAbort) { B.cine = false; try { CBZ.cineAbort(); } catch (e) {} }
-    B.cine = true;
+    // whoever held the lens (ours from the last page, or a scene that was
+    // ending) lets go first: the book is what he is looking at now
+    if (CBZ.cineAbort && (B.cine || (CBZ.cineBusy && CBZ.cineBusy()))) { B.cine = false; try { CBZ.cineAbort(); } catch (e) {} }
+    let ok = false;
     try {
-      CBZ.cinePlay([{ cam: { pos: { x: p.eye.x, y: p.eye.y, z: p.eye.z }, look: { x: p.look.x, y: p.look.y, z: p.look.z } }, dur: 1e9 }], {}, function () {
+      ok = CBZ.cinePlay([{ cam: { pos: { x: p.eye.x, y: p.eye.y, z: p.eye.z }, look: { x: p.look.x, y: p.look.y, z: p.look.z } }, dur: 1e9 }], {}, function () {
         // the scene ended from outside (death, a cut): the book is put down
         if (B.cine) { B.cine = false; if (B.isOpen) close(true); }
-      });
-    } catch (e) { B.cine = false; }
+      }) !== false;
+    } catch (e) { ok = false; }
+    B.cine = ok;
   }
   let lastAspect = 0;
   function open() {
@@ -226,6 +229,7 @@
     const PO_ = PO();
     if (PO_ && PO_.busy && PO_.busy()) return false;           // a folder open, a call, somebody at the desk
     B.isOpen = true; CBZ.presBookOpen = true;
+    document.documentElement.classList.add("pres-reading");
     B.closed.visible = false; B.open.visible = true;
     B.focus = 0;
     paintSpread();
@@ -240,6 +244,7 @@
   function close(fromScene) {
     if (!B.isOpen) return;
     B.isOpen = false; CBZ.presBookOpen = false;
+    document.documentElement.classList.remove("pres-reading");
     B.turnT = -1; if (B.leaf) B.leaf.visible = false;
     if (B.open) B.open.visible = false;
     if (B.closed) B.closed.visible = true;
@@ -476,4 +481,11 @@
     _build: function () { return build(); }, _groups: function () { return { closed: B.closed, open: B.open }; },
   };
   CBZ.presBookOpen = false;
+  // while he reads, nothing of the game's own furniture sits on the page
+  // (the map in the corner, the money, the bar of things he carries)
+  (function () {
+    const st = document.createElement("style");
+    st.textContent = "html.pres-reading #cityHud, html.pres-reading #hotbar { visibility: hidden !important; }";
+    (document.head || document.documentElement).appendChild(st);
+  })();
 })();

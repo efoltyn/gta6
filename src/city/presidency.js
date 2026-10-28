@@ -1519,8 +1519,10 @@
         key: "martial", yes: "Deploy", no: "Refuse", ok: "Trucks are rolling.", nope: "Then we wait for the next one.",
       };
       // THE WAR (city/warroom.js): at war he wants to hit them; at peace with
-      // a country that has stopped talking to us, he wants to go.
-      const WR = CBZ.warroom;
+      // a country that has stopped talking to us, he wants to go. (Not in the
+      // President game: its foreign countries are the real ones in
+      // president/world.js, and the General brings THOSE wars himself.)
+      const WR = CBZ.presGame && CBZ.presGame.on ? null : CBZ.warroom;
       if (WR && WR.enemy()) {
         const t = WR.target();
         const bk = WR.bunkerTarget();

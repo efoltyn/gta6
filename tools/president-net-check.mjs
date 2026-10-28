@@ -2,14 +2,14 @@
 /* tools/president-net-check.mjs — two presidents, one world, over a real relay.
 
    Starts server/server.js on a free port (the same relay protocol a room
-   runs in a host's tab), opens games/president.html twice in one headless
-   Chrome (two tabs), hosts a room in the first, joins it from the second,
-   seats the guest in another country and begins. Then checks:
-     both tabs start            the guest is handed the host's world
-     the clock runs on both     the guest steps only on the host's ticks
-     a guest's order lands      a tariff tapped in the guest tab appears in
-                                the host's world, made by the guest's country
-     lockstep                   at the same day both worlds hash the same
+   runs in a host's tab), opens games/president.html (the lobby) twice in
+   one headless Chrome (two tabs), hosts a room in the first, joins it from
+   the second, seats the guest in another country and begins. Then checks
+   that both pages head into the real Mansion (index.html?slice=estate) in
+   the same room, two different countries, one seed, the host marked as the
+   one who runs the clock. (The world's lockstep itself is
+   tools/president-sim-check.mjs LOCKSTEP; the game page's side of the room
+   is city/president_game.js joinRoom.)
 
    node tools/president-net-check.mjs
 */
@@ -49,7 +49,7 @@ async function tab() {
 }
 try {
   await sleep(600);
-  const q = `relay=ws://127.0.0.1:${PORT}/ws&seed=4242&countries=8`;
+  const q = `relay=ws://127.0.0.1:${PORT}/ws`;
   const A = { evl: rig.evl, wait: rig.wait, send: rig.send };
   await rig.open("games/president.html", q);
   await A.wait("window.CBZ && CBZ.presWorld && document.getElementById('clist').children.length > 0", 30000);
@@ -64,27 +64,16 @@ try {
   // the guest takes a different country
   await B.evl(`(() => { const rows = document.querySelectorAll('.crow'); for (const r of rows) if (!r.classList.contains('on') && !r.classList.contains('taken')) { r.click(); return; } })()`);
   await sleep(1500);
+  // BEGIN: every president's page opens the real game, in the same room, on the host's clock
+  for (const T of [A, B]) await T.evl("CBZ.presGo = function (u) { window.__went = u; }; true");
   await A.evl("document.getElementById('begin').click()");
-  check("both tabs take office", await A.wait("document.body.classList.contains('playing')", 60000) && await B.wait("document.body.classList.contains('playing')", 60000));
-  const seats = await A.evl("JSON.stringify([CBZ.presGame.me(), CBZ.presGame.state().c.filter(c => c.human != null).map(c => c.id)])");
-  const bme = await B.evl("CBZ.presGame.me()");
-  check("two different presidents", JSON.parse(seats)[0] !== bme && JSON.parse(seats)[1].length === 2, "host " + JSON.parse(seats)[0] + ", guest " + bme + ", humans " + JSON.parse(seats)[1]);
-  // run the clock fast on the host
-  await A.send("Target.activateTarget", { targetId: rig.page.id }).catch(() => {});
-  await A.evl("CBZ.presGame.speed(4)");
-  check("the guest's world moves with the host's clock", await B.wait("CBZ.presGame.state().day > 40", 90000), "guest day " + await B.evl("CBZ.presGame.state().day"));
-  // the guest gives an order
-  const tgt = await B.evl("CBZ.presGame.state().c.find(c => c.alive && c.id !== CBZ.presGame.me()).id");
-  await B.evl(`CBZ.presGame.submit({ type: "tariff", t: ${tgt}, good: "all", v: 0.25 })`);
-  check("the guest's tariff lands in the host's world", await A.wait(`CBZ.presGame.state().log.some(e => e.k === "tariff" && e.c === ${bme} && e.t === ${tgt})`, 30000));
-  check("...and comes back to the guest", await B.wait(`CBZ.presGame.state().log.some(e => e.k === "tariff" && e.c === ${bme} && e.t === ${tgt})`, 30000));
-  // lockstep: pause, let the guest catch up, compare
-  await A.evl("CBZ.presGame.speed(0)");
-  await sleep(2500);
-  const ha = JSON.parse(await A.evl("JSON.stringify([CBZ.presGame.state().day, CBZ.presWorld.checksum(CBZ.presGame.state())])"));
-  await B.wait(`CBZ.presGame.state().day === ${ha[0]}`, 20000);
-  const hb = JSON.parse(await B.evl("JSON.stringify([CBZ.presGame.state().day, CBZ.presWorld.checksum(CBZ.presGame.state())])"));
-  check("same day, same world", ha[0] === hb[0] && ha[1] === hb[1], "day " + ha[0] + " " + ha[1].toString(16) + " vs day " + hb[0] + " " + hb[1].toString(16));
+  const ok = await A.wait("!!window.__went", 20000) && await B.wait("!!window.__went", 20000);
+  check("both pages head into office", ok);
+  const ua = new URL(await A.evl("window.__went"), rig.origin + "games/"), ub = new URL(await B.evl("window.__went"), rig.origin + "games/");
+  check("into the real Mansion", /index\.html$/.test(ua.pathname) && ua.searchParams.get("slice") === "estate" && ub.searchParams.get("slice") === "estate", ua.pathname + "?" + ua.searchParams);
+  check("the same room, the host runs the clock", ua.searchParams.get("room") && ua.searchParams.get("room") === ub.searchParams.get("room") && ua.searchParams.get("host") === "1" && !ub.searchParams.get("host"));
+  check("two different countries", ua.searchParams.get("president") && ua.searchParams.get("president") !== ub.searchParams.get("president"), ua.searchParams.get("president") + " / " + ub.searchParams.get("president"));
+  check("one world (same seed)", ua.searchParams.get("pseed") === ub.searchParams.get("pseed"));
   console.log("errors: host", rig.errors.length ? rig.errors.slice(0, 5).join(" | ") : "none", "· guest", B.errors.length ? B.errors.slice(0, 5).join(" | ") : "none");
   B.close();
 } catch (e) { console.error("FAILED:", e.message); fails++; }

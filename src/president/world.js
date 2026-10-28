@@ -1293,7 +1293,7 @@
     // expiry: ignoring a matter is an answer
     c.matters = c.matters.filter(function (m) {
       if (S.day <= m.expires) return true;
-      if (m.kind === "coup" || m.kind === "traitor") { fall(S, c, m.kind === "coup" ? "coup" : "assassinated"); return false; }
+      if (m.kind === "coup" || m.kind === "traitor" || m.kind === "hit") { fall(S, c, m.kind === "coup" ? "coup" : "assassinated"); return false; }
       if (m.kind === "bill") { /* unsigned: it dies */ logEv(S, c.id, "billDied", { name: m.data.name }); }
       const who = c.cab[m.from]; if (who) who.loyalty -= 2;
       return false;
@@ -1580,6 +1580,14 @@
         if (!obey(S, c, "security", 0.3)) return { ok: false, why: "refused", role: "security" };
         const mine = c.budget.security * c.gdp, theirs = T.budget.security * T.gdp;
         const p = clamp(0.12 + 0.55 * mine / (mine + theirs * 1.6), 0.05, 0.7);
+        // A HUMAN TARGET IS NOT A ROLL: the men come for him in his own
+        // building (city/president_storm.js) and the fight answers ("storm").
+        // A page with no building lets the clock run out, and he falls.
+        if (T.human != null && !T.out) {
+          if (!T.matters.some(function (m) { return m.kind === "hit"; })) addMatter(S, T, "hit", "security", { by: c.id }, [{ label: "Run", act: { type: "noop" } }], 4, true);
+          logEv(S, c.id, "sent", { t: T.id });
+          return { ok: true, sent: true };
+        }
         const hit = rnd(S) < p;
         const caught = rnd(S) < (hit ? 0.35 : 0.65);
         logEv(S, c.id, hit ? "killed" : "plotFailed", { t: T.id, name: T.leader.name, caught: caught });
@@ -1776,6 +1784,32 @@
         return { ok: true };
       }
       case "resign": { fall(S, c, "resigned"); return { ok: true }; }
+      /* THE FIGHT DECIDED IT. In the real building (city/president_storm.js)
+         a coup or an attempt on a human president's life is people with
+         guns, and who walks out is what happened, not a roll: the page that
+         saw it sends this. In a room it travels through the host like every
+         other action, so every machine's world agrees. */
+      // the men are in the building: the matter waits for the fight, not the clock
+      case "stormBegin": {
+        const m = c.matters.find(function (x) { return x.id === a.m; });
+        if (!m) return { ok: false, why: "gone" };
+        m.expires = S.day + 90;
+        return { ok: true };
+      }
+      case "storm": {
+        const m = a.m != null ? c.matters.find(function (x) { return x.id === a.m; }) : null;
+        if (m) c.matters = c.matters.filter(function (x) { return x !== m; });
+        if (c.out) return { ok: false, why: "out" };
+        if (a.won) {
+          const kind = m ? m.kind : "coup";
+          if (kind === "coup") { logEv(S, c.id, "coupFailed", { name: c.cab.general.name }); c.cab.general = newMinister(S, "general", c); c.freedom -= 3; c.rally += 6; }
+          else if (kind === "traitor") { logEv(S, c.id, "plotFoiled", { name: c.cab.security.name }); c.cab.security = newMinister(S, "security", c); c.rally += 4; }
+          else { logEv(S, c.id, "survived", { by: m && m.data ? m.data.by : -1 }); c.rally += 8; if (m && m.data && m.data.by >= 0) plotFound(S, S.c[m.data.by], c); }
+          return { ok: true, survived: true };
+        }
+        fall(S, c, a.why || (m && m.kind === "coup" ? "coup" : "assassinated"));
+        return { ok: true, survived: false };
+      }
       case "arrest": {
         // the coup at your door: your security against his soldiers
         const gen = c.cab.general;

@@ -146,7 +146,13 @@
   // a row: label left, value right-aligned on the value column
   const VAL_X = 520;
   function row(x, label, val, Y, col, sub) {
-    T(x, label, MARGIN, Y, 27, "", INK2);
+    // the label gives way to the value: it never runs under the number
+    x.font = "700 28px " + MONO;
+    const vw = x.measureText(String(val)).width;
+    let ls = 27;
+    x.font = ls + "px " + SERIF;
+    while (ls > 15 && MARGIN + x.measureText(label).width + 18 > VAL_X - vw) { ls--; x.font = ls + "px " + SERIF; }
+    T(x, label, MARGIN, Y, ls, "", INK2);
     T(x, val, VAL_X, Y, 28, "700", col || INK, "right", MONO);
     if (sub) T(x, sub, VAL_X + 18, Y, 21, "", INK2, "left", MONO);
   }
