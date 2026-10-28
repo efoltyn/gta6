@@ -197,9 +197,18 @@ MASS.begin = function (asBench, how) {
   }
   MASS.on = rows > 0;
   if (!MASS.on) return false;
-  if (how && how.restage && typeof resetArmies === "function") resetArmies();
+  /* a battle of rows is a new war: its armies' ledgers start here (the rows
+     add their power below). morale.js's own "a roster nobody has counted is a
+     new war" test cannot see rows, and at the first tick it wiped every
+     row's p0: the army lost nothing, whatever it lost. */
+  if (typeof resetArmies === "function") { resetArmies(); for (let i = 0; i < men.length; i++) men[i]._mc = 0; }
   const total = SET.redN + SET.blueN;
   MASS.total = total;
+  /* THE CORE'S STEP. Its rules run on their own clocks (a think every 0.25-0.6 s,
+     a round on its flight time), so the step only sets how evenly the work is
+     spread: a small war steps with the frame (no frame carries a whole 0.1 s
+     of thinks), a huge one in bigger steps (fewer passes over a million rows). */
+  MASS.DT = total <= 20000 ? 1 / 30 : total <= 200000 ? 0.05 : 0.1;
   STORE.reserve(total + 16);
   const ext = massExtent();
   MASS.ground = massGround(ext);
@@ -227,6 +236,7 @@ MASS.open = function (o) {
   if (o.fullr) MASS.opt.fullr = o.fullr;
   if (!CBZ.battleInfantry) return false;
   MASS.on = true;
+  MASS.DT = 1 / 30;                             // (a city war's forces are small: the core steps with the frame)
   MASS.total = 0;
   STORE.reserve(o.capHint || 256);
   MASS.ground = null; MASS.cover = null;
@@ -639,8 +649,15 @@ MASS.count = function (fresh) {
     const x = X[r], z = Z[r];
     const own = !(C.ext && C.ext[r]);
     const u = own ? MASS.unitOf[UN[r]] : null;
-    const w = u ? u.w : 1;
-    const p = DN && DN[r] ? 0 : w * (0.45 + 0.55 * Math.max(0, Math.min(1, CP ? CP[r] : 1)));
+    /* a host body's power is the page's own sum for it (morale.js manWeight:
+       a tank is a squad's worth, by its hp), the one its p0 was counted in.
+       Counted at 1 a head before, a lone M1 read as 95% destroyed in the
+       army arithmetic from the first second, and thirty riflemen it was
+       killing took heart from it. */
+    const eb = own ? null : STORE.ref[r];
+    const w = u ? u.w : eb && eb._mw ? eb._mw : 1;
+    const hf = u ? (CP ? CP[r] : 1) : eb && eb.maxHp ? eb.hp / eb.maxHp : 1;
+    const p = DN && DN[r] ? 0 : w * (0.45 + 0.55 * Math.max(0, Math.min(1, hf)));
     const fighting = l === 1 && !(DN && DN[r]);
     if (SD[r] === 0) {
       a0++; ax0 += x; az0 += z; p0 += p;

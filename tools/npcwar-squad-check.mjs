@@ -46,11 +46,16 @@ function placer(na, nb, D, flip) {
     const side_ = slot === 0 ? 0 : slot <= 4 ? -1 : 1;
     const back = slot === 0 ? 0 : 4 + k * 4.2, latm = side_ * (5 + k * 4.2);
     const x0 = west ? -D / 2 : D / 2;
-    return { x: x0 - fx * back, z: lat + latm * (west ? 1 : -1), h: west ? Math.PI / 2 : -Math.PI / 2 };
+    // (the east line is the west one turned 180 degrees about the centre, as
+    // the ground is: before, it was the west one MIRRORED, so squad k of each
+    // side stood on different ground)
+    return { x: x0 - fx * back, z: west ? lat + latm : -(lat + latm), h: west ? Math.PI / 2 : -Math.PI / 2 };
   };
 }
 function fight(sa, sb, na, nb, seed, grounds) {
-  const g = grounds[seed % grounds.length];
+  // each ground is fought from both ends (seed % 6 with seed & 1 paired every
+  // even ground with one end and every odd one with the other)
+  const g = grounds[(seed >> 1) % grounds.length];
   const flip = seed & 1;
   const B = battle({ ground: g, seed: seed * 104729 + na, a: sa, b: sb, na, nb, place: placer(na, nb, RANGE, flip) });
   const I = B.I, C = B.S.cols;

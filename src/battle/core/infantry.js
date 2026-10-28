@@ -879,10 +879,17 @@
       }
       // ---- contact: what he does about it
       // his own contact (he sees one, a round cracked past, he knows where they are),
-      // or his squad's: he heard the fire and the shout, and he knows the bearing
+      // or his squad's: he heard the fire and the shout, and he knows the bearing.
+      // (The squad's, once the squad is fighting: a squad still travelling, or
+      // bounding forward in overwatch, that only HEARS the platoon's fight on
+      // the net keeps moving to it. Before, every man in it took the heard
+      // contact as his own and went to ground with nothing to shoot, while the
+      // squad, none of whose men had seen anything, kept ordering the bound:
+      // a 60 v 25 attack lay 160 m short of the line for four minutes.)
       const own = tg >= 0 || I.simT - G.crackT[r] < 8 || I.simT - G.lkT[r] < 12;
       const sqd = G.sqd[r];
-      const inContact = own || (sqd >= 0 && SQ.lastC[sqd] > 0 && I.simT - SQ.lastC[sqd] < 10);
+      const sqT = sqd >= 0 ? SQ.task[sqd] : TASK.advance;
+      const inContact = own || (sqd >= 0 && sqT !== TASK.advance && sqT !== TASK.overwatch && SQ.lastC[sqd] > 0 && I.simT - SQ.lastC[sqd] < 10);
       if (own) G.contactT[r] = I.simT;
       decide(r, D, t, inContact);
     }
@@ -1034,7 +1041,11 @@
           return;
         }
         if (G.post[r] !== POST.stand) {
-          if (G.post[r] === POST.prone && !quiet) { G.mv[r] = MOVE.hold; return; }
+          // (unless his team has the bound: then he gets up and goes, which is
+          // what the watching team is down there for. Before, a squad whose men
+          // had taken a crack in the last 40 s lay in "overwatch" for minutes,
+          // both teams down, and never closed.)
+          if (G.post[r] === POST.prone && !quiet && task !== TASK.overwatch) { G.mv[r] = MOVE.hold; return; }
           if (G.postT[r] <= 0) setPost(r, POST.stand);
           G.mv[r] = MOVE.hold;
           return;
@@ -1193,15 +1204,18 @@
       if (G.post[r] !== POST.prone) { G.post[r] = POST.prone; G.postT[r] = 0; }
     }
     function routThink(r) {
-      // away from the enemy, as fast as he can, until he is far enough
-      const o = I.order[G.side[r] ? 0 : 1];
-      void o;
-      const tx = G.lkT[r] > -50 ? G.lkx[r] : G.x[r], tz = G.lkT[r] > -50 ? G.lkz[r] : G.z[r] + 1;
+      /* away from the enemy, as fast as he can, until he is out of it: 400 m
+         from the nearer of where he last saw them and the middle of their
+         army. (A man who had never seen one ran from a point a metre in front
+         of him, which went with him: he never got clear and never left.) */
+      const e = G.side[r] ? 0 : 1;
+      let tx = sideX[e], tz = sideZ[e];
+      if (G.lkT[r] > -50 && Math.hypot(G.lkx[r] - G.x[r], G.lkz[r] - G.z[r]) < Math.hypot(tx - G.x[r], tz - G.z[r])) { tx = G.lkx[r]; tz = G.lkz[r]; }
       const dx = G.x[r] - tx, dz = G.z[r] - tz, d = Math.hypot(dx, dz) || 1;
       G.gx[r] = G.x[r] + dx / d * 40; G.gz[r] = G.z[r] + dz / d * 40;
       if (G.post[r] !== POST.stand) setPost(r, POST.stand);
       G.mv[r] = MOVE.run;
-      if (d > 600) { G.life[r] = LIFE.fled; I.stats.fled[G.side[r]]++; ev(EV.fled, r, -1, 0); }
+      if (d > 400) { G.life[r] = LIFE.fled; I.stats.fled[G.side[r]]++; ev(EV.fled, r, -1, 0); }
     }
 
     /* ============================================================ THE TRIGGER */
@@ -2028,6 +2042,15 @@
       }
       return best;
     }
+    // the squad runs: every man of it still on his feet
+    function routSquad(sq) {
+      const base = sq * 10;
+      for (let j = 0; j < 10; j++) {
+        const r = SQ.mem[base + j];
+        if (r >= 0 && fighting(r) && G.life[r] === LIFE.alive) { G.life[r] = LIFE.routed; ev(EV.rout, r, -1, 0); }
+      }
+      SQ.task[sq] = TASK.gone;
+    }
     function squadTick(sq) {
       const base = sq * 10;
       let lead = -1, nAlive = 0, nFight = 0, cx = 0, cz = 0, inContact = 0, pinned = 0, tx = 0, tz = 0, nt = 0, stress = 0, firing = 0;
@@ -2087,24 +2110,22 @@
       const A = I.army[SQ.side[sq]];
       const P = losses + stress / nFight + (A ? Math.max(0, 0.4 - A.morale) * 0.8 + (A.broken ? 0.4 : 0) : 0);
       const task0 = SQ.task[sq];
-      // a broken army's squads go, in contact or not: back toward their own side
-      if (A && A.broken && P > D.nerve * 1.2 && task0 !== TASK.gone) {
-        for (let j = 0; j < 10; j++) {
-          const r = SQ.mem[base + j];
-          if (r >= 0 && fighting(r) && G.life[r] === LIFE.alive) { G.life[r] = LIFE.routed; ev(EV.rout, r, -1, 0); }
-        }
-        SQ.task[sq] = TASK.gone;
+      /* A BROKEN ARMY (half of it running, or its morale gone: under 0.2 with
+         the shock of the last deaths left out, an army that has lost half its
+         power and is losing, not one that has just taken a bad minute) goes. A squad that is shaken itself
+         runs with it; a steady one pulls out in order (breaking contact by
+         bounds), and once it is clear it keeps going: there is nothing left
+         to hold the line with. Before, only a squad far past its own nerve
+         went, and ten steady men sat on a lost field for good. */
+      if (A && (A.broken || A.morale + (A.shock || 0) < 0.2) && task0 !== TASK.gone) {
+        if (P > D.nerve * 0.8 || !inContact) { routSquad(sq); return; }
+        if (task0 !== TASK.breakc) { SQ.task[sq] = TASK.breakc; SQ.bound[sq] = 1; SQ.boundT[sq] = I.simT; SQ.brkX[sq] = cx; SQ.brkZ[sq] = cz; SQ.brkT[sq] = I.simT; }
+        if (Math.hypot(cx - SQ.brkX[sq], cz - SQ.brkZ[sq]) > 150) { routSquad(sq); return; }
+        if (I.simT - SQ.boundT[sq] > 5) { SQ.bound[sq] = SQ.bound[sq] === 1 ? 2 : 1; SQ.boundT[sq] = I.simT; }
         return;
       }
       if (inContact && (P > D.nerve || task0 === TASK.breakc)) {
-        if (P > D.nerve * 1.45 || (task0 === TASK.breakc && P > D.nerve * 1.25)) {
-          for (let j = 0; j < 10; j++) {
-            const r = SQ.mem[base + j];
-            if (r >= 0 && fighting(r) && G.life[r] === LIFE.alive) { G.life[r] = LIFE.routed; ev(EV.rout, r, -1, 0); }
-          }
-          SQ.task[sq] = TASK.gone;
-          return;
-        }
+        if (P > D.nerve * 1.45 || (task0 === TASK.breakc && P > D.nerve * 1.25)) { routSquad(sq); return; }
         if (task0 !== TASK.breakc) { SQ.task[sq] = TASK.breakc; SQ.bound[sq] = 1; SQ.boundT[sq] = I.simT; SQ.brkX[sq] = cx; SQ.brkZ[sq] = cz; SQ.brkT[sq] = I.simT; }
         // out of it: 150 m back from where it broke, or out of contact
         if (Math.hypot(cx - SQ.brkX[sq], cz - SQ.brkZ[sq]) > 150) { SQ.task[sq] = TASK.hold; return; }
@@ -2184,7 +2205,8 @@
     }
 
     /* ============================================================ THE STEP */
-    let sqCur = 0, stepN = 0, sqDir = 1;
+    let stepN = 0;
+    const SQ_DT = 0.5;
     I.step = function (dt) {
       const T0 = now();
       I.simT += dt;
@@ -2196,16 +2218,20 @@
       }
       // the grids: the bodies every 0.2 s, who-can-see-whom every 0.5 s
       if (gridAt < 0 || I.simT - gridAt >= 0.2) rebuild(gridAt < 0 || I.simT - eyeGridAt >= 0.5);
-      // the squads, each once a second, staggered
+      /* THE SQUADS, each on its own clock: twice a second, at a phase of its
+         own drawn off the battle's seed. Before, one round went up the squad
+         list and back down it; the side whose squads were laid first always
+         decided first after the turn at the bottom, and lost a 30 v 30 mirror
+         58-42 over 400 seeds (60-40 the other way with the list reversed). */
       const t1 = now();
       if (SQ.n) {
-        let k = Math.max(1, Math.ceil(SQ.n * dt));
-        // (the round goes up the squads and back down them, so no side's squads always decide first)
-        while (k-- > 0) {
-          if (sqCur >= SQ.n) sqCur = SQ.n - 1;
-          squadTick(sqCur);
-          sqCur += sqDir;
-          if (sqCur >= SQ.n) { sqCur = SQ.n - 1; sqDir = -1; } else if (sqCur < 0) { sqCur = 0; sqDir = 1; }
+        const asc0 = (stepN & 1) === 0, SA = SQ.at, simT0 = I.simT;
+        for (let k = 0; k < SQ.n; k++) {
+          const q = asc0 ? k : SQ.n - 1 - k;
+          if (simT0 < SA[q]) continue;
+          if (SA[q] <= 0) { SA[q] = simT0 + SQ_DT * trait(q + 0x40000, 0x5A7); continue; }    // (its first tick: a phase of its own)
+          squadTick(q);
+          SA[q] = simT0 + SQ_DT * (0.8 + 0.4 * trait(q + 0x40000, (simT0 * 2) | 0));
         }
       }
       const t2 = now(); I.ms.squad += t2 - t1;

@@ -119,7 +119,7 @@ function updateMorale() {
      ever counted, while the ledger says it has, is a fresh one. */
   let counted = 0;
   for (let i = 0; i < men.length; i++) if (men[i]._mc) { counted = 1; break; }
-  if (!counted && men.length && (ARMY.red.p0 > 0 || ARMY.blue.p0 > 0)) resetArmies();
+  if (!counted && men.length && !(MASS.on && MASS.rows) && (ARMY.red.p0 > 0 || ARMY.blue.p0 > 0)) resetArmies();
   const dt = moraleT < 0 ? 0 : Math.max(0, Math.min(2, simT - moraleT));
   moraleT = simT;
   const R = ARMY.red, B = ARMY.blue;
