@@ -209,6 +209,8 @@ MASS.begin = function (asBench, how) {
   spawnQueue.length = 0;
   MASS.spawnAll();
   MASS.buildSquads();
+  // (each army's middle first: the first order is "advance on HIM", not on the world's origin)
+  MASS.count(true); MASS.com();
   massOrders(true);
   if (CBZ.massDraw) CBZ.massDraw.begin();
   return true;

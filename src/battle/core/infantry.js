@@ -267,7 +267,7 @@
         const cap = Math.max(n, sqCap * 2, 16);
         for (const k in SQ) {
           if (k === "n" || k === "mem") continue;
-          const a = new SQ[k].constructor(cap); a.set(SQ[k].subarray(0, Math.min(SQ[k].length, cap))); SQ[k] = a;
+          const a = new SQ[k].constructor(cap); if (k === "lead") a.fill(-1); a.set(SQ[k].subarray(0, Math.min(SQ[k].length, cap))); SQ[k] = a;      // (a squad has no leader until its first tick names one)
         }
         const m = new I32(cap * 10).fill(-1); m.set(SQ.mem.subarray(0, Math.min(SQ.mem.length, cap * 10))); SQ.mem = m;
         sqCap = cap;
@@ -2144,7 +2144,7 @@
     }
 
     /* ============================================================ THE STEP */
-    let sqCur = 0;
+    let sqCur = 0, stepN = 0, sqDir = 1;
     I.step = function (dt) {
       const T0 = now();
       I.simT += dt;
@@ -2160,12 +2160,24 @@
       const t1 = now();
       if (SQ.n) {
         let k = Math.max(1, Math.ceil(SQ.n * dt));
-        while (k-- > 0) { squadTick(sqCur); sqCur = (sqCur + 1) % SQ.n; }
+        // (the round goes up the squads and back down them, so no side's squads always decide first)
+        while (k-- > 0) {
+          if (sqCur >= SQ.n) sqCur = SQ.n - 1;
+          squadTick(sqCur);
+          sqCur += sqDir;
+          if (sqCur >= SQ.n) { sqCur = SQ.n - 1; sqDir = -1; } else if (sqCur < 0) { sqCur = 0; sqDir = 1; }
+        }
       }
       const t2 = now(); I.ms.squad += t2 - t1;
       // the men: his think on his own clock, then his trigger
       const LF = G.life, TA = G.thinkAt, TG = G.tgt, RT = G.reloadT, LK = G.lkT, EX = G.ext, simT = I.simT;
-      for (let r = 0; r < n; r++) {
+      /* THE ORDER MEN ARE WALKED IN ALTERNATES, step by step. Inside one step
+         the first man walked acts on a world the second has not acted in yet;
+         walked always low row to high, the side whose rows were laid first won
+         a mirror match 19 times in 23 (measured on the dunes, 30 v 30). */
+      const asc = (++stepN & 1) === 0;
+      for (let k = 0; k < n; k++) {
+        const r = asc ? k : n - 1 - k;
         const l = LF[r];
         if ((l !== LIFE.alive && l !== LIFE.routed) || EX[r]) continue;
         if (simT >= TA[r]) {
