@@ -111,379 +111,317 @@
   const ROLE_TITLE = { general: "General", treasury: "Treasury Secretary", bank: "Central Bank Governor", trade: "Trade Representative", security: "Security Chief" };
 
   // =============================================================== names
-  const SYL_A = ["Val", "Kor", "Ostr", "Mar", "Tel", "Bar", "Sar", "Nov", "Esk", "Dra", "Kal", "Ruv", "Zan", "Hel", "Ard", "Lum", "Teg", "Mor", "Vesh", "Ilm", "Qar", "Tor", "Bel", "Cas", "Dun", "Fer", "Gal", "Hav", "Jor", "Lys", "Myr", "Nar", "Ost", "Pel", "Rhe", "Sol", "Tam", "Ul", "Vor", "Yr", "Zel", "Aen", "Brev", "Coth", "Dal", "Erm"];
-  const SYL_B = ["a", "e", "i", "o", "u", "ar", "en", "is", "or", "an", "el", "um", "ad", "ir", "ov", "eth", "ak"];
-  const SYL_C = ["ia", "stan", "land", "mark", "ova", "esh", "ar", "ene", "ium", "or", "ad", "iya", "ana", "ond", "eria", "avia", "ith", "una"];
-  const CITY_C = ["grad", "ford", "polis", "ton", "berg", "mouth", "haven", "dor", "ville", "kent", "port", "mar", "sk", "abad", "ora", "um", "ice", "en"];
-  const FIRST = ["Anton", "Mara", "Idris", "Lena", "Viktor", "Sana", "Elias", "Noor", "Pavel", "Ines", "Tomas", "Rhea", "Oskar", "Dalia", "Kasim", "Yara", "Bram", "Selin", "Mateo", "Ilse", "Ruben", "Zofia", "Amir", "Greta", "Luka", "Hana", "Marek", "Odile", "Teo", "Vera", "Jonas", "Leyla", "Felix", "Nadia", "Arvid", "Esme", "Dario", "Katya", "Henrik", "Amara"];
-  const LAST_A = ["Vor", "Hal", "Kest", "Mor", "Bren", "Sev", "Dal", "Orl", "Tarr", "Lind", "Rask", "Fen", "Gor", "Hask", "Ivr", "Jas", "Kov", "Lor", "Marr", "Nesk", "Pol", "Quin", "Rov", "Strand", "Tov", "Ulm", "Vask", "Wren"];
-  const LAST_B = ["ane", "ek", "ov", "ström", "ani", "ez", "ar", "en", "ić", "ello", "ard", "is", "ova", "ski", "berg", "ain", "ell", "ow"];
+  /* NOBODY HERE IS MADE UP. The countries, their borders, their leaders and
+     their numbers are real (president/nations.js, president/earth.js). The
+     people AROUND a leader (his ministers, the man who replaces him when he
+     falls) are not anybody in particular: a first name and a surname from
+     his own country's language. */
+  function nationsData() { return CBZ.presNations || (typeof require === "function" ? require("./nations.js") : null); }
+  function earthData() { return CBZ.presEarth || (typeof require === "function" ? require("./earth.js") : null); }
   function pick(r, a) { return a[Math.floor(r() * a.length) % a.length]; }
-  function countryName(r) { const s = pick(r, SYL_A) + (r() < 0.45 ? pick(r, SYL_B) : "") + pick(r, SYL_C); return s; }
-  function cityName(r) { return pick(r, SYL_A) + (r() < 0.5 ? pick(r, SYL_B) : "") + pick(r, CITY_C); }
-  function personName(r) { return pick(r, FIRST) + " " + pick(r, LAST_A) + pick(r, LAST_B); }
-  // HoI4-ish muted country fills, far enough apart to read on paper
-  const PALETTE = ["#7d9fc4", "#c47d7d", "#8fb07a", "#d2b467", "#a487c0", "#6fb3ad", "#c99a6e", "#8c8fb8", "#b8b07a", "#c086a3", "#7aa88e", "#d0866a", "#9aa6b4", "#b5916d", "#7d8f6a", "#a37a7a"];
+  function personName(r, pool) {
+    const P = nationsData().names(pool);
+    return pick(r, P[0]) + " " + pick(r, P[1]);
+  }
 
   // ============================================================== the map
-  const GEO = new Map();
-  function geo(seed, n) {
-    const key = (seed | 0) + ":" + (n | 0);
-    if (GEO.has(key)) return GEO.get(key);
-    const r = stream((seed ^ 0x51ab3) | 0);
-    const Wd = 160, Ht = 96, N = Wd * Ht;
-    // ---- height: a few continents and fractal noise
-    function vnoise(x, y, s) {
-      const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
-      const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
-      const a = hash2(s, xi, yi), b = hash2(s, xi + 1, yi), c = hash2(s, xi, yi + 1), d = hash2(s, xi + 1, yi + 1);
-      return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  /* THE REAL WORLD AS TILES (earth.js: equirectangular, a few tenths of a
+     degree a tile). A country in play is split into provinces, one per city
+     in its row (nations.js), each grown over the country's own tiles from
+     its city; a front moves city by city. Land of a country not in play is
+     `land` but no province: it is drawn, named and bordered, and nobody
+     marches across it. Sea lanes run only over open water. */
+  let GEO = null;
+  function decodeEarth(E) {
+    const land = new Int16Array(E.W * E.H);
+    let o = 0;
+    for (let i = 0; i < E.rle.length; i += 2) {
+      const v = E.rle.charCodeAt(i) - 0x30 - 1, n = E.rle.charCodeAt(i + 1) - 0x30;
+      land.fill(v, o, o + n); o += n;
     }
-    function fbm(x, y) {
-      let t = 0, amp = 0.5, f = 1;
-      for (let o = 0; o < 5; o++) { t += amp * vnoise(x * f, y * f, seed + o * 977); amp *= 0.5; f *= 2.03; }
-      return t;
-    }
-    const cont = [];
-    const nc = 3 + Math.floor(r() * 3);
-    for (let i = 0; i < nc; i++) cont.push({ x: 18 + r() * (Wd - 36), y: 14 + r() * (Ht - 28), rx: 18 + r() * 26, ry: 12 + r() * 18, w: 0.7 + r() * 0.5 });
-    const h = new Array(N);
-    for (let y = 0; y < Ht; y++) for (let x = 0; x < Wd; x++) {
-      let b = 0;
-      for (const c of cont) { const dx = (x - c.x) / c.rx, dy = (y - c.y) / c.ry; b += c.w * Math.exp(-(dx * dx + dy * dy)); }
-      const edge = Math.min(x, Wd - 1 - x, y, Ht - 1 - y);
-      h[y * Wd + x] = b * 0.9 + fbm(x / 22, y / 22) * 1.1 - (edge < 6 ? (6 - edge) * 0.12 : 0);
-    }
-    const sorted = h.slice().sort(function (a, b) { return a - b; });
-    const sea = sorted[Math.floor(N * 0.58)];
-    const land = new Array(N);
-    for (let i = 0; i < N; i++) land[i] = h[i] > sea ? 1 : 0;
-    // drop specks: components under 40 cells go under the sea
-    const comp = new Array(N).fill(-1);
-    let nComp = 0;
-    const sizes = [];
-    for (let i = 0; i < N; i++) {
-      if (!land[i] || comp[i] >= 0) continue;
-      const q = [i]; comp[i] = nComp; let k = 0;
-      while (k < q.length) {
-        const j = q[k++], x = j % Wd, y = (j / Wd) | 0;
-        const nb = [x > 0 ? j - 1 : -1, x < Wd - 1 ? j + 1 : -1, y > 0 ? j - Wd : -1, y < Ht - 1 ? j + Wd : -1];
-        for (const t of nb) if (t >= 0 && land[t] && comp[t] < 0) { comp[t] = nComp; q.push(t); }
-      }
-      sizes.push(q.length); nComp++;
-    }
-    for (let i = 0; i < N; i++) if (land[i] && sizes[comp[i]] < 40) land[i] = 0;
-    let landN = 0; for (let i = 0; i < N; i++) landN += land[i];
-    // ---- provinces: spaced seeds, grown over land
-    const want = Math.max(40, (n | 0) * 7);
-    const minD = Math.sqrt(landN / want) * 0.8;
-    const seeds = [];
-    for (let tries = 0; tries < want * 60 && seeds.length < want; tries++) {
-      const i = Math.floor(r() * N);
-      if (!land[i]) continue;
-      const x = i % Wd, y = (i / Wd) | 0;
-      let ok = true;
-      for (const s of seeds) { const dx = s.x - x, dy = s.y - y; if (dx * dx + dy * dy < minD * minD) { ok = false; break; } }
-      if (ok) seeds.push({ x: x, y: y, i: i });
-    }
-    const cell = new Array(N).fill(-1);
-    function grow(list) {
-      const q = [];
-      list.forEach(function (s, k) { cell[s.i] = s.id != null ? s.id : k; q.push(s.i); });
-      let k = 0;
-      while (k < q.length) {
-        // a little shuffle so borders wander instead of running straight
-        const sw = k + Math.floor(r() * Math.min(6, q.length - k));
-        const tmp = q[k]; q[k] = q[sw]; q[sw] = tmp;
-        const j = q[k++], x = j % Wd, y = (j / Wd) | 0;
-        const nb = [x > 0 ? j - 1 : -1, x < Wd - 1 ? j + 1 : -1, y > 0 ? j - Wd : -1, y < Ht - 1 ? j + Wd : -1];
-        for (const t of nb) if (t >= 0 && land[t] && cell[t] < 0) { cell[t] = cell[j]; q.push(t); }
-      }
-    }
-    seeds.forEach(function (s, k) { s.id = k; });
-    grow(seeds);
-    // islands that got no seed: one province each
-    for (let i = 0; i < N; i++) if (land[i] && cell[i] < 0) { const s = { x: i % Wd, y: (i / Wd) | 0, i: i, id: seeds.length }; seeds.push(s); grow([s]); }
-    const P = seeds.length;
+    return land;
+  }
+  function geo() {
+    if (GEO) return GEO;
+    const E = earthData(), NA = nationsData();
+    const Wd = E.W, Ht = E.H, N = Wd * Ht;
+    const land = decodeEarth(E);                       // earth country index per tile, -1 sea
+    const nat = new Int16Array(N).fill(-1);            // nation in play per tile
+    const eIdx = NA.list.map(function (n) { return E.iso.indexOf(n.iso); });
+    const natOfE = {};
+    eIdx.forEach(function (e, k) { if (e >= 0) natOfE[e] = k; });
+    for (let i = 0; i < N; i++) { const e = land[i]; if (e >= 0 && natOfE[e] != null) nat[i] = natOfE[e]; }
+    const tileOf = function (lat, lon) {
+      const x = Math.floor((lon - E.lonW) / E.step), y = Math.floor((E.latN - lat) / E.step);
+      return { x: Math.max(0, Math.min(Wd - 1, x)), y: Math.max(0, Math.min(Ht - 1, y)) };
+    };
+    const nb4 = function (j) {
+      const x = j % Wd, y = (j / Wd) | 0;
+      return [x > 0 ? j - 1 : j + Wd - 1, x < Wd - 1 ? j + 1 : j - Wd + 1, y > 0 ? j - Wd : -1, y < Ht - 1 ? j + Wd : -1];
+    };
+    // ---- the cities: a seed tile each, on its own country's land
+    const cell = new Int32Array(N).fill(-1);
     const provs = [];
-    for (let k = 0; k < P; k++) provs.push({ id: k, n: 0, sx: 0, sy: 0, coast: 0, adj: [], sea: [], hsum: 0 });
+    NA.list.forEach(function (n, k) {
+      n.cities.forEach(function (ct, ci) {
+        const t = tileOf(ct[1], ct[2]);
+        let best = -1, bd = 1e9;
+        for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
+          const x = (t.x + dx + Wd) % Wd, y = t.y + dy;
+          if (y < 0 || y >= Ht) continue;
+          const j = y * Wd + x;
+          if (nat[j] !== k || cell[j] >= 0) continue;
+          const d = dx * dx + dy * dy;
+          if (d < bd) { bd = d; best = j; }
+        }
+        if (best < 0) return;                          // the city's tile is somebody else's: no province
+        const id = provs.length;
+        cell[best] = id;
+        provs.push({ id: id, nation: k, name: ct[0], city: ct[3], occ: ct[4] || null, capital: ci === 0, seed: best,
+          n: 0, coast: 0, adj: [], sea: [], lx: best % Wd, ly: (best / Wd) | 0 });
+      });
+    });
+    // ---- grow every city over its country's tiles, all at once (a fair race)
+    let q = provs.map(function (p) { return p.seed; }), k = 0;
+    while (k < q.length) {
+      const j = q[k++];
+      for (const t of nb4(j)) if (t >= 0 && cell[t] < 0 && nat[t] >= 0 && nat[t] === provs[cell[j]].nation) { cell[t] = cell[j]; q.push(t); }
+    }
+    // islands with no city of their own: the nearest city of the same country
+    for (let i = 0; i < N; i++) {
+      if (nat[i] < 0 || cell[i] >= 0) continue;
+      const x = i % Wd, y = (i / Wd) | 0;
+      let best = -1, bd = 1e18;
+      for (const p of provs) {
+        if (p.nation !== nat[i]) continue;
+        let dx = Math.abs(p.lx - x); dx = Math.min(dx, Wd - dx);
+        const dy = p.ly - y, d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = p.id; }
+      }
+      if (best >= 0) cell[i] = best;
+    }
+    // ---- sizes, coasts, land borders
     const adjSet = provs.map(function () { return {}; });
+    let sx = provs.map(function () { return 0; }), sy = provs.map(function () { return 0; });
     for (let i = 0; i < N; i++) {
       const p = cell[i]; if (p < 0) continue;
-      const x = i % Wd, y = (i / Wd) | 0, pr = provs[p];
-      pr.n++; pr.sx += x; pr.sy += y; pr.hsum += h[i];
-      const nb = [x > 0 ? i - 1 : -1, x < Wd - 1 ? i + 1 : -1, y > 0 ? i - Wd : -1, y < Ht - 1 ? i + Wd : -1];
-      for (const t of nb) {
+      const pr = provs[p];
+      pr.n++; sx[p] += i % Wd; sy[p] += (i / Wd) | 0;
+      for (const t of nb4(i)) {
         if (t < 0) continue;
-        const q = cell[t];
-        if (q < 0) pr.coast++;
-        else if (q !== p) adjSet[p][q] = 1;
+        if (land[t] < 0) pr.coast++;
+        else if (cell[t] >= 0 && cell[t] !== p) adjSet[p][cell[t]] = 1;
       }
     }
-    provs.forEach(function (pr, k) {
-      pr.cx = pr.sx / Math.max(1, pr.n); pr.cy = pr.sy / Math.max(1, pr.n);
-      pr.elev = pr.hsum / Math.max(1, pr.n) - sea;
-      pr.adj = Object.keys(adjSet[k]).map(Number).sort(function (a, b) { return a - b; });
-      delete pr.sx; delete pr.sy; delete pr.hsum;
-      // the label point: the province's own cell nearest its centroid
-      let best = -1, bd = 1e9;
-      for (let i = 0; i < N; i++) if (cell[i] === k) { const dx = (i % Wd) - pr.cx, dy = ((i / Wd) | 0) - pr.cy, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = i; } }
-      pr.lx = best % Wd; pr.ly = (best / Wd) | 0;
+    provs.forEach(function (pr, k2) {
+      pr.cx = sx[k2] / Math.max(1, pr.n); pr.cy = sy[k2] / Math.max(1, pr.n);
+      pr.adj = Object.keys(adjSet[k2]).map(Number).sort(function (a, b) { return a - b; });
+      pr.elev = 0;
     });
-    // ---- sea lanes: coastal provinces within 14 cells of open water
-    const sOwn = new Array(N).fill(-1), sDist = new Array(N).fill(1e9);
+    // ---- the sea: depth for the map's shading, lanes between coasts
+    const sOwn = new Int32Array(N).fill(-1), sDist = new Int16Array(N).fill(9999);
     const sq = [];
     for (let i = 0; i < N; i++) {
-      if (land[i]) continue;
-      const x = i % Wd, y = (i / Wd) | 0;
-      const nb = [x > 0 ? i - 1 : -1, x < Wd - 1 ? i + 1 : -1, y > 0 ? i - Wd : -1, y < Ht - 1 ? i + Wd : -1];
-      for (const t of nb) if (t >= 0 && cell[t] >= 0) { sOwn[i] = cell[t]; sDist[i] = 1; sq.push(i); break; }
+      if (land[i] >= 0) continue;
+      for (const t of nb4(i)) if (t >= 0 && cell[t] >= 0) { sOwn[i] = cell[t]; sDist[i] = 1; sq.push(i); break; }
     }
     let sk = 0;
     while (sk < sq.length) {
-      const j = sq[sk++], x = j % Wd, y = (j / Wd) | 0;
-      if (sDist[j] >= 9) continue;
-      const nb = [x > 0 ? j - 1 : -1, x < Wd - 1 ? j + 1 : -1, y > 0 ? j - Wd : -1, y < Ht - 1 ? j + Wd : -1];
-      for (const t of nb) if (t >= 0 && !land[t] && sOwn[t] < 0) { sOwn[t] = sOwn[j]; sDist[t] = sDist[j] + 1; sq.push(t); }
+      const j = sq[sk++];
+      if (sDist[j] >= LANE_HALF) continue;
+      for (const t of nb4(j)) if (t >= 0 && land[t] < 0 && sOwn[t] < 0) { sOwn[t] = sOwn[j]; sDist[t] = sDist[j] + 1; sq.push(t); }
     }
     const seaSet = provs.map(function () { return {}; });
     for (let j = 0; j < N; j++) {
       if (sOwn[j] < 0) continue;
       const x = j % Wd, y = (j / Wd) | 0;
-      const nb = [x < Wd - 1 ? j + 1 : -1, y < Ht - 1 ? j + Wd : -1];
+      const nb = [x < Wd - 1 ? j + 1 : j - Wd + 1, y < Ht - 1 ? j + Wd : -1];
       for (const t of nb) {
         if (t < 0 || sOwn[t] < 0 || sOwn[t] === sOwn[j]) continue;
-        if (sDist[t] + sDist[j] > 14) continue;
+        if (sDist[t] + sDist[j] > LANE_HALF * 2) continue;
         const a = sOwn[j], b = sOwn[t];
         if (adjSet[a][b]) continue;
         seaSet[a][b] = 1; seaSet[b][a] = 1;
       }
     }
-    provs.forEach(function (pr, k) { pr.sea = Object.keys(seaSet[k]).map(Number).sort(function (a, b) { return a - b; }); });
-    const out = { W: Wd, H: Ht, cell: cell, h: h, seaLevel: sea, provs: provs, P: P };
-    GEO.set(key, out);
-    return out;
+    provs.forEach(function (pr, k2) { pr.sea = Object.keys(seaSet[k2]).map(Number).sort(function (a, b) { return a - b; }); });
+    // depth: distance to any land (for the map's sea shading)
+    const depth = new Int16Array(N).fill(-1), dq = [];
+    for (let i = 0; i < N; i++) if (land[i] >= 0) { depth[i] = 0; dq.push(i); }
+    let dk = 0;
+    while (dk < dq.length) { const j = dq[dk++]; if (depth[j] >= 12) continue; for (const t of nb4(j)) if (t >= 0 && depth[t] < 0) { depth[t] = depth[j] + 1; dq.push(t); } }
+    const h = new Array(N);
+    for (let i = 0; i < N; i++) h[i] = land[i] >= 0 ? 0.06 : -(depth[i] < 0 ? 12 : depth[i]) * 0.04;
+    GEO = { W: Wd, H: Ht, cell: Array.from(cell), land: land, nat: nat, h: h, seaLevel: 0, provs: provs, P: provs.length,
+      names: E.names, step: E.step, latN: E.latN, lonW: E.lonW, tileOf: tileOf };
+    return GEO;
   }
+  // the share of each raw good the countries NOT in play put on the world market
+  // (the Gulf's oil and gas, Chile's and the Congo's copper, Kazakhstan's uranium)
+  const ROW_SHARE = { oil: 0.3, gas: 0.12, iron: 0.08, copper: 0.4, rare: 0.05, grain: 0.1, uranium: 0.45 };
+  const LANE_HALF = 11;          // tiles from a coast a lane reaches out (two coasts: twice that)
 
   // ============================================================ creation
+  function ymdDay(s) {
+    // "YYYY-MM" -> days after the start (the 1st of that month)
+    if (!s) return 0;
+    const a = String(s).split("-"), st = nationsData().START;
+    return Math.round((Date.UTC(+a[0], (+a[1] || 1) - 1, 1) - Date.UTC(st.y, st.m - 1, st.d)) / 86400000);
+  }
+  /* create(seed): the real world on the first day of the game. The seed is
+     only the dice (who the ministers are, how the leaders lean when the data
+     says nothing, every roll that follows); the world itself is the one in
+     nations.js, the same every game. */
   function create(seed, opts) {
-    opts = opts || {};
     seed = (seed | 0) || 1;
-    const nC = clamp(opts.countries | 0 || 12, 4, 16);
-    const M = geo(seed, nC);
-    const S = { v: 1, seed: seed, nC: nC, rng: (seed * 2654435761) | 0, day: 0, nextId: 1, log: [], fallen: [], over: null, fear: 0, fallout: 0 };
+    const NA = nationsData(), M = geo();
+    const nC = NA.list.length;
+    const S = { v: 2, seed: seed, nC: nC, rng: (seed * 2654435761) | 0, day: 0, nextId: 1, log: [], fallen: [], over: null, fear: 0, fallout: 0 };
     const r = function () { return rnd(S); };
-    // ---- countries: capitals spread by farthest-point over provinces
-    const P = M.P;
-    const caps = [];
-    const big = M.provs.filter(function (p) { return p.n >= 25; });
-    caps.push((big.length ? big[Math.floor(r() * big.length)] : M.provs[0]).id);
-    while (caps.length < nC) {
-      let best = -1, bd = -1;
-      for (const p of M.provs) {
-        if (caps.indexOf(p.id) >= 0 || p.n < 12) continue;
-        let d = 1e9;
-        for (const c of caps) { const q = M.provs[c], dx = q.cx - p.cx, dy = q.cy - p.cy; d = Math.min(d, dx * dx + dy * dy); }
-        d *= 0.8 + r() * 0.4;
-        if (d > bd) { bd = d; best = p.id; }
-      }
-      if (best < 0) break;
-      caps.push(best);
-    }
-    const owner = new Array(P).fill(-1);
-    const size = caps.map(function () { return 0; });
-    caps.forEach(function (p, c) { owner[p] = c; size[c] += M.provs[p].n; });
-    // grow: the smallest country takes its nearest free neighbour, land first
-    let free = P - caps.length, guard = 0;
-    while (free > 0 && guard++ < P * 40) {
-      const order = size.map(function (s, c) { return c; }).sort(function (a, b) { return size[a] - size[b] || a - b; });
-      let took = false;
-      for (const c of order) {
-        let best = -1, bd = 1e9;
-        const cap = M.provs[caps[c]];
-        for (let p = 0; p < P; p++) {
-          if (owner[p] !== c) continue;
-          const pr = M.provs[p];
-          const cand = pr.adj.concat(size[c] > 0 && pr.adj.every(function (q) { return owner[q] >= 0; }) ? pr.sea : []);
-          for (const q of cand) {
-            if (owner[q] >= 0) continue;
-            const qq = M.provs[q], dx = qq.cx - cap.cx, dy = qq.cy - cap.cy;
-            const d = dx * dx + dy * dy + (pr.adj.indexOf(q) < 0 ? 400 : 0);
-            if (d < bd) { bd = d; best = q; }
-          }
-        }
-        if (best >= 0) { owner[best] = c; size[c] += M.provs[best].n; free--; took = true; break; }
-      }
-      if (!took) {
-        // whatever is left is unreachable by land and lane: nearest capital
-        for (let p = 0; p < P; p++) if (owner[p] < 0) {
-          let best = 0, bd = 1e9;
-          caps.forEach(function (cp, c) { const q = M.provs[cp], dx = q.cx - M.provs[p].cx, dy = q.cy - M.provs[p].cy, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = c; } });
-          owner[p] = best; size[best] += M.provs[p].n; free--;
-        }
-      }
-    }
-    // ---- who the countries are
-    const usedNames = {};
-    S.c = [];
-    const regimes = [];
-    for (let c = 0; c < nC; c++) regimes.push(c < Math.ceil(nC * 0.45) ? "democracy" : c < Math.ceil(nC * 0.75) ? "hybrid" : "autocracy");
-    for (let i = regimes.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); const t = regimes[i]; regimes[i] = regimes[j]; regimes[j] = t; }
-    for (let c = 0; c < nC; c++) {
-      let nm = countryName(r), k = 0;
-      while (usedNames[nm] && k++ < 20) nm = countryName(r);
-      usedNames[nm] = 1;
-      const reg = regimes[c];
-      const freedom = reg === "democracy" ? 72 + r() * 22 : reg === "hybrid" ? 40 + r() * 20 : 10 + r() * 22;
-      const rich = reg === "democracy" ? 0.55 + r() * 0.45 : r() * 0.7;
-      const pop = Math.round(8 + Math.pow(r(), 1.6) * 220 + size[c] * 0.08);
-      const gdpPc = 4000 + Math.pow(rich, 1.4) * 62000;
-      const gdp = pop * gdpPc / 1000;          // $bn
-      S.c.push({
-        id: c, name: nm, color: PALETTE[c % PALETTE.length], cap: caps[c], capital: "", regime: reg,
-        freedom: freedom, elections: reg !== "autocracy", termDays: 1460, nextElection: 0,
+    const idOf = {}; NA.list.forEach(function (n, k) { idOf[n.id] = k; });
+    S.c = NA.list.map(function (n, c) {
+      const reg = n.regime;
+      const dial = (NA.DIALS && NA.DIALS[n.id]) || null;
+      const capP = M.provs.find(function (p) { return p.nation === c && p.capital; }) || M.provs.find(function (p) { return p.nation === c; });
+      return {
+        id: c, key: n.id, name: n.name, short: n.short, pool: n.pool, color: n.color, cap: capP ? capP.id : 0, capital: capP ? capP.name : "", regime: reg,
+        freedom: n.freedom, elections: !!n.elections, termDays: Math.round((n.term || 4) * 365.25), nextElection: n.elections ? Math.max(30, ymdDay(n.next)) : 0,
         human: null, alive: true, out: null,
-        leader: { name: personName(r), since: 0, original: true, aggr: r(), mad: r() * r(), auth: reg === "autocracy" ? 0.6 + r() * 0.4 : r() * 0.6, prot: r() },
-        pop: pop, gdp0: gdp, gdp: gdp, prod: 1, gap: 0, svc0: 0, u: 5 + r() * 3, cpi: 100, core: 100, cpiHist: [], infl: 2,
-        tax: 0, budget: {}, debt: 0, coupon: 0, yld: 0, rate: 2.5, rateHold: 0, rating: "A", defaulted: 0, crisis: 0,
-        approval: 48 + r() * 12, unrest: 8 + r() * 10, anger: 0, scandal: 0, rally: 0,
-        div: 0, planes: 0, md: 0, nukes: 0, nukeProg: 0, equip: 1, supply: 1, warDays: 0, dead: 0,
+        leader: { name: n.leader, title: n.title, since: 0, original: true,
+          aggr: dial ? dial[0] : r() * 0.6, mad: dial ? dial[1] : r() * r() * 0.5, auth: dial ? dial[2] : (reg === "autocracy" ? 0.6 + r() * 0.4 : r() * 0.5), prot: dial ? dial[3] : r() },
+        pop: n.pop, gdp0: n.gdp, gdp: n.gdp, prod: 1, gap: 0, svc0: 0, u: n.u, cpi: 100, core: 100, cpiHist: [], infl: n.infl, infl0: n.infl,
+        inflBias: (n.infl - 2) / 100,
+        tax: 0, budget: {}, debt: 0, coupon: 0, yld: 0, rate: n.rate, rateHold: 0, rating: "A", defaulted: 0, crisis: 0, haven: n.haven || 0,
+        approval: n.approval, unrest: clamp(8 + (50 - n.approval) * 0.4 + (n.u > 10 ? 8 : 0), 3, 60), anger: 0, scandal: 0, rally: 0,
+        div: 0, planes: 0, md: 0, nukes: n.nukes || 0, nukeProg: n.nukeProg || 0, equip: 1, supply: 1, warDays: 0, dead: 0,
         posture: {}, tariffs: {}, sanctions: [], embargo: {}, allies: [], deals: [], war: [],
         stock: new Array(NG).fill(0), sup: new Array(NG).fill(0), dem: new Array(NG).fill(0),
         imp: new Array(NG).fill(0), exp: new Array(NG).fill(0), fill: new Array(NG).fill(1), pl: GOODS.map(function (g) { return g.P0; }),
         dBase: new Array(NG).fill(0), util: new Array(NG).fill(0.85), cap0: new Array(NG).fill(0), gi0: 1,
         tradeIn: 0, tradeOut: 0, tariffRev: 0, rev: 0, spend: 0, deficit: 0,
         cab: {}, matters: [], memo: {}, gained: 0, lost: 0,
-        // the army's hold on the state, the printing press, the currency,
-        // the bank's independence, and what the country is saying (Holler)
-        armyPower: reg === "autocracy" ? 45 : reg === "hybrid" ? 28 : 15, martial: 0,
-        print: 0, fx: 1, cbIndep: reg === "democracy" ? 0.9 : reg === "hybrid" ? 0.65 : 0.35,
+        armyPower: reg === "autocracy" ? 45 : reg === "hybrid" ? 28 : 15, martial: n.martial ? 1 : 0,
+        print: 0, fx: 1, cbIndep: reg === "democracy" ? 0.9 : reg === "hybrid" ? 0.6 : 0.35,
         heat: { prices: 0, war: 0, crackdown: 0, scandal: 0, plot: 0, pride: 0 }, promise: null,
-        // bailouts: what you owe other governments, what they owe you
-        loans: [], patron: -1,
-      });
-    }
-    // rich democracies keep their nukes; a couple of others have them too
-    const byGdp = S.c.slice().sort(function (a, b) { return b.gdp - a.gdp; });
-    byGdp.forEach(function (c, k) { if (k < 2 || (k < 5 && r() < 0.5)) c.nukes = 6 + Math.floor(r() * 40); });
-    // ---- provinces: people, deposits, factories
-    S.p = M.provs.map(function (g, k) {
-      return { id: k, name: "", owner: owner[k], ctl: owner[k], pop: 0, fac: {}, fact: {}, dmg: { raw: 0, fact: 0, power: 0, city: 0, nuke: 0 }, prog: 0, by: -1 };
+        loans: [], patron: -1, ind: n.ind || 1,
+      };
     });
-    const cityUsed = {};
-    S.p.forEach(function (p) {
-      let nm = cityName(r), k = 0; while (cityUsed[nm] && k++ < 20) nm = cityName(r); cityUsed[nm] = 1; p.name = nm;
+    // ---- provinces: the cities, their people, what is under them
+    S.p = M.provs.map(function (g) {
+      const occ = g.occ != null && idOf[g.occ] != null ? idOf[g.occ] : g.nation;
+      return { id: g.id, name: g.name, owner: g.nation, ctl: occ, pop: 0, fac: {}, fact: {}, dmg: { raw: 0, fact: 0, power: 0, city: 0, nuke: 0 }, prog: 0, by: -1 };
     });
     S.c.forEach(function (c) {
-      const mine = S.p.filter(function (p) { return p.owner === c.id; });
-      let w = 0; const ws = mine.map(function (p) { const x = M.provs[p.id].n * (0.5 + r()) * (p.id === c.cap ? 3 : 1); w += x; return x; });
-      mine.forEach(function (p, i) { p.pop = Math.max(0.2, c.pop * ws[i] / w); });
-      c.capital = S.p[c.cap].name;
-    });
-    // deposits: each raw good is found somewhere, rare things rarely
-    const depositOdds = { oil: 0.3, gas: 0.32, iron: 0.26, copper: 0.16, rare: 0.07, grain: 0.7, uranium: 0.07 };
-    const facTotal = {};
-    RAW.forEach(function (g) {
-      facTotal[g] = 0;
-      const owners = {};
-      S.p.forEach(function (p) {
-        const gp = M.provs[p.id];
-        let odds = depositOdds[g];
-        if (g === "grain") odds *= clamp(1.3 - gp.elev * 1.5, 0.2, 1.2);
-        if (g === "iron" || g === "copper" || g === "rare" || g === "uranium") odds *= clamp(0.5 + gp.elev * 2.5, 0.4, 2.2);
-        if (r() < odds) {
-          const n = g === "grain" ? Math.max(1, Math.round(gp.n / 18 * (0.5 + r()))) : 1 + Math.floor(Math.pow(r(), 2) * 9);
-          p.fac[g] = n; facTotal[g] += n; owners[p.owner] = 1;
-        }
+      const mine = M.provs.filter(function (g) { return g.nation === c.id; });
+      // the people: the metros, and the country's remainder spread over its land
+      const metro = mine.reduce(function (a, g) { return a + g.city; }, 0);
+      const tiles = mine.reduce(function (a, g) { return a + g.n; }, 0) || 1;
+      const rest = Math.max(0, c.pop - metro);
+      mine.forEach(function (g) { S.p[g.id].pop = Math.max(0.05, (metro > c.pop ? g.city * c.pop / metro : g.city) + rest * g.n / tiles); });
+      // deposits: the country's real output, over its provinces by land, a little uneven
+      const res = NA.list[c.id].res || {};
+      RAW.forEach(function (gid) {
+        const tot = res[gid] || 0;
+        if (tot <= 0) return;
+        const w = mine.map(function (g) { return g.n * (0.4 + r() * 1.2) * (gid === "grain" ? 1 : (r() < 0.55 ? 1 : 0.08)); });
+        const wt = w.reduce(function (a, b) { return a + b; }, 0) || 1;
+        mine.forEach(function (g, i) { const v = tot * w[i] / wt; if (v > tot * 0.02) S.p[g.id].fac[gid] = +v.toFixed(3); });
       });
-      // every resource exists in at least two countries
-      let tries = 0;
-      while (Object.keys(owners).length < 2 && tries++ < 50) {
-        const p = S.p[Math.floor(r() * S.p.length)];
-        if (owners[p.owner]) continue;
-        const n = 2 + Math.floor(r() * 4); p.fac[g] = (p.fac[g] || 0) + n; facTotal[g] += n; owners[p.owner] = 1;
-      }
     });
-    S.yield = GOODS.map(function (g) { return g.raw ? g.q / Math.max(1, facTotal[g.id]) : 0; });
+    const facTotal = {};
+    RAW.forEach(function (gid) { facTotal[gid] = 0; S.p.forEach(function (p) { facTotal[gid] += p.fac[gid] || 0; }); });
+    // what the countries not in play sell the world (the rest is mined and pumped here)
+    S.row = GOODS.map(function (g) { return g.raw ? g.q * (ROW_SHARE[g.id] || 0) : 0; });
+    S.yield = GOODS.map(function (g) { return g.raw ? g.q * (1 - (ROW_SHARE[g.id] || 0)) / Math.max(1e-6, facTotal[g.id]) : 0; });
     // ---- the state's books, the cabinet, the elections
     const gdpW = S.c.reduce(function (a, c) { return a + c.gdp; }, 0);
     S.P = GOODS.map(function (g) { return g.P0; });
     S.PHist = GOODS.map(function (g) { return [g.P0]; });
     S.c.forEach(function (c) {
+      const n = NA.list[c.id];
       const share = c.gdp / gdpW;
-      BUDGET.forEach(function (b) { c.budget[b.id] = +(b.d * (0.7 + r() * 0.6)).toFixed(1); });
-      if (c.regime === "autocracy") { c.budget.military += 1.5; c.budget.security += 1.2; c.budget.welfare -= 4; }
-      if (c.regime === "democracy") c.budget.welfare += 2;
+      const rich = c.gdp / c.pop;                      // $k a head
+      BUDGET.forEach(function (b) { c.budget[b.id] = +(b.d * (0.85 + r() * 0.3)).toFixed(1); });
+      c.budget.military = n.mil;
+      c.budget.welfare = +clamp(rich > 30 ? 15 + (c.freedom - 80) * 0.1 : rich > 10 ? 9 : 5, 3, 22).toFixed(1);
+      c.budget.missile = +(n.nukes > 0 || n.mil > 3 ? 0.5 : 0.2).toFixed(1);
+      if (c.regime === "autocracy") c.budget.security += 1.2;
       const spend = ADMIN + BUDGET.reduce(function (a, b) { return a + c.budget[b.id]; }, 0);
-      c.debt = c.gdp * (0.25 + r() * 0.85);
-      c.rate = 2 + r() * 2;
-      const intPct = c.debt / c.gdp * (c.rate + 1.5);
-      c.tax = clamp(Math.round(spend + intPct - 1 - r() * 2.5), 14, 48);
+      c.debt = c.gdp * n.debt / 100;
+      // the deficit a country really runs: taxes a few points under what it spends
+      const intPct = c.debt / c.gdp * (c.rate + 1.0) * (1 - c.haven * 0.5);
+      c.tax = clamp(Math.round(spend + intPct - (n.debt > 90 ? 4 : 2.5)), 12, 50);
       c.yld = yieldTarget(S, c); c.coupon = c.yld;
-      c.nextElection = c.elections ? 240 + Math.floor(r() * 1200) : 0;
-      ROLES.forEach(function (role) { c.cab[role] = newMinister(S, role); });
-      // demand: final use of each good in proportion to the economy
-      GOODS.forEach(function (g, i) {
-        const tilt = 0.7 + r() * 0.6;
-        c.dBase[i] = g.fd * share * tilt;
-      });
-      // factories: industrial countries make more than their share
-      const ind = 0.3 + r() * 1.4;
-      c.ind = ind;
+      ROLES.forEach(function (role) { c.cab[role] = newMinister(S, role, c); });
+      GOODS.forEach(function (g, i) { c.dBase[i] = g.fd * share * (0.85 + r() * 0.3); });
     });
     // normalise final demand to the world totals; factories to world output
     GOODS.forEach(function (g, i) {
       const tot = S.c.reduce(function (a, c) { return a + c.dBase[i]; }, 0) || 1;
       S.c.forEach(function (c) { c.dBase[i] *= g.fd / tot; });
       if (g.raw) return;
-      const wts = S.c.map(function (c) { return Math.pow(c.gdp, 0.8) * c.ind * (0.6 + r() * 0.8); });
+      const wts = S.c.map(function (c) { return Math.pow(c.gdp, 0.8) * c.ind * (0.85 + r() * 0.3); });
       const wt = wts.reduce(function (a, b) { return a + b; }, 0) || 1;
       S.c.forEach(function (c, k) {
         const cap = g.q / 0.85 * wts[k] / wt;          // factories run at 85% in a normal year
         c.cap0[i] = cap;
-        // place it in the country's biggest cities
         const mine = S.p.filter(function (p) { return p.owner === c.id; }).sort(function (a, b) { return b.pop - a.pop || a.id - b.id; });
         const top = mine.slice(0, Math.max(1, Math.min(6, mine.length)));
         const tp = top.reduce(function (a, p) { return a + Math.sqrt(p.pop); }, 0) || 1;
         top.forEach(function (p) { p.fact[g.id] = cap * Math.sqrt(p.pop) / tp; });
       });
     });
-    // military from the budget, stocks from demand, services from what is left
     S.c.forEach(function (c) {
+      const army = NA.list[c.id].army; if (army) c.armyX = Math.max(0, army - divTarget(c));
       c.div = divTarget(c); c.planes = Math.round(planeTarget(c)); c.md = mdTarget(c);
       GOODS.forEach(function (g, i) { c.stock[i] = 30 * (c.dBase[i] + interDemand(S, c, i)); });
       c.memo.mil0 = c.budget.military; c.memo.infra0 = c.budget.infra; c.memo.res0 = c.budget.research;
     });
-    // relations: free countries like each other, neighbours rub
+    // ---- the world as it stands: blocs, grudges, treaties, sanctions, tariffs
     S.rel = [];
-    for (let a = 0; a < nC; a++) { S.rel.push(new Array(nC).fill(0)); }
+    for (let a = 0; a < nC; a++) S.rel.push(new Array(nC).fill(0));
+    const bloc = {};
+    for (const b in NA.BLOCS) NA.BLOCS[b].forEach(function (id) { bloc[id] = b; });
     for (let a = 0; a < nC; a++) for (let b = a + 1; b < nC; b++) {
-      const fa = S.c[a].freedom, fb = S.c[b].freedom;
-      let v = 20 - Math.abs(fa - fb) * 0.5 + (r() - 0.5) * 50;
-      if (neighbours(S, a, b)) v -= 12;
-      v = Math.round(clamp(v, -70, 80));
-      S.rel[a][b] = S.rel[b][a] = v;
+      const ka = S.c[a].key, kb = S.c[b].key, ba = bloc[ka], bb = bloc[kb];
+      let v = 12 - Math.abs(S.c[a].freedom - S.c[b].freedom) * 0.15;
+      if (ba && ba === bb) v = ba === "west" ? 55 : 40;
+      else if (ba && bb) v = -45;
+      S.rel[a][b] = S.rel[b][a] = Math.round(v);
     }
-    // a few standing alliances among the like-minded
-    for (let a = 0; a < nC; a++) for (let b = a + 1; b < nC; b++) {
-      if (S.rel[a][b] > 45 && r() < 0.5) { S.c[a].allies.push(b); S.c[b].allies.push(a); }
-    }
+    NA.REL.forEach(function (t) { const a = idOf[t[0]], b = idOf[t[1]]; if (a != null && b != null) S.rel[a][b] = S.rel[b][a] = t[2]; });
+    NA.ALLIANCES.forEach(function (grp) {
+      const ids = grp.map(function (k2) { return idOf[k2]; }).filter(function (x) { return x != null; });
+      ids.forEach(function (a) { ids.forEach(function (b) { if (a !== b && S.c[a].allies.indexOf(b) < 0) S.c[a].allies.push(b); }); });
+    });
+    NA.SANCTIONS.forEach(function (t) { const a = idOf[t[0]], b = idOf[t[1]]; if (a != null && b != null && S.c[a].sanctions.indexOf(b) < 0) S.c[a].sanctions.push(b); });
+    NA.TARIFFS.forEach(function (t) { const a = idOf[t[0]], b = idOf[t[1]]; if (a != null && b != null) S.c[a].tariffs[b] = { all: t[2] }; });
     // a few silent days to settle the markets and measure goods value added,
     // then services are whatever the rest of the economy is
-    for (let k = 0; k < 4; k++) marketDay(S);
+    for (let k2 = 0; k2 < 4; k2++) marketDay(S);
     S.c.forEach(function (c) { c.svc0 = Math.max(c.gdp0 * 0.4, c.gdp0 - goodsVA(S, c)); c.gdp = c.gdp0; c.tariffRev = 0; c.tradeIn = 0; c.tradeOut = 0; c.gi0 = goodsIndex(c); c.cpiHist = [100]; });
+    // the wars already being fought on the first morning
+    NA.WARS.forEach(function (t) {
+      const a = idOf[t[0]], b = idOf[t[1]];
+      if (a == null || b == null) return;
+      const A = S.c[a], B = S.c[b];
+      A.war.push(b); B.war.push(a); A.posture[b] = "attack"; B.posture[a] = "hold";
+      A.allies = A.allies.filter(function (x) { return x !== b; }); B.allies = B.allies.filter(function (x) { return x !== a; });
+      A.warStart = B.warStart = -250; A.warDays = B.warDays = 250;
+    });
     logEv(S, -1, "world", {});
     return S;
   }
 
-  function newMinister(S, role) {
+  function newMinister(S, role, c) {
     const r = function () { return rnd(S); };
-    return { role: role, name: personName(r), loyalty: 55 + r() * 30, ambition: r(), hawk: r(), comp: 0.75 + r() * 0.5, since: S.day, mood: 0 };
+    return { role: role, name: personName(r, c && c.pool), loyalty: 55 + r() * 30, ambition: r(), hawk: r(), comp: 0.75 + r() * 0.5, since: S.day, mood: 0 };
   }
 
   // ===================================================== derived budgets
   function milBn(c) { return c.gdp * c.budget.military / 100; }
-  function divTarget(c) { return 2 + milBn(c) * 0.55 / 3; }
+  // the budget buys divisions; a country that fields more men than its budget (conscripts, aid) carries the difference
+  function divTarget(c) { return 2 + milBn(c) * 0.55 / 3 + (c.armyX || 0); }
   function planeTarget(c) { return milBn(c) * 0.25 / 0.35; }
   function mdTarget(c) { return 1 - Math.exp(-c.budget.missile * 0.9 * (0.8 + c.budget.research * 0.1)); }
   function spendPct(c) { return ADMIN + BUDGET.reduce(function (a, b) { return a + c.budget[b.id]; }, 0); }
@@ -492,13 +430,15 @@
   function debtRatio(c) { return (c.debt + official(c) * 0.5) / Math.max(1, c.gdp); }
 
   function yieldTarget(S, c) {
-    const dr = debtRatio(c);
+    // a reserve currency or a nation of savers carries debt the market shrugs at
+    const dr = debtRatio(c) * (1 - (c.haven || 0));
     let y = Math.max(0.25, c.rate) + 1.1;
     if (dr > 0.6) y += 2.4 * (dr - 0.6);
     if (dr > 1.2) y += 5 * (dr - 1.2) * (dr - 1.2) + 2 * (dr - 1.2);
     const def = -c.deficit / Math.max(1, c.gdp) * 100;            // deficit as % GDP (positive = deficit)
     if (c.deficit < 0 && def > 3) y += 0.35 * (def - 3);
-    y += 0.4 * Math.max(0, c.infl - 2);
+    // inflation the policy rate does not already pay for
+    y += 0.4 * Math.max(0, c.infl - Math.max(2, c.rate - 1));
     if (c.war && c.war.length) y += 1.2 + 4 * occupiedShare(S, c);
     y += c.unrest / 30 + (c.coupRisk || 0) * 8;
     y += (c.sanctionHit || 0) * 12;
@@ -649,6 +589,18 @@
         for (let j = 0; j < n; j++) { let sold = 0; for (let i = 0; i < n; i++) sold += F[i][j]; left[j] = Math.max(0, offer[j] - sold); }
         for (let i = 0; i < n; i++) { let got = 0; for (let j = 0; j < n; j++) got += F[i][j]; want[i] = Math.max(0, need[i] - got); }
       }
+      /* THE REST OF THE WORLD. The countries in play are not the whole
+         planet: the Gulf states pump oil, Chile and the Congo mine copper,
+         Kazakhstan digs uranium. What they sell (S.row, a share of each raw
+         good's world output) goes to whoever is still short after the
+         countries in play have traded, at the world price, sanctions or not. */
+      const rowS = S.row ? S.row[g] || 0 : 0;
+      const rowGot = new Array(n).fill(0);
+      if (rowS > 0) {
+        let tw = 0; for (let i = 0; i < n; i++) tw += want[i];
+        if (tw > 1e-12) { const f = Math.min(1, rowS / tw); for (let i = 0; i < n; i++) rowGot[i] = want[i] * f; }
+        wSup += rowS;
+      }
       // ---- the world price: fundamentals plus how thin the stocks are
       const stockDays = wStock / Math.max(1e-9, wDem);
       let x = (wDem - wSup) / Math.max(1e-9, wDem) + 0.01 * (30 - stockDays);
@@ -664,7 +616,7 @@
       for (let i = 0; i < n; i++) {
         const c = C[i];
         if (!c.alive) continue;
-        let im = 0, ex = 0, trf = 0, tariffW = 0;
+        let im = rowGot[i], ex = 0, trf = 0, tariffW = 0;
         for (let j = 0; j < n; j++) {
           im += F[i][j]; ex += F[j][i];
           const t = tariffOn(S, i, j, gid);
@@ -722,10 +674,15 @@
       c.crisis++;
       if (c.crisis > 60 && c.defaulted <= 0) doDefault(S, c, "forced");
     }
-    if (!c.crisis && c.defaulted <= 0 && (c.yld > 14 || (c.yld > 10 && debtRatio(c) > 1.1))) { c.crisis = 1; logEv(S, c.id, "crisis", { y: +c.yld.toFixed(1) }); }
-    if (c.crisis && c.yld < 8) { c.crisis = 0; logEv(S, c.id, "crisisOver", {}); }
+    // stress is what the market charges OVER the money's own price (the
+    // policy rate, or inflation): 18% in Brazil is a normal Tuesday
+    const stress = c.yld - Math.max(c.rate, c.infl, 0);
+    if (!c.crisis && c.defaulted <= 0 && (stress > 9 || (stress > 6 && debtRatio(c) * (1 - (c.haven || 0)) > 1.1))) { c.crisis = 1; logEv(S, c.id, "crisis", { y: +c.yld.toFixed(1) }); }
+    if (c.crisis && stress < 4) { c.crisis = 0; logEv(S, c.id, "crisisOver", {}); }
     const crisisCut = c.crisis ? Math.min(0.25, c.crisis / 240) : 0;       // the spending nobody would lend for
     c.debt = Math.max(0, c.debt - c.deficit / 365 - (crisisCut * spend / 365));
+    // GDP here is real; the debt is in money, and inflation eats money
+    c.debt *= 1 - clamp(c.infl, 0, 80) / 100 / 365;
     // official loans: interest plus a tenth of the principal a year, paid to
     // the lender (borrowed, if it has to be)
     for (const l of c.loans) {
@@ -739,12 +696,15 @@
     c.coupon += (c.yld - c.coupon) / (7 * 365);
     // bond market
     c.yld += (yieldTarget(S, c) - c.yld) * 0.04;
-    c.rating = c.defaulted > 0.5 ? "D" : c.yld < 2.5 ? "AAA" : c.yld < 3.5 ? "AA" : c.yld < 4.5 ? "A" : c.yld < 6 ? "BBB" : c.yld < 8 ? "BB" : c.yld < 12 ? "B" : "CCC";
+    c.yld = clamp(c.yld, 0.2, 60);
+    const spr = c.yld - Math.max(c.rate, c.infl, 0);
+    c.rating = c.defaulted > 0.5 ? "D" : spr < 1.4 ? "AAA" : spr < 2 ? "AA" : spr < 2.8 ? "A" : spr < 3.8 ? "BBB" : spr < 5 ? "BB" : spr < 7 ? "B" : "CCC";
     if (c.defaulted > 0) c.defaulted = Math.max(0, c.defaulted - 1 / (5 * 365));
     // ---- output: potential grows, the gap breathes
     const def = -c.deficit / Math.max(1, c.gdp) * 100;
     const occ = occupiedShare(S, c);
-    let target = 0.004 * (def - 2) - 0.004 * (c.rate - 3)
+    // money is tight by the REAL rate: 15% in Brazil is not 15% in Germany
+    let target = 0.004 * (def - 2) - 0.004 * (c.rate - Math.max(0, c.infl) - 1)
       - 0.22 * (1 - fillE) - 0.18 * (1 - fillF) - 0.06 * (1 - fillC)
       - (c.sanctionHit || 0) - (c.war.length ? 0.01 + occ * 0.3 : 0)
       - c.unrest / 900 - crisisCut * 0.3 - (c.defaulted > 0 ? 0.05 * c.defaulted : 0)
@@ -780,7 +740,9 @@
     const uT = clamp(5.2 - c.gap * 55 + (0.9 - utilAvg) * 10 - (c.war.length ? 1 : 0) + (c.crisis ? 2 : 0), 1.5, 45);
     c.u += (uT - c.u) * 0.02;
     const def3 = Math.max(0, def - 3);
-    c.core *= 1 + (0.02 + 0.45 * c.gap + 0.004 * def3 - 0.0035 * (c.rate - 3.5) + (c.defaulted > 0 ? 0.08 * c.defaulted : 0)
+    // inflation a country walked in with (Argentina, Turkey, Iran) fades over years, not days
+    c.inflBias = (c.inflBias || 0) * 0.9985;
+    c.core *= 1 + (0.02 + (c.inflBias || 0) + 0.45 * c.gap + 0.004 * def3 - 0.0035 * (c.rate - Math.max(0, c.infl) - 1) +(c.defaulted > 0 ? 0.08 * c.defaulted : 0)
       + c.print * 0.009 + (1 - c.cbIndep) * 0.012 + Math.max(0, 1 - c.fx) * 0.04) / 365;
     c.cpi = c.core * (0.62 + 0.38 * goodsIndex(c) / c.gi0);
     if (S.day % 30 === 0) { c.cpiHist.push(+c.cpi.toFixed(3)); if (c.cpiHist.length > 13) c.cpiHist.shift(); }
@@ -790,7 +752,7 @@
       const back = h[0], months = h.length - 1;
       const yoy = (Math.pow(c.cpi / Math.max(1e-6, back), 12 / Math.max(1, months)) - 1) * 100;
       const w = Math.min(1, months / 12);
-      c.infl = yoy * w + 2 * (1 - w);
+      c.infl = yoy * w + (c.infl0 != null ? c.infl0 : 2) * (1 - w);
     }
     c.infl = clamp(fin(c.infl, 2), -30, 400);
     // ---- the central bank
@@ -840,19 +802,29 @@
     const occ = occupiedShare(S, c);
     const shortages = (1 - c.fill[GI.food]) * 1.2 + (1 - c.fill[GI.fuel]) * 0.8 + (1 - c.fill[GI.gas]) * 0.4;
     const dem = c.regime === "democracy";
-    let A = 52 - 2.0 * (c.u - 5) - 1.4 * Math.max(0, c.infl - 2.5) + 0.9 * clamp((c.growth || 0) * 100, -10, 6)
+    /* WHAT PEOPLE ARE USED TO. South Africa lives with 32% unemployment and
+       Turkey with 30% inflation; what moves a voter is it getting WORSE than
+       he knows. The norms drift toward today over a few years. */
+    if (c.uHab == null) { c.uHab = c.u; c.inflHab = c.infl; }
+    c.uHab += (c.u - c.uHab) * 0.0012; c.inflHab += (c.infl - c.inflHab) * 0.0012;
+    const uN = Math.max(5, Math.min(30, c.uHab)), iN = Math.max(2.5, c.inflHab);
+    let A = 52 - 2.0 * (c.u - uN) - 1.4 * Math.max(0, c.infl - iN) + 0.9 * clamp((c.growth || 0) * 100, -10, 6)
       - shortages * 25 + c.rally - Math.min(18, c.warDays / 40) - occ * 60 + Math.min(10, c.gained * 1.5) - Math.min(20, c.lost * 2.5)
       - (dem ? Math.max(0, 60 - c.freedom) * 0.25 : 0) - c.unrest * 0.12 - c.scandal
       - (c.tax - 30) * 0.5 + (c.budget.welfare - 13) * 0.6 + (c.defaulted > 0 ? 10 * c.defaulted : 0) * -1
       - (c.crisis ? 6 : 0) - S.fear * 8
       - c.heat.prices * 0.3 - c.heat.war * 0.2 - (dem ? c.heat.crackdown * 0.15 : c.heat.crackdown * 0.04) - c.heat.scandal * 0.25 + c.heat.pride * 0.2;
-    A = clamp(A, 3, 95);
+    // everything the numbers do not hold (a face, a party, a war at home) is
+    // in the leader's real approval on day one; it fades over years
+    if (c.apprBias == null) c.apprBias = c.approval - A;
+    c.apprBias *= 0.9994;
+    A = clamp(A + c.apprBias, 3, 95);
     c.approval += (A - c.approval) * 0.025;
     c.approval = clamp(fin(c.approval, 40), 1, 99);
     c.rally *= 0.985; c.scandal *= 0.99;
     // unrest: what the people will not put up with, minus what holds them down
     const sec = c.budget.security;
-    let U = 6 + Math.max(0, c.u - 5) * 2 + Math.max(0, 50 - c.approval) * 1.25 + shortages * 30 + c.anger - sec * 4 + Math.max(0, 40 - c.freedom) * (sec < 2 ? 0.35 : 0.1)
+    let U = 6 + Math.max(0, c.u - uN) * 2 +Math.max(0, 50 - c.approval) * 1.25 + shortages * 30 + c.anger - sec * 4 + Math.max(0, 40 - c.freedom) * (sec < 2 ? 0.35 : 0.1)
       + c.heat.crackdown * 0.3 + c.heat.prices * 0.3 + c.heat.scandal * 0.15;
     if (c.martial) U = Math.min(U, 25);
     U = clamp(U, 0, 100);
@@ -932,7 +904,7 @@
     }
     const p = clamp(0.35 + gen.ambition * 0.3 - c.budget.security * 0.06 + c.unrest / 200, 0.05, 0.9);
     if (rnd(S) < p) fall(S, c, "coup");
-    else { logEv(S, c.id, "coupFailed", { name: gen.name }); c.cab.general = newMinister(S, "general"); }
+    else { logEv(S, c.id, "coupFailed", { name: gen.name }); c.cab.general = newMinister(S, "general", c); }
   }
 
   /* A president falls: the leader is out, a new one (always an AI) comes in.
@@ -943,14 +915,14 @@
     S.fallen.push({ c: c.id, name: was.name, why: why, day: S.day, original: !!was.original });
     logEv(S, c.id, "fall", { why: why, name: was.name });
     if (c.human != null && was.original) { c.out = why; c.humanLost = S.day; }
-    c.leader = { name: personName(function () { return rnd(S); }), since: S.day, original: false, aggr: rnd(S), mad: rnd(S) * rnd(S), auth: c.regime === "autocracy" ? 0.5 + rnd(S) * 0.5 : rnd(S) * 0.5, prot: rnd(S) };
+    c.leader = { name: personName(function () { return rnd(S); }, c.pool), title: c.leader.title, since: S.day, original: false, aggr: rnd(S), mad: rnd(S) * rnd(S), auth: c.regime === "autocracy" ? 0.5 + rnd(S) * 0.5 : rnd(S) * 0.5, prot: rnd(S) };
     c.approval = clamp(c.approval + 15, 30, 65); c.unrest *= 0.6; c.scandal = 0; c.rally = 0;
     if (why === "coup") { c.regime = "autocracy"; c.elections = false; c.freedom = Math.min(c.freedom, 25); }
     if (why === "revolution") { c.regime = "democracy"; c.elections = true; c.freedom = Math.max(c.freedom, 60); c.nextElection = S.day + c.termDays; }
     if (why === "election") c.nextElection = S.day + c.termDays;
     c.matters = [];
     // a new leader brings his own people
-    ROLES.forEach(function (role) { if (rnd(S) < 0.6) c.cab[role] = newMinister(S, role); });
+    ROLES.forEach(function (role) { if (rnd(S) < 0.6) c.cab[role] = newMinister(S, role, c); });
     checkOver(S);
   }
 
@@ -975,7 +947,18 @@
     // a base in a country next to b is a border with b
     const A = S.c[a];
     if (!noBase && A && A.bases) for (const h of A.bases) if (h !== b && S.c[h] && S.c[h].alive && S.c[h].allies.indexOf(a) >= 0 && reach(S, h, b, true) === 2) return 1;
+    // a navy that crosses oceans reaches any coast
+    if (A && blueWater(A) && landingFor(S, b) != null) return 1;
     return 0;
+  }
+  // the real world is wider than a lane: a power with an ocean-going navy
+  // (a big enough military budget) can land on any coast it is at war with
+  function blueWater(c) { return milBn(c) >= 60 && c.div > 8; }
+  function landingFor(S, b) {
+    const M = geo();
+    let best = null, bc = 0;
+    for (const p of S.p) if (p.ctl === b && M.provs[p.id].coast > bc) { bc = M.provs[p.id].coast; best = p.id; }
+    return best;
   }
   function occupiedShare(S, c) {
     let own = 0, lost = 0;
@@ -1055,13 +1038,24 @@
       for (const q of g.adj) tryEdge(q, false);
       for (const q of g.sea) tryEdge(q, true);
     }
+    // across an ocean: a landing on the enemy's longest coast, from home
+    for (const A of C) {
+      if (!A.alive || !A.war.length || !blueWater(A)) continue;
+      for (const b of A.war) {
+        if (A.posture[b] !== "attack" || edges.some(function (e) { return e.a === A.id && e.b === b; })) continue;
+        const q = landingFor(S, b);
+        if (q == null || S.p[A.cap].ctl !== A.id) continue;
+        edges.push({ from: A.cap, to: q, a: A.id, b: b, sea: true, far: true });
+        perC[A.id] += 2;
+      }
+    }
     const flips = [];
     const pushed = {};
     for (const e of edges) {
       const A = C[e.a], B = C[e.b];
       if (A.posture[e.b] !== "attack") continue;
       const wa = 2 / Math.max(1, perC[e.a]), wb = 1 / Math.max(1, perC[e.b]);
-      const atk = Math.max(0.01, strength(A) * wa) * (e.sea ? 0.35 : 1) * (1 + A.budget.research * 0.02);
+      const atk = Math.max(0.01, strength(A) * wa) * (e.far ? 0.22 : e.sea ? 0.35 : 1) * (1 + A.budget.research * 0.02);
       const dfn = Math.max(0.01, strength(B) * wb) * 1.25 * (1 + B.budget.infra * 0.02) * (S.p[e.to].id === B.cap ? 1.4 : 1) * (1 + occupiedShare(S, B) * 1.5);
       const share = atk / (atk + dfn);
       const tgt = S.p[e.to];
@@ -1150,7 +1144,7 @@
     logEv(S, c.id, "strike", { t: t, p: pid, what: what, lost: lost, wing: wing + missiles, hit: Math.round(hit) });
     return { ok: true, lost: lost, hit: hit };
   }
-  function nuke(S, c, t, pid) {
+  function nuke(S, c, t, pid, answer) {
     const T = S.c[t], p = S.p[pid];
     // no stockpile: a crude device, bought and smuggled; it may fizzle, and
     // everybody will know where it came from
@@ -1170,9 +1164,10 @@
     S.fallout = Math.min(1, S.fallout + 0.25);
     S.c.forEach(function (o) { if (o.alive) o.approval -= 4; });
     // the answer, if the target can give one
-    if (T.nukes > 0 && T.human == null && rnd(S) < 0.85) {
+    // an answer is never itself answered here: the next exchange is a day's decision
+    if (!answer && T.nukes > 0 && T.human == null && rnd(S) < 0.85) {
       const tg = biggestCity(S, c.id);
-      if (tg != null) nuke(S, T, c.id, tg);
+      if (tg != null) nuke(S, T, c.id, tg, true);
     }
     return { ok: true, stopped: false };
   }
@@ -1266,7 +1261,7 @@
       // he quits
       if (m.loyalty < 12 && rnd(S) < 0.01) {
         logEv(S, c.id, "resigned", { role: role, name: m.name });
-        c.scandal += 2; c.cab[role] = newMinister(S, role); c.cab[role].loyalty = 50;
+        c.scandal += 2; c.cab[role] = newMinister(S, role, c); c.cab[role].loyalty = 50;
       }
     });
     // the Security Chief who wants your chair sends a man through the door
@@ -1727,7 +1722,7 @@
         if (!c.cab[role]) return { ok: false, why: "role" };
         const was = c.cab[role];
         logEv(S, c.id, "fired", { role: role, name: was.name });
-        c.cab[role] = newMinister(S, role); c.cab[role].loyalty = 62;
+        c.cab[role] = newMinister(S, role, c); c.cab[role].loyalty = 62;
         ROLES.forEach(function (r) { if (r !== role) c.cab[r].mood -= 1.5; });
         if (role === "general") c.equip *= 0.95;
         if (role === "bank") { c.cbIndep = Math.max(0, c.cbIndep - 0.35); c.yld += 1.5; c.cab.bank.loyalty = 85; logEv(S, c.id, "bankFired", {}); }
@@ -1785,13 +1780,13 @@
         // the coup at your door: your security against his soldiers
         const gen = c.cab.general;
         const p = clamp(0.3 + c.budget.security * 0.08 + c.cab.security.loyalty / 200 - gen.ambition * 0.2, 0.05, 0.9);
-        if (rnd(S) < p) { logEv(S, c.id, "coupFailed", { name: gen.name }); c.cab.general = newMinister(S, "general"); c.freedom -= 3; return { ok: true, survived: true }; }
+        if (rnd(S) < p) { logEv(S, c.id, "coupFailed", { name: gen.name }); c.cab.general = newMinister(S, "general", c); c.freedom -= 3; return { ok: true, survived: true }; }
         fall(S, c, "coup"); return { ok: true, survived: false };
       }
       case "defy": {
         const sc = c.cab.security;
         const p = clamp(0.25 + c.cab.general.loyalty / 160 + c.budget.security * 0.03, 0.05, 0.85);
-        if (rnd(S) < p) { logEv(S, c.id, "plotFoiled", { name: sc.name }); c.cab.security = newMinister(S, "security"); return { ok: true, survived: true }; }
+        if (rnd(S) < p) { logEv(S, c.id, "plotFoiled", { name: sc.name }); c.cab.security = newMinister(S, "security", c); return { ok: true, survived: true }; }
         fall(S, c, "assassinated"); return { ok: true, survived: false };
       }
       case "seat": {
@@ -1915,7 +1910,8 @@
 
   // ============================================================== views
   function date(day) {
-    const d0 = Date.UTC(2029, 0, 20) + day * 86400000;
+    const st = nationsData().START;
+    const d0 = Date.UTC(st.y, st.m - 1, st.d) + day * 86400000;
     const dt = new Date(d0);
     const M = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     return { y: dt.getUTCFullYear(), m: dt.getUTCMonth(), d: dt.getUTCDate(), text: dt.getUTCDate() + " " + M[dt.getUTCMonth()] + " " + dt.getUTCFullYear() };

@@ -221,7 +221,10 @@
       const ratio = str(S, T) / Math.max(0.3, str(S, from));
       const occ = PW.occupiedShare(S, T);
       if (terms === "status") return occ > 0.3 || ratio < 0.5 || T.warDays > 700;
-      return occ > 0.15 || ratio < 0.85 || T.warDays > 400 || T.approval < 32;
+      // a white peace hands back what he took: a man holding the other side's
+      // land does not sign that for being tired, only for losing
+      const holds = S.p.some(function (p) { return p.owner === from.id && p.ctl === T.id; });
+      return occ > 0.15 || ratio < 0.85 || (!holds && (T.warDays > 400 || T.approval < 32));
     }
     return false;
   }

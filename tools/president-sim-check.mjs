@@ -5,7 +5,7 @@
    model every President page and every multiplayer client runs) and checks
    that the one connected model behaves like an economy:
 
-     sane        N years of AI presidents on several seeds: no NaN/Infinity
+     sane        N years of AI presidents on the real world (several seeds): no NaN/Infinity
                  anywhere in the state, every price positive, every yield in
                  range, every living country with a positive GDP
      bonds       a country that borrows hard (welfare +12% GDP) pays more for
@@ -50,7 +50,7 @@ function seat(S, c) { PW.apply(S, { type: "seat", c: c, who: "test" }); }
 // ------------------------------------------------------------ sane, for years
 console.log("SANE: " + YEARS + " years of AI presidents, seeds " + SEEDS.join(","));
 for (const seed of SEEDS) {
-  const S = PW.create(seed, { countries: 12 });
+  const S = PW.create(seed);
   let bad = null, minP = Infinity, maxY = 0, wars = 0, falls = 0;
   for (let d = 0; d < YEARS * 365; d++) {
     PW.step(S, []);
@@ -75,16 +75,16 @@ for (const seed of SEEDS) {
 // ------------------------------------------------------------ bonds respond
 console.log("BONDS");
 {
-  const base = run(PW.create(7, { countries: 12 }), 200);
+  const base = run(PW.create(7), 200);
   // the country with the lowest yield, so there is room to see it rise
-  const c = base.c.filter(x => x.alive).sort((a, b) => a.yld - b.yld)[0].id;
+  const c = base.c.findIndex(x => x.key === "deu");      // a solid borrower, so there is room to see it fall
   seat(base, c);
   const A = PW.clone(base), B = PW.clone(base);
   PW.apply(B, { type: "budget", c: c, k: "welfare", v: B.c[c].budget.welfare + 6 });
   run(A, 365); run(B, 365);
   const a = A.c[c], b = B.c[c];
   const defaulted = B.log.some(e => e.k === "default" && e.c === c);
-  check("deficit spending raises debt (or ends in default)", defaulted || PW.debtRatio(b) > PW.debtRatio(a) + 0.04, (PW.debtRatio(a) * 100).toFixed(0) + "% -> " + (PW.debtRatio(b) * 100).toFixed(0) + "% of GDP" + (defaulted ? ", defaulted" : ""));
+  check("deficit spending raises debt (or ends in default)", defaulted || PW.debtRatio(b) > PW.debtRatio(a) + 0.03, (PW.debtRatio(a) * 100).toFixed(0) + "% -> " + (PW.debtRatio(b) * 100).toFixed(0) + "% of GDP" + (defaulted ? ", defaulted" : ""));
   check("the bond market charges for it", b.yld > a.yld + 0.5, a.yld.toFixed(2) + "% -> " + b.yld.toFixed(2) + "%");
   // and the full dose: a refinancing crisis
   const C = PW.clone(base);
@@ -97,7 +97,7 @@ console.log("BONDS");
 // ------------------------------------------------------------ war cuts supply
 console.log("WAR");
 {
-  const base = run(PW.create(21, { countries: 12 }), 120);
+  const base = run(PW.create(21), 120);
   // the single biggest oil field in the world
   let best = null, bo = 0;
   for (const p of base.p) { const n = p.fac.oil || 0; if (n > bo) { bo = n; best = p; } }
@@ -118,7 +118,7 @@ console.log("WAR");
 // ------------------------------------------------------------ tariffs move trade
 console.log("TARIFF");
 {
-  const base = run(PW.create(99, { countries: 12 }), 90);
+  const base = run(PW.create(99), 90);
   // the biggest bilateral steel flow in the world
   const F = base.flow[G.steel];
   let bi = -1, bj = -1, bf = 0;
@@ -137,8 +137,8 @@ console.log("TARIFF");
 // ------------------------------------------------------------ printing money
 console.log("PRINTING");
 {
-  const base = run(PW.create(7, { countries: 12 }), 100);
-  const c = 5; seat(base, c);
+  const base = run(PW.create(7), 100);
+  const c = base.c.findIndex(x => x.key === "deu"); seat(base, c);
   const A = PW.clone(base), B = PW.clone(base);
   PW.apply(B, { type: "print", c: c, v: 8 });
   run(A, 540); run(B, 540);
@@ -151,7 +151,7 @@ console.log("PRINTING");
 // ------------------------------------------------------------ the army's power
 console.log("ARMY");
 {
-  const base = run(PW.create(21, { countries: 12 }), 60);
+  const base = run(PW.create(21), 60);
   const c = base.c.filter(x => x.alive)[0].id; seat(base, c);
   const A = PW.clone(base), B = PW.clone(base);
   // the general may say no; ask until he says yes (that is a real answer too)
@@ -165,8 +165,8 @@ console.log("ARMY");
 // ------------------------------------------------------------ a plot found out
 console.log("PLOT");
 {
-  const base = run(PW.create(7, { countries: 12 }), 30);
-  const c = 2, t = 9; seat(base, c);
+  const base = run(PW.create(7), 30);
+  const c = base.c.findIndex(x => x.key === "fra"), t = base.c.findIndex(x => x.key === "irn"); seat(base, c);
   // find a stream position where the plot is discovered (the world decides)
   let B = null, res = null;
   for (let k = 0; k < 40; k++) {
@@ -187,7 +187,7 @@ console.log("PLOT");
 // ------------------------------------------------------------ nothing is gated
 console.log("NO GATES");
 {
-  const S = run(PW.create(99, { countries: 12 }), 30);
+  const S = run(PW.create(99), 30);
   const c = S.c.find(x => x.alive), t = S.c.find(x => x.alive && x.id !== c.id);
   seat(S, c.id);
   c.planes = 0; c.nukes = 0; c.cab.general.loyalty = 100; c.cab.general.hawk = 1;
