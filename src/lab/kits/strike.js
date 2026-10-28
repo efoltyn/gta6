@@ -50,7 +50,7 @@ CBZ.lab.kit("strike", {
     "src/city/aircraft.js", "src/city/strategic.js", "src/city/playerair.js",
   ],
   mode: "city",
-  params: { run: "carpet", alt: 900, obs: 6000, floor: 4000 },
+  params: { run: "carpet", alt: 900, obs: 6000, floor: 4000, sunAz: 145, sunEl: 32 },
   duration: 30,
   setup: function (W, P) {
     const THREE = window.THREE;
@@ -65,10 +65,42 @@ CBZ.lab.kit("strike", {
     // slices once a city is playing; the lab finishes it now so frame one
     // is drawn as the game draws it
     if (CBZ.volNoise && CBZ.volNoise.finish) CBZ.volNoise.finish();
+    // THE SUN: a morning sun, low enough to model a cloud (a high noon sun or
+    // one behind the lens lights every billow flat). sunAz = the compass
+    // direction it shines FROM (deg from +x toward +z), sunEl its elevation.
+    if (CBZ.sun) {
+      const az = (P.sunAz != null ? +P.sunAz : 145) * Math.PI / 180, el = (P.sunEl != null ? +P.sunEl : 32) * Math.PI / 180;
+      const tp = CBZ.sun.target ? CBZ.sun.target.position : new THREE.Vector3();
+      CBZ.sun.position.set(tp.x + Math.cos(az) * Math.cos(el) * 400, tp.y + Math.sin(el) * 400, tp.z + Math.sin(az) * Math.cos(el) * 400);
+      if (CBZ.sun.shadow && CBZ.sun.shadow.camera) {
+        const sc = CBZ.sun.shadow.camera; sc.left = -180; sc.right = 180; sc.top = 180; sc.bottom = -180; sc.near = 1; sc.far = 1200; sc.updateProjectionMatrix();
+        CBZ.sun.shadow.mapSize.set(2048, 2048);
+      }
+    }
     // the far plane and the air: a city day, not a studio
     const cam = CBZ.camera;
     cam.far = 60000; cam.near = 0.5; cam.updateProjectionMatrix();
     if (scene.fog) { scene.fog.near = 900; scene.fog.far = 14000; }
+    // THE DAY CYCLE'S REWRITE. In the game core/daynight.js (order 2) and
+    // core/gfx.js's finalize rewrite the sun, sky light and fog every frame,
+    // and the nuke and the blasts modulate those values on top, statelessly.
+    // The lab has no day cycle, so without this their modulations compound
+    // (a minute after a nuke the sun was overhead, orange, at 16 %).
+    if (CBZ.onAlways && CBZ.sun) {
+      const sun = CBZ.sun, hemi = CBZ.hemi, fog = scene.fog;
+      const base = {
+        sp: sun.position.clone(), si: sun.intensity, sc: sun.color.clone(),
+        hi: hemi ? hemi.intensity : 0, hc: hemi ? hemi.color.clone() : null, hg: hemi && hemi.groundColor ? hemi.groundColor.clone() : null,
+        fc: fog ? fog.color.clone() : null, fn: fog ? fog.near : 0, ff: fog ? fog.far : 0,
+      };
+      W.lightBase = base;
+      CBZ.onAlways(2, function () {
+        sun.position.copy(base.sp); sun.intensity = base.si; sun.color.copy(base.sc);
+        if (hemi) { hemi.intensity = base.hi; hemi.color.copy(base.hc); if (base.hg) hemi.groundColor.copy(base.hg); }
+        if (fog) { fog.color.copy(base.fc); fog.near = base.fn; fog.far = base.ff; }
+      });
+    }
+
 
     // ---- the streets: one streetkit grid, 3 x 3 blocks ----------------------
     const N = 3, half = (N * PITCH) / 2;
