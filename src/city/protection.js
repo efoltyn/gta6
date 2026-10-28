@@ -1710,7 +1710,81 @@
      centre (the staff's aisle runs toward it), clamped inside the oval wall
      with half a metre to spare; the arrival portal stands in for the staff
      door in the plain-office fallback. Returns {x, z, y, face} or null. */
+  /* NOBODY STANDS IN THE DOORWAY OR ON THE AISLE. The Oval Office's door is
+     a 1.2 m opening with a short vestibule behind it, and the staff aisle runs
+     from it across the room; both posts came out on that walking line
+     (measured: the inside agent 0.56 m from the vestibule's mouth, the outside
+     one 0.9 m off the approach): every visitor, every aide and the Chief of
+     Staff walked into a posted man and stood in the outer office for good.
+     A post nearer than a metre to the line people walk (the office's own
+     doorway(): out2 -> door -> inside, then the room's staff aisle) moves to
+     the nearest spot off it where a man can stand, on its own side of the
+     door (in the office for the inside post, in the outer office for the
+     other). */
+  function clearOfDoorway(post, inside) {
+    const O = CBZ.presidentOffice, D = O && O.doorway ? O.doorway() : null;
+    if (!post || !D) return post;
+    const rooms = CBZ.presidentInteriorRooms ? CBZ.presidentInteriorRooms() : [];
+    let lm = null, ap = null;
+    for (let i = 0; i < rooms.length; i++) if (rooms[i] && rooms[i].key === "ovaloffice") { lm = rooms[i].landmarks; ap = rooms[i].approach; break; }
+    // inside the oval itself (not the study behind the wall beside the door)
+    const inOval = function (x, z) {
+      if (!ap || !ap.depth || !ap.span) return true;
+      const u = (x - ap.x) * ap.nx + (z - ap.z) * ap.nz, v = (x - ap.x) * ap.tx + (z - ap.z) * ap.tz;
+      const hd = ap.depth / 2, hs = ap.span / 2;
+      return ((u - hd) / hd) * ((u - hd) / hd) + (v / hs) * (v / hs) < 0.86;
+    };
+    const line = [D.out2, D.door, D.inside];
+    if (lm && lm.staffAisle0 && lm.staffAisle1) {
+      const d0 = Math.hypot(lm.staffAisle0.x - D.inside.x, lm.staffAisle0.z - D.inside.z), d1 = Math.hypot(lm.staffAisle1.x - D.inside.x, lm.staffAisle1.z - D.inside.z);
+      line.push(d0 <= d1 ? lm.staffAisle0 : lm.staffAisle1, d0 <= d1 ? lm.staffAisle1 : lm.staffAisle0);
+    }
+    const NEED = 1.05;
+    const off = function (x, z) {
+      let m = 1e9;
+      for (let i = 0; i < line.length - 1; i++) {
+        const A = line[i], B = line[i + 1], ux = B.x - A.x, uz = B.z - A.z, L2 = ux * ux + uz * uz || 1e-9;
+        const t = Math.max(0, Math.min(1, ((x - A.x) * ux + (z - A.z) * uz) / L2));
+        m = Math.min(m, Math.hypot(x - A.x - ux * t, z - A.z - uz * t));
+      }
+      return m;
+    };
+    // the side of the door: outward along (ox, oz) is the outer office
+    const side = function (x, z) { return (x - D.door.x) * D.ox + (z - D.door.z) * D.oz; };
+    if (off(post.x, post.z) >= NEED && (inside ? side(post.x, post.z) < -0.3 && inOval(post.x, post.z) : side(post.x, post.z) > 0.3)) return post;
+    let best = null, bd = 1e9;
+    for (let dx = -3; dx <= 3.001; dx += 0.25) for (let dz = -3; dz <= 3.001; dz += 0.25) {
+      const x = post.x + dx, z = post.z + dz, d = dx * dx + dz * dz;
+      if (d >= bd) continue;
+      if (inside ? (side(x, z) > -0.6 || !inOval(x, z)) : side(x, z) < 0.6) continue;
+      if (off(x, z) < NEED || !standable(x, z, post.y)) continue;
+      best = { x: x, z: z, y: post.y, face: post.face }; bd = d;
+    }
+    return best || post;
+  }
+  function standable(x, z, y) {
+    const L = CBZ.colliders || [], r = 0.45;
+    for (let i = 0; i < L.length; i++) {
+      const c = L[i];
+      if (!c || c.maxX < x - r || c.minX > x + r || c.maxZ < z - r || c.minZ > z + r) continue;
+      if (c._bd) continue;                                  // a door leaf swings
+      const y0 = c.y0 != null ? c.y0 : -1e9, y1 = c.y1 != null ? c.y1 : 1e9;
+      if (y1 < y + 0.25 || y0 > y + 1.7) continue;
+      return false;
+    }
+    return true;
+  }
+  const DOORPOST_MEMO = {};
   function officeDoorPost(room, inside) {
+    const p = officeDoorPost0(room, inside);
+    if (!p) return p;
+    const k = (inside ? "i" : "o") + Math.round(p.x * 10) + ":" + Math.round(p.z * 10) + ":" + Math.round(p.y * 10);
+    if (DOORPOST_MEMO[k]) return DOORPOST_MEMO[k];
+    const O = CBZ.presidentOffice;
+    if (!(O && O.doorway && O.doorway())) return p;        // the office is not built yet: ask again later
+    return (DOORPOST_MEMO[k] = clearOfDoorway(p, inside));
+  }
+  function officeDoorPost0(room, inside) {
     if (!room || !room.approach || !room.landmarks || !room.landmarks.arrivalPortal) return null;
     const A2 = room.approach, ap = room.landmarks.arrivalPortal, y = room.floorY || 0;
     if (!inside) {

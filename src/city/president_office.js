@@ -93,7 +93,10 @@
   const CALL_GAP = 40;             // quiet seconds between calls
   const RING_PERIOD = 3.4;         // one trill burst every n seconds
   const FOLDERS_MAX = 3;
-  const AIDE_TALK_R = 4.2;
+  // a visitor speaks once he is across the room from the desk (the sofas and the
+  // coffee table stand between the staff aisle and the desk; a man stopped by
+  // them still says what he came to say)
+  const AIDE_TALK_R = 7.0;
   const DESK_TOP = 0.76;           // interior_programs.js's Resolute desk (the room publishes rec.deskTop)
   const THRONE_BACK = 1.12;        // the chair's centre behind the desk centre, along the frame
 
@@ -324,7 +327,10 @@
       open: DESK_L.open,
       // people: they come in at the office's staff door and stop in front of the desk
       aideSpawn: spawn,
-      aideStand: { x: dl.x, z: dl.z - 2.05 },
+      // where a visitor stops to speak: the room's own spot by the desk (chiefSpot,
+      // on the lane the staff aisle feeds); 2 m in front of the desk was behind
+      // the coffee table, where nobody could get to
+      aideStand: lm.chiefSpot ? toLocal(rec, lm.chiefSpot.x, lm.chiefSpot.z) : { x: dl.x, z: dl.z - 2.05 },
       // the secretary's post: the room's (outside the office door), in world coords
       secPostW: lm.secretaryPost ? { x: lm.secretaryPost.x, z: lm.secretaryPost.z } : toWorld(rec, -Math.min(4.25, half - 0.6), Math.max(1.4, portal.z - 2.0)),
       secLookW: lm.arrivalPortal ? { x: lm.arrivalPortal.x, z: lm.arrivalPortal.z } : toWorld(rec, 0, portal.z),
@@ -1510,15 +1516,76 @@
   function entryRoute(to) {
     const D = doorway();
     if (!D) return [{ x: to.x, z: to.z }];
+    let A = aisle(D.inside, to);
+    const lane = laneCorner(A[A.length - 1], to);
+    // a lane that leaves the aisle before its far end: turn off there
+    if (lane.length && A.length > 1 && between(lane[0], A[0], A[A.length - 1])) A = [A[0]];
     return [{ x: D.out1.x, z: D.out1.z }, { x: D.door.x, z: D.door.z, door: true }, { x: D.inside.x, z: D.inside.z }]
-      .concat(aisle(D.inside, to)).concat([{ x: to.x, z: to.z }]);
+      .concat(A).concat(lane).concat([{ x: to.x, z: to.z }]);
   }
   // out: from where he stands, round the sofas, through the door, on into the outer office
   function exitRoute(from) {
     const D = doorway();
     if (!D) return null;
-    return aisle(from, D.inside).concat([{ x: D.inside.x, z: D.inside.z }, { x: D.door.x, z: D.door.z, door: true },
+    const A = aisle(from, D.inside);
+    return laneCorner(A[0], from).reverse().concat(A).concat([{ x: D.inside.x, z: D.inside.z }, { x: D.door.x, z: D.door.z, door: true },
       { x: D.out1.x, z: D.out1.z }, { x: D.out2.x, z: D.out2.z }]);
+  }
+  /* DOWN THE SIDE OF THE ROOM, NOT ACROSS THE TABLE. The aisle crosses the
+     room between the sofas' far ends and the fireside armchairs; from its end
+     a straight line to the desk cut across the coffee table between the sofas
+     (measured: the Chief of Staff stopped against it 6 m from the desk, never
+     close enough to speak, and walked out again). The corner keeps the aisle
+     point's place across the room and takes the desk end's depth: he walks
+     down the lane outside the sofa, then across to the desk. */
+  function laneCorner(a, to) {
+    const rec = ROOM.rec || office();
+    if (!a || !to || !rec || !rec.approach) return [];
+    const la = toLocal(rec, a.x, a.z), lt = toLocal(rec, to.x, to.z);
+    if (Math.abs(la.z - lt.z) < 1.0) return [];
+    const y = rec.floorY;
+    if (clearLine(a, to, y, 0.5)) return [];
+    // a lane down the room clear of the furniture: along the aisle to it, down
+    // it, across to the desk; the lane's first corner may sit a little into
+    // the room from the aisle (past an armchair or a planter at its end).
+    // Lanes with room for a walking body (0.5 m, peds.js's own radius) first,
+    // then a tight squeeze (0.36 m) before giving up.
+    const dir = lt.z > la.z ? 1 : -1;
+    for (const R of [0.5, 0.36]) {
+      for (let k = 0; k <= 14; k++) for (const s of k ? [1, -1] : [1]) for (let j = 0; j <= 6; j++) {
+        const lx = lt.x + s * k * 0.25, bz = la.z + dir * j * 0.3;
+        if ((lt.z - bz) * dir < 0.6) break;
+        const b = toWorld(rec, lx, bz), c = toWorld(rec, lx, lt.z);
+        if (clearLine(a, b, y, R) && clearLine(b, c, y, R) && clearLine(c, to, y, R)) {
+          return [{ x: b.x, z: b.z }, { x: c.x, z: c.z }];
+        }
+      }
+    }
+    return [];
+  }
+  function between(p, a, b) {
+    const ux = b.x - a.x, uz = b.z - a.z, L2 = ux * ux + uz * uz || 1e-9;
+    const t = ((p.x - a.x) * ux + (p.z - a.z) * uz) / L2;
+    return t > 0.02 && t < 0.98;
+  }
+  // nothing a body would walk into between p and q (colliders on this floor, R metres either side)
+  function clearLine(p, q, y, R) {
+    const C = CBZ.colliders || [];
+    R = R || 0.36;
+    const ux = q.x - p.x, uz = q.z - p.z, L2 = ux * ux + uz * uz || 1e-9;
+    for (let i = 0; i < C.length; i++) {
+      const c = C[i];
+      if (!c || c._bd || c.maxX < Math.min(p.x, q.x) - R || c.minX > Math.max(p.x, q.x) + R || c.maxZ < Math.min(p.z, q.z) - R || c.minZ > Math.max(p.z, q.z) + R) continue;
+      const y0 = c.y0 != null ? c.y0 : -1e9, y1 = c.y1 != null ? c.y1 : 1e9;
+      if (y1 < y + 0.2 || y0 > y + 1.7) continue;
+      // the box against the swept disc: sample the line
+      const n = Math.max(2, Math.ceil(Math.sqrt(L2) / 0.2));
+      for (let k = 0; k <= n; k++) {
+        const x = p.x + ux * k / n, z = p.z + uz * k / n;
+        if (x > c.minX - R && x < c.maxX + R && z > c.minZ - R && z < c.maxZ + R) return false;
+      }
+    }
+    return true;
   }
   // he walks out; he leaves the world when nobody can see him (systems/leave.js)
   function walkOut(ped, tag) {
@@ -1554,6 +1621,29 @@
       if (ped.group && ped.group.parent) ped.group.parent.remove(ped.group);
       const a = CBZ.cityPeds; if (a) { const i = a.indexOf(ped); if (i >= 0) a.splice(i, 1); }
     } catch (e) {}
+  }
+  /* THE OFFICE DOOR OPENS FOR WHOEVER IS COMING THROUGH IT. A body this file
+     walks (controlled: an aide, the Chief, a visitor) is not routed by the
+     navigator, and the steering's wall kernel read the shut leaf as a wall and
+     turned him away from it before systems/bodydoors.js ever saw the door on
+     his heading: measured, every visitor stood in the outer office for good
+     (bodyDoors opened 0 doors all session). So the door waypoint opens its
+     door itself when he is a few metres from it, through the same provider a
+     body or the player opens it with. */
+  const _dn = [];
+  function openDoorAt(x, z, y, r) {
+    const BD = CBZ.bodyDoors;
+    if (!BD || !BD.near) return 0;
+    let n = 0;
+    BD.near(x, z, r || 1.4, _dn);
+    for (let i = 0; i < _dn.length; i++) {
+      const c = _dn[i], e = c._bd;
+      if (!e || (c.y0 != null && Math.abs(c.y0 - y) > 1.6)) continue;
+      if (Math.hypot((c.minX + c.maxX) / 2 - x, (c.minZ + c.maxZ) / 2 - z) > (r || 1.4)) continue;
+      if (BD.isOpen(c)) continue;
+      try { e.p.set(e.rec, true); n++; } catch (er) {}
+    }
+    return n;
   }
   function walkTo(p, x, z) {
     if (!p || p.dead) return;
@@ -1659,6 +1749,7 @@
       if (!w) { AIDE.phase = "wait"; AIDE.t = 0; holdAt(p, faceTo(p, Pp)); return; }
       const d = Math.hypot(p.pos.x - w.x, p.pos.z - w.z);
       const last = AIDE.wp >= AIDE.route.length - 1;
+      if (w.door && d < 3.5 && ROOM.rec) openDoorAt(w.x, w.z, ROOM.rec.floorY);
       AIDE.stuck += dt;
       if (AIDE.lastD - d > 0.5) { AIDE.lastD = d; AIDE.stuck = 0; }
       // a waypoint he cannot reach is skipped; nobody is carried there
@@ -2568,7 +2659,9 @@
     deskPoint: deskPoint,
     // the office's door and the walk through it (president_staff.js sends
     // its people in and out by these; systems/leave.js removes them unseen)
-    doorway: doorway, entryRoute: entryRoute, exitRoute: exitRoute, aisle: aisle, walkOut: walkOut,
+    doorway: doorway, entryRoute: entryRoute, exitRoute: exitRoute, aisle: aisle, walkOut: walkOut, openDoorAt: openDoorAt,
+    // a spot a body can stand on this floor of the office (nothing within R, 0.45 m)
+    standable: function (x, z, R) { const r = ROOM.rec || office(); return r ? clearLine({ x: x, z: z }, { x: x, z: z }, r.floorY, R || 0.45) : true; },
     // still carrying him to the chair (the run's first seconds, before he has
     // reached it): protection.js holds the detail's opening muster for this,
     // so the agents are posted where he actually starts

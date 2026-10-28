@@ -55,6 +55,15 @@
   CBZ.CONFIG.PRESIDENCY_FALLS = false;          // presidency.js: no impeachment, no junta knock
   CBZ.CONFIG.PRESIDENT_TERM_DAYS = 0;           // officials.js: no 7-day city term
   document.documentElement.classList.add("pres-game");
+  // the city's title card (its stories, its games strip) is not this game's:
+  // while the Mansion builds, the card says where you are going, nothing else
+  (function () {
+    const st = document.createElement("style");
+    st.textContent = "html.pres-game #title .card-box > * { display: none !important; }" +
+      "html.pres-game #title .card-box::after { content: 'THE WHITE HOUSE'; display: block; padding: 28px 8px; text-align: center;" +
+      " font: 700 clamp(28px, 6vw, 54px)/1 Georgia, serif; letter-spacing: .08em; color: #f2ede0; }";
+    (document.head || document.documentElement).appendChild(st);
+  })();
 
   const DAY_SECS = Math.max(1, +(Q.get("daysecs") || 4));     // one day of the world every four seconds of play
   const PSEED = (+(Q.get("pseed") || 0) | 0) || 1 + ((Date.now() / 1000) | 0) % 99991;
@@ -378,10 +387,14 @@
      eyes, looking over the desk at the room. After that the view follows his
      hands as it does everywhere (systems/fpsmode.js viewForHands). */
   function eyes() {
-    if (A.eyes) return;
+    if (A.eyes > 30) return;                 // three seconds of holding it, then it is his
     const P = CBZ.player, O = PO();
     if (!P || !P._propSeat || (O && O.placing && O.placing())) return;
-    A.eyes = true;
+    // the spawn's last settle re-seats him and the view rule answers that: ask
+    // again until it holds
+    const first = !A.eyes;
+    A.eyes = (A.eyes || 0) + 1;
+    if (CBZ.fpsActive && CBZ.fpsActive() && !first) return;
     const dp = O && O.deskPoint ? O.deskPoint() : null;
     try { if (CBZ.setFPS) CBZ.setFPS(true); } catch (e) {}
     if (CBZ.cam) { if (dp) CBZ.cam.yaw = dp.heading + Math.PI; CBZ.cam.pitch = 0.4; }

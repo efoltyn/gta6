@@ -486,6 +486,7 @@
   (function () {
     const st = document.createElement("style");
     st.textContent = "html.pres-reading #cityHud, html.pres-reading #hotbar { visibility: hidden !important; }";
-    (document.head || document.documentElement).appendChild(st);
+    const host = document.head || document.documentElement || document.body;
+    if (host && host.appendChild) host.appendChild(st);
   })();
 })();

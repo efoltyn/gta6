@@ -59,23 +59,10 @@
     return { inOffice: !!(a && a.inOffice), door: O && O.doorway ? O.doorway() : null, floorY: P() && P().pos ? P().pos.y : 0 };
   }
   function hyp(a, b) { return Math.hypot(a.x - b.x, a.z - b.z); }
-  // THEY COME THROUGH THE DOOR: a shut leaf in their way swings open
-  // (systems/bodydoors.js's providers: the same door the player opens)
-  const _near = [];
-  function openDoorsNear(x, z, y, r) {
-    const BD = CBZ.bodyDoors;
-    if (!BD || !BD.near) return 0;
-    let n = 0;
-    BD.near(x, z, r, _near);
-    for (let i = 0; i < _near.length; i++) {
-      const c = _near[i], e = c._bd;
-      if (!e || (c.y0 != null && Math.abs(c.y0 - y) > 1.6)) continue;
-      if (Math.hypot((c.minX + c.maxX) / 2 - x, (c.minZ + c.maxZ) / 2 - z) > r) continue;
-      if (BD.isOpen(c)) continue;
-      try { e.p.set(e.rec, true); n++; } catch (er) {}
-    }
-    return n;
-  }
+  // THEY COME THROUGH THE DOOR: a shut leaf in their way swings open (the
+  // office's own openDoorAt: systems/bodydoors.js's provider, the same door
+  // the player opens)
+  function openDoorsNear(x, z, y, r) { const O = PO(); return O && O.openDoorAt ? O.openDoorAt(x, z, y, r) : 0; }
 
   // ---- the men
   function post(x, z, y, opts) {
@@ -116,61 +103,97 @@
     if (CBZ.cityNpcOffense) { try { CBZ.cityNpcOffense(p, 90, "attempt on the President"); } catch (e) {} }
   }
 
-  // ---- the arrival: from the outer office through the door, or from the
-  // nearest cover when he is not in his office
+  // ---- the arrival. In the office: through the outer office and the door,
+  // ONE AT A TIME from the spot the office's own visitors are posted at
+  // (president_office.js doorway().out2), the next as soon as the last is
+  // clear of it, the way a squad comes through a door. A file of men posted at
+  // once jammed the outer office (measured: five bodies stuck against its
+  // furniture for half a minute). Away from the office: a ring 22 m out.
   function spawnPoint(i) {
     const O = office(), Pp = P();
-    if (O.inOffice && O.door) {
-      // a file in the outer office, the lead nearest the door
-      const D = O.door, side = i % 2 ? 0.32 : -0.32, back = i * 0.85;
-      return { x: D.out1.x + D.ox * (0.6 + back) - D.oz * (i ? side : 0), z: D.out1.z + D.oz * (0.6 + back) + D.ox * (i ? side : 0), y: O.floorY };
-    }
-    // outside the office: a ring 22 m out, the far side from where he looks
+    if (O.inOffice && O.door) return { x: O.door.out2.x, z: O.door.out2.z, y: O.floorY, door: true };
     const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
     const a = yaw + Math.PI * 0.8 + i * 0.22;
     return { x: Pp.pos.x - Math.sin(a) * 22, z: Pp.pos.z - Math.cos(a) * 22, y: Pp.pos.y };
   }
-  function spawnSquad(kind) {
-    const S = ST.ctx.state(), me = S.c[ST.ctx.me];
-    ST.men = [];
+  function specs(kind) {
+    const S = ST.ctx.state(), me = S.c[ST.ctx.me], out = [];
     if (kind === "coup") {
-      const sp = spawnPoint(0);
-      const gen = post(sp.x, sp.z, sp.y, { job: "military general", archetype: "military", armed: true, weapon: "Pistol", gender: "m" });
-      if (gen) { gen.name = "General " + (me.cab.general.name.split(" ").pop()); gen.nameKnown = true; ST.men.push(gen); ST.lead = gen; }
+      out.push({ lead: true, name: "General " + (me.cab.general.name.split(" ").pop()), named: true, o: { job: "military general", archetype: "military", armed: true, weapon: "Pistol", gender: "m" } });
       const n = 4 + Math.min(3, Math.floor((me.armyPower || 30) / 25));
-      for (let i = 1; i <= n; i++) {
-        const q = spawnPoint(i);
-        const s = post(q.x, q.z, q.y, { job: "soldier", archetype: "soldier", armed: true, weapon: i % 3 ? "Rifle" : "SMG", gender: "m" });
-        if (s) { s.name = "Soldier"; ST.men.push(s); }
-      }
+      for (let i = 1; i <= n; i++) out.push({ name: "Soldier", o: { job: "soldier", archetype: "soldier", armed: true, weapon: i % 3 ? "Rifle" : "SMG", gender: "m" } });
     } else if (kind === "traitor") {
+      for (let i = 0; i < 2; i++) out.push({ name: "Agent", o: { job: "close protection", archetype: "professional", armed: true, weapon: "SMG", gender: "m" } });
+    } else {
+      // gunmen in suits: they walk in like anybody with a folder and draw at the desk
+      const n = 2 + (S.day % 2);
+      for (let i = 0; i < n; i++) out.push({ lead: i === 0, name: "Aide", o: { job: "aide", archetype: "professional", armed: false, weapon: "Pistol", gender: i % 2 ? "f" : "m" } });
+    }
+    return out;
+  }
+  function make(spec, i) {
+    const q = spawnPoint(i);
+    const p = post(q.x, q.z, q.y, spec.o);
+    if (!p) return null;
+    p.name = spec.name; if (spec.named) p.nameKnown = true;
+    p._hp0 = p.hp;
+    const D = office().door;
+    if (q.door && D && p.group) p.group.rotation.y = Math.atan2(-D.ox, -D.oz);
+    ST.men.push(p);
+    if (spec.lead && !ST.lead) ST.lead = p;
+    const k = ST.men.length - 1;
+    ST.route[k] = routeTo(standFor(k));
+    ST.wp[k] = 0;
+    const w0 = ST.route[k][0];
+    walkTo(p, w0.x, w0.z);
+    return p;
+  }
+  function spawnSquad(kind) {
+    ST.men = []; ST.route = []; ST.wp = [];
+    ST.queue = specs(kind);
+    if (kind === "traitor") {
       // one of his own: the agent nearest him walks over with the paper
       const det = detail(), Pp = P();
       det.sort(function (a, b) { return hyp(a.pos, Pp.pos) - hyp(b.pos, Pp.pos); });
       const lead = det[0] || null;
-      if (lead) { turn(lead); ST.lead = lead; ST.men.push(lead); }
-      else {
-        const sp = spawnPoint(0);
-        const a = post(sp.x, sp.z, sp.y, { job: "close protection", archetype: "professional", armed: true, weapon: "Pistol", gender: "m" });
-        if (a) { a.name = "Agent"; ST.lead = a; ST.men.push(a); }
-      }
-      // and the men waiting behind the door
-      for (let i = 1; i <= 2; i++) {
-        const q = spawnPoint(i);
-        const a = post(q.x, q.z, q.y, { job: "close protection", archetype: "professional", armed: true, weapon: "SMG", gender: "m" });
-        if (a) { a.name = "Agent"; ST.men.push(a); }
-      }
-    } else {
-      // gunmen in suits: they walk in like anybody with a folder and draw at the desk
-      const n = 2 + (S.day % 2);
-      for (let i = 0; i < n; i++) {
-        const q = spawnPoint(i);
-        const a = post(q.x, q.z, q.y, { job: "aide", archetype: "professional", armed: false, weapon: "Pistol", gender: i % 2 ? "f" : "m" });
-        if (a) { a.name = "Aide"; ST.men.push(a); }
-      }
-      ST.lead = ST.men[0] || null;
+      if (lead) {
+        turn(lead); ST.lead = lead; ST.men.push(lead); lead._hp0 = lead.hp;
+        ST.route[0] = [standFor(0)]; ST.wp[0] = 0;
+        walkTo(lead, ST.route[0][0].x, ST.route[0][0].z);
+      } else ST.queue.unshift({ lead: true, name: "Agent", o: { job: "close protection", archetype: "professional", armed: true, weapon: "Pistol", gender: "m" } });
     }
-    note("men in the building: " + ST.men.length);
+    const O = office();
+    if (O.inOffice && O.door) { const s0 = ST.queue.shift(); if (s0) make(s0, 0); }
+    else { while (ST.queue.length) make(ST.queue.shift(), ST.men.length); }
+    note("men coming: " + (ST.men.length + ST.queue.length));
+  }
+  // the next man through the door, once the last one is clear of it
+  function feedDoor() {
+    if (!ST.queue || !ST.queue.length) return;
+    const D = office().door;
+    if (!D) { while (ST.queue.length) make(ST.queue.shift(), ST.men.length); return; }
+    for (const p of ST.men) if (p && !p.dead && Math.hypot(p.pos.x - D.out2.x, p.pos.z - D.out2.z) < 1.1) return;
+    make(ST.queue.shift(), ST.men.length);
+  }
+  // where the k-th man stands when he gets to him: a short arc in front of
+  // him, on the doorway's side; the first one closest
+  function standFor(k) {
+    const Pp = P(), D = office().door;
+    const tox = D ? D.inside.x - Pp.pos.x : 1, toz = D ? D.inside.z - Pp.pos.z : 0;
+    const l = Math.hypot(tox, toz) || 1, ux = tox / l, uz = toz / l;
+    const row = k === 0 ? 0 : 1 + ((k - 1) % 2) + Math.floor((k - 1) / 4);
+    const off = k === 0 ? 0 : ((k % 2 ? 1 : -1) * (0.9 + Math.floor((k - 1) / 2) % 2 * 0.9));
+    const dist = k === 0 ? 2.4 : 3.3 + (row > 2 ? 0.9 : 0);
+    // a spot a man can stand on (not the coffee table, not a sofa): the nearest
+    // free one round the planned spot
+    const O = PO(), ok = function (x, z) { return !O || !O.standable || O.standable(x, z); };
+    const bx = Pp.pos.x + ux * dist - uz * off, bz = Pp.pos.z + uz * dist + ux * off;
+    if (ok(bx, bz)) return { x: bx, z: bz };
+    for (let r = 0.4; r <= 2.0; r += 0.4) for (let a = 0; a < 8; a++) {
+      const x = bx + Math.cos(a * Math.PI / 4) * r, z = bz + Math.sin(a * Math.PI / 4) * r;
+      if (ok(x, z)) return { x: x, z: z };
+    }
+    return { x: bx, z: bz };
   }
   // take an agent off the detail and point him at the President
   function turn(p) {
@@ -215,6 +238,7 @@
     ST.phase = "fight"; ST.ft = 0;
     note("guns out");
     if (ST.kind === "coup") say(ST.lead, "Take him.", 2);
+    while (ST.queue && ST.queue.length) make(ST.queue.shift(), ST.men.length);
     for (const p of ST.men) hunt(p);
     // the detail: some of them were never his
     const S = ST.ctx.state(), me = S.c[ST.ctx.me];
@@ -272,32 +296,41 @@
     if (!Pp) return;
     if (ST.phase === "over" || ST.phase === "yielded") return;
     if (Pp.dead) { finish(false, ST.kind === "coup" ? "coup" : "assassinated"); return; }
-    if (ST.phase === "enter") {
-      // they walk in, one route, the lead first; the gunmen in suits draw at four metres
+    if (ST.phase === "enter" || ST.phase === "ask") {
+      feedDoor();                       // the next man through the door (and the rest keep coming while he talks)
+      // they walk their routes in; the lead holds in front of him
       let arrived = 0;
       for (let i = 0; i < ST.men.length; i++) {
         const p = ST.men[i];
         if (!p || p.dead) continue;
+        openDoorsNear(p.pos.x, p.pos.z, p.pos.y || 0, 2.6);
         const r = ST.route[i]; if (!r) continue;
         const w = r[ST.wp[i]];
         if (!w) { arrived++; continue; }
         const d = Math.hypot(p.pos.x - w.x, p.pos.z - w.z);
-        if (d < 0.8) { ST.wp[i]++; const n = r[ST.wp[i]]; if (n) walkTo(p, n.x, n.z); else { hold(p); arrived++; } }
+        if (w.door && d < 3.5) openDoorsNear(w.x, w.z, p.pos.y || 0, 1.4);
+        // a waypoint he cannot reach (a sofa, a man in the way) is given up after
+        // four seconds without getting closer; the last one means he is there
+        ST.st = ST.st || []; ST.bd = ST.bd || [];
+        if (ST.bd[i] == null || ST.bd[i] - d >= 0.4) { ST.bd[i] = d; ST.st[i] = 0; } else ST.st[i] = (ST.st[i] || 0) + dt;
+        if (d < 0.8 || ST.st[i] > 4) {
+          ST.wp[i]++; ST.st[i] = 0; ST.bd[i] = null;
+          const n = r[ST.wp[i]]; if (n) walkTo(p, n.x, n.z); else { hold(p); arrived++; }
+        }
         else if (p.state !== "walk") walkTo(p, w.x, w.z);
+        // the gunmen in suits draw at four metres
         if (ST.kind === "hit" && hyp(p.pos, Pp.pos) < 4.5) { fight(); return; }
       }
+      // he shot first (or anybody did): the talking is over
+      if (ST.men.some(function (p) { return p && (p.dead || (p._hp0 != null && p.hp < p._hp0)); })) { fight(); return; }
+      if (ST.phase === "ask") return;
       const lead = ST.lead;
       const near = lead && !lead.dead && hyp(lead.pos, Pp.pos) < 3.6;
-      const inRoom = lead && !lead.dead && hyp(lead.pos, Pp.pos) < 7 && Math.abs((lead.pos.y || 0) - (Pp.pos.y || 0)) < 2;
-      for (const p of ST.men) if (p && !p.dead) openDoorsNear(p.pos.x, p.pos.z, p.pos.y || 0, 2.6);
-      if (ST.kind !== "hit" && (near || (inRoom && arrived >= Math.max(1, ST.men.length - 1)) || ST.t > 60)) { ST.phase = "ask"; ask(); }
+      const inRoom = lead && !lead.dead && hyp(lead.pos, Pp.pos) < 7.5 && Math.abs((lead.pos.y || 0) - (Pp.pos.y || 0)) < 2;
+      // in the room with him, or as close as the furniture lets him: he says it
+      ST.inRoomT = inRoom ? (ST.inRoomT || 0) + dt : 0;
+      if (ST.kind !== "hit" && (near || (inRoom && (arrived >= 1 || ST.inRoomT > 5)) || ST.t > 60)) { ST.phase = "ask"; ask(); }
       if (ST.kind === "hit" && ST.t > 45) fight();
-      // he shot first: the talking is over
-      if (ST.men.some(function (p) { return p && (p.dead || p.hp < (p.maxHp || 100)); })) fight();
-      return;
-    }
-    if (ST.phase === "ask") {
-      if (ST.men.some(function (p) { return p && (p.dead || (p.hp != null && p.maxHp && p.hp < p.maxHp)); })) fight();
       return;
     }
     if (ST.phase === "fight") {
@@ -319,28 +352,13 @@
     const Pp = P();
     if (!Pp || !Pp.pos || g.mode !== "city" || g.state !== "playing") return false;
     ST.on = true; ST.kind = m.kind; ST.m = m; ST.ctx = ctx; ST.t = 0; ST.ft = 0; ST.phase = "enter";
-    ST.men = []; ST.turned = []; ST.lead = null; ST.asked = false; ST.result = null; ST.armedPlayer = false; ST.log = [];
+    ST.men = []; ST.turned = []; ST.lead = null; ST.asked = false; ST.result = null; ST.armedPlayer = false; ST.log = []; ST.queue = []; ST.route = []; ST.wp = []; ST.st = []; ST.bd = []; ST.inRoomT = 0;
     ctx.submit({ type: "stormBegin", m: m.id });
     // whatever he was reading, he puts it down
     if (CBZ.presBook && CBZ.presBook.isOpen && CBZ.presBook.isOpen()) CBZ.presBook.close();
     spawnSquad(m.kind);
-    if (!ST.men.length) { finish(false, m.kind === "coup" ? "coup" : "assassinated"); return true; }
-    // where they stand when they get to him: a short arc in front of him
-    const O = office(), D = O.door;
-    ST.route = []; ST.wp = [];
-    for (let i = 0; i < ST.men.length; i++) {
-      const p = ST.men[i];
-      let sx = Pp.pos.x, sz = Pp.pos.z;
-      const tox = D ? D.inside.x - Pp.pos.x : p.pos.x - Pp.pos.x, toz = D ? D.inside.z - Pp.pos.z : p.pos.z - Pp.pos.z;
-      const l = Math.hypot(tox, toz) || 1, ux = tox / l, uz = toz / l;
-      const off = (i - (ST.men.length - 1) / 2) * 0.95, dist = i === 0 ? 2.4 : 3.6;
-      sx += ux * dist - uz * off; sz += uz * dist + ux * off;
-      ST.route.push(p === ST.lead && ST.kind === "traitor" && ST.turned.indexOf(p) >= 0 ? [{ x: sx, z: sz }] : routeTo({ x: sx, z: sz }));
-      ST.wp.push(0);
-      const w0 = ST.route[i][0];
-      walkTo(p, w0.x, w0.z);
-    }
-    if (ST.kind === "coup" && ST.men[1]) say(ST.men[1], "Move.", 1.5);
+    if (!ST.men.length && !ST.queue.length) { finish(false, m.kind === "coup" ? "coup" : "assassinated"); return true; }
+    if (ST.kind === "coup" && ST.lead) say(ST.lead, "Move.", 1.5);
     note("storm: " + m.kind);
     return true;
   }
