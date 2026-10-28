@@ -149,6 +149,7 @@
     if (!B) throw new Error("battleInfantry needs CBZ.ballistics");
     const AR = CBZ.armour || null;
     let seed = (cfg.seed >>> 0) || 0x2545F491;
+    // the day's wind (m/s, a horizontal vector): the host's, else a breeze off the seed
     function rnd() { seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return seed / 4294967296; }
     function gauss() { const u = Math.max(1e-9, rnd()), v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(6.283185307 * v); }
     // who each man is (his habits) is the battle's, not his row number's
@@ -164,8 +165,8 @@
       S.col("cand", I32, -1); S.col("det", F); S.col("detN", F); S.col("expo", F);
       S.col("acqT", F); S.col("aimT", F); S.col("cool", F); S.col("burst", U8);
       S.col("mag", I16); S.col("ammo", I16); S.col("reloadT", F); S.col("heat", F); S.col("rngE", F); S.col("rngTgt", I32, -1);
-      S.col("supp", F); S.col("stress", F); S.col("cap", F); S.col("bleed", F); S.col("down", U8); S.col("aidBy", I32, -1);
-      S.col("flashT", F, -99); S.col("thinkAt", F); S.col("contactT", F, -99); S.col("crackT", F, -99);
+      S.col("supp", F); S.col("stress", F); S.col("cap", F); S.col("bleed", F); S.col("down", U8); S.col("aidBy", I32, -1); S.col("aidOn", I32, -1); S.col("aidEnd", F);
+      S.col("pin", U8); S.col("flashT", F, -99); S.col("thinkAt", F); S.col("contactT", F, -99); S.col("crackT", F, -99);
       S.col("hitX", F); S.col("hitZ", F); S.col("shots", I32); S.col("hits", I32);
       S.col("plF", U8); S.col("plB", U8); S.col("plS", U8); S.col("helm", U8);
       S.col("inF", F, 1); S.col("inB", F, 1); S.col("inS", F, 1); S.col("inH", F, 1);
@@ -185,6 +186,10 @@
       camX: 0, camZ: 0, shotR: 0, EV: EV, POST: POST, LIFE: LIFE, MOVE: MOVE, DOCTRINE: DOCTRINE,
     };
     const now = (typeof performance !== "undefined" && performance.now) ? function () { return performance.now(); } : function () { return Date.now(); };
+    {
+      const wa = rnd() * 6.283185, ws = rnd() * 4.5;          // calm to a fresh breeze
+      I.wind = cfg.wind ? { x: cfg.wind.x, z: cfg.wind.z } : { x: Math.sin(wa) * ws, z: Math.cos(wa) * ws };
+    }
 
     /* ------------------------------------------------------------ unit types
        spec: { trn, gun, optic, kit: { plates, sides, helmet }, look } */
@@ -223,7 +228,8 @@
     /* ------------------------------------------------------------ squads
        ten men: slot 0 leads, 1-4 alpha, 5-9 bravo. The host names the id. */
     const SQ = { n: 0, side: new U8(0), mem: new I32(0), cnt: new U8(0), task: new U8(0), at: new F(0), lead: new I32(0),
-      cx: new F(0), cz: new F(0), contact: new F(0), bound: new U8(0), boundT: new F(0), thx: new F(0), thz: new F(0), hurt: new U8(0), fx: new F(0), fz: new F(0) };
+      cx: new F(0), cz: new F(0), contact: new F(0), bound: new U8(0), boundT: new F(0), thx: new F(0), thz: new F(0), hurt: new U8(0), fx: new F(0), fz: new F(0),
+      lostT: new F(0), brkX: new F(0), brkZ: new F(0), brkT: new F(0), lastC: new F(0) };
     const TASK = { advance: 0, contact: 1, base: 2, bound: 3, assault: 4, hold: 5, breakc: 6, gone: 7 };
     I.TASK = TASK;
     function sqGrow(n) {
@@ -246,7 +252,7 @@
       G.tgt[r] = -1; G.tgtT[r] = 0; G.seenT[r] = -99; G.lkT[r] = -99; G.cand[r] = -1; G.det[r] = 0; G.expo[r] = 0;
       G.acqT[r] = 0; G.aimT[r] = 0; G.cool[r] = 0; G.burst[r] = 0;
       G.mag[r] = t.armed ? t.magSize : 0; G.ammo[r] = t.armed ? t.carry : 0; G.reloadT[r] = 0; G.heat[r] = 0; G.rngE[r] = 0; G.rngTgt[r] = -1;
-      G.supp[r] = 0; G.stress[r] = 0; G.cap[r] = 1; G.bleed[r] = 0; G.down[r] = 0; G.aidBy[r] = -1;
+      G.supp[r] = 0; G.stress[r] = 0; G.cap[r] = 1; G.bleed[r] = 0; G.down[r] = 0; G.aidBy[r] = -1; G.aidOn[r] = -1; G.aidEnd[r] = 0;
       G.flashT[r] = -99; G.thinkAt[r] = I.simT + rnd() * 0.25; G.contactT[r] = -99; G.crackT[r] = -99;
       G.shots[r] = 0; G.hits[r] = 0; G.vx[r] = 0; G.vz[r] = 0;
       G.plF[r] = t.plate; G.plB[r] = t.plate; G.plS[r] = t.side; G.helm[r] = t.helm;
@@ -580,8 +586,12 @@
         }
       }
       // ---- contact: what he does about it
-      const inContact = tg >= 0 || I.simT - G.crackT[r] < 8 || I.simT - G.lkT[r] < 12;
-      if (inContact) G.contactT[r] = I.simT;
+      // his own contact (he sees one, a round cracked past, he knows where they are),
+      // or his squad's: he heard the fire and the shout, and he knows the bearing
+      const own = tg >= 0 || I.simT - G.crackT[r] < 8 || I.simT - G.lkT[r] < 12;
+      const sqd = G.sqd[r];
+      const inContact = own || (sqd >= 0 && SQ.lastC[sqd] > 0 && I.simT - SQ.lastC[sqd] < 10);
+      if (own) G.contactT[r] = I.simT;
       decide(r, D, t, inContact);
     }
     function acquire(r, o, e) {
@@ -677,6 +687,7 @@
       if (tg >= 0) { tx = G.x[tg]; tz = G.z[tg]; }
       else if (I.simT - G.lkT[r] < 30) { tx = G.lkx[r]; tz = G.lkz[r]; }
       else if (I.simT - G.crackT[r] < 15) { tx = G.hitX[r]; tz = G.hitZ[r]; }
+      else if (sq >= 0 && SQ.lastC[sq] > 0 && I.simT - SQ.lastC[sq] < 10) { tx = SQ.thx[sq]; tz = SQ.thz[sq]; }
       if (tx === tx) G.face[r] = Math.atan2(tx - G.x[r], tz - G.z[r]);
       // ---- reload: in cover before he is dry (trained), or when dry
       if (t.armed && G.reloadT[r] <= 0 && G.ammo[r] > 0) {
@@ -696,7 +707,8 @@
       }
       // ---- contact
       const pinned = G.supp[r] > D.pinAt;
-      if (pinned && !(G.lifeHold)) I.led.pins++;
+      if (pinned && !G.pin[r]) I.led.pins++;
+      G.pin[r] = pinned ? 1 : 0;
       // a rush in progress runs out (he drops wherever he is)
       if (G.mv[r] === MOVE.rush) {
         const arrived = Math.hypot(G.gx[r] - G.x[r], G.gz[r] - G.z[r]) < 0.8;
@@ -719,13 +731,23 @@
           return;
         }
       }
-      if (task === TASK.breakc && !pinned && tx === tx) {
-        // break contact: back, by bounds, away from the threat
+      /* BREAK CONTACT, by bounds: the moving team gets up and rushes back to
+         the best spot 20-30 m behind, the other stays down and fires; they
+         swap on the squad's clock. Nobody turns his back on the enemy all at once. */
+      if (task === TASK.breakc && !pinned && tx === tx && boundingTeam(sq, r)) {
         const dx = G.x[r] - tx, dz = G.z[r] - tz, d = Math.hypot(dx, dz) || 1;
-        G.gx[r] = G.x[r] + dx / d * 25; G.gz[r] = G.z[r] + dz / d * 25;
+        const L = 20 + 10 * trait(r, 0xBAC);
+        const go = spotNear(r, G.x[r] + dx / d * L, G.z[r] + dz / d * L, tx, tz);
+        G.gx[r] = go.x; G.gz[r] = go.z;
         setPost(r, POST.stand); G.mv[r] = MOVE.rush; G.rushT[r] = 0;
+        I.led.rushes++;
         return;
       }
+      /* BUDDY AID. A mate down within reach, the squad not pinned, and he is
+         the nearest man free to go: he gets to him (low), works on him (the
+         bleeding is packed and tied off; he is out of the fight while he does
+         it), and the wounded man lives longer for it. */
+      if (aidStep(r, D, sq, pinned)) return;
       // ---- a firing position. At first contact he takes the best spot he
       // can reach (training: how far he looks, and whether he looks at all);
       // after that he stays put and fights from it
@@ -832,7 +854,7 @@
     const _poi = { x: 0, y: 0, z: 0 };
     function trigger(r, dt) {
       const t = T_(r), D = t.D;
-      if (!t.armed || G.down[r] || G.life[r] !== LIFE.alive) return;
+      if (!t.armed || G.down[r] || G.life[r] !== LIFE.alive || G.aidOn[r] >= 0) return;
       if (G.reloadT[r] > 0) {
         G.reloadT[r] -= dt;
         if (G.reloadT[r] <= 0) {
@@ -843,6 +865,7 @@
       }
       if (G.cool[r] > 0) G.cool[r] -= dt;
       const tg = G.tgt[r];
+      if (tg < 0 || (G.expo[r] <= 0 && G.acqT[r] <= 0)) { if (G.postT[r] <= 0) areaFire(r, t, D); }
       if (tg < 0 || G.postT[r] > 0) { G.aimT[r] = 0; return; }
       if (G.acqT[r] > 0) { G.acqT[r] -= dt; return; }
       if (G.expo[r] <= 0) { G.aimT[r] = Math.max(0, G.aimT[r] - dt); return; }
@@ -866,6 +889,53 @@
       }
       const sig = sigmaNow(r, t, d);
       fire(r, tg, t, D, d, sig, pinned);
+    }
+    /* AREA FIRE. Nobody in his sight, but he knows (or believes) where they
+       are: the last place he saw one, where the cracks came from, the
+       squad's bearing. A trained man fires there only as covering fire (his
+       squad has a team on the move) at a sustained rate, a round every few
+       seconds; an untrained one sprays toward the noise. The rounds are flown
+       like any other and hit whoever is really there; their cracks keep heads
+       down, which is the point. */
+    function areaFire(r, t, D) {
+      if (G.cool[r] > 0 || G.mag[r] <= 0 || G.mv[r] !== MOVE.hold || G.post[r] === POST.stand && G.postT[r] > 0) return;
+      if (I.simT - G.lkT[r] > 10) return;
+      const sq = G.sqd[r];
+      const cover = sq >= 0 && (SQ.task[sq] === TASK.bound || SQ.task[sq] === TASK.assault || SQ.task[sq] === TASK.breakc) && !boundingTeam(sq, r);
+      const undisciplined = D.press < 0.5;
+      if (!cover && !undisciplined) return;
+      const pinned = G.supp[r] > D.pinAt;
+      if (pinned && !undisciplined) return;
+      // a reserve he keeps for a real target (fire discipline)
+      if (!undisciplined && G.mag[r] <= t.magSize * D.ammoDisc + 1) return;
+      const x = G.x[r], z = G.z[r];
+      const ax = G.lkx[r], az = G.lkz[r];
+      const d = Math.hypot(ax - x, az - z);
+      if (d < 8 || d > (t.g.area || 600)) return;
+      // over the lip he is behind? (a man flat behind a fold fires into its face)
+      const p = G.post[r], oy = G.y[r] + MUZ[p], gy = hAt(ax, az);
+      if (!lineClear(x, oy, z, ax, gy + 0.8, az)) return;
+      G.aimT[r] = 0;
+      // his point: the spot, with the error of not seeing it (a few metres, more far off)
+      const err = 1.5 + d * 0.012;
+      const px = ax + gauss() * err, pz = az + gauss() * err;
+      const sig = sigmaNow(r, t, d) + (pinned ? 18 : 2);
+      G.mag[r]--; G.shots[r]++;
+      I.stats.shots[G.side[r]]++;
+      I.led.area = (I.led.area || 0) + 1;
+      const hd = Math.hypot(px - x, pz - z) || 1;
+      const ox = x + (px - x) / hd * 0.5, oz = z + (pz - z) / hd * 0.5;
+      const poi = B.poi(t.v0, t.k, hd, t.g.zero, t.g.sightH);
+      const k = hd / 1000, ex = gauss() * sig, ey = gauss() * sig;
+      const hx = (px - ox) / hd, hz = (pz - oz) / hd;
+      launch(r, ox, oy, oz, px - hz * ex * k, gy + 0.45 + poi + ey * k, pz + hx * ex * k, t, -1);
+      G.flashT[r] = I.simT;
+      G.heat[r] = G.heat[r] * Math.exp(-(I.simT - G.flashT[r]) / D.recover) + (t.g.recoil || 3);
+      // the rate: sustained covering fire, or a spray
+      if (undisciplined) {
+        if (G.burst[r] + 1 < D.burst) { G.burst[r]++; G.cool[r] = t.interval; }
+        else { G.burst[r] = 0; G.cool[r] = 0.8 + rnd() * 1.2; }
+      } else G.cool[r] = 2.2 + rnd() * 2.0;
     }
     // his angular error in mil (1-sigma per axis) right now
     function sigmaNow(r, t, d) {
@@ -917,7 +987,15 @@
       const ey = gauss() * s + heat * 0.6;
       const k = hd / 1000;
       const hx = (ax - ox) / hd, hz = (az - oz) / hd;
-      const px = ax - hz * ex * k, pz = az + hx * ex * k, py = ay + hold + poiTrue + ey * k;
+      /* THE WIND. The crosswind moves a round by W x (time of flight - range
+         / muzzle velocity) (the point-mass lag rule). He holds off for the
+         wind he reads: a trained man reads it to within a third, and corrects
+         after a miss he sees; an untrained one does not hold off at all. */
+      const wc = I.wind.x * hz - I.wind.z * hx;              // the crosswind, m/s (+ = to his right)
+      const lag = Math.max(0, tf - hd / t.v0);
+      const read = D.adjust > 0.3 ? 1 + gauss() * (1 - D.adjust) * 0.6 : 0;
+      const ew = wc * lag * (1 - read);                       // the drift he did not hold off for (m)
+      const px = ax - hz * (ex * k - ew), pz = az + hx * (ex * k - ew), py = ay + hold + poiTrue + ey * k;
       launch(r, ox, oy, oz, px, py, pz, t, tg);
       // the gun on his shoulder
       G.heat[r] = heat + (g.recoil || 3) * (p === POST.prone ? 0.55 : p === POST.kneel ? 0.8 : 1);
@@ -1220,7 +1298,13 @@
       const org = res.plate ? "plate" : res.organ || (res.zone === "head" ? "head" : res.zone && (res.zone.indexOf("arm") === 0 || res.zone.indexOf("leg") === 0) ? "limb" : "torso");
       if (I.led.organs[org] != null) I.led.organs[org]++;
       // what it does to him
-      hurt(b, H.kill ? 2 : H.now, H.bleed, sh, res.plate);
+      /* WHAT IT DOES TO HIM, AS A MAN. ballistics.harm is per unit of a whole
+         body; for a man the wound takes him out of the fight (now) and the
+         blood loss kills him over time. A round through the brain kills on
+         the spot; through the chest he is down at once and dies over tens of
+         seconds (the heart) to minutes (the lungs) unless his mates pack and
+         tie it off; the gut takes longer; a limb longer still. */
+      hurt(b, H.kill ? 2 : Math.min(0.9, H.now), H.bleed * 0.25, sh, res.plate);
       return res.vOut;
     }
     function hurt(b, now_, bleed, by, plate) {
@@ -1257,7 +1341,7 @@
         if (o === b || G.side[o] !== sd || !fighting(o)) return;
         const dx = G.x[o] - x, dz = G.z[o] - z, d2 = dx * dx + dz * dz;
         if (d2 > 225) return;
-        G.stress[o] += k * (1 - Math.sqrt(d2) / 15) * D_(o).suppK;
+        G.stress[o] += k * 0.4 * (1 - Math.sqrt(d2) / 15) * D_(o).suppK;
       });
       const sq = G.sqd[b];
       if (sq >= 0) SQ.hurt[sq] = Math.min(255, SQ.hurt[sq] + 1);
@@ -1276,7 +1360,7 @@
     function crack(b, k, fx, fz) {
       const D = D_(b);
       G.supp[b] += D.suppK * (0.35 + 0.65 * k);
-      G.stress[b] += 0.02 * D.suppK * k;
+      G.stress[b] += 0.012 * D.suppK * k;
       I.led.cracks++;
       if (I.simT - G.crackT[b] > 3 || G.tgt[b] < 0) { G.hitX[b] = fx; G.hitZ[b] = fz; }
       G.crackT[b] = I.simT;
@@ -1324,6 +1408,8 @@
         // the body's clocks
         if (G.postT[r] > 0) { G.postT[r] -= dt; if (G.postT[r] <= 0) { G.postT[r] = 0; G.post[r] = G.postTo[r]; } }
         if (G.supp[r] > 0) { const D = D_(r); G.supp[r] *= Math.exp(-dt / D.calm); if (G.supp[r] < 0.01) G.supp[r] = 0; }
+        // the stress of it wears off over a minute or so (faster out of contact)
+        if (G.stress[r] > 0) G.stress[r] *= Math.exp(-dt / (I.simT - G.contactT[r] < 10 ? 90 : 30));
         if (G.bleed[r] > 0) {
           G.cap[r] -= G.bleed[r] * dt;
           G.hp[r] = Math.max(0, G.cap[r] * 100);
@@ -1376,6 +1462,71 @@
       _bg.x = bx; _bg.z = bz;
       return _bg;
     }
+    // the best prone spot round (cx, cz) against a threat: a lip that hides him
+    const _sn = { x: 0, z: 0 };
+    function spotNear(r, cx, cz, tx, tz) {
+      let best = -1, bx = cx, bz = cz;
+      for (let k = 0; k < 6; k++) {
+        const a = k * 1.047 + trait(r, k + 0x9A) * 0.5, rr = k ? 4 : 0;
+        const px = cx + Math.sin(a) * rr, pz = cz + Math.cos(a) * rr;
+        const s = spotScore(px, pz, POST.prone, tx, tz);
+        const v = s.ok ? 1 - s.show : -1;
+        if (v > best) { best = v; bx = px; bz = pz; }
+      }
+      _sn.x = bx; _sn.z = bz;
+      return _sn;
+    }
+    /* BUDDY AID (decide calls it). Returns true while he is busy with it. */
+    function aidStep(r, D, sq, pinned) {
+      const p = G.aidOn[r];
+      if (p >= 0) {
+        if (!alive(p) || !G.down[p] || G.aidBy[p] !== r) { G.aidOn[r] = -1; return false; }
+        const dx = G.x[p] - G.x[r], dz = G.z[p] - G.z[r], d = Math.sqrt(dx * dx + dz * dz);
+        if (d > 1.0) {
+          G.gx[r] = G.x[p] - dx / (d || 1) * 0.7; G.gz[r] = G.z[p] - dz / (d || 1) * 0.7;
+          // the last strides low (a crawl under fire), the rest a rush
+          if (d < 6 && (pinned || I.simT - G.crackT[r] < 3)) { if (G.post[r] === POST.stand) setPost(r, POST.prone); G.mv[r] = MOVE.crawl; }
+          else { setPost(r, POST.stand); G.mv[r] = MOVE.rush; G.rushT[r] = 0; }
+          G.aidEnd[r] = 0;
+          return true;
+        }
+        G.mv[r] = MOVE.hold;
+        if (G.post[r] === POST.stand) setPost(r, POST.kneel);
+        if (G.aidEnd[r] <= 0) G.aidEnd[r] = I.simT + 18 + 20 * (1 - D.press) + rnd() * 10;
+        if (I.simT >= G.aidEnd[r]) {
+          // packed, tied off: the bleeding mostly stopped
+          G.bleed[p] *= 0.12;
+          I.led.aids++;
+          ev(EV.aid, p, r, 0);
+          G.aidOn[r] = -1; G.aidEnd[r] = 0;
+          return false;
+        }
+        return true;
+      }
+      if (D.aid <= 0 || pinned || sq < 0) return false;
+      const task = SQ.task[sq];
+      if (task === TASK.assault || task === TASK.breakc || task === TASK.gone) return false;
+      if (G.slot[r] === 0 && SQ.cnt[sq] > 2) return false;          // the leader runs the fight
+      const base = sq * 10;
+      for (let j = 0; j < 10; j++) {
+        const w = SQ.mem[base + j];
+        if (w < 0 || w === r || !alive(w) || !G.down[w] || G.aidBy[w] >= 0 && alive(G.aidBy[w]) && G.aidOn[G.aidBy[w]] === w) continue;
+        if (G.bleed[w] < 0.002) continue;                          // he is not bleeding out
+        const d = Math.hypot(G.x[w] - G.x[r], G.z[w] - G.z[r]);
+        if (d > D.aid) continue;
+        // the nearest free mate goes
+        let nearer = false;
+        for (let k = 0; k < 10 && !nearer; k++) {
+          const o = SQ.mem[base + k];
+          if (o < 0 || o === r || o === w || !fighting(o) || G.aidOn[o] >= 0 || (G.slot[o] === 0 && SQ.cnt[sq] > 2)) continue;
+          if (Math.hypot(G.x[w] - G.x[o], G.z[w] - G.z[o]) < d - 0.5) nearer = true;
+        }
+        if (nearer) continue;
+        G.aidOn[r] = w; G.aidBy[w] = r; G.aidEnd[r] = 0;
+        return aidStep(r, D, sq, pinned);
+      }
+      return false;
+    }
     function squadTick(sq) {
       const base = sq * 10;
       let lead = -1, nAlive = 0, nFight = 0, cx = 0, cz = 0, inContact = 0, pinned = 0, tx = 0, tz = 0, nt = 0, stress = 0;
@@ -1395,26 +1546,33 @@
         else if (I.simT - G.lkT[r] < 20) { tx += G.lkx[r]; tz += G.lkz[r]; nt++; }
       }
       if (!nFight) { SQ.task[sq] = TASK.gone; return; }
-      // the leader: slot 0, else the next man takes it (and they all feel it)
+      /* THE LEADER: slot 0, else the next man takes it. Losing him is felt by
+         every man, and for a while nobody is giving orders: the squad goes to
+         ground and fights where it is until the next man has taken charge
+         (a trained squad knows who is next; a conscript one waits longer). */
+      const D = D_(lead);
       if (SQ.lead[sq] >= 0 && SQ.lead[sq] !== lead && !fighting(SQ.lead[sq])) {
-        for (let j = 0; j < 10; j++) { const r = SQ.mem[base + j]; if (r >= 0 && fighting(r)) G.stress[r] += 0.12 * D_(r).suppK; }
+        for (let j = 0; j < 10; j++) { const r = SQ.mem[base + j]; if (r >= 0 && fighting(r)) G.stress[r] += 0.1 * D_(r).suppK; }
+        SQ.lostT[sq] = I.simT + 4 + 22 * (1 - D.press);
       }
       SQ.lead[sq] = lead;
       cx /= nFight; cz /= nFight;
       SQ.cx[sq] = cx; SQ.cz[sq] = cz;
-      const D = D_(lead);
       const o = I.order[SQ.side[sq]];
       // the march direction
       let fx = o.x - cx, fz = o.z - cz;
       const fl = Math.hypot(fx, fz) || 1;
       SQ.fx[sq] = fx / fl; SQ.fz[sq] = fz / fl;
-      if (nt) { SQ.thx[sq] = tx / nt; SQ.thz[sq] = tz / nt; }
+      if (nt) { SQ.thx[sq] = tx / nt; SQ.thz[sq] = tz / nt; if (inContact) SQ.lastC[sq] = I.simT; }
       const losses = 1 - nFight / Math.max(1, SQ.cnt[sq]);
-      // morale: the squad's mean stress against its nerve
-      const meanStress = stress / nFight + losses * 0.6;
-      if (meanStress > D.nerve && inContact) {
-        // broken: they break contact; past more it is a rout
-        if (meanStress > D.nerve * 1.4) {
+      /* MORALE. The pressure on the squad is its losses (men down and dead,
+         the ones they can see) plus the mean stress its men carry (cracks,
+         wounds, mates falling beside them). Past its nerve it breaks contact
+         (an ordered withdrawal by bounds); far past it, it routs. */
+      const P = losses + stress / nFight;
+      const task0 = SQ.task[sq];
+      if (inContact && (P > D.nerve || task0 === TASK.breakc)) {
+        if (P > D.nerve * 1.45 || (task0 === TASK.breakc && P > D.nerve * 1.25)) {
           for (let j = 0; j < 10; j++) {
             const r = SQ.mem[base + j];
             if (r >= 0 && fighting(r) && G.life[r] === LIFE.alive) { G.life[r] = LIFE.routed; ev(EV.rout, r, -1, 0); }
@@ -1422,23 +1580,33 @@
           SQ.task[sq] = TASK.gone;
           return;
         }
-        SQ.task[sq] = TASK.breakc;
+        if (task0 !== TASK.breakc) { SQ.task[sq] = TASK.breakc; SQ.bound[sq] = 1; SQ.boundT[sq] = I.simT; SQ.brkX[sq] = cx; SQ.brkZ[sq] = cz; SQ.brkT[sq] = I.simT; }
+        // out of it: 150 m back from where it broke, or out of contact
+        if (Math.hypot(cx - SQ.brkX[sq], cz - SQ.brkZ[sq]) > 150) { SQ.task[sq] = TASK.hold; return; }
+        if (I.simT - SQ.boundT[sq] > 5) { SQ.bound[sq] = SQ.bound[sq] === 1 ? 2 : 1; SQ.boundT[sq] = I.simT; }
         return;
       }
+      if (task0 === TASK.breakc && !inContact) { SQ.task[sq] = TASK.hold; return; }
+      if (task0 === TASK.hold && I.simT - SQ.brkT[sq] < 120 && SQ.brkT[sq] > 0) return;    // it has withdrawn: it holds there
       if (!inContact) {
         SQ.task[sq] = o.kind === "hold" ? TASK.hold : TASK.advance;
         SQ.bound[sq] = 0;
         return;
       }
       // in contact
-      if (o.kind === "hold" || nFight < 2) { SQ.task[sq] = TASK.base; return; }
+      if (o.kind === "hold" || nFight < 2 || I.simT < SQ.lostT[sq]) { SQ.task[sq] = TASK.base; return; }
       const dTh = nt ? Math.hypot(SQ.thx[sq] - cx, SQ.thz[sq] - cz) : 999;
-      // fire and movement: one team moves while the other fires, and only
-      // while the fire is not too heavy to move under; the team swaps on the
-      // squad's clock. Inside 40 m of a suppressed enemy: the assault
+      /* FIRE AND MOVEMENT: one team moves while the other fires, and only
+         while the fire is not too heavy to move under; the teams swap on the
+         squad's clock. A base of fire comes first (the squad down and
+         shooting for a few seconds). Inside 45 m of the enemy: the assault. */
       if (pinned >= Math.ceil(nFight * 0.5)) { SQ.task[sq] = TASK.base; SQ.bound[sq] = 0; return; }
-      const prev = SQ.task[sq];
-      if (prev !== TASK.bound && prev !== TASK.assault) { SQ.task[sq] = TASK.base; if (I.simT - SQ.boundT[sq] > 8) { SQ.task[sq] = TASK.bound; SQ.bound[sq] = 1; SQ.boundT[sq] = I.simT; } return; }
+      if (task0 !== TASK.bound && task0 !== TASK.assault) {
+        SQ.task[sq] = TASK.base;
+        if (SQ.contact[sq] <= 0) SQ.contact[sq] = I.simT;
+        if (I.simT - SQ.contact[sq] > 6 + 8 * (1 - D.press) && I.simT - SQ.boundT[sq] > 6) { SQ.task[sq] = TASK.bound; SQ.bound[sq] = 1; SQ.boundT[sq] = I.simT; }
+        return;
+      }
       if (I.simT - SQ.boundT[sq] > 6 + 4 * (1 - D.press)) {
         SQ.bound[sq] = SQ.bound[sq] === 1 ? 2 : 1; SQ.boundT[sq] = I.simT;
       }
@@ -1475,7 +1643,7 @@
       // the triggers
       for (let r = 0; r < n; r++) {
         if (G.life[r] !== LIFE.alive) continue;
-        if (G.tgt[r] < 0 && G.reloadT[r] <= 0) continue;
+        if (G.tgt[r] < 0 && G.reloadT[r] <= 0 && I.simT - G.lkT[r] > 10) continue;
         trigger(r, dt);
       }
       const t4 = now(); I.ms.fire += t4 - t3;
