@@ -80,7 +80,9 @@
   const POST = { stand: 0, kneel: 1, prone: 2 };
   const POST_NAME = ["stand", "crouch", "prone"];      // ballistics.MAN's names
   const MOVE = { hold: 0, walk: 1, rush: 2, crawl: 3, run: 4 };
-  const EV = { kill: 1, down: 2, hit: 3, fled: 4, rout: 5, rally: 6, shot: 7, aid: 8, post: 9 };
+  const EV = { kill: 1, down: 2, hit: 3, fled: 4, rout: 5, rally: 6, shot: 7, aid: 8, post: 9, crack: 10 };
+  // a row the host owns (its own body, synced into the store each step): what it is
+  const EXT = { none: 0, man: 1, beast: 2, vehicle: 3 };
   // a round for the renderer: shooter, origin, unit direction, where it stopped
   // (metres along the line), muzzle velocity, drag, cartridge idx, tracer, hit row
   const SHOT_F = 13;
@@ -173,6 +175,7 @@
       S.col("plF", U8); S.col("plB", U8); S.col("plS", U8); S.col("helm", U8);
       S.col("inF", F, 1); S.col("inB", F, 1); S.col("inS", F, 1); S.col("inH", F, 1); S.col("plSo", U8); S.col("inSo", F, 1);
       S.col("vx", F); S.col("vz", F);
+      S.col("ext", U8); S.col("extW", F); S.col("extH", F); S.col("extMM", F);
     }
     cols();
     /* THE COLUMNS, AS A FAST OBJECT. The store's `cols` collects its ~90
@@ -189,7 +192,7 @@
         acqT: c.acqT, aimT: c.aimT, cool: c.cool, burst: c.burst, mag: c.mag, ammo: c.ammo, reloadT: c.reloadT, heat: c.heat, rngE: c.rngE, rngTgt: c.rngTgt,
         supp: c.supp, stress: c.stress, cap: c.cap, bleed: c.bleed, down: c.down, aidBy: c.aidBy, aidOn: c.aidOn, aidEnd: c.aidEnd, pin: c.pin,
         flashT: c.flashT, thinkAt: c.thinkAt, contactT: c.contactT, crackT: c.crackT, hitX: c.hitX, hitZ: c.hitZ, shots: c.shots, hits: c.hits,
-        plF: c.plF, plB: c.plB, plS: c.plS, helm: c.helm, inF: c.inF, inB: c.inB, inS: c.inS, inH: c.inH, plSo: c.plSo, inSo: c.inSo, vx: c.vx, vz: c.vz,
+        plF: c.plF, plB: c.plB, plS: c.plS, helm: c.helm, inF: c.inF, inB: c.inB, inS: c.inS, inH: c.inH, plSo: c.plSo, inSo: c.inSo, vx: c.vx, vz: c.vz, ext: c.ext, extW: c.extW, extH: c.extH, extMM: c.extMM,
       };
     }
     let G = bindG(S.cols);
@@ -632,6 +635,16 @@
     function exposure(a, b) {
       const ax = G.x[a], az = G.z[a], ay = G.y[a] + EYE[G.post[a]];
       const bx = G.x[b], bz = G.z[b], by = G.y[b];
+      const ek = G.ext[b];
+      if (ek && ek !== EXT.man) {
+        // a hull or an animal: its top, its middle, its foot, each a third of its face
+        const h = G.extH[b], A3 = G.extW[b] * h / 3;
+        let ar = 0;
+        if (lineClear(ax, ay, az, bx, by + h * 0.92, bz)) ar += A3;
+        if (lineClear(ax, ay, az, bx, by + h * 0.55, bz)) ar += A3;
+        if (lineClear(ax, ay, az, bx, by + h * 0.18, bz)) ar += A3;
+        return ar;
+      }
       const p = G.post[b];
       const L = LOOK[p];
       let area = 0;
@@ -834,6 +847,16 @@
     }
     function acquire(r, o, e) {
       const D = D_(r);
+      // A RIFLE DOES NOT SHOOT AT A TANK: armour his round cannot go through at
+      // this range (its thinnest face: he can hope for a flank) is a threat he
+      // knows about and gets down from, not a mark
+      if (G.extMM[o] > 0) {
+        const t = T_(r), d = Math.hypot(G.x[o] - G.x[r], G.z[o] - G.z[r]);
+        if (B.penRHA(t.c, B.vAt(t.v0, t.k, d), t.v0) < G.extMM[o]) {
+          G.lkx[r] = G.x[o]; G.lkz[r] = G.z[o]; G.lkT[r] = I.simT;
+          return;
+        }
+      }
       const prev = G.tgt[r];
       G.tgt[r] = o; G.expo[r] = e; G.seenT[r] = I.simT;
       G.lkx[r] = G.x[o]; G.lkz[r] = G.z[o]; G.lkT[r] = I.simT;
@@ -1350,17 +1373,21 @@
           w++;
           continue;
         }
-        resolve(o);
+        resolve(o, I.types[RB[o + 11] | 0], false);
       }
       nR = w;
       I.ms.rounds += now() - t0;
     }
-    function resolve(o) {
-      const sh = RB[o] | 0, typ = RB[o + 11] | 0, t = I.types[typ];
+    /* A ROUND ARRIVES. o: its slot in RB; t: what fired it ({ c: cartridge,
+       D: the shooter's doctrine, or null for a round from the host's world});
+       outside: the round is the host's (it does not wound the host's own
+       bodies through here; the host resolves those). Returns where it stopped. */
+    function resolve(o, t, outside) {
+      const sh = RB[o] | 0, typ = RB[o + 11] | 0;
       const ox = RB[o + 1], oz = RB[o + 3], dx = RB[o + 4], dz = RB[o + 6], hk = RB[o + 13];
       let stop = RB[o + 7];
       const sT = RB[o + 12];
-      const sd = G.side[sh];
+      const sd = outside ? _outSide : G.side[sh];
       // the bodies along the line: everyone within 1.2 m of it in the ground
       // plane, from the muzzle to where it stopped (the body grid, 4 m cells)
       _hitList.length = 0; _hitA.length = 0;
@@ -1369,7 +1396,7 @@
       const stamp = ++_stampN, cst = ++hbStamp;
       // the band of cells within 3.2 m of its path (a hit within 1.25 m, a crack
       // within the cartridge's suppression radius), walked a cell at a time
-      _rv.o = o; _rv.sh = sh; _rv.ox = ox; _rv.oz = oz; _rv.ux = ux; _rv.uz = uz; _rv.hEnd = hEnd; _rv.hk = hk; _rv.stop = stop; _rv.t = t; _rv.stamp = stamp;
+      _rv.o = o; _rv.sh = sh; _rv.side = sd; _rv.ox = ox; _rv.oz = oz; _rv.ux = ux; _rv.uz = uz; _rv.hEnd = hEnd; _rv.hk = hk; _rv.stop = stop; _rv.t = t; _rv.stamp = stamp; _rv.outside = outside;
       for (let hs = 2; hs <= hEnd + 4; hs += 4) {
         const x = ox + ux * hs, z = oz + uz * hs;
         // the round high over the ground cannot hit or rattle anybody here
@@ -1390,16 +1417,25 @@
         if (!alive(b)) continue;
         const v = B.vAt(RB[o + 9], RB[o + 10], a * hk) * vk;
         if (v < 60) { stop = a; break; }
+        if (G.ext[b]) {
+          // one of the host's own bodies (its men, an animal, a hull): the host
+          // flies this round into it with its own anatomy and armour
+          extHit(o, b, a, v, sh, typ);
+          if (hitRow < 0) hitRow = b;
+          stop = a + 0.1;
+          break;
+        }
         traceMan(o, b, a);
         const vOut = woundMan(o, b, v, t, sh);
         if (hitRow < 0) hitRow = b;
         if (vOut < 60) { stop = a + 0.2; break; }
         vk *= vOut / v;
       }
+      if (outside) return stop;
       // the strike: where a miss lands tells a trained shooter how far off he was
       if (hitRow < 0) {
         const mk = RB[o + 14] | 0;
-        if (mk >= 0 && G.rngTgt[sh] === mk) {
+        if (mk >= 0 && G.rngTgt[sh] === mk && t.D) {
           const D = t.D;
           // he sees the dust kick (not in the dark, not off his own suppression)
           if (stop < sT + 60 && G.supp[sh] < D.pinAt) G.rngE[sh] *= 1 - D.adjust;
@@ -1428,7 +1464,8 @@
       }
     }
     let _stampN = 1, _stampA = new I32(0);
-    const _rv = { o: 0, sh: 0, ox: 0, oz: 0, ux: 0, uz: 0, hEnd: 0, hk: 1, stop: 0, t: null, stamp: 0 };
+    const _rv = { o: 0, sh: 0, side: 0, ox: 0, oz: 0, ux: 0, uz: 0, hEnd: 0, hk: 1, stop: 0, t: null, stamp: 0, outside: false };
+    let _outSide = 0;
     function visitBody(b) {
       const R = _rv;
       if (b === R.sh || _stampA[b] === R.stamp) return;
@@ -1437,6 +1474,21 @@
       const along = bx * R.ux + bz * R.uz;
       if (along < 0.5 || along > R.hEnd + 1) return;
       const off = Math.abs(bx * R.uz - bz * R.ux);
+      const ek = G.ext[b];
+      if (ek) {
+        // the host's body: a hull or an animal by its footprint, its men as men
+        if (R.outside) return;                         // (the host flies its own rounds into its own bodies)
+        if (ek !== EXT.man) {
+          const reach = G.extW[b] * 0.5 + 0.3;
+          if (off > reach) { return; }
+          const y = roundY(R.o, along / R.hk) - G.y[b];
+          if (y < -0.2 || y > G.extH[b] + 0.2) return;
+          const a = Math.max(0, along - reach) / R.hk;
+          if (a >= R.stop) return;
+          _hitList.push(b); _hitA.push(a);
+          return;
+        }
+      }
       if (off > 1.25) { if (off < 6) nearMiss(R.o, b, along, off, R.t); return; }
       // the line through his body, in his posture
       const a = traceMan(R.o, b, along / R.hk);
@@ -1444,6 +1496,20 @@
       if (a >= R.stop) return;
       _hitList.push(b); _hitA.push(a);
     }
+    /* A ROUND OF OURS REACHED ONE OF THE HOST'S BODIES: handed over whole (the
+       line, where it met him, its speed, who fired, what fired) for the host
+       to fly into him with its own anatomy and armour. */
+    const EXT_F = 12;
+    I.extHits = new F(256 * EXT_F); I.nExt = 0;
+    function extHit(o, b, a, v, sh, typ) {
+      if ((I.nExt + 1) * EXT_F > I.extHits.length) { const g = new F(I.extHits.length * 2); g.set(I.extHits); I.extHits = g; }
+      const q = I.nExt * EXT_F, E = I.extHits;
+      E[q] = b; E[q + 1] = sh; E[q + 2] = RB[o + 1]; E[q + 3] = RB[o + 2]; E[q + 4] = RB[o + 3];
+      E[q + 5] = RB[o + 4]; E[q + 6] = RB[o + 5]; E[q + 7] = RB[o + 6]; E[q + 8] = Math.max(0, a - 1.5); E[q + 9] = v; E[q + 10] = typ; E[q + 11] = I.simT;
+      I.nExt++;
+
+    }
+    I.EXT_F = EXT_F;
     // the zones the line crosses in man b (into _tr); returns the first entry (m along the line) or -1
     function traceMan(o, b, s0) {
       const ox = RB[o + 1], oy = RB[o + 2], oz = RB[o + 3], dx = RB[o + 4], dy = RB[o + 5], dz = RB[o + 6];
@@ -1543,9 +1609,9 @@
       const res = B.wound(_tr, MAN_AN, c, v, c.v0, lay, _wr);
       if (!res.hit) return v;
       const H = B.harm(res, MAN_AN, true);
-      const sd = G.side[sh];
+      const sd = _rv.side;
       I.stats.hits[sd]++;
-      G.hits[sh]++;
+      if (sh >= 0) G.hits[sh]++;
       if (I.led.firstHit[sd] < 0) I.led.firstHit[sd] = I.simT;
       const dist = Math.hypot(G.x[b] - RB[o + 1], G.z[b] - RB[o + 3]);
       I.led.hitsAt[bandOf(dist)]++;
@@ -1592,7 +1658,7 @@
     function shock(b, k) {
       const x = G.x[b], z = G.z[b], sd = G.side[b];
       forDiscB(x, z, 15, function (o) {
-        if (o === b || G.side[o] !== sd || !fighting(o)) return;
+        if (o === b || G.side[o] !== sd || G.ext[o] || !fighting(o)) return;
         const dx = G.x[o] - x, dz = G.z[o] - z, d2 = dx * dx + dz * dz;
         if (d2 > 225) return;
         G.stress[o] += k * 0.4 * (1 - Math.sqrt(d2) / 15) * D_(o).suppK;
@@ -1602,8 +1668,8 @@
     }
     // A ROUND CRACKS PAST HIM
     function nearMiss(o, b, along, off, t) {
-      const sh = RB[o] | 0;
-      if (G.side[b] === G.side[sh] || !alive(b)) return;
+      if (G.side[b] === _rv.side || !alive(b)) return;
+      if (G.ext[b] && (G.ext[b] !== EXT.man || _rv.outside)) return;
       const v = B.vAt(RB[o + 9], RB[o + 10], along);
       const R = B.suppressR(t.c, v);
       const y = roundY(o, along / RB[o + 13]) - (G.y[b] + EYE[G.post[b]]);
@@ -1612,6 +1678,8 @@
       crack(b, 1 - miss / R, RB[o + 1], RB[o + 3]);
     }
     function crack(b, k, fx, fz) {
+      // one of the host's men: the host rattles him (its own suppression)
+      if (G.ext[b]) { if (G.ext[b] === EXT.man) ev(EV.crack, b, -1, k); return; }
       const D = D_(b);
       G.supp[b] += D.suppK * (0.35 + 0.65 * k);
       G.stress[b] += 0.012 * D.suppK * k;
@@ -1637,7 +1705,7 @@
       // the munition's charge W (kg TNT): overpressure and fragments by scaled distance
       const Wk = Math.max(0.01, imp.W || 0.2), Rk = 12 * Math.cbrt(Wk / 0.18);
       forDiscB(imp.x, imp.z, Rk, function (b) {
-        if (!alive(b)) return;
+        if (!alive(b) || G.ext[b]) return;                 // (the host blasts its own bodies)
         const d = Math.hypot(G.x[b] - imp.x, G.z[b] - imp.z);
         if (d > Rk) return;
         // fragments: the chance a man takes one falls with the area he shows
@@ -1658,12 +1726,12 @@
       const t0 = now();
       const n = I.nRows || 0;
       moveN++;
-      const LF = G.life, PT = G.postT, SU = G.supp, ST = G.stress, BL = G.bleed;
+      const LF = G.life, PT = G.postT, SU = G.supp, ST = G.stress, BL = G.bleed, EX = G.ext;
       // the stress of it wears off over a minute or so (faster out of contact)
       const kIn = Math.exp(-dt / 90), kOut = Math.exp(-dt / 30);
       for (let r = 0; r < n; r++) {
         const l = LF[r];
-        if (l !== LIFE.alive && l !== LIFE.routed) continue;
+        if ((l !== LIFE.alive && l !== LIFE.routed) || EX[r]) continue;
         // the body's clocks
         if (PT[r] > 0) { PT[r] -= dt; if (PT[r] <= 0) { PT[r] = 0; G.post[r] = G.postTo[r]; } }
         if (SU[r] > 0) { SU[r] *= CALM_K[G.typ[r]]; if (SU[r] < 0.01) SU[r] = 0; }
@@ -1894,10 +1962,10 @@
       }
       const t2 = now(); I.ms.squad += t2 - t1;
       // the men: his think on his own clock, then his trigger
-      const LF = G.life, TA = G.thinkAt, TG = G.tgt, RT = G.reloadT, LK = G.lkT, simT = I.simT;
+      const LF = G.life, TA = G.thinkAt, TG = G.tgt, RT = G.reloadT, LK = G.lkT, EX = G.ext, simT = I.simT;
       for (let r = 0; r < n; r++) {
         const l = LF[r];
-        if (l !== LIFE.alive && l !== LIFE.routed) continue;
+        if ((l !== LIFE.alive && l !== LIFE.routed) || EX[r]) continue;
         if (simT >= TA[r]) {
           const contact = simT - G.contactT[r] < 20;
           const step = contact ? 0.25 : 0.6;
@@ -1912,6 +1980,49 @@
       resolveRounds();
       I.ms.total += now() - T0;
     };
+    /* ============================================================ THE HOST'S BODIES
+       A body the host owns (its own man: a crew, the player's man, a man
+       with bare hands; an animal; a hull) has a row too, written by the host
+       every step (x y z heading vx vz post life). Our men see it, shoot at
+       it and are shot by it; it never thinks or moves here. kind: EXT.*;
+       w, h: its size (m); mm: its thinnest armour (RHA mm; 0 = none). */
+    I.addExt = function (r, side, kind, w, h, mm) {
+      G.typ[r] = 0; G.sqd[r] = -1; G.side[r] = side;
+      G.ext[r] = kind; G.extW[r] = w || 0.5; G.extH[r] = h || 1.8; G.extMM[r] = mm || 0;
+      G.life[r] = LIFE.alive; G.down[r] = 0; G.tgt[r] = -1; G.post[r] = G.post[r] || POST.stand;
+      G.cap[r] = 1; G.bleed[r] = 0; G.supp[r] = 0;
+      I.nRows = Math.max(I.nRows || 0, r + 1);
+    };
+    // one of our men becomes the host's (the player took him): he keeps his row
+    I.release = function (r) { G.ext[r] = EXT.man; G.tgt[r] = -1; G.mv[r] = MOVE.hold; G.aidOn[r] = -1; };
+    // and is handed back: he picks up where the host left him (the host wrote his body)
+    I.adopt = function (r) {
+      G.ext[r] = EXT.none; G.thinkAt[r] = I.simT; G.gx[r] = G.x[r]; G.gz[r] = G.z[r]; G.mv[r] = MOVE.hold;
+      G.postT[r] = 0; G.postTo[r] = G.post[r]; G.e0o[r] = -1; G.e1o[r] = -1; G.clT[r] = -99;
+    };
+    /* A ROUND FROM THE HOST'S WORLD (a hull's machine gun, the player's rifle)
+       through our men: the same band walk, the same zones, plates and
+       wounds. The host has already traced its world (ground, walls) and
+       passes where it stopped (sMax, metres along the line). by: the
+       shooter's row (or -1), side: his side, cart: a ballistics CART row.
+       Returns where one of our men stopped it (or sMax). */
+    const _outT = { c: null, D: null };
+    I.traceRound = function (ox, oy, oz, dx, dy, dz, v0, k, cart, sMax, by, side) {
+      if (!cart) return sMax;
+      if (gridAt < 0) rebuild(true);
+      if ((nR + 1) * RF > RB.length) { const g = new F(RB.length * 2); g.set(RB); RB = g; }
+      const o = nR * RF;                              // a scratch slot past the live rounds
+      const L = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+      dx /= L; dy /= L; dz /= L;
+      RB[o] = by == null ? -1 : by; RB[o + 1] = ox; RB[o + 2] = oy; RB[o + 3] = oz; RB[o + 4] = dx; RB[o + 5] = dy; RB[o + 6] = dz;
+      RB[o + 7] = sMax; RB[o + 8] = 0; RB[o + 9] = v0; RB[o + 10] = k; RB[o + 11] = -1; RB[o + 12] = sMax; RB[o + 13] = Math.sqrt(dx * dx + dz * dz) || 1;
+      RB[o + 14] = -1; RB[o + 15] = 0;
+      _outT.c = cart; _outSide = side | 0;
+      return resolve(o, _outT, true);
+    };
+    // the wounds the host resolved on a man of ours (its own anatomy pass): now, bleed, by row
+    I.wound = function (r, nowFrac, bleed, by) { if (alive(r) && !G.ext[r]) hurt(r, nowFrac, bleed || 0, by == null ? -1 : by, false); };
+    I.EXT = EXT;
     I.alive = alive; I.fighting = fighting;
     I.audit = function () {
       return { simT: I.simT, stats: I.stats, led: I.led, ms: I.ms, rounds: nR };
@@ -1931,6 +2042,6 @@
     return CBZ.armour.kitSpec(N, ["plates", "soft", "helmet"], trn === "pro" ? "second" : null);
   }
   CBZ.battleInfantry = { create: create, DOCTRINE: DOCTRINE, TRN_IDS: TRN_IDS, EV: EV, POST: POST, LIFE: LIFE, MOVE: MOVE, SHOT_F: SHOT_F,
-    EYE: EYE, MUZ: MUZ, kitFor: kitFor };
+    EYE: EYE, MUZ: MUZ, kitFor: kitFor, EXT: EXT };
   if (typeof module !== "undefined" && module.exports) module.exports = CBZ.battleInfantry;
 })();
