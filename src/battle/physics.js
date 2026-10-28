@@ -229,6 +229,7 @@ function push2(m, o, k) {
   // the pass correcting an "overlap" that is the entire point of the move
   if (o._apeHeld || m._apeHeld || o._apeFlying || m._apeFlying) return;
   if (o._tossed || m._tossed) return;      // in a trunk, or in the air (flyStep)
+  if (o.puppet || m.puppet) return;       // a rig that shows a row of the infantry core: the row places it
   // clearance is the PAIR's, not the species': a man by a man keeps the old
   // 0.9, a man by a bear keeps more, and the radii are clamped at build so
   // the widest pair (2.2) still fits the FINE cell's completeness bound
@@ -327,7 +328,7 @@ function pinnedPass() {
 function unpin(m, o) {
   if (o.dead || o === m) return;
   if (m.vehicle || o.vehicle) return;      // pushVehicle already put him outside the hull
-  if (o._tossed || m._tossed || o._apeHeld || m._apeHeld || o._apeFlying || m._apeFlying) return;
+  if (o._tossed || m._tossed || o._apeHeld || m._apeHeld || o._apeFlying || m._apeFlying || o.puppet || m.puppet) return;
   // the PAIR's clearance and the PAIR's overlap line, exactly as push2 and
   // the probe read them — a lion pinned against a hangar is the same fault
   // as a man pinned against a facade, and a man's numbers are still 0.9/0.62

@@ -79,7 +79,7 @@
   const LIFE = { free: 0, alive: 1, routed: 2, fled: 3, dead: 4 };
   const POST = { stand: 0, kneel: 1, prone: 2 };
   const POST_NAME = ["stand", "crouch", "prone"];      // ballistics.MAN's names
-  const MOVE = { hold: 0, walk: 1, rush: 2, crawl: 3, run: 4 };
+  const MOVE = { hold: 0, walk: 1, rush: 2, crawl: 3, run: 4, march: 5 };
   const EV = { kill: 1, down: 2, hit: 3, fled: 4, rout: 5, rally: 6, shot: 7, aid: 8, post: 9, crack: 10 };
   // a row the host owns (its own body, synced into the store each step): what it is
   const EXT = { none: 0, man: 1, beast: 2, vehicle: 3 };
@@ -143,7 +143,9 @@
   const MUZ = [1.45, 0.98, 0.27];            // the muzzle
   const AIMY = [1.28, 0.80, 0.22];           // a centre-of-mass aim
   const HALF = [[0.20, 0.55], [0.20, 0.38], [0.22, 0.14]];   // half width, half height of the mass he aims at
-  const SPEED = { walk: 1.45, rush: 4.2, crawl: 0.45, run: 3.4 };
+  // (walk: a tactical pace in formation, eyes out; march: a route march with
+  // kit, far from the enemy; run and rush: under fire or catching up)
+  const SPEED = { walk: 1.45, march: 1.75, rush: 4.2, crawl: 0.45, run: 3.4 };
   const SIGHT_R = 700;                       // nobody is looked for past this
 
   function create(S, cfg) {
@@ -153,7 +155,9 @@
     const AR = CBZ.armour || null;
     let seed = (cfg.seed >>> 0) || 0x2545F491;
     // the day's wind (m/s, a horizontal vector): the host's, else a breeze off the seed
-    function rnd() { seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return seed / 4294967296; }
+    // the dice: mulberry32 (xorshift32's consecutive outputs are correlated, and the two
+    // sides' men draw alternately within a step)
+    function rnd() { seed = (seed + 0x6D2B79F5) | 0; let t = seed; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
     function gauss() { const u = Math.max(1e-9, rnd()), v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(6.283185307 * v); }
     // who each man is (his habits) is the battle's, not his row number's
     const SALT = Math.imul((cfg.seed >>> 0) || 1, 0x27D4EB2F) | 0;
@@ -203,8 +207,9 @@
       ms: { grid: 0, think: 0, move: 0, fire: 0, rounds: 0, squad: 0, total: 0 },
       stats: { shots: [0, 0], hits: [0, 0], kills: [0, 0], downs: [0, 0], fled: [0, 0], thinks: 0, los: 0, rounds: 0 },
       led: { shotsAt: [0, 0, 0, 0, 0, 0, 0], hitsAt: [0, 0, 0, 0, 0, 0, 0], organs: { brain: 0, spine: 0, vital: 0, gut: 0, torso: 0, head: 0, limb: 0, plate: 0 },
-        plate: 0, platePen: 0, firstShot: [-1, -1], firstHit: [-1, -1], cracks: 0, aids: 0, posts: 0, rushes: 0, pins: 0 },
+        plate: 0, platePen: 0, firstShot: [-1, -1], firstHit: [-1, -1], firstSee: [-1, -1], firstSeeD: [0, 0], cracks: 0, aids: 0, posts: 0, rushes: 0, pins: 0 },
       order: [{ kind: "advance", x: 0, z: 0 }, { kind: "advance", x: 0, z: 0 }],
+      army: [{ morale: 1, broken: false }, { morale: 1, broken: false }],
       camX: 0, camZ: 0, shotR: 0, EV: EV, POST: POST, LIFE: LIFE, MOVE: MOVE, DOCTRINE: DOCTRINE,
     };
     const now = (typeof performance !== "undefined" && performance.now) ? function () { return performance.now(); } : function () { return Date.now(); };
@@ -251,8 +256,9 @@
        ten men: slot 0 leads, 1-4 alpha, 5-9 bravo. The host names the id. */
     const SQ = { n: 0, side: new U8(0), mem: new I32(0), cnt: new U8(0), task: new U8(0), at: new F(0), lead: new I32(0),
       cx: new F(0), cz: new F(0), contact: new F(0), bound: new U8(0), boundT: new F(0), thx: new F(0), thz: new F(0), hurt: new U8(0), fx: new F(0), fz: new F(0),
-      lostT: new F(0), brkX: new F(0), brkZ: new F(0), brkT: new F(0), lastC: new F(0) };
-    const TASK = { advance: 0, contact: 1, base: 2, bound: 3, assault: 4, hold: 5, breakc: 6, gone: 7 };
+      lostT: new F(0), brkX: new F(0), brkZ: new F(0), brkT: new F(0), lastC: new F(0),
+      oK: new U8(0), oX: new F(0), oZ: new F(0), fireT: new F(0), flX: new F(0), flZ: new F(0), flT: new F(0) };
+    const TASK = { advance: 0, contact: 1, base: 2, bound: 3, assault: 4, hold: 5, breakc: 6, gone: 7, overwatch: 8, flank: 9 };
     I.TASK = TASK;
     let sqCap = 0;
     function sqGrow(n) {
@@ -269,6 +275,20 @@
       SQ.n = n;
     }
     I.squads = SQ;
+    /* A SQUAD'S OWN ORDER (a host that fields forces: Gang City): march on
+       (x, z) and fight there ("advance"), or go there and hold it ("hold").
+       null hands it back to its side's order. */
+    const _sqo = { kind: "advance", x: 0, z: 0 };
+    I.squadOrder = function (sq, o) {
+      if (sq < 0) return;
+      sqGrow(sq + 1);
+      if (!o) { SQ.oK[sq] = 0; return; }
+      SQ.oK[sq] = o.kind === "hold" ? 2 : o.kind === "move" ? 3 : 1; SQ.oX[sq] = o.x; SQ.oZ[sq] = o.z;
+    };
+    function orderOf(sq, side) {
+      if (sq >= 0 && SQ.oK[sq]) { _sqo.kind = SQ.oK[sq] === 2 ? "hold" : SQ.oK[sq] === 3 ? "move" : "advance"; _sqo.x = SQ.oX[sq]; _sqo.z = SQ.oZ[sq]; return _sqo; }
+      return I.order[side];
+    }
 
     I.add = function (r, type, sq, slot, side) {
       const t = I.types[type];
@@ -514,12 +534,13 @@
     }
     let live = [new I32(0), new I32(0)], liveN = [0, 0], all = new I32(0), allN = 0, gridAt = -1;
     let eyeGridAt = -1, calmDt = -1, CALM_K = new F(0);
+    const sideX = [0, 0], sideZ = [0, 0];
     function rebuild(eyes) {
       const t0 = now();
       const n = I.nRows || 0;
       if (all.length < n) { all = new I32(Math.max(n, 1024)); live[0] = new I32(all.length); live[1] = new I32(all.length); }
       // the field's extent (with room)
-      let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9, na = 0, n0 = 0, n1 = 0;
+      let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9, na = 0, n0 = 0, n1 = 0, sx0 = 0, sz0 = 0, sx1 = 0, sz1 = 0;
       for (let r = 0; r < n; r++) {
         const l = G.life[r];
         if (l !== LIFE.alive && l !== LIFE.routed) continue;
@@ -527,9 +548,11 @@
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z;
         all[na++] = r;
         if (G.down[r]) continue;              // a downed man is a body to hit, not a man to look for
-        if (G.side[r] === 0) live[0][n0++] = r; else live[1][n1++] = r;
+        if (G.side[r] === 0) { live[0][n0++] = r; sx0 += x; sz0 += z; } else { live[1][n1++] = r; sx1 += x; sz1 += z; }
       }
       allN = na; liveN[0] = n0; liveN[1] = n1;
+      // each army's middle (a squad's flank is the side of it the squad stands on)
+      if (n0) { sideX[0] = sx0 / n0; sideZ[0] = sz0 / n0; } if (n1) { sideX[1] = sx1 / n1; sideZ[1] = sz1 / n1; }
       if (na) {
         const pad = 160;
         if (x0 - pad < ext.x0 || z0 - pad < ext.z0 || x1 + pad > ext.x1 || z1 + pad > ext.z1 || gridAt < 0) {
@@ -700,6 +723,8 @@
         const ex = G.lkx[a] - G.x[b], ez = G.lkz[a] - G.z[b];
         if (ex * ex + ez * ez < 100) S *= 3;
       }
+      // a man on the move scans worse than one who has stopped to look
+      if (G.mv[a] !== MOVE.hold) S *= G.mv[a] === MOVE.walk || G.mv[a] === MOVE.crawl ? 0.6 : 0.3;
       // his own head down: he is not looking
       const sup = G.supp[a];
       if (sup > D.pinAt) S *= 0.12; else S *= 1 / (1 + sup * 1.4);
@@ -712,6 +737,7 @@
        and the presence grid says so exactly). */
     const _cand = new I32(8), _cd = new F(8);
     let _nc = 0, _cx = 0, _cz = 0, _cs = 0, _fx = 0, _fz = 0, _cr2 = 0, _self = -1, _wide = false;
+    let CL8 = new I32(0);                 // each man's short list of the nearest eight in his sector (stride 8)
     function visitCand(o) {
       if (o === _self) return;
       const dx = G.x[o] - _cx, dz = G.z[o] - _cz, d2 = dx * dx + dz * dz;
@@ -791,10 +817,11 @@
         // his short list of the nearest few in his sector, kept for a scan
         // cycle (1.5 s); the distances are the men's real ones every think
         let n = 0;
+        if (CL8.length < (I.nRows || 0) * 8) { const g = new I32(Math.max(1024, (I.nRows || 0) * 16)).fill(-1); g.set(CL8); CL8 = g; }
+        const c8 = r * 8;
         if (I.simT - G.clT[r] < 1.5) {
-          const L4 = [G.cl0[r], G.cl1[r], G.cl2[r], G.cl3[r]];
-          for (let i = 0; i < 4; i++) {
-            const o = L4[i];
+          for (let i = 0; i < 8; i++) {
+            const o = CL8[c8 + i];
             if (o < 0 || !fighting(o)) continue;
             const dx = G.x[o] - x, dz = G.z[o] - z;
             _cand[n] = o; _cd[n] = dx * dx + dz * dz; n++;
@@ -803,7 +830,7 @@
         if (!n) {
           n = candidates(r, SIGHT_R);
           G.clT[r] = I.simT;
-          G.cl0[r] = n > 0 ? _cand[0] : -1; G.cl1[r] = n > 1 ? _cand[1] : -1; G.cl2[r] = n > 2 ? _cand[2] : -1; G.cl3[r] = n > 3 ? _cand[3] : -1;
+          for (let i = 0; i < 8; i++) CL8[c8 + i] = i < n ? _cand[i] : -1;
         }
         let cur = G.cand[r];
         if (cur >= 0 && (!fighting(cur) || cur === tg)) { cur = G.cand[r] = -1; }
@@ -815,7 +842,16 @@
         }
         const sc = G.scan[r]++;
         if (n && ((sc & 1) === 0 || cur < 0)) {
-          const k = Math.min(n, 4), ki = (sc >> 1) % k;
+          // where he looks: where the fire came from (the man nearest it), every
+          // other glance while it is fresh; otherwise round the nearest eight
+          let ki = (sc >> 1) % n;
+          if (I.simT - G.lkT[r] < 8 && ((sc >> 1) & 1)) {
+            let bd = 1e18;
+            for (let i = 0; i < n; i++) {
+              const o = _cand[i], ex = G.x[o] - G.lkx[r], ez = G.z[o] - G.lkz[r], e2 = ex * ex + ez * ez;
+              if (e2 < bd && o !== cur) { bd = e2; ki = i; }
+            }
+          }
           const o = _cand[ki];
           const d = Math.sqrt(_cd[ki]);
           // a man he could not notice in hours even fully in the open is not looked at
@@ -854,10 +890,14 @@
         const t = T_(r), d = Math.hypot(G.x[o] - G.x[r], G.z[o] - G.z[r]);
         if (B.penRHA(t.c, B.vAt(t.v0, t.k, d), t.v0) < G.extMM[o]) {
           G.lkx[r] = G.x[o]; G.lkz[r] = G.z[o]; G.lkT[r] = I.simT;
+          // and it frightens him: nothing he carries can touch it (a squad
+          // with no answer to armour breaks contact long before it is killed)
+          if (d < 500) G.stress[r] += 0.06 * D.suppK * (1 - d / 600);
           return;
         }
       }
       const prev = G.tgt[r];
+      if (I.led.firstSee[G.side[r]] < 0) { I.led.firstSee[G.side[r]] = I.simT; I.led.firstSeeD[G.side[r]] = Math.hypot(G.x[o] - G.x[r], G.z[o] - G.z[r]); }
       G.tgt[r] = o; G.expo[r] = e; G.seenT[r] = I.simT;
       G.lkx[r] = G.x[o]; G.lkz[r] = G.z[o]; G.lkT[r] = I.simT;
       if (prev !== o) {
@@ -961,11 +1001,39 @@
           if (need > 0) { G.reloadT[r] = D.reload * (0.9 + 0.2 * rnd()) * (G.mv[r] === MOVE.rush ? 1.4 : 1); G.burst[r] = 0; }
         }
       }
+      // a rush in progress runs out wherever he is (in a fight or out of one): he drops
+      if (G.mv[r] === MOVE.rush) {
+        const pinned0 = G.supp[r] > D.pinAt;
+        const arrived = Math.hypot(G.gx[r] - G.x[r], G.gz[r] - G.z[r]) < 0.8;
+        if (arrived || G.rushT[r] > D.rushMax * (0.8 + 0.4 * trait(r, 0x7A)) || (pinned0 && G.rushT[r] > 1.2)) {
+          G.mv[r] = MOVE.hold; G.rushT[r] = 0; G.gx[r] = G.x[r]; G.gz[r] = G.z[r];
+          setPost(r, inContact ? POST.prone : POST.kneel);
+        }
+        return;
+      }
       if (!inContact) {
-        // ---- no contact: the order (march, hold)
-        G.post[r] === POST.prone && G.postT[r] <= 0 && I.simT - G.contactT[r] > 40 ? setPost(r, POST.stand) : 0;
-        if (task === TASK.hold || task === TASK.base) { G.mv[r] = MOVE.hold; return; }
-        if (G.post[r] !== POST.stand) { if (I.simT - G.contactT[r] > 40) setPost(r, POST.stand); else { G.mv[r] = MOVE.hold; return; } }
+        // ---- no contact: the order (march, hold, bounding overwatch). A man
+        // who was in a fight stays down for a while after it goes quiet.
+        const quiet = I.simT - G.contactT[r] > 40;
+        if (task === TASK.hold || task === TASK.base) {
+          G.mv[r] = MOVE.hold;
+          if (G.post[r] === POST.stand && G.postT[r] <= 0) setPost(r, POST.kneel);    // a held position is held low
+          return;
+        }
+        if (task === TASK.overwatch && sq >= 0 && !boundingTeam(sq, r)) {
+          // the watching team: down on a knee, eyes on the ground ahead
+          G.mv[r] = MOVE.hold; G.gx[r] = G.x[r]; G.gz[r] = G.z[r];
+          if (G.post[r] === POST.stand && G.postT[r] <= 0) setPost(r, POST.kneel);
+          const o = orderOf(sq, G.side[r]);
+          if (o.x === o.x) G.face[r] = Math.atan2(o.x - G.x[r], o.z - G.z[r]);
+          return;
+        }
+        if (G.post[r] !== POST.stand) {
+          if (G.post[r] === POST.prone && !quiet) { G.mv[r] = MOVE.hold; return; }
+          if (G.postT[r] <= 0) setPost(r, POST.stand);
+          G.mv[r] = MOVE.hold;
+          return;
+        }
         march(r);
         return;
       }
@@ -973,19 +1041,11 @@
       const pinned = G.supp[r] > D.pinAt;
       if (pinned && !G.pin[r]) I.led.pins++;
       G.pin[r] = pinned ? 1 : 0;
-      // a rush in progress runs out (he drops wherever he is)
-      if (G.mv[r] === MOVE.rush) {
-        const arrived = Math.hypot(G.gx[r] - G.x[r], G.gz[r] - G.z[r]) < 0.8;
-        if (arrived || G.rushT[r] > D.rushMax * (0.8 + 0.4 * trait(r, 0x7A)) || (pinned && G.rushT[r] > 1.2)) {
-          G.mv[r] = MOVE.hold; G.rushT[r] = 0; G.gx[r] = G.x[r]; G.gz[r] = G.z[r];
-          setPost(r, POST.prone);
-        }
-        return;
-      }
       // squad orders under fire: the bounding team moves, the base fires
-      const bounding = sq >= 0 && (task === TASK.bound || task === TASK.assault) && boundingTeam(sq, r);
+      const bounding = sq >= 0 && (task === TASK.bound || task === TASK.assault || task === TASK.flank) && boundingTeam(sq, r);
       if (bounding && !pinned && tx === tx) {
-        const go = boundGoal(r, sq, tx, tz);
+        // (a flank bounds toward the flank point, still facing where the enemy is)
+        const go = task === TASK.flank ? boundToward(r, sq, SQ.flX[sq], SQ.flZ[sq], tx, tz) : boundGoal(r, sq, tx, tz);
         if (go) {
           G.gx[r] = go.x; G.gz[r] = go.z;
           setPost(r, POST.stand);
@@ -1019,7 +1079,7 @@
         if (Math.hypot(G.gx[r] - G.x[r], G.gz[r] - G.z[r]) < 0.5) { G.mv[r] = MOVE.hold; }
         return;
       }
-      if (G.mv[r] === MOVE.walk || G.mv[r] === MOVE.run) { G.mv[r] = MOVE.hold; G.gx[r] = G.x[r]; G.gz[r] = G.z[r]; }
+      if (G.mv[r] === MOVE.walk || G.mv[r] === MOVE.run || G.mv[r] === MOVE.march) { G.mv[r] = MOVE.hold; G.gx[r] = G.x[r]; G.gz[r] = G.z[r]; }
       if (tx === tx) {
         const usesGround = D.coverR > 0 && trait(r, 0xC0E) < 0.35 + D.coverR / 16;
         if (G.post[r] === POST.stand && G.postT[r] <= 0) {
@@ -1045,18 +1105,32 @@
           setPost(r, POST.prone);
           return;
         }
+        // ...and flat with no line, he comes up to a knee if that gives him one (and the fire allows it)
+        if (G.post[r] === POST.prone && G.postT[r] <= 0 && I.simT - G.seenT[r] > 3 && G.supp[r] < D.pinAt * 0.6 &&
+            I.simT > G.spotT[r] - 3 && !lineClear(G.x[r], G.y[r] + EYE[2], G.z[r], tx, hAt(tx, tz) + 0.6, tz) &&
+            lineClear(G.x[r], G.y[r] + EYE[1], G.z[r], tx, hAt(tx, tz) + 0.6, tz)) {
+          setPost(r, POST.kneel);
+          return;
+        }
         /* A BETTER SPOT. He is down; the fold he dropped into may show too
            much of him, or no longer give him the line. While the mark is out
            of his sight (he has nothing to shoot, the enemy has nothing to see)
            and he is not pinned, a trained man crawls to the best spot within a
            few strides: lower behind a lip, still with the line. */
         if (G.postT[r] <= 0 && usesGround && !pinned && G.post[r] !== POST.stand && G.reloadT[r] <= 0 &&
-            (I.simT - G.seenT[r] > 2.5 || G.expo[r] <= 0) && I.simT - G.crackT[r] > 1.5 && I.simT > G.spotT[r]) {
+            (I.simT - G.seenT[r] > 2.5 || G.expo[r] <= 0) && G.supp[r] < D.pinAt * 0.7 && I.simT > G.spotT[r]) {
           G.spotT[r] = I.simT + 6 + 4 * trait(r, 0x5907);           // he looked: not again for a while
-          const sp = bestSpot(r, Math.min(5, D.coverR), tx, tz);
+          /* NO LINE, NO FIGHT. A man who cannot see where the fire comes from
+             (flat behind a crest, a wall between) is not in the fight: he
+             goes to where he can be. A few strides, low; farther, a short
+             rush when the fire on him is light. */
+          const blind = I.simT - G.seenT[r] > 4 && !lineClear(G.x[r], G.y[r] + EYE[G.post[r]], G.z[r], tx, hAt(tx, tz) + 0.6, tz);
+          const sp = bestSpot(r, blind ? D.coverR : Math.min(5, D.coverR), tx, tz);
           if (sp && Math.hypot(sp.x - G.x[r], sp.z - G.z[r]) > 0.8) {
-            G.gx[r] = sp.x; G.gz[r] = sp.z; G.mv[r] = MOVE.crawl;
-            if (G.post[r] !== sp.p && sp.p !== POST.stand) setPost(r, sp.p);
+            const far = Math.hypot(sp.x - G.x[r], sp.z - G.z[r]) > 3.5;
+            G.gx[r] = sp.x; G.gz[r] = sp.z;
+            if (far && G.supp[r] < D.pinAt * 0.4) { setPost(r, POST.stand); G.mv[r] = MOVE.rush; G.rushT[r] = 0; I.led.rushes++; }
+            else { G.mv[r] = MOVE.crawl; if (G.post[r] !== sp.p && sp.p !== POST.stand) setPost(r, sp.p); }
             I.led.posts++;
             return;
           }
@@ -1071,17 +1145,19 @@
     }
     function firePost_(r, tx, tz, habit) {
       const x = G.x[r], z = G.z[r], gy = hAt(x, z), ty = hAt(tx, tz) + 0.9;
-      if (habit) return lineClear(x, gy + EYE[1], z, tx, ty, tz) ? POST.kneel : POST.stand;
+      if (habit) return lineClear(x, gy + EYE[1], z, tx, ty, tz) || !lineClear(x, gy + EYE[0], z, tx, ty, tz) ? POST.kneel : POST.stand;
       if (lineClear(x, gy + EYE[2], z, tx, ty, tz)) return POST.prone;
       if (lineClear(x, gy + EYE[1], z, tx, ty, tz)) return POST.kneel;
-      return POST.stand;
+      // standing is the only line: he stands to fight; no line from anywhere: he gets down
+      return lineClear(x, gy + EYE[0], z, tx, ty, tz) ? POST.stand : POST.prone;
     }
 
     /* ---- the march: the squad's formation slot on its leader ---- */
     function march(r) {
       const sq = G.sqd[r];
-      const o = I.order[G.side[r]];
+      const o = orderOf(G.sqd[r], G.side[r]);
       let gx = o.x, gz = o.z;
+      if (gx !== gx) { G.mv[r] = MOVE.hold; return; }       // an order to hold where he stands
       if (sq >= 0) {
         const lead = SQ.lead[sq];
         const s = G.slot[r];
@@ -1096,7 +1172,12 @@
       }
       G.gx[r] = gx; G.gz[r] = gz;
       const d = Math.hypot(gx - G.x[r], gz - G.z[r]);
-      G.mv[r] = d < 1 ? MOVE.hold : d > 12 ? MOVE.run : MOVE.walk;
+      // the point man walks (an advance to contact is a patrol, not a race); a man
+      // well off his place in the wedge jogs to it
+      const lead = sq < 0 || SQ.lead[sq] === r || SQ.lead[sq] < 0;
+      // (a squad travelling, far from any enemy, route-marches; near him it walks)
+      const travel = sq >= 0 && SQ.task[sq] === TASK.advance;
+      G.mv[r] = d < 1 ? MOVE.hold : (!lead && d > 12) ? MOVE.run : travel ? MOVE.march : MOVE.walk;
       if (d > 0.5) G.face[r] = Math.atan2(gx - G.x[r], gz - G.z[r]);
     }
 
@@ -1170,7 +1251,10 @@
       if (G.cool[r] > 0 || G.mag[r] <= 0 || G.mv[r] !== MOVE.hold || G.post[r] === POST.stand && G.postT[r] > 0) return;
       if (I.simT - G.lkT[r] > 10) return;
       const sq = G.sqd[r];
-      const cover = sq >= 0 && (SQ.task[sq] === TASK.bound || SQ.task[sq] === TASK.assault || SQ.task[sq] === TASK.breakc) && !boundingTeam(sq, r);
+      // a base of fire: the squad down and fighting (win the firefight), and the team
+      // that stays put while the other moves (covering fire)
+      const task = sq >= 0 ? SQ.task[sq] : TASK.base;
+      const cover = (task === TASK.base || task === TASK.bound || task === TASK.assault || task === TASK.breakc || task === TASK.flank) && (sq < 0 || !boundingTeam(sq, r) || task === TASK.base);
       const undisciplined = D.press < 0.5;
       if (!cover && !undisciplined) return;
       const pinned = G.supp[r] > D.pinAt;
@@ -1186,7 +1270,8 @@
       if (!lineClear(x, oy, z, ax, gy + 0.8, az)) return;
       G.aimT[r] = 0;
       // his point: the spot, with the error of not seeing it (a few metres, more far off)
-      const err = 1.5 + d * 0.012;
+      // (a trained man puts it on the spot; an untrained one sprays toward the noise)
+      const err = D.press < 0.5 ? 3 + d * 0.05 : 1.5 + d * 0.012;
       const px = ax + gauss() * err, pz = az + gauss() * err;
       const sig = sigmaNow(r, t, d) + (pinned ? 18 : 2);
       G.mag[r]--; G.shots[r]++;
@@ -1615,6 +1700,7 @@
       if (I.led.firstHit[sd] < 0) I.led.firstHit[sd] = I.simT;
       const dist = Math.hypot(G.x[b] - RB[o + 1], G.z[b] - RB[o + 3]);
       I.led.hitsAt[bandOf(dist)]++;
+      if ((RB[o + 14] | 0) < 0) I.led.areaHits = (I.led.areaHits || 0) + 1;      // a round fired at a place, not a man
       const org = res.plate ? "plate" : res.organ || (res.zone === "head" ? "head" : res.zone && (res.zone.indexOf("arm") === 0 || res.zone.indexOf("leg") === 0) ? "limb" : "torso");
       if (I.led.organs[org] != null) I.led.organs[org]++;
       // what it does to him
@@ -1637,6 +1723,13 @@
       G.stress[b] += plate ? 0.08 : 0.25;
       G.aimT[b] = 0;
       if (by >= 0) { G.crackT[b] = I.simT; G.hitX[b] = G.x[by]; G.hitZ[b] = G.z[by]; if (G.tgt[b] < 0 && G.lkT[b] < I.simT - 2) { G.lkx[b] = G.x[by]; G.lkz[b] = G.z[by]; G.lkT[b] = I.simT - 3; } }
+      // HE IS HIT, AND HIS SQUAD KNOWS IT (the shout, the man going down): contact, and a
+      // bearing on where it came from (the crack and the thump give it, roughly)
+      const sqb = G.sqd[b];
+      if (sqb >= 0 && by >= 0) {
+        const d = Math.hypot(G.x[by] - G.x[b], G.z[by] - G.z[b]), e = 3 + d * 0.08;
+        SQ.lastC[sqb] = I.simT; SQ.thx[sqb] = G.x[by] + gauss() * e; SQ.thz[sqb] = G.z[by] + gauss() * e;
+      }
       ev(EV.hit, b, by, now_);
       if (G.cap[b] <= 0) { kill(b, by); return; }
       if (!G.down[b] && G.cap[b] < 0.5) downMan(b, by);
@@ -1681,7 +1774,8 @@
       // one of the host's men: the host rattles him (its own suppression)
       if (G.ext[b]) { if (G.ext[b] === EXT.man) ev(EV.crack, b, -1, k); return; }
       const D = D_(b);
-      G.supp[b] += D.suppK * (0.35 + 0.65 * k);
+      // (it saturates: the fifth round past his head is not five times as frightening as the first)
+      G.supp[b] += D.suppK * (0.35 + 0.65 * k) * Math.max(0.1, 1 - G.supp[b] / (D.pinAt * 2.5));
       G.stress[b] += 0.012 * D.suppK * k;
       I.led.cracks++;
       if (I.simT - G.crackT[b] > 3 || G.tgt[b] < 0) { G.hitX[b] = fx; G.hitZ[b] = fz; }
@@ -1701,22 +1795,34 @@
       if (!imp) return;
       if (imp.kind === "blast") { blast(imp); return; }
     };
+    /* A BLAST. The charge W (kg TNT) does two things to a man: the
+       overpressure, lethal inside a scaled distance Z = d / W^(1/3) of ~1.5
+       (blast-lung, the body thrown), and the FRAGMENTS, which are the killer
+       at range. Calibrated on the M67 (0.18 kg Comp B): ~2000 effective
+       fragments, ~50% casualties at its 5 m kill radius and ~15% at its 15 m
+       casualty radius against a standing man. The number of fragments that
+       find a man is the count over the sphere times the area he shows: a man
+       flat on the ground presents a third (that is why men go flat), the
+       ground itself shields him past the shell's own height. Each one is a
+       small wound; enough of them is a casualty. */
     function blast(imp) {
-      // the munition's charge W (kg TNT): overpressure and fragments by scaled distance
-      const Wk = Math.max(0.01, imp.W || 0.2), Rk = 12 * Math.cbrt(Wk / 0.18);
+      const Wk = Math.max(0.005, imp.W || 0.18), Rk = 18 * Math.cbrt(Wk / 0.18), N0 = 2000 * Wk / 0.18;
+      const by = imp.by == null ? -1 : imp.by;
       forDiscB(imp.x, imp.z, Rk, function (b) {
         if (!alive(b) || G.ext[b]) return;                 // (the host blasts its own bodies)
-        const d = Math.hypot(G.x[b] - imp.x, G.z[b] - imp.z);
+        const d = Math.max(0.3, Math.hypot(G.x[b] - imp.x, G.z[b] - imp.z));
         if (d > Rk) return;
-        // fragments: the chance a man takes one falls with the area he shows
-        // (a prone man presents a third) and with the square of the range
-        const show = G.post[b] === POST.prone ? 0.3 : G.post[b] === POST.kneel ? 0.6 : 1;
-        const frags = 300 * Wk / 0.18 * show * 0.7 / (4 * Math.PI * Math.max(1, d * d)) ;
-        let n = 0; for (let k = 0; k < 6 && rnd() < frags / 6; k++) n++;
         const Z = d / Math.cbrt(Wk);
-        if (Z < 1.6) { hurt(b, 2, 0, imp.by == null ? -1 : imp.by, false); return; }
-        for (let k = 0; k < n; k++) hurt(b, 0.15 + rnd() * 0.45, 0.01, imp.by == null ? -1 : imp.by, false);
+        if (Z < 1.5) { hurt(b, 2, 0, by, false); return; }
+        const show = G.post[b] === POST.prone ? 0.22 : G.post[b] === POST.kneel ? 0.45 : 0.7;
+        const mean = N0 * show / (4 * Math.PI * d * d);
+        // Poisson, by inversion (the mean is small past a few metres)
+        let n = 0, p = Math.exp(-Math.min(30, mean)), s = p;
+        const u = rnd();
+        while (u > s && n < 40) { n++; p *= mean / n; s += p; }
+        for (let k = 0; k < n && alive(b); k++) hurt(b, 0.05 + rnd() * 0.22, 0.004 + rnd() * 0.01, by, false);
         G.supp[b] += 3 * (1 - d / Rk);
+        G.crackT[b] = I.simT; G.hitX[b] = imp.x; G.hitZ[b] = imp.z;
       });
     }
 
@@ -1746,9 +1852,9 @@
         const m = G.mv[r];
         if (m === MOVE.hold || G.postT[r] > 0 || G.down[r]) { G.vx[r] = 0; G.vz[r] = 0; continue; }
         // a man moves in his posture: up to rush, flat to crawl
-        let sp = m === MOVE.rush ? SPEED.rush : m === MOVE.run ? SPEED.run : m === MOVE.crawl ? SPEED.crawl : SPEED.walk;
+        let sp = m === MOVE.rush ? SPEED.rush : m === MOVE.run ? SPEED.run : m === MOVE.crawl ? SPEED.crawl : m === MOVE.march ? SPEED.march : SPEED.walk;
         if (m === MOVE.crawl && G.post[r] !== POST.prone) sp = 0.9;     // a crouched shuffle
-        if ((m === MOVE.rush || m === MOVE.run || m === MOVE.walk) && G.post[r] !== POST.stand) { setPost(r, POST.stand); G.vx[r] = 0; G.vz[r] = 0; continue; }
+        if ((m === MOVE.rush || m === MOVE.run || m === MOVE.walk || m === MOVE.march) && G.post[r] !== POST.stand) { setPost(r, POST.stand); G.vx[r] = 0; G.vz[r] = 0; continue; }
         sp *= 0.55 + 0.45 * Math.min(1, G.cap[r] / 0.8);
         const dx = G.gx[r] - G.x[r], dz = G.gz[r] - G.z[r], d = Math.sqrt(dx * dx + dz * dz);
         if (d < 0.05) { G.vx[r] = 0; G.vz[r] = 0; continue; }
@@ -1789,6 +1895,15 @@
       }
       _bg.x = bx; _bg.z = bz;
       return _bg;
+    }
+    // a bound of 20-30 m toward (gx, gz), to the best spot there against the threat (tx, tz)
+    function boundToward(r, sq, gx, gz, tx, tz) {
+      const x = G.x[r], z = G.z[r];
+      const dx = gx - x, dz = gz - z, d = Math.sqrt(dx * dx + dz * dz) || 1;
+      if (d < 6) return null;
+      const L = Math.min(d, 20 + 10 * trait(r, 0xF1A));
+      void sq;
+      return spotNear(r, x + dx / d * L, z + dz / d * L, tx, tz);
     }
     // the best prone spot round (cx, cz) against a threat: a lip that hides him
     const _sn = { x: 0, z: 0 };
@@ -1855,9 +1970,27 @@
       }
       return false;
     }
+    // the side's contact, by 250 m cell: when, and the threat's bearing point
+    const PCN = [new Map(), new Map()];
+    function pkey(x, z) { return (Math.floor(x / 250) + 32768) * 65536 + (Math.floor(z / 250) + 32768); }
+    function platoonSay(side, x, z, tx, tz) {
+      const k = pkey(x, z), M = PCN[side];
+      let e = M.get(k);
+      if (!e) { e = { t: 0, x: 0, z: 0 }; M.set(k, e); }
+      e.t = I.simT; e.x = tx; e.z = tz;
+    }
+    function platoonHear(side, x, z) {
+      const M = PCN[side], cx = Math.floor(x / 250), cz = Math.floor(z / 250);
+      let best = null, bt = I.simT - 10;
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        const e = M.get((cx + dx + 32768) * 65536 + (cz + dz + 32768));
+        if (e && e.t > bt && Math.hypot(e.x - x, e.z - z) < 700) { bt = e.t; best = e; }
+      }
+      return best;
+    }
     function squadTick(sq) {
       const base = sq * 10;
-      let lead = -1, nAlive = 0, nFight = 0, cx = 0, cz = 0, inContact = 0, pinned = 0, tx = 0, tz = 0, nt = 0, stress = 0;
+      let lead = -1, nAlive = 0, nFight = 0, cx = 0, cz = 0, inContact = 0, pinned = 0, tx = 0, tz = 0, nt = 0, stress = 0, firing = 0;
       for (let j = 0; j < 10; j++) {
         const r = SQ.mem[base + j];
         if (r < 0 || !alive(r)) continue;
@@ -1869,6 +2002,7 @@
         if (lead < 0 || (G.slot[r] === 0)) lead = lead < 0 || G.slot[r] === 0 ? r : lead;
         if (I.simT - G.contactT[r] < 6) inContact++;
         if (G.supp[r] > D_(r).pinAt) pinned++;
+        if (I.simT - G.flashT[r] < 5) firing++;
         const tg = G.tgt[r];
         if (tg >= 0) { tx += G.x[tg]; tz += G.z[tg]; nt++; }
         else if (I.simT - G.lkT[r] < 20) { tx += G.lkx[r]; tz += G.lkz[r]; nt++; }
@@ -1886,19 +2020,42 @@
       SQ.lead[sq] = lead;
       cx /= nFight; cz /= nFight;
       SQ.cx[sq] = cx; SQ.cz[sq] = cz;
-      const o = I.order[SQ.side[sq]];
+      const o = orderOf(sq, SQ.side[sq]);
       // the march direction
       let fx = o.x - cx, fz = o.z - cz;
       const fl = Math.hypot(fx, fz) || 1;
       SQ.fx[sq] = fx / fl; SQ.fz[sq] = fz / fl;
       if (nt) { SQ.thx[sq] = tx / nt; SQ.thz[sq] = tz / nt; if (inContact) SQ.lastC[sq] = I.simT; }
+      /* THE PLATOON HEARS IT. A squad in a fight says so on the net (and the
+         squads beside it hear the guns): its side's contact, by 250 m cell,
+         with the bearing. A squad within a cell of one that is fighting is in
+         contact too. Only squads with contact of their own write it. */
+      if (inContact && nt) platoonSay(SQ.side[sq], cx, cz, SQ.thx[sq], SQ.thz[sq]);
+      else if (!inContact && !(SQ.lastC[sq] > 0 && I.simT - SQ.lastC[sq] < 10)) {
+        const p = platoonHear(SQ.side[sq], cx, cz);
+        if (p) { SQ.lastC[sq] = I.simT; SQ.thx[sq] = p.x; SQ.thz[sq] = p.z; }
+      }
       const losses = 1 - nFight / Math.max(1, SQ.cnt[sq]);
       /* MORALE. The pressure on the squad is its losses (men down and dead,
          the ones they can see) plus the mean stress its men carry (cracks,
          wounds, mates falling beside them). Past its nerve it breaks contact
          (an ordered withdrawal by bounds); far past it, it routs. */
-      const P = losses + stress / nFight;
+      /* ...and the ARMY's: the host steps one army morale over every man it has
+         (CBZ.brain.morale, the same one every army in the game shares) and
+         hands it in (I.army). A losing army weighs on every squad in it; a
+         broken one takes them all with it. */
+      const A = I.army[SQ.side[sq]];
+      const P = losses + stress / nFight + (A ? Math.max(0, 0.4 - A.morale) * 0.8 + (A.broken ? 0.4 : 0) : 0);
       const task0 = SQ.task[sq];
+      // a broken army's squads go, in contact or not: back toward their own side
+      if (A && A.broken && P > D.nerve * 1.2 && task0 !== TASK.gone) {
+        for (let j = 0; j < 10; j++) {
+          const r = SQ.mem[base + j];
+          if (r >= 0 && fighting(r) && G.life[r] === LIFE.alive) { G.life[r] = LIFE.routed; ev(EV.rout, r, -1, 0); }
+        }
+        SQ.task[sq] = TASK.gone;
+        return;
+      }
       if (inContact && (P > D.nerve || task0 === TASK.breakc)) {
         if (P > D.nerve * 1.45 || (task0 === TASK.breakc && P > D.nerve * 1.25)) {
           for (let j = 0; j < 10; j++) {
@@ -1917,24 +2074,69 @@
       if (task0 === TASK.breakc && !inContact) { SQ.task[sq] = TASK.hold; return; }
       if (task0 === TASK.hold && I.simT - SQ.brkT[sq] < 120 && SQ.brkT[sq] > 0) return;    // it has withdrawn: it holds there
       if (!inContact) {
-        SQ.task[sq] = o.kind === "hold" ? TASK.hold : TASK.advance;
+        // a hold with a place goes there first (more than 15 m off it), then holds it; one without holds where it stands
+        if ((o.kind === "hold" || o.kind === "move") && !(o.x === o.x && Math.hypot(o.x - cx, o.z - cz) > (o.kind === "move" ? 8 : 15))) { SQ.task[sq] = TASK.hold; SQ.bound[sq] = 0; return; }
+        /* THE MOVEMENT TECHNIQUE. Far from the enemy, a squad travels (the
+           wedge, at a route march). Close to where he is, it moves by
+           BOUNDING OVERWATCH (within 300 m: contact expected): one team goes forward while the other kneels
+           and watches the ground ahead, ready to fire; then they swap. The
+           team that halts is the one that sees the enemy first. */
+        const dEn = o.x === o.x ? Math.hypot(o.x - cx, o.z - cz) : 1e9;
+        // (a MOVE is a march to a place, not an advance on the enemy: no overwatch on it)
+        if (o.kind === "advance" && dEn < 300 && nFight >= 4) {
+          if (task0 !== TASK.overwatch) { SQ.task[sq] = TASK.overwatch; SQ.bound[sq] = 1; SQ.boundT[sq] = I.simT; }
+          else if (I.simT - SQ.boundT[sq] > (SQ.bound[sq] === 1 ? 20 : 14)) { SQ.bound[sq] = SQ.bound[sq] === 1 ? 2 : 1; SQ.boundT[sq] = I.simT; }
+          return;
+        }
+        SQ.task[sq] = TASK.advance;
         SQ.bound[sq] = 0;
         return;
       }
       // in contact
-      if (o.kind === "hold" || nFight < 2 || I.simT < SQ.lostT[sq]) { SQ.task[sq] = TASK.base; return; }
+      if (o.kind === "hold" || o.kind === "move" || nFight < 2 || I.simT < SQ.lostT[sq]) { SQ.task[sq] = TASK.base; return; }
       const dTh = nt ? Math.hypot(SQ.thx[sq] - cx, SQ.thz[sq] - cz) : 999;
       /* FIRE AND MOVEMENT: one team moves while the other fires, and only
          while the fire is not too heavy to move under; the teams swap on the
          squad's clock. A base of fire comes first (the squad down and
          shooting for a few seconds). Inside 45 m of the enemy: the assault. */
+      if (firing) SQ.fireT[sq] = I.simT;
       if (pinned >= Math.ceil(nFight * 0.5)) { SQ.task[sq] = TASK.base; SQ.bound[sq] = 0; return; }
+      /* THE FLANK. A squad that cannot fight from where it is (nobody in it
+         has had anything to shoot at for 25 s: the enemy is over a crest,
+         behind a wall) moves round: 90 degrees off the line to the threat,
+         on the side the squad already leans to, by bounds, and fights from
+         there. It gives up the flank when it is there, or has been at it for
+         a minute and a half. */
+      if (task0 === TASK.flank) {
+        if (Math.hypot(SQ.flX[sq] - cx, SQ.flZ[sq] - cz) < 15 || I.simT - SQ.flT[sq] > 90 || I.simT - SQ.fireT[sq] < 2) { SQ.task[sq] = TASK.base; SQ.contact[sq] = I.simT - 4; return; }
+        if (I.simT - SQ.boundT[sq] > 8) { SQ.bound[sq] = SQ.bound[sq] === 1 ? 2 : 1; SQ.boundT[sq] = I.simT; }
+        return;
+      }
+      if (nt && nFight >= 3 && I.simT - SQ.fireT[sq] > 25 && I.simT - SQ.contact[sq] > 25 && dTh > 40) {
+        const ax = cx - SQ.thx[sq], az = cz - SQ.thz[sq], al = Math.hypot(ax, az) || 1;
+        // the side: the one the squad already stands toward, off its own army's
+        // middle, across the line to the threat (the outer squads go round the outside)
+        const sd0 = SQ.side[sq];
+        const lat = (cx - sideX[sd0]) * (-az / al) + (cz - sideZ[sd0]) * (ax / al);
+        const sideK = lat >= 0 ? 1 : -1;
+        const px = -az / al * sideK, pz = ax / al * sideK;
+        const R = Math.min(140, Math.max(50, dTh * 0.8));
+        SQ.flX[sq] = SQ.thx[sq] + (ax / al * 0.35 + px * 0.94) * R;
+        SQ.flZ[sq] = SQ.thz[sq] + (az / al * 0.35 + pz * 0.94) * R;
+        SQ.task[sq] = TASK.flank; SQ.flT[sq] = I.simT; SQ.bound[sq] = 1; SQ.boundT[sq] = I.simT;
+        I.led.flanks = (I.led.flanks || 0) + 1;
+        return;
+      }
       if (task0 !== TASK.bound && task0 !== TASK.assault) {
         SQ.task[sq] = TASK.base;
         if (SQ.contact[sq] <= 0) SQ.contact[sq] = I.simT;
-        if (I.simT - SQ.contact[sq] > 6 + 8 * (1 - D.press) && I.simT - SQ.boundT[sq] > 6) { SQ.task[sq] = TASK.bound; SQ.bound[sq] = 1; SQ.boundT[sq] = I.simT; }
+        // the first bound goes once the base of fire is working (men down and shooting)
+        const baseOn = firing >= Math.max(1, Math.ceil(nFight / 4));
+        if (baseOn && I.simT - SQ.contact[sq] > 6 + 8 * (1 - D.press) && I.simT - SQ.boundT[sq] > 6) { SQ.task[sq] = TASK.bound; SQ.bound[sq] = 1; SQ.boundT[sq] = I.simT; }
         return;
       }
+      // no fire covering the move: the move stops, the squad gets its base of fire going again
+      if (firing < Math.max(1, Math.ceil(nFight / 5)) && dTh > 45) { SQ.task[sq] = TASK.base; SQ.contact[sq] = I.simT - 4; return; }
       if (I.simT - SQ.boundT[sq] > 6 + 4 * (1 - D.press)) {
         SQ.bound[sq] = SQ.bound[sq] === 1 ? 2 : 1; SQ.boundT[sq] = I.simT;
       }

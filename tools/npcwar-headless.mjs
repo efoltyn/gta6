@@ -265,8 +265,8 @@ scenario(10, "the ground: cover for the host, earthworks, craters, broken cover"
   run(W, 1);                                     // the armies come in over the first frames
   const HOST = vm.runInContext("HOST", W.sb), MAP = vm.runInContext("MAP", W.sb);
   check(typeof HOST.coverNear === "function" && typeof HOST.coverFrom === "function", "the host interface carries coverNear / coverFrom");
-  const red = vm.runInContext("men", W.sb).find((m) => m.team === "red" && !m.dead);
-  const blue = vm.runInContext("men", W.sb).find((m) => m.team === "blue" && !m.dead);
+  const red = W.sb.__battle.man("red");      // (a rifleman is a row of the infantry core: a rig or a ghost)
+  const blue = W.sb.__battle.man("blue");
   const pt = HOST.coverFrom(red.pos.x, red.pos.z, blue.pos.x, blue.pos.z, 60);
   check(pt && ((blue.pos.x - pt.x) * pt.nx + (blue.pos.z - pt.z) * pt.nz) < 0,
     "coverFrom finds a point with the cover between a red man and the blue line (" + (pt ? pt.kind + " " + pt.h.toFixed(2) + " m" : "none") + ")");
@@ -359,7 +359,7 @@ scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawle
     check(!!tank.group && !tank.group.userData.standIn, "built by its own unit file (units/vehicles/m1_abrams.js), not a stand-in (rig " + !!tank.rig + ")");
     const crew = tank.seats.filter((s) => s.crew && s.man).map((s) => s.seat);
     check(crew.length === 1 && crew[0] === "driver", "the side's one man is in the driver's seat (" + JSON.stringify(crew) + ")");
-    const blue = R.find((m) => m.team === "blue" && !m.dead);
+    const blue = W.sb.__battle.man("blue");    // (a rig, or a ghost of a row of the infantry core)
     const hp0 = tank.hp;
     const sx = blue.pos.x, sz = blue.pos.z;
     blue.pos.x = tank.pos.x + Math.sin(tank.h) * 60; blue.pos.z = tank.pos.z + Math.cos(tank.h) * 60;
@@ -449,7 +449,7 @@ scenario(12, "wheels: a Humvee and a loaded M35 v 30 riflemen", async () => {
   const crewN = [hm, tr].reduce((s, v) => s + v.seats.filter((x) => x.crew && x.man).length, 0);
   check(crewN === 5 && onFoot === 18 && tr.dismounted, "5 crew aboard; the 16 riflemen and the Humvee's 2 got out at once (" + crewN + " crew, " + onFoot + " on foot, enemy " + Math.round(d0) + " m)");
   run(W, 2);
-  const blue = R.find((m) => m.team === "blue" && !m.dead);
+  const blue = W.sb.__battle.man("blue");
   const sx = blue.pos.x, sz = blue.pos.z;
   const hp0 = hm.hp;
   blue.pos.x = hm.pos.x + Math.sin(hm.h) * 80; blue.pos.z = hm.pos.z + Math.cos(hm.h) * 80;
@@ -499,7 +499,7 @@ scenario(16, "the convoy: an M1, a MaxxPro and a JLTV v riflemen with RPGs", asy
     "the MaxxPro's six and the JLTV's one got out (" + onFoot + " riflemen on foot)");
   // the scripted check: an AK man 80 m off each face of the MRAP, a sniper off its flank
   run(W, 1);
-  const blue = R.find((m) => m.team === "blue" && !m.dead && !m.launcher);
+  const blue = W.sb.__battle.man("blue", (m) => !m.launcher);
   const sx = blue.pos.x, sz = blue.pos.z, sw = blue.wid;
   const hp0 = mr.hp, faces = [];
   for (const [name, a] of [["front", 0], ["side", Math.PI / 2], ["rear", Math.PI], ["other side", -Math.PI / 2]]) {
@@ -622,7 +622,7 @@ scenario(17, "the convoy: an Abrams and two loaded FMTVs v 40 riflemen; the squa
   check(trucks.every((t) => t.dismounted && t.seats.every((s) => s.crew || !s.man)), "the squads got out (the armies form inside the 520 m dismount range)");
   check(trucks.every((t) => t.rig.tailgate.obj.rotation.x < -1.2), "the tailgates are down (" + trucks.map((t) => t.rig.tailgate.obj.rotation.x.toFixed(2)).join(", ") + ")");
   // ARMOUR BY PLACE: a man 80 m off the face, a round with its impact point
-  const blue = W.sb.__battle.roster().find((m) => m.team === "blue" && !m.dead);
+  const blue = W.sb.__battle.man("blue");
   const t = trucks[0], sx = blue.pos.x, sz = blue.pos.z;
   const world = (hx, hy, hz) => {
     const c = Math.cos(t.h), s = Math.sin(t.h);
@@ -676,7 +676,7 @@ scenario(15, "rocket artillery: a HIMARS fire mission on 40 riflemen", async () 
   let guided = 0, minD = 1e9;
   const orig = h.rig.launched.bind(h.rig);
   h.rig.launched = function (rk, shot, t) { orig(rk, shot, t); if (rk.homing) guided++; };
-  const blueDead = () => W.sb.__battle.roster().filter((m) => m.team === "blue" && m.dead).length;
+  const blueDead = () => W.sb.__battle.soldiers("blue").filter((m) => m.dead).length;     // (rows of the infantry core included)
   const a = run(W, 150, () => {
     for (const o of W.sb.__battle.roster()) if (o.team === "blue" && !o.dead) minD = Math.min(minD, Math.hypot(o.pos.x - h.pos.x, o.pos.z - h.pos.z));
     return true;
@@ -852,7 +852,7 @@ scenario(13, "the B-52: a high-altitude run, the bay opens, a stick walks across
   const R = b.rig && b.rig.state;
   check(!!R && !!R.skins && R.skins.length > 0, "its own skinned airframe was built (not the stand-in)");
   check(agl() > 8500, "it comes in at bombing height (" + Math.round(agl()) + " m)");
-  const enemy = W.sb.__battle.roster().filter((m) => m.team === "blue" && !m.dead);
+  const enemy = W.sb.__battle.soldiers("blue").filter((m) => !m.dead);
   const d0 = Math.min.apply(null, enemy.map((m) => Math.hypot(m.pos.x - b.pos.x, m.pos.z - b.pos.z)));
   check(d0 > 10500, "from beyond its release distance, so the first pass is a real run (" + Math.round(d0) + " m out)");
   let doorAtFirst = -1, first = -1, firstD = 0, maxStick = 0, stick = 0, lastN = 0, lastT = 0;
@@ -869,7 +869,7 @@ scenario(13, "the B-52: a high-altitude run, the bay opens, a stick walks across
   check(doorAtFirst > 0.9, "the bay doors were open before the first bomb left (" + doorAtFirst.toFixed(2) + ")");
   check(firstD > 7000, "released kilometres short of the mark (" + Math.round(firstD) + " m)");
   check(maxStick >= 12, "a stick, not a few bombs a pass (" + maxStick + " in one ripple)");
-  const dead = W.sb.__battle.roster().filter((m) => m.team === "blue" && m.dead).length;
+  const dead = W.sb.__battle.soldiers("blue").filter((m) => m.dead).length;
   console.log("    (B-52: " + dead + " of 60 dead, " + b.kills + " kills, war " + (a.over ? "over at " + a.simT + " s" : "still on at " + a.simT + " s") + ")");
   check(dead > 0, "the stick killed (" + dead + ")");
 });

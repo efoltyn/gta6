@@ -670,6 +670,35 @@ CBZ.npcwar.onBoot(function () {
        is the same array the sim walks, deliberately: a copy would let a stale
        flag hide behind the copy. */
     roster: function () { return men; },
+    /* EVERY MAN ON THE FIELD: the infantry core's rows (src/battle/mass.js;
+       as their rigs where they have one, else as ghosts: pos, team, wid,
+       stance, dead) and the page's own men. A tool that wants "a man of
+       that side" asks here, not the page's roster (which holds only rigs). */
+    soldiers: function (team) {
+      const out = [];
+      for (let i = 0; i < men.length; i++) {
+        const m = men[i];
+        if (m.vehicle || m.beast || (team && m.team !== team)) continue;
+        out.push(m);
+      }
+      if (MASS.on && STORE) {
+        const C = STORE.cols;
+        for (let r = 0; r < STORE.rows; r++) {
+          if (C.ext[r] || C.life[r] === 0 || STORE.ref[r]) continue;
+          if (team && (C.side[r] ? "blue" : "red") !== team) continue;
+          const g = MASS.ghost(r);
+          g.pos.set(C.x[r], C.y[r], C.z[r]); g.dead = C.life[r] === 4; g.fled = C.life[r] === 3; g.downed = !!C.down[r];
+          out.push(g);
+        }
+      }
+      return out;
+    },
+    // a living man of a side (a rig, the page's own, or a row's ghost)
+    man: function (team, pred) {
+      const L = this.soldiers(team);
+      for (let i = 0; i < L.length; i++) { const m = L[i]; if (!m.dead && !m.fled && (!pred || pred(m))) return m; }
+      return null;
+    },
     // the squad brain's ledger: tasks, tactics fired, per-tier think cost (ai/squad.js)
     tactics: function () { return tacticsReadout(); },
     // the columns (src/battle/convoyhost.js): their audit, the live convoy

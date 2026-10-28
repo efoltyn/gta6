@@ -632,14 +632,14 @@ document.body.appendChild(b);}}catch(e){}})();
      gloves, knee pads, real camouflage (warlord/camo.js, shared) fitted to the
      body; and what the kit stops (systems/armour.js, CBZ.armour.resolve). -->
 <script src="src/warlord/camo.js?v=nations1026"></script>
-<script src="src/systems/armour.js?v=armourm1011"></script>
-<script src="src/entities/combatkit.js?v=nations1026"></script>
+<script src="src/systems/armour.js?v=inf1028c"></script>
+<script src="src/entities/combatkit.js?v=inf1028c"></script>
 <script src="src/entities/soldier.js?v=drone1012"></script>
 <!-- THE REAL CROWD (entities/crowdgpu.js): the CBZ.human mesh GPU-instanced
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=nations1026"></script>
+<script src="src/entities/crowdgpu.js?v=inf1028c"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -705,7 +705,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/hud.js?v=noobj1022"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/ballistics.js?v=strike1013m"></script>
+<script src="src/weapons/ballistics.js?v=inf1028c"></script>
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
 <script src="src/weapons/munitions.js?v=rounds1013m"></script>
@@ -1265,7 +1265,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/mil_air.js?v=army1013m"></script>
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
 <!-- ONE ARMY (city/army.js): the door to NPC War's battle core, sim and unit kit. Only the API + loader ride the page; the unit files and the war engine load when a force or Fort Brandt's motor pool needs them. -->
-<script src="src/city/army.js?v=nations1026"></script>
+<script src="src/city/army.js?v=inf1028c"></script>
 <!-- ONE UNIT, BUILT FOR THE CITY (city/unitmodels.js): CBZ.milModels, the one path that builds a units/vehicles machine outside the battle (Fort Brandt, the player's F-35, the airbase, The Isles' army). After army.js (its loader), before island_military. -->
 <script src="src/city/unitmodels.js?v=f35one1022"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter

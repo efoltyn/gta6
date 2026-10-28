@@ -145,6 +145,11 @@
     // coverHead folds the legs itself); its own impostor frames, it is a
     // different shape from anyone standing or sitting
     { id: "coverHead", gait: false, pose: "coverHead", period: 4.0, n: 8, imp: 2 },
+    // A SOLDIER IN A FIGHT IS NOT STANDING (NPC War's infantry core: every row
+    // has a posture). Kneeling on the mark, and flat on it behind the rifle;
+    // their impostors are the crouched and the crawling shapes.
+    { id: "rifleKneel", gait: false, period: 4.0, n: 6, impOf: "coverHead", soldier: { carry: "high", stance: "crouch" } },
+    { id: "rifleProne", gait: false, period: 4.0, n: 6, impOf: "crawl", soldier: { carry: "low", stance: "prone" } },
   ];
   const CLIP_IX = Object.create(null);
   let ROWS = 0, IMP_ROWS = 0;

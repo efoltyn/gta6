@@ -94,6 +94,8 @@ function join() {
       if (d < bd) { bd = d; m = o; }
     }
   }
+  // a man of the infantry core with no rig yet: he gets one now (mass.js)
+  if (!m && MASS.on) m = MASS.takeRow(team, c.x, c.z);
   return m ? takeOver(m) : false;
 }
 /* TAKE OVER: any unit, either side. The body stops thinking and you drive
@@ -102,6 +104,8 @@ function join() {
 function takeOver(u) {
   if (!started || over || bench || !canTake(u)) return false;
   if (YOU.m === u) return true;
+  // a rig of the infantry core becomes the page's own man while you are him (mass.js release)
+  if (u.puppet) MASS.release(u);
   if (YOU.m) youRelease(YOU.m);
   if (YOU.beat) { YOU.beat = null; }
   YOU.m = u; YOU.last = u; YOU.down = false;
@@ -137,6 +141,8 @@ function takeOver(u) {
 function youRelease(u) {
   if (!u) return;
   u.you = false; u.thinkAt = simT; u.slot = "hold";
+  // ...and a man of the infantry core goes back to it, from where you left him
+  if (u._coreMan && !u.dead && !u.fled) MASS.adopt(u);
   if (u.beast && u._atkAnim != null && u._atkAnim >= 0 && CBZ.creatureEndAttack) { try { CBZ.creatureEndAttack(u); } catch (e) {} }
   YOU.strike = null;
 }

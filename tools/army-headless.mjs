@@ -202,7 +202,9 @@ scenario(2, "orders: hold, move, attack", async () => {
   A.orderForce(g, { type: "attack", at: { x: -300, z: 400 } });
   W.step(40);
   const sg = A.status(g), au = A.audit();
-  check(sg.z > 60, "ATTACK marches on its objective, far from the lens (centre z " + Math.round(sg.z) + ")");
+  // (a route march with kit is ~1.75 m/s, the squads forming their wedges first: 40 s is ~50 m,
+  //  not the old tier's 4.6 m/s run)
+  check(sg.z > 40, "ATTACK marches on its objective, far from the lens (centre z " + Math.round(sg.z) + ")");
   check(au.mass.tiers.far + au.mass.tiers.mid >= 30, "far from the lens it is fought by the tier sim, not rigs (" + JSON.stringify(au.mass.tiers) + ")");
 });
 
