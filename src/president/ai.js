@@ -15,8 +15,12 @@
      auth   how much he cares about elections and the press
      prot   protectionism and caution: tariffs, missile defense
 
+   CONQUEST. A beaten country gives up (yields); a victor swallows what it
+   can digest and keeps the rest as a puppet; a master with an appetite
+   annexes his puppets after a year; a puppet does not pick its own wars.
+
    PUBLIC  CBZ.presWorld.ai = { turn(S, c, apply), accepts(S, T, from, kind, terms),
-                                takesBailout(S, T, lender, amt, strings) }
+                                takesBailout(S, T, lender, amt, strings), yields(S, T, by) }
 ============================================================ */
 (function (root) {
   "use strict";
@@ -68,7 +72,10 @@
       if (!PW.reach(S, c.id, o.id)) continue;
       threat = Math.max(threat, str(S, o) / Math.max(0.5, bloc(S, c)));
     }
-    const milT = clamp(1.6 + L.aggr * 1.6 + (threat > 1 ? 1.2 : threat > 0.6 ? 0.5 : 0) + (c.war.length ? 2.2 : 0), 1, 9) * (c.crisis ? 0.7 : 1);
+    // from what the country is used to spending (Costa Rica does not rearm like Russia), up with the threat and the war
+    const base = Math.max(0.2, c.memo.mil0 != null ? c.memo.mil0 : 2);
+    const milT = clamp(base * (0.85 + L.aggr * 0.4) + (threat > 1 ? Math.max(0.6, base * 0.5) : threat > 0.6 ? Math.max(0.25, base * 0.2) : 0)
+      + (c.war.length ? Math.max(1.2, base) : 0), 0, Math.max(9, base * 1.2)) * (c.crisis ? 0.7 : 1);
     if (Math.abs(B.military - milT) > 0.15) act({ type: "budget", k: "military", v: B.military + clamp(milT - B.military, -0.25, 0.25) });
     const misT = clamp(0.2 + L.prot * 0.6 + (threat > 0.8 ? 0.4 : 0) + (c.war.length ? 0.4 : 0), 0, 3);
     if (Math.abs(B.missile - misT) > 0.1) act({ type: "budget", k: "missile", v: B.missile + clamp(misT - B.missile, -0.1, 0.1) });
@@ -114,7 +121,7 @@
       if (S.rel[c.id][o.id] > 40 && c.deals.indexOf(o.id) < 0 && !mine && !hit && c.war.indexOf(o.id) < 0 && o.human == null && once(S, c, "deal" + o.id, 240)) act({ type: "deal", t: o.id });
       // sanctions: the free world against the unfree, lifted when things mend
       const sn = c.sanctions.indexOf(o.id) >= 0;
-      if (!sn && c.freedom > 65 && o.freedom < 30 && S.rel[c.id][o.id] < -30 && once(S, c, "sanc" + o.id, 200)) act({ type: "sanction", t: o.id, on: 1 });
+      if (!sn && c.freedom > 65 && o.freedom < 30 && S.rel[c.id][o.id] < -60 && once(S, c, "sanc" + o.id, 200)) act({ type: "sanction", t: o.id, on: 1 });
       if (sn && S.rel[c.id][o.id] > 5 && once(S, c, "unsanc" + o.id, 200)) act({ type: "sanction", t: o.id, on: 0 });
       // alliances: friends with a common problem
       if (c.allies.indexOf(o.id) < 0 && S.rel[c.id][o.id] > 50 && c.war.indexOf(o.id) < 0 && o.human == null && threat > 0.7 && once(S, c, "ally" + o.id, 300)) act({ type: "alliance", t: o.id });
@@ -123,18 +130,33 @@
     }
 
     // ---- 7. war
-    if (!c.war.length && L.aggr > 0.55 && !c.crisis) {
-      let best = null, bs = 0;
+    // a master swallows his puppets once they are used to it
+    if (c.lord < 0 && L.aggr > 0.35) for (const o of S.c) {
+      if (!o.alive || o.lord !== c.id || S.day - (o.lordDay || 0) < 365) continue;
+      if (once(S, c, "annex" + o.id, 180) && r(S) < 0.5 + L.aggr * 0.4) act({ type: "annex", t: o.id });
+    }
+    if (!c.war.length && L.aggr > 0.55 && !c.crisis && c.lord < 0) {
+      // a democracy needs a far worse grudge, and starts far fewer wars, than a strongman
+      // (unless the scenario is a country coming apart: then every governor is a strongman)
+      const sc = PW.scen(S), dem = c.regime === "democracy" && !sc.tension, cold = dem ? -40 : -25;
+      let best = null, bs = 0, bReach = 0;
       for (const o of S.c) {
         if (!o.alive || o.id === c.id || c.allies.indexOf(o.id) >= 0) continue;
-        if (S.rel[c.id][o.id] > -25) continue;
-        if (PW.reach(S, c.id, o.id) < 1) continue;
+        if (S.rel[c.id][o.id] > cold || o.lord === c.id) continue;
+        const rc = PW.reach(S, c.id, o.id);
+        if (rc < 1) continue;
         const ratio = str(S, c) / Math.max(0.3, bloc(S, o));
-        if (ratio > 1.6 && ratio > bs) { bs = ratio; best = o; }
+        // the neighbour across a land border first; an invasion over water is a bigger thing
+        const score = ratio * (rc === 2 ? 1 : 0.5);
+        if (ratio > 1.6 && score > bs) { bs = score; best = o; bReach = rc; }
       }
       // a war is a big decision: a weak, cold neighbour, and a reason to want
       // one (a falling approval, or a man who simply likes them)
-      if (best && (c.approval < 40 || (L.aggr > 0.85 && bs > 2)) && r(S) < L.aggr * 0.07) {
+      // (and rarer in the first months: the world on day one is the world as it is)
+      // a country that has just fought catches its breath, and every conquest makes the next one dearer
+      const rested = S.day - (c.memo.peaceDay != null ? c.memo.peaceDay : -1e9) > 540;
+      const mood = (dem ? 0.35 : c.regime === "hybrid" ? 0.7 : 1) * (sc.tension || 1) * (bReach === 2 ? 1 : 0.4) / (1 + (c.memo.taken || 0) * 0.5);
+      if (best && rested && (c.approval < 40 + (sc.tension ? 15 : 0) || (L.aggr > 0.85 && bs > 2)) && r(S) < L.aggr * 0.035 * mood * (S.day < 180 ? 0.25 : 1)) {
         const k = "ult" + best.id;
         if (best.human != null && !best.out) {
           // a human gets the call first
@@ -170,6 +192,9 @@
         const p = PW.biggestCity(S, e);
         if (p != null) act({ type: "nuke", t: e, p: p });
       }
+      // winning: ask them to give up (they say yes when they are beaten)
+      if (c.posture[e] === "attack" && ratio > 1.2 && PW.occupiedShare(S, E) > 0.3 && once(S, c, "demand" + e, 45)) act({ type: "surrender", t: e });
+      if (c.lord >= 0) continue;                                  // a puppet's peace is its master's
       if (c.warDays > 200 && (occ > 0.25 || ratio < 0.7 || c.approval < 30) && once(S, c, "peace" + e, 60)) act({ type: "peace", t: e, terms: "white" });
       else if (c.warDays > 300 && ratio > 1.8 && c.gained > 2 && once(S, c, "peaceS" + e, 90)) act({ type: "peace", t: e, terms: "status" });
     }
@@ -228,6 +253,14 @@
     }
     return false;
   }
+  // a country gives up when it is beaten: its capital gone, most of it held, or no army left to speak of
+  function yields(S, T, by) {
+    const PW = W(), occ = PW.occupiedShare(S, T), ratio = str(S, T) / Math.max(0.3, str(S, by));
+    if (T.cap >= 0 && S.p[T.cap].ctl !== T.id && occ > 0.3) return true;
+    if (occ > 0.5 && ratio < 0.9) return true;
+    if (occ > 0.3 && ratio < 0.45) return true;
+    return ratio < 0.15 && T.warDays > 120;
+  }
   function takesBailout(S, T, L, amt, strings) {
     const rel = S.rel[T.id][L.id];
     const need = T.crisis > 0 || T.yld > 9;
@@ -237,7 +270,7 @@
     return true;
   }
 
-  const AI = { turn: turn, accepts: accepts, takesBailout: takesBailout };
+  const AI = { turn: turn, accepts: accepts, takesBailout: takesBailout, yields: yields };
   if (CBZ.presWorld) CBZ.presWorld.ai = AI;
   else CBZ.presWorldAI = AI;
   if (typeof module !== "undefined" && module.exports) module.exports = AI;
