@@ -205,6 +205,7 @@ MASS.begin = function (asBench, how) {
   MASS.ground = massGround(ext);
   MASS.cover = massCover(ext, MASS.ground);
   MASS.I = MASS.T = CBZ.battleInfantry.create(STORE, { ground: MASS.ground, cover: MASS.cover, seed: (lcg() * 0x7ffffffe) | 0 || 1 });
+  MASS.I.armySelf = false;                      // (the page steps one army morale over every body: morale.js)
   MASS.unitOf = [];
   spawnQueue.length = 0;
   MASS.spawnAll();
@@ -230,6 +231,7 @@ MASS.open = function (o) {
   STORE.reserve(o.capHint || 256);
   MASS.ground = null; MASS.cover = null;
   MASS.I = MASS.T = CBZ.battleInfantry.create(STORE, { groundAt: o.groundAt || HOST.groundAt, seed: (lcg() * 0x7ffffffe) | 0 || 1 });
+  MASS.I.armySelf = false;
   MASS.unitOf = [];
   MASS.buildSquads();
   if (CBZ.massDraw) { CBZ.massDraw.capHint = o.capHint || 0; CBZ.massDraw.begin(); }

@@ -148,6 +148,8 @@
   const SPEED = { walk: 1.45, march: 1.75, rush: 4.2, crawl: 0.45, run: 3.4 };
   const SIGHT_R = 700;                       // nobody is looked for past this
 
+  // an army's morale record, in CBZ.brain.morale.armyStep's shape
+  function armyRec() { return { p0: 0, pNow: 0, men0: 0, morale: 1, shock: 0, alive: 0, routing: 0, fled: 0, broken: false }; }
   function create(S, cfg) {
     cfg = cfg || {};
     const B = CBZ.ballistics;
@@ -209,7 +211,9 @@
       led: { shotsAt: [0, 0, 0, 0, 0, 0, 0], hitsAt: [0, 0, 0, 0, 0, 0, 0], organs: { brain: 0, spine: 0, vital: 0, gut: 0, torso: 0, head: 0, limb: 0, plate: 0 },
         plate: 0, platePen: 0, firstShot: [-1, -1], firstHit: [-1, -1], firstSee: [-1, -1], firstSeeD: [0, 0], cracks: 0, aids: 0, posts: 0, rushes: 0, pins: 0 },
       order: [{ kind: "advance", x: 0, z: 0 }, { kind: "advance", x: 0, z: 0 }],
-      army: [{ morale: 1, broken: false }, { morale: 1, broken: false }],
+      // the army's morale: the host's (it steps one over every body it has: I.armySelf = false),
+      // else this sim's own, by the same rule (CBZ.brain.morale.armyStep) over its own men
+      army: [armyRec(), armyRec()], armySelf: true,
       camX: 0, camZ: 0, shotR: 0, EV: EV, POST: POST, LIFE: LIFE, MOVE: MOVE, DOCTRINE: DOCTRINE,
     };
     const now = (typeof performance !== "undefined" && performance.now) ? function () { return performance.now(); } : function () { return Date.now(); };
@@ -316,6 +320,7 @@
         if (SQ.cnt[sq] < s + 1) SQ.cnt[sq] = s + 1;
       }
       I.nRows = Math.max(I.nRows || 0, r + 1);
+      { const A = I.army[G.side[r]]; A.p0 += manW(r); A.men0++; }
     };
     I.order = function (side, o) { I.order[side] = o; I.orders[side] = o; };
     I.orders = I.order;   // (the same array: order[side])
@@ -1739,13 +1744,48 @@
       I.stats.downs[by >= 0 ? G.side[by] : (G.side[b] ? 0 : 1)]++;
       ev(EV.down, b, by, 0);
       shock(b, 0.3);
+      armyLoss(b);
     }
     function kill(b, by) {
       if (G.life[b] === LIFE.dead) return;
       G.life[b] = LIFE.dead; G.cap[b] = 0; G.hp[b] = 0; G.vx[b] = 0; G.vz[b] = 0; G.mv[b] = MOVE.hold;
       I.stats.kills[by >= 0 ? G.side[by] : (G.side[b] ? 0 : 1)]++;
       ev(EV.kill, b, by, 0);
-      if (!G.down[b]) shock(b, 0.45);
+      if (!G.down[b]) { shock(b, 0.45); armyLoss(b); }
+    }
+    /* THE ARMY'S OWN MORALE (when the host has none to hand in): the shared
+       rule, CBZ.brain.morale (shock decays, losses against theirs, men seen
+       running, the odds), over this sim's men: each weighs his training. */
+    function manW(r) {
+      const MO = CBZ.brain && CBZ.brain.morale, K = MO && MO.K;
+      const t = I.types[G.typ[r]];
+      return (K && K.TIER_W && K.TIER_W[t.trn]) || 1;
+    }
+    function armyLoss(b) {
+      if (!I.armySelf || G.ext[b]) return;
+      const MO = CBZ.brain && CBZ.brain.morale;
+      if (MO && MO.deathShock) MO.deathShock(I.army[G.side[b]], manW(b));
+    }
+    let armyAt = -1;
+    function armyTick() {
+      const MO = CBZ.brain && CBZ.brain.morale;
+      if (!I.armySelf || !MO || !MO.armyStep) return;
+      const dt = armyAt < 0 ? 0 : I.simT - armyAt;
+      if (armyAt >= 0 && dt < 0.6) return;
+      armyAt = I.simT;
+      const A0 = I.army[0], A1 = I.army[1];
+      A0.pNow = A1.pNow = 0; A0.alive = A1.alive = 0; A0.routing = A1.routing = 0;
+      const n = I.nRows || 0;
+      for (let r = 0; r < n; r++) {
+        const l = G.life[r];
+        if ((l !== LIFE.alive && l !== LIFE.routed) || G.ext[r] || G.down[r]) continue;
+        const A = I.army[G.side[r]];
+        A.alive++;
+        if (l === LIFE.routed) A.routing++;
+        A.pNow += manW(r) * (0.45 + 0.55 * Math.max(0, Math.min(1, G.cap[r])));
+      }
+      MO.armyStep(A0, A1, dt, null);
+      MO.armyStep(A1, A0, dt, null);
     }
     // the men round a man who goes down feel it
     function shock(b, k) {
@@ -2192,6 +2232,7 @@
       const t4 = now(); I.ms.think += t4 - t2;
       moveAll(dt);
       resolveRounds();
+      armyTick();
       I.ms.total += now() - T0;
     };
     /* ============================================================ THE HOST'S BODIES

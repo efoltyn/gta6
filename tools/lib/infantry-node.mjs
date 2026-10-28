@@ -21,7 +21,7 @@ import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
-const FILES = ["src/weapons/weapon-data.js", "src/weapons/ballistics.js", "src/systems/armour.js",
+const FILES = ["src/weapons/weapon-data.js", "src/weapons/ballistics.js", "src/systems/armour.js", "src/systems/brain.js",
   "src/battle/core/store.js", "src/battle/core/countries.js", "src/battle/core/infantry.js"];
 let SB = null;
 export function ctx() {
