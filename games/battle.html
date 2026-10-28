@@ -14,10 +14,13 @@
 
   Nothing violent here is drawn by this file. The men are studio.cast. The
   guns in their hands are weapons/appearances via systems/actorweapons.js.
-  HOW they fight is systems/combat_iq.js — the same fire tokens, cover
-  breaks, flanking arcs, suppression and per-training accuracy the city
-  runs. Tracers, muzzle flashes, impacts and the pocked walls afterwards
-  are systems/gunfx.js. Dead men sprawl through CBZ.deathPose and their
+  HOW a rifleman fights, at every battle size from 1 v 1 to a million a
+  side, is the infantry core (src/battle/core/infantry.js): what he sees,
+  his posture and cover, his aim and trigger by his training's doctrine,
+  every round flown on weapons/ballistics.js, wounds by what a round
+  reached, suppression, squads, morale. The rigs near the lens show it
+  (src/battle/mass.js). Tracers, muzzle flashes, impacts and the pocked
+  walls afterwards are systems/gunfx.js. Dead men sprawl through CBZ.deathPose and their
   rifles fall through CBZ.weaponPhysics and clatter on the real ground.
   Rockets detonate through studio.boom, so they hurt both sides and bring
   the towers down through the same collapse chain a bomber uses.
@@ -176,7 +179,7 @@
   skips files a page already carries, so the day a "guns" pack ships,
   these lines simply stop being needed.
 ============================================================ -->
-<script src="../src/core/studio.js?v=noteam1026"></script>
+<script src="../src/core/studio.js?v=inf1028c"></script>
 <!-- NPC WAR ITSELF: src/battle/, one shared scope, in this order. The
   file map and who owns what: docs/npcwar/ARCHITECTURE.md -->
 <script src="../src/battle/npcwar.js?v=npcw1011b"></script>
@@ -184,19 +187,18 @@
 <script src="../src/units/manifest.js?v=presboot3"></script>
 <script src="../src/units/kit/moves.js?v=take1011"></script>
 <script src="../src/battle/core/roster.js?v=army1013"></script>
-<script src="../src/battle/core/countries.js?v=nations1026"></script>
+<script src="../src/battle/core/countries.js?v=inf1028a"></script>
 <script src="../src/battle/core/sides.js?v=nations1026"></script>
 <script src="../src/battle/core/series.js?v=army1013"></script>
 <script src="../src/battle/core/host.js?v=curb1013"></script>
 <script src="../src/battle/core/store.js?v=army1013"></script>
 <script src="../src/battle/core/lod.js?v=convoy1013"></script>
 <script src="../src/battle/core/flow.js?v=army1013"></script>
-<script src="../src/battle/core/tiersim.js?v=army1013m"></script>
-<script src="../src/battle/core/simlink.js?v=army1013"></script>
+<script src="../src/battle/core/infantry.js?v=inf1028f"></script>
 <script src="../src/battle/core/tactics.js?v=army1013m"></script>
 <script src="../src/battle/settings.js?v=nations1026"></script>
 <script src="../src/battle/arenas/maps.js?v=army1013"></script>
-<script src="../src/battle/teams.js?v=nations1026"></script>
+<script src="../src/battle/teams.js?v=inf1028a"></script>
 <script src="../src/battle/arms.js?v=army1013"></script>
 <script src="../src/battle/load.js?v=nations1026"></script>
 <script src="../src/battle/core.js?v=army1013"></script>
@@ -214,24 +216,24 @@
 <script src="../src/battle/arenas/field.js?v=convoy1013"></script>
 <script src="../src/battle/men.js?v=nations1026"></script>
 <script src="../src/battle/beasts.js?v=army1013m"></script>
-<script src="../src/battle/damage.js?v=rounds1013m"></script>
-<script src="../src/battle/ai/morale.js?v=army1013m"></script>
+<script src="../src/battle/damage.js?v=inf1028c"></script>
+<script src="../src/battle/ai/morale.js?v=inf1028f"></script>
 <script src="../src/battle/death.js?v=army1013m"></script>
-<script src="../src/battle/physics.js?v=strike1013m"></script>
+<script src="../src/battle/physics.js?v=inf1028c"></script>
 <script src="../src/units/kit/vehicle.js?v=strike1013m"></script>
 <script src="../src/systems/roadgraph.js?v=curb1013"></script>
 <script src="../src/systems/convoy.js?v=curb1013"></script>
-<script src="../src/battle/vehicles.js?v=rounds1013m"></script>
+<script src="../src/battle/vehicles.js?v=inf1028c"></script>
 <script src="../src/battle/drones.js?v=strike1013m"></script>
-<script src="../src/battle/ai/orders.js?v=army1013m"></script>
-<script src="../src/battle/fire.js?v=rounds1013m"></script>
-<script src="../src/battle/air.js?v=strike1013m"></script>
+<script src="../src/battle/ai/orders.js?v=inf1028c"></script>
+<script src="../src/battle/fire.js?v=inf1028c"></script>
+<script src="../src/battle/air.js?v=inf1028c"></script>
 <script src="../src/battle/ai/think.js?v=convoy1013"></script>
 <script src="../src/battle/ai/squad.js?v=army1013m"></script>
 <script src="../src/battle/convoyhost.js?v=curb1013"></script>
-<script src="../src/battle/step.js?v=convoy1013"></script>
+<script src="../src/battle/step.js?v=inf1028c"></script>
 <script src="../src/battle/melee.js?v=army1013"></script>
-<script src="../src/battle/player.js?v=army1013m"></script>
+<script src="../src/battle/player.js?v=inf1028c"></script>
 <script src="../src/battle/camera/camera.js?v=strike1013m"></script>
 <script src="../src/battle/camera/study.js?v=army1013"></script>
 <script src="../src/battle/camera/killcam.js?v=army1013"></script>
@@ -239,15 +241,15 @@
 <script src="../src/battle/clock.js?v=army1013m"></script>
 <script src="../src/battle/bench.js?v=army1013"></script>
 <script src="../src/battle/spawn.js?v=army1013m"></script>
-<script src="../src/battle/mass.js?v=beastfull1026"></script>
-<script src="../src/battle/massdraw.js?v=nations1026"></script>
+<script src="../src/battle/mass.js?v=inf1028f"></script>
+<script src="../src/battle/massdraw.js?v=inf1028c"></script>
 <script src="../src/battle/colours.js?v=nations1026"></script>
 <script src="../src/battle/settingspanel.js?v=army1013"></script>
 <script src="../src/battle/scoring.js?v=nations1026"></script>
 <script src="../src/battle/begin.js?v=nations1026"></script>
 <script src="../src/battle/tick.js?v=kitfix1013"></script>
 <script src="../src/battle/loop.js?v=army1013m"></script>
-<script src="../src/battle/probe.js?v=nations1026"></script>
+<script src="../src/battle/probe.js?v=inf1028c"></script>
 <script src="../src/battle/main.js?v=army1013"></script>
 <a href="../" id="portalHome" style="position:fixed;left:12px;top:10px;z-index:2147483000;font:700 13px/1 Fredoka,Arial,sans-serif;letter-spacing:.08em;color:#fff;text-decoration:none;background:rgba(4,20,36,.55);padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.25)">◀ ALL GAMES</a>
 </body>
