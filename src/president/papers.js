@@ -180,6 +180,7 @@
         y += 38;
       });
     } else { T(x, "At peace.", MARGIN, y, 26, "italic", INK2); y += 40; }
+    { const Rm = PW.realm(S, me); if (Rm.conquered > 0) { T(x, "Ours: " + Rm.cities + " cities. Conquered " + Rm.conquered + " of " + Rm.rivals + ".", MARGIN, y, 24, "700", GREEN); y += 38; } }
     rule(x, MARGIN, R, y - 8, INK2, 1); y += 36;
     // what the papers say: the newest real things
     T(x, "THE PAPERS", MARGIN, y, 24, "700", INK2, "left", MONO); y += 42;
@@ -308,88 +309,88 @@
   }
 
   // ============================================================ THE WORLD
-  /* The real map (president/earth.js), the countries in play in their
-     colours, the rest of the world in its real borders, in grey; under it the
-     countries in play, by name. A tap on either picks a country. */
+  /* The scenario's map (president/mapdraw.js: who holds what, the fronts,
+     your colour and where it ends), the score, and under it the countries
+     still in play, by name. A tap on either picks a country. */
+  function MAPD() { return CBZ.presMap || (typeof require === "function" ? require("./mapdraw.js") : null); }
   const MAP = { y0: MARGIN + 116, h: 0 };
-  let mapCache = null, mapKey = "";
-  function worldMap(S, me, ui) {
-    const M = W().geo(), Wd = M.W, Ht = M.H;
-    const k = S.day + ":" + ui.sel + ":" + S.p.map(function (p) { return p.ctl; }).join(",");
-    if (mapCache && mapKey === k) return mapCache;
-    mapKey = k;
-    const cv = mapCache || document.createElement("canvas");
-    cv.width = Wd; cv.height = Ht;
-    const ic = cv.getContext("2d"), id = ic.createImageData(Wd, Ht), D = id.data;
-    const cols = S.c.map(function (c) { const n = parseInt(c.color.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; });
-    for (let i = 0; i < Wd * Ht; i++) {
-      const o = i * 4, pv = M.cell[i], e = M.land[i];
-      if (e < 0) { D[o] = 196; D[o + 1] = 211; D[o + 2] = 214; D[o + 3] = 255; continue; }     // the sea, pale on paper
-      let col, k2 = 1;
-      if (pv < 0) col = [214, 208, 192];                                                      // not in play
-      else {
-        const p = S.p[pv];
-        col = cols[p.ctl];
-        if (p.owner !== p.ctl && ((i % Wd + ((i / Wd) | 0)) % 3 === 0)) col = cols[p.owner];
-        if (ui.sel != null && p.ctl === ui.sel) k2 = 0.82;
-      }
-      // a border: the next tile belongs to somebody else
-      const x0 = i % Wd;
-      const nb = [x0 < Wd - 1 ? i + 1 : i - Wd + 1, i + Wd < Wd * Ht ? i + Wd : -1];
-      for (const t of nb) {
-        if (t < 0) continue;
-        const ctlT = M.cell[t] >= 0 ? S.p[M.cell[t]].ctl : -1 - M.land[t], ctlI = pv >= 0 ? S.p[pv].ctl : -1 - e;
-        if (ctlT !== ctlI) { k2 *= 0.72; break; }
-      }
-      D[o] = col[0] * k2; D[o + 1] = col[1] * k2; D[o + 2] = col[2] * k2; D[o + 3] = 255;
-    }
-    ic.putImageData(id, 0, 0);
-    mapCache = cv;
-    return cv;
-  }
   function world(x, hits, S, me, ui) {
-    let y = header(x, "The World", "Tap a country", S);
-    const M = W().geo();
-    const mw = R - MARGIN, mh = Math.round(mw * M.H / M.W);
+    const PW = W(), sc = PW.scen(S), Rm = PW.realm(S, me);
+    let y = header(x, sc.id === "world" ? "The World" : sc.name, "Tap a country", S);
+    const img = MAPD().image(S, me, { sel: ui.sel, theme: "paper" });
+    // the frame fills the width, or the height it is allowed, whichever comes first
+    const maxH = 470;
+    let mw = R - MARGIN, mh = Math.round(mw * img.h / img.w);
+    if (mh > maxH) { mh = maxH; mw = Math.round(mh * img.w / img.h); }
+    const mx = MARGIN + Math.round((R - MARGIN - mw) / 2);
     MAP.y0 = y - 30; MAP.h = mh;
     x.imageSmoothingEnabled = false;
-    x.drawImage(worldMap(S, me, ui), MARGIN, MAP.y0, mw, mh);
+    if (img.cv) x.drawImage(img.cv, mx, MAP.y0, mw, mh);
     x.imageSmoothingEnabled = true;
-    x.strokeStyle = INK; x.lineWidth = 2; x.strokeRect(MARGIN, MAP.y0, mw, mh);
-    hits.push({ x: MARGIN, y: MAP.y0, w: mw, h: mh, fn: "map", mw: mw, mh: mh });
-    y = MAP.y0 + mh + 46;
-    // the countries in play: those at war with us, our allies, then by size
+    x.strokeStyle = INK; x.lineWidth = 2; x.strokeRect(mx, MAP.y0, mw, mh);
+    hits.push({ x: mx, y: MAP.y0, w: mw, h: mh, fn: "map", mw: mw, mh: mh, fr: img.frame });
+    y = MAP.y0 + mh + 40;
+    // the score: how far your colour has spread
+    T(x, "Ours: " + Rm.cities + " of " + Rm.of + " cities.  Conquered " + Rm.conquered + " of " + Rm.rivals + ".", MARGIN, y, 23, "700", INK);
+    y += 44;
+    // the countries still free: those at war with us, our allies, then by size; our puppets last
     const me0 = S.c[me];
-    const list = S.c.filter(function (o) { return o.alive && o.id !== me; }).sort(function (a, b) {
-      const ka = (me0.war.indexOf(a.id) >= 0 ? 1e6 : 0) + (me0.allies.indexOf(a.id) >= 0 ? 1e5 : 0) + a.gdp;
-      const kb = (me0.war.indexOf(b.id) >= 0 ? 1e6 : 0) + (me0.allies.indexOf(b.id) >= 0 ? 1e5 : 0) + b.gdp;
-      return kb - ka;
-    });
+    const rank = function (o) { return (me0.war.indexOf(o.id) >= 0 ? 1e6 : 0) + (o.lord === me ? -1e6 : 0) + (me0.allies.indexOf(o.id) >= 0 ? 1e5 : 0) + o.gdp; };
+    const list = S.c.filter(function (o) { return o.alive && o.id !== me; }).sort(function (a, b) { return rank(b) - rank(a); });
     const colW = (R - MARGIN - 16) / 3, rowH = 44;
     const rows = Math.floor((B - y + 20) / rowH);
     list.slice(0, rows * 3).forEach(function (o, i) {
       const X = MARGIN + (i % 3) * (colW + 8), Y = y + Math.floor(i / 3) * rowH;
-      x.fillStyle = o.color; x.fillRect(X, Y - 22, 10, 26);
-      const tag = me0.war.indexOf(o.id) >= 0 ? RED : ui.sel === o.id ? BLUE : INK;
+      x.fillStyle = o.lord >= 0 ? S.c[o.lord].color : o.color; x.fillRect(X, Y - 22, 10, 26);
+      const tag = me0.war.indexOf(o.id) >= 0 ? RED : o.lord === me ? GREEN : ui.sel === o.id ? BLUE : INK;
       x.font = "700 21px " + SERIF; x.textAlign = "left"; x.fillStyle = tag; x.textBaseline = "alphabetic";
-      let s = o.short; while (x.measureText(s).width > colW - 22 && s.length > 3) s = s.slice(0, -1);
-      x.fillText(s, X + 18, Y);
+      let s2 = o.short; while (x.measureText(s2).width > colW - 22 && s2.length > 3) s2 = s2.slice(0, -1);
+      x.fillText(s2, X + 18, Y);
       hits.push({ x: X, y: Y - 30, w: colW, h: rowH, fn: "pick", c: o.id });
     });
   }
-  // the map tile under a tap on the world page -> a country in play, or null
+  // the map under a tap on the world page -> a country in play, or null
   function mapPick(S, hit, px, py) {
-    const M = W().geo();
-    const tx = Math.floor((px - hit.x) / hit.mw * M.W), ty = Math.floor((py - hit.y) / hit.mh * M.H);
-    if (tx < 0 || ty < 0 || tx >= M.W || ty >= M.H) return null;
-    // a little forgiveness round small countries: the nearest country tile within 3
-    for (let r = 0; r <= 3; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-      const X = tx + dx, Y = ty + dy;
-      if (X < 0 || Y < 0 || X >= M.W || Y >= M.H) continue;
-      const pv = M.cell[Y * M.W + X];
-      if (pv >= 0) return S.p[pv].ctl;
+    const fx = (px - hit.x) / hit.mw, fy = (py - hit.y) / hit.mh;
+    if (fx < 0 || fy < 0 || fx > 1 || fy > 1) return null;
+    return MAPD().pick(S, fx, fy, hit.fr || MAPD().frame(S));
+  }
+
+  /* WHAT YOU CAN DO TO A COUNTRY: one list, for the country page and the
+     phone's map card. Every entry is an action; nothing is greyed out. */
+  function actions(S, me, t) {
+    const PW = W(), mine = S.c[me], sel = S.c[t], out = [];
+    if (!sel || !sel.alive || t === me) return out;
+    const B2 = function (id, label, act, style) { out.push({ id: id, label: label, act: act, style: style }); };
+    if (sel.lord === me) {
+      B2("annex", "Annex them", { type: "annex", t: t }, "war");
+      B2("release", "Set them free", { type: "release", t: t }, "go");
+      return out;
     }
-    return null;
+    const atWar = mine.war.indexOf(t) >= 0;
+    if (atWar) {
+      B2("posture", mine.posture[t] === "attack" ? "Hold the line" : "Attack", { type: "posture", t: t, v: mine.posture[t] === "attack" ? "hold" : "attack" }, "war");
+      B2("surrender", "Demand surrender", { type: "surrender", t: t }, "war");
+      B2("peace", "Offer peace", { type: "peace", t: t, terms: "white" }, "go");
+      const tgt = PW.bestTarget(S, t);
+      if (tgt) {
+        B2("strike", "Bomb " + S.p[tgt.p].name, { type: "strike", t: t, p: tgt.p, what: tgt.what }, "war");
+        B2("power", "Bomb their power", { type: "strike", t: t, p: tgt.p, what: "power" }, "war");
+      }
+    } else {
+      B2("war", "Declare war", { type: "war", t: t }, "war");
+      B2("ally", mine.allies.indexOf(t) >= 0 ? "Leave the alliance" : "Offer an alliance", mine.allies.indexOf(t) >= 0 ? { type: "leaveAlliance", t: t } : { type: "alliance", t: t }, mine.allies.indexOf(t) >= 0 ? "war" : "go");
+      if (mine.deals.indexOf(t) < 0) B2("deal", "Offer a trade deal", { type: "deal", t: t }, "go");
+      const topBuy = PW.topImport(S, mine, t);
+      B2("tariff", "Tariff their " + PW.GOODS[PW.GI[topBuy]].name.toLowerCase(), { type: "tariff", t: t, good: topBuy, v: 0.25 });
+      if (mine.tariffs[t]) B2("untariff", "Lift our tariffs", { type: "tariff", t: t, good: "all", v: 0 }, "go");
+      B2("sanction", mine.sanctions.indexOf(t) >= 0 ? "Lift sanctions" : "Sanction them", { type: "sanction", t: t, on: mine.sanctions.indexOf(t) >= 0 ? 0 : 1 }, mine.sanctions.indexOf(t) >= 0 ? "go" : "war");
+      B2("lend", "Lend $" + Math.round(sel.gdp * 0.12) + " bn", { type: "bailout", t: t, amt: Math.round(sel.gdp * 0.12), strings: "alliance" });
+    }
+    B2("threaten", "Threaten them", { type: "post", v: "threaten", t: t }, "war");
+    if (mine.nukes > 0 || mine.nukeProg > 0) { const p = PW.biggestCity(S, t); if (p != null) B2("nuke", "Nuclear strike", { type: "nuke", t: t, p: p }, "war"); }
+    B2("kill", "Have him killed", { type: "assassinate", t: t }, "war");
+    return out;
   }
 
   // ============================================================ A COUNTRY
@@ -406,6 +407,8 @@
     const r = S.rel[me][t];
     const tags = [];
     if (mine.war.indexOf(t) >= 0) tags.push("AT WAR");
+    if (sel.lord === me) tags.push("OUR PUPPET");
+    else if (sel.lord >= 0) tags.push("PUPPET OF " + S.c[sel.lord].short.toUpperCase());
     if (mine.allies.indexOf(t) >= 0) tags.push("ALLY");
     if (mine.deals.indexOf(t) >= 0) tags.push("TRADE DEAL");
     if (mine.sanctions.indexOf(t) >= 0) tags.push("WE SANCTION THEM");
@@ -426,30 +429,7 @@
       box(hits, x, X, Y, bw, bh, label, { act: act }, style);
       k++;
     };
-    const topBuy = PW.topImport(S, mine, t);
-    const gname = function (g) { return PW.GOODS[PW.GI[g]].name.toLowerCase(); };
-    const atWar = mine.war.indexOf(t) >= 0;
-    if (atWar) {
-      Bx(mine.posture[t] === "attack" ? "Hold the line" : "Attack", { type: "posture", t: t, v: mine.posture[t] === "attack" ? "hold" : "attack" }, "war");
-      Bx("Offer peace", { type: "peace", t: t, terms: "white" }, "go");
-      const tgt = PW.bestTarget(S, t);
-      if (tgt) {
-        const pn = S.p[tgt.p].name;
-        Bx("Bomb " + pn, { type: "strike", t: t, p: tgt.p, what: tgt.what }, "war");
-        Bx("Bomb their power", { type: "strike", t: t, p: tgt.p, what: "power" }, "war");
-      }
-    } else {
-      if (mine.deals.indexOf(t) < 0) Bx("Offer a trade deal", { type: "deal", t: t }, "go");
-      Bx(mine.allies.indexOf(t) >= 0 ? "Leave the alliance" : "Offer an alliance", mine.allies.indexOf(t) >= 0 ? { type: "leaveAlliance", t: t } : { type: "alliance", t: t }, mine.allies.indexOf(t) >= 0 ? "war" : "go");
-      Bx("Tariff their " + gname(topBuy), { type: "tariff", t: t, good: topBuy, v: 0.25 });
-      if (mine.tariffs[t]) Bx("Lift our tariffs", { type: "tariff", t: t, good: "all", v: 0 }, "go");
-      Bx(mine.sanctions.indexOf(t) >= 0 ? "Lift sanctions" : "Sanction them", { type: "sanction", t: t, on: mine.sanctions.indexOf(t) >= 0 ? 0 : 1 }, mine.sanctions.indexOf(t) >= 0 ? "go" : "war");
-      Bx("Lend $" + Math.round(sel.gdp * 0.12) + " bn", { type: "bailout", t: t, amt: Math.round(sel.gdp * 0.12), strings: "alliance" });
-      Bx("Declare war", { type: "war", t: t }, "war");
-    }
-    Bx("Threaten them", { type: "post", v: "threaten", t: t }, "war");
-    if (mine.nukes > 0 || mine.nukeProg > 0) { const p = PW.biggestCity(S, t); if (p != null) Bx("Nuclear strike", { type: "nuke", t: t, p: p }, "war"); }
-    Bx("Have him killed", { type: "assassinate", t: t }, "war");
+    actions(S, me, t).forEach(function (o) { Bx(o.label, o.act, o.style); });
   }
 
   // ============================================================ the book
@@ -475,7 +455,7 @@
     const r = S.c[me].cab[m.from]; return r ? r.name : m.from;
   }
 
-  CBZ.presPapers = { PAGE_W: PAGE_W, PAGE_H: PAGE_H, MARGIN: MARGIN, order: order, paint: paint, hit: hit, mapPick: mapPick,
+  CBZ.presPapers = { PAGE_W: PAGE_W, PAGE_H: PAGE_H, MARGIN: MARGIN, order: order, paint: paint, hit: hit, mapPick: mapPick, actions: actions,
     fmtBn: fmtBn, fmtPct: fmtPct, isCall: isCall, callerName: callerName };
   if (typeof module !== "undefined" && module.exports) module.exports = CBZ.presPapers;
 })(typeof globalThis !== "undefined" ? globalThis : this);

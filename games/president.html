@@ -5,14 +5,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <link rel="icon" href="data:,">
 <title>President</title>
-<meta name="description" content="Run a real country from the Oval Office: the budget, the bond market, tariffs, wars and elections are one connected world, and every order goes through a person who can refuse it.">
+<meta name="description" content="Run a real country from the Oval Office, in the whole world, one region of it, or the fifty states against each other: the budget, the bond market, tariffs, wars and elections are one connected world, and you can conquer all of it.">
 <!-- ============================================================
   PRESIDENT — this page is the door, not the game.
 
-  You pick a real country (president/nations.js: the countries, their
-  leaders, their numbers; president/earth.js: the real map) and TAKE OFFICE
-  opens the real Executive Mansion in the real engine:
-     index.html?slice=estate&president=<country>
+  You pick a world (president/scenarios.js: the Full World, a region, or
+  the USA state against state), then a real country or state
+  (president/nations.js, president/states.js: who runs it, its numbers;
+  president/earth.js: the real map) and TAKE OFFICE opens the real
+  Executive Mansion in the real engine:
+     index.html?slice=estate&president=<country>&scen=<world>
   (city/president_game.js). There you are a body in the chair behind the
   Resolute desk, and you get up and walk the West Wing and the grounds.
   A room of presidents is set up here and then played there, one world on
@@ -52,12 +54,22 @@
   #code{font:700 38px Fredoka,monospace;letter-spacing:.2em;color:var(--gold)}
   #seats div{padding:3px 0}
   #asof{opacity:.45;font-size:12px}
+  /* the worlds: big enough for a thumb, two to a row on a phone */
+  #scens{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;max-width:1300px;margin:0 0 6px}
+  .scen{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-height:54px;padding:9px 12px;border-radius:10px;background:#121a27;border:1px solid #1f2b40;text-align:left}
+  .scen b{font-size:16px}
+  .scen span{font-size:12px;opacity:.65}
+  .scen.on{border-color:var(--gold);background:#1c2233}
+  #scensub{opacity:.6;margin:0 0 12px;font-size:14px}
+  @media (max-width:520px){#scens{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
 <div id="start">
   <h1>PRESIDENT</h1>
-  <p class="sub">The Oval Office. The real world.</p>
+  <p class="sub">The Oval Office. The real world. Take all of it.</p>
+  <div id="scens" role="group" aria-label="Which world"></div>
+  <p id="scensub"></p>
   <div class="wrap">
     <div>
       <canvas id="preview" width="1200" height="440" aria-label="The world: tap a country"></canvas>
@@ -80,11 +92,14 @@
     <div id="clist"></div>
   </div>
 </div>
-<script src="../src/president/earth.js?v=pres1028"></script>
-<script src="../src/president/nations.js?v=pres1028"></script>
-<script src="../src/president/world.js?v=pres1028"></script>
+<script src="../src/president/earth.js?v=scen1028"></script>
+<script src="../src/president/nations.js?v=scen1028"></script>
+<script src="../src/president/states.js?v=scen1028"></script>
+<script src="../src/president/scenarios.js?v=scen1028"></script>
+<script src="../src/president/world.js?v=scen1028"></script>
+<script src="../src/president/mapdraw.js?v=scen1028"></script>
 <script src="../src/net/rooms.js?v=pres1026"></script>
 <script src="../src/president/net.js?v=pres1028"></script>
-<script src="../src/president/game.js?v=pres1028"></script>
+<script src="../src/president/game.js?v=scen1028"></script>
 </body>
 </html>

@@ -7,7 +7,8 @@
 
    Paints every page of src/president/papers.js on a recording canvas (text
    measured at a conservative em width, so a real font is narrower) for
-   several countries at several moments of a game (day 0; a year on with the
+   several countries at several moments of a game, in the Full World, the
+   Middle East, Africa and the USA (day 0; a year on with the
    world's wars running; a country at war), and fails on:
      · any text whose box leaves the page's margins (right or bottom), or
        starts above the top of the page
@@ -107,6 +108,24 @@ for (const seed of [7, 21]) {
     const enemy = S.c[me].war[0];
     paintAll("seed " + seed + " day 420 " + k, S, me, { me, sel: enemy != null ? enemy : (me + 3) % S.c.length });
   }
+}
+// the regions and the fifty states: their own maps, their own names, a conquest under way
+for (const [scen, keys] of [["mideast", ["sau", "isr", "bhr"]], ["usa", ["tx", "ca", "dc"]], ["africa", ["nga", "zaf"]]]) {
+  const S = PW.create(11, { scen });
+  for (const k of keys) {
+    const me = S.c.findIndex((c) => c.key === k);
+    PW.apply(S, { type: "seat", c: me, who: "check" });
+    paintAll(scen + " day 0 " + k, S, me, { me, sel: (me + 1) % S.c.length });
+  }
+  // the first of them takes a neighbour and keeps its government as a puppet
+  const me = S.c.findIndex((c) => c.key === keys[0]);
+  const t = S.c.findIndex((c) => c.alive && c.id !== me && PW.reach(S, me, c.id) === 2);
+  let w = null; for (let k2 = 0; k2 < 8 && !(w && w.ok); k2++) w = PW.apply(S, { type: "war", c: me, t: t });
+  for (let d = 0; d < 200; d++) PW.step(S, []);
+  paintAll(scen + " at war " + keys[0], S, me, { me, sel: t });
+  for (const p of S.p) if (p.owner === t && p.id !== S.c[t].cap) { p.ctl = me; S.tv++; }
+  if (S.c[t].alive) { S.p[S.c[t].cap].ctl = me; S.tv++; PW.apply(S, { type: "surrender", c: me, t: t }); }
+  paintAll(scen + " with a puppet " + keys[0], S, me, { me, sel: t });
 }
 const uniq = [...new Set(bad)];
 for (const b of uniq.slice(0, 40)) console.log("  FAIL " + b);
