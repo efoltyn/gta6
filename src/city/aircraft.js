@@ -805,14 +805,23 @@
   // ---------------------------------------------------- MISSILE projectiles --
   // A pooled flight RECORD. Its body is a pooled munition mesh swapped in
   // per launch (munitions.acquire), its two motor-flare slots are claimed once.
-  function getMissile() {
+  // `strat` asks for one of the long-range rounds (cruise / ballistic). They
+  // ride the same records but have their own allowance on top of the
+  // tactical cap, so a salvo never starves the police air of missiles.
+  const MAX_STRAT = 8;
+  function liveCount(strat) {
+    let n = 0;
+    for (let i = 0; i < missiles.length; i++) if (missiles[i].live && !!missiles[i].strat === !!strat) n++;
+    return n;
+  }
+  function getMissile(strat) {
+    if (liveCount(strat) >= (strat ? MAX_STRAT : MAX_MISSILES)) return null;
     let m = missilePool.pop();
     if (m) { m.live = true; return m; }
-    if (missiles.length >= MAX_MISSILES) return null;   // pool empty + at cap
     return {
       group: new THREE.Group(), body: null, type: null, spec: null, flare: MU.claimFlares(2),
       trail: { x: 0, y: 0, z: 0, on: false }, live: true, dir: new THREE.Vector3(), life: 0,
-      byPlayer: false, seek: null, route: null, site: null, fx: null, speed: 0,
+      byPlayer: false, seek: null, route: null, site: null, fx: null, speed: 0, strat: null,
     };
   }
   function freeMissile(m) {
@@ -820,8 +829,9 @@
     if (m.group && m.group.parent) m.group.parent.remove(m.group);
     MU.flareOff(m.flare, 2);
     m.trail.on = false;
-    m.route = null; m.seek = null; m.site = null; m.fx = null;
-    if (missilePool.length < MAX_MISSILES) missilePool.push(m);
+    if (m.strat) stratEnd(m);
+    m.route = null; m.seek = null; m.site = null; m.fx = null; m.strat = null;
+    if (missilePool.length < MAX_MISSILES + MAX_STRAT) missilePool.push(m);
   }
 
   // Internal launcher. `byPlayer` flags the projectile as the player's (so its
@@ -1219,6 +1229,538 @@
     };
   };
 
+  /* ==========================================================================
+     LONG-RANGE ROUNDS ON THE SAME POOL: CBZ.cityCruiseMissile and
+     CBZ.cityBallisticMissile.
+
+     Same records (getMissile / freeMissile), same pooled bodies drawn by
+     weapons/munitions.js, same smoke and flare clouds, same detonate(). What
+     differs is only the flight, so updateMissiles hands a record with a
+     `strat` block to stepStrat() instead of its tactical branch. No
+     self-destruct clock: a cruise round flies until it reaches its target or
+     the ground, and the obstacle picture comes from city/airspace.js (every
+     building record in the world, far ones included) plus the ground oracle.
+
+     CRUISE (type "tomahawk"):
+       boost   only when launched from the ground: the booster can burns with
+               a big flare and a thick white column, the round climbs out and
+               pitches over toward its route; the can drops away, the wings
+               and tail fins pop out
+       cruise  ~245 m/s, held 30-60 m over whatever is under it and ahead of it
+               (ground or rooftops, sampled along the heading), heading eased
+               toward each waypoint with a visible bank in every turn; the
+               engine shows only a small hot glow and a faint haze
+       popup   ~2 km out it climbs to a few hundred metres over the target
+       dive    it pushes over and comes down steeply onto the aim point; the
+               contact point is wherever the last step meets a building box
+               or the ground (a facade hit lands on the wall)
+     BALLISTIC (type "iskander"): a scripted terminal leg only — it appears
+       high up-range along the line from `from`, curves into a steep dive and
+       arrives some 25 s later: glowing nose, a bright streak behind it and a
+       thin grey wake that hangs in the air.
+
+     Every live one is listed by CBZ.cityMissilesInAir() for cameras.
+  ========================================================================== */
+  const G_ACC = 9.81;
+  const CRUISE_V = 245, CRUISE_AGL = 42, ROOF_CLEAR = 32;
+  const BOOST_T = 10;
+  let stratSeq = 0;
+  function airspace() { return CBZ.airspace; }
+  function groundY(x, z) {
+    if (CBZ.floorAt) { const v = +CBZ.floorAt(x, z); if (isFinite(v)) return v; }
+    return 0;
+  }
+  // tallest roof within r of (x, z): the airspace index (100 m cells, far
+  // buildings included), else the live surface query, else nothing
+  function roofY(x, z, r) {
+    const AS = airspace();
+    if (AS && AS.topNear) { try { return +AS.topNear(x, z, r) || 0; } catch (e) { return 0; } }
+    return roofTopAt(x, z);
+  }
+  // segment (x0 + d t, t in 0..1) against an oriented building box: entry t
+  // and the entry face's world normal, or null
+  const _sb = { t: 0, nx: 0, ny: 0, nz: 0 };
+  function segRecord(r, x0, y0, z0, dx, dy, dz) {
+    const co = r.co != null ? r.co : 1, si = r.si || 0;
+    const rx = x0 - r.cx, rz = z0 - r.cz;
+    const lx = rx * co - rz * si, lz = rx * si + rz * co, ldx = dx * co - dz * si, ldz = dx * si + dz * co;
+    _sl.t0 = 0; _sl.t1 = 1; _sl.ax = 0; _sl.ay = 0; _sl.az = 0;
+    if (!slab(lx, ldx, -r.hw, r.hw, 0) || !slab(y0, dy, r.y0, r.y1, 1) || !slab(lz, ldz, -r.hd, r.hd, 2)) return null;
+    if (!_sl.ax && !_sl.ay && !_sl.az) return null;   // started inside: not an entry
+    _sb.t = _sl.t0; _sb.ny = _sl.ay;
+    _sb.nx = _sl.ax * co + _sl.az * si; _sb.nz = -_sl.ax * si + _sl.az * co;
+    return _sb;
+  }
+  const _sl = { t0: 0, t1: 1, ax: 0, ay: 0, az: 0 };
+  function slab(o, d, lo, hi, axis) {
+    if (Math.abs(d) < 1e-9) return o >= lo && o <= hi;
+    let a = (lo - o) / d, b = (hi - o) / d, n = -1;
+    if (a > b) { const q = a; a = b; b = q; n = 1; }
+    if (a > _sl.t0) { _sl.t0 = a; _sl.ax = axis === 0 ? n : 0; _sl.ay = axis === 1 ? n : 0; _sl.az = axis === 2 ? n : 0; }
+    if (b < _sl.t1) _sl.t1 = b;
+    return _sl.t0 <= _sl.t1;
+  }
+  // the first building or the ground the segment meets. Buildings are the
+  // airspace index's records (every shell in the world, near or far) tested
+  // as their real boxes, so a facade hit lands ON the wall; the index's own
+  // sweep adds the live structures it knows (bridges, cranes, towers).
+  const _hitTmp = { x: 0, y: 0, z: 0 }, _recs = [];
+  function sweepStep(x0, y0, z0, x1, y1, z1) {
+    let best = null;
+    const AS = airspace();
+    if (AS && AS.recordsAt) {
+      const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0, len = Math.hypot(dx, dy, dz);
+      let rs = null;
+      try { rs = AS.recordsAt(x1, null, z1, len + 1, _recs); } catch (e) { rs = null; }
+      if (rs) for (let i = 0; i < rs.length; i++) {
+        const r = rs[i];
+        if ((r.built && r.built.gone) || (r.lot && r.lot.demolished)) continue;
+        if (Math.min(y0, y1) > r.y1) continue;
+        const q = segRecord(r, x0, y0, z0, dx, dy, dz);
+        if (!q || (best && q.t >= best.t)) continue;
+        best = { t: q.t, x: x0 + dx * q.t, y: y0 + dy * q.t, z: z0 + dz * q.t, normal: { x: q.nx, y: q.ny, z: q.nz }, lot: r.lot || null, building: true };
+      }
+      if (AS.sweep) {
+        let h = null;
+        try { h = AS.sweep(x0, y0, z0, x1, y1, z1, 0.3, { records: false }); } catch (e) { h = null; }
+        if (h && (!best || h.t < best.t)) best = { t: h.t, x: h.x, y: h.y, z: h.z, normal: { x: h.nx, y: h.ny, z: h.nz }, lot: h.lot || null, building: true };
+      }
+    } else {
+      // no index loaded: the live colliders, sampled along the step
+      const len = Math.hypot(x1 - x0, y1 - y0, z1 - z0), n = Math.min(40, Math.ceil(len / 0.8));
+      for (let s = 1; s <= n; s++) {
+        const k = s / n;
+        _hitTmp.x = x0 + (x1 - x0) * k; _hitTmp.y = y0 + (y1 - y0) * k; _hitTmp.z = z0 + (z1 - z0) * k;
+        if (hitsBlocker(_hitTmp)) { best = { t: k, x: _hitTmp.x, y: _hitTmp.y, z: _hitTmp.z, normal: null, lot: null, building: true }; break; }
+      }
+    }
+    // the ground: where height-above-ground changes sign along the step
+    const a0 = y0 - groundY(x0, z0), a1 = y1 - groundY(x1, z1);
+    if (a1 <= 0.3 && (!best || best.t > 0)) {
+      const t = a0 > 0.3 ? Math.max(0, Math.min(1, (a0 - 0.3) / (a0 - a1))) : 0;
+      if (!best || t < best.t) {
+        const gx = x0 + (x1 - x0) * t, gz = z0 + (z1 - z0) * t;
+        best = { t: t, x: gx, y: groundY(gx, gz) + 0.4, z: gz, normal: { x: 0, y: 1, z: 0 }, lot: null, building: false };
+      }
+    }
+    return best;
+  }
+  // closest approach of the step to the aim point (a target in mid-air, or
+  // one inside a box the index does not know about, still gets its hit)
+  function nearAim(x0, y0, z0, x1, y1, z1, tx, ty, tz, rad) {
+    const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0, L2 = dx * dx + dy * dy + dz * dz;
+    let t = L2 > 1e-9 ? ((tx - x0) * dx + (ty - y0) * dy + (tz - z0) * dz) / L2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const cx = x0 + dx * t, cy = y0 + dy * t, cz = z0 + dz * t;
+    if ((cx - tx) * (cx - tx) + (cy - ty) * (cy - ty) + (cz - tz) * (cz - tz) > rad * rad) return null;
+    return { t: t, x: cx, y: cy, z: cz, normal: null, lot: null, building: false };
+  }
+
+  // put the right pooled body on a record (the same swap launchMissile makes)
+  function dressRecord(m, type) {
+    if (m.type !== type) {
+      if (m.body) MU.release(m.body);
+      m.body = MU.acquire(type); m.type = type; m.spec = MU.spec(type);
+      m.group.add(m.body);
+    }
+    const u = m.body.userData;
+    if (u.booster) { u.booster.visible = false; }
+    if (u.wings) u.wings.scale.set(1, 1, 1);
+    if (u.sheath) u.sheath.visible = false;
+    if (u.streak) u.streak.visible = false;
+    m.body.rotation.set(0, 0, 0);
+  }
+  function newHandle(kind, type) {
+    return { id: ++stratSeq, kind: kind, type: type, alive: true, launched: false, phase: "pending",
+      x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 1, speed: 0, impact: null };
+  }
+  function writeHandle(m) {
+    const h = m.strat.handle, p = m.group.position;
+    h.x = p.x; h.y = p.y; h.z = p.z; h.dx = m.dir.x; h.dy = m.dir.y; h.dz = m.dir.z;
+    h.speed = m.speed; h.phase = m.strat.phase; h.launched = m.strat.launched;
+  }
+  function stratEnd(m) {
+    const S = m.strat, u = m.body && m.body.userData;
+    if (u && u.booster && u.booster.parent !== m.body) {
+      if (u.booster.parent) u.booster.parent.remove(u.booster);
+      u.booster.visible = false; u.booster.position.set(0, 0, 0); u.booster.rotation.set(0, 0, 0);
+      m.body.add(u.booster);
+    }
+    if (u && u.sheath) u.sheath.visible = false;
+    if (u && u.streak) u.streak.visible = false;
+    if (m.body) m.body.rotation.set(0, 0, 0);
+    if (S && S.handle && S.handle.alive) { S.handle.alive = false; if (S.handle.phase !== "impact") S.handle.phase = "gone"; }
+  }
+  function stratImpact(m, hit) {
+    const S = m.strat, h = S.handle;
+    h.alive = false; h.phase = "impact";
+    h.impact = { x: hit.x, y: hit.y, z: hit.z, building: !!hit.building, t: +S.t.toFixed(2),
+      speed: +m.speed.toFixed(1), dive: +(Math.asin(Math.max(-1, Math.min(1, -m.dir.y))) * 180 / Math.PI).toFixed(1) };
+    if (typeof S.onImpact === "function") { try { S.onImpact(h.impact, h); } catch (e) {} }
+  }
+
+  // ---- the cruise round, one step ----------------------------------------
+  function smooth01(a, b, x) { const k = Math.max(0, Math.min(1, (x - a) / (b - a))); return k * k * (3 - 2 * k); }
+  function stepCruise(m, dt, r) {
+    const S = m.strat, p = m.group.position, sp = m.spec, u = m.body.userData;
+    const px = p.x, py = p.y, pz = p.z;
+    // where it is heading: the current waypoint, the target once they are flown
+    let ax = S.tx, az = S.tz;
+    while (S.wi < S.route.length) {
+      const w = S.route[S.wi];
+      if (Math.hypot(w.x - px, w.z - pz) < 260) { S.wi++; continue; }
+      ax = w.x; az = w.z; break;
+    }
+    const rng = Math.hypot(S.tx - px, S.tz - pz);
+    if (S.phase === "boost" && S.t >= S.boostT) {
+      // burnout: the can drops away, the engine lights, the wings come out
+      S.phase = "cruise"; S.sepT = S.t;
+      MU.flareOff(m.flare, 2); m.trail.on = false;
+      const bo = u.booster;
+      if (bo && r) {
+        m.group.updateMatrixWorld(true);
+        r.attach(bo);
+        S.boV.x = m.dir.x * m.speed * 0.82; S.boV.y = m.dir.y * m.speed * 0.82 - 2; S.boV.z = m.dir.z * m.speed * 0.82;
+        S.boT = 0;
+      }
+    }
+    if (S.phase === "cruise" && rng <= S.popR) S.phase = "popup";
+    // ---- heading: eased toward the aim point, the bank follows the turn
+    const toAim = Math.atan2(S.phase === "cruise" || S.phase === "boost" ? ax - px : S.tx - px, S.phase === "cruise" || S.phase === "boost" ? az - pz : S.tz - pz);
+    const err = angleDelta(S.psi, toAim);
+    const turnMax = S.phase === "dive" ? 0.35 : 0.13;
+    const rate = Math.max(-turnMax, Math.min(turnMax, err * 0.7));
+    S.psi += rate * dt;
+    const bankWant = S.phase === "boost" ? 0 : Math.max(-1.05, Math.min(1.05, Math.atan(S.v * rate / G_ACC)));
+    S.bank += (bankWant - S.bank) * Math.min(1, dt * 2.2);
+    // ---- pitch: the phase's flight-path angle, eased at a pitch rate
+    let gWant = S.gam, gRate = 0.3;
+    if (S.phase === "boost") {
+      const k = S.t / S.boostT;
+      S.v = 22 + (CRUISE_V - 22) * (1 - Math.pow(1 - Math.min(1, k), 1.7));
+      gWant = (80 - 74 * smooth01(0.06, 0.8, k)) * Math.PI / 180;
+      gRate = 1.2;
+    } else if (S.phase === "cruise") {
+      S.v += (CRUISE_V - S.v) * Math.min(1, dt * 0.6);
+      // the height to hold: AGL over the ground here, roof clearance over
+      // every roof ahead, ramped so it climbs before it gets there
+      const hx = Math.sin(S.psi), hz = Math.cos(S.psi);
+      let need = groundY(px, pz) + CRUISE_AGL;
+      const ramp = Math.tan(9 * Math.PI / 180);
+      for (let k = 0; k <= 16; k++) {
+        const d = k * 75, sx = px + hx * d, sz = pz + hz * d;
+        const top = Math.max(groundY(sx, sz) + CRUISE_AGL, roofY(sx, sz, 30) + ROOF_CLEAR);
+        const req = top - d * ramp;
+        if (req > need) need = req;
+      }
+      S.hold = need;
+      gWant = Math.max(-0.15, Math.min(0.28, (need - py) * 0.035));
+      gRate = 0.22;
+    } else if (S.phase === "popup") {
+      // climb hard, level off at the top, and push over once the target is
+      // well below the nose: that is what makes the last leg a steep dive
+      S.v += (CRUISE_V - 12 - S.v) * Math.min(1, dt * 0.6);
+      if (py > S.apex) S.apex = py;
+      const lam = Math.atan2(py - S.ty, Math.max(1, rng));
+      if (py >= S.apexY - 50) S.top = true;
+      gWant = S.top ? 0 : S.climb; gRate = 0.3;
+      if (lam >= S.trigger) S.phase = "dive";
+    }
+    if (S.phase === "dive") {
+      S.v += (275 - S.v) * Math.min(1, dt * 0.5);
+      if (py > S.apex) S.apex = py;
+      // pitch rate follows the sight-line's rate (x4) plus a little pursuit:
+      // the round curves onto the aim point instead of chasing it past
+      const lam = Math.atan2(S.ty - py, Math.max(0.5, rng));
+      const lamDot = S.lamPrev == null || dt <= 0 ? 0 : (lam - S.lamPrev) / dt;
+      S.lamPrev = lam;
+      const gd = Math.max(-0.45, Math.min(0.45, 4 * lamDot + 0.6 * (lam - S.gam)));
+      S.gam += gd * dt;
+    } else {
+      S.gam += Math.max(-gRate * dt, Math.min(gRate * dt, gWant - S.gam));
+    }
+    // ---- move
+    const cg = Math.cos(S.gam);
+    m.dir.set(Math.sin(S.psi) * cg, Math.sin(S.gam), Math.cos(S.psi) * cg);
+    const step = S.v * dt;
+    const nx = px + m.dir.x * step, ny = py + m.dir.y * step, nz = pz + m.dir.z * step;
+    m.speed = S.v;
+    // ---- contact along the step: a building, the ground, the aim point
+    let hit = sweepStep(px, py, pz, nx, ny, nz);
+    if (!hit && S.phase === "dive") hit = nearAim(px, py, pz, nx, ny, nz, S.tx, S.ty, S.tz, 3);
+    if (hit) {
+      p.set(hit.x, hit.y, hit.z);
+      hit.dirx = m.dir.x; hit.dirz = m.dir.z; hit.by = S.by;
+      return hit;
+    }
+    p.set(nx, ny, nz);
+    m.group.lookAt(nx + m.dir.x, ny + m.dir.y, nz + m.dir.z);
+    m.group.rotateZ(-S.bank);
+    // ---- the parts: wings and tail fins out after the can goes
+    if (u.wings) {
+      const k = S.phase === "boost" ? 0 : Math.max(0, Math.min(1, (S.t - S.sepT - 0.2) / 0.8));
+      const e = 0.12 + 0.88 * (1 - (1 - k) * (1 - k));
+      u.wings.scale.set(e, e, 1);
+    }
+    // ---- exhaust
+    const half = sp.L / 2;
+    if (S.phase === "boost") {
+      const bl = sp.boosterL || 0.7;
+      const tx = nx - m.dir.x * (half + bl), ty = ny - m.dir.y * (half + bl), tz = nz - m.dir.z * (half + bl);
+      MU.motorFlare(m.flare, tx, ty, tz, m.dir.x, m.dir.y, m.dir.z, 3.4);
+      MU.trail(m.trail, tx, ty, tz, m.dir.x, m.dir.y, m.dir.z, sp.boost, S.v);
+    } else {
+      // the turbofan: a small hot glow in the nozzle and a faint haze
+      const tx = nx - m.dir.x * half, ty = ny - m.dir.y * half, tz = nz - m.dir.z * half;
+      const on = Math.min(1, Math.max(0, (S.t - S.sepT - 0.6) / 1.2));
+      const fl = 0.85 + MU.rand() * 0.3;
+      MU.setFlare(m.flare, tx, ty, tz, 0.5 * fl * on, 0.7 * on, 1, 0.66, 0.36);
+      MU.setFlare(m.flare + 1, tx - m.dir.x * 0.5, ty - m.dir.y * 0.5, tz - m.dir.z * 0.5, 1.3 * fl * on, 0.16 * on, 1, 0.42, 0.14);
+      if (on > 0.5) MU.trail(m.trail, tx, ty, tz, m.dir.x, m.dir.y, m.dir.z, sp.haze, S.v);
+    }
+    // ---- the spent can, falling away tumbling
+    const bo = u.booster;
+    if (bo && bo.parent && bo.parent !== m.body && bo.visible) {
+      S.boT += dt;
+      const V = S.boV, dg = Math.max(0, 1 - 0.35 * dt);
+      V.x *= dg; V.z *= dg; V.y = V.y * dg - G_ACC * dt;
+      bo.position.x += V.x * dt; bo.position.y += V.y * dt; bo.position.z += V.z * dt;
+      bo.rotateX(dt * 2.6); bo.rotateY(dt * 0.9);
+      if (S.boT < 1.6 && MU.rand() < 0.5) {
+        MU.smoke(bo.position.x, bo.position.y, bo.position.z, 0, 0.4, 0, 0.8, 4.5, 3.5, 0.32, 0.9, 0.9, 0.88);
+      }
+      if (S.boT > 8 || bo.position.y < groundY(bo.position.x, bo.position.z)) bo.visible = false;
+    }
+    return null;
+  }
+
+  // ---- the ballistic body, one step --------------------------------------
+  function bez(q, u, o) {
+    const v = 1 - u, a = v * v * v, b = 3 * v * v * u, c = 3 * v * u * u, d = u * u * u;
+    o.x = a * q[0].x + b * q[1].x + c * q[2].x + d * q[3].x;
+    o.y = a * q[0].y + b * q[1].y + c * q[2].y + d * q[3].y;
+    o.z = a * q[0].z + b * q[1].z + c * q[2].z + d * q[3].z;
+    return o;
+  }
+  const _bp = { x: 0, y: 0, z: 0 }, _bq = { x: 0, y: 0, z: 0 };
+  function stepBallistic(m, dt) {
+    const S = m.strat, p = m.group.position, sp = m.spec, u = m.body.userData;
+    const px = p.x, py = p.y, pz = p.z;
+    // speed: fastest up high, a little slower by the time it reaches the city
+    const hk = Math.max(0, Math.min(1, py / S.h0));
+    S.v = S.vLo + (S.vHi - S.vLo) * hk;
+    S.s += S.v * dt;
+    // arc length -> curve parameter (the table is monotonic; walk forward)
+    const T = S.tab, n = T.length - 1;
+    while (S.k < n && T[S.k + 1] < S.s) S.k++;
+    let uu = 1;
+    if (S.k < n) { const a = T[S.k], b = T[S.k + 1]; uu = (S.k + (b > a ? (S.s - a) / (b - a) : 0)) / n; }
+    bez(S.q, Math.min(1, uu), _bp);
+    bez(S.q, Math.min(1, uu + 0.002), _bq);
+    let dx = _bq.x - _bp.x, dy = _bq.y - _bp.y, dz = _bq.z - _bp.z;
+    const dl = Math.hypot(dx, dy, dz);
+    if (dl > 1e-6) { dx /= dl; dy /= dl; dz /= dl; m.dir.set(dx, dy, dz); }
+    m.speed = S.v;
+    S.phase = _bp.y > 12000 ? "reentry" : "terminal";
+    let hit = sweepStep(px, py, pz, _bp.x, _bp.y, _bp.z);
+    if (!hit && S.s >= S.len) hit = { t: 1, x: S.tx, y: S.ty, z: S.tz, normal: null, lot: null, building: false };
+    if (hit) {
+      p.set(hit.x, hit.y, hit.z);
+      hit.dirx = m.dir.x; hit.dirz = m.dir.z; hit.by = S.by;
+      return hit;
+    }
+    p.set(_bp.x, _bp.y, _bp.z);
+    m.group.lookAt(_bp.x + m.dir.x, _bp.y + m.dir.y, _bp.z + m.dir.z);
+    // ---- the heat: a glowing shell on the nose, a white-hot point at the
+    // tip, a streak of glowing wake, and a grey trail low down. Far away the
+    // glow keeps a minimum on-screen size, as a bright point does.
+    const cam = CBZ.camera;
+    const cd = cam ? Math.hypot(cam.position.x - _bp.x, cam.position.y - _bp.y, cam.position.z - _bp.z) : 1000;
+    const far = Math.max(1, cd / 900);
+    const fl = 0.85 + MU.rand() * 0.3;
+    const half = sp.L / 2;
+    if (u.sheath) { u.sheath.visible = true; const s = 1 + 0.06 * (MU.rand() - 0.5); u.sheath.scale.set(s, s, 1); }
+    if (u.streak) {
+      u.streak.visible = true;
+      const len = Math.max(24, Math.min(140, S.v * 0.045));
+      u.streak.scale.set(fl * (0.9 + 0.3 * (far - 1) / far), fl * (0.9 + 0.3 * (far - 1) / far), len);
+    }
+    const nx = _bp.x + m.dir.x * (half + 0.4), ny = _bp.y + m.dir.y * (half + 0.4), nz = _bp.z + m.dir.z * (half + 0.4);
+    MU.setFlare(m.flare, nx, ny, nz, sp.flare * fl * Math.min(far, 18), 1, 1, 0.93, 0.8);
+    MU.setFlare(m.flare + 1, _bp.x, _bp.y, _bp.z, sp.flare * 3.2 * fl * Math.min(far, 14), 0.42, 1, 0.5, 0.18);
+    if (_bp.y < 16000) {
+      const tx = _bp.x - m.dir.x * (half + 30), ty = _bp.y - m.dir.y * (half + 30), tz = _bp.z - m.dir.z * (half + 30);
+      MU.trail(m.trail, tx, ty, tz, m.dir.x, m.dir.y, m.dir.z, sp.wake, S.v);
+    }
+    return null;
+  }
+
+  function stepStrat(m, dt, r) {
+    const S = m.strat;
+    if (!S.launched) {
+      S.delay -= dt;
+      if (S.delay > 0) return null;
+      stratLaunch(m, r);
+      if (!m.live || !m.strat) return null;
+    }
+    S.t += dt;
+    m.life += dt;
+    const hit = S.kind === "ballistic" ? stepBallistic(m, dt) : stepCruise(m, dt, r);
+    if (!hit && S.t > S.maxT) {
+      // out of fuel / lost: it comes down where it is
+      const p = m.group.position;
+      return { t: 1, x: p.x, y: Math.max(p.y, groundY(p.x, p.z) + 0.4), z: p.z, normal: null, lot: null, building: false,
+        dirx: m.dir.x, dirz: m.dir.z, by: S.by };
+    }
+    if (!hit) writeHandle(m);
+    return hit;
+  }
+
+  function stratLaunch(m, r) {
+    const S = m.strat, p = m.group.position, u = m.body.userData;
+    S.launched = true; S.t = 0;
+    m.life = 0; m.trail.on = false;
+    if (S.kind === "ballistic") {
+      bez(S.q, 0, _bp);
+      p.set(_bp.x, _bp.y, _bp.z);
+      bez(S.q, 0.002, _bq);
+      m.dir.set(_bq.x - _bp.x, _bq.y - _bp.y, _bq.z - _bp.z).normalize();
+      S.phase = "reentry";
+    } else {
+      p.set(S.fx, S.fy, S.fz);
+      const ground = groundY(S.fx, S.fz);
+      const aim = S.route.length ? S.route[0] : { x: S.tx, z: S.tz };
+      S.psi = S.heading != null ? S.heading : Math.atan2(aim.x - S.fx, aim.z - S.fz);
+      if (S.fy - ground > 15) {
+        S.phase = "cruise"; S.boostT = 0; S.sepT = -10; S.v = CRUISE_V; S.gam = 0;
+        if (u.wings) u.wings.scale.set(1, 1, 1);
+      } else {
+        S.phase = "boost"; S.boostT = BOOST_T; S.sepT = 1e9; S.v = 22; S.gam = 80 * Math.PI / 180;
+        p.y = Math.max(S.fy, ground + 1.5);
+        if (u.booster) u.booster.visible = true;
+        if (u.wings) u.wings.scale.set(0.12, 0.12, 1);
+        if (CBZ.sfx) CBZ.sfx("whoosh");
+      }
+      const cg = Math.cos(S.gam);
+      m.dir.set(Math.sin(S.psi) * cg, Math.sin(S.gam), Math.cos(S.psi) * cg);
+    }
+    m.speed = S.v || 0;
+    m.group.lookAt(p.x + m.dir.x, p.y + m.dir.y, p.z + m.dir.z);
+    if (r) r.add(m.group);
+    writeHandle(m);
+  }
+
+  function stratRecord(kind, type, opts) {
+    if (!g || g.mode !== "city") return null;
+    const r = root(); if (!r) return null;
+    if (!MU.spec(type)) return null;
+    const m = getMissile(true); if (!m) return null;
+    dressRecord(m, type);
+    m.byPlayer = !!opts.byPlayer; m.seek = null; m.route = null; m.site = opts.site || ("strike:" + kind);
+    m.fx = opts.fxKind ? { kind: opts.fxKind } : null;
+    m.life = 0; m.speed = 0; m.out = false; m.trail.on = false;
+    const h = newHandle(kind, type);
+    m.strat = {
+      kind: kind, handle: h, phase: "pending", launched: false, t: 0,
+      delay: Math.max(0, +opts.delay || 0), by: opts.by != null ? opts.by : (opts.byPlayer ? "player" : null),
+      onImpact: opts.onImpact || null, maxT: 900,
+      tx: 0, ty: 0, tz: 0, v: 0,
+    };
+    h.abort = function () { if (m.strat && m.strat.handle === h) { freeMissile(m); const i = missiles.indexOf(m); if (i >= 0) missiles.splice(i, 1); } };
+    ordSite(m.site, "missile").calls++;
+    return m;
+  }
+
+  // CBZ.cityCruiseMissile({ from:{x,y,z}, target:{x,y,z}, type:"tomahawk",
+  //   delay, byPlayer, by, onImpact, via:[{x,z},...], heading })
+  // → a handle { id, alive, phase, x, y, z, dx, dy, dz, speed, impact, abort() }
+  CBZ.cityCruiseMissile = function (opts) {
+    opts = opts || {};
+    const f = opts.from, t = opts.target;
+    if (!f || !t || !isFinite(+f.x) || !isFinite(+f.z) || !isFinite(+t.x) || !isFinite(+t.z)) return null;
+    const type = opts.type && MU.spec(opts.type) ? opts.type : "tomahawk";
+    const m = stratRecord("cruise", type, opts);
+    if (!m) return null;
+    const S = m.strat;
+    S.fx = +f.x; S.fz = +f.z; S.fy = isFinite(+f.y) ? +f.y : groundY(S.fx, S.fz);
+    S.tx = +t.x; S.tz = +t.z; S.ty = isFinite(+t.y) ? +t.y : groundY(S.tx, S.tz) + 1;
+    S.heading = isFinite(+opts.heading) ? +opts.heading : null;
+    S.psi = 0; S.gam = 0; S.bank = 0; S.wi = 0; S.sepT = -10; S.boostT = 0; S.hold = 0; S.apex = -1e9;
+    S.boV = { x: 0, y: 0, z: 0 }; S.boT = 0;
+    const dist = Math.hypot(S.tx - S.fx, S.tz - S.fz);
+    // the route: the caller's waypoints, or one gentle dogleg on a long leg
+    // (alternating sides through a salvo) so the run in reads as flown
+    S.route = [];
+    if (Array.isArray(opts.via)) {
+      for (const w of opts.via) if (w && isFinite(+w.x) && isFinite(+w.z)) S.route.push({ x: +w.x, z: +w.z });
+    } else if (dist > 3000) {
+      const ux = (S.tx - S.fx) / dist, uz = (S.tz - S.fz) / dist, side = (stratSeq & 1) ? 1 : -1;
+      const off = Math.min(900, dist * 0.08) * side, at = 0.3;
+      S.route.push({ x: S.fx + ux * dist * at - uz * off, z: S.fz + uz * dist * at + ux * off });
+    }
+    // the terminal manoeuvre: start ~1.8 km out, top out ~300 m over the aim
+    // point, push over when it is ~38 degrees below the nose
+    S.popR = Math.max(700, Math.min(1800, dist * 0.45));
+    S.apexY = Math.max(S.ty, groundY(S.tx, S.tz)) + Math.max(160, Math.min(310, S.popR * 0.17));
+    S.climb = 21 * Math.PI / 180;
+    S.trigger = 34 * Math.PI / 180;
+    S.top = false; S.lamPrev = null;
+    writeHandle(m);
+    if (missiles.indexOf(m) < 0) missiles.push(m);
+    return m.strat.handle;
+  };
+
+  // CBZ.cityBallisticMissile({ target:{x,y,z}, from:{x,z}, type:"iskander",
+  //   delay, byPlayer, by, onImpact }) → a handle (as above)
+  CBZ.cityBallisticMissile = function (opts) {
+    opts = opts || {};
+    const t = opts.target;
+    if (!t || !isFinite(+t.x) || !isFinite(+t.z)) return null;
+    const type = opts.type && MU.spec(opts.type) ? opts.type : "iskander";
+    const m = stratRecord("ballistic", type, opts);
+    if (!m) return null;
+    const S = m.strat;
+    S.tx = +t.x; S.tz = +t.z; S.ty = isFinite(+t.y) ? +t.y : groundY(S.tx, S.tz) + 0.5;
+    // up-range: toward the launcher (`from`), default from the west
+    const f = opts.from || { x: S.tx - 60000, z: S.tz };
+    let ux = (+f.x || 0) - S.tx, uz = (+f.z || 0) - S.tz;
+    const fd = Math.hypot(ux, uz);
+    if (fd < 1) { ux = -1; uz = 0; } else { ux /= fd; uz /= fd; }
+    const D0 = fd > 1 ? Math.min(36000, fd * 0.85) : 36000, H0 = 26000;
+    const P0 = { x: S.tx + ux * D0, y: S.ty + H0, z: S.tz + uz * D0 };
+    const P3 = { x: S.tx, y: S.ty, z: S.tz };
+    const chord = Math.hypot(D0, H0);
+    const g0 = 32 * Math.PI / 180, g3 = 80 * Math.PI / 180;
+    const P1 = { x: P0.x - ux * Math.cos(g0) * chord * 0.34, y: P0.y - Math.sin(g0) * chord * 0.34, z: P0.z - uz * Math.cos(g0) * chord * 0.34 };
+    const P2 = { x: P3.x + ux * Math.cos(g3) * chord * 0.42, y: P3.y + Math.sin(g3) * chord * 0.42, z: P3.z + uz * Math.cos(g3) * chord * 0.42 };
+    S.q = [P0, P1, P2, P3];
+    const N = 240, tab = new Float32Array(N + 1);
+    let L = 0;
+    bez(S.q, 0, _bp);
+    let lx = _bp.x, ly = _bp.y, lz = _bp.z;
+    for (let i = 1; i <= N; i++) { bez(S.q, i / N, _bp); L += Math.hypot(_bp.x - lx, _bp.y - ly, _bp.z - lz); tab[i] = L; lx = _bp.x; ly = _bp.y; lz = _bp.z; }
+    S.tab = tab; S.len = L; S.s = 0; S.k = 0;
+    S.h0 = H0; S.vHi = 2050; S.vLo = 1750; S.v = S.vHi;
+    S.maxT = 120;
+    writeHandle(m);
+    if (missiles.indexOf(m) < 0) missiles.push(m);
+    return m.strat.handle;
+  };
+
+  // THE CAMERA CONTRACT: every long-range round in the air, in launch order.
+  CBZ.cityMissilesInAir = function () {
+    const out = [];
+    for (let i = 0; i < missiles.length; i++) {
+      const m = missiles[i];
+      if (!m.live || !m.strat || !m.strat.launched) continue;
+      const p = m.group.position, S = m.strat;
+      out.push({ id: S.handle.id, x: p.x, y: p.y, z: p.z, dx: m.dir.x, dy: m.dir.y, dz: m.dir.z,
+        alive: true, phase: S.phase, type: m.type, kind: S.kind, speed: m.speed,
+        agl: p.y - groundY(p.x, p.z), hold: S.hold || 0, bank: S.bank || 0 });
+    }
+    return out;
+  };
+
   // ---- PUBLIC: missile/blast tuning (so a player salvo reads punchy) --------
   // Read-only-ish knobs the player aircraft can consult. MISSILE_SPD/MAX_MISSILES
   // are the shared pool's tunables; the blast power/radius mirror detonate()'s
@@ -1244,6 +1786,17 @@
     for (let i = missiles.length - 1; i >= 0; i--) {
       const m = missiles[i];
       if (!m.live) { missiles.splice(i, 1); continue; }
+      // the long-range rounds fly their own profile (stepStrat below); the
+      // pool, the records and detonate() are the same
+      if (m.strat) {
+        const hit = stepStrat(m, dt, r);
+        if (hit) {
+          detonate(hit.x, hit.y, hit.z, m.byPlayer, m.fx, m.type, hit);
+          stratImpact(m, hit);
+          freeMissile(m); missiles.splice(i, 1);
+        }
+        continue;
+      }
       const p = m.group.position;
       // ---- HOMING: proportional-nav-lite. Only re-aims if the launcher gave
       // us a live `seek` getter (a static-point shot — e.g. at a building —
@@ -1373,11 +1926,21 @@
      carries the charge in kg TNT per row and city/buildings.js prices holes,
      breaches, gutting and collapse off that charge). `fx.kind` only names the
      LOOK (the Patriot/MLRS "rpg cloud"); it never changes the charge. */
-  const ROUND_ROW = { aam: "aam", atgm: "hellfire", hydra: "hydra", mlrs: "rocket227", patriot: "patriot", shell: "shell" };
-  function detonate(x, y, z, byPlayer, fx, type) {
+  // tomahawk is its own munition-table row; the ballistic body borrows the
+  // heaviest general-purpose bomb row the table already prices
+  const ROUND_ROW = { aam: "aam", atgm: "hellfire", hydra: "hydra", mlrs: "rocket227", patriot: "patriot", shell: "shell",
+    tomahawk: "tomahawk", iskander: "mk84" };
+  function detonate(x, y, z, byPlayer, fx, type, hit) {
     const row = ROUND_ROW[type] || "missile";
     const o = { byPlayer: !!byPlayer };
     if (fx && fx.kind) o.fx = { kind: fx.kind };
+    // a long-range round says which way it was going and what it struck
+    if (hit) {
+      o.dirx = hit.dirx; o.dirz = hit.dirz;
+      if (hit.normal) o.normal = hit.normal;
+      if (hit.by != null) o.by = hit.by;
+      if (hit.lot) o.lot = hit.lot;
+    }
     CBZ.detonate(x, y, z, row, o);
     // A MISSILE'S BLAST NOW REACHES AIRCRAFT (owner: fire and SEE the
     // result): this detonate used to call only the ground/building couplers,
@@ -2306,8 +2869,10 @@
         despawnJet(jets[i], false); jets.splice(i--, 1);
       } else { jets[i].phase = "return"; jets[i].phaseT = 0; }
     }
-    for (let i = missiles.length - 1; i >= 0; i--) freeMissile(missiles[i]);
-    missiles.length = 0; jetCD = 5;
+    // the police response's rounds go; a cruise or ballistic strike already
+    // in the air is not the wanted level's to call back
+    for (let i = missiles.length - 1; i >= 0; i--) if (!missiles[i].strat) { freeMissile(missiles[i]); missiles.splice(i, 1); }
+    jetCD = 5;
   }
   // expose a clean kill switch (wanted-reset / mode-exit can call it)
   CBZ.cityClearAircraft = teardown;

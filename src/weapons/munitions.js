@@ -22,6 +22,8 @@
          gbu28    GBU-28-class bunker buster         5.84   0.368
          pg7      PG-7V (RPG-7 round, 85 mm bulb)    0.90   0.085
          g40      40 mm grenade                      0.11   0.040
+         tomahawk Tomahawk-class cruise missile      5.56   0.518  (+ wings/fins, booster can)
+         iskander Iskander-class ballistic body      7.30   0.920  (+ hot-nose sheath, streak)
 
    2. THE POOLS. acquire(type) hands out a pooled Object3D of that type,
       release(obj) takes it back. Nothing is built per shot.
@@ -110,7 +112,11 @@
     let o = 0;
     for (let i = 0; i < gs.length; i++) {
       const p = gs[i].attributes.position, q = gs[i].attributes.normal;
-      _col.setHex(parts[i].c);
+      /* the palette is authored as SCREEN colour (sRGB hex, what a paint chip
+         looks like); the renderer outputs sRGB and reads vertex colours as
+         LINEAR, so a hex written straight in comes out lighter and more
+         saturated: olive drab 0x4b5320 rendered as lime. Convert once here. */
+      _col.setHex(parts[i].c).convertSRGBToLinear();
       for (let k = 0; k < p.count; k++, o++) {
         P[o * 3] = p.getX(k); P[o * 3 + 1] = p.getY(k); P[o * 3 + 2] = p.getZ(k);
         N[o * 3] = q.getX(k); N[o * 3 + 1] = q.getY(k); N[o * 3 + 2] = q.getZ(k);
@@ -152,6 +158,14 @@
     gbu28:   { L: 5.84, D: 0.368 },
     pg7:     { L: 0.90, D: 0.085, burn: 0, flare: 0.35, trail: { s0: 0.28, s1: 2.0, life: 3.4, a0: 0.5, shade: 0.74, spacing: 1.2 } },
     g40:     { L: 0.11, D: 0.040 },
+    // cruise missile: the booster's thick white column, then a quiet engine
+    // (city/aircraft.js flies both phases and picks the look per phase)
+    tomahawk: { L: 5.56, D: 0.518, burn: 0, flare: 0.32, boosterL: 0.69,
+      boost: { s0: 1.1, s1: 7.5, life: 7.0, a0: 0.72, shade: 0.96, spacing: 2.6, budget: 150 },
+      haze:  { s0: 0.35, s1: 2.6, life: 1.4, a0: 0.07, shade: 0.92, spacing: 7, budget: 30 } },
+    // ballistic body: a hot nose and a thin grey wake
+    iskander: { L: 7.30, D: 0.920, burn: 0, flare: 2.4,
+      wake: { s0: 2.0, s1: 9.0, life: 14, a0: 0.42, shade: 0.72, spacing: 18, budget: 170 } },
   };
 
   // ---- builders: each returns { body:[{g,c}], vane?, wings? } ----
@@ -288,6 +302,65 @@
       const pts = [[0, -0.11], [0.021, -0.11], [0.021, -0.045], [0.020, -0.036], [0.017, -0.020], [0.011, -0.007], [0.005, 0], [0, 0]];
       return { body: [{ g: latheZ(pts.map((p) => [p[0], p[1] + 0.055]), 12), c: 0x6b6f52 }, { g: band(0.021, -0.02, -0.005, 1.03), c: COL.yellow }] };
     },
+    // Cruise missile, Tomahawk silhouette: a long grey tube with a rounded
+    // ogive nose, the boat-tail and small engine nozzle at the back, the
+    // ventral inlet fairing ahead of the tail. The straight mid-body wings
+    // and the four X tail fins are the moving mesh (they pop out after
+    // launch); the booster can on the tail is its own mesh (it drops away).
+    tomahawk: function (s) {
+      const L = s.L, R = s.D / 2, zt = -L / 2, zn = L / 2, noseL = 0.62, tailL = 0.42;
+      const P = [];
+      // tail: the nozzle lip, the boat-tail taper
+      P.push({ g: latheZ([[0, zt + 0.04], [0.085, zt + 0.04], [0.105, zt], [0.125, zt], [R * 0.62, zt + 0.07], [R * 0.86, zt + tailL * 0.6], [R, zt + tailL]], 22), c: COL.greyD });
+      P.push({ g: latheZ([[0, zt + 0.10], [0.08, zt + 0.10], [0.08, zt + 0.04]], 14), c: COL.black });     // the hot hole
+      // body, two tones split at the mid joint
+      P.push({ g: latheZ([[R, zt + tailL], [R, -0.35]], 24), c: 0xa6adb3 });
+      P.push({ g: latheZ([[R, -0.35], [R, zn - noseL]], 24), c: 0xb9bfc4 });
+      P.push({ g: latheZ(ogive(R, noseL, zn - noseL, 12, 0.03).concat([[0.02, zn - 0.006], [0, zn]]), 24), c: 0xd4d7d6 });
+      P.push({ g: band(R, zn - noseL - 0.03, zn - noseL), c: COL.greyD });
+      P.push({ g: band(R, -0.37, -0.34), c: COL.greyD });
+      P.push({ g: band(R, zt + tailL + 0.5, zt + tailL + 0.53), c: COL.greyD });
+      P.push({ g: band(R, 1.05, 1.10), c: COL.yellow });
+      // the sensor window under the nose
+      P.push({ g: box(0.11, 0.02, 0.18, 0, -R * 0.93, zn - noseL - 0.25), c: COL.glass });
+      // ventral inlet: a fairing hanging under the aft body, open to the front
+      const zi0 = zt + tailL + 0.25, zi1 = zi0 + 0.78;
+      P.push({ g: box(0.26, 0.13, zi1 - zi0, 0, -R - 0.045, (zi0 + zi1) / 2), c: 0x9aa1a7 });
+      P.push({ g: box(0.20, 0.09, 0.03, 0, -R - 0.05, zi1 + 0.005), c: COL.black });
+      P.push({ g: fin([[R * 0.7, zi0 - 0.26], [R * 0.7, zi0 + 0.05], [R + 0.11, zi0 + 0.05]], 0.24, -Math.PI / 2), c: 0x9aa1a7 });
+      // wings (2.67 m tip to tip) + four X tail fins: the deploying mesh
+      const half = 2.67 / 2, wz = -0.05;
+      const W = [0, Math.PI].map((a) => ({ g: fin([[R * 0.8, wz - 0.17], [R * 0.8, wz + 0.19], [half, wz + 0.13], [half, wz - 0.11]], 0.018, a), c: 0x9ba2a8 }));
+      fins(4, [[R * 0.85, zt + 0.06], [R * 0.85, zt + 0.42], [R + 0.33, zt + 0.16], [R + 0.33, zt + 0.02]], 0.014, Math.PI / 4).forEach((g) => W.push({ g, c: 0x939aa0 }));
+      // booster can on the tail, with its own big nozzle
+      const bL = s.boosterL, zb = zt - bL;
+      const B = [
+        { g: latheZ([[R * 0.98, zb + 0.12], [R * 0.98, zt + 0.02], [R * 0.6, zt + 0.02]], 22), c: 0x5b6166 },
+        { g: latheZ([[0, zb - 0.06], [0.2, zb - 0.06], [0.24, zb], [R * 0.7, zb + 0.05], [R * 0.98, zb + 0.12]], 22), c: COL.dark },
+        { g: band(R * 0.98, zb + 0.3, zb + 0.34, 1.02), c: COL.greyD },
+      ];
+      return { body: P, wings: W, booster: B, boosterZ: zb - 0.06 };
+    },
+    // Ballistic missile body, Iskander silhouette: a fat tube, a long sharp
+    // nose cone (dark heat-shield coat), four small trapezoid tail controls.
+    // The sheath (a glowing shell over the nose) and the streak (a long
+    // additive cone aft) are the FX meshes city/aircraft.js scales per frame.
+    iskander: function (s) {
+      const L = s.L, R = s.D / 2, zt = -L / 2, zn = L / 2, noseL = 2.3;
+      const P = [];
+      P.push({ g: latheZ([[0, zt + 0.08], [0.24, zt + 0.08], [0.3, zt], [R * 0.82, zt + 0.02], [R, zt + 0.16]], 24), c: COL.dark });
+      P.push({ g: latheZ([[R, zt + 0.16], [R, zn - noseL]], 26), c: 0x8d9483 });
+      P.push({ g: latheZ(ogive(R, noseL, zn - noseL, 16, 0.025).concat([[0, zn]]), 26), c: 0x3a3d3c });
+      P.push({ g: band(R, zn - noseL - 0.05, zn - noseL), c: 0x2b2e2f });
+      P.push({ g: band(R, 0.2, 0.26), c: 0x6f7568 });
+      P.push({ g: band(R, -1.6, -1.55), c: 0x6f7568 });
+      fins(4, [[R * 0.92, zt + 0.18], [R * 0.92, zt + 0.86], [R + 0.3, zt + 0.62], [R + 0.3, zt + 0.3]], 0.03, Math.PI / 4).forEach((g) => P.push({ g, c: 0x6f7568 }));
+      // FX: a hot shell hugging the nose, a long tapering wake streak
+      const SH = [{ g: latheZ(ogive(R * 1.16, noseL * 1.05, zn - noseL * 1.05 + 0.08, 12, 0.04).concat([[0, zn + 0.12]]), 20), c: 0xffffff }];
+      const st = new THREE.ConeGeometry(R * 0.95, 1, 14, 1, true);
+      st.rotateX(-Math.PI / 2); st.translate(0, 0, -0.5);               // apex at z = -1, base at 0
+      return { body: P, sheath: SH, streak: st };
+    },
   };
   // Low-drag general-purpose bomb (Mk-80 family): tangent-ogive nose with
   // a nose fuze (+ spinning arming vane), parallel body, yellow HE band,
@@ -326,7 +399,10 @@
     if (!s) return null;
     const b = BUILD[type](s);
     e = { body: merge(b.body), vane: b.vane ? merge(b.vane) : null, vaneZ: b.vaneZ || 0,
-      wings: b.wings ? merge(b.wings) : null };
+      wings: b.wings ? merge(b.wings) : null,
+      booster: b.booster ? merge(b.booster) : null, boosterZ: b.boosterZ || 0,
+      sheath: b.sheath ? merge(b.sheath) : null, streak: b.streak || null };
+    if (e.streak) e.streak._shared = true;
     GEO[type] = e;
     return e;
   }
@@ -336,8 +412,11 @@
     MAT = {
       body: new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 28, specular: 0x2a2c2e }),
       tracer: new THREE.MeshBasicMaterial({ color: 0xff5a2a }),
+      // the ballistic body's hot nose and its wake streak (additive, unlit)
+      sheath: new THREE.MeshBasicMaterial({ color: 0xffb070, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }),
+      streak: new THREE.MeshBasicMaterial({ color: 0xffc890, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }),
     };
-    MAT.body._shared = true; MAT.tracer._shared = true;
+    for (const k in MAT) MAT[k]._shared = true;
     return MAT;
   }
 
@@ -367,6 +446,27 @@
       grp.add(w);
       grp.userData.wings = w;
     }
+    // a booster can that separates: hidden until a launch asks for it; the
+    // flier detaches it into the world and reset() brings it home
+    if (G.booster) {
+      const b = new THREE.Mesh(G.booster, M.body);
+      b.castShadow = true; b.visible = false;
+      grp.add(b);
+      grp.userData.booster = b;
+    }
+    if (G.sheath) {
+      const sh = new THREE.Mesh(G.sheath, M.sheath);
+      sh.visible = false; sh.renderOrder = 4;
+      grp.add(sh);
+      grp.userData.sheath = sh;
+    }
+    if (G.streak) {
+      const st = new THREE.Mesh(G.streak, M.streak);
+      st.visible = false; st.renderOrder = 4; st.frustumCulled = false;
+      st.position.z = -SPEC[type].L / 2;
+      grp.add(st);
+      grp.userData.streak = st;
+    }
     if (SPEC[type].tracer) {
       const t = new THREE.Mesh(tracerGeo(), M.tracer);
       t.position.z = -SPEC[type].L / 2 - 0.01;
@@ -385,6 +485,13 @@
     const u = o.userData;
     if (u.vane) u.vane.rotation.z = 0;
     if (u.wings) u.wings.scale.set(1, 1, 1);
+    if (u.booster) {
+      const b = u.booster;
+      if (b.parent !== o) { if (b.parent) b.parent.remove(b); o.add(b); }
+      b.position.set(0, 0, 0); b.rotation.set(0, 0, 0); b.scale.set(1, 1, 1); b.visible = false;
+    }
+    if (u.sheath) { u.sheath.visible = false; u.sheath.scale.set(1, 1, 1); }
+    if (u.streak) { u.streak.visible = false; u.streak.scale.set(1, 1, 1); }
   }
   function acquire(type) {
     const p = POOL[type];
@@ -395,6 +502,8 @@
   function release(o) {
     if (!o) return;
     if (o.parent) o.parent.remove(o);
+    const bo = o.userData && o.userData.booster;
+    if (bo && bo.parent !== o) { if (bo.parent) bo.parent.remove(bo); bo.visible = false; o.add(bo); }
     const t = o.userData && o.userData.munition;
     if (!t) return;
     const p = POOL[t] || (POOL[t] = []);
