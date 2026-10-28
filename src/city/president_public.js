@@ -2704,6 +2704,12 @@
       if (L.sp.phase === "react") { L.sp.t = 0; return true; }
       return false;
     },
+    // a crowd at the gate now, for a reason another file owns (the President
+    // game's own unrest, city/president_game.js); the cooldown still holds
+    protest: function (size) {
+      if (PROT.active || (PROT.cooldownUntil != null && now() < PROT.cooldownUntil)) return false;
+      return startProtest(size != null ? size : null, true);
+    },
     _protestNow: function (size) {
       if (PROT.active) endProtest("end");
       PROT.cooldownUntil = -1;

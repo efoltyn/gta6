@@ -118,6 +118,12 @@
       if (h && h.rec) { h.rec.name = S.c[ME].name; }
     } catch (e) {}
     if (CBZ.presBook) CBZ.presBook.setSource(bookSource());
+    // a man at his desk sees his desk, not the back of his own head: the day
+    // starts in his own eyes (after that the view follows his hands, as it
+    // does everywhere in the game: systems/fpsmode.js viewForHands)
+    if (CBZ.setFPS && !(CBZ.fpsActive && CBZ.fpsActive())) { try { CBZ.setFPS(true); } catch (e) {} }
+    if (CBZ.cam) CBZ.cam.pitch = Math.max(CBZ.cam.pitch || 0, 0.42);
+    if (CBZ.fps) CBZ.fps.fp = Math.min(CBZ.fps.fp || 0, -0.42);
     syncCabinet();
     A.ver++;
     news(S.c[ME].leader.title + " " + S.c[ME].leader.name + " starts the day in the Oval Office", { cat: S.c[ME].short.toUpperCase() });
@@ -227,7 +233,9 @@
       A.lastN = e.n;
       if (e.c === ME && e.k === "refused") refused(e);
       if (e.c === ME && e.k === "fall") end(e.why);
+      if (e.k === "strike" && e.t === ME) warComesHome(e);
     }
+    streetTemper(me);
     if (S.day !== A.newsDay) { A.newsDay = S.day; tvNews(); }
     if (S.over && S.over.winner === ME) end("won");
     if (S.day % 7 === 0) syncCabinet();
@@ -252,6 +260,36 @@
       news(f.text, { cat: "WORLD" });
       if (++n >= 2) break;
     }
+  }
+  /* THE WORLD COMES TO THE DOOR. What the world model says happened to this
+     country is something he hears and sees from the Mansion, not a number:
+       an enemy strike on the capital: jets over the city, bombs landing a few
+         hundred metres out (systems/impactbus.js, the real blast), sirens, the
+         detail getting him down
+       the street boiling over (unrest): a crowd at the gate with signs
+         (president_public.js's own protest, the pen across from the gate) */
+  let raidAt = -999;
+  function warComesHome(e) {
+    const P = CBZ.player, me = c();
+    if (!P || !P.pos || !CBZ.detonate || !me) return;
+    if (e.p !== me.cap && !(S.p[e.p] && S.p[e.p].pop > 6)) return;     // the capital, or a big city near enough to hear
+    if (S.day - raidAt < 6) return;
+    raidAt = S.day;
+    const n = e.p === me.cap ? 3 : 1;
+    for (let i = 0; i < n; i++) {
+      const a = ((S.day * 7 + i * 131) % 360) * Math.PI / 180, d = 210 + ((S.day * 13 + i * 57) % 140);
+      const x = P.pos.x + Math.sin(a) * d, z = P.pos.z + Math.cos(a) * d;
+      setTimeout(function () { try { CBZ.detonate(x, null, z, "bomb", { byPlayer: false }); } catch (er) {} }, 2500 + i * 1700);
+    }
+    if (CBZ.sfxAt) { try { CBZ.sfxAt("siren", P.pos.x, P.pos.z, { volume: 0.45 }); } catch (er) {} }
+    const PR = CBZ.protection;
+    if (PR && PR.alarm) { try { PR.alarm(P.pos.x, P.pos.z, "air strike"); } catch (er) {} }
+  }
+  let protestDay = -999;
+  function streetTemper(me) {
+    const PP = CBZ.presidentPublic;
+    if (!PP || !PP.protest || me.unrest < 45 || S.day - protestDay < 20) return;
+    if (PP.protest(Math.round(6 + me.unrest / 6))) protestDay = S.day;
   }
   function news(text, o) { const P = PO(); if (P && P.news) { try { P.news(text, o || {}); } catch (e) {} } }
   // the people in the Mansion are the cabinet: the names on the book's cabinet
