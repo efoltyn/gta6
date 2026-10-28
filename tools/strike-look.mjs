@@ -86,7 +86,8 @@ const RUNS = {
     cams: {
       "street, 90 m": `({ p: [W.blds[2].cx + 90, 1.7, W.blds[2].cz + 40], l: [W.blds[2].cx + 10, 16, W.blds[2].cz], fov: 62 })`,
       "rooftop, 300 m": `({ p: [W.blds[2].cx + 260, 60, W.blds[2].cz - 160], l: [W.blds[2].cx, 18, W.blds[2].cz], fov: 40 })`,
-      "street blast, 60 m": `({ p: [-W.half * 0.0 + 30, 1.7, -26 + 50], l: [-26, 8, -24], fov: 62 })`,
+      "down the street, 140 m": `({ p: [-26 + 140, 1.7, -26 + 1.5], l: [-26, 14, -24], fov: 55 })`,
+      "close, 45 m": `({ p: [-26 + 45, 1.7, -27.5], l: [-26, 10, -24], fov: 70 })`,
     },
     params: "run=det",
   },

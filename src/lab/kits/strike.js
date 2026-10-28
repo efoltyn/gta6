@@ -45,7 +45,7 @@ CBZ.lab.kit("strike", {
     "src/systems/solidground.js", "src/systems/debris.js", "src/systems/fx.js", "src/systems/volfx.js", "src/systems/craters.js",
     "src/city/crashfx.js", "src/systems/impactbus.js", "src/city/structural.js", "src/city/fracture.js",
     "src/city/collapse.js", "src/city/crashdeform.js", "src/city/nukefx.js",
-    "src/weapons/munitions.js", "src/units/unitkit.js", "src/city/unitmodels.js",
+    "src/weapons/munitiontable.js", "src/systems/breach.js", "src/systems/spatialgrid.js", "src/weapons/munitions.js", "src/units/unitkit.js", "src/city/unitmodels.js",
     "src/units/vehicles/b52.js", "src/units/vehicles/b2_spirit.js", "src/units/vehicles/f35.js",
     "src/city/aircraft.js", "src/city/strategic.js", "src/city/playerair.js",
   ],
@@ -61,6 +61,10 @@ CBZ.lab.kit("strike", {
       f0.material = new THREE.MeshLambertMaterial({ color: 0x6f6a5c });
       f0.scale.setScalar(1);
     }
+    // the shared 3D noise every volume marches: the game builds it in idle
+    // slices once a city is playing; the lab finishes it now so frame one
+    // is drawn as the game draws it
+    if (CBZ.volNoise && CBZ.volNoise.finish) CBZ.volNoise.finish();
     // the far plane and the air: a city day, not a studio
     const cam = CBZ.camera;
     cam.far = 60000; cam.near = 0.5; cam.updateProjectionMatrix();

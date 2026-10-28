@@ -1363,7 +1363,7 @@
     return c && c.position ? Math.hypot(x - c.position.x, y - c.position.y, z - c.position.z) : 0;
   }
 
-  const DUST_ROCK = [0.36, 0.33, 0.3], DUST_ASPHALT = [0.46, 0.44, 0.41], DUST_EARTH = [0.5, 0.44, 0.36];
+  const DUST_ROCK = [0.36, 0.33, 0.3], DUST_ASPHALT = [0.46, 0.44, 0.41], DUST_EARTH = [0.5, 0.44, 0.36], DUST_WALL = [0.58, 0.55, 0.5];
   // a struck surface's colour -> its dust: paler and greyer than the face
   // (pulverised material scatters more), never black, never saturated
   function surfTone(c) {
@@ -1393,19 +1393,50 @@
     // salvo) or the shader could not be built.
     const dustTone = o.surf || (K.surface === "rock" ? DUST_ROCK : (groundKind(x, z) === "dirt" ? DUST_EARTH : DUST_ASPHALT));
     const V = CBZ.volfx;
+    /* HEAVY ORDNANCE IS DRAWN AT ITS OWN SIZE. The charge (kg TNT-equivalent,
+       the blast law's own number for the ordnance) goes to the volume, which
+       scales the fireball, the cloud and its clocks by the cube root of it
+       (systems/volfx.js heavyBlast). It used to be clamped to an RPG's look:
+       a 2,000 lb Mk-84 drew a 2.7 m ball and 11 s of smoke. */
+    const Wkg = o.W > 0 ? +o.W : 0;
+    const heavy = Wkg >= 4;
+    // up a facade the dust is the wall's (concrete and plaster), not the road's
+    const hDust = heavy && o.elevated && !o.surf ? DUST_WALL : dustTone;
+    const sc = heavy ? Math.cbrt(Wkg / 0.9) : 1, ts = Math.sqrt(sc);
     o.vol = !!(V && V.blast(x, cy, z, {
-      P: P * Math.sqrt(Math.max(0.3, K.fire)), floorY: gy,
+      P: P * Math.sqrt(Math.max(0.3, K.fire)), floorY: gy, kg: heavy ? Wkg : 0,
       soot: [K.tone[0] * 0.75, K.tone[1] * 0.75, K.tone[2] * 0.75],
-      dust: dustTone, nrm: o.snrm || o.nrm || null, dustOn: !o.elevated && K.dust > 0,
+      dust: heavy ? hDust : dustTone, nrm: o.snrm || o.nrm || null, dustOn: !o.elevated && K.dust > 0,
     }));
-    if (K.light > 0) flashPool.flash(x, cy + 0.6, z, 3.4 * K.light * Math.min(2.2, P), 24 + 12 * Math.min(3, P));
+    if (K.light > 0) {
+      if (heavy) flashPool.flash(x, cy + 0.6 + sc * 0.8, z, 3.4 * K.light * Math.min(2.2, P) * Math.min(3, ts), (24 + 12 * Math.min(3, P)) * Math.min(4.5, Math.pow(sc, 0.7)));
+      else flashPool.flash(x, cy + 0.6, z, 3.4 * K.light * Math.min(2.2, P), 24 + 12 * Math.min(3, P));
+    }
+    if (heavy && V) {
+      const R0 = 2.0 * sc;
+      // the lens: a bloom many fireballs wide, gone with the fireball
+      if (V.glare) V.glare(x, cy + R0 * 0.35, z, { r: R0 * 6.5, peak: 0.9, hold: 0.04 * ts, tau: 0.12 * ts, col: [1, 0.88, 0.7] });
+      // the ground (or the wall) thrown out: dark streaks fanning out and falling
+      if (V.clods) {
+        const L = CBZ.blastLaw;
+        const eR = L && L.ejectaR ? L.ejectaR(Wkg) : 2.2 * 0.8 * Math.cbrt(Wkg);
+        const n = Math.round(Math.min(90, 18 + 9 * sc) * (0.45 + 0.55 * q));
+        const wall = o.snrm || o.nrm;
+        V.clods(x, cy, z, n, {
+          speed: 16 * ts + 0.6 * eR, size: Math.min(0.9, 0.06 * sc + 0.12), col: hDust, floorY: gy,
+          nrm: wall && Math.abs(wall.y) < 0.7 ? wall : null, cone: o.elevated ? 0.2 : 0.65,
+        });
+      }
+    }
     if (o.vol) {
       // sparks: burning fragments in streaks, thrown off the face
-      if (K.sparks > 0) V.sparks(x, cy, z, Math.max(6, Math.round(34 * S * K.sparks * (0.45 + 0.55 * q))), {
-        speed: 11 + 5 * P, nrm: o.snrm || o.nrm || null, floorY: gy,
+      if (K.sparks > 0) V.sparks(x, cy, z, Math.max(6, Math.round(34 * S * K.sparks * (0.45 + 0.55 * q) * (heavy ? 1 + 0.12 * sc : 1))), {
+        speed: (11 + 5 * P) * (heavy ? Math.min(3, ts) : 1), nrm: o.snrm || o.nrm || null, floorY: gy,
+        life: heavy ? 0.45 * Math.min(2.5, ts) : undefined,
       });
       // the low dust skirt still runs out along the floor in the floor's colour
-      if (!o.elevated && K.dust > 0) {
+      // (a heavy blast's volume carries its own skirt, metres high)
+      if (!heavy && !o.elevated && K.dust > 0) {
         const nDust = Math.max(2, Math.round(8 * S * K.dust * q));
         for (let i = 0; i < nDust; i++) {
           const a = (i / nDust) * 6.2832 + rng() * 0.5, sp = (8 + rng() * 6) * sq;
@@ -1528,9 +1559,10 @@
     const surf = K.surface || groundKind(x, z);
     if (CBZ.debris && K.frag > 0 && !(CBZ.groundOwnsEjecta && CBZ.groundOwnsEjecta(x, z))) {
       try {
+        const hv = o.W >= 4 ? Math.cbrt(o.W / 0.9) : 1;
         CBZ.debris.chips(x, gy + 0.3, z, {
-          kind: surf, count: Math.max(2, Math.round(10 * S * K.frag * q)),
-          power: 0.55 + 0.25 * S, spread: 2.5, dust: false,
+          kind: surf, count: Math.max(2, Math.round(10 * S * K.frag * q * Math.min(3, 0.6 + 0.3 * hv))),
+          power: (0.55 + 0.25 * S) * Math.min(2.2, Math.sqrt(hv)), spread: 2.5 * Math.min(4, hv * 0.6 + 0.4), dust: false,
         });
       } catch (e) {}
     }
@@ -1547,7 +1579,7 @@
     //     it and the fires above carry their own soot columns, so the sprite
     //     column (a string of camera-facing cards) only stands outdoors, for
     //     the big long-burning kinds, where it is a far landmark.
-    if (K.column > 0 && (!o.vol || K.column >= 40)) addColumn(x, gy, z, K.column * (0.75 + 0.15 * Math.min(2, S)), Math.min(2.2, 0.55 + 0.45 * S) * Math.sqrt(K.smoke), K.tone, K.mushroom);
+    if (K.column > 0 && (!o.vol || (K.column >= 40 && !(o.W >= 4)))) addColumn(x, gy, z, K.column * (0.75 + 0.15 * Math.min(2, S)), Math.min(2.2, 0.55 + 0.45 * S) * Math.sqrt(K.smoke), K.tone, K.mushroom);
   }
 
   // ---- per-frame: the light, the queued marks, the columns, the fires --------
@@ -1693,7 +1725,7 @@
     // opts.surface {r,g,b} / [r,g,b]: the colour of what was hit (the dust is
     // THAT); opts.surfNormal: the struck face, so the volume sits off it
     const vo = { fxq: fxq, elevated: elevated, airburst: !!opts.airburst, nrm: nrm, dir: dir,
-      surf: surfTone(opts.surface), snrm: opts.surfNormal || null, vol: false };
+      surf: surfTone(opts.surface), snrm: opts.surfNormal || null, vol: false, W: chargeOf(opts) };
     blastVisual(x, gy, cy, z, P, K, vo);
     // street furniture in the blast breaks into itself (city/props.js)
     if (CBZ.cityPropsBlast) { try { CBZ.cityPropsBlast(x, cy, z, R, power, { byPlayer: !!opts.byPlayer, cause: opts.cause || null }); } catch (e) {} }
@@ -1890,8 +1922,11 @@
       const fxq = CBZ.qScale ? CBZ.qScale(0.35, 1) : 1;
       const elevated = cy - gy > 6;
       const dir = blastDir(opts);
-      blastVisual(x, gy, cy, z, Math.min(4.2, P), K, { fxq: fxq, elevated: elevated, airburst: false, nrm: null, dir: dir });
-      if (!elevated) blastAftermath(x, gy, z, Math.min(4.2, P), K, { fxq: fxq, nrm: null, dir: dir, W: chargeOf(opts) });
+      const Wc = chargeOf(opts), nrm = blastNormal(opts);
+      const vo = { fxq: fxq, elevated: elevated, airburst: false, nrm: nrm, dir: dir, W: Wc, vol: false,
+        surf: surfTone(opts.surface), snrm: opts.surfNormal || null };
+      blastVisual(x, gy, cy, z, Math.min(4.2, P), K, vo);
+      if (!elevated) blastAftermath(x, gy, z, Math.min(4.2, P), K, { fxq: fxq, nrm: nrm, dir: dir, W: Wc, vol: vo.vol });
     }
     if (CBZ.cityPropsBlast) { try { CBZ.cityPropsBlast(x, cy, z, R, power, { byPlayer: byPlayer, cause: opts.cause || "airstrike" }); } catch (e) {} }
 
