@@ -78,7 +78,9 @@
       pen: { flesh: 0.55, wood: 0.30, sand: 0.18, dirt: 0.14, cinder: 0.07, brick: 0.05, concrete: 0.03, steel: 0.006, rha: 0.004 } },
     "50ae": { name: ".50 AE 300gr", g: 19.4, mm: 12.7, v0: 472, dragK: 0.55,
       pen: { flesh: 0.55, wood: 0.35, sand: 0.20, dirt: 0.16, cinder: 0.08, brick: 0.06, concrete: 0.04, steel: 0.007, rha: 0.005 } },
-    "556": { name: "5.56x45mm M855", g: 4.0, mm: 5.7, v0: 905, dragK: 0.57,
+    // core: the M855's steel penetrator (systems/armour.js pierceMM: it beats
+    // Level III steel and PE plates at speed)
+    "556": { name: "5.56x45mm M855", g: 4.0, mm: 5.7, v0: 905, dragK: 0.57, core: "steel",
       pen: { flesh: 0.45, wood: 0.60, sand: 0.30, dirt: 0.25, cinder: 0.30, brick: 0.14, concrete: 0.08, steel: 0.010, rha: 0.006 },
       tracer: 0xff5a2a },                                   // M856: red
     "762x39": { name: "7.62x39mm M43", g: 7.9, mm: 7.8, v0: 715, dragK: 0.62,

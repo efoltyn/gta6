@@ -351,6 +351,32 @@
     }
     return RATE_MM[RATE_MM.length - 1][1];
   }
+  /* WHAT A FLOWN ROUND HAS AGAINST A PIECE: its steel-equivalent penetration
+     (mm) at velocity v, the way that piece meets it. Aramid (a soft panel, a
+     helmet shell) is rated against handgun speeds: a rifle round past ~600 m/s
+     cuts it like the cloth it is. A hardened steel or PE plate rated Level III
+     against 7.62x51 ball is beaten by a STEEL-PENETRATOR round at speed: M855
+     (and 5.45 7N6) through AR500 inside ~100 m is why NIJ 0101.07 added RF2.
+     The cartridge says so with `core: "steel"` (weapons/ballistics.js CART). */
+  function pierceMM(p, cart, v, v0) {
+    const B = CBZ.ballistics;
+    if (!B || !cart) return 10;
+    let pd = B.depth(cart, "steel", v, v0) * 1000;
+    if (p.mat === "aramid" && v > 600) pd *= 2.2;
+    if (cart.core === "steel" && (p.mat === "steel" || p.mat === "pe")) pd *= 1.55;
+    return pd;
+  }
+  /* A PLATE AGAINST A FLOWN ROUND, by its own rules (shared by NPC War's page
+     and the infantry core): "pen" | "stop" | "deflect". rng is the caller's
+     seeded dice. The piece's rating falls as it cracks (ratingOf). */
+  function versus(p, cart, v, v0, rng) {
+    const R = rng || Math.random;
+    const pd = pierceMM(p, cart, v, v0);
+    const mm = rateMM(ratingOf(p));
+    if (p.kind === "helmet" && pd > mm && R() < (p.deflect || 0)) return "deflect";
+    const pPen = 1 / (1 + Math.exp(-((pd - mm) / Math.max(1, mm * 0.06))));
+    return R() < pPen ? "pen" : "stop";
+  }
   function layer(unit, zone, hit) {
     const state = unit && unit.armour;
     if (!state || !state.pieces) return null;
@@ -368,15 +394,12 @@
     p.hits++; state.hits = (state.hits || 0) + 1;
     const B = CBZ.ballistics;
     // the round's steel-equivalent penetration now, in mm
-    let pdMM = 10, ej = 1750;
+    let pdMM = 10, ej = 1750, pdReal = 10;
     if (B && hit && hit.cart) {
-      pdMM = B.depth(hit.cart, "steel", hit.v, hit.v0) * 1000;
+      pdReal = B.depth(hit.cart, "steel", hit.v, hit.v0) * 1000;
+      pdMM = pierceMM(p, hit.cart, hit.v, hit.v0);
       ej = B.energy(hit.cart, hit.v) / (hit.cart.pellets || 1);
     }
-    // aramid (a soft panel, a helmet shell) is rated against handgun speeds: a
-    // rifle round past ~600 m/s cuts it like the cloth it is
-    const pdReal = pdMM;
-    if (p.mat === "aramid" && hit && hit.v > 600) pdMM *= 2.2;
     const mm = rateMM(ratingOf(p));
     const rifle = pdMM > 8.5;
     const last = { t: state.hits, piece: cv.key, zone: zn, stopped: false, pen: false, deflect: false, stagger: 0, winded: 0 };
@@ -435,6 +458,10 @@
     coverage: coverage,
     layer: layer,
     rateMM: rateMM,
+    pierceMM: pierceMM,
+    versus: versus,
+    piece: piece,
+    ratingOf: ratingOf,
   };
   // the weapons layer's name for the hook (src/battle/fire.js armsHit)
   CBZ.battleArmour = CBZ.battleArmour || {};
