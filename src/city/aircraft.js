@@ -1590,7 +1590,7 @@
     }
     const nx = _bp.x + m.dir.x * (half + 0.4), ny = _bp.y + m.dir.y * (half + 0.4), nz = _bp.z + m.dir.z * (half + 0.4);
     MU.setFlare(m.flare, nx, ny, nz, sp.flare * fl * Math.min(far, 18), 1, 1, 0.93, 0.8);
-    MU.setFlare(m.flare + 1, _bp.x, _bp.y, _bp.z, sp.flare * 3.2 * fl * Math.min(far, 14), 0.42, 1, 0.5, 0.18);
+    MU.setFlare(m.flare + 1, _bp.x, _bp.y, _bp.z, sp.flare * 2.0 * fl * Math.min(far, 14), 0.42, 1, 0.5, 0.18);
     if (_bp.y < 16000) {
       const tx = _bp.x - m.dir.x * (half + 30), ty = _bp.y - m.dir.y * (half + 30), tz = _bp.z - m.dir.z * (half + 30);
       MU.trail(m.trail, tx, ty, tz, m.dir.x, m.dir.y, m.dir.z, sp.wake, S.v);

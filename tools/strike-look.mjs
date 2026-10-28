@@ -80,13 +80,13 @@ const RUNS = {
     beats: [3, 8, 12, 15, 17.5, 18.6, 19.4, 21, 24, 30],
     seconds: 32,
     cams: {
-      "street, looking up the approach": `({ p: [W.blds[4].cx + 60, 1.7, W.blds[4].cz - 70], l: [W.blds[4].cx - 400, 160, W.blds[4].cz + 300], fov: 62 })`,
+      "street, looking up the approach": `({ p: [26, 1.7, -64], l: [-400, 170, 330], fov: 66 })`,
       "chase, 3/4 behind the lead": `(function(){ const m = S && S.missiles && S.missiles[0]; if (!m) return { p: [W.half + 200, 90, W.half + 220], l: [0, 25, 0], fov: 50 };
         const rx = m.dz, rz = -m.dx, rl = Math.hypot(rx, rz) || 1;
         return { p: [m.x - m.dx * 13 + rx / rl * 6, m.y - m.dy * 13 + 2.2, m.z - m.dz * 13 + rz / rl * 6], l: [m.x + m.dx * 14, m.y + m.dy * 14, m.z + m.dz * 14], fov: 55 }; })()`,
       "fly-by, ahead of the lead": `(function(){ const m = S && S.missiles && S.missiles[0]; if (!m) return { p: [W.half + 500, 80, -300], l: [0, 20, 0], fov: 40 };
         const rx = m.dz, rz = -m.dx, rl = Math.hypot(rx, rz) || 1;
-        return { p: [m.x + m.dx * 70 + rx / rl * 22, m.y + m.dy * 70 - 3, m.z + m.dz * 70 + rz / rl * 22], l: [m.x, m.y, m.z], fov: 32 }; })()`,
+        return { p: [m.x + m.dx * 30 + rx / rl * 16, m.y + m.dy * 30 - 2.5, m.z + m.dz * 30 + rz / rl * 16], l: [m.x, m.y, m.z], fov: 38 }; })()`,
       "rooftop, 500 m off the targets": `({ p: [W.half + 420, 70, -W.half - 260], l: [0, 25, 0], fov: 44 })`,
     },
     params: "run=missile",

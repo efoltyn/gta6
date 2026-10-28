@@ -164,7 +164,7 @@
       boost: { s0: 1.1, s1: 7.5, life: 7.0, a0: 0.72, shade: 0.96, spacing: 2.6, budget: 150 },
       haze:  { s0: 0.35, s1: 2.6, life: 1.4, a0: 0.07, shade: 0.92, spacing: 7, budget: 30 } },
     // ballistic body: a hot nose and a thin grey wake
-    iskander: { L: 7.30, D: 0.920, burn: 0, flare: 2.4,
+    iskander: { L: 7.30, D: 0.920, burn: 0, flare: 0.9,
       wake: { s0: 2.0, s1: 9.0, life: 14, a0: 0.42, shade: 0.72, spacing: 18, budget: 170 } },
   };
 

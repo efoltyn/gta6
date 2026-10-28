@@ -50,7 +50,7 @@ CBZ.lab.kit("strike", {
     "src/city/aircraft.js", "src/city/strategic.js", "src/city/playerair.js",
   ],
   mode: "city",
-  params: { run: "carpet", alt: 900, obs: 6000, floor: 4000, sunAz: 145, sunEl: 32 },
+  params: { run: "carpet", alt: 900, obs: 6000, floor: 40000, sunAz: 145, sunEl: 32 },
   duration: 30,
   setup: function (W, P) {
     const THREE = window.THREE;
