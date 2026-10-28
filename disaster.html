@@ -30,7 +30,7 @@
 <link rel="stylesheet" href="css/mobile.css?v=noobj1022">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
 <link rel="stylesheet" href="css/city.css?v=noobj1022">
-<link rel="stylesheet" href="css/campaign.css?v=noobj1022">
+<link rel="stylesheet" href="css/campaign.css?v=pres1028">
 <link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
 <link rel="stylesheet" href="css/title_hub.css?v=islesave1022">
 <script>
@@ -832,7 +832,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisonvoice.js?v=voice1022"></script>
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
-<script src="src/systems/camera.js?v=hands1022"></script>
+<script src="src/systems/camera.js?v=pres1028"></script>
 <script src="src/systems/physics.js?v=nogc1022"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- THE ONE MOVER (CBZ.bodyMove) every human body is moved through, and the per-frame net (onUpdate 99.97) that puts back anything that crossed a wall. After physics.js (sweepCircle/collide/walkGroundAt). -->
@@ -952,11 +952,11 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <!-- where a floating touch button may go (the verb column, the way out): pure rect math -->
 <script src="src/systems/touch_layout.js?v=deck1011"></script>
-<script src="src/systems/seat_exit.js?v=deck1011"></script>
+<script src="src/systems/seat_exit.js?v=pres1028"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
-<script src="src/systems/gamepad.js?v=cmd1022p"></script>
+<script src="src/systems/gamepad.js?v=pres1028"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
      Additive: registers its own updaters (gated by game.mode) and builds
@@ -1317,7 +1317,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
-<script src="src/entities/moves_posture.js?v=jailai1020"></script>
+<script src="src/entities/moves_posture.js?v=pres1028"></script>
 <script src="src/city/economy.js?v=isleopen1022"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
@@ -2167,7 +2167,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=cine1022"></script>
+<script src="src/city/president_office.js?v=pres1028"></script>
 <script src="src/city/motorcade.js?v=mijkl10bodymo"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
@@ -2187,7 +2187,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/warroom.js?v=borders1022"></script>
 <script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=protestcpu1022"></script>
-<script src="src/city/president_public.js?v=protestcpu1022"></script>
+<script src="src/city/president_public.js?v=pres1028"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on

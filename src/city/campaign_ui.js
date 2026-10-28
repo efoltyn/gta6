@@ -1240,6 +1240,30 @@
     });
     return out;
   }
+  /* THE PROMPT SPEAKS THE HAND THAT IS ON THE GAME (owner: "It's showing a
+     controller prompt for keyboard as if I'm holding a controller. If I have
+     a controller connected, great.").
+       pad     a controller is connected AND was the last thing touched
+               (systems/gamepad.js CBZ.padActive): the answers round the d-pad
+               glyph, d-pad up / left / right answers
+       keys    keyboard and mouse: one row, left to right, each answer with
+               the number key that picks it (1 2 3); a click picks it too
+       touch   a row of answers you tap; no key, no glyph
+     Re-read every frame, so picking the pad up mid-question changes it. */
+  function inputMode() {
+    if (CBZ.padActive && CBZ.padActive()) return "pad";
+    if (CBZ.touchMode || (document.body && document.body.classList.contains("touch"))) return "touch";
+    return "keys";
+  }
+  function applyInputMode() {
+    if (!CP.el) return;
+    const m = inputMode();
+    if (CP.el.getAttribute("data-input") === m) return;
+    CP.el.setAttribute("data-input", m);
+    // the number each answer answers to, in the order the row reads
+    const row = ["left", "up", "right"].filter(function (d) { return !!CP.slots[d]; });
+    DIRS.forEach(function (d) { const i = row.indexOf(d); CP.btn[d].setAttribute("data-key", i >= 0 ? String(i + 1) : ""); });
+  }
   function openCine(meta, speaker, text, list, framed) {
     if (!ensureCine()) return false;
     CP.slots = slotsFor(list);
@@ -1253,6 +1277,8 @@
       b.classList.remove("picked");
       if (CP.pad) CP.pad.classList.toggle("has-" + d, !!c);
     });
+    CP.el.removeAttribute("data-input");
+    applyInputMode();
     const line = framed ? textOf(text, "") : "";
     CP.who.textContent = line ? speakerName(speaker) : "";
     CP.line.textContent = line;
@@ -1362,6 +1388,7 @@
   }
   function tickCine(dt) {
     if (!CP.open) return;
+    applyInputMode();
     if (g.state !== "playing" || state.open) return;     // a pause or the phone holds the clock
     CP.t += Math.min(0.1, dt || 0.016);
     if (!CP.ready && CP.t >= CP.delay) { CP.ready = true; CP.el.classList.add("ready"); }

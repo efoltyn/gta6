@@ -56,6 +56,7 @@
   // WALL-STEER scratch: cityNav.contextSteer writes the chosen unit dir here
   // (move() asks it for the WALL half only; neighbours go through CBZ.moves).
   const _ctxOut = { x: 0, z: 0 };
+  const _doorNear = [];               // bodyDoors.near scratch (a controlled body at a door walks straight)
   // One spatial index for the rich city-ped rigs. Context steering used to
   // rescan the full ped list for every active mover; that becomes quadratic as
   // the city cast grows. Rebuild once per frame, then inspect only local cells.
@@ -6682,7 +6683,24 @@
     // half only (neighbours are the motor's). Every frame on screen; four times
     // a second off it, or at once if the goal swung away from the held dir.
     let tx = gx, tz = gz;
-    if (!order && !routed && cmdSpd > 0 && dist > 1.2 && CBZ.cityNav && CBZ.cityNav.contextSteer) {
+    // (A CONTROLLED BODY GOING THROUGH A DOOR walks straight at it. The wall
+    // kernel read a shut or narrow doorway as a wall and turned him away from
+    // it, so an aide, the Chief of Staff or a visitor walking into the Oval
+    // Office stood in the outer office for good, and systems/leave.js could
+    // not walk anybody out through a door either. Within four metres
+    // of a door on his own floor, a body walking its owner's waypoints goes
+    // straight (systems/bodydoors.js opens the leaf on his heading); anywhere
+    // else the kernel still walks him round the sofa.)
+    let atDoor = false;
+    if (ped.controlled && ped.path && ped.path.length && CBZ.bodyDoors && CBZ.bodyDoors.near) {
+      const near = CBZ.bodyDoors.near(ped.pos.x, ped.pos.z, 4.2, _doorNear);
+      for (let i = 0; i < near.length && !atDoor; i++) {
+        const c = near[i];
+        if (c.y0 != null && Math.abs(c.y0 - (ped.pos.y || 0)) > 1.6) continue;
+        if (Math.hypot((c.minX + c.maxX) / 2 - ped.pos.x, (c.minZ + c.maxZ) / 2 - ped.pos.z) < 4.2) atDoor = true;
+      }
+    }
+    if (!order && !routed && !atDoor && cmdSpd > 0 && dist > 1.2 && CBZ.cityNav && CBZ.cityNav.contextSteer) {
       const hx = dx / dist, hz = dz / dist;
       const psx = ped._prevSteerX || 0, psz = ped._prevSteerZ || 0;
       // A STEER IS A COMMITMENT: on screen it is re-asked ~7 times a second,

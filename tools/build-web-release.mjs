@@ -111,6 +111,15 @@ if(!portal){
       writeFileSync(p,html);
     }
   }
+  // THE PRESIDENT'S DOOR opens the real engine (city/president_game.js): in
+  // the portal the engine page is gang-city.html, not ../index.html (the chart)
+  {
+    const p=path.join(output,'games/president.html');
+    if(existsSync(p)){
+      const html=readFileSync(p,'utf8').replace('</head>','<script>window.CBZ=Object.assign(window.CBZ||{},{ENGINE_PAGE:"../gang-city.html"});</script>\n</head>');
+      writeFileSync(p,html);
+    }
+  }
   // thumbnails: ba covers, 16:9, converted to 960x540 JPEG so the chart is light
   const thumbFor={};
   if(thumbs){

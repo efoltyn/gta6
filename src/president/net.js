@@ -103,7 +103,13 @@
   }
 
   CBZ.presNet = {
-    host: function (opts) { opts = Object.assign({}, opts, { host: true }); return session("room:host", opts); },
+    // opts.code: open THAT room again (a host whose lobby page handed the room
+    // to the game page re-opens the same code; rooms.js rolls a new one if taken)
+    host: function (opts) {
+      opts = Object.assign({}, opts, { host: true });
+      const c = opts.code ? (CBZ.rooms ? CBZ.rooms.cleanCode(opts.code) : String(opts.code).toUpperCase()) : "";
+      return session(c ? "room:" + c + ":host" : "room:host", opts);
+    },
     join: function (code, opts) { const c = CBZ.rooms ? CBZ.rooms.cleanCode(code) : String(code || "").toUpperCase(); return session("room:" + c, opts); },
   };
 })();

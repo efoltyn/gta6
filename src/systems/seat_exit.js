@@ -200,6 +200,7 @@
   function onKey(e) {
     if (!e || e.repeat || e.ctrlKey || e.metaKey || e.altKey || typing(e)) return;
     if (!live()) return;
+    if (CBZ.presBookOpen) return;           // reading the briefing book: E closes the book, not the chair (city/president_book.js)
     const k = String(e.key || "").toLowerCase();
     if (k !== "e" && k !== "f") return;
     const st = seatState();

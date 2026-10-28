@@ -155,7 +155,7 @@
     if (H.crackdown > 8) P(pick(["Said one word at the protest. Lost my job.", "We're not afraid of you."], s));
     if (H.scandal > 8) P(pick(["Every week a new leak.", "Resign."], s));
     if (H.pride > 6) P(pick(["Proud of this country today.", "Flags on every house on my street."], s));
-    if (c.fx < 0.7) P("The " + c.name + " mark is worth nothing. Paid in dollars or not at all.");
+    if (c.fx < 0.7) P(pick(["Our money buys half what it did.", "Shops want cash up front now."], s));
     if (!out.length && c.approval > 55) P(pick(["Quiet week. Good.", "Say what you want, the trains run."], s));
     return out;
   }

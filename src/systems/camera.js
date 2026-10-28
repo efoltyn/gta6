@@ -604,7 +604,9 @@
     // a bare unlock and paused, and inventory.js's own `!playing && invOpen ->
     // close()` sweep then shut the bag on the next frame. Pressing I flashed
     // the stash and dropped you on the pause card.
-    if (!cam.locked && CBZ.game.state === "playing" && !(CBZ.surv && CBZ.surv.spectating) && !(CBZ.fullMap && CBZ.fullMap.active) && !CBZ.cityMenuOpen && !CBZ.invOpen && !CBZ.settingsOpen && !(CBZ.cityCam && CBZ.cityCam.death) && !CBZ.game.busted && !(CBZ.game.mode === "city" && CBZ.player && CBZ.player.dead)) CBZ.setState("paused");
+    // CBZ.presBookOpen (city/president_book.js): reading the briefing book
+    // lets the mouse go so it can point at the page; the world keeps running.
+    if (!cam.locked && CBZ.game.state === "playing" && !(CBZ.surv && CBZ.surv.spectating) && !(CBZ.fullMap && CBZ.fullMap.active) && !CBZ.cityMenuOpen && !CBZ.invOpen && !CBZ.settingsOpen && !CBZ.presBookOpen && !(CBZ.cityCam && CBZ.cityCam.death) && !CBZ.game.busted && !(CBZ.game.mode === "city" && CBZ.player && CBZ.player.dead)) CBZ.setState("paused");
     else if (cam.locked && CBZ.game.state === "paused") CBZ.setState("playing");
   });
   document.addEventListener("mousemove", (e) => {

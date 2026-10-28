@@ -217,6 +217,17 @@
 
     // ---- A CINEMATIC QUESTION IS UP (city/campaign_ui.js): the d-pad answers
     // it and the pad drives nothing else (no walk, no look, no trigger) ----
+    // ---- SOMETHING IN YOUR HANDS OWNS THE PAD (city/president_book.js: the
+    // briefing book turns on the d-pad / bumpers, points with the stick) ----
+    const OWN = CBZ.padOwner;
+    if (OWN && OWN.active && OWN.active()) {
+      if (Object.keys(held).length) releaseAllKeys();
+      padE(false);
+      setAim(false); setFire(false);
+      try { OWN.pad(pad, function (i) { return edge(pad, i); }, B); } catch (e) {}
+      for (const k in B) edge(pad, B[k]);
+      return;
+    }
     const PR = CBZ.padPrompt;
     if (PR && PR.active && PR.active()) {
       if (Object.keys(held).length) releaseAllKeys();

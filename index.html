@@ -21,7 +21,7 @@
 <link rel="stylesheet" href="css/mobile.css?v=noobj1022">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
 <link rel="stylesheet" href="css/city.css?v=noobj1022">
-<link rel="stylesheet" href="css/campaign.css?v=noobj1022">
+<link rel="stylesheet" href="css/campaign.css?v=pres1028">
 <link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
 <link rel="stylesheet" href="css/title_hub.css?v=islesave1022">
 </head>
@@ -906,7 +906,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=hands1022"></script>
+<script src="src/systems/camera.js?v=pres1028"></script>
 <script src="src/systems/physics.js?v=nogc1022"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- THE ONE MOVER (CBZ.bodyMove) every human body is moved through, and the per-frame net (onUpdate 99.97) that puts back anything that crossed a wall. After physics.js (sweepCircle/collide/walkGroundAt). -->
@@ -1054,11 +1054,11 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <!-- where a floating touch button may go (the verb column, the way out): pure rect math -->
 <script src="src/systems/touch_layout.js?v=deck1011"></script>
-<script src="src/systems/seat_exit.js?v=deck1011"></script>
+<script src="src/systems/seat_exit.js?v=pres1028"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
-<script src="src/systems/gamepad.js?v=cmd1022p"></script>
+<script src="src/systems/gamepad.js?v=pres1028"></script>
 <script src="src/systems/fpsmode.js?v=stall1022"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=stall1022"></script>
@@ -1497,7 +1497,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
-<script src="src/entities/moves_posture.js?v=jailai1020"></script>
+<script src="src/entities/moves_posture.js?v=pres1028"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=hands1022"></script>
 <script src="src/city/economy.js?v=isleopen1022"></script>
@@ -1522,7 +1522,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=trunk1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=noobj1022"></script>
+<script src="src/city/peds.js?v=pres1028"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -2115,9 +2115,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/agency.js?v=ijkl1022"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
-<script src="src/city/campaign_ui.js?v=pres1026"></script>
+<script src="src/city/campaign_ui.js?v=pres1028"></script>
 <script src="src/city/campaign.js?v=camp1022b"></script>
-<script src="src/city/cinematics.js?v=cmd1022o"></script>
+<script src="src/city/cinematics.js?v=pres1028"></script>
 <script src="src/systems/humancontact.js?v=bodymove1022"></script>
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
      (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
@@ -2350,7 +2350,7 @@ document.body.appendChild(b);}}catch(e){}})();
      decisions (roles, stable slots, smoothed follow, sector scans, the panic
      protocol, counter-snipers) for every detail in the city. -->
 <script src="src/city/brain_protection.js?v=mladdervoice1"></script>
-<script src="src/city/protection.js?v=leave1014"></script>
+<script src="src/city/protection.js?v=pres1028"></script>
 <script src="src/city/officials.js?v=leave1014"></script>
 <script src="src/city/approval.js?v=boot1013"></script>
 <script src="src/city/elections.js?v=address1008"></script>
@@ -2563,7 +2563,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=borders1022"></script>
+<script src="src/city/presidency.js?v=pres1028"></script>
 <script src="src/city/politics.js?v=btn1011"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
@@ -2573,7 +2573,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=cine1022"></script>
+<script src="src/city/president_office.js?v=pres1028"></script>
 <script src="src/city/motorcade.js?v=mijkl10bodymo"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
@@ -2582,6 +2582,16 @@ document.body.appendChild(b);}}catch(e){}})();
      loyalty, loyalty feeds the coup. After presidency.js,
      president_office.js, protection.js, motorcade.js. -->
 <script src="src/city/president_staff.js?v=leave1014"></script>
+<!-- THE PRESIDENT GAME (games/president.html opens this page with ?president=):
+     the briefing book on the Resolute desk, the men who come for him in the
+     building, and the real-world model on a clock feeding the office. All
+     three are inert without ?president= (the book has no source, no storm is
+     started, the game file returns at once). president_game.js loads the
+     president/*.js world files itself, under ITS OWN ?v= below: bump it when
+     any of them changes. -->
+<script src="src/city/president_book.js?v=pres1028"></script>
+<script src="src/city/president_storm.js?v=pres1028"></script>
+<script src="src/city/president_game.js?v=pres1028"></script>
 <!-- THE COMMANDER IN CHIEF (city/warroom.js): war / peace / airstrike / nuke
      for a sitting President, ordered from the Situation Room's red phones and
      map (presidency.js), every strike aimed on the map target board
@@ -2593,7 +2603,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/warroom.js?v=borders1022"></script>
 <script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=protestcpu1022"></script>
-<script src="src/city/president_public.js?v=protestcpu1022"></script>
+<script src="src/city/president_public.js?v=pres1028"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on
