@@ -101,33 +101,22 @@
   }
 
   /* ============================================================
-     SHAPES — a drop is a real object, and the object says what it is.
+     SHAPES — a drop is the REAL object, the one in the trade table.
 
-     Keyed off economy.js's OWN item table (its `tag` field), with a short
-     list of name overrides for the things a tag cannot separate. Adding an
-     item to economy.js gets a shape for free from its tag; adding a NEW
-     SHAPE is a row here and nothing else. There is no per-item table and
-     there must never be one.
+     A gun, the guard's torch and the shank are the authored weapon models
+     (CBZ.buildActorWeapon / CBZ.buildFlashlight), stripped of their hand pose
+     and laid on the shared measured-rest solver. EVERYTHING ELSE is the item's
+     own model from city/itemassets.js — the pack of cigarettes, the flip
+     phone, the brass knuckles, the bag of pruno — at its real size, which is
+     also exactly what its icon is a photograph of. This file used to draw its
+     own two-box stand-ins per tag (a "card" for a phone, a "pouch" cube for
+     anything it had no row for): the cubes the owner asked about.
      ============================================================ */
   const cmat = function (c, o) { return CBZ.cmat ? CBZ.cmat(c, o) : new THREE.MeshLambertMaterial({ color: c }); };
   const bgeo = function (w, h, d) {
     if (CBZ.boxGeom) return CBZ.boxGeom(w, h, d);
     const g = new THREE.BoxGeometry(w, h, d); g._shared = true; return g;
   };
-  const _cyl = new Map();
-  function cgeo(r, h) {
-    const k = r + "," + h;
-    let g = _cyl.get(k);
-    if (!g) { g = new THREE.CylinderGeometry(r, r, h, 10); g._shared = true; _cyl.set(k, g); }
-    return g;
-  }
-  const _tor = new Map();
-  function tgeo(r, t) {
-    const k = r + "," + t;
-    let g = _tor.get(k);
-    if (!g) { g = new THREE.TorusGeometry(r, t, 5, 12); g._shared = true; _tor.set(k, g); }
-    return g;
-  }
   function put(parent, geo, mat, x, y, z, rx, ry, rz) {
     const m = new THREE.Mesh(geo, mat);
     m.position.set(x || 0, y || 0, z || 0);
@@ -137,51 +126,35 @@
     return m;
   }
 
-  // name -> shape overrides. Everything else falls through to its ITEMS tag.
-  const SHAPE_BY_NAME = {
-    "Gun": "gun", "Rifle": "gun", "Guard Torch": "torch",
-    // "shank" is the Shiv's OWN shape, not the generic blade: it is the only
-    // improvised blade in the catalog with a real authored model, so the thing
-    // you see lying on the concrete is the thing that was in his fist a second
-    // earlier. The rest keep the two-box approximation until they earn a model.
-    "Shiv": "shank", "Shank": "shank",
-    "Razor Blade": "blade", "Hacksaw Blade": "blade",
-    "Brass Knuckles": "blade", "Hatchet": "blade", "Pickaxe": "blade",
-    "Handcuff Key": "card", "Contraband Map": "card", "Burner SIM": "card",
-    "Phone Charger": "card", "Burner Phone": "card", "Tattoo Gun": "pouch",
-    "Cigarette Carton": "carton", "Ramen": "carton", "Energy Bar": "carton",
-    "Energy Drink": "vial", "Soap": "carton", "Lighter": "vial",
-    "Cash Roll": "roll", "Gold Chain": "chain", "Gold Tooth": "trinket",
-    "Luxury Watch": "trinket", "Stolen Wallet": "carton",
-    "Bedsheet Rope": "roll", "Lockpick": "blade",
-    "Bandage": "gauze",
-  };
-  const SHAPE_BY_TAG = {
-    key: "card", valuables: "trinket", drugs: "vial",
-    tools: "pouch", goods: "pouch", resource: "pouch",
-  };
-  function shapeOf(name) {
-    if (SHAPE_BY_NAME[name]) return SHAPE_BY_NAME[name];
-    const it = CBZ.econ && CBZ.econ.ITEMS && CBZ.econ.ITEMS[name];
-    return (it && SHAPE_BY_TAG[it.tag]) || "pouch";
-  }
+  // the three things that ride the weapon rest solver; everything else is "item"
+  const RIGID_BY_NAME = { "Gun": "gun", "Rifle": "gun", "Guard Torch": "torch", "Shiv": "shank", "Shank": "shank" };
+  function shapeOf(name) { return RIGID_BY_NAME[name] || "item"; }
   function rigidShape(shape) { return shape === "gun" || shape === "torch" || shape === "shank"; }
 
-  // A tint per rarity, so a gold chain in the dirt reads differently from a
-  // bar of soap without anybody typing a colour per item.
-  // Tints match css/inventory.css's slot borders (rare = blue, epic = gold) —
-  // the ground glint and the bag border are the same claim about the same item,
-  // and the two tables disagreeing was caught at merge. Change BOTH or neither.
-  const RARE_TINT = { common: 0x8b8f96, uncommon: 0x6fa9c8, rare: 0x60a4ff, epic: 0xffcb5c };
-  function tintOf(name) {
-    const it = CBZ.econ && CBZ.econ.ITEMS && CBZ.econ.ITEMS[name];
-    return RARE_TINT[(it && it.rarity) || "common"] || RARE_TINT.common;
+  // An item asset, centred on its own bounds so the ballistic below can spin
+  // it about its middle and rest it on its measured half-height.
+  function centred(obj) {
+    const g = new THREE.Group();
+    g.add(obj);
+    obj.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(obj);
+    if (!isFinite(b.min.x)) return { mesh: g, hh: 0.03, r: 0.08 };
+    obj.position.x -= (b.min.x + b.max.x) / 2;
+    obj.position.y -= (b.min.y + b.max.y) / 2;
+    obj.position.z -= (b.min.z + b.max.z) / 2;
+    const hh = Math.max(0.004, (b.max.y - b.min.y) / 2);
+    const r = Math.max(0.04, Math.min(0.16, Math.max(b.max.x - b.min.x, b.max.z - b.min.z) / 2));
+    return { mesh: g, hh: hh, r: r };
+  }
+  function itemModel(name) {
+    let o = null;
+    try { o = CBZ.itemAssetPickup ? CBZ.itemAssetPickup(name, null, null) : null; } catch (e) { o = null; }
+    return o;
   }
 
   // Each builder returns { mesh, hh, r } — hh is the half-height it rests on,
-  // r the collision radius for the ballistic. Two or three meshes, no more.
+  // r the collision radius for the ballistic.
   function buildShape(shape, name) {
-    const tint = tintOf(name);
     const g = new THREE.Group();
     let hh = 0.07, r = 0.12;
     if (shape === "gun") {
@@ -195,9 +168,7 @@
         model.position.set(0, 0, 0);
         model.rotation.set(0, 0, 0);
         // REAL-DIMENSION SIZING (weapons/weapon-scale.js): the floor is world
-        // space, so the world scalar applies directly — the gun on the deck
-        // is the same length as the one that lands in the hand (it used to be
-        // ~40% longer and shrink on pickup).
+        // space, so the world scalar applies directly.
         model.scale.setScalar((CBZ.weaponWorldScale && CBZ.weaponWorldScale(name)) || 1.05);
         g.add(model);
       } else {
@@ -205,9 +176,7 @@
       }
       hh = 0.05; r = 0.13;
     } else if (shape === "torch") {
-      // The exact held model, with the hand-socket rotation removed. Released
-      // torches join the same measured side-rest solver as firearms, so their
-      // reflector/body—not a guessed half-height—decides where the ground is.
+      // The exact held model, with the hand-socket rotation removed.
       if (CBZ.buildFlashlight) {
         const model = CBZ.buildFlashlight({ lit: false });
         model.position.set(0, 0, 0);
@@ -215,83 +184,44 @@
         model.scale.setScalar(1.08);
         g.add(model);
       } else {
-        put(g, cgeo(0.055, 0.44), cmat(0x20262d), 0, 0, 0, Math.PI / 2);
+        put(g, bgeo(0.11, 0.11, 0.44), cmat(0x20262d), 0, 0, 0);
       }
       hh = 0.055; r = 0.12;
     } else if (shape === "shank") {
-      // Same law as the gun and the torch above: the dropped object is the
-      // AUTHORED object with the hand-socket pose stripped off, so it lands on
-      // its real flat side under the shared measured-rest solver instead of on
-      // a guessed half-height. A shank that fell out of a dead man's waistband
-      // must be the same shank you pick up.
+      // the AUTHORED shank, hand-socket pose stripped: the same blade that
+      // was in his fist a second earlier.
       if (CBZ.buildActorWeapon) {
         const model = CBZ.buildActorWeapon("Shiv");
         model.position.set(0, 0, 0);
         model.rotation.set(0, 0, 0);
-        // same real-dimension law as the gun branch above
         model.scale.setScalar((CBZ.weaponWorldScale && CBZ.weaponWorldScale("Shiv")) || 1.05);
         g.add(model);
       } else {
-        put(g, bgeo(0.05, 0.04, 0.20), cmat(0x1b1f26), 0, 0, -0.02);
-        put(g, bgeo(0.035, 0.02, 0.26), cmat(0xb9c2cc), 0, 0.005, 0.20);
+        put(g, bgeo(0.035, 0.02, 0.26), cmat(0xb9c2cc), 0, 0.005, 0.10);
       }
       hh = 0.018; r = 0.10;
-    } else if (shape === "blade") {
-      put(g, bgeo(0.05, 0.04, 0.20), cmat(0x1b1f26), 0, 0, -0.02);           // taped grip
-      put(g, bgeo(0.035, 0.02, 0.26), cmat(0xb9c2cc), 0, 0.005, 0.20);       // ground edge
-      hh = 0.02; r = 0.10;
-    } else if (shape === "card") {
-      put(g, bgeo(0.20, 0.014, 0.13), cmat(0xe8e3d6), 0, 0, 0);
-      put(g, bgeo(0.20, 0.016, 0.035), cmat(tint), 0, 0.002, -0.04);         // mag stripe
-      hh = 0.008; r = 0.10;
-    } else if (shape === "carton") {
-      put(g, bgeo(0.26, 0.13, 0.17), cmat(0xf2ede0), 0, 0, 0);
-      put(g, bgeo(0.27, 0.05, 0.18), cmat(tint), 0, 0.05, 0);                // band
-      hh = 0.065; r = 0.14;
-    } else if (shape === "vial") {
-      put(g, cgeo(0.045, 0.16), cmat(0x2f3a44), 0, 0, 0, Math.PI / 2);       // lies on its side
-      put(g, cgeo(0.048, 0.03), cmat(tint), 0, 0, 0.088, Math.PI / 2);       // cap
-      hh = 0.045; r = 0.09;
-    } else if (shape === "roll") {
-      put(g, cgeo(0.055, 0.15), cmat(0x4d6b45), 0, 0, 0, Math.PI / 2);       // rolled notes
-      put(g, tgeo(0.058, 0.012), cmat(0xb03a3a), 0, 0, 0, 0);                // rubber band
-      hh = 0.055; r = 0.09;
-    } else if (shape === "gauze") {
-      // A GAUZE ROLL (systems/vitals.js wraps a bleed with one): a short
-      // white roll on its side, the wound layers showing as rings on both
-      // ends, the loose end unrolled flat along the surface in front of it.
-      const white = cmat(0xf1eee5), layer = cmat(0xd8d2c3), core = cmat(0xb9b09c);
-      put(g, cgeo(0.036, 0.07), white, 0, 0, 0, 0, 0, Math.PI / 2);           // the roll
-      put(g, cgeo(0.008, 0.072), core, 0, 0, 0, 0, 0, Math.PI / 2);          // the wound centre
-      for (const sx of [-0.0355, 0.0355]) {
-        put(g, tgeo(0.024, 0.0022), layer, sx, 0, 0, 0, Math.PI / 2, 0);    // layer lines on the end
-        put(g, tgeo(0.015, 0.002), layer, sx, 0, 0, 0, Math.PI / 2, 0);
-      }
-      put(g, bgeo(0.068, 0.003, 0.09), white, 0, -0.0345, 0.05);            // the loose end, laid out flat
-      hh = 0.036; r = 0.07;
-    } else if (shape === "chain") {
-      put(g, tgeo(0.10, 0.018), cmat(tint), 0, 0, 0, Math.PI / 2);           // laid flat
-      hh = 0.018; r = 0.12;
-    } else if (shape === "trinket") {
-      put(g, bgeo(0.075, 0.03, 0.075), cmat(tint), 0, 0, 0);                 // face / stone
-      put(g, bgeo(0.045, 0.018, 0.19), cmat(0x2a2118), 0, -0.004, 0);        // strap
-      hh = 0.018; r = 0.09;
-    } else {                                                                  // pouch
-      put(g, bgeo(0.17, 0.10, 0.12), cmat(0x5a5347), 0, 0, 0);
-      put(g, bgeo(0.06, 0.03, 0.13), cmat(tint), 0, 0.055, 0);               // tie
-      hh = 0.05; r = 0.11;
+    } else {
+      const o = itemModel(name);
+      if (o) return centred(o);
+      put(g, bgeo(0.10, 0.04, 0.14), cmat(0x5a5347), 0, 0, 0);       // no itemassets.js loaded
+      hh = 0.02; r = 0.08;
     }
     return { mesh: g, hh: hh, r: r };
   }
 
-  // The cigarettes a body is carrying land as ONE physical bundle rather
-  // than as N separate props — a dozen loose packs on the floor is confetti.
+  // The cigarettes a body is carrying land as packs, not N loose props: one
+  // pack under a full pack's worth (20), two lying together from 20 up.
   function buildCigs(n) {
     const g = new THREE.Group();
-    put(g, bgeo(0.20, 0.11, 0.13), cmat(0xf6f3ea), 0, 0, 0);
-    put(g, bgeo(0.21, 0.045, 0.14), cmat(0xc94d3a), 0, 0.045, 0);
-    if (n >= 10) put(g, bgeo(0.18, 0.10, 0.12), cmat(0xe9e3d2), 0.045, 0.10, 0.02, 0, 0.4, 0);
-    return { mesh: g, hh: 0.055, r: 0.12 };
+    const a = itemModel("Cigarettes");
+    if (!a) { put(g, bgeo(0.055, 0.022, 0.088), cmat(0xf4f1ea), 0, 0, 0); return { mesh: g, hh: 0.011, r: 0.06 }; }
+    a.rotation.x = -Math.PI / 2;                 // a dropped pack lies on its back
+    g.add(a);
+    if (n >= 20) {
+      const b = itemModel("Cigarettes");
+      if (b) { b.rotation.set(-Math.PI / 2, 0, 0.5); b.position.set(0.05, 0, 0.03); g.add(b); }
+    }
+    return centred(g);
   }
 
   /* ============================================================

@@ -136,10 +136,42 @@
   function cn(g, mat, r, h, x, y, z, rx, ry, rz) { return put(g, gCon(r, h), mat, x, y, z, rx, ry, rz); }
   function to(g, mat, r, t, x, y, z, rx, ry, rz) { return put(g, gTor(r, t), mat, x, y, z, rx, ry, rz); }
   function oc(g, mat, r, x, y, z) { return put(g, gOct(r), mat, x, y, z); }
+  // A TUBE along a smooth path (a charger cable, a rope's tail, a wire). The
+  // points are [x,y,z] triples; the key names the path so it is built once.
+  function gTube(key, pts, r, seg) {
+    return G("u" + key + "," + r, function () {
+      const v = pts.map(function (p) { return new THREE.Vector3(p[0], p[1], p[2]); });
+      return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(v), seg || 32, r, 6, false);
+    });
+  }
+  function tb(g, mat, key, pts, r, seg) { return put(g, gTube(key, pts, r, seg), mat, 0, 0, 0); }
+  // A FLAT OUTLINE lying on XZ, base at y=0, extruded h up: [x, z] pairs. The
+  // one shape a toothed blade or a SIM card's clipped corner needs.
+  function gFlat(key, pts, h) {
+    return G("f" + key + "," + h, function () {
+      const s = new THREE.Shape();
+      s.moveTo(pts[0][0], -pts[0][1]);
+      for (let i = 1; i < pts.length; i++) s.lineTo(pts[i][0], -pts[i][1]);
+      const geo = new THREE.ExtrudeGeometry(s, { depth: h, bevelEnabled: false });
+      geo.rotateX(-Math.PI / 2);          // shape Y -> world -Z (undone by the minus above), extrusion -> +Y
+      return geo;
+    });
+  }
 
   // A CylinderGeometry's axis is Y. LZ lays it along Z (the long-axis rule);
   // LX lays it along X. Written once so no builder ever guesses the sign.
   const LZ = Math.PI / 2, LX = -Math.PI / 2, TAU = Math.PI * 2;
+
+  // S: a colour authored as it should LOOK (sRGB), turned into the linear
+  // value the renderers want. Both the game and the icon studio encode their
+  // output to sRGB, so a hex handed straight to a material is shown lifted:
+  // 0xc8322b, a cigarette-pack red, came out pink and every pale thing went to
+  // white. The prison kit is authored in S so its colours are the colours.
+  function s2l(c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+  function S(hex, opts) {
+    const r = Math.round(s2l(hex >> 16 & 255) * 255), g = Math.round(s2l(hex >> 8 & 255) * 255), b = Math.round(s2l(hex & 255) * 255);
+    return M((r << 16) | (g << 8) | b, opts);
+  }
 
   // ---- colour arithmetic (the tint is the only thing a species changes) ----
   function cl(v) { return v < 0 ? 0 : v > 255 ? 255 : v | 0; }
@@ -398,6 +430,18 @@
           const o = put(g, gOct(at[i][2]), i % 2 ? xtal : xtal2, at[i][0], 0.006 + at[i][2] * 0.35, at[i][1]);
           o.scale.set(0.8, 0.5, 1.3); o.rotation.set(0.3 * i, 1.1 * i, 0);
         }
+        return;
+      }
+      // A GRAM BAG: what "Powder" is in a cell — a small zip baggie, the
+      // white mound pushing the plastic up, a few grains loose on the table.
+      if (/^powder$|gram|baggie|eight ?ball/.test(n)) {
+        const bag = S(0xdfe5e2), seal = S(0xb03a32), powder = S(0xf3f4f6), powderD = S(0xd9dde2);
+        bx(g, bag, 0.048, 0.0035, 0.062, 0, 0.00175, 0);
+        bx(g, seal, 0.049, 0.004, 0.004, 0, 0.002, 0.026);
+        bx(g, bag, 0.049, 0.0015, 0.006, 0, 0.0008, 0.030);
+        sh(g, powder, 0.019, -0.002, 0.004, -0.004, 1.0, 0.42, 1.15);
+        sh(g, powderD, 0.012, 0.006, 0.006, 0.006, 1.0, 0.38, 1.0);
+        for (let i = 0; i < 5; i++) sh(g, powder, 0.0018, 0.032 + (i % 2) * 0.006, 0.0008, -0.014 + i * 0.006, 1, 0.5, 1);
         return;
       }
       // THE KILO BRICK. ~12 x 4.5 x 19 cm, wrapped in overlapping bands of tan
@@ -1003,6 +1047,359 @@
       to(g, C.mA, 0.014, 0.0038, 0, 0.0038, 0, LZ, 0, 0);
       oc(g, C.mD, 0.0105, 0, 0.019, 0).scale.set(1, 1.25, 1);
       cy(g, C.mL, 0.007, 0.009, 0.006, 0, 0.010, 0, 0, 0, 0, 6);             // setting
+    },
+
+    // ---- THE PRISON'S POCKETS (2026-10-28). OWNER: "a lot of the items in
+    //  inventory are stupid fucking fake icons, like a fucking cube. What the
+    //  fuck is the cube? I like the guns because the icon is a mini version of
+    //  the actual gun." Every one of these used to fall to `parcel` (the
+    //  cube), to the burger (ramen, an energy bar), to the shop knife (brass
+    //  knuckles, a hacksaw blade) or to a smartphone (a SIM card). Each is now
+    //  the object, at its real size, and the same model lies on the floor when
+    //  a man drops it (systems/prisondrops.js) and sits in the trade table.
+
+    // A FLIP-TOP PACK, standing, lid thrown back, three filters showing and
+    // one pulled half out. The roof chevron is what says "cigarettes" at
+    // 30 px; the orange cork tips are what say it up close. 55 x 88 x 22 mm.
+    cigpack: function (g) {
+      const white = S(0xf4f1ea), red = S(0xc8322b), foil = S(0xcfd3d8), cork = S(0xd88a3c), paper = S(0xf7f5ef);
+      const W = 0.055, H = 0.070, D = 0.022;
+      bx(g, white, W, H, D, 0, H / 2, 0);
+      // the red roof: a band across the top of every face and a chevron down the front
+      bx(g, red, W + 0.0008, 0.016, D + 0.0008, 0, H - 0.008, 0);
+      bx(g, red, 0.033, 0.010, 0.0008, -0.0125, 0.052, D / 2 + 0.0002, 0, 0, -0.50);
+      bx(g, red, 0.033, 0.010, 0.0008, 0.0125, 0.052, D / 2 + 0.0002, 0, 0, 0.50);
+      bx(g, S(0x1d1f24), 0.026, 0.004, 0.0008, 0, 0.026, D / 2 + 0.0002);   // the printed name line
+      bx(g, S(0xd8c27a), 0.012, 0.010, 0.0008, 0, 0.014, D / 2 + 0.0002);   // the seal
+      bx(g, foil, W - 0.003, 0.004, D - 0.003, 0, H + 0.002, 0);           // the foil collar
+      // the lid, hinged at the back top edge and thrown back
+      const lid = new THREE.Group(); lid.position.set(0, H, -D / 2); lid.rotation.x = -2.0; g.add(lid);
+      bx(lid, red, W, 0.018, D, 0, 0.009, D / 2);
+      bx(lid, white, W - 0.002, 0.016, 0.0006, 0, 0.009, D + 0.0002);
+      // three filters level with the foil, one pulled up
+      const at = [[-0.017, 0], [-0.0085, 0.010], [0.0, 0], [0.0085, 0], [0.017, 0]];
+      for (let i = 0; i < at.length; i++) {
+        const up = at[i][1], x = at[i][0];
+        cy(g, cork, 0.0039, 0.0039, 0.020, x, H + 0.004 + up, 0.004);
+        if (up) cy(g, paper, 0.0039, 0.0039, 0.016, x, H - 0.010 + up, 0.004);
+        cy(g, cork, 0.0039, 0.0039, 0.020, x, H + 0.004, -0.0045);
+      }
+    },
+    // A CARTON: ten packs in one long sleeve (270 x 90 x 50 mm), the same red
+    // roof on each end and along the top, one end torn open with a pack
+    // sliding out of it.
+    carton: function (g) {
+      const white = S(0xf4f1ea), red = S(0xc8322b), gold = S(0xd8c27a);
+      const W = 0.090, H = 0.050, L = 0.270;
+      bx(g, white, W, H, L, 0, H / 2, 0);
+      bx(g, red, W + 0.001, H + 0.001, 0.050, 0, H / 2, -L / 2 + 0.025);
+      bx(g, red, W + 0.001, H + 0.001, 0.034, 0, H / 2, L / 2 - 0.017);
+      for (let i = -2; i <= 2; i++) {                       // a roof chevron per pack along the top
+        bx(g, red, 0.026, 0.0008, 0.008, -0.012, H + 0.0004, i * 0.040, 0, 0.55, 0);
+        bx(g, red, 0.026, 0.0008, 0.008, 0.012, H + 0.0004, i * 0.040, 0, -0.55, 0);
+      }
+      bx(g, gold, W + 0.0012, 0.003, 0.003, 0, H - 0.008, 0.06);   // the tear strip
+      // the torn end flap, hinged at the top edge, swung up
+      const flap = new THREE.Group(); flap.position.set(0, H, L / 2); flap.rotation.x = -1.1; g.add(flap);
+      bx(flap, red, W, 0.001, 0.045, 0, 0, 0.0225);
+      // a pack sliding out of the open end, lying on its face
+      bx(g, white, 0.055, 0.022, 0.060, 0.012, 0.012, L / 2 + 0.018);
+      bx(g, red, 0.0556, 0.0226, 0.018, 0.012, 0.012, L / 2 + 0.040);
+    },
+    // A DISPOSABLE LIGHTER, standing: the oval tank, the steel hood, the
+    // striker wheel and the black fork you press.
+    lighter: function (g) {
+      const tank = S(0xd9452f), steel = S(0xc4cbd2), dark = S(0x1b1d22);
+      const t = cy(g, tank, 0.0125, 0.0125, 0.064, 0, 0.032, 0, 0, 0, 0, 16); t.scale.z = 0.56;
+      const sh2 = cy(g, S(0xb63826), 0.0127, 0.0127, 0.004, 0, 0.0645, 0, 0, 0, 0, 16); sh2.scale.z = 0.58;
+      bx(g, steel, 0.024, 0.013, 0.013, 0.001, 0.071, 0);              // the hood
+      for (let i = 0; i < 3; i++) bx(g, dark, 0.004, 0.0035, 0.0134, -0.006 + i * 0.006, 0.073, 0);  // its vents
+      cy(g, S(0x6f767e), 0.0046, 0.0046, 0.009, -0.010, 0.0775, 0, 0, 0, LX);   // the striker wheel
+      bx(g, dark, 0.012, 0.006, 0.010, 0.009, 0.0675, 0);                 // the fork
+    },
+    // A BAR OF SOAP: a rounded cake with a domed top, an oval pressed into
+    // it, and a little lather on one corner.
+    soap: function (g) {
+      const soapM = S(0x9fd3b8), soapL = S(0xc6e8d6), foam = S(0xf6f8f8);
+      put(g, gRRect(0.060, 0.090, 0.016, 0.020), soapM, 0, 0, 0);
+      sh(g, soapM, 0.030, 0, 0.020, 0, 0.92, 0.22, 1.36);
+      const ov = cy(g, soapL, 0.018, 0.018, 0.0016, 0, 0.0262, 0, 0, 0, 0, 20); ov.scale.z = 1.5;
+      sh(g, foam, 0.0070, 0.022, 0.022, 0.034); sh(g, foam, 0.0050, 0.016, 0.024, 0.040);
+      sh(g, foam, 0.0042, 0.026, 0.020, 0.024);
+    },
+    // A DISPOSABLE RAZOR: the slim orange handle along Z, the head across the
+    // top with its two bright blades and the blue lubricating strip.
+    razor: function (g) {
+      const handle = S(0xe0782e), handleD = S(0xb85c1f), blade = S(0xdfe5ea), head = S(0x2b2f36), strip = S(0x3f8fd8);
+      bx(g, handle, 0.011, 0.008, 0.120, 0, 0.004, -0.010);
+      bx(g, handleD, 0.007, 0.0012, 0.070, 0, 0.0086, -0.030);          // the grip channel
+      bx(g, handle, 0.016, 0.009, 0.014, 0, 0.0045, 0.054, 0.25, 0, 0);
+      bx(g, head, 0.042, 0.009, 0.016, 0, 0.007, 0.064, 0.25, 0, 0);   // the head
+      bx(g, blade, 0.040, 0.0016, 0.0024, 0, 0.0115, 0.064, 0.25, 0, 0);
+      bx(g, blade, 0.040, 0.0016, 0.0024, 0, 0.0105, 0.068, 0.25, 0, 0);
+      bx(g, strip, 0.040, 0.0018, 0.0030, 0, 0.0125, 0.059, 0.25, 0, 0);
+    },
+    // A PHONE CHARGER: the white wall brick with its two prongs, and the
+    // cable in a loose loop ending in its small plug.
+    charger: function (g) {
+      const white = S(0xeef0f2), shade = S(0xc9ced4), steel = S(0xb9c0c8);
+      bx(g, white, 0.026, 0.026, 0.030, 0, 0.013, 0);
+      bx(g, shade, 0.022, 0.001, 0.026, 0, 0.0262, 0);
+      bx(g, steel, 0.0016, 0.006, 0.016, -0.0063, 0.013, -0.023);      // the prongs
+      bx(g, steel, 0.0016, 0.006, 0.016, 0.0063, 0.013, -0.023);
+      cy(g, white, 0.0040, 0.0034, 0.010, 0, 0.012, 0.019, LZ);       // strain relief
+      tb(g, white, "chg", [[0, 0.012, 0.023], [0.006, 0.006, 0.050], [0.040, 0.003, 0.072], [0.070, 0.003, 0.040],
+        [0.058, 0.003, -0.010], [0.030, 0.003, -0.040], [0.012, 0.003, -0.066]], 0.0028, 48);
+      bx(g, white, 0.012, 0.007, 0.022, 0.009, 0.004, -0.078, 0, 0.35, 0);     // the plug
+      bx(g, steel, 0.008, 0.0028, 0.008, 0.005, 0.004, -0.092, 0, 0.35, 0);
+    },
+    // A SIM: the carrier card it came punched in, and the SIM itself popped
+    // out beside it, gold contacts up, the clipped corner that says SIM.
+    sim: function (g) {
+      const red = S(0xc33a33), white = S(0xf2f2ee), gold = S(0xd8b04a), goldD = S(0x8a6c22), ink = S(0x3a3f48);
+      const T = 0.0008;
+      put(g, gRRect(0.054, 0.0856, 0.003, T), white, 0, 0, 0);
+      bx(g, red, 0.0536, 0.0003, 0.034, 0, T + 0.0001, 0.025);           // the carrier's colour
+      bx(g, ink, 0.022, 0.0003, 0.003, -0.010, T + 0.0003, 0.030);
+      bx(g, S(0xb9bdc2), 0.017, 0.0003, 0.027, 0.006, T + 0.0001, -0.018);   // the empty cutout
+      // the SIM, 15 x 25 mm, one corner clipped
+      const sg = new THREE.Group(); sg.position.set(0.044, 0, -0.006); sg.rotation.y = 0.35; g.add(sg);
+      put(sg, gFlat("sim", [[-0.0075, -0.0125], [0.0075, -0.0125], [0.0075, 0.0085], [0.0035, 0.0125], [-0.0075, 0.0125]], T), white, 0, 0, 0);
+      bx(sg, gold, 0.0095, 0.0004, 0.011, 0, T + 0.0001, -0.002);
+      bx(sg, goldD, 0.0005, 0.0002, 0.011, 0, T + 0.0004, -0.002);
+      bx(sg, goldD, 0.0095, 0.0002, 0.0005, 0, T + 0.0004, -0.0045);
+      bx(sg, goldD, 0.0095, 0.0002, 0.0005, 0, T + 0.0004, 0.0005);
+    },
+    // A BURNER: a flip phone opened, keypad up, the lid tilted back on its
+    // hinge with the little screen facing you.
+    flipphone: function (g) {
+      const body = S(0x3a4048), bodyL = S(0x59616b), key = S(0xc9ced4), screen = S(0x6fc0de), dark = S(0x15181c);
+      bx(g, body, 0.048, 0.011, 0.088, 0, 0.0055, 0);
+      for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) {
+        bx(g, key, 0.010, 0.0016, 0.0070, (c - 1) * 0.013, 0.0115, 0.022 - r * 0.0105);
+      }
+      cy(g, key, 0.0070, 0.0070, 0.0016, 0, 0.0115, -0.023, 0, 0, 0, 16);   // the nav ring
+      cy(g, dark, 0.0030, 0.0030, 0.0020, 0, 0.0118, -0.023, 0, 0, 0, 10);
+      bx(g, S(0x4fae5a), 0.008, 0.0016, 0.004, -0.015, 0.0115, -0.034);     // call / hang up
+      bx(g, S(0xc8443a), 0.008, 0.0016, 0.004, 0.015, 0.0115, -0.034);
+      cy(g, bodyL, 0.0062, 0.0062, 0.046, 0, 0.008, -0.044, 0, 0, Math.PI / 2, 14);   // the hinge
+      const lid = new THREE.Group(); lid.position.set(0, 0.008, -0.044); lid.rotation.x = 1.15; g.add(lid);
+      bx(lid, body, 0.048, 0.009, 0.086, 0, 0.0045, -0.043);
+      bx(lid, dark, 0.040, 0.0008, 0.046, 0, 0.0094, -0.040);
+      bx(lid, screen, 0.034, 0.0010, 0.038, 0, 0.0100, -0.040);
+      bx(lid, S(0x2b2f36), 0.012, 0.0010, 0.003, 0, 0.0100, -0.074);       // the earpiece
+    },
+    // BRASS KNUCKLES, lying flat: four finger rings in a row fused into a
+    // curved palm bar. Brass, so it catches the key light.
+    knuckles: function (g) {
+      const brass = S(0xc9a44a), brassL = S(0xe6c86e);
+      for (let i = 0; i < 4; i++) {
+        const x = -0.0345 + i * 0.023;
+        to(g, brass, 0.0115, 0.0042, x, 0.0042, 0.006, LZ, 0, 0);
+        to(g, brassL, 0.0115, 0.0016, x, 0.0078, 0.006, LZ, 0, 0);        // the worn top edge
+        bx(g, brass, 0.010, 0.0080, 0.012, x, 0.004, -0.0135);            // web to the bar
+      }
+      bx(g, brass, 0.074, 0.0084, 0.012, 0, 0.0042, -0.027);             // the palm bar
+      cy(g, brass, 0.0060, 0.0060, 0.0084, -0.040, 0.0042, -0.030, 0, 0, 0, 12);
+      cy(g, brass, 0.0060, 0.0060, 0.0084, 0.040, 0.0042, -0.030, 0, 0, 0, 12);
+      bx(g, brassL, 0.064, 0.0012, 0.004, 0, 0.0088, -0.027);
+    },
+    // A HACKSAW BLADE, out of its frame: the blue bimetal strip with its
+    // toothed edge and the pin holes at both ends, one end wound in black
+    // tape for a grip — what it is in a cell.
+    hacksaw: function (g) {
+      const blue = S(0x2f5fb3), steel = S(0xc4cbd2), tape = S(0x15171a), hole = S(0x0c0d10);
+      const L = 0.150, Wd = 0.0065, pts = [[-Wd, -L], [-Wd, L]];
+      for (let i = 0; i < 40; i++) {                      // the teeth, along +x
+        const z = L - (i / 40) * 2 * L;
+        pts.push([Wd, z], [Wd + 0.0024, z - 0.0038]);
+      }
+      pts.push([Wd, -L]);
+      put(g, gFlat("hacksaw", pts, 0.0008), blue, 0, 0, 0);
+      bx(g, steel, 0.0028, 0.0009, 2 * L - 0.004, Wd + 0.0004, 0.0001, 0);   // the bright set of the teeth
+      cy(g, hole, 0.0022, 0.0022, 0.0010, 0, 0.0002, L - 0.008, 0, 0, 0, 10);
+      cy(g, tape, 0.0105, 0.0105, 0.075, 0, 0.0105, -L + 0.045, LZ, 0, 0, 10);
+      to(g, S(0x2a2d32), 0.0108, 0.0012, 0, 0.0105, -L + 0.020, 0, 0, 0);
+      to(g, S(0x2a2d32), 0.0108, 0.0012, 0, 0.0105, -L + 0.064, 0, 0, 0);
+    },
+    // A PRISON TATTOO GUN: a pen barrel for the tube, a cassette motor
+    // bound on top with black electrical tape, a toothbrush handle for the
+    // frame, a guitar-string needle out of the tip and the wires to a 9 V.
+    tattoo: function (g) {
+      const pen = S(0xe9ecef), penD = S(0x3f6fd0), motor = S(0xb9c0c8), motorD = S(0x30343a), tape = S(0x15171a),
+            brush = S(0x3aa35a), needle = S(0xdfe5ea), red = S(0xc8392f), batt = S(0x1f2329), copper = S(0xc98a3a);
+      cy(g, pen, 0.0050, 0.0050, 0.120, 0, 0.012, 0.010, LZ, 0, 0, 12);       // the pen barrel
+      cn(g, penD, 0.0050, 0.016, 0, 0.012, 0.078, LZ);                       // its tip
+      cy(g, needle, 0.0007, 0.0007, 0.018, 0, 0.012, 0.094, LZ, 0, 0, 6);
+      bx(g, brush, 0.010, 0.006, 0.120, 0, 0.004, -0.006);                    // the toothbrush handle under it
+      cy(g, motor, 0.0115, 0.0115, 0.026, 0, 0.0285, -0.034, LZ, 0, 0, 16);   // the motor on top
+      cy(g, motorD, 0.0118, 0.0118, 0.004, 0, 0.0285, -0.049, LZ, 0, 0, 16);
+      cy(g, motorD, 0.0030, 0.0030, 0.010, 0, 0.0285, -0.016, LZ, 0, 0, 8);  // the shaft, and the cam on it
+      for (let i = 0; i < 3; i++) cy(g, tape, 0.0135, 0.0135, 0.008, 0, 0.0205, -0.044 + i * 0.022, LZ, 0, 0, 14);
+      tb(g, red, "tatR", [[0.004, 0.030, -0.048], [0.010, 0.020, -0.075], [0.030, 0.006, -0.095], [0.042, 0.004, -0.112]], 0.0011, 16);
+      tb(g, motorD, "tatB", [[-0.004, 0.030, -0.048], [0.000, 0.018, -0.080], [0.018, 0.006, -0.100], [0.030, 0.004, -0.114]], 0.0011, 16);
+      bx(g, batt, 0.026, 0.017, 0.046, 0.040, 0.0085, -0.140, 0, 0.3, 0);       // the 9 V
+      bx(g, copper, 0.0262, 0.0172, 0.010, 0.040, 0.0085, -0.162, 0, 0.3, 0);
+      cy(g, motor, 0.0035, 0.0035, 0.003, 0.033, 0.0185, -0.118, 0, 0.3, 0, 8);
+      cy(g, motor, 0.0035, 0.0035, 0.003, 0.046, 0.0185, -0.122, 0, 0.3, 0, 8);
+    },
+    // A CUP OF INSTANT NOODLES: the tapered paper cup, its red band, the
+    // foil lid peeled half back, the dried block showing under it.
+    cupnoodle: function (g) {
+      const cup = S(0xf3f0e8), red = S(0xc8322b), redD = S(0x8f1f1a), foil = S(0xd4d8dd), noodle = S(0xe6c477);
+      cy(g, cup, 0.046, 0.034, 0.080, 0, 0.040, 0, 0, 0, 0, 24);
+      cy(g, red, 0.0445, 0.0385, 0.030, 0, 0.046, 0, 0, 0, 0, 24);
+      cy(g, redD, 0.0470, 0.0470, 0.004, 0, 0.0795, 0, 0, 0, 0, 24);          // the rolled rim
+      cy(g, noodle, 0.043, 0.043, 0.004, 0, 0.0785, 0, 0, 0, 0, 24);
+      for (let i = 0; i < 6; i++) to(g, S(0xd2ab5c), 0.007, 0.0016, -0.018 + (i % 3) * 0.012, 0.0812, 0.010 + ((i / 3) | 0) * 0.012, LZ, 0, i);
+      wg(g, foil, 0.047, 0.0012, Math.PI, Math.PI, 0, 0.0818, 0);              // the foil still sealed
+      const peel = new THREE.Group(); peel.position.set(0, 0.0818, 0); peel.rotation.z = 0.9; g.add(peel);
+      wg(peel, foil, 0.047, 0.0012, 0, Math.PI, 0, 0, 0);
+      bx(peel, red, 0.010, 0.0014, 0.024, 0.040, 0.0004, 0);                  // the printed tab
+    },
+    // AN ENERGY BAR: the green wrapper with its crimped ends, torn open at
+    // one end, the bar sticking out of it.
+    snackbar: function (g) {
+      const wrap = S(0x3f8f4a), band = S(0xe8c23a), crimp = S(0x2f6f38), bar = S(0x6b4426), nut = S(0xb88a52);
+      bx(g, wrap, 0.040, 0.014, 0.110, 0, 0.007, -0.010);
+      bx(g, band, 0.0405, 0.0145, 0.022, 0, 0.007, -0.020, 0, 0.0, 0);
+      bx(g, crimp, 0.044, 0.003, 0.014, 0, 0.007, -0.070);                     // the crimped seal
+      for (let i = 0; i < 5; i++) bx(g, wrap, 0.044, 0.0035, 0.0012, 0, 0.007, -0.075 + i * 0.0025);
+      bx(g, bar, 0.034, 0.012, 0.034, 0, 0.007, 0.060);                         // the bar, out of the torn end
+      for (let i = 0; i < 4; i++) sh(g, nut, 0.0042, -0.010 + (i % 2) * 0.016, 0.0135, 0.050 + i * 0.008, 1, 0.6, 1);
+      bx(g, wrap, 0.042, 0.002, 0.012, 0.004, 0.015, 0.046, 0.5, 0.2, 0);      // the torn flap lifting
+    },
+    // AN ENERGY DRINK: a slim 250 ml can, the brand panel, the silver neck
+    // and the ring pull on top.
+    energycan: function (g) {
+      const blue = S(0x2850a0), silver = S(0xc4cbd2), red = S(0xd2392f), steel = S(0x9aa3ad);
+      cy(g, blue, 0.0265, 0.0265, 0.122, 0, 0.061, 0, 0, 0, 0, 20);
+      cy(g, silver, 0.0268, 0.0268, 0.040, 0, 0.088, 0, 0, 0, 0, 20);
+      cy(g, red, 0.0270, 0.0270, 0.012, 0, 0.062, 0, 0, 0, 0, 20);
+      cy(g, silver, 0.0225, 0.0265, 0.010, 0, 0.127, 0, 0, 0, 0, 20);         // the neck
+      cy(g, steel, 0.0228, 0.0228, 0.003, 0, 0.1335, 0, 0, 0, 0, 20);          // the lid
+      bx(g, S(0xdfe5ea), 0.007, 0.0012, 0.016, 0, 0.1355, 0.004);              // the ring pull
+      cy(g, steel, 0.0228, 0.0225, 0.004, 0, 0.002, 0, 0, 0, 0, 20);
+    },
+    // PRUNO: fermenting fruit in a sealed bag, swollen, orange and cloudy,
+    // chunks of fruit pressing at the plastic.
+    pruno: function (g) {
+      const bag = S(0xdfe5e2), seal = S(0x3b62a8), juice = S(0xd9892a), juiceL = S(0xeab25a), pulp = S(0xc9692a), peel = S(0xe8c23a);
+      sh(g, juice, 0.060, 0, 0.022, 0, 1.0, 0.38, 1.25);
+      sh(g, juiceL, 0.040, -0.010, 0.034, 0.010, 1.0, 0.26, 1.1);              // the cloud of yeast near the top
+      bx(g, bag, 0.122, 0.004, 0.026, 0, 0.004, -0.082);                       // the empty plastic above the liquid
+      bx(g, seal, 0.124, 0.006, 0.006, 0, 0.005, -0.094);                      // the zip
+      bx(g, bag, 0.124, 0.003, 0.010, 0, 0.003, -0.102);
+      const at = [[0.024, 0.040, 0.020, pulp], [-0.026, 0.036, -0.020, peel], [0.010, 0.042, -0.032, pulp], [-0.020, 0.032, 0.036, peel]];
+      for (let i = 0; i < at.length; i++) {
+        const d = put(g, gDod(0.011), at[i][3], at[i][0], at[i][1], at[i][2]);
+        d.scale.set(1, 0.6, 1.2); d.rotation.set(i, 2 * i, 0);
+      }
+      sh(g, S(0xf3f1e8), 0.004, 0.030, 0.040, -0.010); sh(g, S(0xf3f1e8), 0.003, 0.034, 0.038, -0.002);   // gas bubbles
+    },
+    // PAINKILLERS: a blister strip, 2 x 5 tablets under domes, one popped.
+    blister: function (g) {
+      // the card is the printed side (deep green, the brand band) so the
+      // white tablets under their domes stand off it
+      const foil = S(0x8e98a4), print = S(0x2f7a58), printL = S(0x4fa37c), dome = S(0xc9d4dc), tab = S(0xf6f6f2), hole = S(0x3a3f46);
+      bx(g, foil, 0.048, 0.0014, 0.096, 0, 0.0007, 0);
+      bx(g, print, 0.046, 0.0003, 0.090, 0, 0.0016, 0);
+      bx(g, printL, 0.046, 0.0003, 0.010, 0, 0.0019, -0.040);
+      for (let r = 0; r < 5; r++) for (let c = 0; c < 2; c++) {
+        const x = (c - 0.5) * 0.020, z = -0.024 + r * 0.016;
+        if (r === 4 && c === 1) { cy(g, hole, 0.0062, 0.0062, 0.0006, x, 0.0016, z, 0, 0, 0, 14); continue; }
+        sh(g, dome, 0.0068, x, 0.0016, z, 1, 0.55, 1);
+        cy(g, tab, 0.0052, 0.0052, 0.0034, x, 0.0040, z, 0, 0, 0, 14);
+      }
+    },
+    // A BEDSHEET ROPE: torn strips twisted together and coiled, a knot every
+    // arm's length (that is how you climb one), the tail lying out.
+    rope: function (g) {
+      const sheet = S(0xeef0f2), stripe = S(0x8faccc), knot = S(0xd9dde2);
+      to(g, sheet, 0.064, 0.014, 0, 0.014, 0, LZ, 0, 0);
+      to(g, stripe, 0.064, 0.007, 0, 0.022, 0, LZ, 0, 0.6);
+      to(g, sheet, 0.050, 0.013, 0.004, 0.036, 0.004, LZ, 0, 0);
+      to(g, stripe, 0.050, 0.006, 0.004, 0.044, 0.004, LZ, 0, 1.4);
+      for (let i = 0; i < 4; i++) {
+        const a = i * TAU / 4 + 0.4;
+        sh(g, knot, 0.020, Math.cos(a) * 0.064, 0.016, Math.sin(a) * 0.064, 1, 0.9, 1);
+      }
+      tb(g, sheet, "rope", [[0.060, 0.012, 0.030], [0.090, 0.010, 0.070], [0.100, 0.010, 0.120], [0.080, 0.010, 0.160]], 0.012, 20);
+      sh(g, knot, 0.019, 0.080, 0.014, 0.162);
+    },
+    // A CONTRABAND MAP: a sheet torn from a pad, folded in three and lying
+    // half open, a pencil plan of the corridors on it with the way out marked.
+    map: function (g) {
+      const paper = S(0xe8e0c8), paperD = S(0xcfc6aa), pencil = S(0x3a3f48), red = S(0xc8392f);
+      const P = 0.068, L = 0.100, T = 0.0008;
+      bx(g, paper, P, T, L, 0, 0.012, 0);                                      // the middle panel
+      const a = new THREE.Group(); a.position.set(-P / 2, 0.012, 0); a.rotation.z = -0.45; g.add(a);
+      bx(a, paperD, P, T, L, -P / 2, 0, 0);
+      const b = new THREE.Group(); b.position.set(P / 2, 0.012, 0); b.rotation.z = -0.17; g.add(b);
+      bx(b, paper, P, T, L, P / 2, 0, 0);
+      const y = 0.0128;
+      // the plan: a corridor run, two cross corridors, the wall
+      bx(g, pencil, 0.0022, 0.0004, 0.080, -0.010, y, 0);
+      bx(g, pencil, 0.050, 0.0004, 0.0022, 0.004, y, -0.030);
+      bx(g, pencil, 0.040, 0.0004, 0.0022, -0.004, y, 0.020);
+      bx(g, pencil, 0.0022, 0.0004, 0.030, 0.022, y, 0.035);
+      bx(b, pencil, 0.0022, 0.0004, 0.070, 0.020, 0.0008, 0);
+      bx(b, pencil, 0.040, 0.0004, 0.0022, 0.036, 0.0008, -0.020);
+      bx(a, pencil, 0.040, 0.0004, 0.0022, -0.030, 0.0008, 0.010);
+      bx(b, red, 0.016, 0.0005, 0.0030, 0.050, 0.0010, 0.030, 0, 0.785, 0);   // the X
+      bx(b, red, 0.016, 0.0005, 0.0030, 0.050, 0.0010, 0.030, 0, -0.785, 0);
+      bx(g, red, 0.0022, 0.0005, 0.030, 0.024, y + 0.0002, -0.008, 0, 0.6, 0); // the route
+    },
+    // A HANDCUFF KEY: the universal key, a short tube shaft with its bit and
+    // a round bow, steel, at its real 5 cm.
+    cuffkey: function (g) {
+      const steel = S(0xb9c0c8), steelD = S(0x6f767e);
+      to(g, steel, 0.0085, 0.0026, 0, 0.0026, -0.016, LZ, 0, 0);
+      cy(g, steel, 0.0024, 0.0024, 0.034, 0, 0.0026, 0.010, LZ, 0, 0, 10);
+      cy(g, steelD, 0.0012, 0.0012, 0.0006, 0, 0.0026, 0.0272, LZ, 0, 0, 8);  // the hollow end
+      bx(g, steel, 0.0070, 0.0024, 0.0040, 0.0045, 0.0026, 0.0225);            // the bit
+      bx(g, steelD, 0.0090, 0.0012, 0.0022, 0, 0.0026, -0.006);                // the collar
+    },
+    // A CORRECTIONS BATON: the 21" expandable, racked open: the knurled
+    // foam grip, the three telescoped steel sections and the ball tip.
+    baton: function (g) {
+      const grip = S(0x24272c), knurl = S(0x3a3f46), steel = S(0x2f343b), collar = S(0x8e98a4);
+      cy(g, grip, 0.0150, 0.0150, 0.180, 0, 0.015, -0.170, LZ, 0, 0, 14);
+      for (let i = 0; i < 7; i++) cy(g, knurl, 0.0154, 0.0154, 0.006, 0, 0.015, -0.240 + i * 0.022, LZ, 0, 0, 14);
+      cy(g, collar, 0.0158, 0.0158, 0.010, 0, 0.015, -0.255, LZ, 0, 0, 14);   // end cap
+      cy(g, steel, 0.0105, 0.0105, 0.170, 0, 0.015, 0.0, LZ, 0, 0, 12);
+      cy(g, collar, 0.0118, 0.0118, 0.006, 0, 0.015, -0.080, LZ, 0, 0, 12);
+      cy(g, steel, 0.0080, 0.0080, 0.170, 0, 0.015, 0.165, LZ, 0, 0, 12);
+      cy(g, collar, 0.0092, 0.0092, 0.006, 0, 0.015, 0.085, LZ, 0, 0, 12);
+      sh(g, collar, 0.0110, 0, 0.015, 0.252);
+    },
+    // THE SHANK: weapons/appearances/shank.js, the exact blade a man draws
+    // and stabs with (systems/actorweapons.js owns it) — never the shop knife.
+    shank: function (g, C) { BUILD.gun(g, C, "Shiv", { gun: "Shiv" }); },
+    // A ROLL OF CASH: notes rolled tight on their short edge, the spiral
+    // showing at both ends, a rubber band round the middle, the outer note
+    // springing loose.
+    cashroll: function (g) {
+      const face = M(BILL.face), edge = M(BILL.edge), print = M(BILL.print), band = S(0xb8432f);
+      cy(g, face, 0.017, 0.017, BILL_W, 0, 0.017, 0, 0, 0, Math.PI / 2, 18);
+      for (const s of [-1, 1]) {
+        to(g, edge, 0.0125, 0.0013, s * (BILL_W / 2 + 0.0002), 0.017, 0, 0, Math.PI / 2, 0);
+        to(g, edge, 0.0075, 0.0013, s * (BILL_W / 2 + 0.0002), 0.017, 0, 0, Math.PI / 2, 0);
+        cy(g, S(0x55684b), 0.003, 0.003, 0.0006, s * (BILL_W / 2 + 0.0002), 0.017, 0, 0, 0, Math.PI / 2, 8);
+      }
+      to(g, band, 0.0174, 0.0022, 0, 0.017, 0, 0, Math.PI / 2, 0);
+      bx(g, print, 0.040, 0.0004, 0.004, 0.006, 0.0342, 0.0);                // the print on the outer note
+      const leaf = new THREE.Group(); leaf.position.set(0, 0.0005, 0.017); leaf.rotation.x = 0.10; g.add(leaf);
+      bx(leaf, face, BILL_W, 0.0005, 0.040, 0, 0, 0.020);                     // the loose end
+      billPrint(leaf, 0.0003, 0.040);
+    },
+    // A GOLD TOOTH: a molar crown with its four cusps, the root still on it.
+    goldtooth: function (g) {
+      const gold = S(0xe0b13c), goldL = S(0xf6e08a), root = S(0xe4ddc8);
+      cn(g, root, 0.0040, 0.012, -0.0035, 0.006, 0, Math.PI, 0, 0.12);
+      cn(g, root, 0.0040, 0.012, 0.0035, 0.006, 0, Math.PI, 0, -0.12);
+      cy(g, gold, 0.0068, 0.0058, 0.008, 0, 0.016, 0, 0, 0, 0, 16).scale.set(1, 1, 0.88);
+      for (let i = 0; i < 4; i++) sh(g, i % 2 ? gold : goldL, 0.0034, (i & 1 ? 1 : -1) * 0.0030, 0.0205, (i & 2 ? 1 : -1) * 0.0027, 1, 0.75, 1);
     },
 
     // The last resort, and still a real object: a wrapped, twined parcel.

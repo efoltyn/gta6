@@ -1019,8 +1019,16 @@
     const t = toneFor(kind, name, row);
     return { t: t, k: kind + "|" + t[0] + "|" + t[1] + "|" + t[2] };
   }
+  // the 12x12 degrade (no WebGL) for the prison's objects: the nearest
+  // drawing that exists. Only ever seen when the icon studio cannot open.
+  const SPRITE_ALIAS = {
+    knuckles: "melee", razor: "melee", hacksaw: "melee", shank: "melee", baton: "melee",
+    cuffkey: "key", flipphone: "phone", charger: "phone", sim: "keycard", cupnoodle: "meal",
+    snackbar: "meal", energycan: "drink", pruno: "drink", blister: "pill", cashroll: "cash",
+    goldtooth: "tooth", tattoo: "tool", lighter: "drink",
+  };
   function sprite(kind, name, row) {
-    const art = ART[kind] || ART[GENERIC];
+    const art = ART[kind] || ART[SPRITE_ALIAS[kind]] || ART[GENERIC];
     const tk = toneKey(kind, name, row);
     let uri = cache[tk.k];
     if (!uri) { uri = cache[tk.k] = bake(art, palette(tk.t[0], tk.t[1], tk.t[2])); }
@@ -1034,7 +1042,7 @@
   //  identical conditions. Nothing here knows what an item IS; it is handed an
   //  Object3D by city/itemassets.js and it takes a picture of it.
   // ============================================================
-  const ICON_PX = 96;            // 3x the 30px slot: sharp on retina, ~4 KB/PNG
+  const ICON_PX = 128;           // a 64px trade tile at 2x: sharp on retina, ~6 KB/PNG, baked once
   const HERO_YAW = 0.62;         // rad, ~35.5 deg — the product-shot three-quarter
   const HERO_PITCH = 0.40;       // rad, ~22.9 deg above the horizon
   const FRAME = 1.10;            // 10% air on the widest dimension. THE margin.
@@ -1160,7 +1168,10 @@
   // model in many colours (that is the same policy the sprite sheet has always
   // had — 40 species, ~36 drawings); NAME for the kinds where the name really
   // does pick a different object out of the registry.
-  const BY_NAME = { gun: 1, melee: 1, tool: 1, pick: 1, crowbar: 1 };
+  // drug is by name too: weed, crystal, a gram bag and a kilo brick are four
+  // different objects of one tone, and keying them by tone photographed the
+  // first one asked for and handed that picture to all four.
+  const BY_NAME = { gun: 1, melee: 1, tool: 1, pick: 1, crowbar: 1, drug: 1 };
   function renderKey(kind, name, row) {
     if (kind === "gun") return "gun|" + String((row && row.gun) || name || "").toLowerCase();
     if (BY_NAME[kind]) return kind + "|" + String(name || "").toLowerCase();
@@ -1258,9 +1269,46 @@
     hat: "hat", top: "top", outer: "outer", bottom: "bottom", shoes: "shoes",
     glasses: "glasses", chain: "chain", watch: "watch", ring: "ring",
   };
+  // name -> the object it is, for the things a prison pocket holds. Order
+  // matters only where one name could match two (a SIM before a phone).
+  const PRISON_KINDS = [
+    [/^cig(arette)?s?$|pack of cig/, "cigpack"],
+    [/carton/, "carton"],
+    [/lighter/, "lighter"],
+    [/\bsoap\b/, "soap"],
+    [/knuckle/, "knuckles"],
+    [/hacksaw/, "hacksaw"],
+    [/razor/, "razor"],
+    [/^shiv$|^shank$/, "shank"],
+    [/phone charger|charging cable|usb cable/, "charger"],
+    [/\bsim\b/, "sim"],
+    [/burner phone|flip ?phone/, "flipphone"],
+    [/tattoo/, "tattoo"],
+    [/ramen|noodle/, "cupnoodle"],
+    [/energy bar|granola|protein bar|candy bar/, "snackbar"],
+    [/energy drink/, "energycan"],
+    [/pruno|hooch/, "pruno"],
+    [/painkiller/, "blister"],
+    [/bedsheet rope|\brope\b/, "rope"],
+    [/\bmap\b/, "map"],
+    [/handcuff key|cuff key/, "cuffkey"],
+    [/\bbaton\b|nightstick/, "baton"],
+    [/cash roll|roll of (cash|bills|notes)/, "cashroll"],
+    [/gold tooth|gold teeth/, "goldtooth"],
+    [/bandage|gauze/, "bandage"],
+  ];
+  function PRISON_KIND(n) {
+    for (let i = 0; i < PRISON_KINDS.length; i++) if (PRISON_KINDS[i][0].test(n)) return PRISON_KINDS[i][1];
+    return null;
+  }
   function kindOf(name, row) {
     const n = String(name == null ? "" : name).toLowerCase();
     row = row || null;
+    // a named prison object outranks the row's generic facts (a city row may
+    // call brass knuckles `melee`, which draws the shop knife); only a real
+    // firearm row keeps its gun.
+    const pk = PRISON_KIND(n);
+    if (pk && !(row && row.gun)) return pk;
 
     // --- what the ROW says it is (covers every runtime registration) -------
     if (row) {
@@ -1286,8 +1334,12 @@
     }
 
     // --- the name, where it is genuinely more specific than the tag -------
-    if (/shiv|knuckle|razor|\bblade\b|hacksaw|machete|cleaver/.test(n)) return "melee";
-    if (/ramen|noodle|soup|snack|candy|energy bar|granola|jerky/.test(n)) return "meal";
+    // THE PRISON'S POCKETS first (2026-10-28, owner: "what the fuck is the
+    // cube?"). Every one of these used to land on the parcel cube, the
+    // burger, the shop knife or a smartphone. Each is now its own object in
+    // city/itemassets.js, the same model that lies on the floor when dropped.
+    if (/\bblade\b|machete|cleaver|knife|hatchet|\baxe\b|pickaxe/.test(n)) return "melee";
+    if (/soup|snack|candy|jerky/.test(n)) return "meal";
     if (/\btooth\b|\bteeth\b|\bfang\b/.test(n)) return "tooth";
     if (/^gun$/.test(n)) return "gun";
     if (/lockpick|\bpicks?\b/.test(n)) return "pick";
@@ -1348,10 +1400,14 @@
   // ============================================================
   //  5. PUBLIC FACE
   // ============================================================
+  // BOTH catalogs: the city's first, then the prison's. It used to read
+  // whichever existed first, so with the city catalog loaded (it always is)
+  // every prison-only row (Powder, Soap, ...) came back null and fell to the
+  // cube.
   function rowFor(name, row) {
     if (row) return row;
-    const IT = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || (CBZ.econ && CBZ.econ.ITEMS) || null;
-    return (IT && IT[name]) || null;
+    const A = CBZ.cityEcon && CBZ.cityEcon.ITEMS, B = CBZ.econ && CBZ.econ.ITEMS;
+    return (A && A[name]) || (B && B[name]) || null;
   }
   CBZ.itemKind = function (name, row) { return kindOf(name, rowFor(name, row)); };
   // The two seams city/itemassets.js reads. It must never carry a second
@@ -1645,8 +1701,14 @@
     let rendered = 0, failed = 0;
     for (const k in rcache) { if (rcache[k]) rendered++; else failed++; }
     const A = CBZ.itemAssetAudit ? CBZ.itemAssetAudit() : null;
+    // the prison's pockets (systems/economy.js) + the smokes themselves: the
+    // owner's cube. prisonGeneric must be 0.
+    const PI = (CBZ.econ && CBZ.econ.ITEMS) || {};
+    const prisonKinds = { Cigarettes: kindOf("Cigarettes", null) };
+    let prisonGeneric = 0;
+    for (const n in PI) { const k = kindOf(n, PI[n]); prisonKinds[n] = k; if (k === GENERIC) prisonGeneric++; }
     return {
-      items, iconed, generic, genericNames, kinds,
+      items, iconed, generic, genericNames, kinds, prisonKinds, prisonGeneric,
       sprites: Object.keys(ART).length, baked: Object.keys(cache).length,
       rendered: rendered,
       spriteFallback: failed + (rendersOn() ? 0 : items),

@@ -217,11 +217,13 @@
   }
 
   // ---- the screen ----------------------------------------------------------------------
+  // every tile is a photograph of the thing (city/itemicons.js, the same
+  // studio the guns go through): the smokes are a real pack, not a CSS bar.
+  // "" means the photograph is still in the studio's queue; the tile shows an
+  // empty well until it lands and the next render() carries it.
   function icon(name) {
-    if (name === "cigs") return '<span class="ptr-cig"></span>';
     let h = "";
-    try { h = CBZ.itemIconHtml ? CBZ.itemIconHtml(name, null, "md") : ""; } catch (e) { h = ""; }
-    if (!h) { try { const src = CBZ.itemIcon ? CBZ.itemIcon(name, {}) : ""; if (src) h = "<img src='" + src + "' alt=''>"; } catch (e) { h = ""; } }
+    try { h = CBZ.itemIconHtml ? CBZ.itemIconHtml(name === "cigs" ? "Cigarettes" : name, null, "md") : ""; } catch (e) { h = ""; }
     return h || '<span class="ptr-none"></span>';
   }
   function tile(side, name, have, inDeal) {

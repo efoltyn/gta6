@@ -724,10 +724,11 @@ body.touch .wprompt.wdock .wname .wrole{font-size:12px;}
   border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.06); padding:6px; display:flex; align-items:center; justify-content:center;
   touch-action:manipulation; -webkit-tap-highlight-color:transparent;}
 #prisonTrade .ptr-tile img{max-width:100%; max-height:100%; object-fit:contain; pointer-events:none;}
+/* the photograph fills the tile: a 28 px md icon in a 64 px well read as a speck */
+#prisonTrade .ptr-tile img.itemIcn{width:82%; height:82%;}
 #prisonTrade .ptr-tile.in{border-color:#ffd27a; background:rgba(255,210,122,.16); box-shadow:inset 0 0 0 1px #ffd27a;}
 #prisonTrade .ptr-n{position:absolute; right:5px; bottom:3px; font-size:12px; opacity:.8;}
 #prisonTrade .ptr-d{position:absolute; left:4px; top:3px; min-width:18px; padding:1px 5px; border-radius:9px; background:#ffd27a; color:#1a1206; font-size:12px; font-weight:700; text-align:center;}
-#prisonTrade .ptr-cig{width:70%; height:18%; border-radius:3px; background:linear-gradient(90deg,#f4efe4 0 72%,#d98b3a 72% 100%); box-shadow:0 1px 2px rgba(0,0,0,.5);}
 #prisonTrade .ptr-none{width:46%; height:46%; border-radius:8px; background:rgba(255,255,255,.18);}
 #prisonTrade .ptr-empty{display:block; height:56px;}
 #prisonTrade .ptr-acts{display:flex; gap:10px; justify-content:flex-end; margin-top:12px; flex-wrap:wrap;}
