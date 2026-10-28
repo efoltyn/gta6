@@ -198,6 +198,7 @@
   const ROLE_TITLE = {
     chief: "Chief of Staff", general: "General", bureau: "Director", police: "Commissioner",
     treasury: "Secretary", whip: "", press: "Press Secretary", aide: "Major", secretary: "",
+    bank: "Governor", trade: "Ambassador",          // the President game's central banker and trade envoy (city/president_game.js)
   };
   function seededName(role) {
     const h = seatH();
@@ -289,6 +290,10 @@
     cord: null, liveCord: null,
   };
 
+  // (the phone's coiled cord loops to its left: it lies on the bare wood, off
+  // the leather, clear of the briefing book; tools/president-desk-census.mjs)
+  const DESK_L = { phone: { x: 0.80, z: 0.14 }, pile: { x: -0.78, z: 0.26 }, open: { x: 0.0, z: 0.24 } };
+  function layout0() { return { phone: DESK_L.phone, pile: DESK_L.pile, open: DESK_L.open }; }
   function layout(rec) {
     const lm = rec.landmarks, A = rec.approach;
     const dl = toLocal(rec, lm.presidentialDesk.x, lm.presidentialDesk.z);
@@ -314,9 +319,9 @@
       // z -0.21..0.41, 6 mm proud): the phone at the right hand on the bare
       // wood, the day's folders fanned at the left hand, the blotter in
       // front of the chair where an open folder lies
-      phone: { x: 0.79, z: 0.14 },
-      pile: { x: -0.78, z: 0.26 },
-      open: { x: 0.0, z: 0.24 },
+      phone: DESK_L.phone,
+      pile: DESK_L.pile,
+      open: DESK_L.open,
       // people: they come in at the office's staff door and stop in front of the desk
       aideSpawn: spawn,
       aideStand: { x: dl.x, z: dl.z - 2.05 },
@@ -410,12 +415,33 @@
     _xq.setFromEuler(_xe); _xp.set(x, y, z);
     return new THREE.Matrix4().compose(_xp, _xq, _xs);
   }
+  /* THE DESK'S OWN CENSUS. Every part laid on the desk is written down here
+     (its box in the desk frame, under the name of the thing it belongs to)
+     while the desk is built, so tools/president-desk-census.mjs can prove
+     nothing on the Resolute floats, sinks or runs into its neighbour. The
+     owner, on the old President page: "Look at the desk itself, things are
+     overlapping." */
+  let DESK_PARTS = [], DESK_OBJ = "", DESK_XF = null;
+  const _cb = new THREE.Box3(), _cv = new THREE.Vector3();
+  function deskNote(geo) {
+    if (!DESK_OBJ) return;
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    _cb.makeEmpty();
+    for (let i = 0; i < 8; i++) {
+      _cv.set(i & 1 ? bb.max.x : bb.min.x, i & 2 ? bb.max.y : bb.min.y, i & 4 ? bb.max.z : bb.min.z);
+      if (DESK_XF) _cv.applyMatrix4(DESK_XF);
+      _cb.expandByPoint(_cv);
+    }
+    DESK_PARTS.push({ obj: DESK_OBJ, min: [_cb.min.x, _cb.min.y, _cb.min.z], max: [_cb.max.x, _cb.max.y, _cb.max.z] });
+  }
   // one part of a merged set: geometry placed by `local`, then by `frame`
   function put(parts, geo, hex, frame, local) {
     const g2 = geo.index ? geo.toNonIndexed() : geo;
     if (g2 !== geo) geo.dispose();
     if (local) g2.applyMatrix4(local);
     if (frame) g2.applyMatrix4(frame);
+    deskNote(g2);
     if (g2.attributes.uv) g2.deleteAttribute("uv");
     if (g2.attributes.uv2) g2.deleteAttribute("uv2");
     g2.clearGroups();
@@ -457,6 +483,8 @@
     ph.rotation.y = PH.YAW;                 // turned toward the chair
     desk.add(ph);
     const parts = [];
+    ph.updateMatrix();
+    DESK_OBJ = "phone"; DESK_XF = ph.matrix.clone();
     // the body: the side profile extruded across its width
     const sh = new THREE.Shape();
     sh.moveTo(-PH.D / 2, 0); sh.lineTo(-PH.D / 2, PH.FRONT); sh.lineTo(PH.D / 2, PH.BACK); sh.lineTo(PH.D / 2, 0); sh.lineTo(-PH.D / 2, 0);
@@ -475,9 +503,9 @@
     const path = new THREE.CatmullRomCurve3([
       new THREE.Vector3(HS_X - 0.004, slopeY(0.1) + 0.006, 0.112),
       new THREE.Vector3(HS_X - 0.03, 0.03, 0.135),
-      new THREE.Vector3(-0.14, 0.0075, 0.12),
-      new THREE.Vector3(-0.165, 0.0075, 0.04),
-      new THREE.Vector3(-0.15, 0.008, -0.03),
+      new THREE.Vector3(-0.118, 0.0088, 0.118),
+      new THREE.Vector3(-0.138, 0.0088, 0.04),
+      new THREE.Vector3(-0.128, 0.0092, -0.03),
       new THREE.Vector3(-PH.W / 2 - 0.004, 0.016, -0.05),
     ]);
     const N = 260, fr = path.computeFrenetFrames(N, false), pts = [];
@@ -499,7 +527,10 @@
     lamp.applyMatrix4(SF);
     ph.add(lamp);
     ROOM.lamp = lamp;
+    const hsM = new THREE.Matrix4().compose(new THREE.Vector3(HS_X, HS_Y, HS_Z), new THREE.Quaternion().setFromEuler(new THREE.Euler(SLOPE, Math.PI / 2, 0)), new THREE.Vector3(1, 1, 1));
+    DESK_XF = ph.matrix.clone().multiply(hsM);
     const hs = buildHandset();
+    DESK_OBJ = ""; DESK_XF = null;
     hs.position.set(HS_X, HS_Y, HS_Z);
     hs.rotation.set(SLOPE, Math.PI / 2, 0);  // along the body, ear end at the back, following the slope
     ph.add(hs);
@@ -600,10 +631,14 @@
   }
   function buildDeskSet(desk, L) {
     const parts = [];
+    DESK_PARTS = []; DESK_XF = null;
     // the blotter in front of the chair, leather with darker end-pieces
-    bx(parts, 0.56, 0.008, 0.34, 0x2e2018, 0, LEATHER_Y + 0.004, L.open.z);
-    for (const s of [-1, 1]) bx(parts, 0.045, 0.003, 0.342, 0x4a3122, s * 0.2575, LEATHER_Y + 0.0095, L.open.z);
+    DESK_OBJ = "blotter";
+    // (wide enough that an open folder or the open briefing book lies on the pad between the end-pieces)
+    bx(parts, 0.62, 0.008, 0.34, 0x2e2018, 0, LEATHER_Y + 0.004, L.open.z);
+    for (const s of [-1, 1]) bx(parts, 0.045, 0.003, 0.342, 0x4a3122, s * 0.2875, LEATHER_Y + 0.0095, L.open.z);
     // the pen holder: a leather cup with a brass rim, two pens in it
+    DESK_OBJ = "pen cup";
     const PX = 0.36, PZ = -0.08;
     cy(parts, 0.034, 0.032, 0.095, 18, 0x2a1c14, PX, LEATHER_Y + 0.0475, PZ);
     cy(parts, 0.0356, 0.0356, 0.006, 18, BRASS, PX, LEATHER_Y + 0.092, PZ);
@@ -613,6 +648,7 @@
       cy(parts, 0.0048, 0.0048, 0.028, 8, BRASS, 0, 0.062, 0, pm);
     }
     // the nameplate, facing the visitor: a walnut foot and a brass face
+    DESK_OBJ = "nameplate";
     const NZ = -0.50, NT = 0.25;
     bx(parts, 0.24, 0.012, 0.06, WALNUT, 0, 0.006, NZ);
     const npM = xf(0, 0.012 + 0.024, NZ, 0, NT);
@@ -628,6 +664,7 @@
     const frames = [[-0.44, -0.40, 0.13, 0.18, 0x6b4a2a, 0], [-0.27, -0.47, 0.10, 0.13, 0xb9b4a8, 0.5]];
     for (let k = 0; k < frames.length; k++) {
       const F = frames[k], fw = F[2], fh = F[3];
+      DESK_OBJ = "photograph " + (k + 1);
       const yaw = Math.atan2(-F[0], 1.12 - F[1]);
       const cyH = fh / 2 * Math.cos(TILT) + 0.007 * Math.abs(Math.sin(TILT));
       const fm = xf(F[0], cyH, F[1], yaw, TILT);
@@ -641,6 +678,7 @@
     }
     // the brass lamp at the far right corner: a stepped foot, a turned
     // column, a cream drum shade
+    DESK_OBJ = "lamp";
     const LX = 0.74, LZ = -0.40;
     cy(parts, 0.070, 0.080, 0.022, 22, BRASS, LX, 0.011, LZ);
     cy(parts, 0.032, 0.050, 0.020, 16, BRASS, LX, 0.032, LZ);
@@ -649,6 +687,7 @@
     cy(parts, 0.018, 0.018, 0.040, 10, BRASS, LX, 0.33, LZ);
     cy(parts, 0.060, 0.125, 0.150, 26, 0xe8dcc0, LX, 0.375, LZ);
     cy(parts, 0.006, 0.010, 0.026, 8, BRASS, LX, 0.463, LZ);
+    DESK_OBJ = "";
     const set = bake(parts, "pres-desk-set");
     if (set) desk.add(set);
     buildPhone(desk, L.phone);
@@ -884,13 +923,15 @@
     const L = ROOM.L;
     const pile = M.folders.filter(function (f) { return f.state === "closed"; }).sort(function (a, b) { return rank(a) - rank(b); });
     const n = pile.length;
+    FOLDER_PARTS = [];
     for (let i = 0; i < n; i++) {
       const f = pile[i];
       const m = closedMesh(f);
-      const j = (h01(i, strHash(f.m.id), 311) - 0.5);
-      const zc = L.pile.z - (n - 1 - i) * FAN, y = i * (FT + 0.0008);
-      m.position.set(L.pile.x + j * 0.02, y, zc);
-      m.rotation.y = j * 0.06;
+      const fp = folderSlot(L, i, n, f.m.id);
+      const zc = fp.z, y = fp.y;
+      m.position.set(fp.x, fp.y, fp.z);
+      m.rotation.y = fp.ry;
+      FOLDER_PARTS.push(folderBox("folder pile", fp.x, fp.y, fp.z, FW, FT, FD, fp.ry));
       ROOM.desk.add(m); f.mesh = m;
       // the part of it you can see: all of the top one, the end of the others
       const az = i === n - 1 ? zc : zc - FD / 2 + FAN / 2;
@@ -902,10 +943,22 @@
       if (f.state !== "open") continue;
       const m = openMesh(f);
       m.position.set(L.open.x, BLOTTER_TOP, L.open.z);
+      FOLDER_PARTS.push(folderBox("open folder", L.open.x, BLOTTER_TOP, L.open.z, FW * 2, 0.0095, FD, 0));
       ROOM.desk.add(m); f.mesh = m;
       const w = deskWorld(L.open.x + FW / 2, BLOTTER_TOP + 0.01, L.open.z);
       if (w) f.tgt = { x: w.x, y: w.y, z: w.z, ay: w.y, ar: 0.16, f: f };
     }
+  }
+  // where the i-th of n closed folders lies: fanned at the left hand, the top one nearest the chair
+  function folderSlot(L, i, n, id) {
+    const j = (h01(i, strHash(id), 311) - 0.5);
+    return { x: L.pile.x + j * 0.02, y: i * (FT + 0.0008), z: L.pile.z - (n - 1 - i) * FAN, ry: j * 0.06 };
+  }
+  let FOLDER_PARTS = [];
+  function folderBox(obj, x, y, z, w, h, d, ry) {
+    const c = Math.abs(Math.cos(ry)), sn = Math.abs(Math.sin(ry));
+    const hx = w / 2 * c + d / 2 * sn, hz = w / 2 * sn + d / 2 * c;
+    return { obj: obj, min: [x - hx, y, z - hz], max: [x + hx, y + h, z + hz] };
   }
   function rank(f) { const k = kindOf(f.m); return k === "security" ? 3 : k === "economy" ? 2 : 1; }
   function deskWorld(lx, ly, lz) {
@@ -1309,7 +1362,7 @@
     return best;
   }
   function openFolder(f) {
-    if (!f || READ.f) return;
+    if (!f || READ.f || CBZ.presBookOpen) return;     // the briefing book is open on the blotter (city/president_book.js)
     refreshBlocked(f);
     f.state = "open";
     paintMemo(f);
@@ -2368,7 +2421,7 @@
       verbs: [{
         id: "presfolder-open", slot: "e", prio: 22,
         label: "Open",
-        canShow: function (t) { return !READ.f && t.f.state === "closed"; },
+        canShow: function (t) { return !READ.f && !CBZ.presBookOpen && t.f.state === "closed"; },
         onSelect: function (t) { if (!READ.f && t.f.state === "closed") openFolder(t.f); },
       }, {
         id: "presfolder-sign", slot: "e", prio: 22,
@@ -2516,6 +2569,24 @@
     // reached it): protection.js holds the detail's opening muster for this,
     // so the agents are posted where he actually starts
     placing: function () { return !!(SPAWN.pending && !SPAWN.sat && !(SPAWN.settle > 0)); },
+    // the desk's own frame (origin on the worktop centre, x the reader's right,
+    // z toward the chair): city/president_book.js lays the briefing book on it
+    deskFrame: function () { return ROOM.desk || null; },
+    // somebody has the President's attention: a folder open, a call, an aide talking
+    busy: function () { return !!(READ.f || M.onCall || AIDE.talking); },
+    // what lies on the desk, in the desk frame (tools/president-desk-census.mjs)
+    deskParts: function () { return DESK_PARTS.concat(FOLDER_PARTS); },
+    // the census builds the desk alone, into a bare group, with n closed
+    // folders on the pile and (open) one on the blotter
+    _deskSetInto: function (group, n, open) {
+      const L = layout0();
+      ROOM.desk = group; ROOM.L = L;
+      buildDeskSet(group, L);
+      FOLDER_PARTS = [];
+      for (let i = 0; i < (n | 0); i++) { const fp = folderSlot(L, i, n, "census" + i); FOLDER_PARTS.push(folderBox("folder pile", fp.x, fp.y, fp.z, FW, FT, FD, fp.ry)); }
+      if (open) FOLDER_PARTS.push(folderBox("open folder", L.open.x, BLOTTER_TOP, L.open.z, FW * 2, 0.0095, FD, 0));
+      return DESK_PARTS.concat(FOLDER_PARTS);
+    },
     audit: audit,
     // harness hooks only
     _M: M, _room: ROOM, _answer: answer, _call: placeCall, _open: function () { openFolder(topFolder()); }, _sign: signFolder,
