@@ -1928,7 +1928,10 @@
     "  float bot = uUmb2.x - th * (0.36 + 0.34 * g) - th * (0.2 * max(L.y, 0.0) + 0.12 * L.x + 0.1);",
     "  float hh = max((top - bot) * 0.5, 0.5);",
     "  float ev = 1.0 - abs(q.y - (top + bot) * 0.5) / hh;",
-    "  return min(ev, (1.04 - rr - 0.07 * L.x) * 3.0) - (1.0 - uUmb2.z) * 1.3;",
+    // presence only trims the edge a little: an ageing deck THINS as one
+    // body (the density takes the fade below), it does not shrink to its
+    // noise peaks, which is what broke it into separate puffs as it died
+    "  return min(ev, (1.04 - rr - 0.07 * L.x) * 3.0) - (1.0 - uUmb2.z) * 0.35;",
     "}",
     // the ground under a point, relative to the vent: the cone's own profile
     "float coneY(float rho) {",
@@ -2021,7 +2024,7 @@
     "    }",
     "    vec4 A1 = noiseA(c);",
     // the deck is eroded much harder than the column: billows, not a lens
-    "    float base = e + (A1.r - 0.5) * mix(1.05, 1.45, wU) + (A1.g - 0.5) * 0.3;",
+    "    float base = e + (A1.r - 0.5) * mix(1.05, 1.12, wU) + (A1.g - 0.5) * 0.3;",
     // steam tears: the Worley channel cuts it into ragged wisps, harder with height
     "    base -= uSteam.x * ((1.0 - A1.g) * (0.25 + 0.55 * smoothstep(0.05, 0.8, q.y / gH)) * uSteam.y + 0.06);",
     "    float d = 0.0;",
@@ -2035,8 +2038,9 @@
     "#if PLUME_DETAIL > 0",
     "      if (base < 0.3) { vec4 A3 = noiseA(c * 8.7 + vec3(0.71, 0.29, 0.13)); det += (A3.g - 0.5) * 0.14 + (A3.b - 0.5) * 0.06; }",
     "#endif",
-    "      float b2 = base + det * mix(1.0, 1.3, wU) * (1.0 - smoothstep(0.15, 0.7, base));",
+    "      float b2 = base + det * (1.0 - smoothstep(0.15, 0.7, base));",
     "      d = smoothstep(-0.02, 0.15, b2) * (0.55 + 0.45 * smoothstep(0.08, 0.6, b2));",
+    "      d *= mix(1.0, smoothstep(0.0, 1.0, uUmb2.z), wU);",      // the deck's fade, as density
     "    }",
     // walk the skin band at half the step: the edge is sampled, not skipped
     "    fineK = (base > -0.12 && base < 0.3) ? 0.5 : 1.0;",
@@ -2059,7 +2063,7 @@
     "#if PLUME_DETAIL > 0",
     "      vec3 q2 = q + uSunDir * sc * 0.32;",
     "      vec4 B1 = noiseA(mix(plumeCoord(q2, sc, wU), c + uSunDir * (0.32 * 0.42), wS));",
-    "      float bl = envAll(q2) + (B1.r - 0.5) * mix(1.05, 1.45, wU) + (B1.g - 0.5) * 0.3;",
+    "      float bl = envAll(q2) + (B1.r - 0.5) * mix(1.05, 1.12, wU) + (B1.g - 0.5) * 0.3;",
     "      float loc = max(bl + 0.05, 0.0) * 2.4;",
     "#else",
     "      float loc = 0.0;",       // a phone: the billows and the skin, the column-scale shadow only

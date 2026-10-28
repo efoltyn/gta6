@@ -199,6 +199,14 @@ CBZ.lab.kit("strike", {
         W.event("strike", W.flight ? "raid inbound: " + heavy : "no CBZ.cityStrikeFlight");
       }, "bombers inbound"]];
     }
+    if (run === "called") {
+      // THE CALL-IN (the bunker map table's "Call in", CBZ.strategicCallStrike):
+      // twelve bombs walked north up the street through the grid's middle
+      return [[0.2, function () {
+        W.called = CBZ.strategicCallStrike ? CBZ.strategicCallStrike({ x: street, z: 0, count: 12, heading: 0, byPlayer: false, stateAct: true }) : null;
+        W.event("strike", W.called ? "strike called" : "no CBZ.strategicCallStrike");
+      }, "strike called in"]];
+    }
     if (run === "missile") {
       // THREE CRUISE MISSILES, a few seconds apart, from the north-west: sea
       // skimming in, a pop-up over the last blocks, and a dive into a facade

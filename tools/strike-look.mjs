@@ -63,6 +63,18 @@ const RUNS = {
     },
     params: "run=b2",
   },
+  /* THE CALL-IN, before and after: CBZ.strategicCallStrike, twelve bombs up
+     the street (x = -26) through the middle of the grid. */
+  called: {
+    beats: [3, 8, 12, 16, 20, 23, 25, 27, 30, 36, 44],
+    seconds: 46,
+    cams: {
+      "street, beside the walk": `({ p: [34, 1.7, -130], l: [-26, 45, 10], fov: 62 })`,
+      "rooftop, 500 m": `({ p: [420, 72, 280], l: [-26, 25, 0], fov: 42 })`,
+      "the sky over the street": `({ p: [140, 260, -520], l: [-26, 420, 300], fov: 58 })`,
+    },
+    params: "run=called",
+  },
   missile: {
     // three Tomahawks from the north-west, 2.2 s apart, onto three towers
     beats: [3, 8, 12, 15, 17.5, 18.6, 19.4, 21, 24, 30],
