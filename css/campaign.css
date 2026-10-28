@@ -449,10 +449,11 @@ body.campaign-phone-open .campaign-phone-peek { display: none !important; }
 .campaign-feed-body { margin: 6px 0 0; color: #bcc8cf; font-size: 12px; line-height: 1.43; white-space: pre-wrap; }
 
 /* ---------- THE CINEMATIC PROMPT (city/campaign_ui.js openCine) ----------
-   The Call of Duty frame: the line as a subtitle, low and centred; the
-   answers round a d-pad glyph (UP over it, LEFT and RIGHT beside it); a
-   hairline bar under them running out. No boxes, no key chips: thin type on
-   a soft shadow, the way a film puts words on a picture. */
+   The Call of Duty frame: the line as a subtitle, low and centred; a
+   hairline bar under the answers running out; thin type on a soft shadow.
+   The answers follow the hand on the game (data-input, campaign_ui.js
+   inputMode): round a d-pad glyph for a controller, a numbered row for the
+   keyboard, a row of buttons for a finger. */
 .cine-prompt {
   position: fixed;
   left: 50%;
@@ -521,6 +522,34 @@ body.campaign-phone-open .campaign-phone-peek { display: none !important; }
 .cine-pad.has-up .arm-up,
 .cine-pad.has-left .arm-left,
 .cine-pad.has-right .arm-right { fill: rgba(255, 255, 255, .82); stroke: rgba(255, 255, 255, .95); }
+/* KEYBOARD AND TOUCH: no d-pad. One row, read left to right (the order the
+   number keys pick in); the keyboard row carries each answer's key, the touch
+   row is buttons you tap. The d-pad cross is the controller's alone. */
+.cine-prompt[data-input="keys"] .cine-pad,
+.cine-prompt[data-input="touch"] .cine-pad { display: none; }
+.cine-prompt[data-input="keys"] .cine-deck,
+.cine-prompt[data-input="touch"] .cine-deck { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px 34px; }
+.cine-prompt[data-input="keys"] .cine-ans,
+.cine-prompt[data-input="touch"] .cine-ans { width: auto; margin: 0; text-align: center; justify-self: auto; }
+.cine-prompt[data-input="keys"] .cine-ans.empty,
+.cine-prompt[data-input="touch"] .cine-ans.empty { display: none; }
+.cine-prompt[data-input="keys"] .cine-ans[data-slot="left"],
+.cine-prompt[data-input="touch"] .cine-ans[data-slot="left"] { order: 1; }
+.cine-prompt[data-input="keys"] .cine-ans[data-slot="up"],
+.cine-prompt[data-input="touch"] .cine-ans[data-slot="up"] { order: 2; }
+.cine-prompt[data-input="keys"] .cine-ans[data-slot="right"],
+.cine-prompt[data-input="touch"] .cine-ans[data-slot="right"] { order: 3; }
+.cine-prompt[data-input="keys"] .cine-ans::before {
+  content: attr(data-key);
+  display: inline-block; min-width: 1.35em; margin-right: .5em; padding: 0 .3em;
+  border: 1px solid rgba(255, 255, 255, .55); border-radius: 4px;
+  font-size: .78em; font-weight: 600; line-height: 1.45; text-align: center; vertical-align: .08em;
+  text-shadow: none; color: #fff; background: rgba(0, 0, 0, .35);
+}
+.cine-prompt[data-input="touch"] .cine-ans {
+  min-height: 46px; padding: 10px 18px; border-radius: 23px;
+  background: rgba(10, 12, 16, .55); border: 1px solid rgba(255, 255, 255, .28);
+}
 .cine-timer { width: min(360px, 60vw); height: 2px; background: rgba(255, 255, 255, .16); opacity: 0; transition: opacity .45s ease; }
 .cine-prompt.ready.timed .cine-timer { opacity: 1; }
 .cine-timer i { display: block; height: 100%; background: rgba(255, 255, 255, .85); transform-origin: left center; transform: scaleX(1); }
