@@ -429,6 +429,22 @@
     return { mat: "steel", mm: pdMM * 4 + 10, piece: cv.key };
   }
 
+  /* WHAT A WEARER'S KIT ISSUES. N: a nation's kit row (entities/combatkit.js
+     NATIONS, or battle/core/countries.js `kit`); pieces: what his loadout
+     wears of it (["plates", "soft", "helmet"]); grade "second": a second-line
+     issue (PE plates, no side plates). One mapping for the rig (combatkit.js
+     wear) and for the infantry core, so the man drawn and the man simulated
+     wear the same armour. */
+  function kitSpec(N, pieces, grade) {
+    const a = {};
+    if (!N) return a;
+    for (const k of pieces || []) {
+      if (k === "plates") { if (N.plates) a.plates = grade === "second" ? "lvl3pe" : N.plates; if (N.sides && grade !== "second") a.sides = N.sides; }
+      else if (k === "soft") { if (N.soft) a.soft = N.soft; }
+      else if (k === "helmet") a.helmet = N.helmet === "b6b47" ? "b6b47" : (N.helmet === "pasgt" ? "pasgt" : (N.helmet ? "ach" : null));
+    }
+    return a;
+  }
   // the share of a standing man's presented area under armour (blasts)
   function coverage(state) {
     if (!state || !state.pieces) return 0;
@@ -459,6 +475,7 @@
     layer: layer,
     rateMM: rateMM,
     pierceMM: pierceMM,
+    kitSpec: kitSpec,
     versus: versus,
     piece: piece,
     ratingOf: ratingOf,

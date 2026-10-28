@@ -171,7 +171,7 @@
       S.col("pin", U8); S.col("flashT", F, -99); S.col("thinkAt", F); S.col("contactT", F, -99); S.col("crackT", F, -99);
       S.col("hitX", F); S.col("hitZ", F); S.col("shots", I32); S.col("hits", I32);
       S.col("plF", U8); S.col("plB", U8); S.col("plS", U8); S.col("helm", U8);
-      S.col("inF", F, 1); S.col("inB", F, 1); S.col("inS", F, 1); S.col("inH", F, 1);
+      S.col("inF", F, 1); S.col("inB", F, 1); S.col("inS", F, 1); S.col("inH", F, 1); S.col("plSo", U8); S.col("inSo", F, 1);
       S.col("vx", F); S.col("vz", F);
     }
     cols();
@@ -189,7 +189,7 @@
         acqT: c.acqT, aimT: c.aimT, cool: c.cool, burst: c.burst, mag: c.mag, ammo: c.ammo, reloadT: c.reloadT, heat: c.heat, rngE: c.rngE, rngTgt: c.rngTgt,
         supp: c.supp, stress: c.stress, cap: c.cap, bleed: c.bleed, down: c.down, aidBy: c.aidBy, aidOn: c.aidOn, aidEnd: c.aidEnd, pin: c.pin,
         flashT: c.flashT, thinkAt: c.thinkAt, contactT: c.contactT, crackT: c.crackT, hitX: c.hitX, hitZ: c.hitZ, shots: c.shots, hits: c.hits,
-        plF: c.plF, plB: c.plB, plS: c.plS, helm: c.helm, inF: c.inF, inB: c.inB, inS: c.inS, inH: c.inH, vx: c.vx, vz: c.vz,
+        plF: c.plF, plB: c.plB, plS: c.plS, helm: c.helm, inF: c.inF, inB: c.inB, inS: c.inS, inH: c.inH, plSo: c.plSo, inSo: c.inSo, vx: c.vx, vz: c.vz,
       };
     }
     let G = bindG(S.cols);
@@ -234,7 +234,7 @@
         magSize: (w && (w.magSize || w.mag)) || (g.cls === "lmg" ? 100 : 30),
         interval: Math.max(0.06, (w && (w.fireDelay || w.interval)) || 0.09),
         optic: spec.optic || 0, mech: B.moaSigma(g.moa || 4),
-        plate: plateIdx(kit.plates), side: plateIdx(kit.sides), helm: plateIdx(kit.helmet),
+        plate: plateIdx(kit.plates), side: plateIdx(kit.sides), helm: plateIdx(kit.helmet), soft: plateIdx(kit.soft),
         armed: spec.gun && spec.gun !== "fists",
         thr: AR && c ? (AR.ROUNDS[c === B.CART["556"] ? "556" : c === B.CART["762x39"] ? "762x39" : c === B.CART["762x51"] ? "762x51" : c === B.CART["9x19"] ? "9mm" : "556"] || null) : null,
       };
@@ -280,7 +280,7 @@
       G.flashT[r] = -99; G.thinkAt[r] = I.simT + rnd() * 0.25; G.contactT[r] = -99; G.crackT[r] = -99;
       G.shots[r] = 0; G.hits[r] = 0; G.vx[r] = 0; G.vz[r] = 0;
       G.plF[r] = t.plate; G.plB[r] = t.plate; G.plS[r] = t.side; G.helm[r] = t.helm;
-      G.inF[r] = 1; G.inB[r] = 1; G.inS[r] = 1; G.inH[r] = 1;
+      G.inF[r] = 1; G.inB[r] = 1; G.inS[r] = 1; G.inH[r] = 1; G.plSo[r] = t.soft; G.inSo[r] = 1;
       G.hp[r] = G.maxHp[r] = 100;
       if (side != null) G.side[r] = side;
       G.life[r] = LIFE.alive;
@@ -1462,7 +1462,7 @@
       // the plates: real boxes where he wears them (front and back of the chest,
       // the sides, the helmet's shell), traced on the same line
       _pl.n = 0;
-      if (G.plF[b] || G.plS[b] || G.helm[b]) {
+      if (G.plF[b] || G.plS[b] || G.helm[b] || G.plSo[b]) {
         const P = PLATE_BOX[G.post[b]];
         let n = 0;
         for (let i = 0; i < P.length; i++) {
@@ -1471,6 +1471,7 @@
           if (box.kind === "back" && !G.plB[b]) continue;
           if (box.kind === "side" && !G.plS[b]) continue;
           if (box.kind === "helm" && !G.helm[b]) continue;
+          if (box.kind === "soft" && !G.plSo[b]) continue;
           _plOne.length = 0;
           if (B.traceZones(box.z, of, orr, qy, df, dr, dy, 1, 1, 1, _plT)) {
             let e = _pl.z[n] || (_pl.z[n] = { kind: "", a: 0 });
@@ -1489,16 +1490,19 @@
     const PLATE_BOX = [
       [ { kind: "front", z: Zb(0.115, 0.135, -0.12, 0.12, 1.12, 1.44) }, { kind: "back", z: Zb(-0.135, -0.115, -0.12, 0.12, 1.12, 1.44) },
         { kind: "side", z: Zb(-0.075, 0.075, -0.21, -0.19, 1.10, 1.30) }, { kind: "side", z: Zb(-0.075, 0.075, 0.19, 0.21, 1.10, 1.30) },
-        { kind: "helm", z: Zb(-0.115, 0.115, -0.105, 0.105, 1.69, 1.81) } ],
+        { kind: "helm", z: Zb(-0.115, 0.115, -0.105, 0.105, 1.69, 1.81) },
+        { kind: "soft", z: Zb(0.10, 0.12, -0.17, 0.17, 0.86, 1.44) }, { kind: "soft", z: Zb(-0.12, -0.10, -0.17, 0.17, 0.86, 1.44) } ],
       [ { kind: "front", z: Zb(0.135, 0.155, -0.12, 0.12, 0.64, 0.96) }, { kind: "back", z: Zb(-0.135, -0.115, -0.12, 0.12, 0.64, 0.96) },
         { kind: "side", z: Zb(-0.06, 0.09, -0.21, -0.19, 0.62, 0.82) }, { kind: "side", z: Zb(-0.06, 0.09, 0.19, 0.21, 0.62, 0.82) },
-        { kind: "helm", z: Zb(-0.095, 0.135, -0.105, 0.105, 1.11, 1.23) } ],
+        { kind: "helm", z: Zb(-0.095, 0.135, -0.105, 0.105, 1.11, 1.23) },
+        { kind: "soft", z: Zb(0.12, 0.14, -0.17, 0.17, 0.42, 0.96) }, { kind: "soft", z: Zb(-0.12, -0.10, -0.17, 0.17, 0.42, 0.96) } ],
       [ { kind: "front", z: Zb(0.32, 0.64, -0.12, 0.12, 0.0, 0.03) }, { kind: "back", z: Zb(0.32, 0.64, -0.12, 0.12, 0.27, 0.30) },
         { kind: "side", z: Zb(0.36, 0.56, -0.23, -0.21, 0.04, 0.24) }, { kind: "side", z: Zb(0.36, 0.56, 0.21, 0.23, 0.04, 0.24) },
-        { kind: "helm", z: Zb(0.78, 0.97, -0.105, 0.105, 0.26, 0.40) } ],
+        { kind: "helm", z: Zb(0.78, 0.97, -0.105, 0.105, 0.26, 0.40) },
+        { kind: "soft", z: Zb(0.0, 0.70, -0.17, 0.17, 0.0, 0.025) }, { kind: "soft", z: Zb(0.0, 0.70, -0.17, 0.17, 0.255, 0.28) } ],
     ];
     function plateOf(b, kind) {
-      return kind === "front" ? G.plF[b] : kind === "back" ? G.plB[b] : kind === "side" ? G.plS[b] : G.helm[b];
+      return kind === "front" ? G.plF[b] : kind === "back" ? G.plB[b] : kind === "side" ? G.plS[b] : kind === "soft" ? G.plSo[b] : G.helm[b];
     }
     /* THE HIT: what the round does to him. Returns the velocity it leaves with. */
     function woundMan(o, b, v, t, sh) {
@@ -1509,7 +1513,8 @@
       let layer = null, plateKind = null;
       for (let i = 0; i < _pl.n; i++) {
         const e = _pl.z[i];
-        if (e.a <= first.a + 0.25 && (!plateKind || e.a < layer)) { plateKind = e.kind; layer = e.a; }
+        // a hard piece (a plate, the helmet) before the soft panel behind it
+        if (e.a <= first.a + 0.25 && (!plateKind || (plateKind === "soft" && e.kind !== "soft") || (e.kind !== "soft" && e.a < layer))) { plateKind = e.kind; layer = e.a; }
       }
       const c = t.c;
       let lay = null;
@@ -1519,7 +1524,7 @@
           I.led.plate++;
           // CBZ.armour's own rule (versus): the round's steel-equivalent
           // penetration now against this piece's rating, cracked as it is
-          const col = plateKind === "front" ? G.inF : plateKind === "back" ? G.inB : plateKind === "side" ? G.inS : G.inH;
+          const col = plateKind === "front" ? G.inF : plateKind === "back" ? G.inB : plateKind === "side" ? G.inS : plateKind === "soft" ? G.inSo : G.inH;
           const pc = _piece;
           pc.kind = P.kind; pc.mat = P.mat; pc.rating = P.rating; pc.deflect = P.deflect || 0; pc.integrity = col[b];
           const out = AR.versus(pc, c, v, c.v0, rnd);
@@ -1914,7 +1919,18 @@
     I.roundsInFlight = function () { return nR; };
     return I;
   }
+  /* WHAT HE WEARS, as armour: his nation's kit row (countries.js `kit`, or
+     combatkit's NATIONS), through the same mapping the rig wears
+     (CBZ.armour.kitSpec). An untrained man and an irregular wear none; a real
+     army's men wear their issue at any training; a regular's issue is the
+     second-line grade (combatkit.js `grade`, men.js kitUp). */
+  function kitFor(N, trn, real) {
+    if (!N || trn === "civ" || N.irregular) return {};
+    if (trn === "thug" && !real) return {};
+    if (!CBZ.armour || !CBZ.armour.kitSpec) return {};
+    return CBZ.armour.kitSpec(N, ["plates", "soft", "helmet"], trn === "pro" ? "second" : null);
+  }
   CBZ.battleInfantry = { create: create, DOCTRINE: DOCTRINE, TRN_IDS: TRN_IDS, EV: EV, POST: POST, LIFE: LIFE, MOVE: MOVE, SHOT_F: SHOT_F,
-    EYE: EYE, MUZ: MUZ };
+    EYE: EYE, MUZ: MUZ, kitFor: kitFor };
   if (typeof module !== "undefined" && module.exports) module.exports = CBZ.battleInfantry;
 })();

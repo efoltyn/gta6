@@ -90,18 +90,18 @@ export function field(o) {
 /* A SIDE off a real country (battle/core/countries.js): its rifle, its
    sight, its training, its plates and helmet. o.trn / o.gun / o.optic
    override (a mirror match, a what-if). */
-const HELMET = { ballistic: "ach", b6b47: "b6b47", pasgt: "pasgt" };
 export function side(country, o) {
   o = o || {};
-  const C = ctx().CBZ.countries;
+  const CBZ = ctx().CBZ, C = CBZ.countries;
   const R = C && C.get(country);
   const rifle = R ? R.rifle : { gun: "ak47" };
-  const kit = R ? R.kit : {};
+  const trn = o.trn || (R ? R.training : "pro");
   return {
-    trn: o.trn || (R ? R.training : "pro"),
+    trn: trn,
     gun: o.gun || rifle.gun,
     optic: o.optic != null ? o.optic : (rifle.optic || 0),
-    kit: o.noKit ? {} : { plates: kit.plates || null, sides: kit.sides || null, helmet: HELMET[kit.helmet] || null },
+    // the armour the page's rig would wear (CBZ.battleInfantry.kitFor -> CBZ.armour.kitSpec)
+    kit: o.noKit ? {} : CBZ.battleInfantry.kitFor(R ? R.kit : null, trn, !!R),
   };
 }
 
