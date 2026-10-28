@@ -1428,8 +1428,8 @@
     // ---- heading: eased toward the aim point, the bank follows the turn
     const toAim = Math.atan2(S.phase === "cruise" || S.phase === "boost" ? ax - px : S.tx - px, S.phase === "cruise" || S.phase === "boost" ? az - pz : S.tz - pz);
     const err = angleDelta(S.psi, toAim);
-    const turnMax = S.phase === "dive" ? 0.35 : 0.13;
-    const rate = Math.max(-turnMax, Math.min(turnMax, err * 0.7));
+    const turnMax = S.phase === "dive" ? 1.1 : 0.13;
+    const rate = Math.max(-turnMax, Math.min(turnMax, err * (S.phase === "dive" ? 3 : 0.7)));
     S.psi += rate * dt;
     const bankWant = S.phase === "boost" ? 0 : Math.max(-1.05, Math.min(1.05, Math.atan(S.v * rate / G_ACC)));
     S.bank += (bankWant - S.bank) * Math.min(1, dt * 2.2);
@@ -1474,7 +1474,10 @@
       const lam = Math.atan2(S.ty - py, Math.max(0.5, rng));
       const lamDot = S.lamPrev == null || dt <= 0 ? 0 : (lam - S.lamPrev) / dt;
       S.lamPrev = lam;
-      const gd = Math.max(-0.45, Math.min(0.45, 4 * lamDot + 0.6 * (lam - S.gam)));
+      // the terminal pull is several g (a hard bunt onto a roof or a wall, not
+      // a glide): with a 0.45 rad/s limit the round pushed over too late and
+      // sailed ~60 m over its target into the street
+      const gd = Math.max(-1.4, Math.min(1.4, 4 * lamDot + 2.2 * (lam - S.gam)));
       S.gam += gd * dt;
     } else {
       S.gam += Math.max(-gRate * dt, Math.min(gRate * dt, gWant - S.gam));
