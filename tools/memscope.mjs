@@ -332,7 +332,8 @@ M.gpuWalk = function(farM){
     var h = 2166136261 ^ u.length, n = u.length, step = Math.max(1, Math.floor(n / 2048));
     for (var i = 0; i < n; i += step) { h ^= u[i]; h = Math.imul(h, 16777619); } h ^= u[n - 1]; h = Math.imul(h, 16777619); return (h >>> 0).toString(36) + ":" + arr.byteLength; }
   function attr(a, R, flags, label){ if (!a) return 0; var d = a.isInterleavedBufferAttribute ? a.data : a; if (seenBuf.has(d)) return 0; seenBuf.add(d);
-    var arr = d.array, e = arr && arr.BYTES_PER_ELEMENT || 4, n = (d.count || 0) * (d.stride || d.itemSize || 1) * e; if (arr && arr.byteLength > n) n = arr.byteLength;
+    /* (a GPU-only attribute, core/batch.js CBZ.gpuOnlyAttrs: reading .array would READ IT BACK; look at its JS copy, if any) */
+    var arr = d._cbzGO ? d._cbzArr : d.array, e = arr && arr.BYTES_PER_ELEMENT || 4, n = (d.count || 0) * (d.stride || d.itemSize || 1) * e; if (arr && arr.byteLength > n) n = arr.byteLength;
     var up = arr ? (M.upBuf.has(arr.buffer)) : true;
     if (!up) { R.notUp += n; tot.notUp += n; if (flags.hidden) { R.notUpHidden += n; tot.notUpHidden += n; } return 0; }
     R.gpu += n; R.geo += n; tot.gpu += n; tot.geo += n;
@@ -374,7 +375,7 @@ M.gpuWalk = function(farM){
       if (mt.uniforms) for (var u in mt.uniforms) { var uv = mt.uniforms[u] && mt.uniforms[u].value; if (uv && uv.isTexture) tex(uv, R, m[1], { hidden: !m[2] }); } }); });
   geoInfo.forEach(function(gi, g){ var R = O(gi.owner), fl = { hidden: !gi.vis, far: gi.vis && gi.allFar, owner: gi.owner }, s = 0, held = 0;
     var names = Object.keys(g.attributes || {});
-    names.forEach(function(k){ s += attr(g.attributes[k], R, fl, gi.name + "." + k); var a = g.attributes[k]; if (a && a.array && a.array.length) held += a.array.byteLength; });
+    names.forEach(function(k){ s += attr(g.attributes[k], R, fl, gi.name + "." + k); var a = g.attributes[k], aa = a && (a._cbzGO ? a._cbzArr : a.array); if (aa && aa.length) held += aa.byteLength; });
     s += attr(g.index, R, fl, gi.name + ".index"); if (g.index && g.index.array && g.index.array.length) held += g.index.array.byteLength;
     for (var mk in (g.morphAttributes || {})) (g.morphAttributes[mk] || []).forEach(function(a){ s += attr(a, R, fl, gi.name + ".morph"); });
     if (s > 0) big.push([gi.owner, String(gi.name).slice(0, 40), s, held, gi.users, gi.vis ? (gi.allFar ? "far" : "vis") : "HIDDEN"]); });

@@ -367,7 +367,8 @@
   }
   function geoBytes(g) {
     let n = 0;
-    for (const k in g.attributes) { const a = g.attributes[k]; if (a && a.array && !a.isInterleavedBufferAttribute) n += a.array.byteLength; }
+    // (a GPU-only attribute, core/batch.js gpuOnlyAttrs, is sized by its count: reading .array would read it back)
+    for (const k in g.attributes) { const a = g.attributes[k]; if (!a || a.isInterleavedBufferAttribute) continue; if (a._cbzGO) n += a.count * a.itemSize * 4; else if (a.array) n += a.array.byteLength; }
     if (g.index && g.index.array) n += g.index.array.byteLength;
     return n;
   }

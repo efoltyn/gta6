@@ -160,6 +160,96 @@
     } catch (e) { return false; }
     return true;
   };
+  /* ONE COPY, AND IT COMES BACK WHEN SOMEBODY READS IT. three keeps every
+     attribute's array in JS after uploading it, so a static mesh costs its
+     vertices twice (the Isles: ~190 MB of CPU copies on one island, both
+     islands' worth during a flight between them). CBZ.gpuOnlyAttrs(geo,
+     names) makes the named attributes GPU-only once they are uploaded: their
+     `array` becomes an accessor that answers from a JS copy while there is
+     one and, when there is none, reads the GPU buffer back (WebGL2
+     getBufferSubData, one synchronous read) and keeps it while it is being
+     read. So EVERY reader keeps working unchanged, whatever it is: a wall
+     decal cut from the wall's own triangles (systems/surfacedecal.js reads
+     the host's normals), a bullet's impact colour (systems/fpsmode.js
+     surfaceAt reads the hit face's vertex colours), a collapse, debris, a
+     clone, computeVertexNormals. A copy nobody has read for READ_TTL frames
+     goes again (only once three holds its current version: a reader that
+     WROTE it and flagged needsUpdate keeps it until that upload is done).
+     Only normals and colours are offered: raycasts read position, index and
+     uv on every test (r128 Mesh.raycast), so those stay in JS. WebGL1 has
+     no readback: there nothing is dropped. A lost context reloads the page
+     (CBZ.freedStaticArrays, systems/glcontext.js), as for the city's. */
+  const GO = { live: new Set(), tick: 0, dropped: 0, droppedMB: 0, reads: 0, readMB: 0, readMs: 0 };
+  const READ_TTL = 480;
+  CBZ.gpuOnlyStats = GO;
+  function goGL() {
+    const R = CBZ.renderer, gl = R && R.getContext && R.getContext();
+    return gl && typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext && self.__cbzGLAttr ? gl : null;
+  }
+  function goRead(a) {
+    const gl = goGL(), K = gl && self.__cbzGLAttr.get(gl), b = K && K.get(a);
+    if (!b || !b.buffer) return null;
+    const T = b.type === 5126 ? Float32Array : b.type === 5125 ? Uint32Array : b.type === 5123 ? Uint16Array : b.type === 5121 ? Uint8Array : b.type === 5120 ? Int8Array : b.type === 5122 ? Int16Array : null;
+    if (!T) return null;
+    const t0 = performance.now();
+    const dst = new T(a.count * a.itemSize);
+    gl.bindBuffer(gl.COPY_READ_BUFFER, b.buffer);
+    gl.getBufferSubData(gl.COPY_READ_BUFFER, 0, dst);
+    gl.bindBuffer(gl.COPY_READ_BUFFER, null);
+    GO.reads++; GO.readMB += dst.byteLength / 1048576; GO.readMs += performance.now() - t0;
+    return dst;
+  }
+  // (shared accessors, never a closure per attribute: see world/island_shops.js vendorOfPost)
+  const GO_ARRAY = {
+    configurable: true, enumerable: true,
+    get: function () {
+      let v = this._cbzArr;
+      if (v == null && this._cbzGone) {
+        v = goRead(this);
+        if (v) { this._cbzArr = v; this._cbzGone = false; GO.live.add(this); }
+      }
+      this._cbzSeen = GO.tick;
+      return v;
+    },
+    set: function (v) { this._cbzArr = v; this._cbzGone = false; if (v) GO.live.add(this); },
+  };
+  function goDrop(a) {
+    const gl = goGL(), K = gl && self.__cbzGLAttr.get(gl), b = K && K.get(a);
+    if (!b || !b.buffer || b.version !== a.version || !a._cbzArr) return false;   // not on the GPU as it stands
+    GO.droppedMB += a._cbzArr.byteLength / 1048576; GO.dropped++;
+    a._cbzArr = null; a._cbzGone = true;
+    GO.live.delete(a);
+    CBZ.freedStaticArrays = true;
+    return true;
+  }
+  // (r128 calls the upload hook from inside createBuffer, before it files
+  // the buffer: the drop waits for the next frame's sweep)
+  const goPend = [];
+  function goUploaded() { const p = this._cbzPrevCb; if (p) p.apply(this, arguments); goPend.push(this); }
+  CBZ.gpuOnlyAttrs = function (g, names) {
+    if (!g || !g.attributes || !goGL()) return 0;
+    let n = 0;
+    for (const k of names) {
+      const a = g.attributes[k];
+      if (!a || a.isInterleavedBufferAttribute || a.isInstancedBufferAttribute || a._cbzGO || !a.array || a.usage !== 35044) continue;
+      a._cbzGO = true;
+      const arr = a.array;
+      Object.defineProperty(a, "array", GO_ARRAY);
+      a._cbzArr = arr; a._cbzGone = false; a._cbzSeen = GO.tick;
+      // (r128 gives every attribute a no-op upload hook; whatever is there still runs, first)
+      if (a._cbzUploaded) goPend.push(a); else { a._cbzPrevCb = a._cbzUploadCb || null; a.onUpload(goUploaded); }
+      n++;
+    }
+    return n;
+  };
+  // the read-back copies nobody is reading any more go again
+  function goSweep() {
+    GO.tick++;
+    if (goPend.length) { for (let i = 0; i < goPend.length; i++) if (!goDrop(goPend[i]) && goPend[i]._cbzArr) GO.live.add(goPend[i]); goPend.length = 0; }
+    if ((GO.tick & 63) || !GO.live.size) return;
+    for (const a of GO.live) if (GO.tick - (a._cbzSeen || 0) > READ_TTL) goDrop(a);
+  }
+  if (CBZ.onAlways) CBZ.onAlways(99.96, goSweep); else if (CBZ.onUpdate) CBZ.onUpdate(99.96, goSweep);
   /* ASYNC EVICTION QUEUE. getBufferSubData is a synchronous round trip; read
      straight away it waits for every queued GPU command (several ms on a
      phone, measured by the orchestrator's concern). So an eviction is QUEUED:

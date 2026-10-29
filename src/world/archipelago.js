@@ -387,6 +387,30 @@
     try { return CBZ.islandTerrain(islandOpts(I)); } catch (e) { console.error("[archipelago terrain " + I.id + "]", e); return null; }
   }
 
+  /* ONE COPY OF AN ISLAND'S STATIC SURFACES. Its shells, interiors, fit-outs,
+     dressing, roads and ground keep their normals and vertex colours on the
+     GPU only, once uploaded (core/batch.js CBZ.gpuOnlyAttrs: a reader gets
+     them back from the GPU, so nothing that reads them changes). Positions,
+     indices and UVs stay: every raycast reads them. Glass, lamps and signs
+     are left alone (they shatter, glow and repaint). */
+  const ONE_COPY = /^(island-shell$|island-interior-|island-fit-|island-office|island-cityhall|island-dressing-|island-breakwater|island-harbour-|survival-(land|roads|sidewalks|road-paint|street-furniture)$)/;
+  const NOT_ONE = /glass|lit|sign/;
+  const ONE_ATTRS = ["normal", "color"];
+  function* oneCopySteps(root) {
+    if (!root || !CBZ.gpuOnlyAttrs) return;
+    const late = CBZ.sliceLate || function () { return false; };
+    const stack = [root];
+    let seen = 0;
+    while (stack.length) {
+      const o = stack.pop();
+      for (let c = o.children.length - 1; c >= 0; c--) stack.push(o.children[c]);
+      if ((++seen & 1023) === 1023 && late()) yield 0;
+      if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || !o.name || !ONE_COPY.test(o.name) || NOT_ONE.test(o.name)) continue;
+      const g = o.geometry;
+      if (g && !g._shared) CBZ.gpuOnlyAttrs(g, ONE_ATTRS);
+    }
+  }
+
   /* ---- BUILD / SHOW / DROP ---------------------------------------------- */
   function startJob(I) {
     if (I.job || I.arena) return;
@@ -416,6 +440,22 @@
       try { if (CBZ.shaderQueue) CBZ.shaderQueue(I.arena.root, { full: true }); } catch (e) {}
       yield 0;
       if (job.attachSteps) yield* job.attachSteps(); else if (job.attach) job.attach();
+      // (after the fit-outs, before the upload: each attribute goes GPU-only as it goes up)
+      yield* oneCopySteps(I.arena.root);
+      /* ONE ISLAND AT A TIME, NOT TWO. It is whole and in the world now, so
+         it can be THE island (tick below) while it is still hidden, and the
+         one you are leaving, out past the drop line behind you where nobody
+         sees it go, is taken down BEFORE this one's buffers go up to the
+         GPU: the two islands' arrays and buffers never stand together
+         (memscope --isles --travel: the both-islands moment was the peak).
+         A few seconds at most, and never once it is close enough to matter. */
+      I.joined = true;
+      const w0 = performance.now();
+      const leaving = function () {
+        return ST.isles.some(function (O) { return O !== I && O.arena && (O._shore || 0) > ST.map.view.drop * 0.9; }) ||
+          ST.chores.some(function (c) { return /:drop$/.test(c.label); });
+      };
+      while (performance.now() - w0 < 4000 && I._shore > 1500 && leaving()) yield "frame";
       // its vertex buffers and textures go up to the GPU a few MB a step
       // while it is still hidden (core/fxwarm.js): the frame it appears in
       // uploads nothing
@@ -452,7 +492,9 @@
   // what the player is in (a jet, a boat) is parented under the island it
   // came from: it leaves with the player, never with the island
   function rescue(root) {
-    const P = CBZ.player, to = ST.active && ST.active.arena ? ST.active.arena.root : ST.root;
+    // (into the island in force only while it is shown: one taking over
+    // while it still warms, hidden, would hide the jet you are flying)
+    const P = CBZ.player, to = ST.active && ST.active.arena && ST.active.arena.root.visible ? ST.active.arena.root : ST.root;
     if (!P || !root || to === root) return;
     for (const m of [P._aircraft, P.driving ? P._vehicle : null]) {
       const grp = m && m.group;
@@ -469,7 +511,7 @@
     // taken down a frame's share at a time (registries first, then the GPU)
     const job = I.job;
     if (job) chore(I.id + ":drop", CBZ.islandDisposeSteps ? CBZ.islandDisposeSteps(job) : (function* () { CBZ.islandDispose(job); })());
-    I.job = null; I.arena = null;
+    I.job = null; I.arena = null; I.joined = false;
     I.ready.value = 0;
     cover(I, false);
     I.state = "far"; I.t = 0;
@@ -595,6 +637,7 @@
       // on a phone, the first flight off Port Royal)
       spawnI.arena.root.visible = true;
       spawnI.state = "near";
+      { const it = oneCopySteps(spawnI.arena.root); for (let r = it.next(); !r.done; r = it.next()) {} }
     } else { spawnI.job = null; }
     // every other island as data, and every far form
     for (const I of ST.isles) {
@@ -775,7 +818,10 @@
     // the island in force: the nearest whole one
     let best = ST.active, bd = best && best.arena ? Math.hypot(best.x - px, best.z - pz) - best.R : 1e9;
     for (const I of ST.isles) {
-      if (!I.arena || I === ST.active || (I.state !== "near" && I.state !== "fadeIn")) continue;
+      // (a warming island that has joined the world takes over only once the
+      // island in force is out past the drop line: it is not seen to go)
+      const early = I.state === "warming" && I.joined && (!ST.active || !ST.active.arena || ST.active._shore > V.drop);
+      if (!I.arena || I === ST.active || (I.state !== "near" && I.state !== "fadeIn" && !early)) continue;
       const d = Math.hypot(I.x - px, I.z - pz) - I.R;
       if (d < bd - SWITCH_HYST) { best = I; bd = d; }
     }
