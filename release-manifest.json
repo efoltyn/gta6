@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "44cc025e47bad73d8be892ecb839763b08265cae",
-  "createdAt": "2026-10-29T09:06:21.106Z",
+  "sourceCommit": "29a71af1d6c166035f4807a9467480ab66fa848a",
+  "createdAt": "2026-10-29T10:22:32.678Z",
   "fileCount": 1475,
-  "totalBytes": 52645668,
+  "totalBytes": 52646286,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -603,8 +603,8 @@
     },
     {
       "file": "src/city/carbody.js",
-      "bytes": 31843,
-      "sha256": "d00a0a2c7a0944e25b153d9109660182cd7552fdae6fb783b8b0a4e9004e163f"
+      "bytes": 31789,
+      "sha256": "89365d1fb501310d781c97fdabafee8018cd292c492307e44dd3140827bf83ae"
     },
     {
       "file": "src/city/carcluster.js",
@@ -768,8 +768,8 @@
     },
     {
       "file": "src/city/collapse.js",
-      "bytes": 122359,
-      "sha256": "4e7dfc2879d4aeba935ba48f4eba05679834a3e604516044dc4c25539045cf2e"
+      "bytes": 122469,
+      "sha256": "ec5afdd23654e61b3b0b659a8805f343348fc8185633c17d3ba6353a904154f8"
     },
     {
       "file": "src/city/combat.js",
@@ -2018,8 +2018,8 @@
     },
     {
       "file": "src/city/vehicles.js",
-      "bytes": 183302,
-      "sha256": "c18128a758040831e55af2eb5568a83d890b27f860376f3542fcd890bdc3fa28"
+      "bytes": 183356,
+      "sha256": "a90796be264c1da93757edc2525dcc2bdd8f987075fb14c94c135084183e8e7b"
     },
     {
       "file": "src/city/verbwheel.js",
@@ -3273,8 +3273,8 @@
     },
     {
       "file": "src/systems/debris.js",
-      "bytes": 93114,
-      "sha256": "b6917a2c40a6f62f20d4e0068604d3e3c97076fbc84adc159fdb84ea33d18703"
+      "bytes": 93353,
+      "sha256": "65d0b8d7baf284625897d5588a201c0d5dd54fd4e505c0c56f6446a289f4d8a0"
     },
     {
       "file": "src/systems/detection.js",
@@ -3298,8 +3298,8 @@
     },
     {
       "file": "src/systems/disasters.js",
-      "bytes": 125609,
-      "sha256": "1362311e63ef9e63f3fd5bb73da430746d305776ce069f1bc87ed9fd3949de83"
+      "bytes": 125753,
+      "sha256": "7e6e709fb6316789858fbf12f4d21dd2f98727e2df5c374fc106a252386c0543"
     },
     {
       "file": "src/systems/dustfx.js",
@@ -3698,8 +3698,8 @@
     },
     {
       "file": "src/systems/quake.js",
-      "bytes": 71809,
-      "sha256": "690faf14473623e1ae55e2885bb28c5935a1f31eb83c92744149f8583226c0af"
+      "bytes": 71922,
+      "sha256": "20500cb7080bcbbcb31353abc6f72e1546f0183e3aa303f608caa0d88e70c5df"
     },
     {
       "file": "src/systems/quests.js",
@@ -7303,33 +7303,33 @@
     },
     {
       "file": "the-isles.html",
-      "bytes": 66468,
-      "sha256": "f561df200668fbe8dcdebeddf7de8162e5b3282a051363e30b42127856086b6e"
+      "bytes": 66470,
+      "sha256": "16bba804bf0bb5c6fe7601cba8529de0d62047fc2606becc31f9e6a25312698c"
     },
     {
       "file": "shark-sim.html",
-      "bytes": 66409,
-      "sha256": "c260782391b8df347a66958e1317b3bc3227a7cbbb3494025cf33f409f4976c9"
+      "bytes": 66411,
+      "sha256": "8c9c395bd0affc2aba31cb002653865fa8796f48bc1385c9adb78e22d8aff5cb"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 66452,
-      "sha256": "812e003d68a87d8ff10021230356611b68e3c9295105a85f052c8706eb18249a"
+      "bytes": 66454,
+      "sha256": "141ab08fc217d83e140ac8170a26f063c5b7d850c2a61a98e35828a220a5238e"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 66421,
-      "sha256": "132187177c06b0a1abf23b1f1c61a9dbad82d5a1eb5bcee3726dd509fccb5864"
+      "bytes": 66423,
+      "sha256": "f35e889787f8bf6ed277b49f97bdfcda593f56f303bc558d3c62a6a58e5f6039"
     },
     {
       "file": "gang-city.html",
-      "bytes": 66376,
-      "sha256": "56a8148b0288fe4ea5b55228c93ae2505876d9fcec2bed4826633dab49ef4834"
+      "bytes": 66378,
+      "sha256": "991083a117c270fa05426da7ab09645b4ea6cb7be2507ae097d8a8abf135849c"
     },
     {
       "file": "gun-game.html",
-      "bytes": 66398,
-      "sha256": "3c2bc4c08f40837c569531044356d5201d39f01dfaf923066a3a300d95b56ce1"
+      "bytes": 66400,
+      "sha256": "7dfdaf6132d0f8af480cd298e40843cb3a926a6aaf4682cbaee52ca6d6d64290"
     },
     {
       "file": "games/battle.html",
