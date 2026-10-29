@@ -2943,7 +2943,7 @@
      half-buried, cooling. The caller hears every landing through onLand
      with the mass, the speed and what was hit, and prices it.
 
-     THE TRAIL is a smoke tube (smokeRibbons), not a string of puff cards:
+     THE TRAIL is a smoke tube (systems/smoketrail.js), not puff cards:
      the old trail dropped a sprite every 50 ms and from the summit an arc
      of them read as a row of grey beads across the sky. The ribbon is the
      rock's real path, widening and thinning as it ages, shaded as a round
@@ -2954,143 +2954,6 @@
      Draws: hot rocks 1, cold rocks 1, trails 1, craters 1, and one per
      live dust burst (at most DUST_CAP) — however many bombs are in the air.
      ============================================================ */
-  /* smokeRibbons(parent, nTrails, nPts): the smoke a moving thing leaves,
-     one draw for every trail. Each trail is its last nPts positions; each
-     point ages, widens (an expanding wake) and fades. The strip faces the
-     camera in the vertex shader and the fragment shader shades it as the
-     ROUND TUBE it stands for: lit on the side toward the sun, dark on the
-     far side, soft at the rim, and torn along its length by value noise. */
-  const RIB_VS = [
-    "attribute vec3 aDir; attribute float aSide; attribute float aW; attribute float aA; attribute float aU; attribute vec3 aCol;",
-    "varying vec3 vS; varying vec3 vV; varying float vA; varying float vU; varying float vX; varying vec3 vCol;",
-    "void main() {",
-    "  vec4 wp = modelMatrix * vec4(position, 1.0);",
-    "  vec3 V = normalize(cameraPosition - wp.xyz);",
-    "  vec3 D = normalize(mat3(modelMatrix) * aDir + vec3(1e-5, 2e-5, 0.0));",
-    "  vec3 S = cross(D, V); float sl = length(S);",
-    "  S = sl > 1e-4 ? S / sl : vec3(0.0, 1.0, 0.0);",
-    "  wp.xyz += S * aSide * aW;",
-    "  vS = S * aSide; vV = V; vA = aA; vU = aU; vX = aSide; vCol = aCol;",
-    "  gl_Position = projectionMatrix * viewMatrix * wp;",
-    "}",
-  ].join("\n");
-  const RIB_FS = [
-    "uniform vec3 uSunDir; uniform float uTime; uniform float uDay;",
-    "varying vec3 vS; varying vec3 vV; varying float vA; varying float vU; varying float vX; varying vec3 vCol;",
-    "float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }",
-    "float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
-    "  return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), f.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), f.x), f.y); }",
-    "void main() {",
-    "  float x = clamp(vX, -1.0, 1.0);",
-    "  float c = sqrt(max(1.0 - x * x, 0.0));",
-    // the tube's own normal: across at the rim, toward the eye on the axis
-    "  vec3 n = normalize(vS + normalize(vV) * c + vec3(1e-5));",
-    "  float lam = clamp(dot(n, uSunDir) * 0.5 + 0.5, 0.0, 1.0);",
-    "  float tor = vn(vec2(vU * 0.55 - uTime * 0.4, x * 1.7)) * 0.65 + vn(vec2(vU * 1.9 + 3.1, x * 4.1 + uTime * 0.7)) * 0.35;",
-    "  float a = vA * smoothstep(0.0, 0.55, c) * smoothstep(0.18, 0.62, tor + c * 0.35);",
-    "  if (a < 0.004) discard;",
-    "  vec3 col = vCol * mix(0.42, 1.25, lam * uDay + 0.3 * (1.0 - uDay));",
-    "  gl_FragColor = vec4(col, a);",
-    "  #include <tonemapping_fragment>",
-    "  #include <encodings_fragment>",
-    "}",
-  ].join("\n");
-  function smokeRibbons(parent, NT, NP) {
-    const NV = NT * NP * 2;
-    const pos = new Float32Array(NV * 3), dir = new Float32Array(NV * 3), side = new Float32Array(NV);
-    const wid = new Float32Array(NV), alp = new Float32Array(NV), uu = new Float32Array(NV), colA = new Float32Array(NV * 3);
-    for (let i = 0; i < NV; i++) side[i] = (i & 1) ? 1 : -1;
-    const idx = [];
-    for (let t = 0; t < NT; t++) for (let k = 0; k < NP - 1; k++) {
-      const a = (t * NP + k) * 2;
-      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-    }
-    const g = new THREE.BufferGeometry();
-    const A = function (name, arr, n) { const b = new THREE.BufferAttribute(arr, n); b.setUsage(THREE.DynamicDrawUsage); g.setAttribute(name, b); return b; };
-    const aPos = A("position", pos, 3), aDir = A("aDir", dir, 3), aW = A("aW", wid, 1), aA = A("aA", alp, 1), aU = A("aU", uu, 1), aC = A("aCol", colA, 3);
-    g.setAttribute("aSide", new THREE.BufferAttribute(side, 1));
-    g.setIndex(idx);
-    const mat = new THREE.ShaderMaterial({
-      uniforms: { uSunDir: { value: new THREE.Vector3(0.5, 0.7, 0.3) }, uTime: { value: 0 }, uDay: { value: 1 } },
-      vertexShader: RIB_VS, fragmentShader: RIB_FS,
-      transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide, fog: false,
-    });
-    const mesh = new THREE.Mesh(g, mat);
-    mesh.frustumCulled = false; mesh.renderOrder = 6; mesh.name = "volcanoSmokeRibbons";
-    mesh.visible = false;
-    parent.add(mesh);
-    // per trail: a ring of points {x, y, z, age}, newest last
-    const tr = [];
-    for (let t = 0; t < NT; t++) {
-      const pts = [];
-      for (let k = 0; k < NP; k++) pts.push({ x: 0, y: 0, z: 0, age: 1e9, u: 0 });
-      tr.push({ pts: pts, head: 0, n: 0, live: false, w0: 0.3, w1: 2, life: 2, a0: 0.5, r: 0.2, g: 0.2, b: 0.2, u: 0 });
-    }
-    let next = 0, time = 0;
-    const R = {
-      mesh: mesh,
-      // a fresh trail: width at birth and at the end of its life, how long a point lives, alpha, colour
-      open(w0, w1, life, a0, col) {
-        const T = tr[next]; next = (next + 1) % NT;
-        T.live = true; T.closed = false; T.n = 0; T.head = 0; T.u = 0;
-        T.w0 = w0; T.w1 = w1; T.life = life; T.a0 = a0; T.r = col.r; T.g = col.g; T.b = col.b;
-        return T;
-      },
-      push(T, x, y, z) {
-        if (!T) return;
-        if (T.n > 0) {
-          const p = T.pts[(T.head + NP - 1) % NP];
-          T.u += Math.hypot(x - p.x, y - p.y, z - p.z);
-        }
-        const q = T.pts[T.head];
-        q.x = x; q.y = y; q.z = z; q.age = 0; q.u = T.u;
-        T.head = (T.head + 1) % NP;
-        T.n = Math.min(NP, T.n + 1);
-      },
-      update(dt, sun, day) {
-        time += dt;
-        mat.uniforms.uTime.value = time;
-        if (sun) mat.uniforms.uSunDir.value.copy(sun);
-        mat.uniforms.uDay.value = day == null ? 1 : day;
-        let any = false;
-        for (let t = 0; t < NT; t++) {
-          const T = tr[t];
-          let alive = false;
-          for (let k = 0; k < NP; k++) {
-            // oldest first: ring order from head
-            const p = T.pts[(T.head + k) % NP];
-            const o = (t * NP + k) * 2;
-            if (T.live && k >= NP - T.n) p.age += dt;
-            const valid = T.live && k >= NP - T.n && p.age < T.life;
-            const u = valid ? p.age / T.life : 1;
-            if (valid) alive = true;
-            // the neighbour toward the newer end sets the strip's direction
-            const pn = T.pts[(T.head + Math.min(k + 1, NP - 1)) % NP], pp = T.pts[(T.head + Math.max(k - 1, NP - T.n)) % NP];
-            let dx = pn.x - pp.x, dy = pn.y - pp.y, dz = pn.z - pp.z;
-            if (dx * dx + dy * dy + dz * dz < 1e-8) { dx = 0; dy = 1; dz = 0; }
-            const w = valid ? T.w0 + (T.w1 - T.w0) * Math.sqrt(u) : 0;
-            // the newest point fades in, so the trail never starts at full width on the rock
-            const a = valid ? T.a0 * (1 - u) * (1 - u) * clamp((k - (NP - T.n)) / 2, 0.15, 1) * clamp(p.age / 0.06, 0.3, 1) : 0;
-            for (let e = 0; e < 2; e++) {
-              const v = o + e;
-              pos[v * 3] = p.x; pos[v * 3 + 1] = p.y; pos[v * 3 + 2] = p.z;
-              dir[v * 3] = dx; dir[v * 3 + 1] = dy; dir[v * 3 + 2] = dz;
-              wid[v] = w; alp[v] = a; uu[v] = p.u;
-              colA[v * 3] = T.r; colA[v * 3 + 1] = T.g; colA[v * 3 + 2] = T.b;
-            }
-          }
-          if (!alive && T.live && T.n > 0 && T.closed) T.live = false;
-          if (alive) any = true;
-        }
-        aPos.needsUpdate = aDir.needsUpdate = aW.needsUpdate = aA.needsUpdate = aU.needsUpdate = aC.needsUpdate = true;
-        mesh.visible = any;
-      },
-      close(T) { if (T) T.closed = true; },
-      dispose() { if (mesh.parent) mesh.parent.remove(mesh); g.dispose(); mat.dispose(); },
-    };
-    return R;
-  }
-
   /* dustBursts(parent, n): the dust a landing rock throws up, as a squat
      column out of the plume program (one more draw while it lives, the
      program already linked). The oldest burst is reused when all are up. */
@@ -3213,10 +3076,13 @@
     craters.count = 0; craters.frustumCulled = false; craters.receiveShadow = true;
     parent.add(craters);
     let crN = 0, crNext = 0;
-    const ribbons = smokeRibbons(parent, MAX, 26);
+    // the trails are shaded smoke tubes (systems/smoketrail.js), one draw
+    const ribbons = CBZ.smokeTrail ? CBZ.smokeTrail.pool(parent, MAX, 26) : null;
     const dust = dustBursts(parent);
     function body0Trail(size, hot) {
-      return hot ? ribbons.open(size * 0.22, size * 1.5, 2.0, 0.36, C_SMOKE) : ribbons.open(size * 0.2, size * 1.3, 1.4, 0.24, C_PALE);
+      if (!ribbons) return null;
+      return hot ? ribbons.open({ w0: size * 0.22, w1: size * 1.5, life: 2.0, a0: 0.36, col: C_SMOKE, rise: 0.3, drag: 0 })
+        : ribbons.open({ w0: size * 0.2, w1: size * 1.3, life: 1.4, a0: 0.24, col: C_PALE, rise: 0.2, drag: 0 });
     }
     const C_HOT = new THREE.Color(screenHex(255, 236, 190));
     const C_MID = new THREE.Color(screenHex(255, 122, 30));
@@ -3285,7 +3151,7 @@
           // a juvenile bomb degasses a dark streak; a lithic trails pale dust
           trail: body0Trail(size, b.hot !== false),
         };
-        ribbons.push(body.trail, x0, y0, z0);
+        if (ribbons) ribbons.push(body.trail, x0, y0, z0);
         bodies.push(body);
         stats.thrown++;
         stats.maxSpeed = Math.max(stats.maxSpeed, v);
@@ -3305,7 +3171,7 @@
             // a big bomb's skin chills in flight but its core does not
             if (b.hot) b.temp = Math.max(0.35, b.temp - dt * 0.09 / Math.max(0.4, b.size));
             b.trailT -= dt;
-            if (b.trailT <= 0) { b.trailT = 0.06; ribbons.push(b.trail, b.x, b.y, b.z); }
+            if (b.trailT <= 0) { b.trailT = 0.06; if (ribbons) ribbons.push(b.trail, b.x, b.y, b.z); }
             let hit = null, gy = 0;
             if (b.vy < 0 && o.solids) { try { hit = o.solids(b.x, b.y - b.size * 0.5, b.z); } catch (e) { hit = null; } }
             if (hit) gy = hit.y;
@@ -3323,8 +3189,7 @@
                 // a crater only where a rock hit DIRT hard enough to dig one
                 if (speed > 10) addCrater(b.x, b.z, Math.min(4.5, b.size * (1.5 + speed / 30)));
               }
-              ribbons.push(b.trail, b.x, b.y, b.z);
-              ribbons.close(b.trail);
+              if (ribbons) { ribbons.push(b.trail, b.x, b.y, b.z); ribbons.close(b.trail); }
               dust.fire(b.x, gy, b.z, b.size, speed);
               if (o.onLand) {
                 try {
@@ -3357,7 +3222,7 @@
         hot.visible = nh > 0; cold.visible = nc > 0;
         // the trails thin out behind them; the landings' dust hangs and settles
         const night = opts && opts.night != null ? clamp(+opts.night, 0, 1) : nightNow(opts);
-        ribbons.update(dt, sunDir3(), 1 - night);
+        if (ribbons) ribbons.update(dt);
         dust.update(dt, night, opts && opts.windX, opts && opts.windZ);
         return handle;
       },
@@ -3365,7 +3230,8 @@
         parent.remove(hot); parent.remove(cold); parent.remove(craters);
         hotMat.dispose(); coldMat.dispose(); crMat.dispose();
         hot.dispose && hot.dispose(); cold.dispose && cold.dispose(); craters.dispose && craters.dispose();
-        ribbons.dispose(); dust.dispose();
+        if (ribbons) ribbons.dispose();
+        dust.dispose();
         const k = LIVE.bombs.indexOf(handle); if (k >= 0) LIVE.bombs.splice(k, 1);
       },
     };

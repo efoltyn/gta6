@@ -414,7 +414,7 @@
       tracer: new THREE.MeshBasicMaterial({ color: 0xff5a2a }),
       // the ballistic body's hot nose and its wake streak (additive, unlit)
       sheath: new THREE.MeshBasicMaterial({ color: 0xffb070, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }),
-      streak: new THREE.MeshBasicMaterial({ color: 0xffc890, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }),
+      streak: new THREE.MeshBasicMaterial({ color: 0xffc890, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }),
     };
     for (const k in MAT) MAT[k]._shared = true;
     return MAT;
@@ -698,13 +698,43 @@
     setFlare(base + 1, tx - dx * back, ty - dy * back, tz - dz * back, size * fl, 0.72 * fl, 1, 0.55, 0.16);
   }
 
-  // ---- a smoke trail laid BY DISTANCE ------------------------------------
-  // `st` is the emitter's own record {x,y,z,on}. Puffs fill the segment from
-  // the last puff to the nozzle now, so a fast round leaves no gaps; the
-  // spacing widens when the round is so fast that `budget` puffs over its
-  // trail's life would overrun the shared pool.
+  // ---- a smoke trail ----------------------------------------------------
+  // `st` is the emitter's own record {x,y,z,on}; on = false starts a new
+  // trail (a new flight, or a phase change the caller marks that way).
+  //
+  // THE TRAIL IS A TUBE (systems/smoketrail.js), not a row of puffs: the
+  // puffs read as beads from far and as a hard bar of overlapping discs from
+  // close. The tube lays a point every `gap` metres (so its NP points span
+  // the spec's life at this speed), and its newest point rides the nozzle,
+  // so it is attached and never gaps however fast the round. A different
+  // spec on the same record (booster to cruise) starts a fresh tube.
+  // Without the module the old puffs, laid by distance, stand in.
+  const _tc = new THREE.Color();
   function trail(st, tx, ty, tz, dx, dy, dz, spec, speed) {
     if (!spec) return;
+    const ST = CBZ.smokeTrail;
+    if (ST) {
+      const P = ST.shared();
+      if (!st.on || st.tubeSpec !== spec || !P.alive(st.tube)) {
+        if (st.tube) P.close(st.tube);
+        const sh = spec.shade;
+        _tc.setRGB(sh, sh, sh * 0.97).convertSRGBToLinear();
+        // the specs were sized for a puff budget; a tube costs nothing per metre,
+        // so it can be as wide and as lasting as real rocket smoke
+        st.tube = P.open({ w0: spec.s0 * 0.5, w1: spec.s1 * 0.75, life: spec.life * 1.8, a0: Math.min(0.92, spec.a0 * 1.35), col: _tc, rise: 0.25, wind: 1, drag: 1.2 });
+        st.tubeSpec = spec; st.on = true;
+        st.x = tx; st.y = ty; st.z = tz;
+        P.push(st.tube, tx, ty, tz, -dx * 1.2, -dy * 1.2, -dz * 1.2);
+        P.push(st.tube, tx, ty, tz, -dx * 1.2, -dy * 1.2, -dz * 1.2);
+        return;
+      }
+      const gap = Math.max(spec.spacing * 1.5, (speed || 0) * spec.life * 1.8 / (P.NP - 3));
+      if (Math.hypot(tx - st.x, ty - st.y, tz - st.z) >= gap) {
+        P.push(st.tube, tx, ty, tz, -dx * 1.2, -dy * 1.2, -dz * 1.2);
+        st.x = tx; st.y = ty; st.z = tz;
+      } else P.head(st.tube, tx, ty, tz);
+      return;
+    }
     clouds();
     if (!st.on) { st.x = tx; st.y = ty; st.z = tz; st.on = true; return; }
     const sx = tx - st.x, sy = ty - st.y, sz = tz - st.z;

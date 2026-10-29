@@ -1585,12 +1585,14 @@
     if (u.sheath) { u.sheath.visible = true; const s = 1 + 0.06 * (MU.rand() - 0.5); u.sheath.scale.set(s, s, 1); }
     if (u.streak) {
       u.streak.visible = true;
-      const len = Math.max(24, Math.min(140, S.v * 0.045));
+      // a short glowing tail, not a bar: by day the plasma behind a Mach 6
+      // body is a few tens of metres of shimmer, the smoke tube does the rest
+      const len = Math.max(14, Math.min(60, S.v * 0.022));
       u.streak.scale.set(fl * (0.9 + 0.3 * (far - 1) / far), fl * (0.9 + 0.3 * (far - 1) / far), len);
     }
     const nx = _bp.x + m.dir.x * (half + 0.4), ny = _bp.y + m.dir.y * (half + 0.4), nz = _bp.z + m.dir.z * (half + 0.4);
-    MU.setFlare(m.flare, nx, ny, nz, sp.flare * fl * Math.min(far, 18), 1, 1, 0.93, 0.8);
-    MU.setFlare(m.flare + 1, _bp.x, _bp.y, _bp.z, sp.flare * 2.0 * fl * Math.min(far, 14), 0.42, 1, 0.5, 0.18);
+    MU.setFlare(m.flare, nx, ny, nz, sp.flare * fl * Math.min(far, 8), 1, 1, 0.93, 0.8);
+    MU.setFlare(m.flare + 1, _bp.x, _bp.y, _bp.z, sp.flare * 1.5 * fl * Math.min(far, 6), 0.3, 1, 0.5, 0.18);
     if (_bp.y < 16000) {
       const tx = _bp.x - m.dir.x * (half + 30), ty = _bp.y - m.dir.y * (half + 30), tz = _bp.z - m.dir.z * (half + 30);
       MU.trail(m.trail, tx, ty, tz, m.dir.x, m.dir.y, m.dir.z, sp.wake, S.v);

@@ -45,7 +45,7 @@ CBZ.lab.kit("strike", {
     "src/systems/solidground.js", "src/systems/debris.js", "src/systems/fx.js", "src/systems/volfx.js", "src/systems/craters.js",
     "src/city/crashfx.js", "src/systems/impactbus.js", "src/city/structural.js", "src/city/fracture.js",
     "src/city/collapse.js", "src/city/crashdeform.js", "src/city/nukefx.js",
-    "src/weapons/munitiontable.js", "src/systems/breach.js", "src/systems/spatialgrid.js", "src/weapons/munitions.js", "src/units/unitkit.js", "src/city/unitmodels.js",
+    "src/weapons/munitiontable.js", "src/systems/breach.js", "src/systems/spatialgrid.js", "src/systems/smoketrail.js", "src/weapons/munitions.js", "src/units/unitkit.js", "src/city/unitmodels.js",
     "src/units/vehicles/b52.js", "src/units/vehicles/b2_spirit.js", "src/units/vehicles/f35.js",
     "src/city/aircraft.js", "src/city/strategic.js", "src/city/playerair.js",
   ],
