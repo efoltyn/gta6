@@ -136,6 +136,19 @@ const RUNS = {
     },
     params: "run=nuke",
   },
+  /* THE WILDFIRE (src/lab/kits/wildfire.js): grass and trees on a 20 degree
+     ramp, two houses and two cars on the bench downwind, wind to +z. */
+  wildfire: {
+    kit: "wildfire",
+    beats: [6, 12, 20, 30, 40],
+    seconds: 45,
+    cams: {
+      "the field, 130 m": `({ p: [-95, 6, -85], l: [25, 14, 15], fov: 58 })`,
+      "downwind, by the houses": `({ p: [10, 4, 75], l: [30, 14, 0], fov: 62 })`,
+      "aerial": `({ p: [-130, 95, -120], l: [20, 8, 20], fov: 52 })`,
+    },
+    params: "mag=0.6",
+  },
   /* THE VOLCANO (src/lab/kits/eruption.js): a 30 m stratovolcano on a plain,
      the island's whole eruption sequence. 0-6 s the summit steaming (the
      fumaroles, harder through the unrest), 6 s the phreatic blast, then the

@@ -709,8 +709,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
 <!-- systems/smoketrail.js: every rocket's and volcanic bomb's trail as a shaded smoke tube (CBZ.smokeTrail) -->
-<script src="src/systems/smoketrail.js?v=tube1029"></script>
-<script src="src/weapons/munitions.js?v=rounds1013m"></script>
+<script src="src/systems/smoketrail.js?v=fx1029"></script>
+<script src="src/weapons/munitions.js?v=fx1029"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -1016,13 +1016,13 @@ document.body.appendChild(b);}}catch(e){}})();
      builders. Must precede systems/disasters.js so the roster finds
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. REQUIRED: the
      old additive-stream fallback in disasters.js was deleted 2026-09-28. -->
-<script src="src/world/volcanofx.js?v=arrive1022"></script>
+<script src="src/world/volcanofx.js?v=fx1029"></script>
 <!-- THE ERUPTION'S SEQUENCE: world/eruption.js (CBZ.eruption) runs unrest,
      phreatic blast, Plinian column + umbrella, bombs, lightning, lava,
      collapse and lahar on volcanofx's builders, mode-agnostic (the lab's
      eruption kit drives the same file). Its fires are systems/wildfire.js's.
      Must precede systems/disasters.js. -->
-<script src="src/world/eruption.js?v=vlook1019"></script>
+<script src="src/world/eruption.js?v=fx1029"></script>
 <!-- THE QUAKE IS SHARED: systems/quake.js is the whole earthquake event (source
      and path, P/S/surface wave train, buildings by type and height, cracks,
      mains, liquefaction, cars, the crowd, what falls on whom), drop-cover,
@@ -1056,7 +1056,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
-<script src="src/systems/wildfire.js?v=jetbound1022"></script>
+<!-- systems/smokeplume.js: a fire's smoke as raymarched plumes (CBZ.smokePlumes), read by wildfire.js -->
+<script src="src/systems/smokeplume.js?v=fx1029"></script>
+<script src="src/systems/wildfire.js?v=fx1029"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
@@ -2049,7 +2051,7 @@ document.body.appendChild(b);}}catch(e){}})();
      carries which payload, prices, delivery days, each nation's starting
      fleet and warheads, bunker hardness. polwar.js seeds from it; warroom.js
      gates, sells and flies off it. -->
-<script src="src/city/arsenal_data.js?v=strike1013m"></script>
+<script src="src/city/arsenal_data.js?v=fx1029"></script>
 <!-- P9: migration — policy per country (president legislates over
      LEGISLATE_DAYS days + an approval cost if unpopular; every other govType
      decrees instantly), daily individual-migration-evaluation propensity

@@ -33,7 +33,7 @@
 CBZ.lab.kit("eruption", {
   about: "the volcano's eruption sequence on a slope with houses, trees and cars: lava path, fires, ash, bombs, frame cost",
   // systems/volfx.js: the shared Perlin-Worley atlas the plume volume marches
-  files: ["src/systems/volfx.js", "src/systems/smoketrail.js", "src/world/volcanofx.js", "src/world/eruption.js", "src/systems/lightningfx.js", "src/systems/wildfire.js"],
+  files: ["src/systems/volfx.js", "src/systems/smoketrail.js", "src/systems/smokeplume.js", "src/world/volcanofx.js", "src/world/eruption.js", "src/systems/lightningfx.js", "src/systems/wildfire.js"],
   params: { mag: 0.8, q: 4, wind: 8 },
   duration: 48,
   setup: function (W, P) {
