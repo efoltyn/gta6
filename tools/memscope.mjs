@@ -566,6 +566,8 @@ export function analyze(snap, { prevIds = null, top = 20, abTop = 0, trace = "" 
       taken.add(po); unowned.push(po); if (unowned.length >= 12) break; } }
   const out = { ms: 0, nodes: N, reachable: cnt, domIters: iters, totalMB: MB(totalSelf),
     classes: [...hist].sort((a, b) => b[1][0] - a[1][0]).slice(0, 25).map(([k, v]) => ({ cls: k, MB: +MB(v[0]).toFixed(2), n: v[1] })),
+    // every class (self bytes, count): two snapshots diffed by class say what GREW, not just what is new
+    classAll: Object.fromEntries([...hist].map(([k, v]) => [k, [v[0], v[1]]])),
     owners: [...byOwner].sort((a, b) => b[1].retained - a[1].retained).map(([k, v]) => ({ owner: k.replace(/^own:/, ""), MB: +MB(v.retained).toFixed(2), bytes: v.retained, roots: v.roots })),
     holders: [...byHolder].sort((a, b) => b[1].retained - a[1].retained).slice(0, 40).map(([k, v]) => ({ holder: k, MB: +MB(v.retained).toFixed(2), bytes: v.retained })),
     unowned: unowned.map((po) => ({ MB: +MB(ret[po]).toFixed(2), cls: cls(post[po]), path: pathTo(post[po]) })),

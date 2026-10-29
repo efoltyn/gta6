@@ -102,6 +102,13 @@
   const DECK_T = 0.25;             // deck slab thickness
   // a small island town's fleet: catalog names (city/economy.js), one per body kind
   const TOWN_MODELS = ["Kotori Sprout", "Bison Vista", "Bison Frontier", "Bison Rampart"];
+  // the catalogue records the disaster island can stand (city/vehicles.js
+  // warms only these on the island, not the city's whole catalogue)
+  CBZ.islandTownModels = function () {
+    const E = CBZ.cityEcon;
+    if (!E || !E.carByName) return [];
+    return TOWN_MODELS.map(function (n) { return E.carByName(n); }).filter(Boolean);
+  };
   const PHONE = (CBZ.deviceClass || "") === "phone";
   const BUILD_PER_FRAME = PHONE ? 2 : 5;   // cars stood up per frame (a car is a few ms to build)
   const REST_MOVE = 0.6;           // m a parked car must be moved before its rest pose follows it
@@ -241,6 +248,9 @@
     }
     S.cars = keep;
     if (A.cars) { A.cars.length = 0; for (let i = 0; i < keep.length; i++) A.cars.push(keep[i].car); }
+    // the merged bodies only the scrapped cars drew leave with them
+    // (city/vehicles.js: the caches are bounded by the cars that exist)
+    if (CBZ.cityCarCachePrune) { try { CBZ.cityCarCachePrune(); } catch (e) {} }
     S.queue = spots.filter(function (s) { return !have.has(s); });
     held.length = 0;
     // nearest the player first: the street you are standing in is real at once

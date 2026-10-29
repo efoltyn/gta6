@@ -28,6 +28,9 @@
 
    Exit 0 = clean, 1 = a leak. */
 export const meta = { world: "survival", fresh: true, dirties: true, timeoutMs: 60 * 60e3 };
+// memscope is imported as a library below: without this its CLI main() runs
+// (a whole city boot in a second Chrome, then process.exit)
+process.env.MEMSCOPE_LIB = "1";
 
 const IDS = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado", "hurricane", "blizzard", "meteor", "sinkhole", "volcano", "nuke"];
 
@@ -73,9 +76,31 @@ const SNAP = `
   }
   out.updaters = CBZ.updaters ? CBZ.updaters.length : -1; out.always = CBZ.always ? CBZ.always.length : -1;
   out.colliders = (CBZ.colliders || []).length; out.platforms = (CBZ.platforms || []).length;
-  var n = 0; CBZ.scene.traverse(function () { n++; }); out.sceneObjs = n;
+  var n = 0, drawn = new Set(); CBZ.scene.traverse(function (o) { n++; if (o.geometry) drawn.add(o.geometry); }); out.sceneObjs = n;
+  // GPU geometries held while drawn by nothing in the scene: what a leak looks
+  // like (the drawn ones move with the camera, the car LOD tier, the rubble)
+  if (window.__gpu) { var off = 0; window.__gpu.live.forEach(function (x) { if (!x.isTexture && !drawn.has(x)) off++; }); out.geoOff = off; }
+  out.geoIn = drawn.size;
+  // unique scene geometries by where they hang (for the match-to-match diff)
+  var where = {}, seenG = new Set();
+  CBZ.scene.traverse(function (o) {
+    if (!o.geometry || seenG.has(o.geometry)) return; seenG.add(o.geometry);
+    var p = o, path = []; for (var d = 0; p && d < 4; d++, p = p.parent) path.push((p.name || p.type).replace(/[0-9]{2,}/g, "#"));
+    var k = path.join("<"); where[k] = (where[k] || 0) + 1;
+  });
+  out.where = where;
   try { out.structs = CBZ.collapse && CBZ.collapse._structs ? CBZ.collapse._structs.length : -1; } catch (e) {}
   try { var ds = CBZ.debris && CBZ.debris.stats ? CBZ.debris.stats() : null; if (ds) out.debris = { live: ds.live, static: ds.static, kept: ds.kept, frozen: ds.frozen, buckets: ds.buckets, watched: ds.watched }; } catch (e) {}
+  try { var cc = CBZ.cityCarCacheSizes ? CBZ.cityCarCacheSizes() : null; out.cars = { looks: CBZ.cityCarBodyTemplates ? CBZ.cityCarBodyTemplates().looks : -1, merge: cc ? cc.merge : -1, vc: cc ? cc.vc : -1 }; } catch (e) {}
+  // OLD CROWDS: every bot of every earlier match is held weakly; one that is
+  // still alive after a GC is held by something that outlived its match
+  try {
+    var W = window.__botRefs || (window.__botRefs = { seen: new WeakSet(), refs: [] });
+    var alive = 0, cur = new Set(CBZ.bots || []);
+    W.refs = W.refs.filter(function (r) { var b = r.deref(); if (!b) return false; if (!cur.has(b)) alive++; return true; });
+    (CBZ.bots || []).forEach(function (b) { if (b && !W.seen.has(b)) { W.seen.add(b); W.refs.push(new WeakRef(b)); } });
+    out.oldBots = alive;
+  } catch (e) {}
   out.bots = CBZ.surv && CBZ.surv.liveBots ? CBZ.surv.liveBots() : -1;
   out.state = CBZ.game.state;
   var seen = new Set();
@@ -210,6 +235,7 @@ export default async function (t) {
     return Math.round(u / 1048576 * 10) / 10;
   };
   const snap = async (label, extra) => {
+    try { await t.send("HeapProfiler.collectGarbage", {}); } catch (_) {}
     const s = await t.fn(SNAP, 300000);
     if (s && s.__err) throw new Error("snapshot: " + s.__err);
     await t.fn(GPU_SEE, 300000);
@@ -220,12 +246,24 @@ export default async function (t) {
       const w = Object.entries(s.progWhy || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
       for (const [k, n] of w) t.log(`      ${String(n).padStart(4)} x ${k}`);
     }
-    t.log(label.padEnd(22), JSON.stringify({ heap: s.heap, geo: s.gpuGeo, tex: s.gpuTex, prog: s.programs, objs: s.sceneObjs, upd: s.updaters, alw: s.always, col: s.colliders, plat: s.platforms, structs: s.structs, debris: s.debris, bots: s.bots, ...(extra || {}) }));
+    t.log(label.padEnd(22), JSON.stringify({ heap: s.heap, geo: s.gpuGeo, geoIn: s.geoIn, geoOff: s.geoOff, tex: s.gpuTex, prog: s.programs, objs: s.sceneObjs, upd: s.updaters, alw: s.always, col: s.colliders, plat: s.platforms, structs: s.structs, debris: s.debris, cars: s.cars, oldBots: s.oldBots, bots: s.bots, ...(extra || {}) }));
     return s;
   };
   await t.fn(GPU_HOOK);
   await t.fn(SETUP);
   await t.step(240);
+  /* --prewarm: draw every mesh of the island once (frustum culling off for one
+     frame) so first-sight uploads (three's buffers + its attribute records for
+     a part of the island seen for the first time from this match's spawn) are
+     paid before the measurement instead of looking like growth. */
+  if (t.flag("--prewarm")) {
+    t.log("prewarm:", JSON.stringify(await t.fn(`
+      var R = CBZ.renderer, keep = [], n0 = R.info.memory.geometries;
+      CBZ.scene.traverse(function (o) { if (o.isMesh || o.isPoints || o.isLine || o.isSprite) { if (o.frustumCulled) { keep.push(o); o.frustumCulled = false; } } });
+      try { CBZ.renderFrame(); } finally { for (var i = 0; i < keep.length; i++) keep[i].frustumCulled = true; }
+      return { uploadedBefore: n0, after: R.info.memory.geometries };
+    `, 600000)));
+  }
   const base = await snap("start");
   const by = {};           // id -> [snap per cycle]
   const all = [base];
@@ -244,7 +282,7 @@ export default async function (t) {
      What a match leaves behind after the next one starts is what a phone
      dies of; match 1 pays for the caches. */
   const restart = !t.flag("--no-restart");
-  const ends = [], wantHeap = t.flag("--heap");
+  const ends = [], wantHeap = t.flag("--heap"), heapFrom = Math.max(1, +t.arg("--heap-from", 1) || 1);
   let heapIds = null;
   for (let c = 1; c <= cycles; c++) {
     if (!(await run(c))) break;
@@ -254,7 +292,15 @@ export default async function (t) {
       await t.step(300);
       const s = await snap(`match ${c + 1} start`);
       all.push(s); ends.push(s);
-      if (wantHeap && (c === 1 || c === cycles)) {
+      // what the scene draws that it did not at the last match start
+      if (verbose && ends.length > 1 && s.where) {
+        const a = ends[ends.length - 2].where || {}, d = [];
+        for (const k in s.where) { const x = s.where[k] - (a[k] || 0); if (x) d.push([x, k]); }
+        for (const k in a) if (!(k in s.where)) d.push([-a[k], k]);
+        d.sort((p, q) => q[0] - p[0]);
+        t.log("   scene geometries vs last match start:", JSON.stringify(d.slice(0, 10)), "...", JSON.stringify(d.slice(-4)));
+      }
+      if (wantHeap && (c === heapFrom || c === cycles)) {
         const hs = await heapSnapshot(t);
         const A = await heapAnalyze(hs, heapIds);
         if (!heapIds) {
@@ -263,7 +309,7 @@ export default async function (t) {
           for (const k of A.classes.slice(0, 12)) t.log(`   ${String(k.MB).padStart(8)} MB ${String(k.n).padStart(8)}  ${k.cls}`);
           for (const u of A.unowned.slice(0, 10)) t.log(`   dom ${String(u.MB).padStart(7)} MB ${u.cls}  ${u.path}`);
         } else if (A.diff) {
-          t.log(`heap NEW since match 2 start: ${A.diff.newMB} MB, ${A.diff.newObjects} objects`);
+          t.log(`heap NEW since match ${heapFrom + 1} start: ${A.diff.newMB} MB, ${A.diff.newObjects} objects`);
           for (const k of A.diff.clusters) t.log(`   ${String(k.MB).padStart(8)} MB ${String(k.n).padStart(7)}  ${k.cls}  <- ${k.path}`);
           t.log("heap NEW, big objects by retainer path:");
           for (const k of A.diff.paths || []) t.log(`   ${String(k.MB).padStart(8)} MB ${String(k.n).padStart(6)}  ${k.path}`);
@@ -313,5 +359,5 @@ export default async function (t) {
   if (errs.length) t.log("page errors", JSON.stringify(errs.slice(0, 8)));
   for (const l of leaks) t.log("LEAK", l);
   return { ok: leaks.length === 0, summary: leaks.length ? `${leaks.length} leak(s): ${leaks.slice(0, 6).join("; ")}` : `clean over ${cycles} cycles of ${ids.length} disasters`,
-    data: { leaks, snaps: all.map((s) => ({ label: s.label, heap: s.heap, geo: s.gpuGeo, tex: s.gpuTex, objs: s.sceneObjs })) } };
+    data: { leaks, snaps: all.map((s) => ({ label: s.label, heap: s.heap, geo: s.gpuGeo, geoIn: s.geoIn, geoOff: s.geoOff, tex: s.gpuTex, objs: s.sceneObjs })) } };
 }
