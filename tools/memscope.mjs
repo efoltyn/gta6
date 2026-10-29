@@ -544,7 +544,15 @@ export function analyze(snap, { prevIds = null, top = 20 } = {}) {
     for (let po = 0; po < root; po++) { const n = post[po]; if (inPrev(nodes[n * nf + oI])) continue; const s = self(n); newSelf += s; newN++;
       const own = ownerOf[po] >= 0 ? gName[ownerOf[po]].replace(/^own:/, "") : "(unowned)", k = own + " | " + cls(n);
       let c = clusters.get(k); if (!c) clusters.set(k, c = { owner: own, cls: cls(n), n: 0, self: 0, rep: -1, repS: -1 }); c.n++; c.self += s; if (s > c.repS) { c.repS = s; c.rep = n; } }
+    /* WHERE the new bytes hang: every new node of 16 KB or more (typed array
+       stores, big arrays) by its retainer path with the indices folded, so a
+       thousand pieces of one leak read as one line instead of one example */
+    const byPath = new Map();
+    for (let po = 0; po < root; po++) { const n = post[po]; const s = self(n); if (s < 16384 || inPrev(nodes[n * nf + oI])) continue;
+      const k = pathTo(n).replace(/\[\d+\]/g, "[]").replace(/<table><\d+>/g, "<table>").replace(/@\d+/g, "@");
+      let c = byPath.get(k); if (!c) byPath.set(k, c = { n: 0, self: 0 }); c.n++; c.self += s; }
     let totPrev = 0; out.diff = { newMB: +MB(newSelf).toFixed(2), newObjects: newN,
+      paths: [...byPath].sort((a, b) => b[1].self - a[1].self).slice(0, top).map(([k, c]) => ({ path: k, n: c.n, MB: +MB(c.self).toFixed(3) })),
       clusters: [...clusters.values()].sort((a, b) => b.self - a.self).slice(0, top).map((c) => ({ owner: c.owner, cls: c.cls, n: c.n, MB: +MB(c.self).toFixed(3), path: pathTo(c.rep) })) };
     void totPrev; void newRet;
   }

@@ -5472,6 +5472,19 @@
       // the tornado's journal: every roof, wall, tree and car it moved goes
       // back, its debris, hail and scar are cleared, the siren stops
       if (CBZ.tornado && CBZ.tornado.restoreWorld) { try { CBZ.tornado.restoreWorld(); } catch (e) {} }
+      // the quake's ground (cracks, sand boils, ponded water), its downed live
+      // lines and felled poles, its pieces and the last event's building scan
+      // (systems/quake.js reset): nothing ever reset them between matches, so
+      // a new match stood on the last one's broken street and kept its memory
+      if (CBZ.quake && CBZ.quake.reset) { try { CBZ.quake.reset(); } catch (e) {} }
+      // the last match's eruption scars (quenched lava, set lahar, the ash
+      // blanket and its roof ledger, cooled bombs) outlive their disaster ON
+      // PURPOSE within a match; the island the new match stands on is the
+      // rebuilt one, so they go with the craters. They used to be kept (up
+      // to ten) into every later match, the ash ledger holding the scrapped
+      // cars and fallen buildings it had been handed.
+      for (let i = 0; i < volScars.length; i++) { try { volScars[i].dispose(); } catch (e) {} }
+      volScars.length = 0;
       if (CBZ.survHoles) CBZ.survHoles.length = 0;
       said.banners = said.hints = said.toasts = 0;
       // a fresh SEEDED arc for this run: world seed + run counter → the same
