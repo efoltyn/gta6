@@ -443,7 +443,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=venue1022"></script>
+<script src="src/config.js?v=wrap1029"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=arrive1022"></script>
@@ -457,7 +457,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the far night lights (GTA "LOD lights"): one sprite per real lamp, lit window, car, beacon and airfield light; three draws, to the horizon -->
 <script src="src/core/lodlights.js?v=isleair1022"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=gpuleak1022"></script>
+<script src="src/core/citystream.js?v=prisonarr1029"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -801,7 +801,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=nopitch1022"></script>
 <script src="src/entities/npc.js?v=nopitch1022"></script>
-<script src="src/entities/ai.js?v=cmd1022o"></script>
+<script src="src/entities/ai.js?v=wrap1029"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -991,7 +991,7 @@ document.body.appendChild(b);}}catch(e){}})();
      shadowPlayer, off its rental timer). Loads after interact.js (which reads
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
-<script src="src/systems/prisonfriends.js?v=nopitch1022"></script>
+<script src="src/systems/prisonfriends.js?v=wrap1029"></script>
 <!-- THE LIFT CAR'S FLOOR PANEL (one for the city cabs and the island towers):
      shows the stops it is handed, calls back the chosen one. BEFORE
      interactions.js: its capture-phase keys must run ahead of the pinned
@@ -2772,7 +2772,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/losgrid.js?v=nukecost1013"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=onecopy1029"></script>
+<script src="src/core/batch.js?v=batchm1029"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
