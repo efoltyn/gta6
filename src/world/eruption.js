@@ -180,6 +180,14 @@
     let steam = null;
     const sinking = [];          // cars the lava is swallowing
     let bombCd = 0, lithicLeft = 0, lithicCd = 0, icCd = 0, cgCd = 0, pyroCd = 0, laharCd = 0, roofT = 0;
+    const pyroFading = [];
+    function tickPyroFading(dt, opts) {
+      for (let i = pyroFading.length - 1; i >= 0; i--) {
+        const f = pyroFading[i];
+        f.update(dt, opts);
+        if (f.faded !== false) { f.dispose(); pyroFading.splice(i, 1); }
+      }
+    }
     let fieldT = 0;
 
     // ---------------------------------------------------------------
@@ -342,7 +350,7 @@
       /* MAGNITUDE OWNS THE SILHOUETTE: ~56 m for a burp, ~194 m for the big
          one, stood one metre over the lip so its foot is inside the apron's
          glow. Fogless: the landmark must not dissolve in its own weather. */
-      E.column = VF.ashColumn({ x: S.x, z: S.z, y: S.peak + 1, height: 46 + 148 * M, r: 6.5 + 10.5 * M, fogless: true, parent: parent });
+      E.column = VF.ashColumn({ x: S.x, z: S.z, y: S.peak + 1, height: 46 + 148 * M, r: 6.5 + 10.5 * M, fogless: true, parent: parent, groundAt: groundAt, rim: S.rim, coneR: S.r });
       E.vent = VF.ventGlow({ x: S.x, z: S.z, r: 3.8 + 4.6 * M, groundAt: groundAt, parent: parent, salt: 4747 });
       H.shake(0.6);
       H.sound("explosion", S.x, S.z);
@@ -460,7 +468,7 @@
       }
       if (E.vent) E.vent.update(dt);
       if (E.lava) for (let i = 0; i < E.lava.length; i++) E.lava[i].update(dt);
-      if (E.bombs) E.bombs.update(dt);
+      if (E.bombs) E.bombs.update(dt, { night: night, windX: E.windX, windZ: E.windZ });
 
       // ---- the blast's cold rock, then the magma's hot rock ----
       if (E.bombs && lithicLeft > 0) {
@@ -513,10 +521,15 @@
           H.sound("rumble");
         }
       }
+      /* the HAZARD ends with the front (done); the cloud it raised hangs,
+         lofts and thins on its own clock (faded), so a run that is over keeps
+         being drawn while the next collapse is free to come */
+      const pOpts = { night: night, windX: E.windX, windZ: E.windZ };
       if (E.pyro) {
-        E.pyro.update(dt);
-        if (E.pyro.done) { E.pyro.dispose(); E.pyro = null; }
+        E.pyro.update(dt, pOpts);
+        if (E.pyro.done) { pyroFading.push(E.pyro); E.pyro = null; }
       }
+      tickPyroFading(dt, pOpts);
 
       // ---- lahar down a different valley ----
       if (o.lahar !== false && M > 0.3 && VF.lahar && E.phase === "plinian") {
@@ -779,7 +792,7 @@
       if (steam) { steam.dispose(); steam = null; }
       if (E.fountain) { E.fountain.dispose(); E.fountain = null; }
       if (E.vent) { E.vent.dispose(); E.vent = null; }
-      if (E.pyro) { E.pyro.dispose(); E.pyro = null; }
+      if (E.pyro) { pyroFading.push(E.pyro); E.pyro = null; }
       if (E.lava) {
         const flows = E.lava;
         flows.forEach(function (f) { f.quench(); });
@@ -806,10 +819,15 @@
           if (col && !col.done) col.update(dt, E.windX, E.windZ, { night: night });
           if (umb && !umb.done) umb.update(dt, E.windX, E.windZ, { night: night, windSpeed: w.speed > 0 ? w.speed : 6 });
           if (ph && !ph.done) ph.update(dt, { night: night });
+          tickPyroFading(dt, { night: night, windX: E.windX, windZ: E.windZ });
           tickCars(dt);
-          if ((!col || col.done) && (!umb || umb.done) && (!ph || ph.done) && !sinking.length) sky.done = true;
+          if ((!col || col.done) && (!umb || umb.done) && (!ph || ph.done) && !pyroFading.length && !sinking.length) sky.done = true;
         },
-        dispose: function () { if (col) col.dispose(); if (umb) umb.dispose(); if (ph) ph.dispose(); },
+        dispose: function () {
+          if (col) col.dispose(); if (umb) umb.dispose(); if (ph) ph.dispose();
+          for (let i = 0; i < pyroFading.length; i++) pyroFading[i].dispose();
+          pyroFading.length = 0;
+        },
       };
       scars.push(sky);
       return scars;

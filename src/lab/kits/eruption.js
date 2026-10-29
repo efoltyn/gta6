@@ -69,6 +69,9 @@ CBZ.lab.kit("eruption", {
       const RS = [], AS = 72;
       for (let r = 0; r <= VR; r += 1.5) RS.push(r);
       for (let r = VR + 4; r <= REGION + 20; r += 6) RS.push(r);
+      // and out to the horizon, coarser and coarser, so a camera on the plain
+      // stands on ground and the far one sees land meet the haze
+      for (let r = REGION + 40; r <= 2400; r *= 1.25) RS.push(r);
       const pos = [], col = [], idx = [];
       const cRock = new THREE.Color(0x4a3b30), cGrass = new THREE.Color(0x4c6b34), c = new THREE.Color();
       for (let i = 0; i < RS.length; i++) {
@@ -81,7 +84,7 @@ CBZ.lab.kit("eruption", {
       }
       for (let i = 0; i < RS.length - 1; i++) for (let j = 0; j < AS; j++) {
         const a = i * AS + j, b = i * AS + (j + 1) % AS, d = (i + 1) * AS + j, e = (i + 1) * AS + (j + 1) % AS;
-        idx.push(a, d, b, b, d, e);
+        idx.push(a, b, d, b, e, d);   // counter-clockwise from above: the ground faces UP
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
