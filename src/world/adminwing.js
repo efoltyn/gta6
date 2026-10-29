@@ -525,6 +525,7 @@
       g.putImageData(img, ox, oy);
     }
     const tex = new THREE.CanvasTexture(c);
+    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);   // drawn once: the canvas goes after upload
     cctvMat = new THREE.MeshBasicMaterial({ map: tex, color: 0xaebbb2 });
     return cctvMat;
   }
@@ -563,6 +564,7 @@
     for (const x of [404, 452]) { g.fillStyle = "#26282c"; g.fillRect(x, 46, 26, 82); g.fillStyle = "#c29c80"; g.beginPath(); g.arc(x + 13, 38, 10, 0, 6.3); g.fill(); }
     g.fillStyle = "#c29c80"; g.fillRect(428, 78, 26, 6);
     const tex = new THREE.CanvasTexture(c);
+    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);   // drawn once: the canvas goes after upload
     picMat = new THREE.MeshLambertMaterial({ map: tex });
     return picMat;
   }

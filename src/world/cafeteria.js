@@ -669,6 +669,20 @@
       SURF_CANVAS[kind] = c;
       return c;
     }
+    /* ONE TEXTURE PER FINISH, NOT ONE PER TINT: a finish material is keyed
+       by kind + tint + roughness and each used to wrap the kind's one canvas
+       in a new CanvasTexture (15 uploads of the same 512 slab). Shared now;
+       the canvas goes once it is on the GPU (core/texfree.js). */
+    const SURF_TEX = {};
+    function surfTex(kind) {
+      if (SURF_TEX[kind]) return SURF_TEX[kind];
+      const t = new THREE.CanvasTexture(surfCanvas(kind));
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 8;
+      t._shared = true;
+      if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(t);
+      return (SURF_TEX[kind] = t);
+    }
     const SMATS = new Map();
     const SURF_ROUGH = { vct: 0.42, quarry: 0.7, walltile: 0.22, acoustic: 0.96, carpet: 1.0, slab: 0.52 };
     const SURF_BUMP = { vct: 0.002, quarry: 0.012, walltile: 0.006, acoustic: 0.008, carpet: 0.004, slab: 0.004 };
@@ -676,9 +690,7 @@
       const key = kind + ":" + (tint == null ? "" : tint) + ":" + (rough == null ? "" : rough);
       let m = SMATS.get(key);
       if (m) return m;
-      const t = new THREE.CanvasTexture(surfCanvas(kind));
-      t.wrapS = t.wrapT = THREE.RepeatWrapping;
-      t.anisotropy = 8;
+      const t = surfTex(kind);
       m = new THREE.MeshStandardMaterial({
         color: tint != null ? tint : 0xffffff, map: t, bumpMap: t,
         bumpScale: SURF_BUMP[kind] || 0.003,

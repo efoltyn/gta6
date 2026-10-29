@@ -968,7 +968,8 @@
     }
     const tex = new THREE.CanvasTexture(c);
     tex.anisotropy = 4;
-    return tex;
+    // painted once (seeded): its canvas goes once the atlas is on the GPU
+    return (CBZ.freeCanvasAfterUpload ? CBZ.freeCanvasAfterUpload(tex) : tex);
   }
 
   let holeMat = null, holeInst = null, aTileI = null;

@@ -44,10 +44,11 @@
     if (y == null) y = 0.012;
     const tex = CBZ.prisonGroundTex ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b, srgb: true })
       : CBZ.checkerTex(a, b, 2);
-    tex.repeat.set(rx, rz);
     const lm = new THREE.MeshLambertMaterial({ map: tex });
     if (CBZ.groundLayer) CBZ.groundLayer(lm, y);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), lm);
+    const pg = new THREE.PlaneGeometry(w, d);
+    if (CBZ.groundTile) CBZ.groundTile(pg, tex, rx, rz); else tex.repeat.set(rx, rz);
+    const m = new THREE.Mesh(pg, lm);
     m.rotation.x = -Math.PI / 2; m.position.set(x, y, z); m.receiveShadow = true; scene.add(m);
     return m;
   }

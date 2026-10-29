@@ -545,9 +545,9 @@ document.body.appendChild(b);}}catch(e){}})();
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=peak1014"></script>
-<script src="src/world/materials.js?v=nostep1013"></script>
+<script src="src/world/materials.js?v=canvas1029"></script>
 <script src="src/world/fuel_station.js?v=arrive1022"></script>
-<script src="src/world/prisonkit.js?v=tow929b"></script>
+<script src="src/world/prisonkit.js?v=canvas1029"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
@@ -768,14 +768,14 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
-<script src="src/world/cafeteria.js?v=jas1020"></script>
+<script src="src/world/cafeteria.js?v=canvas1029"></script>
 <script src="src/world/lounge.js?v=jas1020"></script>
 <!-- the armory display kit: the real carriers/helmets people wear, harvested onto mannequins, hooks and shelves (CBZ.armoryKit) -->
 <script src="src/world/armorykit.js?v=jas1020"></script>
 <script src="src/world/gunroom.js?v=jas1020"></script>
 <script src="src/world/ventilation.js?v=m489457"></script>
-<script src="src/world/escape_routes.js?v=tow929"></script>
-<script src="src/world/southblock.js?v=door929"></script>
+<script src="src/world/escape_routes.js?v=canvas1029"></script>
+<script src="src/world/southblock.js?v=canvas1029"></script>
 <!-- THE PRISON GETS A LID. Every interior above was open-topped (roomShell
      builds four walls and no ceiling), so you could stand in the mess hall and
      watch the crows. roofs.js lays a real ceiling over each of them and hangs
@@ -809,7 +809,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=nopitch1022"></script>
+<script src="src/world/adminwing.js?v=canvas1029"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -824,7 +824,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
-<script src="src/world/prisonwings.js?v=jdeb1001"></script>
+<script src="src/world/prisonwings.js?v=canvas1029"></script>
 <script src="src/world/prisongrounds.js?v=tow929"></script>
 <script src="src/world/corridors.js?v=door929"></script>
 
@@ -1060,7 +1060,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=pres1028"></script>
 <script src="src/systems/fpsmode.js?v=stall1022"></script>
-<script src="src/systems/gunfx.js?v=rounds1013m"></script>
+<script src="src/systems/gunfx.js?v=canvas1029"></script>
 <script src="src/systems/intimidate.js?v=stall1022"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
@@ -2145,7 +2145,7 @@ document.body.appendChild(b);}}catch(e){}})();
      always-updater is in the sort -->
 <!-- projected decals: blood cut out of the struck mesh's own triangles (cars) -->
 <script src="src/systems/surfacedecal.js?v=carblood930"></script>
-<script src="src/systems/gore.js?v=landblood1022"></script>
+<script src="src/systems/gore.js?v=canvas1029"></script>
 <script src="src/systems/wounds.js?v=holes1009b"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID

@@ -325,7 +325,7 @@ M.rmRoots = function(){ delete window.__msRoots; };
 
 /* ---- GPU walk: bytes per owner, uploaded or not, flags ---- */
 M.gpuWalk = function(farM){
-  var C = window.CBZ, sc = C.scene, T = window.THREE, P = C.player && C.player.pos, own = {}, geoInfo = new Map(), seenBuf = new Set(), seenTex = new Set();
+  var C = window.CBZ, sc = C.scene, T = window.THREE, P = C.player && C.player.pos, own = {}, geoInfo = new Map(), seenBuf = new Set(), seenTex = new Set(), seenSrc = new Set();
   var dup = new Map(), big = [], texRows = [], tot = { gpu: 0, geo: 0, tex: 0, cpuStatic: 0, cpuDyn: 0, notUp: 0, notUpHidden: 0, hidden: 0, far: 0, srcKept: 0 };
   function O(k){ return own[k] || (own[k] = { gpu: 0, geo: 0, tex: 0, cpuStatic: 0, cpuDyn: 0, notUp: 0, notUpHidden: 0, hidden: 0, far: 0, srcKept: 0, meshes: 0, instances: 0, tris: 0 }); }
   function ownerOf(o){ for (var x = o; x; x = x.parent) { var w = M.own.get(x); if (w) return w; } return "unowned"; }
@@ -346,14 +346,22 @@ M.gpuWalk = function(farM){
       if (!q.arrs.has(arr.buffer)) { q.arrs.add(arr.buffer); q.n++; q.owners[flags.owner] = 1; } }
     return n; }
   function tex(t, R, owner, flags){ if (!t || !t.isTexture || seenTex.has(t)) return; seenTex.add(t);
-    var im = t.image, faces = 1; if (Array.isArray(im)) { faces = im.length || 6; im = im[0]; }
-    var w = im && (im.width || im.naturalWidth) || 0, h = im && (im.height || im.naturalHeight) || 0, dep = im && im.depth || 1, data = im && im.data;
+    /* A LAZY canvas texture (core/texfree.js) paints its canvas when .image is
+       READ: reading it here made a canvas for every one of them and counted it
+       as "kept" (the prison read ~160 MB of sources it did not hold: ~20 MB).
+       Its size comes from _cbzLazyW/H and its upload from three's own record. */
+    var ld = Object.getOwnPropertyDescriptor(t, "image"), lazy = !!(ld && ld.get && t._cbzLazyW != null);
+    var im = lazy ? null : t.image, faces = 1; if (Array.isArray(im)) { faces = im.length || 6; im = im[0]; }
+    var w = lazy ? t._cbzLazyW : im && (im.width || im.naturalWidth) || 0, h = lazy ? t._cbzLazyH : im && (im.height || im.naturalHeight) || 0, dep = im && im.depth || 1, data = im && im.data;
     var b = t.type === 1015 ? 16 : t.type === 1016 ? 8 : 4; if (t.format === 1028 || t.format === 1024 || t.format === 1021) b /= 4; else if (t.format === 1025 || t.format === 1030) b /= 2;
     var mip = t.generateMipmaps && t.minFilter !== 1003 && t.minFilter !== 1006 ? 4 / 3 : 1;
     var bytes = t.isCompressedTexture ? (t.mipmaps || []).reduce(function(s, m){ return s + (m.data ? m.data.byteLength : 0); }, 0) * faces : w * h * dep * b * mip * faces;
-    var up = data ? (data.buffer && M.upBuf.has(data.buffer)) : (im && M.upSrc.has(im)) || (t.isCompressedTexture && t.mipmaps && t.mipmaps[0] && t.mipmaps[0].data && M.upBuf.has(t.mipmaps[0].data.buffer));
-    var src = im && (im instanceof HTMLCanvasElement || im instanceof HTMLImageElement || (window.ImageBitmap && im instanceof ImageBitmap)) ? w * h * 4 * faces : 0;
-    if (data && data.byteLength) src += data.byteLength;
+    var lp = lazy && C.renderer && C.renderer.properties ? C.renderer.properties.get(t) : null;
+    var up = lazy ? !!(lp && lp.__webglTexture) : data ? (data.buffer && M.upBuf.has(data.buffer)) : (im && M.upSrc.has(im)) || (t.isCompressedTexture && t.mipmaps && t.mipmaps[0] && t.mipmaps[0].data && M.upBuf.has(t.mipmaps[0].data.buffer));
+    // a source wrapped by several textures is one backing store: count it once
+    var src = im && seenSrc.has(im) ? 0 : im && (im instanceof HTMLCanvasElement || im instanceof HTMLImageElement || (window.ImageBitmap && im instanceof ImageBitmap)) ? w * h * 4 * faces : 0;
+    if (data && data.byteLength && !seenSrc.has(im)) src += data.byteLength;
+    if (im) seenSrc.add(im);
     R.srcKept += src; tot.srcKept += src;
     if (!up) { R.notUp += bytes; tot.notUp += bytes; }
     else { R.gpu += bytes; R.tex += bytes; tot.gpu += bytes; tot.tex += bytes; if (flags.hidden) { R.hidden += bytes; tot.hidden += bytes; } }
