@@ -138,10 +138,37 @@
   // swapping in its empty default scene (which has no fog → wrong program).
   const STAND_IN = {
     isScene: true, fog: null, environment: null, background: null, overrideMaterial: null,
-    _lights: null, _objs: null,
+    _lights: null, _objs: null, _from: 0, _at: 0,
     traverseVisible: function (cb) { const l = this._lights; for (let i = 0; i < l.length; i++) cb(l[i]); },
-    traverse: function (cb) { const o = this._objs; for (let i = 0; i < o.length; i++) cb(o[i]); },
+    traverse: function (cb) { const o = this._objs; for (let i = this._from; i < o.length; i++) { this._at = i; cb(o[i]); } },
   };
+  /* ONE BAD OBJECT MUST NOT END THE WARM. r128's compile() keeps its light
+     state in `currentRenderState`, which it never pushes: a material whose
+     environment map has to be converted first (an equirect turned into a cube
+     or a PMREM on its first use) RENDERS inside getProgram, and that nested
+     render pops the state to null on its way out, so the very next lookup
+     throws "Cannot read properties of null (reading 'state')". On the Isles
+     that ended the play-start warm after ~6 of ~170 programs (shaderQueueStats
+     threw: true), and every other program, the explosions' and the missiles'
+     among them, compiled at its first draw in the middle of play: the burst
+     the first F-35 missile set off on a phone. compile() is simply called
+     again from the object that threw (its map is converted now); an object
+     that throws twice is skipped. */
+  function compileFrom(r, cam, objs, rep) {
+    let from = 0, failedAt = -1, guard = 0;
+    while (from < objs.length && guard++ < 64) {
+      STAND_IN._objs = objs; STAND_IN._from = from; STAND_IN._at = from;
+      try { r.compile(STAND_IN, cam); from = objs.length; }
+      catch (e) {
+        rep.threw = true; rep.retried = (rep.retried || 0) + 1; rep.error = String(e && e.message);
+        const at = STAND_IN._at;
+        from = at === failedAt ? at + 1 : at;
+        if (at === failedAt) { rep.skipped = (rep.skipped || 0) + 1; try { console.warn("[fxwarm] compile threw twice on one object, skipped:", e && e.message); } catch (e2) {} }
+        failedAt = at;
+      }
+    }
+    STAND_IN._from = 0;
+  }
 
   let lastReport = null;
 
@@ -211,8 +238,8 @@
       objs.push(px);
     }
     STAND_IN.fog = null; STAND_IN.environment = null; STAND_IN._lights = lights; STAND_IN._objs = objs;
-    try { r.setRenderTarget(depthRT); r.compile(STAND_IN, cam); }
-    catch (e) { try { console.warn("[fxwarm] depth compile threw:", e && e.message); } catch (e2) {} }
+    const drep = {};
+    try { r.setRenderTarget(depthRT); compileFrom(r, cam, objs, drep); }
     finally { r.setRenderTarget(prev); STAND_IN._lights = null; STAND_IN._objs = null; }
   }
 
@@ -225,6 +252,7 @@
     const rep = { objects: 0, programsBefore: 0, programs: 0, badMaterials: 0, threw: false };
     if (!r || typeof r.compile !== "function" || !sc || !cam) return rep;
     const skip = opts && opts.skip;
+    const limit = (opts && opts.limit) | 0, visOnly = !!(opts && opts.visibleOnly);
     const hidden = hiddenRoots();
     // THE LIGHT SET. A program key carries light COUNTS only, and lightpin
     // makes the point/spot counts a constant; so the per-builder calls reuse
@@ -253,6 +281,10 @@
     const casters = (opts && opts.depth && r.shadowMap && r.shadowMap.enabled && n.s > 0) ? [] : null;
     let bad = 0;
     function visit(o) {
+      if (limit && reps.length >= limit) return;   // (the rest stay fresh for the next call)
+      // (what is drawn now, and the effect pools parked hidden at the top of
+      // the scene for the next shot; the rest compile at their first draw, as ever)
+      if (visOnly && o.visible === false && !(o.parent === sc && (!o.children.length || /prewarm/.test(o.name || "")))) return;
       if (hidden.has(o)) return;
       if (skip && skip(o)) return;
       const m = o.material;
@@ -285,8 +317,7 @@
       // opts.target: compile for a render target (a render-to-texture pass keys
       // its programs on the target's encoding, e.g. the cctv feed)
       const tgt = opts && opts.target, prevT = tgt ? r.getRenderTarget() : null;
-      try { if (tgt) r.setRenderTarget(tgt); r.compile(STAND_IN, cam); }
-      catch (e) { rep.threw = true; try { console.warn("[fxwarm] compile threw:", e && e.message); } catch (e2) {} }
+      try { if (tgt) r.setRenderTarget(tgt); compileFrom(r, cam, reps, rep); }
       finally { if (tgt) r.setRenderTarget(prevT); }
       STAND_IN._lights = null; STAND_IN._objs = null;
     }
@@ -325,6 +356,43 @@
     return queue(objs, opts);
   };
   CBZ.shaderQueueStats = function () { return lastReport; };
+
+  /* THE SUN'S SHADOW, SWITCHED WITHOUT A BURST (core/quality.js). Whether the
+     sun casts is in EVERY program's key (numDirLightShadows, shadowMapEnabled),
+     so flipping it in play recompiled every lit material in view, the explosion
+     and smoke shaders and the shadow pass's depth programs in one frame: on a
+     phone the auto tier goes Fastest -> Fast (shadows on) a few seconds into a
+     smooth stretch, such as a flight, and that burst is a compile storm a phone
+     tab does not survive. The target state's programs are compiled first, a few
+     a frame, with the sun casting (or not) only for the length of each compile
+     call; when nothing is left the sun really switches, and every program it
+     needs is already in its material's cache. Same light, same shadow, about a
+     second later. */
+  let flip = null;
+  CBZ.shadowFlipWarm = function (sun, want) {
+    if (!sun) return false;
+    if (!LAZY || (CBZ.CONFIG && CBZ.CONFIG.RENDER_FRAMES === false)) { sun.castShadow = want; return true; }
+    flip = { sun: sun, want: !!want, frames: 0 };
+    return true;
+  };
+  CBZ.shadowFlipPending = function () { return flip ? flip.want : null; };
+  CBZ.onAlways(1.25, function () {
+    const f = flip;
+    if (!f) return;
+    const sun = f.sun, r = CBZ.renderer;
+    if (sun.castShadow === f.want || !r) { flip = null; return; }
+    const prev = sun.castShadow;
+    let rep = null;
+    sun.castShadow = f.want;
+    try { rep = queue(CBZ.scene, { full: true, depth: f.want, limit: 6, visibleOnly: true }); }
+    finally { sun.castShadow = prev; }
+    // done (or given up after ~10 s of frames): switch for real
+    if (!rep || (!rep.objects && !rep.depth) || ++f.frames > 600) {
+      sun.castShadow = f.want;
+      flip = null;
+      if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(true); else r.shadowMap.needsUpdate = true;
+    }
+  });
 
   /* THE BUFFERS, BEFORE THE FIRST DRAW. r128 uploads a geometry's vertex
      buffers (gl.bufferData, every attribute, then the index) the first time

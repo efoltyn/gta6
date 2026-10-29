@@ -225,7 +225,33 @@
     return G;
   }
 
+  /* THE ISLES FLY THE SAME ROUNDS. The player's missiles (the runway F-35,
+     an island gunship) were city-only: on the Isles CBZ.cityFireMissile
+     answered false and city/playeraircraft.js fell back to a bare explosion
+     26 m ahead, on the GROUND under that point, every shot: no missile left
+     the rail, the blast went off below the jet. The pool, its trail and its
+     detonate() are world-agnostic; they need a root to hang the round on and
+     the ground it can hit (the archipelago's terrain, or the sea). The city's
+     gunships and jets stay the city's: only the player's rounds fly here. */
+  function islesOn() { return !!(g && g.mode === "archipelago"); }
+  /* (the player's rounds, parked hidden at the top of the scene from load so
+     core/fxwarm.js compiles their programs with everything else: the first
+     missile off the rail draws nothing that was not already built) */
+  let _roundsParked = false;
+  CBZ.onAlways(1.1, function () {
+    if (_roundsParked || !CBZ.scene || !MU || !MU.build) return;
+    _roundsParked = true;
+    try {
+      for (const t of ["aam", "atgm"]) {
+        const b = MU.build(t);
+        if (!b) continue;
+        b.visible = false; b.name = "round-prewarm:" + t; b.position.set(0, -400, 0);
+        CBZ.scene.add(b);
+      }
+    } catch (e) {}
+  });
   function root() {
+    if (islesOn()) { const A = CBZ.surv && CBZ.surv.arena; return (A && A.root) || null; }
     if (A_root && A_root.parent !== undefined) return A_root;
     const arena = CBZ.city && CBZ.city.arena;
     A_root = arena ? arena.root : null;
@@ -1109,7 +1135,7 @@
   // hand it to launchMissile — the updateMissiles loop then detonates it the
   // instant it strikes geometry/ground, well before that far point.
   CBZ.cityFireMissile = function (x, y, z, dx, dy, dz, opts) {
-    if (!g || g.mode !== "city") return false;
+    if (!g || (g.mode !== "city" && !islesOn())) return false;
     opts = opts || {};
     // normalize the supplied direction (defend against a non-unit vector)
     let nx = dx || 0, ny = dy || 0, nz = dz || 0;
@@ -1319,12 +1345,14 @@
           const k = s / nSamp;
           const sx = prevX + (p.x - prevX) * k, sy = prevY + (p.y - prevY) * k, sz = prevZ + (p.z - prevZ) * k;
           _sweepP.x = sx; _sweepP.y = sy; _sweepP.z = sz;
-          if (sy <= 0.6) { hit = true; hx = sx; hy = 0.4; hz = sz; }
+          const fl = floorAt(sx, sz);
+          if (sy <= fl + 0.6) { hit = true; hx = sx; hy = fl + 0.4; hz = sz; }
           else if (hitsBlocker(_sweepP)) { hit = true; hx = sx; hy = sy; hz = sz; }
           else if (m.seek && m.seek.prox && m.seek.prox(sx, sy, sz)) { hit = true; hx = sx; hy = sy; hz = sz; }
         }
       } else if (!m.route) {
-        if (p.y <= 0.6) { hit = true; hy = 0.4; }
+        const fl = floorAt(p.x, p.z);
+        if (p.y <= fl + 0.6) { hit = true; hy = fl + 0.4; }
         if (!hit && hitsBlocker(p)) hit = true;
         // proximity fuse (lockon.js seeks only): a near-miss on the locked
         // vehicle still detonates instead of sailing past
@@ -1339,6 +1367,16 @@
         detonate(hx, hy, hz, m.byPlayer, m.fx, m.type); freeMissile(m); missiles.splice(i, 1);
       }
     }
+  }
+
+  // what a round strikes underneath it: the city's street plane, or on the
+  // Isles the island's ground or the sea over the abyssal plain
+  function floorAt(x, z) {
+    if (!islesOn()) return 0;
+    let y = -1e9;
+    try { if (CBZ.archipelago && CBZ.archipelago.groundAt) y = CBZ.archipelago.groundAt(x, z); } catch (e) {}
+    const sea = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : -0.8;
+    return Math.max(Number.isFinite(y) ? y : -1e9, sea);
   }
 
   // Colliders whose (1 m padded) bounds can contain (x,z): the physics
@@ -2313,6 +2351,13 @@
   CBZ.cityClearAircraft = teardown;
 
   CBZ.onUpdate(42, function (dt) {
+    if (islesOn()) {
+      // the player's rounds only (the city's air force stays home)
+      if (heli || jets.length) teardown();
+      const r = root();
+      if (r && missiles.length) updateMissiles(dt, r);
+      return;
+    }
     if (g.mode !== "city") { if (heli || jets.length || missiles.length) teardown(); return; }
     // multiplayer guest: the shared wanted level must not spawn a LOCAL gunship
     if (CBZ.net && CBZ.net.noSim()) { if (heli || jets.length || missiles.length) teardown(); return; }

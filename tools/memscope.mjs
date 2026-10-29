@@ -213,6 +213,7 @@ var now = function(){ return performance.now(); };
 var M = window.__ms = { owner: null, curStep: null, building: false, built: false, own: new WeakMap(), roots: {}, nRoots: 0,
   builders: [], steps: [], hold: false, q: [], t: 0, errs: [], upBuf: new WeakSet(), upSrc: new WeakSet(),
   gl: { buf: 0, tex: 0, rb: 0, nbuf: 0, ntex: 0, nrb: 0 }, gls: [], scriptEnd: 0 };
+var cw0 = console.warn; console.warn = function(){ try { var s = Array.prototype.join.call(arguments, " "); if (/fxwarm|threw/.test(s) && M.errs.length < 20) M.errs.push("[warn] " + s.slice(0, 600)); } catch (e) {} return cw0.apply(console, arguments); };
 addEventListener("error", function(e){ if (M.errs.length < 10) M.errs.push(String(e.message || e.type) + (e.filename ? " @" + String(e.filename).split("/").pop() + ":" + e.lineno : "")); }, true);
 /* rAF hold: frames are stepped by hand with a synthetic 1/60 clock (speed.mjs's model) */
 var rAF = window.requestAnimationFrame.bind(window);

@@ -72,7 +72,11 @@ export const WORLDS = {
      in the query picks the spawn island. */
   isles: {
     page: "index.html", seed: 1, query: "mode=archipelago",
-    enter: "(function(){ if (CBZ.game.state==='playing') return; var m=document.querySelector('[data-mode=\"archipelago\"]'); if (m && !m.classList.contains('active')) m.click(); var b=document.getElementById('playBtn'); if (b) b.click(); })()",
+    // (the tile, then CBZ.startRun(): never the Play button, whose click asks
+    // for pointer lock, and a headless browser hands the lock back a moment
+    // later; camera.js reads that release as the player letting go and
+    // PAUSES the run: the isles-leak "pauses ~20 s after boot" flake)
+    enter: "(function(){ if (CBZ.game.state==='playing') return; var m=document.querySelector('[data-mode=\"archipelago\"]'); if (m && !m.classList.contains('active')) m.click(); if (CBZ.game.state==='title' && CBZ.startRun) CBZ.startRun(); })()",
     ready: "CBZ.game.state==='playing' && CBZ.game.mode==='archipelago' && !!(CBZ.archipelago && CBZ.archipelago.state().built && CBZ.archipelago.state().active)",
   },
   /* NPC War on the cheapest venue (the empty kill box, no packs): what the
