@@ -667,7 +667,8 @@
   // ---- behaviour + density tick (order 36.5: after lights, before AI 37) --
   let beh = 0;
   CBZ.onUpdate(36.5, function (dt) {
-    const A = streetArena(); if (!A) return;
+    // (no streets in force, the open sea between the isles: let go of the last)
+    const A = streetArena(); if (!A) { lastArena = null; return; }
     if (A !== lastArena) {
       lastArena = A; targetNear = computeTarget(A);
       if (!A.noGrid) seedHighwaysOnBind(A);     // TRAF-1: every highway starts visibly alive on arrival
@@ -1450,7 +1451,10 @@
   let emgLastElapsed = 0, emgArena = null;
   CBZ.onUpdate(36.7, function (dt) {
     if (!emgOn()) { if (emg.length || liveHonks.length) CBZ.cityEmergencyReset(); return; }
-    const A = streetArena(); if (!A) return;
+    const A = streetArena();
+    // (no streets in force: the open sea between the isles. The last island's
+    // units go with it, and so does this module's hold on it)
+    if (!A) { if (emgArena) { if (emg.length || parked.length) CBZ.cityEmergencyReset(); emgArena = null; } return; }
     // a new island in force (or back to Gang City): the units of the last go
     if (emgArena && emgArena !== A && (emg.length || parked.length)) CBZ.cityEmergencyReset();
     emgArena = A;

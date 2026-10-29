@@ -59,7 +59,7 @@
   const SOFFIT_MIN = 0.35;    // no underside where the flight is lower than this
 
   const links = [];
-  let version = 0;
+  let version = 0, nextId = 1;
 
   function dist2(ax, az, bx, bz) { const dx = ax - bx, dz = az - bz; return dx * dx + dz * dz; }
 
@@ -72,7 +72,10 @@
     for (let i = 1; i < p.length; i++) len += Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y, p[i].z - p[i - 1].z);
     rec.len = len;
     rec.a = p[0]; rec.b = p[p.length - 1];
-    rec.id = links.length ? links[links.length - 1].id + 1 : 1;
+    // (a counter, never "the last one's + 1": an island dropped while another
+    // builds takes its links out from under the builder's, and a builder
+    // finds its own by id, world/disaster_arena.js orientRecords)
+    rec.id = nextId++;
     links.push(rec);
     version++;
     return rec;
@@ -387,6 +390,7 @@
     route: route,
     flightAt: flightAt,
     links: function () { return links; },
+    nextId: function () { return nextId; },
     version: function () { return version; },
     audit: function () {
       let soffits = 0, diag = 0;

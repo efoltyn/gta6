@@ -998,6 +998,17 @@
     S.fallenSeen.clear();
     S.drivenLift = 0; S.drivenFloat = 0;
   }
+  function toSea(A) {
+    const Pl = P();
+    const flown = Pl && Pl._aircraft ? Pl._aircraft : null;
+    const ridden = Pl && Pl.driving ? Pl._vehicle : null;
+    retirePad();
+    scrapFleet(ridden);
+    if (flown && flown.group && A.root && flown.group.parent !== A.root) A.root.add(flown.group);
+    if (S.heli && S.heli !== flown) unparkHeli();
+    if (S.jet && S.jet !== flown) { if (CBZ.airUnpark) { try { CBZ.airUnpark(S.jet); } catch (e) {} } S.jet = null; }
+    S.arena = A;
+  }
   function teardown() {
     const Pl = P();
     if (Pl && Pl._aircraft && S.heli && Pl._aircraft === S.heli && CBZ.cityPlayerAircraftExit) {
@@ -1020,9 +1031,17 @@
       if (Pl && Pl.driving && Pl._vehicle && Pl._vehicle._islandCar && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
       return;
     }
+    // THE OPEN SEA (world/archipelago.js seaArena): nothing stands on it.
+    // The last island's pad, cars, boat and parked machines go with it; the
+    // one you are flying comes with you, under the sea's root.
+    if (CBZ.surv.arena.atSea) { if (S.arena !== CBZ.surv.arena) toSea(CBZ.surv.arena); return; }
     const st = CBZ.surv.stats;
     if (st !== S.stats || S.arena !== CBZ.surv.arena) {
-      if (S.stats) teardown();
+      // (a new MATCH tears the machines down; a new ISLAND does not: setup
+      // hands the island over and keeps the machine you are in. Tearing down
+      // on every hand-over unparked the jet you were flying, which bailed you
+      // out of the F-35 over the next island, the moment it took over)
+      if (S.stats && st !== S.stats) teardown();
       S.stats = st;
       setup();
     }

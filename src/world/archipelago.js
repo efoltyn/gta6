@@ -519,8 +519,9 @@
 
   /* ---- THE ISLAND IN FORCE ---------------------------------------------- */
   function activate(I) {
-    const prev = ST.active;
-    ST.active = I;
+    // (from the open sea, the island before it is the one the sea life comes from)
+    const prev = ST.active || ST.seaFrom;
+    ST.active = I; ST.seaFrom = null;
     const A = I.arena;
     if (CBZ.surv) CBZ.surv.arena = A;
     if (CBZ.islandActivate) CBZ.islandActivate(A, groundAt);
@@ -535,6 +536,52 @@
       if (prev) chore(I.id + ":sealife", migrateLife(A));
     }
   }
+  /* ---- THE OPEN SEA: NO ISLAND IN FORCE ----------------------------------
+     A jet does Port Royal to Highgate in half a minute, and the next island
+     starts building while the last one is still THE island: both stood in
+     memory at once, the whole of the flight (memscope --isles --travel 250:
+     a 1.2 GB peak on a phone). So once you are in the air, out past the drop
+     line of the island you left (3.3 km: in the haze behind you, its far form
+     standing in for it), with the next one on its way, nothing is in force:
+     the island you left fades to its far form and is taken down while the
+     next one is still being built.
+     "Nothing" is a real arena with nothing on it: the sea. Every system that
+     asks CBZ.surv.arena keeps an answer: the water and the swimmer
+     (disaster_arena.js's queries read the module arena and the ground
+     function, the archipelago's own: terrain phase, abyssal plain), the
+     shared sea sheet, the camera. What only an ISLAND has (A.island: people,
+     traffic, police, venues, the machines, world/island_vehicles.js) stands
+     down, because the sea publishes none. On the ground, in a boat or in the
+     water there is always an island in force, as before: the open sea is for
+     an aircraft in flight. */
+  function seaArena(from) {
+    const S0 = ST.atSea || (ST.atSea = { atSea: true, id: null, island: null, sharedSea: true, root: null, ocean: null,
+      center: { x: 0, z: 0 }, radius: 1e5, dryR: 0.001, oceanY: -0.8, seaR: 0,
+      fragile: [], flammable: [], hills: [], islets: [], elevators: [], glass: [], cars: [], carSpots: [],
+      groundHeightAt: groundAt, _rigs: {} });
+    const oy = Number.isFinite(from && from.oceanY) ? from.oceanY : -0.8;
+    S0.root = ST.root; S0.ocean = ST.sea; S0.oceanY = oy;
+    const P = CBZ.player;
+    if (P && P.pos) { S0.center.x = P.pos.x; S0.center.z = P.pos.z; }
+    S0._rigs = { meanY: function () { return oy + (CBZ.waterSurge ? CBZ.waterSurge() : 0); } };
+    return S0;
+  }
+  function toSea() {
+    const I = ST.active;
+    if (!I || !I.arena) return;
+    const S0 = seaArena(I.arena);
+    ST.seaFrom = I; ST.active = null;
+    if (CBZ.surv) CBZ.surv.arena = S0;
+    if (CBZ.islandActivateSea) CBZ.islandActivateSea(S0, groundAt); else if (CBZ.islandActivate) CBZ.islandActivate(S0, groundAt);
+    // the sea forgets the last island's shore (out in the haze behind you)
+    if (ST.sea && CBZ.waterClearField) CBZ.waterClearField(ST.sea);
+    seaG.shoreOf = null; seaG.shore = null;
+  }
+  function inFlight() {
+    const P = CBZ.player, C = P && P._aircraft;
+    return !!(C && !C.onGround && !C.destroyed && !P.dead);   // (P.driving is set in a cockpit too)
+  }
+
   /* THE SEA LIFE (city/wildlife.js, the shark sim's and the disaster island's
      own population) is stocked ONCE for the archipelago, round the spawn
      island, under the archipelago's own root. When another island takes
@@ -790,14 +837,13 @@
       }
     }
     const until = now + ms;
-    // (a teardown waits while a build is mid-building: it unregisters stair
-    // links, and a half-built building turns its own by their index)
-    const midBuild = !!(building && building.state === "building");
+    // (a teardown no longer waits for a build: the stair links it takes out
+    // are found by the builder by id, not index, systems/stairs.js)
     // (a chore that yields "frame" is done for this frame: the island's people
     // are stood one a frame, world/island_people.js)
     const rested = _rested; rested.length = 0;
     while (performance.now() < until) {
-      const k = ST.chores.findIndex(function (c) { return !(midBuild && /:drop$/.test(c.label)) && rested.indexOf(c) < 0; });
+      const k = ST.chores.findIndex(function (c) { return rested.indexOf(c) < 0; });
       if (k < 0) break;
       const c = ST.chores[k];
       let r;
@@ -822,6 +868,9 @@
       // island in force is out past the drop line: it is not seen to go)
       const early = I.state === "warming" && I.joined && (!ST.active || !ST.active.arena || ST.active._shore > V.drop);
       if (!I.arena || I === ST.active || (I.state !== "near" && I.state !== "fadeIn" && !early)) continue;
+      // (from the open sea, the island going away behind you does not come back
+      // in force unless you turn back to it)
+      if (!ST.active && I._shore > V.drop * 0.9) continue;
       const d = Math.hypot(I.x - px, I.z - pz) - I.R;
       if (d < bd - SWITCH_HYST) { best = I; bd = d; }
     }
@@ -829,6 +878,17 @@
     // their streets when each building is finished, and the machines a new
     // island stands, its helipad stair among them, must not land in between)
     if (best && best !== ST.active && best.arena && !(building && building.state === "building")) activate(best);
+    // out to sea: in the air, past the drop line of the island in force, the
+    // next island on its way (see seaArena)
+    else if (ST.active && ST.active.arena && ST.active._shore > V.drop && inFlight() &&
+      ST.isles.some(function (O) { return O !== ST.active && O.state !== "far"; })) toSea();
+    // down at sea with no island in force: the nearest whole one takes over
+    // (on the water or in it, the island systems want one)
+    else if (!ST.active && !inFlight()) {
+      let nb = null, nd = 1e9;
+      for (const I of ST.isles) if (I.arena && I.state !== "fadeOut") { const d = Math.hypot(I.x - px, I.z - pz) - I.R; if (d < nd) { nd = d; nb = I; } }
+      if (nb && !(building && building.state === "building")) activate(nb);
+    }
   }
   CBZ.onAlways(4.5, tick);
 
@@ -882,6 +942,7 @@
     if (!u.uSeaLamps || !u.uSeaLampC) return;
     const on = CBZ.islandNight && CBZ.islandNight.lampUniforms ? CBZ.islandNight.lampUniforms.uLampOn.value : 1 - dayF;
     const A = ST.active && ST.active.arena, cam = CBZ.camera;
+    if (!A) { seaG.shoreOf = null; seaG.shore = null; }
     if (on < 0.02 || !A || !cam) { u.uSeaLampC.value.w = 0; return; }
     if (seaG.shoreOf !== A) { seaG.shoreOf = A; seaG.shore = shoreLamps(A, sea.position.y); }
     const now = performance.now();

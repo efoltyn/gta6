@@ -273,7 +273,11 @@
   CBZ.islandTownDrop = function (A) {
     if (!A || !A.root) return;
     scrapCarsUnder(A.root);
+    // its kerbside fixtures leave the car list; their meshes go with the
+    // island's own teardown (city/vehicles.js cityForgetParkedUnder)
+    if (CBZ.cityForgetParkedUnder) { try { CBZ.cityForgetParkedUnder(A.root); } catch (e) {} }
     dismissCopsUnder(A.root);
+    if (CBZ.cityPoliceChopperLeave) { try { CBZ.cityPoliceChopperLeave(A.root); } catch (e) {} }
     if (CBZ.islandPolice && CBZ.islandPolice.drop) { try { CBZ.islandPolice.drop(A); } catch (e) {} }
   };
   // leaving the islands: the whole island force and every island car goes

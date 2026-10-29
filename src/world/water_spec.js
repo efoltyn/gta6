@@ -3882,6 +3882,20 @@
   }
 
   // Hand an arena sea its baked field (CBZ.waterBakeField handle).
+  /* NO SHORE: the open sea between the isles (world/archipelago.js toSea).
+     The sheet forgets the last island's land mask, and the baked field goes
+     with it (it held the island's ground function). */
+  CBZ.waterClearField = function (target) {
+    const mat = target && target.material ? target.material : target;
+    const u = mat && mat.userData && mat.userData.waterUniforms;
+    if (!u) return false;
+    if (u.uSeaHasLandMask) u.uSeaHasLandMask.value = 0;
+    if (u.uSeaLandMask) u.uSeaLandMask.value = null;
+    const old = mat.userData.waterField;
+    if (old && old.baked && old.tex) { old.done = true; old.tex.dispose(); }
+    mat.userData.waterField = null;
+    return true;
+  };
   CBZ.waterSetField = function (target, field) {
     const mat = target && target.material ? target.material : target;
     const u = mat && mat.userData && mat.userData.waterUniforms;

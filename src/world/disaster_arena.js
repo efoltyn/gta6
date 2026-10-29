@@ -3912,7 +3912,7 @@
 
     function recSnap() {
       const L = CBZ.stairs && CBZ.stairs.links ? CBZ.stairs.links() : null;
-      return { c: CBZ.colliders.length, p: CBZ.platforms.length, l: L ? L.length : 0, g: allGlass.length };
+      return { c: CBZ.colliders.length, p: CBZ.platforms.length, l: L ? L.length : 0, lid: CBZ.stairs && CBZ.stairs.nextId ? CBZ.stairs.nextId() : 0, g: allGlass.length };
     }
     function* orientRecords(snap, ox, oz, yaw, extra) {
       const co = Math.round(Math.cos(yaw)), si = Math.round(Math.sin(yaw));
@@ -3953,7 +3953,12 @@
         if (p.obb) { T(p.obb.cx, p.obb.cz, a); p.obb.cx = a.x; p.obb.cz = a.z; D(p.obb.ux, p.obb.uz, a); p.obb.ux = a.x; p.obb.uz = a.z; }
       }
       const L = CBZ.stairs && CBZ.stairs.links ? CBZ.stairs.links() : null;
-      if (L) for (let i = snap.l; i < L.length; i++) {
+      // (this building's links by id, not by where the list stood: an island
+      // dropped behind you while this one builds takes ITS links out of the
+      // list, and every index after them moves down)
+      let l0 = Math.min(snap.l, L ? L.length : 0);
+      if (L && snap.lid) { while (l0 > 0 && L[l0 - 1].id >= snap.lid) l0--; while (l0 < L.length && L[l0].id < snap.lid) l0++; }
+      if (L) for (let i = l0; i < L.length; i++) {
         for (const pt of L[i].path) { if (done.has(pt)) continue; done.add(pt); T(pt.x, pt.z, a); pt.x = a.x; pt.z = a.z; }
       }
       const quarter = si !== 0;
@@ -6641,7 +6646,7 @@
      burst, CBZ.island) are taken off the page after each slice and kept on
      the job, so an island built in the background never hijacks the one you
      are standing on; activating an island puts its own back. */
-  const OWN_GLOBALS = ["shatterGlass", "islandLiftCall", "islandLiftGo0", "islandLiftGo1", "islandLiftStop", "survRoadStats", "island"];
+  const OWN_GLOBALS = ["shatterGlass", "islandLiftCall", "islandLiftGo0", "islandLiftGo1", "islandLiftGoTo", "islandLiftStop", "survRoadStats", "island"];
   /* WHAT A STEP ADDED TO A SHARED LIST, measured even when the step also
      took things OUT of it. A length mark alone misses that: a shop fit-out
      clears the room's default furniture (CBZ.colliderRemoveMany compacts
@@ -6857,6 +6862,21 @@
     if (Object.prototype.hasOwnProperty.call(G, "#dressing") && CBZ.islandDressing) CBZ.islandDressing.current = G["#dressing"];
   };
   CBZ.islandActive = function () { return arena; };
+  /* THE OPEN SEA (world/archipelago.js seaArena): an arena with no island on
+     it is in force. The water queries keep answering (they read this module's
+     arena and the ground function), and every global an island published
+     goes back to unset, so nothing keeps the island you left alive through
+     a closure (its meanY, its lifts, its glass, CBZ.island). */
+  CBZ.islandActivateSea = function (S0, groundFn) {
+    arena = S0 || null;
+    groundOverride = typeof groundFn === "function" ? groundFn : null;
+    shoreRig = null; kelpRig = null; shoreFacts = null;
+    const r = (S0 && S0._rigs) || {};
+    if (r.meanY) arena_meanY = r.meanY;
+    for (const k of OWN_GLOBALS) CBZ[k] = undefined;
+    if (CBZ.debrisAuditSources) CBZ.debrisAuditSources.island = undefined;
+    if (CBZ.islandDressing) CBZ.islandDressing.current = null;
+  };
   /* NO ISLAND IN FORCE (the archipelago left and no disaster island was ever
      built this session): the globals go back to never having been set, so
      nothing keeps a disposed island alive through a closure. With the
@@ -6950,6 +6970,9 @@
         else if (arr === CBZ.platforms && CBZ.platformRemoveMany) CBZ.platformRemoveMany(items);
         else dropItems(arr, items);
       });
+      // (the line-of-sight grid holds its own copy of the walls until a cast
+      // rebuilds it: let go of the island's now, core/losgrid.js)
+      if (CBZ.losBlockers && buses.has(CBZ.losBlockers) && CBZ.losGridRelease) CBZ.losGridRelease();
       if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
     });
     if (!held.length) return true;

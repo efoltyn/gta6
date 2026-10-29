@@ -22,7 +22,7 @@
      node tools/memscope.mjs --json out.json          # default ~/harness/out/gta6/memscope-<label>.json
      node tools/memscope.mjs --top 20 --no-lock
      node tools/memscope.mjs --isles --play 60        # THE ISLES, real rAF play, heap + GPU every --every s
-     node tools/memscope.mjs --isles --play 60 --travel 250  # carried to the next island at 250 m/s (streams it in)
+     node tools/memscope.mjs --isles --play 60 --travel 250 [--in-jet]  # carried to the next island at 250 m/s (in the runway F-35)
      node tools/memscope.mjs --isles --play 12 --snap --ab-top 3000 --eval x.js  # + heap snapshot, ArrayBuffers by path
 
    WHAT IT PRINTS (and writes in full to the JSON):
@@ -134,7 +134,7 @@ const PLAY = +opt("--play", ISLES ? 60 : 0);
 const EVERY = +opt("--every", 5);
 const DO_HEAP = !has("--no-heap");
 const DO_LEAK = DO_HEAP && !has("--no-leak");
-const LABEL = ISLES ? "isles-" + DEVICE + (has("--fly") ? "-fly" : "") + (opt("--travel", "") ? "-travel" : "") : (MODE !== "city" ? MODE : FULL ? "city" : SLICE.replace(/[^a-z0-9-]/gi, "_")) + "-" + DEVICE;
+const LABEL = ISLES ? "isles-" + DEVICE + (opt("--travel", "") ? "-travel" : "") + (has("--in-jet") ? "-jet" : "") : (MODE !== "city" ? MODE : FULL ? "city" : SLICE.replace(/[^a-z0-9-]/gi, "_")) + "-" + DEVICE;
 const HOUT = path.join(os.homedir(), "harness/out/gta6");
 const JSON_OUT = opt("--json", path.join(fs.existsSync(HOUT) ? HOUT : os.tmpdir(), `memscope-${LABEL}.json`));
 const VIEW = DEVICE === "tablet" ? { w: 1180, h: 820, dpr: 2 } : DEVICE === "phone" ? { w: 390, h: 844, dpr: 3 } : { w: 1512, h: 982, dpr: 2 };
@@ -642,8 +642,8 @@ function heapSampleTop(P, n = 15) {
    after a forced GC = what is really retained), ArrayBuffer backing stores,
    GL bytes (buffers / textures / renderbuffers, from the GL calls), live 2D
    canvases, three.info counts, scene objects and the people/cars standing.
-   --fly puts the player in the spawn island's jet at full throttle (the
-   streamer then builds and drops islands as on a real flight). */
+   --travel <m/s> [--in-jet] carries the player (in the runway F-35) to the next
+   island: the streamer builds and drops islands as on a real flight. */
 async function islesPlay(B, s, ev, base, sid) {
   const url = base + "index.html?mode=archipelago&seed=" + (opt("--seed", "1"));
   log(`isles: boot ${url} (${DEVICE}), play ${PLAY} s`);
@@ -661,21 +661,44 @@ async function islesPlay(B, s, ev, base, sid) {
   }
   /* --travel <m/s>: carried at that speed, 200 m up, from the spawn island
      to the nearest other one (the streamer builds it, hands over, drops the
-     first): what a flight in the spawn jet does to memory, without a pilot */
+     first): what a flight does to memory, without a pilot. --in-jet boards
+     the runway F-35 first and carries IT (the open sea between the isles is
+     for an aircraft in flight, world/archipelago.js toSea). */
   if (opt("--travel", "")) {
-    const r = await ev(`(function(){ var AR = CBZ.archipelago, P = CBZ.player, L = AR.isles(), S = AR.state(), a = L.find(function(i){ return i.id === S.active; }) || L[0];
+    const r = await ev(`(async function(){ var AR = CBZ.archipelago, P = CBZ.player, L = AR.isles(), S = AR.state(), a = L.find(function(i){ return i.id === S.active; }) || L[0];
+      var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+      var jet = null;
+      if (${has("--in-jet") ? 1 : 0}) {
+        var IV = CBZ.islandVehicles;
+        for (var i = 0; i < 40 && !(IV && IV.jet && IV.jet()); i++) await wait(250);
+        var j = IV && IV.jet && IV.jet();
+        if (!j) return "no jet";
+        P.pos.set(j.pos.x + 3, P.pos.y, j.pos.z + 3); await wait(200);
+        CBZ.cityAircraftBoardNearest();
+        for (var k = 0; k < 60 && !P._aircraft; k++) await wait(200);
+        jet = P._aircraft || null;
+        if (!jet) return "could not board";
+        /* (who takes the seat away, if anything does: the stack lands in window.__lostSeat) */
+        var _ac = P._aircraft;
+        Object.defineProperty(P, "_aircraft", { configurable: true, get: function () { return _ac; }, set: function (v) {
+          if (!v && _ac && !window.__lostSeat) window.__lostSeat = String(new Error().stack).split("\\n").slice(2, 9).join(" < ").replace(/https?:[^ ]*?\\/src\\//g, "");
+          _ac = v; } });
+      }
       var b = L.filter(function(i){ return i !== a; }).sort(function(x, y){ return Math.hypot(x.x - a.x, x.z - a.z) - Math.hypot(y.x - a.x, y.z - a.z); })[0];
-      var V = ${+opt("--travel", "0")}, dx = b.x - P.pos.x, dz = b.z - P.pos.z, d = Math.hypot(dx, dz), ux = dx / d, uz = dz / d, last = performance.now(), go = d - b.R * 0.3;
+      var O = jet ? jet.pos : P.pos;
+      var V = ${+opt("--travel", "0")}, dx = b.x - O.x, dz = b.z - O.z, d = Math.hypot(dx, dz), ux = dx / d, uz = dz / d, last = performance.now(), go = d - b.R * 0.3;
       var raf = window.requestAnimationFrame.bind(window);
-      (function f(t){ var dt = Math.min(0.1, (performance.now() - last) / 1000); last = performance.now();
-        if (go > 0) { var s = Math.min(go, V * dt); go -= s; P.pos.x += ux * s; P.pos.z += uz * s; }
-        P.pos.y = Math.max(AR.groundAt(P.pos.x, P.pos.z), 0) + (go > 0 ? 200 : 2); P.vy = 0; P.hp = 100; P.dead = false; raf(f); })();
-      return a.id + ' -> ' + b.id + ' ' + Math.round(d) + ' m'; })()`);
+      (function f(t){ if (window.__stopCarry) return; var dt = Math.min(0.1, (performance.now() - last) / 1000); last = performance.now();
+        if (jet && P._aircraft !== jet && !window.__lostJet) window.__lostJet = { at: performance.now(), destroyed: !!jet.destroyed, hp: jet.hp, y: Math.round(jet.pos.y), ground: Math.round(AR.groundAt(jet.pos.x, jet.pos.z)), atSea: !!(CBZ.surv.arena && CBZ.surv.arena.atSea), active: AR.state().active, dead: P.dead };
+        var Q = jet && P._aircraft === jet ? jet.pos : P.pos;
+        if (go > 0) { var s = Math.min(go, V * dt); go -= s; Q.x += ux * s; Q.z += uz * s; }
+        Q.y = Math.max(AR.groundAt(Q.x, Q.z), 0) + (go > 0 ? 200 : (jet ? 120 : 2));
+        if (jet && P._aircraft === jet) { jet.heading = Math.atan2(ux, uz); jet.pitch = 0; jet.roll = 0; jet.vx = 0; jet.vz = 0; jet.vy = 0;   /* (the carry IS the motion: the flight model's own would double it) */
+          jet.airspeed = jet.speed = go > 0 ? V : 60; jet.onGround = false; jet.hp = jet.maxHp || jet.hp; }
+        else { P.vy = 0; }
+        P.hp = 100; P.dead = false; raf(f); })();
+      return a.id + ' -> ' + b.id + ' ' + Math.round(d) + ' m' + (jet ? ' in the ' + (jet.displayName || 'jet') : ''); })()`, 60000);
     log("travel: " + r);
-  }
-  if (has("--fly")) {
-    const r = await ev(`(function(){ var IV = CBZ.islandVehicles, P = CBZ.player; try { var j = IV && IV.jet ? IV.jet() : null; if (j && CBZ.cityPlayerAircraftEnter) CBZ.cityPlayerAircraftEnter(j); } catch (e) { return 'enter: ' + e.message; } return P._aircraft ? 'in ' + (P._aircraft.kind || P._aircraft.type || '?') : 'no aircraft'; })()`);
-    log("fly: " + r);
   }
   const sample = async (t) => {
     const h0 = await s("Runtime.getHeapUsage");
@@ -683,7 +706,6 @@ async function islesPlay(B, s, ev, base, sid) {
     const h = await s("Runtime.getHeapUsage");
     const p = await ev(`(function(){ var g = __ms.glRead(), c = __ms.canvRead(), C = CBZ, ri = C.renderer && C.renderer.info, n = 0; C.scene.traverse(function(){ n++; });
       var A = C.archipelago && C.archipelago.state(), P = C.player;
-      if (${has("--fly") ? 1 : 0} && P && P._aircraft && C.input) { try { C.input.keys = C.input.keys || {}; } catch (e) {} }
       return { lost: [__ms.lost.n, +__ms.lost.MB.toFixed(1)], g: g, c: c, geo: ri ? ri.memory.geometries : -1, tex: ri ? ri.memory.textures : -1, prog: ri && ri.programs ? ri.programs.length : -1, objs: n,
         peds: (C.cityPeds || []).length, cars: (C.cityCars || []).length, fps: C.fps || null,
         isles: A ? A.isles.map(function(i){ return i.id + ':' + i.state; }).join(' ') : '', pos: P && P.pos ? Math.round(P.pos.x) + ',' + Math.round(P.pos.z) : '' }; })()`);
@@ -695,7 +717,6 @@ async function islesPlay(B, s, ev, base, sid) {
   const tPlay = Date.now();
   for (let t = 0; t <= PLAY; t += EVERY) {
     const wait = tPlay + t * 1000 - Date.now(); if (wait > 0) await sleep(wait);
-    if (has("--fly")) await ev(`(function(){ var K = CBZ.keys || (CBZ.input && CBZ.input.keys); if (K) { K['KeyW'] = K['w'] = K['W'] = true; K['ShiftLeft'] = K['shift'] = true; } return 1; })()`).catch(() => 0);
     const r = await sample(t); rows.push(r);
     log(`t=${lpad(t, 3)}s heap ${lpad(r.heapMB, 6)} (gc ${lpad(r.heapGcMB, 6)}) ab ${lpad(r.abMB, 5)} | GPU ${lpad(r.gpuMB, 6)} (buf ${r.bufMB}/${r.nbuf}, tex ${r.texMB}/${r.ntex}) | GC'd undisposed ${r.lost[0]} (${r.lost[1]} MB) | canvas ${r.canv} live ${r.canvMB} MB, ${r.canvMade} made | geo ${r.geo} tex ${r.tex} prog ${r.prog} objs ${r.objs} peds ${r.peds} cars ${r.cars} | ${r.pos} ${r.isles}`);
   }

@@ -3025,6 +3025,25 @@
      grid. One entry point now, and it is idempotent: scrapping a car twice,
      or a car that was never registered, is a no-op rather than a double
      dispose of shared geometry. */
+  /* AN ISLAND'S KERBSIDE LEAVES WITH THE ISLAND (world/island_town.js
+     islandTownDrop). The parked fixtures (a kerb, a yard, a motorcade bay:
+     _propParked, _arenaRoot) were only purged from the car list when the
+     NEXT island parked its own, which out at sea between the isles is never:
+     their records, and the car-ahead grid's cells holding them, kept the
+     dropped island alive. Their meshes are under the island's root and go
+     with its teardown, so this only lets go of the records. */
+  CBZ.cityForgetParkedUnder = function (root) {
+    if (!root) return 0;
+    let n = 0;
+    const P = CBZ.player;
+    for (let i = CBZ.cityCars.length - 1; i >= 0; i--) {
+      const c = CBZ.cityCars[i];
+      if (!c || !c._propParked || c._arenaRoot !== root || (P && P._vehicle === c)) continue;
+      CBZ.cityCars.splice(i, 1); n++;
+    }
+    if (n) { try { rebuildCarGrid(); } catch (e) {} }
+    return n;
+  };
   CBZ.cityScrapCar = function (car) {
     wakeCar(car);
     if (!car || car._scrapped) return false;
@@ -3035,6 +3054,10 @@
     if (car._heldBy && CBZ.vehicleHoldRelease) { try { CBZ.vehicleHoldRelease(car); } catch (e) {} }
     const i = CBZ.cityCars.indexOf(car);
     if (i >= 0) CBZ.cityCars.splice(i, 1);
+    // (and the car-ahead grid: its cells kept the record, and through it the
+    // island it was parked on, until the next car tick, which out at sea
+    // between the isles does not come)
+    if (i >= 0) { try { rebuildCarGrid(); } catch (e) {} }
     // a scrapped wreck leaves the husk list too: it held the record (and the
     // disposed rig's geometry arrays) until ten newer wrecks pushed it out,
     // across every new disaster match (tools/probes/disaster-leak.mjs)
@@ -8293,6 +8316,7 @@
       for (let i = 0; i < cars.length; i++) _caConsider(c, cars[i], fx, fz, myHalf, look);
     }
     const best = _caBest;
+    _caBest = null;                // (a scratch, not a reference: it held the last car looked at, and its island, after both were gone)
     if (!best) return null;
     // how fast the obstacle is moving AWAY along our heading (crossing traffic
     // and oncoming cars project to ~0 → we brake instead of matching "speed")
