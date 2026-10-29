@@ -341,7 +341,17 @@
      renderer.initTexture. The real meshes then find their buffers there
      (three keys them by attribute and version), so the frame the island
      appears uploads nothing. Nothing about the pixels changes: the stand-
-     ins write no colour and no depth, into a target nobody reads. */
+     ins write no colour and no depth, into a target nobody reads.
+     ONLY WHAT THE ISLAND WILL DRAW WHEN IT APPEARS. A subtree hidden on its
+     own (below the hidden root) is not drawn when the root is shown: the
+     originals a baked shell keeps hidden for raycasts and collider refs
+     (world/disaster_arena.js bakeShell, ~1,600 meshes an island, drawn
+     never), the interiors and venue fit-outs asleep until you come near,
+     the parked pools. Uploading them ahead put a whole second island on
+     the GPU the moment it arrived (memscope --isles --travel: GL buffers
+     24 -> 359 MB at Highgate, 197 MB of it hidden), which is what killed
+     the tab on a phone a few seconds into the first flight. They upload
+     on their own first draw, exactly as the spawn island's do. */
   const UP = { scene: null, cam: null, rt: null, pool: [], mat: null, done: new WeakSet() };
   function upRig() {
     if (UP.scene) return UP;
@@ -373,6 +383,7 @@
     let walked = 0;
     while (stack.length) {
       const o = stack.pop();
+      if (o !== root && !o.visible) continue;
       for (let c = o.children.length - 1; c >= 0; c--) stack.push(o.children[c]);
       const g = o.geometry;
       if (g && g.isBufferGeometry && g.attributes && g.attributes.position && !g._shared && !UP.done.has(g)) { UP.done.add(g); geos.push(g); }

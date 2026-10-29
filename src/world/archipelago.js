@@ -378,6 +378,15 @@
     ST.floor = floor;
   }
 
+  /* AN ISLAND'S TERRAIN RECORD IS ONLY EVER ITS TERRAIN PHASE (the plan and
+     the ground function, CBZ.islandTerrain: no meshes). Never a build's own
+     record (job.terrain): that one holds the island's root and, through its
+     ground function's closure, the build generator's scope, i.e. the whole
+     island, for as long as the record lives, which is the whole session. */
+  function lightTerrain(I) {
+    try { return CBZ.islandTerrain(islandOpts(I)); } catch (e) { console.error("[archipelago terrain " + I.id + "]", e); return null; }
+  }
+
   /* ---- BUILD / SHOW / DROP ---------------------------------------------- */
   function startJob(I) {
     if (I.job || I.arena) return;
@@ -393,7 +402,7 @@
       return;
     }
     I.arena = job.arena;
-    if (!I.terrain) I.terrain = job.terrain;
+    if (!I.terrain) I.terrain = lightTerrain(I);
     // (what an island costs is its build AND its warm-up: the venues fit out
     // in the warm chore, and the island is shown only once they are in)
     I.warmMs = 0;
@@ -579,13 +588,17 @@
       // ~0.7 of it)
       ST.workMs = Math.max(1500, (spawnI.job.ms + performance.now() - a0) * 0.7);
       spawnI.arena = spawnI.job.arena;
-      spawnI.terrain = spawnI.job.terrain;
+      // (its terrain record is the terrain PHASE, like every island's, made
+      // in the loop below: the build's own record carries the island's root
+      // and its generator's whole scope, so keeping it here kept the spawn
+      // island's every array alive after it was dropped behind you: 235 MB
+      // on a phone, the first flight off Port Royal)
       spawnI.arena.root.visible = true;
       spawnI.state = "near";
     } else { spawnI.job = null; }
     // every other island as data, and every far form
     for (const I of ST.isles) {
-      if (!I.terrain) { try { I.terrain = CBZ.islandTerrain(islandOpts(I)); } catch (e) { console.error("[archipelago terrain " + I.id + "]", e); } }
+      if (!I.terrain) I.terrain = lightTerrain(I);
       if (!I.terrain) continue;
       try {
         const geo = I.arena ? farGeometry(I.terrain, realBlocks(I.arena), realTrees(I.arena)) : farGeometry(I.terrain, planBlocks(I.terrain), planTrees(I.terrain));

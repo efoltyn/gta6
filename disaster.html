@@ -947,11 +947,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
 <script src="src/systems/touch.js?v=goods1022"></script>
-<script src="src/systems/touch_vehicle.js?v=deck1011"></script>
+<script src="src/systems/touch_vehicle.js?v=islesmem1029"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <!-- where a floating touch button may go (the verb column, the way out): pure rect math -->
-<script src="src/systems/touch_layout.js?v=deck1011"></script>
+<script src="src/systems/touch_layout.js?v=islesmem1029"></script>
 <script src="src/systems/seat_exit.js?v=pres1028"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
@@ -983,7 +983,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_plan.js?v=isleopen1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=arrive1022"></script>
+<script src="src/world/disaster_arena.js?v=islesmem1029"></script>
 <script src="src/world/island_dressing.js?v=misleopstutte"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
 <script src="src/world/island_venue.js?v=misleopstutte"></script>
@@ -1380,7 +1380,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carlod.js?v=mrg10200048"></script>
 <script src="src/city/vehicles.js?v=stall1022"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
-<script src="src/city/playeraircraft.js?v=jetbound1022"></script>
+<script src="src/city/playeraircraft.js?v=islesmem1029"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1413,7 +1413,7 @@ document.body.appendChild(b);}}catch(e){}})();
      cars (vehicles.js), a rooftop helipad with a flyable helicopter
      (playeraircraft.js CBZ.airParkFlyable), the island's weather fed into both.
      After vehicles.js, playeraircraft.js, bailout.js and aircraft_doors.js. -->
-<script src="src/world/island_vehicles.js?v=arrive1022"></script>
+<script src="src/world/island_vehicles.js?v=islesmem1029"></script>
 <!-- THE ARCHIPELAGO (mode "archipelago"): the disaster island's package built
      many times over on one sea, kilometres apart, streamed in as you near
      each one and dropped behind you. archipelago_map.js is the map as data;
@@ -1615,7 +1615,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ISLANDS' SHOPS (world/island_shops.js): every island outfitter, tailor,
      optician, phone shop and trade fitted with the store systems above, per
      building, through CBZ.islandVenue; a counter and a clerk in each. -->
-<script src="src/world/island_shops.js?v=misleclstutte"></script>
+<script src="src/world/island_shops.js?v=islesmem1029"></script>
 <!-- THE ISLANDS' MONEY (city/islandmoney.js): every island bank a banking hall
      with tellers, a manager's loan desk, an ATM, guards and the strongroom
      (city/bank.js cityVaultRoom); a safe or a cash box in every building with
@@ -2349,7 +2349,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
      and registers its own window-load handler SECOND, so the static merge has
      finished before it promotes materials. -->
-<script src="src/core/gfx.js?v=flicker1009b"></script>
+<script src="src/core/gfx.js?v=islesmem1029"></script>
 <script src="src/core/loop.js?v=front1001"></script>
 <script src="src/main.js?v=sharkmode1"></script>
 </body>
