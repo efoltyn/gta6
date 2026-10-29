@@ -11,6 +11,7 @@
      node tools/memscope.mjs                          # slice gangcity-downtown, phone profile
      node tools/memscope.mjs --slice kingsport-downtown
      node tools/memscope.mjs --full                   # the whole city (slow: big snapshots)
+     node tools/memscope.mjs --mode escape            # the prison (any ?mode=; no slices there)
      node tools/memscope.mjs --query stream=1         # extra url params (streaming on)
      node tools/memscope.mjs --device desktop         # MacBook profile instead of the phone
      node tools/memscope.mjs --no-leak                # skip the move-and-return leak pass
@@ -20,6 +21,9 @@
      node tools/memscope.mjs --root <dir>             # serve another tree
      node tools/memscope.mjs --json out.json          # default ~/harness/out/gta6/memscope-<label>.json
      node tools/memscope.mjs --top 20 --no-lock
+     node tools/memscope.mjs --isles --play 60        # THE ISLES, real rAF play, heap + GPU every --every s
+     node tools/memscope.mjs --isles --play 60 --travel 250  # carried to the next island at 250 m/s (streams it in)
+     node tools/memscope.mjs --isles --play 12 --snap --ab-top 3000 --eval x.js  # + heap snapshot, ArrayBuffers by path
 
    WHAT IT PRINTS (and writes in full to the JSON):
    A. JS HEAP BY OWNER. A V8 heap snapshot (CDP HeapProfiler.takeHeapSnapshot,
@@ -115,7 +119,8 @@ const pad = (s, n) => String(s).padEnd(n).slice(0, n);
 const lpad = (s, n) => String(s).padStart(n);
 
 const FULL = has("--full");
-const SLICE = FULL ? "" : opt("--slice", "gangcity-downtown");
+const MODE = opt("--mode", "city");   // escape = the prison (no slices there)
+const SLICE = FULL || MODE !== "city" ? "" : opt("--slice", "gangcity-downtown");
 const DEVICE = opt("--device", "phone");
 const SEED = opt("--seed", "90210");
 const QUERY = opt("--query", "");
@@ -124,9 +129,12 @@ const FAR = +opt("--far", 600);
 const TOUR_N = +opt("--tour", FULL ? 4 : 6);
 const TOUR_FRAMES = +opt("--tour-frames", 40);
 const SETTLE = +opt("--settle", 30);
+const ISLES = has("--isles");
+const PLAY = +opt("--play", ISLES ? 60 : 0);
+const EVERY = +opt("--every", 5);
 const DO_HEAP = !has("--no-heap");
 const DO_LEAK = DO_HEAP && !has("--no-leak");
-const LABEL = (FULL ? "city" : SLICE.replace(/[^a-z0-9-]/gi, "_")) + "-" + DEVICE;
+const LABEL = ISLES ? "isles-" + DEVICE + (has("--fly") ? "-fly" : "") + (opt("--travel", "") ? "-travel" : "") : (MODE !== "city" ? MODE : FULL ? "city" : SLICE.replace(/[^a-z0-9-]/gi, "_")) + "-" + DEVICE;
 const HOUT = path.join(os.homedir(), "harness/out/gta6");
 const JSON_OUT = opt("--json", path.join(fs.existsSync(HOUT) ? HOUT : os.tmpdir(), `memscope-${LABEL}.json`));
 const VIEW = DEVICE === "tablet" ? { w: 1180, h: 820, dpr: 2 } : DEVICE === "phone" ? { w: 390, h: 844, dpr: 3 } : { w: 1512, h: 982, dpr: 2 };
@@ -221,6 +229,19 @@ function cur(){ if (M.owner) return M.owner; if (M.building) return "step:" + (M
 function srcFile(){ var L = String((new Error()).stack || "").split("\n");
   for (var i = 2; i < L.length; i++) { var m = L[i].match(/\/(?:src|games)\/([^:?)]+\.js)/); if (m && !/^(vendor\/|config\.js|core\/loop\.js|bootstrap\.js)/.test(m[1])) return m[1]; } return ""; }
 function hookThree(){ var T = window.THREE; if (M.hooked || !T || !T.Object3D || !T.Object3D.prototype.add) return; M.hooked = 1;
+  /* every geometry / texture three has uploaded and not disposed (three hooks 'dispose' on first upload, unhooks on dispose) */
+  /* (weakly: a tool that holds what it counts keeps alive what the game let go) */
+  M.gpuRefs = []; M.gpuGone = new WeakSet(); M.gpuReg = new WeakSet();
+  /* GARBAGE-COLLECTED WITHOUT dispose(): three still holds what it uploaded for it
+     (r128 bindingStates keep the attributes, so their arrays AND GL buffers live on) */
+  M.lost = { n: 0, MB: 0, by: {} };
+  M.descGpu = function(x){ var b = 0; if (x.isTexture) { var im = x.image; b = im ? (im.width || 0) * (im.height || 0) * 4 : 0; return { b: b, k: "TEX " + (x.name || "") }; }
+    for (var k in x.attributes) { var a = x.attributes[k]; if (a && a.array) b += a.array.byteLength; } if (x.index && x.index.array) b += x.index.array.byteLength; return { b: b, k: "GEO " + (x.name || x.type) + " [" + Object.keys(x.attributes || {}).join(",") + "]" }; };
+  M.lostFR = new FinalizationRegistry(function(d){ M.lost.n++; M.lost.MB += d.b / 1048576; var r = M.lost.by[d.k] || (M.lost.by[d.k] = [0, 0]); r[0]++; r[1] += d.b / 1048576; });
+  M.gpuLiveList = function(){ var out = []; M.gpuRefs = M.gpuRefs.filter(function(w){ var x = w.deref(); if (!x || M.gpuGone.has(x)) return false; out.push(x); return true; }); return out; };
+  [T.BufferGeometry.prototype, T.Texture.prototype].forEach(function(P){ var ae = P.addEventListener, re = P.removeEventListener;
+    P.addEventListener = function(type, fn){ if (type === "dispose" && !M.gpuReg.has(this)) { M.gpuGone.delete(this); M.gpuRefs.push(new WeakRef(this)); M.gpuReg.add(this); M.lostFR.register(this, M.descGpu(this), this); } return ae.call(this, type, fn); };
+    P.removeEventListener = function(type, fn){ if (type === "dispose") { M.gpuGone.add(this); M.gpuReg.delete(this); M.lostFR.unregister(this); } return re.call(this, type, fn); }; });
   var add = T.Object3D.prototype.add;
   T.Object3D.prototype.add = function(){ var r = add.apply(this, arguments);
     try { var o = cur(), po = M.own.get(this);
@@ -267,6 +288,11 @@ hookGL(window.WebGLRenderingContext && WebGLRenderingContext.prototype);
 hookGL(window.WebGL2RenderingContext && WebGL2RenderingContext.prototype);
 var gc0 = HTMLCanvasElement.prototype.getContext;
 HTMLCanvasElement.prototype.getContext = function(type){ var c = gc0.apply(this, arguments); if (c && /webgl/.test(type) && M.gls.indexOf(c) < 0) M.gls.push(c); return c; };
+/* canvases (iOS counts every 2D backing store against the tab) */
+M.canv = []; M.ncanv = 0;
+var ce0 = Document.prototype.createElement;
+Document.prototype.createElement = function(tag){ var el = ce0.apply(this, arguments); if (el && el.tagName === "CANVAS") { M.ncanv++; M.canv.push(new WeakRef(el)); if (M.canv.length > 4096) M.canv = M.canv.filter(function(w){ return w.deref(); }); } return el; };
+M.canvRead = function(){ var n = 0, px = 0; M.canv = M.canv.filter(function(w){ var c = w.deref(); if (!c) return false; n++; px += (c.width || 0) * (c.height || 0); return true; }); return { made: M.ncanv, live: n, MB: px * 4 / 1048576 }; };
 M.glRead = function(){ var o = { buf: M.gl.buf, tex: M.gl.tex, rb: M.gl.rb, nbuf: M.gl.nbuf, ntex: M.gl.ntex, nrb: M.gl.nrb, db: 0 };
   M.gls.forEach(function(g){ try { var at = g.getContextAttributes() || {}, px = g.drawingBufferWidth * g.drawingBufferHeight, s = at.antialias ? 4 : 1;
     o.db += px * (4 + (at.depth || at.stencil ? 4 : 0)) * s + (s > 1 ? px * 4 : 0); } catch (_) {} });
@@ -308,7 +334,8 @@ M.gpuWalk = function(farM){
     var h = 2166136261 ^ u.length, n = u.length, step = Math.max(1, Math.floor(n / 2048));
     for (var i = 0; i < n; i += step) { h ^= u[i]; h = Math.imul(h, 16777619); } h ^= u[n - 1]; h = Math.imul(h, 16777619); return (h >>> 0).toString(36) + ":" + arr.byteLength; }
   function attr(a, R, flags, label){ if (!a) return 0; var d = a.isInterleavedBufferAttribute ? a.data : a; if (seenBuf.has(d)) return 0; seenBuf.add(d);
-    var arr = d.array, e = arr && arr.BYTES_PER_ELEMENT || 4, n = (d.count || 0) * (d.stride || d.itemSize || 1) * e; if (arr && arr.byteLength > n) n = arr.byteLength;
+    /* (a GPU-only attribute, core/batch.js CBZ.gpuOnlyAttrs: reading .array would READ IT BACK; look at its JS copy, if any) */
+    var arr = d._cbzGO ? d._cbzArr : d.array, e = arr && arr.BYTES_PER_ELEMENT || 4, n = (d.count || 0) * (d.stride || d.itemSize || 1) * e; if (arr && arr.byteLength > n) n = arr.byteLength;
     var up = arr ? (M.upBuf.has(arr.buffer)) : true;
     if (!up) { R.notUp += n; tot.notUp += n; if (flags.hidden) { R.notUpHidden += n; tot.notUpHidden += n; } return 0; }
     R.gpu += n; R.geo += n; tot.gpu += n; tot.geo += n;
@@ -350,7 +377,7 @@ M.gpuWalk = function(farM){
       if (mt.uniforms) for (var u in mt.uniforms) { var uv = mt.uniforms[u] && mt.uniforms[u].value; if (uv && uv.isTexture) tex(uv, R, m[1], { hidden: !m[2] }); } }); });
   geoInfo.forEach(function(gi, g){ var R = O(gi.owner), fl = { hidden: !gi.vis, far: gi.vis && gi.allFar, owner: gi.owner }, s = 0, held = 0;
     var names = Object.keys(g.attributes || {});
-    names.forEach(function(k){ s += attr(g.attributes[k], R, fl, gi.name + "." + k); var a = g.attributes[k]; if (a && a.array && a.array.length) held += a.array.byteLength; });
+    names.forEach(function(k){ s += attr(g.attributes[k], R, fl, gi.name + "." + k); var a = g.attributes[k], aa = a && (a._cbzGO ? a._cbzArr : a.array); if (aa && aa.length) held += aa.byteLength; });
     s += attr(g.index, R, fl, gi.name + ".index"); if (g.index && g.index.array && g.index.array.length) held += g.index.array.byteLength;
     for (var mk in (g.morphAttributes || {})) (g.morphAttributes[mk] || []).forEach(function(a){ s += attr(a, R, fl, gi.name + ".morph"); });
     if (s > 0) big.push([gi.owner, String(gi.name).slice(0, 40), s, held, gi.users, gi.vis ? (gi.allFar ? "far" : "vis") : "HIDDEN"]); });
@@ -441,7 +468,7 @@ async function takeSnapshot(B, sid, crashP) {
 }
 
 /* dominator tree + retained sizes + owners (+ optional diff against earlier ids) */
-export function analyze(snap, { prevIds = null, top = 20 } = {}) {
+export function analyze(snap, { prevIds = null, top = 20, abTop = 0, trace = "" } = {}) {
   const t0 = Date.now();
   const M = snap.meta.meta, nf = M.node_fields.length, ef = M.edge_fields.length;
   const oT = M.node_fields.indexOf("type"), oN = M.node_fields.indexOf("name"), oI = M.node_fields.indexOf("id"), oS = M.node_fields.indexOf("self_size"), oE = M.node_fields.indexOf("edge_count");
@@ -535,6 +562,14 @@ export function analyze(snap, { prevIds = null, top = 20 } = {}) {
     holders: [...byHolder].sort((a, b) => b[1].retained - a[1].retained).slice(0, 40).map(([k, v]) => ({ holder: k, MB: +MB(v.retained).toFixed(2), bytes: v.retained })),
     unowned: unowned.map((po) => ({ MB: +MB(ret[po]).toFixed(2), cls: cls(post[po]), path: pathTo(post[po]) })),
     namedRoots: named.size, jsonMB: +snap.jsonMB.toFixed(0) };
+  /* ArrayBuffer backing stores (outside the V8 heap, inside the tab): by
+     retainer path with indices folded, so 300 copies of one cache read as one row */
+  /* --trace <Class>: the retainer path of every object of that constructor (tag a suspect in-page with an instance of a uniquely named class) */
+  if (trace) { out.trace = []; for (let po = 0; po < root && out.trace.length < 6; po++) { const n = post[po]; if (nm(n) === trace) out.trace.push(pathTo(n)); } }
+  if (abTop) { const byPath = new Map(); let abTot = 0, k = 0;
+    for (let po = 0; po < root; po++) { const n = post[po]; if (!/JSArrayBufferData|ArrayBufferBackingStore|system \/ BackingStore/.test(nm(n))) continue; const sz = self(n); if (sz < 4096) continue; abTot += sz;
+      if (k++ > 60000) continue; const pth = pathTo(n).replace(/\[\d+\]/g, "[]").replace(/\{\d+\}/g, "{}"); let r = byPath.get(pth); if (!r) byPath.set(pth, r = { n: 0, b: 0 }); r.n++; r.b += sz; }
+    out.abuf = { MB: +MB(abTot).toFixed(1), rows: [...byPath].sort((a, b) => b[1].b - a[1].b).slice(0, abTop).map(([pth, r]) => ({ MB: +MB(r.b).toFixed(2), n: r.n, path: pth })) }; }
   /* ids (sorted) so a later snapshot can diff against this one */
   const ids = new Uint32Array(cnt); for (let po = 0; po < cnt; po++) ids[po] = nodes[post[po] * nf + oI]; ids.sort();
   out._ids = ids;
@@ -584,6 +619,95 @@ function heapSampleTop(P, n = 15) {
   return { totalMB: +MB(total).toFixed(1), byBuilder: s(byB), bySite: s(bySite), byFile: s(byFile) };
 }
 
+/* ---------------- --isles: the first PLAY seconds of the Isles, real frames ----------------
+   What a phone tab dies of is what CLIMBS after the load card goes: this boots
+   The Isles (tile click + CBZ.startRun(), the headless door), lets the game's
+   own rAF loop run, and samples every EVERY s: JS heap (as allocated, and
+   after a forced GC = what is really retained), ArrayBuffer backing stores,
+   GL bytes (buffers / textures / renderbuffers, from the GL calls), live 2D
+   canvases, three.info counts, scene objects and the people/cars standing.
+   --fly puts the player in the spawn island's jet at full throttle (the
+   streamer then builds and drops islands as on a real flight). */
+async function islesPlay(B, s, ev, base, sid) {
+  const url = base + "index.html?mode=archipelago&seed=" + (opt("--seed", "1"));
+  log(`isles: boot ${url} (${DEVICE}), play ${PLAY} s`);
+  await s("Page.navigate", { url });
+  for (let t = Date.now(); ; ) {
+    try { if (await ev("!!(window.CBZ && CBZ.bootComplete && CBZ.startRun && document.readyState === 'complete')", 5000)) break; } catch (_) {}
+    if (Date.now() - t > 240000) throw new Error("bootComplete never came"); await sleep(200);
+  }
+  await ev(`(function(){ var m = document.querySelector('[data-mode="archipelago"]'); if (m) m.click(); __ms.arm(); __ms.building = true; var t0 = performance.now();
+    try { CBZ.startRun(); } catch (e) { __ms.errs.push('[startRun] ' + e.message); } __ms.building = false; __ms.built = true; return performance.now() - t0; })()`, 600000);
+  for (let t = Date.now(); ; ) {
+    if (await ev("!!(CBZ.game.state==='playing' && CBZ.archipelago && CBZ.archipelago.state().built)").catch(() => false)) break;
+    if (Date.now() - t > 120000) throw new Error("isles never started: " + JSON.stringify(await ev("({s: CBZ.game.state, m: CBZ.game.mode, e: __ms.errs})")));
+    await sleep(200);
+  }
+  /* --travel <m/s>: carried at that speed, 200 m up, from the spawn island
+     to the nearest other one (the streamer builds it, hands over, drops the
+     first): what a flight in the spawn jet does to memory, without a pilot */
+  if (opt("--travel", "")) {
+    const r = await ev(`(function(){ var AR = CBZ.archipelago, P = CBZ.player, L = AR.isles(), S = AR.state(), a = L.find(function(i){ return i.id === S.active; }) || L[0];
+      var b = L.filter(function(i){ return i !== a; }).sort(function(x, y){ return Math.hypot(x.x - a.x, x.z - a.z) - Math.hypot(y.x - a.x, y.z - a.z); })[0];
+      var V = ${+opt("--travel", "0")}, dx = b.x - P.pos.x, dz = b.z - P.pos.z, d = Math.hypot(dx, dz), ux = dx / d, uz = dz / d, last = performance.now(), go = d - b.R * 0.3;
+      var raf = window.requestAnimationFrame.bind(window);
+      (function f(t){ var dt = Math.min(0.1, (performance.now() - last) / 1000); last = performance.now();
+        if (go > 0) { var s = Math.min(go, V * dt); go -= s; P.pos.x += ux * s; P.pos.z += uz * s; }
+        P.pos.y = Math.max(AR.groundAt(P.pos.x, P.pos.z), 0) + (go > 0 ? 200 : 2); P.vy = 0; P.hp = 100; P.dead = false; raf(f); })();
+      return a.id + ' -> ' + b.id + ' ' + Math.round(d) + ' m'; })()`);
+    log("travel: " + r);
+  }
+  if (has("--fly")) {
+    const r = await ev(`(function(){ var IV = CBZ.islandVehicles, P = CBZ.player; try { var j = IV && IV.jet ? IV.jet() : null; if (j && CBZ.cityPlayerAircraftEnter) CBZ.cityPlayerAircraftEnter(j); } catch (e) { return 'enter: ' + e.message; } return P._aircraft ? 'in ' + (P._aircraft.kind || P._aircraft.type || '?') : 'no aircraft'; })()`);
+    log("fly: " + r);
+  }
+  const sample = async (t) => {
+    const h0 = await s("Runtime.getHeapUsage");
+    await s("HeapProfiler.collectGarbage");
+    const h = await s("Runtime.getHeapUsage");
+    const p = await ev(`(function(){ var g = __ms.glRead(), c = __ms.canvRead(), C = CBZ, ri = C.renderer && C.renderer.info, n = 0; C.scene.traverse(function(){ n++; });
+      var A = C.archipelago && C.archipelago.state(), P = C.player;
+      if (${has("--fly") ? 1 : 0} && P && P._aircraft && C.input) { try { C.input.keys = C.input.keys || {}; } catch (e) {} }
+      return { lost: [__ms.lost.n, +__ms.lost.MB.toFixed(1)], g: g, c: c, geo: ri ? ri.memory.geometries : -1, tex: ri ? ri.memory.textures : -1, prog: ri && ri.programs ? ri.programs.length : -1, objs: n,
+        peds: (C.cityPeds || []).length, cars: (C.cityCars || []).length, fps: C.fps || null,
+        isles: A ? A.isles.map(function(i){ return i.id + ':' + i.state; }).join(' ') : '', pos: P && P.pos ? Math.round(P.pos.x) + ',' + Math.round(P.pos.z) : '' }; })()`);
+    return { t, heapMB: +MB(h0.usedSize).toFixed(1), heapGcMB: +MB(h.usedSize).toFixed(1), abMB: +MB(h.backingStorageSize || 0).toFixed(1),
+      gpuMB: +MB(p.g.total).toFixed(1), bufMB: +MB(p.g.buf).toFixed(1), texMB: +MB(p.g.tex).toFixed(1), nbuf: p.g.nbuf, ntex: p.g.ntex,
+      lost: p.lost, canv: p.c.live, canvMade: p.c.made, canvMB: +p.c.MB.toFixed(1), geo: p.geo, tex: p.tex, prog: p.prog, objs: p.objs, peds: p.peds, cars: p.cars, isles: p.isles, pos: p.pos };
+  };
+  const rows = [];
+  const tPlay = Date.now();
+  for (let t = 0; t <= PLAY; t += EVERY) {
+    const wait = tPlay + t * 1000 - Date.now(); if (wait > 0) await sleep(wait);
+    if (has("--fly")) await ev(`(function(){ var K = CBZ.keys || (CBZ.input && CBZ.input.keys); if (K) { K['KeyW'] = K['w'] = K['W'] = true; K['ShiftLeft'] = K['shift'] = true; } return 1; })()`).catch(() => 0);
+    const r = await sample(t); rows.push(r);
+    log(`t=${lpad(t, 3)}s heap ${lpad(r.heapMB, 6)} (gc ${lpad(r.heapGcMB, 6)}) ab ${lpad(r.abMB, 5)} | GPU ${lpad(r.gpuMB, 6)} (buf ${r.bufMB}/${r.nbuf}, tex ${r.texMB}/${r.ntex}) | GC'd undisposed ${r.lost[0]} (${r.lost[1]} MB) | canvas ${r.canv} live ${r.canvMB} MB, ${r.canvMade} made | geo ${r.geo} tex ${r.tex} prog ${r.prog} objs ${r.objs} peds ${r.peds} cars ${r.cars} | ${r.pos} ${r.isles}`);
+  }
+  if (opt("--eval", "")) { const ex = opt("--eval", ""); try { console.log("eval:", JSON.stringify(await ev(fs.existsSync(ex) ? fs.readFileSync(ex, "utf8") : ex), null, 1)); } catch (e) { console.log("eval threw: " + e.message); } }
+  let heap = null;
+  if (has("--snap")) {
+    if (!has("--no-roots")) await ev("__ms.mkRoots()");
+    const snap = await takeSnapshot(B, sid, new Promise(() => {}));
+    await ev("__ms.rmRoots()");
+    heap = analyze(snap, { top: TOP, abTop: +opt("--ab-top", 30), trace: opt("--trace", "") }); delete heap._ids;
+    if (heap.trace) console.log("trace " + opt("--trace", "") + ":\n   " + heap.trace.join("\n   "));
+    const o = [`\n-- HEAP at ${PLAY} s: ${f1(heap.totalMB)} MB in V8 snapshot`];
+    o.push("   holders (CBZ.<key>, retained MB):"); heap.holders.slice(0, 15).forEach((x) => o.push(`   ${pad(x.holder, 52)} ${lpad(x.MB.toFixed(1), 7)}`));
+    o.push("   unowned dominators:"); heap.unowned.slice(0, 10).forEach((x) => o.push(`   ${lpad(x.MB.toFixed(1), 7)} MB  ${pad(x.cls, 28)} ${x.path}`));
+    o.push("   by class:"); heap.classes.slice(0, 15).forEach((x) => o.push(`   ${pad(x.cls, 52)} ${lpad(x.MB.toFixed(1), 7)} ${lpad(x.n, 8)}`));
+    if (heap.abuf) { o.push(`   ArrayBuffer backing stores ${heap.abuf.MB} MB, by retainer path:`); heap.abuf.rows.slice(0, 30).forEach((x) => o.push(`   ${lpad(x.MB.toFixed(1), 7)} MB ${lpad(x.n, 5)}x  ${x.path}`)); }
+    console.log(o.join("\n"));
+  }
+  const errs = await ev("__ms.errs").catch(() => []);
+  const a = rows[0], z = rows[rows.length - 1];
+  console.log(`\n=== ISLES PLAY ${LABEL} ${PLAY} s: heap(gc) ${a.heapGcMB} -> ${z.heapGcMB} MB (+${(z.heapGcMB - a.heapGcMB).toFixed(1)}), GPU ${a.gpuMB} -> ${z.gpuMB} MB (+${(z.gpuMB - a.gpuMB).toFixed(1)}), canvases ${a.canv} -> ${z.canv} (${a.canvMB} -> ${z.canvMB} MB), peak heap ${Math.max(...rows.map((r) => r.heapMB))} MB`);
+  if (errs.length) console.log("page errors: " + errs.join(" | "));
+  fs.mkdirSync(path.dirname(JSON_OUT), { recursive: true });
+  fs.writeFileSync(JSON_OUT, JSON.stringify({ label: LABEL, url, play: PLAY, rows, errs, heap }, null, 1));
+  console.log(`JSON: ${JSON_OUT}`);
+  cleanup();
+}
+
 /* ---------------- main ---------------- */
 async function main() {
   if (!has("--no-lock")) await takeLock();
@@ -616,11 +740,12 @@ async function main() {
     if (DEVICE === "phone") await s("Emulation.setUserAgentOverride", { userAgent: PHONE_UA, platform: "iPhone", acceptLanguage: "en-US" });
   }
   await s("Page.addScriptToEvaluateOnNewDocument", { source: pre });
+  if (ISLES) return islesPlay(B, s, ev, base, sid);
   /* same-origin blank first, so the sampling heap profiler is running in the
      page's own renderer before the first game script evaluates */
   await s("Page.navigate", { url: base + "__memscope_blank.html" }); await sleep(300);
   await s("HeapProfiler.startSampling", { samplingInterval: +opt("--sample-kb", 128) * 1024 });
-  const q = ["mode=city", "seed=" + SEED]; if (SLICE) q.push("slice=" + encodeURIComponent(SLICE)); if (QUERY) q.push(QUERY.replace(/^[?&]/, ""));
+  const q = ["mode=" + MODE, "seed=" + SEED]; if (SLICE) q.push("slice=" + encodeURIComponent(SLICE)); if (QUERY) q.push(QUERY.replace(/^[?&]/, ""));
   const url = base + "index.html?" + q.join("&");
   log(`boot ${url} (${DEVICE})`);
   const tNav = Date.now();
@@ -650,7 +775,8 @@ async function main() {
     cpu: cpuTop(cpuProf, 20) };
   R.allocs = heapSampleTop(heapProf, 20);
   /* headline memory */
-  const memNow = async () => { const h = await s("Runtime.getHeapUsage"); const g = await ev("__ms.glRead()");
+  // (collected first: freed arrays are garbage, not memory, and an uncollected read counted them)
+  const memNow = async () => { try { await s("HeapProfiler.collectGarbage", {}, 60000); } catch (_) {} const h = await s("Runtime.getHeapUsage"); const g = await ev("__ms.glRead()");
     return { heapMB: +MB(h.usedSize).toFixed(1), arrayBuffersMB: +MB(h.backingStorageSize || 0).toFixed(1), gpuMB: +MB(g.total).toFixed(1), gl: { bufMB: +MB(g.buf).toFixed(1), texMB: +MB(g.tex).toFixed(1), rbMB: +MB(g.rb).toFixed(1), drawingBufferMB: +MB(g.db).toFixed(1), buffers: g.nbuf, textures: g.ntex },
       phoneMB: +MB(h.usedSize + (h.backingStorageSize || 0) + g.total).toFixed(1) }; };
   R.mem = await memNow();

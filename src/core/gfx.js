@@ -354,7 +354,13 @@
      C. ENVIRONMENT REACH
      ================================================================= */
 
-  const pbrClients = [];
+  /* (held WEAKLY: this list only keeps their envMap in step with the sky's.
+     A material an island built (world/disaster_arena.js's volcano skin, its
+     onBeforeCompile a closure over the island build's whole scope) held
+     here strongly kept that island, every array of it, alive for the
+     session after it was dropped: ~235 MB a visited island on a phone.) */
+  const pbrClients = [];          // WeakRef<Material>
+  const pbrSeen = new WeakSet();
 
   /* THE ENVIRONMENT FOLLOWS THE SKY. CBZ.ENV is ONE PMREM of a fixed
      daylight gradient (world/carfx.js), and every Standard material in the
@@ -403,8 +409,9 @@
   function envOn() { return !!(CBZ.CONFIG.GFX_ENV_WORLD && tier().env); }
 
   function registerPbr(mat) {
-    if (!mat || pbrClients.indexOf(mat) >= 0) return mat;
-    pbrClients.push(mat);
+    if (!mat || pbrSeen.has(mat)) return mat;
+    pbrSeen.add(mat);
+    pbrClients.push(new WeakRef(mat));
     const e = envOn() ? envTex() : null;
     if (e && "envMap" in mat && !mat.envMap) { mat.envMap = e; mat.needsUpdate = true; }
     return mat;
@@ -425,15 +432,15 @@
     const want = on ? envTex() : null;
     if (want === lastEnv) return !!want;
     lastEnv = want;
-    const lists = [pbrClients, CBZ.pbrTwins || []];
-    for (let L = 0; L < lists.length; L++) {
-      const arr = lists[L];
-      for (let i = 0; i < arr.length; i++) {
-        const m = arr[i];
-        if (!m || !("envMap" in m)) continue;
-        if (m.envMap !== want) { m.envMap = want; m.needsUpdate = true; }
-      }
-    }
+    const sync = function (m) {
+      if (!m || !("envMap" in m)) return;
+      if (m.envMap !== want) { m.envMap = want; m.needsUpdate = true; }
+    };
+    let live = 0;
+    for (let i = 0; i < pbrClients.length; i++) { const m = pbrClients[i].deref(); if (m) { sync(m); pbrClients[live++] = pbrClients[i]; } }
+    pbrClients.length = live;
+    const twins = CBZ.pbrTwins || [];
+    for (let i = 0; i < twins.length; i++) sync(twins[i]);
     return !!want;
   }
   // CBZ.ENV is built lazily by world/carfx.js once a renderer exists, and the

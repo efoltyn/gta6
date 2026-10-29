@@ -965,14 +965,18 @@
   }
   function parkFlyable(o) {
     o = o || {};
-    // kind "jet": the F-35A (buildJet), unarmed, parked on a runway
-    // threshold (the archipelago's airstrips); null until the unit file is on
-    // the page (the caller asks again); default the heli
+    // kind "jet": the F-35A (buildJet), parked on a runway threshold (the
+    // archipelago's airstrips); null until the unit file is on the page (the
+    // caller asks again); default the heli (the VIP airframe: a civil machine,
+    // never armed). o.armed: a jet carries its AMRAAMs in its bays and fires
+    // them like the base jet ([LMB], the touch reticle); owner 2026-10-29 on
+    // the Isles runway's F-35: "there's no weapon button with it".
     const isJet = o.kind === "jet";
     if (!arenaRoot() || (!isJet && !CBZ.airframes)) return null;
-    const grp = isJet ? buildJet({ unarmed: true, name: o.name }) : buildHeliAirframe({ variant: o.variant || "vip", name: o.name || "Helicopter", livery: o.livery, pilot: false });
+    const armed = isJet && o.armed === true;
+    const grp = isJet ? buildJet({ unarmed: !armed, name: o.name }) : buildHeliAirframe({ variant: o.variant || "vip", name: o.name || "Helicopter", livery: o.livery, pilot: false });
     if (!grp) return null;
-    const craft = makeCraft(isJet ? "jet" : "heli", { group: grp, armed: false, name: o.name || (isJet ? "F-35A" : "Helicopter") });
+    const craft = makeCraft(isJet ? "jet" : "heli", { group: grp, armed: armed, name: o.name || (isJet ? "F-35A" : "Helicopter") });
     if (!craft) return null;
     craft.externalGroup = false;          // ours, built here: no airport registry behind it
     craft.rotorParts = null;
@@ -1692,7 +1696,7 @@
     if (!craft || craft.fireCD > 0) return;
     if (craft.armed === false) return;          // commercial aircraft do not grow F-22 weapons when hijacked
     if (craft.ammo <= 0) {
-      aircraftNote("Out of missiles, land on the pad/hangar to resupply.", 1.6, "Flight Ops");
+      aircraftNote(craft.worldParked && craft.kind === "jet" ? "Out of missiles. Stop on the runway stand to rearm." : "Out of missiles, land on the pad/hangar to resupply.", 1.6, "Flight Ops");
       return;
     }
     // an airframe with weapon bays fires when its doors are open
@@ -2321,7 +2325,8 @@
   //             It used to fly through the WASD switches it also writes: full
   //             roll or nothing past a 0.28 dead band, so a slightly crooked
   //             pull held a full bank and the plane went round in circles.
-  //             THR +/- pills hold Space/Ctrl, TURN L/R pills hold Q/E.
+  //             THR +/- pills hold Space/Ctrl. No rudder pills: the bank
+  //             turns it, and on the runway the same push steers the wheel.
   const _wingIn = { pitch: 0, roll: 0, yaw: 0, thr: 0 };
   const _wingEnv = { onGround: false, agl: 0, authority: 1, groundMul: 1 };
   function flyWing(craft, dt) {
@@ -2379,7 +2384,8 @@
   //             turns in place, the planes' rudder keys), Space/Shift up,
   //             Ctrl down
   //   touch     the stick is the cyclic, ANALOG (CBZ.touchStickAxis), never
-  //             the WASD switches it also writes; TURN L/R pills hold Q/E
+  //             the WASD switches it also writes; its sideways push is the
+  //             pedals at the hover and the lateral cyclic at speed (below)
   const STICK_DEAD = 0.12;   // the touch stick's own dead zone (planes share it)
   function stickShape(v) {
     const a = Math.abs(v);
@@ -2398,12 +2404,23 @@
 
     const inp = _heliIn;
     const ax = CBZ.touchStickAxis ? CBZ.touchStickAxis() : null;
-    if (ax) { inp.cycF = stickShape(ax.y); inp.cycR = stickShape(ax.x); }
-    else {
+    inp.pedal = (k["q"] ? 1 : 0) - (k["e"] ? 1 : 0);
+    if (ax) {
+      /* ONE STICK STEERS (touch has no pedal buttons, systems/touch_layout.js
+         DECK_SIZE): at the hover the sideways push is the PEDALS, the nose
+         turns in place to aim; at speed it is the lateral cyclic, which
+         banks into the turn. The hand-over is heliStep's own cruise law
+         (forward speed 4 -> 14 m/s), so the two never fight. */
+      const side = stickShape(ax.x);
+      const vf = craft.vx * Math.sin(craft.heading || 0) + craft.vz * Math.cos(craft.heading || 0);
+      const t = Math.max(0, Math.min(1, (vf - 4) / 10)), cruise = t * t * (3 - 2 * t);
+      inp.cycF = stickShape(ax.y);
+      inp.cycR = side * cruise;
+      inp.pedal = Math.max(-1, Math.min(1, inp.pedal - side * (1 - cruise)));
+    } else {
       inp.cycF = (k["w"] ? 1 : 0) - (k["s"] ? 1 : 0);
       inp.cycR = (k["d"] ? 1 : 0) - (k["a"] ? 1 : 0);
     }
-    inp.pedal = (k["q"] ? 1 : 0) - (k["e"] ? 1 : 0);
     inp.coll = ((k[" "] || k["shift"]) ? 1 : 0) - (k["control"] ? 1 : 0);
 
     // ETL + ground effect feed the collective's authority (rooftop-aware AGL,
@@ -2580,7 +2597,11 @@
     // resupply if you settle back onto the base
     if (RESUPPLY_AT_BASE && craft.ammo < craft.maxAmmo) {
       const t = tower();
-      const base = craft.kind === "jet" ? (t && t.hangar) : (t && t.helipad);
+      // (an island's jet rearms on its island's runway stand, where it was
+      // parked: the Isles have no tower, world/island_vehicles.js parkJet)
+      const IA = craft.worldParked && CBZ.islandVehicles && CBZ.islandVehicles.arenaOf ? CBZ.islandVehicles.arenaOf() : null;
+      const stand = IA && IA.airstrip && IA.airstrip.stand;
+      const base = stand ? stand : craft.kind === "jet" ? (t && t.hangar) : (t && t.helipad);
       if (base) {
         const bx = base.x, bz = base.z;
         if (Math.hypot(craft.pos.x - bx, craft.pos.z - bz) < 8 && craft.speed < 6) {

@@ -264,10 +264,16 @@
    -> { table, s, rects:{id:rect}, score }                                    */
   // Sizes at scale 1 (an iPad). Every control is at least 44 px at the
   // smallest scale the solver will use, Apple's minimum touch target.
+  /* NO RUDDER / PEDAL PAIR (owner 2026-10-29, the Isles F-35 on a phone:
+     "way too many steering buttons, and there's no weapon button"). The
+     stick is the whole of the steering: a plane banks to turn and steers
+     its nosewheel with the same sideways push on the runway (city/
+     aircraftphysics.js planeStep), and a helicopter's sideways push turns
+     its nose at the hover and banks it at speed (city/playeraircraft.js
+     flyHeliV2). The deck is power, the weapon, and the view. */
   const DECK_SIZE = {
     pwrUp: { w: 100, h: 66 }, pwrDn: { w: 100, h: 66 },
-    yawL: { w: 76, h: 60 }, yawR: { w: 76, h: 60 },
-    fire: { w: 70, h: 70 }, bomb: { w: 70, h: 70 },
+    fire: { w: 84, h: 84 }, bomb: { w: 70, h: 70 },
     view: { w: 60, h: 48 }, dial: { w: 118, h: 118 },
   };
   const STORE_CELL = { w: 66, h: 46, gap: 3, pad: 3 };
@@ -283,12 +289,10 @@
   const DECK_TABLES = {
     wide: [
       { id: "pwrUp", x: "R", floor: 1 },
-      { id: "yawR", x: { left: ["pwrUp"] }, floor: 1 },
-      { id: "yawL", x: { left: ["yawR"] }, floor: 1 },
-      { id: "dial", x: { left: ["yawL"] } },
+      { id: "fire", x: { left: ["pwrUp"] }, floor: 1 },
+      { id: "dial", x: { left: ["fire", "pwrUp"] } },
       { id: "pwrDn", x: { flush: ["pwrUp"] } },
-      { id: "fire", x: { over: ["yawR"] } },
-      { id: "bomb", x: { over: ["yawL"] } },
+      { id: "bomb", x: { over: ["fire"] } },
       { id: "view", x: { over: ["dial"] } },
       { id: "stores", x: "R", stack: 1 },
       { id: "exit", x: "R", stack: 1 },
@@ -298,8 +302,6 @@
       { id: "fire", x: { left: ["pwrUp"] }, floor: 1 },
       { id: "pwrDn", x: { flush: ["pwrUp"] } },
       { id: "bomb", x: { over: ["fire"] } },
-      { id: "yawR", x: "R", row: "yaw" },
-      { id: "yawL", x: { left: ["yawR"] }, row: "yaw" },
       { id: "view", x: "R" },
       { id: "dial", x: "L" },
       { id: "stores", x: "R", stack: 1 },

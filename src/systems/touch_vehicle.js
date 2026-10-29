@@ -31,8 +31,9 @@
      HELI     stick = the CYCLIC, analog (CBZ.touchStickAxis): push to fly
               that way; at speed a sideways push banks into a turn, like the
               planes' stick.
-              pedals (curved arrows) = hold → CBZ.keys["q"] / ["e"] (the nose
-                       turns in place)
+              no pedal buttons: at the hover the stick's sideways push turns
+                       the nose in place (the pedals, Q/E on a keyboard); at
+                       speed it banks into the turn
               power up / down (chevrons) = hold → CBZ.keys[" "] / ["control"]
                        (collective; "control" on purpose: it never collides
                        with the on-foot sprint logic that owns "shift")
@@ -42,8 +43,12 @@
               = nose down, back = nose up.
               throttle up / down (chevrons) = hold → Space / Ctrl (throttle,
                        wheel brakes)
-              rudder (curved arrows) = hold → Q / E (and the nosewheel)
-              fire as heli.
+              no rudder buttons: bank turns it, and on the runway the same
+                       sideways push steers the nosewheel (owner 2026-10-29,
+                       the Isles F-35: "way too many steering buttons")
+              fire as heli: the reticle is the big button beside the throttle
+                       (the Isles F-35 is armed now, playeraircraft.js
+                       parkFlyable).
 
      ARMOR    the tank / armoured truck (city/militaryvehicles.js). It sets
               P.driving but NOT P._vehicle — it keeps a module-local record —
@@ -327,8 +332,6 @@
   const ICON = {
     up: svg('<path d="M6 12.5l6-6 6 6"/><path d="M6 18.5l6-6 6 6"/>'),
     down: svg('<path d="M6 5.5l6 6 6-6"/><path d="M6 11.5l6 6 6-6"/>'),
-    yawL: svg('<path d="M18.5 19v-5a6 6 0 0 0-6-6H5.5"/><path d="M9 4.5L5.5 8 9 11.5"/>'),
-    yawR: svg('<path d="M5.5 19v-5a6 6 0 0 1 6-6h7"/><path d="M15 4.5L18.5 8 15 11.5"/>'),
     view: svg('<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.6"/>'),
     // the pickle: a store hanging nose-down from its rack
     bomb: svg('<path d="M4.5 3h15"/><path d="M12 6v1.5"/><path class="fill" d="M12 22c-2.1-1.7-3.3-4.2-3.3-7.2V11h6.6v3.8c0 3-1.2 5.5-3.3 7.2z"/><path d="M8.7 11L7.2 7.5h9.6L15.3 11"/>'),
@@ -425,11 +428,10 @@
     } else if (next === "heli" || next === "wing") {
       // THE FLIGHT DECK. Order here is irrelevant: refreshDeck() places every
       // one of these by the rect touchLayout.flightDeck computes for it.
+      // (no rudder / pedal pair: the stick steers, see touch_layout.js DECK_SIZE)
       const heli = next === "heli";
       html = (heli ? ico("tvUp", "Collective up", ICON.up, "tv-go") + ico("tvDown", "Collective down", ICON.down, "")
                    : ico("tvThrUp", "Throttle up", ICON.up, "tv-go") + ico("tvThrDn", "Throttle down", ICON.down, "")) +
-        ico("tvYawL", heli ? "Pedal left" : "Rudder left", ICON.yawL, "") +
-        ico("tvYawR", heli ? "Pedal right" : "Rudder right", ICON.yawR, "") +
         '<button type="button" id="tvFire" class="tvbtn tv-fire" aria-label="Fire missile" style="display:none">' + FIRE_SVG + '<span id="tvAmmo" class="tvAmmo"></span></button>' +
         ico("tvView", "Cockpit view", ICON.view, "tv-sm") +
         ico("tvBomb", "Release", ICON.bomb, "tv-round tv-bomb") +
@@ -465,8 +467,6 @@
     if (q("tvTilt")) tapBtn(q("tvTilt"), () => { setTilt(!tiltOn); });
     if (q("tvUp")) holdBtn(q("tvUp"), " ");
     if (q("tvDown")) holdBtn(q("tvDown"), "control");
-    if (q("tvYawL")) holdBtn(q("tvYawL"), "q");
-    if (q("tvYawR")) holdBtn(q("tvYawR"), "e");
     // throttle reuses the heli's power grammar (Space up / Ctrl down) so the
     // stick is free to be the pitch+roll joystick (FLIGHT_CONTROLS_V2).
     if (q("tvThrUp")) holdBtn(q("tvThrUp"), " ");
@@ -774,7 +774,7 @@
     const heli = mode === "heli";
     const els = {
       pwrUp: q(heli ? "tvUp" : "tvThrUp"), pwrDn: q(heli ? "tvDown" : "tvThrDn"),
-      yawL: q("tvYawL"), yawR: q("tvYawR"), fire: q("tvFire"), view: q("tvView"),
+      fire: q("tvFire"), view: q("tvView"),
       bomb: q("tvBomb"), stores: q("tvStores"), dial: dial,
     };
     // THE BOMBER IS THE CONTEXT, not the aircraft: only the B-2 has a bay
@@ -783,7 +783,7 @@
     const pay = CBZ.strategicPayloadReadout ? CBZ.strategicPayloadReadout() : null;
     const stores = (pay && pay.b2 && CBZ.strategicStores) ? CBZ.strategicStores() : null;
     const present = {
-      pwrUp: 1, pwrDn: 1, yawL: 1, yawR: 1, dial: 1, exit: 1,
+      pwrUp: 1, pwrDn: 1, dial: 1, exit: 1,
       fire: !!(craft && craft.armed !== false),
       view: !!CBZ.cockpitToggleView,
       bomb: !!(stores && CBZ.strategicBombHold),
@@ -1060,8 +1060,8 @@
     V("hangar-buy", { ctx: "foot", key: "B", skip: "playeraircraft's [B] at a hangar only ever prints the steal-it notice; the F-22 is not buyable and a pill for a refusal is a lie" });
     V("bomb-camera", { ctx: "b2", key: "C hold", skip: "a cinematic, not a control; [C] keeps it" });
     V("air-homing", { ctx: "air", key: "H", skip: "homing is the default; the dumb-fire toggle stays on [H]" });
-    V("heli-pedals", { ctx: "heli", key: "Q/E", hook: null }); W("heli-pedals", "#tvYawL/#tvYawR");
-    V("wing-rudder", { ctx: "wing", key: "Q/E", hook: null }); W("wing-rudder", "#tvYawL/#tvYawR");
+    V("heli-pedals", { ctx: "heli", key: "Q/E", skip: "the stick's sideways push turns the nose at the hover (playeraircraft.js flyHeliV2), so a pedal pair would be a second steering axis on the glass" });
+    V("wing-rudder", { ctx: "wing", key: "Q/E", skip: "bank turns the plane and the same sideways push steers the nosewheel on the runway (aircraftphysics.js planeStep), so a rudder pair would be a second steering axis on the glass" });
     V("armor-turret", { ctx: "armor", key: "mouse", skip: "the turret already tracks cam.yaw, and on touch cam.yaw IS the look drag, aiming the gun is aiming the camera, so a control would be a duplicate axis" });
   }
 })();

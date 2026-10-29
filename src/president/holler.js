@@ -72,6 +72,12 @@
         break;
       case "peace": P(press(S, null), cname(S, e.c) + " and " + cname(S, e.t) + " stop fighting."); if (mine || aboutMe) P(citizen(s), "Thank God."); break;
       case "capitulated": P(press(S, null), cname(S, e.c) + " surrenders to " + cname(S, e.to) + "."); break;
+      case "annexed":
+        P(press(S, null), cname(S, e.c) + " annexes " + cname(S, e.t) + ".");
+        if (mine) P(citizen(s), pick(["One flag over all of it now.", "How many more?", "My cousin lives there. He's one of us now, I guess."], s));
+        break;
+      case "puppet": P(press(S, null), cname(S, e.t) + " now takes its orders from " + cname(S, e.c) + "."); break;
+      case "free": P(press(S, null), cname(S, e.c) + " is its own country again."); break;
       case "tariff":
         if (e.v > 0) P(press(S, e.c), cname(S, e.c) + " puts " + Math.round(e.v * 100) + "% on " + cname(S, e.t) + " " + goodName(e.good) + ".");
         else P(press(S, e.c), cname(S, e.c) + " lifts its " + goodName(e.good) + " tariff on " + cname(S, e.t) + ".");
@@ -223,6 +229,8 @@
       case "bailoutOffer": return "We can cover $" + d.amt + " billion." + (d.strings === "bases" ? " You host our bases." : d.strings === "alliance" ? " You stand with us." : d.strings === "trade" ? " Your markets open to us." : "");
       case "bailoutAsk": return "The markets have shut us out. We need $" + d.amt + " billion.";
       case "ultimatum": return "Lift what you put on us. You have two weeks.";
+      case "surrender": return "We surrender. The country is yours.";
+      case "demand": return "It is over. Surrender.";
       case "coup": return "It's over, sir. Sign it and you walk out of here.";
       case "traitor": return "Sign the resignation, sir. Now.";
       case "bill": return d.name + ". It passed " + d.yes + " to " + d.no + ".";

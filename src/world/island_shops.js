@@ -338,12 +338,24 @@
     // the register on the counter is a real balance (city/islandmoney.js IV.till)
     if (IV.till) { try { IV.till(b, { lx: cx - cw / 2 + 0.5, ly: top, lz: cz - 0.12, clerk: post, draw: false }); } catch (e) {} }
     // the clerk the shop systems ask for (theft eyes, the ladder, a thank-you)
-    Object.defineProperty(L, "vendor", { configurable: true, get: function () { return post ? post.body() : null; } });
+    L._vendorPost = post;
+    Object.defineProperty(L, "vendor", { configurable: true, get: vendorOfPost });
     // the counter, the clerk's side and the customer's stay clear of the dressing
     // (behind it the back wall is the trade's: its shelves either side of him)
     if (IV.claim) IV.claim(b, 0, { x0: cx - cw / 2 - 0.35, x1: cx + cw / 2 + 0.35, z0: cz - cd / 2 - 1.05, z1: cz + cd / 2 + 0.05 });
     return { local: { x: cx, z: cz, w: cw, d: cd }, top: top, post: post };
   }
+
+  /* THE CLERK, ASKED FOR (lot.building.vendor). One getter for every shop,
+     reading the post off the record it is asked on, never a closure per
+     shop: an accessor lives in the object's hidden class, and V8 shares one
+     descriptor array along a shape's transitions, so a per-shop getter
+     closed over that shop's post (its body, its building, its island's
+     root) was kept by every LATER lot of the same shape, on any island:
+     the whole spawn island, ~235 MB, stayed alive after it was dropped
+     (memscope --isles --travel --trace). */
+  function vendorOfPost() { const p = this._vendorPost; return p ? p.body() : null; }
+  function vendorOfLot() { const L = this._vendorLot; return L ? L.vendor : null; }
 
   /* ---- DRESS THE REST (world/island_fitkit.js) ---------------------------- */
   // (the fit-outs are generators on the island build's slice clock,
@@ -394,7 +406,8 @@
           stock: T.stock || null,
         },
       };
-      Object.defineProperty(shim.building, "vendor", { get: function () { return L.vendor; } });
+      shim.building._vendorLot = L;
+      Object.defineProperty(shim.building, "vendor", { get: vendorOfLot });
       // the clerk's post and his way round the counter to the street door (the
       // store's ledger, CBZ.shopFloor.till: he comes out when you head off
       // with something you have not paid for)
@@ -446,7 +459,8 @@
         counter: { x: kc.x, z: kc.z, w: K.local.w, d: K.local.d, top: b.gy + K.top, tx: tx, tz: tz, inx: inx, inz: inz },
       },
     };
-    Object.defineProperty(shim.building, "vendor", { get: function () { return L.vendor; } });
+    shim.building._vendorLot = L;
+    Object.defineProperty(shim.building, "vendor", { get: vendorOfLot });
     const cs = {
       name: b.name || null, cx: c.x, cz: c.z, inx: inx, inz: inz, tx: tx, tz: tz,
       halfIn: (R.z1 - R.z0) / 2 + WT, halfTan: (R.x1 - R.x0) / 2 + WT, wt: WT,

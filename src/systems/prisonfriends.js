@@ -255,22 +255,22 @@
      times" had nothing behind it. Wrapping rather than editing economy.js:
      city/social.js wraps the city's action verbs the same way, and it means
      this whole feature is one file that can be deleted. */
+  // (re-asked every tick until econ exists: CBZ.wrapOnce keeps that to ONE
+  // wrap whoever else wraps the same verb; see config.js)
   function wrapTrade() {
-    const econ = CBZ.econ;
-    if (!econ || typeof econ.trade !== "function" || econ.trade._pfWrapped) return;
-    const inner = econ.trade;
-    function traded(actor) {
-      const res = inner.apply(this, arguments);
-      // Only a sale that actually happened. A refusal ("that's 14, you have 6")
-      // comes back ok:false and must not count toward being a regular.
-      if (res && res.ok && actor) {
-        actor.pfTrades = (actor.pfTrades || 0) + 1;
-        if (actor.pfTrades === REGULARS_NEEDED) actor.pfPitchT = 0;   // pitch it next time you're close
-      }
-      return res;
-    }
-    traded._pfWrapped = true;
-    econ.trade = traded;
+    if (!CBZ.econ) return;
+    CBZ.wrapOnce(CBZ.econ, "trade", "prisonfriends", function (inner) {
+      return function traded(actor) {
+        const res = inner.apply(this, arguments);
+        // Only a sale that actually happened. A refusal ("that's 14, you have 6")
+        // comes back ok:false and must not count toward being a regular.
+        if (res && res.ok && actor) {
+          actor.pfTrades = (actor.pfTrades || 0) + 1;
+          if (actor.pfTrades === REGULARS_NEEDED) actor.pfPitchT = 0;   // pitch it next time you're close
+        }
+        return res;
+      };
+    });
   }
 
   /* A RESCUE. CBZ.killstreakOnDown(actor, how) is called by every path that
@@ -281,15 +281,17 @@
      Two ways to have been in it: he is the downed man's foe, or the downed man
      was his. Both are checked, because ai.js's startFight only guarantees the
      link in one direction when the second party flees instead of squaring up. */
+  /* entities/ai.js wraps the same function from its own tick: with a flag on
+     each module's own wrapper the two re-wrapped each other every frame (two
+     closures a frame, every knockdown walking the whole chain). CBZ.wrapOnce
+     carries both tags on the outermost function, so each wraps once. */
   function wrapDown() {
-    if (!CBZ.killstreakOnDown || CBZ.killstreakOnDown._pfWrapped) return;
-    const inner = CBZ.killstreakOnDown;
-    function onDown(actor, how) {
-      try { creditRescue(actor); } catch (e) { /* never let a bookkeeping bug eat a takedown */ }
-      return inner.apply(this, arguments);
-    }
-    onDown._pfWrapped = true;
-    CBZ.killstreakOnDown = onDown;
+    CBZ.wrapOnce(CBZ, "killstreakOnDown", "prisonfriends", function (inner) {
+      return function onDown(actor, how) {
+        try { creditRescue(actor); } catch (e) { /* never let a bookkeeping bug eat a takedown */ }
+        return inner.apply(this, arguments);
+      };
+    });
   }
 
   function creditRescue(downed) {

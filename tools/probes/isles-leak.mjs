@@ -37,7 +37,7 @@ const SNAP = `
   out.updaters = CBZ.updaters.length; out.always = CBZ.always.length;
   out.colliders = (CBZ.colliders || []).length; out.platforms = (CBZ.platforms || []).length;
   out.los = (CBZ.losBlockers || []).length; out.camCol = (CBZ.camColliders || []).length;
-  var n = 0; CBZ.scene.traverse(function () { n++; }); out.sceneObjs = n;
+  var n = 0, sg = new Set(); CBZ.scene.traverse(function (o) { n++; if (o.geometry) sg.add(o.geometry); }); out.sceneObjs = n; out.sceneGeo = sg.size;
   var alive = function (L) { var k = 0; (L || []).forEach(function (a) { if (a && !a.dead && !a._parked) k++; }); return k; };
   out.peds = (CBZ.cityPeds || []).length; out.pedsAlive = alive(CBZ.cityPeds);
   out.cars = (CBZ.cityCars || []).length; out.cops = (CBZ.cityCops || []).length;
@@ -127,7 +127,7 @@ const TRAVEL = (id, other) => `
     var o = s.isles.find(function (r) { return r.id === ${JSON.stringify(other)}; });
     if (s.active === ${JSON.stringify(id)} && o && o.state === "far" && (!s.chores || !s.chores.length)) return n;
   }
-  return JSON.stringify({ game: CBZ.game.state, mode: CBZ.game.mode, st: AR.state() });
+  return JSON.stringify({ game: CBZ.game.state, why: { gl: CBZ.glContextAudit ? CBZ.glContextAudit() : null, vis: document.visibilityState, pz: window.__pz || null }, mode: CBZ.game.mode, st: AR.state() });
 `;
 
 async function listeners(t) {
@@ -241,11 +241,13 @@ export default async function (t) {
     if (s && s.__err) throw new Error("snapshot: " + s.__err);
     await t.fn(GPU_SEE, 300000);
     s.listeners = await listeners(t);
-    t.log(label, JSON.stringify({ geo: s.gpuGeo, tex: s.gpuTex, prog: s.programs, upd: s.updaters, alw: s.always, col: s.colliders, plat: s.platforms,
+    t.log(label, JSON.stringify({ geo: s.gpuGeo, sgeo: s.sceneGeo, tex: s.gpuTex, prog: s.programs, upd: s.updaters, alw: s.always, col: s.colliders, plat: s.platforms,
       los: s.los, cam: s.camCol, objs: s.sceneObjs, lis: s.listeners, peds: s.peds, cars: s.cars, cops: s.cops, venues: s.venues, safes: s.safes, vaults: s.vaults,
       full: s.state.full, active: s.state.active, look: s.look ? [s.look.resident, s.look.residentMB, s.look.idleResidentMB, s.look.evicted, s.look.revived] : null }));
     return s;
   };
+  // (who paused it, if anything does: the run cannot settle anywhere then)
+  await t.fn(`if (!window.__pz) { window.__pz = []; var s0 = CBZ.setState; CBZ.setState = function (s) { if (s === "paused" && __pz.length < 3) __pz.push(String(new Error().stack).split("\\n").slice(2, 8).join(" < ").replace(/https?:[^ ]*?\\/src\\//g, "")); return s0.apply(this, arguments); }; } return 1;`);
   await t.fn(GPU_HOOK);
   await t.fn(FAR_WATCH);
   await t.step(240);
@@ -294,7 +296,14 @@ export default async function (t) {
     if (why.pedTex) notes.push(`ped look caches +${why.pedTex} textures not worn by anyone in the scene` + (lk ? ` (CBZ.lookTex: ${lk.resident} resident, ${lk.idleResidentMB} of ${lk.budgetMB} MB unworn, ${lk.evicted} put away, ${lk.revived} drawn again after)` : ""));
     if (lk && (last.gpuTex - base.gpuTex) / R > 1.5) leaks.push(`gpuTex ${base.gpuTex} -> ${last.gpuTex} (> 1.5 a round with the look budget on)`);
   }
-  if ((last.gpuGeo - base.gpuGeo) / R > 60) leaks.push(`gpuGeo ${base.gpuGeo} -> ${last.gpuGeo} (> 60 a round)`);
+  /* (geometries the scene holds, not three's uploaded count: an arriving
+     island uploads only what it draws, core/fxwarm.js uploadSteps, so how
+     many have gone up by snapshot time is which rooms the camera has seen.
+     What is uploaded and held by nothing is GPU_WHY's count above.) */
+  // (the crowd's outfits and the parked cars come and go by the hour: growth
+  // in EVERY round past the baseline is a leak, a wander is not)
+  { let grew = true; for (let i = 2; i < snaps.length; i++) if (!(snaps[i].sceneGeo > snaps[i - 1].sceneGeo + 30)) { grew = false; break; }
+    if (grew) leaks.push(`sceneGeo grew every round: ${snaps.map((s) => s.sceneGeo).join(" -> ")}`); }
   if ((last.sceneObjs - base.sceneObjs) / R > 80) leaks.push(`sceneObjs ${base.sceneObjs} -> ${last.sceneObjs} (> 80 a round)`);
   // people and cars come and go with the hour: growth beyond a crowd's worth is a leak
   for (const k of ["peds", "cars", "cops"]) if (last[k] > base[k] * 1.25 + 8) leaks.push(`${k} ${base[k]} -> ${last[k]}`);

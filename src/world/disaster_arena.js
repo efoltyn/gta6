@@ -6908,6 +6908,23 @@
       CBZ.propUnregister(islBeds.map(function (r) { return r.rec; }));
       for (const r of islBeds) r.rec = null;
     }
+    /* AND EVERY BED AND SEAT ITS FIT-OUTS STOOD. A venue's furniture (a
+       flat's bed, a bar's stools: city/furniture.js, world/roombuild.js)
+       registers itself as it is placed, outside the plan's list above. The
+       fit-out census (world/island_venue.js) does take those records out of
+       CBZ.propBeds / propSeats with the island, but only out of the arrays:
+       their coordinate keys stayed in city/propuse.js's dedupe sets, so the
+       island coming back found every one of its flat beds "already
+       registered" and stood none, and a body lying in one was never stood
+       up. propUnregister is the registry's own way out (keys, occupants).
+       Islands stand kilometres apart: what stands on this one's ground is
+       this one's. */
+    const O0 = job.opts || {};
+    if (O0.world === "archipelago" && CBZ.propUnregister && Number.isFinite(O0.cx) && Number.isFinite(O0.cz)) {
+      const reach = (O0.R || 240) + 400, cx0 = O0.cx, cz0 = O0.cz;
+      const onIt = function (r) { return !!r && Math.abs(r.x - cx0) < reach && Math.abs(r.z - cz0) < reach; };
+      CBZ.propUnregister((CBZ.propBeds || []).filter(onIt).concat((CBZ.propSeats || []).filter(onIt)));
+    }
     if (A) {
       for (const e of A.elevators || []) if (e.rig && e.rig.release) { try { e.rig.release(); } catch (err) {} }
       if (CBZ.stairs && CBZ.stairs.removeOwner) for (const b of A.fragile || []) { try { CBZ.stairs.removeOwner(b.group); } catch (err) {} yield 0; }

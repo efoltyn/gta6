@@ -685,8 +685,19 @@
      at the player's position instead (CBZ.freedStaticArrays says so). */
   function dropArray() { this.array = null; CBZ.freedStaticArrays = true; }
   const KEEP = { position: 1 };
-  CBZ.freeStaticArrays = function (root) {
+  /* opts.merged: a root whose merged meshes nothing far-culls (the prison:
+     core/farcull.js is city-only, so no batch there is ever evicted and
+     re-uploaded from its arrays). Only its merged meshes are touched (batch
+     -inert / -wall / -tex; never a room recipe), and each keeps one copy,
+     the GPU's, exactly like the streamed city's. The prison's merged shell
+     was ~44 MB of arrays held in JS next to their GPU copies, and every
+     batch the camera met for the first time (most of the block is out of
+     view at the start) added its GPU copy on top: the climb a phone dies of
+     mid-run. Called by core/batch.js ensurePrisonBatched. */
+  const MERGED_NAMES = { "batch-inert": 1, "batch-wall": 1, "batch-tex": 1 };
+  CBZ.freeStaticArrays = function (root, opts) {
     if (!root || (CBZ.CONFIG && CBZ.CONFIG.FREE_STATIC_ARRAYS === false)) return 0;
+    const allMerged = !!(opts && opts.merged);
     let n = 0;
     root.traverse(function (o) {
       if (!o.isMesh || o.isInstancedMesh || !o.geometry) return;
@@ -697,8 +708,10 @@
       // anyway, so one copy wins: normals + colours go (the wall / group hide
       // writes position only), and the mesh is no longer evictable.
       const g = o.geometry;
-      const merged = g._evictable && CFG.CITY_STREAM === true;
-      if (!(u.terrain || u.worldSurface || merged)) return;
+      const merged = allMerged
+        ? !!(MERGED_NAMES[o.name] && !o._cbzRoom && !o._cbzInterior && !g._cbzNoDraw)
+        : !!(g._evictable && CFG.CITY_STREAM === true);
+      if (allMerged ? !merged : !(u.terrain || u.worldSurface || merged)) return;
       // (still evictable: core/farcull.js reads a GPU-only merged buffer back,
       // packed, before it leaves the GPU; the GPU used to keep everything a
       // drive had seen: +220 MB of GL after a tour, memscope)

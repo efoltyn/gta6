@@ -163,16 +163,21 @@
     car.collider = null;
     const d = car.dims || {};
     car.roofH = +d.height || 1.45;
-    Object.defineProperty(car, "flung", {
-      configurable: true, enumerable: true,
-      get: function () { return !!car._disaster; },
-      set: function (v) {
-        const D = CBZ.vehicleDisaster;
-        if (!D) return;
-        if (v) D.take(car, cause("wrecked by the disaster")); else D.release(car);
-      },
-    });
+    Object.defineProperty(car, "flung", FLUNG);
   }
+  /* (one accessor for every island car, reading the car it is asked on: an
+     accessor lives in the hidden class, which later objects of the shape
+     share, so a closure per car kept that car, and what it stood on, alive
+     after its island was dropped; see world/island_shops.js vendorOfPost) */
+  const FLUNG = {
+    configurable: true, enumerable: true,
+    get: function () { return !!this._disaster; },
+    set: function (v) {
+      const D = CBZ.vehicleDisaster;
+      if (!D) return;
+      if (v) D.take(this, cause("wrecked by the disaster")); else D.release(this);
+    },
+  };
   function standCar(spot) {
     if (!CBZ.cityAddParkedCar) return null;
     // (a dealer's spot names its own model: world/island_dealers.js, island_lots.js)
@@ -945,8 +950,10 @@
     const st = A.airstrip && A.airstrip.stand;
     if (!st || !CBZ.airParkFlyable) return null;
     // the F-35A (playeraircraft.js buildJet: the units/vehicles airframe),
-    // unarmed, its bays shut; null while its file is still loading
-    return CBZ.airParkFlyable({ kind: "jet", x: st.x, y: A.airstrip.deck, z: st.z, heading: st.heading, name: "F-35A" });
+    // ARMED: its AMRAAMs in the bays, fired like the base jet's ([LMB], the
+    // touch reticle; owner 2026-10-29: "there's no weapon button with it");
+    // null while its file is still loading
+    return CBZ.airParkFlyable({ kind: "jet", x: st.x, y: A.airstrip.deck, z: st.z, heading: st.heading, name: "F-35A", armed: true });
   }
   function setup() {
     const A = CBZ.surv.arena;

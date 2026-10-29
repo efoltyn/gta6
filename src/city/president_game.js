@@ -9,7 +9,7 @@
 
    So games/president.html is now only the door: you pick a real country
    there, and it opens THIS page (index.html) with
-       ?slice=estate&president=<country>&pseed=<n>
+       ?slice=estate&president=<country>&scen=<scenario>&pseed=<n>
    which boots Gang City's Executive Mansion slice (core/slice.js "estate":
    the West Wing, the Oval Office, the residence, the grounds, the gate and
    the street outside, jail-sized) and starts the President origin by itself.
@@ -48,6 +48,8 @@
   const g = CBZ.game || (CBZ.game = {});
   const Q = new URLSearchParams(location.search);
   const KEY = (Q.get("president") || "").toLowerCase();
+  // which world: the whole earth, a region, or the fifty states (president/scenarios.js)
+  const SCEN = (Q.get("scen") || "world").toLowerCase();
   if (!KEY) { CBZ.presGame = { on: false }; return; }
 
   // ---- this game, not Gang City's presidency, decides when you fall
@@ -92,7 +94,8 @@
       });
     }, Promise.resolve());
   }
-  const FILES = ["president/earth.js", "president/nations.js", "president/world.js", "president/ai.js", "president/holler.js", "president/papers.js"];
+  const FILES = ["president/earth.js", "president/nations.js", "president/states.js", "president/scenarios.js", "president/world.js", "president/ai.js",
+    "president/holler.js", "president/mapdraw.js", "president/papers.js"];
   if (ROOM) FILES.push("net/rooms.js", "president/net.js");
   const ready = loadSeq(FILES).then(function () { A.phase = "booting"; });
 
@@ -114,7 +117,7 @@
   // ---- the start: once you hold the seat in the Mansion
   function begin(W0) {
     const NA = CBZ.presNations;
-    S = W0 || PW().create(PSEED);
+    S = W0 || PW().create(PSEED, { scen: SCEN });
     ME = S.c.findIndex(function (x) { return x.key === KEY; });
     if (ME < 0) ME = 0;
     UI.me = ME;
@@ -205,6 +208,7 @@
       yields: ["I'll tell the markets.", "Then I'll find the money elsewhere."], rates: ["Thank you, sir.", "Noted, sir."], callToArms: ["We'll stand with them.", "They won't forget this."],
       warning: ["Done.", "I hope you're right, sir."], polls: ["It's done.", "Then we campaign."], tariffed: ["They'll feel it.", "Understood."],
       bailoutAsk: ["Thank you. We won't forget it.", "I understand."], bill: ["", ""],
+      surrender: ["Then it is yours.", "We keep our flag, then."], demand: ["", "Then we fight."],
     };
     const r = R[m.kind];
     return r ? (yes ? r[0] : r[1]) || null : null;
@@ -330,7 +334,7 @@
   }
 
   // ---- the end: when you are out, or the last one standing
-  const LINE = { won: "The last one standing.", election: "Voted out.", coup: "Overthrown.", assassinated: "Assassinated.", revolution: "Driven out by the street.",
+  const LINE = { won: "It is all yours.", election: "Voted out.", coup: "Overthrown.", assassinated: "Assassinated.", revolution: "Driven out by the street.",
     capitulated: "Your country surrendered.", resigned: "You signed it.", annexed: "Your country is gone.", shot: "Shot dead.", exile: "You got out. The country did not." };
   function end(why) {
     if (A.ended) return;
@@ -348,7 +352,9 @@
     box.innerHTML = "<div style='max-width:520px;width:100%;background:#f2ede0;color:#1c1d22;border-radius:6px;padding:26px 24px;font-family:Georgia,serif;box-shadow:0 30px 80px rgba(0,0,0,.6)'>" +
       "<h2 style='margin:0 0 6px;font:700 34px Georgia,serif'></h2><p style='margin:0 0 16px;opacity:.7'></p>" +
       "<a href='games/president.html' style='display:inline-block;padding:12px 22px;border-radius:999px;background:#c8a24a;color:#16120a;font:700 16px system-ui,sans-serif;text-decoration:none'>Again</a></div>";
-    box.querySelector("h2").textContent = LINE[why] || "Out of office.";
+    let head = LINE[why] || "Out of office.";
+    if (why === "won" && S) { const sc = PW().scen(S); head = sc.id === "world" ? "The world is yours." : sc.name + " is yours."; }
+    box.querySelector("h2").textContent = head;
     box.querySelector("p").textContent = (me ? me.name + ". " : "") + (yrs ? yrs + (yrs === 1 ? " year, " : " years, ") : "") + dd + " days in office.";
     document.body.appendChild(box);
     try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) {}
@@ -369,7 +375,7 @@
         A.net.on("need", function () { if (S) A.net.snapshot(S, { seats: A.seats }); });
         A.net.on("act", function (d) { const st = A.seats[d.from]; if (!st || !d.a) return; d.a.c = st.c; A.pending.push(d.a); });
       } else {
-        A.net.on("open", function () { const NA = CBZ.presNations; A.net.seat(NA.list.findIndex(function (n) { return n.id === KEY; }), name); A.net.need(); });
+        A.net.on("open", function () { A.net.seat(CBZ.presScenarios.members(SCEN).findIndex(function (n) { return n.id === KEY; }), name); A.net.need(); });
         A.net.on("snap", function (d) { if (!A.started) { if (seated()) begin(d.S); else A.snapWaiting = d.S; return; } S = d.S; A.ver++; });
         A.net.on("tick", function (d) {
           if (!S) return;
@@ -435,12 +441,12 @@
   });
 
   CBZ.presGame = {
-    on: true, key: KEY,
+    on: true, key: KEY, scen: SCEN,
     state: function () { return S; }, me: function () { return ME; }, ui: UI,
     submit: submit, news: news, end: end,
     audit: function () {
       const me = c();
-      return { phase: A.phase, started: A.started, ended: A.ended, why: A.why, day: S ? S.day : null, date: S ? PW().date(S.day).text : null,
+      return { phase: A.phase, started: A.started, ended: A.ended, why: A.why, scen: S ? S.scen : SCEN, day: S ? S.day : null, date: S ? PW().date(S.day).text : null,
         country: me ? me.name : null, leader: me ? me.leader.name : null, matters: me ? me.matters.map(function (m) { return m.kind; }) : [],
         delivered: Object.keys(A.seenM).length, net: A.net ? A.net.role : null, book: CBZ.presBook ? CBZ.presBook.audit() : null };
     },
