@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 442
+     Natural Disaster Survival, standing alone: index.html minus the 441
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -494,6 +494,7 @@ document.body.appendChild(b);}}catch(e){}})();
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
 <script src="src/world/treefoot.js?v=sight1011"></script>
 <script src="src/core/prio.js?v=arch2"></script>
+<script src="src/core/lightpin.js?v=w09290242x"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
@@ -963,7 +964,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=island1014"></script>
-<script src="src/systems/debris.js?v=rubbleappend1022"></script>
+<script src="src/systems/debris.js?v=memleak1029"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -1026,7 +1027,7 @@ document.body.appendChild(b);}}catch(e){}})();
      mains, liquefaction, cars, the crowd, what falls on whom), drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
-<script src="src/systems/quake.js?v=seis1014"></script>
+<script src="src/systems/quake.js?v=memleak1029"></script>
 <!-- ==== PER-DISASTER MODULE SEAM ==========================================
      One line per disaster in the survival roster, each owned by exactly that
      disaster and nobody else. A disaster whose behaviour outgrows its entry in
@@ -1069,7 +1070,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=stage1026"></script>
+<script src="src/systems/disasters.js?v=memleak1029b"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=hands1022"></script>
@@ -1360,7 +1361,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carlamps.js?v=night1022"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/carparts.js?v=mtrunk1trunk1"></script>
-<script src="src/city/carbody.js?v=mtrunk1trunk1"></script>
+<script src="src/city/carbody.js?v=memleak1029"></script>
 <script src="src/city/carwheels.js?v=cars2"></script>
 <!-- city/carseats.js: the ONE seat model (layouts per body, doors, the
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
@@ -1378,7 +1379,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=mrg10200048"></script>
-<script src="src/city/vehicles.js?v=stall1022"></script>
+<script src="src/city/vehicles.js?v=memleak1029"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playeraircraft.js?v=islesmem1029"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1495,7 +1496,7 @@ document.body.appendChild(b);}}catch(e){}})();
      skin on buildings that are still standing. Reverts: ?cfg_COLLAPSE_V2=0
      (callers fall back to their snap) · ?cfg_COLLAPSE_FRAGMENTS=0 (chunks
      turn to dust instead of pieces) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
-<script src="src/city/collapse.js?v=livecut1022"></script>
+<script src="src/city/collapse.js?v=memleak1029b"></script>
 <script src="src/systems/strike.js?v=strike1013m"></script>
 <script src="src/city/structural.js?v=jetstrike1022"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,

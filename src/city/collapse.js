@@ -2835,7 +2835,7 @@
       const lx = R[0] * dx + R[3] * dy + R[6] * dz, ly = R[1] * dx + R[4] * dy + R[7] * dz, lz = R[2] * dx + R[5] * dy + R[8] * dz;
       if (lx < O.lo.x || lx > O.hi.x || lz < O.lo.z || lz > O.hi.z || ly < O.lo.y || ly > O.hi.y + TOL) continue;
       const top = y + (O.hi.y - ly) / O.upY;
-      if (top <= y + TOL && top > _sup.h) { _sup.h = top; _sup.src = 4; _sup.ch = null; _sup.on = O; }
+      if (top <= y + TOL && top > _sup.h) { _sup.h = top; _sup.src = 4; _sup.ch = null; }
     }
     const cols = B.cols;
     if (cols) for (let i = 0; i < cols.length; i++) {
@@ -2865,7 +2865,13 @@
   const _q = HAS3 ? new THREE.Quaternion() : null, _ax = HAS3 ? new THREE.Vector3() : null;
   const _R = new Float64Array(9), _Iw = new Float64Array(9);
   const CP = new Float64Array(16 * 4), CS = new Int8Array(16);
-  const CC = new Array(16);
+  /* a side contact's normal code (nx * 10 + nz); 0 for the rest. It used to
+     hold the CHUNK of every other contact too, which nothing read: the last
+     body's last contacts kept their chunk -> its structure -> the building's
+     whole cut (bands, chunk triangles, read-back copies) alive after
+     dispose() and after the match reset, ~35 MB on the island
+     (tools/probes/disaster-leak.mjs). Numbers only now. */
+  const CC = new Int16Array(16);
   function stepBody(B, h) {
     const p = B.pos, v = B.v, w = B.w, q = B.q, S = B.S;
     B.t += h;
@@ -2922,7 +2928,7 @@
       if (d > -0.02 && nC < 16) {
         const vy = v.y + (w.z * rx - w.x * rz);
         CP[nC * 4] = rx; CP[nC * 4 + 1] = ry; CP[nC * 4 + 2] = rz; CP[nC * 4 + 3] = d;
-        CS[nC] = sp.src === 1 ? 1 : 0; CC[nC] = sp.ch;
+        CS[nC] = sp.src === 1 ? 1 : 0; CC[nC] = 0;
         if (sp.src === 4) B.onBody = true;
         if (sp.src === 1 && sp.ch) {
           if (-vy > 1.6) crushSet.push(sp.ch);
@@ -3703,6 +3709,11 @@
       if (one && B.t > 30) { bake(B); continue; }
       if (B.pos.y < -120) removeBody(B, false);
     }
+    // the snapshot lets go: stepBodies returns at once once nothing is
+    // falling, so whatever it still listed (bodies -> their structures -> the
+    // building's cut) stayed alive after the bake, the dispose and the match
+    // reset (tools/probes/disaster-leak.mjs: ~40 MB on the island)
+    _step.length = 0;
   }
 
   /* ============================================================
@@ -3940,8 +3951,13 @@
     return true;
   };
   const finals = new WeakMap();           // group -> the last summary of a structure that is gone
+  /* The support query's scratch (_sup, _col) keeps the last chunk it touched
+     between calls; a chunk holds its structure, so one stale reference held
+     a whole disposed building's cut alive. They let go with the structure. */
+  function dropScratch() { _sup.ch = null; _sup.lch = null; _col.c = null; }
   function dispose(S, forRebuild) {
     if (S.disposed) return;
+    dropScratch();
     try { finals.set(S.grp, summary(S)); } catch (e) {}
     // the boxes still owed to chunks that left come out now (none may be
     // left standing in the world as an invisible wall), and a body still
@@ -4506,6 +4522,7 @@
     if (CBZ.debris) owners.forEach(function (k) { try { CBZ.debris.clear(k); } catch (e) {} });
     owners.clear();
     skins.clear();
+    dropScratch(); _step.length = 0;
   };
 
   /* THE RATCHET (Block Law rule 5). `hardcoded` is the number of registered

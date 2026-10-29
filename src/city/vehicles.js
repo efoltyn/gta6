@@ -3035,6 +3035,11 @@
     if (car._heldBy && CBZ.vehicleHoldRelease) { try { CBZ.vehicleHoldRelease(car); } catch (e) {} }
     const i = CBZ.cityCars.indexOf(car);
     if (i >= 0) CBZ.cityCars.splice(i, 1);
+    // a scrapped wreck leaves the husk list too: it held the record (and the
+    // disposed rig's geometry arrays) until ten newer wrecks pushed it out,
+    // across every new disaster match (tools/probes/disaster-leak.mjs)
+    const hi = husks.indexOf(car);
+    if (hi >= 0) husks.splice(hi, 1);
     car.dead = true;
     if (car.group) {
       if (car.group.parent) car.group.parent.remove(car.group);

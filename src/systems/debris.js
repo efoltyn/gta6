@@ -1525,7 +1525,6 @@
         const k = hk(rec.hfs[i], rec.hfs[i + 1]);
         if (seen.has(k)) continue; seen.add(k);
         let L = stampIdx.get(k); if (!L) { L = []; stampIdx.set(k, L); }
-        if (L.length > 24) { let w = 0; for (let j = 0; j < L.length; j++) if (recs.get(L[j].id) === L[j]) L[w++] = L[j]; L.length = w; }
         L.push(rec);
       }
     }
@@ -1555,6 +1554,34 @@
   const stampIdx = new Map();           // height-field cell -> the settled pieces that stamped it
   let recIt = null, revivedN = 0, dissolvedN = 0;
   const disturbed = [];                 // recs to check before the round (their support just changed)
+  /* A PIECE THAT LEAVES THE RUBBLE LEAVES THE INDEX TOO (2026-10-29).
+     stampIdx is a lookup into `recs`, never an owner. It used to be written
+     on every freeze and pruned only when one cell's list passed 24 entries,
+     so a piece that was evicted, cleared, revived, dissolved or carted off
+     stayed in the lists of every cell it ever stamped, and through rec.parts
+     / rec.b kept its world-space vertex copies, its body, its retired mesh's
+     geometry arrays and the buckets alive. On a phone that was the climb:
+     every quake or eruption's rubble stayed in the JS heap after it was gone
+     from the picture, and a new match kept all of it (tools/probes/
+     disaster-leak.mjs: +25 MB a match). Every removal from `recs` goes
+     through here now. */
+  function unstamp(rec) {
+    const a = rec.hfs;
+    for (let i = 0; i < a.length; i += 3) {
+      const k = hk(a[i], a[i + 1]), L = stampIdx.get(k);
+      if (!L) continue;
+      const j = L.indexOf(rec);
+      if (j < 0) continue;
+      L[j] = L[L.length - 1]; L.pop();
+      if (!L.length) stampIdx.delete(k);
+    }
+  }
+  function forgetRec(id) {
+    const rec = recs.get(id);
+    if (!rec) return;
+    recs.delete(id);
+    unstamp(rec);
+  }
   /* disturb(box): something under this box just went (a storey's boxes
      taken out, a kept slab moved, a piece revived): the pieces over it are
      checked next, not on the watch's next round. */
@@ -1713,7 +1740,7 @@
   }
   // back out of the merged rubble as a live piece of itself, at rest, to fall
   function revive(rec) {
-    recs.delete(rec.id);
+    forgetRec(rec.id);
     const cells = new Map();
     for (let i = 0; i < rec.hfs.length; i += 3) cells.set(hk(rec.hfs[i], rec.hfs[i + 1]), [rec.hfs[i], rec.hfs[i + 1]]);
     restampCells(cells);
@@ -1772,7 +1799,7 @@
      against a wall, hooked under a slab) is not left hanging a fifth time:
      it goes, as the dust and grit it would have made. */
   function dissolve(rec) {
-    recs.delete(rec.id);
+    forgetRec(rec.id);
     const fp = frozenPending.indexOf(rec.b);
     if (fp >= 0) { frozenPending.splice(fp, 1); retire(rec.b); }
     for (const e of rec.parts) {
@@ -1979,7 +2006,7 @@
       if (bk.parts.length !== before && !bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
     }
     staticCount = Math.max(0, staticCount - drop.size);
-    for (const id of drop) recs.delete(id);
+    for (const id of drop) forgetRec(id);
     // An evicted piece is gone from the picture; its solid box used to stay in
     // CBZ.colliders for the rest of the session (an invisible kerb where the
     // rubble had been, and one more box on every city-wide collider walk).
@@ -3090,7 +3117,7 @@
     if (owner != null) { const ks = hfOwned.get(owner); if (ks) { for (const k of ks) hf.delete(k); hfOwned.delete(owner); gritDisturb(-Infinity, Infinity, -Infinity, Infinity); } }
     else hfOwned.clear();
     staticCount = Math.max(0, staticCount - gone.size);
-    for (const id of gone) recs.delete(id);
+    for (const id of gone) forgetRec(id);
     {
       // every solid box this owner's pieces registered (colOf), out in place
       const ids = new Set();
@@ -3107,6 +3134,8 @@
     }
     if (owner == null) {
       hf.clear();
+      // nothing settled is left, so nothing may still be looked up
+      recs.clear(); stampIdx.clear(); recIt = null; disturbed.length = 0;
       if (grit) for (const v of grit.variants) {
         const zero = new THREE.Matrix4().makeScale(0, 0, 0);
         for (let k = 0; k < v.slots.length; k++) { v.slots[k] = null; v.im.setMatrixAt(k, zero); }
@@ -3138,7 +3167,7 @@
       if (bk.parts.length !== before && !bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
     }
     staticCount = Math.max(0, staticCount - gone.size);
-    for (const id of gone) recs.delete(id);
+    for (const id of gone) forgetRec(id);
     n += gone.size;
     // the height-field is hashed, so walk the covered cells directly
     for (let gx = Math.floor((x - r) / HF); gx <= Math.floor((x + r) / HF); gx++)
@@ -3185,7 +3214,7 @@
       if (bk.parts.length !== before && !bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
     }
     staticCount = Math.max(0, staticCount - drop.size);
-    for (const id of drop) recs.delete(id);
+    for (const id of drop) forgetRec(id);
     dropCols(drop, true);
     return drop.size;
   }

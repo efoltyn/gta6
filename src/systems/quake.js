@@ -2808,6 +2808,14 @@
     end(); clearPieces(); clearGround(); clearPoles(); coverReset();
     jobs.length = 0; glassJobs.length = 0;
     dressedArena = null; city.on = false;
+    /* THE LAST EVENT'S BUILDINGS GO WITH IT. ev.S outlived the event (the
+       report reads it) and every record carried its crown scan: five
+       numbers per roof-line triangle of the building's own merged meshes,
+       plus the meshes themselves, kept until the NEXT quake started. On the
+       disaster island that was ~17 MB of a world the new match had already
+       rebuilt (tools/probes/disaster-leak.mjs). */
+    for (let i = 0; i < ev.S.length; i++) ev.S[i].crown = null;
+    ev.S = []; ev.cars = []; ev.owned.length = 0; ev.actors = null; ev.hooks = {};
   }
 
   CBZ.onUpdate(27.6, function (dt) {

@@ -23,7 +23,8 @@
    `t`: evl(expr, ms) / fn(body, ms) (a function body, returns {__err} on throw,
    the president-check idiom) / step(n) / wait(expr, ms, every) / sleep(ms) /
    log(...) / errors() (the boot's page errors + this probe's) / allErrors() /
-   args (string[]) / flag(name) / arg(name, dflt) / seed / world / send (raw CDP).
+   args (string[]) / flag(name) / arg(name, dflt) / seed / world / send (raw CDP) /
+   on(fn) (raw CDP events, e.g. HeapProfiler chunks; returns off()).
    A probe that throws is an ERROR; { ok:false } is a FAIL.
 
    A plain `.js` probe is evaluated IN the page: its source must be a function
@@ -199,6 +200,8 @@ export async function runProbe(pg, probe, { args = [], seed, world, timeoutMs } 
   const t = {
     args, seed, world, timeoutMs,
     send: pg.send,
+    // raw CDP events (no id): returns off()
+    on: (fn) => { (pg.listeners || (pg.listeners = [])).push(fn); return () => { const i = pg.listeners.indexOf(fn); if (i >= 0) pg.listeners.splice(i, 1); }; },
     evl: (e, ms) => pg.evl(e, ms || 10 * 60e3),
     async fn(body, ms) {
       try { return await pg.evl(`(function(){${body}})()`, ms || 10 * 60e3); }
