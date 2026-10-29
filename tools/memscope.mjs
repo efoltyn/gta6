@@ -11,6 +11,7 @@
      node tools/memscope.mjs                          # slice gangcity-downtown, phone profile
      node tools/memscope.mjs --slice kingsport-downtown
      node tools/memscope.mjs --full                   # the whole city (slow: big snapshots)
+     node tools/memscope.mjs --mode escape            # the prison (any ?mode=; no slices there)
      node tools/memscope.mjs --query stream=1         # extra url params (streaming on)
      node tools/memscope.mjs --device desktop         # MacBook profile instead of the phone
      node tools/memscope.mjs --no-leak                # skip the move-and-return leak pass
@@ -115,7 +116,8 @@ const pad = (s, n) => String(s).padEnd(n).slice(0, n);
 const lpad = (s, n) => String(s).padStart(n);
 
 const FULL = has("--full");
-const SLICE = FULL ? "" : opt("--slice", "gangcity-downtown");
+const MODE = opt("--mode", "city");   // escape = the prison (no slices there)
+const SLICE = FULL || MODE !== "city" ? "" : opt("--slice", "gangcity-downtown");
 const DEVICE = opt("--device", "phone");
 const SEED = opt("--seed", "90210");
 const QUERY = opt("--query", "");
@@ -126,7 +128,7 @@ const TOUR_FRAMES = +opt("--tour-frames", 40);
 const SETTLE = +opt("--settle", 30);
 const DO_HEAP = !has("--no-heap");
 const DO_LEAK = DO_HEAP && !has("--no-leak");
-const LABEL = (FULL ? "city" : SLICE.replace(/[^a-z0-9-]/gi, "_")) + "-" + DEVICE;
+const LABEL = (MODE !== "city" ? MODE : FULL ? "city" : SLICE.replace(/[^a-z0-9-]/gi, "_")) + "-" + DEVICE;
 const HOUT = path.join(os.homedir(), "harness/out/gta6");
 const JSON_OUT = opt("--json", path.join(fs.existsSync(HOUT) ? HOUT : os.tmpdir(), `memscope-${LABEL}.json`));
 const VIEW = DEVICE === "tablet" ? { w: 1180, h: 820, dpr: 2 } : DEVICE === "phone" ? { w: 390, h: 844, dpr: 3 } : { w: 1512, h: 982, dpr: 2 };
@@ -620,7 +622,7 @@ async function main() {
      page's own renderer before the first game script evaluates */
   await s("Page.navigate", { url: base + "__memscope_blank.html" }); await sleep(300);
   await s("HeapProfiler.startSampling", { samplingInterval: +opt("--sample-kb", 128) * 1024 });
-  const q = ["mode=city", "seed=" + SEED]; if (SLICE) q.push("slice=" + encodeURIComponent(SLICE)); if (QUERY) q.push(QUERY.replace(/^[?&]/, ""));
+  const q = ["mode=" + MODE, "seed=" + SEED]; if (SLICE) q.push("slice=" + encodeURIComponent(SLICE)); if (QUERY) q.push(QUERY.replace(/^[?&]/, ""));
   const url = base + "index.html?" + q.join("&");
   log(`boot ${url} (${DEVICE})`);
   const tNav = Date.now();
@@ -650,7 +652,8 @@ async function main() {
     cpu: cpuTop(cpuProf, 20) };
   R.allocs = heapSampleTop(heapProf, 20);
   /* headline memory */
-  const memNow = async () => { const h = await s("Runtime.getHeapUsage"); const g = await ev("__ms.glRead()");
+  // (collected first: freed arrays are garbage, not memory, and an uncollected read counted them)
+  const memNow = async () => { try { await s("HeapProfiler.collectGarbage", {}, 60000); } catch (_) {} const h = await s("Runtime.getHeapUsage"); const g = await ev("__ms.glRead()");
     return { heapMB: +MB(h.usedSize).toFixed(1), arrayBuffersMB: +MB(h.backingStorageSize || 0).toFixed(1), gpuMB: +MB(g.total).toFixed(1), gl: { bufMB: +MB(g.buf).toFixed(1), texMB: +MB(g.tex).toFixed(1), rbMB: +MB(g.rb).toFixed(1), drawingBufferMB: +MB(g.db).toFixed(1), buffers: g.nbuf, textures: g.ntex },
       phoneMB: +MB(h.usedSize + (h.backingStorageSize || 0) + g.total).toFixed(1) }; };
   R.mem = await memNow();

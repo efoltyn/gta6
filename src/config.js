@@ -42,6 +42,34 @@
     return _touchDev;
   };
 
+  // ---- WRAP A SHARED FUNCTION ONCE, WHOEVER ELSE WRAPS IT -----------------
+  // CBZ.wrapOnce(obj, key, tag, make): obj[key] = make(obj[key]) unless a wrap
+  // tagged `tag` is already somewhere in the chain. The tags ride on the
+  // OUTERMOST function and every wrap made here copies the ones under it, so
+  // the check sees the whole chain, not just the newest layer.
+  //
+  // WHY: the old idiom flagged only its own wrapper (fn._xWrapped = true) and
+  // re-checked from a per-frame tick (the wrapped verb loads after it). Two
+  // modules doing that to one function never settle: A's check sees B's
+  // wrapper (no _xWrapped on it) and wraps it, B's sees A's and wraps that,
+  // two closures a frame, forever. CBZ.killstreakOnDown in the prison grew
+  // that way (entities/ai.js x systems/prisonfriends.js): ~7,000 nested
+  // wrappers a minute, every knockdown walking the whole chain, until the
+  // heap and the call stack ran out on a long session. Returns true if it
+  // wrapped. tools/probes/wrap-churn.mjs finds any function still re-wrapped
+  // every frame.
+  CBZ.wrapOnce = function (obj, key, tag, make) {
+    const f = obj && obj[key];
+    if (typeof f !== "function") return false;
+    const tags = f._cbzWraps;
+    if (tags && tags.indexOf(tag) >= 0) return false;
+    const w = make(f);
+    if (typeof w !== "function" || w === f) return false;
+    w._cbzWraps = tags ? tags.concat(tag) : [tag];
+    obj[key] = w;
+    return true;
+  };
+
   // ---- shared mutable buses (filled in by other modules) ----
   CBZ.colliders = [];      // {minX,maxX,minZ,maxZ, ref, [y0,y1]} — y0/y1 = a
                            // height-gated wall (window/doorway/floor), checked

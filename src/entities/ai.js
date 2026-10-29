@@ -2251,10 +2251,13 @@
     if (!c || !(cigs > 0) || c.kind === "repo") return;
     c.got = Math.min(c.amt, (c.got || 0) + cigs);
   }
+  /* Re-asked every tick until the verbs exist; CBZ.wrapOnce (config.js) is
+     what makes that safe beside systems/prisonfriends.js, which wraps the
+     same killstreakOnDown the same lazy way: a flag on our own wrapper alone
+     made the two re-wrap each other every frame, forever. */
   function ensureContractWraps() {
-    if (CBZ.killstreakOnDown && !CBZ.killstreakOnDown._contractWrapped) {
-      const inner = CBZ.killstreakOnDown;
-      const onDown = function (actor, how) {
+    CBZ.wrapOnce(CBZ, "killstreakOnDown", "contract", function (inner) {
+      return function (actor, how) {
         try {
           const c = contractAgainst(actor);
           if (c && c.kind === "roughUp" && !c.done) {
@@ -2264,12 +2267,9 @@
         } catch (e) { /* never let bookkeeping eat a takedown */ }
         return inner.apply(this, arguments);
       };
-      onDown._contractWrapped = true;
-      CBZ.killstreakOnDown = onDown;
-    }
-    if (CBZ.econ && CBZ.econ.steal && !CBZ.econ.steal._contractWrapped) {
-      const innerSteal = CBZ.econ.steal;
-      const stealWrapped = function (actor) {
+    });
+    if (CBZ.econ) CBZ.wrapOnce(CBZ.econ, "steal", "contract", function (innerSteal) {
+      return function (actor) {
         // a repo IS the steal on that man — same hand, named object
         if (contractWantedItem(actor)) return contractLift(actor);
         const before = (CBZ.game && CBZ.game.cigs) || 0;
@@ -2277,12 +2277,9 @@
         try { creditCollected(actor, ((CBZ.game && CBZ.game.cigs) || 0) - before); } catch (e) {}
         return res;
       };
-      stealWrapped._contractWrapped = true;
-      CBZ.econ.steal = stealWrapped;
-    }
-    if (CBZ.prisonRobTarget && !CBZ.prisonRobTarget._contractWrapped) {
-      const innerRob = CBZ.prisonRobTarget;
-      const robWrapped = function (who) {
+    });
+    CBZ.wrapOnce(CBZ, "prisonRobTarget", "contract", function (innerRob) {
+      return function (who) {
         const target = who || (CBZ.intimidate && CBZ.intimidate.target && CBZ.intimidate.target());
         const before = (CBZ.game && CBZ.game.cigs) || 0;
         const wanted = target ? contractWantedItem(target) : "";
@@ -2299,9 +2296,7 @@
         } catch (e) {}
         return out;
       };
-      robWrapped._contractWrapped = true;
-      CBZ.prisonRobTarget = robWrapped;
-    }
+    });
   }
 
   // ---- proof and payout ----------------------------------------------------

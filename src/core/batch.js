@@ -1539,6 +1539,8 @@
     CBZ.batchStaticUnder(R);
     CBZ.batchTexturedUnder(R);            // the kit's textured pieces (world/prisonkit.js stat)
     if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(R);
+    // one copy of the merged shell, the GPU's, as in the city (core/citystream.js)
+    if (CBZ.freeStaticArrays) { try { CBZ.freeStaticArrays(R, { merged: true }); } catch (e) { console.error("[free arrays prison]", e); } }
   };
   function runOnce() {
     if (done) return;
