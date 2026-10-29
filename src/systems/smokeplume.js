@@ -134,7 +134,9 @@
     "      vec3 lit = mix(uVegLit, uBlkLit, tone), sh = mix(uVegShade, uBlkShade, tone);",
     "      vec3 col = mix(sh, lit, clamp((Ts * (0.6 + 0.4 * powder) + ms) * uDay, 0.0, 1.0));",
     // the flames light the foot of the column from inside
-    "      col += uGlowCol * glow * exp(-max(hrel, 0.0) * 15.0) * (0.35 + 0.65 * (1.0 - Ts));",
+    // (a house's or a tower's flames are drawn at its windows: its black
+    // smoke takes only a little of their light)
+    "      col += uGlowCol * glow * (1.0 - 0.75 * tone) * exp(-max(hrel, 0.0) * 15.0) * (0.35 + 0.65 * (1.0 - Ts));",
     "      float wgt = T * a;",
     "      acc += wgt * col; tW += wgt * t; wSum += wgt;",
     "      T *= 1.0 - a;",

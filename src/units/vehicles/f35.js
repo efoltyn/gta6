@@ -1036,7 +1036,25 @@
     }
     if (R.hurt > 0 && dt > 0 && CBZ.munitions && CBZ.munitions.smoke) {
       R.puffT -= dt;
-      if (R.puffT <= 0 && (!dead || R.agl > 1 || (ctx && ctx.burning))) {
+      const smoking = !dead || R.agl > 1 || (ctx && ctx.burning);
+      // the smoke a hit jet trails is a shaded tube (systems/smoketrail.js),
+      // its newest point riding the tailpipe; puffs only without the module
+      const ST = CBZ.smokeTrail;
+      if (ST && smoking) {
+        const P = ST.shared();
+        if (!P.alive(R.tube) || R.tubeHurt !== R.hurt) {
+          if (R.tube) P.close(R.tube);
+          const dk = R.hurt >= 2 ? 0.16 : 0.42;
+          if (!R._tc) R._tc = new (window.THREE.Color)();
+          R._tc.setRGB(dk, dk, dk * 0.96).convertSRGBToLinear();
+          R.tube = P.open({ w0: 0.6, w1: R.hurt >= 2 ? 3.4 : 2.0, life: R.hurt >= 2 ? 8 : 4.5, a0: R.hurt >= 2 ? 0.8 : 0.5, col: R._tc, rise: 0.4, wind: 1, drag: 1.5 });
+          R.tubeHurt = R.hurt;
+        }
+        const p = worldAt(R, 0, 2.0, -6.4);
+        if (R.puffT <= 0) { R.puffT = 0.1; P.push(R.tube, p.x, p.y, p.z, -R.vx * 0.05, 0.6, -R.vz * 0.05); }
+        else P.head(R.tube, p.x, p.y, p.z);
+        if (R.hurt >= 2 && CBZ.munitions.fire && Math.random() < dt / 0.07) { try { CBZ.munitions.fire(p.x, p.y, p.z, 0, 0.5, 0, 1.0, 2.6, 0.45, 0.9, 1, 0.55, 0.2); } catch (e) {} }
+      } else if (R.puffT <= 0 && smoking) {
         R.puffT = R.hurt >= 2 ? 0.07 : 0.12;
         const p = worldAt(R, (Math.random() - 0.5) * 0.6, 2.0, -6.4);
         const dk = R.hurt >= 2 ? 0.16 : 0.42;

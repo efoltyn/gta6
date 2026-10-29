@@ -765,7 +765,8 @@
   CBZ.cityCrashSmoke = function (x, y, z, opts) {
     opts = opts || {};
     const cy = Number.isFinite(+y) ? +y : 0.8;
-    const count = Math.max(1, Math.min(6, opts.count == null ? 5 : opts.count | 0));
+    // count: 0 is the flame licks alone (a fire whose smoke is drawn elsewhere: structural.js's plumes)
+    const count = opts.count === 0 ? 0 : Math.max(1, Math.min(6, opts.count == null ? 5 : opts.count | 0));
     const scale = Math.max(0.5, Math.min(2.2, opts.scale || 1));
     for (let i = 0; i < count; i++) {
       const a = rng() * 6.2832, drift = 0.25 + rng() * 0.5;

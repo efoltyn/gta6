@@ -1588,6 +1588,10 @@
       // a short glowing tail, not a bar: by day the plasma behind a Mach 6
       // body is a few tens of metres of shimmer, the smoke tube does the rest
       const len = Math.max(14, Math.min(60, S.v * 0.022));
+      // additive light on a daylight sky reads as a white bar whatever its
+      // strength: the plasma tail is a night sight (shared material)
+      const sh = CBZ.sunHeight != null ? CBZ.sunHeight : 0.5;
+      u.streak.material.opacity = 0.025 + 0.3 * (1 - Math.max(0, Math.min(1, 0.5 + 2.2 * sh)));
       u.streak.scale.set(fl * (0.9 + 0.3 * (far - 1) / far), fl * (0.9 + 0.3 * (far - 1) / far), len);
     }
     const nx = _bp.x + m.dir.x * (half + 0.4), ny = _bp.y + m.dir.y * (half + 0.4), nz = _bp.z + m.dir.z * (half + 0.4);

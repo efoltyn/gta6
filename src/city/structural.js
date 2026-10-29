@@ -1132,7 +1132,50 @@
   S.ignite = function (lot, floor) { const r = lot && ledger.get(lot); if (r) ignite(r, floor | 0); };
 
   let fireAcc = 0;
+  /* THE SMOKE OF A BURNING BUILDING is a plume volume (systems/smokeplume.js):
+     each burning building's highest burning storey is a black-smoke source
+     that pours off its downwind face and climbs, bending with the wind, one
+     draw for every fire in the city. The pooled sprites stay for the flame
+     licks at the openings (light, not smoke), and are the whole receipt
+     without the module. */
+  let plumes = null, plumeSrc = [], plumeTried = false;
+  const _pw = { x: 1, z: 0, s: 4 };
+  function plumeWind() {
+    let wx = 1, wz = 0, sp = 4;
+    if (CBZ.weatherWind) { try { const w = CBZ.weatherWind(); if (w) { if (Number.isFinite(w.x)) wx = w.x; if (Number.isFinite(w.z)) wz = w.z; if (Number.isFinite(+w.speed)) sp = +w.speed; } } catch (e) {} }
+    const l = Math.hypot(wx, wz) || 1;
+    _pw.x = wx / l; _pw.z = wz / l; _pw.s = sp;
+    return _pw;
+  }
+  function plumeSources() {
+    plumeSrc.length = 0;
+    const w = plumeWind();
+    burningRecs.forEach(function (rec) {
+      if (!rec.fires.length || rec.stage >= STAGE.COLLAPSING) return;
+      const b = rec.b, FH = b.FH || 3.2;
+      let top = 0;
+      for (let i = 0; i < rec.fires.length; i++) if (rec.fires[i].f > top) top = rec.fires[i].f;
+      // off the lee face of the top burning storey (a vent there if the blast made one)
+      let x = b.ox + w.x * (b.w || 10) * 0.5, z = b.oz + w.z * (b.d || 10) * 0.5;
+      const vents = rec.vents;
+      if (vents) for (let i = 0; i < vents.length; i++) if (vents[i].f === top) { x = vents[i].x + vents[i].nx * 1.5; z = vents[i].z + vents[i].nz * 1.5; break; }
+      plumeSrc.push({ x: x, y: (top + 0.6) * FH + 1.5, z: z, w: 0.45 + 0.3 * rec.fires.length, kind: 2 });
+    });
+  }
+  function stepPlumes(dt) {
+    if (!plumes && !plumeTried && burningRecs.size && CBZ.smokePlumes && CBZ.scene) {
+      plumeTried = true;
+      try { plumes = CBZ.smokePlumes.create(CBZ.scene); } catch (e) { plumes = null; }
+    }
+    if (!plumes) return;
+    // a rebuilt world is a new scene: the plumes go with it
+    if (CBZ.scene && plumes.mesh.parent !== CBZ.scene) CBZ.scene.add(plumes.mesh);
+    const w = plumeWind();
+    plumes.update(dt, plumeSrc, w.x, w.z, w.s, 0.6);
+  }
   function emitFirePlume(b, FH, f, rec) {
+    // with the plume volume up, the receipt here is the flame licks only
+    const n = plumes ? 0 : 2;
     // a gutted storey burns OUT OF ITS OPENINGS: flame licks and smoke leave
     // through the bays the blast made, not through an intact wall
     const vents = rec && rec.vents;
@@ -1143,7 +1186,7 @@
         if (c.f === f.f) { v = c; break; }
       }
       if (v) {
-        try { CBZ.cityCrashSmoke(v.x + v.nx * 1.1, v.y, v.z + v.nz * 1.1, { flame: true, count: 2 }); } catch (e) {}
+        try { CBZ.cityCrashSmoke(v.x + v.nx * 1.1, v.y, v.z + v.nz * 1.1, { flame: true, count: n }); } catch (e) {}
         return;
       }
     }
@@ -1158,11 +1201,13 @@
     try {
       // Two smoke puffs plus the existing two flame licks: four pooled sprites
       // per visible receipt, instead of the old seven.
-      CBZ.cityCrashSmoke(fx, f.f * FH + FH * 0.6, fz, { flame: true, count: 2 });
+      CBZ.cityCrashSmoke(fx, f.f * FH + FH * 0.6, fz, { flame: true, count: n });
     } catch (e) {}
   }
   function stepFires(dt) {
-    if (!burningRecs.size) return;
+    // the plumes run every frame, and on after the last fire so they fade
+    stepPlumes(dt);
+    if (!burningRecs.size) { plumeSrc.length = 0; return; }
     fireAcc += dt;
     if (fireAcc < FIRE_TICK) return;
     const step = fireAcc; fireAcc = 0;
@@ -1225,6 +1270,7 @@
     // At Best this is three receipts per 0.25 s tick: 48 sprite requests/sec,
     // globally, rather than 112/sec for EACH fully burning building. Nearest
     // first keeps the detail where the player can read it.
+    plumeSources();
     plumeCandidates.sort(function (a, b) { return a.d2 - b.d2; });
     const plumeBudget = Math.max(1, Math.round(CBZ.qScale ? CBZ.qScale(1, 3) : 3));
     for (let i = 0; i < plumeCandidates.length && i < plumeBudget; i++) {
@@ -1707,7 +1753,7 @@
   }
 
   if (CBZ.onUpdate) CBZ.onUpdate(34.45, function (dt) {
-    if (!inCity()) return;
+    if (!inCity()) { if (plumes) plumes.mesh.visible = false; return; }
     if (!ledger.size && !collapsing.length && !condemned.length && !deferredSweepCount) return;
     const d = dt > 0.25 ? 0.25 : dt;
     if (deferredSweepCount) drainDeferredSweeps();
