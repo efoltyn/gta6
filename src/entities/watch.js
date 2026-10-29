@@ -1028,6 +1028,7 @@
   const reg = [];
   const anchorRig = new WeakMap();
   const mounted = new Set();
+  const parked = [];       // WeakRefs to bodies detached long enough to leave the roster
   let cursor = 0;
   function recOf(rig) { return rig && rig._ww || null; }
   function fit(rig, c) {
@@ -1302,14 +1303,31 @@
         cursor = (cursor + 1) % reg.length;
         const r = reg[cursor];
         if (!r) continue;
-        // bodies detached for a while are forgotten, but only once the roster
-        // is big: pooled crowds park bodies off-graph and bring them back
-        if (reg.length > 2000 && r.detachedT && now - r.detachedT > 15) {
-          unmount(r); reg.splice(cursor, 1); cursor--; if (r.rig) r.rig._ww = null;
+        /* A BODY DETACHED FOR A WHILE LEAVES THE ROSTER, AND THE ROSTER STOPS
+           OWNING IT. It used to be kept until the roster passed 2000 bodies,
+           so every crowd the disaster island dropped at a new match (99 rigs,
+           their meshes and arrays) stayed alive here for twenty matches
+           (tools/probes/disaster-leak.mjs). A pooled crowd parks bodies
+           off-graph and brings them back, so a parked body is remembered
+           WEAKLY: back on the graph it rejoins the roster with its own
+           record; dropped for good, the GC takes it and the note. */
+        if (r.detachedT && now - r.detachedT > 15) {
+          unmount(r); reg.splice(cursor, 1); cursor--;
+          if (r.rig && typeof WeakRef === "function") parked.push(new WeakRef(r.rig));
+          else if (r.rig) r.rig._ww = null;
           if (!reg.length) break;
           continue;
         }
         if (!mounted.has(r)) sync(r, cam);
+      }
+    }
+    // the parked bodies: back on the graph -> back on the roster; gone -> forgotten
+    if (parked.length && (_frame % 30) === 0) {
+      for (let i = parked.length - 1; i >= 0; i--) {
+        const rig = parked[i].deref();
+        if (rig && !(rig.group && rig.group.parent)) continue;
+        parked[i] = parked[parked.length - 1]; parked.pop();
+        if (rig && rig._ww) { rig._ww.detachedT = 0; reg.push(rig._ww); }
       }
     }
     const pr = recOf(CBZ.playerChar);

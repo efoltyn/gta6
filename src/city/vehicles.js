@@ -1009,6 +1009,46 @@
     _vcGeoCache.set(key, geo);
     return geo;
   }
+  /* THE MERGE CACHES ARE BOUNDED BY THE CARS THAT EXIST. Both caches above
+     key on (source geometry + matrices [+ paint]), and the paint carries a
+     per-car random tint, so their key space is every car ever built: on the
+     disaster island every new match restocked the street with fresh tints and
+     the caches (each entry a whole merged car body, ~1-2 MB, plus its far-LOD
+     twins) grew by the match, never by what was standing. A prune keeps an
+     entry only while something draws it: the scene, any car record (asleep,
+     proxied or hidden included), a car's full-detail geometry parked behind its
+     LOD twin, and the style templates. Everything else is disposed with its
+     LOD twins (city/carlod.js CBZ.carLodForget). Called where a world scraps
+     its cars (world/island_vehicles.js resetFleet); safe anywhere, one scene
+     walk. Returns how many entries went. */
+  function cachePrune() {
+    if (!_mergeCache.size && !_vcGeoCache.size) return 0;
+    const used = new Set();
+    const take = function (root) { if (root && root.traverse) root.traverse(function (o) { if (o.geometry) used.add(o.geometry); }); };
+    take(CBZ.scene);
+    const cars = CBZ.cityCars || [];
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i]; if (!c) continue;
+      take(c.group);
+      const tr = c._lodTrack;
+      if (tr && tr.full) for (let k = 0; k < tr.full.length; k++) used.add(tr.full[k]);
+    }
+    if (CBZ.cityCarTemplates) { const T = CBZ.cityCarTemplates(); for (let i = 0; i < T.length; i++) take(T[i]); }
+    let n = 0;
+    [_mergeCache, _vcGeoCache].forEach(function (M) {
+      M.forEach(function (geo, key) {
+        if (used.has(geo)) return;
+        M.delete(key);
+        if (CBZ.carLodForget) { try { CBZ.carLodForget(geo); } catch (e) {} }
+        geo.dispose();
+        n++;
+      });
+    });
+    return n;
+  }
+  CBZ.cityCarCachePrune = cachePrune;
+  CBZ.cityCarCacheSizes = function () { return { merge: _mergeCache.size, vc: _vcGeoCache.size, vcMats: _vcMats.size }; };
+
   function mergePlainColourParts(grp, keep) {
     if (CBZ.CONFIG && CBZ.CONFIG.CAR_VC_MERGE === false) return;
     if (!THREE.BufferGeometry.prototype.deleteAttribute) return;
@@ -2458,10 +2498,18 @@
     for (let i = 0; i < list.length; i++) { try { lookOf(list[i]); } catch (e) {} }
   }
   let warmQ = null;
-  function warmIdle() {
+  /* WHAT IS WARMED IS WHAT THIS WORLD CAN SPAWN. A finished look is a whole
+     body template (loft, cabin, doors, face: MBs) kept for the page's life.
+     The city's streets can show any catalogue car and any fleet unit, so the
+     city warms all of them. The disaster island stands four town models
+     (world/island_vehicles.js CBZ.islandTownModels); warming the city's whole
+     catalogue there filled memory with ~60 bodies no match could ever show,
+     a few more every match (tools/probes/disaster-leak.mjs). A world that
+     publishes its own list warms only that. */
+  function warmIdle(only) {
     if (warmQ) return;
     const E = CBZ.cityEcon;
-    warmQ = fleetModels().concat((E && Array.isArray(E.CARS)) ? E.CARS : []);
+    warmQ = only ? only.slice() : fleetModels().concat((E && Array.isArray(E.CARS)) ? E.CARS : []);
     const step = function (dl) {
       // one look per slice, and only into a slice with room for it
       if (dl && !dl.didTimeout && dl.timeRemaining() < 8) { schedule(); return; }
@@ -2558,7 +2606,10 @@
     const tint = 0.86 + rng() * 0.28;
     const paintHex = new THREE.Color(baseColor).multiplyScalar(tint).getHex();
     // (the street catalogue is a vehicle world's: the jail's yard van is not a reason to build it)
-    if (!warmQ && (g.mode === "city" || (CBZ.islandModeOn && CBZ.islandModeOn(g.mode)))) warmIdle();
+    if (!warmQ && (g.mode === "city" || (CBZ.islandModeOn && CBZ.islandModeOn(g.mode)))) {
+      const own = g.mode === "survival" && CBZ.islandTownModels ? CBZ.islandTownModels() : null;
+      warmIdle(own);
+    }
     const L = lookOf(model), style = L.style, tpl = L.tpl;
     if (!tpl) return buildCarBox(model);
     const visual = cloneBody(tpl);
