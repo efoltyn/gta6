@@ -886,6 +886,220 @@
     });
   }
 
+  // ================================================================ SNAKES
+  // A snake is a CHAIN (wildlife.js snakeAnimate places every segment each
+  // frame, nose +X, segments trailing down -X at userData.spacing): segment
+  // 0 is the head, the last is the tail tip. Each segment here is a lofted
+  // spindle a little longer than the spacing, so neighbours overlap into one
+  // smooth body as the wave runs down it; its radius runs from this
+  // segment's girth to the next one's so the taper is continuous. The coat
+  // pattern is painted per vertex from the segment index and the angle round
+  // the body (stripes, diamonds, bands, ovals) and cached per species.
+  function snake(o) {
+    const P = { parts: {}, order: [] };
+    const N = o.N, sp = o.spacing, L = sp * 1.4;
+    const rAt = function (i) { return Math.max(o.rMin, o.R * (1 - Math.pow(i / (N - 1), 1.6) * (1 - o.rMin / o.R)) * (i < 2 ? 0.82 + 0.09 * i : 1)); };
+    // the head: a lofted wedge, the jaw line dark, eyes, nostrils
+    const head = P.parts.seg0 = new K.Part("head");
+    P.order.push("seg0");
+    const H = o.head, hst = [];
+    const prof = H.prof || [[-0.35, 0.42, 0.42, 0.48], [-0.1, 0.5, 0.5, 0.62], [0.25, 0.48, 0.46, 0.56], [0.6, 0.36, 0.34, 0.42], [0.9, 0.24, 0.22, 0.26], [1.0, 0.14, 0.12, 0.16]];
+    for (let i = 0; i < prof.length; i++) hst.push({ x: prof[i][0] * H.len, y: 0, z: 0, rt: prof[i][1] * H.h, rb: prof[i][2] * H.h, w: prof[i][3] * H.w, sq: 0.85, wts: [0, 1], t: i / (prof.length - 1) });
+    head.loft(hst, 12, function (x, y, z, ca, sa, R) {
+      let c = ca < -0.35 ? o.belly : o.head_c || o.body;
+      if (Math.abs(ca + 0.2) < 0.12 && x > 0) c = shade(c, 0.45);       // the mouth line
+      if (H.paint) c = H.paint(x, y, z, ca, sa, c);
+      return shade(c, K.grain(x * 30, y * 30, z * 30));
+    }, { capLen: 0.7, capN: 2 });
+    head.ud.eyes = [];
+    [-1, 1].forEach(function (s) {
+      const ex = H.len * (H.eyeT != null ? H.eyeT : 0.42), ey = H.h * (H.eyeUp != null ? H.eyeUp : 0.22), ez = s * H.w * 0.5;
+      head.ellipsoid(ex, ey, ez, H.h * 0.13, H.h * 0.12, H.h * 0.09, 6, function (x, y, z, ca, sa) { return (s * sa) > 0.3 ? (o.eye || 0x16120a) : shade(o.head_c || o.body, 0.7); }, true, 3);
+      head.ellipsoid(ex + H.h * 0.05, ey + H.h * 0.04, ez + s * H.h * 0.08, H.h * 0.03, H.h * 0.03, H.h * 0.02, 4, 0xeeeae0, true, 1);
+      head.ud.eyes.push([ex, ey, ez + s * H.h * 0.05, H.h * 0.12]);
+      head.ellipsoid(H.len * 0.92, H.h * 0.08, s * H.w * 0.13, H.h * 0.04, H.h * 0.04, H.h * 0.03, 4, 0x0e0c0a, true, 1);   // nostril
+    });
+    if (H.extra) H.extra(head);
+    // the body
+    for (let i = 1; i < N; i++) {
+      const seg = P.parts["seg" + i] = new K.Part("seg" + i);
+      P.order.push("seg" + i);
+      const r0 = rAt(i - 1 + 0.5), r1 = rAt(i), r2 = rAt(Math.min(N - 1, i + 0.5));
+      const last = i === N - 1;
+      const st = [];
+      const n = 6;
+      // lofted tail-to-head (+X) so the ring's "up" is the spine, not the belly
+      for (let kk = 0; kk <= n; kk++) {
+        const k = n - kk, u = k / n, x = L / 2 - u * L;
+        const r = u < 0.5 ? lerp(r0, r1, u * 2) : lerp(r1, last ? r1 * 0.25 : r2, (u - 0.5) * 2);
+        st.push({ x: x, y: 0, z: 0, rt: r * (o.flatTop || 0.92), rb: r * 0.86, w: r * (o.wide || 1.06), sq: 1, wts: [0, 1], t: u });
+      }
+      seg.loft(st, 10, function (x, y, z, ca, sa, R) {
+        const u = R.t != null ? R.t : 0;
+        let c = ca < -0.45 ? o.belly : o.body;
+        if (o.paint) c = o.paint(i + u, ca, sa, c, x, y, z);
+        return shade(c, K.grain(x * 25 + i, y * 25, z * 25));
+      }, { capLen: 0.5, capN: 1 });
+    }
+    if (o.extra) o.extra(P);
+    return P;
+  }
+  // build the group by hand: snakes are not bbox-centred parts on a rig, the
+  // engine owns every segment's position
+  function snakeGroup(id, key, make, ctx) {
+    const sp = CBZ.WILDLIFE_SPECIES[id], sc = (sp && sp.scale) || 1;
+    const ck = id + "|" + key;
+    let B = SNAKE_CACHE.get(ck);
+    if (!B) {
+      const P = make(), parts = [];
+      P.order.forEach(function (nm) {
+        const part = P.parts[nm]; if (!part) return;
+        const p = part.G.p; for (let i = 0; i < p.length; i++) p[i] /= sc;
+        const geo = CBZ.loftKit.toGeometry(part.G, { static: true });
+        geo.computeBoundingBox(); geo.computeBoundingSphere(); geo._shared = true; geo.userData = { _shared: true };
+        const ud = Object.assign({}, part.ud);
+        if (ud.eyes) ud.eyes = ud.eyes.map(function (e) { return [e[0] / sc, e[1] / sc, e[2] / sc, e[3] / sc]; });
+        parts.push({ name: nm, geo: geo, ud: ud, kids: part.kids || null });
+      });
+      B = { parts: parts, ud: P.ud || {}, sc: sc };
+      SNAKE_CACHE.set(ck, B);
+    }
+    const T = window.THREE, g = new T.Group();
+    g.name = "beast:" + id;
+    const mat = K.coatMat ? K.coatMat() : new T.MeshLambertMaterial({ vertexColors: true });
+    const segs = [];
+    B.parts.forEach(function (q, i) {
+      const m = new T.Mesh(q.geo, mat);
+      m.name = id + ":" + q.name;
+      for (const u in q.ud) m.userData[u] = q.ud[u];
+      m.position.x = -i * (B.ud.spacing || 0.2) / sc;
+      m.position.y = (B.ud.baseY || 0.08) / sc;
+      g.add(m); segs.push(m);
+    });
+    g.userData.segs = segs;
+    // the engine reads both in the group's own (scaled) frame
+    g.userData.spacing = B.ud.spacing / sc; g.userData.baseY = B.ud.baseY / sc;
+    if (B.ud.rear) g.userData.rear = B.ud.rear;
+    // the cobra's hood: two flat lofted flaps riding the neck segment (the
+    // engine scales them 0.12 -> 1 as it rears)
+    if (B.ud.hoodGeo) {
+      const hood = [];
+      B.ud.hoodGeo.forEach(function (hg) { const h = new T.Mesh(hg, mat); h.name = id + ":hood"; segs[1].add(h); hood.push(h); });
+      g.userData.hood = hood;
+    }
+    if (B.ud.rattle) g.userData.rattle = segs[segs.length - 1];
+    return g;
+  }
+  const SNAKE_CACHE = new Map();
+  function geoOf(part, sc) {
+    const p = part.G.p; for (let i = 0; i < p.length; i++) p[i] /= sc;
+    const geo = CBZ.loftKit.toGeometry(part.G, { static: true });
+    geo.computeBoundingBox(); geo.computeBoundingSphere(); geo._shared = true; geo.userData = { _shared: true };
+    return geo;
+  }
+
+  function garter() {
+    const P = snake({
+      N: 12, spacing: 0.1, R: 0.024, rMin: 0.008, body: 0x2c3524, belly: 0xc4c48a, eye: 0x120e08,
+      head: { len: 0.075, h: 0.045, w: 0.05, eyeT: 0.45 },
+      paint: function (f, ca, sa, c) {
+        // three yellow stripes: one down the spine, one low on each flank
+        if (ca > 0.86) return 0xd8c85a;
+        if (Math.abs(ca + 0.15) < 0.14) return 0xc8bc56;
+        if (ca > 0.2 && Math.abs(Math.sin(f * 9)) > 0.9) return shade(c, 0.6);     // the checker between
+        return c;
+      },
+    });
+    P.ud = { spacing: 0.1, baseY: 0.022 };
+    return P;
+  }
+  function rattlesnake() {
+    const P = snake({
+      N: 12, spacing: 0.14, R: 0.055, rMin: 0.022, body: 0xb89a6c, belly: 0xe6d8b6, head_c: 0xa88a5e, eye: 0x2a1a08,
+      head: {
+        len: 0.13, h: 0.065, w: 0.12, eyeT: 0.42, eyeUp: 0.3,
+        // the pit viper's wide triangular head, the dark stripe through the eye
+        prof: [[-0.3, 0.38, 0.36, 0.38], [-0.05, 0.5, 0.48, 0.66], [0.3, 0.46, 0.44, 0.56], [0.65, 0.34, 0.32, 0.34], [0.92, 0.24, 0.22, 0.2], [1.0, 0.14, 0.12, 0.12]],
+        paint: function (x, y, z, ca, sa, c) { return Math.abs(ca - 0.15) < 0.12 && x > -0.02 && x < 0.09 ? 0x3a2a1a : c; },
+      },
+      paint: function (f, ca, sa, c) {
+        // the diamond row down the back: dark brown, rimmed cream
+        if (ca > -0.1) {
+          const ph = (f * 1.3) % 1, d = Math.abs(ph - 0.5) * 2;           // 0 at a diamond's middle
+          const across = Math.acos(Math.max(-1, Math.min(1, ca))) / 1.4;   // 0 on the spine
+          const q = d + across;
+          if (q < 0.55) return 0x5a3e24;
+          if (q < 0.72) return 0xeee2c2;
+        }
+        if (f > 10.6) return Math.sin(f * 30) > 0 ? 0x1a1610 : 0xe6dcc4;   // black and white tail bands
+        return c;
+      },
+      extra: function (Pp) {
+        // the rattle: a stack of bony buttons on the tail tip
+        const last = Pp.parts["seg11"];
+        for (let k = 0; k < 4; k++) last.ellipsoid(-0.11 - k * 0.028, 0, 0, 0.018, 0.024 - k * 0.003, 0.016 - k * 0.002, 7, k % 2 ? 0xc8b48c : 0xe2d2ac, false, 2);
+      },
+    });
+    P.ud = { spacing: 0.14, baseY: 0.05, rattle: true };
+    return P;
+  }
+  function cobra() {
+    const sc = (CBZ.WILDLIFE_SPECIES.king_cobra && CBZ.WILDLIFE_SPECIES.king_cobra.scale) || 1;
+    const P = snake({
+      N: 13, spacing: 0.28, R: 0.075, rMin: 0.022, body: 0x5e5230, belly: 0xd8c896, head_c: 0x6a5c34, eye: 0x100c06,
+      head: { len: 0.16, h: 0.07, w: 0.1, eyeT: 0.48 },
+      paint: function (f, ca, sa, c) { return Math.abs(Math.sin(f * 2.2)) > 0.92 ? 0xd2c48e : c; },      // the pale chevron bands
+    });
+    // the hood: two broad, thin flaps off the neck, cream underneath
+    const hoodGeo = [];
+    [-1, 1].forEach(function (s) {
+      // a broad thin flap standing beside the neck, its face turned forward:
+      // cream throat-side in front, olive behind
+      const hp = new K.Part("hood"), cx = -0.02;
+      hp.ellipsoid(cx, 0.05, s * 0.11, 0.014, 0.17, 0.11, 10, function (x) { return x > cx ? 0xd8c896 : 0x54482a; }, true, 4);
+      hoodGeo.push(geoOf(hp, sc));
+    });
+    P.ud = { spacing: 0.28, baseY: 0.068, rear: 4, hoodGeo: hoodGeo };
+    return P;
+  }
+  function mamba() {
+    const P = snake({
+      N: 14, spacing: 0.24, R: 0.045, rMin: 0.012, body: 0x5a5a52, belly: 0xb8b8a4, head_c: 0x56564e, eye: 0x141410,
+      head: {
+        len: 0.12, h: 0.05, w: 0.065, eyeT: 0.4, eyeUp: 0.3,
+        // the coffin head: long, square-browed, a narrow snout; the inky mouth
+        prof: [[-0.3, 0.4, 0.4, 0.46], [-0.05, 0.5, 0.5, 0.58], [0.4, 0.5, 0.48, 0.54], [0.75, 0.38, 0.36, 0.36], [0.95, 0.28, 0.26, 0.24], [1.0, 0.18, 0.16, 0.16]],
+        paint: function (x, y, z, ca, sa, c) { return ca < -0.15 && ca > -0.45 && x > 0.02 ? 0x0a0a0c : c; },
+      },
+      paint: function (f, ca, sa, c) { return ca > -0.2 && Math.sin(f * 4.2 + sa * 2) > 0.75 ? shade(c, 0.82) : c; },
+    });
+    P.ud = { spacing: 0.24, baseY: 0.04 };
+    return P;
+  }
+  function anaconda() {
+    const P = snake({
+      N: 16, spacing: 0.42, R: 0.15, rMin: 0.04, body: 0x56622e, belly: 0xc8c070, head_c: 0x5a662e, eye: 0x18160a, wide: 1.12,
+      head: {
+        len: 0.26, h: 0.12, w: 0.17, eyeT: 0.5, eyeUp: 0.42,
+        prof: [[-0.3, 0.42, 0.42, 0.5], [-0.05, 0.5, 0.5, 0.6], [0.35, 0.46, 0.44, 0.52], [0.7, 0.4, 0.36, 0.42], [0.95, 0.32, 0.28, 0.32], [1.0, 0.2, 0.18, 0.2]],
+        paint: function (x, y, z, ca, sa, c) { return ca > 0.1 && ca < 0.5 && Math.abs(sa) > 0.7 && x > -0.05 ? 0xd8a040 : c; },   // the orange stripe behind the eye
+      },
+      paint: function (f, ca, sa, c) {
+        // big black ovals in two staggered rows down the back; ringed spots
+        // with yellow centres along the flanks
+        const row = Math.sign(sa) || 1, ph = (f * 0.9 + (row > 0 ? 0 : 0.5)) % 1;
+        if (ca > 0.35) { const d = Math.hypot((ph - 0.5) * 2.2, (Math.abs(sa) - 0.45) * 3); if (d < 0.75) return 0x16160e; }
+        if (ca > -0.45 && ca < 0.2) {
+          const p2 = (f * 1.3 + 0.25) % 1, d2 = Math.hypot((p2 - 0.5) * 2.4, (ca + 0.12) * 4.5);
+          if (d2 < 0.45) return 0xc8a83a; if (d2 < 0.7) return 0x16160e;
+        }
+        return c;
+      },
+    });
+    P.ud = { spacing: 0.42, baseY: 0.135 };
+    return P;
+  }
+
   // ================================================================ REGISTRY
   const BODIES = {
     horse: function (r) {
@@ -930,11 +1144,15 @@
     snowshoe_hare: function () { return { key: "s", make: function () { return hare("snowshoe"); } }; },
   };
 
+  const SNAKES = {
+    garter_snake: garter, rattlesnake: rattlesnake, king_cobra: cobra, black_mamba: mamba, green_anaconda: anaconda,
+  };
   function build(id, ctx) {
+    if (SNAKES[id]) return snakeGroup(id, "s", SNAKES[id], ctx);
     const f = BODIES[id];
     if (!f) return null;
     const v = f((ctx && ctx.rng) || Math.random);
     return K.build(id, v.key, v.make, ctx);
   }
-  CBZ.beastBodies = { build: build, has: function (id) { return !!BODIES[id]; }, BODIES: BODIES };
+  CBZ.beastBodies = { build: build, has: function (id) { return !!(BODIES[id] || SNAKES[id]); }, BODIES: BODIES };
 })();

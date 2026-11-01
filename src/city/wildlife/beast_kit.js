@@ -136,7 +136,7 @@
     }
   };
   Part.prototype.ellipsoid = function (cx, cy, cz, rx, ry, rz, segs, colour, plain, rings) {
-    const st = [], n = rings || 4;
+    const st = [], n = Math.max(2, rings || 4);
     for (let i = 0; i < n; i++) {
       const t = -0.86 + 1.72 * i / (n - 1), k = Math.sqrt(1 - t * t);
       st.push({ x: cx + t * rx, y: cy, z: cz, rt: ry * k, rb: ry * k, w: rz * k, wts: W1 });
@@ -704,5 +704,5 @@
     return P;
   }
 
-  CBZ.beastKit = { build: build, quad: quad, mix: mix, shade: shade, smooth: smooth, grain: grain, Part: Part, sampleKeys: sampleKeys, patternMat: patternMat, PAINT: PAINT };
+  CBZ.beastKit = { build: build, quad: quad, coatMat: coatMat, mix: mix, shade: shade, smooth: smooth, grain: grain, Part: Part, sampleKeys: sampleKeys, patternMat: patternMat, PAINT: PAINT };
 })();

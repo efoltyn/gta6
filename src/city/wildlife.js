@@ -3129,9 +3129,16 @@
       s.position.z = Math.sin(a.phase - i * 0.7) * amp * Math.min(1, i / 2 + 0.35);
       s.position.y = (a.reared && i < a.rear) ? a.baseY + (a.rear - i) * a.spacing * 0.85 : a.baseY;
     }
+    // each segment faces along the curve toward the one ahead of it, so the
+    // lofted body bends with the wave instead of sliding sideways in steps
+    for (let i = segs.length - 1; i >= 1; i--) {
+      const s = segs[i], f = segs[i - 1]; if (!s || !f) continue;
+      s.rotation.y = -Math.atan2(f.position.z - s.position.z, f.position.x - s.position.x);
+    }
+    if (segs[0] && segs[1]) segs[0].rotation.y = segs[1].rotation.y;
     if (a.strikeAnim > 0) a.strikeAnim = Math.max(0, a.strikeAnim - dt * 4);
     if (a.hood) { const f = a.reared ? 1 : 0.12; for (let h = 0; h < a.hood.length; h++) if (a.hood[h]) a.hood[h].scale.setScalar(f); }
-    if (a.rattle && (a.reared || a.alarm > 0.1)) a.rattle.rotation.y = Math.sin(a.phase * 3.5) * 0.6;
+    if (a.rattle && (a.reared || a.alarm > 0.1)) a.rattle.rotation.y += Math.sin(a.phase * 3.5) * 0.6;   // the shake rides the yaw set above
   }
 
   function snakeTick(a, dt, P) {
