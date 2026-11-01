@@ -2277,7 +2277,8 @@
     const K = CBZ.horseKit;
     if (!K || !K.build || !K.pose) return null;
     let grp = null;
-    try { grp = K.build({ seed: 11 }); } catch (e) { grp = null; }
+    // seed 8: a bay gelding with black points, the commonest cavalry horse there is
+    try { grp = K.build({ seed: 8 }); } catch (e) { grp = null; }
     const rig = grp && grp.userData.horseRig;
     const sm = rig && rig.mesh;
     if (!sm || !sm.isSkinnedMesh || !rig.table) return null;
