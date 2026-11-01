@@ -292,7 +292,7 @@
   function elephant(bull) {
     const k = bull ? 1 : 0.84;
     const grey = 0x7f7a74;
-    const coat = { body: grey, back: 0x75706a, belly: 0x8a857e, leg: 0x7a756f, face: 0x7c7771, muzzle: 0x77726c, nose: 0x6a655f, hoof: 0xb4ab9a, earIn: 0x8e8178, tail: 0x6e6a64, tailTip: 0x2a2624, chin: 0x8a857e, eye: 0x2a1c14 };
+    const coat = { body: grey, back: 0x75706a, belly: 0x8a857e, leg: 0x7a756f, face: 0x7c7771, muzzle: 0x77726c, nose: 0x6a655f, hoof: 0x625e58, earIn: 0x8e8178, tail: 0x6e6a64, tailTip: 0x2a2624, chin: 0x8a857e, eye: 0x2a1c14 };
     const legP = function (front) {
       const x = front ? 0.95 * k : -0.95 * k;
       return front
@@ -318,7 +318,7 @@
         // breadth above the ground, the tip curled forward
         const t0 = E.hp(0.92, 0, 0);
         const drop = t0[1] - 0.55;    // the tip hangs a hand's breadth over the ground
-        const pts = [[t0[0], t0[1], 0, 0.22 * k], [t0[0] + 0.12 * k, t0[1] - 0.27 * drop, 0, 0.17 * k], [t0[0] + 0.1 * k, t0[1] - 0.6 * drop, 0, 0.12 * k], [t0[0] + 0.02 * k, t0[1] - 0.86 * drop, 0, 0.085 * k], [t0[0] + 0.12 * k, t0[1] - drop, 0, 0.065 * k]];
+        const pts = [[t0[0], t0[1], 0, 0.26 * k], [t0[0] + 0.12 * k, t0[1] - 0.27 * drop, 0, 0.2 * k], [t0[0] + 0.1 * k, t0[1] - 0.6 * drop, 0, 0.14 * k], [t0[0] + 0.02 * k, t0[1] - 0.86 * drop, 0, 0.1 * k], [t0[0] + 0.12 * k, t0[1] - drop, 0, 0.08 * k]];
         E.head.tube(pts, 14, 12, function (x, y, z, ca, sa, R) {
           // wrinkle rings round the trunk
           const t = R.t != null ? R.t : 0;
@@ -506,10 +506,11 @@
         [-1, 1].forEach(function (s) {
           const base = E.hp(0.04, E.H.D * 0.4, s * E.H.Wd * 0.6);
           const pal = 0x7a654a;
-          E.head.tube([[base[0], base[1], base[2], 0.045], [base[0] - 0.02, base[1] + 0.06, base[2] + s * 0.22, 0.04], [base[0] - 0.05, base[1] + 0.12, base[2] + s * 0.42, 0.11], [base[0] - 0.04, base[1] + 0.24, base[2] + s * 0.62, 0.16], [base[0] - 0.02, base[1] + 0.36, base[2] + s * 0.74, 0.08]], 8, 9, pal, true, { flat: 2.4, side: [1, 0, 0] });
+          // the beam runs out sideways, then opens into a broad flat palm tilted up and out
+          E.head.tube([[base[0], base[1], base[2], 0.045], [base[0] - 0.02, base[1] + 0.04, base[2] + s * 0.2, 0.04], [base[0] - 0.04, base[1] + 0.1, base[2] + s * 0.4, 0.035], [base[0] - 0.06, base[1] + 0.2, base[2] + s * 0.6, 0.04], [base[0] - 0.06, base[1] + 0.3, base[2] + s * 0.76, 0.02]], 8, 8, pal, true, { flat: 6.5, side: [1, 0, 0] });
           for (let i = 0; i < 6; i++) {
-            const t = i / 5, px = base[0] - 0.24 + t * 0.5, pz = base[2] + s * (0.64 + Math.sin(t * Math.PI) * 0.16), py = base[1] + 0.3 + Math.sin(t * Math.PI) * 0.06;
-            E.head.tube([[px, py, pz, 0.03], [px + (t - 0.5) * 0.1, py + 0.16, pz + s * 0.06, 0.008]], 3, 5, mix(pal, 0xe6dcc4, 0.5), true);
+            const t = i / 5, px = base[0] - 0.3 + t * 0.48, pz = base[2] + s * (0.62 + Math.sin(t * Math.PI) * 0.18), py = base[1] + 0.22 + Math.sin(t * Math.PI) * 0.08;
+            E.head.tube([[px, py, pz, 0.028], [px + (t - 0.5) * 0.08, py + 0.14, pz + s * 0.08, 0.008]], 3, 5, mix(pal, 0xe6dcc4, 0.5), true);
           }
         });
       },
@@ -760,7 +761,7 @@
     const coat = { body: 0x1e1c1c, back: 0x262424, belly: 0x2a2626, leg: 0x1a1818, face: 0x141212, muzzle: 0x161414, nose: 0x0e0c0c, earIn: 0x1a1818, eye: 0x3a2214, chin: 0x161414, pad: 0x161414, claw: 0x161414 };
     return K.quad({
       fam: "bear", L: 0.95, WH: 1.3, HH: 0.86, chest: 0.62, belly: 0.5, W: 0.34, coat: coat, jaw: true, sq: 0.9,
-      torsoKeys: [[-0.52, 0.86, 0.56, 0.24], [-0.44, 1.0, 0.48, 0.3], [-0.2, 1.12, 0.48, 0.34], [0.05, 1.28, 0.52, 0.38], [0.28, 1.4, 0.62, 0.38], [0.42, 1.35, 0.75, 0.3], [0.5, 1.22, 0.88, 0.2]],
+      torsoKeys: [[-0.48, 0.8, 0.6, 0.18], [-0.4, 0.9, 0.5, 0.25], [-0.2, 1.0, 0.5, 0.29], [0.05, 1.16, 0.55, 0.34], [0.25, 1.32, 0.68, 0.4], [0.4, 1.32, 0.84, 0.34], [0.48, 1.2, 0.96, 0.22]],
       neck: { len: 0.2, ang: 38, r0: 0.22, r1: 0.18 },
       head: { len: 0.3, D: 0.36, Wd: 0.15, ang: 8, dx: 0.06, dy: 0.02, muzzleAt: 0.6, prof: [[-0.1, 0.62, 0.36, 0.42], [0.1, 0.62, 0.46, 0.52], [0.4, 0.42, 0.5, 0.52], [0.7, 0.24, 0.42, 0.42], [0.92, 0.22, 0.34, 0.36], [1.0, 0.16, 0.24, 0.26]] },
       ear: { len: 0.04, w: 0.045, kind: "round", up: 0, out: 85, back: 0, s: 0.98, u: 0.0, t: 0.32 },
@@ -768,7 +769,7 @@
       legZ: 0.3, claws: 0,
       legPts: function (front) {
         return front
-          ? [[0.32, 1.22, 0.13, 0.13, 0.11], [0.36, 0.95, 0.12, 0.12, 0.1], [0.34, 0.66, 0.1, 0.1, 0.09], [0.36, 0.38, 0.1, 0.1, 0.09], [0.38, 0.12, 0.075, 0.075, 0.075], [0.42, 0.03, 0.07, 0.06, 0.08], [0.43, 0.004, 0.05, 0.05, 0.065]]
+          ? [[0.32, 1.2, 0.16, 0.16, 0.13], [0.36, 0.95, 0.13, 0.13, 0.11], [0.34, 0.66, 0.1, 0.1, 0.09], [0.36, 0.38, 0.1, 0.1, 0.09], [0.38, 0.12, 0.075, 0.075, 0.075], [0.42, 0.03, 0.07, 0.06, 0.08], [0.43, 0.004, 0.05, 0.05, 0.065]]
           : [[-0.32, 0.8, 0.14, 0.14, 0.11], [-0.18, 0.55, 0.12, 0.12, 0.1], [-0.12, 0.38, 0.1, 0.1, 0.085], [-0.22, 0.12, 0.075, 0.075, 0.07], [-0.2, 0.03, 0.06, 0.06, 0.07], [-0.08, 0.004, 0.05, 0.04, 0.07]];
       },
       paint: function (part, x, y, z, ca, sa, t, col) {
