@@ -40,4 +40,20 @@
     window.__storeShelfPlan = m && m.plan;
     return function () { return [grp]; };
   };
+  // the pawnbroker's room (city/pawnshop.js through CBZ.pawnShopBuildNow):
+  // the counter across the middle, the shelving run on the back wall at +z
+  window.__pawnShelf = function () {
+    const THREE = window.THREE, CBZ = window.CBZ;
+    const grp = new THREE.Group();
+    const m = new THREE.MeshLambertMaterial({ color: 0xd6cdb8 });
+    const fl = new THREE.Mesh(new THREE.BoxGeometry(10, 0.2, 9), new THREE.MeshLambertMaterial({ color: 0x8a7a66 })); fl.position.set(0, 0.1, 0); grp.add(fl);
+    const bw = new THREE.Mesh(new THREE.BoxGeometry(10, 3.2, 0.3), m); bw.position.set(0, 1.8, 3.35); grp.add(bw);
+    CBZ.scene.add(grp);
+    window.__pawn = CBZ.pawnShopBuildNow ? CBZ.pawnShopBuildNow({
+      FY: 0.2, C: { x: 0, z: -1.2, w: 3.6, d: 0.7, top: 1.15, tx: 1, tz: 0 },
+      wall: { x: 0, z: 3.2, yaw: Math.PI }, runMax: 6.2, root: CBZ.scene,
+      bounds: { minX: -5, maxX: 5, minZ: -4.5, maxZ: 3.2 },
+    }) : null;
+    return function () { return [grp]; };
+  };
 })();

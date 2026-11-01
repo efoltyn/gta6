@@ -1823,19 +1823,19 @@
       for (const sx of [-1, 1]) for (const sy of [0, 1]) for (const sz of [-1, 1])
         bx(g, metal, 0.030, 0.030, 0.030, sx * (W / 2 - 0.012), sy ? H - 0.012 : 0.012, sz * (D / 2 - 0.012));
     },
-    // A FLAT TV: a 43" panel on its two feet, the black glass, the thin
-    // bezel, the logo strip under the screen. Standing, screen to +Z.
+    // A FLAT TV: a 32" panel on its two feet (the set a pawnbroker has six
+    // of), the black glass, the thin bezel, the logo under the screen.
     flattv: function (g) {
       const back = S(0x1d1f23), glass = S(0x0e1116), sheen = S(0x26324a), foot = S(0x2a2d32), logo = S(0x8d9198);
-      const W = 0.970, H = 0.565, D = 0.040, lift = 0.075;
+      const W = 0.730, H = 0.430, D = 0.040, lift = 0.065;
       bx(g, back, W, H, D, 0, lift + H / 2, -0.010);
       bx(g, glass, W - 0.016, H - 0.016, 0.004, 0, lift + H / 2, D / 2 - 0.008);
       bx(g, sheen, W * 0.42, H - 0.030, 0.0008, -W * 0.12, lift + H / 2, D / 2 - 0.0055, 0, 0, 0);
-      bx(g, back, 0.380, 0.250, 0.060, 0, lift + H * 0.45, -0.050);                // the electronics bulge
+      bx(g, back, 0.300, 0.200, 0.050, 0, lift + H * 0.45, -0.045);                // the electronics bulge
       bx(g, logo, 0.040, 0.006, 0.002, 0, lift + 0.006, D / 2 - 0.009);
       for (const s of [-1, 1]) {
-        bx(g, foot, 0.022, lift + 0.040, 0.020, s * 0.380, (lift + 0.040) / 2, 0, 0.0, 0, 0);
-        bx(g, foot, 0.040, 0.012, 0.200, s * 0.380, 0.006, 0.010);
+        bx(g, foot, 0.022, lift + 0.040, 0.020, s * 0.280, (lift + 0.040) / 2, 0, 0.0, 0, 0);
+        bx(g, foot, 0.040, 0.012, 0.170, s * 0.280, 0.006, 0.010);
       }
     },
     // A TOOLBOX: the red steel cantilever box, the black handle, two chrome
