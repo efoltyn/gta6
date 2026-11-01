@@ -3730,9 +3730,9 @@
       else {
         u = (yHip - y) / Math.max(0.05, yHip - yHem);
         const f = 1 + (hem.flare - 1) * Math.pow(u, 1.15);
-        a = w0.a * (1 + (f - 1) * 0.75); zf = w0.zf * f; zb = w0.zb * (1 + (f - 1) * 0.9); n = 2.6 - 0.4 * u;
+        a = w0.a * (1 + (f - 1) * 0.4 * u); zf = w0.zf * f; zb = w0.zb * (1 + (f - 1) * 0.9); n = 2.6 - 0.4 * u;
       }
-      const off = 0.014 + 0.004 * u;
+      const off = 0.024 + 0.004 * u;
       const k = inner ? 0.965 : 1;
       for (let j = 0; j < N; j++) {
         const th = j / N * Math.PI * 2, sn = Math.sin(th), cs = Math.cos(th);
