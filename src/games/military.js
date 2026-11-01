@@ -257,6 +257,10 @@
 
     const gy = floorY(origin.x, origin.z);            // base pad height (≈0)
 
+    // THE BASE'S HARDWARE (2026-10-31 rebuild): every static prop below is
+    // drawn into ONE merged store-fixture kit (city/gunstore.js) and built at
+    // the end, so the whole base is a handful of draw calls.
+    V.kit = CBZ.storeFixtureKit ? CBZ.storeFixtureKit.create() : null;
     buildGate(ctx, gy);
     buildFixer(ctx);
     buildPrototype(ctx, gy);
@@ -268,6 +272,7 @@
     buildElectricFence(ctx, gy);
     buildSearchlights(ctx, gy);
     spawnBaseGuards(ctx);
+    if (V.kit) { const fix = new THREE.Group(); fix.name = "base-fixtures"; V.kit.build(fix); g.add(fix); V.kit = null; }
 
     // ---- ZONES: the interface surface (interactions #14) ----
     ctx.zone({ id: "fixer", label: "[E] The fixer's contract", pos: [V.fixerAt[0], V.fixerAt[1]], r: 3.4, onUse: openBriefing });
@@ -283,13 +288,53 @@
   function buildGate(ctx, gy) {
     const o = V.origin;
     const lGateX = V.gateX - o.x;                      // ≈ +240 local
-    // a striped boom + posts reading as a checkpoint; the extraction crash point
-    ctx.box(V.group, lGateX, gy + 1.1, 0, 0.6, 0.2, 26, ctx.emat(M.warn, 0.35));     // boom bar across the lane
-    ctx.box(V.group, lGateX, gy + 1.1, -13.5, 0.7, 2.2, 0.7, ctx.mat(M.red));         // post N
-    ctx.box(V.group, lGateX, gy + 1.1, 13.5, 0.7, 2.2, 0.7, ctx.mat(M.red));          // post S
-    // RED-lock barrier: a reinforced slab that seals the on-foot causeway mouth
-    // when alert hits RED. Off by default (raised); toggled in setTier().
-    const bar = ctx.box(V.group, lGateX + 1.4, gy + 1.4, 0, 0.8, 2.8, 26, ctx.mat(M.steelD));
+    // the checkpoint: two boom-barrier housings with counterweights and
+    // red/white striped arms meeting on the centreline, stop signs, a guard
+    // booth. The extraction crash point.
+    const k = V.kit;
+    if (k) {
+      k.frame(lGateX, gy, 0, 0);
+      for (const e of [-1, 1]) {
+        const z = e * 13.5;
+        k.box(0, 0.5, z, 0.5, 1.0, 0.6, 0xd8d6cc, "gloss");                     // housing
+        k.box(0, 1.02, z, 0.56, 0.05, 0.66, 0x3a3e46, "metal");
+        k.cyl(0, 1.1, z, 0.09, 0.09, 0.2, 0x3a3e46, "metal", 0, 0, Math.PI / 2, 12);   // pivot drum
+        k.box(0, 1.1, z + e * 0.7, 0.18, 0.3, 0.7, 0x2a2d33, "metal");          // counterweight
+        // the arm: 13 m of striped aluminium out to the centreline
+        const n = 13;
+        for (let i = 0; i < n; i++) k.box(0, 1.1, z - e * (0.5 + i), 0.09, 0.09, 1.0, i % 2 ? 0xc0392b : 0xf2f0ea, "gloss");
+        k.box(0, 0.45, -e * 0.4, 0.12, 0.9, 0.12, 0x3a3e46, "metal");           // the arm's rest post on the centreline
+        k.cyl(0.4, 1.2, z + e * 0.6, 0.012, 0.012, 2.4, 0x8a9098, "metal", 0, 0, 0, 6);   // stop sign post
+        k.cyl(0.4, 2.3, z + e * 0.6, 0.3, 0.3, 0.02, 0xc0392b, "gloss", 0, 0, Math.PI / 2, 8);
+        k.cyl(0.41, 2.3, z + e * 0.6, 0.26, 0.26, 0.022, 0xf2f0ea, "gloss", 0, 0, Math.PI / 2, 8);
+        k.cyl(0.42, 2.3, z + e * 0.6, 0.24, 0.24, 0.022, 0xc0392b, "gloss", 0, 0, Math.PI / 2, 8);
+      }
+      // the guard booth beside the north post
+      k.frame(lGateX - 3, gy, -16.5, 0);
+      k.box(0, 0.06, 0, 2.2, 0.12, 2.2, 0x6a6e66);
+      k.box(0, 1.25, 0, 2.0, 2.3, 2.0, M.olive, "gloss");
+      k.box(0, 1.55, 1.005, 1.6, 0.9, 0.02, 0, "glass"); k.box(1.005, 1.55, 0, 0.02, 0.9, 1.6, 0, "glass");
+      k.box(0, 2.48, 0, 2.4, 0.16, 2.4, M.oliveD, "gloss");
+      k.box(0, 2.62, 0, 0.3, 0.12, 0.3, 0xffb43a, "glow");                       // the beacon
+    }
+    // RED-lock barrier: a row of concrete Jersey barriers that seals the
+    // on-foot causeway mouth when alert hits RED. Off by default; toggled in
+    // gateLock(). Its own group so it can appear and vanish.
+    const bar = new THREE.Group(); bar.position.set(lGateX + 1.4, gy, 0); V.group.add(bar);
+    {
+      const jk = CBZ.storeFixtureKit ? CBZ.storeFixtureKit.create() : null;
+      if (jk) {
+        jk.frame(0, 0, 0, 0);
+        for (let i = 0; i < 9; i++) {
+          const z = -12 + i * 3.0;
+          jk.box(0, 0.12, z, 0.62, 0.24, 2.95, 0xa8a49a);                       // the foot
+          jk.box(0, 0.4, z, 0.4, 0.34, 2.95, 0xb0aca2, "solid");                // the slope
+          jk.box(0, 0.83, z, 0.16, 0.52, 2.95, 0xb8b4aa, "solid");              // the stem
+          jk.box(0.081, 0.6, z, 0.004, 0.08, 2.4, 0xd4a017, "solid");          // reflective stripe
+        }
+        jk.build(bar);
+      }
+    }
     bar.visible = false;
     V.barrier = { mesh: bar, col: null, y: gy + 1.4, lx: lGateX + 1.4 };
     V.fixerAt = [lGateX - 14, 8];                      // fixer stands just inside
@@ -334,8 +379,10 @@
     const [lx, lz] = site("proto", [-170, -160]);
     const g = V.group;
     // 3-wall revetment (open on the SE side). The walls are REAL LOS blockers,
-    // so a clean photo demands the open side — cover IS the puzzle.
-    const wallMat = ctx.mat(M.oliveD);
+    // so a clean photo demands the open side — cover IS the puzzle. The LOS
+    // proxies are the three invisible slabs (r128 raycasts hidden meshes);
+    // what you SEE is a Hesco wall: wire-mesh gabions full of sand, 1.1 m cubes.
+    const wallMat = new THREE.MeshBasicMaterial({ visible: false });
     const w1 = ctx.box(g, lx, gy + 2.2, lz - 6, 18, 4.4, 0.8, wallMat);   // back (N)
     const w2 = ctx.box(g, lx - 8.6, gy + 2.2, lz, 0.8, 4.4, 12, wallMat); // W
     const w3 = ctx.box(g, lx, gy + 2.2, lz + 6, 9, 4.4, 0.8, wallMat);    // partial front (S), leaves SE gap
@@ -343,12 +390,73 @@
     C.solid(lx - 9, lz - 6.4, lx + 9, lz - 5.6);
     C.solid(lx - 9, lz - 6, lx - 8.2, lz + 6);
     C.solid(lx - 4.5, lz + 5.6, lx + 4.5, lz + 6.4);
-    // the prototype — a shrouded next-gen airframe on a cradle
-    ctx.box(g, lx, gy + 0.9, lz, 3.4, 0.5, 9.5, ctx.pmat(M.protoBody, 20));           // fuselage
-    ctx.box(g, lx, gy + 1.5, lz - 1.5, 8.5, 0.35, 3.2, ctx.pmat(M.protoBody, 20));     // blended wing
-    ctx.box(g, lx, gy + 1.35, lz + 3.4, 1.1, 0.6, 1.6, ctx.emat(M.protoGlass, 0.4));   // canopy glow
-    ctx.box(g, lx, gy + 2.0, lz - 3.6, 0.3, 1.4, 1.4, ctx.pmat(M.protoBody, 20));      // tail fin
-    ctx.box(g, lx, gy + 0.25, lz, 2.0, 0.5, 8.0, ctx.mat(M.steelD));                   // cradle
+    const k = V.kit;
+    if (k) {
+      const hesco = (cx, cz, len, alongX) => {
+        k.frame(lx + cx, gy, lz + cz, alongX ? 0 : Math.PI / 2);
+        const n = Math.round(len / 1.1), u = len / n;
+        for (let r = 0; r < 4; r++) for (let i = 0; i < n; i++) {
+          const x = -len / 2 + (i + 0.5) * u, y = r * 1.1 + 0.55;
+          const sand = [0xb8a47a, 0xb09c72, 0xc0ac82][(i + r) % 3];
+          k.box(x, y, 0, u - 0.04, 1.06, 0.8, sand);
+          for (const e of [-1, 1]) {                                         // the gabion's wire frame
+            k.box(x, y, e * 0.405, u - 0.02, 0.02, 0.012, 0x6a6e66, "metal");
+            k.box(x + (u / 2 - 0.02), y, e * 0.405, 0.02, 1.06, 0.012, 0x6a6e66, "metal");
+            k.box(x, y + 0.52, e * 0.405, u - 0.02, 0.02, 0.012, 0x6a6e66, "metal");
+          }
+        }
+      };
+      hesco(0, -6, 18, true); hesco(-8.6, 0, 12, false); hesco(0, 6, 9, true);
+      // the prototype: a blended-wing airframe under a tie-down tarp on its
+      // tow cradle; the landing gear and the nose probe show under the hem
+      k.frame(lx, gy, lz, 0);                                                  // nose toward +z
+      k.box(0, 0.22, 0, 2.2, 0.16, 8.4, M.steelD, "metal");                   // cradle beams
+      for (const z of [-3.2, 0, 3.2]) k.box(0, 0.12, z, 3.0, 0.24, 0.3, M.steelD, "metal");
+      for (const e of [-1, 1]) for (const z of [-3.6, 3.6]) k.cyl(e * 1.3, 0.16, z, 0.16, 0.16, 0.14, 0x141414, "solid", 0, 0, Math.PI / 2, 12);
+      // the tarp: a lofted blended planform, draped (lower at the edges)
+      const tarp = [];
+      const NX = 14, NZ = 18, span = 8.6, len = 10.4;
+      const half = (z) => { const t = (z + len / 2) / len; return span / 2 * Math.max(0.12, Math.min(1, 0.2 + 1.6 * (1 - t))) * (t < 0.15 ? t / 0.15 : 1); };
+      const pos = [], idx = [];
+      for (let j = 0; j <= NZ; j++) {
+        const z = -len / 2 + (j / NZ) * len, hw = Math.max(0.35, half(z));
+        for (let i = 0; i <= NX; i++) {
+          const u = i / NX * 2 - 1, x = u * hw;
+          const crown = 1.95 - 0.55 * Math.abs(u) - 0.9 * u * u;
+          const sag = 0.08 * Math.sin(i * 1.3 + j * 0.7);
+          const y = Math.max(0.55, crown * (0.75 + 0.25 * Math.sin(Math.PI * j / NZ))) - sag;
+          pos.push(x, y, z);
+        }
+      }
+      for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+        const a = j * (NX + 1) + i, b = a + 1, c = a + NX + 1, d = c + 1;
+        idx.push(a, c, b, b, c, d);
+      }
+      const tg = new THREE.BufferGeometry();
+      tg.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      tg.setIndex(idx); tg.computeVertexNormals();
+      k.push(tg, 0x3a3f2c, "solid");
+      // the hem straps down to ground stakes, the nose probe, the gear legs
+      for (let j = 1; j < 6; j++) {
+        const z = -len / 2 + j * (len / 6), hw = Math.max(0.35, half(z));
+        for (const e of [-1, 1]) k.box(e * (hw + 0.3), 0.35, z, 0.04, 0.7, 0.05, 0xd4a017, "solid", 0, 0, e * 0.6);
+      }
+      k.cyl(0, 1.05, len / 2 + 0.6, 0.02, 0.05, 1.2, 0x2a2d33, "metal", Math.PI / 2, 0, 0, 8);
+      for (const p of [[0, 4.2], [-1.6, -0.8], [1.6, -0.8]]) {
+        k.cyl(p[0], 0.55, p[1], 0.05, 0.05, 0.7, 0x8a9098, "metal", 0, 0, 0, 8);
+        k.cyl(p[0], 0.3, p[1], 0.28, 0.28, 0.2, 0x141414, "solid", 0, 0, Math.PI / 2, 14);
+      }
+      // a tow tug parked at the open side and a light tower over the hangar pad
+      k.frame(lx + 5.2, gy, lz + 3.2, -0.6);
+      k.box(0, 0.5, 0, 1.5, 0.6, 2.6, 0xd4a017, "gloss");
+      k.box(0, 1.0, -0.6, 1.2, 0.5, 0.8, 0x2a2d33, "gloss");
+      for (const e of [-1, 1]) for (const f of [-0.8, 0.8]) k.cyl(e * 0.78, 0.3, f, 0.3, 0.3, 0.22, 0x141414, "solid", 0, 0, Math.PI / 2, 12);
+      k.frame(lx + 6.5, gy, lz - 3.5, 0);
+      k.box(0, 0.5, 0, 1.4, 1.0, 2.2, 0xd8d6cc, "gloss");
+      k.cyl(0, 3.4, 0, 0.06, 0.08, 5.0, 0x8a9098, "metal", 0, 0, 0, 8);
+      k.box(0, 5.9, 0, 1.6, 0.3, 0.2, 0x2a2d33, "metal");
+      for (let i = 0; i < 4; i++) k.box(-0.6 + i * 0.4, 5.9, -0.11, 0.3, 0.22, 0.01, 0xfff4dc, "glow");
+    }
     C.solid(lx - 4.4, lz - 4.9, lx + 4.4, lz + 4.9, 0, 1.4);
     ctx.light(lx, gy + 3.4, lz + 3, M.protoGlass, 0.5, 12);
     // a warning placard
@@ -362,33 +470,82 @@
   function buildComms(ctx, gy) {
     const [lx, lz] = site("comms", [80, -175]);
     const g = V.group;
-    // a lattice mast: 4 legs + cross-braces + a stack of antennas (chunky ≥0.3u)
-    const legMat = ctx.mat(M.antenna);
-    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {
-      const leg = ctx.box(g, lx + sx * 1.3, gy + 6, lz + sz * 1.3, 0.35, 12, 0.35, legMat);
-      leg.rotation.set(sz * 0.05, 0, -sx * 0.05);
-    });
-    for (let h = 2; h <= 10; h += 2) {
-      ctx.box(g, lx, gy + h, lz, 3.0, 0.3, 0.3, legMat);
-      ctx.box(g, lx, gy + h, lz, 0.3, 0.3, 3.0, legMat);
+    // a 14 m lattice mast: four angle legs tapering to the top, K-braced
+    // faces, a microwave dish, panel antennas, the whip, the aviation lamp,
+    // and at its foot the equipment shelter and the junction box (the tap point)
+    const k = V.kit;
+    if (k) {
+      k.frame(lx, gy, lz, 0);
+      const H = 14, b0 = 1.3, b1 = 0.4;
+      const at = (y) => b0 + (b1 - b0) * (y / H);
+      const P = (sx, y, sz) => new THREE.Vector3(sx * at(y), y, sz * at(y));
+      const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+      corners.forEach((c) => strut(k, P(c[0], 0, c[1]), P(c[0], H, c[1]), 0.05, M.antenna));
+      for (let y = 0; y < H - 0.1; y += 1.75) {
+        const y2 = Math.min(H, y + 1.75);
+        for (let f = 0; f < 4; f++) {
+          const a = corners[f], b = corners[(f + 1) % 4];
+          strut(k, P(a[0], y2, a[1]), P(b[0], y2, b[1]), 0.025, M.antenna);          // the ring
+          strut(k, P(a[0], y, a[1]), P(b[0], y2, b[1]), 0.02, M.antenna);           // the X brace
+          strut(k, P(b[0], y, b[1]), P(a[0], y2, a[1]), 0.02, M.antenna);
+        }
+      }
+      k.cyl(0, H + 1.6, 0, 0.03, 0.06, 3.2, M.antenna, "metal", 0, 0, 0, 8);                    // the whip
+      k.cyl(0, H + 0.1, 0, 0.12, 0.12, 0.14, 0xff3a2a, "glow", 0, 0, 0, 10);                    // aviation lamp
+      // the dish: a shallow bowl on its yoke, aimed east
+      k.push(new THREE.SphereGeometry(0.75, 16, 6, 0, Math.PI * 2, 0, 0.6), 0xe8e8e4, "gloss", 0.9, 11.5, 0, 0, 0, -Math.PI / 2);
+      k.cyl(0.62, 11.5, 0, 0.05, 0.05, 0.5, 0x8a9098, "metal", 0, 0, Math.PI / 2, 8);
+      for (let f = 0; f < 3; f++) {                                                              // sector panels
+        const a = f * 2.094 + 0.5;
+        k.box(Math.sin(a) * 0.62, 9.2, Math.cos(a) * 0.62, 0.3, 1.3, 0.12, 0xdcdcd8, "gloss", 0, a, 0);
+      }
+      // the shelter and the junction box
+      k.box(-2.6, 1.3, 0, 2.2, 2.6, 2.4, 0xd8d6cc, "gloss");
+      k.box(-2.6, 2.66, 0, 2.4, 0.12, 2.6, 0xb0aca2, "metal");
+      k.box(-1.49, 1.05, 0.4, 0.02, 2.0, 0.9, 0x8a9098, "metal");
+      k.box(-2.6, 2.0, -1.22, 0.8, 0.5, 0.04, 0x8a9098, "metal");                                 // HVAC unit
+      k.box(0, 1.0, 0, 1.0, 1.6, 0.6, 0x5a6042, "gloss");
+      k.box(0, 1.0, 0.305, 0.9, 1.5, 0.012, 0x4a5036, "gloss");
+      k.box(0.36, 1.0, 0.315, 0.04, 0.14, 0.02, 0x8a9098, "metal");                                // the latch
+      k.box(-0.3, 1.55, 0.315, 0.08, 0.08, 0.01, 0x35d07a, "glow");                                // status LED
+      k.cyl(0, 2.0, 0, 0.04, 0.04, 0.8, 0x2a2d33, "metal", 0, 0, 0, 6);                            // conduit up the mast
     }
-    ctx.cyl(g, lx, gy + 13, lz, 0.12, 0.18, 4, legMat, 8);                  // whip
-    ctx.box(g, lx + 1.2, gy + 11.5, lz, 2.2, 0.2, 0.6, ctx.mat(M.steel));   // dish arm
-    ctx.box(g, lx, gy + 1.0, lz, 1.4, 2.0, 1.0, ctx.mat(M.steelD));         // junction box (the tap point)
-    ctx.emat && ctx.box(g, lx + 0.75, gy + 1.0, lz, 0.06, 0.5, 0.5, ctx.emat(0x35d07a, 0.6)); // status LED
     C.solid(lx - 1.8, lz - 1.8, lx + 1.8, lz + 1.8, 0, 12);
     ctx.light(lx, gy + 12, lz, 0xff5a4a, 0.5, 14);                          // red aviation lamp
     V.comms = { lx, lz, wx: V.origin.x + lx, wz: V.origin.z + lz, y: gy + 1.2 };
+  }
+
+  // a round member between two points, baked into the fixture kit
+  const _sy = new THREE.Vector3(0, 1, 0), _sq = new THREE.Quaternion(), _se = new THREE.Euler();
+  function strut(k, a, b, r, col) {
+    const d = new THREE.Vector3().subVectors(b, a), len = d.length();
+    if (len < 1e-4) return;
+    _sq.setFromUnitVectors(_sy, d.multiplyScalar(1 / len)); _se.setFromQuaternion(_sq);
+    k.cyl((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2, r, r, len, col, "metal", _se.x, _se.y, _se.z, 6);
   }
 
   /* -------------------------------------------------------- GENERATOR ---- */
   function buildGenerator(ctx, gy) {
     const [lx, lz] = site("gen", [-30, 44]);
     const g = V.group;
-    ctx.box(g, lx, gy + 1.6, lz, 6, 3.2, 4, ctx.mat(M.olive));              // shed
-    ctx.box(g, lx, gy + 3.3, lz, 6.4, 0.3, 4.4, ctx.mat(M.oliveD));         // roof
-    ctx.box(g, lx + 2.2, gy + 1.4, lz + 2.05, 1.4, 1.6, 0.2, ctx.emat(M.warn, 0.5)); // breaker panel
-    ctx.cyl(g, lx - 2.6, gy + 1.2, lz - 1.4, 0.5, 0.5, 2.4, ctx.mat(M.dark), 10);     // exhaust stack
+    // a containerized diesel genset: louvred olive container on skids, its
+    // exhaust stack with a rain cap, a day tank, and the breaker panel (lit)
+    const k = V.kit;
+    if (k) {
+      k.frame(lx, gy, lz, 0);
+      for (const e of [-1, 1]) k.box(0, 0.1, e * 1.6, 6.0, 0.2, 0.2, M.steelD, "metal");
+      k.box(0, 1.65, 0, 5.9, 2.9, 3.8, M.olive, "gloss");
+      for (let i = 0; i < 18; i++) k.box(-2.85 + i * 0.335, 1.65, 1.905, 0.04, 2.7, 0.02, M.oliveD, "gloss");   // corrugation
+      for (let i = 0; i < 6; i++) k.box(-1.2, 0.8 + i * 0.18, 1.92, 1.6, 0.04, 0.03, 0x2a2d33, "metal", 0.5);    // louvres
+      k.box(1.2, 1.4, 1.915, 1.0, 2.0, 0.02, M.oliveD, "gloss");                                             // the access door
+      k.box(1.62, 1.4, 1.93, 0.04, 0.2, 0.03, 0x8a9098, "metal");
+      k.cyl(-2.6, 3.6, -1.4, 0.18, 0.18, 1.2, 0x3a3e46, "metal", 0, 0, 0, 12);                              // exhaust stack
+      k.cyl(-2.6, 4.25, -1.4, 0.3, 0.2, 0.1, 0x3a3e46, "metal", 0, 0, 0, 12);                              // rain cap
+      k.cyl(2.5, 0.8, -2.6, 0.5, 0.5, 1.6, 0xd8d6cc, "gloss", 0, 0, Math.PI / 2, 14);                     // day tank
+      k.box(2.2, 1.4, 2.0, 1.4, 1.6, 0.18, 0x8a9098, "metal");                                             // breaker panel
+      k.box(2.2, 1.4, 2.095, 1.3, 1.5, 0.01, M.warn, "glow");
+      for (let i = 0; i < 4; i++) k.box(1.8 + i * 0.26, 1.2, 2.11, 0.06, 0.18, 0.02, 0x1a1c20, "metal");
+    }
     C.solid(lx - 3, lz - 2, lx + 3, lz + 2, 0, 3.2);
     signPlate(ctx, lx + 2.2, gy + 2.6, lz + 2.2, "DANGER HIGH VOLTAGE", 0);
     V.gen = { lx, lz };
@@ -415,8 +572,26 @@
   function buildMess(ctx, gy) {
     const [lx, lz] = site("mess", [150, -70]);
     const g = V.group;
-    ctx.box(g, lx, gy + 2, lz, 16, 4, 10, ctx.mat(0x6f7560));               // mess hall
-    ctx.box(g, lx, gy + 4.1, lz, 16.6, 0.3, 10.6, ctx.mat(M.oliveD));       // roof
+    // a prefab mess hall: ribbed metal walls on a concrete plinth, a pitched
+    // roof with a ridge cap, windows, double doors on the +z face, AC units
+    const k = V.kit;
+    if (k) {
+      k.frame(lx, gy, lz, 0);
+      k.box(0, 0.15, 0, 16.4, 0.3, 10.4, 0x8a8880);
+      k.box(0, 2.15, 0, 16, 3.7, 10, 0x6f7560, "gloss");
+      for (let i = 0; i <= 32; i++) for (const e of [-1, 1]) k.box(-8 + i * 0.5, 2.15, e * 5.01, 0.05, 3.7, 0.02, 0x62684f, "gloss");
+      for (let i = 0; i <= 20; i++) for (const e of [-1, 1]) k.box(e * 8.01, 2.15, -5 + i * 0.5, 0.02, 3.7, 0.05, 0x62684f, "gloss");
+      for (const e of [-1, 1]) k.box(0, 4.55, e * 2.6, 16.6, 0.12, 5.6, M.oliveD, "gloss", e * 0.18, 0, 0);   // roof planes
+      k.box(0, 5.02, 0, 16.6, 0.14, 0.4, 0x3a3e46, "metal");
+      for (let i = -3; i <= 3; i++) if (i !== 0) {                                                        // windows
+        k.box(i * 2.1, 2.5, 5.03, 1.2, 0.9, 0.04, 0x2a2d33, "metal");
+        k.box(i * 2.1, 2.5, 5.05, 1.08, 0.78, 0.01, 0xffe0a0, "glow");
+      }
+      k.box(0, 1.25, 5.03, 1.9, 2.3, 0.05, 0x3a3e46, "metal");                                            // double doors
+      k.box(0, 1.25, 5.06, 0.02, 2.2, 0.02, 0x1a1c20);
+      k.box(0, 0.12, 5.6, 2.4, 0.24, 1.0, 0x8a8880);                                                      // the step
+      for (const z of [-2, 2]) { k.box(8.4, 1.0, z, 0.7, 0.9, 1.0, 0xd8d6cc, "gloss"); k.cyl(8.76, 1.0, z, 0.3, 0.3, 0.02, 0x2a2d33, "metal", 0, 0, Math.PI / 2, 12); }
+    }
     C.solid(lx - 8, lz - 5, lx + 8, lz + 5, 0, 4);
     // the timetable light: ON = off-shift guards route here to eat (patrol window)
     V.messLight = ctx.light(lx, gy + 3.4, lz + 5.6, M.lamp, 0.0, 16);
@@ -428,17 +603,31 @@
   function buildBrig(ctx, gy) {
     const [lx, lz] = site("brig", [70, 120]);
     const g = V.group;
-    const wm = ctx.mat(0x4a4e44);
-    // 3 solid walls + a barred front; a real cell you get thrown into
-    ctx.box(g, lx, gy + 1.8, lz - 2.6, 6, 3.6, 0.4, wm);                    // back
-    ctx.box(g, lx - 2.8, gy + 1.8, lz, 0.4, 3.6, 5.2, wm);                  // W
-    ctx.box(g, lx + 2.8, gy + 1.8, lz, 0.4, 3.6, 5.2, wm);                  // E
-    ctx.box(g, lx, gy + 3.6, lz, 6, 0.3, 5.6, ctx.mat(M.oliveD));          // roof
-    for (let i = -2; i <= 2; i++) ctx.cyl(g, lx + i * 0.9, gy + 1.8, lz + 2.5, 0.08, 0.08, 3.4, ctx.mat(M.steel), 6); // bars
+    // a block cell: CMU walls with mortar courses, a slab roof, a front of
+    // round bars with flat straps, a steel bunk with a mattress, a steel toilet
+    const k = V.kit;
+    if (k) {
+      k.frame(lx, gy, lz, 0);
+      k.box(0, 1.8, -2.6, 6, 3.6, 0.4, 0x8a8a82); k.box(-2.8, 1.8, 0, 0.4, 3.6, 5.2, 0x8a8a82); k.box(2.8, 1.8, 0, 0.4, 3.6, 5.2, 0x8a8a82);
+      for (let r = 1; r < 18; r++) {                                                                        // mortar courses
+        const y = r * 0.2;
+        k.box(0, y, -2.395, 5.2, 0.012, 0.01, 0x6a6a64);
+        for (const e of [-1, 1]) { k.box(e * 3.005, y, 0, 0.01, 0.012, 5.2, 0x6a6a64); }
+      }
+      k.box(0, 3.72, 0, 6.4, 0.24, 5.8, 0x7a7a72);
+      k.box(0, 0.1, 2.5, 5.2, 0.2, 0.12, M.bar, "metal");
+      k.box(0, 3.5, 2.5, 5.2, 0.16, 0.14, M.bar, "metal");
+      for (const y of [1.2, 2.4]) k.box(0, y, 2.5, 5.2, 0.06, 0.012, M.bar, "metal");
+      for (let i = 0; i <= 40; i++) k.cyl(-2.6 + i * 0.13, 1.8, 2.5, 0.018, 0.018, 3.4, 0x3a3f45, "metal", 0, 0, 0, 6);
+      k.box(-1.6, 0.42, -1.75, 2.0, 0.06, 0.8, 0x5a5e66, "metal");                                         // bunk
+      k.box(-1.6, 0.5, -1.75, 1.9, 0.12, 0.74, 0x4a5a3a);                                                   // mattress
+      for (const e of [-1, 1]) k.box(-1.6 + e * 0.95, 0.21, -1.4, 0.05, 0.42, 0.05, 0x5a5e66, "metal");
+      k.cyl(1.9, 0.22, -1.9, 0.22, 0.2, 0.44, 0xb0b6c0, "metal", 0, 0, 0, 12);                              // steel toilet
+      k.box(1.9, 0.6, -2.25, 0.5, 0.4, 0.2, 0xb0b6c0, "metal");
+    }
     C.solid(lx - 3, lz - 2.8, lx + 3, lz - 2.2, 0, 3.6);
     C.solid(lx - 3, lz - 2.8, lx - 2.4, lz + 2.8, 0, 3.6);
     C.solid(lx + 2.4, lz - 2.8, lx + 3, lz + 2.8, 0, 3.6);
-    ctx.box(g, lx - 1.6, gy + 0.4, lz - 1.6, 2.4, 0.5, 1.0, ctx.mat(0x33372e)); // bunk
     ctx.light(lx, gy + 3.2, lz, M.lamp, 0.5, 8);
     signPlate(ctx, lx, gy + 2.9, lz - 2.35, "BRIG", 0);
     V.brigCell = { lx, lz, wx: V.origin.x + lx, wz: V.origin.z + lz, y: gy };
@@ -451,9 +640,16 @@
     const spots = site("lights", [[-150, 150], [150, 150], [0, 6], [-110, -110], [120, -120]]);
     for (let i = 0; i < spots.length; i++) {
       const [lx, lz] = spots[i];
-      ctx.cyl(V.group, lx, gy + 2.4, lz, 0.14, 0.18, 4.8, ctx.mat(M.steelD), 8);   // pole
-      ctx.box(V.group, lx, gy + 4.7, lz, 0.6, 0.3, 0.6, ctx.emat(M.lamp, 0.6));    // lamp head
-      const L = ctx.light(lx, gy + 4.6, lz, M.lamp, 0.85, 18);
+      const k = V.kit;
+      if (k) {                                                                      // a 6 m galvanised pole, cobra-head LED luminaire
+        k.frame(lx, gy, lz, i * 1.3);
+        k.box(0, 0.3, 0, 0.5, 0.6, 0.5, 0x9a968c);                                  // footing
+        k.cyl(0, 3.3, 0, 0.07, 0.11, 6.0, 0x8a9098, "metal", 0, 0, 0, 10);
+        k.cyl(0.6, 6.15, 0, 0.035, 0.035, 1.2, 0x8a9098, "metal", 0, 0, Math.PI / 2 - 0.1, 8);
+        k.box(1.25, 6.2, 0, 0.62, 0.12, 0.3, 0x3a3e46, "metal");
+        k.box(1.25, 6.135, 0, 0.5, 0.012, 0.22, M.lamp, "glow");
+      }
+      const L = ctx.light(lx, gy + 5.8, lz, M.lamp, 0.85, 20);
       if (L) { L.userData._base = 0.85; V.lights.push(L); }
     }
   }
@@ -474,10 +670,24 @@
       const n = Math.max(2, Math.round(len / 4));
       for (let i = 0; i <= n; i++) {
         const t = i / n, px = r.ax + (r.bx - r.ax) * t, pz = r.az + (r.bz - r.az) * t;
-        ctx.cyl(V.group, px, gy + 1.3, pz, 0.1, 0.12, 2.6, ctx.mat(M.oliveD), 6);
+        if (V.kit) {                                                                // steel T-post with five insulators
+          V.kit.frame(px, gy, pz, ang);
+          V.kit.box(0, 1.2, 0, 0.06, 2.4, 0.06, M.oliveD, "metal");
+          for (let w = 0; w < 5; w++) V.kit.cyl(0.05, 0.45 + w * 0.42, 0, 0.025, 0.025, 0.06, 0xe8e4d8, "gloss", 0, 0, 0, 8);
+        } else ctx.cyl(V.group, px, gy + 1.3, pz, 0.1, 0.12, 2.6, ctx.mat(M.oliveD), 6);
       }
-      const w1 = ctx.box(V.group, midx, gy + 1.9, midz, 0.06, 0.06, len, ctx.emat(0x66ffff, 0.4)); w1.rotation.y = ang;
-      const w2 = ctx.box(V.group, midx, gy + 1.2, midz, 0.06, 0.06, len, ctx.emat(0x66ffff, 0.4)); w2.rotation.y = ang;
+      // five live strands: thin, with the faint hum-glow that is the tell
+      for (let w = 0; w < 5; w++) {
+        const wire = ctx.box(V.group, midx + Math.cos(ang) * 0.05, gy + 0.45 + w * 0.42, midz - Math.sin(ang) * 0.05, 0.014, 0.014, len, ctx.emat(0x66ffff, 0.35));
+        wire.rotation.y = ang;
+      }
+      if (V.kit) {                                                                    // yellow DANGER plates every other post
+        for (let i = 0; i <= n; i += 2) {
+          const t = i / n, px = r.ax + (r.bx - r.ax) * t, pz = r.az + (r.bz - r.az) * t;
+          V.kit.frame(px, gy, pz, ang);
+          V.kit.box(0.08, 1.45, 0, 0.004, 0.2, 0.3, M.warn, "solid");
+        }
+      }
       signPlate(ctx, midx, gy + 1.7, midz, "ELECTRIFIED FENCE", ang);
       V.fence.push(r);
     }
@@ -491,7 +701,20 @@
     for (let i = 0; i < towers.length; i++) {
       const [lx, lz, phase] = towers[i];
       // tower head (visual, in venue-local)
-      ctx.cyl(V.group, lx, gy + 6, lz, 0.4, 0.6, 0.9, ctx.emat(M.beam, 0.7), 10);
+      // the tower: four legs to a railed platform at 5 m, a ladder, and the
+      // searchlight drum on its yoke (the lens glows)
+      if (V.kit) {
+        const k = V.kit;
+        k.frame(lx, gy, lz, phase);
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.cyl(sx * 0.9, 2.5, sz * 0.9, 0.06, 0.06, 5.0, M.steelD, "metal", 0, 0, 0, 8);
+        for (const y of [1.5, 3.2]) for (let f = 0; f < 4; f++) { const a = f * Math.PI / 2; k.box(Math.sin(a) * 0.9, y, Math.cos(a) * 0.9, 1.8, 0.05, 0.05, M.steelD, "metal", 0, a, 0); }
+        k.box(0, 5.0, 0, 2.4, 0.1, 2.4, 0x5a5e66, "metal");
+        for (let f = 0; f < 4; f++) { const a = f * Math.PI / 2; k.box(Math.sin(a) * 1.2, 5.55, Math.cos(a) * 1.2, 2.4, 0.05, 0.05, M.steelD, "metal", 0, a, 0); k.box(Math.sin(a) * 1.2, 5.3, Math.cos(a) * 1.2, 2.4, 0.04, 0.04, M.steelD, "metal", 0, a, 0); }
+        for (let y = 0.3; y < 5; y += 0.3) k.box(0.9, y, 1.05, 0.4, 0.03, 0.03, 0x8a9098, "metal");
+        k.box(0, 5.4, 0, 0.5, 0.7, 0.08, 0x3a3e46, "metal");                                  // yoke
+        k.cyl(0, 6.0, 0, 0.42, 0.42, 0.7, 0x2a2d33, "metal", Math.PI / 2, 0, 0, 16);        // the drum
+        k.cyl(0, 6.0, 0.36, 0.38, 0.38, 0.02, M.beam, "glow", Math.PI / 2, 0, 0, 16);       // the lens
+      } else ctx.cyl(V.group, lx, gy + 6, lz, 0.4, 0.6, 0.9, ctx.emat(M.beam, 0.7), 10);
       // cone + ground pool live in WORLD coords under worldRoot
       const wx = V.origin.x + lx, wz = V.origin.z + lz;
       const cone = new THREE.Mesh(
