@@ -318,6 +318,12 @@
     return p.done();
   }
 
+  // The prototypes, for the asset turntable (tools/lab asset kit) only.
+  CBZ.streetFurnitureProtos = {
+    signPost: signPostProto, bollard: bollardProto, drain: drainProto, dumpster: dumpsterProto,
+    bags: bagProto, bike: bikeProto, litter: litterProto, weed: weedProto,
+  };
+
   // =====================================================================
   //  THE PASS
   // =====================================================================
