@@ -467,11 +467,17 @@
     const actor = { species: spec, group: model, heading: 0 };
     if (CBZ.buildSwimRig) { try { CBZ.buildSwimRig(actor); } catch (e) { /* static body */ } }
     ud.model = model; ud.actor = actor;
+    // THE SPINE ON THE ORIGIN. The bestiary rides its keel near y=0 (a city
+    // swimmer's waterline); this file's creature origin is the body's centre
+    // (the voxel bodies were), which the depth clamps and the seize assume.
+    // The rig measures the trunk's axis at the tail weld; drop the model by it.
+    const spineY = (actor.swim && isFinite(actor.swim.spineY) ? actor.swim.spineY : 0) * sc;
+    turn.position.y = -spineY;
     // THE BITE POINT, in this group's frame: the species' authored mouth
-    // contract (model-local, +X nose) through the scale and the turn.
+    // contract (model-local, +X nose) through the scale, the turn and the drop.
     const mc = model.userData && model.userData.aquaticMouth;
     const bp = mc && mc.bite;
-    if (bp) ud.jawLocal = { x: -(bp.z || 0) * sc, y: bp.y * sc, z: bp.x * sc };
+    if (bp) ud.jawLocal = { x: -(bp.z || 0) * sc, y: bp.y * sc - spineY, z: bp.x * sc };
     else {
       g.updateMatrixWorld(true);
       const bb = new THREE.Box3().setFromObject(g);
