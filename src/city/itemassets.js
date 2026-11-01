@@ -70,6 +70,14 @@
   //  1. THE KIT — cached geometry, pooled materials, terse placers.
   // ============================================================
   const GEO = new Map();
+  // SHELF LOD. A hero model is 200-800 triangles, which is right in the hand
+  // and in the bag icon and wrong two thousand times over on a shop's
+  // shelves. While LOD < 1 every round primitive below is built with that
+  // share of its segments (never under a floor that still reads as round),
+  // and its cache key carries the count, so the hero geometry is untouched.
+  // CBZ.itemAssetBaked(..., { lod: 0.5 }) is the one way in.
+  let LOD = 1;
+  function sg(n, min) { return LOD >= 1 ? n : Math.max(min || 3, Math.round(n * LOD)); }
   function G(key, make) {
     let g = GEO.get(key);
     if (!g) { g = make(); g._shared = true; GEO.set(key, g); }
@@ -77,14 +85,14 @@
   }
   function gBox(w, h, d) { return G("b" + w + "," + h + "," + d, function () { return new THREE.BoxGeometry(w, h, d); }); }
   function gCyl(rt, rb, h, seg, ts, tl) {
-    seg = seg || 12;
+    seg = sg(seg || 12, 6);
     const s = ts || 0, l = tl == null ? Math.PI * 2 : tl;
     return G("c" + rt + "," + rb + "," + h + "," + seg + "," + s + "," + l,
       function () { return new THREE.CylinderGeometry(rt, rb, h, seg, 1, false, s, l); });
   }
-  function gSph(r) { return G("s" + r, function () { return new THREE.SphereGeometry(r, 12, 9); }); }
-  function gCon(r, h, seg) { seg = seg || 12; return G("n" + r + "," + h + "," + seg, function () { return new THREE.ConeGeometry(r, h, seg); }); }
-  function gTor(r, t, seg) { seg = seg || 16; return G("t" + r + "," + t + "," + seg, function () { return new THREE.TorusGeometry(r, t, 6, seg); }); }
+  function gSph(r) { const a = sg(12, 6), b = sg(9, 4); return G("s" + r + "," + a + "," + b, function () { return new THREE.SphereGeometry(r, a, b); }); }
+  function gCon(r, h, seg) { seg = sg(seg || 12, 6); return G("n" + r + "," + h + "," + seg, function () { return new THREE.ConeGeometry(r, h, seg); }); }
+  function gTor(r, t, seg) { seg = sg(seg || 16, 6); const ts = sg(6, 3); return G("t" + r + "," + t + "," + seg + "," + ts, function () { return new THREE.TorusGeometry(r, t, ts, seg); }); }
   function gOct(r) { return G("o" + r, function () { return new THREE.OctahedronGeometry(r); }); }
   function gDod(r) { return G("d" + r, function () { return new THREE.DodecahedronGeometry(r); }); }
   // A ROUNDED-CORNER SLAB lying flat on XZ, base at y=0: the one shape a card
@@ -132,13 +140,15 @@
   // no caps, because a cap inside a bottle is triangles nobody ever sees and
   // the shelves draw a thousand of these.
   function gBand(rt, rb, h, seg) {
+    seg = sg(seg, 6);
     return G("o" + rt + "," + rb + "," + h + "," + seg, function () { return new THREE.CylinderGeometry(rt, rb, h, seg, 1, true); });
   }
   function bd(g, mat, r, h, y, seg, rb) { return put(g, gBand(r, rb == null ? r : rb, h, seg || 12), mat, 0, y, 0); }
   // a LOW sphere (8 x 6): an end cap, a bean, a bun — things a shelf draws
   // by the hundred, where 216 triangles of roundness is never seen
   function shl(g, mat, r, x, y, z, sx, sy, sz) {
-    const m = put(g, G("q" + r, function () { return new THREE.SphereGeometry(r, 8, 6); }), mat, x, y, z);
+    const a = sg(8, 5), b = sg(6, 4);
+    const m = put(g, G("q" + r + "," + a + "," + b, function () { return new THREE.SphereGeometry(r, a, b); }), mat, x, y, z);
     if (sx != null) m.scale.set(sx, sy == null ? sx : sy, sz == null ? sx : sz);
     return m;
   }
@@ -153,9 +163,10 @@
   // A TUBE along a smooth path (a charger cable, a rope's tail, a wire). The
   // points are [x,y,z] triples; the key names the path so it is built once.
   function gTube(key, pts, r, seg) {
-    return G("u" + key + "," + r, function () {
+    seg = sg(seg || 32, 8); const rs = sg(6, 4);
+    return G("u" + key + "," + r + "," + seg + "," + rs, function () {
       const v = pts.map(function (p) { return new THREE.Vector3(p[0], p[1], p[2]); });
-      return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(v), seg || 32, r, 6, false);
+      return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(v), seg, r, rs, false);
     });
   }
   function tb(g, mat, key, pts, r, seg) { return put(g, gTube(key, pts, r, seg), mat, 0, 0, 0); }
@@ -176,6 +187,7 @@
   // the foot up, turned about Y. The shelf draws hundreds of these, so the
   // segment count is the caller's to keep honest (12-16 reads as round).
   function gLathe(key, pts, seg) {
+    seg = sg(seg || 14, 6);
     return G("l" + key + "," + (seg || 14), function () {
       return new THREE.LatheGeometry(pts.map(function (p) { return new THREE.Vector2(Math.max(0.0001, p[0]), p[1]); }), seg || 14);
     });
@@ -2206,9 +2218,11 @@
     const k = key || bakeKey(name, opts);
     let e = BAKED.get(k);
     if (!e) {
-      const grp = CBZ.itemAsset(name, row, opts);
+      const lod0 = LOD;
+      if (opts && opts.lod) LOD = Math.max(0.2, Math.min(1, +opts.lod || 1));
+      let grp = null, geo = null;
+      try { grp = CBZ.itemAsset(name, row, opts); geo = grp ? bakeGroup(grp) : null; } finally { LOD = lod0; }
       if (!grp) return null;
-      const geo = bakeGroup(grp);
       if (!geo) return null;
       e = { geo: geo, kind: grp.userData.itemAsset, name: grp.userData.itemName };
       BAKED.set(k, e);

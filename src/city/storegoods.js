@@ -82,7 +82,11 @@
   // and the planner fills the eye-level boards first, so what goes bare is
   // the very top and the kick-plate deck, not the middle of an aisle.
   const UNIT_BUDGET = 2400;
-  const TRI_BUDGET = 760000;
+  // 760k was the first cut: a gas station alone hit ~750k triangles, and with
+  // three stores live on a strip that is a frame a phone cannot draw. With the
+  // shelf LOD (half the round segments) 420k faces about as many units as the
+  // old 760k did; a low-power GPU halves it.
+  const TRI_BUDGET = (CBZ.lowPowerGPU ? 0.5 : 1) * 420000;
 
   /* ---- THE PLAN, PER TRADE ------------------------------------------------
      walls     which side walls get a run of bays (+1 / -1 on the tangent)
@@ -205,7 +209,9 @@
     PROTO[name] = null;
     if (!CBZ.itemAssetBaked) return null;
     let m = null;
-    try { m = CBZ.itemAssetBaked(null, name); } catch (err) { m = null; }
+    // the shelf copy: the same model at half the round segments (itemassets.js
+    // SHELF LOD) — a facing of twelve bottles never needs hero roundness
+    try { m = CBZ.itemAssetBaked(null, name, null, { lod: 0.5 }); } catch (err) { m = null; }
     if (!m || !m.geometry || !m.geometry.attributes.position) return null;
     const src = m.geometry;
     if (!src.boundingBox) src.computeBoundingBox();
@@ -1093,7 +1099,9 @@
       }
       // BUILT IS NOT DRAWN: the goods show only once you are close enough to
       // read a shelf; the fixtures stand at the glass from further out.
-      if (p.goodsGroup) p.goodsGroup.visible = (dOf.get(p) || 0) < SHOW_R;
+      // and only the NEAREST store's goods: you are only ever inside one shop,
+      // and two neighbours on a strip would double the stock on screen.
+      if (p.goodsGroup) p.goodsGroup.visible = want[0] === p && (dOf.get(p) || 0) < SHOW_R;
     }
     S.live = want;
   });

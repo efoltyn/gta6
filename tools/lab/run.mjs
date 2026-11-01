@@ -103,7 +103,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         // cams split on a comma that starts a NEW cam name: an at:x,y,z:lx,ly,lz
         // cam carries commas of its own (they are followed by digits)
         // (a cam name that starts with a digit, 3q, splits too: "front,3q")
-        frames, cams: (arg("--cam", "3q")).split(/,(?=[a-z3])/i),
+        frames, cams: (arg("--cam", "3q")).split(/,(?=(?:3q|side|front|back|top|wide|close|orbit:|at:|follow:))/i),
         W: +(arg("--size", "640x400").split("x")[0]) || 640, H: +(arg("--size", "640x400").split("x")[1]) || 400,
       });
       results.push(r);
