@@ -240,13 +240,53 @@
     wall(-(DW / 2 + side / 2), H / 2, half - WT / 2, side, H, WT, 0x8a8f95);
     wall(DW / 2 + side / 2, H / 2, half - WT / 2, side, H, WT, 0x8a8f95);
     put(0, H - 0.4, half - WT / 2, DW, 0.8, WT, 0x8a8f95);          // lintel
-    // roof + a parapet so it reads as a building and not an open pen
+    // roof slab, and a parapet with a coping ROUND THE EDGE (it was one strip
+    // laid across the middle of the roof)
     put(0, H + 0.12, 0, size + 0.5, 0.24, size + 0.5, 0x74797f);
-    put(0, H + 0.42, 0, size + 0.5, 0.36, 0.28, 0x62676d);
+    const E = size / 2 + 0.25 - 0.12;
+    for (const s of [-1, 1]) {
+      put(0, H + 0.42, s * E, size + 0.5, 0.36, 0.24, 0x7e8389);
+      put(s * E, H + 0.42, 0, 0.24, 0.36, size + 0.5, 0x7e8389);
+      put(0, H + 0.62, s * E, size + 0.6, 0.05, 0.32, 0x5f6469);                  // coping
+      put(s * E, H + 0.62, 0, 0.32, 0.05, size + 0.6, 0x5f6469);
+    }
+    // the shell's own detail: a dark plinth course, corner pilasters, a
+    // string course at the head height, a drip edge under the roof
+    for (const s of [-1, 1]) {
+      put(s * (half + 0.01), 0.22, 0, 0.04, 0.44, size, 0x5d6166);
+      if (s < 0) put(0, 0.22, -(half + 0.01), size, 0.44, 0.04, 0x5d6166);   // (the front's runs either side of the door, below)
+      put(s * (half + 0.01), 2.95, 0, 0.05, 0.1, size, 0x6e7378);
+      put(0, 2.95, -(half + 0.01), size, 0.1, 0.05, 0x6e7378);
+      for (const t of [-1, 1]) put(s * (half - 0.1), H / 2, t * (half - 0.1), 0.44, H, 0.44, 0x7b8086);
+    }
+    for (const s of [-1, 1]) put(s * (DW / 2 + side / 2 + 0.1), 0.22, half + 0.01, side - 0.2, 0.44, 0.04, 0x5d6166);
+    // the doorway: a steel frame, a striped threshold plate, a keypad and a
+    // caged security lamp over it, an engraved owner's plate
+    for (const s of [-1, 1]) put(s * (DW / 2 + 0.06), (H - 0.8) / 2, half + 0.02, 0.12, H - 0.8, 0.08, 0x2e3237);
+    put(0, H - 0.8 + 0.06, half + 0.02, DW + 0.24, 0.12, 0.08, 0x2e3237);
+    put(0, 0.012, half - 0.1, DW, 0.024, 0.5, 0x3a3e44);
+    for (let i = 0; i < 6; i++) put(-DW / 2 + 0.25 + i * (DW - 0.5) / 5, 0.026, half - 0.1, 0.14, 0.006, 0.5, 0xd4a017);
+    put(DW / 2 + 0.45, 1.35, half + 0.04, 0.16, 0.24, 0.05, 0x22262a);
+    put(DW / 2 + 0.45, 1.39, half + 0.068, 0.11, 0.06, 0.006, 0x58e08a);
+    put(0, H - 0.18, half + 0.14, 0.42, 0.16, 0.22, 0x2e3237);
+    put(0, H - 0.27, half + 0.2, 0.3, 0.04, 0.12, 0xfff2cc);
+    put(-(DW / 2 + 0.6), 1.6, half + 0.025, 0.5, 0.18, 0.02, 0xc9a24a);
+    // plant on the roof: a vent stack and a condensing unit with its fan
+    put(-half * 0.45, H + 0.55, -half * 0.4, 0.5, 0.62, 0.5, 0x8e9399);
+    put(-half * 0.45, H + 0.9, -half * 0.4, 0.66, 0.08, 0.66, 0x6a6f74);
+    put(half * 0.35, H + 0.6, -half * 0.3, 1.1, 0.72, 0.7, 0xb9bdc0);
+    put(half * 0.35, H + 0.97, -half * 0.3, 0.6, 0.02, 0.6, 0x2a2d31);
     // the strip light, so the hall in front of the door is not a black hole
     put(0, H - 0.14, half * 0.35, 1.6, 0.10, 0.26, 0x9aa3ae);
     put(0, H - 0.22, half * 0.35, 1.4, 0.05, 0.16, 0xdfe9ff);
   }
+
+  // the turntable's door: the outbuilding alone at the origin (no colliders kept)
+  CBZ.propVaultShell = function (size) {
+    const grp = new THREE.Group();
+    buildShell({ x: 0, z: 0, y: 0 }, size || 7, grp, []);
+    return grp;
+  };
 
   /* ONE TILL SOURCE PER VAULT, FOR THE LIFE OF THE RUN. This used to mint a
      fresh object every time the shed was built, and an arena rebuild would

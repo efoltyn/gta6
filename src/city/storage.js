@@ -242,19 +242,109 @@
     return { x: base.x + ((prop.off && prop.off.dx) || 0), z: base.z + ((prop.off && prop.off.dz) || 0) };
   }
 
-  // a small beacon so the property reads in-world (cheap; non-colliding).
-  function beacon(x, z, color) {
-    const root = arenaRoot(); if (!root) return null;
+  /* THE SIGN ON THE LOT (rebuild 2026-10-31, Opus 5.5). It was a grey stick
+     with a glowing coloured box on it. A property for sale is marked the way
+     a real one is: a two-post galvanised frame with a crossbar, a printed
+     agent's board swinging from it on S-hooks (the kind's colour band, FOR
+     SALE, the property's name, its price, the agency), and a SOLD rider
+     bolted across the top the moment it is yours. One canvas per property;
+     the board is faintly self-lit so it still reads at night. */
+  const SIGN = { post: null, bar: null, hook: null, board: null, rider: null, steel: null, edge: null };
+  function signGeo() {
+    if (SIGN.post) return SIGN;
+    SIGN.post = new THREE.BoxGeometry(0.07, 2.5, 0.07);
+    SIGN.bar = new THREE.BoxGeometry(1.5, 0.06, 0.06);
+    SIGN.hook = new THREE.TorusGeometry(0.035, 0.007, 4, 10);
+    SIGN.board = new THREE.BoxGeometry(1.2, 0.8, 0.025);
+    SIGN.rider = new THREE.BoxGeometry(1.2, 0.22, 0.02);
+    SIGN.cap = new THREE.BoxGeometry(0.1, 0.03, 0.1);
+    SIGN.steel = new THREE.MeshLambertMaterial({ color: 0xb4bac0 });
+    SIGN.edge = new THREE.MeshLambertMaterial({ color: 0xe9e6dc });
+    for (const k in SIGN) if (SIGN[k]) SIGN[k]._shared = true;
+    return SIGN;
+  }
+  const KIND_BAND = { garage: "#2f5f9e", warehouse: "#8a5a2c", hangar: "#4f6a36", compound: "#a8661a" };
+  const KIND_WORD = { garage: "LOCK-UP GARAGE", warehouse: "WATERFRONT WAREHOUSE", hangar: "AIRCRAFT HANGAR", compound: "BONDED FREIGHT YARD" };
+  function signTex(prop, sold) {
+    const c = document.createElement("canvas");
+    c.width = 512; c.height = 340;
+    const x = c.getContext("2d");
+    x.fillStyle = "#f4f1e8"; x.fillRect(0, 0, 512, 340);
+    x.fillStyle = KIND_BAND[prop.kind] || "#2f5f9e"; x.fillRect(0, 0, 512, 96);
+    x.fillStyle = "#ffffff"; x.textAlign = "center"; x.textBaseline = "middle";
+    x.font = "bold 64px Arial"; x.fillText(sold ? "SOLD" : "FOR SALE", 256, 50);
+    x.fillStyle = "#1d2228"; x.font = "bold 40px Arial"; x.fillText(String(prop.name || "").toUpperCase(), 256, 140);
+    x.fillStyle = "#59606a"; x.font = "24px Arial"; x.fillText(KIND_WORD[prop.kind] || "PROPERTY", 256, 182);
+    x.fillStyle = "#1d2228"; x.font = "bold 50px Arial"; x.fillText(money(prop.cost), 256, 236);
+    x.fillStyle = KIND_BAND[prop.kind] || "#2f5f9e"; x.fillRect(24, 278, 464, 4);
+    x.fillStyle = "#3a4048"; x.font = "bold 22px Arial"; x.fillText("MERIDIAN PROPERTIES  ·  555-0142", 256, 310);
+    const t = new THREE.CanvasTexture(c);
+    t.anisotropy = 2;
+    return t;
+  }
+  function makeSign(prop, color) {
+    const G = signGeo();
     const grp = new THREE.Group();
+    grp.name = "property-sign";
+    for (const s of [-1, 1]) {
+      const p = new THREE.Mesh(G.post, G.steel); p.position.set(s * 0.7, 1.25, 0); grp.add(p);
+      const cp = new THREE.Mesh(G.cap, G.steel); cp.position.set(s * 0.7, 2.515, 0); grp.add(cp);
+    }
+    const bar = new THREE.Mesh(G.bar, G.steel); bar.position.set(0, 2.32, 0); grp.add(bar);
+    for (const s of [-1, 1]) {
+      const h = new THREE.Mesh(G.hook, G.steel); h.position.set(s * 0.48, 2.26, 0); h.rotation.y = Math.PI / 2; grp.add(h);
+    }
+    const tex = prop ? signTex(prop, false) : null;
+    const face = tex ? new THREE.MeshLambertMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.18 })
+      : new THREE.MeshLambertMaterial({ color: color || 0x3a78c9 });
+    const board = new THREE.Mesh(G.board, [G.edge, G.edge, G.edge, G.edge, face, face]);
+    board.position.set(0, 1.82, 0);
+    board.rotation.x = 0.03;                          // it hangs, so it never quite plumbs
+    grp.add(board);
+    const soldTex = prop ? signTex(prop, true) : null;
+    grp.userData.signFace = face; grp.userData.signTex = { sale: tex, sold: soldTex };
+    // the SOLD rider bolted across the crossbar
+    if (prop) {
+      const c = document.createElement("canvas"); c.width = 256; c.height = 48;
+      const q = c.getContext("2d");
+      q.fillStyle = "#b3261e"; q.fillRect(0, 0, 256, 48);
+      q.fillStyle = "#ffffff"; q.font = "bold 34px Arial"; q.textAlign = "center"; q.textBaseline = "middle"; q.fillText("SOLD", 128, 26);
+      const rt = new THREE.CanvasTexture(c);
+      const rm = new THREE.MeshLambertMaterial({ map: rt });
+      const rider = new THREE.Mesh(G.rider, [G.edge, G.edge, G.edge, G.edge, rm, rm]);
+      rider.position.set(0, 2.5, 0);
+      rider.visible = false;
+      grp.add(rider);
+      grp.userData.rider = rider;
+    }
+    grp.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; o.userData.storageSign = true; } });
+    return grp;
+  }
+  function beacon(x, z, color, prop) {
+    const root = arenaRoot(); if (!root) return null;
+    const grp = makeSign(prop, color);
     grp.position.set(x, floorY(x, z), z);
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.0, 0.3), cmat(0x2a2f38));
-    post.position.y = 1.5; grp.add(post);
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.1, 0.16), cmat(color || 0x3a78c9, { emissive: 0x12243a, ei: 0.5 }));
-    sign.position.y = 2.8; grp.add(sign);
     grp.userData.transient = true;   // arena.reset() sweeps it on a fresh run
     root.add(grp);
     return grp;
   }
+  // the board says what the ledger says: SOLD rider up and the face reprinted
+  // once you own it (checked when the spots are walked, and right after a buy)
+  function refreshSigns() {
+    if (!_spots) return;
+    for (const s of _spots) {
+      const b = s.beacon; if (!b || !b.userData) continue;
+      const own = owns(s.prop.id);
+      if (b.userData._sold === own) continue;
+      b.userData._sold = own;
+      if (b.userData.rider) b.userData.rider.visible = own;
+      const f = b.userData.signFace, T = b.userData.signTex;
+      if (f && T && T.sale && T.sold) { f.map = own ? T.sold : T.sale; f.emissiveMap = f.map; f.needsUpdate = true; }
+    }
+  }
+  CBZ.storageSign = function (id) {                 // the turntable's door: one sign, alone
+    return makeSign(PROP_BY_ID[id || "garage1"] || PROPERTIES[0]);
+  };
   function buildSpots() {
     const root = arenaRoot(); if (!root) return null;
     if (_spots && _spotsRoot === root) return _spots;
@@ -264,14 +354,16 @@
     for (const prop of PROPERTIES) {
       const p = anchorPos(prop);
       const col = prop.kind === "hangar" ? 0x6a7a4a : prop.kind === "compound" ? 0xb0761f : prop.kind === "warehouse" ? 0x9a6a3a : 0x3a78c9;
-      const b = beacon(p.x, p.z, col);
+      const b = beacon(p.x, p.z, col, prop);
       _spots.push({ prop, x: p.x, z: p.z, beacon: b });
     }
     _spotsRoot = root;
+    refreshSigns();
     return _spots;
   }
   function nearestSpot(x, z) {
     const spots = buildSpots(); if (!spots) return null;
+    refreshSigns();
     let best = null, bd = SPOT_R * SPOT_R;
     for (const s of spots) {
       const dx = s.x - x, dz = s.z - z, dd = dx * dx + dz * dz;
@@ -310,6 +402,7 @@
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(Math.max(3, Math.round(prop.cost / 12000)));
     sfx("coin");
     persist();
+    refreshSigns();
     if (open_) render();
   }
 
