@@ -490,6 +490,7 @@
 
   /* ======================= FLAGSHIP VENUE (3D) ============================ */
   /* Card/chip/wheel/reel glue — every fn no-ops without the flagship venue. */
+  const PAL_BRASS = 0xc9a227;
   const CHIP_COLS = { 5: 0xc22323, 25: 0x1c8a4e, 100: 0x26262c, 500: 0x6a3aa0, 1000: 0xc9a227 };
   let cardGeo = null, chipGeo = null; const cardTexCache = {};
   function cardTexture(c) {
@@ -519,28 +520,28 @@
   function v3ClearRound() { if (!V) return; while (V.gCards.children.length) V.gCards.remove(V.gCards.children[0]); while (V.gChips.children.length) V.gChips.remove(V.gChips.children[0]); }
   function v3Card(hi, card, faceUp, delayMs) {
     const T = v3Table(); if (!T) return;
-    cardGeo = cardGeo || new C.THREE.PlaneGeometry(0.26, 0.365);
+    cardGeo = cardGeo || new C.THREE.PlaneGeometry(0.088, 0.123);   // 1.4x a poker card: reads from the rail
     const m = new C.THREE.Mesh(cardGeo, new C.THREE.MeshLambertMaterial({ map: faceUp ? cardTexture(card) : cardBack(), side: C.THREE.DoubleSide }));
     m.rotation.x = -Math.PI / 2; m.userData.card = card; m.userData.hole = !faceUp;
     const idx = hi === "D" ? BJ.dealer.length - 1 : BJ.hands[hi].cards.length - 1;
     const spot = hi === "D" ? T.dealerSpot : (hi === 0 ? T.playerSpot : T.splitSpot);
-    m.position.set(spot[0] - 0.55 + idx * 0.3, spot[1] + idx * 0.003, spot[2] + (hi === "D" ? 0 : idx * 0.06));
+    m.position.set(spot[0] - 0.1 + idx * 0.05, spot[1] + 0.001 + idx * 0.0008, spot[2] + (hi === "D" ? 0 : -idx * 0.018));
     m.visible = false;
     setTimeout(() => { m.visible = true; }, delayMs || 0);
     if (hi === "D") BJ.dealerMeshes.push(m); else BJ.hands[hi].meshes.push(m);
     V.gCards.add(m);
   }
   function v3Reveal() { if (!V || !BJ.dealerMeshes) return; const hole = BJ.dealerMeshes[1]; if (hole && hole.userData.hole) { hole.material.map = cardTexture(hole.userData.card); hole.material.needsUpdate = true; hole.userData.hole = false; } }
-  function v3Split() { const T = v3Table(); if (!T) return; const m = BJ.hands[0].meshes.pop(); if (m) { BJ.hands[1].meshes.push(m); m.position.set(T.splitSpot[0] - 0.55, T.splitSpot[1], T.splitSpot[2]); } }
+  function v3Split() { const T = v3Table(); if (!T) return; const m = BJ.hands[0].meshes.pop(); if (m) { BJ.hands[1].meshes.push(m); m.position.set(T.splitSpot[0] - 0.1, T.splitSpot[1] + 0.001, T.splitSpot[2]); } }
   function v3Chips(amount) {
     const T = v3Table(); if (!T) return;
-    chipGeo = chipGeo || new C.THREE.CylinderGeometry(0.075, 0.075, 0.024, 12);
+    chipGeo = chipGeo || new C.THREE.CylinderGeometry(0.0195, 0.0195, 0.0034, 16);   // a real 39 mm chip
     const denoms = [1000, 500, 100, 25, 5]; let col = 0;
     for (const d of denoms) {
       let n = Math.floor(amount / d); amount -= n * d; n = Math.min(n, 8);
       for (let i = 0; i < n; i++) {
         const m = new C.THREE.Mesh(chipGeo, C.mat(CHIP_COLS[d]));
-        m.position.set(T.betSpot[0] + col * 0.17, T.betSpot[1] + 0.015 + i * 0.026, T.betSpot[2]);
+        m.position.set(T.betSpot[0] + col * 0.042, T.betSpot[1] + 0.0017 + i * 0.0035, T.betSpot[2]);
         V.gChips.add(m);
       }
       if (n) col++;
@@ -549,7 +550,8 @@
   function pocketAngle(i) { return Math.PI / 2 - ((i + 0.5) / 37) * Math.PI * 2; }
   function v3Wheel(outcome, done) {
     const W = V.rl, idx = WHEEL_ORDER.indexOf(outcome);
-    let t = 0, ballA = 0, R = 0.85; const DUR = 5.2;
+    let t = 0, ballA = 0, R = W.rTrack || 0.372; const DUR = 5.2;
+    const R0 = W.rTrack || 0.372, R1 = W.rPocket || 0.27;
     C.anim((dt) => {
       t += dt;
       const w = 2.6 * Math.max(0.22, 1 - (t / DUR) * 0.85);
@@ -557,10 +559,10 @@
       const target = pocketAngle(idx) + W.theta;
       if (t < 3.0) ballA -= (6.5 - t * 1.5) * dt;
       else if (t < DUR) {
-        const k = (t - 3.0) / (DUR - 3.0); R = 0.85 - 0.23 * k;
+        const k = (t - 3.0) / (DUR - 3.0); R = R0 - (R0 - R1) * k;
         const diff = ((target - ballA) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
         ballA += diff * Math.min(1, dt * (1.5 + k * 6)) + w * dt * k;
-      } else { ballA = target; R = 0.62; }
+      } else { ballA = target; R = R1; }
       W.ball.position.set(W.cx + Math.cos(ballA) * R, W.by, W.cz - Math.sin(ballA) * R);
       if (t >= DUR + 0.6) { done(); return false; }
     });
@@ -580,97 +582,162 @@
     });
   }
 
+  /* THE FLOOR (2026-10-31 rebuild). The Golden Ace is drawn with the SAME
+     furniture as every other casino in the world (city/casino.js's
+     CBZ.casinoFixtures on gunstore.js's merged fixture kit): kidney blackjack
+     felts with a padded rail, shoe and chip tray; a roulette table whose
+     rotor, turret and ball are live meshes in the fixture's bowl; mechanical
+     reel slots with real 22-stop reels behind the pay line; the brass cage on
+     a panelled counter; the shark's tufted booth. Real metres throughout
+     (table tops 0.77 m, cards 1.4x poker size so they read from the rail).
+     The whole static floor is a handful of merged draw calls. */
+  function carpetTex(ctx) {
+    return ctx.canvasTex(256, 256, (gg) => {
+      gg.fillStyle = "#2a0910"; gg.fillRect(0, 0, 256, 256);
+      gg.strokeStyle = "rgba(170,132,40,.4)"; gg.lineWidth = 3;
+      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+        const x = 64 + i * 128, y = 64 + j * 128;
+        gg.beginPath(); gg.moveTo(x, y - 44); gg.lineTo(x + 44, y); gg.lineTo(x, y + 44); gg.lineTo(x - 44, y); gg.closePath(); gg.stroke();
+        gg.fillStyle = "rgba(20,70,66,.8)"; gg.beginPath(); gg.arc(x, y, 14, 0, 7); gg.fill();
+        gg.fillStyle = "rgba(201,162,39,.7)"; gg.beginPath(); gg.arc(x, y, 5, 0, 7); gg.fill();
+      }
+      gg.strokeStyle = "rgba(90,20,30,.9)"; gg.lineWidth = 2;
+      for (let q = 0; q <= 256; q += 128) { gg.beginPath(); gg.moveTo(q, 0); gg.lineTo(q, 256); gg.stroke(); gg.beginPath(); gg.moveTo(0, q); gg.lineTo(256, q); gg.stroke(); }
+    }, (hxCarpet * 2 + 2) / 1.6, (hzCarpet * 2 + 2) / 1.6);
+  }
+  let hxCarpet = 8, hzCarpet = 6;
+  function feltPrint(ctx) {
+    // the printed legend on a blackjack felt: transparent, laid over the cloth
+    return ctx.canvasTex(512, 200, (gg) => {
+      gg.clearRect(0, 0, 512, 200);
+      gg.strokeStyle = "rgba(240,226,180,.8)"; gg.lineWidth = 3;
+      gg.beginPath(); gg.arc(256, -330, 470, 1.2, Math.PI - 1.2); gg.stroke();
+      gg.fillStyle = "rgba(240,226,180,.9)"; gg.textAlign = "center"; gg.textBaseline = "middle";
+      gg.font = "800 34px 'Trebuchet MS', sans-serif"; gg.fillText("BLACKJACK PAYS 3 TO 2", 256, 92);
+      gg.font = "700 22px 'Trebuchet MS', sans-serif"; gg.fillStyle = "rgba(240,226,180,.7)";
+      gg.fillText("DEALER MUST STAND ON ALL 17s", 256, 132);
+      gg.font = "700 18px 'Trebuchet MS', sans-serif"; gg.fillText("INSURANCE PAYS 2 TO 1", 256, 166);
+    });
+  }
+  function wheelTexture(ctx) {
+    return ctx.canvasTex(512, 512, (gg) => {
+      const Cc = 256, TAU = Math.PI * 2;
+      gg.fillStyle = "#3a2210"; gg.beginPath(); gg.arc(Cc, Cc, 255, 0, TAU); gg.fill();
+      for (let i = 0; i < 37; i++) {
+        const n = WHEEL_ORDER[i], a0 = (i / 37) * TAU - Math.PI / 2, a1 = ((i + 1) / 37) * TAU - Math.PI / 2;
+        gg.fillStyle = n === 0 ? "#0f7a44" : (RED_SET[n] ? "#a41f2f" : "#15181d");
+        gg.beginPath(); gg.arc(Cc, Cc, 248, a0, a1); gg.arc(Cc, Cc, 150, a1, a0, true); gg.closePath(); gg.fill();
+        // the pocket frets (brass separators)
+        gg.strokeStyle = "#d8b552"; gg.lineWidth = 3;
+        gg.beginPath(); gg.moveTo(Cc + Math.cos(a0) * 150, Cc + Math.sin(a0) * 150); gg.lineTo(Cc + Math.cos(a0) * 200, Cc + Math.sin(a0) * 200); gg.stroke();
+        const am = (a0 + a1) / 2;
+        gg.save(); gg.translate(Cc + Math.cos(am) * 226, Cc + Math.sin(am) * 226); gg.rotate(am + Math.PI / 2);
+        gg.fillStyle = "#fff6e2"; gg.font = "800 22px 'Trebuchet MS'"; gg.textAlign = "center"; gg.textBaseline = "middle";
+        gg.fillText(String(n), 0, 0); gg.restore();
+      }
+      gg.strokeStyle = "#d8b552"; gg.lineWidth = 3;
+      gg.beginPath(); gg.arc(Cc, Cc, 200, 0, TAU); gg.stroke();
+      // the cone: polished wood with four brass spokes
+      const grd = gg.createRadialGradient(Cc, Cc, 20, Cc, Cc, 150);
+      grd.addColorStop(0, "#7a4a22"); grd.addColorStop(1, "#2a1608");
+      gg.fillStyle = grd; gg.beginPath(); gg.arc(Cc, Cc, 150, 0, TAU); gg.fill();
+      gg.strokeStyle = "#c9a227"; gg.lineWidth = 6;
+      for (let q = 0; q < 4; q++) { const a = q * Math.PI / 2 + Math.PI / 4; gg.beginPath(); gg.moveTo(Cc + Math.cos(a) * 30, Cc + Math.sin(a) * 30); gg.lineTo(Cc + Math.cos(a) * 140, Cc + Math.sin(a) * 140); gg.stroke(); }
+    });
+  }
+
   function buildVenue(ctx, venue) {
-    const g = venue.group, PAL = { wood: 0x4a2e1c, woodD: 0x33200f, brass: 0xc9a227, feltG: 0x1c6e46, wine: 0x6e1524, slot: 0x232c38 };
-    V = { bj: [], rl: null, slots: [], gCards: new ctx.THREE.Group(), gChips: new ctx.THREE.Group(), npcs: [], pitBoss: null, shark: null, pendingCast: [], _venue: venue };
+    const THREE = ctx.THREE, g = venue.group;
+    const FX = CBZ.casinoFixtures, KIT = CBZ.storeFixtureKit;
+    V = { bj: [], rl: null, slots: [], gCards: new THREE.Group(), gChips: new THREE.Group(), npcs: [], pitBoss: null, shark: null, pendingCast: [], _venue: venue };
     g.add(V.gCards); g.add(V.gChips);
-    const lot = venue.lot;
+    const lot = venue.lot, bld = lot && lot.building;
     const hx = lot ? Math.max(5, Math.min(8, lot.w / 2 - 1.6)) : 8;
     const hz = lot ? Math.max(4, Math.min(6, lot.d / 2 - 1.6)) : 6;
-    if (venue.kind === "dev") { // dev pad: the harness mounts us on bare ground
-      const pad = new ctx.THREE.Mesh(new ctx.THREE.PlaneGeometry(hx * 2 + 6, hz * 2 + 6), ctx.pmat(0x451018, 4));
-      pad.rotation.x = -Math.PI / 2; pad.position.y = 0.02; g.add(pad);
-      ctx.light(0, 4.5, 0, 0xffca72, 1.1, 18);
+    // the floor and ceiling this room really has (the shell's slab, the
+    // fit-out ceiling plane) so feet, felts and lamp drops all land
+    const tops = bld && bld.floorTops;
+    const ff = tops && tops[0] != null ? tops[0] + 0.03 : 0.02;
+    const ceil = tops && tops[1] != null ? tops[1] - 0.212 : ff + 3.4;
+    V.ff = ff;
+    // the carpet: the house pattern, over the whole floor we dress
+    {
+      hxCarpet = hx; hzCarpet = hz;
+      const carpet = new THREE.Mesh(new THREE.PlaneGeometry(hx * 2 + 2, hz * 2 + 2), new THREE.MeshLambertMaterial({ map: carpetTex(ctx) }));
+      carpet.rotation.x = -Math.PI / 2; carpet.position.y = ff - 0.005; carpet.receiveShadow = true; g.add(carpet);
     }
-    const feltTex = ctx.canvasTex(512, 288, (gg) => {
-      gg.fillStyle = "#1c6e46"; gg.fillRect(0, 0, 512, 288);
-      gg.strokeStyle = "rgba(255,246,226,.75)"; gg.lineWidth = 2;
-      gg.beginPath(); gg.arc(256, -40, 250, 0.42, Math.PI - 0.42); gg.stroke();
-      gg.fillStyle = "rgba(255,246,226,.85)"; gg.font = "800 22px 'Trebuchet MS'"; gg.textAlign = "center";
-      gg.fillText("BLACKJACK PAYS 3 TO 2", 256, 148);
-      for (let i = 0; i < 3; i++) { gg.beginPath(); gg.arc(128 + i * 128, 232, 26, 0, 7); gg.stroke(); }
-    });
-    // --- two blackjack tables, dealers behind ---
+    if (venue.kind === "dev") ctx.light(0, 4.5, 0, 0xffca72, 1.1, 18);
+    const k = KIT ? KIT.create() : null;
+    const printMat = new THREE.MeshLambertMaterial({ map: feltPrint(ctx), transparent: true, depthWrite: false });
+    const printGeo = new THREE.PlaneGeometry(1.25, 0.49);
+
+    // --- two blackjack tables; the dealer stands behind the flat edge (+z) ---
     [-hx * 0.5, hx * 0.5].forEach((cx, which) => {
       const cz = -hz * 0.4;
-      ctx.box(g, cx, 0.5, cz, 3.4, 0.82, 1.9, ctx.mat(PAL.wood));
-      ctx.cyl(g, cx - 1.7, 0.5, cz, 0.95, 0.95, 0.82, ctx.mat(PAL.wood), 14);
-      ctx.cyl(g, cx + 1.7, 0.5, cz, 0.95, 0.95, 0.82, ctx.mat(PAL.wood), 14);
-      const felt = new ctx.THREE.Mesh(new ctx.THREE.PlaneGeometry(3.36, 1.82), new ctx.THREE.MeshPhongMaterial({ map: feltTex, shininess: 3 }));
-      felt.rotation.x = -Math.PI / 2; felt.rotation.z = Math.PI; felt.position.set(cx, 0.925, cz); g.add(felt);
-      ctx.box(g, cx, 0.98, cz - 0.99, 3.4, 0.12, 0.14, ctx.mat(PAL.wine));
-      ctx.box(g, cx, 0.99, cz + 0.86, 1.5, 0.1, 0.34, ctx.mat(PAL.woodD));
-      [0xc22323, 0x1c8a4e, 0x222222, 0x6a3aa0, 0xc9a227].forEach((cc, ci) => ctx.cyl(g, cx - 0.56 + ci * 0.28, 1.06, cz + 0.86, 0.09, 0.09, 0.1, ctx.mat(cc), 10));
-      ctx.box(g, cx + 1.15, 1.02, cz + 0.7, 0.42, 0.18, 0.3, ctx.pmat(0x14100c, 40)).rotation.y = -0.2;
-      ctx.cyl(g, cx, 0.46, cz, 0.3, 0.42, 0.92, ctx.mat(PAL.woodD), 10);
-      ctx.solid(cx - 2.6, cz - 0.95, cx + 2.6, cz + 0.95);
-      for (let s = -1; s <= 1; s++) {
-        ctx.cyl(g, cx + s * 1.15, 0.42, cz - 1.65, 0.08, 0.1, 0.84, ctx.mat(0x22262c), 8);
-        ctx.cyl(g, cx + s * 1.15, 0.88, cz - 1.65, 0.27, 0.27, 0.1, ctx.mat(PAL.wine), 10);
+      // fixture frame: local +Z = the players' side = world -Z (yaw PI)
+      if (k && FX) {
+        FX.blackjack(k, { x: cx, z: cz, yaw: Math.PI }, ff);
+        for (let j = 0; j < 5; j++) {
+          const a = Math.PI * (0.15 + 0.7 * j / 4);
+          const lx = -Math.cos(a) * 1.3, lz = -0.45 + Math.sin(a) * 1.22;
+          FX.stool(k, cx - lx, cz - lz, 0.68, Math.atan2(lx, lz), ff);
+        }
+        FX.lamp(k, { x: cx, z: cz, yaw: 0, len: 1.8 }, ff, ceil);
       }
-      const T = { cx, cz, dealerSpot: [cx, 0.94, cz + 0.35], playerSpot: [cx, 0.94, cz - 0.42], splitSpot: [cx + 1.05, 0.94, cz - 0.42], betSpot: [cx, 0.94, cz - 0.72] };
+      const print = new THREE.Mesh(printGeo, printMat);
+      print.rotation.x = -Math.PI / 2; print.position.set(cx, ff + 0.7735, cz + 0.12); print.renderOrder = 2; g.add(print);
+      ctx.solid(cx - 1.02, cz - 0.52, cx + 1.02, cz + 0.5);
+      const fy = ff + 0.773;
+      const T = { cx, cz, dealerSpot: [cx, fy, cz + 0.26], playerSpot: [cx, fy, cz - 0.02], splitSpot: [cx + 0.34, fy, cz - 0.02], betSpot: [cx, fy, cz - 0.13] };
       V.bj.push(T);
       queueCast({
         // role "dealer" → the facade dresses house waiter-blacks (the vest-and-collar
         // dealer read) and pins them behind the felt, hands over the table.
         role: "dealer", name: which ? "Dealer Vega" : "Dealer Marchetti",
-        at: [cx, cz + 1.05], face: Math.PI, post: "pinned", pose: "deal",
+        at: [cx, cz + 0.85], face: Math.PI, post: "pinned", pose: "deal",
         dialogue: DEALER_LINES[which],
       }, function () {
-        const dealer = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: which ? 0x8a5c34 : 0xc2905c, vest: 0x1c6e46 }).at(cx, cz + 1.05, Math.PI).deal();
+        const dealer = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: which ? 0x8a5c34 : 0xc2905c, vest: 0x1c6e46 }).at(cx, cz + 0.85, Math.PI).deal();
         g.add(dealer.g); ctx.idle(dealer, which * 1.7); return dealer;
       }, "dealer" + which);
-      ctx.zone({ id: "bj" + which, label: "Blackjack, $25 min", pos: [cx, cz - 1.65], r: 1.7, onUse: () => { BJ.tableIx = which; BJ.phase = "bet"; renderBJ(); } });
-      ctx.light(cx, 3.2, cz, 0xffca72, 0.8, 8);
+      ctx.zone({ id: "bj" + which, label: "Blackjack, $25 min", pos: [cx, cz - 1.3], r: 1.5, onUse: () => { BJ.tableIx = which; BJ.phase = "bet"; renderBJ(); } });
+      ctx.light(cx, ff + 2.6, cz, 0xffd9a0, 0.8, 7);
     });
-    // --- roulette table + wheel ---
+
+    // --- roulette: the fixture table, with a live rotor in its bowl ---
     {
       const cx = 0, cz = hz * 0.45;
-      ctx.box(g, cx, 0.5, cz, 5.0, 0.86, 2.1, ctx.mat(PAL.wood));
-      ctx.box(g, cx, 0.97, cz, 5.16, 0.1, 2.26, ctx.mat(PAL.woodD));
-      const wheelTex = ctx.canvasTex(512, 512, (gg) => {
-        const Cc = 256, TAU = Math.PI * 2;
-        gg.fillStyle = "#33200f"; gg.beginPath(); gg.arc(Cc, Cc, 254, 0, TAU); gg.fill();
-        for (let i = 0; i < 37; i++) {
-          const n = WHEEL_ORDER[i], a0 = (i / 37) * TAU - Math.PI / 2, a1 = ((i + 1) / 37) * TAU - Math.PI / 2;
-          gg.fillStyle = n === 0 ? "#0f7a44" : (RED_SET[n] ? "#a41f2f" : "#15181d");
-          gg.beginPath(); gg.moveTo(Cc, Cc); gg.arc(Cc, Cc, 236, a0, a1); gg.closePath(); gg.fill();
-          const am = (a0 + a1) / 2;
-          gg.save(); gg.translate(Cc + Math.cos(am) * 208, Cc + Math.sin(am) * 208); gg.rotate(am + Math.PI / 2);
-          gg.fillStyle = "#fff6e2"; gg.font = "800 24px 'Trebuchet MS'"; gg.textAlign = "center"; gg.textBaseline = "middle";
-          gg.fillText(String(n), 0, 0); gg.restore();
-        }
-        gg.fillStyle = "#2a1a0c"; gg.beginPath(); gg.arc(Cc, Cc, 150, 0, TAU); gg.fill();
-        gg.fillStyle = "#c9a227"; gg.beginPath(); gg.arc(Cc, Cc, 26, 0, TAU); gg.fill();
-      });
-      ctx.cyl(g, cx - 1.55, 1.06, cz, 0.98, 1.06, 0.18, ctx.mat(0x2a1a0c), 24);
-      const disc = new ctx.THREE.Mesh(new ctx.THREE.CircleGeometry(0.92, 37), new ctx.THREE.MeshLambertMaterial({ map: wheelTex }));
-      disc.rotation.x = -Math.PI / 2; disc.position.set(cx - 1.55, 1.165, cz); g.add(disc);
-      const turret = new ctx.THREE.Group(); turret.position.set(cx - 1.55, 1.17, cz); g.add(turret);
-      ctx.cyl(turret, 0, 0.12, 0, 0.1, 0.14, 0.24, ctx.mat(PAL.brass), 10);
-      for (let hh = 0; hh < 4; hh++) { const ha = hh * Math.PI / 2; ctx.box(turret, Math.cos(ha) * 0.17, 0.24, Math.sin(ha) * 0.17, 0.22, 0.04, 0.04, ctx.mat(PAL.brass), ha); }
-      const ball = new ctx.THREE.Mesh(new ctx.THREE.SphereGeometry(0.042, 8, 8), ctx.pmat(0xf4f4f0, 80));
-      ball.position.set(cx - 1.55, 1.21, cz + 0.72); g.add(ball);
-      ctx.solid(cx - 2.7, cz - 1.15, cx + 2.7, cz + 1.15);
-      V.rl = { disc, turret, ball, theta: 0, cx: cx - 1.55, cz, by: 1.2 };
+      if (k && FX) {
+        FX.roulette(k, { x: cx, z: cz, yaw: Math.PI }, ff, { noWheel: true });
+        for (let j = 0; j < 4; j++) FX.stool(k, cx + 0.95 - j * 0.6, cz - 1.0, 0.68, 0, ff);
+        FX.lamp(k, { x: cx, z: cz, yaw: 0, len: 2.2 }, ff, ceil);
+      }
+      // yaw PI turns the fixture's local x round: its wheel end lands at +x
+      const wx = cx - (FX ? FX.wheelX() : -0.77), wz = cz, wy = ff + 0.856;
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(0.345, 48), new THREE.MeshPhongMaterial({ map: wheelTexture(ctx), specular: 0x332211, shininess: 30 }));
+      disc.rotation.x = -Math.PI / 2; disc.position.set(wx, wy, wz); g.add(disc);
+      const turret = new THREE.Group(); turret.position.set(wx, wy, wz); g.add(turret);
+      const brass = ctx.pmat(PAL_BRASS, 70);
+      ctx.cyl(turret, 0, 0.02, 0, 0.05, 0.075, 0.04, brass, 16);           // the turret boss
+      ctx.cyl(turret, 0, 0.065, 0, 0.012, 0.02, 0.07, brass, 8);           // spindle
+      ctx.cyl(turret, 0, 0.105, 0, 0.02, 0.02, 0.012, brass, 10);          // finial
+      for (let hh = 0; hh < 4; hh++) {
+        const ha = hh * Math.PI / 2;
+        ctx.box(turret, Math.cos(ha) * 0.06, 0.085, Math.sin(ha) * 0.06, 0.1, 0.01, 0.01, brass, -ha);
+        ctx.cyl(turret, Math.cos(ha) * 0.11, 0.085, Math.sin(ha) * 0.11, 0.012, 0.012, 0.016, brass, 8);
+      }
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.011, 10, 8), ctx.pmat(0xf4f4f0, 90));
+      ball.position.set(wx + 0.37, wy + 0.012, wz); g.add(ball);
+      ctx.solid(cx - 1.3, cz - 0.64, cx + 1.3, cz + 0.64);
+      V.rl = { disc, turret, ball, theta: 0, cx: wx, cz: wz, by: wy + 0.012, rTrack: 0.372, rPocket: 0.27 };
       queueCast({
         // role "croupier" → house waiter-blacks at the wheel (seeded appearance
         // keeps him a distinct person from the blackjack dealers across the room).
         role: "croupier", name: "Croupier Dubois",
-        at: [cx, cz + 1.5], face: Math.PI, post: "pinned", pose: "deal",
+        at: [cx + 0.4, cz + 1.0], face: Math.PI, post: "pinned", pose: "deal",
         dialogue: CROUPIER_LINES,
       }, function () {
-        const croup = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: 0xd9a066, vest: 0x6e1524 }).at(cx, cz + 1.5, Math.PI).deal();
+        const croup = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: 0xd9a066, vest: 0x6e1524 }).at(cx + 0.4, cz + 1.0, Math.PI).deal();
         g.add(croup.g); ctx.idle(croup, 2.4); return croup;
       }, "croupier");
       queueCast({
@@ -683,44 +750,50 @@
         const boss = ctx.rig({ shirt: 0x14100c, pants: 0x14100c, skin: 0xd9a066, vest: 0x211a12, hair: 0x777c82 }).at(cx + 2.6, cz - 0.6, 2.6).fold();
         g.add(boss.g); ctx.idle(boss, 4.1); return boss;
       }, "pitboss");
-      ctx.zone({ id: "roulette", label: "European Roulette", pos: [cx, cz - 1.9], r: 1.9, onUse: renderRL });
-      ctx.light(cx, 3.3, cz, 0xffca72, 0.85, 9);
+      ctx.zone({ id: "roulette", label: "European Roulette", pos: [cx, cz - 1.5], r: 1.7, onUse: renderRL });
+      ctx.light(cx, ff + 2.6, cz, 0xffd9a0, 0.85, 8);
     }
-    // --- slot bank (first machine drives the 3D reels) ---
+
+    // --- slot bank: four reel machines shoulder to shoulder facing -x;
+    //     the first machine's reels are the ones the panel spins ---
     const stripTex = ctx.canvasTex(48 * 22, 96, (gg) => {
       gg.fillStyle = "#f4ead2"; gg.fillRect(0, 0, 48 * 22, 96);
       for (let i = 0; i < 22; i++) {
-        const x0 = i * 48, cx2 = x0 + 24, cy = 48, s = SLOT_STRIP[i];
+        const x0 = i * 48, cx2 = x0 + 24, cy = 48, sy = SLOT_STRIP[i];
         gg.strokeStyle = "#d8c9a4"; gg.strokeRect(x0 + 1, 8, 46, 80);
-        gg.fillStyle = { CHR: "#c22", LEM: "#e8c62c", ORN: "#e8862c", BELL: "#d9a712", BAR: "#222", SEV: "#c22", DIA: "#3ec6d9" }[s];
-        if (s === "BAR" || s === "SEV") { gg.font = "800 " + (s === "BAR" ? 15 : 40) + "px Verdana"; gg.textAlign = "center"; gg.textBaseline = "middle"; gg.fillText(s === "BAR" ? "BAR" : "7", cx2, cy); }
-        else if (s === "DIA") { gg.beginPath(); gg.moveTo(cx2, cy - 15); gg.lineTo(cx2 + 12, cy); gg.lineTo(cx2, cy + 15); gg.lineTo(cx2 - 12, cy); gg.closePath(); gg.fill(); }
+        gg.fillStyle = { CHR: "#c22", LEM: "#e8c62c", ORN: "#e8862c", BELL: "#d9a712", BAR: "#222", SEV: "#c22", DIA: "#3ec6d9" }[sy];
+        if (sy === "BAR" || sy === "SEV") { gg.font = "800 " + (sy === "BAR" ? 15 : 40) + "px Verdana"; gg.textAlign = "center"; gg.textBaseline = "middle"; gg.fillText(sy === "BAR" ? "BAR" : "7", cx2, cy); }
+        else if (sy === "DIA") { gg.beginPath(); gg.moveTo(cx2, cy - 15); gg.lineTo(cx2 + 12, cy); gg.lineTo(cx2, cy + 15); gg.lineTo(cx2 - 12, cy); gg.closePath(); gg.fill(); }
         else { gg.beginPath(); gg.arc(cx2, cy, 12, 0, 7); gg.fill(); }
       }
     });
+    const reelGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.13, 32, 1, true);
+    const reelMat = new THREE.MeshLambertMaterial({ map: stripTex });
+    const sx = hx - 0.45;
     for (let i = 0; i < 4; i++) {
-      const sx = hx - 0.6, sz = -hz * 0.6 + i * 1.5;
-      const grp = new ctx.THREE.Group(); grp.position.set(sx, 0, sz); grp.rotation.y = -Math.PI / 2; g.add(grp);
-      ctx.box(grp, 0, 0.45, 0, 0.9, 0.9, 0.62, ctx.mat(PAL.slot));
-      ctx.box(grp, 0, 1.32, -0.05, 0.9, 0.85, 0.52, ctx.mat(PAL.slot));
-      ctx.box(grp, 0, 2.05, -0.09, 0.9, 0.3, 0.44, ctx.emat(i % 2 ? 0xff4fa3 : 0x3ec6d9, 0.8));
+      const sz = -hz * 0.45 + i * 0.66;
+      if (k && FX) {
+        FX.slot(k, { x: sx, z: sz, yaw: -Math.PI / 2, hue: i }, ff, { reels: true });
+        FX.stool(k, sx - 0.68, sz, 0.66, 0, ff);
+      }
+      const grp = new THREE.Group(); grp.position.set(sx, ff, sz); grp.rotation.y = -Math.PI / 2; g.add(grp);
       const reels = [];
       for (let r = 0; r < 3; r++) {
-        const reel = new ctx.THREE.Mesh(new ctx.THREE.CylinderGeometry(0.155, 0.155, 0.16, 24, 1, true), new ctx.THREE.MeshLambertMaterial({ map: stripTex }));
-        reel.rotation.z = Math.PI / 2; reel.position.set(-0.2 + r * 0.2, 1.42, 0.16); grp.add(reel); reels.push(reel);
+        const reel = new THREE.Mesh(reelGeo, reelMat);
+        reel.rotation.z = Math.PI / 2; reel.rotation.x = slotStopAngle((i * 7 + r * 5) % 22);
+        reel.position.set(-0.144 + r * 0.144, 1.34, -0.03); grp.add(reel); reels.push(reel);
       }
-      ctx.solid(sx - 0.5, sz - 0.45, sx + 0.5, sz + 0.45);
+      ctx.solid(sx - 0.3, sz - 0.31, sx + 0.3, sz + 0.31);
       V.slots.push({ reels });
-      ctx.zone({ id: "slot" + i, label: "Lucky 7s slots", pos: [sx - 0.9, sz], r: 1.3, onUse: renderSL });
+      ctx.zone({ id: "slot" + i, label: "Lucky 7s slots", pos: [sx - 0.8, sz], r: 0.6, onUse: renderSL });
     }
-    // --- cage + shark booth ---
+    ctx.light(sx - 0.8, ff + 2.4, -hz * 0.45 + 1.0, 0xff9adf, 0.5, 5);
+
+    // --- the cage: a panelled counter under brass bars and glass ---
     {
       const cx = -hx + 0.7, cz = -hz * 0.55;
-      ctx.box(g, cx + 0.6, 0.55, cz, 0.7, 1.1, 3.4, ctx.mat(PAL.wood));
-      ctx.box(g, cx + 0.6, 1.13, cz, 0.86, 0.08, 3.6, ctx.mat(PAL.brass));
-      for (let bz = -1.6; bz <= 1.6; bz += 0.3) { if (Math.abs(bz) < 0.5) continue; ctx.cyl(g, cx + 0.6, 1.95, cz + bz, 0.035, 0.035, 1.6, ctx.mat(PAL.brass), 8); }
-      ctx.box(g, cx + 0.6, 2.8, cz, 0.16, 0.14, 3.6, ctx.mat(PAL.brass));
-      ctx.solid(cx + 0.25, cz - 1.8, cx + 0.95, cz + 1.8);
+      if (k && FX && FX.cage) FX.cage(k, { C: { x: cx + 0.6, z: cz, w: 0.62, d: 3.4, top: ff + 1.02, tx: 0, tz: -1 } }, ff);
+      ctx.solid(cx + 0.27, cz - 1.75, cx + 0.93, cz + 1.75);
       queueCast({
         // "banker" job-hint → formal business fit (bizRecord) AND a sensible cage
         // occupation: the cage IS the house bank. Formal, distinct from floor staff.
@@ -742,16 +815,42 @@
         g.add(guard.g); ctx.idle(guard, 3.3); return guard;
       });
       ctx.zone({ id: "cage", label: "The Cage: buy in, cash out", pos: [cx + 1.5, cz], r: 1.6, onUse: renderCage });
-      ctx.light(cx + 1, 3.0, cz, 0xffd48a, 0.8, 8);
+      ctx.light(cx + 1, ff + 2.6, cz, 0xffd48a, 0.8, 8);
     }
+
+    // --- the shark's booth: a tufted oxblood banquette, a marble pedestal
+    //     table with his lamp, his drink and his ashtray ---
     {
       const cx = hx - 1.4, cz = hz - 0.8;
-      ctx.box(g, cx, 0.3, cz + 0.5, 3.0, 0.6, 0.7, ctx.mat(PAL.wine));
-      ctx.box(g, cx, 0.75, cz + 0.75, 3.0, 0.9, 0.2, ctx.mat(PAL.wine));
-      ctx.cyl(g, cx, 0.5, cz - 0.4, 0.12, 0.16, 1.0, ctx.mat(PAL.woodD), 8);
-      ctx.cyl(g, cx, 1.02, cz - 0.4, 0.75, 0.75, 0.08, ctx.mat(PAL.wood), 12);
-      ctx.cyl(g, cx, 1.2, cz - 0.15, 0.1, 0.14, 0.24, ctx.emat(0xffab66, 0.9), 8);
-      ctx.solid(cx - 1.6, cz - 0.9, cx + 1.6, cz + 0.9);
+      if (k) {
+        // local frame: the shark sits at the origin facing local +Z (= world -z)
+        k.frame(cx, ff, cz + 0.35, Math.PI);
+        const LEA = 0x5a1418, LEAd = 0x3a0c10, WOOD = 0x2a1a10, BR = 0xc9a24a;
+        k.box(0, 0.19, -0.04, 2.3, 0.38, 0.56, WOOD, "gloss");                 // plinth
+        k.box(0, 0.43, -0.02, 2.24, 0.12, 0.6, LEA, "gloss");                  // seat cushion
+        k.box(0, 0.495, 0.27, 2.2, 0.02, 0.04, LEAd, "gloss");                 // cushion welt
+        k.box(0, 0.86, -0.3, 2.24, 0.74, 0.16, LEA, "gloss", -0.12);           // back, raked
+        for (let i = -5; i <= 5; i++) k.box(i * 0.2, 0.86, -0.215, 0.012, 0.66, 0.02, LEAd, "gloss", -0.12);  // channel tufting
+        k.box(0, 1.25, -0.36, 2.36, 0.06, 0.24, WOOD, "gloss");                // capping rail
+        for (const e of [-1, 1]) {
+          k.box(e * 1.2, 0.36, 0.2, 0.16, 0.72, 1.0, WOOD, "gloss");           // end panels (the booth wings)
+          k.box(e * 1.2, 0.73, 0.2, 0.2, 0.03, 1.04, BR, "metal");
+        }
+        // the table: cast base, column, marble top with a brass edge
+        k.cyl(0, 0.02, 0.75, 0.26, 0.3, 0.04, 0x1a1612, "metal", 0, 0, 0, 20);
+        k.cyl(0, 0.38, 0.75, 0.045, 0.06, 0.68, 0x1a1612, "metal", 0, 0, 0, 12);
+        k.cyl(0, 0.735, 0.75, 0.46, 0.46, 0.03, 0xe6e0d4, "gloss", 0, 0, 0, 32);
+        k.torus(0, 0.735, 0.75, 0.46, 0.012, BR, "metal", Math.PI / 2, 0, 0, null, 32);
+        // his lamp, his drink, his ashtray, the cigar
+        k.cyl(-0.25, 0.76, 0.6, 0.05, 0.06, 0.02, BR, "metal", 0, 0, 0, 12);
+        k.cyl(-0.25, 0.9, 0.6, 0.008, 0.008, 0.26, BR, "metal", 0, 0, 0, 6);
+        k.cyl(-0.25, 1.04, 0.6, 0.06, 0.1, 0.1, 0xffc27a, "glow", 0, 0, 0, 14);
+        k.cyl(0.18, 0.79, 0.62, 0.036, 0.032, 0.09, 0, "glass", 0, 0, 0, 12);
+        k.cyl(0.18, 0.768, 0.62, 0.031, 0.031, 0.04, 0x9a5a1a, "gloss", 0, 0, 0, 12);  // the whisky in it
+        k.cyl(0.05, 0.756, 0.92, 0.07, 0.06, 0.03, 0x1c1c22, "gloss", 0, 0, 0, 14);
+        k.cyl(0.08, 0.774, 0.92, 0.008, 0.008, 0.12, 0x4a2a14, "solid", 0, 0, Math.PI / 2, 6);
+      }
+      ctx.solid(cx - 1.3, cz - 0.9, cx + 1.3, cz + 0.9);
       // No `dialogue` on purpose: his [E] is the LOAN PANEL (the ctx.zone below);
       // his line goes over his head via sharkSay() when that panel opens, so the
       // panel always wins the interaction. role "shark" → the facade's high-roller look,
@@ -764,7 +863,11 @@
         shark.g.position.y -= 0.28; g.add(shark.g); ctx.idle(shark, 5.2); return shark;
       }, "shark");
       ctx.zone({ id: "shark", label: "The Shark", pos: [cx, cz - 1.3], r: 1.5, onUse: renderShark });
-      ctx.light(cx, 1.7, cz - 0.1, 0xff9a4e, 0.6, 5.5);
+      ctx.light(cx - 0.25, ff + 1.3, cz - 0.25, 0xff9a4e, 0.6, 5.5);
+    }
+    if (k) {
+      const fix = new THREE.Group(); fix.name = "casino-fixtures";
+      k.build(fix); g.add(fix);
     }
     // --- ambient patrons: real peds milling the slots/roulette so the floor
     //     breathes. Facade-only (no dialogue, no dummy fallback) — before ctx.npc
