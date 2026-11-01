@@ -533,96 +533,246 @@
     V = { origin: venue.origin, fA: null, fB: null, ref: null, judges: [], bookie: null, cutman: null,
       cardMesh: null, card: null, cardCanvas: null, beltLid: null, beltOpen: 0, pending: [], _venue: venue };
 
-    const MAT = { post: 0x8a919e, red: 0xc22333, blue: 0x2246c2, neutral: 0xdfe3ea, wood: 0x4a2e1c,
-      woodD: 0x33200f, steel: 0x39404c, rope: 0xe8e4da, dark: 0x1a1d24, gold: 0xe8b64c, felt: 0x2a6cc0 };
-    const box = (x, y, z, w, h, d, m, ry) => ctx.box(g, x, y, z, w, h, d, ctx.mat(m), ry);
-
-    // ---- RING platform + canvas (canvas mat) : the stage --------------------
+    /* THE RING (2026-10-31 rebuild): a real 7 m (post to post) boxing ring.
+       Steel-framed platform under a black vinyl skirt printed with the house
+       name, a 0.6 m apron, the canvas with its corner logos, four round steel
+       posts behind tall corner pads (red, blue, two neutral), FOUR ropes at
+       the regulation heights (0.46 / 0.81 / 1.17 / 1.52 m) with their
+       turnbuckles and the mid-side spacer straps, aluminium ring steps with
+       handrails, and a lighting truss over it all on four towers. Corner
+       stools with bucket and towel, the judges' and timekeeper's table with
+       the bell, the belt in a lit glass case, the bookmaker's kiosk.
+       Everything static is merged by the store fixture kit: ~6 draw calls. */
+    const MAT = { red: 0xb81f2c, blue: 0x1f3fae, neutral: 0xe4e6ea, gold: 0xe8b64c, dark: 0x16181d };
     const half = 3.5;                             // corner-post ring half-width
-    box(0, 0.45, 0, 8.2, 0.9, 8.2, MAT.steel);   // chunky platform (rests on deck: 0..0.9)
-    // canvas apron: a CanvasTexture top so the ring reads as SOUTHPAW PALACE from the stands
-    const canvasTex = ctx.canvasTex(256, 256, (cc, w, h) => {
-      cc.fillStyle = "#d8d4c4"; cc.fillRect(0, 0, w, h);
-      cc.strokeStyle = "rgba(20,24,32,.35)"; cc.lineWidth = 3; cc.strokeRect(10, 10, w - 20, h - 20);
-      cc.fillStyle = "rgba(30,40,70,.55)"; cc.font = "bold 34px Arial"; cc.textAlign = "center"; cc.textBaseline = "middle";
-      cc.fillText("SOUTHPAW", w / 2, h / 2 - 20); cc.fillText("PALACE", w / 2, h / 2 + 22);
-    });
-    const canvas = new THREE.Mesh(new THREE.BoxGeometry(7.8, 0.08, 7.8), new THREE.MeshLambertMaterial({ map: canvasTex }));
-    canvas.position.set(0, 0.94, 0); g.add(canvas);
-    ctx.solid(-4.1, -4.1, 4.1, 4.1, DECK_Y, DECK_Y + 1.0);   // player bumps the ring apron
+    const CV = CANVAS_Y - DECK_Y;                 // canvas top, local (0.92)
+    const K = CBZ.storeFixtureKit;
+    const k = K ? K.create() : null;
+    const ROPE_H = [0.46, 0.81, 1.17, 1.52];
 
-    // ---- 4 corner posts + pads (red/blue corner identity) -------------------
-    const corners = [[-half, -half, MAT.red], [half, half, MAT.blue], [half, -half, MAT.neutral], [-half, half, MAT.neutral]];
-    corners.forEach((c) => {
-      box(c[0], 0.94 + 0.85, c[1], 0.24, 1.7, 0.24, MAT.post);   // post
-      box(c[0], 0.94 + 0.5, c[1], 0.42, 0.9, 0.42, c[2]);        // padded corner (chunky, load-bearing colour)
+    // the canvas: a printed mat (house name, corner logos), one texture
+    const canvasTex = ctx.canvasTex(512, 512, (cc, w, h) => {
+      cc.fillStyle = "#dcd6c4"; cc.fillRect(0, 0, w, h);
+      let sd = 7; const rn = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);   // scuffs, deterministic
+      for (let i = 0; i < 900; i++) { cc.fillStyle = "rgba(90,80,60," + (0.02 + rn() * 0.04) + ")"; cc.fillRect(rn() * w, rn() * h, 2 + rn() * 6, 2 + rn() * 6); }
+      cc.strokeStyle = "rgba(20,24,32,.5)"; cc.lineWidth = 4; cc.strokeRect(14, 14, w - 28, h - 28);
+      cc.fillStyle = "rgba(160,26,38,.85)"; cc.beginPath(); cc.arc(w / 2, h / 2, 118, 0, 7); cc.fill();
+      cc.fillStyle = "#f2ead8"; cc.beginPath(); cc.arc(w / 2, h / 2, 104, 0, 7); cc.fill();
+      cc.fillStyle = "rgba(24,30,50,.92)"; cc.textAlign = "center"; cc.textBaseline = "middle";
+      cc.font = "900 44px 'Arial Black', Arial"; cc.fillText("SOUTHPAW", w / 2, h / 2 - 22);
+      cc.font = "900 36px 'Arial Black', Arial"; cc.fillText("PALACE", w / 2, h / 2 + 24);
+      cc.fillStyle = "rgba(184,31,44,.75)"; cc.beginPath(); cc.moveTo(14, 14); cc.lineTo(110, 14); cc.lineTo(14, 110); cc.fill();
+      cc.fillStyle = "rgba(31,63,174,.75)"; cc.beginPath(); cc.moveTo(w - 14, h - 14); cc.lineTo(w - 110, h - 14); cc.lineTo(w - 14, h - 110); cc.fill();
     });
-    // ---- sagging ropes as thin cyls between the posts (3 rows) --------------
-    const rc = half - 0.15;
-    const ropeH = [0.55, 0.95, 1.35], sag = [0.16, 0.12, 0.08];
-    for (let r = 0; r < 3; r++) {
-      const y = 0.94 + ropeH[r], s = sag[r];
-      ropeSeg(g, -rc, -rc, rc, -rc, y, s, MAT.rope);   // south
-      ropeSeg(g, -rc, rc, rc, rc, y, s, MAT.rope);     // north
-      ropeSeg(g, -rc, -rc, -rc, rc, y, s, MAT.rope);   // west
-      ropeSeg(g, rc, -rc, rc, rc, y, s, MAT.rope);     // east
+    const canvas = new THREE.Mesh(new THREE.PlaneGeometry(2 * (half + 0.55), 2 * (half + 0.55)), new THREE.MeshLambertMaterial({ map: canvasTex }));
+    canvas.rotation.x = -Math.PI / 2; canvas.position.set(0, CV + 0.001, 0); canvas.receiveShadow = true; g.add(canvas);
+    // the skirt: black vinyl, the house name on every face
+    const skirtTex = ctx.canvasTex(512, 64, (cc, w, h) => {
+      cc.fillStyle = "#0e0f12"; cc.fillRect(0, 0, w, h);
+      cc.fillStyle = "#b81f2c"; cc.fillRect(0, 4, w, 3); cc.fillRect(0, h - 7, w, 3);
+      cc.fillStyle = "#e8b64c"; cc.font = "900 30px 'Arial Black', Arial"; cc.textAlign = "center"; cc.textBaseline = "middle";
+      cc.fillText("SOUTHPAW  PALACE", w / 2, h / 2 + 1);
+    });
+    const skirtMat = new THREE.MeshLambertMaterial({ map: skirtTex });
+    const SK = half + 0.6, skH = CV - 0.06;
+    for (let i = 0; i < 4; i++) {
+      const sk = new THREE.Mesh(new THREE.PlaneGeometry(2 * SK, skH), skirtMat);
+      const a = i * Math.PI / 2;
+      sk.position.set(Math.sin(a) * (SK + 0.002), skH / 2, Math.cos(a) * (SK + 0.002)); sk.rotation.y = a; g.add(sk);
     }
-    // ---- ring steps (the walk-in) on the entry (+Z) side --------------------
-    box(0, 0.25, half + 1.0, 2.2, 0.5, 1.3, MAT.steel);
-    box(0, 0.6, half + 0.5, 1.6, 0.5, 0.9, MAT.steel);
 
-    // ---- corner STOOLS: you SIT on yours between rounds; the cutman works it -
-    box(-half - 0.9, 0.28, -half - 0.9, 0.7, 0.55, 0.7, MAT.red);    // red corner stool
-    box(half + 0.9, 0.28, half + 0.9, 0.7, 0.55, 0.7, MAT.blue);     // blue corner stool
-    ctx.solid(-half - 1.25, -half - 1.25, -half - 0.55, -half - 0.55, DECK_Y, DECK_Y + 0.6);
-    ctx.solid(half + 0.55, half + 0.55, half + 1.25, half + 1.25, DECK_Y, DECK_Y + 0.6);
+    if (k) {
+      k.frame(0, 0, 0, 0);
+      // platform: the deck under the canvas, its padded edge roll, a kick plate
+      k.box(0, (CV - 0.06) / 2, 0, 2 * SK - 0.02, CV - 0.06, 2 * SK - 0.02, 0x1a1c20);
+      k.box(0, CV - 0.03, 0, 2 * SK, 0.06, 2 * SK, 0x2a2c30, "solid");
+      for (let i = 0; i < 4; i++) {
+        const a = i * Math.PI / 2, c = Math.cos(a), s = Math.sin(a);
+        k.cyl(s * SK, CV - 0.005, c * SK, 0.035, 0.035, 2 * SK, 0xb81f2c, "gloss", 0, a, Math.PI / 2, 10);   // the padded edge roll
+      }
+      // posts, turnbuckles, corner pads
+      const corners = [[-half, -half, MAT.red], [half, half, MAT.blue], [half, -half, MAT.neutral], [-half, half, MAT.neutral]];
+      corners.forEach((c) => {
+        const ox = Math.sign(c[0]) * 0.1, oz = Math.sign(c[1]) * 0.1;
+        k.cyl(c[0] + ox, CV + 0.82, c[1] + oz, 0.055, 0.06, 1.64, 0x8a919e, "metal", 0, 0, 0, 14);   // the post
+        k.cyl(c[0] + ox, CV + 1.67, c[1] + oz, 0.07, 0.07, 0.06, 0x5a606a, "metal", 0, 0, 0, 14);
+        for (const y of ROPE_H) {                                                                 // turnbuckles
+          k.cyl(c[0] + ox * 0.5, CV + y, c[1], 0.02, 0.02, 0.12, 0xb0b6c0, "metal", 0, 0, Math.PI / 2, 8);
+          k.cyl(c[0], CV + y, c[1] + oz * 0.5, 0.02, 0.02, 0.12, 0xb0b6c0, "metal", Math.PI / 2, 0, 0, 8);
+        }
+        // the corner pad: a tall cushion over the turnbuckles, turned to face the ring
+        k.box(c[0], CV + 1.0, c[1], 0.26, 1.2, 0.16, c[2], "gloss", 0, Math.atan2(c[0], c[1]) + Math.PI, 0);
+        k.box(c[0], CV + 1.0, c[1], 0.27, 1.12, 0.12, 0x0e0f12, "solid", 0, Math.atan2(c[0], c[1]) + Math.PI, 0);
+      });
+      // four ropes a side, each a gentle catenary, plus two spacer straps a side
+      const rc = half - 0.04;
+      const sides = [[-rc, -rc, rc, -rc], [-rc, rc, rc, rc], [-rc, -rc, -rc, rc], [rc, -rc, rc, rc]];
+      for (let r = 0; r < 4; r++) {
+        const sag = 0.05 + (3 - r) * 0.02, col = r === 3 ? 0xb81f2c : (r === 0 ? 0x1f3fae : 0xf0ece2);
+        sides.forEach((sd) => {
+          const pts = [];
+          for (let i = 0; i <= 8; i++) {
+            const t = i / 8;
+            pts.push(new THREE.Vector3(sd[0] + (sd[2] - sd[0]) * t, CV + ROPE_H[r] - sag * 4 * t * (1 - t), sd[1] + (sd[3] - sd[1]) * t));
+          }
+          k.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.022, 6, false), col, "gloss");
+        });
+      }
+      sides.forEach((sd) => {
+        for (const t of [1 / 3, 2 / 3]) {
+          const x = sd[0] + (sd[2] - sd[0]) * t, z = sd[1] + (sd[3] - sd[1]) * t;
+          const along = sd[0] === sd[2] ? Math.PI / 2 : 0;
+          k.box(x, CV + 0.99, z, 0.05, 1.12, 0.05, 0xf0ece2, "solid", 0, along, 0);
+        }
+      });
+      // ring steps on the entry (+Z) side: three aluminium treads, two handrails
+      const sz0 = SK;
+      for (let i = 0; i < 3; i++) {
+        const tz = sz0 + 0.95 - i * 0.3, ty = 0.24 + i * 0.24;
+        k.box(0, ty - 0.02, tz, 1.2, 0.04, 0.3, 0x3a3e46, "metal");
+        for (let j = 0; j < 4; j++) k.box(-0.45 + j * 0.3, ty, tz, 0.012, 0.003, 0.28, 0x8a9098, "metal");
+      }
+      for (const e of [-1, 1]) {
+        k.box(e * 0.62, 0.38, sz0 + 0.55, 0.04, 0.76, 0.95, 0x1a1c20, "metal");   // stringers
+        const p0 = new THREE.Vector3(e * 0.62, 1.1, sz0 + 1.05), p1 = new THREE.Vector3(e * 0.62, CV + 0.95, sz0 + 0.05);
+        k.push(new THREE.TubeGeometry(new THREE.LineCurve3(p0, p1), 4, 0.02, 8, false), 0xb0b6c0, "metal");
+        k.cyl(e * 0.62, 0.55, sz0 + 1.05, 0.02, 0.02, 1.1, 0xb0b6c0, "metal", 0, 0, 0, 8);
+      }
+      // the lighting truss: four square towers, a box-truss square at 6 m, cans
+      const TR = half + 2.2, TH = 6.2;
+      const truss = (ax, az, bx, bz, y) => {
+        const len = Math.hypot(bx - ax, bz - az), ang = Math.atan2(bx - ax, bz - az);
+        const mx = (ax + bx) / 2, mz = (az + bz) / 2;
+        for (const dy of [-0.15, 0.15]) for (const dw of [-0.15, 0.15]) {
+          const ox = Math.cos(ang) * dw, oz = -Math.sin(ang) * dw;
+          if (Math.abs(Math.sin(ang)) > 0.5) k.cyl(mx + ox, y + dy, mz + oz, 0.022, 0.022, len, 0x2a2d33, "metal", 0, 0, Math.PI / 2, 6);
+          else k.cyl(mx + ox, y + dy, mz + oz, 0.022, 0.022, len, 0x2a2d33, "metal", Math.PI / 2, 0, 0, 6);
+        }
+        const n = Math.round(len / 0.5);
+        for (let i = 0; i <= n; i++) {
+          const t = i / n, x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+          k.box(x, y, z, 0.3, 0.3, 0.012, 0x3a3d44, "metal", 0, ang, 0);
+        }
+      };
+      truss(-TR, -TR, TR, -TR, TH); truss(-TR, TR, TR, TR, TH); truss(-TR, -TR, -TR, TR, TH); truss(TR, -TR, TR, TR, TH);
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const x = sx * TR, z = sz * TR;
+        k.box(x, 0.03, z, 0.8, 0.06, 0.8, 0x2a2d33, "metal");                         // base plate
+        for (const dx of [-0.15, 0.15]) for (const dz of [-0.15, 0.15]) k.cyl(x + dx, TH / 2, z + dz, 0.022, 0.022, TH, 0x2a2d33, "metal", 0, 0, 0, 6);
+        for (let y = 0.5; y < TH; y += 0.5) { k.box(x, y, z - 0.15, 0.3, 0.012, 0.012, 0x3a3d44, "metal"); k.box(x, y, z + 0.15, 0.3, 0.012, 0.012, 0x3a3d44, "metal"); }
+      }
+      // par cans on the truss, aimed at the canvas; their lenses glow
+      for (let i = 0; i < 4; i++) for (let j = -1; j <= 1; j++) {
+        const a = i * Math.PI / 2, c = Math.cos(a), s = Math.sin(a);
+        const x = s * TR + c * j * 1.8, z = c * TR - s * j * 1.8;
+        const tilt = 0.75;
+        k.cyl(x, TH - 0.4, z, 0.13, 0.11, 0.34, 0x16181d, "metal", -tilt * c, 0, tilt * s, 12);
+        k.cyl(x - s * 0.12, TH - 0.52, z - c * 0.12, 0.1, 0.1, 0.01, 0xfff4dc, "glow", -tilt * c, 0, tilt * s, 12);
+      }
 
-    // ---- JUDGES' TABLE (west, ringside): 3 seats, their cards decide it ------
+      // corner stools (red / blue): aluminium frame, padded top, bucket, towel
+      [[-half - 0.9, -half - 0.9, MAT.red], [half + 0.9, half + 0.9, MAT.blue]].forEach((st) => {
+        const x = st[0], z = st[1];
+        for (const dx of [-0.17, 0.17]) for (const dz of [-0.17, 0.17]) k.cyl(x + dx, 0.27, z + dz, 0.014, 0.018, 0.54, 0xb0b6c0, "metal", dz * 0.4, 0, -dx * 0.4, 6);
+        k.box(x, 0.56, z, 0.42, 0.06, 0.42, st[2], "gloss");
+        k.box(x, 0.44, z, 0.4, 0.02, 0.4, 0x8a9098, "metal");
+        k.cyl(x + 0.42, 0.17, z, 0.13, 0.11, 0.34, 0x1a1d22, "gloss", 0, 0, 0, 14);   // the spit bucket
+        k.torus(x + 0.42, 0.34, z, 0.13, 0.008, 0xb0b6c0, "metal", Math.PI / 2, 0, 0, null, 16);
+        k.box(x - 0.05, 0.6, z + 0.14, 0.34, 0.03, 0.16, 0xf2f0ea, "solid", 0, 0.3, 0);   // the towel over it
+      });
+
+      // judges' + timekeeper's table: a draped table, three chairs, scorepads, the bell
+      const jx0 = -half - 3.0;
+      k.box(jx0, 0.74, 0, 0.9, 0.04, 5.2, 0x24262c, "gloss");
+      k.box(jx0 + 0.44, 0.38, 0, 0.02, 0.72, 5.2, 0x0e0f12);                         // front drape
+      for (const e of [-1, 1]) k.box(jx0, 0.38, e * 2.59, 0.9, 0.72, 0.02, 0x0e0f12);
+      k.box(jx0 + 0.452, 0.66, 0, 0.004, 0.06, 5.2, 0xb81f2c);
+      for (let i = 0; i < 3; i++) {
+        const z = (i - 1) * 1.7, cxh = jx0 - 0.75;
+        // the chair: steel frame, padded seat and back
+        for (const dx of [-0.2, 0.2]) for (const dz of [-0.2, 0.2]) k.cyl(cxh + dx, 0.23, z + dz, 0.012, 0.012, 0.46, 0x2a2d33, "metal", 0, 0, 0, 6);
+        k.box(cxh, 0.48, z, 0.46, 0.05, 0.46, 0x1a1c22, "gloss");
+        k.box(cxh - 0.22, 0.78, z, 0.04, 0.5, 0.44, 0x1a1c22, "gloss");
+        // a judge's scorepad and pen
+        k.box(jx0 + 0.1, 0.765, z, 0.22, 0.008, 0.3, 0xf4f2ea);
+        k.cyl(jx0 + 0.1, 0.772, z + 0.18, 0.004, 0.004, 0.14, 0x1a1c22, "solid", Math.PI / 2, 0, 0, 6);
+      }
+      // the bell: a brass gong on its wooden mount, the hammer beside it
+      k.box(jx0 + 0.15, 0.78, 2.2, 0.2, 0.04, 0.26, 0x4a2e1c, "gloss");
+      k.box(jx0 + 0.15, 0.93, 2.2, 0.04, 0.3, 0.04, 0x4a2e1c, "gloss");
+      k.cyl(jx0 + 0.15, 1.02, 2.2, 0.11, 0.11, 0.05, 0xd8a832, "metal", 0, 0, Math.PI / 2, 20);
+      k.cyl(jx0 + 0.1, 0.78, 2.0, 0.008, 0.008, 0.22, 0x4a2e1c, "solid", Math.PI / 2, 0, 0, 6);
+      k.sphere(jx0 + 0.1, 0.78, 1.89, 0.016, 0xb0b6c0, "metal");
+
+      // belt case: walnut plinth with a lit cap, glass box (the live lid) over it
+      const bx0 = 2.6, bz0 = half + 2.8;
+      k.box(bx0, 0.55, bz0, 1.4, 1.1, 1.0, 0x2a1a10, "gloss");
+      k.box(bx0, 1.12, bz0, 1.46, 0.04, 1.06, 0xc9a24a, "metal");
+      k.box(bx0, 1.15, bz0, 1.3, 0.02, 0.9, 0x0e0f12, "solid");
+      k.box(bx0, 0.05, bz0, 1.44, 0.1, 1.04, 0x0e0c0a);
+      k.box(bx0, 0.7, bz0 + 0.505, 0.8, 0.12, 0.004, 0xe8b64c, "metal");               // the brass plaque
+      // the bookmaker's kiosk: framed booth, counter, grille, odds board
+      const wx0 = half + 3.2, wz0 = -half + 0.2;
+      k.box(wx0 + 0.1, 1.2, wz0, 1.4, 2.4, 3.0, 0x16181d, "gloss");
+      k.box(wx0 - 0.62, 0.55, wz0, 0.08, 1.1, 3.0, 0x6e1524, "gloss");                  // the counter front
+      k.box(wx0 - 0.72, 1.12, wz0, 0.36, 0.05, 3.1, 0x2a1a10, "gloss");                 // counter top
+      for (let i = 0; i <= 12; i++) k.cyl(wx0 - 0.62, 1.62, wz0 - 1.45 + i * (2.9 / 12), 0.008, 0.008, 0.95, 0xc9a24a, "metal", 0, 0, 0, 6);
+      k.box(wx0 - 0.62, 2.11, wz0, 0.05, 0.04, 3.0, 0xc9a24a, "metal");
+      k.box(wx0 - 0.62, 1.16, wz0, 0.05, 0.04, 3.0, 0xc9a24a, "metal");
+      k.box(wx0 - 0.75, 2.55, wz0, 0.1, 0.5, 2.0, 0x0b0f16, "gloss");
+      k.build(g);
+    } else {
+      ctx.box(g, 0, CV / 2, 0, 2 * SK, CV, 2 * SK, ctx.mat(0x1a1c20));
+    }
+    ctx.solid(-4.1, -4.1, 4.1, 4.1, DECK_Y, DECK_Y + 1.0);   // player bumps the ring apron
+    ctx.solid(-half - 1.15, -half - 1.15, -half - 0.65, -half - 0.65, DECK_Y, DECK_Y + 0.6);
+    ctx.solid(half + 0.65, half + 0.65, half + 1.15, half + 1.15, DECK_Y, DECK_Y + 0.6);
+
+    // ---- JUDGES' TABLE (west, ringside): their cards decide it -------------
     const jx = -half - 3.0;
-    box(jx, 0.75, 0, 1.3, 0.16, 5.2, MAT.wood);              // table top
-    box(jx, 0.86, 0, 1.34, 0.26, 5.24, MAT.woodD);           // skirt
-    for (let i = 0; i < 3; i++) { box(jx - 0.05, 0.35, (i - 1) * 1.7, 1.0, 0.7, 0.3, MAT.woodD);   // seat block
-      box(jx - 0.9, 0.35, (i - 1) * 1.7, 0.7, 0.7, 0.7, MAT.steel); }                              // chair
     ctx.solid(jx - 0.75, -2.7, jx + 0.75, 2.7, DECK_Y, DECK_Y + 0.95);
     // a scorecard board on the table, redrawn between rounds (their held cards).
-    // ctx.canvasTexLive is the shared LIVE-board helper (core/packages.js) —
-    // ctx.canvasTex paints once and drops the 2d context, which is why this,
-    // government's tally and police's roster each used to hand-roll the same
-    // four lines. 768x256 is 3.00, exactly the 2.4 x 0.8 mesh, so no stretch.
+    // ctx.canvasTexLive is the shared LIVE-board helper (core/packages.js).
+    // 768x256 is 3.00, exactly the 2.4 x 0.8 mesh, so no stretch. Now framed
+    // on an easel-backed board standing on the table, facing the ring.
     V.card = ctx.canvasTexLive(768, 256);
     V.cardCanvas = V.card.canvas; V.boardTex = V.card.tex;
     V.cardMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.8), new THREE.MeshBasicMaterial({ map: V.boardTex, transparent: true }));
-    V.cardMesh.position.set(jx + 0.75, 1.5, 0); V.cardMesh.rotation.y = Math.PI / 2;
+    V.cardMesh.position.set(jx + 0.3, 1.36, 0); V.cardMesh.rotation.y = Math.PI / 2;
     V.cardMesh.castShadow = false; V.cardMesh.receiveShadow = false; g.add(V.cardMesh);
+    ctx.box(g, jx + 0.28, 1.36, 0, 0.03, 0.88, 2.48, ctx.mat(0x0e0f12));
     drawCards(null);
 
     // ---- BELT CASE (the GOAL, by the entry +Z, visible on the walk in) -------
-    const bx = half + 2.4, bz = half + 1.6;
-    box(bx, 0.55, bz, 1.4, 1.1, 1.0, MAT.woodD);            // plinth
-    box(bx, 1.16, bz, 1.24, 0.12, 0.9, MAT.gold);           // shelf
-    const belt = box(bx, 1.28, bz, 0.9, 0.22, 0.5, MAT.gold);  // THE BELT (plate + strap read)
-    box(bx, 1.28, bz, 1.0, 0.14, 0.36, MAT.dark);
-    V.belt = belt; V.beltHome = 1.28;
-    // glass lid (thin transparent box) — lifts on a title win
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.9, 0.94),
-      new THREE.MeshPhongMaterial({ color: 0xbfe4ff, transparent: true, opacity: 0.18, shininess: 90 }));
-    lid.position.set(bx, 1.75, bz); g.add(lid); V.beltLid = lid; V.beltLidHome = 1.75;
-    for (let i = 0; i < 4; i++) box(bx + (i & 1 ? 0.6 : -0.6), 1.7, bz + (i & 2 ? 0.44 : -0.44), 0.1, 1.0, 0.1, MAT.post);
+    const bx = 2.6, bz = half + 2.8;
+    // THE BELT: a black leather strap with the gold centre plate and four side
+    // plates, laid flat on the velvet; a live group so a title win can lift it
+    const belt = new THREE.Group(); belt.position.set(bx, 1.2, bz); g.add(belt);
+    const gold = ctx.pmat(0xe0b040, 80);
+    ctx.box(belt, 0, 0, 0, 1.0, 0.012, 0.1, ctx.pmat(0x111114, 20));
+    const plate = ctx.cyl(belt, 0, 0.012, 0, 0.13, 0.13, 0.014, gold, 24); plate.scale.set(1.25, 1, 1);
+    ctx.cyl(belt, 0, 0.022, 0, 0.08, 0.09, 0.008, ctx.pmat(0xb81f2c, 40), 20);
+    ctx.cyl(belt, 0, 0.028, 0, 0.045, 0.045, 0.006, gold, 16);
+    for (const e of [-1, 1]) for (const f of [1, 2]) ctx.box(belt, e * (0.12 + f * 0.11), 0.01, 0, 0.09, 0.012, 0.085, gold);
+    V.belt = belt; V.beltHome = 1.2;
+    // glass lid (a real glass box) that lifts on a title win
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.7, 0.9),
+      new THREE.MeshPhongMaterial({ color: 0xdcecf2, specular: 0xffffff, transparent: true, opacity: 0.16, shininess: 120, depthWrite: false }));
+    lid.position.set(bx, 1.52, bz); lid.renderOrder = 1; g.add(lid); V.beltLid = lid; V.beltLidHome = 1.52;
     ctx.solid(bx - 0.75, bz - 0.6, bx + 0.75, bz + 0.6, DECK_Y, DECK_Y + 1.4);
 
     // ---- BETTING WINDOW (east): the bettor economy + the bookie's post -------
-    const wx = half + 3.2, wz = -half - 1.0;
-    box(wx, 0.9, wz, 1.6, 1.8, 3.0, MAT.dark);              // booth
-    box(wx - 0.85, 1.86, wz, 0.2, 0.16, 3.1, MAT.gold);     // counter lip
-    const neonTex = ctx.canvasTex(256, 64, (cc, w, h) => { cc.fillStyle = "#0b0f16"; cc.fillRect(0, 0, w, h);
-      cc.fillStyle = "#35e0ff"; cc.font = "bold 30px Arial"; cc.textAlign = "center"; cc.textBaseline = "middle"; cc.fillText("BOOKMAKER", w / 2, h / 2); });
-    const neon = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.45), new THREE.MeshBasicMaterial({ map: neonTex }));
-    neon.position.set(wx - 0.83, 2.4, wz); neon.rotation.y = -Math.PI / 2; g.add(neon);
+    const wx = half + 3.2, wz = -half + 0.2;
+    const neonTex = ctx.canvasTex(512, 128, (cc, w, h) => { cc.fillStyle = "#0b0f16"; cc.fillRect(0, 0, w, h);
+      cc.shadowColor = "#35e0ff"; cc.shadowBlur = 18; cc.strokeStyle = "#35e0ff"; cc.lineWidth = 4; cc.strokeRect(10, 10, w - 20, h - 20);
+      cc.fillStyle = "#c8f6ff"; cc.font = "900 56px 'Arial Black', Arial"; cc.textAlign = "center"; cc.textBaseline = "middle"; cc.fillText("BOOKMAKER", w / 2, h / 2 + 2); });
+    const neon = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 0.47), new THREE.MeshBasicMaterial({ map: neonTex }));
+    neon.position.set(wx - 0.81, 2.55, wz); neon.rotation.y = -Math.PI / 2; g.add(neon);
     ctx.solid(wx - 0.8, wz - 1.5, wx + 0.8, wz + 1.5, DECK_Y, DECK_Y + 1.8);
 
     // ---- the LOOK: one hot pool over the ring (dark plaza / bright ring) -----
-    ctx.light(0, 6.5, 0, 0xfff1d8, 1.1, 22);
-    ctx.light(bx, 3.0, bz, 0xffd77a, 0.7, 7);               // belt-case glow (the goal draws the eye)
+    ctx.light(0, 6.0, 0, 0xfff1d8, 1.2, 22);
+    ctx.light(bx, 2.4, bz, 0xffd77a, 0.7, 6);               // belt-case glow (the goal draws the eye)
 
     // ---- CAST (deferred like casino: real peds need the live arena) ---------
     // fighters: role "boxer" (no catalog boxer fit → pass corner colours). RED
@@ -656,23 +806,10 @@
       onUse: () => { if (LIVE && LIVE.role === "player" && !LIVE.bout.over) openFighterHUD(); else openMain(); },
     });
     ctx.zone({
-      id: "belt", pos: [half + 2.4, half + 1.6], r: 1.8,
+      id: "belt", pos: [2.6, half + 2.8], r: 1.8,
       label: () => bag().belt ? "[E] The Southpaw Palace belt, yours" : "[E] The belt case (win the title)",
       onUse: () => { if (bag().belt) C.hud.toast("SOUTHPAW PALACE CHAMPION"); },
     });
-  }
-
-  // thin sagging rope = two cylinders forming a shallow V (mid dips by `sag`)
-  function ropeSeg(g, ax, az, bx, bz, y, sag, mcol) {
-    const mx = (ax + bx) / 2, mz = (az + bz) / 2;
-    segCyl(g, ax, y, az, mx, y - sag, mz, mcol);
-    segCyl(g, mx, y - sag, mz, bx, y, bz, mcol);
-  }
-  function segCyl(g, ax, ay, az, bx, by, bz, mcol) {
-    const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz) || 0.001;
-    const mesh = C.cyl(g, (ax + bx) / 2, (ay + by) / 2, (az + bz) / 2, 0.05, 0.05, len, C.mat(mcol), 6);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx, dy, dz).normalize());
-    return mesh;
   }
 
   /* deferred cast (arena root/peds land after our order-88 build; casino pattern) */

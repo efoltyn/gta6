@@ -455,6 +455,25 @@
   function safe(fn) { try { return fn(); } catch (e) { console.warn("[warlord/battle]", e); return null; } }
 
   function rockMesh(c, groundAt) {
+    /* THE ROCK IS props.js's ROCK. This fallback (a field desert.js did not
+       raise: ?ground=own, or no desert module) drew every piece of cover as
+       a tan box. The library's boulder is the same object the raised field
+       draws; it comes back yawed, and the collider below follows its yaw. */
+    const P = W.props;
+    if (P && P.cover) {
+      const g = safe(function () {
+        return P.cover(c.kind === "slab" ? "slab" : "boulder",
+          { w: c.w || 2, h: c.h || 1.4, d: c.d || 2, seed: Math.round(c.x * 13 + c.z * 7) });
+      });
+      const rock = g && g.userData.meshCollider;
+      if (g) {
+        g.position.set(c.x, groundAt(c.x, c.z), c.z);
+        scene.add(g);
+        addedMeshes.push(g);
+        if (rock) addedMeshes.push(rock);   // the stone itself is what a round stops on
+        return rock || g;
+      }
+    }
     const m = new THREE.Mesh(
       CBZ.boxGeom ? CBZ.boxGeom(c.w, c.h, c.d) : new THREE.BoxGeometry(c.w, c.h, c.d),
       CBZ.cmat ? CBZ.cmat(0x7a6a4c) : new THREE.MeshLambertMaterial({ color: 0x7a6a4c }));

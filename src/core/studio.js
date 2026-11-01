@@ -593,7 +593,8 @@
              "herd) and a low-poly build() that returns the posed body. Data " +
              "and geometry only: no engine, no spawning, no hunt",
       needs: ["look"],
-      files: ["city/wildlife_species.js",
+      files: ["units/kit/loft.js", "city/wildlife_species.js",
+        "city/wildlife/beast_kit.js", "city/wildlife/beast_bodies.js",
         "city/wildlife/forest_deer.js", "city/wildlife/bears.js",
         "city/wildlife/canines.js", "city/wildlife/apes.js",
         "city/wildlife/bigcats.js", "city/wildlife/megafauna.js",
@@ -749,7 +750,7 @@
              "cannot disagree, overhead cover, and blast that walks a snapshot " +
              "so a kill mid-sweep cannot skip the next body",
       needs: ["boot", "look"],
-      files: ["weapons/munitiontable.js", "systems/ordnance.js"],
+      files: ["weapons/munitiontable.js", "weapons/munitions.js", "systems/ordnance.js"],
       publishes: ["munitionTable", "ordnance"],
     },
     nukefx: {

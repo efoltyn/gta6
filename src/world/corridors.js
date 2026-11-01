@@ -145,6 +145,96 @@
     wallRuns++;
     return m;
   }
+  /* WHAT A REAL CORRIDOR HAS ON ITS WALLS AND CEILING (2026-10-31). It had
+     painted block, a chair rail and strip lights, and that is all: a 640 m
+     building with no services in it. Added, all static and merged by
+     core/batch.js with the rest of the shell:
+       · a 100 mm rubber COVE BASE on both walls (what stops a mop and a
+         floor scrubber chewing the paint);
+       · a 20 mm galvanised CONDUIT run along one wall at the ceiling line,
+         on saddles every 1.5 m, with a JUNCTION BOX feeding each light row
+         and a drop down to a pull station or call point now and then;
+       · a CCTV DOME on the ceiling every ~18 m, staggered side to side
+         (a corridor nobody can see is not a prison corridor);
+       · section SIGNS over every corridor door on both faces, so a man who
+         gets into this maze can read where he is. */
+  const baseM = K.skin("steel", 0x24272b, 0.7), galvM = K.skin("galv", 0xb4bcc4);
+  const domeM = new THREE.MeshLambertMaterial({ color: 0x14161a, transparent: true, opacity: 0.82 });
+  const camM = K.skin("steel", 0xe6e8ea, 0.5), redM = K.skin("steel", 0xb3261e, 0.5);
+  // along a wall run t0..t1 whose inside face is at `face`, `inw` the unit
+  // step from the face into the corridor, `horiz` the run lies along x
+  function fitWall(t0, t1, face, inw, horiz, services) {
+    const len = t1 - t0, tc = (t0 + t1) / 2;
+    const at = (t, off) => (horiz ? [t, face + inw * off] : [face + inw * off, t]);
+    const bx = (t, y, off, along, h, across, m) => {
+      const p = at(t, off);
+      stat(new THREE.BoxGeometry(horiz ? along : across, h, horiz ? across : along), m, p[0], y, p[1], { cast: false });
+    };
+    bx(tc, 0.05, 0.006, len, 0.1, 0.012, baseM);                    // cove base
+    if (!services || len < 2) return;
+    const CY = CH - 0.22;
+    const p0 = at(tc, 0.035);
+    stat(new THREE.CylinderGeometry(0.011, 0.011, len, 6), galvM, p0[0], CY, p0[1],
+      horiz ? { rz: Math.PI / 2, cast: false } : { rx: Math.PI / 2, cast: false });    // conduit
+    const ns = Math.floor(len / 1.5);
+    for (let k = 0; k <= ns; k++) bx(t0 + 0.2 + (k * (len - 0.4)) / Math.max(1, ns), CY, 0.03, 0.03, 0.035, 0.05, galvM);   // saddles
+    const nj = Math.max(1, Math.round(len / 6));
+    for (let k = 0; k < nj; k++) {
+      const t = t0 + ((k + 0.5) * len) / nj;
+      bx(t, CY, 0.05, 0.12, 0.12, 0.07, galvM);                       // junction box
+      // every third bay, a drop to a call point at shoulder height
+      if (k % 3 === 1) {
+        const pd = at(t + 0.4, 0.03);
+        stat(new THREE.CylinderGeometry(0.011, 0.011, CY - 1.55, 6), galvM, pd[0], (CY + 1.55) / 2, pd[1], { cast: false });
+        bx(t + 0.4, 1.45, 0.035, 0.12, 0.16, 0.06, redM);             // call point
+        bx(t + 0.4, 1.45, 0.068, 0.07, 0.07, 0.008, camM);            // its glass
+      }
+    }
+  }
+  let domes = 0;
+  function cctv(x, z) {
+    stat(new THREE.CylinderGeometry(0.075, 0.075, 0.05, 16), camM, x, CH - 0.025, z, { cast: false });   // ceiling base
+    const g = new THREE.SphereGeometry(0.065, 14, 7, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+    g.translate(x, CH - 0.05, z);
+    const m = new THREE.Mesh(g, domeM);
+    m.castShadow = false;
+    (CBZ.prisonRoot || CBZ.scene).add(m);
+    domes++;
+  }
+  // a section sign: one material per label (so every copy merges), a plate
+  // facing +z before `ry`
+  const signMats = {};
+  function sectionSign(text, x, y, z, ry) {
+    let m = signMats[text];
+    if (!m) {
+      const paint = function (g, c) {
+        const W = c.width, H = c.height;
+        g.fillStyle = "#1d3557"; g.fillRect(0, 0, W, H);
+        g.strokeStyle = "#e8edf2"; g.lineWidth = 6; g.strokeRect(10, 10, W - 20, H - 20);
+        g.fillStyle = "#f1f4f7"; g.textAlign = "center"; g.textBaseline = "middle";
+        let size = Math.round(H * 0.5);
+        for (;;) { g.font = "700 " + size + "px Arial, Helvetica, sans-serif"; if (g.measureText(text).width < W * 0.86 || size < 12) break; size -= 2; }
+        g.fillText(text, W / 2, H / 2 + 2);
+      };
+      let t;
+      if (CBZ.lazyCanvasTexture) t = CBZ.lazyCanvasTexture(512, 96, paint, { name: "corridor-sign" });
+      else { const c = document.createElement("canvas"); c.width = 512; c.height = 96; paint(c.getContext("2d"), c); t = new THREE.CanvasTexture(c); }
+      m = signMats[text] = new THREE.MeshLambertMaterial({ map: t });
+    }
+    const geo = new THREE.BoxGeometry(1.6, 0.3, 0.02);
+    geo.rotateY(ry || 0); geo.translate(x, y, z);
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.castShadow = false; mesh.userData.sign = true;
+    (CBZ.prisonRoot || CBZ.scene).add(mesh);
+    return mesh;
+  }
+  const SECTION = {
+    "spine-w-n": "WEST CORRIDOR", "spine-n": "NORTH CORRIDOR", "spine-e-n": "EAST CORRIDOR",
+    "spine-w-s": "WEST CORRIDOR SOUTH", "spine-e-s": "EAST CORRIDOR SOUTH",
+    "wing-industries": "INDUSTRIES", "wing-rec": "RECREATION", "wing-power": "POWER HOUSE",
+    "wing-gate-w": "LOWER YARD GATE W", "wing-gate-e": "LOWER YARD GATE E", "wing-seg": "SEGREGATION",
+    "wing-kitchen": "KITCHEN", "wing-visits": "VISITATION",
+  };
   function build(s) {
     const r = s.r;
     corridorM += s.a1 - s.a0;
@@ -166,6 +256,7 @@
         const li = 0.06;
         if (horiz) CK.lining(run[0], run[1], line - out * li, line, CH);
         else CK.lining(line - out * li, line, run[0], run[1], CH);
+        if (!isEnd) fitWall(run[0], run[1], line - out * li, -out, horiz, side === sides[0]);
       }
     }
     // floor, ceiling, roof, strips — per piece this segment owns
@@ -185,6 +276,13 @@
         const t = p[0] + ((i + 0.5) * len) / n;
         if (s.axis === "z") CK.strip(s.fixed, CH - 0.02, t, 3.2, "z");
         else CK.strip(t, CH - 0.02, s.fixed, 3.2, "x");
+      }
+      // CCTV, between the strips, staggered off the centre-line
+      const nd = Math.max(1, Math.round(len / 18));
+      for (let i = 0; i < nd; i++) {
+        const t = p[0] + ((i + 0.5) * len) / nd + 3, off = ((domes & 1) ? 1 : -1) * (HW - 0.7);
+        if (t > p[1] - 0.5) continue;
+        if (s.axis === "z") cctv(s.fixed + off, t); else cctv(t, s.fixed + off);
       }
     }
     CBZ.onUpdate(21.39, (function () { let done = false; return function () {
@@ -215,6 +313,7 @@
     ["wing-rec", 0],
   ];
   let grilles = 0;
+  const secN = {};
   const byId = {}; for (const s of SEG) byId[s.id] = s;
   for (const g of GRILLES) {
     const s = byId[g[0]], r = s.r, at = g[1];
@@ -227,6 +326,13 @@
       swing: along ? -ex : ex, bands: true, staffR: 3.2, autoShut: 5,
     });
     grilles++;
+    // the section plate over the door head, on both faces of the partition
+    secN[s.id] = (secN[s.id] || 0) + 1;
+    const label = (SECTION[s.id] || "CORRIDOR") + "  " + String.fromCharCode(64 + secN[s.id]);
+    for (const f of [-1, 1]) {
+      if (along) sectionSign(label, s.fixed, 2.98, at + f * 0.165, f > 0 ? 0 : Math.PI);
+      else sectionSign(label, at + f * 0.165, 2.98, s.fixed, f > 0 ? Math.PI / 2 : -Math.PI / 2);
+    }
     // the sign: 1.2 m on the approach side, facing the man who walks toward the exit
     const dir = s.exit || 1;
     if (along) CK.exitSign(s.fixed + 1.4, 3.22, at - dir * 1.2, dir > 0 ? Math.PI : 0);

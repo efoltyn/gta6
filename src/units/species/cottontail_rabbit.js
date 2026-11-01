@@ -7,7 +7,7 @@
    battle's files.
 
    TODAY (wave A) every hook below falls back to what the game already has:
-     body     src/city/wildlife/forest_deer.js (the bestiary's low-poly build)
+     body     the bestiary row's body: src/city/wildlife/beast_bodies.js
      motion   the discovered gait rig: CBZ.wildlifeRig.buildGait / animateGait (city/wildlife_rig.js)
      fight    creature_combat's BITE, driven by
               the battle's beastFight with the numbers below

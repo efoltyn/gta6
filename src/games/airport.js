@@ -676,35 +676,117 @@
       if (au.runway) { AIM.x = au.runway.maxX - 70; AIM.z = (au.runway.minZ + au.runway.maxZ) / 2; }
     }
 
-    const steel = ctx.mat(0x39424c), dark = ctx.mat(0x1c2129), warm = ctx.mat(0xe8b64c);
+    /* THE APRON PROPS (2026-10-31 rebuild), on one merged store-fixture kit:
+       the charter desk is a real check-in counter under a framed departures
+       board; the fueler's truck is a cab-over refueller with an elliptical
+       tank, hose reel, ladder and placards; customs is a glazed booth under
+       a canopy with a real boom barrier. Real metres; colliders unchanged. */
+    const K = CBZ.storeFixtureKit, k = K ? K.create() : null;
 
-    // ---- CHARTER DESK (job board) : counter + a lit board sign at origin ----
-    ctx.box(g, 0, 0.6, 0, 3.2, 1.2, 1.4, ctx.mat(0x2a3542));      // counter
-    ctx.box(g, 0, 1.28, 0, 3.2, 0.16, 1.6, ctx.mat(0x141a20));    // counter top
-    ctx.box(g, -1.5, 2.2, -0.7, 0.3, 3.4, 0.3, steel);           // board post L
-    ctx.box(g, 1.5, 2.2, -0.7, 0.3, 3.4, 0.3, steel);            // board post R
-    ctx.box(g, 0, 3.2, -0.7, 3.2, 1.7, 0.24, ctx.emat(0xe8b64c, 0.55)); // the lit JOB BOARD
-    ctx.box(g, 0, 3.2, -0.56, 2.8, 1.4, 0.06, ctx.mat(0x141a20)); // board face (dark, sign reads on it)
+    // ---- CHARTER DESK (job board) : counter + the departures board ----------
+    if (k) {
+      k.frame(0, 0, 0, 0);                                                   // customer side = +z
+      const top = K.dressCounter(k, 3.2, 1.2, 1.06, 0, { clad: 0x2a3542, trim: 0xb0b6c0, work: 0xd8d6d0, kick: 0x141a20, cladKind: "gloss" });
+      k.box(0, top + 0.14, 0.52, 3.3, 0.04, 0.3, 0xe8e6e0, "gloss");          // the raised ledge
+      k.box(0, 0.7, 0.62, 3.2, 0.06, 0.004, 0xe8b64c, "glow");               // the brand stripe
+      for (const mx of [-0.8, 0.8]) {
+        k.box(mx, top + 0.24, -0.2, 0.46, 0.3, 0.04, 0x1a1c20, "metal", 0.1, Math.PI, 0);
+        k.box(mx, top + 0.24, -0.222, 0.42, 0.26, 0.004, 0x2e4a66, "glow", 0.1, Math.PI, 0);
+      }
+      k.box(1.3, top + 0.08, -0.25, 0.4, 0.16, 0.3, 0x2a2d33, "metal");      // the bag-tag printer
+      // the board: two brushed posts, a black frame, a lit face
+      for (const e of [-1, 1]) k.box(e * 1.55, 2.2, -0.7, 0.12, 4.4, 0.12, 0x8a9098, "metal");
+      k.box(0, 3.25, -0.7, 3.2, 1.6, 0.14, 0x14161a, "gloss");
+    }
+    {
+      const tex = ctx.canvasTex(512, 256, (cc, w, h) => {
+        cc.fillStyle = "#0b0f14"; cc.fillRect(0, 0, w, h);
+        cc.fillStyle = "#e8b64c"; cc.fillRect(0, 0, w, 44);
+        cc.fillStyle = "#0b0f14"; cc.font = "900 28px Arial"; cc.textBaseline = "middle"; cc.textAlign = "left";
+        cc.fillText("REDEYE CHARTER", 16, 23); cc.textAlign = "right"; cc.fillText("DEPARTURES", w - 16, 23);
+        const rows = [["N407RD", "CAPE HARBOR", "BOARDING"], ["N211KX", "HALLORAN", "ON TIME"], ["N88VL", "THE ISLES", "DELAYED"], ["N604TT", "FORT BRANDT", "CANCELLED"]];
+        cc.font = "700 24px 'Courier New', monospace";
+        rows.forEach((r, i) => {
+          const y = 76 + i * 46;
+          cc.fillStyle = i % 2 ? "#121820" : "#0e131a"; cc.fillRect(0, y - 22, w, 44);
+          cc.textAlign = "left"; cc.fillStyle = "#ffd977"; cc.fillText(r[0], 16, y); cc.fillStyle = "#e8eef4"; cc.fillText(r[1], 150, y);
+          cc.textAlign = "right"; cc.fillStyle = r[2] === "DELAYED" ? "#ffb43a" : (r[2] === "CANCELLED" ? "#ff5a4a" : "#5ae08a"); cc.fillText(r[2], w - 16, y);
+        });
+      });
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 1.5), new THREE.MeshBasicMaterial({ map: tex }));
+      board.position.set(0, 3.25, -0.62); g.add(board);
+    }
     ctx.solid(-1.6, -0.7, 1.6, 0.7, 0, 1.3);
     ctx.light(0, 3.4, 0, 0xffca72, 0.8, 12);
 
-    // ---- FUEL TRUCK (fueler station) : tank + cab, chunky ----
+    // ---- FUEL TRUCK (fueler station) : a cab-over refueller, nose to -x ----
     const fx = -14, fz = -3;
-    ctx.box(g, fx, 1.1, fz, 3.4, 1.7, 2.0, ctx.mat(0x8a6a1c));    // tank body
-    ctx.cyl(g, fx + 2.1, 1.1, fz, 0.9, 0.9, 2.0, ctx.mat(0x9a7a2c), 10); // rounded tank end
-    ctx.box(g, fx - 2.2, 0.9, fz, 1.4, 1.6, 2.0, ctx.mat(0x2a2f38)); // cab
-    ctx.box(g, fx + 2.4, 1.0, fz + 1.2, 0.28, 1.6, 0.28, dark);   // fuel-hose riser
+    if (k) {
+      k.frame(fx, 0, fz, -Math.PI / 2);                                         // local +Z = the cab end (-x)
+      const Y = 0xe8c21a, Yd = 0xb8960e;
+      k.box(0, 0.62, 0, 0.9, 0.2, 5.8, 0x1a1c20, "metal");                     // chassis rails
+      for (const z of [2.0, -1.2, -2.4]) for (const e of [-1, 1]) {
+        k.cyl(e * 0.95, 0.5, z, 0.5, 0.5, 0.32, 0x141414, "solid", 0, 0, Math.PI / 2, 16);
+        k.cyl(e * 1.11, 0.5, z, 0.26, 0.26, 0.02, 0xb0b6c0, "metal", 0, 0, Math.PI / 2, 12);
+      }
+      // the cab: a tall box, windscreen, doors, mirrors, beacon
+      k.box(0, 1.55, 2.3, 2.3, 1.7, 1.3, 0xf2f0ea, "gloss");
+      k.box(0, 1.85, 2.96, 2.1, 0.8, 0.02, 0x26303a, "gloss");
+      k.box(0, 0.86, 3.0, 2.34, 0.3, 0.12, 0x2a2d33, "metal");                  // bumper
+      for (const e of [-1, 1]) {
+        k.box(e * 1.16, 1.85, 2.4, 0.02, 0.6, 0.7, 0x26303a, "gloss");          // door glass
+        k.box(e * 1.3, 1.95, 2.8, 0.06, 0.3, 0.12, 0x1a1c20, "metal");          // mirror
+        k.box(e * 0.8, 0.95, 3.04, 0.3, 0.14, 0.02, 0xfff4dc, "glow");          // headlamps
+      }
+      k.box(0, 2.48, 2.2, 0.4, 0.14, 0.2, 0xffb43a, "glow");                     // the beacon
+      // the tank: elliptical barrel, end dishes, a walkway with a rail
+      k.push(new THREE.CylinderGeometry(1.0, 1.0, 3.9, 20, 1), Y, "gloss", 0, 1.75, -0.6, Math.PI / 2, 0, 0, 1.15, 1, 0.85);
+      for (const e of [-1, 1]) k.push(new THREE.SphereGeometry(1.0, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), Yd, "gloss", 0, 1.75, -0.6 + e * 1.95, e * Math.PI / 2, 0, 0, 1.15, 0.12, 0.85);
+      k.box(0, 2.62, -0.6, 0.6, 0.04, 3.6, 0x8a9098, "metal");
+      for (const e of [-1, 1]) k.box(e * 0.32, 2.85, -0.6, 0.03, 0.03, 3.6, 0xb0b6c0, "metal");
+      for (let i = 0; i < 5; i++) for (const e of [-1, 1]) k.box(e * 0.32, 2.74, -2.3 + i * 0.85, 0.03, 0.24, 0.03, 0xb0b6c0, "metal");
+      k.box(0, 1.75, -2.75, 0.5, 0.2, 0.02, 0xc0392b, "solid");                  // the placard (UN 1863)
+      // the hose reel and nozzle at the rear, the ladder up to the walkway
+      k.cyl(0, 0.95, -2.75, 0.45, 0.45, 0.6, 0x2a2d33, "metal", 0, 0, Math.PI / 2, 16);
+      k.cyl(0, 0.95, -2.75, 0.5, 0.5, 0.04, 0x8a9098, "metal", 0, 0, Math.PI / 2, 16);
+      k.cyl(0.35, 0.95, -2.75, 0.5, 0.5, 0.04, 0x8a9098, "metal", 0, 0, Math.PI / 2, 16);
+      for (let i = 0; i < 6; i++) k.box(-1.2, 0.95 + i * 0.3, -2.1, 0.4, 0.03, 0.03, 0xb0b6c0, "metal");
+      for (const e of [-1, 1]) k.box(-1.2 + e * 0.2, 1.7, -2.1, 0.03, 1.8, 0.03, 0xb0b6c0, "metal");
+    }
     ctx.solid(fx - 3.0, fz - 1.1, fx + 3.0, fz + 1.1, 0, 1.9);
     ctx.light(fx, 3.0, fz, 0xffd07a, 0.5, 9);
 
-    // ---- CUSTOMS BOOTH (inspector post) : booth + barrier + sign ----
+    // ---- CUSTOMS BOOTH (inspector post) : glazed booth, canopy, barrier ------
     const cx = 14, cz = -1;
-    ctx.box(g, cx, 1.4, cz, 2.4, 2.8, 2.4, ctx.mat(0x223142));    // booth
-    ctx.box(g, cx, 2.95, cz, 2.9, 0.4, 2.9, ctx.mat(0x2c3d50));   // roof
-    ctx.box(g, cx - 2.4, 0.55, cz + 1.6, 3.0, 0.2, 0.2, ctx.emat(0xff5a3a, 0.6)); // striped barrier arm
-    ctx.box(g, cx, 3.5, cz, 2.2, 0.7, 0.16, ctx.emat(0x36e0c8, 0.7)); // CUSTOMS sign
+    if (k) {
+      k.frame(cx, 0, cz, 0);
+      k.box(0, 0.08, 0, 2.6, 0.16, 2.6, 0x9a968c);                              // plinth
+      k.box(0, 0.6, 0, 2.4, 0.9, 2.4, 0x223142, "gloss");                       // the lower panels
+      for (const e of [-1, 1]) {
+        k.box(e * 1.19, 1.65, 0, 0.02, 1.2, 2.2, 0, "glass");
+        k.box(0, 1.65, e * 1.19, 2.2, 1.2, 0.02, 0, "glass");
+        for (const f of [-1, 1]) k.box(e * 1.18, 1.65, f * 1.18, 0.08, 1.24, 0.08, 0x8a9098, "metal");   // corner mullions
+      }
+      k.box(0, 2.35, 0, 2.5, 0.2, 2.5, 0x223142, "gloss");
+      k.box(0, 2.6, 0, 3.2, 0.12, 3.2, 0x2c3d50, "metal");                      // the canopy
+      k.box(0, 1.1, 0.6, 2.2, 0.04, 0.5, 0xd8d6d0, "gloss");                    // inside counter
+      // the barrier: housing, counterweight, a red/white arm across the lane
+      k.box(-1.6, 0.5, 1.6, 0.4, 1.0, 0.4, 0xd8d6cc, "gloss");
+      k.box(-1.6, 1.0, 1.95, 0.16, 0.24, 0.5, 0x2a2d33, "metal");
+      for (let i = 0; i < 4; i++) k.box(-2.1 - i * 0.8, 0.95, 1.6, 0.8, 0.08, 0.08, i % 2 ? 0xf2f0ea : 0xc0392b, "gloss");
+      k.box(0, 2.95, 1.62, 2.2, 0.6, 0.08, 0x14161a, "gloss");                  // the sign board
+    }
+    {
+      const tex = ctx.canvasTex(256, 64, (cc, w, h) => {
+        cc.fillStyle = "#0b1218"; cc.fillRect(0, 0, w, h);
+        cc.fillStyle = "#36e0c8"; cc.font = "900 34px Arial"; cc.textAlign = "center"; cc.textBaseline = "middle"; cc.fillText("CUSTOMS", w / 2, h / 2 + 2);
+      });
+      const sg = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 0.5), new THREE.MeshBasicMaterial({ map: tex }));
+      sg.position.set(cx, 2.95, cz + 1.665); g.add(sg);
+    }
     ctx.solid(cx - 1.3, cz - 1.3, cx + 1.3, cz + 1.3, 0, 2.8);
     ctx.light(cx, 3.4, cz, 0x6ad0ff, 0.5, 10);
+    if (k) k.build(g);
 
     // ---- WINDSOCK : pole + pivoting frustum cone (real wind drives it) ----
     buildWindsock(ctx, g, -7, 9);
@@ -800,17 +882,23 @@
   }
 
   function buildWindsock(ctx, g, lx, lz) {
-    ctx.box(g, lx, 3.0, lz, 0.3, 6.0, 0.3, ctx.mat(0x8a9099));   // pole
+    // an ICAO windsock: a 6 m tapered mast on a base plate with its swivel
+    // ring and frame, and a 3.6 m sock in five red/white bands that the real
+    // wind fills (R.sock.pivot yaws it, R.sock.cone droops it)
+    ctx.cyl(g, lx, 3.0, lz, 0.05, 0.09, 6.0, ctx.pmat(0x8a9099, 40), 10);
+    ctx.box(g, lx, 0.04, lz, 0.6, 0.08, 0.6, ctx.mat(0x6a6e66));
     ctx.solid(lx - 0.25, lz - 0.25, lx + 0.25, lz + 0.25, 0, 6.0);
     const pivot = new THREE.Group();
     pivot.position.set(lx, 5.7, lz); g.add(pivot);
-    // cone: a horizontal frustum striped orange/white, hung so it can lift
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.02, 6, 20), ctx.pmat(0x8a9099, 40));
+    ring.rotation.y = Math.PI / 2; ring.position.set(0.05, 0, 0); pivot.add(ring);
     const cone = new THREE.Group(); pivot.add(cone);
-    const m1 = new THREE.MeshLambertMaterial({ color: 0xff7a1a, emissive: 0xff7a1a, emissiveIntensity: 0.25 });
-    const m2 = new THREE.MeshLambertMaterial({ color: 0xf2f2f2, emissive: 0xf2f2f2, emissiveIntensity: 0.2 });
-    for (let k = 0; k < 4; k++) {
-      const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.62 - k * 0.09, 0.7 - k * 0.09, 0.7, 10), k % 2 ? m2 : m1);
-      seg.rotation.z = Math.PI / 2; seg.position.set(0.4 + k * 0.72, 0, 0); cone.add(seg);
+    const m1 = new THREE.MeshLambertMaterial({ color: 0xff5a1a, emissive: 0xff5a1a, emissiveIntensity: 0.25, side: THREE.DoubleSide });
+    const m2 = new THREE.MeshLambertMaterial({ color: 0xf2f2f2, emissive: 0xf2f2f2, emissiveIntensity: 0.2, side: THREE.DoubleSide });
+    for (let q = 0; q < 5; q++) {
+      const r0 = 0.3 - q * 0.033, r1 = 0.3 - (q + 1) * 0.033;
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, 0.72, 14, 1, true), q % 2 ? m2 : m1);   // top (+y) turns to -x: the wide end at the mast
+      seg.rotation.z = Math.PI / 2; seg.position.set(0.41 + q * 0.72, 0, 0); cone.add(seg);
     }
     R.sock = { pivot, cone };
   }
@@ -820,10 +908,16 @@
     const baseLx = AIM.x - o.x, baseLz = AIM.z - o.z + 18;    // just south of the runway edge, abeam touchdown
     for (let i = 0; i < 4; i++) {
       const lx = baseLx, lz = baseLz + i * 3.4;
-      ctx.box(g, lx, 0.5, lz, 0.9, 1.0, 0.7, ctx.mat(0x14161a));   // housing
+      // a PAPI light unit: a low box housing on two legs, two lenses in its
+      // face (the lamp colour is driven per frame through R.lampMats)
+      for (const e of [-0.3, 0.3]) ctx.box(g, lx + 0.2, 0.2, lz + e, 0.08, 0.4, 0.08, ctx.mat(0x2a2d33));
+      ctx.box(g, lx, 0.5, lz, 0.9, 0.36, 0.8, ctx.mat(0xe8c21a));                 // housing (airfield yellow)
+      ctx.box(g, lx + 0.1, 0.7, lz, 0.9, 0.04, 0.84, ctx.mat(0x2a2d33));         // hood
       const m = new THREE.MeshLambertMaterial({ color: 0x141414, emissive: 0x141414, emissiveIntensity: 0.15 });
-      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.4, 0.5), m);
-      lamp.position.set(lx, 1.0, lz); g.add(lamp);
+      for (const e of [-0.2, 0.2]) {
+        const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.04, 16), m);
+        lamp.rotation.z = Math.PI / 2; lamp.position.set(lx + 0.46, 0.5, lz + e); g.add(lamp);   // faces the approach (east)
+      }
       R.lampMats.push(m);
     }
   }

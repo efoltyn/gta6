@@ -88,7 +88,7 @@
     price: [0, 0, 440, 520], lcd: [448, 0, 192, 128], num: [640, 0, 96, 96],
     buttons: [448, 128, 256, 64], air: [704, 96, 160, 80], ice: [864, 96, 160, 80],
     propane: [448, 192, 320, 80], open: [768, 192, 256, 96],
-    goods: [0, 528, 1024, 256], cooler: [0, 784, 512, 240],
+    cooler: [0, 784, 512, 240],
     stain: [512, 784, 128, 128], white: [648, 792, 48, 48], stain2: [704, 784, 128, 128],
     hours: [840, 784, 184, 96],
   };
@@ -180,49 +180,20 @@
       text("OPEN", x + w / 2, y + h / 2 + 2, 52, "#ff6a5a"); g.restore();
     })();
     yield 0;
-    // GOODS: four shelves of packaged stock, 64 px per shelf
-    (function () {
-      const [x, y, w, h] = R.goods;
-      g.fillStyle = "#cfd3d6"; g.fillRect(x, y, w, h);
-      const pal = ["#c8202a", "#f2c419", "#1f5fb8", "#2f8f3a", "#f07f1a", "#7b2f8f", "#e8e2d0", "#1a1a1a", "#d84f8f", "#3fb8c8", "#8a5a2a"];
-      for (let s = 0; s < 4; s++) {
-        const sy = y + s * 64;
-        g.fillStyle = "#7d8286"; g.fillRect(x, sy, w, 6);                 // back panel shadow
-        let px = x + 2;
-        while (px < x + w - 8) {
-          const pw = 10 + ((rnd() * 20) | 0), ph = 26 + ((rnd() * 26) | 0), n = 1 + ((rnd() * 4) | 0);
-          const col = pal[(rnd() * pal.length) | 0];
-          for (let k = 0; k < n && px < x + w - 8; k++) {
-            g.fillStyle = col; g.fillRect(px, sy + 56 - ph, pw - 1, ph);
-            g.fillStyle = "rgba(255,255,255,0.35)"; g.fillRect(px + 1, sy + 56 - ph + 4, pw - 3, 4);
-            g.fillStyle = "rgba(0,0,0,0.18)"; g.fillRect(px + pw - 3, sy + 56 - ph, 2, ph);
-            px += pw;
-          }
-          px += (rnd() * 3) | 0;
-        }
-        g.fillStyle = "#e9ecef"; g.fillRect(x, sy + 56, w, 8);             // shelf edge
-        for (let t = x + 10; t < x + w; t += 40 + ((rnd() * 30) | 0)) { g.fillStyle = "#f7f3a0"; g.fillRect(t, sy + 57, 14, 6); }
-      }
-    })();
+    // (no GOODS strip: the shelves are built as shelves, and they stand
+    // empty. The painted packets on them could never be bought — owner,
+    // 2026-10-31: "I hate the gas stations when you put fake products.")
     yield 0;
-    // COOLER DOORS: bottles behind glass, lit
+    // COOLER DOORS: the lit cabinet behind the glass, its wire shelves bare
+    // (nothing painted on them is a thing you could buy)
     (function () {
       const [x, y, w, h] = R.cooler;
-      g.fillStyle = "#f4f6f4"; g.fillRect(x, y, w, h);
-      const pal = ["#c8202a", "#1f5fb8", "#2f8f3a", "#f2c419", "#bfe0f0", "#f07f1a", "#222"];
+      g.fillStyle = "#eef2f2"; g.fillRect(x, y, w, h);
       for (let s = 0; s < 5; s++) {
         const sy = y + 12 + s * 45;
-        g.fillStyle = "#9aa0a4"; g.fillRect(x, sy + 38, w, 4);
-        let px = x + 3;
-        while (px < x + w - 6) {
-          const col = pal[(rnd() * pal.length) | 0], n = 3 + ((rnd() * 6) | 0);
-          for (let k = 0; k < n && px < x + w - 6; k++) {
-            g.fillStyle = col; g.fillRect(px, sy + 10, 8, 28); g.fillRect(px + 2, sy + 4, 4, 7);
-            g.fillStyle = "rgba(255,255,255,0.3)"; g.fillRect(px + 1, sy + 12, 2, 24);
-            px += 10;
-          }
-          px += 2;
-        }
+        g.fillStyle = "#c9d0d4"; g.fillRect(x, sy + 30, w, 8);              // the shelf's shadow on the back
+        g.fillStyle = "#8d9398"; g.fillRect(x, sy + 38, w, 4);              // the wire shelf
+        for (let t = x + 6; t < x + w; t += 12) { g.fillStyle = "#a9afb4"; g.fillRect(t, sy + 38, 2, 4); }
       }
       g.fillStyle = "#2a2e32";
       for (let d = 0; d <= 4; d++) g.fillRect(x + d * (w / 4) - (d === 4 ? 8 : 0), y, 8, h);   // door frames
@@ -701,9 +672,13 @@
     const gz = 9.75;
     [[-10.3, -6.5], [-5.6, -1.8]].forEach(function (run) {
       const g0 = run[0], g1 = run[1], gc = (g0 + g1) / 2, gl2 = g1 - g0;
-      bx("glow", gc, fy + 0.8, gz, gl2, 1.6, 0.8, C.gondola);
-      quad("sign", gc, fy + 0.85, gz - 0.405, gl2 - 0.1, 1.45, "nz", [1, 1, 1], uvRect(R.goods, [0, 0, gl2 / 7.4, 1]));
-      quad("sign", gc, fy + 0.85, gz + 0.405, gl2 - 0.1, 1.45, "pz", [1, 1, 1], uvRect(R.goods, [0.3, 0, gl2 / 7.4, 1]));
+      // a double-sided gondola: the spine, the base deck, four boards a side
+      // (empty: see the GOODS note in the atlas)
+      bx("glow", gc, fy + 0.8, gz, gl2, 1.6, 0.06, C.gondola);
+      bx("glow", gc, fy + 0.07, gz, gl2, 0.14, 0.8, C.inDark);
+      for (const sd of [-1, 1]) for (let k = 0; k < 3; k++)
+        bx("glow", gc, fy + 0.5 + k * 0.38, gz + sd * 0.2, gl2 - 0.04, 0.025, 0.38, C.gondola);
+      bx("glow", gc, fy + 1.6, gz, gl2 + 0.02, 0.03, 0.12, C.inDark);
       solid(g0, g1, gz - 0.4, gz + 0.4, 0, fy + 1.6);
     });
     // counter, register, back rack
@@ -711,8 +686,8 @@
     bx("glow", -0.4, fy + 1.02, 9.7, 0.9, 0.04, 3.1, C.inWall);
     bx("glow", -0.35, fy + 1.2, 9.0, 0.3, 0.3, 0.35, C.inDark);
     quad("glow", -0.52, fy + 1.3, 9.0, 0.24, 0.16, "nx", [0.35, 0.75, 0.9]);
-    bx("glow", 1.5, fy + 1.3, 10.0, 0.4, 2.2, 3.4, C.inDark);
-    quad("sign", 1.29, fy + 1.45, 10.0, 3.2, 1.3, "nx", [1, 1, 1], uvRect(R.goods, [0.6, 0, 0.4, 1]));
+    bx("glow", 1.6, fy + 1.3, 10.0, 0.2, 2.2, 3.4, C.inDark);
+    for (let k = 0; k < 4; k++) bx("glow", 1.38, fy + 0.85 + k * 0.36, 10.0, 0.26, 0.025, 3.3, C.gondola);   // the back bar's shelves, bare
     solid(-0.8, 0, 8.2, 11.2, 0, fy + 1.05);
     solid(1.3, 1.7, 8.3, 11.7, 0, fy + 2.4);
 

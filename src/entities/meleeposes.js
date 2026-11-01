@@ -169,8 +169,9 @@
     const armUp = P.armUp || 0.46, armLo = P.armLo || 0.46, legUp = P.legUp || 0.48, legLo = P.legLo || 0.47;
     const l1 = Math.max(0.12, armUp - 0.02), fy = -(armLo + 0.01), fz = 0.035, l2 = Math.hypot(fy, fz);
     const hipY = ch.hipY > 0 ? ch.hipY : (legUp + legLo);
-    const hs = P.headSize || 0.6;
-    const headY = (ch.neck ? ch.neck.position.y : hipY + 0.93) + (ch.head ? ch.head.position.y : 0.3);
+    // the DRAWN head (character.js HEAD_DRAW scales the neck pivot)
+    const hk = P.headK || 1, hs = (P.headSize || 0.6) * hk;
+    const headY = (ch.neck ? ch.neck.position.y : hipY + 0.93) + (ch.head ? ch.head.position.y * hk : 0.3);
     D = ch._mD = {
       hs, headY, chinY: headY - 0.40 * hs, faceZ: 0.5 * hs,
       shY: la ? la.position.y : headY - 0.34, shX: la ? Math.abs(la.position.x) : 0.62,
@@ -1039,12 +1040,20 @@
     const phi = Math.atan2(f, v);
     out[o] = -(phi + a); out[o + 1] = spec.z; out[o + 2] = kn;
   }
+  /* THE KEYS ARE AUTHORED ON A 0.93 u LEG (thigh + shin): a foot "0.93
+     behind" or a kneel "0.55 up" is a leg length, so it scales with this
+     body's leg (character.js's real-proportions pass made the adult's 1.12).
+     A lying key's hip height (<= 0.35, the body's own thickness) does not. */
+  const KEY_LEG = 0.93;
+  function legKey(spec, k) { return k === 1 ? spec : { f: spec.f * k, lift: spec.lift, z: spec.z }; }
   function resolveKey(D, key) {
     const r = new Float32Array(CH);
-    r[0] = D.hipY - key.h; r[1] = key.mZ; r[2] = key.bx; r[3] = key.by; r[4] = key.bz;
+    const k = (D.g1 + D.g2) / KEY_LEG;
+    const h = key.h > 0.35 ? D.footY + (key.h - D.footY) * k : key.h;
+    r[0] = D.hipY - h; r[1] = key.mZ; r[2] = key.bx; r[3] = key.by; r[4] = key.bz;
     r[5] = key.nx; r[6] = key.ny; r[7] = key.nz;
-    legAngles(D, key.h, key.L, r, 8);
-    legAngles(D, key.h, key.R, r, 11);
+    legAngles(D, h, legKey(key.L, k), r, 8);
+    legAngles(D, h, legKey(key.R, k), r, 11);
     r[14] = key.aL[0]; r[15] = key.aL[1]; r[16] = key.aL[2];
     r[17] = key.aR[0]; r[18] = key.aR[1]; r[19] = key.aR[2];
     return r;

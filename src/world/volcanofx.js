@@ -205,26 +205,41 @@
      instead of a straight line. Same geometry, same one draw call; the square
      simply stops being a square.
      -------------------------------------------------------------------- */
+  /* 2026-10-31: the lobes were soft discs, cut at 0.45 — every patch came
+     out a smooth cartoon cloud with a ruled-by-compass outline, pale blobs
+     pasted on the cone. A deposit's edge is FRAYED: wind-sorted grit thins
+     out into streaks and pinholes. The cutout is now a radial falloff
+     eroded by three octaves of value noise, so the alphaTest edge is ragged
+     with holes near the rim, and the RGB carries a grain the vertex colour
+     multiplies (the patch is no longer one flat grey). 128 px, built once. */
   let _ashTex = null;
   function ashTex() {
     if (_ashTex) return _ashTex;
-    const S = 64, cv = document.createElement("canvas");
+    const S = 128, cv = document.createElement("canvas");
     cv.width = cv.height = S;
     const g = cv.getContext("2d");
-    let seed = 0x6151a3d7 >>> 0;
-    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    const lobe = function (lx, ly, r) {
-      const rg = g.createRadialGradient(lx, ly, r * 0.45, lx, ly, r);
-      rg.addColorStop(0, "rgba(255,255,255,1)");
-      rg.addColorStop(1, "rgba(255,255,255,0)");
-      g.fillStyle = rg;
-      g.beginPath(); g.arc(lx, ly, r, 0, 6.2832); g.fill();
-    };
-    lobe(S * 0.5, S * 0.5, S * 0.34);
-    for (let i = 0; i < 14; i++) {
-      const a = rnd() * 6.2832, d = S * (0.12 + rnd() * 0.24);
-      lobe(S * 0.5 + Math.cos(a) * d, S * 0.5 + Math.sin(a) * d, S * (0.09 + rnd() * 0.13));
+    const img = g.createImageData(S, S), D = img.data;
+    function vn(x, y, f, s2) {
+      const X = x * f, Y = y * f, ix = Math.floor(X), iy = Math.floor(Y);
+      let fx = X - ix, fy = Y - iy;
+      fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+      const w = f | 0;                      // wraps: the tile is seamless per octave
+      const a = ihash(ix % w, iy % w, s2), b = ihash((ix + 1) % w, iy % w, s2);
+      const c = ihash(ix % w, (iy + 1) % w, s2), d = ihash((ix + 1) % w, (iy + 1) % w, s2);
+      return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
     }
+    for (let py = 0; py < S; py++) {
+      for (let px = 0; px < S; px++) {
+        const u = px / S, v = py / S;
+        const dx = u - 0.5, dy = v - 0.5, d = Math.sqrt(dx * dx + dy * dy) * 2;
+        const n = 0.5 * vn(u, v, 4, 611) + 0.32 * vn(u, v, 9, 612) + 0.18 * vn(u, v, 23, 613);
+        const al = clamp((1 - Math.pow(d, 1.6)) * 1.15 + (n - 0.5) * 1.05, 0, 1);
+        const gr = 0.8 + 0.2 * vn(u, v, 31, 614) + 0.06 * (n - 0.5);
+        const o = (py * S + px) * 4, L = clamp(gr, 0, 1) * 255;
+        D[o] = D[o + 1] = D[o + 2] = L | 0; D[o + 3] = (al * 255) | 0;
+      }
+    }
+    g.putImageData(img, 0, 0);
     _ashTex = new THREE.CanvasTexture(cv);
     return _ashTex;
   }
@@ -620,14 +635,19 @@
     "float p1 = fract(uCyc), p2 = fract(uCyc + 0.5);",
     "float w1 = 1.0 - abs(2.0 * p1 - 1.0);",
     "float shK = uShear * max(spV - 0.3, 0.0);",
-    "vec3 L1 = meltLayer(texture2D(map, vUv - vec2(0.0, shK * p1)), heatV, coolV, spV);",
-    "vec3 L2 = meltLayer(texture2D(map, vUv + vec2(0.5, 0.37) - vec2(0.0, shK * p2)), heatV, coolV, spV);",
+    // each layer's shear is measured from the MIDDLE of its cycle, where its
+    // weight peaks (w1 = 1 at p1 = 0.5): the layer on screen is the one that
+    // is least stretched, and the wrap at p = 0/1 happens at weight zero
+    "vec3 L1 = meltLayer(texture2D(map, vUv - vec2(0.0, shK * (p1 - 0.5))), heatV, coolV, spV);",
+    "vec3 L2 = meltLayer(texture2D(map, vUv + vec2(0.5, 0.37) - vec2(0.0, shK * (p2 - 0.5))), heatV, coolV, spV);",
     "vec3 Lm = mix(L2, L1, w1);",
     "float meltK = Lm.x;",
     // what shows through is as hot as the stretch it is in; plate rims and
     // fresh crust carry a dull red of their own until they cool
     "float tMelt = meltK * smoothstep(0.02, 0.3, heatV) * (0.5 + 0.5 * heatV);",
-    "float tPlate = (Lm.y * 0.42 * heatV + heatV * 0.22 * (1.0 - coolV) * (0.5 + 0.5 * Lm.z)) * (1.0 - meltK);",
+    // (the plate's own body glow is a whisper: at 0.22 every plate came out
+    // a warm brown and the crust read as varnished wood, not black rock)
+    "float tPlate = (Lm.y * 0.42 * heatV + heatV * 0.07 * (1.0 - coolV) * (0.5 + 0.5 * Lm.z)) * (1.0 - meltK);",
     "float tGlow = max(tMelt, tPlate);",
     "totalEmissiveRadiance = meltRamp(tGlow) * uFlick;",
     // the crust: dark basalt, a little warmer where fresh, lit by the scene
@@ -1002,7 +1022,15 @@
     /* the banks' crust moves at a third of the core's: the shader's two
        crossfaded crack layers carry the difference on a SHEAR_T cycle */
     const BANK_V = 0.35, SHEAR_T = 6;
-    meltU.uShear.value = skinV * (1 - BANK_V) * SHEAR_T / LACE_L / 0.7;
+    /* CAPPED, OR THE PLATES TURN TO WOOD GRAIN. The core-vs-bank speed
+       difference over a cycle is ~20 m of lace on a 5 m/s flow, and spV walks
+       from bank to core across two or three metres of channel — so the full
+       figure shears every crack 20 m along for each metre across and the
+       Voronoi plates smear into long orange streaks: a polished plank, not a
+       crust (the eruption kit's close frames, 2026-10-31). The visible shear
+       is held to about half a plate (0.13 x 0.35 of a 24 m tile at the worst
+       blend), which still reads as the core outrunning its banks. */
+    meltU.uShear.value = Math.min(0.13, skinV * (1 - BANK_V) * SHEAR_T / LACE_L / 0.7);
     /* EVERY FLOW WEARS THE SAME TEXTURE, so without this every stem on the
        cone would wear the same crack network in the same place — five copies
        of one photograph. A hashed metre offset down the lace slides each
@@ -2579,26 +2607,40 @@
   }
   function craterGeo() {
     if (_craterGeo) return _craterGeo;
-    // a fan: centre, pit ring, ejecta crest, ragged outer edge — opaque
-    // vertex colours, its outline lobed so no crater is a coin
-    const SEG = 20;
-    const pos = [0, -0.06, 0], colA = [];
-    const pit = new THREE.Color(0.016, 0.013, 0.011), lip = new THREE.Color(0.075, 0.066, 0.058), out = new THREE.Color(0.05, 0.045, 0.04);
+    /* AN IMPACT PIT WITH A RAISED EJECTA RIM (2026-10-31). The first cut was
+       three rings with a hashed radius per 18-degree sector on the outer
+       one: a flat dark star, the same star under every bomb (the instances
+       only tilted to the slope, never turned). Now: a bowl that actually
+       goes DOWN (the pit is 0.16 r deep), a crest that stands UP and is the
+       palest thing in it (fresh broken rock thrown out of the hole), and an
+       apron that thins to the ground. The outline bellies on two slow sines
+       with a little hash grain, so it is lobed rather than spiked, and each
+       landing turns the instance about its own normal (addCrater). */
+    const SEG = 28;
+    const pos = [0, -0.16, 0], colA = [];
+    const C = function (r, g, b) { return new THREE.Color(r, g, b); };
+    const pit = C(0.014, 0.012, 0.010), wall = C(0.03, 0.026, 0.022), crest = C(0.10, 0.092, 0.082),
+      apron = C(0.065, 0.058, 0.05), edge = C(0.04, 0.036, 0.032);
     colA.push(pit.r, pit.g, pit.b);
-    const rings = [[0.42, -0.03, pit], [0.72, 0.05, lip], [1.0, 0.0, out]];
+    //            radius  height  colour  lobe weight
+    const rings = [[0.24, -0.13, pit, 0.15], [0.46, -0.04, wall, 0.35], [0.62, 0.09, crest, 0.55],
+      [0.8, 0.04, apron, 0.8], [1.0, 0.0, edge, 1.0]];
     for (let r = 0; r < rings.length; r++) {
       for (let k = 0; k < SEG; k++) {
         const a = (k / SEG) * 6.2832;
-        const lob = r === 2 ? 0.78 + 0.44 * h01(k, 7, 5531) : (r === 1 ? 0.92 + 0.16 * h01(k, 3, 5537) : 1);
+        const lob = 1 + rings[r][3] * (0.13 * Math.sin(3 * a + 0.7) + 0.08 * Math.sin(5 * a + 2.1)
+          + 0.16 * (h01(k, r, 5531) - 0.5));
         const R = rings[r][0] * lob;
-        pos.push(Math.cos(a) * R, rings[r][1], Math.sin(a) * R);
-        const c = rings[r][2];
-        colA.push(c.r, c.g, c.b);
+        // the crest is lumpy: blocks of ejecta, not a lathe-turned lip
+        const y = rings[r][1] + (r === 2 ? 0.05 * (h01(k, 11, 5541) - 0.3) : 0);
+        pos.push(Math.cos(a) * R, y, Math.sin(a) * R);
+        const c = rings[r][2], gr = 0.82 + 0.36 * h01(k, r + 20, 5551);
+        colA.push(c.r * gr, c.g * gr, c.b * gr);
       }
     }
     const idx = [];
     for (let k = 0; k < SEG; k++) idx.push(0, 1 + (k + 1) % SEG, 1 + k);
-    for (let r = 0; r < 2; r++) {
+    for (let r = 0; r < rings.length - 1; r++) {
       const a0 = 1 + r * SEG, b0 = 1 + (r + 1) * SEG;
       for (let k = 0; k < SEG; k++) {
         const k1 = (k + 1) % SEG;
@@ -2660,11 +2702,14 @@
     const stats = { thrown: 0, landed: 0, craters: 0, roof: 0, car: 0, ground: 0, maxSpeed: 0, maxRange: 0 };
     const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
     const _up = new THREE.Vector3(0, 1, 0), _n = new THREE.Vector3(), _e = new THREE.Euler();
+    const _qy = new THREE.Quaternion();
     function addCrater(x, z, r) {
       const e = 0.6;
       const hx1 = groundAt(x + e, z), hx0 = groundAt(x - e, z), hz1 = groundAt(x, z + e), hz0 = groundAt(x, z - e);
       _n.set(hx0 - hx1, 2 * e, hz0 - hz1).normalize();
       _q.setFromUnitVectors(_up, _n);
+      // every pit turned its own way about its normal: no two share an outline
+      _q.multiply(_qy.setFromAxisAngle(_up, h01(x, z, 5561) * 6.2832));
       _p.set(x, groundAt(x, z) + 0.04, z);
       _s.set(r, r, r);
       _m.compose(_p, _q, _s);
@@ -2731,11 +2776,28 @@
             b.rx += b.sx * dt; b.ry += b.sy * dt; b.rz += b.sz * dt;
             // a big bomb's skin chills in flight but its core does not
             if (b.hot) b.temp = Math.max(0.35, b.temp - dt * 0.09 / Math.max(0.4, b.size));
-            b.trailT -= dt;
-            if (b.trailT <= 0) {
-              b.trailT = 0.05;
-              puff(b.x, b.y, b.z, 1.6 + rnd() * 0.8, b.size * 1.1, b.size * 4.5, b.hot ? C_SMOKE : C_PALE, b.hot ? 0.42 : 0.3, 0.6);
+            /* THE TRAIL IS LAID BY DISTANCE, NOT BY THE CLOCK. A puff every
+               0.05 s at 40 m/s is a puff every two metres, each half a metre
+               wide: a string of beads drawn across the sky, not a smoke
+               trail. Puffs now go down every ~0.7 of their own starting
+               width along the arc actually flown this frame (interpolated
+               back along the step), so they overlap into one rope; the pool
+               recycles the oldest, which shortens a trail rather than
+               breaking it. */
+            const stepD = Math.hypot(b.vx, b.vy, b.vz) * dt;
+            const s0T = b.size * 2.2, gap = s0T * 0.7;
+            b.trailT += stepD;
+            let nT = 0;
+            while (b.trailT >= gap && nT < 6) {
+              b.trailT -= gap; nT++;
+              const back = b.trailT / Math.max(1e-4, stepD);   // 0 = now, 1 = start of the step
+              puff(b.x - b.vx * dt * back, b.y - b.vy * dt * back, b.z - b.vz * dt * back,
+                // FX jitter on Math.random: the trail must not draw from the
+                // caller's seeded stream (o.rnd), which places the next bomb
+                1.1 + Math.random() * 0.6, s0T * (0.85 + Math.random() * 0.3), b.size * 5.5,
+                b.hot ? C_SMOKE : C_PALE, b.hot ? 0.34 : 0.24, 0.6);
             }
+            if (nT >= 6) b.trailT = 0;
             let hit = null, gy = 0;
             if (b.vy < 0 && o.solids) { try { hit = o.solids(b.x, b.y - b.size * 0.5, b.z); } catch (e) { hit = null; } }
             if (hit) gy = hit.y;
@@ -2978,31 +3040,44 @@
     const x = +o.x || 0, z = +o.z || 0;
     const R = o.r > 0 ? +o.r : 7;
     const salt = o.salt != null ? (o.salt | 0) : 4444;
-    const SEC = 20, RINGS = [0.34, 0.62, 1.0];
+    /* A THROAT IN A DARK BOWL, NOT A LENS ON THE PEAK (2026-10-31). Three
+       rings with the white core out to a third of the radius and one hashed
+       radius per 18-degree sector drew a pale coin with a star of spikes
+       round it — the eruption kit's wide frames read it as a fried egg on
+       the summit. An open vent is a small incandescent throat, an orange
+       spatter shoulder, then a broad apron of fresh black-red scoria that
+       is barely glowing at all. Six rings at 36 sectors; the rim's lobes
+       are two slow sines plus a little hash grain, so the outline bellies
+       instead of spiking, and the colour carries the same grain so no ring
+       reads as a ruled circle. */
+    const SEC = 36, RINGS = [0.12, 0.24, 0.4, 0.6, 0.8, 1.0];
     const VC = 1 + SEC * RINGS.length;
     const pos = new Float32Array(VC * 3);
     const col = new Float32Array(VC * 3);
-    // 1150 C at the throat, dark spatter at the rim — the entire ramp of the
-    // reference photograph, in four stops
-    const CORE = 0xfff4c8, RING_C = [0xffd677, 0xf07f1d, 0x66180a];
+    // 1150 C at the throat, then cooling spatter out to the dark apron
+    const CORE = 0xfff1c0, RING_C = [0xffd36c, 0xf7922c, 0xc4440f, 0x5a1607, 0x24100a, 0x15100d];
+    const ph1 = h01(x, z, salt + 1) * 6.2832, ph2 = h01(x, z, salt + 2) * 6.2832;
     _c1.setHex(CORE);
     pos[0] = x; pos[1] = groundAt(x, z) + 0.24; pos[2] = z;
     col[0] = _c1.r; col[1] = _c1.g; col[2] = _c1.b;
     for (let r = 0; r < RINGS.length; r++) {
-      _c1.setHex(RING_C[r]);
+      const outerK = r / (RINGS.length - 1);
       for (let s = 0; s < SEC; s++) {
         const a = (s / SEC) * Math.PI * 2;
-        /* THE RIM IS A COASTLINE. One hashed radius per sector, strongest on
-           the outermost ring: the apron throws lobes down whichever flank
-           the hash says, and two vents never share an outline. */
-        const wob = 0.68 + 0.64 * h01(x + Math.cos(a) * 9, z + Math.sin(a) * 9, salt + r * 17);
-        const rr = R * RINGS[r] * (r === RINGS.length - 1 ? wob : (0.86 + 0.28 * (wob - 0.68)));
+        const lob = 0.2 * Math.sin(3 * a + ph1) + 0.11 * Math.sin(5 * a + ph2)
+          + 0.14 * (h01(x + Math.cos(a) * 9, z + Math.sin(a) * 9, salt + r * 17) - 0.5);
+        const rr = R * RINGS[r] * (1 + lob * (0.25 + 0.75 * outerK));
         const px = x + Math.cos(a) * rr, pz = z + Math.sin(a) * rr;
         const off = (1 + r * SEC + s) * 3;
         pos[off] = px;
-        pos[off + 1] = groundAt(px, pz) + 0.2 - r * 0.04;   // drape, thin out
+        pos[off + 1] = groundAt(px, pz) + 0.2 - r * 0.025;   // drape, thin out
         pos[off + 2] = pz;
-        const g2 = 0.9 + 0.2 * h01(px, pz, salt + 5);
+        // hot spatter tongues reach further down the low lobes
+        const hn = h01(px, pz, salt + 5);
+        const t = clamp(r - 0.6 * lob * RINGS.length + (hn - 0.5) * 0.9, 0, RING_C.length - 1);
+        const i0 = Math.floor(t), i1 = Math.min(RING_C.length - 1, i0 + 1);
+        _c1.setHex(RING_C[i0]).lerp(_c2.setHex(RING_C[i1]), t - i0);
+        const g2 = 0.85 + 0.3 * hn;
         col[off] = _c1.r * g2; col[off + 1] = _c1.g * g2; col[off + 2] = _c1.b * g2;
       }
     }
@@ -3470,6 +3545,33 @@
       });
     }
 
+    /* THE BED, SOLVED ONCE — the lava flow's own fix, which the lahar never
+       got. Every column used to stand on the CENTRELINE's ground plus a
+       1.45 m crown that stayed 0.75 m tall right out at the banks, so the mud
+       was a flat-topped slab with vertical sides, and wherever the valley
+       floor tilted across the flow one bank hung metres in the air: the
+       eruption kit photographed a grey concrete beam jutting off the cone.
+       Each column now stands on the ground under itself (ponded towards the
+       centreline's height in the middle, landing on the real ground at the
+       banks), and the thickness rolls to zero at |u| = 1 so the margin is a
+       feathered mud edge lying ON the hillside. Solved once: the path never
+       moves after construction. */
+    const bedY = new Float32Array(N * LAHAR_COLS);
+    const nXs = new Float32Array(N), nZs = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const p = path.pts[i];
+      const a = path.pts[Math.max(0, i - 1)], b2 = path.pts[Math.min(N - 1, i + 1)];
+      let nx = -(b2.z - a.z), nz = (b2.x - a.x);
+      const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl;
+      nXs[i] = nx; nZs[i] = nz;
+      const hw = halfW * wProf[i];
+      for (let c = 0; c < LAHAR_COLS; c++) {
+        const u = LAHAR_U[c], au = Math.abs(u);
+        const g = groundAt(p.x + nx * u * hw, p.z + nz * u * hw);
+        bedY[i * LAHAR_COLS + c] = g + (Math.max(g, p.y) - g) * (1 - au * au);
+      }
+    }
+
     let adv = seg, t = 0, dead = false, hardT = -1;
     const _v = new THREE.Vector3();
 
@@ -3478,9 +3580,7 @@
       for (let i = 0; i <= to && i < N; i++) {
         const p = path.pts[i];
         const hw = halfW * wProf[i];
-        const a = path.pts[Math.max(0, i - 1)], b2 = path.pts[Math.min(N - 1, i + 1)];
-        let nx = -(b2.z - a.z), nz = (b2.x - a.x);
-        const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl;
+        const nx = nXs[i], nz = nZs[i];
         // a travelling chunky wave down the channel — wet concrete heaves,
         // it does not ripple. Frozen once the deposit sets.
         const heave = setK >= 1 ? 0 : Math.sin(t * 2.1 - i * 0.8) * 0.32 * (1 - setK);
@@ -3489,8 +3589,11 @@
           const au = Math.abs(u);
           const x = p.x + nx * u * hw, z = p.z + nz * u * hw;
           pos[off] = x; pos[off + 2] = z;
-          const lumps = (h01(x, z, salt + 9) - 0.5) * 0.9;
-          pos[off + 1] = p.y + 0.08 + (0.75 + 0.7 * (1 - au * au)) + heave * (1 - au) + lumps;
+          // thickness rolls off to nothing at the bank (a feathered edge,
+          // not a kerb); lumps and heave ride the body, not the margin
+          const body = 1 - Math.pow(au, 2.4);
+          const lumps = (h01(x, z, salt + 9) - 0.5) * 0.7 * body;
+          pos[off + 1] = bedY[i * LAHAR_COLS + c] + 0.06 + 1.35 * body + heave * (1 - au) + lumps;
           /* WET CONCRETE, and concrete is MID grey — the first pass was almost
              black and read as a dirt road at any distance. The set deposit is
              paler and dustier still, which is what makes the scar legible
@@ -3792,6 +3895,21 @@
          thin out on faces — read the slope off the corners this probe just
          paid for, and let it scale the VISUAL coverage (the damage ledger
          keeps the raw depth: grit in the air chokes you on a slope too). */
+      /* THE PATCH LIES ON A PLANE, NOT ON ITS FOUR PROBES. The writer used to
+         lerp each corner from the centre's height to its probed height by
+         coverage — but the corner's XZ was already out at the edge, so a
+         half-grown patch on the cone was a flat sheet at the centre's height:
+         the uphill half buried, the downhill half a grey blade standing out
+         of the flank (the eruption kit's close frames, gone with ash=0).
+         The corners were also probed at a fixed size and angle the patch
+         then grows past and combs away from. So the probe now fits a plane —
+         the least-squares gradient of the four corners, in world axes — and
+         the writer seats every corner on it wherever the corner ends up. */
+      const glx = ((C.cy[1] + C.cy[2]) - (C.cy[0] + C.cy[3])) / (4 * hw0);
+      const glz = ((C.cy[2] + C.cy[3]) - (C.cy[0] + C.cy[1])) / (4 * hw0);
+      C.gx = glx * ca - glz * sa;
+      C.gz = glx * sa + glz * ca;
+      C.y0 = 0.5 * C.y + 0.125 * (C.cy[0] + C.cy[1] + C.cy[2] + C.cy[3]);
       let lo = C.cy[0], hi = C.cy[0];
       for (let k = 1; k < 4; k++) { const v = C.cy[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
       const slope = (hi - lo) / Math.max(0.5, hw0 * 2);
@@ -3876,11 +3994,12 @@
       const ca = C.roof ? 1 : Math.cos(angW), sa = C.roof ? 0 : Math.sin(angW);
       const qx = [-hw, hw, hw, -hw], qz = [-hd, -hd, hd, hd];
       for (let k = 0; k < 4; k++) {
-        pos[v + k * 3] = C.x + qx[k] * ca - qz[k] * sa;
-        // drape: the corner rides from the cell centre out to its own ground
-        // as the patch grows. Roofs are flat, so they keep one height.
-        pos[v + k * 3 + 1] = (C.cy ? C.y + (C.cy[k] - C.y) * cov : C.y) + lift;
-        pos[v + k * 3 + 2] = C.z + qx[k] * sa + qz[k] * ca;
+        const dx = qx[k] * ca - qz[k] * sa, dz = qx[k] * sa + qz[k] * ca;
+        pos[v + k * 3] = C.x + dx;
+        // drape: the corner sits on the cell's fitted ground plane wherever
+        // it is (see probeCell). Roofs are flat, so they keep one height.
+        pos[v + k * 3 + 1] = (C.cy ? C.y0 + C.gx * dx + C.gz * dz : C.y) + lift;
+        pos[v + k * 3 + 2] = C.z + dz;
       }
       /* A THIN DUSTING IS NOT A WHITE PATCH. Coverage alone gave every fleck
          the full deposit colour the moment it existed, so the first minute of
@@ -3925,7 +4044,9 @@
            a pale deposit as it deepens, which is the only thing that makes a
            drift read as raised rather than as a stain. Neutral warm grey,
            like the veil (see the note above the roof ramp). */
-        _c3.setHex(0x363431).lerp(_c1.setHex(0x5c5953), cov);
+        // (top stop a step darker than the 2026-09 0x5c5953: on the cone's
+        // dark rock that read as snow drifts, the owner's old complaint)
+        _c3.setHex(0x363431).lerp(_c1.setHex(0x4b4844), cov);
         // ...and back down a stop when it goes deep and damp
         _c3.lerp(_c1.setHex(0x423f3b), deep * 0.5);
       }

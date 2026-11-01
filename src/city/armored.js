@@ -85,16 +85,16 @@
     despawnFar: 360,           // cull an untouched truck that drives way off
   };
 
-  // the armored truck reads as a Brink's-style hardened van: a boxy dark-grey
-  // armored body. We register it through the SAME model shape every traffic car
-  // uses (detailStyle:"van" → the van visual silhouette), then bolt a few armored
-  // detail boxes + a roof beacon onto its group after spawn.
+  // the armored truck is a cash-in-transit truck: a medium-duty cab and an
+  // armoured box (buildArmoredTruck below, registered as the "armored" car
+  // style), spawned through the SAME model shape every traffic car uses.
+  // body stays "van" so its mass/armour profile in vehicles.js is unchanged.
   const TRUCK_MODEL = {
     name: "Armored Cash Truck",
     value: 38000, rarity: 1.0,
     color: 0x3a3f45,           // gunmetal armor grey
     s: 1.22,                   // a touch larger/heavier than a normal van
-    body: "van", detailStyle: "van", designStyle: "armored",
+    body: "van", detailStyle: "armored", designStyle: "armored",
     armoredTruck: true,
   };
 
@@ -106,66 +106,241 @@
   let nextSpawnT = TUNE.firstDelay;   // seconds of in-mode time until the next spawn attempt
   let _lastElapsed = 0;
 
-  // shared armor-detail material (one Lambert, reused across every bolt-on box →
-  // these merge into the same draw bucket as the truck's dark trim, so the armored
-  // dressing is draw-call-cheap). The beacon is its own tiny emissive.
-  let ARMOR_MAT = null, BEACON_MAT = null, PLATE_MAT = null, GOLD_MAT = null;
-  function armorAssets() {
-    if (ARMOR_MAT) return;
-    ARMOR_MAT = new THREE.MeshLambertMaterial({ color: 0x2c3036 });
-    PLATE_MAT = new THREE.MeshLambertMaterial({ color: 0x4a5158 });
-    GOLD_MAT = new THREE.MeshLambertMaterial({ color: 0xd9a520, emissive: 0x3a2a05 });  // company livery stripe
-    BEACON_MAT = new THREE.MeshBasicMaterial({ color: 0xffb030 });
-    ARMOR_MAT._shared = PLATE_MAT._shared = GOLD_MAT._shared = BEACON_MAT._shared = true;
+  /* ============================================================
+     THE TRUCK ITSELF — a cash-in-transit truck, built like one (2026-10-31,
+     Opus 5.5). What was here: the cargo-van body with ~30 loose boxes bolted
+     to its flanks after spawn (slab "armour", a slab grille, a stepped box
+     "cupola") — a van wearing cardboard. What is here is the real class: a
+     medium-duty conventional chassis (International MV / Freightliner M2
+     size) carrying an armoured body, registered as a car style so the
+     shared pipeline (vehicles.js) merges, LODs, dents and paints it like any
+     other car.
+       numbers  6.60 m long, 2.40 m wide over the box, 2.97 m to the roof,
+                4.05 m wheelbase, 0.96 m tyres (duals at the back)
+       cab      short sloped hood with its grille and lamps, arched fenders,
+                a thick-framed armoured windscreen and small armoured door
+                glass (the dressed cab shows through), a gun port under each
+                door window, mirrors, steps, the saddle tank
+       box      radiused armoured body: plate seams and rivet lines, two gun
+                ports a side and two in the back, the curb-side crew door
+                with its hinges and port, double rear doors with hinge
+                knuckles, lock box and handles, a bumper step, roof hatch,
+                the body A/C unit, the company stripe and name
+       lights   headlamps, cab markers, box clearance markers, round tails,
+                and the amber beacon in a Group named "armored_beacon" that
+                spawnTruck finds and the update loop blinks
+     Nose +Z; ground y = 0. */
+  const AT = { L: 6.60, W: 2.40, R: 0.48, zF: 2.30, zR: -1.75, cabB: 0.30, cabF: 1.72, hoodF: 3.08, top: 2.97, boxB: -3.24, boxBot: 0.98 };
+  let _liveryMat = null;
+  function liveryMat() {
+    if (_liveryMat) return _liveryMat;
+    const c = document.createElement("canvas");
+    c.width = 1024; c.height = 192;
+    const x = c.getContext("2d");
+    x.clearRect(0, 0, 1024, 192);
+    // shield emblem
+    x.fillStyle = "#d9a520";
+    x.beginPath(); x.moveTo(40, 26); x.lineTo(150, 26); x.lineTo(150, 100); x.quadraticCurveTo(150, 150, 95, 172); x.quadraticCurveTo(40, 150, 40, 100); x.closePath(); x.fill();
+    x.fillStyle = "#2c3036"; x.font = "bold 92px Arial, Helvetica, sans-serif"; x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText("S", 95, 96);
+    x.fillStyle = "#f0f1f2"; x.textAlign = "left";
+    x.font = "bold 104px Arial, Helvetica, sans-serif";
+    x.fillText("SECURIS", 182, 82);
+    x.fillStyle = "#d9a520"; x.font = "bold 40px Arial, Helvetica, sans-serif";
+    x.fillText("ARMORED  TRANSPORT", 186, 156);
+    const tex = new THREE.CanvasTexture(c);
+    tex.anisotropy = 4;
+    _liveryMat = new THREE.MeshLambertMaterial({ map: tex, transparent: true, alphaTest: 0.35, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    _liveryMat._shared = true;
+    return _liveryMat;
   }
+  function buildArmoredTruck() {
+    const K = CBZ.cityCarKit, SH = K.shape;
+    const RBX = SH.RBX, CYLX = SH.CYLX, rod = SH.rod, bar = SH.bar, arc = SH.arc, put = SH.put;
+    const root = new THREE.Group();
+    const paint = K.paintMat("armored", 0x3a3f45, { metalness: 0.32, roughness: 0.5, envMapIntensity: 0.6 });
+    const plate = K.roleMat("cit-plate", "plastic", 0x4a5158);
+    const dark = K.roleMat("cit-dark", "plastic", 0x17191c);
+    const rubber = K.roleMat("cit-rubber", "plastic", 0x111214);
+    const gold = K.roleMat("cit-gold", "plastic", 0xd9a520, { emissive: 0x3a2a05, ei: 0.4 });
+    const chrome = K.chromeMat(), glass = K.glassMat();
+    const head = K.lightFrontMat(), tail = K.lightTailMat();
+    const amber = K.sharedMat("semi-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 });
+    const A = AT, hw = A.W / 2, cx = 1.10, zN = A.L / 2;
+    const sides = (f) => { f(1); f(-1); };
 
-  // ---- bolt the armored dressing onto a freshly-built truck group -----------
-  // FIXED CONSTANTS ONLY in here: dressTruck runs between spawns, so a draw on
-  // the module rng() would shift every later spawn roll. Geometry is per-truck
-  // (max one alive) and NOT _shared — the normal car disposer frees it.
+    /* ---- CHASSIS + FRONT CLIP ---- */
+    sides(function (s) { RBX(root, dark, s * 0.38, s * 0.48, 0.52, 0.78, A.boxB + 0.1, zN - 0.2, 0.01); });
+    RBX(root, plate, -1.12, 1.12, 0.48, 0.80, zN - 0.24, zN, 0.06);                 // steel bumper
+    RBX(root, dark, -1.0, 1.0, 0.42, 0.50, zN - 0.22, zN - 0.04, 0.01);
+    put(root, K.boxGeo(0.30, 0.15, 0.012), K.plateMat(), 0, 0.64, zN + 0.004);
+    // hood: crowned and sloped, narrower than the cab
+    SH.loft(root, paint, [
+      { z: A.cabF - 0.02, y: 1.20, hw: 0.95, hh: 0.47, pt: 5, pb: 14 },
+      { z: 2.55, y: 1.18, hw: 0.93, hh: 0.42, pt: 5, pb: 14 },
+      { z: A.hoodF, y: 1.12, hw: 0.88, hh: 0.34, pt: 4, pb: 14 },
+    ], 28);
+    // grille: dark core, bars, surround; the lamps either side
+    RBX(root, plate, -0.62, 0.62, 0.82, 1.42, A.hoodF - 0.08, A.hoodF + 0.04, 0.04);
+    RBX(root, dark, -0.55, 0.55, 0.87, 1.37, A.hoodF - 0.06, A.hoodF + 0.05, 0.01);
+    for (let i = 0; i < 6; i++) { const y = 0.92 + i * 0.085; RBX(root, plate, -0.53, 0.53, y - 0.012, y + 0.012, A.hoodF + 0.03, A.hoodF + 0.06, 0.005); }
+    sides(function (s) {
+      RBX(root, dark, s * 0.64, s * 0.90, 1.04, 1.30, A.hoodF - 0.10, A.hoodF + 0.02, 0.03);
+      RBX(root, head, s * 0.67, s * 0.87, 1.08, 1.26, A.hoodF - 0.02, A.hoodF + 0.03, 0.02);
+      RBX(root, amber, s * 0.67, s * 0.87, 0.95, 1.01, A.hoodF - 0.04, A.hoodF + 0.02, 0.01);
+      // fender over the steer wheel + liner
+      arc(root, paint, A.R + 0.08, 0.36, 0.05, -0.05, Math.PI + 0.2, s * 1.0, A.R, A.zF, 22);
+      arc(root, dark, A.R + 0.05, 0.30, 0.02, 0.05, Math.PI, s * 0.98, A.R, A.zF, 16);
+      // a push guard upright each side of the grille
+      RBX(root, plate, s * 0.66, s * 0.74, 0.50, 1.40, zN - 0.08, zN + 0.02, 0.02);
+    });
+    RBX(root, plate, -0.74, 0.74, 1.34, 1.40, zN - 0.08, zN + 0.02, 0.02);
+
+    /* ---- CAB ---- */
+    RBX(root, paint, -cx, cx, 1.0, 1.72, A.cabB, A.cabF, 0.06);                         // lower cab
+    RBX(root, paint, -cx + 0.02, cx - 0.02, 2.48, 2.66, A.cabB, 1.42, 0.08);             // roof
+    sides(function (s) {
+      // the armoured side: thick pillars, a small window, a gun port under it
+      RBX(root, paint, s * (cx - 0.10), s * cx, 1.70, 2.52, A.cabB, 0.62, 0.02);
+      RBX(root, paint, s * (cx - 0.10), s * cx, 2.30, 2.52, 0.60, 1.46, 0.02);
+      RBX(root, paint, s * (cx - 0.10), s * cx, 1.70, 1.84, 0.60, 1.62, 0.02);
+      RBX(root, glass, s * (cx - 0.05), s * (cx - 0.02), 1.82, 2.32, 0.62, 1.44, 0.01);
+      bar(root, paint, [s * (cx - 0.06), 1.70, A.cabF - 0.04], [s * (cx - 0.06), 2.56, 1.40], 0.14, 0.14);
+      CYLX(root, plate, 0.07, 0.03, s * cx, 1.50, 1.05, "x", 16);
+      CYLX(root, dark, 0.04, 0.035, s * cx, 1.50, 1.05, "x", 14);
+      // door seams, handle, step, grab handle, marker
+      RBX(root, dark, s * (cx - 0.002), s * (cx + 0.006), 1.04, 2.30, 0.58, 0.595, 0.002);
+      RBX(root, dark, s * (cx - 0.002), s * (cx + 0.006), 1.04, 2.30, 1.60, 1.615, 0.002);
+      RBX(root, chrome, s * cx, s * (cx + 0.025), 1.62, 1.66, 0.70, 0.86, 0.01);
+      RBX(root, dark, s * 0.88, s * 1.12, 0.62, 0.66, 0.70, 1.20, 0.01);
+      rod(root, chrome, [s * (cx + 0.04), 1.20, 1.66], [s * (cx + 0.04), 2.10, 1.66], 0.016);
+      RBX(root, amber, s * (cx - 0.02), s * (cx + 0.015), 2.60, 2.65, 1.30, 1.40, 0.01);
+      // mirror
+      rod(root, dark, [s * cx, 2.10, 1.50], [s * 1.36, 2.10, 1.54], 0.014);
+      rod(root, dark, [s * cx, 1.78, 1.50], [s * 1.36, 1.76, 1.54], 0.014);
+      RBX(root, dark, s * 1.32, s * 1.42, 1.72, 2.16, 1.48, 1.60, 0.03);
+      RBX(root, glass, s * 1.33, s * 1.41, 1.75, 2.13, 1.475, 1.485, 0.004);
+    });
+    // armoured windscreen in a heavy frame
+    (function () {
+      const zb = A.cabF - 0.02, yb = 1.74, zt = 1.42, yt = 2.50;
+      const fl = Math.hypot(zt - zb, yt - yb), ang = Math.atan2(zb - zt, yt - yb);
+      const m = put(root, K.rboxGeo(1.86, fl * 0.92, 0.02, 0.01), glass, 0, (yb + yt) / 2, (zb + zt) / 2 + 0.005);
+      m.rotation.x = -ang;
+      const f = put(root, K.rboxGeo(2.06, 0.10, 0.08, 0.02), paint, 0, yb + 0.02, zb - 0.01);
+      f.rotation.x = -ang;
+      bar(root, paint, [0, yb, zb], [0, yt, zt], 0.08, 0.06);
+    })();
+    RBX(root, dark, -1.0, 1.0, 2.52, 2.56, 1.40, 1.60, 0.01);                            // visor lip
+    [-0.4, 0, 0.4].forEach(function (x) { RBX(root, amber, x - 0.05, x + 0.05, 2.62, 2.67, 1.38, 1.44, 0.01); });
+    // saddle tank (curb side) and battery box (street side)
+    CYLX(root, plate, 0.24, 0.8, -0.80, 0.64, -0.15, "z", 22);
+    [-0.38, 0.08].forEach(function (z) { CYLX(root, dark, 0.25, 0.04, -0.80, 0.64, z, "z", 22); });
+    RBX(root, dark, 0.56, 1.02, 0.42, 0.86, -0.55, 0.20, 0.03);
+    // exhaust up the back of the cab
+    CYLX(root, chrome, 0.06, 1.8, 0.92, 1.85, 0.20, "y", 14);
+    rod(root, chrome, [0.92, 0.96, 0.20], [0.55, 0.72, 0.20], 0.055);
+
+    K.dressCabin(root, {
+      cabW: (cx - 0.1) * 2, zR: A.cabB + 0.12, zF: A.cabF - 0.12,
+      zTR: A.cabB + 0.12, zTF: 1.36, roofW: (cx - 0.12) * 2,
+      beltY: 1.80, roofY: 2.44, floorY: 1.26, rows: 1, seatLayout: "cab2",
+      doorSpans: [[0.60, 1.60]],
+    });
+
+    /* ---- THE ARMOURED BOX ---- */
+    const bF = A.cabB - 0.04, bB = A.boxB, bm = (bF + bB) / 2;
+    RBX(root, paint, -hw, hw, A.boxBot, A.top, bB, bF, 0.09);
+    RBX(root, dark, -hw + 0.1, hw - 0.1, 0.80, A.boxBot + 0.02, bB + 0.1, bF - 0.1, 0.01);  // sub-frame
+    sides(function (s) {
+      // well liner + steel arch trim over the rear duals
+      arc(root, dark, A.R + 0.06, 0.62, 0.02, 0.0, Math.PI, s * 0.92, A.R, A.zR, 18);
+      // plate seams + rivet lines
+      [-2.35, -1.10, 0.0 - 0.15].forEach(function (z) { RBX(root, dark, s * hw, s * (hw + 0.006), A.boxBot + 0.06, A.top - 0.06, z - 0.006, z + 0.006, 0.002); });
+      [A.boxBot + 0.14, A.top - 0.14].forEach(function (y) {
+        for (let z = bB + 0.15; z < bF - 0.1; z += 0.22) CYLX(root, plate, 0.012, 0.012, s * (hw + 0.004), y, z, "x", 6);
+      });
+      // the company stripe and name
+      RBX(root, gold, s * hw, s * (hw + 0.008), 1.36, 1.50, bB + 0.06, bF - 0.06, 0.003);
+      const nm = put(root, new THREE.PlaneGeometry(2.6, 0.49), liveryMat(), s * (hw + 0.012), 2.02, bm + 0.2, 0, s * Math.PI / 2, 0);
+      nm.geometry._shared = true;
+      // gun ports: a steel boss with a dark port
+      [-2.75, -0.55].forEach(function (z) {
+        CYLX(root, plate, 0.075, 0.03, s * (hw + 0.012), 1.70, z, "x", 18);
+        CYLX(root, dark, 0.045, 0.035, s * (hw + 0.015), 1.70, z, "x", 14);
+      });
+      // box clearance markers
+      [bB + 0.1, bF - 0.1].forEach(function (z) { RBX(root, amber, s * (hw - 0.02), s * (hw + 0.012), A.top - 0.14, A.top - 0.08, z - 0.05, z + 0.05, 0.01); });
+      // rear duals mud flap
+      RBX(root, rubber, s * 0.62, s * 1.18, 0.12, 0.62, A.zR - 0.60, A.zR - 0.57, 0.01);
+    });
+    // the curb-side crew door: frame, hinges, small window, port, handle
+    (function () {
+      const x = -hw - 0.006, z0 = -0.85, z1 = -0.05;
+      RBX(root, dark, x - 0.004, x + 0.004, A.boxBot + 0.06, 2.62, z0 - 0.01, z0 + 0.01, 0.002);
+      RBX(root, dark, x - 0.004, x + 0.004, A.boxBot + 0.06, 2.62, z1 - 0.01, z1 + 0.01, 0.002);
+      RBX(root, dark, x - 0.004, x + 0.004, 2.61, 2.63, z0, z1, 0.002);
+      [1.25, 2.30].forEach(function (y) { CYLX(root, plate, 0.03, 0.14, x - 0.02, y, z1 + 0.02, "y", 10); });
+      RBX(root, plate, x - 0.02, x + 0.01, 2.06, 2.40, z0 + 0.22, z1 - 0.22, 0.02);
+      RBX(root, glass, x - 0.025, x - 0.018, 2.10, 2.36, z0 + 0.26, z1 - 0.26, 0.01);
+      RBX(root, chrome, x - 0.03, x, 1.60, 1.66, z0 + 0.08, z0 + 0.24, 0.01);
+      RBX(root, plate, -hw - 0.14, -hw + 0.02, 0.70, 0.75, z0, z1, 0.01);               // step
+    })();
+    // the rear: double doors, hinge knuckles, lock box, ports, handles, tails
+    const rz = bB - 0.006;
+    RBX(root, dark, -0.012, 0.012, A.boxBot + 0.06, A.top - 0.10, rz - 0.004, rz + 0.004, 0.002);
+    sides(function (s) {
+      [1.30, 2.05, 2.70].forEach(function (y) { CYLX(root, plate, 0.035, 0.16, s * (hw - 0.06), y, rz - 0.02, "y", 10); });
+      CYLX(root, plate, 0.07, 0.03, s * 0.55, 2.0, rz - 0.01, "z", 18);
+      CYLX(root, dark, 0.04, 0.035, s * 0.55, 2.0, rz - 0.015, "z", 14);
+      RBX(root, chrome, s * 0.08, s * 0.30, 1.58, 1.64, rz - 0.04, rz, 0.01);
+      CYLX(root, tail, 0.07, 0.03, s * (hw - 0.22), 1.20, rz - 0.015, "z", 16);
+      CYLX(root, amber, 0.055, 0.03, s * (hw - 0.22), 1.04, rz - 0.015, "z", 14);
+      CYLX(root, head, 0.04, 0.03, s * (hw - 0.40), 1.12, rz - 0.015, "z", 12);
+      RBX(root, amber, s * (hw - 0.14), s * (hw - 0.04), A.top - 0.12, A.top - 0.06, rz - 0.02, rz, 0.01);
+    });
+    RBX(root, plate, -0.20, 0.20, 1.44, 1.76, rz - 0.06, rz, 0.02);                      // lock box
+    RBX(root, gold, -hw + 0.02, hw - 0.02, 2.62, 2.72, rz - 0.01, rz, 0.003);
+    RBX(root, plate, -hw + 0.06, hw - 0.06, 0.50, 0.70, bB - 0.22, bB + 0.05, 0.02);     // bumper step
+    for (let i = 0; i < 6; i++) RBX(root, dark, -0.9 + i * 0.36, -0.9 + i * 0.36 + 0.2, 0.70, 0.705, bB - 0.2, bB - 0.02, 0.002);
+    // roof: escape hatch, body A/C, the beacon
+    RBX(root, plate, -0.40, 0.40, A.top - 0.01, A.top + 0.06, -2.2, -1.5, 0.03);
+    RBX(root, dark, -0.30, 0.30, A.top + 0.06, A.top + 0.08, -2.1, -1.6, 0.01);
+    RBX(root, plate, -0.55, 0.55, A.top - 0.01, A.top + 0.22, -0.40, 0.18, 0.05);
+    for (let i = 0; i < 5; i++) RBX(root, dark, -0.45, 0.45, A.top + 0.222, A.top + 0.226, -0.34 + i * 0.11, -0.30 + i * 0.11, 0.002);
+    const bg = new THREE.Group();
+    bg.name = "armored_beacon";
+    CYLX(bg, dark, 0.13, 0.05, 0, A.top + 0.245, -0.95, "y", 16);
+    CYLX(bg, K.sharedMat("cit-beacon", 0xffb030, { basic: true }), 0.10, 0.15, 0, A.top + 0.345, -0.95, "y", 16, 0.11);
+    root.add(bg);
+
+    /* ---- WHEELS ---- */
+    const rim = "steel";
+    sides(function (s) {
+      const fw = K.makeWheel(A.R, 0.28, rim, 0.55);
+      fw.rotation.z = -s * Math.PI / 2; fw.position.set(s * 1.0, A.R, A.zF); root.add(fw);
+      [0.98, 0.68].forEach(function (x) {
+        const rw = K.makeWheel(A.R, 0.27, rim, 0.55);
+        rw.rotation.z = -s * Math.PI / 2; rw.position.set(s * x, A.R, A.zR); root.add(rw);
+      });
+    });
+    root.userData.loftBody = true;
+    root.userData.vehicleDims = { width: A.W, length: A.L, height: A.top + 0.1, wheelbase: A.zF - A.zR };
+    return root;
+  }
+  CBZ.carStyleBuilders = CBZ.carStyleBuilders || {};
+  CBZ.carStyleBuilders.armored = buildArmoredTruck;
+
+  // ---- after spawn: hand the update loop the beacon the body was built with --
+  // FIXED CONSTANTS ONLY in here: this runs between spawns, so a draw on the
+  // module rng() would shift every later spawn roll.
   function dressTruck(grp) {
-    armorAssets();
-    const dress = new THREE.Group();
-    dress.userData._armoredDress = true;
-    const B = function (mat, sx, sy, sz, px, py, pz) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
-      m.position.set(px, py, pz); dress.add(m); return m;
-    };
-    // FULL SLAB SIDE ARMOR down each flank: plate wall + darker rivet-line
-    // strips (two horizontal runs, two vertical seams) + the gold company
-    // stripe riding proudest — a SECURIS-style color block, no text needed.
-    for (const sx of [-1, 1]) {
-      B(PLATE_MAT, 0.1, 1.15, 3.9, sx * 1.22, 1.35, -0.25);       // armor slab
-      B(ARMOR_MAT, 0.05, 0.1, 3.9, sx * 1.28, 0.98, -0.25);       // rivet lines
-      B(ARMOR_MAT, 0.05, 0.1, 3.9, sx * 1.28, 1.72, -0.25);
-      B(ARMOR_MAT, 0.05, 1.15, 0.1, sx * 1.28, 1.35, -1.7);       // bolted seams
-      B(ARMOR_MAT, 0.05, 1.15, 0.1, sx * 1.28, 1.35, 1.2);
-      B(GOLD_MAT, 0.04, 0.3, 3.9, sx * 1.3, 1.35, -0.25);         // company stripe
-    }
-    // barred windshield grill across the nose + a heavy ram bumper below it
-    B(ARMOR_MAT, 2.15, 0.42, 0.1, 0, 1.76, 2.02);
-    for (const bx of [-0.72, -0.24, 0.24, 0.72]) B(PLATE_MAT, 0.07, 0.46, 0.14, bx, 1.76, 2.04);
-    B(ARMOR_MAT, 2.3, 0.38, 0.28, 0, 0.55, 2.14);
-    // REAR BLAST DOORS — thick double leaf, centre seam, four proud hinge
-    // blocks, gold stripe carrying across (the wall the player aims C4 at)
-    B(ARMOR_MAT, 2.05, 1.6, 0.16, 0, 1.4, -2.46);
-    B(PLATE_MAT, 0.08, 1.6, 0.2, 0, 1.4, -2.48);
-    for (const hy of [0.85, 1.95]) for (const hx of [-0.95, 0.95]) B(PLATE_MAT, 0.16, 0.22, 0.24, hx, hy, -2.5);
-    B(GOLD_MAT, 1.5, 0.3, 0.05, 0, 1.35, -2.6);
-    // hardened roof cupola: stepped turret with a forward vision slit
-    B(ARMOR_MAT, 0.95, 0.34, 1.05, 0, 2.4, -0.2);
-    B(PLATE_MAT, 0.68, 0.3, 0.78, 0, 2.72, -0.2);
-    B(ARMOR_MAT, 0.5, 0.09, 0.06, 0, 2.74, 0.22);
-    // amber roof beacon (security escort look) — a tiny emissive box, blinked by
-    // visibility toggle (no material churn)
-    const beacon = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.34), BEACON_MAT);
-    beacon.position.set(0, 2.95, -0.2); dress.add(beacon);
-    dress.userData.beacon = beacon;
-    grp.add(dress);
+    let beacon = null;
+    grp.traverse(function (o) { if (!beacon && o.name === "armored_beacon") beacon = o; });
+    const dress = { userData: { beacon: beacon } };
     grp.userData._armoredDress = dress;
     return dress;
   }
-
   // ---- spawn ----------------------------------------------------------------
   function spawnTruck() {
     if (truck || g.mode !== "city" || !CBZ.city || !CBZ.city.arena) return;

@@ -199,14 +199,23 @@
     S.goods.push(s);
     return s;
   }
-  function kitGood(S, group, frameK, name, fn, x, y, R) {
-    const K = CBZ.storeFixtureKit;
-    const gk = K.create().frame(frameK.ox, 0, frameK.oz, frameK.yaw);
-    fn(gk, x, y, R);
-    const grp = new THREE.Group();
-    grp.name = "pawn-good";
-    gk.build(grp);
-    return addGood(S, group, name, grp, frameK.world(x, 0.22), y + 0.15);
+  // A SHELF GOOD IS THE CATALOG'S OWN MODEL (city/itemassets.js): the amp on
+  // the board is the amp in your bag and on the pavement where you drop it.
+  // (This file used to build its own box-kit amp, TV, drill, toolbox,
+  // boombox, speakers, camera and console beside the catalog's: two models
+  // of one thing.) Stood on the board top, face to the room, a long thing
+  // turned to lie along the board.
+  function kitGood(S, group, frameK, name, x, y) {
+    if (!CBZ.itemAsset) return null;
+    const m = CBZ.itemAsset(name);
+    if (!m) return null;
+    const bb = new THREE.Box3().setFromObject(m), sz = bb.getSize(new THREE.Vector3());
+    const turn = sz.z > DEPTH - 0.06 && sz.x < sz.z ? Math.PI / 2 : 0;
+    const wp = frameK.world(x, DEPTH / 2 + 0.02);
+    m.position.set(wp.x, y, wp.z);
+    m.rotation.y = frameK.yaw + turn;
+    m.name = "pawn-good";
+    return addGood(S, group, name, m, wp, y + Math.min(0.3, sz.y / 2));
   }
   // a piece in the counter showcase (real item models, CBZ.itemAsset)
   function caseGood(S, group, k, name, lx, y, lz) {
@@ -289,16 +298,16 @@
     // board and never under the neon sign in the middle of the run)
     const PLAN = [
       ["toolbox", "amp", "drill", "laptops", "tv"],
-      ["amp", "boombox", "phones", "camera", "boxes"],
-      ["toolbox", "speakers", "laptops", "boxes", "tv"],
-      ["boxes", "drill", "phones", "console", "tv"],
+      ["amp", "boombox", "phones", "camera", "speakers"],
+      ["toolbox", "speakers", "laptops", "console", "tv"],
+      ["boombox", "drill", "phones", "console", "tv"],
     ];
     for (let i = 0; i < bays; i++) {
       const x0 = -runW / 2 + i * 1.2 + 0.6;
       const row = PLAN[i % PLAN.length];
       for (let j = 0; j < BOARDS.length; j++) {
         let what = row[j];
-        if (what === "tv" && Math.abs(x0) < 0.55) what = "boxes";
+        if (what === "tv" && Math.abs(x0) < 0.55) what = "speakers";
         stockBoard(S, group, k, what, x0 + (R() - 0.5) * 0.1, FY + BOARDS[j] + 0.011, R);
       }
     }
@@ -307,85 +316,23 @@
   // stock merged into the shelving
   function stockBoard(S, group, k, what, x, y, R) {
     switch (what) {
-      case "tv": kitGood(S, group, k, "Flat TV", tv, x, y, R); break;
-      case "amp": kitGood(S, group, k, "Guitar Amp", amp, x, y, R); break;
-      case "drill": kitGood(S, group, k, "Power Drill", drill, x - 0.12, y, R); boxedSaw(k, x + 0.22, y); break;
-      case "toolbox": kitGood(S, group, k, "Toolbox", toolbox, x, y, R); break;
-      case "boombox": kitGood(S, group, k, "Boombox", boombox, x, y, R); break;
-      case "speakers": kitGood(S, group, k, "Speakers", speakers, x, y, R); break;
-      case "camera": kitGood(S, group, k, "Camera", camera, x - 0.2, y, R); kitGood(S, group, k, "Game Console", consoleFn, x + 0.16, y, R); break;
-      case "console": kitGood(S, group, k, "Game Console", consoleFn, x, y, R); break;
+      case "tv": kitGood(S, group, k, "Flat TV", x, y); break;
+      case "amp": kitGood(S, group, k, "Guitar Amp", x, y); break;
+      case "drill": kitGood(S, group, k, "Power Drill", x - 0.2, y); kitGood(S, group, k, "Power Drill", x + 0.2, y); break;
+      case "toolbox": kitGood(S, group, k, "Toolbox", x, y); break;
+      case "boombox": kitGood(S, group, k, "Boombox", x, y); break;
+      case "speakers": kitGood(S, group, k, "Speakers", x, y); break;
+      case "camera": kitGood(S, group, k, "Camera", x - 0.2, y); kitGood(S, group, k, "Game Console", x + 0.16, y); break;
+      case "console": kitGood(S, group, k, "Game Console", x, y); break;
       case "laptops": laptops(S, group, k, x, y); break;
       case "phones": phones(S, group, k, x, y); break;
-      default: boxes(k, x, y);
+      default: break;                                   // a bare stretch of board
     }
   }
 
-  // ---- the pawned goods (each at real size, sitting on the board top y) ----
-  function tv(k, x, y) {
-    k.box(x, y + 0.006, 0.2, 0.24, 0.012, 0.14, 0x1a1a1c, "gloss");
-    k.box(x, y + 0.045, 0.19, 0.05, 0.07, 0.025, 0x1a1a1c, "gloss");
-    k.box(x, y + 0.28, 0.2, 0.74, 0.43, 0.035, 0x151517, "gloss");
-    k.box(x, y + 0.285, 0.2181, 0.71, 0.4, 0.002, 0x0d1116, "gloss");
-  }
-  function amp(k, x, y) {
-    k.box(x, y + 0.18, 0.22, 0.44, 0.36, 0.24, 0x1b1b1b);
-    k.box(x, y + 0.14, 0.3405, 0.4, 0.24, 0.004, 0x3a3936);
-    k.box(x, y + 0.315, 0.3405, 0.4, 0.06, 0.004, 0xb8bcc0, "metal");
-    for (let i = 0; i < 5; i++) k.cyl(x - 0.14 + i * 0.07, y + 0.315, 0.35, 0.009, 0.009, 0.014, 0x111111, "solid", Math.PI / 2, 0, 0, 10);
-    k.box(x, y + 0.37, 0.22, 0.16, 0.016, 0.03, 0x111111);
-    for (const sx of [-1, 1]) for (const sy of [0, 1]) k.box(x + sx * 0.215, y + 0.015 + sy * 0.33, 0.335, 0.02, 0.03, 0.02, 0xa7abb0, "metal");
-  }
-  function drill(k, x, y) {
-    const col = 0xd07a2a;
-    k.box(x, y + 0.035, 0.2, 0.07, 0.07, 0.1, 0x1b1b1d);                                 // battery
-    k.box(x, y + 0.12, 0.2, 0.04, 0.11, 0.05, col, "solid", 0, 0, -0.18);                // handle
-    k.cyl(x + 0.03, y + 0.2, 0.2, 0.034, 0.034, 0.16, col, "solid", 0, 0, Math.PI / 2);  // motor housing
-    k.cyl(x + 0.14, y + 0.2, 0.2, 0.018, 0.022, 0.05, 0x2a2a2a, "metal", 0, 0, Math.PI / 2);
-    k.cyl(x + 0.18, y + 0.2, 0.2, 0.004, 0.004, 0.06, 0xb8bcc0, "metal", 0, 0, Math.PI / 2);
-  }
-  function boxedSaw(k, x, y) {
-    k.box(x, y + 0.13, 0.22, 0.3, 0.26, 0.28, 0x2a5aa8);
-    k.box(x, y + 0.13, 0.3605, 0.2, 0.12, 0.002, 0xf2f0ea);
-  }
-  function toolbox(k, x, y) {
-    k.box(x, y + 0.1, 0.2, 0.46, 0.2, 0.22, 0xb3322b, "metal");
-    k.box(x, y + 0.22, 0.2, 0.47, 0.04, 0.23, 0x8a2621, "metal");
-    k.box(x, y + 0.27, 0.2, 0.2, 0.014, 0.02, 0x1b1b1d, "metal");
-    for (const sx of [-1, 1]) k.box(x + sx * 0.1, y + 0.255, 0.2, 0.012, 0.03, 0.012, 0x1b1b1d, "metal");
-    for (const sx of [-1, 1]) k.box(x + sx * 0.16, y + 0.2, 0.312, 0.03, 0.04, 0.008, 0xc0c5ca, "metal");
-  }
-  function boombox(k, x, y) {
-    k.box(x, y + 0.13, 0.2, 0.52, 0.24, 0.13, 0x8e949b, "metal");
-    for (const sx of [-1, 1]) {
-      k.cyl(x + sx * 0.17, y + 0.12, 0.266, 0.075, 0.075, 0.004, 0x1c1d20, "solid", Math.PI / 2, 0, 0, 20);
-      k.torus(x + sx * 0.17, y + 0.12, 0.268, 0.075, 0.004, 0xc0c5ca, "metal", 0, 0, 0, null, 24);
-    }
-    k.box(x, y + 0.14, 0.2665, 0.13, 0.07, 0.002, 0x2a2d31);
-    for (const sx of [-1, 1]) k.box(x + sx * 0.15, y + 0.275, 0.2, 0.02, 0.05, 0.03, 0x2a2d31, "metal");
-    k.box(x, y + 0.305, 0.2, 0.34, 0.022, 0.034, 0x2a2d31, "metal");
-  }
-  function speakers(k, x, y) {
-    for (const sx of [-1, 1]) {
-      const cx = x + sx * 0.14;
-      k.box(cx, y + 0.15, 0.2, 0.2, 0.3, 0.22, 0x5a3d26);
-      k.cyl(cx, y + 0.11, 0.311, 0.065, 0.065, 0.004, 0x1c1d20, "solid", Math.PI / 2, 0, 0, 20);
-      k.cyl(cx, y + 0.24, 0.311, 0.022, 0.022, 0.004, 0x2a2d31, "metal", Math.PI / 2, 0, 0, 14);
-    }
-  }
-  function camera(k, x, y) {
-    k.box(x, y + 0.045, 0.2, 0.14, 0.09, 0.07, 0x1b1b1d);
-    k.cyl(x, y + 0.045, 0.26, 0.034, 0.036, 0.07, 0x222326, "metal", Math.PI / 2, 0, 0, 18);
-    k.box(x - 0.04, y + 0.1, 0.2, 0.04, 0.02, 0.04, 0x2a2b2e);
-  }
-  function consoleFn(k, x, y) {
-    k.box(x, y + 0.035, 0.2, 0.3, 0.07, 0.24, 0x16171a, "gloss");
-    k.box(x, y + 0.036, 0.3215, 0.26, 0.004, 0.002, 0x3c7cd0, "solid");
-    k.box(x + 0.22, y + 0.018, 0.25, 0.12, 0.035, 0.07, 0x1b1b1d);
-  }
   function laptops(S, group, k, x, y) {
-    if (!CBZ.itemAsset) return boxes(k, x, y);
-    [[-0.2, Math.PI], [0.2, Math.PI + 0.2]].forEach(function (a) {
+    if (!CBZ.itemAsset) return;
+    [[-0.2, 0], [0.2, -0.2]].forEach(function (a) {          // (screens to the room)
       const m = CBZ.itemAsset("Laptop");
       if (!m) return;
       const wp = k.world(x + a[0], 0.22);
@@ -408,60 +355,31 @@
       addGood(S, group, "Phone", m, wp, y + 0.08);
     }
   }
-  function boxes(k, x, y) {
-    const cols = [0x2a5aa8, 0xc23a36, 0x3a7a4a, 0x1b1b1d, 0xe0b020];
-    let cx = x - 0.5;
-    for (let i = 0; i < 4 && cx < x + 0.4; i++) {
-      const w = 0.18 + ((i * 37) % 7) * 0.02, h = 0.14 + ((i * 13) % 5) * 0.03;
-      k.box(cx + w / 2, y + h / 2, 0.2, w, h, 0.28, 0xb08a55);
-      k.box(cx + w / 2, y + h * 0.55, 0.3405, w * 0.8, h * 0.5, 0.002, cols[i % cols.length]);
-      cx += w + 0.04;
-    }
-  }
-
-  // A guitar hung flat on the wall by its headstock from a wall yoke (bouts,
-  // a waist, a neck with a fretboard, an angled headstock with six tuners,
-  // six strings; a sound hole and bridge, or pickups, knobs and a guard).
-  // The yoke stays on the wall; the guitar is a good.
+  // A guitar hung on the wall by its headstock from a wall yoke. The yoke
+  // stays on the wall; the guitar is a good, and it is the catalog's guitar
+  // (city/itemassets.js), the same one in your bag: authored lying on its
+  // back, headstock to -Z, it is stood up by a quarter turn about X (the
+  // headstock up, the top to the room) and hung with its headstock in the
+  // yoke.
   function hangGuitar(S, group, K, W0, x, FY, acoustic) {
     const yoke = K.create().frame(W0.x, 0, W0.z, W0.yaw);
-    const k = K.create().frame(W0.x, 0, W0.z, W0.yaw);
-    const hookY = FY + 1.95;
-    const col = acoustic ? 0xc8955a : 0xa02a2a, dark = 0x2b1d14;
-    const th = acoustic ? 0.1 : 0.045;
-    const bz = 0.02 + th / 2, face = bz + th / 2, Z = face - 0.012;
+    const hookY = FY + 1.95, Z = 0.06;
     yoke.box(x, hookY, 0.01, 0.06, 0.08, 0.02, 0x2a2d31, "metal");
     yoke.cyl(x, hookY - 0.012, (Z + 0.012) / 2, 0.007, 0.007, Z + 0.012, 0x2a2d31, "metal", Math.PI / 2);
     for (const sx of [-1, 1]) yoke.cyl(x + sx * 0.034, hookY + 0.008, Z + 0.004, 0.006, 0.006, 0.04, 0x1b1b1d, "solid");
     yoke.build(group);
-    k.box(x, hookY + 0.09, Z - 0.005, 0.085, 0.19, 0.016, dark, "gloss");
-    for (let i = 0; i < 3; i++) for (const sx of [-1, 1]) k.cyl(x + sx * 0.05, hookY + 0.04 + i * 0.05, Z - 0.005, 0.006, 0.006, 0.02, 0xc0c5ca, "metal", 0, 0, Math.PI / 2);
-    const neckTop = hookY - 0.005, neckLen = 0.48;
-    k.box(x, neckTop - neckLen / 2, Z - 0.004, 0.05, neckLen, 0.02, acoustic ? 0x9a6a3a : 0x6b4a2a);
-    k.box(x, neckTop - neckLen / 2, Z + 0.008, 0.048, neckLen, 0.004, 0x1c1410);
-    for (let i = 1; i < 12; i++) k.box(x, neckTop - i * 0.036, Z + 0.0105, 0.048, 0.002, 0.001, 0xc0c5ca, "metal");
-    const bodyTop = neckTop - neckLen + 0.02;
-    const ub = acoustic ? 0.14 : 0.13, lb = acoustic ? 0.19 : 0.165;
-    const ubY = bodyTop - ub * 0.8, lbY = ubY - (acoustic ? 0.2 : 0.17);
-    k.cyl(x, ubY, bz, ub, ub, th, col, "gloss", Math.PI / 2, 0, 0, 28);
-    k.cyl(x, lbY, bz, lb, lb, th, col, "gloss", Math.PI / 2, 0, 0, 28);
-    k.box(x, (ubY + lbY) / 2, bz, ub * 1.55, (ubY - lbY), th, col, "gloss");
-    if (acoustic) {
-      k.cyl(x, ubY - 0.03, face + 0.0005, 0.045, 0.045, 0.002, 0x120c08, "solid", Math.PI / 2, 0, 0, 20);
-      k.torus(x, ubY - 0.03, face + 0.001, 0.052, 0.003, 0x3a2414, "solid", 0, 0, 0, null, 24);
-      k.box(x, lbY - 0.03, face + 0.004, 0.14, 0.025, 0.008, 0x2b1d14);
-    } else {
-      k.box(x + 0.035, lbY + 0.02, face + 0.001, 0.2, 0.26, 0.002, 0xeeeae0, "solid", 0, 0, 0.3);
-      for (const py of [ubY - 0.02, lbY + 0.06]) k.box(x, py, face + 0.006, 0.075, 0.03, 0.01, 0x111111);
-      k.box(x, lbY - 0.06, face + 0.005, 0.08, 0.02, 0.01, 0xc0c5ca, "metal");
-      for (let i = 0; i < 3; i++) k.cyl(x + 0.1 - i * 0.012, lbY - 0.05 - i * 0.04, face + 0.008, 0.011, 0.011, 0.016, 0x1a1a1a, "solid", Math.PI / 2, 0, 0, 12);
-    }
-    const sTop = neckTop, sBot = acoustic ? lbY - 0.03 : lbY - 0.06;
-    for (let i = 0; i < 6; i++) k.box(x - 0.018 + i * 0.0072, (sTop + sBot) / 2, Z + 0.013, 0.0011, sTop - sBot, 0.0011, 0xd8dade, "metal");
-    const grp = new THREE.Group();
-    grp.name = "pawn-good";
-    k.build(grp);
-    addGood(S, group, acoustic ? "Acoustic Guitar" : "Electric Guitar", grp, k.world(x, 0.08), (ubY + lbY) / 2);
+    if (!CBZ.itemAsset) return;
+    const name = acoustic ? "Acoustic Guitar" : "Electric Guitar";
+    const m = CBZ.itemAsset(name);
+    if (!m) return;
+    m.rotation.set(Math.PI / 2, W0.yaw, 0, "YXZ");
+    const wp = yoke.world(x, 0.025);
+    m.position.set(wp.x, 0, wp.z);
+    m.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(m);
+    m.position.y = hookY + 0.11 - bb.max.y;                  // the headstock in the yoke
+    m.name = "pawn-good";
+    addGood(S, group, name, m, yoke.world(x, 0.08), (bb.min.y + bb.max.y) / 2 + m.position.y);
   }
 
   // An orange neon dollar sign on a black backing board: two open loops and
@@ -995,6 +913,13 @@
       sellable: sellable(false).map((s) => ({ name: s.name, n: s.n, fence: fencePrice(s.name), hot: CBZ.cityHotCount ? CBZ.cityHotCount(s.name) : 0 })),
       tickets: liveTickets().map((t) => ({ id: t.id, name: t.name, principal: t.principal, redeem: t.redeem, left: Math.max(0, Math.round(t.expires - now())) })),
     };
+  };
+  // the lab's handle (tools/lab/storeshelf.js __pawnShelf): a store from a
+  // plain description, its displays built now, no city and no clerk
+  CBZ.pawnShopBuildNow = function (d) {
+    const S = makeStore(Object.assign({ kind: "lab", where: "city", inStore: function () { return false; } }, d));
+    buildDisplays(S);
+    return S;
   };
   CBZ.pawnShops = function () {
     return STORES.map(function (S) {

@@ -121,6 +121,8 @@
     ambulance: "Ambulance",
     firetruck: "Fire Engine",
     bearcat: "SWAT Armored Truck",
+    // city/armored.js: the cash-in-transit truck (a registered builder; same rule as `semi`)
+    armored: "Armored Cash Truck",
   };
 
   // ---- per-style HANDLING FEEL hooks (GTA vehicle-class inspired) ----
@@ -164,6 +166,8 @@
     ambulance:   { class: "van",    accel: 0.80, top: 0.86, turn: 0.72, grip: 0.80, brake: 0.82, drift: 1.10, roll: 1.35 },
     firetruck:   { class: "van",    accel: 0.62, top: 0.80, turn: 0.58, grip: 0.74, brake: 0.66, drift: 1.20, roll: 1.45 },
     bearcat:     { class: "van",    accel: 0.70, top: 0.84, turn: 0.66, grip: 0.82, brake: 0.72, drift: 1.10, roll: 1.25 },
+    // the CIT truck drove on the van silhouette before it had a body: same numbers
+    armored:     { class: "van",    accel: 0.86, top: 0.88, turn: 0.78, grip: 0.82, brake: 0.86, drift: 1.1, roll: 1.3 },
   };
   const DEFAULT_FEEL = { class: "sedan", accel: 1.0, top: 1.0, turn: 1.0, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.6 };
   // (d) THE ONE FEEL LOOKUP. FEEL above covers the road silhouettes; a
@@ -859,6 +863,184 @@
     rboxes.set(key, geo);
     return geo;
   }
+  /* ============================================================
+     THE SHAPE KIT — curved solids for the bodies that are not a lofted
+     road car: the semi tractor, the motorcycle, the cash-in-transit truck
+     (city/armored.js, through CBZ.cityCarKit.shape). All cached by their
+     numbers and _shared, so a template built once costs nothing per car
+     (vehicles.js merges every static part into its per-material buckets):
+       seLoftGeo   a smooth solid through superellipse SECTIONS along Z
+                   (hoods, tanks, fairings, tail cowls)
+       arcBandGeo  a curved slab swept round the X axis (fenders, mudguards)
+       rod / bar   a cylinder or a rounded bar from point A to point B
+                   (fork legs, frame spars, mirror arms, limbs, pipes)
+       RBX / CYLX  a rounded box from its bounds, a cylinder on an axis
+     Every mesh is noSeal: authored exact, so vehicles.js's hole-proofing
+     never inflates it.
+  ============================================================ */
+  const shapeGeos = new Map();
+  function shapeCached(key, fn) {
+    let g = shapeGeos.get(key);
+    if (!g) { g = fn(); g._shared = true; shapeGeos.set(key, g); }
+    return g;
+  }
+  const kf = (a) => a.map((v) => (typeof v === "number" ? (+v).toFixed(3) : String(v))).join(",");
+  /* a ring: { z, y, hw, hh, p, hwT, hwB, hhB, pt, pb, x }. hw/hh are the half
+     width/height, hwT/hwB the half width at the top/bottom (a trapezoid
+     section), hhB the half height below the centre line, pt/pb the
+     superellipse power over/under it (2 = ellipse, 6+ = a rounded box). */
+  function ringPts(r, n) {
+    const out = [];
+    const hw = r.hw, hwT = r.hwT == null ? hw : r.hwT, hwB = r.hwB == null ? hw : r.hwB;
+    const hhT = r.hh, hhB = r.hhB == null ? r.hh : r.hhB;
+    const pt = r.pt || r.p || 4, pb = r.pb || r.p || 4, cx = r.x || 0;
+    for (let i = 0; i < n; i++) {
+      const t = (i / n) * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
+      const p = s >= 0 ? pt : pb;
+      const hwi = hw + (s >= 0 ? (hwT - hw) * s : (hwB - hw) * -s);
+      const x = cx + hwi * Math.sign(c) * Math.pow(Math.abs(c), 2 / p);
+      const y = r.y + (s >= 0 ? hhT : hhB) * Math.sign(s) * Math.pow(Math.abs(s), 2 / p);
+      out.push([x, y]);
+    }
+    return out;
+  }
+  function seLoftGeo(rings, n, noCaps) {
+    n = n || 24;
+    const key = "lo|" + n + "|" + (noCaps ? 1 : 0) + "|" + rings.map(function (r) {
+      return kf([r.z, r.y, r.hw, r.hh, r.p || 0, r.hwT == null ? "" : r.hwT, r.hwB == null ? "" : r.hwB,
+        r.hhB == null ? "" : r.hhB, r.pt || 0, r.pb || 0, r.x || 0]);
+    }).join(";");
+    return shapeCached(key, function () {
+      const side = new THREE.BufferGeometry();
+      const P = [], I = [];
+      rings.forEach(function (r) { ringPts(r, n).forEach(function (q) { P.push(q[0], q[1], r.z); }); });
+      for (let j = 0; j < rings.length - 1; j++) {
+        for (let i = 0; i < n; i++) {
+          const a = j * n + i, b = j * n + (i + 1) % n, c = (j + 1) * n + (i + 1) % n, d = (j + 1) * n + i;
+          // ring points run counter-clockwise seen from +Z: (a,b,c) faces out when the next ring is further +Z
+          if (rings[j + 1].z > rings[j].z) I.push(a, b, c, a, c, d); else I.push(a, c, b, a, d, c);
+        }
+      }
+      side.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+      side.setIndex(I);
+      side.computeVertexNormals();
+      const geo = side.toNonIndexed();
+      if (noCaps) { geo.computeBoundingSphere(); return geo; }
+      const pos = Array.from(geo.attributes.position.array), nor = Array.from(geo.attributes.normal.array);
+      [0, rings.length - 1].forEach(function (j) {
+        const r = rings[j], pts = ringPts(r, n);
+        const other = rings[j === 0 ? 1 : rings.length - 2];
+        const nz = r.z >= other.z ? 1 : -1;
+        let mx = 0, my = 0;
+        pts.forEach(function (q) { mx += q[0]; my += q[1]; });
+        mx /= n; my /= n;
+        for (let i = 0; i < n; i++) {
+          const q0 = pts[i], q1 = pts[(i + 1) % n];
+          const tri = nz > 0 ? [[mx, my], q0, q1] : [[mx, my], q1, q0];
+          tri.forEach(function (q) { pos.push(q[0], q[1], r.z); nor.push(0, 0, nz); });
+        }
+      });
+      const out = new THREE.BufferGeometry();
+      out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      out.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+      out.computeBoundingSphere();
+      return out;
+    });
+  }
+  /* a curved slab swept round the X axis: inner radius R to R+thick, from
+     angle a0 to a1 measured in the ZY plane from +Z toward +Y, `width` along X
+     (centred). Normals analytic: radial on the faces, +-X on the sides. */
+  function arcBandGeo(R, width, thick, a0, a1, seg) {
+    seg = seg || 16;
+    return shapeCached("ab|" + kf([R, width, thick, a0, a1, seg]), function () {
+      const P = [], N = [];
+      const hx = width / 2, R1 = R + thick;
+      const at = (r, a, x) => [x, r * Math.sin(a), r * Math.cos(a)];
+      const quad = (A, B, C, D, nA, nB, nC, nD) => { P.push(...A, ...B, ...C, ...A, ...C, ...D); N.push(...nA, ...nB, ...nC, ...nA, ...nC, ...nD); };
+      for (let i = 0; i < seg; i++) {
+        const t0 = a0 + (a1 - a0) * i / seg, t1 = a0 + (a1 - a0) * (i + 1) / seg;
+        const n0 = [0, Math.sin(t0), Math.cos(t0)], n1 = [0, Math.sin(t1), Math.cos(t1)];
+        const m0 = [0, -n0[1], -n0[2]], m1 = [0, -n1[1], -n1[2]];
+        quad(at(R1, t0, -hx), at(R1, t0, hx), at(R1, t1, hx), at(R1, t1, -hx), n0, n0, n1, n1);
+        quad(at(R, t0, hx), at(R, t0, -hx), at(R, t1, -hx), at(R, t1, hx), m0, m0, m1, m1);
+        quad(at(R, t0, hx), at(R, t1, hx), at(R1, t1, hx), at(R1, t0, hx), [1, 0, 0], [1, 0, 0], [1, 0, 0], [1, 0, 0]);
+        quad(at(R, t0, -hx), at(R1, t0, -hx), at(R1, t1, -hx), at(R, t1, -hx), [-1, 0, 0], [-1, 0, 0], [-1, 0, 0], [-1, 0, 0]);
+      }
+      [[a0, -1], [a1, 1]].forEach(function (e) {
+        const a = e[0], tn = [0, Math.cos(a) * e[1], -Math.sin(a) * e[1]];
+        quad(at(R, a, -hx), at(R, a, hx), at(R1, a, hx), at(R1, a, -hx), tn, tn, tn, tn);
+      });
+      // winding agrees with the authored normals
+      for (let i = 0; i < P.length; i += 9) {
+        const ux = P[i + 3] - P[i], uy = P[i + 4] - P[i + 1], uz = P[i + 5] - P[i + 2];
+        const vx = P[i + 6] - P[i], vy = P[i + 7] - P[i + 1], vz = P[i + 8] - P[i + 2];
+        const gx = uy * vz - uz * vy, gy = uz * vx - ux * vz, gz = ux * vy - uy * vx;
+        if (gx * N[i] + gy * N[i + 1] + gz * N[i + 2] < 0) {
+          for (let k = 0; k < 3; k++) { let t = P[i + 3 + k]; P[i + 3 + k] = P[i + 6 + k]; P[i + 6 + k] = t; t = N[i + 3 + k]; N[i + 3 + k] = N[i + 6 + k]; N[i + 6 + k] = t; }
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+      g.setAttribute("normal", new THREE.Float32BufferAttribute(N, 3));
+      g.computeBoundingSphere();
+      return g;
+    });
+  }
+  function cylGeoK(rt, rb, h, seg, open) {
+    return shapeCached("cy|" + kf([rt, rb, h, seg || 16, open ? 1 : 0]), () => new THREE.CylinderGeometry(rt, rb, h, seg || 16, 1, !!open));
+  }
+  function putMesh(root, geo, mat, x, y, z, rx, ry, rz) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x || 0, y || 0, z || 0);
+    if (rx || ry || rz) m.rotation.set(rx || 0, ry || 0, rz || 0);
+    m.castShadow = false;
+    m.userData.noSeal = true;
+    root.add(m);
+    return m;
+  }
+  function RBX(root, mat, x0, x1, y0, y1, z0, z1, r) {
+    return putMesh(root, rboxGeo(Math.abs(x1 - x0), Math.abs(y1 - y0), Math.abs(z1 - z0), r == null ? 0.02 : r), mat,
+      (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+  }
+  function CYLX(root, mat, r, len, x, y, z, axis, seg, rb, open) {
+    const g = cylGeoK(r, rb == null ? r : rb, len, seg || 16, open);
+    if (axis === "x") return putMesh(root, g, mat, x, y, z, 0, 0, -Math.PI / 2);
+    if (axis === "z") return putMesh(root, g, mat, x, y, z, Math.PI / 2, 0, 0);
+    return putMesh(root, g, mat, x, y, z);
+  }
+  const _ka = new THREE.Vector3(), _kb = new THREE.Vector3(), _kc = new THREE.Vector3(), _kM = new THREE.Matrix4();
+  // orient a Y-long mesh so its +Y runs a->b, its X as near world X as it can
+  function orientAB(m, a, b) {
+    _ka.set(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    const len = _ka.length() || 1e-6;
+    _ka.multiplyScalar(1 / len);
+    _kb.set(1, 0, 0);
+    if (Math.abs(_kb.dot(_ka)) > 0.95) _kb.set(0, 0, 1);
+    _kb.addScaledVector(_ka, -_kb.dot(_ka)).normalize();
+    _kc.crossVectors(_kb, _ka);
+    _kM.makeBasis(_kb, _ka, _kc);
+    m.quaternion.setFromRotationMatrix(_kM);
+    m.position.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+    return len;
+  }
+  function rodBetween(root, mat, a, b, r0, r1, seg) {
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    const m = putMesh(root, cylGeoK(r1 == null ? r0 : r1, r0, len, seg || 10), mat);
+    orientAB(m, a, b);
+    return m;
+  }
+  // a rounded bar a->b, `w` across (near world X), `d` deep (perpendicular)
+  function barBetween(root, mat, a, b, w, d, r) {
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    const m = putMesh(root, rboxGeo(w, len, d, r == null ? Math.min(w, d) * 0.3 : r), mat);
+    orientAB(m, a, b);
+    return m;
+  }
+  function addLoft(root, mat, rings, n, noCaps) { return putMesh(root, seLoftGeo(rings, n, noCaps), mat); }
+  function addArc(root, mat, R, width, thick, a0, a1, x, y, z, seg) {
+    return putMesh(root, arcBandGeo(R, width, thick, a0, a1, seg), mat, x, y, z);
+  }
+  const SHAPE = { loftGeo: seLoftGeo, arcBandGeo, cylGeo: cylGeoK, put: putMesh, RBX, CYLX, rod: rodBetween, bar: barBetween, loft: addLoft, arc: addArc };
   const _cm = new THREE.Matrix4(), _cq = new THREE.Quaternion(), _ce = new THREE.Euler(), _cs = new THREE.Vector3(1, 1, 1), _cp = new THREE.Vector3();
   function mtx(x, y, z, rx, ry, rz) {
     _ce.set(rx || 0, ry || 0, rz || 0, "XYZ");
@@ -2336,203 +2518,299 @@
     };
   })();
 
+  /* THE TRACTOR, rebuilt (2026-10-31, Opus 5.5). A 4x2 long-nose day cab of
+     the Peterbilt 389 / Kenworth W900 school, at real metric scale:
+       cab 2.16 m wide, 1.55 m deep, roof 3.13 m; hood 1.9 m with the steer
+       axle under it (a 3.2 m wheelbase to the drive axle); 1.04 m tyres,
+       duals on the drive axle; chrome grille with its bars and badge, the
+       crowned hood with its louvres, real arched fenders over the steer
+       wheels with the headlamp pods on them, cylinder air cleaners, chrome
+       stacks with heat shields, saddle tanks with their straps, steps, grab
+       handles, a split raked windscreen in real A-pillars (the dressed cab is
+       visible through it), door glass, west-coast mirrors on tube arms, sun
+       visor with five cab markers, air horns, the air and electric lines to
+       the trailer.
+     WHY 4x2 AND NOT A TANDEM: the trailer is a step-deck whose floor sits at
+     0.84-0.95 m from the kingpin back (the hold contract: one flat floor, see
+     SEMI above), and a 0.52 m drive tyre tops out at 1.04 m. The old rear
+     drive axle sat at z 1.30, UNDER the trailer, and its tyres stood 9 cm up
+     through the cargo floor — the same fault the comment below fixed for the
+     bogie. One drive axle ahead of the trailer nose is a real city day cab
+     and needs no wheel in the room.
+     THE TRAILER keeps its room, its tailgate-ramp and its hold declaration
+     byte for byte; the skin gains what a dry van has: aluminium posts, top
+     and bottom rails, corner posts, a rear frame, the red/white conspicuity
+     tape, a taped ICC underride guard, a lamp panel with round tails, slider
+     rails and hangers over the bogie, crossmembers, landing gear with sand
+     shoes and a crank. No partCtx: the tractor's face is authored here, so
+     carparts' generic face must not be hung over it. */
   function makeSemi() {
     const S = SEMI;
     const root = new THREE.Group();
     const paint = paintMat("semi", 0xd8dde3, { metalness: 0.46, roughness: 0.42, envMapIntensity: 0.9 });
     const boxPaint = paintMat("semi-box", 0xeceff2, { metalness: 0.30, roughness: 0.60, envMapIntensity: 0.6 });
-    const dark = glassMat();
+    const glass = glassMat();
     const trim = roleMat("semi-trim", "plastic", 0x1b1f24);
+    const rubber = roleMat("semi-rubber", "plastic", 0x121315);
     const chrome = chromeMat();
+    const alu = roleMat("semi-alu", "plastic", 0xb4bbc2);
+    const skirtM = roleMat("semi-skirt", "plastic", 0x8e959c);
     // scuffed steel — the bed, and the tailgate. It has to be a DIFFERENT tone
-    // from the body: photographed on the Freeport's concrete, a ramp painted in
-    // the trailer's own white lay on pale hardstanding and vanished, so the one
-    // plate that is entirely about "the back is open and you can walk up it"
-    // showed no ramp at all. Bare steel is also what a real load ramp is.
-    // …and the ROLE is "plastic", not "metal", for the same reason. carfx's
-    // metal role carries the fake-reflection env map, and a dark metal under
-    // the Freeport's midday sun renders BRIGHTER than the white body it is
-    // supposed to contrast with — the first re-shoot changed the colour and the
-    // ramp stayed pale. "plastic" is the matte family, so the number authored
-    // here is the tone that appears. It is also what makes the load space read
-    // as a room: a dark floor under pale walls, instead of a white tunnel.
+    // from the body: a ramp painted in the trailer's own white vanished on the
+    // Freeport's pale concrete. "plastic", not "metal": carfx's metal role
+    // carries the fake env reflection and a dark metal renders brighter than
+    // the white body it is meant to contrast with.
     const deck = roleMat("semi-deck", "plastic", 0x41474f);
-    const w = S.w, wheelR = S.wheelR;
+    const head = lightFrontMat(), tail = lightTailMat();
+    const marker = sharedMat("semi-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 });
+    const tapeR = sharedMat("semi-tapeR", 0xc4202a, { emissive: 0x4a080c, ei: 0.6 });
+    const tapeW = sharedMat("semi-tapeW", 0xe9edf0, { emissive: 0x2a2e32, ei: 0.5 });
+    const airR = sharedMat("semi-airR", 0xb0222a), airB = sharedMat("semi-airB", 0x2448a8), airY = sharedMat("semi-airY", 0xd8b020);
+    const w = S.w, hw = w / 2;
+    const sides = (f) => { f(1); f(-1); };
 
-    /* ---- 1. THE ROOM ------------------------------------------------------
-       Authored before anything it is inside of. */
+    /* ---- 1. THE ROOM (unchanged contract) ---------------------------------- */
     addHoldShell(root, {
       w: w, zFront: S.gapZ, zBack: S.tailZ, floorTop: S.floorTop, roofY: S.roofY,
       wall: S.wallT, mat: boxPaint, deckMat: deck, bulkMat: paint,
     });
-    // corrugation: vertical ribs down both flanks, which is what makes a
-    // trailer read as a trailer and not as a shipping crate
-    const ribN = 14;
-    for (let i = 0; i < ribN; i++) {
-      const rz = S.tailZ + (S.gapZ - S.tailZ) * (i + 0.5) / ribN;
-      [1, -1].forEach(function (s) {
-        addBox(root, 0.03, S.roofY - S.floorTop - 0.12, 0.11, s * (w / 2 + 0.012), (S.floorTop + S.roofY) / 2, rz, trim);
-      });
-    }
-    // skirt + underride bar: the two things that stop a trailer looking like a
-    // box on stilts, and the bar is where the tail lamps live
-    [1, -1].forEach(function (s) {
-      addBox(root, 0.05, 0.62, (S.gapZ - S.tailZ) * 0.62, s * (w / 2 - 0.03), S.floorTop - 0.42, S.tailZ + (S.gapZ - S.tailZ) * 0.46, trim);
-    });
-    addBox(root, w * 0.92, 0.14, 0.10, 0, 0.42, S.tailZ - 0.16, trim);
-    [1, -1].forEach(function (s) {
-      addBox(root, 0.10, 0.46, 0.10, s * (w * 0.40), 0.66, S.tailZ - 0.14, trim);
-    });
-    // mudflaps behind the bogie
-    [1, -1].forEach(function (s) {
-      addBox(root, 0.42, 0.44, 0.03, s * (w * 0.36), 0.28, S.tailZ + 1.30, trim);
-    });
-    // roof rail + three clearance markers across the trailer's leading edge
-    const marker = sharedMat("semi-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 });
-    [-0.34, 0, 0.34].forEach(function (fx) {
-      addBox(root, 0.13, 0.06, 0.10, fx * w, S.boxTop + 0.04, S.gapZ - 0.14, marker);
-    });
 
-    /* ---- 2. THE TAILGATE (the door AND the ramp) --------------------------- */
+    /* ---- 2. THE TRAILER SKIN ---------------------------------------------- */
+    const tL = S.gapZ - S.tailZ, tMid = (S.gapZ + S.tailZ) / 2;
+    sides(function (s) {
+      // aluminium side posts (a dry van's panels hang between them)
+      const posts = 17;
+      for (let i = 1; i < posts; i++) {
+        const z = S.tailZ + tL * i / posts;
+        RBX(root, alu, s * hw, s * (hw + 0.02), S.floorTop + 0.07, S.roofY - 0.05, z - 0.035, z + 0.035, 0.008);
+      }
+      // top and bottom rails
+      RBX(root, alu, s * (hw - 0.02), s * (hw + 0.03), S.roofY - 0.07, S.boxTop + 0.015, S.tailZ - 0.02, S.gapZ + 0.02, 0.015);
+      RBX(root, alu, s * (hw - 0.02), s * (hw + 0.03), S.floorTop - 0.17, S.floorTop + 0.08, S.tailZ - 0.02, S.gapZ + 0.02, 0.015);
+      // front and rear corner posts
+      RBX(root, alu, s * (hw - 0.05), s * (hw + 0.035), S.floorTop - 0.17, S.boxTop + 0.02, S.gapZ - 0.07, S.gapZ + 0.03, 0.02);
+      RBX(root, alu, s * (hw - 0.10), s * (hw + 0.035), S.floorTop - 0.17, S.boxTop + 0.025, S.tailZ - 0.07, S.tailZ + 0.10, 0.02);
+      // conspicuity tape down the bottom rail: 0.3 m red / 0.3 m white
+      const seg = 0.3, n = Math.floor((tL - 0.4) / seg);
+      for (let i = 0; i < n; i++) {
+        const z0 = S.tailZ + 0.2 + i * seg;
+        RBX(root, i % 2 ? tapeW : tapeR, s * (hw + 0.03), s * (hw + 0.036), S.floorTop - 0.10, S.floorTop + 0.0, z0, z0 + seg - 0.004, 0.002);
+      }
+      // tape up the rear corner posts (the 'L' a trailer wears at night)
+      for (let i = 0; i < 4; i++) {
+        const y0 = S.floorTop + 0.05 + i * 0.3;
+        RBX(root, i % 2 ? tapeW : tapeR, s * (hw - 0.09), s * (hw + 0.025), y0, y0 + 0.29, S.tailZ - 0.076, S.tailZ - 0.07, 0.002);
+      }
+      RBX(root, tapeR, s * (hw - 0.6), s * (hw - 0.09), S.boxTop - 0.08, S.boxTop - 0.0, S.tailZ - 0.076, S.tailZ - 0.07, 0.002);
+      // side skirt (aero), split ahead of the bogie
+      RBX(root, skirtM, s * (hw - 0.06), s * (hw - 0.03), S.floorTop - 0.70, S.floorTop - 0.18, S.tailZ + 3.3, S.gapZ - 1.9, 0.01);
+      // bogie: slider rails, hangers over each axle, mud flaps
+      RBX(root, trim, s * 0.40, s * 0.52, 0.70, 0.84, S.tailZ + 0.6, S.tailZ + 3.1, 0.01);
+      [S.tailZ + 1.15, S.tailZ + 2.55].forEach(function (az) {
+        RBX(root, trim, s * 0.42, s * 0.54, 0.40, 0.80, az - 0.10, az + 0.10, 0.02);
+        CYLX(root, trim, 0.11, 0.18, s * 0.47, 0.74, az - 0.32, "y", 12);     // air spring
+      });
+      RBX(root, rubber, s * 0.62, s * 1.20, 0.10, 0.62, S.tailZ + 0.56, S.tailZ + 0.59, 0.01);
+      // landing gear: square leg, sand shoe, cross brace
+      const lz = S.gapZ - 1.35;
+      RBX(root, trim, s * 0.66, s * 0.80, 0.16, S.floorTop - 0.12, lz - 0.07, lz + 0.07, 0.01);
+      RBX(root, trim, s * 0.60, s * 0.86, 0.0, 0.06, lz - 0.14, lz + 0.14, 0.01);
+      barBetween(root, trim, [s * 0.73, 0.45, lz], [s * 0.45, S.floorTop - 0.14, lz + 0.55], 0.05, 0.05);
+    });
+    // crank on the curb side
+    rodBetween(root, chrome, [-0.80, 0.62, S.gapZ - 1.35], [-1.08, 0.62, S.gapZ - 1.35], 0.012);
+    rodBetween(root, chrome, [-1.08, 0.62, S.gapZ - 1.35], [-1.08, 0.48, S.gapZ - 1.30], 0.012);
+    barBetween(root, trim, [-0.73, 0.45, S.gapZ - 1.35], [0.73, 0.45, S.gapZ - 1.35], 0.05, 0.05);
+    // crossmembers under the deck
+    for (let z = S.gapZ - 0.9; z > S.tailZ + 3.2; z -= 1.1) RBX(root, trim, -hw + 0.12, hw - 0.12, 0.74, 0.84, z - 0.04, z + 0.04, 0.005);
+    // the rear: header, a lamp panel under the sill, round tails, the taped ICC guard
+    RBX(root, alu, -hw, hw, S.roofY + 0.005, S.boxTop + 0.03, S.tailZ - 0.07, S.tailZ + 0.05, 0.015);
+    RBX(root, trim, -hw + 0.06, hw - 0.06, 0.60, 0.83, S.tailZ - 0.02, S.tailZ + 0.30, 0.01);
+    sides(function (s) {
+      [1.02, 0.86].forEach(function (x) { CYLX(root, tail, 0.065, 0.03, s * x, 0.715, S.tailZ - 0.03, "z", 16); });
+      CYLX(root, marker, 0.05, 0.03, s * 0.70, 0.715, S.tailZ - 0.03, "z", 14);
+      RBX(root, trim, s * 0.86, s * 0.96, 0.44, 0.62, S.tailZ - 0.16, S.tailZ + 0.20, 0.01);   // guard struts
+    });
+    [-0.12, 0, 0.12].forEach(function (x) { CYLX(root, tail, 0.03, 0.03, x, 0.79, S.tailZ - 0.03, "z", 10); });  // ID bar
+    RBX(root, trim, -hw * 0.92, hw * 0.92, 0.38, 0.52, S.tailZ - 0.22, S.tailZ - 0.10, 0.015);
+    for (let i = 0; i < 8; i++) {
+      const x0 = -hw * 0.9 + i * (hw * 1.8 / 8);
+      RBX(root, i % 2 ? tapeW : tapeR, x0, x0 + hw * 1.8 / 8 - 0.004, 0.40, 0.50, S.tailZ - 0.226, S.tailZ - 0.22, 0.002);
+    }
+    // clearance markers across the trailer's leading edge + the glad-hand box
+    [-0.34, 0, 0.34].forEach(function (fx) { RBX(root, marker, fx * w - 0.06, fx * w + 0.06, S.boxTop + 0.01, S.boxTop + 0.07, S.gapZ - 0.2, S.gapZ - 0.08, 0.01); });
+    RBX(root, trim, -0.24, 0.24, 1.00, 1.24, S.gapZ - 0.01, S.gapZ + 0.05, 0.01);
+
+    /* ---- 3. THE TAILGATE (the door AND the ramp; unchanged contract) ------- */
     addTailgate(root, "semi_tailgate", {
       w: S.holdW, len: S.leaf, sillZ: S.tailZ, sillTop: S.floorTop,
       closedRx: S.closedRx, mat: deck, ribMat: chrome, trimMat: trim, leafT: 0.09,
     });
 
-    /* ---- 3. THE TRACTOR ---------------------------------------------------
-       A conventional long-nose: bumper, bonnet, a day cab with a flat roof and
-       a wind fairing, twin stacks, and a catwalk over the fifth wheel. The
-       fifth-wheel GAP between cab and trailer is what reads as articulation
-       even though the group is rigid — leave it out and this is a bus. */
-    const cabF = 5.55, cabRoof = S.cabRoofY, frameY = 0.78;
-    // chassis rails, cab to bogie, so the truck has something to be built on
-    [1, -1].forEach(function (s) {
-      addBox(root, 0.14, 0.26, S.len * 0.82, s * (w * 0.28), frameY - 0.10, -0.4, trim);
+    /* ---- 4. THE TRACTOR ---------------------------------------------------- */
+    const T = {
+      cabB: 3.45, cabF: 5.0, cabX: 1.08, floor: 1.02, belt: 2.04, roof: 3.13, roofF: 4.82,
+      hoodF: 6.86, steerZ: 6.15, driveZ: 2.95, R: S.wheelR,
+    };
+    // frame rails + crossmembers (top at 0.80, under the trailer's deck)
+    sides(function (s) { RBX(root, trim, s * 0.40, s * 0.50, 0.56, 0.80, 0.6, 6.96, 0.01); });
+    [6.6, 5.2, 3.9, 1.2].forEach(function (z) { RBX(root, trim, -0.40, 0.40, 0.60, 0.76, z - 0.05, z + 0.05, 0.005); });
+    // the fifth wheel and the deck plate behind the cab
+    CYLX(root, trim, 0.42, 0.04, 0, 0.82, 2.0, "y", 24);
+    RBX(root, deck, -0.56, 0.56, 0.80, 0.84, 2.42, T.cabB - 0.02, 0.005);
+    // bumper, valance, front plate
+    RBX(root, chrome, -1.22, 1.22, 0.50, 0.86, 6.98, 7.24, 0.07);
+    RBX(root, trim, -0.95, 0.95, 0.46, 0.52, 6.96, 7.16, 0.01);
+    putMesh(root, boxGeo(0.31, 0.155, 0.012), plateMat(), 0, 0.67, 7.247);
+    RBX(root, trim, -0.58, 0.58, 0.84, 0.96, 6.78, 6.99, 0.01);
+    // the grille: chrome surround, dark core, vertical bars, the badge
+    RBX(root, chrome, -0.58, 0.58, 0.92, 2.01, 6.80, 7.02, 0.05);
+    RBX(root, trim, -0.50, 0.50, 0.99, 1.93, 6.82, 7.03, 0.01);
+    for (let i = 0; i < 13; i++) {
+      const x = -0.46 + i * (0.92 / 12);
+      RBX(root, chrome, x - 0.014, x + 0.014, 1.0, 1.92, 7.0, 7.045, 0.006);
+    }
+    RBX(root, chrome, -0.50, 0.50, 1.40, 1.44, 7.0, 7.05, 0.01);
+    RBX(root, trim, -0.15, 0.15, 1.95, 2.06, 6.98, 7.05, 0.03);
+    RBX(root, chrome, -0.12, 0.12, 1.97, 2.04, 7.0, 7.058, 0.02);
+    // the hood: crowned, flat-sided, tapering to the grille
+    const hoodRing = (z, top, hwh) => ({ z: z, y: (top + 0.92) / 2, hw: hwh, hh: (top - 0.92) / 2, pt: 5, pb: 14 });
+    addLoft(root, paint, [hoodRing(T.cabF - 0.04, 2.04, 0.64), hoodRing(5.7, 2.035, 0.635), hoodRing(6.5, 2.02, 0.61), hoodRing(T.hoodF, 2.0, 0.585)], 28);
+    sides(function (s) {
+      for (let i = 0; i < 5; i++) {                       // hood-side louvres
+        const z = 6.0 + i * 0.1;
+        RBX(root, trim, s * 0.606, s * 0.625, 1.52, 1.84, z - 0.022, z + 0.022, 0.006);
+      }
+      RBX(root, chrome, s * 0.60, s * 0.64, 1.10, 1.16, 5.1, 6.7, 0.01);   // hood-side trim strip
     });
-    // fifth-wheel plate + catwalk under the trailer nose
-    addBox(root, w * 0.72, 0.12, 1.30, 0, frameY + 0.10, S.gapZ + 0.55, trim);
-    addBox(root, w * 0.86, 0.06, 0.70, 0, frameY + 0.22, S.cabBackZ + 0.32, deck);
-    // the cab: a prism so the roof rakes forward into the windscreen instead of
-    // sitting on it as a lid
-    addPrism(root, w * 0.97, [
-      [S.cabBackZ, 0], [S.cabBackZ, cabRoof - frameY],
-      [cabF - 0.42, cabRoof - frameY], [cabF - 0.06, cabRoof - frameY - 1.02],
-      [cabF, cabRoof - frameY - 1.18], [cabF, 0],
-    ], frameY, paint);
-    // the bonnet: a long sloped hood forward of the screen, the whole point of
-    // a conventional tractor's silhouette
-    addPrism(root, w * 0.88, [
-      [cabF, 0], [cabF, 1.32],
-      [S.noseZ - 0.62, 1.16], [S.noseZ - 0.12, 0.98], [S.noseZ - 0.12, 0],
-    ], frameY, paint);
-    // windscreen, lying ON the cab's own rake plane (a vertical slab here pokes
-    // through the prism — the van's own orbit-diagnosed bug, not repeated)
+    // fenders over the steer wheels, the well liners under them
+    sides(function (s) {
+      addArc(root, paint, 0.60, 0.62, 0.05, -0.06, Math.PI + 0.26, s * 0.92, T.R, T.steerZ, 24);
+      addArc(root, trim, 0.57, 0.50, 0.02, 0.05, Math.PI, s * 0.88, T.R, T.steerZ, 18);
+      // headlamp pods on the fender crowns, twin rectangular lenses
+      RBX(root, chrome, s * 0.72, s * 1.10, 1.02, 1.25, 6.40, 6.64, 0.04);
+      RBX(root, trim, s * 0.75, s * 1.07, 1.05, 1.22, 6.60, 6.655, 0.01);
+      [[0.77, 0.90], [0.92, 1.05]].forEach(function (xr) { RBX(root, head, s * xr[0], s * xr[1], 1.07, 1.20, 6.62, 6.67, 0.02); });
+      RBX(root, marker, s * 1.10, s * 1.13, 1.06, 1.16, 6.44, 6.60, 0.01);
+      // cylinder air cleaner on the cowl, with its band and elbow into the hood
+      CYLX(root, chrome, 0.17, 0.86, s * 0.84, 1.48, 5.24, "y", 22);
+      CYLX(root, chrome, 0.185, 0.05, s * 0.84, 1.93, 5.24, "y", 22);
+      CYLX(root, trim, 0.176, 0.06, s * 0.84, 1.28, 5.24, "y", 22);
+      rodBetween(root, chrome, [s * 0.84, 1.76, 5.24], [s * 0.60, 1.76, 5.24], 0.075, 0.075, 14);
+      // hood mirror on the fender
+      rodBetween(root, chrome, [s * 1.0, 1.15, 5.9], [s * 1.18, 1.52, 5.95], 0.012);
+      CYLX(root, chrome, 0.075, 0.04, s * 1.19, 1.58, 5.95, "z", 14);
+    });
+
+    // the cab: lower tub, roof, rear wall, pillars, glass
+    RBX(root, paint, -T.cabX, T.cabX, T.floor, T.belt, T.cabB, T.cabF, 0.07);
+    RBX(root, paint, -T.cabX + 0.01, T.cabX - 0.01, 2.92, T.roof, T.cabB, T.roofF, 0.09);
+    RBX(root, paint, -T.cabX, T.cabX, T.belt - 0.04, 2.96, T.cabB, T.cabB + 0.11, 0.03);
+    RBX(root, glass, -0.42, 0.42, 2.32, 2.76, T.cabB - 0.012, T.cabB + 0.004, 0.01);
+    sides(function (s) {
+      RBX(root, paint, s * (T.cabX - 0.08), s * T.cabX, T.belt - 0.04, 2.96, T.cabB, 3.72, 0.02);       // panel behind the door glass
+      RBX(root, paint, s * (T.cabX - 0.08), s * T.cabX, 2.86, 2.96, T.cabB, T.roofF, 0.02);            // door header
+      RBX(root, paint, s * (T.cabX - 0.08), s * T.cabX, T.belt - 0.04, 2.9, 4.66, 4.72, 0.01);         // vent post
+      RBX(root, glass, s * (T.cabX - 0.03), s * (T.cabX - 0.012), T.belt + 0.01, 2.87, 3.72, 4.67, 0.01);
+      RBX(root, glass, s * (T.cabX - 0.03), s * (T.cabX - 0.012), T.belt + 0.01, 2.78, 4.71, 4.86, 0.01);
+      barBetween(root, paint, [s * (T.cabX - 0.05), T.belt - 0.02, T.cabF - 0.02], [s * (T.cabX - 0.05), 2.95, T.roofF - 0.02], 0.10, 0.10);
+      // door shut lines, handle, grab handles, cab marker
+      RBX(root, trim, s * (T.cabX - 0.002), s * (T.cabX + 0.006), T.floor + 0.05, T.belt - 0.02, 3.70, 3.715, 0.002);
+      RBX(root, trim, s * (T.cabX - 0.002), s * (T.cabX + 0.006), T.floor + 0.05, T.belt - 0.02, 4.695, 4.71, 0.002);
+      RBX(root, trim, s * (T.cabX - 0.002), s * (T.cabX + 0.006), T.floor + 0.05, T.floor + 0.065, 3.70, 4.71, 0.002);
+      RBX(root, chrome, s * T.cabX, s * (T.cabX + 0.025), 1.82, 1.87, 3.78, 3.98, 0.01);
+      rodBetween(root, chrome, [s * (T.cabX + 0.05), 1.25, 4.86], [s * (T.cabX + 0.05), 2.45, 4.86], 0.018);
+      rodBetween(root, chrome, [s * (T.cabX + 0.05), 1.25, 3.55], [s * (T.cabX + 0.05), 2.30, 3.55], 0.018);
+      RBX(root, marker, s * T.cabX, s * (T.cabX + 0.02), 1.90, 1.97, 4.88, 4.97, 0.01);
+      // steps ahead of the tank
+      RBX(root, deck, s * 0.88, s * 1.12, 0.54, 0.58, 4.54, 4.92, 0.01);
+      RBX(root, deck, s * 0.90, s * 1.10, 0.82, 0.86, 4.56, 4.90, 0.01);
+      RBX(root, trim, s * 0.86, s * 0.90, 0.52, 1.0, 4.56, 4.90, 0.01);
+      // saddle tank with straps, filler cap and a tread plate on top
+      CYLX(root, chrome, 0.30, 1.0, s * 0.82, 0.70, 3.98, "z", 26);
+      [3.70, 4.26].forEach(function (z) { CYLX(root, trim, 0.313, 0.05, s * 0.82, 0.70, z, "z", 26); });
+      CYLX(root, chrome, 0.055, 0.04, s * 0.92, 0.99, 4.36, "y", 12);
+      RBX(root, deck, s * 0.66, s * 0.96, 0.985, 1.005, 3.74, 4.20, 0.005);
+      // exhaust stack, its heat shield, elbow and the bracket to the cab
+      CYLX(root, chrome, 0.075, 2.72, s * 0.97, 2.36, 3.30, "y", 16);
+      CYLX(root, trim, 0.082, 0.05, s * 0.97, 3.70, 3.30, "y", 16);
+      CYLX(root, alu, 0.095, 0.95, s * 0.97, 1.80, 3.30, "y", 16);
+      rodBetween(root, chrome, [s * 0.97, 1.02, 3.30], [s * 0.52, 0.74, 3.30], 0.07, 0.07, 12);
+      RBX(root, trim, s * 0.97, s * 1.0, 2.55, 2.62, 3.30, T.cabB + 0.01, 0.01);
+      // west-coast mirror on two tube arms, convex spot under it
+      rodBetween(root, chrome, [s * T.cabX, 2.62, 4.76], [s * 1.40, 2.62, 4.80], 0.016);
+      rodBetween(root, chrome, [s * T.cabX, 2.10, 4.76], [s * 1.40, 2.06, 4.80], 0.016);
+      rodBetween(root, chrome, [s * 1.40, 2.0, 4.80], [s * 1.40, 2.68, 4.80], 0.016);
+      RBX(root, chrome, s * 1.37, s * 1.47, 2.12, 2.58, 4.74, 4.86, 0.03);
+      RBX(root, trim, s * 1.38, s * 1.46, 2.15, 2.55, 4.733, 4.745, 0.004);
+      CYLX(root, chrome, 0.08, 0.05, s * 1.43, 1.96, 4.80, "z", 16);
+      // air horn on the roof
+      CYLX(root, chrome, 0.07, 0.52, s * 0.26, T.roof + 0.07, 4.25, "z", 12, 0.03);
+      RBX(root, trim, s * 0.22, s * 0.30, T.roof - 0.01, T.roof + 0.04, 4.10, 4.30, 0.01);
+      // drive-axle quarter fender + mud flap
+      addArc(root, rubber, 0.60, 0.64, 0.025, Math.PI * 0.42, Math.PI * 1.02, s * 0.92, T.R, T.driveZ, 14);
+      RBX(root, rubber, s * 0.62, s * 1.22, 0.14, 0.62, 2.28, 2.31, 0.01);
+    });
+    // the split raked windscreen and its centre post
     (function () {
-      const botZ = cabF - 0.06, botY = frameY + cabRoof - frameY - 1.18 + 0.16;
-      const topZ = cabF - 0.42, topY = frameY + cabRoof - frameY - 0.04;
-      const dz = topZ - botZ, dy = topY - botY, fl = Math.hypot(dz, dy);
-      const nz = dy / fl, ny = -dz / fl;
-      const m = new THREE.Mesh(boxGeo(w * 0.80, fl * 0.96, 0.03), dark);
-      m.position.set(0, (botY + topY) * 0.5 + ny * 0.02, (botZ + topZ) * 0.5 + nz * 0.02);
-      m.rotation.x = Math.atan2(dz, dy);
-      root.add(m);
+      const zb = T.cabF - 0.02, yb = T.belt, zt = T.roofF - 0.02, yt = 2.93;
+      const fl = Math.hypot(zt - zb, yt - yb), ang = Math.atan2(zb - zt, yt - yb);
+      sides(function (s) {
+        const m = putMesh(root, rboxGeo(0.95, fl * 0.97, 0.016, 0.006), glass, s * 0.50, (yb + yt) / 2, (zb + zt) / 2 + 0.004);
+        m.rotation.x = -ang;
+      });
+      barBetween(root, paint, [0, yb, zb], [0, yt, zt], 0.07, 0.05);
     })();
-    const beltY = frameY + 1.28;
-    [1, -1].forEach(function (s) {
-      // door glass, sill to header
-      addBox(root, 0.03, cabRoof - beltY - 0.22, 1.28, s * (w * 0.478), (beltY + cabRoof) * 0.5 - 0.06, S.cabBackZ + 0.92, dark);
-      // door cut + grab handle
-      addBox(root, 0.03, cabRoof - frameY - 0.30, 0.04, s * (w * 0.492), frameY + (cabRoof - frameY) * 0.5, S.cabBackZ + 0.08, trim);
-      addBox(root, 0.06, 0.07, 0.30, s * (w * 0.50), beltY - 0.22, S.cabBackZ + 0.55, chrome);
-      // west-coast mirror on a bracket, out where a truck's mirror lives
-      addBox(root, 0.05, 0.82, 0.05, s * (w * 0.56), beltY + 0.28, cabF - 0.30, trim);
-      addBox(root, 0.05, 0.62, 0.22, s * (w * 0.585), beltY + 0.30, cabF - 0.30, chrome);
-      // EXHAUST STACK — vertical chrome behind the cab, the identity cue
-      addBox(root, 0.15, 2.05, 0.15, s * (w * 0.44), frameY + 1.05, S.cabBackZ + 0.14, chrome);
-      // fuel tank, chrome cylinder-ish, under the door
-      addBox(root, 0.34, 0.56, 1.50, s * (w * 0.40), frameY - 0.22, S.cabBackZ + 0.70, chrome);
-      // step into the cab
-      addBox(root, 0.42, 0.05, 0.34, s * (w * 0.38), frameY - 0.56, S.cabBackZ + 0.72, trim);
+    // sun visor with five cab markers on its lip
+    RBX(root, paint, -1.04, 1.04, 2.99, 3.05, T.roofF - 0.04, 5.10, 0.02);
+    [-0.6, -0.3, 0, 0.3, 0.6].forEach(function (x) { RBX(root, marker, x - 0.05, x + 0.05, 2.985, 3.035, 5.08, 5.12, 0.01); });
+    // air + electrical lines from the back of the cab to the trailer nose
+    [[0.12, airR], [0.0, airB], [-0.12, airY]].forEach(function (a) {
+      rodBetween(root, a[1], [a[0], 2.45, T.cabB - 0.01], [a[0] * 1.4, 1.65, 2.95], 0.014);
+      rodBetween(root, a[1], [a[0] * 1.4, 1.65, 2.95], [a[0] * 1.6, 1.12, S.gapZ + 0.05], 0.014);
     });
-    // grille + bumper + air dam
-    addBox(root, w * 0.70, 0.86, 0.06, 0, frameY + 0.66, S.noseZ - 0.10, trim);
-    addBox(root, w * 0.99, 0.34, 0.16, 0, frameY + 0.02, S.noseZ - 0.02, chrome);
-    // roof fairing over the cab, angled back toward the trailer's leading edge
-    addPrism(root, w * 0.88, [
-      [S.cabBackZ - 0.10, 0], [S.cabBackZ - 0.10, S.boxTop - cabRoof],
-      [cabF - 0.55, 0.06], [cabF - 0.55, 0],
-    ], cabRoof, paint);
-    addLightsSemi(root, w, frameY, S);
 
-    /* ---- 4. THE CABIN, through the ONE shared solver ----------------------
-       dressCabin is what publishes cushionY / seatX / eye / wheel, which is
-       what puts the player's real dressed rig at the wheel (CAR_DRIVER_VISIBLE)
-       and what view.js reads for the first-person eye. A truck that skipped it
-       would be the fourth body style with no cabin — the exact defect
-       carCabinAudit()'s `bare` counter exists to drive to zero. */
+    /* ---- 5. THE CABIN, through the ONE shared solver ----------------------
+       dressCabin publishes cushionY / seatX / eye / wheel: what puts the
+       driver at the wheel and the first-person eye in the cab. */
     dressCabin(root, {
-      cabW: w * 0.90, zR: S.cabBackZ + 0.16, zF: cabF - 0.22,
-      zTR: S.cabBackZ + 0.18, zTF: cabF - 0.48, roofW: w * 0.84,
-      beltY: beltY, roofY: cabRoof - 0.06,
-      floorY: frameY + 0.30, rows: 1,
+      cabW: (T.cabX - 0.08) * 2, zR: T.cabB + 0.14, zF: T.cabF - 0.10,
+      zTR: T.cabB + 0.14, zTF: T.roofF - 0.06, roofW: (T.cabX - 0.1) * 2,
+      beltY: T.belt, roofY: 2.90,
+      floorY: T.floor + 0.28, rows: 1, seatLayout: "cab2",
+      doorSpans: [[3.72, 4.70]],
     });
 
-    /* ---- 5. WHEELS — six axles' worth, hand-placed ------------------------
-       addWheels() lays exactly four at ±length·0.32, which is a car's axle
-       pattern. A tractor-trailer is a steer axle, a drive TANDEM and a trailer
-       BOGIE, and the tandem is most of what makes it read as heavy. Each tire
-       is makeWheel's, so it is tagged playerWheel, spared by the static merge
-       and spun by the drive loop like every other wheel in the city. */
-    const axles = [S.noseZ - 1.55, S.cabBackZ - 0.15, S.cabBackZ - 1.55, S.tailZ + 1.15, S.tailZ + 2.55];
-    axles.forEach(function (az, ai) {
-      /* THE TRAILER BOGIE RUNS SMALLER RUBBER, AND IT IS ARITHMETIC, NOT STYLE.
-         The step-deck's floor panel spans 0.84 to 0.95; a 0.52 m tyre tops out
-         at 1.04, so on the first render the two rear axles — INCLUDING their
-         inboard duals at x ±0.77, which is well inside a 2.28 m clear width —
-         stood 9 cm through the cargo deck. The interior plate photographed
-         eight dark slabs lying on the floor of the room and they were the
-         wheels. 0.40 tops out at 0.80, under the deck, with no wheel wells to
-         draw and no change to how it sits on the road (every wheel's contact
-         patch is y = 0 either way). */
-      const trailer = ai >= 3;
-      const r = trailer ? 0.40 : wheelR;
-      const outer = ai === 0 ? w / 2 - 0.06 : w / 2 - 0.14;   // duals inboard of the steer
-      [1, -1].forEach(function (s) {
+    /* ---- 6. WHEELS ---------------------------------------------------------
+       steer, the drive axle on duals, the trailer bogie on smaller rubber
+       (0.40 m tops out at 0.80, under the deck). makeWheel's tyres are tagged
+       playerWheel: spared by the merge, spun by the drive loop. */
+    const axles = [[T.steerZ, T.R, 1.03, false], [T.driveZ, T.R, 1.08, true], [S.tailZ + 2.55, 0.40, hw - 0.14, true], [S.tailZ + 1.15, 0.40, hw - 0.14, true]];
+    axles.forEach(function (ax) {
+      const az = ax[0], r = ax[1], outer = ax[2], duals = ax[3];
+      sides(function (s) {
         const wheel = makeWheel(r, 0.30, "sixlug", 0.62);
         wheel.rotation.z = -s * Math.PI / 2;
         wheel.position.set(s * outer, r, az);
         root.add(wheel);
-        if (ai > 0) {          // DUALS: a second tire inboard on every axle but the steer
+        if (duals) {
           const twin = makeWheel(r, 0.28, "sixlug", 0.62);
           twin.rotation.z = -s * Math.PI / 2;
-          twin.position.set(s * (outer - 0.34), r, az);
+          twin.position.set(s * (outer - 0.32), r, az);
           root.add(twin);
         }
       });
-    });
-    // landing gear: the legs a trailer stands on, dropped because the tractor
-    // is permanently attached — they are down, which is what a parked rig shows
-    [1, -1].forEach(function (s) {
-      addBox(root, 0.12, S.floorTop - 0.34, 0.12, s * (w * 0.30), (S.floorTop - 0.34) / 2 + 0.10, S.gapZ - 1.35, trim);
-      addBox(root, 0.24, 0.10, 0.30, s * (w * 0.30), 0.10, S.gapZ - 1.35, trim);
+      CYLX(root, trim, 0.06, (outer - 0.3) * 2, 0, r, az, "x", 10);   // the axle
     });
 
-    /* ---- 6. THE DECLARATIONS ---------------------------------------------- */
+    /* ---- 7. THE DECLARATIONS ---------------------------------------------- */
+    root.userData.loftBody = true;           // authored closed: no hole-proofing shell (it would fill the hold)
+    // wheelbase stays the number the drive sim has always turned this truck on
     root.userData.vehicleDims = { width: w, length: S.len, height: S.boxTop, wheelbase: S.cabBackZ - S.tailZ - 1.15 };
-    root.userData.partCtx = {
-      w: w, len: S.len, style: "semi",
-      frontZ: S.noseZ, rearZ: S.tailZ,
-      baseY: frameY + 0.02, headY: frameY + 0.52, tailY: 0.66,
-      noseTopY: frameY + 1.20, bodyY: frameY, baseH: S.roofY - S.floorTop,
-      roofY: S.boxTop, roofZ: (S.gapZ + S.tailZ) / 2, roofW: w * 0.9, roofLen: (S.gapZ - S.tailZ) * 0.8,
-      paint: paint,
-    };
     /* THE HOLD DECLARATION. Plain numbers plus a NAME — nothing here is a
        THREE object, because makeProcedural's clones share userData by
-       reference and a live node stashed in it would be the template's. Every
-       coordinate is this group's own local frame, which is exactly the frame
-       CBZ.vehicleHold's contract asks for. vehicles.js hands this over; this
-       file never calls the hold API and does not need to know it exists. */
+       reference. Every coordinate is this group's own local frame, which is
+       the frame CBZ.vehicleHold's contract asks for. */
     root.userData.holdSpec = {
       id: "semi-trailer", label: "Trailer",
       floor: { x: 0, z: (S.holdFrontZ + S.tailZ) / 2, w: S.holdW, d: S.holdFrontZ - S.tailZ, top: S.floorTop },
@@ -2549,18 +2827,6 @@
       },
     };
     return root;
-  }
-
-  // headlamps low on the bonnet + marker lamps along the cab roof. Kept out of
-  // addLights() because that one places a car's lamp bar off len/2, and a
-  // conventional's lamps live on the FENDERS, ahead of a two-metre bonnet.
-  function addLightsSemi(root, w, frameY, S) {
-    const head = vmat("lightFront", 0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });
-    const tail = vmat("lightTail", 0xff3038, { emissive: 0xff2630, ei: 0.8 });
-    [1, -1].forEach(function (s) {
-      addBox(root, 0.34, 0.20, 0.06, s * (w * 0.33), frameY + 0.44, S.noseZ - 0.06, head);
-      addBox(root, 0.16, 0.34, 0.06, s * (w * 0.34), 0.72, S.tailZ - 0.20, tail);
-    });
   }
 
   /* --- THE VAN: a lofted cab-forward body wrapped round a walk-in hold. ---
@@ -2732,119 +2998,225 @@
   //     the axle line (y = wheelR) the way the real machine hangs off its
   //     spine: engine slung LOW between the axles, tank ABOVE the frame spine,
   //     tail kicked UP past the rear axle. ---
+  /* THE SUPERBIKE, rebuilt (2026-10-31, Opus 5.5). A litre-class sportbike
+     (R1 / Panigale school) at its own numbers: 1.42 m wheelbase, 0.66 m
+     wheels (120/70 front, 190/55 rear), seat 0.86 m, screen top 1.14 m,
+     24-degree rake. What was here was boxes: a slab tank, slab panels, box
+     fork legs, a box rider. What is here:
+       chassis   twin aluminium beam spars head-to-pivot, a braced swingarm
+                 to the rear axle, the chain on its sprockets, the shock
+       front     inverted fork (black stanchions, gold lowers) on two triple
+                 clamps, twin 320 mm discs with radial calipers, a mudguard
+       engine    an inline-four: crankcase, the inclined cylinder block with
+                 its fins, the cam cover, clutch and alternator covers, the
+                 radiator behind the front wheel, four headers into the
+                 collector and a stubby underslung-style side silencer
+       bodywork  lofted fairing nose with twin LED slits and the ram intake,
+                 smoked double-bubble screen, side fairings, the tank, the
+                 seat, the tail cowl kicking up to its LED tail, a hugger
+       controls  clip-ons with grips and levers, fairing mirrors, rearsets
+       rider     the same contract (a Group named moto_rider, leaned by the
+                 drive loop): a tucked rider in leathers built from real
+                 limb segments — pelvis, torso with its aero hump, thighs to
+                 the tank, shins to the pegs, arms to the bars — wearing the
+                 full-face lid from entities/headwear.js.
+     Nose +Z; the drive loop spins the two playerWheel tyres. */
   function makeMotorcycle() {
     const root = new THREE.Group();
-    const paint = roleMat("moto-paint", "paint", 0x16a0e0);
+    // the body paint: a _bodyPaint material, so recolorBody gives each bike its
+    // catalogue colour (the old roleMat was never recoloured: every bike was blue)
+    const paint = paintMat("motorcycle", 0x16a0e0, { metalness: 0.4, roughness: 0.35 });
     const black = roleMat("moto-black", "plastic", 0x101317);
+    const frameM = roleMat("moto-frame", "plastic", 0x7f878e);
+    const engineM = roleMat("moto-engine", "plastic", 0x2a2d31);
     const chrome = chromeMat();
-    const seat = roleMat("moto-seat", "interior", 0x18191c);
-    const rider = roleMat("moto-rider", "plastic", 0x20242c);
+    const gold = roleMat("moto-gold", "plastic", 0xc08624);
+    const seatM = roleMat("moto-seat", "interior", 0x18191c);
+    const leather = roleMat("moto-rider", "plastic", 0x20242c);
+    const accent = roleMat("moto-rider-acc", "plastic", 0xd0d4da);
     const glass = glassMat();
     const red = lightTailMat();
     const white = lightFrontMat();
-    const R = 0.33;                 // wheel radius (17" + rubber)
-    const wb = 0.71;                // wheelbase half-length → 1.42m total
-    const axleY = R;                // both axles sit at wheel-center height
-    // wheels: rear visibly fatter (190-section) than the front (120-section)
-    [[wb, 0.13], [-wb, 0.19]].forEach(function (p) {
+    const R = 0.33, wb = 0.71;                  // wheel radius, half wheelbase
+    const FZ = wb, RZ = -wb, AY = R;            // axles
+    // wheels: rear fatter than the front
+    [[FZ, 0.13], [RZ, 0.19]].forEach(function (p) {
       const wheel = makeWheel(R, p[1]);
       wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(0, axleY, p[0]);
+      wheel.position.set(0, AY, p[0]);
       root.add(wheel);
     });
-    // front fender hugging the tire
-    const fender = addBox(root, 0.16, 0.07, 0.52, 0, axleY + R * 0.72, wb + 0.02, paint);
-    fender.rotation.x = -0.12;
-    // RAKED FORK: twin tubes at ~24° from vertical, steering head to axle.
-    // Tube length spans head (y≈0.98) to axle (y=0.33) → ~0.72 at that angle.
-    [0.075, -0.075].forEach(function (x) {
-      const tube = addBox(root, 0.055, 0.74, 0.055, x, axleY + 0.33, wb - 0.145, chrome);
-      tube.rotation.x = 0.42;       // rake: bottom kicks FORWARD to the axle
+
+    /* ---- FRONT END: head at (z .42, y .95), 24 deg rake to the axle ---- */
+    const head = [0, 0.95, 0.43];
+    const rk = [(FZ - head[2]) / (head[1] - AY), 1];      // dz per unit drop
+    const along = (y) => head[2] + (head[1] - y) * rk[0];
+    [0.085, -0.085].forEach(function (x) {
+      rodBetween(root, black, [x, 1.0, along(1.0)], [x, 0.62, along(0.62)], 0.027, 0.027, 12);   // stanchion
+      rodBetween(root, gold, [x, 0.64, along(0.64)], [x, AY + 0.02, along(AY + 0.02)], 0.034, 0.031, 12);  // lower
+      // 320 mm disc + radial caliper
+      CYLX(root, chrome, 0.16, 0.006, x * 0.82, AY, FZ, "x", 28);
+      barBetween(root, gold, [x * 0.95, AY + 0.06, FZ - 0.15], [x * 0.95, AY + 0.17, FZ - 0.07], 0.03, 0.05, 0.01);
     });
-    // engine/gearbox: the low-slung dense mass between the axles
-    addBox(root, 0.40, 0.34, 0.62, 0, axleY + 0.04, -0.02, black);
-    // belly pan closing the fairing under the engine
-    addPrism(root, 0.42, [[0.42, 0.0], [0.42, 0.16], [-0.30, 0.16], [-0.22, 0.0]], axleY - 0.14, paint);
-    // frame spine rising from steering head back over the engine
-    const spine = addBox(root, 0.14, 0.10, 0.78, 0, axleY + 0.42, 0.22, black);
-    spine.rotation.x = -0.10;
-    // TANK: peak just behind the steering head, spilling back toward the seat
-    addPrism(root, 0.40, [[0.44, 0.02], [0.34, 0.34], [0.02, 0.30], [-0.14, 0.04]], axleY + 0.36, paint);
-    // seat dished BELOW the tank peak…
-    addBox(root, 0.30, 0.08, 0.42, 0, axleY + 0.50, -0.34, seat);
-    // …and the tail cowl kicking UP and back over the rear wheel
-    addPrism(root, 0.28, [[-0.30, 0.0], [-0.42, 0.22], [-0.86, 0.30], [-0.78, 0.10]], axleY + 0.50, paint);
-    addBox(root, 0.22, 0.10, 0.05, 0, axleY + 0.72, -1.10, red);      // LED tail strip in the cowl tip
-    // SWINGARM: from the engine back to the rear axle (the old draft's rear
-    // wheel floated unconnected), plus a chain-side detail plate
-    const swing = addBox(root, 0.30, 0.09, 0.62, 0, axleY + 0.01, -0.42, black);
-    swing.rotation.x = 0.06;
-    addBox(root, 0.03, 0.10, 0.46, 0.14, axleY, -0.44, black);        // chain guard
-    // EXHAUST: header sweeping under the engine into a fat side can, tipped up
-    const can = addBox(root, 0.13, 0.13, 0.52, 0.20, axleY + 0.16, -0.62, chrome);
-    can.rotation.x = -0.20;
-    // header plumbing that actually CONNECTS head → belly → can (the can used
-    // to float beside the engine with no pipework), plus a dark tip outlet
-    const header = addBox(root, 0.075, 0.075, 0.34, 0.16, axleY - 0.02, 0.18, chrome);   // downpipe off the cylinder head
-    header.rotation.x = -0.85;
-    const link = addBox(root, 0.075, 0.075, 0.56, 0.185, axleY + 0.03, -0.15, chrome);   // link pipe under the engine
-    link.rotation.x = 0.69;
-    const tip = addBox(root, 0.105, 0.105, 0.05, 0.20, axleY + 0.11, -0.885, black);     // exhaust outlet
-    tip.rotation.x = -0.20;
-    // NOSE FAIRING wrapping the steering head: painted wedge + twin lamps + screen
-    addPrism(root, 0.38, [[wb + 0.10, 0.28], [wb - 0.10, 0.62], [wb - 0.42, 0.56], [wb - 0.30, 0.20]], axleY + 0.16, paint);
-    addBox(root, 0.32, 0.14, 0.035, 0, axleY + 0.655, wb + 0.03, black);    // dark bezel panel: lamps read as lenses set in it
-    [0.09, -0.09].forEach(function (x) {
-      addBox(root, 0.10, 0.09, 0.05, x, axleY + 0.66, wb + 0.055, white);   // twin projector lamps
+    CYLX(root, chrome, 0.02, 0.24, 0, AY, FZ, "x", 8);                     // axle
+    RBX(root, frameM, -0.13, 0.13, 0.98, 1.02, along(1.0) - 0.06, along(1.0) + 0.06, 0.02);   // top clamp
+    RBX(root, frameM, -0.13, 0.13, 0.86, 0.90, along(0.88) - 0.06, along(0.88) + 0.06, 0.02); // bottom clamp
+    addArc(root, paint, R + 0.03, 0.13, 0.012, 0.35, 1.85, 0, AY, FZ, 14);  // front mudguard
+
+    /* ---- CHASSIS ---- */
+    const pivot = [0, 0.44, -0.22];
+    [0.15, -0.15].forEach(function (x) {
+      barBetween(root, frameM, [x * 0.55, 0.93, 0.40], [x, 0.80, 0.05], 0.05, 0.13, 0.02);      // beam spar (head to tank)
+      barBetween(root, frameM, [x, 0.80, 0.05], [x, pivot[1] + 0.02, pivot[2]], 0.05, 0.13, 0.02);   // down to the pivot
+      barBetween(root, frameM, [x * 0.92, pivot[1], pivot[2]], [x * 0.85, AY, RZ], 0.045, 0.10, 0.02); // swingarm
     });
-    const screen = addBox(root, 0.30, 0.24, 0.03, 0, axleY + 0.86, wb - 0.28, glass);
-    screen.rotation.x = 0.62;       // double-bubble screen laid back over the clocks
-    // clip-on bars BELOW the tank line (racing posture), bar-end mirrors
-    [0.19, -0.19].forEach(function (x) {
-      const bar = addBox(root, 0.16, 0.035, 0.035, x, axleY + 0.60, wb - 0.20, black);
-      bar.rotation.y = x > 0 ? -0.35 : 0.35;
-      addBox(root, 0.07, 0.04, 0.02, x * 1.35, axleY + 0.70, wb - 0.24, black);  // mirror
+    barBetween(root, frameM, [-0.14, 0.40, -0.40], [0.14, 0.40, -0.40], 0.04, 0.05, 0.01);        // swingarm brace
+    CYLX(root, chrome, 0.02, 0.30, 0, AY, RZ, "x", 8);
+    // chain run + sprockets (left side), rear disc + caliper (right)
+    CYLX(root, engineM, 0.105, 0.012, 0.135, AY, RZ, "x", 22);
+    CYLX(root, engineM, 0.045, 0.02, 0.125, 0.42, -0.12, "x", 14);
+    barBetween(root, black, [0.13, 0.46, -0.12], [0.135, AY + 0.10, RZ], 0.012, 0.012, 0.004);
+    barBetween(root, black, [0.13, 0.38, -0.12], [0.135, AY - 0.10, RZ], 0.012, 0.012, 0.004);
+    CYLX(root, chrome, 0.11, 0.006, -0.11, AY, RZ, "x", 22);
+    RBX(root, black, -0.13, -0.10, AY + 0.04, AY + 0.12, RZ + 0.06, RZ + 0.14, 0.01);
+    rodBetween(root, gold, [0, 0.50, -0.30], [0, 0.78, -0.18], 0.028, 0.028, 10);                  // shock
+    CYLX(root, chrome, 0.045, 0.12, 0, 0.62, -0.25, "y", 12);
+
+    /* ---- ENGINE: inline four ---- */
+    RBX(root, engineM, -0.17, 0.17, 0.22, 0.50, -0.20, 0.24, 0.05);                               // crankcase
+    const blk = putMesh(root, rboxGeo(0.34, 0.26, 0.20, 0.03), engineM, 0, 0.62, 0.20);          // cylinder block, leaning forward
+    blk.rotation.x = 0.55;
+    for (let i = 0; i < 4; i++) {                                                                   // fins
+      const f = putMesh(root, rboxGeo(0.36, 0.012, 0.22, 0.004), black, 0, 0.54 + i * 0.045, 0.24 + i * 0.024);
+      f.rotation.x = 0.55;
+    }
+    const cam = putMesh(root, rboxGeo(0.30, 0.06, 0.18, 0.025), frameM, 0, 0.77, 0.31);           // cam cover
+    cam.rotation.x = 0.55;
+    CYLX(root, frameM, 0.11, 0.03, -0.185, 0.37, -0.02, "x", 22);                                  // clutch cover
+    CYLX(root, frameM, 0.08, 0.03, 0.185, 0.36, 0.06, "x", 20);                                    // alternator cover
+    const rad = putMesh(root, rboxGeo(0.40, 0.30, 0.05, 0.015), black, 0, 0.66, 0.36);             // radiator
+    rad.rotation.x = -0.35;
+    // four headers down and back into the collector, the silencer out the right
+    [-0.11, -0.037, 0.037, 0.11].forEach(function (x) {
+      rodBetween(root, chrome, [x, 0.56, 0.36], [x * 0.7, 0.24, 0.30], 0.02, 0.02, 8);
+      rodBetween(root, chrome, [x * 0.7, 0.24, 0.30], [x * 0.3, 0.19, 0.02], 0.02, 0.02, 8);
     });
-    // SIDE FAIRING panels closing the mid-body (thin, tucked in at the knees)
-    [0.185, -0.185].forEach(function (x) {
-      const panel = addBox(root, 0.02, 0.30, 0.72, x, axleY + 0.22, 0.16, paint);
-      panel.rotation.z = x > 0 ? -0.10 : 0.10;   // tumblehome: panels lean in
+    RBX(root, chrome, -0.09, 0.09, 0.14, 0.24, -0.20, 0.06, 0.04);                                  // collector box
+    rodBetween(root, chrome, [0.06, 0.20, -0.18], [0.20, 0.36, -0.40], 0.035, 0.035, 10);
+    rodBetween(root, chrome, [0.20, 0.38, -0.40], [0.22, 0.52, -0.70], 0.07, 0.06, 18);              // silencer
+    rodBetween(root, black, [0.22, 0.52, -0.70], [0.222, 0.53, -0.73], 0.045, 0.045, 14);          // carbon tip
+
+    /* ---- BODYWORK (lofted) ---- */
+    // nose fairing: from the tip back to the tank, wrapping the head
+    addLoft(root, paint, [
+      { z: 0.84, y: 0.78, hw: 0.05, hh: 0.06, p: 2.4 },
+      { z: 0.76, y: 0.80, hw: 0.15, hh: 0.13, p: 2.6 },
+      { z: 0.60, y: 0.80, hw: 0.21, hh: 0.20, p: 2.8, hhB: 0.24 },
+      { z: 0.42, y: 0.78, hw: 0.22, hh: 0.20, p: 3, hhB: 0.30 },
+    ], 22);
+    // side fairings over the engine sides, open at the bottom
+    [1, -1].forEach(function (s) {
+      addLoft(root, paint, [
+        { z: 0.44, y: 0.56, hw: 0.025, hh: 0.20, p: 3, x: s * 0.20 },
+        { z: 0.20, y: 0.52, hw: 0.025, hh: 0.24, p: 3, x: s * 0.215 },
+        { z: -0.06, y: 0.56, hw: 0.02, hh: 0.16, p: 3, x: s * 0.20 },
+      ], 12);
+      RBX(root, black, s * 0.21, s * 0.235, 0.52, 0.62, 0.06, 0.30, 0.01);     // the vent cut in the panel
     });
-    // RIDER folded onto the tank: hips over the seat, chest low, arms to the
-    // clip-ons, helmet down in the bubble — reads "pinned" not "sitting".
+    addLoft(root, paint, [                                                     // belly pan
+      { z: 0.30, y: 0.22, hw: 0.17, hh: 0.06, p: 3 },
+      { z: -0.06, y: 0.22, hw: 0.19, hh: 0.07, p: 3 },
+      { z: -0.22, y: 0.28, hw: 0.10, hh: 0.04, p: 3 },
+    ], 16);
+    // twin LED slits, the ram-air intake between them, number board
+    [0.085, -0.085].forEach(function (x) {
+      const l = putMesh(root, rboxGeo(0.09, 0.03, 0.03, 0.012), white, x, 0.82, 0.78);
+      l.rotation.y = x > 0 ? 0.35 : -0.35;
+    });
+    RBX(root, black, -0.045, 0.045, 0.70, 0.78, 0.80, 0.85, 0.02);
+    // screen
+    const scr = putMesh(root, seLoftGeo([
+      { z: 0.0, y: 0, hw: 0.15, hh: 0.008, p: 2.2 },
+      { z: 0.22, y: 0.02, hw: 0.16, hh: 0.008, p: 2.2 },
+      { z: 0.30, y: 0.0, hw: 0.13, hh: 0.008, p: 2.2 },
+    ], 16), glass, 0, 0.98, 0.45);
+    scr.rotation.x = -0.62;
+    RBX(root, black, -0.09, 0.09, 0.95, 1.02, 0.36, 0.42, 0.02);             // clocks
+    // tank
+    addLoft(root, paint, [
+      { z: 0.38, y: 0.95, hw: 0.12, hh: 0.07, p: 2.6, hhB: 0.10 },
+      { z: 0.22, y: 0.99, hw: 0.17, hh: 0.10, p: 2.8, hhB: 0.14 },
+      { z: 0.0, y: 0.97, hw: 0.17, hh: 0.10, p: 2.8, hhB: 0.14 },
+      { z: -0.14, y: 0.90, hw: 0.12, hh: 0.05, p: 2.6, hhB: 0.08 },
+    ], 22);
+    CYLX(root, chrome, 0.035, 0.012, 0, 1.095, 0.20, "y", 14);                 // filler
+    // seat, tail cowl, tail lamp, hugger
+    addLoft(root, seatM, [
+      { z: -0.10, y: 0.86, hw: 0.13, hh: 0.03, p: 3 },
+      { z: -0.40, y: 0.88, hw: 0.12, hh: 0.035, p: 3 },
+    ], 16);
+    addLoft(root, paint, [
+      { z: -0.30, y: 0.80, hw: 0.15, hh: 0.06, p: 3 },
+      { z: -0.60, y: 0.88, hw: 0.12, hh: 0.08, p: 3 },
+      { z: -0.86, y: 0.98, hw: 0.06, hh: 0.04, p: 3 },
+    ], 18);
+    RBX(root, red, -0.05, 0.05, 0.96, 1.0, -0.875, -0.86, 0.01);
+    addArc(root, black, R + 0.03, 0.20, 0.01, 0.95, 2.0, 0, AY, RZ, 12);      // hugger
+    barBetween(root, black, [0, 0.82, -0.78], [0, 0.62, -0.92], 0.05, 0.02, 0.006);   // plate hanger
+    putMesh(root, boxGeo(0.17, 0.10, 0.008), plateMat(), 0, 0.60, -0.93, 0.25, 0, 0);
+    [1, -1].forEach(function (s) { RBX(root, sharedMat("semi-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 }), s * 0.10, s * 0.14, 0.63, 0.66, -0.92, -0.88, 0.01); });
+
+    /* ---- CONTROLS ---- */
+    [1, -1].forEach(function (s) {
+      const c0 = [s * 0.11, 0.92, along(0.92)], c1 = [s * 0.30, 0.90, along(0.92) - 0.08];
+      barBetween(root, black, c0, c1, 0.03, 0.03, 0.01);                         // clip-on
+      rodBetween(root, black, [s * 0.24, 0.90, c1[2] + 0.015], [s * 0.33, 0.90, c1[2] - 0.01], 0.019, 0.019, 10);  // grip
+      barBetween(root, frameM, [s * 0.17, 0.93, c1[2] + 0.06], [s * 0.31, 0.93, c1[2] + 0.08], 0.012, 0.012, 0.004); // lever
+      rodBetween(root, black, [s * 0.19, 0.95, 0.56], [s * 0.26, 1.00, 0.54], 0.008);                 // mirror stalk
+      const mir = putMesh(root, rboxGeo(0.12, 0.06, 0.05, 0.02), paint, s * 0.29, 1.01, 0.53);
+      mir.rotation.y = s * 0.2;
+      // rearsets
+      rodBetween(root, chrome, [s * 0.15, 0.42, -0.24], [s * 0.20, 0.42, -0.24], 0.012);
+      barBetween(root, frameM, [s * 0.15, 0.42, -0.24], [s * 0.15, 0.62, -0.32], 0.02, 0.05, 0.008);
+    });
+
+    /* ---- THE RIDER: tucked, in leathers ---- */
     const r = new THREE.Group();
-    addBox(r, 0.34, 0.24, 0.40, 0, axleY + 0.58, -0.36, rider);       // hips/thighs on the seat
-    const chest = addBox(r, 0.36, 0.46, 0.26, 0, axleY + 0.84, 0.02, rider);
-    chest.rotation.x = 0.78;        // chest folded toward the tank
-    [0.20, -0.20].forEach(function (x) {
-      const arm = addBox(r, 0.09, 0.09, 0.46, x, axleY + 0.72, 0.30, rider);
-      arm.rotation.x = 0.30;
+    const lean = function (a, b, r0, r1, m) { rodBetween(r, m || leather, a, b, r0, r1, 12); };
+    const joint = function (p, rad, m) { putMesh(r, sphereGeo(rad), m || leather, p[0], p[1], p[2]); };
+    const hip = [0, 0.96, -0.30], chest = [0, 1.20, 0.02];
+    // pelvis and torso, with the aero hump on the back
+    putMesh(r, rboxGeo(0.33, 0.20, 0.28, 0.08), leather, hip[0], hip[1], hip[2]);
+    barBetween(r, leather, [0, 0.98, -0.26], chest, 0.36, 0.22, 0.09);
+    barBetween(r, accent, [0, 1.12, -0.20], [0, 1.24, -0.04], 0.16, 0.06, 0.03);
+    joint([0, 1.24, 0.08], 0.055);                                               // neck
+    [1, -1].forEach(function (s) {
+      const sh = [s * 0.19, 1.22, 0.06], el = [s * 0.25, 1.06, 0.20], gr = [s * 0.29, 0.92, along(0.92) - 0.10];
+      const kn = [s * 0.21, 0.86, 0.05], an = [s * 0.17, 0.48, -0.26];
+      joint(sh, 0.065); lean(sh, el, 0.055, 0.048); joint(el, 0.048); lean(el, gr, 0.046, 0.038);
+      joint(gr, 0.042, black);                                                   // glove
+      lean([s * 0.12, 0.96, -0.28], kn, 0.085, 0.065); joint(kn, 0.066, accent); // thigh to the tank, knee slider
+      lean(kn, an, 0.06, 0.045);
+      putMesh(r, rboxGeo(0.09, 0.10, 0.24, 0.035), black, an[0], an[1] - 0.02, an[2] + 0.05);   // boot on the peg
     });
-    // the helmet is a real full-face moto lid (entities/headwear.js, built in
-    // the adult 0.60 head frame: skull centre (0, 0.30, 0), face +z = the
-    // bike's forward) shrunk to this dummy's 0.15 head and centred where the
-    // head is. A page without headwear.js keeps the dark ball.
+    // the helmet: entities/headwear.js's full-face lid, chin down behind the screen
     const lid = CBZ.headwear && CBZ.headwear.build("moto", { color: 0x0d0f12 });
     if (lid) {
-      const k = 0.15 / 0.33;
+      const k = 0.135 / 0.33;
       lid.scale.setScalar(k);
-      lid.position.set(0, axleY + 1.02 - 0.30 * k, 0.34);
+      lid.position.set(0, 1.30 - 0.30 * k, 0.17);
+      lid.rotation.x = 0.25;
       lid.traverse(function (o) { if (o.isMesh) o.castShadow = false; });
       r.add(lid);
     } else {
-      addSphere(r, 0.15, 0, axleY + 1.02, 0.34, sharedMat("moto-helmet", 0x0d0f12, { emissive: 0x05080a, ei: 0.3 }), 1, 0.92, 1.1);
+      putMesh(r, sphereGeo(0.15), sharedMat("moto-helmet", 0x0d0f12, { emissive: 0x05080a, ei: 0.3 }), 0, 1.33, 0.18).scale.set(1, 0.92, 1.1);
     }
-    [0.17, -0.17].forEach(function (x) {
-      const shin = addBox(r, 0.09, 0.34, 0.10, x, axleY + 0.22, -0.30, rider);  // boots on the rearsets
-      shin.rotation.x = -0.5;
-    });
     r.name = "moto_rider";
     root.add(r);
     root.userData.leanRider = r;
     root.userData.vehicleDims = { width: 0.74, length: wb * 2 + 0.7, height: 1.55, wheelbase: wb * 2 };
     return root;
   }
-
   // --- light helicopter (art pass): plan-tapered fuselage pod with a glass
   //     nose bubble, engine cowl + exhaust stub, TAPERED tail boom carrying a
   //     raked fin + stabilizer, 4-blade tapered main rotor on a real hub/mast,
@@ -3496,6 +3868,8 @@
     // ONE cabin solver, mirrors and real wheels
     addBody, loftDoor, dressCabin, addMirrors, makeWheel, placeWheels, loftCtx,
     BODY: BODY,
+    // curved solids for the non-loft bodies (semi, motorcycle, CIT truck)
+    shape: SHAPE,
   };
   /* ============================================================
      CBZ.carCabinAudit() — THE RATCHET for this wave.

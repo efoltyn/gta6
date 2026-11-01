@@ -20,7 +20,7 @@
     Burger:        { value: 9,   tag: "food", heal: 42 },
     Hotdog:        { value: 6,   tag: "food", heal: 28 },
     "Pizza Slice": { value: 7,   tag: "food", heal: 34 },
-    Soda:          { value: 3,   tag: "food", heal: 12 },
+    Soda:          { value: 3,   tag: "food", heal: 12, drink: true },
     "Energy Drink":{ value: 5,   tag: "food", heal: 18, boost: true },
     Fries:         { value: 4,   tag: "food", heal: 20 },
     // REAL GROCERIES, not just counter food. The catalog carried six items,
@@ -35,7 +35,34 @@
     Bread:         { value: 3,   tag: "food", heal: 24 },
     "Canned Beans":{ value: 3,   tag: "food", heal: 22 },
     Coffee:        { value: 3,   tag: "food", heal: 8,  boost: true },
-    Water:         { value: 2,   tag: "food", heal: 6 },
+    Water:         { value: 2,   tag: "food", heal: 6, drink: true },
+    // THE SHELF CATALOG (2026-10-31). OWNER: "it should be empty shelves and
+    // then real assets, like an apple on the shelf that you can have in your
+    // inventory." A gas station, a corner store and a grocer now stock their
+    // shelves with ONLY these rows (and the ones above): every one a real
+    // model in city/itemassets.js at its real size, bought off the shelf at
+    // the till, eaten through cityEat (`heal` is the hunger it puts back).
+    // The menu's nine-row limit no longer binds them: shelved goods are
+    // bought off the shelf (storegoods.js), not out of the counter list.
+    Banana:        { value: 1,   tag: "food", heal: 12 },
+    Orange:        { value: 2,   tag: "food", heal: 10 },
+    Sandwich:      { value: 6,   tag: "food", heal: 30 },
+    "Candy Bar":   { value: 2,   tag: "food", heal: 10 },
+    Chips:         { value: 2,   tag: "food", heal: 12 },
+    "Beef Jerky":  { value: 6,   tag: "food", heal: 18 },
+    Gum:           { value: 1,   tag: "food", heal: 2 },
+    Milk:          { value: 4,   tag: "food", heal: 16, drink: true },
+    Cereal:        { value: 5,   tag: "food", heal: 26 },
+    // --- convenience goods: real things a counter sells that are not food.
+    //     `fuel` is litres a can pours into the car you are in (city/fuel.js).
+    Cigarettes:      { value: 9,  tag: "goods" },
+    Lighter:         { value: 2,  tag: "goods" },
+    "Phone Charger": { value: 15, tag: "goods" },
+    Batteries:       { value: 5,  tag: "goods" },
+    Newspaper:       { value: 2,  tag: "goods" },
+    "Duct Tape":     { value: 6,  tag: "goods" },
+    "Motor Oil":     { value: 9,  tag: "goods" },
+    "Gas Can":       { value: 25, tag: "goods", fuel: 10 },
     // --- weapons ---
     Pistol:        { value: 350,  tag: "weapon", gun: "pistol",  dmg: 34, rof: 0.32, ammo: 17 },
     Revolver:      { value: 700,  tag: "weapon", gun: "revolver",dmg: 64, rof: 0.5,  ammo: 6 },
@@ -193,6 +220,10 @@
     // do it yourself, hands on the hole for a few seconds; it does not heal
     // anything, it stops the bleeding. Cheap, and on every first-aid shelf.
     Bandage:       { value: 12,   tag: "tool", bandage: true },
+    // the shelf's first aid: a soft zip kit (less than the trauma Medkit) and a
+    // blister strip of painkillers. Both heal through the same "Patch up" verb.
+    "First Aid Kit": { value: 45, tag: "tool", medkit: 25 },
+    Painkillers:   { value: 8,    tag: "tool", medkit: 10 },
     "Body Armor":  { value: 400,  tag: "tool", armor: 60 },
     // --- B7: RESOURCES (harvested from city nodes — trees/rocks/scrap piles;
     // see systems/resources.js) + the two gathering TOOLS (bought/looted —
@@ -361,29 +392,43 @@
                   "Tailored Suit", "Velvet Blazer", "Dress Shoes", "Fur"],
     boutique:    ["Silk Shirt", "Designer Jeans", "Bomber Jacket", "Loafers", "Designer Shades", "Fedora",
                   "Tailored Suit", "Velvet Blazer", "Dress Shoes", "Fur"],
-    // exactly nine — the menu draws stock.slice(0, 9) and the keys are 1-9
-    food:        ["Burger", "Hotdog", "Pizza Slice", "Bread", "Apple", "Canned Beans", "Fries", "Soda", "Energy Drink"],
-    gas:         ["Soda", "Coffee", "Water", "Energy Drink", "Hotdog", "Ammo Box", "Burner Phone", "Bandage"],
+    // THE SHELVED TRADES. Order is the counter menu's order (it lists the
+    // first nine the shelves are NOT already standing) and the shelf planner's
+    // priority (city/storegoods.js): the hot food first (the counter warmer),
+    // the cold drinks (the cooler), then the dry goods down the bays.
+    food:        ["Burger", "Hotdog", "Pizza Slice", "Fries", "Sandwich", "Soda", "Water", "Coffee", "Energy Drink",
+                  "Bread", "Apple", "Banana", "Orange", "Canned Beans", "Chips", "Candy Bar"],
+    gas:         ["Hotdog", "Coffee", "Water", "Soda", "Energy Drink", "Milk", "Sandwich", "Chips", "Candy Bar", "Beef Jerky",
+                  "Gum", "Banana", "Apple", "Cigarettes", "Lighter", "Newspaper", "Batteries", "Phone Charger",
+                  "Motor Oil", "Gas Can", "Duct Tape", "Painkillers", "Bandage", "First Aid Kit", "Burner Phone", "Ammo Box"],
+    // the corner store / grocer (the island's grocer and newsagent, and any
+    // shell whose kind is "store"): groceries first, a little hardware last
+    store:       ["Water", "Soda", "Energy Drink", "Milk", "Bread", "Cereal", "Canned Beans", "Apple", "Banana", "Orange",
+                  "Sandwich", "Chips", "Candy Bar", "Beef Jerky", "Gum", "Coffee", "Cigarettes", "Lighter", "Newspaper",
+                  "Batteries", "Painkillers", "Bandage", "First Aid Kit", "Flashlight"],
     drugs:       ["Weed", "Pills"],
-    hardware:    ["Crowbar", "Lockpick", "Flashlight", "Bat", "Medkit", "Bandage"],
-    electronics: ["Phone", "Laptop", "Burner Phone"],
-    gym:         ["Energy Drink", "Bandage", "Medkit"],
+    hardware:    ["Crowbar", "Lockpick", "Flashlight", "Batteries", "Duct Tape", "Power Drill", "Toolbox", "Hatchet",
+                  "Pickaxe", "Bat", "Gas Can", "Motor Oil", "First Aid Kit", "Medkit", "Bandage", "Water"],
+    electronics: ["Phone", "Laptop", "Burner Phone", "Phone Charger", "Batteries", "Camera", "Game Console", "Speakers",
+                  "Boombox", "Flat TV"],
+    gym:         ["Water", "Energy Drink", "Banana", "Beef Jerky", "Bandage", "Painkillers", "Medkit"],
     barber:      ["Sunglasses", "Earrings", "Snapback", "Beanie", "Fedora", "Designer Shades"],
     // SHADES — the sunglass store. Everything it sells is a real pair of
     // glasses that goes on your face (slot "glasses"), cheapest first.
     eyewear:     ["Retro Frames", "Sunglasses", "Sport Wraps", "Aviators", "Designer Shades"],
     security:    ["Body Armor", "Ammo Box", "Pistol", "Bandage"],
     bank:        [],
-    hospital:    ["Bandage", "Medkit", "Body Armor"],
+    hospital:    ["Bandage", "Painkillers", "First Aid Kit", "Medkit", "Body Armor", "Water"],
     realtor:     [],
     chop:        [],
     casino:      [],
     raceway:     ["Energy Drink", "Bandage", "Medkit"],
-    arena:       ["Energy Drink", "Bandage", "Medkit", "Body Armor"],
-    paintball:   ["Energy Drink", "Bandage", "Medkit"],
-    transit:     ["Soda", "Hotdog", "Burner Phone"],
+    arena:       ["Hotdog", "Water", "Soda", "Energy Drink", "Chips", "Candy Bar", "Bandage", "Painkillers", "Medkit", "Body Armor"],
+    paintball:   ["Water", "Energy Drink", "Candy Bar", "Bandage", "Medkit"],
+    transit:     ["Hotdog", "Coffee", "Water", "Soda", "Energy Drink", "Sandwich", "Chips", "Candy Bar", "Gum", "Newspaper",
+                  "Phone Charger", "Burner Phone"],
     cityhall:    [],
-    airfield:    ["Body Armor", "Medkit", "Air-to-Ground Missile"],
+    airfield:    ["Body Armor", "Medkit", "Air-to-Ground Missile", "Coffee", "Water", "Sandwich", "Candy Bar", "Newspaper"],
     racepark:    [],
   };
 

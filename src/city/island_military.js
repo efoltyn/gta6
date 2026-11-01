@@ -367,6 +367,36 @@
     m.position.set(cx, 1.1, cz); m.castShadow = false; m.receiveShadow = false; root.add(m);
   }
 
+  // the checkpoint barrier: origin at the cabinet foot, the boom along +z
+  function barrierModel(ARM_L, ARM_A) {
+    const g = new THREE.Group();
+    // A REAL BARRIER (2026-10-31): a drive cabinet on a plinth with its
+    // service door and a status lamp, the boom pivoting off its side, the
+    // boom a round tube in red and white bands with a reflector at the tip
+    // and a cast counterweight on the short end. (It was a red stick, a grey
+    // box and a yellow plank.)
+    box(g, 0, 0.06, 0, 0.62, 0.12, 0.62, 0x8a8d90);                 // plinth
+    box(g, 0, 0.62, 0, 0.42, 1.0, 0.38, 0xe8e9e6);                  // drive cabinet
+    box(g, 0, 1.13, 0, 0.46, 0.04, 0.42, 0x3c4046);                 // cabinet lid
+    box(g, 0.212, 0.6, 0, 0.012, 0.7, 0.3, 0xd2d4d2, { cast: false });   // service door
+    box(g, 0, 0.84, 0.192, 0.42, 0.08, 0.012, M.red, { cast: false });  // red band
+    box(g, 0, 1.18, 0, 0.1, 0.06, 0.1, 0xff4a2a, { cast: false, matOpts: { emissive: 0xff3a1a, ei: 0.7 } }); // lamp
+    cyl(g, 0, 0.95, 0.21, 0.07, 0.07, 0.08, M.steelD, 10).rotation.x = Math.PI / 2;   // hub
+    const armG = new THREE.Group();
+    armG.position.set(0, 0.95, 0.27);
+    armG.rotation.x = -ARM_A;                  // +z end raised
+    g.add(armG);
+    const BANDS = 8;
+    for (let i = 0; i < BANDS; i++) {
+      const seg = cyl(armG, 0, 0, (i + 0.5) * ARM_L / BANDS, 0.055, 0.055, ARM_L / BANDS, i % 2 ? 0xf2f2ee : 0xc8261e, 10);
+      seg.rotation.x = Math.PI / 2;
+    }
+    box(armG, 0, 0, ARM_L - 0.04, 0.09, 0.09, 0.05, 0xff6a20, { cast: false, matOpts: { emissive: 0xff5a10, ei: 0.4 } });  // tip reflector
+    box(armG, 0, 0, -0.32, 0.22, 0.26, 0.42, 0x2a2d31);             // counterweight
+    return g;
+  }
+  CBZ.milBarrierModel = function () { return barrierModel(9.5, 1.15); };
+
   // ========================================================================
   //   CAUSEWAY — drivable bridge deck + curb colliders + the gate.
   // ========================================================================
@@ -407,14 +437,10 @@
     const gx = MAXX - 4;
     const ARM_L = 9.5, ARM_A = 1.15;            // arm length / raised angle (rad)
     function boom(px, pz, dirX, dirZ) {
-      const g = new THREE.Group();
+      const g = barrierModel(ARM_L, ARM_A);
       g.position.set(px, 0, pz);
       g.rotation.y = Math.atan2(dirX, dirZ);
       root.add(g);
-      cyl(g, 0, 0.7, 0, 0.16, 0.2, 1.4, M.red, 8);                 // pivot post
-      box(g, 0, 1.05, -0.35, 0.5, 0.7, 0.5, M.steelD);               // counterweight housing
-      const arm = box(g, 0, 0.9 + Math.sin(ARM_A) * ARM_L / 2, Math.cos(ARM_A) * ARM_L / 2, 0.16, 0.16, ARM_L, M.warn);
-      arm.rotation.x = -ARM_A;                    // +z end raised
       col(px, pz, 0.5, 0.5, 0, 1.4);
     }
     boom(gx, CW_CZ - 10.8, 0, 1);

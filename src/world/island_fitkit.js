@@ -512,8 +512,16 @@
     return f;
   }
 
-  /* ---- THE GOODS ON A SHELF (filler: what the trade's shelves hold where
-     the item itself is not for sale on its own) -------------------------- */
+  /* ---- WHAT A SHELF HOLDS --------------------------------------------------
+     NOTHING, or a real catalog item (2026-10-31; the owner: "I hate the gas
+     stations when you put fake products. It should be empty shelves and then
+     real assets"). This used to fill every board with coloured boxes, cans,
+     bottles, jars, tools, gadgets and folded stacks that no one could buy.
+     The real stock of a shop is city/storegoods.js's (each unit the item's
+     own model, bought off the shelf); a fit-out shelf stands EMPTY and clean.
+     What stays is the room's own dressing that was never merchandise: a
+     library's or an office's books and files, a tailor's bolts of cloth. */
+  const DRESSING = { books: 1, files: 1, bolts: 1 };
   const STYLE = {
     boxes:   function (r, r2) { return [0.1 + 0.18 * r, 0.12 + 0.2 * r2, 0.78]; },
     cans:    function (r, r2) { return [0.085, 0.115 + 0.02 * r2, 0.82]; },
@@ -533,6 +541,7 @@
     cards:   function (r, r2) { return [0.1, 0.05, 0.6]; },
   };
   function stock(D, Fr, a, len, n, d, yb, clr, style, pal, seed) {
+    if (!DRESSING[style]) return;
     const S = STYLE[style] || STYLE.boxes;
     pal = pal || PAL.grocery;
     let t = a - len / 2 + 0.02, i = 0;
@@ -579,7 +588,7 @@
       D.box(Fr, a, 0.015, 0.1, w, 0.03, h - 0.1, bk);
       for (let i = 0; i < 9; i++) D.box(Fr, a, 0.034, 0.25 + i * 0.24, w, 0.008, 0.012, 0x7a766e);
       D.box(Fr, a, 0.2, 0, w, 0.4, 0.1, 0x2a2c30);
-      const rows = o.rows || [0.75, 1.2, 1.65, 2.05], st = o.style || "bags", pal = o.pal || PAL.tactical;
+      const rows = o.rows || [0.75, 1.2, 1.65, 2.05], st = o.style || "bags";
       for (let r = 0; r < rows.length; r++) {
         const y = rows[r];
         let iw = 0.3, ih = 0.3, idp = 0.16, gap = 0.08;
@@ -593,9 +602,8 @@
         const step = (w - 0.1) / n;
         for (let i = 0; i < n; i++) {
           const x = a - (w - 0.1) / 2 + step * (i + 0.5);
-          const col = pick(pal, h3((o.seed | 0) + r, i, 9));
-          D.box(Fr, x, 0.06, y + 0.06, 0.012, 0.1, 0.012, 0x8a9096);       // the peg
-          D.box(Fr, x, 0.06 + idp / 2 + 0.03, y - ih + 0.08, iw, idp, ih, col, { nb: true });
+          // the peg, bare: the goods that hung here could not be bought
+          D.box(Fr, x, 0.06, y + 0.06, 0.012, 0.1, 0.012, 0x8a9096);
         }
       }
       D.box(Fr, a, 0.2, 0, w, 0.4, 1.5, 0, { solid: true, noVis: true });
@@ -643,69 +651,62 @@
       }
       D.box(Fr, a, d / 2, 0, w, d, 1.6, 0, { solid: true, noVis: true });
     },
-    // the pawnbroker's guitars, hung by the neck in a row
+    // the pawnbroker's guitar wall: the slat panel and its hangers. The box
+    // guitars that hung here could not be bought; a guitar is a real catalog
+    // model (city/itemassets.js) and a pawnbroker hangs the real ones.
     guitars: function (D, Fr, a, w, d, o) {
-      const bodies = [0x8a4a22, 0x15171b, 0xa82a2a, 0xd8b078, 0x2a4a8a, 0xe8e4da];
       D.box(Fr, a, 0.015, 0.4, w, 0.03, 2.0, 0x5a4632);
       const n = Math.max(1, Math.floor(w / 0.42)), st = w / n;
       for (let i = 0; i < n; i++) {
-        const x = a - w / 2 + st * (i + 0.5), c = pick(bodies, h3(o.seed | 0, i, 5));
-        const y = 0.75 + (i % 2) * 0.12;
-        D.box(Fr, x, 0.09, y, 0.36, 0.1, 0.3, c);                 // lower bout
-        D.box(Fr, x, 0.09, y + 0.3, 0.28, 0.1, 0.18, c);          // upper bout
-        D.box(Fr, x, 0.145, y + 0.12, 0.08, 0.012, 0.08, 0x111214); // the hole / pickup
-        D.box(Fr, x, 0.08, y + 0.48, 0.05, 0.04, 0.55, 0x3a2414);  // neck
-        D.box(Fr, x, 0.08, y + 1.03, 0.08, 0.04, 0.16, 0x1d1f23);  // headstock
+        const x = a - w / 2 + st * (i + 0.5), y = 0.75 + (i % 2) * 0.12;
         D.box(Fr, x, 0.03, y + 1.15, 0.06, 0.06, 0.03, 0x8a9096);  // the hanger
+        D.box(Fr, x, 0.06, y + 1.12, 0.012, 0.06, 0.05, 0x5a5f66);
       }
       D.box(Fr, a, 0.15, 0, w, 0.3, 1.0, 0, { solid: true, noVis: true });
     },
-    // televisions and screens on brackets, a shelf of boxed electronics under
+    // a media wall: the low cabinet and the TV brackets above it
     tvs: function (D, Fr, a, w, d, o) {
+      // (the cabinet and the wall brackets; the screens that hung on them
+      // were not for sale, and a Flat TV is a real catalog model now)
       D.box(Fr, a, d / 2, 0, w, d, 0.8, 0x2a2c30);
-      stock(D, Fr, a, w - 0.06, d / 2, d * 0.8, 0.8, 0.45, "tech", PAL.tech, (o.seed | 0) + 31);
       for (let r = 0; r < 2; r++) {
         const n = r ? 2 : 1, sw = (w - 0.1) / n;
         for (let i = 0; i < n; i++) {
-          const x = a - (w - 0.1) / 2 + sw * (i + 0.5), tw = Math.min(sw - 0.08, r ? 0.62 : 0.95), th = tw * 0.58;
-          const y = r ? 1.95 : 1.35;
-          D.box(Fr, x, 0.05, y, tw, 0.05, th, 0x15171b);
-          D.box(Fr, x, 0.077, y + 0.03, tw - 0.05, 0.004, th - 0.06, 0x1a2a3a);
+          const x = a - (w - 0.1) / 2 + sw * (i + 0.5), y = r ? 1.95 : 1.35;
+          D.box(Fr, x, 0.02, y + 0.12, 0.3, 0.04, 0.2, 0x3a3c42);          // the wall plate
+          for (const s2 of [-1, 1]) D.box(Fr, x + s2 * 0.1, 0.05, y + 0.12, 0.03, 0.05, 0.22, 0x5a5f66);
         }
       }
       D.box(Fr, a, d / 2, 0, w, d, 0.85, 0, { solid: true, noVis: true });
     },
-    // the optician's frame wall: rows of frames on a lit white panel
+    // the optician's frame wall: the lit white panel and its pegs
     frames: function (D, Fr, a, w, d, o) {
       D.box(Fr, a, 0.02, 0.85, w, 0.04, 1.6, 0xf2f0ea);
       D.box(Fr, a, 0.07, 2.45, w, 0.1, 0.06, 0xfff6e4, { glow: true });
       D.box(Fr, a, d / 2, 0, w, d, 0.85, o.base || 0x3a3a40);
       D.box(Fr, a, d / 2, 0.85, w + 0.02, d + 0.02, 0.03, 0xe8e4da);
-      const tints = [0x15171b, 0x5a3a22, 0x8a6a3a, 0x2a3a5a, 0x7a2a2a, 0xb8963e, 0x9aa0a6];
+      // the frame rails, bare (the real pairs stand on the shop's tables and
+      // boards as their own models: city/storegoods.js)
       const cols = Math.max(1, Math.floor((w - 0.1) / 0.19));
       for (let r = 0; r < 7; r++) for (let i = 0; i < cols; i++) {
         const x = a - (w - 0.1) / 2 + (w - 0.1) * (i + 0.5) / cols, y = 1.0 + r * 0.2;
-        const t = pick(tints, h3((o.seed | 0) + r, i, 11));
-        D.box(Fr, x, 0.1, y - 0.035, 0.15, 0.012, 0.016, t, { nb: true }); // brow bar
-        D.box(Fr, x, 0.098, y - 0.06, 0.14, 0.006, 0.035, 0x2a3036, { nb: true });   // the lenses
+        D.box(Fr, x, 0.05, y - 0.03, 0.012, 0.06, 0.012, 0xc8ccd2, { nb: true });   // the display peg
       }
-      stock(D, Fr, a, w - 0.1, d / 2, d * 0.6, 0.88, 0.1, "cards", [0x15171b, 0x5a3a22, 0xe8e4da], (o.seed | 0) + 5);
       D.box(Fr, a, d / 2, 0, w, d, 0.9, 0, { solid: true, noVis: true });
     },
-    // a wall of handsets on a dark panel, each with its screen lit
+    // a handset wall: the dark panel and its cradles
     phones: function (D, Fr, a, w, d, o) {
       D.box(Fr, a, 0.02, 0.85, w, 0.04, 1.55, 0x1d1f23);
       D.box(Fr, a, 0.07, 2.42, w, 0.1, 0.08, 0xeaf2ff, { glow: true });
       D.box(Fr, a, d / 2, 0, w, d, 0.85, 0xe8e4da);
+      // the cradles, empty: the handsets for sale are the real Phone models
+      // on the shop's display tables (city/storegoods.js)
       const cols = Math.max(1, Math.floor((w - 0.1) / 0.2));
-      const scr = [0x2a4a7a, 0x3a6a8a, 0x5a3a7a, 0x2a6a5a];
       for (let r = 0; r < 4; r++) for (let i = 0; i < cols; i++) {
         const x = a - (w - 0.1) / 2 + (w - 0.1) * (i + 0.5) / cols, y = 1.05 + r * 0.33;
         D.box(Fr, x, 0.06, y, 0.1, 0.04, 0.03, 0x8a9096);                   // the cradle
-        D.box(Fr, x, 0.075, y + 0.03, 0.08, 0.012, 0.16, 0x15171b, { nb: true });
-        D.box(Fr, x, 0.082, y + 0.04, 0.068, 0.004, 0.14, pick(scr, h3(o.seed | 0, r * 31 + i, 2)), { glow: true, nb: true });
+        D.box(Fr, x, 0.045, y + 0.06, 0.06, 0.01, 0.1, 0x3a3c42, { nb: true });   // its back plate
       }
-      stock(D, Fr, a, w - 0.1, d / 2, d * 0.6, 0.85, 0.12, "tech", PAL.tech, (o.seed | 0) + 9);
       D.box(Fr, a, d / 2, 0, w, d, 0.9, 0, { solid: true, noVis: true });
     },
     // a suit bay: a walnut panel, jackets double-hung, shirts folded above
@@ -731,7 +732,7 @@
     bolts: function (D, Fr, a, w, d, o) {
       MODS.shelf(D, Fr, a, w, d, Object.assign({}, o, { style: "bolts", pal: o.pal || PAL.fabric, levels: [0.12, 0.42, 0.72, 1.02, 1.32, 1.62], back: o.back || 0x5a4632, frame: 0x3a2414, accent: 0x2a1a10 }));
     },
-    // folded stacks in open cubbies
+    // open cubbies (empty: see "WHAT A SHELF HOLDS")
     cubbies: function (D, Fr, a, w, d, o) {
       const fr = o.frame || 0xe8e4da;
       D.box(Fr, a, 0.012, 0, w, 0.024, 2.2, fr);
@@ -740,11 +741,7 @@
       for (let r = 0; r < 6; r++) {
         const y = 0.1 + r * 0.35;
         D.box(Fr, a, d / 2, y - 0.02, w, d, 0.02, fr, { nb: true });
-        for (let i = 0; i < cols; i++) {
-          const x = a - w / 2 + cw * (i + 0.5);
-          const hh = 0.12 + 0.14 * h3(o.seed | 0, r * 17 + i, 1);
-          D.box(Fr, x, d / 2, y, cw - 0.07, d * 0.8, hh, pick(o.pal || PAL.cloth, h3(o.seed | 0, r * 17 + i, 2)), { nb: true });
-        }
+        // (the folded stacks that filled these could not be bought: empty)
       }
       D.box(Fr, a, d / 2, 0, w, d, 2.2, 0, { solid: true, noVis: true });
     },
@@ -866,9 +863,9 @@
         const n = Math.max(1, Math.floor(L / 0.4));
         for (let i = 0; i < n; i++) for (const s of [-1, 1]) {
           const x = a - L / 2 + L * (i + 0.5) / n;
-          D.box(Fr, x, s * 0.15, 0.9, 0.06, 0.06, 0.08, 0x8a9096);
-          D.box(Fr, x, s * 0.17, 0.98, 0.08, 0.012, 0.15, 0x15171b);
-          D.box(Fr, x, s * 0.177, 0.99, 0.068, 0.004, 0.13, 0x2a4a7a, { glow: true });
+          // the security stand, empty (the real handsets: city/storegoods.js)
+          D.box(Fr, x, s * 0.15, 0.9, 0.06, 0.06, 0.03, 0x8a9096);
+          D.box(Fr, x, s * 0.15, 0.93, 0.02, 0.02, 0.06, 0x5a5f66);
         }
       } else stock(D, Fr, a, L - 0.1, 0, d * 0.8, 0.9, 0.3, o.style || "stacks", o.pal, (o.seed | 0) + Math.round(a * 9));
       D.box(Fr, a, 0, 0, L, d, 0.9, 0, { solid: true, noVis: true });

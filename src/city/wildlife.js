@@ -931,6 +931,21 @@
   function makeEyes(a) {
     const hm = a.gait && a.gait.headMesh;
     if (!hm || !hm.geometry) return null;
+    // a beast-kit head declares its real eyes (mesh-local [x, y, z, r]): the
+    // glow sits ON them, not on the corners of a box that no longer exists
+    const de = hm.userData && hm.userData.eyes;
+    if (de && de.length) {
+      const out = [];
+      for (let i = 0; i < de.length; i++) {
+        const r = Math.max(0.02, de[i][3] * 1.15);
+        const e = new THREE.Mesh(CBZ.boxGeom(r * 1.6, r * 1.3, r * 1.6), aggroEyeMat());
+        e.position.set(de[i][0], de[i][1], de[i][2]);
+        e.visible = false;
+        hm.add(e);
+        out.push(e);
+      }
+      return out;
+    }
     const p = hm.geometry.parameters || {};
     const w = p.width || 0.4, h = p.height || 0.4, dep = p.depth || 0.4;
     const s = Math.max(0.07, Math.min(0.17, dep * 0.26));
@@ -3114,9 +3129,16 @@
       s.position.z = Math.sin(a.phase - i * 0.7) * amp * Math.min(1, i / 2 + 0.35);
       s.position.y = (a.reared && i < a.rear) ? a.baseY + (a.rear - i) * a.spacing * 0.85 : a.baseY;
     }
+    // each segment faces along the curve toward the one ahead of it, so the
+    // lofted body bends with the wave instead of sliding sideways in steps
+    for (let i = segs.length - 1; i >= 1; i--) {
+      const s = segs[i], f = segs[i - 1]; if (!s || !f) continue;
+      s.rotation.y = -Math.atan2(f.position.z - s.position.z, f.position.x - s.position.x);
+    }
+    if (segs[0] && segs[1]) segs[0].rotation.y = segs[1].rotation.y;
     if (a.strikeAnim > 0) a.strikeAnim = Math.max(0, a.strikeAnim - dt * 4);
     if (a.hood) { const f = a.reared ? 1 : 0.12; for (let h = 0; h < a.hood.length; h++) if (a.hood[h]) a.hood[h].scale.setScalar(f); }
-    if (a.rattle && (a.reared || a.alarm > 0.1)) a.rattle.rotation.y = Math.sin(a.phase * 3.5) * 0.6;
+    if (a.rattle && (a.reared || a.alarm > 0.1)) a.rattle.rotation.y += Math.sin(a.phase * 3.5) * 0.6;   // the shake rides the yaw set above
   }
 
   function snakeTick(a, dt, P) {

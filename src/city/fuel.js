@@ -266,6 +266,17 @@
     });
   }
 
+  /* A CAN POURED IN (city/itemicons.js's "Pour" verb on a Gas Can): up to
+     `litres` into the tank, never past full. Returns the litres that went in. */
+  CBZ.fuelPour = function (car, litres) {
+    if (!car || !on()) return 0;
+    ensureTank(car);
+    const cap = car._fuelCap || 55, before = Math.max(0, car._fuel || 0);
+    car._fuel = Math.min(cap, before + Math.max(0, litres || 0));
+    if (car._fuel > 0) { car._fuelSputter = false; car._fuelToldEmpty = false; }
+    return car._fuel - before;
+  };
+
   /* Ratchet: how many vehicle classes still fall through to the default tank
      size rather than declaring one. May only go down. */
   CBZ.fuelAudit = function () {

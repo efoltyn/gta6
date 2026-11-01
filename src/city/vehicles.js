@@ -3395,7 +3395,9 @@
     v.traverse(function (o) { if (o.userData && o.userData.playerWheel) keep.add(o); });
     try {
       sealSeams(v, dims);
-      addInteriorShell(v, dims, null);
+      // (an authored-closed body — the rebuilt tractor — needs no dark filler
+      // block; one sized off the 2.5 m trailer would stand out past its hood)
+      if (!v.userData.loftBody) addInteriorShell(v, dims, null);
       if (mergeStaticCarParts) mergeStaticCarParts(v, keep);
     } catch (e) { /* a lightweight test renderer without geometry baking */ }
     v.position.set(x, 0, z);

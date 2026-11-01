@@ -107,15 +107,29 @@
 
 
   // ========================================================================
-  //  GEOMETRY — voxel-simple, vertex-coloured, merged so a whole camera is
-  //  one instance. Head canonical FORWARD is +z (Object3D.lookAt aligns a
-  //  mesh's +z with its target), lens at the +z front, mount arm at the -z back.
+  //  GEOMETRY — a real BULLET camera (vertex-coloured, merged: a whole camera
+  //  is one instance). Head canonical FORWARD is +z (Object3D.lookAt aligns a
+  //  mesh's +z with its target), the pivot is the housing's centre.
+  //  A security bullet is ~0.3 m of round aluminium housing under a sun
+  //  shield, a dark bezel with the lens and its IR ring, a rear cap the cable
+  //  leaves from, on a knuckle bracket. (The old head was a 0.34 x 0.32 x 0.52
+  //  box with a 24 cm lens drum — the size of a TV camera, three times a real
+  //  one, which is why every bank front read as a toy.) Shown ~1.25x life so it
+  //  still reads at street distance.
+  //  Two mounts, two geometries: WALL (the bracket runs back to a plate on the
+  //  facade, or the lamp shaft) and POLE (the knuckle drops onto the pole top).
   // ========================================================================
   function col(hex) { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; }
+  const _e3 = new THREE.Euler(), _q3 = new THREE.Quaternion(), _p3 = new THREE.Vector3(), _s3 = new THREE.Vector3(1, 1, 1);
   function T(x, y, z) { return new THREE.Matrix4().makeTranslation(x, y, z); }
-  function Trot(rx, x, y, z) { const m = new THREE.Matrix4().makeRotationX(rx); m.setPosition(x, y, z); return m; }
+  function TR(rx, ry, rz, x, y, z) {
+    _e3.set(rx || 0, ry || 0, rz || 0); _q3.setFromEuler(_e3);
+    return new THREE.Matrix4().compose(_p3.set(x, y, z), _q3, _s3);
+  }
+  // A Y-axis cylinder laid along +Z (rotation.x = PI/2 points +Y at +Z)
+  function Z(x, y, z) { return TR(Math.PI / 2, 0, 0, x, y, z); }
 
-  // bake ONE part (box/cyl) into world-local space with a solid vertex colour
+  // bake ONE part into head-local space with a solid vertex colour
   function bakePart(geo, mat4, rgb) {
     const g = geo.index ? geo.toNonIndexed() : geo;
     g.applyMatrix4(mat4);
@@ -144,24 +158,75 @@
     for (const g of parts) g.dispose && g.dispose();
     return out;
   }
-  function headGeo() {
-    const HOUSING = col(0x3a3f47), METAL = col(0x565f6b), MOUNT = col(0x2a2f37),
-      LENS = col(0x0c0e12), GLASS = col(0x2f6377);
-    return mergeParts([
-      bakePart(new THREE.BoxGeometry(0.34, 0.32, 0.52), T(0, 0, 0.03), HOUSING),   // chunky body
-      bakePart(new THREE.BoxGeometry(0.17, 0.17, 0.44), T(0, 0.0, -0.36), METAL),  // mount arm (to wall/pole)
-      bakePart(new THREE.BoxGeometry(0.18, 0.13, 0.24), T(0, 0.21, -0.06), MOUNT), // saddle
-      bakePart(new THREE.CylinderGeometry(0.12, 0.12, 0.26, 12), Trot(Math.PI / 2, 0, 0, 0.33), LENS), // lens barrel (+z)
-      bakePart(new THREE.CylinderGeometry(0.13, 0.13, 0.05, 12), Trot(Math.PI / 2, 0, 0, 0.47), GLASS), // glass ring
-    ]);
+  const C_BODY = col(0xd9dbd8), C_SHIELD = col(0xe8e9e6), C_DARK = col(0x1b1d21), C_BEZEL = col(0x2a2d32),
+    C_GLASS = col(0x1f4a5c), C_IR = col(0x4a1c1c), C_METAL = col(0x9aa0a6), C_CABLE = col(0x141518);
+  // the camera itself, both mounts: housing, shield, bezel, lens, IR ring, cap
+  function housingParts() {
+    const R = 0.075, L = 0.32;
+    const P = [
+      bakePart(new THREE.CylinderGeometry(R, R, L, 14), Z(0, 0, 0.0), C_BODY),                       // housing
+      bakePart(new THREE.CylinderGeometry(R * 1.02, R * 1.02, 0.035, 14), Z(0, 0, -L / 2 - 0.012), C_BEZEL),   // rear cap
+      bakePart(new THREE.CylinderGeometry(R * 1.03, R * 1.03, 0.03, 14), Z(0, 0, L / 2 + 0.01), C_BEZEL),     // front bezel
+      bakePart(new THREE.CylinderGeometry(R * 0.82, R * 0.82, 0.006, 14), Z(0, 0, L / 2 + 0.027), C_DARK),    // the black face
+      bakePart(new THREE.CylinderGeometry(0.03, 0.034, 0.03, 12), Z(0, 0, L / 2 + 0.04), C_DARK),             // lens barrel
+      bakePart(new THREE.CylinderGeometry(0.024, 0.024, 0.004, 12), Z(0, 0, L / 2 + 0.056), C_GLASS),         // lens glass
+    ];
+    for (let k = 0; k < 8; k++) {                                                                   // IR LED ring
+      const a = k * Math.PI / 4 + Math.PI / 8;
+      P.push(bakePart(new THREE.CylinderGeometry(0.008, 0.008, 0.005, 6), Z(Math.cos(a) * 0.05, Math.sin(a) * 0.05, L / 2 + 0.03), C_IR));
+    }
+    // the SUN SHIELD: a half-shell over the top, overhanging the face
+    // (theta from PI/2 sweeps the -z half, which the +X quarter turn lays on top)
+    P.push(bakePart(new THREE.CylinderGeometry(R + 0.014, R + 0.014, L + 0.07, 14, 1, true, Math.PI / 2, Math.PI), Z(0, 0, 0.035), C_SHIELD));
+    return P;
   }
+  // the KNUCKLE under the housing: a saddle clamp, a short stem, the ball
+  function knuckleParts() {
+    return [
+      bakePart(new THREE.BoxGeometry(0.06, 0.02, 0.12), T(0, -0.083, -0.02), C_METAL),
+      bakePart(new THREE.CylinderGeometry(0.016, 0.016, 0.05, 8), T(0, -0.11, -0.03), C_METAL),
+      bakePart(new THREE.SphereGeometry(0.026, 10, 6), T(0, -0.14, -0.03), C_METAL),
+    ];
+  }
+  function headGeoWall() {
+    const P = housingParts().concat(knuckleParts());
+    // the bracket arm, ball -> back and up to the wall plate, cable alongside
+    P.push(bakePart(new THREE.CylinderGeometry(0.018, 0.022, 0.3, 8), Z(0, -0.14, -0.18), C_METAL));
+    P.push(bakePart(new THREE.BoxGeometry(0.13, 0.18, 0.018), T(0, -0.14, -0.33), C_METAL));        // wall plate
+    for (const sx of [-0.045, 0.045]) for (const sy of [-0.07, 0.07])
+      P.push(bakePart(new THREE.CylinderGeometry(0.008, 0.008, 0.01, 6), Z(sx, -0.14 + sy, -0.318), C_DARK));   // its four fixings
+    P.push(bakePart(new THREE.CylinderGeometry(0.006, 0.006, 0.2, 5), TR(Math.PI / 2 + 0.6, 0, 0, 0, -0.07, -0.22), C_CABLE));   // the cable
+    return mergeParts(P);
+  }
+  function headGeoPole() {
+    const P = housingParts().concat(knuckleParts());
+    // the knuckle drops to an adaptor plate that sits on the pole's cap
+    P.push(bakePart(new THREE.CylinderGeometry(0.02, 0.022, 0.12, 8), T(0, -0.21, -0.03), C_METAL));
+    P.push(bakePart(new THREE.CylinderGeometry(0.06, 0.06, 0.02, 12), T(0, -0.27, -0.03), C_METAL));
+    return mergeParts(P);
+  }
+  // A SITE CCTV POLE: anchor-bolted base plate, the tapered galvanised shaft,
+  // its handhole, the NEMA junction box strapped at 2.4 m, the top cap. The
+  // camera sits on the cap (headGeoPole); the pole is yawed with its camera.
   function poleGeo() {
-    const POLE = col(0x4a525c);
-    return mergeParts([
-      bakePart(new THREE.CylinderGeometry(0.11, 0.14, POLE_H, 10), T(0, POLE_H / 2, 0), POLE),   // upright
-      bakePart(new THREE.BoxGeometry(0.16, 0.16, 0.7), T(0, POLE_H - 0.1, 0.28), POLE),          // top cross-arm
-    ]);
+    const POLE = col(0x8d9398), DARK = col(0x3a3f45), BOX = col(0xbfc3c4);
+    const P = [
+      bakePart(new THREE.BoxGeometry(0.36, 0.025, 0.36), T(0, 0.0125, 0), DARK),                       // base plate
+      bakePart(new THREE.CylinderGeometry(0.075, 0.1, POLE_H - 0.31, 12), T(0, (POLE_H - 0.31) / 2 + 0.025, 0), POLE),   // shaft
+      bakePart(new THREE.CylinderGeometry(0.11, 0.11, 0.03, 12), T(0, POLE_H - 0.29, 0), POLE),          // top cap
+      bakePart(new THREE.BoxGeometry(0.07, 0.14, 0.02), T(0, 0.55, 0.095), DARK),                       // handhole cover
+      bakePart(new THREE.BoxGeometry(0.26, 0.32, 0.14), T(0, 2.4, -0.16), BOX),                          // junction box
+      bakePart(new THREE.BoxGeometry(0.24, 0.02, 0.15), T(0, 2.57, -0.16), BOX),                         // its lid lip
+      bakePart(new THREE.CylinderGeometry(0.012, 0.012, 1.7, 5), T(0.0, 3.4, -0.105), DARK),           // conduit up to the camera
+    ];
+    for (const sx of [-0.14, 0.14]) for (const sz of [-0.14, 0.14])
+      P.push(bakePart(new THREE.CylinderGeometry(0.014, 0.014, 0.05, 6), T(sx, 0.045, sz), DARK));    // anchor nuts
+    for (const sy of [2.3, 2.5]) P.push(bakePart(new THREE.CylinderGeometry(0.092, 0.092, 0.02, 12), T(0, sy, 0), DARK));   // banding straps
+    return mergeParts(P);
   }
+
+  // for the lab turntable (the asset kit), nothing else
+  CBZ.cctvGeo = { wall: headGeoWall, pole: headGeoPole, poleGeo: poleGeo, POLE_H: POLE_H };
 
   // ========================================================================
   //  FEED RESOURCES — created ONCE, reused across city rebuilds.
@@ -208,16 +273,19 @@
   //  PLACEMENT — rebuilt per world (arena identity). One head InstancedMesh
   //  for every camera + one pole InstancedMesh for the pole-mounted ones.
   // ========================================================================
-  let camRoot = null, headMesh = null, poleMesh = null;
-  const _heads = [];   // { pos:{x,y,z}, dir:{x,y,z} }
-  const _poles = [];   // { x, z }
+  let camRoot = null, headMesh = null, headPoleMesh = null, poleMesh = null;
+  const _heads = [];   // { pos:{x,y,z}, dir:{x,y,z}, pole } — the mesh is the HOUSING's pose
+  const _poles = [];   // { x, z, yaw }
 
-  function addCam(kind, x, y, z, yaw, pitch, pole) {
+  function addCam(kind, x, y, z, yaw, pitch, pole, fwd) {
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const dir = { x: Math.sin(yaw) * cp, y: sp, z: Math.cos(yaw) * cp };
-    CBZ.cctvCameras.push({ id: "cctv" + CBZ.cctvCameras.length, kind: kind, pos: { x: x, y: y, z: z }, aimYaw: yaw, aimPitch: pitch });
-    _heads.push({ pos: { x: x, y: y, z: z }, dir: dir });
-    if (pole) _poles.push({ x: x, z: z });
+    // fwd: the housing stands this far ahead of its mount point (a lamp's
+    // shaft, a pole's cap), so the bracket reaches back to it, not into it
+    const hx = x + Math.sin(yaw) * (fwd || 0), hz = z + Math.cos(yaw) * (fwd || 0);
+    CBZ.cctvCameras.push({ id: "cctv" + CBZ.cctvCameras.length, kind: kind, pos: { x: hx, y: y, z: hz }, aimYaw: yaw, aimPitch: pitch });
+    _heads.push({ pos: { x: hx, y: y, z: hz }, dir: dir, pole: !!pole });
+    if (pole) _poles.push({ x: x, z: z, yaw: yaw });
   }
   // lot.building.door is a point 1.6m INSIDE the threshold carrying the INWARD
   // normal (nx,nz) — step back to the facade, mount just outside it, aim out+down.
@@ -230,9 +298,10 @@
     addCam(kind, fx - inx * 0.3, MOUNT_H, fz - inz * 0.3, Math.atan2(-inx, -inz), CAM_PITCH, false);
     return true;
   }
-  function addPoleCam(kind, x, z, yaw) { addCam(kind, x, POLE_H, z, yaw, POLE_PITCH, true); }
-  // a head mounted on an EXISTING tall prop (a street lamp) — no pole of our own
-  function addHeadCam(kind, x, y, z, yaw) { addCam(kind, x, y, z, yaw, POLE_PITCH, false); }
+  function addPoleCam(kind, x, z, yaw) { addCam(kind, x, POLE_H, z, yaw, POLE_PITCH, true, 0.14); }
+  // a head mounted on an EXISTING tall prop (a street lamp) — no pole of our
+  // own; its wall bracket clamps to the shaft, so the housing stands proud of it
+  function addHeadCam(kind, x, y, z, yaw) { addCam(kind, x, y, z, yaw, POLE_PITCH, false, 0.42); }
 
   function placeCameras(arena, city) {
     CBZ.cctvCameras.length = 0; _heads.length = 0; _poles.length = 0;
@@ -298,28 +367,33 @@
     for (let i = camRoot.children.length - 1; i >= 0; i--) {
       const m = camRoot.children[i]; camRoot.remove(m); if (m.geometry) m.geometry.dispose();
     }
-    headMesh = poleMesh = null;
+    headMesh = headPoleMesh = poleMesh = null;
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     const dummy = new THREE.Object3D();
-    if (_heads.length) {
-      headMesh = new THREE.InstancedMesh(headGeo(), mat, _heads.length);
-      headMesh.frustumCulled = false; headMesh.castShadow = false; headMesh.receiveShadow = false;
-      for (let i = 0; i < _heads.length; i++) {
-        const c = _heads[i];
+    // one instanced pool per MOUNT (wall/lamp bracket, pole knuckle)
+    const pool = function (geo, list) {
+      if (!list.length) return null;
+      const m = new THREE.InstancedMesh(geo, mat, list.length);
+      m.frustumCulled = false; m.castShadow = false; m.receiveShadow = false;
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i];
         dummy.position.set(c.pos.x, c.pos.y, c.pos.z);
         dummy.lookAt(c.pos.x + c.dir.x, c.pos.y + c.dir.y, c.pos.z + c.dir.z);   // mesh +z → aim dir
         dummy.updateMatrix();
-        headMesh.setMatrixAt(i, dummy.matrix);
+        m.setMatrixAt(i, dummy.matrix);
       }
-      headMesh.instanceMatrix.needsUpdate = true;
-      camRoot.add(headMesh);
-    }
+      m.instanceMatrix.needsUpdate = true;
+      camRoot.add(m);
+      return m;
+    };
+    headMesh = pool(headGeoWall(), _heads.filter(function (c) { return !c.pole; }));
+    headPoleMesh = pool(headGeoPole(), _heads.filter(function (c) { return c.pole; }));
     if (_poles.length) {
       poleMesh = new THREE.InstancedMesh(poleGeo(), mat, _poles.length);
       poleMesh.frustumCulled = false; poleMesh.castShadow = false; poleMesh.receiveShadow = false;
       for (let i = 0; i < _poles.length; i++) {
         dummy.position.set(_poles[i].x, 0, _poles[i].z);
-        dummy.rotation.set(0, 0, 0); dummy.updateMatrix();
+        dummy.rotation.set(0, _poles[i].yaw || 0, 0); dummy.updateMatrix();   // the junction box faces away from the view
         poleMesh.setMatrixAt(i, dummy.matrix);
       }
       poleMesh.instanceMatrix.needsUpdate = true;

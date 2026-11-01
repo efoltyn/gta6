@@ -267,6 +267,39 @@
   Proto.prototype.sphere = function (r, wseg, hseg, color, x, y, z) {
     return this.add(new THREE.SphereGeometry(r, wseg || 8, hseg || 6), color, x, y, z);
   };
+  // CHAMFERED BOX: a box whose twelve edges carry a flat bevel `b` wide. The
+  // bevel is what catches light on a real cabinet/housing edge and is most of
+  // the difference between "a steel box" and "a box primitive" at street range.
+  // 44 tris (a plain box is 12). Centred like BoxGeometry.
+  Proto.prototype.cbox = function (w, h, d, b, color, x, y, z, rx, ry, rz) {
+    b = Math.max(0.001, Math.min(b, w * 0.45, h * 0.45, d * 0.45));
+    const s = new THREE.Shape();
+    const hw = w / 2 - b, hh = h / 2 - b;
+    s.moveTo(-hw, -hh); s.lineTo(hw, -hh); s.lineTo(hw, hh); s.lineTo(-hw, hh); s.lineTo(-hw, -hh);
+    const g = new THREE.ExtrudeGeometry(s, { depth: d - 2 * b, bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 1, steps: 1, curveSegments: 1 });
+    g.translate(0, 0, -(d - 2 * b) / 2);
+    return this.add(g, color, x, y, z, rx, ry, rz);
+  };
+  // LATHE: a turned profile [[r, y], ...] bottom to top, about local Y. The
+  // insulator skirt, the bollard dome, the transformer lid.
+  Proto.prototype.lathe = function (pts, seg, color, x, y, z, rx, ry, rz) {
+    const v = pts.map(function (p) { return new THREE.Vector2(Math.max(0, p[0]), p[1]); });
+    return this.add(new THREE.LatheGeometry(v, seg || 8), color, x, y, z, rx, ry, rz);
+  };
+  // ROD: a cylinder from point A to point B (a brace, a tube, a spoke), so a
+  // frame is authored by its joints rather than by hand-solved Euler angles.
+  const _ra = new THREE.Vector3(), _rb = new THREE.Vector3(), _ry = new THREE.Vector3(0, 1, 0), _rq = new THREE.Quaternion(), _re = new THREE.Euler();
+  Proto.prototype.rod = function (ax, ay, az, bx, by, bz, r, seg, color, r2) {
+    _ra.set(bx - ax, by - ay, bz - az);
+    const L = _ra.length() || 1e-4;
+    _rq.setFromUnitVectors(_ry, _rb.copy(_ra).divideScalar(L));
+    _re.setFromQuaternion(_rq, "XYZ");
+    const g = new THREE.CylinderGeometry(r2 != null ? r2 : r, r, L, seg || 6, 1, false);
+    return this.add(g, color, (ax + bx) / 2, (ay + by) / 2, (az + bz) / 2, _re.x, _re.y, _re.z);
+  };
+  Proto.prototype.torus = function (R, t, rs, ts, arc, color, x, y, z, rx, ry, rz) {
+    return this.add(new THREE.TorusGeometry(R, t, rs || 4, ts || 12, arc || Math.PI * 2), color, x, y, z, rx, ry, rz);
+  };
   Proto.prototype.plate = function (w, d, color, x, y, z, rx, ry, rz) {
     // a zero-thickness quad lying in the XZ plane (rx = -PI/2 baked in)
     return this.add(new THREE.PlaneGeometry(w, d), color, x, y, z, (rx == null ? -Math.PI / 2 : rx), ry, rz);

@@ -259,7 +259,17 @@
        tarmac darkened and one across the footway is the footway darkened */
     crackMat = K.crackMat ? K.crackMat() : new THREE.MeshBasicMaterial({ color: 0x0b0907, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
     pipeMat = new THREE.MeshLambertMaterial({ color: 0x3b3f42, side: THREE.DoubleSide });
-    jetMat = new THREE.PointsMaterial({ color: 0xc9dbe2, size: 0.32, transparent: true, opacity: 0.72, depthWrite: false });
+    // a burst main's spray: round soft droplets (an unmapped Points draws
+    // every droplet as a hard screen square — a jet of confetti tiles)
+    let drop = null;
+    try {
+      const c = document.createElement("canvas"); c.width = c.height = 32;
+      const g = c.getContext("2d"), gr = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+      gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.45, "rgba(255,255,255,0.7)"); gr.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = gr; g.fillRect(0, 0, 32, 32);
+      drop = new THREE.CanvasTexture(c);
+    } catch (e) { drop = null; }
+    jetMat = new THREE.PointsMaterial({ color: 0xc9dbe2, size: 0.42, map: drop, transparent: true, opacity: 0.72, depthWrite: false });
     if (CBZ.groundMaskExempt) [secMat, darkMat, puddleMat, pipeMat, jetMat].forEach(CBZ.groundMaskExempt);
   }
   // the section's hexes are sRGB paint chips; a vertex colour is linear

@@ -30,6 +30,15 @@
     K.tag(K.prof(g, "870.recv", [[-0.050, -0.030], [0.345, -0.030], [0.345, 0.118], [0.320, 0.124], [0.040, 0.124], [-0.020, 0.108], [-0.050, 0.080]],
       0.066, steel, { bevel: 0.005 }), "part_receiver");
     box(g, 0.004, 0.050, 0.150, mat.black, 0.032, 0.070, -0.180);         // ejection port
+    box(g, 0.002, 0.026, 0.118, steel, 0.0345, 0.072, -0.186);            // the bolt's flank in the port
+    // the two trigger-group pins through the receiver, the safety button
+    // through the guard behind the blade, the slide release ahead of it,
+    // and the barrel's collar where it seats in the receiver
+    cyl(g, 0.0058, 0.070, parker, 0, 0.012, -0.040, 0, 0, Math.PI / 2);
+    cyl(g, 0.0058, 0.070, parker, 0, 0.012, -0.300, 0, 0, Math.PI / 2);
+    cyl(g, 0.0062, 0.050, mat.black, 0, -0.030, -0.010, 0, 0, Math.PI / 2);
+    box(g, 0.004, 0.012, 0.030, parker, -0.034, -0.026, -0.150);
+    K.tube(g, 0.0255, 0.0255, 0.030, 16, steel, 0, BORE, -0.360);
     // the matted sighting groove down the receiver's top: the rear of the
     // bead gun's sight line (the eye lays the bead in its rear end)
     K.prof(g, "870.groove", [[0.030, 0.1215], [0.322, 0.1215], [0.322, 0.1245], [0.030, 0.1245]],
