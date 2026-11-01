@@ -173,26 +173,29 @@
     return bigcat({
       L: 1.7 * k, WH: 1.15 * k, HH: 1.08 * k, chest: 0.56 * k, belly: 0.56 * k, W: 0.23 * k, sag: 0.04, tuck: 0.06,
       coat: coat,
-      head: { len: 0.4 * k, D: 0.27 * k, Wd: 0.15 * k, ang: 16, muzzleAt: 0.6 },
+      head: { len: 0.42 * k, D: 0.3 * k, Wd: 0.17 * k, ang: 14, muzzleAt: 0.6 },
+      neck: { len: 0.34 * k, ang: 30, r0: 0.26 * k, r1: 0.2 * k, crest: 0.95, dewlap: 1.05 },
       ear: { len: 0.09 * k, w: 0.095 * k, kind: "round", up: 70, out: 25, back: 12, s: 0.7, u: 0.82, t: 0.12 },
       leg: { f: 0.085 * k, c: 0.05, h: 0.12 * k }, paw: 0.07 * k,
       tail: { len: 0.95 * k, r: 0.035, droop: 70, curl: -1.4, taper: 0.4, tuft: 0.06, tipAt: 0.9 },
       extra: male ? function (E) {
-        // the mane: a deep shaggy collar from behind the ears over the
-        // shoulders and down the chest, darker to the tips
-        const m = E.head;
+        // the mane: a shaggy hood from the brow back over the shoulders and
+        // down the chest; the face stands out of it, the tips run darker
+        const m = E.head, H = E.H;
+        const back = E.nx0 - 0.28 * k, poll = E.hp(0.0, 0, 0), front = E.hp(0.14, 0, 0);
         const st = [];
-        const n = 7;
+        const n = 8;
         for (let i = 0; i <= n; i++) {
           const t = i / n;
-          const x = lerp(E.nx0 - 0.12, E.nx1 + 0.05, t), y = lerp(E.ny0 + 0.02, E.ny1 + 0.02, t);
-          const r = 0.3 * Math.sin(lerp(0.35, 2.7, t)) + 0.08;
-          st.push({ x: x, y: y, z: 0, rt: r * 1.05, rb: r * 1.25, w: r * 1.05, sq: 1, wts: [0, 1], t: t });
+          const x = lerp(back, front[0], t), y = lerp(E.ny0 + 0.1 * k, poll[1] + 0.02 * k, Math.min(1, t * 1.3));
+          const swell = Math.sin(lerp(0.3, 2.5, t));
+          st.push({ x: x, y: y, z: 0, rt: (0.17 + 0.1 * swell) * k, rb: (0.2 + 0.2 * swell) * k, w: (0.18 + 0.1 * swell) * k, sq: 1.1, wts: [0, 1], t: t });
         }
-        m.loft(st, 18, function (x, y, z, ca, sa, R) {
+        m.loft(st, 16, function (x, y, z, ca, sa, R) {
           const t = R.t != null ? R.t : 0;
-          return shade(mix(coat.mane, mix(coat.mane, coat.body, 0.55), smooth(0.4, 1, t) * 0.7 + (ca < -0.3 ? 0.15 : 0)), K.grain(x * 3, y * 3, z * 3) * 1.02);
-        }, { capLen: 0.6 }, false);
+          const tip = 0.5 + 0.5 * Math.sin(x * 61 + y * 37 + z * 53);
+          return shade(mix(mix(coat.body, coat.mane, 0.55 + 0.45 * smooth(0.0, 0.6, t)), shade(coat.mane, 0.7), tip * 0.5), 1.0);
+        }, { capLen: 0.9 }, false);
       } : null,
     });
   }
@@ -201,10 +204,11 @@
     return bigcat({
       L: 1.8, WH: 1.0, HH: 0.98, chest: 0.52, belly: 0.48, W: 0.24, sag: 0.03, tuck: 0.05,
       coat: coat, pattern: "tiger", uScale: 1.25,
-      head: { len: 0.4, D: 0.27, Wd: 0.16, ang: 14, muzzleAt: 0.62 },
+      head: { len: 0.42, D: 0.31, Wd: 0.19, ang: 12, muzzleAt: 0.62 },
+      neck: { len: 0.34, ang: 30, r0: 0.26, r1: 0.2, crest: 0.95, dewlap: 1.05 },
       leg: { f: 0.095, c: 0.05, h: 0.14 }, paw: 0.08,
       tail: { len: 0.95, r: 0.04, droop: 60, curl: -1.2, taper: 0.45, tipAt: 0.92 },
-      ear: { len: 0.1, w: 0.1, kind: "round", up: 70, out: 30, back: 12, s: 0.72, u: 0.82, t: 0.12, back_c: 0x1a1414 },
+      ear: { len: 0.11, w: 0.11, kind: "round", up: 70, out: 30, back: 12, s: 0.72, u: 0.82, t: 0.12, back_c: 0x1a1414 },
       paint: function (part, x, y, z, ca, sa, t, col) {
         if (part === "head" && t > 0.3 && t < 0.55 && ca > 0.1 && ca < 0.6 && Math.abs(sa) > 0.55) return 0xf6f2ea;   // the white cheek ruff
         if (part === "head" && t > 0.2 && t < 0.42 && ca > 0.7) return mix(col, 0xf6f2ea, 0.75);               // the brow spots
@@ -302,8 +306,8 @@
         [-1.52 * k, 2.25 * k, 1.75 * k, 0.4 * k], [-1.4 * k, 2.72 * k, 1.35 * k, 0.6 * k], [-0.9 * k, 2.82 * k, 1.28 * k, 0.72 * k], [-0.1 * k, 2.72 * k, 1.25 * k, 0.8 * k],
         [0.6 * k, 3.0 * k, 1.35 * k, 0.76 * k], [1.15 * k, 3.02 * k, 1.42 * k, 0.66 * k], [1.45 * k, 2.75 * k, 1.6 * k, 0.5 * k], [1.6 * k, 2.5 * k, 1.85 * k, 0.36 * k],
       ],
-      neck: { len: 0.45 * k, ang: 15, r0: 0.62 * k, r1: 0.55 * k, w0: 0.5 * k, w1: 0.45 * k, crest: 0.9, dewlap: 1.0 },
-      head: { len: 0.95 * k, D: 0.9 * k, Wd: 0.42 * k, ang: 72, dy: 0.12 * k, muzzleAt: 0.9, nosePad: false, sq: 0.9,
+      neck: { len: 0.62 * k, ang: 12, r0: 0.62 * k, r1: 0.55 * k, w0: 0.5 * k, w1: 0.45 * k, crest: 0.9, dewlap: 1.0 },
+      head: { len: 0.95 * k, D: 0.9 * k, Wd: 0.42 * k, ang: 68, dy: 0.25 * k, muzzleAt: 0.9, nosePad: false, sq: 0.9,
         prof: [[-0.1, 0.42, 0.42, 0.42], [0.1, 0.55, 0.5, 0.52], [0.4, 0.5, 0.48, 0.5], [0.7, 0.36, 0.38, 0.38], [0.95, 0.24, 0.24, 0.26], [1.0, 0.2, 0.2, 0.22]] },
       eye: { r: 0.035 * k, t: 0.42, up: 0.0, side: 0.97, shine: true },
       legPts: legP, legZ: 0.5 * k,
@@ -313,7 +317,8 @@
         // the trunk: from the face down, hanging in a gentle S to a hand's
         // breadth above the ground, the tip curled forward
         const t0 = E.hp(0.92, 0, 0);
-        const pts = [[t0[0], t0[1], 0, 0.22 * k], [t0[0] + 0.12 * k, t0[1] - 0.5 * k, 0, 0.17 * k], [t0[0] + 0.1 * k, t0[1] - 1.1 * k, 0, 0.12 * k], [t0[0] + 0.02 * k, t0[1] - 1.55 * k, 0, 0.085 * k], [t0[0] + 0.12 * k, Math.max(0.42, t0[1] - 1.85 * k), 0, 0.065 * k]];
+        const drop = t0[1] - 0.55;    // the tip hangs a hand's breadth over the ground
+        const pts = [[t0[0], t0[1], 0, 0.22 * k], [t0[0] + 0.12 * k, t0[1] - 0.27 * drop, 0, 0.17 * k], [t0[0] + 0.1 * k, t0[1] - 0.6 * drop, 0, 0.12 * k], [t0[0] + 0.02 * k, t0[1] - 0.86 * drop, 0, 0.085 * k], [t0[0] + 0.12 * k, t0[1] - drop, 0, 0.065 * k]];
         E.head.tube(pts, 14, 12, function (x, y, z, ca, sa, R) {
           // wrinkle rings round the trunk
           const t = R.t != null ? R.t : 0;
@@ -338,7 +343,7 @@
         [-1, 1].forEach(function (s) {
           const b = E.hp(0.75, -H.D * 0.12, s * H.Wd * 0.45);
           const L2 = bull ? 1.1 : 0.55;
-          E.head.tube([[b[0], b[1], b[2], 0.075 * k], [b[0] + 0.15 * L2, b[1] - 0.45 * L2, b[2] + s * 0.06, 0.07 * k], [b[0] + 0.45 * L2, b[1] - 0.72 * L2, b[2] + s * 0.1, 0.05 * k], [b[0] + 0.78 * L2, b[1] - 0.62 * L2, b[2] + s * 0.06, 0.02 * k]], 10, 9, function (x, y, z, ca, sa, R) { return mix(0xe8dcc0, 0xd8c8a4, R.t || 0); }, true);
+          E.head.tube([[b[0], b[1], b[2], 0.075 * k], [b[0] + 0.12 * L2, b[1] - 0.32 * L2, b[2] + s * 0.06, 0.07 * k], [b[0] + 0.4 * L2, b[1] - 0.5 * L2, b[2] + s * 0.1, 0.05 * k], [b[0] + 0.72 * L2, b[1] - 0.38 * L2, b[2] + s * 0.06, 0.02 * k]], 10, 9, function (x, y, z, ca, sa, R) { return mix(0xe8dcc0, 0xd8c8a4, R.t || 0); }, true);
         });
       },
     });
@@ -352,7 +357,7 @@
       torsoKeys: [[-0.6, 0.6, 0.38, 0.16], [-0.54, 0.76, 0.3, 0.25], [-0.3, 0.8, 0.27, 0.3], [0.0, 0.79, 0.25, 0.32], [0.28, 0.76, 0.27, 0.29], [0.48, 0.72, 0.3, 0.24], [0.6, 0.62, 0.36, 0.18]],
       neck: { len: 0.14, ang: 0, r0: 0.25, r1: 0.22, w0: 0.22, w1: 0.19 },
       head: { len: 0.38, D: 0.3, Wd: 0.14, ang: 28, dx: -0.05, muzzleAt: 0.85, noseUp: 0, prof: [[-0.04, 0.42, 0.46, 0.46], [0.18, 0.5, 0.5, 0.52], [0.45, 0.38, 0.42, 0.36], [0.75, 0.28, 0.3, 0.26], [0.96, 0.26, 0.26, 0.27], [1.0, 0.26, 0.26, 0.27]] },
-      ear: { len: 0.14, w: 0.13, kind: "floppy", up: 30, out: 40, back: -40, s: 0.6, u: 0.75, t: 0.1 },
+      ear: { len: 0.2, w: 0.17, kind: "floppy", up: 35, out: 35, back: -45, s: 0.6, u: 0.8, t: 0.1 },
       eye: { r: 0.016, t: 0.3, up: 0.35, side: 0.85 },
       leg: { f: 0.065, c: 0.038, h: 0.085 }, legZ: 0.15, hoofH: 0.04,
       tail: { len: 0.2, r: 0.016, droop: 10, curl: 7, taper: 0.3, dy: 0.05 },
@@ -371,9 +376,9 @@
     return K.quad({
       fam: "hoof", L: 1.05, WH: 0.78, HH: 0.8, chest: 0.48, belly: 0.33, W: 0.29, sag: 0, barrel: 1.05, sq: 0.8, coat: coat, grazer: true, hoofH: 0.035,
       torsoKeys: [[-0.58, 0.62, 0.42, 0.18], [-0.52, 0.8, 0.32, 0.27], [-0.25, 0.84, 0.3, 0.3], [0.05, 0.84, 0.3, 0.31], [0.3, 0.82, 0.32, 0.29], [0.48, 0.76, 0.38, 0.24], [0.58, 0.66, 0.44, 0.16]],
-      neck: { len: 0.24, ang: 35, r0: 0.18, r1: 0.1, w0: 0.16, w1: 0.08 },
-      head: { len: 0.27, D: 0.15, Wd: 0.07, ang: 55, muzzleAt: 0.75 },
-      ear: { len: 0.11, w: 0.06, kind: "long", up: -5, out: 85, back: 10, s: 0.9, u: 0.6, t: 0.12 },
+      neck: { len: 0.28, ang: 42, r0: 0.18, r1: 0.11, w0: 0.16, w1: 0.09 },
+      head: { len: 0.3, D: 0.17, Wd: 0.08, ang: 55, muzzleAt: 0.75 },
+      ear: { len: 0.12, w: 0.065, kind: "long", up: -5, out: 85, back: 10, s: 0.9, u: 0.6, t: 0.12 },
       eye: { r: 0.015, t: 0.32, up: 0.28, side: 0.95 },
       leg: { f: 0.045, c: 0.022, h: 0.06 }, legZ: 0.13,
       tail: { len: 0.14, r: 0.045, droop: 80, taper: 0.3 },
@@ -471,7 +476,7 @@
       extra: bull ? function (E) {
         [-1, 1].forEach(function (s) {
           rack(E, s, {
-            len: 1.15, r: 0.032, col: 0x6e5236, tip: 0xece3cc,
+            len: 0.98, r: 0.03, col: 0x6e5236, tip: 0xece3cc,
             beam: [[0, 0, 0], [-0.08, 0.25, 0.18], [-0.22, 0.55, 0.3], [-0.38, 0.82, 0.34], [-0.48, 1.02, 0.3], [-0.5, 1.12, 0.24]],
             tines: [[0.06, 0.32, 1, 0.35, 0.05], [0.16, 0.28, 1, 0.45, 0.05], [0.38, 0.26, 0.8, 0.7, 0.0], [0.6, 0.42, 0.7, 0.75, -0.05], [0.82, 0.3, 0.55, 0.85, -0.1]],
           });
@@ -500,7 +505,7 @@
         [-1, 1].forEach(function (s) {
           const base = E.hp(0.04, E.H.D * 0.4, s * E.H.Wd * 0.6);
           const pal = 0x7a654a;
-          E.head.tube([[base[0], base[1], base[2], 0.045], [base[0] - 0.02, base[1] + 0.06, base[2] + s * 0.22, 0.04], [base[0] - 0.05, base[1] + 0.12, base[2] + s * 0.42, 0.11], [base[0] - 0.04, base[1] + 0.24, base[2] + s * 0.62, 0.16], [base[0] - 0.02, base[1] + 0.36, base[2] + s * 0.74, 0.08]], 8, 9, pal, true, { flat: 2.4, side: [0, 1, 0] });
+          E.head.tube([[base[0], base[1], base[2], 0.045], [base[0] - 0.02, base[1] + 0.06, base[2] + s * 0.22, 0.04], [base[0] - 0.05, base[1] + 0.12, base[2] + s * 0.42, 0.11], [base[0] - 0.04, base[1] + 0.24, base[2] + s * 0.62, 0.16], [base[0] - 0.02, base[1] + 0.36, base[2] + s * 0.74, 0.08]], 8, 9, pal, true, { flat: 2.4, side: [1, 0, 0] });
           for (let i = 0; i < 6; i++) {
             const t = i / 5, px = base[0] - 0.24 + t * 0.5, pz = base[2] + s * (0.64 + Math.sin(t * Math.PI) * 0.16), py = base[1] + 0.3 + Math.sin(t * Math.PI) * 0.06;
             E.head.tube([[px, py, pz, 0.03], [px + (t - 0.5) * 0.1, py + 0.16, pz + s * 0.06, 0.008]], 3, 5, mix(pal, 0xe6dcc4, 0.5), true);
@@ -568,7 +573,7 @@
   function bighorn(ram) {
     const coat = { body: 0x7a5e44, back: 0x6e543c, belly: 0xece6da, leg: 0x6a5240, face: 0x7a5e44, muzzle: 0xe8e2d6, nose: 0x2a2420, hoof: 0x2a2420, earIn: 0xc8b8a4, tail: 0x3a2e24, chin: 0xe8e2d6, sock: 0x3a3028, sockH: 0.25 };
     return K.quad({
-      fam: "hoof", L: 1.35, WH: 0.95, HH: 0.97, chest: 0.48, belly: 0.5, W: 0.2, sag: 0.02, coat: coat, grazer: true, hoofH: 0.04,
+      fam: "hoof", L: 1.35, WH: 0.95, HH: 0.97, chest: 0.48, belly: 0.5, W: 0.2, sag: 0.02, coat: coat, grazer: true, hoofH: 0.04, sq: 1, tuck: 0.08,
       neck: { len: 0.34, ang: 40, r0: 0.17, r1: 0.11, w0: 0.13, w1: 0.08 },
       head: { len: 0.3, D: 0.15, Wd: 0.07, ang: 55, muzzleAt: 0.78 },
       ear: { len: 0.1, w: 0.05, kind: "point", up: 10, out: 70, back: 15, s: 0.85, u: 0.6, t: 0.12 },
@@ -633,7 +638,7 @@
       extra: function (E) {
         // the bristle ridge down the spine, tallest over the shoulders
         const st = [];
-        for (let i = 0; i <= 8; i++) { const t = i / 8, x = lerp(-0.4, 0.62, t); st.push({ x: x, y: (t < 0.7 ? lerp(0.82, 0.92, t / 0.7) : lerp(0.92, 0.86, (t - 0.7) / 0.3)), z: 0, rt: 0.02 + 0.06 * Math.sin(t * Math.PI * 0.9), rb: 0.01, w: 0.02, wts: [0, 1], t: t }); }
+        for (let i = 0; i <= 8; i++) { const t = i / 8, x = lerp(-0.45, 0.6, t); st.push({ x: x, y: E.topAt(x) - 0.03, z: 0, rt: 0.03 + 0.07 * Math.sin(t * Math.PI * 0.85), rb: 0.02, w: 0.03, wts: [0, 1], t: t }); }
         E.torso.loft(st, 6, function (x, y, z) { return shade(0x1e1814, K.grain(x * 9, y * 9, z * 9)); }, { capLen: 0.6 }, true);
         const n = E.hp(1.0, 0, 0);
         E.head.ellipsoid(n[0] + 0.004, n[1], 0, 0.012, 0.05, 0.055, 10, 0x3a2e2a, true, 3);
@@ -666,19 +671,19 @@
   function giraffe() {
     const coat = { body: 0xf0e2c4, back: 0xead8b8, belly: 0xf4ead4, leg: 0xf2e6cc, face: 0xe8d4b0, muzzle: 0xe2ceac, nose: 0x3a2a20, hoof: 0x2a2420, earIn: 0xf4ead4, tail: 0xe8d4b0, tailTip: 0x1e1612, chin: 0xf4ead4, mane: 0x6a3e1c };
     return K.quad({
-      fam: "hoof", L: 1.75, WH: 3.0, HH: 2.3, chest: 1.05, belly: 1.72, W: 0.33, coat: coat, grazer: true, pattern: "giraffe", uScale: 0.9, hoofH: 0.09,
-      torsoKeys: [[-0.92, 2.15, 1.95, 0.15], [-0.85, 2.3, 1.78, 0.25], [-0.55, 2.38, 1.76, 0.3], [-0.1, 2.6, 1.72, 0.33], [0.35, 2.95, 1.75, 0.33], [0.62, 3.0, 1.85, 0.28], [0.85, 2.85, 2.05, 0.2], [0.92, 2.7, 2.2, 0.15]],
-      neck: { len: 1.95, ang: 60, r0: 0.3, r1: 0.12, w0: 0.22, w1: 0.09, crest: 0.95, dewlap: 1.05, arch: 0.02 },
+      fam: "hoof", L: 2.1, WH: 3.0, HH: 2.35, chest: 1.2, belly: 1.62, W: 0.42, coat: coat, grazer: true, pattern: "giraffe", uScale: 0.9, hoofH: 0.09,
+      torsoKeys: [[-1.1, 2.15, 1.85, 0.2], [-1.0, 2.35, 1.66, 0.32], [-0.65, 2.42, 1.6, 0.4], [-0.15, 2.62, 1.55, 0.44], [0.35, 2.95, 1.6, 0.44], [0.7, 3.02, 1.72, 0.38], [0.98, 2.85, 1.95, 0.27], [1.08, 2.7, 2.12, 0.18]],
+      neck: { len: 1.95, ang: 60, r0: 0.38, r1: 0.13, w0: 0.27, w1: 0.1, crest: 0.95, dewlap: 1.05, arch: 0.02 },
       head: { len: 0.6, D: 0.24, Wd: 0.1, ang: 55, muzzleAt: 0.8 },
       ear: { len: 0.17, w: 0.08, kind: "long", up: 5, out: 80, back: 15, s: 0.9, u: 0.6, t: 0.12 },
       eye: { r: 0.03, t: 0.3, up: 0.32, side: 0.95 },
       legZ: 0.19,
       tail: { len: 0.9, r: 0.03, droop: 84, taper: 0.5, tuft: 0.06, tipAt: 0.85 },
       legPts: function (front) {
-        const x = front ? 0.62 : -0.64;
+        const x = front ? 0.72 : -0.78;
         return front
-          ? [[x - 0.03, 2.35, 0.13, 0.12, 0.1], [x - 0.07, 1.75, 0.11, 0.1, 0.08], [x - 0.04, 1.05, 0.07, 0.07, 0.065], [x - 0.03, 0.85, 0.06, 0.065, 0.06], [x - 0.02, 0.45, 0.05, 0.05, 0.045], [x - 0.01, 0.18, 0.055, 0.055, 0.05], [x + 0.03, 0.09, 0.05, 0.045, 0.048], [x + 0.05, 0.004, 0.07, 0.06, 0.065]]
-          : [[x + 0.04, 2.05, 0.16, 0.14, 0.11], [x + 0.14, 1.55, 0.13, 0.13, 0.1], [x + 0.02, 1.1, 0.08, 0.09, 0.065], [x - 0.08, 0.85, 0.06, 0.08, 0.055], [x - 0.07, 0.45, 0.05, 0.05, 0.045], [x - 0.05, 0.18, 0.055, 0.055, 0.05], [x - 0.02, 0.09, 0.05, 0.045, 0.048], [x, 0.004, 0.07, 0.06, 0.065]];
+          ? [[x - 0.03, 2.35, 0.16, 0.15, 0.12], [x - 0.07, 1.65, 0.13, 0.12, 0.1], [x - 0.04, 1.05, 0.08, 0.08, 0.07], [x - 0.03, 0.85, 0.06, 0.065, 0.06], [x - 0.02, 0.45, 0.05, 0.05, 0.045], [x - 0.01, 0.18, 0.055, 0.055, 0.05], [x + 0.03, 0.09, 0.05, 0.045, 0.048], [x + 0.05, 0.004, 0.07, 0.06, 0.065]]
+          : [[x + 0.04, 2.05, 0.2, 0.18, 0.13], [x + 0.14, 1.55, 0.15, 0.15, 0.11], [x + 0.02, 1.1, 0.09, 0.1, 0.07], [x - 0.08, 0.85, 0.06, 0.08, 0.055], [x - 0.07, 0.45, 0.05, 0.05, 0.045], [x - 0.05, 0.18, 0.055, 0.055, 0.05], [x - 0.02, 0.09, 0.05, 0.045, 0.048], [x, 0.004, 0.07, 0.06, 0.065]];
       },
       extra: function (E) {
         crestLine(E, E.neck, 0.05, 0.98, 0.07, 0.05, 0.03, coat.mane, true, 0.9);
@@ -697,7 +702,7 @@
     return K.quad({
       fam: "hoof", L: 2.6, WH: 1.75, HH: 1.68, chest: 0.98, belly: 0.62, W: 0.55, hump: 0.12, sag: 0.08, coat: coat, grazer: true, hoofH: 0.07, sq: 0.88,
       torsoKeys: [[-1.35, 1.4, 1.0, 0.3], [-1.25, 1.65, 0.75, 0.46], [-0.85, 1.7, 0.66, 0.54], [-0.25, 1.66, 0.6, 0.58], [0.35, 1.82, 0.62, 0.56], [0.75, 1.85, 0.7, 0.5], [1.1, 1.65, 0.8, 0.4], [1.28, 1.42, 0.92, 0.3]],
-      neck: { len: 0.4, ang: -8, r0: 0.5, r1: 0.42, w0: 0.42, w1: 0.34, crest: 1.0, dewlap: 1.1 },
+      neck: { len: 0.45, ang: -12, r0: 0.42, r1: 0.38, w0: 0.36, w1: 0.31, crest: 1.0, dewlap: 1.1 },
       head: { len: 0.8, D: 0.48, Wd: 0.2, ang: 60, dy: 0.05, muzzleAt: 0.85, noseUp: 0.1, prof: [[-0.05, 0.4, 0.42, 0.44], [0.15, 0.48, 0.48, 0.5], [0.45, 0.38, 0.42, 0.4], [0.75, 0.3, 0.34, 0.36], [0.96, 0.32, 0.32, 0.44], [1.0, 0.26, 0.26, 0.38]] },
       ear: { len: 0.2, w: 0.1, kind: "long", up: 60, out: 30, back: 25, s: 0.75, u: 0.85, t: 0.05 },
       eye: { r: 0.022, t: 0.45, up: 0.0, side: 0.97 },
@@ -755,8 +760,8 @@
     return K.quad({
       fam: "bear", L: 0.95, WH: 1.3, HH: 0.86, chest: 0.62, belly: 0.5, W: 0.34, coat: coat, jaw: true, sq: 0.9,
       torsoKeys: [[-0.52, 0.86, 0.56, 0.24], [-0.44, 1.0, 0.48, 0.3], [-0.2, 1.12, 0.48, 0.34], [0.05, 1.28, 0.52, 0.38], [0.28, 1.4, 0.62, 0.38], [0.42, 1.35, 0.75, 0.3], [0.5, 1.22, 0.88, 0.2]],
-      neck: { len: 0.14, ang: 10, r0: 0.22, r1: 0.18 },
-      head: { len: 0.3, D: 0.34, Wd: 0.14, ang: 8, dy: -0.05, muzzleAt: 0.6, prof: [[-0.1, 0.62, 0.36, 0.42], [0.1, 0.62, 0.46, 0.52], [0.4, 0.42, 0.5, 0.52], [0.7, 0.24, 0.42, 0.42], [0.92, 0.22, 0.34, 0.36], [1.0, 0.16, 0.24, 0.26]] },
+      neck: { len: 0.2, ang: 38, r0: 0.22, r1: 0.18 },
+      head: { len: 0.3, D: 0.36, Wd: 0.15, ang: 8, dx: 0.06, dy: 0.02, muzzleAt: 0.6, prof: [[-0.1, 0.62, 0.36, 0.42], [0.1, 0.62, 0.46, 0.52], [0.4, 0.42, 0.5, 0.52], [0.7, 0.24, 0.42, 0.42], [0.92, 0.22, 0.34, 0.36], [1.0, 0.16, 0.24, 0.26]] },
       ear: { len: 0.04, w: 0.045, kind: "round", up: 0, out: 85, back: 0, s: 0.98, u: 0.0, t: 0.32 },
       eye: { r: 0.017, t: 0.5, up: 0.12, side: 0.72, lid: 0x0e0c0c },
       legZ: 0.3, claws: 0,
@@ -766,7 +771,7 @@
           : [[-0.32, 0.8, 0.14, 0.14, 0.11], [-0.18, 0.55, 0.12, 0.12, 0.1], [-0.12, 0.38, 0.1, 0.1, 0.085], [-0.22, 0.12, 0.075, 0.075, 0.07], [-0.2, 0.03, 0.06, 0.06, 0.07], [-0.08, 0.004, 0.05, 0.04, 0.07]];
       },
       paint: function (part, x, y, z, ca, sa, t, col) {
-        if (silver && part === "torso" && ca > 0.2 && x < 0.15 && x > -0.5) return mix(col, 0x9a9894, smooth(0.2, 0.7, ca) * (1 - smooth(-0.05, 0.15, x)));
+        if (silver && part === "torso" && ca > 0.2 && x < 0.15 && x > -0.5) return mix(col, 0x7e7c78, smooth(0.2, 0.7, ca) * (1 - smooth(-0.05, 0.15, x)));
         if (part === "torso" && ca < -0.4 && x > 0.1) return 0x2a2626;     // the bare leathery chest
         return shade(col, 0.92 + 0.14 * Math.abs(Math.sin(x * 53 + z * 31 + y * 23)));
       },
@@ -782,7 +787,12 @@
   }
 
   // ================================================================ DOGS
+  // the dog's torso: a deep keel of a chest between the elbows, the loin
+  // tucked up hard, a short sloping croup (x / L, y / WH, w / W)
+  const DOG_TORSO = [[-0.51, 0.84, 0.62, 0.5], [-0.46, 0.97, 0.56, 0.78], [-0.32, 0.97, 0.6, 0.85], [-0.12, 0.96, 0.66, 0.88], [0.08, 0.98, 0.52, 1.0], [0.24, 1.02, 0.45, 0.95], [0.36, 0.98, 0.48, 0.78], [0.43, 0.84, 0.58, 0.5]];
   function canid(o) {
+    if (!o.torsoKeys && !o.noKeys) o.torsoKeys = scaleKeys(DOG_TORSO, o.L, o.WH, o.W, 0);
+    if (o.frontX == null) o.frontX = 0.26 * o.L;
     return K.quad(Object.assign({ fam: "dog", jaw: true, sq: 1, tuck: 0.06 }, o));
   }
   function wolf(arctic) {
@@ -826,8 +836,8 @@
       head: { len: 0.17, D: 0.08, Wd: 0.048, ang: 12, muzzleAt: 0.48, prof: [[-0.05, 0.4, 0.38, 0.42], [0.15, 0.5, 0.46, 0.55], [0.38, 0.44, 0.44, 0.5], [0.5, 0.3, 0.36, 0.3], [0.78, 0.2, 0.26, 0.17], [0.97, 0.18, 0.2, 0.14], [1.0, 0.12, 0.14, 0.1]] },
       ear: { len: 0.085, w: 0.06, kind: "point", up: 75, out: 18, back: 8, s: 0.62, u: 0.85, t: 0.14, back_c: 0x1e1a18 },
       eye: { r: 0.009, t: 0.38, up: 0.4, side: 0.82 },
-      leg: { f: 0.022, c: 0.012, h: 0.036 }, paw: 0.02, legZ: 0.045,
-      tail: { len: 0.4, r: 0.04, droop: 70, taper: 0.1, bush: 0.75, tipAt: 0.85 },
+      leg: { f: 0.022, c: 0.012, h: 0.036 }, paw: 0.02, legZ: 0.066,
+      tail: { len: 0.4, r: 0.04, droop: 42, curl: 0.5, taper: 0.1, bush: 0.75, tipAt: 0.85 },
       paint: function (part, x, y, z, ca, sa, t, col) {
         if ((part === "legF" || part === "legH") && y > 0.2) return mix(0x1e1a18, coat.body, smooth(0.2, 0.3, y));
         if (part === "neck" && ca < -0.2) return 0xf6f2ec;
@@ -863,13 +873,13 @@
     const D = { cottontail: [0.3, 0.17, 0.22, 0.09, 0.08], jack: [0.44, 0.27, 0.3, 0.17, 0.12], snowshoe: [0.36, 0.2, 0.25, 0.11, 0.1] }[kind];
     const L = D[0], WH = D[1], HH = D[2];
     return K.quad({
-      fam: "hare", L: L, WH: WH, HH: HH, chest: WH * 0.6, belly: WH * 0.38, W: L * 0.2, sq: 1, coat: C, grazer: true,
+      fam: "hare", L: L, WH: WH, HH: HH, chest: WH * 0.6, belly: WH * 0.38, W: L * 0.2, sq: 1, coat: C,
       torsoKeys: [[-0.52 * L, HH * 0.75, HH * 0.42, L * 0.12], [-0.42 * L, HH * 1.0, HH * 0.25, L * 0.2], [-0.15 * L, HH * 0.98, HH * 0.32, L * 0.21], [0.15 * L, WH * 1.0, WH * 0.4, L * 0.18], [0.38 * L, WH * 0.96, WH * 0.42, L * 0.15], [0.5 * L, WH * 0.82, WH * 0.5, L * 0.1]],
       neck: { len: L * 0.18, ang: 50, r0: L * 0.13, r1: L * 0.1 },
-      head: { len: L * 0.38, D: L * 0.25, Wd: L * 0.1, ang: 35, muzzleAt: 0.7, prof: [[-0.05, 0.42, 0.42, 0.44], [0.2, 0.5, 0.5, 0.52], [0.5, 0.44, 0.46, 0.44], [0.8, 0.32, 0.36, 0.32], [0.97, 0.26, 0.28, 0.24], [1.0, 0.18, 0.2, 0.16]] },
-      ear: { len: D[3], w: D[3] * 0.38, kind: "long", up: 72, out: 12, back: 30, s: 0.4, u: 0.9, t: 0.05, tip: kind === "cottontail" ? null : 0x1a1614 },
+      head: { len: L * 0.3, D: L * 0.26, Wd: L * 0.11, ang: 38, muzzleAt: 0.7, prof: [[-0.05, 0.42, 0.42, 0.44], [0.2, 0.5, 0.5, 0.52], [0.5, 0.44, 0.46, 0.44], [0.8, 0.32, 0.36, 0.32], [0.97, 0.26, 0.28, 0.24], [1.0, 0.18, 0.2, 0.16]] },
+      ear: { len: D[3], w: D[3] * 0.36, kind: "long", up: 70, out: 14, back: 32, s: 0.45, u: 0.9, t: 0.05, face: "side", tip: kind === "cottontail" ? null : 0x1a1614 },
       eye: { r: L * 0.04, t: 0.38, up: 0.3, side: 0.9, lid: shade(C.face, 1.2) },
-      leg: { f: L * 0.05, c: L * 0.035, h: L * 0.09 }, legZ: L * 0.11, frontX: 0.32 * L, hindX: -0.25 * L,
+      leg: { f: L * 0.05, c: L * 0.035, h: L * 0.09 }, legZ: Math.max(L * 0.11, 0.04), frontX: 0.32 * L, hindX: -0.25 * L,
       tail: { len: 0.02, r: 0.02, droop: -30, taper: 0, tuft: D[4] * 0.3 },
     });
   }

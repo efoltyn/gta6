@@ -182,9 +182,12 @@
     if (pivot && headMesh) {
       const hb = headMesh.geometry.boundingBox || (headMesh.geometry.computeBoundingBox(), headMesh.geometry.boundingBox);
       const tx = headMesh.position.x + hb.max.x - pivot[0], ty = headMesh.position.y + hb.min.y - pivot[1];
-      for (let k = 1; k <= 30; k++) {
+      // the lowest the muzzle can go, never past ~63 degrees (the rest of a
+      // real graze is splayed forelegs, which a rigid leg cannot do)
+      let best = 1e9;
+      for (let k = 1; k <= 22; k++) {
         const an = k * 0.05, y = pivot[1] + tx * Math.sin(-an) + ty * Math.cos(-an);
-        grazeA = an;
+        if (y < best) { best = y; grazeA = an; }
         if (y <= 0.1) break;
       }
     } else pivot = null;

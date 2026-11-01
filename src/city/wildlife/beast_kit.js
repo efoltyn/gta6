@@ -507,7 +507,7 @@
           let c = ca < -0.2 ? mix(C.face, C.earIn, smooth(-0.2, -0.7, ca) * (1 - smooth(0.7, 1, R.t != null ? R.t : t) * 0.4)) : (EA.back_c || C.face);
           if (EA.tip && (R.t != null ? R.t : t) > 0.72) c = EA.tip;
           return shade(c, grain(x, y, z));
-        }, { side: [0, 0, 1], capLen: 0.5, capN: 1 }, true);
+        }, { side: EA.face === "side" ? [1, 0, 0] : [0, 0, 1], capLen: 0.5, capN: 1 }, true);
       });
     }
     // lower jaw (predators): its own mesh, low and forward in the cluster
@@ -585,11 +585,11 @@
           [x + 0.08 * L, 0.004, f * 0.3, f * 0.3, f * 0.45],
         ];
         return [
-          [x + 0.12 * L, HH * 0.75, h * 1.3, h * 1.2, h * 0.95],
-          [x + 0.1 * L, HH * 0.35, h * 1.05, h * 1.1, h * 0.85],
-          [x - 0.06 * L, HH * 0.14, h * 0.6, h * 0.6, h * 0.5],
-          [x - 0.02 * L, 0.03, h * 0.45, h * 0.4, h * 0.5],
-          [x + 0.2 * L, 0.004, h * 0.3, h * 0.25, h * 0.45],
+          [x + 0.06 * L, HH * 0.75, h * 1.2, h * 1.1, h * 0.9],
+          [x + 0.08 * L, HH * 0.38, h * 1.05, h * 1.1, h * 0.85],
+          [x - 0.05 * L, HH * 0.14, h * 0.6, h * 0.6, h * 0.5],
+          [x - 0.03 * L, 0.03, h * 0.45, h * 0.4, h * 0.5],
+          [x + 0.1 * L, 0.004, h * 0.3, h * 0.25, h * 0.45],
         ];
       }
       // digitigrade: cats and dogs
@@ -621,7 +621,14 @@
       const leg = P.parts["leg" + nm] = new Part("leg" + nm, UV);
       const z = s * (front ? lz : lz * (o.hindZ || 1.02));
       const lst = [];
-      for (let i = 0; i < pts.length; i++) lst.push({ x: pts[i][0], y: pts[i][1], z: z - s * (i / (pts.length - 1)) * (o.legIn || 0) * lz, rt: pts[i][2], rb: pts[i][3], w: pts[i][4], wts: W1, t: i / (pts.length - 1) });
+      // the leg's root sits INSIDE the body (shoulder blade / thigh under the
+      // skin), splaying out to the foot's track: its top never pokes out
+      // through the flank as a flap
+      const inK = o.legRoot != null ? o.legRoot : 0.62;
+      for (let i = 0; i < pts.length; i++) {
+        const u = i / (pts.length - 1), k2 = Math.min(1, inK + (1 - inK) * Math.min(1, u * 2.2));
+        lst.push({ x: pts[i][0], y: pts[i][1], z: z * k2, rt: pts[i][2], rb: pts[i][3], w: i === 0 ? Math.min(pts[i][4], Math.max(0.01, BW * 0.92 - Math.abs(z) * inK) * 0.9) : pts[i][4], wts: W1, t: u });
+      }
       const hooved = fam === "hoof" || fam === "pig";
       leg.loft(lst, o.legSegs || 9, function (x, y, z2, ca, sa, R, t) {
         let c = mix(C.body, C.leg, smooth(WH * 0.62, WH * 0.4, y));
@@ -631,6 +638,9 @@
         if (paint) c = paint(front ? "legF" : "legH", x, y, z2, ca, sa, t, c);
         return y < hoofH * 1.05 && hooved ? shade(c, 0.9 + 0.2 * clamp01(y / hoofH)) : shade(c, grain(x, y, z2));
       }, { side: [0, 0, 1], capA: true, capB: true, capLen: 0.3, capN: 2, uScale: uS }, false);
+      // a flat sole: the end cap must not dip under the ground plane (the
+      // rig reads a leg's bottom off its bounding box)
+      for (let i = 1; i < leg.G.p.length; i += 3) if (leg.G.p[i] < 0) leg.G.p[i] = 0;
       // claws on paws (bears / dogs / cats show them little; bears a lot)
       if (o.claws) {
         const last = pts[pts.length - 1];
@@ -684,7 +694,12 @@
       const r = (a.rt + (b.rt - a.rt) * u) * (lift != null ? lift : 0.92);
       return [a.x + tx * u - ty / tl * r, a.y + ty * u + tx / tl * r];
     }
-    if (o.extra) o.extra({ P: P, crestAt: crestAt, head: head, torso: torso, neck: neckPart, hp: hp, H: H, ax: ax, up: up, C: C, L: L, WH: WH, HH: HH, chest: chest, BW: BW, nx0: nx0, ny0: ny0, nx1: nx1, ny1: ny1, xr: xr, xf: xf, mix: mix, shade: shade, grain: grain, smooth: smooth, Part: Part });
+    // the torso's top line at x (for ridges, humps, saddles)
+    function topAt(x) {
+      for (let i = 0; i < rows.length - 1; i++) if (x >= rows[i][0] && x <= rows[i + 1][0]) { const u = (x - rows[i][0]) / ((rows[i + 1][0] - rows[i][0]) || 1); return rows[i][1] + (rows[i + 1][1] - rows[i][1]) * u; }
+      return x < rows[0][0] ? rows[0][1] : rows[rows.length - 1][1];
+    }
+    if (o.extra) o.extra({ P: P, crestAt: crestAt, topAt: topAt, head: head, torso: torso, neck: neckPart, hp: hp, H: H, ax: ax, up: up, C: C, L: L, WH: WH, HH: HH, chest: chest, BW: BW, nx0: nx0, ny0: ny0, nx1: nx1, ny1: ny1, xr: xr, xf: xf, mix: mix, shade: shade, grain: grain, smooth: smooth, Part: Part });
     return P;
   }
 
