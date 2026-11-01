@@ -562,7 +562,72 @@
       const w = clamp((sp.fade1 - x) / (sp.fade1 - sp.fade0), 0, 1);
       r = lerp(1, r, w); gg = lerp(1, gg, w); b = lerp(1, b, w);
     }
+    /* sp.cape: a darker saddle over the back (a dolphin's dorsal cape, a
+       seal's darker spine), as a SMOOTH multiplier — sine-ramped across the
+       flank between s0 and s1 and feathered in and out along x between
+       x0 and x1 (feather f) — so it reads as a blended colour field, not
+       a staircase of painted quads. */
+    const cp = sp && sp.cape;
+    if (cp) {
+      const across = clamp((sn - cp.s0) / Math.max(1e-3, cp.s1 - cp.s0), 0, 1);
+      const f = cp.f || 0.3;
+      const along = clamp((x - cp.x0) / f, 0, 1) * clamp((cp.x1 - x) / f, 0, 1);
+      const w = across * across * (3 - 2 * across) * along;
+      const kk = lerp(1, cp.k, w);
+      r *= kk; gg *= kk; b *= kk;
+    }
     return [r, gg, b];
+  }
+  /* A low dome raised off the skin: a tubercle, a barnacle, a knuckle on a
+     flipper. c = base centre, n = outward normal, r = base radius, h = height.
+     Six-sided, so a hundred of them in one Shell is still cheap. */
+  function dome(sh, gi, c, n, r, h) {
+    const t1 = norm3(Math.abs(n[0]) < 0.9 ? cross3(n, [1, 0, 0]) : cross3(n, [0, 1, 0]));
+    const t2 = norm3(cross3(n, t1));
+    const ring = [];
+    for (let k = 0; k < 6; k++) {
+      const a = k / 6 * Math.PI * 2, ca = Math.cos(a) * r, sa = Math.sin(a) * r;
+      ring.push([c[0] + t1[0] * ca + t2[0] * sa - n[0] * r * 0.2, c[1] + t1[1] * ca + t2[1] * sa - n[1] * r * 0.2,
+        c[2] + t1[2] * ca + t2[2] * sa - n[2] * r * 0.2]);
+    }
+    const mid = [], top = [c[0] + n[0] * h, c[1] + n[1] * h, c[2] + n[2] * h];
+    for (let k = 0; k < 6; k++) {
+      const p = ring[k];
+      mid.push([lerp(p[0], top[0], 0.45) + n[0] * h * 0.35, lerp(p[1], top[1], 0.45) + n[1] * h * 0.35, lerp(p[2], top[2], 0.45) + n[2] * h * 0.35]);
+    }
+    for (let k = 0; k < 6; k++) {
+      const k2 = (k + 1) % 6;
+      const fn = function (a, b, d) {
+        const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
+        const cr = cross3(e1, e2), mx = (a[0] + b[0] + d[0]) / 3 - c[0], my = (a[1] + b[1] + d[1]) / 3 - c[1], mz = (a[2] + b[2] + d[2]) / 3 - c[2];
+        return cr[0] * mx + cr[1] * my + cr[2] * mz >= 0 ? cr : [-cr[0], -cr[1], -cr[2]];
+      };
+      sh.polyN(gi, fn(ring[k], ring[k2], mid[k2]), [ring[k], ring[k2], mid[k2], mid[k]]);
+      sh.polyN(gi, fn(mid[k], mid[k2], top), [mid[k], mid[k2], top]);
+    }
+  }
+  /* A thin painted line lying ON the skin of `rings`: a mouth line, a
+     throat pleat, an eye stripe. pts = [[x, ang], ...] along the line; w =
+     width (m). Laid as a quad strip a few mm proud, facing the skin normal. */
+  function skinLine(sh, gi, rings, pts, w, lift) {
+    const L = [];
+    for (let i = 0; i < pts.length; i++) {
+      const sk = onSkin(rings, pts[i][0], pts[i][1], lift == null ? 0.004 : lift);
+      L.push(sk);
+    }
+    for (let i = 0; i < L.length - 1; i++) {
+      const a = L[i], b = L[i + 1];
+      const dir = norm3([b.p[0] - a.p[0], b.p[1] - a.p[1], b.p[2] - a.p[2]]);
+      const sa = norm3(cross3(a.n, dir)), sb = norm3(cross3(b.n, dir));
+      const ww = (i === 0 || i === L.length - 2) ? w * 0.6 : w;
+      const P = [
+        [a.p[0] - sa[0] * ww / 2, a.p[1] - sa[1] * ww / 2, a.p[2] - sa[2] * ww / 2],
+        [b.p[0] - sb[0] * ww / 2, b.p[1] - sb[1] * ww / 2, b.p[2] - sb[2] * ww / 2],
+        [b.p[0] + sb[0] * ww / 2, b.p[1] + sb[1] * ww / 2, b.p[2] + sb[2] * ww / 2],
+        [a.p[0] + sa[0] * ww / 2, a.p[1] + sa[1] * ww / 2, a.p[2] + sa[2] * ww / 2],
+      ];
+      sh.polyN(gi, a.n, P);
+    }
   }
   const SKIN_SHADE_MATS = new Map();   // source material -> its vertex-coloured twin
   function shadedTwin(mat) {
@@ -4125,48 +4190,100 @@
     // units, so 0.9 made a 4.4 m dolphin — as long as a great white. 0.66 is
     // a 3.2 m mean.
     spd: 3.0, danger: 0, aquatic: true, scale: 0.66, color: 0x5c6873,
+    /* THE BOTTLENOSE, from the side: a dark dorsal CAPE over mid-grey flanks
+       over a pale belly (three tones, blended, not two); a domed MELON that
+       drops in a clean crease onto a short thick BEAK; the up-turned mouth
+       line; a small dark eye with the faint eye-to-flipper stripe; the
+       crescent blowhole on top behind the melon; a tall falcate dorsal; dark
+       pointed flippers; flukes notched at the median. Frame and part layout
+       are the same as before (hull + beak + fins + tail sleeve + flukes,
+       nose +X), so the swim rig and every spawner read it unchanged. */
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
-      const grey = m(0x5c6873), pale = m(0xd6dde1), eye = m(0x0d1013);
-      const rings = bodyRings(-1.45, 2.10, 0.82,
-        [0.21, 0.38, 0.46, 0.47, 0.42, 0.30, 0.14],      // [0] = the tail weld
-        [0.115, 0.33, 0.41, 0.42, 0.37, 0.26, 0.12], 12);
-      const hull = hullMesh([grey, pale], rings,
-        { sides: 12, bellyCut: [-0.46, -0.30, -0.24, -0.26, -0.34, -0.44], ragged: 0.06, seed: 97 });
+      const grey = m(0x66727c), pale = m(0xe2e6e7), cape = m(0x3d4851), eye = m(0x0d1013);
+      const lineM = m(0x2a3238);
+      // the melon rides high: ring centres lift toward the head
+      const rings = bodyRings(-1.45, 2.24, function (t) {
+        return 0.82 + Math.max(0, t - 0.70) * 0.20 - Math.max(0, t - 0.92) * 0.9;
+      },
+        [0.21, 0.36, 0.45, 0.47, 0.44, 0.38, 0.30, 0.24, 0.19, 0.075],      // [0] = the tail weld
+        [0.115, 0.30, 0.40, 0.42, 0.39, 0.33, 0.27, 0.215, 0.165, 0.07], 18);
+      const hull = hullMesh([grey, pale], rings, {
+        sides: 16, bellyCut: [-0.46, -0.32, -0.24, -0.22, -0.28, -0.38, -0.46], ragged: 0.05, seed: 97,
+        shade: { cape: { k: 0.62, s0: 0.30, s1: 0.78, x0: -1.25, x1: 1.98, f: 0.55 } },
+      });
       hull.name = "cetaceanHull"; g.add(hull);
-      // melon + short thick beak
-      const beak = hullMesh([grey, pale], bodyRings(-0.20, 0.50, 0,
-        [0.15, 0.075], [0.16, 0.070], 4), { sides: 10, bellyCut: [-0.30], seed: 98 });
-      beak.position.set(2.06, 0.760, 0); g.add(beak);
-      [0.20, -0.20].forEach(function (z) {
-        const e = new T.Mesh(cachedGeom("eye|0.045", function () {
-          return new T.SphereGeometry(0.045, 7, 5);
-        }), eye);
-        e.position.set(1.88, 0.930, z); g.add(e);
+      // THE BEAK: low on the face, so the melon stands proud above it
+      const beakRings = bodyRings(-0.24, 0.42, 0, [0.125, 0.10, 0.082, 0.060, 0.034], [0.14, 0.105, 0.082, 0.058, 0.032], 6);
+      const beak = hullMesh([grey, pale], beakRings, { sides: 12, bellyCut: [-0.10], seed: 98 });
+      beak.position.set(2.12, 0.76, 0); g.add(beak);
+      // face details, merged: mouth lines, eye stripes, blowhole
+      const face = meshOf(cachedGeom("dolphin-face2", function () {
+        const sh = new Shell();
+        [1, -1].forEach(function (s2) {
+          // the mouth: along the beak just below its midline, curling up at the corner
+          const mp = [];
+          for (let k = 0; k <= 8; k++) {
+            const x = lerp(0.38, -0.20, k / 8);
+            const up = k > 5 ? (k - 5) / 3 : 0;
+            mp.push([x, (-0.30 + 0.42 * up * up) * (s2 > 0 ? 1 : 1)]);
+          }
+          const lp = mp.map(function (q) { return [q[0], s2 > 0 ? q[1] : Math.PI - q[1]]; });
+          const off = beakRings.map(function (r) { return r; });
+          // lay on the beak's own rings, then shift into the body frame
+          const sub = new Shell();
+          skinLine(sub, 0, off, lp, 0.016, 0.003);
+          for (let v = 0; v < sub.p.length; v += 3) { sub.p[v] += 2.12; sub.p[v + 1] += 0.76; }
+          const base = sh.p.length / 3;
+          for (let v = 0; v < sub.p.length; v++) sh.p.push(sub.p[v]);
+          (sub.g[0] || []).forEach(function (ix) { (sh.g[0] || (sh.g[0] = [])).push(ix + base); });
+          // eye stripe: from behind the eye, down and back toward the flipper
+          const sa = s2 > 0 ? 0 : Math.PI;
+          const es = [[1.78, 0.05], [1.55, -0.10], [1.30, -0.26], [1.10, -0.36]].map(function (q) {
+            return [q[0], s2 > 0 ? q[1] : Math.PI - q[1]];
+          });
+          skinLine(sh, 1, rings, es, 0.03, 0.002);
+          void sa;
+        });
+        // the blowhole: a small crescent on the crown, horns pointing forward
+        const bh = [];
+        for (let k = 0; k <= 6; k++) {
+          const a = -0.9 + 1.8 * k / 6;
+          bh.push([1.60 + Math.cos(a) * 0.035 - 0.03, Math.PI / 2 + Math.sin(a) * 0.10]);
+        }
+        skinLine(sh, 0, rings, bh, 0.018, 0.003);
+        return sh.geom();
+      }), [lineM, m(0x56616a)]);
+      g.add(face);
+      // the eyes, half-sunk in the skin just above the gape
+      [1, -1].forEach(function (s2) {
+        const sk = onSkin(rings, 1.86, s2 > 0 ? 0.02 : Math.PI - 0.02, -0.012);
+        const e = new T.Mesh(cachedGeom("eye|0.04", function () { return new T.SphereGeometry(0.04, 8, 6); }), eye);
+        e.position.set(sk.p[0], sk.p[1], sk.p[2]); e.scale.set(1.2, 0.85, 1); g.add(e);
       });
       function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([grey], [0.00, 1.22, 0], {           // FALCATE — swept hard back
-        span: 0.86, chordRoot: 0.62, chordTip: 0.05, sweep: 0.72, concavity: 0.34,
-        leadBow: 0.06, rearTipH: 0.08, rearTipBack: 0.20, apexRound: 0.07,
-        thick: 0.09, spanSteps: 5, chordSteps: 4, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
+      fin([cape], [0.00, 1.22, 0], {           // FALCATE — swept hard back
+        span: 0.86, chordRoot: 0.66, chordTip: 0.05, sweep: 0.72, concavity: 0.36,
+        leadBow: 0.08, rearTipH: 0.08, rearTipBack: 0.22, apexRound: 0.07,
+        thick: 0.09, spanSteps: 6, chordSteps: 4, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
       });
       [1, -1].forEach(function (s2) {
-        fin([grey, pale], [0.86, 0.560, s2 * 0.33], {
-          span: 0.62, chordRoot: 0.38, chordTip: 0.05, sweep: 0.56, concavity: 0.22,
-          rearTipBack: 0.12, apexRound: 0.10, thick: 0.06, spanSteps: 5, chordSteps: 3,
-          under: true, spanDir: [-0.42, -0.34, s2 * 0.84], chordDir: [1, 0, s2 * 0.1],
+        fin([cape, grey], [0.92, 0.56, s2 * 0.33], {
+          span: 0.60, chordRoot: 0.36, chordTip: 0.04, sweep: 0.60, concavity: 0.22,
+          leadBow: 0.06, rearTipBack: 0.12, apexRound: 0.08, thick: 0.06, spanSteps: 5, chordSteps: 3,
+          under: true, spanDir: [-0.46, -0.36, s2 * 0.81], chordDir: [1, 0, s2 * 0.1],
         });
       });
-      tailSleeve(g, [grey, pale], rings, {
-        at: [-1.62, 0.82], x0: -0.6, x1: 0.18, tipRy: 0.045, tipRz: 0.034,
-        sides: 12, bellyCut: [-0.40], ragged: 0.04, seed: 99,
+      tailSleeve(g, [cape, pale], rings, {
+        at: [-1.62, 0.82], x0: -0.6, x1: 0.18, tipRy: 0.05, tipRz: 0.032,
+        sides: 12, bellyCut: [-0.55], ragged: 0.04, seed: 99,
       });
-      const fluke = finsMesh([grey, pale], [-2.02, 0.82, 0], [1, -1].map(function (s2) {
+      const fluke = finsMesh([cape, grey], [-2.02, 0.82, 0], [1, -1].map(function (s2) {
         return {
-          span: 0.62, chordRoot: 0.46, chordTip: 0.04, sweep: 0.60, concavity: 0.26,
-          rearTipH: 0.10, rearTipBack: 0.12, apexRound: 0.05, thick: 0.07,
-          spanSteps: 5, chordSteps: 3, under: true,
-          spanDir: [0, 0, s2], chordDir: [1, 0, 0], origin: [0, 0, s2 * 0.04],
+          span: 0.64, chordRoot: 0.46, chordTip: 0.04, sweep: 0.62, concavity: 0.28,
+          rearTipH: 0.12, rearTipBack: 0.12, apexRound: 0.05, thick: 0.07,
+          spanSteps: 6, chordSteps: 3, under: true,
+          spanDir: [0, 0, s2], chordDir: [1, 0, 0], origin: [0, 0, s2 * 0.03],
         };
       }));
       g.add(fluke);
@@ -4181,59 +4298,134 @@
     rarity: "rare", hp: 900, fur: "Whale Blubber", furValue: 600,
     meat: "Whale Meat", meatValue: 50, packs: 2, herd: [1, 2], spd: 1.6, danger: 0.1,
     aquatic: true, scale: 1.6, color: 0x2f3c45,
+    /* THE HUMPBACK, rebuilt from the animal. A long body whose HEAD is a
+       third of it and slopes down to a broad flat rostrum studded with
+       TUBERCLES (rows of knobs, each a dome, not a square sticker); a lower
+       jaw that runs to the tip; a white THROAT with its ventral PLEATS as
+       grooves running chin to navel; the arched mouth line; the eye at the
+       corner; the twin blowholes in their splash guard. The flippers are a
+       third of the body long and white with the knuckled leading edge that
+       gives the species its name (Megaptera, "big wing") — knobs along it,
+       barnacle clusters at the tip. A small dorsal on its hump two-thirds
+       back, a tall keeled tail stock and broad flukes. */
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
-      const dark = m(0x2f3c45), white = m(0xdae0e2), groove = m(0x232d34), knob = m(0x3c4952);
-      const rings = bodyRings(-3.10, 3.70, 0.95,
-        [0.46, 0.84, 1.02, 1.05, 1.00, 0.86, 0.55],      // [0] = the tail weld
-        [0.27, 0.74, 0.94, 0.98, 0.94, 0.82, 0.50], 14);
-      const hull = hullMesh([dark, white, groove], rings, {
-        sides: 14, bellyCut: [-0.52, -0.40, -0.30, -0.18, 0.02, 0.10, -0.10],
-        ragged: 0.05, seed: 101, paintKey: "humpback-grooves",
-        paint: function (i, u, j, s, isBelly) {
-          if (!isBelly || u < 0.42) return -1;
-          return (j % 2) === 0 ? 2 : -1;                 // the throat pleats
-        },
+      const dark = m(0x2c3a43), white = m(0xdfe4e5), groove = m(0x7f8c93), knob = m(0x34434c);
+      const barn = m(0xd7d2c4), lineM = m(0x10171b), eye = m(0x07090a);
+      const yAt = function (t) { return 0.95 - Math.max(0, t - 0.58) * 0.95; };
+      const rings = bodyRings(-3.10, 3.92, yAt,
+        [0.46, 0.80, 1.00, 1.07, 1.08, 1.04, 0.95, 0.82, 0.66, 0.50, 0.36, 0.17],      // [0] = the tail weld
+        [0.27, 0.66, 0.92, 1.02, 1.04, 1.00, 0.93, 0.82, 0.70, 0.57, 0.42, 0.20], 20);
+      const hull = hullMesh([dark, white], rings, {
+        sides: 18, bellyCut: [-0.52, -0.44, -0.36, -0.22, -0.02, 0.10, 0.08, 0.0], ragged: 0.07, seed: 101,
+        shade: { cape: { k: 0.82, s0: 0.2, s1: 0.9, x0: -3.2, x1: 3.8, f: 0.6 } },
       });
       hull.name = "cetaceanHull"; g.add(hull);
-      // TUBERCLES — the knobs on the rostrum, one merged mesh.
-      const knobs = meshOf(cachedGeom("humpback-knobs", function () {
+      const detail = meshOf(cachedGeom("humpback-detail2", function () {
         const sh = new Shell();
-        for (let i = 0; i < 16; i++) {
-          const x = lerp(2.30, 3.60, h01(i * 3 + 1, 5, 77));
-          const ang = Math.PI * 0.5 + (h01(i * 3 + 2, 9, 77) - 0.5) * 2.2;
-          const sk = onSkin(rings, x, ang, 0.02);
-          const tg = norm3(cross3(sk.n, [1, 0, 0]));
-          const fw = norm3(cross3(tg, sk.n));
-          sh.plate(0, sk.p, fw, tg, 0.15, 0.15, sk.n);
+        // TUBERCLES: three rows along the top of the rostrum + a row on the jaw edge
+        for (let row = -1; row <= 1; row++) {
+          for (let k = 0; k < 7; k++) {
+            const x = lerp(2.15, 3.55, k / 6) + (h01(k, row + 3, 77) - 0.5) * 0.08;
+            const ang = Math.PI / 2 + row * 0.42;
+            const sk = onSkin(rings, x, ang, -0.01);
+            dome(sh, 0, sk.p, sk.n, 0.075, 0.07);
+          }
         }
+        [1, -1].forEach(function (s2) {
+          for (let k = 0; k < 6; k++) {
+            const x = lerp(2.4, 3.55, k / 5);
+            const sk = onSkin(rings, x, s2 > 0 ? -0.55 : Math.PI + 0.55, -0.01);
+            dome(sh, 0, sk.p, sk.n, 0.065, 0.06);
+          }
+          // the mouth line: low on the head, arching up over the jaw then down to the corner
+          const mp = [];
+          for (let k = 0; k <= 10; k++) {
+            const t = k / 10, x = lerp(3.84, 1.70, t);
+            const a = -0.28 + 0.16 * Math.sin(Math.PI * t) - (t > 0.85 ? (t - 0.85) * 1.6 : 0);
+            mp.push([x, s2 > 0 ? a : Math.PI - a]);
+          }
+          skinLine(sh, 1, rings, mp, 0.05, 0.004);
+          // THROAT PLEATS: grooves chin to navel across the white throat
+          for (let k = 0; k < 9; k++) {
+            const a = -Math.PI / 2 + s2 * (0.12 + k * 0.13);
+            const x1 = 3.45 - k * 0.06, x0 = 0.2 + k * 0.12;
+            const pl = [];
+            for (let q = 0; q <= 8; q++) pl.push([lerp(x1, x0, q / 8), a]);
+            skinLine(sh, 2, rings, pl, 0.035, 0.004);
+          }
+          // barnacles on the chin
+          for (let k = 0; k < 5; k++) {
+            const sk = onSkin(rings, 3.5 - h01(k, 2, 79) * 0.35, -Math.PI / 2 + s2 * (0.2 + h01(k, 3, 79) * 0.5), -0.005);
+            dome(sh, 3, sk.p, sk.n, 0.04 + h01(k, 4, 79) * 0.03, 0.04);
+          }
+        });
+        // the splash guard and the two blowholes
+        const sg = onSkin(rings, 2.05, Math.PI / 2, -0.02);
+        dome(sh, 0, sg.p, sg.n, 0.20, 0.08);
+        [1, -1].forEach(function (s2) {
+          skinLine(sh, 1, rings, [[1.98, Math.PI / 2 + s2 * 0.05], [1.86, Math.PI / 2 + s2 * 0.09]], 0.035, 0.05);
+        });
         return sh.geom();
-      }), [knob]);
-      g.add(knobs);
+      }), [knob, lineM, groove, barn]);
+      g.add(detail);
+      [1, -1].forEach(function (s2) {
+        const sk = onSkin(rings, 1.72, s2 > 0 ? -0.10 : Math.PI + 0.10, -0.015);
+        const e = new T.Mesh(cachedGeom("eye|0.06", function () { return new T.SphereGeometry(0.06, 8, 6); }), eye);
+        e.position.set(sk.p[0], sk.p[1], sk.p[2]); g.add(e);
+      });
       function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([dark], [-0.75, 1.94, 0], {          // the low dorsal hump
-        span: 0.42, chordRoot: 0.80, chordTip: 0.10, sweep: 0.55, concavity: 0.16,
-        leadBow: 0.12, rearTipH: 0.20, rearTipBack: 0.20, apexRound: 0.30,
+      fin([dark], [-0.90, 1.92, 0], {          // the small dorsal on its hump
+        span: 0.40, chordRoot: 0.85, chordTip: 0.10, sweep: 0.62, concavity: 0.20,
+        leadBow: 0.14, rearTipH: 0.18, rearTipBack: 0.22, apexRound: 0.25,
         thick: 0.20, spanSteps: 4, chordSteps: 4, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
       });
+      // THE FLIPPERS: a third of the body, white, knuckled leading edge
+      const FL = { span: 2.95, chordRoot: 0.74, chordTip: 0.14, sweep: 0.26, concavity: 0.10,
+        leadBow: 0.10, rearTipH: 0.12, rearTipBack: 0.20, apexRound: 0.20,
+        thick: 0.20, spanSteps: 8, chordSteps: 4, under: true };
       [1, -1].forEach(function (s2) {
-        // the enormous white flipper, a third of the body long
-        fin([white, white], [1.40, 0.65, s2 * 0.80], {
-          span: 2.90, chordRoot: 0.72, chordTip: 0.16, sweep: 0.30, concavity: 0.12,
-          leadBow: 0.14, rearTipH: 0.14, rearTipBack: 0.22, apexRound: 0.22,
-          thick: 0.20, spanSteps: 7, chordSteps: 4, under: true,
-          spanDir: [-0.30, -0.24, s2 * 0.92], chordDir: [1, 0, s2 * 0.1],
-        });
+        const at = [1.25, 0.30, s2 * 0.84];
+        const sd = [-0.32, -0.26, s2 * 0.91], cd = [1, 0, s2 * 0.1];
+        fin([white, white], at, Object.assign({ spanDir: sd, chordDir: cd }, FL));
+        // the knuckles and the tip barnacles, in the flipper's own frame
+        const knuckles = meshOf(cachedGeom("humpback-knuckles|" + s2, function () {
+          const sh = new Shell();
+          const u = norm3(cd);
+          let v = sd; const d = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+          v = norm3([v[0] - u[0] * d, v[1] - u[1] * d, v[2] - u[2] * d]);
+          const w = norm3(cross3(u, v));
+          const xL0 = FL.chordRoot * 0.5, xA = xL0 - FL.span * Math.tan(FL.sweep);
+          for (let k = 1; k <= 9; k++) {
+            const h = k / 10.5;
+            const xl = xL0 + (xA - xL0) * h + FL.leadBow * FL.span * Math.sin(Math.PI * h) - 0.03;
+            const y = FL.span * h;
+            const c = [u[0] * xl + v[0] * y, u[1] * xl + v[1] * y, u[2] * xl + v[2] * y];
+            dome(sh, 0, c, u, 0.075 - h * 0.03, 0.06 - h * 0.02);
+          }
+          for (let k = 0; k < 6; k++) {
+            const h = 0.88 + h01(k, 7, 81) * 0.1, y = FL.span * h;
+            const xc = lerp(xL0 + (xA - xL0) * h, xA - FL.chordTip, h01(k, 8, 81));
+            const side = h01(k, 9, 81) > 0.5 ? 1 : -1;
+            const nn = [w[0] * side, w[1] * side, w[2] * side];
+            const c = [u[0] * xc + v[0] * y + nn[0] * 0.03, u[1] * xc + v[1] * y + nn[1] * 0.03, u[2] * xc + v[2] * y + nn[2] * 0.03];
+            dome(sh, 1, c, nn, 0.035 + h01(k, 10, 81) * 0.02, 0.035);
+          }
+          return sh.geom();
+        }), [white, barn]);
+        // built in the flipper's own root frame and parented to it, so the
+        // knuckles ride every stroke the rig gives the flipper
+        g.children[g.children.length - 1].add(knuckles);
       });
       tailSleeve(g, [dark, white], rings, {
-        at: [-3.45, 0.95], x0: -1.21, x1: 0.35, tipRy: 0.12, tipRz: 0.085,
-        sides: 14, bellyCut: [-0.44], ragged: 0.04, seed: 102,
+        at: [-3.45, 0.95], x0: -1.25, x1: 0.35, tipRy: 0.30, tipRz: 0.10,
+        sides: 14, bellyCut: [-0.55], ragged: 0.04, seed: 102,
       });
-      const fluke = finsMesh([dark, white], [-4.15, 0.95, 0], [1, -1].map(function (s2) {
+      const fluke = finsMesh([dark, white], [-4.20, 0.95, 0], [1, -1].map(function (s2) {
         return {
-          span: 1.85, chordRoot: 1.05, chordTip: 0.06, sweep: 0.66, concavity: 0.30,
-          rearTipH: 0.10, rearTipBack: 0.30, apexRound: 0.05, thick: 0.16,
-          spanSteps: 5, chordSteps: 4, under: true,
+          span: 2.15, chordRoot: 1.15, chordTip: 0.06, sweep: 0.60, concavity: 0.24,
+          leadBow: 0.06, rearTipH: 0.10, rearTipBack: 0.30, apexRound: 0.05, thick: 0.16,
+          spanSteps: 7, chordSteps: 4, under: true,
           spanDir: [0, 0, s2], chordDir: [1, 0, 0], origin: [0, 0, s2 * 0.08],
         };
       }));
