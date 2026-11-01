@@ -97,153 +97,441 @@
   const NEAR = 340;            // run the full sim only within this of the field
   const o2Rate = (depth) => 1 + Math.max(0, depth) * 0.025;   // ported dive clock
 
-  /* --------------------------------------------- voxel geometry helpers -- */
-  const voxMat = new THREE.MeshLambertMaterial({ vertexColors: true });
-  voxMat._shared = true;
-  function mergeBoxes(list) { // {w,h,d,x,y,z,c, rx?,ry?,rz?}
-    const pos = [], nor = [], col = [], idx = []; let off = 0;
-    const C = new THREE.Color();
-    for (const b of list) {
-      const g = new THREE.BoxGeometry(b.w, b.h, b.d);
-      if (b.rx) g.rotateX(b.rx); if (b.ry) g.rotateY(b.ry); if (b.rz) g.rotateZ(b.rz);
-      g.translate(b.x || 0, b.y || 0, b.z || 0);
-      const p = g.attributes.position, n = g.attributes.normal, ix = g.index;
-      C.setHex(b.c);
-      for (let i = 0; i < p.count; i++) {
-        pos.push(p.getX(i), p.getY(i), p.getZ(i));
-        nor.push(n.getX(i), n.getY(i), n.getZ(i));
-        col.push(C.r, C.g, C.b);
-      }
-      for (let i = 0; i < ix.count; i++) idx.push(ix.getX(i) + off);
-      off += p.count; g.dispose();
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-    geo.setIndex(idx);
-    return geo;
-  }
-  function voxMesh(list) { return new THREE.Mesh(mergeBoxes(list), voxMat); }
-
-  /* --------------------------------------- ONE parametric creature build -- */
-  /* Same segmented voxel skeleton for every species (body segments, a tail
-     pivot, fins, an optional jaw pivot) — only the proportions/colours and
-     the tail axis change per species. Chunky voxels (≥0.3u members). */
-  function sharkParts(topC, bellyC, meg) {
-    const body = [
-      { w: 0.62, h: 0.5, d: 0.75, x: 0, y: 0.04, z: 1.95, c: topC },
-      { w: 0.86, h: 0.72, d: 1.05, x: 0, y: 0, z: 1.25, c: topC },
-      { w: 1.05, h: 0.9, d: 1.6, x: 0, y: 0, z: 0.1, c: topC },
-      { w: 0.8, h: 0.62, d: 1.05, x: 0, y: 0, z: -1.0, c: topC },
-      { w: 0.88, h: 0.32, d: 1.02, x: 0, y: -0.34, z: 1.25, c: bellyC },
-      { w: 1.07, h: 0.36, d: 1.55, x: 0, y: -0.42, z: 0.1, c: bellyC },
-      { w: 0.3, h: 0.95, d: 0.72, x: 0, y: 0.75, z: 0.12, c: topC, rx: -0.34 },       // dorsal
-      { w: 1.05, h: 0.3, d: 0.62, x: -0.75, y: -0.25, z: 0.72, c: topC, rz: 0.55, ry: 0.35 },  // pect L
-      { w: 1.05, h: 0.3, d: 0.62, x: 0.75, y: -0.25, z: 0.72, c: topC, rz: -0.55, ry: -0.35 }, // pect R
-      { w: 0.3, h: 0.3, d: 0.3, x: -0.4, y: 0.14, z: 1.62, c: 0x0a0a0a },
-      { w: 0.3, h: 0.3, d: 0.3, x: 0.4, y: 0.14, z: 1.62, c: 0x0a0a0a },
-    ];
-    if (meg) body.push(
-      { w: 1.1, h: 0.34, d: 0.9, x: 0, y: 0.42, z: 0.7, c: 0x3a4448 },
-      { w: 0.34, h: 0.6, d: 1.3, x: 0.5, y: 0.1, z: -0.4, c: 0x3a4448 },
-      { w: 0.55, h: 0.3, d: 0.32, x: 0, y: 0.2, z: 1.95, c: 0xd8d8d0 });
-    return {
-      body,
-      tail: [
-        { w: 0.55, h: 0.5, d: 1.0, x: 0, y: 0, z: -0.45, c: topC },
-        { w: 0.3, h: 1.5, d: 0.6, x: 0, y: 0.3, z: -1.1, c: topC, rx: -0.5 },
-        { w: 0.3, h: 0.8, d: 0.45, x: 0, y: -0.3, z: -1.0, c: topC, rx: 0.45 },
-      ], tailZ: -1.5, tailAxis: "y",
-      jaw: [
-        { w: 0.6, h: 0.3, d: 0.7, x: 0, y: -0.08, z: 0.3, c: bellyC },
-        { w: 0.55, h: meg ? 0.34 : 0.22, d: 0.3, x: 0, y: 0.08, z: 0.58, c: 0xfff8f0 },
-      ], jawY: -0.24, jawZ: 1.55,
-      scale: meg ? 3.4 : 1.18,
-    };
-  }
-  function dolphinParts() {
-    const top = 0x7d99ab, belly = 0xe8f2f5;
-    return {
-      body: [
-        { w: 0.3, h: 0.26, d: 0.55, x: 0, y: -0.06, z: 1.28, c: top },
-        { w: 0.55, h: 0.5, d: 0.6, x: 0, y: 0, z: 0.85, c: top },
-        { w: 0.62, h: 0.56, d: 1.15, x: 0, y: 0, z: 0.05, c: top },
-        { w: 0.44, h: 0.38, d: 0.7, x: 0, y: 0, z: -0.75, c: top },
-        { w: 0.63, h: 0.24, d: 1.1, x: 0, y: -0.24, z: 0.05, c: belly },
-        { w: 0.3, h: 0.5, d: 0.42, x: 0, y: 0.44, z: 0.02, c: top, rx: -0.45 },
-        { w: 0.52, h: 0.22, d: 0.4, x: -0.4, y: -0.14, z: 0.5, c: top, rz: 0.5 },
-        { w: 0.52, h: 0.22, d: 0.4, x: 0.4, y: -0.14, z: 0.5, c: top, rz: -0.5 },
-        { w: 0.22, h: 0.22, d: 0.22, x: -0.24, y: 0.12, z: 1.05, c: 0x0a0a0a },
-        { w: 0.22, h: 0.22, d: 0.22, x: 0.24, y: 0.12, z: 1.05, c: 0x0a0a0a },
-      ],
-      tail: [
-        { w: 0.3, h: 0.26, d: 0.55, x: 0, y: 0, z: -0.22, c: top },
-        { w: 1.05, h: 0.22, d: 0.5, x: 0, y: 0, z: -0.6, c: top },                     // horizontal flukes
-      ], tailZ: -1.05, tailAxis: "x",
-      jaw: null, scale: 0.95,
-    };
-  }
-  function orcaParts() {
-    const blk = 0x14181c, wht = 0xe8f0f2;
-    return {
-      body: [
-        { w: 0.95, h: 0.8, d: 1.1, x: 0, y: 0, z: 1.35, c: blk },
-        { w: 1.18, h: 1.02, d: 1.7, x: 0, y: 0, z: 0.1, c: blk },
-        { w: 0.82, h: 0.7, d: 1.05, x: 0, y: 0, z: -1.15, c: blk },
-        { w: 0.96, h: 0.32, d: 1.05, x: 0, y: -0.34, z: 1.35, c: wht },
-        { w: 1.2, h: 0.36, d: 1.66, x: 0, y: -0.44, z: 0.1, c: wht },
-        { w: 0.34, h: 0.34, d: 0.66, x: -0.52, y: 0.22, z: 1.5, c: wht },
-        { w: 0.34, h: 0.34, d: 0.66, x: 0.52, y: 0.22, z: 1.5, c: wht },
-        { w: 1.22, h: 0.3, d: 0.85, x: 0, y: 0.42, z: -0.55, c: 0xb8c4c8 },
-        { w: 0.34, h: 1.7, d: 0.62, x: 0, y: 1.15, z: 0.05, c: blk, rx: -0.16 },        // tall dorsal
-        { w: 0.95, h: 0.3, d: 0.72, x: -0.72, y: -0.3, z: 0.75, c: blk, rz: 0.5 },
-        { w: 0.95, h: 0.3, d: 0.72, x: 0.72, y: -0.3, z: 0.75, c: blk, rz: -0.5 },
-      ],
-      tail: [
-        { w: 0.55, h: 0.44, d: 0.7, x: 0, y: 0, z: -0.3, c: blk },
-        { w: 1.5, h: 0.26, d: 0.6, x: 0, y: 0, z: -0.8, c: blk },
-      ], tailZ: -1.75, tailAxis: "x",
-      jaw: null, scale: 1.45,
-    };
-  }
-  function sealParts() {
-    const top = 0x4a4038, belly = 0x8a7a66;
-    return {
-      body: [
-        { w: 0.5, h: 0.5, d: 1.4, x: 0, y: 0, z: 0, c: top },
-        { w: 0.42, h: 0.42, d: 0.5, x: 0, y: 0.12, z: 0.8, c: top },
-        { w: 0.5, h: 0.24, d: 1.3, x: 0, y: -0.2, z: 0, c: belly },
-        { w: 0.22, h: 0.22, d: 0.22, x: -0.16, y: 0.2, z: 1.02, c: 0x0a0a0a },
-        { w: 0.22, h: 0.22, d: 0.22, x: 0.16, y: 0.2, z: 1.02, c: 0x0a0a0a },
-        { w: 0.6, h: 0.14, d: 0.4, x: -0.3, y: -0.16, z: 0.2, c: top, rz: 0.4 },
-        { w: 0.6, h: 0.14, d: 0.4, x: 0.3, y: -0.16, z: 0.2, c: top, rz: -0.4 },
-      ],
-      tail: [{ w: 0.6, h: 0.14, d: 0.45, x: 0, y: -0.05, z: -0.2, c: top }],
-      tailZ: -0.75, tailAxis: "x", jaw: null, scale: 0.7,
-    };
-  }
-  function buildCreature(kind) {
-    const p = kind === "meg" ? sharkParts(0x2e3a42, 0x6a7880, true)
-      : kind === "shark" ? sharkParts(0x5a6c78, 0xdfe8ec, false)
-      : kind === "dolphin" ? dolphinParts()
-      : kind === "orca" ? orcaParts()
-      : sealParts();
-    const g = new THREE.Group();
-    g.add(voxMesh(p.body));
-    let tail = null, jaw = null;
-    if (p.tail) { tail = new THREE.Group(); tail.position.set(0, 0, p.tailZ); tail.add(voxMesh(p.tail)); g.add(tail); }
-    if (p.jaw) { jaw = new THREE.Group(); jaw.position.set(0, p.jawY, p.jawZ); jaw.add(voxMesh(p.jaw)); g.add(jaw); }
-    g.scale.setScalar(p.scale);
-    g.userData = { tail, jaw, tailAxis: p.tailAxis };
+  /* ----------------------------------------------- prop geometry helpers -- */
+  /* Every prop on this venue is ONE draw: its parts (any geometry, posed and
+     coloured) are merged into one vertex-coloured mesh. Built once per venue
+     build, so the temporaries are allocation at load, never per frame. */
+  const propMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  propMat._shared = true;
+  const _pm = new THREE.Matrix4(), _pe = new THREE.Euler(), _pq = new THREE.Quaternion();
+  const _ps = new THREE.Vector3(), _pp = new THREE.Vector3(), _pc = new THREE.Color();
+  // a posed, coloured copy of `geo` (geo itself is left alone)
+  function part(geo, c, x, y, z, rx, ry, rz, sx, sy, sz) {
+    _pe.set(rx || 0, ry || 0, rz || 0); _pq.setFromEuler(_pe);
+    _pp.set(x || 0, y || 0, z || 0); _ps.set(sx || 1, sy || 1, sz || 1);
+    _pm.compose(_pp, _pq, _ps);
+    const g = geo.index ? geo.toNonIndexed() : geo.clone();
+    g.applyMatrix4(_pm);
+    g.userData.c = c;
     return g;
   }
-  // small parametric fish quad for the instanced bait balls
-  const fishGeo = mergeBoxes([
-    { w: 0.3, h: 0.22, d: 0.55, x: 0, y: 0, z: 0.08, c: 0xa8c8d8 },
-    { w: 0.18, h: 0.3, d: 0.3, x: 0, y: 0, z: -0.32, c: 0x88a8b8 },
-  ]);
-  const fishMat = new THREE.MeshLambertMaterial({ color: 0xb8d8e8 }); fishMat._shared = true;
+  function mergeParts(list) {
+    let n = 0;
+    for (const g of list) n += g.attributes.position.count;
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3);
+    let o = 0;
+    for (const g of list) {
+      const P = g.attributes.position, N = g.attributes.normal, C = g.attributes.color;
+      if (!C) _pc.setHex(g.userData.c == null ? 0x888888 : g.userData.c);
+      for (let i = 0; i < P.count; i++, o++) {
+        pos[o * 3] = P.getX(i); pos[o * 3 + 1] = P.getY(i); pos[o * 3 + 2] = P.getZ(i);
+        nor[o * 3] = N.getX(i); nor[o * 3 + 1] = N.getY(i); nor[o * 3 + 2] = N.getZ(i);
+        if (C) { col[o * 3] = C.getX(i); col[o * 3 + 1] = C.getY(i); col[o * 3 + 2] = C.getZ(i); }
+        else { col[o * 3] = _pc.r; col[o * 3 + 1] = _pc.g; col[o * 3 + 2] = _pc.b; }
+      }
+      g.dispose();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.computeBoundingSphere();
+    return geo;
+  }
+  function propMesh(list) { return new THREE.Mesh(mergeParts(list), propMat); }
+  const BOX = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+  const CYL = (rt, rb, h, n) => new THREE.CylinderGeometry(rt, rb, h, n || 10);
+  function hashC(i, salt) { const x = Math.sin(i * 127.1 + salt * 311.7) * 43758.5453; return x - Math.floor(x); }
+  function shade(hex, k) { _pc.setHex(hex); _pc.multiplyScalar(k); return _pc.getHex(); }
+
+  /* THE BAIT SHACK. Board-and-batten walls in weathered sea-blue paint on a
+     plank platform, a corrugated tin shed roof, a service hatch on the sea
+     face with its shutter propped open over a counter, a caged lantern, a
+     bait cooler, fish crates, a rope coil and a life ring. Local frame: +Z is
+     the sea face, origin on the ground at the shack's centre. W x D = 2.8 x 2.2. */
+  function baitShack() {
+    const L = [];
+    const W = 2.8, D = 2.2, H = 2.25, wood = 0x6e5a44, paint = 0x55787f, batten = 0x6f949a;
+    const trim = 0xd9d2c0, tin = 0x868c88;
+    L.push(part(BOX(W + 0.3, 0.18, D + 0.5), wood, 0, 0.09, 0.1));               // platform
+    for (let i = 0; i < 12; i++) {                                               // its deck boards
+      L.push(part(BOX(W + 0.3, 0.02, 0.2), shade(wood, 0.86 + hashC(i, 1) * 0.22), 0, 0.19, -D / 2 - 0.12 + i * 0.22 + 0.11));
+    }
+    // a shed roof falls to the sea face: the back wall stands taller by the rise
+    const pitch = 0.14, HB = H + D * Math.tan(pitch);
+    const hAt = (z) => H + (HB - H) * (0.5 - z / D);           // wall height at depth z
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {                // corner posts
+      const h = sz < 0 ? HB : H;
+      L.push(part(BOX(0.12, h, 0.12), trim, sx * (W / 2 - 0.06), 0.2 + h / 2, sz * (D / 2 - 0.06)));
+    });
+    // walls: back, two raked sides, and the sea face around the hatch (0.8..1.85 m open, 1.8 wide)
+    L.push(part(BOX(W - 0.12, HB, 0.06), paint, 0, 0.2 + HB / 2, -D / 2 + 0.03));
+    {
+      const sh = new THREE.Shape();
+      sh.moveTo(-D / 2 + 0.06, 0); sh.lineTo(D / 2 - 0.06, 0);
+      sh.lineTo(D / 2 - 0.06, hAt(D / 2 - 0.06)); sh.lineTo(-D / 2 + 0.06, hAt(-D / 2 + 0.06));
+      const side = new THREE.ExtrudeGeometry(sh, { depth: 0.06, bevelEnabled: false });
+      side.rotateY(-Math.PI / 2);                               // shape x -> +z, extrusion -> -x
+      [-1, 1].forEach((sx) => L.push(part(side, paint, sx * (W / 2 - 0.03) + 0.03, 0.2, 0)));
+      side.dispose();
+    }
+    L.push(part(BOX(W - 0.12, 0.8, 0.06), paint, 0, 0.2 + 0.4, D / 2 - 0.03));
+    L.push(part(BOX(W - 0.12, H - 1.85, 0.06), paint, 0, 0.2 + 1.85 + (H - 1.85) / 2, D / 2 - 0.03));
+    [-1, 1].forEach((sx) => L.push(part(BOX(0.44, 1.05, 0.06), paint, sx * 1.12, 0.2 + 1.325, D / 2 - 0.03)));
+    // battens over every wall
+    for (let i = 0; i < 9; i++) {
+      const x = -W / 2 + 0.2 + i * 0.3;
+      L.push(part(BOX(0.05, HB, 0.025), batten, x, 0.2 + HB / 2, -D / 2 - 0.012));
+      if (Math.abs(x) > 0.92) L.push(part(BOX(0.05, H, 0.025), batten, x, 0.2 + H / 2, D / 2 + 0.012));
+      else {
+        L.push(part(BOX(0.05, 0.8, 0.025), batten, x, 0.6, D / 2 + 0.012));
+        L.push(part(BOX(0.05, H - 1.85, 0.025), batten, x, 0.2 + 1.85 + (H - 1.85) / 2, D / 2 + 0.012));
+      }
+    }
+    for (let i = 0; i < 7; i++) {
+      const z = -D / 2 + 0.2 + i * 0.3;
+      const h = hAt(z);
+      [-1, 1].forEach((sx) => L.push(part(BOX(0.025, h, 0.05), batten, sx * (W / 2 + 0.012), 0.2 + h / 2, z)));
+    }
+    // hatch frame + sill
+    L.push(part(BOX(1.9, 0.07, 0.1), trim, 0, 1.0, D / 2));
+    L.push(part(BOX(1.9, 0.07, 0.1), trim, 0, 2.05, D / 2));
+    [-1, 1].forEach((sx) => L.push(part(BOX(0.07, 1.05, 0.1), trim, sx * 0.93, 1.53, D / 2)));
+    // counter shelf on two brackets
+    L.push(part(BOX(2.1, 0.06, 0.48), wood, 0, 1.02, D / 2 + 0.22));
+    [-0.8, 0.8].forEach((x) => L.push(part(BOX(0.05, 0.36, 0.05), wood, x, 0.86, D / 2 + 0.16, -0.75)));
+    // the shutter, hinged at the head and propped out over the counter
+    L.push(part(BOX(1.9, 0.9, 0.04), paint, 0, 2.05 + 0.32, D / 2 + 0.32, -1.05));
+    [-0.85, 0.85].forEach((x) => L.push(part(CYL(0.015, 0.015, 0.75, 5), 0x3a3a38, x, 1.75, D / 2 + 0.38, 0.62)));
+    // shed roof: corrugated tin falling to the sea face, a few rusty runs.
+    // It rests ON the wall heads (their mid-depth height + the sheet), so no
+    // wall pokes through it and none stops short of it.
+    const roofY = 0.2 + (H + HB) / 2 + 0.05, RD = (D + 0.7) / Math.cos(pitch);
+    L.push(part(BOX(W + 0.5, 0.04, RD), tin, 0, roofY, 0.05, pitch));
+    for (let i = 0; i < 23; i++) {
+      const x = -(W + 0.5) / 2 + 0.07 + i * 0.14;
+      const rust = hashC(i, 7) > 0.78;
+      L.push(part(CYL(0.035, 0.035, D + 0.7, 6), rust ? 0x8a5c3c : shade(tin, 0.95 + hashC(i, 3) * 0.12),
+        x, roofY + 0.025, 0.05, Math.PI / 2 + pitch, 0, 0, 1, RD / (D + 0.7), 0.5));
+    }
+    // fascia board along the low (sea) eave, just under the sheet's front edge
+    L.push(part(BOX(W + 0.5, 0.14, 0.04), trim, 0, roofY - Math.sin(pitch) * RD / 2 - 0.08, 0.05 + Math.cos(pitch) * RD / 2 - 0.01, pitch));
+    // lantern: bracket, cap, warm glass, cage bars
+    L.push(part(BOX(0.04, 0.04, 0.3), 0x2a2a28, 1.25, 2.12, D / 2 + 0.12));
+    L.push(part(CYL(0.0, 0.11, 0.08, 8), 0x2a2a28, 1.25, 2.12, D / 2 + 0.27));
+    L.push(part(CYL(0.08, 0.08, 0.2, 8), 0xffd36a, 1.25, 1.98, D / 2 + 0.27));
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2 + 0.4;
+      L.push(part(BOX(0.012, 0.22, 0.012), 0x2a2a28, 1.25 + Math.cos(a) * 0.09, 1.98, D / 2 + 0.27 + Math.sin(a) * 0.09));
+    }
+    // life ring on the side wall: eight arcs, red and white
+    for (let i = 0; i < 8; i++) {
+      const g = new THREE.TorusGeometry(0.28, 0.06, 6, 6, Math.PI / 4);
+      g.rotateZ(i * Math.PI / 4);
+      L.push(part(g, i % 2 ? 0xf2f0ea : 0xd8442a, -W / 2 - 0.09, 1.45, 0.2, 0, Math.PI / 2, 0));
+    }
+    // bait cooler on the platform by the hatch: white tub, blue lid, latch
+    L.push(part(BOX(0.72, 0.42, 0.44), 0xe8e6e0, -1.0, 0.41, D / 2 + 0.42));
+    L.push(part(BOX(0.76, 0.07, 0.48), 0x2d5e8e, -1.0, 0.655, D / 2 + 0.42));
+    L.push(part(BOX(0.1, 0.08, 0.03), 0x9a9a98, -1.0, 0.58, D / 2 + 0.655));
+    // two stacked fish crates (slatted) and a coil of rope
+    for (let k = 0; k < 2; k++) {
+      const y = 0.2 + 0.14 + k * 0.28, x = 1.05, z = -D / 2 - 0.05 + 0.0;
+      for (let j = 0; j < 3; j++) L.push(part(BOX(0.62, 0.07, 0.42), shade(0xa88a5c, 0.9 + 0.1 * k), x + 0.0, y - 0.09 + j * 0.09, z - 0.25, 0, 0.12 * k));
+    }
+    for (let k = 0; k < 3; k++) {
+      const g = new THREE.TorusGeometry(0.24 - k * 0.03, 0.035, 5, 14);
+      L.push(part(g, 0xb59b6a, -0.95, 0.24 + k * 0.06, -D / 2 - 0.08, Math.PI / 2));
+    }
+    return propMesh(L);
+  }
+
+  /* THE PIER. Local frame: +Z runs offshore from the waterline, origin at the
+     coast crossing at deck level 0. Deck planks across two stringers on
+     round pilings that run all the way down to the analytic seabed, X-braced,
+     a bollard pair and a ladder at the end, and the red chum bucket. */
+  function pierMesh(deckY, seabedLocal) {
+    const L = [];
+    const timber = 0x8a6d4b, pile = 0x4f3d2c;
+    for (let i = 0; i < 45; i++) {
+      const z = -1 + i * 0.222;
+      L.push(part(BOX(3.2, 0.05, 0.2), shade(timber, 0.84 + hashC(i, 11) * 0.26), 0, deckY + 0.12, z, 0, (hashC(i, 5) - 0.5) * 0.02));
+    }
+    [-1.3, 0, 1.3].forEach((x) => L.push(part(BOX(0.14, 0.22, 10), shade(timber, 0.7), x, deckY - 0.03, 4)));
+    [1.5, 4.5, 8.4].forEach((z, zi) => {
+      [-1.45, 1.45].forEach((x) => {
+        const sb = seabedLocal(x, z) - 0.4, top = deckY + 0.05, h = top - sb;
+        L.push(part(CYL(0.16, 0.18, h, 9), pile, x, (top + sb) / 2, z));
+        L.push(part(CYL(0.165, 0.165, 0.16, 9), 0x2f4a3a, x, deckY - 0.75, z));      // weed line
+      });
+      L.push(part(BOX(3.0, 0.2, 0.12), shade(timber, 0.7), 0, deckY - 0.18, z));   // cap beam
+      const sb0 = Math.max(seabedLocal(0, z), deckY - 4);
+      const bh = deckY - 0.3 - sb0, ang = Math.atan2(bh, 2.9);
+      if (bh > 0.4) {
+        const len = Math.hypot(bh, 2.9), cy = (deckY - 0.3 + sb0) / 2;
+        L.push(part(BOX(len, 0.12, 0.06), pile, 0, cy, z + 0.1, 0, 0, ang));
+        L.push(part(BOX(len, 0.12, 0.06), pile, 0, cy, z - 0.1, 0, 0, -ang));
+      }
+    });
+    [-1.2, 1.2].forEach((x) => {                                                  // bollards
+      L.push(part(CYL(0.13, 0.15, 0.4, 10), 0x2e3236, x, deckY + 0.34, 8.6));
+      L.push(part(CYL(0.18, 0.18, 0.06, 10), 0x2e3236, x, deckY + 0.55, 8.6));
+    });
+    // ladder down the end face into the water
+    const lb = Math.max(seabedLocal(0.4, 9.05), deckY - 3.2);
+    [-0.25, 0.25].forEach((x) => L.push(part(BOX(0.06, deckY + 0.5 - lb, 0.06), 0x8a8f90, x + 0.4, (deckY + 0.5 + lb) / 2, 9.05)));
+    for (let y = deckY - 0.1; y > lb + 0.2; y -= 0.32) L.push(part(CYL(0.02, 0.02, 0.5, 5), 0x8a8f90, 0.4, y, 9.05, 0, 0, Math.PI / 2));
+    // CHUM bucket: tapered red pail, rim, wire bail, and the chum in it
+    const bx = 1.2, bz = 6, by = deckY + 0.14;
+    L.push(part(CYL(0.27, 0.22, 0.48, 14), 0x9a2a1e, bx, by + 0.24, bz));
+    L.push(part(new THREE.TorusGeometry(0.27, 0.02, 5, 16), 0x7a1e16, bx, by + 0.48, bz, Math.PI / 2));
+    L.push(part(CYL(0.25, 0.25, 0.02, 14), 0x5a0e0a, bx, by + 0.42, bz));
+    const bail = new THREE.TorusGeometry(0.27, 0.01, 4, 12, Math.PI);
+    L.push(part(bail, 0x9a9a98, bx, by + 0.48, bz, 0, 0.3, 0));
+    return propMesh(L);
+  }
+
+  /* A WRECK. A lofted steel hull — round bilge, flat keel line, sheer that
+     lifts to a raked bow, a transom stern — skinned in vertex colours that
+     go from algae-green at the mud line through rust runs to the old paint
+     above, with a deck, a gutted wheelhouse (dark window band, no glass), a
+     snapped mast lying across the deck, a stub of bow rail, and for the
+     container ship a slewed stack of boxes. Local frame: +Z bow, origin on
+     the keel amidships. */
+  function wreckMesh(L0, W, H, i) {
+    const L = [];
+    const NS = 16, NP = 7;
+    const half = (t) => {                       // half-breadth at station t (0 stern .. 1 bow)
+      const bow = t > 0.62 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.62) / 0.38, 2))) : 1;
+      const stern = t < 0.1 ? 0.82 + 1.8 * t : 1;
+      return W / 2 * bow * stern;
+    };
+    const sheer = (t) => H * (1 + 0.28 * Math.pow(Math.max(0, (t - 0.65) / 0.35), 2) + 0.06 * Math.pow(Math.max(0, (0.12 - t) / 0.12), 2));
+    const keelRise = (t) => H * 0.55 * Math.pow(Math.max(0, (t - 0.8) / 0.2), 2);   // forefoot sweeps up
+    const paint = i === 4 ? 0xe6e2d6 : [0x3f5560, 0x6a2f28, 0x2f4a3c, 0x23384f][i % 4];
+    const base = new THREE.Color(paint), rust = new THREE.Color(0x7a4a2a), algae = new THREE.Color(0x3c5a3e), tmp = new THREE.Color();
+    const pos = [], col = [];
+    const ring = [];
+    for (let k = 0; k <= NS; k++) {
+      const t = k / NS, z = -L0 / 2 + t * L0, b = half(t), top = sheer(t), kr = keelRise(t);
+      const pts = [];
+      for (let j = 0; j <= NP; j++) {           // keel (j=0) to deck edge (j=NP), starboard
+        const s2 = j / NP;
+        const y = kr + (top - kr) * s2;
+        const x = Math.max(0.02, b * Math.pow(Math.sin(s2 * Math.PI / 2), 0.45));
+        pts.push([x, y, z]);
+      }
+      ring.push(pts);
+    }
+    const colAt = (x, y, z) => {
+      const k = Math.floor((z + L0) * 1.7), streak = hashC(k, 31 + i) > 0.6 ? 1 : 0;
+      tmp.copy(base);
+      const h01 = y / H;
+      if (h01 < 0.35) tmp.lerp(algae, 0.85 * (1 - h01 / 0.35));
+      tmp.lerp(rust, 0.25 + 0.45 * streak * Math.max(0, 1 - Math.abs(h01 - 0.7) * 2) + hashC(k * 3, 7) * 0.15);
+      return tmp;
+    };
+    const tri = (a, b, c) => { for (const p of [a, b, c]) { pos.push(p[0], p[1], p[2]); const c2 = colAt(p[0], p[1], p[2]); col.push(c2.r, c2.g, c2.b); } };
+    for (let k = 0; k < NS; k++) {
+      for (let j = 0; j < NP; j++) {
+        const a = ring[k][j], b = ring[k + 1][j], c = ring[k + 1][j + 1], d = ring[k][j + 1];
+        const m = (p) => [-p[0], p[1], p[2]];
+        tri(a, c, b); tri(a, d, c);                         // starboard (outward)
+        tri(m(a), m(b), m(c)); tri(m(a), m(c), m(d));       // port
+      }
+      // deck
+      const p0 = ring[k][NP], p1 = ring[k + 1][NP];
+      const q0 = [-p0[0], p0[1], p0[2]], q1 = [-p1[0], p1[1], p1[2]];
+      tri(q0, p1, p0); tri(q0, q1, p1);
+    }
+    // transom
+    const st = ring[0];
+    for (let j = 0; j < NP; j++) {
+      const a = st[j], b = st[j + 1];
+      tri([0, a[1], a[2]], a, b); tri([0, a[1], a[2]], b, [0, b[1], b[2]]);
+      tri([0, a[1], a[2]], [-b[0], b[1], b[2]], [-a[0], a[1], a[2]]); tri([0, a[1], a[2]], [0, b[1], b[2]], [-b[0], b[1], b[2]]);
+    }
+    const hull = new THREE.BufferGeometry();
+    hull.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    hull.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    hull.computeVertexNormals();
+    L.push(hull);
+    // the deck planking reads darker than the hull: a slab just under the sheer amidships
+    L.push(part(BOX(W * 0.9, 0.06, L0 * 0.6), 0x4a3f33, 0, H + 0.01, -L0 * 0.05));
+    // bulwark / rail stubs along the deck edge
+    for (let k = 2; k < NS - 1; k += 2) {
+      const t = k / NS, z = -L0 / 2 + t * L0, b = half(t) * 0.97, y = sheer(t);
+      if (hashC(k, 40 + i) < 0.3) continue;            // gaps: torn away
+      [-1, 1].forEach((sx) => L.push(part(BOX(0.06, 0.7, 0.06), 0x5a3a26, sx * b, y + 0.35, z)));
+    }
+    // wheelhouse: aft of amidships, a gutted box with a dark window band and roof lip
+    const wz = -L0 * 0.24, ww = W * 0.62, wd = L0 * 0.2, wh = H * 0.85;
+    L.push(part(BOX(ww, wh, wd), shade(paint === 0xe6e2d6 ? paint : 0xb8b2a2, 0.8), 0, H + wh / 2, wz));
+    L.push(part(BOX(ww + 0.04, wh * 0.22, wd * 0.9), 0x0d1214, 0, H + wh * 0.72, wz + 0.02));
+    L.push(part(BOX(ww + 0.3, 0.12, wd + 0.3), 0x5a4e44, 0, H + wh + 0.06, wz));
+    // the mast, snapped at the step and lying across the foredeck
+    L.push(part(CYL(0.1, 0.16, H * 2.2, 8), 0x3a3430, 0.4, H + 0.6, L0 * 0.12, 0.22, 0, 1.2));
+    L.push(part(CYL(0.14, 0.16, 0.6, 8), 0x3a3430, 0, H + 0.3, L0 * 0.2));
+    // anchor hawse + bitts on the foredeck
+    [-0.4, 0.4].forEach((x) => L.push(part(CYL(0.09, 0.09, 0.45, 8), 0x2a2622, x, H + 0.22, L0 * 0.34)));
+    if (i === 3) {                                       // the box ship's slewed cargo
+      const cc = [0x8a3a28, 0x2a5a7a, 0x4a6a3a, 0xa87a2a];
+      for (let k = 0; k < 4; k++) {
+        L.push(part(BOX(2.4, 2.4, 6.0), cc[k], (k % 2 ? 0.5 : -0.4), H + 1.2 + (k > 1 ? 2.4 : 0), 1 + (k % 2) * 0.4, 0, 0.08 * (k - 1.5), (k > 1 ? 0.12 : 0)));
+        for (let r = 0; r < 8; r++) L.push(part(BOX(2.44, 2.2, 0.06), shade(cc[k], 0.8), (k % 2 ? 0.5 : -0.4), H + 1.2 + (k > 1 ? 2.4 : 0), 1 + (k % 2) * 0.4 - 2.6 + r * 0.74, 0, 0.08 * (k - 1.5), (k > 1 ? 0.12 : 0)));
+      }
+    }
+    if (i === 4) {                                       // the Aurora: a yacht's long saloon roof and rails
+      L.push(part(BOX(W * 0.7, H * 0.55, L0 * 0.36), 0xe6e2d6, 0, H + H * 0.27, L0 * 0.02));
+      L.push(part(BOX(W * 0.72, H * 0.16, L0 * 0.34), 0x10181c, 0, H + H * 0.36, L0 * 0.02));
+    }
+    return propMesh(L);
+  }
+
+  /* A WRECK BUOY: a conical-bottomed float with a white band, a four-leg
+     lattice tower, a cylindrical topmark (a sphere for the gold wreck), a
+     radar reflector and the lamp. Origin at the waterline. */
+  function buoyMesh(gold) {
+    const L = [], col = gold ? 0xd8a828 : 0xe06428, iron = 0x2a3238;
+    L.push(part(CYL(0.62, 0.62, 0.55, 16), col, 0, 0.05, 0));
+    L.push(part(CYL(0.62, 0.05, 0.5, 16), col, 0, -0.47, 0));
+    L.push(part(CYL(0.635, 0.635, 0.14, 16), 0xf0ece2, 0, 0.18, 0));
+    L.push(part(CYL(0.66, 0.66, 0.08, 16), 0x1a1c1e, 0, 0.33, 0));              // rubbing fender
+    for (let k = 0; k < 4; k++) {
+      const a = k * Math.PI / 2 + Math.PI / 4;
+      const x0 = Math.cos(a) * 0.42, z0 = Math.sin(a) * 0.42, x1 = Math.cos(a) * 0.14, z1 = Math.sin(a) * 0.14;
+      const len = Math.hypot(x1 - x0, 1.5, z1 - z0);
+      const g = BOX(0.06, len, 0.06);
+      const dir = new THREE.Vector3(x1 - x0, 1.5, z1 - z0).normalize();
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(q)); g.translate((x0 + x1) / 2, 0.35 + 0.75, (z0 + z1) / 2);
+      g.userData.c = col; L.push(g.toNonIndexed()); L[L.length - 1].userData.c = col; g.dispose();
+    }
+    [0.75, 1.3].forEach((y, k) => L.push(part(new THREE.TorusGeometry(0.33 - k * 0.12, 0.025, 4, 12), col, 0, y, 0, Math.PI / 2)));
+    // radar reflector: two crossed plates
+    L.push(part(BOX(0.36, 0.36, 0.02), 0xc8ccd0, 0, 1.55, 0, 0, Math.PI / 4));
+    L.push(part(BOX(0.36, 0.36, 0.02), 0xc8ccd0, 0, 1.55, 0, 0, -Math.PI / 4));
+    L.push(part(CYL(0.05, 0.05, 0.3, 6), iron, 0, 1.85, 0));
+    if (gold) L.push(part(new THREE.SphereGeometry(0.2, 12, 8), col, 0, 2.1, 0));
+    else L.push(part(CYL(0.16, 0.16, 0.32, 12), col, 0, 2.15, 0));
+    L.push(part(CYL(0.07, 0.07, 0.14, 8), 0xfff0c8, 0, 2.4, 0));                // the lamp
+    L.push(part(CYL(0.0, 0.08, 0.06, 8), iron, 0, 2.5, 0));
+    return propMesh(L);
+  }
+
+  /* ------------------------------------------- THE ANIMALS ARE THE BESTIARY -- */
+  /* Every creature in this sea used to be a stack of coloured voxel boxes
+     (sharkParts/dolphinParts/orcaParts/sealParts) with a box tail on a pivot
+     -- the same four shapes the city sea had already replaced with real
+     anatomy. They are now the city's own animals: the great white, megalodon,
+     dolphin and orca from city/wildlife/aquatic.js + wildlife_orca.js, and
+     the harbour seal builder that lives beside them. Same hull, same fins,
+     same split-body mouth, same tail rig (wildlife_rig.js) -- so the wreck-
+     field shark and the open-coast shark are one animal on screen as well as
+     in the brain.
+
+     CONTRACT with the rest of this file (unchanged): a creature is one Group,
+     nose along +Z, posed by syncFish(). The bestiary authors noses along +X,
+     so the model sits under a fixed -90 degree turn. The tail beat and the
+     jaw are driven through the shared rig (CBZ.animateSwim / CBZ.swimJaw)
+     from swimBeat() and gape() instead of rotating box pivots. */
+  const SPECIES_OF = { shark: "great_white_shark", meg: "megalodon", dolphin: "dolphin", orca: "orca" };
+  // past this the body is not drawn: the sea's own fog has eaten it long
+  // before, and a great white is ~36 draws. The meg is a set piece and
+  // reads from much further.
+  const DRAW_R = { shark: 150, meg: 420, dolphin: 130, orca: 170, seal: 110 };
+  let frameDt = 1 / 60;
+  function creatureMat(c) { return CBZ.cmat ? CBZ.cmat(c) : new THREE.MeshLambertMaterial({ color: c }); }
+  function buildCreature(kind) {
+    const g = new THREE.Group();
+    g.name = "ocean:" + kind;
+    const turn = new THREE.Group();
+    turn.rotation.y = -Math.PI / 2;              // bestiary +X nose -> this file's +Z
+    g.add(turn);
+    const id = SPECIES_OF[kind];
+    const sp = id && CBZ.WILDLIFE_SPECIES ? CBZ.WILDLIFE_SPECIES[id] : null;
+    let model = null, spec = null;
+    if (sp && sp.build) {
+      model = sp.build({ THREE, mat: creatureMat, rng: () => 0.5 });
+      spec = sp;
+    } else if (kind === "seal" && CBZ.buildHarborSeal) {
+      model = CBZ.buildHarborSeal({ mat: creatureMat });
+      spec = { id: "harbor_seal", name: "harbour seal", aquatic: true, scale: 1 };
+    }
+    const ud = { kind, model: null, actor: null, jawLocal: null, odo: 0, last: null, drawR: DRAW_R[kind] || 150 };
+    g.userData = ud;
+    if (!model) return g;                         // bestiary not loaded: an empty, harmless group
+    const sc = spec.scale || 1;
+    model.scale.setScalar(sc);
+    turn.add(model);
+    const actor = { species: spec, group: model, heading: 0 };
+    if (CBZ.buildSwimRig) { try { CBZ.buildSwimRig(actor); } catch (e) { /* static body */ } }
+    ud.model = model; ud.actor = actor;
+    // THE SPINE ON THE ORIGIN. The bestiary rides its keel near y=0 (a city
+    // swimmer's waterline); this file's creature origin is the body's centre
+    // (the voxel bodies were), which the depth clamps and the seize assume.
+    // The rig measures the trunk's axis at the tail weld; drop the model by it.
+    const spineY = (actor.swim && isFinite(actor.swim.spineY) ? actor.swim.spineY : 0) * sc;
+    turn.position.y = -spineY;
+    // THE BITE POINT, in this group's frame: the species' authored mouth
+    // contract (model-local, +X nose) through the scale, the turn and the drop.
+    const mc = model.userData && model.userData.aquaticMouth;
+    const bp = mc && mc.bite;
+    if (bp) ud.jawLocal = { x: -(bp.z || 0) * sc, y: bp.y * sc - spineY, z: bp.x * sc };
+    else {
+      g.updateMatrixWorld(true);
+      const bb = new THREE.Box3().setFromObject(g);
+      ud.jawLocal = { x: 0, y: (bb.min.y + bb.max.y) * 0.5, z: bb.max.z * 0.92 };
+    }
+    return g;
+  }
+  // the tail chain, pectorals and trunk swing, driven by how far the body
+  // actually moved this frame (the rig reads speed off its group's position,
+  // so the model is slid along its own nose axis by the odometer for the
+  // call and put straight back)
+  const _cam = new THREE.Vector3(), _wp = new THREE.Vector3();
+  function swimBeat(mesh, dt) {
+    const ud = mesh.userData, a = ud && ud.actor;
+    if (!a || !a.swim || !CBZ.animateSwim) return;
+    const p = mesh.position;
+    if (ud.last) ud.odo += Math.min(5, Math.hypot(p.x - ud.last.x, p.y - ud.last.y, p.z - ud.last.z));
+    else ud.last = new THREE.Vector3();
+    ud.last.copy(p);
+    if (ud.odo > 1e5) { ud.odo -= 1e5; if (a.swim.px != null) a.swim.px -= 1e5; }
+    const cam = CBZ.camera;
+    if (cam && cam.getWorldPosition) {
+      cam.getWorldPosition(_cam);
+      mesh.getWorldPosition(_wp);
+      const far = _cam.distanceTo(_wp) > ud.drawR;
+      ud.model.visible = !far;
+      if (far) return;
+    }
+    a.heading = Math.PI * 0.5 - mesh.rotation.y;
+    const m = ud.model;
+    m.position.x = ud.odo;
+    try { CBZ.animateSwim(a, dt); } catch (e) {}
+    m.position.x = 0;
+  }
+  // 0 shut .. 1 full gape, through the species' own hinged mouth
+  function gape(mesh, k) {
+    const a = mesh.userData && mesh.userData.actor;
+    if (a && a.swim && CBZ.swimJaw) { try { CBZ.swimJaw(a, k); } catch (e) {} }
+  }
+  // THE BAIT BALL: real mackerel, one baked vertex-coloured geometry shared by
+  // every instance (was two boxes). Built on first use so the bestiary has
+  // registered by then whatever the script order.
+  let fishGeo = null, fishMat = null;
+  function baitFish() {
+    if (fishGeo) return;
+    fishGeo = CBZ.aquaticBakedGeometry ? CBZ.aquaticBakedGeometry("fish", { nose: "z" }) : null;
+    if (fishGeo) {
+      fishMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    } else {
+      fishGeo = new THREE.ConeGeometry(0.09, 0.5, 6); fishGeo.rotateX(Math.PI / 2);
+      fishMat = new THREE.MeshLambertMaterial({ color: 0xb8d8e8 });
+    }
+    fishMat._shared = true;
+  }
 
   /* --------------------------------------------------- module singletons -- */
   let C = null;          // ctx once mounted
@@ -380,14 +668,19 @@
     // ---- DOCK KIOSK (on land, inland of the waterline): economy + charter ----
     const kx = -ux * 7, kz = -uz * 7;              // ~7u inland from the coast crossing
     const y0 = terrainAt(kx, kz);                  // seat the hut on real terrain
-    g.add(voxMesh([
-      { w: 3.4, h: 2.1, d: 2.6, x: kx, y: y0 + 1.05, z: kz, c: 0x7a4a34 },        // hut
-      { w: 3.8, h: 0.3, d: 3.0, x: kx, y: y0 + 2.25, z: kz, c: 0xc8542e },        // roof
-      { w: 3.0, h: 0.6, d: 0.5, x: kx + ux * 1.3, y: y0 + 0.95, z: kz + uz * 1.3, c: 0x9a7a50 }, // counter (seaward)
-      { w: 0.4, h: 0.4, d: 0.4, x: kx + 1.4, y: y0 + 2.6, z: kz, c: 0xffd451 },   // lantern
-    ]));
-    ctx.solid(kx - 1.7, kz - 1.3, kx + 1.7, kz + 1.3);   // the hut is a wall
-    ctx.light(kx + 1.4, y0 + 2.7, kz, 0xffc868, 0.9, 24);
+    const face = Math.atan2(ux, uz);               // the shack's hatch looks out to sea
+    const shack = baitShack();
+    shack.position.set(kx, y0, kz); shack.rotation.y = face;
+    g.add(shack);
+    // the shack is a wall: the AABB of its turned 2.8 x 2.2 footprint
+    {
+      const hx = Math.abs(Math.cos(face)) * 1.4 + Math.abs(Math.sin(face)) * 1.1;
+      const hz = Math.abs(Math.sin(face)) * 1.4 + Math.abs(Math.cos(face)) * 1.1;
+      ctx.solid(kx - hx, kz - hz, kx + hx, kz + hz);
+    }
+    // the lantern, hung beside the hatch (shack-local 1.25, 1.98, 1.37)
+    ctx.light(kx + Math.cos(face) * 1.25 + Math.sin(face) * 1.37, y0 + 2.0,
+      kz - Math.sin(face) * 1.25 + Math.cos(face) * 1.37, 0xffc868, 0.9, 24);
     // sign
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.7),
       new THREE.MeshBasicMaterial({ map: ctx.canvasTex(256, 64, (x2) => {
@@ -395,7 +688,7 @@
         x2.fillStyle = "#f0a028"; x2.font = "bold 26px Trebuchet MS";
         x2.textAlign = "center"; x2.fillText("DEAD WATER · SALVAGE", 128, 42);
       }) }));
-    sign.position.set(kx + ux * 1.4, y0 + 2.15, kz + uz * 1.4);
+    sign.position.set(kx + ux * 1.19, y0 + 2.47, kz + uz * 1.19);   // on the fascia, under the eave
     sign.rotation.y = Math.atan2(ux, uz);
     g.add(sign);
     // the dock vendor — a REAL city ped (brain + wardrobe + death funnel),
@@ -418,14 +711,10 @@
     // ---- PIER + CHUM BUCKET: the dive launch + the chum supply ----
     // posts run from the analytic seabed up to the deck so the pier is
     // support-connected, not floating over the shallows.
-    const post = (lx, lz) => { const sb = seabedAt(lx, lz); return { h: deckY - sb + 0.3, cy: (deckY + sb) / 2 }; };
-    const pOut = post(ux * 8, uz * 8), pIn = post(ux * 1.5, uz * 1.5);
-    g.add(voxMesh([
-      { w: 3.2, h: 0.3, d: 10, x: ux * 4, y: deckY, z: uz * 4, c: 0x9a7a50, ry: Math.atan2(ux, uz) },  // deck
-      { w: 0.45, h: pOut.h, d: 0.45, x: ux * 8, y: pOut.cy, z: uz * 8, c: 0x6a4a30 },   // outer post → seabed
-      { w: 0.45, h: pIn.h, d: 0.45, x: ux * 1.5, y: pIn.cy, z: uz * 1.5, c: 0x6a4a30 }, // inner post → seabed
-      { w: 0.62, h: 0.55, d: 0.62, x: ux * 6 + uz * 1.2, y: deckY + 0.5, z: uz * 6 - ux * 1.2, c: 0x8a2a20 }, // CHUM bucket
-    ]));
+    // pier-local (x across, z offshore) -> venue-local: x*uz + z*ux, -x*ux + z*uz
+    const pier = pierMesh(deckY, (x, z) => seabedAt(x * uz + z * ux, -x * ux + z * uz));
+    pier.rotation.y = Math.atan2(ux, uz);
+    g.add(pier);
 
     // ---- WRECK LINE: five buoys + sunken hulls out along the bearing ----
     const rng = ctx.stream("wrecks");
@@ -446,21 +735,11 @@
       const gy = floorY(wx, wz);
       const yaw = rng() * Math.PI * 2, tilt = 0.14 + rng() * 0.22;
       const L = 12 + i * 3, W = 3.6 + i * 0.5, H = 2.4 + i * 0.4;
-      const hull = voxMesh([
-        { w: W, h: H, d: L, x: 0, y: H / 2, z: 0, c: 0x4a5a62 },
-        { w: W + 0.4, h: 0.4, d: L + 0.6, x: 0, y: H + 0.1, z: 0, c: 0x3a4a50 },
-        { w: W - 1, h: H * 0.8, d: L * 0.28, x: 0, y: H * 1.4, z: -L * 0.24, c: 0x5a6a72 },
-        { w: 0.5, h: H * 2.0, d: 0.5, x: 0.6, y: H * 1.6, z: L * 0.18, c: 0x3a4048, rz: 0.5 },
-      ]);
+      const hull = wreckMesh(L, W, H, i);
       hull.position.set(lx, gy - 0.4, lz);
       hull.rotation.set(0, yaw, tilt * (i % 2 ? 1 : -1));
       g.add(hull);
-      const buoy = voxMesh([
-        { w: 1.2, h: 0.6, d: 1.2, x: 0, y: 0, z: 0, c: def.gold ? 0xd8a828 : 0xe06428 },
-        { w: 0.3, h: 1.7, d: 0.3, x: 0, y: 1.1, z: 0, c: 0x2a3238 },
-        { w: 0.85, h: 0.55, d: 0.3, x: 0.42, y: 1.6, z: 0, c: 0xf0a028 },
-        { w: 0.36, h: 0.36, d: 0.36, x: 0, y: 2.1, z: 0, c: 0xfff0c8 },
-      ]);
+      const buoy = buoyMesh(!!def.gold);
       buoy.position.set(lx, SEA_Y(), lz);
       g.add(buoy);
       V.wrecks.push({ name: def.name, wx, wz, lx, lz, val: def.val, crates: def.crates + (def.gold ? 1 : 0),
@@ -568,6 +847,7 @@
     o.mesh.rotation.set(0, o.yaw, 0);
     o.mesh.rotateX(-(o.pitch || 0));
     if (o.roll) o.mesh.rotateZ(o.roll);
+    swimBeat(o.mesh, frameDt);
   }
 
   /* ---- bait balls (the base of the chain) ---- */
@@ -577,6 +857,7 @@
     // a school is a size drawn per school, not a constant: every ball in this
     // sea used to be exactly 22 fish, which no two real schools ever are
     const n = 14 + ((Math.random() * 21) | 0);          // 14..34
+    baitFish();
     const mesh = new THREE.InstancedMesh(fishGeo, fishMat, n);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.frustumCulled = false; V.creatureRoot.add(mesh);
@@ -755,11 +1036,11 @@
     }
     k.seize = k.seize || {};
     // THE ONE NUMBER predatorKit CANNOT DERIVE. creatureJawPoint discovers the
-    // frontmost mesh along +X because that is the repo's model convention; these
-    // voxel creatures are authored nose-toward +Z (see sharkParts/syncFish), so
-    // the discovered jaw would sit in the shark's flank. Local, PRE-scale units:
-    // the mesh's own group.scale is already in matrixWorld.
-    k.seize.jaw = { x: 0, y: -0.2, z: 1.95 };
+    // frontmost mesh along +X because that is the repo's model convention; this
+    // file turns the bestiary model nose-toward +Z (see buildCreature/syncFish),
+    // so the discovered jaw would sit in the shark's flank. jawLocal is the
+    // species' own authored bite point carried through that turn and its scale.
+    k.seize.jaw = s.mesh.userData.jawLocal || { x: 0, y: 0, z: 2.6 };
     k.seize.medium = "water";
     k.seize.cause = "eaten by a " + sp.name;
     k.seize.onEnd = function (res) { onHuntEnd(s, res); };
@@ -822,11 +1103,9 @@
   function finishShark(s, dt, spd) {
     clampSwim(s);
     s.tailT += dt * (2.2 + spd * 0.9);
-    if (s.mesh.userData.tail) s.mesh.userData.tail.rotation.y = Math.sin(s.tailT) * 0.5;
-    if (s.mesh.userData.jaw) {
-      s.mesh.userData.jaw.rotation.x = (s.hunt === "rush" || s.hunt === "seize") ? 0.75
-        : (s.aggr > 0.7 || s.hunt === "bump") ? 0.25 : 0.05;
-    }
+   
+    gape(s.mesh, (s.hunt === "rush" || s.hunt === "seize") ? 1
+      : (s.aggr > 0.7 || s.hunt === "bump") ? 0.3 : 0);
     // THE THRASH INTEGRATES ONTO THE MESH; READ IT BACK BEFORE WE OVERWRITE IT.
     // Game packages tick at PRIO 40.5 and the seize machine at 47.35, so the
     // thrash does win the frame it runs in — but `shake` and `drag` are `+=` on
@@ -973,7 +1252,7 @@
             m.charging = null; m.chargeCd = 3;
           }
           clampSwim(m); m.tailT += dt * 9;
-          if (m.mesh.userData.tail) m.mesh.userData.tail.rotation.x = Math.sin(m.tailT) * 0.5;
+         
           syncFish(m); continue;
         }
       }
@@ -983,7 +1262,7 @@
         m.pos.x += Math.sin(m.yaw) * 7.5 * dt; m.pos.z += Math.cos(m.yaw) * 7.5 * dt;
         m.pitch = clamp(Math.atan2(m.jy, 7.5), -1.1, 1.1);
         if (m.jy < 0 && m.pos.y < surf - 0.4) { m.jumping = false; m.jumpCd = 5 + Math.random() * 9; chain.events.dolphinJumps++; }
-        m.tailT += dt * 10; if (m.mesh.userData.tail) m.mesh.userData.tail.rotation.x = Math.sin(m.tailT) * 0.4;
+        m.tailT += dt * 10;
         syncFish(m); continue;
       }
       const slotA = m.slot * 1.256 + simT * 0.15;
@@ -992,7 +1271,7 @@
       const ty = SEA_Y() - 1.3 - Math.abs(Math.sin(simT * 0.7 + m.slot)) * 2.2;
       steer(m, tx, ty, tz, pod.escorting ? 8 : 6.5, 2.6, dt); clampSwim(m);
       if (m.jumpCd <= 0 && m.pos.y > surf - 2.4 && Math.random() < 0.5) { m.jumping = true; m.jy = 6.4; }
-      m.tailT += dt * 7; if (m.mesh.userData.tail) m.mesh.userData.tail.rotation.x = Math.sin(m.tailT) * 0.45;
+      m.tailT += dt * 7;
       syncFish(m);
     }
   }
@@ -1019,10 +1298,10 @@
       o.roll = Math.sin(o.thrashT * 12) * 0.7;
       if (s) { s.pos.x = o.pos.x + Math.sin(o.yaw) * 2.4; s.pos.z = o.pos.z + Math.cos(o.yaw) * 2.4; s.pos.y = o.pos.y + 0.3; s.roll = Math.sin(o.thrashT * 14) * 1.2; syncFish(s); }
       if (o.thrashT <= 0) { if (s) killShark(s, "orca"); o.target = null; o.eatT = 4; }
-      o.tailT += dt * 14; if (o.mesh.userData.tail) o.mesh.userData.tail.rotation.x = Math.sin(o.tailT) * 0.7; syncFish(o); return;
+      o.tailT += dt * 14; syncFish(o); return;
     }
     o.roll = 0;
-    if (o.eatT > 0) { o.eatT -= dt; o.tailT += dt * 3; if (o.mesh.userData.tail) o.mesh.userData.tail.rotation.x = Math.sin(o.tailT) * 0.3; syncFish(o); return; }
+    if (o.eatT > 0) { o.eatT -= dt; o.tailT += dt * 3; syncFish(o); return; }
     if (!o.target || !o.target.alive) {
       o.target = null; let bd = 1e9;
       for (const s of chain.sharks) { if (!s.alive || s.claimed) continue; const dd = d3(o.pos, s.pos); if (dd < bd) { bd = dd; o.target = s; } }
@@ -1046,7 +1325,7 @@
         }
       }
     }
-    clampSwim(o); o.tailT += dt * 6; if (o.mesh.userData.tail) o.mesh.userData.tail.rotation.x = Math.sin(o.tailT) * 0.45; syncFish(o);
+    clampSwim(o); o.tailT += dt * 6; syncFish(o);
   }
 
   /* ---- MEGALODON (the legend — owns the trench) ---- */
@@ -1069,7 +1348,7 @@
   let megSeize = null;
   function megSeizeOpts() {
     if (megSeize) return megSeize;
-    megSeize = { jaw: { x: 0, y: -0.2, z: 1.95 }, medium: "water", style: "shake",
+    megSeize = { jaw: (chain.meg && chain.meg.mesh.userData.jawLocal) || { x: 0, y: 0, z: 9 }, medium: "water", style: "shake",
       dps: 10 + MEG_SP.bite * 0.4, hold: 2.23 * Math.pow(MEG_SP.scale, 0.9),
       escape: 0.41 / Math.pow(MEG_SP.scale, 0.9), thrash: 1,
       cause: "eaten by a megalodon" };
@@ -1120,8 +1399,8 @@
       }
     }
     clampSwim(m); m.tailT += dt * 3.2;
-    if (m.mesh.userData.tail) m.mesh.userData.tail.rotation.y = Math.sin(m.tailT) * 0.45;
-    if (m.mesh.userData.jaw) m.mesh.userData.jaw.rotation.x = (m.running && d3(m.pos, ref) < 20) ? 0.8 : 0.12;
+   
+    gape(m.mesh, (m.running && d3(m.pos, ref) < 20) ? 1 : 0.12);
     syncFish(m);
   }
 
@@ -1194,7 +1473,7 @@
     if (d2(s.pos.x, s.pos.z, s.wx, s.wz) < 6) { const a = Math.random() * 6.28, dd = 30 + Math.random() * 60; s.wx = clamp(s.pos.x + Math.sin(a) * dd, V.bounds.minX, V.bounds.maxX); s.wz = clamp(s.pos.z + Math.cos(a) * dd, V.bounds.minZ, V.bounds.maxZ); }
     const surf = surfaceY(s.pos.x, s.pos.z);
     steer(s, s.wx, surf - 0.8 - Math.abs(Math.sin(simT + s.tailT)) * 0.8, s.wz, 4.5, 2, dt); clampSwim(s);
-    s.tailT += dt * 6; if (s.mesh.userData.tail) s.mesh.userData.tail.rotation.x = Math.sin(s.tailT) * 0.4; syncFish(s);
+    s.tailT += dt * 6; syncFish(s);
   }
 
   /* ============================ the two roles ============================ */
@@ -1286,8 +1565,8 @@
     const ps = RT.playerShark;
     ps.position.set(P.pos.x, surfaceY(P.pos.x, P.pos.z) - 1.4, P.pos.z);
     ps.rotation.set(0, RT.sharkYaw, 0);
-    ps.userData._t = (ps.userData._t || 0) + dt * 8;
-    if (ps.userData.tail) ps.userData.tail.rotation.y = Math.sin(ps.userData._t) * 0.5;
+    swimBeat(ps, dt);
+   
     // EAT: bait balls and seals within range → score
     RT.fedCd -= dt;
     for (const s of chain.schools) {
@@ -1377,6 +1656,7 @@
     if (CBZ.game && CBZ.game.mode && CBZ.game.mode !== "city") { if (chain.sharks.length || chain.schools.length) despawnAll(); if (RT.playerShark) detachShark(); return; }
     dt = Math.min(0.05, dt || 0);
     simT += dt;
+    frameDt = dt;
     const P = CBZ.player;
     const near = P && d2(P.pos.x, P.pos.z, V.center.x, V.center.z) < V.radius + NEAR;
     const inWater = playerInWater();
@@ -1471,6 +1751,8 @@
       anchor: () => (V ? { x: V.origin.x, z: V.origin.z, bearing: V.bearing, deep: V.deep } : null),
       o2: () => RT.o2,
       score: () => RT.score,
+      // the venue's builders, for turntable shots and probes (no mount needed)
+      models: { creature: buildCreature, shack: baitShack, pier: pierMesh, wreck: wreckMesh, buoy: buoyMesh },
     },
   });
 })();
