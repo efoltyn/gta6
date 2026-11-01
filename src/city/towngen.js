@@ -108,6 +108,80 @@
     if (!CBZ.colliders) return;
     CBZ.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, y0: 0, y1: y1 == null ? 30 : y1 });
   }
+  /* THE TOWN WELL — the square's landmark when the recipe names no flagpole.
+     A draw well as a mason and a carpenter build one: a coursed stone drum
+     2.3 m across and 0.85 m high (sitting height, so nobody falls in), a
+     dressed coping ring oversailing it, the dark shaft inside the coping;
+     two squared oak posts standing on the coping carry a windlass drum with
+     an iron crank, a rope down to a hooped bucket, and a little gabled
+     shingle roof on purlins. It was a 1.1 m stone cylinder with two 0.12 m
+     poles and a plank across them. One merged mesh per material. */
+  /* the parts, at scale s (1 = the 2.4 m town well; a village well is ~0.85),
+     building-local with the drum's foot at the origin: [{geo, color}] */
+  function wellParts(s, stone, wood) {
+    s = s || 1;
+    const out = [];
+    const shade = function (hex, f) {
+      return (Math.min(255, (((hex >> 16) & 255) * f) | 0) << 16) | (Math.min(255, (((hex >> 8) & 255) * f) | 0) << 8) | Math.min(255, ((hex & 255) * f) | 0);
+    };
+    const STN = stone, STD = shade(stone, 0.8), STL = shade(stone, 1.12), WD = wood, WDD = shade(wood, 0.72), RF = 0x4e4136, IR = 0x2c2a28;
+    const C = function (rt, rb, h, seg, px, py, pz, col, rx, rz, open) {
+      const g = new THREE.CylinderGeometry(rt * s, rb * s, h * s, seg, 1, !!open);
+      if (rx) g.rotateX(rx); if (rz) g.rotateZ(rz);
+      g.translate(px * s, py * s, pz * s); out.push({ geo: g, color: col });
+    };
+    const B = function (w, h, d, px, py, pz, col, rx) {
+      const g = new THREE.BoxGeometry(w * s, h * s, d * s);
+      if (rx) g.rotateX(rx);
+      g.translate(px * s, py * s, pz * s); out.push({ geo: g, color: col });
+    };
+    const R = 1.12, DH = 0.85;
+    // the drum, a plinth course a shade darker, and two bed joints
+    C(R, R + 0.04, DH, 20, 0, DH / 2, 0, STN);
+    C(R + 0.07, R + 0.09, 0.16, 20, 0, 0.08, 0, STD);
+    for (const jy of [0.32, 0.58]) C(R + 0.012, R + 0.012, 0.025, 20, 0, jy, 0, STD, 0, 0, true);
+    // the coping ring and the shaft inside it (a dark disc a hair above, so it
+    // reads as the hole going down)
+    C(R + 0.1, R + 0.1, 0.13, 20, 0, DH + 0.065, 0, STL);
+    C(R - 0.22, R - 0.22, 0.012, 18, 0, DH + 0.137, 0, 0x14171a);
+    // the frame: two posts, a brace each way at the foot, the windlass
+    const PX = R - 0.06, PH = 2.15, P = 0.15;
+    for (const sg of [-1, 1]) {
+      B(P, PH, P, sg * PX, DH + 0.13 + PH / 2, 0, WD);
+      B(0.08, 0.6, 0.08, sg * (PX - 0.18), DH + 0.4, 0.16, WDD, -0.5);
+      B(0.08, 0.6, 0.08, sg * (PX - 0.18), DH + 0.4, -0.16, WDD, 0.5);
+    }
+    const wy = DH + 1.25;
+    C(0.11, 0.11, 2 * PX - P, 12, 0, wy, 0, WDD, 0, Math.PI / 2);
+    for (const sg of [-1, 1]) C(0.03, 0.03, P + 0.1, 8, sg * PX, wy, 0, IR, 0, Math.PI / 2);   // the axle through each post
+    // the crank: an arm off the +x end and its handle
+    B(0.05, 0.42, 0.05, PX + 0.14, wy - 0.18, 0, IR);
+    C(0.025, 0.025, 0.22, 6, PX + 0.14, wy - 0.38, 0.1, IR, Math.PI / 2);
+    // the rope, the bucket hanging at the coping, its iron hoops
+    C(0.016, 0.016, wy - (DH + 0.62), 5, 0.12, (wy + DH + 0.62) / 2, 0, WDD);
+    C(0.16, 0.13, 0.28, 12, 0.12, DH + 0.48, 0, WD);
+    for (const hy of [0.39, 0.57]) C(0.165, 0.165, 0.025, 12, 0.12, DH + hy, 0, IR, 0, 0, true);
+    // the roof: a ridge beam on the post heads, a purlin under each of the two
+    // shingle slopes at 35 degrees, and a ridge cap
+    const ry = DH + 0.13 + PH, slope = 0.62, half = 1.0, SL = half / Math.cos(slope);
+    B(2 * PX + 0.5, 0.12, 0.12, 0, ry + 0.06, 0, WD);
+    for (const sg of [-1, 1]) {
+      B(2 * PX + 0.5, 0.08, 0.08, 0, ry + 0.1 + Math.tan(slope) * (half - 0.6) - 0.07, sg * 0.6, WDD);
+      B(2 * PX + 0.7, 0.07, SL, 0, ry + 0.1 + Math.tan(slope) * half / 2 - 0.02, sg * half / 2, RF, sg * slope);
+    }
+    B(2 * PX + 0.74, 0.08, 0.16, 0, ry + 0.1 + Math.tan(slope) * half + 0.02, 0, WDD);
+    return out;
+  }
+  CBZ.wellParts = wellParts;        // city/villagekit.js's village well is this one, smaller
+  function townWell(root, x, y, z, stone, wood) {
+    const by = new Map();
+    for (const p of wellParts(1, stone, wood)) {
+      p.geo.translate(x, y, z);
+      let a = by.get(p.color); if (!a) { a = []; by.set(p.color, a); } a.push(p.geo);
+    }
+    by.forEach(function (geos, col) { mergeAdd(root, geos, cmat(col), { cast: col !== 0x14171a }); });
+  }
+  CBZ.townWell = townWell;          // (the lab's asset kit shoots it alone)
   // weighted pick from [{key, w}] using rng
   function wpick(list, rng) {
     if (!list || !list.length) return null;
@@ -874,35 +948,54 @@
         if (CBZ.flags) CBZ.flags.pole(root, { x: sx, y: Y0, z: sz, height: 9, base: true });
         solid(sx, sz, 0.6, 0.6, 9);
       } else {
-        mergeAdd(root, [
-          (function () { const g = new THREE.CylinderGeometry(1.5, 1.7, 1.1, 12); g.translate(sx, Y0 + 0.55, sz); return g; })(),
-          (function () { const g = new THREE.CylinderGeometry(0.12, 0.12, 2.4, 5); g.translate(sx - 1.2, Y0 + 1.7, sz); return g; })(),
-          (function () { const g = new THREE.CylinderGeometry(0.12, 0.12, 2.4, 5); g.translate(sx + 1.2, Y0 + 1.7, sz); return g; })(),
-          (function () { const g = new THREE.BoxGeometry(3.0, 0.16, 0.4); g.translate(sx, Y0 + 2.9, sz); return g; })(),
-        ], cmat(pal.stone != null ? pal.stone : 0x9a8d72), { cast: true });
-        solid(sx, sz, 3.2, 3.2, 2);
+        townWell(root, sx, Y0, sz, pal.stone != null ? pal.stone : 0x9a8d72, WOOD);
+        solid(sx, sz, 2.4, 2.4, Y0 + 1.0);              // the drum (posts and roof stand over it)
       }
-      // benches around the square (instanced). On the park square they sit
-      // beside the four paths, where cityground wears the turf bald at a
-      // bench (its own bench spots), not floating over a lawn.
-      const benchIM = new THREE.InstancedMesh(new THREE.BoxGeometry(2.2, 0.4, 0.6), cmat(WOOD), 4);
-      const dummy = new THREE.Object3D();
+      // benches around the square, facing the landmark. On the park square
+      // they sit beside the four paths, where cityground wears the turf bald
+      // at a bench (its own bench spots), not floating over a lawn. The bench
+      // is the street kit's (city/props.js kerbKit: cast-iron standards, four
+      // seat slats, three back slats), the same one Gang City's parks seat
+      // people on; the old one was a 2.2 x 0.4 x 0.6 plank.
       const bo = Math.min(inW, inD) * 0.23, off = Math.min(sw, sd) / 2 - 4;
       const benchAt = kit
-        ? [[1, 0], [-1, 0], [0, 1], [0, -1]].map(function (q) { return [q[0] * bo + (q[0] === 0 ? 2 : 0), q[1] * bo + (q[1] === 0 ? 2 : 0), q[0] === 0]; })
-        : [[0, -off, false], [0, off, false], [-off, 0, true], [off, 0, true]];
-      benchAt.forEach((c, i) => {
-        const yaw90 = c[2];
-        dummy.position.set(sx + c[0], Y0 + 0.45, sz + c[1]);
-        dummy.rotation.set(0, yaw90 ? Math.PI / 2 : 0, 0); dummy.scale.set(1, 1, 1);
-        dummy.updateMatrix(); benchIM.setMatrixAt(i, dummy.matrix);
-        // SOLID: a 2.2 m plank whose top is 0.65 — over physics.js's 0.45
-        // STEP_UP, so it is not something you walk over, it is something you
-        // walked THROUGH. An InstancedMesh has no per-instance collider, so
-        // the AABB is pushed here, from the SAME rotation the matrix used.
-        solid(sx + c[0], sz + c[1], yaw90 ? 0.6 : 2.2, yaw90 ? 2.2 : 0.6, Y0 + 0.65);
+        ? [[1, 0], [-1, 0], [0, 1], [0, -1]].map(function (q) { return [q[0] * bo + (q[0] === 0 ? 2 : 0), q[1] * bo + (q[1] === 0 ? 2 : 0), q]; })
+        : [[0, -off, [0, -1]], [0, off, [0, 1]], [-off, 0, [-1, 0]], [off, 0, [1, 0]]];
+      const KK = CBZ.kerbKit ? (function () { try { return CBZ.kerbKit(); } catch (e) { return null; } })() : null;
+      const VCM = CBZ.streetHW && CBZ.streetHW.hardwareMaterial ? CBZ.streetHW.hardwareMaterial(false) : null;
+      const benchGeos = [];
+      const oldIM = (KK && KK.bench && VCM) ? null : new THREE.InstancedMesh(new THREE.BoxGeometry(2.2, 0.4, 0.6), cmat(WOOD), 4);
+      const dummy = new THREE.Object3D();
+      benchAt.forEach(function (c, i) {
+        const bx = sx + c[0], bz = sz + c[1];
+        const q = c[2];
+        const face = Math.atan2(-q[0], -q[1]);          // bench +z (the sitter's front) toward the landmark
+        const across = q[0] !== 0;                       // the bench's length runs along z
+        if (!oldIM) {
+          for (const pt of KK.bench.parts) {
+            const g = pt.geo.clone();
+            g.rotateY(face); g.translate(bx, Y0 + 0.012, bz);
+            benchGeos.push(g);
+          }
+          const seatReg = CBZ.propRegisterSeat || CBZ.roomSeatAnchor;
+          if (seatReg) {
+            const tx = Math.cos(face), tz = -Math.sin(face);
+            for (const l of [-0.6, 0, 0.6]) { try { seatReg(bx + tx * l, Y0 + 0.012, bz + tz * l, face, "bench", null, { cushion: 0.46, floorBelow: 0 }); } catch (e) {} }
+          }
+        } else {
+          dummy.position.set(bx, Y0 + 0.45, bz);
+          dummy.rotation.set(0, across ? Math.PI / 2 : 0, 0); dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix(); oldIM.setMatrixAt(i, dummy.matrix);
+        }
+        // SOLID: the seat top is 0.46 and the back 0.86, over physics.js's
+        // 0.45 STEP_UP: a bench is something you walk round, not through. An
+        // instanced or merged bench has no per-piece collider, so the AABB
+        // is pushed here, from the same facing the geometry used.
+        const L = oldIM ? 2.2 : 1.85, D = oldIM ? 0.6 : 0.55;
+        solid(bx, bz, across ? D : L, across ? L : D, Y0 + 0.65);
       });
-      benchIM.instanceMatrix.needsUpdate = true; benchIM.matrixAutoUpdate = false; benchIM.castShadow = true; root.add(benchIM);
+      if (benchGeos.length) mergeAdd(root, benchGeos, VCM, { cast: true });
+      if (oldIM) { oldIM.instanceMatrix.needsUpdate = true; oldIM.matrixAutoUpdate = false; oldIM.castShadow = true; root.add(oldIM); }
       // the town-name sign: a PHYSICAL welcome board on two posts at the
       // square's edge (owner rule: no floating word labels), inside the lot
       // line on a kerbed town so it stands on the square, not the footway.
