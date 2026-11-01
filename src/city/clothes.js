@@ -1567,7 +1567,7 @@
     hemBand(T, rib, hem);                                          // ribbed hem, above the tuck
     T.shade();
     A.fill(bc); for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.88, 1, 0.09, rib); A.shade(); // ribbed cuff, all round
-    return { torso: 1, arms: 1 };
+    return { torso: 1, arms: 1, hood: { hex: body } };
   };
 
   // WIFEBEATER — a ribbed white tank/undershirt: wide shoulder straps, a low
@@ -3790,6 +3790,84 @@
   }
   CBZ.citySkirtGeometry = skirtGeometry;
 
+  /* ---- THE HOOD, DOWN ON THE SHOULDERS ---------------------------------------
+     A hoodie without a hood is a sweatshirt, and at street distance the hood is
+     the whole read of the garment. A painter that declares `hood: {hex}` gets a
+     real one: the hood's fabric lying down round the back and sides of the neck,
+     a soft roll that is thin where its two edges cross at the throat and piles
+     up into the bag of the hood on the upper back. It is a swept tube on the
+     body's own neck ring (torsoShape nRx / nRz / nZc at yN), so it sits on this
+     body's trapezius, and it rides the chest (moves with the spine like the
+     jacket shell). One geometry per body shape, cached; the skirt's material
+     cache (one per colour). CITY_HOOD_MESH=false reverts. */
+  const HOOD_GEO = Object.create(null);
+  function hoodGeometry(S) {
+    if (HOOD_GEO[S.key]) return HOOD_GEO[S.key];
+    const vs = S.vs || 1;
+    const NP = 26, NS = 12;                       // path steps x section sides
+    const rx = S.nRx + 0.035 * vs, rz = S.nRz + 0.035 * vs, zc = S.nZc;
+    const pos = [], idx = [];
+    for (let i = 0; i <= NP; i++) {
+      const t = i / NP;
+      const ph = (t - 0.5) * 2 * 0.86 * Math.PI;      // 0 = the back, +-0.86 pi = the throat
+      const back = 0.5 + 0.5 * Math.cos(ph);         // 1 behind the neck, 0 at the throat
+      // the section: a flattened roll that grows into the hood's bag at the back
+      const r = (0.024 + 0.058 * Math.pow(back, 1.5)) * vs;
+      const flat = 0.55 + 0.25 * back;               // lies down on the shoulders
+      // the path: round the neck, lower and further out at the back
+      const cx = Math.sin(ph) * (rx + r * 0.7);
+      const cz = zc - Math.cos(ph) * (rz + r * 0.8 + 0.035 * vs * back);
+      const cy = S.yN - 0.02 * vs - 0.05 * vs * back * back - (1 - back) * 0.035 * vs;
+      // the frame: outward normal in xz, up
+      const nx = Math.sin(ph), nz = -Math.cos(ph);
+      for (let j = 0; j < NS; j++) {
+        const a = j / NS * Math.PI * 2;
+        let ox = Math.cos(a) * r, oy = Math.sin(a) * r * flat;
+        // the bag hangs: its underside drops further down the back
+        if (oy < 0) oy *= 1 + 1.6 * back * back;
+        pos.push(cx + nx * ox, cy + oy, cz + nz * ox);
+      }
+    }
+    for (let i = 0; i < NP; i++) for (let j = 0; j < NS; j++) {
+      const a0 = i * NS + j, a1 = i * NS + (j + 1) % NS, b0 = a0 + NS, b1 = a1 + NS;
+      idx.push(a0, a1, b0, a1, b1, b0);
+    }
+    // cap both ends (the hood's edges at the throat)
+    for (const e of [0, NP]) {
+      const c0 = pos.length / 3; let sx = 0, sy = 0, sz = 0;
+      for (let j = 0; j < NS; j++) { sx += pos[(e * NS + j) * 3]; sy += pos[(e * NS + j) * 3 + 1]; sz += pos[(e * NS + j) * 3 + 2]; }
+      pos.push(sx / NS, sy / NS, sz / NS);
+      for (let j = 0; j < NS; j++) { const a = e * NS + j, b = e * NS + (j + 1) % NS; if (e === 0) idx.push(c0, b, a); else idx.push(c0, a, b); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    g.computeBoundingSphere();
+    g._shared = true;
+    HOOD_GEO[S.key] = g;
+    return g;
+  }
+  function dressHood(ch, hood) {
+    let hm = ch._hoodMesh;
+    const S = ch.torsoShape, chest = ch.skinSlots && ch.skinSlots.torso && ch.skinSlots.torso[0];
+    const want = !!(hood && hood.hex != null && S && chest && (!CBZ.CONFIG || CBZ.CONFIG.CITY_HOOD_MESH !== false));
+    if (!want) { if (hm) hm.visible = false; return; }
+    if (!hm) {
+      hm = new THREE.Mesh(hoodGeometry(S), skirtMaterial(hood.hex));
+      hm.name = "hood";
+      hm.castShadow = true; hm.receiveShadow = false;
+      hm.userData.clothingPart = "hood";
+      chest.add(hm);
+      ch._hoodMesh = hm;
+    }
+    // the geometry is in the body frame; the chest mesh sits at its own y
+    hm.position.set(-chest.position.x, -chest.position.y, -chest.position.z);
+    hm.geometry = hoodGeometry(S);
+    hm.material = skirtMaterial(hood.hex);
+    hm.visible = true;
+  }
+
   function applyClothes(ch, rec, opts) {
     if (!ch || !ch.skinSlots) return null;
     fitTorso(ch);                                    // chest+waist → ONE garment column
@@ -3797,6 +3875,7 @@
     const key = set ? keyOf(typeof rec === "string" ? { id: rec } : rec, ch) : null;
     if (!set) {                                      // no painted look → strip back to flat
       if (ch._skirtMesh) ch._skirtMesh.visible = false;
+      if (ch._hoodMesh) ch._hoodMesh.visible = false;
       if (ch._clothesKey != null) {
         const s = ch.skinSlots;
         restore(s.torso); restore(s.arms); restore(s.legs); restore(s.pelvis);
@@ -3821,6 +3900,7 @@
     if (ch._clothesKey === key && ch._clothesMat === m) return outParts;    // already wearing it
     const s = ch.skinSlots;
     dressSkirt(ch, set.parts.hem, set.parts.hem && set.parts.hem.hex != null ? set.parts.hem.hex : set.bodyHex);
+    dressHood(ch, set.parts.hood);
     const xr = set.parts.fp ? tailorXR(ch) : 0;      // TAILORING: front laid out in body units
     dress(s.torso, "torso", m, xr);
     if (set.parts.arms) { dress(s.arms, "arm", m); dress(s.armsLower, "arm", m); }

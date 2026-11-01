@@ -7,7 +7,8 @@
    params: cast   comma list of  sex-physique-skin-outfit[-age]  (default:
                   ten people, cop, banker, civilians, gang, inmate, nurse,
                   soldier, builder, executive, guard)
-                  skin is a palette index 0..7 (pale .. deep)
+                  skin is a palette index 0..7 (pale .. deep); an outfit
+                  ending in ! is the bought (forcePaint) version
            gap    metres between bodies (default 0.9)
            focus  index: the cameras frame that one body only
            crop   top: chest up
@@ -35,7 +36,14 @@ CBZ.lab.kit("people", {
       grp.position.set((i - (cast.length - 1) / 2) * gap, 0, 0);
       W.scene.add(grp);
       let dressed = false;
-      try { dressed = !!CBZ.human.dress(ch, oid); } catch (e) { dressed = "threw " + e; }
+      // "hoodie!" = the catalog fit with forcePaint (a BOUGHT hoodie, not the
+      // plain street civvie the casting gives a nobody)
+      try {
+        if (oid.slice(-1) === "!") {
+          const rec = Object.assign({}, CBZ.cityOutfitCatalog()[oid.slice(0, -1)], { forcePaint: 1 });
+          dressed = !!CBZ.human.dress(ch, rec);
+        } else dressed = !!CBZ.human.dress(ch, oid);
+      } catch (e) { dressed = "threw " + e; }
       const top = P.crop === "top";
       const fb = new THREE.Mesh(new THREE.BoxGeometry(0.62, top ? 0.7 : 1.85, 0.4), new THREE.MeshBasicMaterial());
       fb.visible = false; fb.position.set(grp.position.x, top ? 1.42 : 0.93, 0); W.scene.add(fb);

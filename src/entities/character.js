@@ -765,7 +765,7 @@
       // ~0.71 m deltoid span over a 0.46 m chest, a 15 cm sleeve, a 19 cm
       // thigh: a broad-shouldered man, not a fridge. (was 0.34/0.23, 0.30/0.62,
       // pelvis 0.84x0.48, chest 0.92x0.50, yoke 0.94x0.52, jacket 0.98x0.60)
-      legUp: LEG_UP, legLo: LEG_LO, legW: 0.27, hipX: 0.17, shoeH: 0.20,
+      legUp: LEG_UP, legLo: LEG_LO, legW: 0.27, hipX: 0.155, shoeH: 0.20,
       armUp: ARM_UP, armLo: ARM_LO, armW: 0.20, armX: 0.39, handH: 0.20,
       pelvisW: 0.62, pelvisH: 0.20, pelvisD: 0.33,
       torsoH: 0.95, torsoW: 0.66, torsoD: 0.42,
@@ -796,7 +796,7 @@
   const ADULT_F = Object.assign(profileBase(), {
     key: "f", fem: true,
     statureMul: 0.958,                       // ~1.74m beside the male 1.82m
-    legUp: 0.555, legLo: 0.545, legW: 0.25, hipX: 0.20,
+    legUp: 0.555, legLo: 0.545, legW: 0.26, hipX: 0.165,
     armUp: 0.45, armLo: 0.45, armW: 0.17, armX: 0.345,
     pelvisW: 0.64, pelvisH: 0.20, pelvisD: 0.34,
     torsoH: 0.92, torsoW: 0.58, torsoD: 0.39,
