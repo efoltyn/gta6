@@ -404,7 +404,7 @@
       const g = BOX(0.06, len, 0.06);
       const dir = new THREE.Vector3(x1 - x0, 1.5, z1 - z0).normalize();
       const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-      g.applyQuaternion(q); g.translate((x0 + x1) / 2, 0.35 + 0.75, (z0 + z1) / 2);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(q)); g.translate((x0 + x1) / 2, 0.35 + 0.75, (z0 + z1) / 2);
       g.userData.c = col; L.push(g.toNonIndexed()); L[L.length - 1].userData.c = col; g.dispose();
     }
     [0.75, 1.3].forEach((y, k) => L.push(part(new THREE.TorusGeometry(0.33 - k * 0.12, 0.025, 4, 12), col, 0, y, 0, Math.PI / 2)));
