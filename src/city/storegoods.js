@@ -27,25 +27,28 @@
        doors with handles, lit interior, wire shelves, bottles and cans.
      - A COFFEE STATION at a gas station / corner store; a HOT FOOD WARMER on
        the counter where the trade sells hot food.
-     - GOODS THAT READ AS GOODS: cereal boxes, cans, bottles, chip bags, jars,
-       pill bottles, boxed electronics, paint cans, cartons — real sizes, faced
-       up to the front of the board in blocks of one product the way a shop is
-       merchandised, a price ticket under every block. Drawn as a handful of
-       InstancedMeshes over ONE shared label atlas (a detail texture + a tint
-       mask, so a white label panel stays white on a red box).
-     - THE REAL, BUYABLE STOCK (cityEcon.stockFor(kind)) as the game's real
-       item models (CBZ.itemAsset) at their real size, at waist height: cold
-       drinks in the cooler, hot food in the warmer, coffee on the coffee
-       station, everything else on the wall bays. [E] takes it off the shelf
-       (in your hand until you pay at the counter or put it back; out of the
-       door with it is a theft, through CBZ.shopFloor.till), and a bought
-       unit leaves the shelf until the daily restock.
+     - ONLY REAL, BUYABLE STOCK (2026-10-31; the owner: "I hate the gas
+       stations when you put fake products. It should be empty shelves and
+       then real assets, like an apple on the shelf that you can have in
+       your inventory"). A board holds nothing or a catalog item from
+       cityEcon.stockFor(kind), drawn with the model that item has in the
+       hand, on the pavement and in the bag (CBZ.itemAssetBaked), at its
+       real size: blocks of facings, two deep, flat things stacked, a price
+       ticket per block; cold drinks and sandwiches in the cooler, hot food
+       in the warmer, coffee at the station, the rest down the boards from
+       eye level out. Every unit is buyable: [E] takes the front one off the
+       shelf (in your hand until you pay at the counter or put it back; out
+       of the door with it is a theft, through CBZ.shopFloor.till), and a
+       bought unit leaves the shelf until the daily restock. The label atlas
+       of unbuyable cereal boxes, cans and chip bags this file used to fill
+       the boards with is deleted; a board the budget does not reach stands
+       empty and clean.
 
-   COST. Nothing here is eager: a store's fixtures, goods and real stock are
-   built only for the few stores near you (MAX_LIVE), as ~2 merged fixture
-   meshes + ~12 instanced goods batches + one merged mesh per stocked product,
-   with the fixtures solid (colliders pushed while live, removed after). The
-   goods are drawn only inside SHOW_R. No lights: the ceiling fit-out
+   COST. Nothing here is eager: a store's fixtures and stock are built only
+   for the few stores near you (MAX_LIVE), as ~2 merged fixture meshes + ONE
+   InstancedMesh per product it sells (UNIT_BUDGET / TRI_BUDGET cap a
+   store), with the fixtures solid (colliders pushed while live, removed
+   after). The stock is drawn only inside SHOW_R. No lights: the ceiling fit-out
    (fitout_work.js) owns the troffers; these materials take the same night
    self-lit share the fit-out surfaces do, so a lit shop at night is lit.
 
