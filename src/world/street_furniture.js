@@ -211,96 +211,218 @@
   // =====================================================================
   //  PROTOTYPES
   // =====================================================================
-  const GALV = 0xa7adb0;
+  const GALV = 0xa7adb0, GALV_D = 0x858b8e, HOLE = 0x3a3e41;
 
   function signPostProto() {
-    // 2-inch square galvanised perforated-tube post (the US standard), with
-    // the breakaway anchor sleeve it sits in at the footway
+    // 2-inch square galvanised PERFORATED tube (the US standard: 7/16 in
+    // holes on 1 in centres down every face), seated in its 2.5 in breakaway
+    // anchor sleeve with the corner bolt through both, a ground collar, and
+    // the cap. The hole rows are drawn as the dark recessed stripe they read
+    // as past arm's length. The kit scales this in Y by postH/3, so nothing
+    // here has a height-specific detail.
     const p = DK.proto();
-    p.box(0.05, 3.0, 0.05, GALV, 0, 1.5, 0);
-    p.box(0.065, 0.2, 0.065, 0x8a9093, 0, 0.1, 0);        // anchor sleeve
-    p.box(0.056, 0.012, 0.056, 0x7d8386, 0, 3.0, 0);       // top cap
+    p.cbox(0.05, 2.7, 0.05, 0.004, GALV, 0, 1.6, 0);
+    for (let s = -1; s <= 1; s += 2) {
+      p.box(0.011, 2.62, 0.002, HOLE, 0, 1.6, s * 0.0255);
+      p.box(0.002, 2.62, 0.011, HOLE, s * 0.0255, 1.6, 0);
+    }
+    p.cbox(0.064, 0.32, 0.064, 0.004, GALV_D, 0, 0.16, 0);         // anchor sleeve
+    p.cyl(0.006, 0.006, 0.09, 6, 0x6a7073, 0, 0.27, 0, Math.PI / 2, 0, 0);   // corner bolt
+    for (let s = -1; s <= 1; s += 2) p.cyl(0.011, 0.011, 0.006, 6, 0x6a7073, 0, 0.27, s * 0.035, Math.PI / 2, 0, 0);
+    p.cbox(0.11, 0.02, 0.11, 0.006, 0x8e9396, 0, 0.01, 0);          // ground collar
+    p.cbox(0.056, 0.016, 0.056, 0.005, 0x7d8386, 0, 2.958, 0);      // top cap
     return p.done();
   }
   function bollardProto() {
-    // A domed cap made from a tapered cylinder rather than a sphere: a
-    // 10×6 SphereGeometry is 360 verts, which on a few hundred bollards
-    // would cost more than every pole in the city.
+    // A cast-iron "heritage" bollard, turned in one profile: the base flare
+    // on its bolt-down plinth, the barely tapered shaft, a collar, a fluted
+    // neck, the dome and its finial; a retroreflective band at bumper height.
     const p = DK.proto();
-    p.cyl(0.105, 0.125, 0.94, 8, 0x30343a, 0, 0.47, 0);
-    p.cyl(0.055, 0.105, 0.09, 8, 0x30343a, 0, 0.98, 0);
-    p.cyl(0.16, 0.18, 0.09, 8, 0x24272c, 0, 0.045, 0);     // flange
-    p.box(0.22, 0.05, 0.22, 0xd8dbd4, 0, 0.72, 0);         // reflective band
+    const IRON = 0x2c3035;
+    p.cyl(0.165, 0.175, 0.03, 12, 0x23262a, 0, 0.015, 0);
+    for (let k = 0; k < 4; k++) {
+      const a = k * Math.PI / 2 + Math.PI / 4;
+      p.cyl(0.017, 0.017, 0.016, 6, 0x50555a, Math.cos(a) * 0.13, 0.035, Math.sin(a) * 0.13);   // bolt heads
+    }
+    p.lathe([[0.0, 0.03], [0.15, 0.03], [0.15, 0.06], [0.12, 0.1], [0.108, 0.16], [0.1, 0.78],
+      [0.122, 0.8], [0.122, 0.84], [0.094, 0.86], [0.088, 0.9], [0.1, 0.93], [0.1, 0.95],
+      [0.082, 1.0], [0.045, 1.035], [0.02, 1.04], [0.026, 1.07], [0.0, 1.085]], 12, IRON, 0, 0, 0);
+    p.cyl(0.1035, 0.1035, 0.05, 12, 0xdad8ce, 0, 0.7, 0);           // reflective band
     return p.done();
   }
   function drainProto() {
-    // A kerb inlet: the throat cut into the kerb face plus the gutter grate.
+    // A kerb inlet: the steel lintel hood over the throat cut into the kerb
+    // face, the dark throat, and the cast-iron gutter grate (chamfered frame,
+    // vane bars, two lift slots) with the stencil plate on the kerb top.
     const p = DK.proto();
-    p.box(1.15, 0.16, 0.06, 0x1a1c1f, 0, 0.1, 0.17);        // dark throat
-    p.box(1.25, 0.06, 0.42, 0x3a3e42, 0, 0.035, -0.06);     // grate frame
-    for (let i = -2; i <= 2; i++) p.box(0.07, 0.05, 0.34, 0x191b1e, i * 0.19, 0.05, -0.06);  // bars
-    p.box(1.3, 0.2, 0.1, 0xa89e7c, 0, 0.11, 0.22);          // kerb apron either side
+    p.cbox(1.3, 0.2, 0.1, 0.012, 0xa89e7c, 0, 0.1, 0.22);              // kerb apron
+    p.box(1.15, 0.13, 0.06, 0x101113, 0, 0.085, 0.17);                 // dark throat
+    p.cbox(1.2, 0.05, 0.03, 0.006, 0x4a4d50, 0, 0.175, 0.16);          // steel lintel
+    p.cbox(1.25, 0.05, 0.44, 0.012, 0x3a3e42, 0, 0.025, -0.06);        // grate frame
+    p.box(1.13, 0.012, 0.33, 0x0d0e10, 0, 0.046, -0.06);               // the void under the bars
+    for (let i = -5; i <= 5; i++) p.box(0.04, 0.03, 0.33, 0x2b2e31, i * 0.1, 0.045, -0.06);   // bars
+    for (const z of [-0.155, 0.035]) p.box(1.13, 0.03, 0.03, 0x2b2e31, 0, 0.045, z);          // cross bearers
+    p.box(0.3, 0.004, 0.06, 0xc9c3ae, 0, 0.202, 0.24);                 // stencil plate
+    p.box(0.24, 0.005, 0.016, 0x2d4f7a, 0, 0.203, 0.24);
     return p.done();
   }
   function dumpsterProto() {
-    // A 3-yard front-load container: the body flares out toward the top with
-    // the sloped front a truck's forks lift from, steel fork POCKETS down both
-    // flanks, a top rail, two black plastic lids (one propped on the other),
-    // a drain plug, four swivel castors and a weathered hauler panel.
+    // A 3-yard FRONT-LOAD container, 1.85 x 1.15 m: the body flares toward
+    // the top, the sloped front a truck's forks lift from, steel fork
+    // POCKETS down both flanks on gussets, pressed stiffener channels round
+    // the body, the top rim, two black plastic lids on a rod hinge (one
+    // propped), a drain plug, four swivel castors, the hauler's panel.
+    // Local +Z faces OUT from the wall.
     const p = DK.proto();
-    const BODY = 0x2f5e46, DARK = 0x234634, LID = 0x1b1c1e, STEEL = 0x3a3d40;
-    p.box(1.9, 0.9, 1.0, BODY, 0, 0.64, -0.06);                         // lower body
-    p.box(1.9, 0.42, 0.6, BODY, 0, 1.04, 0.2, -0.42, 0, 0);            // sloped front
-    p.box(1.96, 0.36, 1.16, BODY, 0, 1.06, -0.02);                      // upper body
-    p.box(2.0, 0.06, 1.22, DARK, 0, 1.26, -0.02);                       // top rail
+    const BODY = 0x2f5e46, DARK = 0x244936, LID = 0x1b1c1e, STEEL = 0x3a3d40, RUST = 0x5a4632;
+    const W = 1.85;
+    // THE BODY IS ITS SIDE PROFILE, extruded across the width: a vertical
+    // back, a flat top, a short vertical front lip and the long slope that
+    // runs down and in to the floor (the face a truck's forks lift against).
+    const prof = function (zb, zf, zs, y0, y1, ys) {
+      const sh = new THREE.Shape();      // shape x = -z (see the ry below)
+      sh.moveTo(-zb, y0); sh.lineTo(-zb, y1); sh.lineTo(-zf, y1); sh.lineTo(-zf, ys); sh.lineTo(-zs, y0); sh.lineTo(-zb, y0);
+      return sh;
+    };
+    const body = new THREE.ExtrudeGeometry(prof(-0.58, 0.56, 0.08, 0.22, 1.24, 0.92),
+      { depth: W - 0.06, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1, curveSegments: 1 });
+    body.translate(0, 0, -(W - 0.06) / 2);
+    p.add(body, BODY, 0, 0, 0, 0, Math.PI / 2, 0);
+    p.cbox(W + 0.1, 0.06, 1.24, 0.015, DARK, 0, 1.27, -0.01);          // top rim
+    p.cbox(W + 0.02, 0.05, 0.05, 0.01, DARK, 0, 0.92, 0.59);           // front lip channel
+    // stiffener channels: three down the back, two on each flank
+    for (let k = -1; k <= 1; k++) p.cbox(0.08, 0.96, 0.05, 0.01, DARK, k * 0.6, 0.72, -0.615);
     for (let s = -1; s <= 1; s += 2) {
-      p.box(0.14, 0.14, 1.26, STEEL, s * 1.03, 0.9, -0.02);            // fork pocket
-      p.box(0.08, 0.1, 0.9, DARK, s * 0.99, 0.42, -0.06);               // side rib
+      for (const z of [-0.35, 0.05]) p.cbox(0.05, 0.9, 0.08, 0.01, DARK, s * 0.955, 0.7, z);
+      // fork pocket on two gussets
+      p.cbox(0.16, 0.15, 1.2, 0.02, STEEL, s * 1.0, 0.95, -0.02);
+      p.box(0.11, 0.11, 1.22, 0x0e0f10, s * 1.0, 0.95, -0.02);          // its open mouth (dark)
+      for (const z of [-0.4, 0.3]) p.box(0.1, 0.2, 0.03, STEEL, s * 0.97, 0.8, z);
     }
-    p.box(0.97, 0.05, 1.2, LID, -0.49, 1.31, -0.02);                    // lid, shut
-    p.box(0.97, 0.05, 1.2, LID, 0.49, 1.36, -0.08, -0.12, 0, 0);       // lid, propped
-    for (let k = -2; k <= 2; k++) p.box(0.9, 0.012, 0.04, 0x26282b, 0.49, 1.39, -0.08 + k * 0.22, -0.12, 0, 0);  // lid ribs
+    // lids: rod hinge at the back rim, one shut, one propped open a crack
+    p.cyl(0.018, 0.018, W, 6, STEEL, 0, 1.3, -0.6, 0, 0, Math.PI / 2);
+    p.cbox(0.9, 0.06, 1.18, 0.02, LID, -0.47, 1.325, -0.02);
+    p.cbox(0.9, 0.06, 1.18, 0.02, LID, 0.47, 1.4, -0.06, -0.14, 0, 0);
+    for (let k = -2; k <= 2; k++) {
+      p.box(0.86, 0.014, 0.035, 0x262729, -0.47, 1.36, -0.02 + k * 0.22);
+      p.box(0.86, 0.014, 0.035, 0x262729, 0.47, 1.435, -0.06 + k * 0.22, -0.14, 0, 0);
+    }
+    for (const x of [-0.47, 0.47]) p.cbox(0.14, 0.04, 0.05, 0.01, 0x222325, x, 1.33 + (x > 0 ? 0.12 : 0), 0.58);   // lid handles
+    // castors: swivel plate, fork, wheel
     for (let s = -1; s <= 1; s += 2) for (let t = -1; t <= 1; t += 2) {
-      p.box(0.12, 0.06, 0.12, STEEL, s * 0.8, 0.2, t * 0.38 - 0.06);   // castor plate
-      p.cyl(0.08, 0.08, 0.06, 8, 0x151618, s * 0.8, 0.09, t * 0.38 - 0.06, 0, 0, Math.PI / 2);   // wheel
+      const cx = s * 0.78, cz = t * 0.25 - 0.26;
+      p.cbox(0.13, 0.02, 0.13, 0.006, STEEL, cx, 0.225, cz);
+      p.box(0.09, 0.09, 0.012, STEEL, cx, 0.17, cz + 0.035);
+      p.box(0.09, 0.09, 0.012, STEEL, cx, 0.17, cz - 0.035);
+      p.cyl(0.075, 0.075, 0.05, 10, 0x151618, cx, 0.075, cz, Math.PI / 2, 0, 0);
+      p.cyl(0.03, 0.03, 0.056, 8, 0x8a8f93, cx, 0.075, cz, Math.PI / 2, 0, 0);
     }
-    p.cyl(0.035, 0.035, 0.05, 6, STEEL, 0.7, 0.3, -0.58, Math.PI / 2, 0, 0);   // drain plug
-    p.box(0.62, 0.3, 0.012, 0xcfc6a6, 0.5, 0.74, 0.456);                // hauler panel
-    p.box(0.52, 0.05, 0.004, 0x5a2a22, 0.5, 0.8, 0.464);                // its lettering band
+    p.cyl(0.035, 0.035, 0.05, 6, STEEL, 0.7, 0.3, -0.62, Math.PI / 2, 0, 0);   // drain plug
+        // hauler panel on the slope, laid in its plane: a point on the slope
+    // plus the slope's outward normal (forward and DOWN), rotated to face it
+    const sl = Math.atan2(0.92 - 0.22, 0.56 - 0.08);                     // slope angle off horizontal
+    const nY = -Math.cos(sl), nZ = Math.sin(sl), tilt = Math.PI / 2 - sl;
+    const onSlope = function (t, off) { off += 0.03; return [0.22 + (0.92 - 0.22) * t + nY * off, 0.08 + (0.56 - 0.08) * t + nZ * off]; };   // +0.03: the extrusion's bevel
+    let q = onSlope(0.55, 0.008); p.box(0.62, 0.3, 0.012, 0xcfc6a6, 0.5, q[0], q[1], tilt, 0, 0);
+    q = onSlope(0.64, 0.016); p.box(0.52, 0.06, 0.006, 0x5a2a22, 0.5, q[0], q[1], tilt, 0, 0);
+    q = onSlope(0.5, 0.016); p.box(0.42, 0.03, 0.006, 0x3a3c40, 0.46, q[0], q[1], tilt, 0, 0);
+    q = onSlope(0.44, 0.016); p.box(0.3, 0.03, 0.006, 0x3a3c40, 0.4, q[0], q[1], tilt, 0, 0);
+    q = onSlope(0.1, 0.008); p.box(0.44, 0.06, 0.006, RUST, -0.5, q[0], q[1], tilt, 0, 0);   // scuffed kick rust
     return p.done();
   }
   function bagProto() {
-    // Three slumped sacks — ONE prototype, so a whole pile is one instance.
-    // Sphere segments are kept at the legibility floor (5×3): a bin bag is a
-    // lumpy silhouette, and at 0.3m nothing above that is visible.
+    // Three slumped black sacks: each a squashed body, a gathered neck and
+    // the two tied ears of its draw tape. ONE prototype, one instance a pile.
     const p = DK.proto();
-    p.sphere(0.3, 5, 3, 0x24262a, 0, 0.24, 0);
-    p.sphere(0.25, 5, 3, 0x1e2024, 0.36, 0.2, 0.14);
-    p.sphere(0.22, 5, 3, 0x2a2c31, -0.28, 0.18, -0.16);
-    p.cone(0.09, 0.2, 4, 0x24262a, 0, 0.5, 0);              // knotted top
+    function sack(x, z, r, h, col, lean) {
+      const g = new THREE.SphereGeometry(r, 10, 7);
+      // SLUMP: a full bag sits on its contents — flat bottom, bellied sides,
+      // lumps where the rubbish pushes the film out. Deterministic per bag.
+      const a = g.attributes.position.array;
+      for (let i = 0; i < a.length; i += 3) {
+        const vx = a[i], vy = a[i + 1], vz = a[i + 2];
+        const bulge = 1 + 0.09 * Math.sin(vx * 23 + x * 7) * Math.cos(vz * 19 + z * 5) + 0.06 * Math.sin(vy * 17);
+        const belly = vy < 0 ? 1.12 : 1 - 0.18 * (vy / r);
+        a[i] = vx * bulge * belly; a[i + 2] = vz * bulge * belly * 0.92;
+        a[i + 1] = vy < 0 ? vy * 0.55 : vy;
+      }
+      g.computeVertexNormals();
+      g.scale(1, h, 1);
+      p.add(g, col, x, r * h * 0.55, z, lean * 0.4, 0, lean * 0.3);
+      const ny = r * h * 1.5;
+      p.cone(r * 0.32, r * 0.5, 6, col, x + lean * r, ny + r * 0.1, z, Math.PI, 0, 0);  // gathered neck
+      p.cone(r * 0.12, r * 0.38, 4, col, x + lean * r - r * 0.12, ny + r * 0.3, z, 0, 0, 0.7);   // tie ears
+      p.cone(r * 0.12, r * 0.38, 4, col, x + lean * r + r * 0.12, ny + r * 0.3, z, 0, 0, -0.7);
+      p.box(r * 0.3, r * 0.05, r * 0.06, 0xc9c4b5, x + lean * r, ny + r * 0.22, z);  // white draw tape
+    }
+    sack(0, 0, 0.27, 1.05, 0x202226, 0.12);
+    sack(0.4, 0.16, 0.23, 0.95, 0x1b1d21, -0.18);
+    sack(-0.3, -0.18, 0.21, 1.0, 0x26282d, 0.25);
     return p.done();
   }
   function bikeProto() {
+    // A city hybrid, 700c: torus tyres on rims with a hub and spokes, a
+    // diamond frame authored by its JOINTS (head tube, top/down/seat tubes,
+    // stays), the fork, stem and riser bar with grips, seatpost and saddle,
+    // crank with chainring and pedals, the kickstand and a U-lock on the
+    // frame. Local X = along the bike, front at -X.
     const p = DK.proto();
-    const WH = 0x1c1e21;
-    p.cyl(0.33, 0.33, 0.045, 9, WH, -0.52, 0.33, 0, 0, 0, Math.PI / 2);
-    p.cyl(0.33, 0.33, 0.045, 9, WH, 0.52, 0.33, 0, 0, 0, Math.PI / 2);
-    p.box(0.72, 0.045, 0.045, 0x2c6f9c, 0, 0.6, 0);          // top tube
-    p.box(0.68, 0.045, 0.045, 0x2c6f9c, -0.04, 0.42, 0, 0, 0, 0.24);  // down tube
-    p.box(0.045, 0.42, 0.045, 0x2c6f9c, 0.34, 0.44, 0, 0, 0, -0.3);   // seat tube
-    p.box(0.045, 0.5, 0.045, 0x2c6f9c, -0.5, 0.5, 0, 0, 0, 0.14);     // fork
-    p.box(0.05, 0.05, 0.42, 0x35393d, -0.5, 0.78, 0);        // handlebar
-    p.box(0.2, 0.06, 0.11, 0x2a2c30, 0.36, 0.72, 0);         // saddle
+    const TYRE = 0x1a1b1d, RIM = 0x8d9396, FRAME = 0x2c6f9c, BLK = 0x1d1f22, CH = 0x5d6266;
+    const R = 0.335, WB = 1.04, fx = -WB / 2, rx = WB / 2, wy = R + 0.02;
+    for (const x of [fx, rx]) {
+      p.torus(R - 0.018, 0.02, 5, 20, Math.PI * 2, TYRE, x, wy, 0);
+      p.torus(R - 0.045, 0.009, 3, 20, Math.PI * 2, RIM, x, wy, 0);
+      p.cyl(0.022, 0.022, 0.1, 8, CH, x, wy, 0, Math.PI / 2, 0, 0);
+      for (let k = 0; k < 8; k++) {
+        const a = k * Math.PI / 4;
+        p.rod(x, wy, (k % 2 ? 0.035 : -0.035), x + Math.cos(a) * (R - 0.05), wy + Math.sin(a) * (R - 0.05), 0, 0.0025, 3, 0xa9aeb1);
+      }
+    }
+    // frame joints
+    const BB = [0.06, 0.29, 0], ST = [0.16, 0.86, 0], HT = [-0.4, 0.84, 0], HL = [-0.37, 0.66, 0];
+    const tube = function (a, b, r, c) { p.rod(a[0], a[1], a[2], b[0], b[1], b[2], r, 6, c || FRAME); };
+    tube(BB, ST, 0.017);                              // seat tube
+    tube(ST, HT, 0.016);                              // top tube
+    tube(BB, HL, 0.02);                               // down tube
+    tube(HT, [-0.37, 0.64, 0], 0.022);                // head tube
+    for (const s of [-1, 1]) {
+      tube([BB[0], BB[1], s * 0.03], [rx, wy, s * 0.05], 0.009);        // chain stays
+      tube([ST[0] - 0.02, ST[1] - 0.04, s * 0.02], [rx, wy, s * 0.05], 0.008);   // seat stays
+      tube([-0.37, 0.64, s * 0.02], [fx, wy, s * 0.05], 0.011, CH);      // fork blades
+    }
+    tube([-0.4, 0.84, 0], [-0.43, 0.97, 0], 0.013, CH);                  // steerer + stem
+    tube([-0.43, 0.97, 0], [-0.5, 0.98, 0], 0.012, CH);
+    p.rod(-0.5, 0.98, -0.3, -0.5, 0.98, 0.3, 0.011, 6, BLK);            // bar
+    for (const s of [-1, 1]) p.cyl(0.017, 0.017, 0.11, 6, 0x2a2a2a, -0.5, 0.98, s * 0.27, Math.PI / 2, 0, 0);   // grips
+    tube(ST, [0.19, 0.98, 0], 0.012, CH);                                 // seatpost
+    const sad = new THREE.SphereGeometry(0.1, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+    sad.scale(1.35, 0.4, 0.75);
+    p.add(sad, 0x1a1a1c, 0.2, 0.985, 0);                                  // saddle
+    // drivetrain
+    p.cyl(0.1, 0.1, 0.008, 18, CH, BB[0], BB[1], 0.05, Math.PI / 2, 0, 0);    // chainring
+    p.rod(BB[0], BB[1], 0.06, BB[0] + 0.05, BB[1] - 0.16, 0.08, 0.009, 4, CH);   // crank arm
+    p.rod(BB[0], BB[1], -0.06, BB[0] - 0.05, BB[1] + 0.16, -0.08, 0.009, 4, CH);
+    p.box(0.08, 0.02, 0.1, BLK, BB[0] + 0.05, BB[1] - 0.16, 0.13);       // pedals
+    p.box(0.08, 0.02, 0.1, BLK, BB[0] - 0.05, BB[1] + 0.16, -0.13);
+    p.rod(BB[0] + 0.1, BB[1] + 0.005, 0.05, rx, wy + 0.04, 0.05, 0.005, 3, 0x3b3d40);   // chain, top run
+    p.rod(BB[0] + 0.1, BB[1] - 0.09, 0.05, rx, wy - 0.04, 0.05, 0.005, 3, 0x3b3d40);    // chain, return
+    p.rod(0.22, 0.27, -0.03, 0.3, 0.0, -0.16, 0.009, 4, CH);             // kickstand
+    // U-lock round the seat tube
+    p.torus(0.07, 0.009, 4, 10, Math.PI, 0x9a9fa3, 0.1, 0.5, 0, 0, Math.PI / 2, 0);
+    p.cbox(0.17, 0.035, 0.035, 0.008, 0xb0302a, 0.1, 0.43, 0, 0, Math.PI / 2, 0);
     return p.done();
   }
   function litterProto() {
-    // a scatter cluster: a flattened cup, a crushed can, a sheet of paper.
+    // a scatter cluster: a flattened cup with its lid, a crushed can, a sheet
+    // of paper and a receipt.
     // NOTE the flat sheets spin on rz, not ry: the kit composes Euler XYZ, so
     // after the -90° x-tilt it is rz that yaws a ground quad — ry would tip it
     // up on edge. (Same trap the aim-library docs warn about for cameras.)
     const p = DK.proto();
-    p.cyl(0.035, 0.045, 0.11, 5, 0xd8d2c2, 0, 0.055, 0, Math.PI / 2 - 0.2, 0, 0.4);
-    p.box(0.07, 0.05, 0.13, 0x9aa4ad, 0.26, 0.03, 0.14, 0, 0.9, 0);
+    p.cyl(0.035, 0.045, 0.11, 7, 0xd8d2c2, 0, 0.042, 0, Math.PI / 2 - 0.2, 0, 0.4);
+    p.cyl(0.047, 0.047, 0.008, 7, 0x2a2c30, -0.05, 0.045, 0.025, Math.PI / 2 - 0.2, 0, 0.4);
+    p.cyl(0.033, 0.033, 0.07, 7, 0x9aa4ad, 0.26, 0.03, 0.14, 0, 0, Math.PI / 2 - 0.15);
+    p.cyl(0.034, 0.03, 0.018, 7, 0xb3262a, 0.26 + 0.044, 0.03, 0.14, 0, 0, Math.PI / 2 - 0.15);
     p.plate(0.19, 0.14, 0xe7e3d6, -0.2, 0.012, 0.1, -Math.PI / 2, 0, 0.6);
     p.plate(0.1, 0.08, 0xcfc9b8, 0.1, 0.011, -0.22, -Math.PI / 2, 0, -1.1);
     return p.done();
