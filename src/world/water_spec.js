@@ -1137,6 +1137,28 @@
     return seaY() + _ev.h + imp.h;
   };
 
+  // JUST the local entry-impulse term of waterWaveHeight (cavity + travelling
+  // crest, metres, 0 with no live entry). It is the one NON-PLANAR part of the
+  // surface at the scale of a splash, so foam and crown sheets that ride a
+  // plane fit of the swell add this per vertex instead of being sliced into
+  // polygons by a crest the plane cannot follow (world/water_wake.js).
+  // Reading it changes nothing: the wave functions above are untouched.
+  CBZ.waterImpulseHeightAt = function (x, z, t) {
+    if (!Number.isFinite(t)) t = CBZ.waterClock();
+    return sampleSurfaceImpulses(x, z, t, _surfaceImpulseSample).h;
+  };
+  // true while any entry impulse is still alive (lets a caller skip the
+  // per-vertex term entirely on a quiet sea)
+  CBZ.waterImpulsesLive = function (t) {
+    if (!entryPhysicsOn()) return false;
+    if (!Number.isFinite(t)) t = CBZ.waterClock();
+    for (let i = 0; i < MAX_SURFACE_IMPULSES; i++) {
+      const q = surfaceImpulses[i];
+      if (q.w > 0 && t - q.z >= 0 && t - q.z < surfaceImpulseShapes[i].z) return true;
+    }
+    return false;
+  };
+
   // Surface slope (dY/dx, dY/dz) of the DISPLACED sheet — the true geometric
   // slope, which is what a hull pitches on. Allocation-free with `out`.
   // out.fold (0 flat .. ~1 folding) is the Gerstner Jacobian's compression:
@@ -1589,6 +1611,9 @@
     // per-frame copy can let the mirror and shader seas drift apart.
     u.uWaterImpulses = { value: surfaceImpulses };
     u.uWaterImpulseShapes = { value: surfaceImpulseShapes };
+    // 1 while any entry impulse is alive: gates the per-PIXEL impulse normal
+    // in waterSeaMaterial (a uniform branch, free on a quiet sea)
+    u.uImpLive = { value: 0 };
     u.uDeepGain = { value: 1.0 };
     u.uChopGain = { value: 1.0 };
     // x = run-up range (m), y = leading-edge brightness gain, z = enabled
@@ -1692,6 +1717,7 @@
     windTick();
     sceneTick();
     if (u.uSeaTime) u.uSeaTime.value = CBZ.waterClock();
+    if (u.uImpLive) u.uImpLive.value = CBZ.waterImpulsesLive(u.uSeaTime ? u.uSeaTime.value : undefined) ? 1 : 0;
     if (u.uSeaY && !u.fixedSeaY) u.uSeaY.value = seaY();
     // Surge -> how far inland the rendered waterline creeps. The ramp is
     // normalised, so this is a shape constant, not a distance: SHORE_CUT_PER_M
@@ -3084,6 +3110,7 @@
       "varying vec3 vSeaWorld;",
       "varying vec3 vSeaNormal;",
       "varying vec4 vSeaMisc;",          // x crest height (+-1), y distance, z far fade, w inland
+      "varying vec4 vSeaImp;",           // xy the vertex's entry-impulse slope, zw its undisplaced XZ
     ].join("\n");
     const body = kind === "external" ? [
       "  vec4 wB = modelMatrix * vec4(position, 1.0);",
@@ -3095,7 +3122,9 @@
       "  float wInland = 0.0;",
       "  vCbzSteep = wNormal.y;",
       "  vCbzFold = 0.0;",
-    ].join("\n") : CBZ.waterVertexBody("modelMatrix * vec4(position, 1.0)", { arena: kind === "arena", worldXZ: !!opts.worldXZ });
+      "  vSeaImp = vec4(0.0, 0.0, wWorld.xz);",
+    ].join("\n") : CBZ.waterVertexBody("modelMatrix * vec4(position, 1.0)", { arena: kind === "arena", worldXZ: !!opts.worldXZ }) +
+      "\nvSeaImp = vec4(wEntryImp.yz, wXZ);";
     const fogScale = Number.isFinite(opts.fogScale) ? opts.fogScale : (kind === "city" ? 0.66 : 1.0);
     const vs = [
       CBZ.waterVertexDecl(),
@@ -3125,6 +3154,12 @@
       CBZ.waterFragmentDecl(),
       "uniform float uSeaOpacity;",
       kind === "external" ? "uniform vec4 uClip;" : "",
+      kind === "external" ? "" : [
+        "uniform vec4 uWaterImpulses[" + MAX_SURFACE_IMPULSES + "];",
+        "uniform vec4 uWaterImpulseShapes[" + MAX_SURFACE_IMPULSES + "];",
+        "uniform float uImpLive;",
+        IMPULSE_FN,
+      ].join("\n"),
       opts.fragDecl || "",
       VARY,
       "#include <fog_pars_fragment>",
@@ -3141,7 +3176,21 @@
       "  #else",
       "    vec3 cbzTir = uSeaColor * 0.34;",
       "  #endif",
-      "  vec4 sh = cbzShadeSea(vSeaWorld, vSeaNormal, vSeaMisc.x, vCbzFold, vSeaMisc.y, vSeaMisc.z, field, inland, under, uSeaColor, cbzTir);",
+      // THE ENTRY DENT, PER PIXEL. The vertex stage adds the impulse's slope to
+      // the normal at 6x (the swell's exaggeration), but the disc is ~1.5 m a
+      // quad at 20 m and the travelling crest is ~0.3 m wide, so that normal
+      // was sampled a few times across the whole ring and interpolated: every
+      // splash left a ring of hard-edged flat facets on the sea. While an
+      // impulse is live, swap the interpolated impulse slope for the exact one
+      // at this pixel (same closed form, same gain); otherwise skip it.
+      "  vec3 seaN = vSeaNormal;",
+      kind === "external" ? "" :
+        "  if (uImpLive > 0.5) {\n" +
+        "    vec3 eI = cbzEntryImpulse(vSeaImp.zw, uSeaTime);\n" +
+        "    vec2 dI = eI.yz - vSeaImp.xy;\n" +
+        "    seaN = normalize(seaN - vec3(dI.x, 0.0, dI.y) * " + gnum(NORMAL_GAIN_SWELL) + " * max(0.2, seaN.y));\n" +
+        "  }",
+      "  vec4 sh = cbzShadeSea(vSeaWorld, seaN, vSeaMisc.x, vCbzFold, vSeaMisc.y, vSeaMisc.z, field, inland, under, uSeaColor, cbzTir);",
       "  vec3 outColor = sh.rgb;",
       "  float foam = sh.a;",
       "  float solid = foam;",
