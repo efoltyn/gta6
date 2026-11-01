@@ -195,6 +195,126 @@
   };
   const TONE_NAMES = ["warm", "cool", "exec", "clinic"];
 
+  /* ---- SHAPES: the box stays the contract, the mesh gets its real form ------
+     OWNER (Opus 5.5 rebuild): every chair, sofa and bed was a stack of sharp
+     boxes — "a box with a colour". The BOX is not the problem: its numbers are
+     the contract every host, collider, seat anchor and the cushion audit read,
+     and every host draws only boxes. So a box keeps being drawn, with exactly
+     the numbers it always had, and a box tagged with a SHAPE has its geometry
+     swapped AFTER the host drew it, for a form that fits inside the same
+     extents:
+       round: b   a ROUNDED BOX — every edge eased by b metres (a 6 mm arris on
+                  a worktop, 3 cm of crown on a cushion, half its thickness on
+                  a pillow). 24 vertices, the SAME count as a BoxGeometry: the
+                  three vertices at each corner carry their own face's normal,
+                  so the bevel strips and corner facets shade as a curve.
+       cyl: t     a TURNED/ROUND part filling the box (legs, columns, stems,
+                  drums); t = top radius / bottom radius (1.25 = a leg that
+                  tapers to the floor); the wider end fills the box.
+     Both are symmetric under a quarter turn, so the pen's cardinal w/d swap
+     needs nothing from them. Geometries are cached by size: identical pieces
+     share one, which is what lets city/localinst.js pool them, and core/
+     batch.js bakes any geometry (it reads position/normal/index, not
+     "is it a box").
+     The swap only happens when the host handed back a Mesh whose drawn extents
+     ARE the box asked for (a clipped or substituted box keeps its box), and
+     only with FURNISH_DETAIL and FURNISH_SHAPES on: ?cfg_FURNISH_SHAPES=0 is
+     the one-line revert to the box world. Loose pieces (systems/pushables.js
+     recordGeo) bake the same shape into their instance geometry. */
+  if (CBZ.CONFIG.FURNISH_SHAPES == null) CBZ.CONFIG.FURNISH_SHAPES = true;
+  function shapesOn() { return CBZ.CONFIG.FURNISH_SHAPES !== false && det() && !!window.THREE; }
+  const SHAPE_GEO = new Map();
+  function q3(v) { return Math.round(v * 1000); }
+  function roundBoxGeo(w, h, d, b) {
+    const T = window.THREE;
+    const hx = w / 2, hy = h / 2, hz = d / 2;
+    b = Math.max(0, Math.min(b, hx * 0.98, hy * 0.98, hz * 0.98));
+    const pos = [], nrm = [], idx = [];
+    // corner c: sx = bit0, sy = bit1, sz = bit2; vertex c*3 + axis
+    for (let c = 0; c < 8; c++) {
+      const sx = c & 1 ? 1 : -1, sy = c & 2 ? 1 : -1, sz = c & 4 ? 1 : -1;
+      pos.push(sx * hx, sy * (hy - b), sz * (hz - b)); nrm.push(sx, 0, 0);
+      pos.push(sx * (hx - b), sy * hy, sz * (hz - b)); nrm.push(0, sy, 0);
+      pos.push(sx * (hx - b), sy * (hy - b), sz * hz); nrm.push(0, 0, sz);
+    }
+    const V = function (sx, sy, sz, ax) { return (((sx > 0) | 0) + ((sy > 0) | 0) * 2 + ((sz > 0) | 0) * 4) * 3 + ax; };
+    // outward winding by test: the box is convex and centred, so a face's
+    // normal must point the way its centroid does
+    const tri = function (a, bb, c) {
+      const ax = pos[a * 3], ay = pos[a * 3 + 1], az = pos[a * 3 + 2];
+      const ux = pos[bb * 3] - ax, uy = pos[bb * 3 + 1] - ay, uz = pos[bb * 3 + 2] - az;
+      const vx = pos[c * 3] - ax, vy = pos[c * 3 + 1] - ay, vz = pos[c * 3 + 2] - az;
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const cx = ax + pos[bb * 3] + pos[c * 3], cy = ay + pos[bb * 3 + 1] + pos[c * 3 + 1], cz = az + pos[bb * 3 + 2] + pos[c * 3 + 2];
+      if (nx * cx + ny * cy + nz * cz < 0) idx.push(a, c, bb); else idx.push(a, bb, c);
+    };
+    const quad = function (a, bb, c, dd) { tri(a, bb, c); tri(a, c, dd); };
+    const S = [-1, 1];
+    for (const s of S) {
+      quad(V(s, -1, -1, 0), V(s, 1, -1, 0), V(s, 1, 1, 0), V(s, -1, 1, 0));     // X faces
+      quad(V(-1, s, -1, 1), V(1, s, -1, 1), V(1, s, 1, 1), V(-1, s, 1, 1));     // Y faces
+      quad(V(-1, -1, s, 2), V(1, -1, s, 2), V(1, 1, s, 2), V(-1, 1, s, 2));     // Z faces
+    }
+    if (b > 1e-5) {
+      for (const s of S) for (const t of S) {
+        quad(V(s, t, -1, 0), V(s, t, -1, 1), V(s, t, 1, 1), V(s, t, 1, 0));     // X|Y edges, along Z
+        quad(V(s, -1, t, 0), V(s, -1, t, 2), V(s, 1, t, 2), V(s, 1, t, 0));     // X|Z edges, along Y
+        quad(V(-1, s, t, 1), V(-1, s, t, 2), V(1, s, t, 2), V(1, s, t, 1));     // Y|Z edges, along X
+      }
+      for (let c = 0; c < 8; c++) tri(c * 3, c * 3 + 1, c * 3 + 2);              // corner facets
+    }
+    const g = new T.BufferGeometry();
+    g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new T.Float32BufferAttribute(nrm, 3));
+    g.setIndex(idx);
+    return g;
+  }
+  function cylGeo(w, h, d, taper) {
+    const T = window.THREE;
+    // taper = top radius / bottom radius; the wider end fills the box
+    const rt = taper >= 1 ? 0.5 : 0.5 * taper, rb = taper >= 1 ? 0.5 / taper : 0.5;
+    const g = new T.CylinderGeometry(rt, rb, 1, 10, 1, false);
+    if (g.attributes.uv) g.deleteAttribute("uv");
+    g.scale(w, h, d);
+    return g;
+  }
+  // the cached geometry for a shape spec at a size (or null: no shape)
+  function shapeGeo(s, w, h, d) {
+    if (!s || !(w > 0 && h > 0 && d > 0)) return null;
+    const k = (s.cyl != null ? "c" + q3(s.cyl) : "r" + q3(s.round || 0)) + "|" + q3(w) + "|" + q3(h) + "|" + q3(d);
+    let g = SHAPE_GEO.get(k);
+    if (!g) {
+      g = s.cyl != null ? cylGeo(w, h, d, Math.max(0.05, Math.min(1.5, +s.cyl))) : roundBoxGeo(w, h, d, +s.round || 0);
+      g.computeBoundingBox(); g.computeBoundingSphere();
+      g._shared = true;                 // survives every host teardown traversal
+      g._furnShape = k;
+      SHAPE_GEO.set(k, g);
+    }
+    return g;
+  }
+  CBZ.furnishShape = function (s, w, h, d) { return shapesOn() ? shapeGeo(s, w, h, d) : null; };
+  // swap a drawn box mesh's geometry for its shape, only if the host drew the
+  // box it was asked for (a host that clipped, split or substituted it keeps it)
+  function applyShape(m, s, w, h, d) {
+    if (!m || !m.isMesh || m.isInstancedMesh || !m.geometry || !m.geometry.attributes || !m.geometry.attributes.position) return false;
+    const g0 = m.geometry;
+    if (g0._furnShape) return false;
+    if (!g0.boundingBox) g0.computeBoundingBox();
+    const bb = g0.boundingBox;
+    if (!bb || bb.isEmpty()) return false;
+    const sx = (bb.max.x - bb.min.x) * m.scale.x, sy = (bb.max.y - bb.min.y) * m.scale.y, sz = (bb.max.z - bb.min.z) * m.scale.z;
+    const cx = (bb.max.x + bb.min.x) / 2, cy = (bb.max.y + bb.min.y) / 2, cz = (bb.max.z + bb.min.z) / 2;
+    if (Math.abs(sx - w) > 0.002 || Math.abs(sy - h) > 0.002 || Math.abs(sz - d) > 0.002) return false;
+    if (Math.abs(cx) > 1e-4 || Math.abs(cy) > 1e-4 || Math.abs(cz) > 1e-4) return false;
+    if (m.rotation && (m.rotation.x || m.rotation.y || m.rotation.z)) return false;
+    const g = shapeGeo(s, w, h, d);
+    if (!g) return false;
+    m.geometry = g;
+    m.scale.set(1, 1, 1);
+    if (!g0._shared && typeof g0.dispose === "function") { try { g0.dispose(); } catch (e) {} }
+    return true;
+  }
+
   // ---- the audit ledger (BLOCK LAW #5 ratchet) -----------------------------
   const led = { pieces: 0, seats: 0, beds: 0, mismatched: 0, kinds: {} };
   function resetLedger() {
@@ -319,7 +439,12 @@
             if (!hostBox) nSolid++;
           }
         }
+        // the SHAPE rides on the options too (furnShape: no host reads it but
+        // pushables' recorder), and is applied to whatever mesh came back
+        const shp = o && (o.round != null || o.cyl != null) && shapesOn() ? { round: o.round, cyl: o.cyl } : null;
+        if (shp) oo.furnShape = shp;
         const m = draw(p.wx(lat, fwd), cy, p.wz(lat, fwd), w, h, d, color, oo);
+        if (shp && m) applyShape(m, shp, w, h, d);
         if (m && m.isObject3D) p.parts.push(m);
         return cy + h / 2;
       },
@@ -438,26 +563,34 @@
     // Front legs stop under the seat; the REAR pair keep going as the back's
     // uprights (one box each, not a leg plus a separate post 2 cm off it) —
     // which is how a real chair is built and why the back never looks bolted on.
+    // (The front legs are TURNED — round, tapering to the floor; the rear
+    // uprights are square stock with eased arrises, because they are the back.)
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
-      p.put(a * 0.205, 0, b * 0.205, legT, (D && b < 0) ? 0.89 : 0.37, legT, leg);
+      p.put(a * 0.205, 0, b * 0.205, legT, (D && b < 0) ? 0.89 : 0.37, legT, leg, D ? (b < 0 ? { round: 0.012 } : { cyl: 1.25 }) : null);
     // the seat FRAME the pad sits proud of (0.44 vs the pad's 0.52 → a 4cm
     // reveal on every side). It also ties the four legs together, which is what
     // stops them reading as four unrelated sticks.
-    if (D) p.put(0, 0.37, 0, 0.44, 0.05, 0.44, leg);
+    if (D) {
+      p.put(0, 0.37, 0, 0.44, 0.05, 0.44, leg, { round: 0.01 });
+      // an H-STRETCHER low between the legs: two side rails and the cross
+      // rail between them, the joinery that makes four legs one frame
+      for (let a = -1; a <= 1; a += 2) p.put(a * 0.205, 0.13, 0, 0.022, 0.024, 0.37, leg, { round: 0.008 });
+      p.put(0, 0.13, 0, 0.39, 0.022, 0.022, leg, { round: 0.008 });
+    }
     // The pad carries the seat's collider, floor to cushion (less the give),
     // and the back carries its own: walk into it and it stops you.
     const top = D
-      ? p.put(0, 0.39, 0, 0.52, 0.06, 0.52, pad, { solid: true, band: seatBand(0.45) })   // cushion → 0.45
+      ? p.put(0, 0.39, 0, 0.52, 0.06, 0.52, pad, { solid: true, band: seatBand(0.45), round: 0.024 })   // cushion → 0.45, crowned
       : p.put(0, 0.37, 0, 0.50, 0.08, 0.50, pad, { solid: true, band: seatBand(0.45) });  // cushion → 0.45
     if (D) {
       // AN OPEN BACK, the way a chair is joined: a top rail and a lower rail
       // tenoned between the two rear uprights, two slats between them, and AIR
       // round the slats. The old back was three solid panels stacked into a
       // wall; the gaps are what make it read as a chair from across a room.
-      p.put(0, 0.79, -0.205, 0.41, 0.10, 0.035, body, { solid: true, band: [0, 0.89] });   // top rail (the back's solid)
-      p.put(0, 0.53, -0.205, 0.41, 0.045, 0.03, body);               // lower rail
+      p.put(0, 0.79, -0.205, 0.41, 0.10, 0.035, body, { solid: true, band: [0, 0.89], round: 0.016 });   // top rail (the back's solid)
+      p.put(0, 0.53, -0.205, 0.41, 0.045, 0.03, body, { round: 0.01 });               // lower rail
       for (let a = -1; a <= 1; a += 2)
-        p.put(a * 0.075, 0.575, -0.205, 0.04, 0.215, 0.022, body);    // slats
+        p.put(a * 0.075, 0.575, -0.205, 0.04, 0.215, 0.022, body, { round: 0.008 });    // slats
     } else {
       p.put(0, 0.49, -0.21, 0.50, 0.55, 0.08, body, { solid: true, band: [0, 1.04] });   // backrest (legacy slab)
     }
@@ -474,21 +607,25 @@
     const p = pen("taskChair", x, y, z, yaw, opts);
     const pad = p.col("cloth"), frame = P.bezel;
     const D = det();
-    p.put(0, 0.03, 0, 0.62, 0.03, 0.06, frame);                               // spokes
-    p.put(0, 0.03, 0, 0.06, 0.03, 0.62, frame);
-    if (D) for (let a = -1; a <= 1; a += 2) {
-      p.put(a * 0.29, 0, 0, 0.05, 0.03, 0.05, frame);                          // casters
-      p.put(0, 0, a * 0.29, 0.05, 0.03, 0.05, frame);
+    p.put(0, 0.03, 0, 0.62, 0.03, 0.06, frame, D ? { round: 0.012 } : null);   // spokes
+    p.put(0, 0.03, 0, 0.06, 0.03, 0.62, frame, D ? { round: 0.012 } : null);
+    if (D) {
+      p.put(0, 0.025, 0, 0.12, 0.045, 0.12, frame, { cyl: 0.8 });                // the hub the spokes join
+      for (let a = -1; a <= 1; a += 2) {
+        p.put(a * 0.29, 0, 0, 0.05, 0.045, 0.05, frame, { round: 0.02 });       // twin-wheel casters
+        p.put(0, 0, a * 0.29, 0.05, 0.045, 0.05, frame, { round: 0.02 });
+      }
     }
-    p.put(0, 0.06, 0, 0.05, 0.28, 0.05, P.shelf);                              // gas lift
-    p.put(0, 0.34, 0, 0.42, 0.04, 0.42, frame);                                // seat pan
-    const top = p.put(0, 0.38, 0.01, 0.5, 0.07, 0.5, pad, { solid: true, band: seatBand(0.45) });   // cushion → 0.45
-    p.put(0, 0.36, -0.25, 0.06, 0.18, 0.03, frame);                            // back stem, up to the back
-    p.put(0, 0.54, -0.27, 0.46, 0.42, 0.06, pad, { solid: true, band: [0, 0.96] });   // back 0.54..0.96
-    if (D) p.put(0, 0.58, -0.306, 0.4, 0.34, 0.012, frame);                    // its shell, ON the back (it sat 1 mm inside it: two backs fighting)
+    p.put(0, 0.06, 0, 0.05, 0.28, 0.05, P.shelf, D ? { cyl: 1 } : null);       // gas lift
+    if (D) p.put(0, 0.2, 0, 0.07, 0.14, 0.07, frame, { cyl: 1 });              // its bellows sleeve
+    p.put(0, 0.34, 0, 0.42, 0.04, 0.42, frame, D ? { round: 0.012 } : null);   // seat pan
+    const top = p.put(0, 0.38, 0.01, 0.5, 0.07, 0.5, pad, { solid: true, band: seatBand(0.45), round: D ? 0.03 : null });   // cushion → 0.45
+    p.put(0, 0.36, -0.25, 0.06, 0.18, 0.03, frame, D ? { round: 0.01 } : null);   // back stem, up to the back
+    p.put(0, 0.54, -0.27, 0.46, 0.42, 0.06, pad, { solid: true, band: [0, 0.96], round: D ? 0.028 : null });   // back 0.54..0.96
+    if (D) p.put(0, 0.58, -0.306, 0.4, 0.34, 0.012, frame, { round: 0.005 });  // its shell, ON the back (it sat 1 mm inside it: two backs fighting)
     if (D) for (let a = -1; a <= 1; a += 2) {
-      p.put(a * 0.27, 0.40, -0.02, 0.03, 0.2, 0.03, frame);                    // arm post
-      p.put(a * 0.27, 0.60, 0.0, 0.06, 0.03, 0.26, frame);                     // arm pad → 0.63
+      p.put(a * 0.27, 0.40, -0.02, 0.03, 0.2, 0.03, frame, { round: 0.01 });  // arm post
+      p.put(a * 0.27, 0.60, 0.0, 0.06, 0.03, 0.26, frame, { round: 0.013 });   // arm pad → 0.63
     }
     p.seat(0, 0, yaw, "chair", 0.45, top);
     return p.done(0.62, 0.62, 0.96, top);
@@ -508,14 +645,14 @@
     const D = det();
     // short legs under the body, not a plinth: you see floor under a chair
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
-      p.put(a * (W / 2 - 0.1), 0, b * 0.32, 0.05, 0.10, 0.05, P.darkwood);
-    p.put(0, 0.10, 0, W, 0.24, 0.88, cloth, { solid: true, band: seatBand(0.42) });   // body (the seat's solid)
-    const top = p.put(0, 0.34, 0.04, W - 0.30, 0.08, 0.72, cloth);            // cushion → 0.42
-    p.put(0, 0.42, -0.34, W - 0.26, 0.40, 0.14, cloth);                       // back cushion → 0.82
-    p.put(0, 0.34, -0.42, W, 0.48, 0.06, cloth, { solid: true, band: [0, 0.82] });   // back frame → 0.82
+      p.put(a * (W / 2 - 0.1), 0, b * 0.32, 0.05, 0.10, 0.05, P.darkwood, D ? { cyl: 1.35 } : null);   // tapered feet
+    p.put(0, 0.10, 0, W, 0.24, 0.88, cloth, { solid: true, band: seatBand(0.42), round: D ? 0.035 : null });   // body (the seat's solid)
+    const top = p.put(0, D ? 0.31 : 0.34, 0.04, W - 0.30, D ? 0.11 : 0.08, 0.72, cloth, D ? { round: 0.04 } : null);   // cushion → 0.42
+    p.put(0, 0.42, -0.34, W - 0.26, 0.40, 0.14, cloth, D ? { round: 0.06 } : null);   // back cushion → 0.82, plump
+    p.put(0, 0.34, -0.42, W, 0.48, 0.06, cloth, { solid: true, band: [0, 0.82], round: D ? 0.025 : null });   // back frame → 0.82
     for (let a = -1; a <= 1; a += 2) {
-      p.put(a * (W / 2 - 0.08), 0.34, 0.02, 0.16, 0.22, 0.84, cloth, { solid: true, band: [0, D ? 0.61 : 0.56] });   // arm
-      if (D) p.put(a * (W / 2 - 0.08), 0.56, 0.02, 0.18, 0.05, 0.80, cloth);  // soft arm pad → 0.61
+      p.put(a * (W / 2 - 0.08), 0.34, 0.02, 0.16, 0.22, 0.84, cloth, { solid: true, band: [0, D ? 0.61 : 0.56], round: D ? 0.04 : null });   // arm
+      if (D) p.put(a * (W / 2 - 0.08), 0.56, 0.02, 0.18, 0.05, 0.80, cloth, { round: 0.024 });  // soft arm pad → 0.61, rolled
     }
     p.seat(0, 0.04, yaw, "armchair", 0.42, top);
     return p.done(W, 0.90, 0.82, top);
@@ -524,10 +661,12 @@
   // STOOL — pedestal, foot ring, seat. Cushion 0.68 (counter height).
   F.stool = function (x, y, z, yaw, opts) {
     const p = pen("stool", x, y, z, yaw, opts);
-    p.put(0, 0, 0, 0.36, 0.05, 0.36, P.chair);                       // base plate
-    p.put(0, 0.05, 0, 0.10, 0.55, 0.10, P.chair);                    // column
-    p.put(0, 0.22, 0, 0.30, 0.04, 0.30, P.chair);                    // foot ring
-    const top = p.put(0, 0.60, 0, 0.42, 0.08, 0.42, p.col("cloth"), { solid: true, band: [0, 0.68] }); // cushion → 0.68 (above a step: a jump)
+    const D = det();
+    p.put(0, 0, 0, 0.42, 0.03, 0.42, P.chair, D ? { cyl: 0.9 } : null);              // weighted base disc
+    p.put(0, 0.03, 0, D ? 0.06 : 0.10, 0.57, D ? 0.06 : 0.10, D ? P.shelf : P.chair, D ? { cyl: 1 } : null);   // chrome column
+    p.put(0, 0.24, 0, 0.36, 0.022, 0.36, D ? P.shelf : P.chair, D ? { cyl: 1 } : null);   // foot ring
+    if (D) p.put(0, 0.565, 0, 0.30, 0.035, 0.30, P.chair, { cyl: 1.2 });          // seat bell
+    const top = p.put(0, 0.60, 0, 0.42, 0.08, 0.42, p.col("cloth"), { solid: true, band: [0, 0.68], cyl: D ? 1.04 : null }); // cushion → 0.68 (above a step: a jump)
     p.seat(0, 0, yaw, "stool", 0.68, top);
     return p.done(0.42, 0.42, 0.68, top);
   };
@@ -542,8 +681,8 @@
     const wood = p.col("wood");
     const DT = det();
     for (let a = -1; a <= 1; a += 2) {
-      p.put(a * (L / 2 - 0.22), 0, 0, 0.10, 0.35, 0.42, P.chair);    // end legs
-      if (DT) p.put(a * (L / 2 - 0.22), 0.16, 0, 0.14, 0.06, 0.50, P.chair);   // cast-iron foot
+      p.put(a * (L / 2 - 0.22), 0, 0, 0.10, 0.35, 0.42, P.chair, DT ? { round: 0.02 } : null);    // end legs
+      if (DT) p.put(a * (L / 2 - 0.22), 0.16, 0, 0.14, 0.06, 0.50, P.chair, { round: 0.02 });   // cast-iron foot
     }
     // A bench is SLATS. Two boards with a 4cm gap between them at the identical
     // height read as a park bench; one 0.48-deep plank reads as a shelf. Both
@@ -553,14 +692,14 @@
     // seat cannot double the bench's collider count.
     if (DT) p.put(0, 0.29, 0, L - 0.06, 0.06, 0.48, P.chair, { solid: true, band: seatBand(0.45) });
     const top = DT
-      ? p.put(0, 0.35, 0.11, L, 0.10, 0.22, wood)                                      // front slat → 0.45
+      ? p.put(0, 0.35, 0.11, L, 0.10, 0.22, wood, { round: 0.012 })                    // front slat → 0.45
       : p.put(0, 0.35, 0, L, 0.10, 0.48, wood, { solid: true, band: seatBand(0.45) });  // plank → 0.45
-    if (DT) p.put(0, 0.35, -0.13, L, 0.10, 0.22, wood);                                // rear slat → 0.45
+    if (DT) p.put(0, 0.35, -0.13, L, 0.10, 0.22, wood, { round: 0.012 });              // rear slat → 0.45
     if (back && DT) {
-      p.put(0, 0.50, -0.19, L, 0.16, 0.07, wood);                    // lower back rail
-      p.put(0, 0.72, -0.23, L, 0.16, 0.07, wood, { solid: true, band: [0, 0.88] });   // upper back rail, stepped aft (the back's solid)
+      p.put(0, 0.50, -0.19, L, 0.16, 0.07, wood, { round: 0.012 });                    // lower back rail
+      p.put(0, 0.72, -0.23, L, 0.16, 0.07, wood, { solid: true, band: [0, 0.88], round: 0.012 });   // upper back rail, stepped aft (the back's solid)
       for (let a = -1; a <= 1; a += 2)
-        p.put(a * (L / 2 - 0.22), 0.45, -0.21, 0.09, 0.45, 0.09, P.chair);   // back uprights
+        p.put(a * (L / 2 - 0.22), 0.45, -0.21, 0.09, 0.45, 0.09, P.chair, { round: 0.02 });   // back uprights
     } else if (back) {
       p.put(0, 0.55, -0.20, L, 0.42, 0.08, wood, { solid: true, band: [0, 0.97] });   // backrest
     }
@@ -582,10 +721,11 @@
     // short legs at the corners (and mid-span on a long sofa): the floor
     // shows under it, which is the difference between a sofa and a block of
     // upholstery sitting on the carpet
+    const foot = D ? { cyl: 1.4 } : null;                                     // turned feet, tapering down
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
-      p.put(a * (L / 2 - 0.1), 0, b * 0.33, 0.05, 0.12, 0.05, P.darkwood);
-    if (L > 1.9) for (let b = -1; b <= 1; b += 2) p.put(0, 0, b * 0.33, 0.05, 0.12, 0.05, P.darkwood);
-    p.put(0, 0.12, 0, L, 0.22, 0.85, cloth, { solid: true, band: seatBand(0.40) });   // body (the seat's solid)
+      p.put(a * (L / 2 - 0.1), 0, b * 0.33, 0.05, 0.12, 0.05, P.darkwood, foot);
+    if (L > 1.9) for (let b = -1; b <= 1; b += 2) p.put(0, 0, b * 0.33, 0.05, 0.12, 0.05, P.darkwood, foot);
+    p.put(0, 0.12, 0, L, 0.22, 0.85, cloth, { solid: true, band: seatBand(0.40), round: D ? 0.035 : null });   // body (the seat's solid)
     // THE SEAM IS THE WHOLE READ. A sofa is three cushions, and one 2.24-long
     // slab is a bench with upholstery on it. Draw the cushion ONCE PER SEAT
     // with a 3cm gap between, all at the identical 0.34→0.40 band, so the
@@ -595,7 +735,10 @@
     const cw = D ? (inner - GAP * 2) / 3 : inner;
     let top = 0;
     for (let i = -1; i <= 1; i++) {
-      const t = p.put(D ? i * (cw + GAP) : 0, 0.34, 0.03, cw, 0.06, 0.74, cloth);   // cushion → 0.40
+      // a real seat cushion is ~12 cm of foam, crowned; it sinks 6 cm into
+      // the deck so the top is still the declared 0.40
+      const t = D ? p.put(i * (cw + GAP), 0.28, 0.03, cw, 0.12, 0.74, cloth, { round: 0.045 })
+        : p.put(0, 0.34, 0.03, cw, 0.06, 0.74, cloth);                           // cushion → 0.40
       if (i === -1) top = t;
       if (!D) break;
     }
@@ -603,12 +746,15 @@
     // the frame is what the arms and the top edge belong to, the cushions are
     // what the shoulders touch, and the 4cm they stand proud is the difference
     // between "sofa" and "padded wall".
-    p.put(0, 0.34, -0.375, L, 0.51, 0.10, cloth, { solid: true, band: [0, 0.85] });   // back frame → 0.85
+    p.put(0, 0.34, -0.375, L, 0.51, 0.10, cloth, { solid: true, band: [0, 0.85], round: D ? 0.04 : null });   // back frame → 0.85
     if (D) for (let i = -1; i <= 1; i++)
-      p.put(i * (cw + GAP), 0.40, -0.285, cw, 0.36, 0.10, cloth);           // back cushions → 0.76
+      p.put(i * (cw + GAP), 0.39, -0.28, cw, 0.38, 0.13, cloth, { round: 0.06 });   // back cushions → 0.77, plump
     for (let a = -1; a <= 1; a += 2) {
-      p.put(a * (L / 2 - 0.09), 0.34, 0.02, 0.18, 0.24, 0.80, cloth, { solid: true, band: [0, D ? 0.63 : 0.58] });   // arm frame → 0.58
-      if (D) p.put(a * (L / 2 - 0.09), 0.58, 0.02, 0.20, 0.05, 0.76, cloth); // soft arm pad → 0.63
+      p.put(a * (L / 2 - 0.09), 0.34, 0.02, 0.18, 0.24, 0.80, cloth, { solid: true, band: [0, D ? 0.63 : 0.58], round: D ? 0.05 : null });   // arm frame → 0.58
+      if (D) p.put(a * (L / 2 - 0.09), 0.58, 0.02, 0.20, 0.05, 0.76, cloth, { round: 0.024 }); // soft arm pad → 0.63, rolled
+      // a THROW PILLOW in each corner, against the arm and the back, in the
+      // contrast bucket: the one soft accent every lived-in sofa has
+      if (D && L >= 1.8) p.put(a * (L / 2 - 0.36), 0.40, -0.17, 0.36, 0.34, 0.12, P.pillow, { round: 0.055 });
     }
     for (let i = -1; i <= 1; i++) p.seat(i * (L / 3), 0.03, yaw, "sofa", 0.40, top);
     return p.done(L, 0.85, 0.85, top);
@@ -637,38 +783,46 @@
     const p = pen("bed", x, y, z, yaw, opts);
     const linen = p.col("linen"), frame = p.col("frame");
     const D = det();
-    p.put(0, 0, 0, W, D ? 0.26 : 0.32, L, frame, { solid: true, band: seatBand(0.55) });    // base (the mattress's solid: a jump, not a step)
     if (D) {
+      // the frame stands on FEET with a shadow under its rails (the old base
+      // was a slab on the floor): four turned feet, the base set on them
+      for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
+        p.put(a * (W / 2 - 0.07), 0, b * (L / 2 - 0.07), 0.07, 0.08, 0.07, frame, { cyl: 1.3 });
+      p.put(0, 0.08, 0, W, 0.18, L, frame, { solid: true, band: seatBand(0.55), round: 0.01 });    // base (the mattress's solid: a jump, not a step)
       for (let a = -1; a <= 1; a += 2)
-        p.put(a * (W / 2 - 0.03), 0.26, 0, 0.06, 0.11, L, frame);                 // side rails
-      p.put(0, 0.26, -(L / 2 - 0.04), W, 0.17, 0.08, frame);                      // foot rail
+        p.put(a * (W / 2 - 0.03), 0.26, 0, 0.06, 0.11, L, frame, { round: 0.012 });   // side rails
+      p.put(0, 0.26, -(L / 2 - 0.04), W, 0.17, 0.08, frame, { round: 0.014 });        // foot rail
+    } else {
+      p.put(0, 0, 0, W, 0.32, L, frame, { solid: true, band: seatBand(0.55) });       // base
     }
-    const top = p.put(0, 0.32, 0, W - (D ? 0.14 : 0.08), 0.23, L - (D ? 0.16 : 0.10), linen);   // mattress → 0.55
+    const top = p.put(0, 0.32, 0, W - (D ? 0.14 : 0.08), 0.23, L - (D ? 0.16 : 0.10), linen, D ? { round: 0.045 } : null);   // mattress → 0.55, its welted edge
     if (D) {
       // THE DUVET DRAPES. A cover lies OVER the mattress and falls down its
       // sides and foot to just above the rails, so from the room you see cloth
       // hanging, not a thin slab laid on a second slab. Its top is still 0.61
       // (the lying solve reads the mattress, 0.55, which is untouched).
       const duv = p.col("duvet"), dFoot = -L / 2 + 0.06, dHead = L * 0.09;
-      p.put(0, 0.38, (dFoot + dHead) / 2, W - 0.08, 0.23, dHead - dFoot, duv);      // duvet → 0.61
-      p.put(0, 0.56, L * 0.17, W - 0.07, 0.10, 0.16, linen);                         // TURNED-DOWN fold → 0.66
+      p.put(0, 0.38, (dFoot + dHead) / 2, W - 0.08, 0.23, dHead - dFoot, duv, { round: 0.05 });   // duvet → 0.61, soft
+      p.put(0, 0.56, L * 0.17, W - 0.07, 0.10, 0.16, linen, { round: 0.045 });       // TURNED-DOWN fold → 0.66
     } else {
       p.put(0, 0.55, -L * 0.16, W - 0.04, 0.05, L * 0.55, P.blanket);             // folded blanket
     }
     if (D && W >= 1.15) {
       for (let a = -1; a <= 1; a += 2)
-        p.put(a * (W * 0.22), 0.55, L / 2 - 0.34, W * 0.40, 0.14, 0.38, P.pillow); // two pillows
+        p.put(a * (W * 0.22), 0.55, L / 2 - 0.34, W * 0.40, 0.14, 0.38, P.pillow, D ? { round: 0.06 } : null); // two pillows, plump
     } else {
-      p.put(0, 0.55, L / 2 - 0.34, W - 0.34, 0.14, 0.38, P.pillow);               // one pillow
+      p.put(0, 0.55, L / 2 - 0.34, W - 0.34, 0.14, 0.38, P.pillow, D ? { round: 0.06 } : null);               // one pillow
     }
     if (D) {
       // SHAPED headboard: a recessed panel between two proud posts under a cap
       // rail. Three boxes instead of one slab, and the whole reason a bed reads
       // as furniture rather than a plinth when you walk in the door.
-      p.put(0, 0.12, L / 2 + 0.05, W - 0.12, 0.72, 0.09, P.head, { solid: true, band: [0, 0.93] });   // panel → 0.84 (the headboard's solid)
+      p.put(0, 0.12, L / 2 + 0.05, W - 0.12, 0.72, 0.09, P.head, { solid: true, band: [0, 0.93], round: 0.02 });   // panel → 0.84 (the headboard's solid)
+      // an UPHOLSTERED inset on the panel's face: the padded board you lean on
+      p.put(0, 0.58, L / 2 + 0.0, W - 0.30, 0.22, 0.04, P.head, { round: 0.018 });
       for (let a = -1; a <= 1; a += 2)
-        p.put(a * (W / 2 + 0.01), 0.06, L / 2 + 0.0525, 0.10, 0.86, 0.115, frame);   // posts → 0.92 (their backs 1.5 cm in from the cap rail's)
-      p.put(0, 0.84, L / 2 + 0.05, W + 0.14, 0.09, 0.15, P.head);                 // cap rail → 0.93
+        p.put(a * (W / 2 + 0.01), 0.06, L / 2 + 0.0525, 0.10, 0.86, 0.115, frame, { round: 0.016 });   // posts → 0.92 (their backs 1.5 cm in from the cap rail's)
+      p.put(0, 0.84, L / 2 + 0.05, W + 0.14, 0.09, 0.15, P.head, { round: 0.025 });                 // cap rail → 0.93
     } else {
       p.put(0, 0.12, L / 2 + 0.06, W + 0.10, 0.83, 0.12, P.head, { solid: true, band: [0, 0.95] });   // headboard
     }
@@ -697,14 +851,14 @@
       p.put(a * (W / 2 - 0.08), 0, b * (L / 2 - 0.22), 0.05, 0.24, 0.05, frame);   // legs
     p.put(0, 0.24, 0, W, 0.04, L, frame);                                          // rails
     // The deck carries the collider, floor to deck: a step you walk up onto.
-    const top = p.put(0, 0.28, 0, W - 0.06, 0.06, L - 0.08, canvas, { solid: true, band: seatBand(0.34) });  // deck → 0.34
+    const top = p.put(0, 0.28, 0, W - 0.06, 0.06, L - 0.08, canvas, { solid: true, band: seatBand(0.34), round: det() ? 0.02 : null });  // deck → 0.34
     // SLAT SEAMS: three cross battens laid on the deck at the same 0.34, so a
     // sun lounger reads as a slatted frame instead of one canvas plank. Derived
     // from the length, never a magic spacing, so a long or short lounger both
     // come out evenly slatted.
     if (det()) for (let i = -1; i <= 1; i++)
       p.put(0, 0.32, i * (L * 0.24), W - 0.10, 0.02, 0.05, frame);
-    p.put(0, 0.34, L / 2 - 0.26, W - 0.20, 0.10, 0.34, P.pillow);                   // head bolster
+    p.put(0, 0.34, L / 2 - 0.26, W - 0.20, 0.10, 0.34, P.pillow, det() ? { round: 0.045 } : null);                   // head bolster
     p.bed(L - 0.08, y + 0.34, "lounger", top);
     return p.done(W, L, 0.44, top);
   };
@@ -740,10 +894,10 @@
   // proud of the bezel: separated, so it cannot fight, and flush to the eye.
   function monitor(p, lat, fwd, top, wide) {
     const hgt = wide * 0.6;
-    p.put(lat, top, fwd + 0.03, 0.24, 0.012, 0.18, P.bezel);                      // foot
-    p.put(lat, top + 0.012, fwd + 0.055, 0.05, 0.16, 0.03, P.bezel);               // neck
-    p.put(lat, top + 0.10, fwd + 0.03, wide * 0.55, hgt * 0.62, 0.035, P.bezel);   // rear housing
-    p.put(lat, top + 0.08, fwd, wide, hgt, 0.022, P.bezel);                       // the panel
+    p.put(lat, top, fwd + 0.03, 0.24, 0.012, 0.18, P.bezel, { round: 0.005 });                      // foot
+    p.put(lat, top + 0.012, fwd + 0.055, 0.05, 0.16, 0.03, P.bezel, { round: 0.01 });               // neck
+    p.put(lat, top + 0.10, fwd + 0.03, wide * 0.55, hgt * 0.62, 0.035, P.bezel, { round: 0.014 });   // rear housing
+    p.put(lat, top + 0.08, fwd, wide, hgt, 0.022, P.bezel, { round: 0.006 });                       // the panel
     p.put(lat, top + 0.08 + 0.028, fwd - 0.011 - 0.003 - 0.002, wide - 0.03, hgt - 0.045, 0.004, P.screen,
       { emissive: P.screen, ei: 0.35 });                                         // glass, chin below it
   }
@@ -757,24 +911,30 @@
     const D = Math.max(0.6, opts.deep != null ? +opts.deep : 0.75);
     const p = pen("desk", x, y, z, yaw, opts);
     const DT = det();
-    p.put(-(L / 2 - 0.26), 0.02, 0, 0.46, 0.64, D - 0.10, P.desk);
+    p.put(-(L / 2 - 0.26), 0.02, 0, 0.46, 0.64, D - 0.10, P.desk, DT ? { round: 0.006 } : null);
     if (DT) {
       // THREE DRAWER FACES on the pedestal, facing the worker (-forward), each
       // with a handle. A pedestal with no lines on it is a filing box; the
       // horizontal splits are what say "desk" from across a room.
       for (let i = 0; i < 3; i++) {
-        p.put(-(L / 2 - 0.26), 0.08 + i * 0.19, -(D - 0.10) / 2 - 0.012, 0.40, 0.17, 0.03, P.metalD);
-        p.put(-(L / 2 - 0.26), 0.14 + i * 0.19, -(D - 0.10) / 2 - 0.035, 0.16, 0.03, 0.03, P.shelf);
+        p.put(-(L / 2 - 0.26), 0.08 + i * 0.19, -(D - 0.10) / 2 - 0.012, 0.40, 0.17, 0.03, P.metalD, { round: 0.005 });
+        p.put(-(L / 2 - 0.26), 0.14 + i * 0.19, -(D - 0.10) / 2 - 0.035, 0.16, 0.03, 0.03, P.shelf, { round: 0.012 });
       }
     }
-    p.put(L / 2 - 0.05, 0.02, 0, 0.08, 0.66, D - 0.14, P.chair);           // end leg
-    p.put(0, 0.16, D / 2 - 0.05, L - 0.14, DT ? 0.46 : 0.50, 0.06, P.desk);   // modesty panel (up to the apron rail, not behind it)
+    p.put(L / 2 - 0.05, 0.02, 0, 0.08, 0.66, D - 0.14, P.chair, DT ? { round: 0.012 } : null);           // end leg
+    if (DT) p.put(L / 2 - 0.05, 0, 0, 0.10, 0.02, D - 0.10, P.chair, { round: 0.008 });                  // its foot rail
+    p.put(0, 0.16, D / 2 - 0.05, L - 0.14, DT ? 0.46 : 0.50, 0.06, P.desk, DT ? { round: 0.008 } : null);   // modesty panel (up to the apron rail, not behind it)
     // APRON SHADOW: a dark recessed rail tucked under the worktop's front lip.
     // The worktop already oversails it by 4cm, so the rail is never lit the way
     // the top is and the top reads as a separate, floating slab.
     if (DT) p.put(0, 0.62, D / 2 - 0.05, L - 0.08, 0.06, 0.06, P.chair);
-    const top = p.put(0, 0.68, 0, L, 0.06, D, P.worktop, { solid: true, band: [0, 0.74] });   // worktop → 0.74 (the whole desk is solid)
-    if (DT) p.put(0, 0.74, -0.02, 0.44, 0.02, 0.15, P.bezel);              // keyboard, worker side
+    const top = p.put(0, 0.68, 0, L, 0.06, D, P.worktop, { solid: true, band: [0, 0.74], round: DT ? 0.008 : null });   // worktop → 0.74 (the whole desk is solid)
+    if (DT) {
+      p.put(0, 0.74, -0.02, 0.44, 0.02, 0.15, P.bezel, { round: 0.006 });   // keyboard, worker side
+      p.put(0, 0.755, -0.02, 0.41, 0.004, 0.12, P.shelf);                    // its key field
+      p.put(0.32, 0.74, -0.03, 0.065, 0.03, 0.11, P.bezel, { round: 0.014 });   // mouse
+      p.put(-0.45, 0.74, -0.12, 0.08, 0.10, 0.08, P.pillow, { cyl: 1.12 });    // a mug
+    }
     monitor(p, 0, D / 2 - 0.22, 0.74, 0.60);
     // the TASK chair behind the desk, facing it (= facing along yaw, over the top)
     const so = sub(opts, p);
@@ -798,17 +958,17 @@
     // the old 8 cm top on 8 cm posts over a slab apron was a butcher's block,
     // which is exactly the "chunky blocks" read.
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
-      p.put(a * (L / 2 - 0.09), 0, b * (D / 2 - 0.08), DT ? 0.055 : 0.08, DT ? 0.705 : 0.56, DT ? 0.055 : 0.08, wood);
+      p.put(a * (L / 2 - 0.09), 0, b * (D / 2 - 0.08), DT ? 0.055 : 0.08, DT ? 0.705 : 0.56, DT ? 0.055 : 0.08, wood, DT ? { cyl: 1.3 } : null);   // turned, tapering legs
     if (DT) {
       for (let b = -1; b <= 1; b += 2)
-        p.put(0, 0.61, b * (D / 2 - 0.08), L - 0.24, 0.09, 0.025, P.darkwood);       // long aprons
+        p.put(0, 0.61, b * (D / 2 - 0.08), L - 0.24, 0.09, 0.025, P.darkwood, { round: 0.005 });       // long aprons
       for (let a = -1; a <= 1; a += 2)
-        p.put(a * (L / 2 - 0.09), 0.61, 0, 0.025, 0.09, D - 0.22, P.darkwood);       // end aprons, between the legs (not into their tops)
+        p.put(a * (L / 2 - 0.09), 0.61, 0, 0.025, 0.09, D - 0.22, P.darkwood, { round: 0.005 });       // end aprons, between the legs (not into their tops)
       p.put(0, 0.665, 0, L - 0.2, 0.03, D - 0.2, P.darkwood, { solid: true, band: [0, 0.74] });   // under-frame (collider)
     } else {
       p.put(0, 0.56, 0, L - 0.16, 0.10, D - 0.16, wood, { solid: true, band: [0, 0.74] });   // apron
     }
-    const top = DT ? p.put(0, 0.705, 0, L, 0.035, D, wood) : p.put(0, 0.66, 0, L, 0.08, D, wood);   // top → 0.74
+    const top = DT ? p.put(0, 0.705, 0, L, 0.035, D, wood, { round: 0.01 }) : p.put(0, 0.66, 0, L, 0.08, D, wood);   // top → 0.74, eased edge
     // ring: half the chairs down each long side, the remainder at the +x end
     const perSide = Math.floor(n / 2), ends = n - perSide * 2;
     const so = sub(opts, p);
@@ -847,13 +1007,19 @@
     const wood = p.col("wood");
     const DT = det();
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
-      p.put(a * (L / 2 - 0.09), 0, b * (D / 2 - 0.08), 0.06, 0.35, 0.06, wood);
-    if (DT) p.put(0, 0.13, 0, L - 0.16, 0.04, D - 0.14, P.darkwood);        // magazine shelf, housed in the legs
+      p.put(a * (L / 2 - 0.09), 0, b * (D / 2 - 0.08), 0.06, 0.35, 0.06, wood, DT ? { round: 0.014 } : null);
+    if (DT) p.put(0, 0.13, 0, L - 0.16, 0.04, D - 0.14, P.darkwood, { round: 0.008 });        // magazine shelf, housed in the legs
     // The top oversails the legs by 9cm and carries a SHIN-HIGH collider only:
     // a coffee table between a sofa and a screen is an obstacle you step round,
     // never a wall, and never something the body can stand on.
-    const top = p.put(0, 0.35, 0, L, 0.05, D, wood, { solid: true, band: [0, 0.40] });   // top → 0.40
-    if (DT) p.put(0, 0.30, 0, L - 0.10, 0.04, D - 0.12, P.darkwood);        // apron shadow under the lip (its top 1 cm below the legs', never in their plane)
+    const top = p.put(0, 0.35, 0, L, 0.05, D, wood, { solid: true, band: [0, 0.40], round: DT ? 0.012 : null });   // top → 0.40
+    if (DT) {
+      p.put(0, 0.30, 0, L - 0.10, 0.04, D - 0.12, P.darkwood);        // apron shadow under the lip (its top 1 cm below the legs', never in their plane)
+      // a book and a bowl on the top: a coffee table with nothing on it is a
+      // showroom
+      p.put(-L * 0.22, 0.40, 0.02, 0.24, 0.035, 0.17, P.linen, { round: 0.004 });
+      p.put(L * 0.2, 0.40, -0.03, 0.2, 0.06, 0.2, P.pot, { cyl: 1.6 });
+    }
     return p.done(L, D, 0.40, top);
   };
 
@@ -867,10 +1033,17 @@
     const D = Math.max(0.5, opts.deep != null ? +opts.deep : 0.75);
     const p = pen("counter", x, y, z, yaw, opts);
     p.put(0, 0, 0, L - 0.12, 0.12, D - 0.14, P.chair);                       // kick recess
-    p.put(0, 0.12, 0, L, 0.74, D, P.desk, { solid: true, band: [0, 0.92] });      // body
-    const top = p.put(0, 0.86, 0, L + 0.08, 0.06, D + 0.10, P.worktop);      // worktop → 0.92
-    p.put(0, 0.60, D / 2 + 0.06, L, 0.06, 0.04, P.worktop);                  // customer-side rail
-    p.put(L / 2 - 0.42, 0.92, -0.05, 0.34, 0.22, 0.28, P.bezel);             // till
+    const DT = det();
+    p.put(0, 0.12, 0, L, 0.74, D, P.desk, { solid: true, band: [0, 0.92], round: DT ? 0.008 : null });      // body
+    if (DT) {
+      // the customer face in PANELS (the shopfitter's joints), not one slab
+      const np = Math.max(1, Math.round(L / 0.65)), pw = L / np;
+      for (let i = 1; i < np; i++) p.put(-L / 2 + pw * i, 0.16, D / 2 + 0.001, 0.008, 0.64, 0.006, P.chair);
+    }
+    const top = p.put(0, 0.86, 0, L + 0.08, 0.06, D + 0.10, P.worktop, DT ? { round: 0.012 } : null);      // worktop → 0.92
+    p.put(0, 0.60, D / 2 + 0.06, L, 0.06, 0.04, P.worktop, DT ? { round: 0.018 } : null);                  // customer-side rail
+    if (DT) for (let a = -1; a <= 1; a += 2) p.put(a * (L / 2 - 0.15), 0.6, D / 2 + 0.03, 0.03, 0.03, 0.04, P.shelf, { round: 0.01 });   // its stand-offs
+    p.put(L / 2 - 0.42, 0.92, -0.05, 0.34, 0.22, 0.28, P.bezel, DT ? { round: 0.02 } : null);             // till
     p.put(L / 2 - 0.42, 0.96, -0.19 - SCREEN_GAP - 0.01, 0.26, 0.14, 0.02, P.screen,
       { emissive: P.screen, ei: 0.35 });                                  // staff-facing glass
     if (opts.stools) {
@@ -901,11 +1074,13 @@
     p.put(0, 0, 0, L, 0.30, D, P.metal, { solid: true, colH: H });          // plinth (collider = whole rack)
     p.put(0, 0.30, -(D / 2 - 0.03), L, H - 0.35, 0.06, P.metal);            // back panel, up to the cap
     for (let a = -1; a <= 1; a += 2)
-      p.put(a * (L / 2 - 0.03), 0.30, 0, 0.06, H - 0.35, D, P.metal);       // uprights, up to the cap
+      p.put(a * (L / 2 - 0.03), 0.30, 0, 0.06, H - 0.35, D, P.metal, det() ? { round: 0.006 } : null);       // uprights, up to the cap
     const gap = (H - 0.35) / 4;
-    for (let i = 1; i <= 3; i++)
-      p.put(0, 0.30 + gap * i, 0, L - 0.12, 0.05, D - 0.06, P.shelf);       // boards
-    const top = p.put(0, H - 0.05, 0, L + 0.02, 0.05, D + 0.02, P.shelf);   // cap → H, oversailing the uprights by 1 cm
+    for (let i = 1; i <= 3; i++) {
+      p.put(0, 0.30 + gap * i, 0, L - 0.12, 0.05, D - 0.06, P.shelf, det() ? { round: 0.005 } : null);       // boards
+      if (det()) p.put(0, 0.30 + gap * i - 0.02, D / 2 - 0.04, L - 0.12, 0.02, 0.02, P.metal);   // the stiffening lip under each
+    }
+    const top = p.put(0, H - 0.05, 0, L + 0.02, 0.05, D + 0.02, P.shelf, det() ? { round: 0.006 } : null);   // cap → H, oversailing the uprights by 1 cm
     return p.done(L, D, H, top);
   };
 
@@ -916,11 +1091,20 @@
     const H = Math.max(1.2, opts.h != null ? +opts.h : 1.9);
     const D = 0.5, W = n * 0.42;
     const p = pen("locker", x, y, z, yaw, opts);
-    p.put(0, 0, 0, W, H, D, P.metal, { solid: true });                       // carcass
+    const DT = det();
+    p.put(0, 0, 0, W, H, D, P.metal, { solid: true, round: DT ? 0.006 : null });   // carcass
     for (let i = 0; i < n; i++) {
       const lat = -W / 2 + 0.42 * (i + 0.5);
-      p.put(lat, 0.08, D / 2 - 0.005, 0.38, H - 0.16, 0.02, P.metalD);       // door face
-      p.put(lat + 0.14, H * 0.52, D / 2 + 0.02, 0.03, 0.16, 0.03, P.shelf);  // handle
+      p.put(lat, 0.08, D / 2 - 0.005, 0.38, H - 0.16, 0.02, P.metalD, DT ? { round: 0.004 } : null);       // door face
+      p.put(lat + 0.14, H * 0.52, D / 2 + 0.02, 0.03, 0.16, 0.03, P.shelf, DT ? { round: 0.01 } : null);  // handle
+      if (DT) {
+        // the pressed VENT LOUVRES top and bottom, and the number plate
+        for (let k = 0; k < 4; k++) {
+          p.put(lat, H - 0.24 + k * 0.035, D / 2 + 0.006, 0.2, 0.012, 0.006, P.bezel);
+          p.put(lat, 0.16 + k * 0.035, D / 2 + 0.006, 0.2, 0.012, 0.006, P.bezel);
+        }
+        p.put(lat, H - 0.32, D / 2 + 0.007, 0.07, 0.035, 0.004, P.worktop);
+      }
     }
     return p.done(W, D, H, y + H);
   };
@@ -939,14 +1123,15 @@
     const p = pen("wardrobe", x, y, z, yaw, opts);
     const wood = p.col("wood");
     p.put(0, 0, -0.02, L - 0.06, 0.08, D - 0.08, P.darkwood);                   // plinth, set back
-    p.put(0, 0.08, 0, L, H - 0.12, D, wood, { solid: true, band: [0, H] });   // carcass
-    p.put(0, H - 0.04, 0.01, L + 0.04, 0.04, D + 0.03, wood);                   // cornice
+    p.put(0, 0.08, 0, L, H - 0.12, D, wood, { solid: true, band: [0, H], round: det() ? 0.006 : null });   // carcass
+    p.put(0, H - 0.04, 0.01, L + 0.04, 0.04, D + 0.03, wood, det() ? { round: 0.012 } : null);                   // cornice
     const dw = L / n;
     for (let i = 0; i < n; i++) {
       const lat = -L / 2 + dw * (i + 0.5);
-      p.put(lat, 0.10, D / 2 + 0.006, dw - 0.008, H - 0.16, 0.012, wood);       // door face
+      p.put(lat, 0.10, D / 2 + 0.006, dw - 0.008, H - 0.16, 0.012, wood, det() ? { round: 0.004 } : null);       // door face
+      if (det()) p.put(lat, 0.25, D / 2 + 0.013, dw - 0.12, H - 0.46, 0.006, wood, { round: 0.003 });   // the raised field of the door
       const side = (i % 2 === 0) ? 1 : -1;                                     // pulls meet at the pair's joint
-      p.put(lat + side * (dw / 2 - 0.05), H * 0.42, D / 2 + 0.025, 0.018, 0.28, 0.02, P.shelf);
+      p.put(lat + side * (dw / 2 - 0.05), H * 0.42, D / 2 + 0.025, 0.018, 0.28, 0.02, P.shelf, det() ? { cyl: 1 } : null);
     }
     if (det()) for (let i = 1; i < n; i++)
       p.put(-L / 2 + dw * i, 0.10, D / 2 + 0.004, 0.006, H - 0.16, 0.006, P.darkwood);   // the shadow gap
@@ -966,13 +1151,13 @@
     const p = pen("credenza", x, y, z, yaw, opts);
     const wood = p.col("wood");
     p.put(0, 0, -0.03, L - 0.08, 0.07, D - 0.08, P.darkwood);                          // plinth
-    p.put(0, 0.07, 0, L - 0.02, H - 0.105, D - 0.02, wood, { solid: true, band: [0, H] });   // carcass
-    const top = p.put(0, H - 0.035, 0, L + 0.02, 0.035, D + 0.01, wood);               // top → H
+    p.put(0, 0.07, 0, L - 0.02, H - 0.105, D - 0.02, wood, { solid: true, band: [0, H], round: det() ? 0.005 : null });   // carcass
+    const top = p.put(0, H - 0.035, 0, L + 0.02, 0.035, D + 0.01, wood, det() ? { round: 0.01 } : null);               // top → H
     const dw = (L - 0.02) / n;
     for (let i = 0; i < n; i++) {
       const lat = -(L - 0.02) / 2 + dw * (i + 0.5);
-      p.put(lat, 0.08, (D - 0.02) / 2 + 0.004, dw - 0.008, H - 0.13, 0.01, wood);      // door
-      p.put(lat + ((i % 2) ? -1 : 1) * (dw / 2 - 0.04), H * 0.5, (D - 0.02) / 2 + 0.018, 0.012, 0.16, 0.014, P.shelf);
+      p.put(lat, 0.08, (D - 0.02) / 2 + 0.004, dw - 0.008, H - 0.13, 0.01, wood, det() ? { round: 0.003 } : null);      // door
+      p.put(lat + ((i % 2) ? -1 : 1) * (dw / 2 - 0.04), H * 0.5, (D - 0.02) / 2 + 0.018, 0.012, 0.16, 0.014, P.shelf, det() ? { cyl: 1 } : null);
     }
     if (det()) for (let i = 1; i < n; i++)
       p.put(-(L - 0.02) / 2 + dw * i, 0.08, (D - 0.02) / 2 + 0.004, 0.006, H - 0.13, 0.006, P.darkwood);   // 7 mm off the carcass
@@ -996,17 +1181,26 @@
     const h = function (i, k) { return CBZ.hash01 ? CBZ.hash01(x * 3.1 + i * 1.7, z * 2.3 - i * 0.9, 0x91A + k) : ((i * 0.618 + k * 0.31) % 1); };
     const pw = (tree ? 0.42 : 0.26) * Math.min(1.2, s), ph = (tree ? 0.44 : 0.28) * Math.min(1.2, s);
     // a tapered pot: a narrower foot, the body, a rolled rim; soil inside it
-    p.put(0, 0, 0, pw * 0.8, ph * 0.18, pw * 0.8, potC);
-    p.put(0, ph * 0.18, 0, pw, ph * 0.74, pw, potC, { solid: true, colH: ph * 0.74 });
+    const RP = det() && CBZ.CONFIG.FURNISH_SHAPES !== false;          // a ROUND pot (the shapes are on)
+    p.put(0, 0, 0, pw * 0.8, ph * 0.18, pw * 0.8, potC, RP ? { cyl: 1.12 } : null);
+    p.put(0, ph * 0.18, 0, pw, ph * 0.74, pw, potC, { solid: true, colH: ph * 0.74, cyl: RP ? 1.22 : null });
     // the rolled rim is a RING round the soil (a solid lid of pot colour hid
     // the soil 5 mm under its own top), the soil sits 1.5 cm down inside it
     const ro = pw + 0.03, ri = pw - 0.02, rt = (ro - ri) / 2;
-    for (let a = -1; a <= 1; a += 2) {
-      p.put(0, ph * 0.92, a * (ri + rt) / 2, ro, ph * 0.08, rt, potC);
-      p.put(a * (ri + rt) / 2, ph * 0.92, 0, rt, ph * 0.08, ri, potC);
+    let soilTop;
+    if (RP) {
+      // round: a rolled rim drum, the soil a disc just proud inside its lip
+      p.put(0, ph * 0.92, 0, ro, ph * 0.08, ro, potC, { cyl: 1.04 });
+      soilTop = ph + 0.004;
+      p.put(0, soilTop - 0.01, 0, ri, 0.01, ri, P.soil, { cyl: 1 });
+    } else {
+      for (let a = -1; a <= 1; a += 2) {
+        p.put(0, ph * 0.92, a * (ri + rt) / 2, ro, ph * 0.08, rt, potC);
+        p.put(a * (ri + rt) / 2, ph * 0.92, 0, rt, ph * 0.08, ri, potC);
+      }
+      soilTop = Math.max(ph * 0.92 + 0.007, ph - 0.015);
+      p.put(0, soilTop - 0.01, 0, ri, 0.01, ri, P.soil);
     }
-    const soilTop = Math.max(ph * 0.92 + 0.007, ph - 0.015);
-    p.put(0, soilTop - 0.01, 0, ri, 0.01, ri, P.soil);
     const y0 = soilTop;                                   // the stems and the trunk stand ON the soil
     const greens = [P.leaf, P.leaf2, P.leaf3];
     if (!tree) {
@@ -1023,7 +1217,7 @@
       return p.done(pw + 0.03, pw + 0.03, y0 + 0.95 * s, y + ph);
     }
     const TH = 1.7 * s;
-    p.put(0, y0, 0, 0.035, TH * 0.78, 0.035, P.trunk);                               // trunk
+    p.put(0, y0, 0, 0.035, TH * 0.78, 0.035, P.trunk, RP ? { cyl: 0.6 } : null);      // trunk
     // ONE TREE, ONE GREEN. Thin leaf boxes laid at any height and offset come
     // to rest a few mm apart in one plane; in three greens (and with two limbs
     // through the canopy) those pairs flickered for depth. A tree's leaves are
@@ -1056,11 +1250,12 @@
     // a weighted disc, a thin stem, and a tapered DRUM shade: fabric that is
     // lit through (a soft glow), open at the bottom where the bulb's light
     // falls out (bright). The old one was a lit 34 cm cube on a post.
-    p.put(0, 0, 0, 0.30, 0.025, 0.30, P.chair);                              // base
-    p.put(0, 0.025, 0, 0.026, H - 0.30, 0.026, P.chair);                     // stem
-    p.put(0, H - 0.306, 0, 0.36, 0.006, 0.36, P.lamp, { emissive: P.lamp, ei: Math.min(1, ei * 1.5) });   // open mouth
-    p.put(0, H - 0.30, 0, 0.40, 0.16, 0.40, P.lamp, { emissive: P.lamp, ei: ei * 0.55 });                // drum
-    const top = p.put(0, H - 0.14, 0, 0.31, 0.14, 0.31, P.lamp, { emissive: P.lamp, ei: ei * 0.45 });    // taper
+    const RL = det() && CBZ.CONFIG.FURNISH_SHAPES !== false;
+    p.put(0, 0, 0, 0.30, 0.025, 0.30, P.chair, RL ? { cyl: 0.85 } : null);                              // base
+    p.put(0, 0.025, 0, 0.026, H - 0.30, 0.026, P.chair, RL ? { cyl: 1 } : null);                        // stem
+    p.put(0, H - 0.306, 0, 0.36, 0.006, 0.36, P.lamp, { emissive: P.lamp, ei: Math.min(1, ei * 1.5), cyl: RL ? 1 : null });   // open mouth
+    p.put(0, H - 0.30, 0, 0.40, 0.16, 0.40, P.lamp, { emissive: P.lamp, ei: ei * 0.55, cyl: RL ? 0.9 : null });                // drum
+    const top = p.put(0, H - 0.14, 0, 0.31, 0.14, 0.31, P.lamp, { emissive: P.lamp, ei: ei * 0.45, cyl: RL ? 0.8 : null });    // taper
     return p.done(0.40, 0.40, H, top);
   };
 
@@ -1077,21 +1272,31 @@
     const D = Math.max(0.8, opts.deep != null ? +opts.deep : 1.1);
     const p = pen("bossDesk", x, y, z, yaw, opts);
     const surf = p.col("wood"), cloth = p.col("cloth");
-    for (let a = -1; a <= 1; a += 2)
-      p.put(a * (L / 2 - 0.32), 0.02, 0, 0.56, 0.64, D - 0.16, P.darkwood);
-    p.put(0, 0.06, D / 2 - 0.06, L - 0.20, 0.60, 0.10, P.darkwood);
-    const top = p.put(0, 0.66, 0, L, 0.08, D, surf, { solid: true, band: [0, 0.74] });   // worktop → 0.74 (the whole desk is solid)
-    p.put(0, 0.74, D / 2 - 0.10, 0.46, 0.05, 0.08, P.worktop);               // nameplate
+    const DT = det();
+    for (let a = -1; a <= 1; a += 2) {
+      p.put(a * (L / 2 - 0.32), 0.02, 0, 0.56, 0.64, D - 0.16, P.darkwood, DT ? { round: 0.01 } : null);
+      if (DT) for (let i = 0; i < 3; i++) {
+        // drawer fronts on the sitter's side, each with a brass pull
+        p.put(a * (L / 2 - 0.32), 0.07 + i * 0.2, -(D - 0.16) / 2 - 0.008, 0.5, 0.18, 0.02, P.darkwood, { round: 0.005 });
+        p.put(a * (L / 2 - 0.32), 0.15 + i * 0.2, -(D - 0.16) / 2 - 0.025, 0.14, 0.022, 0.022, P.lamp, { round: 0.009 });
+      }
+    }
+    p.put(0, 0.06, D / 2 - 0.06, L - 0.20, 0.60, 0.10, P.darkwood, DT ? { round: 0.01 } : null);
+    const top = p.put(0, 0.66, 0, L, 0.08, D, surf, { solid: true, band: [0, 0.74], round: DT ? 0.014 : null });   // worktop → 0.74 (the whole desk is solid)
+    if (DT) p.put(-0.1, 0.74, -0.08, 0.62, 0.006, 0.42, P.chair, { round: 0.004 });   // the leather writing pad
+    p.put(0, 0.74, D / 2 - 0.10, 0.46, 0.05, 0.08, P.worktop, DT ? { round: 0.01 } : null);               // nameplate
     monitor(p, 0.55, D / 2 - 0.34, 0.74, 0.66);
 
     // THE THRONE — high-back, on a pedestal column, behind the desk.
     const tf = -(D / 2 + 0.52);
-    p.put(0, 0, tf, 0.54, 0.05, 0.54, P.chair);                              // base
-    p.put(0, 0.05, tf, 0.14, 0.37, 0.14, P.chair);                           // column
-    const tTop = p.put(0, 0.42, tf, 0.62, 0.08, 0.62, cloth, { solid: true, band: seatBand(0.50) });   // cushion → 0.50
-    p.put(0, 0.50, tf - 0.27, 0.62, 0.80, 0.10, cloth, { solid: true, band: [0, 1.30] });               // high back → 1.30
+    p.put(0, 0, tf, 0.54, 0.05, 0.54, P.chair, DT ? { cyl: 0.85 } : null);   // base
+    p.put(0, 0.05, tf, 0.14, 0.37, 0.14, P.chair, DT ? { cyl: 0.75 } : null);   // column
+    const tTop = p.put(0, 0.42, tf, 0.62, 0.08, 0.62, cloth, { solid: true, band: seatBand(0.50), round: DT ? 0.035 : null });   // cushion → 0.50
+    p.put(0, 0.50, tf - 0.27, 0.62, 0.80, 0.10, cloth, { solid: true, band: [0, 1.30], round: DT ? 0.045 : null });               // high back → 1.30
+    if (DT) for (let k = 0; k < 3; k++)
+      p.put(0, 0.62 + k * 0.22, tf - 0.21, 0.52, 0.19, 0.04, cloth, { round: 0.018 });    // the buttoned BOLSTERS down its face
     for (let a = -1; a <= 1; a += 2)
-      p.put(a * 0.31, 0.50, tf, 0.08, 0.16, 0.48, cloth);                    // arms
+      p.put(a * 0.31, 0.50, tf, 0.08, 0.16, 0.48, cloth, DT ? { round: 0.035 } : null);                    // arms
     p.seat(0, tf, yaw, "throne", 0.50, tTop);                                // looks out over the desk
 
     // TWO LOWER GUEST CHAIRS, facing the desk across it.
@@ -1139,14 +1344,14 @@
       const L = opts && opts.loose;
       const PB = CBZ.pushables;
       if (!L || !L.parent || opts.noAnchor || !PB || !PB.piece || CBZ.CONFIG.FURNISH_LOOSE === false) return fn(x, y, z, yaw, opts);
-      const key = "furnish:" + name + "|" + toneKey(opts.tone) + "|" + (opts.frameCol != null ? opts.frameCol : "") + "|" + (det() ? 1 : 0);
+      const key = "furnish:" + name + "|" + toneKey(opts.tone) + "|" + (opts.frameCol != null ? opts.frameCol : "") + "|" + (det() ? 1 : 0) + (shapesOn() ? "s" : "");
       // the anchors and the contract at the real spot, drawing nothing
       const rec = fn(x, y, z, yaw, Object.assign({}, opts, { box: NOBOX, solid: false, loose: null, _parts: null }));
       const seat = rec && rec.seats && rec.seats[0];
       const pr = PB.piece({
         key: key,
         build: function (box) {
-          fn(0, 0, 0, 0, { box: function (bx, by, bz, w, h, d, col) { box(bx, by, bz, w, h, d, col); return null; },
+          fn(0, 0, 0, 0, { box: function (bx, by, bz, w, h, d, col, oo) { box(bx, by, bz, w, h, d, col, oo && oo.furnShape); return null; },
             solid: false, tone: opts.tone, frameCol: opts.frameCol, noAnchor: true });
         },
         parent: L.parent, material: L.material || null,

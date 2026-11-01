@@ -328,9 +328,26 @@
     const pos = [], nor = [], col = [], idx = [];
     let x0 = 1e9, x1 = -1e9, y1 = 0, z0 = 1e9, z1 = -1e9;
     const C = new THREE.Color();
-    const box = function (x, y, z, w, h, d, hex) {
+    const box = function (x, y, z, w, h, d, hex, shape) {
       if (!(w > 0 && h > 0 && d > 0)) return;
       C.setHex(hex >>> 0);
+      // a SHAPED box (city/furniture.js: a rounded cushion, a turned leg) bakes
+      // its real geometry, which fits the same extents, instead of six faces
+      const SG = shape && CBZ.furnishShape ? CBZ.furnishShape(shape, w, h, d) : null;
+      if (SG) {
+        const sp = SG.attributes.position.array, sn = SG.attributes.normal.array, b0 = pos.length / 3;
+        for (let i = 0; i < sp.length; i += 3) {
+          pos.push(x + sp[i], y + sp[i + 1], z + sp[i + 2]);
+          nor.push(sn[i], sn[i + 1], sn[i + 2]);
+          col.push(C.r, C.g, C.b);
+        }
+        if (SG.index) { const ia = SG.index.array; for (let i = 0; i < ia.length; i++) idx.push(b0 + ia[i]); }
+        else for (let i = 0; i < sp.length / 3; i++) idx.push(b0 + i);
+        x0 = Math.min(x0, x - w / 2); x1 = Math.max(x1, x + w / 2);
+        z0 = Math.min(z0, z - d / 2); z1 = Math.max(z1, z + d / 2);
+        y1 = Math.max(y1, y + h / 2);
+        return;
+      }
       const c = [x, y, z], half = [w / 2, h / 2, d / 2];
       for (let f = 0; f < 6; f++) {
         // [axis, u, v, sign]: the face at sign*half on `axis`; corners walk

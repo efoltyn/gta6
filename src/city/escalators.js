@@ -50,7 +50,19 @@
   const cmat = (CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); });
 
   // colours (all routed through the shared cmat cache → draw-call neutral)
-  const STEEL = 0x3a424d, TRIM = 0x9aa2ad, DECK = 0x4b525c, COMB = 0xb8a23a, NEWEL = 0x2c333d;
+  const STEEL = 0x3a424d, TRIM = 0x9aa2ad, DECK = 0x4b525c, COMB = 0xb8a23a;
+  const CLAD = 0xb4bac0, CLAD_D = 0x8c939a, SKIRT = 0x6d747c, PLATE = 0x9da3a8;
+  // the newel's handrail drum: a cylinder lying along X (shared, like UNIT)
+  const DRUM = new THREE.CylinderGeometry(0.5, 0.5, 1, 16, 1, false, -Math.PI / 2, Math.PI);   // the +z half: the turn
+  DRUM.rotateZ(Math.PI / 2);
+  // balustrade glass: THE glass (world/materials.js) when present
+  let GLASS_MAT = null;
+  function glassMat() {
+    if (GLASS_MAT) return GLASS_MAT;
+    GLASS_MAT = CBZ.glass ? CBZ.glass({ opacity: 0.32, side: THREE.DoubleSide })
+      : new THREE.MeshLambertMaterial({ color: 0xbfd8dc, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false });
+    return GLASS_MAT;
+  }
 
   function box(parent, x, y, z, w, h, d, hex, o) {
     o = o || {};
@@ -62,6 +74,35 @@
     m.matrixAutoUpdate = false; m.updateMatrix();
     parent.add(m);
     return m;
+  }
+
+  // ONE MESH PER MATERIAL. The balustrades, cladding, landings and newels are
+  // ~50 static unit boxes a lane; drawn one by one that is 4x the old bank's
+  // calls. Every static box of a lane is baked into one geometry per material
+  // (the scrolling step band and handrails, which animate their texture, and
+  // the newel drums stay live).
+  function mergeStatic(grp) {
+    const U = THREE.BufferGeometryUtils;
+    if (!U || !U.mergeBufferGeometries) return;
+    const by = new Map();
+    for (const m of grp.children.slice()) {
+      if (!m.isMesh || m.geometry !== UNIT || (m.userData && m.userData.scroll != null)) continue;
+      m.updateMatrix();
+      let e = by.get(m.material.uuid);
+      if (!e) { e = { mat: m.material, list: [] }; by.set(m.material.uuid, e); }
+      e.list.push(m);
+    }
+    by.forEach(function (e) {
+      if (e.list.length < 2) return;
+      const geos = e.list.map(function (m) { const g = UNIT.clone(); g.applyMatrix4(m.matrix); return g; });
+      const merged = U.mergeBufferGeometries(geos, false);
+      geos.forEach(function (g) { g.dispose(); });
+      if (!merged) return;
+      const mm = new THREE.Mesh(merged, e.mat);
+      mm.receiveShadow = true; mm.matrixAutoUpdate = false; mm.updateMatrix();
+      e.list.forEach(function (m) { grp.remove(m); });
+      grp.add(mm);
+    });
   }
 
   // ---- the TWO shared scrolling textures (built once, reused everywhere) --
@@ -158,40 +199,83 @@
       grp.userData.stepMesh = m;
     }
 
-    // ---- BALUSTRADES (two sides) + a moving HANDRAIL band on each ----------
-    const len2 = Math.hypot(run, riseY) + 0.1;
+    // ---- THE TRUSS, CLAD: an escalator is a steel truss under the steps,
+    // and from the floor you see its stainless side cladding as a long
+    // parallelogram from landing to landing, with the soffit under it. (The
+    // old band was a 16 cm plate floating on nothing.)
+    const len = Math.hypot(run, riseY);
+    const midY = (yLow + yHigh) / 2, midZ = (zLow + zHigh) / 2, tilt = -dirZ * slopeAng;
+    const TD = 1.05;                          // truss depth, measured square to the slope
+    const offY = -Math.cos(slopeAng) * (TD / 2 + 0.06), offZ = dirZ * Math.sin(slopeAng) * (TD / 2 + 0.06);
+    for (const sx of [-1, 1]) {
+      box(grp, cx + sx * (width / 2 + 0.16), midY + offY, midZ + offZ, 0.02, TD, len, CLAD, { rotX: tilt, receive: false });
+      // the cladding's panel joints, every 1.2 m along the run
+      const nj = Math.max(1, Math.floor(len / 1.2));
+      for (let j = 1; j < nj; j++) {
+        const t = j / nj - 0.5;
+        box(grp, cx + sx * (width / 2 + 0.172), midY + offY + t * riseY, midZ + offZ + t * (zHigh - zLow), 0.004, TD, 0.01, CLAD_D, { rotX: tilt, receive: false });
+      }
+    }
+    box(grp, cx, midY + offY * 2 + 0.03, midZ + offZ * 2, width + 0.34, 0.02, len, CLAD_D, { rotX: tilt, receive: false });   // soffit
+
+    // ---- BALUSTRADES: the skirt panel beside the steps, the inner and
+    // outer decking, the GLASS, and the moving handrail on its guide ----------
+    const len2 = len + 0.1;
     const rails = [];
+    // a balustrade run (slope or flat newel), drawn from its centre/length/tilt
+    const balustrade = function (bx, sx, y, z, L, rx) {
+      box(grp, bx - sx * 0.05, y + 0.12, z, 0.02, 0.2, L, SKIRT, { rotX: rx, receive: false });          // skirt panel
+      box(grp, bx, y + 0.22, z, 0.14, 0.03, L, CLAD, { rotX: rx });                                       // inner decking
+      box(grp, bx + sx * 0.06, y + 0.12, z, 0.06, 0.24, L, CLAD, { rotX: rx, receive: false });          // outer decking
+      box(grp, bx, y + 0.64, z, 0.016, 0.82, L, 0, { rotX: rx, receive: false, mat: glassMat() });        // glass
+      box(grp, bx, y + 1.06, z, 0.05, 0.03, L, TRIM, { rotX: rx });                                        // handrail guide
+    };
     for (const sx of [-1, 1]) {
       const bx = cx + sx * (width / 2 + 0.07);
-      // glassy/metal balustrade panel, sloped
-      box(grp, bx, (yLow + yHigh) / 2 + 0.62, (zLow + zHigh) / 2, 0.07, 1.0, len2,
-        STEEL, { rotX: -dirZ * slopeAng, receive: false });
-      // bright top cap of the balustrade
-      box(grp, bx, (yLow + yHigh) / 2 + 1.14, (zLow + zHigh) / 2, 0.13, 0.08, len2,
-        TRIM, { rotX: -dirZ * slopeAng });
-      // moving HANDRAIL — thin band riding just above the cap
+      balustrade(bx, sx, midY, midZ, len2, tilt);
+      // FLAT NEWEL RUNS at both landings: a real escalator's balustrade goes
+      // level for a metre before the handrail turns round its drum
+      balustrade(bx, sx, yLow, zLow - dirZ * 0.55, 1.1, 0);
+      balustrade(bx, sx, yHigh, zHigh + dirZ * 0.55, 1.1, 0);
+      // moving HANDRAIL — the black rubber C-section riding the guide
       const r = new THREE.Mesh(UNIT, RAIL_MAT);
-      r.scale.set(0.16, 0.12, len2);
-      r.position.set(bx, (yLow + yHigh) / 2 + 1.22, (zLow + zHigh) / 2);
-      r.rotation.x = -dirZ * slopeAng;
+      r.scale.set(0.09, 0.05, len2);
+      r.position.set(bx, midY + 1.1, midZ);
+      r.rotation.x = tilt;
       r.matrixAutoUpdate = false; r.updateMatrix();
       grp.add(r);
       r.userData.scroll = (up ? 1 : -1) * dirZ;
       rails.push(r);
+      for (const e of [-1, 1]) {
+        const yE = e < 0 ? yLow : yHigh, zE = e < 0 ? zLow - dirZ * 0.55 : zHigh + dirZ * 0.55;
+        box(grp, bx, yE + 1.1, zE, 0.09, 0.05, 1.1, 0x15181d);                                           // flat handrail
+        // the NEWEL DRUM the handrail turns round, at the run's far end
+        const dz = zE + (e < 0 ? -dirZ : dirZ) * 0.55;
+        const drum = new THREE.Mesh(DRUM, cmat(0x15181d));
+        drum.scale.set(0.09, 0.3, 0.3);
+        drum.rotation.y = (e < 0 ? -dirZ : dirZ) > 0 ? 0 : Math.PI;
+        drum.position.set(bx, yE + 0.97, dz);
+        drum.matrixAutoUpdate = false; drum.updateMatrix();
+        grp.add(drum);
+        box(grp, bx, yE + 0.5, dz, 0.14, 0.95, 0.08, CLAD, {});                                          // newel end cladding
+      }
     }
     grp.userData.rails = rails;
 
     // ---- LANDING PLATES + COMB PLATES at both ends -------------------------
+    // a landing is a FLOOR PLATE: a chequered access cover with its frame,
+    // the yellow-lit comb where the steps disappear, and the yellow edge
     const landD = 1.6;
-    // low landing
-    box(grp, cx, yLow + 0.04, zLow - dirZ * (landD / 2 - 0.1), width + 0.5, 0.16, landD, DECK);
-    box(grp, cx, yLow + 0.10, zLow - dirZ * 0.25, width + 0.2, 0.05, 0.5, COMB, { emissive: 0x6a5d12, ei: 0.4 });
-    // high landing
-    box(grp, cx, yHigh + 0.04, zHigh + dirZ * (landD / 2 - 0.1), width + 0.5, 0.16, landD, DECK);
-    box(grp, cx, yHigh + 0.10, zHigh + dirZ * 0.25, width + 0.2, 0.05, 0.5, COMB, { emissive: 0x6a5d12, ei: 0.4 });
-    // newel skirt boxes (the chunky end housings) — purely visual, low + small
-    box(grp, cx, yLow + 0.55, zLow - dirZ * 0.55, width + 0.4, 1.0, 0.7, NEWEL);
-    box(grp, cx, yHigh + 0.55, zHigh + dirZ * 0.55, width + 0.4, 1.0, 0.7, NEWEL);
+    for (const e of [-1, 1]) {
+      const yE = e < 0 ? yLow : yHigh, zE = e < 0 ? zLow : zHigh, out = e < 0 ? -dirZ : dirZ;
+      box(grp, cx, yE + 0.04, zE + out * (landD / 2 - 0.1), width + 0.5, 0.16, landD, DECK);
+      box(grp, cx, yE + 0.125, zE + out * (landD / 2 - 0.1), width + 0.1, 0.01, landD - 0.3, PLATE);      // the floor plate
+      for (let k = 0; k < 5; k++) box(grp, cx, yE + 0.132, zE + out * (0.35 + k * 0.24), width + 0.08, 0.004, 0.02, CLAD_D);   // its ribs
+      box(grp, cx, yE + 0.10, zE + out * 0.06, width + 0.2, 0.05, 0.16, COMB, { emissive: 0x6a5d12, ei: 0.4 });   // comb
+      for (let k = 0; k < 14; k++) box(grp, cx - width / 2 + (k + 0.5) * width / 14, yE + 0.128, zE - out * 0.02, 0.02, 0.01, 0.08, COMB);   // comb teeth
+    }
+
+    mergeStatic(grp);
 
     // ---- RIDE: register the sloped surface as a CBZ.platforms RAMP ---------
     // groundAt interpolates top = y0 + t*(y1-y0), t along (z-z0)/(z1-z0).
@@ -379,6 +463,8 @@
 
   // PUBLIC: built escalators (minimap markers / missions could target them)
   CBZ.cityEscalators = function () { return escalators; };
+  // the lab turntable builds one bank on the floor (the asset kit); nothing in the game calls it
+  CBZ.escalatorBank = makeBank;
   CBZ.makeEscalator = makeEscalator;   // exposed for future hand-placement
   CBZ.makeEscalatorBank = makeBank;
 })();
