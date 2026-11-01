@@ -266,22 +266,93 @@
     return { group: g, cols: [c] };
   }
 
+  /* THE SITE BARRIER (2026-10-31). The cleared lot was fenced with 0.14 m
+     orange and white BOXES — plywood-thin slabs standing on edge. What a
+     demolition contractor actually rings a site with is the water-filled
+     plastic road barrier: 2.0 m long, 1.0 m tall, a 0.5 m foot narrowing to
+     a 0.2 m crown with a waist, rounded ends, a fill cap on top, two fork
+     slots through the foot and a lug/socket at each end so the run links.
+     One shared geometry per colour (orange, white alternate), built once
+     and kept (_shared: the phase group's dispose pass skips it). */
+  const BAR_L = 2.0, BAR_H = 1.0;
+  let _barGeo = null;
+  function barrierGeo() {
+    if (_barGeo) return _barGeo;
+    // the section (y up, z across), extruded along x with a soft bevel
+    const sh = new THREE.Shape();
+    const P = [[-0.25, 0], [0.25, 0], [0.25, 0.08], [0.17, 0.2], [0.15, 0.52], [0.13, 0.62], [0.1, BAR_H],
+      [-0.1, BAR_H], [-0.13, 0.62], [-0.15, 0.52], [-0.17, 0.2], [-0.25, 0.08]];
+    sh.moveTo(P[0][0], P[0][1]);
+    for (let i = 1; i < P.length; i++) sh.lineTo(P[i][0], P[i][1]);
+    sh.closePath();
+    const bev = 0.035;
+    const body = new THREE.ExtrudeGeometry(sh, { depth: BAR_L - bev * 2, bevelEnabled: true, bevelThickness: bev, bevelSize: bev * 0.7, bevelSegments: 2, curveSegments: 2 });
+    // extrude runs along +z of the shape plane: turn it so the length is x
+    body.rotateY(Math.PI / 2);
+    body.translate(-(BAR_L - bev * 2) / 2, 0, 0);
+    const parts = [body.index ? body.toNonIndexed() : body];
+    const cap = new THREE.CylinderGeometry(0.06, 0.065, 0.04, 10); cap.translate(0.45, BAR_H + 0.02, 0);
+    const lug = new THREE.BoxGeometry(0.1, 0.26, 0.12); lug.translate(BAR_L / 2 + 0.03, 0.62, 0);
+    const lug2 = new THREE.BoxGeometry(0.1, 0.26, 0.12); lug2.translate(-BAR_L / 2 - 0.03, 0.3, 0);
+    // the moulded top handle groove: a raised rib along the crown
+    const rib = new THREE.BoxGeometry(BAR_L * 0.7, 0.03, 0.06); rib.translate(-0.15, BAR_H + 0.015, 0);
+    for (const g of [cap, lug, lug2, rib]) parts.push(g.index ? g.toNonIndexed() : g);
+    const BGU = THREE.BufferGeometryUtils;
+    let geo = null;
+    if (BGU && BGU.mergeBufferGeometries) {
+      for (const g of parts) { for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && k !== "uv") g.deleteAttribute(k); }
+      geo = BGU.mergeBufferGeometries(parts, false);
+    }
+    if (!geo) geo = parts[0];
+    geo.computeVertexNormals();
+    geo._shared = true;
+    _barGeo = geo;
+    return geo;
+  }
+  // dark slot recesses, shared; drawn as two thin boxes against each face
+  let _slotGeo = null;
+  function slotGeo() {
+    if (_slotGeo) return _slotGeo;
+    const a = new THREE.BoxGeometry(0.4, 0.1, 0.565); a.translate(-0.5, 0.07, 0);
+    const b2 = new THREE.BoxGeometry(0.4, 0.1, 0.565); b2.translate(0.5, 0.07, 0);
+    const BGU = THREE.BufferGeometryUtils;
+    _slotGeo = (BGU && BGU.mergeBufferGeometries) ? BGU.mergeBufferGeometries([a, b2], false) : a;
+    _slotGeo._shared = true;
+    return _slotGeo;
+  }
+  function barrier(g, x, z, along, col) {
+    const m = new THREE.Mesh(barrierGeo(), mat(col));
+    m.position.set(x, 0, z);
+    m.rotation.y = along ? 0 : Math.PI / 2;
+    m.castShadow = false; m.receiveShadow = true;
+    g.add(m);
+    const sl = new THREE.Mesh(slotGeo(), mat(0x1c1a18));
+    m.add(sl);
+    return m;
+  }
+  // the site barrier on its own (the lab's turntable, any other site dresser)
+  CBZ.siteBarrier = function (col) { const g = new THREE.Group(); barrier(g, 0, 0, true, col != null ? col : 0xd9480f); return g; };
+
   function buildCleared(rec) {
     const lot = rec.lot, b = lot.building, g = new THREE.Group();
     const rng = lotRng(lot, 0xc1ea);
     // graded gravel pad where the pile was
     box(g, b.ox, 0.06, b.oz, b.w - 0.8, 0.12, b.d - 0.8, 0x54585c);
     // orange/white construction barriers around the perimeter
-    const bw = 2.2, hw = b.w / 2 - 0.6, hd = b.d / 2 - 0.6;
+    // water-filled site barriers, linked end to end round the lot (one gap
+    // per side where the run doesn't divide evenly, as a real crew leaves it)
+    const hw = b.w / 2 - 0.6, hd = b.d / 2 - 0.6;
     for (let s = 0; s < 4; s++) {
       const horiz = s < 2, sign = s % 2 ? 1 : -1;
       const span = (horiz ? b.w : b.d) - 1.2;
-      const nSeg = Math.max(2, Math.round(span / (bw + 1.6)));
+      const nSeg = Math.max(1, Math.floor(span / (BAR_L + 0.08)));
+      const run = nSeg * (BAR_L + 0.08);
       for (let i = 0; i < nSeg; i++) {
-        const t = -span / 2 + (i + 0.5) * (span / nSeg) + (rng() - 0.5) * 0.4;
+        const t = -run / 2 + (i + 0.5) * (BAR_L + 0.08) + (rng() - 0.5) * 0.06;
         const x = horiz ? b.ox + t : b.ox + sign * hw;
         const z = horiz ? b.oz + sign * hd : b.oz + t;
-        box(g, x, 0.55, z, horiz ? bw : 0.14, 0.7, horiz ? 0.14 : bw, i % 2 ? 0xd2691e : 0xe8e4da, 0);
+        const m = barrier(g, x, z, horiz, i % 2 ? 0xd9480f : 0xe8e4da);
+        m.rotation.y += (rng() - 0.5) * 0.05;
       }
     }
     return { group: g, cols: [] };
@@ -405,7 +476,7 @@
       cartOff(rec.propGroup);
       const A = arena();
       if (A && A.root) A.root.remove(rec.propGroup);
-      rec.propGroup.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+      rec.propGroup.traverse((o) => { if (o.isMesh && o.geometry && !o.geometry._shared) o.geometry.dispose(); });
       rec.propGroup = null;
     }
     releasePropCols(rec);
@@ -472,7 +543,7 @@
     if (!g) return;
     cartOff(g);
     if (g.parent) g.parent.remove(g);
-    g.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+    g.traverse((o) => { if (o.isMesh && o.geometry && !o.geometry._shared) o.geometry.dispose(); });
   }
   // presence p∈[0,1]: 1 = fully built at rest, 0 = gone. "flat" is the rubble
   // read (sink flat + shrink footprint toward the lot centre); "v" is the plain

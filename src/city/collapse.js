@@ -1584,7 +1584,8 @@
     S.standingReal = S.chunks.filter(function (c) { return c.tris > 0; }).length;
     S.stats.chunks = S.chunks.filter(function (c) { return c.tris > 0; }).length;
     // the cut faces
-    S.coreMat = mat(mix(shade(S.D.wall, m.tone), 0x8d8a84, 0.4));
+    S.coreMat = capMat(S.material, mix(shade(S.D.wall, m.tone), 0x8d8a84, 0.4), false);
+    S.slabCapMat = capMat(S.material, mix(shade(S.D.wall, m.tone), 0x8d8a84, 0.4), true);
     yield;
     let k = 0;
     // caps on the region's pieces only: outside it a storey breaks as whole
@@ -1621,57 +1622,201 @@
      storey lines; a floor tile shows its slab edge. Built once; inside a
      standing building they lie hidden in the solid, and the moment a
      neighbour falls away they are the broken face that was always there. */
-  function quad(B, p0, p1, p2, p3, n) {
+  /* SECTION UVs (2026-10-31). Every cap used to map one whole texture-less
+     unit square, so a broken face was a flat swatch of one colour: the
+     rubble of a brick block and of a concrete tower were the same beige
+     planks. The cut faces now wear a SECTION texture (capMat below) whose
+     u runs ACROSS the material's thickness (0 at one face, 1 at the other)
+     and whose v runs along the cut in metres / CAP_TILE. A quad hands its
+     corners' (u, v) in `uv`: [u0, v0, u1, v1, u2, v2, u3, v3]. */
+  function quad(B, p0, p1, p2, p3, n, uv) {
     // wind it to face n
     const ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2], vx = p2[0] - p0[0], vy = p2[1] - p0[1], vz = p2[2] - p0[2];
     const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
-    let q = [p0, p1, p2, p3];
-    if (cx * n[0] + cy * n[1] + cz * n[2] < 0) q = [p0, p3, p2, p1];
-    const uvs = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    let q = [0, 1, 2, 3];
+    if (cx * n[0] + cy * n[1] + cz * n[2] < 0) q = [0, 3, 2, 1];
+    const P = [p0, p1, p2, p3];
+    const UV = uv || [0, 0, 1, 0, 1, 1, 0, 1];
     const tri = [0, 1, 2, 0, 2, 3];
     B.need(ST * 6);
     for (const t of tri) {
-      const o = B.n, A = B.a, p = q[t];
+      const o = B.n, A = B.a, k = q[t], p = P[k];
       A[o] = p[0]; A[o + 1] = p[1]; A[o + 2] = p[2];
       A[o + 3] = n[0]; A[o + 4] = n[1]; A[o + 5] = n[2];
-      A[o + 6] = uvs[t][0]; A[o + 7] = uvs[t][1];
+      A[o + 6] = UV[k * 2]; A[o + 7] = UV[k * 2 + 1];
       A[o + 8] = 1; A[o + 9] = 1; A[o + 10] = 1;
       B.n += ST;
     }
   }
+  const CAP_TILE = 1.0;          // metres of cut one section tile spans along the cut
+
+  /* THE INSIDE OF THE MATERIAL, as a section texture. Neutral around 1.0 so
+     the material colour (the old broken-core tint) still sets the tone; the
+     texture carries what the material IS when you break it:
+       concrete / steel / curtain-wall frame   cement paste with aggregate
+            and pores, and the REBAR: two mats of bar ends near each face, in
+            rust (slab edges and wall sections alike)
+       brick / masonry   coursed brick in section — stretchers and headers,
+            75 mm courses, recessed mortar, each brick its own fired shade
+       stone   rubble-core blocks of mixed size in lime mortar
+       adobe   rammed earth with straw and grit
+       timber  sawn/torn wood: grain along the cut, darker latewood bands
+     One 128 x 256 canvas per kind, one material per (kind, tint, slab). */
+  const _capTex = {}, _capMats = new Map();
+  function capRng(seed) { let q = seed >>> 0; return function () { q = (q * 1664525 + 1013904223) >>> 0; return q / 4294967296; }; }
+  function capTex(kind) {
+    if (_capTex[kind] !== undefined) return _capTex[kind];
+    let t = null;
+    try {
+      const W = 128, H = 256, cv = document.createElement("canvas");
+      cv.width = W; cv.height = H;
+      const g = cv.getContext("2d"), r = capRng(0x5eed + kind.length * 977);
+      const grey = function (v, a) { v = Math.max(0, Math.min(255, v | 0)); return "rgba(" + v + "," + v + "," + v + "," + (a == null ? 1 : a) + ")"; };
+      if (kind === "brick" || kind === "masonry") {
+        g.fillStyle = grey(196); g.fillRect(0, 0, W, H);              // mortar, recessed
+        const courses = 13, ch = H / courses;
+        for (let c = 0; c < courses; c++) {
+          // across the wall: a header course (brick ends) or two stretchers
+          const cuts = (c % 2) ? [0, 0.5, 1] : [0, 0.27, 0.73, 1];
+          for (let i = 0; i < cuts.length - 1; i++) {
+            const x0 = cuts[i] * W + 1.5, x1 = cuts[i + 1] * W - 1.5;
+            // fired brick: warm shades as a multiplier on the tint
+            const v = 0.78 + r() * 0.3, rr = 255 * v, gg = 205 * v * (0.92 + r() * 0.12), bb = 180 * v * (0.85 + r() * 0.15);
+            g.fillStyle = "rgb(" + (rr | 0) + "," + (gg | 0) + "," + (bb | 0) + ")";
+            g.fillRect(x0, c * ch + 1.5, x1 - x0, ch - 3);
+            // broken arrises: chips off a few corners
+            for (let k = 0; k < 3; k++) { g.fillStyle = grey(150, 0.5); g.fillRect(x0 + r() * (x1 - x0), c * ch + 1.5 + r() * (ch - 3), 2 + r() * 3, 1 + r() * 2); }
+          }
+        }
+      } else if (kind === "stone") {
+        g.fillStyle = grey(200); g.fillRect(0, 0, W, H);
+        let y = 0;
+        while (y < H) {
+          const h = 18 + r() * 34; let x = 0;
+          while (x < W) {
+            const w = 26 + r() * 60, v = 190 + r() * 60;
+            g.fillStyle = grey(v); g.beginPath();
+            const x1 = Math.min(W, x + w), y1 = Math.min(H, y + h);
+            g.moveTo(x + 2 + r() * 3, y + 2 + r() * 3); g.lineTo(x1 - 2 - r() * 3, y + 2 + r() * 3);
+            g.lineTo(x1 - 2 - r() * 3, y1 - 2 - r() * 3); g.lineTo(x + 2 + r() * 3, y1 - 2 - r() * 3); g.closePath(); g.fill();
+            x += w;
+          }
+          y += h;
+        }
+      } else if (kind === "timber") {
+        g.fillStyle = grey(230); g.fillRect(0, 0, W, H);
+        for (let k = 0; k < 46; k++) {
+          const x = r() * W, w = 1 + r() * 3.5;
+          g.fillStyle = grey(150 + r() * 50, 0.55); g.fillRect(x, 0, w, H);
+        }
+        for (let k = 0; k < 6; k++) { g.fillStyle = grey(110, 0.6); g.beginPath(); g.ellipse(r() * W, r() * H, 3 + r() * 4, 6 + r() * 8, 0, 0, 6.283); g.fill(); }
+      } else {
+        // cement paste, then the aggregate, then the pores
+        const img = g.createImageData(W, H), D = img.data;
+        for (let i = 0; i < W * H; i++) { const v = 214 + ((r() * 30) | 0); D[i * 4] = D[i * 4 + 1] = D[i * 4 + 2] = v; D[i * 4 + 3] = 255; }
+        g.putImageData(img, 0, 0);
+        const stones = kind === "adobe" ? 40 : 170;
+        for (let k = 0; k < stones; k++) {
+          const v = kind === "adobe" ? 175 + r() * 50 : 150 + r() * 105;
+          g.fillStyle = grey(v); g.beginPath();
+          g.ellipse(r() * W, r() * H, 1.5 + r() * 5, 1.2 + r() * 4, r() * 3.14, 0, 6.283); g.fill();
+        }
+        for (let k = 0; k < 90; k++) { g.fillStyle = grey(95, 0.8); g.fillRect(r() * W, r() * H, 1 + r() * 1.5, 1 + r() * 1.5); }
+        if (kind === "adobe") {
+          for (let k = 0; k < 60; k++) { g.strokeStyle = "rgba(255,236,190,0.55)"; g.lineWidth = 1; g.beginPath(); const x = r() * W, y = r() * H, a = r() * 3.14; g.moveTo(x, y); g.lineTo(x + Math.cos(a) * 7, y + Math.sin(a) * 7); g.stroke(); }
+        } else {
+          // the reinforcement: two mats of bars near the faces (cover ~22% of
+          // the section), a bar every 0.2 m along the cut, each end rusted
+          const along = H / (CAP_TILE / 0.2);
+          for (const uu of [0.22, 0.78]) {
+            for (let y = along * 0.5; y < H; y += along) {
+              const cx = uu * W + (r() - 0.5) * 4, cy = y + (r() - 0.5) * 6;
+              g.fillStyle = "rgba(120,74,46,0.55)"; g.beginPath(); g.arc(cx, cy, 6.5, 0, 6.283); g.fill();   // rust bleed
+              g.fillStyle = "rgb(70,52,42)"; g.beginPath(); g.arc(cx, cy, 3.6, 0, 6.283); g.fill();        // the bar
+              g.fillStyle = "rgba(150,120,100,0.8)"; g.beginPath(); g.arc(cx - 1, cy - 1, 1.2, 0, 6.283); g.fill();
+            }
+          }
+        }
+      }
+      t = new THREE.CanvasTexture(cv);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 2;
+    } catch (e) { t = null; }
+    _capTex[kind] = t;
+    return t;
+  }
+  // which section a material id breaks into; a slab is concrete unless the
+  // building is timber or earth (a wood floor, a mud-and-pole roof)
+  function capKind(mId, slab) {
+    if (slab) return mId === "timber" ? "timber" : (mId === "adobe" ? "adobe" : "concrete");
+    if (mId === "brick" || mId === "masonry") return "brick";
+    if (mId === "stone" || mId === "adobe" || mId === "timber") return mId;
+    return "concrete";
+  }
+  function capMat(mId, tint, slab) {
+    const kind = capKind(mId, slab);
+    const key = kind + "|" + tint;
+    let m = _capMats.get(key);
+    if (m) return m;
+    const map = HAS3 ? capTex(kind) : null;
+    if (!map) return mat(tint);
+    // brick shows its own fired colour through any paint: pull the tint warm
+    const col = kind === "brick" ? mix(tint, 0x8f4e37, 0.7) : kind === "timber" ? mix(tint, 0xb08a5c, 0.6) : tint;
+    m = new THREE.MeshLambertMaterial({ color: col, map: map });
+    m.name = "collapseCore-" + kind;
+    m._shared = true;
+    m.userData.debrisKind = kind === "brick" ? "brick" : kind === "timber" ? "wood" : kind === "stone" ? "rock" : kind === "adobe" ? "dirt" : "concrete";
+    m.userData.tile = { u: CAP_TILE, v: CAP_TILE };
+    _capMats.set(key, m);
+    return m;
+  }
   function addCaps(S, c) {
     if (!c.bufs) c.bufs = new Map();
-    let B = c.bufs.get(S.coreMat);
-    if (!B) { B = new Buf(); c.bufs.set(S.coreMat, B); }
+    const T = 1 / CAP_TILE;
     const g = c.gb, y0 = Math.max(ylo(S, c.s), g[2]), y1 = Math.min(yhi(S, c.s), g[3]);
     if (c.kind === 0) {
       if (y1 - y0 < 0.2) return;
+      let B = c.bufs.get(S.coreMat);
+      if (!B) { B = new Buf(); c.bufs.set(S.coreMat, B); }
       const f = c.f, hw = S.hw, hd = S.hd, n = S.nWall[f];
+      // u: 0 at the outer face, 1 at the inner; v: metres up (bay ends) or
+      // along the wall (storey lines) — the section texture's two axes
+      const vy0 = y0 * T, vy1 = y1 * T;
       if (f < 2) {
         const zo = f === 0 ? -hd : hd, zi = f === 0 ? -hd + WT : hd - WT;
-        if (c.j > 0) quad(B, [c.x0, y0, zo], [c.x0, y0, zi], [c.x0, y1, zi], [c.x0, y1, zo], [-1, 0, 0]);
-        if (c.j < n - 1) quad(B, [c.x1, y0, zo], [c.x1, y0, zi], [c.x1, y1, zi], [c.x1, y1, zo], [1, 0, 0]);
+        const ends = [0, vy0, 1, vy0, 1, vy1, 0, vy1];
+        if (c.j > 0) quad(B, [c.x0, y0, zo], [c.x0, y0, zi], [c.x0, y1, zi], [c.x0, y1, zo], [-1, 0, 0], ends);
+        if (c.j < n - 1) quad(B, [c.x1, y0, zo], [c.x1, y0, zi], [c.x1, y1, zi], [c.x1, y1, zo], [1, 0, 0], ends);
         const xa = Math.max(c.x0, -hw), xb = Math.min(c.x1, hw);
-        if (c.s > 0) quad(B, [xa, y0, zo], [xb, y0, zo], [xb, y0, zi], [xa, y0, zi], [0, -1, 0]);
-        if (c.s < S.ns) quad(B, [xa, y1, zo], [xb, y1, zo], [xb, y1, zi], [xa, y1, zi], [0, 1, 0]);
+        const runs = [0, xa * T, 0, xb * T, 1, xb * T, 1, xa * T];
+        if (c.s > 0) quad(B, [xa, y0, zo], [xb, y0, zo], [xb, y0, zi], [xa, y0, zi], [0, -1, 0], runs);
+        if (c.s < S.ns) quad(B, [xa, y1, zo], [xb, y1, zo], [xb, y1, zi], [xa, y1, zi], [0, 1, 0], runs);
       } else {
         const xo = f === 2 ? -hw : hw, xi = f === 2 ? -hw + WT : hw - WT;
-        if (c.j > 0) quad(B, [xo, y0, c.z0], [xi, y0, c.z0], [xi, y1, c.z0], [xo, y1, c.z0], [0, 0, -1]);
-        if (c.j < n - 1) quad(B, [xo, y0, c.z1], [xi, y0, c.z1], [xi, y1, c.z1], [xo, y1, c.z1], [0, 0, 1]);
+        const ends = [0, vy0, 1, vy0, 1, vy1, 0, vy1];
+        if (c.j > 0) quad(B, [xo, y0, c.z0], [xi, y0, c.z0], [xi, y1, c.z0], [xo, y1, c.z0], [0, 0, -1], ends);
+        if (c.j < n - 1) quad(B, [xo, y0, c.z1], [xi, y0, c.z1], [xi, y1, c.z1], [xo, y1, c.z1], [0, 0, 1], ends);
         const za = Math.max(c.z0, -hd), zb = Math.min(c.z1, hd);
-        if (c.s > 0) quad(B, [xo, y0, za], [xo, y0, zb], [xi, y0, zb], [xi, y0, za], [0, -1, 0]);
-        if (c.s < S.ns) quad(B, [xo, y1, za], [xo, y1, zb], [xi, y1, zb], [xi, y1, za], [0, 1, 0]);
+        const runs = [0, za * T, 0, zb * T, 1, zb * T, 1, za * T];
+        if (c.s > 0) quad(B, [xo, y0, za], [xo, y0, zb], [xi, y0, zb], [xi, y0, za], [0, -1, 0], runs);
+        if (c.s < S.ns) quad(B, [xo, y1, za], [xo, y1, zb], [xi, y1, zb], [xi, y1, za], [0, 1, 0], runs);
       }
     } else if (c.s > 0) {
       // the slab edge, if this tile carries a floor plate at its foot
       const fy = c.s * S.FH;
       if (g[2] > fy - SL + 0.35) return;
+      const sm = S.slabCapMat || S.coreMat;
+      let B = c.bufs.get(sm);
+      if (!B) { B = new Buf(); c.bufs.set(sm, B); }
       const a0 = fy - SL + 0.02, a1 = fy + 0.04;
       const zA = Math.max(c.z0, -S.hd + WT), zB = Math.min(c.z1, S.hd - WT), xA = Math.max(c.x0, -S.hw + WT), xB = Math.min(c.x1, S.hw - WT);
-      if (c.ix > 0) quad(B, [c.x0, a0, zA], [c.x0, a0, zB], [c.x0, a1, zB], [c.x0, a1, zA], [-1, 0, 0]);
-      if (c.ix < S.nx - 1) quad(B, [c.x1, a0, zA], [c.x1, a0, zB], [c.x1, a1, zB], [c.x1, a1, zA], [1, 0, 0]);
-      if (c.iz > 0) quad(B, [xA, a0, c.z0], [xB, a0, c.z0], [xB, a1, c.z0], [xA, a1, c.z0], [0, 0, -1]);
-      if (c.iz < S.nz - 1) quad(B, [xA, a0, c.z1], [xB, a0, c.z1], [xB, a1, c.z1], [xA, a1, c.z1], [0, 0, 1]);
+      // u: across the slab (soffit 0 -> top 1); v: metres along the edge
+      const ez = [0, zA * T, 0, zB * T, 1, zB * T, 1, zA * T];
+      const ex = [0, xA * T, 0, xB * T, 1, xB * T, 1, xA * T];
+      if (c.ix > 0) quad(B, [c.x0, a0, zA], [c.x0, a0, zB], [c.x0, a1, zB], [c.x0, a1, zA], [-1, 0, 0], ez);
+      if (c.ix < S.nx - 1) quad(B, [c.x1, a0, zA], [c.x1, a0, zB], [c.x1, a1, zB], [c.x1, a1, zA], [1, 0, 0], ez);
+      if (c.iz > 0) quad(B, [xA, a0, c.z0], [xB, a0, c.z0], [xB, a1, c.z0], [xA, a1, c.z0], [0, 0, -1], ex);
+      if (c.iz < S.nz - 1) quad(B, [xA, a0, c.z1], [xB, a0, c.z1], [xB, a1, c.z1], [xA, a1, c.z1], [0, 0, 1], ex);
     }
   }
 
