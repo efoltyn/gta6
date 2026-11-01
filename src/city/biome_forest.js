@@ -1038,7 +1038,8 @@
     const rockGeo = SMALL_ROCK !== 1 && CBZ.makeRock
       ? CBZ.makeRock(1, 0x5F0235, 1, { scrapes: 9, depthMin: 0.06, depthMax: 0.34 })
       : new THREE.DodecahedronGeometry(1, 0);
-    const rockMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }); rockMat._shared = true;
+    // makeRock bakes per-face colour (beds, fresh faces, lichen, soil foot)
+    const rockMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true, vertexColors: !!rockGeo.attributes.color }); rockMat._shared = true;
 
     const bushes = [], rocks = [];
     const NB = 900, NR = 260;
