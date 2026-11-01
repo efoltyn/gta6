@@ -469,131 +469,24 @@
     }
   }
 
-  /* THE STORES, at their real size and shape. NOSE ALONG +Z (ord.step
-     attitudes a store with lookAt, which aims local +Z down the airflow; the
-     old primitive body had its fat end and fins on +Z, so every bomb fell
-     TAIL FIRST). Each body is one turned shell (ogive nose, parallel body,
-     boat-tail) plus its tail kit, the nose fuze, the two suspension lugs
-     and the yellow band US high-explosive stores wear at the nose.
-       iron    Mk 82 low-drag GP, 500 lb: 2.21 m x 273 mm, conical fin kit
-       heavy   Mk 84 GP, 2000 lb: 3.84 m x 458 mm
-       cluster CBU-87 (SUU-65 dispenser): 2.34 m x 396 mm, square tail
-               fins on a cylindrical shroud, the long seam of the clamshell
-       rocket  M31 GMLRS: 3.94 m x 227 mm, four folding tail fins, canards
-     Geometry is built once per kind and shared; one material per finish. */
-  const STORE = {
-    iron: { L: 2.21, D: 0.273, nose: 0.62, tail: 0.50, fins: "conical", body: 0x5d6247 },
-    heavy: { L: 3.84, D: 0.458, nose: 1.02, tail: 0.86, fins: "conical", body: 0x5a5f46 },
-    cluster: { L: 2.34, D: 0.396, nose: 0.44, tail: 0.30, fins: "box", body: 0x6e6a52 },
-    rocket: { L: 3.94, D: 0.227, nose: 0.58, tail: 0.10, fins: "rocket", body: 0xb9b4a6 },
-  };
-  const storeGeo = {};
-  let storeMats = null;
-  function storeMat(hex, shin) {
-    if (!storeMats) storeMats = {};
-    const k = hex + ":" + (shin || 0);
-    if (!storeMats[k]) {
-      storeMats[k] = shin ? new THREE.MeshPhongMaterial({ color: hex, shininess: shin, specular: 0x222222 })
-        : new THREE.MeshLambertMaterial({ color: hex });
-      storeMats[k]._shared = true;
-    }
-    return storeMats[k];
-  }
-  // turned about +Y, then +Y -> +Z (nose forward)
-  function turned(pts, segs) {
-    const gg = new THREE.LatheGeometry(pts.map(function (p) { return new THREE.Vector2(Math.max(0, p[0]), p[1]); }), segs || 20);
-    gg.rotateX(Math.PI / 2);
-    gg.computeVertexNormals();
-    return gg;
-  }
-  // a fin's side profile [z, r] (z along the body, r outward), extruded thin
-  function finGeo(pts, t) {
-    const s = new THREE.Shape();
-    s.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) s.lineTo(pts[i][0], pts[i][1]);
-    s.closePath();
-    const gg = new THREE.ExtrudeGeometry(s, { depth: t, bevelEnabled: false, curveSegments: 2 });
-    gg.translate(0, 0, -t / 2);
-    gg.rotateY(-Math.PI / 2);   // shape x -> +z (along the body), extrusion -> x
-    gg.computeVertexNormals();
-    return gg;
-  }
-  function buildStoreGeo(kind) {
-    const S = STORE[kind] || STORE.iron;
-    const R = S.D / 2, L = S.L, zT = -L / 2, zN = L / 2;
-    const out = {};
-    // body: tail plug -> boat-tail -> parallel body -> ogive -> fuze seat
-    const pts = [[0, zT], [R * 0.52, zT], [R * 0.62, zT + 0.01]];
-    const tailEnd = zT + S.tail;
-    if (S.tail > 0.12) pts.push([R * 0.70, zT + S.tail * 0.15], [R, tailEnd]);
-    else pts.push([R, zT + 0.02]);
-    const noseStart = zN - S.nose;
-    pts.push([R, noseStart]);
-    for (let i = 1; i <= 8; i++) {
-      const t = i / 8;                                     // tangent ogive
-      pts.push([R * Math.sqrt(1 - t * t) * 0.86 + R * 0.14 * (1 - t), noseStart + S.nose * t * 0.94]);
-    }
-    pts.push([R * 0.10, zN - S.nose * 0.02], [0, zN - S.nose * 0.02]);
-    out.body = turned(pts, 22);
-    // the nose fuze (M904 class): a small turned cone ahead of the ogive
-    out.fuze = turned([[0, zN - S.nose * 0.06], [R * 0.16, zN - S.nose * 0.06], [R * 0.13, zN - 0.012], [R * 0.06, zN], [0, zN]], 14);
-    // the yellow HE band just behind the nose
-    out.band = turned([[R * 1.006, noseStart - 0.05], [R * 1.006, noseStart + 0.04]], 22);
-    // suspension lugs, 14 in (356 mm) apart for 500-2000 lb stores
-    out.lug = new THREE.BoxGeometry(0.03, 0.05, 0.05);
-    // the tail kit
-    if (S.fins === "conical") {
-      // the Mk 82/84 conical fin assembly: a tapered can with four fins
-      const c0 = tailEnd - 0.02, c1 = zT - S.L * 0.04;
-      out.can = turned([[R * 0.70, c1], [R * 0.86, c1], [R * 0.93, c0 - (c0 - c1) * 0.15], [R * 0.66, c0], [R * 0.60, c0]], 18);
-      const span = R * 0.95, len = (c0 - c1) * 0.92;
-      out.fin = finGeo([[c1, R * 0.55], [c1 + len, R * 0.55], [c1 + len * 0.55, R * 0.55 + span * 0.72], [c1, R * 0.55 + span]], 0.006);
-    } else if (S.fins === "box") {
-      const c1 = zT - 0.04, c0 = zT + 0.38;
-      out.fin = finGeo([[c1, R * 0.40], [c0, R * 0.40], [c0 - 0.06, R * 1.35], [c1, R * 1.35]], 0.008);
-      out.ring = turned([[R * 1.30, c1], [R * 1.36, c1], [R * 1.36, c1 + 0.14], [R * 1.30, c1 + 0.14]], 24);
-      out.seam = new THREE.BoxGeometry(0.012, 0.006, L - S.nose - 0.08);
-    } else {
-      // GMLRS: four swept tail fins at the motor's end, four small canards
-      out.fin = finGeo([[zT, R * 0.9], [zT + 0.30, R * 0.9], [zT + 0.20, R * 2.35], [zT + 0.08, R * 2.35]], 0.006);
-      const cz = noseStart - 0.25;
-      out.canard = finGeo([[cz, R * 0.9], [cz + 0.14, R * 0.9], [cz + 0.10, R * 1.75], [cz + 0.04, R * 1.75]], 0.005);
-      out.nozzle = turned([[R * 0.55, zT - 0.05], [R * 0.66, zT - 0.05], [R * 0.60, zT + 0.01], [R * 0.48, zT + 0.01]], 16);
-    }
-    return out;
-  }
+  /* THE STORES are weapons/munitions.js's: the one place a round in the
+     air is drawn (real profiles at real size, nose on +Z, one merged
+     vertex-coloured mesh per type, pooled). ord.step attitudes a store with
+     lookAt, which aims local +Z down the airflow, so they fall nose first.
+     (This file used to draw its own: a fat 8-sided cylinder and two crossed
+     boxes at ~2x size, fins on +Z, so every bomb fell TAIL first.) A pooled
+     body goes back to the pool when its store bursts (dropMesh). */
+  const MUN_TYPE = { mk82: "mk82", mk84: "mk84", cbu87: "cbu87", m31a1: "mlrs" };
   function bombMesh(K) {
     if (K.body === "nukeWarhead") { const w = nukeBody(K); if (w) return w; }
-    const kind = STORE[K.kindId] ? K.kindId : (K.mun === "mk84" ? "heavy" : K.mun === "cbu87" ? "cluster" : K.mun === "m31a1" ? "rocket" : "iron");
-    const S = STORE[kind], R = S.D / 2;
-    const G = storeGeo[kind] || (storeGeo[kind] = buildStoreGeo(kind));
-    const body = storeMat(S.body, 8), dark = storeMat(0x2b2d2c, 10), steel = storeMat(0x8a8d8a, 30), yellow = storeMat(0xd9b21c, 0);
-    const g = new THREE.Group();
-    const add = function (geo, m, x, y, z, rz) {
-      const mesh = new THREE.Mesh(geo, m);
-      mesh.position.set(x || 0, y || 0, z || 0);
-      if (rz) mesh.rotation.z = rz;
-      g.add(mesh);
-      return mesh;
-    };
-    add(G.body, body);
-    add(G.fuze, kind === "rocket" ? body : steel);
-    if (kind !== "rocket") add(G.band, yellow);
-    if (kind !== "rocket") { add(G.lug, steel, 0, R + 0.02, 0.178); add(G.lug, steel, 0, R + 0.02, -0.178); }
-    if (G.can) add(G.can, body);
-    if (G.ring) add(G.ring, body);
-    if (G.seam) add(G.seam, dark, 0, -R, -S.nose / 2 + 0.04);
-    if (G.nozzle) add(G.nozzle, dark);
-    // four fins at 45 degrees (the X a store hangs in under a pylon)
-    for (let i = 0; i < 4; i++) {
-      const a = Math.PI / 4 + i * Math.PI / 2;
-      const f = new THREE.Group();
-      f.rotation.z = a;
-      g.add(f);
-      f.add(new THREE.Mesh(G.fin, kind === "rocket" ? dark : body));
-      if (G.canard) f.add(new THREE.Mesh(G.canard, dark));
-    }
-    return g;
+    const MU = CBZ.munitions;
+    const m = MU && MU.acquire(MUN_TYPE[K.mun] || "mk82");
+    return m || new THREE.Group();
+  }
+  function dropMesh(mesh) {
+    if (!mesh) return;
+    if (mesh.userData && mesh.userData.munition && CBZ.munitions) CBZ.munitions.release(mesh);
+    else if (mesh.parent) mesh.parent.remove(mesh);
   }
 
   // A store as a bare THREE.Group, detached from any flight. An asset
@@ -889,12 +782,13 @@
       // looks like a bomb and not a brick, and it costs one lookAt
       _v.copy(b.pos).add(b.vel);
       b.mesh.lookAt(_v);
+      if (CBZ.munitions && b.mesh.userData.munition) CBZ.munitions.dressBomb(b.mesh, b.age, dt, b.vel.length());
 
       if (struck || b.age > 45) {
         const hx = struck ? _hitX : b.pos.x, hz = struck ? _hitZ : b.pos.z;
         const hy = struck ? _hitY : groundAt(b.pos.x, b.pos.z);
         b.pos.set(hx, hy, hz);
-        scene.remove(b.mesh);
+        dropMesh(b.mesh);
         bombs.splice(i, 1);
         b.live = false;
         ord.blast(hx, hy, hz, b.radius, b.power, { owner: b.owner, team: b.team, kind: b.kind });
@@ -984,7 +878,7 @@
   };
   ord.liveCount = function () { return bombs.length; };
   ord.clear = function () {
-    for (let i = 0; i < bombs.length; i++) scene.remove(bombs[i].mesh);
+    for (let i = 0; i < bombs.length; i++) dropMesh(bombs[i].mesh);
     bombs.length = 0;
     for (let i = 0; i < rings.length; i++) rings[i].visible = false;
   };

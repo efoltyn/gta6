@@ -749,7 +749,7 @@
              "cannot disagree, overhead cover, and blast that walks a snapshot " +
              "so a kill mid-sweep cannot skip the next body",
       needs: ["boot", "look"],
-      files: ["weapons/munitiontable.js", "systems/ordnance.js"],
+      files: ["weapons/munitiontable.js", "weapons/munitions.js", "systems/ordnance.js"],
       publishes: ["munitionTable", "ordnance"],
     },
     nukefx: {
