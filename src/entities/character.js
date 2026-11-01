@@ -495,7 +495,7 @@
   let _handWarned = false;
   let _footWarned = false;
   function bodyHandFit(P) {
-    const s = HAND_LIFE * HAND_K * (P.handH / 0.20) * Math.sqrt((P.armW || 0.30) / 0.30);
+    const s = HAND_LIFE * HAND_K * (P.handH / 0.20) * Math.pow((P.armW || 0.30) / 0.30, 0.75);
     return {
       s,
       wristY: P.handH - P.armLo,                         // the crease = the forearm box's bottom
@@ -762,17 +762,19 @@
       // segments
       // WIDTHS, real-proportions pass: the shoulders spanned 1.54 u (1.08 m,
       // twice a man's) on a 0.92 chest, arms 21 cm thick, thighs 24 cm. Now a
-      // ~0.71 m deltoid span over a 0.46 m chest, a 15 cm sleeve, a 19 cm
-      // thigh: a broad-shouldered man, not a fridge. (was 0.34/0.23, 0.30/0.62,
+      // ~0.71 m deltoid span over a 37 cm chest, a 16 cm sleeve, an 18 cm
+      // thigh: a broad-shouldered man, not a fridge. The arm pivot stays ~1 R
+      // outside the chest wall (as the old ratio had it), which is what keeps
+      // the shoulder end inside the deltoid (tools/torso-check.mjs). (was 0.34/0.23, 0.30/0.62,
       // pelvis 0.84x0.48, chest 0.92x0.50, yoke 0.94x0.52, jacket 0.98x0.60)
-      legUp: LEG_UP, legLo: LEG_LO, legW: 0.27, hipX: 0.155, shoeH: 0.20,
-      armUp: ARM_UP, armLo: ARM_LO, armW: 0.20, armX: 0.39, handH: 0.20,
-      pelvisW: 0.62, pelvisH: 0.20, pelvisD: 0.33,
-      torsoH: 0.95, torsoW: 0.66, torsoD: 0.42,
+      legUp: LEG_UP, legLo: LEG_LO, legW: 0.25, hipX: 0.145, shoeH: 0.20,
+      armUp: ARM_UP, armLo: ARM_LO, armW: 0.235, armX: 0.39, handH: 0.20,
+      pelvisW: 0.56, pelvisH: 0.20, pelvisD: 0.32,
+      torsoH: 0.95, torsoW: 0.53, torsoD: 0.38,
       waistShare: 0, waistW: 0, waistD: 0,   // waistShare 0 = no waist box at all
-      collarW: 0.68, collarH: 0.18, collarD: 0.44,
+      collarW: 0.56, collarH: 0.18, collarD: 0.40,
       headSize: 0.60, neckDrop: 0, headK: HEAD_DRAW,
-      jacketW: 0.72, jacketH: 1.00, jacketD: 0.52,
+      jacketW: 0.59, jacketH: 1.00, jacketD: 0.48,
       // posture
       stanceZ: 0,      // per-leg z-splay: + converges the knees (narrow step width), - splays (toddler wide base)
       // Idle arm carry, SIGNED: NEGATIVE tucks the hand in against the ribs
@@ -796,14 +798,14 @@
   const ADULT_F = Object.assign(profileBase(), {
     key: "f", fem: true,
     statureMul: 0.958,                       // ~1.74m beside the male 1.82m
-    legUp: 0.555, legLo: 0.545, legW: 0.26, hipX: 0.165,
-    armUp: 0.45, armLo: 0.45, armW: 0.17, armX: 0.345,
-    pelvisW: 0.64, pelvisH: 0.20, pelvisD: 0.34,
-    torsoH: 0.92, torsoW: 0.58, torsoD: 0.39,
-    waistShare: 0.325, waistW: 0.49, waistD: 0.34,
-    collarW: 0.60, collarH: 0.17, collarD: 0.39,
+    legUp: 0.555, legLo: 0.545, legW: 0.245, hipX: 0.155,
+    armUp: 0.45, armLo: 0.45, armW: 0.20, armX: 0.355,
+    pelvisW: 0.58, pelvisH: 0.20, pelvisD: 0.33,
+    torsoH: 0.92, torsoW: 0.476, torsoD: 0.36,
+    waistShare: 0.325, waistW: 0.40, waistD: 0.30,
+    collarW: 0.50, collarH: 0.17, collarD: 0.37,
     headSize: 0.55,
-    jacketW: 0.66, jacketH: 0.98, jacketD: 0.49,
+    jacketW: 0.56, jacketH: 0.98, jacketD: 0.46,
     // Step width: male stance sits ~12-15% of hip breadth off the midline,
     // female ~4-8% — the "walks on one line" read (Cho 2004: women walk with a
     // significantly narrower step width). stanceZ converges the knees toward
@@ -995,7 +997,7 @@
   const PHYSIQUE = {
     average:  { tw: 1, td: 1, pw: 1, pd: 1, aw: 1, lw: 1, ax: 0, hx: 0, waist: 0.86, pec: 1, bust: 1, belly: 0.22, scap: 1, spine: 1, soft: 0 },
     slim:     { tw: 0.92, td: 0.90, pw: 0.95, pd: 0.92, aw: 1, lw: 1, ax: -0.03, hx: -0.01, waist: 0.82, pec: 0.55, bust: 0.8, belly: 0, scap: 1.35, spine: 1.15, soft: 0 },
-    heavy:    { tw: 1.10, td: 1.14, pw: 1.08, pd: 1.10, aw: 1, lw: 1, ax: 0.04, hx: 0.02, waist: 1.03, pec: 0.7, bust: 1.25, belly: 1, scap: 0.3, spine: 0.35, soft: 1 },
+    heavy:    { tw: 1.10, td: 1.14, pw: 1.08, pd: 1.10, aw: 1, lw: 1, ax: 0.07, hx: 0.02, waist: 1.03, pec: 0.7, bust: 1.25, belly: 1, scap: 0.3, spine: 0.35, soft: 1 },
     muscular: { tw: 1.08, td: 1.10, pw: 1.00, pd: 1.02, aw: 1, lw: 1, ax: 0.04, hx: 0.01, waist: 0.80, pec: 1.8, bust: 0.85, belly: 0, scap: 1.3, spine: 1.4, soft: 0 },
   };
   const PHYSIQUE_IDS = ["average", "slim", "heavy", "muscular"];
@@ -3405,7 +3407,9 @@
     const W = P.torsoW / 2, D = P.torsoD / 2, R = P.armW / 2, AX = P.armX;
     // the head first (a young child still carries it low, half the old sink),
     // then the shoulders: never so high that the trapezius cannot pass under the chin
-    const pivotY = neckY + NECK_LEN * vs * nk - 0.6 * P.neckDrop;
+    // (a head drawn at HEAD_DRAW carries a neck column that much shorter, so
+    // the chin rides that much lower over the column top: same buried depth)
+    const pivotY = neckY + NECK_LEN * vs * nk * (P.headK || 1) - 0.6 * P.neckDrop;
     const shoulderY = Math.min(neckY - SHOULDER_DROP * vs * (0.4 + 0.6 * nk), pivotY - 0.075 * vs - 0.43 * R);
     const ph = PHYSIQUE[P.physique] || PHYSIQUE.average;
     const fem = P.fem ? (P.child ? cl01((P.ageYears - 11) / 5) : 1) : 0;
@@ -3413,7 +3417,10 @@
     const kidK = P.child ? cl01((P.ageYears - 2) / 14) : 1;     // a body's definition fades in with age
     // THE NECK where it meets the body (headGeometry's column at the junction)
     const nRx = F.neck[1] * 0.98 * hk, nRz = nRx * 0.94, nZc = -0.031 * hk + (headZ || 0);
-    const yN = Math.max(Math.min(neckY, pivotY - 0.07 * vs), shoulderY + 0.30 * R + 0.05 * vs);
+    // (the column's top rides closer under a head drawn smaller, HEAD_DRAW:
+    // the neck column is that much shorter, and must stay buried when the
+    // head tips back)
+    const yN = Math.max(Math.min(neckY, pivotY - 0.07 * vs * (P.headK || 1)), shoulderY + 0.30 * R + 0.05 * vs);
     const tb = 0.05 * vs;
     const sp = shoulderY - base;
     const kY = (k) => base + k * sp;
@@ -3453,10 +3460,20 @@
       [0.94, aSh2, 0.72, 0.82, 2.0],
       [1.02, aSh3, 0.66, 0.74, 1.9],
     ];
+    // THE SHOULDER END LIVES INSIDE THE DELTOID. The top rows' depth was
+    // authored in D units against an arm whose radius was 0.6 D; a slimmer arm
+    // on a real chest (R ~0.48 D) would leave the torso's shoulder end standing
+    // out of the deltoid dome when the arm lifts. Those rows thin to the arm.
+    const shK = Math.min(1, (R / D) / 0.6);
     const rows = [];
+    // …and the shoulder's taper is as TALL as the deltoid is big: the k rows
+    // were spaced for a 0.15 arm radius, so on a slimmer arm they close up
+    // toward the pivot instead of leaving a shoulder end hanging below it
+    const shS = Math.min(1, R / (0.17 * vs));
     for (const r of body) {
-      const y = kY(r[0]);
-      const row = { y, a: r[1] * W, zf: r[2] * D, zb: r[3] * D, zc: 0, n: r[4], tw: 0 };
+      const y = kY(r[0] >= 0.8 ? 1 - (1 - r[0]) * shS : r[0]);
+      const tk = r[0] >= 0.94 ? shK : r[0] >= 0.86 ? lerpN(1, shK, 0.6) : 1;
+      const row = { y, a: r[1] * W, zf: r[2] * D * tk, zb: r[3] * D * tk, zc: 0, n: r[4], tw: 0 };
       if (y < pTop + 0.03) {                                    // the shirt tucks INTO the trousers
         const p = pel(Math.min(y, pTop)), cl = 0.016 * vs;
         row.a = Math.min(row.a, p.a - cl); row.zf = Math.min(row.zf, p.zf - cl); row.zb = Math.min(row.zb, p.zb - cl);
@@ -3474,7 +3491,7 @@
       rows.push({
         y: yT0 + (yN - yT0) * Math.pow(u, 1.4),
         a: lerpN(aT0, nRx + 0.010 * vs, Math.pow(u, 0.8)),
-        zf: lerpN(0.62 * D, nRz + 0.010 * vs, u), zb: lerpN(0.70 * D, nRz + 0.010 * vs, u),
+        zf: lerpN(0.62 * D * shK, nRz + 0.010 * vs, u), zb: lerpN(0.70 * D * shK, nRz + 0.010 * vs, u),
         zc: lerpN(0, nZc, u), n: lerpN(1.9, 2.0, u), tw: u * u,
       });
     }

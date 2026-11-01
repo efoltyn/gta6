@@ -133,10 +133,12 @@
   // at 0.30/0.24/0.26 every frozen body sank its skull and chest 6 cm into
   // the street and restFit lifted the whole man clear, so corpses floated.
   // (Re-measured 2026-10-31 for character.js's real-proportions pass: the head
-  // is drawn at 0.68 of its old size, the chest 0.42 deep not 0.50, the arm
-  // 0.20 thick not 0.30, the thigh 0.27 not 0.34. Was 0.39 / 0.31 / 0.32 /
-  // 0.15 / 0.12 / 0.16 / 0.14: those radii would hold every corpse ~6 cm up.)
-  const RAD = [0.27, 0.26, 0.26, 0.24, 0.24, 0.10, 0.10, 0.10, 0.10, 0.13, 0.13, 0.14, 0.14];
+  // is drawn at 0.68 of its old size, the chest 0.38 deep not 0.50, the arm
+  // 0.235 thick not 0.30, the thigh 0.25 not 0.34. Was 0.39 / 0.31 / 0.32 /
+  // 0.15 / 0.12 / 0.16 / 0.14, which held a corpse propped 0.45 m up against
+  // a wall; the bare measured radii (0.27 / 0.26 / 0.24 ...) let a hard-shot
+  // body push through it. These sit between: tools/bodyfall-check.mjs all ok.)
+  const RAD = [0.30, 0.28, 0.28, 0.28, 0.28, 0.12, 0.12, 0.11, 0.11, 0.14, 0.14, 0.14, 0.14];
   // points that get the wall push (extremities + a hip — limbs out of walls)
   const WALLPTS = [0, 3, 7, 8, 11, 12];
   const WALL_SLIDE = 0.4;    // share of its slide along (and down) a wall a contact keeps per substep: cloth on plaster grips
