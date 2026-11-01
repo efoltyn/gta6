@@ -23,15 +23,15 @@
    (tools/visual-presets/mounted-riders.mjs exists because somebody fixed
    them) and a second horse would have been the worst possible outcome.
 
-     REUSED — the horse itself.  `city/wildlife/farm.js` has a mustang: real
-       silhouette, mane, hooves, authored nose-toward-+X feet-at-y=0. That IS
-       this game's horse. games/warlord.html deliberately refuses the
-       `bestiary` pack ("forty files of bestiary on a phone's first load is
-       forty files nobody asked for") and it is right to. So this file takes
-       exactly TWO of those forty files — the 5 KB species registry and the
-       15 KB farm batch — and only the first time a mount is actually drawn.
-       21 KB, lazily, for the real animal. See loadSpecies().
-
+     REUSED — the horse itself.  units/species/horse.js is NPC War's horse:
+       a lofted, skinned 15.2 hh riding horse on a 34-bone rig. That IS this
+       game's horse. games/warlord.html deliberately refuses the `bestiary`
+       pack ("forty files of bestiary on a phone's first load is forty files
+       nobody asked for") and it is right to, so this file fetches the horse,
+       its three kit files and the species registry lazily, the first time a
+       mount is drawn, and CPU-skins one standing pose into its bake (see
+       buildHorse()). (It was city/wildlife/farm.js's box mustang until
+       2026-11; that file is no longer fetched.)
      REUSED — the rider's mounted pose.  entities/character.js (the `people`
        pack, already loaded) has a whole MOUNTED RIDER branch in animChar:
        hips planted, thighs abducted by an angle solved from the mount's
@@ -168,7 +168,7 @@
       note: "slower than a horse and does not care. crosses the deep sand a horse refuses." },
     { id: "horse", label: "HORSE", species: "horse",
       pace: 4.2, dash: 15.0, mass: 500, seats: 1, hp: 120, thirst: 1,
-      seatY: 2.07, bodyH: 3.26,          // the saddle raises him 9 cm off the bare back
+      seatY: 1.62, bodyH: 2.81,          // units/species/horse.js's 15.2 hh horse, saddled: measured off the bake
       note: "the charge. useless in rocks, decisive on open sand." },
     { id: "technical", label: "TECHNICAL", species: null,
       pace: 9.0, dash: 21.0, mass: 2600, seats: 4, hp: 260, thirst: 1.6,
@@ -952,24 +952,38 @@
      in a forest and exactly wrong for a hundred cavalry. The RULE is reused;
      the per-object walker is not. */
 
-  const SPECIES_FILES = ["city/wildlife_species.js", "city/wildlife/farm.js"];
+  /* [file, the symbol it defines] — a file whose symbol is already on the
+     page is not fetched twice. */
+  const SPECIES_FILES = [
+    ["city/wildlife_species.js", function () { return CBZ.WILDLIFE_SPECIES; }],
+    ["units/kit/gait.js", function () { return CBZ.quadGait; }],
+    ["units/kit/quadrig.js", function () { return CBZ.quadRig; }],
+    ["units/kit/loft.js", function () { return CBZ.loftKit; }],
+    ["units/species/horse.js", function () { return CBZ.horseKit; }],
+  ];
   let speciesP = null;
 
-  /* TWO FILES OUT OF FORTY. games/warlord.html refuses the whole `bestiary`
-     pack on purpose and it is right — but "no animals in this game" stopped
-     being true the moment cavalry did, and the alternative to these 21 KB is
-     drawing a second horse, which is the one thing the brief forbids. So we
-     take the registry and the farm batch, and only when a mount is first
-     actually drawn: a player who never buys a horse never fetches them. */
+  /* THE HORSE IS units/species/horse.js — NPC War's horse, the real animal
+     (a lofted 15.2 hh riding horse: barrel, withers, arched neck, long head,
+     four-segment legs, hooves, a coat). It used to be city/wildlife/farm.js's
+     mustang, which is fifteen axis-aligned boxes on four posts; that file is
+     no longer fetched. games/warlord.html refuses the whole `bestiary` pack
+     on purpose and it is right — so we take the species registry (the camel
+     registers into it) and the horse with the three kit files it stands on,
+     and only when a mount is first actually drawn: a player who never buys a
+     horse never fetches them. See buildHorse() for how a skinned animal
+     goes into this file's instanced bake. */
   function loadSpecies() {
     if (speciesP) return speciesP;
-    if (CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.horse) {
+    if (CBZ.WILDLIFE_SPECIES && CBZ.horseKit) {
       speciesP = Promise.resolve(true);
       defineCamel();
       return speciesP;
     }
     const root = (CBZ.studio && CBZ.studio.root) || "../src/";
-    speciesP = SPECIES_FILES.reduce(function (chain, rel) {
+    speciesP = SPECIES_FILES.reduce(function (chain, row) {
+      const rel = row[0];
+      if (row[1]()) return chain;
       return chain.then(function () {
         return new Promise(function (res) {
           const s = document.createElement("script");
@@ -982,13 +996,22 @@
       });
     }, Promise.resolve()).then(function () {
       defineCamel();
-      return !!(CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.horse);
+      return !!(CBZ.WILDLIFE_SPECIES && CBZ.horseKit);
     });
     return speciesP;
   }
   M.ready = loadSpecies;
   // the unbaked model of one kind, for the turntable (tools/lab asset kit)
-  M.source = function (kindId) { return buildSource(kindId); };
+  // (`tacked`: saddled the way bake() saddles it, the seat on userData.seat)
+  M.source = function (kindId, tacked) {
+    const src = buildSource(kindId);
+    if (tacked && kindId !== "technical" && kindId !== "__foot" && !src.userData.placeholder) {
+      src.updateMatrixWorld(true);
+      const bare = splitParts(src);
+      src.userData.seat = dressTack(src, bare, saddleOf(bare), kindId);
+    }
+    return src;
+  };
 
   /* ============================================================ THE SHAPE KIT
 
@@ -2227,6 +2250,140 @@
     return g;
   }
 
+  /* ============================================================ THE HORSE
+     units/species/horse.js builds ONE SkinnedMesh on a 34-bone rig. This
+     file draws a hundred riders out of seven InstancedMeshes, so the horse
+     comes in the way every other mount does — as static meshes, a body and
+     four legs tagged with their pivots — and the bake below is unchanged.
+
+       1. build it (CBZ.horseKit.build) and let its own pose() stand it
+          square: the bind pose is never what a horse looks like;
+       2. skin it on the CPU, once (SkinnedMesh.boneTransform per vertex);
+       3. sort every triangle by the bone that owns most of its first
+          vertex: a leg's three bones and its pastern are that leg, the
+          neck/head/ears/jaw are the forehand, the tail bones the tail,
+          everything else the barrel. Separate meshes, so saddleOf() finds
+          the barrel as the widest flat top and the neck as the thing
+          standing over the withers — the saddle lands behind the withers
+          by the same rule that seats the camel;
+       4. thin it: the loft is ~11k triangles, sized for one animal on a
+          screen, and a column is a hundred of them. A vertex-cluster pass
+          (2.4 cm cells, per part so no seam welds a leg to the barrel)
+          keeps the silhouette and drops roughly half the triangles;
+       5. legs are tagged mountLeg q with the upper bone's joint as the
+          pivot (shoulder, hip), which is what the instanced swing turns.
+     Nose +X, feet on y = 0: the bestiary's contract, which bake() turns. */
+  function buildHorse() {
+    const K = CBZ.horseKit;
+    if (!K || !K.build || !K.pose) return null;
+    let grp = null;
+    try { grp = K.build({ seed: 11 }); } catch (e) { grp = null; }
+    const rig = grp && grp.userData.horseRig;
+    const sm = rig && rig.mesh;
+    if (!sm || !sm.isSkinnedMesh || !rig.table) return null;
+    // square on four legs: no idle (which cocks a hind leg and drops the head to graze)
+    try {
+      for (let i = 0; i < 180; i++) {
+        if (rig.st) { rig.st.idleT = 0; rig.st.rest = 0; rig.st.graze = 0; }
+        K.pose(rig, 1 / 30, rig.ctl);
+      }
+    } catch (e) {}
+    grp.position.set(0, 0, 0); grp.rotation.set(0, 0, 0);
+    grp.updateMatrixWorld(true);
+    if (sm.skeleton) sm.skeleton.update();
+
+    const T = rig.table, BN = T.BN;
+    const owner = new Int8Array(T.NB).fill(0);           // 0 barrel, 1-4 legs, 5 forehand, 6 tail
+    for (let L = 0; L < 4; L++) {
+      for (let j = 0; j < 3; j++) owner[T.LEGB[L][j]] = 1 + L;
+      if (T.PAST && T.PAST[L] != null) owner[T.PAST[L]] = 1 + L;
+    }
+    ["neck", "neck1", "neck2", "head", "jaw", "earL", "earR"].forEach(function (nm) { if (BN[nm] != null) owner[BN[nm]] = 5; });
+    for (let i = 0; i < 8; i++) if (BN["tail" + i] != null) owner[BN["tail" + i]] = 6;
+
+    const geo = sm.geometry;
+    const P = geo.attributes.position, SI = geo.attributes.skinIndex, SW = geo.attributes.skinWeight, C = geo.attributes.color;
+    const nv = P.count;
+    // the posed position of every vertex, in the group's frame
+    const pos = new Float32Array(nv * 3);
+    const v = new THREE.Vector3();
+    for (let i = 0; i < nv; i++) {
+      v.fromBufferAttribute(P, i);
+      sm.boneTransform(i, v);
+      v.applyMatrix4(sm.matrixWorld);
+      pos[i * 3] = v.x; pos[i * 3 + 1] = v.y; pos[i * 3 + 2] = v.z;
+    }
+    const major = function (i) {
+      let b = SI.getX(i), w = SW.getX(i);
+      if (SW.getY(i) > w) { b = SI.getY(i); w = SW.getY(i); }
+      if (SW.getZ(i) > w) { b = SI.getZ(i); w = SW.getZ(i); }
+      if (SW.getW(i) > w) { b = SI.getW(i); }
+      return owner[b] || 0;
+    };
+    const idx = geo.index ? geo.index.array : null;
+    const nt = idx ? idx.length / 3 : nv / 3;
+    const tris = [[], [], [], [], [], [], []];
+    for (let t = 0; t < nt; t++) {
+      const a = idx ? idx[t * 3] : t * 3, b = idx ? idx[t * 3 + 1] : t * 3 + 1, c = idx ? idx[t * 3 + 2] : t * 3 + 2;
+      tris[major(a)].push(a, b, c);
+    }
+
+    const out = new THREE.Group();
+    out.name = "warlord-horse";
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+    const CELL = 0.024;
+    for (let part = 0; part < 7; part++) {
+      const list = tris[part];
+      if (!list.length) continue;
+      // ---- vertex clustering, per part
+      const cellOf = new Map(), cp = [], cc = [], cn = [];
+      const remap = new Map();
+      const keyOf = function (i) {
+        const x = Math.round(pos[i * 3] / CELL), y = Math.round(pos[i * 3 + 1] / CELL), z = Math.round(pos[i * 3 + 2] / CELL);
+        return x + "," + y + "," + z;
+      };
+      const rep = function (i) {
+        let r = remap.get(i);
+        if (r != null) return r;
+        const k = keyOf(i);
+        r = cellOf.get(k);
+        if (r == null) { r = cp.length / 3; cellOf.set(k, r); cp.push(0, 0, 0); cc.push(0, 0, 0); cn.push(0); }
+        cp[r * 3] += pos[i * 3]; cp[r * 3 + 1] += pos[i * 3 + 1]; cp[r * 3 + 2] += pos[i * 3 + 2];
+        if (C) { cc[r * 3] += C.getX(i); cc[r * 3 + 1] += C.getY(i); cc[r * 3 + 2] += C.getZ(i); }
+        cn[r]++;
+        remap.set(i, r);
+        return r;
+      };
+      const ix = [];
+      for (let t = 0; t < list.length; t += 3) {
+        const a = rep(list[t]), b = rep(list[t + 1]), c = rep(list[t + 2]);
+        if (a === b || b === c || a === c) continue;
+        ix.push(a, b, c);
+      }
+      for (let r = 0; r < cn.length; r++) {
+        const k = 1 / cn[r];
+        cp[r * 3] *= k; cp[r * 3 + 1] *= k; cp[r * 3 + 2] *= k;
+        if (C) { cc[r * 3] *= k; cc[r * 3 + 1] *= k; cc[r * 3 + 2] *= k; }
+        else { cc[r * 3] = cc[r * 3 + 1] = cc[r * 3 + 2] = 0.3; }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(cp, 3));
+      g.setAttribute("color", new THREE.Float32BufferAttribute(cc, 3));
+      g.setIndex(ix);
+      g.computeVertexNormals();
+      const me = new THREE.Mesh(g, mat);
+      me.name = ["barrel", "legFL", "legFR", "legHL", "legHR", "forehand", "tail"][part];
+      if (part >= 1 && part <= 4) {
+        const L = part - 1;
+        const jp = new THREE.Vector3().setFromMatrixPosition(rig.bones[T.LEGB[L][0]].matrixWorld);
+        me.userData.mountLeg = L;
+        me.userData.mountPivot = { x: jp.x, y: jp.y, z: jp.z };
+      }
+      out.add(me);
+    }
+    return out;
+  }
+
   function buildSource(kindId) {
     /* THE HONEST BEFORE. `__foot` is the same machinery with NOTHING under
        the man: one empty group, so the bake produces a walking soldier and no
@@ -2235,6 +2392,10 @@
        horse, which is a comparison that proves nothing. */
     if (kindId === "__foot") return new THREE.Group();
     if (kindId === "technical") return buildTechnical();
+    if (kindId === "horse") {
+      const hz = buildHorse();
+      if (hz) return hz;
+    }
     const k = BY_ID[kindId];
     const sp = CBZ.WILDLIFE_SPECIES && k && CBZ.WILDLIFE_SPECIES[k.species];
     if (!sp || !sp.build) {
