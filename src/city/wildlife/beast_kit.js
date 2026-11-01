@@ -199,22 +199,23 @@
     // cheetah: solid round black spots, dense and even
     cheetah: function (g, W, H, r) {
       g.fillStyle = "#17110c";
-      for (let i = 0; i < 70; i++) { const s = 4 + r() * 3; blob(g, r() * W, r() * H, s, s * (0.85 + r() * 0.3), 0, W, H); }
+      // (v texels are ~2x larger on the hide than u texels: half-height blobs read round)
+      for (let i = 0; i < 90; i++) { const s = 4 + r() * 3; blob(g, r() * W, r() * H, s, s * 0.5 * (0.85 + r() * 0.3), 0, W, H); }
     },
     // leopard / snow leopard rosettes: a broken ring round a darker centre
     rosette: function (g, W, H, r, ink, core) {
-      for (let i = 0; i < 26; i++) {
+      for (let i = 0; i < 34; i++) {
         const cx = r() * W, cy = r() * H, R = 9 + r() * 6;
-        if (core) { g.fillStyle = core; blob(g, cx, cy, R * 0.75, R * 0.65, r(), W, H); }
+        if (core) { g.fillStyle = core; blob(g, cx, cy, R * 0.75, R * 0.33, 0, W, H); }
         g.fillStyle = ink;
         const k = 4 + Math.floor(r() * 3);
         for (let j = 0; j < k; j++) {
           const a = j / k * TAU + r() * 0.5;
-          blob(g, cx + Math.cos(a) * R, cy + Math.sin(a) * R * 0.85, 3.2 + r() * 2.2, 2.4 + r() * 1.6, a, W, H);
+          blob(g, cx + Math.cos(a) * R, cy + Math.sin(a) * R * 0.45, 3.2 + r() * 2.2, 1.3 + r() * 0.8, 0, W, H);
         }
       }
       g.fillStyle = ink;
-      for (let i = 0; i < 30; i++) blob(g, r() * W, r() * H, 2 + r() * 1.6, 2 + r() * 1.6, 0, W, H);
+      for (let i = 0; i < 30; i++) blob(g, r() * W, r() * H, 2 + r() * 1.6, 1 + r() * 0.8, 0, W, H);
     },
     leopard: function (g, W, H, r) { PAINT.rosette(g, W, H, r, "#1b130c", "#c49a5c"); },
     snow_leopard: function (g, W, H, r) { PAINT.rosette(g, W, H, r, "#3b3a3c", "#c9c7c4"); },
@@ -233,18 +234,20 @@
     },
     // giraffe: big chestnut polygons with a cream net between them
     giraffe: function (g, W, H, r) {
+      // a texel round the body spans ~2x what one along it does (the ring
+      // wraps a 2.4 m barrel into half the canvas), so the cells are drawn
+      // twice as many down v as across u and come out square on the hide
       g.fillStyle = "#f4ead8"; g.fillRect(0, 0, W, H);
       g.fillStyle = "#8a4b22";
-      const cells = 5;
-      for (let i = 0; i < cells; i++) for (let j = 0; j < cells; j++) {
-        const cx = (i + 0.5 + (r() - 0.5) * 0.3) * W / cells, cy = (j + 0.5 + (r() - 0.5) * 0.3) * H / cells;
-        const R = W / cells * 0.42;
+      const nx = 4, ny = 8, cw = W / nx, chh = H / ny;
+      for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+        const cx = (i + 0.5 + (j % 2) * 0.5 + (r() - 0.5) * 0.15) * cw, cy = (j + 0.5 + (r() - 0.5) * 0.15) * chh;
         for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
           g.beginPath();
           const k = 6 + Math.floor(r() * 2);
           for (let s = 0; s < k; s++) {
-            const a = s / k * TAU + i, rr = R * (0.82 + r() * 0.24);
-            const px = cx + ox * W + Math.cos(a) * rr, py = cy + oy * H + Math.sin(a) * rr;
+            const a = s / k * TAU + i + j, kk = 0.86 + r() * 0.1;
+            const px = cx + ox * W + Math.cos(a) * cw * 0.45 * kk, py = cy + oy * H + Math.sin(a) * chh * 0.45 * kk;
             if (s) g.lineTo(px, py); else g.moveTo(px, py);
           }
           g.closePath(); g.fill();
