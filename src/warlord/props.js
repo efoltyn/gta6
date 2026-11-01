@@ -240,7 +240,8 @@
     leather:    0x170d06,
     lamp:       0x2a1a08,
     gabion:     0x1f1b15,
-    scrub:      0x0b1807,   // grass and reeds round the water: the frond green, as ground
+    scrub:      0x0b1807,   // the frond green, as a far-LOD crown block
+    damp:       0x271f10,   // spring-wet ground round the water: sand, darker and a breath greener
   };
   /* ============================================================ SURFACES
      EVERY MATERIAL IN THIS FILE IS MADE OF SOMETHING.
@@ -515,7 +516,7 @@
     corr: "corrugated", corrRust: "corrugated",
     adobe: "adobe", adobe2: "adobe", adobe3: "adobe", plaster: "adobe", mudbrick: "mudbrick",
     stone: "stone", stoneDark: "stone", thatch: "thatch", thatch2: "thatch",
-    burlap: "burlap", clay: "earth", gabion: "gabion", scrub: "earth",
+    burlap: "burlap", clay: "earth", gabion: "gabion", scrub: "earth", damp: "earth",
   };
   const _mats = {};
   function M(key) {
@@ -4006,6 +4007,100 @@
     return finish(g, opts);
   }
 
+  /* ---------------------------------------------------------- OASIS GROWTH
+     A clump is a fan of blades out of one root: each blade a tapered strip,
+     two segments, leaning out and curving over under its own length. Tussock
+     (desert panic grass, ~0.5 m) splays wide; reed (Phragmites, ~1.0 m before
+     the instance scale) stands nearly upright. Geometry is built once and
+     shared; every clump is an instance. */
+  const _clumpGeo = {};
+  function clumpGeo(kind) {
+    if (_clumpGeo[kind]) return _clumpGeo[kind];
+    const reed = kind === "reed";
+    const N = reed ? 13 : 11;
+    const t = [];
+    for (let i = 0; i < N; i++) {
+      const h1 = W.hash01(i, 5, reed ? 61 : 67), h2 = W.hash01(i, 7, reed ? 71 : 73), h3 = W.hash01(i, 9, 79);
+      const a = i / N * TAU + h1 * 0.6;
+      const len = reed ? 0.7 + 0.3 * h2 : 0.32 + 0.22 * h2;
+      const lean = reed ? 0.04 + 0.16 * h3 : 0.3 + 0.55 * h3;      // off vertical at the root
+      const curl = reed ? 0.15 : 0.55;                              // extra bend by the tip
+      const w0 = reed ? 0.012 : 0.018;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const r0 = (reed ? 0.05 : 0.03) * h1;                         // roots spread over the crown
+      // the blade's spine: root, knee, tip
+      const pt = function (u) {
+        const th = lean + curl * u * u;
+        const s = len * u;
+        const out = r0 + Math.sin(th) * s * (reed ? 1 : 0.9);
+        return [ca * out, Math.cos(th) * s, sa * out];
+      };
+      const P0 = pt(0), P1 = pt(0.55), P2 = pt(1);
+      // width across the blade, perpendicular to its lean (the tangent)
+      const wx = -sa, wz = ca;
+      const q = function (p, w) { return [[p[0] - wx * w, p[1], p[2] - wz * w], [p[0] + wx * w, p[1], p[2] + wz * w]]; };
+      const A = q(P0, w0), B = q(P1, w0 * 0.7);
+      t.push(A[0][0], A[0][1], A[0][2], A[1][0], A[1][1], A[1][2], B[1][0], B[1][1], B[1][2]);
+      t.push(A[0][0], A[0][1], A[0][2], B[1][0], B[1][1], B[1][2], B[0][0], B[0][1], B[0][2]);
+      t.push(B[0][0], B[0][1], B[0][2], B[1][0], B[1][1], B[1][2], P2[0], P2[1], P2[2]);
+    }
+    _clumpGeo[kind] = soup(t);
+    return _clumpGeo[kind];
+  }
+  /* The growth round one pool. (cx, cz) is the pool's centre in the group's
+     frame; the heights follow the bank and damp-ring dishes buildWell lays
+     (bank 4.6 -> 8.2 m rising 0.06 -> 0.45, damp 8.0 -> 11.5 m falling
+     0.5 -> 0.06). `keep` = [[x, z, r], ...] clear circles: the well head,
+     the trough, the ruin and the stall stand on bare ground. */
+  const GROW_GREEN = [0x0e1a07, 0x13200a, 0x1b1f0b, 0x24210d, 0x2f2711, 0x3a2e14];
+  function oasisGrowth(parent, r, cx, cz, keep) {
+    const yAt = function (rr) {
+      if (rr < 4.6) return 0.06;
+      if (rr < 8.1) return 0.06 + (rr - 4.6) / 3.6 * 0.39;
+      if (rr < 11.5) return 0.5 - (rr - 8.0) / 3.5 * 0.44;
+      return 0.0;
+    };
+    const clear = function (x, z) {
+      for (let k = 0; k < keep.length; k++) {
+        const dx = x - keep[k][0], dz = z - keep[k][1];
+        if (dx * dx + dz * dz < keep[k][2] * keep[k][2]) return false;
+      }
+      return true;
+    };
+    const dm = new THREE.Object3D(), c = new THREE.Color();
+    const plant = function (kind, n, rMin, rMax, bias, sMin, sMax, wet) {
+      const im = new THREE.InstancedMesh(clumpGeo(kind), MW(true, "earth"), n);
+      let k = 0;
+      for (let tries = 0; k < n && tries < n * 6; tries++) {
+        // pow(u, bias) > 1 crowds them toward the water
+        const rr = rMin + (rMax - rMin) * Math.pow(r.f(), bias);
+        const a = r.f() * TAU;
+        const x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr;
+        if (!clear(x, z)) continue;
+        dm.position.set(x, yAt(rr) - 0.02, z);
+        dm.rotation.set(r.range(-0.08, 0.08), r.f() * TAU, r.range(-0.08, 0.08));
+        const s = r.range(sMin, sMax) * (wet ? 1 : 1.15 - 0.45 * (rr - rMin) / (rMax - rMin));
+        dm.scale.set(s * r.range(0.85, 1.2), s, s * r.range(0.85, 1.2));
+        dm.updateMatrix();
+        im.setMatrixAt(k, dm.matrix);
+        // greener by the water, drier toward the sand, with a stray dead clump
+        const dry = Math.min(1, Math.max(0, (rr - rMin) / (rMax - rMin) * 0.85 + r.range(-0.2, 0.25) + (r.chance(0.12) ? 0.5 : 0)));
+        c.setHex(GROW_GREEN[Math.min(GROW_GREEN.length - 1, Math.floor(dry * GROW_GREEN.length))]);
+        im.setColorAt(k, c);
+        k++;
+      }
+      im.count = k;
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      im.castShadow = kind === "reed";
+      im.receiveShadow = true;
+      parent.add(im);
+      return im;
+    };
+    plant("reed", 48, 4.2, 5.8, 1.0, 1.2, 2.0, true);      // a stand of reeds on the waterline
+    plant("tuft", 210, 4.9, 14.5, 1.6, 1.1, 1.9, false);   // tussock on the damp ground, thinning out
+  }
+
   // ---------------------------------------------------------- WELL / OASIS
   function buildWell(opts) {
     const g = shellFor(opts);
@@ -4033,12 +4128,19 @@
     const pool = new THREE.Mesh(dishGeo(4.8, 0.1, 0.1, 24, 0, 0.10), M("water"));
     pool.position.set(2.5, 0, 3);
     near.add(pool);
-    // the green ring that only grows where the water is — the single loudest
-    // "there is water here" signal on a sand-coloured map
-    const grass = new THREE.Mesh(dishGeo(11.5, 0.06, 0.5, 26, 8.0, 0.12), M("scrub"));
-    grass.position.set(2.5, 0, 3);
-    grass.receiveShadow = true;
-    near.add(grass);
+    /* WHAT GROWS WHERE THE WATER IS. This was one solid annulus of frond
+       green 8-11.5 m out — a lawn, or from the camera a rubber ring round a
+       paddling pool. A desert spring is DAMP GROUND (darker, a shade
+       greener than the sand) with clumps of tussock grass on it, thick at
+       the bank and thinning out into the dunes, and a stand of reeds right
+       on the waterline. Two InstancedMeshes, tinted per clump from green
+       through olive to dead straw, so the ring has no edge: settle() folds
+       both into the compound's own draws. */
+    const damp = new THREE.Mesh(dishGeo(11.5, 0.06, 0.5, 26, 8.0, 0.12), M("damp"));
+    damp.position.set(2.5, 0, 3);
+    damp.receiveShadow = true;
+    near.add(damp);
+    oasisGrowth(near, stream((opts.seed == null ? 23 : opts.seed) * 977 + 5), 2.5, 3, [[9.5, -4.5, 2.6], [-3.0, -8.0, 2.2], [7.5, -7.0, 4.0], [-9.5, -3.0, 3.2]]);
 
     // THE PALMS, in a broken ring — a perfect ring reads as planted, and
     // this is meant to read as the reason the well is here
@@ -4161,7 +4263,7 @@
     const fp = new THREE.Mesh(new THREE.CircleGeometry(7.0, 12), M("water"));
     fp.rotation.x = -Math.PI / 2; fp.position.set(2.5, 0.15, 3);
     far.add(fp);
-    const fgr = new THREE.Mesh(new THREE.CircleGeometry(9.5, 14), M("scrub"));
+    const fgr = new THREE.Mesh(new THREE.CircleGeometry(9.5, 14), M("damp"));
     fgr.rotation.x = -Math.PI / 2; fgr.position.set(2.5, 0.05, 3);
     far.add(fgr);
 
