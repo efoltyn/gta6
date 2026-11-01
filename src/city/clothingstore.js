@@ -426,6 +426,64 @@
     sph(k, P, 0, 1.65, 0.005, 0.088, 0.115, 0.1, skin, skinK);                                  // head
   }
 
+  /* ---- THE FORM WEARS THE REAL GARMENT ------------------------------------
+     The mannequin above is a stack of cylinders painted the garment's colour:
+     it shows a colour, not the thing you will be wearing. A dressed form is
+     now the game's own body (CBZ.human.build, the rig every person in the
+     city is) put through the one wear path the mirror uses on YOU
+     (CBZ.cityApplyComposite with this visualId), so the jacket on the form is
+     the jacket's own atlas, lapels, shell and cuffs, on a real torso. It is
+     finished as a display form: gloss white (or a tailor's dark) "skin", no
+     face, no hair, standing on the steel plate and calf rod. Built once with
+     the floor (lazily, at the door) and never animated; the rig's geometry is
+     the shared cache every body uses, so undress() lifts it out before it
+     disposes the fixture buffers. Returns false (and the caller draws the old
+     mannequin) wherever the rig or the wardrobe is not loaded. */
+  const FORM_FEM = { dress: 1, sundress: 1, blouse: 1 };
+  function dressedForm(S, parent, F, P, visualId, dark, seed) {
+    if (!CBZ.human || !CBZ.human.build || !CBZ.cityApplyComposite || !CBZ.cityComposableSpec) return false;
+    const sp = CBZ.cityComposableSpec(visualId);
+    if (!sp) return false;
+    let rig = null;
+    try {
+      const finish = dark ? 0x34373e : 0xe4ddd0;
+      const fem = !!(sp.painted && FORM_FEM[sp.painted]);
+      rig = CBZ.human.build({ build: fem ? "f" : "m", physique: "slim", skin: finish, hair: finish, eye: finish,
+        legs: 0x2a2d34, torso: 0xf1f2ec, collar: 0xf1f2ec, arms: 0xf1f2ec, shoes: 0x1c1d22 });
+      // a shirt / tie / trousers piece is shown over the house basics: a white
+      // shirt and charcoal trousers, the same base the mirror dresses you on
+      CBZ.cityApplyComposite(rig, { shirt: 0xf1f2ec, legs: 0x2a2d34, items: [visualId] });
+    } catch (e) { return false; }
+    const ch = rig, grp = ch.group;
+    // a form has no face and no hair: the features and the hair go, the head
+    // stays (the skull in the form's finish is the mannequin's head)
+    if (ch.neck) ch.neck.children.forEach(function (o) { if (o !== ch.head && o.name !== "head") o.visible = false; });
+    ((ch.skinSlots && ch.skinSlots.hair) || []).forEach(function (m) { if (m) m.visible = false; });
+    // the display stance: arms eased off the body, one forearm forward
+    const P0 = ch.parts || {}, bent = seed < 0.5 ? P0.la : P0.ra;
+    if (P0.la) P0.la.rotation.z = 0.10;
+    if (P0.ra) P0.ra.rotation.z = -0.10;
+    if (bent && bent.userData && bent.userData.low) bent.userData.low.rotation.x = -0.9;
+    grp.userData.formRig = true;
+    // world placement: the kit frame x the fixture frame, the plate under the feet
+    const M = new THREE.Matrix4().multiplyMatrices(F, P);
+    M.decompose(grp.position, grp.quaternion, _s);
+    grp.position.y += 0.016;
+    grp.updateMatrixWorld(true);
+    parent.add(grp);
+    (S.formRigs || (S.formRigs = [])).push(grp);
+    return true;
+  }
+  // the turntable's door: one dressed form, alone (tools / the lab asset kit)
+  CBZ.clothingStoreForm = function (visualId, dark, seed) {
+    const S = {}, g0 = new THREE.Group(), I = new THREE.Matrix4();
+    return dressedForm(S, g0, I, I, visualId, !!dark, seed == null ? 0.3 : seed) ? g0 : null;
+  };
+  function formPlate(k, P) {
+    cy(k, P, 0, 0.008, -0.02, 0.2, 0.016, 0x2a2c30, "metal", 0, 0, 0, null, 24);
+    cy(k, P, 0.06, 0.2, -0.06, 0.008, 0.36, CHROME, "metal");
+  }
+
   // ============================================================
   //  FIXTURES
   // ============================================================
@@ -594,7 +652,9 @@
       const lat = heroSide * Math.min(halfTan - 0.9, 1.4 + i * 1.1);
       const depth = Math.max(2.15, walk + 0.5) + (i % 2) * 0.35;
       const p = L2(lat, depth), seed = h01(cs.cx + i, cs.cz, "form");
-      mannequin(kit, xf(p.x, FF, p.z, (seed - 0.5) * 0.6), lookFor(it.visualId), darkForms, seed);
+      const FP = xf(p.x, FF, p.z, (seed - 0.5) * 0.6);
+      if (dressedForm(S, group, kit.F, FP, it.visualId, darkForms, seed)) formPlate(kit, FP);
+      else mannequin(kit, FP, lookFor(it.visualId), darkForms, seed);
       const w = at(lat, depth);
       col(lat - 0.2, lat + 0.2, depth - 0.2, depth + 0.2, 1.8);
       S.slots.push(itemSlot(it, w.x, FF + 1.2, w.z, { mannequin: true }));
@@ -735,7 +795,9 @@
         const PR = xf(p.x, FF, p.z, 0);
         bx(wk, PR, 0, 0.14, 0, 1.1, 0.24, 0.9, FIN.mdf);                            // riser
         bx(wk, PR, 0, 0.03, 0, 1.12, 0.06, 0.92, 0x2a2622);                         // riser kick
-        mannequin(wk, xf(0, 0.26, 0, (i === 0 ? 0.25 : -0.25), PR), lookFor(wlooks[i]), darkForms, h01(cs.cx, cs.cz, "win" + i));
+        const WP = xf(0, 0.26, 0, (i === 0 ? 0.25 : -0.25), PR), wseed = h01(cs.cx, cs.cz, "win" + i);
+        if (dressedForm(S, wg, wk.F, WP, wlooks[i], darkForms, wseed)) formPlate(wk, WP);
+        else mannequin(wk, WP, lookFor(wlooks[i]), darkForms, wseed);
         // ceiling track + two spot heads aimed at the form (a lamp lens is the
         // one thing here that glows)
         const ty = CEIL - FF - 0.02;
@@ -756,6 +818,9 @@
   }
 
   function undress(S) {
+    // the dressed forms are real rigs on the shared body cache: lift them out
+    // whole before the fixture buffers are disposed
+    if (S.formRigs) { S.formRigs.forEach(function (r) { if (r.parent) r.parent.remove(r); }); S.formRigs = null; }
     for (const grp of [S.group, S.winGroup]) {
       if (!grp) continue;
       if (grp.parent) grp.parent.remove(grp);

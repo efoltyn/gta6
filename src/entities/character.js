@@ -427,9 +427,26 @@
   CBZ.humanLimbGeometry = partGeometry;      // limbs AND torso parts (TORSO block)
   CBZ.humanLimbHalfAt = limbHalfAt;
 
-  // Whole-limb lengths preserved: arm 0.92 (+0.2 hand), leg 0.95 (+0.2 shoe).
+  // arm 0.92 (+0.2 hand); leg 1.07 (+ the shoe). THE REAL-PROPORTIONS PASS
+  // (2026-10-31, owner: "real anatomy proportions"): the leg was 0.95, the
+  // head 0.60, so an adult stood 3.9 heads tall with his hip joint at 37% of
+  // his height (a real man: ~7.5 heads, hip at ~50%) — the stubby toy read.
+  // The head is now DRAWN at HEAD_DRAW of its nominal size (see HEAD_DRAW) and
+  // the leg takes the height it gave back, so the stature, the eye line and
+  // the crown are where they were. Every joint is still read off the profile
+  // (gait, seats, ragdoll, prone, poses), which is why this is two numbers.
   const ARM_UP = 0.46, ARM_LO = 0.46;
-  const LEG_UP = 0.48, LEG_LO = 0.47;
+  const LEG_UP = 0.575, LEG_LO = 0.565;
+  /* HEAD_DRAW: the head, face, hair and everything worn on it are drawn at
+     this share of P.headSize. Applied as ONE scale on the neck pivot, so every
+     consumer that places itself in the neck frame off headSize/0.60 (hats,
+     glasses, earrings, goggles, the face, the hair and its child fit) stays
+     right without knowing, and every absolute headSize threshold in the hair
+     and child code (S < 0.53 = a child's head) keeps meaning what it meant.
+     0.68 puts the adult at ~6.4 heads (a 28 cm head with its hair on a
+     1.82 m man): still a touch heroic, so a face reads at 30 m, but no
+     longer a caricature. Revert: ?cfg_CHAR_HEAD_DRAW=1 (and LEG_* back). */
+  const HEAD_DRAW = (CBZ.CONFIG && CBZ.CONFIG.CHAR_HEAD_DRAW > 0) ? +CBZ.CONFIG.CHAR_HEAD_DRAW : 0.68;
 
   /* ==== HANDS — EVERY BODY WEARS THE FIRST-PERSON HAND ====================
      Owner: "The FP hands are really real, but on the third-person models
@@ -478,7 +495,7 @@
   let _handWarned = false;
   let _footWarned = false;
   function bodyHandFit(P) {
-    const s = HAND_LIFE * HAND_K * (P.handH / 0.20) * Math.sqrt((P.armW || 0.30) / 0.30);
+    const s = HAND_LIFE * HAND_K * (P.handH / 0.20) * Math.pow((P.armW || 0.30) / 0.30, 0.75);
     return {
       s,
       wristY: P.handH - P.armLo,                         // the crease = the forearm box's bottom
@@ -644,7 +661,9 @@
   // Authored (pre-humanScale) height of the reference adult male rig:
   // neck socket 1.88 + head 0.60. Every stature number below is a
   // fraction of this, so the whole table stays unit-free.
-  const ADULT_TOP = 2.48;
+  // (2.60 since the real-proportions pass: the head is drawn at HEAD_DRAW and
+  // the legs carry the difference, so a grown child must reach the same crown)
+  const ADULT_TOP = 2.60;
   const WAIST_TUCK = 0.06;      // waist box tucks UP into the chest box (limb-joint trick)
   // THE ONE Z-FIGHT CLEARANCE. Minimum distance between any two parallel faces
   // of this rig that overlap and are both visible — 0.01 authored is 7mm at
@@ -741,14 +760,21 @@
       key: "m", fem: false, child: false, ageYears: null, band: "adult",
       statureMul: 1,
       // segments
-      legUp: LEG_UP, legLo: LEG_LO, legW: 0.34, hipX: 0.23, shoeH: 0.20,
-      armUp: ARM_UP, armLo: ARM_LO, armW: 0.30, armX: 0.62, handH: 0.20,
-      pelvisW: 0.84, pelvisH: 0.20, pelvisD: 0.48,
-      torsoH: 0.95, torsoW: 0.92, torsoD: 0.50,
+      // WIDTHS, real-proportions pass: the shoulders spanned 1.54 u (1.08 m,
+      // twice a man's) on a 0.92 chest, arms 21 cm thick, thighs 24 cm. Now a
+      // ~0.71 m deltoid span over a 37 cm chest, a 16 cm sleeve, an 18 cm
+      // thigh: a broad-shouldered man, not a fridge. The arm pivot stays ~1 R
+      // outside the chest wall (as the old ratio had it), which is what keeps
+      // the shoulder end inside the deltoid (tools/torso-check.mjs). (was 0.34/0.23, 0.30/0.62,
+      // pelvis 0.84x0.48, chest 0.92x0.50, yoke 0.94x0.52, jacket 0.98x0.60)
+      legUp: LEG_UP, legLo: LEG_LO, legW: 0.25, hipX: 0.145, shoeH: 0.20,
+      armUp: ARM_UP, armLo: ARM_LO, armW: 0.235, armX: 0.39, handH: 0.20,
+      pelvisW: 0.56, pelvisH: 0.20, pelvisD: 0.32,
+      torsoH: 0.95, torsoW: 0.53, torsoD: 0.38,
       waistShare: 0, waistW: 0, waistD: 0,   // waistShare 0 = no waist box at all
-      collarW: 0.94, collarH: 0.18, collarD: 0.52,
-      headSize: 0.60, neckDrop: 0,
-      jacketW: 0.98, jacketH: 1.00, jacketD: 0.60,
+      collarW: 0.56, collarH: 0.18, collarD: 0.40,
+      headSize: 0.60, neckDrop: 0, headK: HEAD_DRAW,
+      jacketW: 0.59, jacketH: 1.00, jacketD: 0.48,
       // posture
       stanceZ: 0,      // per-leg z-splay: + converges the knees (narrow step width), - splays (toddler wide base)
       // Idle arm carry, SIGNED: NEGATIVE tucks the hand in against the ribs
@@ -772,14 +798,14 @@
   const ADULT_F = Object.assign(profileBase(), {
     key: "f", fem: true,
     statureMul: 0.958,                       // ~1.74m beside the male 1.82m
-    legUp: 0.465, legLo: 0.455, legW: 0.30, hipX: 0.27,
-    armUp: 0.45, armLo: 0.45, armW: 0.26, armX: 0.54,
-    pelvisW: 0.80, pelvisH: 0.20, pelvisD: 0.46,
-    torsoH: 0.92, torsoW: 0.78, torsoD: 0.46,
-    waistShare: 0.325, waistW: 0.66, waistD: 0.40,
-    collarW: 0.80, collarH: 0.17, collarD: 0.46,
+    legUp: 0.555, legLo: 0.545, legW: 0.245, hipX: 0.155,
+    armUp: 0.45, armLo: 0.45, armW: 0.20, armX: 0.355,
+    pelvisW: 0.58, pelvisH: 0.20, pelvisD: 0.33,
+    torsoH: 0.92, torsoW: 0.476, torsoD: 0.36,
+    waistShare: 0.325, waistW: 0.40, waistD: 0.30,
+    collarW: 0.50, collarH: 0.17, collarD: 0.37,
     headSize: 0.55,
-    jacketW: 0.86, jacketH: 0.98, jacketD: 0.56,
+    jacketW: 0.56, jacketH: 0.98, jacketD: 0.46,
     // Step width: male stance sits ~12-15% of hip breadth off the midline,
     // female ~4-8% — the "walks on one line" read (Cho 2004: women walk with a
     // significantly narrower step width). stanceZ converges the knees toward
@@ -870,7 +896,9 @@
     const total = G.h * ADULT_TOP;
     const headSize = G.hf * total;
     const stack = total - headSize;                 // feet -> neck socket
-    const legLen = G.ls * stack;
+    // the adult leg grew in the real-proportions pass (LEG_UP): the share
+    // ramps toward it through childhood so 17.9 and 18 are the same body
+    const legLen = G.ls * (1 + 0.16 * Math.min(1, age / 18)) * stack;
     const torsoTotal = stack - legLen;
 
     const p = profileBase();
@@ -879,22 +907,22 @@
     p.statureMul = G.h;
 
     p.legUp = legLen * 0.505; p.legLo = legLen * 0.495;
-    p.legW = mix(0.34, 0.30) * G.gw;
-    p.hipX = mix(0.23, 0.27) * G.hw;
+    p.legW = mix(ADULT_M.legW, ADULT_F.legW) * G.gw;
+    p.hipX = mix(ADULT_M.hipX, ADULT_F.hipX) * G.hw;
     p.shoeH = 0.20 * (0.55 + 0.45 * G.h);           // feet shrink slower than legs
 
     const armLen = mix(0.92, 0.90) * (0.40 + 0.60 * G.h) * (0.55 + 0.45 * G.ls / 0.5);
     p.armUp = armLen * 0.5; p.armLo = armLen * 0.5;
-    p.armW = mix(0.30, 0.26) * G.gw;
-    p.armX = mix(0.62, 0.54) * G.sw;
+    p.armW = mix(ADULT_M.armW, ADULT_F.armW) * G.gw;
+    p.armX = mix(ADULT_M.armX, ADULT_F.armX) * G.sw;
     p.handH = 0.20 * (0.60 + 0.40 * G.h);
 
-    p.pelvisW = mix(0.84, 0.80) * G.hw;
+    p.pelvisW = mix(ADULT_M.pelvisW, ADULT_F.pelvisW) * G.hw;
     p.pelvisH = 0.20 * (0.45 + 0.55 * G.h);
-    p.pelvisD = mix(0.48, 0.46) * G.hw * (0.85 + 0.15 * G.bl);
+    p.pelvisD = mix(ADULT_M.pelvisD, ADULT_F.pelvisD) * G.hw * (0.85 + 0.15 * G.bl);
 
-    p.torsoW = mix(0.92, 0.78) * G.sw;
-    p.torsoD = mix(0.50, 0.46) * G.gw * (0.55 + 0.45 * G.bl);
+    p.torsoW = mix(ADULT_M.torsoW, ADULT_F.torsoW) * G.sw;
+    p.torsoD = mix(ADULT_M.torsoD, ADULT_F.torsoD) * G.gw * (0.55 + 0.45 * G.bl);
     // Every child gets a waist box: on a toddler it is the pot belly (wider
     // and much deeper than the chest), on a pre-teen it is the beginning of
     // a real waist. Same two boxes either way — the numbers do the work.
@@ -914,9 +942,9 @@
     p.waistW = p.torsoW * mix(1.02, 0.86) * (0.90 + 0.10 * G.bl);
     p.waistD = p.torsoD * (0.86 + 0.30 * (G.bl - 1)) * mix(1.10, 0.92);
 
-    p.collarW = mix(0.94, 0.80) * G.sw;
+    p.collarW = mix(ADULT_M.collarW, ADULT_F.collarW) * G.sw;
     p.collarH = 0.18 * (0.5 + 0.5 * G.h);
-    p.collarD = mix(0.52, 0.46) * G.gw;
+    p.collarD = mix(ADULT_M.collarD, ADULT_F.collarD) * G.gw;
 
     p.headSize = headSize;
     // A young child has no neck: the head sits straight on the shoulders.
@@ -969,7 +997,7 @@
   const PHYSIQUE = {
     average:  { tw: 1, td: 1, pw: 1, pd: 1, aw: 1, lw: 1, ax: 0, hx: 0, waist: 0.86, pec: 1, bust: 1, belly: 0.22, scap: 1, spine: 1, soft: 0 },
     slim:     { tw: 0.92, td: 0.90, pw: 0.95, pd: 0.92, aw: 1, lw: 1, ax: -0.03, hx: -0.01, waist: 0.82, pec: 0.55, bust: 0.8, belly: 0, scap: 1.35, spine: 1.15, soft: 0 },
-    heavy:    { tw: 1.10, td: 1.14, pw: 1.08, pd: 1.10, aw: 1, lw: 1, ax: 0.04, hx: 0.02, waist: 1.03, pec: 0.7, bust: 1.25, belly: 1, scap: 0.3, spine: 0.35, soft: 1 },
+    heavy:    { tw: 1.10, td: 1.14, pw: 1.08, pd: 1.10, aw: 1, lw: 1, ax: 0.07, hx: 0.02, waist: 1.03, pec: 0.7, bust: 1.25, belly: 1, scap: 0.3, spine: 0.35, soft: 1 },
     muscular: { tw: 1.08, td: 1.10, pw: 1.00, pd: 1.02, aw: 1, lw: 1, ax: 0.04, hx: 0.01, waist: 0.80, pec: 1.8, bust: 0.85, belly: 0, scap: 1.3, spine: 1.4, soft: 0 },
   };
   const PHYSIQUE_IDS = ["average", "slim", "heavy", "muscular"];
@@ -3373,12 +3401,15 @@
     const neckY = base + P.torsoH - 0.015;
     const vs = P.torsoH / 0.95;                                 // column scale (child/female)
     const nk = P.headSize > 0 ? cl01(1 - P.neckDrop / (P.headSize * 0.17)) : 1;
-    const hk = P.headSize / 0.60;
+    // the neck column is drawn at HEAD_DRAW with the head (the neck pivot's scale)
+    const hk = P.headSize / 0.60 * (P.headK || 1);
     const F = HEAD_FORMS[form] || HEAD_FORMS.m;
     const W = P.torsoW / 2, D = P.torsoD / 2, R = P.armW / 2, AX = P.armX;
     // the head first (a young child still carries it low, half the old sink),
     // then the shoulders: never so high that the trapezius cannot pass under the chin
-    const pivotY = neckY + NECK_LEN * vs * nk - 0.6 * P.neckDrop;
+    // (a head drawn at HEAD_DRAW carries a neck column that much shorter, so
+    // the chin rides that much lower over the column top: same buried depth)
+    const pivotY = neckY + NECK_LEN * vs * nk * (P.headK || 1) - 0.6 * P.neckDrop;
     const shoulderY = Math.min(neckY - SHOULDER_DROP * vs * (0.4 + 0.6 * nk), pivotY - 0.075 * vs - 0.43 * R);
     const ph = PHYSIQUE[P.physique] || PHYSIQUE.average;
     const fem = P.fem ? (P.child ? cl01((P.ageYears - 11) / 5) : 1) : 0;
@@ -3386,7 +3417,10 @@
     const kidK = P.child ? cl01((P.ageYears - 2) / 14) : 1;     // a body's definition fades in with age
     // THE NECK where it meets the body (headGeometry's column at the junction)
     const nRx = F.neck[1] * 0.98 * hk, nRz = nRx * 0.94, nZc = -0.031 * hk + (headZ || 0);
-    const yN = Math.max(Math.min(neckY, pivotY - 0.07 * vs), shoulderY + 0.30 * R + 0.05 * vs);
+    // (the column's top rides closer under a head drawn smaller, HEAD_DRAW:
+    // the neck column is that much shorter, and must stay buried when the
+    // head tips back)
+    const yN = Math.max(Math.min(neckY, pivotY - 0.07 * vs * (P.headK || 1)), shoulderY + 0.30 * R + 0.05 * vs);
     const tb = 0.05 * vs;
     const sp = shoulderY - base;
     const kY = (k) => base + k * sp;
@@ -3426,10 +3460,20 @@
       [0.94, aSh2, 0.72, 0.82, 2.0],
       [1.02, aSh3, 0.66, 0.74, 1.9],
     ];
+    // THE SHOULDER END LIVES INSIDE THE DELTOID. The top rows' depth was
+    // authored in D units against an arm whose radius was 0.6 D; a slimmer arm
+    // on a real chest (R ~0.48 D) would leave the torso's shoulder end standing
+    // out of the deltoid dome when the arm lifts. Those rows thin to the arm.
+    const shK = Math.min(1, (R / D) / 0.6);
     const rows = [];
+    // …and the shoulder's taper is as TALL as the deltoid is big: the k rows
+    // were spaced for a 0.15 arm radius, so on a slimmer arm they close up
+    // toward the pivot instead of leaving a shoulder end hanging below it
+    const shS = Math.min(1, R / (0.17 * vs));
     for (const r of body) {
-      const y = kY(r[0]);
-      const row = { y, a: r[1] * W, zf: r[2] * D, zb: r[3] * D, zc: 0, n: r[4], tw: 0 };
+      const y = kY(r[0] >= 0.8 ? 1 - (1 - r[0]) * shS : r[0]);
+      const tk = r[0] >= 0.94 ? shK : r[0] >= 0.86 ? lerpN(1, shK, 0.6) : 1;
+      const row = { y, a: r[1] * W, zf: r[2] * D * tk, zb: r[3] * D * tk, zc: 0, n: r[4], tw: 0 };
       if (y < pTop + 0.03) {                                    // the shirt tucks INTO the trousers
         const p = pel(Math.min(y, pTop)), cl = 0.016 * vs;
         row.a = Math.min(row.a, p.a - cl); row.zf = Math.min(row.zf, p.zf - cl); row.zb = Math.min(row.zb, p.zb - cl);
@@ -3447,7 +3491,7 @@
       rows.push({
         y: yT0 + (yN - yT0) * Math.pow(u, 1.4),
         a: lerpN(aT0, nRx + 0.010 * vs, Math.pow(u, 0.8)),
-        zf: lerpN(0.62 * D, nRz + 0.010 * vs, u), zb: lerpN(0.70 * D, nRz + 0.010 * vs, u),
+        zf: lerpN(0.62 * D * shK, nRz + 0.010 * vs, u), zb: lerpN(0.70 * D * shK, nRz + 0.010 * vs, u),
         zc: lerpN(0, nZc, u), n: lerpN(1.9, 2.0, u), tw: u * u,
       });
     }
@@ -3476,7 +3520,7 @@
       bust: fem * ph.bust, bustK: 0.585 - 0.05 * elder,
       belly: (P.child ? 0 : ph.belly * (P.fem ? 0.6 : 1)) + 0.35 * elder,
       scap: ph.scap * (0.4 + 0.6 * kidK), spine: ph.spine * (0.4 + 0.6 * kidK), elder,
-      glute: (P.fem ? 1.35 : 1) * (ph.soft ? 1.25 : ph === PHYSIQUE.slim ? 0.75 : 1) * (0.5 + 0.5 * kidK),
+      glute: (P.fem ? 1.15 : 1) * (ph.soft ? 1.25 : ph === PHYSIQUE.slim ? 0.75 : 1) * (0.5 + 0.5 * kidK),
     };
     return S;
   }
@@ -4558,6 +4602,7 @@
     // The pivot rides NECK_LEN above the column top (TORSO block), so the
     // neck shows between the chin and the collar; an older head carries forward.
     neck.position.set(0, TS.pivotY, headZ);
+    neck.scale.setScalar(P.headK || 1);      // HEAD_DRAW: the head and all it wears
     // head keeps a FRESH (unshared) material — reactions.js / gore.js /
     // crowd.js tint it per actor, so it must not be a shared cache entry. Its
     // GEOMETRY is shared (see SHAPED PARTS): one per form + nose, sized by
@@ -9722,7 +9767,7 @@
     const TSh = ch.torsoShape;
     const neckOverHip = TSh ? TSh.pivotY - TSh.hipY : P.torsoH - 0.020 - (P.neckDrop || 0);
     // the eye boxes live in a face group scaled headSize/0.60, at local y 0.34
-    const eyeOverNeck = 0.34 * (P.headSize / 0.60);
+    const eyeOverNeck = 0.34 * (P.headSize / 0.60) * (P.headK || 1);
     const shin = (P.legLo + 0.03) * hs;
     return {
       hs: hs,
@@ -9730,7 +9775,7 @@
       hipFloor: shin * 0.55,                   // seat solve's low clamp
       hipPad: 0.10 * hs,                       // cushion -> hip pad
       eyeOverHip: (neckOverHip + eyeOverNeck) * hs,
-      topOverHip: (neckOverHip + P.headSize) * hs,
+      topOverHip: (neckOverHip + P.headSize * (P.headK || 1)) * hs,
     };
   };
   CBZ.charBands = { CHILD_ADULT_AGE, bandOf };
