@@ -575,8 +575,8 @@
   // Placement reads the model's anchors (muzzle, grip, support, mag, k) and
   // the drawn surface under them; a model without anchors falls back to its
   // userData.muzzle and a k of 2.
-  function buildAttachGroup(id, model) {
-    const r = store()[id]; if (!r) return null;
+  function buildAttachGroup(id, model, rec) {
+    const r = rec || store()[id]; if (!r) return null;
     if (!r.scope && !r.mag && !r.muzzle && !r.under) return null;
     mats();
     const grp = new THREE.Group();
@@ -706,7 +706,7 @@
     return grp;
   }
 
-  function dressModel(model, id) {
+  function dressModel(model, id, recOverride) {
     if (!model) return;
     const old = model.getObjectByName && model.getObjectByName("_gmods");
     if (old) {
@@ -717,9 +717,9 @@
     // A fitted optic replaces the factory one instead of clipping through
     // it. Removing the mod restores the complete factory optic.
     const baseOptic = model.getObjectByName && model.getObjectByName("_baseOptic");
-    const rec = store()[id];
+    const rec = recOverride || store()[id];
     if (baseOptic) baseOptic.visible = !(rec && rec.scope);
-    const grp = buildAttachGroup(id, model);
+    const grp = buildAttachGroup(id, model, rec);
     if (grp) model.add(grp);
     if (rec && rec.mag && MODS[rec.mag] && THREE) {
       const A = anchorsOf(model);
@@ -747,6 +747,21 @@
     for (let i = 0; i < n; i++) dressIndex(i);
   }
   CBZ.gunModsDress = dressIndex;
+  /* Dress ANY model of weapon `id` with an explicit record ({scope, mag,
+     muzzle, under}), independent of what the player owns: a display gun, a
+     case, a shop wall. null / {} strips it back to factory. */
+  CBZ.gunModsDressWith = function (model, id, rec) { if (THREE && model) dressModel(model, id, rec || {}); };
+  /* One attachment on its own, in REAL METRES (scale it by a gun's k to put
+     it on that gun): "suppressor" | "brake" | "grip" | "laser" | "reddot" |
+     "reflex" | "holo". opts.nine = the 9 mm can / pistol compensator. */
+  CBZ.gunModsPartModel = function (modId, opts) {
+    if (!THREE) return null;
+    mats();
+    const nine = !!(opts && opts.nine), tint = MODS[modId] && MODS[modId].scope ? MODS[modId].scope.tint : null;
+    const make = { suppressor: () => suppressor(nine), brake: () => brake(nine), grip: foregrip, laser: laser,
+      reddot: () => redDot(tint), reflex: () => reflex(tint, false), holo: () => holo(tint) }[modId];
+    return make ? make() : null;
+  };
   CBZ.gunModsDressAll = dressAll;
   function dressWeaponId(id) {
     const n = CBZ.fpsWeaponCount ? CBZ.fpsWeaponCount() : 0, idOf = CBZ.fpsWeaponIdOf;
