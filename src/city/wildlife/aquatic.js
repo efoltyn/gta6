@@ -4398,4 +4398,143 @@
       return g;
     },
   });
+
+  /* ---- HARBOUR SEAL (Phoca vitulina). NOT a registered species: the city
+     sea does not spawn seals, and a defineSpecies() here would shift every
+     seeded spawn after it. It is a builder the Ocean game (games/ocean.js)
+     calls for its seal-haul prey, built on the same hull + fin grammar so the
+     shared swim rig drives it like any other swimmer.
+
+     1.6 m nose to hips, a fat spindle that is widest behind the shoulders,
+     a round earless head with a short dog-like muzzle, V nostrils and big wet
+     eyes. Short clawed fore flippers tucked under the chest; the two hind
+     flippers are the engine — fans held palm to palm, swept side to side,
+     which is exactly the lateral stroke the fish rig already makes. Coat is
+     blue-grey over a pale belly, broken by dark irregular spots. */
+  CBZ.buildHarborSeal = function (ctx) {
+    const m = (ctx && ctx.mat) || CBZ.cmat || function (c) { return new T.MeshLambertMaterial({ color: c }); };
+    const g = new T.Group();
+    const coat = m(0x5d6266), belly = m(0xbdb8ab), spot = m(0x24272a);
+    const flip = m(0x34373b), dark = m(0x0b0c0d), nose = m(0x1b1b1c), pad = m(0x63676a);
+    // y rises slightly through the neck so the head rides a touch high, the
+    // way a swimming seal carries it
+    const rings = bodyRings(-0.66, 0.90, function (t) { return t > 0.62 ? (t - 0.62) * 0.16 : 0; },
+      [0.065, 0.15, 0.205, 0.235, 0.24, 0.225, 0.19, 0.150, 0.135, 0.128, 0.108, 0.072, 0.034],
+      [0.075, 0.17, 0.235, 0.265, 0.27, 0.255, 0.21, 0.160, 0.142, 0.132, 0.106, 0.070, 0.034], 22);
+    const hull = hullMesh([coat, belly], rings, {
+      sides: 18, bellyCut: [-0.30, -0.18, -0.12, -0.14, -0.22, -0.30, -0.40], ragged: 0.10, seed: 211,
+    });
+    // THE SPOTS are decals laid ON the skin (irregular 7-gons a few mm proud
+    // of it, oval along the body), not painted quads — a painted quad is a
+    // square, and a seal is not a QR code.
+    const spots = meshOf(cachedGeom("seal-spots", function () {
+      const sh = new Shell();
+      for (let k = 0; k < 64; k++) {
+        const x = lerp(-0.52, 0.66, h01(k, 1, 217));
+        const ang = Math.PI * 0.5 + (h01(k, 2, 217) - 0.5) * 2.7;
+        const sk = onSkin(rings, x, ang, 0.004);
+        const tg = norm3(cross3(sk.n, [1, 0, 0])), fw = norm3(cross3(tg, sk.n));
+        const r = 0.012 + 0.026 * h01(k, 3, 217) * (x > 0.5 ? 0.6 : 1);
+        const pts = [];
+        for (let q = 0; q < 7; q++) {
+          const a = q / 7 * Math.PI * 2, rr = r * (0.7 + 0.5 * h01(k, 10 + q, 217));
+          const cu = Math.cos(a) * rr * 1.35, cv = Math.sin(a) * rr;
+          pts.push([sk.p[0] + fw[0] * cu + tg[0] * cv, sk.p[1] + fw[1] * cu + tg[1] * cv, sk.p[2] + fw[2] * cu + tg[2] * cv]);
+        }
+        sh.polyN(0, sk.n, pts);
+      }
+      return sh.geom();
+    }), [spot]);
+    g.add(spots);
+    hull.name = "sealHull"; g.add(hull);
+    // eyes: large, dark, set high and forward on the skull
+    const eyeGeo = cachedGeom("seal-eye", function () { return new T.SphereGeometry(0.036, 9, 7); });
+    const nostril = cachedGeom("seal-nostril", function () {
+      const sh = new Shell();
+      // a V-slit: two thin plates meeting below
+      sh.plate(0, [0, 0, 0], [0.30, 1, 0], [0, 0, 1], 0.028, 0.008, [1, 0, 0]);
+      return sh.geom();
+    });
+    const padGeo = cachedGeom("seal-whiskerpad", function () { return new T.SphereGeometry(0.05, 9, 7); });
+    [1, -1].forEach(function (s2) {
+      const e = new T.Mesh(eyeGeo, dark);
+      e.position.set(0.735, 0.090, s2 * 0.088); e.scale.set(0.8, 1, 0.9); g.add(e);
+      const pd = new T.Mesh(padGeo, pad);           // the swollen whisker pad
+      pd.position.set(0.830, 0.030, s2 * 0.038); pd.scale.set(0.8, 0.7, 0.75); g.add(pd);
+      const ns = new T.Mesh(nostril, nose);
+      ns.position.set(0.905, 0.052, s2 * 0.016); ns.rotation.y = s2 * 0.5; g.add(ns);
+    });
+    // vibrissae: a fan of fine whiskers per side, one merged mesh
+    const whisk = meshOf(cachedGeom("seal-whiskers", function () {
+      const sh = new Shell();
+      [1, -1].forEach(function (s2) {
+        for (let k = 0; k < 6; k++) {
+          const a = -0.35 + k * 0.14;
+          const root = [0.85, 0.035 - k * 0.006, s2 * 0.075];
+          const dir = norm3([-0.15, Math.sin(a) * 0.6, s2 * 0.95]);
+          const c = [root[0] + dir[0] * 0.055, root[1] + dir[1] * 0.055, root[2] + dir[2] * 0.055];
+          const nn = cross3(dir, [0, 1, 0]);
+          sh.plate(0, c, dir, [0, 1, 0], 0.11, 0.004, nn);             // both faces: a hair
+          sh.plate(0, c, dir, [0, 1, 0], 0.11, 0.004, [-nn[0], -nn[1], -nn[2]]);
+        }
+      });
+      return sh.geom();
+    }), [m(0xe8e4d8)]);
+    g.add(whisk);
+    function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
+    // FORE FLIPPERS: short, broad, clawed paddles held against the chest
+    [1, -1].forEach(function (s2) {
+      fin([flip, flip, m(0x1c1a17)], [0.38, -0.12, s2 * 0.19], {
+        span: 0.21, chordRoot: 0.13, chordTip: 0.09, sweep: 0.20, concavity: 0.04,
+        leadBow: 0.04, rearTipH: 0.25, rearTipBack: 0.02, apexRound: 0.45,
+        thick: 0.04, spanSteps: 5, chordSteps: 3, under: true, tipDark: 0.84,
+        spanDir: [-0.80, -0.30, s2 * 0.52], chordDir: [1, 0, 0],
+      });
+    });
+    // HIND FLIPPERS: two fans behind the hips, palms together, the web
+    // standing vertical so the side-to-side stroke drives water. Each is a
+    // swept blade that WIDENS to the tip (chordTip > chordRoot) with a
+    // notched (concave) trailing edge between the outer digits.
+    [1, -1].forEach(function (s2) {
+      const f = fin([flip, flip], [-0.70, 0.005 * s2, s2 * 0.035], {
+        span: 0.40, chordRoot: 0.12, chordTip: 0.30, sweep: 0.0, concavity: 0.12,
+        leadBow: -0.04, rearTipH: 0.0, rearTipBack: 0.0, apexRound: 0.08,
+        thick: 0.035, spanSteps: 5, chordSteps: 3, embed: 0.05,
+        spanDir: [-1, 0, s2 * 0.12], chordDir: [0, 1, 0],
+      });
+      f.name = "sealHindFlipper";
+    });
+    return g;
+  };
+
+  /* ONE GEOMETRY PER SPECIES, for instanced crowds (a bait ball is one
+     InstancedMesh). Builds the species, bakes every material colour into a
+     vertex colour (schoolBody's own baker), scales it to the species' real
+     size and turns its nose from the bestiary's +X to `opts.nose` ("z" for
+     the Ocean game's +Z-forward convention). Cached per (id, nose). */
+  CBZ.aquaticBakedGeometry = function (id, opts) {
+    const nose = (opts && opts.nose) || "x";
+    const key = "baked|" + id + "|" + nose;
+    return cachedGeom(key, function () {
+      const sp = CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES[id];
+      if (!sp || !sp.build) return null;
+      const mf = CBZ.cmat || function (c) { return new T.MeshLambertMaterial({ color: c }); };
+      const g = sp.build({ THREE: T, mat: mf, rng: function () { return 0.5; } });
+      const meshes = [];
+      g.updateMatrixWorld(true);
+      g.traverse(function (o) { if (o.isMesh) meshes.push(o); });
+      // bakeColours reads each mesh's LOCAL matrix; flatten nested children
+      // onto the group so a sleeve parented under another mesh lands right
+      const flat = meshes.map(function (o) {
+        const c = new T.Mesh(o.geometry, o.material);
+        o.matrixWorld.decompose(c.position, c.quaternion, c.scale);
+        return c;
+      });
+      const geo = bakeColours(flat, true);
+      geo.scale(sp.scale || 1, sp.scale || 1, sp.scale || 1);
+      if (nose === "z") geo.rotateY(-Math.PI / 2);
+      geo.computeBoundingBox(); geo.computeBoundingSphere();
+      return geo;
+    });
+  };
 })();
