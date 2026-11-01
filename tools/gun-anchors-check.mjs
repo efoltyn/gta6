@@ -37,7 +37,7 @@ ctx.navigator = { userAgent: "node" }; ctx.location = { search: "", href: "" };
 ctx.CBZ = { CONFIG: {}, onAlways() {}, onUpdate() {}, on() {} };
 const appearDir = new URL("src/weapons/appearances/", ROOT);
 const appear = readdirSync(appearDir).filter((f) => f.endsWith(".js") && f !== "sidearm.js").sort();
-for (const f of ["src/vendor/three.r128.min.js", "src/weapons/weapon-data.js", "src/weapons/optics.js",
+for (const f of ["src/vendor/three.r128.min.js", "src/weapons/weapon-data.js", "src/weapons/munitions.js", "src/weapons/optics.js",
   "src/weapons/appearances/sidearm.js", ...appear.map((n) => "src/weapons/appearances/" + n), "src/weapons/flashlight.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });
 }

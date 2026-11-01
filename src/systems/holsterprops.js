@@ -59,8 +59,129 @@
       const mm = obj.material;
       if (mm && !mm._shared && mm.dispose) mm.dispose();
     });
-    m.prop = null; m.id = null;
+    m.prop = null; m.id = null; m.holster = null;
   }
+
+  /* ---- THE HOLSTER --------------------------------------------------------
+     A pistol on the hip rides IN something. This is a moulded Kydex OWB
+     holster cut to THIS gun: its shell is measured off the gun model's own
+     vertices (the slide/frame ahead of the grip for its height and width, the
+     trigger guard's foot for its depth), so a Glock, a Python and a Desert
+     Eagle each get their own. The shell covers the muzzle, the dust cover and
+     the whole trigger guard; the mouth is cut on a rake from behind the rear
+     of the guard up to the slide, so the grip and the back of the slide stand
+     clear for the hand, the way a real one is cut. A belt loop rides the
+     body side (the gun's left: a right-hip holster), with three eyelets along
+     the seam. Built in the gun model's own units and space, cached per gun,
+     and parented to the hip prop; when the gun is DRAWN the prop stays
+     mounted with only its holster showing, so an empty holster stays on the
+     hip instead of the whole rig vanishing. */
+  const HOLSTERS = new Map();
+  let holsterMats = null;
+  function holsterMatsGet() {
+    if (holsterMats) return holsterMats;
+    const k = new THREE.MeshPhongMaterial({ color: 0x141517, shininess: 38, specular: 0x2a2c30 });
+    const e = new THREE.MeshPhongMaterial({ color: 0x5b6067, shininess: 60, specular: 0x8a9098 });
+    k._shared = true; e._shared = true;
+    holsterMats = { kydex: k, eyelet: e };
+    return holsterMats;
+  }
+  function holsterGeo(prop, id) {
+    if (HOLSTERS.has(id)) return HOLSTERS.get(id);
+    const A = prop.userData && prop.userData.anchors;
+    let out = null;
+    if (A && A.muzzle && A.trigger && A.grip) {
+      const k = A.k || 2.2;
+      const zMz = A.muzzle.pos.z, zTr = A.trigger.pos.z;
+      const zMouthTop = A.grip.pos.z - 0.035 * k;       // the slide is covered to here
+      const zMouthBot = zTr + 0.028 * k;                 // just behind the trigger guard
+      // measure the gun ahead of the mouth, in the prop's own space
+      let x0 = Infinity, x1 = -Infinity, yTop = -Infinity, yBot = Infinity, yDust = Infinity;
+      const v = new THREE.Vector3(), M = new THREE.Matrix4();
+      prop.traverse(function (o) {
+        if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+        M.identity();
+        for (let p = o; p && p !== prop; p = p.parent) { p.updateMatrix(); M.premultiply(p.matrix); }
+        const pa = o.geometry.attributes.position;
+        for (let i = 0; i < pa.count; i++) {
+          v.fromBufferAttribute(pa, i).applyMatrix4(M);
+          if (v.z > zMouthBot) continue;
+          if (v.z < zMouthTop) { if (v.x < x0) x0 = v.x; if (v.x > x1) x1 = v.x; if (v.y > yTop) yTop = v.y; }
+          if (v.y < yBot) yBot = v.y;
+          if (v.z < zTr - 0.070 * k && v.y < yDust) yDust = v.y;   // ahead of the guard
+        }
+      });
+      if (isFinite(x0) && isFinite(yTop) && isFinite(yBot)) {
+        if (!isFinite(yDust)) yDust = yBot;
+        const wall = 0.0032 * k, b = 0.0022 * k;
+        // [forward (= -z), up]; the shell's outline, clockwise from the muzzle top
+        const fF = -zMz + 0.010 * k, fTR = -zMouthTop, fBR = -zMouthBot;
+        const yT = yTop + wall, yB = yBot - wall, yD = Math.min(yDust - wall, yT - 0.02 * k);
+        const fG = -zTr + 0.052 * k;                   // the guard's front curve (~50 mm ahead of the blade)
+        const pts = [[fF, yT - 0.010 * k], [fF - 0.008 * k, yT], [fTR, yT], [fTR - 0.010 * k, yT - 0.012 * k],
+          [fBR + 0.006 * k, yB + 0.012 * k], [fBR, yB], [fG - 0.010 * k, yB], [fG + 0.006 * k, (yB + yD) / 2],
+          [fG + 0.018 * k, yD], [fF - 0.008 * k, yD], [fF, yD + 0.010 * k]];
+        const s = new THREE.Shape();
+        s.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) s.lineTo(pts[i][0], pts[i][1]);
+        s.closePath();
+        const width = (x1 - x0) + 2 * wall, depth = Math.max(0.001, width - 2 * b);
+        const shell = new THREE.ExtrudeGeometry(s, { depth: depth, steps: 1, bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 2, curveSegments: 4 });
+        shell.translate(0, 0, -depth / 2);
+        shell.rotateY(Math.PI / 2);                  // shape x (forward) -> -z, extrusion -> x
+        shell.translate((x0 + x1) / 2, 0, 0);
+        shell.computeVertexNormals();
+        shell._shared = true;
+        // the belt loop on the body side, and three eyelets along the seam
+        const loopH = (yT - yB) * 0.95, loopL = 0.050 * k;
+        const loop = new THREE.BoxGeometry(0.004 * k, loopH, loopL);
+        loop.translate(x0 - wall - 0.004 * k, (yT + yB) / 2 + 0.006 * k, -(fTR + fBR) / 2 + 0.002 * k);
+        loop._shared = true;
+        const eye = new THREE.CylinderGeometry(0.0032 * k, 0.0032 * k, width + 0.002 * k, 10).rotateZ(Math.PI / 2);
+        eye._shared = true;
+        const eyes = [[fF - 0.014 * k, yD + 0.004 * k], [(fF + fG) / 2, yD - 0.001 * k], [fG - 0.016 * k, yB + 0.006 * k]]
+          .map(function (q) { return [(x0 + x1) / 2, q[1] + 0.004 * k, -q[0]]; });
+        out = { shell: shell, loop: loop, eye: eye, eyes: eyes };
+      }
+    }
+    HOLSTERS.set(id, out);
+    return out;
+  }
+  function ensureHolster(m) {
+    if (!m.prop || m.holster) return m.holster || null;
+    const G = holsterGeo(m.prop, m.id);
+    if (!G) return null;
+    const MT = holsterMatsGet();
+    const h = new THREE.Group();
+    h.name = "holster";
+    h.add(new THREE.Mesh(G.shell, MT.kydex));
+    h.add(new THREE.Mesh(G.loop, MT.kydex));
+    G.eyes.forEach(function (p) { const e = new THREE.Mesh(G.eye, MT.eyelet); e.position.set(p[0], p[1], p[2]); h.add(e); });
+    h.traverse(function (o) { o.castShadow = false; });
+    m.prop.add(h);
+    m.holster = h;
+    return h;
+  }
+  // gunShown false: the hip prop stays mounted, only its (empty) holster drawn
+  function showHipGun(m, gunShown) {
+    if (!m.prop) return;
+    m.prop.visible = true;
+    const h = ensureHolster(m);
+    const kids = m.prop.children;
+    for (let i = 0; i < kids.length; i++) if (kids[i] !== h) kids[i].visible = gunShown;
+    if (!h && !gunShown) m.prop.visible = false;
+  }
+
+  // the hip prop on its own (a holstered gun, unmounted): the turntable, a
+  // shop shelf or an icon can show exactly what rides the hip
+  CBZ.holsteredPistolModel = function (id, empty) {
+    if (!CBZ.buildActorWeapon) return null;
+    const m = { prop: CBZ.buildActorWeapon(id), id: id, holster: null };
+    m.prop.position.set(0, 0, 0);
+    m.prop.rotation.set(0, 0, 0);
+    showHipGun(m, !empty);
+    return m.prop;
+  };
 
   // ---- STOWED props on the body mounts ------------------------------------
   // A stowed gun is the same physical object as a drawn one, so it wears the
@@ -324,7 +445,11 @@
       else if (mounts.back.prop) mounts.back.prop.visible = false;
       if (stow.back2) mountTo(mounts.back2, stow.back2, mp.back2, 0.92);
       else if (mounts.back2.prop) mounts.back2.prop.visible = false;
-      if (stow.hip) mountTo(mounts.hip, stow.hip, mp.hip, 0.92);
+      // the hip keeps its holster while its pistol is in the hand: the prop
+      // stays mounted (as the drawn id) with only the empty holster showing
+      const hipMeta = !stow.hip && heldId && CBZ.weaponById ? CBZ.weaponById(heldId) : null;
+      const hipHeld = hipMeta && isHip(hipMeta) && !hipMeta.melee ? heldId : null;
+      if (stow.hip || hipHeld) { mountTo(mounts.hip, stow.hip || hipHeld, mp.hip, 0.92); showHipGun(mounts.hip, !!stow.hip); }
       else if (mounts.hip.prop) mounts.hip.prop.visible = false;
     } else {
       if (stow.back) mountLegacy(mounts.back, stow.back, ch.body, placeBackLegacy);
@@ -337,7 +462,8 @@
     // The destination copy yields to the moving copy until contact. There is
     // one gun travelling, never a static gun already on the back underneath it.
     if (transfer && mounts[transfer.zone] && mounts[transfer.zone].prop) {
-      mounts[transfer.zone].prop.visible = false;
+      if (transfer.zone === "hip" && mp) showHipGun(mounts.hip, false);
+      else mounts[transfer.zone].prop.visible = false;
     }
   });
 

@@ -20,6 +20,7 @@
          mk84     Mk-84 low-drag 2000 lb             3.28   0.458
          jdam     Mk-84 + JDAM tail kit (GBU-31)     3.88   0.458
          gbu28    GBU-28-class bunker buster         5.84   0.368
+         cbu87    CBU-87 (SUU-65 dispenser) cluster  2.34   0.396
          pg7      PG-7V (RPG-7 round, 85 mm bulb)    0.90   0.085
          g40      40 mm grenade                      0.11   0.040
 
@@ -150,6 +151,7 @@
     mk84:    { L: 3.28, D: 0.458 },
     jdam:    { L: 3.88, D: 0.458 },
     gbu28:   { L: 5.84, D: 0.368 },
+    cbu87:   { L: 2.34, D: 0.396 },
     pg7:     { L: 0.90, D: 0.085, burn: 0, flare: 0.35, trail: { s0: 0.28, s1: 2.0, life: 3.4, a0: 0.5, shade: 0.74, spacing: 1.2 } },
     g40:     { L: 0.11, D: 0.040 },
   };
@@ -230,6 +232,25 @@
       P.push({ g: latheZ([[R * 0.9, zt + 0.66], [0.024, zn - 0.2], [0.013, zn - 0.19], [0.013, zn - 0.01], [0, zn]], 14), c: COL.odD });
       P.push({ g: band(R, zt + 0.50, zt + 0.54), c: COL.yellow });
       fins(4, [[0.02, zt], [0.02, zt + 0.12], [0.06, zt + 0.06], [0.06, zt]], 0.004, Math.PI / 4).forEach((g) => P.push({ g, c: COL.steel }));
+      return { body: P };
+    },
+    // CBU-87 Combined Effects Munition: the SUU-65 tactical munitions
+    // dispenser, a stubby ogive over a parallel clamshell body (its long
+    // seam along the belly), the FZU-39 proximity sensor in the nose, and
+    // four square tail fins braced by a ring.
+    cbu87: function (s) {
+      const L = s.L, R = s.D / 2, zt = -L / 2, zn = L / 2, noseL = 0.46, tailL = 0.30;
+      const P = [];
+      const zS = zn - noseL;
+      P.push({ g: latheZ([[0, zt], [R * 0.62, zt], [R * 0.7, zt + 0.04], [R * 0.86, zt + tailL * 0.6], [R, zt + tailL]], 18), c: COL.od });
+      P.push({ g: latheZ([[R, zt + tailL], [R, zS]].concat(ogive(R, noseL - 0.05, zS, 9, R * 0.22).slice(1)), 20), c: COL.od });
+      P.push({ g: latheZ([[R * 0.22, zn - 0.05], [R * 0.2, zn - 0.02], [R * 0.1, zn - 0.004], [0, zn]], 10), c: COL.steel });
+      P.push({ g: band(R, zS - 0.07, zS - 0.03), c: COL.yellow });
+      P.push({ g: box(0.012, 0.006, L - noseL - tailL, 0, -R - 0.001, (zS + zt + tailL) / 2), c: COL.odD });   // the clamshell seam
+      P.push({ g: box(0.04, 0.05, 0.07, 0, R + 0.02, 0.178), c: COL.steel });
+      P.push({ g: box(0.04, 0.05, 0.07, 0, R + 0.02, -0.178), c: COL.steel });
+      fins(4, [[R * 0.55, zt - 0.03], [R * 0.55, zt + 0.40], [R * 1.36, zt + 0.32], [R * 1.36, zt - 0.03]], 0.008, Math.PI / 4).forEach((g) => P.push({ g, c: COL.odD }));
+      P.push({ g: latheZ([[R * 1.30, zt - 0.03], [R * 1.37, zt - 0.03], [R * 1.37, zt + 0.12], [R * 1.30, zt + 0.12], [R * 1.30, zt - 0.03]], 24), c: COL.odD });
       return { body: P };
     },
     mk82: function (s) { return lowDrag(s, 0.74, 0.55, 0.192, 0.40); },
