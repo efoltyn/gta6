@@ -4566,45 +4566,116 @@
     swimStyle: "flipper",      // wildlife_rig.js: it rows with the front flippers
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
-      const shell = m(0x4a4a28), scute = m(0x2c2b17), cream = m(0xcfc38c);
-      const skin = m(0x4d4a31), beakM = m(0x22221a), eye = m(0x0e1012);
-      // low dome: height about 0.4 of the width, widest just ahead of centre
-      const car = hullMesh([shell, cream, scute], bodyRings(-0.80, 0.78, 0.50,
-        [0.06, 0.15, 0.20, 0.21, 0.19, 0.12, 0.07], [0.20, 0.42, 0.54, 0.58, 0.54, 0.42, 0.24], 13), {
-        sides: 16, bellyCut: [-0.45], ragged: 0.02, seed: 105, paintKey: "turtle-scutes2",
+      /* THE CARAPACE IS PLATES, not a checkerboard. The dome is a dark seam
+         colour; on it sit the real scute layout as raised polygons with the
+         seams showing between them: five vertebrals down the crown, four
+         costals each side, and the ring of small marginals round the rim,
+         each in its own olive-to-chestnut tone. The head is short and blunt
+         with the big plate-scales on top that a green turtle has, a pale
+         jaw and a horny beak. */
+      const shell = m(0x2e2c17), cream = m(0xd2c48c);
+      const skin = m(0x4d4a31), beakM = m(0x22221a), eye = m(0x0e1012), flipM = m(0x34321f);
+      const sc1 = m(0x6a6232), sc2 = m(0x5a5329), sc3 = m(0x786a38), headScale = m(0x3a3820);
+      const carRings = bodyRings(-0.80, 0.78, 0.50,
+        [0.06, 0.15, 0.20, 0.21, 0.19, 0.12, 0.07], [0.20, 0.42, 0.54, 0.58, 0.54, 0.42, 0.24], 15);
+      const car = hullMesh([shell, cream], carRings, {
+        sides: 20, bellyCut: [-0.45], ragged: 0.02, seed: 105,
         shade: { tint: [0.95, 0.95, 0.85] },
-        // THE MOSAIC: tiles, not bands. Along the shell four rows of scutes;
-        // across it the vertebral row on the crown and a costal row each side;
-        // tiles alternate shell/scute tone like the plates of a real carapace.
-        paint: function (i, u, j, s, isBelly) {
-          if (isBelly || s < -0.1) return -1;
-          const along = Math.min(3, (u * 4) | 0);
-          const across = s > 0.82 ? 0 : (j < 4 || j >= 12 ? 1 : 2);
-          return ((along + across) % 2) === 0 ? 2 : -1;
-        },
       });
       car.name = "turtleShell"; g.add(car);
-      // the head: a blunt rounded skull on a short neck, pale under the jaw
-      const head = hullMesh([skin, cream], bodyRings(-0.14, 0.40, 0,
-        [0.085, 0.105, 0.11, 0.095, 0.05], [0.09, 0.11, 0.115, 0.095, 0.045], 6),
-        { sides: 12, bellyCut: [-0.55], ragged: 0.03, seed: 106 });
+      const scutes = meshOf(cachedGeom("turtle-scutes3", function () {
+        const sh = new Shell();
+        // one scute: a polygon in (x, angle) space, laid on the dome
+        // a grid ON the dome (a single flat polygon would chord under the
+        // curve and vanish), inset so the dark seam shows between neighbours
+        function plate(gi, x0, x1, a0, a1, bulge) {
+          const n = 4, cx = (x0 + x1) / 2, ca = (a0 + a1) / 2, G = [];
+          for (let i = 0; i <= n; i++) {
+            const row = [];
+            for (let j = 0; j <= n; j++) {
+              const u = i / n, v = j / n;
+              // the long edges bow out a little: a scute is a rounded hexagon
+              const bow = bulge * Math.sin(Math.PI * u);
+              const x = lerp(cx, lerp(x0, x1, u), 0.90);
+              const an = lerp(ca, lerp(a0 - bow, a1 + bow, v), 0.90);
+              row.push(onSkin(carRings, x, an, 0.006 + 0.004 * Math.sin(Math.PI * u) * Math.sin(Math.PI * v)));
+            }
+            G.push(row);
+          }
+          for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+              const a = G[i][j], b = G[i + 1][j], c = G[i + 1][j + 1], d = G[i][j + 1];
+              const N = norm3([a.n[0] + c.n[0], a.n[1] + c.n[1], a.n[2] + c.n[2]]);
+              sh.polyN(gi, N, [a.p, b.p, c.p, d.p]);
+            }
+          }
+        }
+        const H = Math.PI / 2;
+        // vertebrals: five down the crown
+        const vx = [-0.70, -0.40, -0.10, 0.20, 0.50, 0.76];
+        for (let k = 0; k < 5; k++) plate(k % 3, vx[k], vx[k + 1], H - 0.28, H + 0.28, 0.05);
+        // costals: four each side, from the vertebral edge down to the rim
+        const cxs = [-0.62, -0.28, 0.04, 0.34, 0.66];
+        [1, -1].forEach(function (s2) {
+          for (let k = 0; k < 4; k++) {
+            const a0 = s2 > 0 ? H - 0.30 : H + 0.30, a1 = s2 > 0 ? 0.22 : Math.PI - 0.22;
+            plate((k + 1) % 3, cxs[k], cxs[k + 1], Math.min(a0, a1), Math.max(a0, a1), 0.0);
+          }
+          // marginals: a ring of small plates round the rim
+          for (let k = 0; k < 11; k++) {
+            const x0 = lerp(-0.76, 0.72, k / 11), x1 = lerp(-0.76, 0.72, (k + 1) / 11);
+            const a0 = s2 > 0 ? 0.04 : Math.PI - 0.20, a1 = s2 > 0 ? 0.20 : Math.PI - 0.04;
+            plate((k + 2) % 3, x0, x1, a0, a1, 0.0);
+          }
+        });
+        return sh.geom();
+      }), [sc1, sc2, sc3]);
+      g.add(scutes);
+      // the head: short, broad, blunt, pale under the jaw
+      const headRings = bodyRings(-0.12, 0.32, 0,
+        [0.075, 0.100, 0.112, 0.105, 0.080, 0.040], [0.080, 0.108, 0.120, 0.110, 0.082, 0.040], 7);
+      const head = hullMesh([skin, cream], headRings,
+        { sides: 14, bellyCut: [-0.45], ragged: 0.03, seed: 106 });
       head.name = "turtleHead";
-      head.position.set(0.90, 0.49, 0); g.add(head);
-      // the horny beak: a small dark hook at the front of the jaw
-      const beak = new T.Mesh(cachedGeom("turtle-beak2", function () {
-        return new T.ConeGeometry(0.04, 0.07, 6);
+      head.position.set(0.92, 0.50, 0); g.add(head);
+      // the big head scales: a paired prefrontal and a few plates behind
+      const hs = meshOf(cachedGeom("turtle-headscales", function () {
+        const sh = new Shell();
+        const P = function (x0, x1, a0, a1) {
+          const pts = [[x0, a0], [x1, a0], [x1, a1], [x0, a1]].map(function (c) {
+            const sk = onSkin(headRings, c[0], c[1], 0.003);
+            return [sk.p[0] + 0.92, sk.p[1] + 0.50, sk.p[2]];
+          });
+          sh.polyN(0, [0, 1, 0], pts);
+        };
+        const H = Math.PI / 2;
+        P(0.17, 0.27, H - 0.30, H - 0.02); P(0.17, 0.27, H + 0.02, H + 0.30);   // prefrontals
+        P(0.04, 0.155, H - 0.42, H - 0.04); P(0.04, 0.155, H + 0.04, H + 0.42);
+        P(-0.08, 0.03, H - 0.55, H - 0.05); P(-0.08, 0.03, H + 0.05, H + 0.55);
+        [1, -1].forEach(function (s2) {                                         // the cheek plate
+          const a = s2 > 0 ? 0.05 : Math.PI - 0.05;
+          P(0.02, 0.12, Math.min(a, s2 > 0 ? 0.45 : Math.PI - 0.45), Math.max(a, s2 > 0 ? 0.45 : Math.PI - 0.45));
+        });
+        return sh.geom();
+      }), [headScale]);
+      g.add(hs);
+      // the horny beak: a dark sheath over the front of both jaws
+      const beak = new T.Mesh(cachedGeom("turtle-beak3", function () {
+        const gg = new T.SphereGeometry(0.06, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.62);
+        return gg;
       }), beakM);
-      beak.position.set(1.31, 0.47, 0); beak.rotation.z = -Math.PI / 2 - 0.35; g.add(beak);
-      [0.085, -0.085].forEach(function (z) {
-        const e = new T.Mesh(cachedGeom("eye|0.03", function () {
-          return new T.SphereGeometry(0.03, 6, 5);
+      beak.position.set(1.19, 0.478, 0); beak.rotation.z = -Math.PI / 2; beak.scale.set(0.75, 0.7, 1.05); g.add(beak);
+      [1, -1].forEach(function (s2) {
+        const sk = onSkin(headRings, 0.17, s2 > 0 ? 0.25 : Math.PI - 0.25, -0.01);
+        const e = new T.Mesh(cachedGeom("eye|0.032", function () {
+          return new T.SphereGeometry(0.032, 8, 6);
         }), eye);
-        e.position.set(1.16, 0.53, z); g.add(e);
+        e.position.set(sk.p[0] + 0.92, sk.p[1] + 0.50, sk.p[2]); g.add(e);
       });
       function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
       [1, -1].forEach(function (s2) {
-        fin([skin, cream], [0.46, 0.44, s2 * 0.40], {   // the long rowing flipper: a PADDLE
-          span: 1.00, chordRoot: 0.36, chordTip: 0.16, sweep: 0.46, concavity: 0.10,
+        fin([flipM, cream], [0.46, 0.44, s2 * 0.40], {   // the long rowing flipper: a PADDLE
+          span: 0.82, chordRoot: 0.34, chordTip: 0.15, sweep: 0.46, concavity: 0.10,
           leadBow: 0.10, rearTipH: 0.20, rearTipBack: 0.10, apexRound: 0.40,
           thick: 0.06, spanSteps: 6, chordSteps: 4, under: true,
           spanDir: [-0.40, -0.18, s2 * 0.90], chordDir: [1, 0, s2 * 0.1],
