@@ -258,7 +258,10 @@
     const fit = (CBZ.cityArmorFit && ch) ? CBZ.cityArmorFit(ch) : null;
     const vestW = fit ? fit.vest[0] : 1.02;
     const vestD = fit ? fit.vest[2] : 0.62;
-    const topY = fit ? Math.max(fit.vestY + fit.vest[1] / 2, fit.padY) : 1.84;
+    // (armor.js's fit stopped reporting padY: Math.max(x, undefined) is NaN,
+    // which had been putting the whole mantle at NaN and out of sight)
+    const vTop = fit ? fit.vestY + fit.vest[1] / 2 : NaN;
+    const topY = isFinite(vTop) ? (isFinite(fit.padY) ? Math.max(vTop, fit.padY) : vTop) : 1.84;
     const sx = vestW / 2 + 0.02, fz = vestD / 2;
     const G = LK.geo(), W1 = [0, 1];
     const fur = function (k) { return function (x, y, z, ca) { return furCol(furHex, k * fgrain(x, y, z) * (ca < -0.3 ? 0.72 : 1)); }; };
