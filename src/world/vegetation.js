@@ -1208,7 +1208,7 @@
       // (consumers scale y by the palm's height), radii in metres.
       const bend = [0.10, 0.16, 0.06][v];
       const at = function (t) { return new THREE.Vector3(bend * Math.pow(t, 1.8), t, 0); };
-      const RINGS = 40, pts = [], radii = [];
+      const RINGS = 26, pts = [], radii = [];
       for (let i = 0; i <= RINGS; i++) {
         const t = i / RINGS;
         pts.push(at(t));
@@ -1308,7 +1308,7 @@
       for (let n = 0; n < nuts; n++) {
         const a = (n / nuts) * Math.PI * 2 + h01(n, v, 0x9a6), rr = 0.20 + h01(n, v, 0x9a7) * 0.08;
         const c = new THREE.Vector3(Math.cos(a) * rr, -0.22 - h01(n, v, 0x9a8) * 0.18, Math.sin(a) * rr);
-        const sph = new THREE.IcosahedronGeometry(0.14, 0).toNonIndexed();
+        const sph = new THREE.IcosahedronGeometry(0.14, 0);          // r128 polyhedra are already triangle soup
         const P = sph.attributes.position;
         for (let i = 0; i < P.count; i += 3) {
           const q = [0, 1, 2].map(function (j) { return new THREE.Vector3(P.getX(i + j) + c.x, P.getY(i + j) * 1.15 + c.y, P.getZ(i + j) + c.z); });
