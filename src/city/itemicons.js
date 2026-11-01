@@ -1546,7 +1546,7 @@
     // an animal's food is the ANIMAL'S — a dog treat is a thing you give, not
     // a snack you eat, so this outranks the heal it also carries.
     if (row.dogfeed) return { id: "feed", label: "Feed", hint: "to an animal" };
-    if (row.heal) return { id: "eat", label: row.boost ? "Drink" : "Eat", hint: "+" + Math.round(row.heal) + " food" };
+    if (row.heal) return { id: "eat", label: row.boost || row.drink ? "Drink" : "Eat", hint: "+" + Math.round(row.heal) + " food" };
     if (row.gun) return { id: "equip", label: "Equip", hint: "sidearm" };
     if (row.melee) return { id: "equip", label: "Equip", hint: "melee" };
     if (row.throwable || row.c4 || row.tag === "throwable") return { id: "throw", label: "Throw", hint: "[T]" };

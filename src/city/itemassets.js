@@ -1328,7 +1328,8 @@
         const up = at[i][1], x = at[i][0];
         cy(g, cork, 0.0039, 0.0039, 0.020, x, H + 0.004 + up, 0.004, 0, 0, 0, 7);
         if (up) cy(g, paper, 0.0039, 0.0039, 0.016, x, H - 0.010 + up, 0.004, 0, 0, 0, 7);
-        cy(g, cork, 0.0039, 0.0039, 0.020, x, H + 0.004, -0.0045, 0, 0, 0, 7);
+        // (the back row of filters sits under the front one: a pack seen from
+        // anywhere a person stands shows the front row only)
       }
     },
     // A CARTON: ten packs in one long sleeve (270 x 90 x 50 mm), the same red
@@ -1852,9 +1853,9 @@
       bx(g, blister, 0.072, 0.064, 0.016, 0, 0.050, -0.002);
       for (let i = 0; i < 4; i++) {
         const x = -0.0225 + i * 0.015;
-        cy(g, cell, 0.0071, 0.0071, 0.050, x, 0.050, 0.0, 0, 0, 0, 10);
-        cy(g, copperL, 0.0072, 0.0072, 0.016, x, 0.068, 0.0, 0, 0, 0, 10);
-        cy(g, top, 0.0028, 0.0028, 0.002, x, 0.076, 0.0, 0, 0, 0, 8);
+        cy(g, cell, 0.0071, 0.0071, 0.050, x, 0.050, 0.0, 0, 0, 0, 8);
+        put(g, gBand(0.0072, 0.0072, 0.016, 8), copperL, x, 0.068, 0.0);
+        cy(g, top, 0.0028, 0.0028, 0.002, x, 0.076, 0.0, 0, 0, 0, 6);
       }
       bx(g, S(0xf4f2ee), 0.050, 0.008, 0.003, 0, 0.098, -0.008);
     },
@@ -1871,9 +1872,10 @@
       bx(g, ink, W - 0.030, 0.0006, 0.002, 0, y, L / 2 - 0.052);
       bx(g, photo, 0.150, 0.0006, 0.105, -0.050, y, 0.040);                       // the lead photo
       bx(g, ink, 0.150, 0.0006, 0.012, -0.050, y, 0.110 - 0.014);                 // the headline
-      for (let c = 0; c < 2; c++) for (let r = 0; r < 9; r++)
-        bx(g, grey, 0.052, 0.0005, 0.0025, 0.060 + c * 0.060, y, 0.090 - r * 0.012);
-      for (let r = 0; r < 6; r++) bx(g, grey, 0.150, 0.0005, 0.0025, -0.050, y, -0.030 - r * 0.012);
+      // the columns of type: a grey block per column with the gutters between
+      for (let c = 0; c < 2; c++) bx(g, grey, 0.052, 0.0005, 0.105, 0.060 + c * 0.060, y, 0.042);
+      bx(g, grey, 0.150, 0.0005, 0.070, -0.050, y, -0.060);
+      for (let r = 0; r < 4; r++) bx(g, paper, 0.290, 0.0004, 0.004, 0, y + 0.0002, 0.075 - r * 0.026);   // the paragraph breaks
     },
     // A FIRST AID KIT: the red soft zip pouch with the white cross, the zip
     // round its edge and the carry strap on top. 20 x 13 x 7 cm.

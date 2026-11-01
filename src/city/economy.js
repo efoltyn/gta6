@@ -20,7 +20,7 @@
     Burger:        { value: 9,   tag: "food", heal: 42 },
     Hotdog:        { value: 6,   tag: "food", heal: 28 },
     "Pizza Slice": { value: 7,   tag: "food", heal: 34 },
-    Soda:          { value: 3,   tag: "food", heal: 12 },
+    Soda:          { value: 3,   tag: "food", heal: 12, drink: true },
     "Energy Drink":{ value: 5,   tag: "food", heal: 18, boost: true },
     Fries:         { value: 4,   tag: "food", heal: 20 },
     // REAL GROCERIES, not just counter food. The catalog carried six items,
@@ -35,7 +35,7 @@
     Bread:         { value: 3,   tag: "food", heal: 24 },
     "Canned Beans":{ value: 3,   tag: "food", heal: 22 },
     Coffee:        { value: 3,   tag: "food", heal: 8,  boost: true },
-    Water:         { value: 2,   tag: "food", heal: 6 },
+    Water:         { value: 2,   tag: "food", heal: 6, drink: true },
     // THE SHELF CATALOG (2026-10-31). OWNER: "it should be empty shelves and
     // then real assets, like an apple on the shelf that you can have in your
     // inventory." A gas station, a corner store and a grocer now stock their
@@ -51,7 +51,7 @@
     Chips:         { value: 2,   tag: "food", heal: 12 },
     "Beef Jerky":  { value: 6,   tag: "food", heal: 18 },
     Gum:           { value: 1,   tag: "food", heal: 2 },
-    Milk:          { value: 4,   tag: "food", heal: 16 },
+    Milk:          { value: 4,   tag: "food", heal: 16, drink: true },
     Cereal:        { value: 5,   tag: "food", heal: 26 },
     // --- convenience goods: real things a counter sells that are not food.
     //     `fuel` is litres a can pours into the car you are in (city/fuel.js).
