@@ -231,7 +231,9 @@
       c.rideT += dt;
       // glue the player inside the cabin
       if (P) {
-        P.pos.x = c.pos.x; P.pos.y = c.pos.y - 1.0; P.pos.z = c.pos.z;
+        // on the cabin floor of the airframe, not at its skid line
+        const af = c.group && c.group.userData.airframe, cab = af && af.userData.cabin;
+        P.pos.x = c.pos.x; P.pos.y = c.pos.y - SKID_DROP + ((cab && cab.floorTop) || 0); P.pos.z = c.pos.z;
         P.vy = 0; P.grounded = false;
         if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
       } else { c.phase = "leaving"; return; }    // player died mid-flight → bail
