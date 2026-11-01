@@ -169,32 +169,68 @@
     const g = new THREE.Group();
     // hinge at the door sill so the whole flight swings down from the doorway
     g.position.set(spec.doorLocal.x, drop, spec.doorLocal.z);
-    const rail = cmat(0x9aa3ad), tread = cmat(0xb6bec7);
+    // An integrated airstair, as the door of a jet carries one: closed
+    // aluminium risers under ribbed treads with a yellow nosing, a stringer
+    // PLATE each side (a solid trapezoid, the side you see from the apron),
+    // round handrails on stanchions, a landing at the sill and a rubber foot
+    // pad. Every part is baked into one geometry per material: four meshes.
+    const rail = cmat(0xc4cad0), tread = cmat(0x3a4046), skin = cmat(0xa9b1b9), nose = cmat(0xd9b21f);
+    const ang = Math.atan2(drop, run), len = Math.hypot(drop, run);
+    const bake = { rail: [], tread: [], skin: [], nose: [] };
+    const put = function (k, geo, x, y, z, rx, rz) {
+      const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx || 0, 0, rz || 0));
+      m.setPosition(x, y, z);
+      geo.applyMatrix4(m);
+      bake[k].push(geo.index ? geo.toNonIndexed() : geo);
+    };
+    const rise = drop / STAIR_STEPS, go = run / STAIR_STEPS;
     for (let i = 0; i < STAIR_STEPS; i++) {
       const t = (i + 0.5) / STAIR_STEPS;
-      const st = new THREE.Mesh(new THREE.BoxGeometry(W, 0.05, run / STAIR_STEPS * 0.92), tread);
-      st.position.set(0, -drop * t, -run * t);
-      st.castShadow = false; st.receiveShadow = true;
-      g.add(st);
+      const y = -drop * t, z = -run * t;
+      put("tread", new THREE.BoxGeometry(W, 0.045, go * 0.96), 0, y, z);
+      put("nose", new THREE.BoxGeometry(W, 0.03, 0.045), 0, y + 0.008, z - go * 0.46);
+      put("skin", new THREE.BoxGeometry(W, rise, 0.02), 0, y + rise * 0.5, z + go * 0.47);   // the closed riser
     }
-    // two stringers so it reads as a flight of stairs rather than floating slats
+    // the landing at the sill and the foot pad on the apron
+    put("tread", new THREE.BoxGeometry(W + 0.12, 0.05, 0.42), 0, 0.0, 0.18);
+    put("tread", new THREE.BoxGeometry(W + 0.16, 0.06, 0.34), 0, -drop - 0.02, -run - 0.08);
     for (let sdir = -1; sdir <= 1; sdir += 2) {
-      const len = Math.hypot(drop, run);
-      const sr = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, len), rail);
-      sr.position.set(sdir * (W / 2 + 0.03), -drop / 2, -run / 2);
-      sr.rotation.x = -Math.atan2(drop, run);
-      g.add(sr);
-      // handrail above it, the detail that makes an airstair an AIRSTAIR
-      const hr = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, len), rail);
-      hr.position.set(sdir * (W / 2 + 0.03), -drop / 2 + 0.86, -run / 2);
-      hr.rotation.x = -Math.atan2(drop, run);
-      g.add(hr);
+      const xs = sdir * (W / 2 + 0.025);
+      // THE STRINGER PLATE: a solid side the depth of a step, along the flight
+      const plate = new THREE.BoxGeometry(0.035, 0.30, len - 0.12);
+      put("skin", plate, xs, -drop / 2 + 0.02, -run / 2, -ang);
+      // handrail: a round tube 0.9 m over the nosings, on three stanchions,
+      // with a short level run over the landing
+      const xr = sdir * (W / 2 + 0.06);
+      put("rail", new THREE.CylinderGeometry(0.022, 0.022, len, 8), xr, -drop / 2 + 0.9, -run / 2, Math.PI / 2 - ang);
+      put("rail", new THREE.CylinderGeometry(0.022, 0.022, 0.45, 8), xr, 0.9, 0.2, Math.PI / 2);
       for (let k = 0; k < 3; k++) {
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.86, 0.04), rail);
-        const tt = 0.18 + k * 0.34;
-        post.position.set(sdir * (W / 2 + 0.03), -drop * tt + 0.43, -run * tt);
-        g.add(post);
+        const tt = 0.1 + k * 0.4;
+        put("rail", new THREE.CylinderGeometry(0.018, 0.018, 0.9, 6), xr, -drop * tt + 0.45, -run * tt);
       }
+      put("rail", new THREE.CylinderGeometry(0.018, 0.018, 0.9, 6), xr, 0.45, 0.4);
+    }
+    const bakeMat = { rail: rail, tread: tread, skin: skin, nose: nose };
+    for (const k in bake) {
+      const list = bake[k];
+      if (!list.length) continue;
+      let n = 0;
+      for (const geo of list) n += geo.attributes.position.count;
+      const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3);
+      let at = 0;
+      for (const geo of list) {
+        pos.set(geo.attributes.position.array, at);
+        nrm.set(geo.attributes.normal.array, at);
+        at += geo.attributes.position.array.length;
+        geo.dispose();
+      }
+      const merged = new THREE.BufferGeometry();
+      merged.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      merged.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+      merged.computeBoundingSphere();
+      const mesh = new THREE.Mesh(merged, bakeMat[k]);
+      mesh.castShadow = false; mesh.receiveShadow = k === "tread";
+      g.add(mesh);
     }
     g.userData.stair = { drop: drop, run: run };
     g.visible = false;
@@ -208,6 +244,12 @@
     // swings down about the sill hinge; stowed it lies flat up the fuselage
     g.rotation.x = (1 - t) * 1.32;
   }
+  // lab hook: one deployed stair for a sill `drop` metres up (the turntable)
+  CBZ.debugBuildAirstair = function (drop) {
+    const holder = new window.THREE.Group();
+    poseStair(buildStair(holder, { doorLocal: { x: 0, z: 0 }, inY: drop || 2.4 }), 1);
+    return holder;
+  };
 
   function poseCanopy(grp, t) {
     // a canopy that knows its own hinge poses itself (units/vehicles/f35.js)
