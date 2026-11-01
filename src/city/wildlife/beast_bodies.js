@@ -68,15 +68,7 @@
     }
     part.loft(st, 8, function (x, y, z, ca, sa, R) { return shade(typeof col === "function" ? col(R.t) : col, K.grain(x * 5, y * 5, z * 5) * (ca > 0.5 ? 1.06 : 0.94)); }, { capLen: 0.5 }, plain);
   }
-  // an upright mane along a neck crest (horse, zebra) or a shoulder ridge
-  function crest(part, x0, y0, x1, y1, n, h0, h1, w, col, plain, lean) {
-    const st = [];
-    for (let i = 0; i <= n; i++) {
-      const t = i / n;
-      st.push({ x: lerp(x0, x1, t), y: lerp(y0, y1, t), z: 0, rt: lerp(h0, h1, t), rb: w * 0.5, w: w, sq: 1, wts: [0, 1], t: t });
-    }
-    part.loft(st, 8, function (x, y, z, ca, sa, R) { return shade(typeof col === "function" ? col(R.t) : col, K.grain(x, y, z) * (ca > 0.5 ? 1.08 : 0.95)); }, { capLen: 0.5 }, plain);
-  }
+
 
   // ================================================================ HOOFED
   const HORSE_COATS = {

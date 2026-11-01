@@ -219,12 +219,17 @@
       var col = { x: g.x, z: g.z, top: g.top || g.h || 0.4, h: g.h || 0.4, w: 0.12, parts: [] };
       for (p = 0; p < g.parts.length; p++) {
         var pt = g.parts[p];
+        // the gait HINGES legs (rotation.z about the hip): the corpse solver
+        // only places positions, so hand it the leg at its authored angle or a
+        // body dies with one leg frozen mid-stride
+        if (pt.rz != null) pt.m.rotation.z = pt.rz;
         col.parts.push({ m: pt.m, bx: pt.bx, by: pt.by, bz: pt.m.position.z });
       }
       cols.push(col);
     }
     var head = [];
     if (gt.head) for (i = 0; i < gt.head.length; i++) {
+      if (gt.head[i].rz != null) gt.head[i].m.rotation.z = gt.head[i].rz;    // out of the graze bow, likewise
       head.push({ m: gt.head[i].m, bx: gt.head[i].bx, by: gt.head[i].by, bz: gt.head[i].m.position.z });
     }
     // the tail: whatever hangs off the BACK, above the ground, that is not a
