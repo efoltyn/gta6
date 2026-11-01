@@ -44,14 +44,14 @@
     const base = E.hp(o.at != null ? o.at : 0.02, E.H.D * 0.42, s * E.H.Wd * 0.55);
     const beam = rel(base, s, o.beam, o.len, o.r, o.r * 0.35);
     const col = antlerCol(o.col || 0x6b4f33, o.tip || 0xe9e0c8);
-    E.head.tube(beam, 10, 7, col, true);
+    E.head.tube(beam, 8, 6, col, true);
     // the burr
-    E.head.ellipsoid(base[0], base[1], base[2], o.r * 1.5, o.r * 0.7, o.r * 1.5, 7, shade(o.col || 0x6b4f33, 0.8));
+    E.head.ellipsoid(base[0], base[1], base[2], o.r * 1.5, o.r * 0.7, o.r * 1.5, 6, shade(o.col || 0x6b4f33, 0.8), true, 3);
     (o.tines || []).forEach(function (tn) {
       const p = along(beam, tn[0]);
       const tip = [p[0] + tn[2] * tn[1], p[1] + tn[3] * tn[1], p[2] + s * tn[4] * tn[1], p[3] * 0.2];
       const mid = [(p[0] + tip[0]) / 2 + (tn[5] || 0) * tn[1], (p[1] + tip[1]) / 2, (p[2] + tip[2]) / 2, p[3] * 0.62];
-      E.head.tube([[p[0], p[1], p[2], p[3] * 0.85], mid, tip], 6, 6, col, true);
+      E.head.tube([[p[0], p[1], p[2], p[3] * 0.85], mid, tip], 4, 5, col, true);
     });
   }
   function hornTube(E, s, pts, k, r0, r1, col, tipCol, at) {

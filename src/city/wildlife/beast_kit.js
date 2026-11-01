@@ -141,7 +141,7 @@
       const t = -0.86 + 1.72 * i / (n - 1), k = Math.sqrt(1 - t * t);
       st.push({ x: cx + t * rx, y: cy, z: cz, rt: ry * k, rb: ry * k, w: rz * k, wts: W1 });
     }
-    this.loft(st, segs, typeof colour === "function" ? colour : function () { return colour; }, { capLen: 0.55 }, plain !== false);
+    this.loft(st, segs, typeof colour === "function" ? colour : function () { return colour; }, { capLen: 0.55, capN: segs <= 6 ? 1 : 2 }, plain !== false);
   };
   // a tapered tube through 3-D points [[x,y,z,r],...] (horns, antler tines,
   // tusks, toes); r may be a [rt, rb, w] triple
@@ -152,7 +152,7 @@
       st.push({ x: c[i][0], y: c[i][1], z: c[i][2], rt: r, rb: r, w: r * ((opts && opts.flat) || 1), wts: W1, t: c[i][c[i].length - 1] });
     }
     this.loft(st, segs, typeof colour === "function" ? colour : function () { return colour; },
-      Object.assign({ capLen: 0.8, side: (opts && opts.side) || pickSide(pts) }, opts || {}), plain !== false);
+      Object.assign({ capLen: 0.8, capA: false, capN: 1, side: (opts && opts.side) || pickSide(pts) }, opts || {}), plain !== false);
   };
   function pickSide(pts) {
     const a = pts[0], b = pts[pts.length - 1];
@@ -439,7 +439,7 @@
       if (ca < -0.3) c = mix(c, C.belly, smooth(-0.3, -0.85, ca) * (o.throatPale != null ? o.throatPale : 0.8));
       if (paint) c = paint("neck", x, y, z, ca, sa, t, c);
       return shade(c, grain(x, y, z));
-    }, { capA: false, uScale: uS });
+    }, { capA: false, capN: 2, uScale: uS });
     if (o.grazer) P.parts.neck.ud.pivot = [nx0, ny0];
 
     // ---- head: along its own axis from the poll, angled nose-down
@@ -507,7 +507,7 @@
           let c = ca < -0.2 ? mix(C.face, C.earIn, smooth(-0.2, -0.7, ca) * (1 - smooth(0.7, 1, R.t != null ? R.t : t) * 0.4)) : (EA.back_c || C.face);
           if (EA.tip && (R.t != null ? R.t : t) > 0.72) c = EA.tip;
           return shade(c, grain(x, y, z));
-        }, { side: [0, 0, 1], capLen: 0.5 }, true);
+        }, { side: [0, 0, 1], capLen: 0.5, capN: 1 }, true);
       });
     }
     // lower jaw (predators): its own mesh, low and forward in the cluster
@@ -524,7 +524,7 @@
         let c = mix(C.chin || C.muzzle, C.belly, ca < 0 ? 0.3 : 0);
         if (paint) c = paint("jaw", x, y, z, ca, sa, t, c);
         return shade(c, grain(x, y, z));
-      }, { capLen: 0.8, uScale: uS });
+      }, { capLen: 0.8, capN: 2, uScale: uS });
     }
 
     // ---- legs
@@ -630,7 +630,7 @@
         if (!hooved && y < 0.012) c = C.pad;
         if (paint) c = paint(front ? "legF" : "legH", x, y, z2, ca, sa, t, c);
         return y < hoofH * 1.05 && hooved ? shade(c, 0.9 + 0.2 * clamp01(y / hoofH)) : shade(c, grain(x, y, z2));
-      }, { side: [0, 0, 1], capA: true, capB: true, capLen: 0.3, uScale: uS }, false);
+      }, { side: [0, 0, 1], capA: true, capB: true, capLen: 0.3, capN: 2, uScale: uS }, false);
       // claws on paws (bears / dogs / cats show them little; bears a lot)
       if (o.claws) {
         const last = pts[pts.length - 1];
@@ -664,7 +664,7 @@
         let c = mix(C.tail, C.tailTip, smooth(T.tipAt || 0.75, 1, tt));
         if (paint) c = paint("tail", x, y, z, ca, sa, tt, c);
         return shade(c, grain(x, y, z));
-      }, { capLen: 0.9, uScale: uS * 1.5 });
+      }, { capLen: 0.9, capN: 2, uScale: uS * 1.5 });
       if (T.tuft) {
         const e = pts[pts.length - 1];
         tail.ellipsoid(e[0] - T.tuft * 0.5, e[1] - T.tuft * 0.4, 0, T.tuft * 1.2, T.tuft * 0.8, T.tuft * 0.75, 10, C.tailTip);

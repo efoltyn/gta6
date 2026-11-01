@@ -75,8 +75,10 @@
       const s0 = list[endIdx], t = tangentAt(list, endIdx);
       const len = Math.min(s0.rt, s0.rb, s0.w) * (opts.capLen || 1.0);
       const out = [];
-      const ks = [0.78, 0.48, 0.12], ds = [0.32, 0.66, 0.95];
-      for (let k = 0; k < 3; k++) {
+      // opts.capN (1..3, default 3): fewer cap rings for small parts
+      const cn = opts.capN || 3;
+      const ks = cn === 1 ? [0.4] : cn === 2 ? [0.7, 0.2] : [0.78, 0.48, 0.12], ds = cn === 1 ? [0.8] : cn === 2 ? [0.45, 0.92] : [0.32, 0.66, 0.95];
+      for (let k = 0; k < cn; k++) {
         out.push(Object.assign({}, s0, {
           x: s0.x + t[0] * len * ds[k] * dir, y: s0.y + t[1] * len * ds[k] * dir, z: (s0.z || 0) + t[2] * len * ds[k] * dir,
           rt: s0.rt * ks[k], rb: s0.rb * ks[k], w: s0.w * ks[k], cap: k + 1,
