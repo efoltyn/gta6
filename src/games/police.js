@@ -233,9 +233,43 @@
       flickTubes: [], detLamp: null, coffeeLamp: null };
     const B = (x, y, z, w, h, d, col, ry) => ctx.box(g, x, y, z, w, h, d, ctx.mat(col), ry);
     const wallRun = (x, y, z, w, h, d, col) => { B(x, y, z, w, h, d, col || PAL.wall); ctx.solid(x - w / 2, z - d / 2, x + w / 2, z + d / 2); };
+    /* PRECINCT 13 (2026-10-31 rebuild). The shell stays the shell (walls are
+       walls), but everything a player handles or reads is now a real object
+       in real metres on the merged store fixture kit (city/gunstore.js): a
+       walk-through metal detector, a two-level front desk with monitors and
+       a sign-in clipboard, the bail window's glass, a lectern with a real
+       shield badge, a commercial coffee brewer, a two-door fridge, office
+       desks with chairs and monitors, a CHAIN-LINK evidence cage (one alpha
+       texture) whose gate swings on its hinge, a duffel with straps and
+       handles, round-bar holding cells, a steel fire door with its push bar,
+       the interrogation table with its cuff bar, a kennel with a gabled
+       doghouse, the bondsman's safe, and a sedan for the getaway. ~10 draw
+       calls for everything static. */
+    const K = CBZ.storeFixtureKit;
+    const k = K ? K.create() : null;
+    const chain = chainLinkMat();
+    const meshGeos = [];          // chain-link panels, merged into one mesh at the end
+    const linkPanel = (x0, z0, x1, z1, y0, y1) => {
+      const len = Math.hypot(x1 - x0, z1 - z0), h = y1 - y0;
+      const geo = new THREE.PlaneGeometry(len, h);
+      const uv = geo.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * len / 0.6, uv.getY(i) * h / 0.6);
+      geo.rotateY(Math.atan2(-(z1 - z0), x1 - x0));
+      geo.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+      meshGeos.push(geo);
+    };
 
     // ---- shell: floor slab, perimeter walls (front door gap x[-2,2]), ceiling
-    B(0, 0.02, -5, 32, 0.2, 32, PAL.floor);                 // interior slab
+    {
+      const tile = ctx.canvasTex(256, 256, (cc, w, h) => {
+        cc.fillStyle = "#8a8c84"; cc.fillRect(0, 0, w, h);
+        const cols = ["#8f9188", "#86887f", "#93958c", "#7f8179"];
+        for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { cc.fillStyle = cols[(i * 3 + j * 5) % 4]; cc.fillRect(i * 64 + 1, j * 64 + 1, 62, 62); }
+        cc.fillStyle = "rgba(60,62,58,.18)"; for (let i = 0; i < 4; i++) cc.fillRect(i * 64 + 20, ((i * 37) % 64) + 10, 18, 3);
+      }, 16, 16);
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(32, 0.2, 32), new THREE.MeshLambertMaterial({ map: tile }));
+      slab.position.set(0, 0.02, -5); slab.receiveShadow = true; g.add(slab);
+    }
     B(0, WALL_H + 0.15, -5, 32, 0.3, 32, PAL.ceil);         // ceiling (fluoros own the room)
     // front wall (street side, +Z) with the door gap
     wallRun(-9, WALL_H / 2, 10, 14, WALL_H, T);
@@ -250,48 +284,116 @@
     // one interior spine splitting bullpen/evidence (west) from lobby/interrogation
     wallRun(0, WALL_H / 2, -14, 8, WALL_H, T);              // partial back-of-lobby wall
 
+    if (k) {
+      // institutional wainscot + rubber base on the long interior faces
+      const wain = (x, z, len, yaw) => {
+        k.frame(x, 0, z, yaw);
+        k.box(0, 0.6, 0, len, 1.2, 0.02, PAL.wain, "gloss");
+        k.box(0, 1.22, 0.005, len, 0.04, 0.03, PAL.trim, "solid");
+        k.box(0, 0.06, 0.01, len, 0.12, 0.02, 0x1c1e22);
+      };
+      wain(-8.9, -19.69, 13.8, 0); wain(8.9, -19.69, 13.8, 0);
+      wain(-15.69, -5, 29.4, Math.PI / 2); wain(15.69, -5, 29.4, -Math.PI / 2);
+      wain(-9.1, 9.69, 13.6, Math.PI); wain(9.1, 9.69, 13.6, Math.PI);
+      // ceiling troffers: 1.2 x 0.6 lay-in fixtures on a grid (the glow is the lens)
+      k.frame(0, 0, 0, 0);
+      for (let x = -12; x <= 12; x += 4) for (let z = -16; z <= 6; z += 4) {
+        if (x <= -6 && x >= -12 && z <= -12) continue;              // the cage has its own tube
+        k.box(x, WALL_H - 0.02, z, 1.24, 0.06, 0.64, 0xc8ccd0, "metal");
+        k.box(x, WALL_H - 0.055, z, 1.14, 0.01, 0.54, 0xe8f4ee, "glow");
+      }
+    }
+
     // ---- METAL DETECTOR arch (the entry contract) at z=+8 -------------------
-    B(-1.3, 1.25, 8, 0.5, 2.5, 0.6, PAL.detBar); ctx.solid(-1.55, 7.7, -1.05, 8.3);
-    B(1.3, 1.25, 8, 0.5, 2.5, 0.6, PAL.detBar); ctx.solid(1.05, 7.7, 1.55, 8.3);
-    B(0, 2.62, 8, 2.9, 0.34, 0.6, PAL.detBar);
-    V.detLamp = ctx.box(g, 0, 2.9, 8, 0.5, 0.18, 0.18, new THREE.MeshBasicMaterial({ color: PAL.green }));
+    if (k) {
+      k.frame(0, 0, 8, 0);
+      for (const e of [-1, 1]) {
+        k.box(e * 1.3, 1.05, 0, 0.14, 2.1, 0.6, 0xb8bcc2, "gloss");                 // the side panels
+        k.box(e * 1.23, 1.05, 0, 0.012, 1.9, 0.5, 0x2a2d33, "solid");               // inner sensor faces
+        k.box(e * 1.3, 0.04, 0, 0.3, 0.08, 0.7, 0x2a2d33, "metal");                 // feet
+        for (let i = 0; i < 6; i++) k.box(e * 1.37, 0.45 + i * 0.25, 0.25, 0.004, 0.08, 0.04, 0x3aff7a, "glow");   // zone LEDs
+      }
+      k.box(0, 2.2, 0, 2.74, 0.24, 0.62, 0xb8bcc2, "gloss");                        // the header
+      k.box(0, 2.2, 0.312, 0.8, 0.12, 0.004, 0x14161a, "gloss");                    // its readout
+    }
+    V.detLamp = ctx.box(g, 0, 2.36, 8, 0.32, 0.08, 0.12, new THREE.MeshBasicMaterial({ color: PAL.green }));
+    ctx.solid(-1.55, 7.7, -1.05, 8.3); ctx.solid(1.05, 7.7, 1.55, 8.3);
 
     // ---- FRONT DESK — the corrupt sergeant's anchor (never leaves post) -----
-    B(-6, 0.7, 3.4, 5, 1.4, 1.6, PAL.desk); B(-6, 1.46, 3.4, 5.3, 0.12, 1.9, PAL.desktop);
+    if (k) {
+      k.frame(-6, 0, 3.4, 0);                                                        // public side = +z
+      const top = K.dressCounter(k, 5.0, 1.4, 1.06, 0, { clad: PAL.desk, trim: 0x8a9098, work: 0x2a2d33, kick: 0x16181c, cladKind: "gloss" });
+      k.box(0, top + 0.12, 0.62, 5.2, 0.04, 0.34, 0x84765a, "gloss");                 // the raised transaction ledge
+      for (const e of [-1, 1]) k.box(e * 2.55, top + 0.06, 0.62, 0.04, 0.12, 0.3, 0x2a2d33, "metal");
+      for (const mx of [-1.4, 0.6]) {                                                  // monitors facing the sergeant
+        k.box(mx, top + 0.02, -0.2, 0.22, 0.02, 0.16, 0x1a1c20, "metal");
+        k.box(mx, top + 0.24, -0.2, 0.52, 0.32, 0.04, 0x1a1c20, "metal", 0.1, Math.PI, 0);
+        k.box(mx, top + 0.24, -0.222, 0.48, 0.28, 0.004, 0x3a5a7a, "glow", 0.1, Math.PI, 0);
+      }
+      k.box(1.6, top + 0.035, -0.1, 0.22, 0.05, 0.18, 0x1a1c20, "gloss");             // desk phone
+      k.box(-0.3, top + 0.15, 0.62, 0.24, 0.006, 0.32, 0xf2eedc);                      // sign-in clipboard
+      k.box(-0.3, top + 0.157, 0.5, 0.08, 0.012, 0.03, 0x8a9098, "metal");
+      // the BAIL WINDOW (legal release): counter under a glass screen
+      k.frame(8.2, 0, 3.4, 0);
+      const t2 = K.dressCounter(k, 3.0, 0.8, 0.9, 0, { clad: PAL.desk, trim: 0x8a9098, work: 0x84765a, kick: 0x16181c });
+      k.box(0, t2 + 0.6, 0.0, 3.0, 1.2, 0.02, 0, "glass");
+      k.box(0, t2 + 1.22, 0.0, 3.1, 0.06, 0.08, PAL.trim, "metal");
+      for (const e of [-1, 0, 1]) k.box(e * 1.5, t2 + 0.6, 0.0, 0.05, 1.24, 0.08, PAL.trim, "metal");
+      k.box(0, t2 + 0.03, 0.05, 0.4, 0.04, 0.3, 0x8a9098, "metal");                    // the deal tray
+      k.box(0, 3.2, 0, 3.4, 0.5, 0.5, PAL.steel, "metal");                             // window frame top
+      // VISITOR PODIUM: a lectern with the visitor log
+      k.frame(12, 0, 6, 0);
+      k.box(0, 0.04, 0, 0.7, 0.08, 0.6, 0x16181c);
+      k.box(0, 0.62, 0, 0.56, 1.1, 0.42, PAL.desk, "gloss");
+      k.box(0, 1.2, 0.04, 0.72, 0.04, 0.56, 0x84765a, "gloss", 0.2);
+      k.box(-0.12, 1.23, 0.04, 0.32, 0.012, 0.24, 0xf2eedc, "solid", 0.2);
+    }
     ctx.solid(-8.5, 2.6, -3.5, 4.2);
     signPanel(ctx, g, -6, 2.9, 4.25, 3.4, 0.7, "#0c1118", "#e8b23a", ["FRONT DESK", "ALL VISITORS SIGN IN"], 28);
-
-    // ---- BAIL WINDOW (legal release) ----------------------------------------
-    B(8.2, 1.05, 3.4, 3.2, 0.5, 0.9, PAL.desktop); B(8.2, 0.45, 3.4, 3, 0.9, 0.8, PAL.desk);
-    B(8.2, 3.2, 3.4, 3.4, 0.5, 0.5, PAL.steel);            // window frame top
     ctx.solid(6.6, 2.95, 9.8, 3.85);
     signPanel(ctx, g, 8.2, 2.5, 3.9, 2.6, 0.6, "#101722", "#9fd0ff", ["BAIL / BOND WINDOW"], 26);
-
-    // ---- VISITOR PODIUM + escort badge (badge tier 1) -----------------------
-    B(12, 0.75, 6, 1.1, 1.5, 0.9, PAL.desk); B(12, 1.56, 6, 1.3, 0.12, 1.1, PAL.desktop);
     ctx.solid(11.35, 5.55, 12.65, 6.45);
-    V.badgeMesh = ctx.box(g, 12, 1.7, 6, 0.22, 0.24, 0.08, new THREE.MeshBasicMaterial({ color: PAL.gold }));
+    // the escort BADGE: a gold seven-point shield on the lectern
+    V.badgeMesh = badgeModel();
+    V.badgeMesh.position.set(12.18, 1.245, 6.05); V.badgeMesh.rotation.x = -Math.PI / 2 + 0.2; g.add(V.badgeMesh);
 
     // ---- WANTED BOARD (your own poster; Brisco studies it) ------------------
     signPanel(ctx, g, 15.6, 2.4, 0, 0.5, 2.6, "#12161d", "#c8402f", ["WANTED"], 34, Math.PI / 2, 2.6);
 
     // ---- BULLPEN (west): coffee machine + break fridge + Reyes' case file ----
-    B(-14.6, 0.55, -2, 1.3, 1.1, 2.2, PAL.steel); ctx.solid(-15.25, -3.1, -13.95, -0.9); // coffee counter
-    B(-14.7, 1.5, -1.4, 0.8, 0.8, 0.8, 0x22262c);          // coffee machine
-    V.coffeeLamp = ctx.box(g, -14.7, 1.98, -0.98, 0.34, 0.14, 0.1, new THREE.MeshBasicMaterial({ color: 0xd23b2a }));
-    B(-14.6, 1.05, -5.2, 1.2, 2.1, 1.2, 0xb8bcc0); ctx.solid(-15.2, -5.8, -14, -4.6); // break FRIDGE (the steak)
+    if (k) {
+      k.frame(-14.6, 0, -2, Math.PI / 2);                                             // faces +x
+      K.dressCounter(k, 2.2, 1.0, 0.9, 0, { clad: 0x5a5e66, trim: 0x8a9098, work: 0x2a2d33, kick: 0x16181c });
+      // the commercial brewer: body, hood, two glass decanters on warmers
+      k.box(0.3, 1.32, -0.15, 0.5, 0.82, 0.42, 0x22262c, "gloss");
+      k.box(0.3, 1.66, 0.12, 0.5, 0.12, 0.22, 0x22262c, "gloss");
+      for (const e of [-0.12, 0.12]) {
+        k.cyl(0.3 + e, 0.952, 0.12, 0.08, 0.08, 0.012, 0x1a1c20, "metal", 0, 0, 0, 16);
+        k.cyl(0.3 + e, 1.04, 0.12, 0.06, 0.075, 0.16, 0, "glass", 0, 0, 0, 14);
+        k.cyl(0.3 + e, 1.0, 0.12, 0.068, 0.072, 0.08, 0x3a1e0e, "gloss", 0, 0, 0, 14);
+        k.box(0.3 + e, 1.13, 0.12, 0.13, 0.03, 0.13, 0xd8a832, "solid");
+      }
+      for (let i = 0; i < 4; i++) k.cyl(-0.6 + i * 0.1, 0.95, 0.2, 0.04, 0.035, 0.1, 0xe8e4d8, "solid", 0, 0, 0, 10);   // the mugs
+      // break FRIDGE (the steak): two-door upright, handles
+      k.frame(-14.6, 0, -5.2, Math.PI / 2);
+      k.box(0, 1.05, 0, 1.1, 2.1, 0.7, 0xd8dade, "gloss");
+      k.box(0, 1.5, 0.352, 1.08, 0.006, 0.004, 0x8a9098);
+      k.box(0, 1.05, 0.352, 0.006, 2.06, 0.004, 0x8a9098);
+      for (const e of [-1, 1]) k.box(e * 0.06, 1.2, 0.38, 0.03, 0.6, 0.04, 0xa8acb2, "metal");
+      k.box(0, 0.04, 0.3, 1.0, 0.08, 0.08, 0x1c1e22);
+    }
+    V.coffeeLamp = ctx.box(g, -14.25, 1.5, -1.7, 0.03, 0.03, 0.03, new THREE.MeshBasicMaterial({ color: 0xd23b2a }));
+    ctx.solid(-15.25, -3.1, -13.95, -0.9); ctx.solid(-15.2, -5.8, -14, -4.6);
     // Reyes' desk + the case FILE tray (the case number lives here)
-    deskCluster(ctx, g, -10, -6, 0);
-    B(-10.6, 0.98, -6.4, 0.7, 0.22, 0.5, 0xb8a06a);         // file-tray on the desk
+    deskCluster(ctx, g, k, -10, -6, 0);
+    if (k) {
+      k.frame(-10.6, 0, -6.4, 0);
+      k.box(0, 0.79, 0, 0.36, 0.04, 0.28, 0x2a2d33, "metal");                          // the tray
+      for (let i = 0; i < 4; i++) k.box(0.01 * i, 0.815 + i * 0.012, 0.005 * i, 0.32, 0.01, 0.24, [0xd8b870, 0xe8d8a0, 0xd8b870, 0xc8a860][i], "solid", 0, 0.06 * i, 0);
+    }
     // ---- DUTY ROSTER board (redraws per shift phase) on the west wall ------
-    // A LIVE BOARD IS A SLAB, NOT PAINT. The west wall is centred at x = -16
-    // with thickness T, so its inner face is at -15.70; the old bare quad hung
-    // at -15.65, i.e. 0.05 of air — legal, but with nothing between the board
-    // and the wall it read as a decal. It now gets a real bezel with the
-    // codebase's SCREEN_GAP (0.025) on BOTH seams: bezel back face -15.675 is
-    // 0.025 off the wall, and the roster face at -15.60 stands 0.025 proud of
-    // the bezel front at -15.625. Neither pair can ever share a depth value.
-    // Thickness runs along x here, so no ry: the board faces the bullpen (+x).
+    // A LIVE BOARD IS A SLAB, NOT PAINT: bezel 0.025 off the wall, the roster
+    // face 0.025 proud of the bezel, so no two faces share a depth.
     V.roster = ctx.canvasTexLive(512, 320);       // 1.600 == the 2.4 x 1.5 mesh
     V.rosterCanvas = V.roster.canvas; V.rosterTex = V.roster.tex;
     ctx.box(g, -15.65, 2.6, -8, 0.05, 1.72, 2.62, ctx.mat(PAL.trim));           // bezel
@@ -300,70 +402,147 @@
       m.castShadow = false; m.receiveShadow = false; g.add(m); }
     drawRoster(0);
 
-    // ---- EVIDENCE CAGE (north-west): chain-look walls + gate + clerk + plate --
-    cageWall(ctx, g, -11, -18, 8, 0.34);    // north
-    cageWall(ctx, g, -11, -12, 8, 0.34);    // south
-    cageWall(ctx, g, -15, -15, 0.34, 6);    // west
-    cageWall(ctx, g, -7, -16.3, 0.34, 3.4); // east upper (gate gap around z -14.5..-13)
-    // the cage GATE (dynamic — swings open on a solved lock)
-    V.cageGate = ctx.box(g, -7, 1.8, -13, 0.34, 3.3, 2.0, PAL.cage);
+    // ---- EVIDENCE CAGE (north-west): chain-link walls + gate + clerk + plate --
+    cageWall(ctx, k, linkPanel, -11, -18, 8, 0.34);    // north
+    cageWall(ctx, k, linkPanel, -11, -12, 8, 0.34);    // south
+    cageWall(ctx, k, linkPanel, -15, -15, 0.34, 6);    // west
+    cageWall(ctx, k, linkPanel, -7, -16.3, 0.34, 3.4); // east upper (gate gap around z -14.5..-13)
+    // the cage GATE (dynamic — swings open on its hinge at z -14 on a solved lock)
+    {
+      const gate = new THREE.Group(); gate.position.set(-7, 0, -14); g.add(gate);
+      const fr = ctx.pmat(0x7a838e, 40);
+      ctx.box(gate, 0, 3.4, 1.0, 0.06, 0.06, 2.0, fr); ctx.box(gate, 0, 0.12, 1.0, 0.06, 0.06, 2.0, fr);
+      ctx.box(gate, 0, 1.76, 0.03, 0.06, 3.3, 0.06, fr); ctx.box(gate, 0, 1.76, 1.97, 0.06, 3.3, 0.06, fr);
+      ctx.box(gate, 0, 1.76, 1.0, 0.04, 0.04, 1.9, fr);
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(1.94, 3.22), chain); pl.rotation.y = Math.PI / 2; pl.position.set(0, 1.76, 1.0);
+      const uv = pl.geometry.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 1.94 / 0.6, uv.getY(i) * 3.22 / 0.6);
+      gate.add(pl);
+      ctx.box(gate, 0.06, 1.15, 1.85, 0.08, 0.2, 0.08, ctx.pmat(0x2a2d33, 30));      // the padlock hasp
+      V.cageGate = gate;
+    }
     V.cageGateCol = ctx.solid(-7.17, -14, -6.83, -12);
     // the STASH duffel on a shelf inside
-    V.duffel = ctx.box(g, -11, 0.95, -15, 0.9, 0.5, 0.5, 0x1f6f6a);
+    if (k) {
+      k.frame(-11, 0, -15, 0);
+      k.box(0, 0.66, 0, 1.2, 0.04, 0.6, 0x6a6e76, "metal");                           // the shelf it sits on
+      for (const e of [-1, 1]) for (const f of [-1, 1]) k.box(e * 0.58, 0.33, f * 0.28, 0.04, 0.66, 0.04, 0x5a5e66, "metal");
+    }
+    V.duffel = duffelModel();
+    V.duffel.position.set(-11, 0.68, -15); g.add(V.duffel);
     // clerk desk facing the gate + the NAMEPLATE (swaps PYE/MERCER — READ IT)
-    B(-5.4, 0.7, -13, 1.5, 1.4, 2.2, PAL.desk); B(-5.4, 1.46, -13, 1.8, 0.12, 2.5, PAL.desktop);
+    if (k) {
+      k.frame(-5.4, 0, -13, -Math.PI / 2);                                             // faces -x (the gate)
+      K.dressCounter(k, 2.2, 1.2, 1.06, 0, { clad: PAL.desk, trim: 0x8a9098, work: 0x84765a, kick: 0x16181c, cladKind: "gloss" });
+      k.box(0.6, 1.16, -0.3, 0.32, 0.18, 0.26, 0x1a1c20, "gloss");                     // a label printer
+      k.box(-0.5, 1.12, -0.2, 0.3, 0.08, 0.22, 0x5a5e66, "metal");                     // evidence bags tray
+    }
     ctx.solid(-6.15, -14.1, -4.65, -11.9);
-    // The nameplate is the tell you have to READ, so it gets an easel instead
-    // of hanging in mid-air: two posts carry it off the desktop (top y 1.52) to
-    // the plate's bottom edge at 1.68. Transparent → batch.js never merges it.
+    // The nameplate is the tell you have to READ, so it stands on an easel.
     V.plate = ctx.canvasTexLive(512, 160);        // 3.20 == the 1.4 x 0.44 mesh
     V.plateCanvas = V.plate.canvas; V.plateTex = V.plate.tex;
-    for (const px of [-0.55, 0.55]) ctx.box(g, -5.4 + px, 1.60, -12.0, 0.04, 0.16, 0.04, ctx.mat(PAL.steel));
+    for (const px of [-0.55, 0.55]) ctx.box(g, -5.4 + px, 1.30, -12.0, 0.03, 0.42, 0.03, ctx.mat(PAL.steel));
     { const m = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.44), new THREE.MeshBasicMaterial({ map: V.plateTex, transparent: true }));
-      m.position.set(-5.4, 1.9, -12.0); m.castShadow = false; m.receiveShadow = false; g.add(m); }
+      m.position.set(-5.4, 1.72, -12.0); m.castShadow = false; m.receiveShadow = false; g.add(m); }
     drawPlate("PYE");
-    // the flickering fluorescent over the gate (the stealth mechanic light)
-    for (let k = -1; k <= 1; k += 2) {
-      const tube = ctx.box(g, -9, 4.85, -14 + k * 0.18, 2.2, 0.12, 0.16, new THREE.MeshBasicMaterial({ color: 0x93a695 }));
+    // the flickering fluorescent over the gate (the stealth mechanic light):
+    // a strip housing with two tubes whose materials flicker
+    ctx.box(g, -9, 4.96, -14, 2.4, 0.08, 0.5, ctx.pmat(0xc8ccd0, 20));
+    for (let q = -1; q <= 1; q += 2) {
+      const tube = ctx.cyl(g, -9, 4.88, -14 + q * 0.12, 0.025, 0.025, 2.2, new THREE.MeshBasicMaterial({ color: 0x93a695 }), 8);
+      tube.rotation.z = Math.PI / 2;
       V.flickTubes.push(tube.material);
     }
 
     // ---- INTERROGATION (north-east): viewing window + doc tray + the BOY -----
-    B(11, 0.78, -15, 2.6, 0.2, 1.4, PAL.steel); ctx.solid(9.7, -15.7, 12.3, -14.3); // table
-    // viewing-window wall at x=6 (glass band); the tray passes the lawyer card
+    if (k) {
+      k.frame(11, 0, -15, 0);
+      k.box(0, 0.76, 0, 1.6, 0.04, 0.9, 0x8a9098, "metal");                             // the steel table
+      for (const e of [-1, 1]) for (const f of [-1, 1]) k.box(e * 0.74, 0.38, f * 0.4, 0.05, 0.76, 0.05, 0x5a5e66, "metal");
+      k.cyl(0, 0.82, 0, 0.012, 0.012, 0.5, 0xb0b6c0, "metal", 0, 0, Math.PI / 2, 8);    // the cuff bar
+      for (const e of [-0.25, 0.25]) k.box(e, 0.8, 0, 0.02, 0.06, 0.02, 0xb0b6c0, "metal");
+      for (const f of [-1, 1]) {                                                         // two chairs
+        k.box(0, 0.45, f * 0.75, 0.44, 0.04, 0.42, 0x3a3e46, "metal");
+        k.box(0, 0.7, f * 0.96, 0.44, 0.46, 0.03, 0x3a3e46, "metal");
+        for (const e of [-1, 1]) for (const h2 of [-1, 1]) k.box(e * 0.2, 0.22, f * 0.75 + h2 * 0.19, 0.025, 0.45, 0.025, 0x5a5e66, "metal");
+      }
+      // the pass-through tray in the viewing window sill
+      k.frame(6, 0, -12.4, 0);
+      k.box(0, 1.12, 0, 0.6, 0.06, 0.9, 0x5a5e66, "metal");
+      k.box(0, 1.16, 0, 0.5, 0.02, 0.8, 0x8a9098, "metal");
+    }
+    ctx.solid(9.7, -15.7, 12.3, -14.3);
     B(6, 0.55, -14, 0.5, 1.1, 6, PAL.wall); ctx.solid(5.75, -17, 6.25, -11);         // sill (solid below)
     B(6, 4.15, -14, 0.5, 2.0, 6, PAL.wall);                                          // head (solid above)
-    { const glass = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.6, 5.4),
-        new THREE.MeshPhongMaterial({ color: 0xbfe4ff, transparent: true, opacity: 0.16, shininess: 90 }));
-      glass.position.set(6, 2.5, -14); g.add(glass); }
-    V.docTray = ctx.box(g, 6, 1.22, -12.4, 0.5, 0.14, 0.9, PAL.steel);              // the tray (lawyer card)
+    { const glass = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.0, 5.4),
+        new THREE.MeshPhongMaterial({ color: 0x7a8a94, specular: 0xffffff, transparent: true, opacity: 0.32, shininess: 120, depthWrite: false }));
+      glass.position.set(6, 2.1, -14); glass.renderOrder = 1; g.add(glass); }                    // the one-way glass
+    V.docTray = new THREE.Object3D(); V.docTray.position.set(6, 1.16, -12.4); g.add(V.docTray);
 
     // ---- HOLDING bars (where the boy starts; the LOSE arc's cell) -----------
-    barRun(ctx, g, 12, -4, 12, -8);     // cell A bars along x=12
+    barRun(ctx, k, 12, -4, 12, -8);     // cell A bars along x=12
     signPanel(ctx, g, 12.4, 3.3, -6, 0.4, 0.9, "#0c0f14", "#8a929c", ["HOLDING"], 22, Math.PI / 2);
 
     // ---- REAR FIRE DOOR (opens from inside; the stash route out) ------------
-    V.fireDoor = ctx.box(g, 1.4, 2.2, -20, 2.4, 3.4, 0.24, PAL.steel);
+    {
+      const door = new THREE.Group(); door.position.set(1.4, 0, -20); g.add(door);
+      const st = ctx.pmat(0x6a4a3a, 25), fr = ctx.pmat(0x3a3e46, 30), hw = ctx.pmat(0xb0b6c0, 70);
+      ctx.box(door, 0, 1.06, 0, 1.0, 2.1, 0.05, st); ctx.box(door, 1.02, 1.06, 0, 1.0, 2.1, 0.05, st);   // a pair of leaves
+      ctx.box(door, 0.51, 2.16, 0, 2.14, 0.1, 0.24, fr);                                                  // header
+      for (const e of [-0.56, 1.58]) ctx.box(door, e, 1.08, 0, 0.1, 2.16, 0.24, fr);                    // jambs
+      ctx.box(door, 0.5, 1.0, 0.06, 1.8, 0.05, 0.05, hw);                                                 // the push bar
+      ctx.box(door, 0.51, 1.75, 0.035, 0.3, 0.12, 0.01, new THREE.MeshBasicMaterial({ color: 0xd22a2a })); // EXIT ONLY plate
+      V.fireDoor = door;
+    }
     V.fireDoorCol = ctx.solid(0.2, -20.2, 2.6, -19.8);
 
     // ---- K-9 KENNEL (rear alley, past the fire door) — the toll booth -------
-    penFence(ctx, g, 0, -25.5, 5.6, 0.34);   // outer
-    penFence(ctx, g, -2.6, -23.6, 0.34, 4);
-    penFence(ctx, g, 2.6, -23.6, 0.34, 4);
-    B(1.4, 0.65, -25.9, 1.5, 1.3, 1.4, 0x5c422e); B(1.4, 1.4, -25.9, 1.7, 0.22, 1.6, 0x462f1e); // doghouse
+    penFence(ctx, k, linkPanel, 0, -25.5, 5.6, 0.34);   // outer
+    penFence(ctx, k, linkPanel, -2.6, -23.6, 0.34, 4);
+    penFence(ctx, k, linkPanel, 2.6, -23.6, 0.34, 4);
+    if (k) {                                                                              // the doghouse: plank walls, gabled shingle roof
+      k.frame(1.4, 0, -25.9, 0);
+      k.box(0, 0.05, 0, 1.4, 0.1, 1.3, 0x3a2a1c);
+      k.box(0, 0.5, -0.6, 1.3, 0.8, 0.06, 0x7a5a3a); k.box(-0.62, 0.5, 0, 0.06, 0.8, 1.2, 0x7a5a3a); k.box(0.62, 0.5, 0, 0.06, 0.8, 1.2, 0x7a5a3a);
+      for (const e of [-1, 1]) k.box(e * 0.42, 0.5, 0.6, 0.46, 0.8, 0.06, 0x7a5a3a);   // front either side of the door
+      k.box(0, 0.86, 0.6, 0.4, 0.08, 0.06, 0x7a5a3a);
+      for (const e of [-1, 1]) k.box(e * 0.36, 1.13, 0, 0.82, 0.05, 1.42, 0x3a2e2a, "solid", 0, 0, -e * 0.62);   // roof planes
+      k.cyl(0, 1.38, 0, 0.03, 0.03, 1.44, 0x2a2420, "solid", Math.PI / 2, 0, 0, 6);    // ridge
+      k.cyl(-0.8, 0.05, -0.8, 0.14, 0.12, 0.08, 0x8a9098, "metal", 0, 0, 0, 14);       // the water bowl
+    }
     buildRex(ctx, g, 0, -24);
 
     // ---- BONDSMAN booth (outside the front, east) — both money paths start --
-    B(18.5, 0.7, 6, 2.6, 1.4, 1.4, PAL.desk); B(18.5, 1.46, 6, 2.9, 0.12, 1.7, PAL.desktop);
+    if (k) {
+      k.frame(18.5, 0, 6, Math.PI);                                                    // Lou sits +z, customers -z
+      K.dressCounter(k, 2.6, 1.2, 1.06, 0, { clad: 0x4a2e1c, trim: 0xc9a24a, work: 0x2a1c12, kick: 0x16120c, cladKind: "gloss" });
+      // his SAFE: a real two-tonne box, dial, three-spoke handle, hinges
+      k.frame(20.5, 0, 4.2, 0);
+      k.box(0, 0.8, 0, 1.2, 1.5, 1.2, 0x2a3038, "gloss");
+      k.box(0, 0.8, 0.605, 0.96, 1.26, 0.02, 0x343c46, "gloss");
+      k.cyl(0.1, 1.0, 0.63, 0.09, 0.09, 0.04, 0xb0b6c0, "metal", Math.PI / 2, 0, 0, 20);
+      k.cyl(0.1, 1.0, 0.655, 0.03, 0.03, 0.02, 0x2a2d33, "metal", Math.PI / 2, 0, 0, 12);
+      for (let i = 0; i < 3; i++) k.cyl(0.1 + Math.cos(i * 2.09) * 0.07, 0.68 + Math.sin(i * 2.09) * 0.07, 0.65, 0.008, 0.008, 0.14, 0xb0b6c0, "metal", Math.PI / 2, 0, 0, 6);
+      for (const y of [0.4, 1.2]) k.cyl(-0.47, y, 0.62, 0.025, 0.025, 0.14, 0x8a9098, "metal", 0, 0, 0, 8);
+      k.box(0, 0.03, 0, 1.24, 0.06, 1.24, 0x14161a);
+    }
     ctx.solid(17.2, 5.3, 19.8, 6.7);
-    B(20.5, 0.8, 4.2, 1.3, 1.6, 1.3, 0x2e3540); ctx.solid(19.85, 3.55, 21.15, 4.85);   // safe
+    ctx.solid(19.85, 3.55, 21.15, 4.85);   // safe
     signPanel(ctx, g, 18.5, 2.7, 6.9, 3, 0.7, "#1a0f18", "#e8b23a", ["LOU'S BONDS", "OPEN ALL NIGHT"], 24);
 
     // ---- EXTRACTION beater at the curb (WIN/PARTIAL reads here) -------------
-    B(10, 0.6, 14, 4.2, 0.7, 1.85, PAL.beater); B(10.1, 1.24, 14, 2.1, 0.6, 1.65, 0x3a332c);
-    ctx.box(g, 8, 0.62, 13.55, 0.24, 0.24, 0.5, new THREE.MeshBasicMaterial({ color: 0xffe9b0 })); // headlight ON
-    ctx.box(g, 8, 0.62, 14.45, 0.24, 0.24, 0.5, new THREE.MeshBasicMaterial({ color: 0xffe9b0 }));
+    if (k) beaterCar(k, 10, 14);
+    for (const z of [13.62, 14.38]) {
+      const hl = ctx.box(g, 7.83, 0.68, z, 0.02, 0.12, 0.26, new THREE.MeshBasicMaterial({ color: 0xffe9b0 })); // headlight ON
+      void hl;
+    }
     V.extract = { x: 10, z: 14, r: 3.6 };
+
+    if (k) k.build(g);
+    if (meshGeos.length && THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries) {
+      const merged = THREE.BufferGeometryUtils.mergeBufferGeometries(meshGeos, false);
+      meshGeos.forEach((gg) => gg.dispose());
+      const m = new THREE.Mesh(merged, chain); m.name = "chainlink"; g.add(m);
+    } else meshGeos.forEach((gg) => g.add(new THREE.Mesh(gg, chain)));
 
     // ---- LIGHTS (budget ≤8): fluoro pools; the flickering cage tube last ----
     ctx.light(0, 4.4, 4, 0xdff0e2, 0.9, 20);      // lobby
@@ -380,41 +559,135 @@
     buildZones(ctx);
   }
 
-  /* ---- geometry helpers (chunky ≥0.3u, voxel look) ---- */
-  function deskCluster(ctx, g, x, z, ry) {
-    ctx.box(g, x, 0.72, z, 2.6, 0.24, 1.5, ctx.mat(PAL.desktop), ry);
-    ctx.box(g, x - 1.1, 0.36, z, 0.3, 0.72, 1.4, ctx.mat(PAL.desk), ry);
-    ctx.box(g, x + 1.1, 0.36, z, 0.3, 0.72, 1.4, ctx.mat(PAL.desk), ry);
-    ctx.box(g, x, 0.42, z + 1.25, 0.9, 0.16, 0.9, ctx.mat(0x3a4a5c), ry);
+  /* ---- geometry helpers (real metres, merged through the fixture kit) ---- */
+  let _chain = null;
+  function chainLinkMat() {
+    if (_chain) return _chain;
+    const tex = C.canvasTex(64, 64, (cc, w, h) => {
+      cc.clearRect(0, 0, w, h);
+      cc.strokeStyle = "#aeb4ba"; cc.lineWidth = 3;
+      cc.beginPath(); cc.moveTo(0, h / 2); cc.lineTo(w / 2, 0); cc.lineTo(w, h / 2); cc.lineTo(w / 2, h); cc.closePath(); cc.stroke();
+    });
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    _chain = new THREE.MeshLambertMaterial({ map: tex, transparent: true, alphaTest: 0.4, side: THREE.DoubleSide });
+    return _chain;
+  }
+  function badgeModel() {
+    // a seven-point star shield, 6 cm, gold with an enamel centre
+    const s = new THREE.Shape();
+    for (let i = 0; i < 14; i++) {
+      const a = Math.PI / 2 + (i / 14) * Math.PI * 2, r = i % 2 ? 0.018 : 0.034;
+      if (i) s.lineTo(Math.cos(a) * r, Math.sin(a) * r); else s.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    s.closePath();
+    const geo = new THREE.ExtrudeGeometry(s, { depth: 0.004, bevelEnabled: true, bevelThickness: 0.001, bevelSize: 0.001, bevelSegments: 1 });
+    const m = new THREE.Mesh(geo, C.pmat(PAL.gold, 90));
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.002, 16), C.mat(0x1f3a6a));
+    c.rotation.x = Math.PI / 2; c.position.z = 0.0055; m.add(c);
+    return m;
+  }
+  function duffelModel() {
+    // a 70 cm sports holdall: tube body, end caps, two carry handles, a zip
+    const grp = new THREE.Group();
+    const body = C.mat(0x1f6f6a), dark = C.mat(0x14302e), webbing = C.mat(0x1a1c20);
+    const b = C.cyl(grp, 0, 0.16, 0, 0.16, 0.16, 0.68, body, 14); b.rotation.z = Math.PI / 2; b.scale.set(1, 1, 0.92);
+    for (const e of [-1, 1]) { const cap = C.cyl(grp, e * 0.345, 0.16, 0, 0.162, 0.162, 0.02, dark, 14); cap.rotation.z = Math.PI / 2; }
+    C.box(grp, 0, 0.318, 0, 0.6, 0.006, 0.02, webbing);                                   // the zip
+    for (const e of [-1, 1]) {
+      C.box(grp, e * 0.14, 0.16, 0.0, 0.035, 0.33, 0.33, webbing);                      // webbing bands
+      const h = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.008, 6, 12, Math.PI), webbing);
+      h.position.set(e * 0.14, 0.32, e * 0.03); h.rotation.y = Math.PI / 2; grp.add(h);
+    }
+    return grp;
+  }
+  function deskCluster(ctx, g, k, x, z, ry) {
+    if (k) {
+      k.frame(x, 0, z, ry);
+      k.box(0, 0.74, 0, 1.6, 0.03, 0.8, PAL.desktop, "gloss");                          // the top
+      k.box(0.52, 0.36, 0, 0.42, 0.7, 0.74, PAL.desk, "gloss");                          // drawer pedestal
+      for (let i = 0; i < 3; i++) { k.box(0.52, 0.15 + i * 0.22, 0.375, 0.38, 0.19, 0.01, 0x7a6849, "gloss"); k.box(0.52, 0.2 + i * 0.22, 0.385, 0.12, 0.015, 0.012, 0x8a9098, "metal"); }
+      k.box(-0.76, 0.36, 0, 0.03, 0.72, 0.74, PAL.desk, "gloss");
+      k.box(-0.1, 0.4, -0.38, 1.2, 0.6, 0.02, PAL.desk, "gloss");                        // modesty panel
+      k.box(-0.2, 0.765, -0.2, 0.22, 0.02, 0.16, 0x1a1c20, "metal");                     // monitor
+      k.box(-0.2, 0.98, -0.22, 0.56, 0.34, 0.04, 0x1a1c20, "metal");
+      k.box(-0.2, 0.98, -0.198, 0.52, 0.3, 0.004, 0x3a5a7a, "glow");
+      k.box(-0.2, 0.765, 0.12, 0.44, 0.02, 0.15, 0x2a2d33, "solid");                     // keyboard
+      // the office chair: five-star base, gas lift, seat, back
+      for (let i = 0; i < 5; i++) { const a = i * 1.2566; k.box(Math.sin(a) * 0.17, 0.06, 0.75 + Math.cos(a) * 0.17, 0.05, 0.03, 0.34, 0x1a1c20, "metal", 0, a, 0); }
+      k.cyl(0, 0.25, 0.75, 0.025, 0.025, 0.4, 0x8a9098, "metal", 0, 0, 0, 8);
+      k.box(0, 0.47, 0.75, 0.5, 0.08, 0.48, 0x2a3a4c, "gloss");
+      k.box(0, 0.8, 0.98, 0.46, 0.52, 0.06, 0x2a3a4c, "gloss", 0.12);
+    }
     ctx.solid(x - 1.45, z - 0.85, x + 1.45, z + 0.85);
   }
-  function cageWall(ctx, g, x, z, w, d) {
-    ctx.box(g, x, 0.35, z, w || 0.34, 0.34, d || 0.34, ctx.mat(PAL.cage));
-    ctx.box(g, x, 3.3, z, w || 0.34, 0.34, d || 0.34, ctx.mat(PAL.cage));
-    const len = Math.max(w || 0, d || 0), n = Math.max(1, Math.floor(len / 1.0));
-    for (let i = 0; i <= n; i++) {
-      const tt = i / n - 0.5;
-      if (w > d) ctx.box(g, x + tt * (w - 0.3), 1.82, z, 0.3, 3.3, 0.3, ctx.mat(PAL.cage));
-      else ctx.box(g, x, 1.82, z + tt * (d - 0.3), 0.3, 3.3, 0.3, ctx.mat(PAL.cage));
+  function cageWall(ctx, k, linkPanel, x, z, w, d) {
+    const along = w > d, len = Math.max(w || 0, d || 0);
+    const x0 = along ? x - len / 2 : x, x1 = along ? x + len / 2 : x;
+    const z0 = along ? z : z - len / 2, z1 = along ? z : z + len / 2;
+    linkPanel(x0, z0, x1, z1, 0.12, 3.4);
+    if (k) {
+      k.frame(x, 0, z, along ? 0 : Math.PI / 2);
+      k.cyl(0, 3.45, 0, 0.022, 0.022, len, 0x7a838e, "metal", 0, 0, Math.PI / 2, 8);   // top rail
+      k.cyl(0, 0.1, 0, 0.022, 0.022, len, 0x7a838e, "metal", 0, 0, Math.PI / 2, 8);    // bottom rail
+      const n = Math.max(1, Math.round(len / 1.5));
+      for (let i = 0; i <= n; i++) {
+        const t = -len / 2 + i * len / n;
+        k.cyl(t, 1.75, 0, 0.03, 0.03, 3.5, 0x6a737e, "metal", 0, 0, 0, 8);             // posts
+        k.cyl(t, 0.02, 0, 0.06, 0.06, 0.04, 0x5a5e66, "metal", 0, 0, 0, 8);
+      }
     }
     ctx.solid(x - (w || 0.34) / 2, z - (d || 0.34) / 2, x + (w || 0.34) / 2, z + (d || 0.34) / 2);
   }
-  function barRun(ctx, g, x, z0, x1, z1) {
+  function barRun(ctx, k, x, z0, x1, z1) {
     const cz = (z0 + z1) / 2, len = Math.abs(z1 - z0);
-    ctx.box(g, x, 0.3, cz, 0.4, 0.3, len, ctx.mat(PAL.bars));
-    ctx.box(g, x, 3.55, cz, 0.4, 0.3, len, ctx.mat(PAL.bars));
-    const n = Math.max(1, Math.floor(len / 0.62));
-    for (let i = 0; i <= n; i++) ctx.box(g, x, 1.92, z0 + 0.15 + i * (len - 0.3) / n, 0.3, 3.3, 0.3, ctx.mat(PAL.bars));
+    if (k) {
+      k.frame(x, 0, cz, Math.PI / 2);
+      k.box(0, 0.08, 0, len, 0.1, 0.08, PAL.bars, "metal");                             // floor channel
+      for (const y of [1.1, 2.4]) k.box(0, y, 0, len, 0.06, 0.012, PAL.bars, "metal");  // flat cross-straps
+      k.box(0, 3.5, 0, len, 0.12, 0.12, PAL.bars, "metal");                             // head channel
+      const n = Math.max(2, Math.round(len / 0.13));
+      for (let i = 0; i <= n; i++) k.cyl(-len / 2 + i * len / n, 1.8, 0, 0.018, 0.018, 3.4, 0x4a525e, "metal", 0, 0, 0, 8);
+    }
     ctx.solid(x - 0.2, Math.min(z0, z1), x + 0.2, Math.max(z0, z1));
   }
-  function penFence(ctx, g, x, z, w, d) {
-    ctx.box(g, x, 0.25, z, w, 0.3, d, ctx.mat(PAL.cage));
-    ctx.box(g, x, 1.35, z, w, 0.3, d, ctx.mat(PAL.cage));
-    const len = Math.max(w, d), n = Math.max(1, Math.floor(len / 0.75));
-    for (let i = 0; i <= n; i++) { const tt = i / n - 0.5;
-      if (w > d) ctx.box(g, x + tt * (w - 0.3), 0.8, z, 0.3, 1.4, 0.3, ctx.mat(PAL.cage));
-      else ctx.box(g, x, 0.8, z + tt * (d - 0.3), 0.3, 1.4, 0.3, ctx.mat(PAL.cage)); }
+  function penFence(ctx, k, linkPanel, x, z, w, d) {
+    const along = w > d, len = Math.max(w, d);
+    const x0 = along ? x - len / 2 : x, x1 = along ? x + len / 2 : x;
+    const z0 = along ? z : z - len / 2, z1 = along ? z : z + len / 2;
+    linkPanel(x0, z0, x1, z1, 0.05, 1.5);
+    if (k) {
+      k.frame(x, 0, z, along ? 0 : Math.PI / 2);
+      k.cyl(0, 1.52, 0, 0.02, 0.02, len, 0x8a9098, "metal", 0, 0, Math.PI / 2, 8);
+      const n = Math.max(1, Math.round(len / 1.4));
+      for (let i = 0; i <= n; i++) k.cyl(-len / 2 + i * len / n, 0.78, 0, 0.025, 0.025, 1.56, 0x7a838e, "metal", 0, 0, 0, 8);
+    }
     ctx.solid(x - w / 2, z - d / 2, x + w / 2, z + d / 2);
+  }
+  // the getaway: a tired mid-size sedan facing -x (nose at x - 2.1), 4.2 m long
+  function beaterCar(k, x, z) {
+    k.frame(x, 0, z, -Math.PI / 2);                                                       // local +Z = the nose (-x)
+    const P = PAL.beater, Pd = 0x4a3626, gl = 0x26303a, ch = 0x9aa0a6;
+    k.box(0, 0.55, 0, 1.78, 0.5, 4.2, P, "gloss");                                        // lower body
+    k.box(0, 0.86, 1.45, 1.74, 0.14, 1.2, P, "gloss", -0.05);                             // hood
+    k.box(0, 0.86, -1.6, 1.74, 0.14, 0.9, P, "gloss", 0.06);                              // trunk lid
+    k.box(0, 1.1, -0.1, 1.6, 0.45, 2.0, Pd, "gloss");                                     // cabin
+    k.box(0, 1.1, 0.92, 1.5, 0.42, 0.02, gl, "gloss", -0.75);                             // windscreen
+    k.box(0, 1.1, -1.12, 1.5, 0.4, 0.02, gl, "gloss", 0.8);                               // rear screen
+    for (const e of [-1, 1]) {
+      k.box(e * 0.805, 1.12, -0.1, 0.012, 0.36, 1.86, gl, "gloss");                       // side glass
+      k.box(e * 0.8, 1.12, -0.1, 0.03, 0.4, 0.06, Pd, "gloss");                           // B pillar
+      k.box(e * 0.895, 0.62, 0.1, 0.012, 0.03, 3.6, 0x2a221a);                            // body crease
+      k.box(e * 0.9, 0.78, 0.55, 0.04, 0.025, 0.14, 0x1a1c20, "metal");                   // door handles
+      k.box(e * 0.9, 0.78, -0.55, 0.04, 0.025, 0.14, 0x1a1c20, "metal");
+      for (const f of [-1, 1]) {
+        k.cyl(e * 0.78, 0.33, f * 1.3, 0.33, 0.33, 0.22, 0x141414, "solid", 0, 0, Math.PI / 2, 18);   // tyre
+        k.cyl(e * 0.895, 0.33, f * 1.3, 0.19, 0.19, 0.02, ch, "metal", 0, 0, Math.PI / 2, 14);        // hubcap
+      }
+    }
+    k.box(0, 0.42, 2.12, 1.82, 0.16, 0.1, ch, "metal");                                   // bumpers
+    k.box(0, 0.42, -2.12, 1.82, 0.16, 0.1, ch, "metal");
+    k.box(0, 0.64, 2.11, 0.8, 0.14, 0.02, 0x1a1c20);                                      // grille
+    for (const e of [-1, 1]) k.box(e * 0.66, 0.66, -2.11, 0.28, 0.1, 0.02, 0xb02020, "glow");   // tail lamps
   }
   // REX — a chunky voxel quadruped (a PROP with a mechanic: the smell check),
   // animated via ctx.anim. Built from ctx.box so the package stays self-contained.
