@@ -27,25 +27,28 @@
        doors with handles, lit interior, wire shelves, bottles and cans.
      - A COFFEE STATION at a gas station / corner store; a HOT FOOD WARMER on
        the counter where the trade sells hot food.
-     - GOODS THAT READ AS GOODS: cereal boxes, cans, bottles, chip bags, jars,
-       pill bottles, boxed electronics, paint cans, cartons — real sizes, faced
-       up to the front of the board in blocks of one product the way a shop is
-       merchandised, a price ticket under every block. Drawn as a handful of
-       InstancedMeshes over ONE shared label atlas (a detail texture + a tint
-       mask, so a white label panel stays white on a red box).
-     - THE REAL, BUYABLE STOCK (cityEcon.stockFor(kind)) as the game's real
-       item models (CBZ.itemAsset) at their real size, at waist height: cold
-       drinks in the cooler, hot food in the warmer, coffee on the coffee
-       station, everything else on the wall bays. [E] takes it off the shelf
-       (in your hand until you pay at the counter or put it back; out of the
-       door with it is a theft, through CBZ.shopFloor.till), and a bought
-       unit leaves the shelf until the daily restock.
+     - ONLY REAL, BUYABLE STOCK (2026-10-31; the owner: "I hate the gas
+       stations when you put fake products. It should be empty shelves and
+       then real assets, like an apple on the shelf that you can have in
+       your inventory"). A board holds nothing or a catalog item from
+       cityEcon.stockFor(kind), drawn with the model that item has in the
+       hand, on the pavement and in the bag (CBZ.itemAssetBaked), at its
+       real size: blocks of facings, two deep, flat things stacked, a price
+       ticket per block; cold drinks and sandwiches in the cooler, hot food
+       in the warmer, coffee at the station, the rest down the boards from
+       eye level out. Every unit is buyable: [E] takes the front one off the
+       shelf (in your hand until you pay at the counter or put it back; out
+       of the door with it is a theft, through CBZ.shopFloor.till), and a
+       bought unit leaves the shelf until the daily restock. The label atlas
+       of unbuyable cereal boxes, cans and chip bags this file used to fill
+       the boards with is deleted; a board the budget does not reach stands
+       empty and clean.
 
-   COST. Nothing here is eager: a store's fixtures, goods and real stock are
-   built only for the few stores near you (MAX_LIVE), as ~2 merged fixture
-   meshes + ~12 instanced goods batches + one merged mesh per stocked product,
-   with the fixtures solid (colliders pushed while live, removed after). The
-   goods are drawn only inside SHOW_R. No lights: the ceiling fit-out
+   COST. Nothing here is eager: a store's fixtures and stock are built only
+   for the few stores near you (MAX_LIVE), as ~2 merged fixture meshes + ONE
+   InstancedMesh per product it sells (UNIT_BUDGET / TRI_BUDGET cap a
+   store), with the fixtures solid (colliders pushed while live, removed
+   after). The stock is drawn only inside SHOW_R. No lights: the ceiling fit-out
    (fitout_work.js) owns the troffers; these materials take the same night
    self-lit share the fit-out surfaces do, so a lit shop at night is lit.
 
@@ -74,7 +77,12 @@
   const SHOW_R = 26;        // …and DRAWS its goods only this close
   const MAX_LIVE = 3;       // never more than this many stores standing at once
   const REACH = 2.6;        // arm's length at the shelf
-  const GOODS_BUDGET = 5000; // packaged-goods instances per store (see fillGoods)
+  // A STORE HAS A STOCK BUDGET, in units on the shelves and in the triangles
+  // they cost (a phone draws this). Past it the boards left over stand EMPTY,
+  // and the planner fills the eye-level boards first, so what goes bare is
+  // the very top and the kick-plate deck, not the middle of an aisle.
+  const UNIT_BUDGET = 2400;
+  const TRI_BUDGET = 760000;
 
   /* ---- THE PLAN, PER TRADE ------------------------------------------------
      walls     which side walls get a run of bays (+1 / -1 on the tangent)
@@ -83,30 +91,32 @@
      lanes     gondola lanes PER SIDE of the main aisle
      cooler    reach-in cooler doors at the back of one wall run (0 = none)
      coffee    a coffee station at the front of the other run
-     mix       the packaged goods this trade sells */
+     warmer    a hot-food case on the counter (roller-grill dogs, the slices) */
   const PROFILE = {
-    store:       { walls: [-1, 1], wallStart: 3.4, lanes: 3, cooler: 5, coffee: false, mix: "grocery" },
-    gas:         { walls: [-1, 1], wallStart: 3.4, lanes: 3, cooler: 6, coffee: true, mix: "grocery" },
-    transit:     { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 4, coffee: true, mix: "grocery" },
-    food:        { walls: [-1, 1], wallStart: 10.6, lanes: 1, centreStart: 10.6, cooler: 4, coffee: false, mix: "grocery", warmer: true },
-    hardware:    { walls: [-1, 1], wallStart: 4.4, lanes: 3, cooler: 0, coffee: false, mix: "hardware" },
-    electronics: { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 0, coffee: false, mix: "electronics" },
-    security:    { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 0, coffee: false, mix: "security" },
-    hospital:    { walls: [1], wallStart: 12.6, lanes: 0, cooler: 0, coffee: false, mix: "pharmacy" },
-    gym:         { walls: [1], wallStart: 10.6, lanes: 0, cooler: 3, coffee: false, mix: "grocery", maxBays: 5 },
-    barber:      { walls: [1], wallStart: 8.2, lanes: 0, cooler: 0, coffee: false, mix: "beauty", maxBays: 3 },
-    eyewear:     { walls: [-1, 1], wallStart: 3.4, lanes: 1, cooler: 0, coffee: false, mix: "eyewear" },
-    arena:       { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 4, coffee: true, mix: "grocery" },
-    paintball:   { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 3, coffee: false, mix: "hardware" },
-    airfield:    { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 4, coffee: true, mix: "grocery" },
+    store:       { walls: [-1, 1], wallStart: 3.4, lanes: 3, cooler: 5, coffee: false },
+    gas:         { walls: [-1, 1], wallStart: 3.4, lanes: 3, cooler: 6, coffee: true, warmer: true },
+    transit:     { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 4, coffee: true, warmer: true },
+    food:        { walls: [-1, 1], wallStart: 10.6, lanes: 1, centreStart: 10.6, cooler: 4, coffee: false, warmer: true },
+    hardware:    { walls: [-1, 1], wallStart: 4.4, lanes: 3, cooler: 0, coffee: false },
+    electronics: { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 0, coffee: false },
+    security:    { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 0, coffee: false },
+    hospital:    { walls: [1], wallStart: 12.6, lanes: 0, cooler: 0, coffee: false },
+    gym:         { walls: [1], wallStart: 10.6, lanes: 0, cooler: 3, coffee: false, maxBays: 5 },
+    barber:      { walls: [1], wallStart: 8.2, lanes: 0, cooler: 0, coffee: false, maxBays: 3 },
+    eyewear:     { walls: [-1, 1], wallStart: 3.4, lanes: 1, cooler: 0, coffee: false },
+    arena:       { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 4, coffee: true, warmer: true },
+    paintball:   { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 3, coffee: false },
+    airfield:    { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 4, coffee: true },
   };
   const DEFAULT_PROFILE = PROFILE.store;
 
-  // where the REAL catalog items stand, by what they are
-  const COLD = { Soda: 1, "Energy Drink": 1, Water: 1 };
+  // where the REAL catalog items stand, by what they are: the cold case, the
+  // counter's hot case, the coffee station; everything else on the boards.
+  // (Hot food and a poured coffee with no warmer / station to stand in are
+  // not shelf goods: they stay on the counter's menu.)
+  const COLD = { Soda: 1, "Energy Drink": 1, Water: 1, Milk: 1, Sandwich: 1 };
   const HOT = { Burger: 1, Hotdog: 1, "Pizza Slice": 1, Fries: 1 };
   const BREW = { Coffee: 1 };
-
   /* ---- FIXTURE DIMENSIONS (metres, above the finished floor) --------------- */
   const BAY = 1.25;                                     // one shelf section
   const WALL = { deep: 0.47, h: 2.2, top: 2.46, levels: [0.14, 0.56, 0.96, 1.50, 1.90] };
@@ -169,306 +179,45 @@
     const perf = litHook(new THREE.MeshLambertMaterial({ vertexColors: true, map: perfTex() }));
     const glass = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.2, depthWrite: false });
     const glow = new THREE.MeshBasicMaterial({ vertexColors: true });
-    const A = atlas();
-    const goods = litHook(new THREE.MeshLambertMaterial({ map: A.detail }), function (sh) {
-      sh.uniforms.uGoodsMask = { value: A.mask };
-      sh.fragmentShader = sh.fragmentShader
-        .replace("void main() {", "uniform sampler2D uGoodsMask;\nvoid main() {")
-        .replace("#include <color_fragment>",
-          "#if defined( USE_COLOR ) && defined( USE_MAP )\n" +
-          "\tdiffuseColor.rgb *= mix( vec3( 1.0 ), vColor, texture2D( uGoodsMask, vUv ).r );\n" +
-          "#elif defined( USE_COLOR )\n\tdiffuseColor.rgb *= vColor;\n#endif");
-    });
-    for (const m of [fix, perf, glass, glow, goods]) m._shared = true;
-    _mats = { fix: fix, perf: perf, glass: glass, glow: glow, goods: goods };
+    // THE STOCK: every product on every shelf is its own baked catalog model
+    // (CBZ.itemAssetBaked: the model's part colours as vertex colours), drawn
+    // instanced through this one material. It takes the fit-out's night share
+    // like the fixtures, so a lit shop's goods are lit with it.
+    const stock = litHook(new THREE.MeshLambertMaterial({ vertexColors: true }));
+    for (const m of [fix, perf, glass, glow, stock]) m._shared = true;
+    _mats = { fix: fix, perf: perf, glass: glass, glow: glow, stock: stock };
     return _mats;
   }
 
-  /* THE LABEL ATLAS. 4x4 cells of 128 px. `detail` is what is printed; `mask`
-     says where the brand colour (the instance colour) applies — white = tint,
-     black = keep the print as painted. So a cereal box is brand-red with a
-     cream bowl panel, a soda can is brand-blue with a white wave and bare
-     metal rims, and one texture + one material draws every product in town.
-     No words anywhere (signage law): print is bars, bands, panels, photos. */
-  const CELLS = 4, CS = 128;
-  let _atlas = null;
-  function atlas() {
-    if (_atlas) return _atlas;
-    const N = CELLS * CS;
-    const cd = document.createElement("canvas"); cd.width = cd.height = N;
-    const cm = document.createElement("canvas"); cm.width = cm.height = N;
-    const D = cd.getContext("2d"), M = cm.getContext("2d");
-    D.fillStyle = "#ffffff"; D.fillRect(0, 0, N, N);
-    M.fillStyle = "#000000"; M.fillRect(0, 0, N, N);
-    let ox = 0, oy = 0;
-    function R(x, y, w, h, col, tint) {
-      D.fillStyle = col; D.fillRect(ox + x, oy + y, w, h);
-      M.fillStyle = tint ? "#ffffff" : "#000000"; M.fillRect(ox + x, oy + y, w, h);
-    }
-    function E(x, y, rx, ry, col, tint) {
-      D.fillStyle = col; D.beginPath(); D.ellipse(ox + x, oy + y, rx, ry, 0, 0, Math.PI * 2); D.fill();
-      M.fillStyle = tint ? "#ffffff" : "#000000"; M.beginPath(); M.ellipse(ox + x, oy + y, rx, ry, 0, 0, Math.PI * 2); M.fill();
-    }
-    function P(pts, col, tint) {
-      D.fillStyle = col; M.fillStyle = tint ? "#ffffff" : "#000000";
-      for (const X of [D, M]) {
-        X.beginPath(); X.moveTo(ox + pts[0], oy + pts[1]);
-        for (let i = 2; i < pts.length; i += 2) X.lineTo(ox + pts[i], oy + pts[i + 1]);
-        X.closePath(); X.fill();
-      }
-    }
-    function metal(y, h) {                          // a can rim / lid: bare brushed metal
-      for (let i = 0; i < h; i++) { const t = 170 + ((Math.sin(i * 1.7) * 18) | 0); R(0, y + i, CS, 1, "rgb(" + t + "," + (t + 4) + "," + (t + 8) + ")", false); }
-    }
-    function bars(x, y, n, w, col) { for (let i = 0; i < n; i++) R(x, y + i * 6, w * (1 - i * 0.22), 3, col, false); }
-    const DRAW = [
-      function cereal() {
-        R(0, 0, CS, CS, "#ffffff", true);
-        R(10, 8, 108, 26, "#f5efdd", false); bars(16, 13, 3, 70, "#2b2b2b");
-        E(64, 80, 46, 30, "#f3e9cf", false);
-        for (let i = 0; i < 14; i++) E(36 + (i * 37) % 58, 70 + (i * 23) % 22, 7, 4, i & 1 ? "#d5973a" : "#e9bb5c", false);
-        R(86, 112, 34, 12, "#f4f4f0", false);
-      },
-      function snack() {
-        R(0, 0, CS, CS, "#ffffff", true);
-        R(0, 0, CS, 10, "#9a9a9a", true);
-        P([0, 70, 128, 34, 128, 58, 0, 94], "#f7f5ee", false);
-        E(88, 96, 22, 18, "#c5773b", false); E(84, 92, 8, 6, "#e3a35e", false);
-        bars(12, 20, 2, 60, "#f7f5ee");
-      },
-      function soda() {
-        R(0, 0, CS, CS, "#ffffff", true);
-        P([0, 58, 32, 48, 64, 62, 96, 50, 128, 60, 128, 76, 96, 66, 64, 78, 32, 64, 0, 74], "#f6f6f2", false);
-        E(40, 96, 10, 10, "#f6f6f2", false);
-        metal(0, 10); metal(118, 10);
-      },
-      function tin() {
-        metal(0, 8); metal(120, 8);
-        R(0, 8, CS, 22, "#ffffff", true);
-        R(0, 30, CS, 66, "#efe4c8", false);
-        E(44, 62, 20, 18, "#b5452a", false); E(76, 66, 16, 14, "#5f8f3a", false); E(58, 72, 10, 8, "#d9a441", false);
-        bars(88, 40, 3, 34, "#3a3a3a");
-        R(0, 96, CS, 24, "#ffffff", true);
-      },
-      function bottle() {
-        R(0, 0, CS, 20, "#ffffff", true);              // cap
-        R(0, 20, CS, 42, "#9da2a3", true);             // neck + shoulder (darker, tinted)
-        R(0, 62, CS, 32, "#f4f4f0", false);            // label
-        R(0, 70, CS, 10, "#ffffff", true); bars(10, 84, 1, 60, "#2d2d2d");
-        R(0, 94, CS, 34, "#8f9394", true);             // lower body
-      },
-      function water() {
-        R(0, 0, CS, 18, "#ffffff", true);              // cap
-        R(0, 18, CS, 110, "#d4e5ee", false);
-        for (let i = 0; i < 6; i++) R(i * 22 + 6, 18, 4, 110, "#edf5f9", false);
-        R(0, 58, CS, 28, "#ffffff", true);
-        P([0, 72, 40, 66, 80, 74, 128, 66, 128, 72, 80, 80, 40, 72, 0, 78], "#f6fbfd", false);
-      },
-      function chips() {
-        R(0, 0, CS, CS, "#ffffff", true);
-        R(0, 0, CS, 12, "#c7ccd1", false); R(0, 116, CS, 12, "#c7ccd1", false);
-        for (let i = 0; i < 16; i++) { R(i * 8, 0, 2, 12, "#9aa0a6", false); R(i * 8, 116, 2, 12, "#9aa0a6", false); }
-        bars(16, 20, 2, 80, "#f6f3e8");
-        E(64, 78, 32, 28, "#f0cf6c", false);
-        for (let i = 0; i < 8; i++) E(48 + (i * 13) % 34, 66 + (i * 17) % 26, 9, 5, "#d8a043", false);
-      },
-      function jar() {
-        R(0, 0, CS, 18, "#ffffff", true);
-        for (let i = 0; i < 6; i++) R(0, 2 + i * 3, CS, 1, "#c8c8c8", true);
-        R(0, 18, CS, 110, "#7a2e1c", false);
-        R(0, 50, CS, 46, "#f1e7cf", false); R(0, 58, CS, 10, "#ffffff", true); bars(14, 74, 2, 60, "#3a2a20");
-      },
-      function medbox() {
-        R(0, 0, CS, CS, "#f3f4f5", false);
-        R(0, 40, CS, 30, "#ffffff", true);
-        E(96, 96, 22, 12, "#ffffff", true);
-        bars(12, 12, 3, 70, "#7d848c"); bars(12, 82, 2, 50, "#7d848c");
-      },
-      function pills() {
-        R(0, 0, CS, 16, "#e9e9e6", false);
-        R(0, 16, CS, 112, "#f2f2f0", false);
-        R(0, 50, CS, 30, "#ffffff", true); bars(12, 86, 2, 70, "#8a8f94");
-      },
-      function ebox() {
-        R(0, 0, CS, CS, "#1d1f22", false);
-        const g = D.createLinearGradient(0, oy + 22, 0, oy + 94);
-        g.addColorStop(0, "#56697a"); g.addColorStop(1, "#27313b");
-        D.fillStyle = g; D.fillRect(ox + 14, oy + 22, 100, 72);
-        R(20, 28, 88, 3, "#8fa3b3", false);
-        R(0, 108, CS, 8, "#ffffff", true); bars(14, 8, 2, 56, "#e6e6e6");
-      },
-      function paint() {
-        metal(0, 128);
-        R(0, 30, CS, 74, "#ffffff", true);
-        R(18, 44, 38, 38, "#f4f4f0", false); bars(66, 50, 3, 44, "#2a2a2a");
-        R(0, 0, CS, 6, "#9ea3a8", false); R(0, 122, CS, 6, "#9ea3a8", false);
-      },
-      function carton() {
-        R(0, 0, CS, CS, "#b3875a", false);
-        for (let i = 0; i < 40; i++) R((i * 29) % 128, (i * 47) % 128, 18, 1, "#a47a4f", false);
-        R(8, 8, 112, 44, "#ffffff", true);
-        R(14, 60, 52, 52, "#f0f0ec", false); R(24, 80, 32, 10, "#5a6068", false); R(50, 72, 8, 26, "#5a6068", false);
-        bars(74, 66, 3, 44, "#3b2b1c");
-      },
-      function spray() {
-        R(0, 0, CS, 28, "#ffffff", true);
-        R(0, 28, CS, 100, "#ffffff", true);
-        R(0, 60, CS, 40, "#f4f4f0", false); bars(12, 66, 3, 70, "#303030");
-      },
-      function caseCell() {
-        R(0, 0, CS, CS, "#ffffff", true);
-        R(0, 58, CS, 6, "#c9a54a", false);
-      },
-      function carafe() {
-        R(0, 0, CS, 18, "#1b1b1b", false);
-        R(0, 18, CS, 26, "#c9d3d6", false);
-        R(0, 44, CS, 84, "#3b2417", false);
-        for (let i = 0; i < 4; i++) R(i * 32 + 6, 44, 5, 84, "#5a3b28", false);
-      },
-    ];
-    for (let i = 0; i < DRAW.length; i++) {
-      ox = (i % CELLS) * CS; oy = ((i / CELLS) | 0) * CS;
-      D.save(); D.beginPath(); D.rect(ox, oy, CS, CS); D.clip();
-      M.save(); M.beginPath(); M.rect(ox, oy, CS, CS); M.clip();
-      try { DRAW[i](); } catch (e) { /* a cell that fails to paint stays plain */ }
-      D.restore(); M.restore();
-    }
-    const detail = new THREE.CanvasTexture(cd);
-    detail.encoding = THREE.sRGBEncoding;
-    const mask = new THREE.CanvasTexture(cm);
-    for (const t of [detail, mask]) {
-      t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
-      try { const Rr = CBZ.renderer; if (Rr && Rr.capabilities) t.anisotropy = Math.min(4, Rr.capabilities.getMaxAnisotropy()); } catch (e) {}
-    }
-    _atlas = { detail: detail, mask: mask };
-    return _atlas;
-  }
-  const CELL = { cereal: 0, snack: 1, soda: 2, tin: 3, bottle: 4, water: 5, chips: 6, jar: 7,
-    medbox: 8, pills: 9, ebox: 10, paint: 11, carton: 12, spray: 13, case: 14, carafe: 15 };
-  function cellRect(i) {
-    const cx = i % CELLS, cy = (i / CELLS) | 0, s = 1 / CELLS, m = 1.5 / (CELLS * CS);
-    return { u0: cx * s + m, u1: (cx + 1) * s - m, v0: 1 - (cy + 1) * s + m, v1: 1 - cy * s - m };
-  }
-
-  /* ---- UNIT GOODS GEOMETRY: base on y = 0, 1 m on every axis, front = +z --- */
-  const GEO = Object.create(null);
-  function remapGroup(geo, gi, fn) {
-    const g = geo.groups[gi]; if (!g) return;
-    const uv = geo.attributes.uv, idx = geo.index, seen = new Set();
-    for (let k = g.start; k < g.start + g.count; k++) {
-      const v = idx ? idx.getX(k) : k;
-      if (seen.has(v)) continue; seen.add(v);
-      const o = fn(uv.getX(v), uv.getY(v), v);
-      uv.setXY(v, o[0], o[1]);
-    }
-  }
-  function goodsGeo(shape, cell) {
-    const key = shape + ":" + cell;
-    if (GEO[key]) return GEO[key];
-    const C = cellRect(cell), du = C.u1 - C.u0, dv = C.v1 - C.v0;
-    const full = function (u, v) { return [C.u0 + u * du, C.v0 + v * dv]; };
-    const edge = function (u, v) { return [C.u0 + u * du * 0.07, C.v0 + v * dv]; };        // side strip
-    const cap = function () { return [C.u0 + du * 0.5, C.v1 - dv * 0.02]; };              // lid / rim colour
-    let geo;
-    if (shape === "box" || shape === "bag") {
-      geo = new THREE.BoxGeometry(1, 1, 1, 1, shape === "bag" ? 4 : 1, 1);
-      geo.translate(0, 0.5, 0);
-      // groups: +x, -x, +y, -y, +z (front), -z
-      remapGroup(geo, 0, edge); remapGroup(geo, 1, edge);
-      remapGroup(geo, 2, function (u, v) { return [C.u0 + u * du * 0.07, C.v1 - (1 - v) * dv * 0.04]; });
-      remapGroup(geo, 3, cap);
-      remapGroup(geo, 4, full); remapGroup(geo, 5, full);
-      if (shape === "bag") {
-        // a chip bag: pillowed, crimped flat at the top seam
-        const p = geo.attributes.position;
-        for (let i = 0; i < p.count; i++) {
-          const y = p.getY(i), t = Math.max(0, Math.min(1, (y - 0.72) / 0.28)), s = t * t * (3 - 2 * t);
-          const bt = Math.max(0, Math.min(1, (0.18 - y) / 0.18));
-          p.setZ(i, p.getZ(i) * (1 - 0.82 * s) * (1 - 0.3 * bt));
-          p.setX(i, p.getX(i) * (1 - 0.04 * s));
-        }
-        geo.computeVertexNormals();
-      }
-    } else if (shape === "cyl") {
-      geo = new THREE.CylinderGeometry(0.5, 0.5, 1, 8, 1, false);
-      geo.translate(0, 0.5, 0);
-      remapGroup(geo, 0, full);
-      remapGroup(geo, 1, cap); remapGroup(geo, 2, cap);
-      // the bottom cap stands on a board and is never seen: drop its triangles
-      const g2 = geo.groups[2];
-      if (g2 && geo.index) {
-        const a = geo.index.array, keep = [];
-        for (let i = 0; i < a.length; i++) if (i < g2.start || i >= g2.start + g2.count) keep.push(a[i]);
-        geo.setIndex(keep);
-        geo.clearGroups();
-      }
-    } else {                                             // "bottle": a lathe, v by height
-      const pts = [[0.47, 0.0], [0.5, 0.05], [0.5, 0.58], [0.2, 0.78], [0.17, 0.86],
-        [0.2, 0.985], [0.001, 1]].map(function (q) { return new THREE.Vector2(q[0], q[1]); });
-      geo = new THREE.LatheGeometry(pts, 8);
-      const p = geo.attributes.position, uv = geo.attributes.uv;
-      for (let i = 0; i < uv.count; i++) { const o = full(uv.getX(i), p.getY(i)); uv.setXY(i, o[0], o[1]); }
-    }
-    if (geo.attributes.uv2) geo.deleteAttribute("uv2");
-    geo.computeBoundingSphere();
-    GEO[key] = geo;
-    return geo;
-  }
-
-  /* ---- THE PRODUCTS --------------------------------------------------------
-     w/h/d in metres (cyl/bottle: w is the diameter). rows: how many deep a
-     cylinder stands (boxes are one long facing to the back of the board). */
-  const PAL = {
-    brand: [0xb8322a, 0xd4621e, 0xdc9f22, 0x2e8b3e, 0x1f6f5c, 0x2a64a8, 0x243f8f, 0x6d3a8e, 0x8c1f3f, 0x3b2f2a, 0xc9b27a, 0x4a4f57, 0x9c2b22, 0x157a8c],
-    water: [0xcfe3ee, 0xd9ecf3, 0xbfd8e6, 0x9fc8e0],
-    dark: [0x2a2d31, 0x1f2226, 0x3a3f46, 0xe9e9e6, 0x2a64a8, 0xb8322a],
-    white: [0xffffff],
-  };
-  const T = {
-    cereal: { g: "box", c: "cereal", w: 0.19, h: 0.29, d: 0.07, pal: "brand" },
-    snack: { g: "box", c: "snack", w: 0.15, h: 0.21, d: 0.05, pal: "brand" },
-    soda: { g: "cyl", c: "soda", w: 0.066, h: 0.122, pal: "brand", rows: 2 },
-    tin: { g: "cyl", c: "tin", w: 0.076, h: 0.11, pal: "brand", rows: 2 },
-    bottle: { g: "bottle", c: "bottle", w: 0.072, h: 0.3, pal: "brand", rows: 2 },
-    water: { g: "bottle", c: "water", w: 0.066, h: 0.24, pal: "water", rows: 2 },
-    chips: { g: "bag", c: "chips", w: 0.21, h: 0.28, d: 0.09, pal: "brand" },
-    jar: { g: "cyl", c: "jar", w: 0.082, h: 0.13, pal: "brand", rows: 2 },
-    medbox: { g: "box", c: "medbox", w: 0.11, h: 0.13, d: 0.045, pal: "brand" },
-    pills: { g: "cyl", c: "pills", w: 0.055, h: 0.1, pal: "brand", rows: 2 },
-    ebox: { g: "box", c: "ebox", w: 0.2, h: 0.16, d: 0.07, pal: "dark" },
-    ebig: { g: "box", c: "ebox", w: 0.42, h: 0.3, d: 0.12, pal: "dark", low: true },
-    paint: { g: "cyl", c: "paint", w: 0.17, h: 0.19, pal: "brand", rows: 2, low: true },
-    carton: { g: "box", c: "carton", w: 0.3, h: 0.13, d: 0.22, pal: "brand", low: true },
-    tool: { g: "box", c: "carton", w: 0.16, h: 0.24, d: 0.06, pal: "brand" },
-    spray: { g: "bottle", c: "spray", w: 0.066, h: 0.23, pal: "brand", rows: 2 },
-    case: { g: "box", c: "case", w: 0.16, h: 0.06, d: 0.07, pal: "dark" },
-    carafe: { g: "bottle", c: "carafe", w: 0.15, h: 0.22, pal: "white", rows: 1 },
-    cups: { g: "cyl", c: "pills", w: 0.09, h: 0.34, pal: "brand", rows: 1 },
-  };
-  const MIX = {
-    grocery: [["cereal", 3], ["snack", 3], ["soda", 2], ["tin", 3], ["bottle", 2], ["water", 1], ["chips", 3], ["jar", 2]],
-    drinks: [["soda", 4], ["bottle", 3], ["water", 2]],
-    hardware: [["paint", 3], ["carton", 3], ["tool", 3], ["spray", 2], ["jar", 1]],
-    electronics: [["ebox", 5], ["ebig", 2], ["case", 1]],
-    pharmacy: [["medbox", 5], ["pills", 3], ["spray", 1], ["jar", 1]],
-    beauty: [["spray", 3], ["pills", 1], ["jar", 2], ["case", 1]],
-    eyewear: [["case", 4], ["medbox", 1]],
-    security: [["ebox", 3], ["ebig", 1], ["carton", 2]],
-  };
-  function pick(mixName, r, level, clr) {
-    const mix = MIX[mixName] || MIX.grocery;
-    let tot = 0;
-    const w = [];
-    for (let i = 0; i < mix.length; i++) {
-      const t = T[mix[i][0]];
-      let wt = t.h <= clr - 0.02 ? mix[i][1] : 0;
-      if (t.low) wt *= level <= 1 ? 2 : 0.4;
-      w.push(wt); tot += wt;
-    }
-    if (tot <= 0) return null;
-    let x = r * tot;
-    for (let i = 0; i < mix.length; i++) { x -= w[i]; if (x <= 0) return mix[i][0]; }
-    return mix[mix.length - 1][0];
+  /* ---- WHAT A PRODUCT IS ON A SHELF -----------------------------------------
+     A shelf holds NOTHING or a REAL catalog item. There is no other kind of
+     goods in this file (2026-10-31; the owner: "I hate the gas stations when
+     you put fake products. It should be empty shelves and then real assets,
+     like an apple on the shelf that you can have in your inventory"). The
+     label atlas of cereal boxes, cans, chip bags and jars that could not be
+     bought is deleted. A product's shelf geometry is its item model, baked
+     once (one geometry, vertex colours) and re-seated with its base at y = 0
+     and centred on its footprint, at its REAL size: a water bottle is 21 cm
+     tall on the shelf because it is 21 cm tall in your hand. */
+  const PROTO = Object.create(null);           // name -> { geo, w, h, d, tris } | null
+  function protoOf(name) {
+    if (PROTO[name] !== undefined) return PROTO[name];
+    PROTO[name] = null;
+    if (!CBZ.itemAssetBaked) return null;
+    let m = null;
+    try { m = CBZ.itemAssetBaked(null, name); } catch (err) { m = null; }
+    if (!m || !m.geometry || !m.geometry.attributes.position) return null;
+    const src = m.geometry;
+    if (!src.boundingBox) src.computeBoundingBox();
+    const bb = src.boundingBox;
+    if (!isFinite(bb.min.x) || !isFinite(bb.max.x)) return null;
+    const geo = src.clone();
+    geo.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+    geo.computeBoundingBox(); geo.computeBoundingSphere();
+    geo._shared = true;
+    PROTO[name] = { geo: geo, w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y, d: bb.max.z - bb.min.z,
+      tris: (geo.attributes.position.count / 3) | 0 };
+    return PROTO[name];
   }
 
   /* ============================================================
@@ -699,8 +448,8 @@
     const plan = {
       lot: lot, kind: kind, prof: prof, F: F, K: K, FY: FY, cx: lot.cx, cz: lot.cz,
       runs: [], lanes: [], cooler: null, coffee: null, warmer: null,
-      boards: [], goods: [], tickets: [], slots: [], names: [], rects: [],
-      group: null, built: false, meshes: [], cols: [], real: Object.create(null),
+      boards: [], tickets: [], slots: [], names: [], rects: [],
+      group: null, built: false, meshes: [], cols: [], prod: Object.create(null), units: 0, tris: 0,
     };
     const W2 = new THREE.Vector3();
     plan.toWorld = function (lx, ly, lz) {
@@ -751,8 +500,7 @@
 
     layoutBoards(plan);
     if (!plan.boards.length && !plan.cooler) return null;
-    placeStock(plan, stock);
-    fillGoods(plan);
+    stockShelves(plan, stock);
 
     // footprints (building-local) for the fit-out's occupancy ledger
     const R = function (dA, dB, lA, lB, wall) {
@@ -811,7 +559,7 @@
       for (let k = 0; k < COOL.levels.length; k++) {
         const clr = (k + 1 < COOL.levels.length ? COOL.levels[k + 1] - 0.02 : COOL.h - 0.34) - COOL.levels[k] - 0.02;
         board(plan, { kind: "cool", d: dm, l: C.s * (F.Ti - COOL.deep + 0.06), ax: "in", len: C.d1 - C.d0 - 0.14, fd: -C.s,
-          sd: COOL.deep - 0.26, y: FY + COOL.levels[k], clr: clr, level: k, mix: "drinks" });
+          sd: COOL.deep - 0.26, y: FY + COOL.levels[k], clr: clr, level: k });
       }
     }
   }
@@ -829,173 +577,149 @@
     return Math.atan2(fx, fz);
   }
 
-  /* ---- THE REAL STOCK: where each catalog name stands ---------------------- */
-  function placeStock(plan, stock) {
-    const F = plan.F;
-    const used = new Set();
-    const addSlots = function (name, bo, t0, span, n) {
-      for (let u = 0; u < n; u++) {
-        const t = t0 - span / 2 + (u + 0.5) * (span / n);
-        const p = boardPt(F, bo, t, Math.min(0.12, bo.sd * 0.4));
-        plan.slots.push({ plan: plan, lot: plan.lot, name: name, lx: p.x, ly: bo.y + 0.004, lz: p.z,
-          yaw: faceYaw(F, bo) + (hash01(p.x + u, p.z, 0x9ab3) - 0.5) * 0.3, clr: bo.clr,
-          taken: false, tookDay: -1, x: 0, y: 0, z: 0 });
-      }
-      bo.reserved = bo.reserved || [];
-      bo.reserved.push([t0 - span / 2 - 0.03, t0 + span / 2 + 0.03]);
-      if (plan.names.indexOf(name) < 0) plan.names.push(name);
-    };
-    const cool = plan.boards.filter(function (bo) { return bo.kind === "cool" && (bo.level === 2 || bo.level === 3); });
-    const eye = plan.boards.filter(function (bo) { return bo.kind === "wall" && bo.level === REAL_LEVEL; });
-    const gTop = plan.boards.filter(function (bo) { return bo.kind === "gond" && bo.level === GOND.levels.length - 1; });
-    let ci = 0;
-    // cold drinks: behind the cooler glass at eye level, a 0.5 m section each
-    for (const name of stock) {
-      if (!COLD[name] || !cool.length) continue;
-      const bo = cool[ci % cool.length], lane = (ci / cool.length) | 0;
-      const t0 = -bo.len / 2 + 0.35 + lane * 0.72;
-      if (t0 + 0.28 > bo.len / 2) continue;
-      addSlots(name, bo, t0, 0.5, 3);
-      used.add(name); ci++;
-    }
-    // hot food: in the warmer on the counter
-    if (plan.warmer) {
-      const hot = stock.filter(function (n) { return HOT[n]; });
-      const W = plan.warmer;
-      for (let i = 0; i < hot.length && i < 6; i++) {
-        const tier = (i / 3) | 0, col = i % 3;
-        const l = W.l + (col - 1) * 0.26, d = W.d + 0.02;
-        plan.slots.push({ plan: plan, lot: plan.lot, name: hot[i], lx: F.x(d, l), ly: W.top + (tier ? 0.252 : 0.05),
-          lz: F.z(d, l), yaw: Math.atan2(-F.inx, -F.inz), clr: 0.17, taken: false, tookDay: -1, x: 0, y: 0, z: 0 });
-        used.add(hot[i]);
-        if (plan.names.indexOf(hot[i]) < 0) plan.names.push(hot[i]);
-      }
-    }
-    // coffee: on the coffee station's worktop, beside the brewer
-    if (plan.coffee) {
-      for (const name of stock) {
-        if (!BREW[name]) continue;
-        const C = plan.coffee, l = C.s * (plan.F.Ti - 0.34), d = C.d0 + 1.35;
-        for (let u = 0; u < 3; u++) {
-          const dd = d + u * 0.12;
-          plan.slots.push({ plan: plan, lot: plan.lot, name: name, lx: F.x(dd, l), ly: plan.FY + 0.92, lz: F.z(dd, l),
-            yaw: Math.atan2(-C.s * F.tx, -C.s * F.tz), clr: 0.3, taken: false, tookDay: -1, x: 0, y: 0, z: 0 });
+  /* ---- THE STOCK: every unit on every board is a real, buyable item --------
+     A SLOT is one COLUMN of one product on a board: `units` front to back
+     (local position + yaw), `left` of them on the shelf, `held` in a
+     customer's hands. Taking a unit takes the FRONT one (the back one stays,
+     the way a shelf empties); the day's restock fills every column back up.
+     Blocks of one product are faced up side by side (a block of six waters,
+     not one), each block with its price ticket on the board's channel. */
+  const GAP = 0.006;                         // between facings
+  const LOOSE = { Banana: 1, Orange: 1, Apple: 1, Newspaper: 1 };   // laid out, never stacked
+  function newSlot(plan, name, bo, units) {
+    const sl = { plan: plan, lot: plan.lot, name: name, units: units, left: units.length, held: 0, day: -1,
+      clr: bo ? bo.clr : 0.3, x: 0, y: 0, z: 0 };
+    plan.slots.push(sl);
+    if (plan.names.indexOf(name) < 0) plan.names.push(name);
+    plan.units += units.length;
+    plan.tris += units.length * (protoOf(name) ? protoOf(name).tris : 0);
+    return sl;
+  }
+  // a product's footprint on a board: along the board (fw), into it (fd),
+  // and whether it turns a quarter to fit (a long thing laid along the run)
+  function fitOn(P, bo) {
+    if (!P || P.h > bo.clr - 0.01) return null;
+    if (P.d <= bo.sd - 0.01) return { fw: P.w, fd: P.d, h: P.h, turn: 0 };
+    if (P.w <= bo.sd - 0.01) return { fw: P.d, fd: P.w, h: P.h, turn: Math.PI / 2 };
+    return null;
+  }
+  // one block of `n` facings starting at t0 (board-centred t), `rows` deep
+  function placeBlock(plan, bo, t0, name, fit, n, rows) {
+    const F = plan.F, yaw0 = faceYaw(F, bo) + fit.turn;
+    for (let u = 0; u < n; u++) {
+      const tc = t0 + u * (fit.fw + GAP) + fit.fw / 2;
+      // a FLAT thing (a candy bar, a pack of gum, a blister strip) is stacked
+      // the way a shop stacks it, so a block of them reads from the aisle;
+      // the units run top-front first, which is the one a hand takes
+      const stack = fit.h < 0.04 && !LOOSE[name] ? Math.max(1, Math.min(fit.h < 0.02 ? 6 : 4, Math.floor((Math.min(bo.clr, 0.16) - 0.01) / (fit.h + 0.001)))) : 1;
+      const units = [];
+      for (let r = 0; r < rows; r++) {
+        const p = boardPt(F, bo, tc, 0.014 + fit.fd / 2 + r * (fit.fd + GAP));
+        const j = (hash01(p.x * 7.1 + r, p.z * 3.3 + u, 0x9ab3) - 0.5) * (stack > 1 ? 0.04 : 0.10);   // a hand-faced shelf, not a render
+        for (let k = stack - 1; k >= 0; k--) {
+          const jk = stack > 1 ? (hash01(p.x + k, p.z - r, 0x51c7) - 0.5) * 0.08 : 0;
+          units.push({ lx: p.x, ly: bo.y + 0.002 + k * (fit.h + 0.001), lz: p.z, yaw: yaw0 + j + jk });
         }
-        used.add(name);
-        if (plan.names.indexOf(name) < 0) plan.names.push(name);
       }
+      newSlot(plan, name, bo, units);
     }
-    // everything else: a section of a wall bay at the 0.96 board, spread down
-    // the runs (then the gondola top boards if the walls ran out)
-    const rest = stock.filter(function (n) { return !used.has(n); });
-    const pool = plan.boards.filter(function (bo) { return bo.kind === "table"; }).concat(eye, gTop);
-    if (!pool.length) return;
-    // sections: 0.72 m each, walking the boards front-to-back, alternating sides
-    const sections = [];
-    for (const bo of pool) {
-      const n = Math.max(1, Math.floor(bo.len / 1.6));
-      for (let i = 0; i < n; i++) sections.push({ bo: bo, t0: -bo.len / 2 + (i + 0.5) * (bo.len / n) });
-    }
-    sections.sort(function (a, c) { return (a.bo.kind === "gond") - (c.bo.kind === "gond") || a.bo.d + a.t0 - (c.bo.d + c.t0); });
-    const step = Math.max(1, Math.floor(sections.length / Math.max(1, rest.length)));
-    for (let i = 0; i < rest.length; i++) {
-      // a name with no section left is simply sold over the counter
-      const sec = sections[i * step];
-      if (!sec) break;
-      addSlots(rest[i], sec.bo, sec.t0, Math.min(0.72, sec.bo.len), 3);
+    plan.tickets.push({ bo: bo, t: t0 + Math.min(0.04, fit.fw * 0.4), sale: hash01(t0, bo.y * 7 + bo.d, 0x5a1e) < 0.12 });
+  }
+  function rowsFor(fit, bo, cap) {
+    const deep = Math.max(1, Math.floor((bo.sd - 0.02) / (fit.fd + GAP)));
+    const want = fit.fd < 0.09 ? 3 : fit.fd < 0.2 ? 2 : 1;
+    return Math.max(1, Math.min(deep, want, cap || 3));
+  }
+  function overBudget(plan, share) {
+    const k = share || 1;
+    return plan.units >= UNIT_BUDGET * k || plan.tris >= TRI_BUDGET * k;
+  }
+
+  // fill boards with blocks of `names`, round robin, so every product shows
+  // before any repeats; a product that does not fit a board is skipped there
+  function fillBoards(plan, boards, names, rowCap, seed, share) {
+    if (!names.length) return;
+    // no one product takes the store: each has a ceiling on its units, so a
+    // tray of gum cannot eat the budget a wall of water needed
+    const cap = Math.max(18, Math.ceil(UNIT_BUDGET * (share || 1) * 1.6 / names.length));
+    const had = Object.create(null);
+    for (const sl of plan.slots) had[sl.name] = (had[sl.name] | 0) + sl.units.length;
+    let ptr = 0;
+    for (let bi = 0; bi < boards.length; bi++) {
+      const bo = boards[bi];
+      let pos = -bo.len / 2 + 0.02;
+      const end = bo.len / 2 - 0.02;
+      let misses = 0;
+      while (pos < end - 0.05 && misses < names.length && !overBudget(plan, share)) {
+        const name = names[ptr % names.length];
+        const P = protoOf(name), fit = fitOn(P, bo);
+        if (!fit || fit.fw + GAP > end - pos || (had[name] | 0) >= cap) { ptr++; misses++; continue; }
+        misses = 0;
+        const target = 0.26 + 0.34 * hash01(bi * 3.7 + pos, bo.y + seed, 0x2c9d);
+        let n = Math.max(1, Math.round(target / (fit.fw + GAP)));
+        if (fit.fw > 0.25) n = Math.min(n, 2);
+        n = Math.min(n, Math.floor((end - pos) / (fit.fw + GAP)));
+        if (fit.fw < 0.05) n = Math.min(n, 8);           // (a tray of the little things, not a metre of them)
+        if (n < 1) { ptr++; misses++; continue; }
+        const rows = rowsFor(fit, bo, fit.fw < 0.05 ? Math.min(2, rowCap) : rowCap);
+        placeBlock(plan, bo, pos, name, fit, n, rows);
+        had[name] = (had[name] | 0) + plan.slots.slice(-n).reduce(function (a, q) { return a + q.units.length; }, 0);
+        pos += n * (fit.fw + GAP) + 0.03;
+        ptr++;
+      }
     }
   }
 
-  /* ---- THE PACKAGED GOODS: blocks of one product, faced up --------------- */
-  function fillGoods(plan) {
-    const F = plan.F;
-    const mixName = plan.prof.mix || "grocery";
-    for (let bi = 0; bi < plan.boards.length; bi++) {
-      const bo = plan.boards[bi];
-      const mix = bo.mix || mixName;
-      // the free intervals of this board (real stock reserves its sections)
-      let free = [[-bo.len / 2, bo.len / 2]];
-      if (bo.reserved) for (const rv of bo.reserved) {
-        const nx = [];
-        for (const iv of free) {
-          if (rv[1] <= iv[0] || rv[0] >= iv[1]) { nx.push(iv); continue; }
-          if (rv[0] > iv[0]) nx.push([iv[0], rv[0]]);
-          if (rv[1] < iv[1]) nx.push([rv[1], iv[1]]);
-        }
-        free = nx;
-      }
-      const yaw = faceYaw(F, bo);
-      for (let fi = 0; fi < free.length; fi++) {
-        let pos = free[fi][0];
-        const end = free[fi][1];
-        let k = 0;
-        while (end - pos > 0.12 && k < 64) {
-          const hr = hash01(bo.d * 3.1 + pos * 7.3 + bi, bo.l * 2.7 + bo.y * 11 + k, 0x6d11);
-          const tn = pick(mix, hr, bo.level, bo.clr);
-          k++;
-          if (!tn) break;
-          const t = T[tn];
-          const jit = 0.92 + 0.16 * hash01(pos, bi, 0x71c3);
-          const w = t.w * jit, h = Math.min(t.h * jit, bo.clr - 0.02), gap = t.g === "box" || t.g === "bag" ? 0.008 : 0.004;
-          const blockTarget = 0.3 + 0.55 * hash01(bi + k, pos, 0x2c9d);
-          let n = Math.max(1, Math.round(blockTarget / (w + gap)));
-          n = Math.min(n, Math.floor((end - pos) / (w + gap)));
-          if (n < 1) continue;                   // too wide for what is left: try another
-          const palette = PAL[t.pal] || PAL.brand;
-          const color = palette[Math.floor(hash01(pos * 5.1, bo.y * 3 + bi, 0x41a7) * palette.length) % palette.length];
-          const geoKey = t.g + ":" + CELL[t.c];
-          // a price ticket at the left of the block, on the price channel
-          plan.tickets.push({ bo: bo, t: pos + Math.min(0.06, w * 0.4), sale: hash01(pos, bi * 7, 0x5a1e) < 0.12 });
-          for (let u = 0; u < n; u++) {
-            const tc = pos + u * (w + gap) + w / 2;
-            if (t.g === "box" || t.g === "bag") {
-              const dp = t.d * jit, rows = Math.max(1, Math.floor(bo.sd / (dp + 0.004)));
-              const deep = Math.min(bo.sd, rows * (dp + 0.004) - 0.004);
-              const p = boardPt(F, bo, tc, 0.012 + deep / 2);
-              plan.goods.push({ key: geoKey, x: p.x, y: bo.y, z: p.z, yaw: yaw, sx: w, sy: h, sz: deep, color: color });
-            } else {
-              const rows = Math.max(1, Math.min(t.rows || 2, Math.floor(bo.sd / (w + 0.006))));
-              for (let r = 0; r < rows; r++) {
-                const p = boardPt(F, bo, tc, 0.012 + w / 2 + r * (w + 0.006));
-                plan.goods.push({ key: geoKey, x: p.x, y: bo.y, z: p.z, yaw: yaw + r * 0.9 + u * 0.37, sx: w, sy: h, sz: w, color: color, back: r > 0 });
-              }
-            }
-          }
-          pos += n * (w + gap) + 0.012;
-        }
-      }
+  function stockShelves(plan, stock) {
+    const F = plan.F, e = econ();
+    const has = function (n) { return !!(e && e.ITEMS[n]) && !!protoOf(n); };
+    const names = stock.filter(has);
+    const used = new Set();
+    // the cold case: drinks (and the grab-and-go sandwiches), two deep
+    const cold = names.filter(function (n) { return COLD[n]; });
+    const coolBoards = plan.boards.filter(function (bo) { return bo.kind === "cool"; })
+      .sort(function (a, c) { return Math.abs(a.level - 2.4) - Math.abs(c.level - 2.4); });
+    if (cold.length && coolBoards.length) {
+      fillBoards(plan, coolBoards, cold, 2, 7, 0.3);        // (a third of the store's budget at most)
+      for (const n of cold) used.add(n);
     }
-    // A STORE HAS A GOODS BUDGET. Past it, the rows BEHIND the front facing go
-    // first, evenly across the whole store (every k-th kept), so no shelf reads
-    // emptier than its neighbour and the faced-up front row is never touched.
-    if (plan.goods.length > GOODS_BUDGET) {
-      let backs = 0;
-      for (const g of plan.goods) if (g.back) backs++;
-      const over = plan.goods.length - GOODS_BUDGET;
-      if (backs > 0) {
-        const keepFrac = Math.max(0, 1 - over / backs);
-        let acc = 0;
-        plan.goods = plan.goods.filter(function (g) {
-          if (!g.back) return true;
-          acc += keepFrac;
-          if (acc >= 1) { acc -= 1; return true; }
-          return false;
-        });
+    // the hot case on the counter: two tiers, three a tier
+    if (plan.warmer) {
+      const hot = names.filter(function (n) { return HOT[n]; });
+      const W = plan.warmer;
+      for (let i = 0; i < 6 && hot.length; i++) {
+        const name = hot[i % hot.length], tier = (i / 3) | 0, col = i % 3;
+        const l = W.l + (col - 1) * 0.26, d = W.d + 0.02;
+        newSlot(plan, name, null, [{ lx: F.x(d, l), ly: W.top + (tier ? 0.252 : 0.05), lz: F.z(d, l), yaw: Math.atan2(-F.inx, -F.inz) }]).clr = 0.17;
       }
+      for (const n of hot) used.add(n);
     }
-    // the coffee station's own things: two carafes on the warmers, cup stacks
+    // the coffee station: a row of cups by the brewer
     if (plan.coffee) {
-      const C = plan.coffee, l = C.s * (F.Ti - 0.3), y = plan.FY + 0.92;
-      const yaw = Math.atan2(-C.s * F.tx, -C.s * F.tz);
-      for (let i = 0; i < 2; i++) {
-        const d = C.d0 + 0.38 + i * 0.22, p = { x: F.x(d, l), z: F.z(d, l) };
-        plan.goods.push({ key: "bottle:" + CELL.carafe, x: p.x, y: y + 0.03, z: p.z, yaw: yaw, sx: 0.15, sy: 0.22, sz: 0.15, color: 0xffffff });
-      }
-      for (let i = 0; i < 3; i++) {
-        const d = C.d0 + 1.9 + i * 0.13, p = { x: F.x(d, l), z: F.z(d, l) };
-        plan.goods.push({ key: "cyl:" + CELL.pills, x: p.x, y: y, z: p.z, yaw: 0, sx: 0.09, sy: 0.3 + 0.05 * i, sz: 0.09, color: [0x8c1f3f, 0x2a64a8, 0x3b2f2a][i] });
+      for (const name of names) {
+        if (!BREW[name]) continue;
+        const C = plan.coffee, l = C.s * (F.Ti - 0.34), d = C.d0 + 1.35;
+        for (let u = 0; u < 4; u++) {
+          const dd = d + u * 0.11;
+          newSlot(plan, name, null, [{ lx: F.x(dd, l), ly: plan.FY + 0.92, lz: F.z(dd, l), yaw: Math.atan2(-C.s * F.tx, -C.s * F.tz) }]).clr = 0.3;
+        }
+        used.add(name);
       }
     }
+    // everything else down the boards: the tables first (a phone shop's
+    // handsets), then eye level, then the levels either side of it, the deck
+    // and the top board last — the budget runs out up there, not mid-aisle.
+    const dry = names.filter(function (n) { return !used.has(n) && !COLD[n] && !HOT[n] && !BREW[n]; });
+    // (a cold product with no cooler to stand in goes on a board like the rest)
+    if (!coolBoards.length) for (const n of cold) if (!used.has(n)) dry.push(n);
+    const RANK = { wall: [3, 1, 0, 2, 4], gond: [3, 1, 0, 2], cap: [2, 1, 0] };
+    const pool = plan.boards.filter(function (bo) { return bo.kind !== "cool"; });
+    pool.sort(function (a, c) {
+      const ra = a.kind === "table" ? -1 : (RANK[a.kind] || [])[a.level], rc = c.kind === "table" ? -1 : (RANK[c.kind] || [])[c.level];
+      return (ra == null ? 9 : ra) - (rc == null ? 9 : rc) || (a.kind === "cap") - (c.kind === "cap") || a.d - c.d;
+    });
+    fillBoards(plan, pool, dry, 2, 13);
+    for (const sl of plan.slots) { const u = sl.units[0]; sl.lx = u.lx; sl.ly = u.ly; sl.lz = u.lz; }
   }
 
   /* WORLD COORDINATES ARE A DERIVED, REFRESHABLE FACT. */
@@ -1150,6 +874,17 @@
       // a lid + sugar caddy
       fbox(kit, F, "fix", C.d0 + 1.0, s * (F.Ti - 0.25), FY + 0.92, 0.26, 0.2, 0.1, 0x2a2d31);
       fbox(kit, F, "fix", C.d0 + 2.36, s * (F.Ti - 0.25), FY + 0.92, 0.18, 0.18, 0.12, COL.steel);
+      // the station's own kit (not stock): two glass carafes on the plates
+      // and the sleeves of empty cups in their dispenser
+      for (let i = 0; i < 2; i++) {
+        const cd = C.d0 + 0.38 + i * 0.22, cl = s * (F.Ti - 0.3);
+        fbox(kit, F, "fix", cd, cl, FY + 0.95, 0.13, 0.13, 0.12, 0x3b2417);                         // the coffee in the pot
+        fbox(kit, F, "glass", cd, cl, FY + 1.07, 0.14, 0.14, 0.08, 0xd9e6ea);                      // the glass over it
+        fbox(kit, F, "fix", cd, cl, FY + 1.15, 0.10, 0.10, 0.03, COL.black);                       // the lid
+        fbox(kit, F, "fix", cd, cl + s * 0.09, FY + 1.0, 0.03, 0.04, 0.1, COL.black);              // the handle
+      }
+      fbox(kit, F, "fix", C.d0 + 1.95, s * (F.Ti - 0.2), FY + 0.92, 0.36, 0.14, 0.42, COL.black);   // the cup dispenser
+      for (let i = 0; i < 3; i++) fbox(kit, F, "fix", C.d0 + 1.83 + i * 0.12, s * (F.Ti - 0.28), FY + 1.34, 0.09, 0.09, 0.16, 0xf4f1ea);
     }
     // ---- display tables: a lacquered top on a plinth with a lit edge ----
     for (const t of plan.tables || []) {
@@ -1203,111 +938,51 @@
   }
 
   const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _s = new THREE.Vector3(), _e = new THREE.Euler();
-  function drawGoods(plan, group) {
-    const byKey = Object.create(null);
-    for (const g of plan.goods) (byKey[g.key] || (byKey[g.key] = [])).push(g);
+  const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+
+  /* ---- THE STOCK, INSTANCED PER PRODUCT -------------------------------------
+     One product = one InstancedMesh over its baked model, one instance per
+     unit on the shelves. A unit that leaves the shelf is a zero matrix; the
+     restock puts the matrix back. However deep the stock, a store is one
+     draw call per product it sells. */
+  // the day's restock, read lazily: a column refills when the day turns
+  function onShelf(sl) {
+    const d = today();
+    if (sl.day !== d) { sl.day = d; sl.left = Math.max(0, sl.units.length - (sl.held | 0)); }
+    return sl.left;
+  }
+  // the unit a hand takes: the front-most one still standing
+  function frontUnit(sl) { return sl.units[sl.units.length - onShelf(sl)] || null; }
+  function unitMatrix(u, out) {
+    _v.set(u.lx, u.ly, u.lz); _e.set(0, u.yaw, 0); _q.setFromEuler(_e); _s.set(1, 1, 1);
+    return out.compose(_v, _q, _s);
+  }
+  function syncSlot(sl) {
+    const pr = sl.plan && sl.plan.prod[sl.name];
+    if (!pr || !pr.mesh || sl.base == null) return;
+    const left = onShelf(sl), n = sl.units.length;
+    for (let k = 0; k < n; k++) pr.mesh.setMatrixAt(sl.base + k, k >= n - left ? unitMatrix(sl.units[k], _m4) : ZERO);
+    pr.mesh.instanceMatrix.needsUpdate = true;
+  }
+  function drawStock(plan, group) {
     const M = mats(), out = [];
-    const col = new THREE.Color();
-    for (const key in byKey) {
-      const list = byKey[key], sp = key.split(":");
-      const geo = goodsGeo(sp[0], +sp[1]);
-      const im = new THREE.InstancedMesh(geo, M.goods, list.length);
-      for (let i = 0; i < list.length; i++) {
-        const g = list[i];
-        _v.set(g.x, g.y, g.z); _e.set(0, g.yaw, 0); _q.setFromEuler(_e); _s.set(g.sx, g.sy, g.sz);
-        _m4.compose(_v, _q, _s);
-        im.setMatrixAt(i, _m4);
-        im.setColorAt(i, col.setHex(g.color));
-      }
-      im.instanceMatrix.needsUpdate = true;
-      if (im.instanceColor) im.instanceColor.needsUpdate = true;
-      im.frustumCulled = false;                   // instances span the store; the geometry sphere does not
+    const by = Object.create(null);
+    for (const sl of plan.slots) (by[sl.name] || (by[sl.name] = [])).push(sl);
+    for (const name in by) {
+      const P = protoOf(name), list = by[name];
+      if (!P) continue;
+      let count = 0;
+      for (const sl of list) { sl.base = count; count += sl.units.length; }
+      const im = new THREE.InstancedMesh(P.geo, M.stock, count);
+      im.frustumCulled = false;                 // the instances span the store; the geometry's sphere does not
       im.castShadow = false; im.receiveShadow = false;
       im.matrixAutoUpdate = false; im.updateMatrix();
+      im.userData.storeGood = name;
+      plan.prod[name] = { mesh: im, slots: list, day: today() };
+      for (const sl of list) syncSlot(sl);
       group.add(im); out.push(im);
     }
     return out;
-  }
-
-  /* ---- THE REAL STOCK, MERGED PER PRODUCT ---------------------------------
-     One product = one model (CBZ.itemAsset), baked once per name into parts
-     (geometry per material, at the model's REAL size). Every facing of that
-     product in a store is merged into one mesh per material, and rebuilt when
-     a unit leaves or comes back. ~4 draw calls a product, not 4 per unit. */
-  const PARTS = Object.create(null);
-  const SMAX = 0.5, TINY = 0.08, TPOW = 0.6;
-  function partsOf(name) {
-    if (PARTS[name] !== undefined) return PARTS[name];
-    PARTS[name] = null;
-    if (!CBZ.itemAsset) return null;
-    let o = null;
-    try { o = CBZ.itemAsset(name); } catch (err) { o = null; }
-    if (!o) return null;
-    o.updateMatrixWorld(true);
-    const bb = new THREE.Box3().setFromObject(o);
-    if (!isFinite(bb.min.x) || !isFinite(bb.max.x)) return null;
-    const m = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z);
-    let k = 1;
-    if (m > 1e-4) {
-      if (m > SMAX) k = SMAX / m;
-      else if (m < TINY) k = Math.min(TINY / m, Math.pow(TINY / m, TPOW));   // earrings stay small, not invisible
-    }
-    const byMat = new Map();
-    const fix = new THREE.Matrix4().makeScale(k, k, k).multiply(new THREE.Matrix4().makeTranslation(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2));
-    o.traverse(function (ms) {
-      if (!ms.isMesh || !ms.geometry || !ms.material || Array.isArray(ms.material)) return;
-      let g = ms.geometry.clone();
-      if (g.index) g = g.toNonIndexed();
-      const keep = { position: 1, normal: 1, uv: !!ms.material.map };
-      for (const a in g.attributes) if (!keep[a]) g.deleteAttribute(a);
-      if (!g.attributes.normal) g.computeVertexNormals();
-      if (ms.material.map && !g.attributes.uv) g.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
-      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(fix, ms.matrixWorld));
-      const arr = byMat.get(ms.material) || [];
-      arr.push(g); byMat.set(ms.material, arr);
-    });
-    const parts = [];
-    const BGU = THREE.BufferGeometryUtils;
-    byMat.forEach(function (arr, mat) {
-      let g = null;
-      if (arr.length === 1) g = arr[0];
-      else if (BGU && BGU.mergeBufferGeometries) { try { g = BGU.mergeBufferGeometries(arr, false); } catch (err) { g = null; } }
-      if (g) parts.push({ geo: g, mat: mat });
-      else for (const a of arr) parts.push({ geo: a, mat: mat });
-    });
-    const h = (bb.max.y - bb.min.y) * k;
-    PARTS[name] = parts.length ? { parts: parts, h: h } : null;
-    return PARTS[name];
-  }
-  function slotAvailable(sl) { return !sl.taken || sl.tookDay !== today(); }
-  function buildReal(plan, name) {
-    const prev = plan.real[name];
-    if (prev) for (const m of prev) { if (m.parent) m.parent.remove(m); try { m.geometry.dispose(); } catch (err) {} }
-    plan.real[name] = [];
-    if (!plan.group) return;
-    const P = partsOf(name);
-    if (!P) return;
-    const BGU = THREE.BufferGeometryUtils;
-    for (const part of P.parts) {
-      const geos = [];
-      for (const sl of plan.slots) {
-        if (sl.name !== name || !slotAvailable(sl)) continue;
-        const kk = P.h > sl.clr - 0.01 && P.h > 0 ? Math.max(0.3, (sl.clr - 0.01) / P.h) : 1;
-        _v.set(sl.lx, sl.ly, sl.lz); _e.set(0, sl.yaw, 0); _q.setFromEuler(_e); _s.set(kk, kk, kk);
-        _m4.compose(_v, _q, _s);
-        geos.push(part.geo.clone().applyMatrix4(_m4));
-      }
-      if (!geos.length) continue;
-      let g = geos[0];
-      if (geos.length > 1 && BGU && BGU.mergeBufferGeometries) { try { g = BGU.mergeBufferGeometries(geos, false) || geos[0]; } catch (err) { g = geos[0]; } }
-      const mesh = new THREE.Mesh(g, part.mat);
-      mesh.castShadow = false; mesh.receiveShadow = false;
-      mesh.matrixAutoUpdate = false; mesh.updateMatrix();
-      mesh.userData.storeGood = name;
-      (plan.goodsGroup || plan.group).add(mesh);
-      plan.real[name].push(mesh);
-    }
-    for (const sl of plan.slots) if (sl.name === name) sl.obj = slotAvailable(sl) && plan.real[name].length ? plan.real[name] : null;
   }
 
   function buildPlan(plan) {
@@ -1327,8 +1002,7 @@
     plan.fixGroup = fix; plan.goodsGroup = goods;
     const kit = Kit(plan.FY);
     try { drawFixtures(plan, kit); } catch (err) { /* a half-drawn fixture set still stands */ }
-    plan.meshes = kit.finish(fix).concat(drawGoods(plan, goods));
-    for (const name of plan.names) buildReal(plan, name);
+    plan.meshes = kit.finish(fix).concat(drawStock(plan, goods));
     plan.cols = fixtureCols(plan);
     if (plan.cols.length && CBZ.colliders) {
       for (const c of plan.cols) { c.ref = grp; CBZ.colliders.push(c); }
@@ -1341,12 +1015,11 @@
     if (!plan.built) return;
     if (plan.group && plan.group.parent) plan.group.parent.remove(plan.group);
     for (const m of plan.meshes) {
-      // fixture geometry is per store; goods geometry and every material are shared
+      // fixture geometry is per store; a product's geometry and every material are shared
       if (m.isInstancedMesh) { try { m.dispose(); } catch (err) {} }
       else { try { m.geometry.dispose(); } catch (err) {} }
     }
-    for (const k in plan.real) for (const m of plan.real[k]) { try { m.geometry.dispose(); } catch (err) {} }
-    plan.real = Object.create(null);
+    plan.prod = Object.create(null);
     plan.meshes = [];
     if (plan.cols.length && CBZ.colliders) {
       const set = new Set(plan.cols), C = CBZ.colliders;
@@ -1357,23 +1030,21 @@
     }
     plan.cols = [];
     plan.group = null; plan.fixGroup = null; plan.goodsGroup = null;
-    for (let i = 0; i < plan.slots.length; i++) plan.slots[i].obj = null;
     plan.built = false;
   }
   function teardownAll() { for (let i = 0; i < PLANS.length; i++) teardownPlan(PLANS[i]); S.live.length = 0; }
 
-  // take one unit off the shelf (bought or pocketed): it leaves the shelf
+  // one unit off the shelf and into a hand (bought, pocketed or carried to
+  // the till): the front one goes, the column behind it stays
   function clearSlot(sl) {
-    sl.taken = true; sl.tookDay = today();
-    const p = sl.plan;
-    if (p && p.built) buildReal(p, sl.name);
-    sl.obj = null;
+    if (onShelf(sl) <= 0) return false;
+    sl.left--; sl.held = (sl.held | 0) + 1;
+    syncSlot(sl);
+    return true;
   }
 
   CBZ.onUpdate(37.6, function (dt) {
     const g = CBZ.game;
-    // (the islands: their shelves come through CBZ.islandVenue; Gang City's
-    //  shelves stand only in Gang City)
     // Gang City's shelves stand only in Gang City; an island's (mounted by
     // world/island_shops.js through CBZ.storeGoodsMount) wherever money is real
     const econ = !!g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city");
@@ -1405,18 +1076,19 @@
     const dOf = new Map();
     for (let i = 0; i < near.length; i++) dOf.set(near[i][1], near[i][0]);
     let builtThisTick = false;
+    const day = today();
     for (let i = 0; i < PLANS.length; i++) {
       const p = PLANS[i];
       if (want.indexOf(p) < 0) { if (p.built) teardownPlan(p); continue; }
-      // ONE store built per scan: a store is a few thousand boxes of stock
+      // ONE store built per scan: a store is a thousand units of stock
       if (!p.built) { if (builtThisTick) continue; buildPlan(p); builtThisTick = true; }
       else {
-        // a name the day-count restocked comes back without a rebuild of the store
-        for (const name of p.names) {
-          if (!partsOf(name)) continue;           // no model: nothing to restock
-          let missing = false;
-          for (const sl of p.slots) if (sl.name === name && !sl.obj && slotAvailable(sl)) { missing = true; break; }
-          if (missing) buildReal(p, name);
+        // the day turned while the store stood: the shelves are faced up again
+        for (const name in p.prod) {
+          const pr = p.prod[name];
+          if (pr.day === day) continue;
+          pr.day = day;
+          for (const sl of pr.slots) syncSlot(sl);
         }
       }
       // BUILT IS NOT DRAWN: the goods show only once you are close enough to
@@ -1465,7 +1137,7 @@
       if (Math.abs(p.cx - px) > 40 || Math.abs(p.cz - pz) > 40) continue;
       for (let k = 0; k < p.slots.length; k++) {
         const sl = p.slots[k];
-        if (!sl.obj && !sl._held) continue;
+        if (!(sl.held > 0) && onShelf(sl) <= 0) continue;
         const d = Math.hypot(sl.x - px, sl.z - pz);
         if (d < bd) { bd = d; best = sl; }
       }
@@ -1483,23 +1155,20 @@
   function priceOf(name) { const e = econ(); return (e && e.buyPrice) ? e.buyPrice(name) : 0; }
   function note(t, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(t, s); }
 
-  /* THE ONE SLOT, IN THE HAND (systems/verbs_pickup.js). A shelf's stock is
-     one merged mesh per product, so the unit you take is stood up as its own
-     little object on the slot (the same parts, the same slot transform
-     buildReal uses) for the length of the reach: the hand closes on it, it
-     comes off the shelf in the hand, and on that grab frame the shelf is
-     rebuilt without it. Nothing is merged twice: the stand-up is hidden (the
-     merged shelf still draws the unit) until the hand has it. */
+  /* THE ONE UNIT, IN THE HAND (systems/verbs_pickup.js). A product's stock
+     is one InstancedMesh, so the unit you take is stood up as its own little
+     object (the same baked model, the same unit transform) for the length of
+     the reach: the hand closes on it, it comes off the shelf in the hand, and
+     on that grab frame its instance goes to zero. The stand-up is hidden (the
+     shelf still draws the unit) until the hand has it. */
   function slotObject(sl) {
-    const p = sl.plan, Pt = partsOf(sl.name);
+    const p = sl.plan, P = protoOf(sl.name), u = frontUnit(sl);
     const parent = p && (p.goodsGroup || p.group);
-    if (!Pt || !parent) return null;
+    if (!P || !parent || !u) return null;
     const g = new THREE.Group();
-    const kk = Pt.h > sl.clr - 0.01 && Pt.h > 0 ? Math.max(0.3, (sl.clr - 0.01) / Pt.h) : 1;
-    g.position.set(sl.lx, sl.ly, sl.lz);
-    g.rotation.set(0, sl.yaw, 0);
-    g.scale.setScalar(kk);
-    for (const part of Pt.parts) g.add(new THREE.Mesh(part.geo, part.mat));
+    g.position.set(u.lx, u.ly, u.lz);
+    g.rotation.set(0, u.yaw, 0);
+    g.add(new THREE.Mesh(P.geo, mats().stock));
     g.visible = false;
     parent.add(g);
     return g;
@@ -1518,9 +1187,9 @@
 
   // (the harness's straight purchase: the unit off the shelf, paid for)
   function buySlot(sl) {
-    if (!sl || !sl.obj || sl._taking || !CBZ.cityShopAcquire) return;
+    if (!sl || onShelf(sl) <= 0 || sl._taking || !CBZ.cityShopAcquire) return;
     if (!CBZ.cityShopAcquire(sl.lot, sl.name, 1, null)) return;
-    byHand(sl, function () { clearSlot(sl); });
+    byHand(sl, function () { if (clearSlot(sl)) sl.held--; });
   }
 
   /* THE SHELF IS A REAL SHOP'S SHELF. You take the unit off it (it is in
@@ -1563,26 +1232,25 @@
     return {
       name: name, price: priceOf(name), slot: sl,
       // rung up: the goods in your bag the way the counter menu hands them over
-      onPay: function () { sl._held = false; if (CBZ.cityShopAcquire) CBZ.cityShopAcquire(lot, name, 1, { free: true, bought: true }); },
-      onSteal: function () { sl._held = false; if (CBZ.cityShopAcquire) CBZ.cityShopAcquire(lot, name, 1, { free: true }); },
+      onPay: function () { sl.held = Math.max(0, (sl.held | 0) - 1); if (CBZ.cityShopAcquire) CBZ.cityShopAcquire(lot, name, 1, { free: true, bought: true }); },
+      onSteal: function () { sl.held = Math.max(0, (sl.held | 0) - 1); if (CBZ.cityShopAcquire) CBZ.cityShopAcquire(lot, name, 1, { free: true }); },
       // back on the shelf (put back, or you went down with it)
-      onReturn: function () { sl._held = false; restoreSlot(sl); },
+      onReturn: function () { restoreSlot(sl); },
     };
   }
   function restoreSlot(sl) {
-    sl.taken = false; sl.tookDay = -1;
-    const p = sl.plan;
-    if (p && p.built) buildReal(p, sl.name);
+    sl.held = Math.max(0, (sl.held | 0) - 1);
+    if (onShelf(sl) < sl.units.length) sl.left++;
+    syncSlot(sl);
   }
   function takeSlot(sl) {
-    if (!sl || !sl.obj || sl._taking) return;
+    if (!sl || onShelf(sl) <= 0 || sl._taking) return;
     const T = ledgerOf(sl.plan);
     if (!T) return;
     // one store's goods in your hands at a time: the last store's go back
     for (const q of PLANS) if (q !== sl.plan && q.till && q.till.held.length) q.till.dropAll();
     byHand(sl, function () {
-      clearSlot(sl);
-      sl._held = true;
+      if (!clearSlot(sl)) return;
       T.hold(itemOf(sl));
       if (CBZ.sfx) CBZ.sfx("pickup");
     });
@@ -1631,13 +1299,13 @@
         {
           id: "storegoods-take", slot: "e",
           label: "Take",
-          canShow: function (t) { return !!(t && !t.pay && t.obj); },
+          canShow: function (t) { return !!(t && !t.pay && onShelf(t) > 0); },
           onSelect: function (t) { takeSlot(t); },
         },
         {
           id: "storegoods-putback", slot: "e",
           label: "Put back",
-          canShow: function (t) { return !!(t && !t.pay && t._held); },
+          canShow: function (t) { return !!(t && !t.pay && t.held > 0 && onShelf(t) <= 0); },
           onSelect: function (t) { putBack(t); },
         },
       ],
@@ -1679,10 +1347,19 @@
       const p = S.live[i];
       for (let k = 0; k < p.slots.length; k++) {
         const sl = p.slots[k];
-        if (sl.obj && sl.name === name) { buySlot(sl); return true; }
+        if (sl.name === name && onShelf(sl) > 0) { buySlot(sl); return true; }
       }
     }
     return false;
+  };
+  // the lab's handle (tools/lab/storeshelf.js): stand a mounted plan up now,
+  // with no player and no tick, so a turntable can photograph a shop floor
+  CBZ.storeGoodsBuildNow = function (plan) {
+    if (!plan) return false;
+    refreshWorld(plan);
+    buildPlan(plan);
+    if (plan.goodsGroup) plan.goodsGroup.visible = true;
+    return !!plan.built;
   };
   CBZ.cityStoreGoodsAudit = function () {
     let shelves = 0, slots = 0, standing = 0, goods = 0, meshes = 0;
@@ -1691,9 +1368,9 @@
       const p = PLANS[i];
       shelves += p.boards.length;
       slots += p.slots.length;
-      goods += p.goods.length;
+      goods += p.units;
       kinds[p.kind] = (kinds[p.kind] | 0) + 1;
-      for (let k = 0; k < p.slots.length; k++) if (p.slots[k].obj) standing++;
+      for (let k = 0; k < p.slots.length; k++) standing += onShelf(p.slots[k]);
       if (p.group) p.group.traverse(function (m) { if (m.isMesh) meshes++; });
     }
     return { stores: PLANS.length, kinds: kinds, shelves: shelves, slots: slots, standing: standing,
@@ -1709,12 +1386,12 @@
     }
     if (!best) return null;
     let standing = 0, mesh = 0;
-    for (let k = 0; k < best.slots.length; k++) if (best.slots[k].obj) standing++;
+    for (let k = 0; k < best.slots.length; k++) standing += onShelf(best.slots[k]);
     if (best.group) best.group.traverse(function (m) { if (m.isMesh) mesh++; });
     return { kind: best.kind, dist: Math.round(bd * 10) / 10, names: best.names.slice(),
              shelves: best.boards.length, runs: best.runs.length, lanes: best.lanes.length,
              cooler: !!best.cooler, coffee: !!best.coffee, warmer: !!best.warmer,
-             slots: best.slots.length, standing: standing, goods: best.goods.length,
+             slots: best.slots.length, standing: standing, units: best.units, tris: best.tris,
              meshes: mesh, built: !!best.built };
   };
 })();

@@ -1433,14 +1433,12 @@
       if (!B.clear(F.x(la - s * 0.1, (d0 + d1) / 2), F.z(la - s * 0.1, (d0 + d1) / 2), 0.05)) continue;
       const y = B.fy;
       P.span(B, 0, 2.4, 0, 0.02, y + 0.9, 1.4, 0xa88258);
-      const tools = [0xb3342e, 0x8a9098, 0xe8c23a, 0x2a2d31, 0x3a6ea5];
+      // the peg hooks, bare: a shelf holds nothing or a real catalog item
+      // (city/storegoods.js stands the hardware store's real stock), and the
+      // painted hammers and blister packs that hung here could not be bought
       for (let r2 = 0; r2 < 3; r2++) for (let i = 0; i < 5; i++) {
         const u = 0.3 + i * 0.45, yy = y + 1.05 + r2 * 0.42;
-        const c = tools[(i + r2) % tools.length];
-        const k = (i + r2 * 2) % 3;
-        if (k === 0) { P.span(B, u - 0.02, u + 0.02, 0.02, 0.05, yy, 0.26, 0x6a4a2a); P.span(B, u - 0.07, u + 0.07, 0.02, 0.06, yy + 0.24, 0.05, c); }   // hammer
-        else if (k === 1) P.span(B, u - 0.02, u + 0.02, 0.02, 0.04, yy, 0.3, c);                                                                       // wrench/driver
-        else P.span(B, u - 0.1, u + 0.1, 0.02, 0.08, yy + 0.06, 0.14, c);                                                                                 // packaged goods
+        P.span(B, u - 0.006, u + 0.006, 0.02, 0.1, yy + 0.24, 0.012, 0x8a9098);
       }
       return;
     }
