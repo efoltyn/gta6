@@ -771,10 +771,64 @@
     barRun(leaf, lc, -DOOR_W / 2 + 0.07, DOOR_W / 2 - 0.07, 0, 0.03, LEAF_TOP);
     faceBox(leaf, lc, -DOOR_W / 2 + 0.035, (0.03 + LEAF_TOP) / 2, 0, 0.07, LEAF_TOP - 0.03, 0.1);   // stiles
     faceBox(leaf, lc, DOOR_W / 2 - 0.035, (0.03 + LEAF_TOP) / 2, 0, 0.07, LEAF_TOP - 0.03, 0.1);
+    /* THE HARDWARE a barred slider actually carries (2026-10-31; it was a
+       bare box on the stile with two slivers for keyways):
+         · a LOCK CASE on the lock stile — a surface case with a bevelled
+           face plate each side, a round key escutcheon and a turned
+           cylinder in it, and a vertical PULL on stand-offs on the corridor
+           face (the officer slides the leaf by it once the device releases);
+         · a FOOD PASS / CUFF PORT at waist height: a welded frame through
+           the bars with a hinged flap on the corridor side, two knuckles
+           on its bottom edge and a slide bolt on the top;
+         · a solid KICK PANEL across the foot of the leaf, which is where a
+           real one takes its boots and its mop bucket;
+         · ROLLER HANGERS: a strap up into the housing, a wheel on its axle. */
     const lockT = c.flip ? -DOOR_W / 2 + 0.12 : DOOR_W / 2 - 0.12;  // the stile that meets the jamb
-    faceBox(leaf, lc, lockT, 1.12, 0, 0.16, 0.34, 0.12);           // lock box
-    for (const o of [-0.065, 0.065]) faceBox(leaf, lc, lockT, 1.18, o, 0.03, 0.05, 0.012);   // keyways
-    for (const tt of [-DOOR_W / 2 + 0.2, DOOR_W / 2 - 0.2]) faceBox(leaf, lc, tt, LEAF_TOP + 0.08, 0, 0.06, 0.16, 0.05);  // roller hangers
+    const inT = c.flip ? 1 : -1;                                     // from the lock stile toward the leaf's middle
+    // a disc normal to the face, centred `off` out of it
+    const faceDisc = (t, y, off, r, len, seg) => {
+      const g = new THREE.CylinderGeometry(r, r, len, seg || 14);
+      if (lc.dx !== 0) g.rotateZ(Math.PI / 2); else g.rotateX(Math.PI / 2);
+      const x = lc.dx !== 0 ? lc.dx * off : t, z = lc.dx !== 0 ? t : lc.dz * off;
+      g.translate(x, y + LIFT, z);
+      leaf.push(g);
+    };
+    faceBox(leaf, lc, lockT, 1.12, 0, 0.17, 0.40, 0.11);           // lock case
+    for (const s of [-1, 1]) {
+      faceBox(leaf, lc, lockT, 1.12, s * 0.058, 0.20, 0.44, 0.008);  // face plates, proud of the case
+      faceBox(leaf, lc, lockT, 1.12, s * 0.064, 0.18, 0.42, 0.006);  // bevel step
+      faceDisc(lockT, 1.20, s * 0.072, 0.032, 0.012);                // escutcheon
+      faceDisc(lockT, 1.20, s * 0.08, 0.018, 0.012, 10);             // cylinder
+      faceBox(leaf, lc, lockT, 1.20, s * 0.087, 0.004, 0.02, 0.004); // keyway slot
+    }
+    // the pull, corridor side, inboard of the case
+    const pullT = lockT + inT * 0.17;
+    faceBox(leaf, lc, pullT, 1.12, 0.10, 0.026, 0.42, 0.026);
+    for (const y of [0.93, 1.31]) faceBox(leaf, lc, pullT, y, 0.075, 0.02, 0.02, 0.05);
+    // the food pass: frame through the bars, flap on the corridor face
+    const fpT = c.flip ? 0.12 : -0.12, FPW = 0.42, FPH = 0.17, FPY = 1.02;
+    for (const s of [-1, 1]) {
+      faceBox(leaf, lc, fpT, FPY + s * (FPH / 2 + 0.025), 0, FPW + 0.1, 0.05, 0.09);   // frame rails
+      faceBox(leaf, lc, fpT + s * (FPW / 2 + 0.025), FPY, 0, 0.05, FPH, 0.09);          // frame stiles
+    }
+    faceBox(leaf, lc, fpT, FPY, 0.055, FPW, FPH, 0.012);                                // the flap
+    for (const s of [-1, 1]) {                                                         // hinge knuckles, axis along the face
+      const g = new THREE.CylinderGeometry(0.013, 0.013, 0.08, 8);
+      if (lc.dx !== 0) g.rotateX(Math.PI / 2); else g.rotateZ(Math.PI / 2);
+      const t = fpT + s * 0.13, off = 0.062;
+      g.translate(lc.dx !== 0 ? lc.dx * off : t, FPY - FPH / 2 - 0.012 + LIFT, lc.dx !== 0 ? t : lc.dz * off);
+      leaf.push(g);
+    }
+    faceBox(leaf, lc, fpT, FPY + FPH / 2 - 0.02, 0.07, 0.10, 0.02, 0.016);              // slide bolt
+    faceBox(leaf, lc, fpT + 0.06, FPY + FPH / 2 - 0.02, 0.085, 0.02, 0.04, 0.02);       // its knob
+    // kick panel, between the stiles
+    faceBox(leaf, lc, 0, 0.03 + 0.14, 0, DOOR_W - 0.14, 0.28, 0.012);
+    // roller hangers: strap, axle, wheel
+    for (const tt of [-DOOR_W / 2 + 0.2, DOOR_W / 2 - 0.2]) {
+      faceBox(leaf, lc, tt, LEAF_TOP + 0.06, 0, 0.06, 0.14, 0.012);
+      faceDisc(tt, LEAF_TOP + 0.12, 0, 0.045, 0.03, 14);
+      faceDisc(tt, LEAF_TOP + 0.12, 0, 0.012, 0.06, 8);
+    }
     const leafMesh = mergedMesh(leaf, C_BAR, true, true);
     if (leafMesh) { leafMesh.userData.doorLeaf = "bars"; leafMesh.userData.debrisKind = "metal"; }
     c.bars = leafMesh;
