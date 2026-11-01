@@ -487,7 +487,7 @@
     const H = o.h, rB = o.rBase;
     const parts = [];
     // ---- the bole: flare, taper, a gentle sweep, a thin leader
-    const ys = mid ? [0, 1.2, 6, 12, 17, H] : [0, 0.45, 1.3, 3.2, 6.5, 10, 13.5, 16.5, 18.6, H];
+    const ys = mid ? [0, 1.2, 6, 12, 17, H] : [0, 0.5, 1.6, 5, 10, 14.5, 18, H];
     const swayA = rnd() * Math.PI * 2, sway = o.sway;
     const boleAt = function (y) {
       const t = y / H;
@@ -512,7 +512,10 @@
     // ---- scaffold limbs + secondary boughs
     const N = o.limbs;
     let az = rnd() * Math.PI * 2;
-    const limbSides = mid ? 3 : 6, twigSides = 4, rings = mid ? 2 : 4;
+    // the forks are the near form's luxury: tier 2+ (the quality slider owns
+    // it, as cardDensity owns the leaf cards); a phone gets limbs alone
+    const detail = CBZ.qScale ? CBZ.qScale(0, 1) : 1;
+    const limbSides = mid ? 3 : 5, twigSides = 3, rings = mid ? 2 : 3;
     for (let i = 0; i < N; i++) {
       az += GOLDEN + (rnd() - 0.5) * 0.5;
       const t = i / Math.max(1, N - 1);
@@ -529,7 +532,7 @@
       const r0 = Math.min(boleR(y0) * 0.72, o.limbR * (1 - 0.3 * t));
       const radii = pts.map(function (_, k) { return r0 * (1 - 0.72 * (k / rings)); });
       parts.push(tube(pts, radii, limbSides, 1, 2.6));
-      if (mid) continue;
+      if (mid || detail < 0.5) continue;
       // two (sometimes three) boughs fork off the outer half of the limb
       const forks = 2 + (rnd() < 0.35 ? 1 : 0);
       for (let f = 0; f < forks; f++) {
@@ -1198,56 +1201,80 @@
      against the sky. */
   function palmTrunk(v) {
     return palmOnce("pt" + v, function () {
-      const SEG = 7, parts = [];
+      // A coconut stem: a swollen bole at the foot, a long slender column
+      // that curves toward the light, and the ring of leaf scars every
+      // 10-15 cm that is the trunk's whole texture — carved into the
+      // silhouette (alternating ring radii), not only painted. Unit height
+      // (consumers scale y by the palm's height), radii in metres.
       const bend = [0.10, 0.16, 0.06][v];
       const at = function (t) { return new THREE.Vector3(bend * Math.pow(t, 1.8), t, 0); };
-      const up = new THREE.Vector3(0, 1, 0);
-      for (let i = 0; i < SEG; i++) {
-        const a = at(i / SEG), b = at((i + 1) / SEG);
-        const r0 = 0.20 - 0.07 * (i / SEG) + (i === 0 ? 0.06 : 0), r1 = 0.20 - 0.07 * ((i + 1) / SEG);
-        const len = a.distanceTo(b);
-        const c = new THREE.CylinderGeometry(r1, r0, len * 1.02, 8, 1, true);
-        const uv = c.attributes.uv;
-        for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * 1.5, uv.getY(k) * 0.35 + i * 0.35);
-        const dir = b.clone().sub(a).normalize();
-        c.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir)));
-        c.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
-        parts.push(c);
+      const RINGS = 40, pts = [], radii = [];
+      for (let i = 0; i <= RINGS; i++) {
+        const t = i / RINGS;
+        pts.push(at(t));
+        const base = 0.17 - 0.045 * t + 0.11 * Math.exp(-t / 0.035);          // the bulb at the foot
+        const scar = (i % 2 === 0 && i > 1 && i < RINGS) ? 1.06 : 1.0;          // a collar per scar
+        radii.push(base * scar);
       }
-      const BGU = THREE.BufferGeometryUtils;
-      const g = (BGU && BGU.mergeBufferGeometries && BGU.mergeBufferGeometries(parts, false)) || parts[0];
+      const g = tube(pts, radii, 9, 1.5, 0.4);
       palmRamp(g, 0.62);
       const p = g.attributes.position, col = g.attributes.color;
       for (let i = 0; i < p.count; i++) {
-        const band = 0.5 + 0.5 * Math.cos(p.getY(i) * Math.PI * 2 * 9);
-        const k = 1 - 0.3 * Math.pow(band, 6);
-        col.setXYZ(i, col.getX(i) * k, col.getY(i) * k * 0.98, col.getZ(i) * k * 0.95);
+        const ring = Math.floor(i / 10);
+        const k = (ring % 2 === 0) ? 0.78 : 1.0;                               // dark scar collars
+        const crownshaft = p.getY(i) > 0.95 ? 0.82 : 1;                        // the fibrous boss under the fronds
+        col.setXYZ(i, col.getX(i) * k * crownshaft, col.getY(i) * k * 0.98 * crownshaft, col.getZ(i) * k * 0.92);
       }
       g.userData.top = at(1);
       g.computeBoundingSphere();
       return g;
     });
   }
+  /* THE COCONUT CROWN. A living crown is three things: the YOUNG fronds
+     near the centre, rising steeply; the MATURE fronds, leaving the hub
+     near level and arching over into a hang; the OLD fronds, hanging close
+     down the trunk and going yellow-brown. Each frond is a rachis that
+     integrates its pitch (a real arc), with a leaflet pair at every step
+     whose blades hang in a V off the rachis, longest at mid-frond. A
+     cluster of nuts sits in the leaf axils under the hub. Colours are
+     vertex colours multiplied by the caller's leaf material, so the nuts
+     and dead fronds read warmer than the live leaflets in any tint. */
   function palmCrown(v) {
     return palmOnce("pc" + v, function () {
       const pos = [], col = [];
-      const N = 11, SEG = 17;
-      function tri(a, b, c, ca, cb, cc) {
+      const SEG = 18;
+      function tri(a, b, c, ca, cb, cc, rgb) {
         pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-        col.push(ca, ca, ca * 0.85, cb, cb, cb * 0.85, cc, cc, cc * 0.85);
+        const r = rgb ? rgb[0] : 1, gg = rgb ? rgb[1] : 1, bb = rgb ? rgb[2] : 0.85;
+        col.push(ca * r, ca * gg, ca * bb, cb * r, cb * gg, cb * bb, cc * r, cc * gg, cc * bb);
       }
-      for (let f = 0; f < N; f++) {
-        const yaw = (f / N) * Math.PI * 2 + (h01(f, v, 0x9a1) - 0.5) * 0.35;
-        const len = 2.6 + h01(f, v, 0x9a2) * 0.9;
-        const lift = -0.2 + h01(f, v, 0x9a3) * 0.7;              // start pitch, above/below level
-        const hang = 1.2 + h01(f, v, 0x9a4) * 0.7;               // how hard it droops
-        const dx = Math.cos(yaw), dz = Math.sin(yaw);
-        const sx = -dz, sz = dx;                                   // leaflet side direction
-        // the spine: integrate the pitch so it is a real arc, not a chord
-        const pts = [new THREE.Vector3(0, 0, 0)];
+      const fronds = [];
+      // [count, lift, hang, len, colour]
+      const rings = [
+        [3, 0.85, 0.55, 0.66, null],                              // young, rising
+        [9, 0.10, 1.55, 1.00, null],                              // mature, arching
+        [2, -0.55, 1.15, 0.85, [1.35, 0.95, 0.40]],               // old, hanging, yellowing
+      ];
+      let fi = 0;
+      for (let r = 0; r < rings.length; r++) {
+        const R = rings[r];
+        for (let k = 0; k < R[0]; k++, fi++) {
+          fronds.push({
+            yaw: ((k + (r & 1) * 0.5) / R[0]) * Math.PI * 2 + (h01(fi, v, 0x9a1) - 0.5) * 0.5,
+            len: (3.4 + h01(fi, v, 0x9a2) * 1.2) * R[3],
+            lift: R[1] + (h01(fi, v, 0x9a3) - 0.5) * 0.35,
+            hang: R[2] * (0.8 + h01(fi, v, 0x9a4) * 0.45),
+            rgb: R[4],
+          });
+        }
+      }
+      for (const F of fronds) {
+        const dx = Math.cos(F.yaw), dz = Math.sin(F.yaw);
+        const sx = -dz, sz = dx;
+        const pts = [new THREE.Vector3(dx * 0.12, 0, dz * 0.12)];
         const STEPS = 18;
         for (let s = 1; s <= STEPS; s++) {
-          const u = (s - 0.5) / STEPS, ang = lift - hang * u * u, dl = len / STEPS;
+          const u = (s - 0.5) / STEPS, ang = F.lift - F.hang * u * u, dl = F.len / STEPS;
           const q = pts[s - 1];
           pts.push(new THREE.Vector3(q.x + dx * Math.cos(ang) * dl, q.y + Math.sin(ang) * dl, q.z + dz * Math.cos(ang) * dl));
         }
@@ -1255,21 +1282,39 @@
           const f2 = u * STEPS, i0 = Math.min(STEPS - 1, Math.floor(f2));
           return pts[i0].clone().lerp(pts[i0 + 1], f2 - i0);
         };
+        // the rachis itself, a thin ribbon so the frond has a spine
+        for (let i = 0; i < 6; i++) {
+          const a = spine(i / 6), b = spine((i + 1) / 6), wv = 0.05 * (1 - i / 6);
+          const a2 = a.clone(); a2.y -= wv; const b2 = b.clone(); b2.y -= wv * 0.8;
+          tri(a, b, a2, 0.75, 0.75, 0.6, [1.15, 1.05, 0.6]); tri(b, b2, a2, 0.75, 0.6, 0.6, [1.15, 1.05, 0.6]);
+        }
+        const fold = F.rgb ? 0.9 : 0.62;                    // dead leaflets hang slack
         for (let i = 0; i < SEG; i++) {
-          const u0 = 0.06 + (i / SEG) * 0.94, u1 = 0.06 + ((i + 1) / SEG) * 0.94;
-          // a leaflet is a narrow blade: its base spans only the first half
-          // of the step, so the comb has gaps between blades
-          const a = spine(u0), b = spine(u0 + (u1 - u0) * 0.5);
-          const w = 0.8 * Math.sin(Math.PI * Math.min(1, 0.12 + u0 * 0.95)) + 0.12;   // leaflet length
-          const shade = 0.6 + 0.4 * u0;
+          const u0 = 0.08 + (i / SEG) * 0.92, u1 = 0.08 + ((i + 1) / SEG) * 0.92;
+          const a = spine(u0), b = spine(u0 + (u1 - u0) * 0.55);
+          const w = (1.05 * Math.sin(Math.PI * Math.min(1, 0.10 + u0 * 0.92)) + 0.10) * (F.len / 4);
+          const shade = 0.58 + 0.42 * u0;
           for (let sgn = -1; sgn <= 1; sgn += 2) {
             const tip = new THREE.Vector3(
-              (a.x + b.x) / 2 + sx * sgn * w + dx * w * 0.55,
-              (a.y + b.y) / 2 - w * 0.6,
-              (a.z + b.z) / 2 + sz * sgn * w + dz * w * 0.55);
-            tri(a, b, tip, shade * 0.85, shade * 0.95, shade * 1.1);
+              (a.x + b.x) / 2 + sx * sgn * w * 0.92 + dx * w * 0.42,
+              (a.y + b.y) / 2 - w * fold,
+              (a.z + b.z) / 2 + sz * sgn * w * 0.92 + dz * w * 0.42);
+            tri(a, b, tip, shade * 0.85, shade * 0.95, shade * 1.12, F.rgb);
           }
         }
+      }
+      // the nuts: a cluster of 5-7 low spheres in the axils under the hub
+      const nuts = 5 + ((h01(v, 3, 0x9a5) * 3) | 0);
+      for (let n = 0; n < nuts; n++) {
+        const a = (n / nuts) * Math.PI * 2 + h01(n, v, 0x9a6), rr = 0.20 + h01(n, v, 0x9a7) * 0.08;
+        const c = new THREE.Vector3(Math.cos(a) * rr, -0.22 - h01(n, v, 0x9a8) * 0.18, Math.sin(a) * rr);
+        const sph = new THREE.IcosahedronGeometry(0.14, 0).toNonIndexed();
+        const P = sph.attributes.position;
+        for (let i = 0; i < P.count; i += 3) {
+          const q = [0, 1, 2].map(function (j) { return new THREE.Vector3(P.getX(i + j) + c.x, P.getY(i + j) * 1.15 + c.y, P.getZ(i + j) + c.z); });
+          tri(q[0], q[1], q[2], 0.85, 0.85, 0.85, [1.5, 1.15, 0.45]);
+        }
+        sph.dispose();
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
