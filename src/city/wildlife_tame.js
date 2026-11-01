@@ -280,6 +280,14 @@
       length: 1.5 * fallbackScale,
     };
     if (!group || !THREE.Box3 || !THREE.Matrix4 || !THREE.Vector3) return fallback;
+    // a beast-kit body declares its seat (the back's top line over the
+    // saddle position, group-local): use it rather than the torso's bounding
+    // box, whose top is the withers or a hump, not where a rider sits
+    const ds = group.userData && group.userData.saddle;
+    if (ds && isFinite(ds.y)) {
+      const ks = Math.abs(group.scale.x) || fallbackScale;
+      return { x: ds.x * ks, y: ds.y * ks, width: Math.max(0.48, ds.width * ks), length: ds.width * 2.6 * ks };
+    }
     group.updateMatrixWorld(true);
     const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
     const rel = new THREE.Matrix4(), local = new THREE.Box3();
