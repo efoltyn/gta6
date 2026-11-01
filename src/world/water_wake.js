@@ -360,7 +360,12 @@
         // instead of dissolving into sub-pixel nothing, and capped so a droplet
         // passing the lens cannot fill the frame.
         "  float px = aSize * uPix / max(0.35, -mv.z);",
-        "  gl_PointSize = clamp(px * (0.55 + 0.45 * vStretch), " + DROP_MIN_PX.toFixed(1) + ", 190.0);",
+        // The sprite is the STREAK's length square: the bead's own size along
+        // the travel times the stretch. (It used to grow by only half the
+        // stretch while the fragment kept the full height across the travel,
+        // so a fast drop filled its whole square and drew as a soft-edged
+        // translucent BOX: the squares hanging over a planing boat's wake.)
+        "  gl_PointSize = clamp(px * vStretch, " + DROP_MIN_PX.toFixed(1) + ", 190.0);",
         "}",
       ].join("\n"),
       fragmentShader: [
@@ -373,11 +378,13 @@
         // as ordinary screen space with +y up.
         "  vec2 pc = vec2(gl_PointCoord.x - 0.5, 0.5 - gl_PointCoord.y);",
         "  float ca = cos(vAng), sa = sin(vAng);",
-        "  float rx = (pc.x * ca + pc.y * sa) / vStretch;",   // along travel
-        "  float ry = -pc.x * sa + pc.y * ca;",               // across it
+        // along the travel the streak spans the sprite; across it the bead
+        // keeps its own diameter, 1/vStretch of the sprite
+        "  float rx = pc.x * ca + pc.y * sa;",               // along travel
+        "  float ry = (-pc.x * sa + pc.y * ca) * vStretch;",  // across it
         // ...and the TAIL narrows: a thrown drop is a head with a thread behind
         // it, not a symmetric capsule.
-        "  ry *= 1.0 + max(0.0, -rx) * (vStretch - 1.0) * 2.4;",
+        "  ry *= 1.0 + max(0.0, -rx) * (vStretch - 1.0) * 0.9;",
         "  float d = length(vec2(rx, ry)) * 2.0;",
         "  if (d > 1.0) discard;",
         "  float body = 1.0 - smoothstep(0.30, 1.0, d);",
@@ -1243,13 +1250,24 @@
   // off the pool is what leaves room for the four spray components.
   const RIB_PTS = 96;              // history points per ribbon (~5-15s of wake)
   const RIB_SLOTS = 6;             // hard cap; the live count is qScale'd
-  const RIB_STRIDE = 9;            // x, z, dirX, dirZ, age, halfW, spread, a0, arc
+  const RIB_STRIDE = 12;           // x, z, dirX, dirZ, age, halfW, spread, a0, arc,
+                                   // armOff0, armRate, armA (the Kelvin arms)
+  // THE KELVIN ARMS. Every ribbon point also carries the two diverging crests
+  // of the V, as two more strips in the same mesh: each point's arm sits at
+  // armOff0 + age * spd * tan(19.47deg) either side of where the transom
+  // passed, so the arms are CONTINUOUS lines holding the true Kelvin angle at
+  // any speed. The bow's shed arcs used to be the only V, and from any height
+  // they read as a dotted line of separate dashes. Six vertices a point:
+  // centre pair, port arm pair, starboard arm pair.
+  const RIB_VPP = 6;
+  const ARM_TAU = 2.9;             // arm alpha = exp(-age/ARM_TAU)
   const RIB_TAU = 3.6;             // alpha = exp(-age/TAU)
   const RIB_MAX_AGE = 10.0;        // seconds before a point is retired
   const RIB_UV = 6.0;              // metres of arc per V tile
   const RIB_ARC_WRAP = RIB_UV * 1024;   // an exact tile multiple: wrapping the
                                         // arc accumulator cannot show a seam
 
+  let ribKind = null;
   let ribMesh = null, ribGeo = null, ribMat = null;
   let ribPos = null, ribUv = null, ribA = null;
   const ribSlot = [];
@@ -1284,22 +1302,27 @@
       ribSlot.push(sl);
     }
 
-    const V = RIB_SLOTS * RIB_PTS * 2;          // 1152 — comfortably Uint16
+    const V = RIB_SLOTS * RIB_PTS * RIB_VPP;    // 3456 — comfortably Uint16
     ribPos = new Float32Array(V * 3);
     ribUv = new Float32Array(V * 2);
     ribA = new Float32Array(V);
+    ribKind = new Float32Array(V);
+    for (let v = 0; v < V; v++) ribKind[v] = (v % RIB_VPP) >= 2 ? 1 : 0;
 
     // The index buffer is authored ONCE and never rebuilt: every slot owns a
     // fixed contiguous vertex region and a fixed strip of triangles over it.
-    const segs = RIB_SLOTS * (RIB_PTS - 1);
+    const segs = RIB_SLOTS * (RIB_PTS - 1) * 3;
     const idx = V > 65535 ? new Uint32Array(segs * 6) : new Uint16Array(segs * 6);
     let w = 0;
     for (let s = 0; s < RIB_SLOTS; s++) {
-      const b = s * RIB_PTS * 2;
+      const b = s * RIB_PTS * RIB_VPP;
       for (let k = 0; k < RIB_PTS - 1; k++) {
-        const a0 = b + k * 2, a1 = a0 + 1, b0 = a0 + 2, b1 = a0 + 3;
-        idx[w++] = a0; idx[w++] = b0; idx[w++] = a1;
-        idx[w++] = a1; idx[w++] = b0; idx[w++] = b1;
+        for (let q = 0; q < 3; q++) {           // centre, port arm, starboard arm
+          const a0 = b + k * RIB_VPP + q * 2, a1 = a0 + 1;
+          const b0 = a0 + RIB_VPP, b1 = b0 + 1;
+          idx[w++] = a0; idx[w++] = b0; idx[w++] = a1;
+          idx[w++] = a1; idx[w++] = b0; idx[w++] = b1;
+        }
       }
     }
 
@@ -1307,6 +1330,7 @@
     ribGeo.setAttribute("position", new THREE.BufferAttribute(ribPos, 3).setUsage(THREE.DynamicDrawUsage));
     ribGeo.setAttribute("uv", new THREE.BufferAttribute(ribUv, 2).setUsage(THREE.DynamicDrawUsage));
     ribGeo.setAttribute("aA", new THREE.BufferAttribute(ribA, 1).setUsage(THREE.DynamicDrawUsage));
+    ribGeo.setAttribute("aKind", new THREE.BufferAttribute(ribKind, 1));
     ribGeo.setIndex(new THREE.BufferAttribute(idx, 1));
     ribGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1e6);
 
@@ -1328,10 +1352,12 @@
       blending: THREE.NormalBlending,
       vertexShader: [
         "attribute float aA;",
+        "attribute float aKind;",
         "varying float vA;",
+        "varying float vKind;",
         "varying vec2 vRUv;",
         "void main() {",
-        "  vA = aA;",
+        "  vA = aA; vKind = aKind;",
         "  vRUv = uv;",
         "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
         "}",
@@ -1341,6 +1367,7 @@
         "uniform vec3 uColor;",
         "uniform float uScroll;",
         "varying float vA;",
+        "varying float vKind;",
         "varying vec2 vRUv;",
         "void main() {",
         "  if (vA < 0.004) discard;",
@@ -1355,6 +1382,15 @@
         // same rule water_spec.js's shore functions follow.)
         "  float u = abs(vRUv.x * 2.0 - 1.0);",
         "  float prof = 1.0 - smoothstep(0.12, 1.0, u);",
+        // AN ARM (uv.x 0 inboard .. 1 outboard) is a crest, not a trail: a
+        // sharp leading face outboard, a feathered back inboard, and broken
+        // into a run of short crestlets by the noise (a Kelvin arm is the
+        // envelope of the divergent waves, so it is never one solid line).
+        "  if (vKind > 0.5) {",
+        "    float x = clamp(vRUv.x, 0.0, 1.0);",
+        "    prof = smoothstep(0.0, 0.72, x) * (1.0 - smoothstep(0.80, 1.0, x));",
+        "    churn = clamp(0.30 + (n1 - 0.5) * 2.6 + (n2 - 0.5) * 1.6, 0.0, 1.0);",
+        "  }",
         "  float a = vA * churn * prof;",
         "  if (a < 0.004) discard;",
         "  gl_FragColor = vec4(uColor, a);",
@@ -1377,8 +1413,8 @@
   // Park a whole slot's vertex region on a single point: every triangle in it
   // becomes zero-area, so it is rasterised into exactly nothing.
   function ribCollapse(s) {
-    const base = s * RIB_PTS * 2;
-    for (let k = 0; k < RIB_PTS * 2; k++) {
+    const base = s * RIB_PTS * RIB_VPP;
+    for (let k = 0; k < RIB_PTS * RIB_VPP; k++) {
       const v = base + k;
       ribPos[v * 3] = 0; ribPos[v * 3 + 1] = -9999; ribPos[v * 3 + 2] = 0;
       ribA[v] = 0;
@@ -1423,8 +1459,17 @@
     // turn lays down a narrow ribbon that cannot fold over itself visibly
     b[o + 5] = (st.beam * 0.42 + 0.10) * (0.45 + 0.55 * st.curvK);
     b[o + 6] = (0.40 + st.planing * 0.85) * st.curvK;
-    b[o + 7] = (0.26 + 0.40 * Math.min(1, st.spd / st.planeMs) + st.planing * 0.18) * st.dg;
+    b[o + 7] = Math.min(0.95, (0.34 + 0.48 * Math.min(1, st.spd / st.planeMs) + st.planing * 0.22) * st.dg);
     b[o + 8] = sl.arc;
+    // the arms: the V is already open by the time the bow's crest reaches
+    // the transom (it was shed loa*0.88 upstream), and its strength is the
+    // bow wave's own, ~v^2 and cut by bow-up trim
+    const vN = Math.min(1.6, st.spd / st.planeMs);
+    const trimCut = 1 - Math.min(1, Math.max(0, st.trim) / 0.16) * 0.45;
+    const amp = Math.min(1, vN * vN) * trimCut;
+    b[o + 9] = st.beam * 0.45 + st.loa * 0.88 * TAN_KELVIN * Math.min(1, st.curvK + 0.3);
+    b[o + 10] = st.spd * TAN_KELVIN * st.curvK;
+    b[o + 11] = (0.10 + amp * 0.62) * st.dg * clamp01((st.spd - 1.2) / 3.0);
     sl.head = (sl.head + 1) % RIB_PTS;
     if (sl.n < RIB_PTS) sl.n++;
   }
@@ -1440,6 +1485,7 @@
     const sl = ribClaim(obj, st.camD);
     if (!sl) return;
     sl.ref = obj; sl.seen = 0; sl.camD = st.camD; sl.dirty = true;
+    st.ribArms = true;
 
     // LOW-PASS the heading before the perpendicular is taken: the single most
     // effective mitigation for ribbon self-intersection on hard turns.
@@ -1481,14 +1527,14 @@
     sl.n = n;
     if (n < 2) { ribCollapse(s); sl.dirty = n > 0; return false; }
 
-    const base = s * RIB_PTS * 2;
+    const base = s * RIB_PTS * RIB_VPP;
     let lx = 0, ly = -9999, lz = 0;
     for (let k = 0; k < n; k++) {
       const o = ((start + k) % RIB_PTS) * RIB_STRIDE;
       const px = b[o], pz = b[o + 1], dx = b[o + 2], dz = b[o + 3];
       const age = b[o + 4], hw = b[o + 5];
       // turbulent wakes spread as sqrt(t) and then stop — the 19.47deg
-      // divergence belongs to the Kelvin RINGS, not to the churned trail.
+      // divergence belongs to the Kelvin arms, not to the churned trail.
       let half = hw + Math.sqrt(age) * b[o + 6];
       const cap = hw * 5.0;
       if (half > cap) half = cap;
@@ -1497,7 +1543,7 @@
       const rx = dz, rz = -dx;
       const ax = px - rx * half, az = pz - rz * half;
       const bx = px + rx * half, bz = pz + rz * half;
-      const v0 = base + k * 2, v1 = v0 + 1;
+      const v0 = base + k * RIB_VPP, v1 = v0 + 1;
       // RIDE the live swell, exactly as the foam rings do
       ribPos[v0 * 3] = ax; ribPos[v0 * 3 + 1] = surfY(ax, az) + 0.05; ribPos[v0 * 3 + 2] = az;
       ribPos[v1 * 3] = bx; ribPos[v1 * 3 + 1] = surfY(bx, bz) + 0.05; ribPos[v1 * 3 + 2] = bz;
@@ -1505,13 +1551,36 @@
       ribUv[v0 * 2] = 0; ribUv[v0 * 2 + 1] = vv;
       ribUv[v1 * 2] = 1; ribUv[v1 * 2 + 1] = vv;
       ribA[v0] = a; ribA[v1] = a;
+      // the two arms: centre line at armOff, a crest that broadens slowly as
+      // its waves disperse. One surface sample per arm point; the strip is a
+      // metre or two across, a hundredth of a swell.
+      const armOff = b[o + 9] + age * b[o + 10];
+      const aw = 0.45 + b[o + 11] * 1.1 + Math.sqrt(age) * 0.30;
+      let aa = b[o + 11] * Math.exp(-age / ARM_TAU);
+      if (age < 0.25) aa *= age * 4.0;
+      for (let q = 0; q < 2; q++) {
+        const sg = q === 0 ? -1 : 1;
+        const cx = px + rx * armOff * sg, cz = pz + rz * armOff * sg;
+        const cy = aa > 0.003 ? surfY(cx, cz) + 0.055 : ribPos[v0 * 3 + 1];
+        const wi = base + k * RIB_VPP + 2 + q * 2, wo = wi + 1;   // inboard, outboard
+        const ix = cx - rx * aw * 0.5 * sg, iz = cz - rz * aw * 0.5 * sg;
+        const ox = cx + rx * aw * 0.5 * sg, oz = cz + rz * aw * 0.5 * sg;
+        ribPos[wi * 3] = ix; ribPos[wi * 3 + 1] = cy; ribPos[wi * 3 + 2] = iz;
+        ribPos[wo * 3] = ox; ribPos[wo * 3 + 1] = cy; ribPos[wo * 3 + 2] = oz;
+        // the arm's noise coordinate runs along its own (longer) length
+        const va = vv * 1.6 + q * 0.37;
+        ribUv[wi * 2] = 0; ribUv[wi * 2 + 1] = va;
+        ribUv[wo * 2] = 1; ribUv[wo * 2 + 1] = va;
+        ribA[wi] = aa; ribA[wo] = aa;
+      }
       lx = ribPos[v1 * 3]; ly = ribPos[v1 * 3 + 1]; lz = ribPos[v1 * 3 + 2];
     }
     for (let k = n; k < RIB_PTS; k++) {
-      const v0 = base + k * 2, v1 = v0 + 1;
-      ribPos[v0 * 3] = lx; ribPos[v0 * 3 + 1] = ly; ribPos[v0 * 3 + 2] = lz;
-      ribPos[v1 * 3] = lx; ribPos[v1 * 3 + 1] = ly; ribPos[v1 * 3 + 2] = lz;
-      ribA[v0] = 0; ribA[v1] = 0;
+      for (let j = 0; j < RIB_VPP; j++) {
+        const v = base + k * RIB_VPP + j;
+        ribPos[v * 3] = lx; ribPos[v * 3 + 1] = ly; ribPos[v * 3 + 2] = lz;
+        ribA[v] = 0;
+      }
     }
     sl.dirty = true;
     return true;
@@ -1709,6 +1778,9 @@
     // holds a true 19.47deg half-angle at every speed, for free.
     const vLat = st.spd * TAN_KELVIN;
     const off = st.beam * 0.40 + 0.12;
+    // with the ribbon drawing the arms, an arc only has to be the white
+    // breaking crest at the bow shoulder: short-lived, and not the V itself
+    const armsDrawn = !!st.ribArms;
     for (let k = 0; k < n; k++) {
       for (let s = -1; s <= 1; s += 2) {
         // ...and it is shed as an ARC facing OUTBOARD, not as a full circle.
@@ -1719,8 +1791,8 @@
           st.rx * vLat * s, 0, st.rz * vLat * s,
           0.30 + amp * 0.55 + st.beam * 0.10,
           (0.9 + amp * 1.6) * (0.6 + st.beam * 0.18),
-          1.5 + amp * 1.4,
-          KIND_RING, true, (0.18 + amp * 0.44) * st.dg, 1.0,
+          armsDrawn ? 0.55 + amp * 0.35 : 1.5 + amp * 1.4,
+          KIND_RING, true, (0.18 + amp * 0.44) * st.dg * (armsDrawn ? 0.8 : 1), 1.0,
           Math.atan2(st.rz * s, st.rx * s), 1.05);
       }
     }
@@ -1746,7 +1818,9 @@
           st.rx * (0.5 + st.planing * 0.9) * s - st.fx * 0.25, 0,
           st.rz * (0.5 + st.planing * 0.9) * s - st.fz * 0.25,
           0.26 + st.beam * 0.16, 0.70 + st.beam * 0.22, 1.1 + st.planing * 0.7,
-          KIND_RING, true, al, 0.30);
+          // a WASH (filled boil), not a ring: transom rings read as a row of
+          // little hoops lying in the boat's own track
+          KIND_DROP, true, al, 0.30);
       }
     }
   }
