@@ -194,9 +194,6 @@
     const b = Math.min(255, ((hex & 255) * k) | 0);
     return (r << 16) | (gg << 8) | b;
   }
-  function fmat(hex) {
-    return (CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); })(hex);
-  }
 
   // ---- the HOOD — the harvested head, sized and seated like the photo ------
   // Sizing is three clamps, no taste per species: width targets the discovered
@@ -242,48 +239,91 @@
   // ---- the MANTLE — fur over both shoulders, cord + clasp on the chest -----
   // Every dimension rides CBZ.cityArmorFit's MEASUREMENT of what this rig is
   // actually wearing (the armour-sits-proud law): the mantle is the outermost
-  // layer, 0.04 proud of the vest/jacket plane, so no outfit can stipple it.
+  // layer, proud of the vest/jacket plane, so no outfit can stipple it.
+  // Drawn as lofted shells (CBZ.loftKit): a thick fur yoke that rolls over
+  // both shoulders and droops off their points, a back drape that narrows to
+  // a ragged hem, two chest panels framing the V, and a leather cord to a
+  // pewter clasp — ONE mesh, the fur shaded per vertex (grain, a darker
+  // under-fur, a darker hem), on the bestiary's shared vertex-colour coat.
+  function furCol(furHex, k) { return shade(furHex, Math.max(0.2, k)); }
+  function fgrain(x, y, z) { const v = Math.sin(x * 91.7 + y * 57.3 + z * 73.1) * 43758.55; return 0.88 + 0.22 * (v - Math.floor(v)); }
+  function mantleMat() {
+    if (CBZ.beastKit && CBZ.beastKit.coatMat) return CBZ.beastKit.coatMat();
+    return new THREE.MeshLambertMaterial({ vertexColors: true });
+  }
   function buildMantleMeshes(ch, furHex) {
     const out = [];
-    if (!THREE || !CBZ.boxGeom) return out;
+    const LK = CBZ.loftKit;
+    if (!THREE || !LK) return out;
     const fit = (CBZ.cityArmorFit && ch) ? CBZ.cityArmorFit(ch) : null;
     const vestW = fit ? fit.vest[0] : 1.02;
     const vestD = fit ? fit.vest[2] : 0.62;
     const topY = fit ? Math.max(fit.vestY + fit.vest[1] / 2, fit.padY) : 1.84;
-    const F = fmat(furHex);                 // the coat
-    const D = fmat(shade(furHex, 0.66));    // shadowed under-fur
-    const C = fmat(shade(furHex, 0.38));    // the leather cord
-    const S = fmat(0xc7cdd6);               // the pewter clasp
-    function put(w, h, d, m2, x, y, z, rz, rx) {
-      const mesh = new THREE.Mesh(CBZ.boxGeom(w, h, d), m2);
-      mesh.position.set(x, y, z);
-      if (rz) mesh.rotation.z = rz;
-      if (rx) mesh.rotation.x = rx;
-      mesh.castShadow = false; mesh.receiveShadow = false;
-      mesh.userData.pelt = true;
-      out.push(mesh);
-      return mesh;
-    }
     const sx = vestW / 2 + 0.02, fz = vestD / 2;
-    // shoulders: a deep dark under-slab and a higher coat slab, sloping outward
-    put(0.56, 0.22, vestD + 0.36, D, -sx, topY + 0.06, 0, 0.30, 0);
-    put(0.56, 0.22, vestD + 0.36, D, sx, topY + 0.06, 0, -0.30, 0);
-    put(0.44, 0.18, vestD + 0.22, F, -sx - 0.05, topY + 0.20, 0, 0.42, 0);
-    put(0.44, 0.18, vestD + 0.22, F, sx + 0.05, topY + 0.20, 0, -0.42, 0);
-    // the collar roll behind the neck + the back panel and long drape
-    put(0.58, 0.20, 0.24, F, 0, topY + 0.16, -(fz - 0.04), 0, 0.18);
-    put(vestW + 0.26, 0.52, 0.16, F, 0, topY - 0.14, -(fz + 0.10), 0, 0.10);
-    put(vestW * 0.78, 0.92, 0.10, D, 0, topY - 0.66, -(fz + 0.13), 0, 0.04);
-    // chest fronts framing the V opening
-    put(0.34, 0.46, 0.15, F, -(sx - 0.13), topY - 0.16, fz + 0.06, -0.16, 0);
-    put(0.34, 0.46, 0.15, F, (sx - 0.13), topY - 0.16, fz + 0.06, 0.16, 0);
-    // the cord: two straps meeting at the clasp, tails hanging below it
-    put(0.035, 0.42, 0.03, C, -0.08, topY - 0.10, fz + 0.10, 0.10, 0);
-    put(0.035, 0.42, 0.03, C, 0.08, topY - 0.10, fz + 0.10, -0.10, 0);
-    put(0.12, 0.12, 0.05, S, 0, topY - 0.34, fz + 0.12, 0, 0);
-    put(0.03, 0.60, 0.025, C, -0.035, topY - 0.72, fz + 0.10, 0, 0);
-    put(0.03, 0.60, 0.025, C, 0.035, topY - 0.72, fz + 0.10, 0, 0);
+    const G = LK.geo(), W1 = [0, 1];
+    const fur = function (k) { return function (x, y, z, ca) { return furCol(furHex, k * fgrain(x, y, z) * (ca < -0.3 ? 0.72 : 1)); }; };
+    // the yoke: rolls over both shoulders, drooping off their points
+    const yoke = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10, u = Math.abs(2 * t - 1);
+      yoke.push({ x: -(sx + 0.16) + t * 2 * (sx + 0.16), y: topY + 0.12 - u * u * 0.26, z: -0.02, rt: 0.11 - u * 0.03, rb: 0.07, w: fz + 0.2 - u * 0.05, sq: 0.9, wts: W1 });
+    }
+    LK.loft(G, yoke, 18, fur(1.0), { capLen: 0.8 });
+    // the back drape: from the yoke down the back, narrowing to a ragged hem
+    const drape = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      drape.push({ x: 0, y: topY + 0.06 - t * 0.98, z: -(fz + 0.1 + t * 0.03), rt: 0.05 - t * 0.015, rb: 0.03, w: (sx + 0.12) * (1 - t * 0.28), sq: 0.8, wts: W1, t: t });
+    }
+    LK.loft(G, drape, 14, function (x, y, z, ca, sa, R, t) {
+      const tt = R.t != null ? R.t : t;
+      const hem = tt > 0.85 ? 0.7 + 0.3 * Math.abs(Math.sin(x * 37)) : 1;
+      return furCol(furHex, (1 - 0.25 * tt) * hem * fgrain(x, y, z) * (ca < 0 ? 0.75 : 1));
+    }, { side: [1, 0, 0], capLen: 0.5 });
+    // the chest panels framing the V opening
+    [-1, 1].forEach(function (s) {
+      const pan = [];
+      for (let i = 0; i <= 4; i++) {
+        const t = i / 4;
+        pan.push({ x: s * (sx - 0.15 - t * 0.04), y: topY + 0.02 - t * 0.42, z: fz + 0.08, rt: 0.045, rb: 0.03, w: 0.15 - t * 0.04, sq: 0.8, wts: W1 });
+      }
+      LK.loft(G, pan, 10, fur(0.95), { side: [1, 0, 0], capLen: 0.5 });
+      // the leather cord from the panel to the clasp
+      const cx = s * 0.08;
+      LK.loft(G, [{ x: s * (sx - 0.2), y: topY - 0.06, z: fz + 0.13, rt: 0.014, rb: 0.014, w: 0.014, wts: W1 }, { x: cx, y: topY - 0.32, z: fz + 0.14, rt: 0.014, rb: 0.014, w: 0.014, wts: W1 }], 6, function () { return furCol(furHex, 0.38); }, { capN: 1 });
+      // the tails hanging below the clasp
+      LK.loft(G, [{ x: s * 0.035, y: topY - 0.36, z: fz + 0.14, rt: 0.011, rb: 0.011, w: 0.011, wts: W1 }, { x: s * 0.045, y: topY - 0.88, z: fz + 0.12, rt: 0.01, rb: 0.01, w: 0.01, wts: W1 }], 5, function () { return furCol(furHex, 0.38); }, { capN: 1 });
+    });
+    // the pewter clasp
+    LK.ellipsoid(G, 0, topY - 0.34, fz + 0.15, 0.055, 0.055, 0.025, 10, function () { return 0xc7cdd6; }, W1);
+    const geo = LK.toGeometry(G, { static: true });
+    geo.computeBoundingBox(); geo.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geo, mantleMat());
+    mesh.castShadow = false; mesh.receiveShadow = false;
+    mesh.userData.pelt = true;
+    out.push(mesh);
     return out;
+  }
+  // the cheek fur framing the face under the hood: two soft lofted tufts on
+  // the neck, so they turn with the head like the hood does
+  function buildCheekFur(furHex) {
+    const LK = CBZ.loftKit;
+    if (!THREE || !LK) return null;
+    const G = LK.geo(), W1 = [0, 1];
+    [-1, 1].forEach(function (s) {
+      const st = [];
+      for (let i = 0; i <= 4; i++) {
+        const t = i / 4;
+        st.push({ x: s * (0.34 + t * 0.02), y: 0.44 - t * 0.38, z: 0.08 - t * 0.02, rt: 0.09 * Math.sin(0.4 + t * 2.3) + 0.02, rb: 0.06, w: 0.11 * Math.sin(0.4 + t * 2.3) + 0.02, sq: 1, wts: W1 });
+      }
+      LK.loft(G, st, 10, function (x, y, z, ca) { return furCol(furHex, fgrain(x, y, z) * (ca < 0 ? 0.75 : 1)); }, { side: [1, 0, 0], capLen: 0.7 });
+    });
+    const geo = LK.toGeometry(G, { static: true });
+    geo.computeBoundingBox(); geo.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geo, mantleMat());
+    mesh.castShadow = false; mesh.receiveShadow = false;
+    mesh.userData.pelt = true;
+    return mesh;
   }
 
   // ---- mount / unmount ------------------------------------------------------
@@ -307,17 +347,10 @@
     const furHex = grp ? dominantHex(grp, sp) : ((sp && sp.color) || 0x7a5a3a);
     const hood = buildHood(sp);
     if (hood) { ch.neck.add(hood); out.push(hood); }
-    // side fur flaps framing the face (the photo's cheek fur), on the neck so
-    // they turn with the head like the hood does.
-    const F = fmat(furHex);
-    [-1, 1].forEach(function (s) {
-      const flap = new THREE.Mesh(CBZ.boxGeom(0.15, 0.36, 0.22), F);
-      flap.position.set(s * 0.36, 0.24, 0.08);
-      flap.rotation.z = s * 0.18;
-      flap.castShadow = false; flap.receiveShadow = false;
-      flap.userData.pelt = true;
-      ch.neck.add(flap); out.push(flap);
-    });
+    // side fur framing the face (the photo's cheek fur), on the neck so
+    // it turns with the head like the hood does.
+    const cheeks = buildCheekFur(furHex);
+    if (cheeks) { ch.neck.add(cheeks); out.push(cheeks); }
     const mantle = buildMantleMeshes(ch, furHex);
     for (let i = 0; i < mantle.length; i++) { ch.body.add(mantle[i]); out.push(mantle[i]); }
     return out.length ? out : null;

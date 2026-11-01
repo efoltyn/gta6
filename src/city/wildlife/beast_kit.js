@@ -331,7 +331,9 @@
     for (let i = 0; i < B.parts.length; i++) {
       const q = B.parts[i];
       const m = new THREE.Mesh(q.geo, q.uv && pm ? pm : cm);
-      m.name = id + ":" + q.name;
+      // the barrel is named plainly "body": wildlife_traits.js finds the hull
+      // a hunger cue swells by that name
+      m.name = q.name === "body" ? "body" : id + ":" + q.name;
       m.position.set(q.pos[0], q.pos[1], q.pos[2]);
       for (const u in q.ud) m.userData[u] = q.ud[u];
       g.add(m);
