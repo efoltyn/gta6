@@ -609,6 +609,148 @@
     return m;
   }
 
+  /* ---- THE BANKING-HALL FIXTURES (rebuild 2026-10-31, Opus 5.5) -----------
+     They were a grey box with a brass slab on it for a counter, three blue
+     rectangles for screens, a dark box with a blue square for an ATM and a
+     brown box for the loan desk. Now each is the thing: drawn in a
+     storeFixtureKit frame (+X along it, +Z to the customer, y off the floor)
+     and merged per finish with the rest of the lobby. The teller glass stays
+     real city glass (cityRegisterGlass), so a heist still shatters it.
+     CBZ.bankFixture(kind) builds one alone, for the turntable. */
+  // a run of teller counter: marble-panelled front on a black plinth, a brass
+  // foot rail, a green-marble top; per window a brass glass frame, a deal
+  // tray, a speak grille, a number plate and a card terminal; on the staff
+  // side a work shelf, a monitor and a cash drawer per position.
+  function tellerRun(k, L, D, windows) {
+    const H = 1.1, MARBLE = 0xd9d3c7, VEIN = 0xbab2a3, DARK = 0x1c1d1f, BRASS = 0xc9a24a, TOP = 0x23392f;
+    k.box(0, 0.06, 0.02, L, 0.12, D - 0.04, DARK, "gloss");                            // plinth
+    k.box(0, 0.6, 0, L, 0.96, D - 0.1, MARBLE);                                          // carcass
+    const panels = Math.max(1, Math.round(L / 0.75));
+    for (let i = 0; i < panels; i++) {
+      const x = -L / 2 + (i + 0.5) * (L / panels), pw = L / panels - 0.12;
+      k.box(x, 0.6, D / 2 - 0.03, pw, 0.72, 0.03, MARBLE, "gloss");                      // fielded panel
+      k.box(x, 0.6, D / 2 - 0.012, pw - 0.1, 0.62, 0.01, VEIN, "gloss");
+      k.box(x - pw * 0.18, 0.66, D / 2 - 0.005, 0.006, 0.4, 0.004, 0x9d9484, "solid", 0, 0, 0.5);   // a vein
+    }
+    for (let i = 0; i <= panels; i++) k.box(-L / 2 + i * (L / panels), 0.6, D / 2 - 0.035, 0.05, 0.96, 0.05, DARK, "gloss"); // pilasters
+    k.box(0, 1.1, D / 2 - 0.05, L + 0.02, 0.03, 0.04, BRASS, "metal");                   // brass bead under the top
+    k.box(0, H + 0.03, 0.02, L + 0.04, 0.05, D + 0.12, TOP, "gloss");                    // marble top
+    // brass foot rail on standoffs along the customer face
+    k.cyl(0, 0.16, D / 2 + 0.16, 0.022, 0.022, L - 0.1, BRASS, "metal", 0, 0, Math.PI / 2, 10);
+    const nStand = Math.max(2, Math.round((L - 0.4) / 0.9) + 1);
+    for (let i = 0; i < nStand; i++) k.box(-L / 2 + 0.2 + i * (L - 0.4) / (nStand - 1), 0.16, D / 2 + 0.08, 0.02, 0.02, 0.16, BRASS, "metal");
+    // the teller windows: brass glass frame (the pane itself is city glass)
+    const ww = L / windows;
+    for (let w = 0; w <= windows; w++) k.box(-L / 2 + w * ww, 1.75, 0, 0.05, 1.1, 0.06, BRASS, "metal");
+    k.box(0, 2.31, 0, L + 0.02, 0.05, 0.08, BRASS, "metal");
+    k.box(0, 2.42, -0.02, L + 0.06, 0.16, 0.12, 0x2b2b2d, "gloss");                       // header fascia
+    for (let w = 0; w < windows; w++) {
+      const x = -L / 2 + (w + 0.5) * ww;
+      k.box(x, 1.155, 0.12, 0.34, 0.012, 0.3, 0x8c8f93, "metal");                        // deal tray
+      k.box(x, 1.17, 0.12, 0.3, 0.02, 0.008, 0x8c8f93, "metal");
+      k.cyl(x, 1.55, 0.04, 0.07, 0.07, 0.01, 0x8c8f93, "metal", Math.PI / 2, 0, 0, 14);    // speak grille
+      k.box(x, 2.42, 0.045, 0.16, 0.1, 0.004, 0xf2ecd8, "glow");                         // window number
+      k.box(x, 2.42, 0.048, 0.04, 0.06, 0.002, 0x2a2a2a);
+      // the card terminal on the customer edge
+      k.box(x + ww * 0.3, 1.17, D / 2 - 0.04, 0.09, 0.02, 0.12, 0x1c1e22, "metal");
+      k.box(x + ww * 0.3, 1.2, D / 2 - 0.04, 0.075, 0.03, 0.15, 0x24262a, "gloss", -0.35);
+      k.box(x + ww * 0.3, 1.216, D / 2 - 0.06, 0.055, 0.003, 0.04, 0x3f7fa6, "glow", -0.35);
+      // the staff side: a work shelf, a monitor facing the teller, a drawer
+      k.box(x, 0.86, -D / 2 - 0.14, ww - 0.12, 0.03, 0.34, 0x5a4330);
+      k.box(x, 1.13, -D / 2 + 0.12, 0.2, 0.02, 0.14, 0x1a1b1e, "metal");
+      k.box(x, 1.24, -D / 2 + 0.13, 0.03, 0.2, 0.03, 0x1a1b1e, "metal");
+      k.box(x, 1.4, -D / 2 + 0.12, 0.44, 0.28, 0.035, 0x1a1b1e, "gloss", 0.08, Math.PI, 0);
+      k.box(x, 1.4, -D / 2 + 0.1, 0.4, 0.24, 0.004, 0x2e5a86, "glow", 0.08, Math.PI, 0);
+      k.box(x, 0.7, -D / 2 - 0.005, 0.44, 0.11, 0.02, 0x2a2c30);
+      k.box(x, 0.7, -D / 2 - 0.02, 0.12, 0.012, 0.012, 0xb4b8bd, "metal");
+    }
+  }
+  // a free-standing lobby ATM: plinth, body, hooded fascia with a tilted
+  // screen, keypad, card slot, dispenser, receipt slot, lit brand header.
+  function atmUnit(k) {
+    const BODY = 0x2e3238, STEEL = 0xa9afb6, FACE = 0x15181c, BLUE = 0x2f6fd6;
+    k.box(0, 0.05, 0, 0.72, 0.1, 0.5, 0x111214, "gloss");
+    k.box(0, 0.8, -0.03, 0.68, 1.42, 0.44, BODY, "gloss");
+    k.box(0, 0.98, 0.2, 0.6, 0.86, 0.04, STEEL, "metal");                                 // brushed fascia
+    k.box(0, 1.62, 0.02, 0.7, 0.2, 0.48, BODY, "gloss");                                  // header
+    k.box(0, 1.62, 0.262, 0.62, 0.14, 0.004, BLUE, "glow");                               // lit brand header
+    k.box(0, 1.62, 0.265, 0.36, 0.04, 0.002, 0xeaf2ff, "glow");
+    for (const sx of [-1, 1]) k.box(sx * 0.31, 1.27, 0.25, 0.04, 0.4, 0.14, BODY, "gloss");   // privacy hood cheeks
+    k.box(0, 1.47, 0.29, 0.66, 0.04, 0.16, BODY, "gloss");                               // hood
+    k.box(0, 1.26, 0.235, 0.4, 0.3, 0.03, FACE, "gloss", -0.2);                           // screen bezel
+    k.box(0, 1.26, 0.252, 0.34, 0.24, 0.004, 0x3a7fd0, "glow", -0.2);                    // screen
+    k.box(0, 1.31, 0.258, 0.22, 0.03, 0.002, 0xdfeaff, "glow", -0.2);
+    for (const y of [1.22, 1.17]) k.box(0, y, 0.255, 0.26, 0.022, 0.002, 0x9cc4f0, "glow", -0.2);
+    for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) k.box(sx * 0.235, 1.33 - i * 0.07, 0.24, 0.04, 0.03, 0.02, 0x8c9198, "metal", -0.2);  // soft keys
+    k.box(0, 0.98, 0.28, 0.3, 0.03, 0.2, 0x3a3e44, "metal", 0.5);                         // keypad shelf
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++)
+      k.box(-0.06 + c * 0.05, 1.0 + (r - 1.5) * 0.012, 0.3 - (r - 1.5) * 0.04, 0.036, 0.012, 0.03, r === 3 && c !== 1 ? (c ? 0x2e9a4a : 0xc23a2e) : 0xc9cdd2, "metal", 0.5);
+    k.box(0.2, 1.06, 0.225, 0.1, 0.03, 0.02, 0x111214);                                   // card slot
+    k.box(0.2, 1.06, 0.236, 0.07, 0.006, 0.004, 0x3adf6a, "glow");
+    k.box(0, 0.82, 0.225, 0.28, 0.05, 0.03, 0x111214);                                    // cash dispenser
+    k.box(0, 0.82, 0.24, 0.24, 0.012, 0.004, 0x55595e, "metal");
+    k.box(-0.2, 1.06, 0.225, 0.08, 0.012, 0.02, 0x111214);                                // receipt slot
+    k.box(0, 0.42, 0.205, 0.6, 0.5, 0.02, 0x3a3e44, "gloss");                             // service door
+    k.box(0.24, 0.42, 0.218, 0.03, 0.06, 0.012, STEEL, "metal");
+  }
+  // the loan officer's desk: walnut pedestal desk with a modesty panel, a
+  // leather swivel chair behind it (z -), a client chair in front (z +), a
+  // monitor, a green-shaded banker's lamp, a nameplate, a pen set, a file.
+  function loanDesk(k) {
+    const WAL = 0x4a2e1c, WALD = 0x35200f, LEATH = 0x2a1a14, BRASS = 0xc9a24a;
+    k.box(0, 0.755, 0, 1.5, 0.04, 0.88, WAL, "gloss");                                     // top
+    k.box(0, 0.757, 0, 1.38, 0.042, 0.76, 0x1e3a2c);                                       // leather inlay
+    for (const sx of [-1, 1]) {
+      k.box(sx * 0.55, 0.37, 0, 0.4, 0.72, 0.8, WAL);                                      // pedestals
+      for (let i = 0; i < 3; i++) {
+        k.box(sx * 0.55, 0.14 + i * 0.22, -0.405, 0.36, 0.19, 0.012, WALD);
+        k.box(sx * 0.55, 0.2 + i * 0.22, -0.415, 0.1, 0.015, 0.015, BRASS, "metal");
+      }
+    }
+    k.box(0, 0.45, 0.36, 0.72, 0.56, 0.03, WALD);                                          // modesty panel
+    k.box(0, 0.05, 0, 1.5, 0.1, 0.84, WALD);
+    k.box(-0.3, 0.79, -0.15, 0.2, 0.02, 0.14, 0x1a1b1e, "metal");                          // monitor
+    k.box(-0.3, 0.9, -0.16, 0.03, 0.2, 0.03, 0x1a1b1e, "metal");
+    k.box(-0.3, 1.05, -0.14, 0.5, 0.3, 0.03, 0x1a1b1e, "gloss");
+    k.box(-0.3, 1.05, -0.158, 0.46, 0.26, 0.004, 0x2e5a86, "glow");
+    k.cyl(0.5, 0.785, -0.1, 0.07, 0.08, 0.025, BRASS, "metal", 0, 0, 0, 12);                // banker's lamp
+    k.cyl(0.5, 0.9, -0.1, 0.01, 0.01, 0.22, BRASS, "metal", 0, 0, 0, 6);
+    k.cyl(0.5, 1.02, -0.06, 0.05, 0.09, 0.08, 0x1f5a36, "gloss", 0.35, 0, 0, 14);
+    k.box(0.5, 0.99, -0.05, 0.12, 0.004, 0.05, 0xfff1c8, "glow", 0.35);
+    k.box(0, 0.8, 0.3, 0.3, 0.06, 0.04, WALD, "gloss", -0.4);                              // nameplate
+    k.box(0, 0.805, 0.32, 0.24, 0.035, 0.004, BRASS, "metal", -0.4);
+    k.box(0.25, 0.79, 0.05, 0.08, 0.03, 0.06, 0x111214, "gloss");                          // pen set
+    k.cyl(0.25, 0.85, 0.05, 0.006, 0.006, 0.13, 0x111214, "metal", 0.3, 0, 0, 6);
+    k.box(0.05, 0.782, 0.05, 0.24, 0.012, 0.32, 0xe8e2d0, "solid", 0, 0.2, 0);              // a loan file
+    // the two chairs: the officer's swivel (z -0.85, back at -z), the
+    // client's four-legged (z +0.85, back at +z)
+    for (const side of [-1, 1]) {
+      const z = side * 0.85, bz = z + side * 0.24;
+      if (side < 0) {
+        for (let i = 0; i < 5; i++) { const a = i * Math.PI * 2 / 5; k.box(Math.sin(a) * 0.14, 0.05, z + Math.cos(a) * 0.14, 0.04, 0.03, 0.28, 0x1a1b1e, "metal", 0, a, 0); }
+        k.cyl(0, 0.25, z, 0.03, 0.03, 0.34, 0xb4b8bd, "metal", 0, 0, 0, 8);
+      } else {
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.box(sx * 0.22, 0.21, z + sz * 0.2, 0.04, 0.42, 0.04, WALD, "gloss");
+      }
+      k.box(0, 0.46, z, 0.52, 0.1, 0.5, LEATH, "gloss");                                   // seat
+      const bh = side < 0 ? 0.7 : 0.42;
+      k.box(0, 0.5 + bh / 2, bz, 0.5, bh, 0.08, LEATH, "gloss", side * 0.1);               // back, raked away
+      for (const sx of [-1, 1]) k.box(sx * 0.27, 0.64, z, 0.05, 0.05, 0.42, side < 0 ? 0x1a1b1e : WALD, "gloss");   // arms
+    }
+  }
+  CBZ.bankFixture = function (kind, o) {
+    const KIT = CBZ.storeFixtureKit;
+    if (!KIT || !THREE) return null;
+    o = o || {};
+    const k = KIT.create().frame(0, 0, 0, 0);
+    if (kind === "atm") atmUnit(k);
+    else if (kind === "loan") loanDesk(k);
+    else tellerRun(k, o.len || 4.2, o.d || 0.7, o.windows || 3);
+    const g = new THREE.Group();
+    k.build(g);
+    g.name = "bank-" + (kind || "teller");
+    return g;
+  };
   // ---- build the lobby fixtures once per city --------------------------------
   // world-frame from the lot itself (no buildings.js anchor for "bank"): door
   // gives the inward normal; we lay the teller counter across the back wall, the
@@ -678,18 +820,20 @@
       ? [{ lat: 0, len: cLen }]
       : [{ lat: (-cLen / 2 + (gapLat - GAPW / 2)) / 2, len: Math.max(0, (gapLat - GAPW / 2) - (-cLen / 2)) },
          { lat: ((gapLat + GAPW / 2) + cLen / 2) / 2, len: Math.max(0, cLen / 2 - (gapLat + GAPW / 2)) }];
+    const KIT = CBZ.storeFixtureKit;
+    const k = KIT ? KIT.create() : null;
+    const yawT = KIT ? KIT.yawOf(tx, tz) : 0;            // local +X along the counter, +Z to the customer
     for (const run of runs) {
       if (run.len < 0.35) continue;
       const rgw = Math.abs(tx) * run.len + Math.abs(tz) * cwid;
       const rgd = Math.abs(tz) * run.len + Math.abs(tx) * cwid;
       const rc = at(counterDepth, run.lat);
-      const counter = box(rgw, 1.1, rgd, m.counter);
-      counter.position.set(rc.x, 0.55, rc.z);
-      counter.receiveShadow = true;
-      group.add(counter);
-      const cap = box(rgw + 0.08, 0.06, rgd + 0.08, m.brass);
-      cap.position.set(rc.x, 1.13, rc.z);
-      group.add(cap);
+      if (k) { k.frame(rc.x, 0, rc.z, yawT); tellerRun(k, run.len, cwid, Math.max(1, Math.round(run.len / 1.55))); }
+      else {
+        const counter = box(rgw, 1.1, rgd, m.counter);
+        counter.position.set(rc.x, 0.55, rc.z);
+        group.add(counter);
+      }
       // keep the counter solid so you walk UP to it, never through (height-gated)
       if (CBZ.colliders) CBZ.colliders.push({ minX: rc.x - rgw / 2, maxX: rc.x + rgw / 2, minZ: rc.z - rgd / 2, maxZ: rc.z + rgd / 2, y0: 0, y1: 1.15 });
       // the GLASS partition above the counter — registered as real city glass so
@@ -701,54 +845,38 @@
         gl.position.set(rc.x, 1.75, rc.z); group.add(gl);
       }
     }
-    // three teller screens glowing along the counter (the blue trust accent)
-    for (let i = 0; i < 3; i++) {
-      const lat = (i - 1) * (cLen / 3.2);
-      const sx = cc.x + tx * lat, sz = cc.z + tz * lat;
-      const scr = box(0.34, 0.24, 0.05, m.screen);
-      scr.position.set(sx + inx * 0.1, 1.28, sz + inz * 0.1);
-      scr.rotation.y = Math.atan2(-inx, -inz);
-      group.add(scr);
-    }
     const tlabel = tag(bk.name, "#9fc0ff", 2.4, 0.5);
-    if (tlabel) { tlabel.position.set(cc.x, 2.55, cc.z); group.add(tlabel); }
+    if (tlabel) { tlabel.position.set(cc.x, 2.8, cc.z); group.add(tlabel); }
     S.stations.push({ kind: "teller", x: cc.x, z: cc.z, reach: REACH + 0.4 });
 
     // ---- THE ATM by the entrance (quick withdraw — a roll for the street).
-    const atmPos = at(1.8, Math.min(halfTan - 1.0, 2.0));
-    const atm = box(0.7, 1.6, 0.45, m.atm);
-    atm.position.set(atmPos.x, 0.8, atmPos.z);
-    atm.rotation.y = Math.atan2(-inx, -inz);
-    group.add(atm);
-    const face = box(0.5, 0.5, 0.08, m.atmFace);
-    face.position.set(atmPos.x + inx * 0.22, 1.15, atmPos.z + inz * 0.22);
-    face.rotation.y = atm.rotation.y;
-    group.add(face);
-    const atmScreen = box(0.34, 0.26, 0.04, m.screen);
-    // ATM fascia front is +IN 0.26m. Keep 2.5cm of real air before the 4cm
-    // screen slab so it cannot flicker with the fascia at any viewing angle.
-    atmScreen.position.set(atmPos.x + inx * 0.305, 1.2, atmPos.z + inz * 0.305);
-    atmScreen.rotation.y = atm.rotation.y;
-    group.add(atmScreen);
+    // It stands with its back to the near side wall, its face to the room.
+    const atmLat = Math.min(halfTan - 1.0, 2.0);
+    const atmPos = at(1.8, atmLat);
+    if (k) { const sg = atmLat >= 0 ? -1 : 1; k.frame(atmPos.x, 0, atmPos.z, Math.atan2(tx * sg, tz * sg)); atmUnit(k); }
+    else {
+      const atm = box(0.7, 1.6, 0.45, m.atm);
+      atm.position.set(atmPos.x, 0.8, atmPos.z);
+      group.add(atm);
+    }
     if (CBZ.colliders) CBZ.colliders.push({ minX: atmPos.x - 0.45, maxX: atmPos.x + 0.45, minZ: atmPos.z - 0.45, maxZ: atmPos.z + 0.45, y0: 0, y1: 1.6 });
     const atag = tag("ATM", "#9fe0ff", 1.0, 0.36);
-    if (atag) { atag.position.set(atmPos.x, 1.85, atmPos.z); group.add(atag); }
+    if (atag) { atag.position.set(atmPos.x, 1.95, atmPos.z); group.add(atag); }
     S.stations.push({ kind: "atm", x: atmPos.x, z: atmPos.z, reach: REACH });
 
     // ---- THE LOAN-OFFICER DESK on the open side (the apply-for-a-loan pod).
+    // The officer sits on the counter side; the client's chair faces him.
     const deskPos = at(Math.max(3.2, counterDepth - 2.6), -Math.min(halfTan - 1.2, 2.4));
-    const desk = box(1.5, 0.78, 0.9, m.desk);
-    desk.position.set(deskPos.x, 0.39, deskPos.z);
-    desk.rotation.y = Math.atan2(-inx, -inz);
-    desk.receiveShadow = true;
-    group.add(desk);
-    const monitor = box(0.4, 0.3, 0.05, m.screen);
-    monitor.position.set(deskPos.x, 0.95, deskPos.z);
-    monitor.rotation.y = desk.rotation.y;
-    group.add(monitor);
+    if (k) { k.frame(deskPos.x, 0, deskPos.z, Math.atan2(-inx, -inz)); loanDesk(k); }
+    else {
+      const desk = box(1.5, 0.78, 0.9, m.desk);
+      desk.position.set(deskPos.x, 0.39, deskPos.z);
+      group.add(desk);
+    }
+    if (k) k.build(group);
     if (CBZ.colliders) CBZ.colliders.push({ minX: deskPos.x - 0.78, maxX: deskPos.x + 0.78, minZ: deskPos.z - 0.5, maxZ: deskPos.z + 0.5, y0: 0, y1: 0.82 });
     const dlabel = tag("Loans & Mortgages", "#bcffd0", 1.9, 0.42);
-    if (dlabel) { dlabel.position.set(deskPos.x, 1.35, deskPos.z); group.add(dlabel); }
+    if (dlabel) { dlabel.position.set(deskPos.x, 1.55, deskPos.z); group.add(dlabel); }
     S.stations.push({ kind: "loan", x: deskPos.x, z: deskPos.z, reach: REACH + 0.3 });
 
     // ---- THE VAULT.
