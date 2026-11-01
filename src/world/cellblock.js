@@ -1631,8 +1631,25 @@
     const fx = cx + dx * (d / 2 - 0.10), fz = cz + dz * (d / 2 - 0.10);
     addBox(fx, FY + CH / 2, fz, dx ? 0.20 : w, CH, dz ? 0.20 : w, C_PART_D, { cast: false, blockLOS: true,
       solid: true, y0: FY, y1: FY + CH });
-    for (let i = 0; i < 5; i++)
-      addBox(fx + dx * 0.11, FY + 1.30 + i * 0.16, fz + dz * 0.11, dx ? 0.03 : w * 0.5, 0.06, dz ? 0.03 : w * 0.5, C_STEEL_D, { cast: false });
+    /* the bay's access door (it was five slats floating on the concrete): a
+       steel frame, a hollow-metal leaf with a louvred lower panel, a lever
+       and a lock cylinder, hinges on the far jamb. Static; batched. */
+    const P = (t, off) => [fx + dx * off + (dx ? 0 : t), fz + dz * off + (dz ? 0 : t)];
+    const fb = (t, y, off, along, h, across, col) => {
+      const p = P(t, off);
+      addBox(p[0], FY + y, p[1], dx ? across : along, h, dz ? across : along, col, { cast: false });
+    };
+    const DWd = 0.92, DH = 2.12, F = 0.06;
+    for (const s of [-1, 1]) fb(s * (DWd / 2 + F / 2), (DH + F) / 2, 0.11, F, DH + F, 0.05, C_DARK);   // jambs
+    fb(0, DH + F / 2, 0.11, DWd + 2 * F, F, 0.05, C_DARK);                                               // head
+    fb(0, DH / 2, 0.112, DWd - 0.01, DH - 0.01, 0.03, C_STEEL_D);                                        // leaf
+    for (let i = 0; i < 6; i++) fb(0, 0.22 + i * 0.07, 0.13, DWd * 0.62, 0.035, 0.012, C_DARK);         // louvres
+    fb(0, 0.38, 0.126, DWd * 0.66, 0.46, 0.006, C_STEEL);                                                // louvre frame
+    const lt = -(DWd / 2 - 0.1);
+    fb(lt, 1.02, 0.135, 0.07, 0.07, 0.02, C_STEEL);                                                      // lever rose
+    fb(lt + 0.07, 1.02, 0.15, 0.14, 0.022, 0.022, C_STEEL);                                              // lever
+    fb(lt, 1.16, 0.133, 0.045, 0.045, 0.012, C_STEEL);                                                   // cylinder
+    for (const y of [0.25, 1.05, 1.85]) fb(DWd / 2 - 0.01, y, 0.135, 0.025, 0.11, 0.025, C_STEEL);      // hinges
     addBox(cx, FY + CH + RT / 2, cz, dx ? d + WT : w + WT, RT, dx ? w + WT : d + WT, C_ROOF, { cast: false, blockLOS: true });
   }
 
