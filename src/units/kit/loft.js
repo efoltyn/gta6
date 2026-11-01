@@ -42,7 +42,11 @@
   const CBZ = W.CBZ || (W.CBZ = {});
   const TAU = Math.PI * 2;
 
-  function Geo() { this.p = []; this.c = []; this.si = []; this.sw = []; this.ix = []; this.n = 0; }
+  // uvOn (set by the caller before lofting) makes every ring carry S+1 verts
+  // with its seam under the BELLY and a uv of (arc length along the loft x
+  // opts.uScale, 0..1 round the ring) — what a coat-pattern texture needs (the
+  // bestiary's beast kit). Off, the shell is byte-identical to before.
+  function Geo() { this.p = []; this.c = []; this.si = []; this.sw = []; this.ix = []; this.uv = []; this.uvOn = false; this.n = 0; }
   // hex -> linear 0..1 exactly as THREE r128's Color.setHex (no colour-space conversion)
   Geo.prototype.vert = function (x, y, z, hex, wts) {
     this.p.push(x, y, z);
@@ -84,7 +88,10 @@
     if (opts.capA !== false) rings = capRings(0, -1).reverse().concat(rings);
     if (opts.capB !== false) rings = rings.concat(capRings(list.length - 1, 1));
     const base = [];
+    const UV = !!G.uvOn, SV = UV ? S + 1 : S, a0 = UV ? Math.PI : 0, uK = opts.uScale || 1;
+    let arc = 0;
     for (let i = 0; i < rings.length; i++) {
+      if (i > 0) { const q = rings[i - 1], R1 = rings[i]; arc += Math.hypot(R1.x - q.x, R1.y - q.y, (R1.z || 0) - (q.z || 0)); }
       const R = rings[i];
       const t = tangentAt(rings, i);
       let up = cross3(side0, t);
@@ -93,8 +100,8 @@
       const sd = norm3(cross3(t, up));
       const e = R.sq || 1;
       base.push(G.n);
-      for (let j = 0; j < S; j++) {
-        const a = TAU * j / S, ca = Math.cos(a), sa = Math.sin(a);
+      for (let j = 0; j < SV; j++) {
+        const a = a0 + TAU * j / S, ca = Math.cos(a), sa = Math.sin(a);
         const pc = Math.sign(ca) * Math.pow(Math.abs(ca), e), ps = Math.sign(sa) * Math.pow(Math.abs(sa), e);
         const r = ca >= 0 ? R.rt : R.rb;
         const x = R.x + up[0] * pc * r + sd[0] * ps * R.w;
@@ -108,12 +115,13 @@
           ow.push(hb, hw); wts = ow;
         }
         G.vert(x, y, z, colour(x, y, z, ca, sa, R, i / (rings.length - 1)), wts);
+        if (UV) G.uv.push(arc * uK, j / S);
       }
     }
     for (let i = 0; i < rings.length - 1; i++) {
       const A = base[i], Bb = base[i + 1];
       for (let j = 0; j < S; j++) {
-        const j1 = (j + 1) % S;
+        const j1 = UV ? j + 1 : (j + 1) % S;
         G.ix.push(A + j, A + j1, Bb + j);
         G.ix.push(A + j1, Bb + j1, Bb + j);
       }
@@ -135,8 +143,12 @@
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(G.p, 3));
     geo.setAttribute("color", new THREE.Float32BufferAttribute(G.c, 3));
-    geo.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(G.si, 4));
-    geo.setAttribute("skinWeight", new THREE.Float32BufferAttribute(G.sw, 4));
+    // o.static: a plain (unskinned) mesh — the bestiary's posed bodies
+    if (!o.static) {
+      geo.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(G.si, 4));
+      geo.setAttribute("skinWeight", new THREE.Float32BufferAttribute(G.sw, 4));
+    }
+    if (G.uv.length) geo.setAttribute("uv", new THREE.Float32BufferAttribute(G.uv, 2));
     geo.setIndex(G.ix);
     geo.computeVertexNormals();
     const bs = o.boundingSphere;

@@ -127,7 +127,7 @@
         if (!col) { col = { x: m.position.x, z: m.position.z, top: 0, h: d.h, parts: [] }; cols.push(col); }
         col.top = Math.max(col.top, m.position.y + d.h / 2);
         col.h = Math.max(col.h, d.h);
-        col.parts.push({ m: m, bx: m.position.x, by: m.position.y });
+        col.parts.push({ m: m, bx: m.position.x, by: m.position.y, rz: m.rotation.z });
       } else {
         rest.push({ m: m, d: d, bottom: bottom });
       }
@@ -143,13 +143,13 @@
         const col = cols[c];
         if (Math.abs(col.x - m.position.x) <= 0.13 && Math.abs(col.z - m.position.z) <= 0.13 &&
             m.position.y - r.d.h / 2 < col.top && r.d.h <= col.h * 1.2) {
-          col.parts.push({ m: m, bx: m.position.x, by: m.position.y });
+          col.parts.push({ m: m, bx: m.position.x, by: m.position.y, rz: m.rotation.z });
           joined = true; break;
         }
       }
       // head cluster (for the graze dip): far forward, up off the ground
       if (!joined && maxX > 0.4 && m.position.x >= maxX * 0.55 && r.bottom >= 0.3) {
-        head.push({ m: m, bx: m.position.x, by: m.position.y, bottom: r.bottom });
+        head.push({ m: m, bx: m.position.x, by: m.position.y, bottom: r.bottom, rz: m.rotation.z });
         // THE head box (for the aggro eyes): the biggest far-forward block.
         const vol = r.d.w * r.d.w * r.d.h;
         if (m.position.x >= maxX * 0.62 && vol > headVol) { headVol = vol; headMesh = m; }
@@ -169,9 +169,34 @@
       for (let i = 0; i < head.length; i++) dip = Math.min(dip, head[i].bottom);
       dip = Math.max(0, Math.min(1.1, dip * 0.7));
     }
+    /* A DECLARED NECK ROOT (city/wildlife/beast_kit.js stamps userData.pivot
+       on a grazer's neck): the graze then ROTATES the whole head cluster down
+       about the withers, the way a neck actually lowers, instead of sliding
+       the head off the shoulders. The angle is solved once, here: the one
+       that brings the lowest head point to ~10 cm off the grass. */
+    // a body that declares its eyes declares which mesh IS the head (a long
+    // neck can out-bulk it, which is all the volume test below can see)
+    for (let i = 0; i < head.length; i++) { const ud = head[i].m.userData; if (ud && ud.eyes) { headMesh = head[i].m; break; } }
+    let pivot = null, grazeA = 0;
+    for (let i = 0; i < head.length; i++) { const pv = head[i].m.userData && head[i].m.userData.pivot; if (pv) { pivot = pv; break; } }
+    if (pivot && headMesh) {
+      const hb = headMesh.geometry.boundingBox || (headMesh.geometry.computeBoundingBox(), headMesh.geometry.boundingBox);
+      const tx = headMesh.position.x + hb.max.x - pivot[0], ty = headMesh.position.y + hb.min.y - pivot[1];
+      for (let k = 1; k <= 30; k++) {
+        const an = k * 0.05, y = pivot[1] + tx * Math.sin(-an) + ty * Math.cos(-an);
+        grazeA = an;
+        if (y <= 0.1) break;
+      }
+    } else pivot = null;
+    for (let c = 0; c < cols.length; c++) {
+      const col = cols[c];
+      // the swing hinges at the top of the leg (the hip / shoulder inside the
+      // body), so a stride ROTATES the leg instead of sliding it flat
+      col.len = Math.max(0.1, col.top * 0.9);
+    }
     const cls = classify(sp);
     a.gait = {
-      cols: cols, head: head.length ? head : null, dip: dip, headMesh: headMesh,
+      cols: cols, head: head.length ? head : null, dip: dip, headMesh: headMesh, pivot: pivot, grazeA: grazeA,
       amp: Math.max(0.04, Math.min(0.3, legH * 0.32)),
       freq: Math.max(1.4, Math.min(9, (cls.stepFreq * 2.2) / Math.max(0.22, legH * (sp.scale || 1)))),
       step: 0, k: 0, grazeK: 0,
@@ -220,17 +245,21 @@
       for (let c = 0; c < gt.cols.length; c++) {
         const col = gt.cols[c], s = sw * col.diag;
         const up = Math.max(0, Math.sin(gt.step + (col.diag > 0 ? 0 : Math.PI))) * lift;
+        // rotate about the column top: the foot travels `s`, the hip stays put
+        const an = s / col.len, ca = Math.cos(an), sa = Math.sin(an);
         for (let p = 0; p < col.parts.length; p++) {
           const pt = col.parts[p];
-          pt.m.position.x = pt.bx + s;
-          pt.m.position.y = pt.by + up;
+          const rx = pt.bx - col.x, ry = pt.by - col.top;
+          pt.m.position.x = col.x + rx * ca - ry * sa;
+          pt.m.position.y = col.top + rx * sa + ry * ca + up;
+          pt.m.rotation.z = pt.rz + an;
         }
       }
     } else if (gt.k <= 0.02 && gt._setl !== 1) {
       gt._setl = 1;
       for (let c = 0; c < gt.cols.length; c++) {
         const col = gt.cols[c];
-        for (let p = 0; p < col.parts.length; p++) { const pt = col.parts[p]; pt.m.position.x = pt.bx; pt.m.position.y = pt.by; }
+        for (let p = 0; p < col.parts.length; p++) { const pt = col.parts[p]; pt.m.position.x = pt.bx; pt.m.position.y = pt.by; pt.m.rotation.z = pt.rz; }
       }
     }
     if (walking) gt._setl = 0;
@@ -255,11 +284,21 @@
       gt.grazeK += (want - gt.grazeK) * Math.min(1, dt * 3);
       if (gt.grazeK > 0.01 || gt._setg === 1) {
         gt._setg = gt.grazeK > 0.01 ? 1 : 0;
-        const dy = gt.dip * gt.grazeK, dx = gt.dip * 0.3 * gt.grazeK;
-        for (let i = 0; i < gt.head.length; i++) {
-          const h = gt.head[i];
-          h.m.position.y = h.by - dy;
-          h.m.position.x = h.bx + dx;
+        if (gt.pivot) {
+          const an = -gt.grazeA * gt.grazeK, ca = Math.cos(an), sa = Math.sin(an), px = gt.pivot[0], py = gt.pivot[1];
+          for (let i = 0; i < gt.head.length; i++) {
+            const h = gt.head[i], rx = h.bx - px, ry = h.by - py;
+            h.m.position.x = px + rx * ca - ry * sa;
+            h.m.position.y = py + rx * sa + ry * ca;
+            h.m.rotation.z = h.rz + an;
+          }
+        } else {
+          const dy = gt.dip * gt.grazeK, dx = gt.dip * 0.3 * gt.grazeK;
+          for (let i = 0; i < gt.head.length; i++) {
+            const h = gt.head[i];
+            h.m.position.y = h.by - dy;
+            h.m.position.x = h.bx + dx;
+          }
         }
       }
     }

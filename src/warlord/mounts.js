@@ -952,7 +952,9 @@
      in a forest and exactly wrong for a hundred cavalry. The RULE is reused;
      the per-object walker is not. */
 
-  const SPECIES_FILES = ["city/wildlife_species.js", "city/wildlife/farm.js"];
+  // the farm batch's horse is drawn on the beast kit (lofted shells), so the
+  // kit, its loft maths and the bodies file ride along with the two rows files
+  const SPECIES_FILES = ["units/kit/loft.js", "city/wildlife/beast_kit.js", "city/wildlife/beast_bodies.js", "city/wildlife_species.js", "city/wildlife/farm.js"];
   let speciesP = null;
 
   /* TWO FILES OUT OF FORTY. games/warlord.html refuses the whole `bestiary`

@@ -931,6 +931,21 @@
   function makeEyes(a) {
     const hm = a.gait && a.gait.headMesh;
     if (!hm || !hm.geometry) return null;
+    // a beast-kit head declares its real eyes (mesh-local [x, y, z, r]): the
+    // glow sits ON them, not on the corners of a box that no longer exists
+    const de = hm.userData && hm.userData.eyes;
+    if (de && de.length) {
+      const out = [];
+      for (let i = 0; i < de.length; i++) {
+        const r = Math.max(0.02, de[i][3] * 1.15);
+        const e = new THREE.Mesh(CBZ.boxGeom(r * 1.6, r * 1.3, r * 1.6), aggroEyeMat());
+        e.position.set(de[i][0], de[i][1], de[i][2]);
+        e.visible = false;
+        hm.add(e);
+        out.push(e);
+      }
+      return out;
+    }
     const p = hm.geometry.parameters || {};
     const w = p.width || 0.4, h = p.height || 0.4, dep = p.depth || 0.4;
     const s = Math.max(0.07, Math.min(0.17, dep * 0.26));
