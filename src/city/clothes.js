@@ -2283,7 +2283,7 @@
       L.rect(col, 0, 0.92, 1, 0.06, lo);                          // hem band
     }
     L.shade();
-    return { torso: 1, legs: 1, hips: 1, sleeves: "none" };
+    return { torso: 1, legs: 1, hips: 1, sleeves: "none", hem: { len: 0.9, flare: 1.75, folds: 10 } };
   };
 
   // SUNDRESS — a light summer dress in a woven GINGHAM check.
@@ -2335,7 +2335,7 @@
     if (ctx) patternRow(L, ctx, body, "gingham", accent);         // the skirt carries the same check
     for (const col of ["front", "back", "side"]) L.rect(col, 0, 0.92, 1, 0.05, tone(body, -0.2)); // hem
     L.shade();
-    return { torso: 1, legs: 1, hips: 1, sleeves: "none" };
+    return { torso: 1, legs: 1, hips: 1, sleeves: "none", hem: { len: 0.86, flare: 1.9, folds: 12 } };
   };
 
   // TRACKSUIT VARIANTS — color/stripe themes. PAINT.tracksuit already exists;
@@ -2549,7 +2549,7 @@
   };
   // the girls' variant is the SAME painter with the pleated skirt (the
   // tracksuit2/3 wrapper grammar — one painter, distinct cache keys).
-  PAINT.schoolgirl = function (P, c) { return Object.assign(PAINT.school(P, c, true), { hips: 1 }); };
+  PAINT.schoolgirl = function (P, c) { return Object.assign(PAINT.school(P, c, true), { hips: 1, hem: { len: 0.44, flare: 1.35, folds: 16, pleat: 1 } }); };
   // kids' hoodie: the adult hoodie painter, cast in a child's colors. Nothing
   // about a hoodie changes with age — only the palette and the BODY do.
   PAINT.kidhoodie = function (P, c) { return PAINT.hoodie(P, Object.assign({}, c, { kid: 1 })); };   // …hemmed above a child's tuck
@@ -2581,7 +2581,7 @@
       L.rect(col, 0, 0.53, 1, 0.47, sk);                              // BARE SHINS below the knee
     }
     L.shade();
-    return { torso: 1, arms: 1, legs: 1, hips: 1 };
+    return { torso: 1, arms: 1, legs: 1, hips: 1, hem: { len: 0.5, flare: 1.55, folds: 9, hex: body } };
   };
 
   // ============================================================
@@ -3693,12 +3693,110 @@
   }
   CBZ.citySleeveHeads = sleeveHeads;
 
+  /* ---- THE SKIRT IS CLOTH, NOT PAINT ON TWO LEGS ----------------------------
+     Every dress, sundress, pinafore and pleated school skirt was painted onto
+     the trouser legs: two separate tubes in the dress colour, i.e. a jumpsuit.
+     A painter that declares `hem: {len, flare, folds, pleat}` now also hangs a
+     real skirt from the hips: a lofted shell that hugs the shaped pelvis
+     (character.js torsoShape.pel, the same surface the trousers are) down to
+     the widest hip line and then falls free, flaring to its hem `len` of the
+     way from the hip to the floor, with soft folds that deepen toward the hem
+     (`pleat`: knife pleats, sharper and more of them). One geometry per body
+     shape and hem, cached; one double-sided material per colour, cached. It
+     rides rig.body (the hip-locked node the pelvis is on), so it bobs, sways
+     and leans with the hips; the legs swing inside the flare. The painted
+     legs stay underneath (a stride shows the same fabric, not a leg).
+     Hidden on any other garment; one-line revert: CBZ.CONFIG.CITY_SKIRT_MESH = false. */
+  const SKIRT_GEO = Object.create(null), SKIRT_MAT = Object.create(null);
+  function skirtGeometry(S, hem) {
+    const key = S.key + "|" + hem.len + "|" + hem.flare + "|" + (hem.folds | 0) + "|" + (hem.pleat ? 1 : 0);
+    if (SKIRT_GEO[key]) return SKIRT_GEO[key];
+    const N = 40, ROWS = 11;
+    const pk = S.pk || 1;
+    const yTop = S.pTop - 0.015, yHip = S.hipY + 0.05 * pk;
+    const yHem = S.hipY - hem.len * (S.hipY - 0.05);
+    const w0 = S.pel(yHip);
+    const pos = [], idx = [];
+    const ys = [];
+    for (let i = 0; i <= ROWS; i++) {
+      const t = i / ROWS;
+      ys.push(i <= 2 ? yTop + (yHip - yTop) * (i / 2) : yHip + (yHem - yHip) * ((i - 2) / (ROWS - 2)));
+    }
+    ys.push(yHem + 0.012);                               // the turned-up hem, inside
+    for (let r = 0; r < ys.length; r++) {
+      const y = ys[r], inner = r === ys.length - 1;
+      let a, zf, zb, n, u;
+      if (y >= yHip) { const q = S.pel(Math.min(y, S.pTop)); a = q.a; zf = q.zf; zb = q.zb; n = q.n || 2.6; u = 0; }
+      else {
+        u = (yHip - y) / Math.max(0.05, yHip - yHem);
+        const f = 1 + (hem.flare - 1) * Math.pow(u, 1.15);
+        a = w0.a * (1 + (f - 1) * 0.75); zf = w0.zf * f; zb = w0.zb * (1 + (f - 1) * 0.9); n = 2.6 - 0.4 * u;
+      }
+      const off = 0.014 + 0.004 * u;
+      const k = inner ? 0.965 : 1;
+      for (let j = 0; j < N; j++) {
+        const th = j / N * Math.PI * 2, sn = Math.sin(th), cs = Math.cos(th);
+        const ex = 2 / n;
+        let x = Math.sign(sn) * Math.pow(Math.abs(sn), ex) * (a + off);
+        let z = Math.sign(cs) * Math.pow(Math.abs(cs), ex) * ((cs > 0 ? zf : zb) + off);
+        // folds: soft waves (or knife pleats) that grow toward the hem
+        const fk = hem.folds || 10, wv = hem.pleat ? (Math.abs(((j * fk / N) % 1) - 0.5) * 2 - 0.5) : Math.sin(th * fk);
+        const amp = (hem.pleat ? 0.05 : 0.035) * Math.pow(u, 1.3);
+        x *= (1 + amp * wv) * k; z *= (1 + amp * wv) * k;
+        pos.push(x, y, z);
+      }
+    }
+    for (let r = 0; r < ys.length - 1; r++) for (let j = 0; j < N; j++) {
+      const a0 = r * N + j, a1 = r * N + (j + 1) % N, b0 = a0 + N, b1 = a1 + N;
+      idx.push(a0, b0, a1, a1, b0, b1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    g.computeBoundingSphere();
+    g._shared = true;
+    SKIRT_GEO[key] = g;
+    return g;
+  }
+  function skirtMaterial(hex) {
+    const k = (hex | 0) & 0xffffff;
+    let m = SKIRT_MAT[k];
+    if (!m) {
+      const base = CBZ.cmat ? CBZ.cmat(k) : null;
+      m = base ? base.clone() : new THREE.MeshLambertMaterial({ color: k });
+      m.side = THREE.DoubleSide;
+      SKIRT_MAT[k] = m;
+    }
+    return m;
+  }
+  function dressSkirt(ch, hem, hex) {
+    let sm = ch._skirtMesh;
+    const S = ch.torsoShape, host = ch.body;
+    const want = !!(hem && S && S.pel && host && hex != null && (!CBZ.CONFIG || CBZ.CONFIG.CITY_SKIRT_MESH !== false));
+    if (!want) { if (sm) sm.visible = false; return; }
+    const geo = skirtGeometry(S, hem);
+    if (!sm) {
+      sm = new THREE.Mesh(geo, skirtMaterial(hex));
+      sm.name = "skirt";
+      sm.castShadow = true; sm.receiveShadow = false;
+      sm.userData.clothingPart = "skirt";
+      host.add(sm);
+      ch._skirtMesh = sm;
+    }
+    sm.geometry = geo;
+    sm.material = skirtMaterial(hex);
+    sm.visible = true;
+  }
+  CBZ.citySkirtGeometry = skirtGeometry;
+
   function applyClothes(ch, rec, opts) {
     if (!ch || !ch.skinSlots) return null;
     fitTorso(ch);                                    // chest+waist → ONE garment column
     const set = rec ? getSet(rec, ch) : null;
     const key = set ? keyOf(typeof rec === "string" ? { id: rec } : rec, ch) : null;
     if (!set) {                                      // no painted look → strip back to flat
+      if (ch._skirtMesh) ch._skirtMesh.visible = false;
       if (ch._clothesKey != null) {
         const s = ch.skinSlots;
         restore(s.torso); restore(s.arms); restore(s.legs); restore(s.pelvis);
@@ -3722,6 +3820,7 @@
     const outParts = yokeOn ? set.partsY : set.parts;
     if (ch._clothesKey === key && ch._clothesMat === m) return outParts;    // already wearing it
     const s = ch.skinSlots;
+    dressSkirt(ch, set.parts.hem, set.parts.hem && set.parts.hem.hex != null ? set.parts.hem.hex : set.bodyHex);
     const xr = set.parts.fp ? tailorXR(ch) : 0;      // TAILORING: front laid out in body units
     dress(s.torso, "torso", m, xr);
     if (set.parts.arms) { dress(s.arms, "arm", m); dress(s.armsLower, "arm", m); }
