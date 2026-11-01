@@ -1367,8 +1367,9 @@
 
      The fix is at the paint, once: decode the swatch (the sRGB curve, the
      polynomial metro_fabric uses) and ease it 30% toward its own grey (the
-     grade adds saturation and ACES pushes reds to orange), exactly
-     metro_fabric's MF_MAIN, so a shell and its far copy are one colour.
+     grade adds saturation and ACES pushes reds to orange), as
+     metro_fabric's MF_MAIN does; b.wallColor carries the graded paint, so a
+     shell and its MF_RAW far copy are one colour.
      Applied where a shell's paint becomes a material: the merged trim
      (flushDeco), the structural boxes (lbox), the round primitives, the
      window-trim instances and the debris skin. Pure function of the hex and
@@ -1379,7 +1380,10 @@
     hex = hex >>> 0;
     let g = _gradeCache.get(hex);
     if (g != null) return g;
-    const dec = function (c) { return c * (c * (c * 0.305306011 + 0.682171111) + 0.012522878); };
+    // 18% of the swatch is kept under the decode: a fully decoded slate or
+    // iron (0x2c3036 -> 6,7,8) went to pure black under the city's lights,
+    // and real dark paint and slate still show their colour in the sun
+    const dec = function (c) { return 0.82 * c * (c * (c * 0.305306011 + 0.682171111) + 0.012522878) + 0.18 * c; };
     const r = dec(((hex >> 16) & 255) / 255), gg = dec(((hex >> 8) & 255) / 255), b = dec((hex & 255) / 255);
     const L = 0.2126 * r + 0.7152 * gg + 0.0722 * b;
     const out = function (c) { return Math.max(0, Math.min(255, Math.round((L + (c - L) * 0.7) * 255))); };
