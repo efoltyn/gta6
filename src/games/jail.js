@@ -350,10 +350,12 @@
       }
       // the barred DOOR: a real y0/y1 gate collider across the doorway (X=doorX),
       // plus the visual bars we toggle off when it swings open.
-      const dc = ctx.solid(doorX - 0.18, cz - cellHalf, doorX + 0.18, cz + cellHalf, 0.0, doorH);
-      const bars = new THREE.Group(); gp.add(bars);
-      barGate(ctx, bars, doorX, cz, cellHalf, doorH);
-      V.cells.push({ i, lz: cz, lx: cellX, doorX, half: cellHalf, doorCol: dc, bars, locked: true });
+      // The fixed grille is a permanent wall; only the leaf's opening toggles.
+      const F = cellFront(ctx, gp, doorX, cz, cellHalf, doorH, 0);
+      ctx.solid(doorX - 0.18, cz - cellHalf, doorX + 0.18, cz + F.z0, 0.0, doorH);
+      ctx.solid(doorX - 0.18, cz + F.z1, doorX + 0.18, cz + cellHalf, 0.0, doorH);
+      const dc = ctx.solid(doorX - 0.18, cz + F.z0, doorX + 0.18, cz + F.z1, 0.0, doorH);
+      V.cells.push({ i, lz: cz, lx: cellX, doorX, half: cellHalf, doorCol: dc, bars: F.pivot, swing: true, locked: true });
     }
     // cell 1 (middle) is the PLAYER cell — stands empty & OPEN until an arrest.
     setDoor(V.cells[1], false);
@@ -515,14 +517,16 @@
       if (!fur("bed", gp, ctx, BX + x0 + 1.15, FY, c.z, Math.PI / 2, { len: 1.9, wide: 0.92, tone: "auto" })) {
         box(BX + x0 + 1.15, FY + 0.55, c.z, 1.9, 0.34, 0.92, MAT.bunk); propPlain++;
       }
-      box(BX + x0 + 0.62, FY + 0.28, c.z + half - 0.62, 0.5, 0.56, 0.5, MAT.wire);   // the pan
-      box(BX + x0 + 0.62, FY + 0.72, c.z - half + 0.55, 0.42, 0.06, 0.42, MAT.wallD); // the shelf
-      // the barred DOOR: the y0/y1 gate collider setDoor pushes and pops, plus
-      // the bars we hide when it swings open.
-      const dc = ctx.solid(dx - 0.18, c.z - half, dx + 0.18, c.z + half, FY, FY + CH);
-      const bars = new THREE.Group(); gp.add(bars);
-      barGate(ctx, bars, dx, c.z, half, CH, FY);
-      V.cells.push({ i, lz: c.z, lx: c.x, doorX: dx, half: half, doorCol: dc, bars, locked: true });
+      combi(ctx, gp, BX + x0 + 0.02, FY, c.z + half - 0.62);                          // the stainless combi
+      wallShelf(ctx, gp, BX + x0, FY + 1.25, c.z - half + 0.55, 0.5, 0.34);            // the shelf, on the wall
+      // the barred DOOR: the fixed grille is a permanent wall; `doorCol`, the
+      // y0/y1 collider setDoor pushes and pops, spans the leaf's opening only,
+      // and the leaf swings out on its hinges when it is unlocked.
+      const F = cellFront(ctx, gp, dx, c.z, half, CH, FY);
+      ctx.solid(dx - 0.18, c.z - half, dx + 0.18, c.z + F.z0, FY, FY + CH);
+      ctx.solid(dx - 0.18, c.z + F.z1, dx + 0.18, c.z + half, FY, FY + CH);
+      const dc = ctx.solid(dx - 0.18, c.z + F.z0, dx + 0.18, c.z + F.z1, FY, FY + CH);
+      V.cells.push({ i, lz: c.z, lx: c.x, doorX: dx, half: half, doorCol: dc, bars: F.pivot, swing: true, locked: true });
     }
     setDoor(V.cells[1], false);       // cell 1 is the player's — open until an arrest
 
@@ -535,7 +539,7 @@
     const leaf = new THREE.Group();
     const sg = bl(-GW, SEC_Z);
     leaf.position.set(sg.x, FY, sg.z); leaf.rotation.y = 1.22; gp.add(leaf);
-    barGate(ctx, leaf, GW, 0, GW, CH, 0, true);
+    gateLeaf(ctx, leaf, GW * 2 - 0.05, CH - 0.1);
     signBoard(ctx, gp, bl(-6.2, SEC_Z + 0.14).x, FY + 2.35, bl(-6.2, SEC_Z + 0.14).z, "BOOKING");
 
     // ---- THE DAY ROOM, east of the corridor: tables somebody sits at ------
@@ -562,14 +566,10 @@
 
     // ---- THE BOOKING HALL, inside the front doors. The counter is the point
     //      city/wanted.js's perp walk ends at, so it stands square to the door.
-    box(dsk.x, FY + 0.55, bl(0, z1 - 6.4).z, 7.2, 1.1, 0.92, MAT.desk);
-    box(dsk.x, FY + 1.16, bl(0, z1 - 6.4).z, 7.4, 0.12, 1.02, MAT.deskD);
+    bookingCounter(ctx, gp, dsk.x, FY, bl(0, z1 - 6.4).z, 7.2, 0.92);
     ctx.solid(dsk.x - 3.6, bl(0, z1 - 6.4).z - 0.46, dsk.x + 3.6, bl(0, z1 - 6.4).z + 0.46, FY, FY + 1.16);
     // the property lockers behind the counter — where your guns actually go
-    for (let i = 0; i < 4; i++) {
-      const L = bl(4.6 + i * 1.05, SEC_Z + 0.75);
-      box(L.x, FY + 1.0, L.z, 0.95, 2.0, 0.55, MAT.wallD);
-    }
+    { const L = bl(4.6 + 1.5 * 1.05, SEC_Z + 0.75); lockerBank(ctx, gp, L.x, FY, L.z, 4, 1.05, 2.0, 0.55); }
     ctx.solid(bl(4.1, SEC_Z + 0.75).x, bl(0, SEC_Z + 0.5).z, bl(8.3, SEC_Z + 0.75).x, bl(0, SEC_Z + 1.0).z, FY, FY + 2.0);
     // the bench you wait on
     for (let i = 0; i < 2; i++) {
@@ -837,20 +837,217 @@
     ctx.solid(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, 0.0, h);
   }
 
-  // barred cell-door bars between chunky top/bottom rails (visual; the collider
-  // is the real barrier). Toggled off when the door swings open.
-  //   y0     — the floor it stands on (a shell's ground slab is at ~0.14, the
-  //            legacy yard's is 0; defaulting to 0 keeps every old call exact).
-  //   alongX — the run lies along X instead of Z (the secure line's gate).
-  function barGate(ctx, parent, x, z, half, h, y0, alongX) {
-    y0 = y0 || 0;
-    const bx = (lx, ly, lz, w, hh, d, m) => ctx.box(parent, lx, ly, lz, w, hh, d, ctx.mat(m));
-    const rw = alongX ? half * 2 + 0.2 : 0.22, rd = alongX ? 0.22 : half * 2 + 0.2;
-    bx(x, y0 + 0.2, z, rw, 0.3, rd, MAT.wallD);                // bottom rail (chunky)
-    bx(x, y0 + h - 0.15, z, rw, 0.3, rd, MAT.wallD);           // top rail
-    for (let t = -half + 0.2; t <= half - 0.2 + 1e-6; t += 0.42)
-      ctx.cyl(parent, alongX ? x + t : x, y0 + h / 2, alongX ? z : z + t, 0.05, 0.05, h - 0.4, ctx.mat(MAT.bar), 6);
+  /* ==========================================================
+     THE COUNTY JAIL'S HARDWARE (rebuilt 2026-10-31).
+
+     The cell fronts here were the oldest steel in the game: 10 cm bars at
+     42 cm (a head goes through 42 cm) between two 30 cm concrete-coloured
+     beams, the whole front VANISHING when the door unlocked. The toilet was
+     a 50 cm grey cube, the property lockers four grey slabs.
+
+     Now a cell front is what a county block actually hangs, on the prison's
+     one bar spec (world/corridorkit.js BARS: 25 mm round at 125 mm, flat
+     straps every ~0.5 m, channel rails): a FIXED GRILLE across most of the
+     face and a hinged barred LEAF in a steel jamb at one end. The leaf hangs
+     on three barrel hinges, carries a surface lock case with a key cylinder
+     each side, a pull and a food pass, and it SWINGS OPEN into the corridor
+     when the door is unlocked instead of disappearing.
+
+     COLLIDERS FOLLOW THE STEEL. The fixed grille is a permanent ctx.solid;
+     `doorCol` (what setDoor pushes and splices) spans only the leaf's
+     opening. So an unlocked cell is open where the door is and barred where
+     the bars are, exactly as drawn.
+
+     Everything static is welded into one mesh per front and one per leaf.
+     ========================================================== */
+  const JB = { r: 0.0125, pitch: 0.125, strap: 0.064, strapT: 0.016, strapEvery: 0.52 };
+  const LEAF_W = 0.95;                         // clear opening of a cell door
+  const LEAF_OPEN = -1.62;                     // ~93 degrees, out into the corridor
+  function gBox(list, x, y, z, w, h, d) { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); list.push(g); }
+  // a cylinder along y (axis "y"), x or z
+  function gCyl(list, x, y, z, r, len, seg, axis) {
+    const g = new THREE.CylinderGeometry(r, r, len, seg || 8);
+    if (axis === "x") g.rotateZ(Math.PI / 2); else if (axis === "z") g.rotateX(Math.PI / 2);
+    g.translate(x, y, z); list.push(g);
   }
+  function weld(list, m) {
+    const BGU = THREE.BufferGeometryUtils;
+    if (BGU && BGU.mergeBufferGeometries && list.length > 1) {
+      const geo = BGU.mergeBufferGeometries(list, false);
+      if (geo) {
+        for (const g of list) g.dispose();
+        const mesh = new THREE.Mesh(geo, m);
+        mesh.castShadow = true; mesh.receiveShadow = true;
+        return mesh;
+      }
+    }
+    const grp = new THREE.Group();
+    for (const g of list) grp.add(new THREE.Mesh(g, m));
+    return grp;
+  }
+  // a run of bars in the plane x = 0, t along z from t0 to t1, y0..y1:
+  // channel rails top and bottom, round bars at the pitch, flat straps
+  function grilleGeo(list, t0, t1, y0, y1) {
+    const len = t1 - t0, tc = (t0 + t1) / 2;
+    gBox(list, 0, y0 + 0.04, tc, 0.08, 0.08, len);
+    gBox(list, 0, y1 - 0.04, tc, 0.08, 0.08, len);
+    const n = Math.max(1, Math.round(len / JB.pitch));
+    for (let k = 1; k < n; k++) gCyl(list, 0, (y0 + y1) / 2, t0 + (k * len) / n, JB.r, y1 - y0 - 0.16, 8);
+    const ns = Math.max(1, Math.round((y1 - y0 - 0.16) / JB.strapEvery));
+    for (let k = 1; k < ns; k++) gBox(list, 0, y0 + 0.08 + (k * (y1 - y0 - 0.16)) / ns, tc, JB.strapT, JB.strap, len);
+  }
+  /* A whole cell front in `parent`, the face at x = fx running along z from
+     fz - half to fz + half, floor y0, height h. Returns the leaf's pivot (the
+     cell's `bars`) and the opening's [z0, z1]; the caller makes the colliders.
+     `alongX` turns the whole front a quarter so it runs along x instead. */
+  function cellFront(ctx, parent, fx, fz, half, h, y0, alongX) {
+    y0 = y0 || 0;
+    const steel = ctx.mat(MAT.bar);
+    const holder = new THREE.Group();
+    holder.position.set(fx, y0, fz);
+    if (alongX) holder.rotation.y = Math.PI / 2;
+    parent.add(holder);
+    const top = h - 0.02;
+    // the opening sits at the +t end, its hinge jamb against the partition
+    const oB = half - 0.08, oA = oB - LEAF_W;
+    const fixed = [];
+    grilleGeo(fixed, -half + 0.06, oA - 0.05, 0, top - 0.12);
+    gBox(fixed, 0, top - 0.06, 0, 0.14, 0.12, half * 2);                  // head channel over the whole face
+    gBox(fixed, 0, 0.006, (oA + oB) / 2, 0.16, 0.012, LEAF_W);            // threshold plate
+    for (const t of [-half + 0.03, oA - 0.03, oB + 0.03, half - 0.01])
+      gBox(fixed, 0, (top - 0.12) / 2, t, 0.1, top - 0.12, 0.06);          // square-tube jambs and end posts
+    gBox(fixed, 0.05, 1.1, oA - 0.05, 0.02, 0.24, 0.06);                  // strike plate on the lock jamb
+    holder.add(weld(fixed, steel));
+    // the leaf, hinged on the +t jamb, built from its hinge toward -t
+    const pivot = new THREE.Group();
+    pivot.position.set(0.06, 0, oB);
+    holder.add(pivot);
+    const L = [], LH = top - 0.16, W = LEAF_W - 0.02;
+    grilleGeo(L, -W + 0.06, -0.06, 0.04, LH);
+    for (const t of [-0.03, -W + 0.03]) gBox(L, 0, (0.04 + LH) / 2, t, 0.06, LH - 0.04, 0.06);   // stiles
+    gBox(L, 0, 0.04 + 0.12, -W / 2, 0.012, 0.24, W - 0.1);                                        // kick panel
+    for (const y of [0.3, LH / 2 + 0.05, LH - 0.25]) {                                            // barrel hinges
+      gCyl(L, 0.02, y, 0.018, 0.022, 0.16, 10);
+      gCyl(L, 0.02, y + 0.09, 0.018, 0.008, 0.02, 6);
+      gBox(L, 0.01, y, -0.02, 0.012, 0.12, 0.06);
+    }
+    const lt = -W + 0.12;                                                                         // the lock stile
+    gBox(L, 0, 1.1, lt, 0.11, 0.38, 0.17);                                                        // lock case
+    for (const s of [-1, 1]) {
+      gBox(L, s * 0.058, 1.1, lt, 0.008, 0.42, 0.2);                                              // face plates
+      gCyl(L, s * 0.068, 1.18, lt, 0.03, 0.012, 14, "x");                                         // escutcheon
+      gCyl(L, s * 0.077, 1.18, lt, 0.017, 0.01, 10, "x");                                         // cylinder
+    }
+    gBox(L, 0.1, 1.1, lt + 0.17, 0.026, 0.4, 0.026);                                              // pull
+    for (const y of [0.93, 1.27]) gBox(L, 0.075, y, lt + 0.17, 0.05, 0.02, 0.02);
+    const fc = -W / 2 + 0.04, FPW = 0.38, FPH = 0.16, FPY = 1.0;                                  // food pass
+    for (const s of [-1, 1]) {
+      gBox(L, 0, FPY + s * (FPH / 2 + 0.025), fc, 0.09, 0.05, FPW + 0.1);
+      gBox(L, 0, FPY, fc + s * (FPW / 2 + 0.025), 0.09, FPH, 0.05);
+    }
+    gBox(L, 0.055, FPY, fc, 0.012, FPH, FPW);
+    gCyl(L, 0.062, FPY - FPH / 2 - 0.012, fc, 0.012, FPW * 0.8, 8, "z");                          // flap hinge
+    gBox(L, 0.07, FPY + FPH / 2 - 0.02, fc, 0.016, 0.02, 0.1);                                    // slide bolt
+    pivot.add(weld(L, steel));
+    return { pivot, z0: oA, z1: oB };
+  }
+  /* the stainless combi a county cell bolts to its wall: chase, basin on top
+     with a push tap, the bowl with its rolled rim cantilevered off the front.
+     (x, z) on the wall face, the unit looking +x */
+  function combi(ctx, parent, x, y0, z) {
+    const ss = ctx.pmat ? ctx.pmat(0xc9ced3, 40) : ctx.mat(0xc9ced3), dk = ctx.mat(0x5f6872);
+    const A = [], B = [];
+    gBox(A, 0.13, 0.56, 0, 0.26, 1.12, 0.62);                     // the chase
+    gBox(A, 0.15, 1.135, 0, 0.3, 0.03, 0.64);                     // its lid
+    gBox(A, 0.04, 1.2, 0, 0.05, 0.1, 0.05);                       // tap
+    gBox(A, 0.265, 0.92, 0.18, 0.01, 0.04, 0.04);                 // flush button
+    let g = new THREE.CylinderGeometry(0.19, 0.14, 0.3, 18); g.translate(0.44, 0.26, 0); A.push(g);   // bowl
+    g = new THREE.TorusGeometry(0.19, 0.03, 6, 20); g.rotateX(Math.PI / 2); g.translate(0.44, 0.41, 0); A.push(g);
+    g = new THREE.CylinderGeometry(0.16, 0.13, 0.06, 16); g.translate(0.15, 1.12, 0); B.push(g);       // basin
+    g = new THREE.CylinderGeometry(0.14, 0.14, 0.01, 16); g.translate(0.44, 0.395, 0); B.push(g);      // the water
+    const grp = new THREE.Group();
+    grp.position.set(x, y0, z);
+    grp.add(weld(A, ss), weld(B, dk));
+    parent.add(grp);
+    return grp;
+  }
+  // a steel shelf on two gusset brackets, off the wall at x, looking +x
+  function wallShelf(ctx, parent, x, y, z, w, d) {
+    const L = [];
+    gBox(L, d / 2, 0, 0, d, 0.012, w);
+    gBox(L, d - 0.006, -0.025, 0, 0.012, 0.05, w);                // turned-down lip
+    for (const s of [-1, 1]) {
+      gBox(L, 0.006, -0.1, s * (w / 2 - 0.05), 0.012, 0.2, 0.04);
+      const b = new THREE.BoxGeometry(Math.hypot(d * 0.8, 0.18), 0.02, 0.012);
+      b.rotateZ(Math.atan2(0.18, d * 0.8)); b.translate(d * 0.4, -0.1, s * (w / 2 - 0.05)); L.push(b);
+    }
+    const m = weld(L, ctx.mat(0x8a929c));
+    m.position.set(x, y, z);
+    parent.add(m);
+    return m;
+  }
+  /* a bank of two-tier property lockers, fronts looking +z, centred (x, z):
+     a carcass, two doors per column with louvres, a lift handle with a
+     padlock hasp and a number plate on each. */
+  function lockerBank(ctx, parent, x, y0, z, cols, colW, h, d) {
+    const body = [], doors = [], bright = [];
+    const W = cols * colW;
+    gBox(body, 0, h / 2 + 0.05, 0, W, h - 0.1, d);                       // carcass
+    gBox(body, 0, 0.05, 0.03, W, 0.1, d - 0.06);                         // plinth, set back
+    gBox(body, 0, h + 0.005, 0, W + 0.02, 0.01, d + 0.02);               // top
+    const dh = (h - 0.16) / 2;
+    for (let c = 0; c < cols; c++) {
+      const cx = -W / 2 + colW * (c + 0.5);
+      for (let r = 0; r < 2; r++) {
+        const cy = 0.13 + dh * (r + 0.5) + (r ? 0.02 : 0);
+        gBox(doors, cx, cy, d / 2 + 0.008, colW - 0.03, dh - 0.02, 0.016);
+        for (let k = 0; k < 4; k++) gBox(body, cx, cy + dh * 0.5 - 0.1 - k * 0.035, d / 2 + 0.018, colW * 0.5, 0.012, 0.006);  // louvres
+        gBox(bright, cx + colW / 2 - 0.09, cy, d / 2 + 0.03, 0.03, 0.12, 0.02);   // lift handle
+        gBox(bright, cx + colW / 2 - 0.09, cy - 0.1, d / 2 + 0.024, 0.04, 0.03, 0.012); // hasp
+        gBox(bright, cx, cy - dh * 0.5 + 0.12, d / 2 + 0.018, 0.08, 0.035, 0.004); // number plate
+      }
+    }
+    const grp = new THREE.Group();
+    grp.position.set(x, y0, z);
+    grp.add(weld(body, ctx.mat(0x5d6670)), weld(doors, ctx.mat(0x6c7681)), weld(bright, ctx.mat(0xb8bfc6)));
+    parent.add(grp);
+    return grp;
+  }
+  /* the booking counter: a block carcass with a toe recess, a laminate top
+     with a nosing, and a raised transaction ledge on the public (+z) side.
+     (x, z) is the centre, `len` along x. */
+  function bookingCounter(ctx, parent, x, y0, z, len, dep) {
+    const A = [], T = [];
+    gBox(A, 0, 0.06, -0.04, len - 0.1, 0.12, dep - 0.12);              // toe recess plinth
+    gBox(A, 0, 0.6, 0, len, 0.96, dep);                                // the carcass
+    gBox(A, 0, 0.6, dep / 2 + 0.006, len - 0.06, 0.82, 0.012);         // public face panel
+    for (let i = 1; i < 4; i++) gBox(A, -len / 2 + (len * i) / 4, 0.6, dep / 2 + 0.014, 0.02, 0.82, 0.006);   // panel joints
+    gBox(T, 0, 1.1, -0.03, len + 0.1, 0.04, dep + 0.06);              // the work top
+    gBox(T, 0, 1.24, dep / 2 - 0.06, len + 0.04, 0.035, 0.32);        // the ledge
+    gBox(T, 0, 1.17, dep / 2 - 0.12, len - 0.06, 0.12, 0.03);         // ledge upstand
+    const grp = new THREE.Group();
+    grp.position.set(x, y0, z);
+    grp.add(weld(A, ctx.mat(MAT.desk)), weld(T, ctx.mat(0x9a8f80)));
+    parent.add(grp);
+    return grp;
+  }
+  /* a free barred gate leaf `w` wide, hinge at the parent's origin, running
+     along +x (the secure line's gate, which stands open on its hinges) */
+  function gateLeaf(ctx, parent, w, h) {
+    const L = [];
+    grilleGeo(L, 0.06, w - 0.06, 0.04, h - 0.06);
+    for (const t of [0.03, w - 0.03]) gBox(L, 0, h / 2, t, 0.06, h - 0.04, 0.06);
+    gBox(L, 0, h / 2, w / 2, 0.05, 0.06, w - 0.1);                                    // mid rail
+    for (const y of [0.3, h / 2, h - 0.3]) gCyl(L, 0.02, y, -0.018, 0.022, 0.16, 10);  // hinges
+    gBox(L, 0, 1.1, w - 0.12, 0.11, 0.38, 0.17);                                       // lock case
+    const m = weld(L, ctx.mat(MAT.bar));
+    m.rotation.y = Math.PI / 2;                                                        // t (local z) -> +x
+    parent.add(m);
+    return m;
+  }
+  // the lab turntable reaches these through here (src/lab/kits/asset.js)
+  CBZ.countyJailKit = { cellFront, combi, wallShelf, lockerBank, bookingCounter, gateLeaf, LEAF_W, LEAF_OPEN };
+
   function wallStub(box, ctx, cx, cz, len, t, h) { box(cx, h / 2, cz, len, h, t, MAT.wallD); }
   /* THE SPILL IS THE WALL THAT WAS THERE: broken chunks of the yard wall's
      own material (debris.js's shared irregular cut solids, stretched to
@@ -898,7 +1095,8 @@
     else if (!locked && i >= 0) arr.splice(i, 1);
     const moved = cell.locked !== !!locked;
     cell.locked = !!locked;
-    if (cell.bars) cell.bars.visible = !!locked;
+    // a hinged leaf swings out on its hinges; anything older just hides
+    if (cell.bars) { if (cell.swing) cell.bars.rotation.y = locked ? 0 : LEAF_OPEN; else cell.bars.visible = !!locked; }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     // The door speaks HERE, from the hardware, because that is the only place
     // that knows a leaf actually moved. recapture() used to shout its own cue
