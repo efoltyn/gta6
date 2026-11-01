@@ -121,6 +121,8 @@
     ambulance: "Ambulance",
     firetruck: "Fire Engine",
     bearcat: "SWAT Armored Truck",
+    // city/armored.js: the cash-in-transit truck (a registered builder; same rule as `semi`)
+    armored: "Armored Cash Truck",
   };
 
   // ---- per-style HANDLING FEEL hooks (GTA vehicle-class inspired) ----
@@ -164,6 +166,8 @@
     ambulance:   { class: "van",    accel: 0.80, top: 0.86, turn: 0.72, grip: 0.80, brake: 0.82, drift: 1.10, roll: 1.35 },
     firetruck:   { class: "van",    accel: 0.62, top: 0.80, turn: 0.58, grip: 0.74, brake: 0.66, drift: 1.20, roll: 1.45 },
     bearcat:     { class: "van",    accel: 0.70, top: 0.84, turn: 0.66, grip: 0.82, brake: 0.72, drift: 1.10, roll: 1.25 },
+    // the CIT truck drove on the van silhouette before it had a body: same numbers
+    armored:     { class: "van",    accel: 0.86, top: 0.88, turn: 0.78, grip: 0.82, brake: 0.86, drift: 1.1, roll: 1.3 },
   };
   const DEFAULT_FEEL = { class: "sedan", accel: 1.0, top: 1.0, turn: 1.0, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.6 };
   // (d) THE ONE FEEL LOOKUP. FEEL above covers the road silhouettes; a
@@ -913,7 +917,8 @@
       for (let j = 0; j < rings.length - 1; j++) {
         for (let i = 0; i < n; i++) {
           const a = j * n + i, b = j * n + (i + 1) % n, c = (j + 1) * n + (i + 1) % n, d = (j + 1) * n + i;
-          if (rings[j + 1].z < rings[j].z) I.push(a, b, c, a, c, d); else I.push(a, c, b, a, d, c);
+          // ring points run counter-clockwise seen from +Z: (a,b,c) faces out when the next ring is further +Z
+          if (rings[j + 1].z > rings[j].z) I.push(a, b, c, a, c, d); else I.push(a, c, b, a, d, c);
         }
       }
       side.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
