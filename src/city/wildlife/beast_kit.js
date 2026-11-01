@@ -536,7 +536,7 @@
       if (fam === "hoof" || fam === "pig") {
         const hoofH = o.hoofH || Math.max(0.05, WH * 0.05);
         if (front) return [
-          [x - 0.02 * L, WH - chest * 0.45, f * 1.25, f * 1.2, f * 0.95],
+          [x - 0.02 * L, WH - chest * 0.52, f * 1.25, f * 1.2, f * 0.95],
           [x - 0.035 * L, brisket - chest * 0.02, f * 1.05, f, f * 0.82],
           [x - 0.025 * L, brisket - (brisket * 0.55), f * 0.62, f * 0.66, f * 0.55],
           [x - 0.02 * L, WH * 0.27, c * 1.25, c * 1.2, c * 1.1],     // knee (carpus)
@@ -547,7 +547,7 @@
           [x + 0.03 * L, 0.004, c * 1.3, c * 1.15, c * 1.15],
         ];
         return [
-          [x + 0.02 * L, HH - chest * 0.25, h * 1.25, h * 1.15, h * 0.7],
+          [x + 0.02 * L, HH - chest * 0.36, h * 1.25, h * 1.15, h * 0.7],
           [x + 0.07 * L, HH * 0.66, h * 1.0, h * 1.05, h * 0.72],          // stifle
           [x - 0.01 * L, HH * 0.47, h * 0.62, h * 0.75, h * 0.55],
           [x - 0.065 * L, HH * 0.34, c * 1.25, c * 1.55, c * 1.0],        // hock
@@ -560,7 +560,7 @@
       }
       if (fam === "bear") {
         if (front) return [
-          [x, WH - chest * 0.4, f * 1.3, f * 1.3, f * 1.0],
+          [x, WH - chest * 0.5, f * 1.3, f * 1.3, f * 1.0],
           [x - 0.03 * L, brisket, f * 1.15, f * 1.15, f * 0.9],
           [x - 0.01 * L, WH * 0.22, f * 0.9, f * 0.95, f * 0.8],
           [x + 0.01 * L, WH * 0.08, f * 0.95, f * 0.9, f * 0.95],
@@ -568,7 +568,7 @@
           [x + 0.1 * L, 0.004, f * 0.3, f * 0.3, f * 0.85],
         ];
         return [
-          [x + 0.02 * L, HH - chest * 0.25, h * 1.3, h * 1.2, h * 1.0],
+          [x + 0.02 * L, HH - chest * 0.36, h * 1.3, h * 1.2, h * 1.0],
           [x + 0.05 * L, HH * 0.5, h * 1.05, h * 1.05, h * 0.85],
           [x - 0.01 * L, HH * 0.2, h * 0.75, h * 0.8, h * 0.7],
           [x - 0.03 * L, 0.07, h * 0.65, h * 0.6, h * 0.7],
@@ -578,7 +578,7 @@
       }
       if (fam === "hare") {
         if (front) return [
-          [x, WH - chest * 0.4, f, f, f * 0.85],
+          [x, WH - chest * 0.5, f, f, f * 0.85],
           [x - 0.01 * L, brisket, f * 0.8, f * 0.8, f * 0.7],
           [x, WH * 0.12, f * 0.55, f * 0.55, f * 0.55],
           [x + 0.05 * L, 0.02, f * 0.5, f * 0.45, f * 0.55],
@@ -595,7 +595,7 @@
       // digitigrade: cats and dogs
       const pawR = o.paw || f * 0.85;
       if (front) return [
-        [x - 0.02 * L, WH - chest * 0.4, f * 1.35, f * 1.25, f * 1.0],
+        [x - 0.02 * L, WH - chest * 0.5, f * 1.35, f * 1.25, f * 1.0],
         [x - 0.05 * L, brisket + chest * 0.05, f * 1.1, f * 1.05, f * 0.85],
         [x - 0.02 * L, WH * 0.32, f * 0.8, f * 0.75, f * 0.68],
         [x - 0.005 * L, WH * 0.1, f * 0.58, f * 0.58, f * 0.58],
@@ -604,7 +604,7 @@
         [x + 0.05 * L, 0.004, pawR * 0.6, pawR * 0.55, pawR * 0.75],
       ];
       return [
-        [x + 0.03 * L, HH - chest * 0.25, h * 1.3, h * 1.2, h * 0.95],
+        [x + 0.03 * L, HH - chest * 0.36, h * 1.3, h * 1.2, h * 0.95],
         [x + 0.09 * L, HH * 0.58, h * 1.0, h * 1.0, h * 0.8],             // stifle
         [x - 0.02 * L, HH * 0.42, h * 0.65, h * 0.72, h * 0.55],
         [x - 0.075 * L, HH * 0.27, f * 0.55, f * 0.68, f * 0.5],           // hock
@@ -619,6 +619,7 @@
       const front = nm[0] === "F", s = nm[1] === "L" ? 1 : -1;
       const pts = o.legPts ? o.legPts(front) : legChains(front);
       const leg = P.parts["leg" + nm] = new Part("leg" + nm, UV);
+      leg.ud.leg = nm;
       const z = s * (front ? lz : lz * (o.hindZ || 1.02));
       const lst = [];
       // the leg's root sits INSIDE the body (shoulder blade / thigh under the

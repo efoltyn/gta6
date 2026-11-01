@@ -121,7 +121,10 @@
       // a LEG: taller than wide, planted at the ground
       if (d.h >= 0.14 && d.h >= d.w * 1.1 && bottom <= 0.16 && bottom >= -0.05) {
         let col = null;
-        for (let c = 0; c < cols.length; c++) {
+        // a DECLARED leg (beast_kit stamps userData.leg) is one whole limb:
+        // it starts its own column, however close the other foot stands
+        const decl = m.userData && m.userData.leg;
+        for (let c = 0; c < cols.length && !decl; c++) {
           if (Math.abs(cols[c].x - m.position.x) <= 0.14 && Math.abs(cols[c].z - m.position.z) <= 0.14) { col = cols[c]; break; }
         }
         if (!col) { col = { x: m.position.x, z: m.position.z, top: 0, h: d.h, parts: [] }; cols.push(col); }
@@ -133,13 +136,17 @@
       }
     }
     if (cols.length < 2 || cols.length > 8) return;      // no readable legs — glide
+    let anyDecl = false;
+    for (let c = 0; c < cols.length; c++) if (cols[c].parts[0].m.userData && cols[c].parts[0].m.userData.leg) anyDecl = true;
     // sweep 2: feet / pads / leg stripes stacked on a column ride with it
     const head = [];
     let headMesh = null, headVol = 0;
     for (let i = 0; i < rest.length; i++) {
       const r = rest[i], m = r.m;
       let joined = false;
-      for (let c = 0; c < cols.length; c++) {
+      // declared limbs are whole: nothing else rides a declared column (a
+      // hare's body sits right over its hind feet and would swing with them)
+      for (let c = 0; c < cols.length && !anyDecl; c++) {
         const col = cols[c];
         if (Math.abs(col.x - m.position.x) <= 0.13 && Math.abs(col.z - m.position.z) <= 0.13 &&
             m.position.y - r.d.h / 2 < col.top && r.d.h <= col.h * 1.2) {

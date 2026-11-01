@@ -443,6 +443,7 @@
     head.ud.eyes = [[0.175, 0.485, 0.026, 0.006], [0.175, 0.485, -0.026, 0.006]];
     [-1, 1].forEach(function (s) {
       const leg = P.parts[s > 0 ? "legL" : "legR"] = new K.Part("leg");
+      leg.ud.leg = s > 0 ? "L" : "R";
       leg.tube([[0.0, 0.23, s * 0.04, 0.02], [-0.01, 0.13, s * 0.04, 0.009], [0.0, 0.01, s * 0.04, 0.008]], 5, 6, 0xd8b04a, true);
       [-0.5, 0, 0.5].forEach(function (a) { leg.tube([[0.0, 0.008, s * 0.04, 0.005], [0.05 * Math.cos(a), 0.004, s * 0.04 + 0.05 * Math.sin(a), 0.003]], 3, 4, 0xd8b04a, true); });
     });

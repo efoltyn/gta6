@@ -169,6 +169,23 @@
       if (v > bv) { bv = v; best = m; }
     }
     if (best && best.material && best.material.color) return best.material.color.getHex();
+    // a lofted body (city/wildlife/beast_kit.js) carries its coat in vertex
+    // colours on a white material: average the barrel's colours instead. The
+    // values are already the linear numbers cmat takes, so the mantle
+    // renders the same coat the animal wore.
+    let bigV = 0, big = null;
+    for (let i = 0; i < kids.length; i++) {
+      const m = kids[i]; if (!m.isMesh || !m.geometry || !m.geometry.attributes || !m.geometry.attributes.color) continue;
+      const bb = m.geometry.boundingBox || (m.geometry.computeBoundingBox(), m.geometry.boundingBox);
+      const v = (bb.max.x - bb.min.x) * (bb.max.y - bb.min.y) * (bb.max.z - bb.min.z);
+      if (v > bigV) { bigV = v; big = m; }
+    }
+    if (big) {
+      const c = big.geometry.attributes.color.array;
+      let r = 0, gg = 0, b = 0, n = 0;
+      for (let i = 0; i < c.length; i += 3) { r += c[i]; gg += c[i + 1]; b += c[i + 2]; n++; }
+      if (n) return (Math.round(r / n * 255) << 16) | (Math.round(gg / n * 255) << 8) | Math.round(b / n * 255);
+    }
     return (sp && sp.color) || 0x7a5a3a;
   }
   function shade(hex, k) {
