@@ -1684,6 +1684,15 @@
     }
     return false;
   };
+  // the lab's handle (tools/lab/storeshelf.js): stand a mounted plan up now,
+  // with no player and no tick, so a turntable can photograph a shop floor
+  CBZ.storeGoodsBuildNow = function (plan) {
+    if (!plan) return false;
+    refreshWorld(plan);
+    buildPlan(plan);
+    if (plan.goodsGroup) plan.goodsGroup.visible = true;
+    return !!plan.built;
+  };
   CBZ.cityStoreGoodsAudit = function () {
     let shelves = 0, slots = 0, standing = 0, goods = 0, meshes = 0;
     const kinds = {};

@@ -1026,6 +1026,12 @@
     cuffkey: "key", flipphone: "phone", charger: "phone", sim: "keycard", cupnoodle: "meal",
     snackbar: "meal", energycan: "drink", pruno: "drink", blister: "pill", cashroll: "cash",
     goldtooth: "tooth", tattoo: "tool", lighter: "drink",
+    banana: "produce", orange: "produce", waterbottle: "drink", sodacan: "drink", coffeecup: "drink",
+    sandwich: "bread", chipbag: "fries", jerky: "meal", gum: "meal", milk: "drink", cereal: "meal",
+    hotdog: "meal", motoroil: "drink", gascan: "ammo", batteries: "pill", newspaper: "parcel",
+    firstaid: "medkit", ducttape: "tool", flashlight: "tool", eguitar: "pouch", aguitar: "pouch",
+    amp: "pouch", flattv: "laptop", toolbox: "ammo", camera: "phone", console: "phone", boombox: "pouch",
+    speakers: "pouch", handbag: "pouch", drill: "tool", candybar: "meal",
   };
   function sprite(kind, name, row) {
     const art = ART[kind] || ART[SPRITE_ALIAS[kind]] || ART[GENERIC];
@@ -1285,7 +1291,8 @@
     [/burner phone|flip ?phone/, "flipphone"],
     [/tattoo/, "tattoo"],
     [/ramen|noodle/, "cupnoodle"],
-    [/energy bar|granola|protein bar|candy bar/, "snackbar"],
+    [/candy bar|chocolate bar/, "candybar"],
+    [/energy bar|granola|protein bar/, "snackbar"],
     [/energy drink/, "energycan"],
     [/pruno|hooch/, "pruno"],
     [/painkiller/, "blister"],
@@ -1296,6 +1303,40 @@
     [/cash roll|roll of (cash|bills|notes)/, "cashroll"],
     [/gold tooth|gold teeth/, "goldtooth"],
     [/bandage|gauze/, "bandage"],
+    // THE SHELF CATALOG (2026-10-31): what a gas station, a corner store, a
+    // grocer, a hardware store and a pawnbroker put on their shelves. Each is
+    // its own model in city/itemassets.js, the same object on the shelf, in
+    // the hand, on the pavement and in this slot.
+    [/^banana/, "banana"],
+    [/^oranges?$/, "orange"],
+    [/^water$|bottled water|water bottle/, "waterbottle"],
+    [/^soda$|^cola$|soda can/, "sodacan"],
+    [/^coffee$|cup of coffee/, "coffeecup"],
+    [/sandwich|\bsub\b|hoagie/, "sandwich"],
+    [/^chips$|crisps|bag of chips/, "chipbag"],
+    [/jerky/, "jerky"],
+    [/^gum$|chewing gum/, "gum"],
+    [/^milk$|milk carton/, "milk"],
+    [/cereal/, "cereal"],
+    [/hot ?dog/, "hotdog"],
+    [/motor oil/, "motoroil"],
+    [/gas can|jerry ?can|petrol can/, "gascan"],
+    [/batter(y|ies)/, "batteries"],
+    [/newspaper/, "newspaper"],
+    [/first aid/, "firstaid"],
+    [/duct tape/, "ducttape"],
+    [/^flashlight$|guard torch/, "flashlight"],
+    [/electric guitar/, "eguitar"],
+    [/acoustic guitar/, "aguitar"],
+    [/guitar amp/, "amp"],
+    [/flat tv|television/, "flattv"],
+    [/toolbox|tool box/, "toolbox"],
+    [/^camera$/, "camera"],
+    [/game console/, "console"],
+    [/boombox/, "boombox"],
+    [/^speakers?$/, "speakers"],
+    [/designer bag|handbag/, "handbag"],
+    [/power drill/, "drill"],
   ];
   function PRISON_KIND(n) {
     for (let i = 0; i < PRISON_KINDS.length; i++) if (PRISON_KINDS[i][0].test(n)) return PRISON_KINDS[i][1];
@@ -1529,6 +1570,8 @@
         ? { id: "wear", label: "Take off", hint: "unhood · sells " + fmt$(pawnPrice(name)) + " at a fence" }
         : { id: "wear", label: "Wear", hint: "hood + mantle · sells " + fmt$(pawnPrice(name)) + " at a fence" };
     }
+    // a can of petrol pours into the car you are sitting in (city/fuel.js)
+    if (row.fuel) return { id: "fuel", label: "Pour", hint: "+" + row.fuel + " L into your car" };
     if (row.value > 0) {
       const where = row.pelt ? "pawn / fence" : row.tag === "resource" ? "any counter" : "pawn shop";
       return { id: "sell", label: "Sell", hint: fmt$(pawnPrice(name)) + " at a " + where };
@@ -1621,6 +1664,17 @@
         if (CBZ.cityWear) { try { CBZ.cityWear(name); return true; } catch (e) {} }
         if (E.equip && E.equip(name)) { note("Wearing " + name + "."); return true; }
         return false;
+      case "fuel": {
+        const P = CBZ.player, car = P && P.driving ? P._vehicle : null;
+        if (!car || !CBZ.fuelPour) { note("Get in the car first, then pour the can in."); return false; }
+        const f = CBZ.vehicleFuel ? CBZ.vehicleFuel(car) : null;
+        if (f && f.frac >= 0.999) { note("The tank's already full."); return false; }
+        if (!E.take(name, 1)) return false;
+        const got = CBZ.fuelPour(car, row.fuel || 10);
+        note("Poured " + Math.round(got) + " L into the tank.");
+        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+        return true;
+      }
       case "place":
         if (CBZ.cityInventory && CBZ.cityInventory.placeChest) return !!CBZ.cityInventory.placeChest({});
         return false;
