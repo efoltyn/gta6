@@ -3752,7 +3752,7 @@
         fin([back, belly], [-1.22, 0.50 + s2 * 0.02, 0], {
           span: 0.44, chordRoot: 0.20, chordTip: 0.03, sweep: 0.42, concavity: 0.30,
           rearTipBack: 0.07, apexRound: 0.05, thick: 0.024, spanSteps: 5, chordSteps: 3,
-          under: true, spanDir: [-0.56, s2 * 0.83, 0], chordDir: [1, 0, 0],
+          spanDir: [-0.56, s2 * 0.83, 0], chordDir: [1, 0, 0],
         });
       });
       return schoolBody(g, m, "mackerel");
@@ -3922,7 +3922,7 @@
         fin([back, belly], [-1.80, 0.78 + s2 * 0.03, 0], {   // rigid crescent
           span: 0.92, chordRoot: 0.34, chordTip: 0.04, sweep: 0.60, concavity: 0.34,
           rearTipBack: 0.10, apexRound: 0.04, thick: 0.05, spanSteps: 5, chordSteps: 3,
-          under: true, spanDir: [-0.62, s2 * 0.78, 0], chordDir: [1, 0, 0],
+          spanDir: [-0.62, s2 * 0.78, 0], chordDir: [1, 0, 0],
         });
       });
       return g;
@@ -3939,33 +3939,63 @@
     scale: 1.05, color: 0x1c3f6d, clearance: 150, swimDepth: 3.2,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
-      const back = m(0x14315f), belly = m(0xe9eef1), stripe = m(0x2f6fc4), eye = m(0x0a0d11);
+      /* A BLUE MARLIN, not a candy cane: cobalt-black back over a silver-
+         white belly, crossed by FIFTEEN NARROW pale-cobalt bars (they were
+         broad alternating painted bands, a wasp), a small eye set well back
+         of the bill root, a bill that tapers to a point with the short lower
+         jaw under it, the high first dorsal running back as a long low
+         crest, and a tail that is the same colour on both faces. */
+      const back = m(0x14315f), belly = m(0xe9eef1), bar = m(0x7fa6de), eye = m(0x0a0d11);
+      const finBlue = m(0x1f4a8e);
       const rings = bodyRings(-1.60, 1.86, 0.88,
         [0.11, 0.42, 0.56, 0.56, 0.48, 0.36, 0.17],
-        [0.07, 0.24, 0.33, 0.33, 0.29, 0.22, 0.10], 13);
-      const hull = hullMesh([back, belly, stripe], rings, {
-        sides: 14, bellyCut: [-0.44, -0.30, -0.22, -0.24, -0.36, -0.50], ragged: 0.06, seed: 87,
-        paintKey: "marlin-stripes",
-        paint: function (i, u, j, s, isBelly) {
-          if (isBelly || s < -0.30) return -1;
-          return (i % 2) === 1 && (j % 6) < 4 ? 2 : -1;
-        },
+        [0.07, 0.24, 0.33, 0.33, 0.29, 0.22, 0.10], 15);
+      const hull = hullMesh([back, belly], rings, {
+        sides: 16, bellyCut: [-0.44, -0.30, -0.22, -0.24, -0.36, -0.50], ragged: 0.06, seed: 87,
+        shade: { cape: { k: 0.78, s0: 0.45, s1: 0.95, x0: -1.6, x1: 1.9, f: 0.4 } },
       });
       hull.name = "fishHull"; g.add(hull);
-      // THE BILL — long, round, and the whole silhouette
-      const bill = new T.Mesh(cachedGeom("marlin-bill", function () {
-        return new T.CylinderGeometry(0.04, 0.12, 1.30, 8);
+      const bars = meshOf(cachedGeom("marlin-bars2", function () {
+        const sh = new Shell();
+        for (let k = 0; k < 15; k++) {
+          const x = lerp(-1.25, 1.20, k / 14);
+          [1, -1].forEach(function (s2) {
+            const pts = [];
+            for (let q = 0; q <= 5; q++) {
+              const a = lerp(1.25, -0.18, q / 5) + (h01(k, q, 89) - 0.5) * 0.06;
+              pts.push([x - q * 0.025, s2 > 0 ? a : Math.PI - a]);
+            }
+            skinLine(sh, 0, rings, pts, 0.045 * (1 - Math.abs(k - 7) / 14), 0.003);
+          });
+        }
+        return sh.geom();
+      }), [bar]);
+      g.add(bars);
+      // THE BILL — long, round, tapering to a point, and the whole silhouette
+      const bill = new T.Mesh(cachedGeom("marlin-bill2", function () {
+        return new T.CylinderGeometry(0.008, 0.10, 1.34, 10);
       }), back);
-      bill.position.set(2.48, 1.00, 0); bill.rotation.z = -Math.PI / 2; g.add(bill);
-      [0.20, -0.20].forEach(function (z) {
-        const e = new T.Mesh(cachedGeom("eye|0.085", function () {
-          return new T.SphereGeometry(0.085, 8, 6);
+      bill.position.set(2.50, 0.99, 0); bill.rotation.z = -Math.PI / 2; g.add(bill);
+      const jaw = new T.Mesh(cachedGeom("marlin-jaw", function () {
+        return new T.CylinderGeometry(0.01, 0.075, 0.42, 8);
+      }), belly);
+      jaw.position.set(2.02, 0.90, 0); jaw.rotation.z = -Math.PI / 2 - 0.06; g.add(jaw);
+      [1, -1].forEach(function (s2) {
+        const sk = onSkin(rings, 1.62, s2 > 0 ? 0.30 : Math.PI - 0.30, -0.02);
+        const e = new T.Mesh(cachedGeom("eye|0.055", function () {
+          return new T.SphereGeometry(0.055, 8, 6);
         }), eye);
-        e.position.set(1.66, 1.06, z); e.scale.set(0.8, 1, 0.6); g.add(e);
+        e.position.set(sk.p[0], sk.p[1], sk.p[2]); g.add(e);
       });
       function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      // THE SAIL — tall at the front, falling away into a ridge
-      fin([back], [0.92, 1.30, 0], {
+      // the long low crest the sail falls into, back to the second dorsal
+      fin([finBlue], [0.05, 1.38, 0], {
+        span: 0.20, chordRoot: 1.10, chordTip: 0.60, sweep: 0.20, concavity: 0.10,
+        leadBow: 0.02, rearTipH: 0.30, rearTipBack: 0.05, apexRound: 0.10,
+        thick: 0.03, spanSteps: 3, chordSteps: 5, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
+      });
+      // THE SAIL — tall at the front, falling away into the crest
+      fin([finBlue], [0.92, 1.30, 0], {
         span: 0.95, chordRoot: 0.80, chordTip: 0.08, sweep: 0.34, concavity: 0.28,
         leadBow: 0.10, rearTipH: 0.06, rearTipBack: 0.42, apexRound: 0.22,
         thick: 0.06, spanSteps: 5, chordSteps: 4, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
@@ -4000,7 +4030,7 @@
         fin([back, belly], [-2.12, 0.88 + s2 * 0.03, 0], {
           span: 1.16, chordRoot: 0.40, chordTip: 0.05, sweep: 0.58, concavity: 0.34,
           rearTipBack: 0.12, apexRound: 0.04, thick: 0.06, spanSteps: 5, chordSteps: 3,
-          under: true, spanDir: [-0.60, s2 * 0.80, 0], chordDir: [1, 0, 0],
+          spanDir: [-0.60, s2 * 0.80, 0], chordDir: [1, 0, 0],
         });
       });
       return g;
@@ -4096,7 +4126,7 @@
         fin([back, belly], [-1.64, 0.55 + s2 * 0.02, 0], {
           span: 0.58, chordRoot: 0.24, chordTip: 0.03, sweep: 0.48, concavity: 0.32,
           rearTipBack: 0.08, apexRound: 0.05, thick: 0.03, spanSteps: 5, chordSteps: 3,
-          under: true, spanDir: [-0.56, s2 * 0.83, 0], chordDir: [1, 0, 0],
+          spanDir: [-0.56, s2 * 0.83, 0], chordDir: [1, 0, 0],
         });
       });
       return g;
