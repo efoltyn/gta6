@@ -260,16 +260,45 @@
     const snagGeo = (function () {
       const trunk = trunkOf(0.07, 0.20, 3, 2.4);
       const parts = [trunk];
-      // two stub branches jutting off at fixed angles (unit space; baked in)
-      const stubs = [{ y: 0.55, len: 0.30, tilt: 0.9, rotY: 0.6 }, { y: 0.78, len: 0.22, tilt: -0.8, rotY: 2.6 }];
-      for (const s of stubs) {
-        const b = new THREE.CylinderGeometry(0.025, 0.05, s.len, 4);
-        b.translate(0, s.len / 2, 0);
-        b.rotateZ(s.tilt);
-        b.rotateY(s.rotY);
-        b.translate(0, s.y, 0);
+      // THE DEAD SPRUCE'S SILHOUETTE: a whorl ladder of bare, broken
+      // branches — near level, longest low down, snapped short higher up —
+      // and a split, broken leader. Authored in METRES on the AVERAGE snag
+      // (9.5 m tall drawn at tr 0.7) and then divided into the unit space
+      // the instance scale (tr, h, tr) expects, so a branch is a branch on a
+      // typical snag rather than a vertical plank stretched by h.
+      const H0 = 9.5, T0 = 0.7;
+      let sa = 0.4;
+      const UPV = new THREE.Vector3(0, 1, 0);
+      const limb = function (y, az, len, rise, r0) {
+        const dir = new THREE.Vector3(Math.cos(az), rise, Math.sin(az)).normalize();
+        const b = new THREE.CylinderGeometry(r0 * 0.3, r0, len, 4, 1, true);
+        b.translate(0, len / 2, 0);
+        b.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(UPV, dir)));
+        b.translate(0, y, 0);
+        b.scale(1 / T0, 1 / H0, 1 / T0);
         parts.push(b);
+        return dir;
+      };
+      for (let i = 0; i < 9; i++) {
+        sa += 2.399;
+        const y = 2.6 + i * 0.68;
+        const len = (2.3 - i * 0.2) * (0.55 + 0.45 * Math.abs(Math.sin(i * 3.7)));   // some snapped short
+        const d = limb(y, sa, len, -0.05 + 0.25 * Math.sin(i * 1.9), 0.065 - i * 0.004);
+        // a surviving side twig on the longer ones
+        if (len > 1.2) {
+          const ox = d.x * len * 0.55, oy = y + d.y * len * 0.55, oz = d.z * len * 0.55;
+          const t = new THREE.CylinderGeometry(0.008, 0.02, len * 0.4, 3, 1, true);
+          const td = new THREE.Vector3(Math.cos(sa + 0.7), 0.35, Math.sin(sa + 0.7)).normalize();
+          t.translate(0, len * 0.2, 0);
+          t.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(UPV, td)));
+          t.translate(ox, oy, oz);
+          t.scale(1 / T0, 1 / H0, 1 / T0);
+          parts.push(t);
+        }
       }
+      // the broken, forked leader
+      limb(H0 * 0.86, 0.5, 1.5, 4.0, 0.05);
+      limb(H0 * 0.90, 3.4, 1.1, 2.2, 0.035);
       const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
       if (merge) { const g = merge(parts, false); if (g) return g; }
       return trunk;   // fallback (BufferGeometryUtils absent): plain bare trunk
@@ -634,7 +663,7 @@
         // V2 seat (same law as buildSpecies): base below the downhill sample.
         let ty = t.y, th = t.h, seatRef = t.y;
         if (TREES2) {
-          const fr = Math.max((sbb ? sbb.max.x : 0.3) * t.tr, 0.6);
+          const fr = Math.max(0.48 * t.tr, 0.6);   // the ROOT flare's reach, not the branches' (they are in the air)
           const gu = CBZ.treeGroundUnder(groundY, t.x, t.z, fr);
           seatRef = Math.min(t.y, gu.min);
           ty = seatRef - SEAT;
