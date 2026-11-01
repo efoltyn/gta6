@@ -406,7 +406,7 @@
       [xf, WH - chest * (o.chestFront || 0.3), brisket + chest * 0.12, BW * 0.6],
       [xf + 0.04 * L, WH - chest * 0.5, brisket + chest * 0.3, BW * 0.38],
     ];
-    const rows = sampleKeys(keys, o.torsoRings || 13);
+    const rows = sampleKeys(keys, o.torsoRings || 11);
     const st = rows.map(function (r) { const y = (r[1] + r[2]) / 2, h = (r[1] - r[2]) / 2; return { x: r[0], y: y, rt: h, rb: h, w: r[3], sq: o.sq || 0.92, wts: W1 }; });
     const uS = o.uScale || 1.6;
     function bodyCol(x, y, z, ca, sa, R, t, part) {
@@ -416,7 +416,7 @@
       if (paint) c = paint(part, x, y, z, ca, sa, t, c);
       return shade(c, grain(x, y, z));
     }
-    torso.loft(st, o.torsoSegs || 16, function (x, y, z, ca, sa, R, t) { return bodyCol(x, y, z, ca, sa, R, t, "torso"); }, { capLen: 0.7, uScale: uS });
+    torso.loft(st, o.torsoSegs || 14, function (x, y, z, ca, sa, R, t) { return bodyCol(x, y, z, ca, sa, R, t, "torso"); }, { capLen: 0.7, uScale: uS });
     const sx = o.saddleX != null ? o.saddleX : 0.1 * L;
     let sTop = WH;
     for (let i = 0, best = 1e9; i < rows.length; i++) { const d = Math.abs(rows[i][0] - sx); if (d < best) { best = d; sTop = rows[i][1]; } }
@@ -435,7 +435,7 @@
       const w = (N.w0 || N.r0 * 0.8) + ((N.w1 || N.r1 * 0.85) - (N.w0 || N.r0 * 0.8)) * t;
       nst.push({ x: nx0 + (nx1 - nx0) * t - Math.sin(na) * bend, y: ny0 + (ny1 - ny0) * t + Math.cos(na) * bend, rt: r * (N.crest || 0.9), rb: r * (N.dewlap || 1.1), w: w, wts: W1 });
     }
-    neckPart.loft(nst, 12, function (x, y, z, ca, sa, R, t) {
+    neckPart.loft(nst, 10, function (x, y, z, ca, sa, R, t) {
       let c = mix(C.body, C.face, t * 0.6);
       if (ca > 0.4 && C.mane) c = mix(c, C.mane, smooth(0.4, 0.8, ca));
       if (ca < -0.3) c = mix(c, C.belly, smooth(-0.3, -0.85, ca) * (o.throatPale != null ? o.throatPale : 0.8));
@@ -452,10 +452,10 @@
     function hp(t, u, s) { return [hx0 + ax[0] * t * H.len + up[0] * u, hy0 + ax[1] * t * H.len + up[1] * u, s]; }
     const head = P.parts.head = new Part("head", UV);
     const prof = H.prof || F.prof;
-    const hrows = sampleKeys(prof, 10);
+    const hrows = sampleKeys(prof, 9);
     const hst = hrows.map(function (r) { const q = hp(r[0], (r[1] - r[2]) * H.D * 0.5 * 0, 0); return { x: q[0], y: q[1], z: 0, rt: r[1] * H.D, rb: r[2] * H.D, w: r[3] * H.Wd * 2, sq: H.sq || 0.95, wts: W1, t: r[0] }; });
     const mz = H.muzzleAt != null ? H.muzzleAt : 0.62;
-    head.loft(hst, 14, function (x, y, z, ca, sa, R, t) {
+    head.loft(hst, 12, function (x, y, z, ca, sa, R, t) {
       const tt = R.t != null ? R.t : t;
       let c = C.face;
       if (tt > mz) c = mix(c, C.muzzle, smooth(mz, mz + 0.15, tt));
@@ -467,7 +467,7 @@
     // nose leather / nostrils
     const tipR = prof[prof.length - 2];
     const nq = hp(1.0, H.D * tipR[1] * (H.noseUp != null ? H.noseUp : 0.25), 0);
-    if (H.nosePad !== false) head.ellipsoid(nq[0] - ax[0] * 0.01, nq[1], 0, H.len * 0.035, H.D * tipR[1] * 0.45, H.Wd * 2 * tipR[3] * 0.85, 10, C.nose);
+    if (H.nosePad !== false) head.ellipsoid(nq[0] - ax[0] * 0.01, nq[1], 0, H.len * 0.035, H.D * tipR[1] * 0.45, H.Wd * 2 * tipR[3] * 0.85, 8, C.nose, true, 3);
     // eyes
     const E = Object.assign({ r: H.D * 0.11, t: 0.3, up: 0.28, side: 0.92 }, o.eye || {});
     head.ud.eyes = [];
@@ -476,7 +476,7 @@
       const q = hp(E.t, H.D * pr[1] * E.up, s * H.Wd * 2 * pr[3] * E.side);
       // the eye: a dark glossy ball set in a lid ring of the face colour,
       // and one catch-light so it reads as wet at a distance
-      head.ellipsoid(q[0] + ax[0] * E.r * 0.1, q[1], q[2] + s * E.r * 0.2, E.r * 1.2, E.r * 0.9, E.r * 0.8, 7, function (x, y, z, ca, sa) {
+      head.ellipsoid(q[0] + ax[0] * E.r * 0.1, q[1], q[2] + s * E.r * 0.2, E.r * 1.2, E.r * 0.9, E.r * 0.8, 6, function (x, y, z, ca, sa) {
         return (s * sa) > 0.55 ? C.eye : (E.lid || shade(C.face, 0.6));
       });
       if (E.shine !== false) head.ellipsoid(q[0] + ax[0] * E.r * 0.45, q[1] + E.r * 0.32, q[2] + s * E.r * 0.72, E.r * 0.22, E.r * 0.22, E.r * 0.16, 4, 0xf4f0e8, true, 3);
@@ -633,14 +633,14 @@
         lst.push({ x: pts[i][0], y: pts[i][1], z: z * k2, rt: pts[i][2], rb: pts[i][3], w: i === 0 ? Math.min(pts[i][4], Math.max(0.01, BW * 0.92 - Math.abs(z) * inK) * 0.9) : pts[i][4], wts: W1, t: u });
       }
       const hooved = fam === "hoof" || fam === "pig";
-      leg.loft(lst, o.legSegs || 9, function (x, y, z2, ca, sa, R, t) {
+      leg.loft(lst, o.legSegs || 7, function (x, y, z2, ca, sa, R, t) {
         let c = mix(C.body, C.leg, smooth(WH * 0.62, WH * 0.4, y));
         if (C.sock && y < C.sockH) c = mix(c, C.sock, smooth(C.sockH, C.sockH * 0.8, y));
         if (hooved && y < hoofH * 1.05) c = C.hoof;
         if (!hooved && y < 0.012) c = C.pad;
         if (paint) c = paint(front ? "legF" : "legH", x, y, z2, ca, sa, t, c);
         return y < hoofH * 1.05 && hooved ? shade(c, 0.9 + 0.2 * clamp01(y / hoofH)) : shade(c, grain(x, y, z2));
-      }, { side: [0, 0, 1], capA: true, capB: true, capLen: 0.3, capN: 2, uScale: uS }, false);
+      }, { side: [0, 0, 1], capA: false, capB: true, capLen: 0.3, capN: 2, uScale: uS }, false);   // the root is buried in the body: no cap
       // a flat sole: the end cap must not dip under the ground plane (the
       // rig reads a leg's bottom off its bounding box)
       for (let i = 1; i < leg.G.p.length; i += 3) if (leg.G.p[i] < 0) leg.G.p[i] = 0;
