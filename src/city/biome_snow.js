@@ -2656,8 +2656,10 @@
     // ---- instanced ROCKY OUTCROPS + SNOWDRIFTS ---------------------------
     (function rocksAndDrifts() {
       const RC = 40;
-      const rockG = new THREE.DodecahedronGeometry(1.1, 0);
-      const rockIM = new THREE.InstancedMesh(rockG, mRock, RC);
+      // the ONE rock factory (world/rockscliffs.js): cleaved, bedded, weathered
+      // boulders, radius 1.1 like the dodecahedron they replace
+      const rockG = CBZ.makeRock ? CBZ.makeRock(1.1, 0x5a0c41, 1) : new THREE.DodecahedronGeometry(1.1, 0);
+      const rockIM = new THREE.InstancedMesh(rockG, rockG.attributes.color && CBZ.rockMaterial ? CBZ.rockMaterial(COL.rock) : mRock, RC);
       rockIM.castShadow = true; rockIM.receiveShadow = true;
       const driftG = new THREE.SphereGeometry(1, 6, 4, 0, Math.PI * 2, 0, Math.PI / 2);
       const driftIM = new THREE.InstancedMesh(driftG, mSnowShade, RC);
