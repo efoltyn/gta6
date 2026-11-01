@@ -128,6 +128,20 @@
   function bx(g, mat, w, h, d, x, y, z, rx, ry, rz) { return put(g, gBox(w, h, d), mat, x, y, z, rx, ry, rz); }
   function cy(g, mat, rt, rb, h, x, y, z, rx, ry, rz, seg) { return put(g, gCyl(rt, rb, h, seg), mat, x, y, z, rx, ry, rz); }
   function wg(g, mat, r, h, ts, tl, x, y, z, rx, ry, rz) { return put(g, gCyl(r, r, h, 18, ts, tl), mat, x, y, z, rx, ry, rz); }
+  // A BAND round a standing body (a label, a stripe, a bead): an open tube,
+  // no caps, because a cap inside a bottle is triangles nobody ever sees and
+  // the shelves draw a thousand of these.
+  function gBand(rt, rb, h, seg) {
+    return G("o" + rt + "," + rb + "," + h + "," + seg, function () { return new THREE.CylinderGeometry(rt, rb, h, seg, 1, true); });
+  }
+  function bd(g, mat, r, h, y, seg, rb) { return put(g, gBand(r, rb == null ? r : rb, h, seg || 12), mat, 0, y, 0); }
+  // a LOW sphere (8 x 6): an end cap, a bean, a bun — things a shelf draws
+  // by the hundred, where 216 triangles of roundness is never seen
+  function shl(g, mat, r, x, y, z, sx, sy, sz) {
+    const m = put(g, G("q" + r, function () { return new THREE.SphereGeometry(r, 8, 6); }), mat, x, y, z);
+    if (sx != null) m.scale.set(sx, sy == null ? sx : sy, sz == null ? sx : sz);
+    return m;
+  }
   function sh(g, mat, r, x, y, z, sx, sy, sz) {
     const m = put(g, gSph(r), mat, x, y, z);
     if (sx != null) m.scale.set(sx, sy == null ? sx : sy, sz == null ? sx : sz);
@@ -183,7 +197,7 @@
   // bottom unless `gusset`), base at y=0, front = +Z.
   function gPillow(w, h, d, gusset) {
     return G("w" + w + "," + h + "," + d + "," + (gusset ? 1 : 0), function () {
-      const geo = new THREE.BoxGeometry(w, h, d, 6, 10, 1);
+      const geo = new THREE.BoxGeometry(w, h, d, 4, 8, 1);
       const p = geo.attributes.position;
       for (let i = 0; i < p.count; i++) {
         const x = p.getX(i) / (w / 2), y = p.getY(i) / (h / 2), z = p.getZ(i);
@@ -462,12 +476,12 @@
     // paper label wrapped round it, the picture of the beans on the front.
     can: function (g) {
       const steel = S(0xb4bcc4), steelD = S(0x8a929c), label = S(0xe8dcc0), red = S(0xb8322a), bean = S(0xb8642a), beanD = S(0x8a4418);
-      la(g, steel, "foodcan", [[0.0001, 0.002], [0.034, 0.0], [0.0375, 0.004], [0.036, 0.008], [0.036, 0.104], [0.0375, 0.108], [0.034, 0.111], [0.0001, 0.109]], 0, 0, 0, 16);
-      for (const y of [0.020, 0.092]) cy(g, steelD, 0.0362, 0.0362, 0.004, 0, y, 0, 0, 0, 0, 16);
-      cy(g, label, 0.0364, 0.0364, 0.064, 0, 0.056, 0, 0, 0, 0, 16);
-      cy(g, red, 0.0366, 0.0366, 0.016, 0, 0.080, 0, 0, 0, 0, 16);
-      const pic = cy(g, beanD, 0.020, 0.020, 0.0014, 0, 0.050, 0.0362, LZ, 0, 0, 14); pic.scale.set(1.15, 1, 0.75);
-      for (let i = 0; i < 5; i++) sh(g, bean, 0.0055, -0.012 + i * 0.006, 0.049 + (i % 2) * 0.006, 0.0368, 1, 0.7, 0.45);
+      la(g, steel, "foodcan", [[0.0001, 0.002], [0.034, 0.0], [0.0375, 0.004], [0.036, 0.008], [0.036, 0.104], [0.0375, 0.108], [0.034, 0.111], [0.0001, 0.109]], 0, 0, 0, 14);
+      for (const y of [0.020, 0.092]) bd(g, steelD, 0.0362, 0.004, y, 14);
+      bd(g, label, 0.0364, 0.064, 0.056, 14);
+      bd(g, red, 0.0366, 0.016, 0.080, 14);
+      const pic = cy(g, beanD, 0.020, 0.020, 0.0014, 0, 0.050, 0.0362, LZ, 0, 0, 12); pic.scale.set(1.15, 1, 0.75);
+      for (let i = 0; i < 5; i++) cy(g, bean, 0.0055, 0.0055, 0.002, -0.012 + i * 0.006, 0.049 + (i % 2) * 0.006, 0.0372, LZ, 0, 0, 7).scale.set(1, 1, 0.7);
     },
     // PRODUCE. An apple is an apple: the lathe gives it the shoulders and the
     // dimple a sphere cannot, then the stalk and one leaf. Any other crop the
@@ -475,8 +489,8 @@
     produce: function (g, C, name) {
       const apple = !name || /apple/i.test(String(name));
       const skin = apple ? S(0xc42a2a) : C.mA, blush = apple ? S(0xe2a03a) : C.mL;
-      la(g, skin, "apple", [[0.0001, 0.006], [0.016, 0.0], [0.031, 0.010], [0.040, 0.030], [0.041, 0.050], [0.036, 0.066], [0.024, 0.077], [0.010, 0.076], [0.004, 0.070], [0.0001, 0.069]], 0, 0, 0, 16);
-      const bl = sh(g, blush, 0.020, 0.022, 0.050, 0.020, 0.6, 1, 0.6); bl.scale.set(0.45, 0.8, 0.45);
+      la(g, skin, "apple", [[0.0001, 0.006], [0.016, 0.0], [0.031, 0.010], [0.040, 0.030], [0.041, 0.050], [0.036, 0.066], [0.024, 0.077], [0.010, 0.076], [0.004, 0.070], [0.0001, 0.069]], 0, 0, 0, 12);
+      const bl = shl(g, blush, 0.020, 0.022, 0.050, 0.020, 0.6, 1, 0.6); bl.scale.set(0.45, 0.8, 0.45);
       cy(g, S(0x5a3a1e), 0.0022, 0.0028, 0.022, 0.002, 0.080, 0, 0.18, 0, 0.22, 6);
       bx(g, S(0x4f8a32), 0.024, 0.0025, 0.012, 0.014, 0.084, 0.004, 0, 0.5, 0.35);
     },
@@ -1166,9 +1180,9 @@
       const at = [[-0.017, 0], [-0.0085, 0.010], [0.0, 0], [0.0085, 0], [0.017, 0]];
       for (let i = 0; i < at.length; i++) {
         const up = at[i][1], x = at[i][0];
-        cy(g, cork, 0.0039, 0.0039, 0.020, x, H + 0.004 + up, 0.004);
-        if (up) cy(g, paper, 0.0039, 0.0039, 0.016, x, H - 0.010 + up, 0.004);
-        cy(g, cork, 0.0039, 0.0039, 0.020, x, H + 0.004, -0.0045);
+        cy(g, cork, 0.0039, 0.0039, 0.020, x, H + 0.004 + up, 0.004, 0, 0, 0, 7);
+        if (up) cy(g, paper, 0.0039, 0.0039, 0.016, x, H - 0.010 + up, 0.004, 0, 0, 0, 7);
+        cy(g, cork, 0.0039, 0.0039, 0.020, x, H + 0.004, -0.0045, 0, 0, 0, 7);
       }
     },
     // A CARTON: ten packs in one long sleeve (270 x 90 x 50 mm), the same red
@@ -1235,7 +1249,7 @@
       bx(g, steel, 0.0016, 0.006, 0.016, 0.0063, 0.013, -0.023);
       cy(g, white, 0.0040, 0.0034, 0.010, 0, 0.012, 0.019, LZ);       // strain relief
       tb(g, white, "chg", [[0, 0.012, 0.023], [0.006, 0.006, 0.050], [0.040, 0.003, 0.072], [0.070, 0.003, 0.040],
-        [0.058, 0.003, -0.010], [0.030, 0.003, -0.040], [0.012, 0.003, -0.066]], 0.0028, 48);
+        [0.058, 0.003, -0.010], [0.030, 0.003, -0.040], [0.012, 0.003, -0.066]], 0.0028, 22);
       bx(g, white, 0.012, 0.007, 0.022, 0.009, 0.004, -0.078, 0, 0.35, 0);     // the plug
       bx(g, steel, 0.008, 0.0028, 0.008, 0.005, 0.004, -0.092, 0, 0.35, 0);
     },
@@ -1359,13 +1373,13 @@
     // and the ring pull on top.
     energycan: function (g) {
       const blue = S(0x2850a0), silver = S(0xc4cbd2), red = S(0xd2392f), steel = S(0x9aa3ad);
-      cy(g, blue, 0.0265, 0.0265, 0.122, 0, 0.061, 0, 0, 0, 0, 20);
-      cy(g, silver, 0.0268, 0.0268, 0.040, 0, 0.088, 0, 0, 0, 0, 20);
-      cy(g, red, 0.0270, 0.0270, 0.012, 0, 0.062, 0, 0, 0, 0, 20);
-      cy(g, silver, 0.0225, 0.0265, 0.010, 0, 0.127, 0, 0, 0, 0, 20);         // the neck
-      cy(g, steel, 0.0228, 0.0228, 0.003, 0, 0.1335, 0, 0, 0, 0, 20);          // the lid
+      bd(g, blue, 0.0265, 0.118, 0.063, 14);
+      bd(g, silver, 0.0268, 0.040, 0.088, 14);
+      bd(g, red, 0.0270, 0.012, 0.062, 14);
+      bd(g, silver, 0.0225, 0.010, 0.127, 14, 0.0265);                         // the neck
+      cy(g, steel, 0.0228, 0.0228, 0.003, 0, 0.1335, 0, 0, 0, 0, 14);          // the lid
       bx(g, S(0xdfe5ea), 0.007, 0.0012, 0.016, 0, 0.1355, 0.004);              // the ring pull
-      cy(g, steel, 0.0228, 0.0225, 0.004, 0, 0.002, 0, 0, 0, 0, 20);
+      cy(g, steel, 0.0228, 0.0265, 0.004, 0, 0.002, 0, 0, 0, 0, 14);
     },
     // PRUNO: fermenting fruit in a sealed bag, swollen, orange and cloudy,
     // chunks of fruit pressing at the plastic.
@@ -1393,9 +1407,9 @@
       bx(g, printL, 0.046, 0.0003, 0.010, 0, 0.0019, -0.040);
       for (let r = 0; r < 5; r++) for (let c = 0; c < 2; c++) {
         const x = (c - 0.5) * 0.020, z = -0.024 + r * 0.016;
-        if (r === 4 && c === 1) { cy(g, hole, 0.0062, 0.0062, 0.0006, x, 0.0016, z, 0, 0, 0, 14); continue; }
-        cy(g, dome, 0.0052, 0.0068, 0.0036, x, 0.0034, z, 0, 0, 0, 10);
-        cy(g, tab, 0.0052, 0.0052, 0.0034, x, 0.0040, z, 0, 0, 0, 14);
+        if (r === 4 && c === 1) { cy(g, hole, 0.0062, 0.0062, 0.0006, x, 0.0016, z, 0, 0, 0, 10); continue; }
+        cy(g, dome, 0.0068, 0.0068, 0.0012, x, 0.0022, z, 0, 0, 0, 10);       // the clear blister's rim
+        cy(g, tab, 0.0050, 0.0060, 0.0034, x, 0.0040, z, 0, 0, 0, 10);        // the tablet seen through it
       }
     },
     // A BEDSHEET ROPE: torn strips twisted together and coiled, a knot every
@@ -1501,10 +1515,10 @@
     banana: function (g) {
       const peel = S(0xf0cf45), peelD = S(0xd6ad2c), stalk = S(0x8a8a3a), tip = S(0x2e2418);
       const pts = [[-0.030, 0.019, -0.088], [-0.002, 0.019, -0.050], [0.012, 0.019, 0.0], [0.004, 0.019, 0.050], [-0.022, 0.019, 0.088]];
-      tb(g, peel, "banana", pts, 0.0175, 20);
-      tb(g, peelD, "bananaRib", pts.map(function (p) { return [p[0] + 0.004, p[1] + 0.012, p[2]]; }), 0.0055, 20);
-      sh(g, peel, 0.0175, -0.030, 0.019, -0.088, 1, 1, 0.8);
-      sh(g, peel, 0.0175, -0.022, 0.019, 0.088, 1, 1, 0.8);
+      tb(g, peel, "banana", pts, 0.0175, 14);
+      tb(g, peelD, "bananaRib", pts.map(function (p) { return [p[0] + 0.004, p[1] + 0.012, p[2]]; }), 0.0055, 12);
+      shl(g, peel, 0.0175, -0.030, 0.019, -0.088, 1, 1, 0.8);
+      shl(g, peel, 0.0175, -0.022, 0.019, 0.088, 1, 1, 0.8);
       cy(g, stalk, 0.0065, 0.0085, 0.030, -0.038, 0.020, -0.112, LZ - 0.25, 0, 0, 8);
       cy(g, tip, 0.0045, 0.0065, 0.008, -0.030, 0.019, 0.106, LZ + 0.3, 0, 0, 8);
     },
@@ -1520,35 +1534,35 @@
     // cap are the brand's blue, the ribs are what say "plastic bottle".
     waterbottle: function (g) {
       const pet = S(0xcfe4ef), petD = S(0xa9cde0), label = S(0x2a74c4), labelL = S(0xf4f8fb), cap = S(0x1f5cb4);
-      la(g, pet, "h2o", [[0.026, 0], [0.032, 0.004], [0.033, 0.010], [0.033, 0.135], [0.030, 0.150], [0.020, 0.172], [0.0135, 0.186], [0.0135, 0.196], [0.0001, 0.196]], 0, 0, 0, 14);
-      cy(g, label, 0.0336, 0.0336, 0.058, 0, 0.088, 0, 0, 0, 0, 14);
-      cy(g, labelL, 0.0338, 0.0338, 0.012, 0, 0.094, 0, 0, 0, 0, 14);
-      for (const y of [0.030, 0.045, 0.140]) cy(g, petD, 0.0338, 0.0338, 0.003, 0, y, 0, 0, 0, 0, 14);
-      cy(g, cap, 0.0150, 0.0150, 0.016, 0, 0.203, 0, 0, 0, 0, 12);
-      cy(g, cap, 0.0170, 0.0170, 0.003, 0, 0.1945, 0, 0, 0, 0, 12);   // the tamper ring
+      la(g, pet, "h2o", [[0.026, 0], [0.033, 0.008], [0.033, 0.135], [0.030, 0.150], [0.020, 0.172], [0.0135, 0.186], [0.0135, 0.196], [0.0001, 0.196]], 0, 0, 0, 12);
+      bd(g, label, 0.0336, 0.058, 0.088, 12);
+      bd(g, labelL, 0.0338, 0.012, 0.094, 12);
+      for (const y of [0.030, 0.045, 0.140]) bd(g, petD, 0.0338, 0.003, y, 12);
+      cy(g, cap, 0.0150, 0.0150, 0.016, 0, 0.203, 0, 0, 0, 0, 10);
+      bd(g, cap, 0.0170, 0.003, 0.1945, 10);                               // the tamper ring
     },
     // A SODA CAN: 355 ml, 6.6 cm x 12.2 cm, the domed foot, the necked lid
     // and the ring pull; a red can with the white wave round it.
     sodacan: function (g) {
       const red = S(0xc81f2a), white = S(0xf4f2ee), alu = S(0xc4cbd2), aluD = S(0x9aa3ad);
-      la(g, alu, "canFoot", [[0.0001, 0.003], [0.024, 0.0], [0.031, 0.004], [0.033, 0.011]], 0, 0, 0, 16);
-      cy(g, red, 0.033, 0.033, 0.097, 0, 0.0595, 0, 0, 0, 0, 16);
-      cy(g, white, 0.0333, 0.0333, 0.010, 0, 0.066, 0, 0, 0.0, 0.10, 16);
-      cy(g, white, 0.0333, 0.0333, 0.004, 0, 0.050, 0, 0, 0.0, -0.08, 16);
-      la(g, alu, "canNeck", [[0.033, 0.108], [0.030, 0.115], [0.0275, 0.1205], [0.0275, 0.1225]], 0, 0, 0, 16);
-      cy(g, aluD, 0.0262, 0.0262, 0.002, 0, 0.1205, 0, 0, 0, 0, 16);
+      la(g, alu, "canFoot", [[0.0001, 0.003], [0.024, 0.0], [0.031, 0.004], [0.033, 0.011]], 0, 0, 0, 12);
+      bd(g, red, 0.033, 0.097, 0.0595, 12);
+      put(g, gBand(0.0333, 0.0333, 0.010, 12), white, 0, 0.066, 0, 0, 0, 0.10);
+      put(g, gBand(0.0333, 0.0333, 0.004, 12), white, 0, 0.050, 0, 0, 0, -0.08);
+      la(g, alu, "canNeck", [[0.033, 0.108], [0.030, 0.115], [0.0275, 0.1205], [0.0275, 0.1225]], 0, 0, 0, 12);
+      cy(g, aluD, 0.0262, 0.0262, 0.002, 0, 0.1205, 0, 0, 0, 0, 12);
       bx(g, alu, 0.010, 0.0012, 0.020, 0, 0.1225, 0.006);
       cy(g, aluD, 0.003, 0.003, 0.0012, 0, 0.1226, -0.008, 0, 0, 0, 8);
     },
     // A COFFEE: the 12 oz paper cup, the corrugated sleeve and the sip lid.
     coffeecup: function (g) {
       const cup = S(0xf4f1ea), sleeve = S(0xb4844e), sleeveD = S(0x8e6538), lid = S(0x26282c);
-      cy(g, cup, 0.044, 0.031, 0.112, 0, 0.056, 0, 0, 0, 0, 16);
-      cy(g, sleeve, 0.0425, 0.0365, 0.046, 0, 0.060, 0, 0, 0, 0, 16);
-      cy(g, sleeveD, 0.0428, 0.0428, 0.004, 0, 0.081, 0, 0, 0, 0, 16);
-      cy(g, cup, 0.0455, 0.0455, 0.004, 0, 0.112, 0, 0, 0, 0, 16);           // the rolled rim
-      cy(g, lid, 0.0465, 0.0460, 0.008, 0, 0.118, 0, 0, 0, 0, 16);
-      cy(g, lid, 0.0385, 0.0420, 0.009, 0, 0.1265, 0, 0, 0, 0, 16);
+      cy(g, cup, 0.044, 0.031, 0.112, 0, 0.056, 0, 0, 0, 0, 14);
+      bd(g, sleeve, 0.0425, 0.046, 0.060, 14, 0.0365);
+      bd(g, sleeveD, 0.0428, 0.004, 0.081, 14);
+      bd(g, cup, 0.0455, 0.004, 0.112, 14);                                  // the rolled rim
+      bd(g, lid, 0.0465, 0.008, 0.118, 14, 0.0460);
+      cy(g, lid, 0.0385, 0.0420, 0.009, 0, 0.1265, 0, 0, 0, 0, 14);
       bx(g, S(0x111214), 0.010, 0.002, 0.004, 0, 0.1312, 0.030);          // the sip slot
     },
     // A SANDWICH: one wedge, standing on its crust, the CUT FACE to the front
@@ -1642,12 +1656,12 @@
       bx(g, tray, 0.070, 0.004, 0.170, 0, 0.002, 0);
       for (const s of [-1, 1]) bx(g, tray, 0.004, 0.026, 0.170, s * 0.035, 0.013, 0);
       for (const s of [-1, 1]) bx(g, trayD, 0.0044, 0.006, 0.170, s * 0.035, 0.022, 0);
-      sh(g, bun, 0.030, -0.014, 0.026, 0, 0.62, 0.82, 2.6);
-      sh(g, bun, 0.030, 0.014, 0.026, 0, 0.62, 0.82, 2.6);
-      sh(g, bunL, 0.020, -0.016, 0.040, 0, 0.55, 0.45, 3.4);
+      shl(g, bun, 0.030, -0.014, 0.026, 0, 0.62, 0.82, 2.6);
+      shl(g, bun, 0.030, 0.014, 0.026, 0, 0.62, 0.82, 2.6);
+      shl(g, bunL, 0.020, -0.016, 0.040, 0, 0.55, 0.45, 3.4);
       cy(g, frank, 0.0115, 0.0115, 0.160, 0, 0.044, 0, LZ, 0, 0, 10);
-      sh(g, frank, 0.0115, 0, 0.044, 0.080); sh(g, frank, 0.0115, 0, 0.044, -0.080);
-      tb(g, mustard, "mustard", [[0.000, 0.0565, -0.060], [0.006, 0.0565, -0.040], [-0.006, 0.0565, -0.020], [0.006, 0.0565, 0.0], [-0.006, 0.0565, 0.020], [0.006, 0.0565, 0.040], [0.0, 0.0565, 0.060]], 0.0028, 28);
+      shl(g, frank, 0.0115, 0, 0.044, 0.080); shl(g, frank, 0.0115, 0, 0.044, -0.080);
+      tb(g, mustard, "mustard", [[0.000, 0.0565, -0.060], [0.006, 0.0565, -0.040], [-0.006, 0.0565, -0.020], [0.006, 0.0565, 0.0], [-0.006, 0.0565, 0.020], [0.006, 0.0565, 0.040], [0.0, 0.0565, 0.060]], 0.0028, 20);
     },
     // MOTOR OIL: the quart bottle, flat-sided, the neck off to one corner,
     // black with the amber label.
