@@ -329,15 +329,33 @@
     },
   });
 
-  // A stepped chevron on one spandrel panel: two courses of two arms
-  // meeting at the bay centre — the zigzag of every 1930 lobby, in four boxes.
+  // THE SPANDREL PANEL'S RELIEF. A cast-metal deco panel (Chanin, Fisher,
+  // Guardian) is a raised border with a stepped chevron rising to the bay's
+  // centre line and a stepped keystone on its peak: the zigzag of every 1930
+  // lobby. It used to be two pairs of flat bars, which read from the street
+  // as a row of "= =" faces. Now: a bead frame round the panel, then a
+  // chevron of stepped blocks climbing from both lower corners to a centre
+  // block, all in the darker metal so the light picks the edges out. 13
+  // boxes a panel, merged with the rest of the trim.
   function chevron(ctx, F, f, t, cy, pw, ph, proj, col) {
     if (pw < 0.8 || ph < 0.3) return;
-    const arm = pw * 0.22, th = Math.min(0.1, ph * 0.18);
-    for (let i = 0; i < 2; i++) {
-      const y = cy - ph * 0.15 + i * ph * 0.3;
-      const off = arm * (0.55 + i * 0.5);
-      for (const sg of [-1, 1]) F.box(ctx, f, t + sg * off, y, arm, th, proj, col);
+    const bead = Math.min(0.06, ph * 0.12);
+    // the bead frame, proud of the panel face
+    F.box(ctx, f, t, cy + ph / 2 - bead / 2, pw, bead, proj, col);
+    F.box(ctx, f, t, cy - ph / 2 + bead / 2, pw, bead, proj, col);
+    F.box(ctx, f, t - pw / 2 + bead / 2, cy, bead, ph - 2 * bead, proj, col);
+    F.box(ctx, f, t + pw / 2 - bead / 2, cy, bead, ph - 2 * bead, proj, col);
+    // the chevron: N steps an arm, from the lower corners up to the peak
+    const N = 4;
+    const iw = pw - 4 * bead, ih = ph - 4 * bead;
+    const sx = iw / 2 / (N + 0.5), sy = ih / (N + 1.2);
+    const y0 = cy - ih / 2 + sy * 0.5;
+    for (let i = 0; i < N; i++) {
+      const y = y0 + i * sy;
+      const off = iw / 2 - sx * (i + 0.5);
+      for (const sg of [-1, 1]) F.box(ctx, f, t + sg * off, y, sx * 1.02, sy * 0.62, proj, col);
     }
+    // the stepped keystone on the peak
+    F.box(ctx, f, t, y0 + N * sy - sy * 0.1, sx * 1.6, sy * 0.9, proj + 0.02, col);
   }
 })();

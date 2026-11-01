@@ -33,6 +33,8 @@ CBZ.lab.kit("building", {
     W.add("building", {
       name: "building", street: street, style: P.style && P.style !== "none" ? P.style : null,
       storeys: P.storeys, doorSide: P.door != null ? +P.door : 1, setback: P.setback, retail: P.retail === "1", fit: P.fit !== "0",
+      // color=8a3b26 — the street's wall colour (buildings.js STREET_STYLE.walls)
+      color: P.color ? parseInt(String(P.color).replace(/^#|^0x/, ""), 16) : undefined,
     });
   },
   // frame the building and its lot, not the whole street ring
