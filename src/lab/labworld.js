@@ -302,7 +302,7 @@
       if (kitCam && !/^follow:/.test(String(cam))) subj = kitCam;
       const b = boundsOf(subj);
       b.getCenter(_c); b.getSize(_s);
-      const r = Math.max(1.2, 0.5 * Math.hypot(_s.x, _s.y, _s.z));
+      const r = Math.max(L.kit && L.kit.frameMin != null ? L.kit.frameMin : 1.2, 0.5 * Math.hypot(_s.x, _s.y, _s.z));
       let yaw = 35, pitch = 22, mul = 1;
       const T = { "3q": [35, 22], side: [90, 8], front: [0, 8], back: [180, 8], top: [0, 85], wide: [35, 30], close: [25, 12] };
       if (T[cam]) { yaw = T[cam][0]; pitch = T[cam][1]; if (cam === "wide") mul = 1.8; if (cam === "close") mul = 0.6; }
