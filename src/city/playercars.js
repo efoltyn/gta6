@@ -3023,7 +3023,9 @@
      Nose +Z; the drive loop spins the two playerWheel tyres. */
   function makeMotorcycle() {
     const root = new THREE.Group();
-    const paint = roleMat("moto-paint", "paint", 0x16a0e0);
+    // the body paint: a _bodyPaint material, so recolorBody gives each bike its
+    // catalogue colour (the old roleMat was never recoloured: every bike was blue)
+    const paint = paintMat("motorcycle", 0x16a0e0, { metalness: 0.4, roughness: 0.35 });
     const black = roleMat("moto-black", "plastic", 0x101317);
     const frameM = roleMat("moto-frame", "plastic", 0x7f878e);
     const engineM = roleMat("moto-engine", "plastic", 0x2a2d31);
