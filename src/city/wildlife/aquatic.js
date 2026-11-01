@@ -3098,7 +3098,7 @@
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const grey = m(0x363c40), white = m(0xf1f4f4);
-      const finDark = m(0x2b3134), finTip = m(0x1b1f22), finPale = m(0x545c60);
+      const finDark = m(0x2b3134), finTip = m(0x1b1f22), finPale = m(0x3c4347);
 
       // ONE mouth definition drives three shells: the notch cut into the
       // hull, the notch cut into the rostrum, and the chin the lower jaw
@@ -3232,11 +3232,14 @@
         thick: 0.075, spanSteps: 6, chordSteps: 4,
         spanDir: [-0.588, 0.809, 0], chordDir: [1, 0, 0],
       });
-      fin([grey, white], [-2.04, 0.800, 0], {
-        span: 0.72, chordRoot: 0.46, chordTip: 0.05, sweep: 0.28, concavity: 0.20,
-        rearTipH: 0.10, rearTipBack: 0.16, apexRound: 0.06, thick: 0.065,
-        spanSteps: 5, chordSteps: 4, under: true,
-        spanDir: [-0.788, -0.616, 0], chordDir: [1, 0, 0],
+      // the LOWER lobe: a great white's tail is nearly lunate, so it is
+      // most of the upper's length, and it is grey on BOTH faces (the old
+      // `under` flag made one face of this vertical blade belly-white)
+      fin([grey], [-2.04, 0.800, 0], {
+        span: 0.90, chordRoot: 0.48, chordTip: 0.05, sweep: 0.30, concavity: 0.22,
+        rearTipH: 0.10, rearTipBack: 0.18, apexRound: 0.06, thick: 0.065,
+        spanSteps: 5, chordSteps: 4,
+        spanDir: [-0.760, -0.650, 0], chordDir: [1, 0, 0],
       });
       return g;
     },
@@ -3360,7 +3363,7 @@
       fin([dark, white], [-2.74, 0.90, 0], {
         span: 1.30, chordRoot: 0.82, chordTip: 0.08, sweep: 0.28, concavity: 0.20,
         rearTipBack: 0.28, apexRound: 0.06, thick: 0.12, spanSteps: 5, chordSteps: 4,
-        under: true, spanDir: [-0.788, -0.616, 0], chordDir: [1, 0, 0],
+        spanDir: [-0.788, -0.616, 0], chordDir: [1, 0, 0],
       });
       return g;
     },
@@ -3494,7 +3497,7 @@
       fin([grey, pale], [-1.92, 0.84, 0], {
         span: 0.62, chordRoot: 0.38, chordTip: 0.04, sweep: 0.28, concavity: 0.20,
         rearTipBack: 0.14, apexRound: 0.06, thick: 0.055, spanSteps: 5, chordSteps: 4,
-        under: true, spanDir: [-0.788, -0.616, 0], chordDir: [1, 0, 0],
+        spanDir: [-0.788, -0.616, 0], chordDir: [1, 0, 0],
       });
       return g;
     },
@@ -3655,7 +3658,7 @@
       fin([grey, white], [-1.72, 0.82, 0], {
         span: 0.60, chordRoot: 0.40, chordTip: 0.04, sweep: 0.28, concavity: 0.20,
         rearTipBack: 0.14, apexRound: 0.06, thick: 0.055, spanSteps: 5, chordSteps: 4,
-        under: true, spanDir: [-0.788, -0.616, 0], chordDir: [1, 0, 0],
+        spanDir: [-0.788, -0.616, 0], chordDir: [1, 0, 0],
       });
       return g;
     },
