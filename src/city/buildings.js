@@ -76,6 +76,8 @@
     if (CBZ.CONFIG.SHOPS_ROBBABLE_V1 == null) CBZ.CONFIG.SHOPS_ROBBABLE_V1 = true;
     if (CBZ.CONFIG.FACADES_V2 == null) CBZ.CONFIG.FACADES_V2 = true;
     if (CBZ.CONFIG.FACADE_AC_UNITS == null) CBZ.CONFIG.FACADE_AC_UNITS = false;
+    // BLD_COLOR_GRADE — see gradeHex below. false = the old raw paint.
+    if (CBZ.CONFIG.BLD_COLOR_GRADE == null) CBZ.CONFIG.BLD_COLOR_GRADE = true;
   }
   // FACADES_V2 build-time counters (deterministic per seed): how many windows the
   // massing chose LIT at night + how many got an AC unit, accumulated as the world
@@ -391,7 +393,7 @@
   let trimCount = 0;
   let pendingTrim = [];
   function addTrim(group, lx, ly, lz, bw, bh, bd, col, ox, oz) {
-    const rec = { x: ox + lx, y: ly, z: oz + lz, hw: bw / 2, hh: bh / 2, hd: bd / 2, col: col >>> 0, pool: null, inst: -1, _grp: group };
+    const rec = { x: ox + lx, y: ly, z: oz + lz, hw: bw / 2, hh: bh / 2, hd: bd / 2, col: gradeHex(col >>> 0), pool: null, inst: -1, _grp: group };
     pendingTrim.push(rec); trimCount++;
     return rec;
   }
@@ -1350,6 +1352,42 @@
     const b = Math.min(255, ((hex & 255) * f) | 0);
     return (r << 16) | (g << 8) | b;
   }
+
+  /* ---- THE SHELL COLOUR GRADE (BLD_COLOR_GRADE) ---------------------------
+     Every colour a grammar or this file writes (brick 0x8a3b26, limestone
+     0xcfc6b0, the street's wall tints) is an sRGB DISPLAY colour, the swatch
+     an architect would hold up. It went to the lights as if it were LINEAR
+     reflectance, then out through sRGB encoding and ACES, so the shell read
+     about twice as bright as its swatch: Eastgate's red brick came out salmon
+     (~210,120,80), Westend's limestone and every cream trim landed at the
+     sky's own white, and a street of brick, stone and concrete read as one
+     pale wash (shots/buildings/*-before). city/metro_fabric.js found the
+     same thing on the far city and decodes there; the shells never did, so
+     near and far disagreed as well.
+
+     The fix is at the paint, once: decode the swatch (the sRGB curve, the
+     polynomial metro_fabric uses) and ease it 30% toward its own grey (the
+     grade adds saturation and ACES pushes reds to orange), exactly
+     metro_fabric's MF_MAIN, so a shell and its far copy are one colour.
+     Applied where a shell's paint becomes a material: the merged trim
+     (flushDeco), the structural boxes (lbox), the round primitives, the
+     window-trim instances and the debris skin. Pure function of the hex and
+     cached, so trim still buckets by colour for the batcher. */
+  const _gradeCache = new Map();
+  function gradeHex(hex) {
+    if (typeof hex !== "number" || !(CBZ.CONFIG ? CBZ.CONFIG.BLD_COLOR_GRADE !== false : true)) return hex;
+    hex = hex >>> 0;
+    let g = _gradeCache.get(hex);
+    if (g != null) return g;
+    const dec = function (c) { return c * (c * (c * 0.305306011 + 0.682171111) + 0.012522878); };
+    const r = dec(((hex >> 16) & 255) / 255), gg = dec(((hex >> 8) & 255) / 255), b = dec((hex & 255) / 255);
+    const L = 0.2126 * r + 0.7152 * gg + 0.0722 * b;
+    const out = function (c) { return Math.max(0, Math.min(255, Math.round((L + (c - L) * 0.7) * 255))); };
+    g = (out(r) << 16) | (out(gg) << 8) | out(b);
+    _gradeCache.set(hex, g);
+    return g;
+  }
+  CBZ.cityGradeHex = gradeHex;
 
   /* ---- THE SKIN: what each wall of a building LOOKS like ------------------
      The shell walls (lbox, the colliders, the carve targets, b.losMeshes) are
@@ -3809,7 +3847,7 @@
       for (const r of decoList) decoFixed.push([r[0] - r[3] / 2, r[0] + r[3] / 2, r[1] - r[4] / 2, r[1] + r[4] / 2, r[2] - r[5] / 2, r[2] + r[5] / 2]);
       decoList.length = 0;
       decoGeos.forEach(function (boxes, col) {
-        const matD = CBZ.cmat ? CBZ.cmat(col) : mat(col);
+        const matD = CBZ.cmat ? CBZ.cmat(gradeHex(col)) : mat(gradeHex(col));
         const n = boxes.length / 6;
         if (BGU && BGU.mergeBufferGeometries && n > 1) {
           const m = new THREE.Mesh(mergedBoxGeometry(boxes, n), matD);
@@ -3946,14 +3984,16 @@
           }
           // wholly over the hole: a mesh that is in no scene, so a caller that
           // keeps the handle (a light strip, a collider ref) holds nothing drawn
-          return first || new THREE.Mesh(unitBoxGeo(false, false), CBZ.cmat(col));
+          return first || new THREE.Mesh(unitBoxGeo(false, false), CBZ.cmat(o.raw ? col : gradeHex(col)));
         }
       }
       // fake-AO vertex shading on structural LOS surfaces (walls/roofs/rims) —
       // exactly the meshes batch.js spares, so the colour attribute survives
       let mm;
       if (o.emissive) mm = emisMat(col, o.emissive, o.ei || 0.5, !!o.los);
-      else mm = o.mat || (o.los ? vcMat(col) : CBZ.cmat(col));
+      // the shell's own paint is graded (gradeHex); a caller furnishing the
+      // inside through the record's lbox (o.raw, see `built.lbox`) keeps its swatch
+      else { const gc = o.raw ? col : gradeHex(col); mm = o.mat || (o.los ? vcMat(gc) : CBZ.cmat(gc)); }
       const m = new THREE.Mesh(unitBoxGeo(!!o.los, ly - bh / 2 <= 0.2), mm);
       m.position.set(lx, ly, lz);
       m.scale.set(bw, bh, bd);
@@ -4057,14 +4097,15 @@
     let skin = null;
     if (MPAL) {
       const mk = MPAL.kind === "ashlar" ? "ashlar" : "brick";
-      skin = { faces: [MPAL.wall, MPAL.wall, MPAL.wall, MPAL.wall], hex: MPAL.wall, pattern: mk,
+      const sw = gradeHex(MPAL.wall);
+      skin = { faces: [sw, sw, sw, sw], hex: sw, pattern: mk,
         kind: mk === "ashlar" ? "rock" : "brick", masonry: VENEER_ON ? MPAL.id : null };
     }
     let civicOrderRec = null;
     {
       const bhash = (salt) => (CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42);
       const addMesh = (geo, col, lx, ly, lz, emissive) => {
-        const mm = emissive ? mat(col, { emissive: col, ei: 0.8 }) : (CBZ.cmat ? CBZ.cmat(col) : mat(col));
+        const mm = emissive ? mat(col, { emissive: col, ei: 0.8 }) : (CBZ.cmat ? CBZ.cmat(gradeHex(col)) : mat(gradeHex(col)));
         const m = new THREE.Mesh(geo, mm);
         m.position.set(lx, ly, lz);
         m.castShadow = !emissive; m.receiveShadow = true;
@@ -4274,7 +4315,7 @@
         const pk = skinPick(skinAcc, w, d, storeys * FH);
         if (pk) {
           const sm = SKIN_OF_STRUCTURE[dressed.structure] || [null, "concrete"];
-          skin = { faces: pk.faces, hex: pk.hex, pattern: sm[0], kind: sm[1], masonry: null };
+          skin = { faces: pk.faces.map(function (c) { return c == null ? null : gradeHex(c); }), hex: gradeHex(pk.hex), pattern: sm[0], kind: sm[1], masonry: null };
         }
       }
       // ROOF CLUTTER on every real building (not just masonry) — flat empty
@@ -4862,7 +4903,7 @@
           const cx0 = slabCx, cz0 = slabCz;                          // roof-slab centre
           const chw = cw / 2, chd = cdp / 2, cyc = cy0 + crownH / 2;
           const cCol = shadeHex(color, 1.04);                        // crown a touch brighter
-          const crownMat = CBZ.cmat ? CBZ.cmat(cCol) : mat(cCol);
+          const crownMat = CBZ.cmat ? CBZ.cmat(gradeHex(cCol)) : mat(gradeHex(cCol));
           dbox(cx0, cyc, cz0 - chd, cw, crownH, WT, cCol);          // four crown walls
           dbox(cx0, cyc, cz0 + chd, cw, crownH, WT, cCol);
           dbox(cx0 - chw, cyc, cz0, WT, crownH, cdp, cCol);
@@ -4965,9 +5006,13 @@
     for (let L = 1; L <= storeys; L++) floorTops.push(L * FH);
 
     const built = { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE,
-      wallColor: color, masonry: MASONRY ? (MPAL ? MPAL.id : true) : null,
+      // the paint ON SCREEN (gradeHex of the swatch): every breaker, the far
+      // copy (city/metro.js) and the debris read this, so they match the wall
+      wallColor: gradeHex(color), masonry: MASONRY ? (MPAL ? MPAL.id : true) : null,
       skin,                                          // the visible wall skin per face (CBZ.citySkin)   // the FINAL wall colour/colourway (masonry overrides the caller's), so exterior dressers match the shell
-      boarded: !!opts.boarded, office: !!opts.office, parapetH: pp, roofCrown: crownRect, roofCrowned, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
+      boarded: !!opts.boarded, office: !!opts.office, parapetH: pp, roofCrown: crownRect, roofCrowned, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs,
+      // interiors furnish through this: their swatches are their own (o.raw), not the shell's grade
+      lbox: function (lx, ly, lz, bw, bh, bd, col, o) { return lbox(lx, ly, lz, bw, bh, bd, col, Object.assign({ raw: true }, o || {})); }, FH,
       civicOrder: civicOrderRec,                    // bldCivicOrder's built front (building-local), or null
       clearFloorPoint, wt: WT,                      // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
       localDoor,                                    // building-local doorway + INWARD normal (interior programs orient rooms off the way you arrive)
