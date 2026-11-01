@@ -123,82 +123,170 @@
     const rnd = vrng(0x1eaf);
     ctx.lineCap = "round";
 
+    // A LEAF SPRAY — what a broadleaf card really is: one twig, its
+    // branchlets, and the leaves they carry, seen against the light. The
+    // twig enters at a tile edge (the card's attachment to its bough), the
+    // branchlets fan out, and leaves cluster thickest toward the tips the
+    // way new growth does. Leaves are shaded across their width (one half
+    // catches the sky, the other is in the leaf's own shade) with a pale
+    // midrib, and the hue wanders between yellow-green and blue-green. The
+    // ragged outline is the twig structure itself, not a noise rim on a
+    // disc; the alpha-0.42 body underneath (under the cutoff) only exists
+    // to keep the far mips solid.
     function clump(ox, oy, pointed) {
       const cx = ox + S * 0.5, cy = oy + S * 0.5;
-      ctx.beginPath(); ctx.arc(cx, cy, S * 0.47, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(150,185,95,0.42)"; ctx.fill();
-      // Many SMALL leaves, overlapping to a solid mass in the core and
-      // thinning to a ragged rim: a card is a branch's worth of foliage, not
-      // eight leaves the size of a door.
-      const N = 620;
-      for (let i = 0; i < N; i++) {
-        const a = rnd() * Math.PI * 2, rr = Math.sqrt(rnd());
-        if (rnd() < Math.pow(rr, 9)) continue;                    // ragged rim
-        const rad = S * 0.49 * rr;
-        const x = cx + Math.cos(a) * rad, y = cy + Math.sin(a) * rad * 0.96;
-        // darker leaves first (they end up underneath), bright ones on top
-        const L = 0.42 + 0.58 * Math.pow(i / N, 0.7) * (0.7 + rnd() * 0.3), warm = 0.70 + rnd() * 0.26;
-        const len = S * (0.040 + rnd() * 0.034), wid = len * (pointed ? 0.42 : 0.66);
-        ctx.save(); ctx.translate(x, y); ctx.rotate(rnd() * Math.PI * 2);
-        ctx.fillStyle = rgb(L, warm, 1, 0.50);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(ox + 2, oy + 2, S - 4, S - 4); ctx.clip();
+      const twigs = [];                       // [x0,y0,x1,y1,width]
+      const leaves = [];                      // [x,y,angle,len,L,warm]
+      // the stem: in from the bottom edge, bending across the tile
+      const bend = (rnd() - 0.5) * S * 0.25;
+      const stem = function (t) { return [cx + bend * Math.sin(t * Math.PI * 0.9) * (1 - t * 0.3), oy + S * (0.98 - 0.80 * t)]; };
+      for (let i = 0; i < 8; i++) { const a = stem(i / 8), b = stem((i + 1) / 8); twigs.push([a[0], a[1], b[0], b[1], 5.5 - i * 0.55]); }
+      const nB = 7;
+      for (let i = 0; i < nB; i++) {
+        const t = 0.18 + 0.72 * (i / (nB - 1)) + (rnd() - 0.5) * 0.05;
+        const p = stem(t), side = i & 1 ? 1 : -1;
+        const ang = -Math.PI / 2 + side * (0.55 + rnd() * 0.45);   // up and out
+        const len = S * (0.20 + 0.16 * Math.sin(Math.PI * Math.min(1, t * 1.1))) * (0.8 + rnd() * 0.35);
+        let x = p[0], y = p[1], a = ang;
+        const seg = 5;
+        for (let k = 0; k < seg; k++) {
+          const nx = x + Math.cos(a) * len / seg, ny = y + Math.sin(a) * len / seg;
+          twigs.push([x, y, nx, ny, 3.2 - k * 0.5]);
+          // a leaf every step, alternate sides, bigger toward the tip
+          for (let q = 0; q < 2; q++) {
+            const la = a + (q ? 1 : -1) * (0.7 + rnd() * 0.5);
+            leaves.push([nx, ny, la, S * (0.050 + 0.020 * (k / seg) + rnd() * 0.022), 0.5 + 0.5 * rnd(), 0.70 + rnd() * 0.28]);
+          }
+          x = nx; y = ny; a += (rnd() - 0.5) * 0.35 - side * 0.05;
+        }
+        leaves.push([x, y, a, S * (0.075 + rnd() * 0.02), 0.6 + 0.4 * rnd(), 0.72 + rnd() * 0.26]);   // terminal leaf
+      }
+      const tipP = stem(1);
+      leaves.push([tipP[0], tipP[1], -Math.PI / 2, S * 0.08, 0.9, 0.8]);
+      // inner fill leaves so the spray is a mass, not a skeleton
+      for (let i = 0; i < 150; i++) {
+        const a = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()) * S * 0.36;
+        leaves.push([cx + Math.cos(a) * rr, cy - S * 0.04 + Math.sin(a) * rr, rnd() * Math.PI * 2, S * (0.045 + rnd() * 0.03), 0.25 + 0.5 * rnd(), 0.70 + rnd() * 0.26]);
+      }
+      // THE FAR-MIP BODY follows the spray (fat strokes along every twig,
+      // painted opaque on a scratch canvas and laid down at ONE alpha under
+      // the cutoff), so a distant card keeps the spray's outline, not a disc
+      const body = makeCanvas(S, S);
+      if (body) {
+        const b = body.getContext("2d");
+        b.lineCap = "round"; b.strokeStyle = "rgb(140,175,92)"; b.fillStyle = "rgb(140,175,92)";
+        for (const w of twigs) { b.lineWidth = S * 0.13; b.beginPath(); b.moveTo(w[0] - ox, w[1] - oy); b.lineTo(w[2] - ox, w[3] - oy); b.stroke(); }
+        b.beginPath(); b.arc(cx - ox, cy - oy - S * 0.04, S * 0.26, 0, Math.PI * 2); b.fill();
+        ctx.globalAlpha = 0.42; ctx.drawImage(body, ox, oy); ctx.globalAlpha = 1;
+      }
+      // dark (deep) leaves first, bright ones on top
+      leaves.sort(function (p, q) { return p[4] - q[4]; });
+      ctx.lineCap = "round";
+      for (const w of twigs) {
+        ctx.strokeStyle = "rgb(96,82,66)"; ctx.lineWidth = Math.max(1.2, w[4]);
+        ctx.beginPath(); ctx.moveTo(w[0], w[1]); ctx.lineTo(w[2], w[3]); ctx.stroke();
+      }
+      for (const lf of leaves) {
+        const len = lf[3], wid = len * (pointed ? 0.40 : 0.62), L = 0.40 + 0.60 * lf[4], warm = lf[5];
+        ctx.save(); ctx.translate(lf[0], lf[1]); ctx.rotate(lf[2] + Math.PI / 2);
+        // the petiole, then the blade hanging off it
+        ctx.strokeStyle = "rgb(90,100,60)"; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -len * 0.18); ctx.stroke();
+        ctx.translate(0, -len * 0.18 - len / 2);
+        const gr = ctx.createLinearGradient(-wid / 2, 0, wid / 2, 0);
+        gr.addColorStop(0, rgb(L * 1.08, warm, 1, 0.52));
+        gr.addColorStop(0.5, rgb(L, warm, 1, 0.50));
+        gr.addColorStop(0.52, rgb(L * 0.80, warm * 0.96, 1, 0.52));
+        gr.addColorStop(1, rgb(L * 0.70, warm * 0.94, 1, 0.56));
+        ctx.fillStyle = gr;
         ctx.beginPath();
         if (pointed) {
           ctx.moveTo(0, -len / 2);
-          ctx.quadraticCurveTo(wid * 0.55, 0, 0, len / 2);
-          ctx.quadraticCurveTo(-wid * 0.55, 0, 0, -len / 2);
-        } else ctx.ellipse(0, 0, wid / 2, len / 2, 0, 0, Math.PI * 2);
+          ctx.quadraticCurveTo(wid * 0.62, -len * 0.05, 0, len / 2);
+          ctx.quadraticCurveTo(-wid * 0.62, -len * 0.05, 0, -len / 2);
+        } else {
+          ctx.moveTo(0, -len / 2);
+          ctx.bezierCurveTo(wid * 0.62, -len * 0.40, wid * 0.58, len * 0.30, 0, len / 2);
+          ctx.bezierCurveTo(-wid * 0.58, len * 0.30, -wid * 0.62, -len * 0.40, 0, -len / 2);
+        }
         ctx.fill();
-        ctx.strokeStyle = "rgba(20,40,10,0.30)"; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(0, -len / 2 + 2); ctx.lineTo(0, len / 2 - 2); ctx.stroke();
+        ctx.strokeStyle = "rgba(225,240,180,0.35)"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, len / 2 - 1); ctx.lineTo(0, -len / 2 + 2); ctx.stroke();
         ctx.restore();
       }
+      ctx.restore();
     }
 
-    // A BRANCH LAYER, not a single twig: a trapezoid of dense drooping
-    // boughs, widest at the bottom edge (v 0). Stacked as crossed vertical
-    // cards it prints the serrated cone a spruce is from the ground.
+    // A SPRUCE BOUGH, seen from above or below: the bough's twig runs down
+    // the tile from the trunk end (top edge, v 1) to its tip (bottom edge,
+    // v 0); side shoots leave it at ~45 degrees pointing tipward, longest
+    // in the middle (the spade outline a spruce bough has), and every shoot
+    // is a bottle-brush of short needles, dark on the old wood and paler
+    // at the new-growth tips. No straight-edged body: the outline is the
+    // shoots themselves. The far-mip body follows the shoots, laid at one
+    // alpha under the cutoff, as for the broadleaf sprays.
     function sprig(ox, oy) {
-      const cx = ox + S * 0.5, yBase = oy + S * 0.97, yTip = oy + S * 0.03;
-      const halfW = t => S * (0.49 - 0.30 * t);                   // t 0 bottom .. 1 top
-      ctx.beginPath();
-      ctx.moveTo(cx - halfW(0), yBase); ctx.lineTo(cx + halfW(0), yBase);
-      ctx.lineTo(cx + halfW(1), yTip); ctx.lineTo(cx - halfW(1), yTip); ctx.closePath();
-      ctx.fillStyle = "rgba(95,135,90,0.42)"; ctx.fill();
-      ctx.strokeStyle = "rgb(118,96,72)"; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.moveTo(cx, yBase); ctx.lineTo(cx, yTip); ctx.stroke();
-      const needle = (px, py, dirx, L) => {
-        const nl = 8 + rnd() * 9;
-        ctx.strokeStyle = rgb(L, 0.78, 1, 0.68); ctx.lineWidth = 3.2;
-        for (let q = -1; q <= 1; q += 2) {
-          const na = q * (0.7 + rnd() * 0.6) - 0.35;
-          ctx.beginPath(); ctx.moveTo(px, py);
-          ctx.lineTo(px + dirx * Math.cos(na) * nl, py + Math.sin(na) * nl); ctx.stroke();
-        }
-      };
-      const boughs = 13;
-      for (let i = 0; i < boughs; i++) {
-        const t = (i + 0.5) / boughs;
-        const y = yBase + (yTip - yBase) * t;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(ox + 2, oy + 2, S - 4, S - 4); ctx.clip();
+      const cx = ox + S * 0.5, yTop = oy + S * 0.02, yEnd = oy + S * 0.96;
+      const shoots = [];                                  // [x0,y0,x1,y1,depth]
+      const sway = (rnd() - 0.5) * S * 0.08;
+      const main = function (t) { return [cx + sway * Math.sin(t * Math.PI), yTop + (yEnd - yTop) * t]; };
+      for (let i = 0; i < 10; i++) { const a = main(i / 10), b = main((i + 1) / 10); shoots.push([a[0], a[1], b[0], b[1], 0]); }
+      const nS = 11;
+      for (let i = 0; i < nS; i++) {
+        const t = 0.08 + 0.86 * (i / (nS - 1));
+        const len = S * (0.12 + 0.30 * Math.sin(Math.PI * Math.min(1, t * 0.95 + 0.08))) * (0.85 + rnd() * 0.3);
         for (let sgn = -1; sgn <= 1; sgn += 2) {
-          const len = halfW(t) * (0.86 + rnd() * 0.14);
-          const droop = S * (0.06 + rnd() * 0.10);
-          const ex = cx + sgn * len, ey = y + droop;
-          ctx.strokeStyle = "rgb(112,92,68)"; ctx.lineWidth = 2.6;
-          ctx.beginPath(); ctx.moveTo(cx, y - droop * 0.3); ctx.quadraticCurveTo(cx + sgn * len * 0.5, y - droop * 0.1, ex, ey); ctx.stroke();
-          const nN = Math.max(6, (len / 3) | 0);
-          for (let k = 0; k < nN; k++) {
-            const u = (k + 0.5) / nN;
-            const px = cx + sgn * len * u, py = y - droop * 0.3 + (ey - y + droop * 0.3) * u * u;
-            needle(px, py, sgn, 0.42 + 0.58 * u * (0.7 + rnd() * 0.3));
+          const p = main(t), ang = Math.PI / 2 - sgn * (0.75 + rnd() * 0.3);   // out and tipward
+          const ex = p[0] + Math.cos(ang) * len, ey = p[1] + Math.sin(ang) * len;
+          shoots.push([p[0], p[1], ex, ey, 1]);
+          // a secondary shoot or two off the outer half
+          if (len > S * 0.2) {
+            const u = 0.5 + rnd() * 0.2, qx = p[0] + (ex - p[0]) * u, qy = p[1] + (ey - p[1]) * u;
+            const a2 = ang + sgn * 0.6, l2 = len * 0.35;
+            shoots.push([qx, qy, qx + Math.cos(a2) * l2, qy + Math.sin(a2) * l2, 2]);
           }
         }
       }
-      // loose tufts fill the gaps between boughs
-      for (let i = 0; i < 260; i++) {
-        const t = rnd(), hw = halfW(t) * 0.95;
-        const px = cx + (rnd() * 2 - 1) * hw, py = yBase + (yTip - yBase) * t;
-        needle(px, py, px < cx ? -1 : 1, 0.45 + rnd() * 0.5);
+      const body = makeCanvas(S, S);
+      if (body) {
+        const b = body.getContext("2d");
+        b.lineCap = "round"; b.strokeStyle = "rgb(80,120,80)"; b.lineWidth = S * 0.045;
+        for (const w of shoots) { b.beginPath(); b.moveTo(w[0] - ox, w[1] - oy); b.lineTo(w[2] - ox, w[3] - oy); b.stroke(); }
+        ctx.globalAlpha = 0.42; ctx.drawImage(body, ox, oy); ctx.globalAlpha = 1;
       }
+      ctx.lineCap = "round";
+      for (const w of shoots) {
+        ctx.strokeStyle = "rgb(104,84,62)"; ctx.lineWidth = w[4] === 0 ? 3.4 : (w[4] === 1 ? 2.0 : 1.4);
+        ctx.beginPath(); ctx.moveTo(w[0], w[1]); ctx.lineTo(w[2], w[3]); ctx.stroke();
+      }
+      // needles: a brush along every shoot, both sides, angled forward
+      for (const w of shoots) {
+        const dx = w[2] - w[0], dy = w[3] - w[1], L = Math.hypot(dx, dy) || 1;
+        const ux = dx / L, uy = dy / L, px = -uy, py = ux;
+        const n = Math.max(4, (L / 2.6) | 0);
+        for (let k = 0; k < n; k++) {
+          const u = (k + rnd() * 0.6) / n;
+          const x = w[0] + dx * u, y = w[1] + dy * u;
+          const nl = S * (0.030 + rnd() * 0.016);
+          const Lc = (0.38 + 0.40 * u + rnd() * 0.18) * (w[4] === 0 ? 0.8 : 1);
+          ctx.strokeStyle = rgb(Lc, 0.70, 1, 0.70); ctx.lineWidth = 2.2;
+          for (let q = -1; q <= 1; q += 2) {
+            const fx = ux * 0.55 + px * q * 0.85, fy = uy * 0.55 + py * q * 0.85;
+            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + fx * nl, y + fy * nl); ctx.stroke();
+          }
+        }
+        // the pale new growth at the shoot's tip
+        ctx.strokeStyle = rgb(0.95, 0.80, 1, 0.62); ctx.lineWidth = 2.4;
+        for (let q = -1; q <= 1; q += 2) {
+          ctx.beginPath(); ctx.moveTo(w[2], w[3]);
+          ctx.lineTo(w[2] + (ux * 0.8 + px * q * 0.5) * S * 0.03, w[3] + (uy * 0.8 + py * q * 0.5) * S * 0.03); ctx.stroke();
+        }
+      }
+      ctx.restore();
     }
 
     clump(0, 0, false);
@@ -302,7 +390,10 @@
   // `occ` (optional, per vertex) multiplies in a second darkening — the leaf
   // cards use it for depth inside the crown. Normals are NOT recomputed here:
   // cylinders arrive smooth and the cards carry authored lighting normals.
-  function shadeByHeight(g, floor, power, occ) {
+  // `tint` (optional, rgb per vertex) is the leaf cards' per-card hue: a
+  // canopy is never one green — sunlit outer sprays run yellow-warm, deep
+  // ones blue-cool, and every spray differs a little from its neighbour.
+  function shadeByHeight(g, floor, power, occ, tint) {
     g.computeBoundingBox();
     const p = g.attributes.position, y0 = g.boundingBox.min.y, dy = Math.max(0.001, g.boundingBox.max.y - y0);
     const c = new Float32Array(p.count * 3);
@@ -310,7 +401,8 @@
       const t = Math.max(0, Math.min(1, (p.getY(i) - y0) / dy));
       let v = floor + (1 - floor) * Math.pow(t, power || 0.72);
       if (occ) v *= occ[i];
-      c[i * 3] = v; c[i * 3 + 1] = v; c[i * 3 + 2] = v;
+      if (tint) { c[i * 3] = v * tint[i * 3]; c[i * 3 + 1] = v * tint[i * 3 + 1]; c[i * 3 + 2] = v * tint[i * 3 + 2]; }
+      else { c[i * 3] = v; c[i * 3 + 1] = v; c[i * 3 + 2] = v; }
     }
     g.setAttribute("color", new THREE.BufferAttribute(c, 3));
     g.computeBoundingBox(); g.computeBoundingSphere();
@@ -327,43 +419,160 @@
     return g;
   }
 
+  /* A LIMB IS A CURVE, NOT A STICK. tube() sweeps a ring along a polyline
+     with a parallel-transported frame, so a bent bough is ONE continuous
+     skin (no gaps or kinks at the joints a chain of cylinders shows) with
+     the bark running along it. Indexed like CylinderGeometry so it merges
+     with the roots. */
+  const _tA = new THREE.Vector3(), _tB = new THREE.Vector3(), _tC = new THREE.Vector3();
+  function tube(pts, radii, sides, around, metres) {
+    const rings = pts.length, row = sides + 1;
+    const pos = new Float32Array(rings * row * 3), nrm = new Float32Array(rings * row * 3), uv = new Float32Array(rings * row * 2);
+    const idx = [];
+    let n = null, vAcc = 0;
+    for (let i = 0; i < rings; i++) {
+      const t = new THREE.Vector3();
+      if (i < rings - 1) t.add(_tA.copy(pts[i + 1]).sub(pts[i]).normalize());
+      if (i > 0) t.add(_tA.copy(pts[i]).sub(pts[i - 1]).normalize());
+      t.normalize();
+      if (!n) n = new THREE.Vector3().crossVectors(t, Math.abs(t.y) < 0.9 ? UP : _tC.set(1, 0, 0)).normalize();
+      else n.sub(_tB.copy(t).multiplyScalar(n.dot(t))).normalize();
+      const bx = new THREE.Vector3().crossVectors(t, n);
+      if (i > 0) vAcc += pts[i].distanceTo(pts[i - 1]);
+      for (let s = 0; s <= sides; s++) {
+        const a = (s / sides) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+        const dx = n.x * ca + bx.x * sa, dy = n.y * ca + bx.y * sa, dz = n.z * ca + bx.z * sa;
+        const k = i * row + s;
+        pos[k * 3] = pts[i].x + dx * radii[i]; pos[k * 3 + 1] = pts[i].y + dy * radii[i]; pos[k * 3 + 2] = pts[i].z + dz * radii[i];
+        nrm[k * 3] = dx; nrm[k * 3 + 1] = dy; nrm[k * 3 + 2] = dz;
+        uv[k * 2] = (s / sides) * around; uv[k * 2 + 1] = vAcc / metres;
+        if (i < rings - 1 && s < sides) {
+          const p0 = k, p1 = k + row;
+          idx.push(p0, p0 + 1, p1, p0 + 1, p1 + 1, p1);
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    return g;
+  }
+  // quadratic bezier sampled at `n` + 1 points
+  function arc(p0, p1, p2, n) {
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, u = 1 - t;
+      out.push(new THREE.Vector3(
+        u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x,
+        u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y,
+        u * u * p0.z + 2 * u * t * p1.z + t * t * p2.z));
+    }
+    return out;
+  }
+
+  /* THE BROADLEAF SKELETON. A real deciduous tree reads by its structure
+     long before its leaves: a bole that flares at the foot, leans and
+     tapers into a leader; scaffold limbs leaving it at 35-60 degrees and
+     bending UP toward the light; each limb forking into secondary boughs
+     that end inside the crown's clumps. The crown cards are alpha-tested
+     with gaps, so this skeleton is what shows through them and below them.
+     CONTRACTS KEPT: the bole's radius AT y = 0 is exactly rBase (the
+     BIOME_SOLID_TRUNKS colliders are typed as 0.82 / 0.76 m), the height
+     tops out at H (= 20 m nominal), roots end below y = 0, and the trunk is
+     not varied per instance (one geometry per archetype). */
+  function skeleton(o, mid) {
+    const rnd = vrng(o.seed);
+    const H = o.h, rB = o.rBase;
+    const parts = [];
+    // ---- the bole: flare, taper, a gentle sweep, a thin leader
+    const ys = mid ? [0, 1.2, 6, 12, 17, H] : [0, 0.5, 1.6, 5, 10, 14.5, 18, H];
+    const swayA = rnd() * Math.PI * 2, sway = o.sway;
+    const boleAt = function (y) {
+      const t = y / H;
+      const off = sway * Math.sin(t * Math.PI * 0.9) + sway * 0.35 * Math.sin(t * Math.PI * 2.6 + 0.8);
+      return new THREE.Vector3(Math.cos(swayA) * off, y, Math.sin(swayA) * off);
+    };
+    const boleR = function (y) {
+      const t = y / H;
+      const taper = o.rTop + (o.rMid - o.rTop) * Math.pow(1 - t, 1.25);
+      const flare = (rB - o.rMid) * Math.exp(-y / 0.9);
+      return taper + flare;
+    };
+    const bp = [], br = [];
+    for (let i = 0; i < ys.length; i++) { bp.push(boleAt(ys[i])); br.push(boleR(ys[i])); }
+    br[0] = rB;                               // the collider's radius, exactly
+    parts.push(tube(bp, br, mid ? o.sides - 2 : o.sides, 3, 3.2));
+    // ---- roots: buttress spurs into the ground
+    for (let i = 0; i < (mid ? 0 : o.roots); i++) {
+      const a = i * GOLDEN + 0.4 + (rnd() - 0.5) * 0.4, r = o.rootReach * (0.8 + rnd() * 0.45);
+      parts.push(cylinderBetween([0, 0.5 + rnd() * 0.3, 0], [Math.cos(a) * r, -0.12, Math.sin(a) * r], rB * 0.55, 0.07, 5, true));
+    }
+    // ---- scaffold limbs + secondary boughs
+    const N = o.limbs;
+    let az = rnd() * Math.PI * 2;
+    // the forks are the near form's luxury: tier 2+ (the quality slider owns
+    // it, as cardDensity owns the leaf cards); a phone gets limbs alone
+    const detail = CBZ.qScale ? CBZ.qScale(0, 1) : 1;
+    const limbSides = mid ? 3 : 5, twigSides = 3, rings = mid ? 2 : 3;
+    for (let i = 0; i < N; i++) {
+      az += GOLDEN + (rnd() - 0.5) * 0.5;
+      const t = i / Math.max(1, N - 1);
+      const y0 = o.limbLo + (o.limbHi - o.limbLo) * t + (rnd() - 0.5) * 0.6;
+      const base = boleAt(y0);
+      const reach = o.reach * (1 - 0.35 * t) * (0.85 + rnd() * 0.3);
+      const rise = o.rise * (0.75 + 0.5 * t) * (0.85 + rnd() * 0.3);
+      const dx = Math.cos(az), dz = Math.sin(az);
+      const tip = new THREE.Vector3(base.x + dx * reach, y0 + rise, base.z + dz * reach);
+      // the control point keeps the limb low and outward first, then turns
+      // it up: the elbow every hardwood bough has
+      const ctl = new THREE.Vector3(base.x + dx * reach * 0.62, y0 + rise * 0.25, base.z + dz * reach * 0.62);
+      const pts = arc(base, ctl, tip, rings);
+      const r0 = Math.min(boleR(y0) * 0.72, o.limbR * (1 - 0.3 * t));
+      const radii = pts.map(function (_, k) { return r0 * (1 - 0.72 * (k / rings)); });
+      parts.push(tube(pts, radii, limbSides, 1, 2.6));
+      if (mid || detail < 0.5) continue;
+      // two (sometimes three) boughs fork off the outer half of the limb
+      const forks = 2 + (rnd() < 0.35 ? 1 : 0);
+      for (let f = 0; f < forks; f++) {
+        const u = 0.45 + 0.4 * (f / forks) + rnd() * 0.08;
+        const k = Math.min(rings - 1, Math.floor(u * rings));
+        const from = pts[k].clone().lerp(pts[k + 1], u * rings - k);
+        const side = (f & 1 ? 1 : -1) * (0.55 + rnd() * 0.5);
+        const baz = az + side;
+        const len = reach * (0.42 + rnd() * 0.22);
+        const to = new THREE.Vector3(from.x + Math.cos(baz) * len, from.y + len * (0.30 + rnd() * 0.30), from.z + Math.sin(baz) * len);
+        const mid2 = from.clone().lerp(to, 0.5); mid2.y -= len * 0.12;
+        const rr = r0 * (1 - 0.72 * u) * 0.75;
+        parts.push(tube([from, mid2, to], [rr, rr * 0.6, 0.025], twigSides, 1, 2.0));
+      }
+    }
+    // the leader carries on above the scaffold into the crown top
+    const g = shadeByHeight(merged(parts, parts[0]), o.floor, o.pow);
+    return g;
+  }
+
   function matureWood(mid) {
-    const parts = [bole(0.34, 0.82, 20, mid ? 6 : 9)];
-    // Buttress roots, real metres so they stay broad when uniformly scaled.
-    for (let i = 0; i < (mid ? 0 : 5); i++) {
-      const a = i * GOLDEN + 0.4, r = 2.2 + (i % 2) * 0.7;
-      // the tip goes INTO the ground (it ended 5 cm above the trunk's base,
-      // so on any seat shallower than that a 2-3 m root hung in the air)
-      parts.push(cylinderBetween([0, 0.5, 0], [Math.cos(a) * r, -0.1, Math.sin(a) * r], 0.46, 0.09, 5, true));
-    }
-    // Crown-bearing limbs fork asymmetrically; collision stays on the bole.
-    const limbs = [
-      [[0, 11.8, 0], [3.9, 16.2, 1.2], 0.34, 0.11],
-      [[0, 12.7, 0], [-3.2, 17.1, -1.8], 0.32, 0.11],
-      [[0, 14.0, 0], [1.0, 18.8, -3.5], 0.28, 0.10],
-      [[0, 14.8, 0], [-1.5, 19.4, 3.0], 0.27, 0.10],
-      [[0, 13.2, 0], [4.6, 15.0, -2.6], 0.24, 0.09],
-    ];
-    for (let i = 0; i < limbs.length; i++) {
-      const b = limbs[i]; parts.push(cylinderBetween(b[0], b[1], b[2], b[3], mid ? 3 : 6, true));
-    }
-    const g = shadeByHeight(merged(parts, parts[0]), 0.55, 0.8);
+    const g = skeleton({
+      seed: 0x3a7e, h: 20, rBase: 0.82, rMid: 0.62, rTop: 0.08, sway: 0.38, sides: 10,
+      roots: 5, rootReach: 2.5, limbs: 6, limbLo: 9.6, limbHi: 14.2, reach: 5.0, rise: 3.4, limbR: 0.38,
+      floor: 0.55, pow: 0.8,
+    }, mid);
     g.name = "cbz-mature-tree-wood" + (mid ? "-mid" : "");
     g.userData.vegetationArchetype = "mature-wood";
     return g;
   }
 
   function landscapeWood(mid) {
-    // The country-wide bole: fewer sides, four limbs, four low roots. The
-    // root footprint stays inside the 0.82 m seating samples.
-    const parts = [bole(0.25, 0.76, 20, mid ? 5 : 7)];
-    for (let i = 0; i < 4; i++) {
-      const a = i * GOLDEN;
-      if (!mid) parts.push(cylinderBetween([0, 0.28, 0], [Math.cos(a) * 0.76, -0.08, Math.sin(a) * 0.76], 0.37, 0.06, 5, true));
-      parts.push(cylinderBetween([0, 11.5 + i * 1.2, 0],
-        [Math.cos(a) * 3.8, 16.4 + i * 1.2, Math.sin(a) * 3.8], 0.27, 0.07, mid ? 3 : 5, true));
-    }
-    const g = shadeByHeight(merged(parts, parts[0]), 0.55, 0.82);
+    // The country-wide bole: drawn at 0.72 of its height by continent.js, so
+    // the scaffold rises steeper in authored metres to read at that squash.
+    // The root footprint stays inside the 0.82 m seating samples.
+    const g = skeleton({
+      seed: 0x51d3, h: 20, rBase: 0.76, rMid: 0.52, rTop: 0.07, sway: 0.30, sides: 8,
+      roots: 4, rootReach: 0.95, limbs: 5, limbLo: 10.0, limbHi: 13.8, reach: 4.4, rise: 4.2, limbR: 0.32,
+      floor: 0.55, pow: 0.82,
+    }, mid);
     g.name = "cbz-landscape-tree-wood" + (mid ? "-mid" : "");
     g.userData.vegetationArchetype = "landscape-wood";
     return g;
@@ -379,8 +588,14 @@
   // its foliage: the bole is a straight taper with roots and nothing else.
   // Same 20 m height and 0.76 m base as landscape-wood, so seating, the
   // collider radius and the audit chain are unchanged.
+  // The bole runs to 28 m, past the nominal 20: every consumer stretches the
+  // spire's tip well above the wood's own scale (continent: tip ~23 m over a
+  // 0.72-squashed bole; Redhollow/woods: ~30 sc over a 20 sc bole), and once
+  // the spire became open boughs instead of a solid cone, the top third
+  // stood on nothing. The leader now reaches the tip; the radius at y = 0
+  // (the 0.76 m collider) is unchanged.
   function coniferWood(mid) {
-    const parts = [bole(0.14, 0.76, 20, mid ? 5 : 7)];
+    const parts = [bole(0.05, 0.76, 28, mid ? 5 : 7)];
     for (let i = 0; i < (mid ? 0 : 4); i++) {
       const a = i * GOLDEN + 0.7;
       parts.push(cylinderBetween([0, 0.28, 0], [Math.cos(a) * 0.76, -0.08, Math.sin(a) * 0.76], 0.37, 0.06, 5, true));
@@ -396,19 +611,27 @@
      both windings, with authored lighting normals and atlas uvs.
   ====================================================================== */
   const ATLAS_INSET = 0.012;
-  function CardSet() { this.pos = []; this.nrm = []; this.uv = []; this.occ = []; this.cards = 0; }
-  CardSet.prototype.add = function (c, ax, ay, w, h, tile, flip, light, occ) {
+  function CardSet() { this.pos = []; this.nrm = []; this.uv = []; this.occ = []; this.tint = []; this.cards = 0; }
+  // light: {x,y,z,rx,ry,up} crown-centred, or {axis:true,rx,up}; with an
+  // optional CLUMP {cx,cy,cz,cr,cw}: the normal then blends the crown's
+  // sphere with the clump's own, so each clump is lit on top and shaded
+  // underneath — the cauliflower read of a real canopy instead of one ball.
+  CardSet.prototype.add = function (c, ax, ay, w, h, tile, flip, light, occ, tint) {
     const P = [], N = [], T = [];
     const tu = (tile & 1) * 0.5, tv = tile < 2 ? 0.5 : 0;
     for (let k = 0; k < 4; k++) {
       const sx = (k === 1 || k === 2 ? 1 : -1) * w * 0.5, sy = (k >= 2 ? 1 : -1) * h * 0.5;
       const x = c.x + ax.x * sx + ay.x * sy, y = c.y + ax.y * sx + ay.y * sy, z = c.z + ax.z * sx + ay.z * sy;
       P.push([x, y, z]);
-      // lighting normal: out from the crown's centre (or its axis) through
-      // the vertex, leaned toward the sky
       let nx, ny, nz;
       if (light.axis) { nx = x / light.rx; ny = light.up; nz = z / light.rx; }
       else { nx = (x - light.x) / light.rx; ny = (y - light.y) / light.ry + light.up; nz = (z - light.z) / light.rx; }
+      if (light.cr) {
+        const cw = light.cw, cl = Math.hypot(x - light.cx, y - light.cy, z - light.cz) || 1, ol = Math.hypot(nx, ny, nz) || 1;
+        nx = nx / ol * (1 - cw) + (x - light.cx) / cl * cw;
+        ny = ny / ol * (1 - cw) + (y - light.cy) / cl * cw + light.up * 0.4;
+        nz = nz / ol * (1 - cw) + (z - light.cz) / cl * cw;
+      }
       const nl = Math.hypot(nx, ny, nz) || 1;
       N.push([nx / nl, ny / nl, nz / nl]);
       let u = (k === 1 || k === 2) ? 1 : 0; if (flip) u = 1 - u;
@@ -416,12 +639,14 @@
       T.push([tu + ATLAS_INSET + u * (0.5 - 2 * ATLAS_INSET), tv + ATLAS_INSET + v * (0.5 - 2 * ATLAS_INSET)]);
     }
     const self = this;
+    const tr = tint ? tint[0] : 1, tg = tint ? tint[1] : 1, tb = tint ? tint[2] : 1;
     function tri(a, b, d) {
       for (const i of [a, b, d]) {
         self.pos.push(P[i][0], P[i][1], P[i][2]);
         self.nrm.push(N[i][0], N[i][1], N[i][2]);
         self.uv.push(T[i][0], T[i][1]);
         self.occ.push(occ);
+        self.tint.push(tr, tg, tb);
       }
     }
     tri(0, 1, 2); tri(0, 2, 3);           // front
@@ -434,6 +659,7 @@
     g.setAttribute("normal", new THREE.Float32BufferAttribute(this.nrm, 3));
     g.setAttribute("uv", new THREE.Float32BufferAttribute(this.uv, 2));
     g.userData.occlusion = this.occ;
+    g.userData.tint = this.tint;
     g.userData.leafCards = this.cards;
     return g;
   };
@@ -537,64 +763,118 @@
     return lobes;
   }
 
+  /* THE BROADLEAF CROWN — lobes of CLUMPS of leaf sprays.
+     A canopy is not a ball of leaves: it is a few big masses (the lobes,
+     one per scaffold limb), each made of smaller clumps (one per bough),
+     each a handful of sprays. Cards are placed per CLUMP on the lobe's
+     outer shell, a few dark ones fill the interior so it never reads
+     hollow, and the gaps between clumps are where sky and the limbs show.
+     Each card carries its own tint: outer/upper sprays sun-warm and
+     yellower, inner and lower sprays cool and darker, every spray jittered
+     a little — so 300 instances under one material are not one green. */
   function broadleafCards(set, spec, rnd) {
     const R = spec.r, H = spec.h;
-    const light = { x: 0, y: H * 0.50, z: 0, rx: R, ry: H * 0.55, up: 0.35 };
     const lobes = lobeLayout(spec, rnd);
-    const per = Math.max(3, Math.round(spec.cards * cardDensity()));
+    const dens = cardDensity();
+    const nClump = Math.max(2, Math.round((spec.cards / 2.5) * (0.6 + 0.4 * dens)));
+    const perClump = dens < 0.75 ? 3 : 4;
+    const inner = dens < 0.75 ? 1 : 3;
     const tileBase = rnd() < 0.5 ? 0 : 1;
+    const cy0 = H * 0.5, ry0 = H * 0.55;
+    const tint = [1, 1, 1];
+    function tintFor(y, depth) {
+      const hi = Math.max(0, Math.min(1, (y - H * 0.2) / (H * 0.8)));
+      const sun = Math.max(0, depth) * (0.4 + 0.6 * hi);
+      const j = (rnd() - 0.5) * 0.14, jg = (rnd() - 0.5) * 0.06;
+      tint[0] = (0.90 + 0.20 * sun) * (1 + j);
+      tint[1] = (0.97 + 0.07 * sun) * (1 + jg);
+      tint[2] = (1.06 - 0.22 * sun) * (1 - j * 0.6);
+      return tint;
+    }
     for (let li = 0; li < lobes.length; li++) {
       const L = lobes[li];
+      const LC = new THREE.Vector3(L.x, L.y, L.z);
       const mean = (L.rx + L.ry + L.rz) / 3;
-      for (let i = 0; i < per; i++) {
-        const dir = randomUnit(rnd);
-        const rho = 0.20 + 0.70 * Math.sqrt(rnd());                 // surface-biased fill
-        const c = new THREE.Vector3(L.x + dir.x * rho * L.rx, L.y + dir.y * rho * L.ry, L.z + dir.z * rho * L.rz);
-        // plane: mostly random, leaning tangent so the rim reads as leaf tips
-        const n = randomUnit(rnd).multiplyScalar(0.62).add(dir.clone().multiplyScalar(0.38)).normalize();
-        const f = frame(n, rnd() * Math.PI * 2);
-        const size = mean * (1.35 + rnd() * 0.65);                  // cards overlap: a mass, not a scatter
-        // depth inside the whole crown → baked occlusion
-        const gx = c.x / R, gy = (c.y - light.y) / light.ry, gz = c.z / R;
+      // clumps on the lobe's shell, biased up and out (the light side)
+      for (let ci = 0; ci < nClump; ci++) {
+        const d = randomUnit(rnd);
+        d.y = d.y * 0.8 + 0.28; d.x += Math.sign(L.x || 1e-3) * 0.15; d.z += Math.sign(L.z || 1e-3) * 0.15; d.normalize();
+        const rho = 0.55 + rnd() * 0.32;
+        const cc = new THREE.Vector3(L.x + d.x * rho * L.rx, L.y + d.y * rho * L.ry, L.z + d.z * rho * L.rz);
+        const cr = mean * (0.46 + rnd() * 0.16);
+        const gx = cc.x / R, gy = (cc.y - cy0) / ry0, gz = cc.z / R;
         const depth = Math.min(1, Math.hypot(gx, gy, gz));
-        const occ = 0.52 + 0.48 * depth;
-        set.add(c, f.ax, f.ay, size, size * (0.9 + rnd() * 0.2), (tileBase + (rnd() < 0.25 ? 1 : 0)) & 1, rnd() < 0.5, light, occ);
+        const light = { x: 0, y: cy0, z: 0, rx: R, ry: ry0, up: 0.30, cx: cc.x, cy: cc.y - cr * 0.25, cz: cc.z, cr: cr, cw: 0.5 };
+        for (let k = 0; k < perClump; k++) {
+          const o = randomUnit(rnd);
+          const c = new THREE.Vector3(cc.x + o.x * cr * 0.55, cc.y + o.y * cr * 0.45, cc.z + o.z * cr * 0.55);
+          const out = c.clone().sub(LC).normalize();
+          const n = randomUnit(rnd).multiplyScalar(0.55).add(out.multiplyScalar(0.45)).normalize();
+          const f = frame(n, rnd() * Math.PI * 2);
+          const size = cr * (1.9 + rnd() * 0.7);
+          const occ = 0.60 + 0.40 * depth;
+          set.add(c, f.ax, f.ay, size, size * (0.88 + rnd() * 0.24), (tileBase + (rnd() < 0.3 ? 1 : 0)) & 1, rnd() < 0.5,
+            light, occ, tintFor(c.y, depth));
+        }
+      }
+      // the dark interior: big cards near the lobe core so it is never hollow
+      const lightIn = { x: 0, y: cy0, z: 0, rx: R, ry: ry0, up: 0.30 };
+      for (let k = 0; k < inner; k++) {
+        const o = randomUnit(rnd), rho = 0.15 + rnd() * 0.35;
+        const c = new THREE.Vector3(L.x + o.x * rho * L.rx, L.y + o.y * rho * L.ry, L.z + o.z * rho * L.rz);
+        const f = frame(randomUnit(rnd), rnd() * Math.PI * 2);
+        const size = mean * (1.1 + rnd() * 0.4);
+        set.add(c, f.ax, f.ay, size, size, tileBase, rnd() < 0.5, lightIn, 0.50 + rnd() * 0.08, tintFor(c.y, 0.1));
       }
     }
   }
 
-  // THE SPRUCE — a cross-plane cone. Each level is three vertical
-  // branch-layer cards crossed at 60° (the silhouette from the ground, dense
-  // from every bearing) plus two flat cards (the mass from the air), levels
-  // overlapping so the serrations of one hang over the next. A leader of
-  // two crossed cards tops it.
+  // THE SPRUCE — whorls of drooping BOUGHS, not crossed planes. The old
+  // spire was three full-diameter vertical cards per level plus two flat
+  // ones: a perfect cone in silhouette, and the flat cards seen edge-on
+  // printed as dark horizontal spikes. A real spruce is tiers of branches
+  // leaving the axis level and drooping toward their tips, each tier a
+  // little ragged, with the bole visible through the lower gaps. Each bough
+  // here is ONE card hung from the axis (twig base at the trunk, tip out
+  // and down), rolled about its own length so it shows area from every
+  // bearing; 5-7 per whorl, whorls offset by a golden turn, lengths
+  // jittered so the outline is serrated by real branches. A crossed leader
+  // tops it. Same triangle count as the planes it replaces.
   function spireCards(set, spec, rnd) {
     const R = spec.r, H = spec.h;
     const light = { axis: true, rx: R, up: 0.45 };
-    const levels = Math.max(5, Math.round(8 * cardDensity()));
-    const step = (H * 0.90) / levels;
+    const levels = Math.max(7, Math.round(13 * cardDensity()));
+    const per = cardDensity() < 0.75 ? 5 : 6;
+    const span = H * 0.86;
+    const step = span / levels;
+    const tint = [1, 1, 1];
+    let az = rnd() * Math.PI * 2;
     for (let li = 0; li < levels; li++) {
       const t = (li + 0.5) / levels;
-      const yc = H * 0.05 + t * H * 0.90;
-      const rad = R * (0.16 + 0.84 * Math.pow(1 - t, 0.8)) * (0.92 + rnd() * 0.16);
-      const a0 = rnd() * Math.PI;
-      const occ = 0.80 + 0.20 * t;
-      for (let k = 0; k < 3; k++) {
-        const a = a0 + k * Math.PI / 3;
-        const ax = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
-        set.add(new THREE.Vector3(0, yc, 0), ax, UP, rad * 2.1, step * 1.8, 2 + (k & 1), rnd() < 0.5, light, occ);
-      }
-      for (let k = 0; k < 2; k++) {
-        const a = a0 + rnd() * Math.PI;
-        const ax = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
-        const ay = new THREE.Vector3(-Math.sin(a), -0.18, Math.cos(a)).normalize();
-        set.add(new THREE.Vector3(0, yc - step * 0.25, 0), ax, ay, rad * 2, rad * 2, 2 + k, false, light, occ * 0.9);
+      const yc = H * 0.06 + t * span;
+      const radL = R * (0.14 + 0.86 * Math.pow(1 - t, 0.85));
+      const occ = 0.72 + 0.28 * t;
+      const n = per + (li < levels * 0.5 ? 1 : 0);
+      for (let k = 0; k < n; k++) {
+        az += GOLDEN + (rnd() - 0.5) * 0.5;
+        const len = radL * (0.82 + rnd() * 0.30);
+        const droop = 0.22 + 0.25 * (1 - t) + rnd() * 0.12;           // lower boughs hang more
+        const dir = new THREE.Vector3(Math.cos(az), -droop, Math.sin(az)).normalize();
+        const root = new THREE.Vector3(0, yc + rnd() * step * 0.4, 0);
+        const c = root.clone().addScaledVector(dir, len * 0.5);
+        // width axis: horizontal, perpendicular to the bough, then rolled
+        // about the bough so it is neither flat nor edge-on
+        const side = new THREE.Vector3(-Math.sin(az), 0, Math.cos(az));
+        side.applyAxisAngle(dir, (rnd() < 0.5 ? 1 : -1) * (0.35 + rnd() * 0.45));
+        const j = (rnd() - 0.5) * 0.10;
+        tint[0] = (0.94 + 0.10 * t) * (1 + j); tint[1] = 1 + j * 0.4; tint[2] = (1.04 - 0.08 * t) * (1 - j * 0.5);
+        set.add(c, side, dir.clone().negate(), 0.5 + len * 0.85, len * 1.22, 2 + (k & 1), rnd() < 0.5, light, occ, tint);
       }
     }
-    const tipH = H * 0.12;
+    const tipH = H * 0.11;
     for (let k = 0; k < 2; k++) {
       const a = k * Math.PI / 2 + 0.3;
-      set.add(new THREE.Vector3(0, H - tipH * 0.5, 0), new THREE.Vector3(Math.cos(a), 0, Math.sin(a)), UP, R * 0.5, tipH, 2 + k, false, light, 1);
+      set.add(new THREE.Vector3(0, H - tipH * 0.5, 0), new THREE.Vector3(Math.cos(a), 0, Math.sin(a)), UP, R * 0.42, tipH, 2 + k, false, light, 1);
     }
   }
 
@@ -619,9 +899,9 @@
     g.scale(spec.r / rad, spec.h / hgt, spec.r / rad);
     g.computeBoundingBox(); bb = g.boundingBox;
     g.translate(0, -bb.min.y, 0);
-    const occ = g.userData.occlusion;
-    delete g.userData.occlusion;
-    return shadeByHeight(g, spec.floor, spec.pow, occ);
+    const occ = g.userData.occlusion, tint = g.userData.tint;
+    delete g.userData.occlusion; delete g.userData.tint;
+    return shadeByHeight(g, spec.floor, spec.pow, occ, tint);
   }
 
   // ---- the public variant surface ---------------------------------------
@@ -921,56 +1201,80 @@
      against the sky. */
   function palmTrunk(v) {
     return palmOnce("pt" + v, function () {
-      const SEG = 7, parts = [];
+      // A coconut stem: a swollen bole at the foot, a long slender column
+      // that curves toward the light, and the ring of leaf scars every
+      // 10-15 cm that is the trunk's whole texture — carved into the
+      // silhouette (alternating ring radii), not only painted. Unit height
+      // (consumers scale y by the palm's height), radii in metres.
       const bend = [0.10, 0.16, 0.06][v];
       const at = function (t) { return new THREE.Vector3(bend * Math.pow(t, 1.8), t, 0); };
-      const up = new THREE.Vector3(0, 1, 0);
-      for (let i = 0; i < SEG; i++) {
-        const a = at(i / SEG), b = at((i + 1) / SEG);
-        const r0 = 0.20 - 0.07 * (i / SEG) + (i === 0 ? 0.06 : 0), r1 = 0.20 - 0.07 * ((i + 1) / SEG);
-        const len = a.distanceTo(b);
-        const c = new THREE.CylinderGeometry(r1, r0, len * 1.02, 8, 1, true);
-        const uv = c.attributes.uv;
-        for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * 1.5, uv.getY(k) * 0.35 + i * 0.35);
-        const dir = b.clone().sub(a).normalize();
-        c.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir)));
-        c.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
-        parts.push(c);
+      const RINGS = 26, pts = [], radii = [];
+      for (let i = 0; i <= RINGS; i++) {
+        const t = i / RINGS;
+        pts.push(at(t));
+        const base = 0.17 - 0.045 * t + 0.11 * Math.exp(-t / 0.035);          // the bulb at the foot
+        const scar = (i % 2 === 0 && i > 1 && i < RINGS) ? 1.06 : 1.0;          // a collar per scar
+        radii.push(base * scar);
       }
-      const BGU = THREE.BufferGeometryUtils;
-      const g = (BGU && BGU.mergeBufferGeometries && BGU.mergeBufferGeometries(parts, false)) || parts[0];
+      const g = tube(pts, radii, 9, 1.5, 0.4);
       palmRamp(g, 0.62);
       const p = g.attributes.position, col = g.attributes.color;
       for (let i = 0; i < p.count; i++) {
-        const band = 0.5 + 0.5 * Math.cos(p.getY(i) * Math.PI * 2 * 9);
-        const k = 1 - 0.3 * Math.pow(band, 6);
-        col.setXYZ(i, col.getX(i) * k, col.getY(i) * k * 0.98, col.getZ(i) * k * 0.95);
+        const ring = Math.floor(i / 10);
+        const k = (ring % 2 === 0) ? 0.78 : 1.0;                               // dark scar collars
+        const crownshaft = p.getY(i) > 0.95 ? 0.82 : 1;                        // the fibrous boss under the fronds
+        col.setXYZ(i, col.getX(i) * k * crownshaft, col.getY(i) * k * 0.98 * crownshaft, col.getZ(i) * k * 0.92);
       }
       g.userData.top = at(1);
       g.computeBoundingSphere();
       return g;
     });
   }
+  /* THE COCONUT CROWN. A living crown is three things: the YOUNG fronds
+     near the centre, rising steeply; the MATURE fronds, leaving the hub
+     near level and arching over into a hang; the OLD fronds, hanging close
+     down the trunk and going yellow-brown. Each frond is a rachis that
+     integrates its pitch (a real arc), with a leaflet pair at every step
+     whose blades hang in a V off the rachis, longest at mid-frond. A
+     cluster of nuts sits in the leaf axils under the hub. Colours are
+     vertex colours multiplied by the caller's leaf material, so the nuts
+     and dead fronds read warmer than the live leaflets in any tint. */
   function palmCrown(v) {
     return palmOnce("pc" + v, function () {
       const pos = [], col = [];
-      const N = 11, SEG = 17;
-      function tri(a, b, c, ca, cb, cc) {
+      const SEG = 18;
+      function tri(a, b, c, ca, cb, cc, rgb) {
         pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-        col.push(ca, ca, ca * 0.85, cb, cb, cb * 0.85, cc, cc, cc * 0.85);
+        const r = rgb ? rgb[0] : 1, gg = rgb ? rgb[1] : 1, bb = rgb ? rgb[2] : 0.85;
+        col.push(ca * r, ca * gg, ca * bb, cb * r, cb * gg, cb * bb, cc * r, cc * gg, cc * bb);
       }
-      for (let f = 0; f < N; f++) {
-        const yaw = (f / N) * Math.PI * 2 + (h01(f, v, 0x9a1) - 0.5) * 0.35;
-        const len = 2.6 + h01(f, v, 0x9a2) * 0.9;
-        const lift = -0.2 + h01(f, v, 0x9a3) * 0.7;              // start pitch, above/below level
-        const hang = 1.2 + h01(f, v, 0x9a4) * 0.7;               // how hard it droops
-        const dx = Math.cos(yaw), dz = Math.sin(yaw);
-        const sx = -dz, sz = dx;                                   // leaflet side direction
-        // the spine: integrate the pitch so it is a real arc, not a chord
-        const pts = [new THREE.Vector3(0, 0, 0)];
+      const fronds = [];
+      // [count, lift, hang, len, colour]
+      const rings = [
+        [3, 0.85, 0.55, 0.66, null],                              // young, rising
+        [9, 0.10, 1.55, 1.00, null],                              // mature, arching
+        [2, -0.55, 1.15, 0.85, [1.35, 0.95, 0.40]],               // old, hanging, yellowing
+      ];
+      let fi = 0;
+      for (let r = 0; r < rings.length; r++) {
+        const R = rings[r];
+        for (let k = 0; k < R[0]; k++, fi++) {
+          fronds.push({
+            yaw: ((k + (r & 1) * 0.5) / R[0]) * Math.PI * 2 + (h01(fi, v, 0x9a1) - 0.5) * 0.5,
+            len: (3.4 + h01(fi, v, 0x9a2) * 1.2) * R[3],
+            lift: R[1] + (h01(fi, v, 0x9a3) - 0.5) * 0.35,
+            hang: R[2] * (0.8 + h01(fi, v, 0x9a4) * 0.45),
+            rgb: R[4],
+          });
+        }
+      }
+      for (const F of fronds) {
+        const dx = Math.cos(F.yaw), dz = Math.sin(F.yaw);
+        const sx = -dz, sz = dx;
+        const pts = [new THREE.Vector3(dx * 0.12, 0, dz * 0.12)];
         const STEPS = 18;
         for (let s = 1; s <= STEPS; s++) {
-          const u = (s - 0.5) / STEPS, ang = lift - hang * u * u, dl = len / STEPS;
+          const u = (s - 0.5) / STEPS, ang = F.lift - F.hang * u * u, dl = F.len / STEPS;
           const q = pts[s - 1];
           pts.push(new THREE.Vector3(q.x + dx * Math.cos(ang) * dl, q.y + Math.sin(ang) * dl, q.z + dz * Math.cos(ang) * dl));
         }
@@ -978,21 +1282,39 @@
           const f2 = u * STEPS, i0 = Math.min(STEPS - 1, Math.floor(f2));
           return pts[i0].clone().lerp(pts[i0 + 1], f2 - i0);
         };
+        // the rachis itself, a thin ribbon so the frond has a spine
+        for (let i = 0; i < 6; i++) {
+          const a = spine(i / 6), b = spine((i + 1) / 6), wv = 0.05 * (1 - i / 6);
+          const a2 = a.clone(); a2.y -= wv; const b2 = b.clone(); b2.y -= wv * 0.8;
+          tri(a, b, a2, 0.75, 0.75, 0.6, [1.15, 1.05, 0.6]); tri(b, b2, a2, 0.75, 0.6, 0.6, [1.15, 1.05, 0.6]);
+        }
+        const fold = F.rgb ? 0.9 : 0.62;                    // dead leaflets hang slack
         for (let i = 0; i < SEG; i++) {
-          const u0 = 0.06 + (i / SEG) * 0.94, u1 = 0.06 + ((i + 1) / SEG) * 0.94;
-          // a leaflet is a narrow blade: its base spans only the first half
-          // of the step, so the comb has gaps between blades
-          const a = spine(u0), b = spine(u0 + (u1 - u0) * 0.5);
-          const w = 0.8 * Math.sin(Math.PI * Math.min(1, 0.12 + u0 * 0.95)) + 0.12;   // leaflet length
-          const shade = 0.6 + 0.4 * u0;
+          const u0 = 0.08 + (i / SEG) * 0.92, u1 = 0.08 + ((i + 1) / SEG) * 0.92;
+          const a = spine(u0), b = spine(u0 + (u1 - u0) * 0.55);
+          const w = (1.05 * Math.sin(Math.PI * Math.min(1, 0.10 + u0 * 0.92)) + 0.10) * (F.len / 4);
+          const shade = 0.58 + 0.42 * u0;
           for (let sgn = -1; sgn <= 1; sgn += 2) {
             const tip = new THREE.Vector3(
-              (a.x + b.x) / 2 + sx * sgn * w + dx * w * 0.55,
-              (a.y + b.y) / 2 - w * 0.6,
-              (a.z + b.z) / 2 + sz * sgn * w + dz * w * 0.55);
-            tri(a, b, tip, shade * 0.85, shade * 0.95, shade * 1.1);
+              (a.x + b.x) / 2 + sx * sgn * w * 0.92 + dx * w * 0.42,
+              (a.y + b.y) / 2 - w * fold,
+              (a.z + b.z) / 2 + sz * sgn * w * 0.92 + dz * w * 0.42);
+            tri(a, b, tip, shade * 0.85, shade * 0.95, shade * 1.12, F.rgb);
           }
         }
+      }
+      // the nuts: a cluster of 5-7 low spheres in the axils under the hub
+      const nuts = 5 + ((h01(v, 3, 0x9a5) * 3) | 0);
+      for (let n = 0; n < nuts; n++) {
+        const a = (n / nuts) * Math.PI * 2 + h01(n, v, 0x9a6), rr = 0.20 + h01(n, v, 0x9a7) * 0.08;
+        const c = new THREE.Vector3(Math.cos(a) * rr, -0.22 - h01(n, v, 0x9a8) * 0.18, Math.sin(a) * rr);
+        const sph = new THREE.IcosahedronGeometry(0.14, 0);          // r128 polyhedra are already triangle soup
+        const P = sph.attributes.position;
+        for (let i = 0; i < P.count; i += 3) {
+          const q = [0, 1, 2].map(function (j) { return new THREE.Vector3(P.getX(i + j) + c.x, P.getY(i + j) * 1.15 + c.y, P.getZ(i + j) + c.z); });
+          tri(q[0], q[1], q[2], 0.85, 0.85, 0.85, [1.5, 1.15, 0.45]);
+        }
+        sph.dispose();
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));

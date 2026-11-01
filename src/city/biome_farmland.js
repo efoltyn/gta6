@@ -123,6 +123,213 @@
     chick: mat(0xcf4633),
   };
 
+
+  /* ======================================================================
+     THE FARM KIT — the crops, the fence, the bale and the scarecrow as
+     real plants and real carpentry, in metres. Until 2026-10-31 a corn
+     plant was a 0.18 m green box, a wheat clump a five-sided golden cone,
+     a pasture tuft a four-sided cone, a fence post a square stick and a
+     scarecrow four boxes. Every piece below keeps the OLD piece's pivot
+     and size (the instance matrices that place them are unchanged — a
+     plant is still centred on its own mid-height, a post on its 1.1 m
+     middle, a bale on its axis), so only the vertices changed.
+     Each geometry is ONE non-indexed buffer with flat normals and a vertex
+     colour around 1.0, worn by a vertex-colour copy of the old material's
+     hue: a stalk, its blades and its tassel are one draw per crop, as the
+     box was.
+  ====================================================================== */
+  function Acc() { this.p = []; this.c = []; }
+  Acc.prototype.tri = function (a, b, c, k) {
+    this.p.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    for (let i = 0; i < 3; i++) this.c.push(k[0], k[1], k[2]);
+  };
+  Acc.prototype.quad = function (a, b, c, d, k) { this.tri(a, b, c, k); this.tri(a, c, d, k); };
+  // any r128 geometry, transformed, one colour (or a per-vertex fn)
+  Acc.prototype.geo = function (g, m4, k) {
+    const n = g.index ? g.toNonIndexed() : g;
+    if (m4) n.applyMatrix4(m4);
+    const P = n.attributes.position;
+    for (let i = 0; i < P.count; i++) {
+      this.p.push(P.getX(i), P.getY(i), P.getZ(i));
+      const kk = typeof k === "function" ? k(P.getX(i), P.getY(i), P.getZ(i)) : k;
+      this.c.push(kk[0], kk[1], kk[2]);
+    }
+    if (n !== g) n.dispose();
+    g.dispose();
+  };
+  Acc.prototype.build = function (name) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(this.p, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(this.c, 3));
+    g.computeVertexNormals();
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    g.name = name;
+    return g;
+  };
+  function m4(x, y, z, rx, ry, rz) {
+    return new THREE.Matrix4().compose(new THREE.Vector3(x, y, z),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(rx || 0, ry || 0, rz || 0)), new THREE.Vector3(1, 1, 1));
+  }
+  function frng(seed) { let s = seed >>> 0; return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+
+  // A grass-family BLADE: a strap that rises, arches and droops, tapering to
+  // a point; `segs` quads along a parabola. Shared by corn, wheat and tufts.
+  function blade(A, base, az, len, wid, rise, droop, segs, kBase, kTip) {
+    const dx = Math.cos(az), dz = Math.sin(az), sx = -dz, sz = dx;
+    let prevL = null, prevR = null;
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs;
+      const out = len * t, up = len * (rise * t - droop * t * t);
+      const w = wid * (1 - t * 0.85) * (t < 0.12 ? 0.6 + t * 3.3 : 1);
+      const cx = base[0] + dx * out, cy = base[1] + up, cz = base[2] + dz * out;
+      const L = [cx + sx * w / 2, cy, cz + sz * w / 2], R = [cx - sx * w / 2, cy, cz - sz * w / 2];
+      if (prevL) {
+        const k = [kBase[0] + (kTip[0] - kBase[0]) * t, kBase[1] + (kTip[1] - kBase[1]) * t, kBase[2] + (kTip[2] - kBase[2]) * t];
+        if (i === segs) A.tri(prevL, prevR, [cx, cy, cz], k); else A.quad(prevL, prevR, R, L, k);
+      }
+      prevL = L; prevR = R;
+    }
+  }
+
+  const farmGeoCache = Object.create(null);
+  const farmKit = {
+    // CORN — 2.1 m, centred on its mid-height (the old box's pivot): a
+    // tapering stalk with nodes, eight arching leaves alternating up the
+    // stem, one husked ear in a leaf axil, and the tassel's spreading
+    // branches on top.
+    corn: function () {
+      if (farmGeoCache.corn) return farmGeoCache.corn;
+      const A = new Acc(), r = frng(0xc0a1), H = 2.1, y0 = -H / 2;
+      A.geo(new THREE.CylinderGeometry(0.016, 0.028, H * 0.9, 5, 1, true), m4(0, y0 + H * 0.45, 0), [0.92, 1.0, 0.80]);
+      let az = r() * Math.PI * 2;
+      for (let i = 0; i < 8; i++) {
+        az += Math.PI + (r() - 0.5) * 0.7;
+        const h = y0 + 0.34 + i * 0.17;
+        const len = 0.62 + 0.32 * Math.sin(Math.PI * (0.25 + i / 10));
+        blade(A, [0, h, 0], az, len, 0.085, 1.15 - i * 0.04, 1.35 + r() * 0.3, 5, [0.82, 0.95, 0.78], [1.05, 1.08, 0.70]);
+      }
+      // the ear, in the axil of the fourth leaf, leaning out
+      A.geo(new THREE.CylinderGeometry(0.022, 0.038, 0.24, 6), m4(Math.cos(az) * 0.06, y0 + 1.05, Math.sin(az) * 0.06, 0.35, az, 0), [1.30, 1.22, 0.62]);
+      A.geo(new THREE.ConeGeometry(0.022, 0.08, 5), m4(Math.cos(az) * 0.10, y0 + 1.20, Math.sin(az) * 0.10, 0.35, az, 0), [1.45, 1.20, 0.70]);
+      // the tassel
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2 + r();
+        blade(A, [0, y0 + H * 0.9, 0], a, 0.22, 0.012, 1.9, 1.6, 2, [1.45, 1.30, 0.62], [1.60, 1.35, 0.58]);
+      }
+      blade(A, [0, y0 + H * 0.9, 0], 0, 0.12, 0.014, 2.2, 0.3, 2, [1.45, 1.30, 0.62], [1.55, 1.35, 0.6]);
+      return (farmGeoCache.corn = A.build("farm-corn-plant"));
+    },
+    // WHEAT / SOY CLUMP — 0.95 m, centred: a tiller of stems, each ending in
+    // a bearded ear (wheat) on a golden stalk, with a few flag leaves.
+    wheat: function () {
+      if (farmGeoCache.wheat) return farmGeoCache.wheat;
+      const A = new Acc(), r = frng(0x3ea7), H = 0.95, y0 = -H / 2;
+      for (let i = 0; i < 13; i++) {
+        const a = r() * Math.PI * 2, lean = 0.05 + r() * 0.16, h = H * (0.76 + r() * 0.2);
+        const bx = Math.cos(a) * 0.05, bz = Math.sin(a) * 0.05;
+        const tx = bx + Math.cos(a) * lean * h, tz = bz + Math.sin(a) * lean * h, ty = y0 + h;
+        const sx = -Math.sin(a) * 0.006, sz = Math.cos(a) * 0.006;
+        A.tri([bx - sx, y0, bz - sz], [bx + sx, y0, bz + sz], [tx, ty, tz], [0.92, 0.95, 0.80]);
+        // the ear: a slim spindle (two crossed diamonds) nodding off the tip
+        const ex = Math.cos(a) * 0.035, ez = Math.sin(a) * 0.035, el = 0.10;
+        const e0 = [tx, ty, tz], e1 = [tx + ex, ty + el, tz + ez];
+        const mid = [(e0[0] + e1[0]) / 2, (e0[1] + e1[1]) / 2, (e0[2] + e1[2]) / 2];
+        const k = [1.12, 1.05, 0.90];
+        A.tri(e0, [mid[0] + 0.016, mid[1], mid[2]], e1, k); A.tri(e0, e1, [mid[0] - 0.016, mid[1], mid[2]], k);
+        A.tri(e0, [mid[0], mid[1], mid[2] + 0.016], e1, k); A.tri(e0, e1, [mid[0], mid[1], mid[2] - 0.016], k);
+        // the awns: one bristle up off the ear
+        A.tri([e1[0] - 0.003, e1[1], e1[2]], [e1[0] + 0.003, e1[1], e1[2]], [e1[0] + ex * 0.6, e1[1] + 0.07, e1[2] + ez * 0.6], [1.2, 1.1, 0.9]);
+      }
+      for (let i = 0; i < 5; i++) blade(A, [0, y0 + 0.05, 0], r() * Math.PI * 2, 0.36, 0.022, 1.1, 1.0, 3, [0.80, 0.92, 0.70], [1.0, 1.0, 0.82]);
+      return (farmGeoCache.wheat = A.build("farm-wheat-tiller"));
+    },
+    // PASTURE TUFT — 0.55 m, centred: a fountain of blades.
+    grass: function () {
+      if (farmGeoCache.grass) return farmGeoCache.grass;
+      const A = new Acc(), r = frng(0x9a55), H = 0.55, y0 = -H / 2;
+      for (let i = 0; i < 11; i++) {
+        const len = 0.30 + r() * 0.30;
+        blade(A, [(r() - 0.5) * 0.08, y0, (r() - 0.5) * 0.08], r() * Math.PI * 2, len, 0.03, 1.9 + r() * 1.2, 1.4 + r() * 0.8, 3,
+          [0.78, 0.88, 0.80], [1.10, 1.10, 0.85]);
+      }
+      return (farmGeoCache.grass = A.build("farm-pasture-tuft"));
+    },
+    // FENCE POST — 1.1 m, centred (the old box's pivot): a round treated
+    // post with a weathered cut top, bark-dark at the foot.
+    post: function () {
+      if (farmGeoCache.post) return farmGeoCache.post;
+      const A = new Acc();
+      A.geo(new THREE.CylinderGeometry(0.068, 0.075, 1.06, 7, 1, false), m4(0, -0.02, 0), function (x, y) {
+        const t = (y + 0.55) / 1.1; const v = 0.72 + 0.32 * t; return [v, v * 0.97, v * 0.92];
+      });
+      A.geo(new THREE.ConeGeometry(0.07, 0.06, 7), m4(0, 0.54, 0), [1.05, 1.0, 0.92]);
+      return (farmGeoCache.post = A.build("farm-fence-post"));
+    },
+    // FENCE BOARD — 1 m long on z (scaled along the run), a sawn plank
+    // 0.14 m deep, 35 mm thick, standing on edge.
+    board: function () {
+      if (farmGeoCache.board) return farmGeoCache.board;
+      const A = new Acc();
+      A.geo(new THREE.BoxGeometry(0.035, 0.14, 1), null, function (x, y) { return y > 0 ? [1.04, 1.02, 0.98] : [0.88, 0.86, 0.82]; });
+      return (farmGeoCache.board = A.build("farm-fence-board"));
+    },
+    // ROUND BALE — r 0.7, 1.6 long on Y, centred (the instance lays it on
+    // its side): rounded shoulders, and end faces in concentric rings, the
+    // spiral a round baler rolls.
+    bale: function () {
+      if (farmGeoCache.bale) return farmGeoCache.bale;
+      const pts = [];
+      const ends = [0, 0.12, 0.24, 0.36, 0.48, 0.58];
+      for (const e of ends) pts.push(new THREE.Vector2(e, -0.8));
+      pts.push(new THREE.Vector2(0.65, -0.77), new THREE.Vector2(0.69, -0.70), new THREE.Vector2(0.70, -0.4), new THREE.Vector2(0.70, 0),
+        new THREE.Vector2(0.70, 0.4), new THREE.Vector2(0.69, 0.70), new THREE.Vector2(0.65, 0.77));
+      for (let i = ends.length - 1; i >= 0; i--) pts.push(new THREE.Vector2(ends[i], 0.8));
+      const A = new Acc();
+      A.geo(new THREE.LatheGeometry(pts, 16), null, function (x, y, z) {
+        const rad = Math.hypot(x, z);
+        if (Math.abs(y) > 0.79) { const ring = Math.round(rad / 0.12) & 1; return ring ? [0.86, 0.82, 0.70] : [1.04, 1.0, 0.92]; }
+        const band = Math.abs(y) < 0.05 || Math.abs(Math.abs(y) - 0.4) < 0.05 ? 0.86 : 1;   // the twine wraps
+        return [band, band * 0.98, band * 0.94];
+      });
+      return (farmGeoCache.bale = A.build("farm-round-bale"));
+    },
+    // SCARECROW — 2.6 m on its post, origin at the foot: a cross of rough
+    // poles, a plaid-red shirt stuffed over the crossbar with sleeves to the
+    // ends, straw at the cuffs and the collar, a burlap head and a hat.
+    scarecrow: function (shirtHex, headHex) {
+      const key = "scare" + shirtHex + "_" + headHex;
+      if (farmGeoCache[key]) return farmGeoCache[key];
+      const A = new Acc();
+      const c = function (hex, mul) { const k = new THREE.Color(hex); return [k.r * (mul || 1), k.g * (mul || 1), k.b * (mul || 1)]; };
+      const wood = c(0x6e5132), shirt = c(shirtHex), shirtD = c(shirtHex, 0.7), straw = c(0xd9c27a), head = c(headHex), hat = c(0x5a4630);
+      A.geo(new THREE.CylinderGeometry(0.05, 0.06, 2.3, 6), m4(0, 1.15, 0), wood);
+      A.geo(new THREE.CylinderGeometry(0.035, 0.035, 1.7, 6), m4(0, 1.75, 0, 0, 0, Math.PI / 2), wood);
+      A.geo(new THREE.CylinderGeometry(0.22, 0.26, 0.72, 8), m4(0, 1.45, 0), function (x, y) {
+        return (Math.floor((y + 3) / 0.12) & 1) ? shirt : shirtD;                              // plaid bands
+      });
+      for (let s = -1; s <= 1; s += 2) {
+        A.geo(new THREE.CylinderGeometry(0.075, 0.10, 0.62, 7), m4(s * 0.47, 1.73, 0, 0, 0, s * (Math.PI / 2 + 0.06)), shirt);
+        for (let k = 0; k < 4; k++) A.geo(new THREE.ConeGeometry(0.03, 0.18, 4), m4(s * (0.82 + k * 0.01), 1.70 - k * 0.03, (k - 1.5) * 0.04, 0, 0, s * (Math.PI / 2 + 0.5 + k * 0.15)), straw);
+      }
+      for (let k = 0; k < 6; k++) A.geo(new THREE.ConeGeometry(0.03, 0.2, 4), m4(Math.cos(k) * 0.1, 1.08, Math.sin(k) * 0.1, Math.PI + Math.cos(k) * 0.3, 0, Math.sin(k) * 0.3), straw);
+      A.geo(new THREE.SphereGeometry(0.2, 8, 6), m4(0, 2.02, 0), head);
+      A.geo(new THREE.CylinderGeometry(0.34, 0.34, 0.025, 12), m4(0, 2.17, 0), hat);
+      A.geo(new THREE.CylinderGeometry(0.15, 0.18, 0.2, 10), m4(0, 2.27, 0), hat);
+      for (let k = 0; k < 7; k++) A.geo(new THREE.ConeGeometry(0.025, 0.16, 4), m4(Math.cos(k * 0.9) * 0.2, 2.10, Math.sin(k * 0.9) * 0.2, Math.sin(k * 0.9) * 1.2, 0, -Math.cos(k * 0.9) * 1.2), straw);
+      return (farmGeoCache[key] = A.build("farm-scarecrow"));
+    },
+    material: function (hex, double) {
+      const key = "m" + hex + (double ? "d" : "");
+      if (farmGeoCache[key]) return farmGeoCache[key];
+      const m = new THREE.MeshLambertMaterial({ color: hex, vertexColors: true, side: double ? THREE.DoubleSide : THREE.FrontSide });
+      m._shared = true;
+      return (farmGeoCache[key] = m);
+    },
+  };
+  CBZ.farmKit = farmKit;
+
+  function hexOf(m, d) { return m && m.color ? m.color.getHex() : d; }
+
   CBZ.addLandmass(function (city) {
     const root = city.root;
     if (!root) return;
@@ -358,12 +565,10 @@
       root.add(im);
       return im;
     }
-    // corn: tall thin green stalk box (read close, cheap)
-    buildInstanced(new THREE.BoxGeometry(0.18, 2.1, 0.18), M.cornGreen, plantMatrices.corn, true);
-    // wheat / soy clump: short golden cone
-    buildInstanced(new THREE.ConeGeometry(0.22, 0.95, 5), M.wheat, plantMatrices.wheat, false);
-    // pasture grass tuft: tiny cone
-    buildInstanced(new THREE.ConeGeometry(0.3, 0.55, 4), M.leafGreen, plantMatrices.grass, false);
+    // the plants: real stalks, blades and ears (farmKit above), same pivots
+    buildInstanced(farmKit.corn(), farmKit.material(hexOf(M.cornGreen, 0x4e7d2c), true), plantMatrices.corn, true);
+    buildInstanced(farmKit.wheat(), farmKit.material(hexOf(M.wheat, 0xc9a93f), true), plantMatrices.wheat, false);
+    buildInstanced(farmKit.grass(), farmKit.material(hexOf(M.leafGreen, 0x3f6e2a), true), plantMatrices.grass, false);
 
     // =====================================================================
     // 3) FENCES — one InstancedMesh of posts + one thin box rail per field
@@ -438,8 +643,8 @@
       fenceLine(p.px + hw, p.pz + hd, p.px - hw, p.pz + hd);
       fenceLine(p.px - hw, p.pz + hd, p.px - hw, p.pz - hd);
     }
-    buildInstanced(new THREE.BoxGeometry(0.12, 1.1, 0.12), M.wood, postMats, false);
-    buildInstanced(new THREE.BoxGeometry(0.06, 0.08, 1), M.woodLt, railMats, false);
+    buildInstanced(farmKit.post(), farmKit.material(hexOf(M.wood, 0x6e5132)), postMats, false);
+    buildInstanced(farmKit.board(), farmKit.material(hexOf(M.woodLt, 0x9b7b4e)), railMats, false);
     CBZ.farmFenceSolids = fenceCols;
 
     // Irrigation channels are painted into the unified surface above.
@@ -699,7 +904,7 @@
         }
       }
     }
-    buildInstanced(new THREE.CylinderGeometry(0.7, 0.7, 1.6, 10), M.hay, baleMats, true);
+    buildInstanced(farmKit.bale(), farmKit.material(hexOf(M.hay, 0xcda84a)), baleMats, true);
 
     // scarecrows: cross post + straw head, in a few cropped parcels
     let scareCount = 0;
@@ -707,10 +912,10 @@
       if (!p.crop || scareCount >= 5) continue;
       if (rng() < 0.55) {
         const sx = p.px + rr(-p.w / 4, p.w / 4), sz = p.pz + rr(-p.d / 4, p.d / 4);
-        box(sx, 1.1, sz, 0.12, 2.2, 0.12, M.wood, false);
-        box(sx, 1.7, sz, 1.6, 0.12, 0.12, M.wood, false);
-        box(sx, 2.4, sz, 0.45, 0.5, 0.45, M.scareHead, false);
-        box(sx, 1.6, sz, 0.7, 0.7, 0.25, M.scareShirt, false);
+        const sc = new THREE.Mesh(farmKit.scarecrow(hexOf(M.scareShirt, 0xb53d3d), hexOf(M.scareHead, 0xd9b46a)), farmKit.material(0xffffff));
+        sc.position.set(sx, 0, sz); sc.rotation.y = (sx * 0.37 + sz * 0.11) % (Math.PI * 2);   // no rng draw: the stream stays order-stable
+        sc.castShadow = true; sc.receiveShadow = true; sc.name = "farm-scarecrow";
+        root.add(sc);
         scareCount++;
       }
     }
