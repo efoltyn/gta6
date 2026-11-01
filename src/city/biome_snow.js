@@ -1212,6 +1212,87 @@
   };
 
   // ============================================================
+  /* ======================================================================
+     THE SNOW PINE. It was three hexagonal cones and a white hexagonal cone
+     on top: a stack of party hats. A snow-loaded spruce reads by its TIERS
+     OF DROOPING BOUGHS — each whorl a skirt whose rim is serrated by branch
+     tips that hang lower than the gaps between them, dark and open
+     underneath — and by SNOW LYING ON EVERY TIER, not one cap on the tip.
+       canopy — base at y = 0, height 4.2, widest r 1.55 (the old stack's
+                box, so the placement, audit and LOD bake are unchanged);
+                five serrated skirts, upper faces green, undersides dark.
+       snow   — a shelf of snow on each skirt's upper surface and a crown
+                on the leader, authored in the CANOPY's frame and shifted
+                down 2.7 m, because the placer seats the cap 2.7·sc·vst
+                above the canopy base with the canopy's own scale.
+     The canopy wears a vertex-colour copy of the pine colour (never a
+     mutated shared cmat); the snow keeps the shared snow material.
+  ====================================================================== */
+  const pineCache = {};
+  const PINE_TIERS = [
+    // [base y, apex y, radius]
+    [0.00, 1.60, 1.55], [0.72, 2.20, 1.30], [1.40, 2.78, 1.06], [2.04, 3.36, 0.82], [2.66, 4.20, 0.58],
+  ];
+  function pineTier(pos, col, T, k, shelf) {
+    const yb = T[0], ya = T[1], R = T[2], N = 14;
+    const rim = [];
+    for (let i = 0; i <= N; i++) {
+      const a = (i % N) / N * Math.PI * 2 + k * 0.7;
+      const tip = (i % 2) === 0;
+      const j = 0.9 + 0.2 * Math.abs(Math.sin(i * 12.9898 + k * 78.233));
+      const r = R * (tip ? 1 : 0.70) * j * (shelf ? 0.86 : 1);
+      const y = yb + (tip ? -0.16 : 0.10) * R + (shelf ? 0.07 + (ya - yb) * 0.10 : 0);
+      rim.push([Math.cos(a) * r, y, Math.sin(a) * r, tip]);
+    }
+    const apex = [0, ya + (shelf ? 0.04 : 0), 0];
+    const under = [0, yb + (ya - yb) * 0.30, 0];
+    for (let i = 0; i < N; i++) {
+      const a = rim[i], b = rim[i + 1];
+      // upper surface (CCW seen from outside/above): apex, b, a
+      pos.push(apex[0], apex[1], apex[2], b[0], b[1], b[2], a[0], a[1], a[2]);
+      const ka = a[3] ? 1.08 : 0.86, kb = b[3] ? 1.08 : 0.86;
+      if (shelf) col.push(1, 1, 1, 1, 1, 1, 1, 1, 1);
+      else col.push(0.92, 0.95, 0.92, kb, kb, kb * 0.96, ka, ka, ka * 0.96);
+      if (!shelf) {
+        // the dark, open underside of the whorl
+        pos.push(under[0], under[1], under[2], a[0], a[1], a[2], b[0], b[1], b[2]);
+        col.push(0.32, 0.34, 0.34, 0.58, 0.6, 0.6, 0.58, 0.6, 0.6);
+      }
+    }
+  }
+  function snowPineCanopy() {
+    if (pineCache.canopy) return pineCache.canopy;
+    const pos = [], col = [];
+    for (let k = 0; k < PINE_TIERS.length; k++) pineTier(pos, col, PINE_TIERS[k], k, false);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere();
+    g.name = "snow-pine-canopy";
+    return (pineCache.canopy = g);
+  }
+  function snowPineSnow() {
+    if (pineCache.snow) return pineCache.snow;
+    const pos = [], col = [];
+    for (let k = 0; k < PINE_TIERS.length; k++) pineTier(pos, col, PINE_TIERS[k], k, true);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    g.computeVertexNormals();
+    g.translate(0, -2.7, 0);                      // the placer seats the cap 2.7 up the canopy
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    g.name = "snow-pine-snow";
+    return (pineCache.snow = g);
+  }
+  function pineMaterial(hex) {
+    const key = "m" + hex;
+    if (pineCache[key]) return pineCache[key];
+    const m = new THREE.MeshLambertMaterial({ color: hex, vertexColors: true, flatShading: true });
+    m._shared = true;
+    return (pineCache[key] = m);
+  }
+  CBZ.snowPineKit = { canopy: snowPineCanopy, snow: snowPineSnow, material: pineMaterial };
+
   CBZ.addLandmass(function (city) {
     const root = city.root;
     if (!root) return;
@@ -2308,6 +2389,7 @@
         : new THREE.CylinderGeometry(0.22, 0.32, 1.6, 5);
       const canopyG = (function () {
         if (!TREES2) return new THREE.ConeGeometry(1.5, 4.2, 6);
+        if (CFGS.SNOW_PINE_V2 !== false) return snowPineCanopy();
         // 3 stacked cones, base at y=0, total height 4.2 — each tier's base
         // sinks into the tier below (support-connected by construction).
         if (CFGS.TREES_ONE_GRAMMAR !== false && CBZ.treeCrownGeo) {
@@ -2336,11 +2418,12 @@
       })();
       // snow cap: V2 authors it base-at-y=0 so it can hug the TOP TIER of the
       // stacked canopy (overlapping it — chain-connected) and crown the tip.
-      const capG = TREES2 ? new THREE.ConeGeometry(0.88, 1.6, 6)
+      const PINE2 = TREES2 && CFGS.SNOW_PINE_V2 !== false;
+      const capG = PINE2 ? snowPineSnow() : TREES2 ? new THREE.ConeGeometry(0.88, 1.6, 6)
         : new THREE.ConeGeometry(0.75, 1.9, 6);      // legacy: snow capping the upper canopy (conformal)
-      if (TREES2) capG.translate(0, 0.8, 0);
+      if (TREES2 && !PINE2) capG.translate(0, 0.8, 0);
       const trunkIM = new THREE.InstancedMesh(trunkG, mTrunk, COUNT);
-      const canopyIM = new THREE.InstancedMesh(canopyG, mPine, COUNT);
+      const canopyIM = new THREE.InstancedMesh(canopyG, PINE2 ? pineMaterial(COL.pine) : mPine, COUNT);
       const capIM = new THREE.InstancedMesh(capG, mSnow, COUNT);
       trunkIM.castShadow = canopyIM.castShadow = true;
       const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), s = new THREE.Vector3();
