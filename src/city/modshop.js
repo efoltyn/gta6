@@ -95,24 +95,125 @@
   const GLOW_COLORS = { violet: 0x8a2be2, cyan: 0x22d3ee, red: 0xff2d2d, lime: 0x7cfc00 };
   const glowMats = {};
 
-  // shared materials (one set, reused across every bolt-on → draw-call cheap).
+  /* ============================================================
+     THE BOLT-ONS, BUILT LIKE PARTS (2026-10-31, Opus 5.5). What was here:
+     every mod a handful of unit boxes hung at fractions of the car's
+     bounding box — the armour a black slab beside each door, the
+     supercharger a grey brick on the hood, the wing a plank. What is here:
+     the same mods as real hardware, FITTED to the body they are bolted to.
+     The fit reads the car's own numbers: its body context (the slim partCtx
+     every lofted body publishes: nose and tail planes, the bonnet and deck
+     heights, cowl and deck stations, belt line, roof) and falls back to the
+     bounding dims on a body without one (the trucks).
+       armour    plated door skins with bolt rows, window grilles (bars in a
+                 frame), a ribbed hood plate, a tubular bull bar with uprights
+                 and a skid plate; heavy adds a roof cage
+       wedge     a ribbed plow blade raked over the nose, chevroned hazard
+                 edge, a steel cutting lip, side wings, two hydraulic rams
+                 with chrome pistons
+       perf      1: quad exhaust tips (rolled lips, sooted throats)
+                 2: + a finned front-mount intercooler with its pipes, louvred
+                    hood vents
+                 3: + a polished roots blower with a butterfly scoop through
+                    the hood, and a GT wing on swan-neck uprights with
+                    endplates and a gurney
+       booster   twin bell nozzles with throats and cooling rings on a frame
+       turret    a ring mount, a gun cradle with cooling jacket and flash
+                 hider, an ammo can and a gunner's shield
+       launcher  two seven-tube rocket pods on rails with their fins
+     Handles unchanged: turret.userData.muzzle, launcher.userData.muzzles,
+     booster.userData.flames (the per-frame loops read these). Static parts
+     are merged per material inside the mod root (one draw per material). */
   let MAT = null;
   function assets() {
     if (MAT) return MAT;
+    const K = CBZ.cityCarKit;
+    const role = function (key, r, col, o) {
+      if (K && K.roleMat) return K.roleMat("mod-" + key, r, col, o);
+      const m = new THREE.MeshLambertMaterial({ color: col }); m._shared = true; return m;
+    };
     MAT = {
-      plate:  new THREE.MeshLambertMaterial({ color: 0x14161a }),   // matte near-black armor
-      plateE: new THREE.MeshLambertMaterial({ color: 0x202329 }),   // edge trim
-      metal:  new THREE.MeshLambertMaterial({ color: 0x33373d }),   // gun metal
-      barrel: new THREE.MeshLambertMaterial({ color: 0x1c1f24 }),
-      nozzle: new THREE.MeshLambertMaterial({ color: 0x2a2d33 }),
+      plate:  role("plate", "plastic", 0x24272c),
+      plateE: role("plateE", "plastic", 0x3a3f46),
+      metal:  role("metal", "plastic", 0x41464d),
+      barrel: role("barrel", "plastic", 0x16181b),
+      soot:   role("soot", "plastic", 0x0b0b0c),
+      nozzle: role("nozzle", "plastic", 0x5b5f66),
       flame:  new THREE.MeshBasicMaterial({ color: 0xffae3a }),
-      pod:    new THREE.MeshLambertMaterial({ color: 0x2b2f36 }),
+      pod:    role("pod", "plastic", 0x3c4a3a),
       tip:    new THREE.MeshBasicMaterial({ color: 0xff6a3a }),
-      hazard: new THREE.MeshLambertMaterial({ color: 0xe7c11f }),  // wedge warning stripe
-      chrome: new THREE.MeshLambertMaterial({ color: 0xd7dde4 }),  // exhaust / intercooler
+      hazard: role("hazard", "plastic", 0xe7c11f),
+      chrome: (K && K.chromeMat) ? K.chromeMat() : role("chrome", "plastic", 0xd7dde4),
+      alu:    role("alu", "plastic", 0xb9c0c7),
+      carbon: role("carbon", "plastic", 0x1d1f22),
     };
     for (const k in MAT) MAT[k]._shared = true;
     return MAT;
+  }
+  function shape() { return CBZ.cityCarKit && CBZ.cityCarKit.shape; }
+
+  // ---- the fit: THIS car's body numbers (lofted partCtx, else its dims) -------
+  function fitOf(car, dims) {
+    const v = car && car.group && car.group.userData && car.group.userData.carVisual;
+    const c = (v && v.userData && v.userData.partCtx) || null;
+    const hl = dims.length / 2, hw = dims.width / 2, h = dims.height;
+    const f = {
+      hw: hw, hl: hl, h: h,
+      front: c && c.frontZ != null ? c.frontZ : hl,
+      rear: c && c.rearZ != null ? c.rearZ : -hl,
+      noseTop: c && c.noseTopY != null ? c.noseTopY : h * 0.55,
+      tailTop: c && c.tailTopY != null ? c.tailTopY : h * 0.6,
+      base: c && c.baseY != null ? c.baseY : 0.3,
+      belt: c && c.beltY != null ? c.beltY : h * 0.62,
+      roof: c && c.roofY != null ? c.roofY : h,
+      roofZ: c && c.roofZ != null ? c.roofZ : -dims.length * 0.04,
+      roofW: c && c.roofW ? c.roofW : dims.width * 0.7,
+      roofLen: c && c.roofLen ? c.roofLen : dims.length * 0.36,
+      cowl: c && c.zCowl != null ? c.zCowl : hl * 0.35,
+      deck: c && c.zDeck != null ? c.zDeck : -hl * 0.55,
+    };
+    // the hood runs from the cowl to just short of the nose; the doors span the cabin
+    f.hoodLen = Math.max(0.5, f.front - 0.18 - f.cowl);
+    f.hoodZ = f.cowl + f.hoodLen / 2;
+    f.hoodY = Math.max(f.noseTop, f.belt - 0.08);
+    f.doorZ0 = f.deck + 0.1; f.doorZ1 = f.cowl - 0.05;
+    return f;
+  }
+
+  // ---- one draw per material: bake the root's static meshes ------------------
+  function mergeStatic(root) {
+    const byMat = new Map();
+    root.children.slice().forEach(function (m) {
+      if (!m.isMesh || m.children.length || !m.geometry || !m.geometry.attributes.position) return;
+      (byMat.get(m.material) || byMat.set(m.material, []).get(m.material)).push(m);
+    });
+    const v = new THREE.Vector3(), nm = new THREE.Matrix3();
+    byMat.forEach(function (list, mat) {
+      if (list.length < 2) return;
+      let n = 0;
+      const geos = list.map(function (m) { const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry; n += g.attributes.position.count; m.updateMatrix(); return [g, m.matrix]; });
+      const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
+      let o = 0;
+      geos.forEach(function (gm) {
+        const g = gm[0], M4 = gm[1], P = g.attributes.position, N = g.attributes.normal;
+        nm.getNormalMatrix(M4);
+        for (let i = 0; i < P.count; i++, o += 3) {
+          v.set(P.getX(i), P.getY(i), P.getZ(i)).applyMatrix4(M4); pos[o] = v.x; pos[o + 1] = v.y; pos[o + 2] = v.z;
+          if (N) { v.set(N.getX(i), N.getY(i), N.getZ(i)).applyMatrix3(nm).normalize(); nor[o] = v.x; nor[o + 1] = v.y; nor[o + 2] = v.z; }
+        }
+      });
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+      geo.computeBoundingSphere();
+      const merged = new THREE.Mesh(geo, mat);
+      merged.castShadow = false;
+      root.add(merged);
+      list.forEach(function (m) {
+        root.remove(m);
+        if (m.geometry && !m.geometry._shared && m.geometry.dispose) m.geometry.dispose();   // an earlier merge
+      });
+    });
   }
 
   // ---- dims of THIS car's visual (defensive — many fallbacks) ----------------
@@ -158,60 +259,80 @@
   }
 
   // ============================================================
-  // BUILD each attachment as child meshes (local space: +z = nose, +y = up).
+  // BUILD each attachment (local space: +z = nose, +y = up).
   // ============================================================
-  function buildArmor(root, dims, tier) {
-    const M = assets();
-    const hw = dims.width / 2, hl = dims.length / 2;
+  function buildArmor(root, f, tier) {
+    const M = assets(), S = shape();
     const heavy = tier === "heavy";
-    const th = heavy ? 0.16 : 0.1;                  // plate thickness
-    const yMid = dims.height * 0.42;
-    // door plates down each flank
-    [-1, 1].forEach(function (sx) {
-      const p = new THREE.Mesh(new THREE.BoxGeometry(th, dims.height * 0.5, dims.length * 0.62), M.plate);
-      p.position.set(sx * (hw + th * 0.4), yMid, -dims.length * 0.04);
-      root.add(p);
-      // a bolted edge rib so it reads as added armor, not paint
-      const rib = new THREE.Mesh(new THREE.BoxGeometry(th * 0.6, 0.07, dims.length * 0.62), M.plateE);
-      rib.position.set(sx * (hw + th * 0.7), yMid + dims.height * 0.22, -dims.length * 0.04);
-      root.add(rib);
+    const th = heavy ? 0.035 : 0.025;
+    const z0 = f.doorZ0, z1 = f.doorZ1, zm = (z0 + z1) / 2;
+    const yLo = f.base + 0.12, yHi = f.belt - 0.03;
+    [-1, 1].forEach(function (s) {
+      const x = s * (f.hw + 0.005);
+      // door skin plate + its bolt rows
+      S.RBX(root, M.plate, x, x + s * th, yLo, yHi, z0, z1, 0.012);
+      [yLo + 0.05, yHi - 0.05].forEach(function (y) {
+        for (let z = z0 + 0.08; z < z1 - 0.04; z += 0.16) S.CYLX(root, M.plateE, 0.014, 0.012, x + s * (th + 0.004), y, z, "x", 6);
+      });
+      S.RBX(root, M.plateE, x + s * th, x + s * (th + 0.012), yLo, yHi, zm - 0.015, zm + 0.015, 0.004);
+      // window grille: a frame and vertical bars over the side glass
+      // (the side glass leans in: bars run from the belt out at the door to
+      // the roof rail in at the greenhouse, a hand's width off the glass)
+      const gx0 = s * (f.hw - 0.02), gx1 = s * (f.roofW / 2 + 0.05);
+      const gy0 = f.belt + 0.02, gy1 = f.roof - 0.08;
+      if (gy1 - gy0 > 0.12) {
+        S.rod(root, M.metal, [gx0, gy0, z0 + 0.1], [gx0, gy0, z1 - 0.1], 0.016);
+        S.rod(root, M.metal, [gx1, gy1, z0 + 0.15], [gx1, gy1, z1 - 0.2], 0.016);
+        for (let z = z0 + 0.16; z < z1 - 0.18; z += 0.11) S.rod(root, M.metal, [gx0, gy0, z], [gx1, gy1, z], 0.009, 0.009, 6);
+      }
     });
-    // hood slab
-    const hood = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.86, th, dims.length * 0.34), M.plate);
-    hood.position.set(0, dims.height * 0.62, hl * 0.5);
-    root.add(hood);
-    // grille / ram bar across the nose
-    const grille = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.96, dims.height * 0.34, th * 1.4), M.plate);
-    grille.position.set(0, dims.height * 0.34, hl + th);
-    root.add(grille);
+    // ribbed hood plate following the bonnet
+    S.RBX(root, M.plate, -f.hw * 0.78, f.hw * 0.78, f.hoodY + 0.005, f.hoodY + 0.005 + th, f.hoodZ - f.hoodLen * 0.44, f.hoodZ + f.hoodLen * 0.44, 0.01);
+    [-0.4, 0, 0.4].forEach(function (k) {
+      S.RBX(root, M.plateE, k * f.hw - 0.025, k * f.hw + 0.025, f.hoodY + th, f.hoodY + th + 0.025, f.hoodZ - f.hoodLen * 0.4, f.hoodZ + f.hoodLen * 0.4, 0.008);
+    });
+    // tubular bull bar on two uprights, skid plate under the nose
+    const zb = f.front + 0.16, yb0 = f.base + 0.05, yb1 = Math.max(f.noseTop, f.base + 0.6) + 0.05;
+    [-1, 1].forEach(function (s) {
+      S.rod(root, M.metal, [s * f.hw * 0.55, yb0, zb], [s * f.hw * 0.55, yb1, zb], 0.035);
+      S.rod(root, M.metal, [s * f.hw * 0.55, yb1, zb], [s * f.hw * 0.25, yb1 + 0.06, zb + 0.02], 0.035);
+      S.rod(root, M.metal, [s * f.hw * 0.55, yb0 + 0.08, zb], [s * f.hw * 0.55, yb0 + 0.08, zb - 0.22], 0.03);
+    });
+    S.rod(root, M.metal, [-f.hw * 0.25, yb1 + 0.06, zb + 0.02], [f.hw * 0.25, yb1 + 0.06, zb + 0.02], 0.035);
+    S.rod(root, M.metal, [-f.hw * 0.75, yb0 + 0.12, zb + 0.02], [f.hw * 0.75, yb0 + 0.12, zb + 0.02], 0.04);
+    S.rod(root, M.metal, [-f.hw * 0.55, (yb0 + yb1) / 2, zb], [f.hw * 0.55, (yb0 + yb1) / 2, zb], 0.03);
+    S.RBX(root, M.plate, -f.hw * 0.7, f.hw * 0.7, yb0 - 0.04, yb0 + 0.0, f.front - 0.3, zb + 0.04, 0.01);
     if (heavy) {
-      // a second nose ram tusk + roof plate for the heavy kit
-      const tusk = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.7, 0.12, 0.5), M.plateE);
-      tusk.position.set(0, dims.height * 0.2, hl + 0.32);
-      root.add(tusk);
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.7, th, dims.length * 0.3), M.plate);
-      roof.position.set(0, dims.height + 0.02, -dims.length * 0.02);
-      root.add(roof);
+      // roof cage: a rail frame round the roof on four posts
+      const rw = f.roofW / 2 + 0.03, ry = f.roof + 0.1, rz0 = f.roofZ - f.roofLen * 0.42, rz1 = f.roofZ + f.roofLen * 0.42;
+      [[-rw, rz0], [rw, rz0], [-rw, rz1], [rw, rz1]].forEach(function (p) { S.rod(root, M.metal, [p[0], f.roof - 0.01, p[1]], [p[0], ry, p[1]], 0.022); });
+      S.rod(root, M.metal, [-rw, ry, rz0], [rw, ry, rz0], 0.025); S.rod(root, M.metal, [-rw, ry, rz1], [rw, ry, rz1], 0.025);
+      S.rod(root, M.metal, [-rw, ry, rz0], [-rw, ry, rz1], 0.025); S.rod(root, M.metal, [rw, ry, rz0], [rw, ry, rz1], 0.025);
+      for (let i = 1; i < 4; i++) { const z = rz0 + (rz1 - rz0) * i / 4; S.rod(root, M.metal, [-rw, ry, z], [rw, ry, z], 0.016); }
+      S.RBX(root, M.plate, -rw + 0.04, rw - 0.04, ry - 0.03, ry - 0.01, rz1 - 0.3, rz1, 0.01);
     }
+    mergeStatic(root);
   }
 
-  function buildBooster(root, dims) {
-    const M = assets();
-    const hl = dims.length / 2;
+  function buildBooster(root, f) {
+    const M = assets(), S = shape();
     const grp = new THREE.Group();
     grp.userData._booster = true;
-    // twin rear nozzles
+    const y = Math.max(f.base + 0.25, f.tailTop - 0.1), z = f.rear - 0.12;
+    // the frame the bells hang on
+    S.RBX(grp, M.metal, -f.hw * 0.62, f.hw * 0.62, y - 0.03, y + 0.03, z + 0.02, z + 0.18, 0.01);
     const flames = [];
     [-1, 1].forEach(function (sx) {
-      const noz = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 0.5, 8), M.nozzle);
-      noz.rotation.x = Math.PI / 2;
-      noz.position.set(sx * dims.width * 0.28, dims.height * 0.34, -hl - 0.22);
-      grp.add(noz);
+      const x = sx * f.hw * 0.36;
+      S.CYLX(grp, M.metal, 0.11, 0.16, x, y, z - 0.03, "z", 16);                // throat housing
+      S.CYLX(grp, M.nozzle, 0.12, 0.42, x, y, z - 0.30, "z", 22, 0.24, true);   // bell (open)
+      S.CYLX(grp, M.soot, 0.115, 0.40, x, y, z - 0.29, "z", 22, 0.23, true);    // sooted inner
+      [-0.18, -0.36].forEach(function (dz) { S.CYLX(grp, M.chrome, 0.15 + (-dz) * 0.22, 0.025, x, y, z + dz, "z", 22); });
       const flame = CBZ.createRocketPlume
         ? CBZ.createRocketPlume({ name: "car-rocket-booster", lightRange: 6 })
         : new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.9, 8), M.flame);
       if (!(flame.userData && flame.userData.rocketPlume)) flame.rotation.x = -Math.PI / 2;
-      flame.position.set(sx * dims.width * 0.28, dims.height * 0.34, -hl - 0.48);
+      flame.position.set(x, y, z - 0.56);
       flame.visible = false;
       grp.add(flame);
       flames.push(flame);
@@ -221,131 +342,181 @@
     return grp;
   }
 
-  function buildTurret(root, dims) {
-    const M = assets();
+  function buildTurret(root, f) {
+    const M = assets(), S = shape();
     const grp = new THREE.Group();          // yaws each frame
     grp.userData._turret = true;
-    grp.position.set(0, dims.height + 0.06, -dims.length * 0.02);
-    // base ring
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.36, 0.18, 10), M.metal);
-    base.position.y = 0.09; grp.add(base);
-    // body + barrel that point along the group's local +z (we yaw the group)
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 0.5), M.metal);
-    body.position.set(0, 0.3, 0); grp.add(body);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.0, 8), M.barrel);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.34, 0.6); grp.add(barrel);
+    grp.position.set(0, f.roof + 0.02, f.roofZ);
+    // ring mount + pedestal
+    S.CYLX(grp, M.metal, 0.36, 0.06, 0, 0.03, 0, "y", 24);
+    S.CYLX(grp, M.plateE, 0.30, 0.04, 0, 0.08, 0, "y", 24);
+    S.CYLX(grp, M.metal, 0.07, 0.2, 0, 0.2, 0, "y", 12);
+    // cradle + receiver + barrel with cooling jacket and flash hider (local +z)
+    S.RBX(grp, M.metal, -0.12, 0.12, 0.26, 0.38, -0.30, 0.22, 0.02);
+    S.RBX(grp, M.barrel, -0.09, 0.09, 0.30, 0.44, -0.26, 0.20, 0.02);
+    S.CYLX(grp, M.barrel, 0.055, 0.42, 0, 0.36, 0.42, "z", 14);
+    S.CYLX(grp, M.metal, 0.07, 0.3, 0, 0.36, 0.36, "z", 14);
+    for (let i = 0; i < 4; i++) S.CYLX(grp, M.soot, 0.072, 0.015, 0, 0.36, 0.25 + i * 0.07, "z", 14);
+    S.CYLX(grp, M.barrel, 0.04, 0.5, 0, 0.36, 0.86, "z", 12);
+    S.CYLX(grp, M.metal, 0.05, 0.08, 0, 0.36, 1.12, "z", 12);
+    // spade grips, ammo can, the shield
+    [-1, 1].forEach(function (s) { S.rod(grp, M.barrel, [s * 0.06, 0.32, -0.30], [s * 0.06, 0.40, -0.40], 0.018); });
+    S.RBX(grp, M.pod, 0.12, 0.30, 0.24, 0.42, -0.14, 0.12, 0.015);
+    S.RBX(grp, M.plate, -0.36, 0.36, 0.20, 0.70, 0.12, 0.16, 0.02);
+    S.RBX(grp, M.soot, -0.08, 0.08, 0.40, 0.48, 0.115, 0.165, 0.01);
     // muzzle anchor (worldpos read for tracers/hitscan origin)
     const muzzle = new THREE.Object3D();
-    muzzle.position.set(0, 0.34, 1.15); grp.add(muzzle);
+    muzzle.position.set(0, 0.36, 1.18); grp.add(muzzle);
     grp.userData.muzzle = muzzle;
+    mergeStatic(grp);
     root.add(grp);
     return grp;
   }
 
-  function buildLauncher(root, dims) {
-    const M = assets();
-    const hl = dims.length / 2;
+  function buildLauncher(root, f) {
+    const M = assets(), S = shape();
     const grp = new THREE.Group();
     grp.userData._launcher = true;
     const muzzles = [];
+    const y = f.hoodY + 0.2, zc = f.hoodZ;
     [-1, 1].forEach(function (sx) {
-      const pod = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.9), M.pod);
-      pod.position.set(sx * dims.width * 0.3, dims.height * 0.66, hl * 0.55);
-      grp.add(pod);
-      const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.16, 7), M.tip);
-      tip.rotation.x = Math.PI / 2;
-      tip.position.set(sx * dims.width * 0.3, dims.height * 0.66, hl * 0.55 + 0.5);
-      grp.add(tip);
+      const x = sx * f.hw * 0.58;
+      // rail and mount
+      S.RBX(grp, M.metal, x - 0.05, x + 0.05, f.hoodY, y - 0.12, zc - 0.2, zc + 0.2, 0.01);
+      // the pod: a hex body with seven tubes looking out of its face
+      S.put(grp, S.loftGeo([
+        { z: zc - 0.48, y: y, hw: 0.15, hh: 0.14, p: 2.6 },
+        { z: zc + 0.40, y: y, hw: 0.15, hh: 0.14, p: 2.6 },
+      ], 12), M.pod);
+      const tubes = [[0, 0]].concat([0, 1, 2, 3, 4, 5].map(function (i) { const a = i * Math.PI / 3; return [Math.cos(a) * 0.085, Math.sin(a) * 0.085]; }));
+      tubes.forEach(function (t) {
+        S.CYLX(grp, M.metal, 0.034, 0.06, x + t[0], y + t[1], zc + 0.42, "z", 10);
+        S.CYLX(grp, M.soot, 0.026, 0.062, x + t[0], y + t[1], zc + 0.43, "z", 10);
+      });
+      S.CYLX(grp, M.tip, 0.024, 0.02, x, y, zc + 0.455, "z", 8);
+      // fins at the tail
+      [[0.17, 0], [-0.17, 0], [0, 0.16]].forEach(function (d) {
+        S.RBX(grp, M.plateE, x + d[0] - (d[0] ? 0.0 : 0.008), x + d[0] + (d[0] ? Math.sign(d[0]) * 0.06 : 0.008), y + d[1] - (d[1] ? 0 : 0.008), y + d[1] + (d[1] ? 0.06 : 0.008), zc - 0.48, zc - 0.30, 0.004);
+      });
       const muzzle = new THREE.Object3D();
-      muzzle.position.set(sx * dims.width * 0.3, dims.height * 0.66, hl * 0.55 + 0.62);
+      muzzle.position.set(x, y, zc + 0.6);
       grp.add(muzzle);
       muzzles.push(muzzle);
     });
     grp.userData.muzzles = muzzles;
+    mergeStatic(grp);
     root.add(grp);
     return grp;
   }
 
-  // THE WEDGE — a chunky raked plow blade over the nose (battering-ram
+  // THE WEDGE — a raked, ribbed plow blade over the nose (battering-ram
   // snowplow). Purely visual here; the flip physics live in the 37.7 step.
-  function buildWedge(root, dims) {
-    const M = assets();
-    const hl = dims.length / 2;
+  function buildWedge(root, f) {
+    const M = assets(), S = shape();
     const grp = new THREE.Group();
     grp.userData._wedge = true;
-    const bladeW = dims.width * 1.18, bladeH = dims.height * 0.62;
-    // main slab, raked back toward the hood
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(bladeW, bladeH, 0.3), M.plate);
-    blade.position.set(0, bladeH * 0.5 + 0.12, hl + 0.42);
-    blade.rotation.x = -0.5;
-    grp.add(blade);
-    // hazard stripe riding the blade's top edge (child → follows the rake)
-    const edge = new THREE.Mesh(new THREE.BoxGeometry(bladeW, 0.12, 0.34), M.hazard);
-    edge.position.set(0, bladeH * 0.5 + 0.04, 0);
-    blade.add(edge);
-    // low cutting lip that scoops under bumpers
-    const lip = new THREE.Mesh(new THREE.BoxGeometry(bladeW, 0.16, 0.55), M.plateE);
-    lip.position.set(0, 0.14, hl + 0.58);
-    grp.add(lip);
+    const bw = f.hw * 2 * 1.12, bh = Math.max(0.55, f.noseTop - f.base + 0.25);
+    const zb = f.front + 0.36, rake = 0.55;
+    // the blade: a slab raked back, with vertical ribs behind it
+    const blade = S.put(grp, S.loftGeo([
+      { z: -0.03, y: 0, hw: bw / 2, hh: bh / 2, p: 10 },
+      { z: 0.03, y: 0, hw: bw / 2, hh: bh / 2, p: 10 },
+    ], 20), M.plate, 0, f.base + bh / 2 + 0.06, zb);
+    blade.rotation.x = -rake;
+    const yc = f.base + bh / 2 + 0.06;
+    const bladeBase = [0, yc - Math.cos(rake) * bh / 2, zb + Math.sin(rake) * bh / 2];
+    const bladeTop = [0, yc + Math.cos(rake) * bh / 2, zb - Math.sin(rake) * bh / 2];
+    for (let i = -3; i <= 3; i++) {
+      const x = i * bw / 7.5;
+      S.bar(grp, M.plateE, [x, bladeBase[1] + 0.05, bladeBase[2] - 0.06], [x, bladeTop[1] - 0.04, bladeTop[2] - 0.05], 0.04, 0.08, 0.01);
+    }
+    // the hazard edge: yellow with black chevrons along the top
+    S.bar(grp, M.hazard, [-bw / 2, bladeTop[1] + 0.03, bladeTop[2] + 0.04], [bw / 2, bladeTop[1] + 0.03, bladeTop[2] + 0.04], 0.12, 0.08, 0.01);
+    for (let i = 0; i < 9; i++) {
+      const x = -bw / 2 + 0.12 + i * (bw - 0.24) / 8;
+      const c = S.put(grp, S.loftGeo([{ z: 0, y: 0, hw: 0.025, hh: 0.05, p: 8 }, { z: 0.01, y: 0, hw: 0.025, hh: 0.05, p: 8 }], 8), M.soot, x, bladeTop[1] + 0.005, bladeTop[2] + 0.058);
+      c.rotation.set(-rake, 0, 0.6);
+    }
+    // the steel cutting lip
+    S.RBX(grp, M.metal, -bw / 2, bw / 2, f.base - 0.02, f.base + 0.1, bladeBase[2] - 0.05, bladeBase[2] + 0.22, 0.02);
     [-1, 1].forEach(function (sx) {
-      // angled side wings so struck cars slide UP the blade, not around it
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(0.3, bladeH * 0.8, 0.9), M.plate);
-      wing.position.set(sx * (bladeW / 2 - 0.14), bladeH * 0.44, hl + 0.02);
+      // side wings so struck cars slide UP the blade, not around it
+      const wing = S.put(grp, rboxGeoM(0.05, bh * 0.8, 0.7, 0.015), M.plate, sx * (bw / 2 - 0.02), f.base + bh * 0.42, zb - 0.28);
       wing.rotation.y = sx * 0.35;
-      grp.add(wing);
-      // hydraulic struts back to the chassis (the "ram" in ram wedge)
-      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.05, 6), M.metal);
-      strut.rotation.x = Math.PI / 2 - 0.35;
-      strut.position.set(sx * dims.width * 0.3, dims.height * 0.32, hl - 0.12);
-      grp.add(strut);
+      // hydraulic rams: barrel to the chassis, chrome piston to the blade
+      const a = [sx * f.hw * 0.55, f.base + 0.2, f.front - 0.15], b = [sx * f.hw * 0.55, f.base + bh * 0.5, zb - 0.05];
+      const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+      S.rod(grp, M.metal, a, mid, 0.055);
+      S.rod(grp, M.chrome, mid, b, 0.03);
+      S.CYLX(grp, M.metal, 0.06, 0.08, a[0], a[1], a[2], "x", 10);
     });
+    mergeStatic(grp);
     root.add(grp);
     return grp;
   }
+  function rboxGeoM(w, h, d, r) { return CBZ.cityCarKit.rboxGeo(w, h, d, r); }
 
   // PERFORMANCE bolt-ons — the money must be VISIBLE on the car:
-  //   tier 1: fat chrome exhaust tips
-  //   tier 2: + front intercooler slab and hood vents
-  //   tier 3: + supercharger scoop through the hood and the big trunk wing
-  function buildPerf(root, dims, tier) {
-    const M = assets();
-    const hl = dims.length / 2;
+  //   tier 1: quad exhaust tips
+  //   tier 2: + a finned front-mount intercooler and louvred hood vents
+  //   tier 3: + a roots blower and scoop through the hood, and a GT wing
+  function buildPerf(root, f, tier) {
+    const M = assets(), S = shape();
+    const ty = f.base + 0.08, tz = f.rear - 0.06;
     [-1, 1].forEach(function (sx) {
-      const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 0.44, 8), M.chrome);
-      tip.rotation.x = Math.PI / 2;
-      tip.position.set(sx * dims.width * 0.3, 0.3, -hl - 0.16);
-      root.add(tip);
+      [0.30, 0.18].forEach(function (k) {
+        const x = sx * f.hw * (k + 0.35);
+        S.CYLX(root, M.chrome, 0.048, 0.24, x, ty, tz, "z", 18);
+        S.CYLX(root, M.chrome, 0.056, 0.03, x, ty, tz - 0.12, "z", 18);
+        S.CYLX(root, M.soot, 0.04, 0.03, x, ty, tz - 0.125, "z", 14);
+      });
     });
     if (tier >= 2) {
-      const ic = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.55, 0.28, 0.16), M.chrome);
-      ic.position.set(0, 0.36, hl + 0.04);
-      root.add(ic);
+      const iw = f.hw * 1.2, iy = f.base + 0.2, iz = f.front + 0.02;
+      S.RBX(root, M.alu, -iw / 2, iw / 2, iy - 0.13, iy + 0.13, iz - 0.05, iz + 0.03, 0.01);
+      for (let i = 0; i < 9; i++) { const y = iy - 0.11 + i * 0.0275; S.RBX(root, M.soot, -iw / 2 + 0.04, iw / 2 - 0.04, y - 0.004, y + 0.004, iz + 0.025, iz + 0.035, 0.002); }
       [-1, 1].forEach(function (sx) {
-        const vent = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.2, 0.06, dims.length * 0.14), M.barrel);
-        vent.position.set(sx * dims.width * 0.2, dims.height * 0.66, hl * 0.42);
-        root.add(vent);
+        S.RBX(root, M.alu, sx * iw / 2, sx * (iw / 2 + 0.06), iy - 0.15, iy + 0.15, iz - 0.06, iz + 0.04, 0.015);   // end tanks
+        S.rod(root, M.alu, [sx * (iw / 2 + 0.03), iy + 0.1, iz - 0.03], [sx * (iw / 2 + 0.03), iy + 0.14, iz - 0.35], 0.035);
+        // louvred vents on the hood
+        const vx = sx * f.hw * 0.42, vz = f.hoodZ + f.hoodLen * 0.05;
+        S.RBX(root, M.carbon, vx - f.hw * 0.17, vx + f.hw * 0.17, f.hoodY - 0.005, f.hoodY + 0.012, vz - f.hoodLen * 0.2, vz + f.hoodLen * 0.2, 0.01);
+        for (let i = 0; i < 5; i++) {
+          const z = vz - f.hoodLen * 0.16 + i * f.hoodLen * 0.08;
+          S.RBX(root, M.soot, vx - f.hw * 0.14, vx + f.hw * 0.14, f.hoodY + 0.008, f.hoodY + 0.022, z - 0.012, z + 0.012, 0.004);
+        }
       });
     }
     if (tier >= 3) {
-      const scoop = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.3, 0.24, dims.length * 0.16), M.metal);
-      scoop.position.set(0, dims.height * 0.72, hl * 0.5);
-      root.add(scoop);
-      const mouth = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.24, 0.13, 0.07), M.barrel);
-      mouth.position.set(0, dims.height * 0.74, hl * 0.5 + dims.length * 0.085);
-      root.add(mouth);
+      // the roots blower on its manifold, polished, with a butterfly scoop
+      const bz = f.hoodZ - f.hoodLen * 0.08, by = f.hoodY;
+      S.RBX(root, M.metal, -0.22, 0.22, by - 0.01, by + 0.06, bz - 0.3, bz + 0.3, 0.02);
+      S.put(root, S.loftGeo([
+        { z: bz - 0.26, y: by + 0.16, hw: 0.17, hh: 0.10, p: 3 },
+        { z: bz + 0.26, y: by + 0.16, hw: 0.17, hh: 0.10, p: 3 },
+      ], 20), M.chrome);
+      for (let i = 0; i < 6; i++) { const z = bz - 0.22 + i * 0.088; S.RBX(root, M.alu, -0.18, 0.18, by + 0.06, by + 0.27, z - 0.008, z + 0.008, 0.004); }
+      S.CYLX(root, M.metal, 0.08, 0.06, 0.18, by + 0.16, bz + 0.27, "z", 16);             // pulley snout
+      S.RBX(root, M.carbon, -0.16, 0.16, by + 0.26, by + 0.42, bz - 0.12, bz + 0.18, 0.03);  // scoop
+      S.RBX(root, M.soot, -0.13, 0.13, by + 0.28, by + 0.40, bz + 0.17, bz + 0.19, 0.01);
+      [-0.06, 0.06].forEach(function (x) { S.RBX(root, M.chrome, x - 0.003, x + 0.003, by + 0.29, by + 0.39, bz + 0.165, bz + 0.18, 0.001); });
+      // GT wing: swan-neck uprights from the deck, the plane, endplates, gurney
+      const wz = f.rear + 0.32, wy = f.tailTop + 0.32, ww = f.hw * 2 * 0.94;
       [-1, 1].forEach(function (sx) {
-        const up = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.34, 0.22), M.metal);
-        up.position.set(sx * dims.width * 0.3, dims.height * 0.6 + 0.15, -hl * 0.82);
-        root.add(up);
+        const x = sx * f.hw * 0.42;
+        S.bar(root, M.carbon, [x, f.tailTop - 0.01, wz + 0.22], [x, wy + 0.06, wz + 0.04], 0.02, 0.10, 0.008);
+        S.RBX(root, M.carbon, sx * (ww / 2), sx * (ww / 2 + 0.012), wy - 0.12, wy + 0.10, wz - 0.20, wz + 0.16, 0.01);
       });
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.96, 0.09, 0.42), M.plate);
-      wing.position.set(0, dims.height * 0.6 + 0.33, -hl * 0.82);
-      wing.rotation.x = -0.12;
-      root.add(wing);
+      const wingG = S.loftGeo([
+        { z: wz + 0.16, y: wy, hw: ww / 2, hh: 0.012, p: 2.2 },
+        { z: wz + 0.04, y: wy + 0.025, hw: ww / 2, hh: 0.03, p: 2.2 },
+        { z: wz - 0.14, y: wy + 0.04, hw: ww / 2, hh: 0.012, p: 2.2 },
+      ], 16);
+      S.put(root, wingG, M.carbon);
+      S.RBX(root, M.soot, -ww / 2, ww / 2, wy + 0.04, wy + 0.075, wz - 0.16, wz - 0.13, 0.004);
     }
+    mergeStatic(root);
   }
-
   // UNDERGLOW — one additive plane under the car; shared material per colour.
   function buildGlow(root, dims, colorName) {
     let mat = glowMats[colorName];
@@ -373,22 +544,26 @@
     const root = modRoot(car, true);
     if (!root) return;
     const dims = carDims(car);
+    const fit = fitOf(car, dims);          // THIS body's planes: parts sit on it, not on its bounding box
     const m = car.mods;
     // cache live handles on the car so the per-frame loop avoids a scene walk
     car._modFx = car._modFx || {};
-    try {
-      if (m.armor) buildArmor(root, dims, m.armor);
-      if (m.wedge) buildWedge(root, dims);
-      if (m.perf) buildPerf(root, dims, m.perf | 0);
-      if (m.glow) car._modFx.glow = buildGlow(root, dims, m.glow);
-      if (m.booster) car._modFx.booster = buildBooster(root, dims);
-      if (m.turret) car._modFx.turret = buildTurret(root, dims);
-      if (m.launcher) car._modFx.launcher = buildLauncher(root, dims);
-      // a respray / [C] style-cycle rebuilds car._playerCarFeel from the new
-      // style's stock FEEL table (playercars.js) — re-assert the perf reshape
-      // on top so a built motor doesn't quietly revert to stock after a paint job.
-      if (m.perf) applyPerf(car);
-    } catch (e) { /* a dressing failure must never break the car */ }
+    // each part on its own: one dressing failure must never cost the others,
+    // and never the car (nor the perf reshape below)
+    const dress = function (fn) { try { return fn(); } catch (e) { return null; } };
+    if (shape()) {                         // no car kit on this page: nothing to bolt on with
+      if (m.armor) dress(function () { buildArmor(root, fit, m.armor); });
+      if (m.wedge) dress(function () { buildWedge(root, fit); });
+      if (m.perf) dress(function () { buildPerf(root, fit, m.perf | 0); });
+      if (m.booster) car._modFx.booster = dress(function () { return buildBooster(root, fit); });
+      if (m.turret) car._modFx.turret = dress(function () { return buildTurret(root, fit); });
+      if (m.launcher) car._modFx.launcher = dress(function () { return buildLauncher(root, fit); });
+    }
+    if (m.glow) car._modFx.glow = dress(function () { return buildGlow(root, dims, m.glow); });
+    // a respray / [C] style-cycle rebuilds car._playerCarFeel from the new
+    // style's stock FEEL table (playercars.js) — re-assert the perf reshape
+    // on top so a built motor doesn't quietly revert to stock after a paint job.
+    try { if (m.perf) applyPerf(car); } catch (e) { /* never break the car */ }
   }
   CBZ.cityApplyCarModsRebuild = applyMods;   // public: re-dress after a visual swap / MP spawn
 
