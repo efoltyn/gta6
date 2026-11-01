@@ -987,6 +987,8 @@
     return speciesP;
   }
   M.ready = loadSpecies;
+  // the unbaked model of one kind, for the turntable (tools/lab asset kit)
+  M.source = function (kindId) { return buildSource(kindId); };
 
   /* ============================================================ THE SHAPE KIT
 

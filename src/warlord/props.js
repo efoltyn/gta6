@@ -2925,39 +2925,24 @@
     return g;
   };
 
-  /* Three real rifles, stacked. Reaches straight into CBZ.weaponAppearance,
-     which is the table every appearance file registers into and which THIS
-     page already loads for the battle. systems/actorweapons.js keeps its own
-     buildActorWeapon() private, so the four-helper ctx those factories take
-     (box, cyl, mat, THREE) is rebuilt here — twelve lines against forking a
-     rifle, which is the trade the armoury doctrine asks for. */
-  let _gunCtx = null;
-  function gunCtx() {
-    if (_gunCtx) return _gunCtx;
-    const gm = {
-      dark: M("metalDark"), black: M("char"), bore: M("char"), steel: M("metal"),
-      worn: M("metal"), tan: M("wood"), polymer: M("metalDark"), brass: M("rust"),
-      redShell: M("boxRed"), skin: M("metalDark"),
-    };
-    _gunCtx = {
-      THREE: THREE, mat: gm,
-      box: function (p, sx, sy, sz, m, x, y, z, rx, ry, rz) {
-        const o = new THREE.Mesh(BG(sx, sy, sz), m || gm.dark);
-        o.position.set(x || 0, y || 0, z || 0); o.rotation.set(rx || 0, ry || 0, rz || 0);
-        o.castShadow = true; p.add(o); return o;
-      },
-      cyl: function (p, rr, len, m, x, y, z, rx, ry, rz) {
-        const o = new THREE.Mesh(CG(rr, rr, len, 8), m || gm.dark);
-        o.position.set(x || 0, y || 0, z || 0); o.rotation.set(rx || 0, ry || 0, rz || 0);
-        o.castShadow = true; p.add(o); return o;
-      },
-    };
-    return _gunCtx;
-  }
+  /* A REAL GUN, the armoury's. CBZ.buildActorWeapon (systems/actorweapons.js)
+     is the one builder every man's held rifle comes out of: the same
+     appearance factory, the same shared gun materials, the same real-length
+     scale (weapons/weapon-scale.js). This used to rebuild that builder's ctx
+     here with props.js's own palette (wood-tan polymer, rust brass), so the
+     AK in a camp's stacked-arms pile was a different colour and a different
+     size from the AK in the hand of the man who stacked it.
+     The held pose (barrel down the forearm) is undone: what comes back is the
+     factory's frame, muzzle along -Z, grip at the origin, at real size. */
   P.gun = function (id) {
-    const f = CBZ.weaponAppearance && CBZ.weaponAppearance[id];
-    if (!f) return null;
-    try { return f(gunCtx()); } catch (e) { return null; }
+    if (!CBZ.buildActorWeapon) return null;
+    let m = null;
+    try { m = CBZ.buildActorWeapon(id); } catch (e) { return null; }
+    if (!m) return null;
+    m.position.set(0, 0, 0);
+    m.rotation.set(0, 0, 0);
+    m.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
+    return m;
   };
   P.armStack = function (opts) {
     opts = opts || {};
