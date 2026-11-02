@@ -8,7 +8,7 @@
 
     node tools/people/wardrobe-look.mjs --set uniforms --out DIR [--label after]
     node tools/people/wardrobe-look.mjs --cast "m-average-3-driver-44,f-slim-1-police-30" --out DIR
-  Options: --skinned 0|1 (default 1)  --shots full,chest  --cols 8
+  Options: --skinned 0|1 (default 1)  --shots full,chest,hip,side,profile,back  --cols 8
            --atlas  also dump each outfit's painted atlas (city/clothes.js, 4x)
            --params 'k=v&...'  extra kit params (arms=walk ...)
   A cast entry is the humans kit's own: sex-physique-skin-outfit[-age][~hair][^beard]
@@ -31,6 +31,9 @@ const flag = (k) => a.includes(k);
    clothes on a nine-year-old, the rest alternating men and women so both cuts
    of every uniform are seen. */
 const SETS = {
+  duty: ["m-muscular-5-police-36~buzz", "f-average-1-police-31~bun", "m-average-3-corrections-41~crop", "m-heavy-5-sheriff-53~crop^moustache",
+    "m-average-2-security-40~crop", "m-muscular-7-swat-34~buzz", "m-average-2-detective-46~short", "f-slim-4-precinct-29~pony",
+    "f-average-3-detective-38~bob", "m-heavy-1-detective-52~crop^moustache"],
   uniforms: [
     "m-average-3-driver-44~short", "f-average-1-police-31~bun", "m-muscular-5-police-36~buzz", "m-average-2-security-40~crop",
     "f-slim-4-scrubs-29~pony", "m-average-1-doctor-55~short^moustache", "f-average-6-ems-34~bun", "m-muscular-2-firefighter-38~buzz",
@@ -61,6 +64,14 @@ const GAP = 1.7;
 const CAM = {
   full: { w: 300, h: 520, cam: (x) => ({ p: [x, 1.0, 3.6], l: [x, 0.93, 0], fov: 33 }) },
   chest: { w: 300, h: 360, cam: (x) => ({ p: [x + 0.05, 1.42, 1.25], l: [x, 1.3, 0], fov: 33 }) },
+  // the gun side (the wearer's right, -x), hip height: belt, holster, pouches
+  hip: { w: 300, h: 360, cam: (x) => ({ p: [x - 0.95, 1.05, 0.75], l: [x, 0.98, 0], fov: 36 }) },
+  // square on to the gun side: how far the holster stands off the hip
+  side: { w: 300, h: 360, cam: (x) => ({ p: [x - 1.3, 1.0, 0.001], l: [x, 0.98, 0], fov: 30 }) },
+  // the chest in profile (the wearer's right): how a tie or a badge lies on it
+  profile: { w: 300, h: 360, cam: (x) => ({ p: [x - 0.95, 1.22, 0.16], l: [x, 1.2, 0.16], fov: 32 }) },
+  // from behind: the belt round the back, the cuff case, the keys
+  back: { w: 300, h: 360, cam: (x) => ({ p: [x + 0.35, 1.05, -1.15], l: [x, 0.98, 0], fov: 34 }) },
 };
 
 buildManifest();
@@ -127,7 +138,7 @@ try {
 import json, sys
 from PIL import Image, ImageDraw
 J = json.load(open(sys.argv[1])); rows = J["rows"]; cols = int(sys.argv[3]); shots = sys.argv[4].split(",")
-dims = {"full": (300, 520), "chest": (300, 360)}
+dims = {"full": (300, 520), "chest": (300, 360), "hip": (300, 360), "side": (300, 360), "back": (300, 360), "profile": (300, 360)}
 cw = 300; ch = sum(dims[s][1] for s in shots) + 34
 n = len(rows); R = (n + cols - 1) // cols
 head = 44 if J.get("label") else 0

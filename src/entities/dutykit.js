@@ -266,8 +266,11 @@
     const shirt = opts.shirt != null ? opts.shirt | 0 : 0x24407a;
     const collar = ch.skinSlots && ch.skinSlots.collar && ch.skinSlots.collar[0];
     const cw = collar && collar.geometry && collar.geometry.parameters ? collar.geometry.parameters.width / 2 : S.nRx + 0.05;
-    const key = S.key + "|" + kind + "|" + (gun || "-") + "|" + (torch ? 1 : 0) + "|" + (K.straps ? shirt : 0) + "|" + m.toFixed(4) + "|" + cw.toFixed(3);
-    if (GEO[key]) return GEO[key];
+    // opts.straps false: no epaulettes (a real shirt has shoulders of its own);
+    // opts.store false: a one-off body (people.js, a real one), not cached
+    const straps = K.straps && opts.straps !== false, store = opts.store !== false;
+    const key = S.key + "|" + kind + "|" + (gun || "-") + "|" + (torch ? 1 : 0) + "|" + (straps ? shirt : 0) + "|" + m.toFixed(4) + "|" + cw.toFixed(3);
+    if (store && GEO[key]) return GEO[key];
     const B = new Builder();
     const clr = 0.003 * m;
     // ---- THE BELT: the trousers' waistband is the pelvis top, and the belt
@@ -457,10 +460,10 @@
       box(B, F, 0, 0.012 * m, 0.0225 * m, 0.03 * m, 0.022 * m, 0.002 * m, tone(RADIO, 0.18));
       box(B, F, 0, 0.034 * m, 0.006 * m, 0.012 * m, 0.014 * m, 0.012 * m, RADIO);   // the clip over the strap
     }
-    if (K.straps) epaulettes(B, ch, m, cw, tone(shirt, -0.08), clr);
+    if (straps) epaulettes(B, ch, m, cw, tone(shirt, -0.08), clr);
     const g = B.geometry();
     g.userData.dutyKit = { kind, gun: gun || null, torch, belt: { top, bot, ring: outer.length } };
-    return (GEO[key] = g);
+    return store ? (GEO[key] = g) : g;
   }
   // the cuff case, real size (metres) — was entities/handcuffs.js buildPouch
   const CASE = { w: 0.074, h: 0.088, d: 0.036 };
