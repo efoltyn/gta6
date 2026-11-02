@@ -2384,8 +2384,9 @@
      CBZ.people.track) inside PEOPLE_NEAR metres of the camera, nearest first,
      up to PEOPLE_MAX, wear a real body; past PEOPLE_FAR (hysteresis) or out
      of the lists they go back to the procedural one, which pedinstance.js
-     pools again. Two builds a tick at most. A rig that is re-dressed (its
-     outfit key changes) is rebuilt in the new clothes. */
+     pools again. Builds spend ~12 ms a tick (one at least, three at most).
+     A rig that is re-dressed (its outfit key changes) is rebuilt in the new
+     clothes. */
   const lists = [];
   function track(name) { if (lists.indexOf(name) < 0) lists.push(name); }
   ["cityPeds", "cityCops", "npcs"].forEach(track);
