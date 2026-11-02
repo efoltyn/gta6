@@ -629,8 +629,10 @@ document.body.appendChild(b);}}catch(e){}})();
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
   <script src="src/entities/watch.js?v=memflat1029"></script>
   <!-- STICK CITY: the hat library (every hat procedural, one merged geometry each) and the stick look (?stick=1 or CBZ.STICK_LOOK; off = nothing). After character.js and the dressing modules it stubs (footwear, headwear, jewelry_kit, eyewear, watch, tattoo); before player.js (the player body is built at load) and crowdgpu.js (its hat gear compiles off CBZ.stickLook). -->
-  <script src="src/entities/hats.js?v=stick1102"></script>
-  <script src="src/entities/stickman.js?v=stick1102"></script>
+  <script src="src/entities/hats.js?v=stick1103"></script>
+  <!-- the jewellery library (watches, bracelets, chains + pendants, rings, earrings, grills): after hats.js (its modelling kit) and jewelry_kit.js (the metals' environment) -->
+  <script src="src/entities/jewels.js?v=stick1103"></script>
+  <script src="src/entities/stickman.js?v=stick1103"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
