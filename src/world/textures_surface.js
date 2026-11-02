@@ -825,7 +825,8 @@
         n++;
       }
       for (const s of segs || []) { seg(s.x0, s.z0, s.x1, s.z1, s.half); n++; }
-      const tex = new THREE.DataTexture(bytes, N, N, THREE.LuminanceFormat, THREE.UnsignedByteType);
+      const tex = new THREE.DataTexture(bytes, N, N, THREE.RedFormat, THREE.UnsignedByteType);   // (LuminanceFormat is gone in r187; the shader reads .r)
+      tex.unpackAlignment = 1;
       tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
       tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
       tex.needsUpdate = true;

@@ -591,7 +591,10 @@
     rtSize = TOUCH ? 320 : 512;
     rt = new THREE.WebGLRenderTarget(rtSize, rtSize, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat });
     rt.texture.generateMipmaps = false;
-    if (THREE.SRGBColorSpace) rt.texture.colorSpace = THREE.SRGBColorSpace;
+    // the screen's own transform and programs; the lens shader reads the
+    // encoded bytes raw, as it always did (tools/three/entry.js)
+    if (THREE.screenTarget) THREE.screenTarget(rt);
+    else if (THREE.SRGBColorSpace) rt.texture.colorSpace = THREE.SRGBColorSpace;
     rtCam = new THREE.PerspectiveCamera(10, 1, 0.3, 2000);
     return rt;
   }

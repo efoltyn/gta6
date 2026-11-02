@@ -67,6 +67,44 @@
       cells[rn + "/" + mn] = [px[0], px[1], px[2]];
     }
   }
+  // A TREE CROWN: leaf cards whose normals point out from the crown centre
+  // (vegetation.js's authored lighting normals), vertex colours, lit by hemi +
+  // sun, with and without self-shadowing. Read as a 41x41 block mean.
+  function crownGeo() {
+    const pos = [], nor = [], col = [], rnd = (function () { let s = 7; return function () { s = (s * 16807) % 2147483647; return s / 2147483647; }; })();
+    for (let i = 0; i < 220; i++) {
+      const u = rnd() * 2 - 1, th = rnd() * Math.PI * 2, r = 1.1 * Math.cbrt(rnd());
+      const c = new THREE.Vector3(Math.sqrt(1 - u * u) * Math.cos(th), u, Math.sqrt(1 - u * u) * Math.sin(th)).multiplyScalar(r);
+      const a = new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).normalize(), b = new THREE.Vector3().crossVectors(a, c.clone().normalize()).normalize().multiplyScalar(0.28);
+      const a2 = new THREE.Vector3().crossVectors(b, c.clone().normalize()).normalize().multiplyScalar(0.28);
+      const v = [c.clone().add(b).add(a2), c.clone().sub(b).add(a2), c.clone().sub(b).sub(a2), c.clone().add(b).sub(a2)];
+      for (const k of [0, 1, 2, 0, 2, 3]) { pos.push(v[k].x, v[k].y, v[k].z); const n = v[k].clone().normalize(); nor.push(n.x, n.y, n.z); col.push(0.32, 0.55, 0.22); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    return g;
+  }
+  const cg = crownGeo();
+  const block = new Uint8Array(41 * 41 * 4);
+  for (const shadows of [false, true]) {
+    R.shadowMap.enabled = shadows; R.shadowMap.type = +THREE.REVISION < 150 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;   // what the game used on each
+    for (const mn of ["lambert", "std_r1"]) {
+      const s = new THREE.Scene(); s.background = new THREE.Color(0x000000);
+      s.add(new THREE.HemisphereLight(0xbfd8ff, 0x6b5a40, 0.6));
+      const d = new THREE.DirectionalLight(0xfff1dd, 1.0); d.position.set(3, 5, 8); d.castShadow = shadows;
+      d.shadow.mapSize.set(1024, 1024); d.shadow.camera.left = d.shadow.camera.bottom = -3; d.shadow.camera.right = d.shadow.camera.top = 3; d.shadow.bias = -0.0005;
+      s.add(d); s.add(d.target);
+      const m = mats[mn](); m.vertexColors = true; m.side = THREE.DoubleSide;
+      const mesh = new THREE.Mesh(cg, m); mesh.castShadow = mesh.receiveShadow = shadows; mesh.scale.setScalar(2); s.add(mesh);
+      R.render(s, cam);
+      gl.readPixels(W / 2 - 20, H / 2 - 20, 41, 41, gl.RGBA, gl.UNSIGNED_BYTE, block);
+      let r = 0, g2 = 0, b = 0, n = 0;
+      for (let i = 0; i < block.length; i += 4) { if (block[i] + block[i + 1] + block[i + 2] === 0) continue; r += block[i]; g2 += block[i + 1]; b += block[i + 2]; n++; }
+      cells["crown" + (shadows ? "+shadow" : "") + "/" + mn] = n ? [Math.round(r / n), Math.round(g2 / n), Math.round(b / n)] : [0, 0, 0];
+    }
+  }
   window.__look = { ok: true, rev: THREE.REVISION, cells: cells };
 })();
 </script>

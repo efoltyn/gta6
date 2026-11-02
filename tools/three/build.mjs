@@ -160,6 +160,37 @@ function _cbzQuatCb() { this._e.setFromQuaternion( this, undefined, false ); }
     "\t\t\tif ( ( material.isMeshStandardMaterial || material.isMeshLambertMaterial || material.isMeshPhongMaterial ) && material.envMap === null && scene.environment !== null ) {\n\n\t\t\t\tm_uniforms.envMapIntensity.value = scene.environmentIntensity;",
     "\t\t\tif ( false && material.envMap === null && scene.environment !== null ) { // CBZ: r128 keeps the material's envMapIntensity\n\n\t\t\t\tm_uniforms.envMapIntensity.value = scene.environmentIntensity;", 1, "environment: material envMapIntensity"],
 
+  // ---- "screen" render targets (THREE.screenTarget, tools/three/entry.js) --
+  // r128 rendered into a target through the screen's own output transform
+  // (tone map + the target texture's encoding), so the CCTV feed and the
+  // scope picture shared every program with the main view. r187 renders a
+  // target with no tone mapping in linear space: each material the feed sees
+  // compiled a second program (city: ~100 extra programs at load, measured)
+  // and the feed lost its tone curve. A target marked cbzScreen gets the
+  // screen's toneMapping + outputColorSpace again (it stores the encoded
+  // bytes raw, RGBA8, as r128 did).
+  ["build/three.module.js",
+    "\t\t\tif ( currentRenderTarget === null || currentRenderTarget.isXRRenderTarget === true ) {\n\n\t\t\t\ttoneMapping = renderer.toneMapping;",
+    "\t\t\tif ( currentRenderTarget === null || currentRenderTarget.isXRRenderTarget === true || currentRenderTarget.cbzScreen === true ) {\n\n\t\t\t\ttoneMapping = renderer.toneMapping;", 1, "programs: screen target tone mapping"],
+  ["build/three.module.js",
+    "\t\t\t\tif ( _currentRenderTarget === null || _currentRenderTarget.isXRRenderTarget === true ) {\n\n\t\t\t\t\ttoneMapping = _this.toneMapping;",
+    "\t\t\t\tif ( _currentRenderTarget === null || _currentRenderTarget.isXRRenderTarget === true || _currentRenderTarget.cbzScreen === true ) {\n\n\t\t\t\t\ttoneMapping = _this.toneMapping;", 1, "renderer: screen target tone mapping"],
+  ["build/three.module.js",
+    "outputColorSpace: ( currentRenderTarget === null ) ? renderer.outputColorSpace :",
+    "outputColorSpace: ( currentRenderTarget === null || currentRenderTarget.cbzScreen === true ) ? renderer.outputColorSpace :", 1, "programs: screen target colour space"],
+  ["build/three.module.js",
+    "const colorSpace = ( _currentRenderTarget === null ) ? _this.outputColorSpace :",
+    "const colorSpace = ( _currentRenderTarget === null || _currentRenderTarget.cbzScreen === true ) ? _this.outputColorSpace :", 1, "renderer: screen target colour space"],
+
+  // ---- onUploadCallback fires on the FIRST upload only (r128) -------------
+  // r147 made it fire on every transfer. The game hangs "drop the CPU copy"
+  // on it (core/citystream.js, core/batch.js, city/metro_fabric.js): on r187
+  // a later partial update dropped arrays the batcher still had to merge
+  // ("[park batch pruned] ... bakeMergeV2" in every candidate speed run).
+  ["build/three.module.js",
+    "\t\t\tattribute.clearUpdateRanges();\n\n\t\t}\n\n\t\tattribute.onUploadCallback();\n\n\t}",
+    "\t\t\tattribute.clearUpdateRanges();\n\n\t\t}\n\n\t\t// CBZ: no onUploadCallback on an update (r128: first upload only)\n\n\t}", 1, "attributes: upload callback once"],
+
   // ---- raycasts against pools and skinned bodies (r128) -------------------
   // Same stale-bounds story as culling: r187 early-outs a ray on a sphere it
   // computed once over every instance / every posed vertex. r128 tested each

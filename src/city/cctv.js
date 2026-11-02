@@ -239,10 +239,11 @@
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat,
     });
     rt.texture.generateMipmaps = false;
-    // match the main renderer's outputColorSpace (core/renderer.js: SRGBColorSpace)
-    // so the scene renders into the RT the same way it renders to screen, and
-    // the unlit monitor reads back with correct (non-washed) colour.
-    if (THREE.SRGBColorSpace) rt.texture.colorSpace = THREE.SRGBColorSpace;
+    // render into the RT exactly as onto the screen (tone map + sRGB out,
+    // the screen's own programs: the feed compiles nothing of its own), and
+    // the monitor below decodes it (tools/three/entry.js THREE.screenTarget)
+    if (THREE.screenTarget) THREE.screenTarget(rt);
+    else if (THREE.SRGBColorSpace) rt.texture.colorSpace = THREE.SRGBColorSpace;
     feedCam = new THREE.PerspectiveCamera(FEED_FOV, RT_W / RT_H, 0.3, FEED_FAR_FULL);
     // unlit screen: the RT texture reads as self-lit; the colour multiply gives
     // the desaturated, cool CCTV cast with no custom shader.
@@ -254,6 +255,7 @@
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
     });
     if ("toneMapped" in feedMat) feedMat.toneMapped = false;
+    if (THREE.screenTargetMap) THREE.screenTargetMap(feedMat);
     feedRoot = new THREE.Group();
     feedRoot.name = "cctv-feeds";
     const quad = new THREE.PlaneGeometry(0.5, 0.3);

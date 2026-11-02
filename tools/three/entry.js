@@ -131,6 +131,35 @@ WEBGL.ShaderChunk.transmission_fragment = [
 	S.uv_pars_fragment += alias( 'fragment' );
 }
 
+// ---- 3b. screen render targets (r128's render-to-target) ------------------
+// THREE.screenTarget(rt): render into rt exactly as onto the screen (the
+// renderer's tone mapping and output colour space; a build patch honours
+// rt.cbzScreen) and keep the encoded bytes raw (RGBA8, no colour space), as
+// r128 did. Every program the target's scene needs is the screen's own, so a
+// CCTV feed or a scope picture compiles nothing extra.
+// THREE.screenTargetMap(material): a built-in material that SHOWS such a
+// target (as its .map) decodes it in the shader, as r128 did for an
+// sRGB-tagged map. A custom shader that samples one gets the raw bytes, also
+// as r128 gave them.
+THREE.screenTarget = function ( rt ) {
+	rt.cbzScreen = true;
+	rt.texture.colorSpace = WEBGL.NoColorSpace;
+	rt.texture.internalFormat = 'RGBA8';
+	return rt;
+};
+THREE.screenTargetMap = function ( material ) {
+	const prev = material.onBeforeCompile;
+	material.onBeforeCompile = function ( sh, r ) {
+		if ( prev ) prev.call( this, sh, r );
+		sh.fragmentShader = sh.fragmentShader.replace( '#include <map_fragment>',
+			'#ifdef USE_MAP\n\tdiffuseColor *= sRGBTransferEOTF( texture2D( map, vMapUv ) );\n#endif' );
+	};
+	const key = material.customProgramCacheKey.bind( material );
+	material.customProgramCacheKey = function () { return key() + '|cbzScreenMap'; };
+	material.needsUpdate = true;
+	return material;
+};
+
 // ---- 4. THE renderer switch: THREE.createRenderer(params) -----------------
 // Every page makes its main renderer here. Default: WebGLRenderer (the game
 // as it has always run). Opt-in: `?gpu=webgpu` (or localStorage
