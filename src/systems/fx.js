@@ -404,6 +404,8 @@
     debris.length = 0;
     if (CBZ.debris) CBZ.debris.clear("fx");
     for (let i = markers.length - 1; i >= 0; i--) markers[i].dispose();
+    // (WebGPU) the particle engine's smoke, fire, sparks and rolling rock go too
+    if (CBZ.gpuParticles && CBZ.gpuParticles.on) CBZ.gpuParticles.clear();
     CBZ.survEnv.flash = 0;
   };
 

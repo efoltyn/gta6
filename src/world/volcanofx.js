@@ -173,6 +173,16 @@
   const census = { lava: 0, pyro: 0, lahar: 0, ash: 0, lights: 0, tris: 0, branches: 0, vent: 0, fountain: 0 };
   const LIVE = { lava: [], pyro: [], lahar: [], ash: [], vent: [], column: [], fountain: [], umbrella: [], bombs: [] };
 
+  /* THE GPU PATH (three r187, WebGPU renderer): systems/gpufx.js is THE
+     particle engine there, core/clusterlights.js the light engine. Under it
+     the eruption's sprite cards and ribbons (all ShaderMaterials, which the
+     node renderer cannot draw) become particles and real 3D rocks: the
+     fountain's clots, the bombs' trails and landing dust, the phreatic
+     blast's cock's-tail jets and base surge, and the density current's
+     skin. The WebGL renderer keeps every one of today's builders exactly
+     (gpu() is null there). See docs/plan/three-r187.md, THE FIRE ENGINES. */
+  function gpu() { const g = CBZ.gpuParticles; return g && g.on ? g : null; }
+  function clight(o) { const C = CBZ.clusterLights; return C && C.on ? C.add(o) : null; }
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt | 0) : 0.5; }
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
   function q(lo, hi) { return CBZ.qScale ? CBZ.qScale(lo, hi) : hi; }
@@ -2316,6 +2326,14 @@
   }
   function plumeMaterial() {
     const R = CBZ.renderer;
+    /* THE WEBGPU RENDERER draws no ShaderMaterial: the same march in TSL
+       (world/plume_node.js), with a uniforms object of the same shape */
+    if (R && R.isWebGPURenderer && CBZ.plumeNode) {
+      const tierN = plumeTier();
+      const built = CBZ.plumeNode.make(tierN, plumeNoise(), FLOWN, JETN);
+      plumeAtlas(built.U);
+      return built.mat;
+    }
     const fragDepth = !!(R && R.capabilities && (R.capabilities.isWebGL2 ||
       (R.extensions && R.extensions.has && R.extensions.has("EXT_frag_depth"))));
     const tier = plumeTier();
@@ -2872,6 +2890,79 @@
     const _jm = { x: 0, y: 0, z: 0 }, _jt = { x: 0, y: 0, z: 0 };
     const SURGE_V = 16 + 14 * mag;
     let t = 0, dead = false, done = false, surgeR = rim;
+    /* ---- THE GPU PATH: the "2D rocks rolling down the mountain" -------
+       OWNER, 2026-11-02, on the cock's-tail jets: "little dark gray clouds
+       that look like literally 2D rocks that just kind of roll down the side
+       of the mountain, which looks stupid." They were the jets' fat tips: a
+       sphere of dark density per finger that came down on the flank and
+       slid there. What a phreatic blast really throws is ROCK and the grit
+       it is breaking into. So, under the WebGPU renderer:
+         ROCK     real 3D blocks (systems/gpufx.js rock pool) launched along
+                  each jet, falling, bouncing, rolling and tumbling down the
+                  cone on the height field, shedding lit grit as they go;
+         THE JET  heavy dark dust shed along each jet's own trajectory (the
+                  same drag law), lit by the sun and the crater, which falls
+                  back onto the cone and RUNS DOWN it as a ground-hugging,
+                  billowing current (the dust look's downslope gravity);
+         SURGE    the base surge's ring as the same dust, pale with steam,
+                  rolling outward and down the cone from the rim.
+       The central jet stays the plume volume's column. */
+    const GPx = gpu();
+    const fired = new Uint8Array(JETN);
+    let surgeAcc = 0, blastLight = null;
+    const fxr = Math.random;
+    function gpuBlast(dt, ww) {
+      if (!blastLight && t < 0.3) blastLight = clight({ x: x, y: y + 6, z: z, color: 0xffb070, intensity: 4 + 3 * mag, distance: 60 + 40 * mag, flicker: 0.4 });
+      if (blastLight) blastLight.power(t < 2.5 ? (4 + 3 * mag) * (1 - t / 2.5) : 0);
+      for (let j = 0; j < jets.length; j++) {
+        const J = jets[j];
+        const a = t - J.t0;
+        if (a <= 0 || a > J.life) continue;
+        if (!fired[j]) {
+          fired[j] = 1;
+          // the blocks this finger throws: old cold andesite, broken
+          const nR = 2 + Math.round(3 * mag);
+          for (let k = 0; k < nR; k++) {
+            const sp = J.v * (0.35 + 0.55 * fxr());
+            const sx = (fxr() - 0.5) * 0.35, sz = (fxr() - 0.5) * 0.35;
+            GPx.rock({ x: x + J.cx * rim * 0.5, y: y + 1.5, z: z + J.cz * rim * 0.5,
+              vx: (J.cx + sx) * sp, vy: J.sy * sp, vz: (J.cz + sz) * sp,
+              size: 0.3 + 0.8 * fxr() * (0.6 + 0.6 * mag), temp: 0, life: 35 + 15 * fxr(), spin: 9, shed: 0.9 });
+          }
+        }
+        // the dust the finger is made of, shed along its own flight
+        if (a < Math.min(J.life, 2.4)) {
+          jetAt(J, a, _jt);
+          const ek = Math.exp(-J.k * a);
+          const vr = J.v * ek;
+          const tvx = J.cx * vr, tvz = J.cz * vr, tvy = J.sy * vr - JG / J.k * (1 - ek);
+          const wx = ww ? (ww.windX || 0) * a * 0.7 : 0, wz = ww ? (ww.windZ || 0) * a * 0.7 : 0;
+          const tipR = Math.min(14, (1.4 + 3.0 * a * (0.6 + 0.6 * mag)) * (0.85 + 0.3 * mag));
+          const n = Math.max(1, Math.round((3 + 4 * mag) * Math.min(1, dt * 60)));
+          GPx.emit("dust", { x: x + _jt.x + wx, y: y + _jt.y, z: z + _jt.z + wz, n: n, r: tipR * 0.35,
+            vx: tvx, vy: tvy, vz: tvz, vr: 1.5 + a,
+            life: 5 + 3 * mag, size: tipR * 0.45 + 0.8, grow: tipR * 1.4 + 3, temp: 0.12,
+            tone: clamp(0.85 - a * 0.12, 0.45, 0.85), drag: 0.55 + 0.25 * a, buoy: 0.6, turb: 1.3 });
+        }
+      }
+      // the base surge: a ring of steam and grit off the rim and down the cone
+      if (t < 4.6) {
+        const R = Math.min(coneR * 1.35, rim + SURGE_V / 0.42 * (1 - Math.exp(-0.42 * t)));
+        const vOut = SURGE_V * Math.exp(-0.42 * t);
+        const th = (2.6 + 3.4 * mag) * (1 + 0.55 * Math.sqrt(t));
+        surgeAcc += dt * (70 + 90 * mag) * (1 - t / 4.6);
+        let n = 0;
+        while (surgeAcc >= 1 && n < 120) {
+          surgeAcc -= 1; n++;
+          const ang = fxr() * 6.2832, rr = R * (0.82 + 0.18 * fxr());
+          const px = x + Math.cos(ang) * rr, pz = z + Math.sin(ang) * rr;
+          const sp = vOut * (0.55 + 0.45 * fxr());
+          GPx.emit("dust", { x: px, y: groundAt(px, pz) + th * 0.35, z: pz, n: 1, r: th * 0.3, rUp: 0.4,
+            vx: Math.cos(ang) * sp, vy: 0.6, vz: Math.sin(ang) * sp, vr: 1.2,
+            life: 5 + 2 * mag, size: th * 0.55, grow: th * 2.0 + 2, temp: 0.1, tone: 0.28, drag: 0.5, buoy: 0.8, turb: 1.1 });
+        }
+      }
+    }
     const handle = {
       kind: "phreatic", group: vol ? vol.mesh : null,
       get age() { return t; },
@@ -2913,14 +3004,15 @@
             JM[j].set(_jm.x + wx * 0.45, _jm.y, _jm.z + wz * 0.45, clamp(a / 0.1, 0, 1) * clamp((J.life - a) / 2.2, 0, 1));
             any = 1;
           }
-          vol.U.uJetG.value.set(rim * 0.42, any, clamp(t / 4.5, 0, 1), 0);
+          // (GPU path: the jets are rocks and dust, not fingers of the volume)
+          vol.U.uJetG.value.set(rim * 0.42, GPx ? 0 : any, clamp(t / 4.5, 0, 1), 0);
           // the surge: out of the crater at SURGE_V, decelerating on the apron
           const R = Math.min(coneR * 1.35, rim + SURGE_V / 0.42 * (1 - Math.exp(-0.42 * t)));
           if (t < 5) far = R;
           const th = (2.6 + 3.4 * mag) * (1 + 0.55 * Math.sqrt(t));
           const inner = rim + (R - rim) * 0.4 * Math.min(1, t / 3);
           const pS = clamp(t / 0.35, 0, 1) * clamp((13 - t) / 7, 0, 1);
-          vol.U.uSurge.value.set(R, th, inner, pS);
+          vol.U.uSurge.value.set(R, th, inner, GPx ? 0 : pS);
           // the central jet: up hard, then it hangs and its foot slumps out over the rim
           const H = (34 + 58 * mag) * (1 - Math.exp(-t / 0.9));
           const slump = clamp((t - 1.2) / 3, 0, 1);
@@ -2934,6 +3026,7 @@
           if (t > 13) live = 0;
           else live++;
         }
+        if (GPx) gpuBlast(dt, ww);
         surgeR = far;
         if (t > 1.5 && live === 0) done = true;
         return handle;
@@ -2941,6 +3034,7 @@
       dispose() {
         if (dead) return;
         dead = true;
+        if (blastLight) blastLight.remove();
         if (vol) { vol.U.uSurge.value.w = 0; vol.U.uCol.value.w = 0; vol.U.uJetG.value.y = 0; vol.release("phreatic"); }
       },
     };
@@ -3119,8 +3213,15 @@
     parent.add(craters);
     let crN = 0, crNext = 0;
     // the trails are shaded smoke tubes (systems/smoketrail.js), one draw
-    const ribbons = CBZ.smokeTrail ? CBZ.smokeTrail.pool(parent, MAX, 26) : null;
-    const dust = dustBursts(parent);
+    /* THE GPU PATH: the trail is smoke shed along the real flight, the
+       landing throws a burst of heavy dust that runs down the slope, and a
+       rock that lands on open ground is handed to the engine as a real 3D
+       rock: it bounces, rolls and tumbles down the cone, shedding ash, and
+       the crater stays where it hit (the CPU body stays for the hazard) */
+    const GPx = gpu();
+    const ribbons = !GPx && CBZ.smokeTrail ? CBZ.smokeTrail.pool(parent, MAX, 26) : null;
+    const dust = GPx ? { fire() {}, update() {}, dispose() {} } : dustBursts(parent);
+    const bLights = [];   // the hottest bombs in the air light what they fly over
     function body0Trail(size, hot) {
       if (!ribbons) return null;
       return hot ? ribbons.open({ w0: size * 0.22, w1: size * 1.5, life: 2.0, a0: 0.36, col: C_SMOKE, rise: 0.3, drag: 0 })
@@ -3216,7 +3317,28 @@
             // a big bomb's skin chills in flight but its core does not
             if (b.hot) b.temp = Math.max(0.35, b.temp - dt * 0.09 / Math.max(0.4, b.size));
             b.trailT -= dt;
-            if (b.trailT <= 0) { b.trailT = 0.06; if (ribbons) ribbons.push(b.trail, b.x, b.y, b.z); }
+            if (b.trailT <= 0) {
+              b.trailT = 0.06;
+              if (ribbons) ribbons.push(b.trail, b.x, b.y, b.z);
+              else if (GPx) {
+                /* a juvenile bomb degasses a dark streak, a lithic trails pale
+                   dust: puffs laid along the whole segment flown since the last
+                   tick, close enough to overlap (spaced at a fraction of their
+                   own size), so the trail is a continuous streak, not beads */
+                const px0 = b.lx != null ? b.lx : b.x, py0 = b.ly != null ? b.ly : b.y, pz0 = b.lz != null ? b.lz : b.z;
+                const seg = Math.hypot(b.x - px0, b.y - py0, b.z - pz0);
+                const s0 = b.size * 0.7 + 0.25;
+                const k = Math.max(1, Math.min(8, Math.ceil(seg / (s0 * 0.55))));
+                for (let q = 0; q < k; q++) {
+                  const u = (q + Math.random()) / k;
+                  GPx.emit("smoke", { x: px0 + (b.x - px0) * u, y: py0 + (b.y - py0) * u, z: pz0 + (b.z - pz0) * u, n: 1, r: b.size * 0.3,
+                    vx: b.vx * 0.06, vy: b.vy * 0.06, vz: b.vz * 0.06, vr: 0.5,
+                    life: 1.4 + b.size * 1.3, size: s0, grow: b.size * 3.0 + 1.4,
+                    temp: b.hot ? 0.25 * b.temp : 0, tone: b.hot ? 0.86 : 0.38, drag: 0.7, buoy: 2.2, turb: 1.1 });
+                }
+                b.lx = b.x; b.ly = b.y; b.lz = b.z;
+              }
+            }
             let hit = null, gy = 0;
             if (b.vy < 0 && o.solids) { try { hit = o.solids(b.x, b.y - b.size * 0.5, b.z); } catch (e) { hit = null; } }
             if (hit) gy = hit.y;
@@ -3236,6 +3358,19 @@
               }
               if (ribbons) { ribbons.push(b.trail, b.x, b.y, b.z); ribbons.close(b.trail); }
               dust.fire(b.x, gy, b.z, b.size, speed);
+              if (GPx) {
+                // the landing's dust: thrown up and out, then down the slope
+                GPx.emit("dust", { x: b.x, y: gy + 0.4 + b.size * 0.4, z: b.z, n: Math.round(8 + b.size * 12 + speed * 0.2),
+                  r: b.size * 1.1, rUp: 0.35, vx: b.vx * 0.12, vy: 2.2 + speed * 0.12, vz: b.vz * 0.12, vr: 2.2 + speed * 0.1,
+                  life: 3.2 + b.size * 1.6, size: b.size * 1.2 + 0.7, grow: b.size * 4.5 + 3.2,
+                  temp: b.hot ? 0.35 * b.temp : 0, tone: b.hot ? 0.62 : 0.4 });
+                if (!hit) {
+                  // the rock goes on: a bounce off the slope, and it rolls (the hazard stays the CPU body's)
+                  GPx.rock({ x: b.x, y: gy + b.size, z: b.z, vx: b.vx * 0.5, vy: Math.min(9, Math.abs(b.vy) * 0.28), vz: b.vz * 0.5,
+                    size: b.size, temp: b.hot ? b.temp : 0, life: 40 + 20 * Math.random(), spin: 7, shed: b.hot ? 1.3 : 0.7 });
+                  b.gpu = true;
+                }
+              }
               if (o.onLand) {
                 try {
                   o.onLand({ x: b.x, y: gy, z: b.z, speed: speed, mass: b.mass, size: b.size, hot: b.hot, hit: hit, range: range });
@@ -3246,6 +3381,8 @@
             b.rest += dt;
             if (b.hot) b.temp = Math.max(0, b.temp - dt / (14 + 18 * b.size));
           }
+          // (handed to the GPU engine: it draws and rolls that rock now)
+          if (b.gpu) continue;
           // draw: glowing while it is hotter than dull red, rock after
           _e.set(b.rx, b.ry, b.rz); _q.setFromEuler(_e);
           _p.set(b.x, b.y, b.z); _s.setScalar(b.size);
@@ -3265,6 +3402,21 @@
         if (hot.instanceColor) hot.instanceColor.needsUpdate = true;
         if (cold.instanceColor) cold.instanceColor.needsUpdate = true;
         hot.visible = nh > 0; cold.visible = nc > 0;
+        /* (GPU path) THE BOMBS LIGHT WHAT THEY FLY OVER: the four hottest
+           incandescent rocks in the air each carry a clustered light — free
+           to add and move there, no shader ever sees the count */
+        if (GPx && CBZ.clusterLights && CBZ.clusterLights.on) {
+          let used = 0;
+          for (let i = 0; i < bodies.length && used < 4; i++) {
+            const b = bodies[i];
+            if (b.landed || !b.hot || b.temp < 0.3 || b.size < 0.35) continue;
+            let L = bLights[used];
+            if (!L) L = bLights[used] = clight({ x: b.x, y: b.y, z: b.z, color: 0xff7a2a, intensity: 0, distance: 18, flicker: 0.3 });
+            if (L) L.set(b.x, b.y, b.z).power(0.9 + 1.6 * b.temp * Math.min(1.5, b.size)).reach(10 + 14 * b.size);
+            used++;
+          }
+          for (let i = used; i < bLights.length; i++) if (bLights[i]) bLights[i].power(0);
+        }
         // the trails thin out behind them; the landings' dust hangs and settles
         const night = opts && opts.night != null ? clamp(+opts.night, 0, 1) : nightNow(opts);
         if (ribbons) ribbons.update(dt);
@@ -3277,6 +3429,8 @@
         hot.dispose && hot.dispose(); cold.dispose && cold.dispose(); craters.dispose && craters.dispose();
         if (ribbons) ribbons.dispose();
         dust.dispose();
+        for (let i = 0; i < bLights.length; i++) if (bLights[i]) bLights[i].remove();
+        bLights.length = 0;
         const k = LIVE.bombs.indexOf(handle); if (k >= 0) LIVE.bombs.splice(k, 1);
       },
     };
@@ -3329,7 +3483,14 @@
     // one additive instanced draw for every clot (was one Sprite call each)
     /* renderOrder 6, UNDER the plume volume (7): the fountain stands inside
        the column's foot, so the ash must hide it, not have it glow through */
-    const B = puffBatch(N, { map: glowTex(), tiles: 1, additive: true, fog: false, parent: parent, renderOrder: 6 });
+    /* THE GPU PATH: the clots are spark particles on the same launch law,
+       flown by the engine (gravity, a bounce and a roll on the cone, cooling
+       on the blackbody ramp), and the fountain lights the summit it stands on */
+    const GPx = gpu();
+    const B = GPx ? null : puffBatch(N, { map: glowTex(), tiles: 1, additive: true, fog: false, parent: parent, renderOrder: 6 });
+    const fLight = GPx ? clight({ x: x, y: baseY + 5, z: z, color: 0xff7a26, intensity: 2.2, distance: 40 + 30 * mag, flicker: 0.9 }) : null;
+    let fAcc = 0;
+    const _fp = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, tf: 1, sz: 1, gy: null, jet: false };
     const _fc = new THREE.Color();
     let seed = (((x * 73856093) | 0) ^ ((z * 19349663) | 0) ^ 0x1d3f77b1) >>> 0;
     const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
@@ -3365,12 +3526,26 @@
     }
     let dead = false, active = 1;
     const handle = {
-      kind: "fountain", group: B.mesh, clotCount: N,
+      kind: "fountain", group: B ? B.mesh : null, clotCount: N,
       setActive(k) { active = clamp(k == null ? 1 : +k, 0, 1); return handle; },
       update(dt) {
         if (dead) return handle;
         if (!(dt > 0)) return handle;
         if (dt > 0.2) dt = 0.2;
+        if (GPx) {
+          // a clot's flight is ~tf: N of them in the air means N / 1.5 s launches
+          fAcc += dt * (N / 1.5) * (0.25 + 0.75 * active);
+          let n = 0;
+          while (fAcc >= 1 && n < 96) {
+            fAcc -= 1; n++;
+            _fp.jet = rnd() < 0.34;
+            launch(_fp);
+            GPx.emit("spark", { x: _fp.x, y: _fp.y, z: _fp.z, vx: _fp.vx, vy: _fp.vy, vz: _fp.vz,
+              life: _fp.tf * 1.6 + 0.9, lifeR: 0.4, size: _fp.sz * 0.42, temp: _fp.jet ? 1 : 0.95, drag: 0.03, buoy: 0, turb: 0.15 });
+          }
+          if (fLight) fLight.power(1.2 + 2.4 * active);
+          return handle;
+        }
         const live = Math.max(1, Math.round(N * (0.25 + 0.75 * active)));
         for (let i = 0; i < clots.length; i++) {
           const P = clots[i];
@@ -3409,7 +3584,8 @@
       dispose() {
         if (dead) return;
         dead = true;
-        B.dispose();
+        if (B) B.dispose();
+        if (fLight) fLight.remove();
         const k = LIVE.fountain.indexOf(handle); if (k >= 0) LIVE.fountain.splice(k, 1);
       },
     };
@@ -3624,6 +3800,47 @@
     }
 
     let front = 0, sF = 0, t = 0, adv = 0, boil = 0, dead = false;
+    /* THE GPU PATH: the current's SKIN. The volume is its body; under the
+       WebGPU renderer the head also throws what a real one is made of: hot
+       blocks tumbling and bouncing in the front (real 3D rocks), the heavy
+       grit boiling off the head and running on down the lane, the incandescent
+       base lighting the ground it is about to bury (a clustered light that
+       rides the nose). */
+    const GPx = gpu();
+    const pLight = GPx ? clight({ x: 0, y: -999, z: 0, color: 0xff6a20, intensity: 0, distance: 40, flicker: 0.7 }) : null;
+    let pAcc = 0, rAcc = 0;
+    const _pv = new THREE.Vector3(), _pv2 = new THREE.Vector3();
+    function gpuSkin(dt, night) {
+      const ts = Math.max(0, (front - path.total) / speed);
+      const live = clamp(t / 0.25, 0, 1) * (1 - sstep(PYRO_LINGER * 0.15, PYRO_LINGER * 0.55, ts));
+      pathAt(path, Math.min(sF, path.total), _pv);
+      pathAt(path, Math.max(0, Math.min(sF, path.total) - 3), _pv2);
+      let tx = _pv.x - _pv2.x, tz = _pv.z - _pv2.z; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+      const gy = groundAt(_pv.x, _pv.z);
+      if (pLight) pLight.set(_pv.x, gy + height * 0.25, _pv.z).power(live * (2 + 4 * night)).reach(30 + height * 1.5);
+      if (live <= 0.01) return;
+      const vF = ts > 0 ? 0 : speed;
+      pAcc += dt * (90 + 2 * width) * live;
+      let n = 0;
+      while (pAcc >= 1 && n < 160) {
+        pAcc -= 1; n++;
+        const side = (Math.random() - 0.5) * width * 0.9, back = Math.random() * height * 1.2;
+        const px = _pv.x - tx * back - tz * side, pz = _pv.z - tz * back + tx * side;
+        const sp = vF * (0.35 + 0.35 * Math.random());
+        GPx.emit("dust", { x: px, y: groundAt(px, pz) + height * (0.15 + 0.35 * Math.random()), z: pz, n: 1, r: height * 0.15,
+          vx: tx * sp, vy: 2 + 4 * Math.random(), vz: tz * sp, vr: 2.5,
+          life: 6 + 4 * Math.random(), size: height * 0.28, grow: height * 1.1, temp: 0.55, tone: 0.78, drag: 0.35, buoy: 2.2, turb: 1.6 });
+      }
+      rAcc += dt * (6 + 0.15 * width) * live * (ts > 0 ? 0.2 : 1);
+      while (rAcc >= 1) {
+        rAcc -= 1;
+        const side = (Math.random() - 0.5) * width * 0.6;
+        const px = _pv.x - tz * side, pz = _pv.z + tx * side;
+        GPx.rock({ x: px, y: groundAt(px, pz) + 1.5, z: pz, vx: tx * speed * (0.6 + 0.3 * Math.random()), vy: 3 + 5 * Math.random(),
+          vz: tz * speed * (0.6 + 0.3 * Math.random()), size: 0.35 + 1.1 * Math.random(), temp: 0.65 + 0.3 * Math.random(),
+          life: 30, spin: 10, shed: 1.6 });
+      }
+    }
     // the DRAWN front: full speed down the cone, running out of momentum over
     // the last fifth of the lane. The hazard reads the same front.
     function visFront() {
@@ -3663,6 +3880,7 @@
           vol.light(night, false);
           vol.sync();
         }
+        if (GPx) gpuSkin(dt, nightNow(opts));
         return handle;
       },
       /* WHAT PART OF THE FLOW IS THIS, and the answer has to be measured
@@ -3703,6 +3921,7 @@
         if (dead) return;
         dead = true;
         if (vol) { vol.U.uFlow.value.w = 0; vol.release("pyro"); }
+        if (pLight) pLight.remove();
         const k = LIVE.pyro.indexOf(handle); if (k >= 0) LIVE.pyro.splice(k, 1);
       },
     };

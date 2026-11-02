@@ -98,7 +98,9 @@ function group(lines) {
 
 const want = argv.filter((a) => !a.startsWith("--"));
 const names = want.length ? want : Object.keys(TARGETS);
-const rig = await launch({ rafBudget: 0, preload: PRELOAD });
+// --real-gpu: the Mac's own GPU (ANGLE/Dawn on Metal: a real WebGPU adapter headless), not SwiftShader
+const REAL = argv.includes("--real-gpu"); if (REAL) argv.splice(argv.indexOf("--real-gpu"), 1);
+const rig = await launch({ rafBudget: 0, preload: PRELOAD, gpu: REAL ? "real" : undefined });
 const results = [];
 try {
   for (const name of names) {

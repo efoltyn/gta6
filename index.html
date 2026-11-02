@@ -398,7 +398,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the GLTF/DRACO/RGBE/3MF loaders, BufferGeometryUtils, the meshlet
      pipeline). Built by tools/three/build.mjs from tools/three/entry.js; the
      r128 build and its separate loader scripts are gone. -->
-<script src="src/vendor/three.r187.js?v=r187d"></script>
+<script src="src/vendor/three.r187.js?v=fire1102"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
 <script src="src/core/instcull.js?v=r187a"></script>
 <!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
@@ -491,7 +491,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treefoot.js?v=sight1011"></script>
 <script src="src/world/forestlook.js?v=wreal0929"></script>
 <script src="src/core/prio.js?v=arch2"></script>
-<script src="src/core/lightpin.js?v=r187c"></script>
+<script src="src/core/lightpin.js?v=fire1102"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
@@ -514,6 +514,17 @@ document.body.appendChild(b);}}catch(e){}})();
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
      exists and appends rather than rewriting. -->
 <script src="src/core/groundmask.js?v=norim1020"></script>
+<!-- THE LIGHT ENGINE (WebGPU only): core/clusterlights.js installs Forward+
+     clustered lighting on the WebGPURenderer, so hundreds of fire / lava /
+     explosion point lights light their surroundings with no recompiles, and
+     core/lightpin.js's 16-nearest pin stands down. Inert under WebGL. After
+     core/renderer.js (it sets renderer.lighting). -->
+<script src="src/core/clusterlights.js?v=fire1102e"></script>
+<!-- THE PARTICLE ENGINE (WebGPU only): systems/gpufx.js, CBZ.gpuParticles —
+     TSL compute smoke, dust, fire, sparks, ash and tumbling 3D rocks on a
+     baked height field, one draw a look. Every fire/smoke/explosion system
+     emits into it under WebGPU; inert (on === false) under WebGL. -->
+<script src="src/systems/gpufx.js?v=fire1102e"></script>
 <!-- THE GROUND IS A SOLID: base field minus carvings. Owns CBZ.floorAt, so it
      must load before any mode registers its base (city/mode.js, modes/*). -->
 <script src="src/systems/solidground.js?v=ric0929"></script>
@@ -1064,7 +1075,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Additive: registers its own updaters (gated by game.mode) and builds
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
-<script src="src/systems/fx.js?v=island1014"></script>
+<script src="src/systems/fx.js?v=fire1102e"></script>
 <script src="src/systems/debris.js?v=r187a"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
@@ -1118,19 +1129,22 @@ document.body.appendChild(b);}}catch(e){}})();
      builders. Must precede systems/disasters.js so the roster finds
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. REQUIRED: the
      old additive-stream fallback in disasters.js was deleted 2026-09-28. -->
-<script src="src/world/volcanofx.js?v=r187a"></script>
+<!-- world/plume_node.js: the plume volume's march in TSL (CBZ.plumeNode), the
+     material volcanofx.js uses under the WebGPU renderer. Before volcanofx.js. -->
+<script src="src/world/plume_node.js?v=fire1102e"></script>
+<script src="src/world/volcanofx.js?v=fire1102e"></script>
 <!-- THE ERUPTION'S SEQUENCE: world/eruption.js (CBZ.eruption) runs unrest,
      phreatic blast, Plinian column + umbrella, bombs, lightning, lava,
      collapse and lahar on volcanofx's builders, mode-agnostic (the lab's
      eruption kit drives the same file). Its fires are systems/wildfire.js's.
      Must precede systems/disasters.js. -->
-<script src="src/world/eruption.js?v=fx1029"></script>
+<script src="src/world/eruption.js?v=fire1102"></script>
 <!-- THE QUAKE IS SHARED: systems/quake.js is the whole earthquake event (source
      and path, P/S/surface wave train, buildings by type and height, cracks,
      mains, liquefaction, cars, the crowd, what falls on whom), drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
-<script src="src/systems/quake.js?v=memleak1029"></script>
+<script src="src/systems/quake.js?v=fire1102e"></script>
 <!-- ==== PER-DISASTER MODULE SEAM ==========================================
      One line per disaster in the survival roster, each owned by exactly that
      disaster and nobody else. A disaster whose behaviour outgrows its entry in
@@ -1159,8 +1173,8 @@ document.body.appendChild(b);}}catch(e){}})();
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
 <!-- systems/smokeplume.js: a fire's smoke as raymarched plumes (CBZ.smokePlumes), read by wildfire.js -->
-<script src="src/systems/smokeplume.js?v=r187a"></script>
-<script src="src/systems/wildfire.js?v=r187a"></script>
+<script src="src/systems/smokeplume.js?v=fire1102e"></script>
+<script src="src/systems/wildfire.js?v=fire1102e"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
@@ -1175,7 +1189,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=memleak1029b"></script>
+<script src="src/systems/disasters.js?v=fire1102"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=hands1022"></script>

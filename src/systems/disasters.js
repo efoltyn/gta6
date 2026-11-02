@@ -1489,11 +1489,23 @@
             const P = lane.pts;
             const i = 1 + ((rnd() * Math.min(P.length - 1, 6)) | 0);
             const p = P[i];
-            CBZ.fx.dropDebris({
-              x: p.x + (rnd() - 0.5) * 5, z: p.z + (rnd() - 0.5) * 5,
-              fromY: p.y + 3 + rnd() * 4, vy: -2 - rnd() * 3,
-              size: 0.4 + rnd() * 0.9, shape: "rock", color: 0x4a4038, dmg: 0, linger: 5,
-            });
+            const rx = p.x + (rnd() - 0.5) * 5, rz = p.z + (rnd() - 0.5) * 5;
+            const ry = p.y + 3 + rnd() * 4, rvy = -2 - rnd() * 3, rs = 0.4 + rnd() * 0.9;
+            const GPE = CBZ.gpuParticles;
+            if (GPE && GPE.on) {
+              /* (WebGPU) the rock does what rock does on a 30-degree cone: it
+                 bounces, rolls and tumbles DOWN THE LANE (the particle engine's
+                 rock pool), kicking grit, so the telegraph is a moving
+                 corridor of rockfall instead of stones dropped in place */
+              const nx = P[Math.min(P.length - 1, i + 1)];
+              const ddx = nx.x - p.x, ddz = nx.z - p.z, dl = Math.hypot(ddx, ddz) || 1;
+              GPE.rock({ x: rx, y: ry, z: rz, vx: ddx / dl * 3, vy: rvy, vz: ddz / dl * 3, size: rs * 0.62, temp: 0, life: 30, spin: 5, shed: 0.8 });
+            } else {
+              CBZ.fx.dropDebris({
+                x: rx, z: rz, fromY: ry, vy: rvy,
+                size: rs, shape: "rock", color: 0x4a4038, dmg: 0, linger: 5,
+              });
+            }
           }
         }
       },
@@ -3600,13 +3612,31 @@
         ctx.st.erEmberCd = 0.4;
         const ea = rnd() * 6.28;
         const er = S.r * (0.35 + rnd() * 0.6);
-        CBZ.fx.dropDebris({
-          x: S.x + Math.cos(ea) * er, z: S.z + Math.sin(ea) * er,
-          fromX: S.x + Math.cos(ea) * 1.5, fromZ: S.z + Math.sin(ea) * 1.5,
-          fromY: S.peak + 2,
-          size: 0.22 + rnd() * 0.3, shape: "rock", color: 0xff7e22, glow: true,
-          dmg: 0, linger: 2 + rnd() * 2.5,
-        });
+        const es = 0.22 + rnd() * 0.3, el = 2 + rnd() * 2.5;
+        const GPE = CBZ.gpuParticles;
+        if (GPE && GPE.on) {
+          /* (WebGPU) the spatter is a real glowing block (the particle
+             engine's rock pool): thrown over the rim, it lands on the flank
+             and keeps going, bouncing and rolling down the cone while it
+             cools from orange to black in its cracks, shedding grit */
+          // (same cadence and the same rnd() draws as the WebGL path: the
+          // hazard stream must not depend on the renderer)
+          const hv = er / 1.6;
+          for (let k = 0; k < 3; k++) {
+            const a2 = ea + k * 2.1;
+            GPE.rock({ x: S.x + Math.cos(a2) * 2.5, y: S.peak + 2, z: S.z + Math.sin(a2) * 2.5,
+              vx: Math.cos(a2) * hv, vy: 5 + 4 * Math.random(), vz: Math.sin(a2) * hv,
+              size: es * (1.4 + Math.random()), temp: 0.95, life: 18 + el * 4, spin: 8, shed: 1.2 });
+          }
+        } else {
+          CBZ.fx.dropDebris({
+            x: S.x + Math.cos(ea) * er, z: S.z + Math.sin(ea) * er,
+            fromX: S.x + Math.cos(ea) * 1.5, fromZ: S.z + Math.sin(ea) * 1.5,
+            fromY: S.peak + 2,
+            size: es, shape: "rock", color: 0xff7e22, glow: true,
+            dmg: 0, linger: el,
+          });
+        }
       }
     }
     if (E.pyro && CBZ.shake) {

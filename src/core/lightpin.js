@@ -201,8 +201,24 @@
       else if (o.isSpotLight) reg.spot.add(o);
     });
   }
+  /* CLUSTERED LIGHTING MAKES THE PIN UNNECESSARY (core/clusterlights.js,
+     WebGPU): the light count is not in any program there, so every light
+     reaches the shader and nothing recompiles. Undo our suppression once
+     (a light culled before the switch keeps mask 0 otherwise) and stand down. */
+  let unpinned = false;
+  function clustered() {
+    const C = CBZ.clusterLights;
+    if (!C || !C.on) return false;
+    if (!unpinned) {
+      unpinned = true;
+      for (const kind of ["point", "spot"]) for (const l of reg[kind]) if (!l._cbzPinDummy) l.layers.mask = 1;
+      for (const kind of ["point", "spot"]) for (const d of dummies[kind]) d.visible = false;
+    }
+    return true;
+  }
   function pinNow() {
     if (!CBZ.CONFIG.LIGHT_COUNT_PIN || !CBZ.scene || !CBZ.camera) return;
+    if (clustered()) return;
     ensurePool();
     if (rankedFrame !== frameNo) rankNow();
     const b = budgets();
@@ -253,6 +269,7 @@
   // light toggles, before viewscope's per-frame hides
   CBZ.onAlways(97, function () {
     if (!CBZ.CONFIG.LIGHT_COUNT_PIN || !CBZ.scene || !CBZ.camera) return;
+    if (clustered()) return;
     ensurePool();
     rankNow();
   });

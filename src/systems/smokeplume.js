@@ -163,12 +163,164 @@
   function q01() { return CBZ.qScale ? CBZ.qScale(0, 1) : 1; }
   let _box = null;
 
+  /* ---- THE SAME MARCH IN TSL, for the WebGPU renderer (it draws no
+     ShaderMaterial: under it this box rendered as a black block). Line for
+     line the GLSL above; the uniforms keep the {name: {value}} shape so
+     create() below drives either. Texture reads inside the march are
+     explicit-LOD (WGSL forbids implicit derivatives in a loop), and the
+     march stops at the opaque scene's own depth instead of writing
+     gl_FragDepth (depth test off), so a hillside cuts the column exactly. */
+  function nodeMaterial(steps, maxi) {
+    const T = THREE.TSL;
+    const { Fn, If, Loop, Break, Continue, Discard, uniform, uniformArray, texture, float, vec2, vec3, vec4,
+      floor, fract, mod, mix, clamp, smoothstep, max, min, abs, length, normalize, dot, exp, sin, sign, step,
+      positionWorld, positionLocal, cameraPosition, cameraProjectionMatrix, cameraViewMatrix, modelWorldMatrix,
+      screenCoordinate, screenUV, viewportDepthTexture, perspectiveDepthToViewZ, cameraNear, cameraFar } = T;
+    const vec4s = function () { const a = []; for (let i = 0; i < PLUMES; i++) a.push(new THREE.Vector4()); return a; };
+    const pArr = vec4s(), qArr = vec4s();
+    const placeholder = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
+    placeholder.needsUpdate = true;
+    const atlasT = texture(placeholder);
+    const C = (c) => uniform(c || new THREE.Color());
+    const U = {
+      uAtlas: atlasT, uHasAtlas: uniform(0),
+      uP: { value: pArr }, uQ: { value: qArr },
+      uWind: uniform(new THREE.Vector3(1, 0, 0.5)),
+      uBoxMin: uniform(new THREE.Vector3()), uBoxMax: uniform(new THREE.Vector3()),
+      uTime: uniform(0), uSteps: uniform(steps),
+      uSunDir: uniform(new THREE.Vector3(0.5, 0.7, 0.3)), uDay: uniform(1),
+      uVegLit: C(lin(206, 198, 184)), uVegShade: C(lin(96, 90, 84)),
+      uBlkLit: C(lin(74, 70, 66)), uBlkShade: C(lin(22, 21, 20)),
+      uGlowCol: C(lin(255, 120, 36)),
+      uFog: uniform(new THREE.Vector4()), uFogCol: C(),
+    };
+    const uP = uniformArray(pArr, "vec4"), uQ = uniformArray(qArr, "vec4");
+    const { uHasAtlas, uWind, uBoxMin, uBoxMax, uTime, uSteps, uSunDir, uDay, uVegLit, uVegShade, uBlkLit, uBlkShade, uGlowCol, uFog, uFogCol } = U;
+    const h31 = (p) => fract(sin(dot(p, vec3(127.1, 311.7, 74.7))).mul(43758.5453));
+    const vn3 = (p) => {
+      const i = floor(p), f0 = fract(p), f = f0.mul(f0).mul(float(3.0).sub(f0.mul(2.0)));
+      const c = (x, y, z) => h31(i.add(vec3(x, y, z)));
+      return mix(mix(mix(c(0, 0, 0), c(1, 0, 0), f.x), mix(c(0, 1, 0), c(1, 1, 0), f.x), f.y),
+        mix(mix(c(0, 0, 1), c(1, 0, 1), f.x), mix(c(0, 1, 1), c(1, 1, 1), f.x), f.y), f.z);
+    };
+    const noiseA = (p) => {
+      const out = vec4(0.0).toVar();
+      If(uHasAtlas.greaterThan(0.5), () => {
+        const q = fract(p);
+        const zf = q.z.mul(64.0), z0 = floor(zf), fz = zf.sub(z0), z1 = mod(z0.add(1.0), 64.0);
+        const inner = q.xy.mul(64.0).add(1.5);
+        const t0 = vec2(mod(z0, 8.0), floor(z0.div(8.0))).mul(66.0);
+        const t1 = vec2(mod(z1, 8.0), floor(z1.div(8.0))).mul(66.0);
+        out.assign(mix(atlasT.sample(t0.add(inner).div(528.0)).level(0), atlasT.sample(t1.add(inner).div(528.0)).level(0), fz));
+      }).Else(() => {
+        const x = p.mul(4.0);
+        out.assign(vec4(vn3(x).mul(0.65).add(vn3(x.mul(2.1).add(3.1)).mul(0.35)), vn3(x.mul(1.7).add(7.3)), vn3(x.mul(4.3).add(1.7)), 1.0));
+      });
+      return out;
+    };
+    // the field: the strongest plume's envelope at q, and which plume owns it
+    const field = (q) => {
+      const best = float(-9.0).toVar(), gTone = float(0.0).toVar(), gH = float(0.0).toVar(), gSc = float(6.0).toVar();
+      const gGlow = float(0.0).toVar(), gStr = float(0.0).toVar();
+      for (let i = 0; i < PLUMES; i++) {
+        const P = uP.element(i), Q = uQ.element(i);
+        const h = q.y.sub(P.y), H = Q.z;
+        const hp = max(h, 0.0);
+        const c = P.xz.add(uWind.xy.mul(uWind.z).mul(hp).mul(float(0.35).add(min(hp.div(H), 1.2).mul(0.65))));
+        const r = Q.y.add(hp.mul(0.3));
+        let e = float(1.0).sub(length(q.xz.sub(c)).div(r));
+        e = e.sub(smoothstep(H.mul(0.65), H.mul(1.35), h).mul(1.4));
+        e = min(e, h.add(2.0).div(2.5));
+        e = e.sub(float(1.0).sub(min(P.w, 1.0)).mul(0.6));
+        const ok = P.w.greaterThan(0.001).and(h.greaterThanEqual(-3.0)).and(h.lessThanEqual(H.mul(1.45))).and(e.greaterThan(best));
+        If(ok, () => {
+          best.assign(e); gTone.assign(Q.x); gH.assign(h.div(H)); gSc.assign(Q.y.mul(1.4).add(4.0)); gGlow.assign(Q.w); gStr.assign(P.w);
+        });
+      }
+      return { e: best, tone: gTone, h: gH, sc: gSc, glow: gGlow, str: gStr };
+    };
+    const march = Fn(() => {
+      const ro = cameraPosition;
+      const rd = normalize(positionWorld.sub(ro)).toVar();
+      const sceneZ = perspectiveDepthToViewZ(viewportDepthTexture(screenUV), cameraNear, cameraFar).toVar();
+      const rdV = cameraViewMatrix.mul(vec4(rd, 0.0)).xyz;
+      const tScene = sceneZ.div(min(rdV.z, -1e-4)).toVar();
+      const inv = float(1.0).div(sign(rd).mul(max(abs(rd), vec3(1e-5))).add(step(abs(rd), vec3(0.0)).mul(1e-5)));
+      const ta = uBoxMin.sub(ro).mul(inv), tb = uBoxMax.sub(ro).mul(inv);
+      const tmn = min(ta, tb), tmx = max(ta, tb);
+      const t0 = max(max(max(tmn.x, tmn.y), tmn.z), 0.0).toVar();
+      const t1 = min(min(min(tmx.x, tmx.y), tmx.z), tScene).toVar();
+      If(t1.lessThanEqual(t0), () => { Discard(); });
+      const baseL = max(t1.sub(t0).div(max(uSteps, 8.0)), 0.5).toVar();
+      const jit = fract(fract(dot(screenCoordinate.xy, vec2(0.06711056, 0.00583715))).mul(52.9829189));
+      const acc = vec3(0.0).toVar(), Tt = float(1.0).toVar(), tW = float(0.0).toVar(), wSum = float(0.0).toVar();
+      const t = t0.add(baseL.mul(jit)).toVar();
+      Loop(maxi, () => {
+        If(t.greaterThan(t1).or(Tt.lessThan(0.03)), () => { Break(); });
+        const q = ro.add(rd.mul(t)).toVar();
+        const fd = field(q);
+        const e = fd.e, sc = fd.sc;
+        const stepL = clamp(sc.mul(0.28), baseL.mul(0.3), baseL.mul(1.6)).toVar();
+        If(e.lessThan(-0.6), () => { t.addAssign(stepL.add(e.negate().sub(0.6).mul(sc).mul(0.5))); Continue(); });
+        const tone = fd.tone, hrel = fd.h, glow = fd.glow, str = fd.str;
+        const c = q.sub(vec3(uWind.x.mul(uTime).mul(2.5), uTime.mul(2.2), uWind.y.mul(uTime).mul(2.5))).div(sc).mul(0.42).toVar();
+        const A1 = noiseA(c);
+        const base = e.add(A1.r.sub(0.5).mul(1.05)).add(A1.g.sub(0.5).mul(0.3)).toVar();
+        const d = float(0.0).toVar();
+        If(base.greaterThan(-0.08), () => {
+          const A2 = noiseA(c.mul(3.07).add(vec3(0.37, float(0.11).sub(uTime.mul(0.02)), 0.73)));
+          const b2 = base.add(A2.r.sub(0.5).mul(0.3).add(A2.g.sub(0.5).mul(0.18)).mul(float(1.0).sub(smoothstep(0.15, 0.7, base))));
+          d.assign(smoothstep(-0.02, 0.15, b2).mul(float(0.55).add(smoothstep(0.08, 0.6, b2).mul(0.45))));
+          const hc = clamp(hrel, 0.0, 1.0);
+          d.mulAssign(mix(mix(1.0, 0.3, hc), mix(1.0, 0.65, hc), tone).mul(min(str, 1.0)));
+        });
+        If(d.greaterThan(0.003), () => {
+          const a = float(1.0).sub(exp(d.negate().mul(mix(2.2, 4.0, tone)).mul(stepL).div(sc)));
+          const o1 = field(q.add(uSunDir.mul(sc).mul(0.6))).e;
+          const o2 = field(q.add(uSunDir.mul(sc).mul(1.7))).e;
+          const od = max(o1.add(0.35), 0.0).add(max(o2.add(0.35), 0.0).mul(1.3)).add(d.mul(0.45));
+          const Ts = exp(od.mul(-2.0)).toVar();
+          const ms = exp(od.mul(-0.5)).mul(0.22);
+          const powder = float(1.0).sub(exp(d.mul(-3.0)));
+          const lit = mix(uVegLit, uBlkLit, tone), sh = mix(uVegShade, uBlkShade, tone);
+          const col = mix(sh, lit, clamp(Ts.mul(powder.mul(0.4).add(0.6)).add(ms).mul(uDay), 0.0, 1.0)).toVar();
+          col.addAssign(uGlowCol.mul(glow).mul(float(1.0).sub(tone.mul(0.75))).mul(exp(max(hrel, 0.0).mul(-15.0))).mul(float(0.35).add(float(1.0).sub(Ts).mul(0.65))));
+          const wgt = Tt.mul(a);
+          acc.addAssign(col.mul(wgt)); tW.addAssign(wgt.mul(t)); wSum.addAssign(wgt);
+          Tt.mulAssign(float(1.0).sub(a));
+        });
+        t.addAssign(stepL);
+      });
+      const alpha = float(1.0).sub(Tt).toVar();
+      If(alpha.lessThanEqual(0.004), () => { Discard(); });
+      const tHit = T.select(wSum.greaterThan(1e-4), tW.div(wSum), t0);
+      const cOut = max(acc.div(alpha), vec3(0.0)).toVar();
+      If(uFog.x.greaterThan(0.5), () => { cOut.assign(mix(cOut, uFogCol, smoothstep(uFog.y, uFog.z, tHit))); });
+      return vec4(min(cOut, vec3(64.0)), alpha);
+    });
+    const mat = new THREE.MeshBasicNodeMaterial();
+    mat.name = "smokePlumes(node)";
+    mat.side = THREE.BackSide; mat.transparent = true; mat.depthWrite = false; mat.depthTest = false; mat.fog = false;
+    mat.vertexNode = Fn(() => {
+      const clip = cameraProjectionMatrix.mul(cameraViewMatrix).mul(modelWorldMatrix).mul(vec4(positionLocal, 1.0));
+      return vec4(clip.xy, min(clip.z, clip.w.mul(0.99999)), clip.w);
+    })();
+    mat.colorNode = march();
+    mat.uniforms = U;
+    return mat;
+  }
+
   function create(parent) {
+    const R = CBZ.renderer;
+    if (R && R.isWebGPURenderer && THREE.TSL) return createWith(parent, nodeMaterial(Math.round(18 + 14 * q01()), Math.round(36 + 28 * q01())));
+    return createWith(parent, null);
+  }
+  function createWith(parent, nodeMat) {
     const R = CBZ.renderer;
     const fragDepth = !!(R && R.capabilities && (R.capabilities.isWebGL2 ||
       (R.extensions && R.extensions.has && R.extensions.has("EXT_frag_depth"))));
     const vec4s = function () { const a = []; for (let i = 0; i < PLUMES; i++) a.push(new THREE.Vector4()); return a; };
-    const U = {
+    const U = nodeMat ? nodeMat.uniforms : {
       uAtlas: { value: null }, uHasAtlas: { value: 0 },
       uP: { value: vec4s() }, uQ: { value: vec4s() },
       uWind: { value: new THREE.Vector3(1, 0, 0.5) },
@@ -190,14 +342,14 @@
     }
     const defs = { PLUMES: PLUMES, SP_MAXI: Math.round(36 + 28 * q01()) };
     if (fragDepth) defs.HAS_FRAG_DEPTH = 1;
-    const mat = new THREE.ShaderMaterial({
+    const mat = nodeMat || new THREE.ShaderMaterial({
       uniforms: U, vertexShader: VS, fragmentShader: FS, defines: defs,
       transparent: true, depthWrite: false, depthTest: true, side: THREE.BackSide, fog: false,
       blending: THREE.CustomBlending,
       blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
       blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
     });
-    mat.extensions = { fragDepth: fragDepth };
+    if (!nodeMat) mat.extensions = { fragDepth: fragDepth };
     const mesh = new THREE.Mesh(_box || (_box = new THREE.BoxGeometry(1, 1, 1)), mat);
     mesh.name = "smokePlumes"; mesh.frustumCulled = false; mesh.renderOrder = 9; mesh.visible = false;
     mesh.userData.noHit = true; mesh.userData.transient = true;
