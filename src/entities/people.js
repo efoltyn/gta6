@@ -33,12 +33,15 @@
                 MHCLO binding; blink / jaw / smile / pain / fear / snarl /
                 anger blend shapes (ARKit face units, CC0) driven by
                 systems/facial.js through CBZ.human.facePose.
-     CLOTHES    real garments (fit, collar, cuffs, folds, seams: their own
-                normal + AO maps) fitted to THIS body by MHCLO, the body under
-                them removed. Their COLOUR and every uniform's markings are
-                the game's own outfit painters (city/clothes.js), painted at
-                4x and projected onto the garment the way the painted box
-                body maps them: one wardrobe, nothing parallel.
+     CLOTHES    real garments (fit, collar, cuffs, lapels, ties, folds, seams:
+                their own texture, normal + AO maps) fitted to THIS body by
+                MHCLO, the body under them removed. A uniform is BUILT from
+                them in layers (THE REAL WARDROBE: a duty shirt, a suit with
+                its own tie, a gilet over a sleeve), each garment zone dyed in
+                the colours the game's outfit painter (city/clothes.js) gives
+                that outfit, its markings (badge, patch, tape, lettering)
+                lifted off the painter's picture onto the real cloth. Only a
+                true print (a patterned dress) wears the picture itself.
      RIG        MakeHuman's game_engine skeleton (53 bones, UE names), placed
                 on THIS body by its joint cubes, skinned by its own weights
                 (garments inherit them through their binding).
@@ -73,8 +76,16 @@
 
   const SRC = (typeof document !== "undefined" && document.currentScript && document.currentScript.src) || "";
   const ROOT = SRC ? new URL("../../assets/people/", SRC).href : "assets/people/";
-  const VER = "p1";
-  const HIDE = 30;                 // the layer the proc body hides on
+  const VER = "p2";
+  /* THE PROC BODY HIDES ON A LAYER OF ITS OWN. It used to share
+     pedinstance.js's hide layer (30), and that is a layer with an owner: the
+     outfit guarantee sweep asks pedinstance whether a hidden cloth part is
+     drawn, pedinstance has no record of a part WE hid, calls it a hole, and
+     "repairs" it back onto layer 0. A swept real person walked about inside
+     their old box body. 29 is nobody's: no camera draws it, nothing reveals
+     it, and its readers (the touch tap ray) are told about it here. */
+  const HIDE = 29;
+  CBZ.PEOPLE_HIDE_LAYER = HIDE;
   const NW = 12;                   // wounds per person (shader arrays)
   const EXPR = ["blink", "jaw", "smile", "pain", "fear", "snarl", "anger"];
 
@@ -362,10 +373,375 @@
   }
   function shoesFor(cast, worn) {
     const id = worn ? String(worn.key).split("|")[0] : "street";
-    if (cast.f) return /police|soldier|army|guard|swat|construction|hunter|ranger|farmer/.test(id) ? "shoes:boots_f" : (/dress|exec|suit|office/.test(id) ? "shoes:flats" : "shoes:sneakers");
-    if (/police|soldier|army|guard|swat|construction|hunter|ranger|farmer|coverall|fire|corrections/.test(id)) return "shoes:boots";
-    if (/suit|tux|exec|office|banker|waiter|valet|driver|pilot|cabincrew|bartender/.test(id)) return "shoes:dress";
+    if (cast.f) return /police|precinct|soldier|army|guard|swat|tactical|construction|hivis|groundcrew|marshal|hunter|ranger|farmer|fisherman|corrections|sheriff|warden|security|firefighter|ems/.test(id) ? "shoes:boots_f" : (/dress|exec|suit|office|tuxedo|driver|pilot|cabincrew|waiter|designer|detective|doctor/.test(id) ? "shoes:flats" : "shoes:sneakers");
+    if (/police|precinct|soldier|army|guard|swat|tactical|construction|hivis|groundcrew|marshal|hunter|ranger|farmer|fisherman|coverall|fire|corrections|sheriff|warden|security|ems|mariner|janitor/.test(id)) return "shoes:boots";
+    if (/suit|tux|exec|office|banker|waiter|valet|driver|pilot|cabincrew|bartender|detective|doctor|designer|mailman|busdriver/.test(id)) return "shoes:dress";
     return cast.r() < 0.5 ? "shoes:sneakers" : "shoes:sneakers_b";
+  }
+
+  /* ================================================================ THE REAL WARDROBE
+     OWNER, looking at the first Blender people: the suits and the button-down
+     shirts "look so real", the chauffeur "looks terrible ... that painted on
+     looks horrible". The difference was exactly this: a plain shirt was a real
+     garment dyed one colour, a uniform was the outfit painter's FLAT PICTURE of
+     a uniform (a waistcoat drawn as a polygon, a tie as a stripe, buttons as
+     dots, lapels, pockets and aprons as outlines) wrapped round a real
+     garment that had none of them.
+
+     So a uniform is now BUILT, not painted: real garments (tools/people/
+     build_pack.py ships them, each split into ZONES: its main cloth, legs,
+     the shirt under it, the tie, the trim) layered the way the uniform is
+     worn — a shirt, a three-piece suit with its own tie, a gilet over a long
+     sleeve, bib overalls over a tee — each zone dyed in the uniform's colours.
+     Those COLOURS are read off the outfit painter's own picture (city/
+     clothes.js stays the one place an outfit is designed; the far, boxy body
+     still wears its picture), so a cop is the same navy at 10 m and at 100.
+     Its MARKINGS (the badge, the nameplate, the agency patch, reflective
+     tape, a red cross, lettering, a tracksuit's stripes) are lifted off that
+     picture too and laid on the real cloth — but only the markings: whatever
+     the painter drew to fake STRUCTURE (a vest, lapels, pockets, a placket, a
+     tie) is left behind, because the garment has the real one.
+     An outfit whose picture IS its cloth (a printed dress, gingham, a kid's
+     graphic tee) keeps it as the print it is.
+
+     A layer:  { g: garment, z: { main, legs, shirt, tie } colour sources,
+                 sleeve: source, marks: "TAL" rows that may carry markings,
+                 camo: 1, rough, fabric: 1 (a suit picks its nearest real cloth),
+                 over: 1 (worn over the layer below: hides no body),
+                 tie: source (a tie made on this shirt, setupTie) }
+     A colour source:  T  the painter's torso (back panel: plain cloth)
+                       Tf the torso's front panel   J the tailored jacket
+                       A  the sleeve   L the trousers   tie the painter's tie
+                       "#rrggbb" a fixed colour     keep the garment's own */
+  const SHIRT = function (o) { return [Object.assign({ g: "m_shirt", z: { main: "T", legs: "L" }, marks: "TAL" }, o || {})]; };
+  const SUIT3 = function (z, o) { return [Object.assign({ g: "m_suit3", z: z, marks: "" }, o || {})]; };
+  const BLAZER = function (z, o) { return [Object.assign({ g: "f_blazer", z: z, marks: "" }, o || {})]; };
+  const JACKET = function (o) { return [Object.assign({ g: "m_jacket", z: { main: "T", shirt: "Tf", legs: "L" }, marks: "TAL" }, o || {})]; };
+  const HIVIS = function (base) {
+    return [{ g: base || "m_long", z: { main: "A", legs: "L" }, marks: "AL" }, { g: "m_gilet", z: { main: "T" }, marks: "T", over: 1 }];
+  };
+  const WARDROBE = {
+    // ---- duty shirts: a real button-down (collar, placket, yoke, pockets)
+    police: { m: SHIRT() }, precinct: { m: SHIRT() }, corrections: { m: SHIRT() }, sheriff: { m: SHIRT() },
+    warden: { m: SHIRT() }, security: { m: SHIRT() }, mailman: { m: SHIRT() }, ranger: { m: SHIRT() },
+    janitor: { m: SHIRT() }, mariner: { m: SHIRT() }, busdriver: { m: SHIRT() }, ems: { m: SHIRT() },
+    inmate: { m: SHIRT() }, inmate_cap: { m: SHIRT() }, inmate_orderly: { m: SHIRT() }, inmate_chapel: { m: SHIRT() },
+    chef: { m: SHIRT({ marks: "T" }) }, bartender: { m: SHIRT({ marks: "" }) }, school: { m: SHIRT({ marks: "" }) },
+    soldier: { m: SHIRT({ camo: 1, marks: "" }) },
+    // ---- a vest over a sleeve: hi-vis, blaze orange, a plate carrier
+    construction: { m: HIVIS("m_long") }, hivis: { m: HIVIS("m_long") }, groundcrew: { m: HIVIS("m_long") },
+    marshal: { m: HIVIS("m_long") },
+    hunter: { m: [{ g: "m_shirt", z: { main: "A", legs: "L" }, camo: "A", marks: "" }, { g: "m_gilet", z: { main: "T" }, marks: "T", over: 1 }] },
+    swat: { m: [{ g: "m_shirt", z: { main: "A", legs: "L" }, marks: "AL" }, { g: "m_gilet", z: { main: "T" }, marks: "T", over: 1, rough: 0.8 }] },
+    tactical: { m: [{ g: "m_shirt", z: { main: "A", legs: "L" }, marks: "" }, { g: "m_gilet", z: { main: "T" }, marks: "T", over: 1, rough: 0.8 }] },
+    // ---- jackets: a turnout coat, a ski shell, a coverall, a tracksuit
+    firefighter: { m: JACKET({ z: { main: "T", shirt: "T", legs: "L" } }) },
+    // (a ski shell is plain: the painter's crosses sit at the chest's centre,
+    // which on an open jacket is the tee, and a cross cut in half is a glitch)
+    ski: { m: JACKET({ sleeve: "A", marks: "" }) }, ski_patrol: { m: JACKET({ sleeve: "A", marks: "" }) },
+    puffer: { m: JACKET({ marks: "" }) }, denim_jacket: { m: JACKET({ marks: "" }) }, hoodie: { m: JACKET({ marks: "T" }) },
+    leather: { m: JACKET({ z: { main: "J", shirt: "Tf", legs: "L" }, marks: "", rough: 0.5 }) },
+    varsity: { m: JACKET({ sleeve: "A", marks: "T" }) }, hiker: { m: JACKET({ sleeve: "A", marks: "" }) },
+    homeless: { m: JACKET({ z: { main: "J", shirt: "Tf", legs: "L" }, marks: "" }) },
+    coveralls: { m: JACKET({ z: { main: "T", shirt: "T", legs: "T" }, marks: "T" }) },
+    // (a sleeve stripe runs down the outer arm, which faces the camera only
+    // as a sliver at the silhouette: on these the sleeves stay plain)
+    pitcrew: { m: JACKET({ z: { main: "T", shirt: "T", legs: "L" }, marks: "TL" }) }, racer: { m: JACKET({ z: { main: "T", shirt: "T", legs: "L" }, marks: "TL" }) },
+    athletic: { m: JACKET({ z: { main: "T", shirt: "T", legs: "L" }, marks: "TL" }) }, tracksuit: { m: JACKET({ z: { main: "T", shirt: "T", legs: "L" }, marks: "TL" }) },
+    tracksuit2: { m: JACKET({ z: { main: "T", shirt: "T", legs: "L" }, marks: "TL" }) }, tracksuit3: { m: JACKET({ z: { main: "T", shirt: "T", legs: "L" }, marks: "TL" }) },
+    // ---- tailoring: a real suit, a real tie, a real bow tie
+    suit: { m: [{ g: "m_suit", z: { main: "J", legs: "L" }, fabric: 1, marks: "" }], f: BLAZER({ main: "J", shirt: "Tf", legs: "L" }) },
+    tuxedo: { m: [{ g: "m_tux", z: { main: "J", shirt: "#f1f2ec", tie: "#141414", legs: "L" }, marks: "" }], f: BLAZER({ main: "J", shirt: "#f1f2ec", legs: "L" }) },
+    office: { m: SUIT3({ main: "L", shirt: "T", tie: "tie", legs: "L" }), f: BLAZER({ main: "L", shirt: "T", legs: "L" }) },
+    // the detective at his desk, jacket off (city/outfits.js): his dress
+    // shirt, a tie made on it (setupTie), the shield and the holster on his
+    // belt (the duty kit), no markings lifted (his picture's are the tie)
+    detective: { m: SHIRT({ marks: "", tie: "tie" }) },
+    doctor: { m: SUIT3({ main: "J", shirt: "Tf", tie: "tie", legs: "L" }), f: BLAZER({ main: "J", shirt: "Tf", legs: "L" }) },
+    // a chauffeur, a valet: the waistcoat they were painted in is a jacket
+    driver: { m: SUIT3({ main: "T", shirt: "A", tie: "tie", legs: "L" }), f: BLAZER({ main: "T", shirt: "A", legs: "L" }) },
+    valet: { m: SUIT3({ main: "Tf", shirt: "A", tie: "tie", legs: "L" }), f: BLAZER({ main: "Tf", shirt: "A", legs: "L" }) },
+    waiter: { m: [{ g: "m_tux", z: { main: "J", shirt: "#f1f2ec", tie: "#141414", legs: "L" }, marks: "" }], f: BLAZER({ main: "J", shirt: "#f1f2ec", legs: "L" }) },
+    pilot: { m: SUIT3({ main: "#1c2639", shirt: "T", tie: "tie", legs: "L" }, { marks: "T" }), f: BLAZER({ main: "#1c2639", shirt: "T", legs: "L" }, { marks: "T" }) },
+    cabincrew: { m: SUIT3({ main: "T", shirt: "#eef0f2", tie: "tie", legs: "L" }), f: BLAZER({ main: "T", shirt: "#eef0f2", legs: "L" }) },
+    designer: { m: SUIT3({ main: "J", shirt: "Tf", tie: "tie", legs: "L" }), f: BLAZER({ main: "J", shirt: "Tf", legs: "L" }) },
+    // ---- work and play
+    scrubs: { m: [{ g: "m_tee", z: { main: "T", legs: "L" }, marks: "" }], f: [{ g: "f_tee", z: { main: "T", legs: "L" }, marks: "" }] },
+    vendor: { m: [{ g: "m_tee", z: { main: "T", legs: "L" }, marks: "" }] },
+    housekeeping: { m: SHIRT({ marks: "" }), f: [{ g: "f_suit", z: { main: "T", legs: "L" }, marks: "" }] },
+    lifeguard: { m: [{ g: "m_tee", z: { main: "T", legs: "L" }, marks: "TL" }], f: [{ g: "f_shorts", z: { main: "T", legs: "L" }, marks: "TL" }] },
+    fisherman: { m: [{ g: "m_overalls", z: { main: "Tf", shirt: "A" }, marks: "" }] },
+    farmer: { m: [{ g: "m_overalls", z: { main: "Tf", shirt: "A" }, marks: "" }] },
+    wifebeater: { m: [{ g: "m_tank", z: { main: "T", legs: "L" }, marks: "" }] }, inmate_tank: { m: [{ g: "m_tank", z: { main: "T", legs: "L" }, marks: "" }] },
+    schoolgirl: { m: SHIRT({ marks: "" }), f: [{ g: "f_suit", z: { main: "T", legs: "L" }, marks: "" }] },
+  };
+  // an outfit whose picture IS its cloth: a printed dress, gingham, a kid's tee
+  const PRINTS = /^(dress|sundress|blouse|romper|pinafore|onesie|pyjamas|kidtee|kidhoodie|graphic_tee|comp|gang|basics|street|civvies)$/;
+
+  /* THE PAINTER'S COLOURS. Its picture at 1x, read once per outfit key: the
+     modal colour of a plain patch of each panel (the back of the torso is the
+     cloth with nothing on it; the front's middle strip is skipped, that is
+     where ties and plackets are). */
+  const palCache = Object.create(null);
+  /* the cloth's colour in a patch: the biggest CLUSTER of near colours, not
+     the single commonest one (a painter shades its cloth with gradients, which
+     spread the cloth over many near bins, while a flat strap or badge lands in
+     one: counted bin by bin, the mailman's bag strap outvoted his shirt) */
+  function modalHex(d, W, x0, y0, x1, y1, skip) {
+    const bins = new Map();
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      if (skip && skip(x, y)) continue;
+      const i = (y * W + x) * 4;
+      if (d[i + 3] < 128) continue;
+      const k = ((d[i] >> 4) << 8) | ((d[i + 1] >> 4) << 4) | (d[i + 2] >> 4);
+      let b = bins.get(k);
+      if (!b) { b = [0, 0, 0, 0]; bins.set(k, b); }
+      b[0]++; b[1] += d[i]; b[2] += d[i + 1]; b[3] += d[i + 2];
+    }
+    if (!bins.size) return null;
+    const all = Array.from(bins.values());
+    for (const b of all) { b.r = b[1] / b[0]; b.g = b[2] / b[0]; b.b = b[3] / b[0]; }
+    all.sort(function (a, b) { return b[0] - a[0]; });
+    let best = null, bestN = -1;
+    for (let i = 0; i < Math.min(16, all.length); i++) {
+      const c = all[i];
+      let n = 0;
+      for (const o of all) if (Math.max(Math.abs(o.r - c.r), Math.abs(o.g - c.g), Math.abs(o.b - c.b)) <= 26) n += o[0];
+      if (n > bestN) { bestN = n; best = c; }
+    }
+    let n = 0, r = 0, g = 0, bl = 0;
+    for (const o of all) if (Math.max(Math.abs(o.r - best.r), Math.abs(o.g - best.g), Math.abs(o.b - best.b)) <= 26) { n += o[0]; r += o[1]; g += o[2]; bl += o[3]; }
+    return (Math.round(r / n) << 16) | (Math.round(g / n) << 8) | Math.round(bl / n);
+  }
+  /* WOODLAND in the uniform's own colour: its base, a darker shade, an earth
+     brown and a light khaki (a painter's picture is no palette: its block
+     highlights read as two khakis and the soldier went pale) */
+  function camoFrom(h) {
+    const r = (h >> 16) & 255, g = (h >> 8) & 255, b = h & 255;
+    const c = function (v) { return Math.max(0, Math.min(255, Math.round(v))); };
+    const mk = function (R, G, B) { return (c(R) << 16) | (c(G) << 8) | c(B); };
+    return [h, mk(r * 0.6, g * 0.62, b * 0.58), mk(r * 0.95 + 20, g * 0.76, b * 0.55), mk(r * 1.32 + 16, g * 1.26 + 14, b * 1.22 + 12)];
+  }
+  function paletteOf(worn) {
+    const key = worn.key;
+    if (palCache[key] !== undefined) return palCache[key];
+    let out = null;
+    try {
+      const hi = CBZ.cityClothesHiRes ? CBZ.cityClothesHiRes(key, 1, true) : null;
+      const cv = hi && hi.canvas;
+      if (cv) {
+        const W = cv.width, d = cv.getContext("2d").getImageData(0, 0, W, cv.height).data;
+        const neck = worn.set.parts && worn.set.parts.neck;
+        out = {
+          T: modalHex(d, W, 64, 14, 96, 70), Tf: modalHex(d, W, 4, 16, 60, 70, function (x) { return x >= 26 && x <= 38; }),
+          J: modalHex(d, W, 64, 106, 96, 160), A: modalHex(d, W, 64, 182, 96, 206), L: modalHex(d, W, 64, 222, 96, 250),
+          tie: neck && neck.tie != null ? neck.tie | 0 : modalHex(d, W, 30, 34, 34, 60),
+        };
+      }
+    } catch (e) { out = null; }
+    return (palCache[key] = out);
+  }
+
+  /* THE MARKINGS. The painter's picture at 4x; per panel, its cloth colour
+     (modal) and every pixel that is NOT that cloth and not just a lighter or
+     darker shade of it (shading, seams, pockets, a placket, a tie on a white
+     shirt are all shades). Of those, connected runs that are SMALL (a badge,
+     a nameplate, a patch, a letter, a cross) or BANDS / STRIPES (reflective
+     tape, a tracksuit stripe) stay; a big run is a painted vest or apron or
+     colour block, which the real garment's own cut replaces. */
+  const markCache = Object.create(null);
+  const AWK = 4;
+  const PANELS = [];
+  [["torso", 0, 96], ["arm", 176, 216], ["leg", 216, 256]].forEach(function (r) {
+    [["front", 0, 64], ["back", 64, 96], ["side", 96, 112]].forEach(function (c) { PANELS.push({ row: r[0], col: c[0], x0: c[1], x1: c[2], y0: r[1], y1: r[2] }); });
+  });
+  // a pixel that is not the panel's cloth and not merely a shade of it
+  function notCloth(d, i, br, bg, bb, bs) {
+    if (d[i + 3] < 128) return false;
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    const dr = r - br, dg = g - bg, db = b - bb;
+    if (0.3 * dr * dr + 0.59 * dg * dg + 0.11 * db * db < 30 * 30) return false;
+    const s = r + g + b + 30;
+    return Math.max(Math.abs(r / s - br / bs), Math.abs(g / s - bg / bs), Math.abs(b / s - bb / bs)) >= 0.045;
+  }
+  /* Found on the 1x picture (cheap: 32k pixels), drawn from the 4x one: only
+     the 4x pixels inside a kept 1x cell (grown by one) are tested again, so
+     the edges are the painter's own crisp ones. */
+  function marksOf(worn) {
+    const key = worn.key;
+    if (markCache[key] !== undefined) return markCache[key];
+    let tx = null;
+    try {
+      const lo = CBZ.cityClothesHiRes ? CBZ.cityClothesHiRes(key, 1, true) : null;
+      const hi = lo ? CBZ.cityClothesHiRes(key, AWK, true) : null;
+      const cv = hi && hi.canvas;
+      if (cv && lo.canvas) {
+        const W1 = lo.canvas.width, H1 = lo.canvas.height;
+        const d1 = lo.canvas.getContext("2d").getImageData(0, 0, W1, H1).data;
+        const W = cv.width, H = cv.height, ctx = cv.getContext("2d");
+        const img = ctx.getImageData(0, 0, W, H), d = img.data;
+        const keep1 = new Uint8Array(W1 * H1), baseAt = new Int32Array(W1 * H1).fill(-1);
+        const keep = new Uint8Array(W * H);
+        let any = false;
+        for (const p of PANELS) {
+          const x0 = p.x0, x1 = p.x1, y0 = p.y0, y1 = p.y1, pw = x1 - x0, ph = y1 - y0;
+          const base = modalHex(d1, W1, x0, y0, x1, y1);
+          if (base == null) continue;
+          const br = (base >> 16) & 255, bg = (base >> 8) & 255, bb = base & 255, bs = br + bg + bb + 30;
+          for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) baseAt[y * W1 + x] = base;
+          const mark = new Uint8Array(pw * ph);
+          for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) {
+            if (notCloth(d1, ((y0 + y) * W1 + x0 + x) * 4, br, bg, bb, bs)) mark[y * pw + x] = 1;
+          }
+          // connected runs (4-neighbour union-find over the panel)
+          const par = new Int32Array(pw * ph).fill(-1);
+          const find = function (a) { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+          for (let i = 0; i < pw * ph; i++) {
+            if (!mark[i]) continue;
+            par[i] = i;
+            const x = i % pw;
+            if (x > 0 && mark[i - 1]) { const a = find(i - 1), b = find(i); if (a !== b) par[b] = a; }
+            if (i >= pw && mark[i - pw]) { const a = find(i - pw), b = find(i); if (a !== b) par[b] = a; }
+          }
+          const st = new Map();
+          for (let i = 0; i < pw * ph; i++) {
+            if (!mark[i]) continue;
+            const r = find(i), x = i % pw, y = (i / pw) | 0;
+            let s = st.get(r);
+            if (!s) { s = [0, x, y, x, y]; st.set(r, s); }
+            s[0]++; if (x < s[1]) s[1] = x; if (y < s[2]) s[2] = y; if (x > s[3]) s[3] = x; if (y > s[4]) s[4] = y;
+          }
+          const ok = new Map();
+          st.forEach(function (s, r) {
+            const w = s[3] - s[1] + 1, h = s[4] - s[2] + 1, n = s[0];
+            // small for its panel, or small outright: a patch on a 16 px side
+            // panel is a big share of it (a painted vest is thousands of px)
+            const small = n < Math.max(0.07 * pw * ph, 360);
+            const band = h < 0.12 * ph && w > 0.55 * pw;
+            const cx = (s[1] + s[3]) / 2 / pw;
+            // a painted tie hangs from the collar, dead centre (a lifeguard's
+            // cross beside it is a marking)
+            const tieLike = p.row === "torso" && p.col === "front" && cx > 0.42 && cx < 0.58 && s[2] < 0.16 * ph && h > 0.28 * ph && w < 0.2 * pw;
+            // a stripe: narrow for its panel, or a few pixels in a narrow one
+            const stripe = (w < 0.14 * pw || w <= 4) && h > 0.4 * ph && !tieLike;
+            ok.set(r, (small || band || stripe) && !tieLike);
+          });
+          for (let i = 0; i < pw * ph; i++) {
+            if (!mark[i] || !ok.get(find(i))) continue;
+            keep1[(y0 + ((i / pw) | 0)) * W1 + x0 + (i % pw)] = 1;
+          }
+        }
+        // the 4x pixels of every kept cell and its neighbours, tested against
+        // that cell's own panel cloth
+        for (let y = 0; y < H1; y++) for (let x = 0; x < W1; x++) {
+          let near = 0;
+          for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const yy = y + dy, xx = x + dx;
+            if (yy >= 0 && yy < H1 && xx >= 0 && xx < W1 && keep1[yy * W1 + xx] && baseAt[yy * W1 + xx] === baseAt[y * W1 + x]) { near = 1; break; }
+          }
+          const base = baseAt[y * W1 + x];
+          if (!near || base < 0) continue;
+          const br = (base >> 16) & 255, bg = (base >> 8) & 255, bb = base & 255, bs = br + bg + bb + 30;
+          for (let sy = 0; sy < AWK; sy++) for (let sx = 0; sx < AWK; sx++) {
+            const X = x * AWK + sx, Y = y * AWK + sy;
+            if (notCloth(d, (Y * W + X) * 4, br, bg, bb, bs)) { keep[Y * W + X] = 1; any = true; }
+          }
+        }
+        if (any) {
+          // raw bytes, not a canvas: a canvas stores its pixels premultiplied,
+          // so every clear texel would come back black and the filtering would
+          // ring each badge with a dark fringe; here a clear texel keeps the
+          // cloth's own colour. Rows flipped: the projection's v runs up.
+          const out = new Uint8Array(W * H * 4);
+          for (let y = 0; y < H; y++) {
+            const sy = H - 1 - y;
+            for (let x = 0; x < W; x++) {
+              const si = (sy * W + x) * 4, di = (y * W + x) * 4;
+              out[di] = d[si]; out[di + 1] = d[si + 1]; out[di + 2] = d[si + 2]; out[di + 3] = keep[sy * W + x] ? 255 : 0;
+            }
+          }
+          tx = new THREE.DataTexture(out, W, H, THREE.RGBAFormat);
+          tx.magFilter = THREE.LinearFilter; tx.minFilter = THREE.LinearMipmapLinearFilter;
+          tx.generateMipmaps = true; tx.anisotropy = 4; tx.colorSpace = THREE.LinearSRGBColorSpace;
+          tx.needsUpdate = true;
+        }
+      }
+    } catch (e) { tx = null; }
+    return (markCache[key] = tx);
+  }
+  const _noMarks = (function () {
+    if (typeof document === "undefined") return null;
+    const c = document.createElement("canvas"); c.width = c.height = 2;
+    const t = new THREE.CanvasTexture(c); return t;
+  })();
+  function hexOrNull(v) { return v == null || v === "keep" ? null : v; }
+  /* A STREET NEVER WAITS FOR A BADGE. In the city (the LOD manager's
+     builds) an outfit's markings are worked out on a later quiet tick; the
+     person is dressed at once and the badge lands a moment after, on the
+     materials waiting for it. Tools and the lab get them at once. */
+  const marksQueue = [], marksWait = new Map();
+  function marksSoon(worn) {
+    if (markCache[worn.key] !== undefined) return markCache[worn.key];
+    if (!marksWait.has(worn.key)) { marksWait.set(worn.key, []); marksQueue.push(worn); }
+    return undefined;
+  }
+  function marksPump() {
+    const w = marksQueue.shift();
+    if (!w) return false;
+    const t = marksOf(w);
+    const list = marksWait.get(w.key) || [];
+    marksWait.delete(w.key);
+    for (const m of list) if (m.userData && m.userData.u) m.userData.u.pMarks.value = t || _noMarks;
+    return true;
+  }
+  /* the outfit's LAYERS, each a garment and the colours / markings it wears */
+  function wardrobePlan(ch, cast, worn, flat, defer) {
+    const id = worn ? String(worn.key).split("|")[0] : null;
+    const spec = id && WARDROBE[id];
+    const pal = spec ? paletteOf(worn) : null;
+    if (spec && pal) {
+      const src = (cast.f && spec.f) || spec.m;
+      const parts = (worn.set && worn.set.parts) || {};
+      const cc = (worn.set && worn.set.c) || {};
+      // a region the painter did not paint is whatever the outfit dyed the
+      // rig there (its picture there is only the fill): the office shirt's
+      // painter draws no trousers, the rig's trousers are charcoal
+      const own = function (region, fallback) {
+        const v = flat[region] != null ? flat[region] : cc[region];
+        return v != null ? v : fallback;
+      };
+      const col = function (s) {
+        if (s == null || s === "keep") return null;
+        if (typeof s === "number") return s;
+        if (s[0] === "#") return parseInt(s.slice(1), 16);
+        if (s === "L") return parts.legs ? pal.L : own("legs", pal.L);
+        if (s === "A") return parts.arms || parts.sleeves ? pal.A : own("arms", pal.A);
+        if ((s === "T" || s === "Tf") && !parts.torso) return own("torso", pal[s]);
+        if (s === "J" && !parts.jacket) return col("T");
+        return pal[s] != null ? pal[s] : null;
+      };
+      return src.map(function (ly) {
+        const z = ly.z || {};
+        const mk = ly.marks ? (defer ? marksSoon(worn) : marksOf(worn)) : null;
+        return {
+          key: "cloth:" + ly.g, over: !!ly.over, rough: ly.rough,
+          zc: [col(z.main || "T"), col(z.legs || "L"), col(z.shirt), col(z.tie), null, null],
+          sleeve: ly.sleeve ? col(ly.sleeve) : null,
+          marks: mk || null, marksKey: mk === undefined ? worn.key : null, markRows: ly.marks || "",
+          camo: ly.camo ? camoFrom(col(ly.camo === 1 ? "T" : ly.camo) || 0x4a5238) : null, fabric: !!ly.fabric,
+          tie: ly.tie ? col(ly.tie) : null,
+        };
+      });
+    }
+    // PRINTS and the plain path: the garment the structure asks for, its own
+    // cut; a painted print projected on it, or flat colours read off the rig.
+    // (A uniform whose picture could not be read wears the picture: never the
+    // garment's raw texture, a cop in a denim-blue shirt.)
+    const key = garmentFor(ch, cast, worn);
+    if (worn && (PRINTS.test(id) || !spec || !pal)) {
+      return [{ key: key, print: true, flat: flat, zc: [null, null, null, null, null, null] }];
+    }
+    return [{ key: key, zc: [hexOrNull(flat.torso), hexOrNull(flat.legs), null, null, null, null], sleeve: flat.arms != null && flat.arms !== flat.torso ? flat.arms : null, marks: null, markRows: "" }];
   }
 
   // ================================================================ assets (shared per asset)
@@ -451,14 +827,17 @@
       if (!touched.length) { wi[v * 4] = S.bix.pelvis; ww[v * 4] = 255; }
       for (let j = 0; j < touched.length; j++) acc[touched[j]] = 0;
     }
-    let map = view(e.map), uv = view(e.uv), index = view(e.index), atlasA = null, atlasB = null;
+    let map = view(e.map), uv = view(e.uv), index = view(e.index), atlasA = null, atlasB = null, zone = e.zone ? view(e.zone) : null;
     if (e.role === "cloth") {
-      const r = atlasSplit(a, map, uv, index);
-      map = r.map; uv = r.uv; index = r.index; atlasA = r.A; atlasB = r.B;
+      const r = atlasSplit(a, map, uv, index, zone);
+      map = r.map; uv = r.uv; index = r.index; atlasA = r.A; atlasB = r.B; zone = r.Z;
     }
     a.map = map; a.nR = map.length;
     a.uv = new THREE.BufferAttribute(new Float32Array(uv), 2);
     if (atlasA) { a.atlasA = new THREE.BufferAttribute(atlasA, 2); a.atlasB = new THREE.BufferAttribute(atlasB, 2); }
+    // each vertex's zone of the garment (main cloth / legs / shirt / tie /
+    // trim / hidden): what the real wardrobe dyes it as
+    if (e.role === "cloth") a.zone = new THREE.BufferAttribute(zone || new Uint8Array(map.length), 1);
     a.index = new THREE.BufferAttribute(index.length && map.length > 65535 ? new Uint32Array(index) : new Uint16Array(index), 1);
     a.index._peopleShared = true;
     const sk = skinAttrs(map, function (r, j) { return wi[map[r] * 4 + j]; }, function (r, j) { return ww[map[r] * 4 + j]; });
@@ -485,7 +864,7 @@
   /* THE PROJECTION. Done once per garment, on MakeHuman's neutral body in
      its bind pose, because WHERE on a garment a vertex is (front panel of
      the left sleeve, 40 % down) does not change with who wears it. */
-  function atlasSplit(a, map0, uv0, index0) {
+  function atlasSplit(a, map0, uv0, index0, zone0) {
     const e = a.e, pos = fit(a, S.base);
     const J = joints(S.base);
     const piece = view(e.piece), pieces = e.pieces || [];
@@ -536,7 +915,7 @@
     // only if it reaches the chest; otherwise it is trousers cut high
     const pieceTop = new Float32Array(pieces.length).fill(-1e9);
     for (let v = 0; v < e.nVerts; v++) { const pi = piece[v]; if (pos[v * 3 + 1] > pieceTop[pi]) pieceTop[pi] = pos[v * 3 + 1]; }
-    const keyMap = new Map(), outMap = [], outUv = [], A = [], B = [], idx = [];
+    const keyMap = new Map(), outMap = [], outUv = [], outZ = [], A = [], B = [], idx = [];
     const nT = index0.length / 3;
     for (let t = 0; t < nT; t++) {
       const r0 = index0[t * 3], r1 = index0[t * 3 + 1], r2 = index0[t * 3 + 2];
@@ -564,7 +943,7 @@
         if (id === undefined) {
           id = outMap.length; keyMap.set(k, id);
           const o = map0[r];
-          outMap.push(o); outUv.push(uv0[r * 2], uv0[r * 2 + 1]);
+          outMap.push(o); outUv.push(uv0[r * 2], uv0[r * 2 + 1]); outZ.push(zone0 ? zone0[r] : 0);
           const p = project(region, pos[o * 3], pos[o * 3 + 1], pos[o * 3 + 2]);
           const u = uOf(f, p[0], p[1]);
           const row = region === 0 ? ROWS.torso : region === 1 ? ROWS.arm : ROWS.leg;
@@ -581,7 +960,7 @@
         idx.push(id);
       }
     }
-    return { map: Uint32Array.from(outMap), uv: Float32Array.from(outUv), A: Float32Array.from(A), B: Float32Array.from(B), index: idx };
+    return { map: Uint32Array.from(outMap), uv: Float32Array.from(outUv), A: Float32Array.from(A), B: Float32Array.from(B), index: idx, Z: Uint8Array.from(outZ) };
   }
 
   // ================================================================ normals
@@ -735,47 +1114,137 @@
     m.customProgramCacheKey = function () { return "people-skin-1"; };
     return pbr(m);
   }
-  function clothMaterial(P, a, worn) {
-    const fl = (worn && worn.flat) || {};
+  /* THE CLOTH.
+     REAL (the wardrobe's garments): the garment's own texture, every zone
+     dyed by its own light and dark (each texel against its zone's mean
+     luminance: the weave, the folds, a tie's stripes or paisley come through
+     in any colour; DETAIL from the pack says how much), the trim (buttons,
+     buckles) in its own colours, the painter's MARKINGS laid on through the
+     body projection, a camouflage printed in bind space so it rides the body
+     across every seam.
+     PRINT (a printed dress, gingham, a kid's tee): the painter's picture is
+     the fabric, projected panel by panel the way the boxy body maps it, over
+     the garment's own AO and weave. */
+  const CAMO_FN = [
+    "float pcHash( vec3 p ) { p = fract( p * 0.3183099 + 0.1 ); p *= 17.0; return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) ); }",
+    "float pcNoise( vec3 x ) { vec3 i = floor( x ), f = fract( x ); f = f * f * ( 3.0 - 2.0 * f );",
+    "\treturn mix( mix( mix( pcHash( i ), pcHash( i + vec3( 1.0, 0.0, 0.0 ) ), f.x ), mix( pcHash( i + vec3( 0.0, 1.0, 0.0 ) ), pcHash( i + vec3( 1.0, 1.0, 0.0 ) ), f.x ), f.y ),",
+    "\t\tmix( mix( pcHash( i + vec3( 0.0, 0.0, 1.0 ) ), pcHash( i + vec3( 1.0, 0.0, 1.0 ) ), f.x ), mix( pcHash( i + vec3( 0.0, 1.0, 1.0 ) ), pcHash( i + vec3( 1.0, 1.0, 1.0 ) ), f.x ), f.y ), f.z ); }",
+    // woodland: three overlapping fields of blobs (~12 cm, a little taller
+    // than wide), each with a finer octave to fray its edge
+    "vec3 peopleCamo( vec3 p ) {",
+    "\tvec3 q = p * vec3( 8.0, 5.5, 8.0 );",
+    "\tfloat a = pcNoise( q ) * 0.72 + pcNoise( q * 2.9 + 3.1 ) * 0.28;",
+    "\tfloat b = pcNoise( q + vec3( 11.7, 3.3, 5.1 ) ) * 0.72 + pcNoise( q * 3.1 + 7.3 ) * 0.28;",
+    "\tfloat c = pcNoise( q * 1.4 + vec3( 23.1, 9.2, 1.7 ) ) * 0.72 + pcNoise( q * 3.4 + 1.7 ) * 0.28;",
+    "\tvec3 col = pCamo[ 0 ];",
+    "\tif ( a > 0.55 ) col = pCamo[ 1 ];",
+    "\tif ( b > 0.6 ) col = pCamo[ 2 ];",
+    "\tif ( c > 0.66 ) col = pCamo[ 3 ];",
+    "\treturn col;",
+    "}",
+  ].join("\n");
+  function hexVec(h) { const c = new THREE.Color(h); return new THREE.Vector3(c.r, c.g, c.b); }
+  function clothMaterial(P, a, L) {
+    const e = a.e, Z = e.zones || [], print = !!L.print;
+    let mapTex = print ? (L.tex || null) : tex(e.mat && e.mat.map);
+    const zc = [], zp = [];
+    let ref01 = null, keep01 = false;
+    // a suit wears the nearest of its real cloths; near enough, as it is
+    if (!print && L.fabric && e.mat && e.mat.fabrics && L.zc[0] != null) {
+      const t = new THREE.Color(L.zc[0]);
+      let best = null, bd = 1e9;
+      for (const f of e.mat.fabrics) {
+        const dd = Math.abs(f.main[0] - t.r) + Math.abs(f.main[1] - t.g) + Math.abs(f.main[2] - t.b);
+        if (dd < bd) { bd = dd; best = f; }
+      }
+      if (best) {
+        mapTex = tex(best.map);
+        ref01 = 0.2126 * best.main[0] + 0.7152 * best.main[1] + 0.0722 * best.main[2];
+        keep01 = bd < 0.09;
+        P.fabric = best.name;
+      }
+    }
+    for (let z = 0; z < 6; z++) {
+      const h = L.zc ? L.zc[z] : null, Zs = Z[z] || { ref: 0.5, k: 0.6 };
+      zc.push(hexVec(h != null ? h : 0x808080));
+      let ref = Zs.ref || 0.5, keep = h == null || z === 4;
+      if (ref01 != null && z <= 1) { ref = ref01; if (keep01) keep = true; }
+      zp.push(new THREE.Vector4(Zs.k != null ? Zs.k : 0.6, ref, keep ? 1 : 0, z === 5 ? 1 : 0));
+    }
+    const fl = L.flat || {};
     const fv = function (h) { const c = new THREE.Color(h != null ? h : 0); return new THREE.Vector4(c.r, c.g, c.b, h != null ? 1 : 0); };
+    const rows = L.markRows || "";
+    const camo = L.camo || null;
     const U = Object.assign(woundUniforms(), {
-      pShade: { value: tex(a.e.mat && a.e.mat.shade) }, pJacket: { value: worn && worn.jacket ? 1 : 0 },
-      pFill: { value: new THREE.Color(worn && worn.bodyHex != null ? worn.bodyHex : 0x555555) },
+      pShade: { value: tex(e.mat && e.mat.shade) },
+      pZC: { value: zc }, pZP: { value: zp },
+      pSleeve: { value: L.sleeve != null ? (function () { const c = new THREE.Color(L.sleeve); return new THREE.Vector4(c.r, c.g, c.b, 1); })() : new THREE.Vector4(0, 0, 0, 0) },
+      pMarks: { value: L.marks || _noMarks }, pMarkRows: { value: new THREE.Vector3(rows.indexOf("T") >= 0 ? 1 : 0, rows.indexOf("A") >= 0 ? 1 : 0, rows.indexOf("L") >= 0 ? 1 : 0) },
+      pCamo: { value: (camo || [0, 0, 0, 0]).map(hexVec) }, pCamoOn: { value: camo ? 1 : 0 },
+      // print mode
+      pJacket: { value: L.jacket ? 1 : 0 }, pFill: { value: new THREE.Color(L.bodyHex != null ? L.bodyHex : 0x555555) },
       pFlatT: { value: fv(fl.torso) }, pFlatA: { value: fv(fl.arms) }, pFlatL: { value: fv(fl.legs) },
     });
-    const m = new THREE.MeshStandardMaterial({ map: worn && worn.tex ? worn.tex : null, color: 0xffffff, normalMap: tex(a.e.mat && a.e.mat.normalMap),
-      roughness: 0.88, metalness: 0, skinning: true });
+    const m = new THREE.MeshStandardMaterial({ map: mapTex, color: 0xffffff, normalMap: tex(e.mat && e.mat.normalMap),
+      roughness: L.rough || 0.88, metalness: 0, skinning: true });
     m.normalScale.set(0.9, 0.9);
     m.userData.u = U;
+    m.userData.cloth = { print: print, zc: zc, zp: zp };
+    if (L.marksKey && marksWait.has(L.marksKey)) marksWait.get(L.marksKey).push(m);
     m.onBeforeCompile = function (sh) {
       Object.assign(sh.uniforms, U);
       sh.defines = Object.assign(sh.defines || {}, { PEOPLE_SOAK: "1.0" });
+      if (print) sh.defines.PEOPLE_PRINT = "1";
       sh.vertexShader = patchVertexBind(sh.vertexShader)
-        .replace("#include <common>", "#include <common>\nattribute vec2 atlasA;\nattribute vec2 atlasB;\nvarying vec2 vAtA;\nvarying vec2 vAtB;")
-        .replace("#include <uv_vertex>", "#include <uv_vertex>\nvAtA = atlasA; vAtB = atlasB;");
+        .replace("#include <common>", "#include <common>\nattribute vec2 atlasA;\nattribute vec2 atlasB;\nattribute float zone;\nuniform vec3 pZC[ 6 ];\nuniform vec4 pZP[ 6 ];\n" +
+          "varying vec2 vAtA;\nvarying vec2 vAtB;\nvarying vec3 vZC;\nvarying vec4 vZP;\nvarying float vZone;")
+        .replace("#include <uv_vertex>", "#include <uv_vertex>\nvAtA = atlasA; vAtB = atlasB;\n{ int zi = int( clamp( zone, 0.0, 5.0 ) + 0.5 ); vZC = pZC[ zi ]; vZP = pZP[ zi ]; vZone = zone; }");
       let fs = sh.fragmentShader;
-      fs = fs.replace("#include <common>", "#include <common>\nuniform sampler2D pShade;\nuniform float pJacket;\nuniform vec3 pFill;\nuniform vec4 pFlatT;\nuniform vec4 pFlatA;\nuniform vec4 pFlatL;\nvarying vec2 vAtA;\nvarying vec2 vAtB;\n" + WOUND_PARS + "\n" + WOUND_FN + "\nfloat peopleWet = 0.0;")
+      fs = fs.replace("#include <common>", "#include <common>\nuniform sampler2D pShade;\nuniform vec4 pSleeve;\nuniform sampler2D pMarks;\nuniform vec3 pMarkRows;\nuniform vec3 pCamo[ 4 ];\nuniform float pCamoOn;\n" +
+          "uniform float pJacket;\nuniform vec3 pFill;\nuniform vec4 pFlatT;\nuniform vec4 pFlatA;\nuniform vec4 pFlatL;\n" +
+          "varying vec2 vAtA;\nvarying vec2 vAtB;\nvarying vec3 vZC;\nvarying vec4 vZP;\nvarying float vZone;\n" + WOUND_PARS + "\n" + WOUND_FN + "\n" + CAMO_FN + "\nfloat peopleWet = 0.0;")
         .replace("#include <map_fragment>", [
+          "\tif ( vZP.w > 0.5 ) discard;",
+          "\tfloat sh = texture2D( pShade, vUv ).r * 2.0;",
+          "#ifdef PEOPLE_PRINT",
           // the atlas row says which region this is: torso / arm / leg
           "\tvec4 flatC = vAtA.y > 0.6 ? pFlatT : ( vAtA.y > 0.15 ? pFlatA : pFlatL );",
           "\tvec3 clothC = pFill;",
           "#ifdef USE_MAP",
-          // A TAILORED LOOK: the jacket row first (its V / its cut show the
-          // shirt row beneath, exactly as the painted shell does)
+          // a tailored print: the jacket row first (its V shows the shirt row)
           "\tvec4 texelColor = texture2D( map, pJacket > 0.5 ? vAtB : vAtA );",
           "\tif ( pJacket > 0.5 && texelColor.a < 0.5 ) texelColor = texture2D( map, vAtA );",
           "\tif ( texelColor.a < 0.5 ) texelColor = vec4( pFill, 1.0 );",
           "\tclothC = texelColor.rgb;",   // r187: an sRGB map is decoded by the GPU
           "#endif",
           "\tif ( flatC.a > 0.5 ) clothC = flatC.rgb;",
-          "\tdiffuseColor.rgb *= clothC;",
-          // the garment's own cloth: seams, stitching, weave, its AO
-          "\tdiffuseColor.rgb *= texture2D( pShade, vUv ).r * 2.0;",
+          "\tdiffuseColor.rgb *= clothC * sh;",
+          "#else",
+          "#ifdef USE_MAP",
+          "\tvec3 alb = texture2D( map, vUv ).rgb;",
+          "#else",
+          "\tvec3 alb = vec3( vZP.y );",
+          "#endif",
+          "\tfloat ratio = clamp( dot( alb, vec3( 0.2126, 0.7152, 0.0722 ) ) / max( vZP.y, 0.02 ), 0.12, 2.8 );",
+          "\tvec3 col = vZC;",
+          "\tfloat isMain = 1.0 - step( 0.5, vZone );",
+          "\tfloat rowA = step( 0.156, vAtA.y ) * step( vAtA.y, 0.3125 );",
+          "\tcol = mix( col, pSleeve.rgb, pSleeve.a * isMain * rowA );",
+          "\tif ( pCamoOn > 0.5 && vZone < 1.5 ) col = peopleCamo( vBind );",
+          "\tvec3 cloth = vZP.z > 0.5 ? alb : col * mix( sh, ratio, vZP.x );",
+          // the painter's markings, on the main cloth and the trousers only
+          "\tfloat rowT = step( 0.625, vAtA.y ), rowL = 1.0 - step( 0.156, vAtA.y );",
+          "\tvec4 mk = texture2D( pMarks, vAtA );",
+          "\tfloat gate = dot( vec3( rowT, rowA, rowL ), pMarkRows ) * ( 1.0 - step( 1.5, vZone ) );",
+          "\tcloth = mix( cloth, mk.rgb * mix( sh, 1.0, 0.35 ), clamp( mk.a * gate, 0.0, 1.0 ) );",
+          "\tdiffuseColor.rgb *= cloth;",
+          "#endif",
           WOUND_APPLY,
         ].join("\n"));
       sh.fragmentShader = patchRough(fs);
     };
-    m.customProgramCacheKey = function () { return "people-cloth-1"; };
+    m.customProgramCacheKey = function () { return print ? "people-cloth-print-2" : "people-cloth-real-2"; };
     return pbr(m);
   }
   // EYES: the painted iris is far too saturated taken as stored (the game's
@@ -887,7 +1356,7 @@
     pelvis: "body", spine_01: "body", spine_02: "body", spine_03: "body", clavicle_l: "body", clavicle_r: "body",
     neck_01: "neck", head: "head",
   };
-  function build(ch, look) {
+  function build(ch, look, opts) {
     const cast = castPerson(ch, look);
     const pos0 = shapeOf(cast.macro, cast.detail);
     const J0 = joints(pos0);
@@ -1016,11 +1485,14 @@
     P.hipLift = Math.max(0, mhHipNow.y - procHip.y);
     P.pelvisLocal = pelvisRest.applyMatrix4(_m4b.copy(rest.body.L).invert());
     P.hold = { l: 0, r: 0 };
-    // ---- the meshes
+    // ---- the meshes (a city build leaves its markings for a quiet tick)
+    P.deferMarks = !!(opts && opts.auto);
     dress(P, pos);
     // ---- hide the proc body (layers: the meshes stay alive for every reader)
     hideProc(P);
     setupHats(P, pos);
+    setupKit(P);
+    setupTie(P);
     // ---- the driver: the last child of the rig, run inside the scene's own
     // matrix update, after every proc node above it has composed
     const drv = new THREE.Object3D();
@@ -1059,9 +1531,8 @@
     // what is worn: the painted outfit set the rig is dressed in
     const worn = CBZ.cityClothesWorn ? CBZ.cityClothesWorn(ch) : null;
     P.clothesKey = ch._clothesKey;
-    let atlas = null;
     // WHAT THE RIG ACTUALLY WEARS, region by region: a part the painter drew
-    // comes off the atlas; a part it did not is the flat colour the outfit
+    // is the painter's; a part it did not is the flat colour the outfit
     // system (outfits.js recolorRig) gave the rig's own slot — read straight
     // off that slot, so the two bodies can never disagree
     const sl = ch.skinSlots || {};
@@ -1072,13 +1543,24 @@
       arms: parts.arms ? null : (parts.sleeves ? (parts.sleeves.hex != null ? parts.sleeves.hex : (worn.set.bodyHex != null ? worn.set.bodyHex : slotHex(sl.torso))) : slotHex(sl.arms)),
       legs: parts.legs ? null : slotHex(sl.legs),
     };
-    if (worn) {
-      const hi = CBZ.cityClothesHiRes ? CBZ.cityClothesHiRes(worn.key, 4) : null;
-      atlas = { tex: hi ? hi.tex : worn.set.tex, jacket: !!(worn.set.parts && worn.set.parts.jacket), bodyHex: worn.set.bodyHex, key: worn.key, flat: flat };
-    } else atlas = { tex: null, jacket: false, bodyHex: slotHex(sl.torso), flat: flat };
     P.flat = flat;
+    // WHAT IS WORN, AS REAL CLOTHES (THE REAL WARDROBE): layers of garments,
+    // each dyed zone by zone; a print keeps the painter's picture at 4x
+    const plan = wardrobePlan(ch, cast, worn, flat, P.deferMarks);
+    for (const ly of plan) {
+      if (ly.print) {
+        const hi = worn && CBZ.cityClothesHiRes ? CBZ.cityClothesHiRes(worn.key, 4) : null;
+        ly.tex = worn ? (hi ? hi.tex : worn.set.tex) : null;
+        ly.jacket = !!(worn && worn.set.parts && worn.set.parts.jacket);
+        ly.bodyHex = worn ? worn.set.bodyHex : slotHex(sl.torso);
+      } else if (!worn) {
+        if (ly.zc[0] == null) ly.zc[0] = 0x6a6f78;
+        if (ly.zc[1] == null) ly.zc[1] = 0x2c3a52;
+      }
+    }
+    P.plan = plan;
     const keys = {};
-    keys.cloth = garmentFor(ch, cast, worn);
+    keys.cloth = plan.map(function (ly) { return ly.key; });
     keys.shoes = shoesFor(cast, worn);
     keys.hair = hairKey(look, cast);
     const beard = !cast.f && !cast.kid ? look.beard || null : null;
@@ -1086,7 +1568,9 @@
     P.keys = keys;
     // ---- body faces under the clothes go
     const del = new Uint8Array(S.NB);
-    for (const k of [keys.cloth, keys.shoes]) {
+    // a layer worn OVER another (a gilet) hides nothing: the one under it does
+    const covers = plan.filter(function (ly) { return !ly.over; }).map(function (ly) { return ly.key; }).concat([keys.shoes]);
+    for (const k of covers) {
       const a = k && assetShared(k);
       if (a && a.del) for (let i = 0; i < a.del.length; i++) del[a.del[i]] = 1;
     }
@@ -1173,9 +1657,9 @@
       }
     }
     // ---- clothes and shoes
-    if (keys.cloth) {
-      const a = assetShared(keys.cloth);
-      if (a) part(P, pos, keys.cloth, clothMaterial(P, a, atlas), { cast: true });
+    for (const ly of plan) {
+      const a = assetShared(ly.key);
+      if (a) part(P, pos, ly.key, clothMaterial(P, a, ly), { cast: true });
     }
     if (keys.shoes) {
       const a = assetShared(keys.shoes);
@@ -1215,6 +1699,7 @@
       geo.setAttribute("normal", new THREE.BufferAttribute(gather(n, a.map), 3));
       geo.setAttribute("uv", a.uv);
       if (a.atlasA) { geo.setAttribute("atlasA", a.atlasA); geo.setAttribute("atlasB", a.atlasB); }
+      if (a.zone) geo.setAttribute("zone", a.zone);
       geo.setAttribute("skinIndex", a.skinIndex); geo.setAttribute("skinWeight", a.skinWeight);
       geo.setIndex(a.index);
       if (a.morph && mat.morphTargets) { geo.morphAttributes.position = a.morph; geo.morphTargetsRelative = true; }
@@ -1369,6 +1854,345 @@
     for (const c of an.children) c.updateMatrixWorld(true);
   }
 
+  /* THIS BODY'S SECTION. What is hung on or laid over a real body (the duty
+     kit, a tie) is built round its CLOTHED surface: body and garments, the
+     arms and the head left out (they hang beside the hips in the bind pose).
+     Measured once a build as 48 radii round the body's axis every centimetre
+     from under the hips to over the shoulders (rig-local, at rest), with
+     which of skin and cloth is outermost in each bin. Then dilated a bin and
+     a level: a stiff belt or a tie bridges the folds of the cloth under it,
+     and a wrinkle between two samples must not poke through either. */
+  const SEC_NS = 48, SEC_STEP = 0.01, TAU = Math.PI * 2;
+  function section(P) {
+    if (P.sec !== undefined) return P.sec;
+    const rest = P.rest, J = P.J;
+    if (!rest.body || !J.thigh_l || !J.thigh_r || !J.upperarm_l || !J.upperarm_r) return (P.sec = null);
+    const e = rest.body.L.elements, ax = e[12], az = e[14], NS = SEC_NS;
+    const yHip = (J.thigh_l.head.y + J.thigh_r.head.y) / 2, ySh = (J.upperarm_l.head.y + J.upperarm_r.head.y) / 2;
+    const y0 = yHip - 0.45, nl = Math.max(8, Math.ceil((ySh + 0.2 - y0) / SEC_STEP));
+    const R0 = new Float32Array(nl * NS), C = new Uint8Array(nl * NS);      // C: 1 skin, 2 cloth
+    for (const m of P.meshes) {
+      const cloth = m.name.indexOf("people:cloth:") === 0;
+      if (!cloth && m.name !== "people:body") continue;
+      const g = m.geometry, pa = g.attributes.position, si = g.attributes.skinIndex, ix = g.index;
+      if (!pa || !si || pa.isInterleavedBufferAttribute || si.isInterleavedBufferAttribute) continue;
+      const p = pa.array, sa = si.array, ss = si.itemSize, n = pa.count;
+      // only what is drawn: the body under a garment is gone from its index
+      let used = null;
+      if (ix) { used = new Uint8Array(n); const ia = ix.array; for (let t = 0; t < ia.length; t++) used[ia[t]] = 1; }
+      for (let i = 0; i < n; i++) {
+        if (used && !used[i]) continue;
+        const l = Math.round((p[i * 3 + 1] - y0) / SEC_STEP);
+        if (l < 0 || l >= nl) continue;
+        const grp = S.bgroup[sa[i * ss]];
+        if (grp === 1 || grp === 4) continue;
+        const dx = p[i * 3] - ax, dz = p[i * 3 + 2] - az, r = Math.sqrt(dx * dx + dz * dz);
+        const o = l * NS + Math.round((Math.atan2(dx, dz) / TAU + 1) * NS) % NS;
+        if (r > R0[o]) { R0[o] = r; C[o] = cloth ? 2 : 1; }
+      }
+    }
+    /* A bin no vertex fell in (a garment's rows of vertices run a little
+       over a centimetre apart): first from the same bin above and below,
+       within 3 cm, the surface changes slowly up a body; only then round the
+       ring (which across the front would borrow the wider sides and stand
+       the chest out by centimetres); an empty level from the nearest level
+       that has one. */
+    const R1 = R0.slice();
+    for (let j = 0; j < NS; j++) for (let l = 0; l < nl; l++) {
+      if (R1[l * NS + j] > 0) continue;
+      let a = -1, b = -1;
+      for (let d = 1; d <= 3 && a < 0; d++) if (l - d >= 0 && R1[(l - d) * NS + j] > 0) a = l - d;
+      for (let d = 1; d <= 3 && b < 0; d++) if (l + d < nl && R1[(l + d) * NS + j] > 0) b = l + d;
+      if (a >= 0 && b >= 0) R0[l * NS + j] = R1[a * NS + j] + (R1[b * NS + j] - R1[a * NS + j]) * (l - a) / (b - a);
+      else if (a >= 0 && l - a === 1) R0[l * NS + j] = R1[a * NS + j];
+      else if (b >= 0 && b - l === 1) R0[l * NS + j] = R1[b * NS + j];
+    }
+    const have = new Uint8Array(nl);
+    for (let l = 0; l < nl; l++) {
+      const o = l * NS;
+      let known = 0;
+      for (let j = 0; j < NS; j++) if (R0[o + j] > 0) known++;
+      if (known < 3) continue;
+      have[l] = 1;
+      for (let j = 0; j < NS; j++) {
+        if (R0[o + j] > 0) continue;
+        let a = j, b = j;
+        while (R0[o + ((a + NS) % NS)] <= 0) a--;
+        while (R0[o + (b % NS)] <= 0) b++;
+        const ra = R0[o + ((a + NS) % NS)], rb = R0[o + (b % NS)];
+        R0[o + j] = ra + (rb - ra) * (j - a) / (b - a);
+      }
+    }
+    for (let l = 0; l < nl; l++) {
+      if (have[l]) continue;
+      let d = 1;
+      while (d < nl && !(l - d >= 0 && have[l - d]) && !(l + d < nl && have[l + d])) d++;
+      const src = l - d >= 0 && have[l - d] ? l - d : l + d;
+      if (src >= 0 && src < nl && have[src]) R0.copyWithin(l * NS, src * NS, src * NS + NS);
+    }
+    const R = new Float32Array(nl * NS);
+    for (let l = 0; l < nl; l++) for (let j = 0; j < NS; j++) {
+      let r = 0;
+      for (let dl = -1; dl <= 1; dl++) {
+        const ll = Math.min(nl - 1, Math.max(0, l + dl)) * NS;
+        for (let dj = -1; dj <= 1; dj++) { const v = R0[ll + (j + dj + NS) % NS]; if (v > r) r = v; }
+      }
+      R[l * NS + j] = r;
+    }
+    return (P.sec = { R: R, R0: R0, C: C, y0: y0, nl: nl, ax: ax, az: az, yHip: yHip, ySh: ySh });
+  }
+  function secR(sec, y, th, raw) {                             // bilinear: height, angle
+    const NS = SEC_NS, R = raw ? sec.R0 : sec.R;
+    const fl = Math.max(0, Math.min(sec.nl - 1.001, (y - sec.y0) / SEC_STEP)), l0 = Math.floor(fl), tl = fl - l0;
+    const fa = (th / TAU + 1) * NS, f0 = Math.floor(fa), ta = fa - f0, a0 = f0 % NS, a1 = (a0 + 1) % NS;
+    const o0 = l0 * NS, o1 = o0 + NS;
+    return (R[o0 + a0] * (1 - ta) + R[o0 + a1] * ta) * (1 - tl) + (R[o1 + a0] * (1 - ta) + R[o1 + a1] * ta) * tl;
+  }
+  // the outermost surface's z (from the axis) at x (from the axis), round
+  // the front from the wearer's right to the left (raw: not dilated)
+  function secFront(sec, x, y, raw) {
+    const q0 = -SEC_NS / 4;
+    let px = 0, pz = 0;
+    for (let q = q0; q <= SEC_NS / 4; q++) {
+      const th = q / SEC_NS * TAU, r = secR(sec, y, th, raw), sx = Math.sin(th) * r, sz = Math.cos(th) * r;
+      if (q === q0) { if (sx >= x) return sz; }
+      else if (sx >= x && sx > px) return pz + (sz - pz) * (x - px) / (sx - px);
+      px = sx; pz = sz;
+    }
+    return pz;
+  }
+
+  /* THE DUTY KIT ON THE REAL BODY. entities/dutykit.js hangs an officer's
+     hard kit (the duty belt, holster and pistol, magazine pouches, radio,
+     torch, cuff case, keys, the badge on the chest, the shoulder mic) as ONE
+     mesh built round the proc body's section, so it went out of sight with
+     that body: a cop with no belt and no gun. The kit is BUILT AGAIN for this
+     body: dutykit.js is handed a body that answers with THIS section
+     (CBZ.bodySection reads ch._section) and this chest. So the belt is cut
+     round this waistband, the holster and every pouch hang off this belt
+     clear of these hips and thighs, the badge lies on this shirt: by the
+     kit's own rules, at its true size, nothing bent. Then it rides the real
+     skeleton, the belt and all that hangs on it on the pelvis, the chest kit
+     on the chest. The shoulder straps stay off: the real shirt has its own
+     shoulders. */
+  function setupKit(P) {
+    const ch = P.ch, rest = P.rest, sd = P.sides, TS = ch.torsoShape;
+    if (!ch._dutyKit || P.kit) return;
+    const sec = CBZ.dutyKit && CBZ.bodySection && TS && TS.at && ch.profile && rest[sd.armL] && rest[sd.legL] ? section(P) : null;
+    if (!sec) { P.kitNo = true; return; }
+    const t0 = performance.now();
+    // the proc body's frame in the rig (no turn, a scale), and the height
+    // landmarks, proc then real: the hip joints and the shoulders
+    const e = rest.body.L.elements, s = Math.hypot(e[0], e[1], e[2]);
+    const yh0 = (rest[sd.legL].p.y + rest[sd.legR].p.y) / 2, yh1 = sec.yHip;
+    const ys0 = (rest[sd.armL].p.y + rest[sd.armR].p.y) / 2, ys1 = sec.ySh;
+    const k = (ys1 - yh1) / Math.max(0.05, ys0 - yh0);
+    /* A proc body-local height -> this body's. The belt lands where the hips
+       and the shoulders put it, and the belt and all that hangs on it (to
+       15 cm over it) keep their true size; the chest above is stretched so
+       the proc shoulders land on these. */
+    const B0 = TS.pTop, yB0 = yh1 + (s * B0 + e[13] - yh0) * k;
+    const B1 = B0 + 0.15 / s, yB1 = yB0 + 0.15, Bs = (ys0 - e[13]) / s;
+    const k2 = Math.max(0.5, Math.min(2, (ys1 - yB1) / Math.max(0.05, s * (Bs - B1))));
+    const yOf = (yb) => (yb <= B1 ? yB0 + s * (yb - B0) : yB1 + s * (yb - B1) * k2);
+    const rAt = (yr, th) => secR(sec, yr, th) / s;               // proc model units
+    // the body dutykit.js builds round: this section, this chest
+    const body = Object.create(ch);
+    body._section = function (yb) {
+      const yr = yOf(yb), out = [];
+      for (let j = 0; j < SEC_NS; j++) { const th = j / SEC_NS * TAU, r = rAt(yr, th); out.push([Math.sin(th) * r, Math.cos(th) * r]); }
+      return out;
+    };
+    body.torsoFrontZ = function (xb, yb) { return secFront(sec, xb * s, yOf(yb)) / s; };
+    // a ring as wide as this body: the badge sits 0.40 of the way out (over
+    // the pocket), the mic 0.56
+    body.torsoShape = Object.create(TS);
+    body.torsoShape.at = function (yb) {
+      const yr = yOf(yb);
+      return Object.assign({}, TS.at(yb), { a: (rAt(yr, TAU / 4) + rAt(yr, -TAU / 4)) / 2 });
+    };
+    P.kit = { body: body, s: s, ax: sec.ax, az: sec.az, yOf: yOf, B1: B1, k2: k2, yBelt: yB0 + 0.005, proc: null, src: null, mesh: null, mat: null };
+    refitKit(P);
+    P.kit.ms = performance.now() - t0;                         // what it cost (the LOD budget)
+  }
+  function refitKit(P) {
+    const ch = P.ch, kit = ch._dutyKit, K = P.kit;
+    K.proc = kit; K.src = kit ? kit.geometry : null;
+    const u = kit && kit.userData;
+    const g = u && u.kind ? CBZ.dutyKit.geometry(K.body, u.kind, Object.assign({}, u.opts, { torchOut: !!u.torchOut, straps: false, store: false })) : null;
+    if (!g) { if (K.mesh) K.mesh.visible = false; return; }
+    // the proc kit leaves with the rest of the proc body
+    if (kit.layers.mask !== (1 << HIDE)) { P.hidden.push([kit, kit.layers.mask]); kit.layers.set(HIDE); }
+    // proc body-local -> this rig at rest; the belt and all that hangs on it
+    // ride the pelvis, the chest kit the chest
+    const pa = g.attributes.position.array, na = g.attributes.normal.array, n = pa.length / 3;
+    const sI = new Uint16Array(n * 4), sW = new Float32Array(n * 4);
+    const pel = S.bix.pelvis, chest = S.bix.spine_03 != null ? S.bix.spine_03 : S.bix.spine_02;
+    for (let i = 0, o = 0; i < n; i++, o += 3) {
+      const yb = pa[o + 1], up = yb > K.B1;
+      pa[o] = K.ax + K.s * pa[o]; pa[o + 1] = K.yOf(yb); pa[o + 2] = K.az + K.s * pa[o + 2];
+      if (up) {                                              // stretched by k2 up there
+        const nx = na[o], ny = na[o + 1] / K.k2, nz = na[o + 2], l = Math.hypot(nx, ny, nz) || 1;
+        na[o] = nx / l; na[o + 1] = ny / l; na[o + 2] = nz / l;
+      }
+      sI[i * 4] = up ? chest : pel; sW[i * 4] = 1;
+    }
+    g.setAttribute("skinIndex", new THREE.BufferAttribute(sI, 4));
+    g.setAttribute("skinWeight", new THREE.BufferAttribute(sW, 4));
+    g.computeBoundingSphere(); g.computeBoundingBox();
+    g._shared = false;
+    g.userData.own = true;                                     // every buffer here is this person's
+    if (!K.mat) { K.mat = kit.material.clone(); K.mat.skinning = true; }
+    if (K.mesh) { K.mesh.geometry.dispose(); K.mesh.geometry = g; }
+    else { K.mesh = addMesh(P, g, K.mat, "dutykit", { cast: false }); K.mesh.receiveShadow = false; }
+    K.mesh.visible = true;
+  }
+  function driveKit(P) {
+    const kit = P.ch._dutyKit, K = P.kit;
+    // a kit put on after this body was built
+    if (!K) { if (kit && !P.kitNo) setupKit(P); return; }
+    // the torch comes off the belt, a re-dress swaps the kit: follow it
+    if (kit !== K.proc || (kit && kit.geometry !== K.src)) refitKit(P);
+    if (K.mesh) K.mesh.visible = !!kit && visibleUp(kit, P.ch.group);
+  }
+
+  /* A TIE, MADE. The detective's design is a dress shirt and tie, his jacket
+     off; no garment in the pack is a shirt with a whole tie (a suit's tie is
+     modelled only where its jacket leaves it showing). So the tie is built
+     on this shirt: a four-in-hand knot at the foot of the open collar (worn
+     loosened, the top button undone; the band is under the collar) and the
+     blade from the knot to the belt, widening as a tie is cut, flat across,
+     a few millimetres off the placket and never tucking in steeper than
+     cloth falls. It bends with the shirt: every vertex takes the
+     skinning of the shirt vertex nearest it. */
+  function setupTie(P) {
+    const ly = P.plan && P.plan.find(function (l) { return l.tie != null; });
+    const sec = ly ? section(P) : null;
+    if (!sec) return;
+    const t0 = performance.now();
+    const NS = SEC_NS, C = sec.C, lev = (y) => Math.round((y - sec.y0) / SEC_STEP);
+    // the foot of the open collar: down the front from the neck, the first
+    // cloth after skin (a closed collar: just under its top edge)
+    let yV = null, skin = false, top = null;
+    for (let l = Math.min(sec.nl - 1, lev(sec.ySh + 0.16)); l >= Math.max(0, lev(sec.ySh - 0.3)); l--) {
+      const c = C[l * NS];
+      if (c === 1) skin = true;
+      else if (c === 2) { if (skin) { yV = sec.y0 + l * SEC_STEP; break; } if (top == null) top = sec.y0 + l * SEC_STEP; }
+    }
+    if (yV == null) { if (top == null) return; yV = top - 0.02; }
+    const yTip = P.kit && P.kit.yBelt ? P.kit.yBelt + 0.004 : sec.yHip + 0.12;
+    const kTop = yV + 0.008, kBot = kTop - 0.042;
+    if (kBot - yTip < 0.15) return;
+    const tone = function (hex, f) { return [((hex >> 16) & 255) / 255 * f, ((hex >> 8) & 255) / 255 * f, (hex & 255) / 255 * f]; };
+    const pos = [], col = [], idx = [];
+    const v = function (x, y, z, c) { pos.push(sec.ax + x, y, sec.az + z); col.push(c[0], c[1], c[2]); return pos.length / 3 - 1; };
+    const quad = function (a, b, c, d) { idx.push(a, d, c, a, c, b); };   // a b top (left, right), d c below
+    // the cloth under a row, flat across its width: the shirt as it is (not
+    // the belt's bridged section), and a fold half a centimetre above or
+    // below the row is under it too
+    const under = function (y, w) {
+      let z = -1;
+      for (const f of [-0.5, -0.25, 0, 0.25, 0.5]) for (const d of [-0.005, 0, 0.005]) z = Math.max(z, secFront(sec, f * w, y + d, true));
+      return z;
+    };
+    const base = ly.tie, face = tone(base, 1), edge = tone(base, 0.94), knot = tone(base, 0.88);
+    // ---- the blade: a row a centimetre, from under the knot to the tip. Its
+    // line: the cloth under each row, hung (it never tucks in steeper than
+    // cloth falls), then smoothed so the light runs down it unbroken
+    const L = kBot - yTip, rows = Math.max(8, Math.round(L / 0.01)), dy = L / rows;
+    const ys = [], ws = [], zs = [];
+    for (let i = 0; i <= rows; i++) {
+      const t = i / rows, tipT = Math.max(0, (t * L - (L - 0.04)) / 0.04);   // the last 4 cm come to a point
+      ys.push(kBot - L * t);
+      ws.push((0.034 + 0.052 * Math.min(1, t / 0.9)) * (1 - tipT * 0.999));
+      const z = under(ys[i], Math.max(ws[i], 0.03));
+      zs.push(i ? Math.max(z, zs[i - 1] - 0.55 * dy) : z);
+    }
+    const zf = zs.map(function (z, i) {
+      let a = 0, n = 0;
+      for (let k = -2; k <= 2; k++) { const j = i + k; if (j >= 0 && j <= rows) { a += zs[j]; n++; } }
+      return Math.max(a / n, z - 0.002);
+    });
+    const F = [], Wl = [], Wr = [], NF = [];
+    for (let i = 0; i <= rows; i++) {
+      const y = ys[i], w = ws[i], off = 0.0035 + 0.005 * Math.max(0, 1 - i * dy / 0.05), z = zf[i] + off;   // fuller under the knot
+      // the face's normal: square to the line it hangs on
+      const dz = (zf[Math.min(rows, i + 1)] - zf[Math.max(0, i - 1)]) / ((Math.min(rows, i + 1) - Math.max(0, i - 1)) * dy || 1);
+      const ny = dz, nl = Math.hypot(ny, 1);
+      NF.push([ny / nl, 1 / nl]);
+      F.push([v(-w / 2, y, z, edge), v(0, y, z + 0.0016, face), v(w / 2, y, z, edge)]);
+      Wl.push([v(-w / 2, y, z - 0.0035, edge), v(-w / 2, y, z, edge)]);
+      Wr.push([v(w / 2, y, z, edge), v(w / 2, y, z - 0.0035, edge)]);
+    }
+    for (let i = 0; i < rows; i++) {
+      quad(F[i][0], F[i][1], F[i + 1][1], F[i + 1][0]); quad(F[i][1], F[i][2], F[i + 1][2], F[i + 1][1]);
+      quad(Wl[i][0], Wl[i][1], Wl[i + 1][1], Wl[i + 1][0]); quad(Wr[i][0], Wr[i][1], Wr[i + 1][1], Wr[i + 1][0]);
+    }
+    // ---- the knot: an inverted trapezoid, a bulge
+    const zk = Math.max(under(kTop, 0.044), under(kBot, 0.03), zf[0] - 0.002);
+    const K0 = [v(-0.022, kTop, zk + 0.013, knot), v(0, kTop, zk + 0.017, knot), v(0.022, kTop, zk + 0.013, knot)];
+    const K1 = [v(-0.0185, (kTop + kBot) / 2, zk + 0.014, knot), v(0, (kTop + kBot) / 2, zk + 0.019, face), v(0.0185, (kTop + kBot) / 2, zk + 0.014, knot)];
+    const K2 = [v(-0.0145, kBot, zk + 0.01, knot), v(0, kBot, zk + 0.013, knot), v(0.0145, kBot, zk + 0.01, knot)];
+    quad(K0[0], K0[1], K1[1], K1[0]); quad(K0[1], K0[2], K1[2], K1[1]);
+    quad(K1[0], K1[1], K2[1], K2[0]); quad(K1[1], K1[2], K2[2], K2[1]);
+    const Kb = [v(-0.022, kTop, zk + 0.002, knot), v(0.022, kTop, zk + 0.002, knot), v(-0.0145, kBot, zk + 0.002, knot), v(0.0145, kBot, zk + 0.002, knot)];
+    quad(Kb[0], Kb[1], K0[2], K0[0]);                              // the top, back to the collar
+    quad(Kb[0], K0[0], K1[0], Kb[2]); quad(K0[2], Kb[1], Kb[3], K1[2]);
+    quad(K1[0], K2[0], K2[0], Kb[2]); quad(K1[2], Kb[3], K2[2], K2[2]);
+    const blade = { F: F, Wl: Wl, Wr: Wr, NF: NF };
+    // ---- one rigid colour mesh, skinned off the shirt under it
+    const n = pos.length / 3, P3 = new Float32Array(pos);
+    const shirt = P.meshes.find(function (m) { return m.name === "people:" + ly.key; });
+    const sI = new Uint16Array(n * 4), sW = new Float32Array(n * 4);
+    const chest = S.bix.spine_03 != null ? S.bix.spine_03 : S.bix.spine_02;
+    for (let i = 0; i < n; i++) { sI[i * 4] = chest; sW[i * 4] = 1; }
+    if (shirt) {
+      const sg = shirt.geometry, sp = sg.attributes.position.array, si = sg.attributes.skinIndex, sw = sg.attributes.skinWeight;
+      // (r128: raw arrays; the pack's weights are normalized bytes)
+      const wDiv = !sw.normalized ? 1 : sw.array instanceof Uint8Array ? 255 : sw.array instanceof Uint16Array ? 65535 : 1;
+      const cand = [];
+      for (let i = 0, m = sp.length / 3; i < m; i++) {
+        const dx = sp[i * 3] - sec.ax, dz = sp[i * 3 + 2] - sec.az, y = sp[i * 3 + 1];
+        if (Math.abs(dx) < 0.09 && dz > 0 && y > yTip - 0.04 && y < kTop + 0.14) cand.push(i);
+      }
+      // one search a centimetre of tie: a row is narrow, the shirt's
+      // skinning does not change across it
+      const near = new Map();
+      if (cand.length) for (let i = 0; i < n; i++) {
+        const key = Math.round(P3[i * 3 + 1] * 100);
+        let best = near.get(key);
+        if (best === undefined) {
+          let bd = 1e9;
+          for (const c of cand) {
+            const dx = sp[c * 3] - sec.ax, dy = sp[c * 3 + 1] - P3[i * 3 + 1], dz = sp[c * 3 + 2] - P3[i * 3 + 2], d = dx * dx + dy * dy + dz * dz;
+            if (d < bd) { bd = d; best = c; }
+          }
+          near.set(key, best);
+        }
+        for (let k = 0; k < 4; k++) { sI[i * 4 + k] = si.array[best * si.itemSize + k]; sW[i * 4 + k] = sw.array[best * sw.itemSize + k] / wDiv; }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(P3, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(col), 3));
+    g.setAttribute("skinIndex", new THREE.BufferAttribute(sI, 4));
+    g.setAttribute("skinWeight", new THREE.BufferAttribute(sW, 4));
+    g.setIndex(idx);
+    g.computeVertexNormals();                                  // the knot's; the blade's are set
+    const na = g.attributes.normal.array, setN = function (i, x, y, z) { na[i * 3] = x; na[i * 3 + 1] = y; na[i * 3 + 2] = z; };
+    blade.F.forEach(function (r, i) {
+      const ny = blade.NF[i][0], nz = blade.NF[i][1], e = 0.22, l = Math.hypot(e, ny, nz);
+      setN(r[0], -e / l, ny / l, nz / l); setN(r[1], 0, ny, nz); setN(r[2], e / l, ny / l, nz / l);   // a soft round across
+      setN(blade.Wl[i][0], -1, 0, 0); setN(blade.Wl[i][1], -1, 0, 0); setN(blade.Wr[i][0], 1, 0, 0); setN(blade.Wr[i][1], 1, 0, 0);
+    });
+    g.userData.own = true;
+    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, specular: 0x141414, shininess: 14 });
+    mat.skinning = true;
+    mat.name = "people-tie";
+    P.tie = addMesh(P, g, mat, "tie", { cast: false });
+    P.tie.userData.ms = performance.now() - t0;
+  }
+
   // ================================================================ the driver
   const _R = [], _Pp = [];
   for (let i = 0; i < 64; i++) { _R.push(new THREE.Quaternion()); _Pp.push(new THREE.Vector3()); }
@@ -1459,6 +2283,7 @@
     }
     faceDrive(P);
     driveHats(P);
+    driveKit(P);
   }
   const _ikDir = new THREE.Vector3(), _ikPole = new THREE.Vector3(), _ikMid = new THREE.Vector3(), _ikTgt = new THREE.Vector3();
   const HOLD = { pistol: 1, grip: 1, support: 1, cupover: 1, wheel: 1, plant: 1, point: 1, card: 1 };
@@ -1824,16 +2649,31 @@
       geo.setAttribute("position", new THREE.Float32BufferAttribute(P2, 3));
       geo.setAttribute("normal", new THREE.Float32BufferAttribute(N2, 3));
       if (U2.length) geo.setAttribute("uv", new THREE.Float32BufferAttribute(U2, 2));
-      if (m.geometry.attributes.atlasA) {
-        // the garment keeps its painted panel: copy the atlas UVs as the uv
+      const src = m.material, cl = src.userData && src.userData.cloth;
+      if (cl && cl.print && m.geometry.attributes.atlasA) {
+        // a print keeps its painted panel: copy the atlas UVs as the uv
         const at = m.geometry.attributes.atlasA, A2 = new Float32Array(P2.length / 3 * 2);
         for (let v = 0; v < n; v++) if (remap[v] >= 0) { A2[remap[v] * 2] = at.getX(v); A2[remap[v] * 2 + 1] = at.getY(v); }
         geo.setAttribute("uv", new THREE.BufferAttribute(A2, 2));
       }
+      let vcol = false;
+      if (cl && !cl.print && m.geometry.attributes.zone) {
+        // real cloth: each vertex its zone's dye (a kept zone, its own mean)
+        const zt = m.geometry.attributes.zone, C2 = new Float32Array(P2.length);
+        for (let v = 0; v < n; v++) {
+          if (remap[v] < 0) continue;
+          const z = Math.max(0, Math.min(5, Math.round(zt.getX(v)))), c = cl.zc[z], p = cl.zp[z];
+          // a kept zone (trim, a real shirt) stands as a neutral of its own mean
+          const k = p.y * 1.4, r = remap[v] * 3;
+          C2[r] = p.z > 0.5 ? k : c.x; C2[r + 1] = p.z > 0.5 ? k : c.y; C2[r + 2] = p.z > 0.5 ? k : c.z;
+        }
+        geo.setAttribute("color", new THREE.BufferAttribute(C2, 3));
+        vcol = true;
+      }
       geo.setIndex(I2);
-      const src = m.material;
-      const mat = src.map || src.color ? new THREE.MeshStandardMaterial({ map: src.map || null, color: src.color ? src.color.clone() : 0xffffff,
-        roughness: src.roughness != null ? src.roughness : 0.7, transparent: !!src.transparent, alphaTest: src.alphaTest || 0, side: src.side }) : src;
+      const mat = vcol ? new THREE.MeshStandardMaterial({ vertexColors: true, color: 0xffffff, roughness: src.roughness != null ? src.roughness : 0.85, normalMap: src.normalMap || null })
+        : (src.map || src.color ? new THREE.MeshStandardMaterial({ map: src.map || null, color: src.color ? src.color.clone() : 0xffffff,
+          roughness: src.roughness != null ? src.roughness : 0.7, transparent: !!src.transparent, alphaTest: src.alphaTest || 0, side: src.side }) : src);
       if (m === P.meshes[0] && P.skinMat) {
         const t = P.skinMat.userData.u.pTone.value;
         mat.color.setRGB(t.x, t.y, t.z);
@@ -1881,7 +2721,7 @@
       const g = m.geometry;
       if (g && !done.has(g)) {
         done.add(g);
-        for (const k of ["uv", "skinIndex", "skinWeight", "atlasA", "atlasB"]) if (g.attributes[k]) g.deleteAttribute(k);
+        if (!g.userData.own) for (const k of ["uv", "skinIndex", "skinWeight", "atlasA", "atlasB", "zone"]) if (g.attributes[k]) g.deleteAttribute(k);
         if (g.index && g.index._peopleShared) g.setIndex(null);
         g.morphAttributes = {};
         g.dispose();
@@ -1899,8 +2739,9 @@
      CBZ.people.track) inside PEOPLE_NEAR metres of the camera, nearest first,
      up to PEOPLE_MAX, wear a real body; past PEOPLE_FAR (hysteresis) or out
      of the lists they go back to the procedural one, which pedinstance.js
-     pools again. Two builds a tick at most. A rig that is re-dressed (its
-     outfit key changes) is rebuilt in the new clothes. */
+     pools again. Builds spend ~12 ms a tick (one at least, three at most).
+     A rig that is re-dressed (its outfit key changes) is rebuilt in the new
+     clothes. */
   const lists = [];
   function track(name) { if (lists.indexOf(name) < 0) lists.push(name); }
   ["cityPeds", "cityCops", "npcs"].forEach(track);
@@ -1946,17 +2787,25 @@
       if (P.manual) return;
       if (!keep.has(ch) || !ch.group.parent || ch._clothesKey !== P.clothesKey || (ch.look && ch.look !== P.look)) detach(ch);
     });
+    // a frame budget, not a count: people keep coming in until ~12 ms of
+    // building is spent (one at least, three at most); a tick that builds no
+    // one works out one queued outfit's markings instead
     let built = 0;
+    const t0 = performance.now();
     for (const ch of keep) {
-      if (ch._people || built >= 2) continue;
+      if (ch._people) continue;
+      if (built >= 3 || (built >= 1 && performance.now() - t0 > 12)) break;
       if (attach(ch, ch.look || {}, { auto: true })) built++;
     }
+    if (!built) marksPump();
   }
   if (CBZ.onAlways) CBZ.onAlways(95.8, manage);
 
   CBZ.people = {
     ready: ready, attach: attach, detach: detach, wound: wound, sever: sever, track: track, manage: manage,
     pending: function () { return pendingTex; },
+    // the wardrobe's own view of an outfit (tools/people/wardrobe-look.mjs)
+    _wardrobe: { table: WARDROBE, palette: function (worn) { return paletteOf(worn); }, marks: function (worn) { return marksOf(worn); } },
     failed: function () { return failed; },
     loaded: function () { return !!S.ready; },
     stats: function () {

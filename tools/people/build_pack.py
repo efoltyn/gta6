@@ -2,6 +2,9 @@
 """tools/people/build_pack.py — the Blender people pack for src/entities/people.js.
 
     python3 tools/people/build_pack.py [--mh DIR] [--mpfb DIR] [--out assets/people]
+    ZDEBUG=DIR python3 tools/people/build_pack.py   # + every garment's ZONE MAP: its texture
+                                                    #   tinted by zone, islands numbered, and
+                                                    #   the island table (what ZONE_RULES ids are)
 
 Reads MakeHuman's own CC0 data straight from disk (the MPFB extension's
 built-in data and the CC0 community asset packs it installs) and writes
@@ -361,12 +364,12 @@ def _save(im, fn, q=84):
     if fn.endswith(".png"): im.save(full, optimize=True)
     else: im.save(full, quality=q, optimize=True, progressive=True)
     return fn
-def tex_color(path, size=1024, q=84):
+def tex_color(path, size=1024, q=84, alpha=True):
     if not path or not os.path.exists(path): return None
     k = _key(path, "c", size)
     if k in TEX: return TEX[k]
     im = _load(path, size)
-    if im.mode in ("RGBA", "LA", "P"):
+    if alpha and im.mode in ("RGBA", "LA", "P"):
         im = im.convert("RGBA")
         if np.asarray(im)[..., 3].min() < 250:
             TEX[k] = _save(im, _name(path, "c", "png")); return TEX[k]
@@ -509,9 +512,214 @@ def load_asset(kind, name):
     info["m"] = mhmat(info["material"])
     return info
 
-def asset(kind, name, role, tex=None, extra=None):
+def fitted(info):
+    """the asset fitted to the BASE body (MakeHuman's own formula), native dm;
+       an asset's own OBJ frame is not always the body's (the bib overalls are
+       modelled standing on the origin), the fitted points always are"""
+    bind = np.array(info["verts"], np.float64)
+    v = bv[bind[:, 0].astype(int)] * bind[:, 3:4] + bv[bind[:, 1].astype(int)] * bind[:, 4:5] + bv[bind[:, 2].astype(int)] * bind[:, 5:6]
+    sc = []
+    for ax, k in ((0, "x"), (1, "y"), (2, "z")):
+        s_ = info["scale"].get(k)
+        sc.append(abs(bv[s_[0], ax] - bv[s_[1], ax]) / s_[2] if s_ else 1.0)
+    return v + bind[:, 6:9] * np.array(sc)
+
+# ------------------------------------------------------------------ THE REAL WARDROBE: garment zones
+"""A garment's own texture says what each part of it IS: a suit's panels are
+one cloth, its shirt collar and cuffs another, its tie a third, its buttons
+little islands of their own. Every UV island is classified once, here, into a
+ZONE, so the game can dress the garment in an outfit's colours zone by zone
+while the cloth keeps everything the photo-sourced texture has (the weave, the
+folds, a tie's stripes or paisley, the stitching):
+    0 MAIN   the garment's own cloth (a jacket, a shirt, a tee, a dress)
+    1 LEGS   trousers / jeans / a skirt
+    2 SHIRT  a shirt worn UNDER the main cloth (a suit's collar and cuffs, the
+             tee under bib overalls or an open jacket)
+    3 TIE    a tie, a bow tie
+    4 TRIM   buttons, buckles, zips, a belt: kept in their own colour
+    5 HIDE   part of the model the game does not wear (a cameo pendant on
+             every woman in a blazer would be a uniform of its own)
+Each zone ships its mean luminance (what a texel is measured against when the
+cloth is recoloured) and a DETAIL strength: how much of the texture's own
+light and dark survives a recolour (0 = the flat-dyed look, AO and fine weave
+only; 1 = all of it)."""
+Z_MAIN, Z_LEGS, Z_SHIRT, Z_TIE, Z_TRIM, Z_HIDE = 0, 1, 2, 3, 4, 5
+NZ = 6
+DETAIL_K = [0.85, 0.6, 0.6, 1.0, 1.0, 0.0]
+
+def uv_islands(nvt, F):
+    par = list(range(max(1, nvt)))
+    def f(x):
+        while par[x] != x:
+            par[x] = par[par[x]]; x = par[x]
+        return x
+    for face in F:
+        ts = [t for (_, t) in face if t >= 0]
+        if not ts: continue
+        a = f(ts[0])
+        for t in ts[1:]:
+            b = f(t)
+            if a != b: par[b] = a
+    roots = {}
+    isl = np.zeros(max(1, nvt), np.int64)
+    for t in range(nvt):
+        isl[t] = roots.setdefault(f(t), len(roots))
+    return isl, len(roots)
+
+def _srgb_load(path, size=512):
+    if not path or not os.path.exists(path): return None
+    return np.asarray(_load(path, size).convert("RGB")).astype(np.float64) / 255.0
+
+def _face_samples(avt, face, img, rng, n=3):
+    """n random texels per triangle of a face, area-weighted by the caller"""
+    H, W = img.shape[:2]
+    uv = np.array([avt[t] for (_, t) in face if t >= 0])
+    out, area = [], 0.0
+    for j in range(1, len(uv) - 1):
+        a, b, c = uv[0], uv[j], uv[j + 1]
+        ar = abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2
+        area += ar
+        k = max(1, int(round(n * min(8.0, 1 + ar * 4000))))
+        for _ in range(k):
+            r1, r2 = rng.random(), rng.random()
+            if r1 + r2 > 1: r1, r2 = 1 - r1, 1 - r2
+            q = a + r1 * (b - a) + r2 * (c - a)
+            x = int(min(W - 1, max(0, (q[0] % 1.0) * W))); y = int(min(H - 1, max(0, (1 - (q[1] % 1.0)) * H)))
+            out.append(img[y, x])
+    return out, area
+
+def garment_zones(info, piece_of_vert, pieces, rule):
+    """per face a zone; per zone the stats the shader recolours against"""
+    aF, avt = info["aF"], info["avt"]
+    rule = rule or {}
+    img = _srgb_load(info["m"].get("diffuseTexture"))
+    isl, nI = uv_islands(len(avt), aF)
+    fp = fitted(info)
+    rng = np.random.default_rng(7)
+    face_isl = np.array([isl[face[0][1]] if face[0][1] >= 0 else -1 for face in aF])
+    I = []
+    for i in range(nI):
+        fs = np.where(face_isl == i)[0]
+        if not len(fs): continue
+        cols, area = [], 0.0
+        for fi in fs:
+            if img is not None:
+                s, ar = _face_samples(avt, aF[fi], img, rng)
+                cols += s; area += ar
+        cols = np.array(cols) if cols else np.full((1, 3), 0.5)
+        rgb = cols.mean(axis=0)
+        L = 0.2126 * cols[:, 0] + 0.7152 * cols[:, 1] + 0.0722 * cols[:, 2]
+        vs = sorted(set(v for fi in fs for (v, _) in aF[fi]))
+        pos = fp[vs].mean(axis=0)
+        reg = [pieces[piece_of_vert[v]]["region"] for v in vs]
+        region = max(set(reg), key=reg.count)
+        mx, mn = rgb.max(), rgb.min()
+        I.append({"i": i, "faces": fs, "area": area * 100, "rgb": rgb, "L": float(L.mean()), "Lsd": float(L.std()),
+                  "sat": float((mx - mn) / (mx + 1e-6)), "pos": pos, "region": region})
+    # the garment's own cloth: the biggest colour group among its top islands
+    top = [s for s in I if s["region"] in ("top", "mixed")] or I
+    best, best_a = None, -1
+    for s in top:
+        a = sum(t["area"] for t in top if np.abs(t["rgb"] - s["rgb"]).max() < 0.09)
+        if a > best_a: best, best_a = s["rgb"], a
+    zone_of_isl = {}
+    # a garment with a separate top piece: its hip-bound piece is the bottoms
+    # (shorts, a skirt); one cut in a single piece splits at the hips
+    has_top = any(p["region"] == "top" and p["n"] > 200 for p in pieces)
+    for s in I:
+        i, x, y, z = s["i"], s["pos"][0], s["pos"][1], s["pos"][2]
+        d = float(np.abs(s["rgb"] - best).max())
+        neck_front = abs(x) < 1.0 and y > 3.8 and z > 0.2
+        if i in rule.get("ids", {}): zn = rule["ids"][i]
+        elif s["region"] == "bottom": zn = Z_LEGS
+        elif s["region"] in ("feet", "head"): zn = Z_TRIM
+        # trousers / jeans / a skirt cut in one piece with the top: whatever
+        # hangs below the hips (a dress's skirt is the dress's own cloth)
+        elif s["region"] == "mixed" and not rule.get("dress") and (has_top or y < -0.2): zn = Z_LEGS
+        elif d < rule.get("same", 0.12): zn = Z_MAIN
+        elif neck_front and not rule.get("notie") and (s["sat"] > 0.3 or s["Lsd"] > 0.12) and s["L"] < 0.8 and s["area"] < 4.0: zn = Z_TIE
+        elif s["L"] > 0.5 and s["sat"] < 0.25: zn = Z_SHIRT
+        elif s["area"] < rule.get("trim_area", 0.4): zn = Z_TRIM
+        else: zn = rule.get("other", Z_MAIN)
+        if rule.get("inner") == "keep" and zn in (Z_SHIRT, Z_TIE): zn = Z_TRIM
+        zone_of_isl[i] = zn
+        s["zone"] = zn
+    if os.environ.get("ZDEBUG") and img is not None:
+        # the garment's texture with every island tinted by its zone and numbered
+        tint = {Z_MAIN: (40, 120, 255), Z_LEGS: (40, 220, 90), Z_SHIRT: (255, 255, 255), Z_TIE: (255, 40, 40), Z_TRIM: (255, 200, 0), Z_HIDE: (0, 0, 0)}
+        S2 = 768
+        base = Image.fromarray((img * 255).astype(np.uint8)).resize((S2, S2)).convert("RGB")
+        ov = Image.new("RGBA", (S2, S2), (0, 0, 0, 0))
+        from PIL import ImageDraw
+        dr = ImageDraw.Draw(ov)
+        for s in I:
+            for fi in s["faces"]:
+                pts = [(avt[t][0] % 1.0 * S2, (1 - avt[t][1] % 1.0) * S2) for (_, t) in aF[fi] if t >= 0]
+                if len(pts) >= 3: dr.polygon(pts, fill=tint[s["zone"]] + (110,))
+        base = Image.alpha_composite(base.convert("RGBA"), ov).convert("RGB")
+        dr2 = ImageDraw.Draw(base)
+        for s in I:
+            uv = np.array([avt[t] for fi in s["faces"][:40] for (_, t) in aF[fi] if t >= 0])
+            if len(uv): dr2.text((uv[:, 0].mean() % 1.0 * S2, (1 - uv[:, 1].mean() % 1.0) * S2), str(s["i"]), fill=(255, 0, 255))
+        os.makedirs(os.environ["ZDEBUG"], exist_ok=True)
+        tag = rule.get("_tag") or os.path.basename(os.path.dirname(info["obj"]))
+        base.save(os.path.join(os.environ["ZDEBUG"], tag + ".png"))
+        with open(os.path.join(os.environ["ZDEBUG"], tag + ".txt"), "w") as fo:
+            for s in sorted(I, key=lambda q: -q["area"]):
+                fo.write("%3d z%d %-6s a%6.2f rgb(%.2f %.2f %.2f) L%.2f sd%.2f sat%.2f pos(%5.2f %5.2f %5.2f)\n" % (
+                    s["i"], s["zone"], s["region"], s["area"], *s["rgb"], s["L"], s["Lsd"], s["sat"], *s["pos"]))
+    zone_of_vt = np.array([zone_of_isl.get(int(isl[t]), Z_MAIN) for t in range(len(avt))], np.int64) if len(avt) else np.zeros(0, np.int64)
+    # per zone: mean colour and mean luminance of its texels (raw sRGB, the
+    # game's own convention: hexes and textures are both taken as stored)
+    Zs = []
+    for zn in range(NZ):
+        ss = [s for s in I if s.get("zone") == zn]
+        if not ss:
+            Zs.append({"ref": 0.5, "mean": [0.5, 0.5, 0.5], "k": DETAIL_K[zn], "n": 0}); continue
+        w = np.array([max(1e-6, s["area"]) for s in ss])
+        rgb = (np.array([s["rgb"] for s in ss]) * w[:, None]).sum(0) / w.sum()
+        L = float((np.array([s["L"] for s in ss]) * w).sum() / w.sum())
+        k = rule.get("k", {}).get(zn, DETAIL_K[zn])
+        Zs.append({"ref": round(L, 4), "mean": [round(float(c), 4) for c in rgb], "k": k, "n": len(ss)})
+    info["_islands"] = I
+    return zone_of_vt, Zs
+
+# what each garment is made of, where the colour rules alone would guess wrong
+ZONE_RULES = {
+    # the elegant suit's shirt front and tie are ONE island (and its collar and
+    # cuffs are the same white): they stay the real shirt and the real tie of
+    # whichever of its fabrics is worn; the jacket and trousers take the colour
+    "male_elegantsuit01": {"other": Z_TRIM, "inner": "keep", "k": {Z_MAIN: 0.9, Z_LEGS: 0.9}},
+    "toigo_shift_dress": {"dress": True}, "toigo_halter_dress_knee_length": {"dress": True},
+    # the casual tees carry a printed logo: dyed flat (the AO and weave stay)
+    "male_casualsuit02": {"k": {Z_MAIN: 0.0, Z_LEGS: 0.45}}, "male_casualsuit04": {"k": {Z_MAIN: 0.0, Z_LEGS: 0.45}},
+    "male_casualsuit06": {"k": {Z_MAIN: 0.0, Z_LEGS: 0.45}}, "male_casualsuit03": {"k": {Z_MAIN: 0.0, Z_LEGS: 0.45}},
+    "female_casualsuit01": {"k": {Z_MAIN: 0.0, Z_LEGS: 0.45}}, "female_casualsuit02": {"k": {Z_MAIN: 0.0, Z_LEGS: 0.45}},
+    "female_sportsuit01": {"k": {Z_MAIN: 0.0, Z_LEGS: 0.3}},
+    # the work shirt is denim: a uniform shirt keeps its seams, not its fade
+    "male_casualsuit01": {"k": {Z_MAIN: 0.25, Z_LEGS: 0.15}},
+    # the open zip jacket shows a striped tee (islands 15-18, too close to the
+    # jacket's dark grey for the colour rule): the shirt under it
+    "male_casualsuit05": {"ids": {15: Z_SHIRT, 16: Z_SHIRT, 17: Z_SHIRT, 18: Z_SHIRT}, "k": {Z_MAIN: 0.55, Z_SHIRT: 0.0, Z_LEGS: 0.45}},
+    # bib overalls are ONE cloth front and back (no legs zone); the brass
+    # buckles stay brass
+    "male_worksuit01": {"notie": True, "dress": True, "ids": {4: Z_TRIM, 7: Z_TRIM}, "k": {Z_MAIN: 0.45, Z_SHIRT: 0.0}},
+    # the tuxedo's pleated shirt front and collar are the shirt, the purple
+    # paisley wings and knot the bow tie
+    "toigo_suit_with_jacket_and_bowtie": {"ids": {4: Z_SHIRT, 6: Z_SHIRT, 33: Z_TIE, 34: Z_TIE, 35: Z_TIE}, "k": {Z_MAIN: 0.8, Z_LEGS: 0.8, Z_SHIRT: 0.7, Z_TIE: 1.0}},
+    # the blazer's cameo pendant (five layered islands at the throat) goes
+    "toigo_female_suit": {"ids": {0: Z_HIDE, 1: Z_HIDE, 2: Z_HIDE, 3: Z_HIDE, 4: Z_HIDE}, "k": {Z_MAIN: 0.8, Z_LEGS: 0.8}},
+    "toigo_male_suit_3": {"k": {Z_MAIN: 0.8, Z_LEGS: 0.8, Z_SHIRT: 0.6, Z_TIE: 1.0}},
+    "female_elegantsuit01": {"k": {Z_MAIN: 0.25, Z_LEGS: 0.7}},
+    # the gilet is dyed (hi-vis, blaze orange, black): its seams, not its print
+    "male_casualsuit05_gilet": {"k": {Z_MAIN: 0.35}, "_tag": "gilet"},
+    "male_casualsuit06_tank": {"k": {Z_MAIN: 0.0, Z_LEGS: 0.45}, "_tag": "tank"},
+}
+
+def asset(kind, name, role, tex=None, extra=None, derive=None, zones=True):
     info = load_asset(kind, name)
     if not info: return None
+    if derive: derive(info)
     av, avt, aF = info["av"], info["avt"], info["aF"]
     arv, art, atri = split_render(aF)
     bind = np.array(info["verts"], np.float64)
@@ -541,10 +749,17 @@ def asset(kind, name, role, tex=None, extra=None):
                            "arm": round(float(gs[1]), 2)})
         e["piece"] = put(lab.astype(np.uint8))
         e["pieces"] = pieces
+        if role == "cloth" and zones:
+            zvt, Zs = garment_zones(info, lab, pieces, ZONE_RULES.get(zones if isinstance(zones, str) else name))
+            zr = np.array([zvt[t] if t >= 0 and len(zvt) else Z_MAIN for t in art], np.uint8)
+            e["zone"] = put(zr)
+            e["zones"] = Zs
     if tex: e.update(tex(info))
     if extra: e.update(extra)
-    print("  %-8s %-34s %5d v %5d tris del %5d %s" % (role, name, len(av), len(atri), len(info["delete"]),
-          (" pieces " + " ".join("%s:%d/%.0fmm" % (p["region"], p["n"], p["off"]) for p in e.get("pieces", []))) if e.get("pieces") else ""))
+    if not derive: INFO[name] = info
+    print("  %-8s %-34s %5d v %5d tris del %5d %s%s" % (role, name, len(av), len(atri), len(info["delete"]),
+          (" pieces " + " ".join("%s:%d/%.0fmm" % (p["region"], p["n"], p["off"]) for p in e.get("pieces", []))) if e.get("pieces") else "",
+          (" zones " + " ".join("%s:%d/%.2f" % ("MLSTR?"[z], Z["n"], Z["ref"]) for z, Z in enumerate(e["zones"]) if Z["n"])) if e.get("zones") else ""))
     return e
 
 def t_hair(info):
@@ -565,17 +780,52 @@ def t_color(size):
     return f
 def t_cloth(info):
     m = info["m"]
-    # a garment with its own AO + normal map takes its cloth from those (the
-    # diffuse carries prints and logos the outfit painters must not wear);
-    # one without takes the fine high-pass of its diffuse
+    # SHADE: a garment with its own AO + normal map takes its cloth from those
+    # (the diffuse carries prints and logos a flat dye must not wear); one
+    # without takes the fine high-pass of its diffuse. MAP: the garment's real
+    # texture, which a zone recolours by its own light and dark (zones above)
     has_maps = bool(m.get("aomapTexture") and m.get("normalmapTexture"))
-    return {"mat": {"shade": tex_shade(None if has_maps else m.get("diffuseTexture"), m.get("aomapTexture"), 1024),
-                    "normalMap": tex_normal(m.get("normalmapTexture"), 512, derive_from=m.get("diffuseTexture"), k=2.0)}}
+    d = m.get("diffuseTexture")
+    return {"mat": {"shade": tex_shade(None if has_maps else d, m.get("aomapTexture"), 1024),
+                    "map": tex_color(d, 1024, 80, alpha=False),
+                    "normalMap": tex_normal(m.get("normalmapTexture"), 512, derive_from=d, k=2.0)}}
 
 A = {}
-def add(key, kind, name, role, tex=None, extra=None):
-    e = asset(kind, name, role, tex, extra)
+INFO = {}
+def add(key, kind, name, role, tex=None, extra=None, **kw):
+    e = asset(kind, name, role, tex, extra, **kw)
     if e: A[key] = e
+
+# DERIVED CUTS: real geometry, re-cut. The arm share of every garment vertex
+# comes off its binding (the body vertices it rides and their bone groups).
+def arm_share(info):
+    b = np.array(info["verts"], np.float64)
+    return sum(VGROUP[b[:, k].astype(int), 1] * b[:, 3 + k] for k in range(3))
+def d_gilet(info):
+    """male_casualsuit05's zip jacket with its sleeves cut away and its tee and
+    jeans left behind: a gilet / work vest, worn OVER a shirt (a hi-vis vest,
+    a blaze-orange hunting vest, a plate carrier's silhouette). It hides none
+    of the body: the shirt under it does that."""
+    av, aF = info["av"], info["aF"]
+    lab, nc = components(len(av), aF)
+    b = np.array(info["verts"], np.float64)
+    off = np.linalg.norm(b[:, 6:9], axis=1) * S * 1000
+    g = (VGROUP[b[:, 0].astype(int)] * b[:, 3:4] + VGROUP[b[:, 1].astype(int)] * b[:, 4:5] + VGROUP[b[:, 2].astype(int)] * b[:, 5:6])
+    jacket = set(c for c in range(nc) if off[lab == c].mean() > 18 and g[lab == c][:, 2].mean() < 0.3)
+    aw = arm_share(info)
+    info["aF"] = [f for f in aF if lab[f[0][0]] in jacket and np.mean([aw[v] for v, _ in f]) < 0.42]
+    info["delete"] = []
+def d_tank(info):
+    """male_casualsuit06's tee with its sleeves cut away: a tank top; the arms
+    it no longer covers are the wearer's own again"""
+    av, aF = info["av"], info["aF"]
+    lab, nc = components(len(av), aF)
+    b = np.array(info["verts"], np.float64)
+    g = (VGROUP[b[:, 0].astype(int)] * b[:, 3:4] + VGROUP[b[:, 1].astype(int)] * b[:, 4:5] + VGROUP[b[:, 2].astype(int)] * b[:, 5:6])
+    top = set(c for c in range(nc) if g[lab == c][:, 2].mean() < 0.3)
+    aw = arm_share(info)
+    info["aF"] = [f for f in aF if not (lab[f[0][0]] in top and np.mean([aw[v] for v, _ in f]) > 0.38)]
+    info["delete"] = [v for v in info["delete"] if VGROUP[v, 1] < 0.22]
 
 print("assets:")
 add("eyes", "eyes", "high-poly", "eyes")
@@ -591,14 +841,45 @@ HAIR = {"short": "short02", "short_b": "cortu_short_messy_hair", "crop": "short0
 for k, nm in HAIR.items(): add("hair:" + k, "hair", nm, "hair", t_hair)
 BEARD = {"full": "wdg_scruffy_beard", "moustache": "rehmanpolanski_moustache_viking", "goatee": "culturalibre_faun_beard"}
 for k, nm in BEARD.items(): add("beard:" + k, "clothes", nm, "beard", t_hair)
-# garments: the GEOMETRY of real clothes (fit, folds, collars, cuffs, hems)
-# with their cloth detail; the COLOUR and every uniform's markings come from
-# the game's own outfit painters (city/clothes.js), projected onto them
+# garments: real clothes (fit, folds, collars, cuffs, hems, lapels, ties) with
+# their real cloth; the game dresses them in each outfit's own colours zone by
+# zone (src/entities/people.js, THE REAL WARDROBE). A uniform is BUILT from
+# them (a shirt, a suit, a gilet over a shirt), never painted onto one.
 CLOTH = {"m_long": "male_casualsuit02", "m_long_b": "male_casualsuit03", "m_tee": "male_casualsuit04", "m_tee_b": "male_casualsuit06",
          "m_jacket": "male_casualsuit05", "m_suit": "male_elegantsuit01", "m_overalls": "male_worksuit01",
+         "m_shirt": "male_casualsuit01", "m_suit3": "toigo_male_suit_3", "m_tux": "toigo_suit_with_jacket_and_bowtie",
          "f_tee": "female_casualsuit01", "f_shorts": "female_casualsuit02", "f_sport": "female_sportsuit01",
-         "f_suit": "female_elegantsuit01", "f_dress": "toigo_shift_dress", "f_halter": "toigo_halter_dress_knee_length"}
+         "f_suit": "female_elegantsuit01", "f_blazer": "toigo_female_suit",
+         "f_dress": "toigo_shift_dress", "f_halter": "toigo_halter_dress_knee_length"}
 for k, nm in CLOTH.items(): add("cloth:" + k, "clothes", nm, "cloth", t_cloth)
+add("cloth:m_gilet", "clothes", "male_casualsuit05", "cloth", t_cloth, derive=d_gilet, zones="male_casualsuit05_gilet")
+add("cloth:m_tank", "clothes", "male_casualsuit06", "cloth", t_cloth, derive=d_tank, zones="male_casualsuit06_tank")
+# THE SUIT'S REAL FABRICS: male_elegantsuit01 ships in several cloths (a grey,
+# a brown, navies with a striped or a paisley tie, olive, teal), each with its
+# own shirt and tie. The game picks the nearest to the outfit's colour and dyes
+# only the jacket and trousers the rest of the way.
+SUIT_FABRICS = ["toigo_male_elegant_suit_gray", "toigo_male_elegant_suit_brown", "toigo_male_elegant_suit_blue_with_red_striped_tie",
+                "toigo_male_elegant_suit_blue_pinstripe_with_paisley_tie", "toigo_male_elegant_suit_olive", "toigo_male_elegant_suit_teal"]
+if "cloth:m_suit" in A:
+    sinfo = INFO.get("male_elegantsuit01")
+    def main_mean(path):
+        img = _srgb_load(path, 512)
+        rng = np.random.default_rng(3)
+        cols = []
+        for s in sinfo["_islands"]:
+            if s.get("zone") != Z_MAIN: continue
+            for fi in s["faces"][::3]:
+                cs, _ = _face_samples(sinfo["avt"], sinfo["aF"][fi], img, rng, 1)
+                cols += cs
+        return [round(float(c), 4) for c in np.array(cols).mean(axis=0)]
+    fabrics = [{"name": "black", "map": A["cloth:m_suit"]["mat"]["map"], "main": main_mean(sinfo["m"].get("diffuseTexture"))}]
+    for vn in SUIT_FABRICS:
+        mm = glob.glob(os.path.join(UD, "clothes", "male_elegantsuit01", vn, "*.mhmat"))
+        d = mhmat(mm[0]).get("diffuseTexture") if mm else None
+        if not d: print("  MISSING fabric", vn); continue
+        fabrics.append({"name": vn.replace("toigo_male_elegant_suit_", ""), "map": tex_color(d, 1024, 80, alpha=False), "main": main_mean(d), "src": vn})
+    A["cloth:m_suit"]["mat"]["fabrics"] = fabrics
+    print("  suit fabrics", [(f["name"], f["main"]) for f in fabrics])
 SHOES = {"dress": "shoes01", "boots": "shoes03", "sneakers": "shoes05", "sneakers_b": "shoes06", "flats": "toigo_ballet_flats",
          "boots_f": "toigo_ankle_boots_female"}
 for k, nm in SHOES.items(): add("shoes:" + k, "clothes", nm, "shoes", t_color(512))
@@ -659,15 +940,7 @@ print("skin normals", list(SKN))
 # ------------------------------------------------------------------ masks in body UV space
 # R full beard, G goatee, B moustache, A scalp: where stubble shades the skin,
 # where a shaved head shows, what the hair line under hair cards darkens
-def fitted(info):
-    """the asset fitted to the BASE body (MakeHuman's own formula)"""
-    bind = np.array(info["verts"], np.float64)
-    v = bv[bind[:, 0].astype(int)] * bind[:, 3:4] + bv[bind[:, 1].astype(int)] * bind[:, 4:5] + bv[bind[:, 2].astype(int)] * bind[:, 5:6]
-    sc = []
-    for ax, k in ((0, "x"), (1, "y"), (2, "z")):
-        s_ = info["scale"].get(k)
-        sc.append(abs(bv[s_[0], ax] - bv[s_[1], ax]) / s_[2] if s_ else 1.0)
-    return v + bind[:, 6:9] * np.array(sc)
+# (fitted(): the asset on the base body, defined with the garment zones)
 body_idx = np.array(sorted(groups["body"]))
 bpos = bv[body_idx]
 def near_mask(points, radius):
@@ -737,7 +1010,12 @@ def prov(name, kind):
     lic = (m or {}).get("license", "CC0 (MakeHuman system asset)" if name in ("high-poly", "low-poly", "teeth_base", "tongue01", "eyebrow001", "eyelashes01") else "?")
     if "CC0" not in lic.upper().replace("-", ""): bad.append(name)
     rows.append("| %s | %s | %s | %s | %s | %s |" % (name, kind, (m or {}).get("author", "MakeHuman team"), (m or {}).get("pack", "makehuman_system_assets"), lic, (m or {}).get("source", "") or "-"))
-for k, e in A.items(): prov(e["name"], e["role"])
+_seen = set()
+for k, e in A.items():
+    if e["name"] in _seen: continue          # a derived cut (the gilet, the tank) is its source garment
+    _seen.add(e["name"]); prov(e["name"], e["role"])
+    for fab in (e.get("mat") or {}).get("fabrics", []):
+        if fab.get("src"): prov(fab["src"], "suit fabric")
 for nm in SK: prov(nm, "skin")
 lic_md = ["# The people pack: provenance", "",
           "Everything in `assets/people/` is derived (meshes re-indexed, textures resized / converted / recoloured, targets",

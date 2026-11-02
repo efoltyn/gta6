@@ -38,11 +38,21 @@ packs the MakeHuman asset site lists as CC0. Built by `tools/people/build_pack.p
 | male_casualsuit06 | cloth | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
 | male_casualsuit05 | cloth | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
 | male_elegantsuit01 | cloth | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
+| toigo_male_elegant_suit_gray | suit fabric | MargaretToigo | system_clothes_materials01 | CC0 | http://www.makehumancommunity.org/node/987 |
+| toigo_male_elegant_suit_brown | suit fabric | MargaretToigo | system_clothes_materials01 | CC0 | http://www.makehumancommunity.org/node/984 |
+| toigo_male_elegant_suit_blue_with_red_striped_tie | suit fabric | MargaretToigo | system_clothes_materials01 | CC0 | http://www.makehumancommunity.org/node/983 |
+| toigo_male_elegant_suit_blue_pinstripe_with_paisley_tie | suit fabric | MargaretToigo | system_clothes_materials01 | CC0 | http://www.makehumancommunity.org/node/990 |
+| toigo_male_elegant_suit_olive | suit fabric | MargaretToigo | system_clothes_materials01 | CC0 | http://www.makehumancommunity.org/node/988 |
+| toigo_male_elegant_suit_teal | suit fabric | MargaretToigo | system_clothes_materials01 | CC0 | http://www.makehumancommunity.org/node/991 |
 | male_worksuit01 | cloth | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
+| male_casualsuit01 | cloth | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
+| toigo_male_suit_3 | cloth | MargaretToigo | suits01 | CC0 | http://www.makehumancommunity.org/node/1733 |
+| toigo_suit_with_jacket_and_bowtie | cloth | MargaretToigo | suits01 | CC0 | http://www.makehumancommunity.org/node/1317 |
 | female_casualsuit01 | cloth | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
 | female_casualsuit02 | cloth | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
 | female_sportsuit01 | cloth | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
 | female_elegantsuit01 | cloth | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
+| toigo_female_suit | cloth | MargaretToigo | suits01 | CC0 | http://www.makehumancommunity.org/node/1324 |
 | toigo_shift_dress | cloth | MargaretToigo | dress01 | CC0 | http://www.makehumancommunity.org/node/1724 |
 | toigo_halter_dress_knee_length | cloth | MargaretToigo | dress01 | CC0 | http://www.makehumancommunity.org/node/1853 |
 | shoes01 | shoes | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |

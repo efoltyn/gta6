@@ -87,6 +87,9 @@ export function loadVerbsVM(opts = {}) {
       strike() { return 0; },
     },
     sfx: noop, shake: noop, doHitstop: noop, doSlowmo: noop,
+    // config.js's economy gate (systems/arrest.js asks it), the same rule
+    ECONOMY_MODES: { city: 1, archipelago: 1 },
+    economyMode(m) { return !!this.ECONOMY_MODES[m || (this.game && this.game.mode)]; },
   };
   const CBZ = ctx.CBZ;
   const run = (f) => { loading = f; vm.runInContext(read(f), ctx, { filename: f }); loading = ""; };
