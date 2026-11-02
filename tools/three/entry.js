@@ -49,6 +49,12 @@ import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
 import * as MeshletGeometryUtils from 'three/addons/utils/MeshletGeometryUtils.js';
 import * as MeshletPipeline from 'three/addons/pipelines/MeshletDrawingPipeline.js';
+// the fire / smoke / light engines (src/systems/gpufx.js, src/core/clusterlights.js):
+// Forward+ clustered lights, curl noise, soft particles, box raymarching
+import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
+import { curlNoise, snoise, snoiseVec3 } from 'three/addons/tsl/math/curlNoise.js';
+import { softParticles } from 'three/addons/tsl/utils/SoftParticles.js';
+import { RaymarchingBox } from 'three/addons/tsl/utils/Raymarching.js';
 
 const THREE = Object.assign( {}, WEBGPU, WEBGL );
 
@@ -70,10 +76,14 @@ THREE.ThreeMFLoader = ThreeMFLoader;
 THREE.MeshletGeometryUtils = Object.assign( {}, MeshletGeometryUtils );
 THREE.MeshletDrawingPipeline = MeshletPipeline.MeshletDrawingPipeline;
 THREE.MeshletBatch = MeshletPipeline.MeshletBatch;
+THREE.ClusteredLighting = ClusteredLighting;
 THREE.Addons = {
 	BufferGeometryUtils: BGU, SkeletonUtils: THREE.SkeletonUtils,
 	GLTFLoader, DRACOLoader, RGBELoader, HDRLoader, ThreeMFLoader,
 	MeshletGeometryUtils: THREE.MeshletGeometryUtils, MeshletDrawingPipeline: MeshletPipeline,
+	ClusteredLighting,
+	// TSL helpers (node functions; use them inside node materials / compute only)
+	curlNoise, snoise, snoiseVec3, softParticles, RaymarchingBox,
 };
 
 // BufferGeometry's uuid is made on first use (its constructor no longer

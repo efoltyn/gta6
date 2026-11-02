@@ -133,6 +133,10 @@
     const reg = o.region || { cx: S.x, cz: S.z, R: 120 };
     const W = o.world || {};
     const buildings = W.buildings || [], trees = W.trees || [], cars = W.cars || [];
+    // (WebGPU) the particle engine's rocks and dust roll on this same ground:
+    // its height field is baked off groundAt over the whole region, in slices
+    const GPE = CBZ.gpuParticles;
+    if (GPE && GPE.on) GPE.ensureGround(groundAt, reg.cx, reg.cz, 2 * (reg.R || 120) + 80);
     const H = Object.assign({
       shake: function (k) { if (CBZ.shake) CBZ.shake(k); },
       sound: function (name, x, z) { if (x != null && CBZ.sfxAt) CBZ.sfxAt(name, x, z); else if (CBZ.sfx) CBZ.sfx(name); },
@@ -176,6 +180,8 @@
       roofs: [], carRoofs: [],
     };
     if (!E.lane) E.lane = lane(S, E.collapseBearing, groundAt, reg.R);
+    // the newest eruption, for tripods and probes (tools/fire/shot.mjs aims off its lane)
+    CBZ.eruption.last = E;
 
     let steam = null;
     const sinking = [];          // cars the lava is swallowing

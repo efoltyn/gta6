@@ -78,9 +78,17 @@ export async function launch(opts = {}) {
   const dbg = await claimPort(12000, 400, (p) => fetch(`http://127.0.0.1:${p}/json/version`));
   const profile = `/tmp/cbz-cdp-${dbg}-${process.pid}`;
   await rm(profile, { recursive: true, force: true }).catch(() => {});
+  /* opts.gpu: "real" = the Mac's own GPU (ANGLE on Metal for WebGL, Dawn on
+     Metal for WebGPU; headless=new gets a real "apple metal-3" adapter on
+     this M1, measured 2026-11-02). Default stays SwiftShader: software GL is
+     slow but it is the same picture on every box. */
+  const gfx = opts.gpu === "real"
+    ? ["--use-angle=metal", "--enable-unsafe-webgpu", "--ignore-gpu-blocklist", "--enable-webgl"]
+    : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl"];
+  const win = opts.window || "900,600";
   const chrome = spawn(CHROME, ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
-    "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl",
-    "--mute-audio", "--window-size=900,600", `--remote-debugging-port=${dbg}`,
+    ...gfx, "--mute-audio", `--window-size=${win}`, `--remote-debugging-port=${dbg}`,
+    "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
     `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
 
   let page = null;
