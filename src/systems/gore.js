@@ -4225,6 +4225,7 @@
     return { held: mouthfuls.length, keys: mouthfuls.map(function (f) { return f.key; }) };
   };
 
+  const _svm = new THREE.Matrix4();
   function severBody(actor, key, opts) {
     opts = opts || {};
     if (!CBZ.scene || !STUMPS[key]) return false;
@@ -4265,6 +4266,13 @@
       };
       severed.push(r);
     }
+    // THE BLENDER PEOPLE (entities/people.js): a rig wearing a real body
+    // loses the real limb — its skin collapses into the joint under a flesh
+    // and bone cap, and the piece that flies is that limb (skin, sleeve,
+    // hand), CPU-skinned in the pose it had. The proc part below still
+    // hides (every reader of `visible` keeps working); its stump only marks
+    // where the blood leaves, moved onto the real joint.
+    const realGib = ch._people && CBZ.people && CBZ.people.sever ? CBZ.people.sever(ch, key, opts) : null;
     part.visible = false;
     // ---- STUMP: the torn cut face seated at the joint, riding the rig ------
     const J = STUMPS[key];
@@ -4282,6 +4290,11 @@
       stump.rotation.set(J.ay < 0 ? Math.PI : 0, Math.random() * 6.28, 0);
       stump.castShadow = false;
       parent.add(stump);
+      if (realGib && realGib.userData && realGib.userData.pivot) {
+        parent.updateWorldMatrix(true, false);
+        stump.position.copy(realGib.userData.pivot).applyMatrix4(_svm.copy(parent.matrixWorld).invert());
+        stump.layers.set(30);                           // people.js draws the cap; this is the spray's origin
+      }
     }
     r.items.push({ key, part, stump });
     // The open joint pumps a couple of diminishing pulses while the corpse is
@@ -4327,13 +4340,13 @@
     // clothing/skin materials (shared refs, never disposed) — launched from
     // the part's exact world transform. Never a generic red cube.
     if (!opts.noFly && bits.length < 500) {
-      const fly = part.clone();
+      const fly = realGib && realGib.isObject3D ? realGib : part.clone();
       // strip SOCKETS (hand/weapon mounts) but keep the two-segment limb's
       // `low` joint group — it holds the forearm/shin mesh + cap, and the old
       // "remove every non-Mesh child" loop would amputate the flying gib at
       // the elbow/knee. Sockets are tagged userData.isSocket in character.js.
       const stripQ = [];
-      fly.traverse((o) => { if (o !== fly && o.userData && o.userData.isSocket) stripQ.push(o); });
+      if (fly !== realGib) fly.traverse((o) => { if (o !== fly && o.userData && o.userData.isSocket) stripQ.push(o); });
       for (let i = 0; i < stripQ.length; i++) { if (stripQ[i].parent) stripQ[i].parent.remove(stripQ[i]); }
       fly.visible = true;
       // A SEVERED LIMB MUST BE VISIBLE EVEN WHEN ITS ORIGINAL IS INSTANCED.
@@ -4342,8 +4355,8 @@
       // contract above depends on that), and Object3D.copy carries
       // layers.mask into the clone, so an un-revealed gib would fly off
       // invisible. One call, guarded: a no-op when the system is off.
-      if (CBZ.pedInstanceReveal) CBZ.pedInstanceReveal(fly);
-      part.matrixWorld.decompose(fly.position, fly.quaternion, fly.scale);
+      if (CBZ.pedInstanceReveal && fly !== realGib) CBZ.pedInstanceReveal(fly);
+      if (fly !== realGib) part.matrixWorld.decompose(fly.position, fly.quaternion, fly.scale);
       scene().add(fly);
       let dx = opts.dir ? opts.dir.x || 0 : 0, dz = opts.dir ? opts.dir.z || 0 : 0;
       const dl = Math.hypot(dx, dz);

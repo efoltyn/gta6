@@ -9,6 +9,8 @@
 //   2. a head of state in his bunker survives an ordinary airstrike
 //   3. a B-2 + two GBU-57s breach that bunker and kill him (succession runs)
 //   4. every event reads right on NEWS ONE
+//   5. the strike console's called raid is a B-52 cell through the one strike
+//      flight, and every Mk-82 it drops lands on its aimpoint
 // Run: node tools/warroom-check.cjs
 const fs = require("fs"), vm = require("vm"), path = require("path");
 const ROOT = process.argv[2] || path.resolve(__dirname, "..");
@@ -33,6 +35,7 @@ const CBZ = {
   onUpdate: (o, fn) => updates.push({ o, fn }),
   onAlways: () => {},
   addLandmass: (fn, o) => landmass.push({ o: o || 0, fn }),
+  registerCityRegion: () => {},          // city/regions.js (the map's region registry) is not loaded here
   hash01: (a, b, s) => { const x = Math.sin(a * 12.9898 + b * 78.233 + (s || 0) * 3.1) * 43758.5453; return x - Math.floor(x); },
   cityFeed: (t) => {},
   presidency: {
@@ -67,6 +70,11 @@ const CBZ = {
   milModels: {
     jet: () => ({ group: new THREE.Group(), footW: 12, footL: 16, height: 4, aircraftDims: { span: 12, length: 16, height: 4 } }),
     bomber: () => ({ group: new THREE.Group(), footW: 56, footL: 48, height: 12, aircraftDims: { span: 56, length: 48, height: 12 } }),
+    // the B-2 is built by id through city/strategic.js's makeB2 adapter
+    // (milModels.has/build since it became the unit file): a bare airframe
+    has: (k) => k === "jet" || k === "bomber" || k === "b2_spirit",
+    load: () => Promise.resolve([]),
+    build: (id) => (id === "b2_spirit" ? { group: Object.assign(new THREE.Group(), { userData: { aircraftDims: { family: "B-2-stealth", length: 20.9, span: 52.43, height: 5.18 } } }), rig: null } : null),
   },
 };
 win.CBZ = CBZ;
@@ -172,6 +180,26 @@ for (let i = 0; i < 400 && !(vb.breached) && CBZ.strategicSortieState().active; 
 tick(3);
 console.log("buster detonations:", JSON.stringify(detonations.filter(x => x.kind === "buster")), "bunker shell", JSON.stringify(vb.shell));
 console.log("bunker breached:", vb.breached, "wornCE", vb.wornCE && vb.wornCE.toFixed(2), "veridia leader killed:", killed.indexOf("veridia_pres") >= 0, "successor:", P.get("veridia").office.holder);
+// ===== 4. the bunker map table's CALLED strike is a real raid now: a B-52
+// cell flies in through playerair.js's strike flight and every Mk-82 is a
+// released store that lands on its aimpoint (strategic.js's solved fall)
+console.log("\n--- 4. a called B-52 raid (the strike console's CBZ.strategicCallStrike)");
+{
+  const det0 = detonations.length;
+  let report = null, impacts = 0;
+  const ok = CBZ.strategicCallStrike({ x: 400, z: 300, heading: Math.PI / 2, count: 6, byPlayer: false,
+    onImpact: () => { impacts++; }, onDone: (r) => { report = r; } });
+  const fl = CBZ.cityStrikeFlights().filter((f) => f.airframe === "b52")[0];
+  console.log("called ->", ok, "flight:", fl ? `${fl.jets.length} x ${fl.airframe} ${fl.kind}, lead ${Math.round(fl.lead)} m, fall ${fl.tf.toFixed(1)} s, eta ${fl.eta.toFixed(1)} s` : "none",
+    "run:", JSON.stringify(CBZ.strategicBombRunState()));
+  const aims = fl ? fl.jets.flatMap((j) => j.aims) : [];
+  tick(Math.ceil((fl ? fl.eta : 30) + 10));
+  const hits = detonations.slice(det0).filter((d) => d.kind === "mk82");
+  let worst = 0;
+  for (const d of hits) { let b = 1e9; for (const a of aims) b = Math.min(b, Math.hypot(a.x - d.x, a.z - d.z)); worst = Math.max(worst, b); }
+  console.log("mk82 detonations:", hits.length, "of", aims.length, "worst miss", worst.toFixed(1), "m, onImpact", impacts, "report:", JSON.stringify(report));
+  console.log("strategicGrav", CBZ.strategicGrav, "bombs in the air now:", CBZ.strategicBombsInAir().length);
+}
 console.log("\nEVENTS:", events.map(e => e[0]).join(", "));
 // NO RAW KEYS IN ANY HEADLINE: a sid, a polity id or "Someone" never reaches text
 const ids = ["veridia_pres", "veridia_vp", "mbeya_pres", "solara_pres", "cell_emir", "lead_", "cell_dugout", "Someone", "undefined", "null"];

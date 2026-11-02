@@ -62,12 +62,15 @@
    ground speed). The run is a public seam — CBZ.strategicBombRun(opts) /
    CBZ.strategicBombRunState() / CBZ.strategicOnBombRun — so the mission
    layer can hang "bomb the city" off it without touching this file. With no
-   B-2 in the air the SAME seam flies a CALLED sortie off-map
-   (CBZ.strategicCallStrike), which is what the bunker's map table tasks.
+   B-2 in the air the SAME seam calls in a RAID (CBZ.strategicCallStrike): a
+   B-52 cell flown by playerair.js's one strike flight, every Mk-82 a real
+   store off its bay clip through releaseStore() — what the bunker's map
+   table tasks.
    [X] cycles the payload: Mk-84 · JDAM · GBU bunker buster · nuclear weapon.
 
-   BALLISTICS ARE SOLVED, NOT INTEGRATED. y(t) = y0 + vy t - 1/2 g t^2 and the
-   landing time is the positive root of the quadratic, so a round's impact
+   BALLISTICS ARE SOLVED, NOT INTEGRATED. y(t) = y0 + vy t - 1/2 g t^2 (g the
+   real 9.81, and an iron bomb's light linear drag in closed form — see the
+   GRAV / DRAG_TAU block) and the landing time is its root, so a round's impact
    POINT, TIME and SPEED are all known the instant it leaves the bay. That one
    change is what makes the carpet-walk dust land with the craters, lets an
    over-cap release snap straight to its end state instead of queueing, and
@@ -153,6 +156,7 @@
     jdam:   { power: 2.6, radius: 12 },
     buster: { power: 3.0, radius: 13 },
     nuke:   { power: 3.0, radius: 14 },
+    mk82:   { power: 1.8, radius: 8 },
   };
   /* ---- ORDNANCE MASS + THE KINETIC LAW ------------------------------------
      Real ordnance, real kilograms. Mk-84 2000 lb = 925 kg carrying ~429 kg of
@@ -179,7 +183,7 @@
   // only a B-2 carries. Its reference energy scales with the mass, so the
   // penetration a given release earns (BUSTER_PEN_CE x sqrt(E/refE)) is the
   // same arithmetic the 2130 kg round had — heavier round, same law.
-  const MASS = { bomb: 925, jdam: 970, buster: 13600, nuke: 4400 };
+  const MASS = { bomb: 925, jdam: 970, buster: 13600, nuke: 4400, mk82: 241 };
   const BUSTER_REF_E = 3.4e7 * (13600 / 2130);   // 13.6 t arriving at ~180 m/s — a NOMINAL release
   const BUSTER_PEN_CE = 6.0;       // GBU-28's published ~6 m of reinforced concrete, at refE
 
@@ -722,10 +726,11 @@
 
   // ---- the falling ordnance: shapes + pools live in weapons/munitions.js ---
   // Mk-84 for the iron bomb, the Mk-84 + JDAM kit for the guided round, the
-  // GBU-28 penetrator for the buster; each a pooled, one-draw-call body with
-  // its moving part (fuze vane / pop-out wings) dressed per frame below.
+  // GBU-28 penetrator for the buster, the Mk-82 500 lb for a heavy bomber's
+  // bay stick (playerair.js's B-52 cells); each a pooled, one-draw-call body
+  // with its moving part (fuze vane / pop-out wings) dressed per frame below.
   const MU = CBZ.munitions;
-  const BOMB_MUNITION = { bomb: "mk84", jdam: "jdam", buster: "gbu28" };
+  const BOMB_MUNITION = { bomb: "mk84", jdam: "jdam", buster: "gbu28", mk82: "mk82" };
 
   /* ==========================================================================
      CBZ.nukeWarhead(opts) — WHAT A NUCLEAR GRAVITY BOMB LOOKS LIKE.
@@ -916,14 +921,50 @@
     }
     return m;
   }
-  const bombs = [];                          // {mesh,kind,x0,y0,z0,vx,vy,vz,t,sol,seek}
-  const GRAV = 14;                                   // gamey-fast fall — reads right at flight alt
+  const bombs = [];                          // {mesh,kind,x0,y0,z0,vx,vy,vz,tau,t,sol,seek}
+  /* ---- g. THE ONE CONSTANT every bomb in the game falls at ----------------
+     Was 14 ("gamey-fast — reads right at flight alt"). It is the real 9.81
+     now: a heavy bomber's stick from 900 m takes the 13.5 s a real one does,
+     and the B-61's escape profile, the JDAM's glide budget and the buster's
+     arrival speed are all solved against the same number. Nobody else types
+     a g for a bomb: playerair.js leads its releases off CBZ.strategicFall
+     (this solver), the walk prediction, the sortie's release timing and the
+     bomb camera all evaluate the same arcs. */
+  const GRAV = 9.81;
+  /* ---- DRAG, KEPT CLOSED-FORM. A real low-drag bomb loses airspeed: by the
+     time a Mk-82 from a B-52 at 200 m/s / 900 m hits, it has fallen ~190 m
+     behind the aeroplane, and that lag is what makes a stick STREAM out
+     behind and below the bomber instead of hanging in a vertical column under
+     it (vacuum) — the look of every carpet-bombing photograph. Quadratic drag
+     has no closed form with gravity; LINEAR drag does, so each iron bomb
+     carries a time constant tau (dv/dt = g - v/tau):
+         vx(t) = vx0·e^(-t/tau)            x(t) = x0 + vx0·tau·(1 - e^(-t/tau))
+         vy(t) = -g·tau + (vy0 + g·tau)·e^(-t/tau)
+         y(t)  = y0 - g·tau·t + tau·(vy0 + g·tau)·(1 - e^(-t/tau))
+     g·tau is the terminal velocity. tau is fitted to the round's real drag at
+     ~200 m/s (Cd ~0.3 on its diameter, its mass): Mk-82 241 kg / 0.273 m
+     -> ~1.9 m/s^2 of drag -> tau ~100 s; Mk-84 925 kg / 0.458 m -> ~140 s;
+     the 13.6 t MOP barely notices the air. The landing time is the root of a
+     concave y(t): Newton from the vacuum root, converged in 2-3 steps, ONCE
+     at release — per frame the bomb is still a pure evaluation.
+     The JDAM flies its own steered parabola (its fins fly out the drag) and
+     the B61's ballistic leg is the dense casing the RET block measures at
+     1.045x vacuum over kilometres, so neither carries a tau. */
+  const DRAG_TAU = { mk82: 100, bomb: 140, buster: 420 };
+  function tauOf(kind) { return DRAG_TAU[kind] || 0; }
   const GLIDE_AUTH = 55;                             // JDAM cross-range authority, m/s of correction
   const REAIM = 0.35;                                // seconds between guided aimpoint re-solves
-  // Live ordnance in the air. Quality-scaled per the brief: a low tier flies
-  // fewer bodies, and over the cap a release SNAPS to its end state (below)
-  // rather than being dropped or queued.
-  function bombCap() { return Math.max(4, Math.round(CBZ.qScale ? CBZ.qScale(6, 14) : 14)); }
+  /* Live ordnance in the air. EVERY released round is a record that flies its
+     clock to its solved impact (records are a few numbers each); the quality
+     tier only caps how many are DRAWN. It used to cap the records, and over
+     the cap a release detonated the instant it left the bay — harmless for a
+     B-2's four-bomb stick, but a B-52 cell's 81 Mk-82s would have gone off
+     in the bombers' faces, 13 s early and 2.5 km short. A round over the
+     draw cap still falls on time, it is just not drawn; RECORD_CAP is only a
+     runaway guard. A Mk-82 is two draw calls (body + fuze vane). */
+  function bombCap() { return Math.max(8, Math.round(CBZ.qScale ? CBZ.qScale(24, 96) : 96)); }
+  const RECORD_CAP = 600;
+  let _drawn = 0;                                    // rounds in `bombs` with a mesh
 
   /* ---- BALLISTICS, SOLVED — not integrated -------------------------------
      The old sim stepped `vy -= GRAV*dt` every frame and asked "have I hit the
@@ -931,12 +972,12 @@
      formula (sqrt(2h/g), which throws away the release vy entirely), so the
      carpet-walk dust and the actual craters disagreed by metres. Both are gone.
 
-     y(t) = y0 + vy·t − ½g·t², so the landing time is the positive root of
-     ½g·t² − vy·t + (y0 − ys) = 0. Solving it at RELEASE means the impact
+     y(t) = y0 + vy·t − ½g·t² (or its drag form above), so the landing time is
+     the positive root of y(t) = ys. Solving it at RELEASE means the impact
      point, the impact TIME and the impact SPEED are all known the instant the
      bomb leaves the bay. That is what buys, for free:
        • the dust walk lining up with the craters (cityBombWalk takes a `delay`)
-       • the over-cap degrade path (snap straight to the end state)
+       • a strike flight's lead (playerair.js asks CBZ.strategicFall)
        • the kinetic law (the buster is priced by the speed it actually arrives at)
      Per-frame the bomb is then a pure evaluation — no integration, no drift.
      ---------------------------------------------------------------------- */
@@ -958,23 +999,52 @@
     return s;
   }
 
+  const T_MAX = 90;                                  // s — never leave one in the sky
+  // the time to fall `h` metres from a release vertical speed `vy` (+ up),
+  // under g alone (tau 0) or with linear drag tau
+  function fallTime(h, vy, tau) {
+    h = Math.max(0, h);
+    const disc = vy * vy + 2 * GRAV * h;
+    let t = disc <= 0 ? 0 : (vy + Math.sqrt(disc)) / GRAV;
+    if (!(t > 0) || !isFinite(t)) return 0;
+    if (tau > 0) {
+      // Newton on f(t) = y(t) - ys, concave and falling: from the vacuum root
+      // (short of the drag root) the first step overshoots and the rest walk
+      // back monotonically
+      const gT = GRAV * tau, A = vy + gT;
+      for (let i = 0; i < 8; i++) {
+        const u = -Math.expm1(-t / tau);
+        const f = h - gT * t + tau * A * u;
+        const fp = -gT + A * (1 - u);                   // vy(t) < 0
+        if (!(fp < -1e-6)) break;
+        const d = f / fp;
+        t -= d;
+        if (!(t > 0)) { t = 0; break; }
+        if (Math.abs(d) < 1e-5) break;
+      }
+    }
+    return t > T_MAX ? T_MAX : t;
+  }
+  // horizontal carry of a store `t` seconds after release, per m/s it left with
+  function carryK(t, tau) { return tau > 0 ? tau * -Math.expm1(-t / tau) : t; }
+
   // The closed form. `ys` depends on where it lands, so the surface sample is
   // iterated 3x — it converges on the first pass over flat ground and still
-  // lands honestly on a roof or a berm.
-  function solveFall(x0, y0, z0, vx, vy, vz) {
+  // lands honestly on a roof or a berm. `kind` picks the round's drag.
+  function solveFall(x0, y0, z0, vx, vy, vz, kind) {
+    const tau = tauOf(kind);
     let ys = surfaceAt(x0, z0, y0), t = 0, hx = x0, hz = z0;
     for (let i = 0; i < 3; i++) {
-      const disc = vy * vy + 2 * GRAV * Math.max(0, y0 - ys);
-      t = disc <= 0 ? 0 : (vy + Math.sqrt(disc)) / GRAV;
-      if (!(t > 0) || !isFinite(t)) t = 0;
-      if (t > 40) t = 40;                              // never leave one in the sky
-      hx = x0 + vx * t; hz = z0 + vz * t;
+      t = fallTime(y0 - ys, vy, tau);
+      const k = carryK(t, tau);
+      hx = x0 + vx * k; hz = z0 + vz * k;
       const ns = surfaceAt(hx, hz, y0);
       if (Math.abs(ns - ys) < 0.05) { ys = ns; break; }
       ys = ns;
     }
-    const vyImp = vy - GRAV * t;
-    return { t: t, x: hx, y: ys, z: hz, speed: Math.hypot(vx, vyImp, vz) };
+    const E = tau > 0 ? Math.exp(-t / tau) : 1;
+    const vyImp = tau > 0 ? -GRAV * tau + (vy + GRAV * tau) * E : vy - GRAV * t;
+    return { t: t, x: hx, y: ys, z: hz, speed: Math.hypot(vx * E, vyImp, vz * E) };
   }
 
   /* ==========================================================================
@@ -1010,20 +1080,24 @@
      still needs about two seconds to propagate to the departing aircraft.
      Above the altitude where free-fall already takes 12 s the chute stays stowed and
      the round is a plain ballistic drop, exactly like the high-release
-     profile above. At GRAV 14 that crossover is h = 0.5*14*12^2 = 1,008 m.
+     profile above. At the real g that crossover is h = 0.5*9.81*12^2 = 706 m.
 
      THE CANOPY'S DESCENT RATE IS THEN SOLVED PER DROP, not typed:
          t0  = 2.8 s of clean fall before the canopy is streamed (the real
                sequence lets the weapon separate and stabilise first)
-         h0  = 0.5*g*t0^2 + eject*t0 = 0.5*14*7.84 + 1.5*2.8 = 59.1 m
-         v0  = g*t0 + eject = 40.7 m/s at the moment of the snatch
+         h0  = 0.5*g*t0^2 + eject*t0 = 0.5*9.81*7.84 + 1.5*2.8 = 42.7 m
+         v0  = g*t0 + eject = 29.0 m/s at the moment of the snatch
          vt  = (h - h0) / (T_ESCAPE - t0)
-     At a 300 m release that is (300-59)/9.2 = 26 m/s, i.e. the canopy takes
-     the weapon from 40.7 m/s down to 26 — a 36% bite, visible as a snatch.
      Clamped to [16, 70] m/s so it can never become a fiction in either
-     direction, and REFUSED outright when the solved vt is not meaningfully
-     below the speed the weapon already has (vt >= 0.92*v0): a "chute" that
-     accelerates its own bomb is worse than no chute.
+     direction, and a canopy is only ever streamed where it BITES: its solved
+     vt must sit under 0.92*v0, the speed the weapon already has — a "chute"
+     that accelerates its own bomb is worse than no chute. Where the weapon is
+     still too slow off the ejector for that (a 300 m release wants 28 m/s
+     against 29 m/s at 2.8 s), the stream simply waits, a tenth of a second
+     at a time, until it does (3.0 s there; 7.6 s from 600 m, where the
+     canopy only trims the last few hundred metres). (At the old gamey g of
+     14 every release from 420 m to the crossover fell ballistic and short
+     of the escape, the 600 m row below read 9.4 s; that gap is closed.)
 
      The chute phase is still CLOSED FORM, which is this file's whole
      doctrine. Velocity approaches vt exponentially with time constant tau,
@@ -1036,27 +1110,22 @@
      which is what makes a retarded round land where the aircraft was rather
      than downrange of it.
 
-     MEASURED, across the whole release band (agl / profile / fall s /
-     canopy vt / how much it takes off the speed at the snatch / how far a
-     105 m/s bomber is when it goes off):
+     MEASURED (CBZ.strategicState().delivery), across the release band (agl /
+     profile / fall s / deploy s / canopy vt / how far a 105 m/s bomber is
+     when it goes off):
 
-        50 m  ballistic   2.78 s     —          —      (lands before deploy)
-        80 m  chute       3.55 s   16 m/s     -61%      372 m
-       150 m  chute       7.79 s   16 m/s     -61%      818 m
-       200 m  chute      10.91 s   16 m/s     -61%    1,146 m
-       300 m  chute      11.75 s   26 m/s     -36%    1,234 m
-       400 m  chute      11.96 s   37 m/s      -9%    1,255 m
-       600 m  ballistic   9.37 s     —          —        984 m
-     1,008 m  ballistic  12.11 s     —          —      1,272 m   <- crossover
-     2,000 m  ballistic  17.01 s     —          —      1,786 m
+        80 m  chute       4.77 s   2.8 s   16 m/s      501 m
+       150 m  chute       9.14 s   2.8 s   16 m/s      960 m
+       300 m  chute      11.95 s   3.0 s   28 m/s    1,255 m
+       600 m  chute      11.96 s   7.6 s   69 m/s    1,255 m
+       706 m  ballistic  12.15 s     —       —      1,275 m   <- crossover
+     1,200 m  ballistic  15.79 s     —       —      1,658 m
 
-     TWO HONEST LIMITS, both left in on purpose. Near the crossover the
-     canopy only trims (-9% at 400 m) — it does exactly as much as the
-     profile demands and no more. Below ~200 m the delivery cannot reliably
-     clear the severe-pressure contour before the delayed shock catches it:
-     the canopy is already at its VT_MIN floor and there is not enough sky
-     left. That is the real laydown problem, not a bug, and it is why the
-     bay already refuses a release under 14 m AGL.
+     ONE HONEST LIMIT, left in on purpose. Below ~200 m the delivery cannot
+     reliably clear the severe-pressure contour before the delayed shock
+     catches it: the canopy is already at its VT_MIN floor and there is not
+     enough sky left. That is the real laydown problem, not a bug, and it is
+     why the bay already refuses a release under 14 m AGL.
   ========================================================================== */
   const RET = {
     T_ESCAPE: 12.0,     // s — clear the 1,109 m / 5 psi contour at 105 m/s
@@ -1071,19 +1140,23 @@
     if (kind !== "nuke" || CBZ.CONFIG.NUKE_FX_V2 === false) return null;
     const h = y0 - ys;
     if (!(h > 0)) return null;
-    const t0 = RET.T0;
-    // the weapon must still BE in the air when the canopy is due
-    const h0 = 0.5 * GRAV * t0 * t0 - vy * t0;
-    if (h0 >= h) return null;                          // it lands before deploy
-    const span = RET.T_ESCAPE - t0;
-    if (!(span > 0.5)) return null;
-    let vt = (h - h0) / span;
-    const v0 = GRAV * t0 - vy;                         // downward speed at deploy
-    if (!(v0 > 0)) return null;
-    if (vt >= v0 * RET.BITE) return null;              // free-fall already clears it
-    vt = Math.max(RET.VT_MIN, Math.min(RET.VT_MAX, vt));
-    if (vt >= v0 * RET.BITE) return null;              // ...and again after the clamp
-    return { t0: t0, vt: vt, tau: RET.TAU, v0: v0, y0: y0 - h0, x0: 0, z0: 0, hx: 0, hz: 0 };
+    // the free fall already buys the escape: the canopy stays stowed
+    if (fallTime(h, vy, 0) >= RET.T_ESCAPE) return null;
+    // the canopy is streamed at the EARLIEST moment after the clean-fall
+    // separation (T0) at which it genuinely retards — its solved descent rate
+    // under the speed the weapon already has. A weapon still slow off the
+    // ejector waits a little longer, so the snatch is always a snatch
+    for (let i = 0; RET.T0 + i * 0.1 < RET.T_ESCAPE - 0.5; i++) {
+      const t0 = Math.round((RET.T0 + i * 0.1) * 10) / 10;
+      // the weapon must still BE in the air when the canopy is due
+      const h0 = 0.5 * GRAV * t0 * t0 - vy * t0;
+      if (h0 >= h) return null;                        // it lands before deploy
+      const v0 = GRAV * t0 - vy;                       // downward speed at deploy
+      if (!(v0 > 0)) continue;
+      const vt = Math.max(RET.VT_MIN, Math.min(RET.VT_MAX, (h - h0) / (RET.T_ESCAPE - t0)));
+      if (vt < v0 * RET.BITE) return { t0: t0, vt: vt, tau: RET.TAU, v0: v0, y0: y0 - h0, x0: 0, z0: 0, hx: 0, hz: 0 };
+    }
+    return null;
   }
   // Fill in the deploy-point position/impact time for a solved retard. `bal`
   // is the round's own BALLISTIC solve, which already found the surface.
@@ -1149,15 +1222,27 @@
       out.y = R.y0 - R.vt * d - R.tau * dv * (1 - e);
       out.z = R.z0 + b.vz * hk;
       out.vy = -(R.vt + dv * e);
+      out.vx = b.vx * e; out.vz = b.vz * e;
+      return out;
+    }
+    const tau = b.tau || 0;
+    if (tau > 0) {                                    // linear drag (the DRAG_TAU block)
+      const u = -Math.expm1(-t / tau), gT = GRAV * tau, A = b.vy + gT;
+      out.x = b.x0 + b.vx * tau * u;
+      out.y = b.y0 - gT * t + tau * A * u;
+      out.z = b.z0 + b.vz * tau * u;
+      out.vy = -gT + A * (1 - u);
+      out.vx = b.vx * (1 - u); out.vz = b.vz * (1 - u);
       return out;
     }
     out.x = b.x0 + b.vx * t;
     out.y = b.y0 + b.vy * t - 0.5 * GRAV * t * t;
     out.z = b.z0 + b.vz * t;
     out.vy = b.vy - GRAV * t;
+    out.vx = b.vx; out.vz = b.vz;
     return out;
   }
-  const _bp = { x: 0, y: 0, z: 0, vy: 0 };
+  const _bp = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
 
   // THE BAY, in world space. localToWorld off the actual model is exact and
   // banks with the aircraft. The B-2 names its own (makeB2: under the rotary
@@ -1184,7 +1269,7 @@
      Deaths are the canonical game.kills delta. We do not estimate victims from
      the blast radius and we do not wrap a kill function: if the shared death
      bus has not confirmed a kill, this number does not move.                 */
-  const _bombCinePoint = { x: 0, y: 0, z: 0, vy: 0 };
+  const _bombCinePoint = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
   const _bombCineView = {
     active: false, snap: false,
     x: 0, y: 0, z: 0, lx: 0, ly: 0, lz: 0, fov: 52,
@@ -1394,6 +1479,10 @@
                   has no business seizing it)
      opts.crime — {x,z} to bill "shots fired" at, or falsy for none (an ordered
                   strike is billed once, by nukeDetonate, as terrorism)
+     opts.age   — seconds the store has ALREADY been falling: a stick rippled
+                  faster than the frame rate (a B-52's 27 Mk-82s in under a
+                  second) lets each one go at its exact release point and
+                  instant, not at the frame boundary
      ---------------------------------------------------------------------- */
   CBZ.strategicRelease = function (kind, p, rv, opts) {   // probe/tooling handle
     return releaseStore(kind, p, rv, opts || {});
@@ -1403,7 +1492,7 @@
     const b = {
       mesh: null, kind: kind, t: 0, reaim: 0, seek: null,
       x0: p.x, y0: p.y, z0: p.z,
-      vx: rv.vx, vy: rv.vy, vz: rv.vz,
+      vx: rv.vx, vy: rv.vy, vz: rv.vz, tau: tauOf(kind),
       // carried to resolveImpact so the blame survives the fall (undefined on
       // the piloted path, which is what keeps that path byte-identical)
       by: opts.by, byPlayer: opts.byPlayer,
@@ -1412,7 +1501,7 @@
       // crime to the player for it (city/warroom.js owns those consequences)
       stateAct: !!opts.stateAct,
     };
-    b.sol = solveFall(b.x0, b.y0, b.z0, b.vx, b.vy, b.vz);
+    b.sol = solveFall(b.x0, b.y0, b.z0, b.vx, b.vy, b.vz, kind);
     /* THE DELIVERY PROFILE, chosen the way a real one is: ballistic unless the
        free fall does not already buy the aircraft its escape (see retardFor).
        Solved HERE, at release, so the impact point/time/speed the whole file
@@ -1427,6 +1516,7 @@
     // release position instead, which keeps a replay identical for free.
     b.tumble = 1.0;
     b.age = 0;
+    const ago = opts.age > 0 ? Math.min(+opts.age, 0.5) : 0;
     b.phase = ((Math.abs(b.x0 * 12.9898 + b.z0 * 78.233) * 43758.5453) % 1) * 6.2832;
 
     // GUIDED: acquisition is lockon.js's — asked through the shared ordnance
@@ -1448,24 +1538,34 @@
       try { CBZ.cityCrime(kind === "bomb" ? 120 : 200, { x: opts.crime.x, z: opts.crime.z, type: "shots-fired" }); } catch (e) {}
     }
 
-    // OVER THE CAP — DEGRADE, never queue. The solver already knows exactly
-    // where and when this round lands, so the only thing a saturated sky loses
-    // is a few seconds of a 0.3 m cylinder falling: the crater, the kills and
-    // the ledger hit are identical. This snap-to-end-state is only possible
-    // BECAUSE the ballistics are closed-form.
-    if (bombs.length >= bombCap()) { resolveImpact(b); return b; }
+    // A RUNAWAY GUARD, not a budget: only past RECORD_CAP live rounds does a
+    // release snap straight to its end state (possible BECAUSE the ballistics
+    // are closed-form). The draw budget is bombCap(), below.
+    if (bombs.length >= RECORD_CAP) { resolveImpact(b); return b; }
+    b.t = ago; b.age = ago;
 
-    // A MESH THAT FAILS TO BUILD NEVER EATS THE WEAPON: the round still flies
-    // its solved arc and resolves on time, it just is not drawn
-    try { b.mesh = bombMesh(kind); } catch (e) { b.mesh = null; }
+    // OVER THE DRAW CAP, or A MESH THAT FAILS TO BUILD, NEVER EATS THE WEAPON:
+    // the round still flies its solved arc and resolves on time, it just is
+    // not drawn
+    if (_drawn < bombCap()) { try { b.mesh = bombMesh(kind); } catch (e) { b.mesh = null; } }
     if (b.mesh) {
+      _drawn++;
       b.mesh.rotation.order = "YXZ";                 // yaw then pitch — nose tracks the arc
-      b.mesh.position.set(b.x0, b.y0, b.z0);
-      b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
+      bombAt(b, b.t, _bp);
+      b.mesh.position.set(_bp.x, _bp.y, _bp.z);
+      b.mesh.rotation.set(0, Math.atan2(b.vx, b.vz), 0);
       if (CBZ.scene) CBZ.scene.add(b.mesh);
     }
     bombs.push(b);
     return b;
+  }
+  function dropRound(b) {
+    if (b.mesh) { dropBombMesh(b.mesh); b.mesh = null; _drawn = Math.max(0, _drawn - 1); }
+  }
+  function dropAllRounds() {
+    for (let i = 0; i < bombs.length; i++) dropRound(bombs[i]);
+    bombs.length = 0;
+    _drawn = 0;
   }
 
   // Re-solve a guided round onto its (possibly moved) aimpoint from wherever
@@ -1552,7 +1652,7 @@
     let tf = 0;
     for (let i = 0; i < count; i++) {
       const lead = i * interval;
-      const sol = solveFall(p.x + ax * lead, p.y + ay * lead, p.z + az * lead, vx, vy, vz);
+      const sol = solveFall(p.x + ax * lead, p.y + ay * lead, p.z + az * lead, vx, vy, vz, run.kind);
       if (i === 0) tf = sol.t;
       pts.push({ x: sol.x, y: sol.y, z: sol.z });
     }
@@ -1593,53 +1693,59 @@
     return true;
   }
 
-  /* ---- THE CALLED STRIKE — the same verb, flown off-map -------------------
-     "Bomb that district" with no player in the cockpit. There is deliberately
-     no second bomb sim here: nukefx.js's CBZ.cityBombWalk already owns the
-     staggered prefab walk and, in `detonate:true` mode, fires each impact
-     through CBZ.detonate exactly once — so the structural ledger, the kill bus
-     and the crime system all see it once, capped at 24 points and 2 concurrent
-     walks. All this function contributes is the track and the time-on-target.  */
+  /* ---- THE CALLED STRIKE — a real raid, flown in -------------------------
+     "Bomb that district" with no player in the cockpit. This used to be a
+     bodiless walk of dust kicks (nukefx.js's cityBombWalk in detonate mode):
+     no aeroplane, no falling bomb, the craters just appeared on a timer. It
+     is now a B-52 CELL (three B-52Hs in trail, by default) flown by
+     playerair.js's CBZ.cityStrikeFlight — the ONE strike flight every bombing
+     aeroplane in the game flies — which releases every Mk-82 off its own bay
+     clip through releaseStore() above: the same solved fall, the same pooled
+     body, the same CBZ.detonate, once per bomb. All this function adds is the
+     order's grammar and the run bookkeeping (strategicBombRunState / onDone /
+     CBZ.strategicOnBombRun), unchanged for its callers.
+       opts: x, z (required)  heading (radians, the direction of travel)
+             count     stores EACH aeroplane walks across the mark (default:
+                       its whole load — 27 Mk-82 in a B-52's bay)
+             kind      "bomb" (iron: what the airframe's bay carries) | "jdam"
+             airframe  "b52" (default) | "b2" | "f35"     jets (default 3 / 1)
+             interval  s between releases (else the airframe's stick spacing)
+             speed, alt, tot (s to the first impact, if there is room)
+             by, byPlayer, stateAct, label
+             onImpact(im, flight, n), onDone(report)                       */
   function calledStrike(opts) {
-    if (CBZ.CONFIG.STRAT_BOMB_RUN === false || !CBZ.cityBombWalk) return false;
+    opts = opts || {};
+    if (CBZ.CONFIG.STRAT_BOMB_RUN === false || !CBZ.cityStrikeFlight) return false;
     if (!g || g.mode !== "city") return false;
     if (run.active) return false;
     const tx = +opts.x, tz = +opts.z;
     if (!isFinite(tx) || !isFinite(tz)) return false;
-    const kind = opts.kind === "jdam" ? "jdam" : "bomb";   // called sorties fly iron
-    const count = Math.max(1, Math.min(RUN_MAX, opts.count || 12));
-    const interval = Math.max(0.08, opts.interval || RUN_INTERVAL);
-    // a stick walks ALONG a heading through the aimpoint, centred on it, at
-    // the same spacing a real run lays down: interval x a bomber's ground speed.
-    const hd = opts.heading != null ? +opts.heading : 0;
-    const step = interval * (opts.speed || 190);
-    const hx = Math.sin(hd), hz = Math.cos(hd);
-    const pts = [];
-    for (let i = 0; i < count; i++) {
-      const d = (i - (count - 1) / 2) * step;
-      const px = tx + hx * d, pz = tz + hz * d;
-      pts.push({ x: px, y: surfaceAt(px, pz) + 1.0, z: pz });
-    }
-    // A CALLED sortie authors its impact points ON THE GROUND — there is no
-    // release velocity to inherit, so this track is vertical by construction.
-    // Registering it keeps CBZ.ordnanceAudit() honest about how many bomb sites
-    // the world actually has rather than only counting the flown one.
+    const airframe = opts.airframe === "b2" || opts.airframe === "f35" ? opts.airframe : "b52";
+    const jets = Math.max(1, (opts.jets | 0) || (airframe === "b52" ? 3 : 1));
+    const per = opts.count > 0 ? Math.round(+opts.count) : 0;     // 0 = the full load
+    const speed = opts.speed > 0 ? +opts.speed : 0;
+    const fo = {
+      x: tx, z: tz, airframe: airframe, jets: jets, bombs: per, kind: opts.kind === "jdam" ? "jdam" : undefined,
+      heading: opts.heading != null && isFinite(+opts.heading) ? +opts.heading : 0,
+      speed: speed || undefined, alt: opts.alt > 0 ? +opts.alt : undefined, tot: opts.tot > 0 ? +opts.tot : undefined,
+      by: opts.by !== undefined ? opts.by : who(), byPlayer: opts.byPlayer !== false, stateAct: !!opts.stateAct,
+      label: opts.label || "", onImpact: typeof opts.onImpact === "function" ? opts.onImpact : null,
+    };
+    if (opts.interval > 0 && per > 1) fo.stick = +opts.interval * (speed || 200) * (per - 1);
     if (CBZ.ordnanceSite) { try { CBZ.ordnanceSite("strategic:called-strike", "bomb"); } catch (e) {} }
-    const tot = Math.max(4, +opts.tot || 7);          // time on target, seconds
-    run.active = true; run.kind = kind; run.want = count; run.sent = count;
-    run.acc = 0; run.t = 0; run.interval = interval;
+    let f = null;
+    try { f = CBZ.cityStrikeFlight(fo); } catch (e) { f = null; }
+    if (!f) return false;
+    run.active = true; run.kind = f.kind; run.want = f.total; run.sent = 0;
+    run.acc = 0; run.t = 0; run.interval = f.interval || RUN_INTERVAL;
     run.x0 = tx; run.z0 = tz;
     run.onDone = typeof opts.onDone === "function" ? opts.onDone : null;
     _runCollapses = 0;
-    run._called = tot + count * interval + 1.2;       // when the sortie is over
-    try {
-      CBZ.cityBombWalk(pts, {
-        kind: kind, interval: interval, delay: tot, detonate: true,
-        by: opts.by !== undefined ? opts.by : who(), byPlayer: opts.byPlayer !== false,
-        dirx: hx, dirz: hz,
-      });
-    } catch (e) { run.active = false; return false; }
-    note("STRIKE INBOUND · " + count + " x 2000 lb, " + Math.round(tot) + "s out. Clear the grid.", 3.4);
+    run._called = f;                                  // the raid in the air; the run ends when it does
+    const each = f.jets.length ? f.jets[0].aims.length : 0;
+    const what = f.kind === "mk82" ? "Mk-82" : f.kind === "jdam" ? "JDAM" : "Mk-84";
+    const who_ = airframe === "b52" ? (f.jets.length > 1 ? "B-52 CELL" : "B-52") : airframe === "b2" ? "B-2" : "STRIKE";
+    note(who_ + " INBOUND · " + (f.jets.length > 1 ? f.jets.length + " x " : "") + each + " " + what + ", " + Math.round(f.eta || 0) + "s out. Clear the grid.", 3.4);
     if (CBZ.sfxAt) CBZ.sfxAt("siren", tx, tz, { volume: 0.35 });
     return true;
   }
@@ -1703,8 +1809,12 @@
     // ---- the carpet run: one release per interval while the trigger is held
     if (run.active) {
       run.t += dt;
-      if (run._called != null) {                        // a CALLED sortie flies itself
-        if (run.t >= run._called) { run._called = null; endRun("done"); }
+      if (run._called != null) {                        // a CALLED raid flies itself
+        const f = run._called;
+        run.sent = f.released | 0;
+        // over when the last bomb has landed (the cell is still flying home)
+        if (f.total > 0 && f.hits >= f.total) { run._called = null; endRun("done"); }
+        else if (f.gone) { run._called = null; endRun(f.finished ? "done" : "aborted"); }
       } else if (!c || g.mode !== "city") endRun("aborted");
       else {
         run.acc += dt;
@@ -1726,8 +1836,7 @@
       }
     }
     if (!g || g.mode !== "city") {                      // mode flip: sweep the sky
-      for (const b of bombs) dropBombMesh(b.mesh);
-      bombs.length = 0;
+      dropAllRounds();
       stopBombCine();
       return;
     }
@@ -1747,7 +1856,7 @@
         if (b.reaim <= 0) reaimGuided(b);
       }
       if (b.t >= b.sol.t) {
-        dropBombMesh(b.mesh);
+        dropRound(b);
         bombs.splice(i, 1);
         resolveImpact(b);
         continue;
@@ -1756,9 +1865,10 @@
       bombAt(b, b.t, _bp);
       b.mesh.position.set(_bp.x, _bp.y, _bp.z);
       // nose tracks the arc: yaw down the ground track, pitch down the descent
-      // angle. (The old code pitched the nose UP as it fell — positive X
+      // angle — the CURRENT one, which drag steepens as the round sheds its
+      // airspeed. (The old code pitched the nose UP as it fell — positive X
       // rotation is what points a +Z nose at the ground.)
-      const hsp = Math.hypot(b.vx, b.vz);
+      const hsp = Math.hypot(_bp.vx, _bp.vz);
       b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
       b.mesh.rotation.x = Math.atan2(-_bp.vy, hsp > 0.001 ? hsp : 0.001);
       // the fuze's arming vane windmills up with airspeed; a GBU-28's tail
@@ -2233,8 +2343,11 @@
      at any distance, for every kind — which a fixed release offset cannot.
 
      ALTITUDE IS THE WEAPON for a penetrator: a GBU-57 dropped from the B-2's
-     600 m pass arrives at ~92 m/s and gets ~4.3 m of concrete; two in the
-     same hole open a head of state's bunker (city/bunkers.js wornCE).
+     900 m pass falls 13.6 s, arrives at ~131 m/s and gets ~4.4 m of
+     concrete; two in the same hole open a head of state's bunker (7 m,
+     city/bunkers.js wornCE) and Fort Brandt's (8.5 m). (The pass was 600 m
+     when bombs fell at a "gamey" g of 14; at the real 9.81 that height only
+     buys 3.6 m a round, and two no longer open Fort Brandt.)
      ========================================================================== */
   if (CBZ.CONFIG.STRAT_NUKE_SORTIE == null) CBZ.CONFIG.STRAT_NUKE_SORTIE = true;
   const SORTIE = {
@@ -2247,7 +2360,7 @@
     CLIMB: 30,         // m/s climb once airborne
     TURN: 0.35,        // rad/s turn rate (a ~470 m radius at cruise)
     RUN: 900,          // m of straight run-in at height before the mark
-    ALT: { nuke: 210, buster: 600, bomb: 240, jdam: 240 },   // pass altitude AGL over the mark
+    ALT: { nuke: 210, buster: 900, bomb: 240, jdam: 240 },   // pass altitude AGL over the mark
   };
   const sorties = [];
   const _sv = { vx: 0, vy: 0, vz: 0 };
@@ -2327,7 +2440,7 @@
     const bp = bayPoint(s);
     const rv = releaseVel(s, s.kind);
     const x0 = bp.x, y0 = bp.y, z0 = bp.z, vx = rv.vx, vy = rv.vy, vz = rv.vz;
-    let sol = solveFall(x0, y0, z0, vx, vy, vz);
+    let sol = solveFall(x0, y0, z0, vx, vy, vz, s.kind);
     const ret = retardFor(s.kind, y0, vy, sol.y);
     if (ret) sol = solveRetard({ x0: x0, y0: y0, z0: z0, vx: vx, vy: vy, vz: vz }, ret, sol);
     return sol;
@@ -2594,11 +2707,10 @@
     if (el + 0.001 < _lastEl) {
       radZones.length = 0;
       pendingBusters.length = 0;
-      for (const b of bombs) dropBombMesh(b.mesh);
-      bombs.length = 0;
+      dropAllRounds();
       for (const a of armed) if (a.mesh && a.mesh.parent) a.mesh.parent.remove(a.mesh);
       armed.length = 0;
-      run.active = false; run.onDone = null; run.sent = 0;
+      run.active = false; run.onDone = null; run.sent = 0; run._called = null;
       nk = null;
       sortieEndAll();                      // and every bomber goes back on its pad
       if (CBZ.impact && CBZ.impact.clearWaves) { try { CBZ.impact.clearWaves(); } catch (e) {} }
@@ -3039,16 +3151,39 @@
      frames). Answers, without dropping anything: where would a release from
      (x,y,z) at (vx,vy,vz) land, when, how fast, and how deep would a buster
      get. This is what a CDP probe asserts a bomb run against.               */
-  CBZ.strategicBallistics = function (x, y, z, vx, vy, vz) {
-    const s = solveFall(+x || 0, +y || 0, +z || 0, +vx || 0, +vy || 0, +vz || 0);
+  CBZ.strategicBallistics = function (x, y, z, vx, vy, vz, kind) {
+    const s = solveFall(+x || 0, +y || 0, +z || 0, +vx || 0, +vy || 0, +vz || 0, kind);
     return {
       t: +s.t.toFixed(3), x: +s.x.toFixed(2), y: +s.y.toFixed(2), z: +s.z.toFixed(2),
       speed: +s.speed.toFixed(2),
       lead: +Math.hypot(s.x - (+x || 0), s.z - (+z || 0)).toFixed(2),
       busterE: Math.round(energyOf("buster", s.speed)),
       busterPenCE: +busterPenCE(s.speed).toFixed(2),
-      grav: GRAV,
+      grav: GRAV, tau: tauOf(kind),
     };
+  };
+  /* THE FALL, for anybody who has to LEAD a release (playerair.js's strike
+     flights): where and when a `kind` store let go at (x,y,z) with velocity
+     (vx,vy,vz) lands — the very solve releaseStore() will run, drag and all.
+     `out` is optional caller scratch. Unrounded, unlike the probe above. */
+  CBZ.strategicFall = function (kind, x, y, z, vx, vy, vz, out) {
+    const s = solveFall(+x || 0, +y || 0, +z || 0, +vx || 0, +vy || 0, +vz || 0, kind);
+    out = out || {};
+    out.t = s.t; out.x = s.x; out.y = s.y; out.z = s.z; out.speed = s.speed;
+    return out;
+  };
+  CBZ.strategicGrav = GRAV;
+  /* EVERY BOMB IN THE AIR, NOW — the storyboard cameras' contract
+     (tools/strike-look.mjs rides the lowest one down). Read-only: a fresh
+     array of plain {x, y, z, kind}, drawn or not. */
+  CBZ.strategicBombsInAir = function () {
+    const out = [];
+    for (let i = 0; i < bombs.length; i++) {
+      const b = bombs[i];
+      bombAt(b, Math.min(b.t, b.sol.t), _bp);
+      out.push({ x: _bp.x, y: _bp.y, z: _bp.z, kind: b.kind });
+    }
+    return out;
   };
   CBZ.strategicOnBombRun = CBZ.strategicOnBombRun || null;   // fn(report) — mission hook
   CBZ.strategicDevastation = function () {

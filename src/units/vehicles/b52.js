@@ -1186,7 +1186,11 @@
     const g = R.group, veh = R.veh;
     if (ctx && ctx.dead) R.dead = true;
     const dead = R.dead;
-    const px = g.position.x, py = g.position.y, pz = g.position.z, h = g.rotation.y, roll = -g.rotation.z, gam = -g.rotation.x;
+    // roll > 0 = starboard wing DOWN (the controls block's convention). On a
+    // +Z-nose, port-+X airframe that is a POSITIVE z rotation (it lifts +X):
+    // the battle banks a port turn with rotation.z < 0 (vehicles.js), so this
+    // was -rotation.z once and raised the spoilers on the UP-going wing.
+    const px = g.position.x, py = g.position.y, pz = g.position.z, h = g.rotation.y, roll = g.rotation.z, gam = -g.rotation.x;
     if (!R.seeded || snap) { R.px = px; R.py = py; R.pz = pz; R.h0 = h; R.roll0 = roll; R.g0 = gam; R.seeded = true; }
     let spd = 0, rollRate = 0, pitchRate = 0, yawRate = 0;
     if (dt > 0) {
@@ -1334,9 +1338,14 @@
     if (T && dt > 0) {
       if (!T.added && CBZ.scene) {
         CBZ.scene.add(T.mesh); T.added = true;
-        T.mesh.onBeforeRender = function () { if (Date.now() - T.wall > 1500) T.mesh.visible = false; };
+        // an airframe nobody animates any more (parked, culled, its record
+        // dropped) must not leave its ribbons hanging in the sky: the trails
+        // hide after ~2 s of frames drawn without a tick. Counted in DRAWS,
+        // not wall time — a slow frame (a software renderer filming a
+        // storyboard, a hitch) is not an airframe that stopped flying.
+        T.mesh.onBeforeRender = function () { if (++T.wall > 120) T.mesh.visible = false; };
       }
-      T.wall = Date.now();
+      T.wall = 0;
       const show = g.visible !== false && air;
       T.mesh.visible = show || T.mesh.visible && !R.crashed;
       if (show || dead) {

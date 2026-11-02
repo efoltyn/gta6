@@ -80,7 +80,7 @@
       mbeya:    { jet: 0,  heavy: 0, b2: 0, warhead: 0, mop: 0 },
     },
     // ---- BUNKERS. roofCE = metres of concrete-equivalent over the room
-    // (city/bunkers.js); a GBU-57 dropped by a B-2 from 600 m gets ~4.3 m, and
+    // (city/bunkers.js); a GBU-57 dropped by a B-2 from 900 m gets ~4.4 m, and
     // a second one in the same hole goes on from the bottom of the first. So a
     // head of state's bunker takes two, a terror cell's dug-out takes one.
     bunkers: {

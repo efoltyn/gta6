@@ -1149,7 +1149,7 @@
     try { rec = CBZ.countryRecAt(pos.x, pos.z); } catch (e) { rec = null; }
     if (!rec) return;
     let col = "#d8d2c2";
-    try { const c = (CBZ.countries(true) || []).find(function (q) { return q.id === rec.id; }); if (c) col = c.color; } catch (e) {}
+    try { const c = (CBZ.countryList(true) || []).find(function (q) { return q.id === rec.id; }); if (c) col = c.color; } catch (e) {}
     const nm = String(rec.name || rec.id);
     ctx.save();
     ctx.font = "800 12px Fredoka, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
@@ -1185,12 +1185,12 @@
   // country names, lettered across the land at country scale: biggest on the
   // world view, gone by the time you are reading streets
   function drawCountryNames(p) {
-    if (!CBZ.countries) return;
+    if (!CBZ.countryList) return;
     const spanM = W / p.sc;   // metres across the chart
     const fade = Math.max(0, Math.min(1, (spanM - 1400) / 1600));
     if (fade <= 0.02) return;
     let list;
-    try { list = CBZ.countries(); } catch (e) { return; }
+    try { list = CBZ.countryList(); } catch (e) { return; }
     const own = [];
     const prevA = ctx.globalAlpha;
     for (const c of list) {
@@ -1954,8 +1954,8 @@
     // terrain reads as a political map without losing its relief.
     const nTint = Object.create(null);
     const ownAt = typeof CBZ.countryAtExact === "function" ? CBZ.countryAtExact : null;
-    if (ownAt && CBZ.countries) {
-      try { for (const c of CBZ.countries()) nTint[c.id] = { rgb: hexRgb(c.color), a: c.home ? 0.13 : 0.2 }; } catch (e) {}
+    if (ownAt && CBZ.countryList) {
+      try { for (const c of CBZ.countryList()) nTint[c.id] = { rgb: hexRgb(c.color), a: c.home ? 0.13 : 0.2 }; } catch (e) {}
     }
     for (let py = y0; py < y1; py += STEP) {
       const wz = p.wz(py + STEP * 0.5);
@@ -3227,7 +3227,7 @@
         legend.innerHTML = html;
       };
       const common = "<span><i style='background:#ff9b3d'></i>You</span><span><i style='background:#7de7ff'></i>Route</span>";
-      const countriesKey = (CBZ.countries ? "<span style='opacity:.55;font-weight:700;letter-spacing:.5px;margin-left:6px'>COUNTRIES</span>" +
+      const countriesKey = (CBZ.countryList ? "<span style='opacity:.55;font-weight:700;letter-spacing:.5px;margin-left:6px'>COUNTRIES</span>" +
         "<span><i style='width:16px;height:3px;border-radius:0;box-shadow:none;background:repeating-linear-gradient(90deg,#f6eedc 0 5px,transparent 5px 8px)'></i>Border</span>" +
         "<span><i style='width:16px;height:4px;border-radius:0;box-shadow:none;background:repeating-linear-gradient(90deg,#ff5446 0 8px,transparent 8px 10px)'></i>At war</span>" +
         "<span><i style='background:#ffe092'></i>Your country</span>" : "");

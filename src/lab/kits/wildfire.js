@@ -28,12 +28,15 @@
 CBZ.lab.kit("wildfire", {
   about: "grass + trees on a slope, two houses and two cars, wind across the slope; the real wildfire runs and the probe reports spread up/down slope, spotting, houses, cars and frame cost",
   uses: ["building", "car"],
-  files: ["src/world/treeaudit.js", "src/world/vegetation.js", "src/systems/wildfire.js"],
+  files: ["src/world/treeaudit.js", "src/world/vegetation.js", "src/systems/volfx.js", "src/systems/smokeplume.js", "src/systems/wildfire.js"],
   params: { slope: 20, wind: 6, mag: 0.5, active: 30, after: 12, trees: 46, storeys: 2 },
   duration: 45,
   setup: function (W, P) {
     const THREE = window.THREE;
     const L = CBZ.lab;
+    // the game builds the shared billow atlas in idle slices long before a
+    // fire; the lab finishes it now so the smoke plumes are drawn as in play
+    if (CBZ.volNoise && CBZ.volNoise.finish) CBZ.volNoise.finish();
     if (L.floor) L.floor.visible = false;
     const slope = (+P.slope || 0) * Math.PI / 180, tanS = Math.tan(slope);
     const RX0 = -10, RX1 = 70, ZB0 = -8, ZB1 = 12;    // the ramp, and where it eases out

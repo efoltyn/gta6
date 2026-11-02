@@ -732,6 +732,9 @@
     root.add(smoke);
     const embers = pointsLayer(MAXEMBER, [["aAlpha", 1]], emberMaterial(), 10);
     root.add(embers);
+    // the smoke itself is raymarched plumes (systems/smokeplume.js); the
+    // point layer above stays only as the fallback without that module
+    const plumes = CBZ.smokePlumes ? CBZ.smokePlumes.create(root) : null;
     const ash = pointsLayer(MAXASH, [["aAlpha", 1], ["aSeed", 1]], ashMaterial(), 9);
     const aseed = ash.geometry.attributes.aSeed.array;
     for (let i = 0; i < MAXASH; i++) aseed[i] = ((i * 0.7548776662) % 1 + 1) % 1;
@@ -739,7 +742,7 @@
     const burnRoot = new THREE.Group(); burnRoot.name = "wildfireBurn"; burnRoot.userData.transient = true;
     root.add(burnRoot);
     FX = {
-      root, flame, glow, smoke, embers, ash, burnRoot,
+      root, flame, glow, smoke, embers, ash, burnRoot, plumes,
       spuff: new Array(MAXSMOKE).fill(null), sFree: [],
       epuff: new Array(MAXEMBER).fill(null), eFree: [],
       apuff: new Array(MAXASH).fill(null), aFree: [],
@@ -765,6 +768,7 @@
       if (m.material && m.material.dispose) m.material.dispose();
     };
     [FX.flame, FX.glow, FX.smoke, FX.embers, FX.ash].forEach(kill);
+    if (FX.plumes) FX.plumes.dispose();
     if (G.tiles) G.tiles.forEach((t) => { if (t) { if (t.parent) t.parent.remove(t); t.geometry.dispose(); } });
     if (G.tiles) G.tiles.fill(null);
     if (G.mat) { G.mat.dispose(); G.mat = null; }
@@ -823,7 +827,7 @@
   /* ---- smoke / embers / ash pools -------------------------------------- */
   // tone: 0 vegetation smoke (grey-tan), 1 structure/car smoke (black)
   function spawnSmoke(x, y, z, surface, dense, tone) {
-    if (!fxAlive() || !FX.sFree.length) return;
+    if (!fxAlive() || FX.plumes || !FX.sFree.length) return;
     const i = FX.sFree.pop();
     const drift = F.wspd * (surface ? 0.75 : 0.5);
     const cw = (jit() - 0.5) * (surface ? 3.2 : 1.6);
@@ -1385,10 +1389,12 @@
     }
   }
 
+  const NO_SOURCES = [];
   /* ---- sources: one list the smoke, embers, spotting and heat read --------- */
   let DT_EMIT = 1 / 60;
   function buildSources() {
     const S = F.sources; S.length = 0;
+    F.srcAt = F.t;
     const B = F.burningList;
     for (let i = 0; i < B.length; i++) {
       const t = B[i], ph = t._wfPh != null ? t._wfPh : 1;
@@ -1986,6 +1992,13 @@
     eg.position.needsUpdate = true; eg.aAlpha.needsUpdate = true;
 
     ashTick(dt);
+
+    // the plumes read the fire's sources while they are fresh; once nothing
+    // rebuilds them (everything is out) the plumes are fed nothing and fade
+    if (FX.plumes) {
+      const fresh = F.t - (F.srcAt != null ? F.srcAt : -1e9) < 0.5;
+      FX.plumes.update(dt, fresh ? F.sources : NO_SOURCES, F.wx, F.wz, F.wspd, F.mag);
+    }
 
     if (!F.live && F.smokeLinger > 0) F.smokeLinger -= dt;
     // THE SCAR AGES: wet-black char greys toward ash over the minutes after

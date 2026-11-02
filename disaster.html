@@ -709,7 +709,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/weapons/ballistics.js?v=inf1028c"></script>
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
-<script src="src/weapons/munitions.js?v=rounds1013m"></script>
+<!-- systems/smoketrail.js: every rocket's and volcanic bomb's trail as a shaded smoke tube (CBZ.smokeTrail) -->
+<script src="src/systems/smoketrail.js?v=fx1029"></script>
+<script src="src/weapons/munitions.js?v=fx1029"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -1015,13 +1017,13 @@ document.body.appendChild(b);}}catch(e){}})();
      builders. Must precede systems/disasters.js so the roster finds
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. REQUIRED: the
      old additive-stream fallback in disasters.js was deleted 2026-09-28. -->
-<script src="src/world/volcanofx.js?v=arrive1022"></script>
+<script src="src/world/volcanofx.js?v=fx1029"></script>
 <!-- THE ERUPTION'S SEQUENCE: world/eruption.js (CBZ.eruption) runs unrest,
      phreatic blast, Plinian column + umbrella, bombs, lightning, lava,
      collapse and lahar on volcanofx's builders, mode-agnostic (the lab's
      eruption kit drives the same file). Its fires are systems/wildfire.js's.
      Must precede systems/disasters.js. -->
-<script src="src/world/eruption.js?v=vlook1019"></script>
+<script src="src/world/eruption.js?v=fx1029"></script>
 <!-- THE QUAKE IS SHARED: systems/quake.js is the whole earthquake event (source
      and path, P/S/surface wave train, buildings by type and height, cracks,
      mains, liquefaction, cars, the crowd, what falls on whom), drop-cover,
@@ -1055,7 +1057,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
-<script src="src/systems/wildfire.js?v=jetbound1022"></script>
+<!-- systems/smokeplume.js: a fire's smoke as raymarched plumes (CBZ.smokePlumes), read by wildfire.js -->
+<script src="src/systems/smokeplume.js?v=fx1029b"></script>
+<script src="src/systems/wildfire.js?v=fx1029"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
@@ -1498,7 +1502,7 @@ document.body.appendChild(b);}}catch(e){}})();
      turn to dust instead of pieces) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
 <script src="src/city/collapse.js?v=memleak1029b"></script>
 <script src="src/systems/strike.js?v=strike1013m"></script>
-<script src="src/city/structural.js?v=jetstrike1022"></script>
+<script src="src/city/structural.js?v=fx1029b"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
@@ -1802,7 +1806,7 @@ document.body.appendChild(b);}}catch(e){}})();
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=isles1022m"></script>
+<script src="src/systems/fullmap.js?v=isles1022n"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -1983,8 +1987,8 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.addLandmass so load order isn't strictly load-bearing today, but
      this keeps the "assets define before buildTown reads them" contract
      honest for any future eager caller. -->
-<!-- WHOSE GROUND IS THIS (city/borders.js): every point to one country, derived from the claims the world already makes; CBZ.countryAt / CBZ.countries / CBZ.countryBorders for the map, the radar and every rule that cares. -->
-<script src="src/city/borders.js?v=isles1022m"></script>
+<!-- WHOSE GROUND IS THIS (city/borders.js): every point to one country, derived from the claims the world already makes; CBZ.countryAt / CBZ.countryList / CBZ.countryBorders for the map, the radar and every rule that cares. -->
+<script src="src/city/borders.js?v=isles1022n"></script>
 <!-- REAL CASINOS — order-90 dress pass over every casino lot (mainland Golden
      Ace + composed town casinos): marquee/mast exterior, felt tables with
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after
@@ -2048,7 +2052,7 @@ document.body.appendChild(b);}}catch(e){}})();
      carries which payload, prices, delivery days, each nation's starting
      fleet and warheads, bunker hardness. polwar.js seeds from it; warroom.js
      gates, sells and flies off it. -->
-<script src="src/city/arsenal_data.js?v=strike1013m"></script>
+<script src="src/city/arsenal_data.js?v=fx1029"></script>
 <!-- P9: migration — policy per country (president legislates over
      LEGISLATE_DAYS days + an approval cost if unpopular; every other govType
      decrees instantly), daily individual-migration-evaluation propensity

@@ -32,7 +32,8 @@
         bombs landed, and a sim step stays under 4 ms mean. */
 CBZ.lab.kit("eruption", {
   about: "the volcano's eruption sequence on a slope with houses, trees and cars: lava path, fires, ash, bombs, frame cost",
-  files: ["src/world/volcanofx.js", "src/world/eruption.js", "src/systems/lightningfx.js", "src/systems/wildfire.js"],
+  // systems/volfx.js: the shared Perlin-Worley atlas the plume volume marches
+  files: ["src/systems/volfx.js", "src/systems/smoketrail.js", "src/systems/smokeplume.js", "src/world/volcanofx.js", "src/world/eruption.js", "src/systems/lightningfx.js", "src/systems/wildfire.js"],
   params: { mag: 0.8, q: 4, wind: 8 },
   duration: 48,
   setup: function (W, P) {
@@ -42,6 +43,9 @@ CBZ.lab.kit("eruption", {
     // first texture that asks it for anisotropy is not timed as eruption cost
     if (CBZ.labWorld && CBZ.labWorld.renderer) CBZ.labWorld.renderer();
     if (CBZ.labWorld && CBZ.labWorld.floor) CBZ.labWorld.floor.visible = false;
+    // the game builds the shared noise atlas in idle slices long before any
+    // eruption; the lab finishes it now so the plume is drawn as in play
+    if (CBZ.volNoise && CBZ.volNoise.finish && P.atlas !== "0") CBZ.volNoise.finish();
     const VX = 0, VZ = 0, PEAK = 30, VR = 36, RIM = 6.2, BOWL = 3.6, REGION = 140;
     /* the cone: concave (peak * t^1.65), a crater bowl, six V-shaped radial
        barrancos born under the rim and fading out at the foot — the same
@@ -65,6 +69,9 @@ CBZ.lab.kit("eruption", {
       const RS = [], AS = 72;
       for (let r = 0; r <= VR; r += 1.5) RS.push(r);
       for (let r = VR + 4; r <= REGION + 20; r += 6) RS.push(r);
+      // and out to the horizon, coarser and coarser, so a camera on the plain
+      // stands on ground and the far one sees land meet the haze
+      for (let r = REGION + 40; r <= 2400; r *= 1.25) RS.push(r);
       const pos = [], col = [], idx = [];
       const cRock = new THREE.Color(0x4a3b30), cGrass = new THREE.Color(0x4c6b34), c = new THREE.Color();
       for (let i = 0; i < RS.length; i++) {
@@ -77,7 +84,7 @@ CBZ.lab.kit("eruption", {
       }
       for (let i = 0; i < RS.length - 1; i++) for (let j = 0; j < AS; j++) {
         const a = i * AS + j, b = i * AS + (j + 1) % AS, d = (i + 1) * AS + j, e = (i + 1) * AS + (j + 1) % AS;
-        idx.push(a, d, b, b, d, e);
+        idx.push(a, b, d, b, e, d);   // counter-clockwise from above: the ground faces UP
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
