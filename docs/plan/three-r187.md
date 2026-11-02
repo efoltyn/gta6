@@ -368,9 +368,28 @@ as stock point lights, so a legacy-attenuation patch there covers both.
   own smoke. Columns: TSL smokeplume. Char ground: TSL burn tiles.
 - QUAKE gas fires (systems/quake.js): tongues + smoke into the engine, a light.
 
+### Measured (2026-11-02, M1, real GPU headless, tools/fire/perf.mjs, frame = render + GPU synced)
+
+| scene | WebGL today | WebGPU + engines | WebGPU, engines off |
+|---|---|---|---|
+| eruption t+8 s, flank | 36.7 ms (p90 43.4), 2519 calls | 9.9 ms (p90 15.4), 241 calls | 9.5 ms, 187 calls |
+| wildfire t+10 s | 40.4 ms (p90 46.3), 2546 calls | 8.3 ms (p90 10.6), 311 calls | 21.0 ms, 257 calls |
+
+Sim tick (stepSim, all systems) 6-11 ms on every lane; the engines' CPU
+side (emission staging + compute submits) 0.2-0.5 ms a frame; ~10-15k
+particles + up to 160 rocks + 12-100 clustered lights live in these scenes.
+The WebGPU frame is NOT like for like with WebGL yet (the world's
+onBeforeCompile hooks are ignored there, lights are physical), so read the
+engines' cost off the two WebGPU columns: under a millisecond of GPU for
+the eruption, and the wildfire is cheaper WITH them (the incompatible point
+layers and black plume box cost more than the engine). Captures:
+~/harness/out/gta6/r187-fire/sheets (left WebGL today, right WebGPU after).
+
 ### Tools
 
 ```sh
+node tools/fire/sheets.mjs <beforeDir> <afterDir> <outDir>             # side-by-side sheets
+node tools/fire/perf.mjs [--lanes webgl,webgpu,webgpu-off]              # the table above
 node tools/fire/lab.mjs --scene all|volcano|fire|lights [--night] --cam "x,y,z,ax,ay,az,fov;..."   # the engines alone, 1 s boot
 node tools/fire/shot.mjs --gpu webgpu|webgl --beats slope-warn,flank-film,night-flank,wildfire-night --out <dir>
 node tools/fire/probe.mjs --force volcano --secs 7 --expr-file f.js          # an answer from the staged island
