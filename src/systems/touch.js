@@ -1150,6 +1150,9 @@
        file; `enable` is idempotent and free when the system is off (nothing
        is ever on that layer). */
     if (CBZ.PED_INST_LAYER != null && tapRay.layers) tapRay.layers.enable(CBZ.PED_INST_LAYER);
+    // (and the layer entities/people.js parks a real person's proc body on:
+    // the finger taps the person, whichever body is drawing them)
+    if (CBZ.PEOPLE_HIDE_LAYER != null && tapRay.layers) tapRay.layers.enable(CBZ.PEOPLE_HIDE_LAYER);
 
     const roots = new Map(), objects = [];
     function add(group, kind, rec) {

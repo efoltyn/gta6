@@ -77,7 +77,15 @@
   const SRC = (typeof document !== "undefined" && document.currentScript && document.currentScript.src) || "";
   const ROOT = SRC ? new URL("../../assets/people/", SRC).href : "assets/people/";
   const VER = "p2";
-  const HIDE = 30;                 // the layer the proc body hides on
+  /* THE PROC BODY HIDES ON A LAYER OF ITS OWN. It used to share
+     pedinstance.js's hide layer (30), and that is a layer with an owner: the
+     outfit guarantee sweep asks pedinstance whether a hidden cloth part is
+     drawn, pedinstance has no record of a part WE hid, calls it a hole, and
+     "repairs" it back onto layer 0. A swept real person walked about inside
+     their old box body. 29 is nobody's: no camera draws it, nothing reveals
+     it, and its readers (the touch tap ray) are told about it here. */
+  const HIDE = 29;
+  CBZ.PEOPLE_HIDE_LAYER = HIDE;
   const NW = 12;                   // wounds per person (shader arrays)
   const EXPR = ["blink", "jaw", "smile", "pain", "fear", "snarl", "anger"];
 

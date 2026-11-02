@@ -115,12 +115,20 @@ for half, rng in (("1", range(0, 32)), ("2", range(32, 64))):
 # ---------------------------------------------------------------- in the game
 cb, ca = S + "/city_before", S + "/city_after"
 if os.path.exists(ca + "/shots.json"):
+    live = []
     for sh in json.load(open(ca + "/shots.json")):
         k = sh["kind"]
         bp, ap = f"{cb}/{k}.png", f"{ca}/{k}.png"
         if os.path.exists(bp) and os.path.exists(ap):
             P({"type": "pair", "title": "In the game: " + k.replace("_", " "), "caption": "Gang City, live, the same pedestrian and the same camera: the painted uniform on the real body, then the real wardrobe.",
                "before": bp, "after": ap})
+        elif os.path.exists(ap):
+            live.append({"path": ap, "label": k.replace("_", " ") + ", live in Gang City"})
+    # live frames with no before beside them: three to a page
+    for n in range(0, len(live), 3):
+        P({"type": "stack", "title": "In the game" if n == 0 else "In the game (cont.)",
+           "caption": "Gang City, live: a pedestrian of each trade on a street corner, dressed by the real wardrobe through the same LOD the city uses." if n == 0 else "",
+           "frames": live[n:n + 3]})
 # ---------------------------------------------------------------- how
 if os.path.exists(S + "/zones.png"):
     P({"type": "sheet", "title": "How: every garment knows its parts", "caption": "Each UV island of each garment is classified once, from its own texture: blue = the main cloth, green = trousers / skirt, white = the shirt under it, red = the tie, yellow = buttons and buckles (kept), black = left off (a cameo pendant). The game dyes zone by zone and keeps the cloth's own light and dark.",
