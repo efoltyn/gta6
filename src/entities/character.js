@@ -9030,6 +9030,9 @@
        below the hips, the two thighs. Model units. */
     const NS = 48;
     function outline(ch, y) {
+      // a body that measured its own section (people.js: the real, skinned
+      // body under a uniform) answers for itself, a fresh 48-point list
+      if (ch._section) return ch._section(y);
       const S = ch.torsoShape, P = ch.profile, out = [];
       for (let j = 0; j < NS; j++) {
         const th = j / NS * Math.PI * 2, dx = Math.sin(th), dz = Math.cos(th);

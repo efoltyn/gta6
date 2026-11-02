@@ -50,7 +50,8 @@ vm.runInContext(read("src/vendor/three.r128.min.js"), ctx, { filename: "three" }
 const GEO = {}, MAT = {};
 ctx.CBZ.boxGeom = (w, h, d) => GEO[w + "," + h + "," + d] || (GEO[w + "," + h + "," + d] = new ctx.THREE.BoxGeometry(w, h, d));
 ctx.CBZ.cmat = (hex) => MAT[hex] || (MAT[hex] = Object.assign(new ctx.THREE.MeshLambertMaterial({ color: hex }), { _shared: true }));
-for (const f of ["src/entities/headwear.js", "src/city/clothes.js", "src/city/outfits.js", "src/entities/dutykit.js"]) {
+// world/materials.js owns CBZ.paintMesh, which outfits.js recolours a rig with
+for (const f of ["src/world/materials.js", "src/entities/headwear.js", "src/city/clothes.js", "src/city/outfits.js", "src/entities/dutykit.js"]) {
   try { vm.runInContext(read(f), ctx, { filename: f }); }
   catch (e) { console.log("load " + f + " threw: " + e.message); process.exit(2); }
 }
@@ -119,7 +120,7 @@ for (const id of ["swat", "soldier", "tactical"]) check(cat[id].colors.gloves !=
 check(cat.detail.colors.gloves == null, "the detail is bare-handed");
 
 // ---- 4: recolorRig mounts / strips the kit and the gloves
-function mesh() { return { material: { color: { h: null, setHex(x) { this.h = x; } }, emissive: null }, userData: {}, visible: true }; }
+function mesh() { return { material: { color: { h: null, setHex(x) { this.h = x; }, getHex() { return this.h; } }, emissive: null }, userData: {}, visible: true }; }
 function rig() {
   const s = {};
   for (const k of ["pelvis", "legs", "legsLower", "torso", "arms", "armsLower", "collar", "shoes", "cap", "hair", "badge"]) s[k] = [mesh()];
@@ -131,9 +132,11 @@ CBZ.cityRecolorRig(a, D.colors, D);
 CBZ.cityRecolorRig(b, D.colors, D);
 const last2 = painted.slice(-2);
 check(last2.length === 2 && keyOf(last2[0]) === keyOf(last2[1]) && last2[0].style === D.style, "two detail bodies ask the atlas for the same suit key");
-// the kit is ONE merged, vertex-coloured mesh (shades + earpiece), not seven boxes
-check(a._detailKit && a._detailKit.isMesh && a._detailKit.parent === a.neck && a._detailKit.userData.mask === 3, "kit mounted on the neck as one mesh (shades + earpiece)");
-check(a._detailKit.geometry.attributes.color && a._detailKit.geometry.attributes.position.count > 200, "kit is a merged, vertex-coloured shape (" + (a._detailKit.geometry.attributes.position.count) + " verts)");
+// the earpiece is ONE merged, vertex-coloured mesh on the neck, not boxes;
+// the shades are a fitted pair of their own (entities/eyewear.js "agent",
+// fitted to a real head: not on these stub rigs)
+check(a._detailKit && a._detailKit.isMesh && a._detailKit.parent === a.neck && a._detailKit.userData.mask === 2, "earpiece mounted on the neck as one mesh");
+check(a._detailKit.geometry.attributes.color && a._detailKit.geometry.attributes.position.count > 60, "earpiece is a merged, vertex-coloured shape (" + (a._detailKit.geometry.attributes.position.count) + " verts)");
 check(a._detailKit.geometry === b._detailKit.geometry && a._detailKit.material === b._detailKit.material, "kit geometry/material shared between wearers");
 CBZ.cityRecolorRig(a, cat.swat.colors, cat.swat);
 // the neck now also carries the role hat (entities/headwear.js), so "stripped"
