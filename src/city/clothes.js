@@ -42,7 +42,7 @@
   const THREE = window.THREE;   // bind locally so the bare-THREE refs resolve (browser always has it; harness stubs it). clothes.js stays defined even headless — outfits.js/peds.js consume its API unconditionally.
 
   // ---- the atlas layout (one canvas per outfit) ----------------------------
-  const W = 128, H = 256;
+  const W = 128, H = 256, W0 = W;
   const COLS = { front: [0, 64], back: [64, 96], side: [96, 112], cap: [112, 128] };
   const ROWS = { torso: [0, 96], jacket: [96, 176], arm: [176, 216], leg: [216, 256] };
   // part dims MUST match entities/character.js boxes; jacket = inflated torso
@@ -3056,7 +3056,12 @@
   const SHELL_V0 = 0.028, SHELL_VK = 0.951, SHELL_MARGIN = 2;
   function coverUnderShell(ctx) {
     if (!ctx || typeof ctx.getImageData !== "function" || typeof ctx.putImageData !== "function") return;
-    const jr = ROWS.jacket, tr = ROWS.torso, jh = jr[1] - jr[0], th = tr[1] - tr[0];
+    // a hi-res repaint (CBZ.cityClothesHiRes) draws through ctx.scale(k, k);
+    // this pass works in device pixels, so it scales its own layout by k
+    // (k = 1 for every atlas the painted body wears: the exact old pass)
+    const k = ctx.canvas && ctx.canvas.width > W0 ? Math.round(ctx.canvas.width / W0) : 1;
+    const W = W0 * k;
+    const jr = [ROWS.jacket[0] * k, ROWS.jacket[1] * k], tr = [ROWS.torso[0] * k, ROWS.torso[1] * k], jh = jr[1] - jr[0], th = tr[1] - tr[0];
     let J, T;
     try { J = ctx.getImageData(0, jr[0], W, jh); T = ctx.getImageData(0, tr[0], W, th); } catch (e) { return; }
     const jd = J && J.data, td = T && T.data;
@@ -3064,9 +3069,9 @@
     // the shell's cut, grown by the margin INSIDE its own face column (a
     // column edge is a seam on the body, not the edge of a hole)
     const cols = [], colOf = new Int16Array(W);
-    for (const k in COLS) cols.push(COLS[k]);
+    for (const c in COLS) cols.push([COLS[c][0] * k, COLS[c][1] * k]);
     for (let x = 0; x < W; x++) for (let c = 0; c < cols.length; c++) if (x >= cols[c][0] && x < cols[c][1]) colOf[x] = c;
-    const open = new Uint8Array(W * jh), M = SHELL_MARGIN;
+    const open = new Uint8Array(W * jh), M = SHELL_MARGIN * k;
     for (let y = 0; y < jh; y++) for (let x = 0; x < W; x++) {
       if (jd[(y * W + x) * 4 + 3] >= 128) continue;
       const c = cols[colOf[x]];
@@ -3167,7 +3172,7 @@
     const m = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5 });
     m._shared = true;                               // clearCityPeds must never dispose it
     m._cbzClothKey = key;                           // the audit's "this is painted cloth" mark
-    const set = { mat: m, tex, parts, bodyHex: null, neckHex: null, yoke: null, partsY: parts };
+    const set = { mat: m, tex, parts, bodyHex: null, neckHex: null, yoke: null, partsY: parts, c: c };
     // ---- READ BACK WHAT WAS ACTUALLY PAINTED (see THE SHOULDER YOKE) --------
     // shoulder patch, well clear of plackets/pockets/the alpha gap, at a row
     // height where shade() contributes nothing — so a suit answers exactly
@@ -3264,6 +3269,40 @@
     return s;
   }
   CBZ.cityClothesTex = getSet;
+
+  /* THE BLENDER PEOPLE WEAR THE SAME GARMENT (entities/people.js). A real
+     garment mesh is painted by this file's painters, projected onto it the
+     way the box body maps a face — so a cop is still this cop, a scrub still
+     this scrub. cityClothesWorn: the set a rig is dressed in. cityClothesHiRes:
+     that set's atlas painted again at k x (the painters draw vectors through
+     the context, so ctx.scale(k, k) is the whole port; coverUnderShell scales
+     its pixel pass itself). One canvas per key per k, cached, never per rig. */
+  CBZ.cityClothesWorn = function (ch) {
+    const k = ch && ch._clothesKey;
+    const s = k != null ? sets[k] : null;
+    return s ? { key: k, set: s } : null;
+  };
+  const hiSets = {};
+  CBZ.cityClothesHiRes = function (key, k, fresh) {
+    k = Math.max(1, Math.min(8, k | 0 || 4));
+    const set = sets[key];
+    if (!set || typeof document === "undefined") return null;
+    const hk = key + "@" + k;
+    if (hiSets[hk] && !fresh) return hiSets[hk];
+    const cv = document.createElement("canvas");
+    cv.width = W * k; cv.height = H * k;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.scale(k, k);
+    const c = set.c || {};
+    clothFill(ctx, key, c);
+    clothPaint(ctx, key, c);
+    if (fresh) return { canvas: cv, parts: set.parts, bodyHex: set.bodyHex, k: k };   // a look at it (tools), never uploaded
+    const tex = new THREE.CanvasTexture(cv);
+    tex.magFilter = THREE.LinearFilter;
+    tex.anisotropy = 4;
+    return (hiSets[hk] = { tex: tex, canvas: cv, parts: set.parts, bodyHex: set.bodyHex, k: k });
+  };
 
   // ============================================================
   //  CBZ.cityPaintedBodyHex(recOrId, ch) → the hex this record's garment

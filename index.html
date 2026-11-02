@@ -617,7 +617,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=looks1022b"></script>
+  <script src="src/entities/character.js?v=people1102"></script>
   <script src="src/entities/headwear.js?v=armourm1011"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -1507,7 +1507,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=hands1022"></script>
 <script src="src/city/economy.js?v=isleopen1022"></script>
-<script src="src/city/clothes.js?v=looks1022b"></script>
+<script src="src/city/clothes.js?v=people1102"></script>
 <script src="src/city/outfits.js?v=islesave1022"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <script src="src/city/hunger.js?v=stam1009"></script>
@@ -1539,7 +1539,9 @@ document.body.appendChild(b);}}catch(e){}})();
      demand ladder: a mugger, a doorman, a corner crew, a guard asking first).
      peds.js think() yields to it; nothing runs at parse. -->
 <script src="src/city/ladder.js?v=cmd1022o"></script>
-<script src="src/entities/pedinstance.js?v=arrive1022"></script>
+<script src="src/entities/pedinstance.js?v=people1102"></script>
+<!-- THE BLENDER PEOPLE: the nearest peds wear real skinned bodies (MakeHuman CC0 pack, assets/people) driven by their own procedural rig; after pedinstance.js (it hands rigs back) and character.js (facePose) -->
+<script src="src/entities/people.js?v=people1102"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -2151,8 +2153,8 @@ document.body.appendChild(b);}}catch(e){}})();
      always-updater is in the sort -->
 <!-- projected decals: blood cut out of the struck mesh's own triangles (cars) -->
 <script src="src/systems/surfacedecal.js?v=carblood930"></script>
-<script src="src/systems/gore.js?v=canvas1029"></script>
-<script src="src/systems/wounds.js?v=holes1009b"></script>
+<script src="src/systems/gore.js?v=people1102"></script>
+<script src="src/systems/wounds.js?v=people1102"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused

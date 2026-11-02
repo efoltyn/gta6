@@ -2273,6 +2273,14 @@
     const kind = opts.melee === "blade" ? "blade" : "shot";
     const cal = opts.cal != null ? opts.cal : (opts.caliber != null ? opts.caliber : 1);
 
+    // THE BLENDER PEOPLE (entities/people.js): the skin the camera sees takes
+    // the wound where the round met it (cast along the shooter's line, stored
+    // in bind space so it rides every pose). The hidden proc body below still
+    // takes it too: the limp, the ledger, the decal bookkeeping all stay.
+    if (ch._people && CBZ.people && CBZ.people.wound) {
+      try { CBZ.people.wound(ch, new THREE.Vector3(wp.x, wp.y, wp.z), { kind: kind === "blade" ? "cut" : "shot", cal: cal, dmg: opts.dmg, fromX: opts.fromX, fromZ: opts.fromZ, dir: opts.dir }); } catch (e) {}
+    }
+
     const pick = pickPart(actor, px, py, pz, !!opts.head);
     const part = pick.mesh;
     if (!part || !part.geometry) { refuse("wound:no-part"); return; }

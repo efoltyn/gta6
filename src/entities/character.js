@@ -4896,6 +4896,9 @@
       torsoBackZ: function (x, y) { return torsoSurfaceZ(TS, x, y, -1); },
     };
     // HANDS: rig.setHandPose / rig.setHandLod (HANDS block above makeCharacter)
+    // the look this body was built from (entities/people.js builds the same
+    // person as a real skinned body from it: skin, hair, beard, heritage, age)
+    rig.look = c;
     rig.handFit = handFit;
     rig.setHandPose = function (side, pose) { setBodyHandPose(rig, side, pose); };
     // one distance LOD for the whole body: the hands (fphands body LODs) and

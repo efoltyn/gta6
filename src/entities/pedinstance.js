@@ -1124,6 +1124,9 @@
      part is born invisible. systems/gore.js:1093 clones a severed limb for
      the flying gib — it calls this so the gib renders. Public + guarded so
      any future cloner can do the same in one line. */
+  // entities/people.js: give a rig back whole (every part on its own layer
+  // again, its instances freed) before a real body takes it over
+  CBZ.pedInstanceForget = function (g) { const r = g && rigs.get(g); if (r) dropRig(r); };
   CBZ.pedInstanceReveal = function (obj) {
     if (!obj || !obj.traverse) return obj;
     obj.traverse(function (o) { if (o.layers && o.layers.mask === HIDE_MASK) o.layers.mask = 1; });
@@ -1502,6 +1505,10 @@
       if (!g || !g.isObject3D) continue;
       const r = rigOf(g);
       r.stamp = stamp;
+      // A RIG WEARING A REAL BODY (entities/people.js) draws that body: it is
+      // never pooled, and its subtree's matrices are left to the render walk
+      // (the skinned driver rides it). people.js hands it back on detach.
+      if (a.char && a.char._people) { if (r.recs.length) emptyRig(r); g._cbzMatrixOwnedFrame = undefined; continue; }
       if (a.culled || !g.parent || !chainVisible(g)) { parkRig(r); continue; }
       /* A BODY RIDING SOMETHING NEVER HOLDS A POSE. The held pose is a WORLD
          pose, and a rig attached to a car/boat/plane (npclife.js) is carried

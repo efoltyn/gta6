@@ -136,6 +136,19 @@ const RUNS = {
     },
     params: "run=nuke",
   },
+  /* THE PEOPLE (src/lab/kits/humans.js): a line-up of every sex, build, skin
+     tone, age, hair and beard, in outfits. params skinned=1 swaps in the
+     Blender people on the same rigs; the face cams find each head. */
+  humans: {
+    kit: "humans",
+    beats: [1.0],
+    seconds: 1.5,
+    cams: {
+      "line-up, front": `({ p: [0, 1.15, 10.5], l: [0, 0.95, 0], fov: 32 })`,
+      "line-up, 3/4": `({ p: [-6.2, 1.55, 7.6], l: [0, 0.92, 0], fov: 40 })`,
+    },
+    params: "",
+  },
   /* THE WILDFIRE (src/lab/kits/wildfire.js): grass and trees on a 20 degree
      ramp, two houses and two cars on the bench downwind, wind to +z. */
   wildfire: {
@@ -195,6 +208,12 @@ try {
         if (!ready) await new Promise((r) => setTimeout(r, 100));
       }
       if (!ready || !ready.ready) throw new Error("lab did not boot: " + JSON.stringify(ready) + " " + pg.errors.slice(0, 5).join(" | "));
+      // a kit that streams assets (the people pack) says so: wait for it
+      for (let i = 0; i < 900; i++) {
+        const busy = await pg.evl("(() => { const W = __lab.W || __lab.world; return !!(W && W.busy && W.busy()); })()", 30e3).catch(() => false);
+        if (!busy) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
       const cells = {};
       const t0 = Date.now();
       for (const bt of beats) {
