@@ -231,8 +231,151 @@ people rework to land). Real WebGPU (not the WebGL2 backend) needs a
 headed/GPU Chrome: tools/speed.mjs runs the real GPU headless and is the
 place to add a `--gpu webgpu` lane.
 
+(Correction, 2026-11-02: headless Chrome DOES get the real GPU's WebGPU
+adapter on this Mac: `--headless=new --enable-unsafe-webgpu --use-angle=metal
+--ignore-gpu-blocklist`, no SwiftShader flags, reports `apple / metal-3`.
+`tools/lib/cdp.mjs` launch({ gpu: "real" }) and `boot-check --real-gpu` do it.)
 
+## THE FIRE ENGINES (WebGPU): one particle engine, clustered lights, TSL volumes
 
+Fire, smoke, ash, dust, sparks and flying/rolling rock under the WebGPU
+renderer. Two shared engines (other systems build on them: the destruction /
+explosions work must use `CBZ.gpuParticles` for fireballs, debris and dust,
+not stand up a second particle system) and the FX that use them. Everything
+is gated: under the classic WebGLRenderer `CBZ.gpuParticles.on` and
+`CBZ.clusterLights.on` are false and every caller keeps today's builder, so
+the WebGL look is unchanged (boot-check clean, same rnd() draws: the hazard
+stream never depends on the renderer).
+
+### `src/systems/gpufx.js` — `CBZ.gpuParticles`, THE particle engine
+
+TSL compute on storage buffers, one compute pass and ONE instanced draw per
+look however many particles are alive. Live only on the real WebGPU backend
+(the WebGL2 fallback of the WebGPU renderer has no atomics or vertex-stage
+storage): check `GP.on`.
+
+```js
+const GP = CBZ.gpuParticles;
+if (GP.on) {
+  GP.ensureGround(groundAt, cx, cz, size);   // bake the height field (sliced, once per field)
+  GP.emit("smoke", { x, y, z, n: 4, r: 1.5, vy: 3, vr: 1, life: 6, size: 2, grow: 9,
+                     temp: 0.5, tone: 0.6 });        // tone 0 steam .. 0.5 ash .. 1 soot
+  GP.emit("fire",  { x, y, z, n: 2, r: 0.8, vy: 2, life: 0.8, size: 1.6, temp: 1 });
+  GP.emit("spark", { x, y, z, n: 8, vr: 9, vy: 12, life: 2.5, size: 0.2, temp: 1, buoy: 0 });
+  GP.emit("dust",  { x, y, z, n: 20, r: 2, vr: 4, life: 4, size: 1.5, grow: 6, tone: 0.4 });
+  GP.emit("ash",   { x, y, z, n: 1, vy: -0.6, life: 10, size: 0.12 });
+  GP.rock({ x, y, z, vx, vy, vz, size: 0.8, temp: 0.9, life: 40, spin: 6, shed: 1 });
+}
+GP.setWind(x, y, z) / GP.setWind(null)   // pin / follow CBZ.weatherWind
+GP.clear([look])   GP.stats()             // { pools: {look: {max, emitted, gpuRing}}, computeMs, ground }
+```
+
+EMIT fields (all optional): `x y z` where, `n` count (max 2048 a pool a
+frame), `r` spawn-sphere radius (`rUp` squashes it vertically), `vx vy vz`
+velocity + `vr` random spread, `life lifeR` seconds, `size grow` start/end
+size in metres (gases grow as they entrain air), `temp` 0..1 heat (buoyancy,
+the blackbody glow, the fire colour), `tone`, and per-particle overrides of
+the look's `buoy drag turb`.
+
+| look | what | physics | draw |
+|---|---|---|---|
+| smoke | billowing lit puffs | buoyancy x temp, cools 0.22/s; wind drag (vertical a third); curl noise | MeshLambertNode billboards: scene sun/sky + every clustered light, lobe normals from the puff atlas, hot underside glows, soft particles |
+| dust | heavy grit (impacts, surges, density currents) | as smoke, heavier; RUNS DOWNHILL near the ground (slope gravity) | as smoke, warmer tone |
+| fire | incandescent gas | strong buoyancy, fast cooling, curl licking | additive flame tongues on a blackbody ramp, tileable scrolling noise |
+| spark | embers, spatter, clots | ballistic, bounce 0.35 on the height field | additive streaks stretched along velocity |
+| ash | lit flakes | slow fall, flutter, settle | small lit quads |
+| rock | real 3D blocks | rigid bodies: gravity, bounce (restitution off the slope normal), ROLLING (w -> n x v / r), tumbling quaternion | InstancedMesh, storage instance matrices written by compute, MeshStandardNode, cracks glow by temperature, cast shadows |
+
+Rocks SHED grit into the smoke pool GPU -> GPU (an atomic ring reserved at
+the top of the target pool, an accumulator per rock: one puff per half its
+own size of path, so a trail is a streak, never beads). Pools are sized off
+`CBZ.qScale` (phone .. desktop). The height field is ONE 256 x 256 storage
+buffer baked off a `groundAt` (an eruption and the wildfire share the
+island's: `ensureGround` bakes once). The clock is the game's dt (an
+`onAlways` at 96.5), so a frozen-rAF `CBZ.stepSim` storyboard advances it
+tick for tick; paused = frozen.
+
+Adding an effect: emit into an existing look (most explosions are
+fire + smoke + dust + spark + rock with different numbers); add a LOOK only
+for a genuinely new draw. Do not create a second particle system.
+
+### `src/core/clusterlights.js` — `CBZ.clusterLights`, Forward+ lights
+
+Installs `THREE.ClusteredLighting` (examples/jsm/lighting/ClusteredLighting.js,
+512 lights, 32 px tiles x 24 depth slices x 64 a cluster) as
+`renderer.lighting` under the WebGPU renderer (either backend). Point and
+spot lights are binned by a compute pass into a data texture; LightsNode's
+cache key hashes only the non-clustered lights (sun, sky, shadow casters),
+so adding, moving or removing a fire light NEVER recompiles a program.
+`core/lightpin.js` stands down when `CBZ.clusterLights.on` (it restores the
+masks it set once and stops pinning): every lamp, fire and lava pool reaches
+the shader, phones included.
+
+```js
+const L = CBZ.clusterLights.add({ x, y, z, color: 0xff7a2a, intensity: 1.6, distance: 14, flicker: 0.8 });
+L.set(x, y, z).power(v).reach(d).color(hex);  L.remove();
+```
+
+`intensity` is in the GAME's light units (the r128 legacy model);
+`CL.toNode()` converts once for the node renderer's physical falloff (matched
+at a third of the reach). When the core light-model port lands it should set
+`THREE.LEGACY_LIGHTS_NODE = true` and the game units pass straight through.
+Clustered lights use the same `directPointLight` / `getDistanceAttenuation`
+as stock point lights, so a legacy-attenuation patch there covers both.
+
+### The TSL volumes (the smoke the owner likes, kept)
+
+- `src/world/plume_node.js` (`CBZ.plumeNode.make`): the volcano's plume
+  volume march (column, umbrella, fall streaks, base surge, density current,
+  cock's-tail jets, fumarole wisps, dust bursts) ported line for line from
+  volcanofx.js's GLSL. Same uniforms object shape, so volcanofx.js drives
+  either; `plumeMaterial()` picks it under WebGPU. Before this the plume box
+  rendered as a BLACK BOX under WebGPU (an incompatible ShaderMaterial draws
+  black, not nothing), which is most of why the earlier ?gpu=webgpu frames
+  were dark.
+- `src/systems/smokeplume.js`: the wildfire's convection columns, same
+  treatment (`nodeMaterial()` beside the GLSL).
+- `src/systems/wildfire.js` burn tiles (char, ash, singe, ember bed): TSL.
+- WGSL rules learned: every texture read inside a march is explicit-LOD
+  (`.sample(uv).level(0)`; implicit derivatives are illegal in non-uniform
+  control flow); a texture that is swapped later is read through
+  `textureNode.sample()` so the reads follow `.value`; the march stops at the
+  scene depth (`viewportDepthTexture` -> metres along the ray) with
+  depthTest off instead of writing frag depth; uniforms referenced inside
+  `Fn().setLayout()` functions shared between kernels went missing from the
+  second kernel's bind group (inline node builders instead).
+
+### What uses them (WebGPU only; WebGL keeps today's builders)
+
+- VOLCANO (world/volcanofx.js, world/eruption.js, systems/disasters.js):
+  the phreatic blast's cock's-tail jets, the owner's "little dark gray clouds
+  that look like 2D rocks rolling down the side of the mountain", are real
+  tumbling rocks + heavy dark dust shed along each jet's flight that falls
+  back and runs down the cone; the base surge is pale dust rolling off the
+  rim; bombs trail continuous smoke, burst dust on landing and hand their
+  rock to the engine (it bounces and rolls on down, the crater and the hazard
+  stay the CPU body's); the four hottest bombs in the air carry lights; the
+  fountain is spark clots + a light; the warning's rockfall and the
+  incandescent spatter roll down the lane; the density current throws hot
+  tumbling rocks and billowing grit from its head and lights the ground under
+  its nose. The column/umbrella are the TSL plume.
+- WILDFIRE (systems/wildfire.js): every flame tongue (crowns, the grass
+  front, window bays, roofs, cars) is emitted as fire particles (budgeted to
+  the pool), flame tips shed lit smoke, the surface smoke and column puffs
+  are particles, embers sparks, ash flakes; the glow sprites are replaced by
+  up to 96 clustered lights keyed on the burning thing (trees, grass blocks,
+  houses, cars), so the fire lights the ground, the trunks, the walls and its
+  own smoke. Columns: TSL smokeplume. Char ground: TSL burn tiles.
+- QUAKE gas fires (systems/quake.js): tongues + smoke into the engine, a light.
+
+### Tools
+
+```sh
+node tools/fire/lab.mjs --scene all|volcano|fire|lights [--night] --cam "x,y,z,ax,ay,az,fov;..."   # the engines alone, 1 s boot
+node tools/fire/shot.mjs --gpu webgpu|webgl --beats slope-warn,flank-film,night-flank,wildfire-night --out <dir>
+node tools/fire/probe.mjs --force volcano --secs 7 --expr-file f.js          # an answer from the staged island
+node tools/three/boot-check.mjs disaster --gpu webgpu --real-gpu
+```
 
 ## Engine code that talks to WebGL directly (WebGPU phase)
 

@@ -3321,11 +3321,22 @@
               b.trailT = 0.06;
               if (ribbons) ribbons.push(b.trail, b.x, b.y, b.z);
               else if (GPx) {
-                // a juvenile bomb degasses a dark streak, a lithic trails pale dust
-                GPx.emit("smoke", { x: b.x, y: b.y, z: b.z, n: b.size > 0.7 ? 2 : 1, r: b.size * 0.4,
-                  vx: b.vx * 0.08, vy: b.vy * 0.08, vz: b.vz * 0.08, vr: 0.6,
-                  life: 1.6 + b.size * 1.4, size: b.size * 0.9 + 0.3, grow: b.size * 3.4 + 1.6,
-                  temp: b.hot ? 0.3 * b.temp : 0, tone: b.hot ? 0.86 : 0.38, drag: 0.7, buoy: 2.5, turb: 1.1 });
+                /* a juvenile bomb degasses a dark streak, a lithic trails pale
+                   dust: puffs laid along the whole segment flown since the last
+                   tick, close enough to overlap (spaced at a fraction of their
+                   own size), so the trail is a continuous streak, not beads */
+                const px0 = b.lx != null ? b.lx : b.x, py0 = b.ly != null ? b.ly : b.y, pz0 = b.lz != null ? b.lz : b.z;
+                const seg = Math.hypot(b.x - px0, b.y - py0, b.z - pz0);
+                const s0 = b.size * 0.7 + 0.25;
+                const k = Math.max(1, Math.min(8, Math.ceil(seg / (s0 * 0.55))));
+                for (let q = 0; q < k; q++) {
+                  const u = (q + Math.random()) / k;
+                  GPx.emit("smoke", { x: px0 + (b.x - px0) * u, y: py0 + (b.y - py0) * u, z: pz0 + (b.z - pz0) * u, n: 1, r: b.size * 0.3,
+                    vx: b.vx * 0.06, vy: b.vy * 0.06, vz: b.vz * 0.06, vr: 0.5,
+                    life: 1.4 + b.size * 1.3, size: s0, grow: b.size * 3.0 + 1.4,
+                    temp: b.hot ? 0.25 * b.temp : 0, tone: b.hot ? 0.86 : 0.38, drag: 0.7, buoy: 2.2, turb: 1.1 });
+                }
+                b.lx = b.x; b.ly = b.y; b.lz = b.z;
               }
             }
             let hit = null, gy = 0;

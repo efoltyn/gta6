@@ -42,7 +42,7 @@
 
    API (all no-ops when !on)
      const GP = CBZ.gpuParticles
-     GP.on                                    true under the WebGPU renderer, after init
+     GP.on                                    true under the WebGPU renderer on its real WebGPU backend, after init
      GP.emit(look, o)                         spawn o.n particles (see EMIT below)
      GP.rock(o)                               throw one rock {x,y,z,vx,vy,vz,size,temp,spin,shed}
      GP.setGround(groundAt, cx, cz, size, res)  bake the height field (sliced over frames)
@@ -176,8 +176,8 @@
         const r2 = u * u + v * v;
         const n1 = fbm(u * 2.6 + ox, v * 2.6 + oy, 5);
         const body = Math.exp(-r2 * 4.2);
-        let d = body * (0.35 + 1.1 * n1);
-        d = smooth(0.16, 0.72, d) * (1 - smooth(0.72, 0.92, Math.sqrt(r2)));
+        let d = body * (0.18 + 1.4 * n1);
+        d = smooth(0.2, 0.78, d) * (1 - smooth(0.68, 0.9, Math.sqrt(r2)));
         den[y * H + x] = d;
       }
       for (let y = 0; y < H; y++) for (let x = 0; x < H; x++) {
@@ -205,6 +205,40 @@
   function smooth(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
   let _atlas = null;
   function atlas() { return _atlas || (_atlas = puffAtlas()); }
+  /* a TILEABLE value-noise fbm (R, G two octave sets), 128 x 128, repeat-
+     wrapped: what a flame's licking scrolls through without a seam */
+  let _noise = null;
+  function noiseTex() {
+    if (_noise) return _noise;
+    const S = 128, D = new Uint8Array(S * S * 4);
+    let seed = 0x7f4a7c15 >>> 0;
+    const L = 64, lat = new Float32Array(L * L * 2);
+    for (let i = 0; i < lat.length; i++) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; lat[i] = seed / 4294967296; }
+    const vn = (x, y, p, o) => {   // period p lattice cells
+      const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+      const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+      const m = (v) => ((v % p) + p) % p;
+      const at = (a, b) => lat[o + m(b) * L + m(a)];
+      const a = at(xi, yi), b = at(xi + 1, yi), c = at(xi, yi + 1), d = at(xi + 1, yi + 1);
+      return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+    };
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      let r = 0, g = 0, w = 0.5, nw = 0;
+      for (let k = 0, p = 4; k < 4; k++, p *= 2) {
+        r += w * vn(x / S * p, y / S * p, p, 0);
+        g += w * vn(x / S * p + 0.5, y / S * p + 0.5, p, L * L);
+        nw += w; w *= 0.5;
+      }
+      const o = (y * S + x) * 4;
+      D[o] = Math.round(255 * r / nw); D[o + 1] = Math.round(255 * g / nw); D[o + 2] = 0; D[o + 3] = 255;
+    }
+    const t = new THREE.DataTexture(D, S, S, THREE.RGBAFormat);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+    t.needsUpdate = true;
+    _noise = t;
+    return t;
+  }
 
   /* the blackbody ramp a temperature 0..1 glows on (linear, unclamped: the
      hot end is HDR and the tone map rolls it off) */
@@ -224,7 +258,7 @@
      buoy, drag, turb: defaults per particle; g: gravity coupling;
      bounce: restitution off the ground (0 = stop), stick: settle on it. */
   const LOOKS = {
-    smoke: { max: [3000, 14000], gpu: 2048, cool: 0.22, buoy: 5.0, drag: 0.9, turb: 1.4, g: 0.15, bounce: 0, lit: true, order: 9 },
+    smoke: { max: [3000, 14000], gpu: 4096, cool: 0.22, buoy: 5.0, drag: 0.9, turb: 1.4, g: 0.15, bounce: 0, lit: true, order: 9 },
     dust:  { max: [1500, 8000], gpu: 1024, cool: 0.9, buoy: 1.2, drag: 1.1, turb: 1.0, g: 0.5, bounce: 0, lit: true, order: 9, slope: 0.8 },
     fire:  { max: [1500, 7000], gpu: 0, cool: 1.6, buoy: 14.0, drag: 1.2, turb: 2.6, g: 0.05, bounce: 0, lit: false, order: 10 },
     spark: { max: [600, 3000], gpu: 512, cool: 0.45, buoy: 1.5, drag: 0.25, turb: 1.2, g: 1.0, bounce: 0.35, lit: false, order: 11 },
@@ -441,20 +475,32 @@
         const dead = age.greaterThan(v4.w);
         // SHED: a hot or fast rock leaves ash and grit behind it (GPU -> GPU)
         const shedP = pool.shedInto;
+        const acc = b4.z.toVar();          // a rock's B.z is its shed accumulator
         if (shedP && shedP.gpuCounter) {
-          const rr = hash(i.add(U.frame.mul(uint(7919))));
-          const rate = b4.w.mul(float(2.0).add(speed.mul(0.9))).mul(rad.mul(1.4).add(0.3)).mul(select(contact, float(1.6), float(0.7)));
-          If(rr.lessThan(rate.mul(dt)).and(dead.not()), () => {
-            const r2 = hash(i.add(U.frame.mul(uint(31337))).add(uint(17)));
-            const r3 = hash(i.add(U.frame.mul(uint(1013))).add(uint(91)));
-            const off = vec3(r2.sub(0.5), r3.mul(0.6), r3.sub(r2)).mul(rad.mul(1.6));
-            const hot = temp;
-            gpuSpawn(shedP,
-              vec4(pos.add(off), 0.0),
-              vec4(vel.mul(0.25).add(vec3(0.0, float(0.6).add(hot.mul(2.5)), 0.0)), float(2.4).add(r2.mul(2.6)).add(rad.mul(1.5))),
-              vec4(rad.mul(0.9).add(0.25), rad.mul(3.2).add(1.4), r3, hot.mul(0.7)),
-              vec4(0.8, float(1.2).add(hot.mul(5.0)), 1.2, float(0.62).add(hot.mul(0.2))));
-          });
+          /* ONE PUFF EVERY HALF ITS OWN SIZE OF PATH: an accumulator, not a
+             dice roll (dice bunch up and leave gaps: a trail of beads). Up to
+             two a frame, laid back along the frame's own step, so even a fast
+             rock leaves a continuous streak. A cold block in the air sheds
+             nothing; a hot one degasses; on the ground every rock kicks grit. */
+          const s0 = rad.mul(1.2).add(0.35);
+          const rate = b4.w.mul(speed.div(max(s0.mul(0.5), 0.15)).add(1.5)).mul(select(contact, float(1.0), smoothstep(0.15, 0.5, temp)));
+          acc.addAssign(rate.mul(dt));
+          for (let s = 0; s < 2; s++) {
+            If(acc.greaterThanEqual(1.0).and(dead.not()), () => {
+              acc.subAssign(1.0);
+              const r2 = hash(i.mul(uint(2654435761)).add(U.frame.mul(uint(40503))).add(uint(17 + s * 101)));
+              const r3 = hash(i.mul(uint(2246822519)).add(U.frame.mul(uint(97))).add(uint(91 + s * 57)));
+              const off = vec3(r2.sub(0.5), r3.mul(0.5), r3.sub(r2)).mul(rad.mul(0.9));
+              const back = vel.mul(dt.mul(s === 0 ? 0.25 : 0.75));
+              const hot = temp;
+              gpuSpawn(shedP,
+                vec4(pos.sub(back).add(off), 0.0),
+                vec4(vel.mul(0.22).add(vec3(0.0, float(0.6).add(hot.mul(2.5)), 0.0)), float(1.4).add(r2.mul(1.6)).add(rad.mul(1.2))),
+                vec4(s0, rad.mul(3.6).add(1.8), r3, hot.mul(0.4)),
+                vec4(0.8, float(1.2).add(hot.mul(5.0)), 1.2, float(0.62).add(hot.mul(0.2))));
+            });
+          }
+          acc.assign(min(acc, 2.0));
         }
         If(dead, () => {
           V.element(i).assign(vec4(0.0));
@@ -465,6 +511,7 @@
           A.element(i).assign(vec4(a4.xyz, temp));
           Q.element(i).assign(q);
           W.element(i).assign(vec4(w, rad));
+          B.element(i).assign(vec4(b4.xy, acc, b4.w));
         });
       });
       // THE MATRIX the draw reads: position, orientation, the rock's own size
@@ -528,8 +575,10 @@
       const cr = cos(rot), sr = sin(rot);
       rotCS = vec2(cr, sr);
       const rx = c.x.mul(cr).sub(c.y.mul(sr)), ry = c.x.mul(sr).add(c.y.mul(cr));
-      const lift = isFire ? size.mul(0.3) : float(0.0);     // a tongue stands on its base
-      world = pA.xyz.add(camRight.mul(rx.mul(size))).add(camUp.mul(ry.mul(size).add(lift)));
+      // a tongue is taller than it is wide and stands on its base
+      const wK = isFire ? 0.8 : 1.0, hK = isFire ? 1.7 : 1.0;
+      const lift = isFire ? size.mul(0.55) : float(0.0);
+      world = pA.xyz.add(camRight.mul(rx.mul(size).mul(wK))).add(camUp.mul(ry.mul(size).mul(hK).add(lift)));
     }
     mat.positionNode = world.mul(alive).add(vec3(0.0, float(-1e4).mul(float(1.0).sub(alive)), 0.0));
     // fragment: the puff's own shape from the atlas (variant by seed), eroded with age
@@ -539,14 +588,24 @@
     const vK = varying(k), vT = varying(aA.w), vTone = varying(bA.w), vSeed = varying(seed);
     let alpha, color;
     if (isFire) {
-      // a flame tongue: the puff stretched up, scrolled, cut by its own noise
-      const fUv = uv().sub(0.5);
-      const tongue = smoothstep(0.5, 0.05, length(vec2(fUv.x.mul(1.35), fUv.y.add(0.12).mul(0.8))));
-      const lick = texture(atlas(), uv().mul(vec2(0.5, 0.35)).add(vec2(fract(vSeed.mul(7.0)).mul(0.5), fract(U.time.mul(0.35).add(vSeed)).mul(0.5)))).g;
-      const body = tongue.mul(smoothstep(0.25, 0.75, tex.r.mul(0.6).add(lick.mul(0.7))));
-      const heat = vT.mul(float(0.55).add(body.mul(0.6)));
-      alpha = body.mul(smoothstep(0.0, 0.12, vK)).mul(float(1.0).sub(smoothstep(0.55, 1.0, vK)));
-      color = blackbody(heat);
+      /* A FLAME TONGUE, not a ball: wide and white-hot at its base, narrowing
+         to a licking tip that the noise (scrolling UP, tileable) tears and
+         bends; the colour is the gas's own temperature, hottest in the core
+         and the root, dull red at the ragged edge and the tip. */
+      const fu = uv();
+      const y = fu.y, x = fu.x.sub(0.5).mul(2.0);
+      const nUv = vec2(fu.x.mul(0.7).add(vSeed.mul(3.7)), y.mul(0.55).sub(U.time.mul(1.1)).add(vSeed.mul(1.9)));
+      const n1 = texture(noiseTex(), nUv).r, n2 = texture(noiseTex(), nUv.mul(2.3).add(vec2(0.37, 0.11))).g;
+      const n = n1.mul(0.65).add(n2.mul(0.35));
+      // a teardrop: round at the root, tapering to a torn tip
+      const width = pow(max(float(1.0).sub(y), 0.0), 0.7).mul(0.85).mul(smoothstep(-0.3, 0.1, y)).mul(float(0.7).add(n.mul(0.6)));
+      const q = abs(x.add(n.sub(0.5).mul(0.95).mul(y))).div(max(width, 0.02));
+      const top = float(0.62).add(n.mul(0.38));
+      const body = float(1.0).sub(smoothstep(0.35, 1.0, q)).mul(float(1.0).sub(smoothstep(top.sub(0.25), top, y)));
+      const core = pow(max(float(1.0).sub(q), 0.0), 2.0).mul(pow(max(float(1.0).sub(y), 0.0), 0.8));
+      const heat = vT.mul(float(0.38).add(core.mul(0.66)));
+      alpha = body.mul(body).mul(smoothstep(0.0, 0.12, vK)).mul(float(1.0).sub(smoothstep(0.55, 1.0, vK)));
+      color = blackbody(heat).mul(0.42);
       mat.blending = THREE.AdditiveBlending;
     } else if (isSpark) {
       const sUv = uv().sub(0.5);
@@ -557,14 +616,14 @@
     } else if (isAsh) {
       const aUv = uv().sub(0.5);
       alpha = smoothstep(0.5, 0.3, length(aUv)).mul(float(1.0).sub(smoothstep(0.8, 1.0, vK))).mul(0.9);
-      color = mix(vec3(0.20, 0.19, 0.18), vec3(0.42, 0.40, 0.37), vSeed);
+      color = mix(vec3(0.42, 0.41, 0.39), vec3(0.7, 0.69, 0.66), vSeed);      // burnt leaf and grass ash: pale grey
     } else {
       // smoke / dust: the billow; its edge eaten into wisps as it ages (the
       // erosion threshold climbs with age), never faded as a disc
       const erode = tex.g.mul(0.35).add(0.05).mul(vK.mul(1.3));
       const den = smoothstep(erode, erode.add(0.45), tex.r);
       const fadeIn = smoothstep(0.0, 0.05, vK), fadeOut = float(1.0).sub(smoothstep(0.55, 1.0, vK));
-      const thick = name === "dust" ? 0.5 : 0.42;
+      const thick = name === "dust" ? 0.44 : 0.36;
       alpha = den.mul(fadeIn).mul(fadeOut).mul(thick);
       const tone = vTone;
       const base = name === "dust"
@@ -578,7 +637,7 @@
       const nrm = normalize(vec3(nv, sqrt(max(float(1.0).sub(dot(nv, nv)), 0.04))));
       mat.normalNode = nrm;
       // the hot young underside glows on its own (the fire under it)
-      mat.emissiveNode = blackbody(vT).mul(vT.mul(vT)).mul(smoothstep(0.25, -0.6, nrm.y)).mul(1.1);
+      mat.emissiveNode = blackbody(vT).mul(vT.mul(vT)).mul(smoothstep(0.25, -0.6, nrm.y)).mul(0.65);
     }
     if (softParticles && !isSpark) {
       try { alpha = softParticles({ opacity: alpha, distance: isFire ? 0.6 : 1.6 }); } catch (e) { /* no depth copy: hard edges */ }
@@ -809,7 +868,7 @@
       if (look && k !== look) continue;
       const p = GP.pools[k];
       p.pending = 0;
-      // a zero-life spawn over the whole ring is the cheapest clear: rebuild the storage
+      // the CPU copy of the storage is all zeros (the GPU owns the live state): uploading it kills every particle
       p.D.value.array.fill(0); p.D.value.needsUpdate = true;
     }
   }
@@ -845,7 +904,12 @@
       return (hCPU[o] * (1 - fu) + hCPU[o + 1] * fu) * (1 - fv) + (hCPU[o + g.res] * (1 - fu) + hCPU[o + g.res + 1] * fu) * fv;
     };
   }
+  /* LIVE ONLY ON THE REAL WEBGPU BACKEND. The WebGPU renderer's WebGL2
+     fallback (no navigator.gpu) runs compute as transform feedback, with no
+     atomics and no storage reads in the vertex stage: the engine stays off
+     there (on === false) and the callers keep their old builders. */
   (R0.cbzReady || Promise.resolve()).then(function () {
+    if (!(R0.backend && R0.backend.isWebGPUBackend)) return;
     try { goLive(); } catch (e) { console.error("[gpufx] init", e); }
   });
 

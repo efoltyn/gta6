@@ -152,6 +152,75 @@
   const MAXTREEFLAME = 64, MAXFLAME = 1500, MAXGLOW = 360;
   const MAXSMOKE = 2000, MAXEMBER = 400, MAXASH = 600;
 
+  /* ---- THE GPU PATH (three r187, WebGPU renderer) ------------------------
+     The node renderer draws no ShaderMaterial (the five point layers below
+     came out as nothing or as black blocks there). Under it every flame
+     tongue the fire draws is EMITTED into the one particle engine
+     (systems/gpufx.js) instead: incandescent gas on a blackbody ramp that
+     rises on its own buoyancy, licks in curl noise and turns to fire-lit
+     smoke at its tip; embers are sparks, ash is lit flakes, and every
+     burning source (crown, grass run, house, car) carries a clustered
+     light (core/clusterlights.js), so the fire lights the ground, the
+     trunks, the houses and its own smoke. The burn texture and the smoke
+     columns are TSL ports of the same shaders. WebGL: today's look exactly. */
+  function gpu() { const g = CBZ.gpuParticles; return g && g.on ? g : null; }
+  let gFrameDt = 1 / 60, gFlames = 0, gFlameScale = 1;
+  function gpuFlame(GP, x, y, z, size, alpha, seed) {
+    gFlames++;
+    if (!(size > 0.05) || !(alpha > 0.02)) return;
+    // ~6 particles a second a tongue (each lives ~0.8 s), thinned to the pool's budget
+    const want = 9 * alpha * gFlameScale * gFrameDt * (0.7 + 0.15 * Math.min(4, size));
+    let n = Math.floor(want); if (jit() < want - n) n++;
+    if (!n) return;
+    const base = y - size * 0.38;
+    GP.emit("fire", { x: x, y: base + size * 0.1, z: z, n: n, r: size * 0.3, rUp: 0.2,
+      vx: F.wx * F.wspd * 0.08, vy: 0.8 + size * 0.45, vz: F.wz * F.wspd * 0.08, vr: 0.35 + size * 0.06,
+      life: Math.min(1.5, 0.45 + size * 0.11), lifeR: 0.15, size: size * 0.62, temp: 0.75 + 0.25 * alpha });
+    // the tip of a flame is where its smoke starts: lit from below by the flame
+    if (jit() < 0.14 * n) {
+      GP.emit("smoke", { x: x, y: base + size * 0.95, z: z, n: 1, r: size * 0.25, vy: 1.2 + size * 0.3,
+        vx: F.wx * F.wspd * 0.15, vz: F.wz * F.wspd * 0.15, vr: 0.5,
+        life: 4 + size * 0.6, size: size * 0.45 + 0.4, grow: size * 1.8 + 2.5, temp: 0.55, tone: 0.62, drag: 0.6, buoy: 3.5 });
+    }
+  }
+  /* the fire's light: one clustered light per burning source, the strongest
+     LIGHTS_MAX of them, keyed on the thing burning so a light never jumps */
+  const LIGHTS_MAX = 96;
+  const fLights = new Map();
+  const _lRank = [];
+  function fireLights(dt) {
+    const CL = CBZ.clusterLights;
+    if (!CL || !CL.on) return;
+    const S = F.sources;
+    _lRank.length = 0;
+    for (let i = 0; i < S.length; i++) _lRank.push(S[i]);
+    _lRank.sort((a, b) => b.w - a.w);
+    const seen = new Set();
+    for (let i = 0; i < _lRank.length && i < LIGHTS_MAX; i++) {
+      const s = _lRank[i];
+      const key = s.kind === 0 ? "t" + Math.round(s.x * 4) + "," + Math.round(s.z * 4)
+        : (s.kind === 1 ? "b" + Math.round(s.x / 6) + "," + Math.round(s.z / 6) : (s.kind === 2 ? "h" + Math.round(s.x) + "," + Math.round(s.z) : "c" + Math.round(s.x / 3) + "," + Math.round(s.z / 3)));
+      seen.add(key);
+      let L = fLights.get(key);
+      const gy = ground(s.x, s.z);
+      if (!L) {
+        L = { h: CL.add({ x: s.x, y: gy + 1.5, z: s.z, color: s.kind >= 2 ? 0xff6a22 : 0xff8a34, intensity: 0, distance: 12, flicker: 0.85 }), p: 0 };
+        fLights.set(key, L);
+      }
+      const want = (s.kind === 2 ? 2.2 : s.kind === 3 ? 1.5 : s.kind === 0 ? 1.6 : 1.1) * Math.min(2.5, s.w);
+      L.p += (want - L.p) * Math.min(1, dt * 3);
+      const y = s.kind === 0 ? (s.y || gy + 4) - 1.5 : (s.kind === 2 ? Math.min(s.y || gy + 4, gy + 6) : gy + 1.2);
+      L.h.set(s.x, y, s.z).power(L.p).reach(9 + 9 * Math.min(2.5, s.w));
+    }
+    for (const [key, L] of fLights) {
+      if (seen.has(key)) continue;
+      L.p -= L.p * Math.min(1, dt * 1.5) + dt * 0.05;
+      if (L.p <= 0.02) { L.h.remove(); fLights.delete(key); continue; }
+      L.h.power(L.p);
+    }
+  }
+  function fireLightsOff() { for (const [, L] of fLights) L.h.remove(); fLights.clear(); }
+
   /* ---- run state -------------------------------------------------------- */
   const F = {
     live: false, arena: null, bridge: null,
@@ -583,7 +652,51 @@
   /* THE BURN: char, ash, the singe ahead of the front and the ember bed
      behind it, read from one cell texture. A world-space noise warps the
      lookup so the cell grid never shows: the edges come out ragged. */
+  /* (GPU path) the same burn in TSL: the char, the ash streaks, the singe
+     and the breathing ember bed, read off the same cell texture */
+  function burnNodeMaterial(tex, texel, ox, oz) {
+    const T = THREE.TSL;
+    const { float, vec2, vec3, vec4, uniform, texture, uv, positionWorld, floor, fract, dot, mix, smoothstep, clamp, max, sin, Discard, If, Fn } = T;
+    const uTime = uniform(0), uAge = uniform(0), uTexel = uniform(texel), uOrigin = uniform(new THREE.Vector2(ox, oz));
+    const map = texture(tex);
+    const hsh = (p) => {
+      const p3a = fract(vec3(p.x, p.y, p.x).mul(0.1031));
+      const p3 = p3a.add(dot(p3a, p3a.yzx.add(33.33)));
+      return fract(p3.x.add(p3.y).mul(p3.z));
+    };
+    const vn = (p) => {
+      const i = floor(p), f0 = fract(p), f = f0.mul(f0).mul(float(3.0).sub(f0.mul(2.0)));
+      return mix(mix(hsh(i), hsh(i.add(vec2(1.0, 0.0))), f.x), mix(hsh(i.add(vec2(0.0, 1.0))), hsh(i.add(vec2(1.0, 1.0))), f.x), f.y);
+    };
+    const m = new THREE.MeshBasicNodeMaterial();
+    m.name = "wildfire-burn(node)";
+    m.transparent = true; m.depthWrite = false; m.fog = true;
+    m.polygonOffset = true; m.polygonOffsetFactor = -4; m.polygonOffsetUnits = -4;
+    m.colorNode = Fn(() => {
+      const m0 = map.sample(uv());
+      If(m0.r.add(m0.g).add(m0.b).lessThan(0.002), () => { Discard(); });
+      const p = positionWorld.xz.sub(uOrigin);
+      const n1 = vn(p.mul(0.42)), n2 = vn(p.mul(1.7).add(13.1)), n3 = vn(p.mul(4.3).sub(7.7));
+      const warp = vec2(n1, vn(p.mul(0.42).add(31.7))).sub(0.5).mul(uTexel).mul(1.6);
+      const mm = map.sample(uv().add(warp));
+      const charA = smoothstep(0.18, 0.62, mm.r.add(n2.sub(0.5).mul(0.35)));
+      const ash = smoothstep(0.55, 0.85, n3.mul(0.6).add(n2.mul(0.4))).mul(charA).mul(0.6);
+      const charCol = mix(mix(vec3(0.028, 0.024, 0.02), vec3(0.36, 0.34, 0.31), ash), vec3(0.29, 0.27, 0.23), uAge.mul(0.8));
+      const singe = mm.b.mul(float(1.0).sub(charA)).mul(n2.mul(0.3).add(0.7));
+      const col = mix(vec3(0.36, 0.27, 0.12), charCol, charA).toVar();
+      const a = max(charA.mul(float(0.93).sub(uAge.mul(0.45))), singe.mul(0.5)).toVar();
+      const g = mm.g.mul(smoothstep(0.25, 0.75, n2.add(sin(uTime.mul(6.0).add(n1.mul(20.0))).mul(0.25))));
+      const hot = mix(vec3(0.85, 0.12, 0.01), vec3(1.0, 0.55, 0.12), g.mul(g));
+      col.assign(mix(col, hot.mul(1.4), clamp(g.mul(1.3), 0.0, 1.0)));
+      a.assign(max(a, g));
+      If(a.lessThan(0.01), () => { Discard(); });
+      return vec4(col, a);
+    })();
+    m.uniforms = { uMap: map, uTime: uTime, uAge: uAge, uTexel: uTexel, uOrigin: uOrigin };
+    return m;
+  }
   function burnMaterial(tex, texel, ox, oz) {
+    if (gpu()) return burnNodeMaterial(tex, texel, ox, oz);
     const m = new THREE.ShaderMaterial({
       uniforms: fogUniforms({
         uMap: { value: null }, uTime: { value: 0 }, uAge: { value: 0 },
@@ -741,7 +854,17 @@
     root.add(ash);
     const burnRoot = new THREE.Group(); burnRoot.name = "wildfireBurn"; burnRoot.userData.transient = true;
     root.add(burnRoot);
+    // (GPU path) the point layers stay for their bookkeeping but are never
+    // drawn: the particle engine draws the fire, the clustered lights its glow
+    const GPx = gpu();
+    if (GPx) {
+      flame.visible = glow.visible = smoke.visible = embers.visible = ash.visible = false;
+      const A = CBZ.surv && CBZ.surv.arena;
+      const gAt = A && A.groundHeightAt ? A.groundHeightAt : null;
+      if (gAt && A.center) GPx.ensureGround(gAt, A.center.x, A.center.z, 2 * (A.radius || 280) + 80);
+    }
     FX = {
+      gpu: GPx,
       root, flame, glow, smoke, embers, ash, burnRoot, plumes,
       spuff: new Array(MAXSMOKE).fill(null), sFree: [],
       epuff: new Array(MAXEMBER).fill(null), eFree: [],
@@ -773,6 +896,7 @@
     if (G.tiles) G.tiles.fill(null);
     if (G.mat) { G.mat.dispose(); G.mat = null; }
     if (FX.burnRoot.parent) FX.burnRoot.parent.remove(FX.burnRoot);
+    fireLightsOff();
     FX = null;
   }
   function fxAlive() { return FX && FX.smoke && FX.smoke.parent; }
@@ -827,6 +951,16 @@
   /* ---- smoke / embers / ash pools -------------------------------------- */
   // tone: 0 vegetation smoke (grey-tan), 1 structure/car smoke (black)
   function spawnSmoke(x, y, z, surface, dense, tone) {
+    if (FX && FX.gpu && fxAlive()) {
+      /* (GPU path) the surface smoke running ahead of the front: low, pale,
+         dragged downwind along the ground; a column puff climbs on its heat.
+         The big columns themselves are the plume volume (smokeplume.js). */
+      FX.gpu.emit("smoke", { x: x, y: y, z: z, n: 1, r: surface ? 1.6 : 0.8, rUp: surface ? 0.3 : 1,
+        vx: F.wx * F.wspd * (surface ? 0.45 : 0.25), vy: surface ? 0.25 : 3, vz: F.wz * F.wspd * (surface ? 0.45 : 0.25), vr: 0.6,
+        life: surface ? 9 : 6, size: surface ? 2.6 : 2.0, grow: surface ? 7 : 9, temp: surface ? 0.05 : 0.4,
+        tone: tone ? 0.92 : (dense ? 0.6 : 0.42), drag: surface ? 0.9 : 0.6, buoy: surface ? 0.3 : 4 });
+      return;
+    }
     if (!fxAlive() || FX.plumes || !FX.sFree.length) return;
     const i = FX.sFree.pop();
     const drift = F.wspd * (surface ? 0.75 : 0.5);
@@ -840,6 +974,11 @@
     };
   }
   function spawnEmber(x, y, z, vx, vy, vz, life) {
+    if (FX && FX.gpu && fxAlive()) {
+      FX.gpu.emit("spark", { x: x, y: y, z: z, n: 1, vx: vx, vy: vy, vz: vz, vr: 0.3, life: life * 1.6, lifeR: 0.2,
+        size: 0.09, temp: 0.85, drag: 0.6, buoy: 1.6, turb: 2.2 });
+      return;
+    }
     if (!fxAlive() || !FX.eFree.length) return;
     const i = FX.eFree.pop();
     FX.epuff[i] = { x, y, z, vx, vy, vz, age: 0, life };
@@ -1760,6 +1899,8 @@
 
   /* ---- the drawn frame -------------------------------------------------------- */
   function pushFlame(x, y, z, size, alpha, seed) {
+    const GP = FX.gpu;
+    if (GP) { gpuFlame(GP, x, y, z, size, alpha, seed); return; }
     if (FX.flameN >= MAXFLAME) return;
     const g = FX.flame.geometry, j = FX.flameN++;
     const p = g.attributes.position.array;
@@ -1767,6 +1908,7 @@
     g.attributes.aSize.array[j] = size; g.attributes.aAlpha.array[j] = alpha; g.attributes.aSeed.array[j] = seed;
   }
   function pushGlow(x, y, z, size, alpha) {
+    if (FX.gpu) return;              // (GPU path: the glow is a real light, fireLights)
     if (FX.glowN >= MAXGLOW) return;
     const g = FX.glow.geometry, j = FX.glowN++;
     const p = g.attributes.position.array;
@@ -1917,7 +2059,15 @@
     FX.embers.material.uniforms.uScale.value = pointScale;
     if (G.mat) G.mat.uniforms.uTime.value = F.t;
 
+    if (FX.gpu) { gFrameDt = Math.min(0.1, Math.max(0, dt)); gFlames = 0; }
     drawFlames();
+    if (FX.gpu) {
+      // keep the fire pool inside its budget whatever the size of the front
+      // (~6 particles a second a tongue, each ~0.8 s alive)
+      const cap = (FX.gpu.pools.fire ? FX.gpu.pools.fire.MAX : 5000) / 0.85;
+      gFlameScale = Math.max(0.12, Math.min(1, cap / Math.max(1, gFlames * 9)));
+      fireLights(dt);
+    }
 
     // the burn texture uploads at ~20 Hz, not per cell change
     G.texCd -= dt;
@@ -2014,6 +2164,22 @@
   // ASH FALLS WHERE THE PLUME IS OVERHEAD: flakes are born above the ground
   // the smoke field covers near the viewer, and drift down with the wind
   function ashTick(dt) {
+    if (FX.gpu) {
+      // (GPU path) the same rule, flakes into the engine's ash pool
+      const cam = CBZ.camera;
+      if (!cam || !F.sources.length) return;
+      const c = cam.position;
+      const tries = Math.ceil(90 * dt);
+      for (let k = 0; k < tries; k++) {
+        const a = jit() * 6.283, r = 3 + jit() * 26;
+        const x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
+        const f = smokeAt(x - F.wx * 6, z - F.wz * 6);
+        if (jit() > Math.min(1, f * 0.8)) continue;
+        FX.gpu.emit("ash", { x: x, y: c.y + 3 + jit() * 12, z: z, n: 1, vy: -(0.45 + jit() * 0.5),
+          vx: F.wx * F.wspd * 0.35, vz: F.wz * F.wspd * 0.35, life: 9 + jit() * 6, size: 0.1 + 0.08 * jit(), temp: 0, drag: 1.2 });
+      }
+      return;
+    }
     const ag = FX.ash.geometry.attributes;
     const ap = ag.position.array, aa = ag.aAlpha.array;
     const cam = CBZ.camera;

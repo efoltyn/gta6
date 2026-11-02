@@ -822,9 +822,15 @@
        spread along the face, each licking on its own seed. */
     const grp = new THREE.Group();
     const F = [];
-    const fmat = CBZ.wildfire && CBZ.wildfire.flameMaterial ? CBZ.wildfire.flameMaterial() : null;
-    if (fmat) {
-      const N = 7, P = new Float32Array(N * 3), S = new Float32Array(N), A = new Float32Array(N), Sd = new Float32Array(N);
+    /* (WebGPU) the tongues are emitted into the one particle engine
+       (systems/gpufx.js) and the fire carries a clustered light; the point
+       sprites below are a ShaderMaterial the node renderer cannot draw */
+    const GPE = CBZ.gpuParticles && CBZ.gpuParticles.on ? CBZ.gpuParticles : null;
+    const fmat = !GPE && CBZ.wildfire && CBZ.wildfire.flameMaterial ? CBZ.wildfire.flameMaterial() : null;
+    let tongues = null;
+    // (the same rnd() draws on either renderer: the hazard stream is shared)
+    const N = 7, P = new Float32Array(N * 3), S = new Float32Array(N), A = new Float32Array(N), Sd = new Float32Array(N);
+    if (fmat || GPE) {
       const along = side < 2 ? 1 : 0;              // the wall runs along x on the -z/+z faces
       for (let i = 0; i < N; i++) {
         const u = (i / (N - 1) - 0.5) * 3.2 + (rnd() - 0.5) * 0.5;
@@ -833,6 +839,9 @@
         P[i * 3 + 2] = along ? (side === 0 ? -0.35 : 0.35) : u;
         S[i] = 1.6 + rnd() * 1.6; A[i] = 0.85; Sd[i] = rnd();
       }
+      if (GPE) tongues = { P: P, S: S, N: N, acc: 0, light: CBZ.clusterLights ? CBZ.clusterLights.add({ x: fx, y: fy + 1, z: fz, color: 0xff7a2a, intensity: 2.0, distance: 16, flicker: 0.9 }) : null };
+    }
+    if (fmat) {
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(P, 3));
       g.setAttribute("aSize", new THREE.BufferAttribute(S, 1));
@@ -844,11 +853,12 @@
     }
     grp.position.set(fx, fy, fz);
     if (scene()) scene().add(grp);
-    const smoke = CBZ.fx && CBZ.fx.particleCloud
+    const smoke = !GPE && CBZ.fx && CBZ.fx.particleCloud
       ? CBZ.fx.particleCloud({ mode: "rise", color: 0x2b2622, count: 90, radius: 3.2, top: 26, size: 0.6, opacity: 0.38, vMin: 3.5, vMax: 7, drift: 4 })
       : null;
     if (smoke) smoke.setActive(0.75);
     const rec = {
+      tongues: tongues,
       t: t, grp: grp, F: F, smoke: smoke, x: fx, y: fy, z: fz, age: 0,
       nx: side === 2 ? -1 : side === 3 ? 1 : 0, nz: side === 0 ? -1 : side === 1 ? 1 : 0,
       life: o.life != null ? o.life : 90,
@@ -875,6 +885,20 @@
         if (al) { for (let q = 0; q < al.count; q++) al.array[q] = 0.85 * fade; al.needsUpdate = true; }
       }
       if (f.smoke) f.smoke.update(dt, f.x, f.y + 2, f.z);
+      const tg = f.tongues, GPE = CBZ.gpuParticles;
+      if (tg && GPE && GPE.on) {
+        // (WebGPU) the ragged sheet of tongues along the break, and its smoke
+        tg.acc += dt * 6 * tg.N * fade;
+        while (tg.acc >= 1) {
+          tg.acc -= 1;
+          const i = (Math.random() * tg.N) | 0, s = tg.S[i];
+          GPE.emit("fire", { x: f.x + tg.P[i * 3], y: f.y + tg.P[i * 3 + 1] - s * 0.3, z: f.z + tg.P[i * 3 + 2], n: 1, r: s * 0.15,
+            vx: f.nx * 0.6, vy: 1 + s * 0.4, vz: f.nz * 0.6, vr: 0.4, life: 0.5 + s * 0.12, size: s * 0.5, temp: 0.95 });
+          if (Math.random() < 0.18) GPE.emit("smoke", { x: f.x + tg.P[i * 3] + f.nx * 0.6, y: f.y + s * 0.7, z: f.z + tg.P[i * 3 + 2] + f.nz * 0.6,
+            n: 1, r: 0.6, vx: f.nx * 0.8, vy: 2.5, vz: f.nz * 0.8, life: 7, size: 1.2, grow: 7, temp: 0.5, tone: 0.9, buoy: 4 });
+        }
+        if (tg.light) tg.light.power(2.0 * fade * k);
+      }
       // fire is what turns a survivable hit into a fatal one — it eats the
       // building's OWN ledger, through whoever owns it
       if (hooks.structDamage) { try { hooks.structDamage(f.t, 0.028 * dt); } catch (e) {} }
@@ -889,6 +913,7 @@
     if (f.grp && f.grp.parent) f.grp.parent.remove(f.grp);
     for (let j = 0; j < f.F.length; j++) { if (f.F[j].geometry) f.F[j].geometry.dispose(); if (f.F[j].material) f.F[j].material.dispose(); }
     if (f.smoke) f.smoke.dispose();
+    if (f.tongues && f.tongues.light) f.tongues.light.remove();
     if (f.t) f.t._quakeFire = null;
   }
 

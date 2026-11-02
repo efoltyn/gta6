@@ -57,6 +57,8 @@ const BEATS = {
     cam: { lane: true, az: 0.45, dist: 0.8, alt: 3, look: 0.3, lookY: 0.1, fov: 60 } },
   "close-active": { label: "on the flank beside the lane: the eruption", force: "volcano", state: "active", extra: 2, mag: 0.7, strip: { n: 8, step: 0.6 },
     cam: { lane: true, az: 0.45, dist: 0.8, alt: 3, look: 0.3, lookY: 0.1, fov: 60 } },
+  "rocks-close":  { label: "the blast's rock coming down the cone, close", force: "volcano", state: "active", extra: 2.2, mag: 0.8, strip: { n: 4, step: 0.7 },
+    cam: { lane: true, az: 0.0, dist: 1.25, alt: 7, look: 0.45, lookY: 0.25, fov: 48 } },
   "wildfire":     { label: "wildfire front", force: "wildfire", state: "active", extra: 10,
     cam: { fire: true, dist: 34, alt: 12, fov: 64 } },
   "wildfire-night": { label: "wildfire at night: the ground lit by the fire", force: "wildfire", state: "active", extra: 10, night: true,
@@ -114,10 +116,15 @@ try {
       const ar = CBZ.surv.arena, S = CBZ.eruption ? CBZ.eruption.site(ar) : null, gAt = ar.groundHeightAt;
       const c = B.cam; let px, py, pz, ax, ay, az;
       if (c.fire) {
-        const W = CBZ.wildfire && CBZ.wildfire.debug ? CBZ.wildfire.debug() : null;
-        const f = W && W.front ? W.front : (W && W.cells && W.cells[0]) || { x: ar.cx || 0, z: ar.cz || 600 };
-        ax = f.x; az = f.z; ay = gAt(ax, az) + 3;
-        px = ax + c.dist * 0.8; pz = az + c.dist * 0.6; py = Math.max(gAt(px, pz), 0.5) + c.alt;
+        // the fire's centre of mass, framed from downwind-side so the smoke leans across
+        const hz = CBZ.wildfire && CBZ.wildfire.hazards ? CBZ.wildfire.hazards(64) : [];
+        let sx = 0, sz = 0, sw = 0;
+        for (const h of hz) { sx += h.x * h.r; sz += h.z * h.r; sw += h.r; }
+        const seed = CBZ.wildfire && CBZ.wildfire.seedPos ? CBZ.wildfire.seedPos() : null;
+        const f = sw > 0 ? { x: sx / sw, z: sz / sw } : (seed || { x: ar.center ? ar.center.x : 0, z: ar.center ? ar.center.z : 600 });
+        const w = CBZ.wildfire && CBZ.wildfire.wind ? CBZ.wildfire.wind() : { x: 1, z: 0 };
+        ax = f.x; az = f.z; ay = gAt(ax, az) + 4;
+        px = ax - w.z * c.dist - w.x * c.dist * 0.4; pz = az + w.x * c.dist - w.z * c.dist * 0.4; py = Math.max(gAt(px, pz), 0.5) + c.alt;
       } else {
         let base = 0;
         // the collapse lane's bearing: the slope the warning's rockfall and the density current come down
