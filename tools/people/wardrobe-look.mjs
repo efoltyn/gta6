@@ -70,6 +70,8 @@ const CAM = {
   side: { w: 300, h: 360, cam: (x) => ({ p: [x - 1.3, 1.0, 0.001], l: [x, 0.98, 0], fov: 30 }) },
   // the chest in profile (the wearer's right): how a tie or a badge lies on it
   profile: { w: 300, h: 360, cam: (x) => ({ p: [x - 0.95, 1.22, 0.16], l: [x, 1.2, 0.16], fov: 32 }) },
+  // a big three-quarter portrait, knees up: how a uniform reads as a whole
+  hero: { w: 560, h: 760, cam: (x) => ({ p: [x - 0.55, 1.3, 1.75], l: [x, 1.12, 0], fov: 38 }) },
   // from behind: the belt round the back, the cuff case, the keys
   back: { w: 300, h: 360, cam: (x) => ({ p: [x + 0.35, 1.05, -1.15], l: [x, 0.98, 0], fov: 34 }) },
 };
@@ -138,8 +140,8 @@ try {
 import json, sys
 from PIL import Image, ImageDraw
 J = json.load(open(sys.argv[1])); rows = J["rows"]; cols = int(sys.argv[3]); shots = sys.argv[4].split(",")
-dims = {"full": (300, 520), "chest": (300, 360), "hip": (300, 360), "side": (300, 360), "back": (300, 360), "profile": (300, 360)}
-cw = 300; ch = sum(dims[s][1] for s in shots) + 34
+dims = {"full": (300, 520), "chest": (300, 360), "hip": (300, 360), "side": (300, 360), "back": (300, 360), "profile": (300, 360), "hero": (560, 760)}
+cw = max(dims[s][0] for s in shots); ch = sum(dims[s][1] for s in shots) + 34
 n = len(rows); R = (n + cols - 1) // cols
 head = 44 if J.get("label") else 0
 sheet = Image.new("RGB", (cols * cw, R * ch + head), (22, 22, 26))

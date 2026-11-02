@@ -714,6 +714,12 @@ ZONE_RULES = {
     # the gilet is dyed (hi-vis, blaze orange, black): its seams, not its print
     "male_casualsuit05_gilet": {"k": {Z_MAIN: 0.35}, "_tag": "gilet"},
     "male_casualsuit06_tank": {"k": {Z_MAIN: 0.0, Z_LEGS: 0.45}, "_tag": "tank"},
+    # the undershirt is one knit: its darker ribbed collar band is dyed with
+    # it (not kept grey as trim) and stays darker by its own light
+    "toigo_basic_tucked_t-shirt": {"same": 0.5, "trim_area": 0.0, "k": {Z_MAIN: 0.55}},
+    # uniform slacks are even and pressed: dyed navy at the wool's full fold
+    # contrast they read as faded denim
+    "toigo_wool_pants": {"k": {Z_MAIN: 0.5, Z_LEGS: 0.22}},
 }
 
 def asset(kind, name, role, tex=None, extra=None, derive=None, zones=True):
@@ -850,7 +856,11 @@ CLOTH = {"m_long": "male_casualsuit02", "m_long_b": "male_casualsuit03", "m_tee"
          "m_shirt": "male_casualsuit01", "m_suit3": "toigo_male_suit_3", "m_tux": "toigo_suit_with_jacket_and_bowtie",
          "f_tee": "female_casualsuit01", "f_shorts": "female_casualsuit02", "f_sport": "female_sportsuit01",
          "f_suit": "female_elegantsuit01", "f_blazer": "toigo_female_suit",
-         "f_dress": "toigo_shift_dress", "f_halter": "toigo_halter_dress_knee_length"}
+         "f_dress": "toigo_shift_dress", "f_halter": "toigo_halter_dress_knee_length",
+         # a patrol officer's: the crew-neck undershirt that shows at his open
+         # collar (worn UNDER the duty shirt: people.js keeps only what the
+         # collar leaves showing) and real uniform slacks, not the jeans
+         "m_crew": "toigo_basic_tucked_t-shirt", "m_slacks": "toigo_wool_pants"}
 for k, nm in CLOTH.items(): add("cloth:" + k, "clothes", nm, "cloth", t_cloth)
 add("cloth:m_gilet", "clothes", "male_casualsuit05", "cloth", t_cloth, derive=d_gilet, zones="male_casualsuit05_gilet")
 add("cloth:m_tank", "clothes", "male_casualsuit06", "cloth", t_cloth, derive=d_tank, zones="male_casualsuit06_tank")
