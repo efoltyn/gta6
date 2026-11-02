@@ -37,7 +37,8 @@
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
       // LIT, not MeshBasic: an unlit sign is a full-bright panel at night
-      new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(c) })
+      // (painted once; the canvas goes once the plate is on the GPU)
+      new THREE.MeshLambertMaterial({ map: (CBZ.freeCanvasAfterUpload ? CBZ.freeCanvasAfterUpload(new THREE.CanvasTexture(c)) : new THREE.CanvasTexture(c)) })
     );
     mesh.position.set(x, y, z);
     mesh.rotation.y = ry || 0;

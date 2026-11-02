@@ -364,7 +364,10 @@
       sun.shadow.mapSize.set(wantMap, wantMap);
       if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     }
-    sun.castShadow = wantShadow;
+    // (in play, through the warm: the switch is in every program's key, core/fxwarm.js shadowFlipWarm)
+    // (always handed over in play, even unchanged: a newer tier cancels a pending switch)
+    if (CBZ.game && CBZ.game.state === "playing" && CBZ.shadowFlipWarm) CBZ.shadowFlipWarm(sun, wantShadow);
+    else sun.castShadow = wantShadow;
     if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(true);
     else renderer.shadowMap.needsUpdate = true;
     // per-tier draw distance: city fog range + the farcull radius. Published

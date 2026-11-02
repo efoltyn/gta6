@@ -554,6 +554,94 @@
     return new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex, vertexColors: true });
   }
 
+  /* ======================================================================
+     THE SAGUARO. It was a 7-sided cylinder with straight 6-sided sticks for
+     arms. A saguaro is read by three things, all built here: its PLEATS
+     (12-14 vertical ribs, the column is a star in section — every ridge
+     lighter, every groove dark, a pale row of areoles along each crest), a
+     ROUNDED crown, and arms that leave the trunk level and turn UP through
+     an elbow (the J). Both geometries keep the old pieces' contracts:
+       trunk — unit height centred on y = 0 (scaled (1, h, 1)), base radius
+               0.40 / top 0.32, so solid() and the audit boxes are unchanged;
+       arm   — unit height centred on y = 0 (scaled (1, len, 1)), its root
+               at local x = -0.42, i.e. ON the trunk axis given the 0.42 m
+               radial offset the placer already applies, rising at +x.
+     Vertex colours ~1 around the old CACTUS hue (own vertex-colour material,
+     never a mutated shared cmat).
+  ====================================================================== */
+  const sagCache = {};
+  // a pleated tube along pts (Vector3), ribbed radius = r(t) * (1 - groove)
+  function pleated(pts, radii, ribs, groove, yScale) {
+    const sides = ribs * 2, row = sides + 1, rings = pts.length;
+    const pos = [], col = [], idx = [];
+    const up = new THREE.Vector3(0, 1, 0), t = new THREE.Vector3(), n = new THREE.Vector3(), b = new THREE.Vector3(), tmp = new THREE.Vector3();
+    let prevN = null;
+    for (let i = 0; i < rings; i++) {
+      t.set(0, 0, 0);
+      if (i < rings - 1) t.add(tmp.copy(pts[i + 1]).sub(pts[i]).normalize());
+      if (i > 0) t.add(tmp.copy(pts[i]).sub(pts[i - 1]).normalize());
+      t.normalize();
+      if (!prevN) { n.crossVectors(t, Math.abs(t.y) < 0.9 ? up : tmp.set(1, 0, 0)).normalize(); prevN = n.clone(); }
+      else { n.copy(prevN).sub(tmp.copy(t).multiplyScalar(prevN.dot(t))).normalize(); prevN.copy(n); }
+      b.crossVectors(t, n);
+      for (let s = 0; s <= sides; s++) {
+        const a = (s / sides) * Math.PI * 2, ridge = (s & 1) === 0;
+        const r = radii[i] * (ridge ? 1 : 1 - groove);
+        const dx = n.x * Math.cos(a) + b.x * Math.sin(a), dy = n.y * Math.cos(a) + b.y * Math.sin(a), dz = n.z * Math.cos(a) + b.z * Math.sin(a);
+        pos.push(pts[i].x + dx * r, pts[i].y + dy * r * (yScale || 1), pts[i].z + dz * r);
+        const k = ridge ? 1.10 : 0.66;
+        col.push(k, k, k * 0.96);
+        if (i < rings - 1 && s < sides) { const p0 = i * row + s, p1 = p0 + row; idx.push(p0, p0 + 1, p1, p0 + 1, p1 + 1, p1); }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  }
+  function saguaroTrunk() {
+    if (sagCache.trunk) return sagCache.trunk;
+    // unit height; the top 8% rounds over into the crown (a scaled quarter
+    // circle: at h ~ 4 m this is a ~0.3 m dome, which is what the plant has)
+    const pts = [], radii = [];
+    const prof = [[-0.5, 0.40], [-0.44, 0.37], [-0.3, 0.36], [0, 0.35], [0.3, 0.34], [0.40, 0.33], [0.43, 0.31], [0.455, 0.27], [0.475, 0.20], [0.49, 0.11], [0.5, 0.0]];
+    for (const p of prof) { pts.push(new THREE.Vector3(0, p[0], 0)); radii.push(p[1]); }
+    const g = pleated(pts, radii, 7, 0.16);
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    g.name = "desert-saguaro-trunk";
+    return (sagCache.trunk = g);
+  }
+  function saguaroArm() {
+    if (sagCache.arm) return sagCache.arm;
+    // the J in unit space: level out of the trunk, an elbow, then up; the
+    // vertical scale (len, ~0.8-2.3 m) stretches only the rise, so the level
+    // run's section is drawn at 1/1.5 in y to land near round at mid length
+    const P = [[-0.42, -0.47], [-0.18, -0.47], [0.02, -0.46], [0.16, -0.42], [0.25, -0.33], [0.30, -0.18], [0.31, 0.05], [0.31, 0.30], [0.31, 0.42], [0.31, 0.47], [0.31, 0.5]];
+    const R = [0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.21, 0.205, 0.18, 0.12, 0.0];
+    const pts = P.map(function (p) { return new THREE.Vector3(p[0], p[1], 0); });
+    const g = pleated(pts, R, 5, 0.18);
+    // the level run: squash its section in y so the stretch evens out
+    const pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i), x = pos.getX(i);
+      if (x < 0.2) { const cy = -0.47 + (x > 0.02 ? (x - 0.02) * 0.3 : 0); pos.setY(i, cy + (y - cy) / 1.5); }
+    }
+    g.computeVertexNormals();
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    g.name = "desert-saguaro-arm";
+    return (sagCache.arm = g);
+  }
+  function saguaroMaterial(hex) {
+    const key = "m" + hex;
+    if (sagCache[key]) return sagCache[key];
+    const m = new THREE.MeshLambertMaterial({ color: hex, vertexColors: true });
+    m._shared = true;
+    return (sagCache[key] = m);
+  }
+  CBZ.saguaroKit = { trunk: saguaroTrunk, arm: saguaroArm, material: saguaroMaterial };
+
   CBZ.addLandmass(function (city) {
     const root = (city && city.root) || (CBZ.scene);
     if (!root) return;
@@ -1061,12 +1149,12 @@
       if (inTown(x, z) || !claimNature(x, z, 1.15)) continue;                           // no saguaros in streets, roads, or future landmarks
       cactusSpots.push({ x, z, h, arms });
     }
-    const trunkGeo = new THREE.CylinderGeometry(0.32, 0.4, 1, 7);
-    const trunkIM = new THREE.InstancedMesh(trunkGeo, cmat(CACTUS), cactusSpots.length);
+    const trunkGeo = saguaroTrunk();
+    const trunkIM = new THREE.InstancedMesh(trunkGeo, saguaroMaterial(CACTUS), cactusSpots.length);
     trunkIM.castShadow = true; trunkIM.receiveShadow = true;
     let armCount = 0; cactusSpots.forEach(c => armCount += c.arms);
-    const armGeo = new THREE.CylinderGeometry(0.22, 0.24, 1, 6);
-    const armIM = new THREE.InstancedMesh(armGeo, cmat(CACTUS), Math.max(1, armCount));
+    const armGeo = saguaroArm();
+    const armIM = new THREE.InstancedMesh(armGeo, saguaroMaterial(CACTUS), Math.max(1, armCount));
     armIM.castShadow = true;
     // TREES_V2 (config.js): the saguaro base sat at EXACTLY the centre dune
     // sample (the downhill edge floated on dune slopes) and both arms hung on

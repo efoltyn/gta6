@@ -22,7 +22,7 @@
      node tools/memscope.mjs --json out.json          # default ~/harness/out/gta6/memscope-<label>.json
      node tools/memscope.mjs --top 20 --no-lock
      node tools/memscope.mjs --isles --play 60        # THE ISLES, real rAF play, heap + GPU every --every s
-     node tools/memscope.mjs --isles --play 60 --travel 250  # carried to the next island at 250 m/s (streams it in)
+     node tools/memscope.mjs --isles --play 60 --travel 250 [--in-jet]  # carried to the next island at 250 m/s (in the runway F-35)
      node tools/memscope.mjs --isles --play 12 --snap --ab-top 3000 --eval x.js  # + heap snapshot, ArrayBuffers by path
 
    WHAT IT PRINTS (and writes in full to the JSON):
@@ -134,7 +134,7 @@ const PLAY = +opt("--play", ISLES ? 60 : 0);
 const EVERY = +opt("--every", 5);
 const DO_HEAP = !has("--no-heap");
 const DO_LEAK = DO_HEAP && !has("--no-leak");
-const LABEL = ISLES ? "isles-" + DEVICE + (has("--fly") ? "-fly" : "") + (opt("--travel", "") ? "-travel" : "") : (MODE !== "city" ? MODE : FULL ? "city" : SLICE.replace(/[^a-z0-9-]/gi, "_")) + "-" + DEVICE;
+const LABEL = ISLES ? "isles-" + DEVICE + (opt("--travel", "") ? "-travel" : "") + (has("--in-jet") ? "-jet" : "") : (MODE !== "city" ? MODE : FULL ? "city" : SLICE.replace(/[^a-z0-9-]/gi, "_")) + "-" + DEVICE;
 const HOUT = path.join(os.homedir(), "harness/out/gta6");
 const JSON_OUT = opt("--json", path.join(fs.existsSync(HOUT) ? HOUT : os.tmpdir(), `memscope-${LABEL}.json`));
 const VIEW = DEVICE === "tablet" ? { w: 1180, h: 820, dpr: 2 } : DEVICE === "phone" ? { w: 390, h: 844, dpr: 3 } : { w: 1512, h: 982, dpr: 2 };
@@ -213,6 +213,7 @@ var now = function(){ return performance.now(); };
 var M = window.__ms = { owner: null, curStep: null, building: false, built: false, own: new WeakMap(), roots: {}, nRoots: 0,
   builders: [], steps: [], hold: false, q: [], t: 0, errs: [], upBuf: new WeakSet(), upSrc: new WeakSet(),
   gl: { buf: 0, tex: 0, rb: 0, nbuf: 0, ntex: 0, nrb: 0 }, gls: [], scriptEnd: 0 };
+var cw0 = console.warn; console.warn = function(){ try { var s = Array.prototype.join.call(arguments, " "); if (/fxwarm|threw/.test(s) && M.errs.length < 20) M.errs.push("[warn] " + s.slice(0, 600)); } catch (e) {} return cw0.apply(console, arguments); };
 addEventListener("error", function(e){ if (M.errs.length < 10) M.errs.push(String(e.message || e.type) + (e.filename ? " @" + String(e.filename).split("/").pop() + ":" + e.lineno : "")); }, true);
 /* rAF hold: frames are stepped by hand with a synthetic 1/60 clock (speed.mjs's model) */
 var rAF = window.requestAnimationFrame.bind(window);
@@ -325,7 +326,7 @@ M.rmRoots = function(){ delete window.__msRoots; };
 
 /* ---- GPU walk: bytes per owner, uploaded or not, flags ---- */
 M.gpuWalk = function(farM){
-  var C = window.CBZ, sc = C.scene, T = window.THREE, P = C.player && C.player.pos, own = {}, geoInfo = new Map(), seenBuf = new Set(), seenTex = new Set();
+  var C = window.CBZ, sc = C.scene, T = window.THREE, P = C.player && C.player.pos, own = {}, geoInfo = new Map(), seenBuf = new Set(), seenTex = new Set(), seenSrc = new Set();
   var dup = new Map(), big = [], texRows = [], tot = { gpu: 0, geo: 0, tex: 0, cpuStatic: 0, cpuDyn: 0, notUp: 0, notUpHidden: 0, hidden: 0, far: 0, srcKept: 0 };
   function O(k){ return own[k] || (own[k] = { gpu: 0, geo: 0, tex: 0, cpuStatic: 0, cpuDyn: 0, notUp: 0, notUpHidden: 0, hidden: 0, far: 0, srcKept: 0, meshes: 0, instances: 0, tris: 0 }); }
   function ownerOf(o){ for (var x = o; x; x = x.parent) { var w = M.own.get(x); if (w) return w; } return "unowned"; }
@@ -346,14 +347,22 @@ M.gpuWalk = function(farM){
       if (!q.arrs.has(arr.buffer)) { q.arrs.add(arr.buffer); q.n++; q.owners[flags.owner] = 1; } }
     return n; }
   function tex(t, R, owner, flags){ if (!t || !t.isTexture || seenTex.has(t)) return; seenTex.add(t);
-    var im = t.image, faces = 1; if (Array.isArray(im)) { faces = im.length || 6; im = im[0]; }
-    var w = im && (im.width || im.naturalWidth) || 0, h = im && (im.height || im.naturalHeight) || 0, dep = im && im.depth || 1, data = im && im.data;
+    /* A LAZY canvas texture (core/texfree.js) paints its canvas when .image is
+       READ: reading it here made a canvas for every one of them and counted it
+       as "kept" (the prison read ~160 MB of sources it did not hold: ~20 MB).
+       Its size comes from _cbzLazyW/H and its upload from three's own record. */
+    var ld = Object.getOwnPropertyDescriptor(t, "image"), lazy = !!(ld && ld.get && t._cbzLazyW != null);
+    var im = lazy ? null : t.image, faces = 1; if (Array.isArray(im)) { faces = im.length || 6; im = im[0]; }
+    var w = lazy ? t._cbzLazyW : im && (im.width || im.naturalWidth) || 0, h = lazy ? t._cbzLazyH : im && (im.height || im.naturalHeight) || 0, dep = im && im.depth || 1, data = im && im.data;
     var b = t.type === 1015 ? 16 : t.type === 1016 ? 8 : 4; if (t.format === 1028 || t.format === 1024 || t.format === 1021) b /= 4; else if (t.format === 1025 || t.format === 1030) b /= 2;
     var mip = t.generateMipmaps && t.minFilter !== 1003 && t.minFilter !== 1006 ? 4 / 3 : 1;
     var bytes = t.isCompressedTexture ? (t.mipmaps || []).reduce(function(s, m){ return s + (m.data ? m.data.byteLength : 0); }, 0) * faces : w * h * dep * b * mip * faces;
-    var up = data ? (data.buffer && M.upBuf.has(data.buffer)) : (im && M.upSrc.has(im)) || (t.isCompressedTexture && t.mipmaps && t.mipmaps[0] && t.mipmaps[0].data && M.upBuf.has(t.mipmaps[0].data.buffer));
-    var src = im && (im instanceof HTMLCanvasElement || im instanceof HTMLImageElement || (window.ImageBitmap && im instanceof ImageBitmap)) ? w * h * 4 * faces : 0;
-    if (data && data.byteLength) src += data.byteLength;
+    var lp = lazy && C.renderer && C.renderer.properties ? C.renderer.properties.get(t) : null;
+    var up = lazy ? !!(lp && lp.__webglTexture) : data ? (data.buffer && M.upBuf.has(data.buffer)) : (im && M.upSrc.has(im)) || (t.isCompressedTexture && t.mipmaps && t.mipmaps[0] && t.mipmaps[0].data && M.upBuf.has(t.mipmaps[0].data.buffer));
+    // a source wrapped by several textures is one backing store: count it once
+    var src = im && seenSrc.has(im) ? 0 : im && (im instanceof HTMLCanvasElement || im instanceof HTMLImageElement || (window.ImageBitmap && im instanceof ImageBitmap)) ? w * h * 4 * faces : 0;
+    if (data && data.byteLength && !seenSrc.has(im)) src += data.byteLength;
+    if (im) seenSrc.add(im);
     R.srcKept += src; tot.srcKept += src;
     if (!up) { R.notUp += bytes; tot.notUp += bytes; }
     else { R.gpu += bytes; R.tex += bytes; tot.gpu += bytes; tot.tex += bytes; if (flags.hidden) { R.hidden += bytes; tot.hidden += bytes; } }
@@ -558,6 +567,8 @@ export function analyze(snap, { prevIds = null, top = 20, abTop = 0, trace = "" 
       taken.add(po); unowned.push(po); if (unowned.length >= 12) break; } }
   const out = { ms: 0, nodes: N, reachable: cnt, domIters: iters, totalMB: MB(totalSelf),
     classes: [...hist].sort((a, b) => b[1][0] - a[1][0]).slice(0, 25).map(([k, v]) => ({ cls: k, MB: +MB(v[0]).toFixed(2), n: v[1] })),
+    // every class (self bytes, count): two snapshots diffed by class say what GREW, not just what is new
+    classAll: Object.fromEntries([...hist].map(([k, v]) => [k, [v[0], v[1]]])),
     owners: [...byOwner].sort((a, b) => b[1].retained - a[1].retained).map(([k, v]) => ({ owner: k.replace(/^own:/, ""), MB: +MB(v.retained).toFixed(2), bytes: v.retained, roots: v.roots })),
     holders: [...byHolder].sort((a, b) => b[1].retained - a[1].retained).slice(0, 40).map(([k, v]) => ({ holder: k, MB: +MB(v.retained).toFixed(2), bytes: v.retained })),
     unowned: unowned.map((po) => ({ MB: +MB(ret[po]).toFixed(2), cls: cls(post[po]), path: pathTo(post[po]) })),
@@ -579,7 +590,15 @@ export function analyze(snap, { prevIds = null, top = 20, abTop = 0, trace = "" 
     for (let po = 0; po < root; po++) { const n = post[po]; if (inPrev(nodes[n * nf + oI])) continue; const s = self(n); newSelf += s; newN++;
       const own = ownerOf[po] >= 0 ? gName[ownerOf[po]].replace(/^own:/, "") : "(unowned)", k = own + " | " + cls(n);
       let c = clusters.get(k); if (!c) clusters.set(k, c = { owner: own, cls: cls(n), n: 0, self: 0, rep: -1, repS: -1 }); c.n++; c.self += s; if (s > c.repS) { c.repS = s; c.rep = n; } }
+    /* WHERE the new bytes hang: every new node of 16 KB or more (typed array
+       stores, big arrays) by its retainer path with the indices folded, so a
+       thousand pieces of one leak read as one line instead of one example */
+    const byPath = new Map();
+    for (let po = 0; po < root; po++) { const n = post[po]; const s = self(n); if (s < 16384 || inPrev(nodes[n * nf + oI])) continue;
+      const k = pathTo(n).replace(/\[\d+\]/g, "[]").replace(/<table><\d+>/g, "<table>").replace(/@\d+/g, "@");
+      let c = byPath.get(k); if (!c) byPath.set(k, c = { n: 0, self: 0 }); c.n++; c.self += s; }
     let totPrev = 0; out.diff = { newMB: +MB(newSelf).toFixed(2), newObjects: newN,
+      paths: [...byPath].sort((a, b) => b[1].self - a[1].self).slice(0, top).map(([k, c]) => ({ path: k, n: c.n, MB: +MB(c.self).toFixed(3) })),
       clusters: [...clusters.values()].sort((a, b) => b.self - a.self).slice(0, top).map((c) => ({ owner: c.owner, cls: c.cls, n: c.n, MB: +MB(c.self).toFixed(3), path: pathTo(c.rep) })) };
     void totPrev; void newRet;
   }
@@ -626,8 +645,8 @@ function heapSampleTop(P, n = 15) {
    after a forced GC = what is really retained), ArrayBuffer backing stores,
    GL bytes (buffers / textures / renderbuffers, from the GL calls), live 2D
    canvases, three.info counts, scene objects and the people/cars standing.
-   --fly puts the player in the spawn island's jet at full throttle (the
-   streamer then builds and drops islands as on a real flight). */
+   --travel <m/s> [--in-jet] carries the player (in the runway F-35) to the next
+   island: the streamer builds and drops islands as on a real flight. */
 async function islesPlay(B, s, ev, base, sid) {
   const url = base + "index.html?mode=archipelago&seed=" + (opt("--seed", "1"));
   log(`isles: boot ${url} (${DEVICE}), play ${PLAY} s`);
@@ -645,21 +664,44 @@ async function islesPlay(B, s, ev, base, sid) {
   }
   /* --travel <m/s>: carried at that speed, 200 m up, from the spawn island
      to the nearest other one (the streamer builds it, hands over, drops the
-     first): what a flight in the spawn jet does to memory, without a pilot */
+     first): what a flight does to memory, without a pilot. --in-jet boards
+     the runway F-35 first and carries IT (the open sea between the isles is
+     for an aircraft in flight, world/archipelago.js toSea). */
   if (opt("--travel", "")) {
-    const r = await ev(`(function(){ var AR = CBZ.archipelago, P = CBZ.player, L = AR.isles(), S = AR.state(), a = L.find(function(i){ return i.id === S.active; }) || L[0];
+    const r = await ev(`(async function(){ var AR = CBZ.archipelago, P = CBZ.player, L = AR.isles(), S = AR.state(), a = L.find(function(i){ return i.id === S.active; }) || L[0];
+      var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+      var jet = null;
+      if (${has("--in-jet") ? 1 : 0}) {
+        var IV = CBZ.islandVehicles;
+        for (var i = 0; i < 40 && !(IV && IV.jet && IV.jet()); i++) await wait(250);
+        var j = IV && IV.jet && IV.jet();
+        if (!j) return "no jet";
+        P.pos.set(j.pos.x + 3, P.pos.y, j.pos.z + 3); await wait(200);
+        CBZ.cityAircraftBoardNearest();
+        for (var k = 0; k < 60 && !P._aircraft; k++) await wait(200);
+        jet = P._aircraft || null;
+        if (!jet) return "could not board";
+        /* (who takes the seat away, if anything does: the stack lands in window.__lostSeat) */
+        var _ac = P._aircraft;
+        Object.defineProperty(P, "_aircraft", { configurable: true, get: function () { return _ac; }, set: function (v) {
+          if (!v && _ac && !window.__lostSeat) window.__lostSeat = String(new Error().stack).split("\\n").slice(2, 9).join(" < ").replace(/https?:[^ ]*?\\/src\\//g, "");
+          _ac = v; } });
+      }
       var b = L.filter(function(i){ return i !== a; }).sort(function(x, y){ return Math.hypot(x.x - a.x, x.z - a.z) - Math.hypot(y.x - a.x, y.z - a.z); })[0];
-      var V = ${+opt("--travel", "0")}, dx = b.x - P.pos.x, dz = b.z - P.pos.z, d = Math.hypot(dx, dz), ux = dx / d, uz = dz / d, last = performance.now(), go = d - b.R * 0.3;
+      var O = jet ? jet.pos : P.pos;
+      var V = ${+opt("--travel", "0")}, dx = b.x - O.x, dz = b.z - O.z, d = Math.hypot(dx, dz), ux = dx / d, uz = dz / d, last = performance.now(), go = d - b.R * 0.3;
       var raf = window.requestAnimationFrame.bind(window);
-      (function f(t){ var dt = Math.min(0.1, (performance.now() - last) / 1000); last = performance.now();
-        if (go > 0) { var s = Math.min(go, V * dt); go -= s; P.pos.x += ux * s; P.pos.z += uz * s; }
-        P.pos.y = Math.max(AR.groundAt(P.pos.x, P.pos.z), 0) + (go > 0 ? 200 : 2); P.vy = 0; P.hp = 100; P.dead = false; raf(f); })();
-      return a.id + ' -> ' + b.id + ' ' + Math.round(d) + ' m'; })()`);
+      (function f(t){ if (window.__stopCarry) return; var dt = Math.min(0.1, (performance.now() - last) / 1000); last = performance.now();
+        if (jet && P._aircraft !== jet && !window.__lostJet) window.__lostJet = { at: performance.now(), destroyed: !!jet.destroyed, hp: jet.hp, y: Math.round(jet.pos.y), ground: Math.round(AR.groundAt(jet.pos.x, jet.pos.z)), atSea: !!(CBZ.surv.arena && CBZ.surv.arena.atSea), active: AR.state().active, dead: P.dead };
+        var Q = jet && P._aircraft === jet ? jet.pos : P.pos;
+        if (go > 0) { var s = Math.min(go, V * dt); go -= s; Q.x += ux * s; Q.z += uz * s; }
+        Q.y = Math.max(AR.groundAt(Q.x, Q.z), 0) + (go > 0 ? 200 : (jet ? 120 : 2));
+        if (jet && P._aircraft === jet) { jet.heading = Math.atan2(ux, uz); jet.pitch = 0; jet.roll = 0; jet.vx = 0; jet.vz = 0; jet.vy = 0;   /* (the carry IS the motion: the flight model's own would double it) */
+          jet.airspeed = jet.speed = go > 0 ? V : 60; jet.onGround = false; jet.hp = jet.maxHp || jet.hp; }
+        else { P.vy = 0; }
+        P.hp = 100; P.dead = false; raf(f); })();
+      return a.id + ' -> ' + b.id + ' ' + Math.round(d) + ' m' + (jet ? ' in the ' + (jet.displayName || 'jet') : ''); })()`, 60000);
     log("travel: " + r);
-  }
-  if (has("--fly")) {
-    const r = await ev(`(function(){ var IV = CBZ.islandVehicles, P = CBZ.player; try { var j = IV && IV.jet ? IV.jet() : null; if (j && CBZ.cityPlayerAircraftEnter) CBZ.cityPlayerAircraftEnter(j); } catch (e) { return 'enter: ' + e.message; } return P._aircraft ? 'in ' + (P._aircraft.kind || P._aircraft.type || '?') : 'no aircraft'; })()`);
-    log("fly: " + r);
   }
   const sample = async (t) => {
     const h0 = await s("Runtime.getHeapUsage");
@@ -667,7 +709,6 @@ async function islesPlay(B, s, ev, base, sid) {
     const h = await s("Runtime.getHeapUsage");
     const p = await ev(`(function(){ var g = __ms.glRead(), c = __ms.canvRead(), C = CBZ, ri = C.renderer && C.renderer.info, n = 0; C.scene.traverse(function(){ n++; });
       var A = C.archipelago && C.archipelago.state(), P = C.player;
-      if (${has("--fly") ? 1 : 0} && P && P._aircraft && C.input) { try { C.input.keys = C.input.keys || {}; } catch (e) {} }
       return { lost: [__ms.lost.n, +__ms.lost.MB.toFixed(1)], g: g, c: c, geo: ri ? ri.memory.geometries : -1, tex: ri ? ri.memory.textures : -1, prog: ri && ri.programs ? ri.programs.length : -1, objs: n,
         peds: (C.cityPeds || []).length, cars: (C.cityCars || []).length, fps: C.fps || null,
         isles: A ? A.isles.map(function(i){ return i.id + ':' + i.state; }).join(' ') : '', pos: P && P.pos ? Math.round(P.pos.x) + ',' + Math.round(P.pos.z) : '' }; })()`);
@@ -679,7 +720,6 @@ async function islesPlay(B, s, ev, base, sid) {
   const tPlay = Date.now();
   for (let t = 0; t <= PLAY; t += EVERY) {
     const wait = tPlay + t * 1000 - Date.now(); if (wait > 0) await sleep(wait);
-    if (has("--fly")) await ev(`(function(){ var K = CBZ.keys || (CBZ.input && CBZ.input.keys); if (K) { K['KeyW'] = K['w'] = K['W'] = true; K['ShiftLeft'] = K['shift'] = true; } return 1; })()`).catch(() => 0);
     const r = await sample(t); rows.push(r);
     log(`t=${lpad(t, 3)}s heap ${lpad(r.heapMB, 6)} (gc ${lpad(r.heapGcMB, 6)}) ab ${lpad(r.abMB, 5)} | GPU ${lpad(r.gpuMB, 6)} (buf ${r.bufMB}/${r.nbuf}, tex ${r.texMB}/${r.ntex}) | GC'd undisposed ${r.lost[0]} (${r.lost[1]} MB) | canvas ${r.canv} live ${r.canvMB} MB, ${r.canvMade} made | geo ${r.geo} tex ${r.tex} prog ${r.prog} objs ${r.objs} peds ${r.peds} cars ${r.cars} | ${r.pos} ${r.isles}`);
   }

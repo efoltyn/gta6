@@ -658,6 +658,8 @@
     jobs.push({ geo: geo, s: s, tex: tex, key: k, it: null });
   }
   function finish(job, d) {
+    // its source was forgotten (disposed) while the worker had it: nothing to keep
+    if (job.geo._carLodGone) { if (d && d !== job.geo && d.dispose) d.dispose(); return; }
     let lod = job.geo;
     if (d && d.userData.tris <= (1 - MIN_SAVE) * d.userData.srcTris) {
       d._shared = true;                 // never disposed by teardown; crashdeform copies before it dents
@@ -847,6 +849,24 @@
     if (tr && tr.on) apply(tr, false);
   }
   CBZ.carLodRestore = restore;
+  /* FORGET A SOURCE (city/vehicles.js cache prune): the source geometry is
+     being disposed because no car draws it any more, so its far twins go with
+     it. They are _shared (no car teardown ever frees them), and the cache is
+     a WeakMap, so without this they left the GPU only when GC found them. A
+     job still queued for it is dropped; one in the worker is let go on landing. */
+  function forget(geo) {
+    if (!geo) return 0;
+    geo._carLodGone = true;
+    let n = 0;
+    const m = cache.get(geo);
+    if (m) {
+      m.forEach(function (lod) { if (lod && lod !== PENDING && lod !== geo && lod.dispose) { lod.dispose(); n++; } });
+      cache.delete(geo);
+    }
+    for (let i = jobs.length - 1; i >= 0; i--) if (jobs[i].geo === geo) jobs.splice(i, 1);
+    return n;
+  }
+  CBZ.carLodForget = forget;
 
   let frame = 0, swapsLast = 0;
   function tick() {

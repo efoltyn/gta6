@@ -3279,7 +3279,7 @@
       const canopyMat = SCENERY ? VKIT.material("landscape-crown") : new THREE.MeshLambertMaterial(V2
         ? { color: 0xffffff, vertexColors: true, flatShading: true }
         : { color: 0x3f7a3f });
-      const rockMat = new THREE.MeshLambertMaterial(V2 ? { color: 0xffffff, flatShading: true } : { color: 0x8b8f96 });
+      const rockMat = new THREE.MeshLambertMaterial(V2 ? { color: 0xffffff, flatShading: true, vertexColors: !!rockG.attributes.color } : { color: 0x8b8f96 });
       const trunks = new THREE.InstancedMesh(trunkG, trunkMat, Math.max(1, CARPET ? 1 : nTree));
       const canopies = new THREE.InstancedMesh(canopyG, canopyMat, Math.max(1, CARPET ? 1 : nTree));
       const rocks = new THREE.InstancedMesh(rockG, rockMat, nRock);

@@ -23,7 +23,8 @@
    `t`: evl(expr, ms) / fn(body, ms) (a function body, returns {__err} on throw,
    the president-check idiom) / step(n) / wait(expr, ms, every) / sleep(ms) /
    log(...) / errors() (the boot's page errors + this probe's) / allErrors() /
-   args (string[]) / flag(name) / arg(name, dflt) / seed / world / send (raw CDP).
+   args (string[]) / flag(name) / arg(name, dflt) / seed / world / send (raw CDP) /
+   on(fn) (raw CDP events, e.g. HeapProfiler chunks; returns off()).
    A probe that throws is an ERROR; { ok:false } is a FAIL.
 
    A plain `.js` probe is evaluated IN the page: its source must be a function
@@ -71,7 +72,11 @@ export const WORLDS = {
      in the query picks the spawn island. */
   isles: {
     page: "index.html", seed: 1, query: "mode=archipelago",
-    enter: "(function(){ if (CBZ.game.state==='playing') return; var m=document.querySelector('[data-mode=\"archipelago\"]'); if (m && !m.classList.contains('active')) m.click(); var b=document.getElementById('playBtn'); if (b) b.click(); })()",
+    // (the tile, then CBZ.startRun(): never the Play button, whose click asks
+    // for pointer lock, and a headless browser hands the lock back a moment
+    // later; camera.js reads that release as the player letting go and
+    // PAUSES the run: the isles-leak "pauses ~20 s after boot" flake)
+    enter: "(function(){ if (CBZ.game.state==='playing') return; var m=document.querySelector('[data-mode=\"archipelago\"]'); if (m && !m.classList.contains('active')) m.click(); if (CBZ.game.state==='title' && CBZ.startRun) CBZ.startRun(); })()",
     ready: "CBZ.game.state==='playing' && CBZ.game.mode==='archipelago' && !!(CBZ.archipelago && CBZ.archipelago.state().built && CBZ.archipelago.state().active)",
   },
   /* NPC War on the cheapest venue (the empty kill box, no packs): what the
@@ -199,6 +204,8 @@ export async function runProbe(pg, probe, { args = [], seed, world, timeoutMs } 
   const t = {
     args, seed, world, timeoutMs,
     send: pg.send,
+    // raw CDP events (no id): returns off()
+    on: (fn) => { (pg.listeners || (pg.listeners = [])).push(fn); return () => { const i = pg.listeners.indexOf(fn); if (i >= 0) pg.listeners.splice(i, 1); }; },
     evl: (e, ms) => pg.evl(e, ms || 10 * 60e3),
     async fn(body, ms) {
       try { return await pg.evl(`(function(){${body}})()`, ms || 10 * 60e3); }

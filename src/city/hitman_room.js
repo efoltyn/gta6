@@ -909,9 +909,15 @@
     B.light = L0;
   }
 
-  /* ---------------- guns (simple, but shaped like guns) ------------------- */
-  // Each is built in PROFILE (x = along the gun, muzzle +x; y = up; z = its
-  // thickness) and laid on its side in the foam by rotating x -90 degrees.
+  /* ---------------- the guns in the foam --------------------------------
+     The case holds THE game's guns: each is CBZ.buildActorWeapon (the model
+     the player then carries, the NPCs carry, the gun store hangs and the
+     inventory photographs), unmounted from the hand, at its real world size
+     (weapons/weapon-scale.js) and laid on its right side. The cans the
+     pistol and SMG are handed with ride beside them in their own cut-outs,
+     the way a real case stores them, drawn by the same gunsmith part factory
+     that bolts one on in hand (city/gunmods.js CBZ.gunModsPartModel).
+     gunGroup stays for the case's other kit (binoculars, the vial). */
   function gunGroup(build) {
     const S = new Batch();
     build(S);
@@ -920,60 +926,58 @@
     gg.children.forEach(function (m) { m.castShadow = false; m.receiveShadow = true; });
     return gg;
   }
-  const GUNS = {
-    rifle: function (S) {
-      S.add(profile([[-0.47, -0.075], [-0.44, -0.082], [-0.30, -0.046], [-0.19, -0.032], [-0.16, -0.032], [-0.178, -0.112], [-0.142, -0.12], [-0.112, -0.03], [0.02, -0.028], [0.20, -0.014], [0.212, 0.004], [0.02, 0.012], [-0.2, 0.02], [-0.29, 0.042], [-0.47, 0.036]], 0.036, 0.004), "gunPoly");
-      S.add(boxGeo(0.28, 0.036, 0.03), "gunMetal", -0.04, 0.03, 0);
-      S.add(rod(0.09, 0.47, 0.0095, 0.0078, 12), "gunMetal", 0, 0.032, 0);
-      S.add(rod(0.44, 0.48, 0.0115, 0.0115, 12), "gunMetal", 0, 0.032, 0);
-      S.add(boxGeo(0.064, 0.05, 0.024), "gunMetal", -0.03, -0.03, 0);                 // magazine
-      S.add(boxGeo(0.07, 0.006, 0.012), "gunMetal", -0.12, -0.055, 0);                // trigger guard
-      // scope
-      S.add(rod(-0.19, 0.13, 0.0125, 0.0125, 16), "black", 0, 0.088, 0);
-      S.add(rod(0.13, 0.19, 0.0125, 0.021, 16), "black", 0, 0.088, 0);
-      S.add(rod(0.19, 0.245, 0.021, 0.021, 16), "black", 0, 0.088, 0);
-      S.add(rod(0.244, 0.246, 0.018, 0.018, 16), "glassLens", 0, 0.088, 0);
-      S.add(rod(-0.225, -0.19, 0.018, 0.0125, 16), "black", 0, 0.088, 0);
-      S.add(rod(-0.265, -0.225, 0.018, 0.018, 16), "black", 0, 0.088, 0);
-      S.add(new THREE.CylinderGeometry(0.01, 0.01, 0.024, 12), "black", -0.03, 0.108, 0);
-      S.add(new THREE.CylinderGeometry(0.01, 0.01, 0.024, 12).rotateX(Math.PI / 2), "black", -0.03, 0.088, 0.02);
-      S.add(boxGeo(0.018, 0.045, 0.03), "gunMetal", -0.11, 0.062, 0);
-      S.add(boxGeo(0.018, 0.045, 0.03), "gunMetal", 0.06, 0.062, 0);
-      // bolt handle
-      S.add(new THREE.CylinderGeometry(0.005, 0.005, 0.05, 8).rotateX(Math.PI / 2), "gunMetal", -0.13, 0.036, 0.035);
-      S.add(new THREE.SphereGeometry(0.01, 10, 8), "gunMetal", -0.13, 0.036, 0.06);
-    },
-    shotgun: function (S) {
-      S.add(profile([[-0.46, -0.085], [-0.43, -0.092], [-0.22, -0.042], [-0.14, -0.03], [-0.14, 0.02], [-0.24, 0.026], [-0.46, 0.032]], 0.038, 0.004), "gunWood");
-      S.add(roundBox(0.22, 0.066, 0.036, 0.006), "gunMetal", -0.03, 0.002, 0);
-      S.add(rod(0.08, 0.47, 0.011, 0.011, 14), "gunMetal", 0, 0.022, 0);
-      S.add(rod(0.08, 0.40, 0.0105, 0.0105, 14), "gunMetal", 0, -0.008, 0);
-      S.add(roundBox(0.16, 0.036, 0.042, 0.012), "gunWood", 0.2, -0.008, 0);
-      S.add(new THREE.SphereGeometry(0.004, 6, 4), "brass", 0.465, 0.035, 0);
-      S.add(boxGeo(0.06, 0.006, 0.012), "gunMetal", -0.09, -0.05, 0);
-    },
-    pistol: function (S) {
-      S.add(roundBox(0.19, 0.03, 0.026, 0.004), "gunMetal", -0.005, 0.027, 0);        // slide
-      S.add(boxGeo(0.15, 0.02, 0.028), "gunPoly", -0.005, 0.004, 0);                    // frame
-      S.add(profile([[-0.1, 0.012], [-0.055, 0.012], [-0.045, -0.1], [-0.085, -0.106], [-0.108, 0.0]], 0.03, 0.003), "gunPoly");
-      S.add(profile([[-0.045, -0.006], [0.0, -0.006], [0.004, -0.03], [-0.04, -0.034]], 0.012, 0), "gunPoly");
-      S.add(rod(0.09, 0.1, 0.006, 0.006, 10), "gunMetal", 0, 0.027, 0);
-      S.add(rod(0.1, 0.25, 0.016, 0.016, 16), "black", 0, 0.027, 0);                    // suppressor
-    },
-    smg: function (S) {
-      S.add(roundBox(0.26, 0.05, 0.036, 0.006), "gunMetal", -0.02, 0.02, 0);
-      S.add(profile([[-0.1, -0.004], [-0.065, -0.004], [-0.055, -0.1], [-0.092, -0.106]], 0.032, 0.003), "gunPoly");
-      S.add(profile([[0.0, -0.004], [0.032, -0.004], [0.05, -0.145], [0.017, -0.15]], 0.024, 0.002), "gunMetal");
-      S.add(profile([[0.07, -0.004], [0.1, -0.004], [0.1, -0.05], [0.082, -0.055]], 0.03, 0.003), "gunPoly");   // stub grip
-      S.add(rod(0.11, 0.135, 0.008, 0.008, 10), "gunMetal", 0, 0.025, 0);
-      S.add(rod(0.135, 0.29, 0.017, 0.017, 16), "black", 0, 0.025, 0);
-      S.add(boxGeo(0.22, 0.01, 0.008), "gunMetal", -0.05, -0.01, 0.024);                // folded stock rails
-      S.add(boxGeo(0.22, 0.01, 0.008), "gunMetal", -0.05, 0.03, 0.024);
-      S.add(boxGeo(0.014, 0.065, 0.03), "gunPoly", -0.155, 0.01, 0.016);
-      S.add(boxGeo(0.02, 0.02, 0.01), "gunMetal", -0.12, 0.052, 0);
-      S.add(boxGeo(0.02, 0.016, 0.01), "gunMetal", 0.09, 0.05, 0);
-    },
-  };
+  // measure a group's visible meshes in its own space
+  function footOf(gg, box) {
+    gg.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(gg.matrixWorld).invert();
+    box.makeEmpty();
+    gg.traverse(function (o) {
+      if (!o.isMesh || !o.geometry) return;
+      for (let p = o; p && p !== gg; p = p.parent) if (p.visible === false) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      box.union(o.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld)));
+    });
+    return box;
+  }
+  // a game gun lying on its right side, muzzle +x, centred on the group in
+  // x/z with its lowest point on y = 0; `fitLen` caps its length, `magOut`
+  // stores it with the magazine out (the SMG's mag would not fit the row)
+  function caseGun(id, fitLen, magOut) {
+    const gg = new THREE.Group(), side = new THREE.Group();
+    gg.add(side);
+    side.rotation.x = -Math.PI / 2;            // up -> toward the front, right side up
+    let model = null;
+    try { model = CBZ.buildActorWeapon ? CBZ.buildActorWeapon(id) : null; } catch (e) { model = null; }
+    gg.userData.foot = [0.3, 0.1];
+    if (!model) return gg;
+    model.position.set(0, 0, 0);
+    model.rotation.set(0, -Math.PI / 2, 0);    // muzzle -z -> +x
+    let sc = (CBZ.weaponWorldScale && CBZ.weaponWorldScale(id)) || (1 / ((model.userData.anchors && model.userData.anchors.k) || 1.8));
+    model.scale.setScalar(sc);
+    if (magOut) model.traverse(function (o) { if (o.name === "part_mag") o.visible = false; });
+    side.add(model);
+    const box = new THREE.Box3();
+    footOf(gg, box);
+    const len = box.max.x - box.min.x;
+    if (fitLen && len > fitLen) { sc *= fitLen / len; model.scale.setScalar(sc); footOf(gg, box); }
+    side.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2);
+    model.traverse(function (o) { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
+    gg.userData.foot = [box.max.x - box.min.x, box.max.z - box.min.z];
+    return gg;
+  }
+  // a loose 9 mm can lying along x, centred, resting on y = 0
+  function caseCan() {
+    const g = new THREE.Group();
+    const can = CBZ.gunModsPartModel ? CBZ.gunModsPartModel("suppressor", { nine: true }) : null;
+    if (can) {
+      can.rotation.y = -Math.PI / 2;           // its forward (-z) -> +x
+      can.position.set(-0.063, 0.0167, 0);     // the can runs -0.020..0.146 m along its axis
+      can.traverse(function (o) { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
+      g.add(can);
+    }
+    g.userData.foot = [0.168, 0.034];
+    return g;
+  }
   // the loadout: what the case holds, what taking it gives (the real weapon
   // API: weapons/weapon-data.js unlockWeapon + systems/fpsmode.js ammo +
   // city/gunmods.js g.cityGunMods), and where it sits in the foam (case
@@ -1008,25 +1012,58 @@
     S.add(roundBox(0.2, 0.025, 0.03, 0.01), "black", 0, 0.08, -CASE.d / 2 - 0.02);
     // hinge knuckles on the back
     for (const lx of [-0.4, 0, 0.4]) S.add(rod(-0.05, 0.05, 0.009, 0.009, 8), "caseTrim", lx, CASE.rim, CASE.d / 2 + 0.004);
+    // THE GUNS, laid out in the foam from their MEASURED footprints: the
+    // long gun along the hinge, the shotgun under it, the SMG (mag out) and
+    // the pistol on the front row with their two cans and the binoculars.
+    // Each loadout row's `at` is rewritten to where its gun actually lies,
+    // so the verb hotspots (caseLocal(it.at)) follow the layout.
+    const inner = CASE.w - 0.075, half = inner / 2;
+    const guns = {
+      rifle: caseGun("sniper", inner),
+      shotgun: caseGun("shotgun", inner),
+      smg: caseGun("smg", null, true),
+      pistol: caseGun("sidearm"),
+    };
+    const cans = [caseCan(), caseCan()];
+    const gap = 0.014;
+    let zTop = CASE.d / 2 - 0.04;
+    const placeAt = function (key, x, zMid) {
+      const it = LOADOUT.find(function (r) { return r.key === key; });
+      if (it) it.at = { x: x, z: zMid };
+    };
+    const fR = guns.rifle.userData.foot, fS = guns.shotgun.userData.foot, fM = guns.smg.userData.foot, fP = guns.pistol.userData.foot;
+    placeAt("rifle", 0, zTop - fR[1] / 2); zTop -= fR[1] + gap;
+    placeAt("shotgun", -half + fS[0] / 2, zTop - fS[1] / 2); zTop -= fS[1] + gap;
+    const smgX = -half + fM[0] / 2;
+    placeAt("smg", smgX, zTop - fM[1] / 2);
+    const pX = smgX + fM[0] / 2 + 0.035 + fP[0] / 2;
+    placeAt("pistol", pX, zTop - fP[1] / 2);
+    const canX = smgX + fM[0] / 2 + 0.035 + 0.084;
+    const canZ0 = zTop - fP[1] - 0.03;
+    const binAt = { x: Math.min(half - 0.085, pX + fP[0] / 2 + 0.11), z: zTop - 0.075 };
     // foam cutouts (the recess each gun leaves when it is out)
-    const cuts = { rifle: [0.98, 0.17], shotgun: [0.95, 0.12], pistol: [0.37, 0.13], smg: [0.46, 0.16] };
+    const cut = function (w, d, x, z) {
+      S.add(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2), "foamCut", x, CASE.foam + 0.0015, z);
+    };
     for (let i = 0; i < LOADOUT.length; i++) {
-      const it = LOADOUT[i], c = cuts[it.key];
-      S.add(new THREE.PlaneGeometry(c[0], c[1]).rotateX(-Math.PI / 2), "foamCut", it.at.x, CASE.foam + 0.0015, it.at.z);
+      const it = LOADOUT[i], f = guns[it.key].userData.foot;
+      cut(f[0] + 0.03, f[1] + 0.02, it.at.x, it.at.z);
     }
-    S.add(new THREE.PlaneGeometry(0.16, 0.13).rotateX(-Math.PI / 2), "foamCut", 0.42, CASE.foam + 0.0015, -0.2);
+    cut(0.19, 0.08, canX, canZ0 - 0.022);
+    cut(0.17, 0.15, binAt.x, binAt.z);
     S.finish(cg, B, null);
 
-    // the guns
     B.guns = {};
     for (let i = 0; i < LOADOUT.length; i++) {
-      const it = LOADOUT[i];
-      const gg = gunGroup(GUNS[it.key]);
-      gg.rotation.x = -Math.PI / 2;
-      gg.position.set(it.at.x, CASE.foam + 0.004, it.at.z);
+      const it = LOADOUT[i], gg = guns[it.key];
+      gg.position.set(it.at.x, CASE.foam + 0.002, it.at.z);
       cg.add(gg);
       B.guns[it.key] = gg;
     }
+    cans.forEach(function (c, i) {
+      c.position.set(canX, CASE.foam + 0.001, canZ0 - i * 0.044);
+      cg.add(c);
+    });
     // binoculars (always in the case)
     const bin = gunGroup(function (S2) {
       S2.add(rod(-0.06, 0.05, 0.024, 0.024, 16), "gunOlive", 0, 0, -0.031);
@@ -1037,7 +1074,7 @@
       S2.add(rod(-0.08, -0.06, 0.018, 0.02, 12), "black", 0, 0, 0.031);
       S2.add(boxGeo(0.07, 0.022, 0.03), "gunOlive", -0.01, 0, 0);
     });
-    bin.position.set(0.42, CASE.foam + 0.02, -0.2);
+    bin.position.set(binAt.x, CASE.foam + 0.02, binAt.z);
     bin.rotation.y = 0.1;
     cg.add(bin);
 

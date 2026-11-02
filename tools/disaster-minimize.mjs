@@ -73,7 +73,16 @@ const needed = new Set(manifest.needed || []);
    because a test would.
 
    Adding to it costs bytes; removing from it means proving the loss another
-   way. Say which when you edit it. */
+   way. Say which when you edit it.
+
+   2026-10-29 + core/lightpin.js (bytes: 12 KB). The search dropped it: the
+   island runs without it. But r128 bakes the point-light count into every lit
+   program and keeps every variant a material ever compiled until the material
+   is disposed, so without the pin each new count of lava / fire / lightning
+   lights compiled the whole island again and kept it: shader programs climbed
+   41 -> 377 over three matches on the phone build and never came down
+   (tools/probes/disaster-leak.mjs). index.html always had it; on a phone it
+   pins the same 3 nearest lights there. */
 const pin = new Set(manifest.pin || []);
 for (const p of pin) { drop.delete(p); needed.delete(p); }
 

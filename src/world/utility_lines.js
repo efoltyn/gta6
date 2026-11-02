@@ -45,21 +45,32 @@
   if (CBZ.CONFIG.STREET_WIRES_V2 == null) CBZ.CONFIG.STREET_WIRES_V2 = true;
 
   // ---- authored dimensions (metres) ------------------------------------
-  const POLE_H = 9.4;          // butt to top
+  // A 40 ft class-4 distribution pole set 1.8 m in the ground: 9.4 m showing.
+  const POLE_H = 9.4;          // butt (ground line) to top
   const POLE_R_TOP = 0.135, POLE_R_BUTT = 0.205;
   const ARM_Y = 8.45;          // crossarm centre height
-  const ARM_SPAN = 2.3;        // crossarm length
+  const ARM_SPAN = 2.44;       // an 8 ft crossarm
+  const ARM_W = 0.09, ARM_H = 0.115;   // 3.5 x 4.5 in timber
   const INSUL_Y = ARM_Y + 0.28;
   const COMMS_Y = 6.35;
+  const LAMP_Y = 7.25;         // cobra mast root: under the primary, over the comms
+  const CAN_Y = 7.0;           // pole-mounted transformer, centre of the tank
   const SPACING = 31;          // pole pitch down a run
   const SAG = 0.048;           // conductor droop at the DESIGN span, as a fraction
   const WIRE_R = 0.036;
   const CORE_CLEAR = 62;       // no poles inside this radius of city centre
   const MIN_CLEAR = 5.5;       // a conductor never dips closer than this to the ground
 
-  const WOOD = 0x6c5a44, WOOD_D = 0x54452f, GLASS = 0x86a8ab, STEEL = 0x8c9298;
+  const WOOD = 0x5e5040, WOOD_D = 0x4a3d2e, WOOD_B = 0x3a3027, GLASS = 0x86a8ab, STEEL = 0x8c9298;
+  const PORC = 0xb9b6ad, GALV = 0x9da3a6, GALV_D = 0x7a8084, COPPER = 0x8a5a3a;
   const CAN = 0x9aa1a6, PAD_GREEN = 0x3f5a44, CAB_GREY = 0x9ba1a4, WIRE_C = 0x14161a;
   const GUARD_Y = 0xd8c23a;    // the high-vis sleeve on the bottom of a guy
+
+  // the shaft's real radius at a height (it tapers butt -> top)
+  function rAt(h) { return POLE_R_BUTT + (POLE_R_TOP - POLE_R_BUTT) * (h / POLE_H); }
+  // The crossarm is bolted to the FACE of the pole, not run through its axis:
+  // its centre sits one half-thickness off the timber surface on local -Z.
+  const ARM_Z = -(rAt(ARM_Y) + ARM_W / 2);
 
   // =====================================================================
   //  THE ONE TABLE — where a wire may LAND on this pole.
@@ -72,14 +83,19 @@
   //  hung in the air BESIDE the pin it was supposed to sit in — exactly what
   //  the owner photographed. Nothing here nudges a constant: the endpoint is
   //  now the insulator, pushed through the pole's own instance matrix.
+  //
+  //  The framing is the standard US three-phase tangent: two phases on pin
+  //  insulators near the crossarm ends, the third on a POLE-TOP PIN above the
+  //  timber. (The old table put the centre pin at x=0 on an arm through the
+  //  pole's axis, i.e. inside the pole.)
   const ARM_X = ARM_SPAN / 2 - 0.2;
+  const ARM_TOP = ARM_Y + ARM_H / 2;
+  const PIN_TOP_Y = POLE_H + 0.16;                 // pole-top bracket's seat
   const ATTACH = {
-    // THREE-phase crossarm -> THREE conductors. The old pass drew three
-    // insulators and strung two, so the centre pin carried nothing at all.
     phase: [
-      { x: -ARM_X, y: INSUL_Y + 0.015, z: 0 },
-      { x: 0, y: INSUL_Y + 0.015, z: 0 },
-      { x: ARM_X, y: INSUL_Y + 0.015, z: 0 },
+      { x: -ARM_X, y: INSUL_Y + 0.015, z: ARM_Z },
+      { x: 0, y: PIN_TOP_Y + 0.215, z: 0 },
+      { x: ARM_X, y: INSUL_Y + 0.015, z: ARM_Z },
     ],
     // The comms bundle hangs off the BRACKET at local x=0.34. It used to be
     // drawn from the pole's AXIS, i.e. straight through the timber.
@@ -88,66 +104,138 @@
     // side away from the pull. The radius is the shaft's real taper at that
     // height, not a guess.
     guyY: ARM_Y - 0.35,
-    guyR: POLE_R_BUTT + (POLE_R_TOP - POLE_R_BUTT) * ((ARM_Y - 0.35) / POLE_H),
+    guyR: rAt(ARM_Y - 0.35),
   };
 
   // =====================================================================
   //  PROTOTYPES
   // =====================================================================
+  // A porcelain PIN INSULATOR, base at y0: the steel pin's thread collar, a
+  // three-shed skirt, the crown with the conductor groove (whose height is
+  // the attach table's +0.215 above the seat), the tie on top.
+  function pinInsulator(p, x, y0, z, col) {
+    p.box(0.03, 0.05, 0.03, GALV_D, x, y0 + 0.025, z);
+    p.lathe([[0.0, 0.04], [0.07, 0.075], [0.046, 0.11], [0.06, 0.15], [0.034, 0.195],
+      [0.044, 0.215], [0.0, 0.245]], 6, col, x, y0, z);
+  }
   function poleProto() {
     const p = DK.proto();
-    // The shaft tapers like a real class-4 pole: fatter at the butt.
-    p.cyl(POLE_R_TOP, POLE_R_BUTT, POLE_H, 8, WOOD, 0, POLE_H / 2, 0);
-    // crossarm runs along local X, so a pole yawed to the street puts its
-    // arm square across the wire direction
-    p.box(ARM_SPAN, 0.13, 0.13, WOOD_D, 0, ARM_Y, 0);
-    p.box(0.1, 0.5, 0.1, WOOD_D, 0, ARM_Y - 0.3, 0.09, -0.5, 0, 0);   // diagonal brace
-    p.box(0.1, 0.5, 0.1, WOOD_D, 0, ARM_Y - 0.3, -0.09, 0.5, 0, 0);
-    // Three glass insulators, drawn AT the attach table's own x — the pins and
-    // the conductors can no longer be edited apart. BOXES, not cylinders: at
-    // 8.7m a 6-sided cylinder costs twice the vertices of a box and reads
-    // identically. Prototype vertex count is multiplied by every instance in
-    // the world, so shape economy up here is worth more than anywhere else.
-    for (let i = 0; i < ATTACH.phase.length; i++) {
-      p.box(0.11, 0.2, 0.11, GLASS, ATTACH.phase[i].x, INSUL_Y - 0.1, 0);
+    // The shaft tapers like a real class-4 pole and weathers in bands: the
+    // ground-line soak where the preservative bleeds, the long grey-brown
+    // stick, the cut top with its sloped roof.
+    const H1 = 1.6;
+    p.cyl(rAt(H1), POLE_R_BUTT, H1, 12, WOOD_B, 0, H1 / 2, 0);
+    p.cyl(POLE_R_TOP, rAt(H1), POLE_H - H1, 12, WOOD, 0, H1 + (POLE_H - H1) / 2, 0);
+    p.cyl(POLE_R_TOP * 0.55, POLE_R_TOP, 0.05, 12, WOOD_D, 0, POLE_H + 0.025, 0);
+    // ---- the crossarm on the pole face, through-bolted, two flat braces ---
+    p.cbox(ARM_SPAN, ARM_H, ARM_W, 0.012, WOOD_D, 0, ARM_Y, ARM_Z);
+    p.cyl(0.011, 0.011, 0.5, 6, GALV_D, 0, ARM_Y, ARM_Z * 0.5, Math.PI / 2, 0, 0);   // through-bolt
+    p.cyl(0.035, 0.035, 0.012, 8, GALV, 0, ARM_Y, ARM_Z - ARM_W / 2 - 0.006, Math.PI / 2, 0, 0);  // its square washer
+    for (let s = -1; s <= 1; s += 2) {
+      // a flat steel V brace: crossarm underside at +-0.6 down to one lag
+      // bolt on the pole face 0.6 m below the arm
+      p.rod(s * 0.6, ARM_Y - ARM_H / 2, ARM_Z, 0, ARM_Y - 0.62, -rAt(ARM_Y - 0.62) - 0.01, 0.014, 4, GALV);
+      p.cyl(0.02, 0.02, 0.016, 6, GALV_D, s * 0.6, ARM_Y - ARM_H / 2 - 0.01, ARM_Z);
     }
-    // comms/cable-TV bracket lower down — the standoff is the comms attach
-    p.box(0.44, 0.07, 0.07, STEEL, 0.16, COMMS_Y, 0);
-    p.box(0.09, 0.13, 0.09, STEEL, ATTACH.comms.x, COMMS_Y + 0.09, 0);
-    // climbing steps — tiny, but they are what stops a pole reading as a stick
-    for (let s = 0; s < 2; s++) {
-      p.box(0.28, 0.045, 0.045, STEEL, 0, 2.6 + s * 1.6, (s % 2 ? 0.1 : -0.1));
+    p.cyl(0.026, 0.026, 0.03, 6, GALV_D, 0, ARM_Y - 0.62, -rAt(ARM_Y - 0.62) - 0.012, Math.PI / 2, 0, 0);
+    // ---- the two arm phases on pin insulators, AT the attach table's x ----
+    for (const i of [0, 2]) pinInsulator(p, ATTACH.phase[i].x, ARM_TOP, ATTACH.phase[i].z, PORC);
+    // ---- the pole-top pin: a galvanised bracket lagged to the timber's
+    // side, its seat over the axis, and the centre phase's insulator on it --
+    p.box(0.05, 0.42, 0.012, GALV, 0, POLE_H - 0.06, rAt(POLE_H - 0.2) + 0.006);
+    p.box(0.07, 0.012, rAt(POLE_H) + 0.07, GALV, 0, PIN_TOP_Y - 0.006, (rAt(POLE_H) + 0.07) / 2 - 0.035);
+    pinInsulator(p, 0, PIN_TOP_Y, 0, PORC);
+    // ---- comms/cable-TV standoff — its clamp is the comms attach ---------
+    const rc = rAt(COMMS_Y);
+    p.box(0.07, 0.16, 0.012, GALV, rc + 0.006, COMMS_Y, 0, 0, 0, 0);
+    p.rod(rc, COMMS_Y, 0, ATTACH.comms.x, COMMS_Y, 0, 0.016, 5, GALV);
+    p.cbox(0.07, 0.12, 0.07, 0.01, GALV_D, ATTACH.comms.x, COMMS_Y + 0.05, 0);
+    // ---- the ground wire stapled down the -X face to the butt, under its
+    // 2.4 m wooden U-guard, and the numbered aluminium pole tag ------------
+    const gh = ARM_Y - 0.4;
+    p.rod(-rAt(0) - 0.006, 0, 0, -rAt(gh) - 0.006, gh, 0, 0.006, 3, COPPER);
+    p.box(0.022, 2.4, 0.05, WOOD_D, -rAt(1.2) - 0.012, 1.2, 0);
+    p.box(0.004, 0.11, 0.075, 0xc4c8ca, 0, 1.75, rAt(1.75) + 0.002, 0, Math.PI / 2, 0);
+    // ---- climbing steps: galvanised step bolts, alternate faces, every
+    // 0.45 m from 2.7 m up to the comms, each turned up at its end ---------
+    for (let k = 0; k < 7; k++) {
+      const h = 2.7 + k * 0.5, s = k % 2 ? 1 : -1, r0 = rAt(h);
+      p.box(0.02, 0.02, 0.19, GALV, 0, h, s * (r0 + 0.075));
+      p.box(0.02, 0.05, 0.02, GALV, 0, h + 0.025, s * (r0 + 0.165));
     }
     return p.done();
   }
 
+  // POLE-MOUNTED TRANSFORMER, authored in the POLE'S frame (origin at the
+  // butt, the tank hung off local +X) so it takes the pole's exact instance
+  // transform, lean and all, and can never float off the timber.
   function transformerProto() {
     const p = DK.proto();
-    p.cyl(0.4, 0.4, 0.92, 8, CAN, 0, 0, 0);
-    p.cyl(0.42, 0.42, 0.08, 8, 0x7d848a, 0, 0.5, 0);          // lid rim
-    p.box(0.14, 0.22, 0.14, GLASS, -0.16, 0.62, 0);           // HV bushings
-    p.box(0.14, 0.22, 0.14, GLASS, 0.16, 0.62, 0);
-    p.box(0.5, 0.1, 0.1, 0x7d848a, 0, -0.4, -0.34);           // mounting bracket
+    const R = 0.27, H = 0.86, cx = rAt(CAN_Y) + 0.07 + R, y = CAN_Y;
+    // two hanger brackets lagged to the pole, the tank's lugs on them
+    for (let s = -1; s <= 1; s += 2) {
+      p.cbox(0.1, 0.06, 0.24, 0.008, GALV_D, rAt(y) + 0.03, y + s * 0.26, 0);
+      p.box(cx - rAt(y) - R + 0.08, 0.05, 0.06, GALV_D, (rAt(y) + cx - R) / 2 + 0.02, y + s * 0.26, 0);
+    }
+    p.cyl(R, R, H, 16, CAN, cx, y, 0);
+    p.cyl(R + 0.012, R + 0.012, 0.04, 16, 0x868d92, cx, y - H / 2 + 0.02, 0);         // bottom chime
+    p.cyl(R + 0.018, R + 0.018, 0.045, 16, 0x868d92, cx, y + H / 2 - 0.01, 0);         // lid band
+    p.lathe([[R + 0.012, 0], [R - 0.02, 0.05], [R * 0.6, 0.085], [0, 0.095]], 16, 0x8f969b, cx, y + H / 2 + 0.012, 0);
+    // the HV bushing on the lid, its lead rising to the near arm phase, and
+    // the three LV bushings on the street face
+    pinInsulator(p, cx - 0.05, y + H / 2 + 0.06, 0, 0x6d5e4c);
+    const A = ATTACH.phase[2];
+    p.rod(cx - 0.05, y + H / 2 + 0.29, 0, A.x, A.y - 0.02, A.z, 0.008, 3, 0x2a2c2e);
+    for (let k = -1; k <= 1; k++) {
+      p.cyl(0.022, 0.026, 0.07, 8, 0x5a4b3c, cx + R + 0.03, y + 0.24, k * 0.11, 0, 0, Math.PI / 2);
+    }
+    p.box(0.004, 0.09, 0.07, 0x1d1f21, cx + R + 0.002, y + 0.02, 0);                   // kVA stencil plate
+    p.box(0.004, 0.035, 0.18, 0xd8c23a, cx + R + 0.003, y - 0.1, 0);                   // hazard band
     return p.done();
   }
 
+  // PAD-MOUNT TRANSFORMER on its concrete slab: the sloped-shoulder tank,
+  // the double front doors with their penta-head bolt and hinges, the
+  // radiator fins down the back, the yellow warning decal.
   function padTransformerProto() {
     const p = DK.proto();
-    p.box(1.9, 0.16, 1.5, 0x8d8d86, 0, 0.08, 0);              // concrete pad
-    p.box(1.5, 1.15, 1.1, PAD_GREEN, 0, 0.73, 0);             // cabinet
-    p.box(1.56, 0.09, 1.16, 0x33493a, 0, 1.34, 0);            // lid overhang
-    for (let i = 0; i < 4; i++) p.box(1.02, 0.045, 0.03, 0x2c3f33, 0, 0.42 + i * 0.13, 0.552);  // louvres
-    p.box(0.16, 0.22, 0.03, 0xc8b24a, -0.5, 1.05, 0.553);     // hazard plate
+    p.cbox(1.9, 0.16, 1.5, 0.03, 0x8d8d86, 0, 0.08, 0);                     // pad, chamfered
+    p.cbox(1.5, 1.05, 1.1, 0.025, PAD_GREEN, 0, 0.16 + 0.525, 0);          // tank
+    p.cbox(1.54, 0.12, 1.14, 0.045, 0x3a5340, 0, 1.24, 0);                 // sloped roof
+    p.box(0.012, 0.92, 0.008, 0x2b3d31, 0, 0.68, 0.554);                   // door meeting seam
+    for (let s = -1; s <= 1; s += 2) {
+      p.box(0.69, 0.008, 0.008, 0x2b3d31, s * 0.37, 1.15, 0.554);          // door heads
+      p.box(0.008, 0.92, 0.008, 0x2b3d31, s * 0.72, 0.68, 0.554);          // door jambs
+      for (const hy of [0.4, 0.95]) p.cyl(0.018, 0.018, 0.09, 8, 0x33473a, s * 0.735, hy, 0.56);   // hinge barrels
+    }
+    p.cyl(0.035, 0.035, 0.03, 5, 0x9aa1a6, 0.08, 0.72, 0.565, Math.PI / 2, 0, 0);   // penta-head bolt
+    p.cbox(0.05, 0.16, 0.035, 0.008, 0x2a3a2f, 0.08, 0.86, 0.57);                  // handle
+    p.box(0.28, 0.16, 0.004, 0xd9c23a, -0.4, 0.98, 0.555);                         // WARNING decal
+    p.box(0.26, 0.04, 0.005, 0x1b1c1e, -0.4, 1.02, 0.556);
+    for (let k = 0; k < 7; k++) p.box(0.04, 0.82, 0.16, 0x37503d, -0.48 + k * 0.16, 0.66, -0.63);   // radiator fins
+    p.box(1.1, 0.06, 0.1, 0x33473a, 0, 1.06, -0.6);
+    p.box(1.1, 0.06, 0.1, 0x33473a, 0, 0.27, -0.6);
     return p.done();
   }
 
+  // TELECOM / SIGNAL CABINET on its plinth: inset door with seams, three
+  // hinge knuckles, the lock and handle, side louvres, a rain hood with a drip.
   function cabinetProto() {
     const p = DK.proto();
-    p.box(0.62, 1.18, 0.38, CAB_GREY, 0, 0.61, 0);
-    p.box(0.66, 0.07, 0.42, 0x7f8588, 0, 1.22, 0);            // rain hood
-    p.box(0.5, 0.9, 0.02, 0x878d90, 0, 0.6, 0.196);           // door seam
-    p.box(0.06, 0.12, 0.04, 0x53585b, 0.16, 0.55, 0.206);     // latch
-    p.box(0.7, 0.1, 0.46, 0x6f6f68, 0, 0.05, 0);              // plinth
+    p.cbox(0.72, 0.1, 0.46, 0.02, 0x6f6f68, 0, 0.05, 0);                  // plinth
+    p.cbox(0.62, 1.12, 0.38, 0.018, CAB_GREY, 0, 0.66, 0);                // body
+    p.cbox(0.68, 0.07, 0.44, 0.02, 0x8b9194, 0, 1.25, 0.005);             // rain hood
+    p.box(0.66, 0.012, 0.012, 0x7a8083, 0, 1.21, 0.215);                  // drip edge
+    // the door, proud by 6 mm, framed by its seam
+    p.box(0.52, 0.96, 0.008, 0x8e9497, 0, 0.66, 0.194);
+    p.box(0.535, 0.006, 0.006, 0x5e6366, 0, 1.145, 0.199);
+    p.box(0.535, 0.006, 0.006, 0x5e6366, 0, 0.175, 0.199);
+    for (let k = 0; k < 3; k++) p.cyl(0.011, 0.011, 0.07, 6, 0x6d7275, -0.27, 0.3 + k * 0.36, 0.2);
+    p.cbox(0.04, 0.16, 0.03, 0.006, 0x4e5356, 0.2, 0.66, 0.208);         // handle
+    p.cyl(0.014, 0.014, 0.012, 8, 0xb59a4a, 0.2, 0.78, 0.2, Math.PI / 2, 0, 0);   // lock
+    p.box(0.16, 0.1, 0.004, 0xe3e0d6, -0.08, 0.98, 0.2);                  // ID label
+    for (let s = -1; s <= 1; s += 2) for (let k = 0; k < 5; k++)
+      p.box(0.006, 0.02, 0.24, 0x6f7578, s * 0.313, 0.9 + k * 0.045, 0, 0.35, 0, 0);   // louvres
     return p.done();
   }
 
@@ -156,25 +244,53 @@
   // because the same function hands back both. poleH:0 puts the prototype's
   // origin at the arm's root on the shaft, which is where arms.add places it.
   const MAST = (CBZ.lampMast ? CBZ.lampMast({ poleH: 0, reach: 2.05, rise: 0.42, poleR: 0.18 })
-    : { armLen: 2.03, armRotX: 1.302, armCY: 0.15, armCZ: 1.07, headY: 0.32, headZ: 2.05 });
+    : { armLen: 2.03, armRotX: 1.302, armCY: 0.15, armCZ: 1.07, headY: 0.32, headZ: 2.05, tipY: 0.42, tipZ: 2.05 });
 
+  // The mast arm AND the cobra-head housing: everything that does not glow.
+  // The luminaire batch below is the lens alone, so at night the light comes
+  // off the glass, not off the whole painted housing.
   function mastArmProto() {
-    // an upsweeping arm; the luminaire itself is a separate emissive batch so
-    // it can join the existing dusk-lighting driver.
     const p = DK.proto();
-    p.cyl(0.055, 0.075, MAST.armLen, 5, STEEL, 0, MAST.armCY, MAST.armCZ, MAST.armRotX, 0, 0);
-    p.box(0.07, 0.07, 0.66, STEEL, 0, MAST.armCY - 0.30, MAST.armCZ * 0.5, -0.78, 0, 0);   // gusset
+    const rp = rAt(LAMP_Y);
+    // the pole bracket: a curved saddle plate lagged to the timber, two
+    // through-bolts, and the arm's socket
+    for (const sy of [0.12, -0.16]) p.cyl(rp + 0.008, rp + 0.008, 0.03, 10, GALV_D, 0, sy, 0, 0, 0, 0);   // band straps
+    p.cbox(0.12, 0.36, 0.06, 0.012, GALV_D, 0, -0.02, rp + 0.025);
+    // the arm: a tapered elliptical tube from socket to tip, an upswept
+    // truss under it for stiffness
+    const tY = MAST.tipY != null ? MAST.tipY : MAST.headY + 0.1, tZ = MAST.tipZ != null ? MAST.tipZ : MAST.headZ;
+    p.rod(0, 0.06, rp + 0.05, 0, tY, tZ - 0.25, 0.042, 8, STEEL, 0.03);
+    p.rod(0, -0.14, rp + 0.05, 0, (0.06 + tY) / 2 - 0.02, (rp + tZ) / 2, 0.016, 5, STEEL);
+    // the cobra head housing on the tip: slip-fitter, the tapered body,
+    // the hinged door line under it
+    const hy = tY - 0.02, hz = tZ + 0.08;
+    p.cyl(0.05, 0.05, 0.16, 8, 0x8c9195, 0, tY - 0.005, tZ - 0.2, Math.PI / 2 - 0.2, 0, 0);
+    const dome = new THREE.SphereGeometry(0.2, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    dome.scale(0.85, 0.55, 1.7);
+    p.add(dome, 0x979ca0, 0, hy - 0.07, hz);
+    const rim = new THREE.CylinderGeometry(0.172, 0.172, 0.02, 12);
+    rim.scale(1, 1, 1.75);
+    p.add(rim, 0x6f7477, 0, hy - 0.07, hz);
+    p.cyl(0.018, 0.018, 0.03, 8, 0x2b2d2f, 0, hy + 0.05, hz - 0.12);     // photocell
     return p.done();
   }
 
   function lampHeadProto() {
-    // long along +Z, i.e. ALONG the arm it hangs on (it used to be long across
-    // it, which is a luminaire mounted sideways).
+    // THE LENS ONLY: a shallow sag-glass dish under the housing, long along
+    // +Z (along the arm it hangs on). This batch carries the emissive.
     const p = DK.proto();
-    p.box(0.3, 0.16, 0.62, 0xb9bec0, 0, 0.06, 0);
-    p.box(0.24, 0.09, 0.5, 0xffe6b8, 0, -0.05, 0);            // the lens
+    const g = new THREE.SphereGeometry(0.15, 12, 4, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+    g.scale(1, 0.35, 1.7);
+    p.add(g, 0xfff1d0, 0, 0, 0.08);
     return p.done();
   }
+
+  // The prototypes, for the asset turntable (tools/lab asset kit) and nothing
+  // else: a rebuild is looked at alone on the floor before it ships.
+  CBZ.utilityProtos = {
+    pole: poleProto, transformer: transformerProto, pad: padTransformerProto,
+    cabinet: cabinetProto, mastArm: mastArmProto, lampHead: lampHeadProto, MAST: MAST,
+  };
 
   // =====================================================================
   //  CATENARY WIRE BUILDER
@@ -360,9 +476,9 @@
         const h = P.h;
         // pole-mounted transformer on roughly a fifth of poles
         if (h < 0.2) {
-          const bx = x + Math.sin(yaw + Math.PI / 2) * 0.32;
-          const bz = z + Math.cos(yaw + Math.PI / 2) * 0.32;
-          cans.add(bx, y + 7.0, bz, { ry: yaw });
+          // authored in the pole's own frame (butt origin): the SAME transform,
+          // lean included, so the hangers stay lagged to the timber
+          cans.add(x, y, z, { ry: P.ry, rx: P.rx, rz: P.rz });
         }
         // COBRA-HEAD MAST ARM, on the shared CBZ.lampMast solve: local +Z is
         // the carriageway, so `ry` is simply the bearing from the pole to the
@@ -370,11 +486,14 @@
         // separately-typed offset that could drift from it.
         const armOut = -side;                       // arm points at the street
         if (h > 0.62) {
-          const ay = y + POLE_H - 1.2;
+          // the root is the pole AXIS at LAMP_Y pushed through the pole's own
+          // transform, so a leaning pole carries its bracket with it
+          const mr = worldAt(P, 0, LAMP_Y, 0);
+          const ay = mr.y;
           const ox = r.vertical ? armOut : 0, oz = r.vertical ? 0 : armOut;
           const ry = Math.atan2(ox, oz);
-          arms.add(x, ay, z, { ry: ry });
-          heads.add(x + ox * MAST.headZ, ay + MAST.headY, z + oz * MAST.headZ, { ry: ry });
+          arms.add(mr.x, ay, mr.z, { ry: ry });
+          heads.add(mr.x + ox * MAST.headZ, ay + MAST.headY, mr.z + oz * MAST.headZ, { ry: ry });
           census.mast++;
           lampCensus.lamps++;
           const half = (r.w != null ? r.w : (city.ROAD || 18)) / 2;

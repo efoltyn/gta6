@@ -37,14 +37,31 @@
     g.addColorStop(0.52, "rgba(55,170,255,.48)");
     g.addColorStop(1, "rgba(20,90,255,0)");
     x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
+    return new THREE.CanvasTexture(c);   // (r128: no colorSpace; the glow is authored for the linear read)
   }
 
   const glowTex = glowTexture();
-  const dartGeo = new THREE.CylinderGeometry(0.012, 0.019, 0.12, 7);
-  const dartMat = new THREE.MeshLambertMaterial({ color: 0x202a31, emissive: 0x071018, emissiveIntensity: 0.35 });
+  /* THE PROBE, at its real size: an X26/X2 cartridge fires a 9 mm barbed
+     steel dart on a ~24 mm moulded body (the wire leaves its tail). Turned
+     about +Y with the barb's point at +Y, the way update() aims it down its
+     own flight line; the mesh sits on the wire's end, so the barb stands in
+     whatever it struck and the body trails on the wire. (It was a 12 cm cone,
+     4-5x life.) */
+  const turned = (pts, n) => {
+    const gg = new THREE.LatheGeometry(pts.map((q) => new THREE.Vector2(q[0], q[1])), n);
+    gg.computeVertexNormals();
+    return gg;
+  };
+  const dartBodyGeo = turned([[0, -0.024], [0.0034, -0.024], [0.0038, -0.021], [0.0038, -0.005], [0.0030, -0.002], [0.0012, 0], [0, 0]], 10);
+  const dartBarbGeo = turned([[0, -0.001], [0.0009, -0.001], [0.0009, 0.006], [0.0017, 0.0072], [0.0009, 0.0084], [0, 0.0115]], 8);
+  const dartMat = new THREE.MeshLambertMaterial({ color: 0x2a2f33, emissive: 0x071018, emissiveIntensity: 0.35 });
+  const barbMat = new THREE.MeshPhongMaterial({ color: 0xaab2b8, shininess: 70, specular: 0x9aa4ac });
+  function makeDart() {
+    const d = new THREE.Group();
+    d.add(new THREE.Mesh(dartBodyGeo, dartMat));
+    d.add(new THREE.Mesh(dartBarbGeo, barbMat));
+    return d;
+  }
   const arcPairs = [
     [[-0.36, 1.72, 0.10], [0.40, 1.22, 0.12]],
     [[0.38, 1.65, 0.06], [-0.32, 0.96, 0.16]],
@@ -72,7 +89,7 @@
 
   function makeRecord() {
     const wires = [line(WIRE_POINTS, 0xdce7eb, 0.86, false), line(WIRE_POINTS, 0xc9d8de, 0.82, false)];
-    const darts = [new THREE.Mesh(dartGeo, dartMat), new THREE.Mesh(dartGeo, dartMat)];
+    const darts = [makeDart(), makeDart()];
     for (const dart of darts) { dart.visible = false; dart.frustumCulled = false; CBZ.scene.add(dart); }
     const arcs = [];
     for (let i = 0; i < ARC_COUNT; i++) arcs.push(line(ARC_POINTS, i % 2 ? 0x73d7ff : 0xe4f8ff, 0.95, true));

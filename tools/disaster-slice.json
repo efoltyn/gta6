@@ -3878,7 +3878,6 @@
   "src/systems/breach.js",
   "src/systems/airports.js",
   "src/world/forestlook.js",
-  "src/core/lightpin.js",
   "src/core/groundmask.js",
   "src/systems/bunkerspace.js",
   "src/systems/tunnels.js",
@@ -4463,6 +4462,7 @@
   "src/systems/controls.js",
   "src/world/water_underwater.js",
   "src/world/water_survival.js",
-  "src/city/aircraftimpact.js"
+  "src/city/aircraftimpact.js",
+  "src/core/lightpin.js"
  ]
 }

@@ -185,37 +185,62 @@
     return grp;
   }
 
-  /* STENCIL — blocky painted lettering from thin boxes, run-length collapsed
-     (a row of "111" is ONE box, not three). 3x5 glyphs, drawn in the plane
-     x = const with the text running along +Z and up along +Y, which is the
-     reading orientation for somebody standing in the yard looking east. */
-  const FONT = {
-    A: ["111", "101", "111", "101", "101"],
-    R: ["111", "101", "111", "110", "101"],
-    M: ["101", "111", "101", "101", "101"],
-    O: ["111", "101", "101", "101", "111"],
-    Y: ["101", "101", "111", "010", "010"],
-  };
-  function stencil(text, x, yTop, z0, px, color) {
-    let z = z0;
-    for (let i = 0; i < text.length; i++) {
-      const rows = FONT[text[i]];
-      if (rows) {
-        for (let r = 0; r < rows.length; r++) {
-          let c = 0;
-          while (c < 3) {
-            if (rows[r][c] !== "1") { c++; continue; }
-            let run = 1;
-            while (c + run < 3 && rows[r][c + run] === "1") run++;
-            addBox(x, yTop - (r + 0.5) * px, z + (c + run / 2) * px,
-              0.05, px, px * run, color, { cast: false, receive: false });
-            c += run;
-          }
-        }
+  /* STENCIL — paint sprayed through a cut stencil onto the block wall. It
+     was a 3x5 pixel font built from boxes, which read as a video-game sign.
+     Now it is what a facility actually paints: heavy condensed capitals with
+     the stencil BRIDGES left in every letter (the ties that hold the cut-out
+     card together), soft overspray on the edges and the odd dry patch, on a
+     transparent decal laid 15 mm off the wall, in the plane x = const with
+     the text running along +Z (the reading direction for somebody standing
+     in the yard looking east). One plane, one lazy canvas. */
+  function stencil(text, x, yMid, zMid, w, h, color) {
+    const CW = 1024, CHh = Math.max(64, Math.round(CW * h / w));
+    const css = "#" + ("000000" + (color >>> 0).toString(16)).slice(-6);
+    const paint = function (g, cv) {
+      const W = cv.width, H = cv.height;
+      g.clearRect(0, 0, W, H);
+      let size = Math.round(H * 0.78);
+      g.textAlign = "center"; g.textBaseline = "middle";
+      for (;;) {
+        g.font = "900 " + size + "px Impact, 'Arial Black', 'Helvetica Neue', Arial, sans-serif";
+        if (g.measureText(text).width + size * 0.12 * text.length <= W * 0.94 || size < 16) break;
+        size -= 4;
       }
-      z += px * 4;   // 3 wide + a 1px gap
-    }
-    return z - z0 - px;
+      // letter-spaced by hand (canvas letterSpacing is not everywhere)
+      const gap = size * 0.12, widths = [];
+      let total = 0;
+      for (const ch of text) { const cw = g.measureText(ch).width; widths.push(cw); total += cw + gap; }
+      total -= gap;
+      g.filter = "blur(1.2px)";                      // overspray
+      g.fillStyle = css;
+      let cx = (W - total) / 2;
+      for (let i = 0; i < text.length; i++) { g.fillText(text[i], cx + widths[i] / 2, H * 0.5); cx += widths[i] + gap; }
+      g.filter = "none";
+      // the bridges: two horizontal ties cut through every letter
+      g.globalCompositeOperation = "destination-out";
+      const bh = Math.max(3, size * 0.05);
+      g.fillRect(0, H * 0.5 - size * 0.17 - bh / 2, W, bh);
+      g.fillRect(0, H * 0.5 + size * 0.17 - bh / 2, W, bh);
+      // a dry roller: a few faint passes where the paint did not take
+      let s = 1337;
+      const rnd = function () { s = (s * 16807) % 2147483647; return s / 2147483647; };
+      g.globalAlpha = 0.35;
+      for (let i = 0; i < 40; i++) g.fillRect(rnd() * W, rnd() * H, 2 + rnd() * 30, 1 + rnd() * 3);
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = "source-over";
+    };
+    let t;
+    if (CBZ.lazyCanvasTexture) t = CBZ.lazyCanvasTexture(CW, CHh, paint, { name: "armory-stencil" });
+    else { const c = document.createElement("canvas"); c.width = CW; c.height = CHh; paint(c.getContext("2d"), c); t = new THREE.CanvasTexture(c); }
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshLambertMaterial({
+      map: t, transparent: true, alphaTest: 0.35, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    m.position.set(x, yMid, zMid);
+    m.rotation.y = -Math.PI / 2;                     // face the yard (-x), read along +z
+    m.castShadow = false; m.receiveShadow = true;
+    m.userData.sign = true;
+    ROOT.add(m);
+    return m;
   }
 
   // ------------------------------------------------------------------
@@ -273,8 +298,7 @@
   const lamp = reader.led;
   CK.intercom(WALL_X - WALL_T / 2, 1.45, DZ1 + 0.075 + 0.3, -1, 0);
   // the painted sign beside it
-  stencil("ARMORY", 18.71, 4.05, 3.50, 0.115, 0xd9dee5);
-  addBox(18.70, 3.36, 4.80, 0.04, 0.06, 2.64, 0xd9dee5, { cast: false });   // underline
+  stencil("ARMORY", 18.665, 3.72, 4.82, 2.9, 0.78, 0xd9dee5);
 
   const armory = {
     gate, lamp, set: doorSet, slab: gateSlab, reader: reader, open: false, t: 0, slots: [],

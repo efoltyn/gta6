@@ -336,8 +336,11 @@
     k.box(0.45, 0.83, -0.3, 0.16, 0.1, 0.24, 0x14161a, "gloss", 0, 0.3, 0);    // shoe
     k.box(-0.38, 0.775, -0.2, 0.063, 0.003, 0.088, 0xf4f2ec);                  // the dealer's up card
   }
-  function roulette(k, T, ff) {
+  // opts.noWheel: leave the wheel head off (games/casino.js spins its own
+  // rotor, turret and ball in the bowl's place: local (wheelX(), 0.86, 0)).
+  function roulette(k, T, ff, opts) {
     k.frame(T.x, ff, T.z, T.yaw);
+    const noWheel = !!(opts && opts.noWheel);
     const Lh = 1.25, Dh = 0.6;
     k.box(0, 0.36, 0, 2 * Lh - 0.2, 0.64, 2 * Dh - 0.2, 0x2a1c14, "gloss");    // cabinet
     k.box(0, 0.04, 0, 2 * Lh - 0.3, 0.08, 2 * Dh - 0.3, 0x0e0c0a);
@@ -359,6 +362,8 @@
     // the wheel: wood bowl, pocket ring, cone and turret
     const wx = -Lh + 0.48;
     k.cyl(wx, 0.8, 0, 0.42, 0.4, 0.1, 0x4a2a16, "gloss", 0, 0, 0, 28);
+    k.torus(wx, 0.852, 0, 0.405, 0.018, 0x2a1810, "gloss", Math.PI / 2, 0, 0, null, 32);   // bowl lip
+    if (!noWheel) {
     k.cyl(wx, 0.852, 0, 0.36, 0.36, 0.006, 0x2a1c14, "gloss", 0, 0, 0, 28);
     for (let i = 0; i < 37; i++) {
       const a = (i / 37) * Math.PI * 2;
@@ -368,11 +373,21 @@
     k.cyl(wx, 0.92, 0, 0.012, 0.03, 0.08, 0xc9a24a, "metal", 0, 0, 0, 8);
     for (let i = 0; i < 4; i++) k.box(wx, 0.955, 0, 0.12, 0.01, 0.01, 0xc9a24a, "metal", 0, i * Math.PI / 4, 0);
     k.sphere(wx + 0.25, 0.866, 0.1, 0.008, 0xf4f2ec, "gloss");
+    } else {
+      k.cyl(wx, 0.851, 0, 0.385, 0.385, 0.004, 0x1a0f08, "gloss", 0, 0, 0, 32);   // ball track floor under the rotor
+      for (let i = 0; i < 8; i++) {                                               // the diamond deflectors on the track
+        const a = (i / 8) * Math.PI * 2;
+        k.box(wx + Math.cos(a) * 0.37, 0.858, Math.sin(a) * 0.37, 0.022, 0.01, 0.012, 0xc9a24a, "metal", 0, -a, 0);
+      }
+    }
     // chip stacks and the dolly
     for (let i = 0; i < 5; i++) for (let c = 0; c < 6; c++) k.cyl(0.9 - i * 0.07, 0.765 + c * 0.0034, -0.45, 0.019, 0.019, 0.0033, [0xc0392b, 0x2a7a3a, 0x1f4a8a, 0xe8e2c8, 0x7a2a8a][i], "solid", 0, 0, 0, 8);
   }
   const SCREEN = [0x2a5a9a, 0x7a2a6a, 0x2a7a5a, 0x8a5a1a, 0x5a2a8a];
-  function slot(k, S2, ff) {
+  // opts.reels: a mechanical reel window instead of the video screen (games/
+  // casino.js mounts three real spinning reels at local (+-0.15|0, 1.34, 0.02)).
+  function slot(k, S2, ff, opts) {
+    const reels = !!(opts && opts.reels);
     k.frame(S2.x, ff, S2.z, S2.yaw);                                // local +Z = the player's side
     const cab = 0x1c1c22, trim = 0xc9a24a;
     k.box(0, 0.06, 0, 0.62, 0.12, 0.58, 0x0e0e10);                  // plinth
@@ -380,9 +395,32 @@
     k.box(0, 0.93, 0.08, 0.6, 0.08, 0.3, 0x24242a, "gloss", 0.28);  // raked button deck
     for (let i = 0; i < 5; i++) k.box(-0.2 + i * 0.1, 0.975, 0.1, 0.06, 0.012, 0.04, [0xe8e2c8, 0xe8e2c8, 0x9fe0ff, 0xffd46a, 0xff5a5a][i], "glow", 0.28);
     k.box(0.2, 0.84, 0.23, 0.08, 0.05, 0.02, 0x0e0e10, "gloss");    // bill acceptor
-    k.box(0, 1.34, -0.1, 0.6, 0.78, 0.4, cab, "gloss");             // head cabinet
-    k.box(0, 1.34, 0.105, 0.56, 0.62, 0.02, 0x0e0e10, "gloss");     // bezel
-    k.box(0, 1.34, 0.117, 0.5, 0.54, 0.004, SCREEN[S2.hue % SCREEN.length], "glow");
+    if (!reels) k.box(0, 1.34, -0.1, 0.6, 0.78, 0.4, cab, "gloss");             // head cabinet
+    else {                                                          // head cabinet opened round the reel recess
+      k.box(0, 1.34, -0.19, 0.6, 0.78, 0.22, cab, "gloss");
+      for (const e of [-1, 1]) k.box(e * 0.275, 1.34, 0.0, 0.05, 0.78, 0.2, cab, "gloss");
+      k.box(0, 1.65, 0.0, 0.5, 0.16, 0.2, cab, "gloss");
+      k.box(0, 1.055, 0.0, 0.5, 0.21, 0.2, cab, "gloss");
+    }
+    if (!reels) {
+      k.box(0, 1.34, 0.105, 0.56, 0.62, 0.02, 0x0e0e10, "gloss");     // bezel
+      k.box(0, 1.34, 0.117, 0.5, 0.54, 0.004, SCREEN[S2.hue % SCREEN.length], "glow");
+    } else {
+      // reel window: a chrome bezel round a 0.13 m slot onto the three reels
+      // (22-stop strips at r 0.12, three symbols showing), a pay line across
+      // it, the paytable glass above and the credit meter below
+      k.box(0, 1.34, -0.17, 0.5, 0.36, 0.02, 0x060608);                              // recess back
+      k.box(0, 1.215, 0.05, 0.5, 0.11, 0.1, cab, "gloss");                           // fill under the window
+      k.box(0, 1.5, 0.05, 0.5, 0.16, 0.1, cab, "gloss");                             // fill over it
+      for (const e of [-1, 1]) {
+        k.box(0, 1.34 + e * 0.078, 0.108, 0.48, 0.026, 0.024, 0xb8bcc2, "metal");
+        k.box(e * 0.228, 1.34, 0.108, 0.026, 0.182, 0.024, 0xb8bcc2, "metal");
+      }
+      for (const e of [-1, 1]) k.box(e * 0.072, 1.34, 0.1, 0.008, 0.13, 0.01, 0x2a2a30, "metal");  // reel dividers
+      k.box(0, 1.34, 0.118, 0.43, 0.005, 0.002, 0xff3a2a, "glow");                   // the pay line
+      k.box(0, 1.5, 0.103, 0.46, 0.13, 0.004, SCREEN[S2.hue % SCREEN.length], "glow"); // paytable glass
+      k.box(0, 1.215, 0.103, 0.26, 0.045, 0.004, 0xff4a2a, "glow");                  // credit meter
+    }
     for (const e of [-1, 1]) k.box(e * 0.3, 1.2, 0.08, 0.012, 1.3, 0.012, trim, "glow");   // LED edge strips
     k.box(0, 1.86, -0.05, 0.58, 0.26, 0.3, cab, "gloss");           // topper
     k.box(0, 1.86, 0.102, 0.52, 0.2, 0.004, SCREEN[(S2.hue + 2) % SCREEN.length], "glow");
@@ -526,6 +564,10 @@
   }, 90);
 
   CBZ.dressCasino = dressCasino;
+  // the furniture, for the one casino a game package dresses itself
+  // (games/casino.js, THE GOLDEN ACE): same tables, slots and lamps as every
+  // other casino in the world, drawn into the caller's fixture kit.
+  CBZ.casinoFixtures = { blackjack: blackjack, roulette: roulette, slot: slot, stool: stool, lamp: lampOver, cage: cage, wheelX: function () { return -1.25 + 0.48; }, FELT: FELT, GOLD: GOLD };
   CBZ.cityCasinoCage = function (lot) {
     if (!lot || lot.kind !== "casino" || !lot._cageSpot) return null;
     const TL = CBZ.cityTill;

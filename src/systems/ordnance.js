@@ -469,28 +469,24 @@
     }
   }
 
-  let bombGeo = null, bombMats = null;
+  /* THE STORES are weapons/munitions.js's: the one place a round in the
+     air is drawn (real profiles at real size, nose on +Z, one merged
+     vertex-coloured mesh per type, pooled). ord.step attitudes a store with
+     lookAt, which aims local +Z down the airflow, so they fall nose first.
+     (This file used to draw its own: a fat 8-sided cylinder and two crossed
+     boxes at ~2x size, fins on +Z, so every bomb fell TAIL first.) A pooled
+     body goes back to the pool when its store bursts (dropMesh). */
+  const MUN_TYPE = { mk82: "mk82", mk84: "mk84", cbu87: "cbu87", m31a1: "mlrs" };
   function bombMesh(K) {
     if (K.body === "nukeWarhead") { const w = nukeBody(K); if (w) return w; }
-    if (!bombGeo) {
-      bombGeo = new THREE.CylinderGeometry(0.5, 0.34, 1, 8);
-      bombMats = {};
-    }
-    if (!bombMats[K.color]) bombMats[K.color] = new THREE.MeshLambertMaterial({ color: K.color });
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(bombGeo, bombMats[K.color]);
-    body.scale.set(K.size, K.len, K.size);
-    body.rotation.x = Math.PI / 2;          // long axis down −Z, like the airframes
-    g.add(body);
-    const fin = new THREE.Mesh(
-      CBZ.boxGeom ? CBZ.boxGeom(0.12, K.size * 2.0, K.len * 0.28) : new THREE.BoxGeometry(0.12, K.size * 2.0, K.len * 0.28),
-      bombMats[K.color]);
-    fin.position.z = K.len * 0.36;
-    g.add(fin);
-    const fin2 = fin.clone();
-    fin2.rotation.z = Math.PI / 2;
-    g.add(fin2);
-    return g;
+    const MU = CBZ.munitions;
+    const m = MU && MU.acquire(MUN_TYPE[K.mun] || "mk82");
+    return m || new THREE.Group();
+  }
+  function dropMesh(mesh) {
+    if (!mesh) return;
+    if (mesh.userData && mesh.userData.munition && CBZ.munitions) CBZ.munitions.release(mesh);
+    else if (mesh.parent) mesh.parent.remove(mesh);
   }
 
   // A store as a bare THREE.Group, detached from any flight. An asset
@@ -786,12 +782,13 @@
       // looks like a bomb and not a brick, and it costs one lookAt
       _v.copy(b.pos).add(b.vel);
       b.mesh.lookAt(_v);
+      if (CBZ.munitions && b.mesh.userData.munition) CBZ.munitions.dressBomb(b.mesh, b.age, dt, b.vel.length());
 
       if (struck || b.age > 45) {
         const hx = struck ? _hitX : b.pos.x, hz = struck ? _hitZ : b.pos.z;
         const hy = struck ? _hitY : groundAt(b.pos.x, b.pos.z);
         b.pos.set(hx, hy, hz);
-        scene.remove(b.mesh);
+        dropMesh(b.mesh);
         bombs.splice(i, 1);
         b.live = false;
         ord.blast(hx, hy, hz, b.radius, b.power, { owner: b.owner, team: b.team, kind: b.kind });
@@ -881,7 +878,7 @@
   };
   ord.liveCount = function () { return bombs.length; };
   ord.clear = function () {
-    for (let i = 0; i < bombs.length; i++) scene.remove(bombs[i].mesh);
+    for (let i = 0; i < bombs.length; i++) dropMesh(bombs[i].mesh);
     bombs.length = 0;
     for (let i = 0; i < rings.length; i++) rings[i].visible = false;
   };

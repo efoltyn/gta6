@@ -720,7 +720,7 @@
     for (let i = moves.length - 1; i >= 0; i--) {
       const m = moves[i];
       const fs = m.ch && m.ch.footStep;
-      if (!fs || m.fs !== fs.gen) { moves.splice(i, 1); continue; }
+      if (!fs || m.fs !== fs.gen || gone(m.ch)) { moves.splice(i, 1); continue; }
       const sr = MP.stepRoot(m.ch), dd = sr - m.last;
       m.last = sr;
       if (dd > 0) moveBy(m.B, m.dx * m.D * dd, m.dz * m.D * dd);
@@ -728,7 +728,7 @@
     }
     for (let i = falls.length - 1; i >= 0; i--) {
       const F = falls[i], ch = F.B.ch, f = ch && ch.fall;
-      if (!f || !f.on || F.a.dead) {
+      if (!f || !f.on || F.a.dead || gone(ch)) {
         // he is back on his feet: a ko timer only this pass was counting ends
         // with the get-up (left over, it kept him "down" for good: B.down()
         // true, never hit again, his fighter never ticking)
@@ -982,6 +982,14 @@
      step, the root on the same curve). A second hit ADDS steps to the ones
      he has not taken yet; it never cuts the reel short. */
   const reels = [];
+  /* A BODY THAT LEFT THE WORLD LEAVES THESE LISTS. A rig whose group is no
+     longer attached to anything (the disaster island's crowd is dropped whole
+     at every new match; a pooled actor is parked) never finishes its fall or
+     its step: its footStep / fall stay "on" forever, so falls[], moves[] and
+     reels[] kept every bot knocked down at a match's end, its rig and brain
+     with it, match after match (tools/probes/disaster-leak.mjs: falls[49],
+     moves[95] by the seventh match). */
+  function gone(ch) { const g = ch && ch.group; return !g || !g.parent; }
   function reel(a, B, ch, dx, dz, n, D, dur) {
     if (!(n > 0) || !B || !B.pos) return;
     const l = Math.hypot(dx, dz) || 1;
@@ -1000,7 +1008,7 @@
   function stepReels() {
     for (let i = reels.length - 1; i >= 0; i--) {
       const r = reels[i];
-      if (r.B.dead() || r.B.down() || r.n <= 0) { reels.splice(i, 1); continue; }
+      if (r.B.dead() || r.B.down() || r.n <= 0 || gone(r.ch)) { reels.splice(i, 1); continue; }
       const fs = r.ch && r.ch.footStep;
       if (fs && fs.on) continue;                          // this step is not done
       stepAlong(r.a, r.B, r.ch, r.dx, r.dz, r.D, r.dur);

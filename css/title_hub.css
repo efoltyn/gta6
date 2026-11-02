@@ -262,10 +262,17 @@ body.mode-archipelago #title .new-life-btn{
   display:flex; align-items:center; gap:14px;
 }
 #title .mode-strip-label::after{content:""; flex:1; height:1px; background:var(--hub-line);}
+/* THE RAIL IS ONE ROW, HOWEVER MANY GAMES. It was repeat(8, 1fr) for eight
+   games; the ninth (The Isles) wrapped Bomb Survivor onto an orphan second
+   row on every desktop. Columns are now generated per tile, so a tenth game
+   costs no CSS edit; past what fits, the row scrolls sideways with snap. */
 #title .mode-select{
-  display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:clamp(8px,.9vw,14px);
-  width:100%; margin:0;
+  display:grid; grid-auto-flow:column; grid-auto-columns:minmax(118px,1fr); gap:clamp(8px,.9vw,14px);
+  width:100%; margin:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:none;
+  scroll-snap-type:x proximity; padding:4px 2px 8px;
 }
+#title .mode-select::-webkit-scrollbar{display:none;}
+#title .mode-select > .mode-btn{scroll-snap-align:start;}
 #title .mode-btn{
   position:relative; display:block; min-width:0; min-height:0; margin:0; padding:0;
   aspect-ratio:16 / 10; overflow:hidden; cursor:pointer; text-align:left;
@@ -305,7 +312,7 @@ body.mode-archipelago #title .new-life-btn{
 ============================================================ */
 /* tablets in portrait, small laptops: the rail wraps to two rows of four */
 @media (max-width:1099px){
-  #title .mode-select{grid-template-columns:repeat(4,minmax(0,1fr));}
+  #title .mode-select{grid-auto-columns:minmax(150px,22vw);}
   #title .origin-select{grid-template-columns:repeat(3,minmax(0,1fr));}
 }
 /* one column: phones in portrait and narrow tablets. The rail becomes a
@@ -371,7 +378,7 @@ body.mode-archipelago #title .new-life-btn{
   #title .origin-label, #title .gg-map-label{margin:10px 0 6px;}
   #title .origin-btn{min-height:40px; padding:6px 10px;}
   #title #playBtn{padding-block:12px; font-size:22px;}
-  #title .mode-select{grid-template-columns:repeat(8,minmax(128px,1fr)); overflow-x:auto; scrollbar-width:none; min-height:84px;}
+  #title .mode-select{grid-auto-columns:minmax(128px,1fr); min-height:92px;}
   #title .mode-btn{height:80px; aspect-ratio:auto;}
 }
 

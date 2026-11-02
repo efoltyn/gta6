@@ -156,6 +156,7 @@
     for (let i = 0; i < cols.length; i++) { const c = cols[i]; if (drop.has(c)) { n++; if (sync && !gridRemove(c, cellRange(c))) colDirty = true; } else cols[w++] = c; }
     cols.length = w;
     if (sync && !colDirty) { colCount = w; tailMark(); }
+    if (n) forgetQueries();
     return n;
   };
   // colliders APPENDED since the grid last matched `n0` entries (a streamed
@@ -296,8 +297,20 @@
   CBZ.queryCollidersNear = function (x, z, radius, out) {
     out = out || [];
     out.length = queryInto(x, z, radius, out);
+    if (out.length && !queryOuts.has(out) && queryOuts.size < 64) queryOuts.add(out);
     return out;
   };
+  /* THE LAST ANSWER IS NOT A REFERENCE TO KEEP. Every caller's reusable
+     result array (and the collide pass's own) held the walls of its last
+     query until its next one, and out at sea between the isles nobody
+     queries: a dropped island's walls, their meshes and through them the
+     whole island stayed alive (memscope --isles --travel --in-jet). Walls
+     leaving the world empty them. */
+  const queryOuts = new Set();
+  function forgetQueries() {
+    for (const o of queryOuts) o.length = 0;
+    if (typeof _near !== "undefined") _near.fill(null);
+  }
 
   /* SEGMENT QUERY WITH AN EARLY OUT. combat_iq's position picker asked
      queryCollidersNear for a DISC around each candidate lane (radius half the
@@ -2323,6 +2336,7 @@
     }
     plats.length = w;
     if (sync && !platDirty) { platCount = w; platTailMark(); }
+    if (n) forgetQueries();
     return n;
   };
   CBZ.platformAddMany = function (list) {

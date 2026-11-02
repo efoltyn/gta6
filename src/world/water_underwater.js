@@ -50,11 +50,21 @@
       now — see THE FLOOR LAW — but the caustic ceiling still only paints the
       surface: light that has travelled 20 m of water no longer dances.)
 
-   3. GOD RAYS as billboarded shafts. True volumetrics are far out of budget.
-      Seven additive soft-edged quads hang from the surface at world positions
-      and torus-wrap around the swimmer, so they have real PARALLAX (the CSS
-      ray gradient this file used to fake never could). They fade with depth,
-      with daylight, and vanish entirely below ~22m.
+   3. GOD RAYS as one merged mesh of light shafts (REBUILT 2026-10-31). True
+      volumetrics are far out of budget. The first cut was seven upright
+      MeshBasic quads with a canvas gradient: from a few metres under it read
+      as exactly that, a glowing rectangle standing on the sand with a ruler
+      edge where it met the surface. Now 12-32 shafts (by quality tier) are
+      ribbons in ONE geometry and ONE draw call, placed and shaped entirely in
+      the vertex shader: rooted on the surface at world spots that torus-wrap
+      around the swimmer (parallax), slanted down the REFRACTED sun direction
+      (Snell, n = 1.333, so a low sun gives raking shafts and a high one
+      vertical ones), each turned about its own axis to face the eye, widening
+      as it goes down. The fragment feathers both sides, fades the root in so
+      it never draws a line along the surface, decays down the shaft, flickers
+      on its own slow beat (the swell focusing and losing the light), and
+      fades out near the lens, edge-on, and into the fog. They fade with
+      depth and daylight and vanish below ~30 m.
 
    4. THE WATERLINE. A true per-pixel half-in-half-out split needs a depth
       pass. The affordable version: project a point on the live surface a few
@@ -596,34 +606,6 @@
     return causticTex;
   }
 
-  let shaftTex = null;
-  function shaftTexture() {
-    if (shaftTex) return shaftTex;
-    // A soft-edged vertical shaft: bright at the top (the surface), gone at
-    // the bottom, feathered on both sides so the quad has no visible border.
-    const W = 32, H = 128;
-    const c = document.createElement("canvas");
-    c.width = W; c.height = H;
-    const g2 = c.getContext("2d");
-    const img = g2.createImageData(W, H);
-    for (let y = 0; y < H; y++) {
-      const t = y / (H - 1);
-      const vert = Math.pow(1 - t, 1.6);            // fade downward
-      for (let x = 0; x < W; x++) {
-        const s = (x + 0.5) / W;
-        const horiz = Math.pow(Math.sin(s * Math.PI), 2.2);   // feathered sides
-        const p = Math.round(Math.max(0, Math.min(1, vert * horiz)) * 255);
-        const q = (y * W + x) * 4;
-        img.data[q] = 255; img.data[q + 1] = 255; img.data[q + 2] = 255; img.data[q + 3] = p;
-      }
-    }
-    g2.putImageData(img, 0, 0);
-    shaftTex = new THREE.CanvasTexture(c);
-    shaftTex.wrapS = shaftTex.wrapT = THREE.ClampToEdgeWrapping;
-    shaftTex.name = "cbz-uw-shaft";
-    shaftTex.needsUpdate = true;
-    return shaftTex;
-  }
 
   // ============================================================
   //  IN-WORLD FX (built lazily on the first dive)
@@ -632,9 +614,13 @@
   // is ours: the planar mirror and every CCTV camera keep the default mask, so
   // none of this can leak into another render pass.
   const FX_LAYER = 2;
-  const SHAFTS = 7;
-  const SHAFT_R = 34;        // torus-wrap radius around the swimmer
-  const SHAFT_H = 22;
+  const SHAFTS_MAX = 32;     // geometry is built for this many; the tier draws fewer
+  const SHAFT_R = 26;        // torus-wrap radius around the swimmer
+  const SHAFT_H = 22;        // shaft length along the refracted ray, metres
+  function shaftBudget() {
+    const n = CBZ.qScale ? CBZ.qScale(12, SHAFTS_MAX) : 20;
+    return Math.max(4, Math.min(SHAFTS_MAX, Math.round(n)));
+  }
 
   // The backdrop shell (see THE EMPTY PIXEL, below). Radius only has to clear
   // the longest EFFECTIVE fog range this file can produce by a wide margin at
@@ -648,7 +634,8 @@
   // sphere around the eye.
   const BACKDROP_R = 600;
 
-  let fxRoot = null, ceiling = null, ceilU = null, shafts = null, shaftMat = null;
+  let fxRoot = null, ceiling = null, ceilU = null, shafts = null, shaftMat = null, shaftU = null;
+  const _ray = new THREE.Vector3(), _sunL = new THREE.Vector3();
   let backdrop = null;
 
   /* ============================================================
@@ -1000,38 +987,138 @@
     }
 
     if (CFG.WATER_GODRAYS !== false) {
-      shaftMat = new THREE.MeshBasicMaterial({
-        map: shaftTexture(),
-        color: 0xcdf2ff,
+      // ONE ribbon per shaft, 2 x 6 vertices (6 rows down the shaft, so the
+      // widening and the decay are smooth), all in one geometry. Every vertex
+      // carries its shaft's seed (world offset, width, phase) and its own
+      // (side, along) corner; the vertex shader does the rest.
+      const ROWS = 6, VPS = ROWS * 2;
+      const nV = SHAFTS_MAX * VPS;
+      const aSeed = new Float32Array(nV * 4);
+      const aCorner = new Float32Array(nV * 3);
+      const pos = new Float32Array(nV * 3);       // unused by the shader; bounds only
+      const idx = new Uint16Array(SHAFTS_MAX * (ROWS - 1) * 6);
+      let w = 0;
+      for (let i = 0; i < SHAFTS_MAX; i++) {
+        // Golden-angle spiral: an even, deterministic spread with no rng.
+        const a = i * 2.39996, rr = 4 + Math.sqrt((i + 0.5) / SHAFTS_MAX) * (SHAFT_R - 4);
+        const ox = Math.cos(a) * rr, oz = Math.sin(a) * rr;
+        // widths: mostly slim, a few broad, so the set never looks stamped
+        const h1 = ((i * 0.7548777) % 1), h2 = ((i * 0.5698403 + 0.3) % 1);
+        const wid = (i % 5) === 2 ? 3.0 + h2 * 2.2 : 0.4 + h1 * h1 * 1.8;
+        const ph = (i * 0.6180339) % 1 * 6.2832;
+        for (let r = 0; r < ROWS; r++) {
+          for (let sd = 0; sd < 2; sd++) {
+            const v = i * VPS + r * 2 + sd;
+            aSeed[v * 4] = ox; aSeed[v * 4 + 1] = oz; aSeed[v * 4 + 2] = wid; aSeed[v * 4 + 3] = ph;
+            aCorner[v * 3] = sd ? 1 : -1;
+            aCorner[v * 3 + 1] = r / (ROWS - 1);
+            aCorner[v * 3 + 2] = i;               // the shaft's index (WebGL1 has no gl_VertexID)
+          }
+        }
+        for (let r = 0; r < ROWS - 1; r++) {
+          const a0 = i * VPS + r * 2, a1 = a0 + 1, b0 = a0 + 2, b1 = a0 + 3;
+          idx[w++] = a0; idx[w++] = b0; idx[w++] = a1;
+          idx[w++] = a1; idx[w++] = b0; idx[w++] = b1;
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("aSeed", new THREE.BufferAttribute(aSeed, 4));
+      geo.setAttribute("aCorner", new THREE.BufferAttribute(aCorner, 3));
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+      geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+      shaftU = Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), {
+        uEye: { value: new THREE.Vector3() },       // swimmer xz + surface y
+        uRay: { value: new THREE.Vector3(0, -1, 0) }, // refracted sun, pointing down
+        uColor: { value: new THREE.Color(0xcdf2ff) },
+        uOpacity: { value: 0 },
+        uTime: { value: 0 },
+        uCount: { value: SHAFTS_MAX },
+      });
+      shaftMat = new THREE.ShaderMaterial({
+        name: "cbz-uw-shaft",
+        uniforms: shaftU,
+        fog: true,
         transparent: true,
-        opacity: 0,
         depthWrite: false,
+        depthTest: true,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
-        fog: false,
+        vertexShader: [
+          "attribute vec4 aSeed;",
+          "attribute vec3 aCorner;",
+          "uniform vec3 uEye;",
+          "uniform vec3 uRay;",
+          "uniform float uTime;",
+          "uniform float uCount;",
+          "varying vec2 vC;",
+          "varying float vK;",       // this shaft's intensity (flicker x near/edge-on fades)
+          "varying float vDepthV;",
+          "const float R = " + SHAFT_R.toFixed(1) + ";",
+          "const float H = " + SHAFT_H.toFixed(1) + ";",
+          "void main() {",
+          "  vC = aCorner.xy;",
+          // world-anchored root, torus-wrapped around the swimmer, drifting
+          // slowly as the swell that focuses it moves on
+          "  vec2 seed = aSeed.xy + vec2(sin(uTime * 0.043 + aSeed.w), cos(uTime * 0.037 + aSeed.w * 1.7)) * 2.2;",
+          "  vec2 rel = mod(seed - uEye.xz + R, 2.0 * R) - R;",
+          "  vec3 root = vec3(uEye.x + rel.x, uEye.y - 0.12, uEye.z + rel.y);",
+          "  vec3 P = root + uRay * (aCorner.y * H);",
+          // turn the ribbon about its own axis to face the eye
+          "  vec3 toEye = cameraPosition - P;",
+          "  vec3 S = cross(uRay, toEye);",
+          "  float sl = length(S);",
+          "  S = sl > 1e-4 ? S / sl : vec3(1.0, 0.0, 0.0);",
+          "  float wid = aSeed.z * (1.0 + 0.85 * aCorner.y);",
+          "  P += S * aCorner.x * wid * 0.5;",
+          // a shaft you are standing in, or looking straight down, is not a
+          // shaft: fade it near the lens and edge-on
+          "  float dEye = length(rel);",
+          "  float near = smoothstep(2.0, 7.0, dEye);",
+          "  float edge = 1.0 - pow(abs(dot(normalize(toEye), uRay)), 6.0);",
+          // its own slow beat: two incommensurate sines, never fully dark
+          "  float fl = 0.55 + 0.30 * sin(uTime * 0.71 + aSeed.w * 3.1) + 0.15 * sin(uTime * 1.93 + aSeed.w * 7.7);",
+          // a broad shaft is the same light spread wider: dimmer per pixel
+          "  vK = near * edge * fl * clamp(1.5 / (0.5 + aSeed.z), 0.3, 1.0);",
+          "  vec4 mv = modelViewMatrix * vec4(P, 1.0);",
+          "  vDepthV = -mv.z;",
+          "  gl_Position = projectionMatrix * mv;",
+          // shafts past the tier's budget collapse to nothing
+          "  if (aCorner.z >= uCount) gl_Position = vec4(0.0, 0.0, -2.0, 1.0);",
+          "}",
+        ].join("\n"),
+        fragmentShader: [
+          "uniform vec3 uColor;",
+          "uniform float uOpacity;",
+          "uniform vec3 fogColor;",
+          "uniform float fogNear;",
+          "uniform float fogFar;",
+          "varying vec2 vC;",
+          "varying float vK;",
+          "varying float vDepthV;",
+          "void main() {",
+          "  float side = 1.0 - abs(vC.x);",
+          "  float feather = side * side * (3.0 - 2.0 * side);",
+          "  feather *= feather;",
+          // the root fades in over the first half metre: no ruler line along
+          // the underside of the surface
+          "  float top = smoothstep(0.0, 0.035, vC.y);",
+          "  float decay = exp(-2.6 * vC.y) * (1.0 - smoothstep(0.7, 1.0, vC.y));",
+          // additive light cannot be fogged toward a colour, only extinguished
+          "  float ext = 1.0 - smoothstep(fogNear, fogFar * 1.5, vDepthV);",
+          "  float a = uOpacity * vK * feather * top * decay * ext;",
+          "  if (a < 0.002) discard;",
+          "  gl_FragColor = vec4(uColor * a, 1.0);",
+          "}",
+        ].join("\n"),
       });
-      shaftMat.name = "cbz-uw-shaft";
-      shafts = [];
-      const geo = new THREE.PlaneGeometry(3.2, SHAFT_H, 1, 1);
-      for (let i = 0; i < SHAFTS; i++) {
-        const m = new THREE.Mesh(geo, shaftMat);
-        m.name = "cbz-uw-shaft" + i;
-        m.frustumCulled = false;
-        m.renderOrder = 7;
-        m.userData.uwFx = true;
-        m.layers.set(FX_LAYER);
-        // Golden-angle spiral: an even, deterministic spread with no rng.
-        // ox/oz is the seed offset from the swimmer; wx/wz is the WORLD spot
-        // the shaft then holds on to (that is what gives it parallax).
-        const a = i * 2.39996, rr = 5 + (i / SHAFTS) * (SHAFT_R - 8);
-        m.userData.ox = Math.cos(a) * rr;
-        m.userData.oz = Math.sin(a) * rr;
-        m.userData.wx = m.userData.ox;
-        m.userData.wz = m.userData.oz;
-        m.scale.x = 0.7 + (i % 3) * 0.35;
-        shafts.push(m);
-        fxRoot.add(m);
-      }
+      shafts = new THREE.Mesh(geo, shaftMat);
+      shafts.name = "cbz-uw-shafts";
+      shafts.frustumCulled = false;
+      shafts.renderOrder = 7;
+      shafts.userData.uwFx = true;
+      shafts.layers.set(FX_LAYER);
+      fxRoot.add(shafts);
     }
 
     fxRoot.add(buildSnow());
@@ -1082,32 +1169,35 @@
         Math.min(1, 0.54 + tint.g * 0.7),
         Math.min(1, 0.76 + tint.b * 0.45));
     }
-    if (shafts && shaftMat) {
+    if (shafts && shaftU) {
       const gfade = Math.max(0, 1 - depth / 30);
-      shaftMat.opacity = 0.30 * gfade * gfade * day * (1 - murkK);
-      const vis = shaftMat.opacity > 0.004;
-      for (let i = 0; i < shafts.length; i++) {
-        const m = shafts[i];
-        let dx = m.userData.wx - camX, dz = m.userData.wz - camZ;
-        // First dive (or a teleport across the map): re-seed rather than
-        // wrapping a few dozen metres per frame for the next ten seconds.
-        if (Math.abs(dx) > SHAFT_R * 3 || Math.abs(dz) > SHAFT_R * 3) {
-          m.userData.wx = camX + m.userData.ox; m.userData.wz = camZ + m.userData.oz;
-          dx = m.userData.ox; dz = m.userData.oz;
-        }
-        // torus wrap: keep every shaft inside SHAFT_R of the swimmer
-        if (dx > SHAFT_R) { m.userData.wx -= SHAFT_R * 2; dx -= SHAFT_R * 2; }
-        else if (dx < -SHAFT_R) { m.userData.wx += SHAFT_R * 2; dx += SHAFT_R * 2; }
-        if (dz > SHAFT_R) { m.userData.wz -= SHAFT_R * 2; dz -= SHAFT_R * 2; }
-        else if (dz < -SHAFT_R) { m.userData.wz += SHAFT_R * 2; dz += SHAFT_R * 2; }
-        const d = Math.hypot(dx, dz);
-        m.visible = vis && d > 3.5;
-        if (!m.visible) continue;
-        m.position.set(m.userData.wx, surfY - SHAFT_H * 0.5 + 0.4, m.userData.wz);
-        // yaw to face the eye (billboard about Y only — a shaft leans, it
-        // never rolls) plus a slow lean so the column is not a dead vertical.
-        m.rotation.y = Math.atan2(-dx, -dz);
-        m.rotation.z = Math.sin(t * 0.11 + i) * 0.06;
+      // additive, so the per-pixel sum of several overlapping ribbons is what
+      // the eye reads: lower per-shaft gain than the seven quads had
+      const op = 0.30 * gfade * gfade * day * (1 - murkK);
+      shaftU.uOpacity.value = op;
+      shafts.visible = op > 0.004;
+      if (shafts.visible) {
+        shaftU.uTime.value = t;
+        shaftU.uEye.value.set(camX, surfY, camZ);
+        shaftU.uCount.value = shaftBudget();
+        // THE REFRACTED SUN (Snell, water n = 1.333). Light travels -L; a
+        // flat surface bends it toward the vertical, so the steepest a shaft
+        // can lean is ~48.6 deg however low the sun is.
+        const sunT = CBZ.sunTarget || (CBZ.sun && CBZ.sun.target) || null;
+        if (CBZ.sun && sunT) _sunL.copy(CBZ.sun.position).sub(sunT.position);
+        else _sunL.set(-0.34, 0.84, 0.42);
+        if (_sunL.y < 0.05) _sunL.y = 0.05;            // moon / dusk: keep it down-going
+        _sunL.normalize();
+        const eta = 1 / 1.333, cosI = _sunL.y;
+        const k = 1 - eta * eta * (1 - cosI * cosI);
+        _ray.set(-_sunL.x * eta, 0, -_sunL.z * eta);
+        _ray.y = -Math.sqrt(Math.max(0, k));
+        _ray.normalize();
+        shaftU.uRay.value.copy(_ray);
+        shaftU.uColor.value.setRGB(
+          Math.min(1, 0.55 + tint.r * 0.9),
+          Math.min(1, 0.78 + tint.g * 0.5),
+          Math.min(1, 0.86 + tint.b * 0.35));
       }
     }
     driveSnow(t, surfY, depth, day, tint);

@@ -771,10 +771,64 @@
     barRun(leaf, lc, -DOOR_W / 2 + 0.07, DOOR_W / 2 - 0.07, 0, 0.03, LEAF_TOP);
     faceBox(leaf, lc, -DOOR_W / 2 + 0.035, (0.03 + LEAF_TOP) / 2, 0, 0.07, LEAF_TOP - 0.03, 0.1);   // stiles
     faceBox(leaf, lc, DOOR_W / 2 - 0.035, (0.03 + LEAF_TOP) / 2, 0, 0.07, LEAF_TOP - 0.03, 0.1);
+    /* THE HARDWARE a barred slider actually carries (2026-10-31; it was a
+       bare box on the stile with two slivers for keyways):
+         · a LOCK CASE on the lock stile — a surface case with a bevelled
+           face plate each side, a round key escutcheon and a turned
+           cylinder in it, and a vertical PULL on stand-offs on the corridor
+           face (the officer slides the leaf by it once the device releases);
+         · a FOOD PASS / CUFF PORT at waist height: a welded frame through
+           the bars with a hinged flap on the corridor side, two knuckles
+           on its bottom edge and a slide bolt on the top;
+         · a solid KICK PANEL across the foot of the leaf, which is where a
+           real one takes its boots and its mop bucket;
+         · ROLLER HANGERS: a strap up into the housing, a wheel on its axle. */
     const lockT = c.flip ? -DOOR_W / 2 + 0.12 : DOOR_W / 2 - 0.12;  // the stile that meets the jamb
-    faceBox(leaf, lc, lockT, 1.12, 0, 0.16, 0.34, 0.12);           // lock box
-    for (const o of [-0.065, 0.065]) faceBox(leaf, lc, lockT, 1.18, o, 0.03, 0.05, 0.012);   // keyways
-    for (const tt of [-DOOR_W / 2 + 0.2, DOOR_W / 2 - 0.2]) faceBox(leaf, lc, tt, LEAF_TOP + 0.08, 0, 0.06, 0.16, 0.05);  // roller hangers
+    const inT = c.flip ? 1 : -1;                                     // from the lock stile toward the leaf's middle
+    // a disc normal to the face, centred `off` out of it
+    const faceDisc = (t, y, off, r, len, seg) => {
+      const g = new THREE.CylinderGeometry(r, r, len, seg || 14);
+      if (lc.dx !== 0) g.rotateZ(Math.PI / 2); else g.rotateX(Math.PI / 2);
+      const x = lc.dx !== 0 ? lc.dx * off : t, z = lc.dx !== 0 ? t : lc.dz * off;
+      g.translate(x, y + LIFT, z);
+      leaf.push(g);
+    };
+    faceBox(leaf, lc, lockT, 1.12, 0, 0.17, 0.40, 0.11);           // lock case
+    for (const s of [-1, 1]) {
+      faceBox(leaf, lc, lockT, 1.12, s * 0.058, 0.20, 0.44, 0.008);  // face plates, proud of the case
+      faceBox(leaf, lc, lockT, 1.12, s * 0.064, 0.18, 0.42, 0.006);  // bevel step
+      faceDisc(lockT, 1.20, s * 0.072, 0.032, 0.012);                // escutcheon
+      faceDisc(lockT, 1.20, s * 0.08, 0.018, 0.012, 10);             // cylinder
+      faceBox(leaf, lc, lockT, 1.20, s * 0.087, 0.004, 0.02, 0.004); // keyway slot
+    }
+    // the pull, corridor side, inboard of the case
+    const pullT = lockT + inT * 0.17;
+    faceBox(leaf, lc, pullT, 1.12, 0.10, 0.026, 0.42, 0.026);
+    for (const y of [0.93, 1.31]) faceBox(leaf, lc, pullT, y, 0.075, 0.02, 0.02, 0.05);
+    // the food pass: frame through the bars, flap on the corridor face
+    const fpT = c.flip ? 0.12 : -0.12, FPW = 0.42, FPH = 0.17, FPY = 1.02;
+    for (const s of [-1, 1]) {
+      faceBox(leaf, lc, fpT, FPY + s * (FPH / 2 + 0.025), 0, FPW + 0.1, 0.05, 0.09);   // frame rails
+      faceBox(leaf, lc, fpT + s * (FPW / 2 + 0.025), FPY, 0, 0.05, FPH, 0.09);          // frame stiles
+    }
+    faceBox(leaf, lc, fpT, FPY, 0.055, FPW, FPH, 0.012);                                // the flap
+    for (const s of [-1, 1]) {                                                         // hinge knuckles, axis along the face
+      const g = new THREE.CylinderGeometry(0.013, 0.013, 0.08, 8);
+      if (lc.dx !== 0) g.rotateX(Math.PI / 2); else g.rotateZ(Math.PI / 2);
+      const t = fpT + s * 0.13, off = 0.062;
+      g.translate(lc.dx !== 0 ? lc.dx * off : t, FPY - FPH / 2 - 0.012 + LIFT, lc.dx !== 0 ? t : lc.dz * off);
+      leaf.push(g);
+    }
+    faceBox(leaf, lc, fpT, FPY + FPH / 2 - 0.02, 0.07, 0.10, 0.02, 0.016);              // slide bolt
+    faceBox(leaf, lc, fpT + 0.06, FPY + FPH / 2 - 0.02, 0.085, 0.02, 0.04, 0.02);       // its knob
+    // kick panel, between the stiles
+    faceBox(leaf, lc, 0, 0.03 + 0.14, 0, DOOR_W - 0.14, 0.28, 0.012);
+    // roller hangers: strap, axle, wheel
+    for (const tt of [-DOOR_W / 2 + 0.2, DOOR_W / 2 - 0.2]) {
+      faceBox(leaf, lc, tt, LEAF_TOP + 0.06, 0, 0.06, 0.14, 0.012);
+      faceDisc(tt, LEAF_TOP + 0.12, 0, 0.045, 0.03, 14);
+      faceDisc(tt, LEAF_TOP + 0.12, 0, 0.012, 0.06, 8);
+    }
     const leafMesh = mergedMesh(leaf, C_BAR, true, true);
     if (leafMesh) { leafMesh.userData.doorLeaf = "bars"; leafMesh.userData.debrisKind = "metal"; }
     c.bars = leafMesh;
@@ -1577,8 +1631,25 @@
     const fx = cx + dx * (d / 2 - 0.10), fz = cz + dz * (d / 2 - 0.10);
     addBox(fx, FY + CH / 2, fz, dx ? 0.20 : w, CH, dz ? 0.20 : w, C_PART_D, { cast: false, blockLOS: true,
       solid: true, y0: FY, y1: FY + CH });
-    for (let i = 0; i < 5; i++)
-      addBox(fx + dx * 0.11, FY + 1.30 + i * 0.16, fz + dz * 0.11, dx ? 0.03 : w * 0.5, 0.06, dz ? 0.03 : w * 0.5, C_STEEL_D, { cast: false });
+    /* the bay's access door (it was five slats floating on the concrete): a
+       steel frame, a hollow-metal leaf with a louvred lower panel, a lever
+       and a lock cylinder, hinges on the far jamb. Static; batched. */
+    const P = (t, off) => [fx + dx * off + (dx ? 0 : t), fz + dz * off + (dz ? 0 : t)];
+    const fb = (t, y, off, along, h, across, col) => {
+      const p = P(t, off);
+      addBox(p[0], FY + y, p[1], dx ? across : along, h, dz ? across : along, col, { cast: false });
+    };
+    const DWd = 0.92, DH = 2.12, F = 0.06;
+    for (const s of [-1, 1]) fb(s * (DWd / 2 + F / 2), (DH + F) / 2, 0.11, F, DH + F, 0.05, C_DARK);   // jambs
+    fb(0, DH + F / 2, 0.11, DWd + 2 * F, F, 0.05, C_DARK);                                               // head
+    fb(0, DH / 2, 0.112, DWd - 0.01, DH - 0.01, 0.03, C_STEEL_D);                                        // leaf
+    for (let i = 0; i < 6; i++) fb(0, 0.22 + i * 0.07, 0.13, DWd * 0.62, 0.035, 0.012, C_DARK);         // louvres
+    fb(0, 0.38, 0.126, DWd * 0.66, 0.46, 0.006, C_STEEL);                                                // louvre frame
+    const lt = -(DWd / 2 - 0.1);
+    fb(lt, 1.02, 0.135, 0.07, 0.07, 0.02, C_STEEL);                                                      // lever rose
+    fb(lt + 0.07, 1.02, 0.15, 0.14, 0.022, 0.022, C_STEEL);                                              // lever
+    fb(lt, 1.16, 0.133, 0.045, 0.045, 0.012, C_STEEL);                                                   // cylinder
+    for (const y of [0.25, 1.05, 1.85]) fb(DWd / 2 - 0.01, y, 0.135, 0.025, 0.11, 0.025, C_STEEL);      // hinges
     addBox(cx, FY + CH + RT / 2, cz, dx ? d + WT : w + WT, RT, dx ? w + WT : d + WT, C_ROOF, { cast: false, blockLOS: true });
   }
 
@@ -1629,40 +1700,119 @@
   //      and the brackets it hangs on. Colliders: the RAIL only, banded
   //      [FY, FY+RAIL_H] — a rail 3.9 m up is nothing to a man on the
   //      ground, to his navigator, or to the lane audits below. ------------
+  /* WHAT A CELL-HOUSE GALLERY IS MADE OF (rebuilt 2026-10-31). It was a flat
+     14 cm slab with three square sticks along its edge, which from the hall
+     floor read as a shelf with a towel rail on it. A real tier walk is
+     fabricated steel and every part of it shows from below:
+       · a CHANNEL FASCIA (a 250 mm C-section) along the open edge that the
+         deck plate sits in, flanges turned back under the deck;
+       · a deck plate with its seams every 1.2 m and a 120 mm TOE PLATE so
+         nothing is kicked off it;
+       · a 1.05 m guard of ROUND TUBE (48 mm handrail, 42 mm mid rail) on
+         50 mm square STANCHIONS at ~1.5 m, each on a base plate, and
+         vertical PICKETS at 110 mm between a bottom rail and the handrail —
+         a cell-house rail is a fence against throwing a man (or a chair) to
+         the floor, not a balustrade you can step through;
+       · a CANTILEVER under the deck at every cell partition: a 150 mm beam
+         off a wall plate with a diagonal KNEE BRACE back to the wall.
+     Colliders, platforms and every coordinate are unchanged: this is the
+     drawing only. Everything static still merges into two meshes. */
   const gal = [];                       // merged dark steel: rails, brackets, treads
   const dk = [];                        // the deck plates, a lighter grey
-  function deckRun(x0, x1, z0, z1) {
+  const _ua = new THREE.Vector3(), _ub = new THREE.Vector3(), _ud = new THREE.Vector3(), _uq = new THREE.Quaternion();
+  const _Y = new THREE.Vector3(0, 1, 0), _um = new THREE.Matrix4();
+  // a round rod from a to b (world), merged into `list`
+  function pushRod(list, ax, ay, az, bx, by, bz, r, seg) {
+    _ua.set(ax, ay + LIFT, az); _ub.set(bx, by + LIFT, bz);
+    _ud.subVectors(_ub, _ua);
+    const len = _ud.length();
+    if (len < 1e-4) return;
+    const g = new THREE.CylinderGeometry(r, r, len, seg || 8, 1, true);
+    _uq.setFromUnitVectors(_Y, _ud.normalize());
+    g.applyMatrix4(_um.makeRotationFromQuaternion(_uq));
+    g.translate((_ua.x + _ub.x) / 2, (_ua.y + _ub.y) / 2, (_ua.z + _ub.z) / 2);
+    list.push(g);
+  }
+  // a rectangular member from a to b (world): `w` across horizontally, `h` up
+  function pushBeam(list, ax, ay, az, bx, by, bz, w, h) {
+    const dx = bx - ax, dy = by - ay, dz = bz - az;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1e-4) return;
+    const g = new THREE.BoxGeometry(len, h, w);
+    g.rotateZ(Math.atan2(dy, Math.hypot(dx, dz)));
+    g.rotateY(-Math.atan2(dz, dx));
+    g.translate((ax + bx) / 2, (ay + by) / 2 + LIFT, (az + bz) / 2);
+    list.push(g);
+  }
+  // `ax` the axis the run lies along, `oe` which side of the rect is OPEN
+  // (the fascia side) on the cross axis: +1 / -1.
+  function deckRun(x0, x1, z0, z1, ax, oe) {
     pushBox(dk, (x0 + x1) / 2, FY - GDECK / 2, (z0 + z1) / 2, x1 - x0, GDECK, z1 - z0);
+    if (!oe) return;
+    const along = ax === "x" ? x1 - x0 : z1 - z0, a0 = ax === "x" ? x0 : z0;
+    const edge = ax === "x" ? (oe > 0 ? z1 : z0) : (oe > 0 ? x1 : x0);
+    const box = (t, y, alongL, h, across, off) => {
+      if (ax === "x") pushBox(gal, t, y, edge + off, alongL, h, across);
+      else pushBox(gal, edge + off, y, t, across, h, alongL);
+    };
+    const mid = a0 + along / 2;
+    // the channel fascia: web just outboard of the deck edge, flanges back under it
+    box(mid, FY - 0.11, along, 0.25, 0.012, oe * 0.006);
+    box(mid, FY - 0.229, along, 0.012, 0.08, -oe * 0.034);
+    box(mid, FY - 0.006, along, 0.012, 0.07, -oe * 0.029);
+    // plate seams
+    const n = Math.max(1, Math.round(along / 1.2));
+    for (let i = 1; i < n; i++) {
+      const t = a0 + (along * i) / n;
+      if (ax === "x") pushBox(gal, t, FY + 0.001, (z0 + z1) / 2, 0.008, 0.004, z1 - z0 - 0.02);
+      else pushBox(gal, (x0 + x1) / 2, FY + 0.001, t, x1 - x0 - 0.02, 0.004, 0.008);
+    }
   }
   // rail along one edge. `ax` = the axis the rail runs along; (ox,oz) the edge.
   function railRun(ax, a0, a1, ox, oz) {
-    const len = a1 - a0, mid = (a0 + a1) / 2;
+    const len = a1 - a0;
+    const P = (t, y) => (ax === "z" ? [ox, y, t] : [t, y, oz]);
+    const rod = (t0, y0, t1, y1, r, seg) => { const p = P(t0, y0), q = P(t1, y1); pushRod(gal, p[0], p[1], p[2], q[0], q[1], q[2], r, seg); };
     const box = (t, y, along, h, across) => {
       if (ax === "z") pushBox(gal, ox, y, t, across, h, along);
       else pushBox(gal, t, y, oz, along, h, across);
     };
-    box(mid, FY + RAIL_H, len, 0.06, 0.06);          // top rail
-    box(mid, FY + RAIL_H * 0.55, len, 0.05, 0.05);   // mid rail
-    box(mid, FY + 0.07, len, 0.14, 0.04);            // kick plate
-    const N = Math.max(1, Math.round(len / 1.9));
-    for (let i = 0; i <= N; i++) box(a0 + (len * i) / N, FY + RAIL_H / 2, 0.06, RAIL_H, 0.06);
+    rod(a0, FY + RAIL_H - 0.024, a1, FY + RAIL_H - 0.024, 0.024, 10);   // 48 mm handrail
+    rod(a0, FY + 0.56, a1, FY + 0.56, 0.021, 8);                        // 42 mm mid rail
+    box((a0 + a1) / 2, FY + 0.18, len, 0.024, 0.032);                   // picket bottom rail
+    box((a0 + a1) / 2, FY + 0.06, len, 0.12, 0.010);                    // toe plate
+    // stanchions on base plates
+    const N = Math.max(1, Math.round(len / 1.5));
+    for (let i = 0; i <= N; i++) {
+      const t = a0 + (len * i) / N;
+      box(t, FY + (RAIL_H - 0.05) / 2, 0.05, RAIL_H - 0.05, 0.05);
+      box(t, FY + 0.006, 0.14, 0.012, 0.14);
+    }
+    // pickets: 16 mm square at 110 mm, bottom rail to handrail
+    const NPk = Math.max(1, Math.round(len / 0.11));
+    for (let k = 1; k < NPk; k++) {
+      const t = a0 + (len * k) / NPk;
+      box(t, FY + (0.19 + RAIL_H - 0.04) / 2, 0.016, RAIL_H - 0.04 - 0.19, 0.016);
+    }
     // the collider, on the same edge, the rail's own height
     if (ax === "z") solid(ox - 0.08, a0, ox + 0.08, a1, FY, FY + RAIL_H);
     else solid(a0, oz - 0.08, a1, oz + 0.08, FY, FY + RAIL_H);
   }
-  // steel angle brackets under the deck, one per cell partition
+  // the cantilever under the deck at a partition, (x,z) on the cell face,
+  // (dx,dz) out over the hall: a beam the deck's width and a knee brace
   function bracket(x, z, dx, dz) {
-    for (let i = 0; i < 2; i++) {
-      const t = 0.35 + i * 0.55;
-      pushBox(gal, x + dx * t, FY - GDECK - 0.10, z + dz * t, dx ? 0.12 : 0.12, 0.12, dz ? 0.12 : 0.12);
-    }
-    pushBox(gal, x + dx * 0.55, FY - GDECK - 0.24, z + dz * 0.55, dx ? 1.05 : 0.12, 0.10, dz ? 1.05 : 0.12);
+    const yb = FY - GDECK - 0.075, out = GW - 0.04;
+    pushBeam(gal, x, yb, z, x + dx * out, yb, z + dz * out, 0.008, 0.15);                  // web
+    pushBeam(gal, x, yb - 0.071, z, x + dx * out, yb - 0.071, z + dz * out, 0.09, 0.008);  // bottom flange
+    pushBeam(gal, x + dx * 0.03, yb - 0.95, z + dz * 0.03, x + dx * 0.95, yb - 0.08, z + dz * 0.95, 0.07, 0.07);   // knee brace
+    pushBox(gal, x + dx * 0.01, yb, z + dz * 0.01, dx ? 0.02 : 0.18, 0.26, dz ? 0.02 : 0.18);           // wall plates
+    pushBox(gal, x + dx * 0.01, yb - 0.95, z + dz * 0.01, dx ? 0.02 : 0.16, 0.18, dz ? 0.02 : 0.16);
   }
   // north gallery (in front of row A and across the post), then the sides
   const NG1 = NFACE + GW;
-  deckRun(WFACE, EFACE, NFACE, NG1);
-  deckRun(WFACE, WFACE + GW, NG1, SZ1);
-  deckRun(EFACE - GW, EFACE, NG1, SZ1);
+  deckRun(WFACE, EFACE, NFACE, NG1, "x", 1);
+  deckRun(WFACE, WFACE + GW, NG1, SZ1, "z", 1);
+  deckRun(EFACE - GW, EFACE, NG1, SZ1, "z", -1);
   railRun("x", WFACE + GW, EFACE - GW, 0, NG1);
   railRun("z", NG1, SZ0, WFACE + GW, 0);
   railRun("z", NG1, SZ0, EFACE - GW, 0);
@@ -1681,6 +1831,11 @@
   //      the flight's OWN first 3.1 m of run. Feet on the lower treads were
   //      inside the band, so the flight was a wall from the floor and nobody,
   //      player or inmate, could ever get on it. -------------------------
+  /* The steel is an OPEN-RISER flight: a channel stringer each side, every
+     tread a plate with a turned-down nosing on two angle cleats; on the open
+     side the gallery's own guard (round-tube rail and mid rail on raked
+     stanchions, pickets between), and a wall handrail on brackets. Same
+     colliders, same flight record. */
   const stairLinks = [];
   function stair(side) {
     const xB = side * STAIR_X0, xT = side * (Math.abs(WFACE) - GW);   // bottom, top
@@ -1688,29 +1843,46 @@
     const run = Math.abs(xT - xB);
     const N = Math.round(FY / 0.19);                                // risers
     const tread = run / N, rise = FY / N;
+    const IN = STAIR_W - 0.16;                                       // between the stringers
     for (let i = 1; i <= N; i++) {
       const x = xB + side * (tread * (i - 0.5)), y = rise * i;
-      pushBox(gal, x, y - 0.03, zc, tread + 0.02, 0.06, STAIR_W);   // tread
-      pushBox(gal, x - side * (tread * 0.5 - 0.02), y - rise / 2 - 0.03, zc, 0.04, rise, STAIR_W); // riser
+      pushBox(dk, x, y - 0.012, zc, tread + 0.03, 0.024, IN);                         // the plate
+      pushBox(gal, x - side * (tread / 2 + 0.005), y - 0.035, zc, 0.012, 0.07, IN);   // nosing
+      for (const z of [SZ0 + 0.09, SZ1 - 0.09]) pushBox(gal, x, y - 0.06, z, tread * 0.8, 0.06, 0.012);   // cleats
     }
-    // stringers: two sloped plates, drawn as rotated meshes (addBox has no yaw)
-    for (const z of [SZ0 + 0.05, SZ1 - 0.05]) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(run, FY) + 0.3, 0.32, 0.06), CBZ.cmat(C_DARK));
-      m.position.set((xB + xT) / 2, FY / 2 - 0.10, z);
-      m.rotation.z = side * Math.atan2(FY, run);
-      m.castShadow = false; m.receiveShadow = true;
-      root.add(m);
+    // stringers: a channel each side, web + top and bottom flanges
+    const ang = Math.atan2(FY, run);
+    const ox = Math.sin(ang) * 0.15, oy = Math.cos(ang) * 0.15;     // the web's centre sits under the nosing line
+    const ax0 = xB - side * 0.12, ay0 = 0, bx0 = xT + side * 0.12, by0 = FY;
+    for (const z of [SZ0 + 0.06, SZ1 - 0.06]) {
+      const inw = z < zc ? 1 : -1;
+      pushBeam(gal, ax0 + side * ox, ay0 - oy, z, bx0 + side * ox, by0 - oy, z, 0.012, 0.30);
+      pushBeam(gal, ax0, ay0, z + inw * 0.035, bx0, by0, z + inw * 0.035, 0.07, 0.012);
+      pushBeam(gal, ax0 + side * ox * 2, ay0 - oy * 2, z + inw * 0.035, bx0 + side * ox * 2, by0 - oy * 2, z + inw * 0.035, 0.07, 0.012);
     }
-    // handrail on the open (north) side: posts, and a rail that climbs with them
+    // the guard on the open (north) side
+    const RZ = SZ0 + 0.03;
     const NP = 5;
     for (let i = 0; i <= NP; i++) {
       const t = i / NP, x = xB + side * run * t, y = FY * t;
-      pushBox(gal, x, y + 0.5, SZ0 + 0.03, 0.05, 1.0, 0.05);
+      pushBox(gal, x, y + 0.5, RZ, 0.05, 1.0, 0.05);
     }
-    const hr = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(run, FY), 0.05, 0.05), CBZ.cmat(C_DARK));
-    hr.position.set((xB + xT) / 2, FY / 2 + 1.0, SZ0 + 0.03);
-    hr.rotation.z = side * Math.atan2(FY, run);
-    hr.castShadow = false; root.add(hr);
+    pushRod(gal, xB, 1.0 - 0.024, RZ, xT, FY + 1.0 - 0.024, RZ, 0.024, 10);
+    pushRod(gal, xB, 0.52, RZ, xT, FY + 0.52, RZ, 0.021, 8);
+    pushRod(gal, xB, 0.16, RZ, xT, FY + 0.16, RZ, 0.012, 6);                       // picket rail
+    const NPk = Math.round(run / 0.13);
+    for (let k = 1; k < NPk; k++) {
+      const t = k / NPk, x = xB + side * run * t, y = FY * t;
+      pushBox(gal, x, y + 0.16 + 0.8 / 2, RZ, 0.016, 0.8, 0.016);
+    }
+    // the wall handrail, on brackets off the south wall's face
+    const WZ = SZ1 + 0.04;
+    pushRod(gal, xB - side * 0.2, 0.9, WZ - 0.08, xT, FY + 0.9, WZ - 0.08, 0.021, 8);
+    for (let i = 0; i <= 3; i++) {
+      const t = i / 3, x = xB + side * run * t, y = FY * t + 0.9;
+      pushBox(gal, x, y - 0.04, WZ - 0.045, 0.02, 0.08, 0.07);
+      pushBox(gal, x, y - 0.08, WZ - 0.006, 0.08, 0.12, 0.012);
+    }
     // the handrail's collider: a stepped band the rail's own 6 cm thick, on
     // the flight's north edge (outside the walk lane, never across it)
     for (let i = 0; i < NP; i++) {

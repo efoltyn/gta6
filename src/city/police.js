@@ -1213,6 +1213,25 @@
     }
   }
 
+  /* AN ISLAND DROPPED BEHIND YOU (world/island_town.js islandTownDrop): its
+     helicopter goes with it, unless it is up and after you, in which case it
+     comes along under whatever is in force (the next island, or the open sea:
+     world/archipelago.js toSea). Left under the dropped root, it kept that
+     whole island alive (memscope --isles --travel --in-jet). */
+  CBZ.cityPoliceChopperLeave = function (root) {
+    if (!chopper || !chopper.group || !root) return false;
+    let mine = false;
+    for (let p = chopper.group.parent; p; p = p.parent) if (p === root) { mine = true; break; }
+    if (!mine) return false;
+    const flying = chopper.phase !== "idle" && chopper.phase !== "down";
+    const A = CBZ.surv && CBZ.surv.arena;
+    if (flying && (g.wanted | 0) >= 3 && A && A.root && A.root !== root) {
+      A.root.add(chopper.group);
+      if (chopper.pool) A.root.add(chopper.pool);
+    } else { despawnChopper(); chopperRebuildT = 0; }
+    return true;
+  };
+
   // posted roadblock officers don't count toward the response total: the wall is
   // pressure AHEAD of you, layered ON TOP of the chase — it must never starve it.
   function liveCops() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead && !c._post) n++; return n; }

@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 442
+     Natural Disaster Survival, standing alone: index.html minus the 441
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -494,6 +494,7 @@ document.body.appendChild(b);}}catch(e){}})();
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
 <script src="src/world/treefoot.js?v=sight1011"></script>
 <script src="src/core/prio.js?v=arch2"></script>
+<script src="src/core/lightpin.js?v=w09290242x"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
@@ -519,7 +520,7 @@ document.body.appendChild(b);}}catch(e){}})();
      must load before any mode registers its base (city/mode.js, modes/*). -->
 <script src="src/systems/solidground.js?v=ric0929"></script>
 <!-- THE ONE STAIR SYSTEM: flight walk surfaces + level links + AI routes. Before any world builder (the prison builds at parse time). -->
-<script src="src/systems/stairs.js?v=sink1011"></script>
+<script src="src/systems/stairs.js?v=opensea1029"></script>
 <!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
 <script src="src/systems/craters.js?v=norim1020"></script>
 <!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
@@ -535,9 +536,9 @@ document.body.appendChild(b);}}catch(e){}})();
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=peak1014"></script>
-<script src="src/world/materials.js?v=nostep1013"></script>
+<script src="src/world/materials.js?v=canvas1029"></script>
 <script src="src/world/fuel_station.js?v=arrive1022"></script>
-<script src="src/world/prisonkit.js?v=tow929b"></script>
+<script src="src/world/prisonkit.js?v=canvas1029"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
@@ -604,7 +605,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <!-- sunglasses FITTED to the head they are worn on (every pair: bling, the detail kit, the portrait, warlord); after character.js + jewelry_kit.js (its street environment) -->
   <script src="src/entities/eyewear.js?v=armourm1011"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
-  <script src="src/entities/watch.js?v=protestcpu1022"></script>
+  <script src="src/entities/watch.js?v=memflat1029"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -667,7 +668,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/cuffedplayer.js?v=butt1022"></script>
 <script src="src/entities/verbposes.js?v=butt1022"></script>
 <script src="src/entities/meleeposes.js?v=melee1011"></script>
-<script src="src/systems/verbs_strike.js?v=fists1026"></script>
+<script src="src/systems/verbs_strike.js?v=memflat1029"></script>
 <script src="src/systems/melee.js?v=butt1022"></script>
 <script src="src/systems/bodyfall.js?v=bodymove1022"></script>
 <!-- CBZ.leave: PEOPLE WALK OUT, NOBODY VANISHES. Every game's "his part is over"
@@ -835,7 +836,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/camera.js?v=pres1028"></script>
-<script src="src/systems/physics.js?v=nogc1022"></script>
+<script src="src/systems/physics.js?v=opensea1029"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- THE ONE MOVER (CBZ.bodyMove) every human body is moved through, and the per-frame net (onUpdate 99.97) that puts back anything that crossed a wall. After physics.js (sweepCircle/collide/walkGroundAt). -->
 <script src="src/systems/bodymove.js?v=bodymove1022"></script>
@@ -965,7 +966,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=island1014"></script>
-<script src="src/systems/debris.js?v=rubbleappend1022"></script>
+<script src="src/systems/debris.js?v=memleak1029"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -985,7 +986,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_plan.js?v=isleopen1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=islesmem1029"></script>
+<script src="src/world/disaster_arena.js?v=opensea1029"></script>
 <script src="src/world/island_dressing.js?v=misleopstutte"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
 <script src="src/world/island_venue.js?v=misleopstutte"></script>
@@ -1028,7 +1029,7 @@ document.body.appendChild(b);}}catch(e){}})();
      mains, liquefaction, cars, the crowd, what falls on whom), drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
-<script src="src/systems/quake.js?v=seis1014"></script>
+<script src="src/systems/quake.js?v=memleak1029"></script>
 <!-- ==== PER-DISASTER MODULE SEAM ==========================================
      One line per disaster in the survival roster, each owned by exactly that
      disaster and nobody else. A disaster whose behaviour outgrows its entry in
@@ -1073,7 +1074,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=stage1026"></script>
+<script src="src/systems/disasters.js?v=memleak1029b"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=hands1022"></script>
@@ -1102,7 +1103,7 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=onesea1022"></script>
+<script src="src/world/water_spec.js?v=opensea1029"></script>
 <!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_runup.js?v=tsudir1020"></script>
 <!-- where the water is brown: the silt the run-up scoured off the land, carried out to sea by the backwash, spread and settled (the sea shader's turbidity mask), and CBZ.waterTurbidAt, the one turbidity + current query the underwater medium and the swimmer read -->
@@ -1364,7 +1365,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carlamps.js?v=night1022"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/carparts.js?v=mtrunk1trunk1"></script>
-<script src="src/city/carbody.js?v=mtrunk1trunk1"></script>
+<script src="src/city/carbody.js?v=memleak1029"></script>
 <script src="src/city/carwheels.js?v=cars2"></script>
 <!-- city/carseats.js: the ONE seat model (layouts per body, doors, the
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
@@ -1381,8 +1382,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
-<script src="src/city/carlod.js?v=mrg10200048"></script>
-<script src="src/city/vehicles.js?v=stall1022"></script>
+<script src="src/city/carlod.js?v=both1029"></script>
+<script src="src/city/vehicles.js?v=both1029"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playeraircraft.js?v=islesmem1029"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1417,7 +1418,7 @@ document.body.appendChild(b);}}catch(e){}})();
      cars (vehicles.js), a rooftop helipad with a flyable helicopter
      (playeraircraft.js CBZ.airParkFlyable), the island's weather fed into both.
      After vehicles.js, playeraircraft.js, bailout.js and aircraft_doors.js. -->
-<script src="src/world/island_vehicles.js?v=islesmem1029"></script>
+<script src="src/world/island_vehicles.js?v=both1029"></script>
 <!-- THE ARCHIPELAGO (mode "archipelago"): the disaster island's package built
      many times over on one sea, kilometres apart, streamed in as you near
      each one and dropped behind you. archipelago_map.js is the map as data;
@@ -1499,7 +1500,7 @@ document.body.appendChild(b);}}catch(e){}})();
      skin on buildings that are still standing. Reverts: ?cfg_COLLAPSE_V2=0
      (callers fall back to their snap) · ?cfg_COLLAPSE_FRAGMENTS=0 (chunks
      turn to dust instead of pieces) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
-<script src="src/city/collapse.js?v=livecut1022"></script>
+<script src="src/city/collapse.js?v=memleak1029b"></script>
 <script src="src/systems/strike.js?v=strike1013m"></script>
 <script src="src/city/structural.js?v=fx1029b"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
@@ -1811,7 +1812,7 @@ document.body.appendChild(b);}}catch(e){}})();
      always-updater is in the sort -->
 <!-- projected decals: blood cut out of the struck mesh's own triangles (cars) -->
 <script src="src/systems/surfacedecal.js?v=carblood930"></script>
-<script src="src/systems/gore.js?v=landblood1022"></script>
+<script src="src/systems/gore.js?v=canvas1029"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused
@@ -2279,7 +2280,7 @@ document.body.appendChild(b);}}catch(e){}})();
      scoreboard existed only to host those two rules and are gone with it. -->
 
 <!-- 5. quality + loop + boot -->
-<script src="src/core/quality.js?v=safeboot1014"></script>
+<script src="src/core/quality.js?v=shot1029"></script>
 
 <!-- REAL BOATS. Four hulls with real numbers replace one mesh wearing three
      name aliases: a 4.5m RIB, the 6.2m runabout (mesh untouched — zero art

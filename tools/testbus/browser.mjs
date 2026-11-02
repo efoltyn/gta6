@@ -141,11 +141,13 @@ export async function attachChrome(dbg, pid) {
 export async function connect(wsUrl) {
   const ws = new WebSocket(wsUrl);
   let id = 1; const pend = new Map();
-  const P = { ws, errors: [], closed: false };
+  const P = { ws, errors: [], closed: false, listeners: [] };
   await new Promise((res, rej) => { ws.addEventListener("open", res, { once: true }); ws.addEventListener("error", rej, { once: true }); });
   ws.addEventListener("close", () => { P.closed = true; for (const [, r] of pend) r({ __closed: true }); pend.clear(); });
   ws.addEventListener("message", (ev) => {
     const m = JSON.parse(ev.data);
+    // raw CDP events for a probe (t.on): heap snapshot chunks and the like
+    if (!m.id) for (const f of P.listeners) { try { f(m); } catch (_) {} }
     if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); return; }
     if (m.method === "Runtime.exceptionThrown") {
       const d = m.params.exceptionDetails;

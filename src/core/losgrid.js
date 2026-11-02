@@ -396,6 +396,16 @@
   };
 
   CBZ.losGridDirty = function () { dirty = true; };
+  /* LET GO. The grid keeps its own references to every blocker (objs, exact)
+     until the next cast rebuilds it, and out at sea between the isles nothing
+     casts: a dropped island's walls, and through their parents the whole
+     island, stayed alive in here until the next island was in force
+     (memscope --isles --travel --in-jet: ~130 MB). A teardown that took a
+     batch of blockers out calls this; the next cast rebuilds, as dirty did. */
+  CBZ.losGridRelease = function () {
+    dirty = true; builtFor = null; builtLen = 0;
+    n = 0; objs.length = 0; exact.length = 0; cells = new Map();
+  };
 
   /* REMOVE IN PLACE. A building teardown (city/structural.js hideReal,
      city/demolition.js) drops its walls from CBZ.losBlockers; the length

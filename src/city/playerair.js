@@ -42,33 +42,6 @@
   let _s = 47711;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
-  // SHAPE HELPERS (r128) — local copies of aircraft.js's sculptors (builders
-  // stay self-contained per file by project convention). taperBox scales each
-  // vertex's X/Y by a factor that depends on its Z (nose=+Z → nz, tail=-Z →
-  // tz), with optional roofline (top) / keel (bot) narrowing.
-  // taperBox lives ONCE in world/carfx.js now (was copied into 6 builders).
-  function taperBox(w, h, d, opt) { return CBZ.taperBox(w, h, d, opt); }
-  // one thin tapered/drooped rotor blade geometry rooted at the hub (extends +X)
-  function bladeGeo(len, droop) {
-    const geo = new THREE.BoxGeometry(len, 0.06, 0.34, 6, 1, 1);
-    const pos = geo.attributes.position, hl = len / 2;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), t = (x + hl) / len;
-      pos.setX(i, x + hl);                                   // root at origin, +X
-      pos.setZ(i, pos.getZ(i) * (1 - 0.45 * t));
-      pos.setY(i, pos.getY(i) - (droop || 0) * t * t);
-    }
-    pos.needsUpdate = true; geo.computeVertexNormals();
-    return geo;
-  }
-  // env-mapped vehicle materials (carfx.js roles: paint/glass/chrome/metal/
-  // interior/…) with a flat-Lambert fallback. These craft spawn at RUNTIME
-  // (phone calls), so carfx is loaded long before the first summon.
-  function vmat(role, color, opts) {
-    if (CBZ.vehicleMat) { try { return CBZ.vehicleMat(role, color, opts); } catch (e) {} }
-    return CBZ.mat ? CBZ.mat(color, opts) : new THREE.MeshLambertMaterial({ color: color });
-  }
-
   // ---- tunables -------------------------------------------------------------
   const CRUISE_Y    = 48;     // ride cruise altitude (clears every core-tower parapet at FH=4.6)
   const HELI_SPEED  = 30;     // m/s lateral (a personal heli is quick)
@@ -80,7 +53,6 @@
   const STRIKE_CD   = 40;     // s jet rearm
 
   // ---- shared state ---------------------------------------------------------
-  let G = null;               // lazy geom/mat cache
   let chopper = null;         // active personal heli or null
   let chopperCD = 0, strikeCD = 0;
 
@@ -113,125 +85,56 @@
     return true;
   }
 
-  // ---- shared assets --------------------------------------------------------
-  function assets() {
-    if (G) return G;
-    const shared = (o) => { if (o) o._shared = true; return o; };
-    const M = (c, o) => { const m = CBZ.mat ? CBZ.mat(c, o) : new THREE.MeshLambertMaterial({ color: c }); return shared(m); };
-    G = {
-      // ---- YOUR CHOPPER: a warm yellow/white executive taxi — instantly reads
-      // as "the friendly one" against the black-and-white police airframes.
-      matCab:  shared(vmat('paint', 0xe8b23c)),           // warm taxi yellow
-      matRoof: shared(vmat('paint', 0xf2f3f5)),           // white roof / boom / accents
-      matTrim: shared(vmat('metal', 0x3c434c)),           // skids / struts / rotor head
-      matSeat: shared(vmat('interior', 0x14171c)),        // seats + dark insets
-      matBlade:shared(vmat('metal', 0x1e242b)),           // solid rotor blades
-      matGlow: M(0xffd98a, { emissive: 0xffd98a, ei: 0.7 }),   // warm landing-light bar
-      // ONE-OFF transparent bubble glass: the shared carfx 'glass' is opaque on
-      // purpose (sort cost at 100s of cars), but a single summoned chopper can
-      // afford true see-through panes — you SEE the seats you're about to take.
-      matBubble: shared(new THREE.MeshStandardMaterial({
-        color: 0x9fc6d8, metalness: 0.55, roughness: 0.08,
-        transparent: true, opacity: 0.42, depthWrite: false, envMap: (CBZ.ENV || null),
-      })),
-      // friendly heli — sculpted cab, glass bubble, tapered boom
-      heliBody: shared(taperBox(2.0, 1.35, 4.4, { nz: 0.5, tz: 0.45, top: 0.72, bot: 0.62, segD: 8 })),
-      heliBubble:shared(taperBox(1.65, 0.95, 2.0, { nz: 0.45, tz: 0.95, top: 0.55 })),   // glass bubble cabin
-      heliRoof: shared(taperBox(1.7, 0.26, 2.6, { nz: 0.6, tz: 0.55, top: 0.7 })),       // white roof cap under the mast
-      heliSeat: shared(new THREE.BoxGeometry(0.62, 0.16, 0.55)),  // seat cushion
-      heliSeatBack: shared(new THREE.BoxGeometry(0.62, 0.6, 0.16)),
-      heliBoom: shared(taperBox(0.55, 0.55, 3.0, { tz: 0.45, top: 0.8, bot: 0.8 })),     // tapered tail boom
-      heliFin:  shared(taperBox(0.18, 1.05, 0.7, { tz: 0.5, top: 0.55 })),
-      heliStab: shared(new THREE.BoxGeometry(1.6, 0.12, 0.6)),
-      heliSkid: shared(taperBox(0.16, 0.16, 3.6, { nz: 0.5, tz: 0.5 })),
-      heliStrut:shared(new THREE.BoxGeometry(0.18, 0.6, 0.18)),   // chunky — thin members float at distance
-      heliHub:  shared(new THREE.CylinderGeometry(0.22, 0.28, 0.24, 8)),
-      heliPlate:shared(new THREE.CylinderGeometry(0.3, 0.36, 0.1, 8)),   // swashplate under the hub
-      glowStrip:shared(new THREE.BoxGeometry(0.55, 0.16, 0.14)),  // nose landing light
-      rotorBlade:shared(bladeGeo(4.4, 0.12)),                    // one tapered blade (rooted at hub, +X)
-      rotorDisc:shared(new THREE.CircleGeometry(4.5, 20)),       // spin blur disc
-      rotorTail:shared(new THREE.BoxGeometry(0.05, 1.4, 0.26)),  // one tail blade
-      navBead:  shared(new THREE.BoxGeometry(0.15, 0.15, 0.15)),
-      rotorMat: shared(new THREE.MeshBasicMaterial({ color: 0x0e1015, transparent: true, opacity: 0.5, depthWrite: false })),
-      navR:     shared(new THREE.MeshBasicMaterial({ color: 0xff2a22 })),
-      navG:     shared(new THREE.MeshBasicMaterial({ color: 0x18ff3a })),
-      navW:     shared(new THREE.MeshBasicMaterial({ color: 0xeaf4ff })),
-    };
-    return G;
-  }
-
-  function disposeGroup(obj) {
-    if (!obj) return;
-    obj.traverse(function (o) {
-      if (o.isSprite) return;
-      if (o.geometry && !o.geometry._shared && o.geometry.dispose) { try { o.geometry.dispose(); } catch (e) {} }
-      const m = o.material; if (m && !m._shared && m.dispose) { try { m.dispose(); } catch (e) {} }
-    });
-  }
-
-  // an entry point far off an edge, heading toward (tx,tz)
-  function edgePoint(tx, tz, y) {
-    const a = CBZ.city && CBZ.city.arena;
-    const cx = a && a.center ? a.center.x : 0, cz = a && a.center ? a.center.z : 0;
-    let span = 130;
-    if (a && a.minX != null) span = Math.max(a.maxX - a.minX, a.maxZ - a.minZ) * 0.6 + 40;
-    const ang = Math.atan2((tx - cx) || 0.001, (tz - cz) || 0.001);
-    return { x: cx + Math.sin(ang) * span, y: y, z: cz + Math.cos(ang) * span };
-  }
-
   // ============================================================ CHOPPER ======
-  // Mesh-only builder (no scene/player dependency) — used by makeChopper below
-  // and exposed for tools/studio.mjs asset photography (CBZ.debugBuildPlayerAir).
+  /* YOUR CHOPPER is the game's civil light twin (city/airframes.js, the
+     lofted airframe every civil helicopter in the game flies: real window
+     holes, doors, cabin seats, skids, four-blade rotor, nav lights), in the
+     warm taxi yellow over white that marks it as the friendly one against the
+     black-and-white police airframes. It used to be a separate 30-box
+     stand-in (taper boxes, a box blade, cube nav lights) built only here.
+
+     Contract kept: { grp, rotor, trotor }. grp's origin sits 1.0 m above the
+     skid bottoms (makeChopper lands it at floor + 1.0, the ride glues the
+     player at origin - 1.0, the campaign prologue lifts it 1.05). rotor spins
+     about local Y, trotor about local X; the airframe's second blade pair is
+     parented to the first so one rotation turns all four blades. */
+  const SKID_DROP = 1.0;
+  const TAXI_LIVERY = { body: 0xe8b23c, belly: 0xf2f3f5, accent: 0x1c2026, accent2: 0x3c434c };
   function buildChopperGroup() {
-    const a = assets();
     const grp = new THREE.Group();
-    // warm yellow cab with a white roof cap — a flying taxi, not a warbird
-    const body = new THREE.Mesh(a.heliBody, a.matCab); grp.add(body);
-    const roof = new THREE.Mesh(a.heliRoof, a.matRoof); roof.position.set(0, 0.72, -0.4); grp.add(roof);
-    // TRANSPARENT glass bubble over the nose — the two seats read through it
-    const canopy = new THREE.Mesh(a.heliBubble, a.matBubble); canopy.position.set(0, 0.42, 1.2); grp.add(canopy);
-    for (const sx of [-0.42, 0.42]) {
-      const cush = new THREE.Mesh(a.heliSeat, a.matSeat); cush.position.set(sx, -0.12, 0.55); grp.add(cush);
-      const back = new THREE.Mesh(a.heliSeatBack, a.matSeat); back.position.set(sx, 0.12, 0.22); grp.add(back);
-    }
-    // tapered tail boom (white) — front sunk into the rear of the cabin (no gap)
-    const boom = new THREE.Mesh(a.heliBoom, a.matRoof);
-    boom.position.set(0, 0.34, -3.3); grp.add(boom);
-    const fin = new THREE.Mesh(a.heliFin, a.matCab); fin.position.set(0, 0.85, -4.45); grp.add(fin);
-    const stab = new THREE.Mesh(a.heliStab, a.matRoof); stab.position.set(0, 0.34, -4.2); grp.add(stab);
-    // nose landing light (warm glow) low on the chin
-    const glow = new THREE.Mesh(a.glowStrip, a.matGlow); glow.position.set(0, -0.28, 2.1); grp.add(glow);
-    // skids on angled struts that meet the tapered belly
-    for (const sx of [-1, 1]) {
-      const skid = new THREE.Mesh(a.heliSkid, a.matTrim); skid.position.set(sx * 0.85, -0.95, 0.1); grp.add(skid);
-      for (const sz of [1.1, -0.9]) {
-        const st = new THREE.Mesh(a.heliStrut, a.matTrim);
-        st.position.set(sx * 0.72, -0.62, sz); st.rotation.z = sx * 0.42; grp.add(st);
+    grp.name = "player-chopper";
+    const AF = CBZ.airframes;
+    if (!AF || !AF.build) return { grp: grp, rotor: null, trotor: null };
+    const inner = AF.build("heli", { variant: "civil", livery: TAXI_LIVERY });
+    inner.position.y = -SKID_DROP;
+    grp.add(inner);
+    const rig = AF.rig(inner);
+    const pair = function (list, axis) {
+      const a = list && list[0], b = list && list[1];
+      if (a && b) {
+        a.add(b);
+        b.position.set(0, 0, 0);
+        b.rotation.set(0, 0, 0);
+        b.rotation[axis] = Math.PI / 2;
       }
-    }
-    // rotor head: swashplate + mast hub + two REAL tapered blades + blur disc
-    // (named `rotor` group spun by updateChopper — the contract is unchanged)
-    const plate = new THREE.Mesh(a.heliPlate, a.matTrim); plate.position.set(0, 0.9, -0.2); grp.add(plate);
-    const hub = new THREE.Mesh(a.heliHub, a.matTrim); hub.position.set(0, 1.04, -0.2); grp.add(hub);
-    const rotor = new THREE.Group(); rotor.position.set(0, 1.1, -0.2);
-    rotor.add(new THREE.Mesh(a.rotorBlade, a.matBlade));                  // +X blade
-    const opp = new THREE.Group(); opp.rotation.y = Math.PI; opp.add(new THREE.Mesh(a.rotorBlade, a.matBlade)); rotor.add(opp);   // -X blade
-    grp.add(rotor);
-    const disc = new THREE.Mesh(a.rotorDisc, a.rotorMat); disc.rotation.x = -Math.PI / 2; disc.position.set(0, 1.08, -0.2); grp.add(disc);
-    // tail rotor on the boom's starboard side (group spun about local X)
-    const trotor = new THREE.Group(); trotor.position.set(0.17, 0.68, -4.55);
-    const tb1 = new THREE.Mesh(a.rotorTail, a.matBlade); trotor.add(tb1);
-    const tb2 = new THREE.Mesh(a.rotorTail, a.matBlade); tb2.rotation.x = Math.PI / 2; trotor.add(tb2);
-    grp.add(trotor);
-    // nav lights: port red / stbd green low on the cab, white beacon on the fin
-    const nL = (m, x, y, z) => { const b = new THREE.Mesh(a.navBead, m); b.position.set(x, y, z); grp.add(b); };
-    nL(a.navR, -0.74, -0.3, 0.5); nL(a.navG, 0.74, -0.3, 0.5); nL(a.navW, 0, 1.32, -4.45);
+      return a || null;
+    };
+    const rotor = pair(rig && rig.rotors, "y");
+    const trotor = pair(rig && rig.trotors, "x");
+    if (rig) { rig.rotors.length = rotor ? 1 : 0; rig.trotors.length = trotor ? 1 : 0; }
     // tag the spinnables on the group too, so external consumers (the campaign
     // prologue reuses this exact airframe via CBZ.debugBuildPlayerAir) can
     // spin the blades without holding our internal refs
     grp.userData.rotor = rotor;
     grp.userData.trotor = trotor;
+    grp.userData.rotorDisc = inner.userData.rotorDisc || null;
+    grp.userData.airframe = inner;
     return { grp, rotor, trotor };
+  }
+  // the rotor blur fades in with rpm (the airframe's own disc)
+  function chopperBlur(c) {
+    const d = c.group && c.group.userData.rotorDisc;
+    if (d && d.material) d.material.opacity = Math.max(0, Math.min(0.3, (c.spin - 0.3) * 0.45));
   }
 
   function makeChopper(P) {
@@ -258,6 +161,8 @@
   function despawnChopper() {
     if (!chopper) return;
     if (chopper.group && chopper.group.parent) chopper.group.parent.remove(chopper.group);
+    const af = chopper.group && chopper.group.userData.airframe;
+    if (af && CBZ.airframes && CBZ.airframes.dispose) CBZ.airframes.dispose(af);
     disposeGroup(chopper.group);
     chopper = null;
     g.cityChopperRide = false;
@@ -282,6 +187,7 @@
     c.spin += (targetSpin - c.spin) * Math.min(1, dt * 2);
     if (c.rotor) c.rotor.rotation.y += dt * 46 * c.spin;
     if (c.trotor) c.trotor.rotation.x += dt * 64 * c.spin;
+    chopperBlur(c);
 
     if (c.phase === "incoming") {
       const L = c.land;
@@ -326,7 +232,9 @@
       c.rideT += dt;
       // glue the player inside the cabin
       if (P) {
-        P.pos.x = c.pos.x; P.pos.y = c.pos.y - 1.0; P.pos.z = c.pos.z;
+        // on the cabin floor of the airframe, not at its skid line
+        const af = c.group && c.group.userData.airframe, cab = af && af.userData.cabin;
+        P.pos.x = c.pos.x; P.pos.y = c.pos.y - SKID_DROP + ((cab && cab.floorTop) || 0); P.pos.z = c.pos.z;
         P.vy = 0; P.grounded = false;
         if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
       } else { c.phase = "leaving"; return; }    // player died mid-flight → bail

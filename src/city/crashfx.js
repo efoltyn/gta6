@@ -340,6 +340,27 @@
                           // FIRST-BLAST PREWARM block at the bottom of this file),
                           // so no slot is ever minted mid-fight
   let burstRing = 0;      // next slot to (re)use
+  /* A POINT IS A SQUARE unless something says otherwise: a PointsMaterial
+     with no map rasterises every particle as a hard-edged screen square, so
+     every blast's sparks and every wall-ruin's dust spray was a spray of
+     confetti tiles (2026-10-31). One shared 32 px soft round sprite: a hot
+     pin-point core for the additive sparks, a soft shoulder that reads as a
+     grain of dust under normal blending. Built once, on first use. */
+  let burstDotTex = null;
+  function burstDot() {
+    if (burstDotTex) return burstDotTex;
+    try {
+      const S = 32, c = document.createElement("canvas"); c.width = c.height = S;
+      const g = c.getContext("2d"), r = S / 2, gr = g.createRadialGradient(r, r, 0, r, r, r);
+      gr.addColorStop(0.0, "rgba(255,255,255,1)");
+      gr.addColorStop(0.35, "rgba(255,255,255,0.85)");
+      gr.addColorStop(0.7, "rgba(255,255,255,0.25)");
+      gr.addColorStop(1.0, "rgba(255,255,255,0)");
+      g.fillStyle = gr; g.fillRect(0, 0, S, S);
+      burstDotTex = new THREE.CanvasTexture(c);
+    } catch (e) { burstDotTex = null; }
+    return burstDotTex;
+  }
   function makeBurstSlot() {
     const pos = new Float32Array(BURST_MAX * 3);
     const attr = new THREE.BufferAttribute(pos, 3);
@@ -348,7 +369,7 @@
     geo.setAttribute("position", attr);
     geo.setDrawRange(0, 0);
     const mat = new THREE.PointsMaterial({
-      size: 0.1, transparent: true, opacity: 0,
+      size: 0.1, transparent: true, opacity: 0, map: burstDot(),
       depthWrite: false, blending: THREE.AdditiveBlending,
     });
     const mesh = new THREE.Points(geo, mat);
@@ -407,7 +428,7 @@
     if (pooled) {
       // re-dress the reused material + buffer for this burst's exact look/count
       mat = slot.mat; geo = slot.geo; mesh = slot.mesh;
-      mat.color.set(color); mat.size = size; mat.opacity = op0; mat.blending = blend;
+      mat.color.set(color); mat.size = size * 1.35; mat.opacity = op0; mat.blending = blend;
       mat.needsUpdate = true;            // blending swap needs a program recompile flag
       geo.setDrawRange(0, count);
       // bound the per-frame GPU upload to the LIVE particles only (the buffer is
@@ -419,7 +440,7 @@
       geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
       mat = new THREE.PointsMaterial({
-        color, size, transparent: true, opacity: op0,
+        color, size, transparent: true, opacity: op0, map: burstDot(),
         depthWrite: false, blending: blend,
       });
       mesh = new THREE.Points(geo, mat);

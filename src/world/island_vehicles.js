@@ -102,6 +102,13 @@
   const DECK_T = 0.25;             // deck slab thickness
   // a small island town's fleet: catalog names (city/economy.js), one per body kind
   const TOWN_MODELS = ["Kotori Sprout", "Bison Vista", "Bison Frontier", "Bison Rampart"];
+  // the catalogue records the disaster island can stand (city/vehicles.js
+  // warms only these on the island, not the city's whole catalogue)
+  CBZ.islandTownModels = function () {
+    const E = CBZ.cityEcon;
+    if (!E || !E.carByName) return [];
+    return TOWN_MODELS.map(function (n) { return E.carByName(n); }).filter(Boolean);
+  };
   const PHONE = (CBZ.deviceClass || "") === "phone";
   const BUILD_PER_FRAME = PHONE ? 2 : 5;   // cars stood up per frame (a car is a few ms to build)
   const REST_MOVE = 0.6;           // m a parked car must be moved before its rest pose follows it
@@ -241,6 +248,9 @@
     }
     S.cars = keep;
     if (A.cars) { A.cars.length = 0; for (let i = 0; i < keep.length; i++) A.cars.push(keep[i].car); }
+    // the merged bodies only the scrapped cars drew leave with them
+    // (city/vehicles.js: the caches are bounded by the cars that exist)
+    if (CBZ.cityCarCachePrune) { try { CBZ.cityCarCachePrune(); } catch (e) {} }
     S.queue = spots.filter(function (s) { return !have.has(s); });
     held.length = 0;
     // nearest the player first: the street you are standing in is real at once
@@ -998,6 +1008,17 @@
     S.fallenSeen.clear();
     S.drivenLift = 0; S.drivenFloat = 0;
   }
+  function toSea(A) {
+    const Pl = P();
+    const flown = Pl && Pl._aircraft ? Pl._aircraft : null;
+    const ridden = Pl && Pl.driving ? Pl._vehicle : null;
+    retirePad();
+    scrapFleet(ridden);
+    if (flown && flown.group && A.root && flown.group.parent !== A.root) A.root.add(flown.group);
+    if (S.heli && S.heli !== flown) unparkHeli();
+    if (S.jet && S.jet !== flown) { if (CBZ.airUnpark) { try { CBZ.airUnpark(S.jet); } catch (e) {} } S.jet = null; }
+    S.arena = A;
+  }
   function teardown() {
     const Pl = P();
     if (Pl && Pl._aircraft && S.heli && Pl._aircraft === S.heli && CBZ.cityPlayerAircraftExit) {
@@ -1020,9 +1041,17 @@
       if (Pl && Pl.driving && Pl._vehicle && Pl._vehicle._islandCar && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
       return;
     }
+    // THE OPEN SEA (world/archipelago.js seaArena): nothing stands on it.
+    // The last island's pad, cars, boat and parked machines go with it; the
+    // one you are flying comes with you, under the sea's root.
+    if (CBZ.surv.arena.atSea) { if (S.arena !== CBZ.surv.arena) toSea(CBZ.surv.arena); return; }
     const st = CBZ.surv.stats;
     if (st !== S.stats || S.arena !== CBZ.surv.arena) {
-      if (S.stats) teardown();
+      // (a new MATCH tears the machines down; a new ISLAND does not: setup
+      // hands the island over and keeps the machine you are in. Tearing down
+      // on every hand-over unparked the jet you were flying, which bailed you
+      // out of the F-35 over the next island, the moment it took over)
+      if (S.stats && st !== S.stats) teardown();
       S.stats = st;
       setup();
     }

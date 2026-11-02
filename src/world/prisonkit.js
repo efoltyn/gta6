@@ -131,6 +131,21 @@
     t.anisotropy = aniso || 8;
     return t;
   }
+  /* ONE TEXTURE PER SURFACE, NOT ONE PER TINT. A skin material is keyed by
+     kind + tint + roughness, and each used to wrap the kind's one canvas in a
+     NEW CanvasTexture: the same picture uploaded once per tint. The texture is
+     shared now (its settings are the kind's alone), and once it is on the GPU
+     its canvas goes (core/texfree.js): nothing paints these again, and a
+     tint made later reuses the texture, never the canvas. */
+  const SURF_TEX = {};
+  function surfaceTex(kind, aniso) {
+    const k = kind + "@" + aniso;
+    if (SURF_TEX[k]) return SURF_TEX[k];
+    const t = tex(surface(kind), aniso);
+    t._shared = true;
+    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(t);
+    return (SURF_TEX[k] = t);
+  }
   const grey = (px, l) => { px.r = px.g = px.b = Math.max(0, Math.min(255, l)); };
 
   const CANVAS = {};
@@ -290,8 +305,7 @@
         envMap: CBZ.ENV || null, envMapIntensity: 0.9,
       });
     } else {
-      const canvas = surface(kind === "polished" ? "concrete" : kind);
-      const map = tex(canvas, kind === "chainlink" ? 16 : 8);
+      const map = surfaceTex(kind === "polished" ? "concrete" : kind, kind === "chainlink" ? 16 : 8);
       const metal = kind === "galv" || kind === "chainlink" || kind === "grating";
       m = new THREE.MeshStandardMaterial({
         color: tint != null ? tint : 0xffffff, map: map,
@@ -923,24 +937,29 @@
   CBZ.prisonFence = fence;
 
   // a printed plate: text on a coloured board, facing +z before `ry`
+  // (a lazy canvas, core/texfree.js: painted when the plate is first drawn,
+  // given back once it is on the GPU; 21 plates were 6.9 MB of canvases kept
+  // beside their textures for the whole run)
   function signPlate(text, x, y, z, w, h, ry, fg, bg) {
-    const c = document.createElement("canvas");
-    c.width = 512; c.height = Math.max(64, Math.round(512 * h / w));
-    const g = c.getContext("2d");
-    g.fillStyle = bg || "#b3261e"; g.fillRect(0, 0, c.width, c.height);
-    g.strokeStyle = "rgba(255,255,255,.7)"; g.lineWidth = 8; g.strokeRect(6, 6, c.width - 12, c.height - 12);
-    g.fillStyle = fg || "#f3f3ef";
-    g.textAlign = "center"; g.textBaseline = "middle";
-    const lines = String(text).split("\n");
-    let size = Math.round(c.height * (lines.length > 1 ? 0.36 : 0.44));
-    for (;;) {
-      g.font = "700 " + size + "px Arial, Helvetica, sans-serif";
-      const widest = Math.max.apply(null, lines.map((ln) => g.measureText(ln).width));
-      if (widest <= c.width * 0.9 || size <= 12) break;
-      size -= 2;
-    }
-    lines.forEach((ln, i) => g.fillText(ln, c.width / 2, c.height / 2 + (i - (lines.length - 1) / 2) * c.height * 0.46));
-    const t = new THREE.CanvasTexture(c);
+    const CW = 512, CH = Math.max(64, Math.round(512 * h / w));
+    const paint = function (g, c) {
+      g.fillStyle = bg || "#b3261e"; g.fillRect(0, 0, c.width, c.height);
+      g.strokeStyle = "rgba(255,255,255,.7)"; g.lineWidth = 8; g.strokeRect(6, 6, c.width - 12, c.height - 12);
+      g.fillStyle = fg || "#f3f3ef";
+      g.textAlign = "center"; g.textBaseline = "middle";
+      const lines = String(text).split("\n");
+      let size = Math.round(c.height * (lines.length > 1 ? 0.36 : 0.44));
+      for (;;) {
+        g.font = "700 " + size + "px Arial, Helvetica, sans-serif";
+        const widest = Math.max.apply(null, lines.map((ln) => g.measureText(ln).width));
+        if (widest <= c.width * 0.9 || size <= 12) break;
+        size -= 2;
+      }
+      lines.forEach((ln, i) => g.fillText(ln, c.width / 2, c.height / 2 + (i - (lines.length - 1) / 2) * c.height * 0.46));
+    };
+    let t;
+    if (CBZ.lazyCanvasTexture) t = CBZ.lazyCanvasTexture(CW, CH, paint, { name: "sign" });
+    else { const c = document.createElement("canvas"); c.width = CW; c.height = CH; paint(c.getContext("2d"), c); t = new THREE.CanvasTexture(c); }
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshLambertMaterial({ map: t, side: THREE.DoubleSide }));
     m.position.set(x, y, z); m.rotation.y = ry || 0;
     m.userData.sign = true;
@@ -1025,7 +1044,7 @@
     // (a 2.8 m path shows 0.44 of a tile across, not a whole tile squeezed
     // into it), so a narrow strip is never stretched along its length.
     const rep = (s) => (s < 6.3 ? s / 6.3 : Math.round(s / 6.3));
-    tex.repeat.set(rep(w), rep(d));
+    const tileR = [rep(w), rep(d)];
     /* LAYERS. Patches lie on patches (a court on the turf, a pad on the
        yard, all on the wing slab) a centimetre apart, which the depth
        buffer cannot separate at 100 m: they shimmered through each other.
@@ -1035,7 +1054,9 @@
        a patch are never overdrawn by it. */
     const y = o.y != null ? o.y : 0.02;
     const mat = groundLayer(new THREE.MeshLambertMaterial({ map: tex }), y);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+    const pg = new THREE.PlaneGeometry(w, d);
+    if (CBZ.groundTile) CBZ.groundTile(pg, tex, tileR[0], tileR[1]); else tex.repeat.set(tileR[0], tileR[1]);
+    const m = new THREE.Mesh(pg, mat);
     m.rotation.x = -Math.PI / 2; m.position.set(x, y, z);
     m.receiveShadow = true;
     m.userData.ground = kind;

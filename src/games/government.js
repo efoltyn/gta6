@@ -914,6 +914,198 @@
   }
 
   /* ======================= BUILD ========================================= */
+  /* THE CHAMBER'S FURNITURE (2026-10-31 rebuild). Was coloured boxes: a brown
+     slab bench, red-box chairs, plain cabinets, a 'shredder' that was two
+     grey bricks. Now real furniture in real metres on the merged store
+     fixture kit (city/gunstore.js), so the whole room is ~5 draw calls:
+     a raised-panel council bench with brass nameplates, blotters and
+     gooseneck mics; a carpeted dais with a wood nosing; tufted high-back
+     council chairs (same seat contract: cushion at DAIS_H + COUNCIL_SEAT_H,
+     arms at 0.69); a lectern with the city seal and the gavel; shelving with
+     archive boxes and binders; two-door cabinets; the clerk's window as a
+     counter under a brass-framed glass screen; a folding press table with
+     recorders; the security desk with its monitors; a real office shredder.
+     Every position, collider and zone is unchanged. */
+  function dressChamber(ctx, g, hx, hz, frameZ) {
+    const K = CBZ.storeFixtureKit;
+    if (!K) return;
+    const k = K.create();
+    const W = 0x4a3826, WD = 0x2e2216, BR = 0xc9a24a, LEA = 0x5a1a1e, LEAd = 0x3a0e12;
+    // ---- the bench: a panelled desk the councillors sit behind (front = +z) --
+    const bz = -hz * 0.52, BL = hx * 1.7;
+    k.frame(0, 0, bz, 0);
+    K.dressCounter(k, BL, 0.66, 0.92, 0, { clad: W, trim: BR, work: 0x2a1c12, kick: 0x1a120c, cladKind: "gloss" });
+    const panels = Math.max(2, Math.round(BL / 1.1));
+    for (let i = 0; i < panels; i++) {                                     // raised panels on the lobby face
+      const x = -BL / 2 + (i + 0.5) * (BL / panels);
+      k.box(x, 0.5, 0.345, BL / panels - 0.16, 0.56, 0.02, 0x553f2a, "gloss");
+      k.box(x, 0.5, 0.357, BL / panels - 0.26, 0.46, 0.006, W, "gloss");
+    }
+    // ---- the dais under the chairs (carpet top, wood nosing) ---------------
+    k.frame(0, 0, -hz * 0.6 + 0.15, 0);
+    k.box(0, DAIS_H / 2 - 0.01, 0, BL, DAIS_H - 0.02, 1.5, WD, "gloss");
+    k.box(0, DAIS_H - 0.01, 0, BL - 0.04, 0.02, 1.46, 0x4a1418);
+    k.cyl(0, DAIS_H - 0.02, 0.75, 0.03, 0.03, BL, 0x553f2a, "gloss", 0, 0, Math.PI / 2, 8);
+    // ---- each seat: chair, nameplate, blotter, mic --------------------------
+    for (let i = 0; i < COUNCIL_N; i++) {
+      const s = V.seats[i];
+      k.frame(s.x, DAIS_H, s.z, 0);                                         // the chair faces +z
+      const SH = COUNCIL_SEAT_H;
+      for (const dx of [-0.25, 0.25]) for (const dz of [-0.23, 0.23]) {
+        k.cyl(dx, (SH - 0.12) / 2, dz, 0.025, 0.03, SH - 0.12, WD, "gloss", 0, 0, 0, 8);
+        k.cyl(dx, 0.02, dz, 0.032, 0.032, 0.04, BR, "metal", 0, 0, 0, 8);   // brass ferrules
+      }
+      k.box(0, SH - 0.1, 0, 0.6, 0.06, 0.58, WD, "gloss");                  // seat frame
+      k.box(0, SH - 0.045, 0.01, 0.6, 0.09, 0.56, LEA, "gloss");            // cushion
+      k.box(0, SH + 0.45, -0.27, 0.64, 0.86, 0.1, LEA, "gloss", -0.08);     // the high back
+      k.cyl(0, SH + 0.88, -0.3, 0.05, 0.05, 0.66, WD, "gloss", 0, 0, Math.PI / 2, 10);   // crest rail
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++)               // buttoned tufting
+        k.cyl(-0.21 + c * 0.14, SH + 0.2 + r * 0.22, -0.215 + r * 0.018, 0.014, 0.014, 0.01, LEAd, "gloss", Math.PI / 2 - 0.08, 0, 0, 6);
+      for (const dx of [-1, 1]) {
+        k.box(dx * 0.34, 0.69, 0.02, 0.07, 0.05, 0.52, WD, "gloss");   // arm (0.69 above the dais)
+        k.box(dx * 0.34, 0.715, 0.02, 0.075, 0.025, 0.46, LEA, "gloss");                 // arm pad
+        k.cyl(dx * 0.34, 0.56, 0.22, 0.022, 0.022, 0.26, WD, "gloss", 0, 0, 0, 8);       // arm post
+      }
+      // on the bench in front of him: blotter, brass nameplate, a gooseneck mic
+      k.frame(s.x, 0, bz, 0);
+      k.box(0, 0.965, -0.06, 0.62, 0.006, 0.4, 0x1a3a2a);
+      k.box(0, 0.98, 0.18, 0.36, 0.06, 0.012, BR, "metal", -0.35);
+      k.cyl(0.22, 0.97, 0.12, 0.045, 0.05, 0.02, 0x1a1c20, "metal", 0, 0, 0, 12);
+      k.cyl(0.22, 1.1, 0.06, 0.006, 0.006, 0.28, 0x1a1c20, "metal", -0.45, 0, 0, 6);
+      k.cyl(0.22, 1.22, -0.02, 0.014, 0.012, 0.05, 0x1a1c20, "metal", -1.2, 0, 0, 8);
+      k.sphere(0.22, 1.215, 0.005, 0.006, 0xff3a2a, "glow");               // the tally light
+    }
+    // ---- a walnut surround behind the tally board ---------------------------
+    k.frame(0, 0, frameZ, 0);
+    k.box(0, 2.75, -0.09, 5.3, 3.6, 0.06, WD, "gloss");
+    k.box(0, 0.95, -0.07, 5.3, 0.06, 0.1, BR, "metal");
+    // ---- the lectern at the chair (speaker on +z, it faces the bench) --------
+    k.frame(0, 0, hz * 0.14, Math.PI);                                       // local +Z = the bench
+    k.box(0, 0.04, 0, 0.95, 0.08, 0.72, 0x1a120c);
+    k.box(0, 0.55, 0, 0.82, 0.95, 0.6, W, "gloss");
+    k.box(0, 0.55, 0.305, 0.66, 0.78, 0.02, 0x553f2a, "gloss");
+    k.cyl(0, 0.62, 0.32, 0.17, 0.17, 0.02, BR, "metal", Math.PI / 2, 0, 0, 28);   // the city seal
+    k.cyl(0, 0.62, 0.332, 0.12, 0.12, 0.012, 0x1f3a6a, "solid", Math.PI / 2, 0, 0, 24);
+    k.torus(0, 0.62, 0.34, 0.145, 0.006, 0xe8dcb0, "metal", 0, 0, 0, null, 28);
+    k.box(0, 1.08, -0.04, 0.95, 0.05, 0.72, BR, "metal", -0.18);            // the slanted top (rises to the bench)
+    k.box(0, 1.105, -0.05, 0.6, 0.006, 0.42, 0x1a3a2a, "solid", -0.18);
+    k.box(0.32, 1.12, -0.2, 0.12, 0.03, 0.12, WD, "gloss");                  // the gavel block
+    k.cyl(0.32, 1.165, -0.2, 0.028, 0.028, 0.11, WD, "gloss", 0, 0, Math.PI / 2, 10);   // gavel head
+    k.cyl(0.32, 1.16, -0.09, 0.01, 0.012, 0.2, 0x553f2a, "gloss", Math.PI / 2, 0, 0, 8);
+    // ---- records room: the partition (plaster over a wood dado) ------------
+    k.frame(-hx * 0.55, 0, -hz * 0.24, 0);
+    k.box(0, 1.4, 0, 0.25, 2.8, hz * 0.52, 0xb8b0a0);
+    for (const e of [-1, 1]) {
+      k.box(e * 0.13, 0.5, 0, 0.012, 1.0, hz * 0.52, W, "gloss");
+      k.box(e * 0.135, 1.0, 0, 0.02, 0.05, hz * 0.52, WD, "gloss");
+      k.box(e * 0.135, 0.06, 0, 0.02, 0.12, hz * 0.52, WD, "gloss");
+    }
+    // the shelving: steel uprights, five shelves, archive boxes and binders
+    const NSHELF = 5;
+    for (let i = 0; i < NSHELF; i++) {
+      const z = -hz * 0.42 + i * (hz * 0.84 / (NSHELF - 1));
+      k.frame(-hx * 0.87, 0, z, Math.PI / 2);                               // faces +x (the aisle)
+      for (const e of [-1, 1]) k.box(e * 0.465, 1.05, 0, 0.03, 2.1, 0.42, 0x5a5e66, "metal");
+      k.box(0, 1.05, -0.2, 0.93, 2.1, 0.01, 0x3a3e46, "metal");
+      for (let sh = 0; sh < 5; sh++) {
+        const y = 0.1 + sh * 0.48;
+        k.box(0, y, 0, 0.93, 0.025, 0.42, 0x6a6e76, "metal");
+        if (sh === 4) continue;
+        let x = -0.42;
+        let n = 0;
+        while (x < 0.4 && n < 8) {
+          const r = ctx.rand(i * 11 + sh, n, "shelfgoods");
+          if (r < 0.55) {                                                   // a bankers box with its lid and hand hole
+            const w = 0.3;
+            if (x + w > 0.44) break;
+            k.box(x + w / 2, y + 0.14, 0.01, w - 0.01, 0.25, 0.38, 0xc8b48a);
+            k.box(x + w / 2, y + 0.27, 0.01, w + 0.004, 0.03, 0.385, 0xb8a47a);
+            k.box(x + w / 2, y + 0.2, 0.2, 0.08, 0.03, 0.004, 0x3a2e1c);
+            x += w + 0.01;
+          } else {                                                          // a run of binders
+            const nb = 3 + Math.floor(r * 4);
+            for (let b = 0; b < nb && x < 0.4; b++) {
+              const col = [0x1f3a6a, 0x6e1524, 0x2a2a2a, 0x2a5a3a][(b + sh + i) % 4];
+              k.box(x + 0.03, y + 0.17, 0.02, 0.05, 0.31, 0.28, col);
+              k.box(x + 0.03, y + 0.2, 0.161, 0.03, 0.06, 0.002, 0xe8e4d8);
+              x += 0.055;
+            }
+            x += 0.02;
+          }
+          n++;
+        }
+      }
+    }
+    // ---- supply cabinets: two-door walnut with brass pulls (front = +z) -----
+    const SUP = [[hx * 0.68, hz * 0.5], [-hx * 0.7, -hz * 0.05], [1.9, hz * 0.02], [hx * 0.55, -hz * 0.42]];
+    SUP.forEach((p) => {
+      k.frame(p[0], 0, p[1], 0);
+      k.box(0, 0.05, 0, 0.66, 0.1, 0.56, 0x1a120c);
+      k.box(0, 0.72, 0, 0.7, 1.24, 0.6, W, "gloss");
+      k.box(0, 1.37, 0, 0.76, 0.06, 0.66, WD, "gloss");                      // top
+      k.box(0, 1.42, 0, 0.72, 0.04, 0.62, 0x553f2a, "gloss");                // crown
+      for (const e of [-1, 1]) {
+        k.box(e * 0.17, 0.74, 0.302, 0.32, 1.12, 0.012, 0x553f2a, "gloss");  // door
+        k.box(e * 0.17, 0.74, 0.31, 0.24, 1.0, 0.006, W, "gloss");           // its raised panel
+        k.cyl(e * 0.025, 0.82, 0.325, 0.008, 0.008, 0.14, BR, "metal", 0, 0, 0, 6);   // pull
+      }
+      k.box(0, 0.74, 0.304, 0.006, 1.12, 0.012, 0x1a120c);                   // the door gap
+    });
+    // ---- the clerk's window (customer side = -z) ----------------------------
+    {
+      const cp = V.clerkPos;
+      k.frame(cp.x, 0, cp.z, Math.PI);
+      const top = K.dressCounter(k, 1.9, 0.6, 1.1, 0, { clad: W, trim: BR, work: 0x8a8e94, kick: 0x1a120c, cladKind: "gloss" });
+      k.box(0, top + 0.47, 0.05, 1.86, 0.86, 0.012, 0, "glass");
+      k.box(0, top + 0.92, 0.05, 1.96, 0.06, 0.06, BR, "metal");
+      for (const e of [-1, 1]) k.box(e * 0.95, top + 0.47, 0.05, 0.05, 0.94, 0.06, BR, "metal");
+      for (let bi = 0; bi < 7; bi++) k.cyl(-0.78 + bi * 0.26, top + 0.47, 0.09, 0.012, 0.012, 0.86, BR, "metal", 0, 0, 0, 6);
+      k.box(0, top + 0.02, 0.08, 0.36, 0.03, 0.26, 0x6a6e74, "metal");     // the deal tray under the glass
+      k.cyl(0, top + 0.32, 0.06, 0.07, 0.07, 0.02, 0x6a6e74, "metal", Math.PI / 2, 0, 0, 16);   // speaking grille
+      K.till(k, 0.55, top, 0.6);
+    }
+    // ---- the press table: folding table, recorders, a notepad, a laptop ----
+    {
+      const px = hx * 0.35, pz = hz * 0.72;
+      k.frame(px, 0, pz, Math.PI);                                           // the reporter's side = -z
+      k.box(0, 0.74, 0, 1.6, 0.03, 0.5, 0xd8d6d0);
+      k.box(0, 0.7, 0, 1.5, 0.05, 0.44, 0x9a9ea4, "metal");
+      for (const e of [-1, 1]) for (const f of [-1, 1]) k.cyl(e * 0.72, 0.36, f * 0.2, 0.014, 0.014, 0.72, 0x9a9ea4, "metal", 0, 0, 0, 6);
+      for (let i = 0; i < 3; i++) {
+        k.box(-0.5 + i * 0.16, 0.77, 0.1, 0.06, 0.02, 0.11, 0x1a1c20, "gloss", 0, 0.2 * (i - 1), 0);
+        k.box(-0.5 + i * 0.16, 0.782, 0.08, 0.03, 0.003, 0.02, 0xff4a2a, "glow", 0, 0.2 * (i - 1), 0);
+      }
+      k.box(0.05, 0.758, 0.04, 0.16, 0.006, 0.22, 0xf2eedc);
+      k.box(0.45, 0.762, 0.02, 0.33, 0.014, 0.23, 0x2a2d33, "metal");
+      k.box(0.45, 0.88, -0.1, 0.33, 0.22, 0.012, 0x2a2d33, "metal", 0.25);
+      k.box(0.45, 0.88, -0.092, 0.3, 0.19, 0.003, 0x3a5a7a, "glow", 0.25);
+    }
+    // ---- the security desk (guard side = -x): counter + two CCTV monitors --
+    {
+      k.frame(hx * 0.86, 0, -hz * 0.08, -Math.PI / 2);
+      const top = K.dressCounter(k, 2.0, 0.5, 1.06, 0, { clad: WD, trim: BR, work: 0x1d1e21, kick: 0x111214 });
+      for (const e of [-0.45, 0.45]) {
+        k.box(e, top + 0.02, 0.05, 0.2, 0.02, 0.14, 0x1a1c20, "metal");
+        k.box(e, top + 0.22, 0.05, 0.46, 0.3, 0.04, 0x1a1c20, "metal", -0.1);
+        k.box(e, top + 0.22, 0.073, 0.42, 0.26, 0.003, 0x4a6a5a, "glow", -0.1);
+      }
+    }
+    // ---- the shredder (front = +z): bin, head unit, feed slot, status LEDs ---
+    {
+      k.frame(hx * 0.78, 0, -hz * 0.5, 0);
+      for (const e of [-1, 1]) for (const f of [-1, 1]) k.cyl(e * 0.24, 0.03, f * 0.21, 0.025, 0.025, 0.04, 0x111214, "solid", Math.PI / 2, 0, 0, 8);
+      k.box(0, 0.42, 0, 0.58, 0.74, 0.52, 0x3a3e46, "gloss");
+      k.box(0, 0.45, 0.262, 0.4, 0.3, 0.004, 0, "glass");                    // the bin's window
+      k.box(0, 0.38, 0.258, 0.38, 0.16, 0.003, 0xe8e4d8);                    // confetti in it
+      k.box(0, 0.86, 0, 0.62, 0.14, 0.56, 0x16181d, "gloss");                // head unit
+      k.box(0, 0.932, 0.05, 0.36, 0.004, 0.012, 0x050506);                   // the feed slot
+      for (let i = 0; i < 3; i++) k.box(-0.2 + i * 0.05, 0.931, 0.2, 0.025, 0.004, 0.012, [0x3aff6a, 0xffb43a, 0xff3a2a][i], "glow");
+      k.box(0.2, 0.93, 0.2, 0.08, 0.008, 0.04, 0x2a2d33, "metal");
+    }
+    const fix = new THREE.Group(); fix.name = "chamber-fixtures";
+    k.build(fix); g.add(fix);
+  }
+
   function build(ctx, venue) {
     C = ctx;
     const g = venue.group;
@@ -945,14 +1137,11 @@
     for (let i = 0; i < COUNCIL_N; i++) V.seatMeta[i].baseStance = base[i] || "against";
 
     // ---- the bench + seats (the councillors sit here) ----
-    ctx.box(g, 0, 0.5, -hz * 0.52, hx * 1.7, 0.9, 0.7, ctx.mat(COL.wood));
-    ctx.box(g, 0, 0.98, -hz * 0.52 - 0.34, hx * 1.7, 0.16, 0.08, ctx.mat(COL.brass));
     ctx.solid(-hx * 0.85, -hz * 0.52 - 0.42, hx * 0.85, -hz * 0.52 + 0.42);
     // THE DAIS under the chairs (see DAIS_H above): one platform spanning the
     // seat row — from behind the chair backs to just past the front-most bowed
     // cushion — so every chair leg and every seated foot lands ON it. The
     // bench keeps the floor: it is the desk you lobby across, not the stage.
-    ctx.box(g, 0, DAIS_H / 2, -hz * 0.6 + 0.15, hx * 1.7, DAIS_H, 1.5, ctx.mat(COL.woodD));
     // Proper high-backed council chairs. The old chair was one 0.5 × 0.92 ×
     // 0.5 upright block, so it had neither a visible seat nor a truthful seat
     // height and forced every councillor into character.js's compressed legacy
@@ -974,15 +1163,6 @@
     V.seatRecs = [];
     for (let i = 0; i < COUNCIL_N; i++) {
       const s = V.seats[i];
-      const legH = COUNCIL_SEAT_H - 0.12;
-      for (let dx = -1; dx <= 1; dx += 2) for (let dz = -1; dz <= 1; dz += 2)
-        ctx.box(g, s.x + dx * 0.27, DAIS_H + legH / 2, s.z + dz * 0.25, 0.08, legH, 0.08, ctx.mat(COL.woodD));
-      ctx.box(g, s.x, DAIS_H + COUNCIL_SEAT_H - 0.06, s.z, 0.70, 0.12, 0.68, ctx.mat(COL.red));
-      ctx.box(g, s.x, DAIS_H + COUNCIL_SEAT_H + 0.39, s.z - 0.29, 0.72, 0.78, 0.12, ctx.mat(COL.red));
-      for (let dx = -1; dx <= 1; dx += 2) {
-        ctx.box(g, s.x + dx * 0.38, DAIS_H + 0.69, s.z + 0.02, 0.08, 0.08, 0.52, ctx.mat(COL.woodD));
-        ctx.box(g, s.x + dx * 0.38, DAIS_H + 0.56, s.z + 0.23, 0.08, 0.30, 0.08, ctx.mat(COL.woodD));
-      }
       let rec = null;
       if (CBZ.propRegisterSeat) {
         try {
@@ -1032,8 +1212,6 @@
     V.screens = [bmesh];
 
     // ---- the chair / podium (the session hub) ----
-    ctx.box(g, 0, 0.55, hz * 0.14, 0.95, 1.1, 0.72, ctx.mat(COL.woodD));
-    ctx.box(g, 0, 1.16, hz * 0.14, 1.15, 0.1, 0.82, ctx.mat(COL.brass));
     ctx.solid(-0.55, hz * 0.14 - 0.42, 0.55, hz * 0.14 + 0.42);
     ctx.zone({ id: "session", pos: [0, hz * 0.14 + 1.25], r: 2.0, onUse: openSession,
       label: function () { return G.active ? "[E] The chair, call the vote" : (G.result ? "[E] The chamber (session over)" : "[E] Convene the Docklands session"); } });
@@ -1051,12 +1229,10 @@
     }
 
     // ---- records room: partition + shelves (seeded dirt tables) ----
-    ctx.box(g, -hx * 0.55, 1.4, -hz * 0.24, 0.25, 2.8, hz * 0.52, ctx.mat(COL.wall));
     ctx.solid(-hx * 0.55 - 0.15, -hz * 0.5, -hx * 0.55 + 0.15, 0.02);
     const NSHELF = 5;
     for (let i = 0; i < NSHELF; i++) {
       const z = -hz * 0.42 + i * (hz * 0.84 / (NSHELF - 1));
-      ctx.box(g, -hx * 0.87, 1.05, z, 0.42, 2.1, 0.95, ctx.mat(COL.woodD));
       ctx.solid(-hx * 0.87 - 0.26, z - 0.5, -hx * 0.87 + 0.26, z + 0.5);
       const hasDirt = ctx.rand(i, 9, "sd") < 0.62;
       V.shelves.push({ searched: false, member: hasDirt ? Math.floor(ctx.rand(i, 10, "sm") * COUNCIL_N) : -1, line: DIRT_LINES[Math.floor(ctx.rand(i, 11, "sl") * DIRT_LINES.length)] });
@@ -1077,8 +1253,6 @@
     for (let i = 0; i < SUPPLY.length; i++) {
       (function (sp) {
         const it = WANT_ITEMS.filter(function (w) { return w.id === sp.id; })[0];
-        ctx.box(g, sp.x, 0.7, sp.z, 0.7, 1.4, 0.6, ctx.mat(COL.wood));
-        ctx.box(g, sp.x, 1.45, sp.z, 0.76, 0.12, 0.66, ctx.mat(COL.brass));
         ctx.solid(sp.x - 0.4, sp.z - 0.35, sp.x + 0.4, sp.z + 0.35);
         ctx.zone({ id: "supply_" + sp.id, pos: [sp.x, sp.z + 0.85], r: 1.2,
           label: function () { return (G.satchel && G.satchel[sp.id]) ? "[E] (taken) " + (it ? it.name : sp.id) : "[E] Take " + (it ? it.name : sp.id); },
@@ -1092,12 +1266,6 @@
     //      is most of the time. Sited on the -x lobby wall so it reads on the
     //      way in, not tucked behind the bench. ----
     V.clerkPos = { x: -hx * 0.34, z: hz * 0.62 };
-    ctx.box(g, V.clerkPos.x, 0.55, V.clerkPos.z, 1.9, 1.1, 0.6, ctx.mat(COL.wood));          // counter
-    ctx.box(g, V.clerkPos.x, 1.16, V.clerkPos.z, 2.0, 0.1, 0.7, ctx.mat(COL.stone));         // stone sill
-    ctx.box(g, V.clerkPos.x, 1.95, V.clerkPos.z, 1.9, 1.5, 0.08, ctx.mat(0x22282f));         // glass screen
-    for (let bi = 0; bi < 5; bi++) {                                                          // the bars
-      ctx.box(g, V.clerkPos.x - 0.7 + bi * 0.35, 1.95, V.clerkPos.z - 0.05, 0.05, 1.5, 0.05, ctx.mat(COL.brass));
-    }
     ctx.solid(V.clerkPos.x - 1.0, V.clerkPos.z - 0.35, V.clerkPos.x + 1.0, V.clerkPos.z + 0.35);
     ctx.zone({ id: "clerkwindow", pos: [V.clerkPos.x, V.clerkPos.z - 0.95], r: 1.5,
       onUse: openClerkWindow,
@@ -1111,19 +1279,15 @@
 
     // ---- the lobby press (leak fears) ----
     V.reporterPost = { x: hx * 0.35, z: hz * 0.62, face: Math.PI };
-    ctx.box(g, hx * 0.35, 0.5, hz * 0.72, 1.6, 1.0, 0.5, ctx.mat(COL.woodD));   // press table
     ctx.solid(hx * 0.35 - 0.85, hz * 0.72 - 0.3, hx * 0.35 + 0.85, hz * 0.72 + 0.3);
     ctx.zone({ id: "reporter", pos: [hx * 0.35, hz * 0.5], r: 1.4, onUse: openReporter, label: "[E] Leak to the reporter" });
 
     // ---- security desk + guard (the jam responder) ----
     V.guardPost = { x: hx * 0.82, z: -hz * 0.08, face: -Math.PI / 2 };
-    ctx.box(g, hx * 0.86, 0.55, -hz * 0.08, 0.5, 1.1, 2.0, ctx.mat(COL.woodD));  // desk
     ctx.solid(hx * 0.86 - 0.3, -hz * 0.08 - 1.05, hx * 0.86 + 0.3, -hz * 0.08 + 1.05);
 
     // ---- the shredder (clears the ledger; jams 30%) ----
     V.shredderPos = { x: hx * 0.78, z: -hz * 0.5 };
-    ctx.box(g, hx * 0.78, 0.45, -hz * 0.5, 0.6, 0.9, 0.55, ctx.mat(0x232a33));
-    ctx.box(g, hx * 0.78, 0.92, -hz * 0.5, 0.66, 0.08, 0.6, ctx.mat(0x14181e));
     ctx.solid(hx * 0.78 - 0.35, -hz * 0.5 - 0.32, hx * 0.78 + 0.35, -hz * 0.5 + 0.32);
     ctx.zone({ id: "shredder", pos: [hx * 0.78, -hz * 0.5 + 0.9], r: 1.2,
       label: function () { return "[E] Feed the shredder (" + (G && G.ledger ? G.ledger.length : 0) + " page)"; },
@@ -1136,6 +1300,8 @@
       { x: hx * 0.5, z: -hz * 0.08 },
       { x: hx * 0.18, z: hz * 0.5 },
     ];
+
+    dressChamber(ctx, g, hx, hz, frameZ);
 
     // ---- lights (budget ≤ 8) ----
     ctx.light(0, 3.5, -hz * 0.3, 0xfff0d0, 0.95, hz * 3);

@@ -1009,6 +1009,46 @@
     _vcGeoCache.set(key, geo);
     return geo;
   }
+  /* THE MERGE CACHES ARE BOUNDED BY THE CARS THAT EXIST. Both caches above
+     key on (source geometry + matrices [+ paint]), and the paint carries a
+     per-car random tint, so their key space is every car ever built: on the
+     disaster island every new match restocked the street with fresh tints and
+     the caches (each entry a whole merged car body, ~1-2 MB, plus its far-LOD
+     twins) grew by the match, never by what was standing. A prune keeps an
+     entry only while something draws it: the scene, any car record (asleep,
+     proxied or hidden included), a car's full-detail geometry parked behind its
+     LOD twin, and the style templates. Everything else is disposed with its
+     LOD twins (city/carlod.js CBZ.carLodForget). Called where a world scraps
+     its cars (world/island_vehicles.js resetFleet); safe anywhere, one scene
+     walk. Returns how many entries went. */
+  function cachePrune() {
+    if (!_mergeCache.size && !_vcGeoCache.size) return 0;
+    const used = new Set();
+    const take = function (root) { if (root && root.traverse) root.traverse(function (o) { if (o.geometry) used.add(o.geometry); }); };
+    take(CBZ.scene);
+    const cars = CBZ.cityCars || [];
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i]; if (!c) continue;
+      take(c.group);
+      const tr = c._lodTrack;
+      if (tr && tr.full) for (let k = 0; k < tr.full.length; k++) used.add(tr.full[k]);
+    }
+    if (CBZ.cityCarTemplates) { const T = CBZ.cityCarTemplates(); for (let i = 0; i < T.length; i++) take(T[i]); }
+    let n = 0;
+    [_mergeCache, _vcGeoCache].forEach(function (M) {
+      M.forEach(function (geo, key) {
+        if (used.has(geo)) return;
+        M.delete(key);
+        if (CBZ.carLodForget) { try { CBZ.carLodForget(geo); } catch (e) {} }
+        geo.dispose();
+        n++;
+      });
+    });
+    return n;
+  }
+  CBZ.cityCarCachePrune = cachePrune;
+  CBZ.cityCarCacheSizes = function () { return { merge: _mergeCache.size, vc: _vcGeoCache.size, vcMats: _vcMats.size }; };
+
   function mergePlainColourParts(grp, keep) {
     if (CBZ.CONFIG && CBZ.CONFIG.CAR_VC_MERGE === false) return;
     if (!THREE.BufferGeometry.prototype.deleteAttribute) return;
@@ -2458,10 +2498,18 @@
     for (let i = 0; i < list.length; i++) { try { lookOf(list[i]); } catch (e) {} }
   }
   let warmQ = null;
-  function warmIdle() {
+  /* WHAT IS WARMED IS WHAT THIS WORLD CAN SPAWN. A finished look is a whole
+     body template (loft, cabin, doors, face: MBs) kept for the page's life.
+     The city's streets can show any catalogue car and any fleet unit, so the
+     city warms all of them. The disaster island stands four town models
+     (world/island_vehicles.js CBZ.islandTownModels); warming the city's whole
+     catalogue there filled memory with ~60 bodies no match could ever show,
+     a few more every match (tools/probes/disaster-leak.mjs). A world that
+     publishes its own list warms only that. */
+  function warmIdle(only) {
     if (warmQ) return;
     const E = CBZ.cityEcon;
-    warmQ = fleetModels().concat((E && Array.isArray(E.CARS)) ? E.CARS : []);
+    warmQ = only ? only.slice() : fleetModels().concat((E && Array.isArray(E.CARS)) ? E.CARS : []);
     const step = function (dl) {
       // one look per slice, and only into a slice with room for it
       if (dl && !dl.didTimeout && dl.timeRemaining() < 8) { schedule(); return; }
@@ -2558,7 +2606,10 @@
     const tint = 0.86 + rng() * 0.28;
     const paintHex = new THREE.Color(baseColor).multiplyScalar(tint).getHex();
     // (the street catalogue is a vehicle world's: the jail's yard van is not a reason to build it)
-    if (!warmQ && (g.mode === "city" || (CBZ.islandModeOn && CBZ.islandModeOn(g.mode)))) warmIdle();
+    if (!warmQ && (g.mode === "city" || (CBZ.islandModeOn && CBZ.islandModeOn(g.mode)))) {
+      const own = g.mode === "survival" && CBZ.islandTownModels ? CBZ.islandTownModels() : null;
+      warmIdle(own);
+    }
     const L = lookOf(model), style = L.style, tpl = L.tpl;
     if (!tpl) return buildCarBox(model);
     const visual = cloneBody(tpl);
@@ -3025,6 +3076,25 @@
      grid. One entry point now, and it is idempotent: scrapping a car twice,
      or a car that was never registered, is a no-op rather than a double
      dispose of shared geometry. */
+  /* AN ISLAND'S KERBSIDE LEAVES WITH THE ISLAND (world/island_town.js
+     islandTownDrop). The parked fixtures (a kerb, a yard, a motorcade bay:
+     _propParked, _arenaRoot) were only purged from the car list when the
+     NEXT island parked its own, which out at sea between the isles is never:
+     their records, and the car-ahead grid's cells holding them, kept the
+     dropped island alive. Their meshes are under the island's root and go
+     with its teardown, so this only lets go of the records. */
+  CBZ.cityForgetParkedUnder = function (root) {
+    if (!root) return 0;
+    let n = 0;
+    const P = CBZ.player;
+    for (let i = CBZ.cityCars.length - 1; i >= 0; i--) {
+      const c = CBZ.cityCars[i];
+      if (!c || !c._propParked || c._arenaRoot !== root || (P && P._vehicle === c)) continue;
+      CBZ.cityCars.splice(i, 1); n++;
+    }
+    if (n) { try { rebuildCarGrid(); } catch (e) {} }
+    return n;
+  };
   CBZ.cityScrapCar = function (car) {
     wakeCar(car);
     if (!car || car._scrapped) return false;
@@ -3035,6 +3105,15 @@
     if (car._heldBy && CBZ.vehicleHoldRelease) { try { CBZ.vehicleHoldRelease(car); } catch (e) {} }
     const i = CBZ.cityCars.indexOf(car);
     if (i >= 0) CBZ.cityCars.splice(i, 1);
+    // (and the car-ahead grid: its cells kept the record, and through it the
+    // island it was parked on, until the next car tick, which out at sea
+    // between the isles does not come)
+    if (i >= 0) { try { rebuildCarGrid(); } catch (e) {} }
+    // a scrapped wreck leaves the husk list too: it held the record (and the
+    // disposed rig's geometry arrays) until ten newer wrecks pushed it out,
+    // across every new disaster match (tools/probes/disaster-leak.mjs)
+    const hi = husks.indexOf(car);
+    if (hi >= 0) husks.splice(hi, 1);
     car.dead = true;
     if (car.group) {
       if (car.group.parent) car.group.parent.remove(car.group);
@@ -3316,7 +3395,9 @@
     v.traverse(function (o) { if (o.userData && o.userData.playerWheel) keep.add(o); });
     try {
       sealSeams(v, dims);
-      addInteriorShell(v, dims, null);
+      // (an authored-closed body — the rebuilt tractor — needs no dark filler
+      // block; one sized off the 2.5 m trailer would stand out past its hood)
+      if (!v.userData.loftBody) addInteriorShell(v, dims, null);
       if (mergeStaticCarParts) mergeStaticCarParts(v, keep);
     } catch (e) { /* a lightweight test renderer without geometry baking */ }
     v.position.set(x, 0, z);
@@ -8288,6 +8369,7 @@
       for (let i = 0; i < cars.length; i++) _caConsider(c, cars[i], fx, fz, myHalf, look);
     }
     const best = _caBest;
+    _caBest = null;                // (a scratch, not a reference: it held the last car looked at, and its island, after both were gone)
     if (!best) return null;
     // how fast the obstacle is moving AWAY along our heading (crossing traffic
     // and oncoming cars project to ~0 → we brake instead of matching "speed")

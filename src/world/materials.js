@@ -362,6 +362,7 @@
   // ============================================================
   const GROUND_KINDS = ["yard-grass", "field-grass", "asphalt", "concrete"];
   const groundCanvases = new Map();     // bake key -> HTMLCanvasElement
+  const groundTexs = new Map();         // bake key + encoding -> the one shared texture
   let groundTexCalls = 0;
 
   function ci(v) { return v < 0 ? 0 : v > 255 ? 255 : Math.round(v); }
@@ -625,13 +626,24 @@
     };
     if (o.b == null) o.b = o.a;
     const key = k + "|" + o.a + "|" + o.b + "|" + o.size + "|" + o.wear + "|" + o.patch + "|" + o.grain + "|" + o.joint + "|" + o.crack;
+    groundTexCalls++;
+    /* ONE TEXTURE PER BAKE, NOT ONE PER SLAB. Every slab used to wrap the
+       (cached) canvas in a new CanvasTexture only to give it its own repeat:
+       37 textures over 10 pictures, each uploaded. The texture is shared now
+       (repeat 1) and the tiling lives in the slab's UVs (CBZ.groundTile, the
+       same product three's uvTransform made). opts.repeat keeps a private one. */
+    const own = !!(opts.repeat && opts.repeat.length === 2);
+    const tkey = key + "|" + (opts.srgb ? "s" : "l");
+    if (!own && groundTexs.has(tkey)) return groundTexs.get(tkey);
     let canvas = groundCanvases.get(key);
     if (!canvas) { canvas = bakeGround(k, o); groundCanvases.set(key, canvas); }
-    groundTexCalls++;
     const t = new THREE.CanvasTexture(canvas);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    if (opts.repeat && opts.repeat.length === 2) t.repeat.set(+opts.repeat[0], +opts.repeat[1]);
+    if (own) t.repeat.set(+opts.repeat[0], +opts.repeat[1]);
     t.anisotropy = groundAniso();
+    // a canvas wrapped by more than one texture (linear + sRGB, a private
+    // repeat) stays: core/texfree.js frees only a canvas one texture owns
+    canvas._cbzTexCount = (canvas._cbzTexCount || 0) + 1;
     // Untagged by default (see the WHY NOT note above: indoor slabs are tuned
     // against the untagged palette). OUTDOOR paving passes `srgb: true`
     // (2026-09-27): read as linear under the sRGB output, the yard's concrete
@@ -640,9 +652,26 @@
     if (opts.srgb) t.encoding = THREE.sRGBEncoding;
     t.needsUpdate = true;
     t._cbzGround = k;
+    if (!own) {
+      t._shared = true;
+      groundTexs.set(tkey, t);
+      if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(t);
+    }
     return t;
   }
   CBZ.prisonGroundTex = prisonGroundTex;
+  /* CBZ.groundTile(geometry, tex, rx, rz): tile a ground texture rx x rz
+     over a slab. A shared prisonGroundTex texture keeps repeat 1 and the
+     slab's UVs are scaled instead (uv * repeat, exactly what the texture's
+     uvTransform did); any other texture (a checker fallback) is its own and
+     takes the repeat as before. */
+  CBZ.groundTile = function (geometry, tex, rx, rz) {
+    if (!tex) return;
+    if (!tex._shared || !tex._cbzGround || !geometry || !geometry.attributes.uv) { tex.repeat.set(rx, rz); return; }
+    const uv = geometry.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * rx, uv.getY(i) * rz);
+    uv.needsUpdate = true;
+  };
   CBZ.PRISON_GROUND_KINDS = GROUND_KINDS;
 
   // Ratchet. `legacy` counts GROUND surfaces in the compound (a plane laid

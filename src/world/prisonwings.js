@@ -183,10 +183,11 @@
     const tex = CBZ.prisonGroundTex ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b, srgb: true })
       : (CBZ.checkerTex ? CBZ.checkerTex(a, b, 2) : null);
     if (!tex) return null;
-    tex.repeat.set(Math.max(1, Math.round(w / 6.3)), Math.max(1, Math.round(d / 6.3)));
     const mat = new THREE.MeshLambertMaterial({ map: tex });
     mat.polygonOffset = true; mat.polygonOffsetFactor = 10; mat.polygonOffsetUnits = 20;
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+    const pg = new THREE.PlaneGeometry(w, d), rx = Math.max(1, Math.round(w / 6.3)), rz = Math.max(1, Math.round(d / 6.3));
+    if (CBZ.groundTile) CBZ.groundTile(pg, tex, rx, rz); else tex.repeat.set(rx, rz);
+    const m = new THREE.Mesh(pg, mat);
     m.rotation.x = -Math.PI / 2; m.position.set(x, 0.011, z);
     m.receiveShadow = true; ROOT.add(m);
     return m;

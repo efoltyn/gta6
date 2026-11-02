@@ -507,6 +507,8 @@
     g.putImageData(img, 0, 0);
     ldTex = new THREE.CanvasTexture(c);
     ldTex.wrapS = ldTex.wrapT = THREE.ClampToEdgeWrapping;
+    // painted once, read only by the decal shaders: the canvas goes after upload
+    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(ldTex);
     return ldTex;
   }
 

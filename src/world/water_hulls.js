@@ -354,6 +354,14 @@
     const out = new THREE.BufferGeometry();
     out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    // UVs ride along when every member has them (a textured material such as
+    // the freighter's corrugated containers keeps its map after the merge)
+    if (geos.length && geos.every(function (g) { return g.attributes.uv; })) {
+      const uv = new Float32Array(n * 2);
+      let au = 0;
+      for (const g of geos) { uv.set(g.attributes.uv.array, au); au += g.attributes.uv.array.length; }
+      out.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    }
     out.computeBoundingSphere();
     return out;
   }
@@ -3125,80 +3133,294 @@
     return finish(b, { width: W, length: L, height: TOP + 2.0, wheelbase: L * 0.6 });
   }
 
-  // ---- COASTAL FREIGHTER — 140 m container feeder (horizon silhouette) -----
-  // Built to be seen from 1-3 km: the hull is a coarse loft (11 stations,
-  // 7 rings), the cargo is a dozen boxes, the house is three. It still has a
-  // real waterline — dark topsides, red bottom — because a shark that swims
-  // out that far should find a red hull and a screw the size of a house.
+  // ---- COASTAL FREIGHTER — 140 m geared container feeder (~1,100 TEU) -----
+  // The sea's big ship, seen from a kilometre off and from a shark's eye
+  // alongside, so it is drawn for both. What makes a feeder read as one:
+  //   HULL   a fine loft (25 stations) with a long parallel midbody, a raked
+  //          stem with flare over a BULBOUS BOW faired into the forefoot, a
+  //          wide transom, dark topsides, a white sheer line, red antifouling.
+  //   CARGO  real 40 ft boxes (12.19 x 2.44 x 2.59) in bays on hatch covers,
+  //          rows across the beam that thin out as the bow narrows, stacked
+  //          deeper amidships, lashing bridges between bays, corrugated sides.
+  //   GEAR   two deck cranes to port (pedestal, cab, boom in its rest), a
+  //          forecastle with bulwark, breakwater, windlasses and anchors in
+  //          their pockets, mooring winches and bollards aft.
+  //   HOUSE  five storeys of accommodation aft with window bands and deck
+  //          lips, the bridge with a raked wraparound window and open wings
+  //          out to the ship's side, the mast with radar scanners, the funnel
+  //          in company colours, and a free-fall lifeboat on its stern ramp.
+  // Physics contract unchanged: LOA 140, beam 22, draft 8, freeboard 10, the
+  // helm on the bridge at (0, 27.6, -47.5) and its seat floor at 26.4.
+  let _ctrTex = null;
+  function containerMat(hex) {
+    const key = "mh-ctr-" + hex.toString(16);
+    let m = _mats.get(key); if (m) return m;
+    if (!_ctrTex && typeof document !== "undefined" && document.createElement) {
+      try {
+        const cv = document.createElement("canvas"); cv.width = 128; cv.height = 32;
+        const c = cv.getContext("2d");
+        c.fillStyle = "#c4c4c4"; c.fillRect(0, 0, 128, 32);
+        for (let i = 0; i < 128; i += 4) { c.fillStyle = "#a9a9a9"; c.fillRect(i, 0, 1, 32); c.fillStyle = "#f0f0f0"; c.fillRect(i + 2, 0, 1, 32); }
+        c.fillStyle = "#707070"; c.fillRect(0, 0, 128, 2); c.fillRect(0, 30, 128, 2); c.fillRect(0, 0, 2, 32); c.fillRect(126, 0, 2, 32);
+        _ctrTex = new THREE.CanvasTexture(cv);
+        _ctrTex.anisotropy = 2;
+        _ctrTex._shared = true;
+      } catch (e) { _ctrTex = null; }
+    }
+    m = new THREE.MeshLambertMaterial({ color: hex, map: _ctrTex || null, emissive: hex, emissiveIntensity: 0.03 });
+    m._shared = true; _mats.set(key, m);
+    return m;
+  }
   function buildFreighter() {
     const b = new THREE.Group();
     const L = 140, W = 22, FB = 10, T = 8;
-    const hull = M.ship(), red = M.shipRed(), white = M.pwcHull(), dark = M.dark(), grey = M.grey();
-    const boxA = sharedMat("mh-ctrA", 0x9a3b25, { emissive: 0x1e0b06, ei: 0.16 });
-    const boxB = sharedMat("mh-ctrB", 0x2a5b8c, { emissive: 0x081420, ei: 0.16 });
-    const boxC = sharedMat("mh-ctrC", 0x6f7a3a, { emissive: 0x14180a, ei: 0.16 });
+    const hull = M.ship(), red = M.shipRed(), dark = M.dark(), grey = M.grey(), glass = M.glass();
+    const white = sharedMat("mh-shipwhite", 0xeceff0, { emissive: 0x2c3034, ei: 0.22 });
+    const deckPaint = sharedMat("mh-shipdeck", 0x5a6b5e, { emissive: 0x10140f, ei: 0.16 });
+    const hatchMat = sharedMat("mh-hatch", 0x3f5566, { emissive: 0x0b1015, ei: 0.16 });
+    const steel = sharedMat("mh-shipsteel", 0x8b949b, { emissive: 0x1a1d20, ei: 0.18 });
+    const crane = sharedMat("mh-crane", 0xd9a321, { emissive: 0x2c2005, ei: 0.2 });
+    const lifeboat = sharedMat("mh-lifeboat", 0xf06a12, { emissive: 0x3a1604, ei: 0.25 });
+    const funnelBand = sharedMat("mh-funnelband", 0x1f5f9e, { emissive: 0x06182a, ei: 0.2 });
     const HL = LOFT();
-    let st = null, out = null;
+    let st = null, out = null, shell = null;
     if (HL) {
       st = HL.stationsFromLines({
         loa: L, beam: W, draft: T, freeboard: FB,
         sheerBow: 2.6, sheerStern: 0.6,
-        roundBilge: true, bilgeN: 6, maxBeamHeight: 0.55,
-        flareBow: 16, tumblehome: 0, transomRake: 12,
-        tKeel: 0.45, rockerAft: 0.97, n: 11,
+        roundBilge: true, bilgeN: 7, maxBeamHeight: 0.5,
+        flareBow: 22, tumblehome: 0, transomRake: 14,
+        tKeel: 0.5, n: 25,
         planHalfBeam: function (t) {
-          if (t < 0.14) return 0.66 + 0.34 * Math.pow(t / 0.14, 0.6);
-          if (t <= 0.70) return 1;
-          const u = clampN((t - 0.70) / 0.30, 0, 1);
-          return Math.max(0, 1 - Math.pow(u, 1.6));
+          if (t < 0.16) return 0.70 + 0.30 * Math.pow(t / 0.16, 0.55);
+          if (t <= 0.68) return 1;
+          const u = clampN((t - 0.68) / 0.32, 0, 1);
+          return Math.max(0, 1 - Math.pow(u, 1.75));
+        },
+        // flat keel nearly to the bow, a short run up aft to the skeg, and the
+        // forefoot rising only in the last tenth (the bulb sits there)
+        keelProfile: function (t) {
+          if (t < 0.10) return 0.80 + 0.20 * Math.pow(t / 0.10, 0.7);
+          if (t <= 0.88) return 1;
+          return 1 - Math.pow((t - 0.88) / 0.12, 1.5) * 0.62;
         },
       });
-      loftHull(b, st, hull, {
-        rings: 7, transom: "flat", deck: true, deckCamber: 0.25, deckCols: 5,
+      rakeStem(st, -14 * Math.PI / 180, 0.10);
+      shell = loftHull(b, st, hull, {
+        rings: 10, transom: "flat", deck: true, deckCamber: 0.25, deckCols: 7,
         paint: { bottom: 0x8e2b22, dirt: 0.35, slime: 1.2, scale: 8 },
       });
       out = HL.outline(st);
     }
     const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
-    const keelAt = (z) => (out ? out.keelYAt(z) : -T);
-    // bulbous bow under the forefoot
-    const bz = L * 0.47;
-    const bulb = addCyl(b, 2.2, 7.5, 0, -T * 0.55, bz - 1.0, red, 10);
-    bulb.rotation.x = Math.PI / 2;
-    // THE CARGO: bays of containers, three colours in blocks across the beam,
-    // a metre of dark gap between bays so it reads as stacks, not a slab
-    const mats = [boxA, boxB, boxC];
-    let bay = 0;
-    for (let z = -40; z < 50; z += 13.2) {
-      const tiers = 2 + ((bay * 7) % 3);
-      const h = tiers * 2.6;
-      for (let k = 0; k < 3; k++) {
-        const w = W * 0.84 / 3;
-        const x = -W * 0.42 + w * (k + 0.5);
-        addBox(b, w - 0.2, h, 12.2, x, sheerAt(z) + h * 0.5, z, mats[(bay + k * 2) % 3]);
-      }
-      bay++;
+    const hbAt = (z) => (out ? out.halfBeamAt(z) : W / 2);
+    const hash = (a, c) => { const v = Math.sin(a * 127.1 + c * 311.7) * 43758.5453; return v - Math.floor(v); };
+
+    // ---- the hull's furniture --------------------------------------------
+    // white sheer line along both sides, the length of the ship
+    if (out) {
+      [1, -1].forEach(function (side) {
+        const lo = [], up = [];
+        for (let i = 0; i <= 40; i++) {
+          const z = -L * 0.5 + 1.0 + (L - 3.5) * (i / 40);
+          const x = side * (hbAt(z) + 0.04), y = sheerAt(z);
+          lo.push([x, y - 0.75, z]); up.push([x, y - 0.25, z]);
+        }
+        ribbon(b, lo, up, white, { flip: side < 0 });
+      });
     }
-    // hatch coamings under the stacks
-    addBox(b, W * 0.86, 1.0, 92, 0, sheerAt(3) + 0.3, 3, grey);
-    // THE HOUSE aft: accommodation block, bridge deck with wings, funnel
-    const HZ = -52;
-    // the bridge must see over the stacks, so the house stands 16 m
-    addBox(b, 15, 16, 10, 0, FB + 8.0, HZ, white);
-    addBox(b, W + 1.2, 1.1, 4.0, 0, FB + 16.3, HZ + 3.0, white);          // bridge wings
-    addBox(b, 14.6, 1.6, 0.3, 0, FB + 14.6, HZ + 5.05, dark);             // bridge windows
-    addBox(b, 3.8, 9.0, 5.5, 0, FB + 16.5, HZ - 7.5, grey);               // funnel
-    addBox(b, 3.9, 1.5, 5.6, 0, FB + 20.1, HZ - 7.5, red);                // funnel band
-    addTubeBetween(b, [0, FB + 16.8, HZ + 1.0], [0, FB + 24.0, HZ + 1.0], 0.35, grey, 6);   // radar mast
-    addTubeBetween(b, [0, sheerAt(60), 60], [0, sheerAt(60) + 11, 60], 0.3, grey, 6);       // foremast
-    addBox(b, 12, 1.4, 5, 0, sheerAt(64) + 0.7, 64, grey);                // forecastle break
+    // THE BULBOUS BOW: an ellipsoid faired into the forefoot, its nose ~4 m
+    // past the stem at the waterline, wholly below it
+    const zStem = L * 0.5;
+    // (baked into hull space, so the painted shell material reads it as bottom)
+    const bulbGeo = new THREE.SphereGeometry(1, 18, 12);
+    bulbGeo.scale(2.0, 2.6, 7.0);
+    bulbGeo.translate(0, -T * 0.55, zStem - 4.6);
+    const bulb = new THREE.Mesh(bulbGeo, (shell && shell.material) || red);
+    bulb.userData.noMerge = true;
+    b.add(bulb);
+    // the fairing: a taller, finer lens behind the bulb that carries its
+    // section up into the forefoot so the bulb grows out of the stem
+    const fairGeo = new THREE.SphereGeometry(1, 16, 10);
+    fairGeo.scale(1.7, 3.4, 8.0);
+    fairGeo.translate(0, -T * 0.47, zStem - 9.0);
+    const fair = new THREE.Mesh(fairGeo, bulb.material);
+    fair.userData.noMerge = true;
+    b.add(fair);
+    // anchors stowed in their pockets either side of the stem, hawse pipes
+    [1, -1].forEach(function (side) {
+      const za = zStem - 7.5, ya = sheerAt(za) - 2.6, xa = side * (hbAt(za) + 0.05);
+      const pocket = addBox(b, 0.2, 2.4, 2.6, xa, ya, za, dark);
+      pocket.rotation.y = side * 0.38;
+      const shank = addBox(b, 0.35, 2.2, 0.35, xa + side * 0.12, ya - 0.1, za, steel);
+      shank.rotation.y = side * 0.38;
+      const crown = addBox(b, 0.4, 0.45, 1.9, xa + side * 0.14, ya - 1.15, za, steel);
+      crown.rotation.y = side * 0.38;
+    });
+
+    // ---- forecastle: bulwark, breakwater, windlasses, foremast ----------
+    if (out) {
+      bulwark(b, out, 1, 50, zStem - 0.6, 1.5, 0.15, hull, white, white, 1.2);
+      bulwark(b, out, -1, 50, zStem - 0.6, 1.5, 0.15, hull, white, white, 1.2);
+      bulwark(b, out, 1, -L * 0.5 + 1.2, -56, 1.3, 0.15, hull, white, white, 1.2);
+      bulwark(b, out, -1, -L * 0.5 + 1.2, -56, 1.3, 0.15, hull, white, white, 1.2);
+    }
+    const yF = sheerAt(56);
+    // breakwater: a V of plate that shields the first bay from green water
+    [1, -1].forEach(function (side) {
+      const pl = addBox(b, 9.2, 3.0, 0.25, side * 4.2, yF + 1.3, 50.6, white);
+      pl.rotation.y = side * -0.32;
+    });
+    // windlasses with their chain pipes, and bollards along the bulwarks
+    [1, -1].forEach(function (side) {
+      const zW = 61, yW = sheerAt(zW);
+      addBox(b, 2.2, 1.2, 2.0, side * 2.6, yW + 0.6, zW, grey);
+      const drum = addCyl(b, 0.75, 1.1, side * 2.6, yW + 1.5, zW, steel, 14); drum.rotation.z = Math.PI / 2;
+      addTubeBetween(b, [side * 2.6, yW + 1.1, zW + 1.0], [side * 3.6, yW + 0.2, zStem - 7.4], 0.22, dark, 6);
+      for (const zb of [54, 66, -60, -66]) {
+        const yb = sheerAt(zb), xb = side * (hbAt(zb) - 1.3);
+        addCyl(b, 0.28, 0.75, xb, yb + 0.38, zb - 0.4, steel, 10);
+        addCyl(b, 0.28, 0.75, xb, yb + 0.38, zb + 0.4, steel, 10);
+      }
+    });
+    addTubeBetween(b, [0, yF, 58], [0, yF + 12, 58], 0.32, white, 8);              // foremast
+    addBox(b, 3.4, 0.18, 0.18, 0, yF + 9.5, 58, white);                             // its yard
+
+    // ---- THE CARGO --------------------------------------------------------
+    const CTR = [0x1d5c8f, 0xa23a26, 0x2f6b45, 0xd07a1f, 0x8a8f94, 0xe8e4da, 0x6b2f5c, 0x2a3946, 0xb8a133];
+    const CL = 12.19, CW = 2.44, CH = 2.59, PITCH = 13.0;
+    const BAYS = 7, z0Bay = -38.5;
+    for (let bay = 0; bay < BAYS; bay++) {
+      const zc = z0Bay + bay * PITCH;
+      const narrow = Math.min(hbAt(zc - CL * 0.5), hbAt(zc + CL * 0.5));
+      const rows = Math.max(2, Math.min(8, Math.floor((narrow * 2 - 2.0) / (CW + 0.05))));
+      const span = rows * (CW + 0.05);
+      const yDeck = Math.max(sheerAt(zc - 6), sheerAt(zc + 6));
+      // hatch coaming + the cover panels (two per bay, a seam between)
+      const yHatch = yDeck + 1.5;
+      addBox(b, span + 0.8, 1.5, CL + 0.6, 0, yDeck + 0.75, zc, deckPaint);
+      for (const dz of [-1, 1]) addBox(b, span + 0.6, 0.35, CL * 0.5 - 0.08, 0, yHatch + 0.17, zc + dz * (CL * 0.25 + 0.02), hatchMat);
+      const yBase = yHatch + 0.35;
+      const deep = bay >= 1 && bay <= 5 ? 4 : 3;
+      for (let r = 0; r < rows; r++) {
+        const x = -span * 0.5 + (CW + 0.05) * (r + 0.5);
+        const edge = r === 0 || r === rows - 1;
+        let tiers = deep - (edge ? 1 : 0) - (hash(bay, r) < 0.28 ? 1 : 0);
+        if (bay === 0 && hash(r, 9) < 0.3) tiers = 0;                         // an empty slot shows the cover
+        for (let k = 0; k < tiers; k++) {
+          const col = CTR[Math.floor(hash(bay * 13 + r, k * 7 + 3) * CTR.length)];
+          addBox(b, CW, CH, CL, x, yBase + CH * (k + 0.5) + k * 0.02, zc, containerMat(col));
+        }
+      }
+      // the lashing bridge aft of each bay: posts, a walkway, a handrail
+      if (bay > 0) {
+        const zl = zc - PITCH * 0.5;
+        addBox(b, span + 0.4, 0.15, 0.9, 0, yHatch + 2.9, zl, steel);
+        addBox(b, span + 0.4, 0.06, 0.06, 0, yHatch + 3.9, zl - 0.4, steel);
+        for (let r = 0; r <= rows; r += 2) {
+          const x = -span * 0.5 + (CW + 0.05) * r;
+          addBox(b, 0.14, 2.9, 0.14, x, yDeck + 1.5 + 1.45, zl, steel);
+        }
+      }
+    }
+
+    // ---- two deck cranes to port, booms down in their rests --------------
+    for (const zc of [z0Bay + PITCH * 1.5, z0Bay + PITCH * 4.5]) {
+      const x = 8.2, yD = sheerAt(zc);
+      addCyl(b, 1.25, 13.0, x, yD + 6.5, zc, crane, 14);                         // pedestal
+      addBox(b, 3.2, 3.4, 3.6, x, yD + 14.6, zc, crane);                         // slewing house
+      addBox(b, 1.4, 1.2, 0.08, x - 0.6, yD + 15.1, zc + 1.82, glass);           // cab window
+      addTubeBetween(b, [x, yD + 13.6, zc + 1.2], [1.4, yD + 18.2, zc + 23.0], 0.45, crane, 8);   // boom
+      addTubeBetween(b, [x, yD + 16.2, zc], [1.4, yD + 18.4, zc + 23.0], 0.06, dark, 4);          // luffing wire
+      addTubeBetween(b, [1.4, yD + 18.2, zc + 23.0], [1.4, yD + 14.6, zc + 23.0], 0.04, dark, 4);  // hoist wire
+      addBox(b, 0.7, 0.9, 0.5, 1.4, yD + 14.2, zc + 23.0, crane);                // hook block
+    }
+
+    // ---- THE HOUSE aft -----------------------------------------------------
+    const yD0 = sheerAt(-52) + 0.1;
+    const ZF = -46.4, ZA = -58.6;                  // front and aft faces
+    const levels = 5, LH = (26.2 - yD0) / levels;  // the bridge floor lands at 26.4
+    for (let i = 0; i < levels; i++) {
+      const y0 = yD0 + i * LH, w = 15.2 - (i >= 3 ? 1.0 : 0);
+      const zf = ZF - 0.2 - (i < 2 ? 0.4 : 0), za = ZA + (i >= 3 ? 1.2 : 0);
+      const d = zf - za, zm = (zf + za) * 0.5;
+      addBox(b, w, LH - 0.25, d, 0, y0 + (LH - 0.25) * 0.5, zm, white);
+      addBox(b, w + 0.6, 0.25, d + 0.6, 0, y0 + LH - 0.125, zm, white);      // deck lip
+      // window bands: front face and both sides
+      if (i > 0) {
+        const yw = y0 + LH * 0.55;
+        addBox(b, w - 2.4, 0.95, 0.06, 0, yw, zf + 0.03, glass);
+        addBox(b, 0.06, 0.95, d - 2.6, w * 0.5 + 0.03, yw, zm, glass);
+        addBox(b, 0.06, 0.95, d - 2.6, -w * 0.5 - 0.03, yw, zm, glass);
+      }
+      // railings on the open deck edge in front of the next storey
+      const yr = y0 + LH + 0.55;
+      addBox(b, w + 0.6, 0.05, 0.05, 0, yr + 0.5, zf + 0.25, steel);
+    }
+    // the bridge: floor 26.4, a raked wraparound window, wings to the side
+    const yB = 26.4, BW = 17.0, BZF = -46.0, BZA = -51.2;
+    addBox(b, BW, 0.25, BZF - BZA, 0, yB - 0.125, (BZF + BZA) * 0.5, white);   // bridge deck
+    addBox(b, BW, 0.9, BZF - BZA, 0, yB + 0.45, (BZF + BZA) * 0.5, white);     // console-height wall
+    const win = addBox(b, BW - 0.4, 1.7, 0.12, 0, yB + 1.85, BZF - 0.15, glass);
+    win.rotation.x = -0.18;                                                    // raked out at the top
+    addBox(b, 0.12, 1.7, BZF - BZA - 1.2, BW * 0.5 - 0.06, yB + 1.85, (BZF + BZA) * 0.5 - 0.3, glass);
+    addBox(b, 0.12, 1.7, BZF - BZA - 1.2, -BW * 0.5 + 0.06, yB + 1.85, (BZF + BZA) * 0.5 - 0.3, glass);
+    addBox(b, BW, 0.8, BZF - BZA - 1.0, 0, yB + 3.1, (BZF + BZA) * 0.5 - 0.5, white);       // wall above the glass
+    addBox(b, BW + 1.0, 0.25, BZF - BZA + 0.6, 0, yB + 3.55, (BZF + BZA) * 0.5, white);    // roof with its visor
+    addBox(b, BW - 0.6, 3.2, 0.2, 0, yB + 1.6, BZA + 0.1, white);                            // back wall
+    // the wings out to the ship's side, with their bulwarks
+    [1, -1].forEach(function (side) {
+      const x0 = BW * 0.5, x1 = W * 0.5 + 0.6, wx = (x0 + x1) * 0.5, ww = x1 - x0;
+      addBox(b, ww, 0.25, 3.4, side * wx, yB - 0.125, BZF - 1.9, white);
+      addBox(b, ww, 1.1, 0.12, side * wx, yB + 0.55, BZF - 0.26, white);
+      addBox(b, 0.12, 1.1, 3.4, side * (x1 - 0.06), yB + 0.55, BZF - 1.9, white);
+      addBox(b, 0.5, 1.2, 0.5, side * (x1 - 0.5), yB + 0.6, BZF - 1.0, grey);   // wing console
+    });
+    // the mast on the wheelhouse roof: a tapered pole, a platform, two
+    // scanners, the domes and whips
+    const yR = yB + 3.68, zM = -49.0;
+    addTubeBetween(b, [0, yR, zM], [0, yR + 7.0, zM], 0.28, white, 8);
+    addBox(b, 4.2, 0.18, 1.4, 0, yR + 3.4, zM, white);
+    addBox(b, 4.6, 0.22, 0.32, 0, yR + 3.75, zM, dark);                        // X-band scanner
+    addBox(b, 3.4, 0.2, 0.28, 0, yR + 5.6, zM, dark);                          // S-band scanner
+    for (const sx of [1.6, -1.6]) {
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 8), white);
+      dome.position.set(sx, yR + 0.45, zM - 1.6); b.add(dome);
+    }
+    addTubeBetween(b, [2.2, yR, zM + 0.8], [2.2, yR + 4.5, zM + 0.8], 0.03, dark, 4);
+    addTubeBetween(b, [-2.2, yR, zM + 0.8], [-2.2, yR + 4.5, zM + 0.8], 0.03, dark, 4);
+    // THE FUNNEL behind the mast: a raked casing in company colours, black
+    // top, two uptakes
+    const fz = -55.6, fy = yD0 + levels * LH;
+    const fun = new THREE.Group(); fun.position.set(0, fy, fz); fun.rotation.x = -0.10; b.add(fun);
+    addBox(fun, 4.6, 7.6, 6.2, 0, 3.8, 0, white);
+    addBox(fun, 4.7, 1.8, 6.3, 0, 5.0, 0, funnelBand);
+    addBox(fun, 4.7, 0.9, 6.3, 0, 7.5, 0, dark);
+    addCyl(fun, 0.42, 1.4, 0.9, 8.4, -0.8, dark, 10);
+    addCyl(fun, 0.32, 1.2, -0.9, 8.3, -0.8, dark, 10);
+    mergeByMaterial(fun);
+
+    // ---- the stern: free-fall lifeboat on its ramp, mooring winches ------
+    const zR = -62.6, yRmp = yD0 + LH * 1.6;
+    const ramp = addBox(b, 3.6, 0.3, 7.0, 0, yRmp, zR, steel); ramp.rotation.x = 0.6;
+    addBox(b, 0.25, yRmp - yD0, 0.25, 1.6, (yRmp + yD0) * 0.5, zR + 2.2, steel);
+    addBox(b, 0.25, yRmp - yD0, 0.25, -1.6, (yRmp + yD0) * 0.5, zR + 2.2, steel);
+    const boat = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), lifeboat);
+    boat.scale.set(1.45, 1.35, 4.1); boat.position.set(0, yRmp + 1.25, zR); boat.rotation.x = 0.6; b.add(boat);
+    const canopy = addBox(b, 1.6, 0.5, 2.2, 0, yRmp + 2.3, zR + 0.4, white); canopy.rotation.x = 0.6;
+    [1, -1].forEach(function (side) {
+      const zW = -64.5, yW = sheerAt(zW);
+      addBox(b, 1.8, 1.0, 1.6, side * 5.5, yW + 0.5, zW, grey);
+      const d2 = addCyl(b, 0.6, 1.2, side * 5.5, yW + 1.3, zW, steel, 12); d2.rotation.z = Math.PI / 2;
+    });
+
     // one big slow screw, a rudder behind it
     if (st) inboardGear(b, st, { props: [[0, -62.5]], r: 2.2, shaft: 7 });
     // sidelights on the bridge wings (where a ship carries them), masthead
     // lights on the foremast and the radar mast
-    navLights(b, W * 0.5 + 0.6, FB + 16.3, HZ + 3.0, -L * 0.49, null);
-    addBox(b, 0.6, 0.6, 0.6, 0, sheerAt(60) + 11.2, 60, M.navWhite());
-    addBox(b, 0.6, 0.6, 0.6, 0, FB + 24.2, HZ + 1.0, M.navWhite());
+    navLights(b, W * 0.5 + 0.6, yB + 1.2, BZF - 1.9, -L * 0.49, null);
+    addBox(b, 0.6, 0.6, 0.6, 0, yF + 12.2, 58, M.navWhite());
+    addBox(b, 0.6, 0.6, 0.6, 0, yR + 7.2, zM, M.navWhite());
     return finish(b, { width: W, length: L, height: FB + 25, wheelbase: L * 0.6 });
   }
 

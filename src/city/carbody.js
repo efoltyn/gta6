@@ -835,7 +835,10 @@
         geos: { paint: la.paint.geo(), dark: la.dark.geo(), glass: la.glass.geo() },
         y0: mid[P.R][1], belt: mid[P.G0][1], y1: mid[P.G1][1],
         hx: side * lsec[kL].pts[P.S][0],
-        skinX: function (z, y) { return SH.section(z).pts[P.S][0]; },
+        // (a `skinX(z)` closure lived here, read by nothing. A closure made
+        //  in this function keeps the WHOLE build scope alive, and through
+        //  CBZ.carBody.last that was the last loft's raw accumulators, 10-16
+        //  MB of plain number arrays per page. The skin is SH.section(z).)
         shoulderY: mid[P.S][1],
         handle: (function () {
           const z = d.z0 + Math.min(0.2, (d.z1 - d.z0) * 0.22);

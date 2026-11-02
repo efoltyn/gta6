@@ -252,11 +252,139 @@
     hutBox(parts, -DW / 2 - 0.15, DW / 2 + 0.15, -0.2, 0.08, zc - HUT_T / 2 - 0.42, zc - HUT_T / 2 - 0.02, 0x8f8a80);
     return parts;
   }
+  // one mesh per colour (a corrugated roof is thirty ribs; a mesh each was a
+  // draw call each until core/batch.js got to it)
   function addParts(g, parts) {
-    for (const p of parts) {
-      const m = new THREE.Mesh(p.geo, cmat(p.color));
-      m.castShadow = true; m.receiveShadow = true; g.add(m);
+    const by = new Map();
+    for (const p of parts) { let a = by.get(p.color); if (!a) { a = []; by.set(p.color, a); } a.push(p.geo); }
+    by.forEach(function (geos, col) {
+      let geo = null;
+      if (geos.length === 1) geo = geos[0];
+      else if (BGU && BGU.mergeBufferGeometries) { try { geo = BGU.mergeBufferGeometries(geos); } catch (e) { geo = null; } }
+      const list = geo ? [geo] : geos;
+      for (const q of list) { const m = new THREE.Mesh(q, cmat(col)); m.castShadow = true; m.receiveShadow = true; g.add(m); }
+    });
+  }
+  function shadeC(hex, f) {
+    return (Math.min(255, (((hex >> 16) & 255) * f) | 0) << 16) | (Math.min(255, (((hex >> 8) & 255) * f) | 0) << 8) | Math.min(255, ((hex & 255) * f) | 0);
+  }
+  function mixC(a, b, t) {
+    const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255, br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+    return ((((ar + (br - ar) * t) | 0) << 16) | (((ag + (bg - ag) * t) | 0) << 8) | ((ab + (bb - ab) * t) | 0));
+  }
+
+  /* ---- THE ROOFS ------------------------------------------------------
+     A rondavel's thatch is a steep cone laid in courses and tied down: a
+     thick eave lip where the bundles end, three binding rings round it and a
+     bound top-knot. A shack's corrugated roof is a SHEET of galvanised iron
+     with its corrugations running down the fall, nailed to purlins and
+     oversailing the walls at the eaves; it was a 22 cm slab (and a 16 cm
+     tilted slab on the lean-to). */
+  function thatchParts(R, H, wallH, col) {
+    const parts = [];
+    const roof = new THREE.ConeGeometry(R, H, 14); roof.translate(0, wallH + H / 2 - 0.05, 0);
+    parts.push({ geo: roof, color: col });
+    // the eave lip: a short drum of bundle ends, a shade darker
+    const lip = new THREE.CylinderGeometry(R * 0.97, R + 0.06, 0.2, 14, 1, true); lip.translate(0, wallH + 0.04, 0);
+    parts.push({ geo: lip, color: shadeC(col, 0.78) });
+    // binding rings, each on the cone's surface at its height
+    for (const f of [0.3, 0.55, 0.78]) {
+      const r = R * (1 - f) + 0.02;
+      const ring = new THREE.CylinderGeometry(r, r + 0.02, 0.06, 14, 1, true); ring.translate(0, wallH - 0.05 + H * f, 0);
+      parts.push({ geo: ring, color: shadeC(col, 0.62) });
     }
+    // the top-knot
+    const knot = new THREE.CylinderGeometry(0.05, 0.13, 0.42, 8); knot.translate(0, wallH - 0.05 + H + 0.12, 0);
+    parts.push({ geo: knot, color: shadeC(col, 0.7) });
+    return parts;
+  }
+  // a corrugated sheet roof W x D, its centre at height y, falling toward +z
+  // (the back, away from the door) by `fall` radians
+  function tinRoofParts(W, D, y, fall, col) {
+    const parts = [];
+    const put = function (g) { g.rotateX(fall); g.translate(0, y, 0); return g; };
+    // purlins under the sheet, across the fall
+    for (const z of [-D * 0.38, 0, D * 0.38]) {
+      const pg = new THREE.BoxGeometry(W - 0.1, 0.07, 0.07); pg.translate(0, -0.045, z);
+      parts.push({ geo: put(pg), color: TIMBER });
+    }
+    // the sheet and its corrugations, running with the fall
+    parts.push({ geo: put(new THREE.BoxGeometry(W, 0.012, D)), color: col });
+    const n = Math.max(6, Math.round(W / 0.13));
+    for (let i = 0; i <= n; i++) {
+      const rg = new THREE.BoxGeometry(0.035, 0.022, D); rg.translate(-W / 2 + W * i / n, 0.016, 0);
+      parts.push({ geo: put(rg), color: i % 7 === 3 ? shadeC(col, 0.86) : col });   // a lapped seam every few
+    }
+    // rust bloom along the low edge where the water runs off
+    const ru = new THREE.BoxGeometry(W, 0.014, 0.35); ru.translate(0, 0.004, -D / 2 + 0.175);
+    parts.push({ geo: put(ru), color: mixC(col, 0x6a3a22, 0.5) });
+    return parts;
+  }
+
+  /* ---- THE MARKET STALL --------------------------------------------------
+     Four poles, a plank counter on trestles across the front at 0.9 m, a
+     shelf under it, a gabled canvas awning on a ridge pole with a striped
+     valance hanging off the front and sides, and the day's stock on the
+     counter in slatted crates. It was four poles and a 14 cm coloured slab. */
+  function stallParts(canvas, s) {
+    s = s || 1;
+    const parts = [];
+    const B = function (w, h, d, x, y, z, col, rx) {
+      const g = new THREE.BoxGeometry(w * s, h * s, d * s);
+      if (rx) g.rotateX(rx);
+      g.translate(x * s, y * s, z * s); parts.push({ geo: g, color: col });
+    };
+    const P = 1.35, PH = 2.25;
+    for (const px of [-P, P]) for (const pz of [-P, P]) B(0.1, PH, 0.1, px, PH / 2, pz, WELLWOOD);
+    // the ridge pole on two king posts standing on the side rails
+    for (const px of [-P, P]) { B(0.08, 0.5, 0.08, px, PH + 0.25, 0, WELLWOOD); B(0.07, 0.07, 2 * P, px, PH - 0.03, 0, WELLWOOD); }
+    B(2 * P + 0.3, 0.08, 0.08, 0, PH + 0.5, 0, WELLWOOD);
+    // the canvas: two slopes ridge to eave
+    const slope = Math.atan2(0.5, P), SL = Math.hypot(0.5, P) + 0.22;
+    for (const sg of [-1, 1]) B(2 * P + 0.5, 0.025, SL, 0, PH + 0.27, sg * (P / 2 + 0.06), sg > 0 ? canvas : shadeC(canvas, 0.9), sg * slope);
+    // the valance: alternating canvas and cream drops along the front, plain sides
+    const VAL = shadeC(canvas, 0.82), STRIPE = 0xe9e1cf, nv = 9, VW = 2 * P + 0.5;
+    for (let i = 0; i < nv; i++) B(VW / nv - 0.02, 0.22, 0.02, -VW / 2 + VW * (i + 0.5) / nv, PH - 0.08, -P - 0.22, i % 2 ? STRIPE : VAL);
+    for (const sx of [-1, 1]) B(0.02, 0.22, 2 * P + 0.4, sx * (P + 0.25), PH - 0.08, 0, VAL);
+    // the counter (front, -z) on two trestles, its apron, the shelf under it
+    const cz = -P + 0.45;
+    B(2 * P - 0.1, 0.06, 0.8, 0, 0.9, cz, 0x8a6a46);
+    B(2 * P - 0.1, 0.12, 0.04, 0, 0.82, cz - 0.4, 0x6e5236);
+    for (const tx of [-P * 0.7, P * 0.7]) {
+      B(0.06, 0.9, 0.06, tx, 0.44, cz - 0.28, WELLWOOD, 0.14);
+      B(0.06, 0.9, 0.06, tx, 0.44, cz + 0.28, WELLWOOD, -0.14);
+    }
+    B(2 * P - 0.3, 0.04, 0.6, 0, 0.3, cz, 0x7a5c3c);
+    // crates of stock on the counter: slatted sides, the produce heaped in
+    const STOCK = [0xb8382a, 0xd88a2a, 0x6a9a3a, 0xd8c04a, 0x7a3a5a];
+    const nc = 4;
+    for (let i = 0; i < nc; i++) {
+      const x = -P + 0.5 + i * (2 * P - 1.0) / (nc - 1);
+      B(0.5, 0.2, 0.36, x, 1.03, cz, 0x9a7a52);
+      for (const sy of [0.97, 1.07]) B(0.52, 0.03, 0.38, x, sy, cz, 0x6e5236);
+      B(0.44, 0.07, 0.3, x, 1.15, cz, STOCK[(i * 3 + 1) % STOCK.length]);
+    }
+    // two sacks on the shelf
+    for (const x of [-0.6, 0.5]) B(0.42, 0.36, 0.34, x, 0.5, cz + 0.05, 0xb59a6a);
+    return parts;
+  }
+  // the village well: the town square's well (city/towngen.js wellParts) at
+  // village scale; on a page without towngen (warlord), a coursed ring and a
+  // windlass frame from the same numbers
+  function villageWellParts(s) {
+    s = s || 1;
+    if (CBZ.wellParts) return CBZ.wellParts(0.85 * s, STONE, WELLWOOD);
+    const parts = [];
+    const ring = new THREE.CylinderGeometry(0.95 * s, 1.0 * s, 0.75 * s, 16); ring.translate(0, 0.375 * s, 0);
+    parts.push({ geo: ring, color: STONE });
+    const cap = new THREE.CylinderGeometry(1.04 * s, 1.04 * s, 0.11 * s, 16); cap.translate(0, 0.8 * s, 0);
+    parts.push({ geo: cap, color: shadeC(STONE, 1.12) });
+    const hole = new THREE.CylinderGeometry(0.76 * s, 0.76 * s, 0.01 * s, 14); hole.translate(0, 0.86 * s, 0);
+    parts.push({ geo: hole, color: 0x14171a });
+    for (const sg of [-1, 1]) { const p = new THREE.BoxGeometry(0.13 * s, 1.8 * s, 0.13 * s); p.translate(sg * 0.9 * s, 1.75 * s, 0); parts.push({ geo: p, color: WELLWOOD }); }
+    const drum = new THREE.CylinderGeometry(0.09 * s, 0.09 * s, 1.7 * s, 10); drum.rotateZ(Math.PI / 2); drum.translate(0, 1.9 * s, 0);
+    parts.push({ geo: drum, color: shadeC(WELLWOOD, 0.75) });
+    return parts;
   }
 
   // ============================================================
@@ -273,17 +401,14 @@
     instanceable: true, noCollide: true,
     geom: function () {
       const wallH = 2.3, roofH = 1.7;
-      const roof = new THREE.ConeGeometry(2.15, roofH, 10); roof.translate(0, wallH + roofH / 2 - 0.05, 0);
-      return paintMerge(roundHutParts(1.55, 1.8, wallH, MUD[0]).concat([{ geo: roof, color: THATCH[0] }]));
+      return paintMerge(roundHutParts(1.55, 1.8, wallH, MUD[0]).concat(thatchParts(2.15, roofH, wallH, THATCH[0])));
     },
     material: function () { return vcMat(); },
     build: function (ctx) {
       const r = ctx.rng || Math.random, s = ctx.scale || 1, g = ctx.group;
       const wallH = 2.3 * s;
-      addParts(g, roundHutParts(1.55 * s, 1.8 * s, wallH, pick(MUD, r)));
       const roofH = 1.7 * s;
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(2.15 * s, roofH, 10), cmat(pick(THATCH, r)));
-      roof.position.y = wallH + roofH / 2 - 0.05; roof.castShadow = true; g.add(roof);
+      addParts(g, roundHutParts(1.55 * s, 1.8 * s, wallH, pick(MUD, r)).concat(thatchParts(2.15 * s, roofH, wallH, pick(THATCH, r))));
       hutInterior(ctx, 2.1, 2.1, 4.3);
     },
   });
@@ -294,16 +419,13 @@
     footprint: { hx: 2.0, hz: 2.0 }, clearance: 0.4, y1: 2.6, zone: "village",
     instanceable: true, noCollide: true,
     geom: function () {
-      const roof = new THREE.BoxGeometry(3.8, 0.22, 3.8); roof.translate(0, 2.1 + 0.11, 0);
-      return paintMerge(boxHutParts(3.3, 3.3, 2.1, ADOBE[0]).concat([{ geo: roof, color: CORR[0] }]));
+      return paintMerge(boxHutParts(3.3, 3.3, 2.1, ADOBE[0]).concat(tinRoofParts(3.7, 3.7, 2.1 + 0.16, 0.06, CORR[0])));
     },
     material: function () { return vcMat(); },
     build: function (ctx) {
       const r = ctx.rng || Math.random, s = ctx.scale || 1, g = ctx.group;
       const wallH = 2.1 * s;
-      addParts(g, boxHutParts(3.3 * s, 3.3 * s, wallH, pick(ADOBE, r)));
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(3.8 * s, 0.22 * s, 3.8 * s), cmat(pick(CORR, r)));
-      roof.position.y = wallH + 0.11 * s; roof.castShadow = true; g.add(roof);
+      addParts(g, boxHutParts(3.3 * s, 3.3 * s, wallH, pick(ADOBE, r)).concat(tinRoofParts(3.7 * s, 3.7 * s, wallH + 0.16 * s, 0.06, pick(CORR, r))));
       hutInterior(ctx, 2.0, 2.0, 2.6);
     },
   });
@@ -314,73 +436,43 @@
     footprint: { hx: 1.8, hz: 1.8 }, clearance: 0.35, y1: 2.5, zone: "village",
     instanceable: true, noCollide: true,
     geom: function () {
-      const roof = new THREE.BoxGeometry(3.4, 0.16, 3.4); roof.rotateX(0.16); roof.translate(0, 2.15, 0);
-      return paintMerge(boxHutParts(3.0, 3.0, 2.0, WOODW[0]).concat([{ geo: roof, color: CORR[1] }]));
+      const lp = boxHutParts(3.0, 3.0, 2.0, WOODW[0]);
+      hutBox(lp, -1.5, 1.5, 2.0, 2.44, -1.5, -1.5 + HUT_T, WOODW[0]);
+      return paintMerge(lp.concat(tinRoofParts(3.4, 3.5, 2.0 + 0.26, 0.16, CORR[1])));
     },
     material: function () { return vcMat(); },
     build: function (ctx) {
       const r = ctx.rng || Math.random, s = ctx.scale || 1, g = ctx.group;
       const wallH = 2.0 * s;
-      addParts(g, boxHutParts(3.0 * s, 3.0 * s, wallH, pick(WOODW, r)));
-      // single-slope (lean-to) roof: tilt one axis so it reads high-to-low.
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(3.4 * s, 0.16 * s, 3.4 * s), cmat(pick(CORR, r)));
-      roof.position.y = wallH + 0.15 * s; roof.rotation.x = 0.16; roof.castShadow = true; g.add(roof);
+      // single-slope (lean-to) roof: the sheet falls to the back wall; the
+      // door wall is carried up under its high edge
+      const wc = pick(WOODW, r), lp = boxHutParts(3.0 * s, 3.0 * s, wallH, wc);
+      hutBox(lp, -1.5 * s, 1.5 * s, wallH, wallH + 0.44 * s, -1.5 * s, -1.5 * s + HUT_T, wc);
+      addParts(g, lp.concat(tinRoofParts(3.4 * s, 3.5 * s, wallH + 0.26 * s, 0.16, pick(CORR, r))));
       hutInterior(ctx, 1.8, 1.8, 2.5);
     },
   });
 
-  // well — low stone ring + two posts + a crossbar. ~2m footprint (a
-  // village utility piece, not a full hut).
+  // well — a coursed stone well with a windlass under a little roof (the
+  // town square's well, city/towngen.js wellParts, at village scale).
   CBZ.assets.define("well", {
-    footprint: { hx: 1.1, hz: 1.1 }, clearance: 0.3, y1: 1.9, zone: "village",
+    footprint: { hx: 1.1, hz: 1.1 }, clearance: 0.3, y1: 2.9, zone: "village",
     instanceable: true,
-    geom: function () {
-      const ring = new THREE.CylinderGeometry(0.95, 1.05, 0.85, 12); ring.translate(0, 0.425, 0);
-      const post1 = new THREE.BoxGeometry(0.12, 1.5, 0.12); post1.translate(-0.65, 0.425 + 0.75, 0);
-      const post2 = new THREE.BoxGeometry(0.12, 1.5, 0.12); post2.translate(0.65, 0.425 + 0.75, 0);
-      const bar = new THREE.BoxGeometry(1.5, 0.12, 0.12); bar.translate(0, 0.425 + 1.44, 0);
-      return paintMerge([{ geo: ring, color: STONE }, { geo: post1, color: WELLWOOD }, { geo: post2, color: WELLWOOD }, { geo: bar, color: WELLWOOD }]);
-    },
+    geom: function () { return paintMerge(villageWellParts(1)); },
     material: function () { return vcMat(); },
-    build: function (ctx) {
-      const s = ctx.scale || 1, g = ctx.group;
-      const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.95 * s, 1.05 * s, 0.85 * s, 12), cmat(STONE));
-      ring.position.y = 0.425 * s; ring.castShadow = true; ring.receiveShadow = true; g.add(ring);
-      const wood = cmat(WELLWOOD);
-      const post1 = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 1.5 * s, 0.12 * s), wood);
-      post1.position.set(-0.65 * s, 0.425 * s + 0.75 * s, 0); post1.castShadow = true; g.add(post1);
-      const post2 = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 1.5 * s, 0.12 * s), wood);
-      post2.position.set(0.65 * s, 0.425 * s + 0.75 * s, 0); post2.castShadow = true; g.add(post2);
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(1.5 * s, 0.12 * s, 0.12 * s), wood);
-      bar.position.y = 0.425 * s + 1.44 * s; bar.castShadow = true; g.add(bar);
-    },
+    build: function (ctx) { addParts(ctx.group, villageWellParts(ctx.scale || 1)); },
   });
 
-  // stall_market — 4 posts + a bright fabric canopy: the village market.
-  // ~3.4m footprint.
+  // stall_market — a market stall: poles, a counter of crated stock, a
+  // gabled canvas awning with a valance. ~3.4m footprint.
   CBZ.assets.define("stall_market", {
-    footprint: { hx: 1.7, hz: 1.7 }, clearance: 0.35, y1: 2.2, zone: "village",
+    footprint: { hx: 1.7, hz: 1.7 }, clearance: 0.35, y1: 2.8, zone: "village",
     instanceable: true,
-    geom: function () {
-      const parts = [];
-      for (const [px, pz] of [[-1.3, -1.3], [1.3, -1.3], [-1.3, 1.3], [1.3, 1.3]]) {
-        const post = new THREE.BoxGeometry(0.12, 2.0, 0.12); post.translate(px, 1.0, pz);
-        parts.push({ geo: post, color: WELLWOOD });
-      }
-      const canopy = new THREE.BoxGeometry(3.0, 0.14, 3.0); canopy.translate(0, 2.07, 0);
-      parts.push({ geo: canopy, color: CANOPY[0] });
-      return paintMerge(parts);
-    },
+    geom: function () { return paintMerge(stallParts(CANOPY[0], 1)); },
     material: function () { return vcMat(); },
     build: function (ctx) {
-      const r = ctx.rng || Math.random, s = ctx.scale || 1, g = ctx.group;
-      const wood = cmat(WELLWOOD);
-      for (const [px, pz] of [[-1.3, -1.3], [1.3, -1.3], [-1.3, 1.3], [1.3, 1.3]]) {
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 2.0 * s, 0.12 * s), wood);
-        post.position.set(px * s, 1.0 * s, pz * s); post.castShadow = true; g.add(post);
-      }
-      const canopy = new THREE.Mesh(new THREE.BoxGeometry(3.0 * s, 0.14 * s, 3.0 * s), cmat(pick(CANOPY, r)));
-      canopy.position.y = 2.07 * s; canopy.castShadow = true; g.add(canopy);
+      const r = ctx.rng || Math.random;
+      addParts(ctx.group, stallParts(pick(CANOPY, r), ctx.scale || 1));
     },
   });
 
