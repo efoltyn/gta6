@@ -33,7 +33,7 @@
      CBZ.countryAt(x, z)      -> country id | null      (16 m cached)
      CBZ.countryRecAt(x, z)   -> the polity country record | null
      CBZ.countryAtExact(x, z, land?) -> id | null       (uncached, for bakers)
-     CBZ.countries()          -> [{id, name, color, home, polygons, label,
+     CBZ.countryList()        -> [{id, name, color, home, polygons, label,
                                    atWar (at war with YOUR country), wars:[ids]}]
                                    polygons = [[x,z,x,z,...]]
      CBZ.countryBorders()     -> [{a, b, war, lines:[[x,z,...]], pts}]: one
@@ -495,7 +495,9 @@
   CBZ.countryAt = countryAt;
   CBZ.countryRecAt = countryRecAt;
   CBZ.countryAtExact = function (x, z, land) { return exact(x, z, land); };
-  CBZ.countries = countries;
+  // not CBZ.countries: that is NPC War's nation roster (battle/core/countries.js),
+  // and the city's war engine runs NPC War's own files, which read it
+  CBZ.countryList = countries;
   CBZ.countryBorders = countryBorders;
   CBZ.countryHome = countryHome;
   CBZ.countryCrossing = function () { return crossing; };

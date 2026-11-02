@@ -1926,7 +1926,10 @@
         const a = L[i], ch = a && a.char;
         if (!ch || !ch.group || !ch.skinSlots || !ch.parts || inList.has(ch)) continue;
         inList.add(ch);
-        if (a.culled || !ch.group.parent || ch.child && (ch.ageYears || 10) < 5) continue;
+        // a hidden ped (riding in a car, going through a door, not yet
+        // revealed) is drawn by nobody, so it earns no new body; one that is
+        // already real keeps it, so a short hide never costs a rebuild
+        if (a.culled || !ch.group.parent || !ch.group.visible && !ch._people || ch.child && (ch.ageYears || 10) < 5) continue;
         const e = ch.group.matrixWorld.elements, dx = e[12] - cx, dy = e[13] - cy, dz = e[14] - cz;
         const d2 = dx * dx + dy * dy + dz * dz;
         if (d2 < (ch._people ? far2 : near2)) _cand.push([d2, ch]);
