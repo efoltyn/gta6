@@ -154,7 +154,13 @@ THREE.createRenderer = function ( params ) {
 		const hasGPU = !! ( globalThis.navigator && navigator.gpu );
 		const r = new WEBGPU.WebGPURenderer( Object.assign( {}, params, { forceWebGL: ! hasGPU || params.forceWebGL === true } ) );
 		r.cbzBackend = hasGPU && params.forceWebGL !== true ? 'webgpu' : 'webgpu-gl';
+		// a WebGPURenderer THROWS on render() before init() has resolved; the
+		// game's loops start at once, so frames before then are skipped
+		let ready = false;
+		const render0 = r.render;
+		r.render = function () { return ready ? render0.apply( this, arguments ) : undefined; };
 		r.cbzReady = r.init().then( () => {
+			ready = true;
 			// init() may fall back to WebGL2 by itself (no adapter): say what really runs
 			if ( r.backend && ! r.backend.isWebGPUBackend ) r.cbzBackend = 'webgpu-gl';
 			return r;

@@ -237,7 +237,7 @@
       if (scene && scene === CBZ.scene) pinNow();
       return r0.apply(this, arguments);
     };
-    if (typeof R.compile === "function") {
+    if (typeof R.compile === "function" && R.isWebGLRenderer) {   // (WebGPURenderer.compile is a getter)
       const c0 = R.compile;
       R.compile = function (scene) {
         if (scene && scene === CBZ.scene) pinNow();

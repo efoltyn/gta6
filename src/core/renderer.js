@@ -538,6 +538,8 @@
   renderer.shadowMap.autoUpdate = false;
   renderer.shadowMap.needsUpdate = true;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // the film grade lives in a ShaderChunk; the node renderer gets plain ACES
+  if (toneMode === THREE.CustomToneMapping && !renderer.isWebGLRenderer) toneMode = THREE.ACESFilmicToneMapping;
   if (toneMode) {
     renderer.toneMapping = toneMode;
     renderer.toneMappingExposure = +CBZ.CONFIG.RENDER_EXPOSURE || 1;

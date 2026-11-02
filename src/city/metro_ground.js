@@ -2801,7 +2801,7 @@
           "  mgW = modelMatrix * mgW; vMgW = mgW.xyz; vMgK = gk; vMgD = -mvPosition.z; }");
       sh.fragmentShader = sh.fragmentShader
         .replace("#include <common>", "#include <common>\n" + TURF() + "\n" + MG_FUNCS)
-        .replace("#include <color_fragment>", "#ifdef USE_COLOR\n  diffuseColor.rgb *= mgSurface(vColor * vColor);\n#else\n  diffuseColor.rgb *= mgSurface(vec3(0.5));\n#endif")
+        .replace("#include <color_fragment>", "#ifdef USE_COLOR\n  diffuseColor.rgb *= mgSurface(vColor.rgb * vColor.rgb);\n#else\n  diffuseColor.rgb *= mgSurface(vec3(0.5));\n#endif")
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\nif (abs(vMgK.x - 7.0) < 0.5) totalEmissiveRadiance += vec3(1.0, 0.78, 0.5) * uMgNight * 3.0;");
     };
     m.customProgramCacheKey = function () { return "metroGround2"; };

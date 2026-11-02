@@ -1,0 +1,73 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>three look probe</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body>
+<!-- tools/three/look-probe.html — the lighting / colour pipeline on one page,
+     read back as numbers, so two three.js builds can be compared exactly.
+     ?three=<path to a classic three build> (default: the vendored r187).
+     window.__look = { ok, rev, cells: { name: [r,g,b] } } once rendered.
+     Each cell is one material x one light rig on a sphere, sampled at the
+     sphere's centre (facing the camera), output sRGB, ACES or none. -->
+<script>
+  const q = new URLSearchParams(location.search);
+  document.write('<script src="' + (q.get("three") || "../../src/vendor/three.r187.js") + '"><\/script>');
+</script>
+<script>
+(function () {
+  const q = new URLSearchParams(location.search);
+  const W = 640, H = 480;
+  const R = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+  R.setPixelRatio(1); R.setSize(W, H);
+  if ("outputColorSpace" in R) R.outputColorSpace = THREE.SRGBColorSpace; else R.outputEncoding = THREE.sRGBEncoding;
+  if (q.get("tone") === "aces") { R.toneMapping = THREE.ACESFilmicToneMapping; }
+  document.body.appendChild(R.domElement);
+  const cam = new THREE.OrthographicCamera(-4, 4, 3, -3, 0.1, 100); cam.position.set(0, 0, 20); cam.lookAt(0, 0, 0);
+  const mats = {
+    lambert: () => new THREE.MeshLambertMaterial({ color: 0x8a7a66 }),
+    phong: () => new THREE.MeshPhongMaterial({ color: 0x8a7a66, shininess: 20, specular: 0x222222 }),
+    std_r1: () => new THREE.MeshStandardMaterial({ color: 0x8a7a66, roughness: 1, metalness: 0 }),
+    std_r5: () => new THREE.MeshStandardMaterial({ color: 0x8a7a66, roughness: 0.5, metalness: 0 }),
+    std_m: () => new THREE.MeshStandardMaterial({ color: 0x8a7a66, roughness: 0.4, metalness: 1 }),
+    basic: () => new THREE.MeshBasicMaterial({ color: 0x8a7a66 }),
+  };
+  const rigs = {
+    ambient: (s) => s.add(new THREE.AmbientLight(0xffffff, 0.6)),
+    hemi: (s) => s.add(new THREE.HemisphereLight(0xbfd8ff, 0x6b5a40, 0.8)),
+    sun: (s) => { const d = new THREE.DirectionalLight(0xfff1dd, 1.0); d.position.set(3, 5, 8); s.add(d); s.add(d.target); },
+    point: (s) => { const p = new THREE.PointLight(0xffffff, 1.5, 12); p.position.set(0, 0, 4); s.add(p); },
+    spot: (s) => { const p = new THREE.SpotLight(0xffffff, 1.5, 14, Math.PI / 5, 0.3); p.position.set(0, 0, 5); p.target.position.set(0, 0, 0); s.add(p); s.add(p.target); },
+  };
+  // an image-based-lighting rig: a sky/ground gradient through PMREM (the
+  // path core/gfx.js + city/official_assets.js use)
+  let envTex = null;
+  rigs.env = (s) => {
+    if (!envTex) {
+      const c = document.createElement("canvas"); c.width = 256; c.height = 128;
+      const g = c.getContext("2d"), gr = g.createLinearGradient(0, 0, 0, 128);
+      gr.addColorStop(0, "#7fb2ff"); gr.addColorStop(0.5, "#e8eef5"); gr.addColorStop(0.52, "#8a7a5a"); gr.addColorStop(1, "#3a3020");
+      g.fillStyle = gr; g.fillRect(0, 0, 256, 128);
+      const t = new THREE.CanvasTexture(c); t.mapping = THREE.EquirectangularReflectionMapping;
+      if ("colorSpace" in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding;
+      const pm = new THREE.PMREMGenerator(R); envTex = pm.fromEquirectangular(t).texture;
+    }
+    s.environment = envTex;
+  };
+  rigs.env_sun = (s) => { rigs.env(s); rigs.sun(s); };
+  const geo = new THREE.SphereGeometry(0.9, 48, 32);
+  const cells = {};
+  const px = new Uint8Array(4);
+  const gl = R.getContext();
+  for (const rn in rigs) {
+    for (const mn in mats) {
+      const s = new THREE.Scene(); s.background = new THREE.Color(0x000000);
+      rigs[rn](s);
+      const m = new THREE.Mesh(geo, mats[mn]()); s.add(m);
+      R.render(s, cam);
+      gl.readPixels(W / 2, H / 2, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      cells[rn + "/" + mn] = [px[0], px[1], px[2]];
+    }
+  }
+  window.__look = { ok: true, rev: THREE.REVISION, cells: cells };
+})();
+</script>
+</body></html>

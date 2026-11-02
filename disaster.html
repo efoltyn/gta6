@@ -407,7 +407,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the GLTF/DRACO/RGBE/3MF loaders, BufferGeometryUtils, the meshlet
      pipeline). Built by tools/three/build.mjs from tools/three/entry.js; the
      r128 build and its separate loader scripts are gone. -->
-<script src="src/vendor/three.r187.js?v=r187b"></script>
+<script src="src/vendor/three.r187.js?v=r187c"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
 <script src="src/core/instcull.js?v=r187a"></script>
 <!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
@@ -491,7 +491,7 @@ document.body.appendChild(b);}}catch(e){}})();
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
 <script src="src/world/treefoot.js?v=sight1011"></script>
 <script src="src/core/prio.js?v=arch2"></script>
-<script src="src/core/lightpin.js?v=w09290242x"></script>
+<script src="src/core/lightpin.js?v=r187c"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
@@ -508,7 +508,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
 <script src="src/core/prisonlazy.js?v=isleleak1022"></script>
-<script src="src/core/renderer.js?v=r187a"></script>
+<script src="src/core/renderer.js?v=r187c"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
@@ -637,7 +637,7 @@ document.body.appendChild(b);}}catch(e){}})();
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=r187a"></script>
+<script src="src/entities/crowdgpu.js?v=r187c"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -1681,7 +1681,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=r187a"></script>
-<script src="src/city/metro_ground.js?v=peak1014"></script>
+<script src="src/city/metro_ground.js?v=r187c"></script>
 <script src="src/city/metro.js?v=mrg10200048"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- WHO A PERSON IS AND WHAT YOU CAN DO TO HIM: the role -> verbs table the

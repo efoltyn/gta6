@@ -146,6 +146,20 @@ function _cbzQuatCb() { this._e.setFromQuaternion( this, undefined, false ); }
     "\t\t\tuniforms.transmissionSamplerMap.value = transmissionRenderTarget.texture;\n\t\t\tuniforms.transmissionSamplerSize.value.set( transmissionRenderTarget.width, transmissionRenderTarget.height );",
     "\t\t\tif ( transmissionRenderTarget ) { // CBZ: there is no transmission pass (r128 transmission)\n\t\t\tuniforms.transmissionSamplerMap.value = transmissionRenderTarget.texture;\n\t\t\tuniforms.transmissionSamplerSize.value.set( transmissionRenderTarget.width, transmissionRenderTarget.height );\n\t\t\t}", 1, "materials: transmission target optional"],
 
+  // ---- scene.environment lights PBR materials only, at their own intensity (r128)
+  // r187 also lights MeshLambert/MeshPhong with scene.environment, and gives
+  // every material without its own envMap scene.environmentIntensity instead
+  // of its envMapIntensity. The game is Lambert-heavy and sets
+  // envMapIntensity per material (core/gfx.js tiers it): measured on
+  // tools/three/look-probe.html, a Lambert sphere under sky IBL + sun read
+  // (177,163,145) on r128 and (211,200,186) on r187 (whites blow out).
+  ["build/three.module.js",
+    "( material.isMeshStandardMaterial || material.isMeshLambertMaterial || material.isMeshPhongMaterial ) ? scene.environment : null",
+    "( material.isMeshStandardMaterial ) ? scene.environment : null /* CBZ: r128 */", 3, "environment: PBR only"],
+  ["build/three.module.js",
+    "\t\t\tif ( ( material.isMeshStandardMaterial || material.isMeshLambertMaterial || material.isMeshPhongMaterial ) && material.envMap === null && scene.environment !== null ) {\n\n\t\t\t\tm_uniforms.envMapIntensity.value = scene.environmentIntensity;",
+    "\t\t\tif ( false && material.envMap === null && scene.environment !== null ) { // CBZ: r128 keeps the material's envMapIntensity\n\n\t\t\t\tm_uniforms.envMapIntensity.value = scene.environmentIntensity;", 1, "environment: material envMapIntensity"],
+
   // ---- raycasts against pools and skinned bodies (r128) -------------------
   // Same stale-bounds story as culling: r187 early-outs a ray on a sphere it
   // computed once over every instance / every posed vertex. r128 tested each

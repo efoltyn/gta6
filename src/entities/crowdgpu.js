@@ -454,8 +454,9 @@
     const R = CBZ.renderer;
     if (!R || !R.capabilities) return "no renderer";
     const C = R.capabilities;
-    if (!C.vertexTextures) return "no vertex texture fetch";
-    if (!C.floatVertexTextures) return "no float vertex textures";
+    // three r187 is WebGL2-only: vertex texture fetch of float textures is
+    // guaranteed there (the vertexTextures / floatVertexTextures flags are gone)
+    if (!(C.maxVertexTextures > 0)) return "no vertex texture fetch";
     GPU.maxTex = C.maxTextureSize || 4096;
     return "";
   }
@@ -498,9 +499,9 @@
           "vec3 cgColor() {\n  float s = mod(aPart.y, 16.0);\n" +
           "  if (s < 0.5) return cgPal(iLook.x);\n  if (s < 1.5) return cgPal(iLook.y);\n  if (s < 2.5) return cgPal(iLook.z);\n" +
           "  if (s < 3.5) return cgPal(iLook.w);\n  if (s < 4.5) return cgPal(iLook2.x);\n  if (s < 5.5) return cgPal(iLook2.y);\n" +
-          "  if (s < 6.5) return color;\n  if (s < 7.5) return cgPal(iLook.x) * vec3(0.80, 0.60, 0.58);\n  return cgPal(floor(iVel.w / 256.0));\n}")
+          "  if (s < 6.5) return color.rgb;\n  if (s < 7.5) return cgPal(iLook.x) * vec3(0.80, 0.60, 0.58);\n  return cgPal(floor(iVel.w / 256.0));\n}")
         .replace("#include <color_vertex>", "")
-        .replace("#include <beginnormal_vertex>", "cgSkin();\nvColor = cgColor();\nvec3 objectNormal = cgN;")
+        .replace("#include <beginnormal_vertex>", "cgSkin();\nvColor = vec4( cgColor(), 1.0 );\nvec3 objectNormal = cgN;")   // (r187: vColor is a vec4 in every vertex shader)
         .replace("#include <begin_vertex>", "vec3 transformed = cgP;");
     };
     mat.customProgramCacheKey = function () { return "crowdgpu-mesh-3"; };

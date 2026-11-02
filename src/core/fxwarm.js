@@ -155,6 +155,9 @@
      again from the object that threw (its map is converted now); an object
      that throws twice is skipped. */
   function compileFrom(r, cam, objs, rep) {
+    // the stand-in scene is a WebGLRenderer.compile trick; a WebGPURenderer
+    // (?gpu=webgpu) builds its node pipelines at first draw (phase B: compileAsync)
+    if (!r.isWebGLRenderer) return;
     let from = 0, failedAt = -1, guard = 0;
     while (from < objs.length && guard++ < 64) {
       STAND_IN._objs = objs; STAND_IN._from = from; STAND_IN._at = from;
