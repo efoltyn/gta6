@@ -33,7 +33,7 @@ import vm from "node:vm";
 const require = createRequire(import.meta.url);
 const ROOT = new URL("../", import.meta.url);
 const read = (f) => readFileSync(new URL(f, ROOT), "utf8");
-const THREE = require(new URL("src/vendor/three.r128.min.js", ROOT).pathname);
+const THREE = require(new URL("src/vendor/three.r187.js", ROOT).pathname);
 const MAX_MM = 3;
 let fails = 0;
 const ok = (c, m, d) => { if (!c) fails++; console.log((c ? "ok   " : "FAIL ") + m + (d ? "  (" + d + ")" : "")); };

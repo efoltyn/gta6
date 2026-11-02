@@ -46,7 +46,7 @@ ctx.navigator = { userAgent: "node" }; ctx.location = { search: "", href: "" };
 ctx.localStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
 const updates = [];
 ctx.CBZ = { CONFIG: {}, onAlways() {}, onUpdate(o, f) { updates.push([o, f]); }, on() {} };
-for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js",
+for (const f of ["src/vendor/three.r187.js", "src/world/materials.js", "src/systems/fphands.js",
   "src/entities/footwear.js", "src/entities/character.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });
 }

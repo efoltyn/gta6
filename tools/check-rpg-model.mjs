@@ -19,7 +19,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ctxG = { console, Math, Date, Float32Array, Uint16Array, Uint32Array, Uint8Array, Int32Array, Array, Object, Map, Set, WeakMap };
 ctxG.window = ctxG; ctxG.self = ctxG;
 vm.createContext(ctxG);
-vm.runInContext(readFileSync(path.join(root, "src/vendor/three.r128.min.js"), "utf8"), ctxG);
+vm.runInContext(readFileSync(path.join(root, "src/vendor/three.r187.js"), "utf8"), ctxG);
 const THREE = ctxG.THREE;
 ctxG.CBZ = { CONFIG: {} };
 for (const f of ["src/weapons/appearances/sidearm.js", "src/weapons/appearances/bazooka.js", "src/weapons/munitions.js"])

@@ -121,7 +121,7 @@ function ok(c, m) { if (c) { passes++; if (process.env.V) console.log("  ok " + 
   ctx.addEventListener = () => {}; ctx.requestAnimationFrame = () => 0;
   const clocks = [];
   ctx.CBZ = { CONFIG: {}, game: { mode: "city" }, npcs: [], onUpdate(o, f) { if (o === 35.5) clocks.push(f); }, onAlways() {}, onReset() {}, onModeEnter() {}, on() {} };
-  for (const f of ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
+  for (const f of ["src/vendor/three.r187.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
     "src/entities/footwear.js", "src/entities/character.js", "src/weapons/weapon-data.js", "src/weapons/weapon-scale.js", "src/weapons/appearances/sidearm.js", "src/systems/actorweapons.js"]) {
     vm.runInContext(read(f), ctx, { filename: f });
   }

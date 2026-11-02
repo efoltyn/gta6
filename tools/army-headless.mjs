@@ -54,7 +54,7 @@ function boot(opts) {
   sb.window = sb; sb.self = sb; sb.globalThis = sb;
   vm.createContext(sb);
   const run = (rel) => vm.runInContext(src(rel), sb, { filename: "src/" + rel });
-  run("vendor/three.r128.min.js");
+  run("vendor/three.r187.js");
   const THREE = sb.THREE;
   sb.CBZ = { CONFIG: {}, game: { mode: "city", state: "playing" }, now: 0 };
   const CBZ = sb.CBZ;

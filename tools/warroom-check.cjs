@@ -24,7 +24,7 @@ function fakeCanvas() { return { width: 64, height: 64, style: {}, getContext: (
 const ctx = vm.createContext({ addEventListener: () => {}, removeEventListener: () => {}, window: win, console, Math, Object, Array, JSON, isFinite, Map, Set, Float32Array, Uint16Array, Uint32Array, Int32Array, Uint8Array, Int8Array, Int16Array, Uint8ClampedArray, Float64Array, ArrayBuffer, DataView, WeakMap, Symbol, Promise, setTimeout, clearTimeout, performance: { now: () => Date.now() }, navigator: { userAgent: "node" }, document: { createElement: () => fakeCanvas(), createElementNS: () => ({ style: {} }) }, self: win });
 win.window = win; win.self = win; win.document = ctx.document; win.navigator = ctx.navigator;
 function load(f) { vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), ctx, { filename: f }); }
-load("src/vendor/three.r128.min.js");
+load("src/vendor/three.r187.js");
 const THREE = win.THREE || ctx.THREE;
 win.THREE = THREE;
 const scene = new THREE.Group();

@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
-const THREE = require(path.join(ROOT, "src/vendor/three.r128.min.js"));
+const THREE = require(path.join(ROOT, "src/vendor/three.r187.js"));
 globalThis.window = { THREE, CBZ: { CONFIG: {} } };
 require(path.join(ROOT, "src/world/textures_surface.js"));
 const CBZ = globalThis.window.CBZ;

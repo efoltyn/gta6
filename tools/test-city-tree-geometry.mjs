@@ -7,7 +7,7 @@ import vm from 'node:vm';
 const ctx = vm.createContext({ console });
 ctx.window = ctx; ctx.self = ctx;
 ctx.CBZ = { CONFIG: {}, qScale: (_lo, hi) => hi };
-for (const file of ['src/vendor/three.r128.min.js', 'src/vendor/BufferGeometryUtils.js',
+for (const file of ['src/vendor/three.r187.js',
   'src/world/treeaudit.js', 'src/world/vegetation.js', 'src/world/rockscliffs.js']) {
   vm.runInContext(readFileSync(new URL('../' + file, import.meta.url), 'utf8'), ctx, { filename: file });
 }

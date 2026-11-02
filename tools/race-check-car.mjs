@@ -4,7 +4,7 @@
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 global.window = global;
-const THREE = require("../src/vendor/three.r128.min.js");
+const THREE = require("../src/vendor/three.r187.js");
 const carApi = require("../src/race/race_car.js");
 
 let fails = 0;

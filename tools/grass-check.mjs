@@ -32,8 +32,7 @@ const win = { document, console, Math, Date, setTimeout, clearTimeout, performan
 win.window = win; win.self = win; win.CBZ = { CONFIG: {} };
 const context = vm.createContext(win);
 const load = (rel) => vm.runInContext(fs.readFileSync(path.join(ROOT, rel), "utf8"), context, { filename: rel });
-load("src/vendor/three.r128.min.js");
-load("src/vendor/BufferGeometryUtils.js");
+load("src/vendor/three.r187.js");
 const CBZ = win.CBZ, THREE = win.THREE;
 CBZ.colliders = []; CBZ.onUpdate = () => {}; CBZ.onAlways = () => {};
 CBZ.hash01 = (x, z, s) => { let h = (Math.round(x * 16) * 374761393 + Math.round(z * 16) * 668265263 + s * 2246822519) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };

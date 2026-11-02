@@ -185,7 +185,7 @@ function marineVM() {
   ctx.document = { createElement: () => ({ getContext: () => null, style: {} }), addEventListener() {} };
   const CBZ = (ctx.CBZ = { CONFIG: {}, onAlways() {}, onUpdate() {}, on() {}, game: { mode: "sharksim" } });
   const run = (f) => vm.runInContext(read(f), ctx, { filename: f });
-  run("src/vendor/three.r128.min.js");
+  run("src/vendor/three.r187.js");
   const THREE = ctx.THREE;
   CBZ.hash01 = (a, b, s) => { const x = Math.sin(a * 12.9898 + b * 78.233 + (s | 0) * 37.719) * 43758.5453; return x - Math.floor(x); };
   const gc = {};

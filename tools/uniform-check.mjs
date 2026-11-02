@@ -46,7 +46,7 @@ ctx.CBZ = {
     { id: "blues", name: "Blues", color: 0x2f5fc8, accent: 0x10131a },
   ] },
 };
-vm.runInContext(read("src/vendor/three.r128.min.js"), ctx, { filename: "three" });
+vm.runInContext(read("src/vendor/three.r187.js"), ctx, { filename: "three" });
 const GEO = {}, MAT = {};
 ctx.CBZ.boxGeom = (w, h, d) => GEO[w + "," + h + "," + d] || (GEO[w + "," + h + "," + d] = new ctx.THREE.BoxGeometry(w, h, d));
 ctx.CBZ.cmat = (hex) => MAT[hex] || (MAT[hex] = Object.assign(new ctx.THREE.MeshLambertMaterial({ color: hex }), { _shared: true }));

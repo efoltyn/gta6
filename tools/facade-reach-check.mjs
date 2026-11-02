@@ -68,8 +68,7 @@ function shellEnv() {
     getElementById() { return null; }, querySelector() { return null; }, querySelectorAll() { return []; }, body: { appendChild() {} }, head: { appendChild() {} }, addEventListener() {} };
   vm.createContext(ctx);
   const load = (rel) => vm.runInContext(fs.readFileSync(ROOT + "/" + rel, "utf8"), ctx, { filename: rel });
-  load("src/vendor/three.r128.min.js");
-  load("src/vendor/BufferGeometryUtils.js");
+  load("src/vendor/three.r187.js");
   const THREE = ctx.THREE, matCache = new Map();
   ctx.CBZ = {
     CONFIG: {}, colliders: [], platforms: [], losBlockers: [], game: { mode: "city" }, WORLD_SEED: 90210,
@@ -224,7 +223,7 @@ const HIST = {};
 function runMetro() {
   const require = createRequire(import.meta.url);
   const snap = JSON.parse(fs.readFileSync(path.join(ROOT, "tools/metro-world-snapshot.json"), "utf8"));
-  const THREE = require(path.join(ROOT, "src/vendor/three.r128.min.js"));
+  const THREE = require(path.join(ROOT, "src/vendor/three.r187.js"));
   globalThis.window = { THREE, CBZ: { CONFIG: {}, WORLD_SEED: 90210, highwayNetTable: () => snap.hw, HIGHWAY_NET_HALF: snap.H } };
   require(path.join(ROOT, "src/core/seed.js"));
   require(path.join(ROOT, "src/city/facade_kit.js"));

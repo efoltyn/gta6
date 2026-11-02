@@ -412,7 +412,7 @@
   "src/main.js"
  ],
  "unused": [
-  "src/vendor/three.r128.min.js",
+  "src/vendor/three.r187.js",
   "src/vendor/WaterReflect.js",
   "src/vendor/DRACOLoader.js",
   "src/vendor/GLTFLoader.js",
@@ -4358,7 +4358,7 @@
   "src/systems/touch.js",
   "src/systems/trauma.js",
   "src/systems/weather.js",
-  "src/vendor/three.r128.min.js",
+  "src/vendor/three.r187.js",
   "src/world/cellblock.js",
   "src/world/crates.js",
   "src/world/disaster_arena.js",

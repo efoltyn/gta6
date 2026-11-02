@@ -30,7 +30,7 @@ const argv = process.argv.slice(2);
 const seedArg = argv.indexOf("--seed") >= 0 ? +argv[argv.indexOf("--seed") + 1] : 90210;
 const snap = JSON.parse(readFileSync(path.join(ROOT, "tools/metro-world-snapshot.json"), "utf8"));
 
-const THREE = require(path.join(ROOT, "src/vendor/three.r128.min.js"));
+const THREE = require(path.join(ROOT, "src/vendor/three.r187.js"));
 globalThis.window = { THREE, CBZ: { CONFIG: {}, WORLD_SEED: seedArg, highwayNetTable: () => snap.hw, HIGHWAY_NET_HALF: snap.H } };
 require(path.join(ROOT, "src/city/highways.js"));          // CBZ.highwaySmoothPath: the deck's own centreline
 require(path.join(ROOT, "src/city/zoning.js"));        // the world zoning field metro.js plans with

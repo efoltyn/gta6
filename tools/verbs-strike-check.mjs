@@ -48,7 +48,7 @@ async function load() {
   ctx.window = ctx; ctx.self = ctx;
   ctx.document = { createElement: () => ({ width: 64, height: 64, style: {}, getContext: () => g2d() }), getElementById: () => null, addEventListener() {}, body: {} };
   ctx.addEventListener = () => {};
-  vm.runInContext(read("src/vendor/three.r128.min.js"), ctx);
+  vm.runInContext(read("src/vendor/three.r187.js"), ctx);
   const T = ctx.THREE;
   const updaters = [];
   ctx.CBZ = { CONFIG: {}, HUMAN_SCALE: 0.7, onUpdate: (order, fn) => updaters.push({ order, fn }), onAlways() {}, game: { mode: "city", state: "playing" }, now: 0,

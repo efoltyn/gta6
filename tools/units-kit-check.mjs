@@ -126,7 +126,7 @@ for (const tname of Object.keys(gait.TABLES)) {
 {
   const sb = { Math, Object, Array, Number, String, JSON, Float32Array, Uint16Array, Uint32Array, Int32Array, Uint8Array, Map, Set, Symbol, Error, console };
   sb.window = sb; vm.createContext(sb);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, "src/vendor/three.r128.min.js"), "utf8"), sb);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, "src/vendor/three.r187.js"), "utf8"), sb);
   const Ref = refLoft(sb.THREE);
   const D = dog.dims("shepherd", 0), K = D.K;
   const st = [

@@ -35,7 +35,7 @@ function world(merge, pbr) {
   // pbr: a PBR tier after core/gfx.js armed it (world/materials.js cmat hands out Standard twins)
   ctx.CBZ = { CONFIG: { CAR_VC_MERGE: merge, GFX_PBR_MATERIALS: !!pbr }, gfxPbrArmed: !!pbr, gfxTier: { pbr: !!pbr }, onAlways() {}, onUpdate() {}, on() {}, flags: {} };
   ctx.addEventListener = () => {}; ctx.removeEventListener = () => {}; ctx.requestAnimationFrame = () => 0;
-  for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/world/carfx.js", "src/city/carlamps.js", "src/city/carparts.js",
+  for (const f of ["src/vendor/three.r187.js", "src/world/materials.js", "src/world/carfx.js", "src/city/carlamps.js", "src/city/carparts.js",
     "src/city/carbody.js", "src/city/carwheels.js", "src/city/carseats.js", "src/city/playercars.js", "src/city/carlod.js", "src/city/vehicles.js"]) {
     vm.runInContext(read(f), ctx, { filename: f });
   }

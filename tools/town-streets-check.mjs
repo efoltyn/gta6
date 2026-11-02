@@ -41,8 +41,7 @@ function makeEnv() {
   win.CBZ = { CONFIG: {} };
   const context = vm.createContext(win);
   function load(rel) { vm.runInContext(fs.readFileSync(path.join(ROOT, rel), "utf8"), context, { filename: rel }); }
-  load("src/vendor/three.r128.min.js");
-  load("src/vendor/BufferGeometryUtils.js");
+  load("src/vendor/three.r187.js");
   return { win, load, context, CBZ: win.CBZ, THREE: win.THREE };
 }
 

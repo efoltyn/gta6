@@ -67,7 +67,7 @@
 
   // the same lists as tools/lab/deps.mjs PRELUDE / POSTLUDE (kept in step by
   // tools/lab/check.mjs, which fails if they drift)
-  L.PRELUDE = ["src/vendor/three.r128.min.js", "src/config.js", "src/core/seed.js", "src/core/microboot.js",
+  L.PRELUDE = ["src/vendor/three.r187.js", "src/config.js", "src/core/seed.js", "src/core/microboot.js",
     "src/lab/closure.js", "src/lab/registry.js", "src/lab/labworld.js"];
   L.PRELUDE_PROVIDERS = ["src/config.js", "src/core/seed.js", "src/lab/labworld.js"];
   L.POSTLUDE = ["src/core/loop.js"];
@@ -119,13 +119,13 @@
     glTried = true;
     const tGL = performance.now();
     try {
-      renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, preserveDrawingBuffer: true, powerPreference: "high-performance", stencil: false });
+      renderer = THREE.createRenderer({ canvas: canvas, antialias: true, preserveDrawingBuffer: true, powerPreference: "high-performance", stencil: false });
       renderer.setPixelRatio(1);
       renderer.setSize(640, 400, false);
-      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
     } catch (e) { loadErrors.push("renderer: " + (e && e.message)); }
     L.glMs = Math.round(performance.now() - tGL);
     return renderer;
@@ -350,7 +350,7 @@
     const tex = new THREE.CanvasTexture(cv);
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.repeat.set(size / 8, size / 8);
-    tex.encoding = THREE.sRGBEncoding;
+    tex.colorSpace = THREE.SRGBColorSpace;
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshLambertMaterial({ map: tex }));
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;

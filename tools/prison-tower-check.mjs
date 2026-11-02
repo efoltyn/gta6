@@ -77,8 +77,7 @@ function run(path, soft) {
   try { vm.runInContext(read(path), ctx, { filename: path }); return true; }
   catch (e) { if (!soft) throw e; if (VERBOSE) console.log("  (soft) " + path + ": " + String(e.message).slice(0, 140)); return false; }
 }
-run("src/vendor/three.r128.min.js");
-run("src/vendor/BufferGeometryUtils.js");
+run("src/vendor/three.r187.js");
 const THREE = sandbox.THREE;
 run("src/config.js");
 const CBZ = sandbox.CBZ;

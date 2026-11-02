@@ -40,7 +40,7 @@ function ctx2d(c) {
 ctx.document = { createElement() { return { width: 300, height: 150, style: {}, getContext() { return this._c || (this._c = ctx2d(this)); }, addEventListener() {} }; }, getElementById() { return null; }, querySelector() { return null; }, body: { appendChild() {}, classList: { contains() { return false; } } }, addEventListener() {} };
 vm.createContext(ctx);
 function load(rel) { vm.runInContext(fs.readFileSync(ROOT + "/" + rel, "utf8"), ctx, { filename: rel }); }
-load("src/vendor/three.r128.min.js");
+load("src/vendor/three.r187.js");
 const THREE = ctx.THREE;
 const CBZ = ctx.CBZ = { CONFIG: {}, game: { mode: "city", state: "playing" }, onUpdate() {}, onNewDay() {}, onAlways() {},
   boxGeom(w, h, d) { return new THREE.BoxGeometry(w, h, d); }, hash01(x, z, s) { const v = Math.sin(x * 12.9898 + z * 78.233 + (s || 0) * 0.123) * 43758.5453; return v - Math.floor(v); },

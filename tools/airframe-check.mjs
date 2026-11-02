@@ -22,7 +22,7 @@ ctx.window = ctx; ctx.self = ctx; ctx.globalThis = ctx;
 ctx.document = { createElement() { return { getContext() { return null; }, style: {} }; } };
 vm.createContext(ctx);
 function load(rel) { vm.runInContext(fs.readFileSync(ROOT + "/" + rel, "utf8"), ctx, { filename: rel }); }
-load("src/vendor/three.r128.min.js");
+load("src/vendor/three.r187.js");
 const THREE = ctx.THREE;
 const cache = new Map();
 ctx.CBZ = {

@@ -59,7 +59,7 @@ ctx.addEventListener = () => {};
 ctx.location = { search: "" };
 ctx.CBZ = { CONFIG: {}, game: {}, onAlways() {}, onUpdate() {}, on() {}, emit() {} };
 ctx.CBZ.tattoo = { _mkCanvas: stubCanvas, lazy: false };
-for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/tattoo.js",
+for (const f of ["src/vendor/three.r187.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/tattoo.js",
   "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js", "src/entities/heritage.js",
   "src/city/clothes.js", "src/city/outfits.js"]) {
   try { vm.runInContext(read(f), ctx, { filename: f }); }

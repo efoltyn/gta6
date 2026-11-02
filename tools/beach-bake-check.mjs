@@ -28,7 +28,7 @@ function run(label) {
     bakeGet: (k, sig) => { const e = store.get(k); if (e && e.sig === sig) { hits++; store.delete(k); return e.arrays; } return null; },
     bakePut: (k, sig, arrays) => { puts++; const c = {}; for (const a in arrays) c[a] = arrays[a].slice(); store.set(k, { sig, arrays: c }); },
   };
-  vm.runInContext(read("src/vendor/three.r128.min.js"), ctx);
+  vm.runInContext(read("src/vendor/three.r187.js"), ctx);
   vm.runInContext(read("src/world/materials.js"), ctx, { filename: "materials.js" });
   vm.runInContext(read("src/city/beach.js"), ctx, { filename: "beach.js" });
   const root = new ctx.THREE.Scene();

@@ -3,7 +3,7 @@
 //   node tools/carinstances-check.js
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const ROOT = path.resolve(__dirname, "..");
-const THREE = require(ROOT + "/src/vendor/three.r128.min.js");
+const THREE = require(ROOT + "/src/vendor/three.r187.js");
 const always = [];
 const CBZ = { CONFIG: {}, game: { mode: "city" }, cityFogFar: 380, onAlways: (o, fn) => always.push(fn) };
 CBZ.scene = new THREE.Scene();

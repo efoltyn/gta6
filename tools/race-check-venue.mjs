@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 globalThis.window = globalThis;
 const ctx = new Proxy(function () {}, { get(t, p) { return p === "width" ? 10 : function () { return ctx; }; }, set() { return true; } });
 globalThis.document = { createElement() { return { width: 0, height: 0, style: {}, getContext() { return ctx; } }; } };
-const THREE_ = require(path.join(ROOT, "src/vendor/three.r128.min.js"));
+const THREE_ = require(path.join(ROOT, "src/vendor/three.r187.js"));
 const THREE = globalThis.THREE || THREE_;
 const core = require(path.join(ROOT, "src/race/race_core.js"));
 const track = require(path.join(ROOT, "src/race/race_track.js"));

@@ -61,7 +61,7 @@ const verbose = process.argv.includes("--verbose");
 const ctx = vm.createContext({ console, Math, performance });
 ctx.window = ctx; ctx.self = ctx;
 ctx.CBZ = { CONFIG: {}, onAlways() {}, onUpdate() {}, on() {} };
-const FILES = ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js"];
+const FILES = ["src/vendor/three.r187.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js"];
 for (const f of FILES) if (existsSync(new URL(f, ROOT))) vm.runInContext(read(f), ctx, { filename: f });
 const { THREE: T, CBZ } = ctx;
 const H = CBZ.fpHands;

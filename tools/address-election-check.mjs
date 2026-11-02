@@ -57,7 +57,7 @@ ctx.document = { createElement() { return { width: 300, height: 150, style: {}, 
   getElementById() { return null; }, querySelector() { return null; }, body: { appendChild() {}, classList: { add() {}, remove() {}, toggle() {} } }, addEventListener() {} };
 vm.createContext(ctx);
 function load(rel) { vm.runInContext(readFileSync(path.join(ROOT, rel), "utf8"), ctx, { filename: rel }); }
-load("src/vendor/three.r128.min.js");
+load("src/vendor/three.r187.js");
 const THREE = ctx.THREE;
 
 // ---------------------------------------------------------------- the stub world

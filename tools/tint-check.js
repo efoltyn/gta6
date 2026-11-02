@@ -11,7 +11,7 @@ Canvas.prototype.getContext = function () { return new Proxy({}, { get: () => fu
 const ctx = { console, Math, Float32Array, Uint16Array, Uint32Array, Int8Array, Uint8Array, Int16Array, Int32Array, Uint8ClampedArray, Float64Array, ArrayBuffer, Map, Set, WeakMap, WeakSet, WeakRef, Symbol, Object, Array, JSON, Number, String, Error, Reflect, Proxy,
   performance: { now: () => 0 }, setInterval: () => 0, setTimeout: () => 0, document: { createElement: () => new Canvas() } };
 ctx.self = ctx; ctx.window = ctx; vm.createContext(ctx);
-vm.runInContext(R("src/vendor/three.r128.min.js"), ctx);
+vm.runInContext(R("src/vendor/three.r187.js"), ctx);
 ctx.CBZ = { CONFIG: {}, scene: new ctx.THREE.Scene(), onAlways() {}, on() {}, onFrame() {} };
 vm.runInContext(R("src/world/materials.js"), ctx);
 const { CBZ, THREE } = ctx;

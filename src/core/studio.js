@@ -202,7 +202,7 @@
     // ---- the floor every page stands on -----------------------------------
     three: {
       gives: "three.js r128, the renderer everything here is written against",
-      files: ["vendor/three.r128.min.js"],
+      files: ["vendor/three.r187.js"],
       publishes: [],
       test: function () { return !!window.THREE; },
     },
@@ -475,7 +475,7 @@
          windows and door at build time (CBZ.facadeOpenings.faces). Missing,
          makeBuilding threw inside towngen's try and EVERY lot came up empty:
          the NPC War downtown was 85 bare lawns and not one building. */
-      files: ["vendor/BufferGeometryUtils.js", "city/facade_openings.js", "city/buildings.js", "city/furniture.js",
+      files: ["city/facade_openings.js", "city/buildings.js", "city/furniture.js",
               "city/cityground.js", "city/streetkit.js", "city/towngen.js"],
       publishes: ["cityMakeBuilding", "buildTown", "streetKit"],
     },
@@ -560,7 +560,7 @@
       // returns null without it, and a stem/pole built from that null threw
       // "reading 'isBufferGeometry'" out of raise() with half a harbour drawn
       // and a mesh with no geometry left in the scene (every render threw).
-      files: ["vendor/BufferGeometryUtils.js", "systems/airports.js", "city/airport_kit.js", "city/airport_capeharbor.js"],
+      files: ["systems/airports.js", "city/airport_kit.js", "city/airport_capeharbor.js"],
       publishes: ["buildAirfield", "airportKit", "registerAirport"],
     },
     speedway: {

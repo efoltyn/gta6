@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs"; import vm from "node:vm"; import path fr
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const g = { console, Math, Float32Array, Uint16Array, Uint32Array, Uint8Array, Int32Array, Array, Object, Map, Set, WeakMap };
 g.window = g; g.self = g; vm.createContext(g);
-vm.runInContext(readFileSync(path.join(root, "src/vendor/three.r128.min.js"), "utf8"), g);
+vm.runInContext(readFileSync(path.join(root, "src/vendor/three.r187.js"), "utf8"), g);
 g.CBZ = { CONFIG: {} };
 for (const f of ["src/weapons/appearances/sidearm.js", "src/weapons/appearances/bazooka.js", "src/weapons/munitions.js"]) vm.runInContext(readFileSync(path.join(root, f), "utf8"), g, { filename: f });
 const M = g.CBZ.munitions; let fails = 0;

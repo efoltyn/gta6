@@ -23,7 +23,7 @@ ctx.window = ctx; ctx.self = ctx; ctx.globalThis = ctx;
 ctx.document = { createElement() { return { getContext() { return null; }, style: {} }; } };
 vm.createContext(ctx);
 const load = function (r) { vm.runInContext(fs.readFileSync(ROOT + "/" + r, "utf8"), ctx, { filename: r }); };
-load("src/vendor/three.r128.min.js");
+load("src/vendor/three.r187.js");
 const THREE = ctx.THREE;
 ctx.CBZ = { CONFIG: {}, game: {}, cmat(c) { return new THREE.MeshLambertMaterial({ color: c }); }, onUpdate() {} };
 load("src/city/airframe_kit.js");

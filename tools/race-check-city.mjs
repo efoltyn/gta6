@@ -55,7 +55,7 @@ Object.defineProperty(globalThis, "navigator", { value: { maxTouchPoints: 0 }, c
 let nowMs = 0;
 globalThis.performance = { now: () => nowMs };
 
-const THREE = globalThis.THREE = require(path.join(ROOT, "src/vendor/three.r128.min.js"));
+const THREE = globalThis.THREE = require(path.join(ROOT, "src/vendor/three.r187.js"));
 
 // ---- the city, stubbed ---------------------------------------------------------------
 const updates = [], landmasses = [], providers = [];

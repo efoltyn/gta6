@@ -52,8 +52,7 @@ const sandbox = {
 };
 sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
-vm.runInContext(read("src/vendor/three.r128.min.js"), sandbox, { filename: "three" });
-vm.runInContext(read("src/vendor/BufferGeometryUtils.js"), sandbox, { filename: "bgu" });
+vm.runInContext(read("src/vendor/three.r187.js"), sandbox, { filename: "three" });
 const THREE = sandbox.THREE;
 
 // ---- the stub world

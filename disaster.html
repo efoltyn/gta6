@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 441
+     Natural Disaster Survival, standing alone: index.html minus the 436
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -32,7 +32,7 @@
 <link rel="stylesheet" href="css/city.css?v=noobj1022">
 <link rel="stylesheet" href="css/campaign.css?v=pres1028">
 <link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
-<link rel="stylesheet" href="css/title_hub.css?v=islesave1022">
+<link rel="stylesheet" href="css/title_hub.css?v=rail1031">
 <script>
   /* THIS PAGE IS ONE GAME. src/config.js reads START_MODE and opens there, so
      the island is the only world this build ever stands up — no city, no
@@ -403,16 +403,13 @@ document.body.appendChild(b);}}catch(e){}})();
   </div>
 </div>
 
-<!-- Three.js (vendored locally — same r128 build the CDN served; local files load
-     offline, deterministically, and inside the headless screenshot harness).
-     (The r164 IIFE spike and its compat shim were deleted 2026-09-29: never
-     loaded, recoverable from git history if a migration is ever attempted.) -->
-<script src="src/vendor/three.r128.min.js?v=pf0930e"></script>
+<!-- three.js r187 as ONE classic script (window.THREE: WebGL + WebGPU + TSL +
+     the GLTF/DRACO/RGBE/3MF loaders, BufferGeometryUtils, the meshlet
+     pipeline). Built by tools/three/build.mjs from tools/three/entry.js; the
+     r128 build and its separate loader scripts are gone. -->
+<script src="src/vendor/three.r187.js?v=r187a"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
-<script src="src/core/instcull.js?v=treelod1012"></script>
-<script src="src/vendor/BufferGeometryUtils.js"></script>
-<!-- Official Three.js sample loaders used by the farm truck / BIM campus.
-     fflate must precede ThreeMFLoader because .3mf is a ZIP container. -->
+<script src="src/core/instcull.js?v=r187a"></script>
 <!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
      the terrain builder. BOTH must load before city/world.js runs, since
      buildCity() calls CBZ.buildTerrain() and routes groundHeightAt →
@@ -444,7 +441,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=wrap1029"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
-<script src="src/core/texfree.js?v=arrive1022"></script>
+<script src="src/core/texfree.js?v=r187a"></script>
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=beach1020"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
@@ -453,7 +450,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
 <script src="src/core/sight.js?v=farcopy1013"></script>
 <!-- the far night lights (GTA "LOD lights"): one sprite per real lamp, lit window, car, beacon and airfield light; three draws, to the horizon -->
-<script src="src/core/lodlights.js?v=isleair1022"></script>
+<script src="src/core/lodlights.js?v=r187a"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
 <script src="src/core/citystream.js?v=prisonarr1029"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
@@ -487,9 +484,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=peak1014c"></script>
+<script src="src/world/vegetation.js?v=r187a"></script>
 <!-- one tree at every distance: near -> mid copy -> octahedral impostor, dithered crossfades (CBZ.treeLod) -->
-<script src="src/world/treelod.js?v=farcopy1013"></script>
+<script src="src/world/treelod.js?v=r187a"></script>
 <!-- where a tree meets the ground: instanced contact shade + mulch rings every
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
 <script src="src/world/treefoot.js?v=sight1011"></script>
@@ -511,7 +508,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
 <script src="src/core/prisonlazy.js?v=isleleak1022"></script>
-<script src="src/core/renderer.js?v=onesea1022"></script>
+<script src="src/core/renderer.js?v=r187a"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
@@ -535,10 +532,10 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=peak1014"></script>
-<script src="src/world/materials.js?v=canvas1029"></script>
-<script src="src/world/fuel_station.js?v=arrive1022"></script>
-<script src="src/world/prisonkit.js?v=canvas1029"></script>
+<script src="src/world/textures_surface.js?v=r187a"></script>
+<script src="src/world/materials.js?v=r187a"></script>
+<script src="src/world/fuel_station.js?v=r187a"></script>
+<script src="src/world/prisonkit.js?v=r187a"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
@@ -558,10 +555,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
      the one TV set, shared by every screen in the game. Before world/lounge.js
      (the prison dayroom set) and every city/ room that hangs a TV. -->
-<script src="src/city/newsroom.js?v=tvanchor1020"></script>
+<script src="src/city/newsroom.js?v=r187a"></script>
 <!-- the NEWS ONE studio (city/newsstudio.js): the real anchor at a real desk,
      the field camera, and the one shared render behind every TV picture -->
-<script src="src/city/newsstudio.js?v=tvanchor1020"></script>
+<script src="src/city/newsstudio.js?v=r187a"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -575,7 +572,7 @@ document.body.appendChild(b);}}catch(e){}})();
      after core/batch.js has run would already be welded into a static buffer.
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
-<script src="src/world/carfx.js?v=speed1014"></script>
+<script src="src/world/carfx.js?v=r187a"></script>
 <script src="src/world/cellblock.js?v=cmd1022o"></script>
 <!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
      CBZ.spawnPiece at parse time, so they must load after chunks.js/
@@ -598,10 +595,10 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=looks1022b"></script>
+  <script src="src/entities/character.js?v=people1102"></script>
   <script src="src/entities/headwear.js?v=armourm1011"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
-  <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
+  <script src="src/entities/jewelry_kit.js?v=r187a"></script>
   <!-- sunglasses FITTED to the head they are worn on (every pair: bling, the detail kit, the portrait, warlord); after character.js + jewelry_kit.js (its street environment) -->
   <script src="src/entities/eyewear.js?v=armourm1011"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
@@ -632,15 +629,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- SOLDIER KIT (entities/combatkit.js): plate carriers, helmets, eye pro,
      gloves, knee pads, real camouflage (warlord/camo.js, shared) fitted to the
      body; and what the kit stops (systems/armour.js, CBZ.armour.resolve). -->
-<script src="src/warlord/camo.js?v=nations1026"></script>
+<script src="src/warlord/camo.js?v=r187a"></script>
 <script src="src/systems/armour.js?v=inf1028c"></script>
-<script src="src/entities/combatkit.js?v=inf1028c"></script>
+<script src="src/entities/combatkit.js?v=r187a"></script>
 <script src="src/entities/soldier.js?v=drone1012"></script>
 <!-- THE REAL CROWD (entities/crowdgpu.js): the CBZ.human mesh GPU-instanced
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=inf1028c"></script>
+<script src="src/entities/crowdgpu.js?v=r187a"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -710,7 +707,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
 <!-- systems/smoketrail.js: every rocket's and volcanic bomb's trail as a shaded smoke tube (CBZ.smokeTrail) -->
-<script src="src/systems/smoketrail.js?v=fx1029"></script>
+<script src="src/systems/smoketrail.js?v=r187a"></script>
 <script src="src/weapons/munitions.js?v=fx1029"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
@@ -966,7 +963,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=island1014"></script>
-<script src="src/systems/debris.js?v=memleak1029"></script>
+<script src="src/systems/debris.js?v=r187a"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -982,12 +979,12 @@ document.body.appendChild(b);}}catch(e){}})();
      world/island_building.js is each building's stairs, landings, slabs and
      roof as data (node-checkable by tools/island-stairs-check.mjs); the
      builder lays exactly what it says, so it loads first. -->
-<script src="src/world/island_roads.js?v=misleopstutte"></script>
+<script src="src/world/island_roads.js?v=r187a"></script>
 <script src="src/world/island_plan.js?v=isleopen1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=opensea1029"></script>
-<script src="src/world/island_dressing.js?v=misleopstutte"></script>
+<script src="src/world/disaster_arena.js?v=r187a"></script>
+<script src="src/world/island_dressing.js?v=r187a"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
 <script src="src/world/island_venue.js?v=misleopstutte"></script>
 <script src="src/world/island_night.js?v=lampglow1022"></script>
@@ -1007,7 +1004,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
-<script src="src/world/groundshaft.js?v=norim1020"></script>
+<script src="src/world/groundshaft.js?v=r187a"></script>
 <!-- THE SINKHOLE EVENT (warning, cover collapse, calving, what goes in) reads
      the shaft through CBZ.groundShaftKit, so it loads right after it. -->
 <script src="src/world/sinkhole.js?v=norim1020"></script>
@@ -1017,7 +1014,7 @@ document.body.appendChild(b);}}catch(e){}})();
      builders. Must precede systems/disasters.js so the roster finds
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. REQUIRED: the
      old additive-stream fallback in disasters.js was deleted 2026-09-28. -->
-<script src="src/world/volcanofx.js?v=fx1029"></script>
+<script src="src/world/volcanofx.js?v=r187a"></script>
 <!-- THE ERUPTION'S SEQUENCE: world/eruption.js (CBZ.eruption) runs unrest,
      phreatic blast, Plinian column + umbrella, bombs, lightning, lava,
      collapse and lahar on volcanofx's builders, mode-agnostic (the lab's
@@ -1050,7 +1047,7 @@ document.body.appendChild(b);}}catch(e){}})();
      debris jams, bridge failure, manholes and the silt it leaves. Loads before
      world/water_spec.js; it reaches the material at runtime. -->
 
-<script src="src/systems/flashflood.js?v=tsudir1020"></script>
+<script src="src/systems/flashflood.js?v=r187a"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
 <script src="src/systems/hurricane.js?v=feel1020"></script>
@@ -1058,8 +1055,8 @@ document.body.appendChild(b);}}catch(e){}})();
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
 <!-- systems/smokeplume.js: a fire's smoke as raymarched plumes (CBZ.smokePlumes), read by wildfire.js -->
-<script src="src/systems/smokeplume.js?v=fx1029b"></script>
-<script src="src/systems/wildfire.js?v=fx1029"></script>
+<script src="src/systems/smokeplume.js?v=r187a"></script>
+<script src="src/systems/wildfire.js?v=r187a"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
@@ -1103,20 +1100,20 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=opensea1029"></script>
+<script src="src/world/water_spec.js?v=r187a"></script>
 <!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_runup.js?v=tsudir1020"></script>
 <!-- where the water is brown: the silt the run-up scoured off the land, carried out to sea by the backwash, spread and settled (the sea shader's turbidity mask), and CBZ.waterTurbidAt, the one turbidity + current query the underwater medium and the swimmer read -->
 <script src="src/world/tsunami_silt.js?v=silt1020"></script>
 <!-- the bore on the land and its white water: wall pieces on the run-up's own fronts, steps and cascades, and lit foam / mist volume off them (two particle pools, depth-sorted) -->
-<script src="src/world/tsunami_whitewater.js?v=ww1020"></script>
+<script src="src/world/tsunami_whitewater.js?v=r187a"></script>
 <script src="src/world/tsunami_debris.js?v=tsuowns1020"></script>
 <script src="src/world/tsunami_flow.js?v=runup1014"></script>
 <script src="src/world/tsunami_scene.js?v=bore1020b"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
-<script src="src/city/streetkit.js?v=metro0929"></script>
+<script src="src/city/streetkit.js?v=r187a"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
-<script src="src/city/flags.js?v=nations1026"></script>
+<script src="src/city/flags.js?v=r187a"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1130,7 +1127,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the-hole rects, the facade scan + cut, the no-shared-plane pass and the
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
-<script src="src/city/facade_openings.js?v=stutter1022"></script>
+<script src="src/city/facade_openings.js?v=r187a"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1284,7 +1281,9 @@ document.body.appendChild(b);}}catch(e){}})();
      companion system (both self-register as high-order landmasses). -->
 <script src="src/city/wildlife_rig.js?v=sharkfix3"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
-<script src="src/city/wildlife/aquatic.js?v=sweep0929"></script>
+<script src="src/city/wildlife/beast_kit.js?v=r187a"></script>
+<script src="src/city/wildlife/beast_bodies.js?v=beast1"></script>
+<script src="src/city/wildlife/aquatic.js?v=r187a"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
@@ -1316,7 +1315,7 @@ document.body.appendChild(b);}}catch(e){}})();
      so either order works — keep them adjacent, still landmass order 40. -->
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
-<script src="src/city/street_hardware.js?v=farform1011m"></script>
+<script src="src/city/street_hardware.js?v=r187a"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
@@ -1340,6 +1339,8 @@ document.body.appendChild(b);}}catch(e){}})();
      demand ladder: a mugger, a doorman, a corner crew, a guard asking first).
      peds.js think() yields to it; nothing runs at parse. -->
 <script src="src/city/ladder.js?v=cmd1022o"></script>
+<!-- THE BLENDER PEOPLE: the nearest peds wear real skinned bodies (MakeHuman CC0 pack, assets/people) driven by their own procedural rig; after pedinstance.js (it hands rigs back) and character.js (facePose) -->
+<script src="src/entities/people.js?v=r187a"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1371,20 +1372,20 @@ document.body.appendChild(b);}}catch(e){}})();
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=trunk1022"></script>
-<script src="src/city/playercars.js?v=mtrunk1trunk1"></script>
+<script src="src/city/playercars.js?v=r187a"></script>
 <!-- systems/volfx.js: the volumetric fireball / smoke / fire (raymarched boxes
      fitted to the room) + spark streaks, and THE shared 3D noise atlas
      (CBZ.volNoise) that city/nukefx.js also marches. Before crashfx (its
      blasts and fires draw through it) and nukefx (reads the atlas). -->
 <script src="src/city/crashdeform.js?v=cardraws1020"></script>
-<script src="src/city/emergencykit.js?v=mtrunk1trunk1"></script>
+<script src="src/city/emergencykit.js?v=r187a"></script>
 <script src="src/city/cardyn.js?v=emg1019"></script>
 <!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=both1029"></script>
 <script src="src/city/vehicles.js?v=both1029"></script>
-<script src="src/city/carinstances.js?v=cardraws1020"></script>
+<script src="src/city/carinstances.js?v=r187a"></script>
 <script src="src/city/playeraircraft.js?v=islesmem1029"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
@@ -1508,7 +1509,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=bodymove1022"></script>
+<script src="src/systems/tornado.js?v=r187a"></script>
 <script src="src/city/aircraftimpact.js?v=jetbound1022"></script>
 <script src="src/city/metro_promote.js?v=mrg10200048"></script>
 <!-- city/shopfloor.js: what every counter shop shares (the clerk, the till of
@@ -1616,7 +1617,7 @@ document.body.appendChild(b);}}catch(e){}})();
      near you, plus its real catalog stock as the real item models, buyable
      where they stand. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
-<script src="src/city/storegoods.js?v=isleclose1022"></script>
+<script src="src/city/storegoods.js?v=r187a"></script>
 <!-- THE ISLANDS' SHOPS (world/island_shops.js): every island outfitter, tailor,
      optician, phone shop and trade fitted with the store systems above, per
      building, through CBZ.islandVenue; a counter and a clerk in each. -->
@@ -1647,7 +1648,7 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=merge1014c"></script>
+<script src="src/city/fitout.js?v=r187a"></script>
 <script src="src/city/fitout_plans.js?v=loose1013"></script>
 <script src="src/city/fitout_work.js?v=loose1013"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
@@ -1679,7 +1680,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
-<script src="src/world/grassfield.js?v=speed1014"></script>
+<script src="src/world/grassfield.js?v=r187a"></script>
 <script src="src/city/metro_ground.js?v=peak1014"></script>
 <script src="src/city/metro.js?v=mrg10200048"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
@@ -1718,7 +1719,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=looks1022b"></script>
+<script src="src/city/cityground.js?v=r187a"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -1782,8 +1783,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The hitman's world is physical (2026-09-27): paper he reads, hands that
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
-<script src="src/city/hitman_hands.js?v=hands1022"></script>
-<script src="src/city/hitman_room.js?v=mem1014"></script>
+<script src="src/city/hitman_hands.js?v=r187a"></script>
+<script src="src/city/hitman_room.js?v=r187a"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=w09290219"></script>
 <script src="src/city/agency.js?v=ijkl1022"></script>
@@ -1812,7 +1813,7 @@ document.body.appendChild(b);}}catch(e){}})();
      always-updater is in the sort -->
 <!-- projected decals: blood cut out of the struck mesh's own triangles (cars) -->
 <script src="src/systems/surfacedecal.js?v=carblood930"></script>
-<script src="src/systems/gore.js?v=canvas1029"></script>
+<script src="src/systems/gore.js?v=r187a"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused
@@ -1846,7 +1847,7 @@ document.body.appendChild(b);}}catch(e){}})();
      full) and the caller falls back to CBZ.wildlifeDeathTumble. -->
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=sweep0929"></script>
+<script src="src/city/wildlife_shark.js?v=r187a"></script>
 <!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
      (defineSpecies is last-write-wins) so the markings that actually identify
      the animal exist: the white post-ocular eye patch, the grey saddle, the
@@ -1861,7 +1862,7 @@ document.body.appendChild(b);}}catch(e){}})();
      takedown is CONSUMED from marine_predation, not re-implemented.
      Reverts whole with CBZ.CONFIG.ORCA_V1 / ORCA_POD / ORCA_SURFACE /
      ORCA_ACTS / ORCA_DRAG / ORCA_HUNT. -->
-<script src="src/city/wildlife_orca.js?v=sharkfix3"></script>
+<script src="src/city/wildlife_orca.js?v=r187a"></script>
 <!-- THE SEA EATS ITSELF: the marine predation graph (who preys on whom, who
      MOBS whom), the orca pod's bearings/ram/roll-over finisher, a big shark
      taking a small boat, and the chum producers that had never existed — a
@@ -2172,7 +2173,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=ptouch1028"></script>
+<script src="src/city/president_office.js?v=r187a"></script>
 <script src="src/city/motorcade.js?v=mijkl10bodymo"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
@@ -2188,7 +2189,7 @@ document.body.appendChild(b);}}catch(e){}})();
      started, the game file returns at once). president_game.js loads the
      president/*.js world files itself, under ITS OWN ?v= below: bump it when
      any of them changes. -->
-<script src="src/city/president_book.js?v=ptouch1028"></script>
+<script src="src/city/president_book.js?v=r187a"></script>
 <script src="src/city/president_storm.js?v=pres1028"></script>
 <script src="src/city/president_dock.js?v=scen1028"></script>
 <script src="src/city/president_game.js?v=scen1028"></script>
@@ -2203,7 +2204,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/warroom.js?v=borders1022"></script>
 <script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=protestcpu1022"></script>
-<script src="src/city/president_public.js?v=pres1028"></script>
+<script src="src/city/president_public.js?v=r187a"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on
@@ -2303,7 +2304,7 @@ document.body.appendChild(b);}}catch(e){}})();
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
-<script src="src/world/water_underwater.js?v=silt1020"></script>
+<script src="src/world/water_underwater.js?v=r187a"></script>
 <script src="src/world/water_buoyancy.js?v=isles1022"></script>
 <!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
      over, and a hull that goes over stays over — inverted, keel up, its people
@@ -2348,7 +2349,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/viewscope.js?v=merge1014c"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=batchm1029"></script>
+<script src="src/core/batch.js?v=r187a"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder

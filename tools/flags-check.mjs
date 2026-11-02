@@ -45,7 +45,7 @@ ctx.document = {
 };
 vm.createContext(ctx);
 function load(rel) { vm.runInContext(fs.readFileSync(ROOT + "/" + rel, "utf8"), ctx, { filename: rel }); }
-load("src/vendor/three.r128.min.js");
+load("src/vendor/three.r187.js");
 const THREE = ctx.THREE;
 const upd = [];
 const events = [];

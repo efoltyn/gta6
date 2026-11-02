@@ -109,7 +109,7 @@ ctx.CBZ = {
   onUpdate(o, f) { hooks.update.push([o, f]); }, onAlways(o, f) { hooks.always.push([o, f]); }, onReset() {}, onModeEnter() {}, on() {},
 };
 const APPEAR = ["sidearm", "shotgun", "carbine", "smg", "taser", "bazooka", "glauncher", "ak47", "revolver", "deagle", "uzi", "sniper", "lmg", "shank"];
-const FILES = ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
+const FILES = ["src/vendor/three.r187.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
   "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js", "src/entities/heritage.js",
   "src/city/clothes.js", "src/city/outfits.js", "src/entities/dutykit.js", "src/city/armor.js", "src/systems/prisonoutfits.js",
   "src/entities/jewelry_kit.js", "src/entities/eyewear.js", "src/entities/watch.js", "src/city/bling.js",

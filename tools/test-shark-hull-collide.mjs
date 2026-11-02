@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ctx = vm.createContext({ console, Math, Number, Date, Array, Object, isFinite, Float32Array, Int32Array, Uint16Array, Uint32Array, Map, WeakMap, Set });
 ctx.self = ctx; ctx.window = ctx; ctx.globalThis = ctx;
-vm.runInContext(fs.readFileSync(path.join(ROOT, "src/vendor/three.r128.min.js"), "utf8"), ctx, { filename: "three.js" });
+vm.runInContext(fs.readFileSync(path.join(ROOT, "src/vendor/three.r187.js"), "utf8"), ctx, { filename: "three.js" });
 const THREE = ctx.THREE;
 const CBZ = (ctx.CBZ = {});
 const updaters = [];

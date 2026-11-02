@@ -39,7 +39,7 @@ const read = (f) => readFileSync(new URL(f, ROOT), "utf8");
 const ctx = vm.createContext({ console, Math, performance, Date });
 ctx.window = ctx; ctx.self = ctx;
 ctx.CBZ = { CONFIG: {}, onAlways() {}, onUpdate() {}, on() {} };
-for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/watch.js"]) {
+for (const f of ["src/vendor/three.r187.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/watch.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });
 }
 const { THREE: T, CBZ } = ctx;

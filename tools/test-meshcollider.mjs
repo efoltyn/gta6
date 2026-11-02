@@ -21,7 +21,7 @@ const read = (f) => readFileSync(new URL(f, ROOT), "utf8");
 const ctx = vm.createContext({ console, Math, Float64Array, Float32Array, Uint32Array, Uint8Array, Int32Array, Map });
 ctx.window = ctx; ctx.self = ctx;
 ctx.CBZ = { CONFIG: {} };
-vm.runInContext(read("src/vendor/three.r128.min.js"), ctx, { filename: "three.r128.min.js" });
+vm.runInContext(read("src/vendor/three.r187.js"), ctx, { filename: "three.r187.js" });
 vm.runInContext(read("src/systems/meshcollider.js"), ctx, { filename: "meshcollider.js" });
 const T = ctx.THREE, CBZ = ctx.CBZ, MC = CBZ.meshCollider;
 
@@ -221,7 +221,7 @@ function mergeBoxes(list) {
   try {
     const ctx2 = vm.createContext({ console, Math, Float64Array, Float32Array, Uint32Array, Uint8Array, Int32Array, Map, Set, performance: { now: () => 0 } });
     ctx2.window = ctx2; ctx2.self = ctx2; ctx2.CBZ = { CONFIG: {}, colliders: [], platforms: [], onUpdate() {}, onAlways() {}, onReset() {}, on() {} };
-    vm.runInContext(read("src/vendor/three.r128.min.js"), ctx2);
+    vm.runInContext(read("src/vendor/three.r187.js"), ctx2);
     vm.runInContext(read("src/systems/physics.js"), ctx2);
     ok = typeof ctx2.CBZ.orientedCollider === "function";
     if (ok) {

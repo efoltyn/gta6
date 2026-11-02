@@ -30,7 +30,7 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => (argv.indexOf(k) >= 0 ? argv[argv.indexOf(k) + 1] : d);
 const seed = +opt("--seed", 90210), only = opt("--city", "");
 const snap = JSON.parse(readFileSync(path.join(ROOT, "tools/metro-world-snapshot.json"), "utf8"));
-const THREE = require(path.join(ROOT, "src/vendor/three.r128.min.js"));
+const THREE = require(path.join(ROOT, "src/vendor/three.r187.js"));
 globalThis.window = { THREE, CBZ: { CONFIG: {}, WORLD_SEED: seed, highwayNetTable: () => snap.hw, HIGHWAY_NET_HALF: snap.H } };
 for (const f of ["zoning", "metroplan", "metro", "metro_ground"]) require(path.join(ROOT, "src/city/" + f + ".js"));
 const CBZ = globalThis.window.CBZ, L = CBZ.metroLib, MG = CBZ.metroGround, FM = MG.FARMAP_COLOURS;

@@ -79,7 +79,7 @@ function inkCanvas(w, h) {
   return cv;
 }
 ctx.CBZ.tattoo = { lazy: false, _mkCanvas: inkCanvas };
-for (const f of ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/tattoo.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js",
+for (const f of ["src/vendor/three.r187.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/tattoo.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js",
   "src/entities/heritage.js", "src/city/clothes.js", "src/city/outfits.js", "src/entities/dutykit.js", "src/entities/pedinstance.js",
   "src/city/armor.js", "src/systems/prisonoutfits.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });

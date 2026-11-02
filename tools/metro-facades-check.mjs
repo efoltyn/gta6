@@ -40,7 +40,7 @@ const require = createRequire(import.meta.url);
 const argv = process.argv.slice(2);
 const seedArg = argv.indexOf("--seed") >= 0 ? +argv[argv.indexOf("--seed") + 1] : 90210;
 const snap = JSON.parse(readFileSync(path.join(ROOT, "tools/metro-world-snapshot.json"), "utf8"));
-const THREE = require(path.join(ROOT, "src/vendor/three.r128.min.js"));
+const THREE = require(path.join(ROOT, "src/vendor/three.r187.js"));
 globalThis.window = { THREE, CBZ: { CONFIG: {}, WORLD_SEED: seedArg, highwayNetTable: () => snap.hw, HIGHWAY_NET_HALF: snap.H } };
 require(path.join(ROOT, "src/core/seed.js"));
 // the kit and its grammars, in index.html's order

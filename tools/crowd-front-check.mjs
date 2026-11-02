@@ -34,7 +34,7 @@ ctx.window = ctx; ctx.self = ctx; ctx.document = fakeDocument();
 ctx.navigator = { userAgent: "node" }; ctx.location = { search: "", href: "" };
 ctx.localStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
 ctx.addEventListener = () => {}; ctx.requestAnimationFrame = () => 0;
-vm.runInContext(read("src/vendor/three.r128.min.js"), ctx, { filename: "three" });
+vm.runInContext(read("src/vendor/three.r187.js"), ctx, { filename: "three" });
 const THREE = ctx.THREE;
 const CBZ = ctx.CBZ = { CONFIG: {}, game: { mode: "city" }, onUpdate() {}, onAlways() {}, onReset() {}, onModeEnter() {}, deviceClass: "tablet" };
 CBZ.scene = new THREE.Scene();

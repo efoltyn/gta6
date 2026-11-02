@@ -26,7 +26,7 @@ CBZ.lab.ingredient("building", {
   // BufferGeometryUtils merges a shell's trim per colour (buildings.js falls
   // back to one mesh per piece without it: same look, ~10x the draws); the
   // facades glob is every registered grammar, so a new style is in on its own
-  files: ["src/vendor/BufferGeometryUtils.js", "src/city/facade_openings.js", "src/city/buildings.js", "src/city/facade_kit.js",
+  files: ["src/city/facade_openings.js", "src/city/buildings.js", "src/city/facade_kit.js",
     "src/city/facades/*.js"],
   make: function (W, o) {
     const THREE = window.THREE;

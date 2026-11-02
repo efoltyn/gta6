@@ -46,7 +46,7 @@ const VERBOSE = process.argv.includes("--verbose");
 const ctx = vm.createContext({ console, Math, Map, Set, WeakMap, Float32Array, Float64Array, Int32Array, Uint16Array, Uint32Array });
 ctx.window = ctx; ctx.self = ctx;
 ctx.CBZ = { CONFIG: {} };
-vm.runInContext(read("src/vendor/three.r128.min.js"), ctx, { filename: "three" });
+vm.runInContext(read("src/vendor/three.r187.js"), ctx, { filename: "three" });
 vm.runInContext(`
   (function(){
     const gc = new Map(), mc = new Map();

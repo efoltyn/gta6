@@ -485,7 +485,7 @@ export function loadManifest() { return buildManifest().man; }
    the real engine file wins wherever a kit reaches it. labworld.js publishes
    by name the few things it really stands in for (scene, camera, renderer,
    canvas, the lights). src/lab/labworld.js keeps the same list for the page. */
-export const PRELUDE = ["src/vendor/three.r128.min.js", "src/config.js", "src/core/seed.js", "src/core/microboot.js",
+export const PRELUDE = ["src/vendor/three.r187.js", "src/config.js", "src/core/seed.js", "src/core/microboot.js",
   "src/lab/closure.js", "src/lab/registry.js", "src/lab/labworld.js"];
 export const PRELUDE_PROVIDERS = ["src/config.js", "src/core/seed.js", "src/lab/labworld.js"];
 /* loaded after the closure, last, as index.html does: it sorts the frame registry

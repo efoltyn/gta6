@@ -3,7 +3,7 @@
 //   node tools/stream-jobs-check.js
 const path = require("path"), fs = require("fs"), vm = require("vm");
 const ROOT = path.resolve(__dirname, "..");
-const THREE = require(ROOT + "/src/vendor/three.r128.min.js");
+const THREE = require(ROOT + "/src/vendor/three.r187.js");
 const win = { THREE, performance, console, setTimeout, clearTimeout, location: { search: "?stream=1" }, document: { readyState: "complete" }, URLSearchParams };
 win.window = win; win.self = win;
 const ctx = vm.createContext(win);

@@ -28,7 +28,7 @@ ctx.localStorage = { getItem() { return null; }, setItem() {}, removeItem() {} }
 ctx.addEventListener = () => {}; ctx.requestAnimationFrame = () => 0;
 ctx.CBZ = { CONFIG: {}, game: { mode: "city" }, npcs: [], onUpdate() {}, onAlways() {}, onReset() {}, onModeEnter() {}, on() {} };
 const GUNS = ["sidearm", "taser", "revolver"];
-const FILES = ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
+const FILES = ["src/vendor/three.r187.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
   "src/entities/footwear.js", "src/entities/character.js", "src/weapons/weapon-data.js", "src/weapons/weapon-scale.js",
   ...GUNS.map((n) => `src/weapons/appearances/${n}.js`), "src/systems/actorweapons.js"];
 for (const f of FILES) vm.runInContext(read(f), ctx, { filename: f });

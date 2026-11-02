@@ -49,7 +49,7 @@ let now = 0;
 globalThis.performance = { now: () => now };
 globalThis.setTimeout = (f) => { f(); return 0; };
 
-const THREE_ = require(path.join(ROOT, "src/vendor/three.r128.min.js"));
+const THREE_ = require(path.join(ROOT, "src/vendor/three.r187.js"));
 const THREE = globalThis.THREE = Object.assign({}, globalThis.THREE || THREE_);
 let draws = 0;
 THREE.WebGLRenderer = function () {

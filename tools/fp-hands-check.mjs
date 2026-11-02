@@ -39,7 +39,7 @@ const read = (f) => readFileSync(new URL(f, ROOT), "utf8");
 const ctx = vm.createContext({ console, Math });
 ctx.window = ctx; ctx.self = ctx;
 ctx.CBZ = { CONFIG: {}, weaponAppearance: {} };
-for (const f of ["src/vendor/three.r128.min.js", "src/systems/fphands.js",
+for (const f of ["src/vendor/three.r187.js", "src/systems/fphands.js",
   "src/weapons/appearances/sidearm.js", "src/weapons/appearances/shotgun.js", "src/weapons/appearances/carbine.js",
   "src/weapons/appearances/smg.js", "src/weapons/appearances/revolver.js", "src/weapons/appearances/deagle.js",
   "src/weapons/appearances/ak47.js", "src/weapons/appearances/uzi.js", "src/weapons/appearances/sniper.js",

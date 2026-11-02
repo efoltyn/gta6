@@ -48,7 +48,7 @@ export function packPlan(names) {
 // the studio stub IS three + microboot (running the real ones would replace
 // it); `look` (materials, carfx) is the browser's paint and wants the frame
 // loop: microboot's own cmat/boxGeom fallbacks stand in for it (boot below)
-const PACK_SKIP = new Set(["vendor/three.r128.min.js", "core/microboot.js", "world/materials.js", "world/carfx.js"]);
+const PACK_SKIP = new Set(["vendor/three.r187.js", "core/microboot.js", "world/materials.js", "world/carfx.js"]);
 // the bestiary needs `look` (materials, carfx) only for the browser's paint
 export const BEAST_PACKS = ["caps", "bestiary", "beasts"];
 /* ...and the single files of the `people` pack the FIGHT reads (the rest of
@@ -80,7 +80,7 @@ for (const m of HTML.matchAll(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/scri
     PAGE_SCRIPTS.push({ name: rel, code: fs.readFileSync(path.join(ROOT, rel), "utf8") });
   } else if (m[2].trim()) PAGE_SCRIPTS.push({ name: "battle.inline.js", code: m[2] });
 }
-const THREE_SRC = fs.readFileSync(path.join(ROOT, "src/vendor/three.r128.min.js"), "utf8");
+const THREE_SRC = fs.readFileSync(path.join(ROOT, "src/vendor/three.r187.js"), "utf8");
 
 // ------------------------------------------------------------------ a fake DOM
 function mkEl(tag, doc) {
@@ -182,7 +182,7 @@ export function boot(url, opts) {
     const f = path.join(ROOT, "src", rel);
     if (fs.existsSync(f)) vm.runInContext(fs.readFileSync(f, "utf8"), sb, { filename: "src/" + rel });
   };
-  vm.runInContext(THREE_SRC, sb, { filename: "three.r128.min.js" });
+  vm.runInContext(THREE_SRC, sb, { filename: "three.r187.js" });
   const THREE = sb.THREE;
   // the engine files the armoury would have loaded, for real
   sb.CBZ = { CONFIG: {}, game: { mode: "studio", state: "playing" }, now: 0 };

@@ -45,7 +45,7 @@ function boot() {
   };
   win.window = win; win.self = win;
   const ctx = vm.createContext(win);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, "src/vendor/three.r128.min.js"), "utf8"), ctx);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, "src/vendor/three.r187.js"), "utf8"), ctx);
   vm.runInContext(fs.readFileSync(path.join(ROOT, "src/core/microboot.js"), "utf8"), ctx, { filename: "microboot.js" });
   return ctx;
 }

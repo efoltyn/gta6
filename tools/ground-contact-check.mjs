@@ -66,7 +66,7 @@ console.log("\n2. tree contact (world/treefoot.js)");
 const ctx = vm.createContext({ console });
 ctx.window = ctx; ctx.self = ctx;
 ctx.CBZ = { CONFIG: {}, qScale: (_lo, hi) => hi };
-for (const f of ["src/vendor/three.r128.min.js", "src/vendor/BufferGeometryUtils.js", "src/world/treeaudit.js", "src/world/vegetation.js", "src/world/treefoot.js"]) {
+for (const f of ["src/vendor/three.r187.js", "src/world/treeaudit.js", "src/world/vegetation.js", "src/world/treefoot.js"]) {
   vm.runInContext(src(f), ctx, { filename: f });
 }
 const { THREE: T, CBZ: C } = ctx;

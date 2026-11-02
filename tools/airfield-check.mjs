@@ -54,8 +54,7 @@ globalThis.document = {
   currentScript: null,
 };
 const load = (rel) => vm.runInThisContext(fs.readFileSync(path.join(ROOT, rel), "utf8"), { filename: rel });
-load("src/vendor/three.r128.min.js");
-load("src/vendor/BufferGeometryUtils.js");
+load("src/vendor/three.r187.js");
 const THREE = globalThis.THREE;
 
 // ---- the CBZ the airfield code talks to ------------------------------------

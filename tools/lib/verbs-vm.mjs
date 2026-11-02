@@ -90,7 +90,7 @@ export function loadVerbsVM(opts = {}) {
   };
   const CBZ = ctx.CBZ;
   const run = (f) => { loading = f; vm.runInContext(read(f), ctx, { filename: f }); loading = ""; };
-  run("src/vendor/three.r128.min.js");
+  run("src/vendor/three.r187.js");
   const THREE = ctx.THREE;
   CBZ.player = { pos: new THREE.Vector3(0, 0, -30), radius: 0.38, dead: false, hp: 100, speed: 0, vy: 0, grounded: true };
   CBZ.camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 500);

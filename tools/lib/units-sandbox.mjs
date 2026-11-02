@@ -26,7 +26,7 @@ export function sandbox(opts) {
   set: (t, k, v) => { t[k] = v; return true; } });
   G.document = { createElement: () => ({ width: 0, height: 0, style: {}, getContext: () => ctx2d }), scripts: [], head: { appendChild() {} } };
   vm.createContext(G);
-  vm.runInContext(readFileSync(path.join(ROOT, "src/vendor/three.r128.min.js"), "utf8"), G);
+  vm.runInContext(readFileSync(path.join(ROOT, "src/vendor/three.r187.js"), "utf8"), G);
   const THREE = G.THREE;
   const mats = new Map();
   const updaters = [];

@@ -40,7 +40,7 @@ CBZ.lab.kit("strike", {
   about: "a 3x3 downtown of real shells hit by a B-52 carpet run, a B-2 stick, a cruise missile salvo, a nuke or one Mk-84 into a tower, all through CBZ.detonate",
   uses: [],
   files: [
-    "src/vendor/BufferGeometryUtils.js", "src/city/streetkit.js", "src/city/facade_openings.js", "src/city/buildings.js",
+    "src/city/streetkit.js", "src/city/facade_openings.js", "src/city/buildings.js",
     "src/city/facade_kit.js", "src/city/facades/*.js",
     "src/systems/solidground.js", "src/systems/debris.js", "src/systems/fx.js", "src/systems/volfx.js", "src/systems/craters.js",
     "src/city/crashfx.js", "src/systems/impactbus.js", "src/city/structural.js", "src/city/fracture.js",

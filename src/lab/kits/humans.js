@@ -24,7 +24,7 @@ CBZ.lab.kit("humans", {
   about: "a line-up of people of every sex, build, skin tone, age, hair and beard, in outfits; walk / aim / gore; skinned=1 swaps in the Blender people on the same rigs",
   files: ["src/entities/character.js", "src/entities/gait.js", "src/entities/heritage.js", "src/systems/fphands.js",
     "src/entities/footwear.js", "src/entities/headwear.js", "src/entities/eyewear.js", "src/city/clothes.js", "src/city/outfits.js",
-    "src/systems/wounds.js", "src/systems/gore.js", "src/vendor/GLTFLoader.js", "src/entities/people.js"],
+    "src/systems/wounds.js", "src/systems/gore.js", "src/entities/people.js"],
   symbols: ["human", "animChar", "cityOutfitCatalog", "cityApplyClothes"],
   params: { gap: 0.95, arms: "rest" },
   duration: 1.5,

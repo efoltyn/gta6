@@ -5,7 +5,7 @@
 //   node tools/trimbox-merge-check.js
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const ROOT = path.resolve(__dirname, "..");
-const THREE = require(ROOT + "/src/vendor/three.r128.min.js");
+const THREE = require(ROOT + "/src/vendor/three.r187.js");
 function grab(src, startRe, endMarker) {
   const a = src.search(startRe); if (a < 0) throw new Error("no " + startRe);
   const b = src.indexOf(endMarker, a); if (b < 0) throw new Error("no end for " + startRe);

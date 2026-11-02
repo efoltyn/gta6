@@ -31,7 +31,7 @@ import { fakeDocument } from "./lib/fake-canvas.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (f) => readFileSync(new URL(f, ROOT), "utf8");
-const FILES = ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
+const FILES = ["src/vendor/three.r187.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
   "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js", "src/entities/eyewear.js", "src/entities/heritage.js",
   "src/entities/moves.js", "src/entities/gait.js", "src/entities/poses.js", "src/entities/soldier.js", "src/entities/moves_posture.js",
   "src/warlord/camo.js", "src/systems/armour.js", "src/entities/combatkit.js", "src/weapons/ballistics.js"];

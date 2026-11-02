@@ -67,7 +67,7 @@ ctx.navigator = { userAgent: "node" }; ctx.location = { search: "", href: "" };
 ctx.localStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
 const hooks = { always: [], update: [] };
 ctx.CBZ = { CONFIG: {}, onAlways(o, f) { hooks.always.push([o, f]); }, onUpdate(o, f) { hooks.update.push([o, f]); }, on() {} };
-for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js",
+for (const f of ["src/vendor/three.r187.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js",
   "src/weapons/weapon-data.js", "src/weapons/weapon-scale.js", ...APPEAR.map((n) => `src/weapons/appearances/${n}.js`),
   "src/systems/actorweapons.js", "src/systems/holsterprops.js", "src/systems/gunhands.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });
@@ -301,7 +301,7 @@ for (const B of BODIES) for (const id of GUNS) tpCase(id, B);
 const fctx = vm.createContext({ console, Math });
 fctx.window = fctx; fctx.self = fctx;
 fctx.CBZ = { CONFIG: {}, weaponAppearance: {} };
-for (const f of ["src/vendor/three.r128.min.js", "src/systems/fphands.js", ...APPEAR.map((n) => `src/weapons/appearances/${n}.js`),
+for (const f of ["src/vendor/three.r187.js", "src/systems/fphands.js", ...APPEAR.map((n) => `src/weapons/appearances/${n}.js`),
   "src/entities/watch.js", "src/systems/gunhands.js"]) {
   vm.runInContext(read(f), fctx, { filename: f });
 }
