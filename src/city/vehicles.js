@@ -1540,6 +1540,7 @@
   // merged seated body: lap + torso + two arms + head, facing +z, origin at
   // the seat surface. Per-part flat vertex colour bakes shirt/skin/trouser.
   function occGeo(variant) {
+    if (CBZ.stickLook && CBZ.stickSeatedGeo) return CBZ.stickSeatedGeo(variant);   // STICK CITY: a seated stickman (entities/stickman.js)
     let geo = OCC_GEOS.get(variant);
     if (geo) return geo;
     const shirt = new THREE.Color(OCC_SHIRTS[variant % OCC_SHIRTS.length]);

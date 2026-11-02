@@ -39,7 +39,8 @@ const GAMES=[
   {slug:'disaster-survival',mode:'survival', name:'Disaster Survival',  hook:'100 on an island. One disaster. Last one alive.', desc:'A hundred survivors on a procedurally generated island. A tsunami, a volcano, a quake, a wildfire or a nuke. Be the last one standing.'},
   {slug:'prison-escape',    mode:'escape',   name:'Prison Escape',      hook:'Cell Block Z. Get out.', desc:'Inmate or cop in a working prison: cells, yard, corridors, contraband, guards with tasers. Escape, or keep them in.'},
   {slug:'gang-city',        mode:'city',     name:'Gang City',          hook:'Turf, gangs, cops. The whole city.', desc:'An open city with gangs, cops, cars, planes and boats. Pick a story and take over.', heavy:true},
-  {slug:'gun-game',         mode:'gungame',  name:'Gun Game',           hook:'Every kill climbs the ladder. The last rung is fists.', desc:'Weapon-ladder deathmatch on picked maps. Every kill climbs the ladder; the final rung is bare fists.'},
+  {slug:'stick-city',       mode:'city', cbz:{STICK_LOOK:true}, name:'Stick City', hook:'Everyone is a stickman. The hat is who you are.', desc:'Gang City as black stick figures: the gangs wear their colours, the cops wear the cap, the general wears the braid. Knock a hat off and wear it.', heavy:true},
+  {slug:'gun-game',        mode:'gungame',  name:'Gun Game',           hook:'Every kill climbs the ladder. The last rung is fists.', desc:'Weapon-ladder deathmatch on picked maps. Every kill climbs the ladder; the final rung is bare fists.'},
   {slug:'npc-war',          page:'games/battle.html',        name:'NPC War',        hook:'Two armies. Any size. You hold the clock.', desc:'Two armies of any size fight with the city\'s own combat brain while you fly the camera and run the clock.'},
   {slug:'bomb-survivor',    page:'games/bomb-survivor.html', name:'Bomb Survivor',  hook:'6 v 6 over the real city.', desc:'Six against six, the real island and the real downtown, three minutes each way.'},
   {slug:'desert-warlord',   page:'games/warlord.html',       name:'Desert Warlord', hook:'Your army. Your dead stay dead.', desc:'The men of NPC War, but they are yours: paid for or frightened into joining, and the ones who die stay dead.'},
@@ -57,7 +58,9 @@ const indexSrc=readFileSync(path.join(source,'index.html'),'utf8');
 function modePage(game,{home}){
   let html=indexSrc.replace('<title>Gang Life</title>',`<title>${game.name}</title>`);
   // HARNESS TRAP: set the mode before ANY game module, not merely config.js.
-  html=html.replace('</head>',`<meta name="description" content="${game.desc.replace(/"/g,'&quot;')}">\n<script>window.CBZ=Object.assign(window.CBZ||{},{START_MODE:${JSON.stringify(game.mode)}});</script>\n</head>`);
+  // game.cbz: extra page switches set before any module (Stick City: STICK_LOOK)
+  const boot=Object.assign({START_MODE:game.mode},game.cbz||{});
+  html=html.replace('</head>',`<meta name="description" content="${game.desc.replace(/"/g,'&quot;')}">\n<script>window.CBZ=Object.assign(window.CBZ||{},${JSON.stringify(boot)});</script>\n</head>`);
   const begin=html.indexOf('<div class="origin-label mode-strip-label">');
   const end=html.indexOf('</button>\n    </div>',begin);
   if(begin<0||end<begin)throw new Error('More Games markup moved; update product packaging');
@@ -91,7 +94,8 @@ for(const dir of ['src','css','assets'])await copyTree(dir);
 let product;
 if(!portal){
   const mode=arg('--mode','sharksim');
-  const game=GAMES.find(g=>g.mode===mode);
+  // --mode takes a mode or a slug (--mode stick-city: Gang City's mode with the stick switch)
+  const game=GAMES.find(g=>g.slug===mode)||GAMES.find(g=>g.mode===mode);
   if(!game)throw new Error('Unsupported standalone mode '+mode);
   product=game.name;
   put('index.html',modePage(game,{home:false}));

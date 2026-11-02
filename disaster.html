@@ -595,7 +595,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=duty1103c"></script>
+  <script src="src/entities/character.js?v=stick187"></script>
   <script src="src/entities/headwear.js?v=armourm1011"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -603,6 +603,9 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/eyewear.js?v=armourm1011"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
   <script src="src/entities/watch.js?v=memflat1029"></script>
+  <!-- STICK CITY: the hat library (every hat procedural, one merged geometry each) and the stick look (?stick=1 or CBZ.STICK_LOOK; off = nothing). After character.js and the dressing modules it stubs (footwear, headwear, jewelry_kit, eyewear, watch, tattoo); before player.js (the player body is built at load) and crowdgpu.js (its hat gear compiles off CBZ.stickLook). -->
+  <script src="src/entities/hats.js?v=stick1102"></script>
+  <script src="src/entities/stickman.js?v=stick1102"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -637,7 +640,7 @@ document.body.appendChild(b);}}catch(e){}})();
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=r187c"></script>
+<script src="src/entities/crowdgpu.js?v=stick187"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -1384,8 +1387,8 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=both1029"></script>
-<script src="src/city/vehicles.js?v=both1029"></script>
-<script src="src/city/carinstances.js?v=r187a"></script>
+<script src="src/city/vehicles.js?v=stick187"></script>
+<script src="src/city/carinstances.js?v=stick187"></script>
 <script src="src/city/playeraircraft.js?v=islesmem1029"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the

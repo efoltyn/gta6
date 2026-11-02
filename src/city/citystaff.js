@@ -45,8 +45,9 @@
 
   function ensureMeshes() {
     if (bodyMesh) return;
-    const bg = new THREE.BoxGeometry(0.46, 1.15, 0.28);
-    const hg = new THREE.BoxGeometry(0.28, 0.32, 0.28);
+    const stick = CBZ.stickLook && CBZ.stickStaffGeo;   // STICK CITY (entities/stickman.js)
+    const bg = stick ? CBZ.stickStaffGeo() : new THREE.BoxGeometry(0.46, 1.15, 0.28);
+    const hg = stick ? CBZ.stickStaffHeadGeo() : new THREE.BoxGeometry(0.28, 0.32, 0.28);
     bodyMesh = new THREE.InstancedMesh(bg, new THREE.MeshLambertMaterial(), CAP);
     headMesh = new THREE.InstancedMesh(hg, new THREE.MeshLambertMaterial(), CAP);
     bodyMesh.frustumCulled = false; headMesh.frustumCulled = false;
@@ -64,8 +65,8 @@
     if (count >= CAP) return -1;
     const i = count++;
     slots[i] = { h: heading, sway: Math.random() * 6.28, line: line, idx: idx, lat: 0, fixed: line < 0, x: x, z: z, company: company || null, lot: lot || null };
-    _c.setHex(SHIRT[(Math.random() * SHIRT.length) | 0]); bodyMesh.setColorAt(i, _c);
-    _c.setHex(SKIN[(Math.random() * SKIN.length) | 0]); headMesh.setColorAt(i, _c);
+    _c.setHex(SHIRT[(Math.random() * SHIRT.length) | 0]); if (CBZ.stickLook) _c.setHex(CBZ.STICK_HEX); bodyMesh.setColorAt(i, _c);
+    _c.setHex(SKIN[(Math.random() * SKIN.length) | 0]); if (CBZ.stickLook) _c.setHex(CBZ.STICK_HEX); headMesh.setColorAt(i, _c);
     return i;
   }
 
