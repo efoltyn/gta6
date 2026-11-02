@@ -6,6 +6,7 @@ DIR holds what tools/people/wardrobe-look.mjs and a Gang City host filmed:
   before/  after/   wardrobe-look --set duty --shots full,chest,hip,profile,back
                     on the shipped code (the kit hid with the box body) and on this one
   walk/             the same officers mid-stride (--params arms=walk), this code
+  hero/             wardrobe-look --shots hero (three-quarter portraits), this code
   city_before/  city_after/   live Gang City, the same crosswalk and cameras
                     (shots.json: kind, file = full length, file2 = the gun side)
 Pages go through tools/storyboard-pdf.py (phone pages)."""
@@ -38,6 +39,7 @@ def city(sub):
 
 BEF, AFT = rows("before"), rows("after")
 WALK = rows("walk") if os.path.exists(os.path.join(S, "walk", "cast.json")) else {}
+HERO = rows("hero") if os.path.exists(os.path.join(S, "hero", "cast.json")) else {}
 CB, CA = city("city_before"), city("city_after")
 
 
@@ -105,18 +107,18 @@ ids = list(AFT.keys())
 # ---------------------------------------------------------------- cover
 hero = grid([AFT[i]["shots"]["chest"] for i in [cid("police"), cid("sheriff"), cid("detective"), cid("police", "f"), cid("corrections"), cid("swat")] if i],
             3, C + "/hero.png", cell=(360, 432))
-P({"type": "cover", "title": "THE DUTY KIT, ON THE REAL BODY",
-   "subtitle": "A cop's belt, holster and badge went out of sight with the box body the real one replaced. Now the whole kit is built again on the real body.",
+P({"type": "cover", "title": "COPS THAT LOOK LIKE COPS",
+   "subtitle": "On a real body an officer lost his belt and his gun with the box body, and wore an open button-down over bare chest and jeans. Now: the uniform, and the whole duty kit on it.",
    "image": hero, "bullets": [
-       "duty belt and buckle, holster and pistol, magazine pouches, radio, torch, cuff case, a CO's keys, the badge, the shoulder mic",
-       "built by the kit's own rules round THIS body: the belt cut round its waistband, everything on it hung clear of its hips and thighs, at true size, nothing bent",
-       "it rides the real skeleton (the belt on the pelvis, the badge on the chest) and follows the game: a guard's torch leaves the belt when it is in his hand",
-       "the detective as he was designed: jacket off, dress shirt and a real tie, the gold shield on his belt, the pancake holster on his hip",
+       "real uniform slacks, not jeans; the duty shirt over a crew-neck undershirt at its open collar (navy for a cop, white under a guard's black)",
+       "duty belt and buckle, holster and pistol, magazine pouches, radio, torch, cuff case, a CO's keys, the badge, the radio mic",
+       "the kit built by its own rules round THIS body, at true size, riding the real skeleton; it follows the game (a guard's torch leaves the belt in his hand)",
+       "the detective in his suit and its real tie, the gold shield at his breast pocket, the gun under the jacket",
        "about a millisecond a person",
    ]})
 # ---------------------------------------------------------------- live
 if "police" in CB and "police" in CA:
-    P({"type": "pair", "title": "Patrol, live in Gang City", "caption": "The same crosswalk, the same camera. Before: a real body in a duty shirt, the belt and gun gone with the box body. After: the duty belt, the holster on the gun side, the badge and the radio mic.",
+    P({"type": "pair", "title": "Patrol, live in Gang City", "caption": "The same crosswalk, the same camera. Before: a man in an open button-down and jeans, no belt, no gun. After: the uniform (slacks, the undershirt at the collar), the duty belt, the holster on the gun side, the badge and the radio mic.",
        "before": CB["police"]["file"], "after": CA["police"]["file"]})
     P({"type": "pair", "title": "The gun side", "caption": "The holster and pistol hang off the belt behind the right hip, clear of it, the way the kit hangs them on any body.",
        "before": CB["police"]["file2"], "after": CA["police"]["file2"]})
@@ -127,10 +129,15 @@ for title, kinds in (("Sheriff, security, corrections", ["sheriff", "security", 
             fr.append({"path": side(crop_mid(CB[k]["file"], 0.4, f"{C}/cb_{k}.png"), crop_mid(CA[k]["file"], 0.4, f"{C}/ca_{k}.png"), f"{C}/city_{k}.png", h=560),
                        "label": k + ", live in Gang City"})
     if fr: P({"type": "stack", "title": title, "caption": "Live, before and after.", "frames": fr})
+# ---------------------------------------------------------------- the uniform
+if HERO:
+    hk = list(HERO.keys())
+    P({"type": "sheet", "title": "The uniform", "caption": "Pressed slacks, the duty shirt, the crew-neck undershirt at the open collar, the patches, nameplate and badge, the belt and its kit. A patrol officer, not a man in a button-down.",
+       "image": grid([HERO[i]["shots"]["hero"] for i in hk], 3 if len(hk) > 4 else len(hk), C + "/uniform.png", cell=(420, 570), labels=[nice(i) for i in hk])})
 # ---------------------------------------------------------------- the lab: up close
 pm = cid("police")
 if pm:
-    P({"type": "pair", "title": "The hip, up close", "caption": "The same officer, rig and camera. The belt now covers the shirt's tuck line; the holster hangs where the box body's did.",
+    P({"type": "pair", "title": "The hip, up close", "caption": "The same officer, rig and camera. Uniform slacks for the jeans, the belt over the shirt's tuck line, the holster where the box body's hung.",
        "before": BEF[pm]["shots"]["hip"], "after": AFT[pm]["shots"]["hip"]})
 fr = []
 for k in [cid("police"), cid("sheriff"), cid("police", "f")]:
@@ -140,16 +147,14 @@ if fr: P({"type": "stack", "title": "Round the back", "caption": "The radio with
 # ---------------------------------------------------------------- the detective
 d = cid("detective")
 if d:
-    P({"type": "pair", "title": "The detective", "caption": "His outfit says it: at his desk, jacket off, dress shirt and tie, the gold shield clipped on his belt. The wardrobe had put him in a suit jacket, and his belt went round the jacket. Now the shirt, a tie made on it (no garment has a whole one), the shield and the pancake holster.",
+    P({"type": "pair", "title": "The detective", "caption": "Plainclothes: his suit and its real tie, knotted at a closed collar. His duty belt and gun are under the jacket where a detective carries them; the gold shield shows at his breast pocket.",
        "before": BEF[d]["shots"]["chest"], "after": AFT[d]["shots"]["chest"]})
-    fr = [{"path": AFT[k]["shots"]["profile"], "label": nice(k) + ", in profile"} for k in [cid("detective"), cid("detective", "f"), cid("detective", "m", 1)] if k and "profile" in AFT[k]["shots"]]
-    if fr: P({"type": "stack", "title": "The tie lies on the shirt", "caption": "Knotted at the open collar, a few millimetres off the placket all the way to the belt.", "frames": fr})
 # ---------------------------------------------------------------- sheets
-P({"type": "sheet", "title": "Every kit, before", "caption": "The shipped code: real bodies, no kit.",
+P({"type": "sheet", "title": "Every officer, before", "caption": "The shipped code: real bodies in open button-downs and jeans, no kit.",
    "image": grid([BEF[i]["shots"]["full"] for i in ids], 5, C + "/all_before.png", cell=(216, 374), labels=[nice(i) for i in ids])})
-P({"type": "sheet", "title": "Every kit, after", "caption": "Police, corrections, sheriff, security, SWAT, the detectives: each kit rebuilt on its body.",
+P({"type": "sheet", "title": "Every officer, after", "caption": "Police, corrections, sheriff, security, SWAT, the detectives: the uniform, and each kit rebuilt on its body.",
    "image": grid([AFT[i]["shots"]["full"] for i in ids], 5, C + "/all_after.png", cell=(216, 374), labels=[nice(i) for i in ids])})
-P({"type": "sheet", "title": "On the chest", "caption": "The badge over the left pocket (a star for the sheriff), the radio mic above it.",
+P({"type": "sheet", "title": "On the chest", "caption": "The undershirt at the open collar in the uniform's own collar colour, the badge over the left pocket (a star for the sheriff), the radio mic above it, the nameplate and the patches.",
    "image": grid([AFT[i]["shots"]["chest"] for i in ids], 4, C + "/chests.png", cell=(270, 324), labels=[nice(i) for i in ids])})
 if WALK:
     wk = list(WALK.keys())
@@ -160,7 +165,8 @@ P({"type": "text", "title": "How it works", "paragraphs": [
     "THE SECTION. people.js measures the real body's clothed surface once per build: 48 radii round its axis every centimetre from under the hips to over the shoulders, body and garments, the arms and head left out. A centimetre the garment's vertices skipped is filled from above and below, not round the ring (that borrowed the wider sides and stood the chest out by centimetres), then dilated a bin: a stiff belt bridges the folds under it.",
     "BUILT AGAIN. dutykit.js is handed a body that answers with that section (CBZ.bodySection now asks a body for its own) and that chest. So the belt is cut round this waistband by the kit's own code, and the holster, pouches, radio and cuff case are hung off this belt and pushed clear of these hips and thighs by the same rules that hung them on the box body. Heights map hip to hip and shoulder to shoulder; the belt and everything on it keep their true size.",
     "WORN. The kit is skinned to the real skeleton (the belt and all on it to the pelvis, the badge and mic to the chest), follows the game's kit (a guard's torch out of its ring, a re-dress, a strip) and hides when the game hides it. About a millisecond a person.",
-    "THE TIE. No garment in the pack has a whole tie (a suit's is modelled only where its jacket shows it), so the detective's is made on his shirt: a four-in-hand knot at the open collar, a blade cut wider toward the tip, laid a few millimetres off the shirt, skinned like the shirt under it.",
+    "THE UNIFORM. Three real garments (all CC0, in the people pack): uniform wool slacks, pressed (their fold contrast cut, or dyed navy they read as denim); over them the duty shirt with its own jeans not worn (a zone of the garment dropped from its index); and a crew-neck tee worn UNDER the shirt. The tee shows only where the shirt leaves skin bare: a face is drawn only if the body vertices it is fitted to are bare, and it is fitted skin-tight so the shirt covers it everywhere else. It takes the outfit's own collar colour.",
+    "THE DETECTIVE. In his suit the duty belt is under his jacket: the kit is built CONCEALED, no belt or holster shown, the gold shield on the breast.",
 ]})
 spec = {"pages": pages}
 json.dump(spec, open(S + "/dutykit_pdf.json", "w"), indent=1)

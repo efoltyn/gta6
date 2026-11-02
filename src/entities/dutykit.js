@@ -267,170 +267,174 @@
     const collar = ch.skinSlots && ch.skinSlots.collar && ch.skinSlots.collar[0];
     const cw = collar && collar.geometry && collar.geometry.parameters ? collar.geometry.parameters.width / 2 : S.nRx + 0.05;
     // opts.straps false: no epaulettes (a real shirt has shoulders of its own);
-    // opts.store false: a one-off body (people.js, a real one), not cached
-    const straps = K.straps && opts.straps !== false, store = opts.store !== false;
-    const key = S.key + "|" + kind + "|" + (gun || "-") + "|" + (torch ? 1 : 0) + "|" + (straps ? shirt : 0) + "|" + m.toFixed(4) + "|" + cw.toFixed(3);
+    // opts.store false: a one-off body (people.js, a real one), not cached;
+    // opts.concealed: a jacket over the belt (a detective in his suit): the
+    // belt and all on it are under it, unseen, and the shield is on the breast
+    const straps = K.straps && opts.straps !== false, store = opts.store !== false, concealed = !!opts.concealed;
+    const key = S.key + "|" + kind + "|" + (gun || "-") + "|" + (torch ? 1 : 0) + "|" + (straps ? shirt : 0) + "|" + m.toFixed(4) + "|" + cw.toFixed(3) + (concealed ? "|c" : "");
     if (store && GEO[key]) return GEO[key];
     const B = new Builder();
     const clr = 0.003 * m;
     // ---- THE BELT: the trousers' waistband is the pelvis top, and the belt
     // covers the shirt's tuck line there
     const bh = K.beltH * m, top = S.pTop + 0.005 * m, bot = top - bh, tB = 0.0045 * m;
-    // the belt is cinched: ~1 mm off the shirt, so a seated thigh rising into
-    // the crease meets it where it meets the body, not a centimetre proud
-    const bclr = 0.0009 * m;
-    // the body's outline at one height, held bclr off it, with the small dips
-    // a soft section has bridged (a belt is stiff)
-    const ringAt = (y) => {
-      const r0 = span(ch, y - 0.002 * m, y + 0.002 * m, 1).map((p) => { const r = Math.hypot(p[0], p[1]) || 1; return [p[0] * (r + bclr) / r, p[1] * (r + bclr) / r]; });
-      for (let j = 0; j < NS; j++) {
-        const a = r0[(j + NS - 1) % NS], b = r0[j], c = r0[(j + 1) % NS];
-        const ra = Math.hypot(a[0], a[1]), rb = Math.hypot(b[0], b[1]), rc = Math.hypot(c[0], c[1]);
-        const want = (ra + rb + rc) / 3;
-        if (want > rb) r0[j] = [b[0] * want / rb, b[1] * want / rb];
-      }
-      return r0;
-    };
-    /* THE BELT IS A CONE, NOT A CYLINDER: it follows the section at its top
-       AND at its bottom (a belly slopes in toward the waistband, the pelvis
-       flares out), so no part of it stands off the body. Held to the widest
-       section over its height, a heavy man's belt stood 3 cm proud of his
-       waistband under the belly. */
-    const inB = ringAt(bot), inM = ringAt((bot + top) / 2), inT = ringAt(top);
-    const inAt = (j, y) => {
-      const k = Math.min(1, Math.max(0, (y - bot) / (top - bot))), jj = j % NS;
-      const A = k < 0.5 ? inB[jj] : inM[jj], C = k < 0.5 ? inM[jj] : inT[jj], w = k < 0.5 ? k * 2 : k * 2 - 1;
-      return [A[0] + (C[0] - A[0]) * w, A[1] + (C[1] - A[1]) * w];
-    };
-    // thinnest across the front, where a seated thigh comes up into the crease
-    const tAt = (j) => { const a = Math.abs((((j / NS) * 360 + 180) % 360) - 180); return tB * (0.62 + 0.38 * Math.min(1, Math.max(0, (a - 45) / 45))); };
-    // the belt's outer face at mid height, for everything hung on it; every
-    // outline the hanging kit clears is the widest over the belt's height
-    const outer = span(ch, bot, top).map((p, j) => { const r = Math.hypot(p[0], p[1]) || 1, t = bclr + tAt(j); return [p[0] * (r + t) / r, p[1] * (r + t) / r]; });
-    const stitch = tone(K.belt, 0.22), edge = tone(K.belt, 0.08);
-    /* THE BELT RIDES UP OVER THE FRONT OF THE HIPS: its lower edge lifts from
-       beside the buckle round to the side (the thigh crease), the way a belt sits
-       on a pelvis, so a thigh flexed to sit swings up under it instead of
-       through it (tools/overlap-audit.mjs: seated thigh vs belt). */
-    const lift = (j) => {
-      const a = Math.abs((((j / NS) * 360 + 180) % 360) - 180);
-      const s = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
-      return Math.min(bh * 0.4, 0.021 * m) * s(8, 24, a) * (1 - s(100, 122, a));
-    };
-    // rows: [height above bot, colour, lifts with the lower edge, how far out
-    // (0 = on the body, 1 = full thickness), edge tilt]. The edges are ROUNDED
-    // back to the body: a leather belt's edge is a rolled, burnished curve,
-    // and a square lip standing proud is what a seated thigh would catch.
-    const rows = [[0, edge, 1, 0.2, -1], [0.004 * m, stitch, 1, 0.85, 0], [0.007 * m, K.belt, 1, 1, 0],
-      [top - bot - 0.007 * m, K.belt, 0, 1, 0], [top - bot - 0.004 * m, stitch, 0, 0.85, 0], [top - bot, edge, 0, 0.2, 1]];
-    const cols = [];
-    for (let j = 0; j <= NS; j++) {
-      const n = outNormal(inM, j / NS * Math.PI * 2), l = lift(j), t = tAt(j % NS);
-      cols.push(rows.map((r) => {
-        const y = bot + r[0] + (r[2] ? l : 0), a = inAt(j, y);
-        return B.v([a[0] + n[0] * t * r[3], y, a[1] + n[2] * t * r[3]], r[4] ? [n[0], r[4] * 1.2, n[2]] : n, r[1]);
-      }));
-    }
-    for (let j = 0; j < NS; j++) for (let r = 0; r < rows.length - 1; r++) B.q(cols[j][r], cols[j + 1][r], cols[j + 1][r + 1], cols[j][r + 1]);
-    for (const [y, up] of [[top, 1], [bot, -1]]) {                // the lips back to the body
-      const ring = [];
+    if (!concealed) {
+      // the belt is cinched: ~1 mm off the shirt, so a seated thigh rising into
+      // the crease meets it where it meets the body, not a centimetre proud
+      const bclr = 0.0009 * m;
+      // the body's outline at one height, held bclr off it, with the small dips
+      // a soft section has bridged (a belt is stiff)
+      const ringAt = (y) => {
+        const r0 = span(ch, y - 0.002 * m, y + 0.002 * m, 1).map((p) => { const r = Math.hypot(p[0], p[1]) || 1; return [p[0] * (r + bclr) / r, p[1] * (r + bclr) / r]; });
+        for (let j = 0; j < NS; j++) {
+          const a = r0[(j + NS - 1) % NS], b = r0[j], c = r0[(j + 1) % NS];
+          const ra = Math.hypot(a[0], a[1]), rb = Math.hypot(b[0], b[1]), rc = Math.hypot(c[0], c[1]);
+          const want = (ra + rb + rc) / 3;
+          if (want > rb) r0[j] = [b[0] * want / rb, b[1] * want / rb];
+        }
+        return r0;
+      };
+      /* THE BELT IS A CONE, NOT A CYLINDER: it follows the section at its top
+         AND at its bottom (a belly slopes in toward the waistband, the pelvis
+         flares out), so no part of it stands off the body. Held to the widest
+         section over its height, a heavy man's belt stood 3 cm proud of his
+         waistband under the belly. */
+      const inB = ringAt(bot), inM = ringAt((bot + top) / 2), inT = ringAt(top);
+      const inAt = (j, y) => {
+        const k = Math.min(1, Math.max(0, (y - bot) / (top - bot))), jj = j % NS;
+        const A = k < 0.5 ? inB[jj] : inM[jj], C = k < 0.5 ? inM[jj] : inT[jj], w = k < 0.5 ? k * 2 : k * 2 - 1;
+        return [A[0] + (C[0] - A[0]) * w, A[1] + (C[1] - A[1]) * w];
+      };
+      // thinnest across the front, where a seated thigh comes up into the crease
+      const tAt = (j) => { const a = Math.abs((((j / NS) * 360 + 180) % 360) - 180); return tB * (0.62 + 0.38 * Math.min(1, Math.max(0, (a - 45) / 45))); };
+      // the belt's outer face at mid height, for everything hung on it; every
+      // outline the hanging kit clears is the widest over the belt's height
+      const outer = span(ch, bot, top).map((p, j) => { const r = Math.hypot(p[0], p[1]) || 1, t = bclr + tAt(j); return [p[0] * (r + t) / r, p[1] * (r + t) / r]; });
+      const stitch = tone(K.belt, 0.22), edge = tone(K.belt, 0.08);
+      /* THE BELT RIDES UP OVER THE FRONT OF THE HIPS: its lower edge lifts from
+         beside the buckle round to the side (the thigh crease), the way a belt sits
+         on a pelvis, so a thigh flexed to sit swings up under it instead of
+         through it (tools/overlap-audit.mjs: seated thigh vs belt). */
+      const lift = (j) => {
+        const a = Math.abs((((j / NS) * 360 + 180) % 360) - 180);
+        const s = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+        return Math.min(bh * 0.4, 0.021 * m) * s(8, 24, a) * (1 - s(100, 122, a));
+      };
+      // rows: [height above bot, colour, lifts with the lower edge, how far out
+      // (0 = on the body, 1 = full thickness), edge tilt]. The edges are ROUNDED
+      // back to the body: a leather belt's edge is a rolled, burnished curve,
+      // and a square lip standing proud is what a seated thigh would catch.
+      const rows = [[0, edge, 1, 0.2, -1], [0.004 * m, stitch, 1, 0.85, 0], [0.007 * m, K.belt, 1, 1, 0],
+        [top - bot - 0.007 * m, K.belt, 0, 1, 0], [top - bot - 0.004 * m, stitch, 0, 0.85, 0], [top - bot, edge, 0, 0.2, 1]];
+      const cols = [];
       for (let j = 0; j <= NS; j++) {
-        const yy = up < 0 ? y + lift(j) : y, a = inAt(j, yy), n = outNormal(inM, j / NS * Math.PI * 2), t = tAt(j % NS) * 0.2;
-        ring.push([B.v([a[0], yy, a[1]], [0, up, 0], edge), B.v([a[0] + n[0] * t, yy, a[1] + n[2] * t], [0, up, 0], edge)]);
+        const n = outNormal(inM, j / NS * Math.PI * 2), l = lift(j), t = tAt(j % NS);
+        cols.push(rows.map((r) => {
+          const y = bot + r[0] + (r[2] ? l : 0), a = inAt(j, y);
+          return B.v([a[0] + n[0] * t * r[3], y, a[1] + n[2] * t * r[3]], r[4] ? [n[0], r[4] * 1.2, n[2]] : n, r[1]);
+        }));
       }
-      for (let j = 0; j < NS; j++) B.q(ring[j][0], ring[j + 1][0], ring[j + 1][1], ring[j][1]);
-    }
-    const rad = (d) => d * Math.PI / 180;
-    const beltF = (deg) => {                                    // a frame ON the belt's outer face
-      const th = rad(deg), p = samplesAt(outer, th);
-      return frame([p[0], 0, p[1]], outNormal(outer, th));
-    };
-    const ym = (bot + top) / 2;
-    // buckle + keepers
-    const bF = beltF(0);
-    box(B, bF, 0, ym, 0.003 * m, (K.beltH > 0.04 ? 0.062 : 0.045) * m, bh * 0.82, 0.006 * m, K.buckle);
-    for (const d of K.keepers) {
-      const F = beltF(d);
-      box(B, F, 0, ym, 0.003 * m, 0.02 * m, bh, 0.006 * m, K.belt);
-      box(B, F, -0.005 * m, ym + bh * 0.2, 0.0065 * m, 0.006 * m, 0.006 * m, 0.0018 * m, NICKEL);
-      box(B, F, -0.005 * m, ym - bh * 0.2, 0.0065 * m, 0.006 * m, 0.006 * m, 0.0018 * m, NICKEL);
-    }
-    // outlines the hanging kit must clear (body below the belt, and the belt)
-    const lowBody = span(ch, top - 0.30 * m, top, 6);
-    const hang = (deg, h, w) => hangFrame(rad(deg), top - h, top, w, [outer, lowBody], clr);
-    // ---- THE GUN SIDE (-x, the wearer's right): holster, grip butt to the rear
-    if (gun) {
-      const F = hang(K.gunAt, 0.24 * m, 0.10 * m);
-      const L = K.belt;
-      if (gun === "pistol") {
-        box(B, F, 0.004 * m, top + 0.012 * m - 0.045 * m, 0.025 * m, 0.092 * m, 0.09 * m, 0.05 * m, L);   // trigger-guard body
-        box(B, F, 0.02 * m, top - 0.078 * m - 0.06 * m, 0.021 * m, 0.048 * m, 0.12 * m, 0.042 * m, L);    // slide / barrel
-        box(B, F, 0.004 * m, top + 0.012 * m, 0.028 * m, 0.05 * m, 0.012 * m, 0.054 * m, tone(L, 0.12)); // welt at the mouth
-        const G = lean(F, 0.34, top + 0.006 * m);
-        box(B, G, -0.018 * m, 0.036 * m, 0.025 * m, 0.032 * m, 0.095 * m, 0.03 * m, GRIP);           // the pistol grip
-        box(B, G, -0.018 * m, 0.064 * m, 0.025 * m, 0.036 * m, 0.012 * m, 0.036 * m, L);              // retention strap
-      } else if (gun === "taser") {
-        box(B, F, 0.006 * m, top - 0.055 * m, 0.024 * m, 0.075 * m, 0.13 * m, 0.048 * m, L);
-        const G = lean(F, 0.3, top);
-        box(B, G, -0.014 * m, 0.03 * m, 0.024 * m, 0.03 * m, 0.07 * m, 0.03 * m, TASER);
-      } else {                                                 // a detective's pancake, high and tight
-        const Fp = hang(K.gunAt, 0.12 * m, 0.09 * m);
-        box(B, Fp, 0.006 * m, top - 0.045 * m, 0.018 * m, 0.088 * m, 0.11 * m, 0.036 * m, tone(L, 0.05));
-        const G = lean(Fp, 0.36, top);
-        box(B, G, -0.016 * m, 0.035 * m, 0.02 * m, 0.03 * m, 0.085 * m, 0.028 * m, GRIP);
+      for (let j = 0; j < NS; j++) for (let r = 0; r < rows.length - 1; r++) B.q(cols[j][r], cols[j + 1][r], cols[j + 1][r + 1], cols[j][r + 1]);
+      for (const [y, up] of [[top, 1], [bot, -1]]) {                // the lips back to the body
+        const ring = [];
+        for (let j = 0; j <= NS; j++) {
+          const yy = up < 0 ? y + lift(j) : y, a = inAt(j, yy), n = outNormal(inM, j / NS * Math.PI * 2), t = tAt(j % NS) * 0.2;
+          ring.push([B.v([a[0], yy, a[1]], [0, up, 0], edge), B.v([a[0] + n[0] * t, yy, a[1] + n[2] * t], [0, up, 0], edge)]);
+        }
+        for (let j = 0; j < NS; j++) B.q(ring[j][0], ring[j + 1][0], ring[j + 1][1], ring[j][1]);
       }
-    }
-    // ---- magazine pouches (double, flapped) on the support side
-    for (const d of (K.mags || [])) {
-      const F = hang(d, 0.085 * m, 0.08 * m);
-      for (const s of [-1, 1]) {
-        const a = s * 0.019 * m;
-        box(B, F, a, top + 0.012 * m - 0.0425 * m, 0.015 * m, 0.034 * m, 0.085 * m, 0.03 * m, K.belt);
-        box(B, F, a, top + 0.0 * m, 0.017 * m, 0.036 * m, 0.024 * m, 0.034 * m, tone(K.belt, 0.06));
-        box(B, F, a, top - 0.006 * m, 0.0345 * m, 0.007 * m, 0.007 * m, 0.002 * m, NICKEL);
+      const rad = (d) => d * Math.PI / 180;
+      const beltF = (deg) => {                                    // a frame ON the belt's outer face
+        const th = rad(deg), p = samplesAt(outer, th);
+        return frame([p[0], 0, p[1]], outNormal(outer, th));
+      };
+      const ym = (bot + top) / 2;
+      // buckle + keepers
+      const bF = beltF(0);
+      box(B, bF, 0, ym, 0.003 * m, (K.beltH > 0.04 ? 0.062 : 0.045) * m, bh * 0.82, 0.006 * m, K.buckle);
+      for (const d of K.keepers) {
+        const F = beltF(d);
+        box(B, F, 0, ym, 0.003 * m, 0.02 * m, bh, 0.006 * m, K.belt);
+        box(B, F, -0.005 * m, ym + bh * 0.2, 0.0065 * m, 0.006 * m, 0.006 * m, 0.0018 * m, NICKEL);
+        box(B, F, -0.005 * m, ym - bh * 0.2, 0.0065 * m, 0.006 * m, 0.006 * m, 0.0018 * m, NICKEL);
       }
-    }
-    // ---- the torch in its ring (hidden while it is in his hand)
-    if (K.torch != null) {
-      const F = hang(K.torch, 0.2 * m, 0.045 * m);
-      box(B, F, 0, top - 0.01 * m, 0.012 * m, 0.036 * m, 0.03 * m, 0.024 * m, K.belt);   // the ring holder
-      if (torch) {
-        const c = 0.036 * m;
-        cyl(B, F, 0, c, top - 0.012 * m, top + 0.032 * m, 0.019 * m, TORCH, 10);       // head, above the ring
-        cyl(B, F, 0, c, top + 0.032 * m, top + 0.036 * m, 0.017 * m, NICKEL, 10);      // bezel
-        cyl(B, F, 0, c, top - 0.18 * m, top - 0.012 * m, 0.0135 * m, TORCH, 8);        // body through the ring
+      // outlines the hanging kit must clear (body below the belt, and the belt)
+      const lowBody = span(ch, top - 0.30 * m, top, 6);
+      const hang = (deg, h, w) => hangFrame(rad(deg), top - h, top, w, [outer, lowBody], clr);
+      // ---- THE GUN SIDE (-x, the wearer's right): holster, grip butt to the rear
+      if (gun) {
+        const F = hang(K.gunAt, 0.24 * m, 0.10 * m);
+        const L = K.belt;
+        if (gun === "pistol") {
+          box(B, F, 0.004 * m, top + 0.012 * m - 0.045 * m, 0.025 * m, 0.092 * m, 0.09 * m, 0.05 * m, L);   // trigger-guard body
+          box(B, F, 0.02 * m, top - 0.078 * m - 0.06 * m, 0.021 * m, 0.048 * m, 0.12 * m, 0.042 * m, L);    // slide / barrel
+          box(B, F, 0.004 * m, top + 0.012 * m, 0.028 * m, 0.05 * m, 0.012 * m, 0.054 * m, tone(L, 0.12)); // welt at the mouth
+          const G = lean(F, 0.34, top + 0.006 * m);
+          box(B, G, -0.018 * m, 0.036 * m, 0.025 * m, 0.032 * m, 0.095 * m, 0.03 * m, GRIP);           // the pistol grip
+          box(B, G, -0.018 * m, 0.064 * m, 0.025 * m, 0.036 * m, 0.012 * m, 0.036 * m, L);              // retention strap
+        } else if (gun === "taser") {
+          box(B, F, 0.006 * m, top - 0.055 * m, 0.024 * m, 0.075 * m, 0.13 * m, 0.048 * m, L);
+          const G = lean(F, 0.3, top);
+          box(B, G, -0.014 * m, 0.03 * m, 0.024 * m, 0.03 * m, 0.07 * m, 0.03 * m, TASER);
+        } else {                                                 // a detective's pancake, high and tight
+          const Fp = hang(K.gunAt, 0.12 * m, 0.09 * m);
+          box(B, Fp, 0.006 * m, top - 0.045 * m, 0.018 * m, 0.088 * m, 0.11 * m, 0.036 * m, tone(L, 0.05));
+          const G = lean(Fp, 0.36, top);
+          box(B, G, -0.016 * m, 0.035 * m, 0.02 * m, 0.03 * m, 0.085 * m, 0.028 * m, GRIP);
+        }
       }
-    }
-    // ---- the radio on the belt (antenna up, clipped on)
-    if (K.radio != null) {
-      const F = hang(K.radio, 0.075 * m, 0.06 * m);
-      box(B, F, 0, top + 0.045 * m - 0.06 * m, 0.017 * m, 0.058 * m, 0.12 * m, 0.034 * m, RADIO);
-      box(B, F, 0, top + 0.035 * m - 0.06 * m, 0.0345 * m, 0.046 * m, 0.05 * m, 0.002 * m, tone(RADIO, 0.18));   // speaker grille
-      cyl(B, F, -0.016 * m, 0.02 * m, top + 0.045 * m, top + 0.11 * m, 0.0055 * m, AERIAL, 6);
-      cyl(B, F, 0.014 * m, 0.02 * m, top + 0.045 * m, top + 0.058 * m, 0.0075 * m, AERIAL, 6);
-    }
-    // ---- the cuff case: a closed black case, flap and snap (9.5 x 7.5 x 4 cm)
-    if (K.cuffs != null) {
-      const F = hang(K.cuffs, 0.1 * m, 0.08 * m);
-      box(B, F, 0, top + 0.01 * m - 0.044 * m, 0.018 * m, CASE.w * m, CASE.h * m, CASE.d * m, 0x131518);
-      box(B, F, 0, top + 0.01 * m - 0.012 * m, 0.02 * m, CASE.w * m + 0.004 * m, 0.03 * m, CASE.d * m + 0.004 * m, 0x16181c);
-      box(B, F, 0, top + 0.01 * m - 0.022 * m, 0.0415 * m, 0.011 * m, 0.011 * m, 0.003 * m, NICKEL);
-    }
-    // ---- a CO's key ring on the right front
-    if (K.keys != null) {
-      const F = hang(K.keys, 0.08 * m, 0.04 * m);
-      box(B, F, 0, top - 0.004 * m, 0.006 * m, 0.014 * m, 0.03 * m, 0.008 * m, NICKEL);            // the clip
-      for (let k = 0; k < 4; k++) {
-        const G = lean(F, (k - 1.5) * 0.22, top - 0.016 * m);
-        box(B, G, (k - 1.5) * 0.005 * m, -0.026 * m, 0.012 * m + k * 0.002 * m, 0.009 * m, 0.048 * m, 0.0022 * m, k & 1 ? NICKEL : 0xb49a52);
+      // ---- magazine pouches (double, flapped) on the support side
+      for (const d of (K.mags || [])) {
+        const F = hang(d, 0.085 * m, 0.08 * m);
+        for (const s of [-1, 1]) {
+          const a = s * 0.019 * m;
+          box(B, F, a, top + 0.012 * m - 0.0425 * m, 0.015 * m, 0.034 * m, 0.085 * m, 0.03 * m, K.belt);
+          box(B, F, a, top + 0.0 * m, 0.017 * m, 0.036 * m, 0.024 * m, 0.034 * m, tone(K.belt, 0.06));
+          box(B, F, a, top - 0.006 * m, 0.0345 * m, 0.007 * m, 0.007 * m, 0.002 * m, NICKEL);
+        }
       }
-    }
-    // ---- the detective's shield on his belt, just off the buckle
-    if (K.beltBadge) {
-      const F = beltF(K.beltBadge.at);
-      box(B, F, 0, top - 0.004 * m, 0.0022 * m, 0.016 * m, 0.02 * m, 0.003 * m, 0x2a2016);           // the clip over the belt
-      const Fb = frame(add(F.o, [0, 1, 0], top - 0.014 * m), F.n);   // rides high on the belt: a seated thigh comes up under it
-      badge(B, Fb, K.beltBadge, m, 0.004 * m);
+      // ---- the torch in its ring (hidden while it is in his hand)
+      if (K.torch != null) {
+        const F = hang(K.torch, 0.2 * m, 0.045 * m);
+        box(B, F, 0, top - 0.01 * m, 0.012 * m, 0.036 * m, 0.03 * m, 0.024 * m, K.belt);   // the ring holder
+        if (torch) {
+          const c = 0.036 * m;
+          cyl(B, F, 0, c, top - 0.012 * m, top + 0.032 * m, 0.019 * m, TORCH, 10);       // head, above the ring
+          cyl(B, F, 0, c, top + 0.032 * m, top + 0.036 * m, 0.017 * m, NICKEL, 10);      // bezel
+          cyl(B, F, 0, c, top - 0.18 * m, top - 0.012 * m, 0.0135 * m, TORCH, 8);        // body through the ring
+        }
+      }
+      // ---- the radio on the belt (antenna up, clipped on)
+      if (K.radio != null) {
+        const F = hang(K.radio, 0.075 * m, 0.06 * m);
+        box(B, F, 0, top + 0.045 * m - 0.06 * m, 0.017 * m, 0.058 * m, 0.12 * m, 0.034 * m, RADIO);
+        box(B, F, 0, top + 0.035 * m - 0.06 * m, 0.0345 * m, 0.046 * m, 0.05 * m, 0.002 * m, tone(RADIO, 0.18));   // speaker grille
+        cyl(B, F, -0.016 * m, 0.02 * m, top + 0.045 * m, top + 0.11 * m, 0.0055 * m, AERIAL, 6);
+        cyl(B, F, 0.014 * m, 0.02 * m, top + 0.045 * m, top + 0.058 * m, 0.0075 * m, AERIAL, 6);
+      }
+      // ---- the cuff case: a closed black case, flap and snap (9.5 x 7.5 x 4 cm)
+      if (K.cuffs != null) {
+        const F = hang(K.cuffs, 0.1 * m, 0.08 * m);
+        box(B, F, 0, top + 0.01 * m - 0.044 * m, 0.018 * m, CASE.w * m, CASE.h * m, CASE.d * m, 0x131518);
+        box(B, F, 0, top + 0.01 * m - 0.012 * m, 0.02 * m, CASE.w * m + 0.004 * m, 0.03 * m, CASE.d * m + 0.004 * m, 0x16181c);
+        box(B, F, 0, top + 0.01 * m - 0.022 * m, 0.0415 * m, 0.011 * m, 0.011 * m, 0.003 * m, NICKEL);
+      }
+      // ---- a CO's key ring on the right front
+      if (K.keys != null) {
+        const F = hang(K.keys, 0.08 * m, 0.04 * m);
+        box(B, F, 0, top - 0.004 * m, 0.006 * m, 0.014 * m, 0.03 * m, 0.008 * m, NICKEL);            // the clip
+        for (let k = 0; k < 4; k++) {
+          const G = lean(F, (k - 1.5) * 0.22, top - 0.016 * m);
+          box(B, G, (k - 1.5) * 0.005 * m, -0.026 * m, 0.012 * m + k * 0.002 * m, 0.009 * m, 0.048 * m, 0.0022 * m, k & 1 ? NICKEL : 0xb49a52);
+        }
+      }
+      // ---- the detective's shield on his belt, just off the buckle
+      if (K.beltBadge) {
+        const F = beltF(K.beltBadge.at);
+        box(B, F, 0, top - 0.004 * m, 0.0022 * m, 0.016 * m, 0.02 * m, 0.003 * m, 0x2a2016);           // the clip over the belt
+        const Fb = frame(add(F.o, [0, 1, 0], top - 0.014 * m), F.n);   // rides high on the belt: a seated thigh comes up under it
+        badge(B, Fb, K.beltBadge, m, 0.004 * m);
+      }
     }
     // ---- THE CHEST: badge over the left pocket, mic, epaulettes
     const colTop = S.base + P.torsoH;
@@ -448,10 +452,11 @@
       F.o = add(F.o, F.n, s + 0.0012 * m);
       return F;
     };
-    if (K.badge && ch.torsoFrontZ) {
+    const chestBadge = K.badge || (concealed ? K.beltBadge : null);
+    if (chestBadge && ch.torsoFrontZ) {
       const yB = colTop - 0.27 * P.torsoH, xB = 0.40 * S.at(yB).a;
       const F = onChest(chestFrame(xB, yB), 0.06 * m, 0.07 * m);
-      badge(B, F, K.badge, m, 0);
+      badge(B, F, chestBadge, m, 0);
     }
     if (K.mic && ch.torsoFrontZ) {
       const yM = S.shoulderY - 0.075 * S.vs, xM = 0.56 * S.at(yM).a;
@@ -462,7 +467,7 @@
     }
     if (straps) epaulettes(B, ch, m, cw, tone(shirt, -0.08), clr);
     const g = B.geometry();
-    g.userData.dutyKit = { kind, gun: gun || null, torch, belt: { top, bot, ring: outer.length } };
+    g.userData.dutyKit = { kind, gun: concealed ? null : gun || null, torch: torch && !concealed, belt: concealed ? null : { top, bot, ring: NS } };
     return store ? (GEO[key] = g) : g;
   }
   // the cuff case, real size (metres) — was entities/handcuffs.js buildPouch
