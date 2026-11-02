@@ -9,7 +9,7 @@ varying vec2 vMgK; varying vec3 vMgW; varying float vMgD;`).replace("#include <p
   mgW = modelMatrix * mgW; vMgW = mgW.xyz; vMgK = gk; vMgD = -mvPosition.z; }`),sh.fragmentShader=sh.fragmentShader.replace("#include <common>",`#include <common>
 `+TURF()+`
 `+MG_FUNCS).replace("#include <color_fragment>",`#ifdef USE_COLOR
-  diffuseColor.rgb *= mgSurface(vColor * vColor);
+  diffuseColor.rgb *= mgSurface(vColor.rgb * vColor.rgb);
 #else
   diffuseColor.rgb *= mgSurface(vec3(0.5));
 #endif`).replace("#include <emissivemap_fragment>",`#include <emissivemap_fragment>

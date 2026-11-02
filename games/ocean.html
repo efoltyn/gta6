@@ -169,7 +169,7 @@
   </div>
 </div>
 
-<script src="../src/vendor/three.r128.min.js"></script>
+<script src="../src/vendor/three.r187.js?v=r187d"></script>
 <script>
 /* ============================================================================
    DEAD WATER — a complete open-water salvage game in one file. three.js r128.
@@ -270,7 +270,8 @@ const GOLD_VALUE = 2600;
 /* ------------------------------------------------------------ three set -- */
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 2400);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = THREE.createRenderer({ antialias: true });
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // r128's default (linear) output: the look this page was tuned on
 renderer.setPixelRatio(1);
 renderer.setSize(innerWidth, innerHeight);
 document.getElementById("game").appendChild(renderer.domElement);
