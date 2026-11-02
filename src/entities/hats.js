@@ -181,6 +181,54 @@
         g.computeVertexNormals();
         return g;
       },
+      // A FITTED SHELL: cloth or a shell ON the ball (radius r), from the
+      // crown down to an edge whose height edgeY(phi) varies round the head
+      // (phi 0 = the front). Snug by construction: every vertex is on r.
+      shell: function (r, edgeY, o) {
+        o = o || {};
+        const n = S(o.n || 36), m = far ? 6 : (o.m || 12);
+        const pos = [], idx = [];
+        for (let i = 0; i <= n; i++) {
+          const ph = i / n * TAU, te = Math.acos(Math.max(-0.999, Math.min(0.999, edgeY(ph) / r)));
+          for (let j = 0; j <= m; j++) {
+            const th = te * j / m;
+            pos.push(r * Math.sin(th) * Math.sin(ph), r * Math.cos(th), r * Math.sin(th) * Math.cos(ph));
+          }
+        }
+        const row = m + 1;
+        for (let i = 0; i < n; i++) for (let j = 0; j < m; j++) {
+          const a = i * row + j, b = (i + 1) * row + j;
+          idx.push(a, a + 1, b, b, a + 1, b + 1);
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        g.setIndex(idx);
+        g.computeVertexNormals();
+        // the crown's pole and the seam share one normal (straight out)
+        const P = g.attributes.position, N = g.attributes.normal;
+        for (let k = 0; k < P.count; k++) { const x = P.getX(k), y = P.getY(k), z = P.getZ(k), l = Math.hypot(x, y, z) || 1; N.setXYZ(k, x / l, y / l, z / l); }
+        return g;
+      },
+      // a point ON the skull: azimuth phi (0 = front), height y, `off` proud of the ball
+      onHead: function (ph, y, off) { const rr = Math.sqrt(Math.max(0, 1 - y * y)) + (off || 0); return [Math.sin(ph) * rr, y, Math.cos(ph) * rr]; },
+      // A RIBBON: a flat strip of cloth along a path, `w` wide (fn of t or a
+      // number), lying across `side` (default x). Drawn both sides.
+      ribbon: function (pts, w, o) {
+        o = o || {};
+        const curve = new THREE.CatmullRomCurve3(pts.map(function (p) { return new V3(p[0], p[1], p[2]); }));
+        const n = S(o.n || 14), pos = [], idx = [];
+        const side = new V3(1, 0, 0);
+        for (let i = 0; i <= n; i++) {
+          const t = i / n, c = curve.getPointAt(t), ww = (typeof w === "function" ? w(t) : w) / 2;
+          pos.push(c.x - side.x * ww, c.y, c.z, c.x + side.x * ww, c.y, c.z);
+        }
+        for (let i = 0; i < n; i++) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        g.setIndex(idx);
+        g.computeVertexNormals();
+        return g;
+      },
       // a BRIM: a ring from r0 to r1 at height y, `t` thick; shape(phi, k) -> dy
       // bends it (k = 0 at the crown edge .. 1 at the rim); rx/rz stretch it
       brim: function (r0, r1, y, o) {
@@ -287,44 +335,71 @@
   }
 
   /* ===== STREET ===== */
-  def("bandana", "Bandana", "street", [cw(C.red, 0x7d1616), cw(C.blue, 0x153d82), cw(C.black, 0x050507), cw(C.green, 0x15502b), cw(C.purple, 0x3b2160)], function (K) {
-    // the cloth folded over the crown, tied low at the nape
-    const g = K.dome(1.055, -0.05, { n: 30, m: 12 });
-    deform(g, function (v) {
-      // the front edge sits square across the brow; the cloth bags a touch at the back
-      if (v.z > 0.2) v.y = Math.max(v.y, 0.22 + (v.z - 0.2) * 0.05);
-      if (v.z < -0.3) { v.z -= 0.04 * (-v.z - 0.3); }
-    });
-    K.put(g, "a", { r: [-0.1, 0, 0] });
-    // the folded hem over the brow
-    K.put(K.torus(1.035, 0.05, { arc: Math.PI * 1.15, n: 28 }), "b", { r: [Math.PI / 2 - 0.1, 0, Math.PI * 0.5 + Math.PI * 0.075], p: [0, 0.23, 0.02], o: "YXZ" });
-    // the knot and the two tails at the nape
-    K.put(K.ball(0.16, 12), "a", { p: [0, -0.02, -1.02], s: [1.2, 0.85, 0.8] });
-    K.put(K.tube([[0.06, -0.04, -1.05], [0.16, -0.32, -1.12], [0.24, -0.62, -1.08]], function (t) { return 0.09 * (1 - 0.55 * t); }, { n: 10, m: 6 }), "a", { s: [1, 1, 0.45] });
-    K.put(K.tube([[-0.06, -0.04, -1.05], [-0.2, -0.28, -1.14], [-0.34, -0.5, -1.12]], function (t) { return 0.085 * (1 - 0.55 * t); }, { n: 10, m: 6 }), "a", { s: [1, 1, 0.45] });
-    // two paisley flecks so it reads as cloth, not paint
-    K.put(K.ball(0.07, 8), "c", { p: [0.45, 0.82, 0.48], s: [1, 0.4, 1] });
-    K.put(K.ball(0.06, 8), "c", { p: [-0.5, 0.75, 0.52], s: [1, 0.4, 1] });
-  }, { tags: ["gang"] });
+  /* THE BANDANA, tied over the head: the cloth laid ON the skull (a fitted
+     shell), its folded hem straight across the brow, the knot low at the back
+     of the head and two tails falling from it. The gang colour is `a`. */
+  def("bandana", "Bandana", "street", [cw(C.red, 0x7d1616, C.white), cw(C.blue, 0x153d82, C.white), cw(C.black, 0x050507, C.white), cw(C.green, 0x15502b, C.white), cw(C.purple, 0x3b2160, C.white)], function (K) {
+    const edge = function (ph) { const c = Math.cos(ph); return c >= 0 ? 0.04 + 0.28 * Math.pow(c, 2) : 0.04 - 0.24 * Math.pow(-c, 1.4); };
+    K.put(K.shell(1.04, edge, { n: 40, m: 12 }), "a");
+    // the folded hem across the brow, round to the back
+    const hem = [];
+    for (let i = -12; i <= 12; i++) { const ph = i / 12 * 2.75; hem.push(K.onHead(ph, edge(ph) + 0.015, 0.06)); }
+    K.put(K.tube(hem, 0.055, { n: 44, m: 6 }), "b", { s: [1, 0.8, 1] });
+    // the print: a few paisley flecks in the trim colour
+    [[0.5, 0.78], [-0.6, 0.7], [1.9, 0.62], [-2.2, 0.5], [0.05, 0.93], [2.8, 0.66]].forEach(function (q) { K.put(K.ball(0.055, 8), "c", { p: K.onHead(q[0], q[1], 0.045), s: [1, 0.5, 1] }); });
+    // the knot and the two tails
+    const kn = K.onHead(Math.PI, edge(Math.PI) + 0.02, 0.12);
+    K.put(K.ball(0.15, 12), "a", { p: kn, s: [1.3, 0.9, 0.8] });
+    for (const sx of [-1, 1]) K.put(K.ribbon([[kn[0] + sx * 0.05, kn[1] - 0.04, kn[2]], [sx * 0.2, kn[1] - 0.32, kn[2] + 0.04], [sx * 0.32, kn[1] - 0.62, kn[2] + 0.12]], function (t) { return 0.2 * (1 - 0.6 * t); }, { n: 8 }), "a");
+  }, { fit: false, tags: ["gang"] });
 
-  def("headband", "Rolled Bandana", "street", [cw(C.red, 0x7d1616), cw(C.blue, 0x153d82), cw(C.black), cw(C.white, C.grey)], function (K) {
-    K.put(K.torus(1.02, 0.11, { n: 36, m: 8 }), "a", { r: [Math.PI / 2 - 0.12, 0, 0], p: [0, 0.3, 0], s: [1, 1, 0.9] });
-    K.put(K.ball(0.15, 10), "a", { p: [0.72, 0.28, -0.72], s: [1, 0.8, 1] });
-    K.put(K.tube([[0.76, 0.24, -0.78], [0.92, -0.05, -0.92], [1.0, -0.32, -0.92]], function (t) { return 0.08 * (1 - 0.5 * t); }, { n: 8, m: 6 }), "a", { s: [1, 1, 0.6] });
-    K.put(K.tube([[0.68, 0.24, -0.82], [0.7, -0.08, -1.05], [0.66, -0.36, -1.12]], function (t) { return 0.07 * (1 - 0.5 * t); }, { n: 8, m: 6 }), "a", { s: [1, 1, 0.6] });
-  }, { tags: ["gang", "sport"] });
+  /* THE ROLLED BANDANA. A folded bandana rolled into a rope and tied round
+     the head: snug ON the skull, across the forehead just above the brow,
+     dipping a little at the back where the knot sits, two short tails. Every
+     point is laid on the ball (K.onHead), so it can never float. */
+  def("headband", "Rolled Bandana", "street", [cw(C.red, 0x7d1616), cw(C.blue, 0x153d82), cw(C.black, 0x2a2a30), cw(C.white, C.grey), cw(C.green, 0x15502b)], function (K) {
+    const N = 24, ring = [];
+    for (let i = 0; i < N; i++) { const ph = i / N * TAU; ring.push(K.onHead(ph, 0.3 + 0.07 * Math.cos(ph), 0.055)); }
+    K.put(K.tube(ring, 0.105, { closed: true, n: 40, m: 8 }), "a", { s: [1, 0.8, 1] });
+    // the paisley fleck of a print on the front
+    K.put(K.ball(0.05, 8), "b", { p: K.onHead(0.35, 0.37, 0.13) });
+    K.put(K.ball(0.04, 8), "b", { p: K.onHead(-0.45, 0.36, 0.13) });
+    // the knot at the back and its two tails, laid against the skull and falling
+    const kn = K.onHead(Math.PI, 0.22, 0.13);
+    K.put(K.ball(0.16, 12), "a", { p: kn, s: [1.3, 0.95, 0.85] });
+    for (const sx of [-1, 1]) {
+      const p1 = K.onHead(Math.PI - sx * 0.2, 0.0, 0.08), p2 = K.onHead(Math.PI - sx * 0.34, -0.42, 0.07);
+      K.put(K.ribbon([[kn[0] + sx * 0.06, kn[1] - 0.04, kn[2]], p1, p2], function (t) { return 0.2 * (1 - 0.5 * t); }, { n: 10 }), "a");
+    }
+  }, { fit: false, tags: ["gang", "sport"] });
 
-  def("durag", "Durag", "street", [cw(C.black, 0x2a2a30), cw(C.navy, 0x2a3c66), cw(C.red, 0x8e1c1c), cw(0xc9b27a, 0x9c8656), cw(C.white, 0xc8c8c8)], function (K) {
-    const g = K.dome(1.045, -0.02, { n: 30, m: 12 });
-    deform(g, function (v) { if (v.z > 0.25) v.y = Math.max(v.y, 0.3); });
-    K.put(g, "a", { r: [-0.12, 0, 0] });
-    // the centre seam over the crown
-    K.put(K.torus(1.05, 0.022, { arc: Math.PI * 0.95, n: 24, m: 5 }), "b", { r: [0, Math.PI / 2, 0], p: [0, 0, 0] });
-    // the long flat tail down the back
-    K.put(K.tube([[0, -0.05, -1.0], [0, -0.45, -1.08], [0, -0.95, -1.02], [0.02, -1.35, -0.92]], function (t) { return 0.22 * (1 - 0.25 * t); }, { n: 12, m: 8 }), "a", { s: [1, 1, 0.18] });
-    // the ties round the forehead
-    K.put(K.torus(1.04, 0.035, { n: 36, m: 5 }), "a", { r: [Math.PI / 2 - 0.1, 0, 0], p: [0, 0.26, 0] });
-  }, { tags: ["street"] });
+  /* THE DURAG. A fitted cap of stretch cloth hugging the whole top and back
+     of the head: its edge sits on the brow at the front, crosses above the
+     ears and runs down to the nape at the back. The tie band goes across the
+     forehead and round to the back; the long flap and the two ties hang down
+     the back of the neck. */
+  def("durag", "Durag", "street", [cw(C.black, 0x2a2a30), cw(C.navy, 0x2a3c66), cw(C.red, 0x8e1c1c), cw(0xc9b27a, 0x9c8656), cw(C.white, 0xc8c8c8), cw(C.purple, 0x3b2160)], function (K) {
+    const edge = function (ph) { const c = Math.cos(ph); return c >= 0 ? 0.05 + 0.3 * Math.pow(c, 1.5) : 0.05 - 0.68 * Math.pow(-c, 1.25); };
+    K.put(K.shell(1.035, edge, { n: 40, m: 14 }), "a");
+    // the centre seam, front edge over the crown to the nape
+    const seam = [];
+    const bf = Math.acos(edge(0) / 1.05), bb = Math.acos(edge(Math.PI) / 1.05);
+    for (let i = 0; i <= 16; i++) { const t = i / 16, be = bf - (bf + bb) * t; seam.push([0, Math.cos(be) * 1.05, Math.sin(be) * 1.05]); }
+    K.put(K.tube(seam, 0.018, { n: 30, m: 5 }), "b");
+    // the tie band: across the forehead on the edge, round the sides, down to the nape
+    const band = [];
+    for (let i = -10; i <= 10; i++) { const ph = i / 10 * 2.1; const y = Math.min(edge(ph), 0.33) + 0.02; band.push(K.onHead(ph, y, 0.05)); }
+    const left = band.slice(0, 1)[0], right = band[band.length - 1];
+    const knot = K.onHead(Math.PI, -0.5, 0.1);
+    K.put(K.tube(band, 0.05, { n: 40, m: 6 }), "a", { s: [1, 0.85, 1] });
+    for (const end of [left, right]) K.put(K.tube([end, K.onHead(Math.sign(end[0]) * 2.6, -0.32, 0.07), knot], 0.045, { n: 10, m: 5 }), "a");
+    K.put(K.ball(0.09, 10), "a", { p: knot, s: [1.3, 0.8, 0.8] });
+    // the flap: wide at the nape, hanging down the back of the neck
+    const nape = K.onHead(Math.PI, edge(Math.PI) + 0.02, 0.03);
+    K.put(K.ribbon([nape, [0, -0.95, -0.72], [0, -1.35, -0.52], [0, -1.7, -0.42]], function (t) { return 0.62 - 0.24 * t; }, { n: 14 }), "a");
+    // and the two long ties, either side of it
+    for (const sx of [-1, 1]) K.put(K.tube([knot, [sx * 0.16, -0.9, -0.82], [sx * 0.2, -1.3, -0.62], [sx * 0.22, -1.62, -0.5]], function (t) { return 0.04 * (1 - 0.3 * t); }, { n: 12, m: 5 }), "a", { s: [1, 1, 0.6] });
+  }, { fit: false, tags: ["street", "gang"] });
 
   def("ballcap", "Baseball Cap", "street", [cw(C.red, C.red, C.white), cw(C.navy, C.navy, C.white), cw(C.black, C.black, C.red), cw(C.white, C.blue), cw(C.green, C.green, C.white), cw(C.grey, C.charcoal), cw(C.yellow, C.black), cw(C.sky, C.white)], function (K) {
     capCrown(K, { r: 1.07, y0: 0.1, tilt: -0.22 });
@@ -588,7 +663,7 @@
   def("garrison", "Garrison Cap", "military", [cw(C.olive, C.khaki, C.gold), cw(C.navy, C.gold, C.gold), cw(C.white, C.navy, C.gold), cw(0x7a1414, C.gold, C.gold)], function (K) {
     foldCap(K, 1.15, 0.5, 2.05, 1.2, "a", "b");
     badge(K, "c", 0.26, 1.02, 0.7, 0.55, "star");
-  }, { tags: ["military", "work"] });
+  }, { fit: false, tags: ["military", "work"] });
 
   def("boonie", "Boonie Hat", "military", [cw(C.olive, 0x37432a), cw(C.tan, 0x9c8656), cw(0x5a5e52, 0x3a3e34), cw(C.khaki, C.brown)], function (K) {
     K.put(K.lathe([[1.03, 0.14], [1.02, 0.55], [0.95, 0.78], [0.5, 0.86], [0, 0.85]], { n: 28 }), "a");
@@ -706,7 +781,7 @@
   def("paper", "Paper Hat", "work", [cw(C.white, C.red), cw(C.white, C.navy), cw(C.white, C.green)], function (K) {
     // the soda-fountain fold, with a stripe
     foldCap(K, 1.1, 0.55, 2.0, 1.22, "a", "b");
-  }, { tags: ["work"] });
+  }, { fit: false, tags: ["work"] });
 
   def("medic", "Medic Cap", "work", [cw(C.white, C.red, C.red), cw(0x2a4a8a, C.white, C.white), cw(0xd6ef2a, C.navy, C.navy)], function (K) {
     capCrown(K, { r: 1.07, y0: 0.1, tilt: -0.22, button: true });
@@ -722,7 +797,7 @@
     K.put(g, "a", { p: [0, 0.98, 0.18], r: [-0.35, 0, 0] });
     K.put(K.box(1.32, 0.06, 0.06), "b", { p: [0, 0.82, 0.48], r: [-0.35, 0, 0] });
     badge(K, "c", 0, 1.06, 0.48, 0.75, "cross");
-  }, { tags: ["work"] });
+  }, { fit: false, tags: ["work"] });
 
   def("scrubcap", "Scrub Cap", "work", [cw(0x5aa8c8, 0x3a88a8), cw(0x6ab080, 0x4a9060), cw(0x8a6ac8, 0x6a4aa8), cw(C.navy, C.blue)], function (K) {
     const g = K.dome(1.08, 0.0, { n: 30, m: 12 });
@@ -736,7 +811,7 @@
     K.put(K.cyl(0.845, 0.845, 0.1, { n: 30, open: true }), "b", { r: [0, 0, 0.18], p: [0.07, 0.6, 0] });
     K.put(K.cyl(0.845, 0.845, 0.06, { n: 30, open: true }), "b", { r: [0, 0, 0.18], p: [0.1, 0.92, 0] });
     K.put(K.torus(0.9, 0.025, { arc: Math.PI, n: 16, m: 4 }), "c", { r: [0, Math.PI / 2, Math.PI], p: [0.05, 0.25, 0] });
-  }, { tags: ["work", "fun"] });
+  }, { fit: false, tags: ["work", "fun"] });
 
   def("convict", "Convict Cap", "work", [cw(C.white, 0x101012), cw(C.orange, 0x101012)], function (K) {
     // the cartoon pillbox in prison stripes
@@ -849,22 +924,22 @@
     K.put(K.cone(0.14, 0.3, { n: 6 }), "a", { p: [0.4, 0.88, 0.62], r: [0.35, 0, -0.35], s: [1, 1, 0.3] });
     K.put(K.cone(0.14, 0.3, { n: 6 }), "a", { p: [-0.4, 0.88, 0.62], r: [0.35, 0, 0.35], s: [1, 1, 0.3] });
     K.put(K.ball(0.09, 8), "b", { p: [0, 0.9, 0.78] });
-  }, { tags: ["fun", "formal"] });
+  }, { fit: false, tags: ["fun", "formal"] });
 
   def("halo", "Halo", "fun", [cw(0xfff3b0, C.gold), cw(C.white, C.white)], function (K) {
     K.put(K.torus(0.72, 0.075, { n: 36, m: 8 }), "a", { r: [Math.PI / 2 - 0.1, 0, 0], p: [0, 1.45, -0.05] });
-  }, { tags: ["fun"] });
+  }, { fit: false, tags: ["fun"] });
 
   def("horns", "Devil Horns", "fun", [cw(C.scarlet, C.black), cw(C.black, C.scarlet)], function (K) {
     for (const s of [-1, 1]) K.put(K.tube([[s * 0.45, 0.75, 0.25], [s * 0.62, 1.05, 0.32], [s * 0.66, 1.34, 0.22], [s * 0.56, 1.52, 0.06]], function (t) { return 0.19 * (1 - 0.92 * t); }, { n: 12, m: 8 }), "a");
     K.put(K.torus(1.01, 0.035, { arc: Math.PI, n: 20, m: 5 }), "b", { r: [0, Math.PI / 2, 0], p: [0, 0.0, 0.16] });
-  }, { tags: ["fun"] });
+  }, { fit: false, tags: ["fun"] });
 
   def("party", "Party Hat", "fun", [cw(C.pink, C.yellow, C.white), cw(C.blue, C.gold, C.white), cw(C.green, C.red, C.yellow), cw(C.purple, C.teal, C.gold)], function (K) {
     K.put(K.cone(0.5, 1.15, { n: 24, open: true }), "a", { p: [0.18, 1.32, 0.05], r: [0, 0, -0.22] });
     for (let i = 0; i < 3; i++) K.put(K.torus(0.42 - i * 0.12, 0.035, { n: 20, m: 4 }), "b", { r: [Math.PI / 2, 0, -0.22], p: [0.18 + (0.22 + i * 0.3) * Math.sin(0.22), 0.9 + i * 0.3, 0.05] });
     K.put(K.ball(0.16, 10), "c", { p: [0.18 + 0.6 * Math.sin(0.22), 1.32 + 0.57 * Math.cos(0.22) + 0.06, 0.05] });
-  }, { tags: ["fun"] });
+  }, { fit: false, tags: ["fun"] });
 
   def("viking", "Viking Helmet", "fun", [cw(C.steel, C.ivory, 0x6b4428), cw(0x9a8a5a, C.ivory, C.gold)], function (K) {
     K.put(K.dome(1.12, 0.05, { n: 28, m: 12 }), "a", { r: [-0.05, 0, 0] });
@@ -932,10 +1007,10 @@
   def("catears", "Cat Ears", "fun", [cw(C.black, C.pink, C.black), cw(C.white, C.pink, C.white), cw(C.pink, C.white, C.pink)], function (K) {
     K.put(K.torus(1.04, 0.05, { arc: Math.PI, n: 22, m: 5 }), "a", { r: [0, Math.PI / 2, 0], p: [0, 0.02, 0.08] });
     for (const s of [-1, 1]) {
-      K.put(K.cone(0.34, 0.55, { n: 4 }), "a", { p: [s * 0.55, 1.08, 0.08], r: [0, Math.PI / 4, s * -0.4], s: [1, 1, 0.45] });
-      K.put(K.cone(0.22, 0.36, { n: 4 }), "b", { p: [s * 0.55, 1.06, 0.15], r: [0, Math.PI / 4, s * -0.4], s: [1, 1, 0.3] });
+      K.put(K.cone(0.34, 0.55, { n: 4 }), "a", { p: [s * 0.52, 1.0, 0.08], r: [0, Math.PI / 4, s * -0.45], s: [1, 1, 0.45] });
+      K.put(K.cone(0.22, 0.36, { n: 4 }), "b", { p: [s * 0.52, 0.99, 0.15], r: [0, Math.PI / 4, s * -0.45], s: [1, 1, 0.3] });
     }
-  }, { tags: ["fun"] });
+  }, { fit: false, tags: ["fun"] });
 
   def("bunny", "Bunny Ears", "fun", [cw(C.white, C.pink, C.white), cw(C.pink, C.white, C.pink), cw(C.black, C.red, C.black)], function (K) {
     K.put(K.torus(1.04, 0.05, { arc: Math.PI, n: 22, m: 5 }), "a", { r: [0, Math.PI / 2, 0], p: [0, 0.02, 0.06] });
@@ -943,7 +1018,7 @@
       K.put(K.tube([[s * 0.4, 0.92, 0.1], [s * 0.5, 1.45, 0.14], [s * 0.56, 2.0, 0.06], [s * 0.6, 2.3, -0.1]], function (t) { return 0.2 * Math.sin(Math.PI * (0.12 + 0.86 * t)) + 0.02; }, { n: 14, m: 8 }), "a", { s: [1, 1, 1] });
       K.put(K.tube([[s * 0.4, 1.0, 0.24], [s * 0.5, 1.45, 0.28], [s * 0.56, 1.95, 0.2]], function (t) { return 0.11 * Math.sin(Math.PI * (0.12 + 0.8 * t)) + 0.01; }, { n: 12, m: 6 }), "b", { s: [1, 1, 0.5] });
     }
-  }, { tags: ["fun"] });
+  }, { fit: false, tags: ["fun"] });
 
   def("jester", "Jester Hat", "fun", [cw(C.red, C.yellow, C.gold), cw(C.purple, C.green, C.gold), cw(C.blue, C.red, C.gold)], function (K) {
     K.put(K.dome(1.07, 0.1, { n: 28, m: 10 }), "a", { r: [-0.1, 0, 0] });
@@ -954,7 +1029,7 @@
       K.put(K.ball(0.13, 10), "c", { p: [s * 1.52, 0.6, -0.15] });
     }
     K.put(K.torus(1.07, 0.09, { n: 32, m: 6 }), "c", { r: [Math.PI / 2 - 0.1, 0, 0], p: [0, 0.16, 0.02] });
-  }, { tags: ["fun"] });
+  }, { fit: false, tags: ["fun"] });
 
   def("knight", "Knight's Helm", "fun", [cw(C.steel, 0x14151a, C.gold), cw(0x9aa0a8, 0x14151a, C.red)], function (K) {
     // the great helm: a flat-topped barrel over the whole head, an eye slit
@@ -1043,23 +1118,49 @@
     const K = kit(lod);
     d.build(K);
     if (d.yaw) for (let i = 0; i < K.parts.length; i++) K.parts[i].g.rotateY(d.yaw);
-    /* THE HAT SITS ON THE HEAD, NEVER IN IT. A crown authored round a band
-       at the equator would let the skull poke through a flat top or a dent;
-       the whole hat rides up until every part over the crown clears the
-       unit sphere by a skin (per hat, measured, once per build). */
-    if (d.lift !== false) {
-      let dy = 0;
-      for (let i = 0; i < K.parts.length; i++) {
-        const P = K.parts[i].g.attributes.position;
-        for (let k = 0; k < P.count; k++) {
-          const x = P.getX(k), y = P.getY(k), z = P.getZ(k), r2 = x * x + z * z;
-          if (y < 0.2 || r2 > 0.96) continue;
-          const need = Math.sqrt(1.03 - r2) - y;
-          if (need > dy) dy = need;
+    /* THE HAT SITS ON THE HEAD: NEVER IN IT, NEVER FLOATING OVER IT.
+       Every hat is authored round a band of radius ~1.04 at height `seat`
+       (default 0.2). On a ball that band only touches the head at the
+       equator, so a hat that just rose until its crown cleared the skull
+       left its band hanging in the air. Instead each hat is SEATED:
+         s   a uniform scale (1 = as authored, down to 0.55: a smaller hat
+             sits higher, where the ball is narrower, its band ON the skin)
+         dy  the lift that puts the scaled band exactly on the ball
+         k   a stretch of the crown over the band, if the skull would still
+             poke through a flat top or a dent (capped per hat: `tall`)
+       The largest hat that fits wins. Measured once per build. */
+    if (d.fit !== false) {
+      const yb = d.seat != null ? d.seat : 0.2, Rb = d.band || 1.04, kmax = d.tall || 1.3;
+      const P0 = K.parts.map(function (p) { return p.g.attributes.position; });
+      let best = null;
+      for (let s = 1.0; s >= 0.549; s -= 0.025) {
+        const rb = Rb * s;
+        const dy = rb < 0.995 ? Math.sqrt(1 - rb * rb) + 0.012 - yb * s : 0;
+        const ys = yb * s + dy;
+        let k = 1;
+        for (let i = 0; i < P0.length; i++) {
+          const P = P0[i];
+          for (let j = 0; j < P.count; j++) {
+            const x = P.getX(j) * s, y = P.getY(j) * s + dy, z = P.getZ(j) * s, r2 = x * x + z * z;
+            if (r2 > 0.6 || y < ys + 0.06) continue;
+            const want = Math.sqrt(1.035 - r2);
+            if (y < want) k = Math.max(k, (want - ys) / (y - ys));
+          }
         }
+        if (k <= kmax || s < 0.56) { best = { s: s, dy: dy, ys: ys, k: Math.min(k, 2.2) }; break; }
       }
-      if (dy > 0) for (let i = 0; i < K.parts.length; i++) K.parts[i].g.translate(0, dy, 0);
-      d._lift = dy;
+      const B = best;
+      if (B && (B.s < 0.999 || B.dy > 1e-4 || B.k > 1.0001)) for (let i = 0; i < K.parts.length; i++) {
+        const g = K.parts[i].g, P = g.attributes.position;
+        for (let j = 0; j < P.count; j++) {
+          let y = P.getY(j) * B.s + B.dy;
+          if (y > B.ys) y = B.ys + (y - B.ys) * B.k;
+          P.setXYZ(j, P.getX(j) * B.s, y, P.getZ(j) * B.s);
+        }
+        P.needsUpdate = true;
+        g.computeVertexNormals();
+      }
+      d._lift = B ? B.k - 1 : 0; d._fit = B;
     }
     return K.parts;
   }
@@ -1104,7 +1205,7 @@
 
   CBZ.hats = {
     ids: function () { return CAT.map(function (d) { return d.id; }); },
-    info: function (id) { const d = BY[id]; return d ? { id: d.id, name: d.name, group: d.group, colorways: d.colorways.slice(), tags: (d.tags || []).slice() } : null; },
+    info: function (id) { const d = BY[id]; return d ? { id: d.id, name: d.name, group: d.group, colorways: d.colorways.slice(), tags: (d.tags || []).slice(), lift: d._lift || 0, fit: d._fit || null } : null; },
     has: function (id) { return !!BY[id]; },
     byTag: function (tag) { return CAT.filter(function (d) { return (d.tags || []).indexOf(tag) >= 0 || d.group === tag; }).map(function (d) { return d.id; }); },
     geometry: geometry,
@@ -1115,5 +1216,9 @@
     colorOf: colorOf,
     PALETTE: C,
     audit: function () { return { kinds: CAT.length, geometries: GEO.size + SPLIT.size, verts: VERTS }; },
+    // the modelling kit and the merge, for other part libraries (entities/jewels.js)
+    kit: kit,
+    merge: merge,
+    deform: deform,
   };
 })();

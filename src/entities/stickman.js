@@ -100,7 +100,7 @@
   let STICK = null;
   function stickMat() {
     if (STICK) return STICK;
-    STICK = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.08 });
+    STICK = new THREE.MeshStandardMaterial({ roughness: 0.62, metalness: 0.0 });   // matte ink: a soft sheen, no metal tint
     STICK.name = "stick";
     freeze(STICK, STICK_HEX, 0);
     return STICK;
@@ -296,6 +296,21 @@
       lock(head, ball([(0 - hp[0]) / sc, (cy - hp[1]) / sc, (cz - hp[2]) / sc], R / sc, 22), M);
     }
     rig._stickHead = { y: cy, z: cz, r: R };
+    // WHERE JEWELLERY GOES (entities/jewels.js frames): the wrists (a little up
+    // the forearm from the hand), the top of the spine under the head, the
+    // hand balls, the head ball
+    const wy = P_handH - P_armLo + 0.02 + rl * 2.2;
+    const J = rig._stickJ = { wristL: null, wristR: null, neck: null, handL: null, handR: null, head: { parent: rig.neck, p: [0, cy, cz], s: R } };
+    // (the watch face turned half toward the front, so it reads from ahead and from the side)
+    if (parts.la) J.wristL = { parent: parts.la.userData.low, p: [0, wy, 0], s: rl * 0.96, yaw: -Math.PI / 4 };
+    if (parts.ra) J.wristR = { parent: parts.ra.userData.low, p: [0, wy, 0], s: rl * 0.96, yaw: Math.PI * 1.25 };
+    J.neck = { parent: rig.body, p: [0, neckAt[1] - rt * 0.35, neckAt[2] * 0.5], s: rt };
+    for (const k of ["la", "ra"]) {
+      const hand = parts[k] && parts[k].userData.cap;
+      if (!hand) continue;
+      const fs = (hand.userData.fit && hand.userData.fit.s) || hand.scale.x || 1;
+      J[k === "la" ? "handL" : "handR"] = { parent: hand, p: [0, 0, -rh * 0.55 / fs], s: rh / fs };
+    }
     // ---- what a stick figure does not have
     const gone = [].concat(s.torso ? s.torso.slice(1) : [], s.collar || [], s.stripes || [], s.belt || [], s.badge || [], s.hair || [], s.beard || [], s.cap || [], s.shoes || []);
     for (const m of gone) detach(m);
@@ -342,6 +357,35 @@
     return m;
   }
   CBZ.stickWearHat = wearHat;
+
+  /* ---------------------------------------------------------------- jewellery on rigs
+     set = {watch, bracelet, chain, ring, ring2, ear, grill}: piece ids (or
+     null). One group per slot, on the mount the piece's frame names. */
+  const JW = CBZ.jewels || null;
+  const SLOT_MOUNT = { watch: "wristL", bracelet: "wristR", chain: "neck", ring: "handR", ring2: "handL", ear: "head", grill: "head" };
+  function wearJewels(rig, set) {
+    if (!JW || !rig || !rig._stickJ) return;
+    const cur = rig._jew || (rig._jew = {});
+    for (const slot in SLOT_MOUNT) {
+      const want = set && set[slot] && JW.has(set[slot]) ? set[slot] : null;
+      const have = cur[slot];
+      if ((have ? have.id : null) === want) continue;
+      if (have && have.group) detach(have.group);
+      cur[slot] = null;
+      if (!want) continue;
+      const M = rig._stickJ[SLOT_MOUNT[slot]];
+      if (!M || !M.parent) continue;
+      const g = JW.mesh(want);
+      g.position.set(M.p[0], M.p[1], M.p[2]);
+      g.scale.setScalar(M.s);
+      if (M.yaw) g.rotation.y = M.yaw;
+      g.userData.stickJewel = true;
+      M.parent.add(g);
+      cur[slot] = { id: want, group: g };
+    }
+  }
+  CBZ.stickWearJewels = wearJewels;
+  function jewelsKey(set) { if (!set) return ""; let k = ""; for (const s in SLOT_MOUNT) k += (set[s] || "-") + "|"; return k; }
 
   /* ---------------------------------------------------------------- who wears what */
   function gangOf(id) {
@@ -445,6 +489,54 @@
   }
   CBZ.stickHatFor = hatFor;
 
+  /* THE DRIP. Gang bosses dripping gold, lieutenants a chain, VIPs a watch,
+     soldiers dog tags, cops a plain watch, civilians now and then. Every pick
+     is a hash of the person, never the shared rng. */
+  function pickH(list, h) { return list[(h >>> 0) % list.length]; }
+  function jewelsFor(p) {
+    if (!p || p.child) return null;
+    const t = (p.tag | 0) + 7, h = hash(t, 31), h2 = hash(t, 57), h3 = hash(t, 91), r = h % 100;
+    const job = p.job || "";
+    if (p.kind === "cop" || p.isCop) {
+      if (p.swat) return { watch: "watch_sport" };
+      if (p.copRank === "captain" || p.copRank === "chief") return { watch: "watch_gold", ring: "ring_gold" };
+      return { watch: r < 70 ? "watch_steel" : "watch_digital" };
+    }
+    if (p.kind === "medic") return { watch: "watch_digital" };
+    if (p.gang && !p.isFamily && job !== "family" && (p.kind === "gang" || p.rank || p.kind === "crew" || p.recruited || /gang/i.test(job))) {
+      const rank = p.rank || "";
+      if (p.isBoss || rank === "boss") return { chain: pickH(["chain_medallion", "chain_iced", "chain_cuban"], h2), watch: pickH(["watch_diamond", "watch_iced", "watch_gold"], h3), ring: "ring_signet", ring2: "ring_iced", ear: "studs_diamond", bracelet: "bracelet_gold", grill: r < 50 ? "grill_gold" : null };
+      if (rank === "lt" || rank === "lieutenant") return { chain: pickH(["chain_cuban", "chain_rope", "chain_dollar"], h2), watch: r < 60 ? "watch_gold" : null, ear: r < 50 ? "studs_diamond" : null };
+      if (rank === "enforcer") return { chain: r < 55 ? pickH(["chain_rope", "chain_cross"], h2) : null, ear: h3 % 100 < 30 ? "studs_gold" : null };
+      return { chain: r < 30 ? pickH(["chain_rope", "chain_cross", "chain_silver", "chain_dollar"], h2) : null, ear: h3 % 100 < 18 ? pickH(["studs_diamond", "hoops_gold"], h) : null, watch: h2 % 100 < 15 ? "watch_digital" : null };
+    }
+    if (p.milRank) {
+      if (p.milRank === "general") return { watch: "watch_gold", chain: "dogtags" };
+      return { chain: "dogtags", watch: r < 45 ? "watch_sport" : null };
+    }
+    if (p.vipTitle) {
+      const v = String(p.vipTitle);
+      if (/magnate|tycoon/i.test(v)) return { watch: "watch_diamond", ring: "ring_diamond", bracelet: "bracelet_tennis" };
+      if (/don|boss/i.test(v)) return { watch: "watch_gold", ring: "ring_signet", chain: "chain_cross" };
+      if (/star|celebrity/i.test(v)) return { chain: "chain_iced", watch: "watch_iced", ear: "studs_diamond", ring: "ring_iced" };
+      return { watch: "watch_dress", ring: "ring_gold" };
+    }
+    if (p.kind === "security") return { watch: "watch_steel" };
+    if (p.archetype === "dealer" || p._role === "dealer") return { chain: "chain_rope", ear: "studs_diamond", watch: r < 40 ? "watch_gold" : null };
+    if (p.archetype === "hustler") return { chain: r < 60 ? "chain_dollar" : "chain_rope", ear: "hoops_gold" };
+    if (p.vagrant || p.archetype === "vagrant") return null;
+    // civilians: the occasional watch, now and then a chain, studs or a ring; the well-off more
+    const rich = (p.wealth || 0) > 0.7 || /executive|banker|lawyer|ceo|broker/i.test(job);
+    const set = {};
+    if (rich ? r < 85 : r < 26) set.watch = rich ? pickH(["watch_gold", "watch_dress", "watch_steel"], h2) : pickH(["watch_steel", "watch_digital", "watch_sport", "watch_dress"], h2);
+    if (h2 % 100 < (rich ? 20 : 6)) set.chain = pickH(["chain_silver", "chain_cross", "chain_rope"], h3);
+    if (h3 % 100 < 9) set.ear = pickH(["studs_gold", "hoops_gold", "studs_diamond"], h);
+    if ((h >>> 9) % 100 < (rich ? 30 : 5)) set.ring = rich ? "ring_diamond" : "ring_gold";
+    if ((h2 >>> 9) % 100 < 6) set.bracelet = pickH(["bangle_silver", "bracelet_beads", "bracelet_gold"], h);
+    return set;
+  }
+  CBZ.stickJewelsFor = jewelsFor;
+
   /* ---------------------------------------------------------------- the player's hat
      Priority: a hat you picked up / bought last > the uniform you wear >
      your gang's colours > the story you chose. */
@@ -455,6 +547,25 @@
   function shopHatName() {
     const E = CBZ.cityEcon;
     try { const n = E && E.outfit ? E.outfit().hat : null; return n && E.count(n) > 0 ? n : null; } catch (e) { return null; }
+  }
+  // the economy's jewellery looks -> library pieces (the jewelry store's own stock)
+  const LOOK_JEWEL = { chainGold: "chain_rope", chainIced: "chain_iced", earrings: "studs_diamond", ring: "ring_diamond", ringPinky: "ring_iced",
+    watchGold: "watch_gold", watchIced: "watch_iced", watchSteel: "watch_steel", watchDiver: "watch_sport", grill: "grill_gold" };
+  function playerJewels() {
+    const set = {};
+    const E = CBZ.cityEcon;
+    try {
+      const o = E && E.outfit ? E.outfit() : null;
+      if (o) for (const slot of ["chain", "watch", "ring", "glasses"]) {
+        const n = o[slot]; if (!n || E.count(n) <= 0) continue;
+        const it = E.ITEMS[n]; if (!it) continue;
+        const id = it.jewelLook || LOOK_JEWEL[it.blingLook];
+        if (!id || !JW || !JW.has(id)) continue;
+        set[JW.info(id).slot] = id;
+      }
+    } catch (e) {}
+    for (const k in playerJewelPick) set[k] = playerJewelPick[k];
+    return set;
   }
   function playerHat() {
     const g = CBZ.game || {};
@@ -506,6 +617,23 @@
     return true;
   }
   CBZ.stickKnockHat = knockHat;
+  // a piece of jewellery off a body, falling to the ground as a pickup
+  function dropJewel(rig, slot, imp, big) {
+    const J = rig && rig._jew && rig._jew[slot];
+    if (!J || !J.group || !J.group.parent || !CBZ.scene) return false;
+    const g = J.group;
+    g.updateWorldMatrix(true, false);
+    g.matrixWorld.decompose(_w, _wq, _ws);
+    detach(g); CBZ.scene.add(g);
+    g.position.copy(_w); g.quaternion.copy(_wq); g.scale.copy(_ws);
+    const a = Math.random() * TAU, sp = big ? 4 : 1.2;
+    LOOSE.push({ mesh: g, kind: "jewel", slot: slot, id: J.id, vx: Math.sin(a) * sp, vy: big ? 5 : 2, vz: Math.cos(a) * sp,
+      sx: (Math.random() - 0.5) * 6, sz: (Math.random() - 0.5) * 6, t: 0, rest: false, floor: rig.group ? rig.group.position.y : _w.y - 1.4 });
+    rig._jew[slot] = null; rig._jewLocked = true;
+    if (LOOSE.length > MAX_LOOSE) { const o = LOOSE.shift(); detach(o.mesh); }
+    return true;
+  }
+  CBZ.stickDropJewel = dropJewel;
   const _up2 = new THREE.Vector3(0, 1, 0), _hu = new THREE.Vector3(), _qq = new THREE.Quaternion();
   function stepLoose(dt) {
     for (let i = LOOSE.length - 1; i >= 0; i--) {
@@ -517,7 +645,7 @@
       m.position.x += L.vx * dt; m.position.y += L.vy * dt; m.position.z += L.vz * dt;
       m.rotation.x += L.sx * dt; m.rotation.z += L.sz * dt;
       const gy = groundAt(m.position.x, m.position.z, L.floor);
-      const bb = m.geometry.boundingBox, bot = bb ? -bb.min.y * m.scale.y : m.scale.y * 0.2;
+      const bb = m.geometry && m.geometry.boundingBox, bot = L.kind === "jewel" ? 0.03 : (bb ? -bb.min.y * m.scale.y : m.scale.y * 0.2);
       const lift = Math.max(m.scale.y * 0.25, bot * 0.6);
       if (m.position.y <= gy + lift && L.vy < 0) {
         m.position.y = gy + lift;
@@ -527,7 +655,7 @@
           _hu.set(0, 1, 0).applyQuaternion(m.quaternion);
           const yaw = Math.atan2(_hu.x, _hu.z) + Math.random();
           m.rotation.set(0, yaw, 0);
-          m.rotation.x = (Math.random() - 0.5) * 0.3;
+          m.rotation.x = L.kind === "jewel" ? -Math.PI / 2 : (Math.random() - 0.5) * 0.3;
           m.position.y = gy + bot + 0.01;
           L.rest = true;
         }
@@ -548,11 +676,22 @@
     }
     return best;
   }
+  let playerJewelPick = {};
   function takeHat(L) {
     const pc = CBZ.playerChar;
     if (!L || !pc) return false;
     const i = LOOSE.indexOf(L); if (i < 0) return false;
     LOOSE.splice(i, 1); detach(L.mesh);
+    if (L.kind === "jewel") {
+      // what you had in that slot drops at your feet
+      if (pc._jew && pc._jew[L.slot]) dropJewel(pc, L.slot, null, false);
+      pc._jewLocked = false;
+      playerJewelPick[L.slot] = L.id;
+      pc._jewKey = null;
+      const ji = JW && JW.info(L.id);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("You put on the " + (ji ? ji.name : "piece") + ".", 1.6);
+      return true;
+    }
     // what you had drops at your feet
     if (pc._hat && pc._hat.mesh) knockHat(pc, null, false);
     playerPick = { id: L.id, cw: L.cw };
@@ -622,11 +761,18 @@
     let st = STATE.get(p);
     if (!st) { st = { dead: !!p.dead, ko: (p.ko || 0) > 0 }; STATE.set(p, st); }
     const dead = !!p.dead, ko = (p.ko || 0) > 0;
-    if (dead && !st.dead) { if (Math.random() < 0.6) knockHat(ch, p._stickImp || null, !!p._stickBig); }
+    if (dead && !st.dead) {
+      if (Math.random() < 0.6) knockHat(ch, p._stickImp || null, !!p._stickBig);
+      if (ch._jew && ch._jew.chain && Math.random() < (p._stickBig ? 0.9 : 0.5)) dropJewel(ch, "chain", p._stickImp || null, !!p._stickBig);
+    }
     else if (ko && !st.ko && !dead) { if (Math.random() < 0.4) knockHat(ch, p._stickImp || null, false); }
     st.dead = dead; st.ko = ko;
     // gore took the head: the hat does not stay floating over the neck
     if (ch._hat && ch._hat.mesh && ch.head && (ch.head.visible === false || ch.head.parent !== ch.neck)) knockHat(ch, p._stickImp || null, true);
+    if (!dead && !ch._jewLocked) {
+      const js = jewelsFor(p), k = jewelsKey(js);
+      if (ch._jewKey !== k) { ch._jewKey = k; wearJewels(ch, js); }
+    }
     if (dead || (ch._hat && ch._hat.off)) return;          // a body keeps what it has; a knocked-off hat stays off
     const want = hatFor(p);
     if (want) wearHat(ch, want.id, want.cw || 0); else wearHat(ch, null);
@@ -640,7 +786,11 @@
       if (!showcased && CBZ.player.pos) showcased = layShowcase();
       const pl = CBZ.player;
       if (pl.dead && !(pc._hat && pc._hat.off)) knockHat(pc, null, false);
-      else if (!pl.dead) { if (pc._hat && pc._hat.off) pc._hat = null; const w = playerHat(); wearHat(pc, w && w.id, w ? w.cw || 0 : 0); }
+      else if (!pl.dead) {
+        if (pc._hat && pc._hat.off) pc._hat = null; const w = playerHat(); wearHat(pc, w && w.id, w ? w.cw || 0 : 0);
+        const js = playerJewels(), k = jewelsKey(js);
+        if (pc._jewKey !== k) { pc._jewKey = k; pc._jewLocked = false; wearJewels(pc, js); }
+      }
     }
     // everyone else, a slice a frame
     const A = actors();
@@ -650,7 +800,7 @@
     const L = nearHat();
     if (ensureBtn()) {
       if (L && !(CBZ.player && (CBZ.player.dead || CBZ.player.driving))) {
-        if (btnFor !== L) { const info = H.info(L.id); btn.textContent = "Wear the " + (info ? info.name : "hat") + "  [H]"; btnFor = L; }
+        if (btnFor !== L) { const info = L.kind === "jewel" ? (JW && JW.info(L.id)) : H.info(L.id); btn.textContent = "Wear the " + (info ? info.name : "hat") + "  [H]"; btnFor = L; }
         btn.style.display = "block";
       } else if (btnFor || btn.style.display !== "none") { btn.style.display = "none"; btnFor = null; }
     }
@@ -814,6 +964,16 @@
     ["Sombrero", "sombrero", 180, 3], ["Viking Helmet", "viking", 500, 5], ["Pirate Hat", "tricorne", 450, 5], ["Wizard Hat", "wizard", 420, 4],
     ["Crown", "crown", 25000, 30], ["Party Hat", "party", 15, 1], ["Propeller Beanie", "propeller", 25, 1], ["Traffic Cone", "cone", 10, 1],
   ];
+  // [shop name, piece, price, economy slot, drip]
+  const SHOP_JEWELS = [
+    ["Gold Rope Chain", "chain_rope", 650, "chain", 7], ["Silver Chain", "chain_silver", 180, "chain", 2], ["Gold Cross", "chain_cross", 480, "chain", 5],
+    ["Cuban Link", "chain_cuban", 3800, "chain", 15], ["Gold Medallion", "chain_medallion", 6500, "chain", 19], ["Dollar Chain", "chain_dollar", 1200, "chain", 9],
+    ["Dog Tags", "dogtags", 40, "chain", 1], ["Steel Watch", "watch_steel", 1200, "watch", 6], ["Gold Watch", "watch_gold", 2400, "watch", 14],
+    ["Diamond Watch", "watch_diamond", 9500, "watch", 21], ["Digital Watch", "watch_digital", 60, "watch", 1], ["Sport Watch", "watch_sport", 220, "watch", 3],
+    ["Dress Watch", "watch_dress", 900, "watch", 6], ["Gold Band", "ring_gold", 400, "ring", 4], ["Signet Ring", "ring_signet", 2600, "ring", 12],
+    ["Diamond Studs", "studs_diamond", 1400, "ring", 9], ["Gold Studs", "studs_gold", 300, "ring", 3], ["Gold Hoops", "hoops_gold", 260, "ring", 3],
+    ["Gold Grill", "grill_gold", 1800, "glasses", 12], ["Iced Grill", "grill_iced", 7000, "glasses", 20],
+  ];
   let shopDone = false;
   function shopHats() {
     if (shopDone) return;
@@ -826,6 +986,12 @@
     E.SHOP_STOCK.clothing = ["Baseball Cap", "Snapback", "Beanie", "Bucket Hat", "Cowboy Hat", "Durag", "Headphones", "Party Hat", "Traffic Cone"].concat(E.SHOP_STOCK.clothing.filter(function (n) { return isHat(n) && ["Snapback", "Beanie"].indexOf(n) < 0; }));
     E.SHOP_STOCK.boutique = ["Fedora", "Homburg", "Trilby", "Top Hat", "Bowler", "Pork Pie", "Boater", "Beret", "Crown"];
     E.SHOP_STOCK.barber = ["Flat Cap", "Newsboy Cap", "Trucker Cap", "Motorbike Helmet", "Sombrero", "Viking Helmet", "Pirate Hat", "Wizard Hat", "Propeller Beanie"];
+    // THE JEWELLER and the pawn shop: every piece the library has, in the economy's own slots
+    if (JW) {
+      for (const sj of SHOP_JEWELS) if (!E.ITEMS[sj[0]]) E.ITEMS[sj[0]] = { value: sj[2], tag: "wearable", slot: sj[3], drip: sj[4], jewelLook: sj[1] };
+      E.SHOP_STOCK.jewelry = ["Gold Rope Chain", "Cuban Link", "Gold Medallion", "Iced Chain", "Gold Watch", "Diamond Watch", "Diamond Ring", "Diamond Studs", "Gold Grill"];
+      E.SHOP_STOCK.pawn = (E.SHOP_STOCK.pawn || []).concat(["Dog Tags", "Steel Watch", "Digital Watch", "Gold Cross", "Gold Hoops"]);
+    }
   }
 
   /* ---------------------------------------------------------------- the front door */
