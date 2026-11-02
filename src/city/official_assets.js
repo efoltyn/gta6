@@ -153,11 +153,13 @@
   // it out of scene.background avoids a second photographic sky/cloud layer.
   let envStarted = false;
   function startEnvironment() {
-    if (envStarted || !THREE.RGBELoader || !CBZ.renderer || !CBZ.scene) return;
+    if (envStarted || !THREE.HDRLoader || !CBZ.renderer || !CBZ.scene) return;
     envStarted = true; state.environment = "loading";
-    new THREE.RGBELoader().load("assets/official/sky/blouberg_sunrise_2_1k.hdr", function (tex) {
+    new THREE.HDRLoader().load("assets/official/sky/blouberg_sunrise_2_1k.hdr", function (tex) {
       try {
-        const pmrem = new THREE.PMREMGenerator(CBZ.renderer);
+        // the WebGL PMREM, or the node one under ?gpu=webgpu
+        const PM = CBZ.renderer.isWebGPURenderer ? THREE.WebGPU.PMREMGenerator : THREE.PMREMGenerator;
+        const pmrem = new PM(CBZ.renderer);
         const rt = pmrem.fromEquirectangular(tex);
         CBZ.scene.environment = rt.texture;
         CBZ.cityEnvironmentTarget = rt;

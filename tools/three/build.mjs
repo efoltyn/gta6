@@ -110,6 +110,56 @@ function _cbzQuatCb() { this._e.setFromQuaternion( this, undefined, false ); }
     "\t\tthis.isInstancedMesh = true;\n",
     "\t\tthis.isInstancedMesh = true;\n\t\tthis.frustumCulled = false; // CBZ: r128 default (core/instcull.js owns pool culling)\n", 1, "InstancedMesh: frustumCulled false"],
 
+  // ---- Box3.setFromObject / expandByObject measure GEOMETRY (r128) --------
+  // r187 boxes an InstancedMesh by the union of every instance and a
+  // SkinnedMesh by every vertex through its current pose (computed on the
+  // CPU, once, then cached). The game calls setFromObject ~115 places on rigs,
+  // pools and kits that were tuned on r128's answer: the geometry's box placed
+  // by matrixWorld. (precise = true still walks the vertices, as in r187.)
+  ["build/three.core.js",
+    "\t\t\t\tif ( object.boundingBox !== undefined ) {",
+    "\t\t\t\tif ( false && object.boundingBox !== undefined ) { // CBZ: r128 semantics (tools/three/build.mjs)", 1, "Box3.expandByObject: geometry box"],
+
+  // ---- one draw per transparent double-sided material (r128) --------------
+  // r154+ draws a transparent DoubleSide material twice (back faces, then
+  // front) unless forceSinglePass. Measured on the survival island: the same
+  // ~1000 visible objects cost 1143 draws on r128 and 2222 on r187. Every
+  // such material in the game was tuned single-pass; one that wants the
+  // sorted two-pass look can set forceSinglePass = false itself.
+  ["build/three.core.js",
+    "\t\tthis.forceSinglePass = false;",
+    "\t\tthis.forceSinglePass = true; // CBZ: r128's single pass (tools/three/build.mjs)", 1, "Material.forceSinglePass default true"],
+
+  // ---- transmission is r128's alpha law, not a second render of the world --
+  // r128's MeshPhysicalMaterial.transmission faded the pane's alpha (1 -
+  // transmission + the luminance it reflects). r187 refracts: ANY visible
+  // transmissive material makes the renderer draw every opaque object a
+  // second time into a transmission target. The game's car glass and lamp
+  // lenses are transmissive, so on r187 a street with one car in it drew
+  // ~1000 objects twice (survival island: 1143 draws on r128, 2220 on r187).
+  // The lists treat transmission as the transparency it was; the shader half
+  // (THREE r128 alpha law) is the transmission_fragment swap in entry.js.
+  ["build/three.module.js",
+    "\t\tif ( material.transmission > 0.0 ) {",
+    "\t\tif ( false && material.transmission > 0.0 ) { // CBZ: r128 transmission (no transmission pass)", 2, "render lists: no transmissive pass"],
+  ["build/three.module.js",
+    "\t\t\tuniforms.transmissionSamplerMap.value = transmissionRenderTarget.texture;\n\t\t\tuniforms.transmissionSamplerSize.value.set( transmissionRenderTarget.width, transmissionRenderTarget.height );",
+    "\t\t\tif ( transmissionRenderTarget ) { // CBZ: there is no transmission pass (r128 transmission)\n\t\t\tuniforms.transmissionSamplerMap.value = transmissionRenderTarget.texture;\n\t\t\tuniforms.transmissionSamplerSize.value.set( transmissionRenderTarget.width, transmissionRenderTarget.height );\n\t\t\t}", 1, "materials: transmission target optional"],
+
+  // ---- raycasts against pools and skinned bodies (r128) -------------------
+  // Same stale-bounds story as culling: r187 early-outs a ray on a sphere it
+  // computed once over every instance / every posed vertex. r128 tested each
+  // instance of a pool, and a skinned body by its geometry's bounds.
+  ["build/three.core.js",
+    "\t\t// test with bounding sphere first\n\n\t\tif ( this.boundingSphere === null ) this.computeBoundingSphere();\n\n\t\t_sphere$4.copy( this.boundingSphere );\n\t\t_sphere$4.applyMatrix4( matrixWorld );\n\n\t\tif ( raycaster.ray.intersectsSphere( _sphere$4 ) === false ) return;\n",
+    "\t\t// CBZ: no instance-union early-out (r128; the union is computed once and goes stale)\n", 1, "InstancedMesh.raycast: r128"],
+  ["build/three.core.js",
+    "\t\tif ( this.boundingSphere === null ) this.computeBoundingSphere();\n\n\t\t_sphere$5.copy( this.boundingSphere );",
+    "\t\tconst _cbzG = this.geometry; // CBZ: the geometry's bounds (r128), not a posed sphere computed once\n\t\tif ( _cbzG.boundingSphere === null ) _cbzG.computeBoundingSphere();\n\n\t\t_sphere$5.copy( _cbzG.boundingSphere );", 1, "SkinnedMesh.raycast: geometry sphere"],
+  ["build/three.core.js",
+    "\t\tif ( this.boundingBox !== null ) {\n\n\t\t\tif ( _ray$2.intersectsBox( this.boundingBox ) === false ) return;",
+    "\t\tif ( this.geometry.boundingBox !== null ) {\n\n\t\t\tif ( _ray$2.intersectsBox( this.geometry.boundingBox ) === false ) return;", 1, "SkinnedMesh.raycast: geometry box"],
+
   // ---- the r128 light model, JS half (THREE.LEGACY_LIGHTS) ----------------
   ["build/three.core.js",
     "\tconstructor( color, intensity, distance = 0, angle = Math.PI / 3, penumbra = 0, decay = 2 ) {",

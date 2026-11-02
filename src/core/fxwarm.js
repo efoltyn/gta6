@@ -196,15 +196,16 @@
       return custom;
     }
     const g = o.geometry;
-    const morph = !!(m.morphTargets && g && g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length);
-    const skin = !!(o.isSkinnedMesh && m.skinning);
+    // three r187 derives morphing/skinning from the OBJECT (the material flags are gone)
+    const morph = !!(g && g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length);
+    const skin = !!o.isSkinnedMesh;
     const key = (morph ? 1 : 0) + "|" + (skin ? 1 : 0) + "|" + side + "|" + inst;
     if (depthSeen.has(key)) return null;
     depthSeen.add(key);
     const mk = (morph ? 1 : 0) + "|" + (skin ? 1 : 0) + "|" + side;
     let d = depthMats.get(mk);
     if (!d) {
-      d = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, morphTargets: morph, skinning: skin });
+      d = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
       d.side = side;
       depthMats.set(mk, d);
     }

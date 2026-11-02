@@ -1746,7 +1746,7 @@
         opts.far != null ? opts.far : 14000);
       CBZ.camera.position.set(0, 20, 60);
     }
-    if (!CBZ.clock) CBZ.clock = new THREE.Clock();
+    if (!CBZ.clock) CBZ.clock = new THREE.Timer();   // (THREE.Clock is deprecated in r187)
 
     function resize() {
       const w = window.innerWidth, h = Math.max(1, window.innerHeight);

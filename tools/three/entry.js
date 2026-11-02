@@ -100,6 +100,20 @@ const LEGACY_ATTEN = 'float getDistanceAttenuation( const in float lightDistance
 }
 THREE.LEGACY_LIGHTS = true;
 
+// ---- 2b. r128 transmission: an alpha law -----------------------------------
+// (the JS half, no transmission render pass, is in tools/three/build.mjs)
+WEBGL.ShaderChunk.transmission_fragment = [
+	'#ifdef USE_TRANSMISSION',
+	'\tmaterial.transmission = transmission;',
+	'\tmaterial.transmissionAlpha = 1.0;',
+	'\t#ifdef USE_TRANSMISSIONMAP',
+	'\t\tmaterial.transmission *= texture2D( transmissionMap, vTransmissionMapUv ).r;',
+	'\t#endif',
+	'\t// r128: the pane fades by its transmission and comes back where it reflects',
+	'\tdiffuseColor.a *= mix( saturate( 1. - material.transmission + dot( reflectedLight.directSpecular + reflectedLight.indirectSpecular, vec3( 0.2126, 0.7152, 0.0722 ) ) ), 1.0, metalnessFactor );',
+	'#endif',
+].join( '\n' );
+
 // ---- 3. r128's `vUv` in built-in materials --------------------------------
 // r128 gave every built-in material with a map ONE uv varying, vUv, already
 // through the map's uvTransform; ~90 onBeforeCompile hooks in the game read
