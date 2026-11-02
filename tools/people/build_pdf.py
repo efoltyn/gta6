@@ -64,7 +64,7 @@ P({"type": "cover", "title": "THE BLENDER PEOPLE", "subtitle": "Every person nea
    "image": hero, "bullets": [
        "MakeHuman's CC0 bodies through Blender + MPFB: every ancestry, age, sex and build blended the way MakeHuman blends them",
        "real skin per ancestry and age, real eyes, brows, lashes, hair cards, beards, stubble and shaved scalps",
-       "real garments fitted to each body, still painted by the game's own outfit painters: a cop is still that cop",
+       "real garments fitted to each body, every uniform built from them in the outfit painters' own colours: a cop is still that cop",
        "gore on the real skin: wounds where the round lands, blood that runs and soaks cloth, real limbs that come off",
        "a Blender MCP server: build, render and export people from a prompt",
    ]})
@@ -119,7 +119,7 @@ P({"type": "text", "title": "How it works", "paragraphs": [
     "BLENDER. Blender 4.5 LTS with the MPFB 2 extension (MakeHuman for Blender) and the CC0 MakeHuman asset packs, headless. tools/people/build_pack.py turns that into assets/people: the hm08 body, an SVD basis of all 288 macro targets, face detail targets, ARKit face units as blend shapes, the game_engine skeleton and weights, MHCLO-bound eyes, brows, lashes, teeth, hair, beards, garments and shoes, skins, relief maps, beard and scalp masks. 11.7 MB + lazily loaded textures, all CC0 (the build refuses anything else).",
     "THE RUNTIME (src/entities/people.js). A small MakeHuman: MakeHuman's own macro weighting builds each body (sex, age, muscle, weight, ancestry mix from heritage.js), seeded face detail makes every face different, MHCLO fits the garments to that body and removes the skin under them. About 12 ms a person.",
     "ANIMATION. The procedural rig stays the source of truth (gait, aim, seats, vaults, ragdoll, gore). Each frame the skeleton is retargeted off it: rotation deltas, the person's own bone lengths, a pelvis that rides real hips, two-bone IK onto the rig's wrists and ankles. Blinks, talking and grimaces come from facial.js through blend shapes.",
-    "CLOTHES. The colours and markings are the game's own outfit painters repainted at 4x and box-projected per triangle onto the real garments, so every uniform the game has still reads.",
+    "CLOTHES. Every uniform is built from real garments (a duty shirt, a suit with its own tie, a gilet over a sleeve, bib overalls), each zone dyed in the colours the game's own outfit painter gives it; only the markings (badge, patch, tape, lettering) are lifted off the painting onto the cloth (see artifacts/people/uniforms-before-after.pdf).",
     "GORE. wounds.js and gore.js forward to the real body: wounds cast along the shot onto the skin, bind-space blood that runs and soaks, a collapsed chain with a flesh-and-bone cap, the real limb thrown by gore.js's own physics.",
     "IN THE GAME. A LOD manager gives the nearest peds real bodies (28 m in, 34 m out, 18 desktop / 8 touch, two builds a tick); pedinstance.js hands them back whole and pools them again when they leave. Flag: CBZ.CONFIG.PEOPLE_SKINNED.",
 ]})
