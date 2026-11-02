@@ -1379,7 +1379,7 @@
       tex = new THREE.CanvasTexture(cv);
       if (CBZ.texKeep) CBZ.texKeep(tex);
     }
-    tex.encoding = THREE.sRGBEncoding;           // sRGB-authored colours (the pale-sign bug class)
+    tex.colorSpace = THREE.SRGBColorSpace;           // sRGB-authored colours (the pale-sign bug class)
     tex.anisotropy = 4;
     const mat = new THREE.MeshLambertMaterial({ map: tex, emissive: 0x111111, emissiveMap: tex });
     _atlas = { tex: tex, mat: mat, specs: specs, eager: !CBZ.lazyCanvasTexture,

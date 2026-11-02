@@ -789,7 +789,7 @@
       x.fillText(own ? "SOLD" : "FOR SALE", 256, 118);
       const t = new THREE.CanvasTexture(c);
       const R = CBZ.renderer;
-      if (R && R.outputEncoding === THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+      if (R && R.outputColorSpace === THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
       t.anisotropy = 4;
       m = new THREE.MeshLambertMaterial({ map: t });
       m._shared = true;

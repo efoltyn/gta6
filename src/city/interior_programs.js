@@ -5607,7 +5607,7 @@
     for (let i = 0; i < 10; i++) { x.fillStyle = rnd() < 0.5 ? "rgba(0,0,0,0.025)" : "rgba(255,255,255,0.025)"; x.fillRect(0, rnd() * H, W, 20 + rnd() * 60); }
     x.restore();
     const t = new T.CanvasTexture(cv);
-    t.encoding = T.sRGBEncoding;
+    t.colorSpace = T.SRGBColorSpace;
     t.generateMipmaps = true;
     t.minFilter = T.LinearMipmapLinearFilter;
     t.magFilter = T.LinearFilter;

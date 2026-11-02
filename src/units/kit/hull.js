@@ -466,7 +466,7 @@
     weather(g, S, rnd, id === "winter" ? 9 : 7, true);
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     return (TEX["c:" + id] = t);
   }
@@ -493,7 +493,7 @@
     weather(g, S, rnd, 8, false);
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     return (TEX["k:" + id] = t);
   }
@@ -710,7 +710,7 @@
     "  float a = vA * smoothstep(0.5, 0.12, d) * (0.85 + 0.15 * sin(p.x * 23.0 + p.y * 17.0));",
     "  if (a < 0.004) discard;",
     "  gl_FragColor = vec4(vC, a);",
-    "  #include <encodings_fragment>",
+    "  #include <colorspace_fragment>",
     "  #include <fog_fragment>",
     "}"].join("\n");
   function Fx(n, additive) {

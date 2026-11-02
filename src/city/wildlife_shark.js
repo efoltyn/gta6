@@ -614,7 +614,7 @@
   }
   function canvasTex(c) {
     const t = new THREE.CanvasTexture(c);
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;   // r128-safe
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.needsUpdate = true;
     t._shared = true;
     return t;

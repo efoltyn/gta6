@@ -116,7 +116,7 @@
     this.name = name; this.G = CBZ.loftKit.geo(); this.G.uvOn = !!uv; this.uv = !!uv;
     this.ud = {};
   }
-  // The renderer writes sRGB (outputEncoding) and r128 takes vertex colours
+  // The renderer writes sRGB (outputColorSpace) and r128 takes vertex colours
   // as LINEAR, so a hex authored as the colour you SEE has to be linearised
   // or every coat comes out bleached (the old box tiger read butter-yellow).
   const LIN = new Float32Array(256);

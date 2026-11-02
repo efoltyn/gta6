@@ -1521,7 +1521,7 @@
         it.chars = it.text.length;
       })(__L[__i], __i); yield 0; } }
       const tex = new THREE.CanvasTexture(cvs);
-      if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;
+      if (THREE.SRGBColorSpace != null) tex.colorSpace = THREE.SRGBColorSpace;
       tex.anisotropy = 4;
       const mat = new THREE.MeshLambertMaterial({ map: tex });
       mat.name = "island-signs";

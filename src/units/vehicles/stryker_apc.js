@@ -334,7 +334,7 @@
     g.putImageData(im, 0, 0);
     const t = new THREE.CanvasTexture(cv);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     return t;
   }

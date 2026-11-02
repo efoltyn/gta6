@@ -432,8 +432,8 @@
       mat.needsUpdate = true;            // blending swap needs a program recompile flag
       geo.setDrawRange(0, count);
       // bound the per-frame GPU upload to the LIVE particles only (the buffer is
-      // BURST_MAX long but only `count` matter) — r128 honours updateRange.count.
-      slot.attr.updateRange.offset = 0; slot.attr.updateRange.count = count * 3;
+      // BURST_MAX long but only `count` matter) — three honours the update range.
+      slot.attr.clearUpdateRanges(); slot.attr.addUpdateRange(0, count * 3);
       slot.attr.needsUpdate = true;      // upload the freshly-written positions
       mesh.visible = true;
     } else {

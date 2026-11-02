@@ -201,8 +201,8 @@
   //  Checked, never assumed — that file is being edited concurrently.
   // ============================================================
   /* THE MOUTH INTERIOR IS UNLIT, and the hex values that follow look absurdly
-     dark because they are correct. core/renderer.js runs outputEncoding =
-     sRGBEncoding with ColorManagement.enabled = false, so an authored colour is
+     dark because they are correct. core/renderer.js runs outputColorSpace =
+     SRGBColorSpace with ColorManagement.enabled = false, so an authored colour is
      treated as LINEAR and brightened on the way out — then MeshLambert takes
      the same key light as the whale's back on top of that. That is how a mouth
      written as 0x100609 and a deck written as 0x32171c ended up rendering as
@@ -1569,7 +1569,7 @@
   }
   function canvasTex(c) {
     const t = new T.CanvasTexture(c);
-    if (T.sRGBEncoding != null) t.encoding = T.sRGBEncoding;      // r128 spelling
+    if (T.SRGBColorSpace != null) t.colorSpace = T.SRGBColorSpace;
     t.needsUpdate = true;
     t._shared = true;
     return t;

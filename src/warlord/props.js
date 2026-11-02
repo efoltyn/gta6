@@ -164,7 +164,7 @@
      This took three passes and two wrong theories, so all of it is written
      down rather than only the answer.
 
-     The renderer runs outputEncoding = sRGBEncoding with ACES tone mapping.
+     The renderer runs outputColorSpace = SRGBColorSpace with ACES tone mapping.
      r128 has ColorManagement off, so a hex you type is stored as a LINEAR
      value and only encoded on the way out: linear 0.48 (0x7a) leaves as 0.72
      on screen (0xb8) before a single light touches it. Multiply by the
@@ -694,7 +694,7 @@
     }
     g.putImageData(img, 0, 0);
     const tex = new THREE.CanvasTexture(c);
-    tex.encoding = THREE.sRGBEncoding;
+    tex.colorSpace = THREE.SRGBColorSpace;
     _flameMat = new THREE.MeshBasicMaterial({
       map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending, fog: true,
@@ -3064,7 +3064,7 @@
     }
     g.putImageData(img, 0, 0);
     const tex = new THREE.CanvasTexture(c);
-    tex.encoding = THREE.sRGBEncoding;
+    tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     // the colour is the linear multiplier every other material in this file
     // is authored at (see the palette): a dyed rug under this sun is not neon

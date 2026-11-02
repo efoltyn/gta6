@@ -261,8 +261,8 @@
       const lo = this.lo, hi = Math.min(this.hi, this.cap);
       for (const s of this.spec) {
         const a = this.geo.attributes[s[0]];
-        a.updateRange.offset = lo * s[1];
-        a.updateRange.count = (hi - lo) * s[1];
+        a.clearUpdateRanges();
+        a.addUpdateRange(lo * s[1], (hi - lo) * s[1]);
         a.needsUpdate = true;
       }
       this.lo = Infinity; this.hi = -1;

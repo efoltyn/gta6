@@ -1631,7 +1631,7 @@
      grazing angle must never turn into a hole in the mesh. */
   const UNLIT_CACHE = new Map();
   /* THESE HEX VALUES LOOK ABSURDLY DARK AND THEY ARE CORRECT. core/renderer.js
-     runs outputEncoding = sRGBEncoding with ColorManagement.enabled = false, so
+     runs outputColorSpace = SRGBColorSpace with ColorManagement.enabled = false, so
      an authored colour is treated as LINEAR and brightened on the way out:
      0x53211f leaves the pipe at about rgb(140,85,70), a milk-chocolate brown.
      That is the second half of why the old cavity read as a tongue — its wall

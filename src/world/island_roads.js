@@ -34,7 +34,7 @@
 
    Everything is deterministic (position hashes + a fixed-seed PRNG local to
    this file); the arena's rng() stream is never touched. Colour maps are
-   canvases uploaded as sRGB (texture.encoding = sRGBEncoding) and authored
+   canvases uploaded as sRGB (texture.colorSpace = SRGBColorSpace) and authored
    so they DECODE to real linear albedo (asphalt ~0.05, concrete ~0.2).
 ============================================================ */
 (function () {
@@ -475,7 +475,7 @@
   const _tex = {};
   function finishTex(THREE, c, wrapS, wrapT, renderer) {
     const t = new THREE.CanvasTexture(c);
-    t.encoding = THREE.sRGBEncoding;
+    t.colorSpace = THREE.SRGBColorSpace;
     t.wrapS = wrapS; t.wrapT = wrapT;
     try { t.anisotropy = renderer ? Math.min(8, renderer.capabilities.getMaxAnisotropy()) : 4; } catch (e) { t.anisotropy = 4; }
     t.needsUpdate = true;

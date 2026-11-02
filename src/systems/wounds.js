@@ -564,7 +564,8 @@
   // depth discipline as unlit(): reads depth, never writes it.
   const MAT_CLOTH = new THREE.MeshBasicMaterial({
     color: 0xffffff, vertexColors: true, transparent: true, depthWrite: false,
-    blending: THREE.MultiplyBlending, fog: false, toneMapped: false,
+    blending: THREE.CustomBlending, blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,   // r128's MultiplyBlending (r187's wants premultiplied alpha)
+    fog: false, toneMapped: false,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   MAT_CLOTH._shared = true;
@@ -1294,7 +1295,7 @@
     // authored as DISPLAY colours: decoded to linear on read, re-encoded on the
     // way out, so what is written here is what the eye gets (see cutMat's note
     // on this renderer's linear-hex trap)
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     t.needsUpdate = true;
     t._shared = true;
@@ -1421,7 +1422,8 @@
     flesh._shared = true;
     const tear = new THREE.MeshBasicMaterial({
       map: makeSkinTex(skinJobs().tear), color: 0xffffff, transparent: true, depthWrite: false,
-      blending: THREE.MultiplyBlending, fog: false, toneMapped: false,
+      blending: THREE.CustomBlending, blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,   // r128's MultiplyBlending
+      fog: false, toneMapped: false,
       polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
     });
     tear._shared = true;
@@ -2684,7 +2686,7 @@
   function cutMat(layer) {
     if (!MAT_BORE) {
       /* THE VALUES ARE LOW ON PURPOSE, and the first capture is why. This
-         renderer runs with outputEncoding = sRGBEncoding and r128's colour
+         renderer runs with outputColorSpace = SRGBColorSpace and r128's colour
          management OFF, so a material colour is treated as LINEAR and encoded
          on the way out — 0x6a1014 leaves the pipe at roughly #ae4545. A wound
          authored at "dark maroon" photographs as bright arterial red, which

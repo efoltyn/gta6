@@ -43,9 +43,9 @@
   const MPH = 2.2369362920544;
 
   // ---- renderer, scene, sky -------------------------------------------------
-  const renderer = new THREE.WebGLRenderer({ antialias: QUALITY === "high", powerPreference: "high-performance" });
+  const renderer = THREE.createRenderer({ antialias: QUALITY === "high", powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, QUALITY === "high" ? 2 : 1.5));
-  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   $("stage").appendChild(renderer.domElement);

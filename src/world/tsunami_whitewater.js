@@ -500,7 +500,7 @@
       "  vec3 col = mix( bodyLit, foamLit, clamp( cov, 0.0, 1.0 ) );",
       "  gl_FragColor = vec4( col, 1.0 );",
       "  #include <tonemapping_fragment>",
-      "  #include <encodings_fragment>",
+      "  #include <colorspace_fragment>",
       "  #include <fog_fragment>",
       "}",
     ].join("\n");
@@ -547,7 +547,7 @@
     if (m > 0) {
       for (const nm of ["iA", "iB", "iC"]) {
         const at = geo.attributes[nm];
-        at.updateRange.offset = 0; at.updateRange.count = m * 4; at.needsUpdate = true;
+        at.clearUpdateRanges(); at.addUpdateRange(0, m * 4); at.needsUpdate = true;
       }
     }
     S.wall.visible = m > 0;
@@ -653,7 +653,7 @@
       "  vec3 col = mist ? alb * ( amb * 0.95 + uSunCol * 0.45 * vL.x ) : alb * ( amb * 0.80 * ao * ( 0.55 + 0.45 * vL.x ) + uSunCol * wrap * 0.70 * vL.x );",
       "  gl_FragColor = vec4( col, alpha );",
       "  #include <tonemapping_fragment>",
-      "  #include <encodings_fragment>",
+      "  #include <colorspace_fragment>",
       "  #include <fog_fragment>",
       "}",
     ].join("\n");
@@ -718,16 +718,14 @@
     const t = (vy + Math.sqrt(disc)) / g;
     return Math.max(0.25, Math.min(life, t));
   }
-  /* Hand the GPU only what was born since its last upload. Three resets an
-     attribute's updateRange.count to -1 when it uploads; until it has, a
-     second batch (two sim steps between renders) widens the same range. */
+  /* Hand the GPU only what was born since its last upload. Three clears an
+     attribute's update ranges when it uploads; until it has, a second batch
+     (two sim steps between renders) adds its own range and three merges. */
   function flushPool(pool) {
     if (pool.dirtyLo < 0) return;
     const off = pool.dirtyLo * 16, cnt = (pool.dirtyHi - pool.dirtyLo + 1) * 16;
     for (const at of [pool.aP, pool.aV, pool.aK, pool.aS]) {
-      const ur = at.updateRange;
-      if (ur.count === -1) { ur.offset = off; ur.count = cnt; }
-      else { const lo = Math.min(ur.offset, off), hi = Math.max(ur.offset + ur.count, off + cnt); ur.offset = lo; ur.count = hi - lo; }
+      at.addUpdateRange(off, cnt);
       at.needsUpdate = true;
     }
     pool.dirtyLo = -1; pool.dirtyHi = -1;
@@ -767,7 +765,7 @@
       const v = (ks[j] & 0xffff) * 4, o = j * 6;
       ix[o] = v; ix[o + 1] = v + 1; ix[o + 2] = v + 2; ix[o + 3] = v; ix[o + 4] = v + 2; ix[o + 5] = v + 3;
     }
-    if (m > 0) { pool.idx.updateRange.offset = 0; pool.idx.updateRange.count = m * 6; pool.idx.needsUpdate = true; }
+    if (m > 0) { pool.idx.clearUpdateRanges(); pool.idx.addUpdateRange(0, m * 6); pool.idx.needsUpdate = true; }
     pool.geo.setDrawRange(0, m * 6);
     pool.alive = m;
     const ph = renderer && renderer.domElement ? renderer.domElement.height : 900;

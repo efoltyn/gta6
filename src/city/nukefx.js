@@ -570,7 +570,7 @@
     "#endif",
     "  gl_FragColor = vec4(acc / alpha, 1.0);",
     "  #include <tonemapping_fragment>",
-    "  #include <encodings_fragment>",
+    "  #include <colorspace_fragment>",
     "  gl_FragColor = vec4(gl_FragColor.rgb * alpha, alpha);",
     "}",
   ].join("\n");

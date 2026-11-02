@@ -176,7 +176,7 @@
     "vec4 cbzTex() {",
     "  if ( uUseMap < 0.5 ) return vec4( 1.0 );",
     "  vec4 t = texture2D( uMap, vUv );",
-    "  return uMapSRGB > 0.5 ? sRGBToLinear( t ) : t;",
+    "  return uMapSRGB > 0.5 ? sRGBTransferEOTF( t ) : t;",
     "}",
     "vec3 cbzNormal() {",
     "#ifdef BAKE_FLAT",
@@ -190,7 +190,7 @@
     "void main() {",
     "  vec4 t = cbzTex();",
     "  if ( t.a < uCut ) discard;",
-    "  gl_FragColor = LinearTosRGB( vec4( uColor * vCol * t.rgb, 1.0 ) );",
+    "  gl_FragColor = sRGBTransferOETF( vec4( uColor * vCol * t.rgb, 1.0 ) );",
     "}",
   ].join("\n");
   const BAKE_FS_NORMAL = BAKE_FS_HEAD + "\n" + [
@@ -214,7 +214,7 @@
       uniforms: {
         uMap: { value: map },
         uUseMap: { value: map ? 1 : 0 },
-        uMapSRGB: { value: map && map.encoding === THREE.sRGBEncoding ? 1 : 0 },
+        uMapSRGB: { value: 0 },   // three r187: an sRGB-tagged map is decoded by the GPU before the shader sees it
         uColor: { value: src && src.color ? src.color.clone() : new THREE.Color(1, 1, 1) },
         uCut: { value: cut },
         uSlot: { value: new THREE.Vector2(part.slot === 0 ? 1 : 0, part.slot === 1 ? 1 : 0) },
@@ -253,7 +253,7 @@
     const r = CBZ.renderer;
     if (!r || !r.getContext) return false;
     const scene = new THREE.Scene();
-    scene.autoUpdate = false;
+    scene.matrixWorldAutoUpdate = false;
     const cam = new THREE.OrthographicCamera(0, FRAMES * 2, FRAMES * 2, 0, 0.1, 20);
     cam.position.set(0, 0, 10);
     cam.updateMatrixWorld(true);
@@ -428,9 +428,9 @@
     "  vec4 cbzAl = texture2D( cbzImpAlb, vImpUv );",
     "  if ( cbzAl.a < 0.5 ) discard;",
     "  vec4 cbzNr = texture2D( cbzImpNrm, vImpUv ) / cbzAl.a;",
-    "  vec3 cbzAlb = sRGBToLinear( vec4( cbzAl.rgb / cbzAl.a, 1.0 ) ).rgb;",
+    "  vec3 cbzAlb = sRGBTransferEOTF( vec4( cbzAl.rgb / cbzAl.a, 1.0 ) ).rgb;",
     "#ifdef USE_COLOR",
-    "  vec3 cbzTa = vColor;",
+    "  vec3 cbzTa = vColor.rgb;",
     "#else",
     "  vec3 cbzTa = vec3( 1.0 );",
     "#endif",
@@ -444,7 +444,7 @@
     "  if ( cbzLn.y < 0.0 ) cbzLn.xz = ( 1.0 - abs( cbzLn.zx ) ) * vec2( cbzLn.x >= 0.0 ? 1.0 : -1.0, cbzLn.z >= 0.0 ? 1.0 : -1.0 );",
     "  vec3 cbzWn = normalize( vImpAx * cbzLn.x + vImpAy * cbzLn.y + vImpAz * cbzLn.z );",
     "  vec3 normal = normalize( ( viewMatrix * vec4( cbzWn, 0.0 ) ).xyz );",
-    "  vec3 geometryNormal = normal;",
+    "  vec3 nonPerturbedNormal = normal;",
     "  float faceDirection = 1.0;",
   ].join("\n");
 

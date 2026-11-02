@@ -320,7 +320,7 @@
     try {
       const tex = new THREE.CanvasTexture(envCanvas());
       tex.mapping = THREE.EquirectangularReflectionMapping;
-      if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;
+      if (THREE.SRGBColorSpace != null) tex.colorSpace = THREE.SRGBColorSpace;
       tex.needsUpdate = true;
       const pmrem = new THREE.PMREMGenerator(CBZ.renderer);
       if (pmrem.compileEquirectangularShader) pmrem.compileEquirectangularShader();
@@ -494,7 +494,7 @@
     if (atlas && THREE.CanvasTexture) {
       if (!plateTex) {
         plateTex = new THREE.CanvasTexture(atlas);
-        if (THREE.sRGBEncoding != null) plateTex.encoding = THREE.sRGBEncoding;
+        if (THREE.SRGBColorSpace != null) plateTex.colorSpace = THREE.SRGBColorSpace;
         plateTex.anisotropy = 4;
       }
       map = plateTex.clone();

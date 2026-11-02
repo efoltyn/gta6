@@ -922,7 +922,7 @@
     if (!root) return null;
     const tex = new THREE.CanvasTexture(canvas);
     tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
-    if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
     const mat = new THREE.MeshBasicMaterial({ map: tex, color: 0xdadada, toneMapped: false });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(pose.w, pose.h), mat);
     mesh.position.set(pose.x, pose.y, pose.z);

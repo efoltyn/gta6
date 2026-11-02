@@ -1720,7 +1720,7 @@
     micro.canvas = canvas;
 
     if (!CBZ.renderer) {
-      const r = new THREE.WebGLRenderer({
+      const r = THREE.createRenderer({
         canvas: canvas,
         antialias: opts.antialias !== false,
         powerPreference: "high-performance",
@@ -1728,12 +1728,12 @@
       });
       r.setPixelRatio(Math.min(window.devicePixelRatio || 1, C.MICRO_DPR_MAX));
       r.setSize(window.innerWidth, window.innerHeight, false);
-      r.outputEncoding = THREE.sRGBEncoding;          // r128 spelling — this repo is pinned
+      r.outputColorSpace = THREE.SRGBColorSpace;
       r.toneMapping = opts.toneMapping != null ? opts.toneMapping : THREE.ACESFilmicToneMapping;
       r.toneMappingExposure = opts.exposure != null ? opts.exposure : 1.0;
       if (C.MICRO_SHADOWS && opts.shadows !== false) {
         r.shadowMap.enabled = true;
-        r.shadowMap.type = THREE.PCFSoftShadowMap;
+        r.shadowMap.type = THREE.PCFShadowMap;
       }
       CBZ.renderer = r;
     }

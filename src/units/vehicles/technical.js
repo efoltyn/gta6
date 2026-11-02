@@ -131,7 +131,7 @@
     const THREE = W.THREE;
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     return t;
   }

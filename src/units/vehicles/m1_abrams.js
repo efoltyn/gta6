@@ -284,7 +284,7 @@
     if (cv) {
       const tx = new T.CanvasTexture(cv);
       tx.wrapS = tx.wrapT = T.RepeatWrapping;
-      if (T.sRGBEncoding) tx.encoding = T.sRGBEncoding;
+      if (T.SRGBColorSpace) tx.colorSpace = T.SRGBColorSpace;
       tx.anisotropy = 4;
       o.map = tx;
     } else o.color = new T.Color().setRGB.apply(new T.Color(), lin(parseInt(sch.base.slice(1), 16)));
@@ -815,7 +815,7 @@
         "void main(){ vec2 q = gl_PointCoord - 0.5; float d = length(q) * 2.0; if (d > 1.0) discard;",
         " float a = (1.0 - d * d); a *= a; a *= 0.85 + 0.15 * sin(q.x * 17.0 + q.y * 11.0);",
         " gl_FragColor = vec4(vC, vA * a);",
-        "#include <encodings_fragment>",
+        "#include <colorspace_fragment>",
         "#include <fog_fragment>",
         "}"].join("\n"),
     });

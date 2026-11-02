@@ -142,14 +142,14 @@
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(1 / (tile || 1), 1 / ((opts && opts.tileV) || tile || 1));
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = aniso();
     t._shared = true;
     return t;
   }
   function paperTex(c) {
     const t = new THREE.CanvasTexture(c);
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = aniso();
     t.minFilter = THREE.LinearMipmapLinearFilter || t.minFilter;
     return t;
@@ -285,7 +285,7 @@
       }
       const t = new THREE.CanvasTexture(c);
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
-      if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+      if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
       t._shared = true;
       return t;
     },
@@ -302,7 +302,7 @@
       edge.addColorStop(0, "rgba(0,0,0,1)"); edge.addColorStop(0.12, "rgba(0,0,0,0)"); edge.addColorStop(0.88, "rgba(0,0,0,0)"); edge.addColorStop(1, "rgba(0,0,0,1)");
       cc.fillStyle = edge; cc.fillRect(0, 0, 128, 256);
       const t = new THREE.CanvasTexture(c);
-      if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+      if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
       t._shared = true;
       return t;
     },
@@ -322,7 +322,7 @@
         cc.fillStyle = "rgba(255,240,200,.5)"; cc.fillRect(x - 14, y - 2, 28, 1.5);
       }
       const t = new THREE.CanvasTexture(c);
-      if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+      if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
       t.anisotropy = aniso(); t._shared = true;
       return t;
     },
@@ -1452,7 +1452,7 @@
       const issue = { masthead: "The Morning Ledger", headline: paperHeadline() };
       // (a caller's own issue comes as a painter: city/agency.js's daily paper)
       const ltex = CBZ.lazyCanvasTexture(1400, 1900, paint || function (ctx, lc) { K.newspaper(issue, { canvas: lc }); }, { name: "hm-paper" });
-      if (THREE.sRGBEncoding != null) ltex.encoding = THREE.sRGBEncoding;
+      if (THREE.SRGBColorSpace != null) ltex.colorSpace = THREE.SRGBColorSpace;
       ltex.anisotropy = aniso();
       ltex.minFilter = THREE.LinearMipmapLinearFilter || ltex.minFilter;
       const grp = new THREE.Group();

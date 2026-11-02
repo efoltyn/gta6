@@ -197,7 +197,7 @@
   function paintEmissive(sh) {
     sh.fragmentShader = sh.fragmentShader.replace(
       "#include <emissivemap_fragment>",
-      "#include <emissivemap_fragment>\n#ifdef USE_COLOR\n\ttotalEmissiveRadiance *= vColor;\n#endif");
+      "#include <emissivemap_fragment>\n#ifdef USE_COLOR\n\ttotalEmissiveRadiance *= vColor.rgb;\n#endif");
   }
   // null = this paint cannot be shared (it keeps its own material)
   function paintKey(m) {

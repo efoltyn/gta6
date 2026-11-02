@@ -1533,7 +1533,7 @@
     "  gl_FragColor = vec4(max(col, vec3(0.0)), t.a * vCol.a);",
     "  if (!(gl_FragColor.a > 0.004)) discard;",
     "  #include <tonemapping_fragment>",
-    "  #include <encodings_fragment>",
+    "  #include <colorspace_fragment>",
     "  #include <fog_fragment>",
     "}",
   ].join("\n");
@@ -2289,7 +2289,7 @@
     "#endif",
     "  gl_FragColor = vec4(cOut, 1.0);",
     "  #include <tonemapping_fragment>",
-    "  #include <encodings_fragment>",
+    "  #include <colorspace_fragment>",
     "  gl_FragColor = vec4(clamp(gl_FragColor.rgb, 0.0, 1.0) * alpha, alpha);",
     "}",
   ].join("\n");

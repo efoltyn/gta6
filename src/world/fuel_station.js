@@ -222,7 +222,7 @@
     yield* stain(R.stain, 0x0113); yield* stain(R.stain2, 0x0a51);
     g.fillStyle = "#ffffff"; g.fillRect(R.white[0], R.white[1], R.white[2], R.white[3]);
     const t = new THREE.CanvasTexture(cv);
-    t.encoding = THREE.sRGBEncoding;
+    t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 8;
     return t;
   }
@@ -281,7 +281,7 @@
       g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill();
     }
     const t = new THREE.CanvasTexture(cv);
-    t.encoding = THREE.sRGBEncoding; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
     return t;
   }
 
@@ -351,9 +351,9 @@
     try {
       if (CBZ.lazyBaked) {
         const NS = (CBZ.qualityLevel != null && CBZ.qualityLevel <= 1) ? 512 : 1024;
-        atlas = CBZ.lazyBaked(AT, AT, bakeAtlasSteps, { name: "fuel-atlas" }); atlas.encoding = THREE.sRGBEncoding; atlas.anisotropy = 8;
+        atlas = CBZ.lazyBaked(AT, AT, bakeAtlasSteps, { name: "fuel-atlas" }); atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = 8;
         slab = CBZ.lazyBaked(NS, NS, slabBake, { name: "fuel-slab" });
-        slab.encoding = THREE.sRGBEncoding; slab.wrapS = slab.wrapT = THREE.RepeatWrapping; slab.anisotropy = 8;
+        slab.colorSpace = THREE.SRGBColorSpace; slab.wrapS = slab.wrapT = THREE.RepeatWrapping; slab.anisotropy = 8;
         // every station on every island draws these two through M: an
         // island's teardown must not free them (a freed one was painted again,
         // 0.5 s of noise, on the arrival of the next island with a station)

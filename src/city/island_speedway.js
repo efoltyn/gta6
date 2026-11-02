@@ -373,7 +373,7 @@
       paintGround(cv.getContext("2d"));
       tex = new THREE.CanvasTexture(cv);
     }
-    tex.encoding = THREE.sRGBEncoding;
+    tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     const shape = new THREE.Shape();
     for (let i = 0; i <= 192; i++) {

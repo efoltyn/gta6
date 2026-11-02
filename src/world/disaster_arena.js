@@ -2628,7 +2628,7 @@
           "  volG = vec2(volRelief(vVolW.xz + vec2(e, 0.0), volFine) - h0, volRelief(vVolW.xz + vec2(0.0, e), volFine) - h0) / e;\n" +
           "  float rockMod = mix(1.0, 0.62 + 0.62 * h0, volMid);\n" +
           "  vec3 gT = texture2D(uVolGrass, vVolW.xz / " + GRASS_TILE.toFixed(3) + ").rgb;\n" +
-          "  gT = pow(gT, vec3(2.2)) * uVolGrassK;\n" +
+          "  gT = gT * uVolGrassK;\n" +   // the grass map is sRGB-tagged: three r187 decodes it in the GPU
           "  vec3 vegMod = " + (grassTex ? "gT" : "vec3(1.0)") + ";\n" +
           "  diffuseColor.rgb *= mix(vec3(rockMod), vegMod, veg);\n" +
           "}");

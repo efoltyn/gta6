@@ -817,7 +817,7 @@
         rec.tex.magFilter = THREE.LinearFilter;       // always near, and mip
         rec.tex.generateMipmaps = false;              // regeneration every repaint
         if (THREE.ClampToEdgeWrapping) rec.tex.wrapS = rec.tex.wrapT = THREE.ClampToEdgeWrapping;
-        if (THREE.sRGBEncoding != null) rec.tex.encoding = THREE.sRGBEncoding;  // match core/renderer.js
+        if (THREE.SRGBColorSpace != null) rec.tex.colorSpace = THREE.SRGBColorSpace;  // match core/renderer.js
         rec.parts.panelMesh.material.map = rec.tex;
         rec.parts.panelMesh.material.needsUpdate = true;
         paintPanel(rec, true);

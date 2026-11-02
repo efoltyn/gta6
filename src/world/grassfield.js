@@ -438,11 +438,12 @@
       let v = vs.replace("#include <common>", "#include <common>\n" + VERT_PARS);
       v = v.replace("#include <beginnormal_vertex>", VERT_BEGIN + "\nvec3 objectNormal = gfN;\n#ifdef USE_TANGENT\nvec3 objectTangent = vec3( 1.0, 0.0, 0.0 );\n#endif");
       v = v.replace("#include <begin_vertex>", "");
-      // one light for both faces: a thin blade is lit through
-      v = v.replace("#include <lights_lambert_vertex>", "#include <lights_lambert_vertex>\n#ifdef DOUBLE_SIDED\nvLightBack = vLightFront;\nvIndirectBack = vIndirectFront;\n#endif");
       sh.vertexShader = v;
+      // one light for both faces: a thin blade is lit through (three r187
+      // lights Lambert per fragment and flips a back face's normal; flip it back)
       sh.fragmentShader = sh.fragmentShader
         .replace("#include <common>", "#include <common>\nvarying vec3 vGfCol;")
+        .replace("#include <normal_fragment_begin>", "#include <normal_fragment_begin>\n#ifdef DOUBLE_SIDED\nnormal *= faceDirection;\n#endif")
         .replace("#include <color_fragment>", "#include <color_fragment>\ndiffuseColor.rgb *= vGfCol;");
     };
     mat.customProgramCacheKey = function () { return "cbzGrassField1"; };
@@ -540,7 +541,7 @@
     if (this.dirty1 < 0) return;
     const off = this.dirty0, cnt = this.dirty1 - this.dirty0;
     [this.aPos, this.aPar, this.aCol].forEach(function (a) {
-      a.updateRange.offset = off * 4; a.updateRange.count = cnt * 4; a.needsUpdate = true;
+      a.clearUpdateRanges(); a.addUpdateRange(off * 4, cnt * 4); a.needsUpdate = true;
     });
     this.dirty0 = Infinity; this.dirty1 = -1;
   };

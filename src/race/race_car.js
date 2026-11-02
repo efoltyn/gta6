@@ -1002,12 +1002,12 @@
     let tex = null;
     if (CB && CB.lazyCanvasTexture && typeof document !== "undefined") {
       tex = CB.lazyCanvasTexture(tsz, tsz, function (ctx) { drawLivery(ctx, L, tsz); }, { name: "race-livery" });
-      tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
+      tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
     } else {
       const cv = makeCanvas(tsz, tsz);
       if (cv) {
         drawLivery(cv.ctx, L, tsz);
-        tex = new THREE.CanvasTexture(cv.c); tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
+        tex = new THREE.CanvasTexture(cv.c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
       }
     }
     const bodyMat = new THREE.MeshStandardMaterial({ map: tex, color: tex ? 0xffffff : col(THREE, hexToInt(L.base)),
@@ -1085,7 +1085,7 @@
       const wheel = new THREE.Mesh(steeringGeo(THREE), S.mats.trim); col_.add(wheel);
       const dc = makeCanvas(256, 128);
       let dtex = null;
-      if (dc) { dtex = new THREE.CanvasTexture(dc.c); dtex.encoding = THREE.sRGBEncoding; }
+      if (dc) { dtex = new THREE.CanvasTexture(dc.c); dtex.colorSpace = THREE.SRGBColorSpace; }
       const dmat = new THREE.MeshBasicMaterial({ map: dtex, color: dtex ? 0xffffff : 0x0a0b0c, toneMapped: false });
       const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.19, 0.095), dmat);
       screen.position.set(EYE.x, 0.868, 0.335); screen.rotation.set(-0.45, Math.PI, 0, "YXZ");

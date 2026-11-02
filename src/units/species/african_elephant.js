@@ -191,7 +191,7 @@
     const p0 = r() * 6, p1 = r() * 6, p2 = r() * 6;
     const SOLE = 0x37322e, NAIL = 0xb8ae9c, EYE = 0x120c08, LID = 0x3e3934, LIP = 0x5b4d47, INNER = 0x8a7c76, TUFT = 0x161311;
     /* The palette below is written as the colour you SEE (sRGB). The page
-       renders with outputEncoding = sRGB and r128 takes vertex colours as
+       renders with outputColorSpace = sRGB and r128 takes vertex colours as
        linear, so every value is linearised on the way out; written raw, a
        grey elephant came out chalk white. */
     const raw = function (part, x, y, z, ca, sa, R, t) {

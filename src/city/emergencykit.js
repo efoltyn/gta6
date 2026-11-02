@@ -250,7 +250,7 @@
         if (c && c.fillText) {
           draw(c, W, H);
           const tex = new THREE.CanvasTexture(cv);
-          if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;
+          if (THREE.SRGBColorSpace != null) tex.colorSpace = THREE.SRGBColorSpace;
           tex.anisotropy = 4;
           m = new THREE.MeshLambertMaterial({
             map: tex, emissiveMap: tex, emissive: 0x262626, emissiveIntensity: 1,

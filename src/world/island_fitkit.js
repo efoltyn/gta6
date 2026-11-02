@@ -246,7 +246,7 @@
       g2.fillText(lines[i], W / 2, lh * (i + 0.7));
     }
     const t = new THREE.CanvasTexture(cv);
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     texCache.set(key, t);
     return t;
@@ -1129,7 +1129,7 @@
       g2.fillStyle = "#1d1f23"; g2.fillRect(8, 8, 112, 4); g2.fillRect(8, 180, 112, 4);
     }
     const t = new THREE.CanvasTexture(cv);
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     texCache.set(key, t);
     return t;
   }
@@ -1145,7 +1145,7 @@
     const rows = ["E", "F P", "T O Z", "L P E D", "P E C F D", "E D F C Z P"];
     for (let i = 0; i < rows.length; i++) { g2.font = "bold " + Math.round(40 - i * 6) + "px Helvetica, Arial, sans-serif"; g2.fillText(rows[i], 64, 24 + i * 29); }
     const t = new THREE.CanvasTexture(cv);
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     texCache.set("eyechart", t);
     return t;
   }

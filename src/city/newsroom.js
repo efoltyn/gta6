@@ -769,7 +769,7 @@
     CV = document.createElement("canvas"); CV.width = W; CV.height = H;
     CTX = CV.getContext("2d");
     TEX = new THREE.CanvasTexture(CV);
-    if (THREE.sRGBEncoding != null) TEX.encoding = THREE.sRGBEncoding;     // match core/renderer.js
+    if (THREE.SRGBColorSpace != null) TEX.colorSpace = THREE.SRGBColorSpace;     // match core/renderer.js
     TEX.anisotropy = 4;
     TEX.generateMipmaps = true;
     MAT = new THREE.MeshBasicMaterial({ map: TEX, color: 0xe2e2e2 });
@@ -1465,7 +1465,7 @@
     OV = document.createElement("canvas"); OV.width = W; OV.height = H;
     OVCTX = OV.getContext("2d");
     OVTEX = new THREE.CanvasTexture(OV);
-    if (THREE.sRGBEncoding != null) OVTEX.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) OVTEX.colorSpace = THREE.SRGBColorSpace;
     OVTEX.generateMipmaps = false;
     OVTEX.minFilter = THREE.LinearFilter;
     return true;

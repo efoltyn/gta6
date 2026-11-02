@@ -265,7 +265,7 @@
   function shadeEmissive(shader) {
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <emissivemap_fragment>",
-      "#include <emissivemap_fragment>\n#ifdef USE_COLOR\n\ttotalEmissiveRadiance *= vColor;\n#endif");
+      "#include <emissivemap_fragment>\n#ifdef USE_COLOR\n\ttotalEmissiveRadiance *= vColor.rgb;\n#endif");
   }
   function sharedMat(key, color, opts) {
     let m = mats.get(key);
@@ -1192,7 +1192,7 @@
       }
     } catch (e) { tex = null; }
     if (!tex) { _atlasMat = sharedMat("interior-screen-v5", 0x04060a, { emissive: 0x0c1e2c, ei: 0.9 }); return _atlasMat; }
-    if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     // painted once (drawAtlas): the canvas goes back once it is on the GPU (core/texfree.js)
     if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);
@@ -1250,7 +1250,7 @@
   /* THE CABIN HAS A FAR CUT. Past ~120 m nothing inside a car reads through
      its glass at phone resolution, yet every car kept drawing its baked room
      (up to ~17k verts), its lit screens and its wheel. A geometry tagged
-     _cbzFar is skipped by the renderer (vendor/three.r128.min.js projectObject
+     _cbzFar is skipped by the renderer (vendor/three.r187.js projectObject
      calls self.__cbzFar) past `out` from the camera and comes back inside
      `in`: glass and body stay, the margin keeps it from flickering at the
      line. Instanced pools are not judged here (their object sits at the

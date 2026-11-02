@@ -914,9 +914,9 @@
     "  gl_FragColor = vec4(rgb, a);",
     "  #ifdef USE_FOG",
     "    #ifdef FOG_EXP2",
-    "      float ff = 1.0 - exp(-fogDensity * fogDensity * fogDepth * fogDepth);",
+    "      float ff = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);",
     "    #else",
-    "      float ff = smoothstep(fogNear, fogFar, fogDepth);",
+    "      float ff = smoothstep(fogNear, fogFar, vFogDepth);",
     "    #endif",
     "    gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor * gl_FragColor.a, ff);",
     "  #endif",
@@ -1224,10 +1224,10 @@
       mesh.visible = k > 0;
       if (k > 0) {
         const n = k * 4;
-        APos.updateRange.offset = 0; APos.updateRange.count = n; APos.needsUpdate = true;
-        ACol.updateRange.offset = 0; ACol.updateRange.count = n; ACol.needsUpdate = true;
-        AExt.updateRange.offset = 0; AExt.updateRange.count = n; AExt.needsUpdate = true;
-        ADir.updateRange.offset = 0; ADir.updateRange.count = n; ADir.needsUpdate = true;
+        APos.clearUpdateRanges(); APos.addUpdateRange(0, n); APos.needsUpdate = true;
+        ACol.clearUpdateRanges(); ACol.addUpdateRange(0, n); ACol.needsUpdate = true;
+        AExt.clearUpdateRanges(); AExt.addUpdateRange(0, n); AExt.needsUpdate = true;
+        ADir.clearUpdateRanges(); ADir.addUpdateRange(0, n); ADir.needsUpdate = true;
       }
     }
 
@@ -1298,7 +1298,7 @@
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(3, 2);
-    t.encoding = THREE.sRGBEncoding;
+    t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     return t;
   }

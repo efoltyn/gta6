@@ -1043,7 +1043,7 @@
           "  vDark = iMisc.y;",
           "  gl_Position = projectionMatrix * mvPosition;",
           "  #ifdef USE_FOG",
-          "  fogDepth = vz;",
+          "  vFogDepth = vz;",
           "  #endif",
           "}",
         ].join("\n"),
@@ -1055,7 +1055,7 @@
           "  float a = texture2D(map, vUv).a * vA;",
           "  if (a < 0.004) discard;",
           "  gl_FragColor = vec4(mix(cFresh, cDeep, vDark), a);",
-          "  #include <encodings_fragment>",
+          "  #include <colorspace_fragment>",
           "  #include <fog_fragment>",
           "}",
         ].join("\n"),
@@ -4004,7 +4004,7 @@
          stump.scale.set(J.sx, J.sy, J.sz);                 // legs: 0.36 x 0.15 x 0.36
 
      A box. Untextured, axis-aligned, and BLOOD_D (0x5e070b) through this
-     renderer's outputEncoding = sRGBEncoding with r128 colour management OFF
+     renderer's outputColorSpace = SRGBColorSpace with r128 colour management OFF
      comes out of the pipe near #a5xxxx — a bright, flat, unlit-looking red (the
      same measurement the DECAL note at the top of this file was written for).
      A 36 x 15 x 36 cm slab of that is the single most-seen object in a

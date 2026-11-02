@@ -89,7 +89,7 @@
   function texFor(c) {
     const t = new THREE.CanvasTexture(c);
     const R = CBZ.renderer;
-    if (R && R.outputEncoding === THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+    if (R && R.outputColorSpace === THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
     try { t.anisotropy = R && R.capabilities ? Math.min(8, R.capabilities.getMaxAnisotropy()) : 4; } catch (e) {}
     t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
     return t;

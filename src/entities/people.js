@@ -111,7 +111,7 @@
     // as stored (no sRGB decode) and every look in the game was tuned that
     // way, so the people's textures do the same — a person's skin then lands
     // on exactly the tone the casting picked, beside everything else.
-    t.encoding = srgb ? THREE.sRGBEncoding : THREE.LinearEncoding;
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.LinearSRGBColorSpace;
     t.anisotropy = 4;
     return (texCache[name] = t);
   }
@@ -618,16 +618,16 @@
   }
   const LPF = (function () {
     const src = THREE.ShaderChunk.lights_physical_pars_fragment;
-    const line = "reflectedLight.directDiffuse += ( 1.0 - clearcoatDHR ) * irradiance * BRDF_Diffuse_Lambert( material.diffuseColor );";
+    const line = "reflectedLight.directDiffuse += irradiance * diffuseBRDF * ( 1.0 - F );";   // three r187
     if (src.indexOf(line) < 0) return null;
     // SKIN SCATTERS. Light reaches past the terminator, red furthest (the
     // classic wrap approximation of subsurface scattering): the hard plastic
     // shadow line on a face becomes the soft warm falloff of real skin.
+    // (directLight.color already carries the legacy-lights PI, THREE.LEGACY_LIGHTS)
     return src.replace(line,
       "#ifdef PEOPLE_WRAP\n" +
-      "\tvec3 wrapIrr = clamp( ( vec3( dot( geometry.normal, directLight.direction ) ) + PEOPLE_WRAP ) / ( 1.0 + PEOPLE_WRAP ), 0.0, 1.0 ) * directLight.color;\n" +
-      "\t#ifndef PHYSICALLY_CORRECT_LIGHTS\n\t\twrapIrr *= PI;\n\t#endif\n" +
-      "\treflectedLight.directDiffuse += ( 1.0 - clearcoatDHR ) * wrapIrr * BRDF_Diffuse_Lambert( material.diffuseColor );\n" +
+      "\tvec3 wrapIrr = clamp( ( vec3( dot( geometryNormal, directLight.direction ) ) + PEOPLE_WRAP ) / ( 1.0 + PEOPLE_WRAP ), 0.0, 1.0 ) * directLight.color;\n" +
+      "\treflectedLight.directDiffuse += wrapIrr * diffuseBRDF * ( 1.0 - F );\n" +
       "#else\n\t" + line + "\n#endif");
   })();
   const WOUND_PARS = [
@@ -765,7 +765,7 @@
           "\tvec4 texelColor = texture2D( map, pJacket > 0.5 ? vAtB : vAtA );",
           "\tif ( pJacket > 0.5 && texelColor.a < 0.5 ) texelColor = texture2D( map, vAtA );",
           "\tif ( texelColor.a < 0.5 ) texelColor = vec4( pFill, 1.0 );",
-          "\tclothC = mapTexelToLinear( texelColor ).rgb;",
+          "\tclothC = texelColor.rgb;",   // r187: an sRGB map is decoded by the GPU
           "#endif",
           "\tif ( flatC.a > 0.5 ) clothC = flatC.rgb;",
           "\tdiffuseColor.rgb *= clothC;",

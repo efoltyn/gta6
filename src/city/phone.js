@@ -59,7 +59,7 @@
     ctx = cv.getContext("2d");
     if (!ctx) { cv = null; return false; }
     tex = new THREE.CanvasTexture(cv);
-    if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;   // core/renderer.js outputs sRGB
+    if (THREE.SRGBColorSpace != null) tex.colorSpace = THREE.SRGBColorSpace;   // core/renderer.js outputs sRGB
     tex.generateMipmaps = false;
     tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
     tex.anisotropy = 4;

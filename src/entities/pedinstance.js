@@ -369,7 +369,7 @@
   function pageClass(t) {
     const im = srcDims(t), w = im.w, h = im.h;
     const mips = t.generateMipmaps !== false && t.minFilter !== THREE.NearestFilter && t.minFilter !== THREE.LinearFilter;
-    const key = w + "x" + h + "|" + t.minFilter + "|" + t.magFilter + "|" + (mips ? 1 : 0) + "|" + t.anisotropy + "|" + t.encoding;
+    const key = w + "x" + h + "|" + t.minFilter + "|" + t.magFilter + "|" + (mips ? 1 : 0) + "|" + t.anisotropy + "|" + t.colorSpace;
     let C = pageClasses.get(key);
     if (C !== undefined) return C;
     const g = mips ? 8 : 1, sw = w + 2 * g, sh = h + 2 * g;
@@ -398,7 +398,7 @@
     t.flipY = false; t.premultiplyAlpha = false; t.unpackAlignment = 4;
     t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
     t.minFilter = s.minFilter; t.magFilter = s.magFilter; t.generateMipmaps = s.generateMipmaps;
-    t.anisotropy = s.anisotropy; t.encoding = s.encoding;
+    t.anisotropy = s.anisotropy; t.colorSpace = s.colorSpace;
     t.name = "pedinst-page";
     t._shared = true;
     t.needsUpdate = true;
@@ -473,7 +473,7 @@
     if (!gl || !pr || !pr.__webglTexture || !gl.copyTexSubImage2D) return false;
     const tmp = new THREE.DataTexture(null, C.PW, oldPH, THREE.RGBAFormat, THREE.UnsignedByteType);
     tmp.flipY = false; tmp.generateMipmaps = false; tmp.minFilter = tmp.magFilter = THREE.NearestFilter;
-    tmp.encoding = P.tex.encoding;
+    tmp.colorSpace = P.tex.colorSpace;
     const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
     const fb = gl.createFramebuffer();
     let ok = false;
@@ -580,7 +580,7 @@
         R.initTexture(P.tex);
         const pr = R.properties.get(P.tex);
         if (!pr || !pr.__webglInit) throw new Error("page not on the GPU");
-        R.copyTextureToTexture(new THREE.Vector2(0, PH - oldPH), { isDataTexture: true, image: { data: old, width: C.PW, height: oldPH } }, P.tex);
+        R.copyTextureToTexture({ isDataTexture: true, image: { data: old, width: C.PW, height: oldPH } }, P.tex, null, new THREE.Vector2(0, PH - oldPH));
         P.gpuOnly = true; CBZ.freedStaticArrays = true;
         P.PH = PH;
         P.cap = C.cols * Math.floor(PH / C.sh);
@@ -769,7 +769,7 @@
         if (!_pageSrc) _pageSrc = { isDataTexture: true, image: { data: null, width: 0, height: 0 } };
         _pageSrc.image.data = B; _pageSrc.image.width = sw; _pageSrc.image.height = sh;
         try {
-          R.copyTextureToTexture(_pagePos.set(s.x, y0), _pageSrc, T);
+          R.copyTextureToTexture(_pageSrc, T, null, _pagePos.set(s.x, y0));
           pageCopies++;
           return true;
         } catch (e) { /* fall through to the whole-page upload */ }
@@ -1637,17 +1637,17 @@
     // Every slot ever written is < p.next, so [0, next) is the whole truth.
     if (p.mDirty) {
       const a = p.mesh.instanceMatrix;
-      a.updateRange.offset = 0; a.updateRange.count = p.next * 16;
+      a.clearUpdateRanges(); a.addUpdateRange(0, p.next * 16);
       a.needsUpdate = true; p.mDirty = false;
     }
     if (p.uDirty && p.uv) {
       const u = p.uv;
-      u.updateRange.offset = 0; u.updateRange.count = p.next * 4;
+      u.clearUpdateRanges(); u.addUpdateRange(0, p.next * 4);
       u.needsUpdate = true; p.uDirty = false;
     }
     if (p.cDirty && p.mesh.instanceColor) {
       const c = p.mesh.instanceColor;
-      c.updateRange.offset = 0; c.updateRange.count = p.next * 3;
+      c.clearUpdateRanges(); c.addUpdateRange(0, p.next * 3);
       c.needsUpdate = true; p.cDirty = false;
     }
   }

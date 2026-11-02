@@ -86,7 +86,7 @@
     "  vec3 col = vCol * mix(0.42, 1.2, lam * uDay + 0.3 * (1.0 - uDay)) * (0.8 + 0.32 * n2);",
     "  gl_FragColor = vec4(col, a);",
     "  #include <tonemapping_fragment>",
-    "  #include <encodings_fragment>",
+    "  #include <colorspace_fragment>",
     "  #include <fog_fragment>",
     "}",
   ].join("\n");

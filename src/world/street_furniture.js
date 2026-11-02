@@ -187,7 +187,7 @@
     let aniso = 8;
     try { const R = CBZ.renderer; if (R && R.capabilities && R.capabilities.getMaxAnisotropy) aniso = Math.min(8, R.capabilities.getMaxAnisotropy()); } catch (e) { /* keep 8 */ }
     t.anisotropy = Math.max(1, aniso);
-    if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;   // r128 spelling: sRGB-authored canvas colours
+    if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;   // sRGB-authored canvas colours
     _atlas = t;
     return t;
   }

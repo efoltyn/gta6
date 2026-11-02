@@ -434,9 +434,8 @@
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat, repeat);
     t.anisotropy = anisoCap();
-    // r128 encoding API (NOT .colorSpace — that lands in r152). Colour maps are
-    // authored as sRGB bytes; normal/roughness are DATA and must stay linear.
-    if (srgb && THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+    // Colour maps are authored as sRGB bytes; normal/roughness are DATA and must stay linear.
+    if (srgb && THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
     t.needsUpdate = true;
     return t;
   }
@@ -627,12 +626,12 @@
     "float gndVn( vec2 p ) { vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );",
     "  return mix( mix( gndH( i ), gndH( i + vec2( 1.0, 0.0 ) ), f.x ), mix( gndH( i + vec2( 0.0, 1.0 ) ), gndH( i + vec2( 1.0, 1.0 ) ), f.x ), f.y ); }",
     // two reads of one tiling map, the second rotated + enlarged, mixed by a
-    // slow noise; decoded sRGB -> linear (polynomial fit)
+    // slow noise. The maps are sRGB-tagged (surfaceMaps' colour map), so the
+    // GPU hands back linear texels (three r187); no decode here.
     "vec3 gndTap( sampler2D m, vec2 uv, float w ) {",
     "  vec3 a = texture2D( m, uv ).rgb;",
     "  vec3 b = texture2D( m, mat2( 0.8, -0.6, 0.6, 0.8 ) * uv * 0.3125 + vec2( 0.37, 0.11 ) ).rgb;",
-    "  vec3 c = mix( a, b, 0.25 + 0.5 * w );",
-    "  return c * ( c * ( c * 0.305306011 + 0.682171111 ) + 0.012522878 ); }",
+    "  return mix( a, b, 0.25 + 0.5 * w ); }",
   ].join("\n");
   /* THE FAR CITY MAP. One RGBA atlas holding every metro's ground as seen
      from kilometres off (RGB = sqrt of linear albedo, A = 0 none / 0.5 ground
@@ -668,7 +667,7 @@
   CBZ.GROUND_LIN_GLSL = SRGB_GLSL;       // the same decode for a shader of its own (alpine_skin.js)
   CBZ.groundLinear = function (x, out) {       // out: decode INTO this Color (no allocation)
     if (x && x.isTexture) {
-      if (THREE.sRGBEncoding && x.encoding !== THREE.sRGBEncoding) { x.encoding = THREE.sRGBEncoding; x.needsUpdate = true; }
+      if (THREE.SRGBColorSpace && x.colorSpace !== THREE.SRGBColorSpace) { x.colorSpace = THREE.SRGBColorSpace; x.needsUpdate = true; }
       return x;
     }
     const c = out ? (x && x.isColor ? out.copy(x) : out.set(x)) : (x && x.isColor ? x.clone() : new THREE.Color(x));
@@ -865,8 +864,8 @@
     // extra.vertexColors = false and its lawn colour as extra.color
     const mat = new THREE.MeshLambertMaterial(Object.assign({ color: 0xffffff, vertexColors: true }, opts.extra || {}));
     mat.name = opts.name || "ground-skin";
-    // r128 samples a custom sampler raw (no mapTexelToLinear), so the shader
-    // decodes; these are the SAME cached maps the island volcano reads.
+    // these are the SAME cached maps the island volcano reads (sRGB-tagged:
+    // the GPU decodes them for this custom sampler too).
     // Tier 0 / textures off: no maps, and the turf, the verges, the stone
     // and the decode all still run (they are math, not textures): the land
     // looks like the land on every tier.

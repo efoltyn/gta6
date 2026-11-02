@@ -1853,8 +1853,8 @@
         arr[k] = run; arr[k + 1] = vel; arr[k + 2] = wl; arr[k + 3] = fl;
       }
     }
-    S.attr.updateRange.offset = S.r0 * NC * 4;
-    S.attr.updateRange.count = (S.r1 - S.r0 + 1) * NC * 4;
+    S.attr.clearUpdateRanges();
+    S.attr.addUpdateRange(S.r0 * NC * 4, (S.r1 - S.r0 + 1) * NC * 4);
     S.attr.needsUpdate = true;
 
     // ---- the surf ribbon rides the live swell

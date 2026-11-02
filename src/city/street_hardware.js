@@ -439,7 +439,7 @@
   }
   function finishTex(cv) {
     const t = new THREE.CanvasTexture(cv);
-    if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     return t;
   }

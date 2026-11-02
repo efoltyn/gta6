@@ -544,7 +544,7 @@
     for (let i = 0; i < 10; i++) { x.strokeText(String(i), i * 32 + 16, 21); x.fillText(String(i), i * 32 + 16, 21); }
     const T = window.THREE;
     numAtlas = new T.CanvasTexture(c);
-    if (T.sRGBEncoding != null) numAtlas.encoding = T.sRGBEncoding;
+    if (T.SRGBColorSpace != null) numAtlas.colorSpace = T.SRGBColorSpace;
     numAtlas.anisotropy = 2;
     // the pixels are on the GPU after the first upload: drop the canvas
     numAtlas.onUpdate = function () { try { numAtlas.image = { width: 320, height: 40 }; } catch (e) {} };

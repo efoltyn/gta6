@@ -244,7 +244,7 @@
     const cv = document.createElement("canvas"); cv.width = 1024; cv.height = 512;
     S.bdCtx = cv.getContext("2d");
     S.bdTex = new THREE.CanvasTexture(cv);
-    if (THREE.sRGBEncoding != null) S.bdTex.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) S.bdTex.colorSpace = THREE.SRGBColorSpace;
     paintBackdrop();
     const bdMat = new THREE.MeshBasicMaterial({ map: S.bdTex, color: 0xb4b4b4 });
     bdMat.toneMapped = false;
@@ -290,7 +290,7 @@
     x2.fillStyle = "#ffffff"; x2.font = "bold 46px Arial, sans-serif"; x2.textBaseline = "middle";
     x2.fillText("NEWS", 66, 66); x2.fillText("ONE", 196, 66);
     const lt = new THREE.CanvasTexture(lc);
-    if (THREE.sRGBEncoding != null) lt.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) lt.colorSpace = THREE.SRGBColorSpace;
     const plateM = new THREE.MeshBasicMaterial({ map: lt });
     plateM.toneMapped = false;
     const plate = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.25), plateM);
@@ -332,7 +332,7 @@
       S.rtB = new THREE.WebGLRenderTarget(RW, RH, opts);
       [S.rtA, S.rtB].forEach(function (rt) {
         rt.texture.generateMipmaps = false;
-        if (THREE.sRGBEncoding != null) rt.texture.encoding = THREE.sRGBEncoding;   // like the canvas it replaces
+        if (THREE.SRGBColorSpace != null) rt.texture.colorSpace = THREE.SRGBColorSpace;   // like the canvas it replaces
       });
       // the overlay pass: newsroom's canvas on a screen quad
       S.ov = new THREE.Scene();

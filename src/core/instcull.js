@@ -36,7 +36,7 @@
    Why an accessor and not a registry: every InstancedMesh ever built gets the
    behaviour through its prototype, with no scene walk, no list to keep in
    sync, and nothing for builders to remember. This file loads straight after
-   three.r128.min.js so no pool is constructed before the accessor exists.
+   three.r187.js so no pool is constructed before the accessor exists.
 
    Bounds are cached per pool and re-measured only when its instanceMatrix
    version, count or geometry changes. Pools that rewrite every frame
@@ -152,9 +152,23 @@
   }
 
   const _box = new THREE.Box3();
+  const _sph = new THREE.Sphere();
   const baseIntersects = THREE.Frustum.prototype.intersectsObject;
+  // r128's test for a pool or a skinned body: its GEOMETRY's sphere, placed
+  // by matrixWorld. three r187 tests an object.boundingSphere it computes
+  // ONCE (every instance / every skinned vertex, on the CPU) and never again,
+  // so a pool whose instances move or a body that changes pose would cull on
+  // stale bounds, and the first sight of every body pays the skinning.
+  function geoSphere(f, object) {
+    const g = object.geometry;
+    if (!g) return true;
+    if (g.boundingSphere === null) g.computeBoundingSphere();
+    return f.intersectsSphere(_sph.copy(g.boundingSphere).applyMatrix4(object.matrixWorld));
+  }
   THREE.Frustum.prototype.intersectsObject = function (object) {
-    if (!object.isInstancedMesh || !ctl.on || !predictable(object)) return baseIntersects.call(this, object);
+    if (object.isSkinnedMesh) return geoSphere(this, object);
+    if (!object.isInstancedMesh) return baseIntersects.call(this, object);
+    if (!ctl.on || !predictable(object)) return geoSphere(this, object);
     // not on the GPU yet: draw it (that first draw uploads the real matrices)
     if (!object.instanceMatrix._cbzUploaded) return true;
     ctl.tested++;

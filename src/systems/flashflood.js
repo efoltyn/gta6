@@ -1620,7 +1620,7 @@
       "  vec3 col = vCol.rgb * (0.85 + 0.3 * (0.5 - c.y * 0.5));",
       "  gl_FragColor = vec4(col, a);",
       "  #include <tonemapping_fragment>",
-      "  #include <encodings_fragment>",
+      "  #include <colorspace_fragment>",
       "  #include <fog_fragment>",
       "}",
     ].join("\n");
@@ -1826,11 +1826,11 @@
     R.box.i0 = ni0; R.box.i1 = ni1; R.box.j0 = nj0; R.box.j1 = nj1;
     const P3 = geo.attributes.position, N3 = geo.attributes.normal, F4 = geo.attributes.aFlow, S1 = geo.attributes.aShow, D1 = geo.attributes.aDepth;
     const off = j0 * n, cnt = (j1 - j0 + 1) * n;
-    P3.updateRange.offset = off * 3; P3.updateRange.count = cnt * 3; P3.needsUpdate = true;
-    N3.updateRange.offset = off * 3; N3.updateRange.count = cnt * 3; N3.needsUpdate = true;
-    F4.updateRange.offset = off * 4; F4.updateRange.count = cnt * 4; F4.needsUpdate = true;
-    S1.updateRange.offset = off; S1.updateRange.count = cnt; S1.needsUpdate = true;
-    D1.updateRange.offset = off; D1.updateRange.count = cnt; D1.needsUpdate = true;
+    P3.clearUpdateRanges(); P3.addUpdateRange(off * 3, cnt * 3); P3.needsUpdate = true;
+    N3.clearUpdateRanges(); N3.addUpdateRange(off * 3, cnt * 3); N3.needsUpdate = true;
+    F4.clearUpdateRanges(); F4.addUpdateRange(off * 4, cnt * 4); F4.needsUpdate = true;
+    S1.clearUpdateRanges(); S1.addUpdateRange(off, cnt); S1.needsUpdate = true;
+    D1.clearUpdateRanges(); D1.addUpdateRange(off, cnt); D1.needsUpdate = true;
     R.uploadBytes = cnt * 21;
     // the room sheets
     if (R.rooms) {

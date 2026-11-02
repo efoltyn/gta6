@@ -312,7 +312,7 @@
      which is the clue that this is not an exposure problem.
 
      It is the missing half of a colour pipeline. microboot's renderer sets
-     outputEncoding = sRGB (this file's preview copies it, and so does the
+     outputColorSpace = sRGB (this file's preview copies it, and so does the
      game), but r128 has no ColorManagement: a material colour is taken as-is
      and treated as LINEAR, and only the final frame is encoded to sRGB. So an
      authored sRGB hex goes into the render one gamma step too bright and
@@ -1443,15 +1443,15 @@
     } catch (e) { return null; }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     /* THE PREVIEW MUST BE THE SAME PIPELINE AS THE GAME, or it lies about the
-       clothes. The first pass set outputEncoding = sRGB and no tone mapping,
+       clothes. The first pass set outputColorSpace = sRGB and no tone mapping,
        which is half of microboot's renderer — and the missing half is exactly
        the half that holds dark values down. The black suit photographed as
        MID-GREY next to a charcoal one and the two were indistinguishable in
        the grid: a linear->sRGB transfer with no ACES roll-off lifts 0x121318
-       to roughly 0x4a4d55. microboot.js sets outputEncoding sRGB AND
+       to roughly 0x4a4d55. microboot.js sets outputColorSpace sRGB AND
        ACESFilmicToneMapping at exposure 1; copying both is what makes a black
        suit render black here and black on the sand. */
-    if (THREE.sRGBEncoding != null) renderer.outputEncoding = THREE.sRGBEncoding;   // r128 spelling
+    if (THREE.SRGBColorSpace != null) renderer.outputColorSpace = THREE.SRGBColorSpace;
     if (THREE.ACESFilmicToneMapping != null) renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
     const scene = new THREE.Scene();

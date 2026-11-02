@@ -572,11 +572,11 @@
     "  if (uTM < 0.5) accE = 1.0 - exp(-accE);",
     "  gl_FragColor = vec4(acc / alpha, 1.0);",
     "  #include <tonemapping_fragment>",
-    "  #include <encodings_fragment>",
+    "  #include <colorspace_fragment>",
     "  vec3 sC = gl_FragColor.rgb * alpha;",
     "  gl_FragColor = vec4(accE, 1.0);",
     "  #include <tonemapping_fragment>",
-    "  #include <encodings_fragment>",
+    "  #include <colorspace_fragment>",
     "  gl_FragColor = vec4(sC + gl_FragColor.rgb, alpha);",
     "}",
   ].join("\n");
@@ -1173,9 +1173,9 @@
       }
     }
     const A = sparkGeo.attributes;
-    A.position.updateRange.offset = 0; A.position.updateRange.count = sp.n * 12; A.position.needsUpdate = true;
-    A.aOther.updateRange.offset = 0; A.aOther.updateRange.count = sp.n * 12; A.aOther.needsUpdate = true;
-    A.aCol.updateRange.offset = 0; A.aCol.updateRange.count = sp.n * 16; A.aCol.needsUpdate = true;
+    A.position.clearUpdateRanges(); A.position.addUpdateRange(0, sp.n * 12); A.position.needsUpdate = true;
+    A.aOther.clearUpdateRanges(); A.aOther.addUpdateRange(0, sp.n * 12); A.aOther.needsUpdate = true;
+    A.aCol.clearUpdateRanges(); A.aCol.addUpdateRange(0, sp.n * 16); A.aCol.needsUpdate = true;
     sparkGeo.setDrawRange(0, sp.n * 6);
     sparkMesh.visible = sp.n > 0;
     const cv = CBZ.renderer && CBZ.renderer.domElement;
@@ -1253,7 +1253,7 @@
           "  if (a < 0.01) discard;",
           "  gl_FragColor = vec4(vCol.rgb, a);",
           "  #include <tonemapping_fragment>",
-          "  #include <encodings_fragment>",
+          "  #include <colorspace_fragment>",
           "}",
         ].join("\n"),
         transparent: true, depthWrite: false, depthTest: true,
@@ -1372,10 +1372,10 @@
       }
     }
     const A = clodGeo.attributes;
-    A.position.updateRange.offset = 0; A.position.updateRange.count = cl.n * 12; A.position.needsUpdate = true;
-    A.aOther.updateRange.offset = 0; A.aOther.updateRange.count = cl.n * 12; A.aOther.needsUpdate = true;
-    A.aCol.updateRange.offset = 0; A.aCol.updateRange.count = cl.n * 16; A.aCol.needsUpdate = true;
-    A.aSide.updateRange.offset = 0; A.aSide.updateRange.count = cl.n * 8; A.aSide.needsUpdate = true;
+    A.position.clearUpdateRanges(); A.position.addUpdateRange(0, cl.n * 12); A.position.needsUpdate = true;
+    A.aOther.clearUpdateRanges(); A.aOther.addUpdateRange(0, cl.n * 12); A.aOther.needsUpdate = true;
+    A.aCol.clearUpdateRanges(); A.aCol.addUpdateRange(0, cl.n * 16); A.aCol.needsUpdate = true;
+    A.aSide.clearUpdateRanges(); A.aSide.addUpdateRange(0, cl.n * 8); A.aSide.needsUpdate = true;
     clodGeo.setDrawRange(0, cl.n * 6);
     clodMesh.visible = cl.n > 0;
     const cv = CBZ.renderer && CBZ.renderer.domElement;
@@ -1407,7 +1407,7 @@
     g.addColorStop(1.0, "rgba(255,190,130,0)");
     x.fillStyle = g; x.fillRect(0, 0, S, S);
     glareTex = new THREE.CanvasTexture(cv);
-    glareTex.encoding = THREE.sRGBEncoding;
+    glareTex.colorSpace = THREE.SRGBColorSpace;
     return glareTex;
   }
   function glare(x, y, z, o) {

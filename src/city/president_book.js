@@ -56,7 +56,7 @@
   function canvas() { const c = document.createElement("canvas"); c.width = (CBZ.presPapers && CBZ.presPapers.PAGE_W) || 768; c.height = (CBZ.presPapers && CBZ.presPapers.PAGE_H) || 1024; return c; }
   function texOf(cv) {
     const t = new THREE.CanvasTexture(cv);
-    t.encoding = THREE.sRGBEncoding;
+    t.colorSpace = THREE.SRGBColorSpace;
     t.minFilter = THREE.LinearMipmapLinearFilter;
     try { t.anisotropy = Math.min(8, CBZ.renderer.capabilities.getMaxAnisotropy()); } catch (e) { t.anisotropy = 4; }
     return t;
@@ -85,7 +85,7 @@
     x.font = "bold 17px Georgia, serif"; x.textAlign = "center";
     x.fillText("THE PRESIDENT'S", 128, 214); x.fillText("DAILY BRIEF", 128, 238);
     x.font = "bold 11px 'Courier New', monospace"; x.fillText("TOP SECRET", 128, 300);
-    const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding;
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
     return t;
   }
 

@@ -41,9 +41,9 @@
        surface and `fbm` is module-private. Twelve lines, cited, not forked
        behaviour — if that file's noise ever changes, nothing here breaks.
      · world/textures_surface.js:337-346 — mkTex. THE ENCODING LINE IS THE
-       POINT: core/renderer.js:501 sets renderer.outputEncoding =
-       sRGBEncoding, so a colour CanvasTexture that does not declare
-       `encoding = THREE.sRGBEncoding` gets its sRGB bytes read as linear and
+       POINT: core/renderer.js:501 sets renderer.outputColorSpace =
+       SRGBColorSpace, so a colour CanvasTexture that does not declare
+       `encoding = THREE.SRGBColorSpace` gets its sRGB bytes read as linear and
        comes out visibly washed out and too bright. masonryTex does not set
        it (and its bricks are correspondingly pale); surfaceMaps does. We do.
      · core/packages.js:94 canvasTex — the create-canvas-draw-wrap shape.
@@ -1080,10 +1080,10 @@
     t.generateMipmaps = true;
     t.minFilter = THREE.LinearMipmapLinearFilter;
     t.magFilter = THREE.LinearFilter;
-    // r128 spelling. renderer.outputEncoding is sRGBEncoding
+    // renderer.outputColorSpace is SRGBColorSpace
     // (core/renderer.js:501), so a colour map that does not say this comes
     // out washed out and too bright — see masonryTex, which does not say it.
-    if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
     t.needsUpdate = true;
     return t;
   }

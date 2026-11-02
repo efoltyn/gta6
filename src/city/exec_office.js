@@ -119,7 +119,7 @@
       t = new THREE.CanvasTexture(cv);
     }
     if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; }
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     tex[key] = t;
     return t;

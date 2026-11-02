@@ -195,7 +195,7 @@
     t.anisotropy = 2;
     // painted colour, so it is sRGB like the renderer's output (core/renderer.js);
     // uploaded linear it washed every sign and seal out pale
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     TEX[key] = t;
     return t;
   }

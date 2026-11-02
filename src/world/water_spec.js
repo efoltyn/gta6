@@ -3142,7 +3142,7 @@
       "  gl_Position = projectionMatrix * mvPosition;",
       "  #include <fog_vertex>",
       // Ocean atmosphere accumulates more slowly than city-block fog.
-      fogScale !== 1 ? "  #ifdef USE_FOG\n    fogDepth *= " + gnum(fogScale) + ";\n  #endif" : "",
+      fogScale !== 1 ? "  #ifdef USE_FOG\n    vFogDepth *= " + gnum(fogScale) + ";\n  #endif" : "",
       "}",
     ].join("\n");
     const cut = kind === "city"
@@ -3204,7 +3204,7 @@
         "  #ifdef USE_FOG\n  outColor = mix(outColor, fogColor, smoothstep(3600.0, 6400.0, vSeaMisc.y));\n  #endif" : "",
       "  gl_FragColor = vec4(outColor, uSeaOpacity * cbzSeaAlpha(V, vSeaMisc.y, under, solid) * outAlpha);",
       "  #include <tonemapping_fragment>",
-      "  #include <encodings_fragment>",
+      "  #include <colorspace_fragment>",
       "  #include <fog_fragment>",
       "}",
     ].join("\n");
@@ -4502,7 +4502,7 @@
       "  if ( a < 0.02 ) discard;",
       "  gl_FragColor = vec4( col, a );",
       "  #include <tonemapping_fragment>",
-      "  #include <encodings_fragment>",
+      "  #include <colorspace_fragment>",
       "  #include <fog_fragment>",
       "}",
     ].join("\n");
@@ -4674,7 +4674,7 @@
       "  }",
       "  gl_FragColor = vec4( vCol.rgb, a );",
       "  #include <tonemapping_fragment>",
-      "  #include <encodings_fragment>",
+      "  #include <colorspace_fragment>",
       "  #include <fog_fragment>",
       "}",
     ].join("\n");
@@ -5216,7 +5216,7 @@
       "    gl_FragColor = vec4(c, 1.0);",
       "  }",
       "  #include <tonemapping_fragment>",
-      "  #include <encodings_fragment>",
+      "  #include <colorspace_fragment>",
       "  #include <fog_fragment>",
       "}",
     ].join("\n");

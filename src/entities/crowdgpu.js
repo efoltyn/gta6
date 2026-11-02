@@ -831,7 +831,7 @@
         const M = meshes[k], P = M.P;
         P.geo.instanceCount = P.n;
         M.mesh.visible = P.n > 0;
-        if (P.n) for (const a in P.A) { const at = P.A[a]; at.needsUpdate = true; if (at.updateRange) { at.updateRange.offset = 0; at.updateRange.count = P.n * 4; } }
+        if (P.n) for (const a in P.A) { const at = P.A[a]; at.needsUpdate = true; at.clearUpdateRanges(); at.addUpdateRange(0, P.n * 4); }
       }
       L.drawn = [0, n1, n2, n3];
       // the extent of the people drawn (plus a body, plus the walk the GPU

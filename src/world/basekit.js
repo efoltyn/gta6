@@ -1184,7 +1184,7 @@
       const tex = new THREE.CanvasTexture(cv);
       tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true;
       tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
-      if (THREE.sRGBEncoding && host.srgb) tex.encoding = THREE.sRGBEncoding;
+      if (THREE.SRGBColorSpace && host.srgb) tex.colorSpace = THREE.SRGBColorSpace;
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(2 * P.hx, 2 * P.hz), new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex }));
       plane.rotation.x = -Math.PI / 2;
       plane.position.y = (host.y || 0) + (host.groundLift || 0);

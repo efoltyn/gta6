@@ -235,7 +235,7 @@
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
-    if (srgb && THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+    if (srgb && THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
     return t;
   }
   P.canvasTex = canvasTex;
@@ -384,7 +384,7 @@
     "  float afD = length( vAfW + viewMatrix[3].xyz * mat3( viewMatrix ) );",
     "  float afNear = 1.0 - smoothstep( 50.0, 200.0, afD );",
     "  vec3 afC = diffuseColor.rgb;",
-    "  vec3 afS = LinearTosRGB( vec4( afC, 1.0 ) ).rgb;",
+    "  vec3 afS = sRGBTransferOETF( vec4( afC, 1.0 ) ).rgb;",
     "  float afL = dot( afS, vec3( 0.299, 0.587, 0.114 ) );",
     "  float afLl = dot( afC, vec3( 0.299, 0.587, 0.114 ) );",
     "  float afGr = smoothstep( 0.03, 0.09, afS.g - max( afS.r, afS.b ) );",
@@ -816,7 +816,7 @@
     }
     const tex = new THREE.CanvasTexture(cvs);
     tex.anisotropy = 4;
-    if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
     // painted once: the canvas goes back once it is on the GPU (core/texfree.js)
     if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);
     const faceGeos = [], frame = [], legs = [];

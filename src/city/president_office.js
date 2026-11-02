@@ -167,7 +167,7 @@
   }
   function canvasTex(cv) {
     const t = new THREE.CanvasTexture(cv);
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;     // match core/renderer.js
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;     // match core/renderer.js
     t.anisotropy = 4;
     return t;
   }

@@ -144,7 +144,7 @@
     g.fillStyle = "#ffffff"; g.fillRect(21, 3, 22, 3);          // the fitting itself
     _roomTexLit = new THREE.CanvasTexture(cv);
     _roomTexLit.wrapS = _roomTexLit.wrapT = THREE.ClampToEdgeWrapping;
-    if (THREE.sRGBEncoding != null) _roomTexLit.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) _roomTexLit.colorSpace = THREE.SRGBColorSpace;
     // MIPMAPPED (64x128 is a power of two): a 1.5 m window at 100 m covers ~10
     // pixels of this 64-texel painting, and with LinearFilter alone every turn
     // of the view re-picked which texels landed: the room panels shimmered
@@ -185,7 +185,7 @@
     g.fillStyle = sg; g.fillRect(0, 0, 64, 128);
     _roomTex = new THREE.CanvasTexture(cv);
     _roomTex.wrapS = _roomTex.wrapT = THREE.ClampToEdgeWrapping;
-    if (THREE.sRGBEncoding != null) _roomTex.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace != null) _roomTex.colorSpace = THREE.SRGBColorSpace;
     // mipmapped: seen far more often from the street than near (see the lit twin)
     _roomTex.minFilter = THREE.LinearMipmapLinearFilter;
     _roomTex.generateMipmaps = true;

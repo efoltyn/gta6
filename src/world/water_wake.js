@@ -166,8 +166,8 @@
    tail last), so three RIBs and a superyacht degrade gracefully instead of
    starving the rain and the splashes. Ribbons cost the pools NOTHING.
 
-   COLOUR: this renderer runs the legacy linear pipeline (outputEncoding =
-   sRGBEncoding, ColorManagement off), so an authored hex is treated as LINEAR
+   COLOUR: this renderer runs the legacy linear pipeline (outputColorSpace =
+   SRGBColorSpace, ColorManagement off), so an authored hex is treated as LINEAR
    and comes out brighter than the swatch — the trap that once rendered 0x53211f
    as rgb(140,85,70). Foam and spray are authored at the top of the range where
    that transform is nearly the identity, and calibrated against a screenshot of
@@ -398,7 +398,7 @@
         "  vec3 col = mix(uTint, vec3(1.0), clamp(0.34 + 0.66 * up * (0.45 + 0.55 * core), 0.0, 1.0));",
         "  gl_FragColor = vec4(col, min(1.0, a));",
         "  #include <tonemapping_fragment>",
-        "  #include <encodings_fragment>",
+        "  #include <colorspace_fragment>",
         "}",
       ].join("\n"),
     });
@@ -611,7 +611,7 @@
         "  if (a < 0.004) discard;",
         "  gl_FragColor = vec4(uColor, clamp(a, 0.0, 1.0));",
         "  #include <tonemapping_fragment>",
-        "  #include <encodings_fragment>",
+        "  #include <colorspace_fragment>",
         "}",
       ].join("\n"),
     });
@@ -917,7 +917,7 @@
         "  col = mix(col, uThin, film * 0.35);",
         "  gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));",
         "  #include <tonemapping_fragment>",
-        "  #include <encodings_fragment>",
+        "  #include <colorspace_fragment>",
         "  #include <fog_fragment>",
         "}",
       ].join("\n"),
@@ -1395,7 +1395,7 @@
         "  if (a < 0.004) discard;",
         "  gl_FragColor = vec4(uColor, a);",
         "  #include <tonemapping_fragment>",
-        "  #include <encodings_fragment>",
+        "  #include <colorspace_fragment>",
         "}",
       ].join("\n"),
     });

@@ -239,10 +239,10 @@
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat,
     });
     rt.texture.generateMipmaps = false;
-    // match the main renderer's outputEncoding (core/renderer.js: sRGBEncoding)
+    // match the main renderer's outputColorSpace (core/renderer.js: SRGBColorSpace)
     // so the scene renders into the RT the same way it renders to screen, and
     // the unlit monitor reads back with correct (non-washed) colour.
-    if (THREE.sRGBEncoding) rt.texture.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace) rt.texture.colorSpace = THREE.SRGBColorSpace;
     feedCam = new THREE.PerspectiveCamera(FEED_FOV, RT_W / RT_H, 0.3, FEED_FAR_FULL);
     // unlit screen: the RT texture reads as self-lit; the colour multiply gives
     // the desaturated, cool CCTV cast with no custom shader.

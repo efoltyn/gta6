@@ -859,7 +859,7 @@
            toneMapping() and linearToOutputTexel() before mixing, so the sky/
            fog seam law stays exact under ACES.
          * scene.background = a THREE.Color goes to gl.clearColor RAW. r128's
-           WebGLBackground does not tone map it and outputEncoding does not
+           WebGLBackground does not tone map it and outputColorSpace does not
            touch it. So the takeover below was clearing the buffer to the
            LINEAR value while every fogged pixel around it showed the graded
            one. Reconstructed for the deep medium: raw (10,19,24) against a

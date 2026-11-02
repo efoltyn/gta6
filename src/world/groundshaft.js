@@ -169,7 +169,7 @@
   function hs(h, a, b) { return CBZ.hash01 ? CBZ.hash01(h.seed + a * 13.7, b * 7.3, 91) : rnd(); }
 
   /* EVERY HEX IN THIS FILE IS A PAINT CHIP (sRGB), AND A VERTEX COLOUR IS
-     LINEAR. The renderer writes sRGB out (outputEncoding = sRGBEncoding) and
+     LINEAR. The renderer writes sRGB out (outputColorSpace = SRGBColorSpace) and
      r128 multiplies vertex colours in as they stand, so `((hex >> 16) & 255)
      / 255` laid 0x2f2e2c down as 0.18 linear, three times the island's own
      asphalt (0.055) and grey, and the 0x8e8b83 base course as 0.55: the rim
@@ -1043,7 +1043,8 @@
   function rimCrackMat() {
     if (!crackMat) {
       crackMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, blending: THREE.MultiplyBlending, transparent: true, depthWrite: false,
+        color: 0xffffff, blending: THREE.CustomBlending, blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,   // r128's MultiplyBlending (r187's wants premultiplied alpha)
+        transparent: true, depthWrite: false,
         fog: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
       });
       crackMat.color.setRGB(0.12, 0.112, 0.105);

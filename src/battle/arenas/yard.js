@@ -41,7 +41,7 @@ function cvs(S, H) { const c = document.createElement("canvas"); c.width = S; c.
 function wrapTex(canvas, srgb) {
   const t = new THREE.CanvasTexture(canvas);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  if (srgb) t.encoding = THREE.sRGBEncoding;
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
   return t;
 }

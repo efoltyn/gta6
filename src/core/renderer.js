@@ -38,8 +38,10 @@
         toneMapping()/linearToOutputTexel() pair before mixing — the seam is
         now mathematically exact instead of approximately right.
 
-   All three are r128-native (outputEncoding/sRGBEncoding, CustomToneMapping;
-   NOT colorSpace, NOT OutputPass) and each is a one-line revert.
+   All three ride three's own WebGL hooks (outputColorSpace, CustomToneMapping,
+   the fog ShaderChunks; three r187, NOT an OutputPass) and each is a one-line
+   revert. The WebGPU renderer (?gpu=webgpu) has none of these hooks: they
+   become nodes in the TSL phase (docs/plan/three-r187.md).
 ============================================================ */
 (function () {
   "use strict";
@@ -80,7 +82,7 @@
   function glslF(v, d) { return (+v).toFixed(d == null ? 4 : d); }
 
   /* ---------------- 1. tone mapping + film grade -----------------------
-     r128 ships an empty `vec3 CustomToneMapping( vec3 color ) { return color; }`
+     three (r128 and still r187) ships an empty `vec3 CustomToneMapping( vec3 color ) { return color; }`
      stub at the end of the tonemapping_pars_fragment chunk precisely so an
      application can define its own curve. We replace the stub, then select
      THREE.CustomToneMapping. If the stub ever moves (a THREE upgrade), the
@@ -206,8 +208,8 @@
        cbzFogY  — the fragment's WORLD height (aerial perspective / the melt).
        cbzFogRaw— the TRUE view depth, captured at the tail of the chunk, i.e.
                   BEFORE any builder's post-multiply. world/terrain_overhaul.js's
-                  `terrainFogScale` and world.js's ocean both rewrite `fogDepth`
-                  AFTER including this chunk, so `fogDepth` downstream is a
+                  `terrainFogScale` and world.js's ocean both rewrite `vFogDepth`
+                  AFTER including this chunk, so `vFogDepth` downstream is a
                   LOOK, not a distance. AERIAL_FOG_MELT needs the real one.
        cbzFogUp — THE UP-COMPONENT OF THE LINE OF SIGHT, u in Duntley's contrast
                   transmittance law (see UNDERWATER ANISOTROPY below). +1 when
@@ -220,13 +222,13 @@
                   unit up-component with one length() and one divide. No camera
                   position, no second matrix, correct under skinning and
                   instancing because mvPosition already carries both.
-                  NOTE the radial length and NOT fogDepth: r128's fog_vertex
-                  sets fogDepth = -mvPosition.z, which is PLANAR depth, and
+                  NOTE the radial length and NOT vFogDepth: r128's fog_vertex
+                  sets vFogDepth = -mvPosition.z, which is PLANAR depth, and
                   Δy/planar is not a unit vector's y off-axis (it reads 0.577
                   for a fragment 30° up instead of 0.500).
        APPEND, never rewrite: world.js's ocean, terrain_overhaul.js and
        src/vendor/WaterReflect.js all include these chunks and post-process
-       `fogDepth` right after. Appending leaves every one of those intact. */
+       `vFogDepth` right after. Appending leaves every one of those intact. */
     THREE.ShaderChunk.fog_pars_vertex = parsV +
       "\n#ifdef USE_FOG\n  varying float cbzFogY;\n  varying float cbzFogRaw;\n" +
       "  varying float cbzFogUp;\n#endif\n";
@@ -234,7 +236,7 @@
       "\n#ifdef USE_FOG\n" +
       "  float cbzRelY = dot( mvPosition.xyz, viewMatrix[1].xyz );\n" +
       "  cbzFogY = " + CAM_Y + " + cbzRelY;\n" +
-      "  cbzFogRaw = fogDepth;\n" +
+      "  cbzFogRaw = vFogDepth;\n" +
       "  cbzFogUp = cbzRelY / max( length( mvPosition.xyz ), 1e-4 );\n" +
       "#endif\n";
     THREE.ShaderChunk.fog_pars_fragment = parsF +
@@ -327,7 +329,7 @@
       // are 0, which is every dry frame in the game — same float, bit for bit.
       // The max() is the clamp Kd/c -> 1 needs (the upward range would run to
       // infinity); 0.30 caps the look-up advantage at 3.3x the level range.
-      "  float cbzFogD = fogDepth * max( 0.30,",
+      "  float cbzFogD = vFogDepth * max( 0.30,",
       "    ( 1.0 - cbzUwAniso * cbzFogUp ) * ( 1.0 + cbzUwSil * max( 0.0, -cbzFogUp ) ) );",
       "  #ifdef FOG_EXP2",
       "    float cbzFogFactor = 1.0 - exp( - fogDensity * fogDensity * cbzFogD * cbzFogD );",
@@ -387,11 +389,11 @@
 
          (2) THE TERRAIN NEVER ENTERS THE FOG SLAB AT ALL. world/
              terrain_overhaul.js's `CBZ.terrainFogScale(mat, scale)` appends
-             `fogDepth *= uFogScale` after this chunk, and every large ground
+             `vFogDepth *= uFogScale` after this chunk, and every large ground
              surface in the game is wrapped in it: the continent plate at
              0.08 (city/continent.js), the snow massif and its ground at 0.12
              (city/biome_snow.js), the worldSurface sweep and world.js's own
-             ground at 0.10. At 0.08 a plate 4200 m away reports a fogDepth of
+             ground at 0.10. At 0.08 a plate 4200 m away reports a vFogDepth of
              336 m — BELOW fogNear (672) — so smoothstep(fogNear, fogFar, .)
              returns exactly 0. To reach full fog that plate would have to be
              fogFar/0.08 = 52,500 m away; the far plane is 7,000 m. Terrain
@@ -427,7 +429,7 @@
          cbzMelt — runs on cbzFogRaw, the TRUE view depth captured at the tail
                    of fog_vertex before any builder's post-multiply. That is
                    what makes this immune to fault (2): whatever a surface has
-                   done to its own fogDepth for near-field taste, its distance
+                   done to its own vFogDepth for near-field taste, its distance
                    from the eye is still its distance from the eye, and the
                    melt is driven by that. It completes exactly where the base
                    fog saturates (fogFar), so any pixel at or beyond fogFar is
@@ -472,7 +474,7 @@
           "  #endif",
           "  float cbzAir = 1.0 - exp( - max( " + CAM_Y + ", 0.0 ) / " + glslF(2 * H, 2) + " );",
           // Lift the FACTOR, not the haze: a builder that scaled its own
-          // fogDepth has already forced the base smoothstep to zero, so
+          // vFogDepth has already forced the base smoothstep to zero, so
           // multiplying it by anything is still zero.
           // (the open-sea air melts at the end of the air instead, below)
           "  cbzFogFactor = mix( cbzFogFactor, 1.0, cbzAir * cbzMelt * ( 1.0 - cbzTailOn ) );"
@@ -498,7 +500,7 @@
       );
     }
     body.push(
-      "  gl_FragColor.rgb = mix( gl_FragColor.rgb, cbzFogCol, saturate( cbzFogFactor ) );",
+      "  gl_FragColor.rgb = mix( gl_FragColor.rgb, cbzFogCol, clamp( cbzFogFactor, 0.0, 1.0 ) );",   // (not saturate(): a ShaderMaterial's prefix has no <common>)
       "#endif"
     );
     THREE.ShaderChunk.fog_fragment = body.join("\n");
@@ -509,13 +511,15 @@
   let SAFE_BOOT = false;
   try { SAFE_BOOT = sessionStorage.getItem("cbz.safeboot") === "1"; } catch (e) {}
   CBZ.safeBoot = SAFE_BOOT;
-  const renderer = new THREE.WebGLRenderer({
+  // THE renderer switch (tools/three/entry.js): WebGLRenderer, or the
+  // WebGPURenderer behind ?gpu=webgpu
+  const renderer = THREE.createRenderer({
     antialias: !SAFE_BOOT,           // MSAA — crisp edges on the blocky geometry
     powerPreference: "high-performance",
     stencil: false,                  // we never use the stencil buffer
   });
   renderer.setSize(innerWidth, innerHeight);
-  // GFX_SHADER_DIAGNOSTICS — r128 queries LINK_STATUS + getProgramInfoLog for
+  // GFX_SHADER_DIAGNOSTICS — three queries LINK_STATUS + getProgramInfoLog for
   // EVERY compiled program when debug.checkShaderErrors is on (its default),
   // and each query forces a full CPU↔GPU pipeline sync while Metal finishes
   // the compile. Measured 2026-08-03 (M1 Pro, seed 90210): ~19s of a 47s
@@ -526,14 +530,14 @@
   if (CBZ.CONFIG.GFX_SHADER_DIAGNOSTICS == null) CBZ.CONFIG.GFX_SHADER_DIAGNOSTICS = false;
   renderer.debug.checkShaderErrors = !!CBZ.CONFIG.GFX_SHADER_DIAGNOSTICS;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap; // softer shadow edges; res driven by core/quality.js
+  renderer.shadowMap.type = THREE.PCFShadowMap; // r187: PCF is the soft one now (5 Vogel taps x hardware compare, shadow.radius wide); PCFSoftShadowMap was removed. res driven by core/quality.js
   // The sun creeps across the sky (core/daynight.js's per-mode day), so the shadow
   // map barely changes frame-to-frame. Re-rendering the entire scene from the
   // light's POV every frame is wasted work — instead we drive updates manually
   // (see the throttle below), which reclaims a full shadow pass on most frames.
   renderer.shadowMap.autoUpdate = false;
   renderer.shadowMap.needsUpdate = true;
-  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   if (toneMode) {
     renderer.toneMapping = toneMode;
     renderer.toneMappingExposure = +CBZ.CONFIG.RENDER_EXPOSURE || 1;
@@ -587,7 +591,13 @@
      LENGTH is part of the dirty test — but only while the values are non-zero,
      because a fresh program already reads the zeros we would be writing.
   ============================================================ */
-  (function installFogAniso() {
+  // The two pushes below and the shadow gate write straight into WebGL
+  // programs / WebGLShadowMap. Under ?gpu=webgpu (a WebGPURenderer: no
+  // ShaderChunk fog, no programs list) they are no-ops until the node port
+  // (docs/plan/three-r187.md).
+  const WEBGL = !!renderer.isWebGLRenderer;
+  if (!WEBGL) { CBZ.setFogAniso = function () {}; CBZ.setFarAir = function () {}; }
+  if (WEBGL) (function installFogAniso() {
     const gl = renderer.getContext();
     let sentA = 0, sentS = 0, sentLen = -1;
     CBZ.setFogAniso = function (aniso, sil) {
@@ -627,7 +637,7 @@
      are up and CBZ.setFarAir(0) when they come down; a program compiled
      since the last push (the cache grew, or its newest entry changed) gets
      it on the next call. */
-  (function installFarAir() {
+  if (WEBGL) (function installFarAir() {
     const gl = renderer.getContext();
     const sent = [0, 0, 0, 0];
     let sentLen = -1, sentLast = null;
@@ -698,7 +708,7 @@
   // land inside one of those wrote a map missing those buildings' shadows,
   // and the main view then used it until the next refresh. needsUpdate stays
   // set, so the next on-screen render does the refresh instead.
-  (function onScreenShadowPassOnly() {
+  if (WEBGL) (function onScreenShadowPassOnly() {
     const sm = renderer.shadowMap, pass = sm.render;
     sm.render = function (lights, scene, camera) {
       if (!sm.autoUpdate && renderer.getRenderTarget() !== null) return;

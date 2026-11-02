@@ -631,7 +631,7 @@
       c.restore();
     }
     const tex = new THREE.CanvasTexture(cv);
-    if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
     tex.needsUpdate = true;
     return tex;
@@ -875,7 +875,7 @@
           g.globalCompositeOperation = "saturation"; g.fillStyle = "#808080"; g.fillRect(0, 0, 192, 128);
           g.globalCompositeOperation = "source-over"; g.fillStyle = "rgba(75,81,88,0.62)"; g.fillRect(0, 0, 192, 128);
           const t = new THREE.CanvasTexture(cv);
-          if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+          if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
           m = new THREE.MeshLambertMaterial({ map: t, polygonOffset: true, polygonOffsetFactor: -2 });
           m._shared = true;
         }

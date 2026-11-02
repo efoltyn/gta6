@@ -425,6 +425,7 @@
     if (!THREE || !CBZ.makeCharacter) return false;
     try {
       const rend = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
+      rend.outputColorSpace = THREE.LinearSRGBColorSpace;   // r128's default (linear) output, as it always rendered
       rend.setPixelRatio(1);
       rend.setClearColor(0x000000, 0);
       const scene = new THREE.Scene();

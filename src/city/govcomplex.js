@@ -1247,7 +1247,7 @@
         }, { name: "estate-" + kind });
         map.wrapS = map.wrapT = kind === "helipad" ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
         map.anisotropy = aniso;
-        if (THREE.sRGBEncoding) map.encoding = THREE.sRGBEncoding;
+        if (THREE.SRGBColorSpace) map.colorSpace = THREE.SRGBColorSpace;
         const wantN = kind !== "helipad" && !!(CBZ.pbrMaterialsOn && CBZ.pbrMaterialsOn());
         let normal = null;
         if (wantN) {
@@ -1273,7 +1273,7 @@
       const map = new THREE.CanvasTexture(cc);
       map.wrapS = map.wrapT = kind === "helipad" ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
       map.anisotropy = aniso;
-      if (THREE.sRGBEncoding) map.encoding = THREE.sRGBEncoding;
+      if (THREE.SRGBColorSpace) map.colorSpace = THREE.SRGBColorSpace;
       let normal = null;
       // the normal map only feeds the PBR path (Lambert has no normalMap in
       // r128), and the helipad deck is paint on a slab, not a relief

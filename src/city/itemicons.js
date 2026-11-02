@@ -1067,7 +1067,7 @@
       R3.setPixelRatio(1);
       R3.setSize(ICON_PX, ICON_PX, false);
       R3.setClearColor(0x000000, 0);
-      if (T.sRGBEncoding != null) R3.outputEncoding = T.sRGBEncoding;   // r128 spelling
+      if (T.SRGBColorSpace != null) R3.outputColorSpace = T.SRGBColorSpace;
       RSCENE = new T.Scene();
       RHOLD = new T.Group();
       RSCENE.add(RHOLD);

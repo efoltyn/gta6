@@ -42,7 +42,7 @@
   function tex(THREE, cv, wrap) {
     if (!cv) return null;
     const t = new THREE.CanvasTexture(cv);
-    t.encoding = THREE.sRGBEncoding;
+    t.colorSpace = THREE.SRGBColorSpace;
     if (wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 4;
     return t;
@@ -59,7 +59,7 @@
     let t = null;
     if (CB && CB.lazyCanvasTexture && typeof document !== "undefined") {
       t = CB.lazyCanvasTexture(w, h, function (g, cv) { paint(g, cv); }, { name: name || "race-tex" });
-      t.encoding = THREE.sRGBEncoding;
+      t.colorSpace = THREE.SRGBColorSpace;
       if (wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping;
       t.anisotropy = 4;
       return t;
@@ -418,7 +418,7 @@
       g.fillStyle = "rgba(255,255,255," + a.toFixed(2) + ")"; g.fillRect(x, 0, 1, H);
     }
     for (let i = 0; i < 300; i++) { g.fillStyle = "rgba(255,255,255," + (R() * 0.4).toFixed(2) + ")"; g.fillRect(R() * W, R() * H, 1, 3 + R() * 10); }
-    const t = tex(THREE, cv, true); if (t) t.encoding = THREE.LinearEncoding;
+    const t = tex(THREE, cv, true); if (t) t.colorSpace = THREE.LinearSRGBColorSpace;
     return t;
   }
 
@@ -800,7 +800,7 @@
     function flush() {
       if (dirtyHi < 0) return;
       for (const [a, per] of [[aPos, 12], [aUV, 8], [aFade, 12]]) {
-        a.updateRange.offset = dirtyLo * per; a.updateRange.count = (dirtyHi - dirtyLo + 1) * per; a.needsUpdate = true;
+        a.clearUpdateRanges(); a.addUpdateRange(dirtyLo * per, (dirtyHi - dirtyLo + 1) * per); a.needsUpdate = true;
       }
       dirtyLo = Infinity; dirtyHi = -1;
     }

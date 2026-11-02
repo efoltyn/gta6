@@ -806,7 +806,7 @@
             "{ vec3 bw = abs(normalize(vCamoN)); bw = bw * bw * bw * bw; bw /= (bw.x + bw.y + bw.z + 1e-5);\n" +
             "  vec3 q = vCamoP * uCamoScale;\n" +
             "  vec3 cc = texture2D(uCamo, q.zy).rgb * bw.x + texture2D(uCamo, q.xz).rgb * bw.y + texture2D(uCamo, q.xy).rgb * bw.z;\n" +
-            "  diffuseColor.rgb = sRGBToLinear(vec4(cc, 1.0)).rgb * uCamoTint; }");
+            "  diffuseColor.rgb = cc * uCamoTint; }");   // the tile is sRGB-tagged (warlord/camo.js): the GPU decodes it
       };
       mat.customProgramCacheKey = function () { return "cbz-camo"; };
     }

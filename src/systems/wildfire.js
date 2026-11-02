@@ -337,9 +337,9 @@
   const FOG_FADE = `
     #ifdef USE_FOG
       #ifdef FOG_EXP2
-        float fogF = 1.0 - exp(- fogDensity * fogDensity * fogDepth * fogDepth);
+        float fogF = 1.0 - exp(- fogDensity * fogDensity * vFogDepth * vFogDepth);
       #else
-        float fogF = smoothstep(fogNear, fogFar, fogDepth);
+        float fogF = smoothstep(fogNear, fogFar, vFogDepth);
       #endif
       gl_FragColor.a *= 1.0 - fogF;
     #endif`;

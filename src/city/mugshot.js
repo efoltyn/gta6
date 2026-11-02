@@ -75,7 +75,7 @@
       // borrow the portrait context; stand up our own only if there isn't one
       let rend = CBZ.cityPortraitRenderer ? try_(function () { return CBZ.cityPortraitRenderer(); }, null) : null;
       let owned = false;
-      if (!rend) { rend = new THREE.WebGLRenderer({ antialias: true, alpha: true }); owned = true; }
+      if (!rend) { rend = new THREE.WebGLRenderer({ antialias: true, alpha: true }); rend.outputColorSpace = THREE.LinearSRGBColorSpace; owned = true; }   // r128's default (linear) output, as it always rendered
       rend.setPixelRatio(1);
       rend.setClearColor(0x000000, 0);
       const scene = new THREE.Scene();

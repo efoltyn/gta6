@@ -367,22 +367,18 @@
   // one shared run of zeros for GPU slice hides (grown, never per call)
   let _zeros = new Float32Array(0);
   function zeros(n) { if (_zeros.length < n) _zeros = new Float32Array(Math.max(n, _zeros.length * 2)); return _zeros.subarray(0, n); }
-  /* UPLOAD THE SLICE, NOT THE TILE. needsUpdate alone makes r128 re-send the
+  /* UPLOAD THE SLICE, NOT THE TILE. needsUpdate alone makes three re-send the
      whole attribute (bufferSubData of the full array): one building hidden in
      a street tile re-uploaded every vertex of that tile, and a nuke's teardown
-     queue hides one or more buildings a frame for seconds. updateRange sends
-     just the touched span; several slices hidden in one frame upload as their
-     union. Only a range THIS function set is ever widened: if anything else
-     bumped the attribute since (its own full update may still be pending),
-     the range is cleared and three uploads the whole array as before. */
+     queue hides one or more buildings a frame for seconds. An update range
+     sends just the touched span; several slices hidden in one frame each add
+     theirs (three merges them and clears the list once uploaded). Only ranges
+     THIS function added are kept: if anything else bumped the attribute since
+     (its own full update may still be pending), the list is cleared and three
+     uploads the whole array as before. */
   function uploadRange(attr, i0, n) {
-    const ur = attr.updateRange;
-    if (ur && attr._cbzRV !== undefined && attr._cbzRV === attr.version) {
-      if (ur.count > 0) {
-        const a = Math.min(ur.offset, i0), b = Math.max(ur.offset + ur.count, i0 + n);
-        ur.offset = a; ur.count = b - a;
-      } else { ur.offset = i0; ur.count = n; }
-    } else if (ur) ur.count = -1;
+    if (attr._cbzRV !== undefined && attr._cbzRV === attr.version) attr.addUpdateRange(i0, n);
+    else attr.clearUpdateRanges();
     attr.needsUpdate = true;
     attr._cbzRV = attr.version;
   }

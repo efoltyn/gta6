@@ -1941,7 +1941,7 @@
         o += q.p.length / 3;
       }
       if (o > o0) {
-        const up = function (a, k) { a.updateRange.offset = o0 * k; a.updateRange.count = (o - o0) * k; a.needsUpdate = true; };
+        const up = function (a, k) { a.clearUpdateRanges(); a.addUpdateRange(o0 * k, (o - o0) * k); a.needsUpdate = true; };
         up(A.position, 3); up(A.normal, 3); up(A.color, 3); up(A.uv, 2);
       }
       bk.nv = o;

@@ -93,7 +93,7 @@
      defines, a custom cache key / onBeforeCompile). */
   const sigSeen = new Set();
   let sigLight = null;
-  function texSig(t) { return t ? "T" + (t.encoding | 0) + (t.isCubeTexture ? "c" : "") + (t.mapping | 0) : "-"; }
+  function texSig(t) { return t ? "T" + (t.colorSpace || "") + (t.isCubeTexture ? "c" : "") + (t.mapping | 0) : "-"; }
   function progSig(m, bits) {
     let k = m.type + "|" + bits + "|" + (m.vertexColors ? 1 : 0) + (m.fog ? 1 : 0) + (m.flatShading ? 1 : 0) + (m.transparent ? 1 : 0) +
       (m.alphaTest > 0 ? 1 : 0) + (m.dithering ? 1 : 0) + (m.premultipliedAlpha ? 1 : 0) + (m.toneMapped === false ? 0 : 1) +
@@ -274,7 +274,7 @@
       if (L.castShadow) n.s++;
     }
     lightSig = n.D + "|" + n.P + "|" + n.S + "|" + n.H + "|" + n.R + "|" + n.s + "|" + (r.shadowMap.enabled ? 1 : 0) + "|" + (sc.fog ? (sc.fog.isFogExp2 ? 2 : 1) : 0) +
-      (opts && opts.target ? "|t" + (opts.target.texture ? opts.target.texture.encoding : 0) : "");
+      (opts && opts.target ? "|t" + (opts.target.texture ? opts.target.texture.colorSpace : 0) : "");
     const reps = [];
     // no light casts (the phone tier turns the sun's shadow off): the shadow
     // pass never runs, so its depth programs would be compiled for nothing
@@ -427,7 +427,7 @@
     UP.mat.name = "upload-stand-in";
     UP.mat._shared = true;
     UP.scene = new THREE.Scene();
-    UP.scene.autoUpdate = false;
+    UP.scene.matrixWorldAutoUpdate = false;
     UP.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     UP.cam.updateMatrixWorld();
     UP.rt = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false });

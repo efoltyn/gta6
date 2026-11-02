@@ -246,7 +246,7 @@
     try {
       const tex = new THREE.CanvasTexture(envCanvas());
       tex.mapping = THREE.EquirectangularReflectionMapping;
-      if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;
+      if (THREE.SRGBColorSpace != null) tex.colorSpace = THREE.SRGBColorSpace;
       tex.needsUpdate = true;
       _env = tex;
       for (let i = 0; i < _allMats.length; i++) { _allMats[i].envMap = _env; _allMats[i].needsUpdate = true; }

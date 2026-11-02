@@ -2310,7 +2310,7 @@
     const v = new THREE.Vector3();
     for (let i = 0; i < nv; i++) {
       v.fromBufferAttribute(P, i);
-      sm.boneTransform(i, v);
+      sm.applyBoneTransform(i, v);
       v.applyMatrix4(sm.matrixWorld);
       pos[i * 3] = v.x; pos[i * 3 + 1] = v.y; pos[i * 3 + 2] = v.z;
     }

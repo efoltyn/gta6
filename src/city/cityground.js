@@ -59,7 +59,7 @@
    COLOUR IS DECODED BY HAND. Custom samplers in r128 are sampled raw, so
    every tint here is converted sRGB -> linear in JS once, and the detail
    maps are LINEAR multipliers (mean 0.5 = x1.0), never colours. There is no
-   canvas and no texture.encoding to get wrong (the pale-road bug).
+   canvas and no texture.colorSpace to get wrong (the pale-road bug).
 
    COST: one draw call for every lot pad (was three), no geometry change, no
    new lights, no per-frame CPU beyond one uniform ease. Boot: ~3 detail

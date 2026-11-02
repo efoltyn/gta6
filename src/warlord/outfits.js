@@ -231,7 +231,7 @@
      white paper.
 
      It is not the palette. `core/microboot.js:1234` sets
-     `renderer.outputEncoding = THREE.sRGBEncoding`, so r128 hands
+     `renderer.outputColorSpace = THREE.SRGBColorSpace`, so r128 hands
      `material.color` to the shader AS LINEAR and applies the sRGB transfer
      once at output. An sRGB-looking hex therefore carries roughly twice the
      reflectance it looks like, and comes back off the screen a long way
@@ -251,7 +251,7 @@
      in — the conversion belongs at the seam, not in the data.
 
      NOT converted, and each for a reason: the clothes.js atlas (its canvas is
-     sRGB bytes and is tagged sRGBEncoding below, so three does the transfer),
+     sRGB bytes and is tagged SRGBColorSpace below, so three does the transfer),
      camo.js's textures (it tags its own), and skin/hair (entities/character.js
      owns those and a half-converted body is worse than an unconverted one).
 
@@ -937,7 +937,7 @@
   /* THE ATLAS IS sRGB BYTES AND NEVER SAID SO. city/clothes.js paints its
      garments into a 2d canvas in ordinary sRGB hex — "#8a4b30" means what it
      looks like — and then builds a CanvasTexture WITHOUT setting
-     `encoding = THREE.sRGBEncoding`. On a renderer with outputEncoding sRGB
+     `encoding = THREE.SRGBColorSpace`. On a renderer with outputColorSpace sRGB
      (this page, microboot.js:1234) three reads those bytes as linear and the
      transfer is applied a second time on the way out, so every painted
      uniform in the engine renders roughly a stop and a half over. It is the
@@ -950,18 +950,15 @@
      shared, the flag is a declaration rather than a behaviour, and the city
      would want the same correction the day anybody looks. Worth pushing
      upstream — noted in the report. Revert with the same flag as the flat
-     path, since the two have to agree or the atlas and the trousers fight.
-
-     r128 spelling throughout: `encoding` / `THREE.sRGBEncoding`, never
-     `colorSpace` (that is r152+ and does not exist here). */
+     path, since the two have to agree or the atlas and the trousers fight. */
   function tagAtlasSRGB(pr, ch) {
-    if (!LINEAR || !THREE || !THREE.sRGBEncoding || !CBZ.cityClothesTex) return;
+    if (!LINEAR || !THREE || !THREE.SRGBColorSpace || !CBZ.cityClothesTex) return;
     let set = null;
     try { set = CBZ.cityClothesTex(pr, ch); } catch (e) { return; }
     if (!set) return;
     const fix = function (t, m) {
-      if (!t || t.encoding === THREE.sRGBEncoding) return;
-      t.encoding = THREE.sRGBEncoding;
+      if (!t || t.colorSpace === THREE.SRGBColorSpace) return;
+      t.colorSpace = THREE.SRGBColorSpace;
       t.needsUpdate = true;
       if (m) m.needsUpdate = true;
     };

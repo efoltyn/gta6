@@ -1020,7 +1020,7 @@
      the top of it. Both halves of that picture are bugs in this function.
 
        THE COLOUR. props.js's header does the arithmetic with a calculator
-       and three photographs: this page runs outputEncoding = sRGBEncoding
+       and three photographs: this page runs outputColorSpace = SRGBColorSpace
        with ACES over it, so a hex typed into a material is STORED linear and
        encoded on the way out, and desert.js's sand lands at 0xE8-0xF1 on
        screen. The huts were painted 0xbaa07a as though a hex meant what a
@@ -2149,7 +2149,7 @@
   /* THE MEN ON THIS MAP HAVE BEEN RENDERING TWICE AS BRIGHT AS THE MEN IN THE
      GAME, and it is the same bug three other files in this module already have
      a paragraph about. `microboot.js:1234` sets
-     `renderer.outputEncoding = THREE.sRGBEncoding`, so r128 takes every colour
+     `renderer.outputColorSpace = THREE.SRGBColorSpace`, so r128 takes every colour
      handed to the shader — material.color AND instanceColor — as LINEAR and
      applies the sRGB transfer once on the way out. outfits.js's tables are
      authored in sRGB (that is what a hex means to a person) and its apply()

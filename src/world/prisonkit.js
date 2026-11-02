@@ -62,7 +62,7 @@
 
    TEXTURES ARE AUTHORED, NOT LOADED. Canvas + a seeded LCG, like
    world/textures_surface.js and the cell finishes: a byte-deterministic
-   surface with no asset to ship. They are UNTAGGED (no sRGBEncoding) on
+   surface with no asset to ship. They are UNTAGGED (no SRGBColorSpace) on
    purpose — the compound's palette (CBZ.mat / cmat / checkerTex) is
    untagged, and a tagged map beside an untagged wall reads a stop darker.
 

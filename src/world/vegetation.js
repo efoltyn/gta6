@@ -85,7 +85,7 @@
   }
   function finishTexture(cv, repeat) {
     const t = new THREE.CanvasTexture(cv);
-    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;   // r128 spelling — pinned
+    if (THREE.SRGBColorSpace != null) t.colorSpace = THREE.SRGBColorSpace;
     t.wrapS = t.wrapT = repeat ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
     t.minFilter = THREE.LinearMipmapLinearFilter;
     t.magFilter = THREE.LinearFilter;

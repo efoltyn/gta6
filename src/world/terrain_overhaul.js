@@ -582,8 +582,8 @@
     out.multiplyScalar(0.90 + wob * 0.12);
   }
 
-  // ---- the fogDepth scale — terrain reads solid past the city fog wall.
-  //      r128: fog_vertex sets `fogDepth = -mvPosition.z` (varying). Shared
+  // ---- the vFogDepth scale — terrain reads solid past the city fog wall.
+  //      r128: fog_vertex sets `vFogDepth = -mvPosition.z` (varying). Shared
   //      helper (biome_snow + continent also call it). 0.12: from the city
   //      core the far ranges sit ~40-55% into fog (genuine atmospheric
   //      recession, still tracking the LIVE fog color day/night); from the
@@ -594,7 +594,7 @@
      uFogScale exists so a range 3 km out recedes toward the sky instead of
      popping forward like a sticker, and 0.12 is right for that. Underwater it
      is a disaster, and it is what made the shallow bottom read as a
-     featureless pale sheet: `fogDepth *= 0.12` means the seabed 9 m in front
+     featureless pale sheet: `vFogDepth *= 0.12` means the seabed 9 m in front
      of a diver is shaded as though it were ONE metre away, so it never takes
      the water's colour at all. No amount of albedo work can fix that — the
      medium was simply never being applied to the ground.
@@ -618,7 +618,7 @@
      whichever adopter compiled first at a given light count supplied the
      source for all of them. With 9 point lights the continent plate won
      (fog scaled); pinned at 16 a bare trail decal won, and the whole
-     Redhollow floor and continent plate lost `fogDepth *= uFogScale`: the
+     Redhollow floor and continent plate lost `vFogDepth *= uFogScale`: the
      aerial horizon fogged out pale (tools/speed.mjs look guard, 2026-09-29).
      Each wrapper appends its tag to the key it found. */
   function chainKey(mat, tag) {
@@ -654,7 +654,7 @@
       sh.uniforms.uFogScale = fogScaleUniform(scale);
       sh.vertexShader = "uniform float uFogScale;\n" + sh.vertexShader
         .replace("#include <fog_vertex>",
-          "#include <fog_vertex>\n#ifdef USE_FOG\n\tfogDepth *= uFogScale;\n#endif");
+          "#include <fog_vertex>\n#ifdef USE_FOG\n\tvFogDepth *= uFogScale;\n#endif");
     };
     // A surface whose fog is scaled down has had its atmosphere taken away
     // for kilometres; the air (aerialHaze, below) gives the physical part

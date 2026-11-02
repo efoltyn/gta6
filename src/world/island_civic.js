@@ -427,7 +427,7 @@
       x.fillText("THE ISLES", W / 2, 322);
     }
     const t = new window.THREE.CanvasTexture(cv);
-    if (window.THREE.sRGBEncoding != null) t.encoding = window.THREE.sRGBEncoding;
+    if (window.THREE.SRGBColorSpace != null) t.colorSpace = window.THREE.SRGBColorSpace;
     cache[key] = t;
     return t;
   }

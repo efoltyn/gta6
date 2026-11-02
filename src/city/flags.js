@@ -1072,7 +1072,7 @@
   function texH(ratio) { return Math.max(64, Math.round(TEX_W * ratio[0] / ratio[1])); }
   function newTex(canvas) {
     const t = new THREE.CanvasTexture(canvas);
-    if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     t.name = "flag";
     return t;

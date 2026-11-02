@@ -9120,7 +9120,7 @@
     for (let i = 0; i < 128; i += 2) { x.fillRect(i, 0, 1, 128); x.fillRect(0, i, 128, 1); }
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.encoding = THREE.sRGBEncoding;
+    t.colorSpace = THREE.SRGBColorSpace;
     // 8 stripes per texture across a 4 m awning -> two repeats = 25 cm stripes
     t.repeat.set(along ? 1 : 2, along ? 2 : 1);
     m = new THREE.MeshLambertMaterial({ map: t });

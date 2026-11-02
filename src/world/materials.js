@@ -345,7 +345,7 @@
   //      already baked in. The prison ground needs per-surface, NON-uniform
   //      repeats (the walkway is 1 x 6), and writing .repeat on a shared
   //      instance would corrupt every other consumer of that cache entry;
-  //    - it tags colour maps THREE.sRGBEncoding, correct on its own terms, but
+  //    - it tags colour maps THREE.SRGBColorSpace, correct on its own terms, but
   //      this compound's palette (mat / cmat / checkerTex / concreteTex) is
   //      authored UNTAGGED, so a tagged map reads visibly darker than the wall
   //      it meets;
@@ -649,7 +649,7 @@
     // (2026-09-27): read as linear under the sRGB output, the yard's concrete
     // and bitumen came out near-white on a phone (the owner's screenshot), a
     // pale sheet with no weight. Tagged, the authored tones are the tones.
-    if (opts.srgb) t.encoding = THREE.sRGBEncoding;
+    if (opts.srgb) t.colorSpace = THREE.SRGBColorSpace;
     t.needsUpdate = true;
     t._cbzGround = k;
     if (!own) {

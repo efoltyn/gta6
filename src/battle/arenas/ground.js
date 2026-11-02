@@ -452,8 +452,8 @@ CBZ.battleGround = (function () {
     if (!MK.mesh || MK.dirtyHi < 0) return;
     const lo = MK.dirtyLo, n = MK.dirtyHi - lo + 1;
     const im = MK.mesh.instanceMatrix;
-    im.updateRange.offset = lo * 16; im.updateRange.count = n * 16; im.needsUpdate = true;
-    MK.attr.updateRange.offset = lo * 4; MK.attr.updateRange.count = n * 4; MK.attr.needsUpdate = true;
+    im.clearUpdateRanges(); im.addUpdateRange(lo * 16, n * 16); im.needsUpdate = true;
+    MK.attr.clearUpdateRanges(); MK.attr.addUpdateRange(lo * 4, n * 4); MK.attr.needsUpdate = true;
     MK.dirtyLo = 1e9; MK.dirtyHi = -1;
   }
   // a dark burn on the ground, any surface
@@ -612,8 +612,8 @@ CBZ.battleGround = (function () {
     G.sprays++;
     ["position", "aV", "aC", "aT"].forEach(function (k) {
       const A = SP.a[k];
-      if (SP.head > lo) { A.updateRange.offset = lo * A.itemSize; A.updateRange.count = (SP.head - lo) * A.itemSize; }
-      else { A.updateRange.offset = 0; A.updateRange.count = -1; }
+      if (SP.head > lo) { A.clearUpdateRanges(); A.addUpdateRange(lo * A.itemSize, (SP.head - lo) * A.itemSize); }
+      else { A.clearUpdateRanges(); }
       A.needsUpdate = true;
     });
   }
@@ -736,7 +736,7 @@ CBZ.battleGround = (function () {
       for (let k = 0; k < it.n; k++) {
         const vi = idx ? idx.getX(k) : k;
         _bv.v.fromBufferAttribute(pos, vi);
-        if (o.isSkinnedMesh && o.boneTransform) { o.boneTransform(vi, _bv.v); }
+        if (o.isSkinnedMesh && o.applyBoneTransform) { o.applyBoneTransform(vi, _bv.v); }
         _bv.v.applyMatrix4(o.matrixWorld);
         if (nor) _bv.n.fromBufferAttribute(nor, vi).applyMatrix3(_bv.nm).normalize(); else _bv.n.set(0, 1, 0);
         const w = b.n;
@@ -750,7 +750,7 @@ CBZ.battleGround = (function () {
       }
     }
     [P, N, C].forEach(function (A) {
-      A.updateRange.offset = start * 3; A.updateRange.count = (b.n - start) * 3; A.needsUpdate = true;
+      A.clearUpdateRanges(); A.addUpdateRange(start * 3, (b.n - start) * 3); A.needsUpdate = true;
     });
     b.mesh.geometry.setDrawRange(0, b.n);
     G.kept++; G.keptVerts += verts;

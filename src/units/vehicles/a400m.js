@@ -1048,7 +1048,7 @@
         if (g) {
           F.paint(g, d, 190, 100, { grain: false });
           const t = new THREE.CanvasTexture(c);
-          if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+          if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
           m = new THREE.MeshLambertMaterial({ map: t, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 });
           m._shared = true;
         }

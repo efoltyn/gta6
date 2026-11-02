@@ -381,7 +381,7 @@
   function texOf(THREE, c, wrap) {
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = wrap === false ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
-    if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;      // authored sRGB: decode it
+    if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;      // authored sRGB: decode it
     try { if (CBZ.renderer && CBZ.renderer.capabilities) t.anisotropy = Math.min(8, CBZ.renderer.capabilities.getMaxAnisotropy()); } catch (e) {}
     return t;
   }

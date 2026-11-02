@@ -157,7 +157,7 @@
     if (this._cbzLazy && this._cbzLazyPaint && CBZ.lazyCanvasTexture) {
       const L = this._cbzLazyPaint, t = CBZ.lazyCanvasTexture(L.w, L.h, L.paint, L.opts);
       const src = this, keys = ["name", "mapping", "wrapS", "wrapT", "magFilter", "minFilter", "anisotropy", "format", "internalFormat", "type",
-        "rotation", "matrixAutoUpdate", "generateMipmaps", "premultiplyAlpha", "flipY", "unpackAlignment", "encoding"];
+        "rotation", "matrixAutoUpdate", "generateMipmaps", "premultiplyAlpha", "flipY", "unpackAlignment", "colorSpace"];
       for (let i = 0; i < keys.length; i++) t[keys[i]] = src[keys[i]];
       t.offset.copy(src.offset); t.repeat.copy(src.repeat); t.center.copy(src.center); t.matrix.copy(src.matrix);
       t.needsUpdate = true;

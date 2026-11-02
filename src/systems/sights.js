@@ -591,7 +591,7 @@
     rtSize = TOUCH ? 320 : 512;
     rt = new THREE.WebGLRenderTarget(rtSize, rtSize, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat });
     rt.texture.generateMipmaps = false;
-    if (THREE.sRGBEncoding) rt.texture.encoding = THREE.sRGBEncoding;
+    if (THREE.SRGBColorSpace) rt.texture.colorSpace = THREE.SRGBColorSpace;
     rtCam = new THREE.PerspectiveCamera(10, 1, 0.3, 2000);
     return rt;
   }
