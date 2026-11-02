@@ -709,6 +709,9 @@
         .replace("#include <map_fragment>", [
           "#include <map_fragment>",
           "diffuseColor.rgb *= pTone;",
+          // a decoded photo is more saturated than the game's palette around
+          // it; a touch of grey keeps warm mid-tones skin and not leather
+          "diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), diffuseColor.rgb, 0.85 );",
           // STUBBLE AND A SHAVED SCALP: hair that is cut to the skin is a fine
           // dark grain in the hair's colour over the beard / scalp masks; up
           // close it is follicles, at a distance their average (no shimmer)
@@ -1105,7 +1108,10 @@
     const skinKey = skinFor(look, cast), sk = M.skins[skinKey];
     P.skinKey = skinKey;
     const ageKey = (cast.ageY < 34 ? "young" : cast.ageY < 58 ? "middleage" : "old") + "_" + (cast.f ? "female" : "male");
-    const sm = skinMaterial({ skinTex: tex(sk.map), reliefTex: tex(M.skinNormals[ageKey] || M.skinNormals.young_male) });
+    // the skin photo DECODED (sRGB): its own contrast and colour (lips, flush,
+    // shadow under the brow) survive; its linear mean is then scaled to the
+    // casting's tone, so the person still matches the cast
+    const sm = skinMaterial({ skinTex: tex(sk.map, true), reliefTex: tex(M.skinNormals[ageKey] || M.skinNormals.young_male) });
     const hex = look.skin != null ? look.skin : 0xcf9a72;
     const tgt = [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
     // the palest casting hexes are brighter than any real skin's albedo; a
@@ -1115,8 +1121,10 @@
     // THE CASTING'S TONE, THE TEXTURE'S LIFE: brightness follows the hex all
     // the way, hue only halfway, so a pale hex does not bleach the real skin's
     // own warmth and flush out of it (a per-channel match turns it porcelain)
-    const lt = 0.2126 * tgt[0] + 0.7152 * tgt[1] + 0.0722 * tgt[2], ls = 0.2126 * sk.tone[0] + 0.7152 * sk.tone[1] + 0.0722 * sk.tone[2];
-    const kl = lt / Math.max(0.02, ls), hue = function (i) { return clampT(kl * Math.sqrt((tgt[i] / sk.tone[i]) / kl)); };
+    const lin = function (c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    const st = [lin(sk.tone[0]), lin(sk.tone[1]), lin(sk.tone[2])];
+    const lt = 0.2126 * tgt[0] + 0.7152 * tgt[1] + 0.0722 * tgt[2], ls = 0.2126 * st[0] + 0.7152 * st[1] + 0.0722 * st[2];
+    const kl = lt / Math.max(0.01, ls), hue = function (i) { return Math.max(0.3, Math.min(6, kl * Math.sqrt((tgt[i] / Math.max(0.005, st[i])) / kl))); };
     sm.userData.u.pTone.value.set(hue(0), hue(1), hue(2));
     const hairHex = look.hair != null ? look.hair : 0x2a2018;
     const hc = new THREE.Color(hairHex);

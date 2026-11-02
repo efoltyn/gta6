@@ -240,11 +240,19 @@ def people_render(spec: dict, out: str = "", shot: str = "portrait", samples: in
             pass
         scn.view_settings.exposure = -0.35
         scn.render.resolution_x, scn.render.resolution_y = {int(width)}, {int(height)}
-        top = max((bm.matrix_world @ v.co).z for v in bm.data.vertices)
+        # frame on the EYES (MPFB keeps hidden helper geometry above the skull,
+        # so the mesh's own top is not the top of the head)
+        ek = spec.get("eyes", "high-poly").lower()
+        eyes = [o for o in bpy.data.objects if o.type == "MESH" and ek in o.name.lower()]
+        if eyes:
+            ez = sum((eyes[0].matrix_world @ v.co).z for v in eyes[0].data.vertices) / max(1, len(eyes[0].data.vertices))
+            top = ez + 0.11
+        else:
+            top = max((bm.matrix_world @ v.co).z for v in bm.data.vertices)
         cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam")); scn.collection.objects.link(cam); scn.camera = cam
         import mathutils
         if "{shot}" == "portrait":
-            cam.data.lens = 85; tgt = mathutils.Vector((0, 0, top - 0.13)); cam.location = (0.25, -1.05, top - 0.1)
+            cam.data.lens = 85; tgt = mathutils.Vector((0, 0, top - 0.15)); cam.location = (0.24, -1.0, top - 0.12)
         else:
             cam.data.lens = 50; tgt = mathutils.Vector((0, 0, top * 0.52)); cam.location = (0.9, -3.6, top * 0.62)
         cam.rotation_euler = (tgt - cam.location).to_track_quat("-Z", "Y").to_euler()
