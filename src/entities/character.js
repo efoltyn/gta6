@@ -4374,6 +4374,7 @@
   }
 
   function makeCharacter(c) {
+    if (CBZ.stickLook && CBZ.stickSpec) c = CBZ.stickSpec(c);   // STICK CITY (entities/stickman.js): the skeleton without the look
     const g = new THREE.Group();
     // Keep the world/physics root at scale 1: ragdoll, KO, child rigs and mode
     // reset code legitimately animate `group.scale`. The authored voxel model
@@ -4956,6 +4957,7 @@
     // every face on the page lives (blinks, looks, talks, LODs) through
     // systems/facial.js; a page without it keeps a still, near-tier face
     if (typeof CBZ.faceRegister === "function") CBZ.faceRegister(rig);
+    if (CBZ.stickLook && CBZ.stickify) CBZ.stickify(rig, c);   // STICK CITY: every part becomes a stick, the hat goes on
     return rig;
   }
 

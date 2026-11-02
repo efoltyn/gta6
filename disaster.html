@@ -32,7 +32,7 @@
 <link rel="stylesheet" href="css/city.css?v=noobj1022">
 <link rel="stylesheet" href="css/campaign.css?v=pres1028">
 <link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
-<link rel="stylesheet" href="css/title_hub.css?v=islesave1022">
+<link rel="stylesheet" href="css/title_hub.css?v=rail1031">
 <script>
   /* THIS PAGE IS ONE GAME. src/config.js reads START_MODE and opens there, so
      the island is the only world this build ever stands up — no city, no
@@ -598,7 +598,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=looks1022b"></script>
+  <script src="src/entities/character.js?v=stick1102"></script>
   <script src="src/entities/headwear.js?v=armourm1011"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -606,6 +606,9 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/eyewear.js?v=armourm1011"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
   <script src="src/entities/watch.js?v=memflat1029"></script>
+  <!-- STICK CITY: the hat library (every hat procedural, one merged geometry each) and the stick look (?stick=1 or CBZ.STICK_LOOK; off = nothing). After character.js and the dressing modules it stubs (footwear, headwear, jewelry_kit, eyewear, watch, tattoo); before player.js (the player body is built at load) and crowdgpu.js (its hat gear compiles off CBZ.stickLook). -->
+  <script src="src/entities/hats.js?v=stick1102"></script>
+  <script src="src/entities/stickman.js?v=stick1102"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -640,7 +643,7 @@ document.body.appendChild(b);}}catch(e){}})();
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=inf1028c"></script>
+<script src="src/entities/crowdgpu.js?v=stick1102"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -1284,6 +1287,8 @@ document.body.appendChild(b);}}catch(e){}})();
      companion system (both self-register as high-order landmasses). -->
 <script src="src/city/wildlife_rig.js?v=sharkfix3"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
+<script src="src/city/wildlife/beast_kit.js?v=beast1"></script>
+<script src="src/city/wildlife/beast_bodies.js?v=beast1"></script>
 <script src="src/city/wildlife/aquatic.js?v=sweep0929"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
@@ -1340,6 +1345,8 @@ document.body.appendChild(b);}}catch(e){}})();
      demand ladder: a mugger, a doorman, a corner crew, a guard asking first).
      peds.js think() yields to it; nothing runs at parse. -->
 <script src="src/city/ladder.js?v=cmd1022o"></script>
+<!-- THE BLENDER PEOPLE: the nearest peds wear real skinned bodies (MakeHuman CC0 pack, assets/people) driven by their own procedural rig; after pedinstance.js (it hands rigs back) and character.js (facePose) -->
+<script src="src/entities/people.js?v=people1102b"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1383,7 +1390,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=both1029"></script>
-<script src="src/city/vehicles.js?v=both1029"></script>
+<script src="src/city/vehicles.js?v=stick1102"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playeraircraft.js?v=islesmem1029"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1812,7 +1819,7 @@ document.body.appendChild(b);}}catch(e){}})();
      always-updater is in the sort -->
 <!-- projected decals: blood cut out of the struck mesh's own triangles (cars) -->
 <script src="src/systems/surfacedecal.js?v=carblood930"></script>
-<script src="src/systems/gore.js?v=canvas1029"></script>
+<script src="src/systems/gore.js?v=people1102"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused

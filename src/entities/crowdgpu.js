@@ -229,6 +229,13 @@
      Register before the first bake; without any, the bake is what it was. */
   const GEAR = [];
   const S_GEAR = 8;
+  // HAT(lookRecord) -> {k, color} | null: the hat a crowd look wears (Stick City)
+  let HAT = null;
+  function hatCode(id) {
+    const lk = LOOKS[id]; if (!lk) return 0;
+    if (lk._hat == null) { const h = HAT(lk); lk._hat = h && h.k > 0 ? h.k * 65536 + 256 * palIndex(h.color) : 0; }
+    return lk._hat;
+  }
   function damp(c, t, r, dt) { return c + (t - c) * (1 - Math.exp(-r * dt)); }
   function slotOf(mesh, region) {
     const nm = mesh.name || "";
@@ -445,7 +452,10 @@
   // WHAT THIS PERSON WEARS: iVel.w = gear code (bit 0 helmet, bit 1 rifle, bit 2 kit,
   // bit 3 the rifle is the second one, bits 8..15 the helmet's palette index);
   // a part's class is aPart.y / 16
-  const GLSL_GEAR = "bool cgWorn() {\n  float g = floor(aPart.y / 16.0 + 0.001);\n  if (g < 0.5) return true;\n" +
+  // HATS (Stick City, entities/stickman.js): class 8 + k is hat k, worn when
+  // the instance's hat selector (iVel.w bits 16+) is k; only compiled in then
+  const GLSL_HAT = CBZ.stickLook ? "  if (g > 7.5) return abs(g - 8.0 - floor(iVel.w / 65536.0)) < 0.5;\n" : "";
+  const GLSL_GEAR = "bool cgWorn() {\n  float g = floor(aPart.y / 16.0 + 0.001);\n  if (g < 0.5) return true;\n" + GLSL_HAT +
     "  bool helm = mod(iVel.w, 2.0) > 0.5, gun = mod(floor(iVel.w / 2.0), 2.0) > 0.5, gun2 = mod(floor(iVel.w / 8.0), 2.0) > 0.5;\n" +
     "  if (g < 1.5) return helm;\n  if (g < 2.5) return gun && !gun2;\n  if (g < 3.5) return !helm;\n" +
     "  if (g < 4.5) return mod(floor(iVel.w / 4.0), 2.0) > 0.5;\n  return gun && gun2;\n}\n";
@@ -498,7 +508,7 @@
           "vec3 cgColor() {\n  float s = mod(aPart.y, 16.0);\n" +
           "  if (s < 0.5) return cgPal(iLook.x);\n  if (s < 1.5) return cgPal(iLook.y);\n  if (s < 2.5) return cgPal(iLook.z);\n" +
           "  if (s < 3.5) return cgPal(iLook.w);\n  if (s < 4.5) return cgPal(iLook2.x);\n  if (s < 5.5) return cgPal(iLook2.y);\n" +
-          "  if (s < 6.5) return color;\n  if (s < 7.5) return cgPal(iLook.x) * vec3(0.80, 0.60, 0.58);\n  return cgPal(floor(iVel.w / 256.0));\n}")
+          "  if (s < 6.5) return color;\n  if (s < 7.5) return cgPal(iLook.x) * vec3(0.80, 0.60, 0.58);\n  return cgPal(mod(floor(iVel.w / 256.0), 256.0));\n}")
         .replace("#include <color_vertex>", "")
         .replace("#include <beginnormal_vertex>", "cgSkin();\nvColor = cgColor();\nvec3 objectNormal = cgN;")
         .replace("#include <begin_vertex>", "vec3 transformed = cgP;");
@@ -699,7 +709,7 @@
       // vx, vz: optional velocity (m/s) the GPU carries the body along until the next cut
       add: function (x, y, z, yaw, lk, clip, phase, rate, scale, vx, vz, gear) {
         if (n >= cap) return -1;
-        sgear[n] = gear || 0;
+        sgear[n] = gear || (HAT ? hatCode(lk | 0) : 0);
         sx[n] = x; sy[n] = y; sz[n] = z; syaw[n] = yaw; slook[n] = lk | 0;
         const C = typeof clip === "number" ? CLIPS[clip] : CLIP_IX[clip];
         sclip[n] = C ? C.index : 0; sph[n] = phase || 0; srate[n] = rate || 0; sscale[n] = scale > 0 ? scale : 1;
@@ -905,6 +915,8 @@
       return Object.assign({}, TIER);
     },
     gear: function (fn) { if (typeof fn === "function" && GEAR.indexOf(fn) < 0) GEAR.push(fn); return !BAKE; },
+    // Stick City: fn(lookRecord) -> {k, color} picks each look's baked hat class
+    hats: function (fn) { HAT = typeof fn === "function" ? fn : null; for (let i = 0; i < LOOKS.length; i++) LOOKS[i]._hat = null; },
     // what one person wears, for layer.add's last argument
     gearCode: function (o) {
       if (!o) return 0;
