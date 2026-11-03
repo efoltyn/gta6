@@ -57,6 +57,11 @@
    stay alive, hidden on a layer the cameras do not draw, so hit tests,
    gore's state flags and every reader of them keep working.
 
+   EVERYONE IS REAL. Every person the game builds (character.js keeps them
+   all, the player too) wears a real body while they are in the world,
+   nearest first under a frame budget; each is culled as a whole off screen
+   and posed less often far off (see LOD). The box body is only a skeleton.
+
    API
      CBZ.people.ready()            -> Promise (loads the pack once)
      CBZ.people.attach(ch, look)   -> true when the rig now wears a person
@@ -288,7 +293,11 @@
   }
   const PHYS = { average: [0.5, 0.5], slim: [0.4, 0.22], heavy: [0.42, 0.92], muscular: [0.95, 0.6] };
   function castPerson(ch, look) {
-    const seed = look.seed != null ? look.seed >>> 0 : hashStr([look.skin, look.hair, look.build, look.heritage, look.hairStyle, look.beard, look.age, look.physique].join("|"));
+    // the look seeds the person; a rig's own id is mixed in (two guards built
+    // from one uniform and one skin tone are two men), except the player's,
+    // who is the same man every time he is built
+    const own = ch && ch.personId != null && ch !== CBZ.playerChar ? ch.personId : "";
+    const seed = look.seed != null ? look.seed >>> 0 : hashStr([look.skin, look.hair, look.build, look.heritage, look.hairStyle, look.beard, look.age, look.physique, own].join("|"));
     const r = rng(seed);
     const f = look.build === "f";
     const ageY = ch && ch.ageYears != null ? ch.ageYears : (look.age != null && isFinite(look.age) ? +look.age : 24 + Math.floor(r() * 22));
@@ -1502,6 +1511,13 @@
     P.hipLift = Math.max(0, mhHipNow.y - procHip.y);
     P.pelvisLocal = pelvisRest.applyMatrix4(_m4b.copy(rest.body.L).invert());
     P.hold = { l: 0, r: 0 };
+    // ---- the bounds every mesh of this person is culled by: the body at rest,
+    // as tall as they are round its middle (lying down, or a limb flung out,
+    // still inside it). A real person off screen is not drawn.
+    let lo = Infinity, hi = -Infinity, sx = 0, sz = 0;
+    for (let i = 0; i < pos.length; i += 3) { const y = pos[i + 1]; if (y < lo) lo = y; if (y > hi) hi = y; sx += pos[i]; sz += pos[i + 2]; }
+    const nv = pos.length / 3;
+    P.sphere = new THREE.Sphere(new THREE.Vector3(sx / nv, (lo + hi) / 2, sz / nv), Math.max(0.5, (hi - lo) * 1.2));
     // ---- the meshes (a city build leaves its markings for a quiet tick)
     P.deferMarks = !!(opts && opts.auto);
     dress(P, pos);
@@ -1699,7 +1715,9 @@
     m.bind(P.skeleton, new THREE.Matrix4());
     m.castShadow = opts.cast !== false;
     m.receiveShadow = true;
-    m.frustumCulled = false;
+    // culled as the PERSON (one sphere for all their meshes, posed or not)
+    m.frustumCulled = !!P.sphere;
+    if (P.sphere) m.boundingSphere = P.sphere;
     if (opts.order) m.renderOrder = opts.order;
     m.userData.people = P;
     P.root.add(m);
@@ -2128,9 +2146,33 @@
     c.L.decompose(c.p, c.q, c.s);
     return c;
   }
+  /* A person far off or out of view is posed less often (where they stand
+     moves with their group every frame; only the limbs wait): in view, every
+     frame to 25 m, every 2nd to 60, every 3rd past it; out of view every 8th.
+     With everyone real that is most of the cost of a crowd. */
+  const _frus = new THREE.Frustum(), _pv = new THREE.Matrix4(), _ws = new THREE.Sphere();
+  let _frusAt = -1;
+  function poseEvery(P, g) {
+    const cam = CBZ.camera, r = CBZ.renderer;
+    if (!cam || !P.sphere) return 1;
+    const f = r && r.info && r.info.render ? r.info.render.frame : -1;
+    if (f !== _frusAt) { _frusAt = f; _pv.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); _frus.setFromProjectionMatrix(_pv); }
+    _ws.copy(P.sphere).applyMatrix4(g.matrixWorld);
+    if (!_frus.intersectsSphere(_ws)) return 8;
+    const e = cam.matrixWorld.elements, d = Math.hypot(_ws.center.x - e[12], _ws.center.y - e[13], _ws.center.z - e[14]);
+    return d < 25 ? 1 : d < 60 ? 2 : 3;
+  }
   function drive(P) {
     const ch = P.ch, g = ch.group;
     if (!P.root || !P.root.visible) return;
+    if (P.posed && (P.beat = (P.beat || 0) + 1) % poseEvery(P, g)) {
+      // the limbs wait; a hat (a mesh of its own, not skinned) still goes
+      // where the head is now
+      const an = P.hatAnchor;
+      if (an) { an.matrixWorld.multiplyMatrices(P.root.matrixWorld, an.matrix); for (const c of an.children) c.updateMatrixWorld(true); }
+      return;
+    }
+    P.posed = true;
     _gInv.copy(g.matrixWorld).invert();
     const bones = P.bones, Sb = S.bones, J = P.J, A = P.A, rest = P.rest;
     // world (group-local) rotation of every bone: the delta of its proc node
@@ -2654,75 +2696,75 @@
     return true;
   }
   /* ================================================================ LOD
-     THE NEAREST PEOPLE ARE REAL. Every ~10 frames: the full-rig people the
-     game runs (CBZ.cityPeds / cityCops / npcs, plus any list a mode adds with
-     CBZ.people.track) inside PEOPLE_NEAR metres of the camera, nearest first,
-     up to PEOPLE_MAX, wear a real body; past PEOPLE_FAR (hysteresis) or out
-     of the lists they go back to the procedural one, which pedinstance.js
-     pools again. Builds spend ~12 ms a tick (one at least, three at most).
-     A rig that is re-dressed (its outfit key changes) is rebuilt in the new
-     clothes. */
-  const lists = [];
-  function track(name) { if (lists.indexOf(name) < 0) lists.push(name); }
-  ["cityPeds", "cityCops", "npcs"].forEach(track);
-  const isTouch = typeof navigator !== "undefined" && (navigator.maxTouchPoints > 1 || /iPhone|iPad|Android/i.test(navigator.userAgent || ""));
-  if (CBZ.CONFIG.PEOPLE_MAX == null) CBZ.CONFIG.PEOPLE_MAX = isTouch ? 8 : 18;
-  if (CBZ.CONFIG.PEOPLE_NEAR == null) CBZ.CONFIG.PEOPLE_NEAR = 28;
-  if (CBZ.CONFIG.PEOPLE_FAR == null) CBZ.CONFIG.PEOPLE_FAR = 34;
+     EVERYONE IS REAL. Every person the game builds (entities/character.js
+     keeps them all: pedestrians, cops, guards, inmates, the warden, the
+     player, bots, fighters, medics, players on the network) wears a real
+     body while they are in the world; the box body is only the skeleton that
+     drives it. Nearest first, built every frame while anyone waits, ~8 ms a
+     frame (one at least): a fresh prison is all real in a few seconds.
+     A person drawn by nobody (riding in a car, behind a door, not yet
+     revealed) earns no new body but keeps the one they have; a person who
+     leaves the world gives it back; a re-dressed rig is rebuilt in the new
+     clothes. What keeps a crowd of real people cheap is elsewhere: each is
+     culled as a whole off screen (P.sphere) and posed less often far off or
+     out of view (poseEvery). CONFIG.PEOPLE_MAX / PEOPLE_NEAR / PEOPLE_FAR
+     cap it only if a page sets them (a weak device). Toddlers under five keep
+     the box body: the pack has no body that small. */
+  const BUILD_MS = 8;
   let lodTick = 0;
-  const _cand = [];
-  function manage() {
-    if (CBZ.CONFIG.PEOPLE_SKINNED === false) { if (live.size) Array.from(live).forEach(function (P) { detach(P.ch); }); return; }
-    if (++lodTick % 10) return;
-    const cam = CBZ.camera;
-    if (!cam) return;
+  const _cand = [], queue = [];
+  function inWorld(g) { let o = g; while (o.parent) o = o.parent; return o === CBZ.scene; }
+  function plan(cam) {
+    const C = CBZ.CONFIG, max = C.PEOPLE_MAX != null ? C.PEOPLE_MAX : Infinity;
+    const near2 = C.PEOPLE_NEAR != null ? C.PEOPLE_NEAR * C.PEOPLE_NEAR : Infinity;
+    const far2 = C.PEOPLE_FAR != null ? C.PEOPLE_FAR * C.PEOPLE_FAR : Infinity;
     const ce = cam.matrixWorld.elements, cx = ce[12], cy = ce[13], cz = ce[14];
-    const near2 = CBZ.CONFIG.PEOPLE_NEAR * CBZ.CONFIG.PEOPLE_NEAR, far2 = CBZ.CONFIG.PEOPLE_FAR * CBZ.CONFIG.PEOPLE_FAR;
     _cand.length = 0;
-    const inList = new Set();
-    for (const nm of lists) {
-      const L = CBZ[nm];
-      if (!L || !L.length) continue;
-      for (let i = 0; i < L.length; i++) {
-        const a = L[i], ch = a && a.char;
-        if (!ch || !ch.group || !ch.skinSlots || !ch.parts || inList.has(ch)) continue;
-        inList.add(ch);
-        // a hidden ped (riding in a car, going through a door, not yet
-        // revealed) is drawn by nobody, so it earns no new body; one that is
-        // already real keeps it, so a short hide never costs a rebuild
-        if (a.culled || !ch.group.parent || !ch.group.visible && !ch._people || ch.child && (ch.ageYears || 10) < 5) continue;
-        const e = ch.group.matrixWorld.elements, dx = e[12] - cx, dy = e[13] - cy, dz = e[14] - cz;
-        const d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 < (ch._people ? far2 : near2)) _cand.push([d2, ch]);
-      }
-    }
+    if (CBZ.forEachCharacter) CBZ.forEachCharacter(function (ch) {
+      if (!ch.group || !ch.skinSlots || !ch.parts) return;
+      if (ch.child && (ch.ageYears || 10) < 5) return;
+      if (!ch._people && !ch.group.visible) return;
+      if (!inWorld(ch.group)) return;
+      const e = ch.group.matrixWorld.elements, dx = e[12] - cx, dy = e[13] - cy, dz = e[14] - cz;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < (ch._people ? far2 : near2)) _cand.push([d2, ch]);
+    });
+    queue.length = 0;
     if (!_cand.length && !live.size) return;
     if (!S.ready) { if (_cand.length && !loading) ready(); return; }
     _cand.sort(function (a, b) { return a[0] - b[0]; });
     const keep = new Set();
-    for (let i = 0; i < _cand.length && keep.size < CBZ.CONFIG.PEOPLE_MAX; i++) keep.add(_cand[i][1]);
-    // out: gone from the lists, detached, too far, over the cap, or re-dressed
+    for (let i = 0; i < _cand.length && keep.size < max; i++) keep.add(_cand[i][1]);
+    // out: gone from the world, over a cap a page set, or re-dressed
     Array.from(live).forEach(function (P) {
       const ch = P.ch;
       if (P.manual) return;
-      if (!keep.has(ch) || !ch.group.parent || ch._clothesKey !== P.clothesKey || (ch.look && ch.look !== P.look)) detach(ch);
+      if (!keep.has(ch) || !inWorld(ch.group) || ch._clothesKey !== P.clothesKey || (ch.look && ch.look !== P.look)) detach(ch);
     });
-    // a frame budget, not a count: people keep coming in until ~12 ms of
-    // building is spent (one at least, three at most); a tick that builds no
-    // one works out one queued outfit's markings instead
+    for (const ch of keep) if (!ch._people) queue.push(ch);
+  }
+  function manage() {
+    if (CBZ.CONFIG.PEOPLE_SKINNED === false) { if (live.size) Array.from(live).forEach(function (P) { detach(P.ch); }); return; }
+    const cam = CBZ.camera;
+    if (!cam) return;
+    if (++lodTick % 10 === 1) plan(cam);
+    // the queue, nearest first, ~8 ms a frame (one at least); a frame that
+    // builds no one works out one queued outfit's markings instead
     let built = 0;
-    const t0 = performance.now();
-    for (const ch of keep) {
-      if (ch._people) continue;
-      if (built >= 3 || (built >= 1 && performance.now() - t0 > 12)) break;
-      if (attach(ch, ch.look || {}, { auto: true })) built++;
+    if (queue.length && S.ready) {
+      const t0 = performance.now();
+      while (queue.length && (built < 1 || performance.now() - t0 < BUILD_MS)) {
+        const ch = queue.shift();
+        if (ch._people || !ch.group || !inWorld(ch.group)) continue;
+        if (attach(ch, ch.look || {}, { auto: true })) built++;
+      }
     }
-    if (!built) marksPump();
+    if (!built && lodTick % 10 === 5) marksPump();
   }
   if (CBZ.onAlways) CBZ.onAlways(95.8, manage);
 
   CBZ.people = {
-    ready: ready, attach: attach, detach: detach, wound: wound, sever: sever, track: track, manage: manage,
+    ready: ready, attach: attach, detach: detach, wound: wound, sever: sever, manage: manage,
     pending: function () { return pendingTex; },
     // the wardrobe's own view of an outfit (tools/people/wardrobe-look.mjs)
     _wardrobe: { table: WARDROBE, palette: function (worn) { return paletteOf(worn); }, marks: function (worn) { return marksOf(worn); } },

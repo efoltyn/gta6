@@ -73,6 +73,9 @@ CBZ.lab.kit("humans", {
     });
     W.skinnedN = 0;
     W.peopleReady = true;
+    // everyone the game builds is real now (people.js LOD): skinned=0 is the
+    // procedural body on purpose, so the real ones are switched off for it
+    if (CBZ.CONFIG) CBZ.CONFIG.PEOPLE_SKINNED = +P.skinned === 1;
     if (+P.skinned === 1 && CBZ.people) {
       W.peopleReady = false;
       CBZ.people.ready().then(function () {

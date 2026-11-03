@@ -9561,7 +9561,24 @@
      rig's job is to make the real body cheap to build; childhood.js's job is to
      prove nobody is faking one. */
 
-  CBZ.makeCharacter = makeCharacter;
+  /* EVERY PERSON IN ONE PLACE. Whoever builds a person (a pedestrian, a cop,
+     a guard, an inmate, the warden, the player, a bot, a fighter, a medic, a
+     player on the network) builds them here, so this is where a person is
+     known: entities/people.js gives every one of them in the world a real
+     body. Each gets an id of their own (their face is seeded from it, so two
+     guards built from one uniform are two men), and is held weakly: a rig the
+     game lets go of is not kept alive here. */
+  const RIGS = new Set();
+  let personN = 0;
+  const weak = typeof WeakRef === "function" ? function (o) { return new WeakRef(o); } : function (o) { return { deref: function () { return o; } }; };
+  CBZ.makeCharacter = function (c) {
+    const ch = makeCharacter(c);
+    if (ch) { ch.personId = ++personN; RIGS.add(weak(ch)); }
+    return ch;
+  };
+  CBZ.forEachCharacter = function (fn) {
+    RIGS.forEach(function (r) { const ch = r.deref(); if (ch) fn(ch); else RIGS.delete(r); });
+  };
   CBZ.charProfile = charProfile;
   // Published so city/clothes.js can stop keeping its own copy of it — a
   // duplicated geometry constant that drifts is a seam nobody notices until
