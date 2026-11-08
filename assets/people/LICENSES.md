@@ -55,6 +55,8 @@ packs the MakeHuman asset site lists as CC0. Built by `tools/people/build_pack.p
 | toigo_female_suit | cloth | MargaretToigo | suits01 | CC0 | http://www.makehumancommunity.org/node/1324 |
 | toigo_shift_dress | cloth | MargaretToigo | dress01 | CC0 | http://www.makehumancommunity.org/node/1724 |
 | toigo_halter_dress_knee_length | cloth | MargaretToigo | dress01 | CC0 | http://www.makehumancommunity.org/node/1853 |
+| toigo_basic_tucked_t-shirt | cloth | MargaretToigo | shirts01 | CC0 | http://www.makehumancommunity.org/node/1203 |
+| toigo_wool_pants | cloth | MargaretToigo | pants01 | CC0 | http://www.makehumancommunity.org/node/1194 |
 | shoes01 | shoes | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
 | shoes03 | shoes | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
 | shoes05 | shoes | makehuman_system | makehuman_system_assets | CC0 | http://www.makehumancommunity.org |
