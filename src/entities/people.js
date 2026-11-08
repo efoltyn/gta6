@@ -77,7 +77,9 @@
   const CBZ = window.CBZ;
   if (!CBZ || CBZ.people || typeof THREE === "undefined") return;
   CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PEOPLE_SKINNED == null) CBZ.CONFIG.PEOPLE_SKINNED = true;
+  // OFF by default (owner 2026-11-07: "I want the old humans back in all games, fuck the makehuman blender shit").
+  // The procedural humans draw; the Blender pack is never fetched. ?skinned=1 in the lab still shows them.
+  if (CBZ.CONFIG.PEOPLE_SKINNED == null) CBZ.CONFIG.PEOPLE_SKINNED = false;
 
   const SRC = (typeof document !== "undefined" && document.currentScript && document.currentScript.src) || "";
   const ROOT = SRC ? new URL("../../assets/people/", SRC).href : "assets/people/";
