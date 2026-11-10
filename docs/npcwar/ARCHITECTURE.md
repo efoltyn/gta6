@@ -1004,7 +1004,11 @@ War's adapter and what each man does with the answer.
   animal charging him, panic only from real cues).
 - **Casualties are not only the dead**: a bad hit can put a man DOWN (`m.downed`: bleeding,
   crawling, out of the fight; a mate drags him to cover, which stops the bleeding); a beaten brawler
-  quits and runs (systems/melee.js `quit`). Nobody surrenders in NPC War (removed 2026-11-10: it was
+  quits and runs (systems/melee.js `quit`). **At arm's length** a rifleman of the core with an empty
+  gun (or half way through a magazine change) strikes: the stock, the knife, a fist; the rig throws
+  it with entities/meleeposes.js. **Ammunition runs out**: every man carries his weapon's real load
+  (180 rounds for a carbine, 150 for an AK, 500 for an LMG); dry, he takes a magazine off a mate
+  who can spare one, goes in by hand when nobody is shooting, or keeps his head down. Nobody surrenders in NPC War (removed 2026-11-10: it was
   a dice roll that knelt men down mid-firefight; a cornered man makes his last stand).
 - **Tiers**: every unit gets `m.aiTier` (0 FULL / 1 MID / 2 FAR) from `m.lod` when the scale
   scheduler sets it, else the lens distance through `CBZ.battleLod.tierOf`. A MID man thinks on
@@ -1203,6 +1207,11 @@ row names one (`mun`), and its terminal dive lands it through `studio.boom({ mun
 ---
 
 ## 10. Checks: node only, no browser
+
+**These are instruments, not gates** (owner, 2026-11-10: "stop with the gates... run ultra fast,
+ultra custom, ultra slim tests for very specific things if you need to"). Do not run this list
+before a commit or a push, and do not report pass counts. Reach for ONE of them, or a ten-second
+script of your own, when you need a specific number about the thing you just changed.
 
 ```
 node tools/npcwar-check.mjs        <1 s. Every page file parses; no top-level name in two battle

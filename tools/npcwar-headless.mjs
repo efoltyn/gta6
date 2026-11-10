@@ -246,7 +246,7 @@ scenario(5, "snow, fields and the wood: the skins build and fight", async () => 
     await settle();
     const a0 = W.B().audit();
     check(a0.started && a0.map === map && a0.terrainLos !== undefined, map + ": booted (relief " + a0.relief + " m, terrain sight " + a0.terrainLos + ")");
-    const a = run(W, 240);
+    const a = run(W, 900);          // (a fight between equals is minutes: scenario 1)
     check(a.over, map + ": it ended (" + a.simT + " s, winner " + a.winner + ")");
   }
 });

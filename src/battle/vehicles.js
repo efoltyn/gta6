@@ -228,7 +228,25 @@ function makeVehicle(teamId, i, id) {
   if (air) {
     // stats.ingress (m): a bomber starts its run from beyond the horizon, far
     // enough out that its first pass is a real run (release distance + line-up)
-    const back = (S.ingress || 700) + (i % 4) * 90;
+    /* A JET'S FIRST PASS IS A REAL RUN. Its release point is kilometres short
+       of the mark (a bomb let go level from 4,500 m at 250 m/s flies 7.5 km),
+       and an airframe that starts inside that cannot drop: it overflew the
+       fight, went 12 km out to turn round, and delivered nothing for the
+       first three minutes of a war that was over in two (measured: an F-35,
+       0 weapons in 135 s). It starts its run-in from outside its own
+       release distance, lined up, so the first weapon lands in the first
+       minute; every pass after that is the racetrack's. */
+    let runIn = 0;
+    if (def.drive !== "rotor" && !S.airdrop) {
+      const spd = S.speed || 200, alt = S.alt || 300;
+      for (const w of (def.weapons || [])) {
+        if (!w) continue;
+        const rel = w.kind === "bombs" ? spd * Math.sqrt(2 * (w.alt || alt) / 9.81)
+          : (w.kind === "missile" || w.kind === "sam") ? (w.range || 6000) * 0.85 : (w.range || 1500);
+        runIn = Math.max(runIn, rel + spd * 6);
+      }
+    }
+    const back = Math.max(S.ingress || 700, runIn) + (i % 4) * 90;
     px = at.x - Math.sin(h) * back; pz = at.z - Math.cos(h) * back;
     // a helicopter comes in low (nap of the earth), a jet at its cruise
     py = HOST.groundAt(px, pz) + (def.drive === "rotor" ? Math.max(S.nap || 10, Math.min(S.alt || 40, 30)) : (S.alt || 300));
@@ -502,6 +520,8 @@ function thinkVehicle(u) {
     u.target.set(u.home.x, 0, u.home.z); u.slot = "hold";
     return;
   }
+  u.backUp = false;
+  if (vehKeepOut(u, S)) return;
   if (u.tgt && !u.tgt.dead) {
     const dx = u.tgt.pos.x - u.pos.x, dz = u.tgt.pos.z - u.pos.z, d = Math.hypot(dx, dz) || 1;
     // close threats (beasts, men with fists) get run at or run over; a
@@ -509,16 +529,86 @@ function thinkVehicle(u) {
     let want = stand;
     if (u.tgt.beast || u.tgt.fists) want = Math.min(stand, 18);
     if (u.tgt.launcher && d < 60) want = 90;
-    if (!u.sees && !vehIndirect(u)) want = Math.min(want, d * 0.6);   // an indirect launcher needs no sight line: it keeps its standoff
+    /* NO LINE TO THE MARK: close up to find one, but not for ever. This was
+       `want = d * 0.6` every think, which has no floor: behind a dune the
+       hull halved the range again and again until it was parked in the
+       middle of the enemy's infantry (measured: M1s 35 m from riflemen a
+       quarter of a minute into the war). A crew looks for a line from 120 m
+       at the nearest. */
+    if (!u.sees && !vehIndirect(u)) want = Math.min(want, Math.max(u.tgt.beast || u.tgt.fists ? 0 : 120, d * 0.6));
     if (d > want * 1.15 || d < want * 0.6) {
       const go = d - want;
       u.target.set(u.pos.x + dx / d * go, 0, u.pos.z + dz / d * go);
+      u.slot = "push";
+    } else if (!u.sees && !vehIndirect(u) && !u.tgt.beast && !u.tgt.fists) {
+      /* AT ITS RANGE AND STILL NO LINE: it does not sit behind the dune
+         for the rest of the war (with the 120 m floor above, two hulls each
+         did, either side of one crest, 300 s and counting: tools/
+         npcwar-headless section 8). It works round the mark at the range
+         it has, a hull-length at a time, until the ground opens; each hull
+         keeps going the way it started. */
+      if (!u._flank) u._flank = (men.indexOf(u) & 1) ? 1 : -1;
+      const sx = -dz / d * u._flank, sz = dx / d * u._flank;
+      u.target.set(u.pos.x + sx * 45 + dx / d * (d - want) * 0.5, 0, u.pos.z + sz * 45 + dz / d * (d - want) * 0.5);
       u.slot = "push";
     } else { u.target.set(u.pos.x, 0, u.pos.z); u.slot = "fire"; }
   } else {
     if (!navStep(u, u.target)) u.target.set(com.x, 0, com.z);
     u.slot = "march";
   }
+}
+/* ARMOUR DOES NOT DRIVE INTO INFANTRY, AND DOES NOT PARK TRACK TO TRACK.
+   A tank's guns reach a kilometre and its sides and rear are what a rocket
+   team is waiting for: it fights riflemen from where they cannot reach it,
+   and when they get inside that (they came on, or it was sent at a target
+   behind them) it BACKS OFF, nose to them, coax still firing. And a platoon
+   keeps its interval, because one salvo should not find two hulls: a hull
+   with a wingman inside thirty-five metres eases away from him.
+   Bare-handed men and animals are not a threat to a hull; it still runs
+   those down (thinkVehicle). Returns true when it has set the move. */
+const _kn = [];
+function vehKeepOut(u, S) {
+  if (u.air || !u.wpn.length || u.def.drive == null) return false;
+  if (u.tgt && (u.tgt.beast || u.tgt.fists)) return false;
+  const keep = S.keepOut != null ? S.keepOut : (u.def.turret ? 95 : 60);
+  if (keep <= 0) return false;
+  // the nearest armed enemy on foot: the core's rows, and the page's own men
+  let fx = 0, fz = 0, fd = keep, hit = false;
+  const row = typeof MASS !== "undefined" && MASS.nearFoe ? MASS.nearFoe(u.team, u.pos.x, u.pos.z, keep) : null;
+  if (row) { fx = row.x; fz = row.z; fd = row.d; hit = true; }
+  const a = fineNear(u.pos.x, u.pos.z, keep, _kn);
+  for (let i = 0; i < a.length; i++) {
+    const o = a[i];
+    if (o.team === u.team || o.dead || o.fled || o.downed || o.vehicle || o.beast || o.fists || o.puppet || o.routed) continue;
+    const d = Math.hypot(o.pos.x - u.pos.x, o.pos.z - u.pos.z);
+    if (d < fd) { fd = d; fx = o.pos.x; fz = o.pos.z; hit = true; }
+  }
+  if (hit) {
+    const ax = (u.pos.x - fx) / (fd || 1), az = (u.pos.z - fz) / (fd || 1);
+    const go = keep * 1.35 - fd;
+    u.target.set(u.pos.x + ax * go, 0, u.pos.z + az * go);
+    u.backUp = true;
+    u.slot = "fallback";
+    return true;
+  }
+  // the interval: only on the move or holding, never while it is laying a shot
+  let wx = 0, wz = 0, wd = 35;
+  const b = fineNear(u.pos.x, u.pos.z, 35, _kn);
+  for (let i = 0; i < b.length; i++) {
+    const o = b[i];
+    if (o === u || o.team !== u.team || !o.vehicle || o.air || o.dead || o.fled || o.cv) continue;
+    const d = Math.hypot(o.pos.x - u.pos.x, o.pos.z - u.pos.z);
+    if (d < wd) { wd = d; wx = o.pos.x; wz = o.pos.z; }
+  }
+  if (wd < 35 && wd > 0.01) {
+    // the one further along the men list gives way (both doing it would hold the gap shut)
+    if (men.indexOf(u) < men.indexOf(b.find(function (o) { return o !== u && o.pos.x === wx && o.pos.z === wz; }) || u)) return false;
+    const ax = (u.pos.x - wx) / wd, az = (u.pos.z - wz) / wd;
+    u.target.set(u.pos.x + ax * (42 - wd), 0, u.pos.z + az * (42 - wd));
+    u.slot = "push";
+    return true;
+  }
+  return false;
 }
 // armour first for the big gun, people for the machine gun; asked of what
 // the crew can see, nearest first, a handful of sight lines per think
@@ -594,7 +684,13 @@ function vehDriveTo(u, sdt, halt) {
   const D = CBZ.vehicleDrive, def = u.def, S = def.stats || {};
   const dx = u.target.x - u.pos.x, dz = u.target.z - u.pos.z, d = Math.hypot(dx, dz);
   let thr = 0, st = 0;
-  if (!halt && d > 2.5) {
+  if (!halt && d > 2.5 && u.backUp && Math.abs(D.wrap(Math.atan2(dx, dz) - u.h)) > 1.2) {
+    // IN REVERSE, the front plate staying on what it is backing away from
+    const err = D.wrap(Math.atan2(-dx, -dz) - u.h);
+    // (tracks pivot the same way whichever way they run; steered wheels swing the tail in reverse)
+    st = D.clamp((def.drive === "tracked" ? -err : err) * 1.8, -1, 1);
+    thr = -D.clamp(d / 20, 0.2, 1) * (Math.abs(err) > 1.1 ? 0.3 : 1);
+  } else if (!halt && d > 2.5) {
     const want = Math.atan2(dx, dz);
     const err = D.wrap(want - u.h);
     st = D.clamp(-err * 1.8, -1, 1);

@@ -363,24 +363,14 @@ function ergSurfaceGLSL(form, surface) {
     "  normal = normalize(normal + (viewMatrix * vec4(wN, 0.0)).xyz);\n" +
     "  diffuseColor.rgb *= 1.0 - smoothstep(160.0, 800.0, dist) * 0.04; }\n";
   if (form === "dune") return head +
-    /* RIPPLES, AT THEIR REAL SIZE. The old ripples ran 0.7-1.1 m crest to
-       crest and were drawn out to 120 m: a sand sea covered in contour
-       lines, which is what the owner called gimmicky. Wind ripples on a
-       dune are 6-14 cm apart and a centimetre high; you see them as a fine
-       texture within a few paces and as nothing at all from further off.
-       Coarser (20-30 cm) granule ripples sit in the troughs. Gone on the
-       slip face (avalanching sand wipes them). */
-    "  float kR = (1.0 - smoothstep(3.0, 16.0, dist)) * (1.0 - smoothstep(0.12, 0.5, lee));\n" +
-    "  if (kR > 0.0) {\n" +
-    "    float lam = 0.09 + 0.05 * egN(q * 0.4) + 0.14 * trough;\n" +
-    "    float warp = 0.3 * sin(q.y * 7.0 + egN(q * vec2(0.6, 2.5)) * 5.0) * lam;\n" +
-    "    float ph = (q.x + warp) / lam * 6.2832;\n" +
-    "    float rip = sin(ph) + 0.3 * sin(2.0 * ph);\n" +
-    "    float dr = (cos(ph) + 0.6 * cos(2.0 * ph)) * 6.2832 / lam;\n" +
-    "    wN -= vec3(uW.x, 0.0, uW.y) * dr * 0.0022 * kR;\n" +
-    // dark heavy minerals settle in the ripple troughs
-    "    diffuseColor.rgb *= 1.0 - 0.05 * kR * smoothstep(0.3, 1.1, -rip);\n" +
-    "  }\n" +
+    /* NO DRAWN RIPPLES. Twice now a sine has been laid across the sand to
+       be wind ripples (0.7-1.1 m crest to crest out to 120 m, then 9-14 cm
+       inside 16 m) and twice the owner has called the result fake: "the
+       lines on the sand look super unrealistic" (2026-11-10). A regular
+       wave narrower than a few pixels does not read as ripples, it beats
+       against the pixel grid into big curved contour bands that crawl as the
+       lens moves. Real sand at fighting distance is tone and grain, which is
+       what is below; nothing periodic is drawn on it. */
     /* THE SAND ITSELF, at every range: tone drifts over metres (wet-dark
        hollows, pale dry crests, mineral streaks the wind lays along it) and
        the surface is grainy, never one flat colour */

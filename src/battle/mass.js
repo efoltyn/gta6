@@ -504,6 +504,27 @@ function massEvents(E, n) {
     } else if (ty === EV.rout) {
       const m = STORE.ref[a];
       if (m && m.puppet) m.routed = true;
+    } else if (ty === EV.strike && !C.anc[a]) {
+      /* A BLOW AT ARM'S LENGTH, SEEN. The core struck (core/infantry.js
+         closeFight: an empty rifle and a man in reach); the rig throws it
+         with entities/meleeposes.js's own strikes: the stock driven out off
+         the rear hip, the knife, a straight right. v: 1 it went in, 0.5 it
+         landed on a helmet or a plate, 0 he missed. */
+      const m = STORE.ref[a], o = b >= 0 ? STORE.ref[b] : null;
+      if (m && m.puppet && !m.dead && m.char) {
+        const k = MASS.I.meleeKind ? MASS.I.meleeKind(a) : "butt";
+        const anim = k === "knife" || k === "bayonet" ? "stab" : k === "fist" ? "cross" : "butt";
+        const K = CBZ.meleePoses && CBZ.meleePoses.KINDS && CBZ.meleePoses.KINDS[anim];
+        const dur = (K && K.dur) || 0.42;
+        m.char.punchKind = anim; m.char.punchArm = "rear"; m.char.punchDur = dur; m.char.punchT = dur;
+        m._cqbT = 1.5;
+        if (b >= 0) { m.yaw = Math.atan2(C.x[b] - C.x[a], C.z[b] - C.z[a]); m.group.rotation.y = m.yaw; }
+        if (camDist2(m.pos) < 90 * 90) { try { CBZ.sfx(v > 0 ? "punch" : "whoosh", { dist: Math.sqrt(camDist2(m.pos)), ghost: true, volume: v > 0 ? 0.8 : 0.4 }); } catch (e) {} }
+      }
+      if (v > 0 && o && o.puppet && !o.dead && o.char && CBZ.soldier && CBZ.soldier.hit) {
+        let dx = C.x[b] - C.x[a], dz = C.z[b] - C.z[a]; const l = Math.hypot(dx, dz) || 1;
+        try { CBZ.soldier.hit(o.char, { sev: v >= 1 ? 0.9 : 0.45, dirX: dx / l, dirZ: dz / l }); } catch (e) {}
+      }
     }
   }
   MASS.stats.ms.events += performance.now() - t0;
@@ -772,6 +793,30 @@ MASS.cands = function (m, range, out, spot) {
     }
   }
 };
+/* THE NEAREST ENEMY RIFLEMAN OF THE CORE to a point, within R (no sight
+   test: a crew knows roughly where the infantry it is fighting is). Returns
+   { x, z, d } or null. vehicles.js asks, for a hull's keep-out. */
+const _nf = { x: 0, z: 0, d: 0 };
+MASS.nearFoe = function (team, x, z, R) {
+  if (!MASS.on || !STORE) return null;
+  if (!_mcG || simT - _mcG.at > 0.35) massCandGrid();
+  const cells = _mcG.side[team === "red" ? 1 : 0], C = STORE.cols;
+  const cx = Math.floor(x / MC), cz = Math.floor(z / MC), n = Math.ceil(R / MC);
+  let bd = R * R, hit = false;
+  for (let dz = -n; dz <= n; dz++) for (let dx = -n; dx <= n; dx++) {
+    const a = cells.get(mcKey(cx + dx, cz + dz));
+    if (!a) continue;
+    for (let i = 0; i < a.length; i++) {
+      const r = a[i];
+      if (C.life[r] !== 1 || C.down[r]) continue;
+      const ox = C.x[r] - x, oz = C.z[r] - z, d2 = ox * ox + oz * oz;
+      if (d2 < bd) { bd = d2; _nf.x = C.x[r]; _nf.z = C.z[r]; hit = true; }
+    }
+  }
+  if (!hit) return null;
+  _nf.d = Math.sqrt(bd);
+  return _nf;
+};
 function massCandGrid() {
   const C = STORE.cols;
   const S = _mcG ? _mcG.side : [new Map(), new Map()];
@@ -858,6 +903,7 @@ function puppetSync(m, dt) {
   m.tgt = tg >= 0 ? (STORE.ref[tg] || massGhost(tg)) : null;
   m.sees = tg >= 0 && C.expo[r] > 0;
   m.slot = m.speed > 0.3 ? "move" : "fire";
+  if (m._cqbT > 0) m._cqbT -= dt;
   m.inCover = false;
   if (C.reloadT[r] > 0 && !m._rel && m.char && CBZ.soldier && CBZ.soldier.reload) {
     m._rel = true;

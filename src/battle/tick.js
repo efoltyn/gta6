@@ -64,7 +64,15 @@ function simSubStep(sdt) {
      was, which is the only way that check keeps meaning what it says. */
   if (deadSolving > 0) {
     if (HAS_BEASTS && CBZ.quadRagdollStep) CBZ.quadRagdollStep(sdt);
-    if (CBZ.ragdollStep) CBZ.ragdollStep(sdt);
+    /* A BODY FALLS AT 60 Hz WHATEVER THE DIAL SAYS. The sim's sub-step grows
+       to 0.055 s at 2x-8x, and a 13-point verlet body stepped that coarsely
+       freezes mid-tumble: balled up, hips in the air, 30-70 cm over its own
+       shadow (tools/npcwar-body-shots.mjs at a 1/30 step). At most thirty
+       bodies are ever solving, so the extra passes cost nothing. */
+    if (CBZ.ragdollStep) {
+      const n = Math.max(1, Math.ceil(sdt / 0.0168));
+      for (let k = 0; k < n; k++) CBZ.ragdollStep(sdt / n);
+    }
   }
   rebuildFine();                       // bodies moved: the body grid is stale
   separateSolve(Math.min(0.9, sdt * 26));
@@ -84,6 +92,43 @@ function simSubStep(sdt) {
 /* the render-side pass at real time: gait, aim pose, the sling, the
    prisoners, and the tiers moving with the lens. dt follows the frame,
    realDt is the wall clock (promotion budgets). */
+/* A MAN LYING DOWN LIES ON THE GROUND HE IS ON. The rig's prone pose is a
+   body laid out dead level about its own origin (0.8 m of legs behind it,
+   0.9 m of chest and head and a rifle ahead); the dunes are
+   not level. Measured (tools/npcwar-ground-contact.mjs): a third of prone
+   men were sunk more than 12 cm, the worst 95 cm, with the other end of the
+   same man hanging in the air over his own shadow. So a prone or wounded
+   man's whole rig is pitched and rolled onto the slope under him, sampled
+   at his knees, his chest and either hip, and lifted onto it. It eases in
+   as he goes down and out as he gets up; a standing man is plumb. */
+function lieOnGround(m, dt) {
+  const g = m.group;
+  if (!g || m.ragdoll || (HOST && HOST.water)) return;
+  const want = (m.stance === "prone" || m.downed) ? 1 : 0;
+  let k = m._lieK || 0;
+  k += (want - k) * Math.min(1, dt * 5);
+  if (k < 0.01) {
+    if (m._lay) { m._lay = false; g.rotation.x = 0; g.rotation.z = 0; g.rotation.order = "XYZ"; }
+    m._lieK = 0;
+    return;
+  }
+  m._lieK = k; m._lay = true;
+  const x = m.pos.x, z = m.pos.z, yaw = g.rotation.y;
+  const fx = Math.sin(yaw), fz = Math.cos(yaw);
+  const hF = HOST.groundAt(x + fx * 0.85, z + fz * 0.85), hB = HOST.groundAt(x - fx * 0.7, z - fz * 0.7);
+  const hR = HOST.groundAt(x + fz * 0.3, z - fx * 0.3), hL = HOST.groundAt(x - fz * 0.3, z + fx * 0.3);
+  const hC = HOST.groundAt(x, z);
+  if (!Number.isFinite(hF + hB + hR + hL + hC)) return;
+  // a step, a wall foot or a crater lip is not a slope to drape a man down
+  const pitch = Math.max(-0.6, Math.min(0.6, Math.atan2(hF - hB, 1.55)));
+  const roll = Math.max(-0.5, Math.min(0.5, Math.atan2(hR - hL, 0.6)));
+  g.rotation.order = "YXZ";
+  g.rotation.x = -pitch * k;
+  g.rotation.z = roll * k;
+  // on the plane through his knees and chest, at his origin
+  const plane = hB + (hF - hB) * (0.7 / 1.55);
+  g.position.y = hC + (Math.max(plane, hC - 0.05) - hC + 0.02) * k;
+}
 function animFrame(dt, realDt) {
   const camP = CBZ.camera.position;
   for (let i = 0; i < men.length; i++) {
@@ -150,4 +195,12 @@ function animFrame(dt, realDt) {
     }
   }
   if (MASS.on) MASS.frame(realDt);      // promotion, demotion, ghosts, the crowd draw
+  // after the puppets were put where their rows are (MASS.frame writes their height)
+  for (let i = 0; i < men.length; i++) {
+    const m = men[i];
+    if (m.dead || m.vehicle || m.beast || !m.group || m._apeHeld || m._apeFlying) continue;
+    if (!m._lay && m.stance !== "prone" && !m.downed) continue;
+    const dx = m.pos.x - camP.x, dz = m.pos.z - camP.z;
+    if (dx * dx + dz * dz < 260 * 260) lieOnGround(m, dt);
+  }
 }

@@ -8,7 +8,7 @@
    for the question "is this what a firefight looks like?".
 
      node tools/npcwar-timeline.mjs [--a usa] [--b usa] [--n 30] [--range 400]
-        [--secs 600] [--every 5] [--seed 3] [--ground rolling] */
+        [--secs 600] [--every 5] [--seed 3] [--ground rolling] [--ammo 30] */
 import { ctx, field, side, battle } from "./lib/infantry-node.mjs";
 const arg = (k, d) => { const i = process.argv.indexOf("--" + k); return i > 0 ? process.argv[i + 1] : d; };
 const A = arg("a", "usa"), Bc = arg("b", "usa"), N = +arg("n", 30), RANGE = +arg("range", 400);
@@ -27,6 +27,11 @@ const B = battle({ ground: g, seed: SEED * 104729 + N, a: sa, b: sbb, na: N, nb:
 const I = B.I, C = B.S.cols;
 I.order[0] = { kind: "advance", x: RANGE / 2 + 100, z: 0 };
 I.order[1] = { kind: "advance", x: -RANGE / 2 - 100, z: 0 };
+// --ammo N: every man starts with N rounds in reserve (to watch them run dry)
+const AMMO = arg("ammo", null);
+const MAG = arg("mag", null);          // --mag N: and N in the gun
+if (AMMO != null) for (let r = 0; r < B.S.rows; r++) if (C.ammo[r] > 0) C.ammo[r] = +AMMO;
+if (MAG != null) for (let r = 0; r < B.S.rows; r++) if (C.mag[r] > 0) C.mag[r] = +MAG;
 const pin = [DOC && DOC[sa.trn] ? DOC[sa.trn].pinAt : 1.5, DOC && DOC[sbb.trn] ? DOC[sbb.trn].pinAt : 1.5];
 console.log(`${A} (${sa.trn}) v ${Bc} (${sbb.trn}), ${N} a side, ${RANGE} m, ${GROUND}, seed ${SEED}`);
 console.log("   t   | fight dead down ran  prone pinned | fight dead down ran  prone pinned |  gap m | rounds  hits  (slice)");
@@ -51,5 +56,6 @@ while (t < SECS) {
   console.log(String(t.toFixed(0)).padStart(5) + "  | " + f(o[0]) + "   | " + f(o[1]) + "   | " + String(gn ? (gap / gn).toFixed(0) : "-").padStart(5) + "  | " +
     String(sh - ps[0]).padStart(5) + " " + String(hi - ph[0]).padStart(5));
   ps[0] = sh; ph[0] = hi;
-  if (!o[0][0] || !o[1][0]) { console.log("over at " + t.toFixed(0) + " s: " + (o[0][0] ? A + " (west)" : o[1][0] ? Bc + " (east)" : "nobody") + " holds the field; rounds " + sh + ", hits " + hi + (hi ? ", " + (sh / hi).toFixed(1) + " a hit" : "")); break; }
+  if (!o[0][0] || !o[1][0]) { console.log("over at " + t.toFixed(0) + " s: " + (o[0][0] ? A + " (west)" : o[1][0] ? Bc + " (east)" : "nobody") + " holds the field; rounds " + sh + ", hits " + hi + (hi ? ", " + (sh / hi).toFixed(1) + " a hit" : "") +
+    "; blows at arm's length " + (I.led.cqb || 0) + " (" + (I.led.blowsIn || 0) + " landed), magazines passed " + (I.led.crossload || 0) + ", men who ran dry " + (I.led.ranDry || 0)); break; }
 }

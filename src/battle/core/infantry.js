@@ -199,7 +199,13 @@
     gladius: { reach: 0.78, now: [0.5, 0.9], bleed: 0.045, pen: 0.45, thrust: true },
     spear:   { reach: 1.6,  now: [0.45, 0.85], bleed: 0.04, pen: 0.4, thrust: true },
     bayonet: { reach: 0.95, now: [0.4, 0.8], bleed: 0.04, pen: 0.35, thrust: true },
+    // what a modern rifleman has at arm's length with an empty gun (cqb below):
+    // the stock driven into a face, the fighting knife off his vest, a fist
+    knife:   { reach: 0.6,  now: [0.3, 0.7],  bleed: 0.05, pen: 0.2, thrust: true },
+    butt:    { reach: 0.8,  now: [0.12, 0.42], bleed: 0.004, pen: 0, blunt: true },
+    fist:    { reach: 0.55, now: [0.04, 0.16], bleed: 0, pen: 0, blunt: true },
   };
+  const MELEE_KIND = ["butt", "knife", "bayonet", "fist"];
   /* THE SHIELDS. A scutum (Fayum find): 1.28 x 0.63 m, curved, three layers
      of birch strips (~6-10 mm) under calf hide, an iron boss: 7-10 kg. It turns
      a blade, a stone and most arrows; it stops a throwing spear's head, which
@@ -910,7 +916,8 @@
       const D = D_(r), t = T_(r);
       if (G.down[r]) { downThink(r, dt); return; }
       if (G.life[r] === LIFE.routed) { routThink(r); return; }
-      if (I.ancN) closeThreat(r);                          // a sword at arm's length is no search
+      closeThreat(r);                                      // a man at arm's length is no search
+      if (cqb(r, D, t)) return;                            // an empty gun and an enemy in reach
       const x = G.x[r], z = G.z[r];
       // ---- what he sees
       let tg = G.tgt[r];
@@ -1341,7 +1348,7 @@
     function trigger(r, dt) {
       const t = T_(r), D = t.D;
       if (!t.armed || G.down[r] || G.life[r] !== LIFE.alive || G.aidOn[r] >= 0) return;
-      if (I.ancN && closeFight(r, t, D, dt)) return;      // the bayonet, empty or reloading with a sword on him
+      if (closeFight(r, t, D, dt)) return;                // the bayonet, the butt, the knife: empty or reloading with a man on him
       if (G.reloadT[r] > 0) {
         G.reloadT[r] -= dt;
         if (G.reloadT[r] <= 0) {
@@ -2751,27 +2758,126 @@
       if (d > t.M.reach + 0.62 || G.swT[r] > 0) return;
       blow(r, tg, t.M, t.A.skill, t.A.strikeT);
     }
-    /* A RIFLEMAN AT ARM'S LENGTH: empty, or reloading, with a man of the line
-       on him, he fights with the bayonet (and the butt) */
+    /* A RIFLEMAN AT ARM'S LENGTH. With a round in the chamber he shoots: at
+       two metres a rifle is still a rifle. EMPTY, or half way through a
+       magazine change, with a man on him, he does what infantry have always
+       done: the stock into the face, the knife, a fist if that is all there
+       is, and against a man of the line of battle the bayonet. Before this
+       only a legionary could be struck (the whole thing was gated on an
+       ancient army being on the field), so two modern sections that ran
+       into each other with empty magazines stood a metre apart reloading. */
+    const mkA = [];                       // each man's last blow (MELEE_KIND index), for the rig
+    const dryA = [];                      // he has been counted as out of ammunition (the ledger)
+    I.meleeKind = function (r) { return MELEE_KIND[mkA[r] | 0]; };
+    function meleeOf(r, tg, D) {
+      if (G.anc[tg]) return 2;                                  // a sword in his face: the bayonet
+      const u = trait(r, 0xC9B + ((I.simT * 0.7) | 0));
+      if (D.press >= 0.5) return u < 0.55 ? 0 : 1;              // trained: butt stroke, then the knife
+      return u < 0.6 ? 0 : u < 0.75 ? 1 : 3;                    // a militiaman swings the rifle, or his fist
+    }
     function closeFight(r, t, D, dt) {
       if (G.swT[r] > 0) G.swT[r] -= dt;
       const tg = G.tgt[r];
-      if (tg < 0 || !G.anc[tg] || !fighting(tg)) return false;
+      if (tg < 0 || !fighting(tg)) return false;
+      if (!G.anc[tg] && G.ext[tg]) return false;          // the host's own bodies fight by the host's melee
       if (G.mag[r] > 0 && G.reloadT[r] <= 0) return false;
       const dx = G.x[tg] - G.x[r], dz = G.z[tg] - G.z[r], d = Math.sqrt(dx * dx + dz * dz);
-      if (d > MELEE.bayonet.reach + 0.6) return false;
+      const k = meleeOf(r, tg, D), M = MELEE[MELEE_KIND[k]];
+      if (d > M.reach + 0.6) return false;
       if (G.swT[r] > 0) return true;
-      G.reloadT[r] = Math.max(G.reloadT[r], 0);
-      blow(r, tg, MELEE.bayonet, 0.25 + 0.45 * D.press, 2.2 - D.press * 0.6);
+      mkA[r] = k;
+      G.face[r] = Math.atan2(dx, dz);
+      I.led.cqb = (I.led.cqb || 0) + 1;
+      blow(r, tg, M, 0.25 + 0.45 * D.press, 2.2 - D.press * 0.6);
       return true;
     }
-    // a man of the line close to a rifleman: the rifleman knows he is there (no search, no detection)
+    /* THE EMPTY GUN (think asks, before anything else). Three cases:
+         an enemy inside five metres and nothing in the gun: he does not lie
+           there changing magazines, he gets up and goes for him
+         no rounds left on him at all: he takes a magazine off the nearest
+           mate who can spare one (cross-loading, a few seconds); nobody can,
+           and the enemy is inside thirty metres: he goes in with what he has;
+           otherwise he stays down and out of it. A man with an empty rifle
+           is not a rifleman, and before this he lay in the open aiming it
+           for the rest of the war
+       Returns true when it has decided his move for this think. */
+    function cqb(r, D, t) {
+      if (!t.armed || G.aidOn[r] >= 0) return false;
+      const dry = G.mag[r] <= 0 && G.ammo[r] <= 0;
+      if (!dry && G.mag[r] > 0 && G.reloadT[r] <= 0) return false;
+      const x = G.x[r], z = G.z[r], sd = G.side[r];
+      const reach = dry ? 30 : 5;
+      let e = -1, bd = reach * reach;
+      forDiscB(x, z, reach, function (o) {
+        if (G.side[o] === sd || !fighting(o) || (G.ext[o] && !G.anc[o])) return;
+        const ox = G.x[o] - x, oz = G.z[o] - z, d2 = ox * ox + oz * oz;
+        if (d2 < bd) { bd = d2; e = o; }
+      });
+      if (dry) {
+        // a magazine from a mate (the wounded give theirs up first)
+        let m = -1, md = 26, mdown = false;
+        forDiscB(x, z, 5, function (o) {
+          if (o === r || G.side[o] !== sd || !alive(o) || G.ext[o] || G.typ[o] !== G.typ[r]) return;
+          if (G.ammo[o] < t.magSize * (G.down[o] ? 1 : 2)) return;
+          const ox = G.x[o] - x, oz = G.z[o] - z, d2 = ox * ox + oz * oz;
+          const dn = !!G.down[o];
+          if ((dn && !mdown) || (dn === mdown && d2 < md)) { md = d2; m = o; mdown = dn; }
+        });
+        if (m >= 0 && e < 0 || (m >= 0 && bd > 64)) {
+          G.ammo[m] -= t.magSize; G.ammo[r] += t.magSize;
+          G.reloadT[r] = D.reload * 1.2 + 2.5 + Math.sqrt(md) * 0.6;       // the shout, the throw, the change
+          G.mv[r] = MOVE.hold; G.gx[r] = x; G.gz[r] = z;
+          I.led.crossload = (I.led.crossload || 0) + 1;
+          return true;
+        }
+        if (!dryA[r]) { dryA[r] = 1; I.led.ranDry = (I.led.ranDry || 0) + 1; }
+      }
+      if (e < 0) {
+        if (!dry) return false;
+        /* NOBODY IS SHOOTING AND HE KNOWS WHERE THEY ARE: he goes in. Two
+           sections that have shot themselves dry at sixty metres do not lie
+           there until the end of time (measured: they did, tools/
+           npcwar-timeline.mjs --ammo 0); the side that still has rounds
+           shoots the men coming, and if neither has, it is settled by hand. */
+        const sqh = G.sqd[r] >= 0 ? sqHot[G.sqd[r]] : undefined;
+        const quiet = I.simT - Math.max(G.crackT[r], sqh === undefined ? -99 : sqh);
+        if (quiet > 6 && I.simT - G.lkT[r] < 90 && Math.hypot(G.lkx[r] - x, G.lkz[r] - z) > 8) {
+          if (G.post[r] !== POST.stand && G.postT[r] <= 0) setPost(r, POST.stand);
+          G.gx[r] = G.lkx[r]; G.gz[r] = G.lkz[r]; G.mv[r] = MOVE.rush; G.rushT[r] = 0; G.tgt[r] = -1;
+          return true;
+        }
+        // nothing to fight with and nobody in reach: he keeps his head down
+        G.mv[r] = MOVE.hold; G.gx[r] = x; G.gz[r] = z; G.tgt[r] = -1;
+        if (G.post[r] !== POST.prone && G.postT[r] <= 0) setPost(r, POST.prone);
+        return true;
+      }
+      // he goes for him
+      const d = Math.sqrt(bd);
+      G.tgt[r] = e; G.expo[r] = LOOK_ALL[G.post[e]]; G.seenT[r] = I.simT; G.lkx[r] = G.x[e]; G.lkz[r] = G.z[e]; G.lkT[r] = I.simT; G.contactT[r] = I.simT;
+      G.face[r] = Math.atan2(G.x[e] - x, G.z[e] - z);
+      if (d > 1.1) {
+        if (G.post[r] !== POST.stand && G.postT[r] <= 0) setPost(r, POST.stand);
+        // to arm's length of him, not into him (two men who both ran in used to end up in one spot)
+        const k = (d - 0.95) / d;
+        G.gx[r] = x + (G.x[e] - x) * k; G.gz[r] = z + (G.z[e] - z) * k; G.mv[r] = d > 3 ? MOVE.rush : MOVE.walk; G.rushT[r] = 0;
+      } else if (d < 0.7) {
+        // on top of him: a step back to where a blow can be thrown
+        const ux = d > 0.01 ? (x - G.x[e]) / d : Math.sin(G.face[r]), uz = d > 0.01 ? (z - G.z[e]) / d : Math.cos(G.face[r]);
+        G.gx[r] = x + ux * 0.5; G.gz[r] = z + uz * 0.5; G.mv[r] = MOVE.walk;
+      } else { G.mv[r] = MOVE.hold; G.gx[r] = x; G.gz[r] = z; if (G.post[r] === POST.prone && G.postT[r] <= 0) setPost(r, POST.kneel); }
+      return true;
+    }
+    // an enemy close to a rifleman: he knows he is there (no search, no detection).
+    // A man of the line of battle inside six metres; anybody inside three and a half.
     function closeThreat(r) {
       const x = G.x[r], z = G.z[r], sd = G.side[r];
-      let e = -1, bd = 36;
-      forDiscB(x, z, 6, function (o) {
-        if (G.side[o] === sd || !G.anc[o] || !fighting(o)) return;
+      const R = I.ancN ? 6 : 3.5;
+      let e = -1, bd = R * R;
+      forDiscB(x, z, R, function (o) {
+        if (G.side[o] === sd || !fighting(o)) return;
+        if (!G.anc[o] && (G.ext[o] === EXT.vehicle)) return;
         const ox = G.x[o] - x, oz = G.z[o] - z, d2 = ox * ox + oz * oz;
+        if (!G.anc[o] && d2 > 12.25) return;
         if (d2 < bd) { bd = d2; e = o; }
       });
       if (e < 0) return;
@@ -2781,7 +2887,7 @@
       }
       G.expo[r] = LOOK_ALL[G.post[e]]; G.seenT[r] = I.simT; G.lkx[r] = G.x[e]; G.lkz[r] = G.z[e]; G.lkT[r] = I.simT; G.contactT[r] = I.simT;
       G.face[r] = Math.atan2(G.x[e] - x, G.z[e] - z);
-      // nobody lies down with a sword over him: he comes up to fight
+      // nobody lies down with a man standing over him: he comes up to fight
       if (G.post[r] === POST.prone && G.postT[r] <= 0 && bd < 9) setPost(r, POST.kneel);
     }
     /* WHAT IRON STOPS A POINT. zone: 0 head, 1 chest, 2 belly, 3 a limb;
@@ -2840,7 +2946,7 @@
       I.led.blowsIn = (I.led.blowsIn || 0) + 1;
       if (G.down[b]) { woundAt(b, 1, M, a, 1); ev(EV.strike, a, b, 1); return; }
       const z = thrustZone();
-      if (pointStopped(b, z, M.pen, false)) { G.stress[b] += 0.05; ev(EV.strike, a, b, 0.5); return; }
+      if (pointStopped(b, z, M.pen, false)) { G.stress[b] += 0.05; if (M.blunt) G.supp[b] += 0.5; ev(EV.strike, a, b, 0.5); return; }
       woundAt(b, z, M, a, 1);
       ev(EV.strike, a, b, 1);
     }

@@ -568,15 +568,31 @@
      extremities (systems/bodyfall.js's resolver), by moving the POINTS, so
      the frozen pose keeps the fix. */
   const _fv = new THREE.Vector3(), _fp = { x: 0, y: 0, z: 0 };
-  function lowestUnder(root, stop, skip) {
-    let low = Infinity;
+  /* HOW FAR UNDER ITS OWN GROUND. lowestUnder answers "what is the lowest
+     vertex", and restFit compared that with the ground under the body's
+     CENTRE. On a street that is the same question. On a slope it is not: a
+     body lying down a dune has its downhill end well below the ground under
+     its middle while resting exactly on the sand, and the fit hoisted the
+     whole man up to 35 cm to "clear" it (measured on NPC War's dunes: a
+     third of the dead more than 12 cm off the ground, hanging over their
+     own shadows; tools/npcwar-ground-contact.mjs). This asks every vertex
+     about the ground under THAT vertex and returns the deepest it is in
+     (<= 0: nothing is under). Once per body, at the moment it sleeps. */
+  function deepestUnder(root, stop, skip, yRef) {
+    let deep = -Infinity;
     root.traverse((o) => {
       if (!o.isMesh || o.isInstancedMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
       for (let q = o; q && q !== stop; q = q.parent) { if (q.visible === false) return; if (skip && (q === skip[0] || q === skip[1])) return; }
       const pos = o.geometry.attributes.position;
-      for (let i = 0; i < pos.count; i++) { _fv.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); if (_fv.y < low) low = _fv.y; }
+      // a dense mesh is asked every few vertices: the ground is a height query each
+      const stride = pos.count > 240 ? Math.ceil(pos.count / 240) : 1;
+      for (let i = 0; i < pos.count; i += stride) {
+        _fv.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+        const d = groundUnder(_fv.x, _fv.z, yRef) - _fv.y;
+        if (d > deep) deep = d;
+      }
     });
-    return low;
+    return deep;
   }
   const _feet = [null, null];
   function restFit(s) {
@@ -586,7 +602,6 @@
     g.updateMatrixWorld(true);
     if (CBZ.charAnkleSolve) { CBZ.charAnkleSolve(ch, 0, false); g.updateMatrixWorld(true); }
     const p = s.p, q = s.q;
-    const floor = groundUnder(s.cx, s.cz, s.cy + 0.5);
     /* A SHOE IN THE STREET LIFTS THAT LEG, NOT THE MAN. A stiff shoe can
        barely point (its flex range), so a body lying on its face has the
        toe caps under its shins. That is real: the shins rest propped on the
@@ -603,16 +618,16 @@
       for (let n = 0; n < 2; n++) {
         const f = _feet[n];
         if (!f) continue;
-        const lo = lowestUnder(f, g, null);
-        const d = Number.isFinite(lo) ? floor - lo : 0;
+        const dp = deepestUnder(f, g, null, s.cy + 0.5);
+        const d = Number.isFinite(dp) ? dp : 0;
         if (d > 0.005) { const i = (11 + n) * 3 + 1; const u = Math.min(0.25, d); p[i] += u; q[i] += u; footMoved = true; }
       }
       if (!footMoved) break;
       writePose(s);
       g.updateMatrixWorld(true);
     }
-    const low = lowestUnder(g, g, _feet);
-    let dy = Number.isFinite(low) ? floor - low : 0;
+    const low = deepestUnder(g, g, _feet, s.cy + 0.5);
+    let dy = Number.isFinite(low) ? low : 0;
     dy = dy > 0 ? Math.min(0.35, dy) : 0;
     _fp.x = g.position.x; _fp.y = g.position.y; _fp.z = g.position.z;
     if (CBZ.bodyFall && CBZ.bodyFall.unwall && CBZ.collide) {
