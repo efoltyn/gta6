@@ -124,7 +124,9 @@ function ergDress(id, cx, cz, gap, g) {
        of a kneeling line blinds it (its eye is under the bank) and the held
        exchange fell from 30 to 0.7 on the fields. Earthworks are ground, so
        they go in before anything else. ?dig=0 leaves them out. */
-    if ((surface === "sand" || surface === "snow") && Q.get("dig") !== "0") {
+    // (the sand has none: owner, 2026-11-10, "I hate most of the things in the
+    // desert. Just sand is better." The erg is dunes and nothing else.)
+    if (surface === "snow" && Q.get("dig") !== "0") {
       for (const side of [-1, 1]) {
         const x = cx + side * (gap / 2 - 22), z = cz + (side < 0 ? -40 : 38);
         // red (west) looks east (+x), blue looks west

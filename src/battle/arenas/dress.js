@@ -687,43 +687,13 @@ CBZ.battleDress = (function () {
      has ever run, jersey barriers and sandbag walls in the middle of a sand
      sea, shipping containers on a speedway and heaps of rubble on an
      untouched airfield apron: props for the sake of props, and the owner
-     read them as the toy they were. On the sand the pans between barchans
-     carry rock: lag gravel and low outcrops where the sand runs thin, so
-     those stay, on the pans, and nothing else is added. */
+     read them as the toy they were. Then it kept rock outcrops on the pans,
+     and the owner again (2026-11-10): "I hate most of the things in the
+     desert. Like, just sand is better." So open ground gets nothing from
+     here at all; the dunes are the cover. */
   function open(ctx) {
     D.ctx = ctx; taken.length = 0;
-    _ds = 0x5eed1 ^ ((ctx.seed || 7) * 2654435761);
-    const theme = ctx.theme || "desert";
-    const cx = ctx.cx, cz = ctx.cz, gap = ctx.gap;
-    let made = 0;
-    if (theme !== "desert") return made;
-    const fold = typeof FOLD !== "undefined" && FOLD.on;
-    // the pans: where the dune shape is at its base level (DS.trough) and
-    // the ground is flat enough to be a pan, not a slope
-    const onPan = function (x, z) {
-      if (typeof duneDetail !== "function") return true;
-      duneDetail(x, z);
-      return DS.trough > 0.55 && DS.lee < 0.1;
-    };
-    for (let t = 0; t < 60 && made < 4; t++) {
-      let x = cx + (rnd() - 0.5) * (gap + 120);
-      const z = cz + (rnd() - 0.5) * 260;
-      if (fold) x = FOLD.cx + FOLD.src * Math.abs(x - FOLD.cx);
-      const r = 7;
-      if (!free(x, z, r) || !onPan(x, z) || !flatEnough(x, z, 5, 0.9)) continue;
-      if (fold && (!free(2 * FOLD.cx - x, 2 * FOLD.cz - z, r) || !onPan(2 * FOLD.cx - x, 2 * FOLD.cz - z))) continue;
-      claim(x, z, r);
-      if (fold) claim(2 * FOLD.cx - x, 2 * FOLD.cz - z, r);
-      // an outcrop: a few bedded stones along one strike, half buried
-      const strike = rnd() * Math.PI, m = 3 + ((rnd() * 3) | 0);
-      for (let b = 0; b < m; b++) {
-        const d = (b - (m - 1) / 2) * (2.2 + rnd() * 1.6);
-        place("boulder", x + Math.cos(strike) * d + (rnd() - 0.5) * 1.4, z + Math.sin(strike) * d + (rnd() - 0.5) * 1.4,
-          strike + (rnd() - 0.5) * 0.5, { size: 0.9 + rnd() * 1.3 });
-      }
-      made++;
-    }
-    return made;
+    return 0;
   }
 
   /* THE DOWNTOWN. Cover follows the street: burnt cars along the kerbs,

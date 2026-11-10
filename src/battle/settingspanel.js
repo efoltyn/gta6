@@ -200,7 +200,7 @@ CBZ.npcwar.onBoot(function () {
   const ctl = el("ctl");
   if (ctl && ctl.appendChild) {
     const b = document.createElement("button");
-    b.id = "cSet"; b.setAttribute("aria-label", "settings"); b.innerHTML = gear;
+    b.id = "cSet"; b.textContent = "SETTINGS";
     b.addEventListener("click", function () { SETTINGS.toggle(); });
     ctl.appendChild(b);
   }

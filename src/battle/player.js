@@ -33,7 +33,11 @@
    is better, whoever is after you or already in your reach counts double,
    and the one you had keeps it unless something clearly better turns up.
 
-   Leaving is the rifle button (G). Dying is a slow beat on the body, then
+   A MAN WITH A GUN IS A SHOOTER, not a two-button toy (THE SHOOTER, below):
+   the mouse aims, the round goes where the crosshair is, you reload, you
+   use the sights, you get down.
+
+   Leaving is the takeover button (G). Dying is a slow beat on the body, then
    you are in the nearest ally's boots (or the director has the lens if
    nobody is left). Touch: the stick and one attack button, nothing else.
 
@@ -134,7 +138,8 @@ function takeOver(u) {
   YOU.blendT = 0.55;                         // the lens swoops into the body, then rides it
   if (COARSE) touchOn(); else CBZ.micro.lock();
   el("xhair").classList.toggle("on", k === "man" ? !u.fists : k === "vehicle");
-  el("cRifle").classList.add("on");
+  shooterEnter(u);
+  paintCam();
   return true;
 }
 // the body goes back to its own brain
@@ -154,7 +159,7 @@ function leaveYou(down) {
   touchOff();
   if (!COARSE) CBZ.micro.unlock();
   el("xhair").classList.remove("on");
-  el("cRifle").classList.remove("on");
+  shooterLeave();
   if (_yMark) _yMark.style.display = "none";
   if (cam.mode === "you" || cam.mode === "youdead") {
     setCamMode("auto");
@@ -205,7 +210,7 @@ function frameYouBeat(dt) {
   if (!ally || !takeOver(ally)) {
     YOU.m = null;
     if (!COARSE) CBZ.micro.unlock();
-    el("cRifle").classList.remove("on");
+    shooterLeave();
     setCamMode("auto");
     cam.shot = "hero"; cam.followM = m; cam.holdT = 0.5; cam.cutAt = simT + 2;
   }
@@ -219,9 +224,12 @@ function touchOn() {
   if (!T.root) T.init({});
   if (!T.root) return;
   T.root.style.display = "";
-  // ONE BUTTON. Reload is automatic, the stance is the fight's own.
+  // fire, and for a rifleman the sights, the reload and the stance (THE SHOOTER)
   if (!TB) TB = {
     fire: T.addButton({ glyph: "◎", key: "KeyJ", right: 22, bottom: "calc(104px + env(safe-area-inset-bottom,0px))", size: 92, id: "tFire" }),
+    aim: T.addButton({ glyph: "⌖", key: "KeyQ", right: 124, bottom: "calc(120px + env(safe-area-inset-bottom,0px))", size: 58, id: "tAim" }),
+    reload: T.addButton({ glyph: "R", key: "KeyR", right: 30, bottom: "calc(208px + env(safe-area-inset-bottom,0px))", size: 54, id: "tReload" }),
+    stance: T.addButton({ glyph: "C", key: "KeyC", right: 96, bottom: "calc(196px + env(safe-area-inset-bottom,0px))", size: 54, id: "tStance" }),
   };
 }
 function touchOff() { const T = CBZ.micro.touch; if (T && T.root) T.root.style.display = "none"; }
@@ -477,6 +485,7 @@ function turnTo(cur, want, rate) {
   return cur + Math.max(-rate, Math.min(rate, d));
 }
 function stepYouMan(m, sdt) {
+  if (youShooter(m)) { stepYouShooter(m, sdt); return; }
   if (m.supp > 0) m.supp = Math.max(0, m.supp - sdt * SUPP_DECAY);
   if (m.reloadT > 0) { m.reloadT -= sdt; if (m.reloadT <= 0) m.mag = m.magSize; }
   m.cool -= sdt;
@@ -522,6 +531,225 @@ function stepYouMan(m, sdt) {
   // a held trigger on a semi-auto keeps firing, a shade slower than tapping
   const pull = semi ? (I.edge || (I.atk && m.cool <= -0.12)) : I.atk;
   if (pull && m.cool <= 0 && m.reloadT <= 0) youFire(m, t);
+}
+
+/* ============================================================ THE SHOOTER
+   YOU, WITH A RIFLE. Taking a soldier used to be MOVE and one ATTACK button:
+   the game picked your target, aimed for you and rolled whether you hit, the
+   magazine refilled itself from nothing, and you could only stand or crouch.
+   The owner: "when I press the button to take control of a player, it's very
+   stupid... not like the gun game and not like the other games." Now it is a
+   shooter, on the same rounds every other rifle on the field fires:
+
+     the mouse aims            free, up and down; the crosshair is where the
+                               round goes (flown from your muzzle to the point
+                               under it by fire.js fireShot, mode "point")
+     left button               fire: semi-auto per press, automatic held
+     right button (Q)          the sights: closer glass, a steadier rifle,
+                               a slower walk
+     R                         reload, from the rounds you carry (your
+                               weapon's real load). When they are gone they
+                               are gone: the trigger clicks
+     C / Z                     kneel / go prone (steadier each time, slower)
+     Shift                     sprint (you cannot shoot at a sprint)
+     V                         first person / over the shoulder
+     F                         the rifle butt, on whoever is in arm's reach
+   The rifle is steadier lower and through the sights, opens up when you
+   move and climbs with every round; you bring it back down. Rocket men,
+   brawlers, animals and vehicles keep the controls they had. */
+const SH = { on: false, pitch: 0, ads: 0, adsT: false, fp: false, zoom: 1.5, rp: 0, ry: 0, bloom: 0, sprint: false,
+  aim: null, dry: false, hintT: 0, shown: "" };
+let _shAmmo = null, _shHint = null, _shEye = null, _shR = null, _shU = null;
+CBZ.npcwar.onBoot(function () {
+  SH.aim = V(); _shEye = V(); _shR = V(); _shU = V();
+  try {
+    _shAmmo = document.createElement("div"); _shAmmo.id = "youAmmo"; document.body.appendChild(_shAmmo);
+    _shHint = document.createElement("div"); _shHint.id = "youHint"; document.body.appendChild(_shHint);
+  } catch (e) { _shAmmo = _shHint = null; }
+});
+function youShooter(m) { return !!m && !m.vehicle && !m.beast && !m.fists && !m.launcher && !!m.magSize; }
+function shooterEnter(u) {
+  if (!youShooter(u)) { shooterLeave(); return; }
+  SH.pitch = 0; SH.ads = 0; SH.adsT = false; SH.rp = SH.ry = SH.bloom = 0; SH.dry = false; SH.shown = "";
+  const g = CBZ.ballistics && CBZ.ballistics.gun ? CBZ.ballistics.gun(u.wid) : null;
+  // what he carries: the weapon's real load (a core row hands over what it had left)
+  if (u.youRes == null) u.youRes = u.row != null && STORE && STORE.cols.ammo && STORE.cols.ammo[u.row] > 0 ? STORE.cols.ammo[u.row] : (g && g.carry) || u.magSize * 5;
+  SH.zoom = g && g.cls === "sniper" ? 4 : g && g.cls === "lmg" ? 1.4 : g && g.cls === "pistol" ? 1.25 : 1.6;
+  if (_shAmmo) _shAmmo.classList.add("on");
+  if (_shHint) {
+    _shHint.innerHTML = COARSE ? "<b>STICK</b> move &nbsp; <b>DRAG</b> aim &nbsp; <b>FIRE</b> &nbsp; <b>AIM</b> sights &nbsp; <b>R</b> reload &nbsp; <b>C</b> stance"
+      : "<b>MOUSE</b> aim &nbsp; <b>LEFT</b> fire &nbsp; <b>RIGHT</b> sights &nbsp; <b>R</b> reload &nbsp; <b>C</b> kneel &nbsp; <b>Z</b> prone &nbsp; <b>SHIFT</b> sprint &nbsp; <b>V</b> first person &nbsp; <b>F</b> rifle butt &nbsp; <b>G</b> leave";
+    _shHint.classList.add("on"); SH.hintT = 9;
+  }
+}
+function shooterLeave() {
+  SH.on = false; SH.adsT = false;
+  if (_shAmmo) _shAmmo.classList.remove("on");
+  if (_shHint) _shHint.classList.remove("on");
+  const x = el("xhair"); if (x) { x.classList.remove("ads"); x.classList.remove("run"); }
+  paintCam();
+}
+function shooterReload(m, w) {
+  if (m.reloadT > 0 || m.mag >= m.magSize || !(m.youRes > 0)) return false;
+  m.reloadT = ((w && (w.reloadTime || w.reload)) || 2.4) * (m.stance === "prone" ? 1.15 : 1);
+  m.reloads++;
+  try { CBZ.sfx("reload", { dist: 2, ghost: true }); } catch (e) {}
+  return true;
+}
+function shooterSigma(m) {
+  // radians, 1-sigma: the hold in this posture, through the sights or from the hip, moving or still
+  let s = m.stance === "prone" ? 0.0035 : m.stance === "crouch" ? 0.006 : 0.0105;
+  s *= 1 - 0.72 * SH.ads;
+  s += Math.min(0.03, (m.speed || 0) * 0.0045);
+  if (m.supp > 0.35) s *= 1.4;
+  return s + SH.bloom;
+}
+function shooterFire(m, w) {
+  const P = SH.aim;
+  let from = CBZ.actorMuzzle ? CBZ.actorMuzzle(m, _yFrom) : null;
+  if (!from) from = _yFrom.set(m.pos.x + Math.sin(m.yaw) * 0.5, m.pos.y + (m.eyeH || 1.5) * 0.93, m.pos.z + Math.cos(m.yaw) * 0.5);
+  const dx = P.x - from.x, dy = P.y - from.y, dz = P.z - from.z, d = Math.hypot(dx, dy, dz) || 1;
+  const sg = shooterSigma(m);
+  // two gaussians across the line of fire (the camera's own dice: yours is not the battle's)
+  const g1 = (crand() + crand() + crand() - 1.5) * 1.15, g2 = (crand() + crand() + crand() - 1.5) * 1.15;
+  const hx = dz / d, hz = -dx / d;                       // level, across the line
+  _yTo.set(P.x + hx * g1 * sg * d, P.y + g2 * sg * d, P.z + hz * g1 * sg * d);
+  YOU.fireAt = simT;
+  fireShot(m, null, { mode: "point", at: _yTo });
+  m.cool = Math.max((w && (w.fireDelay || w.interval)) || 0.11, 0.07);
+  // the rifle climbs and wanders; lower and through the sights it climbs less
+  const k = (m.stance === "prone" ? 0.45 : m.stance === "crouch" ? 0.7 : 1) * (1 - 0.35 * SH.ads);
+  const kick = Math.min(0.03, 0.0045 + ((w && w.damage) || 20) * 0.00022) * k;
+  SH.rp += kick; SH.ry += (crand() - 0.5) * kick * 0.9;
+  SH.pitch = Math.min(1.25, SH.pitch + kick * 0.35);     // some of it stays up: you pull it back down
+  SH.bloom = Math.min(0.02, SH.bloom + kick * 0.3);
+  if (CBZ.shake) CBZ.shake(0.05 + kick * 4);
+}
+const _shq = [];
+function shooterButt(m) {
+  const a = fineNear(m.pos.x, m.pos.z, 2.4, _shq);
+  let best = null, bs = 0.35;
+  for (let i = 0; i < a.length; i++) {
+    const o = a[i];
+    if (o === m || o.dead || o.fled || o.team === m.team || o.vehicle) continue;
+    const ox = o.pos.x - m.pos.x, oz = o.pos.z - m.pos.z, d = Math.hypot(ox, oz) || 1;
+    if (d > meleeReach(m, o) * 1.3) continue;
+    const along = (ox * Math.sin(YOU.yaw) + oz * Math.cos(YOU.yaw)) / d;
+    if (along > bs) { bs = along; best = o; }
+  }
+  if (best) youButt(m, best);
+  else { m.cool = 0.5; if (m.char) { m.char.punchKind = "butt"; m.char.punchDur = 0.44; m.char.punchT = 0.44; } try { CBZ.sfx("whoosh", { dist: 2, ghost: true, volume: 0.5 }); } catch (e) {} }
+}
+function stepYouShooter(m, sdt) {
+  if (m.supp > 0) m.supp = Math.max(0, m.supp - sdt * SUPP_DECAY);
+  if (m.reloadT > 0) {
+    m.reloadT -= sdt;
+    if (m.reloadT <= 0) { const need = Math.min(m.magSize - m.mag, m.youRes | 0); m.mag += need; m.youRes -= need; }
+  }
+  m.cool -= sdt;
+  const I = youInput(), IN = CBZ.micro.input;
+  const adsWant = SH.adsT || !!(IN && !COARSE && IN.locked && IN.buttons && IN.buttons[2]) || !!(YOU.drive && YOU.drive.ads);
+  let ax = I.ax, az = I.az;
+  if (knockedDown(m)) { ax = 0; az = 0; }
+  const mv = youMoveDir({ ax: ax, az: az });
+  const sprint = I.run && az > 0.3 && m.stance === "stand" && !adsWant && m.reloadT <= 0;
+  let spd = 0;
+  if (mv.len > 0.05) {
+    spd = (m.stance === "prone" ? 0.9 : m.stance === "crouch" ? 2.2 : sprint ? 6.6 : adsWant ? 2.3 : 4.2) * mv.len;
+    if (m.hp < m.maxHp * 0.45) spd *= 0.78;
+    m.pos.x += mv.x * spd * sdt; m.pos.z += mv.z * spd * sdt;
+    CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
+  }
+  m.speed = spd;
+  SH.sprint = sprint && spd > 4.5;
+  SH.want = adsWant && !SH.sprint;
+  if (MAP.water) stepDepth(m, sdt);
+  m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
+  m.coverK = m.stance === "crouch" ? CROUCH_HIT : 1;
+  m.up = true;
+  m.yaw = turnTo(m.yaw, YOU.yaw, sdt * 18);
+  m.group.rotation.y = m.yaw;
+  if (SH.sprint || knockedDown(m)) return;
+  const w = CBZ.weaponById(m.wid);
+  if (m.mag <= 0 && m.reloadT <= 0) {
+    // dry: it reloads itself if there is anything to reload with, else the trigger clicks
+    if (!shooterReload(m, w) && I.edge && !SH.dry) { SH.dry = true; try { CBZ.sfx("click", { dist: 1, ghost: true }); } catch (e) {} }
+    if (!I.atk) SH.dry = false;
+    return;
+  }
+  const semi = w && !w.auto;
+  const pull = semi ? I.edge : I.atk;
+  if (pull && m.cool <= 0 && m.reloadT <= 0) shooterFire(m, w);
+}
+function frameShooter(m, dt) {
+  const IN = CBZ.micro.input;
+  if (IN) {
+    if (IN.pressed("KeyC")) setStance(m, m.stance === "crouch" ? "stand" : "crouch");
+    if (IN.pressed("KeyZ")) setStance(m, m.stance === "prone" ? "stand" : "prone");
+    if (IN.pressed("KeyR")) shooterReload(m, CBZ.weaponById(m.wid));
+    if (IN.pressed("KeyV")) SH.fp = !SH.fp;
+    if (IN.pressed("KeyQ")) SH.adsT = !SH.adsT;
+    if (IN.pressed("KeyF") && m.cool <= 0) shooterButt(m);
+  }
+  SH.on = true;
+  SH.ads += ((SH.want ? 1 : 0) - SH.ads) * Math.min(1, dt * 11);
+  const rk = Math.exp(-dt / 0.16);
+  SH.rp *= rk; SH.ry *= rk; SH.bloom *= Math.exp(-dt / 0.35);
+  const yaw = YOU.yaw + SH.ry, up = Math.max(-1.3, Math.min(1.3, SH.pitch + SH.rp));
+  const cu = Math.cos(up), fx = Math.sin(yaw) * cu, fy = Math.sin(up), fz = Math.cos(yaw) * cu;
+  const rx = -Math.cos(yaw), rz = Math.sin(yaw);                    // screen right
+  const hy = m.pos.y + (m.stance === "prone" ? 0.42 : m.stance === "crouch" ? 1.05 : 1.6);
+  const E = _shEye;
+  if (SH.fp) E.set(m.pos.x + Math.sin(yaw) * 0.22, hy, m.pos.z + Math.cos(yaw) * 0.22);
+  else {
+    // over the right shoulder; it comes in close through the sights
+    let back = m.stance === "prone" ? 2.3 : 2.8;
+    const side = 0.62, lift = 0.3;
+    const hx = m.pos.x + rx * side, hz = m.pos.z + rz * side, top = hy + lift;
+    for (let k = 0; k < 4; k++) {
+      E.set(hx - fx * back, top - fy * back, hz - fz * back);
+      if (!CBZ.micro.segmentBlocked || !CBZ.micro.segmentBlocked(hx, top, hz, E.x, E.y, E.z)) break;
+      back *= 0.55;
+    }
+    const fl = MAP.camFloor(E.x, E.z);
+    if (E.y < fl) E.y = fl;
+    // through the sights the eye is AT the rifle, not behind a helmet that fills the frame
+    if (SH.ads > 0.01) {
+      const k = SH.ads * SH.ads * (3 - 2 * SH.ads);
+      E.x += (m.pos.x + Math.sin(yaw) * 0.22 + rx * 0.06 - E.x) * k;
+      E.y += (hy - E.y) * k;
+      E.z += (m.pos.z + Math.cos(yaw) * 0.22 + rz * 0.06 - E.z) * k;
+    }
+  }
+  if (!cam.fpEye) cam.fpEye = V();
+  cam.fpEye.copy(E);
+  cam.fpDir = yaw; cam.fpUp = up; cam.fpRoll = 0;
+  cam.wFov = 64 / (1 + SH.ads * (SH.zoom - 1));
+  cam.wFocus.set(m.pos.x, m.pos.y, m.pos.z);
+  cam.followM = m;
+  // WHAT THE CROSSHAIR IS ON: along the look until the ground (or 700 m of air)
+  let d = 2, hit = 700;
+  const P = SH.aim;
+  for (let step = 1.5; d < 700; d += step, step *= 1.12) {
+    const px = E.x + fx * d, py = E.y + fy * d, pz = E.z + fz * d;
+    if (py < MAP.groundAt(px, pz)) { hit = d - step * 0.5; break; }
+  }
+  P.set(E.x + fx * hit, E.y + fy * hit, E.z + fz * hit);
+  // the rifle is laid on it (tick.js lays a man's gun on his mark)
+  if (_yDummy) { _yDummy.pos.copy(P); _yDummy.aimY = 0; m.tgt = _yDummy; m.sees = true; }
+  // the glass
+  const x = el("xhair");
+  if (x) { x.classList.toggle("ads", SH.ads > 0.5); x.classList.toggle("run", SH.sprint); }
+  if (_shAmmo) {
+    const st = m.reloadT > 0 ? "RELOADING" : SH.sprint ? "SPRINT" : m.stance === "prone" ? "PRONE" : m.stance === "crouch" ? "KNEELING" : "STANDING";
+    const key = m.mag + "/" + (m.youRes | 0) + st;
+    if (key !== SH.shown) {
+      SH.shown = key;
+      _shAmmo.innerHTML = "<b>" + Math.max(0, m.mag) + "</b> <i>/ " + (m.youRes | 0) + "</i><small>" + st + "</small>";
+      _shAmmo.classList.toggle("low", m.mag <= Math.ceil(m.magSize * 0.25));
+    }
+  }
+  if (SH.hintT > 0 && (SH.hintT -= dt) <= 0 && _shHint) _shHint.classList.remove("on");
 }
 
 /* ---- AN ANIMAL ---- */
@@ -741,14 +969,17 @@ function frameYou(dt) {
   let looked = false;
   if (IN) {
     // the edge keys, once a FRAME (the step above runs up to eight times one)
-    if (!m.vehicle && !m.beast) {
+    if (!m.vehicle && !m.beast && !youShooter(m)) {
       if (IN.pressed("KeyC")) setStance(m, m.stance === "crouch" ? "stand" : "crouch");
       if (IN.pressed("KeyR")) youReload(m, CBZ.weaponById(m.wid));
     }
     if (m.vehicle && IN.pressed("KeyX")) m._youSeat = (m._youSeat || 0) + 1;
     if (IN.mx || IN.mz) looked = true;
-    YOU.yaw -= IN.mx * 0.0024;
+    // (through the sights the same hand movement is a smaller angle)
+    const sens = youShooter(m) ? 1 / (1 + SH.ads * (SH.zoom - 1)) : 1;
+    YOU.yaw -= IN.mx * 0.0024 * sens;
     YOU.pitch = Math.max(0.02, Math.min(0.85, YOU.pitch + IN.mz * 0.002));
+    SH.pitch = Math.max(-1.25, Math.min(1.25, SH.pitch - IN.mz * 0.0022 * sens));
   }
   if (YOU.drive && YOU.drive.yaw != null) YOU.yaw = YOU.drive.yaw;
   /* ON A PHONE THE LENS HELPS: with the look thumb idle, the camera eases
@@ -761,6 +992,8 @@ function frameYou(dt) {
     if (d < youRange(m) * 0.6) YOU.yaw = turnTo(YOU.yaw, Math.atan2(t.pos.x - m.pos.x, t.pos.z - m.pos.z), dt * 1.8);
   }
   frameYouFeel(m);
+  if (youShooter(m)) { frameShooter(m, dt); if (_yMark) _yMark.style.display = "none"; return; }
+  SH.on = false;
   frameChase(m, dt);
   youMarkStep();
 }

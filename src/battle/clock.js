@@ -6,20 +6,15 @@
    CBZ.npcwar.onBoot(), in file order, once the armoury is in. */
 
 /* ============================================================ CLOCK */
-const ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg>';
-const ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
-const ICON_FAST = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l8 6-8 6zM12 6l8 6-8 6z"/></svg>';
 const SPEED_RING = [1, 2, 4, 8, 0.25];
 function setSpeed(s) {
   if (s > 0) lastSpeed = s;
   speed = s;
   const pb = el("cPause");
-  pb.innerHTML = s === 0 ? ICON_PLAY : ICON_PAUSE;
+  pb.textContent = s === 0 ? "RESUME" : "PAUSE";
   pb.classList.toggle("on", s === 0);
-  // the speed button is the fast-forward mark at real time and the dial's
-  // number once it is anything else
   const sb = el("cSpeed"), shown = s === 0 ? lastSpeed : s;
-  sb.innerHTML = shown === 1 ? ICON_FAST : (shown < 1 ? "&frac14;" : shown) + "&times;";
+  sb.innerHTML = "SPEED " + (shown < 1 ? "&frac14;" : shown) + "&times;";
   sb.classList.toggle("on", shown !== 1);
 }
 CBZ.npcwar.onBoot(function () {
@@ -28,8 +23,14 @@ CBZ.npcwar.onBoot(function () {
     const i = SPEED_RING.indexOf(speed === 0 ? lastSpeed : speed);
     setSpeed(SPEED_RING[(i + 1) % SPEED_RING.length]);
   });
-  el("cCam").addEventListener("click", function () {
-    cycleCam();
+  /* THE CAMERA IS FOUR NAMED BUTTONS, not one eye icon that stepped blind
+     through six modes. The lit one is the one you are on (paintCam). */
+  el("cCamSeg").addEventListener("click", function (e) {
+    const b = e.target.closest && e.target.closest("button");
+    if (!b) return;
+    const k = b.dataset.cam;
+    if (k === "follow") setCamMode("follow", cam.mode === "follow" && cam.followTeam === "red" ? "blue" : "red");
+    else setCamMode(k);
   });
 });
 /* THE CONTROLS LEAVE THE PICTURE. Still mouse for three seconds and the row
@@ -41,6 +42,20 @@ function wakeCtl() {
   el("ctl").classList.remove("idle");
 }
 /* THE RIFLE BUTTON: only where there are men (or a crewed hull) to carry one */
+// which camera button is lit, and what the takeover button says
+function paintCam() {
+  const seg = el("cCamSeg");
+  if (!seg || !seg.querySelectorAll) return;
+  const now = cam.mode === "fp" ? "lock" : cam.mode;
+  seg.querySelectorAll("button").forEach(function (b) {
+    const on = b.dataset.cam === now;
+    b.classList.toggle("on", on);
+    b.style.setProperty("--cc", on && now === "follow" ? "#" + TEAMS[cam.followTeam].color.toString(16).padStart(6, "0") : "#ff7a45");
+    if (b.dataset.cam === "follow") b.textContent = on ? "FRONT LINE: " + TEAMS[cam.followTeam].name : "FRONT LINE";
+  });
+  const r = el("cRifle");
+  if (r) { const mine = cam.mode === "you" || cam.mode === "youdead"; r.textContent = mine ? "LEAVE (G)" : "TAKE CONTROL"; r.classList.toggle("on", mine); }
+}
 function paintCtl() {
   const r = el("cRifle");
   if (r) r.classList.toggle("hide", !youTeam() || !!bench);

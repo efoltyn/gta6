@@ -125,7 +125,7 @@ function foldSeg(ax, az, bx, bz, fn) {
    toward so the horizon matches the window. */
 const ERG_PAL = {
   sand:   { form: "dune",  surface: "sand", sand: 0xc89a62, crest: 0xdcb47a, trough: 0xa5774a, slip: 0xd1a46a, pan: 0x9d8466,
-            amp: 1, tint: null, tuft: 0x9a8a5a, tufts: 700, rough: 0.96 },
+            amp: 1, tint: null, tuft: 0x9a8a5a, tufts: 0, rough: 0.96 },
   snow:   { form: "drift", surface: "snow", sand: 0xe4e9ee, crest: 0xf4f7fa, trough: 0xd1d9e1, slip: 0xc7d3df, pan: 0xd6dce1,
             amp: 1, tint: [0.88, 0.91, 0.94], tuft: 0x857e6c, tufts: 160, rough: 0.72 },
   grass:  { form: "roll",  surface: "grass", sand: 0x6c8744, crest: 0x7a9650, trough: 0x5c763a, slip: 0x6c8744, pan: 0x8b8758,
@@ -908,7 +908,8 @@ function reseatDesertDress(world) {
       }
       // the old rocks in the battle window make way for the dressing's own;
       // the rest are sunk a third into their sand, which is how stone sits
-      if (Math.abs(p.x - DUNE.cx) < DUNE.R0 && Math.abs(p.z - DUNE.cz) < DUNE.R0 && PAL.surface !== "sand") { o.setMatrixAt(i, zero); continue; }
+      // (on the sand every rock inside the dune field goes: the erg is sand)
+      if (PAL.surface === "sand" ? w > 0 : (Math.abs(p.x - DUNE.cx) < DUNE.R0 && Math.abs(p.z - DUNE.cz) < DUNE.R0)) { o.setMatrixAt(i, zero); continue; }
       p.y = MAP_GROUND(p.x, p.z) + s.y * 0.12;
       mtx.compose(p, q, s); o.setMatrixAt(i, mtx);
     }

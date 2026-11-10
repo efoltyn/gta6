@@ -213,7 +213,10 @@ function camApply(dt) {
 /* THE EYE IS THE POSITION: first person, and the director's tripod (a lens
    on the ground looking UP at a helicopter is not an orbit; the orbit's arm
    never goes below the horizon). */
-function eyeShot() { return cam.mode === "fp" || (cam.mode === "auto" && cam.shot === "tripod" && !!cam.tri); }
+function eyeShot() {
+  return cam.mode === "fp" || (cam.mode === "auto" && cam.shot === "tripod" && !!cam.tri) ||
+    (cam.mode === "you" && typeof SH !== "undefined" && SH.on);        // YOU with a rifle (player.js)
+}
 /* FIRST PERSON is not an orbit with a short arm: the eye IS the position and
    the glass looks where the unit looks. No occlusion pass (the eye is inside
    the thing that would block it); the ground still holds it up. */

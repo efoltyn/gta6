@@ -73,10 +73,7 @@ function setCamMode(mode, team) {
   if (mode !== "you") cam.wFov = cam.fov0;
   // the camera button lights while a director owns the lens, in the
   // followed army's colour when it is riding one of them
-  const cb = el("cCam");
-  cb.classList.toggle("on", mode !== "free");
-  cb.style.setProperty("--cc", mode === "follow"
-    ? "#" + TEAMS[cam.followTeam].color.toString(16).padStart(6, "0") : "#ff7a45");
+  paintCam();
   if (mode === "lock" || mode === "fp") {
     const m = lockPick(0);
     if (!m) { cam.mode = was; return; }       // nothing worth riding: stay where you were
