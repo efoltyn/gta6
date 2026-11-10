@@ -35,6 +35,8 @@
   // fighters, whatever their training (battle/core/countries.js)
   function menWordFor(tier, n, nation) {
     const RC = nation && CBZ.countries && CBZ.countries.get ? CBZ.countries.get(nation) : null;
+    // a service or an army with its own name for its men: Marines, legionaries
+    if (RC && RC.men && (tier !== "civ" || RC.era === "ancient")) return n === 1 ? RC.men[0] : RC.men[1];
     if (RC && tier !== "civ" && tier !== "swat") return RC.kind === "group" ? (n === 1 ? "fighter" : "fighters") : (n === 1 ? "soldier" : "soldiers");
     return menWord(tier, n);
   }

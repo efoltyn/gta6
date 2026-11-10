@@ -113,7 +113,7 @@
     sqFull: { n: 0, ms: 0 }, sqMid: { n: 0, ms: 0 }, sqFar: { n: 0, ms: 0 } };
   const SQ_COST = ["sqFull", "sqMid", "sqFar"];
   const STATS = { bounds: 0, flanks: 0, assaults: 0, pins: 0, fallbacks: 0, drills: 0, screens: 0,
-    focusSwitch: 0, nades: 0, drags: 0, leadersLost: 0, surrendered: { red: 0, blue: 0 }, coverPosts: 0, foldPosts: 0, openPosts: 0 };
+    focusSwitch: 0, nades: 0, drags: 0, leadersLost: 0, coverPosts: 0, foldPosts: 0, openPosts: 0 };
 
   /* ---------------------------------------------------------- formations
      formSlot(form, idx, sp) -> { r, b }: metres to the leader's RIGHT and
@@ -131,7 +131,7 @@
   }
 
   /* ---------------------------------------------------------- helpers */
-  function out(o) { return !o || o.dead || o.fled || o.surrendered || o.downed; }
+  function out(o) { return !o || o.dead || o.fled || o.downed; }
   function soldier(m) { return m && !m.beast && !m.vehicle && !m.inVeh; }
   function armoured(o) {
     if (!o || !o.vehicle || !o.def || !o.def.stats) return false;
@@ -390,7 +390,7 @@
       const m = list[i];
       if (!soldier(m)) continue;
       n0++;
-      if (m.dead || m.fled || m.surrendered) { dead++; continue; }
+      if (m.dead || m.fled) { dead++; continue; }
       if (m.downed) { if (!m.cared) S.downed.push(m); continue; }
       if (m.routed || m.you || m.fists) continue;
       m.sqd = S;
@@ -405,7 +405,7 @@
     if (!S.alive) { S.task = "gone"; S.leader = null; return; }
     // ---- the leader
     const L0 = S.leader;
-    if (!L0 || L0.dead || L0.routed || L0.downed || L0.fled || L0.surrendered || S.men.indexOf(L0) < 0) {
+    if (!L0 || L0.dead || L0.routed || L0.downed || L0.fled || S.men.indexOf(L0) < 0) {
       if (L0 && (L0.dead || L0.downed)) {
         S.shock = Math.min(0.6, S.shock + K.SHOCK_LEADER);
         STATS.leadersLost++;
@@ -985,11 +985,10 @@
     SQ.forEach(function (S) { sq[S.task] = (sq[S.task] || 0) + 1; });
     const c = {};
     for (const k in COST) c[k] = { n: COST[k].n, ms: Math.round(COST[k].ms * 100) / 100, per: COST[k].n ? Math.round(COST[k].ms / COST[k].n * 1000) / 1000 : 0 };
-    return Object.assign({}, STATS, { surrendered: Object.assign({}, STATS.surrendered), squads: sq, cost: c });
+    return Object.assign({}, STATS, { squads: sq, cost: c });
   }
   function resetStats() {
     for (const k in STATS) if (typeof STATS[k] === "number") STATS[k] = 0;
-    STATS.surrendered = { red: 0, blue: 0 };
   }
 
   CBZ.battleTactics = { K, FORMS, formSlot, threat, make, tick, tierOf, reloadOK, postFor, safeSpot, armoured, wclass, out,

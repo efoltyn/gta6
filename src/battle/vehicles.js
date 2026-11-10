@@ -424,7 +424,12 @@ function vehBailOut(u, catastrophic) {
 /* ------------------------------------------------------------- the step */
 function stepVehicle(u, sdt) {
   if (u.drone) { stepDrone(u, sdt); return; }            // src/battle/drones.js
-  if (u.dead) { stepWreck(u, sdt); vehAnimate(u, sdt); return; }
+  /* A MISSILE OFF THE RAIL DOES NOT STOP BECAUSE ITS LAUNCHER DIED. The
+     rounds in flight used to be stepped only by a living hull, so killing a
+     Patriot froze its PAC-3s in the air for the rest of the war (measured:
+     2 launched, 0 arrived, tools/npcwar-headless section 14). A seeker that
+     has its mark flies on. */
+  if (u.dead) { if (u.shots && u.shots.length) stepVehShots(u, sdt); stepWreck(u, sdt); vehAnimate(u, sdt); return; }
   if (u.fled) return;
   stepVehShots(u, sdt);
   for (let k = 0; k < u.wpn.length; k++) {
@@ -706,6 +711,37 @@ function vehCrush(u, sdt) {
   }
 }
 
+/* IS ONE OF OUR OWN HULLS ON THE GUN LINE? dangerClose keeps high explosive
+   off our men, and deliberately skips vehicles (a frag ring does nothing to
+   a tank). But a round in flight is swept against every body on its path
+   (fire.js rocketBody), so a tank laying on a man the far side of its wingman
+   put a 120 mm HEAT round through the wingman's side armour: measured, 3 M1
+   v 60 brawlers, one Abrams lost to its own platoon (tools/npcwar-headless
+   section 8). A real crew does not fire with a friendly in the sight picture:
+   the gun holds, and the hull keeps moving until the lane opens. The line is
+   walked on the body grid out to the mark (400 m at most), each friendly hull
+   tested as its own box plus a metre and a half. */
+const _hl = [];
+function hullInLane(u, t) {
+  if (typeof TAC !== "undefined" && TAC && TAC.on === false) return false;
+  const dx = t.pos.x - u.pos.x, dz = t.pos.z - u.pos.z, d = Math.hypot(dx, dz);
+  if (d < 4) return false;
+  const nx = dx / d, nz = dz / d, reach = Math.min(d, 400);
+  for (let s = 0; s <= reach; s += 9) {
+    const a = fineNear(u.pos.x + nx * s, u.pos.z + nz * s, 12, _hl);
+    for (let i = 0; i < a.length; i++) {
+      const o = a[i];
+      if (o === u || o === t || !o.vehicle || o.air || o.dead || o.fled || o.team !== u.team) continue;
+      const ox = o.pos.x - u.pos.x, oz = o.pos.z - u.pos.z;
+      const along = ox * nx + oz * nz;
+      const rad = Math.hypot(o.vlen || 3, o.vwid || 1.5);
+      if (along < 1 || along > d + rad) continue;
+      if (Math.abs(ox * nz - oz * nx) < rad * 0.75 + 1.5) return true;
+    }
+  }
+  return false;
+}
+
 /* ------------------------------------------------------------- the guns */
 function vehFight(u, sdt) {
   u._wantShot = false;
@@ -773,6 +809,8 @@ function vehFight(u, sdt) {
     if (w.kind === "cannon" && !t.vehicle && dist < 500 && vehHasMG(u, dist) && lcg() < 0.6) { W.cool = 1; continue; }
     // DANGER CLOSE: high explosive is not put down on top of our own men (ai/squad.js)
     if (w.kind !== "mg" && !(w.kind === "cannon" && t.vehicle) && dangerClose(u.team, t.pos.x, t.pos.z, ((w.he && w.he.blast) || 6) * 0.9)) { W.cool = 0.6; continue; }
+    // THE LANE: a direct-fire round is not sent through one of our own hulls
+    if (w.kind !== "mg" && !w.indirect && !u.air && !t.air && hullInLane(u, t)) { W.cool = 0.5; u._laneHeld = simT; continue; }
     // a gun with its own sector off the hull (a door gun: yawLo..yawHi from
     // the nose) never fires out of it, whatever its mount
     if (w.yawLo != null && w.yawHi != null && (rel < w.yawLo || rel > w.yawHi)) continue;
@@ -1051,6 +1089,13 @@ function vehFireHE(u, w, t, dist) {
   const rk = {
     pos: V().copy(from), vel: vel, grav: g, t: 0, by: u, life: Math.max(7, sol.t * 1.5 + 2),
     mun: he.mun || null, he: he, tgt: t.fake ? null : t,
+    /* THE FUZE ARMS DOWNRANGE. A shell arms on setback and spin a few tens
+       of metres out, a rocket once its motor has carried it clear: a round
+       that clips the lip of the dune in front of its own launcher is a dud,
+       not a 90 kg warhead going off on the rail (measured: an M270 killed
+       by its own first rocket, tools/npcwar-headless section 15). fire.js
+       stepRockets already honours r.arm (the 40 mm had the only one). */
+    arm: w.indirect || w.guided ? 80 : 20,
     w: { blastRadius: he.blast || 6, blastPower: (he.power || 1.4) / 0.55, sfx: null },
   };
   rockets.push(rk);
@@ -1077,8 +1122,9 @@ function vehLaunch(u, w, t) {
      and its timing stay exactly the guidance's. */
   const att = row && row.attack;
   const loft = t.air || u.air ? 0 : att === "top" ? Math.min(150, Math.max(20, d0 * 0.18)) : att === "dive" ? Math.min(60, d0 * 0.08) : 0;
-  u.shots.push({ pos: from, tgt: t, w: w, t: 0, by: u, d0: Math.max(1, d0), loft: loft, vp: { x: from.x, y: from.y, z: from.z },
-    fx: MU && MU.flight ? MU.flight(shape, {}) : null });
+  const ms = { pos: from, tgt: t, w: w, t: 0, by: u, d0: Math.max(1, d0), loft: loft, vp: { x: from.x, y: from.y, z: from.z },
+    fx: MU && MU.flight ? MU.flight(shape, {}) : null };
+  u.shots.push(ms);
 }
 // where the round is DRAWN: its guided point plus the profile's loft
 function vehShotDraw(s, sdt) {
@@ -1498,12 +1544,13 @@ function vehRelease(u, W, he, guideTo, tf) {
   if (u.rig && u.rig.muzzleWorld) { try { const p = u.rig.muzzleWorld(V(), shot); if (p && isFinite(p.y)) p0.copy(p); } catch (e) {} }
   let mesh = null;
   if (u.rig && u.rig.store) { try { mesh = u.rig.store(shot) || null; } catch (e) { mesh = null; } }
-  rockets.push({
+  const bm = {
     pos: p0, mesh: mesh,
     vel: vel,
     grav: 9.81, t: 0, by: u, life: Math.max(40, fall * 1.4 + 5), homing: guideTo || null, mun: he.mun || w.mun || null, he: he, bomb: true,
     w: { blastRadius: he.blast, blastPower: he.power / 0.55 },
-  });
+  };
+  rockets.push(bm);
 }
 
 /* ------------------------------------------------------------- the hits */

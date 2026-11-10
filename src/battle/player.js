@@ -68,7 +68,7 @@ function youTeam() {
 }
 // can this body be taken over right now?
 function canTake(u) {
-  if (!u || u.dead || u.fled || u.inVeh || u._apeHeld || u._apeFlying || u._tossed || u.downed || u.surrendered) return false;   // a wounded man on the ground is not a body to drive
+  if (!u || u.dead || u.fled || u.inVeh || u._apeHeld || u._apeFlying || u._tossed || u.downed) return false;   // a wounded man on the ground is not a body to drive
   if (u.group && !u.group.visible) return false;
   if (u.vehicle && vehCrewN(u) === 0) return false;
   return true;

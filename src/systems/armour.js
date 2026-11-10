@@ -127,6 +127,12 @@
     b6b47:   { kind: "helmet", mat: "aramid", rating: 1.7, trauma: 0.15, deflect: 0.22, label: "6B47 Ratnik" },
     pasgt:   { kind: "helmet", mat: "aramid", rating: 1.4, trauma: 0.17, deflect: 0.18, label: "PASGT" },
     steelpot:{ kind: "helmet", mat: "steel",  rating: 0.9, trauma: 0.2,  deflect: 0.15, label: "steel helmet" },
+    // ANCIENT ARMOUR (battle/core/countries.js `ancient`): wrought iron, about
+    // a millimetre of it. It turns a blade's cut and most arrows; any rifle
+    // round of the last 120 years goes through it like the sheet it is.
+    segmentata: { kind: "soft", mat: "steel", rating: 0.42, trauma: 0.3, label: "lorica segmentata (iron bands, ~1 mm)" },
+    hamata:  { kind: "soft",  mat: "steel",  rating: 0.3, trauma: 0.35, label: "lorica hamata (iron mail)" },
+    galea:   { kind: "helmet", mat: "steel", rating: 0.5, trauma: 0.3,  deflect: 0.1, label: "Imperial Gallic helmet (iron, ~1.2 mm)" },
   };
 
   /* ---- THE ZONES -----------------------------------------------------------
@@ -342,7 +348,7 @@
   // the ballistics zone -> this file's zones (area-weighted inside it)
   const BZ = { head: ["skull", "face"], torso: ["neck", "thorax", "side", "armpit"], gut: ["abdomen", "pelvis"] };
   // a rating on the threat scale as mm of mild steel, the ballistics layer's unit
-  const RATE_MM = [[0.9, 3], [1.4, 4.5], [1.7, 5.5], [2.2, 7.5], [3.6, 13.6], [3.75, 14.6], [4.6, 19], [4.8, 21], [6, 40]];
+  const RATE_MM = [[0.3, 1.0], [0.9, 3], [1.4, 4.5], [1.7, 5.5], [2.2, 7.5], [3.6, 13.6], [3.75, 14.6], [4.6, 19], [4.8, 21], [6, 40]];
   function rateMM(r) {
     if (r <= RATE_MM[0][0]) return RATE_MM[0][1];
     for (let i = 1; i < RATE_MM.length; i++) {

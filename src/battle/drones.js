@@ -205,7 +205,7 @@ function droneBind(u, was) {
     const ref = was ? was.pos : (u.home || u.pos);
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
-      if (m.team !== u.team || m.vehicle || m.beast || m.dead || m.fled || m.downed || m.inVeh || m.you || m.routed || m.surrendered) continue;
+      if (m.team !== u.team || m.vehicle || m.beast || m.dead || m.fled || m.downed || m.inVeh || m.you || m.routed) continue;
       const O = m.droneOp;
       if (O && (O.done || O.kind !== want || O.drones.length >= (D.perOp || 3))) continue;
       // a team already flying this kind first, then the nearest man
@@ -521,7 +521,6 @@ function droneChoose(u, from) {
   for (let i = 0; i < men.length; i++) {
     const o = men[i];
     if (o.team === u.team || o.dead || o.fled || o.downed || o.air || o.ghost) continue;
-    if (o.surrendered) continue;
     const d = Math.hypot(o.pos.x - from.x, o.pos.z - from.z);
     if (d > reach) continue;
     let s = -1;

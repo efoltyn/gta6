@@ -703,6 +703,14 @@
         break;
       }
       case "script": if (M) script(g, e, M); break;
+      // lettering in a serif capital (a Roman vexillum's SPQR): `h` is the cap height as a share of the hoist
+      case "text": if (M && e.text) {
+        const at = e.at || [0.5, 0.5], h = (e.h || 0.18) * M.H;
+        g.save(); g.fillStyle = col; g.textAlign = "center"; g.textBaseline = "middle";
+        g.font = "bold " + Math.max(4, Math.round(h * 1.3)) + "px Georgia, 'Times New Roman', serif";
+        const q = M.map ? M.map(at[0] * M.W, at[1] * M.H) : [at[0] * M.W, at[1] * M.H];
+        g.fillText(String(e.text), q[0], q[1]); g.restore();
+      } break;
       case "sword": if (M) sword(g, e, M); break;
       case "iran": iranEmblem(g, e, x, y, s); break;
       case "takbir-border": if (M) takbirBorder(g, e, M); break;

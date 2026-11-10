@@ -22,8 +22,6 @@
                     top, some with the root plate torn up.
      dry wall       a battered dry-stone field wall with its coping stones.
      bale           a 1.5 m round bale of straw in its net wrap.
-     rubble         a heap of broken concrete with rebar sticking out.
-     containers     the yard's ISO boxes, stacked.
 
    Every one registers with CBZ.battleCover (a collider, its cover points and
    its hit points). Visuals are InstancedMesh pools: one draw per kind, the
@@ -32,7 +30,7 @@
    collapse (a slumped heap) or put away.
 
    PUBLIC  CBZ.battleDress = { begin(ctx), place(kind, x, z, yaw, opts),
-     flush(), open(ctx), city(ctx), stats() }
+     flush(), open(ctx), city(ctx), outpost(x, z, face, surface), stats() }
    ctx = { cx, cz, gap, groundAt, theme, blocked(x, z, r), roads } */
 
 CBZ.battleDress = (function () {
@@ -283,17 +281,24 @@ CBZ.battleDress = (function () {
   }
   function boulderGeo(v, granite) {
     return once("boulder" + v + (granite ? "g" : "s"), function () {
+      // the snow's granite wears a snow cap: whatever faces up is white
+      const snowy = !!(D.ctx && D.ctx.theme === "snow");
       const g = lumpRock(2, 7 + v * 13, 0.62 + v * 0.08, granite ? function (x, y, z, ny) {
+        // granite: a dark grey, feldspar flecks, lichen on the weather side
         const n = vn2(x * 3 + v, z * 3 + y * 2, 19);
-        let r = 0.46 + n * 0.1, gg = 0.46 + n * 0.1, b = 0.45 + n * 0.1;
+        let r = 0.3 + n * 0.12, gg = 0.3 + n * 0.12, b = 0.31 + n * 0.12;
+        const fleck = vn2(x * 14, z * 14 + y * 9, 27);
+        if (fleck > 0.7) { r += 0.1; gg += 0.09; b += 0.07; }
         const lich = vn2(x * 5 + 2, z * 5 + y * 4, 23);
-        if (lich > 0.62 && ny > 0) { r = 0.52; gg = 0.55; b = 0.36; }      // lichen on the lit side
-        if (ny > 0.55) { r *= 0.9; gg *= 0.95; b *= 0.85; }
+        if (lich > 0.64 && ny > -0.1) { r = 0.42; gg = 0.46; b = 0.28; }      // lichen on the lit side
+        if (snowy && ny > 0.45) { const k = Math.min(1, (ny - 0.45) * 3); r += (0.9 - r) * k; gg += (0.92 - gg) * k; b += (0.95 - b) * k; }
         return [r, gg, b];
       } : function (x, y, z, ny) {
         const band = Math.sin(y * 7.5 + vn2(x * 1.3, z * 1.3, 5) * 2.4);
-        let r = 0.6 + band * 0.045, gg = 0.47 + band * 0.03, b = 0.36 + band * 0.02;
-        if (ny > 0.55) { const k = (ny - 0.55) * 0.5; r -= r * k; gg -= gg * k; b -= b * k * 0.8; }
+        let r = 0.46 + band * 0.05, gg = 0.35 + band * 0.03, b = 0.26 + band * 0.02;
+        const v2 = 0.85 + vn2(x * 6, z * 6 + y * 3, 13) * 0.3;
+        r *= v2; gg *= v2; b *= v2;
+        if (ny > 0.4) { const k = (ny - 0.4) * 0.6; r -= r * k; gg -= gg * k; b -= b * k * 0.7; }
         return [r, gg, b];
       });
       if (!g.attributes.uv) g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
@@ -429,30 +434,6 @@ CBZ.battleDress = (function () {
       });
     });
   }
-  function rubbleGeo(v) {
-    return once("rubble" + v, function () {
-      const parts = [];
-      for (let i = 0; i < 14; i++) {
-        const a = h01(i, v, 81) * 6.28, d = Math.sqrt(h01(i, v, 83)) * 1.3;
-        const s = boulderGeo(i % 3, true).clone();
-        const sz = 0.35 + h01(i, v, 85) * 0.5;
-        s.scale(sz, sz * (0.5 + h01(i, v, 87) * 0.4), sz * 0.8);
-        s.rotateY(a * 2);
-        s.translate(Math.cos(a) * d, (1.3 - d) * 0.45, Math.sin(a) * d * 0.7);
-        paint(s, function (x, y, z) { const t = 0.5 + h01(i, Math.round(y * 9), 89) * 0.18; return [t, t * 0.98, t * 0.95]; });
-        parts.push(s);
-      }
-      for (let i = 0; i < 4; i++) {                    // rebar
-        const r = flat(new THREE.CylinderGeometry(0.012, 0.012, 1.4, 4));
-        r.rotateZ(0.6 + i * 0.35); r.rotateY(i * 1.4);
-        r.translate((i - 1.5) * 0.4, 0.7, (h01(i, v, 91) - 0.5) * 0.6);
-        paint(r, function () { return [0.3, 0.17, 0.1]; });
-        parts.push(r);
-      }
-      parts.forEach(function (q) { if (!q.attributes.uv) q.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(q.attributes.position.count * 2), 2)); });
-      return merge(parts.map(flat));
-    });
-  }
 
   /* ---- POOLS: one InstancedMesh per article, built at flush() ------------- */
   const MAT = {};
@@ -499,7 +480,6 @@ CBZ.battleDress = (function () {
   function drawing() { return !!(CBZ.renderer || (CBZ.micro && CBZ.micro.renderer)) && typeof document !== "undefined"; }
   function flush() {
     if (!drawing()) return;
-    flushContainers();
     const m4 = new THREE.Matrix4();
     Object.keys(D.pools).forEach(function (k) {
       const P = D.pools[k];
@@ -585,7 +565,6 @@ CBZ.battleDress = (function () {
     log:      { hw: 0.5, hd: 0.5, h: 0.9, hp: 650, rubble: 0.5 },
     drywall:  { hw: 1.5, hd: 0.36, h: 1.12, hp: 300, rubble: 0.5 },
     bale:     { hw: 0.62, hd: 0.76, h: 1.5, hp: 70, rubble: 0 },
-    rubble:   { hw: 1.4, hd: 1.0, h: 1.0, hp: 1e9, rubble: 0 },
   };
   /* ON A TURNED ERG (erg.js FOLD) a thing placed while the field is being
      dressed lands on the kept half and again turned through the centre
@@ -624,11 +603,6 @@ CBZ.battleDress = (function () {
       hw = L / 2; hd = r; h = r * 1.6;
     } else if (kind === "drywall") { P = pool("drywall", wallGeo, "drywall"); it = put(P, x, g - 0.06, z, yaw, 1); }
     else if (kind === "bale") { P = pool("bale", baleGeo, "bale"); it = put(P, x, g - 0.04, z, yaw, 1); }
-    else if (kind === "rubble") {
-      const v = (h01(x * 3, z * 3, 9) * 2) | 0;
-      P = pool("rubble" + v, function () { return rubbleGeo(v); }, "rubble");
-      it = put(P, x, g - 0.1, z, yaw, 1);
-    }
     D.counts[kind] = (D.counts[kind] || 0) + 1;
     const rec = CBZ.battleCover.add({
       kind: kind, x: x, z: z, yaw: yaw, hw: hw, hd: hd, h: h, hp: S.hp, rubbleH: S.rubble,
@@ -677,33 +651,6 @@ CBZ.battleDress = (function () {
       place("sandbags", x - rx * 1.65 - fx * 0.05, z - rz * 1.65 - fz * 0.05, face + Math.PI / 2 + 0.25);
     }
   }
-  /* CONTAINERS: the yard's own ISO boxes (yard.js containerInto), stacked
-     one or two high on an apron or a quay. Steel boxes do not blow over:
-     static, one merged mesh per paint, colliders and cover like the rest. */
-  const contB = {};
-  function containers(x, z, yaw, tiers, L) {
-    if (typeof foldEmit !== "function" || !FOLD.on) return containersOne(x, z, yaw, tiers, L);
-    return foldEmit(x, z, L / 2, function (fx, fz, sg) { return containersOne(fx, fz, foldYaw(yaw, sg), tiers, L); });
-  }
-  function containersOne(x, z, yaw, tiers, L) {
-    const paints = CONT_PAINT;
-    for (let t = 0; t < tiers; t++) {
-      const hex = paints[(rnd() * paints.length) | 0];
-      const B = contB[hex] || (contB[hex] = new GeoBatch());
-      B.xf(x, D.ctx.groundAt(x, z) + t * CN.H, z, yaw);
-      containerInto(B, L);
-    }
-    CBZ.battleCover.add({ kind: "container", x: x, z: z, yaw: yaw, hw: L / 2, hd: CN.W / 2, h: tiers * CN.H, hp: 1e9 });
-    D.counts.container = (D.counts.container || 0) + 1;
-  }
-  function flushContainers() {
-    if (!drawing()) return;
-    Object.keys(contB).forEach(function (hex) {
-      const skin = containerSkin(+hex);
-      contB[hex].mesh(yardPatch(new THREE.MeshPhongMaterial({ map: skin.map, specular: 0x262626, shininess: 22 }), { mottle: 0.16, grime: 0.5 }));
-      delete contB[hex];
-    });
-  }
   function barricade(x, z, yaw) {
     const c = Math.cos(yaw), s = -Math.sin(yaw);
     place("jersey", x - c * 1.6, z - s * 1.6, yaw + (rnd() - 0.5) * 0.08);
@@ -711,96 +658,77 @@ CBZ.battleDress = (function () {
     if (rnd() < 0.6) place("sandbags", x + c * 4.4 + Math.sin(yaw) * 0.4, z + s * 4.4 + Math.cos(yaw) * 0.4, yaw + 0.2);
   }
 
-  /* OPEN GROUND (the erg, the fields, a raised venue's apron): clusters in
-     the band between the start lines, each one a reason to be somewhere.
-     Forward positions near each side's line face the other side; the middle
-     gets the things a fought-over field collects — wrecks, rocks, a
-     barricade across the obvious lane. */
+  /* A FORWARD POSITION A SIDE HAS DUG IN (sand and snow): a bulldozed berm
+     with two foxholes behind it and, at the end the enemy will try to turn,
+     one HESCO cell with a sandbag return: the machine gun's corner. Out in
+     front of a side's line and off its axis, so the attackers must take it
+     or pass it under its fire. The berm and the pits are ground (ground.js,
+     dug before anything stands on them); the basket and the bags are
+     articles with colliders and cover. Everything here lands in turned pairs
+     on a turned erg, so both sides get the same position. `face` is the yaw
+     that looks at the enemy. */
+  function outpost(x, z, face, surface) {
+    const G = CBZ.battleGround;
+    const fx = Math.sin(face), fz = Math.cos(face);       // toward the enemy
+    const rx = Math.cos(face), rz = -Math.sin(face);      // the right
+    const bh = surface === "snow" ? 1.3 : 1.5;
+    G.berm(x - rx * 14, z - rz * 14, x + rx * 14, z + rz * 14, bh, 3.2);
+    G.pit(x - fx * 4 - rx * 6, z - fz * 4 - rz * 6, 1.1, 1.2);
+    G.pit(x - fx * 4 + rx * 6, z - fz * 4 + rz * 6, 1.1, 1.2);
+    // the gun corner: a basket on the berm's end, bags closing the flank
+    place("hesco", x + rx * 16.6 - fx * 0.6, z + rz * 16.6 - fz * 0.6, face + Math.PI / 2);
+    place("sandbags", x + rx * 17.8 - fx * 3.0, z + rz * 17.8 - fz * 3.0, face);
+  }
+
+  /* OPEN GROUND. What stands between two armies on open ground is the
+     ground: the crests, the folds, what the wood and the farm and the snow
+     put there (woods.js, fields.js) and the positions each side dug
+     (outpost, above). This used to scatter burnt-out sedans where no road
+     has ever run, jersey barriers and sandbag walls in the middle of a sand
+     sea, shipping containers on a speedway and heaps of rubble on an
+     untouched airfield apron: props for the sake of props, and the owner
+     read them as the toy they were. On the sand the pans between barchans
+     carry rock: lag gravel and low outcrops where the sand runs thin, so
+     those stay, on the pans, and nothing else is added. */
   function open(ctx) {
     D.ctx = ctx; taken.length = 0;
     _ds = 0x5eed1 ^ ((ctx.seed || 7) * 2654435761);
     const theme = ctx.theme || "desert";
     const cx = ctx.cx, cz = ctx.cz, gap = ctx.gap;
-    const half = gap / 2;
     let made = 0;
-    /* ON A TURNED FIELD (erg.js FOLD) every draw lands on the kept half and
-       place() puts each thing there and at its turned twin, so the spot must
-       be free on BOTH sides (a raised venue's walls are not symmetric). */
+    if (theme !== "desert") return made;
     const fold = typeof FOLD !== "undefined" && FOLD.on;
-    const tryAt = function (fn, r, n, xs, zs) {
-      for (let t = 0; t < n; t++) {
-        let x = cx + xs();
-        const z = cz + zs();
-        if (fold) x = FOLD.cx + FOLD.src * Math.abs(x - FOLD.cx);
-        if (!free(x, z, r) || !flatEnough(x, z, r * 0.7, ctx.tol || 1.2)) continue;
-        if (fold && (!free(2 * FOLD.cx - x, 2 * FOLD.cz - z, r) || !flatEnough(2 * FOLD.cx - x, 2 * FOLD.cz - z, r * 0.7, ctx.tol || 1.2))) continue;
-        claim(x, z, r);
-        if (fold) claim(2 * FOLD.cx - x, 2 * FOLD.cz - z, r);
-        fn(x, z);
-        made++;
-        return true;
-      }
-      return false;
+    // the pans: where the dune shape is at its base level (DS.trough) and
+    // the ground is flat enough to be a pan, not a slope
+    const onPan = function (x, z) {
+      if (typeof duneDetail !== "function") return true;
+      duneDetail(x, z);
+      return DS.trough > 0.55 && DS.lee < 0.1;
     };
-    // forward positions: two to three a side, a little ahead of each line
-    for (const side of [-1, 1]) {
-      if (fold && side !== FOLD.src) continue;                // the turn makes the other side's
-      const face = side < 0 ? Math.PI / 2 : -Math.PI / 2;     // red (west) looks east, blue looks west
-      const nPos = theme === "forest" ? 2 : 3;
-      for (let k = 0; k < nPos; k++) {
-        tryAt(function (x, z) { position(x, z, face, theme === "desert" && k === 0); }, 5,
-          12, function () { return side * (half - 14 - rnd() * 16); }, function () { return (k - 1) * 34 + (rnd() - 0.5) * 18; });
+    for (let t = 0; t < 60 && made < 4; t++) {
+      let x = cx + (rnd() - 0.5) * (gap + 120);
+      const z = cz + (rnd() - 0.5) * 260;
+      if (fold) x = FOLD.cx + FOLD.src * Math.abs(x - FOLD.cx);
+      const r = 7;
+      if (!free(x, z, r) || !onPan(x, z) || !flatEnough(x, z, 5, 0.9)) continue;
+      if (fold && (!free(2 * FOLD.cx - x, 2 * FOLD.cz - z, r) || !onPan(2 * FOLD.cx - x, 2 * FOLD.cz - z))) continue;
+      claim(x, z, r);
+      if (fold) claim(2 * FOLD.cx - x, 2 * FOLD.cz - z, r);
+      // an outcrop: a few bedded stones along one strike, half buried
+      const strike = rnd() * Math.PI, m = 3 + ((rnd() * 3) | 0);
+      for (let b = 0; b < m; b++) {
+        const d = (b - (m - 1) / 2) * (2.2 + rnd() * 1.6);
+        place("boulder", x + Math.cos(strike) * d + (rnd() - 0.5) * 1.4, z + Math.sin(strike) * d + (rnd() - 0.5) * 1.4,
+          strike + (rnd() - 0.5) * 0.5, { size: 0.9 + rnd() * 1.3 });
       }
+      made++;
     }
-    // no-man's land
-    const mid = function () { return (rnd() - 0.5) * (gap - 36); };
-    const wide = function () { return (rnd() - 0.5) * 220; };
-    const want = ctx.density || 1;
-    const set = {
-      desert: [["hulk", 5], ["boulders", 6], ["sandbag", 4], ["barricade", 1]],
-      snow:   [["boulders", 8], ["hulk", 2], ["sandbag", 3], ["logs", 3]],
-      field:  [["bales", 5], ["hulk", 2], ["sandbag", 3], ["boulders", 2]],
-      forest: [["sandbag", 2]],
-      apron:  [["containers", 5], ["hulk", 4], ["barricade", 4], ["sandbag", 4], ["rubble", 2], ["hesco", 2]],
-      urban:  [["hulk", 6], ["barricade", 4], ["sandbag", 3], ["rubble", 4]],
-    }[theme] || [];
-    set.forEach(function (row) {
-      const n = Math.round(row[1] * want);
-      for (let i = 0; i < n; i++) {
-        const kind = row[0];
-        if (kind === "hulk") tryAt(function (x, z) { place("hulk", x, z, rnd() * 6.28); }, 3.2, 10, mid, wide);
-        else if (kind === "boulders") tryAt(function (x, z) {
-          const m = 2 + ((rnd() * 3) | 0);
-          for (let b = 0; b < m; b++) place("boulder", x + (rnd() - 0.5) * 6, z + (rnd() - 0.5) * 6, rnd() * 6.28, { size: 1.1 + rnd() * 1.4 });
-        }, 5, 10, mid, wide);
-        else if (kind === "sandbag") tryAt(function (x, z) {
-          place("sandbags", x, z, Math.PI / 2 + (rnd() - 0.5) * 0.6);
-          if (rnd() < 0.5) place("sandbags", x + (rnd() - 0.5) * 1.2, z + 2.5, Math.PI / 2 + (rnd() - 0.5) * 0.6);
-        }, 3, 10, mid, wide);
-        else if (kind === "barricade") tryAt(function (x, z) { barricade(x, z, Math.PI / 2 + (rnd() - 0.5) * 0.4); }, 6, 10, mid, wide);
-        else if (kind === "hesco") tryAt(function (x, z) {
-          place("hesco", x, z, Math.PI / 2); place("hesco", x, z + 4.4, Math.PI / 2);
-        }, 6, 10, mid, wide);
-        else if (kind === "rubble") tryAt(function (x, z) { place("rubble", x, z, rnd() * 6.28); }, 2.5, 10, mid, wide);
-        else if (kind === "containers") tryAt(function (x, z) {
-          // broadside to the fire line, a pair or a single, one or two high
-          const L = rnd() < 0.6 ? 6.058 : 12.192, yaw = Math.PI / 2 + (rnd() - 0.5) * 0.1;
-          containers(x, z, yaw, rnd() < 0.35 ? 2 : 1, L);
-          if (rnd() < 0.4) containers(x + CN.W + 0.3, z + (rnd() - 0.5) * 2, yaw, 1, L);
-        }, 7.5, 12, mid, wide);
-        else if (kind === "logs") tryAt(function (x, z) { place("log", x, z, rnd() * 6.28, { len: 6 + rnd() * 5, r: 0.3 + rnd() * 0.15 }); }, 6, 10, mid, wide);
-        else if (kind === "bales") tryAt(function (x, z) {
-          const m = 2 + ((rnd() * 4) | 0), yaw = rnd() * 6.28;
-          for (let b = 0; b < m; b++) place("bale", x + Math.cos(yaw) * b * 1.35, z - Math.sin(yaw) * b * 1.35, yaw + (rnd() - 0.5) * 0.2);
-        }, 4, 10, mid, wide);
-      }
-    });
     return made;
   }
 
   /* THE DOWNTOWN. Cover follows the street: burnt cars along the kerbs,
      a barricade across some of the avenues the armies come down, sandbag
-     nests at junction corners, and rubble where a facade came down. Each
+     nests at junction corners. Each
      is tested against the real buildings (blocked) so nothing stands in a
      wall. `roads` are the town's own records: {x, z, len, w, vertical}. */
   function city(ctx) {
@@ -833,15 +761,12 @@ CBZ.battleDress = (function () {
         const p = at(s, (rnd() < 0.5 ? -1 : 1) * (rd.w || 14) * 0.18);
         if (free(p[0], p[1], 5)) { claim(p[0], p[1], 5); barricade(p[0], p[1], acrossYaw); made++; }
       }
-      // rubble off a facade at the kerb line
-      if (rnd() < 0.35) {
-        const p = at((rnd() - 0.5) * len * 0.8, (rnd() < 0.5 ? -1 : 1) * ((rd.w || 14) / 2 + 1.5));
-        if (free(p[0], p[1], 2)) { claim(p[0], p[1], 2); place("rubble", p[0], p[1], rnd() * 6.28); made++; }
-      }
+      // (no "rubble off a facade": the facades are standing, so there is
+      // none to fall; a heap with rebar beside an intact bank was a prop)
       void ri;
     });
-    // nests at junctions near the middle
-    for (let k = 0; k < 6; k++) {
+    // sandbag nests at junctions near the middle: the corners a defence holds
+    for (let k = 0; k < 4; k++) {
       const x = ctx.cx + (rnd() - 0.5) * ctx.gap * 0.8, z = ctx.cz + (rnd() - 0.5) * 180;
       let best = null, bd = 1e9;
       roads.forEach(function (rd) {
@@ -861,7 +786,7 @@ CBZ.battleDress = (function () {
 
   return {
     begin: function (ctx) { D.ctx = ctx; D.placed.length = 0; taken.length = 0; D.counts = {}; Object.keys(D.pools).forEach(function (k) { delete D.pools[k]; }); },
-    place: place, flush: flush, open: open, city: city,
+    place: place, flush: flush, open: open, city: city, outpost: outpost,
     claim: claim, free: function (x, z, r) { return free(x, z, r); },
     geo: { log: logGeo, boulder: boulderGeo, hulk: hulkGeo, sandbags: sandbagWallGeo },
     material: matFor,

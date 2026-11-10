@@ -28,7 +28,7 @@ function killCam(m) {
   if (cam) camKill(m);
   if (!KILLCAM || bench || over || !started) return;
   if (!m || !m.beast || KILL.t > 0 || KILL.cool > 0 || YOU.beat) return;
-  if (cam.mode === "free" || cam.mode === "kill" || cam.mode === "you" || cam.mode === "youdead") return;
+  if (cam.mode === "free" || cam.mode === "lock" || cam.mode === "fp" || cam.mode === "kill" || cam.mode === "you" || cam.mode === "youdead") return;
   if (camDist2(m.pos) > 110 * 110) return;
   if (SLOW.t > 0) { SLOW.t = 0; setSpeed(SLOW.back); }
   KILL.t = 2.1; KILL.cool = 7; KILL.n++;
@@ -91,18 +91,28 @@ function frameFollow(dt) {
   }
   const f = cam.followM;
   if (!f) return;
-  const h = f.vehicle ? f.h : f.beast ? Math.atan2(Math.cos(f.heading || 0), Math.sin(f.heading || 0)) : f.yaw;
+  const h = camHeading(f, dt, 0.7);          // the front rank turns; the lens does not whip
   cam.wFocus.set(f.pos.x, bodyAimY(f), f.pos.z);
   cam.wYaw = h + Math.PI + 0.35;
   cam.wPitch = 0.16;
-  cam.wDist = f.beast ? Math.max(5, studyRange(f) * 0.8) : f.vehicle ? Math.max(12, bodySize(f) * 3.4) : 7.8;
-  cam.wFov = cam.fov0;
+  cam.wDist = f.beast ? Math.max(5, studyRange(f) * 0.8) : f.vehicle ? Math.max(14, bodySize(f) * 3.9) : 7.8;
+  cam.wFov = lensBase() - 4;
   if (cam.holdT > 0) cam.holdT -= dt;
 }
 
 /* ONE CAMERA STEP A FRAME, on wall time: the posture writes its targets, the
    ease is the posture's own (a director drifts, a chase cam is on rails, free
    hands are instant), and camApply makes a lens out of them. */
+/* A FLICK GLIDES. The finger lifts at speed and the pan / orbit it had keeps
+   going, bleeding off in about a third of a second, so a thumb on a phone
+   moves the war the way a thumb on a map does. hud.js feeds FLING (px/s). */
+const FLING = { px: 0, py: 0, ox: 0, oy: 0 };
+function camFling(dt) {
+  if (FLING.px * FLING.px + FLING.py * FLING.py > 400) camPan(FLING.px * dt, FLING.py * dt);
+  if (FLING.ox * FLING.ox + FLING.oy * FLING.oy > 400) camOrbit(FLING.ox * dt, FLING.oy * dt);
+  const f = Math.exp(-dt / 0.33);
+  FLING.px *= f; FLING.py *= f; FLING.ox *= f; FLING.oy *= f;
+}
 function stepCamera(dt) {
   const IN = CBZ.micro.input;
   if (simT - POINT.at > 0.5) updatePoint();
@@ -121,6 +131,11 @@ function stepCamera(dt) {
     frameUnder(dt);
   } else if (cam.mode === "surface") {
     frameWave(dt);
+  } else if (cam.mode === "lock") {
+    frameLock(dt);
+    ease = 0.012;
+  } else if (cam.mode === "fp") {
+    frameFp(dt);
   } else if (cam.mode === "you") {
     frameYou(dt);
     ease = cam.ease;
@@ -128,20 +143,25 @@ function stepCamera(dt) {
     frameYouBeat(dt);
     ease = 0.03;
   } else {
-    // FREE: WASD pans, Q / E turn; the pointers are hud.js's
+    // FREE: WASD pans (shift = fast), Q / E turn;
+    // the pointers are hud.js's. A flick of the finger keeps gliding.
     ease = 0.0004;
+    const c = CBZ.camera;
     if (IN) {
-      const fwd = 46 * dt * (cam.dist / 60 + 0.4);
+      const fast = (IN.keys && (IN.keys.ShiftLeft || IN.keys.ShiftRight)) ? 2.6 : 1;
+      const fwd = 46 * dt * (cam.dist / 60 + 0.4) * fast;
       const mx = IN.axis("KeyA", "KeyD"), mz = IN.axis("KeyS", "KeyW");
       if (mx || mz) {
-        cam.wFocus.x += (-Math.sin(cam.yaw) * mz - Math.cos(cam.yaw) * mx) * fwd;
-        cam.wFocus.z += (-Math.cos(cam.yaw) * mz + Math.sin(cam.yaw) * mx) * fwd;
+        cam.wFocus.x += (-Math.sin(cam.wYaw) * mz - Math.cos(cam.wYaw) * mx) * fwd;
+        cam.wFocus.z += (-Math.cos(cam.wYaw) * mz + Math.sin(cam.wYaw) * mx) * fwd;
         cam.wFocus.y = MAP.groundAt(cam.wFocus.x, cam.wFocus.z);
       }
       const turn = IN.axis("KeyE", "KeyQ");
       if (turn) cam.wYaw += turn * dt * 1.6;
     }
-    cam.wFov = cam.fov0;
+    camFling(dt);
+    cam.wFov = Math.min(cam.fov0, 58);
+    cam.wFocus.y = MAP.groundAt(cam.wFocus.x, cam.wFocus.z);
   }
   cam.ease = ease;
   camApply(dt);

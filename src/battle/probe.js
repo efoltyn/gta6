@@ -576,6 +576,46 @@ CBZ.npcwar.onBoot(function () {
         x: Math.round(m.pos.x * 100) / 100, y: Math.round(m.pos.y * 100) / 100,
         z: Math.round(m.pos.z * 100) / 100 } : null;
     },
+    /* camRide(mode, sel, o): LOCK or FP (camera/camera.js) on one unit, by the
+       same names camFollow takes ("m1_abrams", "a:3", "men"); o = { rel, pitch,
+       zoom, look: [yaw, pitch] } sets the viewer's orbit / glance. */
+    camRide: function (mode, sel, o) {
+      const m = studyFind(String(sel || ""));
+      if (!m) return null;
+      o = o || {};
+      cam.lockM = m; cam.followM = m;
+      setCamMode(mode === "fp" ? "fp" : "lock");
+      lockTo(m);
+      if (o.rel != null) cam.lockRel = +o.rel;
+      if (o.pitch != null) cam.lockPitch = +o.pitch;
+      if (o.zoom != null) { cam.lockZoom = +o.zoom; cam.fpZoom = Math.max(1, +o.zoom); }
+      if (o.look) { cam.fpYaw = +o.look[0] || 0; cam.fpPitch = +o.look[1] || 0; cam.fpIdle = 0; }
+      if (mode === "fp") frameFp(0); else frameLock(0);
+      cam.focus.copy(cam.wFocus); cam.yaw = cam.wYaw; cam.pitch = cam.wPitch; cam.dist = cam.wDist;
+      camApply(1);
+      return { id: m.id, mode: cam.mode, x: Math.round(m.pos.x), y: Math.round(m.pos.y), z: Math.round(m.pos.z) };
+    },
+    /* camShot("tripod", sel): the director's long lens on sticks, planted
+       on one unit by the names camFollow takes. Returns null when there is
+       no clear place to stand. The shot runs its own length, then the
+       director carries on. */
+    camShot: function (shot, sel) {
+      const m = studyFind(String(sel || ""));
+      if (!m || shot !== "tripod") return null;
+      setCamMode("auto");
+      cam.side = 1;
+      if (!tripodPlace(m)) return null;
+      cam.shot = "tripod"; cam.followM = m; cam.round = null; cam.holdT = 0;
+      cam.cutAt = simT + 8; cam.ease = 0.012; cam.snap = true;
+      frameDirector(0);
+      camApply(1);
+      return { id: m.id, shot: cam.shot, eye: [Math.round(cam.tri.x), Math.round(cam.tri.y * 10) / 10, Math.round(cam.tri.z)], fov: Math.round(cam.wFov * 10) / 10 };
+    },
+    // the lens as the director has it: mode, shot, how many rounds it has ridden
+    camState: function () {
+      return { mode: cam.mode, shot: cam.shot, cuts: cam.cuts, roundAt: cam.roundAt == null ? null : cam.roundAt,
+        fov: Math.round(CBZ.camera.fov * 10) / 10, feel: typeof FEEL_ON !== "undefined" && FEEL_ON };
+    },
     // every living animal the study desk can be pointed at, in its own order
     swimmers: function () {
       return studyList().map(function (m) {

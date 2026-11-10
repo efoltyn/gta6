@@ -127,15 +127,18 @@ CBZ.battleFields = (function () {
     const REACH = 420, CROPS = 340;
     const iMin = Math.floor(-REACH / PARCEL.w), iMax = Math.ceil(REACH / PARCEL.w);
     const jMin = Math.floor(-REACH / PARCEL.d), jMax = Math.ceil(REACH / PARCEL.d);
+    // the grid lines are PUSHED (erg.js parcelEdge): parcel (i, j) runs from
+    // EA(i) to EA(i + 1) along a and EB(j) to EB(j + 1) along b
+    const EA = function (i) { return parcelEdge(i, 0); }, EB = function (j) { return parcelEdge(j, 1); };
     /* 1. THE BOUNDARIES FIRST: banks are part of the ground, so they go in
        before anything is seated on it. Each parcel owns its west and south
        edge; the kind of edge is the hash of the edge. */
     const hedgeRuns = [];
     for (let i = iMin; i <= iMax; i++) for (let j = jMin; j <= jMax; j++) {
       for (const side of [0, 1]) {
-        // side 0: the edge at a = i*w running along b; side 1: b = j*d running along a
-        const a0 = side ? i * PARCEL.w : i * PARCEL.w, b0 = side ? j * PARCEL.d : j * PARCEL.d;
-        const L = side ? PARCEL.w : PARCEL.d;
+        // side 0: the edge at a = EA(i) running along b; side 1: b = EB(j) running along a
+        const a0 = EA(i), b0 = EB(j);
+        const L = side ? EA(i + 1) - EA(i) : EB(j + 1) - EB(j);
         const kindR = h01(i * 2 + side, j, 601);
         if (kindR > 0.72) continue;                              // an open edge: just the turn of the plough
         const hedge = kindR < 0.47;
@@ -237,8 +240,9 @@ CBZ.battleFields = (function () {
     /* 3. the crops and the bales, parcel by parcel */
     const wheat = [], maize = [], tufts = [];
     for (let i = iMin; i <= iMax; i++) for (let j = jMin; j <= jMax; j++) {
-      const P = parcelAt.apply(null, W((i + 0.5) * PARCEL.w, (j + 0.5) * PARCEL.d));
-      const ctr = W((i + 0.5) * PARCEL.w, (j + 0.5) * PARCEL.d);
+      const PA0 = EA(i), PA1 = EA(i + 1), PB0 = EB(j), PB1 = EB(j + 1), PW = PA1 - PA0, PD = PB1 - PB0;
+      const P = parcelAt.apply(null, W((PA0 + PA1) / 2, (PB0 + PB1) / 2));
+      const ctr = W((PA0 + PA1) / 2, (PB0 + PB1) / 2);
       if (Math.abs(ctr[0] - cx) > CROPS + 60 || Math.abs(ctr[1] - cz) > CROPS + 60) continue;
       // rows === 0: the rows are lines of constant a (they run along b), as
       // the shader draws them (rc = loc.x); rows === 1: they run along a
@@ -247,9 +251,9 @@ CBZ.battleFields = (function () {
       const yaw = Math.atan2(-dir[1], dir[0]);
       if (P.type === CROP.wheat || P.type === CROP.maize) {
         const sp = 0.76, strip = P.type === CROP.wheat ? 4 : 3;
-        const LA = rows0 ? PARCEL.w : PARCEL.d, LB = rows0 ? PARCEL.d : PARCEL.w;
+        const LA = rows0 ? PW : PD, LB = rows0 ? PD : PW;
         for (let r = sp * 4; r < LA - 3; r += sp) for (let t = 3.2 + strip / 2; t < LB - 3.2; t += strip) {
-          const a = i * PARCEL.w + (rows0 ? r : t), b = j * PARCEL.d + (rows0 ? t : r);
+          const a = PA0 + (rows0 ? r : t), b = PB0 + (rows0 ? t : r);
           const w = W(a, b);
           if (Math.abs(w[0] - cx) > CROPS || Math.abs(w[1] - cz) > CROPS) continue;
           if (keep(w[0], w[1], 1)) continue;
@@ -257,19 +261,28 @@ CBZ.battleFields = (function () {
           foldEmit(w[0], w[1], 0, function (wx, wz, sg) { into.push({ x: wx, z: wz, yaw: foldYaw(yaw, sg) }); });
         }
       } else if (P.type === CROP.stubble) {
-        // a line of round bales left where the baler dropped them
-        const n = 6 + ((h01(i, j, 631) * 8) | 0);
-        for (let k = 0; k < n; k++) {
-          const a = i * PARCEL.w + 12 + h01(i, j * 9 + k, 633) * (PARCEL.w - 24), b = j * PARCEL.d + 10 + h01(i * 9 + k, j, 635) * (PARCEL.d - 20);
-          const w = W(a, b);
-          if (keep(w[0], w[1], 2) || !D.free(w[0], w[1], 1.2)) continue;
-          D.claim(w[0], w[1], 1.1);
-          D.place("bale", w[0], w[1], h01(i, k, 637) * 6.28);
-          F.bales++;
+        /* THE BALES LIE WHERE THE BALER DROPPED THEM: in rows along the
+           direction it worked the field (the parcel's own row axis), a
+           bale every 14-24 m along each pass, the passes 18-26 m apart, and
+           every bale lying with its axis ACROSS the row the way it comes
+           out of the chamber. They used to be scattered at random over the
+           stubble, which no field has ever looked like. */
+        const LA = rows0 ? PW : PD, LB = rows0 ? PD : PW;
+        const passGap = 18 + h01(i, j, 631) * 8;
+        for (let pass = passGap * 0.6; pass < LB - 6; pass += passGap) {
+          const step = 14 + h01(i, j * 7 + Math.round(pass), 633) * 10;
+          for (let r = 8 + h01(i * 3 + Math.round(pass), j, 635) * step; r < LA - 8; r += step) {
+            const a = PA0 + (rows0 ? r : pass), b = PB0 + (rows0 ? pass : r);
+            const w = W(a, b);
+            if (keep(w[0], w[1], 2) || !D.free(w[0], w[1], 1.2)) continue;
+            D.claim(w[0], w[1], 1.1);
+            D.place("bale", w[0], w[1], yaw + Math.PI / 2 + (h01(i, Math.round(r), 637) - 0.5) * 0.3);
+            F.bales++;
+          }
         }
       } else if (P.type === CROP.pasture) {
         for (let k = 0; k < 220; k++) {
-          const a = i * PARCEL.w + h01(i, j * 300 + k, 639) * PARCEL.w, b = j * PARCEL.d + h01(i * 300 + k, j, 641) * PARCEL.d;
+          const a = PA0 + h01(i, j * 300 + k, 639) * PW, b = PB0 + h01(i * 300 + k, j, 641) * PD;
           const w = W(a, b);
           foldEmit(w[0], w[1], 0, function (wx, wz) { tufts.push({ x: wx, z: wz }); });
         }

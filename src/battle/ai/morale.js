@@ -138,12 +138,12 @@ function updateMorale() {
       // on steering him away) and leaves the field only once he is off the
       // screen or far; before this he blinked out mid-stride in view.
       if (!m._fledCounted) { m._fledCounted = true; A.fled++; m._fledAt = performance.now() / 1000; }
-      if (m.group && !m.surrendered && runnerInSight(m) && performance.now() / 1000 - m._fledAt < FLED_IN_SIGHT_MAX) continue;
+      if (m.group && runnerInSight(m) && performance.now() / 1000 - m._fledAt < FLED_IN_SIGHT_MAX) continue;
       // OFF THE FIELD: out of every loop that walks `men`, so the grid, the
       // camera and the HUD forget him without each learning a new flag
       men.splice(i, 1);
       fledMen.push(m);
-      if (m.group && !m.surrendered) m.group.visible = false;   // a prisoner stays where he knelt
+      if (m.group) m.group.visible = false;
       if (m.ordTgt) {
         m.ordTgt.alive = false;
         if (CBZ.ordnance && CBZ.ordnance.removeTarget) { try { CBZ.ordnance.removeTarget(m.ordTgt); } catch (e) {} }
@@ -272,8 +272,6 @@ function routCheck(m, dt) {
       }
     }
     if (cornered) {
-      // ...or he puts his hands up: by his training, his wounds and the odds (ai/squad.js)
-      if (typeof trySurrender === "function" && trySurrender(m)) return true;
       m.routed = false; m.rallyT = 12; m.routStall = 0;
       return false;
     }

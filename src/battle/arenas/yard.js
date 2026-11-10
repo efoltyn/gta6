@@ -7,7 +7,7 @@
 
 /* ============================================================ MAPS
    Each ground answers the same three questions: height, where RED stands,
-   where BLUE stands. The kill box registers its crates as real colliders,
+   where BLUE stands. The kill box registers its boxes as real colliders,
    which is all it takes for combat_iq to treat them as cover and for
    segmentBlocked to treat them as walls. */
 /* ============================================================ THE YARD
@@ -28,8 +28,9 @@
      - precast concrete "lego" blocks for the perimeter (1.6 x 0.8 x 0.8 m,
        running bond, chamfered edges, the two lifting knobs on the top
        course), which is what a yard is actually walled with.
-     - jersey barriers (the real F-shape profile) and timber crates on
-       pallets for the low cover in between.
+     - jersey barriers (the real F-shape profile) for the low cover between.
+       (The "timber crates on pallets" are gone: a yard keeps its goods IN the
+       boxes, and a pile of crates in the open read as the game prop it was.)
    Surfaces are canvas textures WITH normal maps derived from their own
    height fields, tiled at world scale, plus one shared world-space shader
    patch (macro mottle so the tiling never shows, and grime where things
@@ -148,40 +149,6 @@ function precastTex() {
       g.fillStyle = "#222"; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill();
     }
   }, 3);
-}
-/* SAWN PINE: 256 px = 1.2 m, six 200 mm boards, grain, knots, nail heads. */
-function pineTex() {
-  return texPair("pine", 256, function (g, S) {
-    g.fillStyle = "#a5835a"; g.fillRect(0, 0, S, S);
-    const B = S / 6;
-    for (let y = 0; y < S; y += B) {
-      const k = trand();
-      g.fillStyle = k < 0.5 ? "rgba(255,236,200," + (0.04 + trand() * 0.1) + ")" : "rgba(60,38,16," + (0.05 + trand() * 0.12) + ")";
-      g.fillRect(0, y, S, B);
-    }
-    for (let i = 0; i < 140; i++) {
-      g.strokeStyle = "rgba(70,44,18," + (0.06 + trand() * 0.12) + ")"; g.lineWidth = 1;
-      const y = trand() * S; g.beginPath(); g.moveTo(0, y); g.bezierCurveTo(S * 0.3, y + 2 + trand() * 3, S * 0.6, y - 3, S, y); g.stroke();
-    }
-    for (let i = 0; i < 5; i++) {
-      const x = trand() * S, y = trand() * S;
-      g.fillStyle = "rgba(80,48,20,0.55)"; g.beginPath(); g.ellipse(x, y, 4 + trand() * 3, 2 + trand() * 2, 0, 0, 6.283); g.fill();
-    }
-    blotches(g, S, 8, 20, 60, function () { return "rgba(70,72,66,0.18)"; });     // weathering to silver-grey
-    g.fillStyle = "rgba(30,20,10,0.75)";
-    for (let y = 0; y < S; y += B) g.fillRect(0, y, S, 2);                         // board gaps
-    g.fillStyle = "rgba(40,40,44,0.8)";
-    for (let y = 0; y < S; y += B) { g.fillRect(10, y + B / 2 - 1, 3, 3); g.fillRect(S - 13, y + B / 2 - 1, 3, 3); }
-  }, function (g, S) {
-    g.fillStyle = "#909090"; g.fillRect(0, 0, S, S);
-    const B = S / 6;
-    for (let i = 0; i < 160; i++) {
-      g.strokeStyle = "rgba(0,0,0," + (0.1 + trand() * 0.2) + ")"; g.lineWidth = 1;
-      const y = trand() * S; g.beginPath(); g.moveTo(0, y); g.lineTo(S, y + (trand() - 0.5) * 4); g.stroke();
-    }
-    g.fillStyle = "#101010";
-    for (let y = 0; y < S; y += B) g.fillRect(0, y - 1, S, 3);
-  }, 2.2);
 }
 /* THE CONTAINER SKIN, one 512 atlas per paint:
      SIDE  u 0..1,       v 0.5..1   (one 20 ft side, 6.06 x 2.59 m)
@@ -541,29 +508,6 @@ function jerseyInto(B, L, col) {
     }
   }
 }
-/* ---- A PALLET AND ITS CRATES. A 1.2 x 1.0 m pallet (three stringers, a
-   five-board deck) carrying sawn-pine crates with framing battens. */
-function palletInto(B) {
-  const uv = function () { return UV_TILE(1.2, trand(), trand()); }, pale = [1.12, 1.08, 1.0];
-  for (const z of [-0.44, 0, 0.44]) B.box(0, 0.05, z, 1.2, 0.1, 0.1, { uv: uv, skip: 8, col: pale });
-  for (let i = 0; i < 5; i++) B.box(-0.53 + i * 0.265, 0.111, 0, 0.14, 0.022, 1.0, { uv: uv, skip: 8, col: pale });
-}
-function crateInto(B, y0, w, h, d) {
-  const hx = w / 2, hz = d / 2, T = 0.02, bw = 0.09, cy = y0 + h / 2;
-  const plank = function () { return UV_TILE(1.2, trand(), trand()); };
-  const dark = [0.78, 0.74, 0.7];
-  B.box(0, cy, 0, w, h, d, { uv: plank, skip: 8 });
-  for (const sz of [-1, 1]) {                                 // long faces: corner posts, rails, a middle rail
-    for (const sx of [-1, 1]) B.box(sx * (hx - bw / 2), cy, sz * (hz + T / 2), bw, h, T, { uv: plank, skip: 8, col: dark });
-    for (const yy of [y0 + bw / 2, y0 + h - bw / 2, cy]) B.box(0, yy, sz * (hz + T / 2), w - 2 * bw, bw, T, { uv: plank, col: dark });
-  }
-  for (const sx of [-1, 1]) {                                 // short faces
-    for (const sz of [-1, 1]) B.box(sx * (hx + T / 2), cy, sz * (hz - bw / 2), T, h, bw, { uv: plank, skip: 8, col: dark });
-    for (const yy of [y0 + bw / 2, y0 + h - bw / 2]) B.box(sx * (hx + T / 2), yy, 0, T, bw, d - 2 * bw, { uv: plank, col: dark });
-  }
-  for (const sz of [-0.3, 0.3]) B.box(0, y0 + h + T / 2, sz * d, w, T, bw, { uv: plank, skip: 8, col: dark });
-}
-
 /* ---- THE YARD, laid out. Returns the list of named props for the audit. */
 const SCENERY = [];
 function buildYard(W, D, gap) {
@@ -590,7 +534,6 @@ function buildYard(W, D, gap) {
   blockB.xf(hw, 0, 0, -Math.PI / 2); legatoRun(blockB, -hd + 0.4, hd - 0.4, 4, false);
   // `mat` (and `hollow` / `fill`) is what a round meets (src/battle/fire.js,
   // weapons/ballistics.js): precast concrete, a steel box with air in it,
-  // timber crates part-full
   const CONC = { mat: "concrete" };
   CBZ.micro.addBoxCollider(0, 1.6, -hd, W + 0.8, 3.2, 0.8, CONC); CBZ.micro.addBoxCollider(0, 1.6, hd, W + 0.8, 3.2, 0.8, CONC);
   CBZ.micro.addBoxCollider(-hw, 1.6, 0, 0.8, 3.2, D, CONC); CBZ.micro.addBoxCollider(hw, 1.6, 0, 0.8, 3.2, D, CONC);
@@ -694,34 +637,6 @@ function buildYard(W, D, gap) {
       runs++;
     }
   }
-  // 4. CRATES ON PALLETS, beside the containers they came out of
-  const cB = new GeoBatch();
-  let piles = 0; tries = 0;
-  while (piles < 8 && tries++ < 60) {
-    const x = west((sWorld() - 0.5) * (gap - 10));
-    const z = (sWorld() - 0.5) * (D - 30);
-    const two = sWorld() < 0.5;             // two pallets side by side
-    const ex = two ? 1.25 : 0.62, ez = 0.52;
-    if (onLine(x, ex, 1.6) || !fits(x, z, ex, ez, 1.6)) continue;
-    const yaw = sWorld() < 0.5 ? 0 : Math.PI;
-    const stacks = [1 + ((sWorld() * 2) | 0), 1 + ((sWorld() * 2) | 0)];
-    for (const m of [1, -1]) {
-      const mx = x * m, mz = z * m;
-      let high = 0;
-      for (let p = 0; p < (two ? 2 : 1); p++) {
-        const px = two ? mx + (p ? 0.63 : -0.63) * m : mx;
-        cB.xf(px, 0, mz, yaw + (m < 0 ? Math.PI : 0)); palletInto(cB);
-        const stack = stacks[p];
-        for (let s = 0; s < stack; s++) crateInto(cB, 0.122 + s * 1.02, 1.14, 1.0, 0.94);
-        high = Math.max(high, 0.122 + stack * 1.02);
-      }
-      claim(mx, mz, ex, ez);
-      CBZ.micro.addBoxCollider(mx, high / 2, mz, ex * 2, high, ez * 2, { mat: "wood", fill: 0.45 });
-      SCENERY.push({ kind: "crates", x: mx, y: high / 2, z: mz });
-      piles++;
-    }
-  }
-
   // ONE MESH PER MATERIAL
   const concreteMat = function () {
     return yardPatch(new THREE.MeshPhongMaterial({ map: pc.map, normalMap: pc.normalMap,
@@ -729,9 +644,6 @@ function buildYard(W, D, gap) {
   };
   blockB.mesh(concreteMat());
   jB.mesh(concreteMat());
-  const pine = pineTex();
-  cB.mesh(yardPatch(new THREE.MeshPhongMaterial({ map: pine.map, normalMap: pine.normalMap,
-    normalScale: new THREE.Vector2(0.7, 0.7), specular: 0x0c0c0c, shininess: 6 }), { mottle: 0.2, grime: 0.35 }));
   Object.keys(contB).forEach(function (hex) {
     const skin = containerSkin(+hex);
     contB[hex].mesh(yardPatch(new THREE.MeshPhongMaterial({ map: skin.map, specular: 0x262626, shininess: 22 }),
@@ -774,12 +686,29 @@ function seabed(y) {
   m.userData.terrain = true;
   CBZ.scene.add(m);
 }
-/* GROUND OUT TO THE FOG around a raised venue or the city. It was a flat
-   colour 4 mm ABOVE the venue's own lowest floor, which is a depth fight
-   across the whole venue at any range past a few hundred metres. It sits
-   under the venue now (2 cm down and pushed back in depth), and it is the
-   poured slab texture at 8 m a tile, tinted to the colour the venue asked
-   for, so the far ground has joints and stains instead of paint. */
+/* BARE EARTH: 512 px = 8 m. Dry ground with its stones, the odd dark damp
+   patch, dead grass, and no joints: what lies around a base, an airfield or
+   the edge of a town where nobody poured anything. */
+function earthTex() {
+  return texPair("earth", 512, function (g, S) {
+    g.fillStyle = "#8a8070"; g.fillRect(0, 0, S, S);
+    blotches(g, S, 40, 30, 150, function (k) { return k < 0.55 ? "rgba(60,52,40,0.16)" : "rgba(210,200,180,0.12)"; });
+    blotches(g, S, 18, 12, 50, function () { return "rgba(90,96,60,0.18)"; });      // dead grass in the low spots
+    speckle(g, S, 7000, 0.22, true, 3); speckle(g, S, 3500, 0.16, false, 2.5);
+    for (let i = 0; i < 900; i++) {                                              // stones
+      const x = trand() * S, y = trand() * S, r = 0.8 + trand() * 2.2;
+      g.fillStyle = trand() < 0.5 ? "rgba(120,112,100,0.7)" : "rgba(60,54,46,0.6)";
+      g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill();
+    }
+  }, null);
+}
+/* GROUND OUT TO THE FOG around a raised venue or the city. It used to be
+   the yard's POURED SLAB texture, saw-cut joints every four metres, out to
+   900 m around the downtown and 420 m around every venue: a square
+   kilometre of concrete with lines on it, which no place on earth has
+   around it. It is earth now, tinted to the place, and it still sits under
+   the venue (2 cm down and pushed back in depth) so nothing fights the
+   venue's own floor for the depth buffer. */
 function apron(minX, maxX, minZ, maxZ, color, y) {
   const sx = maxX - minX, sz = maxZ - minZ;
   const g = new THREE.PlaneGeometry(sx, sz);
@@ -787,11 +716,11 @@ function apron(minX, maxX, minZ, maxZ, color, y) {
   g.translate((minX + maxX) / 2, (y == null ? 0 : y) - 0.02, (minZ + maxZ) / 2);
   const uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * sx / 8, uv.getY(i) * sz / 8);
-  const want = new THREE.Color(color || 0x8d9198), base = new THREE.Color(0x8b867c);
+  const want = new THREE.Color(color || 0x7d7a6c), base = new THREE.Color(0x8a8070);
   const tint = new THREE.Color(Math.min(1, want.r / base.r), Math.min(1, want.g / base.g), Math.min(1, want.b / base.b));
-  const slab = slabTex();
-  const mat = yardPatch(new THREE.MeshLambertMaterial({ map: slab.map, color: tint,
-    polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }), { mottle: 0.35, grime: 0 });
+  const earth = earthTex();
+  const mat = yardPatch(new THREE.MeshLambertMaterial({ map: earth.map, color: tint,
+    polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }), { mottle: 0.45, grime: 0, scale: 0.7 });
   const m = new THREE.Mesh(g, mat);
   m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
   m.userData.terrain = true;

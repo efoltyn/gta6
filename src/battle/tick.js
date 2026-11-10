@@ -149,6 +149,5 @@ function animFrame(dt, realDt) {
       if (m._weaponProp.visible !== showGun) m._weaponProp.visible = showGun;
     }
   }
-  if (TAC.captives.length) animCaptives(dt);   // the prisoners kneel, hands up
   if (MASS.on) MASS.frame(realDt);      // promotion, demotion, ghosts, the crowd draw
 }

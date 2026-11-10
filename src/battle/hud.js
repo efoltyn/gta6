@@ -14,9 +14,11 @@
    Every write is guarded by a cached value: this runs at 10 Hz on a page
    that is already drawing a thousand bodies. */
 const whoC = { on: null, team: "", hp: -1, low: null, mag: -1, rl: null, hasMag: null, hurt: null };
+let lockBarOn = false;
 function stepWho() {
+  if (lockBarOn !== (cam.mode === "lock" || cam.mode === "fp")) setLockBar();
   const m = (cam.mode === "follow" || cam.mode === "you" || cam.shot === "hero" ||
-    cam.shot === "charge" || cam.shot === "study" || cam.mode === "kill")
+    cam.shot === "charge" || cam.shot === "tripod" || cam.shot === "study" || cam.mode === "kill" || cam.mode === "lock" || cam.mode === "fp")
     ? cam.followM : null;
   const on = !!m && !m.dead;
   if (on !== whoC.on) { whoC.on = on; el("who").classList.toggle("on", on); }
@@ -58,6 +60,12 @@ function setCamMode(mode, team) {
   // any lens but YOU's: the body you were driving goes back to its brain
   if (mode !== "you" && YOU.m) leaveYou(false);
   const was = cam.mode;
+  if ((mode === "lock" || mode === "fp") && (was === "lock" || was === "fp") && cam.lockM && !cam.lockM.dead) {
+    // lock <-> first person is the same unit through another window
+    cam.mode = mode; cam.snap = true; cam.fpYaw = cam.fpPitch = 0; cam.fpIdle = 9; cam.fpZoom = 1;
+    setLockBar();
+    return;
+  }
   cam.mode = mode;
   if (team) cam.followTeam = team;
   // the director takes a fresh shot the moment it is handed the lens
@@ -69,7 +77,13 @@ function setCamMode(mode, team) {
   cb.classList.toggle("on", mode !== "free");
   cb.style.setProperty("--cc", mode === "follow"
     ? "#" + TEAMS[cam.followTeam].color.toString(16).padStart(6, "0") : "#ff7a45");
-  if (mode === "follow") {
+  if (mode === "lock" || mode === "fp") {
+    const m = lockPick(0);
+    if (!m) { cam.mode = was; return; }       // nothing worth riding: stay where you were
+    lockTo(m);
+    cam.lockZoom = 1; cam.fpZoom = 1; cam.fpYaw = cam.fpPitch = 0; cam.fpIdle = 9;
+    cam.shot = "lock";
+  } else if (mode === "follow") {
     updatePoint();
     cam.followM = subjectFor(cam.followTeam) || hottestMan();
     cam.holdT = 0; cam.reptT = simT + 3;
@@ -78,6 +92,34 @@ function setCamMode(mode, team) {
     if (!STUDY.m || STUDY.m.dead) studyPick(null);
     cam.shot = "study";
   }
+  FLING.px = FLING.py = FLING.ox = FLING.oy = 0;
+  setLockBar();
+}
+/* LOCK / FP: two arrows to walk the roster and a window toggle, only while
+   one of those lenses is on (a phone has no T key). */
+function setLockBar() {
+  let bar = document.getElementById("lockBar");
+  const on = cam.mode === "lock" || cam.mode === "fp";
+  if (!bar) {
+    if (!on) return;
+    bar = document.createElement("div");
+    bar.id = "lockBar";
+    bar.innerHTML = '<button data-k="prev" aria-label="previous unit">&#8249;</button>' +
+      '<button data-k="fp" aria-label="first person">1ST</button>' +
+      '<button data-k="next" aria-label="next unit">&#8250;</button>';
+    bar.addEventListener("click", function (e) {
+      const b = e.target.closest && e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.k === "fp") setCamMode(cam.mode === "fp" ? "lock" : "fp");
+      else lockStep(b.dataset.k === "next" ? 1 : -1);
+      setLockBar();
+    });
+    document.body.appendChild(bar);
+  }
+  lockBarOn = on;
+  bar.classList.toggle("on", on);
+  const f = bar.querySelector('[data-k="fp"]');
+  if (f) f.classList.toggle("lit", cam.mode === "fp");
 }
 /* AUTO -> FOLLOW RED -> FOLLOW BLUE -> STUDY -> (the water postures) -> FREE.
    Both armies have a front and which one you ride is the question a
@@ -88,9 +130,9 @@ function setCamMode(mode, team) {
    does nothing, which is worse than no control. */
 function cycleCam() {
   const wet = !!(MAP && MAP.water && !SWIM_OLD);
-  const ring = ["auto", "followRed", "followBlue", "study"]
+  const ring = ["auto", "followRed", "followBlue", "lock", "study"]
     .concat(wet ? ["under", "surface"] : []).concat(["free"]);
-  const now = cam.mode === "follow" ? "follow" + (cam.followTeam === "red" ? "Red" : "Blue") : cam.mode;
+  const now = cam.mode === "follow" ? "follow" + (cam.followTeam === "red" ? "Red" : "Blue") : cam.mode === "fp" ? "lock" : cam.mode;
   let i = ring.indexOf(now);
   const next = ring[(i + 1) % ring.length];
   if (next === "followRed") setCamMode("follow", "red");
@@ -114,23 +156,47 @@ function uiTarget(e) {
   return e.target && (e.target.closest && e.target.closest("#menu,#ctl,#end,button,select,input,.mt-btn,.mt-stick"));
 }
 function camPan(dx, dy) {
-  const s = cam.dist * 0.0016 * (cam.wPitch > 0.9 ? 1.4 : 1);
-  // screen right on the ground is (cos yaw, -sin yaw); screen up is (-sin, -cos)
-  const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw), fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw);
-  cam.wFocus.x += (-rx * dx + fx * dy) * s;
-  cam.wFocus.z += (-rz * dx + fz * dy) * s;
+  /* GRAB THE GROUND: a pixel of finger is a pixel of ground under it. The
+     width of the view at the focus, over the height of the screen, so the map
+     sticks to the thumb at any zoom and any glass. Looking along the ground
+     a vertical drag covers more of it, which the tilt term accounts for. */
+  const c = CBZ.camera;
+  const s = 2 * cam.dist * Math.tan((c.fov || 60) * Math.PI / 360) / Math.max(320, window.innerHeight);
+  const tilt = 1 / Math.max(0.45, Math.sin(Math.max(0.1, cam.wPitch)));
+  // screen right on the ground is (cos yaw, -sin yaw); screen up is (-sin, -cos).
+  // The TARGET yaw: a turn still in flight must not skew the drag.
+  const y = cam.wYaw;
+  const rx = Math.cos(y), rz = -Math.sin(y), fx = -Math.sin(y), fz = -Math.cos(y);
+  cam.wFocus.x += (-rx * dx + fx * dy * tilt) * s;
+  cam.wFocus.z += (-rz * dx + fz * dy * tilt) * s;
   cam.wFocus.y = MAP.groundAt(cam.wFocus.x, cam.wFocus.z);
 }
 function camOrbit(dx, dy) {
   cam.wYaw -= dx * 0.0052;
   cam.wPitch = Math.max(pitchLo(), Math.min(1.42, cam.wPitch + dy * 0.004));
 }
-function camZoom(k) { cam.wDist = Math.max(3, Math.min(600, cam.wDist * k)); }
+// the arm is multiplicative (a wheel notch is a fraction of the way in, not
+// a fixed number of metres), from a shoulder to the whole field
+function camZoom(k) {
+  if (cam.mode === "lock" || cam.mode === "fp") { lockZoom(k); return; }
+  cam.wDist = Math.max(1.4, Math.min(2200, cam.wDist * k));
+}
+// the finger's own speed, for the glide when it lifts
+const FV = { x: 0, y: 0, t: 0, mode: null };
+function flingNote(dx, dy, mode) {
+  const now = performance.now(), dtm = Math.max(4, now - FV.t) / 1000;
+  FV.t = now;
+  const k = Math.min(1, dtm * 12);
+  FV.x += (dx / dtm - FV.x) * k; FV.y += (dy / dtm - FV.y) * k;
+  FV.mode = mode;
+}
 CBZ.npcwar.onBoot(function () {
   window.addEventListener("pointerdown", function (e) {
     if (!started || uiTarget(e)) return;
     // a soldier's mouse is his weapon: a click with no lock takes the lock
     if (cam.mode === "you") { if (!COARSE && !CBZ.micro.input.locked) CBZ.micro.lock(); return; }
+    FV.x = FV.y = 0; FV.t = performance.now(); FV.mode = null;
+    FLING.px = FLING.py = FLING.ox = FLING.oy = 0;       // a touch stops the glide
     PTR.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), b: e.button, shift: e.shiftKey });
     if (!gest) gest = { moved: false, cx: 0, cy: 0, sp: 0, two: false };
     gest.two = false;                       // a second finger re-seeds the pair
@@ -142,23 +208,39 @@ CBZ.npcwar.onBoot(function () {
     p.x = e.clientX; p.y = e.clientY;
     if (!gest.moved && Math.hypot(p.x - p.sx, p.y - p.sy) > 8) {
       gest.moved = true;
-      if (cam.mode !== "free") setCamMode("free");
+      // a lock or first-person lens stays on its unit while the hand looks round it
+      if (cam.mode !== "free" && cam.mode !== "lock" && cam.mode !== "fp") setCamMode("free");
     }
     if (!gest.moved) return;
+    const riding = cam.mode === "lock" || cam.mode === "fp";
     if (PTR.size >= 2) {
       const it = PTR.values(), a = it.next().value, b = it.next().value;
       const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, sp = Math.hypot(a.x - b.x, a.y - b.y);
+      const an = Math.atan2(b.y - a.y, b.x - a.x);
       if (gest.two) {
-        camPan(cx - gest.cx, cy - gest.cy);
+        // pinch = dolly, centre = pan, twist = turn (all at once, like a map)
+        if (!riding) camPan(cx - gest.cx, cy - gest.cy);
         if (gest.sp > 4 && sp > 4) camZoom(gest.sp / sp);
+        let da = an - gest.an;
+        while (da > Math.PI) da -= Math.PI * 2;
+        while (da < -Math.PI) da += Math.PI * 2;
+        if (Math.abs(da) < 0.6) { if (riding) lockLook(-da / 0.0052, 0); else cam.wYaw += da; }
+        if (!riding) flingNote(cx - gest.cx, cy - gest.cy, "pan");
       }
-      gest.two = true; gest.cx = cx; gest.cy = cy; gest.sp = sp;
-    } else if (p.b === 2 || p.shift) camPan(dx, dy);
-    else camOrbit(dx, dy);
+      gest.two = true; gest.cx = cx; gest.cy = cy; gest.sp = sp; gest.an = an;
+    } else if (riding) lockLook(dx, dy);
+    else if (p.b === 2 || p.shift) { camPan(dx, dy); flingNote(dx, dy, "pan"); }
+    else { camOrbit(dx, dy); flingNote(dx, dy, "orbit"); }
   });
   const up = function (e) {
     const p = PTR.get(e.pointerId);
     PTR.delete(e.pointerId);
+    // lifted at speed: let it glide (a pause before the lift = no glide)
+    if (p && gest && gest.moved && PTR.size === 0 && FV.mode && performance.now() - FV.t < 70 && cam.mode === "free") {
+      const cap = 2600;
+      const vx = Math.max(-cap, Math.min(cap, FV.x)), vy = Math.max(-cap, Math.min(cap, FV.y));
+      if (FV.mode === "pan") { FLING.px = vx; FLING.py = vy; } else { FLING.ox = vx; FLING.oy = vy; }
+    }
     if (p && gest && !gest.moved && PTR.size === 0 && p.b === 0 && performance.now() - p.t < 450 && started && !over) tapTake(p.x, p.y);
     if (PTR.size === 0) gest = null;
     else if (gest) gest.two = false;
@@ -167,8 +249,11 @@ CBZ.npcwar.onBoot(function () {
   window.addEventListener("pointercancel", up);
   window.addEventListener("wheel", function (e) {
     if (!started || uiTarget(e) || cam.mode === "you") return;
-    if (cam.mode !== "free") setCamMode("free");
-    camZoom(e.deltaY > 0 ? 1.13 : 0.885);
+    if (cam.mode !== "free" && cam.mode !== "lock" && cam.mode !== "fp") setCamMode("free");
+    // a mouse notch is ~100 and a trackpad's flick is a stream of small
+    // numbers: the zoom follows the distance scrolled, not the event count
+    const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+    camZoom(Math.exp(Math.max(-240, Math.min(240, dy)) * 0.0016));
   }, { passive: true });
   window.addEventListener("contextmenu", function (e) { if (started && !uiTarget(e)) e.preventDefault(); });
 });

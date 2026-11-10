@@ -205,6 +205,32 @@
         emblem: { kind: "sun", color: "#FEBD11", n: 21, at: [0.5, 0.5, 0.42] } },
       rifle: { gun: "ak47", name: "AKM" }, training: "pro", mark: 0xfebd11,
       kit: kit("woodland", 0x4f5136, "pasgt", 0x4c5236, "lvl3") },
+    /* THE UNITED STATES MARINE CORPS. A separate service of the United States
+       that fights under the national colours. Rifleman's issue: the M27 IAR /
+       M4A1 class (5.56) with the RCO (4x), MARPAT desert, the ECH helmet,
+       ESAPI front and back in the Plate Carrier Gen III. */
+    { id: "usmc", name: "United States Marine Corps", short: "USMC", kind: "force",
+      flag: { ratio: [10, 19], layout: "stripes-canton", colors: ["#B22234", "#FFFFFF", "#3C3B6E"],
+        stripes: 13, cantonStripes: 7, cantonW: 0.4, emblem: { kind: "star-grid", color: "#FFFFFF" } },
+      rifle: { gun: "carbine", name: "M27 IAR", optic: 4 }, training: "elite", mark: 0xb5873a,
+      men: ["Marine", "Marines"],
+      kit: kit("marpat", 0x8c7a58, "ballistic", 0x8a7a5c, "esapi", A_US) },
+    /* ---- ANCIENT ARMIES. They do not carry rifles: `era: "ancient"` hands
+       their men to the infantry core's LINE OF BATTLE (close order, the
+       throwing spear, the sword and the shield; src/battle/core/infantry.js)
+       and their kit to entities/ancientkit.js. `ancient` is what each man
+       carries: his sword, how many throwing spears, his shield, his body
+       armour and helmet (systems/armour.js classes, so a rifle round is
+       resolved against the real thing). */
+    { id: "rome", name: "Roman Legion", short: "ROME", kind: "ancient", era: "ancient",
+      // the vexillum: a crimson cloth, the letters in gold under a laurel
+      flag: { ratio: [4, 5], layout: "plain", colors: ["#8E1B1B"],
+        emblems: [{ kind: "laurel", color: "#D9A520", at: [0.5, 0.36, 0.42] },
+          { kind: "text", text: "SPQR", color: "#E8B83A", at: [0.5, 0.72], h: 0.2 }] },
+      rifle: { gun: "gladius", name: "GLADIUS HISPANIENSIS" }, training: "elite", mark: 0xb3261e,
+      men: ["legionary", "legionaries"],
+      ancient: { sword: "gladius", pila: 2, shield: "scutum", body: "segmentata", helmet: "galea", tunic: 0x8e2a22, cloth: 0x9a3328, crest: 0xb3261e },
+      kit: { camo: null, kit: 0x6b5232, helmet: null, plates: null, soft: null, boots: 0x5a3e24, gloves: null, ancient: true } },
   ];
   const BY = Object.create(null);
   ROWS.forEach(function (r) {
@@ -212,7 +238,7 @@
     BY[r.id] = r;
   });
   function get(id) { return id != null && BY[id] ? BY[id] : null; }
-  const KIND_TITLE = { state: "COUNTRIES", force: "ARMED FORCES", group: "ARMED GROUPS" };
+  const KIND_TITLE = { state: "COUNTRIES", force: "ARMED FORCES", group: "ARMED GROUPS", ancient: "ANCIENT ARMIES" };
 
   CBZ.countries = {
     list: function () { return ROWS.slice(); },
@@ -225,9 +251,13 @@
     mark: function (id) { const r = get(id); return r ? r.mark : null; },
     name: function (id) { const r = get(id); return r ? r.name : null; },
     short: function (id) { const r = get(id); return r ? r.short : null; },
+    // an ancient army (its men fight in the line of battle, not with rifles)
+    ancient: function (id) { const r = get(id); return r && r.era === "ancient" ? r.ancient : null; },
+    // what its men are called, when it is not "soldiers"
+    men: function (id) { const r = get(id); return r ? r.men || null : null; },
     // the picker's groups, in order: [{ title, ids }]
     groups: function () {
-      return ["state", "force", "group"].map(function (k) {
+      return ["state", "force", "group", "ancient"].map(function (k) {
         return { kind: k, title: KIND_TITLE[k], ids: ROWS.filter(function (r) { return r.kind === k; }).map(function (r) { return r.id; }) };
       });
     },

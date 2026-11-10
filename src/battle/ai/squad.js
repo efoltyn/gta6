@@ -17,10 +17,7 @@
                       record (carry, stance, cover peek / lean / blind fire)
                       plus its verbs (reload, grenade throw, hit, dive)
      the wounded      a bad hit can put a man DOWN instead of dead: he
-                      bleeds, crawls, and a mate drags him to cover; a
-                      downed man nobody reaches can be taken prisoner
-     the surrender    a broken man who is cornered may put his hands up
-                      instead of fighting to the last (by training and odds)
+                      bleeds, crawls, and a mate drags him to cover
      the grenades     thrown into cover, never onto a mate; the men where
                       one lands go flat or get clear
      the armour       paceVehicle: a tank does not run off from its infantry
@@ -30,13 +27,12 @@
    Every src/battle file shares ONE script scope. */
 
 const TAC_OLD = Q.get("tac") === "old";
-const TAC = { on: !TAC_OLD, at: -1, tierAt: -1, vehs: { red: [], blue: [] }, captives: [],
+const TAC = { on: !TAC_OLD, at: -1, tierAt: -1, vehs: { red: [], blue: [] }, 
   A: null, home: null, lastTickT: -1 };
-const SURRENDER_P = { civ: 0.85, thug: 0.6, pro: 0.42, elite: 0.26, swat: 0.18 };
 function tacClock() {
   try { return typeof window.__tacClock === "function" ? window.__tacClock() : performance.now(); } catch (e) { return 0; }
 }
-function tacOut(o) { return !o || o.dead || o.fled || o.surrendered || o.downed; }
+function tacOut(o) { return !o || o.dead || o.fled || o.downed; }
 
 /* ============================================================ THE ADAPTER */
 function tacAdapter() {
@@ -448,21 +444,6 @@ function downedStep(m, sdt) {
     HOST.resolveCircle(m.pos, m.rad || 0.45, m.pos.y, 1.8);
     m.pos.y = HOST.bodyY(m, m.pos.x, m.pos.z);
   }
-  // overrun: an enemy on top of him and none of his own near
-  m._dnT = (m._dnT || 0) - sdt;
-  if (m._dnT <= 0) {
-    m._dnT = 0.8;
-    const a = fineNear(m.pos.x, m.pos.z, 12, _dn);
-    let foe = false, mate = false;
-    for (let i = 0; i < a.length; i++) {
-      const o = a[i];
-      if (o === m || o.dead || o.downed || o.routed || o.vehicle) continue;
-      const d = Math.hypot(o.pos.x - m.pos.x, o.pos.z - m.pos.z);
-      if (o.team === m.team) mate = true;
-      else if (d < 4 && !o.beast) foe = true;
-    }
-    if (foe && !mate) surrender(m);
-  }
 }
 function dragThink(m, S) {
   const w = m.dragTgt;
@@ -502,71 +483,28 @@ function dragFollow(m) {
   if (w.group) w.group.rotation.y = Math.atan2(-dx, -dz);
 }
 
-/* ============================================================ SURRENDER */
-function surrender(m) {
-  if (m.surrendered || m.dead || m.you) return false;
-  m.surrendered = true; m.fled = true; m.routed = false; m.downed = false;
-  m.tgt = null; m.sees = false; m.speed = 0;
-  CBZ.battleTactics.STATS.surrendered[m.team]++;
-  // the rifle goes on the ground
-  const prop = m._weaponProp;
-  if (prop && CBZ.weaponPhysics && CBZ.weaponPhysics.drop) {
-    try {
-      CBZ.scene.attach(prop);
-      m._weaponProp = null; m._weaponPropId = null;
-      CBZ.weaponPhysics.drop(prop, { vx: (lcg() - 0.5) * 1.2, vy: 1.2, vz: (lcg() - 0.5) * 1.2, source: "npcwar-surrender" });
-      dropGuns.push(prop);
-    } catch (e) {}
-  }
-  m.armed = false;
-  if (m.char) { m.char.surrender = true; m.char.soldier = null; m.char.kneelB = 1; m.char.crouch = false; m.char.pronePose = false; }
-  TAC.captives.push(m);
-  emitWar("surrender", { team: m.team, id: m.id });
-  return true;
-}
-/* A FIST FIGHT HE HAS LOST (systems/melee.js judged it: "yield" = hands up,
-   "flee" = he runs). The fighter layer only poses it; the page makes it
-   real — a prisoner, or a man routing like any other. melee.js asks. */
+/* ============================================================ NOBODY PUTS HIS HANDS UP
+   NPC War had a surrender: a routed man who was "cornered" (his run stalled
+   4.5 s, enemy near or not, or one came inside 4.5 m) rolled 42-85% by
+   training to kneel with his hands up in the middle of the firefight, and a
+   wounded man did it when an enemy passed within 4 m. He was counted with the
+   fled and nobody ever took him anywhere. It was a coin flip that deleted
+   fighters and left kneeling men on a field still being fought over, so it
+   is gone (owner, 2026-11-10). A cornered man turns and fights (ai/morale.js);
+   a broken army still breaks, runs and leaves, which is how these wars end.
+   Gang City's hands-up and arrest (systems/arrest.js, brain.js) are another
+   system and are untouched. */
+/* A FIST FIGHT HE HAS LOST (systems/melee.js judged it: he quits). Either
+   way he is a man routing like any other. melee.js asks. */
 function fistQuit(m) {
   const q = m._vfS && m._vfS.quit;
-  if (q === "yield") return surrender(m);
-  if (q === "flee" && !m.routed) {
+  if ((q === "flee" || q === "yield") && !m.routed) {
     m.routed = true; m.routT = 0; m.routStall = 0; m.tgt = null; m.sees = false;
     const foe = foeCentre(m);
     m.routBest = Math.hypot(m.pos.x - foe.x, m.pos.z - foe.z);
     return true;
   }
   return false;
-}
-// a broken man, cornered: does he put his hands up? (routCheck asks)
-function trySurrender(m) {
-  if (!TAC.on || m.you) return false;
-  // hands up to WHOM: an animal takes no prisoners. Measured: 2-9 men a
-  // battle "surrendered" to a gorilla or a tiger and left the field
-  let captor = false;
-  for (let i = 0; i < men.length && !captor; i++) {
-    const o = men[i];
-    if (o.team !== m.team && !o.dead && !o.fled && !o.beast) captor = true;
-  }
-  if (!captor) return false;
-  const p = SURRENDER_P[m.tier] != null ? SURRENDER_P[m.tier] : 0.4;
-  const hurt = m.hp < (m.maxHp || 100) * 0.5 ? 0.2 : 0;
-  const A = tacAdapter();
-  const odds = A.odds(m.team);
-  const hopeless = odds < 0.5 ? 0.2 : 0;
-  // a stable draw per man, so the same man is the one who gives up
-  return CBZ.battleTactics.hash01(m, 0x5022 + (m.routT | 0)) < Math.min(0.95, p + hurt + hopeless) && surrender(m);
-}
-// the prisoners kneel with their hands up (a short animation, near the lens)
-function animCaptives(dt) {
-  for (let i = TAC.captives.length - 1; i >= 0; i--) {
-    const m = TAC.captives[i];
-    if (!m.char || !CBZ.animChar) { TAC.captives.splice(i, 1); continue; }
-    m._capT = (m._capT || 0) + dt;
-    if (m._capT > 4) continue;                     // settled: the pose holds
-    if (camDist2(m.pos) > 160 * 160) continue;
-    try { CBZ.animChar(m.char, 0, dt); } catch (e) {}
-  }
 }
 
 /* ============================================================ GRENADES
@@ -589,7 +527,7 @@ function nadeWarn(N) {
   const a = fineNear(N.tx, N.tz, 7, _nw);
   for (let k = 0; k < a.length; k++) {
     const o = a[k];
-    if (o.dead || o.beast || o.vehicle || o.downed || o.you || o.surrendered) continue;
+    if (o.dead || o.beast || o.vehicle || o.downed || o.you) continue;
     // a trained man reacts more often (and his own side's grenade he knew about)
     const quick = o.team === N.team ? 0.95 : o.tier === "elite" || o.tier === "swat" ? 0.75 : o.tier === "pro" ? 0.6 : 0.4;
     if (CBZ.battleTactics.hash01(o, 0x6E1D + (N.t * 10 | 0)) > quick) continue;
@@ -915,7 +853,6 @@ function tacticsVehicle(u) {
 // a new war (morale.js resetArmies): the last one's squads, bombs and prisoners go
 function tacReset() {
   TAC.home = null; TAC.at = -1;
-  TAC.captives.length = 0;
   TAC.panics = TAC.dodges = TAC.downed = TAC.saved = TAC.booms = TAC.blind = TAC.paced = TAC.vaults = TAC.heldFire = 0;
   if (CBZ.battleTactics) CBZ.battleTactics.reset();
 }

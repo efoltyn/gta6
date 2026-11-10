@@ -128,7 +128,8 @@ change it only in coordination.
 | `src/battle/ai/squad.js` | the squad brain's page half: the adapter, the tick, `squadThink`, stances + the cover cycle, `soldierRig` (entities/soldier.js), the wounded, surrender, grenades, vaults, danger close, `tacticsVehicle` (§9b) | AI |
 | `src/battle/step.js` | one unit's body for one tick: locomotion, the strike bubble, the punch exchange | AI / melee / physics |
 | `src/battle/player.js` | YOU: taking over a man (and a crew seat) | player control |
-| `src/battle/camera/camera.js` | the director, follow, the point man | camera |
+| `src/battle/camera/camera.js` | the director (hero, charge, establish, general, tripod, round), follow, lock / first person, the point man | camera |
+| `src/battle/camera/feel.js` | the operator: handheld sway by shot, recoil kick from the unit on the lens, blast concussion that lands at the speed of sound, first-person ride (tracks, rotor, head bob); `?feel=0/1` | camera |
 | `src/battle/camera/study.js` | the study desk (one body, locked) | camera |
 | `src/battle/camera/killcam.js` | the kill cam | camera |
 | `src/battle/hud.js` | the lens card, camera modes, pointer input, render resolution | HUD |
@@ -143,14 +144,14 @@ change it only in coordination.
 | `src/battle/core.js` | `CBZ.now`, `CBZ.floorAt` shims | core |
 | `src/battle/arenas/maps.js` | `MAPS`: every ground the page offers | terrain |
 | `src/battle/arenas/field.js` | `buildMap(id)`: raise a ground, return the MAP record (spawn, ground, sight) | terrain |
-| `src/battle/arenas/erg.js` | the open dunes / snow / fields / wood: the height forms (barchan + transverse dunes off one wind, snow drifts, rolling ground), the crest table, the parcels, the skin and its per-surface shader (ripples, sastrugi, litter + dapple, crops); `FOLD`: the war window is one half turned 180 degrees about the centre, so both start lines get the same ground, cover and sight lines (`foldEmit` / `foldSeg` place every prop, tree, bank and drift in turned pairs while the field is dressed) | terrain |
+| `src/battle/arenas/erg.js` | the open dunes / snow / fields / wood: the height forms (barchan + transverse dunes off one wind, snow drifts, rolling ground), the crest table, the parcels (a pushed grid, never a quilt), the skin and its per-surface shader (centimetre ripples, sastrugi, litter + dapple, crops, earth banks); THE SKIN IS THE GROUND: the window is sampled into height grids (1 m over the fighting ground, 4 m to the window's edge, chunked), the triangles are built from them and `battleGround.bake` makes `MAP.groundAt` read the same grids with the same triangle split, so a foot never sinks into or floats over the drawn surface; `FOLD`: the war window is one half turned 180 degrees about the centre, so both start lines get the same ground, cover and sight lines (`foldEmit` / `foldSeg` place every prop, tree, bank and drift in turned pairs while the field is dressed) | terrain |
 | `src/battle/arenas/cover.js` | `CBZ.battleCover`: every cover point (props, walls, crests, crater lips), hit points, destruction; `MAP.coverNear/coverFrom` | terrain |
-| `src/battle/arenas/dress.js` | `CBZ.battleDress`: the real objects (sandbags, hesco, jersey, burnt cars, boulders, logs, dry walls, bales, rubble, containers), instanced, and where they go (open ground, the downtown's streets). The HESCO basket is `world/basekit.js`'s (`CBZ.baseKit.hescoGeo`, loaded before this file), the same one Fort Brandt's revetments use; the MILITARY ISLAND venue is laid out by that kit's base planner | terrain |
+| `src/battle/arenas/dress.js` | `CBZ.battleDress`: the real objects (sandbags, hesco, jersey, burnt cars, boulders, logs, dry walls, bales), instanced, and where they go: `outpost` (a side's dug-in position on sand and snow: berm, two foxholes, a hesco gun corner), `open` (rock outcrops on the dunes' pans; NOTHING else is scattered on open ground or on a raised venue: no stray sedans, barriers, sandbag walls, containers or rubble), `city` (burnt cars at the kerbs, barricades, corner nests of a fought-over downtown). The HESCO basket is `world/basekit.js`'s (`CBZ.baseKit.hescoGeo`, loaded before this file), the same one Fort Brandt's revetments use; the MILITARY ISLAND venue is laid out by that kit's base planner | terrain |
 | `src/battle/arenas/ground.js` | `CBZ.battleGround`: earthworks + craters in groundAt, prints and tracks, scorch, blast spray, blowing sand, the baked dead (remains) | terrain |
 | `src/battle/arenas/woods.js` | `CBZ.battleWoods`: THE WOOD (canopy, understory, bracken, deadfall, canopy map) and the snow's spruce groves | terrain |
 | `src/battle/arenas/fields.js` | `CBZ.battleFields`: farmland (hedgerows on banks, dry walls, wheat, maize, bales, pasture) | terrain |
 | `src/battle/arenas/sea.js` | open water: swell, reef, fleet, depth | water |
-| `src/battle/arenas/yard.js` | the kill box (its props in turned pairs about the centre, like the erg) | terrain |
+| `src/battle/arenas/yard.js` | the kill box (containers and jersey runs in turned pairs about the centre, like the erg), plus `apron` (bare earth out to the fog around a raised venue or the downtown) and `seaPlate` / `seabed` | terrain |
 
 | `src/battle/melee.js` | men with bare hands: `stepFists` (combat_iq's IQ.melee, damage x `IQ.lastBlow(m).dmgMul`), `knockedDown` (a man on the floor is not steered) | melee |
 
@@ -494,9 +495,12 @@ MOVE + ATTACK only (men: CBZ.melee grammar with fists, auto-aimed fire with a gu
 close; animals: the `moves` hook above; vehicles: drive + seat weapon). Death while possessed: a
 slow beat on the body, then you hop to the nearest ally. Camera modes: `auto` (the director:
 interest score over fights, deaths, charges, big guns, explosions; shots `hero` `charge`
-`establish` `general`; slow-motion on knockouts, kills on the lens, explosions; `?slowmo=0/1`,
+`establish` `general`, `tripod` (a long lens planted on the ground ahead of a moving hull or under
+an aircraft, panning as it goes by) and `round` (riding a bomb, rocket or missile down, then the
+beat on what it did); it does not hand the lens back to the subject that just had it; slow-motion on knockouts, kills on the lens, explosions; `?slowmo=0/1`,
 off by default under `probe=1`), `follow`, `study/under/surface`, `kill`, `you` (chase cam),
-`youdead`, `free` (drag orbit, right-drag / two fingers pan, wheel / pinch zoom). The lens never
+`youdead`, `lock` (T: one unit on rails, drag orbits it, T / Shift+T walk the roster) and `fp`
+(Y: its eyes, hatch or cockpit), `free` (drag orbit, right-drag / two fingers pan, wheel / pinch zoom). The lens never
 enters walls, ground, dunes or bodies (camApply). Probe seams: `__battle.take(sel)`,
 `youDrive({ax,az,run,atk,yaw})`, `youState()`, `director()`. Shot service: `--cams lens` shoots
 the game's own camera.
@@ -767,6 +771,13 @@ battle over 320 men was fought by MID and FAR. That system and its worker are de
   as settled as his discipline asks. Every round is flown on `weapons/ballistics.js`: the gun's
   group, his hold in his posture, recoil not yet recovered, his range estimate (corrected after a
   miss he sees strike), his lead on a mover, the wind (held off by what he reads), and suppression.
+  **And the fight itself** (`DOCTRINE.fear`, mil): while rounds are passing his squad, and at 60%
+  from the moment an enemy who knows he is there is in his sights, every shot carries a combat
+  aiming error on top of the range-day hold (elite 6 mil, pro 8.5, thug 13). Rifle fire at range
+  pins and wears down; it kills when somebody closes. A 30 v 30 between equals from 400 m is two
+  to four minutes, decided inside 150 m (it was 28 s at six rounds a hit, nobody moving).
+  `node tools/npcwar-timeline.mjs` prints a fight every few seconds: fighting, dead, down, ran,
+  prone, pinned, the gap, rounds and hits.
 - **Hits.** A round is traced through the ground and cover at launch. When it arrives it is traced
   through the bodies near its line: ballistics zones in each man's posture, and real plate boxes
   where plates are worn (`CBZ.armour.versus`). A near miss rattles everyone it passes.
@@ -992,9 +1003,9 @@ War's adapter and what each man does with the answer.
   blind fire when the fire is too heavy), reflexes before orders (a grenade at his feet, an
   animal charging him, panic only from real cues).
 - **Casualties are not only the dead**: a bad hit can put a man DOWN (`m.downed`: bleeding,
-  crawling, out of the fight; a mate drags him to cover, which stops the bleeding); a broken man
-  who is cornered may surrender (`m.surrendered`, counted with the fled); a beaten brawler yields
-  (systems/melee.js `quit`).
+  crawling, out of the fight; a mate drags him to cover, which stops the bleeding); a beaten brawler
+  quits and runs (systems/melee.js `quit`). Nobody surrenders in NPC War (removed 2026-11-10: it was
+  a dice roll that knelt men down mid-firefight; a cornered man makes his last stand).
 - **Tiers**: every unit gets `m.aiTier` (0 FULL / 1 MID / 2 FAR) from `m.lod` when the scale
   scheduler sets it, else the lens distance through `CBZ.battleLod.tierOf`. A MID man thinks on
   `BUDGET.think.mid`, a FAR man on `.far`, with fewer sight lines per target search; the squad

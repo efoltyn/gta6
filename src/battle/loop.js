@@ -53,6 +53,12 @@ function frame(dt) {
     if (IN.pressed("KeyF")) {
       setCamMode("follow", cam.mode === "follow" && cam.followTeam === "red" ? "blue" : "red");
     }
+    // T rides one unit (a tank, a plane, a hero); T again / Shift+T walks the roster; Y is its eyes
+    if (IN.pressed("KeyT")) {
+      if (cam.mode === "lock" || cam.mode === "fp") lockStep(IN.keys.ShiftLeft || IN.keys.ShiftRight ? -1 : 1);
+      else setCamMode("lock");
+    }
+    if (IN.pressed("KeyY")) setCamMode(cam.mode === "fp" ? "lock" : "fp");
     if (IN.pressed("KeyC")) setCamMode(cam.mode === "auto" ? "free" : "auto");
     /* THE TEST BED'S OWN KEYS. V locks the lens on one animal, [ and ] walk
        the roster, U drops it under the swell and B sits it on the waterline.

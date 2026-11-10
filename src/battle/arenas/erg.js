@@ -290,9 +290,33 @@ function duneCrests(cx, cz, hx, hz, step) {
 /* ---- THE FIELDS' PARCELS, shared by the skin shader and fields.js -------
    A turned grid of parcels; each cell's crop is read from a 16 x 16 type
    table, uploaded as a texture so the shader and the layout agree EXACTLY
-   (no float hash that could round differently on a GPU). */
-const PARCEL = { ang: 0.21, w: 104, d: 78, n: 16, types: null, tex: null };
+   (no float hash that could round differently on a GPU).
+
+   NOT A QUILT. The first farmland was sixteen-by-sixteen identical
+   rectangles and from the air it read as a patchwork quilt, which is what
+   the owner saw. Real parcels are the same shape family but never the same
+   size: every grid line is pushed off its nominal position by up to 35% of
+   a cell, independently per column and per row, so neighbouring fields
+   differ in width and depth and no two corners line up across the field.
+   The pushes ride in the same texture (B = the column's, A = the row's), so
+   the shader draws the boundary exactly where fields.js builds the hedge. */
+const PARCEL = { ang: 0.21, w: 104, d: 78, n: 16, jit: 0.7, types: null, tex: null };
 const CROP = { pasture: 0, wheat: 1, maize: 2, plough: 3, stubble: 4 };
+// the pushes, in [0, 1): 0.5 is the nominal line (quantised to the texture's byte)
+function parcelJit(i, axis) { return Math.round(hash2(i, axis ? 5 : 3, 227) * 255) / 255; }
+// where grid line i stands along an axis (0: a / columns, 1: b / rows)
+function parcelEdge(i, axis) {
+  const w = axis ? PARCEL.d : PARCEL.w;
+  return i * w + (parcelJit(i, axis) - 0.5) * PARCEL.jit * w;
+}
+// the cell index along an axis for coordinate t
+function parcelIndex(t, axis) {
+  const w = axis ? PARCEL.d : PARCEL.w;
+  let i = Math.floor(t / w);
+  if (t < parcelEdge(i, axis)) i--;
+  else if (t >= parcelEdge(i + 1, axis)) i++;
+  return i;
+}
 function parcelTypes() {
   if (PARCEL.types) return PARCEL.types;
   const t = new Uint8Array(PARCEL.n * PARCEL.n);
@@ -309,10 +333,10 @@ function parcelAt(x, z) {
   const rx = x - DUNE.cx, rz = z - DUNE.cz;
   const c = Math.cos(PARCEL.ang), s = Math.sin(PARCEL.ang);
   const a = rx * c + rz * s, b = -rx * s + rz * c;
-  const i = Math.floor(a / PARCEL.w), j = Math.floor(b / PARCEL.d);
+  const i = parcelIndex(a, 0), j = parcelIndex(b, 1);
   const T = parcelTypes(), n = PARCEL.n;
   const ii = Math.max(0, Math.min(n - 1, i + n / 2)), jj = Math.max(0, Math.min(n - 1, j + n / 2));
-  return { i: i, j: j, u: a - i * PARCEL.w, v: b - j * PARCEL.d, type: T[jj * n + ii], rows: hash2(i, j, 223) < 0.5 ? 0 : 1 };
+  return { i: i, j: j, u: a - parcelEdge(i, 0), v: b - parcelEdge(j, 1), type: T[jj * n + ii], rows: hash2(i, j, 223) < 0.5 ? 0 : 1 };
 }
 
 /* ---- THE SKIN ------------------------------------------------------------ */
@@ -339,31 +363,40 @@ function ergSurfaceGLSL(form, surface) {
     "  normal = normalize(normal + (viewMatrix * vec4(wN, 0.0)).xyz);\n" +
     "  diffuseColor.rgb *= 1.0 - smoothstep(160.0, 800.0, dist) * 0.04; }\n";
   if (form === "dune") return head +
-    // RIPPLES: wind-transverse, sinuous, bifurcating; gentle stoss, steep lee.
-    // Coarser in the troughs, gone on the slip face (avalanching sand wipes
-    // them), quiet right on the brink.
-    "  float kR = (1.0 - smoothstep(16.0, 70.0, dist)) * (1.0 - smoothstep(0.12, 0.5, lee)) * (1.0 - crest * 0.6);\n" +
-    "  float kC = (1.0 - smoothstep(30.0, 120.0, dist)) * (1.0 - smoothstep(0.12, 0.5, lee));\n" +
-    "  if (kC > 0.0) {\n" +
-    "    float warp = 0.55 * sin(q.y * 0.83 + egN(q * vec2(0.05, 0.3)) * 4.0) + 0.45 * egN(q * vec2(0.11, 0.9));\n" +
-    "    float lam = 0.72 + 0.4 * trough;\n" +
+    /* RIPPLES, AT THEIR REAL SIZE. The old ripples ran 0.7-1.1 m crest to
+       crest and were drawn out to 120 m: a sand sea covered in contour
+       lines, which is what the owner called gimmicky. Wind ripples on a
+       dune are 6-14 cm apart and a centimetre high; you see them as a fine
+       texture within a few paces and as nothing at all from further off.
+       Coarser (20-30 cm) granule ripples sit in the troughs. Gone on the
+       slip face (avalanching sand wipes them). */
+    "  float kR = (1.0 - smoothstep(3.0, 16.0, dist)) * (1.0 - smoothstep(0.12, 0.5, lee));\n" +
+    "  if (kR > 0.0) {\n" +
+    "    float lam = 0.09 + 0.05 * egN(q * 0.4) + 0.14 * trough;\n" +
+    "    float warp = 0.3 * sin(q.y * 7.0 + egN(q * vec2(0.6, 2.5)) * 5.0) * lam;\n" +
     "    float ph = (q.x + warp) / lam * 6.2832;\n" +
-    "    float rip = sin(ph) + 0.28 * sin(2.0 * ph);\n" +
-    "    float dr = (cos(ph) + 0.56 * cos(2.0 * ph)) * 6.2832 / lam;\n" +
-    "    wN -= vec3(uW.x, 0.0, uW.y) * dr * 0.016 * kR;\n" +
-    // dark heavy minerals settle in the ripple troughs: ripples read even in flat light
-    "    diffuseColor.rgb *= 1.0 - 0.07 * kC * smoothstep(0.2, 1.1, -rip);\n" +
+    "    float rip = sin(ph) + 0.3 * sin(2.0 * ph);\n" +
+    "    float dr = (cos(ph) + 0.6 * cos(2.0 * ph)) * 6.2832 / lam;\n" +
+    "    wN -= vec3(uW.x, 0.0, uW.y) * dr * 0.0022 * kR;\n" +
+    // dark heavy minerals settle in the ripple troughs
+    "    diffuseColor.rgb *= 1.0 - 0.05 * kR * smoothstep(0.3, 1.1, -rip);\n" +
     "  }\n" +
-    // wind-sorted bands parallel to the crest on the stoss
-    "  float bands = sin(frac * 26.0 + egN(q * vec2(0.02, 0.006)) * 7.0);\n" +
-    "  diffuseColor.rgb *= 1.0 + 0.035 * bands * (1.0 - lee) * (1.0 - trough);\n" +
+    /* THE SAND ITSELF, at every range: tone drifts over metres (wet-dark
+       hollows, pale dry crests, mineral streaks the wind lays along it) and
+       the surface is grainy, never one flat colour */
+    "  float tone = 0.9 + 0.2 * egN(rel * 0.11 + 3.0) + 0.08 * (egN(rel * 0.37) - 0.5);\n" +
+    "  float streak = egN(vec2(q.x * 0.9, q.y * 0.12) + 9.0);\n" +
+    "  diffuseColor.rgb *= tone * (1.0 - 0.06 * smoothstep(0.55, 0.85, streak) * (1.0 - lee));\n" +
+    "  diffuseColor.rgb *= mix(vec3(1.0), vec3(0.93, 0.9, 0.86), trough * 0.5);\n" +
     // the slip face: grainflow tongues down the fall line
     "  float gf = egN(vec2(q.y * 1.7, q.x * 0.12));\n" +
     "  diffuseColor.rgb *= 1.0 + 0.07 * (gf - 0.5) * lee;\n" +
     "  wN += vec3(-uW.y, 0.0, uW.x) * (egN(vec2(q.y * 1.7 + 0.15, q.x * 0.12)) - gf) * 0.9 * lee * (1.0 - smoothstep(20.0, 80.0, dist));\n" +
-    // grain, where the lens is close
-    "  float gr = egH(floor(vEW.xz * 22.0));\n" +
-    "  diffuseColor.rgb *= 1.0 + (gr - 0.5) * 0.06 * (1.0 - smoothstep(4.0, 14.0, dist));\n" +
+    // grain, where the lens is close: a rough surface, not a painted one
+    "  float gr = egH(floor(vEW.xz * 60.0));\n" +
+    "  float gk = 1.0 - smoothstep(2.0, 9.0, dist);\n" +
+    "  diffuseColor.rgb *= 1.0 + (gr - 0.5) * 0.14 * gk;\n" +
+    "  wN += vec3(egN(vEW.xz * 9.0) - 0.5, 0.0, egN(vEW.xz * 9.0 + 4.0) - 0.5) * 0.12 * (1.0 - smoothstep(4.0, 30.0, dist));\n" +
     tail;
   if (form === "drift") return head +
     // SASTRUGI: sharp wind-carved ridges along the wind, irregular, in fields
@@ -385,43 +418,67 @@ function ergSurfaceGLSL(form, surface) {
     "  specularStrength *= 1.0 + 2.5 * crust;\n" +
     // the lee holds blue shade (sky-lit hollows)
     "  diffuseColor.rgb *= mix(vec3(1.0), vec3(0.9, 0.95, 1.05), lee * 0.7 + trough * 0.3);\n" +
-    // glints: a crystal catches the sun from one angle only
-    "  float gl = egH(floor(vEW.xz * 20.0) + floor(normalize(vEW - cameraPosition).xz * 6.0) * 31.0);\n" +
-    "  vSpark = step(0.9965, gl) * (1.0 - smoothstep(6.0, 40.0, dist));\n" +
+    // glints: crystals catch the sun from one angle only. Tiny (3 cm cells),
+    // within a few paces, and rare: the old ones were 5 cm squares drawn to
+    // 40 m and read as confetti on the snow
+    "  float gl = egH(floor(vEW.xz * 33.0) + floor(normalize(vEW - cameraPosition).xz * 6.0) * 31.0);\n" +
+    "  vSpark = step(0.9985, gl) * (1.0 - smoothstep(2.0, 11.0, dist)) * 0.6;\n" +
+    // the surface: powder and crust at two scales, wind-scoured hollows a
+    // shade darker, the sun side of every small drift a shade brighter
+    "  float pw = egN(rel * 0.06 + 5.0) * 0.6 + egN(rel * 0.4 + 1.0) * 0.4;\n" +
+    "  diffuseColor.rgb *= 0.94 + 0.1 * pw;\n" +
+    "  wN += vec3(egN(vEW.xz * 1.3) - 0.5, 0.0, egN(vEW.xz * 1.3 + 7.0) - 0.5) * 0.16 * (1.0 - smoothstep(6.0, 60.0, dist));\n" +
     tail;
   if (surface === "forest") return head +
-    // LEAF LITTER: duff browns, moss in the damp hollows, fallen leaves, twigs
-    "  float kL = 1.0 - smoothstep(10.0, 45.0, dist);\n" +
+    /* THE FOREST FLOOR IS A CARPET, not a plane with dots on it. The old
+       floor was flat tan with one oval "leaf" per 20 cm cell and one stick
+       per 1.4 m cell: confetti on a lattice. Litter is continuous: browns
+       at three scales (drifts of leaves, the leaves, their edges), darker
+       and wetter in the hollows, moss where it stays damp, bare soil where
+       the ground is trodden or steep, and the odd stick lying at its own
+       angle in a cell that is jittered off the grid so no lattice shows. */
+    "  float kL = 1.0 - smoothstep(8.0, 40.0, dist);\n" +
     "  float moss = smoothstep(0.58, 0.78, egN(rel * 0.09 + 11.0) * 0.7 + trough * 0.5);\n" +
-    "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.2, 0.26, 0.11), moss * 0.7);\n" +
-    "  float damp = egN(rel * 0.21 + 4.0);\n" +
-    "  diffuseColor.rgb *= 0.86 + 0.24 * damp;\n" +
-    "  vec2 lc = floor(vEW.xz * 5.0); float lh = egH(lc);\n" +
-    "  vec3 leaf = lh < 0.33 ? vec3(0.55, 0.32, 0.12) : (lh < 0.66 ? vec3(0.62, 0.48, 0.2) : vec3(0.38, 0.24, 0.13));\n" +
-    "  float lf = step(0.55, egH(lc + 17.0)) * (1.0 - moss) * kL;\n" +
-    "  vec2 lp = fract(vEW.xz * 5.0) - 0.5; lf *= 1.0 - smoothstep(0.16, 0.3, length(lp * vec2(1.0, 1.7)));\n" +
-    "  diffuseColor.rgb = mix(diffuseColor.rgb, leaf, lf * 0.75);\n" +
-    // twigs: one thin stick per 1.4 m cell, at its own angle
-    "  vec2 tc = floor(vEW.xz / 1.4); vec2 tp = fract(vEW.xz / 1.4) - 0.5; float ta = egH(tc + 5.0) * 3.14;\n" +
+    "  float drift = egN(rel * 0.35 + 4.0);\n" +
+    "  float leaf1 = egN(vEW.xz * 3.3 + 1.0), leaf2 = egN(vEW.xz * 9.0 + 7.0);\n" +
+    "  vec3 litter = mix(vec3(0.3, 0.2, 0.11), vec3(0.5, 0.36, 0.18), leaf1 * 0.7 + leaf2 * 0.3);\n" +
+    "  litter = mix(litter, vec3(0.24, 0.17, 0.1), smoothstep(0.55, 0.9, leaf2) * 0.5 * kL);\n" +
+    "  vec3 soil = vec3(0.26, 0.21, 0.15) * (0.85 + 0.3 * egN(vEW.xz * 1.7));\n" +
+    "  float bare = smoothstep(0.6, 0.85, egN(rel * 0.13 + 21.0));\n" +
+    "  vec3 floorC = mix(litter, soil, bare * 0.8);\n" +
+    "  floorC *= 0.82 + 0.3 * drift;\n" +
+    "  floorC = mix(floorC, vec3(0.16, 0.24, 0.09), moss * 0.75);\n" +
+    "  diffuseColor.rgb = mix(diffuseColor.rgb * 0.9, floorC, 0.85);\n" +
+    // sticks: one per ~1.4 m cell at most, the cell's origin pushed by its own hash
+    "  vec2 tcf = vEW.xz / 1.4; vec2 tc = floor(tcf); vec2 push = vec2(egH(tc + 3.0), egH(tc + 13.0)) - 0.5;\n" +
+    "  vec2 tp = fract(tcf) - 0.5 - push * 0.6; float ta = egH(tc + 5.0) * 3.14;\n" +
     "  vec2 td = vec2(cos(ta), sin(ta)); float along = dot(tp, td), off = abs(dot(tp, vec2(-td.y, td.x)));\n" +
-    "  float twig = step(0.45, egH(tc)) * (1.0 - smoothstep(0.006, 0.014, off)) * step(abs(along), 0.32) * kL;\n" +
-    "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.12, 0.08), twig * 0.8);\n" +
-    "  wN += vec3(egN(vEW.xz * 3.1) - 0.5, 0.0, egN(vEW.xz * 3.1 + 9.0) - 0.5) * 0.25 * kL;\n" +
+    "  float twig = step(0.6, egH(tc)) * (1.0 - smoothstep(0.006, 0.016, off)) * step(abs(along), 0.18 + 0.14 * egH(tc + 9.0)) * kL;\n" +
+    "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.14, 0.1, 0.07), twig * 0.85);\n" +
+    "  wN += vec3(egN(vEW.xz * 3.1) - 0.5, 0.0, egN(vEW.xz * 3.1 + 9.0) - 0.5) * 0.3 * kL;\n" +
+    "  wN += vec3(egN(vEW.xz * 12.0) - 0.5, 0.0, egN(vEW.xz * 12.0 + 2.0) - 0.5) * 0.25 * (1.0 - smoothstep(2.0, 10.0, dist));\n" +
     // DAPPLED LIGHT: the canopy map over the stand, broken by sun flecks
     "  vec2 cuv = (rel - uCanopyR.xy) / uCanopyR.zw;\n" +
     "  float cov = (cuv.x > 0.0 && cuv.x < 1.0 && cuv.y > 0.0 && cuv.y < 1.0) ? texture2D(uCanopy, cuv).r : 0.0;\n" +
     "  float fleck = smoothstep(0.58, 0.82, egN(vEW.xz * 0.55 + 3.0) * 0.6 + egN(vEW.xz * 1.9) * 0.4);\n" +
     "  vShade = mix(1.0, min(1.0, 0.34 + 0.72 * fleck), cov);\n" +
     tail;
-  // FIELDS: the parcel's crop, by the type table, with rows and furrows
+  // FIELDS: the parcel's crop, by the type table, with rows and furrows.
+  // The grid lines are pushed (PARCEL.jit, per column in B, per row in A of
+  // the type texture): a coordinate's cell is found by testing its nominal
+  // cell and the two beside it against the pushed lines, as parcelIndex does.
   return head +
     "  float pc = cos(uParcel.x), ps = sin(uParcel.x);\n" +
     "  vec2 pa = vec2(rel.x * pc + rel.y * ps, -rel.x * ps + rel.y * pc);\n" +
     "  vec2 cell = floor(pa / uParcel.yz);\n" +
-    "  vec2 loc = pa - cell * uParcel.yz;\n" +
+    "  vec2 e0 = pEdge(cell), e1 = pEdge(cell + 1.0);\n" +
+    "  if (pa.x < e0.x) { cell.x -= 1.0; } else if (pa.x >= e1.x) { cell.x += 1.0; }\n" +
+    "  if (pa.y < e0.y) { cell.y -= 1.0; } else if (pa.y >= e1.y) { cell.y += 1.0; }\n" +
+    "  e0 = pEdge(cell); e1 = pEdge(cell + 1.0);\n" +
+    "  vec2 loc = pa - e0; vec2 size = e1 - e0;\n" +
     "  vec4 pt = texture2D(uParcelT, (clamp(cell + 8.0, 0.0, 15.0) + 0.5) / 16.0);\n" +
     "  float ty = floor(pt.r * 255.0 + 0.5); float rowAx = pt.g > 0.5 ? 1.0 : 0.0;\n" +
-    "  float edge = min(min(loc.x, uParcel.y - loc.x), min(loc.y, uParcel.z - loc.y));\n" +
+    "  float edge = min(min(loc.x, size.x - loc.x), min(loc.y, size.y - loc.y));\n" +
     "  float rc = mix(loc.x, loc.y, rowAx);\n" +
     "  float kF = 1.0 - smoothstep(40.0, 200.0, dist);\n" +
     "  vec3 turf = vec3(1.0);\n" +
@@ -429,13 +486,20 @@ function ergSurfaceGLSL(form, surface) {
     "  vec3 col = diffuseColor.rgb * turf;\n" +
     "  if (ty > 0.5 && edge > 2.5) {\n" +
     "    float row = 0.5 + 0.5 * cos(rc / 0.76 * 6.2832);\n" +
-    "    if (ty < 1.5) { col = vec3(0.6, 0.5, 0.27) * (0.9 + 0.12 * egN(rel * 0.05)) * (1.0 - 0.08 * row * kF); }\n" +             // wheat stubble ground under the crop
-    "    else if (ty < 2.5) { col = mix(vec3(0.3, 0.24, 0.17), vec3(0.32, 0.4, 0.17), row * 0.6) * (0.92 + 0.12 * egN(rel * 0.04)); }\n" +   // maize: soil between rows
-    "    else if (ty < 3.5) { col = vec3(0.34, 0.26, 0.18) * (0.88 + 0.16 * egN(rel * 0.03)) * (0.86 + 0.2 * row);\n" +           // ploughed furrows
+    // within a field the ground is never one colour: wet patches, thin soil, headlands
+    "    float vary = 0.84 + 0.3 * egN(rel * 0.035 + 2.0) + 0.1 * (egN(rel * 0.17) - 0.5);\n" +
+    "    if (ty < 1.5) { col = vec3(0.5, 0.42, 0.24) * vary * (1.0 - 0.08 * row * kF); }\n" +             // wheat: the dry soil under the crop
+    "    else if (ty < 2.5) { col = mix(vec3(0.27, 0.21, 0.15), vec3(0.3, 0.36, 0.16), row * 0.6) * vary; }\n" +   // maize: soil between rows
+    "    else if (ty < 3.5) { col = vec3(0.3, 0.23, 0.17) * vary * (0.86 + 0.2 * row);\n" +           // ploughed furrows
     "      float d = -sin(rc / 0.76 * 6.2832) * 6.2832 / 0.76; vec2 ax = rowAx > 0.5 ? vec2(-ps, pc) : vec2(pc, ps);\n" +
     "      wN -= vec3(ax.x, 0.0, ax.y) * d * 0.035 * kF; }\n" +
-    "    else { col = vec3(0.66, 0.6, 0.38) * (0.92 + 0.1 * egN(rel * 0.06)) * (1.0 - 0.1 * step(0.8, fract(rc / 4.5)) * kF); }\n" +  // stubble with windrows
+    "    else { col = vec3(0.56, 0.5, 0.32) * vary * (1.0 - 0.1 * step(0.8, fract(rc / 4.5)) * kF); }\n" +  // stubble with windrows
     "  }\n" +
+    // THE BANKS ARE EARTH: a hedge stands on a bank (aD.w carries the earthwork
+    // height on the fields), and a bank is dark soil with rank grass, not
+    // the parcel's paint running up it
+    "  float bank = smoothstep(0.1, 0.5, frac);\n" +
+    "  col = mix(col, vec3(0.22, 0.2, 0.12) * (0.85 + 0.3 * egN(vEW.xz * 0.9)), bank * 0.85);\n" +
     // the farm track along every third boundary
     "  float trk = 1.0 - smoothstep(1.4, 2.2, abs(loc.y - 1.0));\n" +
     "  trk *= step(0.5, mod(cell.y, 3.0)) < 0.5 ? 1.0 : 0.0;\n" +
@@ -463,7 +527,8 @@ function ergMaterial(P) {
     const T = parcelTypes(), n = PARCEL.n, d = new Uint8Array(n * n * 4);
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
       const k = (j * n + i) * 4;
-      d[k] = T[j * n + i]; d[k + 1] = hash2(i - n / 2, j - n / 2, 223) < 0.5 ? 0 : 255; d[k + 3] = 255;
+      d[k] = T[j * n + i]; d[k + 1] = hash2(i - n / 2, j - n / 2, 223) < 0.5 ? 0 : 255;
+      d[k + 2] = Math.round(parcelJit(i - n / 2, 0) * 255); d[k + 3] = Math.round(parcelJit(j - n / 2, 1) * 255);
     }
     parcelTex = new THREE.DataTexture(d, n, n, THREE.RGBAFormat);
     parcelTex.magFilter = THREE.NearestFilter; parcelTex.minFilter = THREE.NearestFilter;
@@ -477,7 +542,7 @@ function ergMaterial(P) {
     sh.uniforms.uF = { value: new THREE.Vector2(FOLD.ground ? 1 : 0, FOLD.src) };
     sh.uniforms.uCanopy = { value: ERG_CANOPY.tex };
     sh.uniforms.uCanopyR = { value: ERG_CANOPY.rect };
-    sh.uniforms.uParcel = { value: new THREE.Vector3(PARCEL.ang, PARCEL.w, PARCEL.d) };
+    sh.uniforms.uParcel = { value: new THREE.Vector4(PARCEL.ang, PARCEL.w, PARCEL.d, PARCEL.jit) };
     sh.uniforms.uParcelT = { value: parcelTex || ERG_CANOPY.tex };
     sh.vertexShader = "attribute vec4 aD;\nvarying vec4 vED;\nvarying vec3 vEW;\n" +
       sh.vertexShader.replace("#include <project_vertex>",
@@ -485,8 +550,12 @@ function ergMaterial(P) {
     let surf = ergSurfaceGLSL(form, surface).replace("TURF_CALL",
       turfOn ? "turf = groundTurf(vEW.xz, dist, 0.35);" : "turf = vec3(0.92 + 0.16 * egN(rel * 0.043) + 0.08 * (egN(vEW.xz * 0.6) - 0.5) * kF);");
     sh.fragmentShader = "varying vec4 vED;\nvarying vec3 vEW;\nuniform vec2 uC;\nuniform vec2 uW;\nuniform vec2 uF;\n" +
-      "uniform sampler2D uCanopy;\nuniform vec4 uCanopyR;\nuniform vec3 uParcel;\nuniform sampler2D uParcelT;\n" +
-      ERG_GLSL + "\n" + (turfOn ? CBZ.GROUND_TURF_GLSL + "\n" : "") +
+      "uniform sampler2D uCanopy;\nuniform vec4 uCanopyR;\nuniform vec4 uParcel;\nuniform sampler2D uParcelT;\n" +
+      ERG_GLSL + "\n" +
+      // grid line (i, j) of the parcels, pushed: the texel's B is the column's push, A the row's
+      "vec2 pEdge(vec2 ij) { vec4 t = texture2D(uParcelT, (clamp(ij + 8.0, 0.0, 15.0) + 0.5) / 16.0);\n" +
+      "  return ij * uParcel.yz + (vec2(t.b, t.a) - 0.5) * uParcel.w * uParcel.yz; }\n" +
+      (turfOn ? CBZ.GROUND_TURF_GLSL + "\n" : "") +
       sh.fragmentShader
         .replace("void main() {", "void main() {\n  float vSpark = 0.0; float vShade = 1.0;")
         .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" + surf)
@@ -500,73 +569,200 @@ function ergMaterial(P) {
   if (CBZ.battleGround) CBZ.battleGround.patchTerrain(mat);
   return mat;
 }
+/* THE SKIN IS THE GROUND. Until this wave the men stood on the analytic
+   height function and the eye saw a mesh sampled from it every 2-4 m: two
+   different surfaces. Between vertices the triangles cut every corner, so on
+   a sharp crest a man floated and in a hollow or on a berm's shoulder his
+   feet sank out of sight (a hedge bank 1.7 m across could fall between two
+   vertices and never be drawn at all while the men walked up it).
+
+   Now the window is sampled ONCE into height grids, the triangles are built
+   from those grids, and MAP.groundAt reads the SAME grids with the SAME
+   triangle split (battleGround.bake): the surface a foot rests on is a point
+   on a drawn triangle, by construction. Two grids, turned onto the wind like
+   the old skin: the fighting ground at 1 m a vertex (a crest is a line, a
+   foxhole is a hole, a bank is a bank) out to INNER m each way, and the rest
+   of the 1.2 km window at 4 m. The 1 m grid's rim is snapped onto the 4 m
+   grid's chords so the two meet without a crack. Both are cut into chunks
+   with their own bounds, so the camera and the shadow pass cull by the
+   chunk, and the normals come off the grid (central differences), not off
+   each chunk's own triangles, so no chunk border shows as a shading seam.
+   Earthworks dug while the field was dressed (berms, pits, drifts) are in
+   the grids; whatever the battle digs afterwards (craters) is added on top
+   by ground.js as before, and its crater mesh reads the same grid. */
+const SKIN = { inner: 256, cellIn: 1, cellOut: 4, grids: null };
 function ergSkin(world) {
   const P = DUNE.pal || ERG_PAL.sand;
-  const S = DUNE.half * 2;
   const roll = P.form === "roll";
-  const NU = roll ? 300 : 600, NV = 300;
-  const du = S / NU, dv = S / NV;
-  const n = (NU + 1) * (NV + 1);
-  const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), aD = new Float32Array(n * 4);
+  const analytic = MAP_GROUND;                      // the shape + the dressing's earthworks
+  const GRD = CBZ.battleGround;
+  const W = [DUNE.wx, DUNE.wz], Qv = [-DUNE.wz, DUNE.wx];
+  const cx = DUNE.cx, cz = DUNE.cz;
   const sand = new THREE.Color(P.sand), crest = new THREE.Color(P.crest), trough = new THREE.Color(P.trough),
     slip = new THREE.Color(P.slip), pan = new THREE.Color(P.pan), tmp = new THREE.Color();
-  const W = [DUNE.wx, DUNE.wz], Q = [-DUNE.wz, DUNE.wx];
-  for (let j = 0; j <= NV; j++) {
-    const v = -DUNE.half + j * dv;
-    for (let i = 0; i <= NU; i++) {
-      const u = -DUNE.half + i * du;
-      const lx = u * W[0] + v * Q[0], lz = u * W[1] + v * Q[1];
-      const x = lx + DUNE.cx, z = lz + DUNE.cz;
-      // world + detail + earthworks: what the men stand on. duneDetail ran
-      // inside it for this very point, so DS holds this vertex's anatomy
-      // (the earthworks add height, never anatomy)
-      const y = MAP_GROUND(x, z);
-      const k = j * (NU + 1) + i;
-      pos[k * 3] = lx; pos[k * 3 + 1] = y; pos[k * 3 + 2] = lz;
-      const far = FOLD.ground && foldFar(x);
-      const w = duneWeight(x, z), fx = far ? 2 * FOLD.cx - x : x, fz = far ? 2 * FOLD.cz - z : z;
-      const lee = DS.lee * w, cr = DS.crest * w, tr = DS.trough * w;
-      tmp.copy(sand);
-      if (roll) {
-        tmp.lerp(DS.h > 0 ? crest : trough, Math.min(1, Math.abs(DS.h) / 6) * 0.5);
-      } else {
-        tmp.lerp(crest, cr * 0.55);
-        tmp.lerp(slip, lee * 0.45);
-        tmp.lerp(trough, tr * 0.6);
-        const flat = vn2(fx * 0.012, fz * 0.012, 61);
-        if (flat > 0.6) tmp.lerp(pan, Math.min(1, (flat - 0.6) * 4) * tr * 0.7);
+  // one grid: cell c over half-extent R; heights, colours and the dunes'
+  // anatomy (aD) per vertex, in the wind frame (u along, v across)
+  function sample(c, R) {
+    const n = Math.round(2 * R / c), N = n + 1;
+    const h = new Float32Array(N * N), col = new Float32Array(N * N * 3), aD = new Float32Array(N * N * 4);
+    for (let j = 0; j < N; j++) {
+      const v = -R + j * c;
+      for (let i = 0; i < N; i++) {
+        const u = -R + i * c;
+        const x = cx + u * W[0] + v * Qv[0], z = cz + u * W[1] + v * Qv[1];
+        const y = analytic(x, z);                   // duneDetail ran inside: DS is this vertex's anatomy
+        const k = j * N + i;
+        h[k] = y;
+        // on the rolling grounds aD.w is the earthwork under the vertex (a
+        // hedge bank, a berm), 0..1 over 0.9 m, so the skin can paint a bank
+        // as earth; on the dunes it stays the slope fraction (the shader's `frac`)
+        const bank = roll ? Math.min(1, Math.max(0, GRD.deform(x, z) / 0.9)) : 0;
+        const far = FOLD.ground && foldFar(x);
+        const w = duneWeight(x, z), fx = far ? 2 * FOLD.cx - x : x, fz = far ? 2 * FOLD.cz - z : z;
+        const lee = DS.lee * w, cr = DS.crest * w, tr = DS.trough * w;
+        tmp.copy(sand);
+        if (roll) {
+          tmp.lerp(DS.h > 0 ? crest : trough, Math.min(1, Math.abs(DS.h) / 6) * 0.5);
+        } else {
+          tmp.lerp(crest, cr * 0.55);
+          tmp.lerp(slip, lee * 0.45);
+          tmp.lerp(trough, tr * 0.6);
+          const flat = vn2(fx * 0.012, fz * 0.012, 61);
+          if (flat > 0.6) tmp.lerp(pan, Math.min(1, (flat - 0.6) * 4) * tr * 0.7);
+        }
+        tmp.multiplyScalar(0.96 + vn2(fx * 0.21, fz * 0.21, 71) * 0.06);
+        if (w < 1) tmp.lerp(sand, 1 - w);
+        col[k * 3] = tmp.r; col[k * 3 + 1] = tmp.g; col[k * 3 + 2] = tmp.b;
+        aD[k * 4] = lee; aD[k * 4 + 1] = cr; aD[k * 4 + 2] = tr; aD[k * 4 + 3] = roll ? bank : DS.frac;
       }
-      tmp.multiplyScalar(0.96 + vn2(fx * 0.21, fz * 0.21, 71) * 0.06);
-      if (w < 1) tmp.lerp(sand, 1 - w);
-      col[k * 3] = tmp.r; col[k * 3 + 1] = tmp.g; col[k * 3 + 2] = tmp.b;
-      aD[k * 4] = lee; aD[k * 4 + 1] = cr; aD[k * 4 + 2] = tr; aD[k * 4 + 3] = DS.frac;
     }
+    return { c: c, R: R, n: n, N: N, h: h, col: col, aD: aD };
   }
-  const idx = new Uint32Array(NU * NV * 6);
-  let o = 0;
-  for (let j = 0; j < NV; j++) for (let i = 0; i < NU; i++) {
-    const a = j * (NU + 1) + i, b = a + 1, c = a + NU + 1, d = c + 1;
-    idx[o++] = a; idx[o++] = c; idx[o++] = b; idx[o++] = b; idx[o++] = c; idx[o++] = d;
+  const outer = sample(SKIN.cellOut, DUNE.half);
+  const inner = sample(SKIN.cellIn, SKIN.inner);
+  // the fine grid's rim lies on the coarse grid's lines: snap its rim
+  // vertices onto the coarse chords so the two meshes share an edge exactly
+  (function snapRim() {
+    const c = outer.c, N = outer.N, step = Math.round(c / inner.c);
+    const at = function (u, v) {                      // the coarse surface along one of its own grid lines
+      const fi = (u + outer.R) / c, fj = (v + outer.R) / c;
+      const i0 = Math.floor(fi + 1e-6), j0 = Math.floor(fj + 1e-6);
+      const ti = fi - i0, tj = fj - j0;
+      const a = outer.h[j0 * N + i0];
+      if (ti > 1e-6) return a + (outer.h[j0 * N + i0 + 1] - a) * ti;
+      if (tj > 1e-6) return a + (outer.h[(j0 + 1) * N + i0] - a) * tj;
+      return a;
+    };
+    for (let k = 0; k <= inner.n; k++) {
+      if (k % step === 0) continue;                  // a shared vertex is the same sample already
+      const t = -inner.R + k * inner.c;
+      inner.h[k] = at(t, -inner.R);                                   // j = 0 row
+      inner.h[inner.n * inner.N + k] = at(t, inner.R);                // j = n row
+      inner.h[k * inner.N] = at(-inner.R, t);                         // i = 0 column
+      inner.h[k * inner.N + inner.n] = at(inner.R, t);                // i = n column
+    }
+  })();
+  SKIN.grids = { inner: inner, outer: outer };
+  /* THE GROUND, off the grids: the same triangle split the index buffer uses
+     (the diagonal from (i+1, j) to (i, j+1)), the fine grid strictly inside
+     its rim, the coarse one out to the window's edge, the shape's own
+     function past that (where the window has faded into the world anyway). */
+  const gridAt = function (G, u, v) {
+    const fu = (u + G.R) / G.c, fv = (v + G.R) / G.c;
+    let i = Math.floor(fu), j = Math.floor(fv);
+    if (i < 0) i = 0; else if (i > G.n - 1) i = G.n - 1;
+    if (j < 0) j = 0; else if (j > G.n - 1) j = G.n - 1;
+    const du = fu - i, dv = fv - j, k = j * G.N + i;
+    const ha = G.h[k], hb = G.h[k + 1], hc = G.h[k + G.N], hd = G.h[k + G.N + 1];
+    if (du + dv <= 1) return ha + (hb - ha) * du + (hc - ha) * dv;
+    return hd + (hc - hd) * (1 - du) + (hb - hd) * (1 - dv);
+  };
+  const IN = SKIN.inner, OUT = DUNE.half;
+  let fallback = analytic;
+  const skinGround = function (x, z) {
+    const rx = x - cx, rz = z - cz;
+    const u = rx * W[0] + rz * W[1], v = rx * Qv[0] + rz * Qv[1];
+    if (u > -IN && u < IN && v > -IN && v < IN) return gridAt(inner, u, v);
+    if (u >= -OUT && u <= OUT && v >= -OUT && v <= OUT) return gridAt(outer, u, v);
+    return fallback(x, z);
+  };
+  // past the window the ground is the shape's own function (no earthworks
+  // out there); bake() hands it back, because `analytic` is the ground.js
+  // wrapper that now reads the grids itself
+  const shape = CBZ.battleGround.bake(skinGround);
+  fallback = shape || fallback;
+  // normals off the grid: central differences in the wind frame, turned
+  // into the world. Consistent across every chunk border.
+  function normalAt(G, i, j, out) {
+    const N = G.N, k = j * N + i;
+    const i0 = i > 0 ? k - 1 : k, i1 = i < G.n ? k + 1 : k;
+    const j0 = j > 0 ? k - N : k, j1 = j < G.n ? k + N : k;
+    const du = (G.h[i1] - G.h[i0]) / ((i1 - i0) * G.c), dv = (G.h[j1] - G.h[j0]) / (((j1 - j0) / N) * G.c);
+    let nx = -(du * W[0] + dv * Qv[0]), nz = -(du * W[1] + dv * Qv[1]);
+    const l = Math.sqrt(nx * nx + 1 + nz * nz);
+    out[0] = nx / l; out[1] = 1 / l; out[2] = nz / l;
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-  g.setAttribute("aD", new THREE.BufferAttribute(aD, 4));
-  g.setIndex(new THREE.BufferAttribute(idx, 1));
-  g.computeVertexNormals();
-  // the winding must face up: flip if the first triangle's normal points down
-  if (g.attributes.normal.getY(0) < 0) {
-    for (let t = 0; t < idx.length; t += 3) { const s = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = s; }
-    g.computeVertexNormals();
+  const mat = ergMaterial(P);
+  const nrm = [0, 1, 0];
+  let flip = -1;                                    // decided on the first triangle: +1 keep, 0 swap
+  const skins = [];
+  /* one chunk of a grid: cells [i0, i1) x [j0, j1); `skip(i, j)` drops a cell
+     (the coarse grid's cells under the fine grid) */
+  function chunk(G, i0, i1, j0, j1, skip) {
+    const ni = i1 - i0 + 1, nj = j1 - j0 + 1, nV = ni * nj;
+    const pos = new Float32Array(nV * 3), col = new Float32Array(nV * 3), aD = new Float32Array(nV * 4), nor = new Float32Array(nV * 3);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const k = G.N * j + i, q = (j - j0) * ni + (i - i0);
+      const u = -G.R + i * G.c, v = -G.R + j * G.c;
+      pos[q * 3] = u * W[0] + v * Qv[0]; pos[q * 3 + 1] = G.h[k]; pos[q * 3 + 2] = u * W[1] + v * Qv[1];
+      col[q * 3] = G.col[k * 3]; col[q * 3 + 1] = G.col[k * 3 + 1]; col[q * 3 + 2] = G.col[k * 3 + 2];
+      aD[q * 4] = G.aD[k * 4]; aD[q * 4 + 1] = G.aD[k * 4 + 1]; aD[q * 4 + 2] = G.aD[k * 4 + 2]; aD[q * 4 + 3] = G.aD[k * 4 + 3];
+      normalAt(G, i, j, nrm);
+      nor[q * 3] = nrm[0]; nor[q * 3 + 1] = nrm[1]; nor[q * 3 + 2] = nrm[2];
+    }
+    const idx = [];
+    for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
+      if (skip && skip(i, j)) continue;
+      const a = (j - j0) * ni + (i - i0), b = a + 1, c = a + ni, d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+    if (!idx.length) return null;
+    if (flip < 0) {
+      // the winding must face up: test the first triangle's normal
+      const a = idx[0], c = idx[1], b = idx[2];
+      const ax = pos[a * 3], ay = pos[a * 3 + 1], az = pos[a * 3 + 2];
+      const e1x = pos[c * 3] - ax, e1y = pos[c * 3 + 1] - ay, e1z = pos[c * 3 + 2] - az;
+      const e2x = pos[b * 3] - ax, e2y = pos[b * 3 + 1] - ay, e2z = pos[b * 3 + 2] - az;
+      flip = (e1z * e2x - e1x * e2z) < 0 ? 0 : 1;
+      void e1y; void e2y;
+    }
+    if (flip === 0) for (let t = 0; t < idx.length; t += 3) { const s = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = s; }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g.setAttribute("aD", new THREE.BufferAttribute(aD, 4));
+    g.setIndex(new THREE.BufferAttribute(nV > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
+    g.computeBoundingSphere();
+    const m = new THREE.Mesh(g, mat);
+    m.position.set(cx, 0, cz);
+    m.receiveShadow = true; m.castShadow = true;
+    m.userData.terrain = true; m.userData.dynamic = true;
+    m.name = "duneSkin";
+    CBZ.scene.add(m);
+    skins.push(m);
+    return m;
   }
-  g.computeBoundingSphere();
-  const m = new THREE.Mesh(g, ergMaterial(P));
-  m.position.set(DUNE.cx, 0, DUNE.cz);
-  m.receiveShadow = true; m.castShadow = true;
-  m.userData.terrain = true; m.userData.dynamic = true;
-  m.name = "duneSkin";
-  CBZ.scene.add(m);
-  DUNE.skin = m;
+  // the fine ground in 4 x 4 chunks
+  const CI = 4, ci = inner.n / CI;
+  for (let a = 0; a < CI; a++) for (let b = 0; b < CI; b++) chunk(inner, a * ci, (a + 1) * ci, b * ci, (b + 1) * ci, null);
+  // the coarse window in 5 x 5 chunks, holed under the fine ground
+  const lo = Math.round((outer.R - inner.R) / outer.c), hi = Math.round((outer.R + inner.R) / outer.c);
+  const under = function (i, j) { return i >= lo && i < hi && j >= lo && j < hi; };
+  const CO = 5, co = outer.n / CO;
+  for (let a = 0; a < CO; a++) for (let b = 0; b < CO; b++) chunk(outer, Math.round(a * co), Math.round((a + 1) * co), Math.round(b * co), Math.round((b + 1) * co), under);
+  DUNE.skin = skins[0] || null;
+  DUNE.skins = skins;
   // the world's own plane gives up the turned window, per fragment
   const T = world && world.terrain;
   if (T && T.material) {
@@ -644,7 +840,10 @@ function lumpRock(detail, salt, flat, paint) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
     let k = 0.74 + vn2(x * 1.9 + salt, z * 1.9 + y * 1.6, 83) * 0.38 + vn2(x * 4.7 + y, y * 4.7 + z + salt, 89) * 0.13 +
       vn2(x * 11 + salt, z * 11 + y * 7, 97) * 0.045;
-    k *= 1 + 0.035 * Math.sin(y * 10 + vn2(x * 2 + salt, z * 2, 7) * 3);      // bedding ledges
+    // joints: rock breaks along planes, so the lump carries creases and
+    // faces (ridged noise), not the pillow a smooth sum of octaves makes
+    k += (Math.abs(vn2(x * 2.6 + salt * 0.7, z * 2.6 + y * 2.2, 101) - 0.5) * 2 - 0.5) * 0.14;
+    k *= 1 + 0.05 * Math.sin(y * 10 + vn2(x * 2 + salt, z * 2, 7) * 3);       // bedding ledges
     p.setXYZ(i, x * k, y * k * (y > 0 ? flat : 1), z * k);
   }
   g.computeVertexNormals();
@@ -658,12 +857,13 @@ function lumpRock(detail, salt, flat, paint) {
 }
 function rockGeometry() {
   return lumpRock(2, 0, 0.72, function (x, y, z, ny) {        // 260 instances: 320 tris each
+    // desert sandstone: a dark varnished rock, not the pale loaf it was
     const band = Math.sin(y * 7.5 + vn2(x * 1.3, z * 1.3, 5) * 2.4);
-    let r = 0.6 + band * 0.045, g = 0.47 + band * 0.03, b = 0.36 + band * 0.02;
-    if (band > 0.55) { r += 0.05; g -= 0.01; }                        // an iron-red bed
-    const v = 0.9 + vn2(x * 6, z * 6 + y * 3, 13) * 0.2;
+    let r = 0.46 + band * 0.05, g = 0.35 + band * 0.03, b = 0.26 + band * 0.02;
+    if (band > 0.55) { r += 0.06; g -= 0.01; }                        // an iron-red bed
+    const v = 0.85 + vn2(x * 6, z * 6 + y * 3, 13) * 0.3;
     r *= v; g *= v; b *= v;
-    if (ny > 0.55) { const k = (ny - 0.55) * 0.5; r -= r * k; g -= g * k; b -= b * k * 0.8; }   // desert varnish
+    if (ny > 0.4) { const k = (ny - 0.4) * 0.6; r -= r * k; g -= g * k; b -= b * k * 0.7; }    // desert varnish, darkest on the sun-facing tops
     const dust = Math.max(0, Math.min(1, (-y - 0.05) * 2.2));         // sand banked at the foot
     r += (0.77 - r) * dust; g += (0.58 - g) * dust; b += (0.36 - b) * dust;
     return [r, g, b];

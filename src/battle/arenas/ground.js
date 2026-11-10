@@ -53,7 +53,7 @@ CBZ.battleGround = (function () {
     ctx: null, base: null, gl: false,
     surface: "sand", soft: true,
     feats: [], grid: new Map(), CELL: 16,
-    craters: [], marksN: 0, sprays: 0, kept: 0, keptVerts: 0,
+    craters: [], baked: 0, marksN: 0, sprays: 0, kept: 0, keptVerts: 0,
   };
   function h01(a, b, s) {
     let h = (Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263) ^ Math.imul(s | 0, 2246822519)) | 0;
@@ -846,13 +846,27 @@ CBZ.battleGround = (function () {
     G.surface = ctx.surface || "sand";
     G.soft = ctx.soft !== false;
     G.base = ctx.groundAt;
-    G.feats.length = 0; G.grid.clear(); G.craters.length = 0;
+    G.feats.length = 0; G.grid.clear(); G.craters.length = 0; G.baked = 0;
     U.uCrN.value = 0;
     G.gl = !!(CBZ.renderer || (CBZ.micro && CBZ.micro.renderer)) && typeof document !== "undefined";
-    const base = ctx.groundAt;
-    G.ground = function (x, z) { return base(x, z) + deform(x, z); };
+    // reads G.base LIVE, so bake() can swap the shape for the drawn grids
+    G.ground = function (x, z) { return G.base(x, z) + deform(x, z); };
     if (CBZ.battleCover) { CBZ.battleCover.reset(); CBZ.battleCover.ground(G.ground); }
     return G.ground;
+  }
+  /* THE DRAWN GROUND BECOMES THE GROUND. erg.js samples the shape plus every
+     earthwork dug while the field was dressed into the height grids its
+     triangles are built from, then hands the grid reader here: from now on
+     the base is what is drawn, the dressing-time earthworks are IN it (so
+     they leave the live list, or they would count twice), and only what the
+     battle digs afterwards (craters) is added on top. Returns the shape the
+     grids were sampled from, for the ground past the window's edge. */
+  function bake(gridFn) {
+    const shape = G.base;
+    G.base = gridFn;
+    G.baked += G.feats.length;                      // they are still there: in the grids
+    G.feats.length = 0; G.grid.clear();
+    return shape;
   }
   // after the field is up: the decal layer, the spray pool, the hooks
   function arm() {
@@ -883,7 +897,7 @@ CBZ.battleGround = (function () {
   });
 
   return {
-    begin: begin, arm: arm, deform: deform,
+    begin: begin, bake: bake, arm: arm, deform: deform,
     // earthworks laid while the field is being dressed land on the erg in
     // turned pairs (erg.js FOLD); in battle FOLD.on is off
     berm: function (ax, az, bx, bz, hgt, w) {
@@ -900,7 +914,7 @@ CBZ.battleGround = (function () {
     craters: function () { return G.craters; },
     surface: function () { return G.surface; },
     stats: function () {
-      return { surface: G.surface, soft: G.soft, earthworks: G.feats.length - G.craters.length, craters: G.craters.length,
+      return { surface: G.surface, soft: G.soft, earthworks: G.baked + G.feats.length - G.craters.length, craters: G.craters.length,
         marks: G.marksN, sprays: G.sprays, remains: G.kept, remainVerts: G.keptVerts, remainBatches: RB.list.length };
     },
   };

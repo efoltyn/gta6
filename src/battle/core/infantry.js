@@ -80,7 +80,9 @@
   const POST = { stand: 0, kneel: 1, prone: 2 };
   const POST_NAME = ["stand", "crouch", "prone"];      // ballistics.MAN's names
   const MOVE = { hold: 0, walk: 1, rush: 2, crawl: 3, run: 4, march: 5 };
-  const EV = { kill: 1, down: 2, hit: 3, fled: 4, rout: 5, rally: 6, shot: 7, aid: 8, post: 9, crack: 10 };
+  // (strike: a blow in the press, a = who struck, b = whom, v = 1 it went in, 0.5 on the shield, 0 a miss;
+  //  throw: a = who let his spear go; shield: a's shield took a spear and he let it fall)
+  const EV = { kill: 1, down: 2, hit: 3, fled: 4, rout: 5, rally: 6, shot: 7, aid: 8, post: 9, crack: 10, strike: 11, throw: 12, shield: 13 };
   // a row the host owns (its own body, synced into the store each step): what it is
   const EXT = { none: 0, man: 1, beast: 2, vehicle: 3 };
   // a round for the renderer: shooter, origin, unit direction, where it stopped
@@ -120,15 +122,100 @@
        nerve    the stress at which he breaks
        aid      he goes to a downed mate within this many metres
        moveFire he fires on the move (0 never, 1 always)
-       ammoDisc share of a mag he keeps back before he stops to reload  */
+       ammoDisc share of a mag he keeps back before he stops to reload
+       fear     mil, 1-sigma: the aiming error the fight itself puts on
+                every shot while rounds are passing his squad, on top of his
+                hold (in quadrature). `hold` above is a qualification-range
+                number, and no army has ever shot like its range scores in
+                contact: a snatched sight picture, a rifle fired from an
+                awkward lie, a head that will not stay up. Rowland, The
+                Stress of Battle (2006; British Army operational analysis of
+                real engagements against field trials) puts rifle fire in
+                combat at about a tenth of its trial effectiveness, less for
+                the best, far worse for the worst; US counts of small-arms
+                rounds per casualty run to the thousands. With these rows a
+                trained man in contact hits a standing man about one round
+                in sixty at 400 m, one in six at 100 m, and almost every
+                time at 20 m: at range rifle fire PINS, and it kills when
+                somebody closes. Before this the core fought at range-day
+                accuracy: 30 v 30 between equals at 400 m was over in 28 s
+                at six rounds a hit, without either side moving
+                (tools/npcwar-squad-check.mjs, tools/npcwar-timeline.mjs). A
+                man nobody is shooting at (the first volley of an ambush)
+                shoots as he qualifies. */
   const DOCTRINE = {
-    civ:   { detect: 0.16, acq: 2.1, settle: 1.00, hold: [3.4, 2.5, 1.5], recover: 0.60, press: 0.00, burst: 4, rangeErr: 0.30, adjust: 0.10, lead: [0.30, 0.50], drop: 2.2, rise: 1.6, rushMax: 9, coverR: 0, suppK: 1.7, pinAt: 0.55, calm: 6.0, reload: 6.0, tac: 0, nerve: 0.35, aid: 0, moveFire: 1, ammoDisc: 0 },
-    thug:  { detect: 0.24, acq: 1.6, settle: 0.75, hold: [2.7, 1.9, 1.15], recover: 0.45, press: 0.30, burst: 3, rangeErr: 0.22, adjust: 0.25, lead: [0.50, 0.40], drop: 1.7, rise: 1.4, rushMax: 7, coverR: 3, suppK: 1.35, pinAt: 0.85, calm: 4.5, reload: 4.4, tac: 0, nerve: 0.48, aid: 6, moveFire: 1, ammoDisc: 0 },
-    pro:   { detect: 0.36, acq: 1.15, settle: 0.55, hold: [1.95, 1.35, 0.80], recover: 0.33, press: 0.58, burst: 2, rangeErr: 0.15, adjust: 0.45, lead: [0.75, 0.25], drop: 1.3, rise: 1.1, rushMax: 5, coverR: 6, suppK: 1.00, pinAt: 1.25, calm: 3.2, reload: 3.0, tac: 1, nerve: 0.62, aid: 15, moveFire: 0.4, ammoDisc: 0.25 },
-    elite: { detect: 0.52, acq: 0.80, settle: 0.38, hold: [1.35, 0.95, 0.52], recover: 0.24, press: 0.80, burst: 1, rangeErr: 0.10, adjust: 0.65, lead: [0.90, 0.15], drop: 1.0, rise: 0.9, rushMax: 4, coverR: 10, suppK: 0.72, pinAt: 1.8, calm: 2.2, reload: 2.4, tac: 1, nerve: 0.76, aid: 25, moveFire: 0.15, ammoDisc: 0.33 },
-    swat:  { detect: 0.62, acq: 0.62, settle: 0.30, hold: [1.10, 0.80, 0.45], recover: 0.20, press: 0.86, burst: 1, rangeErr: 0.08, adjust: 0.75, lead: [0.95, 0.10], drop: 0.9, rise: 0.8, rushMax: 3.5, coverR: 12, suppK: 0.60, pinAt: 2.2, calm: 1.8, reload: 2.1, tac: 1, nerve: 0.85, aid: 25, moveFire: 0.1, ammoDisc: 0.33 },
+    civ:   { fear: 17, detect: 0.16, acq: 2.1, settle: 1.00, hold: [3.4, 2.5, 1.5], recover: 0.60, press: 0.00, burst: 4, rangeErr: 0.30, adjust: 0.10, lead: [0.30, 0.50], drop: 2.2, rise: 1.6, rushMax: 9, coverR: 0, suppK: 1.7, pinAt: 0.55, calm: 6.0, reload: 6.0, tac: 0, nerve: 0.35, aid: 0, moveFire: 1, ammoDisc: 0 },
+    thug:  { fear: 13, detect: 0.24, acq: 1.6, settle: 0.75, hold: [2.7, 1.9, 1.15], recover: 0.45, press: 0.30, burst: 3, rangeErr: 0.22, adjust: 0.25, lead: [0.50, 0.40], drop: 1.7, rise: 1.4, rushMax: 7, coverR: 3, suppK: 1.35, pinAt: 0.85, calm: 4.5, reload: 4.4, tac: 0, nerve: 0.48, aid: 6, moveFire: 1, ammoDisc: 0 },
+    pro:   { fear: 8.5, detect: 0.36, acq: 1.15, settle: 0.55, hold: [1.95, 1.35, 0.80], recover: 0.33, press: 0.58, burst: 2, rangeErr: 0.15, adjust: 0.45, lead: [0.75, 0.25], drop: 1.3, rise: 1.1, rushMax: 5, coverR: 6, suppK: 1.00, pinAt: 1.25, calm: 3.2, reload: 3.0, tac: 1, nerve: 0.62, aid: 15, moveFire: 0.4, ammoDisc: 0.25 },
+    elite: { fear: 6, detect: 0.52, acq: 0.80, settle: 0.38, hold: [1.35, 0.95, 0.52], recover: 0.24, press: 0.80, burst: 1, rangeErr: 0.10, adjust: 0.65, lead: [0.90, 0.15], drop: 1.0, rise: 0.9, rushMax: 4, coverR: 10, suppK: 0.72, pinAt: 1.8, calm: 2.2, reload: 2.4, tac: 1, nerve: 0.76, aid: 25, moveFire: 0.15, ammoDisc: 0.33 },
+    swat:  { fear: 5, detect: 0.62, acq: 0.62, settle: 0.30, hold: [1.10, 0.80, 0.45], recover: 0.20, press: 0.86, burst: 1, rangeErr: 0.08, adjust: 0.75, lead: [0.95, 0.10], drop: 0.9, rise: 0.8, rushMax: 3.5, coverR: 12, suppK: 0.60, pinAt: 2.2, calm: 1.8, reload: 2.1, tac: 1, nerve: 0.85, aid: 25, moveFire: 0.1, ammoDisc: 0.33 },
   };
   const TRN_IDS = ["civ", "thug", "pro", "elite", "swat"];
+
+  /* ============================================================ THE LINE OF BATTLE: DRILL
+     An ancient army's men (countries.js era "ancient") fight in CLOSE ORDER:
+     blocks of men in files and ranks that move, wheel and fight as one body,
+     because a man alone with a sword is dead and a wall of shields is not.
+     One row per training level (the same TRAININGS ids: a levy, a warband, a
+     citizen militia, a professional legion, a guard). Units:
+       march quick charge   m/s of the block: in step on the approach, the
+                            quick step inside bowshot, the run into contact
+                            (a legion marched ~4.8 km/h; Caesar's men ran the
+                            last stretch, BG 1.52)
+       fileW rankD          m a man takes across and in depth in fighting order
+                            (Polybius 18.30: three feet of his own and three
+                            between him and the next, ~1.8 m; we take 1.5)
+       closeW closeD        the locked shield wall at contact
+       testW testD          the testudo (Dio 49.30, Plutarch Antony 45): the
+                            shields locked over the head and round the sides,
+                            the men packed to a shield's width
+       testudo              he knows it (1) or not (0)
+       pilumR               m: the throwing spear is let go inside this
+                            (effective 15-20 m, Connolly; the heavy one first)
+       skill                0..1: how he fights with the sword and shield
+       strikeT              s between blows in the press (a fight of minutes,
+                            not seconds: men held off behind the shields)
+       nerve                the pressure (losses + strain) the block breaks at
+       suppK                how much the crack of a round frightens him (a
+                            noise nobody in his world had heard)
+       drill                0..1: how hard the block holds its order (it waits
+                            for its stragglers, it closes its gaps)
+       relief               the front rank is relieved by the next (1) or not
+       turn                 rad/s the block wheels at                       */
+  const ANC = {
+    civ:   { march: 1.05, quick: 1.4, charge: 3.4, fileW: 1.3, rankD: 1.7, closeW: 1.15, closeD: 1.4, testW: 1.0, testD: 1.0, testudo: 0, pilumR: 0,  skill: 0.22, strikeT: 2.6, nerve: 0.42, suppK: 1.5, drill: 0.25, relief: 0, turn: 0.16 },
+    thug:  { march: 1.2,  quick: 1.7, charge: 4.2, fileW: 1.6, rankD: 1.8, closeW: 1.3,  closeD: 1.5, testW: 1.0, testD: 1.0, testudo: 0, pilumR: 16, skill: 0.45, strikeT: 1.9, nerve: 0.62, suppK: 1.25, drill: 0.35, relief: 0, turn: 0.22 },
+    pro:   { march: 1.15, quick: 1.55, charge: 3.8, fileW: 1.4, rankD: 1.7, closeW: 1.0,  closeD: 1.3, testW: 0.85, testD: 0.95, testudo: 0, pilumR: 18, skill: 0.5,  strikeT: 2.0, nerve: 0.72, suppK: 1.15, drill: 0.6, relief: 0, turn: 0.26 },
+    elite: { march: 1.25, quick: 1.6, charge: 4.0, fileW: 1.5, rankD: 1.8, closeW: 1.0,  closeD: 1.25, testW: 0.74, testD: 0.86, testudo: 1, pilumR: 20, skill: 0.66, strikeT: 1.7, nerve: 0.9, suppK: 1.0, drill: 0.9, relief: 1, turn: 0.32 },
+    swat:  { march: 1.25, quick: 1.65, charge: 4.1, fileW: 1.5, rankD: 1.8, closeW: 1.0,  closeD: 1.25, testW: 0.74, testD: 0.86, testudo: 1, pilumR: 20, skill: 0.76, strikeT: 1.6, nerve: 0.97, suppK: 0.9, drill: 0.95, relief: 1, turn: 0.34 },
+  };
+  /* THE BLADES. reach: m of blade and arm past his shoulder; the wound a blow
+     that lands does by where it lands (now: the share of him it takes at once;
+     bleed: per second); pen: the odds a thrust goes through iron (mail, the
+     segmented plates) where a cut would not. The gladius was a thrusting
+     sword (Vegetius 1.12: "a thrust of two inches is fatal"). The bayonet and
+     the butt are what a rifleman has when the magazine is empty. */
+  const MELEE = {
+    gladius: { reach: 0.78, now: [0.5, 0.9], bleed: 0.045, pen: 0.45, thrust: true },
+    spear:   { reach: 1.6,  now: [0.45, 0.85], bleed: 0.04, pen: 0.4, thrust: true },
+    bayonet: { reach: 0.95, now: [0.4, 0.8], bleed: 0.04, pen: 0.35, thrust: true },
+  };
+  /* THE SHIELDS. A scutum (Fayum find): 1.28 x 0.63 m, curved, three layers
+     of birch strips (~6-10 mm) under calf hide, an iron boss: 7-10 kg. It turns
+     a blade, a stone and most arrows; it stops a throwing spear's head, which
+     then hangs in it (and the man drops it, which was the point of the pilum).
+     It does not stop a rifle round: that goes through 10 mm of wood and keeps
+     nearly all of its speed (the round is flown through it, below).
+       w h y0   its size and its bottom edge over the ground, carried
+       block    the odds a blow he sees coming lands on it               */
+  const SHIELDS = {
+    scutum: { w: 0.64, h: 1.06, y0: 0.32, block: 0.66, wood: 0.01 },
+    aspis:  { w: 0.9,  h: 0.9,  y0: 0.55, block: 0.6,  wood: 0.012 },
+  };
+  // what a man of the line is doing, for the renderer (G.stc)
+  const STC = { carry: 0, wall: 1, roof: 2, fight: 3, charge: 4, throw: 5, rout: 6, side: 7 };
+  // the block's state
+  const BM = { march: 0, testudo: 1, quick: 2, volley: 3, charge: 4, melee: 5, rout: 6, hold: 7 };
 
   // the body for the eye: where on him a sight line is aimed (height above
   // his feet, m) and the area that point stands for (m2), by posture. A prone
@@ -182,6 +269,13 @@
       S.col("inF", F, 1); S.col("inB", F, 1); S.col("inS", F, 1); S.col("inH", F, 1); S.col("plSo", U8); S.col("inSo", F, 1);
       S.col("vx", F); S.col("vz", F);
       S.col("ext", U8); S.col("extW", F); S.col("extH", F); S.col("extMM", F);
+      // THE LINE OF BATTLE (an ancient army's men): his block and his place in
+      // it (file, rank as formed, rank now), the slot's offset off the block's
+      // front, his shield, his throwing spears, how tired his arm is, what he
+      // is doing (STC), his next blow, when he lets his spear go, engaged
+      S.col("anc", U8); S.col("blk", I32, -1); S.col("bfl", U8); S.col("brk0", U8); S.col("brk", U8);
+      S.col("bsx", F); S.col("bsb", F); S.col("shd", U8); S.col("pil", U8); S.col("pvol", U8);
+      S.col("fat", F); S.col("stc", U8); S.col("swT", F); S.col("thrT", F, -99); S.col("eng", U8);
     }
     cols();
     /* THE COLUMNS, AS A FAST OBJECT. The store's `cols` collects its ~90
@@ -199,6 +293,8 @@
         supp: c.supp, stress: c.stress, cap: c.cap, bleed: c.bleed, down: c.down, aidBy: c.aidBy, aidOn: c.aidOn, aidEnd: c.aidEnd, pin: c.pin,
         flashT: c.flashT, thinkAt: c.thinkAt, contactT: c.contactT, crackT: c.crackT, hitX: c.hitX, hitZ: c.hitZ, shots: c.shots, hits: c.hits,
         plF: c.plF, plB: c.plB, plS: c.plS, helm: c.helm, inF: c.inF, inB: c.inB, inS: c.inS, inH: c.inH, plSo: c.plSo, inSo: c.inSo, vx: c.vx, vz: c.vz, ext: c.ext, extW: c.extW, extH: c.extH, extMM: c.extMM,
+        anc: c.anc, blk: c.blk, bfl: c.bfl, brk0: c.brk0, brk: c.brk, bsx: c.bsx, bsb: c.bsb, shd: c.shd, pil: c.pil, pvol: c.pvol,
+        fat: c.fat, stc: c.stc, swT: c.swT, thrT: c.thrT, eng: c.eng,
       };
     }
     let G = bindG(S.cols);
@@ -251,6 +347,22 @@
         thr: AR && c ? (AR.ROUNDS[c === B.CART["556"] ? "556" : c === B.CART["762x39"] ? "762x39" : c === B.CART["762x51"] ? "762x51" : c === B.CART["9x19"] ? "9mm" : "556"] || null) : null,
       };
       t.carry = g.carry || 180;
+      /* A MAN OF THE LINE OF BATTLE (spec.anc: { sword, pila, shield, body,
+         helmet }): no rifle. His doctrine is ANC[trn] (the drill of his
+         training), his rifle-shaped doctrine row is kept for the shared rules
+         (the rattle, the nerve, the calm) with his own nerve and fear of the
+         noise; his armour is the real iron (systems/armour.js classes). */
+      if (spec.anc) {
+        const A = ANC[spec.trn] || ANC.elite, a = spec.anc;
+        t.anc = true; t.armed = false; t.A = A;
+        t.M = MELEE[a.sword] || MELEE.gladius;
+        t.pila = a.pila | 0;
+        t.SH = SHIELDS[a.shield] || null;
+        t.D = Object.assign({}, D, { pinAt: 99, suppK: A.suppK, nerve: A.nerve, calm: 5, aid: 0, coverR: 0 });
+        t.plate = 0; t.side = 0;
+        t.soft = plateIdx(a.body); t.helm = plateIdx(a.helmet);
+        t.magSize = 0; t.carry = 0;
+      } else t.M = MELEE.bayonet;
       t.idx = I.types.length;
       I.types.push(t);
       return t.idx;
@@ -261,7 +373,7 @@
     const SQ = { n: 0, side: new U8(0), mem: new I32(0), cnt: new U8(0), task: new U8(0), at: new F(0), lead: new I32(0),
       cx: new F(0), cz: new F(0), contact: new F(0), bound: new U8(0), boundT: new F(0), thx: new F(0), thz: new F(0), hurt: new U8(0), fx: new F(0), fz: new F(0),
       lostT: new F(0), brkX: new F(0), brkZ: new F(0), brkT: new F(0), lastC: new F(0),
-      oK: new U8(0), oX: new F(0), oZ: new F(0), fireT: new F(0), flX: new F(0), flZ: new F(0), flT: new F(0) };
+      oK: new U8(0), oX: new F(0), oZ: new F(0), fireT: new F(0), flX: new F(0), flZ: new F(0), flT: new F(0), anc: new U8(0) };
     const TASK = { advance: 0, contact: 1, base: 2, bound: 3, assault: 4, hold: 5, breakc: 6, gone: 7, overwatch: 8, flank: 9 };
     I.TASK = TASK;
     let sqCap = 0;
@@ -312,9 +424,13 @@
       if (side != null) G.side[r] = side;
       G.life[r] = LIFE.alive;
       G.y[r] = hAt(G.x[r], G.z[r]);
+      G.anc[r] = t.anc ? 1 : 0; G.blk[r] = -1; G.eng[r] = 0; G.fat[r] = 0; G.swT[r] = 0; G.thrT[r] = -99; G.pvol[r] = 0;
+      G.shd[r] = t.anc && t.SH ? 1 : 0; G.pil[r] = t.anc ? t.pila : 0; G.stc[r] = 0;
+      if (t.anc) I.ancN = (I.ancN || 0) + 1;
       if (sq != null && sq >= 0) {
         sqGrow(sq + 1);
         SQ.side[sq] = G.side[r];
+        if (t.anc) SQ.anc[sq] = 1;
         const s = slot | 0;
         if (s < 10) SQ.mem[sq * 10 + s] = r;
         if (SQ.cnt[sq] < s + 1) SQ.cnt[sq] = s + 1;
@@ -790,9 +906,11 @@
 
     function think(r, dt) {
       I.stats.thinks++;
+      if (G.anc[r]) { ancThink(r, dt); return; }          // a man of the line of battle (below)
       const D = D_(r), t = T_(r);
       if (G.down[r]) { downThink(r, dt); return; }
       if (G.life[r] === LIFE.routed) { routThink(r); return; }
+      if (I.ancN) closeThreat(r);                          // a sword at arm's length is no search
       const x = G.x[r], z = G.z[r];
       // ---- what he sees
       let tg = G.tgt[r];
@@ -1223,6 +1341,7 @@
     function trigger(r, dt) {
       const t = T_(r), D = t.D;
       if (!t.armed || G.down[r] || G.life[r] !== LIFE.alive || G.aidOn[r] >= 0) return;
+      if (I.ancN && closeFight(r, t, D, dt)) return;      // the bayonet, empty or reloading with a sword on him
       if (G.reloadT[r] > 0) {
         G.reloadT[r] -= dt;
         if (G.reloadT[r] <= 0) {
@@ -1310,6 +1429,16 @@
         else { G.burst[r] = 0; G.cool[r] = 0.8 + rnd() * 1.2; }
       } else G.cool[r] = 2.2 + rnd() * 2.0;
     }
+    // when rounds last passed a man of each squad (sigmaNow: DOCTRINE.fear)
+    const sqHot = [];
+    // does the man he is shooting at know he is in a fight? (looking for
+    // somebody, has a mark of his own, or was shot at in the last minute)
+    function tgAware(r) {
+      const tg = G.tgt[r];
+      if (tg < 0) return false;
+      if (G.ext[tg]) return true;
+      return G.tgt[tg] >= 0 || I.simT - G.contactT[tg] < 60 || I.simT - G.crackT[tg] < 60;
+    }
     // his angular error in mil (1-sigma per axis) right now
     function sigmaNow(r, t, d) {
       const D = t.D, p = G.post[r];
@@ -1322,11 +1451,25 @@
       hold *= 1 + 2.4 * Math.exp(-G.aimT[r] / (D.settle * (1 + D.press * d / 400)));
       // moving
       if (G.mv[r] !== MOVE.hold) hold += G.mv[r] === MOVE.walk ? 4 : 9;
+      // THE RANGE SHOOTS BACK (DOCTRINE.fear): rounds have passed him in the
+      // last half minute. It comes on with the first crack and wears off
+      // slowly once nobody is shooting at him any more.
+      // Rounds past HIM, or past anybody in his squad: a section under
+      // fire is under fire, not just the man the last burst was meant for.
+      const sqh = G.sqd[r] >= 0 ? sqHot[G.sqd[r]] : undefined;
+      const quiet = I.simT - Math.max(G.crackT[r], sqh === undefined ? -99 : sqh);
+      let fear = quiet >= 0 && quiet < 40 ? D.fear * (quiet < 8 ? 1 : Math.exp(-(quiet - 8) / 10)) : 0;
+      // An armed enemy in sight is already not the range, before his first
+      // round arrives: most of it comes on at contact (the first volley of
+      // a meeting engagement used to be fired at qualification accuracy,
+      // and broke a conscript platoon at 400 m inside eight seconds).
+      // The ambusher, whose mark has not seen him, has none of it.
+      if (fear < D.fear * 0.6 && tgAware(r)) fear = D.fear * 0.6;
       // the rattle, and a wound
       hold *= 1 + 0.55 * Math.min(3, G.supp[r]) * D.suppK;
       hold *= 1 + (1 - G.cap[r]) * 2.2;
       const heat = G.heat[r] * Math.exp(-(I.simT - G.flashT[r]) / D.recover);
-      return Math.sqrt(hold * hold + t.mech * t.mech + heat * heat);
+      return Math.sqrt(hold * hold + t.mech * t.mech + heat * heat + fear * fear);
     }
     function fire(r, tg, t, D, d, sig, pinned) {
       G.mag[r]--;
@@ -1710,6 +1853,18 @@
           }
         }
       }
+      // A SHIELD IN THE WAY (a man of the line facing the shot): the round goes
+      // through a centimetre of boards and hide first, and keeps nearly all of its speed
+      if (G.anc[b] && G.shd[b] && !G.down[b]) {
+        const SH = T_(b).SH, hb = G.heading[b];
+        const facing = -(Math.sin(hb) * RB[o + 4] + Math.cos(hb) * RB[o + 6]) / (RB[o + 13] || 1);
+        const hy = roundY(o, first.a) - G.y[b];
+        if (SH && facing > 0.3 && hy > SH.y0 && hy < SH.y0 + SH.h) {
+          v = B.pierce(c, "wood", SH.wood / Math.max(0.3, facing), v, c.v0);
+          I.led.shieldHits = (I.led.shieldHits || 0) + 1;
+          if (v < 60) return 0;
+        }
+      }
       const res = B.wound(_tr, MAN_AN, c, v, c.v0, lay, _wr);
       if (!res.hit) return v;
       const H = B.harm(res, MAN_AN, true);
@@ -1741,6 +1896,7 @@
       G.supp[b] += plate ? 0.8 : 1.6;
       G.stress[b] += plate ? 0.08 : 0.25;
       G.aimT[b] = 0;
+      if (G.anc[b] && G.blk[b] >= 0 && by >= 0 && !G.anc[by]) BK.fireT[G.blk[b]] = I.simT;
       if (by >= 0) { G.crackT[b] = I.simT; G.hitX[b] = G.x[by]; G.hitZ[b] = G.z[by]; if (G.tgt[b] < 0 && G.lkT[b] < I.simT - 2) { G.lkx[b] = G.x[by]; G.lkz[b] = G.z[by]; G.lkT[b] = I.simT - 3; } }
       // HE IS HIT, AND HIS SQUAD KNOWS IT (the shout, the man going down): contact, and a
       // bearing on where it came from (the crack and the thump give it, roughly)
@@ -1808,7 +1964,11 @@
         if (o === b || G.side[o] !== sd || G.ext[o] || !fighting(o)) return;
         const dx = G.x[o] - x, dz = G.z[o] - z, d2 = dx * dx + dz * dz;
         if (d2 > 225) return;
-        G.stress[o] += k * 0.4 * (1 - Math.sqrt(d2) / 15) * D_(o).suppK;
+        // (a man in close order has a hundred men within 15 m of him and was
+        // drilled to expect the front rank to fall: it is the man beside him
+        // who counts, and the block's losses, counted by the block)
+        const g = G.anc[o] ? (d2 < 4 ? 0.35 : 0.06) : 1;
+        G.stress[o] += k * 0.4 * (1 - Math.sqrt(d2) / 15) * D_(o).suppK * g;
       });
       const sq = G.sqd[b];
       if (sq >= 0) SQ.hurt[sq] = Math.min(255, SQ.hurt[sq] + 1);
@@ -1827,9 +1987,11 @@
     function crack(b, k, fx, fz) {
       // one of the host's men: the host rattles him (its own suppression)
       if (G.ext[b]) { if (G.ext[b] === EXT.man) ev(EV.crack, b, -1, k); return; }
+      if (G.anc[b] && G.blk[b] >= 0) BK.fireT[G.blk[b]] = I.simT;     // his block is under missiles
       const D = D_(b);
       // (it saturates: the fifth round past his head is not five times as frightening as the first)
       G.supp[b] += D.suppK * (0.35 + 0.65 * k) * Math.max(0.1, 1 - G.supp[b] / (D.pinAt * 2.5));
+      if (G.sqd[b] >= 0) sqHot[G.sqd[b]] = I.simT;
       G.stress[b] += 0.012 * D.suppK * k;
       I.led.cracks++;
       if (I.simT - G.crackT[b] > 3 || G.tgt[b] < 0) { G.hitX[b] = fx; G.hitZ[b] = fz; }
@@ -1886,7 +2048,7 @@
       const t0 = now();
       const n = I.nRows || 0;
       moveN++;
-      const LF = G.life, PT = G.postT, SU = G.supp, ST = G.stress, BL = G.bleed, EX = G.ext;
+      const LF = G.life, PT = G.postT, SU = G.supp, ST = G.stress, BL = G.bleed, EX = G.ext, AC = G.anc;
       // the stress of it wears off over a minute or so (faster out of contact)
       const kIn = Math.exp(-dt / 90), kOut = Math.exp(-dt / 30);
       for (let r = 0; r < n; r++) {
@@ -1896,6 +2058,7 @@
         if (PT[r] > 0) { PT[r] -= dt; if (PT[r] <= 0) { PT[r] = 0; G.post[r] = G.postTo[r]; } }
         if (SU[r] > 0) { SU[r] *= CALM_K[G.typ[r]]; if (SU[r] < 0.01) SU[r] = 0; }
         if (ST[r] > 0) ST[r] *= I.simT - G.contactT[r] < 10 ? kIn : kOut;
+        if (AC[r]) { ancMove(r, dt); continue; }             // the line of battle: his slot in the frame
         if (BL[r] <= 0 && G.mv[r] === MOVE.hold) { G.vx[r] = 0; G.vz[r] = 0; continue; }
         if (G.bleed[r] > 0) {
           G.cap[r] -= G.bleed[r] * dt;
@@ -2052,6 +2215,7 @@
       SQ.task[sq] = TASK.gone;
     }
     function squadTick(sq) {
+      if (SQ.anc[sq]) return;                     // (a file of the line of battle: its block decides)
       const base = sq * 10;
       let lead = -1, nAlive = 0, nFight = 0, cx = 0, cz = 0, inContact = 0, pinned = 0, tx = 0, tz = 0, nt = 0, stress = 0, firing = 0;
       for (let j = 0; j < 10; j++) {
@@ -2123,6 +2287,20 @@
         if (Math.hypot(cx - SQ.brkX[sq], cz - SQ.brkZ[sq]) > 150) { routSquad(sq); return; }
         if (I.simT - SQ.boundT[sq] > 5) { SQ.bound[sq] = SQ.bound[sq] === 1 ? 2 : 1; SQ.boundT[sq] = I.simT; }
         return;
+      }
+      /* A HORDE AT ARM'S LENGTH. Men with swords and spears coming on in close
+         order, many more of them than of us: a squad does not lie there and
+         wait to be overrun. It falls back by bounds, one team firing while the
+         other runs, to keep the distance its rifles need, and keeps doing it
+         while they keep coming. (Untrained men just run: below.) */
+      if (inContact && I.ancN && task0 !== TASK.gone) {
+        const nh = hordeNear(SQ.side[sq], cx, cz, 55, 64);
+        if (nh > Math.max(5, nFight * 2)) {
+          if (task0 !== TASK.breakc) { SQ.task[sq] = TASK.breakc; SQ.bound[sq] = 1; SQ.boundT[sq] = I.simT; SQ.brkX[sq] = cx; SQ.brkZ[sq] = cz; SQ.brkT[sq] = I.simT; I.led.fallbacks = (I.led.fallbacks || 0) + 1; }
+          else if (Math.hypot(cx - SQ.brkX[sq], cz - SQ.brkZ[sq]) > 110) { SQ.brkX[sq] = cx; SQ.brkZ[sq] = cz; }
+          if (I.simT - SQ.boundT[sq] > 4) { SQ.bound[sq] = SQ.bound[sq] === 1 ? 2 : 1; SQ.boundT[sq] = I.simT; }
+          return;
+        }
       }
       if (inContact && (P > D.nerve || task0 === TASK.breakc)) {
         if (P > D.nerve * 1.45 || (task0 === TASK.breakc && P > D.nerve * 1.25)) { routSquad(sq); return; }
@@ -2204,6 +2382,672 @@
       SQ.task[sq] = dTh < 45 ? TASK.assault : TASK.bound;
     }
 
+    /* ============================================================ THE LINE OF BATTLE
+       An ancient army fights as BLOCKS (a Roman century: 80 men, ten files of
+       eight, the contubernium being one file). The block is a frame: a front
+       centre, a facing, a frontage per man and a depth per rank. Every man
+       steers to his slot in it every step, faces where it faces, and closes
+       up when the man in front of him falls (his file's ranks are counted off
+       again from the front: nobody steps over a gap). The block decides on
+       its own clock what it is doing:
+         MARCH      in step toward the enemy (or its order's point)
+         TESTUDO    shields locked over and round, packed, slow: under missile
+                    fire inside bowshot (a crack is a missile to a man who has
+                    never heard a rifle)
+         QUICK      the quick step inside 80 m, back in fighting order
+         VOLLEY     a halt inside spear range: the front two ranks throw (the
+                    heavy pilum, then the light one), each man on his own beat
+         CHARGE     the run into contact
+         MELEE      the press: the front rank fights man to man over the
+                    shields, the ranks behind hold the line and step up into
+                    every gap; a tired front-ranker is relieved by the man
+                    behind him (the drill); the block leans in at a walk
+         ROUT       losses and strain past its nerve: it runs
+       A man in the press picks the enemy at his front, closes to reach and
+       strikes on his own clock: a blow is aimed (his skill, his tiredness),
+       seen and taken on the shield (the other man's skill, the shield's
+       arc), and what lands is a wound where it lands, through whatever iron
+       is there (systems/armour.js's real classes). A rifleman whose magazine
+       is empty fights back with the bayonet by the same rule.
+       THE PILUM is flown: a 2 kg spear let go at 18-23 m/s on the arc that
+       carries it to his mark, with his errors; it is swept against every body
+       in its path each step. It hangs in a shield it strikes (and the man
+       drops the shield), or goes into a man through what he wears. The ones
+       that miss stand in the ground where they fell (I.stuck: the renderer
+       draws every one). */
+    const BCAP = 128;
+    const BK = { n: 0, side: new U8(0), files: new U8(0), ranks: new U8(0), mem: new I32(0), typ: new I32(0), init: new U8(0),
+      cx: new F(0), cz: new F(0), fx: new F(0), fz: new F(0), wf: new F(0), mode: new U8(0), modeT: new F(0), sp: new F(0), at: new F(0),
+      fireT: new F(0), vol: new U8(0), volT: new F(0), ex: new F(0), ez: new F(0), ed: new F(0), n0: new I32(0), nf: new I32(0),
+      w: new F(0), d: new F(0), err: new F(0), px: new F(0), pz: new F(0), freeT: new F(0), wcut: new F(0), dep: new F(0) };
+    let bkCap = 0;
+    function bkGrow(n) {
+      if (n <= BK.n) return;
+      if (n > bkCap) {
+        const cap = Math.max(n, bkCap * 2, 16);
+        for (const k in BK) {
+          if (k === "n" || k === "mem") continue;
+          const a = new BK[k].constructor(cap); a.set(BK[k].subarray(0, Math.min(BK[k].length, cap))); BK[k] = a;
+        }
+        const m = new I32(cap * BCAP).fill(-1); m.set(BK.mem.subarray(0, Math.min(BK.mem.length, cap * BCAP))); BK.mem = m;
+        bkCap = cap;
+      }
+      BK.n = n;
+    }
+    I.blocks = BK; I.BM = BM; I.STC = STC; I.BCAP = BCAP;
+    // the host names the blocks: b on side, files x ranks
+    I.block = function (b, side, files, ranks) {
+      bkGrow(b + 1);
+      BK.side[b] = side; BK.files[b] = Math.min(files, 32); BK.ranks[b] = Math.max(1, Math.min(ranks, Math.floor(BCAP / Math.min(files, 32))));
+      BK.init[b] = 0; BK.mode[b] = BM.march; BK.at[b] = 0; BK.fireT[b] = -99; BK.vol[b] = 0; BK.ed[b] = 1e9; BK.typ[b] = -1;
+    };
+    // ...and put a man in his place in it: file f, rank k
+    I.setBlock = function (r, b, f, k) {
+      if (b < 0 || b >= BK.n || !G.anc[r]) return;
+      const F_ = BK.files[b], R_ = BK.ranks[b];
+      if (f >= F_ || k >= R_) return;
+      G.blk[r] = b; G.bfl[r] = f; G.brk0[r] = k; G.brk[r] = k;
+      BK.mem[b * BCAP + f * R_ + k] = r;
+      BK.n0[b]++; BK.nf[b]++;
+      if (BK.typ[b] < 0) BK.typ[b] = G.typ[r];
+      const A = I.types[G.typ[r]].A;
+      G.bsx[r] = (f - (F_ - 1) / 2) * A.fileW; G.bsb[r] = k * A.rankD;
+      BK.init[b] = 0;
+    };
+    function bA(b) { const t = I.types[BK.typ[b]]; return t && t.A ? t.A : ANC.elite; }
+    // the frame off where its men stand (they were laid in their slots)
+    function blockInit(b) {
+      const F_ = BK.files[b], R_ = BK.ranks[b], base = b * BCAP;
+      let h = NaN, sx = 0, sz = 0, n = 0;
+      for (let q = 0; q < F_ * R_; q++) { const r = BK.mem[base + q]; if (r < 0 || !alive(r)) continue; if (h !== h) h = G.heading[r]; }
+      if (h !== h) h = 0;
+      const fx = Math.sin(h), fz = Math.cos(h), lx = fz, lz = -fx;
+      for (let q = 0; q < F_ * R_; q++) {
+        const r = BK.mem[base + q];
+        if (r < 0 || !alive(r)) continue;
+        sx += G.x[r] - lx * G.bsx[r] + fx * G.bsb[r]; sz += G.z[r] - lz * G.bsx[r] + fz * G.bsb[r]; n++;
+      }
+      if (n) { BK.cx[b] = sx / n; BK.cz[b] = sz / n; }
+      BK.fx[b] = fx; BK.fz[b] = fz; BK.wf[b] = h;
+      const A = bA(b);
+      BK.w[b] = A.fileW; BK.d[b] = A.rankD; BK.dep[b] = (R_ - 1) * A.rankD;
+      BK.init[b] = 1;
+    }
+    /* THE NEAREST ENEMY to a point: the presence grid says whether anybody is
+       within R at all (exact), then the body grid's rings, nearest first. */
+    let _nfD = 0;
+    function nearestFoe(side, x, z, R) {
+      _nfD = 1e9;
+      if (!enemyNear(side, x, z, R)) return -1;
+      const g = GE[side ? 0 : 1];
+      const c0x = Math.floor((x - g.x0) * g.ic), c0z = Math.floor((z - g.z0) * g.ic);
+      const maxRing = Math.ceil(R * g.ic) + 1, st = g.start, L = g.list;
+      let best = -1, bd = R * R;
+      for (let ring = 0; ring <= maxRing; ring++) {
+        if (best >= 0 && (ring - 1) * g.cell > Math.sqrt(bd)) break;
+        for (let dz = -ring; dz <= ring; dz++) {
+          const zz = c0z + dz;
+          if (zz < 0 || zz >= g.h) continue;
+          const edge = dz === -ring || dz === ring, step = edge ? 1 : Math.max(1, 2 * ring);
+          for (let dx = -ring; dx <= ring; dx += step) {
+            const xx = c0x + dx;
+            if (xx >= 0 && xx < g.w) {
+              const k = zz * g.w + xx;
+              for (let i = st[k], e = st[k + 1]; i < e; i++) {
+                const o = L[i];
+                const ox = G.x[o] - x, oz = G.z[o] - z, d2 = ox * ox + oz * oz;
+                if (d2 < bd) { bd = d2; best = o; }
+              }
+            }
+            if (!ring) break;
+          }
+        }
+      }
+      _nfD = best >= 0 ? Math.sqrt(bd) : 1e9;
+      return best;
+    }
+    // how many of the line's men of the other side are within R of a point (capped)
+    function hordeNear(side, x, z, R, cap) {
+      const g = GE[side ? 0 : 1];
+      const cx0 = Math.max(0, Math.floor((x - R - g.x0) * g.ic)), cx1 = Math.min(g.w - 1, Math.floor((x + R - g.x0) * g.ic));
+      const cz0 = Math.max(0, Math.floor((z - R - g.z0) * g.ic)), cz1 = Math.min(g.h - 1, Math.floor((z + R - g.z0) * g.ic));
+      const st = g.start, L = g.list, R2 = R * R;
+      let n = 0;
+      for (let cz = cz0; cz <= cz1; cz++) {
+        const b = cz * g.w;
+        for (let i = st[b + cx0], e = st[b + cx1 + 1]; i < e; i++) {
+          const o = L[i];
+          if (!G.anc[o]) continue;
+          const ox = G.x[o] - x, oz = G.z[o] - z;
+          if (ox * ox + oz * oz < R2 && ++n >= cap) return n;
+        }
+      }
+      return n;
+    }
+    // the friendly blocks near each other: a 64 m grid of their fronts, rebuilt twice a second
+    const BG = new Map();
+    let bgAt = -9;
+    function blockGrid() {
+      BG.forEach(function (a) { a.length = 0; });
+      for (let b = 0; b < BK.n; b++) {
+        if (!BK.nf[b] || BK.mode[b] === BM.rout) continue;
+        const k = (Math.floor(BK.cx[b] / 64) + 32768) * 65536 + (Math.floor(BK.cz[b] / 64) + 32768);
+        let a = BG.get(k); if (!a) { a = []; BG.set(k, a); } a.push(b);
+      }
+      bgAt = I.simT;
+    }
+    /* THE BLOCK DECIDES (its own clock: a quarter second in a fight, longer
+       far from one) */
+    function blockTick(b) {
+      const A = bA(b), F_ = BK.files[b], R_ = BK.ranks[b], base = b * BCAP, sd = BK.side[b];
+      if (!BK.init[b]) blockInit(b);
+      const fx = BK.fx[b], fz = BK.fz[b], lx = fz, lz = -fx;
+      // ---- its men: who is still in the line, counted off from the front of each file
+      let nf = 0, stress = 0, err = 0, occ = 0, frontN = 0, engaged = 0;
+      for (let f = 0; f < F_; f++) {
+        let k = 0;
+        for (let k0 = 0; k0 < R_; k0++) { const r = BK.mem[base + f * R_ + k0]; if (r >= 0 && G.life[r] === LIFE.alive && !G.down[r]) k++; }
+        if (k) occ++;
+      }
+      const mode0 = BK.mode[b];
+      // the frontage it wants: fighting order, the shield wall in contact, the testudo
+      const wantW = mode0 === BM.testudo ? A.testW : (mode0 === BM.melee || mode0 === BM.charge) ? A.closeW : A.fileW;
+      const wantD = mode0 === BM.testudo ? A.testD : (mode0 === BM.melee || mode0 === BM.charge) ? A.closeD : A.rankD;
+      BK.w[b] += (wantW - BK.w[b]) * 0.5; BK.d[b] += (wantD - BK.d[b]) * 0.5;
+      const w = BK.w[b], d = BK.d[b];
+      let li = 0, maxK = 0;
+      for (let f = 0; f < F_; f++) {
+        let k = 0;
+        const lat = (li - (occ - 1) / 2) * w;
+        for (let k0 = 0; k0 < R_; k0++) {
+          const r = BK.mem[base + f * R_ + k0];
+          if (r < 0 || G.life[r] !== LIFE.alive || G.down[r]) continue;
+          G.brk[r] = k; G.bsx[r] = lat; G.bsb[r] = k * d;
+          nf++; stress += G.stress[r];
+          if (k === 0) { frontN++; if (G.eng[r]) engaged++; }
+          const gx = BK.cx[b] + lx * lat - fx * k * d, gz = BK.cz[b] + lz * lat - fz * k * d;
+          const ex = G.x[r] - gx, ez = G.z[r] - gz;
+          if (!G.eng[r]) err += Math.sqrt(ex * ex + ez * ez);
+          k++;
+        }
+        if (k) { li++; if (k > maxK) maxK = k; }
+      }
+      BK.nf[b] = nf;
+      BK.dep[b] = Math.max(0, maxK - 1) * d;
+      if (!nf) { BK.mode[b] = BM.rout; return; }
+      BK.err[b] = err / Math.max(1, nf - engaged);
+      // ---- the enemy: the nearest man to its front, and how far
+      const R = 1500;
+      let e = nearestFoe(sd, BK.cx[b], BK.cz[b], R);
+      let ed = _nfD;
+      BK.ed[b] = ed;
+      if (e >= 0) { BK.ex[b] = G.x[e]; BK.ez[b] = G.z[e]; }
+      // ---- its nerve: what it has lost and what its men carry, and the army's
+      const Ar = I.army[sd];
+      const losses = 1 - nf / Math.max(1, BK.n0[b]);
+      const P = losses * 1.15 + stress / nf + (Ar ? Math.max(0, 0.35 - Ar.morale) * 0.9 + (Ar.broken ? 0.5 : 0) : 0);
+      if (mode0 !== BM.rout && (P > A.nerve || (Ar && Ar.broken && ed < 300))) {
+        BK.mode[b] = BM.rout; BK.modeT[b] = I.simT;
+        for (let q = 0; q < F_ * R_; q++) {
+          const r = BK.mem[base + q];
+          if (r >= 0 && G.life[r] === LIFE.alive && !G.down[r]) { G.life[r] = LIFE.routed; G.eng[r] = 0; G.stc[r] = STC.rout; ev(EV.rout, r, -1, 0); }
+        }
+        return;
+      }
+      if (mode0 === BM.rout) return;
+      // ---- where it faces: the enemy nearest its front; far off, the order's point
+      const o = orderOf(-1, sd);
+      let tx = NaN, tz = NaN;
+      if (e >= 0 && ed < 600) { tx = BK.ex[b]; tz = BK.ez[b]; }
+      else if (o.x === o.x) { tx = o.x; tz = o.z; }
+      if (tx === tx) {
+        const dx = tx - BK.cx[b], dz = tz - BK.cz[b];
+        if (dx * dx + dz * dz > 4) BK.wf[b] = Math.atan2(dx, dz);
+      }
+      // ---- what it does
+      let mode = mode0;
+      const fresh = I.simT - BK.fireT[b] < 5;               // missiles (rounds) striking it or cracking past
+      const hold = o.kind === "hold" || (e < 0 && !(o.x === o.x));
+      const pila = A.pilumR > 0 && BK.vol[b] < 2;
+      if (ed < 2.6 || (mode0 === BM.melee && ed < 9)) { mode = BM.melee; BK.freeT[b] = I.simT; }
+      else if (mode0 === BM.melee && I.simT - BK.freeT[b] < 2.5) mode = BM.melee;
+      else if (mode0 === BM.charge && ed < 40) mode = BM.charge;
+      else if (mode0 === BM.volley) {
+        // the second volley 2.5 s after the first, then the charge
+        if (BK.vol[b] < 2 && I.simT - BK.volT[b] > 2.5 && ed < A.pilumR + 8) { BK.vol[b]++; BK.volT[b] = I.simT; }
+        else if (I.simT - BK.volT[b] > 2.0 || ed > A.pilumR + 12) mode = BM.charge;
+      }
+      else if (pila && ed < A.pilumR && (mode0 === BM.quick || mode0 === BM.march || mode0 === BM.testudo)) { mode = BM.volley; BK.vol[b]++; BK.volT[b] = I.simT; }
+      else if (!pila && ed < 30) mode = BM.charge;
+      else if (hold) mode = BM.hold;
+      else if (ed < 80) mode = BM.quick;
+      else if (A.testudo && fresh && ed < 260) mode = BM.testudo;
+      else mode = BM.march;
+      if (mode !== mode0) { BK.mode[b] = mode; BK.modeT[b] = I.simT; }
+      // ---- the relief: a spent front-ranker drops back behind the next man of his file
+      if (mode === BM.melee && A.relief) {
+        for (let f = 0; f < F_; f++) {
+          let a = -1, a0 = -1, c = -1, c0 = -1;
+          for (let k0 = 0; k0 < R_; k0++) {
+            const r = BK.mem[base + f * R_ + k0];
+            if (r < 0 || G.life[r] !== LIFE.alive || G.down[r]) continue;
+            if (a < 0) { a = r; a0 = k0; } else { c = r; c0 = k0; break; }
+          }
+          if (a >= 0 && c >= 0 && G.fat[a] > 0.62 && G.fat[c] < 0.3 && G.swT[a] > 0.4) {
+            BK.mem[base + f * R_ + a0] = c; BK.mem[base + f * R_ + c0] = a;
+            G.brk0[a] = c0; G.brk0[c] = a0; G.eng[a] = 0; G.tgt[a] = -1;
+            I.led.reliefs = (I.led.reliefs || 0) + 1;
+          }
+        }
+      }
+      // ---- room: a friendly block too close beside it is shouldered off; one right ahead is followed, not walked into
+      if (I.simT - bgAt > 0.5) blockGrid();
+      const cx = BK.cx[b], cz = BK.cz[b], hw = occ * w * 0.5 + 1.5, dep = BK.dep[b];
+      const gx0 = Math.floor(cx / 64), gz0 = Math.floor(cz / 64);
+      let px = 0, pz = 0, ahead = false;
+      for (let a = -1; a <= 1; a++) for (let c = -1; c <= 1; c++) {
+        const L = BG.get((gx0 + a + 32768) * 65536 + (gz0 + c + 32768));
+        if (!L) continue;
+        for (let i = 0; i < L.length; i++) {
+          const o2 = L[i];
+          if (o2 === b || BK.side[o2] !== sd) continue;
+          const rx = BK.cx[o2] - cx, rz = BK.cz[o2] - cz;
+          const along = rx * fx + rz * fz, lat = rx * lx + rz * lz;
+          const hw2 = BK.w[o2] * BK.files[o2] * 0.5 + 1.5;
+          const ov = hw + hw2 - Math.abs(lat);
+          if (ov <= 0) continue;
+          if (along > -BK.dep[o2] - 2 && along < dep + 2) {
+            // side by side and overlapping: shoulder apart (half each)
+            const s = lat > 0 ? -1 : 1;
+            px += lx * s * Math.min(ov, 6) * 0.5; pz += lz * s * Math.min(ov, 6) * 0.5;
+          } else if (along > 0 && along < BK.dep[o2] + 8) ahead = true;
+        }
+      }
+      BK.px[b] = px; BK.pz[b] = pz;
+      BK.wcut[b] = ahead && mode !== BM.melee ? 0.25 : 1;
+      // its clock
+      BK.at[b] = I.simT + (ed < 120 || mode === BM.melee ? 0.25 : ed < 450 ? 0.5 : 1.0) * (0.85 + 0.3 * trait(b + 0x70000, (I.simT * 4) | 0));
+    }
+    // the frames move every step: wheel toward the mark, then forward at the block's pace
+    function moveBlocks(dt) {
+      for (let b = 0; b < BK.n; b++) {
+        if (!BK.nf[b]) continue;
+        if (!BK.init[b]) blockInit(b);
+        const mode = BK.mode[b];
+        if (mode === BM.rout) { BK.sp[b] = 0; continue; }
+        const A = bA(b);
+        let h = Math.atan2(BK.fx[b], BK.fz[b]);
+        let dh = BK.wf[b] - h;
+        while (dh > Math.PI) dh -= 6.283185307; while (dh < -Math.PI) dh += 6.283185307;
+        const tr = A.turn * (mode === BM.testudo ? 0.5 : 1) * dt;
+        h += dh > tr ? tr : dh < -tr ? -tr : dh;
+        BK.fx[b] = Math.sin(h); BK.fz[b] = Math.cos(h);
+        let s = mode === BM.march ? A.march : mode === BM.testudo ? A.march * 0.6 : mode === BM.quick ? A.quick :
+          mode === BM.charge ? A.charge : mode === BM.melee ? (BK.ed[b] > 1.7 ? 0.35 : 0) : 0;
+        if (Math.abs(dh) > 0.5) s *= 0.35;                       // wheeling: the outer files have the long way round
+        // a drilled block waits for its men; a mob does not
+        const er = BK.err[b];
+        if (er > 2.2) s *= Math.max(0, 1 - (er - 2.2) / 2.5 * A.drill);
+        s *= BK.wcut[b];
+        // (inside its last stride it stops: it does not walk its front rank onto the enemy)
+        if (mode !== BM.melee && BK.ed[b] < 3) s = Math.min(s, 0.3);
+        BK.sp[b] = s;
+        BK.cx[b] += BK.fx[b] * s * dt + BK.px[b] * Math.min(1, 0.8 * dt);
+        BK.cz[b] += BK.fz[b] * s * dt + BK.pz[b] * Math.min(1, 0.8 * dt);
+      }
+    }
+    /* A MAN OF THE LINE THINKS: whom to fight at his front, his spear. */
+    function ancThink(r, dt) {
+      void dt;
+      if (G.down[r]) { G.eng[r] = 0; downThink(r, dt); return; }
+      if (G.life[r] === LIFE.routed) { G.eng[r] = 0; G.stc[r] = STC.rout; routThink(r); return; }
+      const b = G.blk[r];
+      const mode = b >= 0 ? BK.mode[b] : BM.melee;
+      const near = b < 0 || BK.ed[b] < 45 || mode === BM.melee || mode === BM.charge;
+      // the enemy within a stride or two of him (front ranks; anybody once they are among the ranks)
+      let e = -1, best = 1e9;
+      if (near) {
+        const x = G.x[r], z = G.z[r], sd = G.side[r];
+        const hx = b >= 0 ? BK.fx[b] : Math.sin(G.heading[r]), hz = b >= 0 ? BK.fz[b] : Math.cos(G.heading[r]);
+        const rank = G.brk[r];
+        const R = rank === 0 ? 3.2 : 2.2;
+        forDiscB(x, z, R, function (o) {
+          if (G.side[o] === sd || !alive(o) || (G.ext[o] && G.ext[o] !== EXT.man)) return;
+          const ox = G.x[o] - x, oz = G.z[o] - z, d2 = ox * ox + oz * oz;
+          if (d2 > R * R) return;
+          // in front of him (or anywhere, if he is in among them)
+          const dd = Math.sqrt(d2) || 0.01, fwd = (ox * hx + oz * hz) / dd;
+          let s = d2 * (fwd > 0.2 ? 1 : 2.5) * (G.down[o] ? 6 : 1);
+          if (s < best) { best = s; e = o; }
+        });
+      }
+      if (e >= 0) {
+        if (G.tgt[r] !== e) { G.tgt[r] = e; if (G.swT[r] < 0.35) G.swT[r] = 0.35 + rnd() * 0.5; }
+        G.eng[r] = 1; G.contactT[r] = I.simT;
+      } else { G.eng[r] = 0; G.tgt[r] = -1; }
+      // his spear: in a volley, the front two ranks, each on his own beat
+      if (b >= 0 && mode === BM.volley && G.pil[r] > 0 && G.brk[r] < 2 && G.pvol[r] < BK.vol[b] && !G.eng[r] && G.thrT[r] < I.simT - 1) {
+        G.thrT[r] = I.simT + 0.15 + rnd() * 0.9 + G.brk[r] * 0.35; G.pvol[r] = BK.vol[b];
+      }
+      // what he looks like doing it
+      if (G.thrT[r] > I.simT - 0.6 && G.thrT[r] < I.simT + 2) G.stc[r] = STC.throw;
+      else if (G.eng[r]) G.stc[r] = STC.fight;
+      else if (mode === BM.testudo) {
+        const F_ = b >= 0 ? BK.files[b] : 1, li = G.bsx[r] / Math.max(0.3, BK.w[b]) + (F_ - 1) / 2;
+        G.stc[r] = G.brk[r] === 0 ? STC.wall : (li < 0.6 || li > F_ - 1.6) ? STC.side : STC.roof;
+      } else if (mode === BM.charge) G.stc[r] = STC.charge;
+      else if (mode === BM.melee) G.stc[r] = G.brk[r] < 2 ? STC.wall : STC.carry;
+      else G.stc[r] = STC.carry;
+    }
+    /* HIS HANDS: the spear let go on its beat, the blow when it is his */
+    function ancTrigger(r, dt) {
+      const t = T_(r);
+      if (G.swT[r] > 0) G.swT[r] -= dt;
+      if (G.down[r]) return;
+      if (G.thrT[r] > 0 && I.simT >= G.thrT[r] && G.thrT[r] > I.simT - dt - 1e-6 && G.pil[r] > 0) throwPilum(r, t);
+      const tg = G.tgt[r];
+      if (tg < 0 || !G.eng[r] || !alive(tg)) return;
+      const dx = G.x[tg] - G.x[r], dz = G.z[tg] - G.z[r], d = Math.sqrt(dx * dx + dz * dz);
+      if (d > t.M.reach + 0.62 || G.swT[r] > 0) return;
+      blow(r, tg, t.M, t.A.skill, t.A.strikeT);
+    }
+    /* A RIFLEMAN AT ARM'S LENGTH: empty, or reloading, with a man of the line
+       on him, he fights with the bayonet (and the butt) */
+    function closeFight(r, t, D, dt) {
+      if (G.swT[r] > 0) G.swT[r] -= dt;
+      const tg = G.tgt[r];
+      if (tg < 0 || !G.anc[tg] || !fighting(tg)) return false;
+      if (G.mag[r] > 0 && G.reloadT[r] <= 0) return false;
+      const dx = G.x[tg] - G.x[r], dz = G.z[tg] - G.z[r], d = Math.sqrt(dx * dx + dz * dz);
+      if (d > MELEE.bayonet.reach + 0.6) return false;
+      if (G.swT[r] > 0) return true;
+      G.reloadT[r] = Math.max(G.reloadT[r], 0);
+      blow(r, tg, MELEE.bayonet, 0.25 + 0.45 * D.press, 2.2 - D.press * 0.6);
+      return true;
+    }
+    // a man of the line close to a rifleman: the rifleman knows he is there (no search, no detection)
+    function closeThreat(r) {
+      const x = G.x[r], z = G.z[r], sd = G.side[r];
+      let e = -1, bd = 36;
+      forDiscB(x, z, 6, function (o) {
+        if (G.side[o] === sd || !G.anc[o] || !fighting(o)) return;
+        const ox = G.x[o] - x, oz = G.z[o] - z, d2 = ox * ox + oz * oz;
+        if (d2 < bd) { bd = d2; e = o; }
+      });
+      if (e < 0) return;
+      if (G.tgt[r] !== e) {
+        G.tgt[r] = e; G.acqT[r] = Math.min(G.acqT[r] > 0 ? G.acqT[r] : 0.3, 0.3); G.aimT[r] = 0;
+        G.rngE[r] = 0; G.rngTgt[r] = e;
+      }
+      G.expo[r] = LOOK_ALL[G.post[e]]; G.seenT[r] = I.simT; G.lkx[r] = G.x[e]; G.lkz[r] = G.z[e]; G.lkT[r] = I.simT; G.contactT[r] = I.simT;
+      G.face[r] = Math.atan2(G.x[e] - x, G.z[e] - z);
+      // nobody lies down with a sword over him: he comes up to fight
+      if (G.post[r] === POST.prone && G.postT[r] <= 0 && bd < 9) setPost(r, POST.kneel);
+    }
+    /* WHAT IRON STOPS A POINT. zone: 0 head, 1 chest, 2 belly, 3 a limb;
+       spear: a throwing spear (heavier: it drives through more) */
+    function pointStopped(b, zone, pen, spear) {
+      if (zone === 0) {
+        const h = PLATES[G.helm[b]];
+        if (!h) return false;
+        // the face is open (a third of the head); the shell turns most points that meet it
+        return rnd() < 0.66 * (h.mat === "steel" ? (spear ? 0.6 : 0.8) : (spear ? 0.5 : 0.7));
+      }
+      if (zone === 3) return false;
+      // the hard plate (ceramic, steel or PE, front and back) over the upper chest: stops any blade or spear
+      const P = PLATES[G.plF[b]];
+      if (zone === 1 && P && P.rating >= 3 && rnd() < 0.55) return true;
+      const So = PLATES[G.plSo[b]];
+      if (So) {
+        // iron bands or mail: a cut is turned, a thrust may get through; aramid is not stab-rated
+        const p = So.mat === "steel" ? 1 - pen * (spear ? 1.3 : 1) : (spear ? 0.25 : 0.35);
+        return rnd() < Math.max(0, Math.min(0.95, p * (zone === 2 ? 0.75 : 1)));
+      }
+      return false;
+    }
+    // where a thrust lands on a standing man (over the shield or under it, or round it)
+    function thrustZone() { const u = rnd(); return u < 0.1 ? 0 : u < 0.6 ? 1 : u < 0.8 ? 2 : 3; }
+    function woundAt(b, zone, M, by, spearK) {
+      const k = spearK || 1;
+      let now_ = 0, bleed = 0;
+      if (zone === 0) { now_ = rnd() < 0.35 ? 2 : 0.7 + rnd() * 0.5; bleed = 0.02; }
+      else if (zone === 1) { now_ = (M.now[0] + rnd() * (M.now[1] - M.now[0])) * k; bleed = M.bleed * 1.2; }
+      else if (zone === 2) { now_ = (M.now[0] * 0.8 + rnd() * (M.now[1] - M.now[0]) * 0.7) * k; bleed = M.bleed * 1.4; }
+      else { now_ = (0.18 + rnd() * 0.22) * k; bleed = M.bleed * 0.4; }
+      hurt(b, Math.min(2, now_), bleed, by, false);
+    }
+    /* THE BLOW. a strikes b with M at skill sk: the shield, the iron, the wound */
+    function blow(a, b, M, sk, beat) {
+      const fa = G.fat[a];
+      G.swT[a] = beat * (0.7 + 0.6 * rnd()) * (1 + fa * 0.8);
+      G.fat[a] = Math.min(1, fa + 0.035);
+      I.led.blows = (I.led.blows || 0) + 1;
+      // he has to land it at all: a moving, guarded man (his skill against the other's)
+      const tb = T_(b);
+      const skB = tb.anc ? tb.A.skill : 0.2 + 0.3 * tb.D.press;
+      const aim = sk * (1 - 0.45 * fa) * (0.55 + 0.45 * Math.max(0.2, G.cap[a]));
+      if (rnd() > 0.35 + 0.55 * aim - 0.2 * skB * (1 - G.fat[b])) { ev(EV.strike, a, b, 0); return; }
+      // the shield: a blow he sees coming lands on it
+      if (G.shd[b] && tb.SH && !G.down[b]) {
+        const hb = G.heading[b], dx = G.x[a] - G.x[b], dz = G.z[a] - G.z[b], dd = Math.hypot(dx, dz) || 1;
+        const facing = (Math.sin(hb) * dx + Math.cos(hb) * dz) / dd;
+        if (facing > 0.2 && rnd() < tb.SH.block * (0.55 + 0.45 * skB) * (1 - 0.35 * G.fat[b])) {
+          G.fat[b] = Math.min(1, G.fat[b] + 0.015);
+          ev(EV.strike, a, b, 0.5);
+          return;
+        }
+      }
+      I.led.blowsIn = (I.led.blowsIn || 0) + 1;
+      if (G.down[b]) { woundAt(b, 1, M, a, 1); ev(EV.strike, a, b, 1); return; }
+      const z = thrustZone();
+      if (pointStopped(b, z, M.pen, false)) { G.stress[b] += 0.05; ev(EV.strike, a, b, 0.5); return; }
+      woundAt(b, z, M, a, 1);
+      ev(EV.strike, a, b, 1);
+    }
+
+    /* ---- THE PILUM, flown ---- */
+    const JF = 12;
+    // [0 x, 1 y, 2 z, 3 vx, 4 vy, 5 vz, 6 by, 7 side, 8 heavy, 9 t0, 10 _, 11 _]
+    let JV = new F(512 * JF), nJ = 0;
+    const SF = 7, SCAP = 6000;
+    // the spears that came down: [x, y, z, dx, dy, dz, kind (0 ground, 1 in a man, 2 in a dropped shield)]
+    I.stuck = new F(SCAP * SF); I.nStuck = 0; I.SF = SF; I.SCAP = SCAP;
+    I.javs = function () { return { buf: JV, n: nJ, F: JF }; };
+    function stick(x, y, z, dx, dy, dz, kind) {
+      const q = (I.nStuck % SCAP) * SF, S2 = I.stuck;
+      S2[q] = x; S2[q + 1] = y; S2[q + 2] = z; S2[q + 3] = dx; S2[q + 4] = dy; S2[q + 5] = dz; S2[q + 6] = kind;
+      I.nStuck++;
+    }
+    function throwPilum(r, t) {
+      G.thrT[r] = -99;
+      const x = G.x[r], z = G.z[r], sd = G.side[r];
+      // his mark: the man he is facing, nearest the line of his file, inside his reach
+      const b = G.blk[r];
+      const hx = b >= 0 ? BK.fx[b] : Math.sin(G.heading[r]), hz = b >= 0 ? BK.fz[b] : Math.cos(G.heading[r]);
+      let e = -1, bs = 1e9;
+      forDiscB(x + hx * 16, z + hz * 16, 18, function (o) {
+        if (G.side[o] === sd || !fighting(o)) return;
+        const ox = G.x[o] - x, oz = G.z[o] - z, d2 = ox * ox + oz * oz;
+        if (d2 > 34 * 34 || d2 < 9) return;
+        const along = ox * hx + oz * hz;
+        if (along < 3) return;
+        const lat = Math.abs(ox * hz - oz * hx);
+        const s = lat * 3 + Math.sqrt(d2);
+        if (s < bs) { bs = s; e = o; }
+      });
+      if (e < 0) return;                                  // nobody in reach: he keeps it
+      G.pil[r]--;
+      const heavy = G.pil[r] >= 1 ? 1 : 0;               // the heavy one goes first (he carried two)
+      const A = t.A;
+      // where he aims: the man's middle, led a little for a mover
+      let ax = G.x[e] + G.vx[e] * 0.9, az = G.z[e] + G.vz[e] * 0.9;
+      const ay = G.y[e] + AIMY[G.post[e]];
+      const oy = G.y[r] + 1.75;
+      const ox = x + hx * 0.3, oz = z + hz * 0.3;
+      let dx = ax - ox, dz = az - oz;
+      const D0 = Math.sqrt(dx * dx + dz * dz) || 1;
+      dx /= D0; dz /= D0;
+      // the speed and the arc that carries it there (the low one), with his errors
+      const err = (1 - A.skill * 0.6) * (1 + 0.6 * Math.min(2, G.stress[r]));
+      const v = (heavy ? 18.5 : 22) * (1 + gauss() * 0.04);
+      const dist = D0 * (1 + gauss() * 0.07 * err);
+      const g9 = 9.81, dy = ay - oy;
+      // tan(th) for a projectile through (dist, dy): the lower root
+      const v2 = v * v, disc = v2 * v2 - g9 * (g9 * dist * dist + 2 * dy * v2);
+      let th = disc > 0 ? Math.atan((v2 - Math.sqrt(disc)) / (g9 * dist)) : 0.7;
+      th += gauss() * 0.025 * err;
+      const yaw = Math.atan2(dx, dz) + gauss() * 0.03 * err;
+      if ((nJ + 1) * JF > JV.length) { const g2 = new F(JV.length * 2); g2.set(JV); JV = g2; }
+      const q = nJ * JF;
+      JV[q] = ox; JV[q + 1] = oy; JV[q + 2] = oz;
+      JV[q + 3] = Math.sin(yaw) * Math.cos(th) * v; JV[q + 4] = Math.sin(th) * v; JV[q + 5] = Math.cos(yaw) * Math.cos(th) * v;
+      JV[q + 6] = r; JV[q + 7] = sd; JV[q + 8] = heavy; JV[q + 9] = I.simT;
+      nJ++;
+      I.led.pila = (I.led.pila || 0) + 1;
+      ev(EV.throw, r, e, heavy);
+    }
+    // the closest the segment p0->p1 comes to the vertical axis of man b, over his height
+    const _ph = { hit: -1, y: 0, s: 0 };
+    let _pj = 0, _jx0 = 0, _jy0 = 0, _jz0 = 0, _jx1 = 0, _jy1 = 0, _jz1 = 0, _jside = 0, _jby = -1;
+    function visitPil(o) {
+      if (o === _jby || G.side[o] === _jside || !alive(o)) return;
+      if (G.ext[o] && G.ext[o] !== EXT.man) return;
+      const sx = _jx1 - _jx0, sz = _jz1 - _jz0, L2 = sx * sx + sz * sz || 1e-6;
+      let s = ((G.x[o] - _jx0) * sx + (G.z[o] - _jz0) * sz) / L2;
+      s = s < 0 ? 0 : s > 1 ? 1 : s;
+      const px = _jx0 + sx * s - G.x[o], pz = _jz0 + sz * s - G.z[o];
+      if (px * px + pz * pz > 0.27 * 0.27) return;
+      const y = _jy0 + (_jy1 - _jy0) * s - G.y[o];
+      const top = G.down[o] ? 0.35 : G.post[o] === POST.prone ? 0.35 : G.post[o] === POST.kneel ? 1.2 : 1.8;
+      if (y < 0.02 || y > top) return;
+      if (_ph.hit < 0 || s < _ph.s) { _ph.hit = o; _ph.y = y; _ph.s = s; }
+    }
+    function stepJav(dt) {
+      let w = 0;
+      for (let i = 0; i < nJ; i++) {
+        const q = i * JF;
+        const x0 = JV[q], y0 = JV[q + 1], z0 = JV[q + 2];
+        const vx = JV[q + 3], vz = JV[q + 5];
+        const vy = JV[q + 4] - 9.81 * dt;
+        const x1 = x0 + vx * dt, y1 = y0 + (JV[q + 4] + vy) * 0.5 * dt, z1 = z0 + vz * dt;
+        JV[q + 4] = vy;
+        _jx0 = x0; _jy0 = y0; _jz0 = z0; _jx1 = x1; _jy1 = y1; _jz1 = z1; _jside = JV[q + 7]; _jby = JV[q + 6] | 0;
+        _ph.hit = -1;
+        const mx = (x0 + x1) * 0.5, mz = (z0 + z1) * 0.5, half = Math.hypot(x1 - x0, z1 - z0) * 0.5 + 0.4;
+        forCells(mx, mz, half, ++hbStamp, visitPil);
+        const sp = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
+        if (_ph.hit >= 0) { pilumHit(q, _ph.hit, _ph.y, sp); continue; }
+        const gy = hAt(x1, z1);
+        if (y1 <= gy || I.simT - JV[q + 9] > 6) {
+          // into the ground at its angle, a third of its length in
+          stick(x1, gy, z1, vx / sp, vy / sp, vz / sp, 0);
+          continue;
+        }
+        JV[q] = x1; JV[q + 1] = y1; JV[q + 2] = z1;
+        if (w !== i) JV.copyWithin(w * JF, q, q + JF);
+        w++;
+      }
+      nJ = w;
+    }
+    function pilumHit(q, b, y, sp) {
+      const by = JV[q + 6] | 0, heavy = JV[q + 8] > 0.5;
+      const dx = JV[q + 3] / sp, dy = JV[q + 4] / sp, dz = JV[q + 5] / sp;
+      I.led.pilaHit = (I.led.pilaHit || 0) + 1;
+      // a man of the line with his shield up, facing it, the point at shield height: it takes it
+      const tb = T_(b);
+      if (G.shd[b] && tb.SH && !G.down[b]) {
+        const hb = G.heading[b], facing = -(Math.sin(hb) * dx + Math.cos(hb) * dz);
+        const sy = G.post[b] === POST.kneel ? -0.45 : 0;
+        if (facing > 0.25 && y > tb.SH.y0 + sy - 0.05 && y < tb.SH.y0 + tb.SH.h + sy + (G.stc[b] === STC.roof || G.stc[b] === STC.wall ? 0.6 : 0.1)) {
+          // the head goes through the boards and hangs there, the shank bent: he lets the shield go
+          if (rnd() < (heavy ? 0.75 : 0.55)) {
+            G.shd[b] = 0;
+            ev(EV.shield, b, by, heavy ? 1 : 0);
+            stick(G.x[b] + Math.sin(hb) * 0.6, G.y[b], G.z[b] + Math.cos(hb) * 0.6, dx, dy, dz, 2);
+            // ...and sometimes on into the arm behind it
+            if (rnd() < 0.12) hurt(b, 0.2 + rnd() * 0.15, 0.01, by, false);
+          } else stick(G.x[b] - dx * 0.8, hAt(G.x[b] - dx * 0.8, G.z[b] - dz * 0.8), G.z[b] - dz * 0.8, dx * 0.4, -0.9, dz * 0.4, 0);
+          G.stress[b] += 0.03;
+          return;
+        }
+      }
+      // the man: where it strikes him, and what he wears there
+      const top = G.post[b] === POST.kneel ? 1.2 : G.post[b] === POST.prone || G.down[b] ? 0.35 : 1.8;
+      const u = y / top;
+      const zone = G.post[b] === POST.prone || G.down[b] ? (rnd() < 0.5 ? 1 : 3) : u > 0.86 ? 0 : u > 0.58 ? 1 : u > 0.46 ? 2 : 3;
+      if (pointStopped(b, zone, heavy ? 0.6 : 0.45, true)) {
+        G.supp[b] += 0.6; G.stress[b] += 0.08;
+        stick(G.x[b] - dx * 0.5, hAt(G.x[b], G.z[b]), G.z[b] - dz * 0.5, dx * 0.5, -0.85, dz * 0.5, 0);
+        return;
+      }
+      woundAt(b, zone, PILUM_M, by, heavy ? 1.15 : 1);
+      stick(G.x[b], G.y[b] + y, G.z[b], dx, dy, dz, 1);
+    }
+    const PILUM_M = { reach: 0, now: [0.55, 0.95], bleed: 0.05, pen: 0.55 };
+
+    /* ---- the man of the line moves: to his slot in the frame, or to the man he is fighting ---- */
+    function ancMove(r, dt) {
+      if (G.bleed[r] > 0) {
+        G.cap[r] -= G.bleed[r] * dt;
+        G.hp[r] = Math.max(0, G.cap[r] * 100);
+        if (G.cap[r] <= 0) { kill(r, -1); return; }
+        if (!G.down[r] && G.cap[r] < 0.5) downMan(r, -1);
+      }
+      if (G.down[r]) { G.vx[r] = 0; G.vz[r] = 0; return; }
+      const b = G.blk[r];
+      const routed = G.life[r] === LIFE.routed;
+      let gx = G.gx[r], gz = G.gz[r], base = 0, top = SPEED.run, fh = NaN;
+      const eng = G.eng[r] && G.tgt[r] >= 0 && alive(G.tgt[r]);
+      if (!routed && b >= 0) {
+        const fx = BK.fx[b], fz = BK.fz[b];
+        gx = BK.cx[b] + fz * G.bsx[r] - fx * G.bsb[r];
+        gz = BK.cz[b] - fx * G.bsx[r] - fz * G.bsb[r];
+        base = BK.sp[b];
+        fh = Math.atan2(fx, fz);
+        const md = BK.mode[b];
+        if (md === BM.charge) top = bA(b).charge * 1.1;
+        if (eng) {
+          // into reach of his man, no further than a couple of strides off his place
+          const tg = G.tgt[r], tx = G.x[tg] - G.x[r], tz = G.z[tg] - G.z[r], td = Math.sqrt(tx * tx + tz * tz) || 0.01;
+          const stand = T_(r).M.reach + 0.42;
+          let ex = G.x[tg] - tx / td * stand, ez = G.z[tg] - tz / td * stand;
+          const ox = ex - gx, oz = ez - gz, ol = Math.sqrt(ox * ox + oz * oz);
+          const lim = G.brk[r] === 0 ? 2.8 : 1.6;
+          if (ol > lim) { ex = gx + ox / ol * lim; ez = gz + oz / ol * lim; }
+          gx = ex; gz = ez;
+          fh = Math.atan2(tx, tz);
+        }
+        if (G.fat[r] > 0) G.fat[r] = Math.max(0, G.fat[r] - (eng ? 0.002 : 0.02) * dt);
+      } else if (routed) { top = SPEED.run * (0.95 + 0.1 * trait(r, 0x40)); base = top; }
+      const dx = gx - G.x[r], dz = gz - G.z[r], d = Math.sqrt(dx * dx + dz * dz);
+      if (d < 0.04) {
+        G.vx[r] = 0; G.vz[r] = 0;
+        if (fh === fh) G.heading[r] = fh;
+        return;
+      }
+      let sp = Math.min(top, base + 1.6 * d) * (0.55 + 0.45 * Math.min(1, G.cap[r] / 0.8));
+      if (G.mv[r] !== MOVE.walk) G.mv[r] = MOVE.walk;
+      let st = Math.min(d, sp * dt);
+      let nx = dx / d, nz = dz / d;
+      // nobody walks into the man in front of him: an enemy within a body's width ahead stops the stride
+      if (!routed && (eng || (b >= 0 && BK.ed[b] < 6))) {
+        const px = G.x[r] + nx * st, pz = G.z[r] + nz * st, sd = G.side[r];
+        let blocked = false;
+        forCells(px, pz, 0.75, ++hbStamp, function (o) {
+          if (o === r || G.side[o] === sd || !alive(o) || G.down[o]) return false;
+          const ox = G.x[o] - px, oz = G.z[o] - pz;
+          if (ox * ox + oz * oz < 0.62 * 0.62 && ox * nx + oz * nz > -0.1) { blocked = true; return true; }
+          return false;
+        });
+        if (blocked) { st = 0; }
+      }
+      G.vx[r] = st > 0 ? nx * sp : 0; G.vz[r] = st > 0 ? nz * sp : 0;
+      G.x[r] += nx * st; G.z[r] += nz * st;
+      G.y[r] = hAt(G.x[r], G.z[r]);
+      // he faces his block's front (or his man); only a man running to catch up looks where he goes
+      G.heading[r] = (routed || (d > 3 && !eng) || fh !== fh) ? Math.atan2(dx, dz) : fh;
+    }
+
     /* ============================================================ THE STEP */
     let stepN = 0;
     const SQ_DT = 0.5;
@@ -2234,9 +3078,18 @@
           SA[q] = simT0 + SQ_DT * (0.8 + 0.4 * trait(q + 0x40000, (simT0 * 2) | 0));
         }
       }
+      // THE BLOCKS of the line of battle, each on its own clock
+      if (BK.n) {
+        const simT0 = I.simT;
+        for (let b = 0; b < BK.n; b++) {
+          if (!BK.nf[b] || simT0 < BK.at[b]) continue;
+          if (BK.at[b] <= 0) { BK.at[b] = simT0 + 0.3 * trait(b + 0x70000, 0x5B1); continue; }
+          blockTick(b);
+        }
+      }
       const t2 = now(); I.ms.squad += t2 - t1;
       // the men: his think on his own clock, then his trigger
-      const LF = G.life, TA = G.thinkAt, TG = G.tgt, RT = G.reloadT, LK = G.lkT, EX = G.ext, simT = I.simT;
+      const LF = G.life, TA = G.thinkAt, TG = G.tgt, RT = G.reloadT, LK = G.lkT, EX = G.ext, AN = G.anc, simT = I.simT;
       /* THE ORDER MEN ARE WALKED IN ALTERNATES, step by step. Inside one step
          the first man walked acts on a world the second has not acted in yet;
          walked always low row to high, the side whose rows were laid first won
@@ -2252,11 +3105,14 @@
           think(r, step);
           TA[r] = simT + step * (0.9 + 0.2 * trait(r, (simT * 4) | 0));
         }
+        if (AN[r]) { if (l === LIFE.alive) ancTrigger(r, dt); continue; }
         if (l !== LIFE.alive || (TG[r] < 0 && RT[r] <= 0 && simT - LK[r] > 10)) continue;
         trigger(r, dt);
       }
       const t4 = now(); I.ms.think += t4 - t2;
+      if (BK.n) moveBlocks(dt);
       moveAll(dt);
+      if (nJ) stepJav(dt);
       resolveRounds();
       armyTick();
       I.ms.total += now() - T0;
@@ -2309,6 +3165,26 @@
       return { simT: I.simT, stats: I.stats, led: I.led, ms: I.ms, rounds: nR };
     };
     I.roundsInFlight = function () { return nR; };
+    // the line of battle at a glance: blocks by state, men in it, spears in the air and down
+    I.lineAudit = function () {
+      const by = {}, names = Object.keys(BM);
+      let men = 0, shields = 0, pila = 0, eng = 0;
+      for (let b = 0; b < BK.n; b++) {
+        if (!BK.nf[b]) continue;
+        const k = names[BK.mode[b]];
+        by[k] = (by[k] || 0) + 1;
+        men += BK.nf[b];
+      }
+      for (let r = 0, n = I.nRows || 0; r < n; r++) {
+        if (!G.anc[r] || G.life[r] !== LIFE.alive) continue;
+        if (G.shd[r]) shields++;
+        pila += G.pil[r];
+        if (G.eng[r]) eng++;
+      }
+      return { blocks: by, men: men, shields: shields, pila: pila, engaged: eng, inFlight: nJ, stuck: Math.min(I.nStuck, SCAP),
+        thrown: I.led.pila || 0, pilaHit: I.led.pilaHit || 0, blows: I.led.blows || 0, blowsIn: I.led.blowsIn || 0,
+        reliefs: I.led.reliefs || 0, shieldHits: I.led.shieldHits || 0, fallbacks: I.led.fallbacks || 0 };
+    };
     return I;
   }
   /* WHAT HE WEARS, as armour: his nation's kit row (countries.js `kit`, or
@@ -2323,6 +3199,6 @@
     return CBZ.armour.kitSpec(N, ["plates", "soft", "helmet"], trn === "pro" ? "second" : null);
   }
   CBZ.battleInfantry = { create: create, DOCTRINE: DOCTRINE, TRN_IDS: TRN_IDS, EV: EV, POST: POST, LIFE: LIFE, MOVE: MOVE, SHOT_F: SHOT_F,
-    EYE: EYE, MUZ: MUZ, kitFor: kitFor, EXT: EXT };
+    EYE: EYE, MUZ: MUZ, kitFor: kitFor, EXT: EXT, ANC: ANC, MELEE: MELEE, SHIELDS: SHIELDS, STC: STC, BM: BM };
   if (typeof module !== "undefined" && module.exports) module.exports = CBZ.battleInfantry;
 })();

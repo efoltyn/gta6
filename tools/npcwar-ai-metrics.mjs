@@ -26,7 +26,7 @@
                       of it
      idle             man-seconds with a visible mark inside 70 m (a rifle's reach),
                       not reloading, not moving, not fired for 5 s
-   plus the outcome: who won, how long, dead / fled / surrendered per side,
+   plus the outcome: who won, how long, dead / fled per side,
    rounds per kill. Animals and vehicles are not scored on these (they are
    not soldiers); the men facing them are.
 
@@ -127,7 +127,7 @@ async function measure(C, seed) {
     // a man down in cover putting rounds over the top (ai/squad.js blindFire)
     // is doing it on purpose: counted, but not as a shot at nothing
     if (m._blindShot || (r && r.mode === "area")) M.blindFire = (M.blindFire || 0) + 1;   // (and the arms layer's suppressive fire into a spot)
-    else if (!tgt || tgt.dead || tgt.fled || tgt.surrendered || tgt.downed || !sb.eyeLos(m, tgt)) { M.blindShots++; if (m.vehicle) M.blindVeh = (M.blindVeh || 0) + 1; }
+    else if (!tgt || tgt.dead || tgt.fled || tgt.downed || !sb.eyeLos(m, tgt)) { M.blindShots++; if (m.vehicle) M.blindVeh = (M.blindVeh || 0) + 1; }
     else if (tgt.vehicle && !m.vehicle && tgt.def && tgt.def.stats && tgt.def.stats.armour && (tgt.def.stats.armour.side || 0) > 30) M.blindShots++;
     if (sb.mateInLane(m, tgt)) M.throughMate++;
     return fs0.apply(this, arguments);
@@ -168,7 +168,7 @@ async function measure(C, seed) {
       const v = md / DT;
       const hit = m.hp < P.hp - 0.01;
       const covered = m.slot === "cover" || m.slot === "peek" || (m.slot === "hull" && m.hull) || m.inCover || m.stance === "prone";
-      const out = m.routed || m.downed || m.surrendered || m.dragging;
+      const out = m.routed || m.downed || m.dragging;
       if (!out && contact) {
         M.manMin += DT / 60;
         if (v > 1 && m.stance !== "prone" && m.stance !== "crouch" && (m.supp || 0) > 0.4 && !covered && !m.hunt) M.exposedAdvance += DT;
@@ -210,7 +210,7 @@ async function measure(C, seed) {
   const mm = Math.max(0.01, M.manMin);
   return {
     name: C.name, over: a.over, winner: a.winner, secs: Math.round(a.simT),
-    dead: T ? T.dead : null, fled: T ? T.fled : null, surrendered: tac ? tac.surrendered : null,
+    dead: T ? T.dead : null, fled: T ? T.fled : null,
     exposedAdvance: +(M.exposedAdvance / mm).toFixed(2),       // s per man-minute
     standShot: +(M.standShot / mm).toFixed(2),
     bunching: +(M.bunchS / Math.max(1, M.contactS) * 100).toFixed(1),   // % of samples
@@ -239,9 +239,8 @@ for (const C of CASES) {
   for (let k = 0; k < SEEDS; k++) {
     const q = await measure(C, k);
     if (q.err) { r = q; break; }
-    const sr = q.surrendered && (q.surrendered.red + q.surrendered.blue) ? " " + q.surrendered.red + "/" + q.surrendered.blue + " surr" : "";
     outs.push((q.over ? q.winner : "none") + " " + q.secs + "s " + q.dead.red + "/" + q.dead.blue + " dead" +
-      (q.fled.red + q.fled.blue ? " " + q.fled.red + "/" + q.fled.blue + " fled" : "") + sr);
+      (q.fled.red + q.fled.blue ? " " + q.fled.red + "/" + q.fled.blue + " fled" : ""));
     if (!r) r = Object.assign({}, q);
     else for (const k2 of KEYS) r[k2] += q[k2];
     if (k === SEEDS - 1) for (const k2 of KEYS) r[k2] = +(r[k2] / SEEDS).toFixed(2);

@@ -118,18 +118,17 @@ function ergDress(id, cx, cz, gap, g) {
   CBZ.battleDress.begin(ctx);
   try {
     /* FORWARD OUTPOSTS: on the sand and the snow, a bulldozed berm with two
-       foxholes behind it, out in front of each side's line and off its axis
-       (a position the attackers must take or pass). Not ACROSS the start
-       lines: measured, a bank in front of a kneeling line blinds it (its eye
-       is under the bank) and the held exchange fell from 30 to 0.7 on the
-       fields. Earthworks are ground, so they go in before anything else.
-       ?dig=0 leaves them out. */
+       foxholes behind it and a gun corner (dress.js outpost), out in front
+       of each side's line and off its axis (a position the attackers must
+       take or pass). Not ACROSS the start lines: measured, a bank in front
+       of a kneeling line blinds it (its eye is under the bank) and the held
+       exchange fell from 30 to 0.7 on the fields. Earthworks are ground, so
+       they go in before anything else. ?dig=0 leaves them out. */
     if ((surface === "sand" || surface === "snow") && Q.get("dig") !== "0") {
       for (const side of [-1, 1]) {
         const x = cx + side * (gap / 2 - 22), z = cz + (side < 0 ? -40 : 38);
-        CBZ.battleGround.berm(x, z - 14, x, z + 14, surface === "sand" ? 1.5 : 1.3, 3.2);
-        CBZ.battleGround.pit(x + side * 4, z - 6, 1.1, 1.2);
-        CBZ.battleGround.pit(x + side * 4, z + 6, 1.1, 1.2);
+        // red (west) looks east (+x), blue looks west
+        CBZ.battleDress.outpost(x, z, side < 0 ? Math.PI / 2 : -Math.PI / 2, surface);
       }
     }
     if (surface === "grass") CBZ.battleFields.build(ctx);
@@ -138,9 +137,13 @@ function ergDress(id, cx, cz, gap, g) {
     CBZ.battleDress.open(ctx);
   } catch (e) { console.warn("[battle] ground dressing failed:", e); }
 }
-/* A RAISED VENUE / THE DOWNTOWN: cover where the venue left open ground. */
+/* THE DOWNTOWN gets what a fought-over city has: burnt cars at the kerbs,
+   barricades across some streets, sandbag nests at the corners a defence
+   holds (dress.js city). A RAISED VENUE gets nothing added: the base, the
+   airport, the harbour, the seat of state and the speedway are the real
+   places, and the shipping containers, rubble heaps, hesco and sandbag
+   walls this used to scatter over their aprons were props on a stage. */
 function venueDress(id, cx, cz, gap, g) {
-  if (id === "arena") return;          // the yard is already a yard
   const keepOut = startClearings(cx, cz, gap);
   const blocked = function (x, z, r) {
     if (blockedAt(x, z)) return true;
@@ -150,18 +153,11 @@ function venueDress(id, cx, cz, gap, g) {
     }
     return false;
   };
-  const ctx = { id: id, cx: cx, cz: cz, gap: gap, groundAt: g, keepOut: keepOut, blocked: blocked, seed: 5, theme: "apron", tol: 0.5 };
-  CBZ.battleDress.begin(ctx);
-  try {
-    if (id === "city" && town && town.roads) { ctx.roads = town.roads; ctx.reach = gap * 0.5 + 110; CBZ.battleDress.city(ctx); }
-    else {
-      /* the cover WE add to a venue goes in turned pairs about the start
-         lines' centre (erg.js FOLD), each pair only where both spots are
-         free; the venue's own walls are the real place and stay as built */
-      FOLD.cx = cx; FOLD.cz = cz; FOLD.src = -1; FOLD.on = true;
-      try { CBZ.battleDress.open(ctx); } finally { FOLD.on = false; }
-    }
-  } catch (e) { console.warn("[battle] venue dressing failed:", e); }
+  const ctx = { id: id, cx: cx, cz: cz, gap: gap, groundAt: g, keepOut: keepOut, blocked: blocked, seed: 5, theme: "urban", tol: 0.5,
+    roads: town && town.roads, reach: gap * 0.5 + 110 };
+  CBZ.battleDress.begin(ctx);                 // every map: the pools and the context, even where nothing is added
+  if (id !== "city" || !town || !town.roads) return;
+  try { CBZ.battleDress.city(ctx); } catch (e) { console.warn("[battle] venue dressing failed:", e); }
 }
 
 let MEASURED = null;        // what the heightfield found, for the audit
@@ -389,8 +385,9 @@ function buildMap(id) {
     if (town && town.rect) {
       // a WIDE apron and no water: the downtown is inland, and the sea plate
       // this map used to carry was the thing fighting the road for the depth
-      // buffer. Ground that runs out to the fog is the honest answer here.
-      apron(town.rect.minX - 900, town.rect.maxX + 900, town.rect.minZ - 900, town.rect.maxZ + 900, 0x555a61);
+      // buffer. Ground that runs out to the fog is the honest answer here:
+      // bare earth and scrub where the streets end, not a poured slab
+      apron(town.rect.minX - 900, town.rect.maxX + 900, town.rect.minZ - 900, town.rect.maxZ + 900, 0x6a6353);
       spawners = {
         red: streetSpawner(town.roads, cx, cz, -1, gap),
         blue: streetSpawner(town.roads, cx, cz, 1, gap),

@@ -54,7 +54,8 @@ scenario(1, "the war room: equal riflemen meet and it ends", async () => {
   check(!!W.B(), "the page booted and published __battle");
   const a0 = W.B().audit();
   check(a0.started, "the war started without the war room (?auto=1)");
-  const a = run(W, 240);
+  // (a firefight between equals is minutes, not seconds: core/infantry.js DOCTRINE.fear)
+  const a = run(W, 900);
   check(a.over, "it ended (" + a.simT + " s, winner " + a.winner + ", red " + a.red + " blue " + a.blue + ")");
   check(a.stats.red.shots > 0 && a.stats.blue.shots > 0, "both lines fired (" + a.stats.red.shots + "/" + a.stats.blue.shots + ")");
   // the weapons' own ledger (src/battle/fire.js): ranges, organs, penetrations
@@ -261,7 +262,9 @@ scenario(10, "the ground: cover for the host, earthworks, craters, broken cover"
   const a0 = W.B().audit();
   const T = a0.terrain || {};
   check(T.cover && T.cover.points > 200 && T.cover.terrain > 50, "the dunes give cover points (" + JSON.stringify(T.cover) + ")");
-  check(T.dress && T.dress.placed > 10, "and real objects to fight from (" + JSON.stringify(T.dress) + ")");
+  // the dug-in positions: a hesco gun corner and a sandbag return a side (plus
+  // whatever rock the pans carry); the old scatter of sedans and barriers is gone
+  check(T.dress && T.dress.placed >= 4 && T.dress.hesco >= 2 && T.dress.sandbags >= 2, "and the outposts' real objects to fight from (" + JSON.stringify(T.dress) + ")");
   run(W, 1);                                     // the armies come in over the first frames
   const HOST = vm.runInContext("HOST", W.sb), MAP = vm.runInContext("MAP", W.sb);
   check(typeof HOST.coverNear === "function" && typeof HOST.coverFrom === "function", "the host interface carries coverNear / coverFrom");
