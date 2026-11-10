@@ -762,7 +762,12 @@ function ergSkin(world) {
       sh.uniforms.uHoleW = { value: new THREE.Vector2(DUNE.wx, DUNE.wz) };
       sh.vertexShader = "varying vec3 vHoleW;\n" + sh.vertexShader.replace("#include <project_vertex>",
         "#include <project_vertex>\nvHoleW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
-      sh.fragmentShader = "varying vec3 vHoleW;\nuniform vec3 uHole;\nuniform vec2 uHoleW;\n" + sh.fragmentShader.replace("void main() {",
+      sh.fragmentShader = "varying vec3 vHoleW;\nuniform vec3 uHole;\nuniform vec2 uHoleW;\n" +
+        "float ergH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n" +
+        "float ergN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);" +
+        " return mix(mix(ergH(i), ergH(i + vec2(1.0, 0.0)), f.x), mix(ergH(i + vec2(0.0, 1.0)), ergH(i + vec2(1.0, 1.0)), f.x), f.y); }\n" +
+        "float ergF(vec2 p) { float a = 0.5, s = 0.0; for (int k = 0; k < 4; k++) { s += a * ergN(p); p = p * 2.03 + vec2(17.0, 9.0); a *= 0.5; } return s / 0.9375; }\n" +
+        sh.fragmentShader.replace("void main() {",
         "void main() {\n { vec2 d = vHoleW.xz - uHole.xy; vec2 q = vec2(dot(d, uHoleW), dot(d, vec2(-uHoleW.y, uHoleW.x)));\n" +
         "   if (abs(q.x) < uHole.z && abs(q.y) < uHole.z) discard; }")
         // the erg beyond the skin wears the skin's sand, so the rim has no seam
@@ -776,8 +781,25 @@ function ergSkin(world) {
           // kilometres so it is not one flat tone; the mountains are the same stone, darker.
           (P.surface === "sand" ? "\n{ float mt = smoothstep(20.0, 150.0, vHoleW.y);" +
             " vec3 sc = vec3(" + (function () { const c = new THREE.Color(P.sand); return [c.r * 0.9, c.g * 0.895, c.b * 0.88].map(function (v) { return v.toFixed(4); }).join(","); })() + ");" +
-            " float n = sin(vHoleW.x * 0.0021 + 1.3) * sin(vHoleW.z * 0.0017 + 0.4) * 0.6 + sin(vHoleW.x * 0.011 + vHoleW.z * 0.007) * 0.25 + sin(vHoleW.x * 0.037 - vHoleW.z * 0.029) * 0.15;" +
-            " sc *= 1.0 + 0.06 * n; diffuseColor.rgb = mix(sc, sc * vec3(0.8, 0.79, 0.8), mt); }" : "") +
+            /* WHAT A DESERT IS FROM THE AIR. Not one tone: sheets of pale sand,
+               fields of transverse dunes (a long lit back, a short dark slip
+               face, crests that wander), dark gravel pavement between them, and
+               pale dry washes braided across the gravel. Painted, so an
+               aircraft filmed from above has ground going past under it. */
+            " vec2 w = vHoleW.xz;" +
+            " vec2 wp = w + 260.0 * (vec2(ergF(w * 0.0014), ergF(w * 0.0014 + 31.0)) - 0.5);" +
+            " float big = ergF(wp * 0.0008 + 5.0);" +
+            " float pav = smoothstep(0.5, 0.6, big);" +
+            " float dn = 1.0 - smoothstep(0.38, 0.47, big);" +
+            " float saw = fract((wp.x * 0.83 + wp.y * 0.55) / 120.0 + 3.0 * ergF(w * 0.0026));" +
+            " float slip = smoothstep(0.72, 0.78, saw) * (1.0 - smoothstep(0.95, 1.0, saw));" +
+            " float duneL = mix(0.9, 1.13, smoothstep(0.0, 0.72, saw)) - 0.24 * slip * (0.5 + ergF(w * 0.011));" +
+            " float wash = 1.0 - smoothstep(0.0, 0.05, abs(ergF(wp * 0.0035 + 9.0) * 2.0 - 1.0));" +
+            " sc *= mix(1.0, duneL, dn);" +
+            " sc = mix(sc, sc * vec3(0.7, 0.66, 0.63), pav * (0.55 + 0.45 * ergF(w * 0.017)));" +
+            " sc = mix(sc, sc * vec3(1.16, 1.14, 1.1), wash * (1.0 - dn) * 0.85);" +
+            " sc *= 0.92 + 0.16 * ergF(w * 0.06);" +
+            " diffuseColor.rgb = mix(sc, sc * vec3(0.8, 0.79, 0.8), mt); }" : "") +
           (P.tint ? "\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(" + P.tint.map(function (v) { return v.toFixed(3); }).join(",") +
             "), 0.82 * (1.0 - smoothstep(2650.0, 2900.0, length(vHoleW.xz))));" : ""));
     };

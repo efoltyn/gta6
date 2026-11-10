@@ -719,11 +719,16 @@ function frameWing(m, dt) {
   cam.wFocus.set(m.pos.x, m.pos.y + (m.vheight || 3) * 0.35 - 1.2, m.pos.z);
   cam.focus.copy(cam.wFocus);                         // rails: it does 250 m/s
   const age = Math.max(0, simT - (cam.wingAt || 0));
-  cam.wYaw = h + cam.side * Math.min(2.5, 0.7 + age * (jet ? 0.26 : 0.16));
-  cam.wPitch = jet ? 0.2 : 0.14;
+  /* How the real ones are shot (a chase plane over Death Valley, a tanker
+     boom over the Gulf): from ABOVE and well off, on a long lens. The aircraft
+     sits against the ground, not the sky, so you read its whole planform and
+     the desert streaks past behind it; the horizon is barely in the frame.
+     It opens high off the nose quarter and slides back to the tail quarter. */
+  cam.wYaw = h + cam.side * Math.min(2.45, 0.85 + age * (jet ? 0.2 : 0.13));
+  cam.wPitch = (jet ? 0.5 : 0.36) - Math.min(0.16, age * 0.02);
   // room for the whole span: a B-52 is 56 m across, an F-35 eleven
-  cam.wDist = Math.max(sz, m.vwid || 0) * (jet ? 2.2 : 1.9) + 8;
-  cam.wFov = lensBase() - 2;
+  cam.wDist = Math.max(sz, m.vwid || 0) * (jet ? 4.4 : 3.6) + 10;
+  cam.wFov = jet ? 27 : 31;
   cam.ease = 0.03;
   if (dt === 0) { cam.yaw = cam.wYaw; cam.pitch = cam.wPitch; cam.dist = cam.wDist; }
   if (m.dead && cam.holdT === 0) { cam.holdT = 2.4; cam.cutAt = Math.max(cam.cutAt, simT + 2.4); }

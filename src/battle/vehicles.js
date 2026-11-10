@@ -2029,7 +2029,52 @@ function pushVehicle(m, o, k) {
    with the steps' summed dt. A unit with no animate gets the shared one:
    its rig's update(dt, v, w, steer), and for an aircraft the milAir surface
    and rotor helper. ctx.shared(dt) runs that from inside a unit's own. */
+/* THE SHADOW AN AIRCRAFT DRAGS OVER THE GROUND. The sun's shadow map covers
+   160 m round the lens; a jet at 300 m is far outside it, and without its
+   shadow an aircraft filmed from above floats on the picture with no height
+   and no speed. One soft dark planform per aircraft, laid on the ground where
+   the sun puts it, softer and fainter the higher it flies. */
+let _airShadeTex = null;
+function airShadeTex() {
+  if (_airShadeTex) return _airShadeTex;
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const g = c.getContext("2d");
+  g.filter = "blur(5px)"; g.fillStyle = "#000";
+  g.beginPath(); g.ellipse(64, 64, 9, 52, 0, 0, 6.3); g.fill();             // fuselage (nose is +y)
+  g.beginPath(); g.moveTo(64, 50); g.lineTo(118, 78); g.lineTo(118, 88); g.lineTo(64, 76); g.lineTo(10, 88); g.lineTo(10, 78); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(64, 98); g.lineTo(86, 112); g.lineTo(86, 117); g.lineTo(42, 117); g.lineTo(42, 112); g.closePath(); g.fill();
+  _airShadeTex = new THREE.CanvasTexture(c);
+  return _airShadeTex;
+}
+function airShade(u) {
+  const dead = u.dead || u.fled || !u.group || !u.group.visible;
+  if (!u.shade) {
+    if (dead || typeof document === "undefined") return;
+    const rotor = u.def && u.def.drive !== "jet";
+    const m = new THREE.Mesh(rotor ? new THREE.CircleGeometry(0.5, 20) : new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ color: 0x000000, map: rotor ? null : airShadeTex(), transparent: true, opacity: 0.4, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+    m.rotation.order = "YXZ"; m.rotation.x = -Math.PI / 2;
+    m.userData.dynamic = true; m.renderOrder = 2; m.name = "airShade";
+    const len = (u.vlen || 8) * 2, wid = (u.vwid || 6) * 2;   // vlen / vwid are half sizes
+    m.scale.set(rotor ? Math.max(wid, len * 0.8) : wid, len, 1);
+    CBZ.scene.add(m); u.shade = m;
+  }
+  const m = u.shade;
+  if (dead) { m.visible = false; return; }
+  const L = CBZ.npcwar.sunDir;
+  let x = u.pos.x, z = u.pos.z, g = HOST.groundAt(x, z);
+  if (L && L.y > 0.05) for (let k = 0; k < 2; k++) {
+    const t = Math.max(0, u.pos.y - g) / L.y;
+    x = u.pos.x - L.x * t; z = u.pos.z - L.z * t; g = HOST.groundAt(x, z);
+  }
+  const alt = Math.max(0, u.pos.y - g);
+  m.visible = alt > 1.5;
+  m.position.set(x, g + 0.35, z);
+  m.rotation.y = u.h + Math.PI;
+  m.material.opacity = 0.46 * Math.max(0.25, 1 - alt / 900);
+}
 function vehAnimate(u, sdt) {
+  if (u.air) airShade(u);
   u._animAcc = (u._animAcc || 0) + sdt;
   u._animN = ((u._animN || 0) + 1) & 1023;
   const every = CBZ.battleLod ? CBZ.battleLod.animEvery(camDist2(u.pos)) : 1;

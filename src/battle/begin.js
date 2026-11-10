@@ -222,6 +222,7 @@ function sunRig(dir) {
   const v = new THREE.Vector3(0.55, 1, 0.35);
   if (dir) v.fromArray(dir);
   v.normalize();
+  CBZ.npcwar.sunDir = v;
   const D = 700;
   let lastSpan = 0;
   /* THE BUG THAT HID EVERY SHADOW ON THIS PAGE. studio.settle() freezes the
