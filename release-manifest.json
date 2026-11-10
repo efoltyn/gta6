@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "3fb9677afe3194479170c476a7128e8b9d223eac",
-  "createdAt": "2026-11-10T22:18:39.828Z",
+  "sourceCommit": "25c7958e55578a05f7aefac0686727d0e53f1a2b",
+  "createdAt": "2026-11-10T22:21:03.120Z",
   "fileCount": 1640,
-  "totalBytes": 89480543,
+  "totalBytes": 89481416,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -43,8 +43,8 @@
     },
     {
       "file": "src/battle/arenas/erg.js",
-      "bytes": 29674,
-      "sha256": "9fea65877301d81a971e15cc40408092861cdc21c539c943bdc58f09806fa774"
+      "bytes": 30547,
+      "sha256": "8f133813a85f7023b11a09530bdf0984b8c34bd494a274ee82f196c5982379af"
     },
     {
       "file": "src/battle/arenas/field.js",
@@ -8109,7 +8109,7 @@
     {
       "file": "games/battle.html",
       "bytes": 12929,
-      "sha256": "c90f916e4776406f2fac8999f67eede9812caeae13575e4aa6996dbc01123d08"
+      "sha256": "8ab7903b50aca5e6e2ba9d88b76a4dace6576e855428d10a8b3ec25b055acfab"
     },
     {
       "file": "games/bomb-survivor-scene.js",
