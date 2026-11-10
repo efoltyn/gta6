@@ -147,10 +147,13 @@ function vn2(x, z, salt) {
   return a + (b - a) * fx + (c - a) * fz + (a - b - c + d) * fx * fz;
 }
 function duneWeight(x, z) {
-  const r = Math.max(Math.abs(x - DUNE.cx), Math.abs(z - DUNE.cz));
-  if (r <= DUNE.R0) return 1;
+  // a dune field has no corners: round, ragged, and it thins out over a long way
+  const dx = x - DUNE.cx, dz = z - DUNE.cz, a = Math.atan2(dz, dx);
+  const r = Math.hypot(dx, dz) * (1 + 0.13 * Math.sin(a * 3 + 1.1) + 0.08 * Math.sin(a * 5 + 4));
+  const r0 = DUNE.R0 * 0.72;
+  if (r <= r0) return 1;
   if (r >= DUNE.R1) return 0;
-  const t = (r - DUNE.R0) / (DUNE.R1 - DUNE.R0);
+  const t = (r - r0) / (DUNE.R1 - r0);
   return 1 - t * t * (3 - 2 * t);
 }
 
@@ -541,24 +544,59 @@ function ergMaterial(P) {
       turfOn ? "turf = groundTurf(vEW.xz, dist, 0.35);" : "turf = vec3(0.92 + 0.16 * egN(rel * 0.043) + 0.08 * (egN(vEW.xz * 0.6) - 0.5) * kF);");
     sh.fragmentShader = "varying vec4 vED;\nvarying vec3 vEW;\nuniform vec2 uC;\nuniform vec2 uW;\nuniform vec2 uF;\n" +
       "uniform sampler2D uCanopy;\nuniform vec4 uCanopyR;\nuniform vec4 uParcel;\nuniform sampler2D uParcelT;\n" +
-      ERG_GLSL + "\n" +
+      ERG_GLSL + "\n" + (surface === "sand" ? ergPaintGLSL() : "") +
       // grid line (i, j) of the parcels, pushed: the texel's B is the column's push, A the row's
       "vec2 pEdge(vec2 ij) { vec4 t = texture2D(uParcelT, (clamp(ij + 8.0, 0.0, 15.0) + 0.5) / 16.0);\n" +
       "  return ij * uParcel.yz + (vec2(t.b, t.a) - 0.5) * uParcel.w * uParcel.yz; }\n" +
       (turfOn ? CBZ.GROUND_TURF_GLSL + "\n" : "") +
       sh.fragmentShader
         .replace("void main() {", "void main() {\n  float vSpark = 0.0; float vShade = 1.0;")
-        .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" + surf)
+        .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" + surf + (surface === "sand" ?
+          /* the skin's own colours (crest, trough, grain) survive only as a
+             ratio on top of the world's paint, and even that fades out over
+             the last 300 m, so from the air there is no square */
+          "\n{ vec2 d = vEW.xz - uC; vec2 q = vec2(dot(d, uW), dot(d, vec2(-uW.y, uW.x)));" +
+          " float e = smoothstep(" + (DUNE.R0 * 0.45).toFixed(1) + ", " + (DUNE.R1 - 40).toFixed(1) + ", length(d));" +
+          " vec3 rel = clamp(diffuseColor.rgb / " + (function () { const c = new THREE.Color((DUNE.pal || ERG_PAL.sand).sand); return "vec3(" + c.r.toFixed(4) + "," + c.g.toFixed(4) + "," + c.b.toFixed(4) + ")"; })() + ", 0.6, 1.4);" +
+          " diffuseColor.rgb = ergPaint(" + ergSandBase(DUNE.pal || ERG_PAL.sand) + ", vEW.xz) * mix(mix(vec3(1.0), rel * 1.06, 0.5), vec3(1.0), e); }\n" : ""))
         // dappled shade is light the canopy took away: it darkens what the sun
         // and sky put on the floor, both
         .replace("#include <aomap_fragment>", "#include <aomap_fragment>\n" +
           "reflectedLight.directDiffuse *= vShade; reflectedLight.indirectDiffuse *= mix(1.0, vShade, 0.7);")
         .replace("#include <tonemapping_fragment>", "gl_FragColor.rgb += vSpark * vec3(0.9, 0.95, 1.0);\n#include <tonemapping_fragment>");
   };
-  mat.customProgramCacheKey = function () { return "npcwar-erg2-" + form + "-" + surface + (turfOn ? "t" : ""); };
+  mat.customProgramCacheKey = function () { return "npcwar-erg3-" + form + "-" + surface + (turfOn ? "t" : ""); };
   if (CBZ.battleGround) CBZ.battleGround.patchTerrain(mat);
   return mat;
 }
+/* THE DESERT'S PAINT, one function for every sand ground mesh (the world's
+   plane AND the battlefield's own skin), so the two cannot differ in tone. */
+function ergPaintGLSL() {
+  return "float ergH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n" +
+    "float ergN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);" +
+    " return mix(mix(ergH(i), ergH(i + vec2(1.0, 0.0)), f.x), mix(ergH(i + vec2(0.0, 1.0)), ergH(i + vec2(1.0, 1.0)), f.x), f.y); }\n" +
+    "float ergF(vec2 p) { float a = 0.5, s = 0.0; for (int k = 0; k < 4; k++) { s += a * ergN(p); p = p * 2.03 + vec2(17.0, 9.0); a *= 0.5; } return s / 0.9375; }\n" +
+    "vec3 ergPaint(vec3 sc, vec2 w) {" +
+        " vec2 wp = w + 260.0 * (vec2(ergF(w * 0.0014), ergF(w * 0.0014 + 31.0)) - 0.5);" +
+    " float big = ergF(wp * 0.0008 + 5.0);" +
+    " float pav = smoothstep(0.42, 0.66, big);" +
+    " float dn = 1.0 - smoothstep(0.36, 0.5, big);" +
+    " float saw = fract((wp.x * 0.83 + wp.y * 0.55) / 90.0 + 3.0 * ergF(w * 0.0026));" +
+    " float duneL = mix(0.96, 1.05, smoothstep(0.0, 0.7, saw)) - 0.07 * smoothstep(0.7, 0.8, saw) * (1.0 - smoothstep(0.9, 1.0, saw));" +
+    " float wash = 1.0 - smoothstep(0.0, 0.035, abs(ergF(wp * 0.0022 + 9.0) * 2.0 - 1.0));" +
+    " float trk = 0.0;" +
+    " for (int k = 0; k < 3; k++) { float a = 0.5 + float(k) * 1.13; vec2 d = vec2(cos(a), sin(a));" +
+    "   float c = dot(w, vec2(-d.y, d.x)) + 55.0 * ergN(vec2(dot(w, d) * 0.0018, float(k) * 7.0)) + float(k) * 211.0;" +
+    "   float per = 1300.0 + float(k) * 470.0; float q = abs(fract(c / per) - 0.5) * per;" +
+    "   trk = max(trk, (1.0 - smoothstep(1.5, 4.5, abs(q - 6.0))) * step(0.35, ergN(vec2(floor(c / per) * 3.1, dot(w, d) * 0.0006)))); }" +
+    " sc *= mix(1.0, duneL, dn);" +
+    " sc = mix(sc, sc * vec3(0.8, 0.78, 0.76), pav * (0.5 + 0.5 * ergF(w * 0.017)));" +
+    " sc = mix(sc, sc * vec3(1.08, 1.07, 1.05), wash * 0.6);" +
+    " sc = mix(sc, sc * vec3(1.14, 1.13, 1.1), trk);" +
+    " sc *= 0.95 + 0.1 * ergF(w * 0.06);" +
+    " return sc; }\n";
+}
+function ergSandBase(P) { const c = new THREE.Color(P.sand); return "vec3(" + [c.r * 0.9, c.g * 0.895, c.b * 0.88].map(function (v) { return v.toFixed(4); }).join(",") + ")"; }
 /* THE SKIN IS THE GROUND. Until this wave the men stood on the analytic
    height function and the eye saw a mesh sampled from it every 2-4 m: two
    different surfaces. Between vertices the triangles cut every corner, so on
@@ -763,10 +801,7 @@ function ergSkin(world) {
       sh.vertexShader = "varying vec3 vHoleW;\n" + sh.vertexShader.replace("#include <project_vertex>",
         "#include <project_vertex>\nvHoleW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
       sh.fragmentShader = "varying vec3 vHoleW;\nuniform vec3 uHole;\nuniform vec2 uHoleW;\n" +
-        "float ergH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n" +
-        "float ergN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);" +
-        " return mix(mix(ergH(i), ergH(i + vec2(1.0, 0.0)), f.x), mix(ergH(i + vec2(0.0, 1.0)), ergH(i + vec2(1.0, 1.0)), f.x), f.y); }\n" +
-        "float ergF(vec2 p) { float a = 0.5, s = 0.0; for (int k = 0; k < 4; k++) { s += a * ergN(p); p = p * 2.03 + vec2(17.0, 9.0); a *= 0.5; } return s / 0.9375; }\n" +
+        ergPaintGLSL() +
         sh.fragmentShader.replace("void main() {",
         "void main() {\n { vec2 d = vHoleW.xz - uHole.xy; vec2 q = vec2(dot(d, uHoleW), dot(d, vec2(-uHoleW.y, uHoleW.x)));\n" +
         "   if (abs(q.x) < uHole.z && abs(q.y) < uHole.z) discard; }")
@@ -787,24 +822,7 @@ function ergSkin(world) {
                tracks: broad faint patches of darker gravel, low sand ripples
                you only just see, a few pale dry washes, and the long straight
                scars of vehicle tracks crossing each other. Barren, not blank. */
-            " vec2 w = vHoleW.xz;" +
-            " vec2 wp = w + 260.0 * (vec2(ergF(w * 0.0014), ergF(w * 0.0014 + 31.0)) - 0.5);" +
-            " float big = ergF(wp * 0.0008 + 5.0);" +
-            " float pav = smoothstep(0.42, 0.66, big);" +
-            " float dn = 1.0 - smoothstep(0.36, 0.5, big);" +
-            " float saw = fract((wp.x * 0.83 + wp.y * 0.55) / 90.0 + 3.0 * ergF(w * 0.0026));" +
-            " float duneL = mix(0.96, 1.05, smoothstep(0.0, 0.7, saw)) - 0.07 * smoothstep(0.7, 0.8, saw) * (1.0 - smoothstep(0.9, 1.0, saw));" +
-            " float wash = 1.0 - smoothstep(0.0, 0.035, abs(ergF(wp * 0.0022 + 9.0) * 2.0 - 1.0));" +
-            " float trk = 0.0;" +
-            " for (int k = 0; k < 3; k++) { float a = 0.5 + float(k) * 1.13; vec2 d = vec2(cos(a), sin(a));" +
-            "   float c = dot(w, vec2(-d.y, d.x)) + 55.0 * ergN(vec2(dot(w, d) * 0.0018, float(k) * 7.0)) + float(k) * 211.0;" +
-            "   float per = 1300.0 + float(k) * 470.0; float q = abs(fract(c / per) - 0.5) * per;" +
-            "   trk = max(trk, (1.0 - smoothstep(1.5, 4.5, abs(q - 6.0))) * step(0.35, ergN(vec2(floor(c / per) * 3.1, dot(w, d) * 0.0006)))); }" +
-            " sc *= mix(1.0, duneL, dn);" +
-            " sc = mix(sc, sc * vec3(0.8, 0.78, 0.76), pav * (0.5 + 0.5 * ergF(w * 0.017)));" +
-            " sc = mix(sc, sc * vec3(1.08, 1.07, 1.05), wash * 0.6);" +
-            " sc = mix(sc, sc * vec3(1.14, 1.13, 1.1), trk);" +
-            " sc *= 0.95 + 0.1 * ergF(w * 0.06);" +
+            " sc = ergPaint(sc, vHoleW.xz);" +
             " diffuseColor.rgb = mix(sc, sc * vec3(0.8, 0.79, 0.8), mt); }" : "") +
           (P.tint ? "\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(" + P.tint.map(function (v) { return v.toFixed(3); }).join(",") +
             "), 0.82 * (1.0 - smoothstep(2650.0, 2900.0, length(vHoleW.xz))));" : ""));
