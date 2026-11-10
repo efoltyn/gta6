@@ -49,107 +49,93 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap">
-<link rel="stylesheet" href="../src/battle/battle.css?v=nations1026">
+<link rel="stylesheet" href="../src/battle/battle.css?v=war1110g">
 </head>
 <body>
+<script>if (/[?&]auto=1/.test(location.search)) document.documentElement.classList.add("auto");</script>
 
 <div id="menu"><div class="in">
   <a class="hubLink" href="../index.html">MAIN MENU</a>
 <script src="../src/core/stage.js?v=strike1013m"></script>
   <header class="hero">
-    <div class="kick">A BATTLE YOU WATCH</div>
     <h1>NPC <em>WAR</em></h1>
-    <p class="sub">Any two armies. Any ground. Make your call, then watch who is still standing.</p>
   </header>
 
   <section>
-    <div class="lbl"><b>01</b>THE QUESTION<i>tap one, or build your own below</i></div>
-    <div class="mus" id="matchups"></div>
-  </section>
-
-  <section>
-    <div class="lbl"><b>02</b>THE GROUND</div>
-    <div class="maps" id="maps"></div>
-  </section>
-
-  <section>
-    <div class="lbl"><b>03</b>THE ARMIES</div>
+    <!-- BUILD TWO FORCES. Each side is a country and a list of what it brings:
+         infantry, armour, guns, aircraft, as many of each as you like
+         (src/battle/menu.js THE FORCE). The "red"/"blue" in the ids and
+         classes are the two slot keys, never shown. -->
     <div class="teams">
-      <!-- A SIDE IS WHAT IS ON IT. The h3 is filled with "40 GORILLAS" /
-           "200 SOLDIERS" (src/battle/core/sides.js); the "red"/"blue" in the
-           ids and classes are the two slot keys, never shown. -->
       <div class="team red">
         <div class="th"><h3 id="redH"></h3><span class="kind" id="redK"></span></div>
-        <div class="cnt">
-          <button data-t="red" data-d="-1" aria-label="fewer on the first side">&minus;</button>
-          <input id="redN" type="number" inputmode="numeric" min="1" value="30" aria-label="how many on the first side">
-          <button data-t="red" data-d="1" aria-label="more on the first side">+</button>
-        </div>
-        <label class="f"><span>WHO</span><select id="redU"></select></label>
-        <label class="f"><span>ARMED WITH</span><select id="redW"></select></label>
-        <label class="f"><span>TRAINING</span><select id="redT"></select></label>
         <label class="f"><span>COUNTRY</span><select id="redF"></select></label>
         <div class="flagstrip" id="redFS" aria-label="the first side's country"></div>
-        <label class="f"><span>AIR SUPPORT</span><select id="redS"></select></label>
+        <div class="flbl">FORCE</div>
+        <div class="force" id="redForce"></div>
+        <div class="fadd" id="redAdd"></div>
+        <div class="two">
+          <label class="f"><span>SMALL ARMS</span><select id="redW"></select></label>
+          <label class="f"><span>TRAINING</span><select id="redT"></select></label>
+        </div>
+        <label class="f"><span>BOMBER ON CALL</span><select id="redS"></select></label>
+        <!-- what the force list above adds up to, in the roster grammar (battle/core/roster.js) -->
+        <select id="redU" hidden></select><input id="redN" type="hidden" value="30">
       </div>
       <div class="vs">V</div>
       <div class="team blue">
         <div class="th"><h3 id="blueH"></h3><span class="kind" id="blueK"></span></div>
-        <div class="cnt">
-          <button data-t="blue" data-d="-1" aria-label="fewer on the second side">&minus;</button>
-          <input id="blueN" type="number" inputmode="numeric" min="1" value="30" aria-label="how many on the second side">
-          <button data-t="blue" data-d="1" aria-label="more on the second side">+</button>
-        </div>
-        <label class="f"><span>WHO</span><select id="blueU"></select></label>
-        <label class="f"><span>ARMED WITH</span><select id="blueW"></select></label>
-        <label class="f"><span>TRAINING</span><select id="blueT"></select></label>
         <label class="f"><span>COUNTRY</span><select id="blueF"></select></label>
         <div class="flagstrip" id="blueFS" aria-label="the second side's country"></div>
-        <label class="f"><span>AIR SUPPORT</span><select id="blueS"></select></label>
+        <div class="flbl">FORCE</div>
+        <div class="force" id="blueForce"></div>
+        <div class="fadd" id="blueAdd"></div>
+        <div class="two">
+          <label class="f"><span>SMALL ARMS</span><select id="blueW"></select></label>
+          <label class="f"><span>TRAINING</span><select id="blueT"></select></label>
+        </div>
+        <label class="f"><span>BOMBER ON CALL</span><select id="blueS"></select></label>
+        <!-- what the force list above adds up to, in the roster grammar (battle/core/roster.js) -->
+        <select id="blueU" hidden></select><input id="blueN" type="hidden" value="30">
       </div>
     </div>
     <div class="presets" id="presets">
-      <span>BOTH SIDES</span>
-      <button data-n="1">1 v 1</button>
-      <button data-n="10">10 v 10</button>
-      <button data-n="30">30 v 30</button>
-      <button data-n="80">80 v 80</button>
-      <button data-n="200">200 v 200</button>
-      <button data-n="500">500 v 500</button>
-      <button data-n="10000">10K v 10K</button>
-      <button data-n="100000">100K v 100K</button>
-    </div>
-    <div class="presets" id="bestof">
-      <span>BEST OF</span>
-      <button data-bo="1">1</button>
-      <button data-bo="3">3</button>
-      <button data-bo="5">5</button>
-      <button data-bo="7">7</button>
+      <span>INFANTRY, BOTH SIDES</span>
+      <button data-n="10">10</button>
+      <button data-n="30">30</button>
+      <button data-n="100">100</button>
+      <button data-n="300">300</button>
+      <button data-n="1000">1,000</button>
+      <button data-n="10000">10K</button>
+      <button data-n="100000">100K</button>
     </div>
   </section>
 
   <section>
-    <div class="lbl"><b>04</b>WHO WINS?<i>make the call, or leave it open</i></div>
-    <div class="callrow" id="callrow">
-      <button class="cr" data-call="red"><b id="redCallN"></b><i id="redCallK"></i></button>
-      <button class="cb" data-call="blue"><b id="blueCallN"></b><i id="blueCallK"></i></button>
-    </div>
-    <div id="streak"></div>
+    <div class="lbl">BATTLEFIELD</div>
+    <div class="maps" id="maps"></div>
   </section>
 
   <div class="dock"><div class="din">
-    <button id="start">START THE WAR</button>
+    <button id="start">START BATTLE</button>
     <div id="bootst"></div>
     <div id="boottrack"><div id="bootbar"></div></div>
   </div></div>
 </div></div>
 
+<!-- THE BAR: every control says what it is (src/battle/clock.js). -->
 <div id="ctl">
-  <button id="cBack" aria-label="setup"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5.4 14 4l-8 8 8 8 1.4-1.4L8.8 12z"/></svg></button>
-  <button id="cPause" aria-label="pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></button>
-  <button id="cSpeed" aria-label="speed"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l8 6-8 6zM12 6l8 6-8 6z"/></svg></button>
-  <button id="cCam" aria-label="camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5C6.5 5 2.7 9.4 1.5 12c1.2 2.6 5 7 10.5 7s9.3-4.4 10.5-7C21.3 9.4 17.5 5 12 5zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"/></svg></button>
-  <button id="cRifle" aria-label="take a rifle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 13h11l1.5-2H21v2.5h-4l-1 1.5h-3.5l-1.6 4H8.6l1.2-4H2z"/></svg></button>
+  <button id="cBack" title="back to the setup screen">SETUP</button>
+  <button id="cPause" title="Space">PAUSE</button>
+  <button id="cSpeed" title="1 2 3 4: speed, 5: quarter speed">SPEED 1&times;</button>
+  <div class="seg" id="cCamSeg">
+    <span>CAMERA</span>
+    <button data-cam="auto" title="the director cuts between shots for you (C)">DIRECTOR</button>
+    <button data-cam="follow" title="ride the front of an army; press again for the other side (F)">FRONT LINE</button>
+    <button data-cam="lock" title="stay on one unit; T for the next, Y for its eyes">ONE UNIT</button>
+    <button data-cam="free" title="drag to look, wheel to zoom, WASD to move">FREE</button>
+  </div>
+  <button id="cRifle" class="take" title="G, or click any soldier, tank or aircraft">TAKE CONTROL</button>
 </div>
 <div id="xhair"></div>
 <div id="banner"></div>
@@ -161,10 +147,7 @@
   <button id="endWatch" class="x" aria-label="keep watching">&times;</button>
   <h2 id="endT"></h2>
   <div id="endSeries"></div>
-  <div id="endCall"></div>
   <div class="acts">
-    <div class="nl">WHO WINS?</div>
-    <div class="calls"><button data-call="red" class="cr" id="endCallRed"></button><button data-call="blue" class="cb" id="endCallBlue"></button></div>
     <div class="row">
       <button id="endAgain" class="big">REMATCH</button>
       <button id="endLoser" class="big2"></button>
@@ -179,77 +162,78 @@
   skips files a page already carries, so the day a "guns" pack ships,
   these lines simply stop being needed.
 ============================================================ -->
-<script src="../src/core/studio.js?v=fire1102e"></script>
+<script src="../src/core/studio.js?v=war1110h"></script>
 <!-- NPC WAR ITSELF: src/battle/, one shared scope, in this order. The
   file map and who owns what: docs/npcwar/ARCHITECTURE.md -->
 <script src="../src/battle/npcwar.js?v=npcw1011b"></script>
-<script src="../src/units/unitkit.js?v=fx1029b"></script>
-<script src="../src/units/manifest.js?v=presboot3"></script>
+<script src="../src/units/unitkit.js?v=war1110h"></script>
+<script src="../src/units/manifest.js?v=war1110h"></script>
 <script src="../src/units/kit/moves.js?v=take1011"></script>
 <script src="../src/battle/core/roster.js?v=army1013"></script>
-<script src="../src/battle/core/countries.js?v=inf1028a"></script>
-<script src="../src/battle/core/sides.js?v=nations1026"></script>
+<script src="../src/battle/core/countries.js?v=war1110"></script>
+<script src="../src/battle/core/sides.js?v=war1110"></script>
 <script src="../src/battle/core/series.js?v=army1013"></script>
 <script src="../src/battle/core/host.js?v=curb1013"></script>
 <script src="../src/battle/core/store.js?v=army1013"></script>
 <script src="../src/battle/core/lod.js?v=convoy1013"></script>
 <script src="../src/battle/core/flow.js?v=army1013"></script>
-<script src="../src/battle/core/infantry.js?v=inf1028f"></script>
-<script src="../src/battle/core/tactics.js?v=army1013m"></script>
-<script src="../src/battle/settings.js?v=nations1026"></script>
+<script src="../src/battle/core/infantry.js?v=war1110k"></script>
+<script src="../src/battle/core/tactics.js?v=war1110b"></script>
+<script src="../src/battle/settings.js?v=war1110g"></script>
 <script src="../src/battle/arenas/maps.js?v=army1013"></script>
 <script src="../src/battle/teams.js?v=inf1028a"></script>
 <script src="../src/battle/arms.js?v=army1013"></script>
 <script src="../src/battle/load.js?v=nations1026"></script>
 <script src="../src/battle/core.js?v=army1013"></script>
-<script src="../src/battle/menu.js?v=nations1026"></script>
+<script src="../src/battle/menu.js?v=war1110e"></script>
 <script src="../src/battle/state.js?v=army1013"></script>
-<script src="../src/battle/arenas/yard.js?v=r187a"></script>
-<script src="../src/battle/arenas/erg.js?v=army1013"></script>
+<script src="../src/battle/arenas/yard.js?v=war1110"></script>
+<script src="../src/battle/arenas/erg.js?v=war1110k"></script>
 <script src="../src/battle/arenas/cover.js?v=army1013"></script>
 <script src="../src/world/basekit.js?v=r187a"></script>
-<script src="../src/battle/arenas/dress.js?v=army1013"></script>
-<script src="../src/battle/arenas/ground.js?v=r187a"></script>
+<script src="../src/battle/arenas/dress.js?v=war1110f"></script>
+<script src="../src/battle/arenas/ground.js?v=war1110h"></script>
 <script src="../src/battle/arenas/woods.js?v=army1013"></script>
-<script src="../src/battle/arenas/fields.js?v=army1013"></script>
+<script src="../src/battle/arenas/fields.js?v=war1110"></script>
 <script src="../src/battle/arenas/sea.js?v=army1013"></script>
-<script src="../src/battle/arenas/field.js?v=convoy1013"></script>
+<script src="../src/battle/arenas/field.js?v=war1110f"></script>
 <script src="../src/battle/men.js?v=nations1026"></script>
 <script src="../src/battle/beasts.js?v=army1013m"></script>
 <script src="../src/battle/damage.js?v=inf1028c"></script>
-<script src="../src/battle/ai/morale.js?v=inf1028f"></script>
+<script src="../src/battle/ai/morale.js?v=war1110b"></script>
 <script src="../src/battle/death.js?v=army1013m"></script>
 <script src="../src/battle/physics.js?v=inf1028c"></script>
 <script src="../src/units/kit/vehicle.js?v=strike1013m"></script>
 <script src="../src/systems/roadgraph.js?v=curb1013"></script>
 <script src="../src/systems/convoy.js?v=curb1013"></script>
-<script src="../src/battle/vehicles.js?v=inf1028c"></script>
-<script src="../src/battle/drones.js?v=strike1013m"></script>
+<script src="../src/battle/vehicles.js?v=war1110k"></script>
+<script src="../src/battle/drones.js?v=war1110b"></script>
 <script src="../src/battle/ai/orders.js?v=inf1028c"></script>
 <script src="../src/battle/fire.js?v=inf1028c"></script>
 <script src="../src/battle/air.js?v=inf1028c"></script>
 <script src="../src/battle/ai/think.js?v=convoy1013"></script>
-<script src="../src/battle/ai/squad.js?v=army1013m"></script>
+<script src="../src/battle/ai/squad.js?v=war1110b"></script>
 <script src="../src/battle/convoyhost.js?v=curb1013"></script>
 <script src="../src/battle/step.js?v=inf1028c"></script>
 <script src="../src/battle/melee.js?v=army1013"></script>
-<script src="../src/battle/player.js?v=inf1028c"></script>
-<script src="../src/battle/camera/camera.js?v=cam1028a"></script>
+<script src="../src/battle/player.js?v=war1110k"></script>
+<script src="../src/battle/camera/camera.js?v=war1110h"></script>
+<script src="../src/battle/camera/feel.js?v=war1110h"></script>
 <script src="../src/battle/camera/study.js?v=army1013"></script>
-<script src="../src/battle/camera/killcam.js?v=army1013"></script>
-<script src="../src/battle/hud.js?v=army1013"></script>
-<script src="../src/battle/clock.js?v=army1013m"></script>
+<script src="../src/battle/camera/killcam.js?v=war1110"></script>
+<script src="../src/battle/hud.js?v=war1110h"></script>
+<script src="../src/battle/clock.js?v=war1110f"></script>
 <script src="../src/battle/bench.js?v=army1013"></script>
 <script src="../src/battle/spawn.js?v=army1013m"></script>
-<script src="../src/battle/mass.js?v=cam1028a"></script>
-<script src="../src/battle/massdraw.js?v=inf1028c"></script>
+<script src="../src/battle/mass.js?v=war1110c"></script>
+<script src="../src/battle/massdraw.js?v=war1110k"></script>
 <script src="../src/battle/colours.js?v=nations1026"></script>
-<script src="../src/battle/settingspanel.js?v=army1013"></script>
-<script src="../src/battle/scoring.js?v=nations1026"></script>
+<script src="../src/battle/settingspanel.js?v=war1110f"></script>
+<script src="../src/battle/scoring.js?v=war1110g"></script>
 <script src="../src/battle/begin.js?v=nations1026"></script>
-<script src="../src/battle/tick.js?v=kitfix1013"></script>
-<script src="../src/battle/loop.js?v=army1013m"></script>
-<script src="../src/battle/probe.js?v=inf1028c"></script>
+<script src="../src/battle/tick.js?v=war1110d"></script>
+<script src="../src/battle/loop.js?v=war1110"></script>
+<script src="../src/battle/probe.js?v=war1110b"></script>
 <script src="../src/battle/main.js?v=army1013"></script>
 <a href="../" id="portalHome" style="position:fixed;left:12px;top:10px;z-index:2147483000;font:700 13px/1 Fredoka,Arial,sans-serif;letter-spacing:.08em;color:#fff;text-decoration:none;background:rgba(4,20,36,.55);padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.25)">◀ ALL GAMES</a>
 </body>
