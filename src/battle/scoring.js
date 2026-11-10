@@ -31,21 +31,21 @@ function readStreak() {
   try { return Object.assign({ streak: 0, best: 0, calls: 0, right: 0 }, JSON.parse(localStorage.getItem(STREAK_KEY) || "{}")); }
   catch (e) { return { streak: 0, best: 0, calls: 0, right: 0 }; }
 }
-let nextCall = null, callScored = false;
+
 let SERIES_AFTER = null;        // the series once this round is scored (endWar)
 function warURL(o) {
   const p = new URLSearchParams();
   p.set("map", SET.map);
   p.set("red", o.red != null ? o.red : SET.redN); p.set("blue", o.blue != null ? o.blue : SET.blueN);
-  p.set("ru", SET.redU); p.set("bu", SET.blueU); p.set("rw", SET.redW); p.set("bw", SET.blueW);
+  p.set("ru", o.ru || SET.redU); p.set("bu", o.bu || SET.blueU); p.set("rw", SET.redW); p.set("bw", SET.blueW);
   p.set("rt", SET.redT); p.set("bt", SET.blueT); p.set("rs", SET.redS); p.set("bs", SET.blueS);
   p.set("af", SET.nationA); p.set("bf", SET.nationB);
   // the series rides along: the next round of a best-of-N is this URL with
   // the score so far (a fresh page is the clean field, see core/series.js)
   if (o.series && o.series.bo > 1) { p.set("bo", o.series.bo); p.set("sa", o.series.a); p.set("sb", o.series.b); }
   else if (SET.bo > 1) p.set("bo", SET.bo);
-  if (o.call) p.set("call", o.call);
   p.set("auto", "1");
+  p.set("play", "1");                    // a person pressed REMATCH: not a tool's run (settings.js PROBE)
   return location.pathname + "?" + p.toString();
 }
 /* MOMENTUM, SHOWN. The man layer calls this when the war turns: an army
@@ -95,38 +95,16 @@ function endWar(won) {
     es.textContent = t;
   }
   el("endAgain").textContent = SERIES_AFTER.bo > 1 && !SERIES_AFTER.over ? "NEXT ROUND" : "REMATCH";
-  el("endCallRed").innerHTML = flagImg("red") + " " + esc(sideName("red"));
-  el("endCallBlue").innerHTML = flagImg("blue") + " " + esc(sideName("blue"));
-  // the call, scored once; the streak is only worth saying once it is one
-  const ec = el("endCall");
-  ec.className = ""; ec.textContent = "";
-  if (SET.call && won && !callScored) {
-    callScored = true;
-    const st = readStreak();
-    const right = SET.call === won;
-    st.calls++; if (right) { st.right++; st.streak++; st.best = Math.max(st.best, st.streak); } else st.streak = 0;
-    try { localStorage.setItem(STREAK_KEY, JSON.stringify(st)); } catch (e) {}
-    ec.className = right ? "right" : "wrong";
-    ec.textContent = right ? (st.streak >= 2 ? st.streak + " IN A ROW" : "YOU CALLED IT") : "WRONG CALL";
-  }
-  nextCall = SET.call || null;
-  el("end").querySelectorAll(".calls button").forEach(function (b) { b.classList.toggle("on", b.dataset.call === nextCall); });
   const loserTeam = won === "red" ? "blue" : won === "blue" ? "red" : null;
   el("endLoser").style.display = loserTeam ? "" : "none";
   if (loserTeam) {
     const n = loserTeam === "red" ? SET.redN : SET.blueN;
-    el("endLoser").textContent = "MORE " + kindLabel(loserTeam === "red" ? SET.redU : SET.blueU) + ", " + n + " TO " + Math.max(n + 1, Math.ceil(n * 1.5));
+    el("endLoser").textContent = "GIVE THE LOSER HALF AGAIN: " + n + " TO " + Math.max(n + 1, Math.ceil(n * 1.5));
   }
   el("end").style.display = "grid";
   el("ctl").classList.add("idle");
 }
 CBZ.npcwar.onBoot(function () {
-  el("end").querySelectorAll(".calls button").forEach(function (b) {
-    b.addEventListener("click", function () {
-      nextCall = nextCall === b.dataset.call ? null : b.dataset.call;
-      el("end").querySelectorAll(".calls button").forEach(function (x) { x.classList.toggle("on", x.dataset.call === nextCall); });
-    });
-  });
   // AGAIN used to be location.reload(), which on a war started from the menu
   // (no ?auto) dropped you straight back on the setup card. A rematch is the
   // same war, now, with your next call riding on it.
@@ -134,13 +112,18 @@ CBZ.npcwar.onBoot(function () {
     // NEXT ROUND carries the score; a decided series (or a best of 1) is a
     // REMATCH: the same war from nothing
     const S = SERIES_AFTER && !SERIES_AFTER.over ? SERIES_AFTER : null;
-    location.href = warURL({ call: nextCall, series: S });
+    location.href = warURL({ series: S });
   });
   el("endLoser").addEventListener("click", function () {
     // a new head count is a new war: the series starts over
-    const o = { call: nextCall };
-    if (winner === "red") o.blue = Math.max(SET.blueN + 1, Math.ceil(SET.blueN * 1.5));
-    else if (winner === "blue") o.red = Math.max(SET.redN + 1, Math.ceil(SET.redN * 1.5));
+    // (a built force carries its own counts: every row of it grows by half)
+    const more = function (u) {
+      const R = CBZ.battleRoster.parse(u);
+      return R.counted ? R.entries.map(function (e) { return e.id + "*" + Math.max(e.n + 1, Math.ceil(e.n * 1.5)); }).join(",") : u;
+    };
+    const o = {};
+    if (winner === "red") { o.blue = Math.max(SET.blueN + 1, Math.ceil(SET.blueN * 1.5)); o.bu = more(SET.blueU); }
+    else if (winner === "blue") { o.red = Math.max(SET.redN + 1, Math.ceil(SET.redN * 1.5)); o.ru = more(SET.redU); }
     location.href = warURL(o);
   });
   el("endMenu").addEventListener("click", function () {

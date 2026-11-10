@@ -27,6 +27,10 @@
     background-size:cover,cover,auto,auto,auto,auto;
     background-position:center,center 32%,0 0,0 0,0 0,0 0;
     background-repeat:no-repeat}
+  /* STRAIGHT INTO A BATTLE (a rematch, a next round: ?auto=1): only the
+     loading bar, never the setup screen flashing up while the field builds */
+  html.auto #menu .in>*:not(.dock),html.auto #menu #start,html.auto #menu .setlink{display:none}
+  html.auto #menu .dock{position:fixed;left:0;right:0;top:46%}
   #menu .in{max-width:980px;margin:0 auto;padding:0 0 28px}
   #menu .hero{padding:calc(3vh + env(safe-area-inset-top,0px)) 0 4px;text-align:center}
   #menu h1{margin:8px 0 6px;font:400 clamp(44px,9vw,76px)/.9 var(--disp);letter-spacing:.02em;

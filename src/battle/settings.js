@@ -123,7 +123,8 @@ if (CBZ.battleRoster.parse(SET.blueU).counted) SET.blueN = CBZ.battleRoster.size
    pull, which is worth paying when a tool is watching and worth nothing when
    a person is. On for ?auto=1 and ?bench=1 (both are tools), on for ?probe=1,
    off otherwise. */
-const PROBE = Q.get("probe") === "1" || (Q.get("probe") !== "0" && (SET.auto || SET.bench));
+// (a REMATCH is ?auto=1 too, and it is a person playing: scoring.js marks it play=1)
+const PROBE = Q.get("probe") === "1" || (Q.get("probe") !== "0" && (SET.auto || SET.bench) && Q.get("play") !== "1");
 const SEP_OLD = Q.get("sep") === "old";      // the revert switch — see separateOld()
 const FIRE_OLD = Q.get("fire") === "old";    // ditto, for fire discipline
 const STEER_OLD = Q.get("steer") === "old";  // ditto, for wall-aware goal projection
