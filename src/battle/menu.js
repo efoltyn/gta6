@@ -273,130 +273,114 @@ CBZ.npcwar.onBoot(function () {
     kindRows(t);
   });
   el("redN").value = SET.redN; el("blueN").value = SET.blueN;
-  // BEST OF: one tap, lit while chosen
-  const boBtns = el("bestof").querySelectorAll("button");
-  const showBo = function () { boBtns.forEach(function (b) { b.classList.toggle("on", +b.dataset.bo === SET.bo); }); };
-  boBtns.forEach(function (b) {
-    b.addEventListener("click", function () {
-      SET.bo = +b.dataset.bo;
-      SERIES = CBZ.battleSeries.make(SET.bo, 0, 0);
-      showBo();
-    });
-  });
-  showBo();
 });
-/* THE QUESTIONS. Each card is a fight people argue about, asked as the
-   question itself. A tap fills the form (ground, kind, count, weapon,
-   training) and nothing else; START is still yours.
-
-   EVERY ROW NAMES ITS GROUND. "8 ORCAS v A MEGALODON" on the kill box is not
-   a matchup, it is a bug, and a land fight on whatever you picked last is a
-   card that lies about what it shows. The land fights are on the open dunes
-   (the owner's favourite ground), the sea fights on open water.
-
-   The water pod sizes are the argument: 8 is the pod that wins on the
-   shipped rows, 4 is the pod that does not (measured; see
-   tools/visual-presets/water-arena.mjs). A fleet is a crew, not a
-   battalion: at 48 riflemen the megalodon died in nineteen seconds and
-   never reached a hull, because bullets sit outside the body-mass model;
-   twenty men with shotguns is a fishing fleet, and it is a fight. THE SHARK
-   LINE-UP is the animation test bed as a button: one of each shark with
-   something to chase, for the STUDY camera (V, and [ ] to walk it). */
-const MATCHUPS = [
-  /* COUNTRIES. A side's `f` is its country (battle/core/countries.js): the
-     flag, the rifle (unless `w` says otherwise) and the kit come with it. */
-  { q: "100 US SOLDIERS v 1000 IRGC", sub: "M4s against ten times the AKs", map: "dunes",
-    r: { u: "men", n: 100, f: "usa", t: "elite" }, b: { u: "men", n: 1000, f: "irgc", t: "pro" } },
-  { q: "300 RUSSIANS v 300 UKRAINIANS", sub: "AK-12 against AK-74", map: "snow",
-    r: { u: "men", n: 300, f: "rus" }, b: { u: "men", n: 300, f: "ukr" } },
-  { q: "200 BRITISH v 200 CHINESE", sub: "two bullpups", map: "grass",
-    r: { u: "men", n: 200, f: "gbr" }, b: { u: "men", n: 200, f: "chn" } },
-  { q: "100 MEN v A GORILLA", sub: "bare fists, nobody trained", map: "dunes",
-    r: { u: "men", n: 100, w: "fists", t: "civ" }, b: { u: "gorilla", n: 1 } },
-  { q: "A TIGER v A LION", sub: "one on one", map: "dunes",
-    r: { u: "bengal_tiger", n: 1 }, b: { u: "lion", n: 1 } },
-  { q: "100 MEN v AN ELEPHANT", sub: "street fighters, bare fists", map: "dunes",
-    r: { u: "men", n: 100, w: "fists", t: "thug" }, b: { u: "african_elephant", n: 1 } },
-  { q: "100 LIONS v 1000 DOGS", sub: "teeth against numbers", map: "dunes",
-    r: { u: "lion", n: 100 }, b: { u: "dog", n: 1000 } },
-  /* ARMOUR. A counted roster ("m1_abrams*1,men*1") puts the man IN the tank:
-     a side's men crew its vehicles first (src/battle/vehicles.js). */
-  { q: "1 MAN AND AN M1 ABRAMS v 200 MEN", sub: "one tank, one crewman, two hundred rifles", map: "dunes",
-    r: { u: "m1_abrams*1,men*1", n: 2, w: "ak47", t: "elite" }, b: { u: "men", n: 200, w: "ak47", t: "pro" } },
-  { q: "3 M1 ABRAMS v 20 GORILLAS", sub: "a troop of silverbacks against armour", map: "dunes",
-    r: { u: "m1_abrams*3", n: 3 }, b: { u: "gorilla", n: 20 } },
-  { q: "A STRYKER AND 30 SOLDIERS v 12 LIONS", sub: "infantry and their APC against a pride", map: "dunes",
-    r: { u: "stryker_apc*1,men*30", n: 31, w: "ak47", t: "elite" }, b: { u: "lion", n: 12 } },
-  { q: "60 WOLVES v 30 SOLDIERS", sub: "the pack against rifles", map: "dunes",
-    r: { u: "gray_wolf", n: 60 }, b: { u: "men", n: 30, w: "ak47", t: "elite" } },
-  { q: "12 BEARS v 120 MEN", sub: "and the men have no guns", map: "dunes",
-    r: { u: "brown_bear", n: 12 }, b: { u: "men", n: 120, w: "fists", t: "thug" } },
-  { q: "200 BISON v 60 RIFLES", sub: "the stampede", map: "dunes",
-    r: { u: "bison", n: 200 }, b: { u: "men", n: 60, w: "ak47", t: "pro" } },
-  { q: "8 ORCAS v A MEGALODON", sub: "is a pod of eight enough?", map: "water",
-    r: { u: "orca", n: 8 }, b: { u: "megalodon", n: 1 } },
-  { q: "4 ORCAS v A MEGALODON", sub: "half the pod", map: "water",
-    r: { u: "orca", n: 4 }, b: { u: "megalodon", n: 1 } },
-  { q: "A MEGALODON v A FLEET", sub: "20 fishermen with shotguns", map: "water",
-    r: { u: "megalodon", n: 1 }, b: { u: "men", n: 20, w: "shotgun", t: "civ" } },
-  { q: "A GREAT WHITE v A BAIT BALL", sub: "400 sardines", map: "water",
-    r: { u: "great_white_shark", n: 1 }, b: { u: "sardine", n: 400 } },
-  { q: "4 GREAT WHITES v 30 SWIMMERS", sub: "nobody brought a weapon", map: "water",
-    r: { u: "great_white_shark", n: 4 }, b: { u: "men", n: 30, w: "fists", t: "civ" } },
-  { q: "DIVERS AND DOLPHINS v SHARKS", sub: "pistols against bulls and hammerheads", map: "water",
-    r: { u: "men|dolphin", n: 40, w: "sidearm", t: "pro" }, b: { u: "bull_shark|hammerhead_shark", n: 26 } },
-  { q: "THE REEF, ALIVE", sub: "tuna and barracuda on the shoals", map: "water",
-    r: { u: "tuna|barracuda", n: 90 }, b: { u: "sardine|fish", n: 300 } },
-  { q: "THE SHARK LINE-UP", sub: "one of each, to study up close", map: "water",
-    r: { u: "great_white_shark|hammerhead_shark|bull_shark|orca", n: 8 }, b: { u: "sardine", n: 120 } },
-];
-CBZ.npcwar.onBoot(function () {
-  muEl = el("matchups");
-});
-const muBtns = [];
 const esc = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); };
-function markMu(btn) { muBtns.forEach(function (x) { x.classList.toggle("on", x === btn); }); }
-// any hand edit after a card means the form is no longer that card
-function menuTouched() { markMu(null); sumUp(); }
-function muMatches(mu) {
-  if (mu.map && mu.map !== SET.map) return false;
-  return [["red", mu.r], ["blue", mu.b]].every(function (row) {
-    const t = row[0], v = row[1];
-    return el(t + "U").value === v.u && String(el(t + "N").value) === String(v.n) &&
-      (!v.w || el(t + "W").value === v.w) && (!v.t || el(t + "T").value === v.t) && (!v.f || el(t + "F").value === v.f);
-  });
-}
+// a hand edit anywhere on the armies re-reads the two sides' names
+function menuTouched() { sumUp(); }
 CBZ.npcwar.onBoot(function () {
-  MATCHUPS.forEach(function (mu) {
-    const b = document.createElement("button");
-    b.type = "button";
-    const ground = MAPS[mu.map] ? mu.map : SET.map;
-    b.className = "mu " + artOf(ground);
-    b.innerHTML = "<span class=\"mg\">" + esc(MAPS[ground].label) + "</span>" +
-      "<span class=\"mq\">" + esc(mu.q).split(" v ").join(" <em>v</em> ") + "</span>" +
-      "<span class=\"ms\">" + esc(mu.sub || "") + "</span>" +
-      "<span class=\"mb\"><s></s><s></s></span>";
-    b.addEventListener("click", function () {
-      if (mu.map && pickMap[mu.map]) pickMap[mu.map]();
-      [["red", mu.r], ["blue", mu.b]].forEach(function (row) {
-        const t = row[0], v = row[1];
-        setKind(el(t + "U"), v.u);
-        el(t + "N").value = v.n;
-        if (v.f) pickCountry(t, v.f, { w: v.w, t: v.t });
-        if (v.w) el(t + "W").value = v.w;
-        if (v.t) el(t + "T").value = v.t;
-        kindRows(t);
-      });
-      markMu(b);
-      sumUp();
-    });
-    muBtns.push(b);
-    muEl.appendChild(b);
-    if (muMatches(mu)) b.classList.add("on");
-  });
-  // a hand edit anywhere on the armies clears the highlighted question
   document.querySelector("#menu .teams").addEventListener("input", menuTouched);
   document.querySelector("#menu .teams").addEventListener("change", menuTouched);
+});
+
+/* ============================================================ THE FORCE
+   A SIDE IS A LIST OF WHAT IT BRINGS. The war room used to open on a wall of
+   "who would win" poster cards and a single WHO dropdown per side, so an
+   army was one kind of thing (and the owner: "I hate those pregame settings.
+   It makes the game so stupid"). Now each side is a force you build: a row
+   of infantry and a row for every machine or animal you add, each with its
+   own count. Quick buttons add the usual arms; the select under them adds
+   anything the game has. The list is written into the hidden WHO / HOW MANY
+   controls as one roster string (battle/core/roster.js: "m1_abrams*4,men*120"),
+   so everything downstream reads a side exactly as it always did. */
+const FORCE = { red: [], blue: [] };
+const FORCE_QUICK = [["m1_abrams", "TANK"], ["bradley_ifv", "IFV"], ["stryker_apc", "APC"], ["hmmwv", "HUMVEE"],
+  ["m270_mlrs", "ROCKET ARTILLERY"], ["ah64_apache", "GUNSHIP"], ["uh60_black_hawk", "AIR ASSAULT"], ["f35", "STRIKE JET"], ["b52", "HEAVY BOMBER"]];
+function forceLabel(id) { return id === "men" ? "INFANTRY" : kindLabel(id); }
+function forceIsMachine(id) { return !!(CBZ.unitKit && id !== "men" && CBZ.unitKit.kindOf(id) === "vehicle"); }
+function forceRead(t) {
+  const u = el(t + "U").value || SET[t + "U"], n = parseInt(el(t + "N").value, 10) || SET[t + "N"] || 1;
+  const L = [];
+  CBZ.battleRoster.kinds(u, n).forEach(function (e) {
+    const had = L.find(function (x) { return x.id === e.id; });
+    if (had) had.n += e.n; else L.push({ id: e.id, n: e.n });
+  });
+  FORCE[t] = L.length ? L : [{ id: "men", n: 30 }];
+}
+function forceWrite(t) {
+  let L = FORCE[t].filter(function (e) { return e.n > 0; });
+  if (!L.length) { L = [{ id: "men", n: 1 }]; FORCE[t] = L; }
+  let u, n;
+  if (L.length === 1) { u = L[0].id; n = L[0].n; }
+  else {
+    // machines first, the infantry last: the order they are put on the field
+    const ord = L.slice().sort(function (a, b) { return (a.id === "men") - (b.id === "men"); });
+    u = ord.map(function (e) { return e.id + "*" + e.n; }).join(",");
+    n = ord.reduce(function (s0, e) { return s0 + e.n; }, 0);
+  }
+  setKind(el(t + "U"), u);
+  el(t + "N").value = n;
+  kindRows(t);
+}
+function forceBump(t, id, by) {
+  let e = FORCE[t].find(function (x) { return x.id === id; });
+  if (!e) { e = { id: id, n: 0 }; FORCE[t].push(e); }
+  if (by === 0) e.n = 0;
+  else if (Math.abs(by) === 1 && !forceIsMachine(id)) e.n = e.n < 1 ? 10 : stepCount(e.n, by);
+  else e.n = Math.max(0, e.n + by);
+  if (e.n <= 0) FORCE[t] = FORCE[t].filter(function (x) { return x !== e; });
+  forceWrite(t); forceDraw(t); menuTouched();
+}
+function forceDraw(t) {
+  const box = el(t + "Force");
+  box.innerHTML = FORCE[t].map(function (e) {
+    return "<div class=\"fr\" data-id=\"" + esc(e.id) + "\"><span class=\"fn\">" + esc(forceLabel(e.id)) + "</span>" +
+      "<button type=\"button\" data-d=\"-1\" aria-label=\"fewer\">&minus;</button>" +
+      "<input type=\"number\" inputmode=\"numeric\" min=\"0\" value=\"" + e.n + "\" aria-label=\"how many\">" +
+      "<button type=\"button\" data-d=\"1\" aria-label=\"more\">+</button>" +
+      "<button type=\"button\" class=\"fx\" data-d=\"0\" aria-label=\"remove\">&times;</button></div>";
+  }).join("");
+}
+CBZ.npcwar.onBoot(function () {
+  const MAN = CBZ.UNIT_MANIFEST || {};
+  ["red", "blue"].forEach(function (t) {
+    forceRead(t); forceWrite(t); forceDraw(t);
+    const box = el(t + "Force");
+    box.addEventListener("click", function (ev) {
+      const b = ev.target.closest && ev.target.closest("button"), row = ev.target.closest && ev.target.closest(".fr");
+      if (!b || !row) return;
+      forceBump(t, row.dataset.id, parseInt(b.dataset.d, 10));
+    });
+    box.addEventListener("change", function (ev) {
+      const row = ev.target.closest && ev.target.closest(".fr");
+      if (!row || ev.target.tagName !== "INPUT") return;
+      const e = FORCE[t].find(function (x) { return x.id === row.dataset.id; });
+      if (!e) return;
+      e.n = Math.max(0, parseInt(ev.target.value, 10) || 0);
+      if (e.n <= 0) FORCE[t] = FORCE[t].filter(function (x) { return x !== e; });
+      forceWrite(t); forceDraw(t); menuTouched();
+      ev.stopPropagation();
+    });
+    // the usual arms, one tap each; then anything else the game has
+    const add = el(t + "Add");
+    add.innerHTML = "<button type=\"button\" data-id=\"men\">+ INFANTRY</button>" +
+      FORCE_QUICK.filter(function (q) { return !!MAN[q[0]]; }).map(function (q) {
+        return "<button type=\"button\" data-id=\"" + q[0] + "\">+ " + q[1] + "</button>";
+      }).join("") + "<select aria-label=\"add any unit\"></select>";
+    const sel = add.querySelector("select");
+    fillKind(sel, "");
+    sel.insertAdjacentHTML("afterbegin", "<option value=\"\" selected>+ MORE</option>");
+    sel.value = "";
+    add.addEventListener("click", function (ev) {
+      const b = ev.target.closest && ev.target.closest("button");
+      if (b) forceBump(t, b.dataset.id, 1);
+    });
+    sel.addEventListener("change", function (ev) {
+      const id = sel.value;
+      sel.value = "";
+      ev.stopPropagation();
+      if (id) forceBump(t, id, forceIsMachine(id) ? 1 : 10);
+    });
+  });
 });
 
 /* THE COUNT STEPPER COUNTS IN ORDERS OF MAGNITUDE. 1, 2 .. 9, 10, 20 .. 90,
@@ -408,16 +392,14 @@ function stepCount(v, dir) {
   return Math.max(1, v + dir * step);
 }
 CBZ.npcwar.onBoot(function () {
-  document.querySelectorAll("#menu .cnt button").forEach(function (b) {
-    b.addEventListener("click", function () {
-      const inp = el(b.dataset.t + "N");
-      inp.value = stepCount(parseInt(inp.value, 10) || 1, parseInt(b.dataset.d, 10) > 0 ? 1 : -1);
-      menuTouched();
-    });
-  });
   el("presets").querySelectorAll("button").forEach(function (b) {
     b.addEventListener("click", function () {
-      el("redN").value = b.dataset.n; el("blueN").value = b.dataset.n;
+      ["red", "blue"].forEach(function (t) {
+        let e = FORCE[t].find(function (x) { return x.id === "men"; });
+        if (!e) { e = { id: "men", n: 0 }; FORCE[t].push(e); }
+        e.n = parseInt(b.dataset.n, 10) || 30;
+        forceWrite(t); forceDraw(t);
+      });
       menuTouched();
     });
   });
@@ -451,35 +433,13 @@ function sumUp() {
     // head count when two armies are told apart by their nations
     const sub = TEAMS[t].name === String(S.label).toUpperCase() ? (S.title || "") : S.label;
     const k = el(t + "K"); if (k) k.textContent = String(sub).toUpperCase();
-    const n = el(t + "CallN"); if (n) n.textContent = TEAMS[t].name;
-    const c = el(t + "CallK"); if (c) c.textContent = String(sub).toUpperCase();
   });
 }
 CBZ.npcwar.onBoot(function () {
-
-  /* THE CALL. Two buttons, both optional; tapping your pick again takes it
-     back. The end screen reads SET.call and scores it into the streak. */
-  callBtns = el("callrow").querySelectorAll("button");
-});
-function showCall() {
-  callBtns.forEach(function (b) { b.classList.toggle("on", b.dataset.call === SET.call); });
-}
-CBZ.npcwar.onBoot(function () {
-  callBtns.forEach(function (b) {
-    b.addEventListener("click", function () {
-      SET.call = SET.call === b.dataset.call ? null : b.dataset.call;
-      showCall();
-    });
-  });
-  showCall();
+  // the record of calls made on the end card (scoring.js) is kept; the war room no longer asks for one
   streak = (function () {
     try { return JSON.parse(localStorage.getItem("cbz-npcwar-streak") || "null"); } catch (e) { return null; }
   })();
-  if (streak && (streak.calls > 0 || streak.best > 0)) {
-    const parts = ["STREAK " + (streak.streak | 0), "BEST " + (streak.best | 0)];
-    if (streak.calls > 0) parts.push("CALLED " + (streak.right | 0) + " OF " + (streak.calls | 0));
-    el("streak").textContent = parts.join("    ");
-  }
   sumUp();
 });
 
