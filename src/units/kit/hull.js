@@ -754,6 +754,21 @@
     for (let i = 0; i < n; i++) this.aAlpha.array[i] = 0;
   }
   let _v2 = null;
+  // the breeze every hull's smoke leans on (the volumetric fires' own wind)
+  const FXW = [1.5, 0.75];
+  let _fxwT = -1;
+  function fxWind() {
+    const now = Date.now();
+    if (now - _fxwT < 2000) return;
+    _fxwT = now;
+    if (!window.CBZ || !CBZ.weatherWind) return;
+    try {
+      const w = CBZ.weatherWind();
+      if (!w || !Number.isFinite(w.x + w.z)) return;
+      const l = Math.hypot(w.x, w.z) || 1, sp = Math.max(0.8, Math.min(3, (+w.speed || 0) * 0.3));
+      FXW[0] = w.x / l * sp; FXW[1] = w.z / l * sp;
+    } catch (e) {}
+  }
   Fx.prototype.emit = function (x, y, z, vx, vy, vz, life, s0, s1, a0, rgb, g, drag) {
     const i = this.next; this.next = (i + 1) % this.n;
     this.pos[i * 3] = x; this.pos[i * 3 + 1] = y; this.pos[i * 3 + 2] = z;
@@ -765,6 +780,7 @@
   };
   Fx.prototype.step = function (dt) {
     if (!this.live) return;
+    fxWind();
     let any = 0;
     const P = this.aPos.array, S = this.aSize.array, A = this.aAlpha.array, C = this.aTint.array;
     for (let i = 0; i < this.n; i++) {
@@ -774,8 +790,10 @@
       const k = Math.max(0, 1 - this.drag[i] * dt);
       this.vel[i * 3] *= k; this.vel[i * 3 + 2] *= k;
       this.vel[i * 3 + 1] = this.vel[i * 3 + 1] * k - this.g[i] * 9.8 * dt;
-      this.pos[i * 3] += this.vel[i * 3] * dt; this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt; this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
       const t = 1 - Math.max(0, this.life[i]) / this.max[i];
+      // smoke that rises is carried by the wind once it is clear of the hull
+      const wk = this.g[i] < 0 ? Math.min(1, (this.max[i] - this.life[i]) * 0.4) : 0;
+      this.pos[i * 3] += (this.vel[i * 3] + FXW[0] * wk) * dt; this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt; this.pos[i * 3 + 2] += (this.vel[i * 3 + 2] + FXW[1] * wk) * dt;
       P[i * 3] = this.pos[i * 3]; P[i * 3 + 1] = this.pos[i * 3 + 1]; P[i * 3 + 2] = this.pos[i * 3 + 2];
       S[i] = this.s0[i] + (this.s1[i] - this.s0[i]) * Math.sqrt(t);
       // fade in fast, out slow
@@ -1105,12 +1123,14 @@
     // burning: the hit set it alight, or it is a wreck still burning out
     const hot = vs.burning || (this.dead && u && u.burnT > 0);
     if (frac < 0.55 || hot) {
-      this.acc.dmg += dt * (hot ? 12 : (0.55 - frac) * 16);
+      this.acc.dmg += dt * (hot ? 7 : (0.55 - frac) * 16);
       this.acc.dmg = Math.min(this.acc.dmg, 6);
       while (this.acc.dmg >= 1) {
         this.acc.dmg -= 1;
         mw(this.root, E[0] + (r() - 0.5) * 0.6, E[1] + 0.3, E[2] + (r() - 0.5) * 0.6, a);
-        if (hot) this.smoke.emit(a[0], a[1], a[2], (r() - 0.5) * 0.6, 2.4 + r() * 1.5, (r() - 0.5) * 0.6, 4 + r() * 3, 0.7, 5.5, 0.6, FXC.black, -0.08, 0.5);
+        // ONE COLUMN: thick and black at the hull, climbing thirty metres,
+        // widening, thinning and leaning downwind as it goes
+        if (hot) this.smoke.emit(a[0], a[1], a[2], (r() - 0.5) * 0.7, 3.4 + r() * 1.6, (r() - 0.5) * 0.7, 10 + r() * 5, 1.0, 8.5 + r() * 3, 0.5, r() < 0.3 ? FXC.soot : FXC.black, -0.075, 0.26);
         else this.smoke.emit(a[0], a[1], a[2], (r() - 0.5) * 0.5, 1.6 + r() * 1.2, (r() - 0.5) * 0.5, 2.5 + r() * 2, 0.4, 3.0, 0.35, FXC.grey, -0.06, 0.6);
       }
     }

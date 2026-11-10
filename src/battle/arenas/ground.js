@@ -181,7 +181,9 @@ CBZ.battleGround = (function () {
 
   /* ============================================================ CRATERS */
   const SURF = {
-    sand:     { pit: [0.45, 0.34, 0.22], wall: [0.62, 0.47, 0.3], ejecta: [0.7, 0.55, 0.36], tint: [1, 1, 1], marks: 1, scorch: 0.85 },
+    // sand thrown out of a hole is the SAME sand, a shade darker for being
+    // damp from below: the old numbers drew a bright orange plate on a tan desert
+    sand:     { pit: [0.3, 0.25, 0.19], wall: [0.41, 0.345, 0.26], ejecta: [0.5, 0.425, 0.315], tint: [1, 1, 1], marks: 1, scorch: 0.9 },
     snow:     { pit: [0.24, 0.2, 0.17], wall: [0.38, 0.33, 0.29], ejecta: [0.55, 0.52, 0.5], tint: [0.86, 0.92, 1.1], marks: 1, scorch: 0.8 },
     grass:    { pit: [0.24, 0.18, 0.12], wall: [0.33, 0.25, 0.17], ejecta: [0.36, 0.3, 0.2], tint: [0.95, 1, 0.92], marks: 0.55, scorch: 0.9 },
     forest:   { pit: [0.2, 0.15, 0.1], wall: [0.28, 0.21, 0.14], ejecta: [0.3, 0.24, 0.16], tint: [0.95, 0.95, 0.9], marks: 0.7, scorch: 0.9 },
@@ -235,7 +237,9 @@ CBZ.battleGround = (function () {
     }
     for (let r = 0; r < RINGS.length - 1; r++) for (let s = 0; s < SEG; s++) {
       const a = r * SEG + s, b = r * SEG + (s + 1) % SEG, cc = (r + 1) * SEG + s, d = (r + 1) * SEG + (s + 1) % SEG;
-      idx.push(a, cc, b, b, cc, d);
+      // wound to face UP: wound the other way the whole bowl was back-face
+      // culled from above and a crater was a round hole onto the sky
+      idx.push(a, b, cc, b, d, cc);
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
@@ -803,7 +807,8 @@ CBZ.battleGround = (function () {
     const g0 = G.ground(x, z);
     const onGround = y - g0 < Math.max(1.5, cr * 1.2) && !(ev && ev.airburst);
     if (G.gl) spray(x, Math.max(y, g0), z, Math.max(1.2, cr * 2.2), Math.min(4, 0.6 + c3 * 0.5));
-    if (G.gl && onGround) clods(x, g0, z, cr, W);
+    // (loose sand has no lumps in it to throw: on the erg a bomb used to leave grey boulders)
+    if (G.gl && onGround && G.surface !== "sand") clods(x, g0, z, cr, W);
     if (onGround) {
       if (G.soft && cr >= 0.3) {
         crater(x, z, cr, cr * (G.surface === "snow" ? 0.42 : G.surface === "sand" ? 0.32 : 0.36));

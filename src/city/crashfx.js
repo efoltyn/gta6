@@ -789,17 +789,27 @@
     // count: 0 is the flame licks alone (a fire whose smoke is drawn elsewhere: structural.js's plumes)
     const count = opts.count === 0 ? 0 : Math.max(1, Math.min(6, opts.count == null ? 5 : opts.count | 0));
     const scale = Math.max(0.5, Math.min(2.2, opts.scale || 1));
+    // every plume leans on the same breeze (it used to stand bolt upright), and
+    // opts.column is a FIRE'S column: fewer, longer-lived, denser puffs that
+    // climb as one body of smoke instead of a stack of fading blobs
+    const col = !!opts.column;
+    let wx = 1.5, wz = 0.75;
+    if (CBZ.weatherWind) {
+      try { const w = CBZ.weatherWind(); if (w && Number.isFinite(w.x + w.z)) { const l = Math.hypot(w.x, w.z) || 1, sp = Math.max(0.8, Math.min(3, (+w.speed || 0) * 0.3)); wx = w.x / l * sp; wz = w.z / l * sp; } } catch (e) {}
+    }
     for (let i = 0; i < count; i++) {
       const a = rng() * 6.2832, drift = 0.25 + rng() * 0.5;
       spawnPuff(x + (rng() - 0.5) * 1.5 * scale,
         cy + 0.3 + rng() * 0.8 * scale,
         z + (rng() - 0.5) * 1.5 * scale, {
           additive: false, smoke: true, base: 1.3 * scale,
-          pop: (4.8 + rng() * 2.6) * scale,
-          life: 4.0 + rng() * 2.6, maxOp: 0.44,
+          pop: (col ? 6.5 + rng() * 3 : 4.8 + rng() * 2.6) * scale,
+          life: col ? 8 + rng() * 4 : 4.0 + rng() * 2.6, maxOp: col ? 0.62 : 0.44,
+          wx: wx, wz: wz, noHeat: !opts.flame, fin: col ? 0.08 : 0.25,
+          buoy: col ? 0.35 : undefined, drag: col ? 0.3 : undefined,
           // opts.shade: a caller's own grey (tear gas is near-white, 0.75+)
           shade: opts.shade != null ? Math.max(0, Math.min(1, +opts.shade)) + rng() * 0.05 : 0.09 + rng() * 0.06, spin: (rng() - 0.5),
-          vx: Math.cos(a) * drift, vy: 1.2 + rng() * 1.0,
+          vx: Math.cos(a) * drift, vy: col ? 2.6 + rng() * 1.2 : 1.2 + rng() * 1.0,
           vz: Math.sin(a) * drift, delay: i * 0.08 + rng() * 0.1,
         });
     }

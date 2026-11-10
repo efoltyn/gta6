@@ -1152,21 +1152,27 @@
     if (this.vs && this.vs.burning) this.burn(dt, false);
   };
   Rig.prototype.burn = function (dt, cookoff) {
-    this.burnAcc -= dt;
-    if (this.burnAcc > 0) return;
-    this.burnAcc = cookoff ? 0.12 : 0.7;
+    this.burnAcc -= dt; this.smokeAcc = (this.smokeAcc || 0) - dt;
+    const jets = cookoff && this.burnAcc <= 0, smoke = this.smokeAcc <= 0;
+    if (!jets && !smoke) return;
     this.root.updateWorldMatrix(true, false);
     const e = this.root.matrixWorld.elements;
     const lz = cookoff ? DM.turZ - 1.95 : -2.6, ly = cookoff ? DM.turY + 0.9 : 1.6;
     const x = e[4] * ly + e[8] * lz + e[12], y = e[5] * ly + e[9] * lz + e[13], z = e[6] * ly + e[10] * lz + e[14];
-    if (cookoff && CBZ.muzzleFlash) {
+    if (jets) {
+      this.burnAcc = 0.12;
       // the bustle's blow-off panels venting: two jets of flame straight up
-      for (let s = -1; s <= 1; s += 2) {
+      // (flame-sized: at scale 4 to 7 they drew one eight-metre white ball)
+      if (CBZ.muzzleFlash) for (let s = -1; s <= 1; s += 2) {
         const ox = e[0] * s * 0.78, oz = e[2] * s * 0.78;
-        try { CBZ.muzzleFlash({ x: x + ox, y: y + 1.2 + Math.random() * 2.5, z: z + oz }, { scale: 4 + Math.random() * 3, life: 0.2, color: 0xffa040 }); } catch (e2) {}
+        try { CBZ.muzzleFlash({ x: x + ox, y: y + 0.6 + Math.random() * 1.6, z: z + oz }, { scale: 1.3 + Math.random() * 1.3, life: 0.2, color: 0xff9030 }); } catch (e2) {}
       }
     }
-    if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(x, y, z, { count: cookoff ? 3 : 2, scale: cookoff ? 1.8 : 1.1, flame: true }); } catch (e3) {} }
+    if (smoke) {
+      // ONE COLUMN of black smoke off the hull, leaning downwind
+      this.smokeAcc = cookoff ? 0.3 : 0.45;
+      if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(x, y, z, { count: cookoff ? 2 : 1, scale: cookoff ? 1.7 : 1.35, flame: true, column: true, shade: 0.045 }); } catch (e3) {} }
+    }
   };
 
   // ---- KNOCKED OUT. The runtime darkens the hull's materials when it kills

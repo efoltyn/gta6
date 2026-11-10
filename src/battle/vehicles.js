@@ -238,18 +238,20 @@ function makeVehicle(teamId, i, id) {
        minute; every pass after that is the racetrack's. */
     let runIn = 0;
     if (def.drive !== "rotor" && !S.airdrop) {
-      const spd = S.speed || 200, alt = S.alt || 300;
+      const spd = S.speed || 200, alt = airCeil(S.alt || 300);
       for (const w of (def.weapons || [])) {
         if (!w) continue;
-        const rel = w.kind === "bombs" ? spd * Math.sqrt(2 * (w.alt || alt) / 9.81)
+        const rel = w.kind === "bombs" ? spd * Math.sqrt(2 * airCeil(w.alt || alt) / 9.81)
           : (w.kind === "missile" || w.kind === "sam") ? (w.range || 6000) * 0.85 : (w.range || 1500);
         runIn = Math.max(runIn, rel + spd * 6);
       }
     }
-    const back = Math.max(S.ingress || 700, runIn) + (i % 4) * 90;
+    // (a jet's book ingress is tens of kilometres: here it starts just outside its
+    // own release distance, so it is over the fight inside the first quarter minute)
+    const back = (runIn > 0 ? runIn : Math.max(S.ingress || 700, runIn)) + (i % 4) * 90;
     px = at.x - Math.sin(h) * back; pz = at.z - Math.cos(h) * back;
     // a helicopter comes in low (nap of the earth), a jet at its cruise
-    py = HOST.groundAt(px, pz) + (def.drive === "rotor" ? Math.max(S.nap || 10, Math.min(S.alt || 40, 30)) : (S.alt || 300));
+    py = HOST.groundAt(px, pz) + (def.drive === "rotor" ? Math.max(S.nap || 10, Math.min(S.alt || 40, 30)) : airCeil(S.alt || 300));
   }
   group.position.set(px, py, pz);
   group.rotation.order = "YXZ";
@@ -1520,20 +1522,28 @@ function stepRotor(u, sdt) {
   u.group.rotation.set(u.ds.pitch, u.h, 0);
   u.yaw = u.h; u.heading = u.h;
 }
+/* THE AIR WAR IS FLOWN LOW. An F-35's book cruise is 4,600 m and a B-52's is
+   over nine kilometres; from there the battlefield is a postage stamp, the
+   aircraft is a dot nobody on the ground ever sees, and a bomb takes half a
+   minute to fall. Over this field every jet makes its runs at a few hundred
+   metres: it crosses the fight where you can see and hear it, and what it
+   drops lands seconds later. */
+const AIR_CEIL = 320;
+function airCeil(a) { return Math.min(a, AIR_CEIL); }
 function stepJet(u, sdt) {
   const D = CBZ.vehicleDrive, S = u.def.stats || {};
   const com = objectiveOf(u);
   const spd = S.speed || 200;
   const turn = Math.min(S.turn || 0.3, 9.81 * Math.tan(1.05) / Math.max(30, spd));
   const R = spd / turn;                                   // the turn circle
-  const cruise = S.alt || 300;
+  const cruise = airCeil(S.alt || 300);
   const t = u.tgt && !u.tgt.dead && !u.tgt.fled && !S.airdrop ? u.tgt : null;
   const ref = t ? t.pos : com;
   const W = S.airdrop ? null : vehAirWeapon(u, t);
   const w = W ? W.w : null;
   const kind = w ? w.kind : "none";
   const dive = kind === "autocannon" || kind === "mg" || kind === "rockets" || kind === "cannon";
-  const runAlt = w && w.alt ? w.alt : (dive ? Math.min(cruise, 1500) : cruise);
+  const runAlt = airCeil(w && w.alt ? w.alt : cruise);
   const dRef = Math.hypot(u.pos.x - ref.x, u.pos.z - ref.z);
   const gRef = HOST.groundAt(ref.x, ref.z);
   // where the weapon is let go, horizontally from the mark
@@ -1556,7 +1566,7 @@ function stepJet(u, sdt) {
     gx = ref.x; gz = ref.z;
     if (dive) {
       // the dive line: height over the mark = distance x tan(dive)
-      const dv = w.dive || 0.3, floor = w.pullOut || 250;
+      const dv = w.dive || 0.3, floor = Math.min(w.pullOut || 250, runAlt * 0.6);
       wantAGL = D.clamp(dRef * Math.tan(dv), floor, runAlt);
       if (dRef < floor / Math.tan(dv) * 1.1) vehJetBreak(u, R);
     }
@@ -1566,6 +1576,7 @@ function stepJet(u, sdt) {
     else if ((kind === "missile" || kind === "sam") && dRef < Math.max((w.minRange || 300) * 2, release * 0.35)) vehJetBreak(u, R);
     if (S.airdrop && !u.dismounted && dRef < 140) vehDismount(u);
   }
+  u.runLeft = u.airPhase === "in" && !u.egress && w ? (dRef - release) / spd : 99;   // seconds to weapon release
   const dx = gx - u.pos.x, dz = gz - u.pos.z;
   const want = Math.atan2(dx, dz);
   const err = D.wrap(want - u.h);
@@ -1581,7 +1592,7 @@ function stepJet(u, sdt) {
   // on the dive line the path angle IS the line's slope (fed forward), plus
   // a correction back onto it; anywhere else, climb or descend to the height
   let ff = 0;
-  if (dive && u.airPhase === "in" && !u.egress) { const dv = w.dive || 0.3; if (wantAGL < runAlt - 1 && wantAGL > (w.pullOut || 250) + 1) ff = -dv; }
+  if (dive && u.airPhase === "in" && !u.egress) { const dv = w.dive || 0.3; if (wantAGL < runAlt - 1 && wantAGL > Math.min(w.pullOut || 250, runAlt * 0.6) + 1) ff = -dv; }
   const gWant = D.clamp(ff + Math.atan2(wantY - u.pos.y, Math.max(200, spd * 3)), -gmax, gmax * 0.8);
   u.ds.gamma += D.clamp(gWant - u.ds.gamma, -0.5 * sdt, 0.5 * sdt);
   u.ds.v = spd;
@@ -1948,10 +1959,15 @@ function stepWreck(u, sdt) {
       if (STUDIO.boom) STUDIO.boom({ x: u.pos.x, y: g + 1, z: u.pos.z }, { W: Math.min(40, 0.0008 * (u._mass || 10000)), kind: "carcook", by: null });
     }
   }
+  // a dead hull is still a weight on the ground: when a bomb digs the sand out
+  // from under it, it goes down into the hole (it used to hang over the bowl)
+  if (!u.air) {
+    const g = HOST.groundAt(u.pos.x, u.pos.z);
+    if (u.pos.y > g + 0.02) { u.sinkV = (u.sinkV || 0) + 9.81 * sdt; u.pos.y = Math.max(g, u.pos.y - u.sinkV * sdt); }
+    else { u.sinkV = 0; if (u.pos.y < g - 0.02) u.pos.y += Math.min(g - u.pos.y, 2 * sdt); }
+  }
   if (u.burnT > 0) {
     u.burnT -= sdt;
-    u._smokeT = (u._smokeT || 0) - sdt;
-    if (u._smokeT <= 0 && CBZ.cityCrashSmoke) { u._smokeT = 0.7; try { CBZ.cityCrashSmoke(u.pos.x, u.pos.y + u.vheight, u.pos.z, { count: 2, scale: 1.2 }); } catch (e) {} }
   }
 }
 

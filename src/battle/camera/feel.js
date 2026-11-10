@@ -59,6 +59,7 @@ function feelHand() {
   const s = cam.shot;
   if (s === "charge") return 0.0085;            // running with them
   if (s === "hero") return 0.0048;
+  if (s === "wing") return 0.0026;              // a chase plane in rough air
   if (s === "round") return 0.006;              // strapped to a rocket
   if (s === "tripod") return 0.0011;            // sticks, a long lens: it only breathes
   if (s === "establish") return 0.0012;
@@ -137,7 +138,7 @@ function camFeel(dt) {
   F.t += dt;
   const m = cam.followM;
   const riding = cam.mode === "fp" || cam.mode === "lock" || cam.mode === "follow" ||
-    (cam.mode === "auto" && (cam.shot === "hero" || cam.shot === "charge" || cam.shot === "tripod"));
+    (cam.mode === "auto" && (cam.shot === "hero" || cam.shot === "charge" || cam.shot === "tripod" || cam.shot === "wing"));
   feelGun(riding ? m : null);
   // two sub-steps keep a stiff spring honest on a slow frame
   feelSpring(dt * 0.5, 190, 17); feelSpring(dt * 0.5, 190, 17);

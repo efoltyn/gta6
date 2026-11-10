@@ -525,14 +525,16 @@
     "        if (ys > -0.3) {",
     "          float spread = smoothstep(uCeil - 1.2, uCeil, q.y) * (1.2 + H * 0.6);",
     "          vec2 off = uWind * max(ys, 0.0) * 0.35;",
-    "          float rs = Rb * 0.55 + max(ys, 0.0) * 0.38 + spread;",
+    "          float rs = Rb * 0.55 + max(ys, 0.0) * (uCeil > 90.0 ? 0.2 : 0.38) + spread;",
     "          float es = 1.0 - length(q.xz - off) / rs;",
     "          if (es > -0.5) {",
     "            vec3 cs = vec3((q.x - off.x) / (rs * 2.0 + 0.6), (q.y - uT * 0.9) / 2.4, (q.z - off.y) / (rs * 2.0 + 0.6)) + seed * 1.31;",
     "            vec4 n2 = noise4(cs);",
     "            float b2 = es + (n2.r - 0.5) * 1.0 + (n2.g - 0.5) * 0.3;",
     "            if (b2 > 0.0) {",
-    "              float ds = clamp(b2 * 1.6, 0.0, 1.0) * smoothstep(-0.3, H * 0.5, ys) * uFire.w;",
+    // in the open the soot thins as it climbs and is gone before the box ends (it was a
+    // black cone cut off flat); under a ceiling it still pools
+    "              float ds = clamp(b2 * 1.6, 0.0, 1.0) * smoothstep(-0.3, H * 0.5, ys) * uFire.w * (uCeil > 90.0 ? 0.7 * (1.0 - smoothstep(H * 1.2, H * 4.0 + 1.4, q.y)) : 1.0);",
     "              float a = 1.0 - exp(-ds * uSmoke.x * stepL);",
     "              float under = exp(-max(ys, 0.0) / max(H, 0.3));",
     "              vec3 lit = uSoot * (uAmb + uKeyCol * 0.6 * clamp(0.4 + n2.b, 0.0, 1.0)) + vec3(1.0, 0.4, 0.1) * uFire.z * uHeat.z * under * 0.12;",

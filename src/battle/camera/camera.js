@@ -177,7 +177,8 @@ function camApply(dt) {
   const sx = Math.sin(cam.yaw) * Math.cos(cp), sz = Math.cos(cam.yaw) * Math.cos(cp), sy = Math.sin(cp);
   const fy = cam.focus.y + 1.2;
   let want = 1;
-  if (CBZ.micro.segmentBlocked) {
+  // (nothing stands between a chase plane and its subject but the subject's own wing)
+  if (CBZ.micro.segmentBlocked && !(cam.mode === "auto" && cam.shot === "wing")) {
     for (let t = 0; t < 6; t++) {
       const d = cam.dist * want;
       const px = cam.focus.x + sx * d, pz = cam.focus.z + sz * d;
@@ -362,6 +363,8 @@ function interestOf(m) {
   if (charging(m)) s += 2.2;
   if (m.beast) s += 0.8 + Math.min(2, bodySize(m) * 0.6);
   if (m.vehicle) s += 1.2 + (simT - (m.lastShotT || -9) < 2.5 ? 2 : 0);
+  // an aircraft about to let go: the next few seconds of this war are its
+  if (m.air && m.runLeft != null && m.runLeft < 6 && m.runLeft > -1) s += 7;
   s += Math.min(3, (m.kills || 0) * 0.55);
   if (m.hp < m.maxHp * 0.4 && inContact(m)) s += 0.8;          // the last of him
   if (m === cam.followM) s *= 1.35;                            // the shot in hand is worth keeping
@@ -507,12 +510,12 @@ function warSnap() { warGlide(true); }
                             (side-on to the fight axis) or GENERAL (overhead)
    Cuts snap; inside a shot the lens moves smoothly. */
 let dirScanT = 0;
-function directorCut(force, round) {
+function directorCut(force, round, wing) {
   const prev = cam.followM;
   // a subject that held the lens for its whole shot gives it up
   cam.tired = prev && !prev.dead && closeShot(cam.shot) && simT >= cam.cutAt ? prev : null;
   if (prev) SEEN.set(prev, simT);
-  const subj = round ? null : bestSubject();
+  const subj = round ? null : wing || bestSubject();
   cam.tired = null;
   cam.cuts++;
   cam.anchor = null;
@@ -522,18 +525,20 @@ function directorCut(force, round) {
   const quiet = cam.score < 1.2;
   let shot;
   if (round) shot = "round";
+  else if (wing) shot = "wing";
   else if (!subj || quiet && cam.sinceWide >= 1) shot = crand() < 0.55 ? "establish" : "general";
   else if (cam.sinceWide >= 2 && !force) shot = crand() < 0.6 ? "establish" : "general";
   else if (charging(subj)) shot = crand() < 0.25 && tripodPlace(subj) ? "tripod" : "charge";
   else if (tripodWants(subj) && tripodPlace(subj)) shot = "tripod";
-  else shot = "hero";
+  else shot = subj.air ? "wing" : "hero";
   if (round) cam.roundAt = simT;
   cam.shot = shot;
   cam.followM = closeShot(shot) ? subj : null;
   cam.sinceWide = closeShot(shot) || round ? cam.sinceWide + 1 : 0;
   cam.craneSpin = (crand() < 0.5 ? -1 : 1) * (0.012 + crand() * 0.02);
   cam.holdT = 0;
-  cam.cutAt = simT + (shot === "hero" ? 6 + crand() * 4 : shot === "round" ? 30 : shot === "tripod" ? 5.5 + crand() * 2.5
+  cam.wingAt = simT;
+  cam.cutAt = simT + (shot === "hero" ? 6 + crand() * 4 : shot === "round" ? 9 : shot === "wing" ? 7 + crand() * 2 : shot === "tripod" ? 5.5 + crand() * 2.5
     : shot === "charge" ? 4.5 + crand() * 2 : 4.5 + crand() * 2.5);
   cam.ease = shot === "general" || shot === "establish" ? 0.06 : 0.012;
   warSnap();
@@ -546,7 +551,7 @@ function directorCut(force, round) {
   cam._lastShot = shot; cam._lastSide = cam.side;
 }
 // the shots that are ON a unit (the who card, the death beat, the kill beat)
-function closeShot(s) { return s === "hero" || s === "charge" || s === "tripod"; }
+function closeShot(s) { return s === "hero" || s === "charge" || s === "tripod" || s === "wing"; }
 
 /* ============================================================ THE TRIPOD
    The lens does not move. It is planted on the ground AHEAD of the thing and
@@ -557,7 +562,8 @@ function closeShot(s) { return s === "hero" || s === "charge" || s === "tripod";
 function unitSpeed(m) { return Math.abs(m.vehicle ? ((m.ds && m.ds.v) || m.speed || 0) : (m.speed || 0)); }
 function tripodWants(m) {
   if (!m || m.dead || m.beast) return false;
-  if (m.air) return crand() < 0.75;                     // from behind, an aircraft is a shot of sand
+  // a jet at 250 m/s is through a planted frame in a blink: it gets the wing shot
+  if (m.air) return !(m.def && m.def.drive === "jet") && crand() < 0.45;
   if (m.vehicle) return unitSpeed(m) > 2.5 && crand() < 0.55;
   return false;
 }
@@ -687,7 +693,8 @@ function frameRound(dt) {
     cam.wDist = R.kind === "bomb" ? 8.5 : 6;
     cam.wFov = lensBase() + 10;
     cam.ease = 0.006;
-    cam.cutAt = Math.max(cam.cutAt, simT + 1);
+    // a ride is a few seconds, not a flight: a long-range missile is left to arrive on its own
+    if (simT - cam.roundAt < 8) cam.cutAt = Math.max(cam.cutAt, simT + 1);
     if (dt === 0) { cam.yaw = cam.wYaw; cam.pitch = cam.wPitch; cam.dist = cam.wDist; }
   } else {
     // IT LANDED. Stay, and back off far enough to see what it did.
@@ -698,10 +705,35 @@ function frameRound(dt) {
     cam.ease = 0.12;
   }
 }
+/* ============================================================ THE WING
+   AN AIRCRAFT, FILMED FROM THE AIR. The lens flies in formation with it: off
+   the nose quarter and a little above to begin with, so the whole airframe is
+   in the frame with the battlefield sliding by underneath, and it drifts back
+   along the wing as the shot runs until it is looking over the tail at where
+   the aircraft is going. When it lets a weapon go the lens watches the store
+   fall away for a beat (stepDirector holds the ride back), and THEN goes with
+   it. */
+function frameWing(m, dt) {
+  const sz = bodySize(m), h = camHeading(m, dt, 0.35);
+  const jet = !!(m.def && m.def.drive === "jet");
+  cam.wFocus.set(m.pos.x, m.pos.y + (m.vheight || 3) * 0.35 - 1.2, m.pos.z);
+  cam.focus.copy(cam.wFocus);                         // rails: it does 250 m/s
+  const age = Math.max(0, simT - (cam.wingAt || 0));
+  cam.wYaw = h + cam.side * Math.min(2.5, 0.7 + age * (jet ? 0.26 : 0.16));
+  cam.wPitch = jet ? 0.2 : 0.14;
+  // room for the whole span: a B-52 is 56 m across, an F-35 eleven
+  cam.wDist = Math.max(sz, m.vwid || 0) * (jet ? 2.2 : 1.9) + 8;
+  cam.wFov = lensBase() - 2;
+  cam.ease = 0.03;
+  if (dt === 0) { cam.yaw = cam.wYaw; cam.pitch = cam.wPitch; cam.dist = cam.wDist; }
+  if (m.dead && cam.holdT === 0) { cam.holdT = 2.4; cam.cutAt = Math.max(cam.cutAt, simT + 2.4); }
+  if (cam.holdT > 0) cam.holdT -= dt;
+}
 function frameDirector(dt) {
   const m = cam.followM;
   const shot = cam.shot;
   if (shot === "round" && cam.round) { frameRound(dt); return; }
+  if (shot === "wing" && m) { frameWing(m, dt); return; }
   if (shot === "tripod" && m && cam.tri) { frameTripod(m, dt); return; }
   if ((shot === "hero" || shot === "charge") && m) {
     const sz = bodySize(m);
@@ -795,16 +827,33 @@ function stepDirector(dt) {
     dirScanT = 0.6;
     // something much bigger elsewhere earns an early cut (never mid death beat)
     const held = simT - (cam.cutAt - 6);
-    if (held > 2.5 && cam.holdT <= 0) {
+    // (a ride is seen through to what the round did)
+    if (held > 2.5 && cam.holdT <= 0 && cam.shot !== "round") {
       const now = subj && !subj.dead ? interestOf(subj) : 0;
       const best = bestSubject();
       if (best && best !== subj && cam.score > now * 2 + 4) cut = true;
     }
   }
   camRoundScan();
-  const rd = roundWanted();
-  if (rd) directorCut(false, rd);
-  else if (cut) directorCut();
+  // one ride in hand (or promised) at a time: the rest of a stick falls unfilmed
+  const rd = cam.pend ? (CAMRND.o = null, null) : roundWanted();
+  if (rd) {
+    /* THE AIRCRAFT FIRST, THEN WHAT IT DROPPED. A round off an aircraft is
+       not ridden from the instant it leaves: the lens is on (or cuts to) the
+       aircraft, watches the store come off and fall away, and goes after it
+       a beat later. Anything launched from the ground is ridden at once. */
+    const by = rd.by && rd.by.air && !rd.by.dead ? rd.by : null;
+    if (by) {
+      const on = cam.shot === "wing" && cam.followM === by;
+      cam.pend = { R: rd, at: simT + (on ? 1.1 : 1.7) };
+      if (!on) directorCut(false, null, by);
+      else cam.cutAt = Math.max(cam.cutAt, cam.pend.at + 0.1);
+    } else directorCut(false, rd);
+  } else if (cam.pend && simT >= cam.pend.at) {
+    const R = cam.pend.R; cam.pend = null;
+    if (roundAlive(R)) directorCut(false, R); else if (cut) directorCut();
+  } else if (cam.pend && simT < cam.pend.at - 3) cam.pend = null;
+  else if (cut && !cam.pend) directorCut();
   frameDirector(dt);
   slowmoWatch();
 }
@@ -988,7 +1037,8 @@ function lockTo(m) {
   cam.lockM = m;
   cam.followM = m;
   cam.lockHM = null; cam.fpHM = null;
-  cam.lockRel = 0.35 * (crand() < 0.5 ? -1 : 1);
+  // an aircraft is looked at from off its nose (from behind it is a shot of sand)
+  cam.lockRel = (m && m.air ? Math.PI - 0.95 : 0.35) * (crand() < 0.5 ? -1 : 1);
   cam.lockPitch = 0; cam.holdT = 0; cam.deadSeen = false;
   cam.fpYaw = cam.fpPitch = 0;
   cam.snap = true;

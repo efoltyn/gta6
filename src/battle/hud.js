@@ -18,7 +18,7 @@ let lockBarOn = false;
 function stepWho() {
   if (lockBarOn !== (cam.mode === "lock" || cam.mode === "fp")) setLockBar();
   const m = (cam.mode === "follow" || cam.mode === "you" || cam.shot === "hero" ||
-    cam.shot === "charge" || cam.shot === "tripod" || cam.shot === "study" || cam.mode === "kill" || cam.mode === "lock" || cam.mode === "fp")
+    cam.shot === "charge" || cam.shot === "tripod" || cam.shot === "wing" || cam.shot === "study" || cam.mode === "kill" || cam.mode === "lock" || cam.mode === "fp")
     ? cam.followM : null;
   const on = !!m && !m.dead;
   if (on !== whoC.on) { whoC.on = on; el("who").classList.toggle("on", on); }

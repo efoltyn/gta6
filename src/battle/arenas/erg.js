@@ -769,6 +769,15 @@ function ergSkin(world) {
         // (the salt pan and the mountains past the dune ring keep their own)
         .replace("#include <color_fragment>", "#include <color_fragment>\n" +
           "diffuseColor.rgb *= mix(vec3(0.9, 0.78, 0.65), vec3(1.0), smoothstep(2650.0, 2900.0, length(vHoleW.xz)));" +
+          // ON THE SAND THE WHOLE BASIN IS SAND. The desert world's own floor is
+          // painted in patches (a salt pan, a dry sea bed, an orange plain) and
+          // from an aircraft those read as flat coloured polygons. Everything
+          // below the mountains wears the erg's sand, mottled at the scale of
+          // kilometres so it is not one flat tone; the mountains are the same stone, darker.
+          (P.surface === "sand" ? "\n{ float mt = smoothstep(20.0, 150.0, vHoleW.y);" +
+            " vec3 sc = vec3(" + (function () { const c = new THREE.Color(P.sand); return [c.r * 0.9, c.g * 0.895, c.b * 0.88].map(function (v) { return v.toFixed(4); }).join(","); })() + ");" +
+            " float n = sin(vHoleW.x * 0.0021 + 1.3) * sin(vHoleW.z * 0.0017 + 0.4) * 0.6 + sin(vHoleW.x * 0.011 + vHoleW.z * 0.007) * 0.25 + sin(vHoleW.x * 0.037 - vHoleW.z * 0.029) * 0.15;" +
+            " sc *= 1.0 + 0.06 * n; diffuseColor.rgb = mix(sc, sc * vec3(0.8, 0.79, 0.8), mt); }" : "") +
           (P.tint ? "\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(" + P.tint.map(function (v) { return v.toFixed(3); }).join(",") +
             "), 0.82 * (1.0 - smoothstep(2650.0, 2900.0, length(vHoleW.xz))));" : ""));
     };
@@ -783,7 +792,11 @@ function ergSkin(world) {
   if (world && world.root) {
     const drop = [];
     world.root.children.forEach(function (o) {
-      if (o.name === "terrain" || o.name === "sea") return;
+      if (o.name === "terrain") return;
+      // THE ERG IS SAND. On the sand nothing else stays: no sea on the
+      // horizon, no boulders, no cone bushes, no flat-topped mesas.
+      if (P.surface === "sand") { drop.push(o); return; }
+      if (o.name === "sea") return;
       if (o.isInstancedMesh && o.count > 0) {
         const mm = new THREE.Matrix4(), pp = new THREE.Vector3();
         o.getMatrixAt(0, mm); pp.setFromMatrixPosition(mm);
@@ -794,6 +807,18 @@ function ergSkin(world) {
     drop.forEach(function (o) { world.root.remove(o); });
   }
   reseatDesertDress(world);
+  // UNDER ALL OF IT, SAND. Wherever two ground meshes do not quite meet (the
+  // rim of the dune window, the lip of a crater) the gap used to show the
+  // bright bottom of the sky; now it shows more sand.
+  if (P.surface === "sand") {
+    const c = new THREE.Color(P.sand);
+    const under = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(c.r * 0.86, c.g * 0.9, c.b * 1.02), fog: true }));
+    under.rotation.x = -Math.PI / 2;
+    under.position.set(DUNE.cx, -70, DUNE.cz);
+    under.name = "sandUnder"; under.userData.dynamic = true; under.frustumCulled = false;
+    CBZ.scene.add(under);
+  }
 }
 // the old name, kept for anything that still calls it
 function duneSkin(world) { return ergSkin(world); }
