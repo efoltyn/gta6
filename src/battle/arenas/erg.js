@@ -124,8 +124,8 @@ function foldSeg(ax, az, bx, bz, fn) {
    skin is lit per pixel now); `tint` is what the world's far terrain is worked
    toward so the horizon matches the window. */
 const ERG_PAL = {
-  sand:   { form: "dune",  surface: "sand", sand: 0xc89a62, crest: 0xdcb47a, trough: 0xa5774a, slip: 0xd1a46a, pan: 0x9d8466,
-            amp: 1, tint: null, tuft: 0x9a8a5a, tufts: 0, rough: 0.96 },
+  sand:   { form: "dune",  surface: "sand", sand: 0xc9b088, crest: 0xdac59e, trough: 0xa9916c, slip: 0xcfb890, pan: 0xa39478,
+            amp: 0.4, tint: null, tuft: 0x9a8a5a, tufts: 0, rough: 0.96 },
   snow:   { form: "drift", surface: "snow", sand: 0xe4e9ee, crest: 0xf4f7fa, trough: 0xd1d9e1, slip: 0xc7d3df, pan: 0xd6dce1,
             amp: 1, tint: [0.88, 0.91, 0.94], tuft: 0x857e6c, tufts: 160, rough: 0.72 },
   grass:  { form: "roll",  surface: "grass", sand: 0x6c8744, crest: 0x7a9650, trough: 0x5c763a, slip: 0x6c8744, pan: 0x8b8758,
@@ -781,24 +781,30 @@ function ergSkin(world) {
           // kilometres so it is not one flat tone; the mountains are the same stone, darker.
           (P.surface === "sand" ? "\n{ float mt = smoothstep(20.0, 150.0, vHoleW.y);" +
             " vec3 sc = vec3(" + (function () { const c = new THREE.Color(P.sand); return [c.r * 0.9, c.g * 0.895, c.b * 0.88].map(function (v) { return v.toFixed(4); }).join(","); })() + ");" +
-            /* WHAT A DESERT IS FROM THE AIR. Not one tone: sheets of pale sand,
-               fields of transverse dunes (a long lit back, a short dark slip
-               face, crests that wander), dark gravel pavement between them, and
-               pale dry washes braided across the gravel. Painted, so an
-               aircraft filmed from above has ground going past under it. */
+            /* THE DESERT OF 1991, FROM THE AIR. Southern Iraq and Kuwait are
+               not a postcard of dunes: a flat pale plain to the haze, nothing
+               standing on it. What the gun-camera film shows is tone and
+               tracks: broad faint patches of darker gravel, low sand ripples
+               you only just see, a few pale dry washes, and the long straight
+               scars of vehicle tracks crossing each other. Barren, not blank. */
             " vec2 w = vHoleW.xz;" +
             " vec2 wp = w + 260.0 * (vec2(ergF(w * 0.0014), ergF(w * 0.0014 + 31.0)) - 0.5);" +
             " float big = ergF(wp * 0.0008 + 5.0);" +
-            " float pav = smoothstep(0.5, 0.6, big);" +
-            " float dn = 1.0 - smoothstep(0.38, 0.47, big);" +
-            " float saw = fract((wp.x * 0.83 + wp.y * 0.55) / 120.0 + 3.0 * ergF(w * 0.0026));" +
-            " float slip = smoothstep(0.72, 0.78, saw) * (1.0 - smoothstep(0.95, 1.0, saw));" +
-            " float duneL = mix(0.9, 1.13, smoothstep(0.0, 0.72, saw)) - 0.24 * slip * (0.5 + ergF(w * 0.011));" +
-            " float wash = 1.0 - smoothstep(0.0, 0.05, abs(ergF(wp * 0.0035 + 9.0) * 2.0 - 1.0));" +
+            " float pav = smoothstep(0.42, 0.66, big);" +
+            " float dn = 1.0 - smoothstep(0.36, 0.5, big);" +
+            " float saw = fract((wp.x * 0.83 + wp.y * 0.55) / 90.0 + 3.0 * ergF(w * 0.0026));" +
+            " float duneL = mix(0.96, 1.05, smoothstep(0.0, 0.7, saw)) - 0.07 * smoothstep(0.7, 0.8, saw) * (1.0 - smoothstep(0.9, 1.0, saw));" +
+            " float wash = 1.0 - smoothstep(0.0, 0.035, abs(ergF(wp * 0.0022 + 9.0) * 2.0 - 1.0));" +
+            " float trk = 0.0;" +
+            " for (int k = 0; k < 3; k++) { float a = 0.5 + float(k) * 1.13; vec2 d = vec2(cos(a), sin(a));" +
+            "   float c = dot(w, vec2(-d.y, d.x)) + 55.0 * ergN(vec2(dot(w, d) * 0.0018, float(k) * 7.0)) + float(k) * 211.0;" +
+            "   float per = 1300.0 + float(k) * 470.0; float q = abs(fract(c / per) - 0.5) * per;" +
+            "   trk = max(trk, (1.0 - smoothstep(1.5, 4.5, abs(q - 6.0))) * step(0.35, ergN(vec2(floor(c / per) * 3.1, dot(w, d) * 0.0006)))); }" +
             " sc *= mix(1.0, duneL, dn);" +
-            " sc = mix(sc, sc * vec3(0.7, 0.66, 0.63), pav * (0.55 + 0.45 * ergF(w * 0.017)));" +
-            " sc = mix(sc, sc * vec3(1.16, 1.14, 1.1), wash * (1.0 - dn) * 0.85);" +
-            " sc *= 0.92 + 0.16 * ergF(w * 0.06);" +
+            " sc = mix(sc, sc * vec3(0.8, 0.78, 0.76), pav * (0.5 + 0.5 * ergF(w * 0.017)));" +
+            " sc = mix(sc, sc * vec3(1.08, 1.07, 1.05), wash * 0.6);" +
+            " sc = mix(sc, sc * vec3(1.14, 1.13, 1.1), trk);" +
+            " sc *= 0.95 + 0.1 * ergF(w * 0.06);" +
             " diffuseColor.rgb = mix(sc, sc * vec3(0.8, 0.79, 0.8), mt); }" : "") +
           (P.tint ? "\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(" + P.tint.map(function (v) { return v.toFixed(3); }).join(",") +
             "), 0.82 * (1.0 - smoothstep(2650.0, 2900.0, length(vHoleW.xz))));" : ""));

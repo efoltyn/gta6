@@ -43,11 +43,11 @@ function begin(asBench) {
          man throws a long shadow down the slope — which is the picture of a
          desert war. The fill drops so the shade is shade (warm sand bounce,
          cool sky), and the haze goes gold toward the horizon. */
-      fov: 64, far: 16000, exposure: 0.8,
-      sky: { top: 0x2f63a3, bottom: 0xe6b57c, fogNear: 700, fogFar: 7200, radius: 12000, exponent: 0.55 },
-      lights: { sun: 1.1, hemi: 0.36, shadowSpan: 160, shadowMap: 2048, sunColor: 0xffcf98,
-        skyColor: 0x9db4d0, groundColor: 0xb48a58 },
-      sunDir: [0.78, 0.36, 0.5],
+      fov: 64, far: 16000, exposure: 0.7,
+      sky: { top: 0x4a78ad, bottom: 0xdccdb0, fogNear: 500, fogFar: 6200, radius: 12000, exponent: 0.5 },
+      lights: { sun: 1.12, hemi: 0.42, shadowSpan: 160, shadowMap: 2048, sunColor: 0xffe6c2,
+        skyColor: 0xa9bcd2, groundColor: 0xb7a380 },
+      sunDir: [0.66, 0.62, 0.42],
     },
     /* OPEN WATER. A maritime sun high enough to put caustic-bright tops on
        the swell, a short fog so the horizon is haze and not a hard rim on a
