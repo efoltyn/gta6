@@ -171,7 +171,7 @@ CBZ.massDraw = (function () {
   // flat), and how he is moving in it (a walk, a run, a rush, a crawl)
   function clipFor(r, spd, C) {
     const p = C.down && C.down[r] ? 2 : C.post ? (C.postT[r] > 0 ? C.postTo[r] : C.post[r]) : 0;
-    if (p === 2) return spd > 0.1 ? CL.crawl : CL.prone;
+    if (p === 2) return spd > 0.3 ? CL.crawl : CL.prone;
     if (C.life[r] === 2 || spd > 3.0) return CL.run;
     if (p === 1) return spd > 0.35 ? CL.crouch : CL.kneel;
     if (spd > 0.35) return CL.walk;

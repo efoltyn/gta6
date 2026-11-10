@@ -812,7 +812,7 @@ function ergSkin(world) {
   // bright bottom of the sky; now it shows more sand.
   if (P.surface === "sand") {
     const c = new THREE.Color(P.sand);
-    const under = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000),
+    const under = new THREE.Mesh(new THREE.PlaneGeometry(80000, 80000),
       new THREE.MeshBasicMaterial({ color: new THREE.Color(c.r * 0.86, c.g * 0.9, c.b * 1.02), fog: true }));
     under.rotation.x = -Math.PI / 2;
     under.position.set(DUNE.cx, -70, DUNE.cz);

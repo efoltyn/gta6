@@ -248,7 +248,9 @@ function makeVehicle(teamId, i, id) {
     }
     // (a jet's book ingress is tens of kilometres: here it starts just outside its
     // own release distance, so it is over the fight inside the first quarter minute)
-    const back = (runIn > 0 ? runIn : Math.max(S.ingress || 700, runIn)) + (i % 4) * 90;
+    // (...and never from beyond the edge of the world: a missile carrier's release
+    // distance is 13 km, which put it outside the map looking back at a disc)
+    const back = Math.min(3600, runIn > 0 ? runIn : Math.max(S.ingress || 700, runIn)) + (i % 4) * 90;
     px = at.x - Math.sin(h) * back; pz = at.z - Math.cos(h) * back;
     // a helicopter comes in low (nap of the earth), a jet at its cruise
     py = HOST.groundAt(px, pz) + (def.drive === "rotor" ? Math.max(S.nap || 10, Math.min(S.alt || 40, 30)) : airCeil(S.alt || 300));
@@ -2093,13 +2095,80 @@ function vehYouSeatWeapon(u, t) {
   }
   return best || list[0];
 }
+/* YOU FLY IT. The same hands as Gang City's aircraft (city/playeraircraft.js):
+     a jet          W / S   stick forward / back (S pulls the nose up)
+                    A / D   roll: bank it and pull to turn
+                    Q / E   rudder
+                    SPACE or SHIFT  throttle up,  CTRL or C  throttle down
+     a helicopter   W / S   cyclic: nose down and go / back
+                    A / D   slide sideways at the hover, turn at speed
+                    Q / E   pedals: the nose round in place
+                    SPACE or SHIFT  climb,  CTRL or C  descend
+   The mouse is a free look round the aircraft and comes back behind it when
+   you let go; fire is the trigger, X the next weapon. A jet flown into the
+   ground is a wreck; a helicopter can be set down. */
+function stepYouAir(u, sdt, I, KB) {
+  const D = CBZ.vehicleDrive, S = u.def.stats || {};
+  const dn = function (c) { return !!(KB && KB.isDown(c)); };
+  const lift = (dn("Space") || dn("ShiftLeft") || dn("ShiftRight") ? 1 : 0) - (dn("ControlLeft") || dn("ControlRight") || dn("KeyC") ? 1 : 0);
+  const rud = (dn("KeyE") ? 1 : 0) - (dn("KeyQ") ? 1 : 0);
+  const g0 = HOST.groundAt(u.pos.x, u.pos.z);
+  if (u.def.drive === "rotor") {
+    const vmax = S.speed || 70;
+    const H = u.youH || (u.youH = { f: u.ds.v || 0, s: 0, y: 0, bank: 0 });
+    const fast = Math.abs(H.f) > vmax * 0.3;
+    H.f += D.clamp(I.az * vmax - H.f, -14 * sdt, 11 * sdt);
+    H.s += D.clamp((fast ? 0 : I.ax * vmax * 0.35) - H.s, -12 * sdt, 12 * sdt);
+    H.y += D.clamp(lift * 11 - H.y, -16 * sdt, 16 * sdt);
+    // screen right is (-cos h, sin h); a turn to the right is the heading going DOWN
+    u.h = D.wrap(u.h - rud * 1.15 * sdt - (fast ? I.ax * 0.7 * sdt : 0));
+    const fx = Math.sin(u.h), fz = Math.cos(u.h);
+    u.pos.x += (fx * H.f - fz * H.s) * sdt; u.pos.z += (fz * H.f + fx * H.s) * sdt;
+    u.pos.y = Math.max(g0 + 1.6, u.pos.y + H.y * sdt);
+    if (u.pos.y <= g0 + 1.61 && H.y < 0) H.y = 0;
+    u.ds.v = H.f; u.ds.vy = H.y; u.speed = Math.hypot(H.f, H.s);
+    u.ds.pitch += (D.clamp(H.f / vmax * 0.3, -0.16, 0.3) - u.ds.pitch) * Math.min(1, sdt * 3);
+    H.bank += (D.clamp(H.s / vmax * 1.2 + (fast ? I.ax * 0.35 : 0), -0.45, 0.45) - H.bank) * Math.min(1, sdt * 3);
+    u.group.rotation.set(u.ds.pitch, u.h, H.bank);
+    u.airPhase = "in"; u.heli = null;
+  } else {
+    const v0 = S.speed || 200, vmin = v0 * 0.5, vmax = v0 * 1.25;
+    if (u.youThr == null) u.youThr = D.clamp(((u.ds.v || v0) - vmin) / (vmax - vmin), 0, 1);
+    u.youThr = D.clamp(u.youThr + lift * 0.45 * sdt, 0, 1);
+    let v = u.ds.v || v0;
+    // thrust against drag toward the throttle's speed, and gravity along the flight path
+    v += D.clamp(vmin + (vmax - vmin) * u.youThr - v, -30 * sdt, 22 * sdt) - 9.81 * Math.sin(u.ds.gamma) * 0.7 * sdt;
+    v = D.clamp(v, vmin * 0.8, vmax * 1.15);
+    const rollIn = -I.ax, pitchIn = -I.az;
+    if (rollIn) u.ds.roll = D.clamp(u.ds.roll + rollIn * 2.0 * sdt, -1.4, 1.4);
+    else u.ds.roll -= u.ds.roll * Math.min(1, 0.45 * sdt);          // hands off: it rolls level, slowly
+    const pull = pitchIn * Math.max(0.5, (S.turn || 0.3) * 2.4);
+    u.ds.gamma = D.clamp(u.ds.gamma + pull * Math.cos(u.ds.roll) * sdt, -1.25, 1.25);
+    // a banked wing turns the aircraft; pulling in the bank tightens it
+    const turn = 9.81 * Math.tan(u.ds.roll) / Math.max(60, v) * 1.5 + pull * Math.sin(u.ds.roll) * 0.85 - rud * 0.2;
+    u.h = D.wrap(u.h + turn * sdt);
+    u.ds.w = turn; u.ds.v = v; u.speed = v;
+    const vh = v * Math.cos(u.ds.gamma);
+    u.pos.x += Math.sin(u.h) * vh * sdt; u.pos.z += Math.cos(u.h) * vh * sdt;
+    u.pos.y += v * Math.sin(u.ds.gamma) * sdt;
+    u.ds.vy = v * Math.sin(u.ds.gamma);
+    u.group.rotation.set(-u.ds.gamma, u.h, -u.ds.roll * 0.95);
+    u.airPhase = "out"; u.airPt = { x: u.pos.x + Math.sin(u.h) * 2500, z: u.pos.z + Math.cos(u.h) * 2500 };
+    if (u.pos.y < g0 + 2.5) {                           // into the ground
+      u.pos.y = g0 + 2.5; u.vs.hp = Math.min(u.vs.hp, -u.maxHp); u.vs.wreck = true; u.vs.burning = true; u.crashed = true;
+      killMan(u, { cause: "crash" });
+      if (STUDIO.boom) STUDIO.boom({ x: u.pos.x, y: g0 + 1, z: u.pos.z }, { W: Math.min(40, 0.0008 * (u._mass || 10000)), kind: "carcook", by: null });
+      return;
+    }
+  }
+  u.yaw = u.h; u.heading = u.h;
+}
 function stepYouVehicle(u, sdt) {
   // move and attack (player.js): the stick is throttle and steering
   const I = youInput();
-  if (u.air) {
-    // an aircraft you ride flies its own pattern; you work the guns
-    stepAir(u, sdt);
-  } else vehMove(u, sdt, { throttle: I.az, steer: I.ax, brake: 0 });
+  const KB = CBZ.micro.input;
+  if (u.air) stepYouAir(u, sdt, I, KB);                 // YOU fly it (below)
+  else vehMove(u, sdt, { throttle: I.az, steer: I.ax, brake: KB && KB.isDown("Space") ? 1 : 0 });
   youRetarget(u, sdt);
   /* THE TURRET FOLLOWS YOUR LOOK, and the look is pulled onto the threat
      nearest it (the auto-target), so a gunner on a phone with no mouse still
@@ -2161,7 +2230,8 @@ function stepYouVehicle(u, sdt) {
     const sc = (1 - along) * 400 + d * 0.01;
     if (sc < bs && eyeLos(u, o)) { bs = sc; best = o; }
   }
-  if (W.w.kind === "bombs") { if (best) vehRelease(u, W, W.w.he); return; }
+  // bombs go when YOU say: they fall from where the aircraft is, on its line
+  if (W.w.kind === "bombs") { vehRelease(u, W, W.w.he || vehHeOf("mk82"), null, 0); return; }
   if (best) { vehFire(u, W, best, Math.hypot(best.pos.x - u.pos.x, best.pos.z - u.pos.z)); return; }
   // nothing on the line: the round goes where the gun points (and counts)
   W.cool = 1 / Math.max(0.01, W.w.rof || 1); W.ammo--;

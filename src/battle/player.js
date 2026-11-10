@@ -139,6 +139,7 @@ function takeOver(u) {
   if (COARSE) touchOn(); else CBZ.micro.lock();
   el("xhair").classList.toggle("on", k === "man" ? !u.fists : k === "vehicle");
   shooterEnter(u);
+  if (k === "vehicle") vehHudEnter(u);
   paintCam();
   return true;
 }
@@ -582,6 +583,33 @@ function shooterEnter(u) {
     _shHint.classList.add("on"); SH.hintT = 9;
   }
 }
+/* A MACHINE'S OWN CARD: how it is flown or driven, and what the weapon in
+   hand is and has left (the same corner the rifle's magazine reads in). */
+function vehHudEnter(u) {
+  YOU.airOff = 0; YOU.vehShown = ""; u.youThr = null; u.youH = null;
+  if (_shHint) {
+    const jet = u.air && u.def.drive !== "rotor";
+    _shHint.innerHTML = COARSE ? "<b>STICK</b> " + (u.air ? "fly" : "drive") + " &nbsp; <b>DRAG</b> look &nbsp; <b>FIRE</b>"
+      : jet ? "<b>W / S</b> nose down / up &nbsp; <b>A / D</b> roll &nbsp; <b>Q / E</b> rudder &nbsp; <b>SPACE</b> throttle up &nbsp; <b>C</b> throttle down &nbsp; <b>MOUSE</b> look &nbsp; <b>LEFT</b> fire &nbsp; <b>X</b> next weapon &nbsp; <b>G</b> leave"
+      : u.air ? "<b>W / S</b> forward / back &nbsp; <b>A / D</b> slide, turn at speed &nbsp; <b>Q / E</b> turn &nbsp; <b>SPACE</b> climb &nbsp; <b>C</b> descend &nbsp; <b>MOUSE</b> aim &nbsp; <b>LEFT</b> fire &nbsp; <b>X</b> next weapon &nbsp; <b>G</b> leave"
+      : "<b>W / S</b> throttle &nbsp; <b>A / D</b> steer &nbsp; <b>SPACE</b> brake &nbsp; <b>MOUSE</b> aim the gun &nbsp; <b>LEFT</b> fire &nbsp; <b>X</b> next weapon &nbsp; <b>G</b> leave";
+    _shHint.classList.add("on"); SH.hintT = 12;
+  }
+  if (_shAmmo) { _shAmmo.classList.add("on"); _shAmmo.classList.remove("low"); }
+}
+function vehHudFrame(u, dt) {
+  if (SH.hintT > 0 && (SH.hintT -= dt) <= 0 && _shHint) _shHint.classList.remove("on");
+  if (!_shAmmo) return;
+  const W = vehYouSeatWeapon(u, YOU.tgt && !YOU.tgt.dead ? YOU.tgt : null);
+  const name = W ? String(W.w.name || W.w.id || W.w.kind).replace(/_/g, " ").toUpperCase() : "NO WEAPON";
+  const st = u.air ? Math.round((u.ds.v || 0) * 3.6) + " KM/H &nbsp; " + Math.round(u.pos.y - HOST.groundAt(u.pos.x, u.pos.z)) + " M" +
+    (u.youThr != null ? " &nbsp; THR " + Math.round(u.youThr * 100) + "%" : "") : Math.round(Math.abs(u.ds.v || 0) * 3.6) + " KM/H";
+  const key = name + (W ? W.ammo + (W.reloadT > 0 ? "r" : "") : "") + st;
+  if (key === YOU.vehShown) return;
+  YOU.vehShown = key;
+  _shAmmo.innerHTML = "<b>" + (W ? Math.max(0, W.ammo) : "-") + "</b><small>" + name + (W && W.reloadT > 0 ? " RELOADING" : "") + "</small><small>" + st + "</small>";
+  _shAmmo.classList.toggle("low", !!W && W.ammo <= 0);
+}
 function shooterLeave() {
   SH.on = false; SH.adsT = false;
   if (_shAmmo) _shAmmo.classList.remove("on");
@@ -977,7 +1005,8 @@ function frameYou(dt) {
     if (IN.mx || IN.mz) looked = true;
     // (through the sights the same hand movement is a smaller angle)
     const sens = youShooter(m) ? 1 / (1 + SH.ads * (SH.zoom - 1)) : 1;
-    YOU.yaw -= IN.mx * 0.0024 * sens;
+    if (m.vehicle && m.air) YOU.airOff = (YOU.airOff || 0) - IN.mx * 0.0024;
+    else YOU.yaw -= IN.mx * 0.0024 * sens;
     YOU.pitch = Math.max(0.02, Math.min(0.85, YOU.pitch + IN.mz * 0.002));
     SH.pitch = Math.max(-1.25, Math.min(1.25, SH.pitch - IN.mz * 0.0022 * sens));
   }
@@ -986,6 +1015,12 @@ function frameYou(dt) {
      round to the threat you are fighting, so a stick and one button is a
      whole fight. A mouse is never second-guessed. */
   YOU.lookIdle = looked ? 0 : YOU.lookIdle + dt;
+  // in the air the look rides the aircraft: free while your hand is on it,
+  // back behind the tail a second after you let go
+  if (m.vehicle && m.air) {
+    if (YOU.lookIdle > 1.2) YOU.airOff = (YOU.airOff || 0) * Math.max(0, 1 - dt * 3);
+    YOU.yaw = m.h + (YOU.airOff || 0);
+  }
   if (COARSE && YOU.lookIdle > 0.6 && YOU.tgt && !YOU.tgt.dead) {
     const t = YOU.tgt;
     const d = Math.hypot(t.pos.x - m.pos.x, t.pos.z - m.pos.z);
@@ -994,6 +1029,7 @@ function frameYou(dt) {
   frameYouFeel(m);
   if (youShooter(m)) { frameShooter(m, dt); if (_yMark) _yMark.style.display = "none"; return; }
   SH.on = false;
+  if (m.vehicle) vehHudFrame(m, dt);
   frameChase(m, dt);
   youMarkStep();
 }

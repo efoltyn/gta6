@@ -431,17 +431,21 @@
   function crawl(ch, dt, speed, J) {
     const P = ch.parts;
     if (!P || !P.ll || !P.rl) return;
-    const k = ch._sCrawlK = damp(ch._sCrawlK || 0, speed > 0.12 ? 1 : 0, 6, dt);
+    // (he is crawling when he is actually covering ground: a man holding still
+    // whose speed jittered over 0.12 used to pump one knee up beside him)
+    const going = speed > (ch._sCrawlK > 0.5 ? 0.18 : 0.32);
+    const k = ch._sCrawlK = damp(ch._sCrawlK || 0, going ? 1 : 0, 6, dt);
     if (k < 0.01) return;
     // one crawl cycle (both sides) covers CRAWL_STRIDE of ground; it runs on
     // ch.phase like the walk, so a baked crowd clip can measure its period
-    if (speed > 0.12) ch.phase = (ch.phase || 0) + (Math.PI * 2) * Math.min(speed, 1.2) / CRAWL_STRIDE * dt;
+    if (going) ch.phase = (ch.phase || 0) + (Math.PI * 2) * Math.min(speed, 1.2) / CRAWL_STRIDE * dt;
     const s = Math.sin(ch.phase || 0), dL = Math.max(0, s), dR = Math.max(0, -s);
     // legs: ll is physical right (-X), rl physical left (+X)
-    add(ch, P.ll.rotation, "x", -0.95 * dR * k); add(ch, P.ll.rotation, "z", -0.55 * dR * k);
-    add(ch, P.rl.rotation, "x", -0.95 * dL * k); add(ch, P.rl.rotation, "z", 0.55 * dL * k);
-    add(ch, J.ll && J.ll.rotation, "x", 1.35 * dR * k);
-    add(ch, J.rl && J.rl.rotation, "x", 1.35 * dL * k);
+    // (the knee comes up beside the hip, not up to the ribs)
+    add(ch, P.ll.rotation, "x", -0.62 * dR * k); add(ch, P.ll.rotation, "z", -0.42 * dR * k);
+    add(ch, P.rl.rotation, "x", -0.62 * dL * k); add(ch, P.rl.rotation, "z", 0.42 * dL * k);
+    add(ch, J.ll && J.ll.rotation, "x", 0.95 * dR * k);
+    add(ch, J.rl && J.rl.rotation, "x", 0.95 * dL * k);
     // arms: the opposite elbow reaches (la is physical left)
     add(ch, P.la && P.la.rotation, "x", -0.40 * dR * k);
     add(ch, P.ra && P.ra.rotation, "x", -0.40 * dL * k);

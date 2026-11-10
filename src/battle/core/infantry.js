@@ -1119,6 +1119,17 @@
       G.aimT[r] = 0;
     }
 
+    /* HOW LOW. Flat on the ground is the answer to fire that is ON him, and
+       to a long-range fight he is settled into. It is not the answer to
+       everything: a man flat cannot see over anything, cannot move, and takes
+       seconds to get back up. Measured before this rule: six men in ten were
+       prone at any moment of a fight and nobody was ever on his feet. Now a
+       soldier in contact kneels to shoot, goes flat when the rounds are
+       landing round him (or the fight is past 220 m and still cracking), and
+       comes back up to a knee when they stop. */
+    function wantsFlat(r, D, dd) {
+      return G.supp[r] > D.pinAt * 0.45 || (dd > 220 && I.simT - G.crackT[r] < 4);
+    }
     function decide(r, D, t, inContact) {
       const sq = G.sqd[r];
       const task = sq >= 0 ? SQ.task[sq] : TASK.advance;
@@ -1144,14 +1155,14 @@
         const arrived = Math.hypot(G.gx[r] - G.x[r], G.gz[r] - G.z[r]) < 0.8;
         if (arrived || G.rushT[r] > D.rushMax * (0.8 + 0.4 * trait(r, 0x7A)) || (pinned0 && G.rushT[r] > 1.2)) {
           G.mv[r] = MOVE.hold; G.rushT[r] = 0; G.gx[r] = G.x[r]; G.gz[r] = G.z[r];
-          setPost(r, inContact ? POST.prone : POST.kneel);
+          setPost(r, inContact && G.supp[r] > D.pinAt * 0.45 ? POST.prone : POST.kneel);
         }
         return;
       }
       if (!inContact) {
         // ---- no contact: the order (march, hold, bounding overwatch). A man
         // who was in a fight stays down for a while after it goes quiet.
-        const quiet = I.simT - G.contactT[r] > 40;
+        const quiet = I.simT - G.contactT[r] > 12;
         if (task === TASK.hold || task === TASK.base) {
           G.mv[r] = MOVE.hold;
           if (G.post[r] === POST.stand && G.postT[r] <= 0) setPost(r, POST.kneel);    // a held position is held low
@@ -1234,16 +1245,28 @@
           // 75 m (or with the enemy already shooting at him inside 150) he
           // kneels and shoots first, the faster of the two
           let p = firePost(r, tx, tz, usesGround ? 0 : 1);
-          if (p === POST.prone && (dd < 75 || (dd < 150 && I.simT - G.crackT[r] < 2))) p = POST.kneel;
+          if (p === POST.prone && !wantsFlat(r, D, dd)) p = POST.kneel;
+          // an untrained man does not think to get small until he is shot at
+          if (!D.tac && G.supp[r] < 0.15 && I.simT - G.crackT[r] > 3) return;
           setPost(r, p);
           return;
         }
         const dd = Math.hypot(tx - G.x[r], tz - G.z[r]);
         // kneeling to trade, past 40 m: once taking fire, or once the mark is
         // gone from view, he goes flat if the ground still gives him the line
-        if (G.post[r] === POST.kneel && G.postT[r] <= 0 && usesGround && dd > 75 &&
-            (G.supp[r] > 0.3 || I.simT - G.seenT[r] > 1.5) && firePost(r, tx, tz, 0) === POST.prone) {
+        if (G.post[r] === POST.kneel && G.postT[r] <= 0 && usesGround && wantsFlat(r, D, dd) && firePost(r, tx, tz, 0) === POST.prone) {
           setPost(r, POST.prone);
+          return;
+        }
+        // the fire has gone off him: back up to a knee, where he can see and move
+        if (G.post[r] === POST.prone && G.postT[r] <= 0 && G.mv[r] === MOVE.hold && !wantsFlat(r, D, dd) &&
+            G.supp[r] < D.pinAt * 0.2 && I.simT - G.crackT[r] > 4 + 3 * trait(r, 0x9E7)) {
+          setPost(r, POST.kneel);
+          return;
+        }
+        // a standing man who has been rattled gets down
+        if (G.post[r] === POST.stand && G.postT[r] <= 0 && !D.tac && (G.supp[r] >= 0.15 || I.simT - G.crackT[r] <= 3)) {
+          setPost(r, wantsFlat(r, D, dd) ? POST.prone : POST.kneel);
           return;
         }
         // ...and flat with no line, he comes up to a knee if that gives him one (and the fire allows it)
@@ -1271,7 +1294,7 @@
             const far = Math.hypot(sp.x - G.x[r], sp.z - G.z[r]) > 3.5;
             G.gx[r] = sp.x; G.gz[r] = sp.z;
             if (far && G.supp[r] < D.pinAt * 0.4) { setPost(r, POST.stand); G.mv[r] = MOVE.rush; G.rushT[r] = 0; I.led.rushes++; }
-            else { G.mv[r] = MOVE.crawl; if (G.post[r] !== sp.p && sp.p !== POST.stand) setPost(r, sp.p); }
+            else { G.mv[r] = MOVE.crawl; if (G.post[r] !== sp.p && sp.p !== POST.stand && (sp.p !== POST.prone || wantsFlat(r, D, dd))) setPost(r, sp.p); }
             I.led.posts++;
             return;
           }
