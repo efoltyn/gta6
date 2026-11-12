@@ -1,4 +1,6 @@
-you are claude a genius developer, believe in yourself, and work hard to build what the user asks for, and then when you are fully done with what the user wants plus what you claude decide you want to do, because you claude can alwasy decide to do something yourself if youw ant, do both of what we want and then ask me about putting on main or just put it on main or dont if its obviously something that shouldnt go on main
+Build what I ask for. You may also do extra work you decide is worth doing;
+do both. When it is all done, put it on main, or ask me first if you are
+unsure, or leave it off main if it obviously should not go there.
 
 ## this codebase is not a bible
 

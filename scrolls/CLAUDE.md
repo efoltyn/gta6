@@ -1,11 +1,11 @@
 # CLAUDE.md
 
-Browser GTA-style game. Three.js r128 (vendored), plain script tags in
-`index.html`, one global `CBZ`, ~264k LOC. No build step — GitHub Pages serves
-the repo root of `main`, so **pushing to main IS the deploy** and anything in
-`src/`/`assets/` ships.
+Browser GTA-style game. Three.js r187 (vendored, `src/vendor/three.r187.js`),
+plain script tags in `index.html`, one global `CBZ`. The game itself has no
+build step. The live site (efoltyn.github.io/gta6) serves the `gh-pages`
+branch, which is a built release; pushing to `main` does not update it.
 
-**Read `docs/claude/` before working — all of it is binding:**
+**Read `scrolls/claude/` before working — all of it is binding:**
 
 - `doctrine.md` — WHY constitution, hard rules (determinism, flags), Block Law + ratchets
 - `verification.md` — math gate, probes, builders-vs-orchestrator, headless facts
@@ -672,7 +672,7 @@ the game, and where they overshoot the answer is a bigger wing. An explicit
 — capacity published, headcount derived not typed, no anonymous body added to a
 prison that cannot sleep the men in it, occupancy ≤ 200%.
 
-## A SOUND HAS A PLACE AND A DECIBEL — `docs/claude/sound.md`
+## A SOUND HAS A PLACE AND A DECIBEL — `scrolls/claude/sound.md`
 
 **"He hears punches from any distance at the same volume"** (owner, 2026-08-09).
 Measured, mode escape, player standing still: `punch` at **90 requests/minute,
