@@ -39,7 +39,8 @@ function frame(dt) {
   // keys: the clock and the cameras
   const IN = CBZ.micro.input;
   if (IN) {
-    if (IN.pressed("Space")) setSpeed(speed === 0 ? lastSpeed : 0);
+    // in a body Space is yours (jump, brake, climb); P pauses there
+    if (IN.pressed(YOU.m ? "KeyP" : "Space")) setSpeed(speed === 0 ? lastSpeed : 0);
     if (IN.pressed("Digit1")) setSpeed(1);
     if (IN.pressed("Digit2")) setSpeed(2);
     if (IN.pressed("Digit3")) setSpeed(4);

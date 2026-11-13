@@ -52,7 +52,46 @@ const YOU = {
   beat: null,                   // the death beat
   hp0: 0, kills0: 0, blendT: 0, gunK: 0, lookIdle: 0,
   drive: null,                  // a tool's input instead of the keys (probe)
+  jy: 0, jv: 0, jumpQ: false,   // a man off the ground: height over it, climb rate, Space asked
+  slideT: 0, slideX: 0, slideZ: 0, cTap: -9,   // the sprint slide, and the last C press (twice = prone)
 };
+/* ON FOOT LIKE THE CITY: Space jumps (6.5 m/s up, gravity 22: about a metre),
+   Space from a knee or the ground stands you up, C at a sprint is a slide,
+   C twice quickly goes prone. */
+function youJump(m) {
+  if (m.stance !== "stand") { setStance(m, "stand"); YOU.slideT = 0; return; }
+  if (YOU.jy <= 0 && !knockedDown(m)) YOU.jumpQ = true;
+}
+function youCrouchKey(m, sprinting) {
+  const now = performance.now() / 1000, twice = now - YOU.cTap < 0.32;
+  YOU.cTap = now;
+  if (sprinting && m.stance === "stand" && YOU.jy <= 0 && YOU.slideT <= -1) {
+    YOU.slideT = 0.8; YOU.slideX = Math.sin(m.yaw); YOU.slideZ = Math.cos(m.yaw);
+    setStance(m, "crouch"); return;
+  }
+  if (twice && m.stance !== "prone") { setStance(m, "prone"); return; }
+  setStance(m, m.stance === "stand" ? "crouch" : m.stance === "prone" ? "crouch" : "stand");
+}
+// the slide carries the body; true while it owns the legs
+function youSlide(m, sdt) {
+  if (YOU.slideT <= 0) { if (YOU.slideT > -1) YOU.slideT -= sdt; return false; }   // a second before the next one
+  YOU.slideT -= sdt;
+  const v = 4 + 6.5 * Math.max(0, YOU.slideT / 0.8);
+  m.pos.x += YOU.slideX * v * sdt; m.pos.z += YOU.slideZ * v * sdt;
+  CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
+  m.speed = v;
+  if (YOU.slideT <= 0) YOU.slideT = -0.001;
+  return true;
+}
+// after the ground has set pos.y: the jump on top of it
+function youAir(m, sdt) {
+  if (YOU.jumpQ) { YOU.jumpQ = false; if (YOU.jy <= 0) { YOU.jv = 6.5; YOU.jy = 0.001; } }
+  if (YOU.jy > 0) {
+    YOU.jv -= 22 * sdt; YOU.jy += YOU.jv * sdt;
+    if (YOU.jy <= 0) { YOU.jy = 0; YOU.jv = 0; }
+  }
+  m.pos.y += YOU.jy;
+}
 let TB = null;
 const _yn = [];
 let _yFrom, _yTo, _yMark = null, _yDummy = null, _yv = null;
@@ -116,6 +155,7 @@ function takeOver(u) {
   YOU.tgt = null; YOU.pickT = 0; YOU.strike = null; YOU.cd = 0; YOU.n = 0;
   YOU.atkPrev = true;                       // the tap that chose him is not an attack
   YOU.hp0 = u.hp; YOU.kills0 = u.kills || 0; YOU.gunK = 0; YOU.lookIdle = 0;
+  YOU.jy = YOU.jv = 0; YOU.jumpQ = false; YOU.slideT = -1;
   u.you = true; u.slot = "you";
   const k = youKind(u);
   if (k === "man") {
@@ -496,7 +536,8 @@ function stepYouMan(m, sdt) {
   if (knockedDown(m)) { ax = 0; az = 0; }              // the knockdown owns the body until he is up
   const mv = youMoveDir({ ax: ax, az: az });
   let spd = 0;
-  if (mv.len > 0.05) {
+  if (youSlide(m, sdt)) spd = m.speed;
+  else if (mv.len > 0.05) {
     if (I.run && m.stance === "crouch") setStance(m, "stand");
     spd = (m.stance === "crouch" ? 2.2 : I.run ? 6.6 : 4.4) * mv.len;
     if (m.hp < m.maxHp * 0.45) spd *= 0.78;            // the limp is the health bar
@@ -506,6 +547,7 @@ function stepYouMan(m, sdt) {
   m.speed = spd;
   if (MAP.water) stepDepth(m, sdt);
   m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
+  youAir(m, sdt);
   m.coverK = m.stance === "crouch" ? CROUCH_HIT : 1;
   m.up = true;
   // THE BODY FACES THE FIGHT, the camera keeps your look: a brawler squares
@@ -579,7 +621,7 @@ function shooterEnter(u) {
   if (_shAmmo) _shAmmo.classList.add("on");
   if (_shHint) {
     _shHint.innerHTML = COARSE ? "<b>STICK</b> move &nbsp; <b>DRAG</b> aim &nbsp; <b>FIRE</b> &nbsp; <b>AIM</b> sights &nbsp; <b>R</b> reload &nbsp; <b>C</b> stance"
-      : "<b>MOUSE</b> aim &nbsp; <b>LEFT</b> fire &nbsp; <b>RIGHT</b> sights &nbsp; <b>R</b> reload &nbsp; <b>C</b> kneel &nbsp; <b>Z</b> prone &nbsp; <b>SHIFT</b> sprint &nbsp; <b>V</b> first person &nbsp; <b>F</b> rifle butt &nbsp; <b>G</b> leave";
+      : "<b>MOUSE</b> aim &nbsp; <b>LEFT</b> fire &nbsp; <b>RIGHT</b> sights &nbsp; <b>R</b> reload &nbsp; <b>SPACE</b> jump &nbsp; <b>C</b> kneel / slide &nbsp; <b>C C</b> prone &nbsp; <b>SHIFT</b> sprint &nbsp; <b>P</b> pause &nbsp; <b>V</b> first person &nbsp; <b>F</b> rifle butt &nbsp; <b>G</b> leave";
     _shHint.classList.add("on"); SH.hintT = 9;
   }
 }
@@ -682,7 +724,8 @@ function stepYouShooter(m, sdt) {
   const mv = youMoveDir({ ax: ax, az: az });
   const sprint = I.run && az > 0.3 && m.stance === "stand" && !adsWant && m.reloadT <= 0;
   let spd = 0;
-  if (mv.len > 0.05) {
+  if (youSlide(m, sdt)) spd = m.speed;
+  else if (mv.len > 0.05) {
     spd = (m.stance === "prone" ? 0.9 : m.stance === "crouch" ? 2.2 : sprint ? 6.6 : adsWant ? 2.3 : 4.2) * mv.len;
     if (m.hp < m.maxHp * 0.45) spd *= 0.78;
     m.pos.x += mv.x * spd * sdt; m.pos.z += mv.z * spd * sdt;
@@ -693,6 +736,7 @@ function stepYouShooter(m, sdt) {
   SH.want = adsWant && !SH.sprint;
   if (MAP.water) stepDepth(m, sdt);
   m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
+  youAir(m, sdt);
   m.coverK = m.stance === "crouch" ? CROUCH_HIT : 1;
   m.up = true;
   m.yaw = turnTo(m.yaw, YOU.yaw, sdt * 18);
@@ -712,7 +756,7 @@ function stepYouShooter(m, sdt) {
 function frameShooter(m, dt) {
   const IN = CBZ.micro.input;
   if (IN) {
-    if (IN.pressed("KeyC")) setStance(m, m.stance === "crouch" ? "stand" : "crouch");
+    if (IN.pressed("KeyC")) youCrouchKey(m, SH.sprint);
     if (IN.pressed("KeyZ")) setStance(m, m.stance === "prone" ? "stand" : "prone");
     if (IN.pressed("KeyR")) shooterReload(m, CBZ.weaponById(m.wid));
     if (IN.pressed("KeyV")) SH.fp = !SH.fp;
@@ -998,9 +1042,10 @@ function frameYou(dt) {
   if (IN) {
     // the edge keys, once a FRAME (the step above runs up to eight times one)
     if (!m.vehicle && !m.beast && !youShooter(m)) {
-      if (IN.pressed("KeyC")) setStance(m, m.stance === "crouch" ? "stand" : "crouch");
+      if (IN.pressed("KeyC")) youCrouchKey(m, m.speed > 5.5);
       if (IN.pressed("KeyR")) youReload(m, CBZ.weaponById(m.wid));
     }
+    if (!m.vehicle && !m.beast && IN.pressed("Space")) youJump(m);
     if (m.vehicle && IN.pressed("KeyX")) m._youSeat = (m._youSeat || 0) + 1;
     if (IN.mx || IN.mz) looked = true;
     // (through the sights the same hand movement is a smaller angle)
