@@ -1,11 +1,13 @@
-# CLAUDE.md
+# Archive (was CLAUDE.md)
+
+This folder is an archive of old project rules. Nothing here is binding and it is not loaded into sessions. The root `CLAUDE.md` is the only rule file. Read this for history only.
 
 Browser GTA-style game. Three.js r187 (vendored, `src/vendor/three.r187.js`),
 plain script tags in `index.html`, one global `CBZ`. The game itself has no
 build step. The live site (efoltyn.github.io/gta6) serves the `gh-pages`
 branch, which is a built release; pushing to `main` does not update it.
 
-**Read `scrolls/claude/` before working — all of it is binding:**
+What is in `scrolls/claude/`:
 
 - `doctrine.md` — WHY constitution, hard rules (determinism, flags), Block Law + ratchets
 - `verification.md` — math gate, probes, builders-vs-orchestrator, headless facts

@@ -3925,7 +3925,7 @@
 
      NOT MODE-GATED, on purpose. `cover` is the shared weather scalar and it is
      zero unless it is actually snowing, so this is inert everywhere it should
-     be. Gating it to the island would be the exact disease scrolls/CLAUDE.md
+     be. Gating it to the island would be the exact disease scrolls/ARCHIVE.md
      names — a shared verb fenced behind a mode that has no say in it.
   ============================================================ */
   if (CBZ.CONFIG.GORE_SNOW_BURY == null) CBZ.CONFIG.GORE_SNOW_BURY = true;

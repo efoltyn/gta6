@@ -90,7 +90,7 @@ This is the single most useful sentence in this document: **the pop-in is not at
 spawn, it is at 95 m, and it is a boolean.**
 
 There is a consequence worth chasing separately. The longest weapon in the game reaches
-240 m (`scrolls/CLAUDE.md`, fortresponse wave) and bodies stop rendering at 95 m, with no
+240 m (`scrolls/ARCHIVE.md`, fortresponse wave) and bodies stop rendering at 95 m, with no
 scope path into `refreshPedLOD`. Either a marksman cannot see the man he is rated to
 hit, or something else raises visibility that this recon did not find. Both are bugs and
 they are different bugs. **Unresolved — §7.**
@@ -112,7 +112,7 @@ Fifteen are `src/city/*`. On the escape side only `entities/crowd.js` calls it.
 no visibility gating of any kind (`grep -nE "npcTransitionSafe|visible|inView|offscreen"`
 returns nothing).
 
-This is the repo's own named bug class, from `scrolls/CLAUDE.md`:
+This is the repo's own named bug class, from `scrolls/ARCHIVE.md`:
 
 > *`mode === "city"` is legitimate when it guards a CITY RECORD … and is a BUG when it
 > guards a shared verb.*
