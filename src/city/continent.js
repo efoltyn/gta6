@@ -598,12 +598,20 @@
     // a ragged edge (160 m). Capped strictly inside the frontier loop so the
     // road keeps >= 110 m of dry shoulder; every POI still holds its land
     // through inSolidRegion below. Pure noise2: deterministic per seed.
-    const COAST_MAX_IN = FRONTIER_IN - 110;
+    /* THE SEA COMES IN. With the ring road gone the only thing the coast must
+       respect is what is actually built, and every authored region is at least
+       PAD (2200 m) inside the plate edge. So the gulfs may be deep: up to
+       COAST_MAX_IN, leaving 300 m of shore outside the nearest region. Three
+       scales: gulfs and capes 5 km apart (the silhouette of the country), bays
+       inside them, and a ragged edge. A gulf is sharpened so it is a gulf and
+       a cape a cape, not a sine wave. */
+    const COAST_MAX_IN = Math.max(FRONTIER_IN - 110, PAD - 300);
     function coastInset(x, z) {
+      const gulf = smooth01((noise2(x - 900, z + 2300, 5200, 8812) - 0.36) / 0.34);
       const big = noise2(x + 3100, z - 1700, 2600, 8809);
       const bay = smooth01((big - 0.34) / 0.44);
-      let v = 16 + bay * bay * 470
-        + (noise2(x, z, 900, 8810) - 0.5) * 160 * (0.35 + bay)
+      let v = 16 + gulf * gulf * (COAST_MAX_IN - 500) + bay * bay * 470
+        + (noise2(x, z, 900, 8810) - 0.5) * 160 * (0.35 + Math.max(bay, gulf))
         + (noise2(x, z, 160, 8811) - 0.5) * 36;
       if (v < 10) v = 10;
       return v > COAST_MAX_IN ? COAST_MAX_IN : v;
@@ -913,7 +921,7 @@
     const futureX0 = minX + FUTURE_ROUTE_IN, futureX1 = maxX - FUTURE_ROUTE_IN;
     const futureZ0 = minZ + FUTURE_ROUTE_IN, futureZ1 = maxZ - FUTURE_ROUTE_IN;
     function frontierDistance(x, z) {
-      if (CFG.CONTINENT_EXPANSION_V2 === false || PAD <= LEGACY_PAD + 80) return 1e9;
+      return 1e9;   // (the ring road this measured to is gone)
       let best = 1e9;
       if (x >= futureX0 - 28 && x <= futureX1 + 28) best = Math.min(best, Math.abs(z - futureZ0), Math.abs(z - futureZ1));
       if (z >= futureZ0 - 28 && z <= futureZ1 + 28) best = Math.min(best, Math.abs(x - futureX0), Math.abs(x - futureX1));
@@ -1365,17 +1373,6 @@
       if (cor) for (let i = 0; i < cor.length; i++) {
         const c = cor[i];
         if (c && [c.x0, c.z0, c.x1, c.z1].every(Number.isFinite)) lfSeg(fRoad, c.x0, c.z0, c.x1, c.z1, (+c.half || 15) + 8);
-      }
-      if (CFG.CONTINENT_EXPANSION_V2 !== false && PAD > LEGACY_PAD + 80) {
-        const fx0 = minX + FRONTIER_IN, fx1 = maxX - FRONTIER_IN, fz0 = minZ + FRONTIER_IN, fz1 = maxZ - FRONTIER_IN;
-        if (fx1 - fx0 > 600 && fz1 - fz0 > 600) {
-          lfRect(fRoad, fx0 - 14, fx1 + 14, fz0 - 14, fz0 + 14); lfRect(fRoad, fx0 - 14, fx1 + 14, fz1 - 14, fz1 + 14);
-          lfRect(fRoad, fx0 - 14, fx0 + 14, fz0 - 14, fz1 + 14); lfRect(fRoad, fx1 - 14, fx1 + 14, fz0 - 14, fz1 + 14);
-          // the four lookouts stand 26 m inside the loop (buildFrontier's MID_IN)
-          const mcx = (minX + maxX) / 2, mcz = (minZ + maxZ) / 2;
-          lfRect(fPlace, mcx - 18, mcx + 18, fz0 + 26 - 14, fz0 + 26 + 14); lfRect(fPlace, mcx - 18, mcx + 18, fz1 - 26 - 14, fz1 - 26 + 14);
-          lfRect(fPlace, fx0 + 26 - 18, fx0 + 26 + 18, mcz - 14, mcz + 14); lfRect(fPlace, fx1 - 26 - 18, fx1 - 26 + 18, mcz - 14, mcz + 14);
-        }
       }
       // ---- places: every authored floor, graded pad, declared footprint, region, lot, deck
       for (let i = 0; i < authoredSurfaceBounds.length; i++) {
@@ -2352,246 +2349,14 @@
     };
 
     // ---- FRONTIER EXPANSION: real travel distance, not a camera trick -------
-    // Four long rural highway legs live wholly OUTSIDE the old authored union,
-    // 190m inside the rounded/noisy coast, keeping the road shoulders dry at
-    // straight shores and broad corners. Four navigation
-    // beacons sit on the INLAND side of that loop: tall enough to provide scale
-    // while approaching, physically reachable, and named on the real map.
+    /* NO RING ROAD. There used to be a "frontier loop" here: four dead-straight
+       rural highways, 60 km of them, laid on a rectangle 760 m inside the plate
+       edge, with four lookout pads. It is why the continent was a rectangle: the
+       coast was capped so the road stayed dry, so the sea could never come in
+       more than 650 m anywhere. A country does not have a square road round its
+       rim. The road is gone and the coast is free (coastInset above). */
     const WALK_IN = COAST ? 44 : -4;
-    let frontier = null;
-    if (CFG.CONTINENT_EXPANSION_V2 !== false && PAD > LEGACY_PAD + 80) frontier = (function buildFrontier() {
-      const ROAD_W = 12, ROUTE_IN = FRONTIER_IN;
-      const x0 = minX + ROUTE_IN, x1 = maxX - ROUTE_IN;
-      const z0 = minZ + ROUTE_IN, z1 = maxZ - ROUTE_IN;
-      if (!(x1 - x0 > 600 && z1 - z0 > 600)) return null;
-
-      const group = new THREE.Group();
-      group.name = "frontier-loop";
-      group.userData.terrain = true; // one world-spanning route; never disappear as one far-cull blob
-      // real asphalt reflectance (0x30343a used to reach the lights as 20%,
-      // a pale concrete band), and the plate's own fog scale and air: from
-      // the air the loop reads as a dark line across the country instead of
-      // fogging out kilometres before the ground it lies on
-      const roadMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(0.072, 0.074, 0.08) });
-      if (CBZ.terrainFogScale) CBZ.terrainFogScale(roadMat, 0.08);
-      const paintMat = new THREE.MeshBasicMaterial({ color: 0xe6c45a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-      // unlit paint on a lit road: without the day tint the dashes glow like
-      // LEDs all night while the asphalt under them goes dark
-      if (CBZ.terrainDayTint) CBZ.terrainDayTint(paintMat);
-      const roadDefs = [
-        { x: (x0 + x1) / 2, z: z0, len: x1 - x0, vertical: false },
-        { x: x1, z: (z0 + z1) / 2, len: z1 - z0, vertical: true },
-        { x: (x0 + x1) / 2, z: z1, len: x1 - x0, vertical: false },
-        { x: x0, z: (z0 + z1) / 2, len: z1 - z0, vertical: true },
-      ];
-      // ---- WHERE A RIVER CROSSES THE LOOP, THE LOOP BRIDGES IT. Every river
-      // in this world now reaches the sea, and the loop runs all the way round
-      // inside the coast, so each one passes under it. Without a deck region
-      // the road plane lay on open water (cars "swam" on the frontier). A
-      // /bridge/ name makes waterfield read the span as a deck and continent
-      // keep the channel carved under it; river.js's channel oracle lets the
-      // hulls through. Piers and parapets make it read as a bridge.
-      const loopBridges = [];
-      const pathBodies = waterBodies.filter(function (b) { return b && b.kind === "path"; });
-      for (let i = 0; i < roadDefs.length && pathBodies.length; i++) {
-        const d = roadDefs[i];
-        // runs along this leg where a channel comes within 22 m of the
-        // carriageway (EXACT distance: the bbox reject is only a lower bound)
-        const runs = [];
-        let runA = null;
-        for (let t = -d.len / 2; t <= d.len / 2 + 8; t += 8) {
-          const px = d.vertical ? d.x : d.x + t, pz = d.vertical ? d.z + t : d.z;
-          let wetHere = false;
-          if (t <= d.len / 2) for (let k = 0; k < pathBodies.length && !wetHere; k++) {
-            for (const sd of [-ROAD_W / 2, 0, ROAD_W / 2]) {
-              if (pathBodyField(pathBodies[k], px + (d.vertical ? sd : 0), pz + (d.vertical ? 0 : sd), true) < 22) { wetHere = true; break; }
-            }
-          }
-          if (wetHere && runA == null) runA = t;
-          else if (!wetHere && runA != null) {
-            const last = runs[runs.length - 1];
-            if (last && runA - last[1] < 80) last[1] = t; else runs.push([runA, t]);
-            runA = null;
-          }
-        }
-        for (const rn of runs) {
-          // abutments reach 25 m further onto dry bank either side
-          const a = rn[0] - 25, b = rn[1] + 25, mid = (a + b) / 2, span = b - a, deckW = ROAD_W + 6;
-          const bx = d.vertical ? d.x : d.x + mid, bz = d.vertical ? d.z + mid : d.z;
-          const reg = {
-            name: "Frontier " + (["North", "East", "South", "West"][i] || "") + " Bridge " + (loopBridges.length + 1),
-            subtitle: "River Crossing", biome: "wilds", kind: "rect", pad: 0,
-            minX: d.vertical ? bx - deckW / 2 : bx - span / 2, maxX: d.vertical ? bx + deckW / 2 : bx + span / 2,
-            minZ: d.vertical ? bz - span / 2 : bz - deckW / 2, maxZ: d.vertical ? bz + span / 2 : bz + deckW / 2,
-          };
-          if (CBZ.registerCityRegion) CBZ.registerCityRegion(city, reg);
-          loopBridges.push({ x: bx, z: bz, vertical: d.vertical, span: span, w: deckW, region: reg });
-        }
-      }
-      if (loopBridges.length) {
-        const BGU = THREE.BufferGeometryUtils;
-        const piers = [], rails = [];
-        const boxAt = function (x, y, z, w, hh, dd) { const g = new THREE.BoxGeometry(w, hh, dd); g.translate(x, y, z); return g; };
-        for (const b of loopBridges) {
-          const half = b.span / 2;
-          for (let t = -half + 12; t <= half - 12; t += 24) for (const sd of [-1, 1]) {
-            piers.push(boxAt(b.vertical ? b.x + sd * (b.w / 2 - 1.2) : b.x + t, -1.4, b.vertical ? b.z + t : b.z + sd * (b.w / 2 - 1.2), 1.4, 3.0, 1.4));
-          }
-          for (const sd of [-1, 1]) {
-            const rx = b.vertical ? b.x + sd * b.w / 2 : b.x, rz = b.vertical ? b.z : b.z + sd * b.w / 2;
-            rails.push(boxAt(rx, 0.5, rz, b.vertical ? 0.35 : b.span, 0.85, b.vertical ? b.span : 0.35));
-            if (CBZ.colliders) CBZ.colliders.push({
-              minX: rx - (b.vertical ? 0.22 : half), maxX: rx + (b.vertical ? 0.22 : half),
-              minZ: rz - (b.vertical ? half : 0.22), maxZ: rz + (b.vertical ? half : 0.22), y0: 0, y1: 0.95, noCam: true,
-            });
-          }
-        }
-        const addMerged = function (list, hex) {
-          if (!list.length) return;
-          const mat = CBZ.cmat ? CBZ.cmat(hex) : new THREE.MeshLambertMaterial({ color: hex });
-          if (BGU && BGU.mergeBufferGeometries) {
-            const m = new THREE.Mesh(BGU.mergeBufferGeometries(list), mat);
-            m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); group.add(m);
-          } else for (const g of list) group.add(new THREE.Mesh(g, mat));
-        };
-        addMerged(piers, 0x8b9097); addMerged(rails, 0xb4b9bf);
-        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-      }
-      const roadRecords = [];
-      for (let i = 0; i < roadDefs.length; i++) {
-        const d = roadDefs[i];
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(d.vertical ? ROAD_W : d.len, d.vertical ? d.len : ROAD_W), roadMat);
-        mesh.rotation.x = -Math.PI / 2; mesh.position.set(d.x, 0.025, d.z);
-        mesh.receiveShadow = true; mesh.name = "frontier-highway-" + i;
-        group.add(mesh);
-        const rec = { x: d.x, z: d.z, len: d.len, vertical: d.vertical,
-          w: ROAD_W, width: ROAD_W, lanesPerDir: 1, laneW: 3.25,
-          district: "highway", frontier: true, noLamps: true };
-        city.roads.push(rec); roadRecords.push(rec);
-      }
-
-      // One merged centre-dash mesh for the entire ~17km circuit. Geometry
-      // scales with visible paint length, but remains exactly one draw call.
-      const dashPos = [];
-      function quad(cx, cz, w, d, y) {
-        const x0q = cx - w / 2, x1q = cx + w / 2, z0q = cz - d / 2, z1q = cz + d / 2;
-        dashPos.push(x0q,y,z0q, x0q,y,z1q, x1q,y,z1q, x0q,y,z0q, x1q,y,z1q, x1q,y,z0q);
-      }
-      for (const d of roadDefs) {
-        const n = Math.max(1, Math.floor(d.len / 22));
-        for (let i = 0; i < n; i++) {
-          const t = -d.len / 2 + (i + 0.5) * d.len / n;
-          quad(d.x + (d.vertical ? 0 : t), d.z + (d.vertical ? t : 0),
-            d.vertical ? 0.24 : 9, d.vertical ? 9 : 0.24, 0.043);
-        }
-      }
-      if (dashPos.length) {
-        const dg = new THREE.BufferGeometry();
-        dg.setAttribute("position", new THREE.Float32BufferAttribute(dashPos, 3));
-        const dm = new THREE.Mesh(dg, paintMat); dm.name = "frontier-highway-paint";
-        dm.userData.roadPaint = true; dm.renderOrder = 1; group.add(dm);
-      }
-      city.root.add(group);
-      city.frontierRoads = roadRecords;
-
-      // Small open shelters + tall survey masts. They are navigation objects,
-      // not sealed fake buildings, and their footprint is published for the
-      // world audit's full 3x3 coast test.
-      // The lookout pad is graded gravel on the SHARED ground skin (was a flat
-      // 0x817b68 beige card lying on the textured plate). Vertex colour is the
-      // gravel tone in the middle, grading to the surrounding scrub over the
-      // outer ring, so the pad wears into the country instead of ending on a
-      // ruled edge; groundSkin supplies the soil/stone detail per pixel.
-      const gravelMat = CBZ.groundSkin
-        ? CBZ.groundSkin({ name: "frontier-lookout-pad", far: 260, sandY: [-9, -8], srgb: true,
-            extra: { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 } })
-        : new THREE.MeshLambertMaterial({ vertexColors: true });
-      const steelMat = new THREE.MeshLambertMaterial({ color: 0x68727d });
-      const roofMat = new THREE.MeshLambertMaterial({ color: 0x39434d });
-      const beaconMat = new THREE.MeshLambertMaterial({ color: 0xff6a45, emissive: 0x7a1d10, emissiveIntensity: 0.45 });
-      const mastGeo = new THREE.CylinderGeometry(0.34, 0.62, 30, 6);
-      const beamGeoX = new THREE.BoxGeometry(5.6, 0.18, 0.18);
-      const beamGeoZ = new THREE.BoxGeometry(0.18, 0.18, 5.6);
-      const beaconGeo = new THREE.SphereGeometry(0.46, 8, 6);
-      const postGeo = new THREE.BoxGeometry(0.22, 3.2, 0.22);
-      const roofGeo = new THREE.BoxGeometry(9, 0.32, 5.6);
-      const padGeo = (function () {
-        const g = new THREE.PlaneGeometry(36, 28, 12, 10);
-        const pos = g.attributes.position, colA = new Float32Array(pos.count * 3);
-        const cGravel = new THREE.Color(0x7d725c), cScrubEdge = new THREE.Color(0x55653f), c = new THREE.Color();
-        for (let i = 0; i < pos.count; i++) {
-          const x = pos.getX(i), y = pos.getY(i);
-          // 0 inside the 32 x 24 working pad, 1 at the frayed outer ring
-          const e = Math.max(Math.abs(x) - 14, 0) / 4 + Math.max(Math.abs(y) - 10, 0) / 4;
-          const n = CBZ.hash01 ? CBZ.hash01(i, 7, 0x6a1d) : 0.5;
-          c.copy(cGravel).lerp(cScrubEdge, Math.min(1, e * (0.75 + 0.5 * n)));
-          c.multiplyScalar(0.92 + 0.16 * n);
-          colA[i * 3] = c.r; colA[i * 3 + 1] = c.g; colA[i * 3 + 2] = c.b;
-        }
-        g.setAttribute("color", new THREE.BufferAttribute(colA, 3));
-        return g;
-      })();
-      const landmarks = [];
-      function footprintShoreMin(x, z, hx, hz) {
-        let best = Infinity;
-        for (let iz = -1; iz <= 1; iz++) for (let ix = -1; ix <= 1; ix++) {
-          const s = shoreField(x + ix * hx, z + iz * hz);
-          if (s < best) best = s;
-        }
-        return best;
-      }
-      function landmark(name, x, z) {
-        const hx = 16, hz = 12, shoreMin = footprintShoreMin(x, z, hx, hz);
-        if (COAST && shoreMin < 24) return; // fail closed: never erect anything near/open in water
-        const g = new THREE.Group(); g.name = "frontier-" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        g.position.set(x, 0, z); g.userData.terrain = true; g.userData.frontierLandmark = true;
-        const pad = new THREE.Mesh(padGeo, gravelMat); pad.rotation.x = -Math.PI / 2; pad.position.y = 0.012; pad.receiveShadow = true; g.add(pad);
-        const mast = new THREE.Mesh(mastGeo, steelMat); mast.position.set(-7, 15, 0); mast.castShadow = true; g.add(mast);
-        for (const y of [10, 20, 29]) {
-          const bx = new THREE.Mesh(beamGeoX, steelMat), bz = new THREE.Mesh(beamGeoZ, steelMat);
-          bx.position.set(-7, y, 0); bz.position.set(-7, y, 0); g.add(bx, bz);
-        }
-        const beacon = new THREE.Mesh(beaconGeo, beaconMat); beacon.position.set(-7, 30.7, 0); g.add(beacon);
-        const roof = new THREE.Mesh(roofGeo, roofMat); roof.position.set(7, 3.25, 0); roof.castShadow = true; g.add(roof);
-        for (const px of [3.2, 10.8]) for (const pz of [-2.1, 2.1]) {
-          const post = new THREE.Mesh(postGeo, steelMat); post.position.set(px, 1.6, pz); g.add(post);
-        }
-        city.root.add(g);
-        if (CBZ.colliders) CBZ.colliders.push({ minX: x - 7.7, maxX: x - 6.3, minZ: z - 0.7, maxZ: z + 0.7, y0: 0, y1: 31, noCam: true, ref: mast });
-        const rec = { name, subtitle: "Frontier Lookout", biome: "frontier", kind: "rect",
-          minX: x - hx, maxX: x + hx, minZ: z - hz, maxZ: z + hz,
-          x, z, shoreMin, pad: 2 };
-        CBZ.registerCityRegion(city, rec); landmarks.push(rec);
-      }
-      const MID_IN = 26;
-      landmark("North Range", cx0, z0 + MID_IN);
-      landmark("East Range", x1 - MID_IN, cz0);
-      landmark("South Range", cx0, z1 - MID_IN);
-      landmark("West Range", x0 + MID_IN, cz0);
-      city.frontierLandmarks = landmarks;
-
-      let roadMinShore = Infinity;
-      for (const d of roadDefs) for (let i = 0; i <= 64; i++) {
-        const t = -d.len / 2 + d.len * i / 64;
-        for (const side of [-ROAD_W / 2, 0, ROAD_W / 2]) {
-          const sx = d.x + (d.vertical ? side : t), sz = d.z + (d.vertical ? t : side);
-          // a bridge span is SUPPOSED to be over water (its abutments are not)
-          if (loopBridges.some(function (b) { const R = b.region; return sx >= R.minX && sx <= R.maxX && sz >= R.minZ && sz <= R.maxZ; })) continue;
-          roadMinShore = Math.min(roadMinShore, shoreField(sx, sz));
-        }
-      }
-      function near(x, z, margin) {
-        margin = margin || 0;
-        for (const d of roadDefs) {
-          const along = d.vertical ? Math.abs(z - d.z) : Math.abs(x - d.x);
-          const across = d.vertical ? Math.abs(x - d.x) : Math.abs(z - d.z);
-          if (along <= d.len / 2 + margin && across <= ROAD_W / 2 + margin) return true;
-        }
-        for (const l of landmarks) if (x >= l.minX - margin && x <= l.maxX + margin && z >= l.minZ - margin && z <= l.maxZ + margin) return true;
-        return false;
-      }
-      return { roads: roadRecords, landmarks, near, defs: roadDefs, loopMeters: roadDefs.reduce((s, d) => s + d.len, 0), roadMinShore, bridges: loopBridges };
-    })();
+    const frontier = null;
 
     const legacyW = authoredBounds.maxX - authoredBounds.minX;
     const legacyD = authoredBounds.maxZ - authoredBounds.minZ;
