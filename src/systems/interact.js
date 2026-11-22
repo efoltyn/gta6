@@ -114,6 +114,9 @@
     steal:    { label: "Pickpocket", fn: (a) => CBZ.econ.steal(a) },
     // PUNCH on the man whose verbs you tapped (the fire button swings at
     // whoever is in front). combat.js punch writes the blow into the jail's law.
+    // THREATEN took Punch's seat on the panel (owner 2026-11-21: the red
+    // button already punches). systems/intimidate.js reads him against you.
+    threaten: { label: "Threaten",  fn: (a) => (CBZ.prisonThreaten ? CBZ.prisonThreaten(a) : { ok: false, msg: "" }) },
     punch:    { label: "Punch",     fn: (a) => (CBZ.punch ? CBZ.punch(a) : { ok: false, msg: "" }) },
     // HANDS BEHIND YOUR BACK the blow is the forehead (combat.js punch in
     // cuffs; walked by the man you hit, the back of the head: melee.js butt)
@@ -379,11 +382,11 @@
       const out = [];
       if ((CBZ.game.cigs || 0) > 0) out.push("pay");
       if (PD().canWorkOff(a)) out.push("workOff");
-      if (out.length) { out.push("grab", "punch"); return out; }
+      if (out.length) { out.push("grab", "threaten"); return out; }
     }
     // HE CAME BACK FOR WHAT YOU TOOK (ai.js ROBBED): give it back, or answer
     // him with your hands
-    if (dem && dem.kind === "robbed" && (CBZ.game.cigs || 0) > 0) return ["pay", "grab", "punch"];
+    if (dem && dem.kind === "robbed" && (CBZ.game.cigs || 0) > 0) return ["pay", "grab", "threaten"];
     // A COP: toss him, cuff him (only a man who gave up or is down), and the
     // orders a uniform gives: steel out is "Drop it", trouble is "Back off"
     if (CBZ.game.role === "cop" && !staff(a)) {
@@ -447,9 +450,9 @@
       : crewWork ? "work"
       : null;
     // FOUR SEATS, ALWAYS FILLED (owner on iPad: "there's not enough"): with no
-    // headline the fourth is your fist on him. Trade stays first because it is
+    // headline the fourth is a threat (the fist is the red button's). Trade stays first because it is
     // the E key, and E on a man you happen to face must never be an assault.
-    return head ? [head, "trade", "steal", "grab"] : ["trade", "steal", "grab", "punch"];
+    return head ? [head, "trade", "steal", "grab"] : ["trade", "steal", "grab", "threaten"];
   }
 
   // a payoff cleans heat; with nothing on your file it would buy nothing
