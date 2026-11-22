@@ -3986,7 +3986,9 @@
     do { texJobStep(J.tissue, 1); texJobStep(J.stain, 1); } while (!(J.tissue.done && J.stain.done) && performance.now() - t0 < ms);
     return J.tissue.done && J.stain.done;
   }
-  function atlasSlice() { atlasRows(1.5); }
+  // (a bite waiting on them paints on top of the warm-up's own rows: its
+  // marks are not held back longer than they must be)
+  function atlasSlice() { atlasRows(2.4); }
 
   /* ---- WHAT THE TEETH LEAVE, AND WHAT THE BODY ANSWERS -------------------- */
   function tint(r, g, b, a) { const l = linArr(r, g, b); return [l[0], l[1], l[2], a]; }
