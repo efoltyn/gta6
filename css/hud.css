@@ -682,9 +682,9 @@ body.touch .wprompt:not(.band)::after{background:rgba(13,26,40,.85); border-colo
 .wprompt .wname .wrole{font-weight:500; font-size:12px; opacity:.78;}
 body:not(.touch) .wprompt.wside .tpill{padding:4px 11px 4px 5px; font-size:14px; background:rgba(9,14,20,.78);}
 body:not(.touch) .wprompt.wside.lead .tpill{background:rgba(14,30,44,.92); border-color:rgba(125,231,255,.6);}
-body.touch .wprompt.wside .tpill{min-height:56px; min-width:112px; justify-content:flex-start; margin:0;}
+body.touch .wprompt.wside .tpill{min-height:44px; min-width:96px; padding:0 16px; font-size:15px; justify-content:flex-start; margin:0;}
 body.touch .wprompt.wside.lead .tpill{background:rgba(25,70,104,.94); border-color:rgba(160,238,255,.85);}
-body.touch .wprompt .wname{font-size:16px;}
+body.touch .wprompt .wname{font-size:14px;}
 
 /* LAID OUT, NOT PINNED (systems/interactions.js layoutBeside / layoutDock).
    The sweep writes each pill's top-left itself, so no centring transform and
@@ -697,16 +697,22 @@ body.touch .wprompt .wname{font-size:16px;}
              44pt and a game thumb mid-fight needs more) */
 .wprompt.wabs, .wprompt.wdock{transform:none !important; padding:0;}
 .wprompt.wabs::after, .wprompt.wdock::after{display:none;}
-body.touch .wprompt.wdock .tpill{display:flex; width:100%; box-sizing:border-box; min-height:58px; min-width:132px;
-  padding:0 22px; margin:0; justify-content:center; font-size:18px; border-radius:29px; box-shadow:0 3px 0 rgba(0,0,0,.35);}
+/* PHONE = THE TRADE TABLE'S SIZE (owner, phone 2026-11-21: Offer / Request /
+   Leave "are perfect size and placement but other interaction buttons are
+   HUGE"). Every prison verb on a phone wears the trade verb's capsule: 44px
+   tall (Apple's floor), 96 wide, 15px words, 6px gaps (interactions.js
+   layoutDock). Only a real tablet held in two hands gets the 58px thumb. */
+body.touch .wprompt:not(.wdock):not(.wside) .tpill{min-height:44px; min-width:96px; padding:0 16px; font-size:15px; border-radius:22px;}
+body.touch .wprompt.wdock .tpill{display:flex; width:100%; box-sizing:border-box; min-height:44px; min-width:96px;
+  padding:0 16px; margin:0; justify-content:center; font-size:15px; border-radius:22px; box-shadow:0 3px 0 rgba(0,0,0,.35);}
 body.touch .wprompt.wdock.lead .tpill{background:rgba(25,70,104,.94); border-color:rgba(160,238,255,.85);}
-body.touch .wprompt.wdock .wname{font-size:16px; padding:0 2px 4px;}
+body.touch .wprompt.wdock .wname{font-size:14px; padding:0 2px 4px;}
 body.touch .wprompt.wdock .wname .wrole{font-size:12px;}
-/* a landscape PHONE is ~390px tall: name + four 58px capsules would climb
-   into the top HUD, so the phone keeps 50px (still over Apple's 44) */
-@media (max-height: 520px){
-  body.touch .wprompt.wdock .tpill{min-height:50px; min-width:112px; font-size:16px; border-radius:25px; padding:0 18px;}
-  body.touch .wprompt.wside .tpill{min-height:50px;}
+/* iPad (owner 2026-10-19: "a little bit too small on iPad") */
+@media (min-width: 700px) and (min-height: 550px){
+  body.touch .wprompt.wdock .tpill{min-height:58px; min-width:132px; font-size:18px; border-radius:29px; padding:0 22px;}
+  body.touch .wprompt.wside .tpill{min-height:56px; min-width:112px; font-size:16px;}
+  body.touch .wprompt .wname, body.touch .wprompt.wdock .wname{font-size:16px;}
 }
 
 /* TRADE (systems/prisontrade.js): your pockets and his on one table */

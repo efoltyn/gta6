@@ -574,7 +574,8 @@
   // a person's verbs on a touchscreen: name on top, the lead verb at the
   // bottom nearest the thumb, one width, tight gaps
   function layoutDock(list) {
-    const gap = 10;   // a thumb between two 56px capsules, not a hair
+    // the trade verbs' 6px on a phone; a tablet's 58px capsules keep 10
+    const gap = (innerWidth >= 700 && innerHeight >= 550) ? 10 : 6;
     const name = list.filter(function (p) { return p.label; });
     const verbs = list.filter(function (p) { return !p.label; }).sort(function (a, b) { return b.row - a.row; });
     const ordered = name.concat(verbs);
