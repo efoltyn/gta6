@@ -334,7 +334,24 @@
     const night = CBZ.nightAmount != null ? CBZ.nightAmount : 1;
     const cam = CBZ.camera;
     if (cam) cam.getWorldPosition(_cam);
+    // THE BLACKOUT (systems/prisonnight.js): the towers are on the prison's
+    // circuit like every other fitting. The lamp is dead — no beam, no pool,
+    // no glare, a dark lens — and the head stops where it was.
+    const PL = CBZ.prisonLights;
+    const black = !!(PL && PL.blackout && PL.blackout());
     for (const sl of MINE) {
+      sl.dark = black;
+      if (black) {
+        if (sl.disabled > 0) sl.disabled = Math.max(0, sl.disabled - dt);   // a sabotage still runs its clock
+        if (sl._hot) { sl._hot = false; sl.cone.material.color.setHex(COL); sl.pool.material.color.setHex(COL); }
+        sl.spot.intensity = 0;
+        sl.cone.material.opacity = 0;
+        sl.pool.material.opacity = 0;
+        sl.rig.lensMat.color.setRGB(0, 0, 0);       // unlit glass: anything above 0 reads grey on black
+        sl.rig.glare.material.opacity = 0;
+        sl.rig.glare.visible = false;
+        continue;
+      }
       const out = sl.disabled > 0;
       if (out) sl.disabled = Math.max(0, sl.disabled - dt);
 
@@ -429,7 +446,7 @@
   // detection query: is this position inside any searchlight pool?
   CBZ.litBySearchlight = function (pos, crouch) {
     for (const sl of CBZ.searchlights) {
-      if (!sl || !sl.pool || sl.disabled > 0 || sl._onRoof) continue;   // a foreign record may carry neither; a roof shelters
+      if (!sl || !sl.pool || sl.disabled > 0 || sl._onRoof || sl.dark) continue;   // a foreign record may carry neither; a roof shelters; a dead lamp lights nothing
       const dx = pos.x - sl.pool.position.x;
       const dz = pos.z - sl.pool.position.z;
       // crouching effectively shrinks how far into the pool you can be caught

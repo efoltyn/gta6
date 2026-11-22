@@ -91,7 +91,7 @@
       work: "office",
       supper: "rounds",    // 17:00 walks it again
       count: "throat",     // 18:30 stands at the wing throat while they come in
-      secure: "quarters", night: "quarters",
+      secure: "quarters", night: "quarters", blackout: "quarters",
     };
     function duty(id) {
       const k = String(id || "").toLowerCase().replace(/[^a-z]/g, "");
@@ -300,7 +300,7 @@
     return !!(gd && gd.group && !gd.dead && !(gd.ko > 0) && !gd.asleep && !gd.tied && gd.kind !== "warden");
   }
   function free(gd) {
-    return able(gd) && !gd._escort && !gd._wardenEscort && !gd._wardenCall && !gd._shakedown && !gd._dayRoute &&
+    return able(gd) && !gd._escort && !gd._wardenEscort && !gd._wardenCall && !gd._shakedown && !gd._dayRoute && !gd._duty &&
       !gd._snitchTask && !gd._pcEscort && !gd._yardCase && !(gd.pause > 0) && !(gd.hunt > 0) && gd.intimidMode !== "scared";
   }
   function inv() { return g.inventory || {}; }
@@ -1016,6 +1016,9 @@
     if (S.call || S.meet || S.shake) return;
     if (S.you && S.you.outcome == null) return;
     if (S.now - (S.youAt || -1e9) < 20) return;                 // a breath after the last one
+    // an officer is already sending you somewhere on the timetable's orders
+    const sch = CBZ.prisonSchedule;
+    if (sch && sch.taking && sch.taking()) return;
     const p = P();
     if (!p) return;
     // STEEL OUT in front of him (a blade at arm's length is his detail's,
@@ -1033,7 +1036,7 @@
     if (!onFloor()) return;
     const b = String(blockId() || "");
     // LOCKED IN: after lock-in, or in a lockdown, a man out of his cell
-    if ((b === "secure" || b === "night" || lockdownOn()) && CBZ.playerInOwnCell && !CBZ.playerInOwnCell() && seesYou(w, 16)) {
+    if ((b === "secure" || b === "night" || b === "blackout" || lockdownOn()) && CBZ.playerInOwnCell && !CBZ.playerInOwnCell() && seesYou(w, 16)) {
       youOrder(w, "cell", function () { return !!CBZ.playerInOwnCell(); }, "cell", { maxDist: 60, patience: [8, 7, 6] });
       return;
     }
@@ -1330,23 +1333,15 @@
     if (b !== "yard" && b !== "work") return;
     if (p.z < -8) return;                                                   // indoors: where he wants you
     S.noYardT = (S.noYardT || 0) - dt;
-    const nt = S.noYardGd;
-    if (nt && able(nt) && Math.hypot(nt.group.position.x - p.x, nt.group.position.z - p.z) < 3.2 && !nt._noYardSaid) {
-      // the officer's ORDER: inside. Walk in and that is that; stay out on
-      // him and he takes you in
-      nt._noYardSaid = true;
-      youOrder(nt, "go", function () { const q = P(); return !!q && q.z < -8; }, "yard", {
-        lines: LINE.noYard, maxDist: 40, patience: [6, 5, 4],
-        force: function () { if (CBZ.addHeat) CBZ.addHeat(4); sendFor("yard", 1); },
-      });
-    }
     if (S.noYardT > 0) return;
     S.noYardT = 30;
-    const gd = pickNear(p.x, p.z, 70, free);
-    if (!gd) return;
-    gd._noYardSaid = false;
-    gd.investigate = { x: p.x, z: p.z, t: 8, scan: 0, type: "report", looking: false, player: false };
-    S.noYardGd = gd;
+    // the officer's ORDER: inside. The gate is shut all day, so the timetable
+    // (systems/prisonschedule.js) walks it: the order, again, then his hand on
+    // your arm, and the gate opens for that crossing only.
+    const sch = CBZ.prisonSchedule;
+    if (!sch || !sch.bringIn || (sch.taking && sch.taking())) return;
+    const gd = pickNear(p.x, p.z, 90, free);
+    if (gd) sch.bringIn(gd, LINE.noYard);
   }
 
   /* ==========================================================
@@ -1719,6 +1714,8 @@
     onShift: onShift,
     exposed: exposed,
     escorted: escorted,
+    // he has taken your yard (systems/prisonschedule.js leaves you inside)
+    noYard: function () { return S.blockSeq < S.noYard; },
     // the player is walking to or standing in his office on his orders
     pass: function () { return !!(S.call && S.call.phase === "lead") || !!S.meet; },
     verbs: verbs,

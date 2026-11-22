@@ -545,6 +545,13 @@
     for (let i = 0; i < 4; i++) {
       const bar = addBox(-4.35, 3.02 + i * 0.32, -7.36, 1.16, 0.2, 0.06, 0x2b2b2b, { cast: false });
       bar.userData.mover = true;
+      // a lit sign on the prison's circuit: dark in the blackout
+      // (systems/prisonnight.js); applySignage below says which bars burn
+      const face = { face: true, mesh: bar, kind: "allnight", x: -4.35, z: -7.36,
+        color: 0x2b2b2b, emissive: 0x000000, off: 0x2b2b2b, ei: 0.9, powered: false };
+      bar._face = face;
+      if (CBZ.prisonLights && CBZ.prisonLights.register) { try { CBZ.prisonLights.register(face); } catch (e) {} }
+      else (CBZ._prisonLateFixtures || (CBZ._prisonLateFixtures = [])).push(face);
       barSlots.push(bar);
     }
     // (d) the staff-room noticeboard plate (world/adminwing.js's muster board
@@ -571,6 +578,9 @@
       m.color.setHex(lit ? t.color : 0x2b2b2b);
       if (m.emissive) m.emissive.setHex(lit ? t.color : 0x000000);
       m.emissiveIntensity = lit ? 0.9 : 0;
+      // the circuit's driver writes from this record from now on
+      const f = barSlots[i]._face;
+      if (f) { f.color = lit ? t.color : 0x2b2b2b; f.emissive = lit ? t.color : 0x000000; f.powered = lit ? true : false; }
     }
     return paint.length + barSlots.length;
   }
@@ -838,7 +848,9 @@
     for (let i = 0; i < cams.length; i++) if (!cams[i].offline) liveCams++;
     if (cams.length && liveCams !== Math.min(cams.length, t.cameras)) missing.push("cameras:" + liveCams);
     const S = CBZ.prisonSchedule;
-    if (!S || !S.blocks || S.blocks[1].from !== t.blocks.yard.from) missing.push("schedule");
+    let yardB = null;
+    if (S && S.blocks) for (let i = 0; i < S.blocks.length; i++) if (S.blocks[i].id === "yard") yardB = S.blocks[i];
+    if (!yardB || yardB.from !== t.blocks.yard.from) missing.push("schedule");
     const P = CBZ.prisonLights;
     let litFloods = 0;
     if (P && P.fixtures) for (let i = 0; i < P.fixtures.length; i++) {

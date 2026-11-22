@@ -16,16 +16,20 @@
         yard's flood masts strike at dusk and burn until dawn.
      3. EVERY SENSOR IS PRICED IN LIGHT. CBZ.sightScale(sensor, x, z) is the
         single hook entities/guards.js's cone math and systems/interactions.
-        js's camera reach both multiply by. In the black a guard sees 40% of
-        his range; under a floodlight, a searchlight beam, a lit room or the
-        sun he sees all of it — and so does the lens.
+        js's camera reach both multiply by. Under a night sky a guard sees 40%
+        of his range; under a floodlight, a searchlight beam, a lit room, the
+        sun or anybody's torch beam he sees all of it — and so does the lens.
+     4. THE BLACKOUT (00:00-05:00). Every fixed light is off — fittings,
+        floods, searchlights, every lamp face — and the sky is a moonless
+        black. The screen is black but for where a hand torch lands, and a
+        man outside every beam is next to invisible (sight ~0.06).
 
-   THE TORCH IS THE ANSWER TO ALL THREE, which is why it had to become real
+   THE TORCH IS THE ANSWER TO ALL OF IT, which is why it had to become real
    light rather than a yellow debug fan. A guard with his flashlight on
-   RESTORES his own range inside the beam — and the beam is a cone you can
-   see coming down a corridor, with a pool on the floor, so the same object
-   that lets him see you is the thing that tells you where he is. That trade
-   is the whole night stealth loop.
+   RESTORES his range inside the beam — and the beam is a cone you can see
+   coming down a corridor, with a pool on the floor, so the same object that
+   lets him see you is the thing that tells you where he is. That trade is
+   the whole night stealth loop.
 
    Every fixture in the prison can join the schedule in one call:
        CBZ.prisonLights.register({ x, z, r: 9, kind: "room", mesh: lamp })
@@ -36,7 +40,7 @@
    systems/fixtures.js owns the records, the per-kind schedule, the material
    driving, the region arithmetic and the sensor curve, and this file is its
    first caller. What stays is the part that is an OPINION about a prison —
-   which fittings exist and where, the six kinds and what each is worth after
+   which fittings exist and where, the kinds and what each is worth after
    lights-out, a wing's barred openings against a room's small panes, a
    searchlight beam counting as light, and how black the yard is allowed to
    get. Any other game gets the same machine by declaring its own.
@@ -93,7 +97,50 @@
 
   function on() { return CFG.PRISON_NIGHT_V1 !== false && CBZ.game && CBZ.game.mode === "escape"; }
   function sched() { return CBZ.prisonSchedule || null; }
-  function lightsOut() { const s = sched(); return !!(s && s.lightsOut()); }
+
+  /* THE BLACKOUT (00:00 - 05:00, the timetable's "blackout" block). Every
+     fixed light in the prison is off: the circuit, not a dimmer. Fittings,
+     floods, the tower searchlights, every lamp face. The sky goes with it — a
+     black, moonless night — but the sky is not on a breaker: it closes over
+     the hour before the lights go (23:00 -> 00:00) and opens again with the
+     dawn (05:00 -> 05:45). `cut` is that sky share, 0..1; everything that
+     lights the world without a lamp (moon key, sky ambient, bounce, fog, the
+     dome, the film grade's lifted black) is multiplied down by it. What is
+     left is what a hand torch lands on.
+     Asked once a frame (stamped on CBZ.now): sightScale asks it per sensor. */
+  const BLACK_FROM = 0, BLACK_TO = 5;      // the hours, when the timetable has no such block
+  const SKY_IN = 1, SKY_OUT = 0.75;        // hours the sky takes to close / to open
+  const dk = { at: -1, black: false, cut: 0 };
+  function wrap24(h) { return ((h % 24) + 24) % 24; }
+  function smooth01(t) { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
+  function darkState() {
+    const now = CBZ.now || 0;
+    if (dk.at === now) return dk;
+    dk.at = now; dk.black = false; dk.cut = 0;
+    const s = on() ? sched() : null;
+    if (!s) return dk;
+    // the block's own hours if the timetable has one; `is` decides inside it
+    let bi = -1;
+    const B = s.blocks;
+    if (B) for (let i = 0; i < B.length; i++) if (B[i] && B[i].id === "blackout") { bi = i; break; }
+    const from = bi >= 0 ? +B[bi].from : BLACK_FROM;
+    const to = bi >= 0 ? +B[(bi + 1) % B.length].from : BLACK_TO;
+    const h = s.hour ? +s.hour() : NaN;
+    if (s.is && s.is("blackout")) dk.black = true;
+    else if (bi < 0 && h === h) dk.black = from <= to ? (h >= from && h < to) : (h >= from || h < to);
+    if (dk.black) { dk.cut = 1; return dk; }
+    if (h === h) {
+      const before = wrap24(from - h), after = wrap24(h - to);
+      if (before < SKY_IN) dk.cut = smooth01(1 - before / SKY_IN);
+      else if (after < SKY_OUT) dk.cut = 1 - smooth01(after / SKY_OUT);
+    }
+    return dk;
+  }
+  function blackout() { return darkState().black; }
+  function skyCut() { return darkState().cut; }
+  // the wing's own lamps die at lights-out, and at the blackout whatever the
+  // block itself says
+  function lightsOut() { const s = sched(); return !!(s && s.lightsOut()) || blackout(); }
   // scratch for the searchlight probe below — one record, never allocated in
   // the light loop, which runs per fixture per sample
   const _p = { x: 0, y: 0, z: 0 };
@@ -123,7 +170,7 @@
         that region's windows admit) and the sensor curve. THIS file owns the
         five things that are the PRISON's opinion and nobody else's:
 
-          · the six kinds and what each is worth at lights-out;
+          · the kinds and what each is worth at lights-out and in the blackout;
           · the wing (barred openings, 0.55 of the sky) against a room (small
             panes, 0.35) — both driven off §4's own two levels;
           · a searchlight beam counting as light on open ground;
@@ -144,10 +191,17 @@
       night:     { day: 0,    out: 0.55, darkOnly: false },  // the wing's night-lights
       flood:     { day: 1,    out: 1,    darkOnly: true },   // strikes at dusk
       perimeter: { day: 1,    out: 1,    darkOnly: true },   // never on the wing's circuit
+      allnight:  { day: 1,    out: 1,    darkOnly: false },  // 24 h: corridor tubes, exit signs, the duty desk
+      sky:       { day: 1,    out: 1,    sky: true },        // a louvre lit by the daylight behind it
+      // (the blackout takes every one of them to 0)
     },
     defaultKind: "room",
     enabled: on,
     lightsOut: lightsOut,
+    blackout: blackout,
+    // the plain sky, less whatever share of it the blackout night has closed
+    sky: function () { return CBZ.fixtures.daySky() * (1 - skyCut()); },
+    skyCut: skyCut,
     // an unremarkable interior: small panes, lit by §4's room level
     window: 0.35,
     ambient: function () { return roomLevel; },
@@ -158,7 +212,11 @@
       _p.x = x; _p.z = z;
       return CBZ.litBySearchlight(_p, false) ? 0.95 : 0;
     },
-    minSight: 0.40,          // what a man keeps in total darkness
+    // what a man keeps with no lamp on him: 0.40 of his range under a night
+    // sky, next to nothing when there is no sky (a body at arm's length)
+    minSight: function () { return 0.40 - 0.34 * skyCut(); },
+    // being lit is being inside a beam — any hand torch's, his own included
+    lit: function (x, z) { return litByTorch(x, z); },
     torchThrow: 15,          // m — how far a hand torch usefully throws
     // how much of the shared night rig survives here (read live: a regime may
     // move it). The shared keyframes are a CITY's night — a place with street
@@ -186,11 +244,40 @@
     return (r && r.id !== "wing") ? r : null;
   }
 
-  /* WHAT A SENSOR GETS: 1 in daylight, 0.40 in true dark, and all of it back
-     inside a torch beam — the beam IS the light, so being in it is being lit.
-     That trade is the whole night stealth loop, and it is the rig's curve so
-     the camera and the guard cone cannot end up on two different ones. */
+  /* WHAT A SENSOR GETS: 1 in daylight, 0.40 under a night sky, ~0.06 in the
+     blackout, and all of it back inside a torch beam — the beam IS the light,
+     so being in it is being lit. That trade is the whole night stealth loop,
+     and it is the rig's curve so the camera and the guard cone cannot end up
+     on two different ones. */
   CBZ.sightScale = RIG.scale;
+
+  /* INSIDE A BEAM. A hand torch lights a cone, not a disc round the man who
+     holds it: in the black, the side of him his light is not pointing at is
+     as dark as anywhere. Every live torch is asked — each guard's (lens and
+     landing published by driveTorches below) and the player's own
+     (systems/playerflashlight.js) — so a man caught in one officer's beam is
+     lit for every eye that looks at him. The beam stops at the wall it hits;
+     on a floor it runs a little past its pool. Nothing allocated. */
+  const BEAM_COS = Math.cos(0.42);         // the spill's half-angle
+  function inBeam(ox, oz, ax, az, wall, x, z) {
+    const px = x - ox, pz = z - oz, pl2 = px * px + pz * pz;
+    if (pl2 < 0.36) return true;                          // at the lens
+    const bx = ax - ox, bz = az - oz, bl = Math.sqrt(bx * bx + bz * bz);
+    if (bl < 0.5) { const dx = x - ax, dz = z - az; return dx * dx + dz * dz < 4; }   // a pool at his feet
+    const reach = Math.min(RIG.torchThrow, wall ? bl + 0.6 : bl * 1.5 + 1.5);
+    if (pl2 > reach * reach) return false;
+    return px * bx + pz * bz > BEAM_COS * Math.sqrt(pl2) * bl;
+  }
+  function litByTorch(x, z) {
+    const list = CBZ.guards || [];
+    for (let i = 0; i < list.length; i++) {
+      const g = list[i];
+      if (!g || !g.flashlightOn || g.dead || !g._torchAim || !g._torchOrigin) continue;
+      if (inBeam(g._torchOrigin.x, g._torchOrigin.z, g._torchAim.x, g._torchAim.z, g._torchWall, x, z)) return true;
+    }
+    const B = CBZ.playerFlashlight && CBZ.playerFlashlight.beam;
+    return !!(B && B.on && inBeam(B.ox, B.oz, B.x, B.z, B.wall, x, z));
+  }
 
   /* ==========================================================
      4. THE FIXTURES THEMSELVES.
@@ -204,10 +291,11 @@
   let wingWant = -1;
   function driveWing() {
     const lamp = CBZ.ceilingLamp;
-    const cut = !!(CBZ.breaker && CBZ.breaker.sabotaged);
-    wingLevel = cut ? 0 : (lightsOut() ? 0.10 : 1);
-    roomLevel = cut ? 0 : (lightsOut() ? 0.18 : 1);
-    if (!lamp || cut) { wingWant = -1; return; }
+    const sabotaged = !!(CBZ.breaker && CBZ.breaker.sabotaged);
+    const dead = sabotaged || blackout();
+    wingLevel = dead ? 0 : (lightsOut() ? 0.10 : 1);
+    roomLevel = dead ? 0 : (lightsOut() ? 0.18 : 1);
+    if (!lamp || sabotaged) { wingWant = -1; return; }
     const want = lightsOut() ? 0 : 1;
     if (want === wingWant) return;
     wingWant = want;
@@ -393,6 +481,7 @@
       g._torchAim.y = torchOrigin.y + torchDirection.y * reach;
       g._torchAim.z = torchOrigin.z + torchDirection.z * reach;
       g._torchOrigin.x = torchOrigin.x; g._torchOrigin.y = torchOrigin.y; g._torchOrigin.z = torchOrigin.z;
+      g._torchWall = !!(h && h.hit && h.wall);          // litByTorch: a wall ends the beam
       if (g._torchPool) {
         const pool = g._torchPool;
         if (h && h.hit && h.t > 0.3) {
@@ -445,8 +534,37 @@
         (`nightFloor`), which multiplies the shared sun/hemi/bounce/fog at
         order 93.6 — after weather's lightning bump (@90) and before
         core/gfx.js's tone-map finalize (@94.5), so our result is scaled
-        exactly as everyone else's is.
+        exactly as everyone else's is. The blackout's `skyCut` rides the same
+        multiply, and is published (CBZ.skyCut) for the two things that light
+        the screen without lighting the world: the sky dome and moon
+        (core/sky.js) and the film grade's lifted black (core/renderer.js).
      ========================================================== */
+  CBZ.onAlways(93.55, function () {
+    const cut = on() ? skyCut() : 0;
+    CBZ.skyCut = cut;
+    if (CBZ.setBlackLevel) CBZ.setBlackLevel(cut);
+    if (!on() && glintsDark) driveGlints(false);      // never leave the city's badges dark
+  });
+
+  /* PAINTED GLINTS. entities/headwear.js gives every cap badge and cord a
+     faint emissive (gold 0x5a4210 x0.35, silver 0x4e565f x0.3) so the metal
+     reads in daylight. In the blackout that is a row of officers' badges
+     floating in the black: a light that is not there. Those two shared
+     materials (and their PBR twins) go dark with the circuit and come back
+     with it; outside the prison they are put straight back. */
+  const GLINTS = [[0xc9a44a, 0x5a4210, 0.35], [0xb9c0c8, 0x4e565f, 0.3]];
+  let glintsDark = false;
+  function driveGlints(dark) {
+    if (dark === glintsDark || !CBZ.cmat) return;
+    glintsDark = dark;
+    for (let i = 0; i < GLINTS.length; i++) {
+      const G = GLINTS[i];
+      const m = CBZ.cmat(G[0], { emissive: G[1], ei: G[2] });
+      if (m && m.emissive) m.emissive.setHex(dark ? 0 : G[1]);
+      const t = m && m._cbzTwin;
+      if (t && t.emissive) t.emissive.setHex(dark ? 0 : G[1]);
+    }
+  }
 
   /* ==========================================================
      7. THE TICK
@@ -458,12 +576,36 @@
   function driveAll() {
     driveWing();
     RIG.drive(true);                                  // fittings + the pooled floods
+    driveGlints(blackout());
     assignTorchLights();
+  }
+  /* THE BREAKERS. The circuit changing state is driven the SAME frame, not
+     on the next 5 Hz pass, so every fitting in the prison goes out (and comes
+     back) together, with the contactor's clunk from the fitting nearest you. */
+  let wasBlack = null;
+  function powerFlipped() {
+    const black = blackout();
+    if (wasBlack === null || black === wasBlack) { wasBlack = black; return false; }
+    wasBlack = black;
+    return true;
+  }
+  function clunk() {
+    const p = CBZ.player && CBZ.player.pos;
+    if (!p || !CBZ.worldSfx || !(CBZ.game && CBZ.game.state === "playing")) return;
+    let best = null, bd = Infinity;
+    for (let i = 0; i < fixtures.length; i++) {
+      const f = fixtures[i];
+      if (!f.mesh) continue;
+      const dx = f.x - p.x, dz = f.z - p.z, d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = f; }
+    }
+    if (best) { try { CBZ.worldSfx("switch", best.x, best.z, { y: 6, ref: 16, volume: 1, gap: 0.5 }); } catch (e) {} }
   }
   CBZ.onUpdate(21.5, function (dt) {
     if (!on()) return;
     buildDynamic();
     fixT -= dt;
+    if (powerFlipped()) { fixT = 0; clunk(); }
     if (fixT <= 0) { fixT = 0.2; driveAll(); }
     driveTorches(dt);                                 // torches move every frame
   });
@@ -474,7 +616,8 @@
   CBZ.onAlways(21.6, function (dt) {
     if (!on() || (CBZ.game && CBZ.game.state === "playing")) return;
     fixT -= dt;
-    if (fixT <= 0) { fixT = 0.35; driveWing(); RIG.drive(false); }
+    if (powerFlipped()) fixT = 0;
+    if (fixT <= 0) { fixT = 0.35; driveWing(); RIG.drive(false); driveGlints(blackout()); }
   });
 
   /* ==========================================================
@@ -491,6 +634,9 @@
     level: lightAt,            // 0..1 light on a point — ask this, not the sun
     sky: RIG.sky,
     lightsOut: lightsOut,
+    blackout: blackout,        // 00:00-05:00: every fixed light off
+    skyCut: skyCut,            // 0..1 share of the night sky closed over it
+    litByTorch: litByTorch,    // is (x, z) inside any live hand torch's beam
     inWing: inWing,
     roomAt: roomAt,
     torchThrow: RIG.torchThrow,
@@ -514,7 +660,9 @@
     const noon = RIG.scale(null, SX, SZ);
     CBZ.dayness = 0; CBZ.duskness = 0;
     const midnight = RIG.scale(null, SX, SZ);
-    const torchLit = RIG.scale({ flashlightOn: true, group: { position: { x: SX, z: SZ } } }, SX, SZ + 4);
+    // a point 4 m down a beam thrown 6 m out from the probe: scale() gives 1
+    // for any point inside a live beam (litByTorch), so being in one is all of it
+    const torchLit = inBeam(SX, SZ, SX, SZ + 6, false, SX, SZ + 4) ? 1 : RIG.scale(null, SX, SZ + 4);
     CBZ.dayness = held; CBZ.duskness = heldK;
     let unknown = 0;
     for (let i = 0; i < fixtures.length; i++) if (!RIG.kinds[fixtures[i].kind]) unknown++;
@@ -527,6 +675,9 @@
       sightUnderTorch: Math.round(torchLit * 1000) / 1000,  // a torch buys it all back
       skyLevel: Math.round(RIG.sky() * 1000) / 1000,
       lightsOut: lightsOut(), wingLevel: wingLevel,
+      blackout: blackout(), skyCut: Math.round(skyCut() * 1000) / 1000,
+      litFixtures: fixtures.filter(function (f) { return f.level > 0.02; }).length,
+      litFaces: RIG.faces.filter(function (f) { return f.level > 0.02; }).length,
       dynamic: dyn.built ? (dyn.flood ? dyn.flood.lamps.length : 0) + dyn.torch.length : 0,
       torchCones: (CBZ.guards || []).filter(function (g) { return !!g._torchCone; }).length,
     };

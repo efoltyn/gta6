@@ -296,8 +296,13 @@
     if (MATS.has(key)) return MATS.get(key);
     let m;
     if (kind === "lit") {
-      // a lit tube: emissive, merged; corridors and vestibules are lit 24 h
+      // a lit tube: emissive, merged; corridors and vestibules are lit 24 h —
+      // on the prison's circuit, so the blackout (systems/prisonnight.js)
+      // takes every one of them out together (one shared material, one face)
       m = new THREE.MeshStandardMaterial({ color: 0xfff6dc, emissive: 0xffe9a8, emissiveIntensity: 1.0, roughness: 0.5, metalness: 0.0 });
+      const face = { face: true, mat: m, kind: "allnight", x: 0, z: 0, color: 0xfff6dc, emissive: 0xffe9a8, ei: 1.0, off: 0x2b2b2b };
+      if (CBZ.prisonLights && CBZ.prisonLights.register) { try { CBZ.prisonLights.register(face); } catch (e) {} }
+      else (CBZ._prisonLateFixtures || (CBZ._prisonLateFixtures = [])).push(face);
     } else if (kind === "glass") {
       m = new THREE.MeshStandardMaterial({
         color: tint != null ? tint : 0x4b6e86, transparent: true, opacity: 0.42,
@@ -714,6 +719,12 @@
       pivot.add(lid); pivot.add(grip);
       root().add(pivot);
       const hole = new THREE.Mesh(new THREE.BoxGeometry(HS - 0.06, 0.004, HS - 0.06), new THREE.MeshBasicMaterial({ color: 0x050607 }));
+      {
+        // unlit near-black reads grey in the blackout (systems/prisonnight.js): black then
+        const face = { face: true, mat: hole.material, kind: "allnight", tint: true, x: 0, z: 0, color: 0x050607 };
+        if (CBZ.prisonLights && CBZ.prisonLights.register) { try { CBZ.prisonLights.register(face); } catch (e) {} }
+        else (CBZ._prisonLateFixtures || (CBZ._prisonLateFixtures = [])).push(face);
+      }
       hole.position.set(hatchC.x, fl + 0.008, hatchC.z);
       hole.visible = false; hole.userData.mover = true;
       root().add(hole);

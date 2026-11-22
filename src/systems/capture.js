@@ -1902,34 +1902,11 @@
   if (CBZ.CONFIG && CBZ.CONFIG.PRISON_PIPE == null) CBZ.CONFIG.PRISON_PIPE = true;
   function pipeOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_PIPE); }
   const STRIKE_TIME = 45;          // seconds added to the stretch per capture
-  let sentShown = -1, sentCallT = 0, sentCall = "";
-  // THE DAY BEAT. No new rooms and no new geometry: the block simply CALLS the
-  // rooms the prison already has, on a rotation, so being inside has a rhythm
-  // and the yard/chow hall are somewhere you are meant to be rather than
-  // scenery you happen to walk through.
-  //
-  //  `lock` is the phase's MECHANIC, not its prose. This table used to be read
-  //  back with /LOCKDOWN/.test(b.s) — a regex over a display string driving a
-  //  behaviour, which breaks the day the copy is reworded (and collided with
-  //  the FACILITY lockdown, which is a different event entirely). The row says
-  //  what it does; the copy is free to change.
-  //  The CALL is its own field (not split back out of the prose with " —" —
-  //  the same display-string-as-data disease the `lock` note above already
-  //  cured once): the call is what the screw shouts and what the objective
-  //  line carries; the prose only ever rode the suppressed hint path.
-  const DAY_BEAT = [
-    { t: 55, call: "Yard", shout: "Yard time!" },
-    { t: 40, call: "Chow", shout: "Chow! Line up!" },
-    { t: 35, call: "Rec", shout: "Rec!" },
-    { t: 30, call: "Count", shout: "Count time! On your bunks!", lock: true },
-  ];
-  let beatI = 0, beatT = 0, beatLock = false;
-  // the block musters to its cells (lockdown.js owns the routine; this is its
-  // second consumer, and the reason it lives there rather than here).
-  function muster(on) {
-    if (!beatOn() || !CBZ.cellMuster) return;
-    try { CBZ.cellMuster(!!on); } catch (e) {}
-  }
+  let sentShown = -1, sentCallT = 0;
+  // (THE DAY BEAT that lived here — "Yard time!", "Chow!", "Count time!" on its
+  // own 160-second loop, racking the cells whatever the hour — is gone. The
+  // prison's one day is systems/prisonschedule.js, and a sentence is served
+  // inside it like any other run.)
   function sentenceTick(dt) {
     if (!pipeOn() || g.role === "cop") return;
     const left = +g.jailSentence || 0;
@@ -1944,54 +1921,13 @@
     sentCallT -= dt;
     if (sentCallT <= 0) {
       sentCallT = 1;
-      if (CBZ.setObjective) {
-        // one standing line: the time left and what the block is doing
-        CBZ.setObjective("Time left: " + s + "s" + (sentCall ? ". " + sentCall : "") + ".");
-      }
+      // the stretch, for whatever reads the objective string (not painted)
+      if (CBZ.setObjective) CBZ.setObjective("Time left: " + s + "s.");
     }
-    // the day beat rotates the block
-    beatT -= dt;
-    if (beatT <= 0) {
-      const b = DAY_BEAT[beatI % DAY_BEAT.length];
-      beatI++;
-      beatT = b.t;
-      sentCall = b.call;
-      // THE CALL IS A CALL. A yard call is a thing an officer SHOUTS across a
-      // block and a thing the block then physically does (muster() below walks
-      // them); it is not a caption. So it goes over the nearest screw's head
-      // (diegetic) and the phase name rides the objective readout — never a
-      // popup. With nobody in earshot it is silent, which is correct: you
-      // missed the call, and that is information you get by being somewhere
-      // else, not information the HUD owes you.
-      if (showing() && (CBZ.prisonSay || CBZ.citySay) && CBZ.guards) {
-        let crier = null, cd = 34 * 34;
-        for (const gd of CBZ.guards) {
-          if (!gd || gd.dead || gd.ko > 0 || !gd.group) continue;
-          const dx = gd.group.position.x - player.pos.x, dz = gd.group.position.z - player.pos.z;
-          const d2 = dx * dx + dz * dz;
-          if (d2 < cd) { cd = d2; crier = gd; }
-        }
-        // prisonSay first: citySay reads .pos and a guard keeps his on .group
-        if (crier) { try { if (CBZ.prisonSay) CBZ.prisonSay(crier, b.shout, { secs: 2.4, force: true }); else CBZ.citySay(crier, b.shout, "#ffd27b", 2.4); } catch (e) {} }
-      }
-      // LOCKUP puts the screws on your block — the cell-watch sweep the
-      // strike-2 rule already drives, reused rather than re-authored.
-      g.cellWatch = b.lock ? true : !!(g.caughtCount >= 2);
-      // ...and it is when the wing actually FILLS: the block walks to its
-      // bunks and the doors rack shut for the count, released at the next call.
-      beatLock = !!b.lock;
-      muster(beatLock);
-    }
-    // Re-assert while the phase lasts. Leaving play hands the block back (the
-    // shared onStateExit teardown), so a pause mid-count would otherwise drop
-    // lockup until the next phase two minutes later. cellMuster(true) on an
-    // already-running muster is a no-op, so this is self-healing and free.
-    if (beatLock) muster(true);
     if (g.jailSentence <= 0) {
       g.jailSentence = 0;
       // the gate opening is the announcement.
-      beatLock = false;
-      releasePlayerCell(); muster(false);   // nothing of ours stays shut past the gate
+      releasePlayerCell();                  // nothing of ours stays shut past the gate
       if (CBZ.cityJailRelease) { try { CBZ.cityJailRelease("served"); return; } catch (e) {} }
       if (CBZ.winGame) { try { CBZ.winGame("served"); } catch (e) {} }
     }
@@ -2031,7 +1967,6 @@
     confineT = INTAKE_T; confineShown = -1;
     g.invuln = Math.max(g.invuln || 0, INTAKE_T + 0.5);
     sealPlayerCell();
-    beatT = INTAKE_T + 2;                         // first yard call AFTER the count
     // YOU WAKE UP IN A CELL WITH THE DOOR SHUT. That is the intake. The two
     // lines that used to say so are gone; what is left is the room, the bars
     // racking across in front of you (sealPlayerCell, above) and the sentence
@@ -2076,11 +2011,11 @@
     if (fireCD > 0) fireCD -= dt;
     // new run? clear every leftover before anything else ticks
     if (pollStrikeRun && pollStrikeRun()) {
-      endEscort(); releasePlayerCell(); muster(false);
+      endEscort(); releasePlayerCell();
       dropHelper(false);
       cancelArrest(false); haulEnd(true);
-      confineT = 0; confineShown = -1; cellWatchCD = 0; sentShown = -1; beatI = 0; beatT = 0; sentCall = "";
-      beatLock = false; intakeDone = false; lastServed = -1;
+      confineT = 0; confineShown = -1; cellWatchCD = 0; sentShown = -1;
+      intakeDone = false; lastServed = -1;
       arrest = null; down = null; deathT = 0; lawGraceT = 0; holeRelease = false;
       if (CBZ.vitals) CBZ.vitals.reset(player);
       lastHurtT = -1e9; spdPX = null; pSpd = 0;
