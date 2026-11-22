@@ -39,6 +39,7 @@ const SCN = {
 const subjects = Object.keys(SCN).map((id) => ({ id, label: SCN[id].label, scn: id, cfg: SCN[id], hud: false, focus: SCN[id].label }));
 
 async function stageShot(input) {
+  const CAL = { sidearm: 0.8, ak47: 1.6, shotgun: 1.5 };   // (the stage runs in the page: module constants are not there)
   const CBZ = window.CBZ;
   const T = window.THREE;
   if (!CBZ || !T) return { ok: false, missing: "CBZ/THREE" };
@@ -242,7 +243,7 @@ async function stageShot(input) {
     MPs.zones(ch, Z);
     const toward = (p, r) => {                     // onto the surface facing the gun
       const dx = from.x - p.x, dz = from.z - p.z, l = Math.hypot(dx, dz) || 1;
-      return { x: p.x + dx / l * r, y: p.y, z: p.z + dz / l * r };
+      return new T.Vector3(p.x + dx / l * r, p.y, p.z + dz / l * r);   // a real Vector3: shotZone measures with it
     };
     if (rd.at === "head") return toward(Z.head.c, Z.head.r * 0.85);
     if (rd.at === "legR") { _a.copy(Z.rA).lerp(Z.rB, 0.45); return toward(_a, Z.legR * 0.9); }
