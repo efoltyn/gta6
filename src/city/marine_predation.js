@@ -286,7 +286,10 @@
     if (m.beam > 0) return m.beam;
     let B = 0;
     const g = a && a.group;
-    if (g && _box) {
+    // a skinned marine body publishes its trunk (fins excluded) directly
+    const mbd = g && g.userData && g.userData.marineBody;
+    if (mbd && mbd.beam > 0) B = mbd.beam * ((g.scale && g.scale.z > 0) ? g.scale.z : 1);
+    if (!(B > 0) && g && _box) {
       let hull = null;
       g.traverse(function (o) { if (!hull && o.isMesh && /hull$/i.test(o.name || "")) hull = o; });
       if (hull) {
@@ -1070,7 +1073,8 @@
         jaw: woundR(gapeOf(a) * (kin ? 0.34 : 0.45), t),
         sev: clamp((frac || 0.1) * 6 + sizeOf(a) / Math.max(0.2, sizeOf(t)) * 0.4, 0.3, 1) * (kin ? 0.7 : 1),
         dir: _cd,
-        by: a,
+        // who bit, by species, with the animal itself beside it
+        by: (a.species && a.species.id) || "", byActor: a,
         bleedS: 16,
       });
       if (took) AUDIT.chunks = (AUDIT.chunks || 0) + 1;

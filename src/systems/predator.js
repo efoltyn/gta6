@@ -179,6 +179,7 @@
   // shrinking-radius search that reads as "it is working the area out" instead
   // of "it is stuck on a waypoint". Two numbers, and it costs nothing.
   const PASS_MAX = 3, PASS_TIGHTEN = 0.17;
+  const ENC_COMMIT = 45;       // s a swimmer may be in a water hunter's sense before the pass that ends it
   // §E ambush: an ambusher does not close in the open. It holds absolutely
   // still until you are inside this fraction of its sense radius, and the
   // longer it has been still the more likely the circle ends in a commit.
@@ -1012,7 +1013,7 @@
   const _goreOpts = { amount: 1, dir: _goreDir, medium: "air", player: false, sfx: true, melee: "blade" };
   const _woundP = { x: 0, y: 0, z: 0 };
   const _woundDir = { x: 1, y: 0, z: 0 };
-  const _woundOpts = { head: false, cal: 1.5, melee: "bite", jaw: 0.3, sev: 0.7, fromX: 0, fromZ: 0 };
+  const _woundOpts = { head: false, cal: 1.5, melee: "bite", jaw: 0.3, sev: 0.7, sever: false, fromX: 0, fromZ: 0, by: "", byActor: null, dir: null, part: null };
   const _sfxOpts = { volume: 1 };
   // the QTE tick must NEVER be eaten by the sample bank's per-name cooldown —
   // a missed instruction cue reads as an unfair death.
@@ -1099,6 +1100,8 @@
   function jawWorld(h, out) {
     const g = h.attacker && h.attacker.group;
     if (!g) { out.x = out.y = out.z = 0; return false; }
+    // a skinned sea animal: between its own teeth, carried by the jaw bones
+    if (h.marine) return CBZ.marineMouthWorld(g, h.marine.engulf ? "grip" : "bite", out);
     const lx = h.jawX != null ? h.jawX : 1.15;
     const ly = h.jawY != null ? h.jawY : 0.25;
     const lz = h.jawZ != null ? h.jawZ : 0;
@@ -1124,8 +1127,20 @@
     return isFinite(out.x) && isFinite(out.y) && isFinite(out.z);
   }
 
+  // a survivor bot (entities/survivorbot.js) has its own damage bus, the one
+  // that knows its ragdoll, its killfeed line and its gore
+  function survBot(v) { return !!(v && CBZ.surv && CBZ.surv.hurt && CBZ.bots && CBZ.bots.indexOf(v) >= 0); }
+  const _survOpts = { fromX: 0, fromZ: 0, force: 4, fling: 1, cause: "", point: null, by: null, medium: "water", lens: false };
+  function survHurt(h, dmg) {
+    const ap = actorPos(h.attacker);
+    _survOpts.fromX = ap ? ap.x : 0; _survOpts.fromZ = ap ? ap.z : 0;
+    _survOpts.cause = h.cause; _survOpts.point = h.jaw; _survOpts.by = h.attacker; _survOpts.medium = h.medium;
+    try { CBZ.surv.hurt(h.victim, dmg, _survOpts); } catch (e) {}
+    _survOpts.by = null;
+  }
   function hurtVictim(h, dmg) {
     if (dmg <= 0) return;
+    if (!h.isPlayer && survBot(h.victim)) { survHurt(h, dmg); return; }
     const ap = actorPos(h.attacker);
     if (h.isPlayer) {
       // THE PLAYER IS NEVER DAMAGED BY A RAW `.hp -=`. cityHurtPlayer is the
@@ -1193,6 +1208,7 @@
       }
       return;
     }
+    if (survBot(v)) { if (!v.dead) survHurt(h, 1e6); return; }
     if (v && v.animal) {
       // AN ANIMAL HAS A KILL CONTRACT TOO, AND THIS BRANCH USED TO SKIP IT.
       // The comment this replaces said "wildlife has no cityKillPed contract",
@@ -1254,44 +1270,51 @@
     _goreOpts.melee = "blade";     // teeth open you like a blade, not a club
     try { CBZ.gore(_jaw.x, _jaw.y, _jaw.z, _goreOpts); } catch (e) {}
     const target = h.isPlayer ? playerRagdollTarget() : h.victim;
-    if (CBZ.bodyWound && target) {
+    /* THE BITE, AS A FACT ABOUT WHO BIT (the wounds seam): by = the
+       attacker's species id, byActor = the attacker itself, dir = the jaw's
+       travel at contact (unit), jaw = the bite's radius from the attacker's
+       own mouth, part = what it closed on, when known. A sea animal's line
+       is its strike (or the rip of the shake on a beat) and its radius is
+       half its mouth; a land animal's stay what they were. */
+    const sid = (h.attacker && h.attacker.species && h.attacker.species.id) || "";
+    let tx = dx, ty = 0, tz = dz;
+    if (h.marine) { tx = h.mst.dx; ty = h.mst.dy; tz = h.mst.dz; }
+    const jawR = h.marine && CBZ.marineJawRadius ? CBZ.marineJawRadius(h.attacker.group)
+      : 0.10 + (actorScale(h.attacker) || 1) * 0.16;
+    if (target && (target.char && target.char.skinSlots) && (CBZ.bodyBite || CBZ.bodyWound)) {
       _woundP.x = _jaw.x; _woundP.y = _jaw.y; _woundP.z = _jaw.z;
       _woundOpts.cal = 1.2 + amount * 0.4;
       _woundOpts.fromX = ap ? ap.x : 0; _woundOpts.fromZ = ap ? ap.z : 0;
-      /* A JAW LEAVES A JAW PRINT, not a knife slit. This was melee:"blade",
-         which since WOUND_REAL_V3 draws a stab SLIT — so a shark worrying a
-         swimmer left knife cuts. "bite" routes to CBZ.bodyBite: both tooth
-         rows sized from THIS mouth (creature_combat's jaw law: 0.10 + 0.16 x
-         the attacker's live scale), bounded by the body it closed on. */
-      const jaw0 = 0.10 + (actorScale(h.attacker) || 1) * 0.16;
-      _woundOpts.jaw = (typeof CBZ.creatureWoundR === "function") ? CBZ.creatureWoundR(jaw0, target) : jaw0;
+      // both tooth rows sized from THIS mouth, bounded by the body it closed on
+      _woundOpts.jaw = (typeof CBZ.creatureWoundR === "function") ? CBZ.creatureWoundR(jawR, target) : jawR;
       _woundOpts.sev = Math.min(1, 0.5 + amount * 0.4);
-      try { CBZ.bodyWound(target, _woundP, _woundOpts); } catch (e) {}
+      _woundOpts.sever = amount >= 1.6;
+      _woundOpts.by = sid; _woundOpts.byActor = h.attacker || null;
+      _woundDir.x = tx; _woundDir.y = ty; _woundDir.z = tz;
+      _woundOpts.dir = _woundDir;
+      _woundOpts.part = h.marine ? (h.mst.part === "leg" ? (h.mst.side > 0 ? "legL" : "legR") : "torso") : null;
+      try { if (CBZ.bodyBite) CBZ.bodyBite(target, _woundP, _woundOpts); else CBZ.bodyWound(target, _woundP, _woundOpts); } catch (e) {}
+      _woundOpts.byActor = null;
     }
-    /* AND IF THE THING IN THE JAWS IS NOT A PERSON.
-       bodyWound (and bodyBite under it) require actor.char.skinSlots — a
-       HUMANOID rig — and return silently on anything else. So every seize on
-       an animal, in a file whose entire job is animals, drew its blood into
-       the water and left the body itself untouched: a shark held and worried
-       by an orca for four seconds came out of it geometrically identical.
-       systems/wounds.js's creatureBiteChunk is the non-humanoid half of the
-       same idea, so ask it for exactly the cases bodyWound could not take.
-       Guarded by its own flag; a humanoid never reaches this line. */
+    /* AND IF THE THING IN THE JAWS IS NOT A PERSON: systems/wounds.js's
+       creatureBiteChunk is the non-humanoid half (bodyBite needs a humanoid
+       rig and returns silently on anything else). */
     if (target && CBZ.creatureBiteChunk && !(target.char && target.char.skinSlots)) {
       _woundP.x = _jaw.x; _woundP.y = _jaw.y; _woundP.z = _jaw.z;
-      try {
-        // the cuts run along the attacker's own line, and the attacker is
-        // named so a lobe it takes off rides in ITS mouth before it is thrown
+      if (!h.marine) {
         const ah = (h.attacker && h.attacker.heading != null)
           ? h.attacker.heading
           : ((h.attacker && h.attacker.group) ? -h.attacker.group.rotation.y : 0);
-        _woundDir.x = Math.cos(ah); _woundDir.y = 0; _woundDir.z = Math.sin(ah);
+        tx = Math.cos(ah); ty = 0; tz = Math.sin(ah);
+      }
+      _woundDir.x = tx; _woundDir.y = ty; _woundDir.z = tz;
+      try {
         CBZ.creatureBiteChunk(target, _woundP, {
-          // ..bounded by the body being worried: a cut is a hole IN something
+          // bounded by the body being worried: a cut is a hole IN something
           jaw: (typeof CBZ.creatureWoundR === "function")
-            ? CBZ.creatureWoundR(0.28 + amount * 0.5, target) : 0.28 + amount * 0.5,
+            ? CBZ.creatureWoundR(h.marine ? jawR : 0.28 + amount * 0.5, target) : (h.marine ? jawR : 0.28 + amount * 0.5),
           sev: Math.min(1, 0.4 + amount * 0.5),
-          dir: _woundDir, by: h.attacker || null, bleedS: 14,
+          dir: _woundDir, by: sid, byActor: h.attacker || null, bleedS: 14,
         });
       } catch (e) {}
     }
@@ -1330,6 +1353,10 @@
       // the Euler order we swapped the attacker into for the hold, so endSeize
       // can put it back exactly (see thrashAttacker's ROLL note).
       rotOrder: "",
+      // a jawed swimmer's bite in the water (see THE BITE IN THE WATER)
+      marine: null,
+      mst: { t: 0, ph: 0, gap: 0, vx: 0, vy: 0, vz: 0, k: 0.6, part: "torso", side: 1, D: 0.3, yaw0: 0, lenM: 4.5,
+        rollT: 0, rollPh: 1, rollDir: 1, splashed: false, lastS: 0, dx: 1, dy: 0, dz: 0, pitch: 0 },
     };
     // the ragdoll pin callback, bound to THIS handle for the handle's whole
     // life. It closes over `h`, not over a module scratch, so a pooled reuse
@@ -1369,6 +1396,7 @@
     h.cause = opts.cause || ("mauled by a " + actorName(attacker));
     h.nonLethal = !!opts.nonLethal;
     h.style = opts.style || "shake";
+    h.marine = marineProfile(attacker, h.medium);
     h.onEnd = typeof opts.onEnd === "function" ? opts.onEnd : null;
     h.mode0 = (CBZ.game && CBZ.game.mode) || "";
     h.result = "";
@@ -1399,17 +1427,22 @@
     // local ROLL and rotation.z stays local PITCH. We take that order for the
     // duration of the hold (predator.js owns the body while it has you) and
     // endSeize puts the original back, so no other writer is affected.
-    if (attacker.group.rotation && BODY_AXIS_STYLE[h.style]) {
+    if (attacker.group.rotation && (BODY_AXIS_STYLE[h.style] || h.marine)) {
       h.rotOrder = attacker.group.rotation.order || "XYZ";
       try { attacker.group.rotation.order = "YXZ"; } catch (e) { h.rotOrder = ""; }
     } else h.rotOrder = "";
     h.promptHTML = CBZ.touchActionPrompt
-      ? CBZ.touchActionPrompt(" ", "BREAK FREE", "[SPACE] BREAK FREE")
-      : "[SPACE] BREAK FREE";
+      ? CBZ.touchActionPrompt(" ", "BREAK FREE", h.marine ? "" : "[SPACE] BREAK FREE")
+      : (h.marine ? "" : "[SPACE] BREAK FREE");
 
     attacker._seizing = h;
     if (!isP) victim._seizedBy = h;
     SEIZES.push(h);
+    if (h.marine) {
+      marineBegin(h);
+      // a fish that bites once and lets go has no window to beat
+      if (h.marine.once) { h.hold = h.marine.once; h.qteMax = 0; }
+    }
 
     // A NON-FINITE JAW IS A POISONED ANCHOR — anchorVictim would write it
     // straight into CBZ.player.pos. Refuse the seize rather than launder a NaN
@@ -1459,6 +1492,14 @@
       if (h.rotOrder) { try { a.group.rotation.order = h.rotOrder; } catch (e) {} }
     }
     h.rotOrder = "";
+    // a sea animal's jaw and head go back to its own swimming, and the body it
+    // held stands back up on its own axis (the swim pose writes only its yaw)
+    if (a && a._mSeize) { a._mSeize.on = false; a._mSeize.yaw = 0; a._mSeize.jaw = -1; }
+    if (h.marine) {
+      const ch = victimChar(h);
+      if (ch && ch.group && ch.group.rotation) { ch.group.rotation.x = 0; ch.group.rotation.z = 0; }
+    }
+    if (h.marine && a && CBZ.swimJaw) { try { CBZ.swimJaw(a, 0); } catch (e) {} }
     // release the limb/jaw layer too, or a bear walks away mid-rear.
     if (CBZ.predatorPose && a) { try { CBZ.predatorPose(a, h.style, 0, 0, 0); } catch (e) {} }
     // AND HAND THE STRIKE CLOCK BACK. creature_combat sets `_atkAnim` at the
@@ -1540,11 +1581,285 @@
     try { CBZ.predatorPose(h.attacker, h.style, p, k, dt); } catch (e) {}
   }
 
+  // ============================================================
+  //  THE BITE IN THE WATER. A swimmer with a real mouth (the skinned bodies
+  //  of city/wildlife/aquatic.js: sharks, the orca, the barracuda) taking a
+  //  swimmer, person or animal. The phases are the seize's own:
+  //    wind    the last lunge: the jaws open wide (snout up, upper jaw out,
+  //            a great white's eyes rolled back) and the body drives its
+  //            front teeth onto the part of the victim nearest them
+  //    strike  the jaws shut on that part (the gape set from its thickness:
+  //            teeth on the skin, never through the body and never short of
+  //            it) and the body's momentum carries both on, so a great white
+  //            coming up from below lifts the swimmer and its head breaks the
+  //            surface in white water sized from its mass and speed
+  //    hold    the saw: the head rips side to side on the neck with the body
+  //            swinging against it, a roll now and then, the whole animal
+  //            swimming on and down with the victim held at the bite
+  //    escape  the shove clear (flingClear) from a mouth that let go
+  //    kill    it goes on down with the body (the carry)
+  //  The victim is placed every frame so the bitten part sits between the
+  //  teeth where the jaw bones carry them, and posed by character.js's
+  //  poseSeizedSwimmer: one arm reaching for the surface, the other beating
+  //  at the head, the free legs kicking, the body folded round a torso bite
+  //  or hanging off a leg.
+  //  Per species: a bull shark comes in level, shakes hard and fast in the
+  //  shallows; a hammerhead (and a barracuda) bites once and lets go; a
+  //  megalodon takes the whole person into its mouth and sounds.
+  // ============================================================
+  const MARINE_BITE = {
+    // lift: m/s added upward at the strike; shake: head rip (rad) and its
+    // rate (Hz) for a 4.5 m animal, slower and shorter as the body grows;
+    // roll: rad of a roll, rollEvery: s between them; fwd/dragV: m/s on and
+    // down while holding, dragD: m under the surface it takes you to;
+    // once: s it holds before letting go; carry: s a kill rides down
+    great_white_shark: { lift: 2.8, shake: 0.42, hz: 2.3, roll: 1.4, rollEvery: 2.6, fwd: 1.6, dragV: 0.9, dragD: 6, carry: 4 },
+    bull_shark: { lift: 0.5, shake: 0.55, hz: 3.4, roll: 0.6, rollEvery: 2.0, fwd: 1.3, dragV: 0.35, dragD: 2.2, carry: 3 },
+    hammerhead_shark: { lift: 0.4, shake: 0.30, hz: 3.0, roll: 0.2, rollEvery: 9, fwd: 0.9, dragV: 0.2, dragD: 1.5, once: 0.9, carry: 2 },
+    megalodon: { lift: 2.2, shake: 0.10, hz: 0.9, roll: 0.25, rollEvery: 6, fwd: 2.6, dragV: 1.6, dragD: 16, engulf: true, carry: 5 },
+    orca: { lift: 1.2, shake: 0.35, hz: 1.6, roll: 0.8, rollEvery: 3.5, fwd: 1.8, dragV: 0.8, dragD: 5, carry: 4 },
+    barracuda: { lift: 0, shake: 0.25, hz: 5.0, roll: 0, rollEvery: 99, fwd: 0.6, dragV: 0, dragD: 0, once: 0.45, carry: 1 },
+    _: { lift: 0.8, shake: 0.35, hz: 2.6, roll: 0.5, rollEvery: 3, fwd: 1.2, dragV: 0.5, dragD: 3, carry: 3 },
+  };
+  const M_STRIKE = 0.45;            // s the strike's momentum carries both
+  const _hax = { fx: 1, fy: 0, fz: 0, ux: 0, uy: 1, uz: 0, sx: 0, sy: 0, sz: 1 };
+  const _pw = { x: 0, y: 0, z: 0 };
+  const _seizePose = { t: 0, part: "torso", side: 1, k: 1, reach: 1 };
+  const _mv = THREE ? [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] : null;
+  const _mm = THREE ? new THREE.Matrix4() : null;
+
+  function marineProfile(attacker, medium) {
+    const g = attacker && attacker.group, ud = g && g.userData;
+    if (medium !== "water" || !ud || !ud.marineBody || !ud.aquaticMouth || !CBZ.marineMouthWorld || !_mv) return null;
+    const id = attacker.species && attacker.species.id;
+    return MARINE_BITE[id] || MARINE_BITE._;
+  }
+  function seaAt(x, z) {
+    if (CBZ.citySeaHeightAt) { try { const y = CBZ.citySeaHeightAt(x, z); if (y != null && isFinite(y)) return y; } catch (e) {} }
+    return 0;
+  }
+  function victimChar(h) {
+    if (h.isPlayer) return CBZ.playerChar || null;
+    const v = h.victim;
+    return (v && v.char && v.char.group) ? v.char : null;
+  }
+  // the centre of the bitten part, in the world: a thigh (hip to knee) or
+  // the trunk (the body's own frame, chest-to-belly)
+  function partWorld(h, out) {
+    const M = h.mst, ch = victimChar(h);
+    if (ch && ch.body && ch.parts && _mv) {
+      ch.group.updateMatrixWorld(true);
+      if (M.part === "leg") {
+        const hip = M.side > 0 ? ch.parts.ll : ch.parts.rl, knee = ch.low && (M.side > 0 ? ch.low.ll : ch.low.rl);
+        if (hip && knee) {
+          hip.getWorldPosition(_mv[0]); knee.getWorldPosition(_mv[1]);
+          out.x = (_mv[0].x + _mv[1].x) * 0.5; out.y = (_mv[0].y + _mv[1].y) * 0.5; out.z = (_mv[0].z + _mv[1].z) * 0.5;
+          return;
+        }
+      }
+      ch.body.localToWorld(_mv[0].set(0, 1.12, 0));
+      out.x = _mv[0].x; out.y = _mv[0].y; out.z = _mv[0].z;
+      return;
+    }
+    const p = actorPos(h.victim);
+    out.x = p ? p.x : h.jaw.x; out.z = p ? p.z : h.jaw.z;
+    out.y = p ? p.y + (h.isPlayer ? 1.0 : 0.4) : h.jaw.y;
+  }
+  // which part the teeth reach first: the trunk or the nearer thigh
+  function marinePickPart(h) {
+    const M = h.mst, ch = victimChar(h);
+    M.part = "torso"; M.side = 1; M.D = 0.30;
+    if (h.marine.engulf) { M.D = 0.55; return; }
+    if (!ch || !ch.parts || !ch.low) return;
+    let best = Infinity;
+    for (let i = 0; i < 3; i++) {
+      M.part = i === 0 ? "torso" : "leg"; M.side = i === 2 ? -1 : 1;
+      partWorld(h, _pw);
+      const d = Math.hypot(_pw.x - h.jaw.x, _pw.y - h.jaw.y, _pw.z - h.jaw.z);
+      if (d < best) { best = d; _seizePose.part = M.part; _seizePose.side = M.side; }
+    }
+    M.part = _seizePose.part; M.side = _seizePose.side;
+    // an adult's thigh and trunk, through the bite
+    M.D = M.part === "leg" ? 0.16 : 0.30;
+  }
+  function marineBegin(h) {
+    const a = h.attacker, g = a.group, M = h.mst;
+    const mb = g.userData.marineBody;
+    M.t = 0; M.ph = 0; M.splashed = false; M.rollT = h.marine.rollEvery * 0.5; M.rollPh = 1;
+    M.rollDir = Math.random() < 0.5 ? -1 : 1; M.lastS = 0;
+    M.lenM = mb.len * ((g.scale && g.scale.x) || 1);
+    M.yaw0 = g.rotation ? g.rotation.y : 0;
+    M.pitch = 0;
+    if (CBZ.marineHeadAxes(g, _hax)) { M.dx = _hax.fx; M.dy = _hax.fy; M.dz = _hax.fz; }
+    M.vx = M.dx * 3; M.vy = M.dy * 3; M.vz = M.dz * 3;
+    jawWorld(h, h.jaw);
+    marinePickPart(h);
+    M.k = 0.6;
+    a._mSeize = a._mSeize || { on: false, yaw: 0, jaw: -1 };
+    a._mSeize.on = true; a._mSeize.yaw = 0; a._mSeize.jaw = 0.5;
+  }
+  // the last lunge: close what is left of the gap by the end of the wind,
+  // jaws opening as it comes
+  function marineWind(h, dt) {
+    const a = h.attacker, g = a.group, M = h.mst;
+    M.t += dt;
+    a._mSeize.on = true; a._mSeize.yaw = 0;
+    a._mSeize.jaw = Math.min(1, 0.5 + 0.5 * smooth(h.t / (S_WIND * 0.7)));
+    if (!jawWorld(h, h.jaw) || dt <= 0) return;
+    partWorld(h, _pw);
+    const left = Math.max(dt, S_WIND - h.t + dt);
+    let sx = (_pw.x - h.jaw.x) * dt / left, sy = (_pw.y - h.jaw.y) * dt / left, sz = (_pw.z - h.jaw.z) * dt / left;
+    // a great white's lunge is ~11 m/s; bigger bodies a little faster
+    const sl = Math.hypot(sx, sy, sz), cap = 12 * Math.sqrt(M.lenM / 4.5) * dt;
+    M.gap = Math.max(0, Math.hypot(_pw.x - h.jaw.x, _pw.y - h.jaw.y, _pw.z - h.jaw.z) - sl);
+    if (sl > cap) { sx *= cap / sl; sy *= cap / sl; sz *= cap / sl; }
+    g.position.x += sx; g.position.y += sy; g.position.z += sz;
+    const vl = Math.hypot(sx, sy, sz) / dt;
+    // the strike's line: the lunge itself, or the head's own heading when the
+    // teeth were already there
+    if (vl > 0.5) { M.dx = sx / dt / vl; M.dy = sy / dt / vl; M.dz = sz / dt / vl; }
+  }
+  // contact: the jaws close on the part, and the body keeps its momentum
+  function marineContact(h) {
+    const a = h.attacker, M = h.mst, P = h.marine;
+    M.k = CBZ.marineClampFor ? CBZ.marineClampFor(a, M.D) : 0.6;
+    const spd = Math.max(3, Math.min(9, 6 * Math.sqrt(M.lenM / 4.5)));
+    M.vx = M.dx * spd; M.vz = M.dz * spd;
+    // the lift, from below: a body rising at the strike keeps rising
+    M.vy = M.dy * spd + P.lift * Math.max(0, 0.3 + M.dy);
+    M.t = 0;
+  }
+  // the attacker's body through the strike, the hold and the carry
+  function marineMove(h, dt) {
+    const a = h.attacker, g = a.group, M = h.mst, P = h.marine;
+    const ms = a._mSeize;
+    ms.on = true;
+    M.t += dt;
+    const sea = seaAt(g.position.x, g.position.z);
+    if (h.phase === "strike") {
+      // momentum through water: the strike speed bleeds off over a body length
+      const e = Math.exp(-2.4 * dt);
+      M.vx *= e; M.vz *= e; M.vy *= Math.exp(-1.6 * dt);
+      g.position.x += M.vx * dt; g.position.y += M.vy * dt; g.position.z += M.vz * dt;
+      // a body cannot fly: at the surface the climb is spent in the breach
+      if (g.position.y > sea + 0.2) { g.position.y = sea + 0.2; if (M.vy > 0) M.vy *= 0.4; }
+      ms.jaw = M.k + (1 - M.k) * Math.max(0, 1 - h.t / 0.08);
+      ms.yaw = 0;
+      M.pitch = clamp(Math.atan2(M.vy, Math.max(0.6, Math.hypot(M.vx, M.vz))), -0.8, 0.85);
+      g.rotation.z = h.baseRotZ + M.pitch;
+      // the head through the surface: white water from its mass and its speed
+      if (!M.splashed && h.jaw.y > sea - 0.5 && M.vy > 0.6 && CBZ.waterHit) {
+        M.splashed = true;
+        try {
+          CBZ.waterHit(h.jaw.x, sea, h.jaw.z, { kind: "body", mass: 11 * M.lenM * M.lenM * M.lenM + 78, speed: Math.hypot(M.vx, M.vy, M.vz) });
+        } catch (e) {}
+      }
+      return;
+    }
+    // ---- the saw. Bigger animals shake slower and shorter (1/sqrt length).
+    const big = Math.sqrt(Math.max(0.4, M.lenM / 4.5));
+    const hz = P.hz / big, A = P.shake / big;
+    const prev = Math.sin(M.ph);
+    M.ph += dt * hz * 6.283185307;
+    // a rip one way and a slower drag back, not a sine
+    const rip = Math.sin(M.ph) + 0.28 * Math.sin(2 * M.ph);
+    const yaw = A * rip;
+    ms.yaw = yaw * 0.7;
+    g.rotation.y = M.yaw0 + yaw * 0.35;
+    // each rip re-closes the teeth: a beat of pain and blood at the turn
+    if (prev < 0 && Math.sin(M.ph) >= 0 && h.phase === "hold") {
+      h.beatHit = 1;
+      CBZ.marineHeadAxes(g, _hax);
+      M.dx = _hax.sx; M.dy = _hax.sy; M.dz = _hax.sz;
+    }
+    ms.jaw = M.k * (1 - 0.10 * Math.max(0, Math.cos(M.ph * 2)));
+    // on and down: forward along its heading, under until dragD deep
+    const hd = -M.yaw0;
+    const depth = sea - g.position.y;
+    const down = depth < P.dragD ? P.dragV : 0;
+    const fwd = P.fwd * (0.75 + 0.35 * Math.sin(M.t * 1.3));
+    // what the strike's climb has left dies away into the hold
+    M.vy *= Math.exp(-3 * dt);
+    g.position.x += Math.cos(hd) * fwd * dt;
+    g.position.z += Math.sin(hd) * fwd * dt;
+    g.position.y += (M.vy - down) * dt;
+    if (g.position.y > sea + 0.1) g.position.y = sea + 0.1;
+    M.pitch += ((down > 0 ? -0.32 : -0.04) - M.pitch) * (1 - Math.exp(-2.5 * dt));
+    g.rotation.z = h.baseRotZ + M.pitch;
+    // the roll: over onto its side and back, now and then
+    M.rollT -= dt;
+    if (M.rollT <= 0 && P.roll > 0.05) { M.rollT = P.rollEvery * (0.7 + 0.6 * Math.random()); M.rollPh = 0; M.rollDir = -M.rollDir; }
+    if (M.rollPh < 1) M.rollPh = Math.min(1, M.rollPh + dt / 1.5);
+    const rp = M.rollPh;
+    const rk = rp < 0.35 ? smooth(rp / 0.35) : (rp < 0.6 ? 1 : 1 - smooth((rp - 0.6) / 0.4));
+    g.rotation.x = h.baseRotX + P.roll * M.rollDir * (rp < 1 ? rk : 0);
+  }
+  /* HOLD THE BODY AT THE BITE. The bitten part's centre is put exactly
+     between the teeth (h.jaw, solved from the jaw bones after this frame's
+     move); the body lies across the mouth when taken at the trunk, and
+     hangs out of it toward the surface when taken by a leg. */
+  function placeHeldBody(h, ch, G) {
+    const M = h.mst;
+    CBZ.marineHeadAxes(h.attacker.group, _hax);
+    const Y = _mv[0], Z = _mv[1], X = _mv[2];
+    if (M.part === "leg") {
+      Y.set(_hax.fx * 0.55, 0.85, _hax.fz * 0.55).normalize();
+      Z.set(_hax.sx, _hax.sy, _hax.sz).multiplyScalar(M.side);
+    } else {
+      Y.set(_hax.sx, _hax.sy, _hax.sz).multiplyScalar(M.side);
+      Z.set(-_hax.fx, -_hax.fy, -_hax.fz);
+    }
+    X.crossVectors(Y, Z).normalize();
+    Z.crossVectors(X, Y).normalize();
+    _mm.makeBasis(X, Y, Z);
+    ch.group.quaternion.setFromRotationMatrix(_mm);
+    // pose first (the part's place depends on the pose), then move the whole
+    // body by whatever puts that part on the teeth
+    _seizePose.t = M.t; _seizePose.part = M.part; _seizePose.side = M.side;
+    const hpK = h.isPlayer ? 1 : (h.victim && h.victim.hp != null && h.victim.maxHp ? clamp(h.victim.hp / h.victim.maxHp, 0.25, 1) : 1);
+    _seizePose.k = (h.phase === "hold" ? 1 : 0.8) * hpK;
+    _seizePose.reach = 1;
+    if (CBZ.poseSeizedSwimmer) { try { CBZ.poseSeizedSwimmer(ch, _seizePose); } catch (e) {} }
+    ch.group.position.set(G.x, G.y, G.z);
+    partWorld(h, _pw);
+    ch.group.position.set(G.x + (G.x - _pw.x), G.y + (G.y - _pw.y), G.z + (G.z - _pw.z));
+    ch.group.updateMatrixWorld(true);
+  }
+  function marineAnchor(h) {
+    if (!jawWorld(h, h.jaw)) return;
+    const G = h.jaw, ch = victimChar(h);
+    if (h.isPlayer) {
+      const P = CBZ.player;
+      if (!P || !P.pos) return;
+      if (ch && ch.group && ch.body) {
+        placeHeldBody(h, ch, G);
+        P.pos.x = ch.group.position.x; P.pos.y = ch.group.position.y; P.pos.z = ch.group.position.z;
+      } else {
+        P.pos.x = G.x; P.pos.z = G.z; P.pos.y = G.y - (h.mst.part === "leg" ? 0.55 : 0.95);
+      }
+      P.vy = 0; P.speed = 0; P.grounded = false;
+      if (P._phys) { P._phys.vx = P._phys.vz = 0; P._phys.vy = 0; P._phys.air = false; }
+      return;
+    }
+    const v = h.victim, p = actorPos(v);
+    if (ch && ch.body) {
+      placeHeldBody(h, ch, G);
+      const q = ch.group.position;
+      if (p && p !== q) { p.x = q.x; p.y = q.y; p.z = q.z; }
+      if (v.group && v.group !== ch.group && v.group.position !== q) v.group.position.copy(q);
+      return;
+    }
+    // an animal in the jaws: its body's centre at the bite
+    if (p) { p.x = G.x; p.y = G.y - 0.1; p.z = G.z; }
+    if (v.group && v.group.position !== p) v.group.position.set(G.x, G.y - 0.1, G.z);
+  }
+
   // ---- the thrash. Big things thrash SLOWER — that 1/sqrt(scale) is what
   //      makes a megalodon read as a megalodon instead of a fast fish.
   function thrashAttacker(h, dt) {
     const g = h.attacker && h.attacker.group;
     if (!g || !g.rotation) return;
+    if (h.marine) { marineMove(h, dt); return; }
     const s = Math.max(0.35, actorScale(h.attacker) || 1);
     const sq = Math.sqrt(s);
     const F = (22 - 8 * clamp(s / 4, 0, 1)) / sq;
@@ -1719,6 +2034,9 @@
 
   function anchorVictim(h) {
     const _jaw = h.jaw;
+    // a live body in a sea animal's jaws is held at the bitten part; a corpse
+    // goes to the ragdoll pin below like any other
+    if (h.marine && (h.isPlayer || !(h.victim && h.victim.dead))) { marineAnchor(h); return; }
     if (h.isPlayer) {
       const P = CBZ.player;
       if (!P || !P.pos) return;
@@ -1827,15 +2145,24 @@
       predatorDread(a, 1, dreadOptsFor(a, 0, h.medium === "water"));
 
       if (h.phase === "wind") {
-        // whip the lens toward the attacker; no damage yet.
-        if (h.t >= S_WIND) { h.phase = "strike"; h.t = 0; enterStrike(h); }
+        // whip the lens toward the attacker; no damage yet. A sea animal
+        // spends it on the last lunge, jaws opening, onto the part it takes.
+        if (h.marine) marineWind(h, dt);
+        // the teeth close when they are ON the part (a lunge that still has
+        // ground to cover gets a few more frames, never a jump)
+        const ready = h.marine ? (h.t >= S_WIND && (h.mst.gap < 0.06 || h.t >= S_WIND + 0.4)) : h.t >= S_WIND;
+        if (ready) {
+          h.phase = "strike"; h.t = 0;
+          if (h.marine) { marineContact(h); anchorVictim(h); }
+          enterStrike(h);
+        }
         continue;
       }
 
       if (h.phase === "strike") {
         thrashAttacker(h, dt);
         anchorVictim(h);
-        if (h.t >= S_STRIKE) { h.phase = "hold"; h.t = 0; scheduleQTE(h); }
+        if (h.t >= (h.marine ? M_STRIKE : S_STRIKE)) { h.phase = "hold"; h.t = 0; scheduleQTE(h); }
         continue;
       }
 
@@ -1892,7 +2219,8 @@
         tickQTE(h, dt);
         if (!h.active) continue;
 
-        if (h.t >= h.hold) { resolveSeize(h, null, false); continue; }
+        // a fish that bites once lets go at the end of its bite
+        if (h.t >= h.hold) { resolveSeize(h, h.marine && h.marine.once ? "escaped" : null, false); continue; }
         continue;
       }
 
@@ -1907,7 +2235,7 @@
         // the lens the instant they die.
         thrashAttacker(h, dt);
         anchorVictim(h);
-        if (h.t >= CARRY_T) { endSeize(h, "killed"); }
+        if (h.t >= (h.marine ? h.marine.carry : CARRY_T)) { endSeize(h, "killed"); }
         continue;
       }
     }
@@ -2039,7 +2367,7 @@
     // implementation was never exercised: the pin was created and destroyed in
     // the same call and lived exactly zero frames.
     const target = h.victim;
-    if (target) h.pinned = pinCorpse(target, h.atFn, CARRY_T + 0.3);
+    if (target) h.pinned = pinCorpse(target, h.atFn, (h.marine ? h.marine.carry : CARRY_T) + 0.3);
     h.phase = "carry"; h.t = 0;
   }
 
@@ -2060,7 +2388,7 @@
     let h = hunter._hunt;
     if (h) return h;
     h = hunter._hunt = {
-      st: "cruise", prev: "", t: 0,
+      st: "cruise", prev: "", t: 0, encT: 0,
       menace: 0, cool: 0, commits: 0,
       orbitDir: Math.random() < 0.5 ? -1 : 1,
       circleDur: 0, vanishDur: 0, scentFake: false,
@@ -2592,6 +2920,16 @@
     }
 
     // ---- the machine ------------------------------------------------------
+    /* THE ENCOUNTER CLOCK. A hungry animal in the water with a swimmer in
+       sense keeps its fake-outs (the circling, the bump, the vanish, the
+       scent that comes to nothing), but each one costs it patience: the
+       commit share of every pass grows with the time the swimmer has been
+       in its sense, and once ENC_COMMIT has gone by the next pass is the
+       strike. Out of sense the clock runs back down. */
+    if (medium === "water") {
+      if (dist < senseR && h.st !== "seize" && h.st !== "disengage") h.encT += dt;
+      else if (dist >= senseR) h.encT = Math.max(0, h.encT - dt * 0.5);
+    }
     switch (h.st) {
 
       case "cruise": {
@@ -2670,7 +3008,9 @@
           // ALREADY happened, so there is nothing left to telegraph and rolling
           // again would just turn a wounded animal's second pass into a coin
           // flip. The recommit is certain; the number of them is the ration.
-          const r = h.recommit ? 1 : Math.max(0, Math.random() - bias);
+          const urge = medium === "water" ? clamp(h.encT / ENC_COMMIT, 0, 1) : 0;
+          const r = (h.recommit || urge >= 1) ? 1 : Math.max(0, Math.random() - bias);
+          const pV = P_CIRCLE_VANISH * (1 - 0.7 * urge), pB = P_CIRCLE_BUMP * (1 - 0.5 * urge);
           // §R: A WATER HUNTER WITH A REAL MOUTH DOES NOT NUDGE ANOTHER
           // ANIMAL — the shut-mouth investigatory bump is the player-dread
           // beat, and thrown at a megalodon it is exactly the owner's "it
@@ -2679,10 +3019,10 @@
           const noBump = !isP && medium === "water" &&
             hunter.group && hunter.group.userData && hunter.group.userData.aquaticMouth &&
             !(typeof CBZ.creatureBitePass === "function" && !CBZ.creatureBitePass());
-          if (r < P_CIRCLE_VANISH) {
+          if (r < pV) {
             h.vanishDur = VANISH_MIN + Math.random() * VANISH_RAND;
             setState(hunter, h, "vanish", opts);
-          } else if (r < P_CIRCLE_VANISH + P_CIRCLE_BUMP && !noBump) {
+          } else if (r < pV + pB && !noBump) {
             setState(hunter, h, "bump", opts);
           } else {
             enterCommit(hunter, h, opts, stinger);
@@ -2757,7 +3097,9 @@
           // ...but not forever. After PASS_MAX fruitless passes it gives up and
           // leaves, which is what makes the NEXT time it finds you mean
           // something. A predator that never leaves is furniture.
-          if (h.passes >= PASS_MAX) {
+          // ...a hunter in the water with a swimmer still in sense does not
+          // give up: its encounter clock ends the stalk in a strike instead
+          if (h.passes >= PASS_MAX && !(medium === "water" && dist < senseR)) {
             setState(hunter, h, "disengage", opts);
             h.cool = MEN_COOL_MIN + Math.random() * MEN_COOL_RAND;
             h.passes = 0;

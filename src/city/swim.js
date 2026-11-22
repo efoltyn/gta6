@@ -947,6 +947,13 @@
     // preserving the ordinary swim owner for the instant the rider lets go.
     if (P._aquaticMount) { bail(P, dt); P._swim = false; return; }
     if (P.dead || P.driving || P._aircraft) { bail(P, dt); return; }
+    // HELD IN A SHARK'S JAWS. systems/predator.js places the body at the bite
+    // and poses it; the water column follows it there, so the swim picks up
+    // from where the jaws let go instead of snapping back to where it was.
+    if (CBZ.predatorSeized && swimming && CBZ.predatorSeized(P)) {
+      S.y = P.pos.y; S.vx = 0; S.vz = 0; S.vy = 0;
+      return;
+    }
     if (!v2On()) { legacyStep(A, P, dt); return; }
     v2Step(A, P, dt);
   });
