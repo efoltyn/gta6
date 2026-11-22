@@ -38,6 +38,7 @@ const WOMEN = [
 const man = (i, extra) => Object.assign({ build: "m" }, MEN[i], extra || {});
 const woman = (i, extra) => Object.assign({ build: "f" }, WOMEN[i], extra || {});
 
+const BUILDS = ["slim", "average", "athletic", "muscular", "big", "stocky", "heavy", "obese"];
 const inmate = (heritage, wear, extra) => Object.assign({ build: "m", heritage, wear: wear || "inmate" }, extra || {});
 const YARD = ["black", "latino", "white", "eastasian"];
 
@@ -78,6 +79,24 @@ const subjects = [
   { id: "men-swim-front", label: "Men in trunks: front", studio: true, view: "front", fit: "swim",
     who: [man(0), man(1), man(2), man(3)],
     focus: "Bare chest and legs with a brief: the groin line on a man." },
+  { id: "women-seat-close", label: "Women, the seat: close, from behind", studio: true, view: "back", frame: "hips", fit: "swim",
+    who: [woman(0), woman(1), woman(3)],
+    focus: "Waist to knee from behind in a two-piece: two round cheeks with a cleft, a fold under them, hips wider than the waist." },
+  { id: "women-seat-threeq", label: "Women, the seat: three-quarter from behind", studio: true, view: "threeqback", frame: "hips", fit: "swim",
+    who: [woman(0), woman(1), woman(3)],
+    focus: "The same turned 40 degrees: how far the seat stands out behind the small of the back." },
+  { id: "types-men", label: "The spectrum: eight builds, men", studio: true, view: "front", frame: "wide", fit: "gym",
+    who: BUILDS.map((b, i) => man(i % 4, { physique: b })),
+    focus: "Slim, average, athletic, muscular, big, stocky, heavy, obese. Before this there were four; a build it does not know falls back to its own pick." },
+  { id: "types-women", label: "The spectrum: eight builds, women", studio: true, view: "front", frame: "wide", fit: "gym",
+    who: BUILDS.map((b, i) => woman(i % 4, { physique: b })),
+    focus: "The same eight on women." },
+  { id: "heights", label: "The spectrum: height", studio: true, view: "front", frame: "wide",
+    who: [0.93, 0.98, 1.03, 1.08].map((h, i) => man(i, { stature: h, wear: "street" })).concat([0.93, 0.98, 1.03, 1.08].map((h, i) => woman(i, { stature: h, wear: "street" }))),
+    focus: "Four men and four women from the shortest to the tallest the draw gives (a man 1.66 to 1.93 m). Before: everyone of a sex was one height." },
+  { id: "yard-mix", label: "The jail yard: eight men as the game draws them", studio: true, view: "front", frame: "wide",
+    who: ["black", "white", "latino", "eastasian", "mideast", "islander", "southasian", "native"].map((h) => inmate(h)),
+    focus: "No build or height asked for: each man gets his own from his look, the way the yard is populated. Different heights, arms, bellies." },
   { id: "men-front", label: "Men, four body types: front", studio: true, view: "front", fit: "gym",
     who: [man(0), man(1), man(2), man(3)],
     focus: "Average, slim, heavy, muscular. Read the shoulder line from the neck to the arm, how far the arms hang from the ribs, the length of the forearm and the leg, and the size of the head on the body." },
@@ -230,13 +249,14 @@ export async function stagePeople(input) {
     }
     const c = { build: w.build, skin: w.skin, hair: w.hair, shoes: 0x2b2b2b };
     if (w.physique) c.physique = w.physique;
+    if (w.stature) c.stature = w.stature;
     if (w.age != null) c.age = w.age;
     if (w.hairStyle) c.hairStyle = w.hairStyle;
     if (fit === "swim") {
       // the beach's own two-piece / trunks (city/beach.js beachSwimwear): bare skin, a top, a brief
       const all = { torso: w.skin, collar: w.skin, arms: w.skin, waist: w.skin, pelvis: w.skin, legs: w.skin, shins: w.skin };
       if (w.build === "f") Object.assign(c, all, { torso: 0x2a3a8a, pelvis: 0x2a3a8a });
-      else Object.assign(c, all, { pelvis: 0x1f3d4d });
+      else Object.assign(c, all, { pelvis: 0x1f3d4d, legs: 0x1f3d4d });      // board shorts: the thigh in cloth, as the beach dresses a man
     } else if (fit === "gym") {
       // bare arms and legs; the women a bare midriff: the body is the subject
       if (w.build === "f") Object.assign(c, { torso: 0x8a2f4a, collar: w.skin, arms: w.skin, waist: w.skin, pelvis: 0x20242c, legs: 0x20242c, shins: w.skin });
@@ -285,8 +305,8 @@ export async function stagePeople(input) {
     S.mode = "studio"; S.view = null;
     const who = subject.who, n = who.length;
     const frame = subject.frame || "body";
-    const gap = frame === "face" ? 0.46 : frame === "chest" ? 0.86 : frame === "hips" ? 0.78 : 1.06;
-    const yaw = subject.view === "threeq" ? -0.70 : subject.view === "side" ? -Math.PI / 2 : subject.view === "back" ? Math.PI : 0;
+    const gap = frame === "face" ? 0.46 : frame === "chest" ? 0.86 : frame === "hips" ? 0.78 : frame === "wide" ? 0.74 : 1.06;
+    const yaw = subject.view === "threeq" ? -0.70 : subject.view === "side" ? -Math.PI / 2 : subject.view === "back" ? Math.PI : subject.view === "threeqback" ? Math.PI - 0.75 : 0;
     for (let i = 0; i < n; i++) {
       const w = who[i];
       const look = lookOf(w, w.wear ? "street" : subject.fit, i);
@@ -315,6 +335,7 @@ export async function stagePeople(input) {
     if (frame === "face") { c.position.set(0, 1.60, 1.95); c.lookAt(0, 1.57, 0.6); }
     else if (frame === "chest") { c.position.set(0, 1.46, 2.85); c.lookAt(0, 1.40, 0.6); }
     else if (frame === "hips") { c.position.set(0, 0.98, 2.75); c.lookAt(0, 0.90, 0.6); }
+    else if (frame === "wide") { c.position.set(0, 1.08, 9.6); c.lookAt(0, 1.0, 0.6); }
     else { c.position.set(0, 1.02, 7.1); c.lookAt(0, 0.96, 0.6); }
     // measurements of the FIRST figure on the page (front pages read true)
     try {

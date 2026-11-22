@@ -621,7 +621,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=hips1122e"></script>
+  <script src="src/entities/character.js?v=body1122f"></script>
   <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -715,7 +715,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/eyes.js?v=rounds1013"></script>
 <script src="src/systems/vitals.js?v=shot1122"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
-<script src="src/entities/player.js?v=pf0930c"></script>
+<script src="src/entities/player.js?v=body1122f"></script>
 <script src="src/entities/coins.js"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
@@ -1311,7 +1311,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/citynav.js?v=people1022"></script>
 <script src="src/city/fracture.js?v=nukecost1013"></script>
 <script src="src/city/demolition.js?v=collapse1014b"></script>
-<script src="src/city/elevators.js?v=lpanel1022"></script>
+<script src="src/city/elevators.js?v=liftride1122"></script>
 <script src="src/city/exec_office.js?v=r187a"></script>
 <script src="src/city/escalators.js?v=air0929r"></script>
 <script src="src/city/roofloot.js?v=cd0929"></script>
@@ -1519,7 +1519,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=hands1022"></script>
 <script src="src/city/economy.js?v=isleopen1022"></script>
-<script src="src/city/clothes.js?v=hips1122e"></script>
+<script src="src/city/clothes.js?v=body1122f"></script>
 <script src="src/city/outfits.js?v=anatomy1122b"></script>
 <script src="src/entities/dutykit.js?v=anatomy1122"></script>
 <script src="src/city/hunger.js?v=stam1009"></script>
@@ -2138,6 +2138,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=w09290219"></script>
 <script src="src/city/agency.js?v=ijkl1022"></script>
+<!-- AUTHORED HITMAN JOBS (one file each, registered with CBZ.hitmanJobs in
+     city/hitman.js; delivered by the burner, the envelope and the folder).
+     sawyou: the man on the pavement looks up your scope, draws a hand across
+     his throat and comes up your building for you. Needs elevators.js's
+     CBZ.cityLiftRide / CBZ.cityStairCore (below; read at run time). -->
+<script src="src/city/hitman_m_sawyou.js?v=sawyou1122"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=ptouch1028"></script>

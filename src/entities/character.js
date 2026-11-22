@@ -150,10 +150,10 @@
     armLo: {   // the elbow (t 0) .. the wrist crease (t 1), where the hand's stub enters
       bare: { top: 1, bot: 0.22, rows: [
         [0.00, 0.71, 0.72, 0.00], [0.22, 0.80, 0.82, 0.02], [0.50, 0.66, 0.72, 0.02],
-        [0.80, 0.49, 0.64, 0.00], [1.00, 0.39, 0.565, 0.00]] },
+        [0.80, 0.46, 0.60, 0.00], [1.00, 0.355, 0.515, 0.00]] },
       cloth: { top: 1, bot: 0.22, rows: [
         [0.00, 0.76, 0.78, 0.00], [0.22, 0.82, 0.84, 0.01], [0.60, 0.70, 0.76, 0.00],
-        [0.90, 0.54, 0.70, 0.00], [0.965, 0.54, 0.70, 0.00], [1.00, 0.50, 0.66, 0.00]] },
+        [0.90, 0.49, 0.635, 0.00], [0.965, 0.49, 0.635, 0.00], [1.00, 0.455, 0.60, 0.00]] },
     },
     /* THE THIGHS MEET (owner 2026-11-22: "middle crotch ... still looks like
        diaper"). Two ROUND thighs side by side leave a deep V between them
@@ -540,7 +540,7 @@
   // by the arm^0.85 from there (a woman's 17 cm, a heavy man's a little
   // more). It was 1.1 x (armW / 0.30)^0.75: referenced to a 21 cm voxel
   // forearm, on a real arm it drew a 13 cm hand.
-  const HAND_K = 1.0, HAND_ARM = 0.186;
+  const HAND_K = 1.0, HAND_ARM = 0.205;
   const HAND_REST_YAW = 0.30;          // a hanging palm turns a little back toward the thigh
   const HAND_HOLD = { pistol: 1, grip: 1, support: 1, cupover: 1, wheel: 1 };
   const HAND_STUB_M = 0.06;            // how far the hand may slide down (its wrist stub reaches 0.07 m back)
@@ -550,7 +550,7 @@
     // (never smaller than the wrist it hangs from: a child's forearm is thick
     // for its hand, and a hand under ~7.5 x the arm's depth leaves the
     // forearm's end standing out round its wrist)
-    const s = Math.max(HAND_LIFE * HAND_K * (P.handH / 0.20) * Math.pow((P.armW || HAND_ARM) / HAND_ARM, 0.85), 7.5 * (P.armW || HAND_ARM));
+    const s = Math.max(HAND_LIFE * HAND_K * (P.handH / 0.20) * Math.pow((P.armW || HAND_ARM) / HAND_ARM, 0.85), 6.8 * (P.armW || HAND_ARM));
     return {
       s,
       wristY: P.handH - P.armLo,                         // the crease = the forearm box's bottom
@@ -824,14 +824,19 @@
       // hangs AGAINST the ribs instead of a hand's breadth outside them. armW
       // is the arm's DEPTH; the loft is narrower across than it is deep
       // (LIMB_SHAPES.armUp), as an arm is.
-      legUp: LEG_UP, legLo: LEG_LO, legW: 0.245, hipX: 0.122, shoeH: 0.20,
-      armUp: ARM_UP, armLo: ARM_LO, armW: 0.186, armX: 0.281, handH: 0.20,
-      pelvisW: 0.475, pelvisH: 0.19, pelvisD: 0.33,
-      torsoH: 0.88, torsoW: 0.456, torsoD: 0.345,
+      // (2026-11-22, owner: "way too thin ... google proportions of attractive
+      // humans". Men rate best at a shoulder-to-waist ratio near 1.57 round the
+      // tape, BMI 23-27, ~13% fat (Aberdeen 2025): a 52 cm shoulder over a 34 cm
+      // chest and an 81 cm waist, an 11 cm upper arm, an 18 cm thigh. The first
+      // anatomy pass was a 32 cm chest with 9.5 cm arms: a thin man.)
+      legUp: LEG_UP, legLo: LEG_LO, legW: 0.258, hipX: 0.1285, shoeH: 0.20,
+      armUp: ARM_UP, armLo: ARM_LO, armW: 0.205, armX: 0.283, handH: 0.20,
+      pelvisW: 0.50, pelvisH: 0.19, pelvisD: 0.34,
+      torsoH: 0.88, torsoW: 0.49, torsoD: 0.36,
       waistShare: 0, waistW: 0, waistD: 0,   // waistShare 0 = no waist box at all
-      collarW: 0.48, collarH: 0.17, collarD: 0.36,
+      collarW: 0.50, collarH: 0.17, collarD: 0.37,
       headSize: 0.60, neckDrop: 0, headK: HEAD_DRAW, headX: HEAD_SX, headZ: HEAD_SZ,
-      jacketW: 0.516, jacketH: 0.93, jacketD: 0.445,
+      jacketW: 0.55, jacketH: 0.93, jacketD: 0.46,
       // posture
       stanceZ: 0,      // per-leg z-splay: + converges the knees (narrow step width), - splays (toddler wide base)
       // Idle arm carry, SIGNED: NEGATIVE tucks the hand in against the ribs
@@ -839,7 +844,7 @@
       // POSITIVE swings it clear of the hip. The shoulders are a real width now,
       // so the arm hangs straight down beside the thigh (the old -0.08 tucked a
       // hand that hung 8 cm outside the hip; today it would put it IN the leg).
-      armOutZ: 0.035,
+      armOutZ: 0.05,
       gait: GAIT_NEUTRAL,
     };
   }
@@ -861,14 +866,18 @@
     // (longer in the leg than the man for her height, a slimmer lower leg, a
     // longer neck, a head a touch narrower: the second pass, "much more real
     // and attractive")
-    legUp: 0.585, legLo: 0.655, legW: 0.262, hipX: 0.134, shinK: 0.80, neckK: 1.12, headX: 0.74,
-    armUp: 0.435, armLo: 0.54, armW: 0.160, armX: 0.244,
-    pelvisW: 0.475, pelvisH: 0.19, pelvisD: 0.33,
-    torsoH: 0.80, torsoW: 0.396, torsoD: 0.275,
-    waistShare: 0.325, waistW: 0.335, waistD: 0.235,
-    collarW: 0.42, collarH: 0.16, collarD: 0.30,
+    // (third pass, owner: "way too thin". A waist-to-hip ratio of 0.7 round
+    // the tape is the figure the research keeps finding (Singh), at a healthy
+    // weight, not a thin one: a 68 cm waist under a 29 cm ribcage, 100 cm
+    // hips, a 19 cm thigh, a 9 cm upper arm. She was a 62 cm waist.)
+    legUp: 0.585, legLo: 0.655, legW: 0.268, hipX: 0.134, shinK: 0.80, neckK: 1.12,
+    armUp: 0.435, armLo: 0.54, armW: 0.174, armX: 0.243,
+    pelvisW: 0.50, pelvisH: 0.19, pelvisD: 0.37,
+    torsoH: 0.80, torsoW: 0.412, torsoD: 0.29,
+    waistShare: 0.325, waistW: 0.365, waistD: 0.27,
+    collarW: 0.43, collarH: 0.16, collarD: 0.31,
     headSize: 0.55,
-    jacketW: 0.456, jacketH: 0.87, jacketD: 0.375,
+    jacketW: 0.472, jacketH: 0.87, jacketD: 0.39,
     // Step width: male stance sits ~12-15% of hip breadth off the midline,
     // female ~4-8% — the "walks on one line" read (Cho 2004: women walk with a
     // significantly narrower step width). stanceZ converges the knees toward
@@ -879,7 +888,7 @@
     // measured men LARGER (14.2° vs 8.2°). This number is therefore a deliberate
     // ART CHEAT, not biomechanics: a wider hip needs the hands to hang clear of
     // it, and that gap between arm and body silhouette is what reads at 30m.
-    armOutZ: 0.075,
+    armOutZ: 0.07,
     /* GAIT (Cho 2004, Clin Biomech 19(2):145-152, 98 adults; Bruening 2015,
        Gait & Posture 41(2)). What the data actually says, which is NOT the
        folklore: cadence is essentially the SAME between sexes at preferred
@@ -1088,23 +1097,34 @@
      what the chest and the thigh actually grew (applyPhysique), so the arm
      still hangs against the ribs and the thighs still meet. ax / hx are what
      is left over: a little extra spread. */
+  /* A SPECTRUM (owner 2026-11-22: "make scale so some can be much taller and
+     bigger arms or fatter etc in a spectrum", every game, the jail included).
+     Eight builds instead of four, from thin to very fat and from lean to very
+     big, plus a HEIGHT per person (statureOf: one scale on the model node, so
+     it costs the crowd nothing). Builds are a finite list on purpose: a body
+     shape is a shared geometry (one chest per build per sex), and a
+     continuous slider would be a geometry per person. */
   const PHYSIQUE = {
-    average:  { tw: 1, td: 1, pw: 1, pd: 1, aw: 1, lw: 1, ax: 0, hx: 0, waist: 0.90, pec: 1, bust: 1, belly: 0.15, scap: 1, spine: 1, soft: 0 },
-    slim:     { tw: 0.94, td: 0.90, pw: 0.96, pd: 0.92, aw: 0.90, lw: 0.92, ax: 0, hx: 0, waist: 0.87, pec: 0.55, bust: 0.8, belly: 0, scap: 1.35, spine: 1.15, soft: 0 },
-    heavy:    { tw: 1.10, td: 1.16, pw: 1.08, pd: 1.12, aw: 1.14, lw: 1.12, ax: 0.004, hx: 0.004, waist: 1.06, pec: 0.7, bust: 1.25, belly: 1, scap: 0.3, spine: 0.35, soft: 1 },
-    muscular: { tw: 1.06, td: 1.08, pw: 1.00, pd: 1.02, aw: 1.14, lw: 1.08, ax: 0.004, hx: 0, waist: 0.84, pec: 1.7, bust: 0.9, belly: 0, scap: 1.3, spine: 1.4, soft: 0 },
+    average:  { tw: 1, td: 1, pw: 1, pd: 1, aw: 1, lw: 1, ax: 0, hx: 0, waist: 0.88, pec: 1, bust: 1, belly: 0.15, scap: 1, spine: 1, soft: 0 },
+    slim:     { tw: 0.93, td: 0.90, pw: 0.96, pd: 0.93, aw: 0.88, lw: 0.90, ax: 0, hx: 0, waist: 0.86, pec: 0.5, bust: 0.8, belly: 0, scap: 1.35, spine: 1.15, soft: 0 },
+    athletic: { tw: 1.03, td: 1.00, pw: 0.98, pd: 1.00, aw: 1.07, lw: 1.04, ax: 0.003, hx: 0, waist: 0.82, pec: 1.3, bust: 0.95, belly: 0, scap: 1.2, spine: 1.3, soft: 0 },
+    muscular: { tw: 1.08, td: 1.08, pw: 1.00, pd: 1.02, aw: 1.18, lw: 1.10, ax: 0.004, hx: 0, waist: 0.82, pec: 1.7, bust: 0.95, belly: 0, scap: 1.3, spine: 1.4, soft: 0 },
+    big:      { tw: 1.17, td: 1.16, pw: 1.06, pd: 1.08, aw: 1.38, lw: 1.20, ax: 0.006, hx: 0.002, waist: 0.88, pec: 2.0, bust: 1.0, belly: 0.2, scap: 1.2, spine: 1.2, soft: 0 },
+    stocky:   { tw: 1.08, td: 1.12, pw: 1.06, pd: 1.08, aw: 1.12, lw: 1.12, ax: 0.004, hx: 0.002, waist: 1.00, pec: 0.9, bust: 1.1, belly: 0.6, scap: 0.6, spine: 0.6, soft: 1 },
+    heavy:    { tw: 1.12, td: 1.20, pw: 1.10, pd: 1.14, aw: 1.16, lw: 1.16, ax: 0.004, hx: 0.004, waist: 1.08, pec: 0.7, bust: 1.25, belly: 1, scap: 0.3, spine: 0.35, soft: 1 },
+    obese:    { tw: 1.22, td: 1.38, pw: 1.20, pd: 1.26, aw: 1.28, lw: 1.28, ax: 0.006, hx: 0.006, waist: 1.20, pec: 0.6, bust: 1.4, belly: 1.6, scap: 0.1, spine: 0.1, soft: 1 },
   };
-  const PHYSIQUE_IDS = ["average", "slim", "heavy", "muscular"];
+  const PHYSIQUE_IDS = ["average", "slim", "athletic", "muscular", "big", "stocky", "heavy", "obese"];
   function applyPhysique(P0, ph) {
     const M = PHYSIQUE[ph];
     // before puberty a body type is half as pronounced, and a child is never "muscular"
-    const s = !P0.child ? 1 : (ph === "muscular" ? 0 : (P0.ageYears < 13 ? 0.5 : 0.8));
+    const s = !P0.child ? 1 : ((ph === "muscular" || ph === "big" || ph === "athletic") ? 0 : (P0.ageYears < 13 ? 0.5 : 0.8));
     const m = (k) => 1 + (M[k] - 1) * s;
     const p = Object.assign({}, P0);
     p.key = P0.key + "~" + ph; p.physique = ph;
     const jw = P0.jacketW - P0.torsoW, jd = P0.jacketD - P0.torsoD;
     p.torsoW = P0.torsoW * m("tw"); p.torsoD = P0.torsoD * m("td");
-    if (P0.waistShare > 0) { p.waistW = P0.waistW * m("tw") * (ph === "heavy" ? 1.16 : ph === "slim" ? 1.03 : 1); p.waistD = P0.waistD * m("td") * (ph === "heavy" ? 1.10 : 1); }
+    if (P0.waistShare > 0) { p.waistW = P0.waistW * m("tw") * (1 + (M.waist / PHYSIQUE.average.waist - 1) * s); p.waistD = P0.waistD * m("td") * (1 + 0.22 * M.belly * M.soft * s); }
     p.pelvisW = P0.pelvisW * m("pw"); p.pelvisD = P0.pelvisD * m("pd");
     p.armW = P0.armW * m("aw"); p.legW = P0.legW * m("lw");
     // the arm rides the chest wall and the thigh the midline: each joint moves
@@ -1138,11 +1158,29 @@
   }
   // c.physique wins; otherwise a stable pick off the look (skin x hair), so a
   // crowd varies and the same person is always the same shape.
+  // what else tells two people apart, for the body's own draw (pure: the same person is always the same body)
+  function bodySalt(c) {
+    const str = (c.hairStyle || "") + "|" + (c.beard || "") + "|" + (c.heritage || "");
+    let h = 0;
+    for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+    return h ^ ((c.eye | 0) * 7) ^ ((c.nose | 0) << 9) ^ ((c.eyeShape | 0) << 13) ^ (c.bodySeed | 0);
+  }
   function physiqueOf(c) {
     if (c.physique && PHYSIQUE[c.physique]) return c.physique;
     if (c.age != null && c.age < 16) return "average";       // a child is a child; the look carries it
-    const h = hashN((c.skin != null ? c.skin : 0xcf9a72) ^ 0x2f6b1d3, (c.hair != null ? c.hair : 0x4a3526) + (c.build === "f" ? 7 : 0)) % 100;
-    return h < 52 ? "average" : h < 72 ? "slim" : h < 88 ? "heavy" : "muscular";
+    const h = hashN((c.skin != null ? c.skin : 0xcf9a72) ^ 0x2f6b1d3 ^ bodySalt(c), (c.hair != null ? c.hair : 0x4a3526) + (c.build === "f" ? 7 : 0)) % 100;
+    return h < 30 ? "average" : h < 44 ? "slim" : h < 58 ? "athletic" : h < 68 ? "muscular" : h < 72 ? "big" : h < 84 ? "stocky" : h < 95 ? "heavy" : "obese";
+  }
+  /* HEIGHT, per person: c.stature (1 = the profile's own height) or a draw off
+     the look, humped round the middle: most people within a few centimetres
+     of average, a few short, a few tall (a man 1.66 to 1.93 m). The player is
+     built at 1 (entities/player.js): the cameras are set for that. */
+  function statureOf(c) {
+    if (c.stature > 0) return Math.max(0.85, Math.min(1.2, +c.stature));
+    if (c.age != null && c.age < 18) return 1;
+    const h = hashN((c.skin != null ? c.skin : 0xcf9a72) ^ 0x51d7a3 ^ bodySalt(c), (c.hair != null ? c.hair : 0x4a3526) + 0x1b3) >>> 0;
+    const bell = ((h & 255) + ((h >> 8) & 255) + ((h >> 16) & 255)) / 765;
+    return 0.93 + 0.15 * bell;
   }
 
   /* ============================================================
@@ -1342,7 +1380,13 @@
     m: { jaw: 0.60, brow: 0.026, round: 0.150, neck: [0.176, 0.194], nose: 1.00, ear: 1.00, chin: 0.012 },
     // (a woman's: a narrower, softer jaw to a small chin, a smooth brow, a
     // smaller nose and ears — owner 2026-11-22: "much much more real and attractive")
-    f: { jaw: 0.46, brow: 0.008, round: 0.180, neck: [0.160, 0.177], nose: 0.76, ear: 0.84, chin: 0.006, cheek: 0.39 },
+    // (owner: "you made their faces weird" — the second pass pinched the jaw,
+    // enlarged the eyes and pursed the lips. The research on faces says the
+    // opposite of exaggeration: the best-rated face is the AVERAGE one, eyes
+    // 46% of the face's width apart and 36% of its length above the mouth
+    // (Pallett 2010), which is what this layout already measures. So: the
+    // plain form again, a hair softer.)
+    f: { jaw: 0.50, brow: 0.012, round: 0.170, neck: [0.160, 0.177], nose: 0.82, ear: 0.88, chin: 0.004 },
     c: { jaw: 0.72, brow: 0.004, round: 0.195, neck: [0.165, 0.180], nose: 0.70, ear: 0.95, chin: 0.000 },
   };
   const NOSE_W = [0.082, 0.102, 0.128];          // narrow | medium | broad bridge-to-nostril width (authored; drawn x HEAD_SX)
@@ -1502,9 +1546,9 @@
      iris is painted the same ratio wider so it draws round. A face comes out
      about five eye-widths across, as a face is. */
   const EYE_SQ = 0.88;
-  const EYE_HX = { m: HEAD_SX, f: 0.74, c: 0.84 };      // the head's own squeeze, by form (childProfile keeps to it)
+  const EYE_HX = { m: HEAD_SX, f: HEAD_SX, c: 0.84 };      // the head's own squeeze, by form (childProfile keeps to it)
   function eyeSpread(form) { return (EYE_HX[form] || HEAD_SX) / EYE_SQ; }
-  const EYE_R = { m: 0.057, f: 0.0615, c: 0.063 };
+  const EYE_R = { m: 0.057, f: 0.059, c: 0.063 };
   function eyeR(form) { return EYE_R[form] || EYE_R.m; }
   // eU/eL: open elevation (rad) of the upper/lower lid edge at the pupil line;
   // tilt: the outer corner's lift; azc: the half-width (azimuth) of the opening
@@ -1517,7 +1561,7 @@
   ];
   function lidShape(si, fk) {
     const S = EYE_SHAPES[si] || EYE_SHAPES[1];
-    const b = fk === "f" ? 0.04 : (fk === "c" ? 0.05 : 0);
+    const b = fk === "f" ? 0.03 : (fk === "c" ? 0.05 : 0);
     return { eU: S.eU + b, eL: S.eL - b * 0.3, tilt: S.tilt, azc: S.azc };
   }
   // how far (rad) the upper lid rotates to meet the lower one, with overlap
@@ -1708,7 +1752,7 @@
      the face frame, shifted so the mesh origin is (0, BROW_REST_Y, 0.303). */
   const BROW_FORM = {
     m: { xi: 0.070, xt: 0.218, y0: 0.424, arch: 0.009, drop: 0.013, wi: 0.032, wt: 0.009, th: 0.0050 },
-    f: { xi: 0.078, xt: 0.212, y0: 0.431, arch: 0.021, drop: 0.017, wi: 0.018, wt: 0.005, th: 0.0035 },
+    f: { xi: 0.078, xt: 0.212, y0: 0.428, arch: 0.017, drop: 0.017, wi: 0.021, wt: 0.005, th: 0.0035 },
     c: { xi: 0.074, xt: 0.205, y0: 0.425, arch: 0.009, drop: 0.010, wi: 0.020, wt: 0.006, th: 0.0035 },
   };
   function browGeometry(form, expr) {
@@ -1949,7 +1993,7 @@
           const e0 = lidEdge("U", S, ph, s);
           const q = Math.min(1, Math.abs(ph) / S.azc), w = 0.3 + 0.7 * Math.sqrt(Math.max(0, 1 - q * q));
           // (a woman's lash line is darker and longer: liner and lashes)
-          const lk = fk === "f" ? 2.4 : 1;
+          const lk = fk === "f" ? 1.35 : 1;
           const rows = [[e0 + 0.05 * w * lk, rad * 1.004], [e0 - 0.055 * w, rad * (1 + 0.075 * w * lk)]];
           for (let k = 0; k < 2; k++) {
             const th = rows[k][0], r = rows[k][1], cp = Math.cos(ph);
@@ -3570,7 +3614,7 @@
     // the waist this block meets (the column's own rows above it, in metres of rig)
     const ph0 = PHYSIQUE[P.physique] || PHYSIQUE.average;
     const wZ0 = P.waistShare > 0 ? (P.waistD / 2) / D : (ph0.soft ? 1.04 : 0.90);
-    const bW0 = 0.76 + 0.14 * ph0.soft - 0.05 * fem;
+    const bW0 = 0.76 + 0.14 * ph0.soft - 0.02 * fem;
     const topF = Math.min(0.93 * pd, lerpN(wZ0, 0.88, 0.5) * D + 0.006 * vs);
     const topB = Math.min(0.91 * pd, lerpN(bW0, 0.84, 0.5) * D + 0.010 * vs);
     const pel = ringTable([
@@ -3624,7 +3668,7 @@
     // (the flank meets the waistband 4 mm inside it: at 70% of the way there it
     // left a 2 cm shelf, the trousers standing out round the hips like a tray)
     const aTk = Math.max(waistA, (pel(pTop).a - 0.006 * vs) / W);
-    const backW = 0.76 + 0.14 * ph.soft - 0.05 * fem;              // the small of the back (a woman's is deeper)
+    const backW = 0.76 + 0.14 * ph.soft - 0.02 * fem;              // the small of the back (a woman's is deeper)
     // [k, half width /W, front /D, back /D, squareness]. The back is DEEP at the
     // shoulder line (the trapezius over C7 carries the neck) and the section
     // turns elliptical there (n < 2 thins the tips into the deltoid).
@@ -3717,7 +3761,7 @@
       bust: fem * ph.bust, bustK: 0.665 - 0.05 * elder,
       belly: (P.child ? 0 : ph.belly * (P.fem ? 0.6 : 1)) + 0.35 * elder,
       scap: ph.scap * (0.4 + 0.6 * kidK), spine: ph.spine * (0.4 + 0.6 * kidK), elder,
-      glute: (1 + 1.5 * fem) * (ph.soft ? 1.25 : ph === PHYSIQUE.slim ? 0.8 : 1) * (0.5 + 0.5 * kidK),
+      glute: (1 + 1.2 * fem) * (ph.soft ? 1.25 : ph.lw < 0.95 ? 0.85 : 1) * (0.5 + 0.5 * kidK),
     };
     return S;
   }
@@ -3734,7 +3778,7 @@
       // THE BUST: a lobe each side, full below (a short underside) and sloping
       // away to the collarbone above, ~4 cm proud on an average woman (was
       // 1.9: under a shirt it did not read at all)
-      if (S.bust > 0) dz += S.bust * 0.60 * D * gss(k - S.bustK, k > S.bustK ? 0.115 : 0.07) * gss(ax - 0.44, 0.235) * fw;
+      if (S.bust > 0) dz += S.bust * 0.52 * D * gss(k - S.bustK, k > S.bustK ? 0.115 : 0.07) * gss(ax - 0.44, 0.235) * fw;
       if (S.belly > 0) dz += S.belly * 0.16 * D * gss(k - 0.27, k > 0.27 ? 0.15 : 0.10) * gss(xn, 0.55) * fw;
     } else if (c < 0) {
       const bw = Math.pow(-c, 0.8);
@@ -3750,8 +3794,10 @@
     if (c < 0) {
       const bw = Math.pow(-c, 0.8);
       // (two cheeks, fullest a little under the hip joint, standing out over the fold the hem draws under them)
-      dz -= S.glute * 0.17 * pd * gss(y - (S.hipY - 0.025 * pk), y > S.hipY - 0.025 * pk ? 0.08 * pk : 0.055 * pk) * gss(ax - 0.46, 0.28) * bw;
-      dz += 0.025 * pd * gss(xn, 0.06) * sm01((S.hipY + 0.03 * pk - y) / (0.03 * pk)) * bw;       // the cleft
+      // (two ROUND cheeks: each its own dome, fullest a little under the hip
+      // joint, a real cleft between them — deeper and the domes fuller on a woman)
+      dz -= S.glute * 0.17 * pd * gss(y - (S.hipY - 0.03 * pk), y > S.hipY - 0.03 * pk ? 0.085 * pk : 0.06 * pk) * gss(ax - 0.50, 0.25) * bw;
+      dz += (0.03 + 0.06 * (S.fem || 0)) * pd * gss(xn, 0.085) * sm01((S.hipY + 0.05 * pk - y) / (0.05 * pk)) * bw;       // the cleft
     } else if (c > 0 && S.belly > 0) {
       dz += S.belly * 0.05 * pd * gss(y - (S.pTop - 0.03 * pk), 0.05 * pk) * gss(xn, 0.6) * Math.pow(c, 0.8);
     }
@@ -3782,7 +3828,9 @@
     // pelvis's hem along the groin and under the seat)
     if (R.vx) {
       const ax = Math.min(1, Math.abs(_rp.xn) / R.vx);
-      _rp.y = R.y + (R.tw || 0) * (c > 0 ? -(R.tf || 0) * Math.pow(1 - ax, 1.25) : (R.tb || 0) * (1 - ax * ax));
+      // (behind: an arc under EACH cheek, lifting at the cleft and at the hip — a seat is two)
+      const fold = (1 - ax * ax * ax * ax) * (0.62 + 0.38 * (1 - Math.pow(1 - Math.min(1, ax / 0.5), 2)));
+      _rp.y = R.y + (R.tw || 0) * (c > 0 ? -(R.tf || 0) * Math.pow(1 - ax, 1.25) : (R.tb || 0) * fold);
     } else _rp.y = R.y + (R.tw || 0) * (c > 0 ? -(R.tf || 0) * Math.pow(c, 1.5) : (R.tb || 0) * Math.pow(-c, 1.5));
     return _rp;
   }
@@ -4051,7 +4099,7 @@
         // which also stands proud of the thighs it is worn over (fading up to the waistband)
         r.tf = spec.brief ? S.pelTf : 0; r.tb = S.pelTb; r.vx = 1;
         if (spec.brief && ys[i] >= S.hipY - 1e-6) {
-          const up = 0.0055 * cl01((S.pTop - ys[i]) / Math.max(1e-6, S.pTop - S.hipY));
+          const up = 0.007 * cl01((S.pTop - ys[i]) / Math.max(1e-6, S.pTop - S.hipY));
           r.a += up; r.zf += up;
         }
         rings.push(r);
@@ -4230,6 +4278,7 @@
             const w = cl01((S.hipY + 0.05 * S.pk - R.y) / (0.05 * S.pk));
             if (w > 0) {
               const r = S.thighF, d = Math.abs(p.x) - S.P.hipX, q = d <= 0 ? 0 : Math.min(1, d / r);
+              // (1 mm proud in trousers: inside the thigh tops it crossed their 12-sided flats in a row of dashes; a brief stands prouder)
               const zH = r * Math.pow(1 - Math.pow(q, 3.4), 1 / 3.4) + (spec.brief ? 0.005 : 0.0015);
               z = lerpN(z, zH, w);
             }
@@ -4646,7 +4695,9 @@
     // co-tuned for the ON path (fpsmode eye 1.65, camera pivot 1.7, hit HEAD_Y 1.50,
     // combat aim ~1.5–1.8) — a full revert flips them back too; see the report.
     const charReal = !CBZ.CONFIG || CBZ.CONFIG.CHAR_SCALE_REAL !== false;
-    const humanScale = !charReal ? 1.0 : ((CBZ.HUMAN_SCALE > 0) ? CBZ.HUMAN_SCALE : 0.70);
+    // (x this person's own height: statureOf — one scale on the model node, published as the rig's scale)
+    const tall = statureOf(c);
+    const humanScale = (!charReal ? 1.0 : ((CBZ.HUMAN_SCALE > 0) ? CBZ.HUMAN_SCALE : 0.70)) * tall;
     model.name = "character-model";
     model.userData.characterModel = true;
     g.userData.humanScale = humanScale;
@@ -4930,9 +4981,9 @@
     // MOUTH: two lips in a lip tone off the skin (fuller for f and for c.lips —
     // heritage.js rolls it), closed; the inside + teeth only exist when open
     // (a woman's lips: fuller, and a rose over the skin's own lip tone)
-    const lipM = cmat(c.lip != null ? c.lip : (form === "f" ? mixHex(lipTone(skinHex), 0xa8303e, 0.40) : lipTone(skinHex)));
-    const lipSx = form === "c" ? 0.84 : (form === "f" ? 0.99 : 1);
-    const lipSy = (form === "f" ? 1.16 : (form === "c" ? 0.92 : 1)) * (c.lips ? 1.25 : 1);
+    const lipM = cmat(c.lip != null ? c.lip : (form === "f" ? mixHex(lipTone(skinHex), 0xa8303e, 0.22) : lipTone(skinHex)));
+    const lipSx = form === "c" ? 0.84 : (form === "f" ? 0.94 : 1);
+    const lipSy = (form === "f" ? 1.14 : (form === "c" ? 0.92 : 1)) * (c.lips ? 1.25 : 1);
     const mouth = new THREE.Mesh(lipGeometry("U", "n"), lipM);
     const lipLow = new THREE.Mesh(lipGeometry("L", "n"), lipM);
     mouth.position.set(0, MOUTH_REST_Y, 0); lipLow.position.set(0, MOUTH_REST_Y, 0);
@@ -5157,7 +5208,7 @@
       // face instead of a hard-coded shared-atlas tan.
       skinTone: c.skin != null ? c.skin : 0xcf9a72,
       // THE BODY SHAPE (TORSO block): garment shells, badges and ties read it
-      torsoShape: TS, physique: physique,
+      torsoShape: TS, physique: physique, stature: tall,
       torsoFrontZ: function (x, y) { return torsoSurfaceZ(TS, x, y, 1); },
       torsoBackZ: function (x, y) { return torsoSurfaceZ(TS, x, y, -1); },
     };

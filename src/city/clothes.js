@@ -3469,6 +3469,10 @@
   function shaped(mesh) { return !!(mesh && mesh.userData && (mesh.userData.limb || mesh.userData.torsoPart)); }
   // the pelvis wears the top sliver of the leg row (where the skirt starts)
   const HIPS_PAINTER = limbPainter("leg", [0.94, 0.995]);
+  // a one-piece's hips: the leg row just UNDER its top sliver — the cloth the
+  // thigh tops themselves wear (the sliver is the row's lit top edge: on a
+  // jumpsuit it drew a paler band round the hips)
+  const ONEPIECE_HIPS = limbPainter("leg", [0.84, 0.92]);
   /* THE SEAT. A garment that declares `seat` has a real pelvis to paint (a
      one-piece's fly and seat pockets, an apron's skirt over the lap), and the
      leg row's 6% sliver gives the pelvis ~2 texels of height: colour only. A
@@ -3969,7 +3973,11 @@
     const pm = pv ? pelvisMat(pv.hex) : null;
     if (pm) dressHips(s.pelvis, (opts && opts.iso) ? isoMat(ch, "pelvis~" + (pv.hex | 0), pm) : pm,
       pv === set.parts.trousers ? TROUSER_PAINTER : SEAT_PAINTER);
-    else if (set.parts.seat && !set.parts.jacket) dressHips(s.pelvis, m, SEAT_PAINTER);
+    // (a one-piece WITH legs: the hips wear the top of its own leg row — the very
+    // cloth and shade the thighs under them wear. Its seat row (zip, pockets)
+    // was a second shade of the same colour: a band round the hips of every
+    // jumpsuit. A seat with no legs under it (an apron) keeps its seat row.)
+    else if (set.parts.seat && !set.parts.jacket) dressHips(s.pelvis, m, set.parts.legs ? ONEPIECE_HIPS : SEAT_PAINTER);
     else if (set.parts.hips && set.parts.legs) dressHips(s.pelvis, m);
     else restore(s.pelvis);
     // ---- the JACKET SHELL (tux/suit/police): silhouette via one inflated
