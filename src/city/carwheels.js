@@ -468,6 +468,14 @@
      ends tapered, so it reads as a cast caliper hugging the disc, not a box
      floating in front of it. The rotor edge disappears into it. */
   const calCache = new Map();
+  /* a phone forgets the wheels and calipers no car or template still wears
+     (city/vehicles.js lookSweep hands over what is worn after it drops a
+     look); a car that needs one again builds it again */
+  CBZ.carWheelCacheTrim = function (worn) {
+    let n = 0;
+    [cache, calCache].forEach(function (M) { M.forEach(function (geo, key) { if (!worn.has(geo)) { M.delete(key); n++; } }); });
+    return n;
+  };
   function caliperGeo(radius, width, rimFrac, side, style) {
     const rf = rimFrac || 0.66, sd = side < 0 ? -1 : 1;
     const key = radius.toFixed(4) + "|" + width.toFixed(4) + "|" + rf.toFixed(3) + "|" + sd + "|" + (style || "");

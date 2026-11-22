@@ -7575,6 +7575,7 @@
       shedStats.styleDrops += CBZ.cityCarTemplateTrim(keep);
     }
     if (CBZ.cityCarTemplates) CBZ.cityCarTemplates().forEach(tUsed);
+    if (CBZ.carWheelCacheTrim) { try { shedStats.wheelDrops = (shedStats.wheelDrops || 0) + CBZ.carWheelCacheTrim(used); } catch (e) {} }
     [_mergeCache, _vcGeoCache].forEach(function (M) {
       M.forEach(function (geo, key) {
         if (!mine.has(geo) || used.has(geo)) return;

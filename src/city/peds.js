@@ -7419,6 +7419,28 @@
   const SIM_MIN_THINKS = 8;
   const MOBILE_STAGGER = !!CBZ.isMobileDevice;
   const FAR_STAGGER_D2 = 160 * 160;
+  /* THE LEAN FAR RECORD (phone; ?cfg_PHONE_PED_LEAN=0 turns it off).
+     Measured at the downtown spawn on the phone profile: of ~130 bodies on
+     the roster about half stand past the drawn band, and the stagger below
+     serves them one frame in three (one in eight past 160 m). On the frames
+     in between the loop still walked some thirty checks and timer
+     decrements on each of them before the stagger let him go, and a city
+     person is a ~220-field object whose every field read is a slow one.
+     So a quiet, undrawn body the stagger has just served goes into a lean
+     record kept BESIDE the roster (who, and the frame of his next tick: two
+     flat arrays indexed like the roster) and the loop passes over him on
+     the frames in between without reading a field of him. The time he sat
+     out is one clock reading on the body, paid into the stagger's own bank
+     when he is next served, so his pace and his decisions are the
+     stagger's exactly. A record holds only while the roster still has that
+     body at that index (a roster that shifted under it serves him the
+     ordinary way) and for one stagger period at most. "Quiet" is the
+     stagger's own test plus: not drawn, not hidden for a spawn reveal, no
+     knockout, flinch, scare, tweak or offence timer running. */
+  const _leanWho = [];
+  let _leanTill = new Int32Array(256);
+  let _leanClock = 0;
+  const leanStats = CBZ.pedLeanStats = { on: false, skipped: 0, entered: 0 };
   CBZ.onUpdate(34, function (dtFrame) {
     let dt = dtFrame;
     if (!econ()) return;
@@ -7443,6 +7465,16 @@
     panicDecay(dt);            // the contagion field forgets (cityScare)
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     const peds = CBZ.cityPeds;
+    // the lean far record (above the updater): sized to the roster, read live
+    const leanOn = MOBILE_STAGGER && !!CBZ.CONFIG.PED_BRAIN_STAGGER && CBZ.CONFIG.PHONE_PED_LEAN !== false;
+    const leanClk0 = _leanClock;
+    _leanClock += dtFrame;
+    if (leanOn) {
+      if (_leanTill.length < peds.length) { const t = new Int32Array(peds.length + 128); t.set(_leanTill); _leanTill = t; }
+      while (_leanWho.length < peds.length) _leanWho.push(null);
+      if (_leanWho.length > peds.length) _leanWho.length = peds.length;   // (no hold on a body that left)
+    } else if (_leanWho.length) _leanWho.length = 0;
+    let leanSkip = 0, leanIn = 0;
     // ---- THIS FRAME'S DECISION DEADLINE (see the block above the updater) ----
     // Read LIVE, so a ?cfg_ped_sim_budget_ms override flips it mid-session.
     const _budgetMs = Number(CBZ.CONFIG.PED_SIM_BUDGET_MS) || 0;
@@ -7458,6 +7490,15 @@
     let _budOver = false, _budStop = 0, _budDone = 0;
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
+      // a body in the lean far record sits out until his next stagger tick
+      // (not one field of him is read: see THE LEAN FAR RECORD)
+      if (leanOn) {
+        const lw = _leanWho[i];
+        if (lw !== null) {
+          if (lw === p && _leanTill[i] > frame) { leanSkip++; continue; }
+          _leanWho[i] = null;        // served now, or the roster moved under the record
+        }
+      }
       dt = dtFrame;              // a prior ped's compensated tick must not leak
       if (p._rigRel) rigRebuild(p);   // a released sleeper an owner put back on the roster
       // MAY THIS BODY DECIDE THIS FRAME? Settled here, at the top, because the
@@ -7654,6 +7695,11 @@
         continue;
       }
       const dx = p.pos.x - camx, dz = p.pos.z - camz, d2 = dx * dx + dz * dz;
+      // back from the lean far record: the frames he sat out join the bank
+      // (clamped: a record is one stagger period, never a stretch in a car)
+      const _la = p._leanAt;
+      if (_la != null) { p._dtBank = (p._dtBank || 0) + Math.min(SIM_BANK_MAX, Math.max(0, leanClk0 - _la)); p._leanAt = null; }
+      let staggerEvery = 0;
       // FAR-BAND STAGGER — see the flag comment above the updater. Runs after
       // the timer decrements (those stay full-rate/cheap) and before all
       // think/walk/animate work. Skipped frames bank their dt; the think frame
@@ -7667,6 +7713,7 @@
         const every = (MOBILE_STAGGER && d2 > FAR_STAGGER_D2) ? 8 : 3;
         if (((i + frame) % every) !== 0) { p._dtBank = (p._dtBank || 0) + dt; continue; }
         if (p._dtBank) { dt += p._dtBank; p._dtBank = 0; }
+        staggerEvery = every;
       } else if (p._dtBank) { dt += p._dtBank; p._dtBank = 0; }
       // Names, levels and job titles belong in conversation/phone surfaces,
       // never as billboard prose over a person's head.
@@ -7912,7 +7959,15 @@
           }
         }
       }
+      // INTO THE LEAN FAR RECORD (above the updater) until his next stagger
+      // tick: served by the stagger this frame, not drawn, and quiet
+      if (staggerEvery && leanOn && !vis && p.group.visible === false && !p._spawnHidden &&
+          !(p.alarmed > 0 || p.npcHeat > 0 || p.rage || p.controlled || p.reportState || p.ko > 0 ||
+            p.poseCower > 0 || p._scareT > 0 || p.tweakT > 0 || p.offenseT > 0 || p.dead || p.inCar)) {
+        _leanWho[i] = p; _leanTill[i] = frame + staggerEvery; p._leanAt = _leanClock; leanIn++;
+      }
     }
+    leanStats.on = leanOn; leanStats.skipped = leanSkip; leanStats.entered = leanIn;
     // WHERE THE NEXT SWEEP RESUMES. Reaching the end of the roster with budget
     // still in hand is a COMPLETED sweep — wrap to 0 so the bodies sitting ahead
     // of this frame's cursor are the first ones served next time, which is what

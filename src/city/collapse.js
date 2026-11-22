@@ -570,6 +570,9 @@
   function coarseSpan(S, a, b) { if (S.region.all) return false; for (let s = a; s <= b; s++) if (S.region.fine[s] === 1) return false; return true; }
   function fineSpan(S, a, b) { if (S.region.all) return true; for (let s = a; s <= b; s++) if (S.region.fine[s] !== 1) return false; return true; }
   function makeStruct(D, hint) {
+    // (a shell whose upper storeys a phone had parked, city/buildings.js, has
+    // them all back before anything here reads its colliders)
+    if (D.b && CBZ.cityShellWake) { try { CBZ.cityShellWake(D.b); } catch (e) {} }
     const P = C.profile({ w: D.w, d: D.d, h: D.h, storeys: D.storeys, FH: D.FH, style: D.style, masonry: D.masonry, material: D.material });
     const m = P.m;
     const ns = D.storeys, FH = D.FH;
