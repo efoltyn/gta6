@@ -16,14 +16,15 @@
    the world the same way every landmass is wired (city/worldmap.js
    addLandmass contract):
 
-     KINGSBRIDGE — the metro. ~4.4 x 3.2 km in the open south-west country
-       the Continental Loop already crosses: a CBD of 20-70 storey towers on
-       a 100 m grid, a midtown, walk-up and rowhouse districts, a central
-       park, a university, a stadium on the freeway, three regional malls,
-       suburbs of curving streets and cul-de-sacs, an industrial belt on the
-       rail line and the river, exurbs and farms at the edge. A river runs
-       through it from Kings Pond to Kings Lake; the Loop and the Southgate
-       Spur cross it on grade-separated overpasses with diamond interchanges.
+     KINGSPORT — the metro, and the country's port. ~4.4 x 3.2 km on the
+       south coast: a CBD of 20-70 storey towers on a 100 m grid, a midtown,
+       walk-up and rowhouse districts, a central park, a university, a
+       stadium on the freeway, three regional malls, suburbs of curving
+       streets and cul-de-sacs, an industrial belt on the rail line and the
+       river, exurbs and farms at the edge. The Kings River runs through it
+       from Kings Pond out to Kings Harbour; the Coast Freeway and the Gulf
+       Freeway cross it on grade-separated overpasses with diamond
+       interchanges.
      THE CITY RINGS — Goldspire, Cape Harbor and Neon Reef keep their
        walk-in towngen downtowns (the enterable shops, jobs and homes) and
        GROW: midrise, rowhouses and suburbs laid round them by the same
@@ -132,17 +133,19 @@
   CBZ.metroCountryside = null;
 
   // ------------------------------------------------------------------
-  //  THE SITES. Coordinates are where the land is (measured against the
-  //  shipped region layout); the planner avoids whatever is actually there
-  //  at build time, so a moved compound or a new road never gets built on.
+  //  THE SITES. Where each city stands is the WORLD PLAN's
+  //  (src/world/worldplan.js `metros`); a city's own river, lakes, rail and
+  //  port are authored here against that position. The planner avoids
+  //  whatever is actually there at build time (a compound, a road, the sea),
+  //  so nothing is ever built on one.
   // ------------------------------------------------------------------
   function siteTable(city) {
     const out = [];
-    // THE METRO. The Loop's west leg (x -2380) runs through its east side
+    // THE METRO. The Coast Freeway (x -2380) runs through its east side
     // mid-superblock (the arterial grid is phased so no arterial hugs it),
-    // the Southgate Spur (x -280) is its east edge, the Bureau's compound
-    // (x -5120..-4812) its north-west corner. minX stays inside the settled
-    // union (-5120) so the continent plate does not move a vertex.
+    // the Gulf Freeway (z 2650) crosses that east side toward Cape Harbor,
+    // Southgate Road (x -280) is its east edge, the Bureau's compound
+    // (x -5120..-4812) its north-west corner.
     //
     // KINGSPORT IS DETROIT (owner, 2026-09-29: "a real one that has
     // diversity and real facades and buildings, almost like a New York or
@@ -161,10 +164,15 @@
     // rx grew 2150 -> 2500 so the land east of the Loop is still city (the
     // centre moved 925 m west). A freight yard lies north of the main line
     // east of the Loop, and the elevated Downtown Loop rings the downtown.
+    // THE PORT (the plan): the Kings River no longer ends in a lake inland.
+    // The south coast comes up to the city as Kings Harbour and the river
+    // runs out into it past the docks (`port`, at the mouth).
+    const PM = (CBZ.worldPlan && CBZ.worldPlan.metros) || {};
+    const KP = PM.kingsport || { cx: -3705, cz: 3000, rx: 2500, rz: 1650, bounds: { minX: -5080, maxX: -330, minZ: 950, maxZ: 4660 } };
     out.push({
       id: "kingsport", name: "Kingsport", tier: "metro", biome: "kingsport", style: "detroit",
-      cx: -3705, cz: 3000, rx: 2500, rz: 1650,
-      bounds: { minX: -5080, maxX: -330, minZ: 950, maxZ: 4660 },
+      cx: KP.cx, cz: KP.cz, rx: KP.rx, rz: KP.rz,
+      bounds: { minX: KP.bounds.minX, maxX: KP.bounds.maxX, minZ: KP.bounds.minZ, maxZ: KP.bounds.maxZ },
       // pinned along the downtown waterfront only (the riverfront avenue
       // keeps its bank); everywhere else it meanders and the grid gives way
       river: { axis: "z", at: -3450, from: 1010, to: 5000, amp: 250, wave: 1750, name: "Kings River",
@@ -172,7 +180,6 @@
         island: { a0: 1650, a1: 2250, half: 70, arm: 40, keep: "west", name: "Kings Island" } },
       lakes: [
         { name: "Kings Pond", x: -3450, z: 1010, r: 125 },
-        { name: "Kings Lake", x: -3450, z: 5260, r: 560 },
       ],
       rail: { axis: "x", at: 3720, tracks: 2, yard: { from: -2150, to: -900, tracks: 6, side: -1 } },
       port: { x: -3450, z: 4450, r: 900 },
@@ -184,27 +191,31 @@
     // communist place". So this is that Kingsport, planned by the planner
     // as it stood (style "legacy": none of the Detroit code runs) from
     // Kingsport's own seed IN KINGSPORT'S FRAME (metro.js planSite: frame)
-    // and moved 7780 m east and 4550 m north, to the open country between
-    // Coyle Valley, the Saltlands and the Loop's east leg. `uniform` tells
-    // the facade pass to vary nothing: every block the same block. What
-    // the new land changed: the Loop's south leg crosses it (z -3400,
-    // where Kingsport had its west leg), so it has the overpasses and
-    // interchanges that tie it to the network; the bounds are clipped to
+    // and moved to where the world plan stands the capital (its `frame`):
+    // inland on the Coyle Plain, between the farm county and the Saltlands.
+    // `uniform` tells the facade pass to vary nothing: every block the same
+    // block. What the new land changed: the Valley Highway runs along its
+    // north edge (z -3250, where Kingsport had its west leg), so it has the
+    // overpasses and interchanges that tie it to the network; the bounds are clipped to
     // the free land (Kingsport's x -4530..-1030, z 950..4130); the river
     // rises south of that freeway (its head cut at Kingsport's z 1310,
     // meanders kept) and ends in a pond-sized lake short of the Saltlands
-    // (under 300 m: no outlet river is routed across the desert); the rail
+    // (the river dies in the basin, which is where the salt comes from); the rail
     // runs 240 m further north so the lake does not sit on it. The centre
     // superblock is a paved square with one abstract monument.
     {
-      const KX = 7780, KZ = -4550;
+      const KF = (PM.karvel && PM.karvel.frame) || { dx: 7780, dz: -4400 };
+      const KX = KF.dx, KZ = KF.dz;
       out.push({
         id: "karvel", name: "Karvel", tier: "metro", biome: "karvel", style: "legacy", uniform: true,
         seedKey: "kingsport", frame: { dx: KX, dz: KZ },
         cx: -2780 + KX, cz: 3050 + KZ, rx: 2150, rz: 1650,
-        bounds: { minX: -4530 + KX, maxX: -1030 + KX, minZ: 950 + KZ, maxZ: 4130 + KZ },
+        bounds: (function () { const c = (PM.karvel && PM.karvel.clip) || { minX: -4530, maxX: -1030, minZ: 950, maxZ: 4130 }; return { minX: c.minX + KX, maxX: c.maxX + KX, minZ: c.minZ + KZ, maxZ: c.maxZ + KZ }; })(),
         river: { axis: "z", at: -3450 + KX, from: 1310 + KZ, phaseFrom: 1010 + KZ, to: 3890 + KZ, amp: 250, wave: 1500, name: "Karvel River",
-          pins: [{ a: 1310 + KZ, off: 0, r: 150 }, { a: 3890 + KZ, off: 0, r: 250 }] },
+          // (the third pin holds the last reach west of the x -3380 arterial:
+          //  unpinned, the meander slid along under that road for 200 m with
+          //  no bridge, since a bridge is a crossing, not a river in a road)
+          pins: [{ a: 1310 + KZ, off: 0, r: 150 }, { a: 3560 + KZ, off: -70, r: 190 }, { a: 3890 + KZ, off: -45, r: 250 }] },
         lakes: [
           { name: "Karvel Pond", x: -3450 + KX, z: 1340 + KZ, r: 100 },
           { name: "Karvel Lake", x: -3450 + KX, z: 3950 + KZ, r: 250 },
@@ -234,7 +245,7 @@
       // and nowhere else (tools/layout-audit.mjs: ring 750-1000 m round the
       // downtown 72% empty). Same planner, same core, same biome as the west
       // borough (it IS the borough, on its other side): walk-ups on the water,
-      // rowhouses, the suburbs across the Mercy Connector, farms at the edge.
+      // rowhouses, the suburbs across the Crosstown Freeway, farms at the edge.
       // The county jail and the two highways through it are planned round
       // (obstacle, corridors), never built on.
       out.push({
@@ -357,9 +368,40 @@
     }
     // cities already planned this build are places too
     for (const p of planned) for (const r of p.regions) obstacles.push({ minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ, name: p.id, pad: 30 });
+    // THE SEA (the world plan's coast): no block, street or building stands
+    // in it. This builder runs long before the continent cuts the coastline,
+    // so it asks the plan, which is where the continent will get it from.
+    for (const o of seaObstacles(box)) obstacles.push(o);
     return { obstacles: obstacles, corridors: corridors };
   }
   function inside(a, b) { return a.minX >= b.minX && a.maxX <= b.maxX && a.minZ >= b.minZ && a.maxZ <= b.maxZ; }
+  // the water inside a box, as rects: 100 m cells within SEA_SHORE of the
+  // shore or beyond it, merged along rows and then down columns
+  const SEA_CELL = 100, SEA_SHORE = 45;
+  function seaObstacles(box) {
+    const P = CBZ.worldPlan; if (!P || !P.landAt) return [];
+    const x0 = Math.floor(box.minX / SEA_CELL) * SEA_CELL, z0 = Math.floor(box.minZ / SEA_CELL) * SEA_CELL;
+    const rows = [];
+    for (let z = z0; z < box.maxZ; z += SEA_CELL) {
+      let run = null;
+      for (let x = x0; x <= box.maxX + SEA_CELL; x += SEA_CELL) {
+        let wet = false;
+        if (x < box.maxX) for (let k = 0; k < 9 && !wet; k++) {
+          if (P.landAt(x + (k % 3) * SEA_CELL / 2, z + ((k / 3) | 0) * SEA_CELL / 2) < SEA_SHORE) wet = true;
+        }
+        if (wet) { if (!run) run = { minX: x, maxX: x + SEA_CELL, minZ: z, maxZ: z + SEA_CELL }; else run.maxX = x + SEA_CELL; }
+        else if (run) { rows.push(run); run = null; }
+      }
+    }
+    rows.sort(function (a, b) { return a.minX - b.minX || a.maxX - b.maxX || a.minZ - b.minZ; });
+    const out = [];
+    for (const r of rows) {
+      const m = out.length && out[out.length - 1];
+      if (m && m.minX === r.minX && m.maxX === r.maxX && m.maxZ === r.minZ) m.maxZ = r.maxZ;
+      else out.push({ minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ, name: "the sea", pad: 0 });
+    }
+    return out;
+  }
 
   // one site -> one plan, from the live layout (shared with the node check)
   // A COPY (site.frame = {dx, dz}: "the source city, moved by dx, dz") is

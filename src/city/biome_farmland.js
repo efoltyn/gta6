@@ -45,9 +45,9 @@
   function pick(arr) { return arr[(rng() * arr.length) | 0]; }
 
   // ---- footprint -----------------------------------------------------------
-  // The rect comes from world/layout.js (CBZ.worldFoot), which owns the
-  // authored anchor, the world-layout dial and the stage-4 footprint scale
-  // together. The authored literals below are the degrade-safe fallback and
+  // The rect is the world plan's (world/worldplan.js, CBZ.worldFoot): where
+  // the county stands and how big its ground is. The authored literals below
+  // are the fallback for a build without the plan and
   // nothing else reads them. WHY THE COUNTY CAN SCALE FOR FREE: its parcels
   // are a fixed 4x4 grid with a fixed plant density per parcel, so a county
   // 1.6x across is bigger FIELDS, not 2.56x the geometry.
@@ -60,34 +60,16 @@
   const CX = (MINX + MAXX) / 2, CZ = (MINZ + MAXZ) / 2;
   const FSC = (CBZ.worldFootScale && CBZ.worldFootScale("farmland")) || 1;   // linear footprint scale
 
-  // causeway: a thin country-road rect running south from the farm's south
-  // edge down to the desert. RE-DERIVED (stage-2 dial): the spine sits on
-  // the farm's own centreline (CX, today 1180) and the deck spans farm MAXZ
-  // -> 600u past the Saltlands' north shore (today 280), meeting the desert
-  // road grid — both shores keep touching under any offset combination.
-  // The REGION stops at the desert's shore in the enlarged world so the two
-  // biomes' registered rects butt instead of overlapping; the compact
-  // (flag-off) world keeps its authored 280 overlap-and-all.
+  // THE COUNTY ROAD: south from the farm's own crossroads to the Saltlands
+  // Highway, the world plan's road along the head of the gulf (it used to run
+  // on as a causeway to the desert's spine; the desert is no longer the
+  // county's neighbour, the gulf is). The deck stops flush at that road's
+  // edge (half 5.5); the drivable record runs on to its centreline.
   const ROAD_X = CX, ROAD_HW = 7;          // half-width 7 → 14u drivable deck
-  // THE SALTLANDS' NORTH SHORE, ASKED FOR RATHER THAN RE-TYPED. `-320 + dz`
-  // was biome_desert.js's `CZ - HZ` copied by hand, and it was written against
-  // the desert's AUTHORED half-extent — the instant that basin scaled, this
-  // deck would have stopped 280 m short of the shore it is supposed to reach
-  // (exactly the bug the Saltlands causeway itself had). One published rect,
-  // one answer; the old literal stays only as the degrade-safe fallback.
-  const _DOFF = (CBZ.worldOff && CBZ.worldOff("desert")) || { dx: 0, dz: 0 };
-  const _DFOOT = CBZ.worldFoot && CBZ.worldFoot("desert");
-  const DESERT_MINZ = _DFOOT ? _DFOOT.minZ : (-320 + _DOFF.dz);   // Saltlands north shore
-  // …and it has to reach the Saltlands' HIGHWAY SPINE, not merely 600 m of
-  // sand. "+600" was measured when the basin's spine sat 320 m south of its
-  // shore; the spine is really (basin centre - 40), so a basin that grows in
-  // z walks it further from the shore and the deck would stop short of the
-  // junction it exists to make. biome_desert.js publishes the spine (it parses
-  // first); the 600 stays as the floor so the flag-off deck is unchanged.
-  const DESERT_HWY_Z = Number.isFinite(CBZ.DESERT_HWY_Z) ? CBZ.DESERT_HWY_Z : null;
+  const _SALT_Z = CBZ.worldPlan && CBZ.worldPlan.saltlandsHighwayZ;
   const ROAD_MINZ = MAXZ;
-  const ROAD_MAXZ = Math.max(DESERT_MINZ + 600, DESERT_HWY_Z == null ? -Infinity : DESERT_HWY_Z + 6);   // a T onto the spine's far edge (half 5.5), no stub past it
-  const ROAD_REGION_MAXZ = (CBZ.CONFIG && CBZ.CONFIG.WORLD_ENLARGE_V2 !== false) ? DESERT_MINZ : ROAD_MAXZ;
+  const ROAD_MAXZ = Number.isFinite(_SALT_Z) ? _SALT_Z - 5.5 : MAXZ + 600;
+  const ROAD_REC_MAXZ = Number.isFinite(_SALT_Z) ? _SALT_Z : ROAD_MAXZ;
 
   // shared materials (one instance each → no per-mesh material churn)
   const M = {
@@ -418,6 +400,9 @@
         // Rides the footprint scale — with BIOME_ORGANIC_EDGES on, this field
         // is the county's real edge outside the rect, not a paint job.
         spread: { west: 70 * FSC, east: 560 * FSC, north: 440 * FSC, south: 150 * FSC },
+        // farm country's real extent is the world plan's valleys (Mercy
+        // Valley, the Coyle Plain); this county is the authored heart of it
+        sources: (CBZ.worldPlan && CBZ.worldPlan.lobes && CBZ.worldPlan.lobes.farmland) || null,
         inner: 0x647847, outer: 0x567048, featherNorm: 0.22,
         owner: "farmland",
         y: 0.006, seed: 0xfa411,
@@ -1176,10 +1161,10 @@
     // =====================================================================
     CBZ.registerCityRegion(city, { name: "Coyle Valley", subtitle: "Farm County", biome: "farmland", kind: "rect", minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ, pad: 8 });
     // causeway widened to the 24m highway deck (x-span ±12 about the centreline)
-    CBZ.registerCityRegion(city, { name: "Coyle Causeway", subtitle: "Farm County", kind: "rect", minX: ROAD_X - 12, maxX: ROAD_X + 12, minZ: causewayDeckZ, maxZ: ROAD_REGION_MAXZ, pad: 1 });
+    CBZ.registerCityRegion(city, { name: "Coyle Road Link", subtitle: "Farm County", kind: "rect", road: true, minX: ROAD_X - 12, maxX: ROAD_X + 12, minZ: causewayDeckZ, maxZ: ROAD_MAXZ, pad: 1 });
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
-      city.roads.push({ x: ROAD_X, z: (causewayRecZ + ROAD_MAXZ) / 2, vertical: true, len: ROAD_MAXZ - causewayRecZ, district: "highway", w: 24, lanesPerDir: 2, laneW: 3.6, rural: true, owner: "farmland" });
+      city.roads.push({ x: ROAD_X, z: (causewayRecZ + ROAD_REC_MAXZ) / 2, vertical: true, len: ROAD_REC_MAXZ - causewayRecZ, district: "highway", w: 24, lanesPerDir: 2, laneW: 3.6, rural: true, owner: "farmland" });
     }
   }, 33);
 })();

@@ -102,12 +102,10 @@
     // Keep the sole ocean mesh beyond the longest city camera frustum. The old
     // 7km square ended inside aircraft sight range, so its hard edge exposed
     // the fog-coloured background and read as a second, flat kind of water.
-    // WORLD_SCALE_V4: the 16000 was measured against a world whose plate
-    // reached x +-6100; a plate that outgrows this record gets land the water
-    // system does not know is coastline. world/layout.js derives the span from
-    // the FLAT rect it also derives (see CBZ.WORLD_SEA_SPAN there) — the
-    // literal stays as the degrade-safe fallback, so a build without layout.js
-    // (or with the flag off) is byte-identical. Costs nothing: the rendered
+    // The span is the world plan's (world/worldplan.js CBZ.WORLD_SEA_SPAN):
+    // a plate that outgrew this record would have land the water system does
+    // not know is coastline. The 16000 literal is only the fallback for a
+    // build without the plan. Costs nothing: the rendered
     // ocean is a camera-centred disc (world/water_spec.js), so this sizes the
     // published BOUNDS record and the geometry's bounding box, not a mesh.
     const SEA_WORLD_SPAN = CFGW.SEA_OVERHAUL !== false
@@ -410,8 +408,15 @@
     const WGATE = 26;                                   // ≥ 24m deck width
     const _MILW = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 };
     const wgz = cz + _MILW.dz;                          // deck centreline == CEN_Z
-    gapWall(EW, (ES + (wgz - WGATE / 2)) / 2, T, (wgz - WGATE / 2) - ES);
-    gapWall(EW, ((wgz + WGATE / 2) + EN) / 2, T, EN - (wgz + WGATE / 2));
+    // ...WHEN THE DECK LANDS ON THIS WALL AT ALL. The world plan stands Fort
+    // Brandt out in the woods, so its deck passes kilometres north of the
+    // downtown and the west seawall is whole. (Unguarded, a gate "at" a z
+    // outside the wall's own span made the second piece run on past the
+    // corner to the gate: a seawall standing in open country.)
+    if (wgz - WGATE / 2 > ES + T && wgz + WGATE / 2 < EN - T) {
+      gapWall(EW, (ES + (wgz - WGATE / 2)) / 2, T, (wgz - WGATE / 2) - ES);
+      gapWall(EW, ((wgz + WGATE / 2) + EN) / 2, T, EN - (wgz + WGATE / 2));
+    } else gapWall(EW, (ES + EN) / 2, T, EN - ES);
     // The east wall has a real road gate. city/expansion.js continues this
     // centre cross-street across a bridge into the island district.
     const GATE = 22;

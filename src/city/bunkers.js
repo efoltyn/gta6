@@ -1649,10 +1649,15 @@
       floorY: gm.floorY, grade0: gm.grade0, found: gm.found, crete: M.snowcrete,
     });
 
-    // ---- SITE 3: DESERT CIVIL-DEFENSE SHELTER (outpost). Far SE corner of
-    // the basin (680..1560 × -320..620), well clear of the town (~1150,110).
-    const d3x = 1450 + Math.round((h01(31, 5, 0xb21) - 0.5) * 50);
-    const d3z = 500 + Math.round((h01(7, 13, 0xb22) - 0.5) * 50);
+    // ---- SITE 3: DESERT CIVIL-DEFENSE SHELTER (outpost). The far south-east
+    // of the basin, well clear of the town. It rides the basin's own ground
+    // (CBZ.worldFoot): the literal (1450, 500) it was typed at was the
+    // AUTHORED basin's corner, and every time the desert moved since, the
+    // shelter stayed behind in open country (the world plan would have left
+    // it on its own islet in the gulf).
+    const _DF = CBZ.worldFoot && CBZ.worldFoot("desert");
+    const d3x = Math.round(_DF ? _DF.cx + _DF.hx * 0.75 : 1450) + Math.round((h01(31, 5, 0xb21) - 0.5) * 50);
+    const d3z = Math.round(_DF ? _DF.cz + _DF.hz * 0.745 : 500) + Math.round((h01(7, 13, 0xb22) - 0.5) * 50);
     const gd = gradeFor(CBZ.desertTerrainHeightAt, d3x, d3z, 22, 18);
     buildBunker(city, root, {
       id: "mesa", name: "Station 9 Fallout Shelter", subtitle: "Civil Defense",

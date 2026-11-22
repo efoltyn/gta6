@@ -104,6 +104,16 @@
       // the freeway buffer, sampled at the corners + centre
       const pts = [[x0, z0], [x1, z0], [x0, z1], [x1, z1], [(x0 + x1) / 2, (z0 + z1) / 2]];
       for (const p of pts) if (Z.freewayEdge(p[0], p[1]) < Z.BUFFER) return false;
+      // THE GEOGRAPHY (the world plan): a farm stands on land, back from the
+      // shore; nobody farms the Saltlands' sand; and the range is not farmed.
+      // (A country road crosses all three: the Overseas Highway runs down the
+      // desert and out over the Keys with nothing beside it.)
+      const WP = CBZ.worldPlan;
+      if (WP && WP.landAt) for (const p of pts) {
+        if (WP.landAt(p[0], p[1]) < 70 || WP.riverDist(p[0], p[1]) < 110) return false;
+        if (WP.coverAt(p[0], p[1], "desert") > 0.25) return false;
+        if (WP.reliefAt(p[0], p[1]).h > 28) return false;
+      }
       return true;
     }
     function take(x0, z0, x1, z1, pad) {

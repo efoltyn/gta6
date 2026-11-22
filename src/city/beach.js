@@ -1479,8 +1479,10 @@
         }
         P.box((x0 + x1) / 2, 0.03, (zBase + zBase + n * STALL_W) / 2, 0.18, 0.012, n * STALL_W, stripe);
       }
-      block(cz - 88, wgz - GAP);
-      block(wgz + GAP, cz + 88);
+      // the gap is the fort deck's mouth, when that deck lands on this quay
+      // at all (the world plan stands the fort far to the north-west)
+      if (wgz > cz - 88 && wgz < cz + 88) { block(cz - 88, wgz - GAP); block(wgz + GAP, cz + 88); }
+      else block(cz - 88, cz + 88);
       const pm = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
       pm.name = "beach-parking-paint";
       const m = P.build("beach-parking", pm);

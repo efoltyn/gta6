@@ -151,5 +151,20 @@
       road: { x: CH_X, z: CH_Z + CH_HZ },
     });
     if (ap) ap.hub = false;
+    /* THE LAST 35 m INTO TOWN. The field's road ends on the town's rect edge
+       (the plug above), but the town's streets end with its grid: its
+       southmost street is 35 m inside that edge (centreline CH_Z + 85, read
+       off the built grid). Between the two was grass: the airport's roads
+       touched nothing. The town's centre street carries on out to the plug. */
+    {
+      const z0 = CH_Z + 85, z1 = CH_Z + CH_HZ;
+      if (CBZ.buildHighway) {
+        try {
+          CBZ.buildHighway(city.root, { path: [{ x: CH_X, z: z0 + 6.5 }, { x: CH_X, z: z1 - 10 }], width: 13, lanesPerDir: 1, median: false, laneW: 3.6,
+            theme: "asphalt", guardrail: false, elevated: false, registerRoads: false, owner: "capeharbor" });
+        } catch (e) { console.error("[airport_capeharbor] town stub", e); }
+      }
+      if (city.roads) city.roads.push({ x: CH_X, z: (z0 + z1) / 2, vertical: true, len: z1 - z0, w: 13, lanesPerDir: 1, laneW: 3.6, district: "capeharbor" });
+    }
   }, 22);
 })();

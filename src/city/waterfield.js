@@ -114,6 +114,15 @@
 
   // Legacy fallback used only before continent.js publishes the real signed
   // shoreline.  It preserves the old gameplay contract during boot.
+  /* BEFORE THE CONTINENT HAS BUILT (every landmass builder that runs ahead of
+     it asks here: the marina's berths, a highway deciding where it bridges,
+     a yacht looking for a roadstead). The coast is the WORLD PLAN's
+     (src/world/worldplan.js landAt), which is what the continent will cut it
+     from, plus the harbour ring round the downtown. This used to answer
+     "anything outside the city rect and every region is water", which read
+     the whole open country as ocean and is how 104 of 112 marina berths were
+     once laid on grass. */
+  const RING0 = QUAY, RING1 = 95;      // continent.js BAY0 / BAY1
   function fallbackWater(A, x, z, allowUnderDecks) {
     if (!A || A.minX == null) return false;
     if (x >= A.minX - QUAY && x <= A.maxX + QUAY && z >= A.minZ - QUAY && z <= A.maxZ + QUAY) return false;
@@ -125,7 +134,11 @@
       if (allowUnderDecks && isLink(regs[i])) continue;
       if (regionHit(regs[i], x, z, 0)) return false;
     }
-    return true;
+    const P = CBZ.worldPlan;
+    if (!P || !P.landAt) return true;
+    const ring = Math.max(Math.max(A.minX - x, 0, x - A.maxX), Math.max(A.minZ - z, 0, z - A.maxZ));
+    if (ring > RING0 && ring < RING1) return true;
+    return P.landAt(x, z) < 0;
   }
 
   /* THE COAST, and only the coast. `coastAt` is the honest signed distance to

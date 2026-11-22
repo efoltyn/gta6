@@ -48,8 +48,8 @@
   if (CFGS.SNOW_TERRAIN_V2 == null) CFGS.SNOW_TERRAIN_V2 = true;
 
   // ---- footprint (per spec): authored rect center (350,-1450), half (420,330)
-  // Anchored through the world-layout dial (world/layout.js). The dial is
-  // UN-PINNED: the biome's interior is authored in the STAGE-1 frame (every
+  // Anchored where the world plan stands it (world/worldplan.js,
+  // CBZ.worldOff). The biome's interior is authored in the STAGE-1 frame (every
   // peak/piste/lake/lodge/lift/town literal below), builders add (DX,DZ) to
   // each authored anchor, and the exported oracles map world → authored at
   // entry — so the interior math is byte-identical at zero offset and the
@@ -57,12 +57,8 @@
   // mountains on the snow island, very far from everything else).
   const _WOFF = (CBZ.worldOff && CBZ.worldOff("snow")) || { dx: 0, dz: 0 };
   const DX = _WOFF.dx, DZ = _WOFF.dz;
-  // WORLD_LAYOUT_V2 (world/layout.js owns the flag; this only mirrors the
-  // default for a build without it). Consumed once, at the Pinecrest seed.
-  if (CFGS.WORLD_LAYOUT_V2 == null) CFGS.WORLD_LAYOUT_V2 = true;
-  const LAYOUT_V2 = function () { return CFGS.WORLD_LAYOUT_V2 !== false; };
-  // The half-extents come from world/layout.js (CBZ.worldFoot), which owns the
-  // authored anchor, the dial AND the stage-4 footprint scale. This biome is
+  // The half-extents come from the world plan (CBZ.worldFoot), which states
+  // the ground's anchor and size together. This biome is
   // the one that had a hand-copy living somewhere else: terrain_overhaul.js
   // re-typed `SNOW_CX = 350 + dx, SNOW_HX = 420, SNOW_NZ = -1780 + dz` to aim
   // the whole backdrop range, and that copy would have gone stale the moment
@@ -1312,7 +1308,7 @@
     // (CX-DX, CZ-DZ — i.e. the literal 350,-1450) finishes the rigid-translate
     // contract the rest of the file already keeps. At zero offset authored ==
     // world, so the flag-off build is byte-identical.
-    const _SEEDX = LAYOUT_V2() ? (CX - DX) : CX, _SEEDZ = LAYOUT_V2() ? (CZ - DZ) : CZ;
+    const _SEEDX = CX - DX, _SEEDZ = CZ - DZ;
     const rng = mulberry((CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170) ^ ((_SEEDX * 73856093) ^ (_SEEDZ * 19349663)));
 
     // shared materials (one instance each — draw-call friendly)
@@ -2015,6 +2011,16 @@
       // family instead; overlapping foothills merge, empty corners remain
       // ordinary country, and the visual/gameplay snow biome becomes much
       // larger without ever reading as a white square.
+      // THE SNOW UP TOP, along the rest of the Mercy Range (the world plan's
+      // `snow` lobes: the high spine west and east of this massif, which the
+      // continent's relief raises). It lies where the land is high enough to
+      // hold it, so this one IS white.
+      if (CBZ.registerBiomeBlend && CBZ.worldPlan && CBZ.worldPlan.lobes && CBZ.worldPlan.lobes.snow) {
+        CBZ.registerBiomeBlend({
+          owner: "snow", name: "Mercy Range snowline", sources: CBZ.worldPlan.lobes.snow,
+          inner: 0xd9dfe0, outer: 0x77786c, roundness: 2.75, featherNorm: 0.26, seed: 0x51a3c7,
+        });
+      }
       if (CBZ.registerBiomeBlend) {
         CBZ.registerBiomeBlend({
           owner: "snow", name: "Greater Mercy alpine catchments",

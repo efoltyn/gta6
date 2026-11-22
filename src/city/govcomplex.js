@@ -5521,6 +5521,15 @@
       }
     }
     if (roadCrosses(city, rect, 6)) return "road";
+    // THE SEA. This runs long before the continent cuts the coastline, so it
+    // asks the world plan, which is where the continent gets the coast from:
+    // a compound stands on land, with a shore to spare.
+    const WP = CBZ.worldPlan;
+    if (WP && WP.landAt) {
+      const mx = (rect.minX + rect.maxX) / 2, mz = (rect.minZ + rect.maxZ) / 2;
+      if (WP.landAt(mx, mz) < 70 || WP.landAt(rect.minX, rect.minZ) < 70 || WP.landAt(rect.maxX, rect.minZ) < 70 ||
+          WP.landAt(rect.minX, rect.maxZ) < 70 || WP.landAt(rect.maxX, rect.maxZ) < 70) return "sea";
+    }
     // the map-reservation ledger's own peer-interpenetration query. Its author
     // wrote it "for a future POI/biome placer"; this is that placer.
     if (CBZ.worldLayout && CBZ.worldLayout.mapConflict) {
@@ -5582,6 +5591,18 @@
     const anchor = def.edgeOfCity && isFinite(city.minX)
       ? { minX: city.minX, maxX: city.maxX, minZ: city.minZ, maxZ: city.maxZ } : U;
     const reach = Math.max(def.hx, def.hz);
+    // THE PLAN FIRST (src/world/worldplan.js `sites`): a compound the plan has
+    // stood somewhere is tried there, under the same clearance test as any
+    // candidate (the plan's own sheet is its belt: the plan may put an estate
+    // on a far coast the settled union does not reach). Only if that ground
+    // is taken does the search below run.
+    const PS = CBZ.worldPlan && CBZ.worldPlan.sites && CBZ.worldPlan.sites[def.id];
+    if (PS && isFinite(PS.x) && isFinite(PS.z)) {
+      const rect = rectOf(PS.x, PS.z, def.hx, def.hz);
+      const why = whyBlocked(city, rect, def.id, LB, CBZ.worldPlan.bounds);
+      if (!why) return { cx: PS.x, cz: PS.z, rect: rect, rejected: 0 };
+      console.warn("[govcomplex] " + def.id + ": the plan's site (" + PS.x + ", " + PS.z + ") is blocked by " + why + "; searching");
+    }
     // A site may widen its own fan. City Hall does, to the FULL circle: it is
     // anchored on the city rather than on the settled union, and the compass
     // direction that has clear ground beside a city is not something this file
@@ -5634,6 +5655,28 @@
       const pz = r.vertical ? Math.max(r.z - hl, Math.min(r.z + hl, z)) : r.z;
       out.push({ x: px, z: pz, seg: r, d: Math.hypot(px - x, pz - z) });
     }
+    // THE HIGHWAYS ARE LAID LATER (city/highwaynet.js, order 91) BUT THEIR
+    // TABLE IS DATA NOW, so an approach can meet the road that will actually
+    // pass its gate. Without this an estate a kilometre from the Valley
+    // Highway ran its drive two kilometres across country to whatever older
+    // road happened to exist when this builder ran. Straight legs only, and
+    // clear of the swept corners at a leg's ends (a T meets a straight deck).
+    const table = CBZ.highwayNetTable ? CBZ.highwayNetTable() : [];
+    for (let t = 0; t < table.length; t++) {
+      const route = table[t], P = route.pts || [];
+      for (let i = 0; i + 1 < P.length; i++) {
+        const a = P[i], b = P[i + 1];
+        const vertical = Math.abs(a.x - b.x) < 0.5;
+        if (!vertical && Math.abs(a.z - b.z) >= 0.5) continue;       // an S-bend's drift
+        const k0 = i > 0 ? (a.r || route.fillet || 60) + 20 : 0, k1 = i + 2 < P.length ? (b.r || route.fillet || 60) + 20 : 0;
+        const s0 = vertical ? a.z : a.x, s1 = vertical ? b.z : b.x, dir = s1 > s0 ? 1 : -1;
+        const lo = Math.min(s0 + dir * k0, s1 - dir * k1), hi = Math.max(s0 + dir * k0, s1 - dir * k1);
+        if (!(hi - lo > 40) || (s1 - s0) * dir < k0 + k1 + 40) continue;
+        const px = vertical ? a.x : Math.max(lo, Math.min(hi, x));
+        const pz = vertical ? Math.max(lo, Math.min(hi, z)) : a.z;
+        out.push({ x: px, z: pz, seg: { planned: route.id, vertical: vertical, w: route.width }, d: Math.hypot(px - x, pz - z) });
+      }
+    }
     out.sort(function (a, b) { return a.d - b.d; });
     return out.slice(0, n || 10);
   }
@@ -5660,6 +5703,13 @@
     // the world when the only route is the direct one.
     const zones = city.noSpawn || [];
     const lots = [city.lots, city.shopLots];
+    // THE METROS' LAND. They plan one order after this builder (43), so their
+    // regions are not there to be refused yet, and an approach that took the
+    // straight line to a freeway on the far side of Kingsport was laid
+    // through 2.6 km of the city before the city existed (the planner then
+    // had to build round a driveway). The plan says what ground is theirs;
+    // every 150 m of approach laid on it costs like any other crossing.
+    const metroLand = (CBZ.worldPlan && CBZ.worldPlan.metroBounds) ? CBZ.worldPlan.metroBounds() : [];
     function legRect(a, b) {
       return { minX: Math.min(a.x, b.x) - 9, maxX: Math.max(a.x, b.x) + 9,
         minZ: Math.min(a.z, b.z) - 9, maxZ: Math.max(a.z, b.z) + 9 };
@@ -5692,6 +5742,11 @@
             });
             if (rc && !rc.ok) bad += 4;
           } catch (e) {}
+        }
+        for (let k = 0; k < metroLand.length; k++) {
+          const m = metroLand[k];
+          const ix = Math.min(lr.maxX, m.maxX) - Math.max(lr.minX, m.minX), iz = Math.min(lr.maxZ, m.maxZ) - Math.max(lr.minZ, m.minZ);
+          if (ix > 0 && iz > 0) bad += Math.max(ix, iz) / 150;
         }
         for (let k = 0; k < zones.length; k++) {
           const s = zones[k];

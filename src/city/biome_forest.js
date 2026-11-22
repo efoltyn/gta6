@@ -32,10 +32,10 @@
   const THREE = window.THREE;
 
   // ---- footprint (given) ------------------------------------------------
-  // The rect comes from world/layout.js (CBZ.worldFoot) — one place holds the
-  // authored anchor, the world-layout dial and the stage-4 footprint scale.
-  // Authored literals are the degrade-safe fallback.
-  const _WOFF = (CBZ.worldOff && CBZ.worldOff("forest")) || { dx: 0, dz: 0 };   // world-layout dial
+  // The rect is the world plan's (world/worldplan.js, CBZ.worldFoot): where
+  // Redhollow stands and how big its ground is. Authored literals are the
+  // fallback for a build without the plan.
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("forest")) || { dx: 0, dz: 0 };   // the plan's offset from the authored anchor
   const _FOOT = (CBZ.worldFoot && CBZ.worldFoot("forest")) ||
     { cx: -560 + _WOFF.dx, cz: -1350 + _WOFF.dz, hx: 390, hz: 330 };
   const CX = _FOOT.cx, CZ = _FOOT.cz, HX = _FOOT.hx, HZ = _FOOT.hz;
@@ -182,6 +182,9 @@
         // the woods' functional edge outside the rect, so an absolute spread
         // would shrink in proportion every time the forest grew.
         spread: { west: 600 * FSC, east: 90 * FSC, north: 320 * FSC, south: 280 * FSC },
+        // the woods' real extent is the world plan's forest country (the wet
+        // north-west and the range's north slope); Redhollow is its heart
+        sources: (CBZ.worldPlan && CBZ.worldPlan.lobes && CBZ.worldPlan.lobes.forest) || null,
         inner: 0x4b6338, outer: 0x45684e, featherNorm: 0.22,
         y: 0.008, seed: 0x0f02e57, owner: "forest",
       });

@@ -1,44 +1,48 @@
 /* ============================================================
-   city/continent.js — ONE LANDMASS. The archipelago becomes a continent.
+   city/continent.js — THE LAND. One country, built to the WORLD PLAN.
 
-   Every POI (airport, military base, casino strip, speedway, biomes,
-   mini-cities) used to sit on its own island with dead ocean between —
-   "circles on the map". This builder runs AFTER every other landmass and
-   fills the water between them with real, walkable backcountry:
+   src/world/worldplan.js states the geography (the coast with its gulf,
+   harbour, bays, capes and keys; the Mercy Range and its passes; the dry
+   basin; the valleys; the wooded north-west). This builder runs AFTER every
+   other landmass and makes that geography the ground:
 
-     • ONE vertex-coloured ground plate spanning the union of every
-       registered region (grass/dirt/scrub patches from the position hash —
-       deterministic per seed, byte-identical across clients).
-     • Sparse deterministic dressing (trees + rocks) as three InstancedMesh
-       draws, only OUTSIDE existing regions so nothing decorates a runway.
-     • Walkable "underlay" region(s) registered LAST so specific places
-       keep winning point-in-region queries; swim.js treats the covered
-       span as land, clampToCity lets you walk POI to POI.
+     • ONE vertex-coloured ground plate over the plan's sheet (land and its
+       near sea), deterministic per seed, byte-identical across clients.
+     • THE COAST is the plan's drawn outline (landAt) plus the small scale a
+       drawn line cannot hold (coves, a ragged edge). The land slopes through
+       dry and wet sand into the water and the sea floor drops below the
+       animated sea surface (world.js); foam is marched along the true zero
+       crossing of the shore field, so it hugs the actual coast.
+     • THE RELIEF is the plan's: the range lifts the land along its spine
+       and falls away through foothills; valley floors and the basin lie
+       flat; the land falls to every river and to the sea; and the ground is
+       a plain round whatever people built (roads, lots, towns), so a road
+       through a pass is a pass.
+     • THE LAND USE is the plan's: fields over the valleys and round every
+       town, woods over the wet north-west and the uplands, bare ground in
+       the basin; the biomes' own blends colour their country.
+     • THE RIVERS are the plan's courses, carved by city/river.js into the
+       same shore field as the sea.
+     • Sparse deterministic dressing (trees + rocks), only OUTSIDE existing
+       regions so nothing decorates a runway.
+     • Walkable "underlay" region(s) registered LAST so specific places keep
+       winning point-in-region queries.
 
-   THE COAST PASS (CBZ.CONFIG.CONTINENT_COAST, default on) — the plate used
-   to be a RAZOR-STRAIGHT rectangle meeting the sea: a game board, not a
-   landmass. Now a deterministic noise field carves an IRREGULAR coastline
-   into the plate's outer rim, slopes it down through
-   a dry-sand → wet-sand rim into the water, and drops the sea floor below
-   the (world.js) animated sea surface. A merged strip of foam "breakers"
-   is marched along the true zero-crossing of the shore field, so the foam
-   always hugs the actual coast (corners, bays, region bulges included).
+   THE HARBOR PASS (CBZ.CONFIG.CONTINENT_HARBOR, default on) keeps a ~67 m
+   water ring round the downtown's rect (starting exactly at swim.js's
+   QUAY=28 line, so the wall-jump, swim, climb-out loop works) and registers
+   the walkable underlay as rects that EXCLUDE the ring. The ring opens into
+   the plan's Inner Harbour at its south-east corner, so the downtown's
+   water is the sea. Causeways and bridges keep their own walkable regions
+   and read as decks over water.
 
-   THE HARBOR PASS (CBZ.CONFIG.CONTINENT_HARBOR, default on) — the plate
-   also used to pave over the mainland city's WATERFRONT: the seawall,
-   beach and moored boats all faced a lawn. This re-opens a ~67u water
-   ring around the city rect (starting exactly at swim.js's QUAY=28 line,
-   so the wall-jump → swim → climb-out loop works again), and registers
-   the walkable underlay as a set of rects that EXCLUDE the ring — so
-   swim.js reads it as real water and clampToCity keeps NPCs out of it.
-   Causeways/bridges keep their own walkable regions and now read as
-   decks over water again. Revert either pass with its flag.
+   It used to derive the land from where things happened to be: the plate
+   was the union of every region plus a 2200 m belt, and the coast a rounded
+   rectangle round it with noise bitten out. That is why the country was a
+   box, and why no bay was anywhere for a reason.
 
-   The old bridges/causeways stay — now they're just the paved roads of a
-   continuous country instead of the only way across an ocean.
-   regionlife spawns nothing here (biome "wilds" has no budget) — open
-   country is open, not filled with pointless NPCs.
-   Revert: CBZ.CONFIG.CITY_CONTINENT = false (archipelago returns).
+   regionlife spawns nothing in open country (biome "wilds" has no budget).
+   Revert: CBZ.CONFIG.CITY_CONTINENT = false (no continent is built).
 ============================================================ */
 (function () {
   "use strict";
@@ -50,16 +54,6 @@
   if (CFG.CONTINENT_COAST == null) CFG.CONTINENT_COAST = true;
   if (CFG.CONTINENT_HARBOR == null) CFG.CONTINENT_HARBOR = true;
   if (CFG.CONTINENT_EXPANSION_V2 == null) CFG.CONTINENT_EXPANSION_V2 = true;
-  // Stage-2 map enlargement (world/layout.js) needs a wider country belt:
-  // the V3 backdrop-relief band rises MARGIN+60..MARGIN+1900 (≈2050u) past
-  // the FLAT edge, and FLAT now hugs the region union — so the plate (and
-  // its wilds/backcountry labeling) must reach ≥2094u past the union or the
-  // ring's mountains stand on unlabeled "open sea" cells that read as city
-  // in the terrain audit. config.js owns the authoritative default (2200
-  // enlarged / 1200 compact — it parses first); this guard only mirrors it
-  // for a build without config.js.
-  if (CFG.CONTINENT_COUNTRY_MARGIN == null)
-    CFG.CONTINENT_COUNTRY_MARGIN = (CFG.WORLD_ENLARGE_V2 !== false) ? 2200 : 1200;
   if (CFG.CONTINENT_RELIEF_V1 == null) CFG.CONTINENT_RELIEF_V1 = true;
   // Adopted terrain/forest techniques from the reference generators (see
   // tools/adoption-terrain-forest.md). Both default ON, one-line revert each.
@@ -173,29 +167,6 @@
     FLATTEN_DECLS.push(out);
     return out;
   };
-  // WORLD_LAYOUT_V2 (declared in world/layout.js, which parses first) — the
-  // stage-3 world re-lay. This file is one of its four consumers; the guard
-  // below only mirrors the default for a build without layout.js.
-  if (CFG.WORLD_LAYOUT_V2 == null) CFG.WORLD_LAYOUT_V2 = true;
-  const LAYOUT_V2 = function () { return CFG.WORLD_LAYOUT_V2 !== false; };
-  // WORLD_SCALE_V4 (same owner, world/layout.js) — the biomes themselves grew.
-  // Two numbers in this file are answerable for it: the plate's sanity roof and
-  // its segment count. Same mirror-only guard.
-  if (CFG.WORLD_SCALE_V4 == null) CFG.WORLD_SCALE_V4 = true;
-  // The STAGE layout.js resolved to when it is present (it rides on top of
-  // WORLD_LAYOUT_V2 and WORLD_ENLARGE_V2, so the raw flag is not the answer);
-  // the flag pair is the fallback for a build without layout.js.
-  const SCALE_V4 = function () {
-    return CBZ.WORLD_LAYOUT_STAGE != null
-      ? CBZ.WORLD_LAYOUT_STAGE >= 4
-      : (LAYOUT_V2() && CFG.WORLD_SCALE_V4 !== false);
-  };
-  // WORLD_SCALE_V5 — the 10x desert. The same two numbers answer for it again,
-  // for the same reason: the region union grew, and both a stale roof and a
-  // stale segment count fail SILENTLY (the roof by deleting the continent, the
-  // count by coarsening every cell in the world).
-  const SCALE_V5 = function () { return (CBZ.WORLD_LAYOUT_STAGE || 1) >= 5; };
-
   /* ==================================================================
      CBZ.worldLayoutAudit() — THE WORLD LAYOUT AS NUMBERS.
 
@@ -397,8 +368,6 @@
       reliefMeanOuterHalf: r1(outerCells ? outerSum / outerCells : 0),
       hillCellsInnerHalf: innerHill,          // relief > 8u inside the middle half
       nonFinite: nonFinite,
-      stage: CBZ.WORLD_LAYOUT_STAGE == null ? 1 : CBZ.WORLD_LAYOUT_STAGE,
-      layoutV2: LAYOUT_V2(),
     };
   };
 
@@ -419,45 +388,24 @@
     }
     for (const r of regs) grow(r.minX, r.maxX, r.minZ, r.maxZ);
     if (isFinite(city.minX)) grow(city.minX, city.maxX, city.minZ, city.maxZ);
-    // Preserve every authored coordinate and expand OUTWARD from their union.
-    // Legacy coast padding was only 40m; after the 44m coast safety inset that
-    // left no traversable country beyond the outermost region. V2 creates a
-    // substantial dry belt without scaling/moving a single city, biome or POI.
+    // THE SHEET IS THE PLAN'S (world/worldplan.js): the land it draws and the
+    // sea round it. It used to be the union of every region plus a 2200 m
+    // belt, which is why the country was a rectangle: the coast was the box
+    // the places happened to fit in. A region that stands outside the plan's
+    // sheet still gets land under it (the sheet grows to hold it, with a
+    // warning: that place is not where the geography says anything is).
+    const PLAN = CBZ.worldPlan || null;
+    if (!PLAN) { console.error("[continent] no world plan (src/world/worldplan.js): the country is not built"); return; }
     const authoredBounds = { minX, maxX, minZ, maxZ };
-    const LEGACY_PAD = 40;
-    const requestedMargin = Number(CFG.CONTINENT_COUNTRY_MARGIN);
-    // clamp roof 2400 (was 1800): the enlarged world's 2200 belt must fit —
-    // the W ≤ 12000 bail below still bounds the total plate.
-    const PAD = CFG.CONTINENT_EXPANSION_V2 === false ? LEGACY_PAD
-      : Math.max(180, Math.min(2400, Number.isFinite(requestedMargin) ? requestedMargin : 1200));
-    minX -= PAD; maxX += PAD; minZ -= PAD; maxZ += PAD;
+    {
+      const PB = PLAN.bounds, G = 260;
+      if (minX - G < PB.minX || maxX + G > PB.maxX || minZ - G < PB.minZ || maxZ + G > PB.maxZ)
+        console.warn("[continent] a region stands off the plan's sheet (union x " + Math.round(minX) + ".." + Math.round(maxX) + ", z " + Math.round(minZ) + ".." + Math.round(maxZ) + ")");
+      minX = Math.min(PB.minX, minX - G); maxX = Math.max(PB.maxX, maxX + G);
+      minZ = Math.min(PB.minZ, minZ - G); maxZ = Math.max(PB.maxZ, maxZ + G);
+    }
     const W = maxX - minX, D = maxZ - minZ;
-    // Sanity roof on the plate, NOT a design constraint — it exists so a
-    // runaway region can never ask for a kilometre-scale PlaneGeometry. The
-    // stage-3 layout (world/layout.js) puts the region union at 7756u wide,
-    // which with the 2200u country belt is 12156 — over the old 12000 roof,
-    // and blowing it would silently delete the entire continent. Raised to
-    // 13500 with the layout flag (still ~1.3k of headroom, and the plate's
-    // vertex count is fixed at (SEG+1)^2 regardless of W, so a wider plate
-    // costs resolution, never memory). Flag off = the authored 12000.
-    //
-    // STAGE 4 (WORLD_SCALE_V4) re-measures it, because "silently delete the
-    // entire continent" is exactly what a stale roof does and this world got
-    // 1.6x wider. The union is now mbeya_west (-4766) to solara (4730) =
-    // 9496 u, so W = 9496 + 2x2200 = 13896 and D = 8245 + 4400 = 12645.
-    // 15500 keeps the same ~1.6k of headroom the stage-3 roof had.
-    //
-    // STAGE 5 (WORLD_SCALE_V5) re-measures it a third time. The Saltlands went
-    // 10x by area and the three eastern nations moved out past its new shore.
-    // MEASURED off the built plate rather than derived from the anchor table
-    // (CBZ.worldScaleAudit().plateW), because the union is every REGISTERED
-    // rect — link decks and pads included — not just the landmass anchors:
-    // W = 17728 and D = 15782 with the 2200 belt. 19500 keeps ~1.8k of
-    // headroom, in line with the previous two roofs. THIS IS THE NUMBER THAT
-    // DELETES THE WORLD IF IT GOES STALE — `return` below bails the whole
-    // plate, silently, and a world with no continent still boots.
-    const W_ROOF = SCALE_V5() ? 19500 : (SCALE_V4() ? 15500 : (LAYOUT_V2() ? 13500 : 12000));
-    if (!isFinite(W) || W <= 0 || W > W_ROOF) return;
+    if (!isFinite(W) || W <= 0 || !isFinite(D) || D <= 0) return;
 
     /* A GRID INDEX OVER RECTS. The plate's field functions each scanned every
        region (223) or every authored surface for all 224k vertices, several
@@ -564,57 +512,28 @@
     // ================= THE SHORE FIELD (deterministic) ====================
     // s(x,z): metres of dry land between the point and the nearest water.
     // Positive on land, negative in water. Two water bodies: the OUTER
-    // COAST (a noise-wobbled inset of the plate rect) and, with HARBOR on,
+    // COAST (the world plan's drawn outline, coastLand below) and, with HARBOR on,
     // the city bay ring. Any NON-bridge region force-holds land so a POI
     // can never be carved. All noise is CBZ.hash01 — byte-identical/seed.
     function sm(t) { return t * t * (3 - 2 * t); }
     const noise2 = CBZ.noise2 || function () { return 0.5; };   // core/seed.js
-    // Signed distance inside a rounded continental frame. The old min-to-four-
-    // edges field made the whole world a perfect square in orbital views even
-    // after noise was added. A broad corner radius changes the land silhouette
-    // while the expanded margin keeps the full authored union untouched.
-    const coastCX = (minX + maxX) * 0.5, coastCZ = (minZ + maxZ) * 0.5;
-    // THE FRONTIER LOOP'S SETBACK, declared once (the relief gate, the loop
-    // builder and the coast cap below all read it). It was 190 m, which left
-    // the coast room for 64 m of wobble: a ruled line round a rectangle.
-    // At 760 m the sea may bite real bays out of the belt and the loop still
-    // runs on dry land everywhere (coastInset is capped against it).
-    const FRONTIER_IN = COAST ? 760 : 36;
-    // Corner radius <= the setback: the rounded frame's inside distance is then
-    // exactly FRONTIER_IN along the whole loop, corners included.
-    const coastRadius = Math.min(FRONTIER_IN - 60, Math.min(W, D) * 0.12);
-    function plateInsideDistance(x, z) {
-      const qx = Math.abs(x - coastCX) - (W * 0.5 - coastRadius);
-      const qz = Math.abs(z - coastCZ) - (D * 0.5 - coastRadius);
-      const outside = Math.hypot(Math.max(qx, 0), Math.max(qz, 0));
-      const inside = Math.min(Math.max(qx, qz), 0);
-      return -(outside + inside - coastRadius);
-    }
-    // THE COASTLINE (owner: "the coast is a razor-straight line around a
-    // rectangular continent"). It was a 10-74 m wobble on a 17 km edge: from
-    // any height, a ruler. A real coast is organised at the scale of the land:
-    // broad bays and headlands kilometres apart (2.6 km field, sharpened so a
-    // bay is a bay and a headland a headland), coves inside them (900 m), and
-    // a ragged edge (160 m). Capped strictly inside the frontier loop so the
-    // road keeps >= 110 m of dry shoulder; every POI still holds its land
-    // through inSolidRegion below. Pure noise2: deterministic per seed.
-    /* THE SEA COMES IN. With the ring road gone the only thing the coast must
-       respect is what is actually built, and every authored region is at least
-       PAD (2200 m) inside the plate edge. So the gulfs may be deep: up to
-       COAST_MAX_IN, leaving 300 m of shore outside the nearest region. Three
-       scales: gulfs and capes 5 km apart (the silhouette of the country), bays
-       inside them, and a ragged edge. A gulf is sharpened so it is a gulf and
-       a cape a cape, not a sine wave. */
-    const COAST_MAX_IN = Math.max(FRONTIER_IN - 110, PAD - 300);
-    function coastInset(x, z) {
-      const gulf = smooth01((noise2(x - 900, z + 2300, 5200, 8812) - 0.36) / 0.34);
-      const big = noise2(x + 3100, z - 1700, 2600, 8809);
-      const bay = smooth01((big - 0.34) / 0.44);
-      let v = 16 + gulf * gulf * (COAST_MAX_IN - 500) + bay * bay * 470
-        + (noise2(x, z, 900, 8810) - 0.5) * 160 * (0.35 + Math.max(bay, gulf))
-        + (noise2(x, z, 160, 8811) - 0.5) * 36;
-      if (v < 10) v = 10;
-      return v > COAST_MAX_IN ? COAST_MAX_IN : v;
+    /* THE COASTLINE IS THE PLAN'S OUTLINE (world/worldplan.js landAt: metres
+       of land to the nearest sea, from one drawn shape: the gulf, the
+       harbour, the capes, the fjords, the keys). It was a rounded rectangle
+       round the region union with noise bitten out of it, so no bay was ever
+       anywhere for a reason. What this file still adds is the small scale a
+       drawn outline cannot hold: coves a few hundred metres across and a
+       ragged edge, 65 m at the very most, a fraction of the narrowest
+       designed water (the Narrows into the Inner Harbour, 480 m). */
+    function coastLand(x, z) {
+      const e = PLAN.landAt(x, z);
+      if (e > 420 || e < -420) return e;
+      // beside a highway the drawn outline rules alone: a route the plan ran
+      // 50 m back from a shore must not find a cove under it
+      const road = CBZ.highwayNetReliefGate ? CBZ.highwayNetReliefGate(x, z) : 1;
+      if (road <= 0) return e;
+      const rag = (noise2(x + 3100, z - 1700, 900, 8810) - 0.5) * 96 + (noise2(x, z, 160, 8811) - 0.5) * 34;
+      return e + rag * (0.35 + 0.65 * noise2(x - 900, z + 2300, 2600, 8812)) * road;
     }
     const BAY0 = 28, BAY1 = 95;          // bay ring: QUAY line → 95u out
     const hasCity = isFinite(city.minX);
@@ -780,7 +699,40 @@
       Object.defineProperty(b, "_maxHalf", { value: m, writable: true, configurable: true, enumerable: false });
       return m;
     }
+    /* TWO SHORTCUTS, NEITHER OF WHICH CHANGES A VISIBLE METRE. This field is
+       the single hottest function of the world build (every plate vertex asks
+       it, the relief asks it again for the same vertex, and every later
+       ground and water query in the game lands here).
+         · THE SAME POINT TWICE: the plate loop asks the relief (which asks
+           here) and then asks here itself, so the last answer is kept.
+         · FAR FROM ANY RIVER OR LAKE: a 96 m grid of the field, built once
+           the rivers are in. Where a cell stands more than IW_FAR from all
+           inland water the cell's own value is the answer: nothing reads this
+           distance past the 1.26 km a valley's slope runs (and a bank is
+           shaped inside 60 m), so three quarters of the country never walks
+           a single river segment. Nearer than that it is measured exactly. */
+    const IW_CELL = 96, IW_FAR = 1400;
+    let IW_G = null, IW_NX = 0, IW_NZ = 0;
+    let _iwX = NaN, _iwZ = NaN, _iwV = 0;
+    function inlandFarGrid() {
+      IW_G = null; _iwX = NaN;
+      IW_NX = Math.ceil(W / IW_CELL) + 1; IW_NZ = Math.ceil(D / IW_CELL) + 1;
+      const G = new Float32Array(IW_NX * IW_NZ);
+      for (let j = 0; j < IW_NZ; j++) for (let i = 0; i < IW_NX; i++) {
+        const v = inlandWaterField(minX + (i + 0.5) * IW_CELL, minZ + (j + 0.5) * IW_CELL);
+        G[j * IW_NX + i] = v > 1e6 ? 1e6 : v;
+      }
+      IW_G = G; _iwX = NaN;
+    }
     function inlandWaterField(x, z) {
+      if (x === _iwX && z === _iwZ) return _iwV;
+      if (IW_G) {
+        const i = ((x - minX) / IW_CELL) | 0, j = ((z - minZ) / IW_CELL) | 0;
+        if (i >= 0 && j >= 0 && i < IW_NX && j < IW_NZ) {
+          const v = IW_G[j * IW_NX + i];
+          if (v > IW_FAR) { _iwX = x; _iwZ = z; _iwV = v; return v; }
+        }
+      }
       let nearest = Infinity;
       for (let i = 0; i < waterBodies.length; i++) {
         const b = waterBodies[i];
@@ -794,12 +746,12 @@
         else wv = waterBodyFieldCore(b, x, z);
         if (wv < nearest) nearest = wv;
       }
+      _iwX = x; _iwZ = z; _iwV = nearest;
       return nearest;
     }
     function shoreField(x, z) { return shoreFieldWith(x, z, inlandWaterField(x, z)); }
     function shoreFieldWith(x, z, inland) {
-      const e = plateInsideDistance(x, z);
-      let s = e - coastInset(x, z);
+      let s = coastLand(x, z);
       if (HARBOR) {
         const sBay = baySigned(x, z, bayDist(x, z));
         if (sBay < s) s = sBay;
@@ -811,63 +763,25 @@
       return s;
     }
 
-    /* ---- THE RIVER (city/river.js) ------------------------------------
-       THE HARBOUR PASS ABOVE BUILDS A MOAT. `bayDist` is a Chebyshev
-       distance, so the water it opens between BAY0 and BAY1 is a closed 67 m
-       ring around the city rect with no outlet on any side — and a flood
-       fill from a marina berth proves it: 314 m and stop, with the nearest
-       coast 7 km away. Every boat in this game was floating in a pond.
-
-       The river cannot be a landmass builder of its own. It has to know
-       where the SEA is to run to it, and NOTHING in this world knows that
-       until the field above exists: before this builder, waterfield.js
-       answers from a boot-time fallback that reads open country as ocean
-       (which is precisely how city/marina.js came to put 104 of 112 berths
-       on grass). So it is called HERE, with `coastOnly` — the same field
-       minus the inland term, i.e. the coastline with no river in it yet,
-       which is exactly the oracle "how far to the sea" needs — and the body
-       it hands back is pushed into the array `inlandWaterField` reads, so
-       one line later the shore field carves it like any other water.        */
-    function coastOnly(x, z) {
-      const e = plateInsideDistance(x, z);
-      let s = e - coastInset(x, z);
-      if (HARBOR) {
-        const sBay = baySigned(x, z, bayDist(x, z));
-        if (sBay < s) s = sBay;
-      }
-      if (s < 12 && inSolidRegion(x, z, 8)) s = 12;
-      return s;
-    }
-    if (CBZ.cityRiverCarve) {
+    /* ---- THE RIVERS (city/river.js) -----------------------------------
+       The courses are the world plan's; river.js shapes each one into a
+       `path` body and bridges the roads that cross it. It is called HERE,
+       not as a landmass builder of its own: its crossings need every road
+       record that exists (the highway network lays its own at order 91) and
+       its bodies have to be in the array `inlandWaterField` reads before the
+       plate is baked, so one line later the shore field carves them like any
+       other water. */
+    if (CBZ.cityRiversCarve) {
       try {
-        const rb = CBZ.cityRiverCarve(city, {
-          shoreAt: coastOnly,
-          plate: { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ },
-        });
         // `waterBodies` is this builder's own slice and is what the field
-        // reads; river.js also files the body on city.waterBodies for the
+        // reads; river.js also files each body on city.waterBodies for the
         // shader/highway consumers. Push here or the carve never happens.
-        if (rb) waterBodies.push(rb);
+        const rbs = CBZ.cityRiversCarve(city) || [];
+        for (let i = 0; i < rbs.length; i++) waterBodies.push(rbs[i]);
       } catch (e) { console.error("[river]", e); }
     }
-    // EVERY LARGE LAKE DRAINS (owner: "nothing flows to the sea"). Kings Lake
-    // took the Kings River in and let nothing out. The river router that
-    // found the harbour's way to the sea (city/river.js) finds each big
-    // lake's too, with the same bridges over whatever road it has to cross;
-    // a pond (< 300 m) may stay a pond.
-    if (CBZ.cityLakeOutletCarve) {
-      const lakes = waterBodies.filter(function (b) { return b && b.kind === "circle" && b.r >= 300; });
-      for (let i = 0; i < lakes.length; i++) {
-        try {
-          const L = lakes[i];
-          const ob = CBZ.cityLakeOutletCarve(city, {
-            shoreAt: coastOnly, plate: { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ },
-          }, { cx: L.cx, cz: L.cz, r: L.r, name: (L.name || "Lake").replace(/\s*(Lake|Pond)$/i, "") + " River",
-               inside: function (x, z) { return waterBodyField(L, x, z) < -30; } });
-          if (ob) { ob.outletOf = L.name || null; waterBodies.push(ob); }
-        } catch (e) { console.error("[lake outlet]", e); }
-      }
-    }
+    // every inland body is in now: the far grid can be built
+    inlandFarGrid();
 
     // ================= CONTINUOUS COUNTRY RELIEF =========================
     // The old continent only changed Y inside the 20m beach rim.  Everywhere
@@ -917,16 +831,6 @@
       }
       return sum;
     }
-    const FUTURE_ROUTE_IN = FRONTIER_IN;
-    const futureX0 = minX + FUTURE_ROUTE_IN, futureX1 = maxX - FUTURE_ROUTE_IN;
-    const futureZ0 = minZ + FUTURE_ROUTE_IN, futureZ1 = maxZ - FUTURE_ROUTE_IN;
-    function frontierDistance(x, z) {
-      return 1e9;   // (the ring road this measured to is gone)
-      let best = 1e9;
-      if (x >= futureX0 - 28 && x <= futureX1 + 28) best = Math.min(best, Math.abs(z - futureZ0), Math.abs(z - futureZ1));
-      if (z >= futureZ0 - 28 && z <= futureZ1 + 28) best = Math.min(best, Math.abs(x - futureX0), Math.abs(x - futureX1));
-      return best;
-    }
     // (THE RIM LAW — interior relief at 0.2x under a 23 m ceiling — is retired:
     //  it is what made the inhabited core a tabletop. See THE LANDFORM below.)
     // ---- THE BUILT-GROUND GATE (TERRAIN_FLATTEN_UNDER_BUILT) -------------
@@ -943,18 +847,11 @@
     // number. So the cell is the constant and the segments follow it, rounded
     // to a multiple of 8 and capped so a runaway region can never ask for a
     // million-triangle plate.
-    //   stage 3: max(12156, 11365)/38 = 320  (byte-identical — the cap and the
-    //            rounding both land exactly on the authored value)
-    //   stage 4: max(13896, 12645)/38 = 366  ->  368  (cells 37.8 x 34.4 m,
-    //            369^2 = 136k verts, 271k triangles)
-    //   stage 5: max(17728, 15782)/38 = 467  ->  472  (cells 37.6 x 33.4 m,
-    //            473^2 = 224k verts, 446k triangles). The CAP has to move with
-    //            it — left at 448 the derivation would CLIP and the cell would
-    //            start creeping back up (39.6 m), which is exactly the silent
-    //            coarsening this comment exists to prevent.
+    //   the plan's sheet: max(18350, 17650)/38 = 483 -> 488, capped at 480
+    //   (cells 38.2 x 36.8 m, 481^2 = 231k verts).
     const PLATE_CELL = 38;
     const PLATE_SEG = COAST
-      ? Math.max(320, Math.min(SCALE_V5() ? 480 : 448, Math.ceil(Math.max(W, D) / PLATE_CELL / 8) * 8))
+      ? Math.max(320, Math.min(480, Math.ceil(Math.max(W, D) / PLATE_CELL / 8) * 8))
       : 72;
     const BUILT_FLAT = Math.hypot(W / PLATE_SEG, D / PLATE_SEG) + 6;
     const BUILT_FADE = 110;    // then the country rises back over ~one block
@@ -1158,7 +1055,6 @@
     // highwayNetReliefGate already zeroes) from filling the grid for nothing.
     function alreadyFlat(x, z) {
       if (builtGate(x, z) <= 0) return true;                       // dgLive is false here
-      if (frontierDistance(x, z) <= 10) return true;
       if (CBZ.highwayNetReliefGate && CBZ.highwayNetReliefGate(x, z) <= 0) return true;
       return false;
     }
@@ -1246,7 +1142,7 @@
             valleys), and toward the sea over a coast ramp that varies from a
             140 m bluff to a 520 m lowland.
          3. HOW FAR TO THE NEAREST BUILT THING. Every road, highway, causeway,
-            the frontier loop, every lot, pad, town, metro and compound is
+            every lot, pad, town, metro and compound is
             rasterised into three distance fields (48 m cells, one chamfer
             pass each). The land is a PLAIN round what people built — full
             relief only ~900 m from a place and ~380 m from a road — so towns
@@ -1267,7 +1163,7 @@
     const lfNX = Math.max(2, Math.ceil(W / LF) + 1), lfNZ = Math.max(2, Math.ceil(D / LF) + 1);
     const LF_BIG = 1e7;
     const lfT0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
-    const fRoad = new Float32Array(lfNX * lfNZ).fill(LF_BIG);    // roads, highways, decks, frontier loop
+    const fRoad = new Float32Array(lfNX * lfNZ).fill(LF_BIG);    // roads, highways, decks
     const fPlace = new Float32Array(lfNX * lfNZ).fill(LF_BIG);   // anything built or graded
     const fTown = new Float32Array(lfNX * lfNZ).fill(LF_BIG);    // where people live (lots, towns, metros)
     function lfRect(F, x0, x1, z0, z1) {
@@ -1354,7 +1250,7 @@
     const isMercyTerrain = function (b) { return /mount-mercy/i.test(b.name || ""); };
     const TOWN_SURF = /mini-city|country-settlement|town-street|mainland-city/i;
     (function seedLandform() {
-      // ---- roads: every record, every deck, every highway corridor, the frontier loop
+      // ---- roads: every record, every deck, every highway corridor
       const rds = Array.isArray(city.roads) ? city.roads : [];
       for (let i = 0; i < rds.length; i++) {
         const r = rds[i];
@@ -1429,21 +1325,39 @@
     CBZ.countryFreedomAt = freedomAt;
     CBZ.countryTownDistAt = function (x, z) { return lfAt(fTown, x, z); };
     CBZ.countryRoadDistAt = function (x, z) { return lfAt(fRoad, x, z); };
-    // THE UPLAND FIELD, shared by the relief and the land use (fields keep to
-    // the plains, woods climb the uplands). Memoised on the exact point: the
-    // plate loop asks the land use and then the relief at the same vertex.
-    const _mac = { x: NaN, z: NaN, wx: 0, wz: 0, upl: 0 };
+    /* THE COUNTRY'S SHAPE IS THE PLAN'S (world/worldplan.js), read once per
+       point and shared by the relief and the land use. It used to be a 5.6 km
+       noise field that put an upland wherever the hash fell: hills with no
+       range behind them, fields on any flat patch near a town. The plan says
+       where the Mercy Range runs and where its passes are, which ground is
+       valley floor, which is the dry basin and which is the wet wooded
+       north-west; noise only keeps a planned edge from being a ruled curve
+       (the query is domain-warped 350 m) and gives the ground its small
+       scale. Memoised on the exact point: the plate loop asks the land use
+       and then the relief at the same vertex.
+         upl   0..1 upland: the foothill apron and the wooded hills
+         rng   metres the range itself lifts the land here (0 off it)
+         alp   0..1 how far up the mountain proper (rock, then snow)
+         farm / des / wood   0..1 valley floor, basin, forest country        */
+    const _mac = { x: NaN, z: NaN, wx: 0, wz: 0, upl: 0, rng: 0, alp: 0, farm: 0, des: 0, wood: 0 };
     function macroAt(x, z) {
       if (x === _mac.x && z === _mac.z) return _mac;
-      const wx = x + (noise2(x + 211, z - 977, 2400, 8950) - 0.5) * 1100;
-      const wz = z + (noise2(x - 613, z + 419, 2400, 8951) - 0.5) * 1100;
-      const m = noise2(wx, wz, 5600, 8952) * 0.6 + noise2(wx, wz, 2300, 8953) * 0.4;
-      _mac.x = x; _mac.z = z; _mac.wx = wx; _mac.wz = wz; _mac.upl = smooth01((m - 0.45) / 0.24);
+      const wx = x + (noise2(x + 211, z - 977, 2400, 8950) - 0.5) * 700;
+      const wz = z + (noise2(x - 613, z + 419, 2400, 8951) - 0.5) * 700;
+      const R = PLAN.reliefAt(wx, wz);
+      const rng = R.h, alp = R.alp, foot = R.foot;
+      const farm = PLAN.coverAt(wx, wz, "farmland"), des = PLAN.coverAt(wx, wz, "desert"), wood = PLAN.coverAt(wx, wz, "forest");
+      const n = noise2(wx, wz, 2300, 8953);
+      let upl = foot > wood * (0.30 + 0.55 * n) ? foot : wood * (0.30 + 0.55 * n);
+      upl *= (1 - 0.85 * farm) * (1 - 0.8 * des);
+      _mac.x = x; _mac.z = z; _mac.wx = wx; _mac.wz = wz;
+      _mac.upl = smooth01(upl); _mac.rng = rng; _mac.alp = alp; _mac.farm = farm; _mac.des = des; _mac.wood = wood;
       return _mac;
     }
     function uplandAt(x, z) { return macroAt(x, z).upl; }
-    // the raw landform, ungated: {h, upl, hills}
-    const _lf = { h: 0, upl: 0, hills: 0 };
+    CBZ.countryMacroAt = macroAt;
+    // the raw landform, ungated: {h, rng, upl, hills}
+    const _lf = { h: 0, rng: 0, upl: 0, hills: 0 };
     function landformAt(x, z) {
       const n = (CFG.CONTINENT_RELIEF_EROSION === false)
         ? countryFbm(x + 1400, z - 900)
@@ -1451,7 +1365,10 @@
       let hills = n + 0.5; hills = hills < 0 ? 0 : (hills > 1 ? 1 : hills);
       const M = macroAt(x, z), wx = M.wx, wz = M.wz, upl = M.upl;
       const rg = 1 - Math.abs(2 * noise2(wx + 700, wz - 300, 760, 8954) - 1);
-      let h = 2 + 12 * hills + upl * (16 + 40 * rg * rg + 16 * hills);
+      // valley floors and the basin lie flatter than open country (the dunes
+      // are the desert's own floor, city/biome_desert.js, not this field)
+      const roll = 1 - 0.6 * M.farm - 0.45 * M.des;
+      let h = (2 + 12 * hills) * (roll < 0.3 ? 0.3 : roll) + upl * (16 + 40 * rg * rg + 16 * hills);
       if (GMB) {
         const dOut = outsideRectDist(x, z, GMB.minX, GMB.maxX, GMB.minZ, GMB.maxZ);
         if (dOut < FOOT_REACH) {
@@ -1459,6 +1376,9 @@
           h += FOOT_LIFT * f * (0.7 + 0.3 * hills);
         }
       }
+      // the range: the plan's lift, broken into ridges and spurs
+      const rg2 = 1 - Math.abs(2 * noise2(wx - 300, wz + 900, 520, 8957) - 1);
+      _lf.rng = M.rng > 0 ? M.rng * (0.60 + 0.30 * rg2 * rg2 + 0.18 * hills) : 0;
       _lf.h = h; _lf.upl = upl; _lf.hills = hills;
       return _lf;
     }
@@ -1482,10 +1402,9 @@
       const valley = 0.28 + 0.72 * smooth01((inland - 60) / 1200);
       let h = L.h * valley * coastFade * free;
       h = RELIEF_CAP * Math.tanh(h / RELIEF_CAP);
-      // Frontier highways are cut into the landscape with broad shoulders;
-      // their visible planes never hover over a noisy heightfield.
-      const fd = frontierDistance(x, z);
-      h *= smooth01((fd - 10) / 36);
+      // the range stands above that ceiling (the ceiling is for hill country).
+      // A road through a pass still lies flat: `free` is 0 beside it.
+      if (L.rng > 0) h += L.rng * (0.45 + 0.55 * valley) * coastFade * free;
       // Same cut for the highway NETWORK (city/highwaynet.js): relief flattens
       // under every route corridor so the flat decks never hover over hills.
       if (CBZ.highwayNetReliefGate) h *= CBZ.highwayNetReliefGate(x, z);
@@ -1568,14 +1487,24 @@
     // Parcels are the SAME 190 m grid the hedgerows are planted on, axis-
     // aligned with the roads, some pairs merged into 380 m fields.
     const FIELD_GRID = 190, FIELD_OX = minX + 37, FIELD_OZ = minZ + 61;
+    // ...AND THE VALLEYS ARE FARM COUNTRY WHOLE (the plan's `farmland`:
+    // Mercy Valley, the Coyle Plain): fields from the range's foot to the
+    // coast whether or not a town is near, which is what a highway through
+    // farmland runs through. Nothing is farmed in the basin.
     function fieldWeightAt(x, z, upl) {
+      const M = macroAt(x, z);
+      if (M.des >= 0.98) return 0;
       const dT = lfAt(fTown, x, z);
-      if (dT > 3000) return 0;
-      const reach = 1200 + 1100 * noise2(x + 1700, z - 900, 1400, 8840);
-      let w = smooth01((dT - 30) / 80) * (1 - smooth01((dT - reach) / 450));
+      let w = 0;
+      if (dT <= 3000) {
+        const reach = 1200 + 1100 * noise2(x + 1700, z - 900, 1400, 8840);
+        w = smooth01((dT - 30) / 80) * (1 - smooth01((dT - reach) / 450));
+      }
+      const pv = M.farm * smooth01((dT - 30) / 80);
+      if (pv > w) w = pv;
       if (w <= 0) return 0;
-      w *= 1 - smooth01(((upl == null ? uplandAt(x, z) : upl) - 0.30) / 0.40);
-      return w;
+      w *= 1 - smooth01(((upl == null ? M.upl : upl) - 0.30) / 0.40);
+      return w * (1 - M.des);
     }
     // -> farmland weight at (x,z); `out` gets that parcel's crop
     function fieldAt(x, z, out, wIn) {
@@ -1591,9 +1520,12 @@
     }
     // Where woods want to be: the uplands and slopes (+), never the farm
     // ring (-). Shared by the ground tone above and the tree stands below.
+    // The plan's forest country is wooded outright, the basin is bare, and
+    // open country in between carries only scattered stands.
     function woodBias(x, z, fw, upl) {
-      if (upl == null) upl = uplandAt(x, z);
-      return 0.16 * upl - 0.30 * (fw == null ? fieldWeightAt(x, z, upl) : fw);
+      const M = macroAt(x, z);
+      if (upl == null) upl = M.upl;
+      return 0.16 * upl + 0.36 * M.wood - 0.60 * M.des - 0.07 - 0.30 * (fw == null ? fieldWeightAt(x, z, upl) : fw);
     }
     const cField = new THREE.Color();
     const c = new THREE.Color(), c2 = new THREE.Color();
@@ -1650,7 +1582,7 @@
     CBZ._plateSig = null;
     if (CBZ.bakeSig && CBZ.bakeGet) {
       try {
-        PLATE_SIG = CBZ.bakeSig("plate|" + CBZ.bakeHash({ W: W, D: D, SEG: SEG, cx0: cx0, cz0: cz0, COAST: COAST, HARBOR: HARBOR,
+        PLATE_SIG = CBZ.bakeSig("plate|" + PLAN.signature() + "|" + CBZ.bakeHash({ W: W, D: D, SEG: SEG, cx0: cx0, cz0: cz0, COAST: COAST, HARBOR: HARBOR,
           regs: regs, water: waterBodies, blends: CBZ._biomeBlendSpecs || null, asb: authoredSurfaceBounds, gr: gradedRegs.slice(0, gradedN),
           annex: city.annex ? { cx: city.annex.cx, cz: city.annex.cz, r: city.annex.radius } : null, cfg: CFG }) + "|" + CBZ.bakeHashArr(dgHas) + CBZ.bakeHashArr(dgBox));
         CBZ._plateSig = PLATE_SIG;            // the backdrop's inputs start here
@@ -2354,7 +2286,7 @@
        edge, with four lookout pads. It is why the continent was a rectangle: the
        coast was capped so the road stayed dry, so the sea could never come in
        more than 650 m anywhere. A country does not have a square road round its
-       rim. The road is gone and the coast is free (coastInset above). */
+       rim. The road is gone and the coast is the world plan's (coastLand above). */
     const WALK_IN = COAST ? 44 : -4;
     const frontier = null;
 
@@ -2371,7 +2303,7 @@
     const legacyArea = legacyW * legacyD, playableArea = playableW * playableD;
     city.worldScale = {
       version: "continent-expansion-v2", enabled: CFG.CONTINENT_EXPANSION_V2 !== false,
-      countryMargin: PAD, legacyMargin: LEGACY_PAD,
+      countryMargin: 0, legacyMargin: 0,
       authoredBounds: Object.assign({}, authoredBounds), terrainBounds: { minX, maxX, minZ, maxZ }, playableBounds,
       authoredWidth: legacyW, authoredDepth: legacyD, playableWidth: playableW, playableDepth: playableD,
       authoredArea: legacyArea, playableArea, addedArea: Math.max(0, playableArea - legacyArea),
