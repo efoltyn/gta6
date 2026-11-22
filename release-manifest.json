@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "c4b71e0c8f4ee37e4baf56041665fcc8c265b771",
-  "createdAt": "2026-11-22T04:43:34.467Z",
+  "sourceCommit": "1ffe76222fc9b8596de842d7db300c5b0a1e21ef",
+  "createdAt": "2026-11-22T04:51:56.607Z",
   "fileCount": 1631,
-  "totalBytes": 88716030,
+  "totalBytes": 88718801,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -2418,8 +2418,8 @@
     },
     {
       "file": "src/entities/character.js",
-      "bytes": 232032,
-      "sha256": "c98f5e16aa2ff8887424fb17a8b63be38eed8e01b9ee3aae42e6a0d66f7908db"
+      "bytes": 233564,
+      "sha256": "d98843afa9349b41ad052d8eb36a15c69d3dd668624cb989b9cbbe13ed2d71c6"
     },
     {
       "file": "src/entities/coins.js",
@@ -3528,13 +3528,13 @@
     },
     {
       "file": "src/systems/interact.js",
-      "bytes": 20001,
-      "sha256": "078b86487ee2c8f84ae3b7d5f35dd30e69cde9395b91720d2e968eabd7ba6b1a"
+      "bytes": 19973,
+      "sha256": "7fda38b7188a3d2352bab3d06aa4bc95f6e063bcda3f1f48494e3f1f5fc2aee1"
     },
     {
       "file": "src/systems/interactions.js",
-      "bytes": 39745,
-      "sha256": "2c33b59d717a9c2512851eed9be9534cfdb019fad3dfa7f0dea3afea538c6ddb"
+      "bytes": 39839,
+      "sha256": "0294a1a91b518d221a2ea7cce07fa4fff1779ed256c9d0a03d60a1384efd98bd"
     },
     {
       "file": "src/systems/intimidate.js",
@@ -4618,8 +4618,8 @@
     },
     {
       "file": "src/weapons/appearances/ak47.js",
-      "bytes": 4128,
-      "sha256": "9c537d0214f71e2c3141c54ec84b592aebd6d2b2641271a3a2cd42d243645388"
+      "bytes": 4132,
+      "sha256": "2c9b62b76b28dbe758210af9125d6669951212d30e5134aacbea541841c0c125"
     },
     {
       "file": "src/weapons/appearances/bazooka.js",
@@ -4643,8 +4643,8 @@
     },
     {
       "file": "src/weapons/appearances/glauncher.js",
-      "bytes": 6469,
-      "sha256": "42efb13919fa6ecadbbaac018393aca1fc96e64a12e73ab86701b865bfc4f3ec"
+      "bytes": 6475,
+      "sha256": "23d633c2a677e6e8430a2f8beb2de7c9478754cb70ab8257e0bb7b5b499d6f04"
     },
     {
       "file": "src/weapons/appearances/grenade.js",
@@ -4658,8 +4658,8 @@
     },
     {
       "file": "src/weapons/appearances/revolver.js",
-      "bytes": 6035,
-      "sha256": "e02f1e14d6855b970ea746263b918e04cfa901089d3213136a3fa9bb7c08d775"
+      "bytes": 6028,
+      "sha256": "175510decf1d80821af116541c7942b2c6c702c6de887a7f8dc16f4c8a416385"
     },
     {
       "file": "src/weapons/appearances/rifles.js",
@@ -4673,8 +4673,8 @@
     },
     {
       "file": "src/weapons/appearances/shotgun.js",
-      "bytes": 3377,
-      "sha256": "2757c6e5454d8a62456e7552cbff1eaa44d0a245a12e3d07fbb6c5c57fb91c20"
+      "bytes": 4238,
+      "sha256": "cd8bc47b5daf2bbf915a74058a8624c120ea543640752985199d19ce395366fc"
     },
     {
       "file": "src/weapons/appearances/sidearm.js",
@@ -4693,8 +4693,8 @@
     },
     {
       "file": "src/weapons/appearances/taser.js",
-      "bytes": 3186,
-      "sha256": "8943adf78ee87b1c480cdbce949114300b6cd4f6ed87c38e4361109d7d8ff141"
+      "bytes": 3495,
+      "sha256": "9b036a7e005b592229cc730c7b585b4c026d3efc59da7eab3afbe8020584621f"
     },
     {
       "file": "src/weapons/appearances/uzi.js",
@@ -4729,7 +4729,7 @@
     {
       "file": "src/weapons/weapon-data.js",
       "bytes": 15644,
-      "sha256": "f669e522bc714b5c0856521b4da15ef131bb91caba74217a29b4ecc200ec87c6"
+      "sha256": "d08633204b13ac290d4473ce34ac17275668a6f2acb9a3de045e7b3de9a828ae"
     },
     {
       "file": "src/weapons/weapon-scale.js",
@@ -8079,37 +8079,37 @@
     {
       "file": "the-isles.html",
       "bytes": 66440,
-      "sha256": "e9e95fdda368a3eb46957ad64c8b30c2af91f23f0231ad7b9147c75db27e5220"
+      "sha256": "6b828409c329f1d56e3b3f2ab7ef1cfddeb57896def915a7b6b9aa60ecfcce60"
     },
     {
       "file": "shark-sim.html",
       "bytes": 66381,
-      "sha256": "b27671947be4bbddc4fad2fb768243a02eac7ddcef02700789f69c6655d95765"
+      "sha256": "bd2330eade16e33e76e0be1a3d7d7547dece73229636706f1bdc1fcc423af272"
     },
     {
       "file": "disaster-survival.html",
       "bytes": 66424,
-      "sha256": "b5de49b806cbc41e56caed50c01f050e71a863724a88304778396f98453d4206"
+      "sha256": "a1e20c42e9ac13b9e44f488c6349d4c0d5c5553e26b33cef4fa46a26a471f8bd"
     },
     {
       "file": "prison-escape.html",
       "bytes": 66393,
-      "sha256": "5013fa5b8ce4be84303eb569c50f7331c851f86d0ac03829f29a766d6c771230"
+      "sha256": "0dbeea3da01398ced33f359edc303715d1f538b307a1453af2b1159ce4cd83f4"
     },
     {
       "file": "gang-city.html",
       "bytes": 66348,
-      "sha256": "956e212403ac00133e7c7c7f77a106ff5cdfb1fda317b045699c62bf99e9a2cb"
+      "sha256": "48dff48e015f44db3460828d4eb6ae1544f9708beb47e33f584d6583668eb9eb"
     },
     {
       "file": "stick-city.html",
       "bytes": 66430,
-      "sha256": "3201fcfee58bcb64511435a4a7a42f2053ac69932cbe7c8c2bae644131370828"
+      "sha256": "c55cad97c0783bfd6076a27a1ca7c4b5aae42348c13d6acd23ba44ee289b0fc9"
     },
     {
       "file": "gun-game.html",
       "bytes": 66370,
-      "sha256": "8444163ef7d762a0400f3b265aa300d61dbdff86155f4adbec626eb6c8b55fe4"
+      "sha256": "93499785d2a62b3eba78859502fcefd730291478f332a07af666d340190846bc"
     },
     {
       "file": "games/battle.html",
