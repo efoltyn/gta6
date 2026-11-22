@@ -376,6 +376,7 @@
     const a = T.a, P = CBZ.player;
     const ap = a.group && a.group.position;
     if (!g || g.mode !== "escape" || g.state !== "playing" || a.dead || (a.ko > 0) || !ap || !P || !P.pos ||
+        a.aiState === "fight" || (a.huntPlayer || 0) > 0 || a.cuffed ||
         Math.hypot(ap.x - P.pos.x, ap.z - P.pos.z) > 4.5) { close(); return; }
     render();
     layoutTouch();
@@ -387,6 +388,8 @@
 
   CBZ.prisonTrade = {
     open: open, close: close, isOpen: isOpen,
+    // the man across the table (entities/ai.js keeps him stood with you)
+    partner: function () { return T.a; },
     // probes: put items on the table by name, then offer/request/accept
     put: function (side, item, n) { const d = side === "mine" ? T.mine : T.theirs; if (n > 0) d[item] = n; else delete d[item]; T.counter = null; render(); },
     offer: offer, request: request, accept: accept,

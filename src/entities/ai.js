@@ -3421,6 +3421,30 @@
     }
     if ((n._steelT || 0) > 0) n._steelT -= dt;
 
+    /* A DEAL IS TWO MEN STOOD TOGETHER (owner 2026-11-22: "when trading with
+       someone they should stand with you like a person doing a drug deal
+       with you, not walk away"). While the trade table is open on him
+       (systems/prisontrade.js partner) he is yours: he closes to arm's
+       length, squares to you, and every few seconds checks over his
+       shoulder. Anything realer still takes him (the gun, the law and the
+       cuffs above; a fight, a hunt, a run, a report below), and the table
+       folds itself when one does. */
+    if (CBZ.prisonTrade && CBZ.prisonTrade.partner && CBZ.prisonTrade.partner() === n &&
+        !((n.huntPlayer || 0) > 0) && n.aiState !== "fight" && n.aiState !== "flee" && n.aiState !== "snitch") {
+      const pp = CBZ.player.pos, gp = n.group.position;
+      const d = Math.hypot(pp.x - gp.x, pp.z - gp.z);
+      n.aiTimer = Math.max(n.aiTimer || 0, 1);              // no wander re-think mid-deal
+      n._dealLookT = (n._dealLookT || 0) - dt;
+      if (n._dealLookT <= 0) { n._dealLookT = 3 + rng() * 3; if (CBZ.npcAvert) CBZ.npcAvert(n, 0.9); }
+      else if (CBZ.npcStare && !(n.stareT > 0)) CBZ.npcStare(n, 0.6);
+      if (n._propSeat) return 0;                             // sat down: he deals from his seat
+      if (d > 1.7) { n.target.set(pp.x, 0, pp.z); return n.baseSpeed * 0.8; }
+      const want = Math.atan2(pp.x - gp.x, pp.z - gp.z);
+      if (CBZ.lerpAngle) n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, want, 1 - Math.pow(0.0006, dt));
+      n.target.set(gp.x, 0, gp.z);
+      return 0;
+    }
+
     // GANG RETALIATION: hunting the player down (set by provokeGang).
     //
     // THIS IS THE OWNER'S OWN EXAMPLE, AND IT WAS THE WORST ONE. A man who had
