@@ -38,6 +38,10 @@
     x: 0, y: 0, z: 0,        // desired camera position
     lx: 0, ly: 0, lz: 0,     // desired look-at
     snap: false,             // true for one frame after a hard CUT
+    // a RIGID shot (a lens bolted inside a moving car): camera.js re-reads it
+    // at render time and sets it outright, no dolly damping, so the lens rides
+    // with the cabin instead of trailing a car length behind it
+    rigid: null,
   };
   CBZ.cineActive = function () { return cineCam.active; };
 
@@ -56,6 +60,7 @@
     if (!st) return endScene(false);
     CINE.t = 0;
     if (st.cut) cineCam.snap = true;
+    cineCam.rigid = st.rigid && typeof st.cam === "function" ? function () { return st.cam(CINE.ctx); } : null;
     if (st.cam) camTo(st.cam, CINE.ctx);
     if (st.hideRig != null && CBZ.playerChar) CBZ.playerChar.group.visible = !st.hideRig;
     if (st.enter) { try { st.enter(CINE.ctx); } catch (e) {} }
@@ -115,7 +120,7 @@
   function endScene(aborted) {
     if (!CINE.playing) return;
     CINE.playing = null; CINE.ctx = null;
-    cineCam.active = false;
+    cineCam.active = false; cineCam.rigid = null;
     // only restore the holster we actually took (a noHolster scene never
     // touched it, so writing prevHolster back would clobber a real change the
     // player made mid-scene).

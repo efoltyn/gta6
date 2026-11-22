@@ -1278,6 +1278,16 @@
     if (cc0 && cc0.active) {
       airCineOn = false;
       introT = 0; prev.copy(player.pos); shakeAmt = 0;
+      // a RIGID shot rides inside a moving car: read at render time, set outright
+      const rs = cc0.rigid ? cc0.rigid() : null;
+      if (rs && rs.pos && rs.look) {
+        cc0.snap = false;
+        camera.position.set(rs.pos.x, rs.pos.y, rs.pos.z);
+        cineV.x.v = cineV.y.v = cineV.z.v = 0;
+        _cineLook.set(rs.look.x, rs.look.y, rs.look.z);
+        camera.lookAt(_cineLook);
+        return;
+      }
       if (cc0.snap) {
         cc0.snap = false;
         camera.position.set(cc0.x, cc0.y, cc0.z);

@@ -828,8 +828,7 @@
       if (JA && JA.weak && JA.weakOut) {
         gateX = JA.weak.x + JA.weakOut.x * 6; gateZ = JA.weak.z + JA.weakOut.z * 6;
         P.pos.set(gateX, 0, gateZ);
-        placedAtGate = true;
-        if (CBZ.cityAddStars) { try { CBZ.cityAddStars(3, "jailbreak"); } catch (e) {} }
+        placedAtGate = true;                 // the stars come in the re-assert below, once
       } else if (!airportSpawn && jailbreakEntry && CBZ.cityPoliceStation) {
         const st = CBZ.cityPoliceStation();
         const d = st && st.lot && st.lot.building && st.lot.building.door;
@@ -839,7 +838,6 @@
           gateX = st.x + (nx / nl) * 2.4; gateZ = st.z + (nz / nl) * 2.4;
           P.pos.set(gateX, 0, gateZ);
           placedAtGate = true;
-          if (CBZ.cityAddStars) { try { CBZ.cityAddStars(3, "jailbreak"); } catch (e) {} }
         }
       }
       if (!placedAtGate) {
@@ -887,9 +885,12 @@
         const HT = (CBZ.CITY && CBZ.CITY.starHeat) || [0, 300, 650, 1100, 3200, 12000];
         game.heat = Math.max(game.heat || 0, (HT[3] || 1100) + 5);
         if ((game.wanted | 0) < 3) game.wanted = 3;
-        game.cityCrimeLabel = "Escaped Convict";
         if (originResult) originResult.introActive = false;
-        if (CBZ.cityAddStars) { try { CBZ.cityAddStars(3, "jailbreak"); } catch (e) {} }
+        // the THREE-star floor, raised through the one star door so the
+        // response is dispatched (cityAddStars ADDS: the old "+3" on top of
+        // the floor above made every breakout a 4-5 star manhunt)
+        if (CBZ.cityAddStars) { try { CBZ.cityAddStars(0, "Escaped Convict"); } catch (e) {} }
+        game.cityCrimeLabel = "Escaped Convict";
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       }
       // Returning characters restore lastPos; a first character gets one-time

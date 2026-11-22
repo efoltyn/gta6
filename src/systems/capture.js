@@ -142,7 +142,20 @@
     let p = null;
     try { p = c.playerSpawn(); } catch (e) { p = null; }
     if (!p || !isFinite(+p.x) || !isFinite(+p.z)) return false;
-    player.pos.set(+p.x, isFinite(+p.y) ? +p.y : 0, +p.z);
+    let px = +p.x, pz = +p.z;
+    // THE SPAWN STANDS 1 m BEHIND THE DOOR PLANE, which is inside the bars
+    // but not clear of them by a body's width: sealPlayerCell() refused the
+    // door on every frame of the intake and a new arrival stood in an open
+    // cell. Landed a step further in, clear of the door, so it can shut.
+    const cell = playerCell();
+    if (cell && !inCellBox(cell, px, pz, BODY_R)) {
+      const r = +cell.half - BODY_R - 0.08;
+      if (r > 0) {
+        px = Math.max(+cell.x - r, Math.min(+cell.x + r, px));
+        pz = Math.max(+cell.z - r, Math.min(+cell.z + r, pz));
+      }
+    }
+    player.pos.set(px, isFinite(+p.y) ? +p.y : 0, pz);
     if (CBZ.bodyTeleported) CBZ.bodyTeleported(player);
     player.vy = 0;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(player.pos);
@@ -2061,12 +2074,6 @@
   CBZ.onUpdate(31, function (dt) {
     if (CBZ.game.mode !== "escape") return;   // prison capture/arrest only in escape (survival + city own theirs)
     if (fireCD > 0) fireCD -= dt;
-    // A served sentence RELEASES you mid-tick (mode -> city, world rebuilt).
-    // Everything below this line is escape-mode plumbing and must not run
-    // against a city that has just been built underneath it.
-    sentenceTick(dt);
-    if (CBZ.game.mode !== "escape") return;
-
     // new run? clear every leftover before anything else ticks
     if (pollStrikeRun && pollStrikeRun()) {
       endEscort(); releasePlayerCell(); muster(false);
@@ -2079,7 +2086,15 @@
       lastHurtT = -1e9; spdPX = null; pSpd = 0;
     }
     // ...and if you were SENT here, you wake in the cell with the door shut.
+    // (BEFORE the sentence clock: its first frame calls the yard, and a new
+    // arrival is counted in his locked cell first, then let out to it)
     intakeWatch();
+    // A served sentence RELEASES you mid-tick (mode -> city, world rebuilt).
+    // Everything below this line is escape-mode plumbing and must not run
+    // against a city that has just been built underneath it.
+    sentenceTick(dt);
+    if (CBZ.game.mode !== "escape") return;
+
     trackSpeed(dt);
     if (lawGraceT > 0) lawGraceT -= dt;
     for (const gd of CBZ.guards) if ((gd.capCD || 0) > 0 && !gd._escort) gd.capCD -= dt;
