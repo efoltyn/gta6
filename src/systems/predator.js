@@ -1069,8 +1069,17 @@
     if (v === P || v.isPlayer === true) return true;
     return !!(P && P.pos && v.pos === P.pos);
   }
+  // the body a bite on the player marks: the city's player actor, capture.js's
+  // wound actor, or (the island page loads neither) the player's own rig
+  const _pwa = {
+    isPlayer: true,
+    get char() { return CBZ.playerChar || null; },
+    get group() { return CBZ.playerChar ? CBZ.playerChar.group : null; },
+    get pos() { return CBZ.player ? CBZ.player.pos : null; },
+    get dead() { return !!(CBZ.player && CBZ.player.dead); },
+  };
   function playerRagdollTarget() {
-    return (CBZ.city && CBZ.city.playerActor) || null;
+    return (CBZ.city && CBZ.city.playerActor) || CBZ.playerWoundActor || (CBZ.playerChar ? _pwa : null);
   }
 
   function predatorSeized(victim) {

@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 424
+     Natural Disaster Survival, standing alone: index.html minus the 420
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -1310,7 +1310,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
-<script src="src/city/wildlife_rig.js?v=sea1122a"></script>
+<script src="src/city/wildlife_rig.js?v=sea1122c"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
 <script src="src/city/wildlife/beast_kit.js?v=r187a"></script>
 <!-- THE DOG FAMILY (units/kit/canid.js): every dog and wild canid in every
@@ -1344,6 +1344,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (predatorKit, marineGape, marineHurt) is asked for at CALL time, so its
      position here is about readability, not load order. -->
 <script src="src/systems/bite_angles.js?v=biteangles1"></script>
+<script src="src/city/creature_combat.js?v=sea1122b"></script>
 <!-- IRONJAW ARENA. arena_venue.js is the BUILDING (raked bowl, concourse,
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
@@ -1704,7 +1705,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/fitout_house.js?v=house1122"></script>
 <script src="src/city/fitout_work.js?v=shops1122d"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
-<script src="src/city/swim.js?v=sea1122b"></script>
+<script src="src/city/swim.js?v=sea1122d"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage
@@ -1883,6 +1884,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the attackers' teeth (systems/dentition.js): every family's dental arch
      from real anatomy, or the attacker's own built body; wounds.js strikes
      each tooth against the bitten body. Before wounds.js. -->
+<script src="src/systems/dentition.js?v=bite1122b"></script>
+<script src="src/systems/wounds.js?v=bite1122c"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused
@@ -1896,6 +1899,7 @@ document.body.appendChild(b);}}catch(e){}})();
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
      same brain. After wounds.js (routes through CBZ.bodyBite). -->
+<script src="src/systems/predator.js?v=sea1122e"></script>
 <!-- The LAND sibling of the swim rig. Land animals had no jaw articulation and
      no spine bend at all — a bear grabbing you moved nothing. Discovery is
      geometric (no species table), so all 45 species animate from one change.
@@ -1916,7 +1920,7 @@ document.body.appendChild(b);}}catch(e){}})();
      full) and the caller falls back to CBZ.wildlifeDeathTumble. -->
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=sea1122b"></script>
+<script src="src/city/wildlife_shark.js?v=sea1122c"></script>
 <!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
      (defineSpecies is last-write-wins) so the markings that actually identify
      the animal exist: the white post-ocular eye patch, the grey saddle, the
