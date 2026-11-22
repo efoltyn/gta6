@@ -19,10 +19,10 @@
 <link rel="stylesheet" href="css/survival_hud.css?v=pace1015">
 <link rel="stylesheet" href="css/screens.css?v=noobj1022">
 <link rel="stylesheet" href="css/shark_title.css?v=noobj1022">
-<link rel="stylesheet" href="css/mobile.css?v=noobj1022">
+<link rel="stylesheet" href="css/mobile.css?v=nopanel1122">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
-<link rel="stylesheet" href="css/city.css?v=noobj1022">
-<link rel="stylesheet" href="css/campaign.css?v=pres1028">
+<link rel="stylesheet" href="css/city.css?v=nopanel1122">
+<link rel="stylesheet" href="css/campaign.css?v=nopanel1122">
 <link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
 <link rel="stylesheet" href="css/title_hub.css?v=rail1031">
 </head>
@@ -402,18 +402,16 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/vendor/three.r187.js?v=fire1102"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
 <script src="src/core/instcull.js?v=ph1122"></script>
-<!-- THE WORLD PLAN: Gang City's geography stated once (coast, range, basin,
-     valleys, rivers, where every place stands, the highway routes). Must
-     load before terrain + every biome/island file: they take their
-     positions from it (CBZ.worldPlan, CBZ.worldOff, CBZ.worldFoot). -->
-<script src="src/world/worldplan.js?v=plan1122"></script>
 <!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
      the terrain builder. BOTH must load before city/world.js runs, since
      buildCity() calls CBZ.buildTerrain() and routes groundHeightAt →
      CBZ.terrainHeight. terrain.js depends on BufferGeometryUtils (above). -->
 <script src="src/vendor/noise.js"></script>
-<!-- world layout dial: per-biome anchor offsets (map-enlargement stage 1;
-     all-zero today). Must load before terrain + every biome/island file. -->
+<!-- THE WORLD PLAN: Gang City's geography stated once (coast, range, basin,
+     valleys, rivers, where every place stands, the highway routes). Must
+     load before terrain + every biome/island file: they take their
+     positions from it (CBZ.worldPlan, CBZ.worldOff, CBZ.worldFoot). -->
+<script src="src/world/worldplan.js?v=plan1122"></script>
 <script src="src/world/rockscliffs.js?v=rock2"></script>
 <script src="src/world/terrain.js?v=nodash1"></script>
 <!-- terrain overhaul: overrides terrainHeight/buildTerrain with a SOLID
@@ -454,7 +452,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the far night lights (GTA "LOD lights"): one sprite per real lamp, lit window, car, beacon and airfield light; three draws, to the horizon -->
 <script src="src/core/lodlights.js?v=r187a"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=ph1122b"></script>
+<script src="src/core/citystream.js?v=ph1122b+house1122r2"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -1103,8 +1101,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_plan.js?v=isleopen1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=door1122"></script>
-<script src="src/world/island_dressing.js?v=door1122"></script>
+<script src="src/world/disaster_arena.js?v=door1122+house1122"></script>
+<script src="src/world/island_dressing.js?v=door1122+house1122r2"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
 <script src="src/world/island_venue.js?v=misleopstutte"></script>
 <script src="src/world/island_night.js?v=lampglow1022"></script>
@@ -1241,7 +1239,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/world.js?v=plan1122"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
 <script src="src/city/flags.js?v=r187a"></script>
-<script src="src/city/interior_programs.js?v=world1122b"></script>
+<script src="src/city/interior_programs.js?v=world1122b+house1122r2"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1256,8 +1254,8 @@ document.body.appendChild(b);}}catch(e){}})();
      the-hole rects, the facade scan + cut, the no-shared-plane pass and the
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
-<script src="src/city/facade_openings.js?v=r187a"></script>
-<script src="src/city/buildings.js?v=shops1122d"></script>
+<script src="src/city/facade_openings.js?v=r187a+house1122"></script>
+<script src="src/city/buildings.js?v=shops1122d+house1122r2"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1310,7 +1308,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE HOUSE LOT: a detached house standing on its land (front yard, side yards, the
      garage wing on the driveway, walk, hedge / fence, back fence, mailbox). towngen.js and
      buildings.js call it at build time. -->
-<script src="src/city/house_yard.js?v=house1020b"></script>
+<script src="src/city/house_yard.js?v=house1020b+house1122r6"></script>
 <script src="src/city/house_plan.js?v=house1122r5"></script>
 <script src="src/city/interiorlight.js?v=r187a"></script>
 <script src="src/city/citynav.js?v=people1022"></script>
@@ -1398,7 +1396,7 @@ document.body.appendChild(b);}}catch(e){}})();
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
 <script src="src/city/settlements.js?v=pres0929b"></script>
-<script src="src/city/towngen.js?v=house1020b"></script>
+<script src="src/city/towngen.js?v=house1020b+house1122r2"></script>
 <!-- THE ONE BET SLIP (city/betslip.js): every wager in the city is written on
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
@@ -1541,7 +1539,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/factions.js?v=verbs2b"></script>
 <script src="src/city/gangs.js?v=world1122b"></script>
 <script src="src/city/social.js?v=voice1022"></script>
-<script src="src/city/realestate.js?v=world1122b"></script>
+<script src="src/city/realestate.js?v=world1122b+house1122r3"></script>
 <script src="src/city/view.js?v=trunk1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
@@ -1953,8 +1951,8 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=r187a"></script>
-<script src="src/city/fitout_plans.js?v=loose1013"></script>
+<script src="src/city/fitout.js?v=r187a+house1122r3"></script>
+<script src="src/city/fitout_plans.js?v=loose1013+house1122r2"></script>
 <script src="src/city/fitout_house.js?v=house1122"></script>
 <script src="src/city/fitout_work.js?v=shops1122d"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
@@ -2010,7 +2008,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
 <script src="src/city/countryside.js?v=plan1122"></script>
-<script src="src/city/metro_fabric.js?v=promote1020"></script>
+<script src="src/city/metro_fabric.js?v=promote1020+house1122r2"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
@@ -2111,11 +2109,10 @@ document.body.appendChild(b);}}catch(e){}})();
      outfit it is ACTUALLY wearing (CBZ.cityMugshot). The hitman contract
      card on the phone shows the mark instead of describing him. -->
 <script src="src/city/mugshot.js?v=r187a"></script>
-<!-- INVENTORY V2 (CBZ.CONFIG.INVENTORY_V2): the Minecraft-like city inventory —
-     renders the interactive [I] slot grid into charpanel's overlay, owns world
-     item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
-     the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
-     death.js/charpanel.js, all loaded above. -->
+<!-- WHAT YOU DROP AND STASH (CBZ.CONFIG.INVENTORY_V2): world item-drop
+     pickups, chests you set down and fill by hand (verbs on the chest, no
+     grid, no screen), cash bags, and the gun that leaves your hand when you
+     die. Needs economy/worldstate/combat/fpsmode/death.js, loaded above. -->
 <script src="src/city/inventory.js?v=nopanel1122"></script>
 <!-- THE PHONE: a real handset in your hand, one for every Gang City player.
      phone_apps.js is what it does (News is NEWS ONE's store, Calls are real
@@ -2157,7 +2154,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/hitman.js; delivered by the burner, the envelope and the folder).
      sawyou: the man on the pavement looks up your scope, draws a hand across
      his throat and comes up your building for you. Needs elevators.js's
-     CBZ.cityLiftRide / CBZ.cityStairCore (below; read at run time). -->
+     CBZ.cityLiftSend / CBZ.cityStairCore (loaded earlier; read at run time). -->
 <script src="src/city/hitman_m_sawyou.js?v=sawyou1122"></script>
 <!-- duel: a rifle on a far roof that is hunting you back. His glass, his
      muzzle flash, the round arriving before its sound, a dummy position, a
@@ -2698,7 +2695,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (it reads that file's published site record), storage.js (the property
      ledger it writes through) and inventory.js (CBZ.cashBags). Revert with
      ?cfg_CASH_STORE_V1=0. -->
-<script src="src/city/cashstore.js?v=world1122b"></script>
+<script src="src/city/cashstore.js?v=world1122b+house1122"></script>
 <!-- A VAULT YOU BOUGHT, ON LAND YOU BOUGHT (city/propertyvault.js). The SAME
      CBZ.cityVaultRoom the bank uses, built into a property you own, paid for at
      the [G] desk, keyed through city/keys.js and banked through CBZ.cityTill.
@@ -2709,7 +2706,7 @@ document.body.appendChild(b);}}catch(e){}})();
      property panel at your address post, the contractor's demolition, locked
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
-<script src="src/city/plots.js?v=world1122b"></script>
+<script src="src/city/plots.js?v=world1122b+house1122r3"></script>
 <script src="src/city/compoundcrew.js?v=leave1014"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
