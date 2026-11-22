@@ -1276,11 +1276,20 @@
        own mouth, part = what it closed on, when known. A sea animal's line
        is its strike (or the rip of the shake on a beat) and its radius is
        half its mouth; a land animal's stay what they were. */
-    const sid = (h.attacker && h.attacker.species && h.attacker.species.id) || "";
+    const att = h.attacker;
+    const sid = (att && (att.biteId || (att.species && att.species.id))) || "";
     let tx = dx, ty = 0, tz = dz;
     if (h.marine) { tx = h.mst.dx; ty = h.mst.dy; tz = h.mst.dz; }
-    const jawR = h.marine && CBZ.marineJawRadius ? CBZ.marineJawRadius(h.attacker.group)
-      : 0.10 + (actorScale(h.attacker) || 1) * 0.16;
+    else if (ap) {
+      // a land jaw: from the body's axis at the height of the mouth, through the teeth
+      const ex = _jaw.x - ap.x, ey = _jaw.y - (ap.y != null ? ap.y : _jaw.y) - 0.5 * (actorScale(att) || 1), ez = _jaw.z - ap.z;
+      const el = Math.hypot(ex, ey, ez);
+      if (el > 1e-3) { tx = ex / el; ty = ey / el; tz = ez / el; }
+    }
+    const cnRig = att && att._cnA && att._cnA.rig;
+    const jawR = h.marine && CBZ.marineJawRadius ? CBZ.marineJawRadius(att.group)
+      : (cnRig && CBZ.canid && CBZ.canid.jawRadius) ? CBZ.canid.jawRadius(cnRig)
+      : 0.10 + (actorScale(att) || 1) * 0.16;
     if (target && (target.char && target.char.skinSlots) && (CBZ.bodyBite || CBZ.bodyWound)) {
       _woundP.x = _jaw.x; _woundP.y = _jaw.y; _woundP.z = _jaw.z;
       _woundOpts.cal = 1.2 + amount * 0.4;
@@ -1628,6 +1637,26 @@
   const _mv = THREE ? [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] : null;
   const _mm = THREE ? new THREE.Matrix4() : null;
 
+  // within a lunge: the mouth (where the teeth are) inside ~1.2 body lengths
+  // of the quarry's trunk and the head pointed within ~45 degrees of it
+  const _lgM = { x: 0, y: 0, z: 0, open: 0 };
+  function marineCanLunge(hunter, target, isP) {
+    const g = hunter.group, ud = g && g.userData;
+    if (!ud || !ud.marineBody || !ud.aquaticMouth || !CBZ.marineMouthWorld || !CBZ.marineHeadAxes) return false;
+    const tp = actorPos(target);
+    if (!tp || !CBZ.marineMouthWorld(g, "bite", _lgM)) return false;
+    // the trunk: a swimmer's chest rides ~1 m over the feet reference
+    const ty = tp.y + (isP || (target.char && target.char.group) ? 1.0 : 0.2);
+    const dx = tp.x - _lgM.x, dy = ty - _lgM.y, dz = tp.z - _lgM.z;
+    const d = Math.hypot(dx, dy, dz);
+    const lenM = ud.marineBody.len * ((g.scale && g.scale.x) || 1);
+    if (d > Math.max(2.5, Math.min(7, lenM * 1.2))) return false;
+    if (!CBZ.marineHeadAxes(g, _hax)) return false;
+    // pointed at it in plan (within ~60 degrees), or right under or over it:
+    // the lunge itself turns the head up onto the body
+    const dh = Math.hypot(dx, dz), fh = Math.hypot(_hax.fx, _hax.fz) || 1;
+    return dh < 1.5 || (dx * _hax.fx + dz * _hax.fz) / fh > dh * 0.5;
+  }
   function marineProfile(attacker, medium) {
     const g = attacker && attacker.group, ud = g && g.userData;
     if (medium !== "water" || !ud || !ud.marineBody || !ud.aquaticMouth || !CBZ.marineMouthWorld || !_mv) return null;
@@ -1707,6 +1736,18 @@
     a._mSeize.jaw = Math.min(1, 0.5 + 0.5 * smooth(h.t / (S_WIND * 0.7)));
     if (!jawWorld(h, h.jaw) || dt <= 0) return;
     partWorld(h, _pw);
+    // the body turns onto the part as it lunges: heading in plan, pitch up or
+    // down the line to it (the hunt's steering has handed it over)
+    const ldx = _pw.x - h.jaw.x, ldz = _pw.z - h.jaw.z, ldy = _pw.y - h.jaw.y;
+    if (Math.hypot(ldx, ldz) > 0.3) {
+      let dh = Math.atan2(ldz, ldx) - (a.heading || 0);
+      while (dh > Math.PI) dh -= 6.283185307; while (dh < -Math.PI) dh += 6.283185307;
+      a.heading = (a.heading || 0) + clamp(dh, -5 * dt, 5 * dt);
+      g.rotation.y = -a.heading;
+    }
+    M.pitch += (clamp(Math.atan2(ldy, Math.max(0.5, Math.hypot(ldx, ldz))), -0.9, 0.9) - M.pitch) * (1 - Math.exp(-8 * dt));
+    g.rotation.z = h.baseRotZ + M.pitch;
+    a._poseOwn = true;
     const left = Math.max(dt, S_WIND - h.t + dt);
     let sx = (_pw.x - h.jaw.x) * dt / left, sy = (_pw.y - h.jaw.y) * dt / left, sz = (_pw.z - h.jaw.z) * dt / left;
     // a great white's lunge is ~11 m/s; bigger bodies a little faster
@@ -1722,6 +1763,7 @@
   // contact: the jaws close on the part, and the body keeps its momentum
   function marineContact(h) {
     const a = h.attacker, M = h.mst, P = h.marine;
+    M.yaw0 = a.group.rotation ? a.group.rotation.y : M.yaw0;
     M.k = CBZ.marineClampFor ? CBZ.marineClampFor(a, M.D) : 0.6;
     const spd = Math.max(3, Math.min(9, 6 * Math.sqrt(M.lenM / 4.5)));
     M.vx = M.dx * spd; M.vz = M.dz * spd;
@@ -2792,6 +2834,16 @@
 
     const h = huntScratch(hunter);
     if (h.state0 == null) h.state0 = hunter.state || "wander";
+    /* ONE QUARRY PER STALK. The same animal hunting a fish one minute and you
+       the next must not carry the fish's circling, passes and commit into
+       yours: a new quarry starts the stalk from the top. */
+    if (h.quarry !== target) {
+      if (h.quarry && h.st !== "seize") {
+        h.st = "cruise"; h.t = 0; h.encT = 0; h.passes = 0;
+        h.struck = false; h.dropped = false; h.wheel = false; h.recommit = false; h.seizeWait = false;
+      }
+      h.quarry = target;
+    }
     h._fightTarget = target;   // for the creature_combat onHit fallback closure
 
     const hp = actorPos(hunter), tp = actorPos(target);
@@ -2915,8 +2967,21 @@
       ? (h.st !== "seize")
       : (h.st !== "seize" && h.st !== "rush" && !h.wheel && !(h.provokeT > 0));
     if (engaged && isP && vetoOk && h.menace >= MEN_PEAK) {
-      setState(hunter, h, "disengage", opts);
-      h.cool = MEN_COOL_MIN + Math.random() * MEN_COOL_RAND;
+      /* IN THE WATER THE BOUT ENDS IN THE STRIKE. A hungry animal that has
+         circled a swimmer to the top of the gauge does not swim off and start
+         again (measured in the real loop: every stalk ran into this veto
+         before its 25% commit came up, and the shark cycled scent-circle-
+         withdraw for minutes). On its orbit it commits; out beyond it the
+         gauge simply waits at the peak until the stalk brings it back in. */
+      if (sub && (h.st === "circle" || h.st === "bump" || h.st === "scent") && dist <= circleR * 1.15) {
+        enterCommit(hunter, h, opts, stinger);
+      } else if (sub && h.st !== "disengage" && h.t < 15) {
+        // (a swimmer it cannot get near - over the shallows - it does give up)
+        h.menace = MEN_PEAK;
+      } else {
+        setState(hunter, h, "disengage", opts);
+        h.cool = MEN_COOL_MIN + Math.random() * MEN_COOL_RAND;
+      }
     }
 
     // ---- the machine ------------------------------------------------------
@@ -2998,7 +3063,9 @@
         const err = clamp((dist - oR) / Math.max(1, oR), -1, 1);
         const wantH = toT + h.orbitDir * (Math.PI * 0.5) * (1 - err * 0.75);
         move(hunter, wantH, cruiseSpd * 1.15, dt);
-        if (h.t >= h.circleDur) {
+        // the pass is decided ON the orbit, never from out where a rush cannot
+        // arrive: a water hunter blown wide keeps circling in until it is back
+        if (h.t >= h.circleDur && (!sub || dist <= circleR * 1.15)) {
           // an ambusher that has been sitting still is WOUND UP: the longer the
           // wait, the likelier this pass is the real one. Everything else keeps
           // the flat 45/30/25 split exactly.
@@ -3154,8 +3221,30 @@
           if (!(hunter._atkAnim >= 0)) { h.struck = false; endCommit(hunter, h, opts, true); }
           break;
         }
+        /* A SEA ANIMAL'S JAWS DECIDE, NOT ITS CENTRE. Its lunge (the seize's
+           wind, THE BITE IN THE WATER) closes the last metres itself, so the
+           moment the mouth is within a lunge of the quarry and pointed at it,
+           it strikes: no swing animation, no cooldown, nothing that a body
+           moving at a rush can overshoot. */
+        if (sub && !hunter._seizing && CBZ.predatorSeize && marineCanLunge(hunter, target, isP)) {
+          const soL = seizeOptsFor(hunter, h, opts, medium);
+          const handleL = soL ? CBZ.predatorSeize(hunter, target, soL) : null;
+          if (handleL) { h.seizeWait = true; setState(hunter, h, "seize", opts); break; }
+        }
         let spdR = rushSpd;
         if (ssR.stop > 0) spdR = Math.min(spdR, Math.max(0, dist - ssR.stop) / Math.max(dt, 1e-3));
+        /* A CHARGE IS A STRAIGHT LINE. A body that commits off a circling pass
+           is pointed along its orbit, and at full rush speed its turning circle
+           is wider than the orbit it came off: it loops round the swimmer and
+           never arrives (measured in the real loop: every rush ran out 15-22 m
+           off, pointed past). So it swings onto the quarry at a slow, tight turn
+           first and the speed comes on as the head comes round. */
+        if (sub && hunter.heading != null) {
+          let he = toT - hunter.heading;
+          while (he > Math.PI) he -= 2 * Math.PI;
+          while (he < -Math.PI) he += 2 * Math.PI;
+          spdR *= clamp((Math.cos(he) - 0.1) / 0.75, 0.22, 1);
+        }
         move(hunter, toT, spdR, dt);
         // THE DROP-OUT, timed off closing speed rather than a fixed radius.
         if (!h.dropped && dist <= rushSpd * DROP_LEAD + reach) {
