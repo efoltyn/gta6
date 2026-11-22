@@ -653,7 +653,13 @@
     if (curOpts && curOpts.live && !curOpts.live()) return;
     acc += Math.max(0, Math.min(0.1, dt || 0));
     if (acc < TICK - 1e-6) return;
-    f.step(acc); acc = 0;
+    /* THE EVENT IS TIME-COMPRESSED, SO THE WATER IS TOO (opts.rate). A real
+       bore crosses a town in minutes; the director's tsunami is over in one.
+       At one second a second the flood got 70 m inland before the sea was
+       already going back out, and the town never went under. */
+    const rate = Math.max(1, Math.min(4, Math.round((curOpts && curOpts.rate) || 1)));
+    for (let k = 0; k < rate; k++) f.step(acc);
+    acc = 0;
     if (curOpts && curOpts.until && curOpts.until(f)) detach(f);
   });
 

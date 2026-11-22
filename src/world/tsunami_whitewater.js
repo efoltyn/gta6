@@ -368,7 +368,7 @@
       uT: { value: 0 }, uTurb: { value: 0.85 },
       // LINEAR (through ACES + sRGB they land much lighter than they read)
       uMud: { value: new THREE.Color(0.060, 0.050, 0.038) },
-      uSea: { value: new THREE.Color(0.040, 0.075, 0.066) },
+      uSea: { value: new THREE.Color(0.037, 0.087, 0.099) },
       uFoamC: { value: new THREE.Color(0.66, 0.68, 0.68) },
       uFoamM: { value: new THREE.Color(0.40, 0.40, 0.375) },
     });

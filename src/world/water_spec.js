@@ -3518,7 +3518,7 @@
     // heavy load) going green-grey where it thins, with sky on it; the old
     // 0x15120e x 0.62 landed near black through ACES. LINEAR: these land at
     // about sRGB (128,116,96) and (112,116,100) lit from above.
-    U.uDwMud = { value: new THREE.Color(opts.mudColor == null ? 0x1c1812 : opts.mudColor) };
+    U.uDwMud = { value: new THREE.Color(opts.mudColor == null ? 0x17170f : opts.mudColor) };
     // the flood is a river with no banks: everything on it moves one way
     U.uDwFlow = { value: new THREE.Vector2(1, 0) };
     U.uDwFlowSpd = { value: 0 };
@@ -3528,10 +3528,10 @@
     // THE DRY DISC: (cx, cz, r, sink) — the sheet is pulled `sink` m down
     // inside r so a swell crest never stripes the plain. w = 0 is a no-op.
     U.uDwDryDisc = { value: new THREE.Vector4(0, 0, 0, 0) };
-    U.uDwSilt = { value: new THREE.Color(opts.siltColor == null ? 0x181a14 : opts.siltColor) };
+    U.uDwSilt = { value: new THREE.Color(opts.siltColor == null ? 0x10201f : opts.siltColor) };
     // dirty off-white: tan-grey once it carries the silt (0x8e8271 lands
     // near white through ACES + sRGB, which is the clean cap the owner saw)
-    U.uDwFoam = { value: new THREE.Color(opts.dirtyFoamColor == null ? 0x574c3c : opts.dirtyFoamColor) };
+    U.uDwFoam = { value: new THREE.Color(opts.dirtyFoamColor == null ? 0x4b4d47 : opts.dirtyFoamColor) };
     /* THE RUN-UP FIELD (world/tsunami_runup.js): while one is attached, the
        sheet over its domain IS the field's surface (one RGBA8 texel a cell,
        see RUN_GLSL), its swell scaled by the depth under it, its dry cells
@@ -3811,7 +3811,7 @@
       "      dens = clamp(dens, 0.0, 1.0) * clamp(turb * 1.15, 0.0, 1.0) * (1.0 - dwStep);",
       "      float fr = dwFroth(vSeaWorld.xz, fl, spd, fpx);",
       "      float thr = 1.0 - dens * 0.62;",
-      "      float cov = smoothstep(thr - 0.20, thr + 0.24, fr) * (0.30 + 0.45 * dens);",
+      "      float cov = smoothstep(thr - 0.20, thr + 0.24, fr) * (0.16 + 0.36 * dens);",
       "      float fSun = clamp(dot(tN, tL) * 0.55 + 0.45, 0.0, 1.0);",
       "      vec3 fAlb = mix(mudBody * 1.6, uDwFoam * (0.62 + 0.30 * fresh), smoothstep(0.0, 0.6, cov));",
       "      vec3 fLit = fAlb * (0.45 + 0.55 * fSun) + dwSkyC * 0.06 * fSun;",
@@ -3962,6 +3962,7 @@
   };
 
   const _siltB = {};
+  const STORM_DEEP = new THREE.Color(0.060, 0.140, 0.160), STORM_SHAL = new THREE.Color(0.110, 0.290, 0.300);
   CBZ.waterDriveDisasterSurface = function (target, state) {
     const mat = target && target.material ? target.material : target;
     const u = mat && mat.userData && mat.userData.waterUniforms;
@@ -3984,6 +3985,20 @@
         u.uRunOn.value = 1;
       } else u.uRunOn.value = 0;
       if (u.uRunOverlay) runOverlaySync(target, mat, u, tx ? F : null);
+    }
+    /* ONE WATER, ONE COLOUR. The wave, the bore and the flood are dark
+       green-grey water under a storm sky; the sea they came out of stayed a
+       bright tropical cyan to the horizon, so the tsunami looked like a
+       different liquid laid on top of the ocean. The sea now goes the same
+       way as the event builds (state.sediment is the event's own 0..1) and
+       comes back as it calms. Authored LINEAR, like every colour here. */
+    if (u.uSeaColor && u.uShallowColor) {
+      const ud = mat.userData;
+      if (!ud.seaBase) ud.seaBase = { deep: u.uSeaColor.value.clone(), shal: u.uShallowColor.value.clone() };
+      const kS = Math.max(0, Math.min(1, +state.sediment || 0));
+      const ks = kS * kS * (3 - 2 * kS);
+      u.uSeaColor.value.copy(ud.seaBase.deep).lerp(STORM_DEEP, ks * 0.9);
+      u.uShallowColor.value.copy(ud.seaBase.shal).lerp(STORM_SHAL, ks * 0.9);
     }
     if (Number.isFinite(state.amp)) u.uDisasterAmp.value = +state.amp;
     if (Number.isFinite(state.chop)) u.uDisasterChop.value = +state.chop;
@@ -4226,9 +4241,9 @@
       uLobe: { value: new THREE.Vector4() }, uLobeFrom: { value: 0.79 },
       uLP: { value: new THREE.Vector3() }, uHalfW: { value: 160 },
       uFade: { value: 1 },
-      uBodySea: { value: new THREE.Color(0.045, 0.085, 0.074) },
+      uBodySea: { value: new THREE.Color(0.037, 0.087, 0.099) },   // the storm sea's own body (STORM_DEEP x 0.62)
       uBodyMud: { value: new THREE.Color(0.072, 0.058, 0.040) },
-      uGlowSea: { value: new THREE.Color(0.045, 0.15, 0.13) },   // green-blue thin water
+      uGlowSea: { value: new THREE.Color(0.075, 0.20, 0.21) },   // green-blue thin water
       uGlowMud: { value: new THREE.Color(0.12, 0.11, 0.07) },
       // wet foam, faintly sea-tinted: aerated water, not snow (0.84-0.90
       // landed as a paper-white cap through ACES)
@@ -4471,7 +4486,7 @@
          overhang was a dark ledge under a white cap: a snowy crag. */
       "  float underC = side * ( 1.0 - sk ) * smoothstep( 0.55, 0.85, up ) * ( 1.0 - smoothstep( -0.55, 0.05, N.y ) );",
       "  float thinL = max( underC, band * 0.6 );",
-      "  vec3 trans = mix( vec3( 0.035, 0.20, 0.17 ), vec3( 0.10, 0.12, 0.07 ), tb * 0.75 );",
+      "  vec3 trans = mix( vec3( 0.05, 0.20, 0.205 ), vec3( 0.10, 0.12, 0.07 ), tb * 0.75 );",
       "  bodyLit += trans * thinL * ( uSkyCol * 0.9 + uSunCol * ( 0.25 + 1.8 * back ) ) * ( 0.8 + 0.4 * r0 );",
       // ---- the foam: lit boils with dark creases, dirty with sediment
       "  vec3 fc = mix( uFoamClean, uFoamMud, smoothstep( 0.0, 0.7, tb ) );",

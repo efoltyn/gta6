@@ -2145,6 +2145,7 @@
     F.setBlocks(tsuBlocks(ctx.arena));
     F._endT = null;
     CBZ.tsuRunup.attach(F, {
+      rate: 3,                                  // the event's clock runs three times the sea's
       // the sea, exactly as published: the mean minus the straight front
       forcing: function (x, z) {
         const m = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : -0.8;
@@ -2664,7 +2665,7 @@
        actually running back down the streets to the sea. */
     // an upper bound: the card ends itself when the wave train has run out
     // (st.endIn in the drain), ~50 s in, the backwash and two more crests
-    get activeSecs() { return TSU_FAST() ? 58 : 70; },
+    get activeSecs() { return TSU_FAST() ? 84 : 96; },
     gap: 8,
     cause: "swept away by the tsunami", tint: 0x2c5a78,
     warn(ctx) {
@@ -2794,7 +2795,10 @@
          half again as fast, and the beats it has to hit (approach, stand,
          crash, crossing) all still fit inside it. */
       // the sweep's own budget (it was 0.46 x a 16 s event: 7.4 s)
-      const sweepSecs = TSU_FAST() ? 7.4 : 11.4;
+      /* 7.4 s put the front across the island at a hundred metres a second: a
+         white blur, gone before the water it stands for had left the beach.
+         17 s is still a wave you cannot outrun, and one you can watch. */
+      const sweepSecs = TSU_FAST() ? 17 : 21;
       st.speed = (2 * R + 104) / sweepSecs;   // legacy constant walk
       /* SHOALING (TSU_SHOAL_V2): integrate the relative-speed profile over
          the whole travel and scale it so approach + stand + crash + crossing
@@ -3096,13 +3100,13 @@
         /* THE SEA HOLDS while the run-up is still climbing (the land's water
            still growing by more than 3% a second), at least the old beat
            and never past 11 s: a long-period wave's crest, not a fixed one. */
-        const base = TSU_FAST() ? 4.8 : 8.8;
+        const base = TSU_FAST() ? 12 : 16;      // long enough for the water to reach the middle of the town
         if (st.run) {
           const v = st.run.landVol, pv = st.runVolPrev != null ? st.runVolPrev : v;
           st.runVolPrev = v;
           const growing = dt > 0 && (v - pv) / dt > 0.03 * Math.max(1, v);
           if (st.floodT < base) st.floodBudget = base;
-          else if (growing) st.floodBudget = Math.min(11, Math.max(st.floodBudget || base, st.floodT + 0.25));
+          else if (growing) st.floodBudget = Math.min(24, Math.max(st.floodBudget || base, st.floodT + 0.25));
         } else st.floodBudget = base;
         if (st.floodT > st.floodBudget) { st.phase = "drain"; st.drainFrom = st.floodSurge; st.trainT = 0; st.trainPrev = st.floodSurge; narrate("hint", "It's going back out. Hold on.", 2.4); }
       } else {  // drain — the backwash and the wave train behind it

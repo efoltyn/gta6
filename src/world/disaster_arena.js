@@ -6516,7 +6516,9 @@
      ============================================================ */
   function makeSeaMaterial(sharedWater) {
     return sharedWater ? CBZ.makeDisasterWaterMaterial({
-      name: "Survival Ocean Water", color: 0x155878, shallowColor: 0x3195a7,
+      // a deeper blue offshore (it was one flat pool cyan to the horizon); the
+      // turquoise stays in the shallows where the bed shows through
+      name: "Survival Ocean Water", color: 0x0f4669, shallowColor: 0x3195a7,
       amp: 0.86, chop: 0.72, foam: 0.34,
     }) : new THREE.MeshLambertMaterial({ color: 0x2f6f9e });
   }

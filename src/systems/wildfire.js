@@ -149,7 +149,7 @@
   const WARN_RATE = 0.2;   // the fire clock creeps through the telegraph
   const TILE = 32;         // char tiles, cells per side
 
-  const MAXTREEFLAME = 64, MAXFLAME = 1500, MAXGLOW = 360;
+  const MAXTREEFLAME = 64, MAXFLAME = 3000, MAXGLOW = 360;
   const MAXSMOKE = 2000, MAXEMBER = 400, MAXASH = 600;
 
   /* ---- THE GPU PATH (three r187, WebGPU renderer) ------------------------
@@ -488,6 +488,121 @@
         }
       `,
       transparent: true, depthWrite: false, blending: THREE.NormalBlending, fog: true,
+    });
+  }
+
+  /* THE FLAME IS A BODY, NOT A CARD. Every tongue used to be a point sprite:
+     a flat picture of a flame turned to face the lens, so the fire had no
+     thickness, looked the same from every side and from above was a row of
+     upright stickers. Each tongue is now a MESH: a teardrop of burning gas
+     with a real outline from any angle, its surface pushed in and out by
+     noise that scrolls up it, swaying and leaning on the wind. It is shaded
+     the way a flame is seen: brightest where you look through the most of it
+     (the middle, low down), thinning to dark red and to nothing at the
+     silhouette and the tip. Instanced: one draw for every flame burning. */
+  function flameBodyGeo(n) {
+    const RAD = 14, RINGS = 12;
+    const pos = [], nor = [], idx = [];
+    const rad = function (h) { return 0.40 * Math.pow(h, 0.42) * Math.pow(1 - h, 1.05); };
+    for (let i = 0; i <= RINGS; i++) {
+      const h = i / RINGS, r = rad(Math.min(0.999, Math.max(0.001, h)));
+      const dr = (rad(Math.min(0.999, h + 0.02)) - rad(Math.max(0.001, h - 0.02))) / 0.04;
+      for (let j = 0; j <= RAD; j++) {
+        const a = j / RAD * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a);
+        pos.push(c * r, h, sn * r);
+        const l = Math.hypot(1, dr * 0.5) || 1;
+        nor.push(c / l, -dr * 0.5 / l, sn / l);
+      }
+    }
+    for (let i = 0; i < RINGS; i++) for (let j = 0; j < RAD; j++) {
+      const a = i * (RAD + 1) + j, b = a + RAD + 1;
+      idx.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+    const g = new THREE.InstancedBufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    g.setIndex(idx);
+    const inst = function (name, k) {
+      const at = new THREE.InstancedBufferAttribute(new Float32Array(n * k), k);
+      at.setUsage(THREE.DynamicDrawUsage); g.setAttribute(name, at);
+    };
+    inst("aPos", 3); inst("aSize", 1); inst("aAlpha", 1); inst("aSeed", 1);
+    g.instanceCount = 0;
+    return g;
+  }
+  function flameBodyMaterial() {
+    return new THREE.ShaderMaterial({
+      uniforms: fogUniforms({ uTime: { value: 0 }, uScale: { value: 320 }, uWind: { value: new THREE.Vector2(1, 0) } }),
+      vertexShader: `
+        uniform float uTime;
+        uniform vec2 uWind;
+        attribute vec3 aPos;
+        attribute float aSize;
+        attribute float aAlpha;
+        attribute float aSeed;
+        varying float vH;
+        varying float vAlpha;
+        varying float vFace;
+        varying vec3 vQ;
+        #include <fog_pars_vertex>
+        void main() {
+          float h = position.y;
+          float t = uTime * 1.9 + aSeed * 23.0;
+          vec3 p = position;
+          // the surface breathes and tears: slow big lobes, quick small ones, both climbing
+          float n1 = sin(p.x * 5.1 + h * 7.0 - t * 2.2 + aSeed * 40.0) * sin(p.z * 4.7 - h * 5.5 + t * 1.3);
+          float n2 = sin(p.x * 11.0 - h * 13.0 + t * 3.7) * sin(p.z * 10.0 + h * 11.0 - t * 2.9 + 1.7);
+          float amp = 0.12 + 0.75 * h;
+          p.xz *= 1.0 + (n1 * 0.26 + n2 * 0.14) * amp;
+          // it sways from the root, more the higher, and leans down the wind
+          p.x += (sin(t * 1.4 + h * 4.0) * 0.16 + n2 * 0.10) * h;
+          p.z += (cos(t * 1.1 + h * 3.3 + 2.0) * 0.16 + n1 * 0.10) * h;
+          p.xz += uWind * h * h * 0.42;
+          p.y *= 1.0 + 0.14 * sin(t * 2.6 + aSeed * 9.0);
+          // every tongue is turned its own way round, so no two show the same side
+          float ca = cos(aSeed * 61.0), sa = sin(aSeed * 61.0);
+          p.xz = vec2(p.x * ca - p.z * sa, p.x * sa + p.z * ca);
+          vec3 nn = vec3(normal.x * ca - normal.z * sa, normal.y, normal.x * sa + normal.z * ca);
+          vec3 wp = aPos + vec3(p.x, p.y - 0.42, p.z) * aSize * 1.12;
+          vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
+          vec3 vn = normalize(mat3(viewMatrix) * nn);
+          vFace = abs(dot(vn, normalize(-mvPosition.xyz)));
+          vH = h; vAlpha = aAlpha;
+          vQ = vec3(position.x * 3.0 + aSeed * 17.0, h * 3.2 - t * 1.25, position.z * 3.0);
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }
+      `,
+      fragmentShader: `
+        varying float vH;
+        varying float vAlpha;
+        varying float vFace;
+        varying vec3 vQ;
+        #include <fog_pars_fragment>
+        float fh(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        float fvn(vec3 p) {
+          vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(fh(i), fh(i + vec3(1, 0, 0)), f.x), mix(fh(i + vec3(0, 1, 0)), fh(i + vec3(1, 1, 0)), f.x), f.y),
+                     mix(mix(fh(i + vec3(0, 0, 1)), fh(i + vec3(1, 0, 1)), f.x), mix(fh(i + vec3(0, 1, 1)), fh(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+        }
+        void main() {
+          float n = fvn(vQ) * 0.65 + fvn(vQ * 2.3 + 5.0) * 0.35;
+          // how much burning gas the eye looks through: all of it face-on, none at the rim
+          float thick = pow(clamp(vFace, 0.0, 1.0), 2.0);
+          float tear = smoothstep(0.18 + 0.62 * vH, 0.55 + 0.62 * vH, n + thick * 0.55);
+          float body = thick * mix(1.0, tear, smoothstep(0.15, 0.6, vH));
+          body *= smoothstep(0.0, 0.10, vH) * (1.0 - smoothstep(0.84, 1.0, vH));
+          float heat = clamp(body * (1.35 - 0.8 * vH) + (n - 0.5) * 0.3, 0.0, 1.0);
+          vec3 color = mix(vec3(0.55, 0.04, 0.0), vec3(1.0, 0.30, 0.02), smoothstep(0.05, 0.32, heat));
+          color = mix(color, vec3(1.0, 0.66, 0.11), smoothstep(0.30, 0.60, heat));
+          color = mix(color, vec3(1.0, 0.93, 0.60), smoothstep(0.62, 0.92, heat));
+          float alpha = smoothstep(0.03, 0.85, body) * vAlpha * 0.92;
+          if (alpha < 0.01) discard;
+          gl_FragColor = vec4(color, alpha);
+          #include <fog_fragment>
+        }
+      `,
+      transparent: true, depthWrite: false, blending: THREE.NormalBlending, fog: true, side: THREE.DoubleSide,
     });
   }
 
@@ -858,8 +973,9 @@
     finally { Math.random = priorRandom; }
   }
   function buildFXMeshes(root) {
-    const flame = pointsLayer(MAXFLAME, [["aSize", 1], ["aAlpha", 1], ["aSeed", 1]], flameMaterial(), 8);
-    flame.geometry.setDrawRange(0, 0); root.add(flame);
+    const flame = new THREE.Mesh(flameBodyGeo(MAXFLAME), flameBodyMaterial());
+    flame.renderOrder = 8; flame.frustumCulled = false; flame.userData.transient = true;
+    root.add(flame);
     const glow = pointsLayer(MAXGLOW, [["aSize", 1], ["aAlpha", 1]], glowMaterial(), 7);
     glow.geometry.setDrawRange(0, 0); root.add(glow);
     const smoke = pointsLayer(MAXSMOKE, [["aColor", 3], ["aSize", 1], ["aAlpha", 1], ["aSeed", 1], ["aSurface", 1], ["aHot", 1]], smokeMaterial(), 9);
@@ -1926,9 +2042,15 @@
     if (GP) { gpuFlame(GP, x, y, z, size, alpha, seed); return; }
     if (FX.flameN >= MAXFLAME) return;
     const g = FX.flame.geometry, j = FX.flameN++;
-    const p = g.attributes.position.array;
+    const p = g.attributes.aPos.array;
     p[j * 3] = x; p[j * 3 + 1] = y; p[j * 3 + 2] = z;
     g.attributes.aSize.array[j] = size; g.attributes.aAlpha.array[j] = alpha; g.attributes.aSeed.array[j] = seed;
+    // a flame is a clump of tongues: a second, smaller body beside the first
+    if (size > 0.9 && FX.flameN < MAXFLAME) {
+      const k = FX.flameN++, a = seed * 39.0, o = size * 0.2, s2 = size * 0.68;
+      p[k * 3] = x + Math.cos(a) * o; p[k * 3 + 1] = y - (size - s2) * 0.47; p[k * 3 + 2] = z + Math.sin(a) * o;
+      g.attributes.aSize.array[k] = s2; g.attributes.aAlpha.array[k] = alpha; g.attributes.aSeed.array[k] = (seed + 0.37) % 1;
+    }
   }
   function pushGlow(x, y, z, size, alpha) {
     if (FX.gpu) return;              // (GPU path: the glow is a real light, fireLights)
@@ -2049,8 +2171,8 @@
       pushGlow(p.x, p.y + 1, p.z, 4.5 * r.I, 0.5 * r.I);
     }
     const fg = FX.flame.geometry;
-    fg.setDrawRange(0, FX.flameN);
-    fg.attributes.position.needsUpdate = true; fg.attributes.aSize.needsUpdate = true;
+    fg.instanceCount = FX.flameN;
+    fg.attributes.aPos.needsUpdate = true; fg.attributes.aSize.needsUpdate = true;
     fg.attributes.aAlpha.needsUpdate = true; fg.attributes.aSeed.needsUpdate = true;
     const gg = FX.glow.geometry;
     gg.setDrawRange(0, FX.glowN);
