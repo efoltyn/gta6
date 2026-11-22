@@ -2023,8 +2023,10 @@
     st.bow = approach(st.bow, post === "bow" ? 1 : 0, 4, dt);
     st.side = approach(st.side, post === "side" || post === "dead" ? 1 : 0, post === "dead" ? 6 : 2, dt);
     st.dead = approach(st.dead, post === "dead" ? 1 : 0, 6, dt);
-    const sitK = st.sit, lieK = Math.min(st.lie, 1 - sitK), bowK = Math.min(st.bow, 1 - sitK - lieK), sideK = st.side;
-    const postK = Math.max(sitK, lieK, bowK, sideK);
+    // ---- deep water: the dog swims (swimSense); nothing sits or lies there
+    const SW = swimSense(rig, st, c, gx, gz, gy, sc, dt), wP = SW.k;
+    const sitK = st.sit * (1 - wP), lieK = Math.min(st.lie, 1 - st.sit) * (1 - wP), bowK = Math.min(st.bow, 1 - st.sit - Math.min(st.lie, 1 - st.sit)) * (1 - wP), sideK = st.side * (1 - wP);
+    const postK = Math.max(sitK, lieK, bowK, sideK, wP);
     // ---- the gait (standing): feet plant; the trot single-tracks
     const G = rig.G, M = G.mix;
     const trotK = (M.wT || 0) + (M.wC || 0) * 0.6, galK = M.wG || 0;
@@ -2099,6 +2101,15 @@
     pR = pR * wSt + P.sit.R * wS + P.lie.R * wL + P.bow.R * wB;
     cR = cR * wSt + P.sit.R * wS + P.lie.R * wL + P.bow.R * wB;
     pRx = pRx * (1 - wD) + wD * 1.45; cRx = cRx * (1 - wD) + wD * 1.45;
+    // swimming: the trunk floats, the withers awash, the front a little high
+    // (the lungs are forward), the hindquarters lower
+    if (wP > 0.001) {
+      const lift = 0.5 * (D.chest.x - D.pelv.x) * sin(SWIM_PITCH), dy = (SW.surfM - 0.045 * K) - D.withers;
+      pX = lerp(pX, D.pelv.x, wP); pY = lerp(pY, D.pelv.y + dy - lift, wP);
+      cX = lerp(cX, D.chest.x, wP); cY = lerp(cY, D.chest.y + dy + lift, wP);
+      pR = lerp(pR, SWIM_PITCH, wP); cR = lerp(cR, SWIM_PITCH, wP);
+      pRx *= 1 - wP; cRx *= 1 - wP; pRy *= 1 - wP; cRy *= 1 - wP;
+    }
     // at rest the trunk sits on what touches the ground (restSolve)
     const RS = st.rest;
     if (RS && RS.on) { cY += RS.Fa; pY += RS.Ba; }
@@ -2124,11 +2135,14 @@
     // ---- legs
     const TT = rig._T || (rig._T = {});
     TT.pX = pX; TT.pY = pY; TT.pZ = pZ; TT.pR = pR; TT.pRx = pRx; TT.pRy = pRy; TT.cX = cX; TT.cY = cY; TT.cZ = cZ; TT.cR = cR; TT.cRx = cRx; TT.cRy = cRy;
+    TT.wP = wP; TT.bedM = SW.bedM != null ? SW.bedM : -1e9;
+    if (wP > 0.001) st.padPh = (st.padPh || 0) + dt * (1.35 + 0.6 * clamp(av / (0.6 * sqrt(K)), 0, 1)) * Math.pow(0.62 / D.withers, 0.3);
     legs(rig, st, P, TT, wS, wL, wB, wD, c);
     // ---- neck, head, jaw, ears, tail, breath
     const KK = rig._K || (rig._K = {});
     KK.cR = cR; KK.cRx = cRx; KK.moveK = moveK; KK.gal = gal; KK.trot = trot; KK.wW = wW; KK.ph = ph; KK.lope = lope;
-    KK.sitK = sitK; KK.lieK = lieK; KK.sideK = sideK; KK.bowK = bowK; KK.fl = fl; KK.turn = st.turn; KK.liftH = liftH;
+    KK.sitK = sitK; KK.lieK = lieK; KK.sideK = sideK; KK.bowK = bowK; KK.fl = fl; KK.turn = st.turn; KK.liftH = liftH; KK.swimK = wP;
+    KK.swimN = st.swimN == null ? 0.3 : st.swimN;
     headNeck(rig, st, c, dt, KK);
     tail(rig, st, dt, KK);
     if (RS && RS.on) { b[BN.neck].quaternion.multiply(RS.qNa); b[BN.tail0].quaternion.multiply(RS.qTa); }
@@ -2141,6 +2155,13 @@
     }
     const hk = Math.max(st.aggr * 0.7, st.threat, st.fear * 0.5) * (1 - st.dead);
     b[BN.hackle].position.set(bp[BN.hackle].x, bp[BN.hackle].y + 0.03 * K * hk, 0);
+    // ---- swimming, the neck carries the mouth just clear of the water: the
+    //      posed mouth's height over the surface steers the neck's lift
+    if (wP > 0.05 && SW.surf != null) {
+      const mo = mouthWorld(rig, _swM);
+      const err = (0.045 * K * sc - (mo.y - SW.surf)) / (0.3 * K * sc);
+      st.swimN = clamp((st.swimN == null ? 0.3 : st.swimN) + clamp(err, -0.15, 0.15) * 5 * dt, -0.5, 0.9);
+    }
     // ---- held up by what touches the ground while it rests
     const RW = st.restW || (st.restW = { sit: 0, lie: 0, side: 0, bow: 0 });
     RW.sit = sitK; RW.lie = lieK; RW.side = sideK; RW.bow = bowK;
@@ -2230,6 +2251,42 @@
     P.pX = hipX - (cos(R) * ox - sin(R) * oy); P.pY = hipY - (sin(R) * ox + cos(R) * oy);
     const cx0 = D.chest.x - D.pelv.x, cy0 = D.chest.y - D.pelv.y;
     P.cX = P.pX + cos(R) * cx0 - sin(R) * cy0; P.cY = P.pY + sin(R) * cx0 + cos(R) * cy0;
+  }
+
+  // ==========================================================================
+  //  IN WATER — deeper than a dog can wade it swims: the trunk floats at the
+  //  surface. The surface is the host's (ctrl.water, world y) or the water's
+  //  own query (CBZ.waterSample: the surface and the depth under it); a dog
+  //  wades with the water up to its chest and swims where it cannot stand.
+  // ==========================================================================
+  const SWIM_PITCH = 0.22;
+  const _swM = { x: 0, y: 0, z: 0 };
+  const _wsO = {};
+  function swimSense(rig, st, c, gx, gz, gy, sc, dt) {
+    const S = st.wat || (st.wat = { t: 0, depth: 0, surf: null, k: 0, surfM: 0 });
+    S.t -= dt;
+    if (S.t <= 0) {
+      S.t = 0.12;
+      let surf = null, depth = 0;
+      if (c.water != null && isFinite(c.water)) { surf = c.water; depth = surf - gy; }
+      else if (typeof CBZ.cityWaterAt === "function") {
+        let wet = false;
+        try { wet = !!CBZ.cityWaterAt(gx, gz); } catch (e) { wet = false; }
+        if (wet) {
+          try {
+            if (typeof CBZ.waterSample === "function") { const w = CBZ.waterSample(gx, gz, _wsO, null); surf = w.y; depth = w.depth; }
+            else if (typeof CBZ.citySeaHeightAt === "function") { surf = CBZ.citySeaHeightAt(gx, gz); depth = surf - gy; }
+          } catch (e) { surf = null; }
+        }
+      }
+      S.surf = surf != null && isFinite(surf) ? surf : null; S.depth = isFinite(depth) ? depth : 0;
+    }
+    const Wd = rig.D.withers * sc;
+    const want = S.surf == null ? 0 : sstep(0.7 * Wd, 1.05 * Wd, S.depth);
+    S.k = approach(S.k, want, 2.2, dt);
+    if (S.k < 1e-3 && want === 0) S.k = 0;
+    if (S.surf != null) { S.surfM = (S.surf - gy) / sc; S.bedM = S.surfM - S.depth / sc; }
+    return S;
   }
 
   // ==========================================================================
@@ -2550,6 +2607,27 @@
         aM = aM * (wSt + wB) - 0.02 * (wS + wL); aT = aT * (wSt + wB) - 0.04 * (wS + wL);
         fz = fz * (1 - wS - wL) + z0 * 1.35 * (wS + wL);
       }
+      if (T.wP > 0.001) {
+        // the dog paddle, diagonal pairs together: each forefoot reaches
+        // forward, pulls down and back (the stroke), folds and comes forward
+        // high under the chest; the hind feet kick a smaller loop
+        const ph = TAU * ((st.padPh || 0) + (Lg === 0 || Lg === 3 ? 0 : 0.5));
+        const up = -sin(ph);                                 // > 0 on the return, < 0 in the stroke
+        let px, py;
+        if (front) {
+          const sx = T.cX + D.shj.x - D.chest.x, sy = T.cY + D.shj.y - D.chest.y;
+          const L = D.humL + D.radL + D.mcL;
+          px = sx + 0.1 * K + 0.16 * K * cos(ph); py = Math.max(sy - 0.6 * L + 0.1 * K * up, T.bedM + pad);
+          aM = lerp(aM, nb[3] - 0.25 - 0.9 * Math.max(0, up), T.wP);
+        } else {
+          const hx0 = T.pX + D.hip.x - D.pelv.x, hy0 = T.pY + D.hip.y - D.pelv.y;
+          const L = D.femL + D.tibL + D.mtL;
+          px = hx0 - 0.04 * K + 0.12 * K * cos(ph); py = Math.max(hy0 - 0.62 * L + 0.07 * K * up, T.bedM + pad);
+          aM = lerp(aM, nb[2] - 0.35 - 0.6 * Math.max(0, up), T.wP);
+        }
+        fx = lerp(fx, px, T.wP); fy = lerp(fy, py, T.wP); fz = lerp(fz, z0, T.wP);
+        aT = lerp(aT, -0.2 - 0.5 * Math.max(0, up), T.wP);
+      }
       if (wD > 0) {
         // on its (right) side the legs lie loose along the ground, out from the
         // belly (-z); the upper (left) pair rests on the lower one
@@ -2639,7 +2717,7 @@
     let nP = (R.kind === "wild" ? -0.06 : 0.0) + st.alert * 0.14 - st.sniff * 0.95 - st.fear * 0.3 - st.aggr * 0.18 - st.threat * 0.22
       - (R.kind === "wild" ? 0.34 : 0.22) * k.trot - 0.26 * k.gal - 0.15 * k.lope + st.lookP * 0.55
       + barkE * 0.14 - biteE * 0.25 + st.howl * 1.05 + 0.25 * st.rearUp - lowBite * 0.75 - 0.25 * lunH * (1 - st.rearUp)
-      - k.lieK * 0.08 - st.dead * 0.5 + 0.2 * k.fl;
+      - k.lieK * 0.08 - st.dead * 0.5 + 0.2 * k.fl + (k.swimN || 0) * (k.swimK || 0);
     // gaze stabilisation: the neck counters the trunk's pitch
     nP -= k.cR * 0.8;
     // head bob at the walk, the pumping neck at the gallop
@@ -2734,13 +2812,15 @@
     // a little down again to reach the ground from the set)
     const sitR = rig._post ? rig._post.sit.R : 0.5;
     carry = carry * (1 - k.sitK - k.lieK) + (-T.rest - sitR + 0.25) * k.sitK + (-T.rest + 0.3) * k.lieK;
+    // swimming, it streams out behind on the water: a rudder
+    if (k.swimK) carry = carry * (1 - k.swimK) + (-T.rest + 0.1) * k.swimK;
     carry = clamp(carry, -2.3, 1.2);
     const curl = (rig.seed & 1 ? 1 : -1) * (0.5 * k.sitK + 0.75 * k.lieK);
     // the wag: frequency by size, width by mood (a happy dog sweeps wide, an
     // alert or aggressive one flags high and narrow)
     const fw = 3.3 * Math.pow(D.withers / 0.6, -0.5) * (0.6 + 0.4 * st.happy + 0.2 * st.alert);
     st.wagPh += dt * TAU * fw;
-    const wagAmp = (st.happy * (wild ? 0.35 : 0.62) + st.alert * 0.06 + st.aggr * 0.05) * (1 - st.fear * 0.75) * (1 - st.dead) * (1 - k.lieK * 0.5);
+    const wagAmp = (st.happy * (wild ? 0.35 : 0.62) + st.alert * 0.06 + st.aggr * 0.05) * (1 - st.fear * 0.75) * (1 - st.dead) * (1 - k.lieK * 0.5) * (1 - 0.7 * (k.swimK || 0));
     const counter = clamp(-st.turn * 0.12, -0.35, 0.35) * k.moveK;      // balances a turn at speed
     // the hips wiggle with a big happy wag when standing still
     const tb = [BN.tail0, BN.tail1, BN.tail2, BN.tail3, BN.tail4];
