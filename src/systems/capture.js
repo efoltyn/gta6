@@ -75,7 +75,6 @@
   function beatOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_CELL_BEAT); }
 
   const BODY_R = 0.55;       // player capsule radius (systems/physics.js)
-  const _marchO = { posture: "stand", radius: 0.3, feet: 0, height: 1.7, clearRadius: BODY_R };
   const INTAKE_T = 8;        // intake hold when a city arrest lands you here
   let heldDoor = null;       // the ONE cell index this file has locked (or null)
 
@@ -256,17 +255,12 @@
   // straight through to the popup it used to write.
   CBZ.jailTell = { toast: tellToast, hint: tellHint, on: showing };
 
-  // Every haul runs the pen's restraint/carry SCENE (startEscort below), never
-  // a string and a teleport. opts.kind picks what the blackout means:
-  //   "hole"     cuffed, walked to your cell, sealed in for a while (default)
-  //   "transfer" cuffed after an ESCAPE: the strike/tier path (applyStrike)
-  //   "medical"  carried to the infirmary (downed, starving): no cuffs, no strike
-  // opts.strike:false (the old medical-drag flag) still means "medical".
+  // THE INFIRMARY CARRY (startEscort below): a body the law does not want,
+  // got off the floor by the screws and carried to Doc Mercer. No cuffs, no
+  // strike. hunger.js calls it for a man who starved. (Every arrest, the
+  // floor included, is CBZ.arrest.take now: see "WHO PICKS YOU UP".)
   function haulToCell(msg, opts) {
-    opts = Object.assign({}, opts || {});
-    if (opts.strike === false && !opts.kind) opts.kind = "medical";
-    if (!opts.kind) opts.kind = (CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture()) ? "transfer" : "hole";
-    startEscort(msg, opts);
+    startEscort(msg, Object.assign({}, opts || {}, { kind: "medical" }));
   }
   CBZ.haulToCell = haulToCell;
   function law(k, n) { if (CBZ.prisonLawCount) CBZ.prisonLawCount(k, n); }
@@ -646,6 +640,11 @@
     CBZ.vitals.on("escape", {
       playerDown(on, o) {
         if (!on || player.dead || down || esc) return;          // the carry stands you up, not the clock
+        // already in their hands on the floor, or cuffed and walked: the
+        // arrest carries on with the body it has (a standing cuff that loses
+        // its man to the floor goes down and is taken there instead)
+        const hk = AR() && AR().active ? AR().active() : null;
+        if (haul || (hk && hk.onGround)) return;
         o = o || {};
         const by = o.by && o.by !== player ? o.by : null;
         if (player.hp == null || player.hp > 0) player.hp = Math.min(player.hp == null ? 100 : player.hp, 1);
@@ -663,12 +662,82 @@
       },
     });
   }
+  /* ============================================================
+     WHO PICKS YOU UP OFF THE FLOOR (2026-11-22).
+
+     OWNER: "Rn when arresting cops throw me over their shoulder all of a
+     sudden instead of the great handcuffing they used to do." Every down in
+     here (out cold, the blood, steel at 0 hp) ended in the infirmary carry,
+     over a screw's shoulder with no cuffs, unless it was an escape: so a man
+     the screws were in the middle of arresting who got put down was carried
+     off like a patient. THE RULE NOW:
+
+       THE LAW HAS YOU (lawWants) when any of
+         · it is an escape capture (the wire, the sterile strip, the exit run)
+         · an offense worth the cuffs is on file (severity 2+)
+         · an arrest was under way (the order, the taser, the chase, a lunge)
+         · a screw put you down (opts.by is a guard)
+         · a screw is hunting you within LAW_R
+       and then you are CUFFED WHERE YOU LIE: the screw who was on you (or the
+       nearest one who can walk, sent at a run along his own nav route, not
+       placed) comes to the body; inside LAW.NEAR with nothing between he
+       kneels on you, one wrist, then the other (CBZ.arrest.take, the ground
+       cuff), comes up off his knee with his hand on your arm, and walks you
+       to your cell (the hole; a transfer for an escape). The rig's fall is
+       the one body all the way: it is held where it landed until his hands
+       take it, never stood up and dropped again.
+
+       THE INFIRMARY CARRY is for a body the law does not want: put down by
+       an inmate, a fall or the blood with nothing on file and nobody after
+       you; and a man who starved (hunger.js). A wanted man bleeding out is
+       still cuffed first: the knee on him is the pressure on the wound (the
+       vitals reset at the cuffs, as the carry did at the pick-up).
+
+     Nobody can come (every screw down, dead, bribed, tied): a man who comes
+     to gets up on his own and it is a chase; one who is bleeding out or
+     still out cold goes to the infirmary the old way. A sent screw who
+     stops gaining on you (a locked door, a stair) hands it to the next man.
+     ============================================================ */
+  const LAW_R = 30;
+  const LAW = { BEAT: 0.6, NEAR: 4.0, REPICK: 0.5, STALL: 6, WAKE: 7, GIVEUP: 40 };
+  function isGuard(a) { return !!a && (CBZ.guards || []).indexOf(a) >= 0; }
+  function lawWants(by, arrestGd) {
+    if (CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture()) return true;
+    const off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
+    if (off && off.severity >= 2) return true;
+    if (arrestGd) return true;
+    if (isGuard(by)) return true;
+    for (const gd of CBZ.guards || []) {
+      if (!(gd.hunt > 0) || !arrestGuardOk(gd) || gd.kind === "warden") continue;
+      if (gdDist(gd) < LAW_R) return true;
+    }
+    return false;
+  }
+  // lawLead: undefined = nobody wants you (the carry); null/guard = the law
+  function newDown(weapon, by, wakeHp, lawLead) {
+    return { t: 0, weapon, by: by || null, wakeHp,
+      law: lawLead !== undefined, lead: lawLead || null, pickT: 0, best: Infinity, stall: 0, excl: [] };
+  }
   function goDown(weapon, opts) {
     law("downs");
+    // read the law off the scene BEFORE it is torn down: the screw who was
+    // arresting you is the one who comes to the body
+    const arrestGd = arrest && arrest.gd && arrestGuardOk(arrest.gd) ? arrest.gd : null;
+    const byGuard = isGuard(opts.by) && arrestGuardOk(opts.by) ? opts.by : null;
+    const wanted = lawWants(opts.by, arrestGd);
     cancelArrest();
     haulEnd(true);
     if (CBZ.killstreakBreak) CBZ.killstreakBreak("Down");
-    down = { t: 0, weapon, by: opts.by || null, wakeHp: weapon === "fist" ? 55 : 30 };
+    const wake = weapon === "fist" ? 55 : 30;
+    down = newDown(weapon, opts.by, wake, wanted ? (arrestGd || byGuard || null) : undefined);
+    if (wanted) {
+      // the record says why (a screw who put you down with nothing on file
+      // put you down because you were fighting him)
+      const off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
+      if ((!off || off.severity < 2) && CBZ.prisonOffense) {
+        try { CBZ.prisonOffense(byGuard ? "assault" : "minor", { severity: byGuard ? 3 : 2, seenBy: down.lead || null }); } catch (e) {}
+      }
+    }
     player.stun = Math.max(player.stun || 0, 1);
     setCaptureState("downed", 60);
     // a thief who put you down goes through your pockets
@@ -686,20 +755,115 @@
     player.stun = Math.max(player.stun || 0, 0.5);
     player.captureState = "downed"; player.captureT = 60;
     // ON THE FLOOR IS THE RIG'S FALL (meleeposes.js), held: the same body the
-    // carry and the cuffs pick up. This used to roll the whole group onto its
+    // cuffs (or the carry) pick up. This used to roll the whole group onto its
     // side, then the haul's holdDown started a real fall from standing on top
     // of it (he unrolled, stood, and fell over a second time).
     holdDown(dt, 1);
+    if (d.law) { lawFloorTick(d, dt); return; }
     if (d.t < DOWN_BEAT) return;
-    // hauled off the floor: to the infirmary, or in cuffs if this was an escape
-    const escapeCap = !!(CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture());
-    const wake = d.wakeHp;
-    // the screws have hands on you: pressure on the wound, and whatever kept
-    // you on the floor (out cold, the blood) is theirs to carry now
+    // nobody wants you: hands on you, pressure on the wound, and whatever
+    // kept you on the floor is theirs to carry to the infirmary
+    toInfirmary(d);
+  }
+  function toInfirmary(d) {
     if (CBZ.vitals) CBZ.vitals.reset(player);
     down = null;
-    if (escapeCap) { player.hp = wake; law("cuffs"); startEscort(null, { kind: "transfer", tased: true }); }
-    else startEscort(null, { kind: "medical", wakeHp: wake, tased: true });
+    startEscort(null, { kind: "medical", wakeHp: d.wakeHp });
+  }
+  // the vitals say he is awake and not bleeding out (he can get up himself)
+  function playerConscious() {
+    const VT = VIT();
+    const R = VT && VT.peek ? VT.peek(player) : null;
+    return !R || (!(R.koT > 0) && !R.collapsed && !R.critical && !(R.tasedT > 0));
+  }
+  // the nearest screw who could walk to (px,pz) and use his hands, skipping `excl`
+  function nearestScrew(px, pz, excl, maxR) {
+    let best = null, bd = maxR != null ? maxR : Infinity;
+    for (const gd of CBZ.guards || []) {
+      if (!arrestGuardOk(gd) || gd.kind === "warden" || gd._escort) continue;
+      if (excl && excl.indexOf(gd) >= 0) continue;
+      if (CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(gd)) continue;
+      const d = Math.hypot(px - gd.group.position.x, pz - gd.group.position.z);
+      if (d < bd) { bd = d; best = gd; }
+    }
+    return best;
+  }
+  function lineTo(gd) {
+    const V = VB();
+    if (!V || !V.lineBlocked) return true;
+    const p = gd.group.position;
+    try { return !V.lineBlocked(p.x, p.y || 0, p.z, player.pos.x, player.pos.z); } catch (e) { return true; }
+  }
+  /* SENT: a screw runs to (x,z) on guards.js's own hunt walk (its nav route
+     round the walls, its stride). With eyes on you that branch walks him to
+     you and asks tryCapture; blind, his chase point is where you lie (a
+     primed search point the radio cannot move). */
+  function sendTo(gd, x, z) {
+    gd.hunt = Math.max(gd.hunt || 0, 6); gd.alert = 1; gd.investigate = null; gd.capCD = 0;
+    const c = gd._chase;
+    if (!gd.seesPlayer && (!c || Math.hypot(c.x - x, c.z - z) > 1.5)) {
+      gd._chase = { x, z, vx: 0, vz: 0, phase: "goto", i: 0, look: 0, atPt: false, best: Infinity, stall: 0, walkT: 0,
+        rings: 0, npts: 3, _primed: true, fixAt: 1e12 };
+    }
+  }
+  function lawFloorTick(d, dt) {
+    if (d.t < LAW.BEAT) return;                       // the body lands first
+    const px = player.pos.x, pz = player.pos.z;
+    let gd = d.lead;
+    if (gd && (!arrestGuardOk(gd) || gd.kind === "warden" || gd._escort || d.excl.indexOf(gd) >= 0)) gd = d.lead = null;
+    d.pickT -= dt;
+    if (!gd && d.pickT <= 0) {
+      d.pickT = LAW.REPICK;
+      gd = d.lead = nearestScrew(px, pz, d.excl);
+      d.best = Infinity; d.stall = 0;
+    }
+    if (!gd) {
+      if (d.t < DOWN_BEAT) return;
+      // nobody alive who can come and put hands on you
+      if (playerConscious()) lawWake(d); else if (d.t >= DOWN_BEAT + 1.5) toInfirmary(d);
+      return;
+    }
+    const dist = gdDist(gd);
+    // in reach, nothing between: his hands (the ground cuff walks the last steps)
+    if (dist <= LAW.NEAR && lineTo(gd) && floorTake(gd)) return;
+    sendTo(gd, px, pz);
+    // not getting any closer (a locked door, a stair he will not take): the next man goes
+    if (dist < d.best - 0.3) { d.best = dist; d.stall = 0; } else d.stall += dt;
+    if (d.stall > LAW.STALL) { d.excl.push(gd); d.lead = null; d.pickT = 0; }
+    // awake (not out cold, not bleeding out) before anybody reached him: he
+    // can get up and go the moment he pushes the stick, and does by himself
+    // after LAW.WAKE. Either way it is a chase.
+    if (playerConscious()) {
+      const K = CBZ.keys || {};
+      const pushing = !!(K.w || K.a || K.s || K.d || K[" "]);
+      if ((pushing && d.t >= 1.5) || d.t >= LAW.WAKE) { lawWake(d); return; }
+    }
+    if (d.t >= LAW.GIVEUP) toInfirmary(d);
+  }
+  function lawWake(d) {
+    const gd = d.lead;
+    down = null;
+    standUp();
+    player.stun = 0;
+    setCaptureState("normal", 0);
+    if (gd && arrestGuardOk(gd)) { gd.hunt = Math.max(gd.hunt || 0, 6); gd.capCD = 0; }
+  }
+  /* HANDS ON A MAN ON THE FLOOR: the arrest's take (systems/arrest.js) from
+     the down beat, by the screw who is at you. False = not yet (no reach):
+     the body stays down and he keeps coming. */
+  function floorTake(gd) {
+    const d = down;
+    if (!d || haul || (arrest && arrest.phase === "take")) return false;
+    arrest = { gd, phase: "order", t: 0, t0: clock(), comply: 0, flee: 0, lastD: gdDist(gd), after: 0, taseCD: 0, tackles: 0 };
+    down = null;
+    cuffs(true, { floor: d });
+    if (arrest && arrest.phase === "take") return true;
+    // refused this frame: still on the floor, still waiting for him
+    down = d;
+    arrest = null;
+    gd._escort = false;
+    player.captureState = "downed"; player.captureT = 60;
+    return false;
   }
   function die(cause, opts) {
     if (player.dead) return;
@@ -734,58 +898,43 @@
   }
 
   // ============================================================
-  //  THE HAUL IS A SCENE — OWNER: "goes to this stupid screen way too fast,
-  //  it should show the player getting handcuffed or at least getting tased,
-  //  I want to see my death, not get cut to this stupid screen early."
-  //
-  //  The old escort was 1.9 s long and the screen was BLACK from 0.95 s: the
-  //  fade began on the frame the cuffs flag flipped, the strike/transfer
-  //  landed at the blackout, and the TRANSFERRED card was up before a hand had
-  //  visibly touched you. On the tower/beat-down paths (haulToCell) there was
-  //  never a taser at all — you dropped and the card came.
-  //
-  //  Every haul now runs the city's arrest grammar (wanted.js: hands → cuff →
-  //  walk → ride) in the pen's own vocabulary, ON CAMERA, before any fade:
+  //  THE INFIRMARY CARRY — a body the law does not want (see WHO PICKS YOU
+  //  UP OFF THE FLOOR): the nearest screws run to it, the lead gets you up
+  //  over his shoulder (CBZ.verbs.carry) and walks off toward the infirmary,
+  //  the lens goes dark on the way, and you come to on the ward bed.
   //
   //    down  — you are on the floor; the nearest screws RUN to the body
-  //    tase  — a drive-stun from the lead screw if nobody tased you yet
-  //    cuff  — he kneels on you, the ties go on (restrain.js's real wrist
-  //            meshes when present), the ratchet clicks, he says so
-  //    lift  — hauled to your feet, still cuffed
-  //    walk  — marched toward your own cell door, screws one pace behind,
-  //            the lens easing round behind you
-  //    fade  — THEN the blackout. The strike/transfer lands there, in the
-  //            cuffs, exactly where it always did (the ONE place).
-  //    wake  — fade back in on the bunk, ties off (in-tier strike only; a
-  //            transfer's card is up at the blackout and this never runs)
+  //    carry — over the shoulder, walked off; the fade rides on the end
+  //    wake  — fade back in by the bed, getting up off your side
+  //
+  //  (2026-11-22: this scene used to be every haul, the cuffs included: a
+  //  tase on the floor, then STOOD UP and cuffed standing, then a scripted
+  //  march under a cine camera. That was a second arrest running beside
+  //  CBZ.arrest.take, and the over-the-shoulder carry was what a wanted man
+  //  got whenever he went down. Every cuffing is the take now; this is only
+  //  the carry.)
   //
   //  The screws are real guards put on `_escort` duty (entities/guards.js
   //  yields the body while the flag is set; this file steers it). No screw
-  //  alive = a short down beat and the cuffs go on anyway (the tower crew),
-  //  so a capture can never wait forever on an empty wing.
+  //  alive = a short down beat and the fade (the infirmary orderlies).
   // ============================================================
   const ESC = {
     DOWN_MAX: 4.5,     // s — longest the body lies waiting for the screws
     DOWN_ALONE: 1.2,   // s — the wait when there is nobody to run in
-    TASE: 1.0,         // s — the drive-stun on the ground
-    CUFF: 1.5,         // s — kneel + ties
-    LIFT: 1.0,         // s — up on your feet
-    WALK_MIN: 2.4,     // s — you always SEE yourself marched
-    WALK_MAX: 5.5,     // s — a far cell is walked off-screen (elevator law)
-    WALK_SPD: 1.35,    // m/s — a perp walk, not a jog
     FADE: 1.0, WAKE: 0.9,
     REACH: 1.45,       // m — where a screw stops to work on a body (actorcollide.js
                        //     holds two standing bodies ~1.4 m apart; asking for less
                        //     is a man pushed back out every frame and never "arriving")
     SECOND_R: 30,      // m — a second screw only if he is already near; a far one
                        //     is a man jogging into a wall for the whole scene
+    WALK_SPD: 1.35,    // m/s — the perp walk (CBZ.arrest.take's escort pace)
   };
   let esc = null;      // the live scene, or null
   const lerpAng = CBZ.lerpAngle || function (a, b, t) {
     let d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
     return a + d * t;
   };
-  // screws for the haul: the two nearest guards who can walk.
+  // screws for the carry: the two nearest guards who can walk.
   function pickScrews() {
     const out = [];
     for (const gd of CBZ.guards || []) {
@@ -797,7 +946,7 @@
     const picked = out.slice(0, 2).filter((o, i) => i === 0 || o.d2 < ESC.SECOND_R * ESC.SECOND_R);
     return picked.map((o) => o.gd);
   }
-  // the warden never walks a man to the hole himself: he orders it (prisonwarden.js)
+  // the warden never carries a man himself: he orders it (prisonwarden.js)
   function screwUsable(gd) { return !!(gd && gd.group && !gd.dead && !(gd.ko > 0) && gd.kind !== "warden"); }
   function releaseScrews() {
     if (!esc) return;
@@ -805,7 +954,7 @@
       if (!gd) continue;
       gd._escort = false;
       if (gd.char) gd.char.crouch = false;
-      gd.capCD = 3.0;              // he does not re-grab the man he just booked
+      gd.capCD = 3.0;
     }
     esc.screws.length = 0;
   }
@@ -847,8 +996,8 @@
   }
   /* THE BODIES ARE CBZ.verbs' AND STRIKE'S. The screw's hands on you are the
      shared verbs (tackle, cuff, escort, carry: systems/verbs.js); you on the
-     floor is the real fall (entities/meleeposes.js), held down until the lift,
-     not the old whole-group rotation.z roll. */
+     floor is the real fall (entities/meleeposes.js), held down until the
+     hands take you, not the old whole-group rotation.z roll. */
   const VB = () => CBZ.verbs || null;
   const pa = () => (VB() ? VB().playerActor() : player);
   function holdDown(dt, side) {
@@ -856,6 +1005,9 @@
     if (MP && MP.startFall && ch) {
       if (!(ch.fall && ch.fall.on)) MP.startFall(ch, { variant: "back", side: side, ko: true, hold: true });
       ch.fall.hold = true;
+      // a fall already getting up (its own clock ran out a frame early) is
+      // laid back down where it is, not dropped again from standing
+      if (ch.fall.phase === "getup" && (ch.fall.gt || 0) < 0.4) { ch.fall.phase = "down"; ch.fall.gt = 0; }
       if (ch.group.rotation.z) ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, 0, 10, dt);
       return;
     }
@@ -867,16 +1019,17 @@
   }
   function dropHolds(e) {
     if (!e) return;
-    for (const k of ["cuffS", "escS", "carryS"]) { const S = e[k]; if (S && !S.done) S.cancel(); e[k] = null; }
+    const S = e.carryS;
+    if (S && !S.done) S.cancel();
+    e.carryS = null;
   }
   // THE LENS. The pen's camera is a tight room-aware boom over your shoulder,
   // so a scene played under it is a wall: you lie under the pivot and the
   // screw kneels behind the camera. city/cinematics.js publishes a scripted
   // camera channel (CBZ.cineCam) that systems/camera.js yields to outright;
   // we write it directly — no director steps, no holster, and it hands back
-  // the moment the scene does. Two shots: a low side-on of the body with the
-  // screws arriving behind it, then a CUT to the perp walk, backing away in
-  // front of the cuffed man with the screws on his heels.
+  // the moment the scene does: a low side-on of the body with the screws
+  // arriving behind it.
   function camOwn() {
     const cc = CBZ.cineCam;
     if (!cc || (CBZ.cineBusy && CBZ.cineBusy())) return null;   // a real director has the lens
@@ -905,20 +1058,6 @@
     const e = esc;
     cc.x = px + e.cx * 2.5; cc.y = py + 1.45; cc.z = pz + e.cz * 2.5;
     cc.lx = px; cc.ly = py + 0.45; cc.lz = pz;
-  }
-  function camWalk(px, py, pz, hx, hz) {
-    const cc = camOwn(); if (!cc) return;
-    const sx = -hz, sz = hx;
-    cc.x = px + hx * 3.2 + sx * 1.5; cc.y = py + 1.7; cc.z = pz + hz * 3.2 + sz * 1.5;
-    cc.lx = px; cc.ly = py + 1.0; cc.lz = pz;
-  }
-  // where the walk goes: your own cell's door mouth, else the cell, else the
-  // spawn — the same "back to your cell" the blackout lands you at.
-  function walkTarget() {
-    const c = beatOn() ? playerCell() : null;
-    if (c && isFinite(+c.doorX) && isFinite(+c.doorZ)) return { x: +c.doorX, z: +c.doorZ };
-    if (c && isFinite(+c.x) && isFinite(+c.z)) return { x: +c.x, z: +c.z };
-    return CBZ.SPAWN ? { x: CBZ.SPAWN.x, z: CBZ.SPAWN.z } : { x: player.pos.x, z: player.pos.z };
   }
 
   // THE INFIRMARY (world/southblock.js: x[26,42] z[88,104], door W at z 96,
@@ -952,30 +1091,20 @@
   }
   function inInfirmary(x, z) { return x > INFIRMARY.x0 && x < INFIRMARY.x1 && z > INFIRMARY.z0 && z < INFIRMARY.z1; }
 
-  // EVERY haul ends here (haulToCell routes through it), so the cuffs are
-  // always ON before applyStrike can ever say TRANSFERRED. opts.kind:
-  // "hole" | "transfer" | "medical" (see haulToCell); opts.lead = the screw
-  // who made the arrest; opts.tased = no drive-stun on the floor.
+  // the carry to the infirmary (haulToCell / a down nobody wants). opts.wakeHp
+  // = the hp you come to with.
   function startEscort(msg, opts) {
     if (esc) return;
     opts = opts || {};
-    const kind = opts.kind || (opts.strike === false ? "medical" : "hole");
-    if (CBZ.killstreakBreak) CBZ.killstreakBreak(kind === "medical" ? "Down" : "Cuffed");
+    if (CBZ.killstreakBreak) CBZ.killstreakBreak("Down");
     cancelArrest();
     down = null;
-    CBZ.playerChar.cuffed = false;
+    tiesOn(false);
     player.stun = 2.2;
     // non-normal for the whole scene; escortTick keeps it alive
-    setCaptureState(kind === "medical" ? "downed" : "cuffed", 60);
+    setCaptureState("downed", 60);
     CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd._chase = null; });
-    if (opts.lead) opts.lead._escort = false;
     const screws = pickScrews();
-    if (opts.lead && screwUsable(opts.lead) && screws[0] !== opts.lead) {
-      const k = screws.indexOf(opts.lead);
-      if (k >= 0) screws.splice(k, 1);
-      screws.unshift(opts.lead);
-      if (screws.length > 2) screws.length = 2;
-    }
     for (const gd of screws) { gd._escort = true; }
     let cx = Math.sin(CBZ.playerChar.group.rotation.y + Math.PI * 0.5), cz = Math.cos(CBZ.playerChar.group.rotation.y + Math.PI * 0.5);
     if (screws[0]) {
@@ -985,78 +1114,63 @@
     esc = {
       cam: false, cx, cz,
       phase: "down", t: 0, total: 0,
-      kind, severity: opts.severity || 2, wakeHp: opts.wakeHp || 55,
-      strike: kind === "transfer",
-      // a man tased on his feet, or one who lay down when told, is not tased
-      // again on the floor; a medical carry is never tased
-      tased: !!opts.tased || kind === "medical",
-      tied: false, stall: 0,
-      screws, tx: 0, tz: 0, hx: 0, hz: 1,
+      kind: "medical", wakeHp: opts.wakeHp || 55,
+      screws, carryS: null, carryTried: false,
     };
   }
-  // tear the scene down without landing anything: a transfer card, a new run,
-  // a death, leaving play. Safe from anywhere, any number of times.
+  // tear the scene down without landing anything: a new run, a death,
+  // leaving play. Safe from anywhere, any number of times.
   function endEscort() {
     if (!esc) return;
-    const e0 = esc;
-    dropHolds(e0);
+    dropHolds(esc);
     camDrop();
     releaseScrews();
     esc = null;
-    tiesOn(false);
     standUp();
     player.subdue = 0; player.stun = 0;
     setCaptureState("normal", 0);
-    // a man waking in the infirmary gets up off his side (the normal-state
-    // damp below stands him); everyone else is already on his feet
-    if (!(e0 && e0.kind === "medical")) CBZ.playerChar.group.rotation.z = 0;
     if (fadeEl) fadeEl.style.opacity = "0";
   }
   function escortTick(dt) {
-    const e = esc, ch = CBZ.playerChar, P = player;
+    const e = esc, P = player;
     e.t += dt; e.total += dt;
     // nothing else may move, hit or grab you mid-scene
     P.stun = Math.max(P.stun || 0, 0.5); g.invuln = Math.max(g.invuln || 0, 0.6);
-    P.captureT = 60; P.captureState = e.kind === "medical" ? "downed" : "cuffed";
-    // a screw shot off the scene drops out of it; the man is still cuffed
+    P.captureT = 60; P.captureState = "downed";
+    // a screw shot off the scene drops out of it
     for (let i = e.screws.length - 1; i >= 0; i--) if (!screwUsable(e.screws[i])) { e.screws[i]._escort = false; e.screws.splice(i, 1); }
     const lead = e.screws[0], second = e.screws[1];
     const px = P.pos.x, pz = P.pos.z;
-    // down on whichever side the hit put you on (a tackle lands you on the other)
-    const side = ch.group.rotation.z < -0.05 ? -1 : 1;
-    const lie = () => holdDown(dt, side);
+    const lie = () => holdDown(dt, 1);
     // the second screw takes the far side of the body
-    const flank = (sx, sz, sgn) => {
+    const flank = () => {
       const ax = lead ? lead.group.position.x - px : 1, az = lead ? lead.group.position.z - pz : 0;
       const al = Math.hypot(ax, az) || 1;
-      return { x: px - az / al * 1.5 * sgn - ax / al * 0.3, z: pz + ax / al * 1.5 * sgn - az / al * 0.3 };
+      return { x: px - az / al * 1.5 - ax / al * 0.3, z: pz + ax / al * 1.5 - az / al * 0.3 };
     };
 
     if (e.phase === "down") {
       lie(); camGround(px, P.pos.y, pz);
       let near = Infinity;
       if (lead) near = screwStep(lead, px, pz, ESC.REACH, px, pz, true, dt);
-      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, true, dt); }
+      if (second) { const f = flank(); screwStep(second, f.x, f.z, 0.2, px, pz, true, dt); }
       // arrived = within reach, OR he has stopped gaining on you (a body on a
       // ledge, a wall on the straight line): the beat goes on from where he is
       if (lead) { if (near < (e.gain == null ? Infinity : e.gain) - 0.02) { e.gain = near; e.stuck = 0; } else e.stuck = (e.stuck || 0) + dt; }
       const arrived = lead ? (near <= 0.35 || (e.stuck > 0.8 && near < 3.0)) : false;
-      if (arrived || e.t >= (lead ? ESC.DOWN_MAX : ESC.DOWN_ALONE)) {
-        e.phase = e.kind === "medical" ? "carry" : (!e.tased && lead) ? "tase" : "lift"; e.t = 0;
-      }
+      if (arrived || e.t >= (lead ? ESC.DOWN_MAX : ESC.DOWN_ALONE)) { e.phase = "carry"; e.t = 0; }
       return;
     }
-    // THE CARRY (downed / starving): two screws get you off the floor and the
-    // lens goes dark on the way to the infirmary. No cuffs, no strike.
+    // THE CARRY: the lead screw gets you up over his shoulder
+    // (CBZ.verbs.carry) and walks off with you toward the infirmary; the
+    // lens goes dark on the way. No cuffs, no strike.
     if (e.phase === "carry") {
       camGround(px, P.pos.y, pz);
-      // the lead screw gets you up over his shoulder (CBZ.verbs.carry) and
-      // walks off with you toward the infirmary; the lens goes dark on the way
       if (!e.carryS && !e.carryTried && lead && VB()) { e.carryTried = true; e.carryS = VB().carry(lead, pa(), { far: true }); }
       const S = e.carryS && !e.carryS.done ? e.carryS : null;
       if (!S) lie();
       if (S && S.phase === "hold") VB().walk(S, S, INFIRMARY.x0, (INFIRMARY.z0 + INFIRMARY.z1) / 2, 1.2, dt);
-      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
+      if (second) { const f = flank(); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
       const fadeAt = S ? 2.6 : 1.4;
       if (e.t >= fadeAt && fadeEl) fadeEl.style.opacity = Math.min(1, (e.t - fadeAt) / ESC.FADE).toFixed(2);
       if (e.t < fadeAt + ESC.FADE) return;
@@ -1069,154 +1183,8 @@
       e.phase = "wake"; e.t = 0;
       return;
     }
-    if (e.phase === "tase") {
-      lie(); camGround(px, P.pos.y, pz);
-      if (!e.tased) {
-        e.tased = true;
-        // the drive-stun: the lead screw's own taser on the body, same event
-        // the standing tase fires, same body-pose signal
-        if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) { try { CBZ.taserFx.actorTasePlayer(lead); } catch (er) {} }
-        if (CBZ.sfx) { try { CBZ.sfx("tase"); } catch (er) {} }
-        if (CBZ.shake) CBZ.shake(0.55);
-      }
-      // (the shudder is the rig's taser lock, entities/meleeposes.js: the old
-      // `body.rotation.x += 0.28` here ACCUMULATED on a damped joint every
-      // frame and folded the torso through the floor)
-      if (lead) screwStep(lead, px, pz, ESC.REACH, px, pz, false, dt);
-      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
-      if (e.t >= ESC.TASE) { e.phase = "lift"; e.t = 0; }
-      return;
-    }
-    // UP, THEN THE CUFFS: the screws get you onto your feet, the lead turns
-    // you round, both wrists behind your back and the ratchet (CBZ.verbs.cuff)
-    if (e.phase === "lift") {
-      camGround(px, P.pos.y, pz);
-      standUp();
-      if (ch.group.rotation.z) ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, 0, 7, dt);
-      if (ch.body && ch.body.rotation.x) ch.body.rotation.x = CBZ.damp(ch.body.rotation.x, 0, 9, dt);
-      if (lead) screwStep(lead, px, pz, ESC.REACH * 0.75, px, pz, false, dt);
-      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
-      // on his feet first (the get-up plays out), then the cuffs
-      if ((e.t >= ESC.LIFT && !(ch.fall && ch.fall.on)) || e.t >= ESC.LIFT + 2.5) {
-        ch.group.rotation.z = 0;
-        const tied = function () {
-          if (e.tied) return;
-          e.tied = true;
-          tiesOn(true);
-          if (lead && CBZ.guardLine) { try { CBZ.guardLine(lead, "cuff", { force: true }); } catch (er) {} }
-        };
-        // he has you up by the arms (force: you were on the floor a beat ago)
-        e.cuffS = lead && VB() ? VB().cuff(lead, pa(), { far: true, force: true, onOutcome: function (S, k) { if (k === "cuffed") tied(); } }) : null;
-        if (!e.cuffS) {
-          // nobody's hands can reach you: no phantom cuffs, the scene is off
-          const gd = lead;
-          endEscort();
-          if (gd) { gd.capCD = 2.5; gd.hunt = Math.max(gd.hunt || 0, 4); }
-          return;
-        }
-        e.phase = "cuff"; e.t = 0;
-      }
-      return;
-    }
-    if (e.phase === "cuff") {
-      camGround(px, P.pos.y, pz);
-      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
-      // HE TORE LOOSE before the cuffs closed (verbs.js struggle): the scene is
-      // over, you are on your feet with a screw staggering off you, and it is
-      // a chase again
-      if (e.cuffS && e.cuffS.done && !e.tied && e.cuffS.result && e.cuffS.result.outcome === "escaped") {
-        const gd = lead;
-        endEscort();
-        if (gd) { gd.capCD = 2.5; gd.hunt = Math.max(gd.hunt || 0, 4); }
-        return;
-      }
-      // the cuffs are on when HIS hands closed them, not when a clock ran out
-      if (e.cuffS && !e.cuffS.done) return;
-      if (!e.tied) {
-        const gd = lead;
-        endEscort();
-        if (gd) { gd.capCD = 2.5; gd.hunt = Math.max(gd.hunt || 0, 4); }
-        return;
-      }
-      dropHolds(e);
-      const w = walkTarget();
-      e.tx = w.x; e.tz = w.z;
-      const dx = e.tx - px, dz = e.tz - pz, d = Math.hypot(dx, dz);
-      if (d > 0.01) { e.hx = dx / d; e.hz = dz / d; }
-      else { e.hx = Math.sin(ch.group.rotation.y); e.hz = Math.cos(ch.group.rotation.y); }
-      // the march: a hand on your arm, one on the ties (CBZ.verbs.escort)
-      e.escS = lead && VB() ? VB().escort(lead, pa(), { far: true }) : null;
-      if (CBZ.cineCam && e.cam) CBZ.cineCam.snap = true;      // CUT to the walk
-      e.phase = "walk"; e.t = 0;
-      return;
-    }
-    // ---- walk / fade: the march, with the blackout riding on the end of it
-    const marching = e.phase === "walk" || e.phase === "fade";
-    if (marching) {
-      const dx = e.tx - px, dz = e.tz - pz, d = Math.hypot(dx, dz);
-      // the legs follow the GROUND COVERED, never the intent: a wall between
-      // you and the door must not make a cuffed man jog on the spot
-      let moved = 0;
-      const held = e.escS && !e.escS.done && e.phase === "walk" ? e.escS : null;
-      if (d > 0.6) {
-        e.hx = dx / d; e.hz = dz / d;
-        const step = Math.min(d - 0.5, ESC.WALK_SPD * dt);
-        const ox = P.pos.x, oz = P.pos.z;
-        if (held) {
-          // the screw walks behind you; you go where his hands send you
-          // (you are placed at the end of this frame: measure last frame's step)
-          const lp = e.lastP || (e.lastP = { x: ox, z: oz });
-          VB().walk(held, held, e.tx - e.hx * 0.9, e.tz - e.hz * 0.9, ESC.WALK_SPD, dt, Math.atan2(e.hx, e.hz));
-          moved = Math.hypot(ox - lp.x, oz - lp.z); lp.x = ox; lp.z = oz;
-        } else {
-          // the march goes through the one mover (systems/bodymove.js)
-          if (CBZ.bodyMove) { _marchO.clearRadius = BODY_R; CBZ.bodyMove(P, e.hx * step, 0, e.hz * step, _marchO); }
-          else { P.pos.x += e.hx * step; P.pos.z += e.hz * step; }
-          P.vy = 0;
-          moved = Math.hypot(P.pos.x - ox, P.pos.z - oz);
-        }
-        e.stall = moved < 0.25 * step ? e.stall + dt : 0;
-      }
-      if (!held) {
-        ch.group.position.copy(P.pos);
-        ch.group.rotation.y = lerpAng(ch.group.rotation.y, Math.atan2(e.hx, e.hz), 1 - Math.pow(0.002, dt));
-      }
-      ch.cuffed = true;
-      if (CBZ.animChar) CBZ.animChar(ch, moved / Math.max(dt, 1e-4), dt);
-      camWalk(P.pos.x, P.pos.y, P.pos.z, e.hx, e.hz);
-      // the lens eases round behind the march — slowly, never a locked camera
-      if (CBZ.cam) CBZ.cam.yaw = lerpAng(CBZ.cam.yaw, Math.atan2(e.hx, e.hz) + Math.PI, 1 - Math.pow(0.55, dt));
-      const back = (CBZ.cityRestrain && CBZ.cityRestrain.ESCORT_D) || 0.9;
-      if (lead && !held) screwStep(lead, P.pos.x - e.hx * (back + 0.55), P.pos.z - e.hz * (back + 0.55), 0.02, P.pos.x + e.hx, P.pos.z + e.hz, false, dt);
-      if (second) screwStep(second, P.pos.x - e.hx * 0.6 - e.hz * 1.0, P.pos.z - e.hz * 0.6 + e.hx * 1.0, 0.02, P.pos.x + e.hx, P.pos.z + e.hz, false, dt);
-      if (e.phase === "walk") {
-        // arrived, walked long enough, or walled off: the rest is off-screen
-        if ((d <= 0.6 && e.t >= ESC.WALK_MIN) || e.t >= ESC.WALK_MAX || (e.stall > 0.7 && e.t >= 1.0)) { e.phase = "fade"; e.t = 0; }
-        return;
-      }
-      // fade
-      if (fadeEl) fadeEl.style.opacity = Math.min(1, e.t / ESC.FADE).toFixed(2);
-      if (e.t < ESC.FADE) return;
-      // ---- THE HAUL SITE: your own cell door. An ESCAPE capture is the one
-      // place a strike (and a transfer) can land, cuffed by construction; any
-      // other cuffing is the hole, which is time, not a strike.
-      dropHolds(e);
-      camDrop(); releaseScrews();
-      if (!landInCell()) { P.pos.copy(CBZ.SPAWN); P.vy = 0; if (CBZ.bodyTeleported) CBZ.bodyTeleported(P); ch.group.position.copy(P.pos); }
-      g.detection = 0; g.invuln = 2.0;
-      if (e.kind === "transfer") {
-        g.caughtCount++;
-        applyStrike();                            // a transfer ends the scene (and the run) in here
-        if (!esc) return;
-      } else holeSentence(e.severity);
-      holeRelease = true;
-      if (confineT > 0) sealPlayerCell();
-      e.phase = "wake"; e.t = 0;
-      return;
-    }
     if (e.phase === "wake") {
       if (fadeEl) fadeEl.style.opacity = Math.max(0, 1 - e.t / ESC.WAKE).toFixed(2);
-      if (e.tied && e.t >= 0.3) { e.tied = false; tiesOn(false); }
       if (e.t >= ESC.WAKE) endEscort();
       return;
     }
@@ -1486,6 +1454,14 @@
       arrive: 0.55,
       onCuffed: function () {
         law("cuffs");
+        if (o.floor) {
+          // the knee on you was the pressure on the wound: you come up in
+          // their hands awake (what the carry did at the pick-up)
+          if (CBZ.vitals) CBZ.vitals.reset(player);
+          player.hp = Math.max(player.hp || 0, o.floor.wakeHp || 30);
+          // his hand is on your arm from the lift into the walk: no free step between
+          player.stun = 0.8;
+        }
         if (CBZ.guardLine) { try { CBZ.guardLine(gd, "cuff", { force: true }); } catch (e) {} }
         if (CBZ.killstreakBreak) CBZ.killstreakBreak("Cuffed");
         haul = { h: h, gd: gd, kind: kind, severity: severity, goals: cellGoals(), t: 0, fade: -1 };
@@ -1501,6 +1477,25 @@
         setCaptureState("normal", 0);
       },
       onMissed: function () {
+        if (o.floor) {
+          // he never got his knee on you (a bunk in the way, the approach ran
+          // out): you are still on the floor and he, or the next man, comes again
+          if (arrest && arrest.gd === gd) arrest = null;
+          gd._escort = false;
+          const ch = CBZ.playerChar;
+          if (ch && ch.fall && ch.fall.on && !player.dead) {
+            down = newDown(o.floor.weapon, o.floor.by, o.floor.wakeHp, gd);
+            down.t = Math.max(LAW.BEAT, o.floor.t || 0);
+            down.excl = (o.floor.excl || []).slice();
+            down.tries = (o.floor.tries || 0) + 1;
+            if (down.tries >= 2) { down.excl.push(gd); down.lead = null; down.tries = 0; }   // the next man tries it
+            setCaptureState("downed", 60);
+          } else {
+            arrest = { gd, phase: "chase", t: 0, t0: clock(), taseCD: 0, tackles: 0, after: 0 };
+            setCaptureState("normal", 0);
+          }
+          return;
+        }
         // you walked off while he reached: that is not complying
         if (arrest && arrest.gd === gd) { gd._escort = false; resist("walked"); }
       },
@@ -1527,7 +1522,10 @@
       return;
     }
     if (a) a.take = h;
-    setCaptureState("normal", 0);
+    // standing, your controls are yours until his hands land; on the floor
+    // you are his already and the yard stays off you
+    if (o.floor || o.subdued || o.pinned) setCaptureState("subdued", 10);
+    else setCaptureState("normal", 0);
   }
   function backToChase(gd) {
     if (gd) gd._escort = false;
@@ -1583,6 +1581,15 @@
     if (!H) return;
     H.t += dt;
     if (!H.gd || H.gd.dead) { if (H.h && H.h.done) haulEnd(false); return; }
+    // the take under the walk ended without landing it or breaking it (a
+    // cancel from outside): no 28 s of a man stood in place, you are loose in
+    // cuffs and the screws come for you (tryCapture re-takes a cuffed man)
+    if (H.h && H.h.done && H.h.result && H.h.result.outcome !== "arrived") {
+      const gd = H.gd;
+      haulEnd(false);
+      if (arrestGuardOk(gd)) { gd.hunt = Math.max(gd.hunt || 0, 6); gd.capCD = 0; }
+      return;
+    }
     // in custody: the yard's detectors and the schedule leave you alone
     // ("escorted" is not a prone state: your body is the verb's)
     player.captureState = "escorted"; player.captureT = 0.5;
@@ -1601,9 +1608,74 @@
   }
   CBZ.prisonHaul = function () { return haul ? { phase: haul.h ? haul.h.phase : null, goals: haul.goals.length, t: haul.t } : null; };
 
+  /* ---- THE SECOND OFFICER ---------------------------------------------------
+     A wing backs its screw up with HANDS, not a number. While a take is live
+     (CBZ.arrest.active: his hands are reaching for you, cuffing you, or
+     walking you) the nearest other screw inside HELP.R comes in and joins it
+     (CBZ.verbs.assist): on the floor he kneels across the backs of your legs
+     from the other side; on your feet he takes your other arm and walks with
+     you. Standing next to you he is what arrest.js's backup counts, so the
+     hold is harder to beat and you can see why. Nobody near and you are
+     winning (the struggle more than HELP.CALL_PROG off his grip): the officer
+     calls it in and the nearest screw in HELP.CALL_R runs over (sent on his
+     own hunt walk). The take ends: he lets go; you got loose: he chases. */
+  const HELP = { R: 9, JOIN_R: 3.5, CALL_R: 45, CALL_PROG: 0.35 };
+  let helper = null, helpCalled = null;
+  function dropHelper(chase) {
+    if (!helper) return;
+    const gd = helper;
+    helper = null;
+    const V = VB();
+    if (V && V.unassist) V.unassist(gd);
+    gd._escort = false;
+    if (gd.char) gd.char.crouch = false;
+    if (chase && arrestGuardOk(gd)) { gd.hunt = Math.max(gd.hunt || 0, 6); gd.capCD = 0; }
+    else gd.capCD = Math.max(gd.capCD || 0, 3);
+  }
+  function helperTick(dt) {
+    const A = AR(), V = VB();
+    const h = A && A.active ? A.active() : null;
+    if (!h || !V || !V.assist || player.dead) {
+      dropHelper(!!(arrest && arrest.phase === "chase"));
+      helpCalled = null;
+      return;
+    }
+    const lead = h.officer;
+    const px = player.pos.x, pz = player.pos.z;
+    if (helper && (!arrestGuardOk(helper) || helper === lead || helper.kind === "warden")) dropHelper(false);
+    // the session he would join: the cuffs, else the walk
+    const S = h.cuffS && !h.cuffS.done ? h.cuffS : h.escS && !h.escS.done ? h.escS : null;
+    if (!helper) {
+      const c = nearestScrew(px, pz, [lead], HELP.R);
+      if (c) { helper = c; c._escort = true; c.hunt = 0; c._chase = null; }
+      else if (S && S.cst && S.cst.prog > HELP.CALL_PROG && helpCalled !== h) {
+        // he is losing you: he calls it in, and the nearest man comes running
+        helpCalled = h;
+        const far = nearestScrew(px, pz, [lead], HELP.CALL_R);
+        if (far) sendTo(far, px, pz);
+        if (A.say) A.say(lead, "Need a hand here!", 1.8);
+      }
+    }
+    if (!helper) return;
+    if (V.assisting && V.assisting(helper) === S && S) return;      // his hands are on you: the verb walks him
+    const d = gdDist(helper);
+    // nothing to join yet (his partner is still stepping in, or you are being
+    // got up off the floor): he closes in and stands ready at your shoulder
+    const ready = S && !(S.verb === "cuff" && S.phase === "approach" && !S.ground);
+    if (!ready || d > HELP.JOIN_R || !V.assist(helper, S)) {
+      screwStep(helper, px, pz, ready ? 0.9 : 1.6, px, pz, d > 4, dt);
+    }
+  }
+
   function arrestTick(dt) {
     const a = arrest, gd = a.gd;
-    if (a.phase === "take") return;                      // arrest.js has the hands; its callbacks move us on
+    if (a.phase === "take") {
+      // arrest.js has the hands; its callbacks move us on. A take that ended
+      // with none of them (cancelled under us) must not leave the arrest
+      // parked on "take" for good: it is a chase again.
+      if (a.take && a.take.done && arrest === a) backToChase(gd);
+      return;
+    }
     if (!arrestGuardOk(gd)) { cancelArrest(a.phase !== "order"); return; }
     a.t += dt;
     if (a.taseCD > 0) a.taseCD -= dt;
@@ -1677,7 +1749,16 @@
   // ORDER_R. Returns how close he should stand (null = his own reach).
   CBZ.tryCapture = function (gd, dt) {
     if (player.dead || g.role === "cop") return null;
-    if (esc || down || haul) return null;
+    if (esc || haul) return null;
+    if (down) {
+      // A WANTED MAN ON THE FLOOR: the screw with eyes on him goes to the
+      // body and, in reach with nothing between, kneels on him for the cuffs
+      if (!down.law || gd.kind === "warden" || !arrestGuardOk(gd) || down.excl.indexOf(gd) >= 0) return null;
+      if (!down.lead || !arrestGuardOk(down.lead) || down.lead._escort) down.lead = gd;
+      if (down.lead !== gd) return ARREST.STANDOFF + 1.2;
+      if (down.t >= LAW.BEAT && gdDist(gd) <= LAW.NEAR && lineTo(gd) && floorTake(gd)) return ESC.REACH;
+      return ESC.REACH;
+    }
     if (arrest) {
       if (arrest.gd !== gd) return ARREST.STANDOFF + 1.2;
       return arrest.phase === "order" ? ARREST.STANDOFF : arrest.phase === "chase" ? 1.2 : ESC.REACH;
@@ -1738,6 +1819,7 @@
     // not on PAUSE: a pause mid-haul used to end the scene and set you loose
     CBZ.jailBoost.onStateExit(function () {
       endEscort(); releasePlayerCell(); confineT = 0; confineShown = -1;
+      dropHelper(false);
       cancelArrest(false); haulEnd(true);
       arrest = null; down = null; deathT = 0; holeRelease = false;
     }, ["title", "won", "lost"]);
@@ -1948,6 +2030,7 @@
     // new run? clear every leftover before anything else ticks
     if (pollStrikeRun && pollStrikeRun()) {
       endEscort(); releasePlayerCell(); muster(false);
+      dropHelper(false);
       cancelArrest(false); haulEnd(true);
       confineT = 0; confineShown = -1; cellWatchCD = 0; sentShown = -1; beatI = 0; beatT = 0; sentCall = "";
       beatLock = false; intakeDone = false; lastServed = -1;
@@ -2013,6 +2096,7 @@
     if (player.dead) {
       if (esc) { camDrop(); releaseScrews(); esc = null; tiesOn(false); }
       if (haul) haulEnd(true);
+      dropHelper(false);
       if (arrest) cancelArrest(false);
       down = null;
       player.captureState = "dead";
@@ -2042,6 +2126,8 @@
     if (esc) { escortTick(dt); return; }
     // cuffed and walked (CBZ.arrest.take has the bodies; this is the walk's clock)
     if (haul) haulTick(dt);
+    // the second officer's hands on any live take (cuffs, the walk)
+    helperTick(dt);
     // on the floor: the screws are coming, and steel can still finish you
     if (down) { downTick(dt); return; }
     if (arrest) {

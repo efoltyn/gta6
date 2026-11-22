@@ -1219,13 +1219,26 @@
      taken behind him and cuffed (the click), the other brought round to it.
      ~3.4 s: align 0.6 (the knee goes down), contact 0.6 (the first wrist),
      drive 1.6, outcome, release 0.5 (the officer comes up). He is LEFT
-     LYING, cuffed: whoever cuffed him hauls him up (V.getUp) after. */
+     LYING, cuffed: whoever cuffed him hauls him up (V.getUp) after.
+
+     UP BY THE ARM (opts.lift, 2026-11-22: the prison's arrest). The release
+     is the lift: the moment the second cuff closes the officer's head-side
+     hand slides off the wrists onto the man's near upper arm, the man's own
+     get-up plays (meleeposes.js, pushed up off his face with his hands
+     behind him), and the officer comes up off his knee WITH him, hand on
+     the arm the whole way, over the get-up's own length. He hands over to
+     the escort standing, not lying. */
+  function liftDur(S) {
+    const MP = CBZ.meleePoses, f = S.T.ch && S.T.ch.fall;
+    return MP && MP.fallTimes ? MP.fallTimes(f && f.variant ? f.variant : "face").getup : 1.6;
+  }
+  function lifting(S) { return S.verb === "cuff" && S.ground && !!S.opts.lift && !!(S.T.ch && S.T.ch.cuffed); }
   DEF.cuff = {
     face: "same", hold: false, speed: 2.4, close: 1.0, allowDown: true, onExplicit: 3,
     work: (S) => S.A.depth + S.T.depth + 0.27 * S.A.arm,
     dur(S, ph) {
       if (S.verb === "uncuff") return ph === "align" ? 0.45 : ph === "contact" ? 0.32 : ph === "drive" ? 0.6 : ph === "outcome" ? 0.12 : ph === "release" ? 0.35 : 0;
-      if (S.ground) return ph === "align" ? 0.6 : ph === "contact" ? 0.6 : ph === "drive" ? 1.6 : ph === "outcome" ? 0.1 : ph === "release" ? 0.5 : 0;
+      if (S.ground) return ph === "align" ? 0.6 : ph === "contact" ? 0.6 : ph === "drive" ? 1.6 : ph === "outcome" ? 0.1 : ph === "release" ? (lifting(S) ? liftDur(S) : 0.5) : 0;
       return ph === "align" ? 0.45 : ph === "contact" ? 0.5 : ph === "drive" ? 1.45 : ph === "outcome" ? 0.12 : ph === "release" ? 0.35 : 0;
     },
     poseA: (S) => S.ground ? "a.kneelCuff" : S.phase === "approach" || S.phase === "align" ? "a.reach" : "a.cuff",
@@ -1235,6 +1248,23 @@
     selfT(S) {       // his arms come behind his back as he is turned
       const k = S.phase === "align" ? 0.7 * smooth(S.k) : S.phase === "approach" ? 0 : 1;
       return k;
+    },
+    /* STANDING, ONE WRIST AND THEN THE OTHER. Both arms used to come behind
+       him together at the align (selfT above), so the "first cuff, then the
+       second wrist brought round" the officer's hands play was done to two
+       wrists already side by side. The first (his RIGHT, under the officer's
+       right hand) is drawn back as he is turned and is there by the end of
+       the contact; the other hangs half back until the first ratchet clicks
+       (drive 0.34) and is then brought round to it. Uncuffing keeps selfT. */
+    selfArms(S, vp) {
+      if (S.verb !== "cuff" || S.ground) return false;
+      const ph = S.phase, k = S.k;
+      const first = ph === "approach" ? 0 : ph === "align" ? 0.55 * smooth(k) : ph === "contact" ? 0.55 + 0.45 * smooth(k) : 1;
+      const second = ph === "approach" ? 0 : ph === "align" ? 0.2 * smooth(k) : ph === "contact" ? 0.2
+        : ph === "drive" ? 0.2 + 0.8 * smooth((k - 0.36) / 0.5) : 1;
+      vp.cuffArms(S.T.ch, second, first);           // (left, right): the right goes first
+      S.T.ch._vcufF = cuffFrame;
+      return true;
     },
     hands(S) {
       if (S.ground) groundHands(S);
@@ -1259,6 +1289,12 @@
       if (ph === "contact" && S.ground) groundFirst(S);
       if (ph === "contact" && S.verb === "cuff") handCuffsOn(S);
       if (ph === "align" && S.ground) groundAlign(S);
+      // the lift: his own get-up starts as the officer's hand takes the arm
+      if (ph === "release" && lifting(S) && CBZ.meleePoses && CBZ.meleePoses.getUp) {
+        S.lifting = true;
+        if (S.roll && !S.roll.sw) rollSwitch(S);
+        CBZ.meleePoses.getUp(S.T.ch);
+      }
     },
     outcome(S) {
       setCuffs(S.t, S.verb === "cuff");
@@ -1562,7 +1598,7 @@
   // he stays down while the officer is on him (the fall's own clock is held)
   function holdFall(S) {
     const f = S.T.ch && S.T.ch.fall;
-    if (!f || !f.on) return;
+    if (!f || !f.on || S.lifting) return;           // (being lifted: his get-up plays)
     f.hold = true;
     if (f.phase === "getup" && (f.gt || 0) < 0.4) { f.phase = "down"; f.gt = 0; }
   }
@@ -1609,6 +1645,20 @@
     const on = (h) => S.kA[h] >= 0.999 && (S.phase !== "contact" || S.k >= 1);
     S.onA[0] = on(0) && !(mix > 0 && mix < 0.999);
     S.onA[1] = on(1);
+    if (S.lifting && S.phase === "release") {
+      // UP BY THE ARM: the head-side hand slides to his near upper arm and
+      // stays on it while he rises; the other lets go of the wrists
+      const h = S.gs && S.gs.side < 0 ? 1 : 0, o = 1 - h;
+      const arm = f > 0 ? "upperArmL" : "upperArmR";
+      const slide = smooth(S.k / 0.3);
+      if (slide >= 0.999) { S.handsA[h] = arm; S.handsA2[h] = null; S.mixA[h] = 0; }
+      else { S.handsA2[h] = arm; S.mixA[h] = slide; }
+      S.gA[h] = "grip";
+      S.kA[h] = 1 - smooth((S.k - 0.88) / 0.12);
+      S.onA[h] = slide >= 0.999 && S.kA[h] >= 0.999;
+      S.kA[o] = 1 - smooth(S.k / 0.25);
+      S.onA[o] = false;
+    }
   }
   // his own arms, one then the other (the first by contact, the second by drive)
   function groundArms(S, vp) {
@@ -2394,6 +2444,7 @@
       // his own arms: behind the back for the cuff / escort
       const selfK = def.selfT ? def.selfT(S) : 0;
       if (T.ch.cuffed) { if (vp) vp.cuffArms(T.ch, 1); T.ch._vcufF = cuffFrame; }
+      else if (def.selfArms && vp && def.selfArms(S, vp)) { /* one wrist, then the other */ }
       else if (selfK > 0 && vp) {
         if (S.verb === "escort") vp.wristTo(T.ch, -1, cuffWorld(T.ch, -1), selfK);
         else vp.cuffArms(T.ch, selfK);
@@ -3075,6 +3126,157 @@
   }
 
   /* ============================================================
+     A SECOND PAIR OF HANDS — V.assist(a, S)
+
+     An arrest with two officers in reach used to be one officer working and
+     the other standing off at the order distance, watching. Now the second
+     one joins the session's TARGET:
+       on the floor (a ground cuff)   he goes down on the other side of the
+                                      man and puts his knee across the backs
+                                      of the man's thighs (the same knee-down
+                                      body as the cuffer, a.kneelCuff, the
+                                      knee aimed at the legs), a hand flat on
+                                      the small of his back: the legs are
+                                      pinned while the wrists are taken
+       on his feet (a standing cuff,  he takes the man's other arm: at his
+       the escort walk)               right shoulder, his hand on the upper
+                                      arm, walking with him
+     He closes the last metres himself (CBZ.moves, the same stepTo every
+     grabber uses; the caller brings him from further off), he counts as one
+     of the session for the contact solver (a._verbS: humancontact.js does
+     not push him off the man he is kneeling on or off his partner), and he
+     lets go the frame the session ends. His being there is what the
+     struggle's backup count reads (arrest.js A.backup): two men on you hold
+     harder, and you can see why.
+       V.assist(a, S) -> record | null   V.unassist(a)   V.assisting(a) -> S | null
+     ============================================================ */
+  const assists = [];
+  const _aP = { k: 0, t: 0, phase: "hold", moving: false, sag: 0, crouch: 0, seed: 0, ground: false, verb: "assist",
+    strain: 0, writhe: 0, knee: null, kneeSide: 1, twist: 0, buttF: 0, buttS: 0 };
+  const _aK = { x: 0, y: 0, z: 0 };
+  const _aL = new THREE.Vector3(), _aR = new THREE.Vector3(), _aH = new THREE.Vector3();
+  function assistOf(a) { for (let i = 0; i < assists.length; i++) if (assists[i].a === a) return assists[i]; return null; }
+  V.assist = function (a, S) {
+    a = norm(a);
+    if (!a || !S || S.done || isPlayerA(a) || a === S.a || a === S.t) return null;
+    if (S.verb !== "cuff" && S.verb !== "escort") return null;
+    const A = body(a);
+    if (!A.pos || !A.ch || A.dead() || A.down()) return null;
+    const own = sessionOf(a);
+    if (own && own !== S) return null;                 // his hands are already on somebody
+    let R = assistOf(a);
+    if (R && R.S === S) return R;
+    if (R) dropAssist(R);
+    R = { a, S, state: "go", t: 0, k: 0, gx: 0, gz: 0, yaw: 0, side: 1, ground: false, hand: null, arm: "l", speed: 0,
+      hp: [handPoseOf(A.ch, "l"), handPoseOf(A.ch, "r")] };
+    assists.push(R);
+    a._verbS = S;
+    return R;
+  };
+  function dropAssist(R) {
+    const i = assists.indexOf(R);
+    if (i >= 0) assists.splice(i, 1);
+    if (R.a._verbS === R.S) R.a._verbS = null;
+    const A = body(R.a);
+    if (A && A.ch) { const vp = VP(); if (vp) vp.clear(A.ch); restoreHands(A.ch, R.hp); }
+  }
+  V.unassist = function (a) { const R = assistOf(norm(a)); if (R) dropAssist(R); };
+  V.assisting = function (a) { const R = assistOf(norm(a)); return R && !R.S.done ? R.S : null; };
+  // where he goes and what he puts his hands on, read off the man as he is now
+  function assistSpot(R, A, T) {
+    const S = R.S;
+    R.ground = S.verb === "cuff" && !!S.ground && !S.lifting;
+    if (R.ground) {
+      const gs = S.gs;
+      if (!gs) return false;                           // the cuffer has not picked his side yet
+      // the far side of him, kneeling across the backs of his thighs
+      const nx = -gs.nx, nz = -gs.nz;
+      contactPoint(T.ch, "thighBackL", _aL, true);
+      contactPoint(T.ch, "thighBackR", _aR, true);
+      const P = A.ch.profile || {};
+      const kx = (_aL.x + _aR.x) * 0.5 + nx * 0.06, kz = (_aL.z + _aR.z) * 0.5 + nz * 0.06;
+      const ky = Math.max(_aL.y, _aR.y) + (P.legW || 0.34) * GROUND.kneeUp * A.scale;
+      const yaw = Math.atan2(-nx, -nz), xwx = Math.cos(yaw), xwz = -Math.sin(yaw);
+      const side = gs.ux * xwx + gs.uz * xwz >= 0 ? 1 : -1;     // the knee leg on his head side
+      const hipXm = (P.hipX || 0.2) * A.scale * side;
+      const hx = kx + nx * GROUND.hipBack, hz = kz + nz * GROUND.hipBack;
+      R.gx = hx - xwx * hipXm; R.gz = hz - xwz * hipXm; R.yaw = yaw; R.side = side;
+      _aK.x = kx; _aK.y = ky; _aK.z = kz;
+      // the hand on the small of his back, the side nearest him
+      contactPoint(T.ch, "lowBackL", _aL, true);
+      contactPoint(T.ch, "lowBackR", _aR, true);
+      const dl = Math.hypot(_aL.x - R.gx, _aL.z - R.gz), dr = Math.hypot(_aR.x - R.gx, _aR.z - R.gz);
+      R.hand = dl <= dr ? "lowBackL" : "lowBackR";
+      R.arm = side > 0 ? "l" : "r";
+      return true;
+    }
+    // on his feet: at his right shoulder, facing where he faces, his left
+    // hand on the man's right upper arm (the escort has the left arm)
+    const ty = T.yaw(), fx = fwdX(ty), fz = fwdZ(ty);
+    const rx = -Math.cos(ty), rz = Math.sin(ty);           // the man's right (his +x is his left)
+    const off = T.width * 0.5 + A.width * 0.5 + 0.12;
+    R.gx = T.pos.x + rx * off - fx * 0.12; R.gz = T.pos.z + rz * off - fz * 0.12;
+    R.yaw = ty; R.side = 1; R.hand = "upperArmR"; R.arm = "l";
+    return true;
+  }
+  function stepAssist(R, dt) {
+    const S = R.S, A = body(R.a), T = S.T;
+    if (S.done || !A || !A.pos || !A.ch || A.dead() || A.down() || !T || !T.ch || S.tFree) { dropAssist(R); return; }
+    if (sessionOf(R.a) !== S) { dropAssist(R); return; }          // taken by another verb
+    R.t += dt;
+    const vp = VP();
+    const ok = assistSpot(R, A, T);
+    let speed = 0;
+    if (ok) {
+      const rem = Math.hypot(R.gx - A.pos.x, R.gz - A.pos.z);
+      if (R.state === "go") {
+        const near = rem < 0.6;
+        speed = stepTo(R, A, R.a, R.gx, R.gz, near ? R.yaw : null, rem > 2.2 ? 4.2 : 2.4, dt, near);
+        if (rem < 0.08 && Math.abs(angDiff(A.yaw(), R.yaw)) < 0.25) { R.state = "on"; R.t = 0; }
+        else if (R.t > 7) { dropAssist(R); return; }               // could not get round to him
+      } else {
+        // on him: keep the spot (he walks with a walked man, stays put on a lying one)
+        if (rem > 1.6) { R.state = "go"; R.t = 0; R.k = 0; }
+        else if (rem > 0.02) speed = stepTo(R, A, R.a, R.gx, R.gz, R.yaw, Math.max(2.4, (S.tSpeed || 0) * 1.4), dt, true);
+        else A.face(R.yaw, 1 - Math.exp(-12 * dt));
+        R.k = Math.min(1, R.k + dt / (R.ground ? 0.6 : 0.35));
+      }
+    }
+    R.speed = speed;
+    if (CBZ.animChar && A.ch._animAt !== CBZ.now) CBZ.animChar(A.ch, speed, dt);
+    if (!ok || R.state !== "on" || !vp) return;
+    // the body
+    _aP.k = R.k; _aP.t = R.t; _aP.phase = R.k < 1 ? "align" : "hold"; _aP.seed = S.seed;
+    _aP.moving = speed > 0.4; _aP.strain = S.strain || 0; _aP.writhe = 0;
+    if (R.ground) {
+      const y = A.yaw(), dx = _aK.x - A.pos.x, dz = _aK.z - A.pos.z;
+      _aK.x = dx * Math.cos(y) - dz * Math.sin(y);
+      _aK.z = dx * Math.sin(y) + dz * Math.cos(y);
+      _aK.y = _aK.y - A.pos.y;
+      _aP.knee = _aK; _aP.kneeSide = R.side; _aP.twist = 0;
+      vp.set(A.ch, "a.kneelCuff", _aP, 11);
+    } else {
+      _aP.knee = null;
+      vp.set(A.ch, "a.escort", _aP, 11);
+    }
+    vp.write(A.ch, dt);
+    // the hand
+    A.ch.group.updateMatrixWorld(true);
+    T.ch.group.updateMatrixWorld(true);
+    if (contactPoint(T.ch, R.hand, _aH, true)) {
+      setHand(A.ch, R.arm, R.ground ? "plant" : "grip");
+      handTo(A.ch, R.arm, _aH, smooth(R.k));
+    }
+    if (CBZ.lockCharacterHips) CBZ.lockCharacterHips(A.ch);
+  }
+  function stepAssists(dt) {
+    for (let i = assists.length - 1; i >= 0; i--) {
+      const R = assists[i];
+      try { stepAssist(R, dt); } catch (e) { dropAssist(R); if (CBZ.CONFIG && CBZ.CONFIG.DEBUG) console.error("[verbs] assist", e); }
+    }
+  }
+
+  /* ============================================================
      THE LATE PASS (order 91)
      ============================================================ */
   let lastMode = null;
@@ -3089,6 +3291,7 @@
       if (lastMode !== null) {
         for (let i = sessions.length - 1; i >= 0; i--) cancel(sessions[i]);
         for (let i = flights.length - 1; i >= 0; i--) endFlight(flights[i], i);
+        for (let i = assists.length - 1; i >= 0; i--) dropAssist(assists[i]);
       }
       lastMode = m;
     }
@@ -3102,6 +3305,8 @@
       if (!S || S.done) continue;
       try { stepSession(S, dt); } catch (e) { finish(S, true); if (CBZ.CONFIG && CBZ.CONFIG.DEBUG) console.error("[verbs]", e); }
     }
+    // the second pairs of hands, after the sessions they join have placed the man
+    if (assists.length) stepAssists(dt);
     if (vp) vp.fade(dt);
     poseCuffs(dt);
   }
