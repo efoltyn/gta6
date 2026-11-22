@@ -234,15 +234,14 @@ function stageMarine(input) {
      named hull child where a species has one; anything else falls back to the
      bbox and is read with that caveat. Lower is more torpedo. */
   let bodyW = size.z, bodyL = size.x, onHull = false;
-  group.traverse(function (o) {
-    // Every species names its body <something>Hull — sharkHull, fishHull,
-    // cetaceanHull. Matching only the shark's meant every fish, dolphin and
-    // whale silently fell back to the whole bounding box and was scored down
-    // for growing the swept pectorals §4 asks for. Match the suffix.
-    if (!o.isMesh || !/Hull$/.test(o.name || "")) return;
-    const hb = new T.Box3().setFromObject(o), hs = new T.Vector3(); hb.getSize(hs);
-    if (hs.x > 0) { bodyW = hs.z; bodyL = hs.x; onHull = true; }
-  });
+  // Every sea animal is one skinned body (city/wildlife/aquatic.js) that
+  // publishes its trunk (no fins) as a box in model units: that is the body.
+  const mb = group.userData && group.userData.marineBody;
+  if (mb && mb.trunk) {
+    const sc = (group.scale && group.scale.x) || 1, hs = new T.Vector3();
+    mb.trunk.getSize(hs);
+    if (hs.x > 0) { bodyW = hs.z * sc; bodyL = hs.x * sc; onHull = true; }
+  }
   const planRatio = bodyL > 0 ? bodyW / bodyL : 0;
   const metrics = {
     parts: parts,

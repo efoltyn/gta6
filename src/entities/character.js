@@ -6933,7 +6933,9 @@
     // ---- UPRIGHT (the tread cycle above, verbatim numbers) -----------------
     const tw = Math.sin(st.tread), t2 = Math.sin(st.tread * 2);
     const up = _swU;
-    _swU.bx = 0.95;
+    // treading is upright (a slight lean), the legs in the eggbeater: thighs
+    // out in front as if seated, knees bent, the shins circling out of phase
+    _swU.bx = 0.20;
     _swU.by = 0;
     _swU.laX = -0.35 + t2 * 0.42;
     _swU.laZ = -0.62;
@@ -6941,12 +6943,12 @@
     _swU.raZ = 0.62;
     _swU.elL = -0.85;
     _swU.elR = -0.85;
-    _swU.llX = 0.55 + t2 * 0.42;
-    _swU.rlX = 0.55 - Math.cos(st.tread * 2) * 0.42;
+    _swU.llX = 1.05 + t2 * 0.30;
+    _swU.rlX = 1.05 - Math.cos(st.tread * 2) * 0.30;
     _swU.llZ = 0.06;
     _swU.rlZ = -0.06;
-    _swU.knL = 0.9 + Math.max(0, tw) * 0.3;
-    _swU.knR = 0.9 + Math.max(0, -tw) * 0.3;
+    _swU.knL = 1.35 + Math.max(0, tw) * 0.35;
+    _swU.knR = 1.35 + Math.max(0, -tw) * 0.35;
     _swU.nX = -0.1;
     _swU.nY = 0;
     _swW.cr = cr; _swW.br = br; _swW.P = P; _swW.U = U;
@@ -7081,7 +7083,7 @@
     const pitchDrive = Math.max(-0.55, Math.min(0.55, -(+o.vy || 0) * 0.22));
     ch.group.rotation.x = 0;
     if (ch.body) {
-      ch.body.rotation.x = (0.30 + pitchDrive) * (1 - m) + 0.95 * m;
+      ch.body.rotation.x = (0.30 + pitchDrive) * (1 - m) + 0.20 * m;
       ch.body.position.set(0, (Math.sin(st.stroke * 2) * 0.028) * (1 - m) + (tw * 0.02) * m, 0);
     }
     if (ch.parts) {
@@ -7092,15 +7094,15 @@
       if (ch.parts.ra) { ch.parts.ra.rotation.x = raC * (1 - m) + raT * m; ch.parts.ra.rotation.z = 0.28 + 0.34 * m; }
       // crawl: flutter kick. tread: eggbeater — the legs circle out of phase.
       const llC = sw * 0.30, rlC = -sw * 0.30;
-      const llT = 0.55 + Math.sin(st.tread * 2) * 0.42, rlT = 0.55 - Math.cos(st.tread * 2) * 0.42;
+      const llT = 1.05 + Math.sin(st.tread * 2) * 0.30, rlT = 1.05 - Math.cos(st.tread * 2) * 0.30;
       if (ch.parts.ll) ch.parts.ll.rotation.x = llC * (1 - m) + llT * m;
       if (ch.parts.rl) ch.parts.rl.rotation.x = rlC * (1 - m) + rlT * m;
     }
     if (ch.low) {
       if (ch.low.la) ch.low.la.rotation.x = -0.45 * (1 - m) - 0.85 * m;
       if (ch.low.ra) ch.low.ra.rotation.x = -0.45 * (1 - m) - 0.85 * m;
-      if (ch.low.ll) ch.low.ll.rotation.x = (0.35 + Math.max(0, -sw) * 0.25) * (1 - m) + (0.9 + Math.max(0, tw) * 0.3) * m;
-      if (ch.low.rl) ch.low.rl.rotation.x = (0.35 + Math.max(0, sw) * 0.25) * (1 - m) + (0.9 + Math.max(0, -tw) * 0.3) * m;
+      if (ch.low.ll) ch.low.ll.rotation.x = (0.35 + Math.max(0, -sw) * 0.25) * (1 - m) + (1.35 + Math.max(0, tw) * 0.35) * m;
+      if (ch.low.rl) ch.low.rl.rotation.x = (0.35 + Math.max(0, sw) * 0.25) * (1 - m) + (1.35 + Math.max(0, -tw) * 0.35) * m;
     }
     /* PANIC IS NOT A FASTER STROKE. Somebody who thinks they are about to be
        eaten stops swimming: the arms come clear of the water and beat OVER the
