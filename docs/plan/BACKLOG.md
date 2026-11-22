@@ -9,6 +9,10 @@ The animals pass's eleven items are done: the phone island page loads the shark 
 6. A lying shepherd's elbows sit about 12 mm into the ground after settling; the side, sit and dead rests are within 3 mm.
 7. The ragdoll often rolls dead canids onto their backs; crows climb over tall towers instead of flying round them.
 8. Wound textures are painted slowly at the start of play, so a bite in the first few seconds may show its marks late.
+9. Bites bleed on screen (sprays, pools, a water cloud from real litres) but do not drain the victim's blood in systems/vitals.js, so a bitten man does not weaken or collapse from blood loss. A gameplay change: your call.
+10. The blood film on the water's surface still uses a grey-to-red filter; under a cloud the red covers it, but a film alone over turquoise reads grey-brown.
+11. Land holds: a wolf's foreleg can touch the held man's free arm (up to 6.6 cm) and a coyote's the held foot (about 6 cm) for a frame or two; the knockdown fall is fast (up to 7 m/s at the chest); a bear that lets go mid-rear snaps level in one frame.
+12. The sea near the lens: a bed deeper than about 3.5 m seen steeply down within a few metres reads grey-green instead of deep teal (the water is kept clear there so swimmers stay visible); the fix is the seabed darkening itself by its own depth.
 
 ---
 
