@@ -86,7 +86,7 @@
         built: S.built, drawCalls: draws, obstacles: S.obstacles.length,
         moorings: CBZ.sharkSeaMoorings.length, floats: S.floatPts.length,
         birds: S.birdSt.length, visible: !!(S.group && S.group.visible),
-        pushes: S.pushes || 0, slides: S.slides || 0,
+        pushes: S.pushes || 0, slides: S.slides || 0, airSolids: AIR.list.length,
       };
     },
   };
@@ -128,12 +128,136 @@
     return m;
   };
 
+  // ============================================================
+  //  WHAT A BIRD CAN FLY INTO — every beam, block, post and rock build()
+  //  makes is kept as a capsule, a yawed box or a capped ellipsoid in a 6 m
+  //  grid, so a gull's landing curve or climb-out is tested before it is flown
+  // ============================================================
+  const AIR = { on: false, list: [], grid: new Map(), cell: 6, pad: 0.6 };
+  function airKey(gx, gz) { return (gx + 32768) * 65536 + (gz + 32768); }
+  function airAdd(o, x0, x1, z0, z1) {
+    if (!AIR.on) return;
+    AIR.list.push(o);
+    const c = AIR.cell, p = AIR.pad;
+    for (let gx = Math.floor((x0 - p) / c); gx <= Math.floor((x1 + p) / c); gx++) {
+      for (let gz = Math.floor((z0 - p) / c); gz <= Math.floor((z1 + p) / c); gz++) {
+        const k = airKey(gx, gz);
+        let b = AIR.grid.get(k);
+        if (!b) { b = []; AIR.grid.set(k, b); }
+        b.push(o);
+      }
+    }
+  }
+  function airCapsule(ax, ay, az, bx, by, bz, r) {
+    const upright = Math.abs(ax - bx) + Math.abs(az - bz) < 1e-6;
+    airAdd({ k: 0, ax: ax, ay: ay, az: az, bx: bx, by: by, bz: bz, r: r, top: Math.max(ay, by) + (upright ? 0 : r) },
+      Math.min(ax, bx) - r, Math.max(ax, bx) + r, Math.min(az, bz) - r, Math.max(az, bz) + r);
+  }
+  // is (x, y, z) within c of anything solid? Things whose top is under
+  // `above` are left out (the surface a bird comes down on)
+  function airHit(x, y, z, c, above) {
+    const b = AIR.grid.get(airKey(Math.floor(x / AIR.cell), Math.floor(z / AIR.cell)));
+    if (!b) return false;
+    for (let i = 0; i < b.length; i++) {
+      const o = b[i];
+      if (o.top < above || y - c > o.top) continue;
+      if (o.k === 0) {
+        const vx = o.bx - o.ax, vy = o.by - o.ay, vz = o.bz - o.az, wx = x - o.ax, wy = y - o.ay, wz = z - o.az;
+        const l2 = vx * vx + vy * vy + vz * vz;
+        const t = l2 > 0 ? Math.max(0, Math.min(1, (wx * vx + wy * vy + wz * vz) / l2)) : 0;
+        const dx = wx - vx * t, dy = wy - vy * t, dz = wz - vz * t, rr = o.r + c;
+        if (dx * dx + dy * dy + dz * dz < rr * rr) return true;
+      } else if (o.k === 1) {
+        const dx = x - o.cx, dz = z - o.cz, lx = o.co * dx - o.si * dz, lz = o.si * dx + o.co * dz, ly = y - o.cy;
+        const ex = Math.max(0, Math.abs(lx) - o.hx), ey = Math.max(0, Math.abs(ly) - o.hy), ez = Math.max(0, Math.abs(lz) - o.hz);
+        if (ex * ex + ey * ey + ez * ez < c * c) return true;
+      } else {
+        const dx = (x - o.cx) / (o.rh + c), dy = (y - o.cy) / (o.rv + c), dz = (z - o.cz) / (o.rh + c);
+        if (dx * dx + dy * dy + dz * dz < 1) return true;
+      }
+    }
+    return false;
+  }
+
+  // the tallest top of anything within r (ground plan) of (x, z)
+  function airTop(x, z, r) {
+    const b = AIR.grid.get(airKey(Math.floor(x / AIR.cell), Math.floor(z / AIR.cell)));
+    let top = -1e9;
+    if (b) for (let i = 0; i < b.length; i++) {
+      const o = b[i];
+      if (o.top <= top) continue;
+      let d;
+      if (o.k === 0) {
+        const vx = o.bx - o.ax, vz = o.bz - o.az, wx = x - o.ax, wz = z - o.az, l2 = vx * vx + vz * vz;
+        const t = l2 > 0 ? Math.max(0, Math.min(1, (wx * vx + wz * vz) / l2)) : 0;
+        d = Math.hypot(wx - vx * t, wz - vz * t) - o.r;
+      } else if (o.k === 1) {
+        const dx = x - o.cx, dz = z - o.cz, lx = o.co * dx - o.si * dz, lz = o.si * dx + o.co * dz;
+        d = Math.hypot(Math.max(0, Math.abs(lx) - o.hx), Math.max(0, Math.abs(lz) - o.hz));
+      } else d = Math.hypot(x - o.cx, z - o.cz) - o.rh;
+      if (d < r) top = o.top;
+    }
+    return top;
+  }
+  // the drawn solids themselves (the pier soup and the rocks) as triangles in
+  // a 4 m grid: where a segment first crosses one (0..1), or -1
+  const TRI = { p: null, grid: new Map(), cell: 4 };
+  function triBuild(soups) {
+    let n = 0;
+    for (let i = 0; i < soups.length; i++) n += soups[i].p.length;
+    const P = new Float32Array(n);
+    let o = 0;
+    for (let i = 0; i < soups.length; i++) { P.set(soups[i].p, o); o += soups[i].p.length; }
+    TRI.p = P; TRI.grid.clear();
+    const c = TRI.cell;
+    for (let i = 0; i + 8 < P.length; i += 9) {
+      const x0 = Math.min(P[i], P[i + 3], P[i + 6]), x1 = Math.max(P[i], P[i + 3], P[i + 6]);
+      const z0 = Math.min(P[i + 2], P[i + 5], P[i + 8]), z1 = Math.max(P[i + 2], P[i + 5], P[i + 8]);
+      for (let gx = Math.floor(x0 / c); gx <= Math.floor(x1 / c); gx++) for (let gz = Math.floor(z0 / c); gz <= Math.floor(z1 / c); gz++) {
+        const k = airKey(gx, gz);
+        let b = TRI.grid.get(k);
+        if (!b) { b = []; TRI.grid.set(k, b); }
+        b.push(i);
+      }
+    }
+  }
+  function triHit(ax, ay, az, bx, by, bz) {
+    const P = TRI.p;
+    if (!P) return -1;
+    const c = TRI.cell, dx = bx - ax, dy = by - ay, dz = bz - az;
+    let best = -1;
+    for (let gx = Math.floor(Math.min(ax, bx) / c); gx <= Math.floor(Math.max(ax, bx) / c); gx++) {
+      for (let gz = Math.floor(Math.min(az, bz) / c); gz <= Math.floor(Math.max(az, bz) / c); gz++) {
+        const L = TRI.grid.get(airKey(gx, gz));
+        if (!L) continue;
+        for (let j = 0; j < L.length; j++) {
+          const i = L[j];
+          const e1x = P[i + 3] - P[i], e1y = P[i + 4] - P[i + 1], e1z = P[i + 5] - P[i + 2];
+          const e2x = P[i + 6] - P[i], e2y = P[i + 7] - P[i + 1], e2z = P[i + 8] - P[i + 2];
+          const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+          const det = e1x * px + e1y * py + e1z * pz;
+          if (det > -1e-12 && det < 1e-12) continue;
+          const inv = 1 / det, tx = ax - P[i], ty = ay - P[i + 1], tz = az - P[i + 2];
+          const u = (tx * px + ty * py + tz * pz) * inv;
+          if (u < 0 || u > 1) continue;
+          const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+          const v = (dx * qx + dy * qy + dz * qz) * inv;
+          if (v < 0 || u + v > 1) continue;
+          const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+          if (t >= 0 && t <= 1 && (best < 0 || t < best)) best = t;
+        }
+      }
+    }
+    return best;
+  }
+
   const BOX = new THREE.BoxGeometry(1, 1, 1);
   // a box from a to b (world points), w wide and h tall
   function beam(soup, ax, ay, az, bx, by, bz, w, h, col) {
     const dx = bx - ax, dy = by - ay, dz = bz - az;
     const len = Math.hypot(dx, dy, dz);
     if (len < 1e-4) return;
+    airCapsule(ax, ay, az, bx, by, bz, 0.5 * Math.hypot(w, h));
     _v.set(dx / len, dy / len, dz / len);
     _q.setFromUnitVectors(_X, _v);
     _s.set(len, h, w);
@@ -142,12 +266,24 @@
   }
   // an axis-aligned-to-yaw box centred at (x,y,z)
   function block(soup, x, y, z, yaw, sx, sy, sz, col) {
+    if (AIR.on) {
+      const co = Math.cos(yaw), si = Math.sin(yaw), ex = Math.abs(co) * sx / 2 + Math.abs(si) * sz / 2, ez = Math.abs(si) * sx / 2 + Math.abs(co) * sz / 2;
+      airAdd({ k: 1, cx: x, cy: y, cz: z, co: co, si: si, hx: sx / 2, hy: sy / 2, hz: sz / 2, top: y + sy / 2 }, x - ex, x + ex, z - ez, z + ez);
+    }
     _e.set(0, yaw, 0); _q.setFromEuler(_e); _s.set(sx, sy, sz);
     _m4.compose(new THREE.Vector3(x, y, z), _q, _s);
     soup.add(BOX, _m4, col);
   }
   const CYL = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
+  const CYL_SHUT = new THREE.CylinderGeometry(1, 1, 1, 8, 1, false);
+  // a piling's end grain: a thin closed disc on its top
+  function capTop(soup, x, y, z, r, col) {
+    _q.identity(); _s.set(r, 0.04, r);
+    _m4.compose(new THREE.Vector3(x, y - 0.02, z), _q, _s);
+    soup.add(CYL_SHUT, _m4, col);
+  }
   function post(soup, x, y0, z, y1, r, col) {
+    airCapsule(x, y0, z, x, y1, z, r);
     _q.identity(); _s.set(r, y1 - y0, r);
     _m4.compose(new THREE.Vector3(x, (y0 + y1) / 2, z), _q, _s);
     soup.add(CYL, _m4, col);
@@ -236,6 +372,7 @@
       return (lo + hi) / 2;
     }
 
+    AIR.on = true;
     const root = new THREE.Group();
     root.name = "shark-sea-scene";
     root.userData.terrain = true;
@@ -276,12 +413,14 @@
         const x = px(b.s, l), z = pz(b.s, l);
         const gy = ground(x, z);
         if (top - gy < 0.35) continue;
-        // the head's outer corners stand 0.9 m proud of the deck: bollards to tie to
+        // the head's outer corners stand 1.3 m proud of the deck, over the rail
+        // (1.1 m): bollards to tie to, and posts a gull sits on clear of it
         const proud = b.head && Math.abs(l) === HEADW && (b.s === L - HEAD || b.s >= L - 0.1);
-        piling(built, x, z, gy, proud ? DY + 0.9 : top, 0.21, SEA, pn++);
+        piling(built, x, z, gy, proud ? DY + 1.3 : top, 0.21, SEA, pn++);
+        if (proud) capTop(built, x, DY + 1.3, z, 0.21, WOOD[pn & 3]);
         lss.push({ l: l, x: x, z: z, gy: gy });
         if (gy < SEA - 0.3) pierObs.push({ x: x, z: z, r: 0.3, kind: "piling" });
-        if (proud) S._perches = (S._perches || []).concat([{ x: x, y: DY + 0.9, z: z }]);
+        if (proud) S._perches = (S._perches || []).concat([{ x: x, y: DY + 1.3, z: z }]);
       }
       if (lss.length < 2) continue;
       const lo = lss[0], hi = lss[lss.length - 1];
@@ -456,6 +595,9 @@
       // centre that puts its crown at `top` is top - 0.55 * sy
       const sy = hgt / 1.55;
       _m4.compose(new THREE.Vector3(x, top - 0.55 * sy, z), _q, _s);
+      // for the birds: an ellipsoid round the lumps, capped at the flattened crown
+      const rh = rw * 1.15 * Math.max(1, 0.75 + h01(salt, 4) * 0.4);
+      airAdd({ k: 2, cx: x, cy: top - 0.55 * sy, cz: z, rh: rh, rv: sy * 1.05, top: top }, x - rh, x + rh, z - rh, z + rh);
       rocks.add(g, _m4, function (qx, qy, qz, k) {
         const d = qy - SEA;
         const n = h01(k * 0.71 + salt, qx * 0.3 + qz);
@@ -541,6 +683,13 @@
     const rockMesh = rocks.mesh(stone, "sea-scene-rocks");
     rockMesh.castShadow = true; rockMesh.receiveShadow = true;
     root.add(rockMesh);
+    // a perch is where the drawn top really is under it (a rock's crown is
+    // lumpy; a post's top is open), not where it was meant to be
+    triBuild([built, rocks]);
+    for (let i = 0; i < perches.length; i++) {
+      const pc = perches[i], h = triHit(pc.x, pc.y + 1.2, pc.z, pc.x, pc.y - 1.5, pc.z), y = pc.y + 1.2 - 2.7 * h;
+      if (h >= 0 && Math.abs(y - pc.y) < 0.9) pc.y = y;
+    }
 
     // ============================================================
     //  THINGS THAT FLOAT — instanced, bobbed on the live sea
@@ -677,6 +826,13 @@
       S.gullDeck = { x: S.pier.head.x, z: S.pier.head.z, ux: bux, uz: buz, y: S.pier.deckY, a: 2.9, l: 6.2,
         avoid: [[2.3, 3.8], [2.3, -3.8], [-2.3, 4.6]] };
       for (let i = 0; i < 3; i++) spots.push({ kind: "walk", x: S.pier.head.x, y: S.pier.deckY, z: S.pier.head.z, by: null });
+      // a spot is kept only if a gull standing there has a clear way up
+      for (let i = spots.length - 1; i >= 0; i--) {
+        const sp = spots[i];
+        if (sp.kind === "walk") continue;
+        const probe = { x: sp.x, y: sp.kind === "float" ? SEA - 0.15 : sp.y, z: sp.z, yaw: h01(i, 91) * 6.283 };
+        if (!climbOut(probe, null, null)) spots.splice(i, 1);
+      }
       S.gullSpots = spots; S.gullFlocks = flocks;
       const st = S.birdSt;
       flocks.forEach(function (F) { for (let i = 0; i < F.n; i++) { const g = newGull(st.length); joinFlock(g, F); st.push(g); } });
@@ -691,6 +847,7 @@
       S.birds = fl;
     }
 
+    AIR.on = false;
     A.root.add(root);
     S.group = root;
     S.built = true;
@@ -783,9 +940,12 @@
     g.F = F; g.mode = "fly";
     g.rr0 = F.r * (0.75 + h01(g.i, 42) * 0.5); g.hh0 = F.h + (h01(g.i, 45) - 0.5) * 5;
     if (!g.has) { g.rr = g.rr0; g.hh = g.hh0; return; }
-    // carry on from where it is: the orbit through its position, turning its way
+    // carry on from where it is: the orbit through its position (its height
+    // wobble included, so it does not drop), turning its way; what is under
+    // its circle is read afresh on its first frame
     g.rr = Math.max(10, Math.hypot(g.x - F.x, g.z - F.z)); g.ang = Math.atan2(g.z - F.z, g.x - F.x);
-    g.hh = g.y - seaY(g.x, g.z);
+    g.hh = g.y - seaY(g.x, g.z) - Math.sin(S.t * 0.31 + g.ph) * 2.0;
+    g.flT = 0; g.topNow = null; g.topAhead = null; g.lift = 0;
     g.dir = (g.vx * -Math.sin(g.ang) + g.vz * Math.cos(g.ang)) >= 0 ? 1 : -1;
   }
   // the waterline sits a third of the way up a floating gull's body
@@ -810,34 +970,119 @@
     g.vx = g.vy = g.vz = 0; g.pitch = 0; g.roll = 0; g.has = true;
     g.next = 20 + rndOf(g)() * 70;
   }
-  function freeSpot(g) {
-    const L = S.gullSpots;
-    let best = null, bd = 90;
+  // the k-th nearest free spot within 90 m
+  function freeSpot(g, k) {
+    const L = S.gullSpots, near = [];
     for (let j = 0; j < L.length; j++) {
       const s = L[j];
       if (s.by) continue;
       const d = s.kind === "walk" ? Math.hypot(S.gullDeck.x - g.x, S.gullDeck.z - g.z) : Math.hypot(s.x - g.x, s.z - g.z);
-      if (d < bd) { bd = d; best = s; }
+      if (d < 90) near.push({ s: s, d: d });
     }
-    return best;
+    near.sort(function (a, b) { return a.d - b.d; });
+    return near[k || 0] ? near[k || 0].s : null;
   }
-  function startLanding(g, sp) {
-    sp.by = g; g.spot = sp; g.mode = "land";
-    if (sp.kind === "walk") { const p = deckPoint(g.i * 31 + ((S.t * 7) | 0)); sp.x = p.x; sp.z = p.z; }
-    const x1 = sp.x, z1 = sp.z, y1 = sp.kind === "float" ? seaY(x1, z1) - draft(g) : sp.y;
+  const _hp = { x: 0, y: 0, z: 0 };
+  function herm(L, s, o) {
+    const s2 = s * s, s3 = s2 * s;
+    const a0 = 2 * s3 - 3 * s2 + 1, b0 = s3 - 2 * s2 + s, a1 = -2 * s3 + 3 * s2, b1 = s3 - s2;
+    o.x = a0 * L.x0 + b0 * L.mx0 + a1 * L.x1 + b1 * L.mx1;
+    o.y = a0 * L.y0 + b0 * L.my0 + a1 * L.y1 + b1 * L.my1;
+    o.z = a0 * L.z0 + b0 * L.mz0 + a1 * L.z1 + b1 * L.mz1;
+    return o;
+  }
+  // a Hermite curve from its velocity now onto the spot, arriving along the
+  // run-in turned by `a` round the spot; steep: dropping onto it from above
+  function landingCurve(g, x1, y1, z1, a, steep) {
     const dh = Math.hypot(x1 - g.x, z1 - g.z) || 1;
     const T = Math.max(2.5, Math.min(8, (dh + Math.abs(g.y - y1) * 0.5) / 6.5));
-    // a Hermite curve from its velocity now to 1.5 m/s along the run-in
-    g.L = { x0: g.x, y0: g.y, z0: g.z, mx0: g.vx * T, my0: g.vy * T, mz0: g.vz * T,
-      x1: x1, y1: y1, z1: z1, mx1: (x1 - g.x) / dh * 1.5 * T, my1: -0.4 * T, mz1: (z1 - g.z) / dh * 1.5 * T, t: 0, T: T };
+    let ux = (x1 - g.x) / dh, uz = (z1 - g.z) / dh;
+    if (a) { const c = Math.cos(a), s = Math.sin(a), rx = ux * c - uz * s; uz = ux * s + uz * c; ux = rx; }
+    const vin = steep ? 0.5 : 1.5;
+    return { x0: g.x, y0: g.y, z0: g.z, mx0: g.vx * T, my0: g.vy * T, mz0: g.vz * T,
+      x1: x1, y1: y1, z1: z1, mx1: ux * vin * T, my1: (steep ? -2.2 : -0.4) * T, mz1: uz * vin * T, t: 0, T: T };
   }
-  function takeOff(g, fx, fz) {
-    if (g.spot) { g.spot.by = null; g.spot = null; }
-    g.mode = "takeoff"; g.T = 0;
-    // away from whatever flushed it, else the way it faces
+  // the curve flown by a gull: its body (0.15 m over its feet) kept a wing's
+  // reach from everything; within 2 m of the spot only the body's own room,
+  // and the surface it comes down on does not count
+  function curveClear(L) {
+    const n = Math.max(14, Math.ceil(Math.hypot(L.x1 - L.x0, L.y1 - L.y0, L.z1 - L.z0) * 1.4 / 0.3));
+    let px = L.x0, py = L.y0 + 0.15, pz = L.z0;
+    for (let i = 1; i <= n; i++) {
+      herm(L, i / n, _hp);
+      const dT = Math.hypot(_hp.x - L.x1, _hp.y - L.y1, _hp.z - L.z1);
+      const c = dT > 2 ? 0.55 : 0.12 + 0.215 * dT;
+      if (airHit(_hp.x, _hp.y + 0.15, _hp.z, c, dT < 1.5 ? L.y1 + 0.12 : -1e9)) return false;
+      // and the body never crosses a drawn face, down to the touch
+      if (triHit(px, py, pz, _hp.x, _hp.y + 0.15, _hp.z) >= 0) return false;
+      px = _hp.x; py = _hp.y + 0.15; pz = _hp.z;
+    }
+    return true;
+  }
+  const SWING = [0, 0.6, -0.6, 1.2, -1.2, 2.0, -2.0, 3.14];
+  function planLanding(g, sp) {
+    for (let tries = 0; tries < (sp.kind === "walk" ? 4 : 1); tries++) {
+      if (sp.kind === "walk") { const p = deckPoint(g.i * 31 + ((S.t * 7) | 0) + tries * 13); sp.x = p.x; sp.z = p.z; }
+      const x1 = sp.x, z1 = sp.z, y1 = sp.kind === "float" ? seaY(x1, z1) - draft(g) : sp.y;
+      for (let st = 0; st < 2; st++) {
+        for (let k = 0; k < SWING.length; k++) {
+          const L = landingCurve(g, x1, y1, z1, SWING[k], st === 1);
+          if (curveClear(L)) return L;
+        }
+      }
+    }
+    return null;
+  }
+  function startLanding(g, sp) {
+    const L = planLanding(g, sp);
+    if (!L) return false;
+    sp.by = g; g.spot = sp; g.mode = "land"; g.L = L;
+    return true;
+  }
+  // the climb-out as stepGull flies it, clear of everything (the surface it
+  // leaves aside); straight up first when nothing round it is
+  // the climb-out's speeds at T s: hard beats away and up, or (up) a jump
+  // straight up for 0.8 s first and then away
+  const _cv = { sp: 0, vy: 0 };
+  function climbV(up, T) {
+    if (up && T < 0.8) { _cv.sp = 0.3; _cv.vy = 3.2; return _cv; }
+    const t = up ? T - 0.8 : T;
+    _cv.sp = Math.min(9, 1.2 + 5 * t); _cv.vy = Math.max(0.8, 2.6 - 0.6 * t);
+    return _cv;
+  }
+  // the climb-out exactly as stepGull flies it (2.2 s), clear of everything;
+  // within the first metre the surface it leaves is left out
+  function climbClear(g, dx, dz, up) {
+    let d = 0, h = 0, px = g.x, py = g.y + 0.15, pz = g.z;
+    for (let i = 1; i <= 22; i++) {
+      const v = climbV(up, (i - 0.5) * 0.1);
+      d += v.sp * 0.1; h += v.vy * 0.1;
+      const x = g.x + dx * d, y = g.y + 0.15 + h, z = g.z + dz * d;
+      if (airHit(x, y, z, d < 0.8 ? 0.15 : 0.5, Math.hypot(d, h) < 1 ? g.y + 0.12 : -1e9) || triHit(px, py, pz, x, y, z) >= 0) return false;
+      px = x; py = y; pz = z;
+    }
+    return true;
+  }
+  // a clear way up from where it stands: away from fx, fz if it can, else
+  // round to one, else straight up first; false when it is boxed in
+  function climbOut(g, fx, fz) {
     let dx = Math.cos(g.yaw), dz = -Math.sin(g.yaw);
     if (fx != null) { const ex = g.x - fx, ez = g.z - fz, el = Math.hypot(ex, ez); if (el > 0.1) { dx = ex / el; dz = ez / el; } }
-    g.tdx = dx; g.tdz = dz;
+    for (let up = 0; up < 2; up++) {
+      for (let k = 0; k < SWING.length; k++) {
+        const c = Math.cos(SWING[k]), s = Math.sin(SWING[k]), rx = dx * c - dz * s, rz = dx * s + dz * c;
+        if (climbClear(g, rx, rz, up === 1)) { g.tdx = rx; g.tdz = rz; g.up = up === 1; return true; }
+      }
+    }
+    return false;
+  }
+  function takeOff(g, fx, fz) {
+    // boxed in (nothing clear round it): it stays put a while rather than fly through
+    if ((g.boxT || 0) > S.t) return;
+    if (!climbOut(g, fx, fz)) { g.boxT = S.t + 4; g.next = Math.max(g.next || 0, 4); return; }
+    if (g.spot) { g.spot.by = null; g.spot = null; }
+    g.mode = "takeoff"; g.T = 0;
+    const dx = g.tdx, dz = g.tdz;
     g.vx = dx * 1.2; g.vz = dz * 1.2; g.vy = 2.0;
     g.clk.phase = 0; g.clk.flapping = true; g.clk.flap = 1; g.clk.boutT = 2;
   }
@@ -868,11 +1113,27 @@
     const BK = CBZ.birdKit, P = g.P;
     if (g.mode === "fly") {
       const F = g.F;
-      g.rr += (g.rr0 - g.rr) * Math.min(1, dt * 0.15); g.hh += (g.hh0 - g.hh) * Math.min(1, dt * 0.15);
+      g.rr += (g.rr0 - g.rr) * Math.min(1, dt * 0.15); g.hh += (g.hh0 - g.hh) * Math.min(1, dt * (g.hh < g.hh0 ? 0.5 : 0.15));
       const rr = Math.max(10, g.rr * (1 + Math.sin(t * 0.23 + g.ph * 2) * 0.1));
       g.ang += g.dir * g.v / rr * dt;
       const x = F.x + Math.cos(g.ang) * rr, z = F.z + Math.sin(g.ang) * rr;
-      move(g, x, seaY(x, z) + g.hh + Math.sin(t * 0.31 + g.ph) * 2.0, z, dt);
+      let y = seaY(x, z) + g.hh + Math.sin(t * 0.31 + g.ph) * 2.0;
+      // the tops of things under its circle, now and a second on, lift it
+      // early (6 m/s at most); under it now, it is never below them
+      g.flT = (g.flT || 0) - dt;
+      if (g.flT <= 0) {
+        g.flT = 0.2;
+        g.topNow = airTop(x, z, 1.6);
+        g.topAhead = g.topNow;
+        for (let j = 1; j <= 5; j++) {
+          const a1 = g.ang + g.dir * g.v / rr * j * 0.2;
+          g.topAhead = Math.max(g.topAhead, airTop(F.x + Math.cos(a1) * rr, F.z + Math.sin(a1) * rr, 1.6));
+        }
+      }
+      const want = Math.max(0, (g.topAhead == null ? -1e9 : g.topAhead) + 1.6 - y);
+      g.lift = Math.max(Math.max(0, (g.topNow == null ? -1e9 : g.topNow) + 1.2 - y), Math.min(want, (g.lift || 0) + 6 * dt), (g.lift || 0) - 1.5 * dt);
+      if (!(g.lift > 0)) g.lift = 0;
+      move(g, x, y + g.lift, z, dt);
       // a coordinated turn banks into the centre: tan(bank) = v^2 / (g r)
       const hs = Math.hypot(g.vx, g.vz) || 1;
       const side = ((F.x - g.x) * -g.vz + (F.z - g.z) * g.vx) >= 0 ? 1 : -1;
@@ -881,7 +1142,12 @@
       BK.clock("gull", g.clk, dt, { climb: g.vy / hs, slow: hs < 7, rnd: rndOf(g) });
       BK.params("gull", "flap", g.clk.phase, P); P.flap = g.clk.flap;
       g.next -= dt;
-      if (g.next <= 0) { const sp = freeSpot(g); if (sp) startLanding(g, sp); else g.next = 10 + rndOf(g)() * 20; }
+      if (g.next <= 0) {
+        // the nearest free spot it can reach on a clear line, else try again later
+        let ok = false;
+        for (let k = 0; k < 3 && !ok; k++) { const sp = freeSpot(g, k); if (!sp) break; ok = startLanding(g, sp); }
+        if (!ok) g.next = 4 + rndOf(g)() * 8;
+      }
       return;
     }
     if (g.mode === "land") {
@@ -907,7 +1173,7 @@
     }
     if (g.mode === "takeoff") {
       g.T += dt;
-      const sp = Math.min(9, 1.2 + 5 * g.T), vy = Math.max(0.8, 2.6 - 0.6 * g.T);
+      const cv = climbV(g.up, g.T), sp = cv.sp, vy = cv.vy;
       move(g, g.x + g.tdx * sp * dt, g.y + vy * dt, g.z + g.tdz * sp * dt, dt);
       g.clk.phase += dt * 3.6;
       BK.params("gull", "flap", g.clk.phase, P); P.flap = 1;
