@@ -78,7 +78,7 @@
   const SWIM_ENTER = 1.35;        // swim.js SWIM_DEPTH: this deep and you are off your feet
   const SWIM_LEAVE = 1.05;        // swim.js STAND_DEPTH: shallower and you get them back
   const WADE_SLOW = 0.58;         // swim.js: fraction of the step the water takes
-  const FLOAT_DEPTH = 1.275;      // swim.js: feet below the surface on a floating body
+  const FLOAT_DEPTH = 1.45;       // swim.js TREAD_DEPTH: feet below the surface, waterline at the chin
   const SWIM_SPEED = 1.15;        // m/s — an unhurried survivor's crawl
   const PANIC_SPEED = 2.10;       // m/s — everything they have
   const PANIC_R = 22;             // m — a predator this close and you stop swimming

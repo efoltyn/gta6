@@ -46,7 +46,9 @@
    listed as pending and not shot, unless named with --ids or --all is given.
 
    Options: --before REF  --after REF  --map ID  --all  --page-only  --size WxH
-            --kind vehicle|species  --ids a,b  --out DIR                         */
+            --kind vehicle|species  --ids a,b  --out DIR  --after-only
+            (--after-only: boot and shoot the AFTER tree only; for when the
+            BEFORE frames were copied out of _raw by an earlier run)           */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -853,12 +855,16 @@ if (!has("--page-only")) {
   log(`chrome up in ${B.startMs} ms (pid ${B.pid})`);
   const trees = [];
   try {
-    const [TB, TA] = await Promise.all([bootTree(B, "before", beforeC, BEFORE_MAP), bootTree(B, "after", afterC, MAP)]);
-    trees.push(TB, TA);
+    // --after-only: the BEFORE frames already exist from an earlier run (copied
+    // out of _raw), so only the changed tree is booted and shot
+    const AFTER_ONLY = has("--after-only");
+    const [TB, TA] = await Promise.all([AFTER_ONLY ? null : bootTree(B, "before", beforeC, BEFORE_MAP), bootTree(B, "after", afterC, MAP)]);
+    if (TB) trees.push(TB);
+    trees.push(TA);
     const t1 = Date.now();
-    const [nb, na] = await Promise.all([runTree(TB, units, false, failed), runTree(TA, units, true, failed)]);
+    const [nb, na] = await Promise.all([TB ? runTree(TB, units, false, failed) : 0, runTree(TA, units, true, failed)]);
     const capS = (Date.now() - t1) / 1000;
-    timing = `One run: ${units.length} ${KIND === "vehicle" ? "vehicles" : "animals"}, ${nb + na} frames; boots ${(TB.bootMs / 1000).toFixed(0)} s / ${(TA.bootMs / 1000).toFixed(0)} s (parallel), capture ${capS.toFixed(0)} s, ${secs()} end to end. ` + timing;
+    timing = `One run: ${units.length} ${KIND === "vehicle" ? "vehicles" : "animals"}, ${nb + na} frames; boots ${TB ? (TB.bootMs / 1000).toFixed(0) : "-"} s / ${(TA.bootMs / 1000).toFixed(0)} s (parallel), capture ${capS.toFixed(0)} s, ${secs()} end to end. ` + timing;
     log(`captured ${nb} before + ${na} after frames in ${capS.toFixed(1)} s`);
   } finally {
     for (const T of trees) { try { await T.pg.closeTarget(); } catch (_) {} try { T.srv.close(); } catch (_) {} }

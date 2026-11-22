@@ -1209,9 +1209,22 @@
     a.heading += d;
 
     const t = clock();
-    const clr = Math.max(2.5 + ((a.species && a.species.scale) || 1),
-                         s.baseClear * (CLEAR[s.state] != null ? CLEAR[s.state] : 1));
+    let clr = Math.max(2.5 + ((a.species && a.species.scale) || 1),
+                       s.baseClear * (CLEAR[s.state] != null ? CLEAR[s.state] : 1));
     const wf = CBZ.waterField;
+    /* THE SWIMMER SETS HOW NEAR THE SHORE THE HUNT MAY COME. The shore pull
+       reaches 3.4 clearances out; with the species' own clearance that put a
+       swimmer 30-60 m off a beach inside the pull, and a scenting shark was
+       bent back out to sea every frame it tried to close. While it hunts, the
+       clearance shrinks so the pull ends short of where the quarry is
+       swimming (and never below the body's own floor). */
+    if (s.state !== "cruise" && s.state !== "disengage" && wf && wf.shoreAt) {
+      const q = quarryOf(a);
+      if (q) {
+        const qs = -wf.shoreAt(q.x, q.z);
+        if (qs > 0) clr = Math.max(2.5 + ((a.species && a.species.scale) || 1), Math.min(clr, qs * 0.24));
+      }
+    }
     let moved = true;
     if (wf && wf.moveInWater) {
       const nav = wf.moveInWater(grp.position.x, grp.position.z, a.heading,
@@ -1454,6 +1467,11 @@
      megalodon and why this comes out UNDER the seal instead of beside it. */
   function strikeWants(a, s, surf, draft) {
     if (s.state !== "rush") return false;
+    // NOT AT A PERSON. A swimmer is taken by the seize's own lunge, which
+    // carries the head (and the swimmer) up through the surface; a leap at
+    // one flies past a body it can no longer steer at
+    const qa = a._hunt && a._hunt._fightTarget;
+    if (qa && (qa === CBZ.player || (CBZ.bots && CBZ.bots.indexOf(qa) >= 0))) return false;
     const qp = quarryOf(a);
     if (!qp) return false;
     const g = a.group;
@@ -2216,8 +2234,24 @@
       return false;
     }
 
+    /* WHO IT HUNTS. You, when you are in the water inside its sense; if you
+       are not, the nearest person swimming out of their depth (a survivor
+       bot), so a shark off a beach full of swimmers takes one of them the
+       way it would take you. The stalk machine is the same either way. */
+    let quarry = player;
+    const senseR = (s.opts && s.opts.senseR) || SENSE_R;
+    if (!(dist < senseR && inWater(player)) && CBZ.bots && CBZ.bots.length) {
+      let best = senseR, pick = null;
+      for (let i = 0; i < CBZ.bots.length; i++) {
+        const b = CBZ.bots[i];
+        if (!b || b.dead || !b.swim || !b.pos) continue;
+        const d = Math.hypot(b.pos.x - grp.position.x, b.pos.z - grp.position.z);
+        if (d < best) { best = d; pick = b; }
+      }
+      if (pick) quarry = pick;
+    }
     let st = null;
-    try { st = hunt(a, player, dt, s.opts); } catch (e) { st = null; }
+    try { st = hunt(a, quarry, dt, s.opts); } catch (e) { st = null; }
     if (!st || st === "cruise") {
       if (s.state !== "cruise") onState(a, "cruise");
       proxy(a, s, dist, dt);

@@ -410,39 +410,6 @@
       },
     });
   }
-  function chicken(hen) {
-    const P = { parts: {}, order: ["body", "head", "legL", "legR"] };
-    const body = P.parts.body = new K.Part("body");
-    const feather = hen ? 0xb4682e : 0xc8521e, dark = hen ? 0x7a4420 : 0x1e3a2a;
-    const col = function (x, y, z, ca) { return shade(ca > 0.3 ? shade(feather, 1.05) : shade(feather, 0.9), K.grain(x * 20, y * 20, z * 20)); };
-    // the body: a teardrop, breast forward, rump up into the tail
-    body.loft([
-      { x: -0.17, y: 0.33, rt: 0.04, rb: 0.04, w: 0.05, wts: [0, 1] }, { x: -0.12, y: 0.3, rt: 0.08, rb: 0.08, w: 0.085, wts: [0, 1] },
-      { x: -0.02, y: 0.29, rt: 0.1, rb: 0.1, w: 0.1, wts: [0, 1] }, { x: 0.07, y: 0.3, rt: 0.095, rb: 0.1, w: 0.09, wts: [0, 1] },
-      { x: 0.13, y: 0.34, rt: 0.065, rb: 0.07, w: 0.065, wts: [0, 1] },
-    ], 12, col, { capLen: 0.8 });
-    // the tail fan and (the rooster's) sickle feathers, the folded wings
-    body.tube([[-0.14, 0.33, 0, 0.03], [-0.2, 0.42, 0, 0.05], [-0.2, 0.5, 0, 0.02]], 5, 8, hen ? feather : dark, true, { flat: 0.35, side: [0, 0, 1] });
-    if (!hen) body.tube([[-0.16, 0.36, 0, 0.02], [-0.25, 0.47, 0, 0.03], [-0.3, 0.42, 0, 0.012]], 5, 6, dark, true, { flat: 0.4, side: [0, 0, 1] });
-    [-1, 1].forEach(function (s) { body.ellipsoid(-0.02, 0.31, s * 0.085, 0.09, 0.05, 0.022, 10, shade(feather, 0.82), true, 3); });
-    const head = P.parts.head = new K.Part("head");
-    head.tube([[0.11, 0.35, 0, 0.045], [0.15, 0.42, 0, 0.032], [0.16, 0.46, 0, 0.03]], 5, 10, col, true);
-    head.ellipsoid(0.165, 0.475, 0, 0.035, 0.032, 0.03, 10, col, true, 3);
-    head.tube([[0.19, 0.48, 0, 0.012], [0.225, 0.47, 0, 0.002]], 3, 6, 0xd8a84a, true);                   // the beak
-    head.tube([[0.14, 0.5, 0, 0.012], [0.165, 0.525, 0, 0.018], [0.19, 0.505, 0, 0.008]], 5, 6, 0xc8241c, true, { flat: 0.4, side: [0, 0, 1] });   // the comb
-    head.ellipsoid(0.185, 0.445, 0, 0.012, 0.02, 0.008, 6, 0xc8241c, true, 3);                         // the wattle
-    [-1, 1].forEach(function (s) { head.ellipsoid(0.175, 0.485, s * 0.026, 0.006, 0.006, 0.004, 5, 0x1a0e08, true, 3); });
-    head.ud.eyes = [[0.175, 0.485, 0.026, 0.006], [0.175, 0.485, -0.026, 0.006]];
-    [-1, 1].forEach(function (s) {
-      const leg = P.parts[s > 0 ? "legL" : "legR"] = new K.Part("leg");
-      leg.ud.leg = s > 0 ? "L" : "R";
-      leg.tube([[0.0, 0.23, s * 0.04, 0.02], [-0.01, 0.13, s * 0.04, 0.009], [0.0, 0.01, s * 0.04, 0.008]], 5, 6, 0xd8b04a, true);
-      [-0.5, 0, 0.5].forEach(function (a) { leg.tube([[0.0, 0.008, s * 0.04, 0.005], [0.05 * Math.cos(a), 0.004, s * 0.04 + 0.05 * Math.sin(a), 0.003]], 3, 4, 0xd8b04a, true); });
-    });
-    P.saddle = { x: 0, y: 0.38, width: 0.18 };
-    return P;
-  }
-
   // ================================================================ WILD UNGULATES
   function elk(bull) {
     const k = bull ? 1 : 0.9;
@@ -780,64 +747,16 @@
     });
   }
 
-  // ================================================================ DOGS
-  // the dog's torso: a deep keel of a chest between the elbows, the loin
-  // tucked up hard, a short sloping croup (x / L, y / WH, w / W)
+  // ================================================================ THE RACCOON'S FRAME
+  // (the wolves, coyote and fox are the canid family's own body now,
+  // src/units/kit/canid.js; this low-slung frame is the raccoon's)
+  // a deep chest between the elbows, the loin tucked, a short sloping croup
+  // (x / L, y / WH, w / W)
   const DOG_TORSO = [[-0.51, 0.84, 0.62, 0.5], [-0.46, 0.97, 0.56, 0.78], [-0.32, 0.97, 0.6, 0.85], [-0.12, 0.96, 0.66, 0.88], [0.08, 0.98, 0.52, 1.0], [0.24, 1.02, 0.45, 0.95], [0.36, 0.98, 0.48, 0.78], [0.43, 0.84, 0.58, 0.5]];
   function canid(o) {
     if (!o.torsoKeys && !o.noKeys) o.torsoKeys = scaleKeys(DOG_TORSO, o.L, o.WH, o.W, 0);
     if (o.frontX == null) o.frontX = 0.26 * o.L;
     return K.quad(Object.assign({ fam: "dog", jaw: true, sq: 1, tuck: 0.06 }, o));
-  }
-  function wolf(arctic) {
-    const coat = arctic
-      ? { body: 0xece8e0, back: 0xe2ddd2, belly: 0xf4f2ec, leg: 0xeeeae2, face: 0xeeeae2, muzzle: 0xf2f0ea, nose: 0x141212, earIn: 0xe2dcd2, tail: 0xe8e4dc, tailTip: 0xe0dad0, chin: 0xf4f2ec, pad: 0x2a2626, eye: 0x9a7a2a }
-      : { body: 0x8a8276, back: 0x4e4740, belly: 0xd8d0c2, leg: 0x9c8a72, face: 0x7a7266, muzzle: 0xd2c8b8, nose: 0x141212, earIn: 0xc8beb0, tail: 0x6e665c, tailTip: 0x1e1c1a, chin: 0xe2dacc, pad: 0x2a2626, eye: 0xa8862a };
-    const k = arctic ? 0.96 : 1;
-    return canid({
-      L: 1.12 * k, WH: 0.8 * k, HH: 0.78 * k, chest: 0.38 * k, belly: 0.44 * k, W: 0.14 * k, sag: 0.0, coat: coat,
-      neck: { len: 0.32 * k, ang: 32, r0: 0.17 * k, r1: 0.12 * k, crest: 1.15, dewlap: 1.2 },
-      head: { len: 0.3 * k, D: 0.16 * k, Wd: 0.085 * k, ang: 14, muzzleAt: 0.5 },
-      ear: { len: 0.1 * k, w: 0.07 * k, kind: "point", up: 78, out: 15, back: 10, s: 0.62, u: 0.85, t: 0.14 },
-      eye: { r: 0.014, t: 0.38, up: 0.4, side: 0.82 },
-      leg: { f: 0.045 * k, c: 0.025, h: 0.07 * k }, paw: 0.04 * k, legZ: 0.08 * k,
-      tail: { len: 0.48 * k, r: 0.04 * k, droop: 72, taper: 0.1, bush: 0.6, tipAt: 0.82 },
-      paint: function (part, x, y, z, ca, sa, t, col) {
-        if (arctic) return col;
-        if (part === "head" && t > 0.25 && t < 0.6 && ca < 0.35 && ca > -0.4 && Math.abs(sa) > 0.6) return 0xd8d0c2;     // the pale cheeks
-        if (part === "torso" && ca > 0.6) return mix(col, 0x2e2a26, smooth(0.6, 0.95, ca) * 0.6);                      // the dark saddle
-        return col;
-      },
-    });
-  }
-  function coyote() {
-    const coat = { body: 0xa08a6a, back: 0x6e5e4a, belly: 0xe2d6c0, leg: 0xb48a5a, face: 0xa8865c, muzzle: 0xd8c8ac, nose: 0x161212, earIn: 0xe2d2b8, tail: 0x8a7658, tailTip: 0x1e1a16, chin: 0xeee4d2, pad: 0x2a2626, eye: 0xb08a2a };
-    return canid({
-      L: 0.88, WH: 0.6, HH: 0.6, chest: 0.28, belly: 0.34, W: 0.1, coat: coat,
-      neck: { len: 0.24, ang: 30, r0: 0.12, r1: 0.085, crest: 1.1, dewlap: 1.15 },
-      head: { len: 0.24, D: 0.12, Wd: 0.065, ang: 14, muzzleAt: 0.48 },
-      ear: { len: 0.1, w: 0.065, kind: "point", up: 78, out: 15, back: 8, s: 0.62, u: 0.85, t: 0.14 },
-      eye: { r: 0.012, t: 0.38, up: 0.4, side: 0.82 },
-      leg: { f: 0.034, c: 0.018, h: 0.055 }, paw: 0.03, legZ: 0.06,
-      tail: { len: 0.4, r: 0.035, droop: 78, taper: 0.1, bush: 0.5, tipAt: 0.85 },
-    });
-  }
-  function redFox() {
-    const coat = { body: 0xc8622a, back: 0xb85622, belly: 0xf2ece2, leg: 0x1e1a18, face: 0xcc6a30, muzzle: 0xf2ece2, nose: 0x141212, earIn: 0xf2e6d8, tail: 0xc05c26, tailTip: 0xf6f2ec, chin: 0xf6f2ec, pad: 0x1e1a18, eye: 0xc89a2a };
-    return canid({
-      L: 0.62, WH: 0.38, HH: 0.38, chest: 0.19, belly: 0.21, W: 0.075, coat: coat,
-      neck: { len: 0.16, ang: 35, r0: 0.08, r1: 0.055, crest: 1.05, dewlap: 1.1 },
-      head: { len: 0.17, D: 0.08, Wd: 0.048, ang: 12, muzzleAt: 0.48, prof: [[-0.05, 0.4, 0.38, 0.42], [0.15, 0.5, 0.46, 0.55], [0.38, 0.44, 0.44, 0.5], [0.5, 0.3, 0.36, 0.3], [0.78, 0.2, 0.26, 0.17], [0.97, 0.18, 0.2, 0.14], [1.0, 0.12, 0.14, 0.1]] },
-      ear: { len: 0.085, w: 0.06, kind: "point", up: 75, out: 18, back: 8, s: 0.62, u: 0.85, t: 0.14, back_c: 0x1e1a18 },
-      eye: { r: 0.009, t: 0.38, up: 0.4, side: 0.82 },
-      leg: { f: 0.022, c: 0.012, h: 0.036 }, paw: 0.02, legZ: 0.066,
-      tail: { len: 0.4, r: 0.04, droop: 42, curl: 0.5, taper: 0.1, bush: 0.75, tipAt: 0.85 },
-      paint: function (part, x, y, z, ca, sa, t, col) {
-        if ((part === "legF" || part === "legH") && y > 0.2) return mix(0x1e1a18, coat.body, smooth(0.2, 0.3, y));
-        if (part === "neck" && ca < -0.2) return 0xf6f2ec;
-        return col;
-      },
-    });
   }
   function raccoon() {
     const coat = { body: 0x7e7870, back: 0x5e5852, belly: 0xa49c92, leg: 0x3a3634, face: 0xd8d4cc, muzzle: 0xe8e4dc, nose: 0x141212, earIn: 0xe8e4dc, tail: 0x8a847c, tailTip: 0x1e1c1c, chin: 0xe8e4dc, pad: 0x2a2626, eye: 0x1a1210 };
@@ -1111,7 +1030,6 @@
     pig: function () { return { key: "p", make: pig }; },
     sheep: function (r) { const b = r() < 0.5; return { key: "s" + b, make: function () { return sheep(b); } }; },
     goat: function (r) { const c = pick(r, ["white", "brown", "pied"]); return { key: c, make: function () { return goat(c); } }; },
-    chicken: function (r) { const h = r() < 0.75; return { key: "c" + h, make: function () { return chicken(h); } }; },
     elk: function (r) { const b = r() < 0.5; return { key: "e" + b, make: function () { return elk(b); } }; },
     moose: function (r) { const b = r() < 0.5; return { key: "m" + b, make: function () { return moose(b); } }; },
     caribou: function (r) { const b = r() < 0.5; return { key: "c" + b, make: function () { return caribou(b); } }; },
@@ -1126,10 +1044,6 @@
     black_bear: function () { return { key: "b", make: function () { return bear("black"); } }; },
     polar_bear: function () { return { key: "p", make: function () { return bear("polar"); } }; },
     gorilla: function (r) { const s = r() < 0.6; return { key: "g" + s, make: function () { return gorilla(s); } }; },
-    gray_wolf: function () { return { key: "w", make: function () { return wolf(false); } }; },
-    arctic_wolf: function () { return { key: "a", make: function () { return wolf(true); } }; },
-    coyote: function () { return { key: "c", make: coyote }; },
-    red_fox: function () { return { key: "f", make: redFox }; },
     raccoon: function () { return { key: "r", make: raccoon }; },
     cottontail_rabbit: function () { return { key: "c", make: function () { return hare("cottontail"); } }; },
     jackrabbit: function () { return { key: "j", make: function () { return hare("jack"); } }; },

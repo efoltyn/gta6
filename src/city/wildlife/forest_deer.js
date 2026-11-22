@@ -26,14 +26,15 @@
   });
 
   // ============================================================
-  //  RED FOX — rusty-orange, white chest/throat & tail tip,
-  //  black lower legs, big pointed ears, long bushy tail.
+  //  RED FOX — the canid family's body (src/units/kit/canid.js):
+  //  rufous, white throat and tail tip, black stockings and ear backs.
   // ============================================================
   S({
     id: "red_fox", name: "Red Fox", biome: "forest", rarity: "common",
     hp: 16, fur: "Fox Pelt", furValue: 42, packs: 4, spd: 3.0, danger: 0, spook: 26,
     scale: 0.8, color: 0xc0552a,
-    build: function (ctx) { return CBZ.beastBodies ? CBZ.beastBodies.build("red_fox", ctx) : null; },
+    build: function (ctx) { return CBZ.canid && CBZ.canid.kitReady() ? CBZ.canid.wildBuild("red_fox", ctx) : null; },
+    animate: function (a, dt) { return CBZ.canid ? CBZ.canid.animateActor(a, dt) : false; },
   });
 
   // ============================================================

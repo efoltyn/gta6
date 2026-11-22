@@ -593,7 +593,12 @@
              "herd) and a low-poly build() that returns the posed body. Data " +
              "and geometry only: no engine, no spawning, no hunt",
       needs: ["look"],
-      files: ["units/kit/loft.js", "city/wildlife_species.js",
+      /* The dog family and the birds are kits now: canines.js builds every
+         wild canid through units/kit/canid.js and farm.js builds its chickens
+         through world/birdkit.js, and both read loft.js and gait.js when a
+         body is built. Without them this pack built no canids and no chickens. */
+      files: ["units/kit/loft.js", "units/kit/gait.js", "world/birdkit.js",
+        "city/wildlife_species.js", "units/kit/canid.js",
         "city/wildlife/beast_kit.js", "city/wildlife/beast_bodies.js",
         "city/wildlife/forest_deer.js", "city/wildlife/bears.js",
         "city/wildlife/canines.js", "city/wildlife/apes.js",

@@ -4199,6 +4199,7 @@
   "src/systems/prisonnav.js",
   "src/city/pednav.js",
   "src/systems/wounds.js",
+  "src/systems/dentition.js",
   "src/systems/predator.js",
   "src/systems/predator_anim.js",
   "src/systems/ape_combat.js",

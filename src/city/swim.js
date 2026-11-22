@@ -267,7 +267,16 @@
   // Holding Space does not merely accelerate you up, it restores POSITIVE
   // buoyancy — so at the surface you HOLD there instead of porpoising out of
   // the water and dropping back. Same number the float model always used.
-  const SURFACE_BUOY = BUOYANCY;
+  /* THE TREAD LINE. Treading water (Space held at the surface) a body rides
+     upright with the waterline at the chin: the feet TREAD_DEPTH down and the
+     eyes ~0.1 m clear. The positive-buoyancy body is neutral exactly there and
+     the kick that brings you up from below fades out as you reach the line,
+     so holding Space holds you IN the water. (It was the full float body plus
+     a constant kick, which balanced with the feet ~0.57 m down: the chest and
+     thighs out of the water, a body kneeling on the sea.) */
+  const TREAD_DEPTH = 1.45;
+  const TREAD_SUB = TREAD_DEPTH / BODY_H;          // 0.853
+  const SURFACE_BUOY = 1 / TREAD_SUB;              // 1.172: neutral at the tread line
   const BED_CLEAR = 0.35;      // never let the feet go below the bed by more than this
   const ENTRY_KEEP = 0.45;     // fraction of the fall speed kept as plunge momentum
   const ENTRY_MAX = 6.5;       // m/s cap on that plunge (a bridge dive, not a torpedo)
@@ -947,6 +956,13 @@
     // preserving the ordinary swim owner for the instant the rider lets go.
     if (P._aquaticMount) { bail(P, dt); P._swim = false; return; }
     if (P.dead || P.driving || P._aircraft) { bail(P, dt); return; }
+    // HELD IN A SHARK'S JAWS. systems/predator.js places the body at the bite
+    // and poses it; the water column follows it there, so the swim picks up
+    // from where the jaws let go instead of snapping back to where it was.
+    if (CBZ.predatorSeized && swimming && CBZ.predatorSeized(P)) {
+      S.y = P.pos.y; S.vx = 0; S.vz = 0; S.vy = 0;
+      return;
+    }
     if (!v2On()) { legacyStep(A, P, dt); return; }
     v2Step(A, P, dt);
   });
@@ -1168,7 +1184,10 @@
     S.sinking = sinkOn && vin <= 0 && !S.diving;
     S.vy += G_WATER * (buoy * sub - 1) * fdt;
     if (vin < 0 && S.vy > -DIVE_SPEED) S.vy = Math.max(-DIVE_SPEED, S.vy - DIVE_ACCEL * fdt);
-    if (vin > 0 && S.vy < RISE_SPEED) S.vy = Math.min(RISE_SPEED, S.vy + RISE_ACCEL * fdt);
+    if (vin > 0 && S.vy < RISE_SPEED) {
+      const kick = clamp01((sub - TREAD_SUB) / 0.12);          // fades out at the line
+      if (kick > 0) S.vy = Math.min(RISE_SPEED, S.vy + RISE_ACCEL * kick * fdt);
+    }
     S.vy *= Math.exp(-VDRAG * fdt);                        // stable at ANY dt
     S.y += S.vy * fdt;
 
@@ -1254,6 +1273,9 @@
   // and why Shark Sim's beach crowd walked the seabed with a land gait. The
   // joints are identical; what moved is WHO may ask for them.
   function poseSwimmer(P, spd) {
+    // the bots' swim pose (prone crawl, upright tread): the body is drawn round
+    // the tread line, so at the surface the hips ride just under the water
+    S.prone = true; S.floatD = TREAD_DEPTH;
     return CBZ.poseSwimmer(CBZ.playerChar, S, { pos: P.pos, vy: S.vy });
   }
 

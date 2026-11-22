@@ -1316,16 +1316,23 @@
     let hull = target._biteContactHull;
     if (hull === undefined && target.species && target.species.aquatic) {
       hull = null;
-      target.group.traverse(function (o) {
+      // a skinned marine body is one mesh fins and all; its trunk box is
+      // published beside it (aquatic.js), which is the collider wanted here
+      const mbd = target.group.userData && target.group.userData.marineBody;
+      if (mbd && mbd.mesh && mbd.trunk) hull = mbd.mesh;
+      else target.group.traverse(function (o) {
         if (!hull && o && o.isMesh && /hull$/i.test(o.name || "")) hull = o;
       });
       target._biteContactHull = hull || null;
     }
+    const hullBox = hull && hull.geometry
+      ? ((target.group.userData.marineBody && target.group.userData.marineBody.mesh === hull) ? target.group.userData.marineBody.trunk
+        : (hull.geometry.boundingBox || (hull.geometry.computeBoundingBox(), hull.geometry.boundingBox)))
+      : null;
     if (hull && hull.geometry) {
-      if (!hull.geometry.boundingBox) hull.geometry.computeBoundingBox();
-      if (hull.geometry.boundingBox) {
+      if (hullBox) {
         hull.updateMatrixWorld(true);
-        biteHullBox.copy(hull.geometry.boundingBox);
+        biteHullBox.copy(hullBox);
         biteHullInvM.copy(hull.matrixWorld).invert();
         biteHullLocalV.copy(mouth).applyMatrix4(biteHullInvM);
         biteHullBox.clampPoint(biteHullLocalV, biteHullSurfaceV);
@@ -1616,6 +1623,59 @@
      own surface has been sitting in biteV one frame earlier the whole time and
      was simply never passed. `kill` is what lets the mouth take a limb with
      it; the caller knows whether this blow is the one that ends them. */
+  /* A PERSON TAKEN IN THE WATER RIDES IN THE JAWS. A ridden shark's kill on
+     a swimmer gets the hold a wild shark's seize has (systems/predator.js,
+     THE BITE IN THE WATER) as far as a body you steer allows: the corpse's
+     trunk pinned exactly between the teeth where the jaw bones carry them,
+     the head sawing side to side with the jaw clamped on the body, while the
+     steering stays yours. */
+  const _hold = { v: null, a: null, t: 0, ph: 0, k: 0.6, at: { x: 0, y: 0, z: 0 } };
+  function unitDir(d) {
+    const l = Math.hypot(d.x, d.y, d.z) || 1;
+    _unitD.x = d.x / l; _unitD.y = d.y / l; _unitD.z = d.z / l;
+    return _unitD;
+  }
+  const _unitD = { x: 1, y: 0, z: 0 };
+  let _holdPending = null;
+  function holdIfSwimming(a, target) {
+    if (biteMedium(_biteAt.x, _biteAt.y, _biteAt.z) !== "water") return;
+    _holdPending = target;
+    // the death bus builds the ragdoll this frame; the pin goes on next tick
+    _hold.a = a;
+  }
+  function beginHumanHold(a, victim) {
+    const g = a && a.group, ud = g && g.userData;
+    if (!victim || !ud || !ud.marineBody || !CBZ.marineMouthWorld || !CBZ.ragdollPin) return;
+    const at = _hold.at;
+    _hold.v = victim; _hold.a = a; _hold.t = 1.8; _hold.ph = 0;
+    _hold.k = CBZ.marineClampFor ? CBZ.marineClampFor(a, 0.30) : 0.6;
+    try {
+      CBZ.ragdollPin(victim, {
+        point: "torso", until: 1.9, stiff: 1,
+        at: function (out) { if (CBZ.marineMouthWorld(g, "bite", at)) { out.x = at.x; out.y = at.y; out.z = at.z; } },
+      });
+    } catch (e) {}
+    a._mSeize = a._mSeize || { on: false, yaw: 0, jaw: -1 };
+    a._mSeize.on = true;
+  }
+  function tickHumanHold(a, dt) {
+    if (_holdPending) { const v = _holdPending; _holdPending = null; beginHumanHold(_hold.a || a, v); }
+    if (!(_hold.t > 0) || !_hold.a) return;
+    const h = _hold.a, ms = h._mSeize;
+    _hold.t -= dt;
+    if (_hold.t <= 0 || !ms) {
+      if (ms) { ms.on = false; ms.yaw = 0; ms.jaw = -1; }
+      _hold.v = null; _hold.a = null; _hold.t = 0;
+      return;
+    }
+    const len = ((h.group.userData.marineBody && h.group.userData.marineBody.len) || 4.5) * ((h.group.scale && h.group.scale.x) || 1);
+    const big = Math.sqrt(Math.max(0.4, len / 4.5));
+    _hold.ph += dt * (2.3 / big) * 6.283185307;
+    ms.on = true;
+    ms.yaw = (0.30 / big) * (Math.sin(_hold.ph) + 0.28 * Math.sin(2 * _hold.ph));
+    ms.jaw = _hold.k;
+  }
+
   function biteHumanWound(a, target, kill) {
     if (typeof CBZ.creatureBiteWound !== "function") return;
     _biteWo.kill = !!kill;
@@ -1733,7 +1793,7 @@
         // made a mounted bite rake a body longer than the body.
         try {
           CBZ.creatureBiteChunk(target, biteV,
-            { jaw: jawR, sev: sev, dir: _biteDir, by: a, bleedS: 12 });
+            { jaw: jawR, sev: sev, dir: unitDir(_biteDir), by: (sp && sp.id) || "", byActor: a, bleedS: 12 });
         } catch (e) {}
       }
     } else if (kind === "cop") {
@@ -1752,6 +1812,7 @@
       // is what decides whether the mouth takes a piece with it.
       biteHumanWound(a, target, pedDown);
       if (pedDown) {
+        holdIfSwimming(a, target);
         CBZ.cityKillPed(target, {
           fromX: a.pos.x, fromZ: a.pos.z, force: 5 + scale * 2, fling: 2 + scale,
           byPlayer: true, point: _biteAt, dir: _biteDir, jaw: jawR, by: a,
@@ -1785,6 +1846,7 @@
         // of seconds.
         lens: false,
       });
+      if (lethal) holdIfSwimming(a, target);
       humanBiteBlood(target, !!target.dead, biteSev);
     } else if (kind === "ship") {
       const shipDamage = Math.max(145, Math.round(damage * 2.5));
@@ -2029,7 +2091,7 @@
           _clampDir.x = Math.cos(a.heading || 0); _clampDir.y = 0; _clampDir.z = Math.sin(a.heading || 0);
           try {
             CBZ.creatureBiteChunk(v, j,
-              { jaw: jawRadiusOf(a, v), sev: 0.85, dir: _clampDir, by: a, bleedS: 12 });
+              { jaw: jawRadiusOf(a, v), sev: 0.85, dir: _clampDir, by: (a.species && a.species.id) || "", byActor: a, bleedS: 12 });
           } catch (er) {}
         }
         /* EVERY OTHER HALF TURN, and measured before it was tuned: a bloom on
@@ -2259,6 +2321,7 @@
   };
 
   function tickAquaticAttack(a, dt) {
+    tickHumanHold(a, dt);
     // THE CEREMONY OWNS THE FRAME. While a clamp is running it writes both
     // pose channels itself and no new bite may start — otherwise the auto-fire
     // in shark_sim would chomp straight through the finish.
