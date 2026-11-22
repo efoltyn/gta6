@@ -575,7 +575,7 @@
   [
     // Southsiders: the old west corner (-22, 30)
     { name: "Chato", heritage: "latino", car: C.south, crewRole: "shotcaller", pos: [-24, 28], region: [-30, -17, 22, 37], speed: 2.0, personality: { greed: 0.42, nerve: 0.78, loyalty: 0.86, snitch: 0.18 } },
-    { name: "Mack", heritage: "latino", car: C.south, crewRole: "collector", pos: [-19, 34], region: [-28, -12, 24, 43], speed: 2.35, personality: { greed: 0.78, nerve: 0.64, loyalty: 0.62, snitch: 0.24 } },
+    { name: "Memo", heritage: "latino", car: C.south, crewRole: "collector", pos: [-19, 34], region: [-28, -12, 24, 43], speed: 2.35, personality: { greed: 0.78, nerve: 0.64, loyalty: 0.62, snitch: 0.24 } },
     { name: "Peep", heritage: "centralam", car: C.south, crewRole: "lookout", pos: [-13, 23], region: [-24, -8, 18, 34], speed: 2.55, personality: { greed: 0.32, nerve: 0.48, loyalty: 0.78, snitch: 0.36 } },
     // Black car: the old east corner (22, 16)
     { name: "Ace", heritage: "black", car: C.black, crewRole: "shotcaller", pos: [22, 17], region: [15, 30, 10, 27], speed: 2.05, personality: { greed: 0.48, nerve: 0.76, loyalty: 0.82, snitch: 0.22 } },
@@ -666,7 +666,7 @@
     { name: "Patient Zero", tag: "Infirmary", color: "#9fe6c0", pos: [29, 100], box: [25, 40, 90, 104], role: "inmate", neutral: true, speed: 1.5,
       behavior: "unpredictable", ratings: { fighting: 22, toughness: 26, speed: 30 }, skin: jump("white", "Patient Zero", { skin: 0xfae0c8, hair: 0x6a6a6a, beard: "stubble", tank: false }) },
     { name: "Orderly Pratt", tag: "Infirmary", outfit: "orderly", color: "#9fe6c0", pos: [37, 100], box: [28, 42, 90, 104], role: "inmate", neutral: true, speed: 1.9,
-      behavior: "defensive", ratings: { fighting: 56, toughness: 64 }, skin: jump("latino", "Orderly Pratt", { ink: "", tank: false, torso: 0xeef2f5, arms: 0xeef2f5 }) },
+      behavior: "defensive", ratings: { fighting: 56, toughness: 64 }, skin: jump("white", "Orderly Pratt", { ink: "", tank: false, torso: 0xeef2f5, arms: 0xeef2f5 }) },
 
     // ===== LAUNDRY (west) — steam, carts & sticky fingers =====
     { name: "Suds", tag: "Laundry", color: "#bfeaff", pos: [-33, 96], box: [-41, -26, 88, 104], role: "thief", neutral: true, speed: 2.6,

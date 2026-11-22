@@ -342,6 +342,39 @@
     return out;
   }
 
+  /* ---- HIS NAME FITS HIS FACE (owner 2026-11-21: "names should match
+     races"). A man goes by his surname or a first name the yard uses; both
+     come from his own heritage's list, so a Samoan is never "Halloran" and
+     an Irishman never "Osei". Deterministic off the rng / seed string. */
+  const NAMES = {
+    black: ["Washington", "Jefferson", "Booker", "Jackson", "Mosley", "Darnell", "Tyrell", "Jamal", "Marcus", "Dante",
+      "Odell", "Lamont", "Reggie", "Terrance", "Deshawn", "Banks", "Freeman", "Robinson", "Malik", "Cedric"],
+    caribbean: ["Baptiste", "Desir", "Pierre", "Delroy", "Clive", "Errol", "Fitzroy", "Joseph", "Toussaint", "Winston"],
+    white: ["Halloran", "Dobbs", "Pike", "Kessler", "Vance", "Murphy", "Doyle", "Callahan", "Hendricks", "Walsh",
+      "Boone", "Cody", "Dale", "Travis", "Wyatt", "Brennan", "Fletcher", "Garrett", "Sullivan", "Marchetti"],
+    easteuro: ["Renke", "Volkov", "Petrov", "Novak", "Kowalski", "Dragan", "Sasha", "Bogdan", "Horvat", "Zoran"],
+    latino: ["Ortiz", "Chuy", "Ramirez", "Gallegos", "Hector", "Lalo", "Medina", "Flaco", "Ruben", "Salazar",
+      "Gilbert", "Rudy", "Navarro", "Cisneros", "Beto"],
+    centralam: ["Funes", "Quintanilla", "Chepe", "Melgar", "Ayala", "Wilber", "Orellana", "Nelson", "Bonilla", "Cruz"],
+    carlatino: ["Colon", "Rivera", "Santiago", "Yunior", "Papo", "Rosario", "Pagan", "Cepeda", "Wilfredo", "Batista"],
+    mexican: ["Don Chava", "Ochoa", "Pancho", "Zavala", "Tomas", "Rangel", "Lupe", "Barajas", "Nacho", "Arellano"],
+    eastasian: ["Chen", "Wong", "Park", "Kim", "Lee", "Tanaka", "Liu", "Zhao", "Jin", "Choi"],
+    seasian: ["Tran", "Nguyen", "Pham", "Sok", "Vang", "Le", "Phan", "Chea", "Xiong", "Bao"],
+    filipino: ["Reyes", "Santos", "Bautista", "Dela Cruz", "Jun", "Mendoza", "Aquino", "Boy", "Villanueva", "Ramos"],
+    native: ["Begay", "Yazzie", "Two Bulls", "Tsosie", "Running Horse", "Redcloud", "Littlewolf", "Skenandore", "Whitehorse", "Joe"],
+    islander: ["Tavita", "Faleolo", "Tuilagi", "Sione", "Kalani", "Mahe", "Fonoti", "Leota", "Keoni", "Tupou"],
+    mideast: ["Haddad", "Nasser", "Khalil", "Saleh", "Rami", "Farouk", "Aziz", "Mansour", "Karim", "Darwish"],
+    southasian: ["Singh", "Patel", "Raj", "Gill", "Sandhu", "Sharma", "Dev", "Malik", "Bains", "Kumar"],
+    mixed: ["Brooks", "Reed", "Cole", "Jordan", "Monroe", "Ellis", "Dorsey", "Hayes", "Quinn", "Carter"],
+  };
+  function heritageName(id, rng) {
+    const pool = NAMES[id] || NAMES[(H[id] && H[id].car) || ""] || NAMES.mixed;
+    const r = toRng(rng);
+    return pool[Math.floor(r() * pool.length) % pool.length];
+  }
+  CBZ.heritageName = heritageName;
+  CBZ.HERITAGE_NAMES = NAMES;
+
   CBZ.HERITAGE = H;
   CBZ.HERITAGE_IDS = IDS;
   CBZ.HERITAGE_CARS = CARS;
