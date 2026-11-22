@@ -1315,8 +1315,8 @@
     // little below the points of shoulder (~62% of the withers), so the chest
     // fills between the upper arms down to the elbows
     const yPro = Math.max(yBr + 0.03 * K, 0.62 * Wt);
-    tk(xS - 0.035 * K, yW - 0.085 * K, lerp(yBr, yPro, 0.4), lerp(yBr, yW, 0.58), D.shW * 0.9, { wts: [CH, 1], keel: 0.5, hk: 0.6 });
-    tk(xS + 0.03 * K, D.shj.y + 0.06 * K, yPro, lerp(yPro, D.shj.y + 0.06 * K, 0.45), D.shW * 0.72, { wts: [CH, 1], keel: 0.35 });
+    tk(xS - 0.035 * K, yW - 0.085 * K, lerp(yBr, yPro, 0.4), lerp(lerp(yBr, yPro, 0.4), yW - 0.085 * K, 0.55), D.shW * 0.9, { wts: [CH, 1], keel: 0.5, hk: 0.6 });
+    tk(xS + 0.02 * K, D.shj.y + 0.06 * K, yPro, lerp(yPro, D.shj.y + 0.06 * K, 0.45), D.shW * 0.72, { wts: [CH, 1], keel: 0.35 });
     const profTorso = function (Rr, ca, sa, out) {
       const e = Rr.sq || 1;
       const pc = Math.sign(ca) * Math.pow(abs(ca), e), ps = Math.sign(sa) * Math.pow(abs(sa), e);
@@ -1333,7 +1333,10 @@
       if (t > 0.82 && ca < -0.2 && q < 0.6 * tuftK * F.ruff) return { len: flen * 5.2 * F.ruff, w: flen * 1.8, down: 0.7 };
       return null;
     } : null;
-    LK.sweep(G, T, { S: S_T, step: stepT, prof: profTorso, part: "torso", hkBone: BN.hackle, fur: furOf(1, 0.45, 1), tufts: tuftTorso, capLen: 0.9 });
+    // (on the chest's front the hair falls straight down; elsewhere it lies along the body)
+    const furBody = furOf(1, 0.45, 1), furChest = furOf(1, 1, 0.15);
+    LK.sweep(G, T, { S: S_T, step: stepT, prof: profTorso, part: "torso", hkBone: BN.hackle, tufts: tuftTorso, capLen: 0.55,
+      fur: function (Rr, ca, sa, t) { return t > 0.93 ? furChest : furBody; } });
 
     // ---- NECK: from inside the withers up to the back of the skull. The
     //      ruff thickens the crest and the throat (wolves, shepherds); a
@@ -1343,8 +1346,9 @@
     const NK = [];
     const n0 = nk(-0.22), n1 = nk(0.05), n2 = nk(0.4), n3 = nk(0.75), n4 = nk(1.02);
     const dl = R.dewlap || 0;
-    NK.push({ x: n0.x, y: n0.y, rt: nr * 1.25, rb: nr * 1.55, w: nr * 1.35 * ruff, wts: [CH, 1], hk: 0.6 });
-    NK.push({ x: n1.x, y: n1.y, rt: nr * 1.15 * ruff, rb: nr * 1.4 * (1 + dl * 0.1), w: nr * 1.2 * ruff, wts: [CH, 0.5, BN.neck, 0.5], hk: 0.3 });
+    // (the base rings stay inside the shoulders; the ruff widens the neck above them)
+    NK.push({ x: n0.x, y: n0.y, rt: nr * 1.25, rb: nr * 1.55, w: Math.min(nr * 1.35 * ruff, D.shW * 0.82), wts: [CH, 1], hk: 0.6 });
+    NK.push({ x: n1.x, y: n1.y, rt: nr * 1.15 * ruff, rb: nr * 1.4 * (1 + dl * 0.1), w: Math.min(nr * 1.2 * ruff, D.shW * 0.88), wts: [CH, 0.5, BN.neck, 0.5], hk: 0.3 });
     NK.push({ x: n2.x, y: n2.y, rt: nr * 1.04 * ruff, rb: nr * 1.12 * (1 + dl * 0.25), w: nr * 1.02 * ruff, wts: [BN.neck, 0.75, BN.neck1, 0.25] });
     NK.push({ x: n3.x, y: n3.y, rt: nr * 0.95 * (1 + (ruff - 1) * 0.6), rb: nr * 1.0 * (1 + dl * 0.3), w: nr * 0.94 * (1 + (ruff - 1) * 0.8), wts: [BN.neck1, 0.85, BN.head, 0.15] });
     NK.push({ x: n4.x, y: n4.y, rt: nr * 0.72, rb: nr * 0.85, w: nr * 0.8, wts: [BN.neck1, 0.3, BN.head, 0.7] });
