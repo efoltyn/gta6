@@ -2073,6 +2073,9 @@
     // fight envelopes: the lunge drives the chest, a hold braces back
     cX += 0.12 * K * st.lunge; pX += 0.05 * K * st.lunge; cY -= 0.03 * K * Math.max(0, -st.lunge) * 2;
     pX -= 0.05 * K * st.hold; pY -= 0.07 * K * st.hold; cX -= 0.02 * K * st.hold;
+    // biting low (a leg, a body on the ground) the forequarters go down with
+    // the head, so the neck does not have to stand the skull on end
+    cY -= 0.11 * K * st.lowBite; cR -= 0.10 * st.lowBite;
     const rise = st.rearUp * D.withers * 0.45;
     cY += rise; cR += Math.atan2(rise, Lb) * 0.7; pY -= 0.03 * K * st.rearUp;
     // a leap: the body flies its ballistic arc (ctrl.airH, model metres),
@@ -3318,6 +3321,11 @@
       }
       return true;
     }
+    // A PERSON IN THESE JAWS (systems/predator.js, THE BITE ON LAND): the seize
+    // moves the body and then poses it itself, so the paws plant against the
+    // body's real motion; the wildlife tick's own pass stands down
+    const LG = a._landGrip;
+    if (LG && LG.on && !LG.now) return true;
     // the hunger cue swells the belly (ribs + loin bones), not the whole
     // skinned mesh: wildlife_traits' named-hull swell is turned away here
     a._bodyMesh = null;
@@ -3372,6 +3380,18 @@
     const tp = tgt && (tgt.pos || (tgt.group && tgt.group.position));
     if (tp) { c.look = tp; } else c.look = null;
     c.mouthTo = null;
+    if (LG && LG.on) {
+      // the grip: the jaw reaches for the bitten part (LG.to, world), the body
+      // braces back on it, rears to a high one and drops its forequarters to a
+      // low one, and the head worries it in bursts (LG.shake)
+      const wsc = rig.mesh.scale.x * (grp.scale.x || 1), mY = D.mouth.y * wsc, wH = D.withers * wsc;
+      const ty = LG.to.y - grp.position.y;
+      c.mouthTo = LG.to; c.look = null; c.hold = LG.gape > 0.05 ? 0 : 1; c.shake = !!LG.shake;
+      c.aggr = 1; c.alert = 1; c.fear = 0; c.threat = 0; c.sniff = 0; c.howl = 0; c.idle = false; c.posture = "stand";
+      c.lunge = LG.lunge || 0; c.gape = LG.gape || 0;
+      c.rearUp = clamp((ty - mY) / (wH * 0.9), 0, 1);
+      c.lowBite = clamp((mY - ty) / (wH * 0.6), 0, 1);
+    } else { c.shake = false; c.rearUp = 0; c.lowBite = 0; }
     pose(rig, dt, c);
     scratchPose(rig, rig.st);
     // keep the creature seams' mouth on the posed jaw (group units)
