@@ -9,6 +9,7 @@ Not started; pick what you want.
 6. Kid's hoodie: the hood lies exactly on the upper back in a few spots and may shimmer.
 7. Natural Disaster: the other 99 survivors still wear flat bright colours; only the player wears real clothes.
 8. Toddlers (age 3): shoulder joint check still fails in a few arm poses (it did before too).
+9. Protective-detail suits: the earpiece wire touches the collar (18 mm) when the head tips; the ear now sits almost over the collar's edge.
 
 ---
 
