@@ -303,7 +303,9 @@
       const R = list[r];
       if (!R || !R.n) continue;
       const span = R.span || 1, half = Math.max(1, Math.round(R.n / 2));
-      const kind = R.thick >= 0.6 ? "cone" : (R.jag ? "blade" : "serrated");
+      // a row much narrower than it is tall is a grasping row of awls (a
+      // bull shark's lower jaw): it punches, it does not slice
+      const kind = R.thick >= 0.6 ? "cone" : (R.jag ? "blade" : (R.w < R.h * 0.45 ? "needle" : "serrated"));
       for (let i = 0; i < half; i++) {
         // centre of tooth i along the half arch (0 at the front)
         const t = span * (i + 0.5) / half;
