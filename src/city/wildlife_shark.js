@@ -225,7 +225,11 @@
     circle: 0.35, bump: 0.35, vanish: 0.35, rush: 0.18, seize: 0.18,
   };
 
+  // the SIM clock (world/water_spec.js's shared water clock): the swell this
+  // file reads, its breach and idle rolls and every hunt timing it keys off
+  // run on game time, so a paused, slowed or stepped game is the same game
   function clock() {
+    if (CBZ.waterClock) { try { const w = CBZ.waterClock(); if (Number.isFinite(w)) return w; } catch (e) {} }
     const t = (typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001;
     return t % 3600;
   }

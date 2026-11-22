@@ -1025,6 +1025,9 @@
   //      "no real decision" failure the mash meter was rejected for.
   let pressStamp = -999;
   function markPress() { pressStamp = nowS(); }
+  // the break-free press, for any input layer that is not a window key event
+  // (a gamepad, a test driving the real loop)
+  CBZ.predatorPress = markPress;
   // ...but a POINTER press is only an escape attempt while a window is actually
   // open. These are capture-phase listeners on window, so without this gate any
   // click anywhere — a HUD button, the map, the phone — stamped a press, and a
