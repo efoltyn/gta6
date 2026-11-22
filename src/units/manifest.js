@@ -26,8 +26,9 @@
   function menGroup(n) {
     return n <= 12 ? "squad" : n <= 50 ? "platoon" : n <= 250 ? "company" : n <= 1000 ? "battalion" : n <= 5000 ? "brigade" : "division";
   }
-  // the wild dogs share one rig: src/units/kit/canid.js on the animal kit
-  const CANID = ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/kit/canid.js"];
+  // every dog and wild canid is one family: src/units/kit/canid.js (its body
+  // lofts through loft.js's sweep, its feet plant through gait.js)
+  const CANID = ["units/kit/gait.js", "units/kit/loft.js", "units/kit/canid.js"];
   // every drone draws on the hull kit's geometry and the drone kit
   const DRONE = ["units/kit/hull.js", "units/kit/drone.js"];
   CBZ.UNIT_MANIFEST = {
@@ -70,8 +71,8 @@
     goat: S("goat", "goats", "herd"),
     horse: Object.assign(S("horse", "horses", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     chicken: S("chicken", "chickens", "flock"),
-    // the war room's "1000 DOGS": the city's one dog (city/dogmodel.js)
-    dog: Object.assign(S("dog", "dogs", "pack"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "city/dogmodel.js"] }),
+    // the war room's "1000 DOGS": the canid family's dog rows
+    dog: Object.assign(S("dog", "dogs", "pack"), { needs: CANID }),
 
     // ---- water ------------------------------------------------------------
     great_white_shark: S("great white shark", "great white sharks", "shiver"),

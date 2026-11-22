@@ -1457,10 +1457,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wildlife_rig.js?v=sharkfix3"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
 <script src="src/city/wildlife/beast_kit.js?v=r187a"></script>
-<script src="src/city/wildlife/beast_bodies.js?v=beast1"></script>
-<script src="src/city/wildlife/forest_deer.js?v=attach1"></script>
+<!-- THE DOG FAMILY (units/kit/canid.js): every dog and wild canid in every
+     mode is this one body, a breed or a species being a row of real
+     measurements. Before the bestiary rows that build it; it reads
+     units/kit/loft.js and gait.js (below) only when a body is built. -->
+<script src="src/units/kit/canid.js?v=dog1122a"></script>
+<script src="src/city/wildlife/beast_bodies.js?v=dog1122a"></script>
+<script src="src/city/wildlife/forest_deer.js?v=dog1122a"></script>
 <script src="src/city/wildlife/bears.js?v=attach1"></script>
-<script src="src/city/wildlife/canines.js?v=dogs1009b"></script>
+<script src="src/city/wildlife/canines.js?v=dog1122a"></script>
 <script src="src/city/wildlife/apes.js?v=beasts1"></script>
 <script src="src/city/wildlife/bigcats.js?v=attach1"></script>
 <script src="src/city/wildlife/megafauna.js?v=attach1"></script>
@@ -1474,20 +1479,19 @@ document.body.appendChild(b);}}catch(e){}})();
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
 <script src="src/city/wildlife_traits.js?v=indiv1"></script>
-<script src="src/city/wildlife.js?v=realpop1012"></script>
+<script src="src/city/wildlife.js?v=dog1122a"></script>
 <script src="src/city/wildlife_tame.js?v=ekey2"></script>
-<!-- THE ONE DOG: city/dogmodel.js is the body (skinned lofted shell per breed,
-     planted-foot walk/trot/gallop, body language) and CBZ.dogGait; city/
-     dogbrain.js is the loyal dog's protector rulebook (pure); dogs.js is the
-     actor (pet / stray / guard / K9) and needs both before it. The dog is
-     built on the shared animal kit (src/units/kit/: planted-foot gait,
-     quadruped rig, lofted skinned shell), which loads first. -->
+<!-- THE ONE DOG: city/dogmodel.js is the dog API (CBZ.dogModel) over the dog
+     family's body (units/kit/canid.js, above); city/dogbrain.js is the loyal
+     dog's protector rulebook (pure); dogs.js is the actor (pet / stray /
+     guard / K9) and needs both before it. The body lofts with units/kit/
+     loft.js and plants its feet with units/kit/gait.js, which load first. -->
 <script src="src/units/kit/gait.js?v=cheetah1011m"></script>
 <script src="src/units/kit/quadrig.js?v=npcw1011"></script>
-<script src="src/units/kit/loft.js?v=npcw1011"></script>
-<script src="src/city/dogmodel.js?v=npcw1011"></script>
+<script src="src/units/kit/loft.js?v=dog1122a"></script>
+<script src="src/city/dogmodel.js?v=dog1122a"></script>
 <script src="src/city/dogbrain.js?v=dogs1009b"></script>
-<script src="src/city/dogs.js?v=sight1011m"></script>
+<script src="src/city/dogs.js?v=dog1122a"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <!-- THE ANGLE LAW loads first because it is the one thing all three biters

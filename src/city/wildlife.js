@@ -905,9 +905,15 @@
 
   function sq(v) { return v * v; }
 
-  // GAIT RIG discovery + the per-frame gait live in city/wildlife_rig.js.
-  const buildGaitRig = RIG.buildGait;
-  const gaitAnimate = RIG.animateGait;
+  // GAIT RIG discovery + the per-frame gait live in city/wildlife_rig.js. A
+  // species whose body animates itself (sp.animate, e.g. the canid family's
+  // skinned body) takes this pass instead; it returns false to hand back.
+  const buildGaitRig = function (a) { if (a.species && a.species.animate) return; RIG.buildGait(a); };
+  const gaitAnimate = function (a, dt) {
+    const sp = a.species;
+    if (sp && sp.animate && sp.animate(a, dt)) return;
+    RIG.animateGait(a, dt);
+  };
   // Aquatic articulation has the same single owner.  Keeping a second copy in
   // this hunting engine meant a new authored-mouth field could work in Battle
   // (wildlife_rig) and silently disappear in Gang City (this file overwrote the
