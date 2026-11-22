@@ -39,15 +39,32 @@
        slope or step between the head end and the feet end, and resolves
        both ends out of walls. Then it SLEEPS: no more writes, so the limbs
        stay put (no slide, no twitch, no re-standing).
-   Cost: one keyed pose write per falling body per frame for about a second,
-   three ground samples and a few collider tests; zero while asleep.
+   AND NOT TWO ALIKE (2026-11-22, owner: "much more real movement getting
+   shot"): what hit him and where picks the fall's STYLE and its CLOCK
+   (readRound below: a head shot drops him where he stands in under half a
+   second, a rifle round in the trunk folds him over it before he sits, a
+   close shotgun throws him back a long step, a leg takes him over toward
+   it, a man shot at a run slides on along it, a man with a wall behind him
+   slides down it and sits against it, a man who bled out sags), and once
+   the muscles are gone his limbs are loose weight on springs
+   (entities/meleeposes.js LIMP WEIGHT): they trail, flop on the floor,
+   overshoot and settle, and every later round kicks the part it hits.
+
+   Cost per falling body: one keyed pose write and 12 limb springs per frame
+   for about two seconds, three ground samples and a few collider tests;
+   zero while asleep.
 
    API (CBZ.bodyFall):
      plan(yaw, ux, uz, out?)  -> { variant "back"|"face", side +-1, drift, hx, hz }
                                  pure: which fall carries a body facing `yaw`
                                  along world (ux, uz), and where the head ends
      start(a, o)              o = { dirX, dirZ, force, vx, vz, dead, hold, dur,
-                                    landed, fromX, fromZ } -> record | null
+                                    landed, fromX, fromZ, and the round that
+                                    did it: zone, cal, wkey, dist, point,
+                                    cause } -> record | null
+     floorOnly(ch, o)         the same fall in a rig whose root is somebody
+                                 else's (the player's: physics.js)
+     drag(a, dt, from?)       a man down and awake drags himself off
      tick(a, dt)              drive it; true while it owns the body's transform
      getUp(a)                 a living man gets up (the rig's own get-up)
      poke(a, dirX, dirZ, f, point?)  a settled body takes another hit: a
@@ -136,7 +153,103 @@
     return [0, 0];
   }
 
+  /* ---- WHAT HIT HIM, AND WHAT HE WAS DOING: the one read every death and
+     every floored man goes through. Two men shot one after the other used
+     to go down as twins (one of two keyed falls, on one clock, with one
+     shove of 0.3 m/s whatever the gun). A body answers the round:
+       · WHERE: the head (or the spine) takes the legs at once: no buckle and
+         no step, he drops where he stood ("drop"); a heavy round through the
+         trunk doubles him over it before he sits ("fold"); a leg takes that
+         leg and he goes over toward it; a man bleeding out sags down slowly.
+       · WHAT: the round's energy (calibre, a shotgun's whole blast, which
+         falls off with range) sets the clock of the fall and the shove: a
+         pocket pistol barely moves him, a rifle round more, a shotgun from
+         two metres throws the whole body back a long step.
+       · DOING: a man shot at a run goes on along his run, on his face, and
+         slides; a man with a wall a step behind him goes back into it and
+         slides down it to sit dead against it ("wall").
+       · and the round's line across his body turns his shoulders (the limp
+         springs, entities/meleeposes.js, take the kick).
+     o (all optional) = { zone head|torso|armL|armR|legL|legR, cal, wkey,
+       dist, point {x,y,z}, cause } on top of start()'s own. */
+  const _rd = { E: 0, round: false, close: false, style: "", rate: 1, shove: 0 };
+  function readRound(o, runSp, seed) {
+    const r = _rd;
+    r.round = o.cal > 0 || !!o.zone || !!o.wkey;
+    let E = r.round ? (o.cal > 0 ? o.cal : 1) : 0;
+    if (o.wkey === "shotgun") { const d = o.dist != null ? o.dist : 6; E *= d < 3 ? 1.4 : d > 16 ? 0.3 : 1.4 - (d - 3) * 0.085; }
+    r.E = E;
+    r.close = o.wkey === "shotgun" && (o.dist != null ? o.dist : 9) < 4.5;
+    const running = runSp > 2.2;
+    let style = "", rate = 1;
+    if (o.cause === "bled out") { style = "fold"; rate = 0.72; }
+    else if (o.zone === "head") { style = "drop"; rate = 1.3 + 0.12 * Math.min(2, E); }
+    else if (r.close) rate = 1.3;
+    else if (o.zone === "torso" || (!o.zone && r.round)) {
+      if (E >= 1.15 && !running) { style = "fold"; rate = 0.95 + 0.1 * Math.min(2, E); }
+      else rate = 0.82 + 0.12 * Math.min(1.5, E);
+    } else if (o.zone === "legL" || o.zone === "legR") rate = 1.0;
+    else if (o.zone === "armL" || o.zone === "armR") rate = 0.9;
+    if (running) rate = Math.max(rate, 1.12);
+    // no two the same: a seeded tenth either way
+    rate *= 0.92 + 0.16 * (0.5 + 0.5 * Math.sin(seed * 7.13));
+    r.style = style; r.rate = rate;
+    r.shove = r.round ? (0.22 + 0.28 * E + (r.close ? 1.7 : 0)) * (o.zone === "head" ? 0.35 : 1) : -1;
+    if (o.cause === "bled out") r.shove = 0;
+    return r;
+  }
+  // a wall (or a shut door, a locker) this close behind the line he falls along
+  function wallBehind(px, pz, py, hx, hz) {
+    for (let t = 0.3; t <= 0.86; t += 0.28) if (blockedAt(px + hx * t, pz + hz * t, py, 0.18)) return true;
+    return false;
+  }
+  // the round's line across him: it turns the shoulders it went through, and
+  // jolts the part it went into (MP.limpKick)
+  function roundKick(ch, g, o, dx, dz, E) {
+    const M = MP();
+    if (!M || !M.limpKick || !(E > 0)) return;
+    const ya = g.rotation.y || 0, c = Math.cos(ya), s = Math.sin(ya);
+    const fx = dx * c - dz * s, fz = dx * s + dz * c;        // the round in his frame (+x his left, +z his front)
+    let tw = 0;
+    if (o.point && o.point.x != null) {
+      const rx = (o.point.x - g.position.x) * c - (o.point.z - g.position.z) * s;
+      const rz = (o.point.x - g.position.x) * s + (o.point.z - g.position.z) * c;
+      tw = rz * fx - rx * fz;                                 // (r x F).y: the yaw it puts in the trunk
+    }
+    const k = Math.min(2.2, E);
+    const z = o.zone || "torso";
+    const part = z === "armL" ? "la" : z === "armR" ? "ra" : z === "legL" ? "rl" : z === "legR" ? "ll" : z === "head" ? "head" : "core";
+    M.limpKick(ch, part, fx >= 0 ? 1 : -1, 0.35 + 0.45 * k, fz, tw * 10 * k);
+  }
+
   const _pl = {};
+  /* ---- ONTO THE FLOOR, IN THE RIG: the keyed collapse picked for this
+     body and this hit, keeping a fall it is already in. Every game's rig,
+     the player's too (systems/capture.js floors yours through it). */
+  function floorRig(ch, P, o, dead, rd, seed) {
+    const M = MP();
+    const cur = ch.fall;
+    const lying = cur && (cur.variant === "back" || cur.variant === "face");
+    if (cur && cur.on && cur.phase !== "getup" && cur.phase !== "" && !lying) {
+      // DOWN ON A KNEE (a leg shot, the liver) AND NOW DEAD OR FLOORED: he
+      // does not kneel forever. From the knee he goes on over, the fall
+      // picked up past its standing buckle, since his legs have already gone.
+      M.startFall(ch, { variant: P.variant, side: P.side, ko: dead || o.ko !== false, hold: true, rate: rd.rate, seed });
+      ch.fall.t = 0.2;
+      return "knee";
+    }
+    if (cur && cur.on && cur.phase !== "getup" && cur.phase !== "") {
+      // ALREADY GOING DOWN (the blow that killed him was a knockdown, or a
+      // second round found a falling man): keep that fall. Restarting it would
+      // blend the collapse from wherever he is, i.e. stand a lying man back up
+      // to the first beat. Only its ending changes: the dead stay down.
+      if (dead) { cur.ko = true; cur.hold = true; }
+      return "kept";
+    }
+    M.startFall(ch, { variant: P.variant, side: P.side, ko: dead || o.ko !== false, hold: dead || o.hold !== false,
+      dur: o.dur, style: rd.style, rate: rd.rate, seed });
+    return "new";
+  }
   function start(a, o) {
     o = o || {};
     const ch = rigOf(a), g = grpOf(a), M = MP();
@@ -151,11 +264,16 @@
     const dl = Math.hypot(dx, dz);
     if (dl > 1e-6) { dx /= dl; dz /= dl; }
     const f = o.force != null ? Math.max(0, +o.force || 0) : 4;
-    // the round's share of the root speed: a pistol barely moves a man, a
-    // close shotgun shoves him; his own run dominates when he has one
-    const shove = Math.min(2.2, 0.06 * f);
+    const seed = a._deathSeed != null ? a._deathSeed : (a._deathSeed = Math.random() * 6.28);
     const mv = moverVel(a, o);
-    let vx = dx * shove + mv[0] * 0.85, vz = dz * shove + mv[1] * 0.85;
+    const runSp = Math.hypot(mv[0], mv[1]);
+    const rd = readRound(o, runSp, seed);
+    // the round's share of the root speed (readRound: by its energy); a blow
+    // with no round behind it keeps the force scale; his own run dominates
+    // when he has one
+    const shove = rd.shove >= 0 ? rd.shove : Math.min(2.2, 0.06 * f);
+    const mvk = rd.style === "fold" && o.cause === "bled out" ? 0 : 0.85;
+    let vx = dx * shove + mv[0] * mvk, vz = dz * shove + mv[1] * mvk;
     const vs = Math.hypot(vx, vz);
     if (vs > MAX_SLIDE) { vx *= MAX_SLIDE / vs; vz *= MAX_SLIDE / vs; }
     // the direction the fall goes is the momentum's, or the blow's when he is still
@@ -163,13 +281,25 @@
     if (Math.hypot(ux, uz) < 0.05) { ux = dx; uz = dz; }
     const yaw0 = g.rotation.y || 0;
     let P = plan(yaw0, ux, uz, _pl);
+    // A LEG GOES: he goes over toward it (the keyed falls fall to his left
+    // for side +1; parts.rl is his left leg)
+    if (o.zone === "legL") P.side = 1; else if (o.zone === "legR") P.side = -1;
+    const py = pos.y || 0;
+    // A WALL A STEP BEHIND HIM: he goes back into it and slides down it, and
+    // sits dead against it. Never lying through it, never bent 30 degrees off
+    // the round to dodge it.
+    if (P.variant === "back" && runSp < 2.2 && CBZ.collide && wallBehind(pos.x, pos.z, py, -Math.sin(yaw0), -Math.cos(yaw0))) {
+      rd.style = "wall"; rd.rate = Math.min(rd.rate, 1.1);
+      P.drift = 0; P.hx = -Math.sin(yaw0); P.hz = -Math.cos(yaw0);
+      const sp = Math.max(0.9, Math.hypot(vx, vz));
+      vx = P.hx * sp; vz = P.hz * sp;                       // into the wall: the mover stops him on it
+    }
     // the walls bend the lie when the natural one is blocked: the same way
     // over (never back toward what hit him), turned as far as the drift
     // allows either side. Nothing clear? Keep the natural fall: he goes down
     // against the wall and the ends resolve out of it on the floor (tick).
-    const py = pos.y || 0;
     const ends0 = P.variant === "face" ? [HEAD_FACE, FEET_FACE] : [HEAD_BACK, FEET_BACK];
-    if (CBZ.collide && !lieClear(pos.x, pos.z, py, P.hx, P.hz, ends0[0], ends0[1])) {
+    if (rd.style !== "wall" && CBZ.collide && !lieClear(pos.x, pos.z, py, P.hx, P.hz, ends0[0], ends0[1])) {
       const base = Math.atan2(P.hx, P.hz) - P.drift;       // the undrifted head direction
       const DR = [FALL_DRIFT, -FALL_DRIFT, FALL_DRIFT * 0.5, -FALL_DRIFT * 0.5];
       for (let i = 0; i < DR.length; i++) {
@@ -180,79 +310,70 @@
     // a strike pose, a reaction, a footstep: the fall owns the body now
     ch.punchT = 0; ch.kickT = 0;
     const dead = !!(o.dead || a.dead);
-    const cur = ch.fall;
-    const lying = cur && (cur.variant === "back" || cur.variant === "face");
-    if (cur && cur.on && cur.phase !== "getup" && cur.phase !== "" && !lying && dead) {
-      // DOWN ON A KNEE (a leg shot, the liver) AND NOW DEAD: he does not
-      // kneel forever. From the knee he goes on over, the fall picked up
-      // past its standing buckle, since his legs have already gone.
-      M.startFall(ch, { variant: P.variant, side: P.side, ko: true, hold: true });
-      ch.fall.t = 0.2;
-    } else if (cur && cur.on && cur.phase !== "getup" && cur.phase !== "") {
-      // ALREADY GOING DOWN (the blow that killed him was a knockdown, or a
-      // second round found a falling man): keep that fall. Restarting it would
-      // blend the collapse from wherever he is, i.e. stand a lying man back up
-      // to the first beat. Only its ending changes: the dead stay down.
+    const how = floorRig(ch, P, o, dead, rd, seed);
+    if (how === "kept") {
+      const cur = ch.fall;
       P.variant = cur.variant === "face" ? "face" : "back";
       P.side = cur.side;
       P.drift = 0;
       const ya = g.rotation.y || 0, hs = P.variant === "face" ? 1 : -1;
       P.hx = Math.sin(ya) * hs; P.hz = Math.cos(ya) * hs;
-      if (dead) { cur.ko = true; cur.hold = true; }
-    } else {
-      M.startFall(ch, { variant: P.variant, side: P.side, ko: dead || o.ko !== false, hold: dead || o.hold !== false, dur: o.dur });
+      rd.style = cur.style || ""; rd.rate = cur.rate || 1;
     }
     const fl = ch.fall;
     fl.dead = dead;
     if (o.landed) {
       // a body that arrives from the air (thrown, blasted) is already on the
-      // floor: straight to the last beat of the collapse
-      const T = M.fallTimes(P.variant).fall;
+      // floor: straight to the last beat of the collapse (key time)
+      const T = M.fallTimes(P.variant, rd.style).fall;
       fl.t = Math.max(0, T - 0.12);
     }
     if (g.rotation.order !== "YXZ") g.rotation.order = "YXZ";
+    // the round goes into the part it found, and turns the shoulders
+    if (rd.round && how !== "kept") roundKick(ch, g, o, dx, dz, rd.E);
     const R = a._bf = a._bf || {};
     R.on = true; R.asleep = false; R.dead = dead;
-    R.variant = P.variant; R.side = P.side;
+    R.variant = P.variant; R.side = P.side; R.style = rd.style;
     R.yaw0 = yaw0; R.drift = P.drift; R.hx = P.hx; R.hz = P.hz;
     R.vx = vx; R.vz = vz;
     R.t = 0; R.still = 0;
-    R.fallT = M.fallTimes(P.variant).fall;
+    R.fallT = M.fallTimes(P.variant, rd.style, rd.rate).fall;   // seconds, on this death's clock
     R.tx0 = g.rotation.x || 0; R.tz0 = g.rotation.z || 0;   // any tumble it arrives with eases out
-    R.seed = a._deathSeed != null ? a._deathSeed : (a._deathSeed = Math.random() * 6.28);
+    R.seed = seed;
     return R;
+  }
+  /* A RIG ONTO THE FLOOR WITHOUT THE ROOT (the player: physics.js owns his
+     root; the fall and the limp are the rig's). o = start()'s, dirX/dirZ the
+     way he is carried. Returns ch.fall. */
+  function floorOnly(ch, o) {
+    o = o || {};
+    const M = MP();
+    if (!ch || !ch.parts || !ch.group || !M || !M.startFall) return null;
+    const g = ch.group, yaw = g.rotation.y || 0;
+    let dx = o.dirX || 0, dz = o.dirZ || 0;
+    if (!(dx || dz)) { dx = -Math.sin(yaw); dz = -Math.cos(yaw); }
+    const seed = Math.random() * 6.28;
+    const rd = readRound(o, o.runSp || 0, seed);
+    const P = plan(yaw, dx, dz, _pl);
+    if (o.zone === "legL") P.side = 1; else if (o.zone === "legR") P.side = -1;
+    const dead = !!o.dead;
+    const how = floorRig(ch, P, o, dead, rd, seed);
+    if (ch.fall) ch.fall.dead = dead;
+    // the fall owns the body: no roll left over from anything before it
+    g.rotation.x = 0; g.rotation.z = 0;
+    if (rd.round && how !== "kept") roundKick(ch, g, o, dx, dz, rd.E);
+    return ch.fall;
   }
 
   function lieEnds(R) {
     return R.variant === "face" ? [HEAD_FACE, FEET_FACE] : [HEAD_BACK, FEET_BACK];
   }
 
-  /* ---- the corpse's own sprawl: seeded, small, on top of the keyed lie, so
-     two men dropped by one burst do not land as twins. Absolute writes over
-     the key the fall just wrote this frame. ---- */
-  // Only ABDUCTION (z) varies: lying on the back or the face, the body's
-  // coronal plane is the floor, so swinging a limb out sideways keeps it ON
-  // the floor; flexing it (x) would lift it into the air or bury it.
-  function sprawl(ch, R, w) {
-    if (!(w > 0)) return;
-    const P = ch.parts, s = R.seed, j = (k) => Math.sin(s * k);
-    if (P.la) P.la.rotation.z += 0.30 * j(2.3) * w;
-    if (P.ra) P.ra.rotation.z -= 0.30 * j(3.1) * w;
-    if (P.ll) P.ll.rotation.z += 0.10 * j(3.7) * w;
-    if (P.rl) P.rl.rotation.z -= 0.10 * j(4.1) * w;
-    if (ch.neck) neckTurn(ch.neck, 0.45 * j(1.3) * w);
-  }
-  /* A TURNED HEAD TURNS BACK. Face down the keyed lie already has the cheek
-     on the floor (about 80 degrees, the end of a neck's range); the sprawl
-     and every round's jolt used to add their own yaw on top in whichever
-     direction, and a shot corpse's head wound round to 132 degrees. Past
-     half the range a turn goes back toward the middle instead, and the
-     body's own limit (CBZ.human.clampNeck) holds the rest. */
-  function neckTurn(neck, d) {
-    const y = neck.rotation.y;
-    if (y > 0.8 && d > 0) d = -d; else if (y < -0.8 && d < 0) d = -d;
-    neck.rotation.y = y + d;
-  }
+  /* The corpse's own sprawl (seeded, so two men dropped by one burst do not
+     land as twins) and every jolt of a round are the LIMP SPRINGS now
+     (entities/meleeposes.js limp): the sprawl is where each limb's spring
+     comes to rest, a round is a kick to the springs of the part it struck,
+     and the limbs trail, flop, overshoot and settle on their own. */
   // FACE DOWN THE FEET GO TOES-DOWN. The keyed lie stretches the legs flat,
   // and a straight leg on its front drives the shoe 12 cm into the floor
   // (measured, tools/bodyfall-check.mjs). A real body lying prone rests on
@@ -325,12 +446,10 @@
     //      this owns, so we run the pose layer ourselves) ----
     M.react(ch, dt, false, ch.low || {});
     const down = !fall || !fall.on || fall.phase === "down";
-    if (R.dead) sprawl(ch, R, Math.min(1, R.t / Math.max(0.2, R.fallT)));
-    const jolting = jolt(ch, R, dt);
+    const jolting = !!(M.limpBusy && M.limpBusy(ch));
     if (fall && fall.on) {
-      const ft = fall.t || 0;
       groundFit(ch, R, fall.phase === "down" ? 1
-        : fall.phase === "fall" ? Math.max(0, Math.min(1, (ft - 0.4) / 0.26))
+        : fall.phase === "fall" ? Math.max(0, Math.min(1, (R.t / Math.max(0.2, R.fallT) - 0.6) / 0.4))
         : fall.phase === "getup" ? Math.max(0, 1 - (fall.gt || 0) / 0.3) : 0);
     }
     // the pose is written outright every frame here: hold its neck to the range
@@ -372,7 +491,8 @@
     let tx = 0, tz = 0;
     const kd = fall && fall.phase === "getup" ? Math.max(0, 1 - (fall.gt || 0) / 0.8)
       : down ? 1 : Math.min(1, k * 1.2);
-    if (kd > 0.3) {
+    // sat against a wall he sits on the floor: nothing to lie along
+    if (kd > 0.3 && R.style !== "wall") {
       const fh = floorAt(pos.x + hx * ends[0], pos.z + hz * ends[0], gy + 0.6);
       const ff = floorAt(pos.x - hx * ends[1], pos.z - hz * ends[1], gy + 0.6);
       let rise = Math.atan2(fh - ff, ends[0] + ends[1]);     // + = head end higher
@@ -429,20 +549,19 @@
      shooting a picture of one. Now the round does what it does to a body:
        - a shove along its line that you can see (a pistol ~5 cm, a close
          shotgun ~20 cm), sliding against the walls like the fall's own;
-       - a JOLT in the part it struck: the nearest limb flicks out along the
-         floor and swings back, a torso or head hit snaps the head over and
-         shudders both arms (abduction and head roll only: lying down, those
-         keep every part ON the floor, like the sprawl);
-     and the body settles and sleeps again once the jolt has played.
+       - a JOLT in the part it struck: a kick to that part's limp springs
+         (entities/meleeposes.js), so the limb flicks along the round and
+         swings back past where it lay and settles; a head hit turns the head
+         over, a trunk hit shudders the shoulders and both arms;
+     and the body settles and sleeps again once the springs are still.
      `point` (world {x,y,z}, optional) picks the part; no point = the core. */
-  const JOLT_T = 0.55;
   function nearestPart(ch, point) {
     const THREE = window.THREE;
     if (!point || !THREE || !ch.parts) return "core";
     const V = _V || (_V = new THREE.Vector3());
     const P = ch.parts, L = ch.low || {}, S = ch.sockets || {};
     const cand = [["la", L.la || P.la], ["ra", L.ra || P.ra], ["ll", L.ll || P.ll], ["rl", L.rl || P.rl],
-      ["la", S.leftHand], ["ra", S.rightHand], ["core", ch.head], ["core", ch.neck], ["core", ch.body]];
+      ["la", S.leftHand], ["ra", S.rightHand], ["head", ch.head], ["head", ch.neck], ["core", ch.body]];
     let best = "core", bd = 1e9;
     for (let i = 0; i < cand.length; i++) {
       const o = cand[i][1];
@@ -453,53 +572,39 @@
     }
     return best;
   }
+  /* A round into a falling or fallen body (dead, out cold, or a living man
+     down on the floor in his own fall): it never restarts the fall or stands
+     him up, it moves what it hit. A body with no muscle in it takes it in
+     the limp springs (the part flicks along the round and swings back); a
+     conscious man on the floor turns off it and covers (MP.groundHit). */
   function poke(a, dirX, dirZ, f, point) {
-    const R = a && a._bf;
-    if (!R || !R.on) return false;
     const l = Math.hypot(dirX || 0, dirZ || 0);
     if (!(l > 1e-6)) return false;
+    const R = a && a._bf;
+    const ch = rigOf(a), g = grpOf(a), M = MP();
     const F = Math.max(0, f || 4);
+    if (!R || !R.on) {
+      const fl = ch && ch.fall;
+      if (!fl || !fl.on || !g || !M) return false;
+      const ya = g.rotation.y || 0;
+      const lx = (dirX / l) * Math.cos(ya) - (dirZ / l) * Math.sin(ya);
+      if (fl.ko && M.limpKick) {
+        const fz = (dirX / l) * Math.sin(ya) + (dirZ / l) * Math.cos(ya);
+        M.limpKick(ch, nearestPart(ch, point), lx >= 0 ? 1 : -1, Math.min(1.6, 0.1 + 0.06 * F), fz, 0);
+      } else if (M.groundHit && fl.phase === "down") M.groundHit(ch, lx, Math.min(1.2, 0.3 + 0.05 * F));
+      return true;
+    }
     // v^2 / (2 * G_SLIDE_FLOOR): 0.18 * 5 = 0.9 m/s slides ~4.5 cm
     const imp = Math.min(1.8, 0.18 * F);
     R.vx += dirX / l * imp; R.vz += dirZ / l * imp;
-    // the jolt: which part, how hard, which way along the floor
-    const ch = rigOf(a), g = grpOf(a);
-    if (ch && g) {
-      const ya = g.rotation.y || 0;
-      const right = (dirX / l) * Math.cos(ya) - (dirZ / l) * Math.sin(ya);   // + = along his right
-      R.joltPart = nearestPart(ch, point);
-      R.joltA = Math.min(0.65, 0.08 + 0.035 * F);
-      R.joltS = right > 0 ? -1 : 1;
-      R.joltT = 0;
+    // the jolt: the springs of the part it struck, along the round
+    if (ch && g && M && M.limpKick) {
+      const ya = g.rotation.y || 0, c = Math.cos(ya), s = Math.sin(ya);
+      const lx = (dirX / l) * c - (dirZ / l) * s, fz = (dirX / l) * s + (dirZ / l) * c;
+      M.limpKick(ch, nearestPart(ch, point), lx >= 0 ? 1 : -1, Math.min(1.6, 0.1 + 0.06 * F), fz, 0);
     }
     R.asleep = false; R.still = 0;
     return true;
-  }
-  // the jolt's weight at time t: a snap out in 50 ms, then an eased return
-  function joltW(t) {
-    if (t < 0.05) return t / 0.05;
-    const u = Math.min(1, (t - 0.05) / (JOLT_T - 0.05));
-    return (1 - u) * (1 - u) * (1 + 2 * u) * Math.exp(-2.2 * u);
-  }
-  function jolt(ch, R, dt) {
-    if (R.joltT == null || R.joltT > JOLT_T) return false;
-    R.joltT += dt;
-    const w = joltW(Math.min(JOLT_T, R.joltT)) * R.joltA * R.joltS, P = ch.parts;
-    const part = R.joltPart;
-    if (part === "la" || part === "ra") {
-      const arm = part === "la" ? P.la : P.ra;
-      if (arm) arm.rotation.z += w;
-      if (ch.neck) neckTurn(ch.neck, 0.25 * w);
-    } else if (part === "ll" || part === "rl") {
-      const hit = part === "ll" ? P.ll : P.rl, other = part === "ll" ? P.rl : P.ll;
-      if (hit) hit.rotation.z += 0.45 * w;
-      if (other) other.rotation.z += 0.15 * w;
-    } else {
-      if (ch.neck) neckTurn(ch.neck, 0.9 * w);
-      if (P.la) P.la.rotation.z += 0.35 * Math.abs(w);
-      if (P.ra) P.ra.rotation.z -= 0.35 * Math.abs(w);
-    }
-    return R.joltT <= JOLT_T;
   }
   function clear(a) {
     if (!a || !a._bf) return;
@@ -714,8 +819,52 @@
     return true;
   };
 
+  /* ============================================================
+     DRAGGING HIMSELF. A man down on the floor and awake (the gut gone, both
+     legs, the blood: CBZ.vitals' "critical") does not lie there like a
+     sleeper waiting for the medic. He gets himself away from the gun:
+     face down he reaches out along the floor and pulls himself up to the
+     hand, on his back he digs his heels in and shoves himself along, head
+     first, in pulls with a rest between (MP's dragPose plays the limbs, this
+     moves the root through the one mover). Never toward what shot him, never
+     while hands are on him, a few metres and he is spent.
+     drag(a, dt, from{x,z}?) -> true while he is dragging
+     ============================================================ */
+  const DRAG_CYC = 1.5, DRAG_V = 0.6, DRAG_MAX = 3.5;
+  const _dgO = { posture: "down", radius: 0.3, feet: 0.05, height: 0.5, cars: false,
+    out: { hit: false, nx: 0, nz: 0, c: null, pushed: false, landed: false, y: 0, floor: 0 } };
+  function drag(a, dt, from) {
+    const ch = rigOf(a), g = grpOf(a);
+    const f = ch && ch.fall;
+    const d = ch ? ch._drag : null;
+    const held = !!(CBZ.verbs && typeof CBZ.verbs.held === "function" && CBZ.verbs.held(a));
+    const ok = !!(g && f && f.on && f.phase === "down" && !f.ko && (f.variant === "back" || f.variant === "face") &&
+      !a.dead && !a.isPlayer && !(a._bf && a._bf.on) && !held && !a.cuffed && !(ch && ch.cuffed));
+    if (!ok || (d && d.went >= DRAG_MAX)) { if (d) d.on = false; a._dragT = 0; return false; }
+    const D = d || (ch._drag = { on: false, t: 0, went: 0 });
+    const ya = g.rotation.y || 0, hs = f.variant === "face" ? 1 : -1;
+    const hx = Math.sin(ya) * hs, hz = Math.cos(ya) * hs;
+    if (!D.on && from && from.x != null) {
+      // his head points back at the gun: he lies still rather than crawl to it
+      const ax = g.position.x - from.x, az = g.position.z - from.z;
+      if (ax * hx + az * hz < -0.2 * Math.hypot(ax, az)) return false;
+    }
+    D.on = true; D.t += dt; a._dragT = 0.25;
+    const ph = (D.t % DRAG_CYC) / DRAG_CYC;
+    const pull = ph > 0.45 ? Math.sin((ph - 0.45) / 0.55 * Math.PI) : 0;
+    const step = DRAG_V * pull * dt;
+    if (step > 0) {
+      if (CBZ.bodyMove) {
+        const sw = CBZ.bodyMove(g.position, hx * step, 0, hz * step, _dgO);
+        if (sw && sw.hit) D.went = DRAG_MAX;                // up against something: he stops there
+      } else { g.position.x += hx * step; g.position.z += hz * step; }
+      D.went += step;
+    }
+    return true;
+  }
+
   CBZ.bodyFall = {
-    plan, start, tick, getUp, poke, clear, resume, unwall,
+    plan, start, tick, getUp, poke, clear, resume, unwall, floorOnly, drag,
     active(a) { return !!(a && a._bf && a._bf.on); },
     asleep(a) { return !!(a && a._bf && a._bf.on && a._bf.asleep); },
     FALL_DRIFT,

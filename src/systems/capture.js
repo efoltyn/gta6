@@ -551,6 +551,7 @@
     const W = V.wound(player, { kind: weapon === "shank" ? "stab" : weapon === "blast" ? "blast" : "bullet",
       zone: hole.zone, point: hole.point, head: !!opts.head, cal: opts.cal, by: opts.by || null,
       dirX: dx, dirZ: dz, fromX, fromZ, critical: crit });
+    if (weapon === "gun") roundOnYou(W, hole, dx, dz, opts);
     return !!W && (W.outcome === "down" || W.outcome === "dead");
   };
   /* ---- A FALL (2026-09-29). physics.js hands every hard landing here
@@ -633,6 +634,35 @@
     if (g.mode !== "escape") { if (limpSet && CBZ.playerChar) { CBZ.playerChar.legHurt = null; limpSet = false; } return; }
     playerLimp();
   });
+  /* ---- THE ROUND ON YOUR BODY (the same language as every man's,
+     systems/verbs_strike.js V.shot and systems/bodyfall.js): it lands where
+     the hole is, you fold or snap or lose the arm, a heavy one in a leg
+     takes you to that knee; floored or killed, the rig goes down along the
+     round in the fall picked for that hit (never the plank rolled about the
+     feet, never the same fall). physics.js holds the stick only while the
+     rig is off its feet. */
+  const ZONE_RIG = { head: "head", neck: "head", chest: "torso", abdomen: "torso", armL: "armL", armR: "armR", legL: "legL", legR: "legR" };
+  const _yShot = { point: null, dir: { x: 0, z: 0 }, cal: 1, wkey: "", dist: 8, head: false };
+  function roundOnYou(W, hole, dx, dz, opts) {
+    const ch = CBZ.playerChar;
+    if (!ch || !W) return;
+    if (W.outcome === "down" || player.dead) {
+      if (CBZ.bodyFall && CBZ.bodyFall.floorOnly) {
+        try {
+          CBZ.bodyFall.floorOnly(ch, { dirX: dx, dirZ: dz, zone: ZONE_RIG[hole.zone] || "torso", cal: opts.cal || 1,
+            wkey: opts.wkey || "", dist: opts.dist, point: hole.point, dead: !!player.dead, ko: !!player.dead,
+            runSp: player.speed || 0 });
+        } catch (e) { /* no rig fall */ }
+      }
+      return;
+    }
+    const VB = CBZ.verbs;
+    if (VB && VB.shot && VB.playerActor) {
+      _yShot.point = hole.point; _yShot.dir.x = dx; _yShot.dir.z = dz; _yShot.cal = opts.cal || 1;
+      _yShot.wkey = opts.wkey || ""; _yShot.dist = opts.dist != null ? opts.dist : 8; _yShot.head = hole.zone === "head";
+      try { VB.shot(VB.playerActor(), _yShot); } catch (e) { /* no rig */ }
+    }
+  }
   CBZ.shootPlayer = function (dmg, fromX, fromZ, opts) {
     return CBZ.hurtPlayer(dmg, fromX, fromZ, Object.assign({ weapon: "gun" }, opts || {}));
   };
@@ -2027,6 +2057,11 @@
       if (ragged && !(CBZ.ragdollPoints && CBZ.ragdollPoints(WOUND_ACTOR))) ragged = false;
       // (a body already lying in the rig's fall stays as it lies: rolling the
       // group on top of the fall laid him down twice)
+      // a death that did not floor the rig (bled out, a fall): it goes down
+      // in the rig's own collapse, not the plank rolled about its feet
+      if (!ragged && !(CBZ.playerChar.fall && CBZ.playerChar.fall.on) && CBZ.bodyFall && CBZ.bodyFall.floorOnly) {
+        try { CBZ.bodyFall.floorOnly(CBZ.playerChar, { dead: true, ko: true }); } catch (e) { /* no rig fall */ }
+      }
       if (!ragged && !(CBZ.playerChar.fall && CBZ.playerChar.fall.on)) CBZ.playerChar.group.rotation.z = CBZ.damp(CBZ.playerChar.group.rotation.z, Math.PI / 2, 11, dt);
       if (fadeEl) fadeEl.style.opacity = "0";
       // A REAL LOSS, seen first: the body drops, then the card (state.js

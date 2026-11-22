@@ -3028,7 +3028,10 @@
       player.crouch = false; stanceReset();
       player.vy -= T.gravity * dt;
       player.pos.y += player.vy * dt; clampCeiling(player, 0.6);
-      const floorD = walkGroundAt(player.pos.x, player.pos.z, player.pos.y) + 0.3;   // lying body rests ON the floor, not through it
+      // the old side roll lay its plank about the feet and needed the root
+      // lifted 0.3; the rig's own fall drops the hips to the floor from a
+      // root ON it (lifted, the dead and the knocked-down floated a hand up)
+      const floorD = walkGroundAt(player.pos.x, player.pos.z, player.pos.y) + (playerChar.fall && playerChar.fall.on ? 0 : 0.3);
       if (player.pos.y <= floorD) { player.pos.y = floorD; player.vy = 0; player.grounded = true; }
       playerChar.group.position.set(player.pos.x, player.pos.y, player.pos.z);
       // a body already lying in the rig's own fall (meleeposes.js) is not

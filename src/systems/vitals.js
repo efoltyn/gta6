@@ -241,9 +241,13 @@
     const R = peek(a); if (!R) return hm;
     if (R.band && R.band.medic === R.a) return 0.25;
     let m = (1 - 0.45 * weak(R)) * legMul(R) * hm;
+    let legs = false, trunk = false;
     for (let i = 0; i < R.bleeds.length; i++) {
       const b = R.bleeds[i];
-      if ((b.zone === "legL" || b.zone === "legR") && b.band < 0.5) { m *= 0.78; break; }
+      if (b.band >= 0.5 || b.dead) continue;
+      if (!legs && (b.zone === "legL" || b.zone === "legR")) { m *= 0.78; legs = true; }
+      // bent over a hole in the gut or the chest he cannot open his stride
+      else if (!trunk && (b.zone === "abdomen" || b.zone === "chest") && b.rate > 0.003) { m *= 0.85; trunk = true; }
     }
     return m;
   };
@@ -272,7 +276,9 @@
       if (l > 1e-6) dir = { x: o.dirX / l, z: o.dirZ / l };
     }
     const ch = rigOf(a);
-    const already = ch && ch.fall && ch.fall.on && ch.fall.phase !== "getup";
+    // on a knee (a leg shot, the liver) is not on the floor: he goes on over
+    const already = ch && ch.fall && ch.fall.on && ch.fall.phase !== "getup" &&
+      ch.fall.variant !== "kneel" && ch.fall.variant !== "liver";
     if (already) {
       // already on the floor: keep him there this long
       if (ch.fall) { ch.fall.dur = Math.max(ch.fall.dur || 0, secs); }
@@ -883,7 +889,8 @@
     if (R.dead && !deadOf(a)) { reset(a); return false; }
     if (!R.dead && deadOf(a)) { R.dead = true; R.koT = 0; R.collapsed = false; R.critical = false; if (R.band) cancel(R); }
     const r = blood(R, dt);
-    if (R.dead) return R.bleeds.length > 0 || R.pour > 0.002;
+    if (R.dead) { hurtOff(a); return R.bleeds.length > 0 || R.pour > 0.002; }
+    hurtOf(R, a);
 
     R.daze = Math.max(0, R.daze - K.DAZE_DECAY * dt);
     if (R.tasedT > 0) R.tasedT = Math.max(0, R.tasedT - dt);
@@ -930,6 +937,12 @@
         }
       }
     }
+    // DOWN AND AWAKE he gets himself away from the gun (systems/bodyfall.js drag)
+    if (!isPlayer(a) && R.critical && !R.collapsed && !(R.koT > 0) && !R.band && CBZ.bodyFall && CBZ.bodyFall.drag) {
+      const by = R.by;
+      const fp = by ? (isPlayer(by) ? (CBZ.player && CBZ.player.pos) : (by.pos || (by.group && by.group.position) || null)) : null;
+      try { CBZ.bodyFall.drag(a, dt, fp); } catch (e) { /* no rig */ }
+    }
     // hold a man on the floor for as long as this file says he is there (the
     // koMode brains read a.ko; the rig's fall is held by its long dur)
     if (!isPlayer(a) && (R.collapsed || R.critical || R.koT > 0) && koMode()) a.ko = Math.max(a.ko || 0, R.koT > 0 ? R.koT + 0.5 : 1.5);
@@ -964,8 +977,39 @@
     return r > 0.0002 || R.koT > 0 || R.collapsed || R.critical || R.groggyT > 0 || R.tasedT > 0 || !!R.band || !!R.medicOf ||
       R.blood < 1 || R.daze > 0.01 || R.riseT > 0 || R.pour > 0.002;
   }
+  /* ---- THE HURT BODY: what his open holes do to how he stands and moves,
+     handed to the rig every tick (entities/meleeposes.js hurtPose reads
+     ch._hurt): a hand pressed on a hole in the trunk and the hunch over it,
+     an arm that hangs, the sag of the blood going, the flinch when rounds go
+     past him or another one goes in. 0..1 each. */
+  function hurtOff(a) { const ch = rigOf(a); if (ch && ch._hurt) ch._hurt.on = false; }
+  function hurtOf(R, a) {
+    const ch = rigOf(a);
+    if (!ch) return;
+    let gut = 0, chest = 0, armL = 0, armR = 0;
+    for (let i = 0; i < R.bleeds.length; i++) {
+      const b = R.bleeds[i];
+      if (b.band >= 0.5) continue;
+      const k = clamp01(0.45 + (b.rate0 || b.rate) * 70) * clamp01(b.rate / Math.max(1e-5, (b.rate0 || b.rate)) * 1.5);
+      if (b.zone === "abdomen") gut = Math.max(gut, k);
+      else if (b.zone === "chest") chest = Math.max(chest, k);
+      else if (b.zone === "armL") armL = Math.max(armL, k);
+      else if (b.zone === "armR") armR = Math.max(armR, k);
+    }
+    const w = weak(R);
+    const since = clock - R.lastHitT;
+    let fl = since >= 0 && since < 0.6 ? 1 - since / 0.6 : 0;
+    if (CBZ.suppressionLevel) { try { fl = Math.max(fl, CBZ.suppressionLevel(a) || 0); } catch (e) { /* gunfx off */ } }
+    const fp = isPlayer(a) && CBZ.fps && CBZ.fps.active;   // first person: your view, not a pose
+    const on = !fp && state(a) === "ok" && (gut + chest + armL + armR + w + fl) > 0.02;
+    let H = ch._hurt;
+    if (!on) { if (H) H.on = false; return; }
+    if (!H) H = ch._hurt = { on: false, gut: 0, chest: 0, armL: 0, armR: 0, weak: 0, flinch: 0 };
+    H.on = true; H.gut = gut; H.chest = chest; H.armL = armL; H.armR = armR; H.weak = w; H.flinch = fl;
+  }
   function reset(a) {
     a = real(a);
+    hurtOff(a);
     const R = a && a._vt;
     if (!R) return;
     if (R.band) cancel(R);
@@ -988,6 +1032,7 @@
       if (!keep && LIST[i] === R && !R.band && !R.medicOf) {
         // quiet: stop walking him (his record stays for state())
         LIST.splice(i, 1); R.live = false;
+        hurtOff(R.a);
         if (R.dead && R.bleeds.length === 0) { /* corpse done pouring */ }
       }
     }

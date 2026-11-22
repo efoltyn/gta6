@@ -52,14 +52,22 @@
       a.group.position.y = 0;
     }
     const kg = killer && killer.group ? killer.group.position : (killer && killer.pos) || null;
+    // the killing round (fpsmode.js gunHit): where it went in, what it was,
+    // along which line. A man who bled out was not shoved by anything.
+    const sh = opts.shot || null;
+    const bled = opts.cause === "bled out";
+    const dirX = opts.dirX != null ? opts.dirX : (sh ? sh.dirX : undefined);
+    const dirZ = opts.dirZ != null ? opts.dirZ : (sh ? sh.dirZ : undefined);
     CBZ.bodyFall.start(a, {
-      fromX: kg ? kg.x : null, fromZ: kg ? kg.z : null,
-      dirX: opts.dirX, dirZ: opts.dirZ,
+      fromX: kg && !bled ? kg.x : null, fromZ: kg && !bled ? kg.z : null,
+      dirX, dirZ,
       // a killing blow or round shoves him; an unwitnessed death just folds
-      force: opts.force != null ? opts.force : (kg ? 7 : 0),
+      force: bled ? 0 : opts.force != null ? opts.force : (kg ? 7 : 0),
+      zone: sh ? sh.zone : null, cal: sh ? sh.cal : 0, wkey: sh ? sh.wkey : "", dist: sh ? sh.dist : null,
+      point: sh ? sh.point : null, cause: opts.cause || "",
       dead: true, hold: true,
     });
-    if (!kg && !(opts.dirX || opts.dirZ) && a._bf) { a._bf.vx = 0; a._bf.vz = 0; }
+    if ((bled || (!kg && !(dirX || dirZ))) && a._bf) { a._bf.vx = 0; a._bf.vz = 0; }
   }
 
   function tick(a, dt) {

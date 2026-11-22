@@ -876,6 +876,7 @@
     } else if (hr.kind === "fold") {
       const f = sstep(0, 0.07, t) * (1 - sstep(0.30, hr.dur, t));
       S.bx += 0.58 * amt * f;                                     // folds over the fist
+      S.by += (hr.tw || 0) * f;                                   // a round's line across the trunk turns the shoulders
       S.dl += 0.13 * amt * f;
       S.mZ += -0.09 * amt * f;                                    // hips go back
       S.nx += 0.30 * amt * f;
@@ -896,7 +897,7 @@
       _t2.set(-sg * 0.6, -1, 0.1); holdP.lerp(_t2, f);
       S.bx += 0.14 * amt * f;                                      // hunched over it
       S.bz += -sg * 0.10 * amt * f;                                // dips onto the hurt side
-      S.by += sg * 0.10 * amt * f;                                 // the hurt shoulder turns away
+      S.by += sg * 0.10 * amt * f + (hr.tw || 0) * f;              // the hurt shoulder turns away
       S.nx += 0.18 * f;                                            // looks down at it
       S.armK = Math.max(S.armK, f);
     } else if (hr.kind === "buckle") {
@@ -914,6 +915,7 @@
       } else {
         S.bx += lz * 0.30 * amt * s;
         S.bz += -lx * 0.16 * amt * s;
+        S.by += (hr.tw || 0) * s;
         // arms go out for balance
         _t.set(0.42, D.shY - 0.30, 0.25); WL.lerp(_t, 0.55 * s * amt);
         _t.x = -0.42; WR.lerp(_t, 0.55 * s * amt);
@@ -1015,6 +1017,21 @@
                L: { f: 0.12, lift: 0, z: 0.05 }, R: { f: -0.18, lift: 0.06, z: -0.02 }, aL: [-0.25, 0.25, -0.40], aR: [-0.30, 0.10, -0.70] },
     shotKneel: { h: 0.56, mZ: 0.02, bx: 0.26, by: 0, bz: 0.08, nx: 0.32, ny: 0, nz: 0.04,
                L: { f: 0.46, lift: 0, z: 0.07 }, R: { f: -0.44, lift: 0.08, z: -0.02 }, aL: [-0.55, 0.08, -0.55], aR: [-0.30, 0.06, -0.85] },
+    // ---- THE LEGS GO AT ONCE (a head shot, the spine): no buckle, no step.
+    //      Both knees fold together and the hips drop almost straight down
+    //      under him, the torso still upright and the head already gone
+    //      forward; the arms are just hanging. From here he topples. ----
+    crumple: { h: 0.36, mZ: -0.02, bx: 0.22, by: 0, bz: 0.06, nx: 0.62, ny: 0.08, nz: 0.10,
+               L: { f: 0.10, lift: 0.05, z: 0.08 }, R: { f: -0.06, lift: 0.07, z: 0.02 }, aL: [0.05, 0.10, -0.15], aR: [0.08, 0.06, -0.20] },
+    // ---- FOLDED OVER IT (a heavy round through the chest or the gut): the
+    //      trunk doubles over the hole while the knees give, before he sits ----
+    foldGut: { h: 0.60, mZ: -0.08, bx: 0.62, by: 0.04, bz: 0.05, nx: 0.40, ny: 0.05, nz: 0.04,
+               L: { f: 0.20, lift: 0, z: 0.06 }, R: { f: 0.06, lift: 0, z: -0.02 }, aL: [-0.70, -0.05, -1.35], aR: [-0.55, -0.10, -1.50] },
+    // ---- SAT DEAD AGAINST THE WALL HE WAS SHOT IN FRONT OF: hips on the
+    //      floor, back on the wall, chin on the chest, legs out, one knee up a
+    //      little, the hands in the lap and on the floor beside him ----
+    seatWall: { h: 0.20, mZ: -0.12, bx: -0.30, by: 0.04, bz: 0.12, nx: 0.62, ny: 0.22, nz: 0.18,
+               L: { f: 0.78, lift: 0.04, z: 0.14 }, R: { f: 0.58, lift: 0.10, z: 0.04 }, aL: [0.20, 0.32, -0.25], aR: [-0.25, 0.12, -0.70] },
   };
   // the sequences: [key, t_end] — the first segment blends from whatever the
   // body was doing, the last hands back to it (weight → 0)
@@ -1028,7 +1045,33 @@
     upFace:   [["pushUp", 0.45], ["kneel", 0.95], ["rise", 1.30], [null, 1.60]],
     upKneel:  [["rise", 0.40], [null, 0.72]],
     kneel:    [["legGive", 0.14], ["shotKneel", 0.36]],
+    // the styled deaths (STYLES below picks one for a variant)
+    dropBack: [["crumple", 0.15], ["seat", 0.32], ["lieBack", 0.60]],
+    dropFace: [["crumple", 0.15], ["knees", 0.28], ["lieFace", 0.54]],
+    foldBack: [["foldGut", 0.26], ["seat", 0.52], ["lieBack", 0.86]],
+    wallBack: [["buckle", 0.20], ["seat", 0.46], ["seatWall", 0.66]],
   };
+  /* HOW he died picks how he goes down (systems/bodyfall.js chooses): `drop`
+     the legs go at once (head), `fold` doubled over a heavy round in the
+     trunk, `wall` sat down against the wall behind him. A style has a
+     sequence per variant (a variant it does not list falls the plain way)
+     and may lie in its own last key. */
+  const STYLES = {
+    drop: { back: "dropBack", face: "dropFace" },
+    fold: { back: "foldBack" },
+    wall: { back: "wallBack", lie: "seatWall" },
+  };
+  function seqName(f, FR) {
+    const st = f.style && STYLES[f.style];
+    const n = st && st[f.variant === "face" ? "face" : "back"];
+    if (n && (f.variant === "back" || f.variant === "face")) return n;
+    return f.ko ? FR.fall : FR.fallC;
+  }
+  function lieName(f, FR) {
+    const st = f.style && STYLES[f.style];
+    if (st && st.lie && st[f.variant === "face" ? "face" : "back"]) return st.lie;
+    return f.ko ? FR.lie : FR.lieC;
+  }
   /* one row per way of going down: its fall (KO'd / conscious), the key it
      lies (or kneels) in, how it gets up, and a beat before anything moves */
   const FALLS = {
@@ -1143,6 +1186,14 @@
     f.hold = !!o.hold;
     f.phase = "fall";
     f.getup = fallRow(variant).getup;
+    // THE CLOCK RUNS ON THE ENERGY: a head shot drops a man in under half a
+    // second, a man bleeding out sags down slowly (bodyfall.js picks it)
+    f.rate = o.rate > 0 ? clamp(o.rate, 0.5, 2.2) : 1;
+    f.style = STYLES[o.style] ? o.style : "";
+    f.seed = Number.isFinite(o.seed) ? o.seed : Math.random() * 6.28;
+    f.snap = false;                 // the first frame records where the fall starts from
+    const L = ch._limp;
+    if (L) { L.init = false; L.sleep = false; }
     // the fall owns the whole body: every strike and reaction on it ends
     ch.punchT = 0; ch.kickT = 0; ch.blockT = 0; ch.dodgeT = 0;
     if (ch.hitReact) ch.hitReact.on = false;
@@ -1158,17 +1209,26 @@
     f.phase = "getup"; f.gt = 0;
     return true;
   };
-  MP.fallTimes = function (variant) {
-    const F = fallRow(variant), fall = SEQ[F.fall], up = SEQ[F.up];
-    return { fall: fall[fall.length - 1][1], getup: up[up.length - 1][1], delay: F.delay };
+  // style / rate optional: the fall's length in SECONDS for that death
+  MP.fallTimes = function (variant, style, rate) {
+    const F = fallRow(variant), up = SEQ[F.up];
+    const st = style && STYLES[style];
+    const sn = st && st[variant === "face" ? "face" : "back"];
+    const fall = (sn && (variant === "back" || variant === "face")) ? SEQ[sn] : SEQ[F.fall];
+    return { fall: fall[fall.length - 1][1] / (rate > 0 ? rate : 1), getup: up[up.length - 1][1], delay: F.delay };
   };
-  function seqSample(ch, seq, t, side, cur, out) {
+  /* grav: a body with no muscle in it (out cold, dead) does not ease onto
+     the floor, it lands: the last segment accelerates the whole way (u^2)
+     and stops on the floor key. The stop is the impact the limp springs
+     below feel; a conscious man's fall still eases in (he catches himself). */
+  function seqSample(ch, seq, t, side, cur, out, grav) {
     const keys = keysOf(ch);
     let t0 = 0;
     for (let i = 0; i < seq.length; i++) {
       const t1 = seq[i][1];
       if (t <= t1 || i === seq.length - 1) {
-        const u = sstep(t0, t1, t);
+        let u = sstep(t0, t1, t);
+        if (grav && i === seq.length - 1 && i > 0) { const q = clamp01((t - t0) / (t1 - t0)); u = q * q; }
         const a = i === 0 ? cur : mirrorInto(keys[seq[i - 1][0]], side, KA);
         const bName = seq[i][0];
         const bk = bName ? mirrorInto(keys[bName], side, KB) : cur;
@@ -1215,6 +1275,292 @@
   };
 
   /* ============================================================
+     LIMP WEIGHT — a body with no muscle in it (out cold, dead).
+     The keyed fall says where the hips and the trunk go; nothing in it moved
+     the arms, the head or a leg except to the next key, so every body landed
+     with its limbs exactly where a key put every other body's, and arrived
+     there as stiff as a mannequin. Once the muscles go, a limb is loose mass
+     on a joint: it trails the trunk while the trunk is moving, flops when the
+     trunk stops on the floor, swings past where it will lie, and settles.
+       · one damped spring per loose degree of freedom (both shoulders, both
+         elbows, the neck three ways, the trunk's twist, both hips' splay);
+       · driven by what the trunk is doing, read off the pose the fall just
+         wrote: its pitch acceleration (a limb lags a turning trunk), the
+         hips' vertical acceleration (the floor stopping the body is the
+         biggest of them: the keyed fall now lands under gravity) and the
+         root's acceleration in his frame;
+       · each spring rests where gravity and the floor leave that limb, a
+         seeded sprawl per body (an arm thrown out, a head turned, one knee
+         fallen up and over), and has joint limits: an arm stops on the floor
+         it lies on and bounces a little off it;
+       · a round into the body is a kick to the springs of the part it hit
+         (MP.limpKick: bodyfall's poke, and the killing round itself).
+     Written ABSOLUTELY on top of the pose the fall wrote this frame (the
+     fall writes every channel outright, and its first segment blends from a
+     snapshot, not the live pose), so nothing winds up: the additive spring
+     writes that exploded in grapple.js have nothing to feed on here.
+     Cost per falling body: 12 springs, a few dozen flops each, for about two
+     seconds; then asleep (rest offsets only, no integration), and a body
+     bodyfall.js has put to sleep is not posed at all.
+     ============================================================ */
+  const LN = 12;
+  // 0 left shoulder flex (x, + = back) 1 left arm out 2 right flex 3 right out
+  // 4 left elbow 5 right elbow 6 neck x (+ = chin down) 7 neck y 8 neck z
+  // 9 trunk twist 10 left leg out 11 right leg out
+  const LK = new Float32Array([46, 46, 46, 46, 38, 38, 64, 56, 56, 50, 80, 80]);
+  const LZETA = [0.22, 0.25, 0.22, 0.25, 0.30, 0.30, 0.30, 0.34, 0.34, 0.40, 0.50, 0.50];
+  const LC = new Float32Array(LN);
+  for (let i = 0; i < LN; i++) LC[i] = 2 * LZETA[i] * Math.sqrt(LK[i]);
+  const LMIN = new Float32Array([-1.7, -0.30, -1.7, -0.30, -1.1, -1.1, -0.55, -0.60, -0.40, -0.40, -0.18, -0.18]);
+  const LMAX = new Float32Array([0.95, 1.25, 0.95, 1.25, 0.35, 0.35, 0.55, 0.60, 0.40, 0.40, 0.45, 0.45]);
+  const LD = new Float32Array(LN);           // this frame's drive (scratch)
+  const G_ARM = 1.5, G_HEAD = 1.1;
+  function limpRec(ch) {
+    return ch._limp || (ch._limp = { x: new Float32Array(LN), v: new Float32Array(LN), r: new Float32Array(LN),
+      bendL: 0, bendR: 0, init: false, sleep: false, kick: false, quiet: 0,
+      pP: 0, wP: 0, pR: 0, wR: 0, hy: 0, vy: 0, gx: 0, gz: 0, vx: 0, vz: 0 });
+  }
+  // where each limb comes to rest: seeded per body, smaller for a man only out cold
+  function limpRest(L, f) {
+    const s = f.seed || 0, m = f.dead ? 1 : 0.55, face = f.variant === "face";
+    const j = (k) => Math.sin(s * k + k);
+    const r = L.r;
+    r[0] = (face ? 1 : -1) * 0.12 * Math.abs(j(1.7)) * m;   // off the floor, never into it
+    r[2] = (face ? 1 : -1) * 0.12 * Math.abs(j(2.9)) * m;
+    r[1] = 0.30 * j(2.3) * m;  r[3] = 0.30 * j(3.1) * m;
+    r[4] = -0.25 * Math.abs(j(4.4)) * m;  r[5] = -0.25 * Math.abs(j(5.2)) * m;
+    r[6] = 0.10 * j(0.9) * m;
+    r[7] = face ? 0 : 0.45 * j(1.3) * m;                    // face down the cheek is already on the floor
+    r[8] = 0.15 * j(2.7) * m;
+    r[9] = 0.10 * j(6.1) * m;
+    r[10] = 0.04 + 0.10 * j(3.7) * m;  r[11] = 0.04 + 0.10 * j(4.1) * m;
+    // on his back one knee may have fallen up: thigh off the floor by a, the
+    // knee bent 2a, so the foot stays flat on the floor (thigh ~ shin)
+    const b = !face && f.style !== "wall" ? 0.32 * Math.max(0, j(5.3)) * m : 0;
+    if (j(7.7) >= 0) { L.bendL = b; L.bendR = 0; } else { L.bendL = 0; L.bendR = b; }
+  }
+  function limp(ch, f, mdt) {
+    if (!f.ko) return;
+    const L = limpRec(ch), g = ch.group;
+    if (!g) return;
+    let fade = 1;
+    if (f.phase === "getup") {
+      // a man coming round takes his limbs back over a third of a second
+      fade = 1 - clamp01((f.gt || 0) / 0.3);
+      if (fade <= 0) { L.init = false; return; }
+    }
+    const dt = Math.min(0.05, Math.max(0, mdt || 0));
+    const x = L.x, v = L.v;
+    if (!L.init) {
+      L.init = true; L.sleep = false; L.quiet = 0;
+      if (!L.kick) { x.fill(0); v.fill(0); }
+      L.kick = false;
+      limpRest(L, f);
+      L.pP = ch.body.rotation.x; L.wP = 0; L.pR = ch.body.rotation.z; L.wR = 0;
+      L.hy = g.position.y + (ch._mMy || 0); L.vy = 0;
+      L.gx = g.position.x; L.gz = g.position.z; L.vx = 0; L.vz = 0;
+    }
+    // how far through the fall (the rest offsets come in with it) and how
+    // much of him is on the floor
+    const FR = fallRow(f.variant), sq = SEQ[seqName(f, FR)];
+    const wr = f.phase === "fall" ? clamp01(f.t / sq[sq.length - 1][1]) : 1;
+    const wd = f.phase === "fall" ? clamp01((wr - 0.7) / 0.3) : 1;
+    if (!L.sleep && dt > 0) {
+      const idt = 1 / dt;
+      const pitch = ch.body.rotation.x, roll = ch.body.rotation.z;
+      const hy = g.position.y + (ch._mMy || 0);
+      const jump = Math.abs(hy - L.hy) + Math.abs(g.position.x - L.gx) + Math.abs(g.position.z - L.gz) > 0.4;
+      const wp = (pitch - L.pP) * idt, wrl = (roll - L.pR) * idt;
+      const vy = (hy - L.hy) * idt, vx = (g.position.x - L.gx) * idt, vz = (g.position.z - L.gz) * idt;
+      let ap = (wp - L.wP) * idt, ar = (wrl - L.wR) * idt, ay = (vy - L.vy) * idt;
+      let ax = (vx - L.vx) * idt, az = (vz - L.vz) * idt;
+      L.pP = pitch; L.wP = wp; L.pR = roll; L.wR = wrl; L.hy = hy; L.vy = vy;
+      L.gx = g.position.x; L.gz = g.position.z; L.vx = vx; L.vz = vz;
+      if (jump) { ap = ar = ay = ax = az = 0; L.wP = L.wR = L.vy = L.vx = L.vz = 0; }   // moved on purpose, not fallen
+      ap = clamp(ap, -260, 260); ar = clamp(ar, -200, 200); ay = clamp(ay, -70, 70);
+      ax = clamp(ax, -70, 70); az = clamp(az, -70, 70);
+      const ya = g.rotation.y || 0, sy = Math.sin(ya), cy = Math.cos(ya);
+      const afw = ax * sy + az * cy, alt = ax * cy - az * sy;  // his front / his left (+x)
+      const sP = Math.sin(pitch), cP = Math.cos(pitch);
+      // the acceleration along the trunk's front: a limb hanging below its
+      // joint lags it (+), the head above its joint the other way
+      const lin = afw * cP - ay * sP;
+      const dArm = -ap + G_ARM * lin;
+      const float = -0.5 * ay * cP;                           // the hips dropping away: the arms float up and out
+      LD[0] = dArm; LD[2] = dArm;
+      LD[1] = G_ARM * (-0.8 * alt + float); LD[3] = G_ARM * (0.8 * alt + float);
+      LD[4] = -0.4 * dArm; LD[5] = -0.4 * dArm;
+      LD[6] = -1.2 * ap - G_HEAD * lin;
+      LD[7] = 0;
+      LD[8] = 0.7 * G_HEAD * alt - ar;
+      LD[9] = 0;
+      const splay = ay > 0 && wd > 0.5 ? 0.06 * ay : 0;       // the floor stops him: the legs bounce apart
+      LD[10] = splay; LD[11] = splay;
+      const face = f.variant === "face", wall = f.style === "wall";
+      const n = dt > 0.022 ? 2 : 1, h = dt / n;
+      for (let s = 0; s < n; s++) {
+        for (let i = 0; i < LN; i++) {
+          const a = LD[i] - LK[i] * (x[i] - L.r[i] * wr) - LC[i] * v[i];
+          v[i] += a * h; x[i] += v[i] * h;
+          let lo = LMIN[i], hi = LMAX[i];
+          // an arm lying on the floor stops on it (back: + is toward the
+          // floor, face down: -)
+          if ((i === 0 || i === 2) && !wall) { if (face) lo = lerp(lo, -0.10, wd); else hi = lerp(hi, 0.10, wd); }
+          // the head on the floor: it bounces off it, it does not nod into it
+          // (back: extension is toward the floor; face down: flexion)
+          else if (i === 6 && !wall) { if (face) hi = lerp(hi, 0.10, wd); else lo = lerp(lo, -0.08, wd); }
+          if (x[i] < lo) { x[i] = lo; if (v[i] < 0) v[i] *= -0.25; }
+          else if (x[i] > hi) { x[i] = hi; if (v[i] > 0) v[i] *= -0.25; }
+        }
+      }
+      // asleep once he is down and nothing is moving
+      if (f.phase === "down") {
+        let e = Math.abs(ap) * 0.01;
+        for (let i = 0; i < LN; i++) e += Math.abs(x[i] - L.r[i]) + 0.2 * Math.abs(v[i]);
+        if (e < 0.03) { L.quiet += dt; if (L.quiet > 0.25) L.sleep = true; } else L.quiet = 0;
+      }
+    }
+    // ---- write it over the fall's pose ----
+    const P = ch.parts, LO = ch.low || {}, k = fade;
+    if (P.la) { P.la.rotation.x += x[0] * k; P.la.rotation.z += x[1] * k; }
+    if (P.ra) { P.ra.rotation.x += x[2] * k; P.ra.rotation.z -= x[3] * k; }
+    if (LO.la) LO.la.rotation.x = Math.min(0, LO.la.rotation.x + x[4] * k);
+    if (LO.ra) LO.ra.rotation.x = Math.min(0, LO.ra.rotation.x + x[5] * k);
+    if (ch.neck) { const nr = ch.neck.rotation; nr.x += x[6] * k; nr.y += x[7] * k; nr.z += x[8] * k; }
+    ch.body.rotation.y += x[9] * k;
+    if (P.rl) P.rl.rotation.z += x[10] * k;        // parts.rl is his LEFT leg
+    if (P.ll) P.ll.rotation.z -= x[11] * k;
+    const bL = L.bendL * wr * k, bR = L.bendR * wr * k;
+    if (bL > 0 && P.rl) { P.rl.rotation.x -= bL; if (LO.rl) LO.rl.rotation.x += 2 * bL; }
+    if (bR > 0 && P.ll) { P.ll.rotation.x -= bR; if (LO.ll) LO.ll.rotation.x += 2 * bR; }
+    if (ch.neck && CBZ.human && CBZ.human.clampNeck) CBZ.human.clampNeck(ch.neck);
+  }
+  /* a round (or a boot) into a limp body: velocity into the springs of the
+     part it struck. part "la"|"ra" (arms), "rl"|"ll" (his left | right leg,
+     the rig's names), "head", "core"; s +1 = the round going toward his left;
+     amt ~0.3 (a pistol into a corpse) .. 1.5 (a close shotgun); fwd = the
+     round along his front (+ = it pushes him forward); tw = trunk twist
+     velocity (the round's line across his shoulders). */
+  MP.limpKick = function (ch, part, s, amt, fwd, tw) {
+    if (!ch || !ch.parts) return false;
+    const L = limpRec(ch), v = L.v;
+    const a = clamp(amt || 0, 0, 2.5);
+    s = s < 0 ? -1 : 1; fwd = fwd || 0;
+    L.sleep = false; L.quiet = 0;
+    if (!L.init) L.kick = true;
+    if (part === "la" || part === "ra") {
+      const i = part === "la" ? 0 : 2;
+      v[i] += -fwd * 6 * a;
+      v[i + 1] += (part === "la" ? s : -s) * 9 * a;           // along the round: out on the side it goes to
+      v[i === 0 ? 4 : 5] -= 5 * a;
+      v[7] += s * 1.5 * a;
+    } else if (part === "rl" || part === "ll") {
+      v[part === "rl" ? 10 : 11] += (part === "rl" ? s : -s) * 5 * a;
+      v[part === "rl" ? 11 : 10] += 1.2 * a;
+    } else if (part === "head") {
+      v[6] += fwd * 7 * a;                                     // driven back (extension) or forward
+      v[7] += s * 7 * a; v[8] += s * 3 * a;
+      v[1] += 2 * a; v[3] += 2 * a;
+    } else {
+      // the trunk is driven along the round; the head and the arms lag it
+      v[6] += -fwd * 3 * a; v[7] += s * 3 * a;
+      v[0] += fwd * 4 * a; v[2] += fwd * 4 * a;
+      v[1] += 3.5 * a; v[3] += 3.5 * a;
+    }
+    if (tw) v[9] += clamp(tw, -6, 6);
+    return true;
+  };
+  // true while the limp springs are still moving (bodyfall.js does not let a body sleep under them)
+  MP.limpBusy = function (ch) { const L = ch && ch._limp; return !!(L && L.init && !L.sleep); };
+
+  /* ---- DRAGGING HIMSELF (bodyfall.js moves the root; ch._drag = { on, t }):
+     face down the arms take turns reaching out along the floor (abduction,
+     which stays IN the floor plane) and pulling him up to the hand, the
+     head up to see; on his back the knees come up, the heels dig in and the
+     legs drive him along head first. Lerped toward targets over the lying
+     key the fall writes outright, so it is bounded. */
+  function dragPose(ch, f, mdt) {
+    const d = ch._drag;
+    if (!d || !d.on || f.ko) return;
+    const P = ch.parts, LO = ch.low || {};
+    const cyc = 1.5, ph = (d.t % cyc) / cyc, n = Math.floor(d.t / cyc);
+    const reach = ph < 0.45 ? sstep(0, 0.45, ph) : 1 - sstep(0.45, 1, ph);
+    if (f.variant === "face") {
+      const lead = n % 2 ? P.la : P.ra, other = n % 2 ? P.ra : P.la;
+      const lo = n % 2 ? LO.la : LO.ra;
+      const out = n % 2 ? 1 : -1;                              // la out = +z, ra out = -z
+      if (lead) lead.rotation.z = lerp(lead.rotation.z, out * 2.5, 0.85 * reach);
+      if (lo) lo.rotation.x = lerp(lo.rotation.x, -1.2, 1 - reach);   // bent while it pulls
+      if (other) other.rotation.z = lerp(other.rotation.z, -out * 0.9, 0.6);
+      if (ch.neck) ch.neck.rotation.x -= 0.30;                   // the head up off the floor
+      const knee = n % 2 ? LO.ll : LO.rl;                          // the opposite knee comes up and pushes
+      if (knee) knee.rotation.x += 0.7 * reach;
+    } else {
+      const push = 1 - reach;                                    // reach = knees up, then the legs drive
+      if (P.rl) P.rl.rotation.x -= 0.75 * reach;
+      if (P.ll) P.ll.rotation.x -= 0.75 * reach;
+      if (LO.rl) LO.rl.rotation.x += 1.5 * reach;
+      if (LO.ll) LO.ll.rotation.x += 1.5 * reach;
+      if (LO.la) LO.la.rotation.x = Math.min(0, lerp(LO.la.rotation.x, -1.3, 0.6 * push));   // elbows dig in
+      if (LO.ra) LO.ra.rotation.x = Math.min(0, lerp(LO.ra.rotation.x, -1.3, 0.6 * push));
+      if (ch.neck) ch.neck.rotation.x += 0.25;                   // the head lifted to see where he goes
+    }
+  }
+
+  /* ============================================================
+     THE HURT BODY — a man who was hit and lives moves like it, all the time,
+     not for one beat. ch._hurt is written every tick by systems/vitals.js
+     from his open wounds: { on, gut, chest, armL, armR, weak, flinch } (0..1).
+       · a hole in the gut or the chest: he hunches over it and one hand is
+         pressed on it (the hand on the other side when an arm is hit too);
+       · a hole in an arm: that arm hangs, the hand is useless;
+       · blood loss: the head droops, the arms go slack, the trunk sags;
+       · flinch: rounds going past him, or a fresh one in him: the shoulders
+         come up, the head goes down, the hands come in.
+     (A leg wound is character.js's limp, ch.legHurt, which wounds.js and
+     vitals already drive.) The trunk is written outright by the gait every
+     frame, so it takes a plain offset; the arms and the neck are damped by
+     the gait from where they were, so they are LERPED toward a target here
+     (a fixed point between the gait's pose and the hurt one: bounded). A
+     gun hold (systems/actorweapons.js, after this) keeps the arms it needs. */
+  function hurtPose(ch, mdt, moving) {
+    const H = ch._hurt;
+    if (!H || !H.on || ch.sitting || ch.lying || ch.mount || ch.cuffed) return;
+    const P = ch.parts, LO = ch.low || {};
+    const busy = ch.punchT > 0 || ch.kickT > 0 || ch.blockT > 0 || !!(ch.hitReact && ch.hitReact.on);
+    const gut = H.gut || 0, chest = H.chest || 0, weak = H.weak || 0, fl = H.flinch || 0;
+    ch.body.rotation.x += 0.22 * gut + 0.10 * chest + 0.12 * weak + 0.14 * fl;
+    if (ch.neck) ch.neck.rotation.x = lerp(ch.neck.rotation.x, 0.4, Math.min(0.8, 0.35 * weak + 0.25 * gut + 0.6 * fl));
+    if (busy) return;
+    const aL = H.armL || 0, aR = H.armR || 0;
+    // a dead arm hangs
+    if (aL > 0 && P.la) { P.la.rotation.x = lerp(P.la.rotation.x, 0.06, 0.75 * aL); P.la.rotation.z = lerp(P.la.rotation.z, 0.04, 0.75 * aL); if (LO.la) LO.la.rotation.x = lerp(LO.la.rotation.x, -0.1, 0.75 * aL); }
+    if (aR > 0 && P.ra) { P.ra.rotation.x = lerp(P.ra.rotation.x, 0.06, 0.75 * aR); P.ra.rotation.z = lerp(P.ra.rotation.z, -0.04, 0.75 * aR); if (LO.ra) LO.ra.rotation.x = lerp(LO.ra.rotation.x, -0.1, 0.75 * aR); }
+    // the hand pressed on the hole in the trunk
+    const trunk = Math.max(gut, chest);
+    const useL = aL < 0.3, useR = aR < 0.3 && !useL;
+    if (trunk > 0.05 && (useL || useR)) {
+      const arm = useL ? P.la : P.ra, lo = useL ? LO.la : LO.ra, inS = useL ? -1 : 1;
+      const hi = chest > gut;
+      const k = Math.min(0.85, 0.3 + 0.6 * trunk) * (moving ? 0.8 : 1);
+      if (arm) { arm.rotation.x = lerp(arm.rotation.x, hi ? -1.0 : -0.72, k); arm.rotation.z = lerp(arm.rotation.z, inS * (hi ? 0.38 : 0.30), k); }
+      if (lo) lo.rotation.x = lerp(lo.rotation.x, hi ? -1.85 : -1.55, k);
+    }
+    // slack with the blood going
+    if (weak > 0.05) {
+      const k = 0.35 * weak;
+      if (P.la && aL <= 0 && !(trunk > 0.05 && useL)) { P.la.rotation.x = lerp(P.la.rotation.x, 0.05, k); if (LO.la) LO.la.rotation.x = lerp(LO.la.rotation.x, -0.12, k); }
+      if (P.ra && aR <= 0 && !(trunk > 0.05 && useR)) { P.ra.rotation.x = lerp(P.ra.rotation.x, 0.05, k); if (LO.ra) LO.ra.rotation.x = lerp(LO.ra.rotation.x, -0.12, k); }
+    }
+    // the flinch: hands in, shoulders up
+    if (fl > 0.05) {
+      const k = 0.7 * fl;
+      if (P.la && aL <= 0) { P.la.rotation.x = lerp(P.la.rotation.x, -0.55, k); P.la.rotation.z = lerp(P.la.rotation.z, -0.12, k); if (LO.la) LO.la.rotation.x = lerp(LO.la.rotation.x, -1.7, k); }
+      if (P.ra && aR <= 0) { P.ra.rotation.x = lerp(P.ra.rotation.x, -0.55, k); P.ra.rotation.z = lerp(P.ra.rotation.z, 0.12, k); if (LO.ra) LO.ra.rotation.x = lerp(LO.ra.rotation.x, -1.7, k); }
+    }
+  }
+
+  /* ============================================================
      HOOK 2 — MP.react: falls, the head snap, the taser. Runs LAST.
      ============================================================ */
   MP.react = function (ch, dt, moving, J) {
@@ -1235,15 +1581,24 @@
       let w = 1;
       const FR = fallRow(variant);
       if (f.phase === "fall") {
-        f.t += mdt;
-        const seq = SEQ[f.ko ? FR.fall : FR.fallC];
+        /* THE FIRST SEGMENT BLENDS FROM WHERE HE WAS, recorded once on the
+           fall's first frame. It used to re-read the live pose every frame,
+           so anything written over the fall (the limp below, a jolt) was fed
+           back into its own source and wound up. */
+        if (!f.snap || !f.cur0) {
+          if (!f.cur0) f.cur0 = new Float32Array(CH);
+          for (let c = 0; c < CH; c++) f.cur0[c] = CUR[c];
+          f.snap = true;
+        }
+        f.t += mdt * (f.rate || 1);
+        const seq = SEQ[seqName(f, FR)];
         // the liver: a beat where nothing happens yet, then the fold
         const tt = Math.max(0, f.t - FR.delay);
-        w = seqSample(ch, seq, tt, side, CUR, OUT);
+        w = seqSample(ch, seq, tt, side, f.cur0, OUT, f.ko);
         if (tt >= seq[seq.length - 1][1]) { f.phase = "down"; f.t = 0; }
       } else if (f.phase === "down") {
         f.t += mdt;
-        const key = keysOf(ch)[f.ko ? FR.lie : FR.lieC];
+        const key = keysOf(ch)[lieName(f, FR)];
         mirrorInto(key, side, OUT);
         OUT[2] += (variant === "face" ? -1 : 1) * 0.025 * Math.sin(ch.breath * 2.4);   // he is still breathing
         if (!f.hold && f.t >= f.dur) { f.phase = "getup"; f.gt = 0; }
@@ -1251,7 +1606,7 @@
         f.gt += mdt;
         const seq = SEQ[FR.up];
         // the first get-up segment starts from the lying key, not the live base
-        const lie = keysOf(ch)[f.ko ? FR.lie : FR.lieC];
+        const lie = keysOf(ch)[lieName(f, FR)];
         mirrorInto(lie, side, MIR);
         w = seqSample(ch, seq, f.gt, side, MIR, OUT);
         // the final segment returns to the live standing base: blend by w
@@ -1267,8 +1622,11 @@
       }
       if (f.on || w > 0) writePose(ch, OUT, f.on ? w : 0);
       if (!f.on) { setModel(ch, 0, 0, 0, 0); }
-      if (f.on && f.phase === "down") groundHit(ch, f, mdt);
-    }
+      // the pose above is written outright every frame, so whatever goes on
+      // top of it is too, and nothing winds up
+      if (f.on) limp(ch, f, mdt);
+      if (f.on && f.phase === "down") { groundHit(ch, f, mdt); dragPose(ch, f, mdt); }
+    } else if (ch._limp && ch._limp.init) ch._limp.init = false;
 
     // ---- HEAD SNAP: additive, backed out next frame by MP.strike ----
     const hr = ch.hitReact;
@@ -1292,6 +1650,8 @@
         ch._rNx = ox; ch._rNy = oy; ch._rNz = oz;
       }
     }
+
+    if (!(f && f.on)) hurtPose(ch, mdt, moving);
 
     // ---- TASER CONTACT: a short involuntary whole-body lock over whatever
     // pose owns the actor. systems/taserfx.js raises only this timer. ----
