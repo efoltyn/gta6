@@ -1271,9 +1271,10 @@
      metre (clear sea: red dies first; silt raises both and browns it),
      R-infinity = 0.33 bb / (a + bb) lit by the scene's own sun and sky, and
      Beer-Lambert transmittance over the path down to the bed and back up.
-     Scalar alpha cannot tint what is behind per channel, so the sheet's
-     alpha carries the green transmittance and the colour adds the difference
-     against a sand estimate. */
+     Scalar alpha cannot tint what is behind per channel, so the sheet lets it
+     through at the most-absorbed channel's transmittance and the colour adds
+     each channel's remainder against a sand estimate: never a negative
+     colour. */
   const SHADE_GLSL = [
     "uniform vec3 uKeyDir;",
     "uniform vec3 uKeyRad;",
@@ -1395,7 +1396,27 @@
     "  tb *= mix(1.0, smoothstep(0.22, 0.55, abs(V.y)), smoothstep(0.3, 1.5, depth));",
     "  float Fs = max(F, cbzSchlick(abs(V.y)));",
     "  vec3 bedEst = vec3(0.36, 0.33, 0.26) * E;",
-    "  vec3 sub = body + (Tr - tb) * bedEst * (1.0 - smoothstep(colD, colD + 1.0, depth));",
+    "  float kc = 1.0 - smoothstep(colD, colD + 1.0, depth);",
+    /* NEVER A NEGATIVE COLOUR. What lies behind shows at one strength tb for
+       all three channels, and the colour made up each channel's difference
+       (Tr - tb) against the sand estimate. tb is the GREEN transmittance and
+       red dies first, so over a metre or more of clear water the red make-up
+       went negative; divided by a small alpha and run through the tone curve
+       (RRTAndODTFit comes out positive for negative input) it lit the clear
+       shallows hot pink and magenta. Where the estimate applies (kc), tb now
+       drops to the most-absorbed channel's transmittance and each channel's
+       remainder is added as light, so the sand still gets kc*Tr + (1-kc)*tb
+       per channel and nothing is ever negative. Unchanged wherever no
+       channel was short. The pool (CBZ_OWN_FLOOR) keeps the green
+       see-through: it composites its own tiled floor per channel in the same
+       opaque fragment, and its tiles and caustic web need that strength. */
+    "#ifdef CBZ_OWN_FLOOR",
+    "  float tMin = tb;",
+    "#else",
+    "  float tMin = min(tb, min(Tr.r, min(Tr.g, Tr.b)));",
+    "#endif",
+    "  tb = mix(tb, tMin, kc);",
+    "  vec3 sub = body + (Tr - tMin) * bedEst * kc;",
     "  vec3 col = mix(sub, sky, F);",
     // ONE lobe for the sun or the moon, as wide as the slope the pixel cannot
     // resolve; the glitter in it comes from the per-pixel normal
@@ -3983,6 +4004,7 @@
     ].join("\n");
     poolMat = new THREE.ShaderMaterial({
       name: "CBZ Pool Water", uniforms: U, vertexShader: vs, fragmentShader: fs, fog: true,
+      defines: { CBZ_OWN_FLOOR: 1 },     // cbzWaterShade: the floor is composited here
     });
     poolMat.userData.waterUniforms = U;
     poolMat.userData.selfDrive = true;
