@@ -606,8 +606,31 @@
     }).replace(/\s{2,}/g, " ").trim();
   }
   let _lines = 0, _said = 0, _silent = 0, _reacts = 0, _spread = 0;
+  /* THE WORDS MATCH THE BODY (owner, 2026-11-21: hands up "but the dialogue
+     shouldn't be as if they have a gun pointed back at me"). Whatever event
+     asked, a man with his hands over his head says a hands-up line, and a man
+     with his muzzle on you never begs. Every line passes here, so no caller
+     (a witness tick, a face-to-face talk, a guard's defy) can contradict the
+     pose the player is looking at. */
+  function handsUpNow(a) {
+    const ch = a.char;
+    return !!(a.poseHandsUp || a.intimidMode === "scared" || a._gunPose === "handsUp" || a.surrender ||
+      (ch && (ch.handsUp || ch.surrender)));
+  }
+  function gunUpNow(a) {
+    return !!(a.poseAimBack || a.intimidMode === "standoff" || a.intimidMode === "draw" || a._gunPose === "aim");
+  }
+  const DEFIANT = { standoff: 1, seeGun: 1, hitBack: 1, shoveBack: 1, stop: 1, bumped: 1, shoved: 1, carCutoff: 1, hesGotAGun: 1, seeHit: 1, leaveMe: 1 };
+  const MEEK = { comply: 1, dontWantTrouble: 1, cower: 1 };
+  function fitBody(a, topic) {
+    if (handsUpNow(a)) return DEFIANT[topic] ? "comply" : topic;
+    if (gunUpNow(a)) return MEEK[topic] ? "standoff" : topic;
+    return topic;
+  }
+
   function line(a, topic, ctx) {
     if (!a || !topic) return null;
+    if (topic !== "order") topic = fitBody(a, topic);
     // AN ORDER is said on its rung, every time it is given: no walk, no
     // "somebody said it a minute ago" (the warden repeats himself)
     if (topic === "order") {
@@ -887,7 +910,10 @@
     // BEFORE the body moves, so the field raise its flee makes merges into
     // this entry (and keeps this ring) instead of starting a fresh one
     if (how === "sprint" && ap) runner(a, ctx.sx, ctx.sz, ctx.why || (ev === "seeGun" || ev === "aimedAt" ? "gun" : null), (ctx.ring | 0));
-    if (!ctx.how && !ctx.silent && !ctx.bodyless && !SPEAK_ONLY[ev]) perform(a, how, ctx);
+    // a man whose hands are already up stays that way: a witness tick must
+    // not square him up or draw for him out of the surrender
+    if (!ctx.how && handsUpNow(a)) how = "handsUp";
+    else if (!ctx.how && !ctx.silent && !ctx.bodyless && !SPEAK_ONLY[ev]) perform(a, how, ctx);
     _res.how = how;
     // the words: only when this person would really say them
     let topic = dd.topic;

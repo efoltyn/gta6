@@ -1234,6 +1234,9 @@
       const threat = threatNear(w);
       if (threat) {
         gs.calmT = 0;
+        // on the mark (a long gun is pitched onto it by actorweapons.js's jail
+        // pass; without a threat that pass carries it at low ready)
+        if (CBZ.actorReadyPose) { try { CBZ.actorReadyPose(w, dt); } catch (e) {} }
         gs.fireCD -= dt;
         if (!gs.warned) { gs.warned = true; gs.fireCD = 1.8; say(w, pick(LINE.gunDraw), 1.6); }
         else if (gs.fireCD <= 0 && p && Math.hypot(p.x - w.group.position.x, p.z - w.group.position.z) < 14) {

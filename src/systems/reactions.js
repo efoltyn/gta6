@@ -638,6 +638,9 @@
         // city ped (state), plus the city's brief gunfire/blast cringe (poseCower).
         const scared = a.aiState === "flee" || (isCity && (a.state === "flee" || (a.poseCower || 0) > 0));
         const aimBack = !down && a.poseAimBack && parts && body;
+        // a long gun the prison pass (systems/actorweapons.js) posed this frame:
+        // both arms are its, nothing below adds to them
+        const gunPosed = isJail && a._gunPoseF != null && a._gunPoseF === CBZ.gunPoseFrame;
         const handsUp = !down && !aimBack && (a.poseHandsUp || scared) && parts && body;
         if (aimBack) {
           // ONE ARM DRIVER for the gun arm: a CITY ped that is actually holding a
@@ -650,7 +653,9 @@
           // a fearless-but-unarmed bruiser squaring up, still gets the arm pose from
           // this path. Gated to city; jail aim-back (guards/npcs) is UNCHANGED.
           const heldGun = a._weaponProp && a._weaponProp.visible && !a._weaponProp.userData.weaponMelee ? a._weaponProp : null;
-          const weaponOwnsArm = isCity && a.armed && heldGun;
+          // (the jail: actorweapons.js's prison pass at 41.7 holds a long gun —
+          // pitched onto the mark — and stamps CBZ.gunPoseFrame when it did)
+          const weaponOwnsArm = a.armed && heldGun && (isCity || gunPosed);
           /* A GUN IN THE HAND IS HELD THE WAY THE HOLD ENGINE SAYS (every mode,
              not just the city's armed-ped pass): the stand-off is CBZ.gunHold's
              ready pose, the same solve every armed NPC uses — firing fist on the
@@ -688,7 +693,7 @@
           // them — their hands-up keeps coming from this additive path, UNCHANGED.
           // (a crouched cover pose, poses.js coverHead, holds its hands over the
           // head itself: the cringe would drag them forward off the skull)
-          const animOwnsArms = !!(a.char && (a.char.handsUp || a.char.surrender || (a.char.pose && CBZ.charPoses && CBZ.charPoses[a.char.pose] && CBZ.charPoses[a.char.pose].crouch)));
+          const animOwnsArms = (!surr && gunPosed) || !!(a.char && (a.char.handsUp || a.char.surrender || (a.char.pose && CBZ.charPoses && CBZ.charPoses[a.char.pose] && CBZ.charPoses[a.char.pose].crouch)));
           if (!animOwnsArms) {
             if (parts.la) {
               const before = parts.la.rotation.x;
@@ -747,7 +752,7 @@
             // Guards carry the torch in the semantic right hand. The left arm
             // absorbs the hit/clutches inward; inmates use the same readable
             // free-arm beat without inventing a weapon-hand exception.
-            if (parts.la) {
+            if (parts.la && !gunPosed) {      // a long gun's off hand stays on the handguard
               const off = JAIL_HIT_FREE_ARM * amp;
               parts.la.rotation.x += off;
               r.laOff += off;

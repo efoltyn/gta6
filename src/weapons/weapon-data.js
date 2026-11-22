@@ -314,7 +314,7 @@
       sfx: "shoot_taser", tracer: 0.006, auto: false, nonlethal: true,
       real: { len: 0.185, ref: "Taser X26 with cartridge. 7.3in OAL (X26E spec sheet)" },
       hold: { heavy: 0.04, support: 0, stance: "pistol" },
-      optic: "none",
+      optic: "iron",                 // the X26's fixed notch + blade (appearances/taser.js)
     },
     {
       /* SHANK — the first MELEE weapon in this table, and the reason `melee`

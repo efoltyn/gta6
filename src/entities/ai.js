@@ -4361,7 +4361,8 @@
     if (n.gang >= 0) noteGangIncident(n, "disrespect", T.k > patience ? 4 : 2, { source: "threat", noResponders: true });
 
     // a man well above you does not even let the first one land
-    const breaks = T.k > patience || margin > 0.6;
+    // and a man with a gun in his hand never backs down to words
+    const breaks = T.k > patience || margin > 0.6 || !!(n.hasGun && n.armed && !n._holstered);
     if (!breaks) {
       if (CBZ.intimidateHold) CBZ.intimidateHold(n, THREAT_HOLD);
       // the yard standing there saw him fold (not his own set)

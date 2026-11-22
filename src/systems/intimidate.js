@@ -618,6 +618,8 @@
     if (!n || !n.group || !alive(n) || n.cuffed) return false;
     if (!n._intimidInit) initN(n);
     if (n.intimidMode && n.intimidMode !== "scared") return false;
+    // a man with a gun in his hand never backs down with his hands up
+    if (gunInHand(n)) return false;
     n.intimidMode = "scared";
     n.intimidT = Math.max(n.intimidT || 0, secs || 5);
     n.poseHandsUp = true; n.poseAimBack = false;

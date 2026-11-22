@@ -53,6 +53,12 @@ export const PRESETS = {
     glance: { setup: {}, cams: ["chase"], times: ["0"] },
     orbit:  { setup: {}, cams: ["chase", "orbit:90:20", "orbit:180:20", "orbit:270:20", "top", "fp"], times: ["0"] },
     timeline: { setup: {}, cams: ["chase"], times: ["0", "2", "5", "10"] },
+    /* every gun the jail hands out, raised to the eye (page/world.js ads:<id>):
+       the game's own lens with a cyan cross on the point of aim. `ads:<id>:side`
+       is the same moment from beside the head (eye = magenta ball). Use with
+       --world prison. */
+    ads: { setup: {}, cams: ["sidearm", "revolver", "deagle", "taser", "shotgun", "carbine", "ak47", "smg", "uzi", "sniper", "lmg", "bazooka", "glauncher"].map((id) => "ads:" + id), times: ["0"] },
+    adsside: { setup: {}, cams: ["sidearm", "revolver", "deagle", "taser", "shotgun", "carbine", "ak47", "smg", "uzi", "sniper", "lmg", "bazooka", "glauncher"].map((id) => "ads:" + id + ":side"), times: ["0"] },
   },
   /* THE LAB (lab.html, tools/lab/README.md): --setup 'kit=person-chair&...'.
      `cycle:N` is N frames evenly over the KIT'S RUN (its duration), the

@@ -1928,7 +1928,10 @@
     // ped and cop) shows the gun only while the discipline has it drawn. A
     // spawn-time sync used to put every armed guard's pistol in his hand for
     // the rest of the day.
-    const governed = !!actor._gd || (!actor.isPlayer && CBZ.game && CBZ.game.mode === "city");
+    // City only: GD.tick runs in the city's poseList and nowhere else, so a
+    // record left on a jail / battle body by a stray GD.trigger (actorAimAt's)
+    // would sit at lv 0 forever and hide his gun for good.
+    const governed = !actor.isPlayer && !!CBZ.game && CBZ.game.mode === "city";
     const shouldShow = !!(actor.armed && !actor.dead && !actor._holstered && (!governed || GD.rec(actor).lv >= 2));
     const id = shouldShow ? normalizeWeaponId(actor.weapon || (actor.swat ? "SMG" : "Pistol")) : null;
     if (!shouldShow) {
@@ -1979,10 +1982,14 @@
   }
 
   function actorAimAt(actor, target, dt) {
-    if (!actor || !target || !actor.group || !target.pos) return;
+    if (!actor || !target || !actor.group) return;
+    // a jail actor keeps his position on the group (no .pos)
+    const ap = actor.pos || actor.group.position, tp = target.pos || (target.group && target.group.position);
+    if (!tp) return;
+    actor._aimIntentT = GD.now();        // the prison pass reads this as "aiming"
     if (!actor.isPlayer && actor.armed) GD.trigger(actor, "fired", 3);
-    const dx = target.pos.x - actor.pos.x;
-    const dz = target.pos.z - actor.pos.z;
+    const dx = tp.x - ap.x;
+    const dz = tp.z - ap.z;
     if (dx * dx + dz * dz > 0.0001) {
       // A SHOOTER TURNS ONTO HIS MARK, HE DOES NOT SNAP. Most fire paths call
       // this with no dt (once per shot), and that was a full one-frame write
@@ -2076,8 +2083,8 @@
      HYSTERESIS: once drawn it stays drawn HOLD (7-11 s, per person) past the
      last trigger and at least 4 s in all, then goes back DELIBERATELY.
      Watching decays after 3 s quiet. Nothing here can flip twice in a second.
-     Who it governs: any body with a record (`actor._gd`), which city poseList
-     makes for every armed ped and cop. Other games keep their own scripted
+     Who it governs: every armed non-player body in city mode (city poseList
+     ticks it for every armed ped and cop). Other games keep their own scripted
      draws (a taser in the jail, a warlord battle) until they adopt it.
      ========================================================================= */
   const GD = (function () {
@@ -2330,6 +2337,100 @@
     if (!CBZ.game || CBZ.game.mode !== "city") return;
     poseList(CBZ.cityPeds, dt); poseList(CBZ.cityCops, dt);
   });
+
+  /* ---- THE PRISON'S LONG GUNS (CBZ.game.mode === "escape") -----------------
+     Owner: "when handling big guns the AI holds it weird when walking around
+     and when aiming." The pass above was city-only, so in the jail nothing
+     posed an armed man's arms between the moments something asked him to aim:
+     the walk cycle swung both arms with a rifle seated in one fist, and the
+     aims that did happen (tower glass, aim-back stand-off) were the LEVEL
+     ready pose at whatever height the target stood.
+
+     Same driver, the prison's lists (CBZ.npcs, CBZ.guards: tower posts and
+     the warden are in it). A jail actor is not under the gun discipline: a
+     man in here holding a gun has it out. Only TWO-HANDED guns are posed
+     here; a handgun / taser / shank keeps the paths it already has
+     (guards.js sidearm gunfight, taserfx, prisonshanks).
+
+       walking / standing  -> GH.lowReady: both hands on it, muzzle down, the
+                              arms do not swing (written after animChar).
+       aiming              -> GH.pitchNpc onto the mark: stock in the shoulder,
+                              off hand on the handguard, barrel pitched at his
+                              chest (a tower shooting down, a con on a stair).
+
+     "Aiming" is an intent other systems already express: poseAimBack
+     (brain_prison.js setPose "aim", intimidate.js's stand-off) or a call to
+     CBZ.actorReadyPose / CBZ.actorAimAt in the last 0.4 s (guards.js,
+     towerwatch.js aimUp, prisonwarden.js). Runs at 41.7: after every jail
+     updater that calls animChar (guards 20, npcs 22, brain 22.5, warden /
+     door watch / postures 41.5), before reactions.js (89), which now leaves
+     an arm this pass owns alone (CBZ.gunPoseFrame stamp). */
+  const JAIL_AIM_HOLD = 0.4;
+  let jailFrame = 0;
+  CBZ.gunPoseFrame = 0;
+  function jailAimIntent(a) {
+    return !!a.poseAimBack || (a._aimIntentT != null && GD.now() - a._aimIntentT < JAIL_AIM_HOLD);
+  }
+  function jailMark(a) {
+    const r = a.rage;
+    if (r && !r.dead) {
+      const p = r.pos || (r.group && r.group.position);
+      if (p) return { p: p, chest: r.isPlayer ? 1.05 : 0.95 };
+    }
+    const P = CBZ.player;
+    return P && P.pos && !P.dead ? { p: P.pos, chest: 1.05 } : null;
+  }
+  function jailPitch(a, dt) {
+    const m = jailMark(a), me = a.group && a.group.position;
+    let want = 0;
+    if (m && me) {
+      const th = Math.hypot(m.p.x - me.x, m.p.z - me.z) || 0.001;
+      // shoulder (1.84 local collar x HUMAN_SCALE 0.70) -> his chest; negative = barrel up
+      want = -Math.atan2((m.p.y || 0) + m.chest - ((me.y || 0) + 1.29), th);
+      want = Math.max(-0.75, Math.min(0.75, want));
+    }
+    const cur = a._aimPitch == null ? want : a._aimPitch;
+    a._aimPitch = cur + (want - cur) * Math.min(1, 12 * (dt || 1 / 60));
+    return a._aimPitch;
+  }
+  function jailSkip(a) {
+    const ch = a.char;
+    if (!ch || !ch.parts || a.dead || a.escaped || (a.ko > 0) || (a.koT > 0) || ch.koT > 0 || ch.koPose) return true;
+    if (a.cuffed || a.restraint || ch.cuffed) return true;
+    if (a.surrender || (a.surrenderT || 0) > 0 || a.poseHandsUp || ch.handsUp || ch.surrender) return true;
+    if (ch.lying || ch.sitting || a._propSeat || ch.traversePose || a._traversal) return true;
+    if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(a)) return true;
+    if (CBZ.climb && CBZ.climb.owns && CBZ.climb.owns(a)) return true;
+    const ph = a._phys;
+    return !!(ph && (ph.down > 0 || ph.air || ph.heldBy));
+  }
+  function poseJailList(list, dt) {
+    if (!list) return;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a || !a.armed || a._holstered || a._gunHidden) continue;
+      if (a.group && a.group.visible === false) continue;
+      if (jailSkip(a)) continue;
+      const prop = a._weaponProp && a._weaponProp.visible ? a._weaponProp : syncActorWeapon(a);
+      if (!prop || !prop.visible || (prop.userData && prop.userData.weaponMelee)) continue;
+      if (CBZ.holds.hands(prop, { view: "tp" }) < 2) continue;
+      let ok = false;
+      if (jailAimIntent(a)) {
+        try { ok = GH.pitchNpc(a.char, prop, jailPitch(a, dt)); } catch (e) { ok = false; }
+        if (!ok) setReadyPose(a.char, prop);
+      } else {
+        a._aimPitch = null;
+        setLowReady(a, prop);
+      }
+      bipodFromPosture(a, prop, dt);
+      a._gunPoseF = jailFrame;
+    }
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(41.7, function (dt) {
+    if (!CBZ.game || CBZ.game.mode !== "escape") return;
+    CBZ.gunPoseFrame = ++jailFrame;
+    poseJailList(CBZ.guards, dt); poseJailList(CBZ.npcs, dt);
+  });
   /* ---- BIPOD FROM POSTURE (the one line of bipod logic an NPC needs) -------
      A bipod'd gun (weapons/appearances/lmg.js userData.bipod) in an actor's
      hands unfolds its legs when the body is PRONE and still — the NPC half of
@@ -2373,7 +2474,13 @@
   CBZ.actorAimAt = actorAimAt;
   CBZ.actorReadyPose = function (actor, dt) {
     const prop = syncActorWeapon(actor);
-    if (prop && actor && actor.char) { setReadyPose(actor.char, prop); bipodFromPosture(actor, prop, dt); }
+    if (!prop || !actor || !actor.char) return prop;
+    actor._aimIntentT = GD.now();
+    // a long gun in the prison is posed (pitched onto the mark) by the one
+    // jail pass at 41.7 — posing it here as well was a second, level writer
+    if (CBZ.game && CBZ.game.mode === "escape" && !(prop.userData && prop.userData.weaponMelee) &&
+        CBZ.holds.hands(prop, { view: "tp" }) >= 2) return prop;
+    setReadyPose(actor.char, prop); bipodFromPosture(actor, prop, dt);
     return prop;
   };
 })();
