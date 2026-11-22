@@ -891,7 +891,7 @@
       if (g.spot.kind === "float") L.y1 = seaY(L.x1, L.z1) - draft(g);
       move(g, a0 * L.x0 + b0 * L.mx0 + a1 * L.x1 + b1 * L.mx1, a0 * L.y0 + b0 * L.my0 + a1 * L.y1 + b1 * L.my1, a0 * L.z0 + b0 * L.mz0 + a1 * L.z1 + b1 * L.mz1, dt);
       const hs = Math.hypot(g.vx, g.vz), left = L.T - L.t;
-      g.roll += (Math.max(-0.8, Math.min(0.8, Math.atan(hs * g.yawRate / GRAV))) - g.roll) * Math.min(1, dt * 3);
+      g.roll += (Math.max(-0.8, Math.min(0.8, -Math.atan(hs * g.yawRate / GRAV))) - g.roll) * Math.min(1, dt * 3);
       if (left < 0.9) {
         // the flare: wings up and forward, tail fanned and down, legs out, nose up, braking beats
         g.clk.phase += dt * 3.6;
