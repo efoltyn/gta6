@@ -227,7 +227,7 @@
     neckL: 0.36, neckR: 0.135, neckAng: 0.72,
     headL: 0.4, muzK: 0.47, skullW: 0.3, skullH: 0.31, muzW: 0.14, muzH: 0.29, stop: 0.09, flews: 0.06, cheek: 1.05, headAng: -0.3,
     ear: { type: "drop", L: 0.45, W: 0.35, tip: 0.25, cup: 0.12, th: 0.028, out: 0.1, fwd: 0, at: 0.18 },
-    tail: { type: "otter", L: 0.66, R: 0.07, bush: 1, rest: 1.0, curl: 0.15 },
+    tail: { type: "otter", L: 0.66, R: 0.058, bush: 1, rest: 0.8, curl: 0.1 },
     leg: { bone: 1.15, paw: 1.05, track: 0.115 },
     fur: { k: 0.3, len: 0.003, tufts: 0.04, ruff: 0, pants: 0.6, tail: 0.6, back: 0, belly: 0.3, cheek: 0, elbow: 0 },
     coats: {
@@ -242,7 +242,7 @@
   // A mutt is two breeds crossed (dims() mixes the parents' numbers by its
   // seed) in a street coat.
   defRow("mutt", {
-    kind: "dog", name: "Mutt", W: 0.53, mass: 22, mix: [["shepherd", "lab"], ["lab", "pit"], ["shepherd", "pit"], ["coyote", "lab"], ["shepherd", "mastiff"], ["lab", "red_fox"]],
+    kind: "dog", name: "Mutt", W: 0.53, mass: 22, mix: [["shepherd", "lab"], ["lab", "pit"], ["shepherd", "pit"], ["coyote", "lab"], ["shepherd", "mastiff"], ["pit", "mastiff"]],
     coats: {
       tanwhite: { pattern: "blaze", base: 0xb88552, under: 0xc8996a, back: 0xa8773f, white: 0xece6da, mask: 0x9a6a3e, eye: 0x4a2c14, earIn: 0x8a6a5e, chest: 1, socks: 0.7, face: 0.5 },
       piebald: { pattern: "piebald", base: 0xe8e2d6, patch: 0x2a221c, patch2: 0x8a5a32, under: 0xeee8de, eye: 0x4a2c14, earIn: 0x9a7a6e, mask: 0x2a221c },
