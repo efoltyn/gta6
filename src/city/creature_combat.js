@@ -1240,6 +1240,12 @@
       var mj = CBZ.marineJawRadius(g0);
       if (mj > 0.02) jaw = mj;
     }
+    // a canid's real mouth (units/kit/canid.js measures it off the rig)
+    var cnR = attacker && attacker._cnA && attacker._cnA.rig;
+    if (cnR && CBZ.canid && typeof CBZ.canid.jawRadius === 'function') {
+      var cj = CBZ.canid.jawRadius(cnR);
+      if (cj > 0.01) jaw = cj;
+    }
     // A TUSK PAIR IS NARROWER THAN A JAW: same paired-crescent wound, less span.
     if (style === 'gore' || style === 'ram') jaw = Math.max(0.10, jaw * GORE_SPAN);
     if (victim) {
@@ -1350,13 +1356,28 @@
       var dl2 = Math.sqrt(_bd2.x * _bd2.x + _bd2.z * _bd2.z);
       if (dl2 > 0.001) { _bd2.x /= dl2; _bd2.z /= dl2; } else { _bd2.x = 1; _bd2.z = 0; }
       _bo.dir = _bd2;
-      // A SEA ANIMAL'S BITE, AS A FACT ABOUT WHO BIT (the wounds seam): by is
-      // the species id with the actor beside it, the line is the way the head
-      // is pointing in three dimensions, the radius is its own mouth's
-      var sea = attacker.species && attacker.species.aquatic;
-      if (sea) {
-        _bo.byActor = attacker; _bo.by = attacker.species.id;
-        if (!(o && o.dir) && CBZ.marineHeadAxes && CBZ.marineHeadAxes(g, _hax2)) { _bd2.x = _hax2.fx; _bd2.y = _hax2.fy; _bd2.z = _hax2.fz; }
+      /* THE BITE, AS A FACT ABOUT WHO BIT (the wounds seam), for every jawed
+         attacker, land or sea: by is its bite id (a canid's breed id, else
+         the species id) with the actor beside it in byActor; the radius is its
+         own mouth's (biteJawRadius above); and when the caller gave no line,
+         the line is the jaw's own travel into the flesh in three dimensions:
+         a sea animal's head axis, a land animal's mouth through the contact. */
+      _bo.byActor = attacker;
+      _bo.by = attacker.biteId || (attacker.species && attacker.species.id) || '';
+      if (!(o && o.dir)) {
+        var sea = attacker.species && attacker.species.aquatic;
+        if (sea && CBZ.marineHeadAxes && CBZ.marineHeadAxes(g, _hax2)) {
+          _bd2.x = _hax2.fx; _bd2.y = _hax2.fy; _bd2.z = _hax2.fz;
+        } else {
+          var cr = attacker._cnA && attacker._cnA.rig;
+          var M = (cr && CBZ.canid && CBZ.canid.mouthWorld) ? CBZ.canid.mouthWorld(cr, _mw2) : jawWorld(attacker);
+          if (M) {
+            // from the animal's own axis at the height of its mouth, through the teeth into the contact
+            var ex = _bp.x - g.position.x, ey = _bp.y - M.y, ez = _bp.z - g.position.z;
+            var el = Math.sqrt(ex * ex + ey * ey + ez * ez);
+            if (el > 0.001) { _bd2.x = ex / el; _bd2.y = ey / el; _bd2.z = ez / el; }
+          }
+        }
       }
       CBZ.bodyBite(target, _bp, _bo);
     } catch (e) {}
@@ -1367,6 +1388,7 @@
   var _bd2 = { x: 0, y: 0, z: 0 };
   var _bo = { jaw: 0.22, sev: 0.7, sever: false, fromX: 0, fromZ: 0, dir: null, by: null, byActor: null };
   var _hax2 = { fx: 1, fy: 0, fz: 0, ux: 0, uy: 1, uz: 0, sx: 0, sy: 0, sz: 1 };
+  var _mw2 = { x: 0, y: 0, z: 0 };
 
   function endAttack(actor) {
     // remove any residual lunge offset so repeated attacks don't drift

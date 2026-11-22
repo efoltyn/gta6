@@ -2067,6 +2067,20 @@
     return out;
   }
 
+  function swimmerInSense(a, pp) {
+    const k = kitOf(a), R = (k && k.senseR > 0 ? k.senseR : 110), g = a.group.position;
+    const P = CBZ.player;
+    if (P && !P.dead && pp && (CBZ.citySwimming ? CBZ.citySwimming() : P._swim) &&
+        Math.hypot(pp.x - g.x, pp.z - g.z) < R) return true;
+    const bots = CBZ.bots;
+    if (bots) {
+      for (let i = 0; i < bots.length; i++) {
+        const b = bots[i];
+        if (b && !b.dead && b.swim && b.pos && Math.hypot(b.pos.x - g.x, b.pos.z - g.z) < R) return true;
+      }
+    }
+    return false;
+  }
   function marineStep(a, dt, P) {
     if (!ON() || !a || !dt || a.dead || a.tamed || a.ridden || a.external) return false;
     const sp = a.species;
@@ -2109,6 +2123,16 @@
       if (stepTip(a, dt)) { show(a, pd2); return true; }
     }
 
+    /* ---- A PERSON IN THE WATER COMES FIRST. An animal that hunts people
+       (wildlife_shark.js's swimmer hunt: danger >= 0.5) with a swimmer inside
+       its sense hunts the swimmer; the fish are the background until the
+       swimmer is out of the water. Two drivers taking turns on one body (a
+       fish this frame, the swimmer the next) was a shark that never closed on
+       either. A mob or a frenzy it is already in keeps it. */
+    if ((sp.danger || 0) >= 0.5 && swimmerInSense(a, pp) && !(m.target && (m.kind === 2 || m.kind === 3))) {
+      if (m.target) drop(a);
+      return false;
+    }
     // ---- ordinary marine predation -----------------------------------------
     const target = pickTarget(a, dt);
     if (!target) {

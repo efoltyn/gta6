@@ -4188,6 +4188,51 @@
           depthWant = m.breathT < 6 ? 0.5 : 1.35;      // on its way up
         }
       }
+    } else if (kind === "dolphin" || kind === "whale") {
+      /* A MAMMAL HAS TO BREATHE. A bout at the surface - the blowhole breaks
+         the water and blows, a short roll under, again - then a dive. A
+         bottlenose takes 2-3 breaths ~3 s apart and goes down for half a
+         minute or so; a humpback blows 3-5 times ~12 s apart and then sounds
+         for a minute or two (real dives run longer; the game's sea is
+         watched in minutes). At the surface the back just breaks the water. */
+      const big = kind === "whale";
+      // the back line of the body itself (no fins), over the origin, in metres:
+      // at the surface it stands just out of the water
+      const mbB = a.group && a.group.userData && a.group.userData.marineBody;
+      if (m.top < 0) m.top = mbB ? mbB.backY * ((a.group.scale && a.group.scale.y) || 1) : bodyTop(a);
+      const surfK = Math.max(0.1, (m.top - 0.08) / Math.max(0.1, a.swimDepth || a._swimDepth0 || 1));
+      if (m.breaths == null) { m.breaths = 0; m.breathFull = 0; m.blown = true; }
+      if (fleeing && !big) { m.breath = 0; m.breaths = 0; m.breathT = Math.max(m.breathT, 6); depthWant = 2.2; }
+      else {
+        m.breathT -= dt;
+        if (m.breath > 0) {
+          depthWant = surfK; wantV = cruise * (big ? 0.5 : 0.7);
+          // the breath is counted from when the back is out, and the blow is
+          // the moment the blowhole clears
+          const out = m.depthK <= surfK * 1.12;
+          if (out && !m.blown) {
+            m.blown = true;
+            if (CBZ.marineBlow) { try { CBZ.marineBlow(a, big ? 1.25 : 0.2); } catch (e) {} }
+          }
+          // (a body held down - the bed, a fight - still finishes its breath)
+          m.breathWait = (m.breathWait || 0) + dt;
+          if (out || m.breathWait > 8) m.breath -= dt;
+          if (m.breath <= 0) {
+            m.breaths--;
+            m.breathT = m.breaths > 0 ? (big ? 9 + Math.random() * 6 : 2.5 + Math.random() * 1.5)
+                                      : (big ? 70 + Math.random() * 60 : 25 + Math.random() * 25);
+          }
+        } else {
+          if (m.breathT <= 0) {
+            if (m.breaths <= 0) m.breaths = big ? 3 + Math.floor(Math.random() * 3) : 2 + Math.floor(Math.random() * 2);
+            m.breath = m.breathFull = big ? 3.2 : 1.8;
+            m.blown = false; m.breathWait = 0;
+          }
+          // between breaths it rolls just under; on a dive it goes down, and
+          // comes up from it over its last eight seconds
+          depthWant = m.breaths > 0 ? (big ? 1.4 : 1.25) : (m.breathT < 8 ? 1.2 : (big ? 3.4 : 2.8));
+        }
+      }
     } else if (kind === "ray") {
       depthWant = fleeing ? 1.3 : 2.2;                   // low in the water; flushes up and away
     } else if (/hammerhead/.test(sp.id)) {
@@ -4195,7 +4240,7 @@
     } else if (kind === "school" && bunch > 0.35) {
       depthWant = 1 - 0.45 * bunch;                      // a ball is driven up at the surface
     }
-    if (kind !== "orca" && kind !== "whale" && kind !== "dolphin" && a._swimDepth0 > 0) {
+    if (kind !== "orca" && a._swimDepth0 > 0) {
       m.depthK += (depthWant - m.depthK) * Math.min(1, dt * (depthWant < m.depthK ? 0.5 : 0.8));
       if (schooled) {
         // A SCHOOL IS A VOLUME: one shared depth (not each fish's own hunger

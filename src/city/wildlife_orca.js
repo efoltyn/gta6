@@ -634,6 +634,55 @@
       try { CBZ.waterSplashAt(s.spout.position.x, surfaceAt(s.spout.position.x, s.spout.position.z, clock()), s.spout.position.z, 0.8 * sc); } catch (e) {}
     }
   }
+  /* A BLOW FOR ANY WHALE OR DOLPHIN. The orca's spout (above) is the one
+     spout in the sea; city/wildlife.js's breathing cycle fires it for the
+     dolphins and humpbacks too, at the blowhole of the animal's own body
+     (spec.blowS along it, the top of the section there), sized by the caller:
+     a dolphin's puff, a humpback's bushy column. Blows that outlive the
+     animal's dive are stepped here. */
+  const BLOWS = [];
+  const _bw = T ? new T.Vector3() : null;
+  CBZ.marineBlow = function (a, size) {
+    const g = a && a.group, mb = g && g.userData && g.userData.marineBody, MB = CBZ.marineBodyKit;
+    if (!mb || !MB || !_bw) return false;
+    const spec = mb.tpl.spec;
+    const PF = mb.tpl._pf || (mb.tpl._pf = MB.makeProfile(spec));
+    const R = MB.sectionAt(spec, PF, spec.blowS || 0.15);
+    g.updateMatrixWorld(true);
+    _bw.set(R.x, R.yc + R.top, 0);
+    mb.mesh.localToWorld(_bw);
+    const s = a._blowS || (a._blowS = { spout: null, spoutT: 0, sz: 1 });
+    const A = assets();
+    if (!s.spout) {
+      const parent = g.parent || CBZ.scene;
+      if (!parent) return false;
+      const sg = new T.Group();
+      sg.userData.dynamic = true;
+      for (let i = 0; i < 3; i++) {
+        const q = new T.Mesh(A.quad, A.spoutMat);
+        q.castShadow = false; q.renderOrder = 6;
+        sg.add(q);
+      }
+      parent.add(sg);
+      s.spout = sg;
+    }
+    s.spoutT = 1.7; s.sz = size > 0 ? size : 1;
+    s.spout.position.copy(_bw);
+    s.spout.visible = true;
+    if (BLOWS.indexOf(s) < 0) BLOWS.push(s);
+    if (CBZ.waterSplashAt) {
+      try { CBZ.waterSplashAt(_bw.x, surfaceAt(_bw.x, _bw.z, clock()), _bw.z, Math.max(0.15, 0.6 * s.sz)); } catch (e) {}
+    }
+    return true;
+  };
+  if (CBZ.onUpdate) {
+    CBZ.onUpdate(47.21, function (dt) {
+      for (let i = BLOWS.length - 1; i >= 0; i--) {
+        stepSpout(BLOWS[i], dt);
+        if (!(BLOWS[i].spoutT > 0)) BLOWS.splice(i, 1);
+      }
+    });
+  }
   function stepSpout(s, dt) {
     if (!s.spout || !(s.spoutT > 0)) {
       if (s.spout && s.spout.visible) s.spout.visible = false;
