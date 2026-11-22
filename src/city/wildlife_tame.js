@@ -2055,25 +2055,32 @@
       try { a.group.rotation.order = "YXZ"; } catch (e) { ride.clampOrder = ""; }
     }
     const j = clampJawWorld(a);
-    if (CBZ.goreChum) {
-      const at = { x: j.x, y: j.y, z: j.z };
-      ride._clampAt = at;
-      try {
-        /* 1.3, not 2.6. Twice this rate on top of the per-beat blooms put so
-           much chum in front of a chase camera that the roll photographed as a
-           red screen (caught in the preset's own captures, both columns). The
-           water still clouds; you can still see what is doing it. */
-        ride.clampChum = CBZ.goreChum(function () { return at.x; }, function () { return at.y; },
-          function () { return at.z; }, 1.3, dur + 2);
-      } catch (e) { ride.clampChum = null; }
-    }
+    /* NO CHUM HANDLE AT THE GRAB. A chum source near the top of the water
+       lays a fresh surface slick every few ticks (systems/gore.js's chum
+       update), each lingering for tens of seconds, so a kill at the surface
+       painted a flat red sheet metres wide over the sea that grew frame by
+       frame. The victim's own wounds bleed into the water; the beats below
+       put the cloud round the jaws. */
+    ride._clampAt = null; ride.clampChum = null;
     if (CBZ.goreBloom) { try { CBZ.goreBloom(j.x, j.y, j.z, { amount: 0.8 }); } catch (e) {} }
-    if (CBZ.waterSplashAt) { try { CBZ.waterSplashAt(j.x, seaY(j.x, j.z), j.z, 4.2); } catch (e) {} }
+    // the grab breaks the surface with the mass that actually hits it (the
+    // head and the forequarters, about a quarter of the body) at the speed it
+    // arrived: a fixed strength-4.2 splash threw a megalodon's sheet of spray
+    // round a bull shark's bite
+    clampSplash(a, j, 0.25, Math.max(1.5, (ride.water && ride.water.v) || 2));
     if (CBZ.shake) CBZ.shake(0.30);   // the grab lands; the roll below no longer kicks
     if (CBZ.doSlowmo) CBZ.doSlowmo(0.5);
     if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: 1 }); } catch (e) {} }
     AQUATIC_AUDIT.clamps = (AQUATIC_AUDIT.clamps || 0) + 1;
     return true;
+  }
+  function clampSplash(a, j, share, speed) {
+    const y = seaY(j.x, j.z);
+    if (CBZ.waterHit) {
+      try { CBZ.waterHit(j.x, y, j.z, { kind: "body", mass: Math.max(20, bodyKg(a) * share), speed: speed }); } catch (e) {}
+    } else if (CBZ.waterSplashAt) {
+      try { CBZ.waterSplashAt(j.x, y, j.z, Math.sqrt(Math.max(20, bodyKg(a) * share) / 78)); } catch (e) {}
+    }
   }
   function endClamp(a) {
     const v = ride.clampVictim;
@@ -2137,7 +2144,8 @@
         if ((beat & 1) === 0 && CBZ.goreBloom) {
           try { CBZ.goreBloom(j.x, j.y, j.z, { amount: 0.5 }); } catch (er) {}
         }
-        if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(j.x, j.z, 2.4); } catch (er) {} }
+        // each half turn breaks the surface with the flank that rolls through it
+        if ((beat & 1) === 0) clampSplash(a, j, 0.12, 2.4);
         /* NO KICK PER HALF TURN. CLAMP_HZ is 1.15, so this fired ~2.3 times a
            second for the whole roll — the most literal earthquake in the game,
            and it was YOU doing the shaking. The half-turn beat is the piece

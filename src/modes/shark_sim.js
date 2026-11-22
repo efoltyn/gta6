@@ -984,14 +984,17 @@
       growWrite(sim.grow, sim.grow.from);
     }
     const y = seaYAt(x, z);
-    if (CBZ.waterSplashAt) {
-      try {
-        CBZ.waterSplashAt(x, y, z, 4.6);
-        for (let i = 0; i < 5; i++) {
-          const ang = (i / 5) * 6.283 + 0.4, r = 3.4;
-          CBZ.waterSplashAt(x + Math.cos(ang) * r, y, z + Math.sin(ang) * r, 2.4);
-        }
-      } catch (e) {}
+    /* The water the new body shoves aside, from its real mass: the body that
+       swells (about 11 kg per cubic metre of length, a shark's density over
+       its own volume) rising through the surface at a few m/s. It was a
+       strength-4.6 hit plus five strength-2.4 hits in a ring 3.4 m out, a
+       sheet of spray thrown far round a fish's last bite. */
+    if (CBZ.waterHit) {
+      const mb = S1 && S1.group && S1.group.userData && S1.group.userData.marineBody;
+      const len = mb ? mb.len * ((S1.group.scale && S1.group.scale.x) || 1) : 4;
+      try { CBZ.waterHit(x, y, z, { kind: "body", mass: Math.max(60, 11 * len * len * len * 0.3), speed: 3.2 }); } catch (e) {}
+    } else if (CBZ.waterSplashAt) {
+      try { CBZ.waterSplashAt(x, y, z, 2.2); } catch (e) {}
     }
     if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(x, z, 4); } catch (e) {} }
     /* A BEAT, NOT A SLAM. Owner, 2026-08-29: the lens is for what is being
