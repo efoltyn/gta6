@@ -2262,6 +2262,26 @@
      refusals, enough strain, in a car you lead). The car is not yours any
      more: the man carrying the most against you has it, and he and one more
      come to say so. */
+  /* WHO A CAR RESPECTS MOST: his rank in it, then what he has done in this
+     yard (the record every fight already writes: kills, men put down, fights
+     stood in), then what he is. The one answer to "who leads now" when
+     nobody won it with his hands: a mutiny, a shotcaller killed. */
+  function yardRespect(n) {
+    const RANK = { shotcaller: 300, enforcer: 160, collector: 110 };
+    const rc = n.record || {};
+    const r = n.ratings || {};
+    return (RANK[n.crewRole] || 0) + (rc.kills || 0) * 14 + (rc.knockdowns || 0) * 4 + (rc.fights || 0) * 0.4
+      - (rc.downs || 0) * 3 + ((r.fighting || 40) + (r.toughness || 40)) * 0.25;
+  }
+  function mostRespected(car, skip) {
+    let top = null, ts = -Infinity;
+    for (const n of CBZ.npcs || []) {
+      if (n === skip || !alive(n) || n.gang !== car || n.role === "merchant" || n.role === "dealer") continue;
+      const w = yardRespect(n);
+      if (w > ts) { ts = w; top = n; }
+    }
+    return top;
+  }
   let _mutinyHooked = false;
   function hookMutiny() {
     if (_mutinyHooked || !CBZ.command || !CBZ.command.on) return;
@@ -2270,13 +2290,12 @@
       const P = CBZ.player;
       if (!m || m.from !== P || !P || !(P._leadsCar >= 0) || !CBZ.game || CBZ.game.mode !== "escape") return;
       const car = P._leadsCar;
-      let top = null, tg = -1;
       for (const n of CBZ.npcs || []) {
-        if (!alive(n) || n.gang !== car) continue;
-        if (CBZ.prisonCrew && CBZ.prisonCrew.has(n)) CBZ.prisonCrew.dismiss(n);
-        const w = (n.playerGrudge || 0) + ((n.personality && n.personality.nerve) || 0.5) * 3;
-        if (w > tg) { tg = w; top = n; }
+        if (alive(n) && n.gang === car && CBZ.prisonCrew && CBZ.prisonCrew.has(n)) CBZ.prisonCrew.dismiss(n);
       }
+      // the car goes to its MOST RESPECTED man (owner 2026-11-22), not to
+      // whoever is sorest at you
+      const top = mostRespected(car, null);
       P._leadsCar = -1;
       addGangStanding(car, -12);
       if (!top) return;
@@ -3218,7 +3237,8 @@
     // leadership passes to a surviving gang-mate
     if (victim.isLeader && victim.gang >= 0) {
       victim.isLeader = false;
-      const heir = CBZ.npcs.find((m) => m.gang === victim.gang && alive(m) && m !== victim) ||
+      // the car's most respected surviving man (it used to be the first one found)
+      const heir = mostRespected(victim.gang, victim) ||
         CBZ.npcs.find((m) => m.yardCar === victim.gang && alive(m) && m !== victim);
       if (heir) { if (heir.gang !== victim.gang) setClique(heir, victim.gang); heir.isLeader = true; leaders[victim.gang] = heir; }
     }
