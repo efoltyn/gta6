@@ -1352,9 +1352,9 @@
       v.trim = pick(PAL.trim, 642);
       v.vW = [0, 0, 1, 3][(h(643) * 4) | 0];
     } else if (b.type === "ware") {
-      const brick = b.style === "brick" || (kind === "powerhouse") || h(650) < 0.3;
+      const brick = b.style === "brick" || (kind === "powerhouse") || (kind !== "elevator-head" && h(650) < 0.3);
       v.style = brick ? "brick" : "metal";
-      v.wall = brick ? aged(pick(PAL.brick, 651), era) : pick(PAL.panel.concat([0x8c9296, 0x9a8f7c, 0x7a8a7e]), 651);
+      v.wall = brick ? aged(pick(PAL.brick, 651), era) : kind === "elevator-head" ? pick(PAL.concrete, 651) : pick(PAL.panel.concat([0x8c9296, 0x9a8f7c, 0x7a8a7e]), 651);
       v.vH = kind === "powerhouse" ? 3 : 0;
     } else if (b.type === "tank" || b.type === "silo") {
       if (kind === "stack") { v.stack = true; v.wall = aged(pick(PAL.brick, 660), era); }

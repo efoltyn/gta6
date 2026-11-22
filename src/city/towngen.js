@@ -772,7 +772,9 @@
           // a fuel lot raises a filling station, not a shell (buildShell
           // below): no shell is planned, or its far copy would stand on the
           // forecourt for good, a painted box in front of the pumps
-          if (isShop && (pick.shopKind || inferShopKind(pick.name) || "food") === "gas" && stationFits(lt)) continue;
+          // (it is still SAID: a `station` record holds the spot, so no
+          // other far source can fill it either; city/metro.js BUILT)
+          if (isShop && (pick.shopKind || inferShopKind(pick.name) || "food") === "gas" && stationFits(lt)) { planned.push({ x: lt.cx, z: lt.cz, station: true }); continue; }
           // the shell this lot will raise, as cityMakeBuilding will raise it
           // (its colour: buildings.js shellColorway, the shell's own answer)
           const cw = CBZ.cityShellColorway ? CBZ.cityShellColorway(bx, bz, color, shellOpts) : null;

@@ -1732,18 +1732,18 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/metroplan.js?v=layout1122"></script>
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
-<script src="src/city/countryside.js?v=wm2a"></script>
+<script src="src/city/countryside.js?v=wm2a+bld1122f"></script>
 <!-- THE PRECINCT'S LOT (city/precinct_site.js): the world plan's police station site paved, its yard fenced, claimed after the boroughs plan (order 44). -->
 <script src="src/city/precinct_site.js?v=wm2a"></script>
 <!-- KINGSPORT'S DOCKS (city/kingsport_docks.js): the container terminal on Kings Harbour east of the river mouth, its dock road off the south arterial (order 44). -->
 <script src="src/city/kingsport_docks.js?v=wm2a"></script>
-<script src="src/city/metro_fabric.js?v=promote1020+house1122r2+sub1122c"></script>
+<script src="src/city/metro_fabric.js?v=promote1020+house1122r2+sub1122c+bld1122f"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=r187a"></script>
 <script src="src/city/metro_ground.js?v=r187c"></script>
-<script src="src/city/metro.js?v=plan1122+bld1122b"></script>
+<script src="src/city/metro.js?v=plan1122+bld1122b+bld1122f"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- WHO A PERSON IS AND WHAT YOU CAN DO TO HIM: the role -> verbs table the
      registry filters every street verb through, the one-line title over a
@@ -1781,7 +1781,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=r187a"></script>
+<script src="src/city/cityground.js?v=r187a+bld1122f"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -2302,7 +2302,7 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=borders1022-ph2"></script>
+<script src="src/city/warroom.js?v=borders1022-ph2+bld1122f"></script>
 <script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=protestcpu1022"></script>
 <script src="src/city/president_public.js?v=r187a"></script>
@@ -2450,7 +2450,7 @@ document.body.appendChild(b);}}catch(e){}})();
        - detail_kit.js FIRST; the other four only register passes into it.
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
-<script src="src/core/farcull.js?v=cardraws1020"></script>
+<script src="src/core/farcull.js?v=cardraws1020+bld1122f"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=merge1014c"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>

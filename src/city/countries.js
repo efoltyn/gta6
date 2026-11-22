@@ -419,11 +419,14 @@
     const rect = T.rect;
 
     const P0 = tpl.palette || {};
-    addPad(root, cx, cz, hx * 2 + 16, hz * 2 + 16, P0.verge != null ? P0.verge : (P0.ground != null ? P0.ground : 0x6f7480), 0.018);
     if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
 
     const town = CBZ.buildTown(root, T.cfg);
     if (!town) return;
+    // the pad under the town's own grid and a metre past it (laid to the
+    // settlement's extents it framed every town in a 20-30 m band of flat
+    // white or sand on the grass)
+    { const R0 = town.rect; addPad(root, (R0.minX + R0.maxX) / 2, (R0.minZ + R0.maxZ) / 2, R0.maxX - R0.minX + 2, R0.maxZ - R0.minZ + 2, P0.verge != null ? P0.verge : (P0.ground != null ? P0.ground : 0x6f7480), 0.018); }
 
     CBZ.registerCityRegion(city, {
       name: s.name, subtitle: s.subtitle || (s.capital ? "Capital" : "Settlement"), biome: s.id, kind: "rect",

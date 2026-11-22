@@ -651,6 +651,7 @@
      Until then it reads as plain concrete — out past the draw-in distance. */
   const queue = [];
   const BUDGET_MS = 3;
+  let passRan = false;              // this world's order-68 paint has run
   function enqueue(state) {
     if (queue.indexOf(state) < 0) { state.cursor = 0; state.painted = false; queue.push(state); }
   }
@@ -843,7 +844,7 @@
     const M = dataTex(THREE, new Uint8Array(NS * NS * 4), NS, false, true);
     const state = { S, M, x0, z0, cell, N: NS, main, lots: ctx.lots || [], districts: ctx.districts || [] };
     watchUpload(state);
-    if (main) { live = state; states = [state]; }     // a new world: the downtown is laid first
+    if (main) { live = state; states = [state]; passRan = false; }     // a new world: the downtown is laid first
     else states.push(state);
     // The landmass pass (order 68) paints once buildings exist; painting the
     // bare lots first as well would only double the boot cost. Without the
@@ -852,6 +853,10 @@
     // same pass, when approach.js has laid its driveways; one built on its
     // own (a studio page) paints at once, its buildings already stand.
     if (!CBZ.addLandmass || (!main && ctx.paintNow !== false)) paint(state);
+    // A TOWN THAT ARRIVES AFTER THAT PASS (a streamed town, built when it is
+    // first seen) was waiting for a pass that had already run: its square,
+    // yards and lawns stayed plain concrete for good. It joins the queue.
+    else if (!main && passRan) enqueue(state);
 
     const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, envMapIntensity: 0.2 });
     mat.name = "city-ground";
@@ -955,6 +960,7 @@
   if (CBZ.addLandmass) CBZ.addLandmass(function cityGroundPaint(city) {
     if (live && city && city.lots) live.lots = city.lots;
     queue.length = 0;
+    passRan = true;
     for (const st of states) {
       if (st.main) paint(st);          // the downtown: now, it is where you are
       else enqueue(st);                // each town: after the load, a few parcels a frame

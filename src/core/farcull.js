@@ -207,6 +207,11 @@
       else if (o.isMesh && o.geometry) {
         if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
         const s = o.geometry.boundingSphere;
+        // its world matrix NOW: a mesh added this frame has not been through
+        // a render yet, and an identity matrixWorld put it at the origin, so
+        // it was judged kilometres off and hidden for good (the war room's
+        // apron at Kesh, placed after the loader, never drew)
+        o.updateWorldMatrix(true, false);
         _v.copy(s.center).applyMatrix4(o.matrixWorld);
         b.x = _v.x; b.z = _v.z; b.r = s.radius * Math.max(o.scale.x, o.scale.z, 1);
       } else {

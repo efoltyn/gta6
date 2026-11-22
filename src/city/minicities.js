@@ -315,13 +315,16 @@
     // ground tone — Neon Reef's purple, Goldspire's grey — read as a void of
     // asphalt a district wide)
     const P0 = tpl.palette || {};
-    addPad(root, cx, cz, hx * 2 + 18, hz * 2 + 18, P0.verge != null ? P0.verge : (P0.ground != null ? P0.ground : 0x6f7480), 0.018);
     if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
 
     // (b)+(c) GROW THE TOWN — now that T1 wired the arena, all shops/homes/roads
     //     register automatically into Zillow/shops/jobs/vendor-staffing.
     const town = CBZ.buildTown(root, T.cfg);
     if (!town) return;
+    // the pad goes under the town's own street grid and a metre past it: laid
+    // to the placement's extents (+9 m) it was a 30 m flat frame of verge
+    // colour round the city on the open grass
+    { const R0 = town.rect; addPad(root, (R0.minX + R0.maxX) / 2, (R0.minZ + R0.maxZ) / 2, R0.maxX - R0.minX + 2, R0.maxZ - R0.minZ + 2, P0.verge != null ? P0.verge : (P0.ground != null ? P0.ground : 0x6f7480), 0.018); }
 
     // (e) REGISTER the walkable region + a causeway to the network, so the
     //     placement reads as a real landmass and you can drive there. The
@@ -496,7 +499,9 @@
     if (!G || typeof CBZ.buildTown !== "function") return;
     const root = city.root; if (!root) return;
     const P0 = G.tpl.palette || {};
-    addPad(root, T.cx, T.cz, 148 + 18, 124 + 18, P0.verge != null ? P0.verge : 0xa89060, 0.018);
+    // the pad tucks a metre under the perimeter footway and no further: at
+    // +9 m a side it was a band of bare sand framing the town on the grass
+    addPad(root, T.cx, T.cz, 148 + 2, 124 + 2, P0.verge != null ? P0.verge : 0xa89060, 0.018);
     if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
     const town = CBZ.buildTown(root, G.cfg);
     if (!town) return;

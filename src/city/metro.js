@@ -1472,7 +1472,15 @@
     for (const fn of CBZ.farPlans || []) {
       let list = [];
       try { list = fn() || []; } catch (e) { console.error("[metro built plan]", e); }
-      for (const r of list) builtPut({ x: r.x, z: r.z, y: 0, w: r.w, d: r.d, storeys: r.storeys, fh: r.fh, color: r.color, facade: r.facade, masonry: r.masonry }, "plans");
+      for (const r of list) {
+        /* A FILLING STATION IS NOT A SHELL, and a plan says where one stands:
+           the spot is held empty, or the slice manifest's measured record of
+           the shell the lot raised before it was a station (the replay, below)
+           filled it with a box no shell ever dissolves: the phantom store in
+           front of every town's pumps. */
+        if (r.station) { if (!builtFind(r.x, r.z)) BUILT.grid.set(bgk(Math.round(r.x / 4), Math.round(r.z / 4)), { x: r.x, z: r.z, held: true }); continue; }
+        builtPut({ x: r.x, z: r.z, y: 0, w: r.w, d: r.d, storeys: r.storeys, fh: r.fh, color: r.color, facade: r.facade, masonry: r.masonry }, "plans");
+      }
     }
     // the manifest's measured records of skipped builders
     for (const r of CBZ.farReplay || []) builtPut({ x: +r.x, z: +r.z, y: +r.y || 0, w: +r.w, d: +r.d, h: +r.h, storeys: r.storeys, fh: r.fh, color: r.color, facade: r.facade, masonry: !!r.masonry }, "replay");
@@ -1547,6 +1555,7 @@
       const b = shells[i];
       if (!b || !b.group || b.park || !Number.isFinite(b.ox) || !Number.isFinite(b.oz)) continue;
       const rec = builtFind(b.ox, b.oz);
+      if (rec && rec.held) continue;                 // a station's spot: no far copy
       if (rec) { rec.grp = b.group; BUILT.covered.set(b.group, rec); }
       else builtLate(b);
     }
@@ -1558,11 +1567,13 @@
       for (const lot of lots) {
         if (!lot || !lot.building || !isFinite(lot.cx)) continue;
         const rec = builtFind(+lot.cx, +lot.cz);
-        if (rec) rec.lot = lot;                      // the live record (a re-run job makes a new one)
+        if (rec && !rec.held) rec.lot = lot;         // the live record (a re-run job makes a new one)
       }
     }
     for (const rec of BUILT.recs) {
-      const gone = !!(rec.lot && rec.lot.demolished);
+      // gone: demolished, or the lot turned out to be a filling station (a
+      // copy from a source that did not know; the forecourt is never a shell)
+      const gone = !!(rec.lot && (rec.lot.demolished || (rec.lot.building && rec.lot.building.fuelStation)));
       const target = !gone && rec.grp && inScene(rec.grp, root) ? 1 : 0;
       rec.gone = gone;
       if (target < 1) { rec.ready = 0; BUILT.ramp.delete(rec); }

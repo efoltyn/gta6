@@ -1376,8 +1376,11 @@
     const cm = CBZ.cmat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
     const root = city.root;
     const QT = 0.40;                                       // marina's quay top
-    const cx = M.QX - 14, cz = M.BZ - 30;                  // hard stand, clear of the lift well
-    boardPos = { x: M.QX - 11 + 4.2, z: M.BZ + 10 };       // the harbourmaster office door face
+    // the marina's hard stand, south of the lift well (its fixed BZ - 30
+    // stood in open water off the solved quay's end, through the brokerage)
+    const cx = M.yard ? M.yard.x : M.QX - 14, cz = M.yard ? M.yard.z : M.BZ - 30;
+    // the harbourmaster office's door face (its glazed door faces the water)
+    boardPos = M.office ? { x: M.office.x + 4.2, z: M.office.z } : { x: M.QX - 11 + 4.2, z: M.BZ + 10 };
 
     // cradle + the prize hull herself (the registry's own mesh — if the
     // registry cannot build her, a shrink-wrapped hull stands in; we never

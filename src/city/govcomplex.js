@@ -2433,6 +2433,48 @@
     return out;
   }
 
+  /* A SLATE HIP ROOF on a plan of half-extents hx x hz centred at (cx, cz),
+     its eaves at `base`: the two long slopes, the two hips and a lead ridge,
+     into `kit` (the house's roof and the motor pool's). Returns its rise and
+     ridge height. */
+  function hipRoof(kit, cx, cz, hx, hz, base, pitch) {
+    const along = hx >= hz, a = along ? hx : hz, c = along ? hz : hx;
+    const rise = c * pitch, top = base + rise;
+    const pos = [], uv = [], T = SURF.slate.tile;
+    // one slope: a polygon of (along, across) corners, UV = along / slope distance
+    const tri = function (p, q2, s2) {
+      const ux = q2[0] - p[0], uz = q2[2] - p[2], vx = s2[0] - p[0], vz = s2[2] - p[2];
+      const ny = uz * vx - ux * vz;
+      const L = ny >= 0 ? [p, q2, s2] : [p, s2, q2];
+      for (const v of L) pos.push(v[0], v[1], v[2]);
+      return L;
+    };
+    const X = function (al, ac, y) { return along ? [cx + al, y, cz + ac] : [cx + ac, y, cz + al]; };
+    const slopeLen = Math.hypot(c, rise);
+    const pushUV = function (L, alongAxis, sgn) {
+      for (const v of L) {
+        const al = along ? v[0] : v[2], ac = along ? v[2] : v[0];
+        const up = (v[1] - base) / rise * slopeLen;
+        uv.push((alongAxis ? al : ac) / T, (up + (sgn > 0 ? 0 : 0.37)) / T);
+      }
+    };
+    for (const sg of [-1, 1]) {
+      // the long slopes (trapezoids) and the hips (triangles)
+      const p0 = X(-a, sg * c, base), p1 = X(a, sg * c, base), p2 = X(a - c, 0, top), p3 = X(-(a - c), 0, top);
+      pushUV(tri(p0, p1, p2), true, sg); pushUV(tri(p0, p2, p3), true, sg);
+      const q0 = X(sg * a, -c, base), q1 = X(sg * a, c, base), q2 = X(sg * (a - c), 0, top);
+      pushUV(tri(q0, q1, q2), false, sg);
+    }
+    const rg = new THREE.BufferGeometry();
+    rg.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    rg.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    rg.computeVertexNormals();
+    kit.add("slate~uv", rg);
+    // the lead ridge
+    if (a - c > 0.1) kit.box(0x3b3f45, cx, top + 0.05, cz, along ? 2 * (a - c) + 0.3 : 0.3, 0.14, along ? 0.3 : 2 * (a - c) + 0.3);
+    return { rise: rise, top: top };
+  }
+
   function houseDress(sh, D, o) {
     const b = sh && sh.b;
     if (!b || !b.group || !D) return null;
@@ -2621,41 +2663,9 @@
       const e1 = rTop + 0.6;
       kit.box(WALL, 0, (rTop + e1) / 2, 0, RW, e1 - rTop, RD);                       // the attic the roof sits on
       kit.box(TRIM, 0, e1 + 0.09, 0, RW + 0.6, 0.18, RD + 0.6);                     // eaves cornice
-      const base = e1 + 0.18, hx = RW / 2 + 0.2, hz = RD / 2 + 0.2;
-      const along = hx >= hz, a = along ? hx : hz, c = along ? hz : hx;
-      const rise = c * (D.pitch || 0.36), top = base + rise;
-      const pos = [], uv = [], T = SURF.slate.tile;
-      // one slope: a polygon of (along, across) corners, UV = along / slope distance
-      const tri = function (p, q2, s2) {
-        const ux = q2[0] - p[0], uy = q2[1] - p[1], uz = q2[2] - p[2], vx = s2[0] - p[0], vy = s2[1] - p[1], vz = s2[2] - p[2];
-        const ny = uz * vx - ux * vz;
-        const L = ny >= 0 ? [p, q2, s2] : [p, s2, q2];
-        for (const v of L) pos.push(v[0], v[1], v[2]);
-        return L;
-      };
-      const X = function (al, ac, y) { return along ? [al, y, ac] : [ac, y, al]; };
-      const slopeLen = Math.hypot(c, rise);
-      const pushUV = function (L, alongAxis, sgn) {
-        for (const v of L) {
-          const al = along ? v[0] : v[2], ac = along ? v[2] : v[0];
-          const up = (v[1] - base) / rise * slopeLen;
-          uv.push((alongAxis ? al : ac) / T, (up + (sgn > 0 ? 0 : 0.37)) / T);
-        }
-      };
-      for (const sg of [-1, 1]) {
-        // the long slopes (trapezoids) and the hips (triangles)
-        const p0 = X(-a, sg * c, base), p1 = X(a, sg * c, base), p2 = X(a - c, 0, top), p3 = X(-(a - c), 0, top);
-        pushUV(tri(p0, p1, p2), true, sg); pushUV(tri(p0, p2, p3), true, sg);
-        const q0 = X(sg * a, -c, base), q1 = X(sg * a, c, base), q2 = X(sg * (a - c), 0, top);
-        pushUV(tri(q0, q1, q2), false, sg);
-      }
-      const rg = new THREE.BufferGeometry();
-      rg.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-      rg.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
-      rg.computeVertexNormals();
-      kit.add("slate~uv", rg);
-      // the lead ridge
-      if (a - c > 0.1) kit.box(0x3b3f45, along ? 0 : 0, top + 0.05, 0, along ? 2 * (a - c) + 0.3 : 0.3, 0.14, along ? 0.3 : 2 * (a - c) + 0.3);
+      const base = e1 + 0.18;
+      const hr = hipRoof(kit, 0, 0, RW / 2 + 0.2, RD / 2 + 0.2, base, D.pitch || 0.36);
+      const rise = hr.rise, top = hr.top;
       col(ox, oz, RW, RD, rTop, base + rise * 0.55);
       roofBase = base + rise * 0.55; roofTop = top;
       info.roofTop = top;
@@ -2896,6 +2906,9 @@
     const fp = F.p(G.u + toHouse, G.v);
     const nf = { x: Math.round(fp.x - c.x), z: Math.round(fp.z - c.z) };
     const H = G.h || 4.4, T = 0.3, FL = YS, CLR = 2.9;
+    // its stone: the house's own when the estate says so (the Executive
+    // Mansion's is its marble), else the estate stone
+    const SK = G.hex || M.stone, SKD = G.hex ? shadeX(G.hex, 0.86) : M.stoneD;
     const alongX = Math.abs(nf.z) > 0.5;
     const faceLen = alongX ? wW : dW, halfN = (alongX ? dW : wW) / 2;
     const nb = G.bays || 4, pier = 0.8, bayW = (faceLen - (nb + 1) * pier) / nb;
@@ -2911,12 +2924,12 @@
     const openSet = G.open || [0, 1];
     for (let i = 0; i <= nb; i++) {
       const t = -faceLen / 2 + pier / 2 + i * (pier + bayW);
-      B(t, CLR / 2, nD, pier, CLR, T + 0.06, M.stone);
+      B(t, CLR / 2, nD, pier, CLR, T + 0.06, SK);
       C(t, nD, pier, T + 0.06, 0, CLR);
     }
-    B(0, (CLR + H) / 2, nD, faceLen, H - CLR, T, M.stone);
+    B(0, (CLR + H) / 2, nD, faceLen, H - CLR, T, SK);
     C(0, nD, faceLen, T, CLR, H);
-    B(0, CLR + 0.1, nD + T / 2 + 0.04, faceLen - 0.2, 0.2, 0.1, M.stoneD, { cast: false });   // the lintel course
+    B(0, CLR + 0.1, nD + T / 2 + 0.04, faceLen - 0.2, 0.2, 0.1, SKD, { cast: false });   // the lintel course
     const kitUp = new Kit();
     for (let i = 0; i < nb; i++) {
       const t = -faceLen / 2 + pier + bayW / 2 + i * (pier + bayW);
@@ -2947,7 +2960,7 @@
       const opens = [];
       if (k < 2) {
         opens.push({ t: -span / 4, w: 1.2, y0: 2.1, y1: 3.1 }, { t: span / 4, w: 1.2, y0: 2.1, y1: 3.1 });
-        if (k === 0) opens.push({ t: 0, w: 0.96, y0: 0, y1: FL + 2.12, door: true });
+        if (k === 0) opens.push({ t: 0, w: 1.1, y0: 0, y1: FL + 2.12, door: true });
       } else {
         for (const tt of [-faceLen / 3, 0, faceLen / 3]) opens.push({ t: tt, w: 1.4, y0: 2.2, y1: 3.1 });
       }
@@ -2957,26 +2970,54 @@
       for (const o2 of opens) {
         const q = fAlongX ? { x: x + o2.t, z: z + f.z * (po - T / 2) } : { x: x + f.x * (po - T / 2), z: z + o2.t };
         if (o2.door) {
-          const qd = fAlongX ? { x: x + o2.t + o2.w / 2 + 0.52, z: z + f.z * (po + 0.03) } : { x: x + f.x * (po + 0.03), z: z + o2.t + o2.w / 2 + 0.52 };
-          kw.box(0x3d4a52, qd.x, FL + 1.03, qd.z, fAlongX ? 0.9 : 0.05, 2.02, fAlongX ? 0.05 : 0.9);
-          const ql = fAlongX ? { x: x + o2.t, z: z + f.z * (po + 0.04) } : { x: x + f.x * (po + 0.04), z: z + o2.t };
-          kw.box(M.stoneD, ql.x, o2.y1 + 0.1, ql.z, fAlongX ? o2.w + 0.4 : 0.08, 0.2, fAlongX ? 0.08 : o2.w + 0.4);
+          // A REAL DOOR: the city's hinged, panelled street leaf in the
+          // doorway (buildings.js makeDoorPanel: its collider fills the gap
+          // shut, it swings in for a body in the doorway). It was a painted
+          // leaf drawn standing open against the wall beside a hole.
+          const dp = fAlongX ? { x: x + o2.t, z: z + f.z * po } : { x: x + f.x * po, z: z + o2.t };
+          // (a phone keeps the painted leaf: a hinged one is a moving pivot of
+          // its own draws, and the hip roof already pays for itself there)
+          const lite = !!(CBZ.facadeLite && CBZ.facadeLite());
+          let real = null;
+          if (CBZ.cityDoorPanel && !lite) {
+            try { real = CBZ.cityDoorPanel(root, 0, 0, { x: dp.x, z: dp.z, nx: -f.x, nz: -f.z }, o2.w, { home: true, paint: 0x26332d, recess: 0.08, y0: FL + 0.02, y1: FL + 2.08 }); }
+            catch (e) { real = null; }
+          }
+          if (!real) {
+            const qd = fAlongX ? { x: x + o2.t + o2.w / 2 + 0.52, z: z + f.z * (po + 0.03) } : { x: x + f.x * (po + 0.03), z: z + o2.t + o2.w / 2 + 0.52 };
+            kw.box(0x3d4a52, qd.x, FL + 1.03, qd.z, fAlongX ? 0.9 : 0.05, 2.02, fAlongX ? 0.05 : 0.9);
+          }
+          // its architrave and a hood over it
+          if (!lite) for (const sg of [-1, 1]) {
+            const qj = fAlongX ? { x: x + o2.t + sg * (o2.w / 2 + 0.09), z: z + f.z * (po + 0.04) } : { x: x + f.x * (po + 0.04), z: z + o2.t + sg * (o2.w / 2 + 0.09) };
+            kw.box(SK, qj.x, (FL + o2.y1) / 2, qj.z, fAlongX ? 0.18 : 0.08, o2.y1 - FL, fAlongX ? 0.08 : 0.18);
+          }
+          const ql = fAlongX ? { x: x + o2.t, z: z + f.z * (po + 0.06) } : { x: x + f.x * (po + 0.06), z: z + o2.t };
+          kw.box(SKD, ql.x, o2.y1 + 0.12, ql.z, fAlongX ? o2.w + 0.6 : 0.12, 0.24, fAlongX ? 0.12 : o2.w + 0.6);
           continue;
         }
         kw.box("glass" + k, q.x, (o2.y0 + o2.y1) / 2, q.z, fAlongX ? o2.w : 0.03, o2.y1 - o2.y0, fAlongX ? 0.03 : o2.w);
         const qs = fAlongX ? { x: x + o2.t, z: z + f.z * (po + 0.06) } : { x: x + f.x * (po + 0.06), z: z + o2.t };
-        kw.box(M.stone, qs.x, o2.y0 - 0.05, qs.z, fAlongX ? o2.w + 0.3 : 0.14, 0.1, fAlongX ? 0.14 : o2.w + 0.3);
+        kw.box(SK, qs.x, o2.y0 - 0.05, qs.z, fAlongX ? o2.w + 0.3 : 0.14, 0.1, fAlongX ? 0.14 : o2.w + 0.3);
       }
       kw.flush(root, "garage-wall");
     }
-    // cornice, roof slab, parapet and its coping
-    box(root, x, H - 0.12, z, wW + 0.3, 0.2, dW + 0.3, M.stoneD, { cast: false });
+    // cornice, roof slab, then the roof: a slate hip on the house's own
+    // pitch where the estate's house wears one (the Executive Mansion), else
+    // a parapet and its coping
+    box(root, x, H - 0.12, z, wW + 0.3, 0.2, dW + 0.3, SKD, { cast: false });
     box(root, x, H + 0.05, z, wW, 0.3, dW, 0x6f6c66);
-    for (const s of [-1, 1]) {
-      box(root, x, H + 0.45, z + s * (dW / 2 - 0.15), wW, 0.5, 0.3, M.stone);
-      box(root, x + s * (wW / 2 - 0.15), H + 0.45, z, 0.3, 0.5, dW - 0.6, M.stone);
-      box(root, x, H + 0.74, z + s * (dW / 2 - 0.15), wW + 0.12, 0.08, 0.42, M.stoneD, { cast: false });
-      box(root, x + s * (wW / 2 - 0.15), H + 0.74, z, 0.42, 0.08, dW - 0.6, M.stoneD, { cast: false });
+    if (G.roof === "hip") {
+      const kr = new Kit();
+      kr.box(SK, x, H + 0.29, z, wW + 0.9, 0.18, dW + 0.9);                          // the eaves cornice
+      const hr = hipRoof(kr, x, z, wW / 2 + 0.45, dW / 2 + 0.45, H + 0.38, G.pitch || 0.36);
+      col(x, z, wW, dW, H, H + 0.38 + hr.rise * 0.55);
+      kr.flush(root, "garage-roof");
+    } else for (const s of [-1, 1]) {
+      box(root, x, H + 0.45, z + s * (dW / 2 - 0.15), wW, 0.5, 0.3, SK);
+      box(root, x + s * (wW / 2 - 0.15), H + 0.45, z, 0.3, 0.5, dW - 0.6, SK);
+      box(root, x, H + 0.74, z + s * (dW / 2 - 0.15), wW + 0.12, 0.08, 0.42, SKD, { cast: false });
+      box(root, x + s * (wW / 2 - 0.15), H + 0.74, z, 0.42, 0.08, dW - 0.6, SKD, { cast: false });
     }
     // strip lights, one over every bay
     for (let i = 0; i < nb; i++) {
@@ -3100,8 +3141,12 @@
       const toHouse = Math.sign((H.u || 0) - W.u) || 1;
       const side = W.face === "front" ? front : F.sideOf(toHouse, 0);
       let b = null;
+      // a wing that is the house's own (W.houseStone) is cut from the house's
+      // stone: the same ashlar colourway, not one hashed from where it stands
+      const wbo = Object.assign({}, W.fh ? { fh: W.fh } : null,
+        W.houseStone && CBZ.masonryPick ? { masonry: CBZ.masonryPick("ashlar", hp.x, hp.z, 0xb21c) } : null);
       if (W.civic) b = civic(root, wp.x, wp.z, F.swap ? W.d : W.w, F.swap ? W.w : W.d, W.storeys, W.hex || M.stone, side,
-        W.dress && W.dress.balustrade ? Object.assign({}, W.civic, { balustrade: true }) : W.civic, W.name || null, W.fh ? { fh: W.fh } : null);
+        W.dress && W.dress.balustrade ? Object.assign({}, W.civic, { balustrade: true }) : W.civic, W.name || null, Object.keys(wbo).length ? wbo : null);
       else {
         const raw = block(root, wp.x, wp.z, F.swap ? W.d : W.w, F.swap ? W.w : W.d, W.storeys, W.hex || M.stoneD, side, Object.assign({ facade: "office" }, W.opts || {}, W.fh ? { fh: W.fh } : {}));
         b = raw ? { b: raw } : null;
@@ -4016,13 +4061,17 @@
     // the office wing, its door on the house side, a colonnade to the court:
     // a low stone block with its own rusticated entrance front
     wings: [{
-      u: -58, v: -30, w: 34, d: 22, storeys: 2, fh: 4.2, hex: M.stone, name: "West Wing", colonnade: true,
-      civic: { kind: "federal", crown: "flat", order: "pilaster", stone: true, monumental: true, balustrade: true },
-      dress: { clad: true, balustrade: true, chimneys: 2 },
+      // (in the house's marble under the house's slate hip and chimneys, the
+      // house's seal-less order: it was a grey federal office with a flat
+      // roof and a seal, a separate building that happened to be close)
+      u: -58, v: -30, w: 34, d: 22, storeys: 2, fh: 4.2, hex: M.marble, name: "West Wing", colonnade: true, houseStone: true,
+      civic: { kind: "mansion", crown: "none", order: "pilaster", stone: true, monumental: true, balustrade: true, seal: false },
+      dress: { clad: true, balustrade: true, roof: "hip", chimneys: 2 },
     }],
     // the motorcade's garage: four drive-in bays on the east side of the
     // court, doors toward the house, an apron to the carriage ring
-    garage: { u: 60, v: 4, w: 12, d: 18.4, bays: 4, open: [0, 1] },
+    // (the house's marble and slate hip: a carriage house, not a flat box)
+    garage: { u: 60, v: 4, w: 12, d: 18.4, bays: 4, open: [0, 1], hex: M.marble, roof: "hip" },
     // the carriage court: the motorcade's ring (motorcade.js §3) runs at
     // 22-26 m round the island at v 18 and stops at the steps at v -4.5
     forecourt: { v0: -8.2, v1: 46, hw: 32, island: 13, islandV: 18 },
@@ -4792,7 +4841,10 @@
         c.main = main;
         // the yard: a shed big enough to hide a truck in, open hardstanding and
         // floodlights. Primitive container boxes do not substitute for detail.
-        block(root, cx - 30, cz + 28, 36, 22, 1, M.steelD, 0, { facade: "office" });
+        // (a service garage: block walls, the drive-in bay and roller shutters
+        // facing the hardstanding east of it; the default brick walk-up with
+        // sash windows read as a tenement in a truck yard)
+        block(root, cx - 30, cz + 28, 36, 22, 1, M.concreteD, 3, { facade: "office", showroom: true, fh: 5.0, dress: { style: "garage", accent: M.steelD } });
         slab(root, cx + 18, cz + 24, 48, 32, M.asphalt, YG);
         for (const p of [[R.minX + 14, R.minZ + 14], [R.maxX - 14, R.minZ + 14], [R.minX + 14, R.maxZ - 14], [R.maxX - 14, R.maxZ - 14]]) {
           floodMast(root, p[0], p[1], 9.0);
@@ -4826,8 +4878,10 @@
         const main = civic(root, cx + 8, cz - 34, 44, 26, 2, M.adobe, 1, null, "La Casa Grande");
         c.main = main;
         box(root, cx + 8, 9.6, cz - 34, 47, 0.7, 29, M.tileRoof, { cast: false });
-        block(root, cx - 30, cz - 2, 20, 32, 1, M.adobe, 3, { facade: "brick" });
-        block(root, cx + 46, cz - 2, 20, 32, 1, M.adobe, 2, { facade: "brick" });
+        // (adobe: thick rounded stucco, vigas, a portal on log posts; the
+        // default brick walk-up made the courtyard two tenements)
+        block(root, cx - 30, cz - 2, 20, 32, 1, M.adobe, 3, { facade: "brick", dress: { style: "adobe" } });
+        block(root, cx + 46, cz - 2, 20, 32, 1, M.adobe, 2, { facade: "brick", dress: { style: "adobe" } });
         slab(root, cx + 8, cz - 2, 52, 32, M.paving, YS);
         disc(root, cx + 8, cz - 2, 7, M.pool, YM, 20);
         // the airstrip, along the southern boundary
@@ -4879,7 +4933,9 @@
         }
         const main = civic(root, cx, cz - 32, 46, 22, 2, M.glassSteel, 1, null, "The Cliff House");
         c.main = main;
-        block(root, cx - 48, cz - 28, 24, 18, 1, M.stoneD, 3, { facade: "office", glassKind: "clear", garageGround: true });
+        // the garage in the house's own modern grammar (a deep fascia, glass,
+        // a stone feature wall), not a brick walk-up beside a glass villa
+        block(root, cx - 48, cz - 28, 24, 18, 1, M.stoneD, 3, { facade: "office", glassKind: "clear", garageGround: true, dress: { style: "desertmod" } });
         // the infinity pool, cut into the TOP terrace (whose deck is at 1.8)
         // and finished with a marble lip at the terrace edge
         slab(root, cx, cz + 2, 34, 12, M.pool, 1.84);

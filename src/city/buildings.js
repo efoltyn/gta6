@@ -3289,6 +3289,9 @@
   // frame to treat an open leaf as a passable gap. Read-only consumer; the
   // door sim above remains the sole writer.
   CBZ.cityDoorsGet = function () { return cityDoors; };
+  // the hinged street door, for a builder that lays its own walls round a
+  // doorway (city/govcomplex.js's motor pools): same leaf, collider, opener
+  CBZ.cityDoorPanel = makeDoorPanel;
 
   // Business catalogue. `sign` = awning/sign colour; `name` shown on the
   // door + HUD; `kind` = the shop kind city/shops.js switches on.

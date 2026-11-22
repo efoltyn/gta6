@@ -250,6 +250,29 @@
   // A place to park a fleet: open ground near the capital that no collider,
   // other station or bunker covers, inside the nation's own land; failing
   // that, a pier off the coast (an island capital is wall to wall town).
+  /* A TOWN OR A ROAD that is not streamed in yet is still built land. A
+     town's lots have no colliders until it is seen, so Keshtown's apron came
+     down half over the town's east blocks with Adar's Well Lane running
+     through it, and Veridia City's the same: 170 m of tarmac and a taxi line
+     laid over streets. Every settlement's own rect (city/countries.js) and
+     every road record of the arena is built land. */
+  function onTownOrRoad(r) {
+    for (const cd of CBZ.COUNTRIES || []) for (const st of cd.settlements || []) {
+      if (!isFinite(st.cx) || !(st.hx > 0)) continue;
+      if (st.cx + st.hx + 10 > r.minX && st.cx - st.hx - 10 < r.maxX && st.cz + st.hz + 10 > r.minZ && st.cz - st.hz - 10 < r.maxZ) return true;
+    }
+    const ar = CBZ.city && CBZ.city.arena;
+    const RD = (ar && ar.roads) || [];
+    for (let i = 0; i < RD.length; i++) {
+      const q = RD[i];
+      if (!q || !isFinite(q.x) || !isFinite(q.z) || !(q.len > 0)) continue;
+      const hw = (q.w || 10) / 2 + 2, hl = q.len / 2;
+      const x0 = q.vertical ? q.x - hw : q.x - hl, x1 = q.vertical ? q.x + hw : q.x + hl;
+      const z0 = q.vertical ? q.z - hl : q.z - hw, z1 = q.vertical ? q.z + hl : q.z + hw;
+      if (x1 > r.minX && x0 < r.maxX && z1 > r.minZ && z0 < r.maxZ) return true;
+    }
+    return false;
+  }
   function rectFree(r) {
     const C = CBZ.colliders || [];
     for (let i = 0; i < C.length; i++) {
@@ -260,6 +283,7 @@
     const S = W();
     for (const k in S.stations) { const s = S.stations[k]; if (Math.abs(s.x - (r.minX + r.maxX) / 2) < (s.w + r.maxX - r.minX) / 2 && Math.abs(s.z - (r.minZ + r.maxZ) / 2) < (s.d + r.maxZ - r.minZ) / 2) return false; }
     for (const k in S.bunkers) { const b = S.bunkers[k]; if (Math.abs(b.cx - (r.minX + r.maxX) / 2) < (b.w + 16 + r.maxX - r.minX) / 2 && Math.abs(b.cz - (r.minZ + r.maxZ) / 2) < (b.d + 16 + r.maxZ - r.minZ) / 2) return false; }
+    if (onTownOrRoad(r)) return false;
     // a planned city's lots are built land even where its tile (and so its
     // colliders) is not streamed in yet: an apron never lands on a block
     const MC = (CBZ.metroCities || []).concat(CBZ.metroCountryside ? [CBZ.metroCountryside] : []);
@@ -283,7 +307,8 @@
         const cx = anchor.x + Math.sin(a) * r, cz = anchor.z + Math.cos(a) * r;
         const rr = { minX: cx - w / 2 - 4, maxX: cx + w / 2 + 4, minZ: cz - d / 2 - 4, maxZ: cz + d / 2 + 4 };
         if (!inside(rr.minX, rr.minZ) || !inside(rr.maxX, rr.minZ) || !inside(rr.minX, rr.maxZ) || !inside(rr.maxX, rr.maxZ) || !inside(cx, cz)) continue;
-        if (rectFree(rr)) return { x: Math.round(cx), z: Math.round(cz), pier: false };
+        // and on level ground: an apron is not laid across a hillside
+        if (rectFree(rr)) { const sp = groundSpan(cx, cz, w, d); if (sp[1] - sp[0] <= 1.2) return { x: Math.round(cx), z: Math.round(cz), pier: false }; }
       }
     }
     // THE PIER: straight out to sea, away from the middle of the world, past
@@ -303,6 +328,11 @@
   }
   function stationOf(id) {
     const S = W();
+    const had = S.stations[id];
+    // a site a save remembers from before towns and roads were built land
+    // is chosen again (unless its apron is already down this session)
+    if (had && !had.pier && !(PARK[id] && PARK[id].built) &&
+        onTownOrRoad({ minX: had.x - had.w / 2, maxX: had.x + had.w / 2, minZ: had.z - had.d / 2, maxZ: had.z + had.d / 2 })) delete S.stations[id];
     if (S.stations[id]) return S.stations[id];
     const an = stationAnchor(id);
     if (!an) return null;
@@ -329,8 +359,27 @@
       (CBZ.platforms = CBZ.platforms || []).push({ minX: s.x - (w + 12) / 2, maxX: s.x + (w + 12) / 2, minZ: s.z - (d + 12) / 2, maxZ: s.z + (d + 12) / 2, top: 0.1, _warroom: true });
       return 0.1;
     }
-    list.push(slab(root, s.x, s.z, w, d, 0.0, 0.05, 0x3a3e43));
-    return 0;
+    // ON LAND the apron stands on the ground there: its top a hand over the
+    // highest point of the country under it (a slab laid at 0.05 vanished
+    // into any field higher than that, the jets parked on bare grass), its
+    // base below the lowest, and a walkable top
+    const lo_hi = groundSpan(s.x, s.z, w, d);
+    const top = Math.max(0.05, lo_hi[1] + 0.12);
+    list.push(slab(root, s.x, s.z, w, d, Math.min(0, lo_hi[0] - 0.4), top, 0x3a3e43));
+    if (top > 0.3) (CBZ.platforms = CBZ.platforms || []).push({ minX: s.x - w / 2, maxX: s.x + w / 2, minZ: s.z - d / 2, maxZ: s.z + d / 2, top: top, _warroom: true });
+    return top > 0.06 ? top : 0;
+  }
+  // the lowest and highest ground under a w x d rect (a 5 x 5 sample)
+  function groundSpan(cx, cz, w, d) {
+    const gy = CBZ.groundAt || CBZ.walkGroundAt;
+    if (!gy) return [0, 0];
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) {
+      const y = +gy(cx - w / 2 + w * i / 4, cz - d / 2 + d * j / 4);
+      if (!isFinite(y)) continue;
+      if (y < lo) lo = y; if (y > hi) hi = y;
+    }
+    return isFinite(lo) ? [lo, hi] : [0, 0];
   }
   function buildStation(id) {
     const P = PARK[id] || (PARK[id] = { built: false, jet: [], heavy: [], b2: [], meshes: [], top: 0 });

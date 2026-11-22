@@ -2158,11 +2158,13 @@
     function nearDoor(x, z, radius) {
       const r2 = radius * radius;
       for (const lot of doorLots()) {
+        // a filling station's way in is its whole forecourt: nothing on the
+        // kerb along any side of its lot (world/fuel_station.js), whether or
+        // not its record carries a door (the Commerce Annex's had none, so
+        // its kerb was never kept)
+        if (lot.building && lot.building.fuelStation && Math.abs(x - lot.cx) < lot.w / 2 + 6 && Math.abs(z - lot.cz) < lot.d / 2 + 6) return true;
         const d = lot.building && lot.building.door;
         if (!d) continue;
-        // a filling station's way in is its whole forecourt: nothing on the
-        // kerb along any side of its lot (world/fuel_station.js)
-        if (lot.building.fuelStation && Math.abs(x - lot.cx) < lot.w / 2 + 6 && Math.abs(z - lot.cz) < lot.d / 2 + 6) return true;
         const ex = d.x - d.nx * 4.8, ez = d.z - d.nz * 4.8;
         if (pointSegmentD2(x, z, d.x, d.z, ex, ez) < r2) return true;
       }

@@ -257,7 +257,10 @@
       }
       const Hd = w(U0 + 4 * PITCH + 9, V0 + PITCH);
       const he = vert ? { w: 26, d: 14 } : { w: 14, d: 26 };
-      bld({ x: Hd.x, z: Hd.z, w: he.w, d: he.d, rot: 0, h: 48, st: 10, fh: 4.8, type: "office", style: "concrete", wall: 0xbdb6a8, glass: 0x2c353e, roof: "flat", kind: "elevator-head", era: 1931 });
+      // the headhouse: a tall steel-clad shaft over the silos with its truck
+      // doors at the foot (metro_fabric's shed), not ten storeys of office
+      // windows, which is what the "office" type made of it
+      bld({ x: Hd.x, z: Hd.z, w: he.w, d: he.d, rot: 0, h: 48, st: 1, fh: 48, type: "ware", style: "metal", wall: 0xbdb6a8, glass: 0x2c353e, roof: "flat", kind: "elevator-head", era: 1931 });
       P.elevators.push({ town: T.id, name: T.name + " Grain Elevator", x: r2(Hd.x), z: r2(Hd.z) });
     }
 

@@ -418,7 +418,9 @@
       const odd = Math.abs(Math.round(Math.sin(rotY))) === 1;
       const w = odd ? SZ.depth : SZ.frontage, d = odd ? SZ.frontage : SZ.depth;
       addPlaced(x, z, w, d);
-      lots.push({ cx: x, cz: z, w, d, kind: "gas", district: "island", building: { name: "Island Gas" } });
+      // fuelStation: its forecourt is a way in (city/props.js keeps the kerb
+      // furniture off it, which needs to know it is a station)
+      lots.push({ cx: x, cz: z, w, d, kind: "gas", district: "island", building: { name: "Island Gas", fuelStation: true } });
       if (CBZ.buildFuelStation) {
         CBZ.buildFuelStation({ parent: root, x, z, y: 0, rotY, deck: 0.06, walkRise: 0, apron: 1.2 });
       }
