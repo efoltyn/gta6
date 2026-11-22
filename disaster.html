@@ -987,7 +987,7 @@ document.body.appendChild(b);}}catch(e){}})();
      orange fireball with a debris cone. REQUIRED by systems/disasters.js (the
      old fireball fallback was deleted 2026-09-28). Needs only config.js +
      scene; it wires itself to the bus lazily, in any script order. -->
-<script src="src/systems/lightningfx.js?v=bolt1"></script>
+<script src="src/systems/lightningfx.js?v=fx1121"></script>
 <!-- THE DISASTER ISLAND: the plan (world/island_plan.js: terrain, harbour,
      streets, lots, cars, boats as data, node-checkable by tools/island-check.mjs),
      the street kit it lays with, the instanced draw of the island's trees and
@@ -1075,7 +1075,7 @@ document.body.appendChild(b);}}catch(e){}})();
      burning cars, the killing plume, ash and the persistent burn scar. -->
 <!-- systems/smokeplume.js: a fire's smoke as raymarched plumes (CBZ.smokePlumes), read by wildfire.js -->
 <script src="src/systems/smokeplume.js?v=fire1102e"></script>
-<script src="src/systems/wildfire.js?v=fire1102e"></script>
+<script src="src/systems/wildfire.js?v=fx1121"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
@@ -1086,7 +1086,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pressure front (one overpressure law: glass, trees, cars, buildings) and
      its late bang, craters with rim + ejecta blanket, curtain, plume, fires.
      REQUIRED by systems/disasters.js (no legacy shower any more). -->
-<script src="src/systems/meteor.js?v=norim1020"></script>
+<script src="src/systems/meteor.js?v=fx1121"></script>
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
@@ -1125,7 +1125,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- where the water is brown: the silt the run-up scoured off the land, carried out to sea by the backwash, spread and settled (the sea shader's turbidity mask), and CBZ.waterTurbidAt, the one turbidity + current query the underwater medium and the swimmer read -->
 <script src="src/world/tsunami_silt.js?v=silt1020"></script>
 <!-- the bore on the land and its white water: wall pieces on the run-up's own fronts, steps and cascades, and lit foam / mist volume off them (two particle pools, depth-sorted) -->
-<script src="src/world/tsunami_whitewater.js?v=r187a"></script>
+<script src="src/world/tsunami_whitewater.js?v=fx1121"></script>
 <script src="src/world/tsunami_debris.js?v=tsuowns1020"></script>
 <script src="src/world/tsunami_flow.js?v=runup1014"></script>
 <script src="src/world/tsunami_scene.js?v=bore1020b"></script>
@@ -1528,7 +1528,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=r187a"></script>
+<script src="src/systems/tornado.js?v=fx1121"></script>
 <script src="src/city/aircraftimpact.js?v=jetbound1022"></script>
 <script src="src/city/metro_promote.js?v=mrg10200048"></script>
 <!-- city/shopfloor.js: what every counter shop shares (the clerk, the till of
