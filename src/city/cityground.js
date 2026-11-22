@@ -414,6 +414,14 @@
         g = 1; wear = Math.max(wear, 0.5); tone = 0.4;
         if (dB < 1.1) g = 0;            // the perimeter walk every block of flats has
         break;
+      case "vacant":                    // a plot nobody built on: rough grass, bald in patches, a track across it
+        g = 1; tone = 0.5;
+        wear = Math.max(wear, 0.2 + 0.42 * sm(clamp01((vn(x / 4.3, z / 4.3, 97) - 0.4) / 0.4)));
+        if (o.track) {                  // the short cut people walk across it
+          const dd = Math.abs(lx * 0.6 - lz * 0.8 * o.track) + (vn(x / 2.1, z / 2.1, 98) - 0.5) * 0.6;
+          wear = Math.max(wear, 0.9 * Math.exp(-(dd * dd) / 0.3));
+        }
+        break;
       default:                          // residential
         g = 1; tone = 0.35;
         if (dB < 0.75) { g = 0; e = 1; tone = 0.03; }                       // planting bed at the facade
@@ -506,6 +514,8 @@
       // poorer streets wear harder; a crew's building lets its yard go
       wear: 0.08 + (1 - D.wealth) * 0.22 + (lot.kind === "abandoned" ? 0.4 : 0),
       park: null, b: null, face: faceOf(lot, b), front: 0, walk: null,
+      // a vacant plot: a short cut worn across it on some (+1 / -1 its diagonal)
+      track: D.kind === "vacant" ? [0, 0, 1, -1][(hash3(Math.round(lot.cx), Math.round(lot.cz), 99) * 4) | 0] : 0,
     };
     if (b && b.park) {
       const w = lot.w || 30, d = lot.d || 30, bo = Math.min(w, d) * 0.23;

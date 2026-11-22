@@ -77,6 +77,10 @@
       const r = roads[i];
       if (!r || r.len < 72 || r.district === "bridge" || r.district === "airport") continue;
       if (r.elevated) continue;            // a flyover deck (city/metro.js) is no place for a kicker
+      // ...nor a kerbed street grid (a town's, city/towngen.js `kit`): a
+      // town street's middle third is its main junction and its square, and
+      // Pinecrest had a kicker standing across the crossroads by the green
+      if (r.kit || r.litByTown) continue;
       // ...and never on a segment the traffic-access law has CLOSED (the
       // airfield, the military perimeter, a bunker shell, or a lane a builder
       // reserved for its own service vehicles). A ramp you cannot legally

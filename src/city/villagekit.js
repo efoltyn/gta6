@@ -519,7 +519,9 @@
   //  new plumbing — a village settlement just points baseTemplate at
   //  "village" instead of "harvestmarket".
   // ============================================================
-  const RET = { retail: true };
+  // the village shop is mud brick (city/facades/adobe.js), not the towns'
+  // brick and plate glass
+  const RET = { retail: true, dress: { style: "adobe" } };
 
   // civic: the well + a market stall (decorative asset props — real
   // colliders, no economy attach; see the file-header FINDING).

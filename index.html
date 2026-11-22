@@ -445,7 +445,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=beach1020"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=wm2a"></script>
+<script src="src/core/slice.js?v=wm2a+bld1122g"></script>
 <!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
 <script src="src/core/sight.js?v=farcopy1013"></script>
@@ -1310,7 +1310,7 @@ document.body.appendChild(b);}}catch(e){}})();
      garage wing on the driveway, walk, hedge / fence, back fence, mailbox). towngen.js and
      buildings.js call it at build time. -->
 <script src="src/city/house_yard.js?v=house1020b+house1122r6+sub1122b"></script>
-<script src="src/city/house_plan.js?v=house1122r5+sub1122b"></script>
+<script src="src/city/house_plan.js?v=house1122r5+sub1122b+bld1122g"></script>
 <script src="src/city/interiorlight.js?v=r187a"></script>
 <script src="src/city/citynav.js?v=people1022"></script>
 <script src="src/city/fracture.js?v=nukecost1013"></script>
@@ -1396,8 +1396,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- SETTLEMENT COMPOSITION — flavored anchor plan + registry + cityWorldGeo
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
-<script src="src/city/settlements.js?v=pres0929b"></script>
-<script src="src/city/towngen.js?v=house1020b+house1122r2+fixB1+bld1122a+bld1122d+bld1122e+bld1122f"></script>
+<script src="src/city/settlements.js?v=pres0929b+bld1122g"></script>
+<script src="src/city/towngen.js?v=house1020b+house1122r2+fixB1+bld1122a+bld1122d+bld1122e+bld1122f+bld1122g"></script>
 <!-- THE ONE BET SLIP (city/betslip.js): every wager in the city is written on
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
@@ -1773,7 +1773,7 @@ document.body.appendChild(b);}}catch(e){}})();
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
 <script src="src/systems/tornado.js?v=fx1121"></script>
 <script src="src/city/aircraftimpact.js?v=jetbound1022"></script>
-<script src="src/city/metro_promote.js?v=mrg10200048"></script>
+<script src="src/city/metro_promote.js?v=mrg10200048+bld1122g"></script>
 <script src="src/city/house_metro.js?v=house1122r6+sub1122c"></script>
 <script src="src/city/shops.js?v=nopanel1122"></script>
 <!-- city/shopfloor.js: what every counter shop shares (the clerk, the till of
@@ -2008,7 +2008,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=winhole1014"></script>
 <script src="src/city/citytemplates.js?v=pres0929b"></script>
-<script src="src/city/minicities.js?v=wm2a+bld1122f"></script>
+<script src="src/city/minicities.js?v=wm2a+bld1122f+bld1122g"></script>
 <!-- REAL CITIES AT REAL SCALE (owner: "realistically large ... not just one mass of tall buildings"):
      metroplan.js is the pure urban planner (land value -> zoning -> arterials -> blocks -> parcels),
      metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
@@ -2016,15 +2016,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE WORLD'S ONE ZONING FIELD (layout wave): intensity, use, the ceiling a grown district may rise to,
      the freeway frontage buffer. Pure data off the regions + highway table; metro.js plans with it. -->
 <script src="src/city/zoning.js?v=base1012"></script>
-<script src="src/city/metroplan.js?v=layout1122"></script>
+<script src="src/city/metroplan.js?v=layout1122+bld1122g"></script>
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
-<script src="src/city/countryside.js?v=wm2a+bld1122f"></script>
+<script src="src/city/countryside.js?v=wm2a+bld1122f+bld1122g"></script>
 <!-- THE PRECINCT'S LOT (city/precinct_site.js): the world plan's police station site paved, its yard fenced, claimed after the boroughs plan (order 44). -->
 <script src="src/city/precinct_site.js?v=wm2a"></script>
 <!-- KINGSPORT'S DOCKS (city/kingsport_docks.js): the container terminal on Kings Harbour east of the river mouth, its dock road off the south arterial (order 44). -->
-<script src="src/city/kingsport_docks.js?v=wm2a"></script>
-<script src="src/city/metro_fabric.js?v=promote1020+house1122r2+sub1122c+bld1122f"></script>
+<script src="src/city/kingsport_docks.js?v=wm2a+bld1122g"></script>
+<script src="src/city/metro_fabric.js?v=promote1020+house1122r2+sub1122c+bld1122f+bld1122g"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
@@ -2055,7 +2055,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/millionaires.js?v=ladder1022"></script>
 <script src="src/city/regionlife.js?v=street1009"></script>
 <script src="src/city/modshop.js?v=nopanel1122"></script>
-<script src="src/city/stuntjumps.js?v=metro0929"></script>
+<script src="src/city/stuntjumps.js?v=metro0929+bld1122g"></script>
 <script src="src/city/storage.js?v=nopanel1122"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
@@ -2081,7 +2081,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=r187a+bld1122f"></script>
+<script src="src/city/cityground.js?v=r187a+bld1122f+bld1122g"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -2446,8 +2446,8 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.addLandmass so load order isn't strictly load-bearing today, but
      this keeps the "assets define before buildTown reads them" contract
      honest for any future eager caller. -->
-<script src="src/city/villagekit.js?v=fac1009"></script>
-<script src="src/city/countries.js?v=c1122+bld1122f"></script>
+<script src="src/city/villagekit.js?v=fac1009+bld1122g"></script>
+<script src="src/city/countries.js?v=c1122+bld1122f+bld1122g"></script>
 <!-- WHOSE GROUND IS THIS (city/borders.js): every point to one country, derived from the claims the world already makes; CBZ.countryAt / CBZ.countryList / CBZ.countryBorders for the map, the radar and every rule that cares. -->
 <script src="src/city/borders.js?v=ph1122"></script>
 <!-- REAL CASINOS — order-90 dress pass over every casino lot (mainland Golden
@@ -2468,7 +2468,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/river.js?v=plan1122"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=plan1122"></script>
+<script src="src/city/continent.js?v=plan1122+bld1122g"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
