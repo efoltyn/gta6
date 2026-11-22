@@ -283,9 +283,8 @@
          graded into raspberry: fresh blood keeps green and blue at a few % of
          red (hue 0-2 deg, pure red), dried blood lets a little more green
          than blue through (hue 5-8 deg, dark red-brown);
-       * fresh blood carries a GLINT: a thin wet line off the meniscus at the
-         pool's edge where the blood darkens the floor less, gone once it
-         dries. Never brighter than the floor: the filter never goes above 1.
+       * the 2x headroom is what lets fresh blood carry a GLINT: a thin wet
+         highlight off the meniscus at the pool's edge, gone once it dries.
      Every shape is a noise-edged field in the atlas and the edge is a hard
      threshold on it, so there is no feathered rim to go pink. A pool GROWS
      by lowering that threshold (the edge advances into the lowest ground
@@ -557,26 +556,15 @@
     "    float mb = (1.0 - depth) * (1.0 - depth) * 26.0 + 3.0;",
     "    vec3 N = normalize(N0 - (vTx * gx + vTy * gy) * mb);",
     "    vec3 L = normalize(vec3(0.3, 1.0, 0.22));",
-    // a GLINT is crisp — on or off, a few texels wide — and it lives on the
-    // meniscus, where the surface really tilts: on a pool's flat middle the
-    // highlight was the same for every texel, so a pool seen from the mirror
-    // angle lit up whole.
+    // a GLINT is crisp — on or off, a few texels wide. A soft half-strength
+    // white over red is exactly pink, so there is no soft half-strength.
     "    float spec = smoothstep(0.35, 0.6, pow(max(dot(N, normalize(L + V)), 0.0), 40.0));",
-    "    spec *= 1.0 - smoothstep(0.08, 0.4, depth);",
     "    float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);",
-    /* A STAIN ONLY TAKES LIGHT AWAY. The sheen used to pull the filter toward
-       (1.25, 1.22, 1.2), i.e. ABOVE 1: the 2x multiply then lifted the
-       floor's red by up to 15% wherever it was on, and a fresh pool seen from
-       the mirror angle of its light had it on over most of its area: a pale
-       red-white patch brighter than the sand it lay on. Now the sheen is the
-       blood darkening the floor LESS (at most letting it through), never more
-       light than the floor had. */
-    "    F = mix(F, vec3(1.0), clamp(wet * (spec * 0.8 + fres * 0.2), 0.0, 0.8));",
+    "    F = mix(F, vec3(1.25, 1.22, 1.2), clamp(wet * (spec * 0.8 + fres * 0.2), 0.0, 0.8));",
     "  }",
     "  vec3 k = vec3(1.0 + (F.r - 1.0) * c, vec2(1.0) + (F.gb - vec2(1.0)) * pow(c, 0.3));",
-    // 2x multiply: blend is src*dst + dst*src, so 0.5 = leave the floor alone,
-    // and nothing above 0.5 is ever written: the floor is the brightest a stain gets
-    "  gl_FragColor = vec4(clamp(k * 0.5, 0.0, 0.5), 1.0);",
+    // 2x multiply: blend is src*dst + dst*src, so 0.5 = leave the floor alone
+    "  gl_FragColor = vec4(clamp(k * 0.5, 0.0, 1.0), 1.0);",
     "}",
   ].join("\n");
 
