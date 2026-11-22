@@ -1706,7 +1706,14 @@
     S.tFree = true;
     endTargetHold(S);
     const power = S.power;
-    if (ctx.kind === "wall" && ctx.dist < 0.35) {
+    const BIw = CBZ.bodyImpact;
+    if (S.verb === "shove" && ctx.kind === "wall" && !grappleSteps(S.t) && BIw && BIw.intoWall &&
+        BIw.intoWall(S.t, S.T.pos, S.dir.x, S.dir.z, 1.5 + 4 * power, power < 0.75 ? 0.8 : 0.7 + 0.9 * power, power >= 0.75)) {
+      // SHOVED INTO A WALL (systems/humancontact.js intoWall): driven back
+      // into it on his feet, slammed, and what is left of the push decides
+      // whether he comes off it dazed or goes down in front of it. (He used
+      // to be launched at it in a hop and lie down.)
+    } else if (ctx.kind === "wall" && ctx.dist < 0.35) {
       // already against it: the shove IS the slam
       const sp = 3.5 + 3.5 * power;
       if (CBZ.trauma && CBZ.trauma.slam) CBZ.trauma.slam(S.t, sp, { wall: true, dir: { x: -S.dir.x, z: -S.dir.z } });

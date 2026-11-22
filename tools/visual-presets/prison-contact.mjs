@@ -25,6 +25,9 @@ const SCN = {
   cuffbutt: { label: "In cuffs: the red button, a man chest to chest", grab: "cuff", dist: 0.8, times: [0.1, 0.25, 0.4, 0.6, 0.9, 1.4] },
   cuffheld: { label: "In cuffs, walked by an officer: the red button",  grab: "cuff", dist: 6, held: true, times: [0.1, 0.3, 0.45, 0.6, 0.9, 1.4] },
   cuffheldkick: { label: "In cuffs, walked, a man in front: the red button", grab: "cuff", dist: 1.5, held: true, times: [0.1, 0.25, 0.4, 0.6, 0.9, 1.4] },
+  wallshove: { label: "Shove a man who has a wall a step behind him", grab: "shove", dist: 1.3, wall: 1.1, times: [1.05, 1.2, 1.35, 1.55, 1.9, 2.8] },
+  wallpin:   { label: "Shove a man whose back is on the wall",        grab: "shove", dist: 1.3, wall: 0.45, times: [1.05, 1.2, 1.35, 1.55, 1.9, 2.8] },
+  wallrun:   { label: "Sprint into a man standing in front of a wall", sprint: true, npcYaw: Math.PI, gap: 7.0, wall: 1.2, times: [0.04, 0.2, 0.45, 0.8, 1.4, 2.6] },
   guard:  { label: "Sprint into an officer",     sprint: true,  npcYaw: Math.PI, gap: 7.0, guard: true, times: [0.04, 0.2, 0.45, 0.8, 1.4, 2.6] },
 };
 
@@ -89,7 +92,24 @@ async function stageContact(input) {
   const P = CBZ.player, V = CBZ.verbs;
   const pa = () => (V && V.playerActor ? V.playerActor() : null);
   const sub = input.subject, cfg = sub.cfg;
-  const YARD = { x: 0, z: 30 };
+  let YARD = { x: 0, z: 30 };
+  if (cfg.wall) {
+    // a wall that faces down the lane (+z), with ten clear metres in front of it
+    if (!S.wallLane) {
+      const open = (x, z) => { try { return V.context({ x, y: 0, z }, { x: 0, z: 1 }, 0.6).kind; } catch (_) { return "?"; } };
+      outer: for (const x of [0, 6, -6, 12, -12, 18, -18, 24, -24, 30, -30]) {
+        let run = 0;
+        for (let z = 14; z < 90; z += 0.25) {
+          const c = V.context({ x, y: 0, z }, { x: 0, z: 1 }, 0.6);
+          if (c.kind === "open") { run += 0.25; continue; }
+          if (c.kind === "wall" && run >= 11 && open(x - 1, z) === "wall" && open(x + 1, z) === "wall" && open(x - 2.5, z) === "wall" && open(x + 2.5, z) === "wall") { S.wallLane = { x, wallZ: z + c.dist }; break outer; }
+          run = 0;
+        }
+      }
+    }
+    if (!S.wallLane) return { ok: false, err: "no wall with a clear lane" };
+    YARD = { x: S.wallLane.x, z: S.wallLane.wallZ - cfg.wall - (cfg.gap || cfg.dist) };
+  }
   const keys = CBZ.keys || (CBZ.keys = {});
   const clearKeys = () => { keys.w = keys.shift = keys.a = keys.s = keys.d = keys.e = false; };
   const step = () => { CBZ.hitstop = 0; CBZ.slowmo = 0; P.hp = 100; CBZ.stepSim(1 / 60); };
@@ -235,7 +255,7 @@ async function stageContact(input) {
       if (cfg.npcRun) { m._bcVx = 0; m._bcVz = -cfg.npcRun; }
       step();
       maxSpeed = Math.max(maxSpeed, (P.pos.z - lastPz) * 60); lastPz = P.pos.z;
-      if (dist(mp, P.pos) < touchD || down(m) || playerDown()) t = 0;
+      if (dist(mp, P.pos) < touchD || down(m) || playerDown() || (m.char && m.char.hitReact && m.char.hitReact.on)) t = 0;
     }
     if (t < 0) return { ok: false, err: "never met" };
     n0 = { x: mp.x, z: mp.z }; q0 = { x: P.pos.x, z: P.pos.z };

@@ -355,7 +355,8 @@
       const power = stumble ? 0.85 : clamp(0.35 + 0.3 * (o.e - T_SHOVE) / (T_STUMBLE - T_SHOVE), 0.35, 0.65);
       const reach = clamp(dv / 1.6, 0.6, 1.6);
       let done = false;
-      if (V && V.react && ch) {
+      if (ch && intoWall(a, posOf(a), nx, nz, Math.max(dv, 0.9), (0.16 + 0.34 * power) * reach * (stumble ? 1.55 : 1), false, m)) done = true;
+      else if (V && V.react && ch) {
         try { done = !!V.react(a, { reaction: "stagger", zone: "body", dir: _dir, power, stagger: true, heavy: stumble, mass: reach }); } catch (e) { done = false; }
       }
       if (!done) kick(a, nx * dv * 0.9, nz * dv * 0.9);
@@ -368,7 +369,8 @@
     dropHeld(a, 1);
     let done = false;
     const after = afterDir(o, nx, nz);
-    if (V && V.knockdown && ch) {
+    if (ch && intoWall(a, posOf(a), _dir.x, _dir.z, Math.max(after.speed, dv), after.travel, true, m)) done = true;
+    else if (V && V.knockdown && ch) {
       try { done = !!V.knockdown(a, { dir: _dir, power: clamp(o.e / 4.5, 0.5, 1), travel: after.travel, dur: 1.0 + clamp(o.e - T_DOWN, 0, 2) * 0.5, ko: false, noKo: !koMode(m) }); } catch (e) { done = false; }
     }
     if (!done) {
@@ -411,6 +413,104 @@
     if (vx == null || vz == null) { vx = nx * (o.dv || 0); vz = nz * (o.dv || 0); }
     kick({ pos: P.pos, r: P.radius || 0.55 }, vx * k, vz * k);
   }
+  /* ============================================================
+     THE WALL BEHIND HIM. A push used to know nothing about what stood behind
+     the man it moved: he reeled or fell his usual distance and the collider
+     quietly stopped him, or (a shove) he was launched into a hop at it and
+     lay down in front of it. Now anything that drives a body (a run-in, a
+     shove) asks what is along the push first. A wall inside the ground he
+     would have covered means he is driven INTO it: his steps end at the wall,
+     his back and skull meet it at what is left of his speed, and that speed
+     decides the rest:
+       slow   (< 1.6 m/s)  he fetches up against it, braced
+       hard   (< 3.4)      a slam (trauma, the sound), the head snaps and he
+                           comes off the wall a step, dazed
+       harder, or a man already going down: the slam, and he crumples off
+                           the wall onto the floor in front of it
+     v0 = his speed the instant after the push, travel = the ground an open
+     floor would have given him. true = the wall has him (the caller does
+     nothing more).
+     ============================================================ */
+  const wallQ = [];
+  const _wd = { x: 0, z: 0 }, _wo = { x: 0, z: 0 };
+  function isPlayerBody(a) {
+    if (!a) return false;
+    if (isPlayer(a)) return true;
+    const V = CBZ.verbs;
+    try { return !!(V && V.playerActor && V.playerActor() === a); } catch (e) { return false; }
+  }
+  function intoWall(a, pos, dx, dz, v0, travel, down, m) {
+    const V = CBZ.verbs;
+    if (!a || !pos || !V || !V.context || !V.react || !(v0 > 0.8)) return false;
+    let c;
+    try { c = V.context(pos, { x: dx, z: dz }, Math.max(0.6, travel + 0.5)); } catch (e) { return false; }
+    if (!c || c.kind !== "wall") return false;
+    const gap = Math.max(0, c.dist - 0.32);            // the floor between his back and it
+    const vHit = v0 * clamp(1 - 0.5 * gap / Math.max(travel, 0.3), 0.3, 1);
+    let t = 0.04;
+    if (down && gap >= 0.3 && V.knockdown) {
+      /* GOING DOWN WITH A WALL BEHIND HIM. He falls the way he was hit and
+         is carried back until the wall stops him (the one mover holds him out
+         of it); on the way down his back and skull meet it (the slam, timed
+         to the sit of the fall) and he ends slumped against its foot. */
+      const isP = isPlayerBody(a);
+      _wd.x = dx; _wd.z = dz;
+      let ok = false;
+      try { ok = !!V.knockdown(a, { dir: _wd, power: clamp(v0 / 4.5, 0.5, 1), travel: Math.max(0.05, Math.min(travel, gap + 0.1)), dur: 1.2 + clamp(vHit - 3, 0, 2) * 0.5, ko: false, noKo: !isP && !koMode(m || mode()) }); } catch (e) { ok = false; }
+      if (!ok) return false;
+      downs++;
+      for (let i = wallQ.length - 1; i >= 0; i--) if (wallQ[i].a === a) wallQ.splice(i, 1);
+      wallQ.push({ a: a, t: 0.4, v: Math.max(vHit, 1.8), dx: dx, dz: dz, down: false, m: m || mode(), slamOnly: true });
+      return true;
+    }
+    if (gap > 0.12) {
+      // the steps that carry him to it
+      const power = clamp(v0 / 5.5, 0.3, 1);
+      _wd.x = dx; _wd.z = dz;
+      try { V.react(a, { reaction: "stagger", zone: "body", dir: _wd, power: power, stagger: true, mass: gap / (0.16 + 0.34 * power) }); } catch (e) { /* no rig */ }
+      t = clamp(gap / Math.max(1.5, v0) + 0.12, 0.15, 0.42);
+    }
+    for (let i = wallQ.length - 1; i >= 0; i--) if (wallQ[i].a === a) wallQ.splice(i, 1);
+    wallQ.push({ a: a, t: t, v: vHit, dx: dx, dz: dz, down: !!down, m: m || mode() });
+    return true;
+  }
+  function wallHit(q) {
+    const a = q.a, V = CBZ.verbs;
+    if (!a || a.dead || !V) return;
+    const isP = isPlayerBody(a);
+    if (isP && CBZ.player && CBZ.player.dead) return;
+    _wo.x = -q.dx; _wo.z = -q.dz;                        // off the wall
+    const sp = 2 + q.v * 1.2;
+    if (q.v > 1.2) {
+      if (CBZ.trauma && CBZ.trauma.slam) { try { CBZ.trauma.slam(a, sp, { wall: true, dir: _wo }); } catch (e) { /* no trauma */ } }
+      if (CBZ.sfx) { try { CBZ.sfx("hit"); } catch (e) { /* no audio */ } }
+    }
+    if (isP) { if (CBZ.shake) CBZ.shake(clamp(q.v * 0.09, 0.06, 0.42)); breakStride(q.v > 1.6 ? 0.6 : 0.25); }
+    if (q.slamOnly) return;                              // already on his way to the floor
+    try {
+      if (q.down || q.v >= 3.4) {
+        downs++;
+        if (sp > 5.5 && CBZ.goreImpact) {
+          const p = isP ? CBZ.player.pos : posOf(a);
+          if (p) CBZ.goreImpact(p.x + q.dx * 0.3, (p.y || 0) + 1.5, p.z + q.dz * 0.3, { dir: { x: q.dx, y: 0, z: q.dz }, amount: 0.3 + 0.08 * q.v, wall: true });
+        }
+        if (V.knockdown) V.knockdown(a, { dir: _wo, power: clamp(q.v / 5, 0.4, 1), travel: 0.28, dur: 1.2 + clamp(q.v - 3, 0, 2) * 0.5, ko: false, noKo: !isP && !koMode(q.m) });
+      } else if (q.v >= 1.6) {
+        V.react(a, { reaction: "stagger", zone: "head", kind: "cross", dir: _wo, power: clamp(q.v / 4, 0.4, 0.85), stagger: true, mass: 0.5 });
+      } else {
+        V.react(a, { reaction: "stagger", zone: "body", dir: _wo, power: 0.25 });
+      }
+    } catch (e) { /* no rig */ }
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(11.6, function (dt) {
+    for (let i = wallQ.length - 1; i >= 0; i--) {
+      const q = wallQ[i];
+      q.t -= dt;
+      if (q.t > 0) continue;
+      wallQ.splice(i, 1);
+      wallHit(q);
+    }
+  });
   function applyPlayer(tier, o, m) {
     const P = CBZ.player;
     if (!P || P.dead) return;
@@ -424,6 +524,9 @@
     if (tier === SHOVE || tier === STUMBLE) {
       const stumble = tier === STUMBLE;
       breakStride(stumble ? 0.55 : 0.3);
+      // (only a push that is actually moving you its own way can put a wall behind you)
+      const pvx = o.vx != null ? o.vx : nx * dv, pvz = o.vz != null ? o.vz : nz * dv;
+      if (pvx * nx + pvz * nz > 0.6 && intoWall(pa, P.pos, nx, nz, Math.hypot(pvx, pvz), stumble ? 0.9 : 0.5, false, m)) { if (stumble) dropHeld(pa, 0.4); return; }
       carry(o, nx, nz, stumble ? 0.75 : 0.6);
       if (CBZ.verbs && CBZ.verbs.react) { try { _dir.x = nx; _dir.z = nz; CBZ.verbs.react(pa, { reaction: "stagger", zone: "body", dir: _dir, power: stumble ? 0.75 : 0.45 }); } catch (e) { /* no rig */ } }
       if (CBZ.shake) CBZ.shake(stumble ? 0.12 : 0.05);
@@ -441,7 +544,8 @@
        get-up); so do you now, along the way you were still moving, carried
        over the ground your momentum had left. */
     let done = false;
-    if (m === "escape" && CBZ.verbs && CBZ.verbs.knockdown) {
+    if (after.speed > 0.8 && intoWall(pa, P.pos, _dir.x, _dir.z, after.speed, after.travel, true, m)) done = true;
+    else if (m === "escape" && CBZ.verbs && CBZ.verbs.knockdown) {
       try { done = !!CBZ.verbs.knockdown(pa, { dir: _dir, power: clamp((o.e || 0) / 4.5, 0.5, 1), travel: after.travel, dur: 0.7 + clamp((o.e || 0) - T_DOWN, 0, 2) * 0.3, ko: false }); } catch (e) { done = false; }
     }
     if (!done) {
@@ -1382,6 +1486,7 @@
     TIERS, T_BRUSH, T_SHOVE, T_STUMBLE, T_DOWN, NONE, BRUSH, SHOVE, STUMBLE, DOWN,
     solve, tierOf, pDown, angleFactor, massOf, stability, verbPower, car, apply,
     playerVel: PV,
+    intoWall,
     rng: null,
   };
   CBZ.humanContact = {
