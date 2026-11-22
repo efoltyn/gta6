@@ -1831,6 +1831,18 @@
     if (g.position.y > sea + 0.1) g.position.y = sea + 0.1;
     M.pitch += ((down > 0 ? -0.32 : -0.04) - M.pitch) * (1 - Math.exp(-2.5 * dt));
     g.rotation.z = h.baseRotZ + M.pitch;
+    // AIR GOES UP: a swimmer dragged under loses the breath in their lungs in
+    // gulps, from the mouth (a corpse, the last of it, in a trickle)
+    M.bubT = (M.bubT || 0) - dt;
+    if (M.bubT <= 0 && CBZ.waterBubbles) {
+      const dead = !h.isPlayer && h.victim && h.victim.dead;
+      M.bubT = dead ? 0.9 + Math.random() * 1.2 : 0.22 + Math.random() * 0.35;
+      const ch = victimChar(h);
+      let bx = h.jaw.x, by = h.jaw.y + 0.5, bz = h.jaw.z;
+      if (ch && ch.body && _mv) { ch.body.localToWorld(_mv[3].set(0, 1.55, 0.08)); bx = _mv[3].x; by = _mv[3].y; bz = _mv[3].z; }
+      else if (h.isPlayer && CBZ.player && CBZ.player.pos) { bx = CBZ.player.pos.x; by = CBZ.player.pos.y + 1.47; bz = CBZ.player.pos.z; }
+      try { CBZ.waterBubbles(bx, by, bz, dead ? 2 : 4 + Math.floor(Math.random() * 6), dead ? 0.003 : 0.008); } catch (e) {}
+    }
     // the roll: over onto its side and back, now and then
     M.rollT -= dt;
     if (M.rollT <= 0 && P.roll > 0.05) { M.rollT = P.rollEvery * (0.7 + 0.6 * Math.random()); M.rollPh = 0; M.rollDir = -M.rollDir; }

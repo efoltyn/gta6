@@ -1497,6 +1497,93 @@
   // that needs to leave a swimmer alone)
   // waterfield.js normally publishes this before swim.js loads. Preserve a
   // standalone fallback for old pages/tests that load only this module.
+  /* ==================================================================
+     AIR UNDER WATER — one instanced pool of bubbles (one draw call).
+     CBZ.waterBubbles(x, y, z, n, r) lets go of n bubbles of about r metres
+     radius at a point under the surface: a diver breathing out, a swimmer
+     dragged under by a shark. Each rises at the terminal speed of an air
+     bubble of its size (about 0.23 m/s for the millimetre bubbles, the
+     Davies-Taylor 0.71*sqrt(g*d) for centimetre caps), wobbles, swells as
+     the water above it thins (radius ~ (P(depth)/P(now))^(1/3), 10 kPa per
+     metre on 101 kPa of air), and breaks at the surface with a ring.
+  ================================================================== */
+  const BUB_MAX = 192;
+  const bubbles = [];
+  let bubMesh = null;
+  const _bm4 = window.THREE ? new window.THREE.Matrix4() : null;
+  function bubEnsure() {
+    if (bubMesh || !window.THREE || !CBZ.scene) return bubMesh;
+    const T = window.THREE;
+    const geo = new T.IcosahedronGeometry(1, 1);
+    const mat = new T.MeshPhongMaterial({ color: 0xdff2f8, specular: 0xffffff, shininess: 90, transparent: true, opacity: 0.55, depthWrite: false });
+    bubMesh = new T.InstancedMesh(geo, mat, BUB_MAX);
+    bubMesh.count = 0; bubMesh.frustumCulled = false; bubMesh.renderOrder = 5;
+    bubMesh.name = "waterBubbles";
+    CBZ.scene.add(bubMesh);
+    return bubMesh;
+  }
+  function bubRise(r) {
+    // terminal rise speed of an air bubble of radius r (m) in sea water
+    if (r < 0.0007) return 0.10 + r * 150;            // small spheres, Stokes-like
+    if (r < 0.006) return 0.23;                       // the wobbling plateau
+    return Math.min(0.9, 0.71 * Math.sqrt(9.81 * r * 2));   // spherical caps
+  }
+  CBZ.waterBubbles = function (x, y, z, n, r) {
+    if (!(n > 0) || !Number.isFinite(x + y + z)) return 0;
+    const surf = surfAt(x, z);
+    if (y > surf - 0.15) return 0;                    // air only goes up from under water
+    let made = 0;
+    for (let i = 0; i < n && bubbles.length < BUB_MAX; i++) {
+      const rr = Math.max(0.0015, (r || 0.004) * (0.45 + Math.random() * 1.1));
+      bubbles.push({
+        x: x + (Math.random() - 0.5) * 0.12, y: y + (Math.random() - 0.5) * 0.08, z: z + (Math.random() - 0.5) * 0.12,
+        r0: rr, d0: Math.max(0, surf - y), r: rr, ph: Math.random() * 6.283, age: 0,
+      });
+      made++;
+    }
+    return made;
+  };
+  CBZ.waterBubbleCount = function () { return bubbles.length; };
+  CBZ.onUpdate(47.6, function (dt) {
+    if (!bubbles.length) { if (bubMesh) bubMesh.count = 0; return; }
+    const m = bubEnsure();
+    let n = 0;
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      b.age += dt;
+      const surf = surfAt(b.x, b.z), depth = Math.max(0, surf - b.y);
+      // the air swells as the water above it thins
+      b.r = b.r0 * Math.cbrt((101 + 10 * b.d0) / (101 + 10 * depth));
+      b.y += bubRise(b.r) * dt;
+      b.ph += dt * (6 + 40 * Math.min(0.02, b.r));
+      const wob = Math.min(0.02, b.r * 0.8);
+      b.x += Math.sin(b.ph) * wob * dt * 6; b.z += Math.cos(b.ph * 1.3) * wob * dt * 6;
+      if (b.y >= surf - b.r || b.age > 40) {
+        if (b.r > 0.004 && CBZ.waterRippleAt) { try { CBZ.waterRippleAt(b.x, b.z, Math.min(0.6, b.r * 12)); } catch (e) {} }
+        bubbles.splice(i, 1);
+        continue;
+      }
+      if (m && _bm4) {
+        _bm4.makeScale(b.r, b.r * 0.85, b.r).setPosition(b.x, b.y, b.z);
+        m.setMatrixAt(n++, _bm4);
+      }
+    }
+    if (m) { m.count = n; m.instanceMatrix.needsUpdate = true; }
+  });
+  // A DIVER BREATHES OUT. Under the surface the player lets go of a few
+  // bubbles every second or so from the mouth (more when diving hard)
+  let exhaleT = 1;
+  CBZ.onUpdate(46.0, function (dt) {
+    const P = CBZ.player;
+    if (!swimming || !P || P.dead || !P.pos || !(dt > 0)) return;
+    const mouthY = P.pos.y + EYE_H - 0.08, surf = surfAt(P.pos.x, P.pos.z);
+    if (mouthY > surf - 0.25) return;
+    exhaleT -= dt * (S.diving ? 1.6 : 1);
+    if (exhaleT > 0) return;
+    exhaleT = 0.9 + Math.random() * 1.4;
+    CBZ.waterBubbles(P.pos.x, mouthY, P.pos.z, 3 + Math.floor(Math.random() * 5), 0.003);
+  });
+
   if (!CBZ.waterField) CBZ.cityWaterAt = function (x, z) {
     const A = arena();
     return !!(A && A.minX != null && waterAt(A, x, z));
