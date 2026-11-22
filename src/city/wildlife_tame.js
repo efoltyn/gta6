@@ -1255,6 +1255,18 @@
         !wf.isNavigableWater(x, z, Math.max(1.2, Math.max(0.35, scale || 1) * 0.9))) return false;
     return true;
   }
+  // the shark sim's sea scene while it is standing (it hides itself in every
+  // other mode, and its rocks go with it)
+  function seaSceneLive() {
+    const sea = CBZ.sharkSeaScene;
+    return sea && sea.built && sea.group && sea.group.visible && typeof sea.blockedAt === "function" ? sea : null;
+  }
+  // its solids at the ride's own fence pad (the clearance rideCanSwim hands
+  // the wrapped navigator, times its 0.35)
+  function rideRockAt(x, z, scale) {
+    const sea = seaSceneLive();
+    return !!(sea && sea.blockedAt(x, z, Math.max(1.2, Math.max(0.35, scale || 1) * 0.9) * 0.35));
+  }
   /* Blocked head-on: slide ALONG the shore instead of dead-stopping into it.
      The old step handed the whole heading to the navigator, so hitting the
      shallows spun the animal; a wall slide keeps the player's aim and just
@@ -1291,8 +1303,8 @@
       const h = k * Math.PI / 4;
       if (!rideCanSwim(x + Math.cos(h) * len, z + Math.sin(h) * len, gd, sc)) return false;
     }
-    const sea = CBZ.sharkSeaScene;
-    if (sea && sea.built && typeof sea.blockedAt === "function" && sea.blockedAt(x, z, len)) return false;
+    const sea = seaSceneLive();
+    if (sea && sea.blockedAt(x, z, len)) return false;
     return true;
   }
   // the nearest clear place, rings outward from (x, z)
@@ -3381,13 +3393,16 @@
       }
       let nx = P.pos.x + Math.cos(travelHead) * stepLen;
       let nz = P.pos.z + Math.sin(travelHead) * stepLen;
+      // a rock, stack or piling of the sea scene is solid at any speed
+      const rock = !W.airborne && rideRockAt(nx, nz, bodyScale);
       // An airborne body lands where physics puts it (a breach that cannot
       // cross the block line is not a breach), and a beached one must be free
       // to work itself back out over ground it is already lying on.
-      if (!W.airborne && !aground && !rideCanSwim(nx, nz, groundD, bodyScale)) {
+      if (rock || (!W.airborne && !aground && !rideCanSwim(nx, nz, groundD, bodyScale))) {
         // A COMMITTED SPRINT BEACHES. Cruising into the sand does not: that is
-        // the difference between an accident and an orca.
-        if (!(sprint && W.v > (R.cruise || 6) * 0.85)) {
+        // the difference between an accident and an orca. A sprint into a
+        // rock is neither: it stops or slides like any other stroke.
+        if (rock || !(sprint && W.v > (R.cruise || 6) * 0.85)) {
           const slid = rideShoreSlide(P.pos.x, P.pos.z, ride.head, stepLen, groundD, bodyScale);
           if (slid) {
             nx = slid.x; nz = slid.z;
