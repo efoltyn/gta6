@@ -994,7 +994,10 @@
     // makeCharacter paints it skin-colored when shortSleeve is set, which
     // reads as a tee ending mid-bicep and bends correctly at the elbow
     // (the old bolt-on forearm box detached the moment the elbow bent).
-    const ch = makeCharacter({
+    // (on a phone the rig is built on a seed it keeps, so a sleeper's rig can
+    // be let go and built again identical: see THE SLEEPER'S RIG below)
+    const _rigSeed = DORM_ON ? ((++_rigSeedN * 2654435761) >>> 0) : null;
+    const ch = (DORM_ON ? seededRig.bind(null, _rigSeed) : makeCharacter)({
       legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: hairFor(r()),
       shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol, capKind: capKind, shortSleeve: shortSleeve,
       build: gender === "f" ? "f" : "m", longHair,
@@ -1271,6 +1274,7 @@
       // the body later reverts to an ordinary civilian. null = plain civilian.
       _castFit: _castFit,
       _spawnHidden: !!spawnHidden,
+      _rigSeed: _rigSeed,
     };
     if (ped._spawnHidden) ped.group.visible = false;
     // CHILDREN ARE NOT TARGETS. systems/childsafe.js seals a protected record's
@@ -2410,7 +2414,7 @@
 
   CBZ.clearCityPeds = function () {
     // the phone budget's sleepers are part of the roster being cleared
-    if (CBZ.cityDormantReturn) CBZ.cityDormantReturn();
+    if (CBZ.cityDormantReturn) CBZ.cityDormantReturn(true);
     // Release moving-parent placements (aircraft seats, authored posts) before
     // disposing the roster. The shared NPC-life layer drops its cabin/actor
     // references here so a rebuilt city never points at disposed character rigs.
@@ -2599,17 +2603,239 @@
     if (g && p === g.cityPartner) return 0;
     return (p._occupyY || 0) > 2.5 ? INDOOR_SLEEP_M : OWNED_SLEEP_M;
   }
+  /* ---- THE SLEEPER'S RIG: let go while asleep, built again on waking ------
+     A sleeper (above) kept his whole three.js rig off the scene: ~55 nodes
+     with their matrices, measured ~60 KB of heap a body and ~240 sleepers at
+     the downtown spawn (15 MB). On a phone the rig now goes once he has slept
+     RIG_REL_T s; the PERSON stays (p.pos, identity, every field on the
+     record) and the rig is built again when he wakes.
+
+     THE SAME RIG, NOT A LOOKALIKE. makePed builds a phone rig on a seed it
+     keeps (seededRig: Math.random answers from that seed for the length of
+     makeCharacter, so phase, breath and the role watch come out the same)
+     and stamps every node with its build index (`_rb`). To let a rig go, a
+     second rig is built from the same look and seed (the PROBE) and the
+     live rig is compared with it node by node: whatever happened after the
+     build (the wardrobe's paint, a swapped garment geometry, a hidden hair
+     shell, a moved or scaled part, userData, a gun or a phone in the hand,
+     fields added to the rig record) is the DIFF, kept with node references
+     written as build indices; objects hung on the rig later are kept as
+     they are. The diff is applied to the probe and the two must draw the
+     same (rigSig: every node, every mesh's visibility, geometry and
+     material) or the sleeper keeps his rig. On waking the rig is built a
+     third time and the diff applied. Hands, limbs, hair, torso and face are
+     put on their near tier first: the tier a fresh build has.
+     A wounded, knocked-down, falling or real-bodied (entities/people.js)
+     sleeper keeps his rig. While it is gone p.char is null (every caller
+     guards it; the sleeper is off the roster) and p.group a bare group
+     standing on p.pos. ?cfg_PHONE_RIG_RELEASE=0 keeps every rig. */
+  if (CBZ.CONFIG.PHONE_RIG_RELEASE == null) CBZ.CONFIG.PHONE_RIG_RELEASE = true;
+  const RIG_REL_T = 4, RIG_REL_PER_BEAT = 6, RIG_BUILD_PER_BEAT = 12;
+  let _rigSeedN = 0;
+  const rigStats = { released: 0, rebuilt: 0, kept: 0, mismatched: 0, last: null };
+  CBZ.pedRigStats = function () { let rel = 0; for (let i = 0; i < _dorm.length; i++) if (_dorm[i]._rigRel) rel++; return Object.assign({ asleep: _dorm.length, releasedNow: rel }, rigStats); };
+  function seededRig(seed, look) {
+    const R0 = Math.random;
+    let s = (seed >>> 0) || 1;
+    Math.random = function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+    let ch;
+    try { ch = makeCharacter(look); } finally { Math.random = R0; }
+    if (ch && ch.group) { let k = 0; ch.group.traverse(function (o) { o._rb = k++; }); }
+    return ch;
+  }
+  // what a rig draws: every node, and per mesh its visibility, geometry, material
+  function rigSig(g0) {
+    let h = 0, n = 0;
+    g0.traverse(function (o) {
+      n++;
+      if (!o.isMesh) return;
+      const m = o.material, mid = Array.isArray(m) ? m.map(function (x) { return x ? x.id : 0; }).join(".") : (m ? m.id : 0);
+      const s = (o.visible ? "1" : "0") + (o.geometry ? o.geometry.id : 0) + ":" + mid + ";";
+      for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+    });
+    return n + "/" + h;
+  }
+  function rigReleasable(p) {
+    const ch = p.char, g0 = p.group;
+    if (!ch || !g0 || p._rigSeed == null || !ch.look || ch._people || p.dead || p._rigRel || p._rigKeep) return false;
+    if (g0._rb !== 0 || !g0.children.length) return false;
+    if ((p.maxHp && p.hp < p.maxHp) || p.ko > 0 || p._wounds || p.ragdoll) return false;
+    if ((ch.fall && ch.fall.on) || (ch.hitReact && ch.hitReact.on)) return false;
+    if (g0.scale.x !== 1 || g0.scale.y !== 1 || g0.scale.z !== 1) return false;
+    return true;
+  }
+  // two values the same, a node by its build index (an object hung later by identity)
+  const _plainProto = Object.prototype;
+  function sameVal(a, b, d) {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== "object" || typeof b !== "object") return typeof a === "number" && typeof b === "number" ? Math.abs(a - b) < 1e-6 : false;
+    if (a.isObject3D || b.isObject3D) return !!(a.isObject3D && b.isObject3D && a._rb != null && a._rb === b._rb);
+    if (d > 3) return true;
+    if (Array.isArray(a)) { if (!Array.isArray(b) || a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (!sameVal(a[i], b[i], d + 1)) return false; return true; }
+    if (Object.getPrototypeOf(a) !== _plainProto || Object.getPrototypeOf(b) !== _plainProto) return typeof a.equals === "function" && a.constructor === b.constructor ? a.equals(b) : false;
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (let i = 0; i < ka.length; i++) if (!sameVal(a[ka[i]], b[ka[i]], d + 1)) return false;
+    return true;
+  }
+  // a value written down without the old nodes in it: a built node is {__rb}
+  function toMark(v, memo) {
+    if (!v || typeof v !== "object") return v;
+    if (v.isObject3D) return v._rb != null ? { __rb: v._rb } : v;
+    if (memo.has(v)) return memo.get(v);
+    if (Array.isArray(v)) { const a = new Array(v.length); memo.set(v, a); for (let i = 0; i < v.length; i++) a[i] = toMark(v[i], memo); return a; }
+    if (Object.getPrototypeOf(v) !== _plainProto) return v;
+    const o = {}; memo.set(v, o);
+    for (const k in v) o[k] = toMark(v[k], memo);
+    return o;
+  }
+  function fromMark(v, map, memo) {
+    if (!v || typeof v !== "object" || v.isObject3D) return v;
+    if (v.__rb != null && Object.keys(v).length === 1) return map[v.__rb] || null;
+    if (memo.has(v)) return memo.get(v);
+    if (Array.isArray(v)) { const a = new Array(v.length); memo.set(v, a); for (let i = 0; i < v.length; i++) a[i] = fromMark(v[i], map, memo); return a; }
+    if (Object.getPrototypeOf(v) !== _plainProto) return v;
+    const o = {}; memo.set(v, o);
+    for (const k in v) o[k] = fromMark(v[k], map, memo);
+    return o;
+  }
+  const SKIP_FIELD = /^_(ww|fa|face|lod|rb)/;
+  function nearTier(ch) {
+    try { if (ch.setHandLod) ch.setHandLod(1); } catch (e) {}
+    try { const H = CBZ.human; if (H && H.faceLod) { H.faceLod(ch, true); if (H.facePose && H.faceRestPose) H.facePose(ch, H.faceRestPose); } } catch (e) {}
+  }
+  function indexRig(g0) { const map = []; g0.traverse(function (o) { if (o._rb != null) map[o._rb] = o; }); return map; }
+  // live vs probe -> the diff, or null when it cannot be written down
+  function rigDiff(ch, probe) {
+    const live = indexRig(ch.group), base = indexRig(probe.group);
+    if (live.length > base.length) return null;
+    const nodes = [], extras = [], memo = new Map();
+    let gone = null;
+    for (let k = 1; k < base.length; k++) {
+      const b = base[k], o = live[k];
+      if (!b) return null;
+      if (!o) { (gone || (gone = [])).push(k); continue; }
+      if (o.type !== b.type) return null;
+      const d = { rb: k };
+      let any = false;
+      const op = o.parent ? o.parent._rb : -1, bp = b.parent ? b.parent._rb : -1;
+      if (op !== bp) { d.par = op; any = true; }
+      if (o.visible !== b.visible) { d.vis = o.visible; any = true; }
+      if (o.geometry !== b.geometry) { d.geo = o.geometry; any = true; }
+      if (o.material !== b.material && !(Array.isArray(o.material) && sameVal(o.material, b.material, 0))) { d.mat = o.material; any = true; }
+      if (o.castShadow !== b.castShadow || o.receiveShadow !== b.receiveShadow || o.renderOrder !== b.renderOrder || o.frustumCulled !== b.frustumCulled) { d.fl = [o.castShadow, o.receiveShadow, o.renderOrder, o.frustumCulled]; any = true; }
+      if (!o.position.equals(b.position) || !o.quaternion.equals(b.quaternion) || !o.scale.equals(b.scale)) {
+        d.xf = new Float32Array([o.position.x, o.position.y, o.position.z, o.quaternion.x, o.quaternion.y, o.quaternion.z, o.quaternion.w, o.scale.x, o.scale.y, o.scale.z]); any = true;
+      }
+      if (o.morphTargetInfluences && !sameVal(o.morphTargetInfluences, b.morphTargetInfluences, 0)) { d.mi = o.morphTargetInfluences.slice(); any = true; }
+      if (o.name !== b.name) { d.name = o.name; any = true; }
+      let ud = null;
+      for (const key in o.userData) if (!sameVal(o.userData[key], b.userData[key], 0)) (ud || (ud = {}))[key] = toMark(o.userData[key], memo);
+      for (const key in b.userData) if (!(key in o.userData)) (ud || (ud = {}))[key] = undefined;
+      if (ud) { d.ud = ud; any = true; }
+      let own = null;
+      for (const key in o) if (key.charCodeAt(0) === 95 && key !== "_rb" && typeof o[key] !== "function" && !sameVal(o[key], b[key], 0)) (own || (own = {}))[key] = toMark(o[key], memo);
+      if (own) { d.own = own; any = true; }
+      if (any) nodes.push(d);
+      const kids = o.children;
+      for (let i = 0; i < kids.length; i++) if (kids[i]._rb == null) extras.push(k, kids[i]);
+    }
+    { const kids = ch.group.children; for (let i = 0; i < kids.length; i++) if (kids[i]._rb == null) extras.push(0, kids[i]); }
+    // the rig record: what the build did not make, or made and was changed since
+    let fields = null;
+    for (const key in ch) {
+      if (SKIP_FIELD.test(key)) continue;
+      const dl = Object.getOwnPropertyDescriptor(ch, key);
+      if (!dl || dl.get || dl.set || typeof dl.value === "function") continue;
+      if (key in probe && sameVal(dl.value, probe[key], 0)) continue;
+      (fields || (fields = {}))[key] = toMark(dl.value, memo);
+    }
+    let rootUd = null;
+    for (const key in ch.group.userData) if (!sameVal(ch.group.userData[key], probe.group.userData[key], 0)) (rootUd || (rootUd = {}))[key] = toMark(ch.group.userData[key], memo);
+    return { nodes: nodes, gone: gone, extras: extras, fields: fields, rootUd: rootUd, armOutZ: ch.armOutZ };
+  }
+  // the diff onto a fresh build (extras are hung by the caller)
+  function rigApply(nc, D) {
+    const map = indexRig(nc.group), memo = new Map();
+    if (D.gone) for (let i = 0; i < D.gone.length; i++) { const o = map[D.gone[i]]; if (o && o.parent) o.parent.remove(o); }
+    for (let i = 0; i < D.nodes.length; i++) {
+      const d = D.nodes[i], o = map[d.rb]; if (!o) continue;
+      if (d.par != null && map[d.par] && o.parent !== map[d.par]) map[d.par].add(o);
+      if (d.vis != null) o.visible = d.vis;
+      if (d.geo !== undefined) o.geometry = d.geo;
+      if (d.mat !== undefined) o.material = d.mat;
+      if (d.fl) { o.castShadow = d.fl[0]; o.receiveShadow = d.fl[1]; o.renderOrder = d.fl[2]; o.frustumCulled = d.fl[3]; }
+      if (d.xf) { const x = d.xf; o.position.set(x[0], x[1], x[2]); o.quaternion.set(x[3], x[4], x[5], x[6]); o.scale.set(x[7], x[8], x[9]); }
+      if (d.mi && o.morphTargetInfluences) for (let j = 0; j < d.mi.length && j < o.morphTargetInfluences.length; j++) o.morphTargetInfluences[j] = d.mi[j];
+      if (d.name != null) o.name = d.name;
+      if (d.ud) for (const key in d.ud) { if (d.ud[key] === undefined) delete o.userData[key]; else o.userData[key] = fromMark(d.ud[key], map, memo); }
+      if (d.own) for (const key in d.own) o[key] = fromMark(d.own[key], map, memo);
+    }
+    if (D.fields) for (const key in D.fields) nc[key] = fromMark(D.fields[key], map, memo);
+    if (D.armOutZ != null) { try { nc.armOutZ = D.armOutZ; } catch (e) {} }
+    if (D.rootUd) for (const key in D.rootUd) nc.group.userData[key] = fromMark(D.rootUd[key], map, memo);
+    return map;
+  }
+  function rigRelease(p) {
+    const ch = p.char, g0 = p.group;
+    nearTier(ch);
+    const probe = seededRig(p._rigSeed, ch.look);
+    let D = null;
+    try { D = rigDiff(ch, probe); } catch (e) { D = null; }
+    let ok = !!D;
+    if (ok) {
+      // the proof: the diff on the probe draws what the live rig draws
+      const pm = rigApply(probe, D);
+      for (let i = 0; i < D.extras.length; i += 2) { const par = pm[D.extras[i]] || probe.group, e = D.extras[i + 1]; par.children.push(e); }
+      ok = rigSig(probe.group) === rigSig(g0);
+      for (let i = 0; i < D.extras.length; i += 2) { const par = pm[D.extras[i]] || probe.group, a = par.children; a.splice(a.indexOf(D.extras[i + 1]), 1); }
+    }
+    if (!ok) { p._rigKeep = true; rigStats.kept++; return false; }
+    D.sig = rigSig(g0);
+    for (let i = 1; i < D.extras.length; i += 2) { const e = D.extras[i]; if (e.parent) e.parent.remove(e); }
+    // the stand-in: the person's own position, facing and root userData
+    const holder = new THREE.Group();
+    Object.defineProperty(holder, "position", { configurable: true, enumerable: true, value: p.pos });
+    holder.quaternion.copy(g0.quaternion);
+    holder.visible = g0.visible;
+    D.look = ch.look; D.personId = ch.personId;
+    p._rigRel = D;
+    p.char = null;
+    p.group = holder;
+    rigStats.released++;
+    return true;
+  }
+  function rigRebuild(p) {
+    const D = p._rigRel; if (!D) return;
+    p._rigRel = null;
+    const holder = p.group;
+    const nc = seededRig(p._rigSeed, D.look);
+    const map = rigApply(nc, D);
+    for (let i = 0; i < D.extras.length; i += 2) (map[D.extras[i]] || nc.group).add(D.extras[i + 1]);
+    if (D.personId != null) nc.personId = D.personId;
+    const ng = nc.group;
+    Object.defineProperty(ng, "position", { configurable: true, enumerable: true, value: p.pos });
+    if (holder && holder.isObject3D) { ng.quaternion.copy(holder.quaternion); ng.visible = holder.visible; }
+    p.char = nc; p.group = ng;
+    p._handLod = 1;
+    rigStats.rebuilt++;
+    const sig = rigSig(ng);
+    if (sig !== D.sig) { rigStats.mismatched++; rigStats.last = (p.name || "?") + " " + D.sig + " -> " + sig; }
+  }
+  // anything that puts a released sleeper back to work builds his rig first
+  CBZ.cityPedRigEnsure = function (p) { if (p && p._rigRel) rigRebuild(p); };
   function sleepPed(p, i) {
     if (CBZ.cityBrain && CBZ.cityBrain.release) { try { CBZ.cityBrain.release(p); } catch (e) {} }
     CBZ.cityPeds.splice(i, 1);
     _corpseDrop(p); _coverDrop(p);
     p._dormParent = p.group ? p.group.parent : null;
     if (p.group && p.group.parent) p.group.parent.remove(p.group);
-    p._dormant = true; p._dtBank = 0;
+    p._dormant = true; p._dtBank = 0; p._dormAt = CBZ.now || performance.now();
     _dorm.push(p);
   }
   function wakePed(p, k) {
     _dorm.splice(k, 1);
+    if (p._rigRel) rigRebuild(p);
     p._dormant = false;
     const A = pedArena();
     const parent = (p._dormParent && p._dormParent.parent) ? p._dormParent : (A && A.root);
@@ -2626,8 +2852,9 @@
     p._dormant = false; p._dormOwned = 0; p._dormParent = null;
   };
   // a rebuilt or cleared city takes the sleepers with the roster
-  CBZ.cityDormantReturn = function () {
-    for (let k = _dorm.length - 1; k >= 0; k--) { const p = _dorm[k]; p._dormant = false; p._dormOwned = 0; p._dormParent = null; CBZ.cityPeds.push(p); }
+  // (teardown: a let-go rig is not built only to be disposed; the stand-in goes)
+  CBZ.cityDormantReturn = function (teardown) {
+    for (let k = _dorm.length - 1; k >= 0; k--) { const p = _dorm[k]; if (p._rigRel && !teardown) rigRebuild(p); p._dormant = false; p._dormOwned = 0; p._dormParent = null; CBZ.cityPeds.push(p); }
     _dorm.length = 0;
   };
   let _dormT = 0;
@@ -2649,12 +2876,31 @@
     // re-registering, city/biome_desert.js / biome_snow.js / marina.js), or
     // who died or was claimed while asleep
     const roster = CBZ.cityPeds;
+    let builds = 0;
     for (let k = _dorm.length - 1; k >= 0; k--) {
       const p = _dorm[k];
       const wr = p._dormOwned ? p._dormOwned : WAKE_M;
-      if (!p.pos || near(p.pos.x, p.pos.z, wr) || (!budget && !p._dormOwned) || p.dead || roster.indexOf(p) >= 0) { p._dormOwned = 0; wakePed(p, k); }
+      const must = !p.pos || p.dead || roster.indexOf(p) >= 0;
+      if (must || near(p.pos.x, p.pos.z, wr) || (!budget && !p._dormOwned)) {
+        // (a rig to build: a few a beat, nearest first next beat; the wake
+        // ring is 50 m past the farthest a phone draws a person)
+        if (p._rigRel && !must && builds >= RIG_BUILD_PER_BEAT) continue;
+        if (p._rigRel) builds++;
+        p._dormOwned = 0; wakePed(p, k);
+      }
     }
     const peds = CBZ.cityPeds;
+    // THE SLEEPER'S RIG: the ones asleep long enough let theirs go, a few a beat
+    if (DORM_ON && CBZ.CONFIG.PHONE_RIG_RELEASE !== false && _dorm.length) {
+      const now = CBZ.now || performance.now();
+      let n = 0;
+      for (let k = 0; k < _dorm.length && n < RIG_REL_PER_BEAT; k++) {
+        const p = _dorm[k];
+        if (p._rigRel || p._rigKeep || now - (p._dormAt || now) < RIG_REL_T * 1000 || !rigReleasable(p)) continue;
+        try { rigRelease(p); } catch (e) { p._rigKeep = true; rigStats.kept++; }
+        n++;
+      }
+    }
     // the owned posts past their range, whatever the budget (a few per beat)
     if (DORM_ON) {
       let n = 0;
@@ -7213,6 +7459,7 @@
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
       dt = dtFrame;              // a prior ped's compensated tick must not leak
+      if (p._rigRel) rigRebuild(p);   // a released sleeper an owner put back on the roster
       // MAY THIS BODY DECIDE THIS FRAME? Settled here, at the top, because the
       // gate block below has to know: a deferred body must HOLD its decision
       // gates, not drain them (draining is how a budget manufactures a convoy).
@@ -7457,6 +7704,15 @@
       // a job, who were otherwise drawn at any range for being `controlled`)
       const renderImportant = (p.controlled && !p._lodOk) || p._farDraw || p.companion || p.recruited || p.faction === "player" || p === g.cityPartner;
       const active = near || important;
+      // A PHONE'S UNSEEN SENTRY. `important` keeps a guard, a scripted detail,
+      // a posted or armed body thinking at the near rate wherever it stands
+      // (measured at the downtown spawn: 51 of 73 bodies past 95 m). On a
+      // phone, one that is past the drawn band, not drawn, and not in
+      // anything (no rage, wanted, report, approach, alarm, heat, flight)
+      // thinks and moves at the far rate instead; the banked dt keeps his
+      // pace, and the moment anything happens to him he is back at full rate.
+      const farQuiet = MOBILE_STAGGER && important && !near && CBZ.CONFIG.PHONE_FAR_QUIET !== false && d2 > VIS_D2 && p.group.visible === false &&
+        !(p.rage || (p.npcWanted | 0) >= 1 || p.reportState || p.approach || p.alarmed > 0 || p.npcHeat > 0 || p.state === "flee" || p.state === "fight");
       // render LOD: peds far from the camera stop drawing entirely (the single
       // biggest GPU saving with ~90 rigs). Simulation proximity is deliberately
       // separate: a tier whose VIS_D2 is below ANIM_D2 may keep a nearby ped's
@@ -7491,7 +7747,7 @@
         if (hl !== p._handLod) { p.char.setHandLod(hl); p._handLod = hl; }
       }
       const far = d2 > FAR_D2;
-      const stride = active ? 4 : (far ? 20 : 10);
+      const stride = (active && !farQuiet) ? 4 : (far ? 20 : 10);
       // ---- THE BUDGETED WORK, AND THE ONLY BUDGETED WORK ----------------------
       // think() IS the decision: the flee-target recompute (fleeFrom -> up to
       // fifteen LOS raycasts through cityNav.nearestExit, the measured 8 s/s),

@@ -356,7 +356,9 @@
     // city LOD: only pose peds the camera can actually see — the pose work is
     // purely visual, so far rigs (already render-culled) just bleed their timers.
     const cam = CBZ.camera ? CBZ.camera.position : null;
-    const CITY_LOD2 = 150 * 150;
+    // (a phone draws a person to ~95 m: past 100 m, or not drawn at all, there is nothing to see)
+    const PHONE = !!CBZ.isMobileDevice && CBZ.CONFIG.PHONE_POSE_LOD !== false;
+    const CITY_LOD2 = PHONE ? 100 * 100 : 150 * 150;
 
     for (let pass = 0; pass < passes; pass++) {
       const list = pass === 0 ? guards : pass === 1 ? npcs : cityPeds;
@@ -379,7 +381,7 @@
           // back out a phantom offset the frame it re-enters range.
           if (cam && !a.dead) {
             const ddx = a.pos.x - cam.x, ddz = a.pos.z - cam.z;
-            if (ddx * ddx + ddz * ddz > CITY_LOD2) {
+            if (ddx * ddx + ddz * ddz > CITY_LOD2 || (PHONE && a.group.visible === false)) {
               const old = R.get(a);
               if (old) {
                 if (old.hyOff && a.char.neck) a.char.neck.rotation.y -= old.hyOff; // un-bake the aim yaw

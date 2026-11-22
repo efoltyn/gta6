@@ -798,13 +798,37 @@
   }
 
   // ================================================================ BUNKERS
+  /* A FAR BUNKER IS BUILT WHEN IT IS NEEDED (phone). The five runtime
+     bunkers (four heads of state, the cell's dug-out) were built on the first
+     war-room tick after the load, ~90 meshes and ~1.4 MB of geometry each,
+     kilometres from the player. On a phone a bunker past BUNKER_NEAR_M of
+     the player and the eye waits in PENDING as its spec; it is built when
+     the player comes within range (ensureBunkers, every 5 s), or at once
+     when the logic asks for it (liveBunker, bunkerOf, a strike's target),
+     so every order, sortie and shelter run finds the same bunker it always
+     did. ?cfg_PHONE_BUNKER_LAZY=0 builds them all at once again. */
+  const PENDING = Object.create(null);
+  const BUNKER_NEAR_M = 700;
+  function bunkerFar(spec) {
+    if (!CBZ.isMobileDevice || CBZ.CONFIG.PHONE_BUNKER_LAZY === false) return false;
+    const P = CBZ.player, cam = CBZ.camera;
+    const r2 = BUNKER_NEAR_M * BUNKER_NEAR_M;
+    if (P && P.pos) { const dx = spec.cx - P.pos.x, dz = spec.cz - P.pos.z; if (dx * dx + dz * dz < r2) return false; }
+    if (cam) { const dx = spec.cx - cam.position.x, dz = spec.cz - cam.position.z; if (dx * dx + dz * dz < r2) return false; }
+    return !!(P && P.pos);
+  }
+  function buildPending(pred) {
+    for (const id in PENDING) { const sp = PENDING[id]; if (!pred || pred(sp)) materialize(sp, true); }
+  }
   function liveBunker(id) {
     const L = CBZ.strategicBunkers || [];
     for (let i = 0; i < L.length; i++) if (L[i].id === id) return L[i];
+    if (PENDING[id]) return materialize(PENDING[id], true);
     return null;
   }
   // the bunker a leader would run to (intact first)
   function bunkerOf(owner) {
+    buildPending(function (sp) { return sp.owner === owner; });
     const L = CBZ.strategicBunkers || [];
     let any = null;
     for (let i = 0; i < L.length; i++) {
@@ -825,6 +849,7 @@
   // map mark, else the enemy leader's, else the cell's once intel has it
   function bunkerTarget(opts) {
     opts = opts || {};
+    buildPending(null);                   // a strike order sees every bunker
     const us = opts.nation || nation();
     const L = CBZ.strategicBunkers || [];
     const ok = function (b) { return b && !b.breached && b.owner && b.owner !== us && known(b); };
@@ -877,7 +902,10 @@
     return null;
   }
   const BUILT = Object.create(null);         // spec id -> the meshes under it (pier)
-  function materialize(spec) {
+  function materialize(spec, now) {
+    if (!now && !PENDING[spec.id] && bunkerFar(spec)) { PENDING[spec.id] = spec; return null; }
+    if (!now && PENDING[spec.id] && bunkerFar(spec)) return null;
+    delete PENDING[spec.id];
     let rec = liveBunker(spec.id);
     if (rec) return rec;
     if (!CBZ.strategicBuildBunker || !THREE) return null;
@@ -960,7 +988,7 @@
       delete S.bunkers[key];
       const spec = bunkerSpec(o.owner, kind, old ? (old.gen | 0) + 1 : 0);
       if (!spec) continue;
-      if (!materialize(spec)) continue;
+      if (!materialize(spec) && !PENDING[spec.id]) continue;     // (a far one stands as its spec until someone comes)
       emit("bunker-built", { owner: o.owner, nation: o.owner === "cell" ? null : o.owner, nationName: nameOf(o.owner), x: Math.round(spec.cx), z: Math.round(spec.cz), day: d,
         text: o.owner === "cell" ? "The Sons of the Dune dig a new bunker" : nameOf(o.owner) + " builds a bunker for its leader" });
     }

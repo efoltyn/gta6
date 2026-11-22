@@ -249,6 +249,13 @@
   const procTemplates = new Map();
   // every car body built so far (the materials a car you get into will draw with)
   CBZ.cityCarTemplates = function () { return Array.from(procTemplates.values()); };
+  // a phone lets a style's raw template go once no look of it is kept
+  // (vehicles.js lookSweep); the next car of that style builds it again
+  CBZ.cityCarTemplateTrim = function (keep) {
+    let n = 0;
+    procTemplates.forEach(function (t, style) { if (!keep.has(style)) { procTemplates.delete(style); n++; } });
+    return n;
+  };
   const tplCtx = new WeakMap();        // template -> its full brand-face context
   let ferrariTemplate = null;
   let ferrariLoading = false;
@@ -3438,8 +3445,12 @@
       // respray has to reach into the rig or the first door you open comes
       // out in the showroom colour.
       const rig = o._cbzDoorRig;
-      if (rig && rig.doors) for (let i = 0; i < rig.doors.length; i++) if (!rig.doors[i].parent) rig.doors[i].traverse(paintOne);
-      if (rig && rig.lid && !rig.lid.parent) rig.lid.traverse(paintOne);
+      // (leaves nobody has asked for yet are not made: they take this paint when they are, vehicles.js lazyDoorRig)
+      if (rig && rig._lazy && !rig._made) rig._paint = color;
+      else {
+        if (rig && rig.doors) for (let i = 0; i < rig.doors.length; i++) if (!rig.doors[i].parent) rig.doors[i].traverse(paintOne);
+        if (rig && rig.lid && !rig.lid.parent) rig.lid.traverse(paintOne);
+      }
       paintOne(o);
     });
     function paintOne(o) {
@@ -3918,7 +3929,10 @@
   CBZ.cityPlayerCarFeel = function (style) {
     return FEEL[style] || (CBZ.marineHulls && CBZ.marineHulls.feel(style)) || (active && active._playerCarFeel) || DEFAULT_FEEL;
   };
-  preloadFerrari();
+  // A phone loads the Ferrari when one is asked for (the three calls above),
+  // not at boot: decoded it is ~14 MB of geometry held for the page's life,
+  // and until it arrives the car is the procedural sports body.
+  if (!CBZ.isMobileDevice) preloadFerrari();
 
   addEventListener("keydown", function (e) {
     const g = CBZ.game;

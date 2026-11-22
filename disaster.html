@@ -609,7 +609,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=sea1122c"></script>
+  <script src="src/entities/character.js?v=sea1122c-ph5"></script>
   <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -855,7 +855,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/physics.js?v=shot1122"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- THE ONE MOVER (CBZ.bodyMove) every human body is moved through, and the per-frame net (onUpdate 99.97) that puts back anything that crossed a wall. After physics.js (sweepCircle/collide/walkGroundAt). -->
-<script src="src/systems/bodymove.js?v=bodymove1022"></script>
+<script src="src/systems/bodymove.js?v=bodymove1022-ph5"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
@@ -1409,7 +1409,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=trunk1022"></script>
-<script src="src/city/playercars.js?v=r187a"></script>
+<script src="src/city/playercars.js?v=r187a-ph5"></script>
 <!-- systems/volfx.js: the volumetric fireball / smoke / fire (raymarched boxes
      fitted to the room) + spark streaks, and THE shared 3D noise atlas
      (CBZ.volNoise) that city/nukefx.js also marches. Before crashfx (its
@@ -1421,7 +1421,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=both1029"></script>
-<script src="src/city/vehicles.js?v=outside1122b"></script>
+<script src="src/city/vehicles.js?v=c1122+pr3-ph5"></script>
 <script src="src/city/carinstances.js?v=stick187"></script>
 <script src="src/city/playeraircraft.js?v=islesmem1029"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -2302,7 +2302,7 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=borders1022-ph2+bld1122f"></script>
+<script src="src/city/warroom.js?v=borders1022-ph2+bld1122f-ph5"></script>
 <script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=protestcpu1022"></script>
 <script src="src/city/president_public.js?v=r187a"></script>
