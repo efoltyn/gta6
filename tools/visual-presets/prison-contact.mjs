@@ -21,6 +21,10 @@ const SCN = {
   grabgo: { label: "Grab a man who is walking off",        grab: "walk",  dist: 2.0, times: [0.15, 0.4, 0.8, 1.4, 2.4, 3.6] },
   shove:  { label: "Shove him out of the grab",  grab: "shove", dist: 1.3, times: [1.05, 1.2, 1.4, 1.7, 2.2, 3.0] },
   pickup: { label: "Pick a man up off the floor", grab: "down", dist: 2.2, times: [0.3, 0.8, 1.4, 2.0, 2.8, 3.8] },
+  cuffkick: { label: "In cuffs: the red button, a man a step away",   grab: "cuff", dist: 1.5, times: [0.1, 0.25, 0.4, 0.6, 0.9, 1.4] },
+  cuffbutt: { label: "In cuffs: the red button, a man chest to chest", grab: "cuff", dist: 0.8, times: [0.1, 0.25, 0.4, 0.6, 0.9, 1.4] },
+  cuffheld: { label: "In cuffs, walked by an officer: the red button",  grab: "cuff", dist: 6, held: true, times: [0.1, 0.3, 0.45, 0.6, 0.9, 1.4] },
+  cuffheldkick: { label: "In cuffs, walked, a man in front: the red button", grab: "cuff", dist: 1.5, held: true, times: [0.1, 0.25, 0.4, 0.6, 0.9, 1.4] },
   guard:  { label: "Sprint into an officer",     sprint: true,  npcYaw: Math.PI, gap: 7.0, guard: true, times: [0.04, 0.2, 0.45, 0.8, 1.4, 2.6] },
 };
 
@@ -123,7 +127,7 @@ async function stageContact(input) {
   for (const g of CBZ.guards || []) { g.hunt = 0; g.alert = 0; g.sus = 0; g._pushN = 0; }
   try { if (CBZ.game) { CBZ.game.heat = 0; } } catch (_) {}
   P.stun = 0; P.hitT = 0; P.hitLock = 0; P.ko = 0; P.hp = 100; P.dead = false;
-  try { P.captureState = "normal"; if (CBZ.playerChar) CBZ.playerChar.cuffed = false; } catch (_) {}
+  try { P.captureState = "normal"; if (CBZ.playerChar) CBZ.playerChar.cuffed = false; try { const hs = V.sessionOf(pa()); if (hs && hs.cancel) hs.cancel(); } catch (_) {} if (S.holder) { S.holder.group.position.x -= 30; S.holder = null; } } catch (_) {}
   place(YARD.x - 14, YARD.z);
   for (let i = 0; i < 200; i++) step();
 
@@ -263,8 +267,35 @@ async function stageContact(input) {
     face(mp.x, mp.z);
     camZ = (mp.z + P.pos.z) / 2 + 0.8;
     q0 = { x: P.pos.x, z: P.pos.z }; n0 = { x: mp.x, z: mp.z };
-    try { sess = CBZ.grapple && CBZ.grapple.grab ? CBZ.grapple.grab(m) : null; } catch (e) { notes.push("grab threw: " + e.message); }
-    grabOk = !!sess;
+    let hp0 = 0, kinds = [];
+    if (cfg.grab === "cuff") {
+      // hands behind the back, then the touch FIRE button's own route (touch.js fireAction)
+      CBZ.playerChar.cuffed = true;
+      if (cfg.held) {
+        // an officer takes you by the arm from behind and walks you
+        const g = (CBZ.guards || []).filter((x) => x && x.group && !x.dead && !(x.ko > 0))[0];
+        if (g) {
+          S.holder = g;
+          g.group.position.set(P.pos.x, 0, P.pos.z - 0.9); g.group.rotation.y = 0;
+          for (let f = 0; f < 5; f++) step();
+          let hs = null;
+          try { hs = V.escort(g, pa(), {}); } catch (e) { notes.push("escort threw: " + e.message); }
+          for (let f = 0; f < 90; f++) { mp.set(YARD.x, 0, P.pos.z + D); m.group.rotation.y = Math.PI; m.pause = 5; step(); }
+          notes.push("escort " + (hs ? hs.phase : "REFUSED"));
+        }
+      }
+      for (let f = 0; f < 20; f++) { mp.set(YARD.x, 0, (cfg.held ? P.pos.z : YARD.z) + D); m.group.rotation.y = Math.PI; m.pause = 5; step(); }
+      face(mp.x, mp.z);
+      camZ = (mp.z + P.pos.z) / 2 + (cfg.held ? -0.6 : 0.8); if (cfg.dist > 3) camZ = P.pos.z;
+      hp0 = m.hp == null ? 100 : m.hp;
+      notes.push(`cuffed ${CBZ.cuffedPlayer && CBZ.cuffedPlayer.on() ? 1 : 0} fp ${CBZ.fps && CBZ.fps.active ? 1 : 0} tpGun ${CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive() ? 1 : 0} armed ${CBZ.playerArmed && CBZ.playerArmed() ? 1 : 0} held ${CBZ.verbs.playerHeld && CBZ.verbs.playerHeld() ? 1 : 0} stun ${(P.stun || 0).toFixed(1)}`);
+      let r = null;
+      try { r = CBZ.melee.trigger(true); } catch (e) { notes.push("trigger threw: " + e.message); }
+      grabOk = !!r;
+    } else {
+      try { sess = CBZ.grapple && CBZ.grapple.grab ? CBZ.grapple.grab(m) : null; } catch (e) { notes.push("grab threw: " + e.message); }
+      grabOk = !!sess;
+    }
     t = 0;
     for (let f = 0; f <= Math.round(lastT * 60); f++) {
       due(f);
@@ -275,7 +306,14 @@ async function stageContact(input) {
       // with him in your hands, walk him forward
       if ((cfg.grab === "stand" || cfg.grab === "down" || cfg.grab === "walk") && tt > 1.5) { keys.w = true; face(P.pos.x, P.pos.z + 5); }
       if (cfg.grab === "shove" && f === 60) { try { CBZ.grapple.push(); } catch (e) { notes.push("push threw: " + e.message); } }
+      if (cfg.grab === "cuff") {
+        if (f === 2) { try { CBZ.melee.trigger(false); } catch (_) {} }
+        const pk = CBZ.playerChar.kickT > 0 ? "kick:" + (CBZ.playerChar.kickKind || "") : CBZ.playerChar.punchT > 0 ? "arm:" + (CBZ.playerChar.punchKind || "") : "";
+        if (pk && kinds[kinds.length - 1] !== pk) kinds.push(pk);
+        m.pause = 5;
+      }
       step(); seePhase();
+      if (cfg.grab === "cuff" && f === Math.round(lastT * 60)) { notes.push(`limbs: ${kinds.join(" > ") || "none moved"} · his hp ${hp0} -> ${m.hp == null ? 100 : Math.round(m.hp)}`); CBZ.playerChar.cuffed = false; try { const hs = V.sessionOf(pa()); if (hs && hs.cancel) hs.cancel(); } catch (_) {} if (S.holder) { S.holder.group.position.x -= 30; S.holder = null; } }
       if (cfg.grab !== "shove" && tt > 1.5) camZ = (mp.z + P.pos.z) / 2 + 0.3;
       if (playerDown()) everPD = true;
       if (down(m)) everND = true;
@@ -303,7 +341,7 @@ async function stageContact(input) {
     metrics[k + "Accepted"] = grabOk ? 1 : 0;
     metrics[k + "HandsOn"] = got ? 1 : 0;
     caption = `button pressed ${(cfg.dist || 1.3).toFixed(1)} m from him · ${grabOk ? "accepted" : "REFUSED: nothing happens"}`;
-    perf = `hands got on him: ${got ? "yes" : "NO"}<br>${phases.join(" > ") || "no session"}` + (notes.length ? "<br>" + notes.join("; ") : "");
+    perf = (cfg.grab === "cuff" ? `button did something: ${grabOk ? "yes" : "NO"}` : `hands got on him: ${got ? "yes" : "NO"}<br>${phases.join(" > ") || "no session"}`) + (notes.length ? "<br>" + notes.join("; ") : "");
   }
   setHud(false);
 

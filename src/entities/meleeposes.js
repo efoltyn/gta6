@@ -335,7 +335,15 @@
     if (hr && hr.on) { hr.t += mdt; if (hr.t >= hr.dur) hr.on = false; }
     if (ch.staggerT > 0) ch.staggerT -= mdt;
 
-    const hard = ch.surrender || ch.handsUp || ch.cuffed || ch.verbHold || fallActive(ch);
+    /* HANDS BEHIND THE BACK IS NOT A BODY THAT CANNOT MOVE. `cuffed` used to
+       switch this whole layer off, so the kick and the headbutt a cuffed man
+       is allowed (combat.js picks them) set their clocks, drew nothing and,
+       with no foot or forehead ever reaching anybody, never landed: the
+       button did nothing you could see. A cuffed man who is striking gets
+       the layer for his legs, hips, torso and head; his ARMS stay where the
+       cuffs hold them (armK below). Standing in cuffs is still no stance. */
+    const cuffStrike = !!ch.cuffed && (punching || kicking) && !ch.verbHold;
+    const hard = ch.surrender || ch.handsUp || (ch.cuffed && !cuffStrike) || ch.verbHold || fallActive(ch);
     const stanceOK = ch.fightStance && !ch.aimingPose && !ch.carryPose && !ch.bladeCarry;
     // THE MOUNT blends in and out on its own clock: on top of a downed man
     // the stance below kneels astride him (ch.mount is written by
@@ -370,7 +378,7 @@
     // never touched here.
     if (typeof ch.setHandPose === "function") {
       const armed = ch.aimingPose || ch.carryPose || ch.bladeCarry;
-      const hand = hard || passive || ch._mK < 0.25 ? null : (punching && ch.punchKind === "shove") ? "open" : "fist";
+      const hand = hard || ch.cuffed || passive || ch._mK < 0.25 ? null : (punching && ch.punchKind === "shove") ? "open" : "fist";
       if (hand !== (ch._mHand || null)) {
         if (hand) { ch.setHandPose("l", hand); if (!armed) ch.setHandPose("r", hand); }
         else if (!fallActive(ch)) { ch.setHandPose("l", "relaxed"); if (!armed) ch.setHandPose("r", "relaxed"); }
@@ -617,7 +625,7 @@
       WR.set(-0.22, WL.y, WL.z);
       PL.set(0.5, -1, 0); PR.set(-0.5, -1, 0);
     }
-    const armK = K * S.armK;
+    const armK = ch.cuffed ? 0 : K * S.armK;     // wrists locked behind him: the strike never moves them
     if (armK > 0.002) {
       const ext = S._k && S._k.ext != null && !S._both ? S._k.ext : null;
       solveArm(ch, "L", WL, PL, S.rollL, S.pzL, armK, S._side === "L" ? ext : null);
