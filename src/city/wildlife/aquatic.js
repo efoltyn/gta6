@@ -337,7 +337,7 @@
       }
       const keep = (spec.keys || []).slice();
       if (spec.mouth) keep.push({ s: spec.mouth.front, key: "mf" }, { s: spec.mouth.corner, key: "mc" });
-      if (spec.eye && lv.eyeRings) {
+      if (spec.eye && spec.eye.s != null && lv.eyeRings) {
         const r = spec.eye.r;
         keep.push({ s: spec.eye.s - r * 1.6, key: 1 }, { s: spec.eye.s, key: 1 }, { s: spec.eye.s + r * 1.6, key: 1 });
       }
@@ -607,6 +607,17 @@
     // of the eyeball a fraction of its radius inside it
     function eyeCentres(spec, PF) {
       const E = spec.eye, L = spec.L;
+      if (E.pos) {
+        // an eye the hull grammar cannot reach (a hammerhead's on the end of
+        // its cephalofoil): placed directly, [s, dy, dz] as fractions of L
+        return [1, -1].map(function (side) {
+          const r = E.r * L;
+          const C = [spec.xNose - E.pos[0] * L, spec.axisY + E.pos[1] * L, E.pos[2] * L * side];
+          const look = nrm3([E.look[0], E.look[1], E.look[2] * side]);
+          const skin = [C[0] + look[0] * r * 0.6, C[1] + look[1] * r * 0.6, C[2] + look[2] * r * 0.6];
+          return { side: side, skin: skin, n: look, c: C, r: r, look: look };
+        });
+      }
       const R = sectionAt(spec, PF, E.s);
       const out = [];
       [1, -1].forEach(function (side) {
@@ -1262,7 +1273,7 @@
           else col = MB.mulc(fin, 0.92 + 0.10 * (1 - m[0]));
           const n = MB.fbm(c.p[0] * 30 / L, c.p[1] * 30 / L, c.p[2] * 30 / L, 5, 2);
           col = MB.mulc(col, 0.95 + 0.10 * n);
-          if (o.fin) col = o.fin(c, col, role);
+          if (o.finHook) col = o.finHook(c, col, role);
           return col.concat([o.specFin == null ? 0.25 : o.specFin]);
         }
         return [1, 0, 1, 0];
@@ -4364,30 +4375,15 @@
       { M: 14, ds: 0.060, headK: 0.6, noseRings: 2, eyeRings: false, gills: false, teeth: false, finSpan: 4, finChord: 3, eyeSeg: 6, eyeRing: 4, pharynx: 2 },
     ],
   };
-  GW_SPEC.makePaint = function (EY) {
-    const roles = {};
-    GW_SPEC.fins.forEach(function (f, i) { roles[i + 1] = f.role; });
-    const pecIds = [4, 5];
-    return paintKit({
-      L: GW_SPEC.L, eyes: EY, finRole: roles,
-      back: 0x2c3338, belly: 0xe3e7e6, fin: 0x2a3135, tint: [0.97, 1.0, 1.04],
-      // the white runs up under the eye, drops to the mouth corner, stays
-      // under the gills, kicks up behind the pectoral and slopes away to the tail
-      line: [[0, -0.55], [0.03, -0.30], [0.07, -0.16], [0.105, -0.36], [0.15, -0.30], [0.20, -0.22], [0.25, 0.04], [0.29, 0.14], [0.34, 0.0], [0.44, -0.06], [0.55, -0.12], [0.64, -0.18], [0.72, -0.24], [0.78, -0.28]],
-      rag: 0.10, specBack: 0.22, specBelly: 0.16, specFin: 0.22,
-      iris: 0x0a1216, sclera: 0xbfc6c6,
-      // the black underside tips of the pectorals
-      mark: function (c) {
-        if (c.tag !== MB.TAG.FIN || pecIds.indexOf(c.m[3]) < 0) return NaN;
-        return c.m[0] - (0.80 + (MB.vn(c.m[1] * 6, c.m[3], 0, 21) - 0.5) * 0.08);
-      },
-      fin: function (c, col) {
-        if (pecIds.indexOf(c.m[3]) >= 0 && c.f(1) >= 0) return c.f(0) < 0 ? MB.hexc(0x08090a) : MB.mulc(col, 0.62);
-        if (c.m[3] === 9 && c.m[1] > 0.78) return MB.mulc(col, 0.80);   // the lower lobe's dark trailing edge
-        return col;
-      },
-    });
-  };
+  // the black underside tips of the pectorals
+  GW_SPEC.fins[3].tip = GW_SPEC.fins[4].tip = { from: 0.80, under: 0x08090a, top: 0.62 };
+  GW_SPEC.makePaint = sharkPaint(GW_SPEC, {
+    back: 0x2c3338, belly: 0xe3e7e6, fin: 0x2a3135, tint: [0.97, 1.0, 1.04],
+    // the white runs up under the eye, drops to the mouth corner, stays
+    // under the gills, kicks up behind the pectoral and slopes away to the tail
+    line: [[0, -0.55], [0.03, -0.30], [0.07, -0.16], [0.105, -0.36], [0.15, -0.30], [0.20, -0.22], [0.25, 0.04], [0.29, 0.14], [0.34, 0.0], [0.44, -0.06], [0.55, -0.12], [0.64, -0.18], [0.72, -0.24], [0.78, -0.28]],
+    rag: 0.10, specBack: 0.22, specBelly: 0.16, specFin: 0.22, iris: 0x0a1216, sclera: 0xbfc6c6, finEdge: 0.82,
+  });
 
   S({
     id: "great_white_shark", name: "Great White Shark", biome: "water",
@@ -4402,423 +4398,253 @@
     build: function () { return marineBuild(GW_SPEC); },
   });
 
+  /* ---- the shark paint, shared: roles from the fin list, optional dusky
+     or black fin tips (a field cut through the fin, so the tip edge is crisp) */
+  function sharkPaint(spec, o) {
+    return function (EY) {
+      const roles = {}, tipIds = [];
+      spec.fins.forEach(function (f, i) {
+        roles[i + 1] = f.role;
+        if (f.tip) tipIds.push(i + 1);
+      });
+      const tipAt = {};
+      spec.fins.forEach(function (f, i) { if (f.tip) tipAt[i + 1] = f.tip; });
+      return paintKit(Object.assign({
+        L: spec.L, eyes: EY, finRole: roles,
+        mark: function (c) {
+          if (c.tag !== MB.TAG.FIN || tipIds.indexOf(c.m[3]) < 0) return NaN;
+          const tp = tipAt[c.m[3]];
+          return c.m[0] - (tp.from + (MB.vn(c.m[1] * 6, c.m[3], 0, 21) - 0.5) * 0.08);
+        },
+        finHook: function (c, col) {
+          const tp = tipAt[c.m[3]];
+          if (tp && c.f(1) >= 0) {
+            const under = c.f(0) < 0;
+            return under ? MB.mixc(col, MB.hexc(tp.under || 0x08090a), tp.k == null ? 1 : tp.k) : MB.mulc(col, tp.top || 0.62);
+          }
+          if (o.finEdge && c.m[1] > 0.8) return MB.mulc(col, o.finEdge);
+          return col;
+        },
+      }, o));
+    };
+  }
+
   /* ============================================================
-     MEGALODON — Otodus megalodon. The great white's grammar, scaled up and
-     made heavier: girth carried far forward, a battering-ram rostrum, and a
-     mouth you could park a dinghy in.
+     MEGALODON — Otodus megalodon, as the lamnid it was: the great white's
+     body plan, heavier. The 2022 three-dimensional reconstruction scaled
+     from lamnid proportions gives a 16 m animal, deepest (~22% TL) behind
+     a short blunt snout, a wider head and mouth than a white shark, larger
+     pectorals (~20% TL) and the same near-lunate keeled tail. Teeth are the
+     white shark's shape at 1.1x the relative height. Eyes are relatively
+     smaller, as they are on bigger sharks. 6.5 model units at scale 2.6 is
+     a 16.5 m adult.
      ============================================================ */
-  const MEG_RINGS = [
-    { x: -2.10, y: 0.98, ry: 0.360, rz: 0.255 },   // THE TAILSTOCK (see weldedSleeve)
-    { x: -1.35, y: 0.96, ry: 0.640, rz: 0.460 },
-    { x: -0.35, y: 0.95, ry: 0.92, rz: 0.72 },
-    { x: 0.60, y: 0.96, ry: 1.02, rz: 0.83 },     // max girth, forward of centre
-    { x: 1.60, y: 0.99, ry: 0.95, rz: 0.80 },
-    { x: 2.50, y: 1.06, ry: 0.74, rz: 0.68 },
-    // buried inside the rostrum from here forward (see weldedRostrum)
-    { x: 3.20, y: 1.16, ry: 0.52, rz: 0.55 },
-    { x: 3.52, y: 1.20, ry: 0.36, rz: 0.42 },
-  ];
-  /* THE APEX FORM HAD THE WORST OF IT. Its snout table began at x = 2.90 and
-     the hull hands the head over at 2.41, so ringAt() was clamping: the shell
-     left the head as a 0.66 CYLINDER while the hull's own cap stood 0.71 wide
-     around it — a collar of body edge visible right round the base of the
-     face, and the largest single step measured on any shark here. */
-  const MEG_BELLY = [-0.40, -0.34, -0.24, -0.06, 0.18, -0.17, -0.30, -0.34];
-  const MEG_ROSTRUM = rostrumOf(MEG_RINGS, MEG_BELLY, {
-    x1: 2.38, x0: 3.98, tipRy: 0.16, tipRz: 0.42, tipY: 1.240, tipLine: 1.045, n: 5,
+  const MEG_SPEC = {
+    id: "megalodon", plan: "lateral", sharkLike: true, profileName: "battering-ram",
+    L: 6.5, xNose: 2.73, axisY: 0.98, noseRound: 0.032, tubeEnd: 0.778, headEnd: 0.27,
+    profile: {
+      top: [[0, 0], [0.02, 0.019], [0.05, 0.038], [0.09, 0.055], [0.14, 0.072], [0.20, 0.088], [0.27, 0.100], [0.34, 0.108], [0.42, 0.106], [0.50, 0.095], [0.58, 0.076], [0.65, 0.054], [0.70, 0.039], [0.735, 0.031], [0.778, 0.024]],
+      bot: [[0, 0], [0.02, 0.015], [0.05, 0.031], [0.09, 0.046], [0.14, 0.061], [0.20, 0.077], [0.27, 0.093], [0.34, 0.102], [0.42, 0.101], [0.50, 0.090], [0.58, 0.070], [0.65, 0.048], [0.70, 0.033], [0.735, 0.026], [0.778, 0.020]],
+      half: [[0, 0], [0.02, 0.022], [0.05, 0.041], [0.09, 0.055], [0.14, 0.067], [0.20, 0.078], [0.27, 0.087], [0.34, 0.091], [0.42, 0.088], [0.50, 0.077], [0.58, 0.060], [0.65, 0.042], [0.70, 0.029], [0.735, 0.022], [0.778, 0.017]],
+      yo: [[0, -0.004], [0.10, 0], [0.62, 0], [0.74, 0.005], [0.78, 0.008]],
+      nB: [[0, 2.5], [0.15, 2.3], [0.30, 2.1], [0.7, 2.0]],
+      keel: [[0.66, 0], [0.70, 0.006], [0.74, 0.009], [0.778, 0.007]],
+    },
+    mouth: {
+      front: 0.046, corner: 0.112, alphaF: 0.34, alphaC: 1.20, shape: 0.55, snoutBlend: 0.03,
+      palate: 0.55, floor: 0.45, throat: 0.85, pharynx: 0.08, lipDrop: 0.0012, chinInset: 0.0034,
+      teeth: {
+        upper: [
+          { n: 24, h: 0.0125, w: 0.0080, inset: 0.0012, sink: 0.0056, rake: 0.04, rakeCorner: 0.5, tilt: 0.12, thick: 0.2, cornerK: 0.42 },
+          { n: 22, h: 0.0068, w: 0.0055, inset: 0.0060, sink: 0.0015, rake: 1.05, rakeCorner: 0.2, thick: 0.2, age: 1 },
+        ],
+        lower: [
+          { n: 22, h: 0.0110, w: 0.0060, inset: 0.0014, sink: 0.0044, rake: 0.06, rakeCorner: 0.45, tilt: -0.05, thick: 0.22, cornerK: 0.40 },
+          { n: 20, h: 0.0058, w: 0.0042, inset: 0.0056, sink: 0.0012, rake: 1.05, rakeCorner: 0.2, thick: 0.2, age: 1 },
+        ],
+      },
+    },
+    eye: { s: 0.068, up: 0.30, r: 0.0046, out: 0.40, socket: 0.28, fwd: 0.10 },
+    gills: { n: 5, s0: 0.170, s1: 0.232, lo0: -0.60, hi0: 0.60, lo1: -0.48, hi1: 0.48, depth: 0.0040, flap: 0.0010, gap: 0.0030, slant: 0.010 },
+    bones: { head: 0.165, neck: 0.245, root: 0.40, tail: [0.52, 0.615, 0.695, 0.760, 0.86] },
+    fins: [
+      { name: "dorsal1", role: "median", at: 0.340, root: 0.120, span: 0.106, dir: [0, 1, 0], phi: Math.PI, sweep: 0.66, bow: 0.05, tipC: 0.11, conc: 0.10, rear: 0.10, rearH: 0.06, round: 0.22, tc: 0.13, tcTip: 0.05, embed: 0.4 },
+      { name: "dorsal2", role: "median", at: 0.652, root: 0.032, span: 0.022, dir: [0, 1, 0], phi: Math.PI, sweep: 0.55, tipC: 0.18, conc: 0.08, rear: 0.30, rearH: 0.25, round: 0.3, tc: 0.10, embed: 0.4 },
+      { name: "anal", role: "median", at: 0.670, root: 0.030, span: 0.021, dir: [0, -1, 0], phi: 0, sweep: 0.55, tipC: 0.18, conc: 0.08, rear: 0.30, rearH: 0.25, round: 0.3, tc: 0.10, embed: 0.4 },
+      { name: "pecR", role: "paired", boneName: "pecR", at: 0.232, root: 0.080, span: 0.200, dir: [-0.30, -0.42, 0.86], phi: 0.95, sweep: 0.42, bow: 0.04, tipC: 0.06, conc: 0.14, rear: 0.12, rearH: 0.12, round: 0.07, tc: 0.12, tcTip: 0.05, embed: 0.3, tip: { from: 0.84, under: 0x0c0e10, top: 0.7 } },
+      { name: "pecL", role: "paired", boneName: "pecL", at: 0.232, root: 0.080, span: 0.200, dir: [-0.30, -0.42, -0.86], phi: 2 * Math.PI - 0.95, sweep: 0.42, bow: 0.04, tipC: 0.06, conc: 0.14, rear: 0.12, rearH: 0.12, round: 0.07, tc: 0.12, tcTip: 0.05, embed: 0.3, tip: { from: 0.84, under: 0x0c0e10, top: 0.7 } },
+      { name: "pelvR", role: "paired", at: 0.552, root: 0.045, span: 0.055, dir: [-0.40, -0.80, 0.45], phi: 0.42, sweep: 0.5, tipC: 0.12, conc: 0.10, rear: 0.25, rearH: 0.18, round: 0.12, tc: 0.10, embed: 0.4 },
+      { name: "pelvL", role: "paired", at: 0.552, root: 0.045, span: 0.055, dir: [-0.40, -0.80, -0.45], phi: 2 * Math.PI - 0.42, sweep: 0.5, tipC: 0.12, conc: 0.10, rear: 0.25, rearH: 0.18, round: 0.12, tc: 0.10, embed: 0.4 },
+      { name: "caudalU", role: "median", originS: 0.765, originDy: 0.002, root: 0.105, span: 0.275, dir: [-0.80, 0.60, 0], sweep: 0.10, bow: 0.05, tipC: 0.05, conc: 0.16, rear: 0, rearH: 0, round: 0.05, tc: 0.12, tcTip: 0.06, embed: 0.5 },
+      { name: "caudalL", role: "median", originS: 0.765, originDy: -0.002, root: 0.092, span: 0.195, dir: [-0.74, -0.67, 0], sweep: 0.08, bow: 0.05, tipC: 0.06, conc: 0.14, rear: 0, rearH: 0, round: 0.06, tc: 0.11, tcTip: 0.06, embed: 0.5 },
+    ],
+    jaw: { lift: 0.22, drop: 0.95, protrude: [0.022, -0.018], gap: 0.06, eyeRoll: "back", rollMax: 2.05 },
+    wave: { lambda: 1.0, amp: 0.075, env: [0.03, 0.0, 1.0], f0: 0.16, fK: 0.55, fMax: 1.3 },
+    finColor: 0x1f2428,
+    lod: [
+      { M: 32, ds: 0.020, headK: 0.55, noseRings: 5, eyeRings: true, gills: true, teeth: true, finSpan: 8, finChord: 7, eyeSeg: 14, eyeRing: 9, pharynx: 4 },
+      { M: 14, ds: 0.060, headK: 0.6, noseRings: 2, eyeRings: false, gills: false, teeth: false, finSpan: 4, finChord: 3, eyeSeg: 6, eyeRing: 4, pharynx: 2 },
+    ],
+  };
+  MEG_SPEC.makePaint = sharkPaint(MEG_SPEC, {
+    back: 0x22282c, belly: 0xdcdfde, fin: 0x1f2428, tint: [0.96, 0.99, 1.04],
+    line: [[0, -0.55], [0.03, -0.32], [0.07, -0.18], [0.105, -0.38], [0.15, -0.32], [0.20, -0.24], [0.25, 0.0], [0.29, 0.10], [0.34, -0.02], [0.44, -0.08], [0.55, -0.14], [0.64, -0.20], [0.72, -0.26], [0.78, -0.30]],
+    rag: 0.11, specBack: 0.20, specBelly: 0.15, specFin: 0.2, iris: 0x0a1114, sclera: 0xbcc3c3, finEdge: 0.82,
   });
-  const MEG_SNOUT = MEG_ROSTRUM.rings;
   S({
     id: "megalodon", name: "Megalodon", biome: "water", rarity: "legendary",
     hp: 1200, fur: "Legendary Megalodon Tooth", furValue: 3000, respawn: false,
     packs: 1, spd: 2.4, danger: 0.8, bite: 60, aquatic: true,
-    scale: 2.6, color: 0x2a3035,
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      const dark = m(0x2a3035), white = m(0xe6ebec);
-      const finDark = m(0x232930), finTip = m(0x161a1e), finPale = m(0x474f55);
-      // 1.32, not 1.58: the front of the mouth sat 10 cm behind a nose 1.6 m
-      // long (see the great white's note) — a beak at the tip. 3.62 on a nose
-      // that ends at 3.98 is the same quarter-snout overhang the hero has.
-      const MOUTH = { hingeX: 2.30, hingeY: 0.800, length: 1.32, width: 1.10, gap: 0.56, cornerRise: 0.25, snoutShell: true };
-      addSharkHull(g, {
-        top: dark, belly: white, sides: 16, rings: MEG_RINGS,
-        // the rostrum's own table forward of the kick, so the two lines meet
-        // at the weld; the kick itself lowered so the gills sit on grey
-        bellyCut: [-0.40, -0.34, -0.24, -0.06, 0.06, -0.17, -0.30, -0.34],
-        ragged: 0.08, seed: 51, profile: "battering-ram",
-        mouth: MOUTH, interior: m(0x33131a), tint: [0.95, 0.99, 1.05],   // dark slate
-      });
-      addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
-        rings: MEG_RINGS,
-        toothHeight: 0.30, toothWidth: 0.245, rowTeeth: 21,
-        maxOpen: 1.02, skin: 0xe6ebec,
-      }));
-      const snout = addSharkRostrum(g, [dark, white, m(0x3c171d)], MEG_SNOUT, {
-        pivotX: 3.20, pivotY: 1.160, sides: 16,
-        bellyCut: MEG_ROSTRUM.belly, bellyLine: MEG_ROSTRUM.line, ragged: 0.06, seed: 52, tuck: 0.90,
-        mouth: MOUTH,
-      });
-      addSharkFaceDetails(g, T, m, {
-        rings: MEG_RINGS, snout: snout, snoutRings: MEG_SNOUT, mouth: MOUTH,
-        eyeX: 3.34, eyeY: 1.315, eyeZ: 0.505, eyeSize: 0.085, dark: 0x07090a,
-        noseX: 3.72, noseY: 0.942, noseZ: 0.19, nostrilLen: 0.24, nostrilWidth: 0.042,
-        gillX: 2.62, gillY: 1.0, gillZ: 0, gills: 5, gillCenter: 0.08,
-        gillHeight: 0.60, gillStep: 0.20, gillWidth: 0.044, gillAngle: 0.22,
-        pores: 60, poreSize: 0.030, poreX0: 3.05, poreX1: 3.94, poreSpread: 0.95,
-        poreSeed: 33, poreColor: 0x2f363a,
-      });
-      addSharkSkin(g, m, {
-        rings: MEG_RINGS, scars: 14, scarLen: 0.70, scarWidth: 0.036, scarColor: 0x99a3a7,
-        folds: 3, foldX: 2.30, foldStep: 0.28, foldSpan: 0.90, foldWidth: 0.05,
-        foldColor: 0x2f353a, skinSeed: 43, mouth: MOUTH,
-      });
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([finDark, finDark, finDark, finPale], [0.20, 1.86, 0], {
-        span: 1.95, chordRoot: 1.60, chordTip: 0.24, sweep: 0.58, concavity: 0.30,
-        leadBow: 0.07, rearTipH: 0.09, rearTipBack: 0.55, apexRound: 0.30,
-        thick: 0.24, spanSteps: 6, chordSteps: 5, paleBase: 0.18, trailPale: 0.17,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([finDark], [-1.35, 1.48, 0], {
-        span: 0.50, chordRoot: 0.50, chordTip: 0.08, sweep: 0.55, concavity: 0.28,
-        rearTipBack: 0.22, apexRound: 0.10, thick: 0.08, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      [1, -1].forEach(function (s2) {
-        fin([dark, white, finTip], [0.62, 0.42, s2 * 0.65], {
-          span: 2.05, chordRoot: 1.10, chordTip: 0.08, sweep: 0.66, concavity: 0.24,
-          leadBow: 0.06, rearTipH: 0.09, rearTipBack: 0.34, apexRound: 0.05,
-          thick: 0.15, spanSteps: 6, chordSteps: 4, under: true, tipDark: 0.78,
-          spanDir: [-0.497, -0.200, s2 * 0.845], chordDir: [1, 0.06, s2 * 0.16],
-        });
-        fin([dark, white], [-0.80, 0.38, s2 * 0.33], {
-          span: 0.68, chordRoot: 0.56, chordTip: 0.06, sweep: 0.55, concavity: 0.22,
-          rearTipBack: 0.18, apexRound: 0.07, thick: 0.075, spanSteps: 4, chordSteps: 3,
-          under: true, spanDir: [-0.160, -0.883, s2 * 0.441], chordDir: [1, 0, s2 * 0.1],
-        });
-        fin([dark], [-1.80, 0.98, s2 * 0.235], {
-          span: 0.24, chordRoot: 0.78, chordTip: 0.16, sweep: 0.12, concavity: 0.05,
-          rearTipH: 0.20, rearTipBack: 0.06, apexRound: 0.50, thick: 0.08,
-          spanSteps: 3, chordSteps: 3, spanDir: [0, 0, s2], chordDir: [1, 0, 0],
-        });
-      });
-      fin([dark], [-1.35, 0.42, 0], {
-        span: 0.44, chordRoot: 0.42, chordTip: 0.06, sweep: 0.55, concavity: 0.25,
-        rearTipBack: 0.18, apexRound: 0.08, thick: 0.065, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, -1, 0], chordDir: [1, 0, 0],
-      });
-      tailSleeve(g, [dark, white], MEG_RINGS, {
-        at: [-2.46, 0.98], x0: -0.744, x1: 0.66, tipRy: 0.090, tipRz: 0.056,
-        tint: [0.95, 0.99, 1.05], sides: 16, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 53,
-      });
-      fin([dark, white], [-2.82, 1.02, 0], {
-        span: 2.25, chordRoot: 0.92, chordTip: 0.10, sweep: 0.30, concavity: 0.24,
-        rearTipH: 0.10, rearTipBack: 0.40, apexRound: 0.05, thick: 0.14,
-        spanSteps: 6, chordSteps: 4, spanDir: [-0.588, 0.809, 0], chordDir: [1, 0, 0],
-      });
-      fin([dark, white], [-2.74, 0.90, 0], {
-        span: 1.30, chordRoot: 0.82, chordTip: 0.08, sweep: 0.28, concavity: 0.20,
-        rearTipBack: 0.28, apexRound: 0.06, thick: 0.12, spanSteps: 5, chordSteps: 4,
-        spanDir: [-0.788, -0.616, 0], chordDir: [1, 0, 0],
-      });
-      return g;
-    },
+    // 6.5 model units x 2.6 = a 16.5 m animal
+    scale: 2.6, color: 0x22282c,
+    swimDepth: 5.0,
+    build: function () { return marineBuild(MEG_SPEC); },
   });
 
   /* ============================================================
-     GREAT HAMMERHEAD — Sphyrna mokarran. The cephalofoil is a HYDROFOIL, so
-     it is built with the fin grammar: rounded tips, a bowed leading edge and
-     a white underside, instead of a rectangular bar across the face.
+     GREAT HAMMERHEAD — Sphyrna mokarran. A slender carcharhiniform body
+     (deepest ~14% TL) behind a cephalofoil a quarter of the body long
+     across, with a nearly straight front margin, the eyes on its tips and
+     the small crescent mouth under its centre. A very tall sickle first
+     dorsal (~17% TL) over the pectoral insertion, a large second dorsal and
+     anal with deeply notched rear margins, falcate pelvics, a strongly
+     heterocercal tail (upper lobe ~29% TL with a subterminal notch, lower
+     lobe ~11%). Grey-brown above, off-white below. 4.5 model units at
+     scale 0.95 is a 4.2 m adult.
      ============================================================ */
-  const HH_RINGS = [
-    { x: -1.50, y: 0.90, ry: 0.175, rz: 0.120 },   // THE TAILSTOCK (see weldedSleeve)
-    { x: -0.85, y: 0.90, ry: 0.350, rz: 0.235 },
-    { x: -0.10, y: 0.90, ry: 0.460, rz: 0.330 },
-    { x: 0.60, y: 0.91, ry: 0.470, rz: 0.350 },
-    { x: 1.20, y: 0.92, ry: 0.400, rz: 0.300 },
-    { x: 1.62, y: 0.93, ry: 0.280, rz: 0.240 },
-  ];
+  const HH_SPEC = {
+    id: "hammerhead_shark", plan: "lateral", sharkLike: true, profileName: "cephalofoil",
+    L: 4.5, xNose: 1.85, axisY: 0.90, noseRound: 0.03, tubeEnd: 0.77, headEnd: 0.24,
+    profile: {
+      top: [[0, 0], [0.02, 0.014], [0.05, 0.020], [0.09, 0.034], [0.14, 0.048], [0.20, 0.060], [0.27, 0.070], [0.34, 0.074], [0.42, 0.071], [0.50, 0.062], [0.58, 0.049], [0.65, 0.036], [0.70, 0.027], [0.735, 0.021], [0.77, 0.017]],
+      bot: [[0, 0], [0.02, 0.011], [0.05, 0.016], [0.09, 0.028], [0.14, 0.043], [0.20, 0.055], [0.27, 0.064], [0.34, 0.068], [0.42, 0.065], [0.50, 0.057], [0.58, 0.044], [0.65, 0.031], [0.70, 0.023], [0.735, 0.018], [0.77, 0.014]],
+      half: [[0, 0], [0.02, 0.026], [0.05, 0.036], [0.09, 0.038], [0.14, 0.044], [0.20, 0.052], [0.27, 0.058], [0.34, 0.060], [0.42, 0.056], [0.50, 0.049], [0.58, 0.039], [0.65, 0.028], [0.70, 0.020], [0.735, 0.016], [0.77, 0.012]],
+      nT: [[0, 2.6], [0.10, 2.2], [0.25, 2.0]], nB: [[0, 2.6], [0.12, 2.2], [0.25, 2.0]],
+    },
+    mouth: {
+      front: 0.078, corner: 0.104, alphaF: 0.30, alphaC: 1.05, shape: 0.6, snoutBlend: 0.025,
+      palate: 0.5, floor: 0.42, throat: 0.7, pharynx: 0.05, lipDrop: 0.0010, chinInset: 0.0028,
+      teeth: {
+        upper: [{ n: 30, h: 0.0052, w: 0.0034, inset: 0.0010, sink: 0.0024, rake: 0.10, rakeCorner: 0.6, tilt: 0.10, thick: 0.2, cornerK: 0.45 }],
+        lower: [{ n: 30, h: 0.0046, w: 0.0026, inset: 0.0012, sink: 0.0020, rake: 0.08, rakeCorner: 0.5, thick: 0.22, cornerK: 0.45 }],
+      },
+    },
+    // on the ends of the cephalofoil, looking out and a little forward
+    eye: { pos: [0.020, 0.002, 0.124], look: [0.35, 0.10, 1], r: 0.0042 },
+    gills: { n: 5, s0: 0.150, s1: 0.200, lo0: -0.55, hi0: 0.40, lo1: -0.45, hi1: 0.32, depth: 0.0035, flap: 0.0009, gap: 0.0028, slant: 0.008 },
+    bones: { head: 0.13, neck: 0.215, root: 0.38, tail: [0.50, 0.60, 0.68, 0.745, 0.85] },
+    fins: [
+      // the cephalofoil: a thick hydrofoil out of each side of the head, its
+      // front margin straight across, its rear margin swept forward to the
+      // blunt tips the eyes sit in
+      { name: "hammerR", role: "paired", originS: 0.032, originDz: 0.018, root: 0.068, span: 0.112, dir: [0.0, 0.0, 1], chordDir: [1, 0, 0], sweep: -0.04, bow: 0.02, tipC: 0.62, conc: 0.0, rear: 0, rearH: 0, round: 0.22, tc: 0.30, tcTip: 0.34, embed: 0.2 },
+      { name: "hammerL", role: "paired", originS: 0.032, originDz: -0.018, root: 0.068, span: 0.112, dir: [0.0, 0.0, -1], chordDir: [1, 0, 0], sweep: -0.04, bow: 0.02, tipC: 0.62, conc: 0.0, rear: 0, rearH: 0, round: 0.22, tc: 0.30, tcTip: 0.34, embed: 0.2 },
+      { name: "dorsal1", role: "median", at: 0.265, root: 0.110, span: 0.170, dir: [0, 1, 0], phi: Math.PI, sweep: 0.46, bow: 0.06, tipC: 0.06, conc: 0.26, rear: 0.16, rearH: 0.05, round: 0.05, tc: 0.12, tcTip: 0.05, embed: 0.4 },
+      { name: "dorsal2", role: "median", at: 0.605, root: 0.040, span: 0.048, dir: [0, 1, 0], phi: Math.PI, sweep: 0.4, tipC: 0.12, conc: 0.30, rear: 0.55, rearH: 0.15, round: 0.1, tc: 0.10, embed: 0.4 },
+      { name: "anal", role: "median", at: 0.585, root: 0.048, span: 0.046, dir: [0, -1, 0], phi: 0, sweep: 0.42, tipC: 0.12, conc: 0.36, rear: 0.5, rearH: 0.12, round: 0.1, tc: 0.10, embed: 0.4 },
+      { name: "pecR", role: "paired", boneName: "pecR", at: 0.190, root: 0.072, span: 0.140, dir: [-0.32, -0.40, 0.86], phi: 0.95, sweep: 0.52, bow: 0.04, tipC: 0.05, conc: 0.20, rear: 0.12, rearH: 0.12, round: 0.05, tc: 0.11, tcTip: 0.05, embed: 0.3, tip: { from: 0.86, under: 0x2b2a25, k: 0.6, top: 0.8 } },
+      { name: "pecL", role: "paired", boneName: "pecL", at: 0.190, root: 0.072, span: 0.140, dir: [-0.32, -0.40, -0.86], phi: 2 * Math.PI - 0.95, sweep: 0.52, bow: 0.04, tipC: 0.05, conc: 0.20, rear: 0.12, rearH: 0.12, round: 0.05, tc: 0.11, tcTip: 0.05, embed: 0.3, tip: { from: 0.86, under: 0x2b2a25, k: 0.6, top: 0.8 } },
+      { name: "pelvR", role: "paired", at: 0.455, root: 0.045, span: 0.062, dir: [-0.40, -0.82, 0.42], phi: 0.40, sweep: 0.55, tipC: 0.08, conc: 0.26, rear: 0.3, rearH: 0.15, round: 0.06, tc: 0.10, embed: 0.4 },
+      { name: "pelvL", role: "paired", at: 0.455, root: 0.045, span: 0.062, dir: [-0.40, -0.82, -0.42], phi: 2 * Math.PI - 0.40, sweep: 0.55, tipC: 0.08, conc: 0.26, rear: 0.3, rearH: 0.15, round: 0.06, tc: 0.10, embed: 0.4 },
+      { name: "caudalU", role: "median", originS: 0.745, originDy: 0.002, root: 0.085, span: 0.300, dir: [-0.82, 0.57, 0], sweep: 0.10, bow: 0.04, tipC: 0.05, conc: 0.10, rear: 0, rearH: 0, round: 0.05, tc: 0.11, tcTip: 0.06, embed: 0.5, notch: { t: 0.78, w: 0.07, d: 0.10 } },
+      { name: "caudalL", role: "median", originS: 0.745, originDy: -0.004, root: 0.070, span: 0.110, dir: [-0.62, -0.78, 0], sweep: 0.12, bow: 0.05, tipC: 0.10, conc: 0.14, rear: 0, rearH: 0, round: 0.12, tc: 0.10, tcTip: 0.06, embed: 0.5 },
+    ],
+    jaw: { lift: 0.08, drop: 0.80, protrude: [0.006, -0.004], gap: 0.03, eyeRoll: "membrane", rollMax: 1.25 },
+    // a hammerhead swims with a lot of head: it sweeps its cephalofoil
+    wave: { lambda: 0.90, amp: 0.095, env: [0.08, 0.10, 1.0], f0: 0.40, fK: 0.90, fMax: 2.8 },
+    finColor: 0x34332d,
+    lod: [
+      { M: 32, ds: 0.020, headK: 0.6, noseRings: 4, eyeRings: true, gills: true, teeth: true, finSpan: 8, finChord: 7, eyeSeg: 12, eyeRing: 8, pharynx: 3 },
+      { M: 14, ds: 0.060, headK: 0.6, noseRings: 2, eyeRings: false, gills: false, teeth: false, finSpan: 4, finChord: 3, eyeSeg: 6, eyeRing: 4, pharynx: 2 },
+    ],
+  };
+  HH_SPEC.makePaint = sharkPaint(HH_SPEC, {
+    back: 0x312f29, belly: 0xe3e0d6, fin: 0x34332d, tint: [1.04, 1.0, 0.92],
+    line: [[0, -0.10], [0.05, -0.05], [0.10, -0.30], [0.15, -0.30], [0.20, -0.20], [0.27, -0.05], [0.34, -0.10], [0.45, -0.14], [0.60, -0.20], [0.72, -0.26], [0.78, -0.30]],
+    rag: 0.06, specBack: 0.22, specBelly: 0.15, specFin: 0.22, iris: 0x2a2416, sclera: 0xb9b8ae, finEdge: 0.85,
+  });
   S({
     id: "hammerhead_shark", name: "Great Hammerhead", biome: "water",
     rarity: "rare", hp: 150, fur: "Shark Fin", furValue: 300,
     meat: "Shark Meat", meatValue: 30, spd: 2.5, danger: 0.5,
-    // REAL SIZE: great hammerhead adults 3.5-5 m. Hull 4.58 units -> 4.35 m mean.
-    bite: 26, aquatic: true, scale: 0.95, sizeVary: 0.10, color: 0x434c50,
-    clearance: 40, swimDepth: 2.5,
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      const grey = m(0x434c50), pale = m(0xe9edec), finDark = m(0x363e42), eye = m(0x07090a);
-      const MOUTH = { hingeX: 1.26, hingeY: 0.688, length: 0.74, width: 0.56, gap: 0.24, cornerRise: 0.115 };
-      addSharkHull(g, {
-        top: grey, belly: pale, sides: 14, rings: HH_RINGS,
-        bellyCut: [-0.36, -0.30, -0.12, 0.10, -0.22, -0.26],
-        ragged: 0.07, seed: 61, profile: "cephalofoil",
-        mouth: MOUTH, interior: m(0x371519), tint: [1.07, 1.02, 0.90],   // bronze-grey
-      });
-      addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
-        rings: HH_RINGS,
-        toothHeight: 0.115, toothWidth: 0.095, rowTeeth: 17,
-        maxOpen: 0.94, skin: 0xe9edec,
-      }));
-      // THE CEPHALOFOIL: a centre block plus two rounded-tip wings.
-      const head = hullMesh([grey, pale], [
-        { x: -0.28, y: 0, ry: 0.245, rz: 0.215 },
-        { x: 0.00, y: 0, ry: 0.180, rz: 0.255 },
-        { x: 0.22, y: 0, ry: 0.155, rz: 0.235 },
-      ], { sides: 12, bellyCut: [-0.20, -0.14, -0.18], ragged: 0.05, seed: 62 });
-      head.position.set(1.88, 0.93, 0);
-      g.add(head);
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      [1, -1].forEach(function (s2) {
-        fin([grey, pale], [1.88, 0.925, s2 * 0.18], {
-          span: 1.12, chordRoot: 0.58, chordTip: 0.42, sweep: 0.02, concavity: 0.02,
-          leadBow: 0.10, rearTipH: 0.50, rearTipBack: 0.02, apexRound: 0.34,
-          thick: 0.24, spanSteps: 5, chordSteps: 4, under: true,
-          spanDir: [0, 0, s2], chordDir: [1, 0, 0],
-        });
-        /* THE EYE. A great hammerhead's eye is SMALL — it is the cephalofoil
-           that is wide, and putting them a metre apart is what sells the head.
-           This one was a full round r=0.105 sphere: on a 1.25x animal that is
-           a 26 cm eyeball, twice the great white's (0.055) and bigger than the
-           megalodon's (0.085) on a body a quarter the size, and it stood proud
-           of the wing tip (1.27 + 0.105 > the 1.30 the wing ends at) because,
-           unlike every other eye in this file, it never got the flatten the
-           shared face builder applies. So it read as a googly eye stuck on a
-           stick. Same radius and the same (0.85, 1, 0.6) squash as the rest of
-           the bestiary now: sunk into the end of the wing, where it lives. */
-        const e = new T.Mesh(cachedGeom("eye|0.052", function () {
-          return new T.SphereGeometry(0.052, 8, 6);
-        }), eye);
-        e.name = "sharkEye"; e.position.set(1.90, 0.925, s2 * 1.27);
-        e.scale.set(0.85, 1, 0.6);
-        g.add(e);
-      });
-      addSharkFaceDetails(g, T, m, {
-        rings: HH_RINGS, eyeSize: 0, eyeX: 0, eyeY: 0, eyeZ: 0, dark: 0x0d1114,
-        noseX: 2.02, noseY: 0.898, noseZ: 0.90, nostrilLen: 0.20, nostrilWidth: 0.028,
-        nostrilYaw: 0.05,
-        gillX: 1.30, gillY: 0.92, gillZ: 0, gills: 5, gillCenter: 0.10,
-        gillHeight: 0.26, gillStep: 0.10, gillWidth: 0.021, gillAngle: 0.22,
-        pores: 0,
-      });
-      addSharkSkin(g, m, {
-        rings: HH_RINGS, scars: 8, scarLen: 0.34, scarWidth: 0.02, scarColor: 0xa9b2b4,
-        folds: 2, foldX: 1.05, foldStep: 0.15, foldSpan: 0.42, foldWidth: 0.026,
-        foldColor: 0x4a5356, skinSeed: 63,
-      });
-      // the scythe dorsal — taller and thinner than a great white's
-      fin([finDark, finDark, finDark, m(0x8d979b)], [0.20, 1.28, 0], {
-        span: 1.55, chordRoot: 0.70, chordTip: 0.09, sweep: 0.42, concavity: 0.34,
-        leadBow: 0.05, rearTipH: 0.08, rearTipBack: 0.28, apexRound: 0.10,
-        thick: 0.11, spanSteps: 6, chordSteps: 5, paleBase: 0.16, trailPale: 0.18,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([finDark], [-0.95, 1.16, 0], {
-        span: 0.30, chordRoot: 0.28, chordTip: 0.04, sweep: 0.55, concavity: 0.28,
-        rearTipBack: 0.12, apexRound: 0.10, thick: 0.04, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      [1, -1].forEach(function (s2) {
-        fin([grey, pale], [0.62, 0.560, s2 * 0.28], {
-          span: 1.05, chordRoot: 0.50, chordTip: 0.04, sweep: 0.68, concavity: 0.24,
-          rearTipH: 0.09, rearTipBack: 0.17, apexRound: 0.05, thick: 0.06,
-          spanSteps: 5, chordSteps: 4, under: true,
-          spanDir: [-0.497, -0.200, s2 * 0.845], chordDir: [1, 0.06, s2 * 0.16],
-        });
-        fin([grey, pale], [-0.55, 0.520, s2 * 0.16], {
-          span: 0.32, chordRoot: 0.28, chordTip: 0.04, sweep: 0.55, concavity: 0.22,
-          rearTipBack: 0.10, apexRound: 0.07, thick: 0.04, spanSteps: 4, chordSteps: 3,
-          under: true, spanDir: [-0.160, -0.883, s2 * 0.441], chordDir: [1, 0, s2 * 0.1],
-        });
-        fin([grey], [-1.32, 0.900, s2 * 0.12], {
-          span: 0.12, chordRoot: 0.36, chordTip: 0.08, sweep: 0.12, concavity: 0.05,
-          rearTipH: 0.20, rearTipBack: 0.03, apexRound: 0.50, thick: 0.04,
-          spanSteps: 3, chordSteps: 3, spanDir: [0, 0, s2], chordDir: [1, 0, 0],
-        });
-      });
-      fin([grey], [-0.95, 0.560, 0], {
-        span: 0.24, chordRoot: 0.24, chordTip: 0.03, sweep: 0.55, concavity: 0.25,
-        rearTipBack: 0.10, apexRound: 0.08, thick: 0.035, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, -1, 0], chordDir: [1, 0, 0],
-      });
-      tailSleeve(g, [grey, pale], HH_RINGS, {
-        at: [-1.76, 0.90], x0: -0.464, x1: 0.42, tipRy: 0.050, tipRz: 0.031,
-        tint: [1.07, 1.02, 0.90], sides: 14, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 64,
-      });
-      fin([grey, pale], [-1.98, 0.94, 0], {
-        span: 1.42, chordRoot: 0.46, chordTip: 0.05, sweep: 0.32, concavity: 0.26,
-        rearTipH: 0.10, rearTipBack: 0.20, apexRound: 0.05, thick: 0.07,
-        spanSteps: 6, chordSteps: 4, spanDir: [-0.616, 0.788, 0], chordDir: [1, 0, 0],
-      });
-      fin([grey, pale], [-1.92, 0.84, 0], {
-        span: 0.62, chordRoot: 0.38, chordTip: 0.04, sweep: 0.28, concavity: 0.20,
-        rearTipBack: 0.14, apexRound: 0.06, thick: 0.055, spanSteps: 5, chordSteps: 4,
-        spanDir: [-0.788, -0.616, 0], chordDir: [1, 0, 0],
-      });
-      return g;
-    },
+    // 4.5 model units x 0.95 = a 4.2 m adult (great hammerheads run 3.5-5 m)
+    bite: 26, aquatic: true, scale: 0.95, sizeVary: 0.10, color: 0x312f29,
+    clearance: 40, swimDepth: 1.75,
+    build: function () { return marineBuild(HH_SPEC); },
   });
 
   /* ============================================================
-     BULL SHARK — Carcharhinus leucas. Stocky, thick, and the one that comes
-     into the surf (clearance 12), so it is the shark the player actually
-     MEETS. Same grammar, blunter everything.
+     BULL SHARK — Carcharhinus leucas. The stockiest requiem shark: deepest
+     ~19% TL, a short, broad, bluntly rounded snout (preoral length less than
+     the mouth's width), small eyes with a nictitating membrane, a broad
+     triangular first dorsal (~10% TL) starting over the pectoral insertion,
+     a sizeable second dorsal and anal, broad falcate pectorals (~19% TL), a
+     heterocercal tail with a subterminal notch (upper lobe ~27% TL, lower
+     ~12%), no keels. Grey above with a brownish cast, white below, dusky
+     fin tips. 3.5 model units at scale 0.76 is a 2.6 m adult — the shark
+     that comes into the surf.
      ============================================================ */
-  /* OWNER, 2026-08-30: "the body is too wide diameter for the head and tall,
-     way too puffer, and doesn't match where they meet — looking very dumb,
-     like a fat dog." (Ported 2026-09-29 from the unmerged
-     claude/bull-shark-form-proportions branch onto today's face/belly work.)
-     MEASURED on the shipped animal: 27.7% of total length deep and 23.1%
-     wide — a manatee, and fatter in both axes than the great white, when a
-     white shark is the deeper-bodied animal of the two. A real Carcharhinus
-     leucas, the stockiest requiem shark there is, runs about 18% deep and 16%
-     wide. This table is 18.5% and 16.2%.
-
-     THE CHEEK KEEPS THE BEAM (the great white's own head-weld rule): width is
-     carried forward through the gill field and given up at the mouth corner;
-     DEPTH goes early and nearly twice as fast. The section turns over from
-     deeper-than-wide (a body) to wider-than-deep (a broad flat head) BEFORE
-     the weld — 0.98 round at the gills, 1.30 at the weld, 1.5 at the nose —
-     so the snout shell picks up a cross-section it already matches. There is
-     still hull between the cheek and the weld (1.22 -> 1.46), because
-     weldedRostrum leaves on the hull's taper there; a hull that arrives flat
-     hands the shell a slope of nothing and the snout comes out a cylinder.
-     10 stations, not 7: a lerp across 0.65 of body is a ramp with corners. */
-  const BULL_RINGS = [
-    { x: -1.32, y: 0.880, ry: 0.152, rz: 0.118 },   // THE TAILSTOCK (see weldedSleeve)
-    { x: -0.96, y: 0.874, ry: 0.236, rz: 0.188 },
-    { x: -0.58, y: 0.870, ry: 0.306, rz: 0.252 },
-    { x: -0.05, y: 0.876, ry: 0.377, rz: 0.322 },
-    { x: 0.60, y: 0.888, ry: 0.402, rz: 0.352 },   // MAX GIRTH — the pectoral line
-    { x: 1.04, y: 0.902, ry: 0.360, rz: 0.352 },   // THE GILL FIELD — full beam, depth already easing
-    { x: 1.22, y: 0.914, ry: 0.300, rz: 0.350 },   // THE CHEEK — wider than deep from here on
-    { x: 1.46, y: 0.936, ry: 0.222, rz: 0.298 },
-    // buried inside the rostrum from here forward (see weldedRostrum)
-    { x: 1.72, y: 0.974, ry: 0.184, rz: 0.254 },
-    { x: 1.88, y: 1.000, ry: 0.148, rz: 0.210 },
-  ];
-  // ONE countershading array for the hull AND the rostrum (the hull call used
-  // to re-type it as a literal). The pectoral kick is a third of the old
-  // amplitude — on the slimmer flank the old +0.14 drew a white rectangle —
-  // and forward of it the white stays UNDER the gills.
-  const BULL_BELLY = [-0.36, -0.33, -0.29, -0.22, -0.04, -0.16, -0.25, -0.31, -0.35, -0.36];
-  /* THE WELD STATION IS THE HULL'S OWN CAP, DERIVED AND NOT TYPED. addSharkHull
-     caps itself at `hingeX + length*0.07` with a flat disc; the old 1.39
-     against a cap at 1.4048 left 15 mm of hull standing past the shell's rim —
-     a ring right round the head, the literal "doesn't match where they meet".
-     Written as the expression so moving the mouth cannot re-open the ledge. */
-  const BULL_HINGE_X = 1.36, BULL_MOUTH_LEN = 0.64;
-  const BULL_ROSTRUM = rostrumOf(BULL_RINGS, BULL_BELLY, {
-    x1: BULL_HINGE_X + BULL_MOUTH_LEN * 0.07,   // == the hull's own cap
-    x0: 2.16, tipRy: 0.140, tipRz: 0.215, tipY: 1.006, tipLine: 0.925, n: 6,
+  const BULL_SPEC = {
+    id: "bull_shark", plan: "lateral", sharkLike: true, profileName: "stocky-blunt",
+    L: 3.5, xNose: 1.45, axisY: 0.88, noseRound: 0.034, tubeEnd: 0.775, headEnd: 0.25,
+    profile: {
+      top: [[0, 0], [0.02, 0.020], [0.05, 0.040], [0.09, 0.056], [0.14, 0.072], [0.20, 0.086], [0.27, 0.096], [0.34, 0.098], [0.42, 0.094], [0.50, 0.083], [0.58, 0.066], [0.65, 0.048], [0.70, 0.035], [0.73, 0.028], [0.775, 0.022]],
+      bot: [[0, 0], [0.02, 0.016], [0.05, 0.032], [0.09, 0.044], [0.14, 0.058], [0.20, 0.074], [0.27, 0.086], [0.34, 0.091], [0.42, 0.088], [0.50, 0.076], [0.58, 0.058], [0.65, 0.040], [0.70, 0.029], [0.73, 0.023], [0.775, 0.018]],
+      half: [[0, 0], [0.02, 0.027], [0.05, 0.046], [0.09, 0.058], [0.14, 0.066], [0.20, 0.075], [0.27, 0.081], [0.34, 0.082], [0.42, 0.078], [0.50, 0.068], [0.58, 0.052], [0.65, 0.036], [0.70, 0.025], [0.73, 0.020], [0.775, 0.015]],
+      yo: [[0, -0.006], [0.10, 0], [0.62, 0], [0.74, 0.004], [0.775, 0.006]],
+      nB: [[0, 2.6], [0.15, 2.3], [0.30, 2.1], [0.7, 2.0]],
+    },
+    mouth: {
+      front: 0.058, corner: 0.106, alphaF: 0.36, alphaC: 1.15, shape: 0.55, snoutBlend: 0.03,
+      palate: 0.55, floor: 0.45, throat: 0.8, pharynx: 0.06, lipDrop: 0.0012, chinInset: 0.0032,
+      teeth: {
+        upper: [
+          { n: 26, h: 0.0082, w: 0.0062, inset: 0.0012, sink: 0.0038, rake: 0.08, rakeCorner: 0.6, tilt: 0.12, thick: 0.2, cornerK: 0.42 },
+          { n: 24, h: 0.0045, w: 0.0042, inset: 0.0050, sink: 0.0012, rake: 1.05, rakeCorner: 0.2, thick: 0.2, age: 1 },
+        ],
+        // the lower teeth are narrow spikes: the bull shark's fork and knife
+        lower: [
+          { n: 24, h: 0.0074, w: 0.0030, inset: 0.0014, sink: 0.0032, rake: 0.04, rakeCorner: 0.4, tilt: -0.05, thick: 0.25, cornerK: 0.45 },
+          { n: 22, h: 0.0040, w: 0.0024, inset: 0.0048, sink: 0.0010, rake: 1.05, rakeCorner: 0.2, thick: 0.25, age: 1 },
+        ],
+      },
+    },
+    eye: { s: 0.066, up: 0.26, r: 0.0052, out: 0.40, socket: 0.26, fwd: 0.10 },
+    gills: { n: 5, s0: 0.168, s1: 0.224, lo0: -0.50, hi0: 0.46, lo1: -0.40, hi1: 0.38, depth: 0.0040, flap: 0.0010, gap: 0.0032, slant: 0.009 },
+    bones: { head: 0.16, neck: 0.24, root: 0.39, tail: [0.51, 0.605, 0.685, 0.745, 0.85] },
+    fins: [
+      { name: "dorsal1", role: "median", at: 0.285, root: 0.120, span: 0.104, dir: [0, 1, 0], phi: Math.PI, sweep: 0.58, bow: 0.05, tipC: 0.09, conc: 0.14, rear: 0.12, rearH: 0.06, round: 0.12, tc: 0.13, tcTip: 0.05, embed: 0.4, tip: { from: 0.84, under: 0x1c1e1f, k: 0.55, top: 0.75 } },
+      { name: "dorsal2", role: "median", at: 0.612, root: 0.046, span: 0.036, dir: [0, 1, 0], phi: Math.PI, sweep: 0.5, tipC: 0.12, conc: 0.18, rear: 0.40, rearH: 0.15, round: 0.15, tc: 0.10, embed: 0.4 },
+      { name: "anal", role: "median", at: 0.622, root: 0.046, span: 0.032, dir: [0, -1, 0], phi: 0, sweep: 0.5, tipC: 0.12, conc: 0.24, rear: 0.40, rearH: 0.15, round: 0.15, tc: 0.10, embed: 0.4 },
+      { name: "pecR", role: "paired", boneName: "pecR", at: 0.205, root: 0.088, span: 0.185, dir: [-0.30, -0.42, 0.86], phi: 0.95, sweep: 0.40, bow: 0.04, tipC: 0.10, conc: 0.12, rear: 0.12, rearH: 0.12, round: 0.10, tc: 0.12, tcTip: 0.05, embed: 0.3, tip: { from: 0.84, under: 0x1c1e1f, k: 0.7, top: 0.7 } },
+      { name: "pecL", role: "paired", boneName: "pecL", at: 0.205, root: 0.088, span: 0.185, dir: [-0.30, -0.42, -0.86], phi: 2 * Math.PI - 0.95, sweep: 0.40, bow: 0.04, tipC: 0.10, conc: 0.12, rear: 0.12, rearH: 0.12, round: 0.10, tc: 0.12, tcTip: 0.05, embed: 0.3, tip: { from: 0.84, under: 0x1c1e1f, k: 0.7, top: 0.7 } },
+      { name: "pelvR", role: "paired", at: 0.500, root: 0.046, span: 0.052, dir: [-0.40, -0.80, 0.45], phi: 0.42, sweep: 0.5, tipC: 0.12, conc: 0.10, rear: 0.25, rearH: 0.18, round: 0.12, tc: 0.10, embed: 0.4 },
+      { name: "pelvL", role: "paired", at: 0.500, root: 0.046, span: 0.052, dir: [-0.40, -0.80, -0.45], phi: 2 * Math.PI - 0.42, sweep: 0.5, tipC: 0.12, conc: 0.10, rear: 0.25, rearH: 0.18, round: 0.12, tc: 0.10, embed: 0.4 },
+      { name: "caudalU", role: "median", originS: 0.748, originDy: 0.002, root: 0.090, span: 0.282, dir: [-0.84, 0.54, 0], sweep: 0.10, bow: 0.04, tipC: 0.05, conc: 0.10, rear: 0, rearH: 0, round: 0.05, tc: 0.11, tcTip: 0.06, embed: 0.5, notch: { t: 0.78, w: 0.07, d: 0.10 }, tip: { from: 0.90, under: 0x1c1e1f, k: 0.45, top: 0.8 } },
+      { name: "caudalL", role: "median", originS: 0.748, originDy: -0.004, root: 0.075, span: 0.122, dir: [-0.62, -0.78, 0], sweep: 0.12, bow: 0.05, tipC: 0.10, conc: 0.14, rear: 0, rearH: 0, round: 0.12, tc: 0.10, tcTip: 0.06, embed: 0.5 },
+    ],
+    jaw: { lift: 0.15, drop: 0.90, protrude: [0.012, -0.010], gap: 0.05, eyeRoll: "membrane", rollMax: 1.25 },
+    // subcarangiform: more of the body takes part in the beat than a white shark's
+    wave: { lambda: 0.90, amp: 0.10, env: [0.05, 0.20, 1.0], f0: 0.45, fK: 1.0, fMax: 3.2 },
+    finColor: 0x2f3335,
+    lod: [
+      { M: 32, ds: 0.022, headK: 0.55, noseRings: 5, eyeRings: true, gills: true, teeth: true, finSpan: 8, finChord: 7, eyeSeg: 12, eyeRing: 8, pharynx: 4 },
+      { M: 14, ds: 0.060, headK: 0.6, noseRings: 2, eyeRings: false, gills: false, teeth: false, finSpan: 4, finChord: 3, eyeSeg: 6, eyeRing: 4, pharynx: 2 },
+    ],
+  };
+  BULL_SPEC.makePaint = sharkPaint(BULL_SPEC, {
+    back: 0x2f3335, belly: 0xe6e7e4, fin: 0x2f3335, tint: [1.05, 1.0, 0.93],
+    line: [[0, -0.30], [0.04, -0.25], [0.07, -0.18], [0.105, -0.34], [0.16, -0.28], [0.22, -0.20], [0.28, -0.12], [0.36, -0.16], [0.46, -0.20], [0.58, -0.24], [0.70, -0.30], [0.775, -0.32]],
+    rag: 0.06, specBack: 0.24, specBelly: 0.16, specFin: 0.24, iris: 0x2b2a1c, sclera: 0xb7bbb6, finEdge: 0.86,
   });
-  const BULL_SNOUT = BULL_ROSTRUM.rings;
   S({
     id: "bull_shark", name: "Bull Shark", biome: "water",
     rarity: "uncommon", hp: 110, fur: "Shark Fin", furValue: 190,
     meat: "Shark Meat", meatValue: 24, spd: 2.7, danger: 0.55,
-    // REAL SIZE (2026-09-27): adults 2.4-3.5 m. The hull is 4.33 model units,
-    // so 0.76 is a 3.3 m mean; sizeVary 0.10 keeps an individual inside
-    // ~2.8-3.8 m instead of the generic uncommon spread (+-34%), which rolled
-    // 5 m bull sharks bigger than great whites.
-    bite: 24, aquatic: true, scale: 0.76, sizeVary: 0.10, color: 0x464e52,
-    clearance: 12, swimDepth: 1.5,
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      const grey = m(0x464e52), white = m(0xf0f2f2), finDark = m(0x394045), finTip = m(0x252b2f);
-      // 0.64, not 0.78: the mouth reached 2.14 on a nose that ends at 2.16.
-      // The rest rides the slimmer head as the SAME FRACTION of its local
-      // section it always was (hinge 0.427 of the half-depth below the spine,
-      // arc 67% of the half-beam, gape and teeth scaled with the depth); left
-      // at the fat-body values the jaw hung below the belly line.
-      const MOUTH = {
-        hingeX: BULL_HINGE_X, hingeY: 0.818, length: BULL_MOUTH_LEN,
-        width: 0.500, gap: 0.149, cornerRise: 0.064, snoutShell: true,
-      };
-      addSharkHull(g, {
-        // 24 sides, not 14: the countershading seam is quantised to whole
-        // faces, and 14 left the head visibly polygonal head-on.
-        top: grey, belly: white, sides: 24, rings: BULL_RINGS,
-        bellyCut: BULL_BELLY,
-        ragged: 0.055, seed: 71, profile: "stocky-blunt",
-        mouth: MOUTH, interior: m(0x3a1518), tint: [1.06, 1.0, 0.92],   // grey-brown
-      });
-      addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
-        rings: BULL_RINGS,
-        toothHeight: 0.075, toothWidth: 0.063, rowTeeth: 19,
-        maxOpen: 1.00, skin: 0xf0f2f2,
-      }));
-      const snout = addSharkRostrum(g, [grey, white, m(0x421a1e)], BULL_SNOUT, {
-        pivotX: 1.66, pivotY: 0.966, sides: 24,
-        bellyCut: BULL_ROSTRUM.belly, bellyLine: BULL_ROSTRUM.line, ragged: 0.055, seed: 72, tuck: 0.90,
-        mouth: MOUTH,
-      });
-      addSharkFaceDetails(g, T, m, {
-        rings: BULL_RINGS, snout: snout, snoutRings: BULL_SNOUT, mouth: MOUTH,
-        eyeX: 1.80, eyeY: 1.150, eyeZ: 0.260, eyeSize: 0.048, dark: 0x07090a,
-        noseX: 1.98, noseY: 0.806, noseZ: 0.105, nostrilLen: 0.13, nostrilWidth: 0.024,
-        gillX: 1.28, gillY: 0.898, gillZ: 0, gills: 5, gillCenter: 0.12,
-        gillHeight: 0.180, gillStep: 0.10, gillWidth: 0.023, gillAngle: 0.22,
-        pores: 40, poreSize: 0.017, poreX0: 1.70, poreX1: 2.12, poreSpread: 0.95,
-        poreSeed: 34, poreColor: 0x424a4e,
-      });
-      addSharkSkin(g, m, {
-        rings: BULL_RINGS, scars: 9, scarLen: 0.34, scarWidth: 0.022, scarColor: 0xaeb6b8,
-        folds: 3, foldX: 1.06, foldStep: 0.14, foldSpan: 0.45, foldWidth: 0.026,
-        foldColor: 0x4f585c, skinSeed: 73, mouth: MOUTH,
-      });
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([finDark, finDark, finDark, m(0x5f686c)], [0.25, 1.169, 0], {
-        span: 0.66, chordRoot: 0.62, chordTip: 0.10, sweep: 0.60, concavity: 0.30,
-        leadBow: 0.07, rearTipH: 0.09, rearTipBack: 0.30, apexRound: 0.30,
-        thick: 0.12, spanSteps: 6, chordSteps: 5, paleBase: 0.18, trailPale: 0.17,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([finDark], [-0.85, 1.047, 0], {
-        span: 0.21, chordRoot: 0.26, chordTip: 0.04, sweep: 0.55, concavity: 0.28,
-        rearTipBack: 0.11, apexRound: 0.10, thick: 0.04, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      [1, -1].forEach(function (s2) {
-        fin([grey, white, finTip], [0.64, 0.639, s2 * 0.276], {
-          span: 0.84, chordRoot: 0.52, chordTip: 0.05, sweep: 0.66, concavity: 0.24,
-          rearTipH: 0.09, rearTipBack: 0.18, apexRound: 0.05, thick: 0.075,
-          spanSteps: 6, chordSteps: 4, under: true, tipDark: 0.78,
-          spanDir: [-0.497, -0.200, s2 * 0.845], chordDir: [1, 0.06, s2 * 0.16],
-        });
-        fin([grey, white], [-0.52, 0.606, s2 * 0.137], {
-          span: 0.30, chordRoot: 0.28, chordTip: 0.04, sweep: 0.55, concavity: 0.22,
-          rearTipBack: 0.10, apexRound: 0.07, thick: 0.042, spanSteps: 4, chordSteps: 3,
-          under: true, spanDir: [-0.160, -0.883, s2 * 0.441], chordDir: [1, 0, s2 * 0.1],
-        });
-        fin([grey], [-1.18, 0.879, s2 * 0.103], {
-          span: 0.10, chordRoot: 0.36, chordTip: 0.09, sweep: 0.12, concavity: 0.05,
-          rearTipH: 0.20, rearTipBack: 0.04, apexRound: 0.50, thick: 0.045,
-          spanSteps: 3, chordSteps: 3, spanDir: [0, 0, s2], chordDir: [1, 0, 0],
-        });
-      });
-      fin([grey], [-0.85, 0.631, 0], {
-        span: 0.20, chordRoot: 0.21, chordTip: 0.03, sweep: 0.55, concavity: 0.25,
-        rearTipBack: 0.10, apexRound: 0.08, thick: 0.035, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, -1, 0], chordDir: [1, 0, 0],
-      });
-      tailSleeve(g, [grey, white], BULL_RINGS, {
-        at: [-1.58, 0.88], x0: -0.432, x1: 0.40, tipRy: 0.036, tipRz: 0.024,
-        tint: [1.06, 1.0, 0.92], sides: 24, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 74,
-      });
-      fin([grey, white], [-1.78, 0.92, 0], {
-        span: 1.06, chordRoot: 0.46, chordTip: 0.05, sweep: 0.30, concavity: 0.24,
-        rearTipH: 0.10, rearTipBack: 0.19, apexRound: 0.05, thick: 0.065,
-        spanSteps: 6, chordSteps: 4, spanDir: [-0.588, 0.809, 0], chordDir: [1, 0, 0],
-      });
-      fin([grey, white], [-1.72, 0.82, 0], {
-        span: 0.60, chordRoot: 0.40, chordTip: 0.04, sweep: 0.28, concavity: 0.20,
-        rearTipBack: 0.14, apexRound: 0.06, thick: 0.055, spanSteps: 5, chordSteps: 4,
-        spanDir: [-0.788, -0.616, 0], chordDir: [1, 0, 0],
-      });
-      return g;
-    },
+    // 3.5 model units x 0.76 = a 2.6 m adult (2.4-3.5 m)
+    bite: 24, aquatic: true, scale: 0.76, sizeVary: 0.10, color: 0x2f3335,
+    clearance: 12, swimDepth: 1.2,
+    build: function () { return marineBuild(BULL_SPEC); },
   });
 
   /* ==========================================================================
