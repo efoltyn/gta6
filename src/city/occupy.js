@@ -515,8 +515,17 @@
     if (actor._occupyPass && rankOf(actor._occupyPass[rec.id]) >= need) return true;
     if (actor._occupyOf === rec.id && rankOf(actor._occupyAccess) >= need) return true;
     if (a.faction && actorFaction(actor) === a.faction) return need <= RANK.faction;
+    // A MEMBER'S UNIFORM (outfits.js) the house believes is a member's pass:
+    // the floors a member may walk, never the boss's own.
+    if (a.faction && actor.isPlayer && need <= RANK.faction && wearsFaction(a.faction)) return true;
     return false;
   };
+  // the player in this faction's uniform, the cover holding (a set's colours
+  // claim "gang:<id>"; police and army claim their own names)
+  function wearsFaction(f) {
+    const T = CBZ.cityDisguiseTrust;
+    return !!(T && f != null && (T("gang:" + f) || T(String(f))));
+  }
   // the seam ownership/missions use: hand an actor (default: the player) a
   // standing pass to a building. One line, no schema.
   CBZ.cityOccupyGrant = function (lot, level, actor) {
@@ -1499,9 +1508,12 @@
       if (d2 < bd) { bd = d2; best = p; }
     }
     if (!best) return false;
-    const gang = rec.preset === "gang";
+    // one of their own (or in their uniform) who wandered too high is asked
+    // to go back down; a stranger in a gang house is beaten
+    const own = !!(rec.faction != null && (actorFaction(actor) === rec.faction || wearsFaction(rec.faction)));
+    const gang = rec.preset === "gang" && !own;
     const e = L.begin(best, "trespass", {
-      hard: gang || rec.preset === "military" ? true : undefined,
+      hard: gang || (rec.preset === "military" && !own) ? true : undefined,
       act: gang ? "beat" : null,
       inside: function () {
         const h = CBZ.cityAccessAt(P.pos.x, P.pos.y || 0, P.pos.z);

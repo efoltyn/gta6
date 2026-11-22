@@ -463,7 +463,12 @@
     }
     if (rec.seen && !rec.seen.dead) {
       const d = distXZ(rec.seen, rec.x, rec.z);
-      if (d < rec.senses * 1.6) return rec.seen;
+      // the player he remembered is not his problem any more once he is under
+      // this post's bar or in its uniform (the same two tests the scan uses)
+      const pa = CBZ.city && CBZ.city.playerActor;
+      const cleared = rec.seen === pa && (((CBZ.game && CBZ.game.wanted) | 0) < rec.minStars ||
+        (rec.org && CBZ.cityDisguiseTrust && CBZ.cityDisguiseTrust(rec.org)));
+      if (d < rec.senses * 1.6 && !cleared) return rec.seen;
       rec.seen = null;
     }
     // THROTTLED. citySecurityIntruder walks the whole ped roster, so running it
@@ -488,6 +493,8 @@
       // city is already hunting), and anybody who has actually shot at him is
       // in `actor.rage` well before this line.
       if (t && t === (CBZ.city && CBZ.city.playerActor) && (CBZ.game && (CBZ.game.wanted | 0)) < rec.minStars) return null;
+      // in this post's own uniform, the cover holding (outfits.js): one of ours
+      if (t && t === (CBZ.city && CBZ.city.playerActor) && rec.org && CBZ.cityDisguiseTrust && CBZ.cityDisguiseTrust(rec.org)) return null;
       if (t && !t.dead && distXZ(t, actor.pos.x, actor.pos.z) < reach) { rec.seen = t; return t; }
     }
     return null;
@@ -537,6 +544,14 @@
       if (!rec.left) { rec.left = true; rec.abandons++; if (rec.onAbandon) { try { rec.onAbandon(actor, rec); } catch (e) {} } }
       rec.leftAt = 0;
       return "flee";
+    }
+
+    // SIZING UP A UNIFORM (outfits.js's close look): he has stopped to ask a
+    // stranger in his own uniform who he is, and faces him while he waits
+    const lk = actor._lookAt;
+    if (lk && lk.pos && CBZ.now < (actor._lookUntil || 0) && !actor.rage) {
+      standIdle(actor, rec, dt, Math.atan2(lk.pos.x - actor.pos.x, lk.pos.z - actor.pos.z));
+      return "hold";
     }
 
     const threat = threatFor(actor, rec, dt);

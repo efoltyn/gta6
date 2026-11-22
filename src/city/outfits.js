@@ -240,7 +240,8 @@
                  colors: { legs: 0x1b2a44, torso: 0x24407a, collar: 0x16264a, arms: 0x24407a, shoes: 0x101216, belt: 0x0d111c } },
     // THE DESK OFFICER (games/police.js's precinct staff): the same patrol
     // uniform and duty belt, but NO cop flag: posted staff are not the city
-    // force, and taking this shirt off one is a costume, not a disguise.
+    // force. Taken off one of them it still claims "police" (the corpse swap
+    // stamps the body's org, §DISGUISE), and they know their own up close.
     precinct:  { id: "precinct", hat: "peaked:police", name: "Precinct Uniform", tier: "law", who: "desk officers", price: 0, drip: 1, cap: true, capColor: 0x17223c, duty: "police",
                  colors: { legs: 0x1b2a44, torso: 0x24407a, collar: 0x16264a, arms: 0x24407a, shoes: 0x101216, belt: 0x0d111c } },
     // PLAINCLOTHES: a detective at his desk, jacket off. Dress shirt and tie,
@@ -1324,9 +1325,8 @@
     }
     if (!opts.silent && CBZ.city) {
       const CLUB = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30, VIP = (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70;
-      if (rec.cop) CBZ.city.note("The uniform's on, at a distance, the city reads a cop.", 2.6);
-      else if (rec.gang) CBZ.city.note("" + rec.name + " on your back, their corners read kin, their rivals read TARGET.", 3);
-      else if (before < CLUB && after >= CLUB && CBZ.city.big) CBZ.city.big("" + rec.name + " · cloth like this opens velvet ropes.");
+      // (what a uniform does is shown by the people who see it, not told here)
+      if (before < CLUB && after >= CLUB && CBZ.city.big) CBZ.city.big("" + rec.name + " · cloth like this opens velvet ropes.");
       else if (before < VIP && after >= VIP && CBZ.city.big) CBZ.city.big("✦ " + rec.name + " · dressed like money; the elite lounge waves you up.");
       else CBZ.city.note("Now wearing " + rec.name + ".", 1.8);
     }
@@ -1354,107 +1354,140 @@
   }
 
   // ============================================================
-  //  PERCEPTION READS — what the street makes of your cloth.
-  //  (police.js / gangs.js / wanted.js call these as tiny guarded reads.)
-  // ============================================================
-  function isCopFit() { const w = g.cityWornOutfit; return !!(w && w.cop); }
-  // NOTE: `copTrust()` and `blowCover()` used to live here — the cop-only trust
-  // rule and the cop-only 60 s burn. They are GONE, not wrapped: the §DISGUISE
-  // block below is the same two rules with the word "cop" removed, and the old
-  // exports point at it. Leaving the originals in place would have been a
-  // second trust rule waiting to drift from the first.
-  // the crew whose colors you're flying (gang id), or null
-  function gangFit() { const w = g.cityWornOutfit; return (w && w.gang) || null; }
-  // crimes committed IN UNIFORM burn hotter (impersonating an officer makes
-  // every charge worse) — wanted.js multiplies its heat charge by this.
-  function heatMult() { return isCopFit() ? 1.5 : 1; }
-
-  // ============================================================
   //  §DISGUISE — THE UNIFORM IS A CLAIM ABOUT WHO YOU ARE.
   //
-  //  OWNER (2026-07-27): "we already have logic for stealing others clothes,
-  //  that's a huge thing now once there are roles that are actually being done
-  //  — there can be fake level and role but actually agents."
+  //  OWNER: "Kill and steal gangs outfit you can walk into gang hq without
+  //  them shooting at you same with police precinct and military base".
+  //  And: "I really like that logic where up close they realize you are not
+  //  one of theirs."
   //
-  //  He is right that the plumbing exists, and it is worth being precise about
-  //  what already existed, because this is a MIGRATION and not a new system:
-  //  the four functions directly above are a complete disguise mechanic —
-  //  trust, a blown-cover timer, a heat multiplier, a "whose colours am I
-  //  flying" read — that was hard-wired to EXACTLY TWO roles, cop and gang,
-  //  because those were the only two roles the game had. Now that every person
-  //  has one, the same mechanic has to stop naming its roles.
+  //  THE CLAIM. Clothes taken off a body say who you are: a set's colours
+  //  "gang:<id>", a cop's uniform "police", a soldier's fatigues "army", any
+  //  other body its job. claimOf reads it off the worn record and nothing
+  //  else, so taking the uniform off (or putting anything else on) ends it.
   //
-  //  So `copTrust`/`blowCover` become the org-agnostic pair below and keep
-  //  their old exports pointing at the new ones. Nothing that called them
-  //  changes; police.js, gangs.js and wanted.js keep working unmodified.
+  //  THE ONE RULE. cityDisguiseTrust(org): you wear that org's claim, you are
+  //  under 2 stars, and nobody has found you out. Whatever would turn hostile
+  //  on sight at a gang's house, the station or the base asks it first, or
+  //  cityDisguiseFriend(person), the same rule asked of one person. The wrong
+  //  uniform gets nothing; a badge or a rival set's colours read as the enemy
+  //  to a gang (cityDisguiseRead).
   //
-  //  WHAT MAKES THE UNIFORM MEAN SOMETHING: the corpse swap now carries the
-  //  DEAD PERSON'S TRUE ROLE along with their cloth (see finishSwap). That is
-  //  the whole feature and it is one stamp — you are not "wearing a blue
-  //  shirt", you are wearing THE FLIGHT ATTENDANT'S UNIFORM, and level.js's
-  //  vocabulary already knows what a flight attendant is.
-  //
-  //  A DISGUISE THAT ALWAYS WORKS IS A CHEAT CODE. Four breakers, and each one
-  //  is a decision the player can actually make rather than a dice roll:
-  //
-  //   (a) SEEN TAKING IT. Stripping a body is already a 2.4 s beat where you
-  //       cannot shoot. Do it in front of a witness and the disguise starts
-  //       burned. This is what makes WHERE you kill somebody matter.
-  //   (b) A MANHUNT OUTRANKS A COSTUME (wanted >= 2). Kept verbatim from the
-  //       cop version — it was already the right rule.
-  //   (c) THE WRONG WEAPON. A flight attendant with an AK is not a flight
-  //       attendant. This is the best tension in the system because it forces
-  //       the same choice the bum predator forces: the disguise or the gun.
-  //   (d) SOMEONE SENIOR RECOGNISES THEY DO NOT KNOW YOU. A member of the org
-  //       you are impersonating, at rank, close and in the open, burns it —
-  //       because the people most fooled by a uniform are the ones outside it.
-  //
-  //  Flag: CITY_DISGUISE (one-line revert to the old cop-only behaviour).
+  //  WHAT BLOWS IT, all of it your own doing:
+  //   (a) somebody watched you strip the body (finishSwap);
+  //   (b) 2 stars or more;
+  //   (c) a gun drawn in a uniform that does not carry one, with somebody near;
+  //   (d) violence: wanted.js burns it on a violent crime, and any of the
+  //       org's own people fighting or hunting you have plainly found you out;
+  //   (e) THE CLOSE LOOK: from a distance the uniform works. A member of the
+  //       org a few metres off, facing you, for a couple of seconds, stops,
+  //       looks and asks. Still in front of him a beat later, he calls it out.
+  //       Walk on before the beat ends and it holds. Seniors are quicker.
+  //  Found out is for that claim and two minutes, and the man who clocked you
+  //  knows your face for ten; another org's uniform is clean.
   // ============================================================
-  if (CBZ.CONFIG.CITY_DISGUISE == null) CBZ.CONFIG.CITY_DISGUISE = true;
-  function disguiseOn() { return CBZ.CONFIG.CITY_DISGUISE !== false; }
 
-  // WHAT DOES THIS GARMENT CLAIM? Reads only the record — no rig, no globals —
-  // so it answers for a corpse's fit as readily as for the player's.
+  // THE CLAIM. kind/gid let the hot reads compare without building strings.
   function claimOf(rec) {
     if (!rec) return null;
-    if (rec.cop) return { org: "police", role: rec.swat ? "SWAT" : "Officer", arms: "gun" };
-    if (rec.gang) return { org: "gang:" + rec.gang, role: "Soldier", arms: "gun" };
-    // stamped by the corpse swap: the TRUE role of the body you took it off.
-    if (rec._claimRole) return { org: rec._claimOrg || null, role: rec._claimRole, arms: rec._claimArms || "none" };
+    if (rec.cop) return { org: "police", kind: "police", gid: null, role: rec.id === "swat" ? "SWAT" : "Officer", arms: "gun" };
+    if (rec.gang) return { org: "gang:" + rec.gang, kind: "gang", gid: rec.gang, role: "Soldier", arms: "gun" };
+    // stamped by the corpse swap: what the body you took it off really was
+    if (rec._claimRole) {
+      const o = rec._claimOrg || null;
+      const kind = o === "police" ? "police" : o === "army" ? "army" : (o && o.indexOf("gang:") === 0) ? "gang" : "job";
+      return { org: o, kind: kind, gid: kind === "gang" ? o.slice(5) : null, role: rec._claimRole, arms: rec._claimArms || "none" };
+    }
     return null;
   }
-  // what the PLAYER currently presents as — or null for "just a person".
+  // what the PLAYER presents as, or null for "just a person". Cached per
+  // record and per stamp (city/agency.js stamps a claim onto the worn record
+  // in place after a swap).
+  let _claimRec, _claimOrgSeen, _claimRoleSeen, _claim = null;
   function disguise() {
-    if (!disguiseOn()) { return isCopFit() ? { org: "police", role: "Officer", arms: "gun" } : null; }
-    return claimOf(g.cityWornOutfit);
+    const w = g.cityWornOutfit;
+    if (w !== _claimRec || (w && (w._claimOrg !== _claimOrgSeen || w._claimRole !== _claimRoleSeen))) {
+      _claimRec = w; _claimOrgSeen = w ? w._claimOrg : undefined; _claimRoleSeen = w ? w._claimRole : undefined;
+      _claim = claimOf(w);
+    }
+    return _claim;
   }
-  CBZ.cityDisguise = function () {
-    const c = disguise(); if (!c) return null;
-    return { org: c.org, role: c.role, trusted: disguiseTrust(c.org) };
-  };
 
-  // THE ONE-LINE QUERY every consumer adopts: "does the world currently read
-  // the player as one of YOURS?" police.js passes "police"; power.js passes the
-  // principal's org; a gate passes its own. Org-agnostic by construction.
+  // WHOSE IS HE? The same words for a person as claimOf has for cloth.
+  function isPolice(p) { return p.kind === "cop" || p._castFit === "precinct" || p._castFit === "detective"; }
+  function isArmy(p) { return !!(p.milRank || p.organization === "military"); }
+  function orgOf(p) {
+    if (!p) return null;
+    if (isPolice(p)) return "police";
+    if (p.gang != null) return "gang:" + p.gang;
+    if (isArmy(p)) return "army";
+    return null;
+  }
+  // is this person one of the people the claim says you are?
+  function memberOf(p, c) {
+    if (c.kind === "police") return isPolice(p);
+    if (c.kind === "gang") return p.gang != null && p.gang == c.gid;   // == : config ids may be numbers
+    if (c.kind === "army") return isArmy(p);
+    // a job: the people doing the same job know their own colleagues
+    return !!(p.job && c.role && CBZ.cityJobTitle && CBZ.cityJobTitle(p.job) === c.role);
+  }
+  // senior enough to know the roster: he clocks you quicker
+  const SENIOR_GANG = { lt: 1, boss: 1, enforcer: 1 };
+  const SENIOR_ARMY = { sergeant: 1, lieutenant: 1, captain: 1, major: 1, colonel: 1, general: 1 };
+  const SENIOR_COP = /sergeant|lieutenant|captain|chief|detective/i;
+  function senior(p, c) {
+    if (c.kind === "police") return !!(p.swat || p.copRank || SENIOR_COP.test(p.job || ""));
+    if (c.kind === "gang") return !!(p.isBoss || SENIOR_GANG[p.rank]);
+    if (c.kind === "army") return !!SENIOR_ARMY[p.milRank];
+    return false;
+  }
+
+  function blownNow(c) {
+    return !!(g.cityOutfitBlownT && CBZ.now < g.cityOutfitBlownT &&
+      g.cityOutfitBlownOrg === c.org && (c.org || g.cityOutfitBlownRole === c.role));
+  }
+  function trusted(c) { return !!c && (g.wanted | 0) < 2 && !blownNow(c); }
+  // THE ONE QUERY: "does the world read the player as one of YOURS right now?"
   function disguiseTrust(org) {
     const c = disguise();
     if (!c) return false;
-    if (org && c.org !== org) return false;              // wrong uniform entirely
-    if ((g.wanted | 0) >= 2) return false;               // (b) a manhunt outranks a costume
-    if (g.cityOutfitBlownT && CBZ.now < g.cityOutfitBlownT) return false;
-    return true;
+    if (org && c.org !== org) return false;              // the wrong uniform gets nothing
+    return trusted(c);
   }
+  CBZ.cityDisguise = function () {
+    const c = disguise(); if (!c) return null;
+    return { org: c.org, role: c.role, trusted: trusted(c) };
+  };
   CBZ.cityDisguiseTrust = disguiseTrust;
-  // is the player pretending at all, and as what — for the audit and the HUD.
   CBZ.cityDisguiseOrg = function () { const c = disguise(); return c ? c.org : null; };
+  // the same rule asked of one person: does HE take you for one of his own?
+  CBZ.cityDisguiseFriend = function (p) {
+    const c = disguise();
+    return !!(c && p && c.kind !== "job" && memberOf(p, c) && trusted(c));
+  };
+  // what HE makes of your cloth: "kin" (his own, the cover holding), "foe" (a
+  // badge or a rival set's colours to a gang man, or his own colours on a man
+  // he has found out), "war" (the colours of a set his own is at war with)
+  CBZ.cityDisguiseRead = function (p) {
+    const c = disguise();
+    if (!c || !p || c.kind === "job") return null;
+    if (memberOf(p, c)) return trusted(c) ? "kin" : (blownNow(c) ? "foe" : null);
+    if (p.gang != null) {
+      if (c.kind === "police") return "foe";
+      if (c.kind === "gang") return (CBZ.cityAtWar && CBZ.cityAtWar(c.gid, p.gang)) ? "war" : "foe";
+    }
+    return null;
+  };
 
-  // BURN IT. Generalised blowCover: any observer, any org, one message.
+  // FOUND OUT. The one who clocked you says so, over his own head.
   function disguiseBlow(by, why) {
     const c = disguise(); if (!c) return false;
-    const fresh = !(g.cityOutfitBlownT && CBZ.now < g.cityOutfitBlownT);
-    g.cityOutfitBlownT = CBZ.now + 60000;
-    // the observer who clocked you says it, over his own head
+    const fresh = !blownNow(c);
+    g.cityOutfitBlownT = CBZ.now + 120000;
+    g.cityOutfitBlownOrg = c.org; g.cityOutfitBlownRole = c.role;
+    lookEnd();
+    // nobody named (a crime reported by wanted.js): the nearest onlooker says it
+    if (fresh && !by) by = strippingWitness(_nobody);
     if (fresh && by && by.pos && CBZ.citySay) {
       CBZ.citySay(by, why || ("Wait, you're no " + String(c.role).toLowerCase() + "!"), null, { secs: 2.6, force: true });
     }
@@ -1463,57 +1496,179 @@
   }
   CBZ.cityDisguiseBlow = disguiseBlow;
 
-  // (c) THE WRONG WEAPON. Only roles whose claim is "unarmed" are broken by a
-  // drawn gun — a cop's uniform and a gang's colours come WITH one, which is
-  // why they were never subject to this and still are not.
-  function weaponBetraysCover() {
-    const c = disguise();
-    if (!c || c.arms === "gun") return false;
-    try { return !!(CBZ.cityHasGun && CBZ.cityHasGun()); } catch (e) { return false; }
+  // the worn record's own flags: a cop's shirt, the crew whose colours (gang id)
+  function isCopFit() { const w = g.cityWornOutfit; return !!(w && w.cop); }
+  function gangFit() { const w = g.cityWornOutfit; return (w && w.gang) || null; }
+  // crimes committed IN a police uniform burn hotter (impersonating an officer
+  // makes every charge worse) — wanted.js multiplies its heat charge by this.
+  function heatMult() { const c = disguise(); return c && c.kind === "police" ? 1.5 : 1; }
+
+  // ---- (e) THE CLOSE LOOK ------------------------------------------------
+  const LOOK_R = 3.2, CALL_R = 4.2, NOD_R = 7, SEEN_R = 30, SCAN = 0.2;
+  const NOTICE = 2.0, NOTICE_SR = 1.2;   // s face to face before he stops and asks
+  const BEAT = 1.6, BEAT_SR = 1.1;       // s after the question before he calls it
+  const LK = { who: null, org: undefined, role: undefined, t: 0, stage: 0, beat: 0, scanT: 0, nodT: 0 };
+  const LINES = {
+    police: { nod: ["Officer.", "Hey.", "Stay safe out there."],
+      ask: ["Hold on. Who are you?", "Hey. What precinct are you out of?", "I don't know you. Badge number?"],
+      call: ["That's not a cop!", "He's no officer. Grab him!"] },
+    gang: { nod: ["Wassup.", "Yo.", "We good."],
+      ask: ["Hold up. Who are you?", "Ay. I don't know you.", "Who you roll with?"],
+      call: ["He ain't one of us!", "That's not our boy! Get him!"] },
+    army: { nod: ["Hey.", "Carry on."],
+      ask: ["Hold on. Who are you?", "What unit are you with?", "You. Where's your post?"],
+      call: ["He's not one of ours!", "Intruder in uniform!"] },
+    job: { nod: [],
+      ask: ["Hold on. Who are you?", "Wait, are you new here?"],
+      call: ["You don't work here!", "He's not one of us!"] },
+  };
+  function lineOf(a) { return a[(Math.random() * a.length) | 0]; }
+  function faces(a, px, pz) {
+    const dx = px - a.pos.x, dz = pz - a.pos.z, d = Math.hypot(dx, dz) || 1;
+    const ry = a.group ? a.group.rotation.y : 0;
+    return (Math.sin(ry) * dx + Math.cos(ry) * dz) / d > 0.45;
   }
-  // (d) SOMEONE SENIOR. Cheap: one throttled scan, nearest-first, LOS-free
-  // (they are 12 m away in the open — if you can see them they can see you).
-  let _senT = 0;
-  function seniorSees(dt) {
-    _senT -= dt; if (_senT > 0) return null;
-    _senT = 0.7;
-    const c = disguise(); if (!c || !c.org) return null;
-    const P = CBZ.player; if (!P || P.dead) return null;
-    const px = P.pos.x, pz = P.pos.z;
-    const pools = [CBZ.cityCops, CBZ.cityPeds];
-    for (let q = 0; q < pools.length; q++) {
-      const arr = pools[q]; if (!arr) continue;
+  function inSight(a, P) {
+    if (!CBZ.clearLineOfFire) return true;
+    try { return !!CBZ.clearLineOfFire(a.pos.x, (a.pos.y || 0) + 1.55, a.pos.z, P.pos.x, (P.pos.y || 0) + 1.55, P.pos.z); } catch (e) { return true; }
+  }
+  function sayTo(a, line, secs) { if (a && !a.dead && line && CBZ.citySay) CBZ.citySay(a, line, null, { secs: secs || 2.4, force: true }); }
+  // he stands and looks while the beat runs. police.js and garrison.js honour
+  // _lookAt for the bodies they drive; the hold below does it for everybody
+  // else. Refreshed every scan, so it lapses by itself.
+  function holdLook(a, PA) { a._lookAt = PA; a._lookUntil = CBZ.now + 700; }
+  function lookEnd() {
+    const w = LK.who;
+    if (w) { w._lookAt = null; w._lookUntil = 0; }
+    LK.who = null; LK.t = 0; LK.stage = 0; LK.beat = 0;
+  }
+  // the base runs its own ladder and its own nods (city/basewatch.js)
+  function armyAtBase(c) {
+    if (c.kind !== "army" || !CBZ.cityBaseStanding) return false;
+    try { const s = CBZ.cityBaseStanding(); return !!(s && s.where && s.where !== "outside"); } catch (e) { return false; }
+  }
+  // HE CALLS IT. The cover is gone and the org reacts as it would to anyone.
+  function callOut(w, c, line) {
+    if (c.kind === "army" && armyAtBase(c) && CBZ.cityBaseBlow) {
+      lookEnd();
+      try { if (CBZ.cityBaseBlow(w, line, 3)) return; } catch (e) {}
+    }
+    disguiseBlow(w, line);
+    const P = CBZ.player, PA = CBZ.city && CBZ.city.playerActor;
+    if (!P || !P.pos) return;
+    if (c.kind === "police") {
+      // impersonating an officer, to an officer's face: the one star that has
+      // them come and take you in (real heat, it cools like any other)
+      if ((g.wanted | 0) < 1 && CBZ.cityAddStars) { try { CBZ.cityAddStars(1, "Impersonating an Officer"); } catch (e) {} }
+      if (w.kind === "cop" && CBZ.cityCopSawCrime) CBZ.cityCopSawCrime(w);
+    } else if (c.kind === "gang") {
+      // a ringer among them: the set is up, he goes for you, and inside their
+      // own house the house gets up
+      if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(c.gid, 0.6);
+      if (PA && !w.dead) { w.rage = PA; w.state = "fight"; }
+      const h = CBZ.cityAccessAt ? CBZ.cityAccessAt(P.pos.x, P.pos.y || 0, P.pos.z) : null;
+      if (h && h.rec && h.rec.faction != null && h.rec.faction == c.gid && CBZ.cityOccupyAlarm) CBZ.cityOccupyAlarm(h.lot, PA, h.floor);
+    }
+  }
+  function lookTick(dt) {
+    const c = disguise();
+    const P = CBZ.player, PA = CBZ.city && CBZ.city.playerActor;
+    if (!c || !P || !P.pos || P.dead || P.driving || !PA) { if (LK.who) lookEnd(); return; }
+    if (LK.org !== c.org || LK.role !== c.role) { lookEnd(); LK.org = c.org; LK.role = c.role; }
+    LK.scanT -= dt;
+    if (LK.scanT > 0) return;
+    const sdt = Math.min(0.5, SCAN - LK.scanT);
+    LK.scanT = SCAN;
+    if (!trusted(c)) { if (LK.who) lookEnd(); return; }
+    const px = P.pos.x, pz = P.pos.z, py = P.pos.y || 0;
+    const L = LINES[c.kind] || LINES.job;
+    // (c) a gun out in a uniform that does not carry one, and somebody near
+    if (c.arms !== "gun") {
+      let gun = false;
+      try { gun = !!(CBZ.cityHasGun && CBZ.cityHasGun()); } catch (e) { gun = false; }
+      const w = gun ? strippingWitness(_nobody) : null;
+      if (w) { disguiseBlow(w, "That's not staff, he's armed!"); return; }
+    }
+    // THE BEAT: he has asked; you are still in front of him, or you walked on
+    if (LK.stage === 1) {
+      const w = LK.who;
+      if (!w || w.dead || (w.ko || 0) > 0 || w.rage) { lookEnd(); return; }
+      const d = Math.hypot(w.pos.x - px, w.pos.z - pz);
+      if (d > CALL_R || Math.abs((w.pos.y || 0) - py) > 2) { lookEnd(); return; }   // walked on: it holds
+      holdLook(w, PA);
+      LK.beat += sdt;
+      if (LK.beat >= (senior(w, c) ? BEAT_SR : BEAT)) { lookEnd(); w._clockedT = CBZ.now; callOut(w, c, lineOf(L.call)); }
+      return;
+    }
+    // one pass: any of his org already on you, the nearest of them about, and
+    // the nearest of them FACING you up close. That last one is who looks: at a
+    // door the brass stand in a knot, and the nearest man may have his back to
+    // you while the one in front of you is staring straight at you.
+    let best = null, bd = NOD_R * NOD_R, onMe = null, look = null, lbd = LOOK_R * LOOK_R;
+    for (let q = 0; q < 2 && !onMe; q++) {
+      const arr = q === 0 ? CBZ.cityCops : CBZ.cityPeds;
+      if (!arr) continue;
       for (let i = 0; i < arr.length; i++) {
         const a = arr[i];
-        if (!a || a.dead || a.isPlayer || a._parked) continue;
-        const dx = a.pos.x - px, dz = a.pos.z - pz;
-        if (dx * dx + dz * dz > 12 * 12) continue;
-        // is THIS person genuinely one of the org you are impersonating, and
-        // senior enough to know the roster? Read off the fields the world keeps.
-        if (c.org === "police") { if (a.kind === "cop" && (a.swat || a.copRank)) return a; continue; }
-        if (c.org.indexOf("gang:") === 0) {
-          if (("gang:" + a.gang) === c.org && (a.rank === "lt" || a.rank === "boss" || a.rank === "enforcer")) return a;
-          continue;
-        }
-        // a job cover: somebody doing the SAME job, at this range, knows their
-        // own colleagues. That is the whole reason a uniform fools outsiders.
-        if (a.job && c.role && CBZ.cityJobTitle && CBZ.cityJobTitle(a.job) === c.role) return a;
+        if (!a || a.dead || a.isPlayer || a._parked || !a.pos || (a.ko || 0) > 0) continue;
+        const dx = a.pos.x - px, dz = a.pos.z - pz, d2 = dx * dx + dz * dz;
+        if (d2 > SEEN_R * SEEN_R || !memberOf(a, c)) continue;
+        // (d) one of them is fighting you or hunting you: you are no colleague
+        if (a.rage === PA || (a.sees && a.curTarget === PA)) { onMe = a; break; }
+        if (a.inCar || a.state === "fight" || a.state === "flee" || Math.abs((a.pos.y || 0) - py) >= 2) continue;
+        if (d2 < bd) { bd = d2; best = a; }
+        if (d2 < lbd && faces(a, px, pz)) { lbd = d2; look = a; }
       }
     }
-    return null;
+    if (look) { best = look; bd = lbd; }
+    if (onMe) { disguiseBlow(onMe, lineOf(L.call)); return; }
+    if (best !== LK.who) { if (LK.who) lookEnd(); LK.who = best; }
+    if (!best) return;
+    const facing = faces(best, px, pz);
+    // the man who clocked you before knows your face: back in front of him in
+    // the same uniform, he calls it at once
+    if ((best._clockedT || -1e9) > CBZ.now - 600000 && facing && inSight(best, P)) {
+      lookEnd(); best._clockedT = CBZ.now; callOut(best, c, "That's him again!");
+      return;
+    }
+    if (bd < LOOK_R * LOOK_R && facing && inSight(best, P)) {
+      // he asked you once already and here you are again: no second grace
+      LK.t += (best._lookAskT || -1e9) > CBZ.now - 30000 ? 9 : sdt;
+      if (LK.t >= (senior(best, c) ? NOTICE_SR : NOTICE)) {
+        LK.stage = 1; LK.beat = 0; best._lookAskT = CBZ.now;
+        holdLook(best, PA);
+        sayTo(best, lineOf(L.ask), 2.4);
+      }
+      return;
+    }
+    LK.t = Math.max(0, LK.t - sdt);
+    // from a distance the uniform works, and now and then one of them says so
+    if (facing && L.nod.length && CBZ.now > LK.nodT && (best._lookNodT || -1e9) < CBZ.now - 90000 &&
+        inSight(best, P) && !armyAtBase(c)) {
+      LK.nodT = CBZ.now + 6000; best._lookNodT = CBZ.now;
+      sayTo(best, lineOf(L.nod), 1.6);
+    }
   }
-  // ticked from the per-frame updater below.
-  function disguiseTick(dt) {
-    if (!disguiseOn() || !disguise()) return;
-    if (weaponBetraysCover()) { disguiseBlow(null, "That's not staff, he's armed!"); return; }
-    const sen = seniorSees(dt);
-    if (sen) disguiseBlow(sen, "I don't know you.");
-  }
+  // the man who stopped to ask stands and looks at you, every frame, after
+  // every brain has moved him (police.js and garrison.js hold their own)
+  CBZ.onUpdate(39.4, function (dt) {
+    const w = LK.who, P = CBZ.player;
+    if (!w || LK.stage !== 1 || w.dead || !P || !P.pos || g.mode !== "city") return;
+    if (w.kind === "cop" || w._post) return;
+    if (w._propSeat || w.state === "sit") return;            // seated: he looks up, he does not spin the chair
+    const want = Math.atan2(P.pos.x - w.pos.x, P.pos.z - w.pos.z);
+    // (a man on a stationed post is turned back to it every frame by his own
+    // loop, island_military.js: turn him harder so he still ends up on you)
+    const k = w._stationed ? 0.5 : Math.min(1, dt * 7);
+    if (w.group) w.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(w.group.rotation.y, want, k) : want;
+    w.speed = 0; w.path = null;
+    if (w.state === "walk" || w.state === "wander") w.state = "idle";
+    w.pause = Math.max(w.pause || 0, 0.4);
+    if (w.target && w.target.set) w.target.set(w.pos.x, 0, w.pos.z);
+  });
 
   CBZ.cityOutfitIsCop = isCopFit;
-  // MIGRATED: the cop-only pair now routes through the org-agnostic one, so
-  // there is a single trust rule and a single burn timer in the game. Existing
-  // callers (police.js, gangs.js, wanted.js) are untouched by design.
+  // the old cop-only names, kept for their callers: the same one rule
   CBZ.cityOutfitCopTrust = function () { return disguiseTrust("police"); };
   CBZ.cityOutfitBlow = function (byCop) { return disguiseBlow(byCop, null); };
   CBZ.cityOutfitGangId = gangFit;
@@ -1532,6 +1687,75 @@
   CBZ.cityOutfitCatalog = function () { buildGangOutfits(); pinDetail(); return CAT; };
   CBZ.cityWearOutfit = function (id, opts) { buildGangOutfits(); return CAT[id] ? wearRecord(CAT[id], opts) : false; };
   CBZ.cityBuyOutfit = buyOutfit;
+
+  // ============================================================
+  //  CAPTURE HOOK. CBZ.cityDisguiseStage("gang" | "police" | "army", gangId?)
+  //  dresses the player as if he had just taken that uniform off a body (the
+  //  same claim, nobody watching, no stars) and stands him outside that org's
+  //  door, facing it: the set's house (occupy.js), the police station
+  //  (police.js cityPoliceStation), Fort Brandt's gate. Returns where.
+  // ============================================================
+  CBZ.cityDisguiseStage = function (kind, gangId) {
+    if (g.mode !== "city") return null;
+    buildGangOutfits();
+    const P = CBZ.player;
+    if (!P || !P.pos || P.dead || P.driving) return null;
+    let rec = null, door = null, out = null, place = null;
+    if (kind === "gang") {
+      // the set's house: the one asked for, else the nearest standing one
+      const occ = CBZ.cityOccupancies || [];
+      let best = null, bd = Infinity;
+      for (let i = 0; i < occ.length; i++) {
+        const r = occ[i], d = r && r.lot && r.lot.building && r.lot.building.door;
+        if (!d || d.x == null || r.preset !== "gang" || !CAT["gang:" + r.faction]) continue;
+        if (gangId != null && r.faction != gangId) continue;
+        const dd = Math.hypot(d.x - P.pos.x, d.z - P.pos.z);
+        if (dd < bd) { bd = dd; best = r; }
+      }
+      if (!best) return null;
+      const d = best.lot.building.door;
+      rec = Object.assign({}, CAT["gang:" + best.faction]);
+      door = { x: d.x, z: d.z };
+      out = { x: -(d.nx != null ? d.nx : 0), z: -(d.nz != null ? d.nz : 1) };   // the door's normal points in
+      place = best.label || ("gang:" + best.faction);
+    } else if (kind === "police") {
+      const st = CBZ.cityPoliceStation ? CBZ.cityPoliceStation() : null;
+      if (!st || st.x == null) return null;
+      const lot = st.lot || {};
+      out = { x: st.x - (lot.cx == null ? st.x : lot.cx), z: st.z - (lot.cz == null ? st.z : lot.cz) };
+      rec = Object.assign({}, CAT.police);
+      door = { x: st.x, z: st.z };
+      place = st.name || "police station";
+    } else if (kind === "army") {
+      const B = CBZ._militaryBase;
+      if (!B || !B.gate || !B.center) return null;
+      out = { x: B.gate.x - B.center.x, z: B.gate.z - B.center.z };
+      rec = Object.assign({}, CAT.soldier, { _claimRole: "Private", _claimOrg: "army", _claimArms: "gun" });
+      door = { x: B.gate.x, z: B.gate.z };
+      place = "Fort Brandt";
+    } else return null;
+    const ol = Math.hypot(out.x, out.z);
+    if (ol > 0.01) { out.x /= ol; out.z /= ol; } else { out.x = 0; out.z = 1; }
+    // far enough out that nobody at the door is face to face with him yet
+    const back = kind === "army" ? 22 : 10;
+    const x = door.x + out.x * back, z = door.z + out.z * back;
+    if (_pendingSwap) cancelSwap();
+    g.wanted = 0; g.heat = 0;
+    g.cityOutfitBlownT = 0; g.cityOutfitBlownOrg = null; g.cityOutfitBlownRole = null;
+    lookEnd();
+    wearRecord(rec, { silent: true });
+    let y = 0;
+    try { y = CBZ.floorAt ? (CBZ.floorAt(x, z) || 0) : 0; } catch (e) { y = 0; }
+    P.pos.set(x, y, z);
+    P.speed = 0; P.vy = 0; P.grounded = true;
+    if (CBZ.bodyTeleported) CBZ.bodyTeleported(P);
+    // facing the door: the camera looks along (-sin, -cos) of its yaw
+    if (CBZ.cam) CBZ.cam.yaw = Math.atan2(out.x, out.z);
+    if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.rotation.y = Math.atan2(-out.x, -out.z);
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return { kind: kind, org: CBZ.cityDisguiseOrg(), place: place,
+      at: { x: Math.round(x), z: Math.round(z) }, door: { x: Math.round(door.x), z: Math.round(door.z) } };
+  };
 
   // ============================================================
   //  AGE + SEX AXES OF THE WARDROBE
@@ -2362,23 +2586,25 @@
       if (CBZ.cityBlingResyncPed) CBZ.cityBlingResyncPed(sw.body);
     }
     // ---- THE ROLE RIDES WITH THE CLOTH -------------------------------------
-    // THIS is the line that turns a cosmetic swap into a disguise. Until now
-    // you took a blue shirt; now you take THE FLIGHT ATTENDANT'S UNIFORM, and
-    // level.js's vocabulary already knows what that is. The claim is stamped
-    // from the dead person's TRUE role (cityTrueRole — never the covered one,
-    // or stripping a plant would hand you his cover instead of his job), plus
-    // the org that can see through it and whether the role comes with a gun.
-    if (CBZ.cityTrueRole && sw.body) {
-      const tr = CBZ.cityTrueRole(sw.body);
-      if (tr && tr.title) {
-        sw.theirs._claimRole = tr.title;
-        sw.theirs._claimOrg = sw.body.gang ? ("gang:" + sw.body.gang)
-          : (sw.body.kind === "cop" ? "police" : (sw.body.milRank ? "army" : null));
-        sw.theirs._claimArms = (sw.body.kind === "cop" || sw.body.gang || sw.body.milRank ||
-          sw.body.kind === "security") ? "gun" : "none";
+    // A cop's shirt and a set's colours say who you are by themselves
+    // (claimOf). Anything else is stamped with what the body really was: his
+    // org in the words the people at the door use (orgOf: a soldier's
+    // fatigues claim "army", a desk sergeant's shirt "police") and his true
+    // job (cityTrueRole, never his cover). Always a copy: a catalog record is
+    // shared, and a claim stamped on it would dress every later wearer.
+    const theirs = Object.assign({}, sw.theirs);
+    const body = sw.body;
+    if (body && !theirs.cop && !theirs.gang) {
+      const tr = CBZ.cityTrueRole ? CBZ.cityTrueRole(body) : null;
+      const org = orgOf(body);
+      const title = (tr && tr.title) || (org === "army" ? "Soldier" : org === "police" ? "Officer" : null);
+      if (title) {
+        theirs._claimRole = title;
+        theirs._claimOrg = org;
+        theirs._claimArms = (org || body.kind === "security" || body.armed) ? "gun" : "none";
       }
     }
-    wearRecord(sw.theirs);
+    wearRecord(theirs);
     // (a) burned on arrival if somebody watched you take it.
     if (sw.witness) disguiseBlow(sw.witness, "I saw what you did to him.");
   }
@@ -2387,17 +2613,19 @@
   // is enough — a uniform whose provenance was observed is not a disguise.
   function strippingWitness(body) {
     const P = CBZ.player; if (!P || !body) return null;
-    const px = P.pos.x, pz = P.pos.z;
-    const pools = [CBZ.cityCops, CBZ.cityPeds];
-    for (let q = 0; q < pools.length; q++) {
-      const arr = pools[q]; if (!arr) continue;
+    const px = P.pos.x, pz = P.pos.z, py = P.pos.y || 0;
+    for (let q = 0; q < 2; q++) {
+      const arr = q === 0 ? CBZ.cityCops : CBZ.cityPeds; if (!arr) continue;
       for (let i = 0; i < arr.length; i++) {
         const a = arr[i];
         if (!a || a.dead || a === body || a.isPlayer || a._parked || (a.ko || 0) > 0) continue;
         if (a.companion || a.recruited || a.controlled) continue;   // your own people don't tell
         if (a.enterT > 0 || (a.group && !a.group.visible)) continue; // indoors / not rendered
         const dx = a.pos.x - px, dz = a.pos.z - pz;
-        if (dx * dx + dz * dz <= 22 * 22) return a;
+        if (dx * dx + dz * dz > 22 * 22) continue;
+        // a wall between you is nobody watching
+        if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(a.pos.x, (a.pos.y || 0) + 1.55, a.pos.z, px, py + 1.0, pz)) continue;
+        return a;
       }
     }
     return null;
@@ -2790,10 +3018,9 @@
     buildGangOutfits();
     const w = worn();
     if (_appliedId !== w.id) applyPlayer();
-    // §DISGUISE breakers (c) wrong weapon and (d) somebody senior recognises
-    // that they do not know you. Both are no-ops the instant you are not
-    // pretending to be anybody, which is the overwhelmingly common case.
-    disguiseTick(dt);
+    // §DISGUISE: the close look and the breakers. Nothing to do unless you
+    // wear somebody's uniform.
+    lookTick(dt);
     // COPS wear the painted uniform too (badge/belt/patches) — makeCop lives
     // in police.js, which we don't edit: a cheap throttled sweep dresses any
     // not-yet-painted cop rig through the same API. One pass per cop, ever

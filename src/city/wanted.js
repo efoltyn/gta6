@@ -751,7 +751,12 @@
     const inset = +CBZ.CONFIG.WANTED_MIL_ZONE_INSET || 0;
     const x = P.pos.x, z = P.pos.z;
     const inside = x > B.minX + inset && x < B.maxX - inset && z > B.minZ + inset && z < B.maxZ - inset;
-    if (!inside) { if (milLock) releaseMilZone(); else milWarnT = 0; return; }
+    // IN THEIR OWN FATIGUES YOU ARE NOT AN INCURSION. A soldier's uniform taken
+    // off a body (city/outfits.js) walks you through the wire like any other
+    // soldier; it stops working the moment the cover is blown or you reach 2*,
+    // and then the grid locks on as before.
+    const uniform = !milLock && CBZ.cityDisguiseTrust && CBZ.cityDisguiseTrust("army");
+    if (!inside || uniform) { if (milLock) releaseMilZone(); else milWarnT = 0; return; }
     if (!milLock) {
       if (milWarnT === 0 && CBZ.city && CBZ.city.big) CBZ.city.big("RESTRICTED AREA. TURN BACK");
       milWarnT += dt;
