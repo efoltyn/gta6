@@ -3751,10 +3751,17 @@
      Island modes (survival, the isles, shark sim) read the island's sea
      (CBZ.survSeaHeightAt: arena mean + front drop + arena-field shoaling +
      the run-up field) and its ground; the city reads citySeaHeightAt and its
-     bathymetry; a page with an adopted sea reads that sheet's level. */
+     bathymetry; a page that hands its own moving surface (waterPageSurface)
+     reads that; a page with an adopted sea reads that sheet's level. */
   const _cur = { x: 0, z: 0 }, _gwf = { x: 0, z: 0, speed: 0 };
-  let pageSeaY = null;
+  let pageSeaY = null, pageHeightAt = null, pageBedY = null;
   CBZ.waterPageSeaY = function (y) { if (Number.isFinite(+y)) pageSeaY = +y; return pageSeaY; };
+  // a page whose sheet moves on the CPU (NPC War's OPEN WATER swell) hands
+  // its own height and its bed, so this door answers the surface it draws
+  CBZ.waterPageSurface = function (heightAt, bedY) {
+    pageHeightAt = typeof heightAt === "function" ? heightAt : null;
+    pageBedY = Number.isFinite(+bedY) ? +bedY : null;
+  };
   CBZ.waterSurfaceAt = function (x, z, out) {
     out = out || {};
     const g = CBZ.game;
@@ -3765,6 +3772,10 @@
       depth = Math.max(0, y - bed);
       eventCurrent(x, z, _cur);
       vx = _cur.x; vz = _cur.z;
+    } else if (pageHeightAt) {
+      y = +pageHeightAt(x, z);
+      if (!Number.isFinite(y)) y = pageSeaY != null ? pageSeaY : 0;
+      depth = pageBedY != null ? Math.max(0, y - pageBedY) : 30;
     } else if (CBZ.citySeaHeightAt && pageSeaY == null) {
       y = CBZ.citySeaHeightAt(x, z);
       const bedD = CBZ.citySeaBedDepth ? +CBZ.citySeaBedDepth(x, z) || 0 : 0;
