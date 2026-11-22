@@ -701,7 +701,16 @@
         // Decide the program before construction. Integrated skyline lots are
         // still the same shop/home records; only their final shell height differs.
         const isShop = (pick.lotKind || (lt.zone === "residential" ? "home" : "shop")) === "shop";
-        const storeys = storeysFor(pick.storeys, lt.ring, lt, isShop); // one shell, final height
+        const storeysBase = storeysFor(pick.storeys, lt.ring, lt, isShop); // one shell, final height
+        /* WHO LIVES ON THIS STREET (city/house_plan.js wealth: the town's own
+           level, nudged by what the home rents for). A street with money
+           builds two storeys where a poor one builds a bungalow, and each
+           wears a house grammar of its own kind. Pure geometry: no rng draw. */
+        const HK = !isShop && !RURAL && CBZ.cityHouse ? CBZ.cityHouse : null;
+        const hWealth = HK ? HK.wealth({ cx: lt.cx, cz: lt.cz, town: cfg.name, district: district, wealth: cfg.wealth,
+          building: { home: { rent: pick.rent != null ? pick.rent : 90 } } }) : 0.5;
+        const hTier = HK ? HK.tierOf(hWealth) : "mid";
+        const storeys = (HK && hTier === "rich" && storeysBase === 1) ? 2 : storeysBase;
         const color = pick.color != null ? pick.color : WOOD;
         // V2: numeric door side (see SIDE_IDX finding). Homes use the shared
         // clean glass shell; buildings.js deliberately normalizes the removed
@@ -724,9 +733,20 @@
            dressed after the shell is built. Pure geometry: no rng draw. */
         const HLOT = !isShop && CBZ.houseLot && !RURAL ? CBZ.houseLot.plan({
           cx: lt.cx, cz: lt.cz, w: lt.w, d: lt.d, nx: lt.door.nx, nz: lt.door.nz,
-          want: { w: Math.min(12.5, (lt.door.nx ? lt.d : lt.w) - 2 * CBZ.houseLot.SIDE), d: Math.min(11.5, (lt.door.nx ? lt.w : lt.d) * 0.55) },
-          garage: storeys <= 3,
+          want: { w: Math.min(hTier === "poor" ? 10.4 : hTier === "rich" ? 13.5 : 12.5, (lt.door.nx ? lt.d : lt.w) - 2 * CBZ.houseLot.SIDE),
+            d: Math.min(hTier === "poor" ? 9.2 : 11.5, (lt.door.nx ? lt.w : lt.d) * (storeys >= 2 ? 0.6 : 0.55)) },
+          minD: storeys >= 2 ? 9 : 8,
+          // a poor street mostly parks on a bare drive; one with money builds a
+          // double garage and keeps a garden behind the house
+          garage: storeys <= 3 && (hTier !== "poor" || (CBZ.hash01 ? CBZ.hash01(lt.cx, lt.cz, 0x9a8) : 0) < 0.4),
+          garageW: hTier === "rich" ? CBZ.houseLot.GARAGE2 : undefined,
+          rear: hTier === "rich" && (lt.door.nx ? lt.w : lt.d) >= 24 ? 6.5 : undefined,
         }) : null;
+        // a house (not a block that happens to stand on a house lot): its own
+        // stair instead of a service core, a house grammar by who lives there
+        const isHouse = !!(HLOT && HK && storeys <= 4);
+        const hStyle = isHouse && HK.styleFor && !(pick.opts && pick.opts.dress !== undefined)
+          ? HK.styleFor({ cx: lt.cx, cz: lt.cz, town: cfg.name, district: district }, storeys, hWealth) : null;
         const fit = !HLOT && CBZ.cityFitShell ? CBZ.cityFitShell(lt.cx, lt.cz, lt.w, lt.d, 0.75, storeys,
           typeof sideArg === "number" ? sideArg : null, baseOpts) : null;
         const w = HLOT ? HLOT.w : Math.max(8, fit ? fit.w : lt.w - 1.5), d = HLOT ? HLOT.d : Math.max(8, fit ? fit.d : lt.d - 1.5);
@@ -734,7 +754,8 @@
         // the lot fence: a house's yards are its own margins (the plan keeps
         // them clear), so only a shell filling its parcel is fenced
         const lotReach = HLOT ? -1 : Math.min(lt.w - w, lt.d - d) / 2;
-        const shellOpts = lotReach > 0.05 ? Object.assign({}, baseOpts, { reach: lotReach }) : baseOpts;
+        const shellOpts = isHouse ? Object.assign({}, baseOpts, { stairs: false }, hStyle ? { dress: { style: hStyle } } : null)
+          : (lotReach > 0.05 ? Object.assign({}, baseOpts, { reach: lotReach }) : baseOpts);
         // the door point: 1.6 m out from the door, wherever the house stands
         const doorPt = HLOT
           ? { x: bx + lt.door.nx * (HLOT.hd / 2 + 1.6), z: bz + lt.door.nz * (HLOT.hd / 2 + 1.6), nx: lt.door.nx, nz: lt.door.nz }
@@ -774,6 +795,9 @@
           // leave the driveway to the painted lot ground
           street: kit ? { footway: FOOTWAY, yLot: LOT_Y, ground: true } : { footway: 0, yLot: 0.03, rural: true },
         };
+        // the parcel the house stands on (the record's w, d are the shell's),
+        // and who lives there
+        if (HLOT) { lotRec.parcel = { w: lt.w, d: lt.d }; lotRec.wealth = hWealth; }
         const bb = lotRec.building;
         // a house on a lot: where it stands and where its own drive runs
         // (city/approach.js lays the drive there instead of on the centreline)
@@ -835,6 +859,12 @@
                 }
               }
             }
+          } else if (isHouse && bb.lbox) {
+            // A HOUSE: its own floor plan (hall, living room, kitchen,
+            // bedrooms, bathroom, a stair where it has an upstairs), room
+            // doors, and the "house" fit-out on every floor
+            // (city/house_plan.js + city/fitout_house.js)
+            try { HK.furnish(bb, lotRec); } catch (e) { if (window.console) console.warn("[town house]", e); }
           } else if (V2 && CBZ.cityFurnishApartment) {
             // V2 — a LIVED-IN home: every storey dressed as a real flat, which
             // auto-registers sleepable beds/sittable seats (propRegisterBed/Seat
@@ -853,7 +883,7 @@
           // shop pass), so the town mounts its own compact facade board here.
           // the house's land: garage wing, walk, front hedge or fence, back
           // fence, shrubs, mailbox (city/house_yard.js)
-          if (HLOT) { try { CBZ.houseLot.dress(root, Object.assign({}, HLOT, { y: LOT_Y })); } catch (e) {} }
+          if (HLOT) { try { CBZ.houseLot.dress(root, Object.assign({}, HLOT, { y: LOT_Y, storeys: bb.storeys, tier: hTier, wealth: hWealth, lot: lotRec })); } catch (e) { if (window.console) console.warn("[house lot]", e); } }
           if (isShop && pick.name) mountShopSign(lt, color, pick.name, w, d);
           if (isShop) shopCanopy(lt, w, d, sk);
           // a late parcel's canopy is merged with it (the town's merge ran long

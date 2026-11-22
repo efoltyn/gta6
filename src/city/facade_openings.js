@@ -396,6 +396,10 @@
        o: { number, frameCol, stoneCol, lampCol, transom: bool, stoop: bool,
             light: bool, canopy: bool, own: bool (a grammar drew its own
             doorcase: frame + number only) }                                  */
+  // the paints a house's front door comes in (the Natural Disaster island's
+  // houses and Gang City's wear the same ones: world/disaster_arena.js doorSet,
+  // city/buildings.js makeDoorPanel)
+  FO.DOOR_PAINTS = [0x24503a, 0x1c3460, 0x8a2420, 0x1c1c1c, 0x6e4526, 0xe6e0d2, 0x35606e, 0x9a7222];
   FO.DOOR = { W: 1.6, H: 2.25, LEAF_RECESS: 0.12,
     // how far the entrance stands out over the walk (m past the wall face):
     // a townhouse stoop's landing + tread (+ its newel caps), a lobby's broad

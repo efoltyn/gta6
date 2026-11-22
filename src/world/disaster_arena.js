@@ -4011,7 +4011,8 @@
       }
       return _doorMat;
     }
-    const DOOR_PAINTS = [0x24503a, 0x1c3460, 0x8a2420, 0x1c1c1c, 0x6e4526, 0xe6e0d2, 0x35606e, 0x9a7222];
+    // (one list for both games: city/facade_openings.js FO.DOOR_PAINTS)
+    const DOOR_PAINTS = (CBZ.facadeOpenings && CBZ.facadeOpenings.DOOR_PAINTS) || [0x24503a, 0x1c3460, 0x8a2420, 0x1c1c1c, 0x6e4526, 0xe6e0d2, 0x35606e, 0x9a7222];
     const DOOR_SHOPS = [0x1c1c1e, 0x2a2622, 0x5a3d24, 0x1f3a2c, 0x33383d, 0x6b4a2a];
     const DOOR_CIVIC = [0x4a2f1a, 0x3a2a1c, 0x24352c, 0x2a2622];
     function doorKindOf(kind) {

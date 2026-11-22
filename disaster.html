@@ -607,7 +607,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=body1122f"></script>
+  <script src="src/entities/character.js?v=shops1122d"></script>
   <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -849,7 +849,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisonvoice.js?v=voice1022"></script>
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
-<script src="src/systems/camera.js?v=pres1028"></script>
+<script src="src/systems/camera.js?v=rigid1122"></script>
 <script src="src/systems/physics.js?v=shot1122"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- THE ONE MOVER (CBZ.bodyMove) every human body is moved through, and the per-frame net (onUpdate 99.97) that puts back anything that crossed a wall. After physics.js (sweepCircle/collide/walkGroundAt). -->
@@ -943,7 +943,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=ph1122"></script>
+<script src="src/systems/state.js?v=intake1122"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1200,6 +1200,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE HOUSE LOT: a detached house standing on its land (front yard, side yards, the
      garage wing on the driveway, walk, hedge / fence, back fence, mailbox). towngen.js and
      buildings.js call it at build time. -->
+<script src="src/city/house_plan.js?v=house1122"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
 <script src="src/city/worldmap.js?v=farcopy1013"></script>
@@ -1644,7 +1645,12 @@ document.body.appendChild(b);}}catch(e){}})();
      near you, plus its real catalog stock as the real item models, buyable
      where they stand. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
-<script src="src/city/storegoods.js?v=r187a"></script>
+<script src="src/city/storegoods.js?v=shops1122d"></script>
+<!-- THE CAR DEALER (city/dealership.js): the cars on a dealer's floor are its
+     stock, each with its price on a sticker in the windscreen, bought (or
+     financed) standing at it. After buildings.js (CBZ.cityShowroomCars),
+     interactions.js and bank.js (the auto note). -->
+<script src="src/city/dealership.js?v=shops1122d"></script>
 <!-- THE ISLANDS' SHOPS (world/island_shops.js): every island outfitter, tailor,
      optician, phone shop and trade fitted with the store systems above, per
      building, through CBZ.islandVenue; a counter and a clerk in each. -->
@@ -1677,7 +1683,8 @@ document.body.appendChild(b);}}catch(e){}})();
      (which declares every floor to it). -->
 <script src="src/city/fitout.js?v=r187a"></script>
 <script src="src/city/fitout_plans.js?v=loose1013"></script>
-<script src="src/city/fitout_work.js?v=loose1013"></script>
+<script src="src/city/fitout_house.js?v=house1122"></script>
+<script src="src/city/fitout_work.js?v=shops1122d"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
 <script src="src/city/swim.js?v=wake1122a"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
@@ -1817,7 +1824,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/hitman_hands.js?v=r187a"></script>
 <script src="src/city/hitman_room.js?v=r187a"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
-<script src="src/city/hitman_fallout.js?v=w09290219"></script>
+<script src="src/city/hitman_fallout.js?v=roofscene1122"></script>
 <script src="src/city/agency.js?v=ijkl1022"></script>
 <!-- AUTHORED HITMAN JOBS (one file each, registered with CBZ.hitmanJobs in
      city/hitman.js; delivered by the burner, the envelope and the folder).
@@ -1825,6 +1832,10 @@ document.body.appendChild(b);}}catch(e){}})();
      his throat and comes up your building for you. Needs elevators.js's
      CBZ.cityLiftRide / CBZ.cityStairCore (below; read at run time). -->
 <script src="src/city/hitman_m_sawyou.js?v=sawyou1122"></script>
+<!-- duel: a rifle on a far roof that is hunting you back. His glass, his
+     muzzle flash, the round arriving before its sound, a dummy position, a
+     new corner after every shot; and a body to go and find when it goes quiet. -->
+<script src="src/city/hitman_m_duel.js?v=duel1122"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/systems/humancontact.js?v=wall1122"></script>

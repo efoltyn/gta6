@@ -20,12 +20,19 @@
    and the house on your map; Buy closes it there and then; Finance and Rent
    are on his wheel. He is the one who sells the penthouse its hangar.
 
-   THE HOUSE, WHEN IT IS YOURS. In the hall, off the walkway:
-     the safe      cash goes in and comes out by hand (and the duffels
+   THE HOUSE, WHEN IT IS YOURS. Each thing in its own place in the house's
+   floor plan (city/house_plan.js spot(): the house says where), solid:
+     the safe      in the main bedroom's closet (the study, in a house with
+                   one). Cash goes in and comes out by hand (and the duffels
                    city/cashstore.js always kept there)
-     the gun rack  the gun in your hands goes on a peg, where you can see
-                   it; take one down and it is in your hands
-     the wardrobe  change into the next thing you own
+     the gun rack  on a wall the house keeps clear for it. The gun in your
+                   hands goes on a peg, where you can see it; take one down
+                   and it is in your hands
+     the wardrobe  the main bedroom's own. Change into the next thing you own
+   A flat in a tower has them in the flat, on its own floor, by its bed.
+   WHAT YOU OWN, AT THE AGENT. He sells a place for you (it is also sold by
+   standing its FOR SALE sign back up: city/plots.js) and takes what the bank
+   is owed on it; so does the bank's own counter.
    The bed is the house's own bed (city/propuse.js): sleeping in a bed you
    own is the full night (healed, fed, rested, wounds dressed, the heat off
    you) and makes that house the one you wake up in.
@@ -207,6 +214,7 @@
     g.cityViewing = null;
     grantKey(lot);
     armPenthouse(lot);
+    spotCache.delete(lot);
     if (CBZ.cityPlots) { try { if (CBZ.cityPlots.sync) CBZ.cityPlots.sync(); if (CBZ.cityPlots.markSold) CBZ.cityPlots.markSold(lot); } catch (e) {} }
     if (by) say(by, pick(["Congratulations. It's yours. Here are the keys.", "Done. The keys. Enjoy the place."], lot.cx));
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -268,6 +276,7 @@
     const have = (g.cash || 0) + (g.cityBank || 0);
     let i = 0;
     for (let k = 0; k < list.length; k++) if (list[k].price <= have) i = k;
+    p._own = null;
     p._pitch = { list: list, i: i, until: T + 90 };
     tell(p);
   }
@@ -337,9 +346,21 @@
   }
   const spotCache = new WeakMap();
   function spots(lot) {
-    const built = !!(lot.building && lot.building.colliders && lot.building.colliders.length);
+    const b0 = lot.building;
+    const built = (b0 && b0.colliders && b0.colliders.length ? "b" : "") + (b0 && b0._house ? "h" : "") + (b0 && b0.group ? "g" : "");
     const hit = spotCache.get(lot);
     if (hit && hit.built === built) return hit.s;
+    /* THE HOUSE SAYS WHERE (city/house_plan.js): the safe in the bedroom
+       closet or the study, the rack on a wall kept clear for it, the wardrobe
+       in the main bedroom; in a tower, clear wall in the flat itself, on its
+       own floor. Each spot carries its floor height (y). What follows is the
+       fallback for a home with no plan yet: the hall behind the door. */
+    const HK = CBZ.cityHouse;
+    if (HK && HK.spot) {
+      let a = null, r = null, w = null;
+      try { a = HK.spot(lot, "safe"); r = HK.spot(lot, "rack"); w = HK.spot(lot, "wardrobe"); } catch (e) { a = r = w = null; }
+      if (a && r && w) { const sp = { safe: a, rack: r, wardrobe: w }; spotCache.set(lot, { built: built, s: sp }); return sp; }
+    }
     const f = front(lot); if (!f) return null;
     const ix = -f.ox, iz = -f.oz;                        // into the house
     const at = function (inn, lat, back) {
@@ -362,15 +383,20 @@
   function ownedHomes() {
     try { return CBZ.cityRealtyOwnedHomes ? (CBZ.cityRealtyOwnedHomes() || []) : []; } catch (e) { return []; }
   }
+  // the owned home you are in or at: measured off its walls (a flat's things
+  // are up in the flat, not by the street door)
   function homeNear(x, z, r) {
     let best = null, bd = r * r;
     for (const h of ownedHomes()) {
       const lot = h.lot; if (!lot || lot.demolished) continue;
-      const d = (h.x - x) * (h.x - x) + (h.z - z) * (h.z - z);
+      const q = rectOf(lot);
+      const dx = Math.max(0, Math.abs(x - q.cx) - q.hw), dz = Math.max(0, Math.abs(z - q.cz) - q.hd);
+      const d = dx * dx + dz * dz;
       if (d < bd) { bd = d; best = lot; }
     }
     return best;
   }
+  function spotY(p) { return p && p.y != null ? p.y : floorY(p.x, p.z); }
 
   // ---- what you see: built for the one owned house you are at ----
   const cm = function (c) { return CBZ.cmat ? CBZ.cmat(c) : new THREE.MeshLambertMaterial({ color: c }); };
@@ -405,9 +431,22 @@
     const A = arena(), s = spots(lot); if (!A || !A.root || !s) return;
     const grp = new THREE.Group(); grp.userData.transient = true;
     const wood = cm(0x6b4a2e), woodD = cm(0x4a3220), steel = cm(0x2b2f35), brass = cm(0xb89a4a);
+    // EACH IS SOLID. A thing with its back on a wall: `wide` along the wall,
+    // from the wall `d0`..`d1` out into the room (its place is 0.31 m off it)
+    const cols = [];
+    const solid = function (sp, wide, d0, d1, ya, yb) {
+      const cx = sp.x + sp.fx * (0.31 - (d0 + d1) / 2), cz = sp.z + sp.fz * (0.31 - (d0 + d1) / 2);
+      const hx = Math.abs(sp.fx) > 0.5 ? (d1 - d0) / 2 : wide / 2, hz = Math.abs(sp.fx) > 0.5 ? wide / 2 : (d1 - d0) / 2;
+      const c = { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz, y0: ya, y1: yb, ref: grp, noStep: true, homeFixture: true };
+      if (CBZ.colliderAdd) CBZ.colliderAdd(c); else if (CBZ.colliders) { CBZ.colliders.push(c); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+      cols.push(c);
+    };
+    const yR = spotY(s.rack), yS = spotY(s.safe), yW = spotY(s.wardrobe);
+    solid(s.rack, 1.56, 0, 0.14, yR + 0.7, yR + 1.95);
+    solid(s.safe, 0.64, 0, 0.6, yS, yS + 0.82);
     // the gun rack: a board on the wall with pegs
     const rk = new THREE.Group();
-    rk.position.set(s.rack.x - s.rack.fx * 0.02, floorY(s.rack.x, s.rack.z), s.rack.z - s.rack.fz * 0.02);
+    rk.position.set(s.rack.x - s.rack.fx * 0.02, yR, s.rack.z - s.rack.fz * 0.02);
     rk.rotation.y = Math.atan2(-s.rack.fx, -s.rack.fz);
     const board = new THREE.Mesh(box(1.5, 1.15, 0.04), wood); board.position.set(0, 1.3, -0.28); rk.add(board);
     const rail = new THREE.Mesh(box(1.56, 0.06, 0.07), woodD); rail.position.set(0, 1.9, -0.27); rk.add(rail);
@@ -420,23 +459,32 @@
     }
     const pegs = new THREE.Group(); pegs.position.set(0, 0, -0.26); rk.add(pegs);
     grp.add(rk);
-    // the wardrobe: two doors, a plinth, a rail of hangers showing at the top
-    const wd = new THREE.Group();
-    wd.position.set(s.wardrobe.x + s.wardrobe.fx * 0.02, floorY(s.wardrobe.x, s.wardrobe.z), s.wardrobe.z + s.wardrobe.fz * 0.02);
-    wd.rotation.y = Math.atan2(-s.wardrobe.fx, -s.wardrobe.fz);
-    const carc = new THREE.Mesh(box(1.1, 2.0, 0.55), woodD); carc.position.set(0, 1.03, -0.02); carc.castShadow = true; wd.add(carc);
-    for (const sx of [-1, 1]) {
-      const door = new THREE.Mesh(box(0.52, 1.86, 0.03), wood); door.position.set(sx * 0.27, 1.05, 0.27); wd.add(door);
-      const knob = new THREE.Mesh(box(0.025, 0.12, 0.03), brass); knob.position.set(sx * 0.05, 1.05, 0.295); wd.add(knob);
+    // the wardrobe: two doors, a plinth, a rail of hangers showing at the top.
+    // (A house with a floor plan has its own in the main bedroom, the
+    // fit-out's, solid already: `drawn`. This one is a flat's.)
+    if (!s.wardrobe.drawn) {
+      const wd = new THREE.Group();
+      wd.position.set(s.wardrobe.x + s.wardrobe.fx * 0.02, yW, s.wardrobe.z + s.wardrobe.fz * 0.02);
+      wd.rotation.y = Math.atan2(-s.wardrobe.fx, -s.wardrobe.fz);
+      const carc = new THREE.Mesh(box(1.1, 2.0, 0.55), woodD); carc.position.set(0, 1.03, -0.02); carc.castShadow = true; wd.add(carc);
+      for (const sx of [-1, 1]) {
+        const door = new THREE.Mesh(box(0.52, 1.86, 0.03), wood); door.position.set(sx * 0.27, 1.05, 0.27); wd.add(door);
+        const knob = new THREE.Mesh(box(0.025, 0.12, 0.03), brass); knob.position.set(sx * 0.05, 1.05, 0.295); wd.add(knob);
+      }
+      const plinth = new THREE.Mesh(box(1.14, 0.06, 0.58), steel); plinth.position.set(0, 0.03, -0.02); wd.add(plinth);
+      grp.add(wd);
+      solid(s.wardrobe, 1.12, 0, 0.6, yW, yW + 2.04);
     }
-    const plinth = new THREE.Mesh(box(1.14, 0.06, 0.58), steel); plinth.position.set(0, 0.03, -0.02); wd.add(plinth);
-    grp.add(wd);
     A.root.add(grp);
-    vis = { lot: lot, grp: grp, rack: pegs, sig: null };
+    vis = { lot: lot, grp: grp, rack: pegs, sig: null, cols: cols, spots: s };
     fillRack(lot);
   }
   function dropVis() {
     if (vis && vis.grp && vis.grp.parent) vis.grp.parent.remove(vis.grp);
+    if (vis && vis.cols) for (const c of vis.cols) {
+      if (CBZ.colliderRemove) { try { CBZ.colliderRemove(c); } catch (e) {} }
+      else if (CBZ.colliders) { const i = CBZ.colliders.indexOf(c); if (i >= 0) { CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); } }
+    }
     vis = null;
   }
 
@@ -553,8 +601,16 @@
     const lat = (lot.cx + f.tx * b.driveAt - f.x) * f.tx + (lot.cz + f.tz * b.driveAt - f.z) * f.tz;
     return { x: f.x + f.tx * lat + f.ox * 4.2, z: f.z + f.tz * lat + f.oz * 4.2, heading: Math.atan2(-f.ox, -f.oz) };
   }
-  function carCap(lot) { const h = homeOf(lot); return standOf(lot) ? Math.max(1, Math.min(2, (h && h.garage) | 0)) : 0; }
+  function carCap(lot) {
+    const h = homeOf(lot); if (!standOf(lot)) return 0;
+    const gs = lot.building.garage && lot.building.garage.stands;
+    return gs && gs.length ? Math.min(2, gs.length) : Math.max(1, Math.min(2, (h && h.garage) | 0));
+  }
   function standN(lot, n) {
+    // a lot that says where each of its cars stands (city/house_yard.js: side
+    // by side before a double garage, nose to tail on a single drive)
+    const gs = lot && lot.building && lot.building.garage && lot.building.garage.stands;
+    if (gs && gs[n] && isFinite(gs[n].x)) return { x: gs[n].x, z: gs[n].z, heading: gs[n].heading || 0 };
     const s = standOf(lot); if (!s || !n) return s;
     // the second car stands behind the first, toward the street
     return { x: s.x - Math.sin(s.heading) * 5.6 * n, z: s.z - Math.cos(s.heading) * 5.6 * n, heading: s.heading };
@@ -639,13 +695,16 @@
     // one target object per thing: the card's hysteresis compares identity
     const tgt = { safe: { pos: { x: 0, y: 0.6, z: 0 } }, rack: { pos: { x: 0, y: 1.4, z: 0 } }, wardrobe: { pos: { x: 0, y: 1.2, z: 0 } } };
     const finder = function (what, reach) {
-      return function (px, pz) {
-        const lot = homeNear(px, pz, 14); if (!lot) return null;
+      return function (px, pz, ctx) {
+        const lot = homeNear(px, pz, 3); if (!lot) return null;
         const s = spots(lot); if (!s) return null;
         const p = s[what];
         if (Math.hypot(p.x - px, p.z - pz) > reach) return null;
+        // on the floor it stands on (the study's safe is not the bedroom's above it)
+        const y = spotY(p), py = ctx && ctx.pos ? ctx.pos.y : (CBZ.player && CBZ.player.pos ? CBZ.player.pos.y : y);
+        if (py < y - 1.0 || py > y + 1.9) return null;
         const t = tgt[what]; t.x = t.pos.x = p.x; t.z = t.pos.z = p.z; t.lot = lot;
-        t.pos.y = floorY(p.x, p.z) + (what === "safe" ? 0.6 : 1.3);
+        t.pos.y = y + (what === "safe" ? 0.6 : 1.3);
         return t;
       };
     };
@@ -723,6 +782,88 @@
       function (p) { const l = pitchLot(p); if (buy(l, "rent", p)) p._pitch = null; }, true);
     A("home-hangar", 28, function () { return "Buy the hangar " + money(hangarPrice()); },
       function (p) { return isAgent(p) && !!g.cityOwnsPenthouse && !g.cityOwnsHangar; }, buyHangar, true);
+
+    // ---- what you own: he sells it for you, he takes what the bank is owed ----
+    A("own-ask", 69, "Ask about my properties", function (p) { return isAgent(p) && !ownPitch(p) && ownedList().length > 0; }, startOwn);
+    A("own-sell", 73, function (p) { const m = ownCur(p); return m ? (ownPitch(p).sure === m.lot ? "Yes, sell it for " : "Sell it for ") + money(m.price) : "Sell it"; },
+      function (p) { return isAgent(p) && !!ownCur(p) && ownCur(p).price != null; }, sellOwn);
+    A("own-payoff", 72, function (p) { const m = ownCur(p); return "Pay off the bank " + money(m ? m.owe : 0); },
+      function (p) { const m = isAgent(p) && ownCur(p); return !!m && m.owe > 0 && (g.cash || 0) + (g.cityBank || 0) >= m.owe; }, function (p) { payOwn(p, 1); });
+    A("own-payhalf", 71, function (p) { const m = ownCur(p); return "Pay the bank " + money(m ? Math.round(m.owe * 0.5) : 0); },
+      function (p) { const m = isAgent(p) && ownCur(p); return !!m && m.owe > 0 && (g.cash || 0) + (g.cityBank || 0) >= Math.round(m.owe * 0.5); }, function (p) { payOwn(p, 0.5); });
+    A("own-next", 70, "The next one", function (p) { const s = isAgent(p) && ownPitch(p); return !!s && s.list.length > 1; }, function (p) { const s = ownPitch(p); s.i = (s.i + 1) % s.list.length; s.sure = null; tellOwn(p); });
+    // ---- the bank's own counter takes a mortgage payment too ----
+    const isBanker = function (p) {
+      const v = p && !p.dead && p.vendor; const b = v && v.building;
+      return !!(b && !v.demolished && (v.kind === "bank" || (b.shop && b.shop.kind === "bank")));
+    };
+    const owedMost = function () { let best = null; for (const m of ownedList()) if (m.owe > 0 && (!best || m.owe > best.owe)) best = m; return best; };
+    const payBank = function (p, frac) {
+      const m = owedMost(), z = Z(); if (!m || !z || !z.payMortgageByLot) return;
+      const msg = z.payMortgageByLot(m.lot, frac);
+      sfx("coin"); say(p, typeof msg === "string" && msg ? msg : "That's come off what you owe.");
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    };
+    A("bank-mortgage-off", 40, function () { const m = owedMost(); return m ? "Pay off " + nameOf(m.lot) + " " + money(m.owe) : "Pay off the mortgage"; },
+      function (p) { const m = isBanker(p) && owedMost(); return !!m && (g.cash || 0) + (g.cityBank || 0) >= m.owe; }, function (p) { payBank(p, 1); }, true);
+    A("bank-mortgage-half", 39, function () { const m = owedMost(); return m ? "Pay " + money(Math.round(m.owe * 0.5)) + " off " + nameOf(m.lot) : "Pay the mortgage"; },
+      function (p) { const m = isBanker(p) && owedMost(); return !!m && (g.cash || 0) + (g.cityBank || 0) >= Math.round(m.owe * 0.5); }, function (p) { payBank(p, 0.5); }, true);
+  }
+
+  /* ---- WHAT YOU OWN, AT THE AGENT -------------------------------------------
+     The same book, your pages: he tells you one of your properties (what he
+     can get for it today, what the bank is owed on it) and sells it on your
+     word, said twice. (It used to be the Sell row of a panel on the lot's
+     address post.) */
+  function ownedList() {
+    const z = Z(); if (!z || !z.ownedLots) return [];
+    const out = [];
+    let L = []; try { L = z.ownedLots() || []; } catch (e) { L = []; }
+    for (const lot of L) {
+      if (!lot) continue;
+      const mt = z.mortgageForLot ? z.mortgageForLot(lot) : null;
+      out.push({ lot: lot, price: z.sellPriceForLot ? z.sellPriceForLot(lot) : null, owe: mt && mt.balance > 0 ? Math.round(mt.balance) : 0 });
+    }
+    return out;
+  }
+  function ownPitch(p) { const s = p && p._own; return s && T < s.until && s.list.length ? s : null; }
+  function ownCur(p) { const s = ownPitch(p); return s ? s.list[Math.min(s.i, s.list.length - 1)] : null; }
+  function tellOwn(p) {
+    const s = ownPitch(p), m = ownCur(p); if (!s || !m) return;
+    s.until = T + 90;
+    const addr = addressOf(m.lot);
+    say(p, nameOf(m.lot) + (addr ? ", " + addr : "") + ". " + (m.price != null ? "I can get you " + money(m.price) + " for it today." : "") +
+      (m.owe > 0 ? " The bank is owed " + money(m.owe) + " on it." : ""), 5.5);
+  }
+  function startOwn(p) {
+    const list = ownedList();
+    if (!list.length) { say(p, "You don't own anything I can sell."); return; }
+    p._pitch = null;
+    p._own = { list: list, i: 0, until: T + 90, sure: null };
+    tellOwn(p);
+  }
+  function sellOwn(p) {
+    const s = ownPitch(p), m = ownCur(p), z = Z(); if (!s || !m || !z || !z.sellByLot) return;
+    if (s.sure !== m.lot) { s.sure = m.lot; s.until = T + 30; say(p, "Sell " + nameOf(m.lot) + " for " + money(m.price) + "? Say the word and it's done."); return; }
+    const lot = m.lot;
+    let ok = false; try { ok = !!z.sellByLot(lot); } catch (e) { ok = false; }
+    if (!ok) { say(p, (z.lastMessage && z.lastMessage()) || "I can't sell that one."); s.sure = null; return; }
+    sfx("coin");
+    if (isHouse(lot)) dropKey(lot);
+    if (CBZ.cityPlots) { try { if (CBZ.cityPlots.sync) CBZ.cityPlots.sync(); if (CBZ.cityPlots.markSold) CBZ.cityPlots.markSold(lot); } catch (e) {} }
+    say(p, pick(["Sold. The money's yours.", "Done. It's off your hands, the money's in."], lot.cx));
+    s.list = ownedList(); s.i = 0; s.sure = null;
+    if (!s.list.length) p._own = null;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    commit();
+  }
+  function payOwn(p, frac) {
+    const m = ownCur(p), z = Z(); if (!m || !z || !z.payMortgageByLot) return;
+    const msg = z.payMortgageByLot(m.lot, frac);
+    sfx("coin");
+    say(p, typeof msg === "string" && msg ? msg : "That's come off what you owe.");
+    const s = ownPitch(p); if (s) { s.list = ownedList(); s.i = Math.min(s.i, Math.max(0, s.list.length - 1)); }
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
   /* ============================================================
@@ -743,7 +884,7 @@
     // the hall of the owned house you are at
     const lot = homeNear(P.pos.x, P.pos.z, 45);
     if (lot) {
-      if (!vis || vis.lot !== lot || vis.grp.parent !== (arena() && arena().root)) buildVis(lot);
+      if (!vis || vis.lot !== lot || vis.grp.parent !== (arena() && arena().root) || vis.spots !== spots(lot)) buildVis(lot);
       else if (vis.sig !== stashOf(lot).guns.join(",")) fillRack(lot);
     } else if (vis) dropVis();
     driveTick();

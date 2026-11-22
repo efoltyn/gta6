@@ -902,5 +902,12 @@
       B.box(x, B.fy + 0.006, z, sw ? 1.7 : 2.4, 0.012, sw ? 2.4 : 1.7, RUG[(H(x, z, 0x2A6) * RUG.length) | 0], { faces: 4 });
     });
   }
-  CBZ.fitoutProps = { plant: plant, drawTV: drawTV, drawLaptop: drawLaptop };
+  /* the parts a home is made of, for the other planners of homes
+     (city/fitout_house.js draws a whole house out of the same kitchen run,
+     WC, vanity, bedside table and lamp a flat is made of). frame(U) is the
+     (d, t) frame every one of them is authored in. */
+  CBZ.fitoutProps = { plant: plant, drawTV: drawTV, drawLaptop: drawLaptop,
+    frame: frame, fbox: fbox, skinAt: skinAt, kitchen: drawKitchen, toilet: toilet, vanity: vanity,
+    nightstand: nightstand, tableLamp: tableLamp, frameArt: frameArt, highChair: highChair,
+    PAINT: PAINT, ACCENT: ACCENT, SOFA: SOFA, LINEN: LINEN, RUG: RUG, WOOD: WOOD, ART: ART, COATS: COATS };
 })();

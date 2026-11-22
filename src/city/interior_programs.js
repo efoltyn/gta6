@@ -1207,6 +1207,20 @@
     // hang (or take down) a door's real leaf now, as walking up to it does
     dress: function (d, on) { dress(d, on !== false); return !!d.dressed; },
     openCount: function () { let n = 0; for (let i = 0; i < UNIT_DOORS.length; i++) if (UNIT_DOORS[i].open) n++; return n; },
+    /* A HOUSE'S ROOM DOORS (city/house_plan.js) are these doors: a leaf anybody
+       may open, hung in the doorway at building-local (lx, lz) on floor y of
+       shell b. `extra` rides onto the record (style: "state" = painted
+       joinery). Returns the record, or null where the host drew nothing. */
+    freeDoor: function (b, y, lx, lz, runX, w, hh, hex, hinge, side, label, k, extra) {
+      const h = host({ b: b });
+      if (!h) return null;
+      const d = freeDoor(h, y, lx, lz, runX, w, hh, hex, hinge, side, label, k);
+      if (d && extra) for (const q in extra) d[q] = extra[q];
+      return d;
+    },
+    // the one panelled leaf (and its paint or wood) every hinged door here
+    // wears: a house's street door hangs the same joinery (city/buildings.js)
+    leafGeometry: leafGeometry, leafMaterial: leafMaterial,
   };
   function unitDrop(rec) {
     if (!rec) return;
