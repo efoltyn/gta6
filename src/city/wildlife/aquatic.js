@@ -98,6 +98,19 @@
       const d = mix(hh(xi, yi + 1, zi + 1, s), hh(xi + 1, yi + 1, zi + 1, s), fx);
       return mix(mix(a, b, fy), mix(c, d, fy), fz);
     }
+    // cellular noise: distance to the nearest and second-nearest cell point
+    // (scales with pale edges, a turtle's head plates)
+    function worley(x, y, z, s) {
+      const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+      let f1 = 9, f2 = 9;
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+        const cx = xi + a, cy = yi + b, cz = zi + c;
+        const px = cx + hh(cx, cy, cz, s), py = cy + hh(cx, cy, cz, s + 1), pz = cz + hh(cx, cy, cz, s + 2);
+        const d = Math.hypot(px - x, py - y, pz - z);
+        if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) f2 = d;
+      }
+      return [f1, f2];
+    }
     function fbm(x, y, z, s, oct) {
       let v = 0, a = 1, n = 0, f = 1;
       for (let o = 0; o < (oct || 3); o++) { v += a * vn(x * f, y * f, z * f, s + o * 31); n += a; a *= 0.5; f *= 2.07; }
@@ -988,7 +1001,22 @@
           const uu = ring[q][0], ww = ring[q][1];
           const P = [O[0] + u[0] * uu + v[0] * vv + w[0] * ww, O[1] + u[1] * uu + v[1] * vv + w[1] * ww, O[2] + u[2] * uu + v[2] * vv + w[2] * ww];
           let wt = chainWeights(chain, P[0]);
-          if (pec) {
+          if (F.bones) {
+            // a wing or flipper with a chain of bones out along its span
+            // (root, middle, tip): blended between the two around this span
+            const bk = F.boneAt, nb = F.bones.length;
+            let wb;
+            if (hf <= bk[0]) wb = [F.bones[0], 1];
+            else if (hf >= bk[nb - 1]) wb = [F.bones[nb - 1], 1];
+            else {
+              let q = 0;
+              while (q < nb - 2 && hf > bk[q + 1]) q++;
+              const t = sm((hf - bk[q]) / (bk[q + 1] - bk[q]));
+              wb = [F.bones[q], 1 - t, F.bones[q + 1], t];
+            }
+            const k = sm((hf - 0.01) / Math.max(0.02, bk[0] + 0.12));
+            wt = scale(chainWeights(chain, O[0]), 1 - k).concat(scale(wb, k));
+          } else if (pec) {
             const k = sm((hf - 0.02) / 0.32);
             const base = chainWeights(chain, O[0]);
             wt = scale(base, 1 - k).concat([F.bone, k]);
@@ -1073,8 +1101,18 @@
       const tailNames = [];
       let prev = "root";
       for (let k = 0; k < bs.tail.length; k++) { const nm = "t" + (k + 1); add(nm, prev, axis(bs.tail[k])); tailNames.push(nm); prev = nm; }
-      if (spec.extraBones) spec.extraBones(add, { sec: sec, axis: axis, ix: ix, PF: PF });
-      (spec.fins || []).forEach(function (f) { if (f.boneName) f.bone = ix[f.boneName]; });
+      // a point a fraction hf out along a fin's span from its root (a wing's
+      // or a flipper's bone pivots)
+      const finPoint = function (name, hf) {
+        const F = (spec.fins || []).filter(function (f) { return f.name === name; })[0];
+        const O = finOrigin(spec, PF, F), v = nrm3(F.dir), d = hf * F.span * L;
+        return [O[0] + v[0] * d, O[1] + v[1] * d, O[2] + v[2] * d];
+      };
+      if (spec.extraBones) spec.extraBones(add, { sec: sec, axis: axis, ix: ix, PF: PF, finPoint: finPoint });
+      (spec.fins || []).forEach(function (f) {
+        if (f.boneName) f.bone = ix[f.boneName];
+        if (f.boneNames) f.bones = f.boneNames.map(function (n) { return ix[n]; });
+      });
       spec.boneIx = ix;
       // the spine chain: head, neck, root, then the tail bones
       const cb = [ix.head, ix.neck, ix.root].concat(tailNames.map(function (n) { return ix[n]; }));
@@ -1227,7 +1265,7 @@
     }
 
     return {
-      TAG: TAG, curve: curve, fbm: fbm, vn: vn, hexc: hexc, mixc: mixc, mulc: mulc, mix: mix, sm: sm, cl: cl,
+      TAG: TAG, curve: curve, fbm: fbm, vn: vn, worley: worley, hexc: hexc, mixc: mixc, mulc: mulc, mix: mix, sm: sm, cl: cl,
       nrm3: nrm3, crs: crs, sub3: sub3, dt3: dt3, Store: Store, finalize: finalize, material: material,
       buildSwimmer: buildSwimmer, sectionAt: sectionAt, ringPoint: ringPoint, ringNormal: ringNormal,
       makeProfile: makeProfile, chainWeights: chainWeights, buildFin: buildFin, buildEye: buildEye,
@@ -5525,232 +5563,203 @@
     build: function () { return marineBuild(HUMPBACK_SPEC); },
   });
 
-  /* ---- GIANT MANTA RAY. The wing IS a fin, so it is built with the fin
-     grammar: one swept blade per side with a bowed leading edge, a concave
-     trailing edge and a knife-edge tip, dark above and white below. The old
-     one was four boxes per side. */
+  /* ---- GIANT MANTA RAY — Mobula birostris. A disc about twice as wide as
+     it is long: the body is a thick flat central lens with the wide terminal
+     mouth at its front between the two cephalic lobes; the wings are the
+     pectoral fins, thin hydrofoils with convex leading edges swept back to
+     pointed tips and concave trailing edges; five gill slits each side on
+     the underside; a small dorsal fin at the base of a whip tail about as
+     long as the body. Black above with the white shoulder chevrons, white
+     below with dark spots and a dark trailing margin. The wings fly: a wave
+     runs out along each from root to tip (city/wildlife_rig.js). 4.4 model
+     units long at scale 1.1 is a 5.1 m disc width. */
+  const MANTA_SPEC = {
+    id: "manta_ray", plan: "flap", profileName: "manta",
+    L: 4.4, xNose: 1.10, axisY: 0.58, noseRound: 0.006, tubeEnd: 0.995, headEnd: 0.20,
+    profile: {
+      half: [[0, 0], [0.004, 0.060], [0.02, 0.085], [0.06, 0.095], [0.12, 0.105], [0.20, 0.110], [0.28, 0.105], [0.36, 0.085], [0.44, 0.055], [0.50, 0.030], [0.54, 0.014], [0.60, 0.008], [0.80, 0.005], [1.0, 0.002]],
+      top: [[0, 0], [0.004, 0.022], [0.02, 0.030], [0.06, 0.042], [0.12, 0.054], [0.20, 0.058], [0.28, 0.055], [0.36, 0.045], [0.44, 0.032], [0.50, 0.020], [0.54, 0.011], [0.60, 0.007], [0.80, 0.004], [1.0, 0.0015]],
+      bot: [[0, 0], [0.004, 0.018], [0.02, 0.024], [0.06, 0.032], [0.12, 0.040], [0.20, 0.044], [0.28, 0.042], [0.36, 0.034], [0.44, 0.024], [0.50, 0.016], [0.54, 0.009], [0.60, 0.006], [0.80, 0.004], [1.0, 0.0015]],
+      nS: [[0, 2.8], [0.10, 2.2], [0.5, 2.0]],
+    },
+    mouth: {
+      front: 0.003, corner: 0.05, alphaF: 1.30, alphaC: 1.50, shape: 0.8, snoutBlend: 0.003,
+      palate: 0.4, floor: 0.4, throat: 0.4, pharynx: 0.04, lipDrop: 0.0005, chinInset: 0.0008,
+    },
+    eye: { s: 0.045, up: 0.10, r: 0.0060, out: 0.45, socket: 0.25, fwd: 0.05 },
+    gills: { n: 5, s0: 0.105, s1: 0.185, lo0: -1.40, hi0: -0.95, lo1: -1.40, hi1: -0.98, depth: 0.0040, flap: 0.0010, gap: 0.0040, slant: 0 },
+    bones: { head: 0.04, neck: 0.10, root: 0.24, tail: [0.45, 0.60, 0.75, 0.90] },
+    extraBones: function (add, k) {
+      add("wR1", "root", k.finPoint("wingR", 0.04)); add("wR2", "wR1", k.finPoint("wingR", 0.40)); add("wR3", "wR2", k.finPoint("wingR", 0.74));
+      add("wL1", "root", k.finPoint("wingL", 0.04)); add("wL2", "wL1", k.finPoint("wingL", 0.40)); add("wL3", "wL2", k.finPoint("wingL", 0.74));
+    },
+    fins: [
+      { name: "wingR", role: "paired", boneNames: ["wR1", "wR2", "wR3"], boneAt: [0.06, 0.42, 0.76], at: 0.06, root: 0.36, span: 0.42, dir: [0, -0.04, 1], chordDir: [1, 0, 0], phi: Math.PI / 2, sweep: 0.40, bow: 0.06, tipC: 0.04, conc: 0.30, rear: 0, rearH: 0, round: 0.04, tc: 0.11, tcTip: 0.06, embed: 0.3 },
+      { name: "wingL", role: "paired", boneNames: ["wL1", "wL2", "wL3"], boneAt: [0.06, 0.42, 0.76], at: 0.06, root: 0.36, span: 0.42, dir: [0, -0.04, -1], chordDir: [1, 0, 0], phi: 1.5 * Math.PI, sweep: 0.40, bow: 0.06, tipC: 0.04, conc: 0.30, rear: 0, rearH: 0, round: 0.04, tc: 0.11, tcTip: 0.06, embed: 0.3 },
+      // the cephalic lobes, unrolled: paddles out of the front corners of the head
+      { name: "lobeR", role: "median", originS: 0.006, originDy: -0.004, originDz: 0.072, root: 0.040, span: 0.070, dir: [1, -0.25, 0.10], chordDir: [0, 1, 0], sweep: 0.0, tipC: 0.7, conc: 0, rear: 0, rearH: 0, round: 0.5, tc: 0.25, tcTip: 0.2, embed: 0.3 },
+      { name: "lobeL", role: "median", originS: 0.006, originDy: -0.004, originDz: -0.072, root: 0.040, span: 0.070, dir: [1, -0.25, -0.10], chordDir: [0, 1, 0], sweep: 0.0, tipC: 0.7, conc: 0, rear: 0, rearH: 0, round: 0.5, tc: 0.25, tcTip: 0.2, embed: 0.3 },
+      { name: "dorsal1", role: "median", at: 0.48, root: 0.040, span: 0.025, dir: [0, 1, 0], phi: Math.PI, sweep: 0.6, tipC: 0.15, conc: 0.1, rear: 0.2, rearH: 0.2, round: 0.3, tc: 0.12, embed: 0.4 },
+    ],
+    jaw: { lift: 0, drop: 0.35, protrude: [0, 0], gap: 0.02 },
+    wave: { lambda: 0.8, amp: 0.05, env: [0.0, 0.0, 1.0], f0: 0.3, fK: 0.5, fMax: 1.0 },
+    finColor: 0x0d1012,
+    lod: [
+      { M: 24, ds: 0.022, headK: 0.7, noseRings: 3, eyeRings: true, gills: true, teeth: true, finSpan: 10, finChord: 8, eyeSeg: 10, eyeRing: 7, pharynx: 3 },
+      { M: 10, ds: 0.070, headK: 0.7, noseRings: 2, eyeRings: false, gills: false, teeth: false, finSpan: 5, finChord: 4, eyeSeg: 6, eyeRing: 4, pharynx: 2 },
+    ],
+  };
+  MANTA_SPEC.makePaint = function (EY) {
+    const roles = {};
+    MANTA_SPEC.fins.forEach(function (f, i) { roles[i + 1] = f.role; });
+    const white = MB.hexc(0xd6dad8), spot = MB.hexc(0x2a2f33), edge = MB.hexc(0x3c4246);
+    return paintKit({
+      L: MANTA_SPEC.L, eyes: EY, finRole: roles,
+      back: 0x0d1012, belly: 0xe6e9e8, fin: 0x0d1012, gum: 0x6f7270, gumDeep: 0x3a3c3b, throat: 0x101112,
+      line: [[0, -0.05], [1, -0.05]], rag: 0.02, specBack: 0.3, specBelly: 0.22, specFin: 0.3,
+      iris: 0x1b1a14, sclera: 0x2c2a24, orbit: 0x0d1012,
+      // the white shoulder chevrons on the wings' upper faces
+      mark: function (c) {
+        if (c.tag !== MB.TAG.FIN || (c.m[3] !== 1 && c.m[3] !== 2)) return NaN;
+        const h = c.m[0], x = c.m[1];
+        const d = ((h - 0.30) / 0.20) * ((h - 0.30) / 0.20) + ((x - 0.34 + 0.25 * (h - 0.3)) / 0.22) * ((x - 0.34 + 0.25 * (h - 0.3)) / 0.22);
+        return 1 - d;
+      },
+      finHook: function (c, col, role) {
+        if (role !== "paired") return col;
+        if (c.f(0) >= 0) return c.f(1) >= 0 ? white : col;
+        // the underside: dark trailing margin and a few dark spots
+        if (c.m[1] > 0.86) return MB.mixc(col, edge, 0.75);
+        const n = MB.vn(c.p[0] * 3.1, c.p[2] * 3.1, 0.5, 41);
+        return n > 0.78 ? MB.mixc(col, spot, MB.sm((n - 0.78) / 0.05)) : col;
+      },
+    });
+  };
   S({
     id: "manta_ray", name: "Giant Manta Ray", biome: "water",
     rarity: "uncommon", hp: 90, fur: "Manta Hide", furValue: 210,
     meat: "Fish Fillet", meatValue: 18, herd: [1, 3], spd: 1.1, danger: 0,
-    aquatic: true, scale: 1.1, color: 0x262c33, clearance: 70, swimDepth: 2.2,
-    swimStyle: "flap",         // wildlife_rig.js: the wings are the stroke
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      const dark = m(0x262c33), pale = m(0xeaeeef), slit = m(0x141a1e), eye = m(0x0a0c0f);
-      const core = hullMesh([dark, pale], bodyRings(-0.95, 1.05, 0.58,
-        [0.10, 0.20, 0.24, 0.22, 0.15], [0.35, 0.60, 0.66, 0.60, 0.44], 8),
-        { sides: 14, bellyCut: [0.02], ragged: 0.04, seed: 103 });
-      core.name = "mantaCore"; g.add(core);
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      [1, -1].forEach(function (s2) {
-        fin([dark, pale], [0.05, 0.575, s2 * 0.52], {
-          span: 2.30, chordRoot: 1.75, chordTip: 0.10, sweep: 0.62, concavity: 0.22,
-          leadBow: 0.09, rearTipH: 0.10, rearTipBack: 0.55, apexRound: 0.06,
-          thick: 0.20, spanSteps: 7, chordSteps: 5, under: true,
-          spanDir: [-0.10, -0.06, s2 * 0.99], chordDir: [1, 0, 0],
-        });
-        // the rolled cephalic lobe ("horn") and the eye behind it
-        fin([dark, pale], [1.16, 0.560, s2 * 0.34], {
-          span: 0.52, chordRoot: 0.22, chordTip: 0.07, sweep: 0.10, concavity: 0.05,
-          rearTipH: 0.30, rearTipBack: 0.05, apexRound: 0.30, thick: 0.14,
-          spanSteps: 4, chordSteps: 3, under: true,
-          spanDir: [0.90, -0.36, s2 * 0.24], chordDir: [0, 0, s2],
-        });
-        const e = new T.Mesh(cachedGeom("eye|0.06", function () {
-          return new T.SphereGeometry(0.06, 7, 5);
-        }), eye);
-        e.position.set(0.98, 0.605, s2 * 0.60); g.add(e);
-      });
-      // THE MOUTH — a wide terminal SLOT, bowed forward in the middle, with a
-      // pale lip above and below. It was a BoxGeometry laid across the face,
-      // which is the last primitive that read as a brick in this animal.
-      const mouth = meshOf(cachedGeom("manta-mouth2", function () {
-        const sh = new Shell(), n = 12, cols = [];
-        for (let i = 0; i <= n; i++) {
-          const t = i / n - 0.5;
-          const z = t * 0.92;
-          const x = 1.13 - t * t * 0.46;                 // bowed forward
-          cols.push({
-            a: sh.v(x, 0.575, z),                        // upper lip, outer
-            b: sh.v(x - 0.055, 0.528, z),                // slot, upper
-            c: sh.v(x - 0.070, 0.489, z),                // slot, lower
-            d: sh.v(x - 0.010, 0.446, z),                // lower lip, outer
-          });
-        }
-        for (let i = 0; i < n; i++) {
-          const p0 = cols[i], p1 = cols[i + 1];
-          sh.quad(1, p0.a, p1.a, p1.b, p0.b);            // upper lip
-          sh.quad(0, p0.b, p1.b, p1.c, p0.c);            // the dark slot
-          sh.quad(1, p0.c, p1.c, p1.d, p0.d);            // lower lip
-        }
-        return sh.geom();
-      }), [slit, m(0x8f9498)]);
-      mouth.name = "mantaMouth";
-      g.add(mouth);
-      const gills = meshOf(cachedGeom("manta-gills", function () {
-        const sh = new Shell();
-        for (let s2 = -1; s2 <= 1; s2 += 2) {
-          for (let i = 0; i < 5; i++) {
-            sh.plate(0, [0.36 - i * 0.17, 0.435, s2 * 0.42], [1, 0, 0], [0, 0, 1], 0.05, 0.30);
-          }
-        }
-        return sh.geom();
-      }), [slit]);
-      g.add(gills);
-      // the whip tail — thin, long, and what the swim rig undulates
-      const tail = hullMesh([dark, dark], bodyRings(-1.30, 0.10, 0,
-        [0.018, 0.075], [0.018, 0.075], 5), { sides: 8, bellyCut: [-1], seed: 104 });
-      tail.position.set(-1.05, 0.58, 0); g.add(tail);
-      return g;
-    },
+    aquatic: true, scale: 1.1, color: 0x0d1012, clearance: 70, swimDepth: 2.2,
+    swimStyle: "flap",
+    build: function () { return marineBuild(MANTA_SPEC); },
   });
 
-  /* ---- GREEN SEA TURTLE. A low, wide, teardrop carapace with a scute
-     mosaic, a cream plastron, a blunt olive head, and two long paddle
-     FLIPPERS that row (wildlife_rig.js strokePecs).
-
-     What it was (seen side-on in the fish pass, 2026-09-27): a tall fish-
-     round hull with its scutes painted as BANDS right round the body (so it
-     read as a wasp-striped torpedo), a pale capsule of a neck with a cream
-     traffic-cone beak on the end, and flippers that tapered to a needle, so
-     at most angles each one was a thin spike. */
+  /* ---- GREEN SEA TURTLE — Chelonia mydas. A low teardrop carapace about
+     four-fifths as wide as it is long and a third as high, its margin a
+     sharp edge; a flat cream plastron; a small blunt head with a horny beak
+     (serrated lower jaw), one pair of prefrontal scales and big eyes, on a
+     short neck that tucks under the shell's front; long paddle fore
+     flippers (~0.4 of the length) with one claw, short rear paddles, a
+     stub tail. The carapace is plates: five vertebrals down the crown, four
+     costals each side, the ring of marginals, every seam cut as a dark line,
+     each plate olive-brown with radiating streaks. It flies with its fore
+     flippers (down and back square, up and forward feathered) and steers
+     with the rear ones (city/wildlife_rig.js). 1.85 model units at scale 0.7
+     is a 1.3 m adult, carapace ~0.85 m. */
+  const TURTLE_SPEC = {
+    id: "sea_turtle", plan: "flipper", profileName: "turtle",
+    L: 1.85, xNose: 0.95, axisY: 0.50, noseRound: 0.02, tubeEnd: 0.995, headEnd: 0.22,
+    profile: {
+      half: [[0, 0], [0.01, 0.030], [0.04, 0.050], [0.08, 0.058], [0.12, 0.055], [0.17, 0.050], [0.21, 0.10], [0.26, 0.22], [0.34, 0.27], [0.45, 0.29], [0.56, 0.28], [0.66, 0.25], [0.75, 0.19], [0.82, 0.12], [0.86, 0.06], [0.90, 0.030], [0.96, 0.015], [1.0, 0.005]],
+      top: [[0, 0], [0.01, 0.028], [0.04, 0.045], [0.08, 0.052], [0.12, 0.050], [0.17, 0.042], [0.21, 0.07], [0.26, 0.11], [0.34, 0.135], [0.45, 0.145], [0.56, 0.140], [0.66, 0.125], [0.75, 0.095], [0.82, 0.060], [0.86, 0.035], [0.90, 0.020], [0.96, 0.010], [1.0, 0.004]],
+      bot: [[0, 0], [0.01, 0.022], [0.04, 0.035], [0.08, 0.042], [0.12, 0.040], [0.17, 0.036], [0.21, 0.045], [0.26, 0.060], [0.34, 0.068], [0.45, 0.070], [0.56, 0.068], [0.66, 0.062], [0.75, 0.050], [0.82, 0.035], [0.86, 0.022], [0.90, 0.015], [0.96, 0.008], [1.0, 0.003]],
+      yo: [[0, -0.02], [0.12, -0.02], [0.21, -0.005], [0.30, 0], [0.86, 0], [1.0, -0.01]],
+      nS: [[0, 2.0], [0.18, 2.0], [0.24, 1.35], [0.80, 1.35], [0.88, 2.0]],
+      nT: [[0, 2.0], [0.2, 2.0], [0.3, 2.2], [0.8, 2.2], [0.9, 2.0]],
+      nB: [[0, 2.0], [0.2, 2.6], [0.8, 2.6], [0.9, 2.0]],
+    },
+    mouth: {
+      front: 0.004, corner: 0.055, alphaF: 1.0, alphaC: 1.30, shape: 0.8, snoutBlend: 0.004,
+      palate: 0.4, floor: 0.4, throat: 0.5, pharynx: 0.03, lipDrop: 0.0010, chinInset: 0.0020,
+    },
+    eye: { s: 0.045, up: 0.25, r: 0.0100, out: 0.42, socket: 0.25, fwd: 0.12 },
+    bones: { head: 0.07, neck: 0.17, root: 0.50, tail: [0.88, 0.95] },
+    extraBones: function (add, k) {
+      add("fR1", "root", k.finPoint("flipR", 0.04)); add("fR2", "fR1", k.finPoint("flipR", 0.50));
+      add("fL1", "root", k.finPoint("flipL", 0.04)); add("fL2", "fL1", k.finPoint("flipL", 0.50));
+      add("hR", "root", k.finPoint("hindR", 0.05)); add("hL", "root", k.finPoint("hindL", 0.05));
+    },
+    fins: [
+      { name: "flipR", role: "paired", boneNames: ["fR1", "fR2"], boneAt: [0.06, 0.52], at: 0.25, root: 0.080, span: 0.42, dir: [-0.20, -0.10, 0.97], chordDir: [1, 0, 0], phi: 0.95, sweep: 0.35, bow: 0.08, tipC: 0.30, conc: 0.04, rear: 0.05, rearH: 0.1, round: 0.45, tc: 0.14, tcTip: 0.10, embed: 0.25 },
+      { name: "flipL", role: "paired", boneNames: ["fL1", "fL2"], boneAt: [0.06, 0.52], at: 0.25, root: 0.080, span: 0.42, dir: [-0.20, -0.10, -0.97], chordDir: [1, 0, 0], phi: 2 * Math.PI - 0.95, sweep: 0.35, bow: 0.08, tipC: 0.30, conc: 0.04, rear: 0.05, rearH: 0.1, round: 0.45, tc: 0.14, tcTip: 0.10, embed: 0.25 },
+      { name: "hindR", role: "paired", boneNames: ["hR"], boneAt: [0.08], at: 0.74, root: 0.070, span: 0.17, dir: [-0.75, -0.10, 0.65], chordDir: [0.6, 0, 0.8], phi: 0.95, sweep: 0.2, tipC: 0.6, conc: 0.04, rear: 0, rearH: 0, round: 0.5, tc: 0.14, tcTip: 0.10, embed: 0.3 },
+      { name: "hindL", role: "paired", boneNames: ["hL"], boneAt: [0.08], at: 0.74, root: 0.070, span: 0.17, dir: [-0.75, -0.10, -0.65], chordDir: [0.6, 0, -0.8], phi: 2 * Math.PI - 0.95, sweep: 0.2, tipC: 0.6, conc: 0.04, rear: 0, rearH: 0, round: 0.5, tc: 0.14, tcTip: 0.10, embed: 0.3 },
+    ],
+    jaw: { lift: 0, drop: 0.35, protrude: [0, 0], gap: 0.02 },
+    wave: { lambda: 1.0, amp: 0.02, env: [0.0, 0.0, 1.0], f0: 0.3, fK: 0.5, fMax: 1.0 },
+    finColor: 0x3a3822,
+    lod: [
+      { M: 32, ds: 0.022, headK: 0.6, noseRings: 4, eyeRings: true, gills: false, teeth: true, finSpan: 8, finChord: 6, eyeSeg: 10, eyeRing: 7, pharynx: 2 },
+      { M: 14, ds: 0.065, headK: 0.6, noseRings: 2, eyeRings: false, gills: false, teeth: false, finSpan: 4, finChord: 3, eyeSeg: 6, eyeRing: 4, pharynx: 2 },
+    ],
+  };
+  TURTLE_SPEC.makePaint = function (EY) {
+    const roles = {};
+    TURTLE_SPEC.fins.forEach(function (f, i) { roles[i + 1] = f.role; });
+    const L = TURTLE_SPEC.L, PF = MB.makeProfile(TURTLE_SPEC);
+    const shellA = MB.hexc(0x4a4426), shellB = MB.hexc(0x5e4a22), streak = MB.hexc(0x2e2a16), seam = MB.hexc(0x1c1a0e);
+    const skinC = MB.hexc(0x3a3822), scaleEdge = MB.hexc(0xb8ad84), beak = MB.hexc(0x24201a);
+    const VS = [0.21, 0.335, 0.455, 0.575, 0.695, 0.86], CS = [0.25, 0.42, 0.56, 0.70, 0.82];
+    function onShell(m) { return m[0] > 0.205 && m[0] < 0.865; }
+    // distance (in L) from the nearest scute seam, on the carapace only
+    function seamDist(c) {
+      const m = c.m, s = m[0];
+      const th = Math.abs(Math.PI - Math.acos(Math.max(-1, Math.min(1, m[1]))));   // 0 at the crown
+      const R = MB.sectionAt(TURTLE_SPEC, PF, s);
+      const arc = R.half / L;                             // radians of ring -> L, roughly
+      let d = 9;
+      if (th < 0.38) for (let k = 1; k < VS.length - 1; k++) d = Math.min(d, Math.abs(s - VS[k]));
+      else if (th < 1.22) for (let k = 1; k < CS.length - 1; k++) d = Math.min(d, Math.abs(s - CS[k]));
+      else { const ms = (s - 0.21) / 0.0595; d = Math.min(d, Math.abs(ms - Math.round(ms)) * 0.0595); }
+      d = Math.min(d, Math.abs(th - 0.38) * arc, Math.abs(th - 1.22) * arc);
+      return d;
+    }
+    return paintKit({
+      L: L, eyes: EY, finRole: roles,
+      back: 0x4a4426, belly: 0xcdbd8c, fin: 0x3a3822, gum: 0x8a6a58, gumDeep: 0x4a3328, throat: 0x14100c,
+      line: [[0, -0.30], [0.12, -0.30], [0.19, -0.25], [0.23, -0.10], [0.85, -0.10], [0.90, -0.30], [1, -0.3]],
+      rag: 0.01, specBack: 0.35, specBelly: 0.2, specFin: 0.22, iris: 0x2b2210, sclera: 0x3a3424, orbit: 0x2a2616,
+      mark: function (c) {
+        if (c.tag !== MB.TAG.SKIN || !onShell(c.m) || c.m[1] > 0.05) return NaN;
+        return 0.0055 - seamDist(c);
+      },
+      skin: function (c, col, up) {
+        const m = c.m;
+        if (m[3] === -2 || m[3] === -3) return beak;       // the horny beak at the lips
+        if (up && onShell(m) && m[1] <= 0.05) {
+          if (c.f(1) >= 0) return seam;
+          // each plate its own tone, streaked out from its growth centre
+          const th = Math.abs(Math.PI - Math.acos(Math.max(-1, Math.min(1, m[1]))));
+          const cell = th < 0.38 ? Math.floor((m[0] - 0.21) / 0.12) : (th < 1.22 ? 10 + Math.floor((m[0] - 0.25) / 0.14) : 20 + Math.floor((m[0] - 0.21) / 0.0595));
+          let base = MB.mixc(shellA, shellB, MB.vn(cell * 1.7, 0.3, th < 0.38 ? 0 : 1, 51));
+          const ang = Math.atan2(m[2], m[1]) * 3 + m[0] * 40;
+          const st = Math.pow(0.5 + 0.5 * Math.sin(ang * 2.3 + MB.vn(m[0] * 30, ang, 0, 52) * 6), 3);
+          return MB.mixc(base, streak, st * 0.45);
+        }
+        if (m[0] < 0.22 || m[0] > 0.86) {
+          // the head, neck and tail: scales with pale edges
+          const w = MB.worley(c.p[0] * 28 / L, c.p[1] * 28 / L, c.p[2] * 28 / L, 61);
+          const e = MB.sm(1 - (w[1] - w[0]) / 0.12);
+          return MB.mixc(up ? skinC : MB.mulc(skinC, 1.4), scaleEdge, e * 0.55);
+        }
+        return col;
+      },
+      finHook: function (c, col) {
+        const w = MB.worley(c.p[0] * 22 / L, c.p[1] * 22 / L, c.p[2] * 22 / L, 62);
+        const e = MB.sm(1 - (w[1] - w[0]) / 0.14);
+        const base = c.f(0) >= 0 ? skinC : MB.mulc(skinC, 1.5);
+        return MB.mixc(base, scaleEdge, e * 0.6);
+      },
+    });
+  };
   S({
     id: "sea_turtle", name: "Green Sea Turtle", biome: "water",
     rarity: "common", hp: 45, fur: "Turtle Shell", furValue: 65,
     meat: "Fish Fillet", meatValue: 12, herd: [1, 3], spd: 0.8, danger: 0,
-    aquatic: true, scale: 0.7, color: 0x5c5a36,
+    aquatic: true, scale: 0.7, color: 0x4a4426,
     clearance: 20, swimDepth: 1.1,
-    swimStyle: "flipper",      // wildlife_rig.js: it rows with the front flippers
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      /* THE CARAPACE IS PLATES, not a checkerboard. The dome is a dark seam
-         colour; on it sit the real scute layout as raised polygons with the
-         seams showing between them: five vertebrals down the crown, four
-         costals each side, and the ring of small marginals round the rim,
-         each in its own olive-to-chestnut tone. The head is short and blunt
-         with the big plate-scales on top that a green turtle has, a pale
-         jaw and a horny beak. */
-      const shell = m(0x2e2c17), cream = m(0xd2c48c);
-      const skin = m(0x4d4a31), beakM = m(0x22221a), eye = m(0x0e1012), flipM = m(0x34321f);
-      const sc1 = m(0x6a6232), sc2 = m(0x5a5329), sc3 = m(0x786a38), headScale = m(0x3a3820);
-      const carRings = bodyRings(-0.80, 0.78, 0.50,
-        [0.06, 0.15, 0.20, 0.21, 0.19, 0.12, 0.07], [0.20, 0.42, 0.54, 0.58, 0.54, 0.42, 0.24], 15);
-      const car = hullMesh([shell, cream], carRings, {
-        sides: 20, bellyCut: [-0.45], ragged: 0.02, seed: 105,
-        shade: { tint: [0.95, 0.95, 0.85] },
-      });
-      car.name = "turtleShell"; g.add(car);
-      const scutes = meshOf(cachedGeom("turtle-scutes3", function () {
-        const sh = new Shell();
-        // one scute: a polygon in (x, angle) space, laid on the dome
-        // a grid ON the dome (a single flat polygon would chord under the
-        // curve and vanish), inset so the dark seam shows between neighbours
-        function plate(gi, x0, x1, a0, a1, bulge) {
-          const n = 4, cx = (x0 + x1) / 2, ca = (a0 + a1) / 2, G = [];
-          for (let i = 0; i <= n; i++) {
-            const row = [];
-            for (let j = 0; j <= n; j++) {
-              const u = i / n, v = j / n;
-              // the long edges bow out a little: a scute is a rounded hexagon
-              const bow = bulge * Math.sin(Math.PI * u);
-              const x = lerp(cx, lerp(x0, x1, u), 0.90);
-              const an = lerp(ca, lerp(a0 - bow, a1 + bow, v), 0.90);
-              row.push(onSkin(carRings, x, an, 0.006 + 0.004 * Math.sin(Math.PI * u) * Math.sin(Math.PI * v)));
-            }
-            G.push(row);
-          }
-          for (let i = 0; i < n; i++) {
-            for (let j = 0; j < n; j++) {
-              const a = G[i][j], b = G[i + 1][j], c = G[i + 1][j + 1], d = G[i][j + 1];
-              const N = norm3([a.n[0] + c.n[0], a.n[1] + c.n[1], a.n[2] + c.n[2]]);
-              sh.polyN(gi, N, [a.p, b.p, c.p, d.p]);
-            }
-          }
-        }
-        const H = Math.PI / 2;
-        // vertebrals: five down the crown
-        const vx = [-0.70, -0.40, -0.10, 0.20, 0.50, 0.76];
-        for (let k = 0; k < 5; k++) plate(k % 3, vx[k], vx[k + 1], H - 0.28, H + 0.28, 0.05);
-        // costals: four each side, from the vertebral edge down to the rim
-        const cxs = [-0.62, -0.28, 0.04, 0.34, 0.66];
-        [1, -1].forEach(function (s2) {
-          for (let k = 0; k < 4; k++) {
-            const a0 = s2 > 0 ? H - 0.30 : H + 0.30, a1 = s2 > 0 ? 0.22 : Math.PI - 0.22;
-            plate((k + 1) % 3, cxs[k], cxs[k + 1], Math.min(a0, a1), Math.max(a0, a1), 0.0);
-          }
-          // marginals: a ring of small plates round the rim
-          for (let k = 0; k < 11; k++) {
-            const x0 = lerp(-0.76, 0.72, k / 11), x1 = lerp(-0.76, 0.72, (k + 1) / 11);
-            const a0 = s2 > 0 ? 0.04 : Math.PI - 0.20, a1 = s2 > 0 ? 0.20 : Math.PI - 0.04;
-            plate((k + 2) % 3, x0, x1, a0, a1, 0.0);
-          }
-        });
-        return sh.geom();
-      }), [sc1, sc2, sc3]);
-      g.add(scutes);
-      // the head: short, broad, blunt, pale under the jaw
-      const headRings = bodyRings(-0.12, 0.32, 0,
-        [0.075, 0.100, 0.112, 0.105, 0.080, 0.040], [0.080, 0.108, 0.120, 0.110, 0.082, 0.040], 7);
-      const head = hullMesh([skin, cream], headRings,
-        { sides: 14, bellyCut: [-0.45], ragged: 0.03, seed: 106 });
-      head.name = "turtleHead";
-      head.position.set(0.92, 0.50, 0); g.add(head);
-      // the big head scales: a paired prefrontal and a few plates behind
-      const hs = meshOf(cachedGeom("turtle-headscales", function () {
-        const sh = new Shell();
-        const P = function (x0, x1, a0, a1) {
-          const pts = [[x0, a0], [x1, a0], [x1, a1], [x0, a1]].map(function (c) {
-            const sk = onSkin(headRings, c[0], c[1], 0.003);
-            return [sk.p[0] + 0.92, sk.p[1] + 0.50, sk.p[2]];
-          });
-          sh.polyN(0, [0, 1, 0], pts);
-        };
-        const H = Math.PI / 2;
-        P(0.17, 0.27, H - 0.30, H - 0.02); P(0.17, 0.27, H + 0.02, H + 0.30);   // prefrontals
-        P(0.04, 0.155, H - 0.42, H - 0.04); P(0.04, 0.155, H + 0.04, H + 0.42);
-        P(-0.08, 0.03, H - 0.55, H - 0.05); P(-0.08, 0.03, H + 0.05, H + 0.55);
-        [1, -1].forEach(function (s2) {                                         // the cheek plate
-          const a = s2 > 0 ? 0.05 : Math.PI - 0.05;
-          P(0.02, 0.12, Math.min(a, s2 > 0 ? 0.45 : Math.PI - 0.45), Math.max(a, s2 > 0 ? 0.45 : Math.PI - 0.45));
-        });
-        return sh.geom();
-      }), [headScale]);
-      g.add(hs);
-      // the horny beak: a dark sheath over the front of both jaws
-      const beak = new T.Mesh(cachedGeom("turtle-beak3", function () {
-        const gg = new T.SphereGeometry(0.06, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.62);
-        return gg;
-      }), beakM);
-      beak.position.set(1.19, 0.478, 0); beak.rotation.z = -Math.PI / 2; beak.scale.set(0.75, 0.7, 1.05); g.add(beak);
-      [1, -1].forEach(function (s2) {
-        const sk = onSkin(headRings, 0.17, s2 > 0 ? 0.25 : Math.PI - 0.25, -0.01);
-        const e = new T.Mesh(cachedGeom("eye|0.032", function () {
-          return new T.SphereGeometry(0.032, 8, 6);
-        }), eye);
-        e.position.set(sk.p[0] + 0.92, sk.p[1] + 0.50, sk.p[2]); g.add(e);
-      });
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      [1, -1].forEach(function (s2) {
-        fin([flipM, cream], [0.46, 0.44, s2 * 0.40], {   // the long rowing flipper: a PADDLE
-          span: 0.82, chordRoot: 0.34, chordTip: 0.15, sweep: 0.46, concavity: 0.10,
-          leadBow: 0.10, rearTipH: 0.20, rearTipBack: 0.10, apexRound: 0.40,
-          thick: 0.06, spanSteps: 6, chordSteps: 4, under: true,
-          spanDir: [-0.40, -0.18, s2 * 0.90], chordDir: [1, 0, s2 * 0.1],
-        });
-        fin([skin, cream], [-0.56, 0.44, s2 * 0.28], { // the short rear paddle
-          span: 0.36, chordRoot: 0.26, chordTip: 0.12, sweep: 0.40, concavity: 0.08,
-          rearTipH: 0.25, rearTipBack: 0.06, apexRound: 0.45, thick: 0.05,
-          spanSteps: 4, chordSteps: 3, under: true,
-          spanDir: [-0.55, -0.15, s2 * 0.82], chordDir: [1, 0, 0],
-        });
-      });
-      // a short pointed tail — the swim rig needs SOMETHING behind the origin
-      const tail = hullMesh([skin, skin], bodyRings(-0.20, 0.06, 0,
-        [0.025, 0.055], [0.025, 0.055], 3), { sides: 8, bellyCut: [-1], seed: 107 });
-      tail.position.set(-0.84, 0.46, 0); g.add(tail);
-      return g;
-    },
+    swimStyle: "flipper",
+    build: function () { return marineBuild(TURTLE_SPEC); },
   });
 
   /* ---- HARBOUR SEAL (Phoca vitulina). NOT a registered species: the city

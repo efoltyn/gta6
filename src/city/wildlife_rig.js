@@ -584,7 +584,7 @@
     const turn = Math.max(-0.3, Math.min(0.3, rig.turn * 0.25));
     if (rig.style === "flap") {
       // a travelling wave out along each wing: root leads, tip follows
-      const amp = (0.42 + 0.22 * rig.spd01 + 0.12 * rig.burst) * (1 - 0.55 * rig.glide);
+      const amp = (0.56 + 0.22 * rig.spd01 + 0.12 * rig.burst) * (1 - 0.55 * rig.glide);
       const wings = [["wR1", "wR2", "wR3", 1], ["wL1", "wL2", "wL3", -1]];
       for (let s = 0; s < 2; s++) {
         const W = wings[s], sgn = W[3];
