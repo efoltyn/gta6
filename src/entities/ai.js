@@ -190,7 +190,10 @@
     if (!n || !alive(n) || !n.group || n.role === "merchant") return false;
     if ((n._brokenUpT || 0) > 0 || (playerDownedNow() && !lethalGrudge(n))) { _huntRefused++; return false; }
     if (playerCuffedNow() && why !== "cheap" && !lethalGrudge(n)) { _huntRefused++; return false; }
-    if (CBZ.player && CBZ.player.gang != null && n.gang === CBZ.player.gang && why !== "wronged") return false;
+    // YOUR OWN SET needs a cause: you wronged him, you broke the car's rules
+    // (systems/prisoncars.js), or it is between the two of you ("own": a
+    // grudge over the loyalty bar, playerBar). Never a stray crew answer.
+    if (CBZ.player && CBZ.player.gang != null && n.gang === CBZ.player.gang && why !== "wronged" && why !== "rules" && why !== "own") return false;
     // A GUN IS OUT. Nobody walks at a muzzle because his feelings are hurt:
     // CBZ.brain.threat decides (systems/brain_prison.js 5c) — a blade inside
     // its window may rush, everyone else runs, hides, gets down or puts his
@@ -2264,6 +2267,7 @@
             c.done = true;
             bookDebtorGrudge(actor, "the beating you took for somebody else", 4);
           }
+          playerDownedOwn(actor);
         } catch (e) { /* never let bookkeeping eat a takedown */ }
         return inner.apply(this, arguments);
       };
@@ -2407,7 +2411,9 @@
     if (CBZ.prisonBrain && CBZ.prisonBrain.broken(n)) return 0;
     const b = behaviorOf(n);
     const odds = fightOdds(n, other);                      // 0..1 he wins this
-    const risk = watched(n) * (1 - b.guts) * 1.2;          // a screw is watching
+    let risk = watched(n) * (1 - b.guts) * 1.2;            // a screw is watching
+    // one of his own, with the set standing there: it costs him with them
+    if (n.gang >= 0 && other && other.gang === n.gang && bandNear(n, 8) > 1) risk += 0.18 * loyaltyOf(n);
     const beef = beefWith(n, other);
     if (beef < BEEF_SWING) {
       // NO HISTORY. The only violence that needs none is predation, and it
@@ -2420,11 +2426,39 @@
     return Math.max(0, Math.min(1, (beef / BEEF_MAX) * nerve + edge - risk));
   }
 
+  /* INSIDE A SET the same rule holds (a reason and an opening), with the
+     set's own weight on it. Gang membership is not a switch:
+       ownBar      a man's LOYALTY raises how much reason he needs before he
+                   swings at one of his own (1x..2x the yard's bar)
+       leaderWeak  the shotcaller was just put down, is hurt, or his nerve
+                   has gone: the moment a man with something against him
+                   takes his shot. A strong leader is safe from a loyal man
+                   whatever he is carrying.
+     The winner leads (downed -> takeLead). This replaced a 1.2% dice roll
+     ("rare betrayal") that needed no reason at all. */
+  function loyaltyOf(n) { const l = n && n.personality && n.personality.loyalty; return l != null ? l : 0.5; }
+  function ownBar(n) { return BEEF_SWING * (1 + loyaltyOf(n)); }
+  function leaderWeak(ld) {
+    if (!ld) return false;
+    const t = (CBZ.game && +CBZ.game.elapsed) || 0;
+    if (t - (ld._downAt != null ? ld._downAt : -1e9) < 180) return true;
+    if (ld.hp != null && ld.hp < (ld.maxHp || 100) * 0.6) return true;
+    return !!(CBZ.prisonBrain && CBZ.prisonBrain.broken && CBZ.prisonBrain.broken(ld));
+  }
+  function takeLead(heir, old) {
+    if (!heir || !old || !(old.gang >= 0)) return;
+    const gang = old.gang;
+    old.isLeader = false;
+    if (old._brain) old._brain.leader = false;
+    if (heir.gang !== gang) setClique(heir, gang);
+    heir.isLeader = true; leaders[gang] = heir;
+    if (CBZ.player && CBZ.player._leadsCar === gang) CBZ.player._leadsCar = -1;
+  }
   function findFoe(n) {
-    // rare betrayal: jump your own leader
-    if (n.gang >= 0 && !n.isLeader && rng() < 0.012) {
+    // THE CHALLENGE: something against his own shotcaller, and the man is weak
+    if (n.gang >= 0 && !n.isLeader) {
       const ld = leaders[n.gang];
-      if (alive(ld) && ld !== n) return ld;
+      if (alive(ld) && ld !== n && dist(n, ld) < 10 && beefWith(n, ld) > ownBar(n) * (leaderWeak(ld) ? 0.75 : 1.5)) return ld;
     }
     // very rare: take a swing at a guard (anyone can do anything)
     if (rng() < 0.006) {
@@ -2542,7 +2576,7 @@
       // with your own man could book beef forever and never go anywhere. Crew
       // raises the bar, it does not remove the possibility, because a set that
       // cannot turn on itself is not a set of people.
-      const bar = (n.gang >= 0 && a.gang === n.gang) ? BEEF_SWING * 1.6 : BEEF_SWING;
+      const bar = (n.gang >= 0 && a.gang === n.gang) ? ownBar(n) : BEEF_SWING;
       const w = beefWith(n, a);
       if (w > bar && w > bw) { bw = w; best = a; }
     }
@@ -3199,6 +3233,17 @@
   function downed(actor, by) {
     credit(by, "knockdowns");
     credit(actor, "downs");
+    actor._downAt = (CBZ.game && +CBZ.game.elapsed) || 0;
+    if (actor.isLeader && actor.gang >= 0) {
+      // put down by one of his own: that man leads now
+      if (by && by !== CBZ.player && by.group && by.kind !== "guard" && by.kind !== "warden" && carK(by) === carK(actor)) takeLead(by, actor);
+      // and the men of his who saw him on the floor remember he can be put
+      // there (the ambitious ones most): a real reason, for the challenge
+      else for (const m of CBZ.npcs || []) {
+        if (m === actor || !alive(m) || m.gang !== actor.gang || !m.group || dist(m, actor) > 18) continue;
+        addBeef(m, actor, (1 - loyaltyOf(m)) * 9 * (0.5 + ((m.personality && m.personality.nerve) || 0.5)));
+      }
+    }
     actor.hp = Math.max(actor.hp || 0, Math.round((actor.maxHp || 100) * 0.5)); actor.aiState = "wander"; actor.foe = null;
     if (actor.char) actor.char.fightStance = false;
     // PUT A MAN DOWN AND YOU HAVE MADE AN ENEMY — his, and his crew's. This is
@@ -3907,6 +3952,7 @@
           // have a reason, and is anyone watching" (wantsToSwing) instead of a
           // roll against temperament and how close somebody was standing.
           const b = behaviorOf(n);
+          if (ownDue(n)) break;
           const foe = findBrawlTarget(n);
           if (foe) {
             const want = wantsToSwing(n, foe);
@@ -3943,7 +3989,10 @@
 
   // called by systems/state.js on restart: revive everyone, re-elect leaders
   function aiReset() {
+    if (CBZ.player) CBZ.player._leadsCar = -1;
+    _ownChallenger = null;
     for (const n of CBZ.npcs) {
+      n._swingDue = null; n._downAt = null; n._threats = null;
       n.dead = false; n.escaped = false; n.group.visible = true; n.group.rotation.z = 0;
       n.group.position.y = 0; n._lvy = 0;
       if (CBZ.prisonCorpseClear) CBZ.prisonCorpseClear(n);   // no sprawl in a revived man's shoulders
@@ -4002,6 +4051,8 @@
     victim._provokeHp = hpNow;
     const struck = !!opts.started || (opts.why == null && hpNow < hpWas - 0.5);
     if (struck && !wasOnYou && victim.kind !== "guard" && victim.kind !== "warden") reportPlayerFight(victim);
+    // ...and thrown at one of YOUR OWN it is your car's business too
+    if (struck && !wasOnYou && playerCar() >= 0 && playerCar() === carK(victim) && PCARS() && PCARS().ownStrike) PCARS().ownStrike(victim);
 
     // HITTING BACK IS NOT A NEW WRONG. combat.js calls this on every landed
     // punch; a man who came for you and is eating your fists does not cost
@@ -4048,6 +4099,13 @@
     const list = PBr.retaliate(victim, aggressor, harm);
     const cap = max != null ? max : 2;
     const ap = isP ? CBZ.player.pos : aggressor.group.position;
+    /* BOTH MEN ARE THEIRS. When the two are of one car the set does not
+       close ranks on whoever got hit: each man standing there sides only on
+       what HE holds — his own beef with either of them, what he thinks of
+       you, and his loyalty to whichever one is the shotcaller. Most watch.
+       Enough of them against the leader is the coup. */
+    const own = isP ? (playerCar() >= 0 && playerCar() === carK(victim)) : carK(aggressor) === carK(victim);
+    const aLeads = isP ? (CBZ.player._leadsCar >= 0 && CBZ.player._leadsCar === carK(victim)) : !!aggressor.isLeader;
     let came = 0, shoved = 0;
     for (let i = 0; i < list.length; i++) {
       const m = list[i].actor, lvl = list[i].level;
@@ -4055,6 +4113,16 @@
       if (m.aiState === "fight" || m.aiState === "snitch" || heldInCell(m)) continue;
       const d = Math.hypot(ap.x - m.group.position.x, ap.z - m.group.position.z);
       if (d > 16) continue;
+      if (own) {
+        const l = loyaltyOf(m);
+        const forV = (victim.isLeader ? l * 8 : 0) + (isP ? (m.playerGrudge || 0) * 1.7 : beefWith(m, aggressor));
+        const forA = (aLeads ? l * 8 : 0) + beefWith(m, victim) +
+          (isP ? Math.max(0, m.rep || 0) / 45 * 6 + Math.max(0, m.playerTrust || 0) * 0.5 : 0);
+        const side = forV - forA;
+        if (side < -5 && came < cap && alive(victim) && m !== victim) { came++; startFight(m, victim); continue; }   // he is with the one who swung
+        if (side <= 5) { if (CBZ.npcStare) CBZ.npcStare(m, 2.5 + rng() * 1.5, isP ? null : ap); continue; }            // he watches
+        // else: he is with the man who got hit, the ladder below decides how hard
+      }
       if (lvl === "avoid") {
         // he would have come — at a GUN he does not (CBZ.brain.social.
         // retaliate): out of its line, the grudge kept for another day
@@ -4315,6 +4383,68 @@
      -> he runs, and the yard sees you run a man off (respect, fear buzz).
      A man of your own car never swings at you over words: pushed past it he
      walks, and your own set thinks less of you for leaning on one of theirs. */
+  /* ---- INSIDE YOUR OWN CAR (the same rule, pointed at you) ----
+     playerBar     what a man of your car must hold against you before he
+                   will swing at one of his own: playerGrudge (0..14) over a
+                   bar his loyalty raises.
+     ownDue        the wander re-think: a swing he held back because a screw
+                   was looking comes due when nobody is; a man of a car YOU
+                   lead, carrying enough against you, challenges you.
+     playerDownedOwn  you put down your own shotcaller: the car is yours
+                   (P._leadsCar; systems/prisonwarden.js's command hook gives
+                   you a leader's authority over its men). A man of yours who
+                   puts YOU down takes it back. */
+  function playerBar(n) { return Math.min(12, 4.6 * (1 + loyaltyOf(n))); }
+  let _ownChallenger = null;
+  function ownDue(n) {
+    const P = CBZ.player;
+    if (!P || !P.pos) return false;
+    const t = (CBZ.game && +CBZ.game.elapsed) || 0;
+    // you led this car and one of its men just put you on the floor
+    if (_ownChallenger && P._leadsCar >= 0 && playerDownedNow()) {
+      const c = _ownChallenger; _ownChallenger = null;
+      if (alive(c) && c.gang === P._leadsCar) {
+        c.isLeader = true; leaders[c.gang] = c; P._leadsCar = -1;
+        addGangStanding(c.gang, -10);
+      }
+    }
+    if ((n.huntPlayer || 0) > 0 || playerDownedNow() || playerDist(n) > 14) return false;
+    // HELD BACK, NOT FORGOTTEN: he would not swing in front of a screw
+    if (n._swingDue) {
+      const due = n._swingDue;
+      if (t > due.until) { n._swingDue = null; return false; }
+      if (watched(n)) return false;
+      n._swingDue = null;
+      if (due.why === "own") { if (requestHunt(n, 8, "own")) { _ownChallenger = n; return true; } return false; }
+      provokeGang(n, 8, { crew: due.crew || 0, why: "threat", standing: 2 });
+      return (n.huntPlayer || 0) > 0;
+    }
+    // YOU LEAD HIS CAR and he is carrying enough against you: the challenge
+    if (P._leadsCar >= 0 && n.gang === P._leadsCar && (n.playerGrudge || 0) >= playerBar(n) && !watched(n) &&
+        rng() < 0.05 + 0.25 * behaviorOf(n).init) {
+      if (requestHunt(n, 10, "own")) { _ownChallenger = n; emote(n, "!"); return true; }
+    }
+    return false;
+  }
+  function playerDownedOwn(actor) {
+    const P = CBZ.player;
+    if (!P || !actor || !actor.isLeader || !(actor.gang >= 0)) return;
+    if (playerCar() !== carK(actor) || (CBZ.game && CBZ.game.carClaim !== "in")) return;
+    actor.isLeader = false;
+    if (actor._brain) actor._brain.leader = false;
+    leaders[actor.gang] = null;
+    P._leadsCar = actor.gang;
+    addGangStanding(actor.gang, 12);
+    for (const m of CBZ.npcs || []) {
+      if (m === actor || !alive(m) || m.gang !== actor.gang) continue;
+      // the loyal ones hold it against you; the rest fall in behind the man who won
+      const l = loyaltyOf(m);
+      if (l > 0.7) m.playerGrudge = Math.min(14, (m.playerGrudge || 0) + (l - 0.5) * 8);
+      else { m.playerFear = Math.min(14, (m.playerFear || 0) + 3); if (CBZ.econ && CBZ.econ.addRespect) CBZ.econ.addRespect(m, 8); m.huntPlayer = 0; }
+    }
+  }
+  CBZ.prisonPlayerLeads = function (car) { const P = CBZ.player; return !!(P && P._leadsCar >= 0 && (car == null || P._leadsCar === car)); };
+
   function carNear(car, x, z, r, skip) {
     if (!(car >= 0)) return 0;
     let k = 0;
@@ -4362,7 +4492,11 @@
 
     // a man well above you does not even let the first one land
     // and a man with a gun in his hand never backs down to words
-    const breaks = T.k > patience || margin > 0.6 || !!(n.hasGun && n.armed && !n._holstered);
+    // A man of a car YOU lead takes it (that is what leading is) until what
+    // he holds against you clears his own bar.
+    const yoursToLead = sameCar && P._leadsCar >= 0 && P._leadsCar === hisCar;
+    const breaks = !!(n.hasGun && n.armed && !n._holstered) ||
+      (yoursToLead ? (n.playerGrudge || 0) >= playerBar(n) : (T.k > patience || margin > 0.6));
     if (!breaks) {
       if (CBZ.intimidateHold) CBZ.intimidateHold(n, THREAT_HOLD);
       // the yard standing there saw him fold (not his own set)
@@ -4378,14 +4512,38 @@
       if (n.target) n.target.set(g.x + ax / al * 16, 0, g.z + az / al * 16);
       emote(n, "!");
     };
+    // THE OPENING. Nobody starts it in front of a screw unless he has the
+    // guts not to care: he holds it, walks, and it comes due when nobody is
+    // looking (ownDue, on his next re-thinks, for the next two minutes).
+    const holdsIt = watched(n) && rng() > behaviorOf(n).guts;
     if (sameCar) {
-      // one of your own: he walks, and your set remembers you leaned on him
-      run();
+      // one of your own. Leaning on him is a strike with your car either way
+      // (systems/prisoncars.js ownStrike); he swings only with enough against
+      // you to clear what his loyalty asks, and then it is between you two.
+      if (!yoursToLead && PCARS() && PCARS().ownStrike) PCARS().ownStrike(n);
       if (CBZ.econ && CBZ.econ.addRespect) CBZ.econ.addRespect(n, -8);
+      if ((yoursToLead || margin >= 0) && (n.playerGrudge || 0) >= playerBar(n)) {
+        if (holdsIt) {
+          n._swingDue = { until: t + 120, why: "own" };
+          say(n, "Not here.", null, 1.6);
+          return { ok: true, msg: "", answer: "later" };
+        }
+        if (requestHunt(n, 8, "own")) {
+          _ownChallenger = n;
+          say(n, "That's enough.", null, 1.6);
+          return { ok: true, msg: "", answer: "fight" };
+        }
+      }
+      run();
       say(n, "We're supposed to be on the same side.", null, 2);
       return { ok: true, msg: "", answer: "walk" };
     }
     if (margin >= 0) {
+      if (holdsIt) {
+        n._swingDue = { until: t + 120, why: "threat", crew: rivalCar ? 1 : 0 };
+        say(n, "Not here.", null, 1.6);
+        return { ok: true, msg: "", answer: "later" };
+      }
       say(n, "That's enough.", null, 1.6);
       provokeGang(n, 8, { crew: rivalCar ? 1 : 0, why: "threat", standing: 2 });
       if ((n.huntPlayer || 0) > 0) return { ok: true, msg: "", answer: "fight" };

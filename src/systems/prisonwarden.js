@@ -1059,6 +1059,9 @@
       if (staffK(man)) return fw && man.kind === "guard" ? 1 : 0;
       if (fw) return 0.8;
       if (fg) return 0.6;
+      // you took the car off its shotcaller (entities/ai.js playerDownedOwn):
+      // its men are yours to order, the weight a leader carries
+      if (isYou(from) && man.gang >= 0 && CBZ.prisonPlayerLeads && CBZ.prisonPlayerLeads(man.gang)) return 0.8;
       return null;                     // con to con: the brain's own (his clique's leader)
     },
     standing: function (man, from) {
