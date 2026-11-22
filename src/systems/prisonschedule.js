@@ -1,94 +1,50 @@
 /* ============================================================
    systems/prisonschedule.js — THE PRISON DAY.
 
-   OWNER: time of day is the PILLAR of the escape game. A cell key matters
-   because your cell locks at night. A dark corner matters because the yard
-   is floodlit and the block is not. The best escape window is the one you
-   have to break out of your own cell to use.
+   A real 24-hour day on the world's own sun (core/daynight.js: escape runs
+   a 12-minute day, 30 real seconds an hour). NOTHING ON SCREEN SAYS WHAT
+   TIME IT IS. The hour shows only in the world: the sky, the lamps, the PA
+   horn, the doors racking and what the officers do.
 
-   None of that is possible while "time of day" is a lighting effect. Before
-   this file the prison had a 150-second sun and NOTHING that read it except
-   the searchlights' brightness and one soft NPC curfew keyed to
-   CBZ.nightAmount > 0.72 — a number, not a schedule. Nothing locked, nothing
-   opened, nobody was ever anywhere because of the hour.
+     00:00  blackout  every lamp in the wing out (systems/prisonnight.js reads
+                      is("blackout")), cells locked, curfew
+     05:00  wake      the morning count in LOCKED cells, then the doors rack
+     07:00  yard      the block is taken OUT: the gate opens, an officer calls
+                      it, every man walks out to the yard, and an officer
+                      comes to YOUR cell and sends you out with them
+     11:30  mess      chow, in the yard's mess hall
+     13:00  work      yard / work detail
+     17:00  supper    chow
+     18:30  count     the evening return: the gate opens, everyone walks in,
+                      and if you are still out an officer comes for you
+     21:00  secure    the cells lock and the count walks the tiers
+     22:00  night     lights out, curfew
+   ...and one or two counts nobody announces, between 23:00 and 04:15,
+   walked with torches.
 
-   So the day is carved into the blocks a real prison actually runs, and the
-   blocks are ENGINE TRUTH: CBZ.prisonSchedule answers "what block is it",
-   "how long until the next one" and "is this body supposed to be here right
-   now". Guard behaviour, NPC routines, lighting and (later) the security
-   tiers all read THIS clock instead of each inventing another one.
+   THE COUNT. One or two officers walk the galleries and look into every
+   cell. You in yours: they walk on. Not there: the count is short. The PA
+   says so and they search: your cell first, then where you were last seen,
+   then the places a man hides (vents, hatches, yard corners), torches out in
+   the dark. The officer who finds you orders you back and walks behind you
+   to your cell, which is held open for you. Not found in 2.5 hours, it is an
+   escape and the warden locks the prison down.
 
-   ------------------------------------------------------------------
-   THE TIMETABLE (in-game hours; core/daynight.js gives escape mode a
-   12-minute day, so an in-game hour is 30 real seconds).
+   EVERY MOVE OF YOU IS AN ORDER (systems/command.js toPlayer): said, said
+   again, the last word, then hands (CBZ.verbs.escort, an arm-bar walk). Do
+   it and the officer walks a pace behind you; stop or turn back and he says
+   it again, then takes your arm. Pull free or run and it is the arrest
+   (systems/capture.js) and the hole.
 
-     05:00  wake     Unlock and morning count — doors rack open, block only
-     07:00  yard     Morning yard — the compound is open
-     11:30  mess     Chow
-     13:00  work     Afternoon yard / work detail
-     17:00  supper   Evening chow
-     18:30  count    Evening return — everyone back to the block
-     21:00  secure   Secure and count — cell doors LOCK, lights still on
-     22:00  night    LIGHTS OUT — dark, curfew, searchlights own the yard
+   THE GATE (world/door.js) is shut every hour but two: the morning move out
+   and the evening return. It also opens for a man being walked across it.
+   At any other time the keycard is the only way through. A lockdown shuts
+   it and cancels the yard.
 
-   Sunrise is 06:00 and sunset 18:00 (the sun's own arc — see hourNow()), so
-   the morning unlock and the evening return both happen in the dark, which
-   is when the torches come out. That is not decoration: it is the hour the
-   block is most confused and least well lit.
-
-   ------------------------------------------------------------------
-   SHOW, DON'T TELL. This file prints NOTHING. A block change is a PA klaxon
-   from a real horn on a real wall (the nearest one to you, so it has a
-   place), the cell doors racking on world/cellblock.js's own sliding leaves,
-   the lights going out (systems/prisonnight.js) and the guards changing
-   post. If you want to know what time it is, look at the sky and listen.
-
-   THE CELL KEY IS THE WHOLE POINT. Cell doors lock through cellblock.js's
-   setDoor — the SAME collider-and-leaf mechanism the keycard door uses — so
-   there is exactly one kind of locked door in this prison. Beating it is
-   physical and takes no prompt: walk into your own locked door holding a
-   Cell Key and it slides. A door you opened that way stays open for the
-   rest of the night (`_keyed`), because staff re-securing the wing at
-   lights-out do not re-check a door that reads as locked.
-
-   ------------------------------------------------------------------
-   THE BLOCK GATE IS PART OF THE TIMETABLE, AND WAS NEVER WIRED TO IT
-   (2026-08-16). The table above says men cross between the block and the
-   compound twice a day — `wake` is "Unlock and morning count", `count` is
-   "Evening return — everyone back to the block". world/door.js's 5.72 x 0.34 m
-   leaf at (0, -8) is the only way across, and nothing but the player's keycard
-   had ever moved it. MEASURED at the night block: thirteen mustered men
-   standing in a heap at z -6.2..-7.3, all thirteen aimed at (0, -9.8) on the
-   far side of that slab, and all fifty cell-house racks behind it. A 0.5 m
-   body cannot pass the band z[-8.5,-7.5] at any x. The evening return has
-   therefore never once been physically possible.
-
-   So §3 racks it, and the rule is the narrowest one that works: THE GATE IS
-   OPEN ONLY WHILE A COUNT IS BEING TAKEN, MEN ARE STILL OUT, AND THE LIGHTS
-   ARE STILL ON. It never opens for yard, chow, work or supper — at those hours
-   the keycard is the only way through, byte for byte as before — and it shuts
-   the moment the last man is in, at the 22:00 lights-out klaxon, or when the
-   hold below runs out, whichever comes first. Every hour the escape is
-   actually played, it is shut and the card is the only answer.
-
-   The cell leaves get the same rule for the same reason: a leaf does not rack
-   shut while a man who sleeps behind it is still outside it, which is what
-   "secure and count" means and is already the shape of the refusal that will
-   not close a door on the player. Both holds are bounded — GATE_HOLD from the
-   evening return, CELL_HOLD from secure — because the wing will wait for a
-   straggler and it will not wait all night; a man it stops waiting for loses
-   his rack to somebody who can reach one. The PLAYER's cell is never held: it
-   has no NPC on its racks, so it locks on the 21:00 klaxon exactly as before
-   and the Cell Key is worth exactly what it was worth.
-
-   Flags: PRISON_SCHEDULE_V1 (all of it), PRISON_SCHEDULE_DOORS (the night
-   lock alone), PRISON_SCHEDULE_PA (the klaxon alone),
-   PRISON_LIGHTSOUT_V2 (the 2026-08-16 routing wave: the count gate, the door
-   hold, the route home, and the housing predicate).
-   Ratchet: CBZ.prisonScheduleAudit().gaps pinned at 0 — every hour of the
-   day belongs to exactly one block — and .hudText pinned at 0.
-   Ratchet: CBZ.prisonScheduleAudit().gateOpenOffCount pinned at 0 — the block
-   gate is never open outside a count, which is the keycard's whole value.
+   Officers on these jobs carry `_duty`; entities/guards.js hands their legs
+   to dutyStep() below (after a hunt, which always wins).
+   Console: CBZ.dayJump(7) starts the yard move, (18.5) the return, (21) the
+   lock-in count, (0) the blackout, (5) the morning count.
 ============================================================ */
 (function () {
   "use strict";
@@ -123,15 +79,22 @@
           home     where a body is supposed to be: "cell" | "block" | null
           pa       how many klaxon blasts announce it (0 = silent)
           torches  the night shift draws flashlights during this block
+          count    the officers walk the tiers and count the cells
+
+        BLACKOUT IS FIRST because the table is ascending from midnight
+        (systems/dayplan.js); `night` now runs 22:00 to 00:00.
+        systems/prisontiers.js rewrites from/cells/home/pa/torches of the
+        eight ids it knows and leaves the blackout alone.
      ========================================================== */
   const BLOCKS = [
-    { id: "wake",   label: "Unlock & Count",  from: 5.0,  cells: "open", lightsOut: false, home: "block", pa: 2, torches: true },
+    { id: "blackout", label: "Blackout",      from: 0.0,  cells: "lock", lightsOut: true,  home: "cell",  pa: 0, torches: true },
+    { id: "wake",   label: "Unlock & Count",  from: 5.0,  cells: "open", lightsOut: false, home: "block", pa: 2, torches: true, count: true },
     { id: "yard",   label: "Morning Yard",    from: 7.0,  cells: null,   lightsOut: false, home: null,    pa: 1, torches: false },
     { id: "mess",   label: "Chow",            from: 11.5, cells: null,   lightsOut: false, home: null,    pa: 1, torches: false },
     { id: "work",   label: "Work & Yard",     from: 13.0, cells: null,   lightsOut: false, home: null,    pa: 1, torches: false },
     { id: "supper", label: "Evening Chow",    from: 17.0, cells: null,   lightsOut: false, home: null,    pa: 1, torches: false },
     { id: "count",  label: "Evening Return",  from: 18.5, cells: null,   lightsOut: false, home: "block", pa: 2, torches: true },
-    { id: "secure", label: "Secure & Count",  from: 21.0, cells: "lock", lightsOut: false, home: "cell",  pa: 3, torches: true },
+    { id: "secure", label: "Secure & Count",  from: 21.0, cells: "lock", lightsOut: false, home: "cell",  pa: 3, torches: true, count: true },
     { id: "night",  label: "Lights Out",      from: 22.0, cells: "lock", lightsOut: true,  home: "cell",  pa: 1, torches: true },
   ];
   // Curfew = the hours a body found in the open is a break in progress. Both
@@ -361,38 +324,23 @@
       if (!n || n.dead || n.escaped || n._crowd || !n.group) continue;
       if (inDoorway(n.group.position, col, 0.6)) return true;
     }
+    // ...and the officer who just walked a man to it, or is counting at it
+    const gl = CBZ.guards || [];
+    for (let i = 0; i < gl.length; i++) {
+      const gd = gl[i];
+      if (gd && gd.group && !gd.dead && inDoorway(gd.group.position, col, 0.6)) return true;
+    }
     return false;
   }
   let wantLocked = false, doorRetry = 0;
 
-  /* ---- THE HOLD. A wing that secures on the clock alone secures its own men
-       OUT, and behind those leaves is most of the building — fifty of the
-       sixty-six racks. So a leaf waits for the man who sleeps behind it, the
-       same refusal shape `playerInDoorway` already has one line down, and the
-       block gate waits for the same reason on the same timer.
-
-       BOUNDED, because a wing that waits forever is a wing that never locks
-       and the escape game is built on it locking. Ninety seconds is 3 in-game
-       hours at escape's 30 s/hour — long enough for the walk in from the sally
-       port (165 m at 1.5-2.8 m/s), short enough that the wing is sealed well
-       before the useful part of the night. When a hold expires the stragglers
-       lose their racks (prisonRest.release) so a mattress is not held all
-       night by a man in the yard, and everything shuts.
-
-       TWO TIMERS, BECAUSE THERE ARE TWO RULES AND THEY START AT DIFFERENT
-       KLAXONS. The block gate's patience runs from the EVENING RETURN, which
-       is when the men are ordered in; the cell leaves' runs from SECURE, which
-       is when the wing is ordered shut. A single timer armed at the return has
-       about fifteen seconds left by the time the leaves are asked for any,
-       which is no patience at all. ---- */
-  /* 110 s is the evening return through to lights-out — 18:30 to 22:00 is
-     3.5 in-game hours at 30 s each — and it is a CEILING, not a duration: the
-     gate shuts the moment the count is in, and `lightsOut` shuts it regardless.
-     Measured at 90: eight men still in the south block when the budget ran out,
-     locked out of a wing with fifteen free racks in it, `abed` 0.78. The walk
-     in from the sally port is 165 m and the timetable already allows for it. */
+  /* ---- THE HOLDS. A leaf waits for the man who sleeps behind it, and the
+       gate waits for the men still walking in at the evening return. Both are
+       bounded: CELL_HOLD from secure, GATE_HOLD (a ceiling, 18:30 to 22:00)
+       from the return. When the cell hold runs out the stragglers lose their
+       racks (prisonRest.release) and everything shuts. ---- */
   const GATE_HOLD = 110, CELL_HOLD = 90;
-  let gateT = 0, holdT = 0, waiting = [], gateOpen = false, gateOffCount = 0;
+  let gateT = 0, holdT = 0, waiting = [], gateOpen = false, gateOffMove = 0;
   function rest() { return CBZ.prisonRest || null; }
   function counting() { const b = live(); return !!(b && b.home !== null); }
   // is the block gate one this file may move at all — a blown slab is a hole
@@ -407,6 +355,24 @@
          this file taking the game's own objective away. So the close only
          fires on a gate `gateMine` says we racked. */
   let gateMine = false;
+  // a body standing in either doorway of the sally port (the inner pair at
+  // z -8, the out pair at z -3.75): the leaves wait for him to step through
+  function inGateway(p) { return Math.abs(p.x) < 1.7 && ((p.z > -9.3 && p.z < -6.7) || (p.z > -5.0 && p.z < -2.5)); }
+  function gateBodies() {
+    const p = CBZ.player && CBZ.player.pos;
+    if (p && inGateway(p)) return true;
+    const list = CBZ.npcs || [];
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (n && n.group && !n.dead && !n.escaped && !n._crowd && inGateway(n.group.position)) return true;
+    }
+    const gl = CBZ.guards || [];
+    for (let i = 0; i < gl.length; i++) {
+      const gd = gl[i];
+      if (gd && gd.group && !gd.dead && inGateway(gd.group.position)) return true;
+    }
+    return false;
+  }
   function setGate(want) {
     if (!v2() || !gateUsable()) return;
     const d = CBZ.door;
@@ -418,6 +384,7 @@
       gateMine = !!d.open;
     } else {
       if (!gateMine) return;                      // his card, his door
+      if (gateBodies()) return;                   // never shut on a man in the doorway
       if (CBZ.closeDoor) {
         CBZ.closeDoor(true);                      // soft: interactions.js ramps the leaf
         if (CBZ.worldSfx) CBZ.worldSfx("door_close", 0, -8, { ref: 12 });
@@ -439,22 +406,27 @@
     // WHO THE WING IS STILL WAITING FOR, asked once for the whole sweep.
     const hold = v2() && wantLocked && holdT > 0 && R && R.unsettled;
     if (hold) R.unsettled(waiting); else waiting.length = 0;
+    // the hole is systems/capture.js's: a sealed cell is never opened from here
+    const sealed = !!(CBZ.playerCellSealed && CBZ.playerCellSealed());
+    // YOUR door waits for you while an officer (or an arrest) is walking you to it
+    const yours = playerDoorHeld();
     for (let i = 0; i < list.length; i++) {
       const c = list[i];
-      const want = wantLocked && !c._keyed && !(hold && waiting.indexOf(c) >= 0);
+      if (c.player && sealed) continue;
+      const want = wantLocked && !c._keyed && !(hold && waiting.indexOf(c) >= 0) && !(c.player && yours);
       if (!!c.locked === want) continue;
       if (playerInDoorway(c)) continue;         // never close a door on a body
       cb.setDoor(c, want);
     }
-    /* ---- and the block gate. It is open only while a count is running and
-         the wing is not yet full; every other hour it is exactly the keycard
-         door it has always been. `gateOffCount` is the ratchet: this file must
-         never leave it open outside a count. ---- */
+    /* ---- and the block gate: open for the day's two moves and for a man
+         being walked across it, shut every other minute (the keycard's whole
+         value). `gateOffMove` counts passes that leave OUR gate open with no
+         move to justify it; it stays at 0. A leaf the player opened with his
+         own card is his and is never counted or closed. ---- */
     if (v2()) {
-      setGate(gateWanted());
-      // …and only ever OUR gate: a leaf the player opened with his own card at
-      // 02:00 is the game working, not this file leaving the wing unlocked.
-      if (gateMine && gateOpen && !counting()) gateOffCount++;
+      const want = gateWanted();
+      setGate(want);
+      if (gateMine && gateOpen && !want && !gateBodies()) gateOffMove++;
     }
   }
 
@@ -514,20 +486,14 @@
      for him, and re-shuffling every claim on the frame the klaxon sounds is a
      game of musical chairs. Pessimistic the moment the hold expires, which is
      what re-homes a straggler onto a rack he can still reach. */
-  /* Is the block gate open, or about to be racked for the count that is
-     running? One sentence: OPEN ONLY WHILE A COUNT IS RUNNING, MEN ARE STILL
-     OUT, AND THE LIGHTS ARE STILL ON.
-
-     `lightsOut` is the hard floor and it is the timetable's own field, not a
-     timer — at 22:00 the leaf is shut whatever the count says, which is every
-     hour the escape is actually played. Before that the gate follows the COUNT
-     rather than the clock, because a wing that racks its gate at 21:00 with
-     men still in the yard has not secured them, it has locked them out: that
-     read `!wantLocked` in the first draft and left four men outside with
-     nowhere to lie down. `gateT` bounds it either way (90 s from the return,
-     i.e. shut by 21:30 in-game at 30 s/hour) so the gate closes on its own
-     even if a straggler never arrives. */
+  /* IS THE GATE WANTED OPEN. Never in a lockdown. Open while a man is being
+     walked across it (an order to the yard or home, an arrest walking him in),
+     for the morning move out, and for the evening return while men are still
+     out and the lights are on (`gateT` bounds it). Shut every other minute. */
   function gateWanted() {
+    if (lockdownOn()) return false;
+    if (crossing()) return true;
+    if (move) return true;
     const b = live(), R = rest();
     return counting() && !(b && b.lightsOut) && gateT > 0 && !!R && R.afoot() > 0;
   }
@@ -616,50 +582,30 @@
     for (let i = 0; i < list.length; i++) setPost(list[i], indoors);
   }
 
-  /* CURFEW IS A RULE ABOUT BEING SEEN, not a magic tripwire. During the two
-     cell blocks a guard who lays eyes on you does not need heat first — an
-     inmate in the open at 02:00 is the whole offence — so the sighting goes
-     straight to a hunt. The counterweight is systems/prisonnight.js: he can
-     barely see, unless he has a torch on you. */
+  /* A BODY IN A FLOODLIT YARD AT NIGHT is a thing the TOWER eventually
+     notices: every few seconds the nearest able screw is sent to look,
+     through the investigate plumbing. A point on the ground, and it goes
+     stale. (What a screw who SEES you out does is watchOut() below.) */
   let curfewT = 0;
-  function enforceCurfew(dt) {
-    const g = CBZ.game;
-    // the officer on the night shift IS the curfew: nobody hunts him for being up
-    if (!isCurfew(live()) || !g || g.state !== "playing" || (g.invuln || 0) > 0 || g.role === "cop") return;
-    const p = CBZ.player && CBZ.player.pos;
-    if (!p || (CBZ.player.captureState && CBZ.player.captureState !== "normal")) return;
-    if (belongs(p.x, p.z)) return;
-    const out = whereIs(p.x, p.z) === "compound";
+  function towerNotice(dt) {
     curfewT -= dt;
+    const g = CBZ.game;
+    if (curfewT > 0 || !isCurfew(live()) || !g || g.state !== "playing" || (g.invuln || 0) > 0 || g.role === "cop") return;
+    const p = CBZ.player && CBZ.player.pos;
+    if (!p || whereIs(p.x, p.z) !== "compound") return;
+    if (!(CBZ.litBySearchlight && CBZ.litBySearchlight(p, CBZ.player.crouch))) return;
+    curfewT = 6;
     const list = CBZ.guards || [];
+    let best = null, bd = Infinity;
     for (let i = 0; i < list.length; i++) {
       const gd = list[i];
-      if (gd.dead || gd.ko > 0 || gd.corrupt || gd.bribed > 0) continue;
-      if (!CBZ.guardSees || !CBZ.guardSees(gd)) continue;
-      // out in the yard after lights-out is a break; out of your cell but
-      // still in the wing is a lesser thing, and prices lower.
-      if (CBZ.addHeat) CBZ.addHeat((out ? 26 : 10) * dt);
-      gd.alert = 1.0;
-      gd.investigate = null;
-      gd.hunt = Math.max(gd.hunt || 0, out ? 3.4 : 2.2);
+      if (gd.dead || gd.ko > 0 || gd.corrupt || gd.hunt > 0 || gd._duty) continue;
+      const d = (gd.group.position.x - p.x) * (gd.group.position.x - p.x) + (gd.group.position.z - p.z) * (gd.group.position.z - p.z);
+      if (d < bd) { bd = d; best = gd; }
     }
-    // A body crossing a floodlit yard at night is also a thing the TOWER
-    // eventually notices: once every few seconds the nearest able screw is
-    // sent to look, through the existing investigate plumbing. No omniscience
-    // — it is a point on the ground, and it goes stale.
-    if (out && curfewT <= 0 && CBZ.litBySearchlight && CBZ.litBySearchlight(p, CBZ.player.crouch)) {
-      curfewT = 6;
-      let best = null, bd = Infinity;
-      for (let i = 0; i < list.length; i++) {
-        const gd = list[i];
-        if (gd.dead || gd.ko > 0 || gd.corrupt || gd.hunt > 0) continue;
-        const d = (gd.group.position.x - p.x) * (gd.group.position.x - p.x) + (gd.group.position.z - p.z) * (gd.group.position.z - p.z);
-        if (d < bd) { bd = d; best = gd; }
-      }
-      if (best) {
-        best.investigate = { x: p.x, z: p.z, t: 8, scan: 0, type: "curfew" };
-        best.alert = Math.max(best.alert || 0, 0.9);
-      }
+    if (best) {
+      best.investigate = { x: p.x, z: p.z, t: 8, scan: 0, type: "curfew" };
+      best.alert = Math.max(best.alert || 0, 0.9);
     }
   }
 
@@ -1064,47 +1010,832 @@
   }
 
   /* ==========================================================
-     7. APPLYING A BLOCK
+     7. OFFICERS ON A SCHEDULE JOB carry `_duty` ({ kind: "take" | "count",
+        torch }). entities/guards.js calls dutyStep() for them every frame,
+        after a hunt (which always wins): they still see, and in the dark
+        their torch is on.
+     ========================================================== */
+  function lockdownOn() { return !!(CBZ.lockdownActive && CBZ.lockdownActive()); }
+  function ableGuard(gd) {
+    return !!(gd && gd.group && !gd.dead && !(gd.ko > 0) && !gd.asleep && !gd.tied && gd.kind !== "warden" &&
+      !gd.towerPost && gd.intimidMode !== "scared");
+  }
+  // on somebody else's job (the warden's, an arrest, a yard case, a door)
+  function otherJob(gd) {
+    return !!(gd._escort || gd._wardenEscort || gd._wardenCall || gd._shakedown || gd._snitchTask ||
+      gd._pcEscort || gd._yardCase || gd._doorCase || gd._wardenDetail);
+  }
+  function freeGuard(gd) {
+    return ableGuard(gd) && !gd._duty && !otherJob(gd) && !(gd.hunt > 0) &&
+      !(gd.investigate && gd.investigate.t > 0) && !(gd.pause > 0) &&
+      !(CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(gd));
+  }
+  function nearestGuard(x, z, maxD, test) {
+    let best = null, bd = maxD * maxD;
+    const list = CBZ.guards || [];
+    for (let i = 0; i < list.length; i++) {
+      const gd = list[i];
+      if (!test(gd)) continue;
+      const dx = gd.group.position.x - x, dz = gd.group.position.z - z, d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = gd; }
+    }
+    return best;
+  }
+  function say(actor, line, secs) {
+    if (!line || !actor || !CBZ.prisonSay) return false;
+    try { return !!CBZ.prisonSay(actor, line, { force: true, secs: secs || 2.0 }); } catch (e) { return false; }
+  }
+  // the PA's words come out of the horn nearest you, after its blasts
+  let paLine = null, paLineT = 0;
+  function paSay(line, n) {
+    if (!CFG.PRISON_SCHEDULE_PA) return;
+    soundPA(n || 1);
+    paLine = line; paLineT = 0.4 + (n || 1) * 0.62;
+  }
+  function pumpPaLine(dt) {
+    if (!paLine) return;
+    paLineT -= dt;
+    if (paLineT > 0) return;
+    const h = nearestHorn(), line = paLine;
+    paLine = null;
+    if (h) say({ kind: "pa", data: { name: "Control" }, pos: { x: h.x, y: (h.y || 3.5) - 1.85, z: h.z } }, line, 2.6);
+  }
+
+  // ---- the player, as the timetable sees him
+  function P() { return CBZ.player && CBZ.player.pos; }
+  function inmatePlayer() {
+    const g = CBZ.game;
+    return !!(g && g.state === "playing" && g.mode === "escape" && g.role !== "cop" && CBZ.player && !CBZ.player.dead);
+  }
+  // somebody else's hands are on him: an arrest, the walk to the hole, the medics
+  function inCustody() {
+    const pl = CBZ.player;
+    if (!pl || pl.dead) return true;
+    if (CBZ.jailEscortPhase && CBZ.jailEscortPhase()) return true;
+    if (CBZ.playerDowned && CBZ.playerDowned()) return true;
+    if (CBZ.prisonArrestPhase && CBZ.prisonArrestPhase()) return true;
+    if (CBZ.prisonHaul && CBZ.prisonHaul()) return true;
+    if (CBZ.arrest && CBZ.arrest.active && CBZ.arrest.active()) return true;
+    return !!(pl.captureState && pl.captureState !== "normal");
+  }
+  function wardenHas() { const W = CBZ.warden; return !!(W && W.pass && W.pass()); }
+  function noYard() { const W = CBZ.warden; return !!(W && W.noYard && W.noYard()); }
+  function orderLive() { const C = CBZ.command; return !!(C && C.playerOrders && C.playerOrders().length); }
+  // nobody sends him anywhere: not an inmate, already in somebody's hands, in
+  // the hole, with the warden, or behind a wheel
+  function excused() {
+    return !inmatePlayer() || inCustody() || wardenHas() || !!CBZ.player.driving ||
+      !!(CBZ.playerCellSealed && CBZ.playerCellSealed());
+  }
+  function pcell() {
+    const cb = CBZ.cellblock, c = cb && cb.v2 ? cb.playerCell : null;
+    return c && typeof c === "object" ? c : null;
+  }
+  // standing in his own cell
+  function playerHome() {
+    const p = P(), c = pcell();
+    if (!p || !c) return false;
+    return p.x > c.x - c.hx && p.x < c.x + c.hx && p.z > c.z - c.hz && p.z < c.z + c.hz && Math.abs((p.y || 0) - (c.fy || 0)) < 1.6;
+  }
+  // what a count needs of him: in his cell (the hole counts), or in custody
+  function accounted() {
+    if (!inmatePlayer()) return true;
+    if (CBZ.playerCellSealed && CBZ.playerCellSealed()) return true;
+    return playerHome() || inCustody();
+  }
+  // the aisle point in front of a cell's door
+  function mouthOf(c) { return { x: c.doorX + c.dx * 1.3, z: c.doorZ + c.dz * 1.3 }; }
+  // the sally port between the wing wall (z -8) and the out door (z -3.75)
+  const OUT_DOOR_Z = -3.75;
+  function vestibule(x, z) { return Math.abs(x) < 2.6 && z < OUT_DOOR_Z + 0.4 && z > -8.6; }
+
+  /* ==========================================================
+     8. AN OFFICER SENDS YOU. kind "yard" (out of the wing), "in" (back
+        into it), "cell" (into your own cell).
+          fetch  he walks up to you
+          order  he says it (command.toPlayer). Obeyed means you made real
+                 progress, never "be there already".
+          walk   he walks a pace behind you. Stall or turn back and he says
+                 it again; the second time he takes you.
+          reach  he closes to arm's length
+          hands  CBZ.verbs.escort: his hand on your arm, walked there round
+                 the walls (the nav grid's path, re-planned as you go)
+        Pull free, run off, or keep out of his hands and it is an offense and
+        a hunt: systems/capture.js's arrest and the hole.
+     ========================================================== */
+  const TAKE_LINES = {
+    yard: ["Yard. Let's go.", "I said yard. Move.", "Last time. Out."],
+    in: ["Count. Inside.", "Inside. Now.", "Last call. Move."],
+    cell: ["Back to your cell.", "Your cell. Now.", "Last time. Cell."],
+  };
+  const TAKE_ORDER = { yard: "go", in: "line", cell: "cell" };
+  const GATE_OUT = { x: 0, z: -1.6 }, GATE_IN = { x: 0, z: -10.4 };
+  let take = null, lastTake = null;
+  function takeArrived(k) {
+    const p = P();
+    if (!p) return false;
+    if (k === "cell") return playerHome();
+    if (k === "in") return inBlock(p.x, p.z, -0.6);
+    return !inBlock(p.x, p.z, 0.2) && !vestibule(p.x, p.z);
+  }
+  // how far he still has to go: it falls as he goes, whatever the route bends
+  function toGo(k) {
+    const p = P();
+    if (!p) return 0;
+    const inside = inBlock(p.x, p.z, 0) || vestibule(p.x, p.z);
+    if (k === "yard") return inside ? Math.hypot(p.x - GATE_OUT.x, p.z - GATE_OUT.z) : 0;
+    if (k === "in") return inside ? 0 : Math.hypot(p.x - GATE_IN.x, p.z - GATE_IN.z);
+    const c = pcell();
+    if (!c) return 0;
+    const mx = c.doorX + c.dx * 1.3, mz = c.doorZ + c.dz * 1.3;      // his door's aisle point
+    if (inside) return Math.hypot(p.x - mx, p.z - mz);
+    return Math.hypot(p.x - GATE_IN.x, p.z - GATE_IN.z) + Math.hypot(GATE_IN.x - mx, GATE_IN.z - mz);
+  }
+  function takeGoal(k) {
+    if (k === "yard") return { x: 0, z: 1.5 };
+    if (k === "in") return { x: 0, z: -12 };
+    let s = null;
+    try { s = CBZ.cellblock && CBZ.cellblock.playerSpawn ? CBZ.cellblock.playerSpawn() : null; } catch (e) { s = null; }
+    const c = pcell();
+    if (s && isFinite(+s.x) && isFinite(+s.z)) return { x: +s.x, z: +s.z };
+    return c ? { x: c.x, z: c.z } : { x: 0, z: -12 };
+  }
+  function startTake(kind, gd, lines) {
+    if (take || !gd || excused() || takeArrived(kind)) return false;
+    take = {
+      kind: kind, gd: gd, lines: lines || TAKE_LINES[kind], phase: "fetch", t: 0, pt: 0, nearest: Infinity,
+      orders: 0, best0: 0, best: Infinity, stall: 0, rec: null, S: null, tries: 0, tryT: 0, esc: false,
+      goal: null, path: null, pathT: 0, pi: 0,
+    };
+    gd._duty = { kind: "take", torch: true };
+    gd.investigate = null; gd._returning = false;
+    return true;
+  }
+  function endTake(why) {
+    const T = take;
+    if (!T) return;
+    take = null;
+    lastTake = { kind: T.kind, why: why, t: Math.round(T.t * 10) / 10, orders: T.orders };
+    if (T.S && !T.S.done && CBZ.verbs && CBZ.verbs.release) { try { CBZ.verbs.release(T.S); } catch (e) {} }
+    const gd = T.gd;
+    if (gd) {
+      if (T.esc) gd._escort = false;
+      if (gd._duty && gd._duty.kind === "take") gd._duty = null;
+      gd._returning = true;
+    }
+    if (T.rec && T.rec.outcome == null && CBZ.command && CBZ.command.cancelPlayer) CBZ.command.cancelPlayer(gd);
+    if (why === "done" && T.kind === "cell") {
+      say(gd, "Stay in there.", 1.6);
+      if (search) endSearch("home");
+    }
+  }
+  // he would not go: on file, and the officer comes for him (the arrest)
+  function resist(T, why) {
+    const gd = T.gd;
+    endTake("resisted: " + why);
+    if (!ableGuard(gd)) return;
+    if (CBZ.prisonOffense) { try { CBZ.prisonOffense("restricted", { severity: 2, seenBy: gd }); } catch (e) {} }
+    gd.hunt = Math.max(gd.hunt || 0, 4); gd.alert = 1; gd.capCD = 0; gd.investigate = null;
+  }
+  function order(T) {
+    T.phase = "order"; T.pt = T.t;
+    T.orders++;
+    T.best0 = toGo(T.kind);
+    const L = T.orders > 1 ? T.lines.slice(1) : T.lines;
+    const C = CBZ.command;
+    let rec = null;
+    if (C && C.toPlayer) {
+      rec = C.toPlayer(T.gd, TAKE_ORDER[T.kind], {
+        lines: L, patience: [6, 5, 4], maxDist: 45,
+        complied: function () { return takeArrived(T.kind) || T.best0 - toGo(T.kind) > 3.5; },
+        alive: function () { return take === T && T.phase === "order"; },
+        onForce: function (r, out) {
+          if (take !== T) return;
+          if (out === "left" || out === "fled") resist(T, "ran");
+          else hands(T);
+        },
+        onDone: function (r, out) {
+          if (take !== T || out !== "complied") return;
+          T.phase = "walk"; T.pt = T.t; T.best = toGo(T.kind); T.stall = 0;
+        },
+      });
+    }
+    T.rec = rec;
+    if (!rec) {
+      // no order layer on this page: the words, and the walk is watched the same
+      say(T.gd, L[0]);
+      T.phase = "walk"; T.best = toGo(T.kind); T.stall = 0;
+    }
+  }
+  function hands(T) {
+    if (T.rec && T.rec.outcome == null && CBZ.command && CBZ.command.cancelPlayer) CBZ.command.cancelPlayer(T.gd);
+    T.rec = null;
+    T.phase = "reach"; T.pt = T.t; T.tryT = 0; T.tries = 0;
+  }
+  function grab(T) {
+    const V = CBZ.verbs;
+    if (!V || !V.escort || !V.playerActor) { resist(T, "no hands"); return; }
+    const A = CBZ.arrest, o = { far: true };
+    if (A) {
+      if (A.tier) o.tierHold = A.tier(T.gd).hold;
+      if (A.pullMul) o.pullMulFn = A.pullMul;
+      if (A.backup) o.backupN = A.backup(T.gd) | 0;
+    }
+    let S = null;
+    try { S = V.escort(T.gd, V.playerActor(), o); } catch (e) { S = null; }
+    if (!S) { if (++T.tries > 8) resist(T, "kept clear"); return; }
+    T.S = S; T.phase = "hands"; T.pt = T.t;
+    T.gd._escort = true; T.esc = true;            // his body is the verb's now (entities/guards.js)
+    T.goal = takeGoal(T.kind); T.path = null; T.pathT = 0; T.pi = 0;
+    say(T.gd, "Walk.", 1.4);
+  }
+  // hands on: walk him there (the same march systems/arrest.js walks a cuffed man)
+  function holdTick(T, dt) {
+    const S = T.S, V = CBZ.verbs, p = P();
+    if (!S || !V || !p) { resist(T, "lost hold"); return; }
+    if (S.done) {
+      const k = S.result && S.result.outcome;
+      if (k === "escaped" || k === "interrupted") { resist(T, "broke loose"); return; }
+      // the hands never closed (he stepped off as they came): reach again
+      T.S = null;
+      if (T.esc) { T.gd._escort = false; T.esc = false; }
+      T.phase = "reach"; T.pt = T.t; T.tryT = 0.5;
+      return;
+    }
+    if (S.phase !== "hold") return;
+    if (takeArrived(T.kind)) { endTake("done"); return; }
+    if (T.t - T.pt > 50) { endTake("stalled"); return; }
+    const goal = T.goal;
+    let tx = goal.x, tz = goal.z;
+    const NG = CBZ.navGrid;
+    if (NG && NG.plan && NG.ready && NG.ready()) {
+      T.pathT -= dt;
+      if (!T.path || T.pathT <= 0) {
+        let path = null;
+        try { path = NG.plan({ x: p.x, z: p.z }, goal, { actor: T.gd }); } catch (e) { path = null; }
+        T.path = path && path.length ? path : null; T.pathT = 2.5; T.pi = 0;
+      }
+      const w = T.path;
+      if (w) {
+        while (T.pi < w.length - 1 && Math.hypot(w[T.pi].x - p.x, w[T.pi].z - p.z) < 0.8) T.pi++;
+        if (T.pi < w.length - 1) { tx = w[T.pi].x; tz = w[T.pi].z; }
+      }
+    }
+    let ux = tx - p.x, uz = tz - p.z;
+    const ul = Math.hypot(ux, uz) || 1;
+    ux /= ul; uz /= ul;
+    const pull = !!(S.cst && S.cst.pullNow > 0);
+    V.walk(S, S, tx - ux * S.work, tz - uz * S.work, pull ? 0.8 : 1.35, dt, Math.atan2(ux, uz));
+  }
+  // every frame while there is one: one man, one officer
+  function takeTick(dt) {
+    const T = take;
+    if (!T) return;
+    T.t += dt;
+    const gd = T.gd, p = P();
+    if (!p || !inmatePlayer() || lockdownOn()) { endTake("off"); return; }
+    if (!ableGuard(gd) || (gd.hunt || 0) > 0) { endTake("officer busy"); return; }
+    if (T.phase === "hands") { holdTick(T, dt); return; }
+    if (excused()) { endTake("custody"); return; }
+    if (takeArrived(T.kind)) { endTake("done"); return; }
+    const d = Math.hypot(p.x - gd.group.position.x, p.z - gd.group.position.z);
+    if (T.phase === "fetch") {
+      if (d < T.nearest) T.nearest = d;
+      // up close he says it; a man drawing away from him, or a long walk over,
+      // gets it called from where he stands (it is an order he never heard
+      // only if he was out of earshot, and then the walk goes on)
+      if (d < 2.8 || ((d > T.nearest + 10 || T.t > 12) && d < 30)) order(T);
+      else if (T.t > 45) endTake("never reached");
+      return;
+    }
+    if (T.phase === "walk") {
+      const left = toGo(T.kind);
+      if (left < T.best - 0.4) { T.best = left; T.stall = 0; }
+      else T.stall += dt;
+      if (T.stall > 9 || left > T.best + 7) { if (T.orders < 2) order(T); else hands(T); }
+      return;
+    }
+    if (T.phase === "reach") {
+      if (d < 2.2) { T.tryT -= dt; if (T.tryT <= 0) { T.tryT = 0.5; grab(T); } }
+      if (take === T && T.phase === "reach" && T.t - T.pt > 14) resist(T, "kept clear");
+    }
+  }
+  // his legs while he is on it (entities/guards.js asks every frame)
+  function stepTake(gd, dt) {
+    const T = take, p = P();
+    const W = CBZ.guardWalkTo, ST = CBZ.guardStand, F = CBZ.guardFaceTo;
+    if (!T || T.gd !== gd || !p || !W || !ST || !F) return false;
+    const gp = gd.group.position;
+    const dx = p.x - gp.x, dz = p.z - gp.z, d = Math.hypot(dx, dz);
+    if (T.phase === "fetch" || T.phase === "reach") {
+      const stop = T.phase === "reach" ? 0.8 : 2.0;
+      if (d > stop + 0.25) W(gd, p.x, p.z, (gd.speed || 2.4) * (T.phase === "reach" ? 1.5 : 1.25), dt, stop, false, p.y);
+      else { ST(gd, dt); F(gd, p.x, p.z, 0.0001, dt); }
+      return true;
+    }
+    if (T.phase === "walk" && d > 2.8) {
+      // a pace behind him, the way an officer walks a man who is going
+      const k = (d - 2.0) / d;
+      W(gd, gp.x + dx * k, gp.z + dz * k, Math.max(gd.speed || 2.4, 2.8), dt, 0.4, false, p.y);
+      return true;
+    }
+    ST(gd, dt); F(gd, p.x, p.z, 0.0001, dt);
+    return true;
+  }
+  // a man being walked across the gate right now: ours, or an arrest's
+  function crossing() {
+    const p = P();
+    if (!p) return false;
+    const inside = inBlock(p.x, p.z, -0.3);
+    if (take && take.phase !== "fetch") return take.kind === "yard" ? (inside || vestibule(p.x, p.z)) : !inside;
+    return !!(CBZ.prisonHaul && CBZ.prisonHaul()) && !inside;
+  }
+  // his own door waits for him while he is being walked to it
+  function playerDoorHeld() {
+    if (playerHome()) return false;
+    if (take && take.kind === "cell" && take.phase !== "fetch") return true;
+    return !!(CBZ.prisonHaul && CBZ.prisonHaul());
+  }
+
+  /* ==========================================================
+     9. THE COUNT. One or two officers walk the galleries, the north row
+        and the hall; the one who passes YOUR door stops and looks in. In
+        there (or in the hole, or in custody): they walk on. Not: the count
+        is short (10). The morning count is taken in locked cells and the
+        doors rack only once it clears (`morningHold`).
+     ========================================================== */
+  const COUNT_WALKS = [
+    [[-1.0, -11.8], [-10.3, -11.8], [-10.3, -36.2], [0, -36.2], [0, -12.6]],   // west gallery, the north row, the hall
+    [[1.0, -11.8], [10.3, -11.8], [10.3, -36.2], [1.4, -36.2]],               // east gallery
+  ];
+  const COUNT_MAX = 55;
+  let count = null, countDue = null, countDueT = 0, morningHold = false, lastCount = null;
+  function walkPts(base) {
+    const pts = [];
+    for (let i = 0; i < base.length; i++) pts.push({ x: base[i][0], z: base[i][1], look: null });
+    return pts;
+  }
+  function segD(px, pz, ax, az, bx, bz) {
+    const vx = bx - ax, vz = bz - az, L = vx * vx + vz * vz;
+    let u = L > 0 ? ((px - ax) * vx + (pz - az) * vz) / L : 0;
+    u = u < 0 ? 0 : u > 1 ? 1 : u;
+    return Math.hypot(px - (ax + vx * u), pz - (az + vz * u));
+  }
+  // his door goes into whichever walk passes nearest it, as a stop to look in
+  function addLook(routes, c) {
+    if (!c || c.fy) return;                       // an upper cell is counted from the floor below
+    const m = mouthOf(c);
+    let best = null, bi = -1, bd = Infinity;
+    for (let r = 0; r < routes.length; r++) {
+      const pts = routes[r];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const d = segD(m.x, m.z, pts[i].x, pts[i].z, pts[i + 1].x, pts[i + 1].z);
+        if (d < bd) { bd = d; best = pts; bi = i; }
+      }
+    }
+    if (best) best.splice(bi + 1, 0, { x: m.x, z: m.z, look: { x: c.x, z: c.z } });
+  }
+  function startCount(kind) {
+    if (count || search || lockdownOn() || !(CBZ.cellblock && CBZ.cellblock.v2)) return false;
+    const a = nearestGuard(-10, -24, 90, freeGuard);
+    if (!a) return false;
+    a._duty = { kind: "count", torch: true, pts: null, i: 0, look: 0, best: Infinity, stall: 0 };   // spoken for
+    const b = nearestGuard(10, -24, 90, freeGuard);
+    const men = b ? [a, b] : [a];
+    const routes = b ? [walkPts(COUNT_WALKS[0]), walkPts(COUNT_WALKS[1])]
+      : [walkPts(COUNT_WALKS[0]).concat(walkPts(COUNT_WALKS[1]))];
+    const c = pcell();
+    addLook(routes, c);
+    count = { kind: kind, t: 0, men: men, checked: !inmatePlayer() || !c, present: true, by: null };
+    for (let k = 0; k < men.length; k++) {
+      const gd = men[k];
+      gd._duty = { kind: "count", torch: true, pts: routes[k], i: 0, look: 0, best: Infinity, stall: 0 };
+      gd.investigate = null; gd._returning = false;
+    }
+    return true;
+  }
+  function stepCount(gd, D, dt) {
+    const W = CBZ.guardWalkTo, ST = CBZ.guardStand, F = CBZ.guardFaceTo;
+    if (!D.pts || D.i >= D.pts.length || !W || !ST || !F) return false;
+    const w = D.pts[D.i];
+    if (D.look > 0) {
+      // at the bars, looking in
+      D.look -= dt;
+      ST(gd, dt);
+      F(gd, w.look.x, w.look.z, 0.0001, dt);
+      if (D.look <= 0) { D.i++; D.best = Infinity; D.stall = 0; }
+      return true;
+    }
+    const d = W(gd, w.x, w.z, (gd.speed || 2.4) * 0.85, dt, 0.4);
+    if (d < D.best - 0.2) { D.best = d; D.stall = 0; } else D.stall += dt;
+    if (d < 0.8 || D.stall > 4) {
+      if (w.look && d < 2.5) D.look = 1.3;
+      else { D.i++; D.best = Infinity; D.stall = 0; }
+    }
+    return true;
+  }
+  function endCount() {
+    const C = count;
+    if (!C) return;
+    count = null;
+    for (let k = 0; k < C.men.length; k++) {
+      const gd = C.men[k];
+      if (gd && gd._duty && gd._duty.kind === "count") { gd._duty = null; gd._returning = true; }
+    }
+  }
+  function countClear(kind, skipped) {
+    lastCount = { kind: kind, clear: true, skipped: !!skipped };
+    if (kind === "wake" && !skipped) paSay("Count's clear.", 1);
+  }
+  function countTick(step) {
+    if (countDue && !count && !search) {
+      countDueT -= step;
+      if (countDueT <= 0) {
+        const k = countDue;
+        countDue = null;
+        if (!startCount(k)) countClear(k, true);  // nobody free to walk it: counted from the desk
+      }
+    }
+    const C = count;
+    if (!C) return;
+    C.t += step;
+    if (lockdownOn()) { endCount(); return; }
+    const c = pcell();
+    let walking = 0;
+    for (let k = 0; k < C.men.length; k++) {
+      const gd = C.men[k];
+      const D = gd && gd._duty;
+      if (!D || D.kind !== "count" || !ableGuard(gd)) continue;
+      if (D.pts && D.i < D.pts.length) walking++;
+      if (!C.checked && c) {
+        const gp = gd.group.position;
+        if ((gp.y || 0) < 1.5 && Math.hypot(gp.x - c.doorX, gp.z - c.doorZ) < 3.4) {
+          C.checked = true; C.by = gd; C.present = accounted();
+          if (!C.present && !(take && take.kind === "cell")) say(gd, "This one's empty.", 1.8);
+        }
+      }
+    }
+    const over = walking === 0 || C.t > COUNT_MAX;
+    if (!C.checked && over) { C.checked = true; C.present = accounted(); }
+    if (C.checked && !C.present && accounted()) C.present = true;     // he got home before it was called
+    if (C.checked && !C.present) {
+      if (take && take.kind === "cell") return;                       // an officer is walking him home: wait
+      const k = C.kind, by = C.by;
+      endCount();
+      startSearch(k, by);
+      return;
+    }
+    if (over) { const k = C.kind; endCount(); countClear(k, false); }
+  }
+
+  /* ==========================================================
+     10. THE COUNT IS SHORT. The PA says so, and the officers search with
+         entities/guards.js's own search (walk to a spot, look round two or
+         three points near it, torch on in the dark): YOUR CELL first, then
+         WHERE YOU WERE LAST SEEN, then the likely places nearest that (the
+         vents and hatches, the culvert, the wall, the yard corners), each
+         party going on to the next place as it finishes. Whoever sees you
+         sends you home (11). Home, in custody or in the hole: the count
+         clears. Not found in SEARCH_H hours it is an escape: the warden's
+         lockdown (systems/prisonwarden.js -> systems/lockdown.js).
+     ========================================================== */
+  const SEARCH_H = 2.5, PARTIES = 4;
+  let search = null, lastSearch = null;
+  function lastSeen() {
+    const g = CBZ.game, now = (g && g.elapsed) || 0;
+    const lk = g && g.lastKnown;
+    if (lk && lk.t > 0 && !lk.heardOnly && isFinite(lk.x) && isFinite(lk.z)) return { x: +lk.x, z: +lk.z };
+    let best = null, at = -Infinity;
+    const list = CBZ.guards || [];
+    for (let i = 0; i < list.length; i++) {
+      const gd = list[i];
+      if (gd && gd.lkAt != null && gd.lkAt > at && isFinite(gd.lkX) && isFinite(gd.lkZ)) { at = gd.lkAt; best = gd; }
+    }
+    if (best && now - at < 4 * secsPerHour()) return { x: best.lkX, z: best.lkZ };
+    return null;
+  }
+  function likelyPlaces(from) {
+    const out = [];
+    const add = function (x, z) { if (isFinite(x) && isFinite(z) && Math.abs(x) < 118 && z > -108 && z < 122) out.push({ x: +x, z: +z }); };
+    add(0, -1.6); add(-24, 14); add(0, 24); add(-22, 46); add(22, 44); add(0, 50);
+    const V = CBZ.vents || [];
+    for (let i = 0; i < V.length; i++) if (V[i]) add(V[i].x, V[i].z);
+    const A = CBZ.altExitZones || [];
+    for (let i = 0; i < A.length; i++) if (A[i]) add(A[i].x, A[i].z);
+    out.sort(function (a, b) { return Math.hypot(a.x - from.x, a.z - from.z) - Math.hypot(b.x - from.x, b.z - from.z); });
+    return out;
+  }
+  function startSearch(kind, by) {
+    if (search || lockdownOn()) return;
+    const c = pcell();
+    const home = c ? { x: c.x, z: c.z } : { x: 0, z: -24 };
+    const seen = lastSeen();
+    search = { kind: kind, t: 0, home: home, seen: seen, places: likelyPlaces(seen || home), next: 0, sent: 0,
+      parties: [], found: false, retaskT: 1 };
+    paSay("Count's short.", 2);
+    if (by && freeGuard(by)) send(by, home, 2);
+    else { const gd = nearestGuard(home.x, home.z, 90, freeGuard); if (gd) send(gd, home, 2); }
+    if (seen) { const gd = nearestGuard(seen.x, seen.z, 120, freeGuard); if (gd) send(gd, seen, 3); }
+    fillParties();
+  }
+  function send(gd, at, npts) {
+    gd.investigate = { x: at.x, z: at.z, t: 10, scan: 0, type: "search", npts: npts || 3 };
+    gd._returning = false;
+    gd.alert = Math.max(gd.alert || 0, 0.6);
+    if (search.parties.indexOf(gd) < 0) search.parties.push(gd);
+    search.sent++;
+  }
+  function nextPlace() {
+    const S = search;
+    if (S.sent % 4 === 3 && !playerHome()) return S.home;      // every fourth look is his cell again
+    if (!S.places.length) return S.home;
+    const q = S.places[S.next % S.places.length];
+    S.next++;
+    return q;
+  }
+  function fillParties() {
+    const S = search;
+    for (let i = S.parties.length - 1; i >= 0; i--) {
+      const gd = S.parties[i];
+      if (!ableGuard(gd) || gd._duty || (gd.hunt || 0) > 0 || otherJob(gd)) S.parties.splice(i, 1);
+    }
+    if (S.found) return;
+    for (let i = 0; i < S.parties.length; i++) {
+      const gd = S.parties[i];
+      if (!(gd.investigate && gd.investigate.t > 0)) send(gd, nextPlace(), 3);
+    }
+    let tries = 0;
+    while (S.parties.length < PARTIES && tries++ < PARTIES) {
+      const q = nextPlace();
+      const gd = nearestGuard(q.x, q.z, 140, freeGuard);
+      if (!gd) break;
+      send(gd, q, 3);
+    }
+  }
+  function endSearch(why) {
+    const S = search;
+    if (!S) return;
+    search = null;
+    lastSearch = { why: why, t: Math.round(S.t * 10) / 10, parties: S.parties.length, sent: S.sent };
+    // the parties finish the look they are on and go back to their rounds
+  }
+  function searchTick(step) {
+    const S = search;
+    if (!S) return;
+    S.t += step;
+    if (lockdownOn()) { endSearch("lockdown"); return; }
+    if (accounted() && !(take && take.kind === "cell")) { endSearch("home"); return; }
+    if (S.found && !(take && take.kind === "cell")) S.found = false;    // the walk home fell through: look again
+    S.retaskT -= step;
+    if (S.retaskT <= 0) { S.retaskT = 1; fillParties(); }
+    if (!S.found && S.t > SEARCH_H * secsPerHour()) {
+      const at = S.seen || S.home;
+      endSearch("escape");
+      const W = CBZ.warden;
+      if (W && W.incident) { try { W.incident("escape", { player: true, seen: false, at: at }); } catch (e) {} }
+      else if (CBZ.lockdown && CBZ.lockdown.begin) { try { CBZ.lockdown.begin("count", { hunt: true }); } catch (e) {} }
+    }
+  }
+
+  /* ==========================================================
+     11. SEEN WHERE YOU SHOULD NOT BE. After lock-in, or while the count is
+         short, a screw who has eyes on you needs no heat first: he comes
+         over and sends you back to your cell (8). It is a hunt only if you
+         will not go. In the dark he barely sees you unless his torch is on
+         you (systems/prisonnight.js). A bent screw looks the other way.
+     ========================================================== */
+  function watchOut() {
+    if (take || excused() || (CBZ.game.invuln || 0) > 0) return;
+    if (!search && !isCurfew(live())) return;
+    const p = P();
+    if (!p || (search ? playerHome() : belongs(p.x, p.z))) return;
+    if (orderLive()) return;
+    const list = CBZ.guards || [];
+    let best = null, bd = Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const gd = list[i];
+      if (!ableGuard(gd) || !gd.seesPlayer || gd.corrupt || gd.bribed > 0 || otherJob(gd)) continue;
+      const d = Math.hypot(gd.group.position.x - p.x, gd.group.position.z - p.z);
+      if (d < bd) { bd = d; best = gd; }
+    }
+    if (best) found(best);
+  }
+  function found(gd) {
+    if ((gd.hunt || 0) > 0) {
+      if (CBZ.prisonArrestPhase && CBZ.prisonArrestPhase()) return;   // the arrest already has him
+      gd.hunt = 0; gd._chase = null;
+    }
+    if (gd._duty && gd._duty.kind === "count") gd._duty = null;
+    gd.investigate = null;
+    if (startTake("cell", gd) && search) search.found = true;
+  }
+
+  /* ==========================================================
+     12. THE DAY'S TWO MOVES.
+         OUT, the first open block of the day (07:00 yard), once the morning
+         count has cleared: the gate opens, an officer calls it, the wing's
+         men walk out (its own residents too, each given a patch of yard;
+         their aisle is kept in `_dayRegion` for the evening), the yard
+         patrol stands the apron, and an officer comes for you. When the
+         wing is empty and you are out (or excused), or after MOVE_OUT_H
+         hours, the gate shuts for the day. A lockdown cancels it; the
+         warden taking your yard leaves you inside.
+         IN, the evening return: the muster above walks the men home; if
+         you are still out IN_WAIT seconds after the horn, an officer comes.
+     ========================================================== */
+  const MOVE_OUT_H = 3, IN_WAIT = 6;
+  const YARD_PATCHES = [[-12, -4, 8, 18], [4, 12, 8, 18], [-6, 6, 16, 26], [-12, -4, 26, 36], [4, 12, 26, 36], [-16, -8, 38, 46], [8, 16, 38, 46]];
+  let move = null, outKey = null, lastMove = null, inArmed = false, inT = 0;
+  function dayKey() { return CBZ.dayCount ? (CBZ.dayCount() | 0) : 0; }
+  // an open block with a day still in front of it (not the last one before the return)
+  function outBlock(b) {
+    if (!b || b.home !== null) return false;
+    const n = nextOf(b);
+    return (!!n && n.home === null) || PLAN.until() > 1.5 * secsPerHour();
+  }
+  function startMoveOut() {
+    outKey = dayKey();
+    move = { dir: "out", t: 0, left: 0, called: false };
+    drivePosts(true);
+    const list = CBZ.npcs || [];
+    let k = 0;
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (!housed(n) || n._cellIdx == null || n._cellIdx < 0) continue;
+      const q = n.group.position;
+      if (!inBlock(q.x, q.z, 0)) continue;
+      if (!n._dayRegion) n._dayRegion = n.region;
+      n.region = YARD_PATCHES[k++ % YARD_PATCHES.length];
+    }
+  }
+  function endMove(why) {
+    if (!move) return;
+    lastMove = { dir: move.dir, why: why, t: Math.round(move.t * 10) / 10, left: move.left };
+    move = null;
+    drivePosts(live().home !== null);
+  }
+  // the officer nearest you in the wing calls it
+  function callIt() {
+    const p = P();
+    const x = p ? p.x : 0, z = p ? p.z : -24;
+    const gd = nearestGuard(x, z, 45, function (o) { return ableGuard(o) && inBlock(o.group.position.x, o.group.position.z, 0); });
+    if (gd) say(gd, "Yard. Move out.", 2.0);
+  }
+  function moveTick(step) {
+    const b = live();
+    if (!move && outKey !== dayKey() && outBlock(b) && !morningHold && !count && !countDue && !search) {
+      if (lockdownOn()) outKey = dayKey();          // a lockdown cancels the yard
+      else startMoveOut();
+    }
+    if (!move) return;
+    move.t += step;
+    if (lockdownOn() || b.home !== null) { endMove("cut"); return; }
+    let left = 0;
+    const list = CBZ.npcs || [];
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (!housed(n) || n.ko > 0 || n._propLie) continue;
+      const q = n.group.position;
+      if (!inBlock(q.x, q.z, 0) && !vestibule(q.x, q.z)) continue;
+      left++;
+      // move along: up off the bunk, no standing about
+      n._bunkGiveUp = Math.max(n._bunkGiveUp || 0, 30);
+      if (n._propSeat || n._propBed) continue;
+      if (n.pause > 0) n.pause = 0;
+      if ((n._lifeActivity === "stand" || n._lifeActivity === "activity") && (!n.aiState || n.aiState === "wander")) {
+        n._lifeActivity = "walk"; n._lifeT = 8;
+        if (CBZ.npcPickTarget) CBZ.npcPickTarget(n);
+      }
+    }
+    move.left = left;
+    if (!move.called && move.t > 0.6) { move.called = true; callIt(); }
+    const p = P();
+    const youDone = !p || excused() || noYard() || takeArrived("yard");
+    if (!youDone && !take && move.t > 2.5 && !orderLive()) {
+      const gd = nearestGuard(p.x, p.z, 70, freeGuard);
+      if (gd) startTake("yard", gd);
+    }
+    if ((left === 0 && youDone && !take) || move.t > MOVE_OUT_H * secsPerHour()) endMove(left === 0 ? "out" : "time");
+  }
+  function inTick(step) {
+    if (!inArmed) return;
+    const b = live();
+    if (b.home !== "block" || lockdownOn()) { inArmed = false; return; }
+    if (inT > 0) { inT -= step; return; }
+    if (take || excused() || orderLive() || takeArrived("in")) return;
+    const p = P();
+    const gd = p ? nearestGuard(p.x, p.z, 120, freeGuard) : null;
+    if (gd) startTake("in", gd);
+  }
+
+  /* ---- THE COUNTS NOBODY ANNOUNCES: one or two a night, rolled per night
+       off the calendar, between 23:00 and 04:15. ---- */
+  const surprise = { key: null, at: [], done: [] };
+  function lateHours() { return ((hourNow() - 22) % 24 + 24) % 24; }      // hours since 22:00
+  function nightKey() { return hourNow() >= 12 ? dayKey() : dayKey() - 1; }
+  function skipPast() {
+    const late = lateHours();
+    if (late > 7.5) return;
+    for (let i = 0; i < surprise.at.length; i++) if (late >= surprise.at[i]) surprise.done[i] = true;
+  }
+  function rollSurprise() {
+    const key = nightKey();
+    if (surprise.key === key) return;
+    surprise.key = key;
+    surprise.at.length = 0; surprise.done.length = 0;
+    const r = function (salt) { return CBZ.hash01 ? CBZ.hash01(key, 31, salt) : Math.random(); };
+    surprise.at.push(1 + r(1) * 2.5);                   // 23:00 .. 01:30
+    if (r(2) < 0.5) surprise.at.push(4.5 + r(3) * 1.75); // 02:30 .. 04:15
+    for (let i = 0; i < surprise.at.length; i++) surprise.done.push(false);
+    skipPast();                                         // a run that starts at 03:00 skips 01:00's
+  }
+  function surpriseTick() {
+    if (!isCurfew(live()) || lockdownOn()) return;
+    const late = lateHours();
+    if (late > 7.5) return;
+    for (let i = 0; i < surprise.at.length; i++) {
+      if (surprise.done[i] || late < surprise.at[i]) continue;
+      surprise.done[i] = true;
+      if (!count && !search && !countDue) { countDue = "night"; countDueT = 0; }
+    }
+  }
+
+  // four times a second
+  function dayTick(step) {
+    surpriseTick();
+    countTick(step);
+    searchTick(step);
+    moveTick(step);
+    inTick(step);
+    watchOut();
+    towerNotice(step);
+    // the morning doors rack once the count is clear (or the trouble is over)
+    if (morningHold && !count && !countDue && !search && !lockdownOn()) {
+      morningHold = false;
+      if (live().cells !== "lock") openCells();
+    }
+  }
+
+  // entities/guards.js: an officer on one of these jobs, every frame
+  function dutyStep(gd, dt) {
+    const D = gd && gd._duty;
+    if (!D || !on()) return false;
+    if (D.kind === "take") return stepTake(gd, dt);
+    if (D.kind === "count") return stepCount(gd, D, dt);
+    return false;
+  }
+
+  /* ==========================================================
+     13. APPLYING A BLOCK
      ========================================================== */
   function live() { return PLAN.block(); }
+  function openCells() {
+    wantLocked = false;
+    doorRetry = 0;
+    const list = cells();
+    if (list) for (let i = 0; i < list.length; i++) list[i]._keyed = false;   // the night's key expires
+  }
 
   function apply(b, announce, prev) {
-    if (b.cells === "lock") wantLocked = true;
+    if (prev === b) prev = null;                  // a replayed block (CBZ.dayJump) starts fresh
+    if (b.cells === "lock") { wantLocked = true; morningHold = false; }
     else if (b.cells === "open") {
-      wantLocked = false;
-      const list = cells();
-      if (list) for (let i = 0; i < list.length; i++) list[i]._keyed = false;   // the night's key expires
+      // THE MORNING COUNT IS TAKEN IN LOCKED CELLS, then the doors rack
+      if (b.count && v2()) { wantLocked = true; morningHold = true; countDue = b.id; countDueT = 1.0; }
+      else openCells();
+    } else if (b.home === null && wantLocked && !morningHold) {
+      // an open day never keeps the cells racked (a clock jumped from 02:00
+      // straight to the yard skipped the morning count that opens them)
+      openCells();
     }
     // never rack a wing open in the middle of a facility lockdown
     if (!wantLocked && (CBZ.game.detection || 0) >= 90) wantLocked = true;
-    // THE DOORS MOVE ON THE KLAXON, not up to a retry interval later. The
-    // 0.35 s gate below exists for the deferred case (a body in the opening),
-    // and core/loop.js clamps world dt to 0.10 s — so on a slow frame that
-    // gate is many real seconds, and a wing that racks shut long after the
-    // horn reads as two unrelated events instead of one order being obeyed.
+    // the doors move on the klaxon, not a retry interval later
     doorRetry = 0;
-    /* A LOCK-UP ARMS THE HOLD ONCE, ON ITS FIRST BLOCK. count -> secure ->
-       night is ONE lock-up with three klaxons in it, not three; re-arming on
-       each of them (which the first draft did) hands the wing a fresh ninety
-       seconds of patience at 22:00 and the gate is still standing open at
-       23:00, which is the escape objective left ajar all night. Measured:
-       `hold` read 89.4 and `gateOpen` true at the night block. */
-    if (b.home === null) { gateT = 0; holdT = 0; }
+    if (b.home === null) { gateT = 0; holdT = 0; inArmed = false; }
     else {
-      // the two blocks that ORDER men across the gate: `wake` (cells open) and
-      // `count` (cells null). `secure` and `night` lock the wing and arm the
-      // leaves' own patience instead — the gate's own budget carries over from
-      // the return, so the count can finish across the 21:00 klaxon.
-      if (b.cells !== "lock") gateT = GATE_HOLD;
-      else if (!prev || prev.cells !== "lock") holdT = CELL_HOLD;
+      /* THE EVENING RETURN: the first indoor block after the open day (or a
+         run that starts in one before lights out) opens the gate for the men
+         coming in, and sends an officer for you if you are out. count ->
+         secure -> night is ONE lock-up: neither timer re-arms inside it. */
+      if (prev ? prev.home === null : (!b.lightsOut && b.cells !== "open")) {
+        gateT = GATE_HOLD;
+        if (b.home === "block") { inArmed = true; inT = IN_WAIT; }
+      }
+      if (b.cells === "lock" && (!prev || prev.cells !== "lock")) holdT = CELL_HOLD;
+      // the lock-in count walks once the leaves have racked
+      if (b.count && b.cells !== "open") { countDue = b.id; countDueT = 0.3 * secsPerHour(); }
     }
-    drivePosts(b.home !== null);
+    if (b.home === null && (!prev || prev.home !== null)) outKey = null;   // a new open day: the yard is due
+    if (b.home !== null && move) endMove("block");
+    if (isCurfew(b)) rollSurprise();
+    drivePosts(b.home !== null || !!move);
     muster(b.home !== null);
     if (announce) soundPA(b.pa);
   }
 
   /* ==========================================================
-     8. THE TICK
+     14. THE TICK
      ========================================================== */
   const pollNewRun = CBZ.jailBoost ? CBZ.jailBoost.newRunWatcher(0.5) : null;
 
@@ -1114,13 +1845,17 @@
   PLAN.on(function (b, prev, first) { apply(b, !first, prev); });
 
   function reset() {
-    PLAN.rearm(); blasts = 0;
+    PLAN.rearm(); blasts = 0; paLine = null;
+    endTake("reset"); endCount(); search = null; move = null;
+    countDue = null; morningHold = false; inArmed = false; outKey = null; surprise.key = null;
+    const G = CBZ.guards || [];
+    for (let i = 0; i < G.length; i++) if (G[i] && G[i]._duty) G[i]._duty = null;
     const list = cells();
     if (list) for (let i = 0; i < list.length; i++) list[i]._keyed = false;
     muster(false);
     drivePosts(false);
     wantLocked = false;
-    gateT = 0; holdT = 0; waiting.length = 0; gateOpen = false; gateOffCount = 0; gateMine = false;
+    gateT = 0; holdT = 0; waiting.length = 0; gateOpen = false; gateOffMove = 0; gateMine = false;
     // the block gate goes back the way the build left it — shut, keycard only
     if (v2() && gateUsable() && CBZ.door.open && CBZ.closeDoor) CBZ.closeDoor();
     if (list && CBZ.cellblock.resetDoors) CBZ.cellblock.resetDoors();
@@ -1134,11 +1869,22 @@
 
   function on() { return CFG.PRISON_SCHEDULE_V1 !== false && CBZ.game && CBZ.game.mode === "escape"; }
 
+  let seenJumps = CBZ.dayJumps || 0, dayAcc = 0;
   CBZ.onUpdate(19.5, function (dt) {
     if (!on()) return;
     if (pollNewRun && pollNewRun()) reset();
 
+    // a clock moved by hand (CBZ.dayJump) lands like a real hour change
+    const jumped = (CBZ.dayJumps || 0) !== seenJumps;
+    if (jumped) {
+      seenJumps = CBZ.dayJumps || 0;
+      // the hours between have passed: whatever was running belonged to them
+      endTake("jump"); endCount(); endSearch("jump"); endMove("jump");
+      countDue = null; morningHold = false;
+      if (PLAN.replay) PLAN.replay();
+    }
     PLAN.poll(dt);            // fires apply() through the listener above
+    if (jumped) skipPast();
 
     /* THE HOLD RUNS DOWN WHILE THE COUNT IS BEING TAKEN, and the instant it
        reaches zero the wing stops waiting: every man still holding a rack he
@@ -1164,31 +1910,35 @@
       }
     }
 
+    takeTick(dt);
+    dayAcc += dt;
+    if (dayAcc >= 0.25) { const s = dayAcc; dayAcc = 0; dayTick(s); }
     driveDoors(dt);
     tryCellKey();
-    enforceCurfew(dt);
     herd(dt);
     recount(dt);
     stalls(dt);
     pumpPA(dt);
+    pumpPaLine(dt);
   });
   // the horn's own lamp fades on menus too, so a paused game does not freeze
   // a speaker mid-shout
   CBZ.onAlways(19.6, function (dt) { pumpHornLamps(dt); });
 
   /* ==========================================================
-     9. THE CONTRACT — what every later phase reads instead of inventing
-        its own clock.
+     15. THE CONTRACT — what every later phase reads instead of inventing
+         its own clock.
      ========================================================== */
   CBZ.prisonSchedule = {
     enabled: on,
     blocks: BLOCKS,
     hour: hourNow,
-    // {h, m} — for anything that needs a real time (a wall clock prop, a
-    // guard's watch). Deliberately NOT a HUD string.
+    // {h, m} — for a thing in the world that tells time (the warden's wall
+    // clock). Never a HUD string.
     clock: function () { const h = hourNow(); return { h: h | 0, m: ((h % 1) * 60) | 0 }; },
     block: live,
     id: function () { return live().id; },
+    // is("blackout") is what the lights read for the pitch-black hours
     is: function (id) { return live().id === id; },
     next: function () { return nextOf(live()); },
     // real seconds until the next block starts
@@ -1215,21 +1965,29 @@
     // security tier, a recapture): n blasts from the nearest real horn
     announce: soundPA,
     horns: horns,
+    // the day's moves, the counts and the officers on them
+    dutyStep: dutyStep,
+    moving: function () { return !!move; },
+    taking: function () { return !!take; },
+    countLive: function () { return !!count; },
+    searching: function () { return !!search; },
+    // a count right now, unannounced (as at night)
+    countNow: function () { if (count || search || countDue) return false; countDue = "night"; countDueT = 0; return true; },
+    // an officer brings the player into the wing (the warden taking his yard)
+    bringIn: function (gd, lines) { return !take && freeGuard(gd) && startTake("in", gd, lines); },
   };
 
-  /* THE RATCHET. `gaps` is the invariant that makes the table trustworthy:
-     every one of the 24 hours belongs to exactly one block, so nothing can
-     fall through into "no schedule". `hudText` is pinned at 0 because this
-     system's whole design is that it never prints — if it ever grows a
-     toast, this number is where it shows up. */
+  /* THE RATCHET. `gaps`: every one of the 24 hours belongs to exactly one
+     block. `hudText` is pinned at 0: this system never prints. `gateOpenOffMove`
+     stays 0: our gate never stands open with no move or escorted man to
+     justify it (the keycard's whole value). */
   CBZ.prisonScheduleAudit = function () {
-    // both invariants are the shared plan's, measured on the LIVE table, so a
-    // regime that rewrites `from` is checked by the same test as the default
     const pa = PLAN.audit();
     const gaps = pa.gaps, sorted = pa.ordered;
     const list = cells();
     let locked = 0, keyed = 0;
     if (list) for (let i = 0; i < list.length; i++) { if (list[i].locked) locked++; if (list[i]._keyed) keyed++; }
+    const T = take, C = count, S = search;
     return {
       on: on(), gaps: gaps, ordered: sorted, hudText: 0,
       blocks: BLOCKS.length, horns: horns.length,
@@ -1237,15 +1995,23 @@
       hour: Math.round(hourNow() * 100) / 100,
       block: live().id, until: Math.round(CBZ.prisonSchedule.until() * 10) / 10,
       curfew: isCurfew(live()), lightsOut: !!live().lightsOut,
-      wantLocked: wantLocked, lockedDoors: locked, keyedDoors: keyed,
+      wantLocked: wantLocked, morningHold: morningHold, lockedDoors: locked, keyedDoors: keyed,
       mustered: mustered,
       nightPosts: (CBZ.guards || []).filter(function (g) { return !!g._dayRoute; }).length,
-      // the 2026-08-16 count gate. `gateOpenOffCount` is the ratchet: the
-      // keycard leaf may only ever stand open while a count is being taken.
       v2: v2(), counting: counting(),
       hold: Math.round(holdT * 10) / 10, gateHold: Math.round(gateT * 10) / 10,
-      gateOpen: !!(CBZ.door && CBZ.door.open), gateOpenOffCount: gateOffCount,
+      gateOpen: !!(CBZ.door && CBZ.door.open), gateWanted: gateWanted(),
+      gateOpenOffMove: gateOffMove, gateOpenOffCount: gateOffMove,   // (old name, same number)
       heldOpenCells: waiting.length,
+      move: move ? { dir: move.dir, t: Math.round(move.t * 10) / 10, left: move.left } : null, lastMove: lastMove,
+      take: T ? { kind: T.kind, phase: T.phase, t: Math.round(T.t * 10) / 10, orders: T.orders, toGo: Math.round(toGo(T.kind) * 10) / 10 } : null,
+      lastTake: lastTake,
+      count: C ? { kind: C.kind, t: Math.round(C.t * 10) / 10, men: C.men.length, checked: C.checked, present: C.present } : null,
+      countDue: countDue, lastCount: lastCount,
+      search: S ? { t: Math.round(S.t * 10) / 10, parties: S.parties.length, sent: S.sent, found: S.found, seen: S.seen } : null,
+      lastSearch: lastSearch,
+      surprise: { at: surprise.at.slice(), done: surprise.done.slice() },
+      playerHome: playerHome(), accounted: accounted(),
     };
   };
   });

@@ -137,6 +137,22 @@
     pace += days;
   };
 
+  /* CBZ.dayJump(hour) — move the clock FORWARD to the next `hour` (0..24),
+     as if the hours between had passed (sun, calendar and pace together).
+     `dayJumps` counts the jumps: a timetable (systems/prisonschedule.js)
+     replays the block it lands in, so jumping to 07:00 starts the yard move
+     and to 18:30 the evening return exactly as the real hour would. */
+  CBZ.dayJumps = 0;
+  CBZ.dayJump = function (hour) {
+    hour = +hour;
+    if (!isFinite(hour)) return (t * 24 + 6) % 24;
+    const want = (((hour - 6) / 24) % 1 + 1) % 1;
+    const d = ((want - t) % 1 + 1) % 1;
+    if (d > 1e-6) CBZ.advanceClock(d);
+    CBZ.dayJumps++;
+    return (t * 24 + 6) % 24;
+  };
+
   // fog keyframes across the day (0..1). The LIGHT keyframes moved to
   // core/lights.js (CBZ.lightRig.keys) so all three writers share one table;
   // fog colour is still owned here because sky.js's horizon seam law is keyed

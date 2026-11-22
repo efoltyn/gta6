@@ -953,7 +953,7 @@
      That's the whole seam fix: horizon stop == scene.fog.color, always. */
   let forcePaint = true, lastPaintAt = -1e9;
   const lastFog = new THREE.Color(-1, -1, -1), lastTint = new THREE.Color(-1, -1, -1);
-  let lastKDay = -1, lastGlowK = -1, lastGlowU = -1, lastPhotoK = -1;
+  let lastKDay = -1, lastGlowK = -1, lastGlowU = -1, lastPhotoK = -1, lastSkyCut = 0;
   let lastSpaceK = -1, lastHazeK = -1, lastStormK = -1, lastStormU = -1e9;
   const _white = new THREE.Color(1, 1, 1);
   /* WRITING THE TINT HAS TO BE IDEMPOTENT. Normally daynight (@2) resets the
@@ -1030,6 +1030,16 @@
       _top.lerp(PAL.blue.top, blueK * 0.8);
       _zen.lerp(PAL.blue.zen, blueK * 0.85);
       _mid.lerp(PAL.blue.mid, blueK * 0.75);
+    }
+    // A CLOSED NIGHT (CBZ.skyCut, the prison's blackout — systems/prisonnight.js):
+    // no moon, no sky glow, the dome goes black with the light it would have
+    // thrown. The horizon stop is the fog colour, which the same cut has
+    // already taken down, so the seam stays closed.
+    const skyCut = clamp01(fin(CBZ.skyCut, 0));
+    if (skyCut > 0) {
+      _top.multiplyScalar(1 - skyCut);
+      _zen.multiplyScalar(1 - skyCut);
+      _mid.multiplyScalar(1 - skyCut);
     }
     // the deck: authored, dimmed into the night with the rest of the sky, then
     // nudged toward the live fog so the disaster's own mood carries into it
@@ -1151,6 +1161,7 @@
     // <10Hz, wasteful at 60); fog/palette drift over seconds, not frames
     const du = Math.abs(frame.glowU - lastGlowU);
     const palMoved = Math.abs(kDay - lastKDay) > 0.02 ||
+      Math.abs(skyCut - lastSkyCut) > 0.02 || (skyCut !== lastSkyCut && (skyCut === 0 || skyCut === 1)) ||
       Math.abs(frame.glowK - lastGlowK) > 0.02 ||
       (frame.glowK > 0.02 && Math.min(du, 1 - du) > 0.01) ||
       Math.abs(frame.photoK - lastPhotoK) > 0.03 ||
@@ -1166,6 +1177,7 @@
       paintSky(fog, tint);
       lastFog.copy(fog); lastTint.copy(tint);
       lastKDay = kDay; lastGlowK = frame.glowK; lastGlowU = frame.glowU; lastPhotoK = frame.photoK;
+      lastSkyCut = skyCut;
       lastSpaceK = frame.spaceK; lastHazeK = frame.hazeK;
       lastStormK = frame.stormK; lastStormU = frame.stormU;
       lastPaintAt = CBZ.now; forcePaint = false;
@@ -1176,7 +1188,7 @@
     {
       const gm = CBZ.game && CBZ.game.mode;
       let sk = gm === "archipelago" ? clamp01((night - 0.6) / 0.35) * (1 - clamp01(frame.stormK * 1.5)) : 0;
-      sk *= 1 - 0.45 * fin(CBZ.moonIllum, 0.5);
+      sk *= (1 - 0.45 * fin(CBZ.moonIllum, 0.5)) * (1 - skyCut);
       stars.visible = sk > 0.01;
       if (stars.visible) {
         starMat.color.setScalar(sk);
@@ -1246,7 +1258,7 @@
     // the PHASE (core/lights.js, 8-day lunation) sets how bright the disc is;
     // a new moon is a faint ashen disc, not a lamp
     const illum = fin(CBZ.moonIllum, 1);
-    let mop = Math.min(1, Math.max(0, (night - 0.12) * 1.25)) * (0.12 + 0.88 * illum);
+    let mop = Math.min(1, Math.max(0, (night - 0.12) * 1.25)) * (0.12 + 0.88 * illum) * (1 - skyCut);
     if (_p.y < -0.02) mop = 0;
     moonSpr.visible = mop > 0.01;
     if (moonSpr.visible) moonSpr.material.opacity = mop;

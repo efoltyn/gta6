@@ -434,31 +434,13 @@
      (clock, three routes, a lost-items line; the routes are deleted, see below). Now it is closed by default
      with NOTHING on screen, and opens on P (keyboard) or the small Plan
      button (touch, the one pill left on a touch prison screen). Open, it is
-     also where the things the bare HUD dropped live: the clock and the
-     block, the cigs, and buttons for the Map and the Ranks (the minimap
+     also where the things the bare HUD dropped live: the cigs, and buttons for the Map and the Ranks (the minimap
      tap and the Ranks pill were their only touch routes). On touch it
      carries Pause too, since a tablet has no Esc.
      ============================================================ */
-  const BLOCK_WORDS = {
-    wake: "Morning count",
-    yard: "Yard",
-    mess: "Chow",
-    work: "Work detail",
-    supper: "Evening chow",
-    count: "Count",
-    secure: "Lockup",
-    night: "Lights out",
-  };
-  function pad(n) { return (n < 10 ? "0" : "") + n; }
-  function clockParts() {
-    const P = CBZ.prisonSchedule;
-    if (!P || !P.enabled || !P.enabled()) return null;
-    const c = P.clock();
-    const id = P.id();
-    const u = Math.max(0, Math.ceil(P.until ? P.until() : 0));
-    return { now: pad(c.h) + ":" + pad(c.m) + "  " + (BLOCK_WORDS[id] || String(id)),
-      until: Math.floor(u / 60) + ":" + pad(u % 60) + " left" };
-  }
+  /* NO CLOCK (owner, 2026-11-22: "a 24 hour clock that isn't shown"). The
+     panel used to print the hour, the block and the minutes left. The time
+     is in the world now: the sky, the lamps, the PA, the doors, the screws. */
 
   /* THE PLAN NO LONGER TELLS YOU THE WAY OUT (owner, 2026-09-28: "Nobody
      should ever tell you to go in the gun room. That should be something
@@ -502,7 +484,7 @@
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-label", "Escape plan");
     panel.innerHTML =
-      '<div class="ep-top"><span class="ep-now"></span><span class="ep-sub ep-cigs"></span></div>' +
+      '<div class="ep-top"><span class="ep-sub ep-cigs"></span></div>' +
       '<div class="ep-lost"></div>' +
       '<div class="ep-btns"><button type="button" data-ep="map">Map</button>' +
       '<button type="button" data-ep="close">Close</button></div>';
@@ -543,18 +525,15 @@
     if (k === "escape" && open) setOpen(false);
   });
 
-  let nowEl = null, cigEl = null, lostEl = null;
+  let cigEl = null, lostEl = null;
   function setText(node, t) { if (node && node.textContent !== t) node.textContent = t; }
   function render() {
     const p = ensurePanel();
     if (!p) return;
-    if (!nowEl) {
-      nowEl = p.querySelector(".ep-now"); cigEl = p.querySelector(".ep-cigs");
+    if (!cigEl) {
+      cigEl = p.querySelector(".ep-cigs");
       lostEl = p.querySelector(".ep-lost");
     }
-    const c = clockParts();
-    const t = CBZ.fmtTime ? CBZ.fmtTime(g.elapsed || 0) : "";
-    setText(nowEl, c ? c.now : t);
     setText(cigEl, (g.cigs || 0) + " cigs");
     const lostOn = S.lostT > 0 && !!S.lost;
     lostEl.style.display = lostOn ? "" : "none";
@@ -625,7 +604,6 @@
         portSeenT: +S.portSeenT.toFixed(2), inPort: (inPort() || {}).label || null,
         seenBy: (function () { const w = seenBy(); return w ? gname(w) : null; })(),
         panel: !!(panel && panel.parentNode && open), open: open, lost: S.lost,
-        clock: clockParts(),
       };
     },
   };

@@ -340,7 +340,13 @@
     const nightAmount = CBZ.nightAmount == null ? (1 - dayness) : CBZ.nightAmount;
     const trueNight = (dayness < 0.045 && sunY < -8) || nightAmount > 0.965;
     const activeSearch = g.hunt > 0 || !!g._chase || (g.investigate && g.investigate.t > 0);
+    // BLACKOUT (00:00-05:00): the torches are the only light in the prison,
+    // so every man on shift keeps his on the whole time
+    const SB = CBZ.prisonSchedule;
+    if (SB && SB.enabled && SB.enabled() && SB.is("blackout")) return activeSearch || g._duty ? "search" : "night";
     if (activeSearch && (!disc || torchDarkEnough(g))) return "search";
+    // a count walked in the dark, or a man walked back in it (prisonschedule.js)
+    if (g._duty && g._duty.torch && (!disc || torchDarkEnough(g))) return "search";
     // A NIGHT SHIFT CARRIES A TORCH. The 34% duty cycle below is an idle-hours
     // habit; during the schedule's own dark blocks (unlock, evening return,
     // secure, lights out — systems/prisonschedule.js) a screw walking a wing
@@ -374,7 +380,11 @@
     // the cone and the floor pool follow the swinging hand for free.
     const present = on && !(torchDiscipline() && torchCloseQuarters(g));
     g.flashlightPresented = present;
-    if (g.wedge) g.wedge.visible = on;
+    // no vision fan in the blackout: an unlit overlay would be the one bright
+    // thing on a black floor (the beam itself is the read)
+    const SB = CBZ.prisonSchedule;
+    const black = !!(on && SB && SB.enabled && SB.enabled() && SB.is("blackout"));
+    if (g.wedge) g.wedge.visible = on && !black;
     if (g.flashlight) {
       g.flashlight.group.visible = on;
       g.flashlight.lensMat.emissive.setHex(on ? 0xcff6ff : 0x000000);
@@ -1337,6 +1347,16 @@
       }
       updateFlashlight(g, dt);
       return true;
+    }
+
+    // ---- A SCHEDULE JOB (systems/prisonschedule.js): walking the count, or
+    // sending a man where the timetable wants him. That file walks his legs;
+    // he still sees (perceive above) and a hunt above still comes first.
+    if (g._duty && CBZ.prisonSchedule && CBZ.prisonSchedule.dutyStep) {
+      let own = false;
+      try { own = !!CBZ.prisonSchedule.dutyStep(g, dt); } catch (e) { own = false; }
+      if (own) { noteState(g, "duty"); updateFlashlight(g, dt); return true; }
+      g._duty = null;
     }
 
     // ---- YARD LAW (systems/brain_prison.js): he saw two inmates at it and is

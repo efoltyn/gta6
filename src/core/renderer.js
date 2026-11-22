@@ -109,7 +109,12 @@
     const GAIN = [1.025, 1.005, 0.982];
     const LIFT = [0.0015, 0.0032, 0.0072];
 
+    // cbzLiftCut: how much of LIFT is taken away (0 = all of it stays, the
+    // default every program reads). LIFT is a floor under black — black
+    // reads as (5, 11, 20) — which is a look until there is nothing on screen
+    // but black: the prison's blackout pushes it to 1 (CBZ.setBlackLevel).
     const custom = [
+      "uniform float cbzLiftCut;",
       "vec3 CustomToneMapping( vec3 color ) {",
       // --- ACES, verbatim from three's own implementation (r128) ---
       "  const mat3 CBZ_ACESIn = mat3(",
@@ -130,7 +135,7 @@
       "  float cbzLum = dot( color, vec3( 0.2126, 0.7152, 0.0722 ) );",
       "  color = mix( vec3( cbzLum ), color, " + glslF(SAT) + " );",
       "  color = color * vec3( " + GAIN.map(function (v) { return glslF(v); }).join(", ") + " )",
-      "        + vec3( " + LIFT.map(function (v) { return glslF(v); }).join(", ") + " );",
+      "        + vec3( " + LIFT.map(function (v) { return glslF(v); }).join(", ") + " ) * ( 1.0 - cbzLiftCut );",
       "  return saturate( color );",
       "}",
     ].join("\n");
@@ -598,7 +603,7 @@
   // ShaderChunk fog, no programs list) they are no-ops until the node port
   // (docs/plan/three-r187.md).
   const WEBGL = !!renderer.isWebGLRenderer;
-  if (!WEBGL) { CBZ.setFogAniso = function () {}; CBZ.setFarAir = function () {}; }
+  if (!WEBGL) { CBZ.setFogAniso = function () {}; CBZ.setFarAir = function () {}; CBZ.setBlackLevel = function () {}; }
   if (WEBGL) (function installFogAniso() {
     const gl = renderer.getContext();
     let sentA = 0, sentS = 0, sentLen = -1;
@@ -663,6 +668,39 @@
       try { renderer.state.useProgram(null); } catch (e) {}
       sent[0] = v[0]; sent[1] = v[1]; sent[2] = v[2]; sent[3] = v[3];
       sentLen = list.length; sentLast = last;
+    };
+  })();
+
+  /* CBZ.setBlackLevel(k) — the film grade's lifted black (installToneMap's
+     LIFT), taken away by k, 0..1. Pushed to every program the same way as the
+     two above: 0, the GLSL default, is today's look, so nothing pushes unless
+     it wants a real black. Quantised to 0.05, written only on a change, and a
+     program compiled while it is non-zero gets it on the next call.
+     systems/prisonnight.js calls it every frame with the blackout's sky cut
+     (0 outside the prison). */
+  if (WEBGL) (function installBlackLevel() {
+    const gl = renderer.getContext();
+    let sent = 0, sentLen = -1, sentLast = null;
+    CBZ.setBlackLevel = function (k) {
+      let v = +k;
+      if (!Number.isFinite(v)) v = 0;
+      v = v < 0 ? 0 : (v > 1 ? 1 : v);
+      v = Math.round(v * 20) / 20;
+      const list = renderer.info && renderer.info.programs;
+      if (!list) return;
+      const last = list.length ? list[list.length - 1] : null;
+      if (v === sent && (v === 0 || (list.length === sentLen && last === sentLast))) return;
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        if (!p || !p.program || !p.getUniforms) continue;
+        let m;
+        try { m = p.getUniforms().map; } catch (e) { continue; }
+        if (!m || !m.cbzLiftCut) continue;
+        gl.useProgram(p.program);
+        gl.uniform1f(m.cbzLiftCut.addr, v);
+      }
+      try { renderer.state.useProgram(null); } catch (e) {}
+      sent = v; sentLen = list.length; sentLast = last;
     };
   })();
 

@@ -104,11 +104,16 @@
     set(!lit);
     return lit;
   }
+  // where the lit beam is this frame: lens (o*) and where it lands (x, y, z).
+  // systems/prisonnight.js asks it whether a point is inside the beam (being
+  // in a beam is being lit, for every eye in the prison). One record, reused.
+  const BEAM = { on: false, ox: 0, oy: 0, oz: 0, x: 0, y: 0, z: 0, wall: false };
   CBZ.playerFlashlight = {
     owned: owned,
     on: function () { return lit && owned(); },
     toggle: toggle,
     set: set,
+    beam: BEAM,
   };
 
   // ---- the numbers ----------------------------------------------------------
@@ -593,6 +598,7 @@
   }
 
   function hideAll() {
+    BEAM.on = false;
     if (R.hot) R.hot.intensity = 0;
     if (R.spill) R.spill.intensity = 0;
     if (R.pool) R.pool.visible = false;
@@ -713,6 +719,10 @@
     // ---- where it lands: the pool on the first surface, the dust up to it --
     const h = cast(_org.x, _org.y, _org.z, _fwd.x, _fwd.y, _fwd.z, REACH, P.pos.y, BEAM_HIT);
     R.lands = h.hit ? (h.wall ? "wall" : "floor") : "air";
+    BEAM.on = true;
+    BEAM.ox = _org.x; BEAM.oy = _org.y; BEAM.oz = _org.z;
+    BEAM.x = h.x; BEAM.y = h.y; BEAM.z = h.z;
+    BEAM.wall = !!(h.hit && h.wall);
     if (h.hit && h.t > 0.25) {
       const r = Math.max(0.18, h.t * Math.tan(POOL_ANGLE));
       const cosI = lay(R.pool, h, _fwd.x, _fwd.y, _fwd.z, r);

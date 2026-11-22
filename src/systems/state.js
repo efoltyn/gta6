@@ -629,6 +629,10 @@
        lets go once that work has visibly stopped: five frames in a row in
        which the renderer compiled no program and uploaded no geometry or
        texture. */
+    // (?cfg_BOOT_CARD_V2=0: the old rule, for an A/B). Declared here, before
+    // sig() and the deadline read it: inside tick() it was out of their scope
+    // and the first sig() threw, so the card never closed.
+    const V2 = CBZ.CONFIG.BOOT_CARD_V2 !== false;
     const info = CBZ.renderer && CBZ.renderer.info;
     const sig = function () {
       if (!info) return "";
@@ -649,8 +653,6 @@
        textures; a geometry upload is a few ms. So the card waits for those to
        stop, and on a phone or tablet a 15 s cap (the old 25 s was the whole
        wait every time, the game drawing behind the card). */
-    // (?cfg_BOOT_CARD_V2=0: the old rule, for an A/B)
-    const V2 = CBZ.CONFIG.BOOT_CARD_V2 !== false;
       still = (s === lastSig) ? still + 1 : 0; lastSig = s;
       if ((cheap >= 3 && n >= 4) || (info && (V2 ? still >= 4 && n >= 5 : still >= 5 && n >= 6)) || t > deadline) { done(); return; }
       requestAnimationFrame(tick);

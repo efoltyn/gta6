@@ -773,6 +773,11 @@
       new THREE.MeshLambertMaterial({ map: exitTex, emissive: 0xffffff, emissiveMap: exitTex, emissiveIntensity: 0.9 }));
     m.position.set(x, y, z); m.rotation.y = ry || 0; m.userData.sign = true;
     root().add(m);
+    // lit 24 h, dark in the blackout (systems/prisonnight.js); unlit, the
+    // print still reads under a torch
+    const face = { face: true, mesh: m, kind: "allnight", x: x, z: z, color: 0xffffff, off: 0xffffff, emissive: 0xffffff, ei: 0.9 };
+    if (CBZ.prisonLights && CBZ.prisonLights.register) { try { CBZ.prisonLights.register(face); } catch (e) {} }
+    else (CBZ._prisonLateFixtures || (CBZ._prisonLateFixtures = [])).push(face);
     addBox(x, y + 0.2, z, 0.05, 0.16, 0.05, 0x3a4048, { cast: false });
     return m;
   }

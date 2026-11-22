@@ -182,8 +182,17 @@
   const shadeMat = mat(0x2b313a); shadeMat.side = THREE.DoubleSide;
   lampPart(new THREE.CylinderGeometry(0.035, 0.11, 0.13, 18, 1, true), 14.24, 1.35, -11.76, shadeMat);    // shade
   lampPart(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 12), 14.24, 1.43, -11.76);                      // shade cap
-  lampPart(new THREE.SphereGeometry(0.035, 12, 8), 14.24, 1.31, -11.76,
+  const bulb = lampPart(new THREE.SphereGeometry(0.035, 12, 8), 14.24, 1.31, -11.76,
     mat(0xffe6b0, { emissive: 0xffb347, ei: 0.9 }));                                                      // bulb
+  // the duty desk is lit all night, and goes dark with everything else in the
+  // blackout (systems/prisonnight.js): the bulb and the pool it throws
+  {
+    bulb.userData.mover = true;                    // a switched lamp: the static batcher keeps off it
+    const face = { face: true, mesh: bulb, pool: ring, poolPeak: ringMat.opacity, kind: "allnight", x: 14.24, z: -11.76,
+      color: 0xffe6b0, emissive: 0xffb347, ei: 0.9, off: 0x3a3630 };
+    if (CBZ.prisonLights && CBZ.prisonLights.register) { try { CBZ.prisonLights.register(face); } catch (e) {} }
+    else (CBZ._prisonLateFixtures || (CBZ._prisonLateFixtures = [])).push(face);
+  }
   /* THE KEY CABINET, AND WHY IT IS HERE. A card lying on a desk answers
      "what is this"; the steel cabinet on the wall behind it, door hanging
      open with one hook stripped bare, answers "where did it come from and
