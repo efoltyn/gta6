@@ -4190,11 +4190,12 @@
       }
     } else if (kind === "dolphin" || kind === "whale") {
       /* A MAMMAL HAS TO BREATHE. A bout at the surface - the blowhole breaks
-         the water and blows, a short roll under, again - then a dive. A
-         bottlenose takes 2-3 breaths ~3 s apart and goes down for half a
-         minute or so; a humpback blows 3-5 times ~12 s apart and then sounds
-         for a minute or two (real dives run longer; the game's sea is
-         watched in minutes). At the surface the back just breaks the water. */
+         the water and blows, a short roll under, again - then a dive, at the
+         real lengths: a bottlenose takes 2-3 breaths ~3 s apart and forages
+         down for 30-90 s; a humpback blows 4-6 times 18-35 s apart and then
+         SOUNDS - the head goes down, the back rounds, the flukes come up out
+         of the water - for a 5-10 minute dive. At the surface the back just
+         breaks the water. */
       const big = kind === "whale";
       // the back line of the body itself (no fins), over the origin, in metres:
       // at the surface it stands just out of the water
@@ -4203,6 +4204,18 @@
       const surfK = Math.max(0.1, (m.top - 0.08) / Math.max(0.1, a.swimDepth || a._swimDepth0 || 1));
       if (m.breaths == null) { m.breaths = 0; m.breathFull = 0; m.blown = true; }
       if (fleeing && !big) { m.breath = 0; m.breaths = 0; m.breathT = Math.max(m.breathT, 6); depthWant = 2.2; }
+      else if (m.sound > 0) {
+        // FLUKES UP: the body pitches nose-down over two and a half seconds
+        // while it is still at the top, which lifts the tail clear of the
+        // water, then slides under and eases toward a steep dive
+        m.sound -= dt;
+        const u = 1 - m.sound / 5.5;
+        const e3 = function (x) { return x <= 0 ? 0 : (x >= 1 ? 1 : x * x * (3 - 2 * x)); };
+        a.group.rotation.z = u < 0.45 ? -0.95 * e3(u / 0.45) : -0.95 + 0.6 * e3((u - 0.45) / 0.55);
+        a._poseOwn = true;
+        depthWant = u < 0.45 ? surfK : (big ? 3.4 : 2.8);
+        wantV = cruise * 0.6;
+      }
       else {
         m.breathT -= dt;
         if (m.breath > 0) {
@@ -4219,12 +4232,13 @@
           if (out || m.breathWait > 8) m.breath -= dt;
           if (m.breath <= 0) {
             m.breaths--;
-            m.breathT = m.breaths > 0 ? (big ? 9 + Math.random() * 6 : 2.5 + Math.random() * 1.5)
-                                      : (big ? 70 + Math.random() * 60 : 25 + Math.random() * 25);
+            m.breathT = m.breaths > 0 ? (big ? 18 + Math.random() * 17 : 2.5 + Math.random() * 1.5)
+                                      : (big ? 300 + Math.random() * 300 : 30 + Math.random() * 60);
+            if (m.breaths <= 0 && big) m.sound = 5.5;     // the last blow, then it sounds
           }
         } else {
           if (m.breathT <= 0) {
-            if (m.breaths <= 0) m.breaths = big ? 3 + Math.floor(Math.random() * 3) : 2 + Math.floor(Math.random() * 2);
+            if (m.breaths <= 0) m.breaths = big ? 4 + Math.floor(Math.random() * 3) : 2 + Math.floor(Math.random() * 2);
             m.breath = m.breathFull = big ? 3.2 : 1.8;
             m.blown = false; m.breathWait = 0;
           }
