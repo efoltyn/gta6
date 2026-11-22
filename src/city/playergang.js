@@ -1,56 +1,85 @@
 /* ============================================================
-   city/playergang.js — YOUR gang: ownership, hierarchy, orders, turf.
+   city/playergang.js — YOUR GANG, IN THE WORLD.
 
-   Two ways to run a crew of your own:
-     1) FOUND one once you have >=3 recruited crew (cityRecruit). You name
-        it, it takes your colour, and it claims the block you're standing on
-        as turf.
-     2) TAKE OVER a rival gang by killing its BOSS (gangs.js fires
-        CBZ.cityPlayerGangBossKilled). Claim it and its surviving members
-        defect to you — same colour, loyal, on your payroll.
+   OWNER: "No dashboards are needed. Everything can be existing in the
+   world. No need for a gang management dashboard: you can see gang members
+   wearing the same colors and recruit people."
 
-   Hierarchy reuses ped.rank: Boss (you) > Lieutenant > Soldier. Promote a
-   crew member to Lieutenant; lieutenants can be told to HOLD a block and
-   anchor a squad there.
+   There is no gang screen. Everything this file does happens on a person
+   or on a piece of ground:
 
-   ORDERS — press [O] to open the command wheel (or use the interact menu's
-   gang options). Orders drive every member of g.playerGang:
-       ATTACK   — everyone targets your aimed / nearest enemy (sets .rage)
-       HOLD     — members post up at your spot and defend it (.guard)
-       FOLLOW   — members ride with you and defend you (.companion brain)
-       DISPERSE — members fall back to their home turf
+   RECRUITING. Walk up to somebody and ask (the card's Recruit). He answers
+   by who he is: what he thinks of you (city/social.js relPlayer), how big
+   you are next to him (city/level.js), whether he has a job and money or
+   nothing to lose, how much nerve he has, how many of yours he has seen
+   buried lately, how hot you are. He says yes, names a price (pay it, or
+   lean on him with the card's Threaten), or says no and means it for a
+   while. A man who already wears another set's colours can be bought, at a
+   price that rises with his rank and his loyalty, and at a risk: turn the
+   wrong one down and he tells his people. With their boss dead by your
+   hand, the same question to any of them is for the whole crew.
+   Your gang starts the day the first one says yes. Nothing is founded on
+   a menu and nothing has a name screen.
 
-   Player-gang members carry gang:g.playerGang.id + faction:"player", so the
-   universal ped brain (peds.js) already treats rival gangs as enemies on
-   turf (turfIntruder keys off p.gang !== ped.gang) and the companion brain
-   defends you while FOLLOWing. We only steer state on top of that.
+   COLOURS. The gang wears what you wear: its colour is the shirt on your
+   back when it starts (or the first colour no other set flies), every
+   member is dressed in it with the crew's rag (city/outfits.js record
+   "gang:player", city/clothes.js bandana), and "Wear my colours" on any of
+   them re-dresses the lot after you change.
 
-   Exposes: CBZ.cityPlayerGangEnsure / Found / Claim / Members / IsMember /
-   Promote / Order / BossKilled / DefendTurf, and CBZ.cityPlayerGangReset.
+   ORDERS go to the man in front of you: Come, Hold here (he takes that
+   corner), Guard the door, Sell here, Go home; on his wheel the same for
+   everybody in earshot. Each is an order like any other (systems/
+   command.js): he does it, says "Sir?", or will not. Kill / Beat / Back
+   off about a third person are city/orders.js's, on that person.
+
+   MONEY IS ON PEOPLE. A man selling takes cash hand to hand (city/
+   gangops.js's buyer staging) and a man holding one of your blocks takes
+   that block's street money; it sits in his pockets (ped.cash) until you
+   Collect from him, he keeps his cut, and if he is shot or arrested first
+   it goes with him. Nothing is wired to a bank.
+
+   TURF is who is standing on it. A block where your people hold a post
+   with no rival standing on it becomes yours; a block of yours with none
+   of you on it and a rival crew on it becomes theirs. The colours on the
+   people and the tag on the wall (city/turftags.js) are the readout.
+
+   JOINING SOMEBODY ELSE'S CREW is the same file's older half: prospect a
+   set, do the four tasks, take the beating or do the hit (both asked of a
+   member, face to face), climb, and take the chair when the boss dies.
+
+   Exposes: CBZ.cityPlayerGangEnsure / Exists / Id / Members / IsMember /
+   Enlist / ClaimTurf / Sync / Restore / CrewSave / BossKilled / Claim /
+   Promote / Order / Apply / DefendTurf / Reset, CBZ.cityCrewAsk,
+   CBZ.cityCrewPost, CBZ.cityGangInitiate, and the prospect / membership
+   API (cityProspectGang, cityJoinGang, cityLeaveGang, cityMemberPutInWork).
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
-  const THREE = window.THREE;
   const g = CBZ.game;
 
-  // ---- gang colours to offer when founding ----
-  const FOUND_COLORS = [
-    { name: "Gold", hex: 0xffd166 }, { name: "Crimson", hex: 0xff4d4d },
-    { name: "Cyan", hex: 0x36e0d0 }, { name: "Violet", hex: 0xc77dff },
-    { name: "Lime", hex: 0x9be564 }, { name: "Orange", hex: 0xff8c42 },
-  ];
+  // colours a new set can fly when the shirt on your back is no colour at all
+  const COLORS = [0xffd166, 0xff4d4d, 0x36e0d0, 0xc77dff, 0x9be564, 0xff8c42];
   const NAME_A = ["Iron", "Black", "Red", "Night", "Concrete", "Wolf", "Ghost", "Royal", "Savage", "Empire"];
   const NAME_B = ["Syndicate", "Mob", "Crew", "Kings", "Cartel", "Lords", "Wolves", "Dynasty", "Saints", "Mafia"];
 
   function rnd() { return Math.random(); }
   function pick(a) { return a[(rnd() * a.length) | 0]; }
   function hex6(n) { return "#" + ("000000" + (n >>> 0).toString(16)).slice(-6); }
+  function money(n) { n = Math.round(+n) || 0; return "$" + n.toLocaleString("en-US"); }
   function shortGang(n) { if (!n) return "them"; const w = n.split(" "); return w.length > 1 ? w[w.length - 1] : n; }
+  function arena() { return CBZ.city && CBZ.city.arena; }
+  function playerActor() { return (CBZ.city && CBZ.city.playerActor) || CBZ.player; }
+  function say(ped, line, secs) {
+    if (!ped || ped.dead || !line || !CBZ.citySay) return false;
+    try { return !!CBZ.citySay(ped, line, "#ffffff", secs || 2.6); } catch (e) { return false; }
+  }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.z - b.z); }
+  let T = 0;                               // this file's own clock, seconds
 
-  // nearest LIVE rival gang record (an actual faction, not the player's) — used
-  // by the orders menu to offer alliance / war with whoever's closest.
+  // nearest LIVE rival gang record (an actual faction, not the player's)
   function nearestRival() {
     const P = CBZ.player; if (!P || !CBZ.cityGangs) return null;
     let best = null, bd = Infinity;
@@ -66,23 +95,14 @@
   // ---- lazy state ----
   function ensure() {
     if (!g.playerGang) {
-      g.playerGang = {
-        id: "player", name: null, color: 0x7ed957,
-        members: [], turf: [], boss: null,
-        founded: false, order: "follow",
-        center: null,
-      };
+      g.playerGang = { id: "player", name: null, color: 0x7ed957, members: [], turf: [], boss: null, founded: false, center: null, lost: 0 };
     }
-    // a ledger-restored gang is a SAFE SHELL ({id,name,color,founded,order} —
-    // worldstate.js can't carry live ped/lot refs): heal the live-ref fields
-    // here so every caller can trust the arrays exist. The GANG_PERSIST blob
-    // (gangs.js → cityPlayerGangRestore) then refills turf + members.
+    // a ledger-restored gang is a SAFE SHELL (worldstate.js cannot carry live
+    // ped/lot refs): heal the live-ref fields so every caller can trust them
     const pg = g.playerGang;
     if (!pg.id) pg.id = "player";
     if (!pg.members) pg.members = [];
     if (!pg.turf) pg.turf = [];
-    // (an old save's "attack": that order is on the man now, city/orders.js Kill)
-    if (pg.order == null || pg.order === "attack") pg.order = "follow";
     return pg;
   }
   CBZ.cityPlayerGangEnsure = ensure;
@@ -90,12 +110,8 @@
   function exists() { return !!(g.playerGang && g.playerGang.founded); }
   CBZ.cityPlayerGangExists = exists;
 
-  // ---- THE one canonical "which crew does the player ride with" read.
-  //      Order: patched into an NPC crew (g.cityMembership) → your own founded
-  //      gang → the legacy g.playerGangId mirror. gangs.js (sanctioned-kill
-  //      gate, vendetta own-crew check) and turf.js read THIS instead of
-  //      re-deriving the old three-field ambiguity (the g.playerGangAffiliation
-  //      orphan is dead — nothing writes it any more). ----
+  // THE one "which crew does the player ride with" read: patched into an NPC
+  // crew (g.cityMembership), else your own, else the legacy mirror.
   CBZ.cityPlayerGangId = function () {
     const m = g.cityMembership;
     if (m && m.gangId) return m.gangId;
@@ -103,27 +119,33 @@
     return g.playerGangId || null;
   };
 
+  // A MAN WHO DIES IS GONE. The roster is the people who are alive, still in
+  // the world and still yours. (A death is counted, pg.lost, by the gang's
+  // tick: the next man you ask has heard about it.)
   function liveMembers() {
-    const pg = g.playerGang ? ensure() : null; if (!pg) return [];   // ensure(): heal a ledger shell's missing arrays
-    // drop anyone dead, despawned, or who quit (careers.js walks a companion off
-    // the job when you miss payroll — that clears recruited/faction)
-    pg.members = pg.members.filter((m) => m && !m.dead && !m.collected && m.recruited && (m.gang === pg.id || m.faction === "player"));
+    const pg = g.playerGang ? ensure() : null; if (!pg) return [];
+    let w = 0;
+    for (let i = 0; i < pg.members.length; i++) {
+      const m = pg.members[i];
+      const ok = m && !m.dead && !m.collected && m.recruited && (m.gang === pg.id || m.faction === "player");
+      if (ok) pg.members[w++] = m;
+    }
+    pg.members.length = w;
     return pg.members;
   }
   CBZ.cityPlayerGangMembers = liveMembers;
-  CBZ.cityPlayerGangIsMember = function (ped) { return !!(ped && g.playerGang && g.playerGang.members.indexOf(ped) >= 0); };
+  function isMember(ped) { return !!(ped && g.playerGang && g.playerGang.members && g.playerGang.members.indexOf(ped) >= 0); }
+  CBZ.cityPlayerGangIsMember = isMember;
 
-  // rank pip used on the floating tag — pulls from the shared ladder (gangs.js)
-  // so the player's crew reads the same Prospect→Boss ladder as everyone else.
   function rankPip(key) { return (CBZ.cityRankName ? CBZ.cityRankName(key) : (key === "lt" ? "Lt." : "Crew")); }
 
-  // tint a member's name tag to the gang colour + label their rank
+  // the name over him, in the gang's colour, with his rank
   function styleMember(ped, color) {
     if (!ped) return;
     ped.tagColor = hex6(color);
     if (ped.tag && ped.char && ped.char.group && CBZ.makeLabelSprite) {
       const pip = rankPip(ped.rank);
-      const txt = (ped.name || "Crew") + (pip && pip !== "Soldier" ? " · " + pip : (ped.rank === "soldier" ? " · Soldier" : ""));
+      const txt = (ped.name || "Crew") + (pip ? " · " + pip : "");
       const lbl = CBZ.makeLabelSprite(txt, { color: hex6(color) });
       lbl.position.y = ped.tag.position.y || (CBZ.charHeadY ? CBZ.charHeadY(ped.char) : 1.97); lbl.scale.copy(ped.tag.scale);
       if (ped.tag.parent) ped.tag.parent.remove(ped.tag);
@@ -131,94 +153,233 @@
     }
   }
 
-  // bring a ped into YOUR gang (defector or fresh recruit)
-  function enlist(ped, rank) {
+  /* ---- COLOURS -----------------------------------------------------------
+     One outfit record, "gang:player", in the same catalog every other set's
+     colours live in (city/outfits.js): a solid shirt and sleeves in the gang
+     colour, dark trousers, and the rag recolorRig ties for any record with a
+     `.gang`. A member wears it as p._wornOutfit, which is the field every
+     re-dress in the game already honours, so nothing can paint him back. */
+  const FIT = { id: "gang:player", name: "Your Colors", tier: "gang", who: "your crew", price: 0, drip: 2, gang: "player",
+    colors: { legs: 0x23262c, torso: 0x7ed957, collar: 0x141820, arms: 0x7ed957, shoes: 0x191b20 } };
+  function fit() {
     const pg = ensure();
-    if (!ped || ped.dead) return;
+    FIT.colors.torso = FIT.colors.arms = pg.color;
+    FIT.name = (pg.name || "Your") + " Colors"; FIT.who = pg.name || "your crew";
+    try {
+      const CAT = CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null;
+      if (CAT && CAT["gang:player"] !== FIT) CAT["gang:player"] = FIT;
+    } catch (e) {}
+    return FIT;
+  }
+  function dress(ped) {
+    if (!ped || ped.dead || !ped.char) return;
+    const rec = fit();
+    if (ped._wornOutfit !== rec) { ped._pgOwnFit = ped._wornOutfit || null; ped._wornOutfit = rec; }
+    ped.outfit = rec.colors.torso;
+    try {
+      if (CBZ.cityRedressPed) CBZ.cityRedressPed(ped);
+      else if (CBZ.cityRecolorRig) CBZ.cityRecolorRig(ped.char, rec.colors, rec);
+    } catch (e) {}
+  }
+  function undress(ped) {
+    if (!ped || ped._wornOutfit !== FIT) return;
+    ped._wornOutfit = ped._pgOwnFit || null; ped._pgOwnFit = null;
+    try { if (!ped.dead && CBZ.cityRedressPed) CBZ.cityRedressPed(ped); } catch (e) {}
+  }
+  function rgb(h) { return [(h >> 16) & 255, (h >> 8) & 255, h & 255]; }
+  function vivid(h) { const c = rgb(h), mx = Math.max(c[0], c[1], c[2]), mn = Math.min(c[0], c[1], c[2]); return mx >= 110 && mx - mn >= 70; }
+  function flown(h) {
+    const a = rgb(h);
+    for (const gn of CBZ.cityGangs || []) {
+      if (!gn || gn.isPlayer || gn.absorbed || gn.color == null) continue;
+      const b = rgb(gn.color);
+      if (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 110) return true;
+    }
+    return false;
+  }
+  function playerShirt() {
+    let w = null;
+    try { w = CBZ.cityOutfitGetEffective ? CBZ.cityOutfitGetEffective() : null; } catch (e) { w = null; }
+    const c = w && w.colors ? w.colors.torso : null;
+    return typeof c === "number" ? c : null;
+  }
+  // what the gang flies: your shirt if it is a colour nobody else flies
+  function pickColour() {
+    const mine = playerShirt();
+    if (mine != null && vivid(mine) && !flown(mine)) return mine;
+    for (let i = 0; i < COLORS.length; i++) if (!flown(COLORS[i])) return COLORS[i];
+    return COLORS[0];
+  }
+  function recolour(hex) {
+    const pg = ensure();
+    pg.color = hex;
+    fit();
+    for (const m of liveMembers()) { dress(m); styleMember(m, hex); }
+    for (const lot of pg.turf) if (lot.building) lot.building.gangColor = hex;
+    registerInGangList();
+    if (CBZ.cityTurfTagsDirty) CBZ.cityTurfTagsDirty();
+  }
+
+  // the gang starts the day somebody joins it
+  function found() {
+    const pg = ensure(); if (pg.founded) return;
+    pg.founded = true;
+    if (!pg.name) pg.name = pick(NAME_A) + " " + pick(NAME_B);
+    pg.color = pickColour();
+    fit();
+    g.career = g.career || "gangster";
+    registerInGangList();
+    if (CBZ.cityRankEvent) CBZ.cityRankEvent("gang-founded", { members: 1 });
+  }
+
+  // bring a ped into YOUR gang (a recruit, a defector, a restored body)
+  function enlist(ped, rank, o) {
+    const pg = ensure();
+    if (!ped || ped.dead) return false;
+    if (!pg.founded) found();
     if (pg.members.indexOf(ped) < 0) pg.members.push(ped);
     ped.gang = pg.id; ped.faction = "player";
-    ped.recruited = true; ped.kind = "crew"; ped.companion = (pg.order === "follow");
+    ped.recruited = true; ped.kind = "crew";
     ped.rank = rank || ped.rank || "soldier";
+    // HE STANDS HIS GROUND, AND THAT IS ALL THE NERVE HE IS GIVEN (the street's
+    // "bold" band, config aggro): he fights whoever comes at him, at you or at
+    // his corner, and he does not go mugging the block on his own account. A
+    // man who was a hothead before you hired him still is one. (Every recruit
+    // used to be set to 0.92, the band that carjacks and attacks police, which
+    // is why a crew left on a corner started fights with the people on it.)
     if (ped._hireAggr == null) ped._hireAggr = ped.aggr;   // restored by CBZ.cityDismiss
-    ped.aggr = Math.max(ped.aggr || 0, 0.92);
-    ped.armed = true; if (!ped.weapon || ped.weapon === "Bat") ped.weapon = "Pistol"; ped.ammo = 999;
-    ped.maxHp = Math.max(ped.maxHp || 120, ped.rank === "lt" ? 200 : 160);
-    ped.hp = Math.max(ped.hp || 1, ped.maxHp * 0.85);
-    ped.npcWanted = 0; ped.npcHeat = 0; ped.alarmed = 0; ped.surrender = false;
-    ped.homeGuard = ped.homeGuard || (pg.center ? { x: pg.center.x, z: pg.center.z } : null);
-    // give them the shared lifecycle stat sheet so they climb the ladder on
-    // merit like any NPC: bodies they put in + cash they earn = promotions.
-    if (CBZ.cityMemberStats) { const s = CBZ.cityMemberStats(ped); s.loyalty = Math.max(s.loyalty, 0.7); }
+    ped.aggr = Math.max(ped.aggr || 0, 0.62);
+    // he comes with what he carries; a man with nothing fights with his hands
+    // until somebody puts a piece in them (city/loyalty.js Give gun)
+    if (ped.armed && ped.weapon) ped.ammo = Math.max(ped.ammo | 0, 90);
+    ped.maxHp = Math.max(ped.maxHp || 100, ped.rank === "lt" ? 200 : 140);
+    ped.hp = Math.max(ped.hp || 1, Math.round(ped.maxHp * 0.85));
+    ped.alarmed = 0; ped.surrender = false; ped.rage = null; ped.staffPost = null;
+    if (CBZ.cityMemberStats) { const s = CBZ.cityMemberStats(ped); s.loyalty = Math.max(s.loyalty, (o && o.loyalty) || 0.6); s.joined = (o && o.how) || "recruit"; }
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
+    dress(ped);
     styleMember(ped, pg.color);
-    registerInGangList();   // keep the CBZ.cityGangs mirror in step (one sync path)
+    ped._pgPaidT = T;
+    if (!ped._post) post(ped, (o && o.post) || "follow", o && o.at);
+    registerInGangList();
+    g.cityCrew = liveMembers().length;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
   }
   CBZ.cityPlayerGangEnlist = enlist;
 
-  // ---- FOUND your own gang on the block you're standing on ----
-  CBZ.cityPlayerGangFound = function (name, color) {
+  // being let go (city/brain_city.js cityDismiss) takes the colours off him
+  (function wrapDismiss() {
+    const orig = CBZ.cityDismiss;
+    if (typeof orig !== "function" || orig._pgWrap) return;
+    const w = function (p, o) {
+      const mine = isMember(p);
+      const r = orig.apply(this, arguments);
+      if (mine && p) { undress(p); p._post = null; p._take = 0; }
+      return r;
+    };
+    for (const k in orig) { try { w[k] = orig[k]; } catch (e) {} }
+    w._pgWrap = true;
+    CBZ.cityDismiss = w;
+    if (CBZ.cityBrain && CBZ.cityBrain.dismiss === orig) CBZ.cityBrain.dismiss = w;
+  })();
+
+  /* ---- LOTS ----------------------------------------------------------------
+     Turf is a lot. Every position below comes off the lot's own record (its
+     centre, its building's rect and door), never a coordinate. */
+  function allLots() {
+    const A = arena(); if (!A) return [];
+    return (A.annex && A.annex.lots && A.annex.lots.length) ? (A.lots || []).concat(A.annex.lots) : (A.lots || []);
+  }
+  function lotReach(lot) { return Math.max(lot.w || 16, lot.d || 16) * 0.5 + 8; }
+  function holdable(lot) { return !!(lot && lot.building && !lot.building.park && !lot.demolished); }
+  function lotNear(x, z, r) {
+    let best = null, bd = Infinity;
+    for (const lot of allLots()) {
+      if (!holdable(lot)) continue;
+      const d = Math.hypot(lot.cx - x, lot.cz - z);
+      if (d > (r != null ? r : lotReach(lot))) continue;
+      if (d < bd) { bd = d; best = lot; }
+    }
+    return best;
+  }
+  // the building's own rect, built or not yet streamed in
+  function rectOf(lot) {
+    const b = lot.building || {};
+    const cx = b.ox != null ? b.ox : (b.x != null ? b.x : lot.cx), cz = b.oz != null ? b.oz : (b.z != null ? b.z : lot.cz);
+    return { cx: cx, cz: cz, hw: (b.w || lot.w || 16) / 2, hd: (b.d || lot.d || 16) / 2 };
+  }
+  /* THE FRONT OF A BUILDING, from its door and its rect. The door record's own
+     normal points in on a city block and out on a town house, so it is not
+     asked: `out` is the side of the rect the door is on. */
+  function frontOf(lot) {
+    const b = lot && lot.building, d = b && b.door;
+    if (!d) return null;
+    const r = rectOf(lot);
+    const dx = d.x - r.cx, dz = d.z - r.cz;
+    let ox = 0, oz = 0, fx, fz, half, mx, mz;
+    if (Math.abs(dx) / r.hw > Math.abs(dz) / r.hd) { ox = dx < 0 ? -1 : 1; fx = r.cx + ox * r.hw; fz = d.z; half = r.hd; mx = fx; mz = r.cz; }
+    else { oz = dz < 0 ? -1 : 1; fx = d.x; fz = r.cz + oz * r.hd; half = r.hw; mx = r.cx; mz = fz; }
+    // (x, z) the wall at the door; (mx, mz) the middle of that wall and `half`
+    // its half-length; out = (ox, oz); along the wall = (tx, tz)
+    return { x: fx, z: fz, ox: ox, oz: oz, tx: -oz, tz: ox, half: half, mx: mx, mz: mz, cx: r.cx, cz: r.cz, hw: r.hw, hd: r.hd, lot: lot };
+  }
+  CBZ.cityLotFront = frontOf;
+
+  function gangRecById(id) { return (CBZ.cityGangs || []).find((x) => x.id === id); }
+  function gangShort(rec) { return rec ? shortGang(rec.name) : "them"; }
+
+  // a lot becomes yours (from nobody, or from the set that held it)
+  function takeLot(lot) {
     const pg = ensure();
-    if (pg.founded) { CBZ.city.note("You already run the " + pg.name + ".", 1.8); return false; }
-    // FOUNDing your own crew is a LATE-game move: you must have been patched into
-    // a real crew first (prospect → initiation → membership is the primary path).
-    if (!g.cityWasMember) return false;
-    const crew = CBZ.cityPeds.filter((p) => p.companion && p.recruited && !p.dead && p.kind === "crew");
-    if (crew.length < 3) return false;
-    pg.name = name || (pick(NAME_A) + " " + pick(NAME_B));
-    pg.color = color != null ? color : pick(FOUND_COLORS).hex;
-    pg.founded = true;
-    // claim the block under your feet as turf
-    const P = CBZ.player;
-    pg.center = { x: P.pos.x, z: P.pos.z };
-    claimTurfAt(P.pos.x, P.pos.z);
-    // first three crew enlisted; the senior one becomes your Lieutenant
-    crew.forEach((c, i) => enlist(c, i === 0 ? "lt" : "soldier"));
-    g.career = "gangster";
-    pg.order = "follow"; applyOrder();
-    g.cityCrew = liveMembers().length;
-    CBZ.city.addRespect(15);
-    if (CBZ.cityRankEvent) CBZ.cityRankEvent("gang-founded", { members: crew.length });
+    if (!pg.founded || !holdable(lot)) return false;
+    const prev = lot.building.gang;
+    if (prev && prev !== pg.id) {
+      const og = gangRecById(prev);
+      if (og && og.turf) { const i = og.turf.indexOf(lot); if (i >= 0) og.turf.splice(i, 1); }
+    }
+    const fresh = pg.turf.indexOf(lot) < 0;
+    if (fresh) pg.turf.push(lot);
+    lot.building.gang = pg.id; lot.building.gangColor = pg.color; lot.building.playerTurf = true;
+    if (lot.building.stash) lot.building.stash.gang = pg.id;
+    if (!pg.center) pg.center = { x: lot.cx, z: lot.cz };
+    registerInGangList();
+    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
+    if (CBZ.cityTurfTagsDirty) CBZ.cityTurfTagsDirty();
+    if (fresh && CBZ.cityRankEvent) CBZ.cityRankEvent("turf", { lot: lot });
+    if (fresh) CBZ.city.addRespect(3);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    showOrdersHud();
+    return fresh;
+  }
+  // a lot of yours goes to the set standing on it
+  function loseLot(lot, to) {
+    const pg = ensure();
+    const i = pg.turf.indexOf(lot); if (i < 0) return false;
+    pg.turf.splice(i, 1);
+    if (to && to.turf && to.turf.indexOf(lot) < 0) to.turf.push(lot);
+    if (lot.building) {
+      lot.building.gang = to ? to.id : null; lot.building.gangColor = to ? to.color : null; lot.building.playerTurf = false;
+      if (lot.building.stash) lot.building.stash.gang = to ? to.id : null;
+    }
+    if (pg.center && pg.turf.length) pg.center = { x: pg.turf[0].cx, z: pg.turf[0].cz };
+    registerInGangList();
+    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
+    if (CBZ.cityTurfTagsDirty) CBZ.cityTurfTagsDirty();
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;
+  }
+  // the block at a point (turf.js's neutral grab, careers.js's crew contract)
+  CBZ.cityPlayerGangClaimTurf = function (x, z) {
+    const lot = lotNear(x, z, 24);
+    return lot ? takeLot(lot) : false;
   };
 
-  // claim the abandoned lot / nearest block as turf (paints it your colour)
-  function claimTurfAt(x, z) {
-    const pg = ensure();
-    const A = CBZ.city && CBZ.city.arena; if (!A) return;
-    let best = null, bd = 24 * 24;
-    const pool = (A.abandonedLots && A.abandonedLots.length) ? A.abandonedLots : (A.lots || []);
-    for (const lot of pool) {
-      const dd = (lot.cx - x) * (lot.cx - x) + (lot.cz - z) * (lot.cz - z);
-      if (dd < bd) { bd = dd; best = lot; }
-    }
-    if (!best) return;
-    const fresh = pg.turf.indexOf(best) < 0 || !(best.building && best.building.playerTurf);
-    if (pg.turf.indexOf(best) < 0) pg.turf.push(best);
-    best.building = best.building || {};
-    best.building.gang = pg.id; best.building.gangColor = pg.color; best.building.playerTurf = true;
-    pg.center = pg.center || { x: best.cx, z: best.cz };
-    // also register us in CBZ.cityGangs so cityGangOf()/turf HUD/the war
-    // director see player turf like any other faction's
-    registerInGangList();
-    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();   // re-derive zone ownership/colour
-    CBZ.city && CBZ.city.note("Claimed this block for the " + pg.name + ".", 2.2);
-    if (fresh && CBZ.cityRankEvent) CBZ.cityRankEvent("turf", { lot: best });
-    CBZ.cityHudDirty && CBZ.cityHudDirty();
-  }
-  CBZ.cityPlayerGangClaimTurf = claimTurfAt;
-
   // mirror g.playerGang into CBZ.cityGangs so shared systems treat it as a gang.
-  // THIS is the single sync point between the two shapes (the plain rec shares
-  // the SAME turf/members arrays, so pushes propagate; only identity fields —
-  // name/color/center — need re-stamping). Exposed as CBZ.cityPlayerGangSync so
-  // every mutation site (here, gangs.js restore, future callers) uses one path
-  // instead of remembering the mirror by hand.
+  // The plain rec shares the SAME turf/members arrays; only identity fields
+  // need re-stamping.
   function registerInGangList() {
-    const pg = g.playerGang && g.playerGang.founded ? ensure() : null;   // ensure(): heal a ledger shell
-    if (!pg) return;
-    if (!CBZ.cityGangs) return;
+    const pg = g.playerGang && g.playerGang.founded ? ensure() : null;
+    if (!pg || !CBZ.cityGangs) return;
     let rec = CBZ.cityGangs.find((x) => x.id === pg.id);
     if (!rec) {
       rec = { id: pg.id, name: pg.name, color: pg.color, turf: pg.turf, center: pg.center || { x: 0, z: 0 }, provoke: 0, members: pg.members, warWith: null, warRemain: 0, isPlayer: true };
@@ -229,33 +390,45 @@
   }
   CBZ.cityPlayerGangSync = registerInGangList;
 
-  // ---- RESTORE (GANG_PERSIST) — rebuild your founded crew from the saved
-  //      safe shell in gangs.js's ledger blob: {founded,name,color,order,
-  //      turf:[lot indices],roster:{rank:count}}. Called by gangs.js's restore
-  //      pass right after the per-seed world spawns, so lot indices resolve
-  //      against the same deterministic city.arena.lots. Members are FRESH
-  //      bodies through the shared ped factory + the normal enlist path (the
-  //      exact pipeline a live recruit takes) — never revived ped refs. ----
-  // THE SHARED POST (city/occupy.js) — exactly the four lines the restore path
-  // wrote by hand. Degrade-safe: the inline branch is the prior behaviour.
+  /* ---- SAVE / RESTORE (rides gangs.js's GANG_PERSIST blob) -------------------
+     The crew is saved as PEOPLE: each man's name, rank, what he was told to do
+     and where, and the money on him. A man who died is simply not in the list.
+     Bodies come back through the shared post (city/occupy.js) and the normal
+     enlist path. Old saves carried only a head count per rank; those come back
+     as that many new men. */
+  CBZ.cityPlayerGangCrewSave = function () {
+    const out = [];
+    for (const m of liveMembers()) {
+      const p = m._post || { kind: "follow" };
+      out.push({
+        n: m.name || null, r: m.rank || "soldier", k: p.kind,
+        x: p.x != null ? Math.round(p.x * 10) / 10 : Math.round(m.pos.x * 10) / 10,
+        z: p.z != null ? Math.round(p.z * 10) / 10 : Math.round(m.pos.z * 10) / 10,
+        f: p.face != null ? Math.round(p.face * 100) / 100 : null,
+        w: m.armed && m.weapon ? m.weapon : null,
+        t: Math.round(m._take || 0), c: Math.min(50000, Math.round(m.cash || 0)),
+        a: m.aggr != null ? Math.round(m.aggr * 100) / 100 : null,
+        l: m.gstat ? Math.round(m.gstat.loyalty * 100) / 100 : null,
+      });
+    }
+    return out;
+  };
   function crewPost(x, z, o) {
     if (CBZ.cityPostNpc) return CBZ.cityPostNpc(x, z, o);
     if (!CBZ.cityMakePed || !CBZ.cityPeds || !o.parent) return null;
     const p = CBZ.cityMakePed(x, z, o.rng, o);
     if (!p) return null;
     o.parent.add(p.group); CBZ.cityPeds.push(p);
-    if (o.homeGuard) p.homeGuard = o.homeGuard;
     return p;
   }
-
   CBZ.cityPlayerGangRestore = function (rec) {
     if (!rec || !rec.founded) return false;
-    const A = CBZ.city && CBZ.city.arena; if (!A || !A.lots || !A.lots.length) return false;
+    const A = arena(); if (!A || !A.lots || !A.lots.length) return false;
     const pg = ensure();
     pg.founded = true;
     if (rec.name) pg.name = rec.name;
     if (rec.color != null) pg.color = rec.color;
-    // turf back from stable per-seed lot indices (repaint = claimTurfAt's stamp)
+    fit();
     pg.turf.length = 0;
     for (const li of rec.turf || []) {
       const lot = A.lots[li]; if (!lot) continue;
@@ -266,78 +439,88 @@
     }
     if (pg.turf.length) pg.center = { x: pg.turf[0].cx, z: pg.turf[0].cz };
     g.career = g.career || "gangster";
-    // crew back up to the saved rank counts
-    const want = rec.roster || {};
-    if (CBZ.cityMakePed) {
-      for (const rk in want) {
-        for (let k = 0, n = want[rk] | 0; k < n; k++) {
-          const lot = pg.turf.length ? pg.turf[k % pg.turf.length] : null;
-          const cx = lot ? lot.cx : (pg.center ? pg.center.x : 0);
-          const cz = lot ? lot.cz : (pg.center ? pg.center.z : 0);
-          // THE SHARED POST (city/occupy.js) — the same four lines, one call.
-          const ped = crewPost(cx + (rnd() - 0.5) * 6, cz + (rnd() - 0.5) * 6, {
-            src: "playergang:crew", rng: rnd, parent: A.root,
-            kind: "gang", gang: pg.id, faction: "player",
-            guard: lot ? { x: lot.cx, z: lot.cz } : null,
-            homeGuard: lot ? { x: lot.cx, z: lot.cz } : null,
-            outfit: pg.color, aggr: 0.92, archetype: "gangster", job: "crew",
-            armed: true, weapon: "Pistol", hp: 160,
-          });
-          if (!ped) continue;
-          enlist(ped, rk);
-        }
-      }
+    let crew = Array.isArray(rec.crew) ? rec.crew.slice() : null;
+    if (!crew) {
+      // an old save: a head count per rank, on the turf
+      crew = [];
+      const want = rec.roster || {};
+      for (const rk in want) for (let k = 0, n = want[rk] | 0; k < n; k++) crew.push({ n: null, r: rk, k: "home" });
     }
-    pg.order = rec.order || pg.order || "disperse";
+    const P = CBZ.player;
+    for (let i = 0; i < crew.length; i++) {
+      const c = crew[i];
+      const lot = pg.turf.length ? pg.turf[i % pg.turf.length] : null;
+      // a man who was walking with you comes back beside you
+      let x = c.x, z = c.z;
+      if (c.k === "follow" || x == null || z == null) {
+        if (c.k === "follow" && P && P.pos) { x = P.pos.x + (rnd() - 0.5) * 5; z = P.pos.z + (rnd() - 0.5) * 5; }
+        else if (lot) { x = lot.cx + (rnd() - 0.5) * 6; z = lot.cz + (rnd() - 0.5) * 6; }
+        else continue;
+      }
+      const o = {
+        src: "playergang:crew", rng: rnd, parent: A.root,
+        kind: "gang", gang: pg.id, faction: "player", outfit: pg.color,
+        aggr: c.a != null ? c.a : 0.66, archetype: "gangster", job: "crew", wealth: 0.3,
+        armed: !!c.w, weapon: c.w || null, hp: 140,
+        cash: Math.max(0, (c.c | 0)),
+      };
+      if (c.n) o.name = c.n;
+      const ped = crewPost(x, z, o);
+      if (!ped) continue;
+      ped._post = null;
+      enlist(ped, c.r || "soldier", { post: c.k || "home", at: (c.x != null && c.k !== "follow") ? { x: c.x, z: c.z, face: c.f } : null, loyalty: c.l || 0.6, how: "restore" });
+      if (c.t > 0) ped._take = Math.min(c.t, ped.cash | 0);
+    }
     registerInGangList();
-    applyOrder();
     g.cityCrew = liveMembers().length;
     if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
+    if (CBZ.cityTurfTagsDirty) CBZ.cityTurfTagsDirty();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    renderHud();
     return true;
   };
 
-  // ---- TAKE OVER a rival gang (its boss just died to the player) ----
-  // gangs.js calls this with the dead boss's gang record.
+  /* ---- TAKING OVER A CREW WHOSE BOSS YOU KILLED ------------------------------
+     gangs.js tells us the boss is down (cityPlayerGangBossKilled). For a while
+     after, the survivors are a crew without a chair, and the question "who do
+     you work for now" (the card's Recruit, on any of them) is asked of all of
+     them at once: THE ASK below decides it. */
   let pendingClaim = null;
   CBZ.cityPlayerGangBossKilled = function (gangRec) {
     if (!gangRec || gangRec.isPlayer || gangRec.id === "player") return;
-    pendingClaim = { rec: gangRec, t: 20 };
+    pendingClaim = { rec: gangRec, t: 90 };
     crewSays(gangRec, "He's down. So who's running this now?", 3.4);
   };
 
   function claimRivalGang(rec) {
     if (!rec) return false;
     const pg = ensure();
-    if (!pg.founded) { pg.founded = true; pg.name = rec.name; pg.color = rec.color; }
+    if (!pg.founded) { pg.founded = true; pg.name = rec.name; pg.color = rec.color; fit(); g.career = g.career || "gangster"; }
     pg.center = pg.center || (rec.center ? { x: rec.center.x, z: rec.center.z } : null);
     // their turf becomes yours
     for (const lot of (rec.turf || [])) {
       if (pg.turf.indexOf(lot) < 0) pg.turf.push(lot);
-      if (lot.building) { lot.building.gang = pg.id; lot.building.gangColor = pg.color; lot.building.playerTurf = true; }
+      if (lot.building) { lot.building.gang = pg.id; lot.building.gangColor = pg.color; lot.building.playerTurf = true; if (lot.building.stash) lot.building.stash.gang = pg.id; }
     }
-    // surviving members defect
+    // the survivors change colours where they stand, and keep their posts
     let defected = 0;
     for (const m of (rec.members || []).slice()) {
       if (!m || m.dead || m === rec.boss) continue;
-      enlist(m, m.rank === "lt" ? "lt" : "soldier");
+      const at = m.guard ? { x: m.guard.x, z: m.guard.z } : { x: m.pos.x, z: m.pos.z };
+      m._post = null;
+      enlist(m, m.rank === "lt" ? "lt" : "soldier", { post: "corner", at: at, how: "takeover", loyalty: 0.5 });
       defected++;
     }
-    // strip the old gang record (it's absorbed)
     rec.turf = []; rec.members = []; rec.absorbed = true; rec.provoke = 0;
     const i = CBZ.cityGangs ? CBZ.cityGangs.indexOf(rec) : -1;
     if (i >= 0) CBZ.cityGangs.splice(i, 1);
     registerInGangList();
-    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();   // zones now fly your colour
-    g.career = "gangster";
+    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
+    if (CBZ.cityTurfTagsDirty) CBZ.cityTurfTagsDirty();
     g.cityCrew = liveMembers().length;
     pendingClaim = null;
-    crewSays({ members: liveMembers() }, "Alright. We ride with you.", 3);
     CBZ.city.addRespect(25);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("takeover", { gang: rec, defected });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    showOrdersHud();
     return true;
   }
 
@@ -365,8 +548,6 @@
   let jumpedIn = null;       // { gangId, t, hits, need } during a jump-in beating
   let workContract = null;   // { gangId, target, t } during a put-in-work hit
 
-  function gangRecById(id) { return (CBZ.cityGangs || []).find((x) => x.id === id); }
-  function gangShort(rec) { return rec ? shortGang(rec.name) : "them"; }
   /* THE CREW TELLS YOU, OR NOBODY DOES. Prospecting used to run on banners
      ("PROSPECTING: X", "HANDLE BUSINESS: drop Y. Follow the beacon."), a HUD
      objective line, a map waypoint to their HQ and a beacon over every mark:
@@ -623,7 +804,6 @@
     CBZ.city.addRespect(12);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("gang-joined", { gang: rec, how });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    showOrdersHud();
   }
   CBZ.cityJoinGang = function (rec, how) { patchIn(rec || prospectableGang(), how || "work"); };
 
@@ -763,19 +943,17 @@
   // Climbs prospect->lookout->runner->soldier->enforcer->lt (Boss is you). Uses
   // the gangs.js engine so gear + tag + loyalty all stay consistent with NPCs.
   CBZ.cityPlayerGangPromote = function (ped) {
-    if (!CBZ.cityPlayerGangIsMember(ped)) { CBZ.city.note("They're not in your gang.", 1.6); return; }
-    if (ped.rank === "lt") { CBZ.city.note(ped.name + " is already your Lieutenant, the top under you.", 2); return; }
+    if (!CBZ.cityPlayerGangIsMember(ped) || ped.rank === "lt") return false;
     const ladder = ladderKeys();          // ONE source (gangs.js RANKS via factions)
     const i = ladder.indexOf(ped.rank); const next = ladder[Math.max(0, i) + 1] || "lt";
     if (CBZ.cityGangRankUp) CBZ.cityGangRankUp(ped, next);
     else { ped.rank = next; ped.maxHp = Math.max(ped.maxHp || 160, 200); ped.hp = ped.maxHp; }
     styleMember(ped, g.playerGang.color);
-    const pip = rankPip(next);
-    // (CUT: the "⬆ NAME → RANK" centre flash — you just picked it from the
-    // menu; the quiet note below carries the same word.)
-    CBZ.city.note((ped.name || "They") + " made " + pip + "." + (next === "lt" ? " Tell them to HOLD a block and lead a squad." : ""), 3);
+    if (CBZ.cityMemberStats) { const s = CBZ.cityMemberStats(ped); s.loyalty = Math.min(1, s.loyalty + 0.12); }
+    say(ped, next === "lt" ? "I won't let you down." : pick(["Appreciate it.", "About time.", "I earned that."]), 2.4);
     CBZ.city.addRespect(4);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("promote", { ped });
+    return true;
   };
 
   // auto-promote YOUR crew on merit too (their tracked bodies + earned cut),
@@ -803,398 +981,746 @@
     }
   }
 
-  // nearest unlooted RIVAL stash block (the gangs.js stash metadata) — the
-  // target for the RAID STASH order. Allies' stashes are off the table.
-  function nearestRivalStashLot(x, z) {
-    let best = null, bd = Infinity;
-    for (const gn of CBZ.cityGangs || []) {
-      if (!gn || gn.isPlayer || gn.absorbed) continue;
-      if (CBZ.cityAreAllied && CBZ.cityAreAllied("player", gn.id)) continue;
-      for (const lot of gn.turf || []) {
+  /* ============================================================
+     THE ASK. You walk up to a person and ask him to run with you. What he
+     says is added up out of who he is and who you are; nothing here is a
+     dice roll he could give a different answer to a minute later (the one
+     random term is a hash of the man himself).
+
+       A STRANGER   his life (a hustler, a man sleeping rough, a dealer: yes
+                    is close; a tourist, a suit, a shopkeeper: it is not),
+                    his money, whether he has a job, his nerve, what he
+                    thinks of you, how big you are beside him, the crew and
+                    the blocks you can show him, the heat on you, the men
+                    you have lost.
+       A RIVAL      all of that, against his loyalty to his own set, his
+                    rank in it, how his set is doing (a dead boss, a thin
+                    bench, an empty treasury) and what his set thinks of
+                    you. A loyal one who is asked tells his people.
+
+     Yes; or a price (cash in your hand, CBZ.city.spend); or no, which holds
+     for a couple of minutes and gets worse if you ask again. The price can
+     be leaned on instead of paid: the card's Threaten (city/orders.js)
+     frightens a man who can be frightened into it, and he joins with no
+     love for you.
+     ============================================================ */
+  const STREET = { hustler: 1, dealer: 1, tweaker: 1, vagrant: 1, volatile: 1, thug: 1, gangster: 1, made: 1, mobster: 1 };
+  const SOFT = { tourist: 1, professional: 1, socialite: 1, exec: 1, merchant: 1, billionaire: 1, tycoon: 1, mobwife: 1 };
+  function relOf(p) { try { return CBZ.cityRel ? CBZ.cityRel(p) : null; } catch (e) { return null; } }
+  function relShift(p, kind, amt) { try { if (CBZ.cityRelShift) CBZ.cityRelShift(p, kind, amt); } catch (e) {} }
+  function hash01(p, salt) {
+    const s = (p.name || "") + "|" + (p._identityId || "") + "|" + (p.job || "") + "|" + salt;
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+    return ((h >>> 0) % 1000) / 1000;
+  }
+  function standingOf(p) {
+    try { const st = CBZ.cityInteractionStanding ? CBZ.cityInteractionStanding(p) : null; return st ? st.score : 50; } catch (e) { return 50; }
+  }
+  function tierOf(key) {
+    const L = CBZ.cityRankLadder ? CBZ.cityRankLadder() : null;
+    if (L) for (let i = 0; i < L.length; i++) if (L[i].key === key) return L[i].tier;
+    return key === "lt" ? 5 : key === "boss" ? 6 : 3;
+  }
+  function strengthOf(rec) {
+    if (CBZ.cityGangStrength) { try { return CBZ.cityGangStrength(rec); } catch (e) {} }
+    let n = 0; for (const m of rec.members || []) if (m && !m.dead) n++; return n;
+  }
+  function bossGone(rec) { return !!(rec.bossDead || rec.leaderless || !rec.boss || rec.boss.dead); }
+  function matesNear(p, r) {
+    const rec = gangRecById(p.gang); if (!rec) return [];
+    const out = [];
+    for (const m of rec.members || []) if (m && m !== p && !m.dead && !(m.ko > 0) && dist(m.pos, p.pos) < r) out.push(m);
+    return out;
+  }
+
+  function askable(p) {
+    if (!p || p.dead || p.player || p.isPlayer || !p.pos) return false;
+    if (p.vendor || p.staffPost || p.child || p.animal) return false;
+    if (p.kind === "cop" || p.kind === "security" || p.kind === "staff" || p.kind === "dog") return false;
+    if (p.archetype === "soldier" || p.archetype === "official") return false;
+    if (p.recruited || p.companion || p.controlled || p.hostage || p.restraint || (p.ko | 0) > 0) return false;
+    if (p.inCar || p._cbzSeat || p.surrender || p.state === "flee" || p.rage) return false;   // not a man you can have a word with right now
+    if (p._iOnly || p._presOfficer || p._presStaff || p._congress || p._compoundCrew) return false;
+    if (isMember(p)) return false;
+    // a man patched into somebody else's crew works for that boss; a sitting
+    // President staffs his office another way (city/president_staff.js)
+    if (g.cityMembership) return false;
+    try { if (CBZ.presidency && CBZ.presidency.seat && CBZ.presidency.seat()) return false; } catch (e) {}
+    if (p.gang) {
+      const rec = gangRecById(p.gang);
+      if (!rec || rec.isPlayer || rec.absorbed) return false;
+      if ((p.isBoss || p.rank === "boss" || p === rec.boss) && !p.dead) return false;   // a boss is not hired
+    }
+    return true;
+  }
+  function askLive(p) { return !!(p && p._pgAsk && T < p._pgAsk.until && !p.dead); }
+
+  // the sum. Returns { s, parts, rival, tier, price, free, snitch, why }
+  function willing(p) {
+    const pg = ensure();
+    const r = relOf(p) || {};
+    const n = liveMembers().length, lots = pg.turf.length;
+    const parts = {};
+    parts.respect = Math.min(0.3, (g.respect || 0) / 150);
+    parts.standing = (standingOf(p) - 50) / 100 * 0.6;
+    parts.rel = ((r.loyalty || 0) + (r.respect || 0)) / 200 * 0.5 + (r.affection || 0) / 100 * 0.1 + (r.fear || 0) / 100 * 0.2 - (r.grudge || 0) / 100 * 0.9;
+    parts.crew = Math.min(0.18, n * 0.03) + Math.min(0.12, lots * 0.04);
+    parts.heat = (g.wanted | 0) >= 3 ? -0.2 : (g.wanted | 0) >= 1 ? -0.05 : 0;
+    parts.lost = -Math.min(0.25, (pg.lost || 0) * 0.06);
+    parts.luck = (hash01(p, "ask") - 0.5) * 0.2;
+    const out = { parts: parts, rival: null, tier: 0 };
+    const rec = p.gang ? gangRecById(p.gang) : null;
+    const lvl = CBZ.cityLevel ? (CBZ.cityLevel(p) || 1) : 1;
+    if (rec) {
+      const ms = CBZ.cityMemberStats ? CBZ.cityMemberStats(p) : { loyalty: 0.6 };
+      const tier = tierOf(p.rank);
+      out.rival = rec; out.tier = tier;
+      parts.base = -0.45;
+      parts.loyal = -((ms.loyalty != null ? ms.loyalty : 0.6) - 0.5) * 0.9;
+      parts.rank = -tier * 0.07;
+      parts.chair = bossGone(rec) ? 0.4 : 0;
+      const str = strengthOf(rec);
+      parts.losing = str <= 4 ? 0.18 : str >= 12 ? -0.08 : 0;
+      parts.pay = (rec.treasury || 0) < 300 ? 0.1 : (rec.treasury || 0) > 3000 ? -0.1 : 0;
+      parts.set = ((CBZ.cityGangStanding ? CBZ.cityGangStanding(rec.id) : 0) || 0) / 100 * 0.3;
+      parts.war = (CBZ.cityAtWar && CBZ.cityAtWar("player", rec.id)) ? -0.2 : 0;
+    } else {
+      const a = p.archetype || "";
+      parts.base = -0.2;
+      parts.life = STREET[a] ? 0.25 : SOFT[a] ? -0.4 : -0.08;
+      parts.money = (0.45 - (p.wealth != null ? p.wealth : 0.4)) * 0.5;
+      let jc = ""; try { jc = (CBZ.cityPedJobClass && CBZ.cityPedJobClass(p)) || ""; } catch (e) { jc = ""; }
+      parts.job = p.vagrant || a === "vagrant" ? 0.15 : jc ? -0.12 : 0;
+      parts.nerve = ((p.aggr != null ? p.aggr : 0.3) - 0.4) * 0.5;
+      parts.piece = p.armed ? 0.08 : 0;
+      parts.kin = p.partner && !p.partner.dead ? -0.06 : 0;
+    }
+    let s = 0; for (const k in parts) s += parts[k];
+    if ((r.grudge || 0) > 45) s = -1;                    // bad blood is a no, whatever else is true
+    out.s = s;
+    if (rec) {
+      out.free = bossGone(rec) && s >= 0.5;
+      if (!out.free && s >= -0.05) out.price = Math.max(400, Math.round((500 + out.tier * 450) * (1.5 - Math.min(1, s)) / 50) * 50);
+      // a man loyal to his set says so to his set
+      out.snitch = s < -0.25 || (parts.loyal < -0.15 && s < -0.05);
+    } else {
+      out.free = s >= 0.45;
+      if (!out.free && s >= -0.3) out.price = Math.max(100, Math.round((150 + (p.wealth || 0.3) * 600 + lvl * 40) * (1.35 - s) / 50) * 50);
+    }
+    // the word a no is said in: the heaviest thing against you
+    let worst = null, wv = -0.04;
+    for (const k in parts) if (parts[k] < wv) { wv = parts[k]; worst = k; }
+    if ((r.grudge || 0) > 45) worst = "rel";
+    if (rec && (!worst || worst === "base")) worst = "loyal";
+    out.why = worst;
+    return out;
+  }
+  CBZ.cityCrewWhy = willing;            // what he would say, and why (a read)
+
+  const NO = {
+    life: ["That's not my world.", "No. I'm not built for that."],
+    money: ["I don't need your money.", "I do fine on my own."],
+    job: ["I got a job. I'm good.", "I work for a living."],
+    nerve: ["No. I don't want any part of that.", "Not me. Ask somebody else."],
+    kin: ["I got people at home. No.", "I can't. I got family."],
+    standing: ["I don't know you.", "Who are you supposed to be?"],
+    respect: ["I don't know you.", "Never heard of you."],
+    rel: ["After what you did? Get away from me.", "You and me got nothing to talk about."],
+    heat: ["You're hot right now. No.", "Half the city's looking for you. No."],
+    lost: ["Your people keep ending up dead. No.", "I heard what happens to your crew."],
+    loyal: ["I'm with my set. Walk away.", "You got the wrong one."],
+    rank: ["I got a place here already.", "I didn't come up this far to start over."],
+    set: ["My people don't like you. Neither do I.", "You? No."],
+    war: ["We're at war with you. Get off the block.", "You got some nerve."],
+    base: ["No.", "Not interested."],
+  };
+  function line(key, p) { const L = NO[key] || NO.base; return L[(hash01(p, key) * L.length) | 0]; }
+  function facePlayer(p, hold) {
+    const P = CBZ.player; if (!P || !P.pos || !p.group) return;
+    p.group.rotation.y = Math.atan2(P.pos.x - p.pos.x, P.pos.z - p.pos.z);
+    if (hold) { p.pause = Math.max(p.pause || 0, hold); p.speed = 0; p.path = null; if (p.target && p.target.set) p.target.set(p.pos.x, 0, p.pos.z); }
+  }
+
+  function ask(p) {
+    if (!askable(p)) return null;
+    facePlayer(p, 4);
+    // he already said no
+    if (p._pgNoT && T < p._pgNoT) {
+      say(p, pick(["I said no.", "Don't ask me again.", "You deaf? No."]));
+      relShift(p, "snubbed", 0.3);
+      p._pgNoT += 30;
+      return { answer: "no" };
+    }
+    const w = willing(p);
+    const rec = w.rival;
+    // HIS BOSS IS DEAD BY YOUR HAND: the question is for all of them
+    if (rec && pendingClaim && pendingClaim.rec === rec && !rec.absorbed) {
+      const t = 0.2 + (g.respect || 0) / 100 + liveMembers().length * 0.05 - strengthOf(rec) * 0.025 + (hash01(p, "crown") - 0.5) * 0.2 +
+        ((CBZ.cityGangStanding ? CBZ.cityGangStanding(rec.id) : 0) || 0) / 250;
+      if (t >= 0.45) {
+        claimRivalGang(rec);
+        say(p, "Alright. We ride with you.", 3);
+        return { answer: "crew" };
+      }
+      pendingClaim = null;
+      say(p, pick(["You ain't him.", "Killing him don't make you him."]), 3);
+      if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(rec.id, 0.5);
+      p._pgNoT = T + 120;
+      return { answer: "no" };
+    }
+    if (w.free) { join(p, 0, w); return { answer: "yes" }; }
+    if (w.price) {
+      p._pgAsk = { price: w.price, until: T + 35, rival: !!rec };
+      facePlayer(p, 8);
+      say(p, rec ? pick([money(w.price) + ". And I never liked him anyway.", money(w.price) + " and I walk today.", "It costs. " + money(w.price) + "."])
+                 : pick([money(w.price) + " up front and I'm yours.", "I don't move for free. " + money(w.price) + ".", "Make it " + money(w.price) + "."]), 3.2);
+      return { answer: "price", price: w.price };
+    }
+    // no
+    p._pgNoT = T + 120;
+    if (rec && w.snitch) {
+      // the risk: he tells his people what you just tried
+      const mates = matesNear(p, 22);
+      say(p, pick(["He's trying to buy me!", "This one's poaching on our block!"]), 2.8);
+      if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(rec.id, mates.length ? 0.7 : 0.4);
+      if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(rec.id, -10);
+      relShift(p, "snubbed", 0.6);
+      return { answer: "snitch" };
+    }
+    say(p, line(w.why || "base", p), 2.8);
+    return { answer: "no", why: w.why };
+  }
+  CBZ.cityCrewAsk = ask;
+
+  function pay(p) {
+    const a = p && p._pgAsk;
+    if (!a || !askLive(p)) return false;
+    facePlayer(p, 3);
+    if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(a.price))) {
+      say(p, pick(["Come back when you have it.", "That's not " + money(a.price) + "."]));
+      return false;
+    }
+    p.cash = (p.cash || 0) + a.price;
+    if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
+    join(p, a.price, willing(p));
+    return true;
+  }
+
+  // he is in. `paid` is what changed hands; `w` is the sum he was asked with.
+  function join(p, paid, w, how) {
+    const from = p.gang && p.gang !== "player" ? gangRecById(p.gang) : null;
+    const tier = from ? tierOf(p.rank) : 0;
+    p._pgAsk = null; p._pgNoT = 0;
+    if (from) {
+      const i = from.members ? from.members.indexOf(p) : -1; if (i >= 0) from.members.splice(i, 1);
+      p.raidT = 0; p.raidLot = null; p.raidGang = null; p._op = null; p._wRole = null; p.guard = null; p.homeGuard = null;
+      // his old set finds out: at once if one of them is standing there
+      const mates = matesNear(p, 25);
+      if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(from.id, mates.length ? 0.6 : 0.25);
+      if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(from.id, mates.length ? -14 : -6);
+      if (mates.length) say(mates[0], pick(["Traitor!", "You're dead, " + (p.name ? p.name.split(" ")[0] : "you") + "!"]), 2.6);
+      p.gang = null;
+    }
+    // the money in his hand is a gun on his hip by the time he falls in
+    if (!p.armed && paid >= 250) { p.armed = true; p.weapon = "Pistol"; p.ammo = 60; }
+    p._post = null;
+    const loyalty = how === "fear" ? 0.28 : Math.max(0.45, Math.min(0.9, 0.55 + (w && w.s ? w.s * 0.4 : 0) + (paid ? 0.08 : 0)));
+    const rank = from ? (tier >= 5 ? "enforcer" : tier >= 3 ? "soldier" : "prospect") : "prospect";
+    if (!enlist(p, rank, { how: from ? "poach" : (how || "recruit"), loyalty: loyalty })) return false;
+    if (CBZ.cityMemberStats) CBZ.cityMemberStats(p).loyalty = loyalty;
+    if (how !== "fear") relShift(p, "recruited", 1);
+    if (paid) relShift(p, "paid", 1);
+    // asked through a car window: he walks round to a door (city/boarding.js)
+    const P = CBZ.player;
+    if (CBZ.followerOrder && P && P.driving && P._vehicle) { try { CBZ.followerOrder(p, "board", { veh: P._vehicle, role: "crew", run: true }); } catch (e) {} }
+    say(p, how === "fear" ? pick(["Alright, alright. I'm in.", "Okay. Okay. I'm with you."])
+      : from ? pick(["Then I'm yours.", "Done. I'm out of there."])
+      : paid ? pick(["Alright. I'm with you.", "Good. Let's work."])
+      : pick(["I'm with you.", "Say less. I'm in.", "About time somebody asked.", "Alright. Where we going?"]), 2.8);
+    CBZ.city.addRespect(from ? 5 : 2);
+    if (CBZ.interactions && CBZ.interactions.refresh) { try { CBZ.interactions.refresh(); } catch (e) {} }
+    return true;
+  }
+
+  /* LEANED ON instead of paid. city/orders.js's Threaten has already put the
+     fear on him (social.js "intimidated", his own reaction by who he is); if
+     he was naming a price when you did it, this is what the fear decides. */
+  (function wrapThreaten() {
+    const O = CBZ.cityOrders2;
+    if (!O || typeof O.threaten !== "function" || O.threaten._pgWrap) return;
+    const orig = O.threaten;
+    const w = function (t) {
+      const had = askLive(t) ? t._pgAsk : null;
+      const res = orig.apply(this, arguments);
+      if (had && t && !t.dead && !isMember(t)) {
+        const r = relOf(t) || {};
+        const scared = (t.fear || 0) >= 4 || (r.fear || 0) >= 45 || t.surrender;
+        const brave = (t.aggr || 0) >= 0.75 || t.armed;
+        t._pgAsk = null;
+        if (scared && !brave && !had.rival) join(t, 0, willing(t), "fear");
+        else { t._pgNoT = T + 240; if (!t.rage) say(t, pick(["Now it's a no.", "Get out of my face."]), 2.4); }
+      }
+      return res;
+    };
+    w._pgWrap = true;
+    O.threaten = w;
+  })();
+
+  /* ============================================================
+     POSTS. What a man of yours is doing, as one small record on him
+     (m._post = { kind, x, z, face }), turned into the fields the ped brain
+     already honours: `companion` walks with you and fights for you, `guard`
+     is a leash to a point he holds and fights from.
+       follow   with you
+       corner   that spot is his: he holds it (and holds the block it is on)
+       door     beside the nearest door, back to the wall, facing out
+       sell     a corner he deals from (THE MONEY, below)
+       home     back on the turf (or outside your house when you hold none)
+     ============================================================ */
+  const CMD_OF = { follow: "come", corner: "hold", door: "guard", sell: "go", home: "go" };
+  function postKind(m) { return m && m._post ? m._post.kind : null; }
+  function doorSpot(pos, m) {
+    let best = null, bd = 16;
+    for (const lot of allLots()) {
+      const b = lot.building; if (!b || !b.door || lot.demolished) continue;
+      const d = Math.hypot(b.door.x - pos.x, b.door.z - pos.z);
+      if (d < bd) { bd = d; best = lot; }
+    }
+    if (!best) return null;
+    const f = frontOf(best); if (!f) return null;
+    // which side of the door: the side he is already on, and never the side
+    // another of yours already has
+    let side = ((pos.x - f.x) * f.tx + (pos.z - f.z) * f.tz) >= 0 ? 1 : -1;
+    for (const o of liveMembers()) {
+      if (o === m || !o._post || o._post.kind !== "door" || o._post.lot !== best) continue;
+      if (o._post.side === side) side = -side;
+    }
+    return { x: f.x + f.ox * 1.3 + f.tx * side * 1.5, z: f.z + f.oz * 1.3 + f.tz * side * 1.5, face: Math.atan2(f.ox, f.oz), lot: best, side: side };
+  }
+  CBZ.cityCrewDoorSpot = doorSpot;
+  // the four corners of a lot, a step outside its building
+  function cornerOf(lot, k) {
+    const r = rectOf(lot);
+    const sx = (k & 1) ? 1 : -1, sz = (k & 2) ? 1 : -1;
+    return { x: r.cx + sx * (r.hw + 1.4), z: r.cz + sz * (r.hd + 1.4), lot: lot };
+  }
+  function ownedHomeLot() {
+    if (g.cityHome && g.cityHome.lot && !g.cityHome.lot.demolished) return g.cityHome.lot;
+    try { const L = CBZ.cityRealtyOwnedHomes ? CBZ.cityRealtyOwnedHomes() : null; if (L && L.length) return L[0].lot; } catch (e) {}
+    return null;
+  }
+  function hasHome() { return !!(ensure().turf.length || ownedHomeLot()); }
+  // where "home" is for this man: a corner of a block you hold that the
+  // fewest of yours already stand on; with no turf, the front of your house
+  function homeSpot(m) {
+    const pg = ensure();
+    const mem = liveMembers();
+    if (pg.turf.length) {
+      let best = null, bn = 1e9;
+      for (const lot of pg.turf) {
         if (lot.demolished) continue;
-        const st = lot.building && lot.building.stash;
-        if (!st || st.looted) continue;
-        const dx = lot.cx - x, dz = lot.cz - z, dd = dx * dx + dz * dz;
-        if (dd < bd) { bd = dd; best = lot; }
+        let n = 0; for (const o of mem) if (o !== m && o._post && o._post.lot === lot) n++;
+        if (n < bn) { bn = n; best = lot; }
+      }
+      if (best) return cornerOf(best, bn % 4);
+    }
+    const h = ownedHomeLot();
+    if (h) {
+      const f = frontOf(h);
+      if (f) {
+        let n = 0; for (const o of mem) if (o !== m && o._post && o._post.lot === h) n++;
+        const side = (n % 2) ? -1 : 1, step = 2.2 + ((n / 2) | 0) * 1.6;
+        return { x: f.x + f.ox * 2.6 + f.tx * side * step, z: f.z + f.oz * 2.6 + f.tz * side * step, face: Math.atan2(f.ox, f.oz), lot: h };
       }
     }
-    return best;
+    return null;
   }
 
-  // the crew cracked a rival stash: same consequences as robbing it yourself
-  // (gangs.js cityRobStash — provoke, standing, heat), but the take is CREW
-  // money, so it banks (like the turf payday) instead of hitting your pocket.
-  function crewCrackStash(lot, foe) {
-    const st = lot && !lot.demolished && lot.building && lot.building.stash;
-    let take = 0;
-    if (st && !st.looted) {
-      st.looted = true;
-      take = st.cash || 0;
-      if (st.mesh && st.mesh.material && st.mesh.material.color) { try { st.mesh.material.color.setHex(0x202020); } catch (e) {} }
+  function post(m, kind, at) {
+    if (!m || m.dead) return false;
+    // whatever body his last order had
+    try { if (m._order && CBZ.cityOrders2 && CBZ.cityOrders2.clear) CBZ.cityOrders2.clear(m); } catch (e) {}
+    if (kind !== "follow" && (m._cbzSeat || m.inCar) && CBZ.followerOrder) { try { CBZ.followerOrder(m, "alight"); } catch (e) {} }
+    if (m._cbzWait && CBZ.followerOrder) { try { CBZ.followerOrder(m, "follow", {}); } catch (e) {} }
+    m._op = null; m.raidT = 0; m.raidLot = null; m.raidGang = null;
+    if (kind === "follow") {
+      m._post = { kind: "follow" };
+      m.companion = true; m.guard = null; m.rage = null; m.path = null; m.pause = 0;
+      return true;
     }
-    if (take > 0) { g.cityBank = (g.cityBank || 0) + take; }
-    CBZ.city.big("STASH RAIDED" + (take ? " +$" + take : ""));
-    CBZ.city.note(take ? "Your crew cracked the stash. $" + take + " banked. They hold the block." : "The stash was already empty, the crew holds the block anyway.", 3);
-    CBZ.city.addRespect(8);
-    if (foe && CBZ.cityGangProvoke) CBZ.cityGangProvoke(foe.id, 1);
-    if (foe && CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(foe.id, -10);
-    if (CBZ.cityCrime) CBZ.cityCrime(50, { x: lot.cx, z: lot.cz, type: "burglary" });
-    if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) CBZ.fullMap.clearWaypoint("city");
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    let s = null;
+    if (kind === "corner" || kind === "sell") s = at || { x: m.pos.x, z: m.pos.z };
+    else if (kind === "door") s = at || doorSpot(m.pos, m) || { x: m.pos.x, z: m.pos.z };
+    else if (kind === "home") s = at || homeSpot(m);
+    if (!s) return false;
+    const lot = s.lot || lotNear(s.x, s.z) || null;
+    m._post = { kind: kind, x: s.x, z: s.z, face: s.face != null ? s.face : null, lot: lot, side: s.side || 0, t: 0 };
+    m.companion = false; m.rage = null;
+    m.guard = { x: s.x, z: s.z }; m.homeGuard = { x: s.x, z: s.z };
+    if (m.target && m.target.set) m.target.set(s.x, 0, s.z);
+    m.pause = 0; m.path = null;
+    if (kind === "sell") m._sellT = 6 + rnd() * 6;
+    return true;
   }
+  CBZ.cityCrewPost = post;
 
-  /* ---- THE ORDER SYSTEM. Every order to the gang is an order to each man in
-     it (systems/command.js): he does it, says "Sir?" (give it again), or will
-     not, and the man who will not keeps doing what he was doing (m._pgNo is
-     the order he refused, and nothing here pushes it onto him). Refusals and
-     bad orders pile up; a gang that thinks little of you mutinies (city/
-     orders.js: the lieutenant takes it and they come for you).
-     The attack order is not here: sending your people at a man is Kill, on
-     the man himself (city/orders.js). ---- */
-  const CMD_OF = { hold: "hold", follow: "come", disperse: "go", raid: "take", fortify: "guard" };
-  function issueOrder(kind) {
+  // THE ORDER: each man decides (systems/command.js), the ones who will take
+  // the post. Several told to hold at once spread round the spot.
+  function order(men, kind, at) {
+    men = (men || []).filter(function (m) { return m && !m.dead && isMember(m); });
+    if (!men.length) return null;
+    let k = 0; const n = men.length;
+    const exec = function (m) {
+      m._pgNo = null;
+      let spot = at || null;
+      if ((kind === "corner" || kind === "sell") && n > 1) {
+        const P = CBZ.player, a = (k++ / n) * 6.283, rr = 2 + n * 0.25;
+        spot = { x: (at ? at.x : P.pos.x) + Math.cos(a) * rr, z: (at ? at.z : P.pos.z) + Math.sin(a) * rr };
+      }
+      return post(m, kind, spot);
+    };
+    const Cm = CBZ.command;
+    if (Cm && Cm.issue) return Cm.issue(playerActor(), n === 1 ? men[0] : men, CMD_OF[kind], null, { game: "city", exec: exec });
+    men.forEach(exec);
+    return { answer: "obey", obey: men, refuse: [] };
+  }
+  function earshot(r) {
+    const P = CBZ.player, out = [];
+    for (const m of liveMembers()) if (dist(m.pos, P.pos) < (r || 30) && !(m.ko > 0)) out.push(m);
+    return out;
+  }
+  /* THE WHOLE GANG, by word of mouth or a phone call (city/phone_apps.js's
+     crew contact): "follow" brings everybody to you, "hold" plants the ones in
+     earshot where you stand, "home" sends everybody back to the turf. */
+  CBZ.cityPlayerGangOrder = function (kind) {
     const pg = ensure();
     if (!pg.founded) return { ok: false, why: "" };
-    const mem = liveMembers();
-    if (!mem.length || !CMD_OF[kind]) return { ok: false, why: "" };
-    const P = CBZ.player;
-    // what the order needs to exist at all
-    let lot = null;
-    if (kind === "raid") {
-      lot = nearestRivalStashLot(P.pos.x, P.pos.z);
-      if (!lot) return { ok: false, why: "" };
-    }
-    if (kind === "fortify" && !pg.turf.length) return { ok: false, why: "" };
-    const was = pg.order, wasHold = pg.holdPoint;
-    pg.order = kind;
-    if (kind === "hold") pg.holdPoint = { x: P.pos.x, z: P.pos.z };
-    if (kind === "raid") { pg.raidLot = lot; pg.raidGangId = (lot.building && lot.building.gang) || null; pg.raidClock = 40; }
-    // each man decides; the ones who obey take the order's body
-    const Cm = CBZ.command, PA = (CBZ.city && CBZ.city.playerActor) || P;
-    const fi = { n: 0 };
-    let r = null;
-    if (Cm && Cm.issue) {
-      r = Cm.issue(PA, mem, CMD_OF[kind], null, { game: "city", exec: function (m) { m._pgNo = null; applyTo(m, pg, P, fi); return true; } });
-      for (const m of mem) if (r.obey.indexOf(m) < 0) m._pgNo = kind;
-    } else for (const m of mem) { m._pgNo = null; applyTo(m, pg, P, fi); }
-    const obeyed = r ? r.obey.length : mem.length;
-    if (!obeyed) {
-      // nobody went: the gang's order is what it was
-      pg.order = was; pg.holdPoint = wasHold;
-      if (kind === "raid") { pg.raidLot = null; pg.raidGangId = null; }
-      for (const m of mem) if (m._pgNo === kind) m._pgNo = null;
-      return { ok: false, answer: r ? r.answer : "refuse", why: "" };
-    }
-    if (kind === "hold") claimTurfAt(P.pos.x, P.pos.z);
-    if (kind === "raid" && pg.raidGangId && CBZ.cityGangProvoke) CBZ.cityGangProvoke(pg.raidGangId, 0.8);
-    g.cityCrew = mem.length;
+    if (kind === "disperse" || kind === "fortify") kind = "home";
+    const men = kind === "hold" ? earshot(30) : liveMembers().slice();
+    if (!men.length) return { ok: false, why: "" };
+    if (kind === "home" && !hasHome()) return { ok: false, why: "" };
+    const r = order(men, kind === "hold" ? "corner" : kind === "home" ? "home" : "follow");
+    const obeyed = r && r.obey ? r.obey.length : 0;
+    if (!obeyed) return { ok: false, answer: r ? r.answer : "refuse", why: "" };
+    return { ok: true, answer: r.answer || "obey", n: obeyed, refused: men.length - obeyed };
+  };
+  // a recount after somebody left (city/brain_city.js cityDismiss)
+  CBZ.cityPlayerGangApply = function () {
+    g.cityCrew = liveMembers().length;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    showOrdersHud();
-    return { ok: true, answer: r ? r.answer : "obey", n: obeyed, refused: mem.length - obeyed };
-  }
-  CBZ.cityPlayerGangOrder = issueOrder;
-
-  // push the current order onto every member's ped fields (the ped brain,
-  // peds.js, does the heavy lifting from these inputs each frame). A man who
-  // refused it (m._pgNo) is left as he is.
-  function applyTo(m, pg, P, fi) {
-    if (pg.order === "follow") {
-      m.companion = true; m.guard = null; m.rage = null;
-    } else if (pg.order === "hold") {
-      m.companion = false; m.rage = null;
-      const gp = pg.holdPoint || pg.center || { x: P.pos.x, z: P.pos.z };
-      m.guard = { x: gp.x, z: gp.z }; m.homeGuard = { x: gp.x, z: gp.z };
-      m.target.set(gp.x + (Math.random() - 0.5) * 4, 0, gp.z + (Math.random() - 0.5) * 4); m.pause = 0; m.path = null;
-    } else if (pg.order === "disperse") {
-      m.companion = false; m.rage = null;
-      const h = m.homeGuard || pg.center || { x: P.pos.x, z: P.pos.z };
-      m.guard = { x: h.x, z: h.z };
-      m.target.set(h.x + (Math.random() - 0.5) * 6, 0, h.z + (Math.random() - 0.5) * 6); m.pause = 0; m.path = null;
-    } else if (pg.order === "raid") {
-      m.companion = false;
-      const lot = pg.raidLot;
-      if (lot) {
-        m.homeGuard = m.homeGuard || (m.guard ? { x: m.guard.x, z: m.guard.z } : (pg.center ? { x: pg.center.x, z: pg.center.z } : null));
-        m.guard = { x: lot.cx + (Math.random() - 0.5) * 6, z: lot.cz + (Math.random() - 0.5) * 6 };
-        m.raidT = 26 + Math.random() * 8; m.raidLot = lot; m.raidGang = pg.raidGangId || null;
-        m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null;
-      }
-    } else if (pg.order === "fortify") {
-      m.companion = false; m.rage = null;
-      const lot = pg.turf.length ? pg.turf[fi.n++ % pg.turf.length] : null;
-      if (lot) {
-        // the post IS the new home: a fortified member stays garrisoned
-        m.guard = { x: lot.cx + (Math.random() - 0.5) * 4, z: lot.cz + (Math.random() - 0.5) * 4 };
-        m.homeGuard = { x: m.guard.x, z: m.guard.z };
-        m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null;
-      }
-    }
-  }
-  function applyOrder() {
-    const pg = g.playerGang; if (!pg || !pg.founded) return;
-    const mem = liveMembers();
-    const P = CBZ.player;
-    const fi = { n: 0 };
-    for (const m of mem) { if (m._pgNo && m._pgNo === pg.order) continue; applyTo(m, pg, P, fi); }
-    g.cityCrew = mem.length;
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-  }
-  CBZ.cityPlayerGangApply = applyOrder;
-
-  // ---- turf defence: rivals can raid; your crew (and any LT holding it) fight ----
-  // The ped brain already makes guards engage rival gangs on turf. We add the
-  // war hook so a rival raiding YOUR block bumps everyone to defend it.
+  };
+  // a rival is raiding one of your blocks (gangs.js launchWar): the men at
+  // home on your turf go to that block and hold it
   CBZ.cityPlayerGangDefendTurf = function (x, z) {
     const pg = g.playerGang; if (!pg || !pg.founded) return;
+    const lot = lotNear(x, z, 30);
+    let k = 0;
     for (const m of liveMembers()) {
-      if (m.companion) continue;       // following crew stays with you
-      if (!m.guard) m.guard = pg.center ? { x: pg.center.x, z: pg.center.z } : { x, z };
+      if (postKind(m) !== "home" || m.rage) continue;
+      if (lot && m._post.lot !== lot) post(m, "home", cornerOf(lot, k++ % 4));
     }
   };
 
-  // ---- on-screen orders HUD ----
-  let hudEl = null, hudHideT = 0;
-  function buildHud() {
-    if (hudEl) return hudEl;
-    hudEl = document.createElement("div");
-    hudEl.id = "cityOrders";
-    hudEl.style.cssText = "position:fixed;left:14px;bottom:120px;z-index:40;display:none;background:rgba(14,16,22,.82);border:2px solid #3a3140;border-radius:12px;padding:8px 12px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;font-size:13px;line-height:1.5;pointer-events:none;box-shadow:0 8px 28px rgba(0,0,0,.5)";
-    document.body.appendChild(hudEl);
-    return hudEl;
+  /* ============================================================
+     THE MONEY. It is made hand to hand and it stays on the man who made it.
+       A SELLER works his corner: a passer-by walks up, the exchange happens
+       (city/gangops.js cityDealStageBuyer, the same staging every corner in
+       the city uses), and the cash is in his pocket. The crew's plug takes a
+       slice, like it does off every other corner. A policeman who is
+       standing there to see it makes him a wanted man (city/law.js radio),
+       and the police's own arrest takes it from there.
+       A MAN HOLDING A BLOCK OF YOURS takes that block's street money, a
+       little every half minute he is actually standing on it.
+     m._take is what he is carrying of yours. Collect (on him) hands it over
+     less his cut, which is what he remembers you by.
+     ============================================================ */
+  const BLOCK_TAKE = 42, BLOCK_TICK = 30, CUT = 0.25;
+  function supplier() {
+    for (const gx of CBZ.cityGangs || []) if (gx && gx.supplier && !gx.isPlayer && !gx.absorbed) return gx;
+    return null;
   }
-  function showOrdersHud() { hudHideT = 6; renderHud(); }
-  function renderHud() {
-    const pg = g.playerGang;
-    buildHud();
-    if (g.mode !== "city") { hudEl.style.display = "none"; return; }
-    // membership / prospect status (when you ride with someone else's crew)
-    if (!pg || !pg.founded) {
-      const M = memb();
-      if (M) {
-        const rec = gangRecById(M.gangId);
-        const pip = CBZ.cityRankName ? CBZ.cityRankName(M.rank) : M.rank;
-        // THE BOOK (city/racket.js, feature-detected): a made man reads his
-        // ledger — stores he runs, cash in drawers, the crew's open job.
-        const bk = CBZ.cityRacketBook ? CBZ.cityRacketBook() : null;
-        hudEl.innerHTML =
-          "<div style='font-weight:700;color:" + hex6(rec ? rec.color : 0x8a93a3) + "'>" + (rec ? rec.name : "Crew") + "</div>" +
-          "<div style='color:#aeb6c2'>You: <b style='color:#e8eef7'>" + pip + "</b>, " + M.bodies + " bodies</div>" +
-          (bk ? "<div style='color:#aeb6c2'>Book <b style='color:#e8eef7'>" + bk.stores + "</b>" +
-                (bk.owed > 0 ? " · <b style='color:#ffd166'>$" + bk.owed + "</b> in drawers" : "") +
-                (bk.hot > 0 ? " · owes the crew $" + bk.hot : "") + "</div>" +
-                (bk.job ? "<div style='color:#ffd166;font-size:12px'>" + bk.job + "</div>" : "")
-              : "");
-        hudEl.style.display = "block"; return;
-      }
-      // prospecting has no HUD card: no "Task 2/4", no step label. Where you
-      // stand with the set is in how its members talk to you.
-      hudEl.style.display = "none"; return;
+  function copSees(m, r) {
+    const L = CBZ.cityCops; if (!L) return null;
+    for (let i = 0; i < L.length; i++) { const c = L[i]; if (c && !c.dead && c.pos && dist(c.pos, m.pos) < r) return c; }
+    return null;
+  }
+  function settle(dealer, buyer) {
+    if (!dealer || dealer.dead || !isMember(dealer)) return;
+    let got = 30 + ((rnd() * 70) | 0);
+    got = Math.max(15, Math.min(got, (buyer.cash | 0) + 40));
+    buyer.cash = Math.max(0, (buyer.cash | 0) - got);
+    const sup = supplier();
+    let keep = got;
+    if (sup) { const kick = Math.round(got * 0.22); sup.treasury = Math.min(12000, (sup.treasury || 0) + kick); keep = got - kick; }
+    dealer.cash = (dealer.cash || 0) + keep;
+    dealer._take = (dealer._take || 0) + keep;
+    if (copSees(dealer, 22)) {
+      dealer.npcWanted = Math.max(dealer.npcWanted | 0, 1);
+      try { if (CBZ.cityLaw && CBZ.cityLaw.radio) CBZ.cityLaw.radio(dealer); } catch (e) {}
     }
-    const mem = liveMembers();
-    const lts = mem.filter((m) => m.rank === "lt").length;
-    const orderName = { follow: "FOLLOW", hold: "HOLD", disperse: "DISPERSE", raid: "RAID STASH", fortify: "FORTIFY" }[pg.order] || "—";
-    // the boss's ledger line (city/racket.js, feature-detected): the book is
-    // as much "your gang" as the bodies are
-    const bk = CBZ.cityRacketBook ? CBZ.cityRacketBook() : null;
-    hudEl.innerHTML =
-      "<div style='font-weight:700;color:" + hex6(pg.color) + "'>" + (pg.name || "Your Gang") + "</div>" +
-      "<div style='color:#aeb6c2'>Crew <b style='color:#e8eef7'>" + mem.length + "</b> · Lts " + lts + " · Turf " + pg.turf.length +
-      (bk && bk.stores ? " · Book <b style='color:#e8eef7'>" + bk.stores + "</b>" + (bk.owed > 0 ? " <span style='color:#ffd166'>($" + bk.owed + ")</span>" : "") : "") + "</div>" +
-      "<div style='color:#ffd166'>Order: <b>" + orderName + "</b></div>" +
-      "<div style='color:#8a93a3;font-size:11px;margin-top:2px'>[O] orders menu</div>";
-    hudEl.style.display = "block";
+  }
+  function atPost(m, r) { return !!(m._post && m._post.x != null && Math.hypot(m.pos.x - m._post.x, m.pos.z - m._post.z) < (r || 3.5)); }
+  function calm(m) { return !m.rage && !(m.ko > 0) && !m.restraint && m.state !== "fight" && m.state !== "flee" && !m.surrender; }
+  function tickSellers(dt) {
+    for (const m of liveMembers()) {
+      if (postKind(m) !== "sell" || !calm(m) || !atPost(m, 3)) continue;
+      m._sellT = (m._sellT == null ? 8 : m._sellT) - dt;
+      if (m._sellT > 0) continue;
+      m._sellT = 12 + rnd() * 14;
+      if (CBZ.cityDealStageBuyer) { try { CBZ.cityDealStageBuyer(m, { onSettle: settle }); } catch (e) {} }
+    }
+  }
+  function collect(m) {
+    const n = Math.floor(m && m._take || 0);
+    if (!m || m.dead || n < 1) return 0;
+    const cut = Math.round(n * (m.rank === "lt" ? 0.3 : CUT));
+    const mine = Math.min(n - cut, Math.floor(m.cash || 0));
+    if (mine <= 0) { m._take = 0; return 0; }
+    m.cash = (m.cash || 0) - mine; m._take = 0; m._pgPaidT = T;
+    if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(mine); else g.cash = (g.cash || 0) + mine;
+    if (CBZ.cityMemberStats) { const s = CBZ.cityMemberStats(m); s.earned += cut; s.contrib += mine; s.loyalty = Math.min(1, s.loyalty + 0.03); }
+    facePlayer(m, 2);
+    say(m, pick([money(mine) + ". All there.", "Here. " + money(mine) + ".", money(mine) + ". Slow day.", money(mine) + ". It's moving."]), 2.4);
+    if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
+    return mine;
   }
 
-  // ---- the [O] orders menu (radial-ish list, reuses the menu-open lock) ----
-  let menuEl = null;
-  function buildMenu() {
-    if (menuEl) return menuEl;
-    menuEl = document.createElement("div");
-    menuEl.id = "cityOrderMenu";
-    menuEl.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:49;display:none;min-width:300px;background:rgba(14,16,22,.96);border:2px solid #3a3140;border-radius:16px;padding:16px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.55);pointer-events:auto";
-    document.body.appendChild(menuEl);
-    menuEl.addEventListener("click", function (e) {
-      const row = e.target.closest && e.target.closest(".oopt");
-      if (row && row.dataset.act) doMenu(row.dataset.act);
-    });
-    return menuEl;
-  }
-  let menuActs = [];
-  function openMenu() {
-    if (g.mode !== "city" || g.state !== "playing" || CBZ.player.dead) return;
-    if (CBZ.cityMenuOpen) return;
-    buildMenu();
-    const pg = ensure();
-    menuActs = [];
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:8px'>Gang Orders</div>";
-    const add = (act, label, color) => { menuActs.push(act); const i = menuActs.length; html += "<div class='oopt' data-act='" + act + "' style='padding:5px 0;cursor:pointer'><b style='color:#ffd166'>" + i + "</b> <span style='color:" + (color || "#e8eef7") + "'>" + label + "</span></div>"; };
-    if (pendingClaim && pendingClaim.rec && !pendingClaim.rec.absorbed) {
-      add("claim", "CLAIM the " + pendingClaim.rec.name + " (take over)", "#ffd166");
+  /* ============================================================
+     WHO HOLDS A BLOCK. Asked once a second of the lots your people are
+     standing on and the lots you hold, by counting bodies:
+       a block your people hold a post on, with nobody of another set on it
+       for HOLD_T seconds, is yours (from nobody at once; from a set, only
+       after their people are gone from it, and that set remembers);
+       a block of yours with none of you on it and two or more of one set on
+       it for HOLD_T seconds is theirs.
+     You count as two of your own. A man down, cuffed or running holds
+     nothing.
+     ============================================================ */
+  const HOLD_T = 20;
+  const ctl = new Map();          // lot -> { t, kind }
+  function bodiesOn(lot) {
+    const R = lotReach(lot), out = { mine: 0, posted: 0, rival: null, rivalN: 0 };
+    const by = {};
+    const peds = CBZ.cityPeds || [];
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p || p.dead || !p.gang || (p.ko | 0) > 0 || p.restraint || p.surrender || p.state === "flee") continue;
+      const dx = p.pos.x - lot.cx, dz = p.pos.z - lot.cz;
+      if (dx * dx + dz * dz > R * R) continue;
+      if (p.gang === "player") { if (isMember(p)) { out.mine++; if (p._post && p._post.kind !== "follow" && p._post.lot === lot) out.posted++; } continue; }
+      if (CBZ.cityAreAllied && CBZ.cityAreAllied("player", p.gang)) continue;
+      by[p.gang] = (by[p.gang] || 0) + 1;
     }
-    const M = memb();
-    if (M && !pg.founded) {
-      // YOU are a patched member of someone else's crew — show your standing
-      const rec = gangRecById(M.gangId);
-      const pip = CBZ.cityRankName ? CBZ.cityRankName(M.rank) : M.rank;
-      html += "<div style='color:" + hex6(rec ? rec.color : 0x8a93a3) + ";font-weight:700;margin:-2px 0 6px'>" + (rec ? rec.name : "Your crew") + " · you're a " + pip + "</div>";
-      html += "<div style='color:#aeb6c2;font-size:12px;margin:-4px 0 8px'>Bodies " + M.bodies + " · Kicked up $" + Math.round(M.contrib) + "</div>";
-      add("leavegang", "LEAVE the crew", "#ff9a9a");
-    } else if (prospecting && !pg.founded) {
-      const rec = gangRecById(prospecting.gangId);
-      const T = prospecting.tasks;
-      const ready = initiationReady();
-      html += "<div style='color:#ffd166;margin:-2px 0 6px'>Hanging with " + (rec ? rec.name : "a crew") + "</div>";
-      if (ready) {
-        add("jumpin", "GET JUMPED IN (survive the beating)", "#ff9a9a");
-        add("putwork", "PUT IN WORK (hit a rival mark)", "#ffd166");
-      } else {
-        add("stopprospect", "Stop prospecting", "#aeb6c2");
-      }
-    }
-    if (!pg.founded && !M && !prospecting) {
-      // FREE AGENT: lead with PROSPECTING the nearest crew — the primary path.
-      const pr = prospectableGang();
-      if (pr) add("prospect", "PROSPECT the " + shortGang(pr.name) + " (join them)", "#9be564");
-      // FOUND-your-own is now a LATE-game option: gated behind having first been
-      // patched into a crew (g.cityWasMember). Until then, you prospect & earn it.
-      const crew = CBZ.cityPeds.filter((p) => p.companion && p.recruited && !p.dead && p.kind === "crew").length;
-      if (g.cityWasMember) {
-        add("found", "FOUND your own gang (" + crew + "/3 crew)", crew >= 3 ? "#7ed957" : "#ff9a9a");
-      } else {
-        html += "<div style='color:#8a93a3;font-size:11px;margin:4px 0 2px'>Found your own crew later, get patched into one first.</div>";
-      }
-    }
-    if (pg.founded) {
-      add("hold", "Hold this block");
-      add("follow", "Follow me");
-      add("disperse", "Back to the turf");
-      // RAID STASH: only offered when a rival stash is actually out there
-      if (nearestRivalStashLot(CBZ.player.pos.x, CBZ.player.pos.z)) add("raidstash", "Raid their stash", "#ffd166");
-      if (pg.turf.length) add("fortify", "Fortify the turf", "#7fd0ff");
-      add("promote", "⬆ PROMOTE nearest crew → Lieutenant", "#7fd0ff");
-      add("claimturf", "CLAIM this block as turf");
-      // ---- takeover meta (turf.js): buy a weakly-held district, broker pacts ----
-      if (CBZ.cityPlayerBuyZone) {
-        const z = CBZ.cityZoneAt && CBZ.cityZoneAt(CBZ.player.pos.x, CBZ.player.pos.z);
-        if (z && z.owner !== "player") add("buyzone", "BUY OUT this district (" + (z.name || "?") + ")", "#ffd166");
-      }
-      // ally with / declare war on the nearest rival gang
-      const rivalNear = nearestRival();
-      if (rivalNear && CBZ.cityAreAllied) {
-        if (CBZ.cityAreAllied("player", rivalNear.id))
-          add("warrival", "DECLARE WAR on " + shortGang(rivalNear.name), "#ff9a9a");
-        else
-          add("allyrival", "ALLY with " + shortGang(rivalNear.name), "#9be564");
-      }
-    }
-    /* ---- THE PEOPLE WHO ARE ACTUALLY WITH YOU ------------------------------
-       This menu only ever spoke to a FOUNDED GANG, which meant that the crew
-       you recruited before founding one, the security you are paying by the
-       hour, the partner walking beside you and the man you have at gunpoint
-       could all be standing at your shoulder with nothing you could say to
-       them. city/boarding.js counts all five kinds as one squad, so the orders
-       that apply to a body — get in, get out, hold this spot, pick up that
-       money, run this to the lockup — live here, above the gang politics, and
-       show only when somebody is there to hear them. */
-    const sq = (CBZ.followerSquad && CBZ.CONFIG.FOLLOWER_ORDERS_V1 !== false) ? CBZ.followerSquad() : [];
-    if (sq.length) {
-      const P = CBZ.player;
-      const ride = (P && (P._aircraft || P._vehicle)) || null;
-      let seated = 0, waiting = 0;
-      for (let i = 0; i < sq.length; i++) { if (sq[i].ped._cbzSeat) seated++; if (sq[i].ped._cbzWait) waiting++; }
-      html += "<div style='color:#7fd0ff;font-weight:700;margin:8px 0 2px'>With you · " + sq.length +
-        (seated ? " (" + seated + " aboard)" : "") + (waiting ? " (" + waiting + " holding)" : "") + "</div>";
-      if (ride) {
-        const free = CBZ.boarding && CBZ.boarding.freeSeats ? CBZ.boarding.freeSeats(ride) : 0;
-        if (seated < sq.length && free > 0) add("sq-in", "GET IN, everyone to a door (" + free + " free)", "#9be564");
-        if (seated) add("sq-out", "GET OUT, everyone off", "#ffd166");
-        if (seated) add("sq-drive", "DRIVE this to my warehouse", "#7fd0ff");
-      } else if (seated) {
-        add("sq-out", "GET OUT, everyone off", "#ffd166");
-      }
-      if (waiting < sq.length) add("sq-wait", "WAIT HERE, hold this spot");
-      if (waiting) add("sq-follow", "ON ME, fall back in");
-      if (CBZ.cashBags && CBZ.cashBags.count && CBZ.cashBags.count() > 0) {
-        add("sq-bags", "GRAB THE BAGS, carry the money", "#ffd166");
-      }
-    }
-    // THE COMPOUND (city/compoundcrew.js): post the people with you at the
-    // compound you're standing at, pull them back, hand the driver the wheel.
-    const cc = (CBZ.compoundCrew && CBZ.compoundCrew.menuEntries) ? CBZ.compoundCrew.menuEntries() : [];
-    if (cc.length) html += "<div style='color:#7fd0ff;font-weight:700;margin:8px 0 2px'>Compound</div>";
-    for (let i = 0; i < cc.length; i++) add(cc[i].act, cc[i].label, cc[i].color);
-    html += CBZ.touchMode ? "<div class='oopt' data-act='close' style='margin-top:10px;padding:10px;border:1px solid #3a3140;border-radius:10px;text-align:center;font-weight:700;letter-spacing:.6px;cursor:pointer'>CLOSE</div>"
-      : "<div style='font-size:12px;color:#8a93a3;margin-top:10px'>[1–" + menuActs.length + "] choose · [O]/[Esc] close</div>";
-    menuEl.innerHTML = html;
-    menuEl.style.display = "block";
-    CBZ.cityMenuOpen = true;
-    if (document.exitPointerLock) try { document.exitPointerLock(); } catch (e) {}
-  }
-  function closeMenu() { if (menuEl) menuEl.style.display = "none"; CBZ.cityMenuOpen = false; if (CBZ.requestLock && g.state === "playing") CBZ.requestLock(); }
-  function doMenu(act) {
-    closeMenu();
-    if (act === "found") CBZ.cityPlayerGangFound();
-    else if (act === "claim") { if (pendingClaim && pendingClaim.rec) claimRivalGang(pendingClaim.rec); }
-    else if (act === "hold") issueOrder("hold");
-    else if (act === "follow") issueOrder("follow");
-    else if (act === "disperse") issueOrder("disperse");
-    else if (act === "raidstash") issueOrder("raid");
-    else if (act === "fortify") issueOrder("fortify");
-    else if (act === "claimturf") claimTurfAt(CBZ.player.pos.x, CBZ.player.pos.z);
-    else if (act === "promote") {
-      const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
-      let best = null, bd = 14 * 14;
-      for (const m of liveMembers()) { if (m.rank === "lt") continue; const dd = (m.pos.x - px) * (m.pos.x - px) + (m.pos.z - pz) * (m.pos.z - pz); if (dd < bd) { bd = dd; best = m; } }
-      if (best) CBZ.cityPlayerGangPromote(best);
-      else CBZ.city.note("No soldier nearby to promote.", 1.8);
-    }
-    else if (act === "buyzone") { if (CBZ.cityPlayerBuyZone) CBZ.cityPlayerBuyZone(); }
-    else if (act === "allyrival") { const r = nearestRival(); if (r && CBZ.cityPlayerSetRelation) CBZ.cityPlayerSetRelation(r.id, "ally"); }
-    else if (act === "warrival") { const r = nearestRival(); if (r && CBZ.cityPlayerSetRelation) CBZ.cityPlayerSetRelation(r.id, "war"); }
-    // ---- prospect / initiation / membership ----
-    else if (act === "prospect") { CBZ.cityProspectGang(prospectableGang()); }
-    else if (act === "stopprospect") { prospecting = null; }
-    else if (act === "jumpin") { const rec = gangRecById(prospecting && prospecting.gangId); if (rec) startJumpIn(rec); }
-    else if (act === "putwork") { const rec = gangRecById(prospecting && prospecting.gangId); if (rec) startWork(rec); }
-    else if (act === "leavegang") { CBZ.cityLeaveGang(); }
-    // ---- squad orders (city/boarding.js owns the verbs; this is the surface) ----
-    else if (act.indexOf("sq-") === 0) doSquad(act.slice(3));
-    else if (act.indexOf("cc-") === 0) { if (CBZ.compoundCrew && CBZ.compoundCrew.menuDo) CBZ.compoundCrew.menuDo(act); }
-  }
-  /* Every one of these is ONE call into CBZ.followerOrderAll, and every one of
-     them REPORTS WHAT ACTUALLY HAPPENED rather than what was asked for — "two
-     of four got a seat" is the honest sentence when a sedan has two chairs
-     left, and it is the sentence that tells you to take a second car. */
-  function doSquad(verb) {
-    if (!CBZ.followerOrderAll) return;
+    for (const id in by) if (by[id] > out.rivalN) { out.rivalN = by[id]; out.rival = id; }
     const P = CBZ.player;
-    const sq = CBZ.followerSquad ? CBZ.followerSquad() : [];
-    if (verb === "drive") {
-      // the nearest crew member ALREADY aboard takes the wheel; nobody else can
-      // be handed a wheel they would have to walk to across the map.
-      let who = null;
-      for (let i = 0; i < sq.length; i++) {
-        const p = sq[i].ped;
-        if (sq[i].role === "captive" || sq[i].role === "hostage") continue;   // you do not hand a hostage your truck
-        if (p._cbzSeat || Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z) < 12) { who = p; break; }
-      }
-      if (!who) { CBZ.city.note("Nobody close enough to take the wheel.", 1.8); return; }
-      CBZ.followerOrder(who, "drive", {});
-      return;
-    }
-    const map = { in: "board", out: "alight", wait: "wait", follow: "follow", bags: "bags" };
-    const v = map[verb]; if (!v) return;
-    const n = CBZ.followerOrderAll(v, v === "wait" ? { x: P.pos.x, z: P.pos.z } : {});
-    const words = {
-      board: [" head for a door.", "Nobody could get a seat."],
-      alight: [" step out.", "Nobody to put out."],
-      wait: [" hold here.", ""],
-      follow: [" fall back in.", ""],
-      bags: [" go for the money.", "No money on the ground."],
-    }[v];
-    if (n) CBZ.city.note(n + (n === 1 ? " of them" : " of them") + words[0], 1.9);
-    else if (words[1]) CBZ.city.note(words[1], 1.7);
+    if (P && !P.dead && P.pos) { const dx = P.pos.x - lot.cx, dz = P.pos.z - lot.cz; if (dx * dx + dz * dz < R * R) out.mine += 2; }
+    return out;
   }
+  // who is standing on a block right now, and how long the count has held (a read)
+  CBZ.cityCrewHolding = function (lot) { const b = bodiesOn(lot), c = ctl.get(lot); b.t = c ? c.t : 0; b.need = HOLD_T; return b; };
+  function tickTurf(dt) {
+    const pg = g.playerGang; if (!pg || !pg.founded) return;
+    const seen = new Set();
+    // blocks your people are posted on
+    for (const m of liveMembers()) {
+      const lot = m._post && m._post.kind !== "follow" ? m._post.lot : null;
+      if (!lot || seen.has(lot) || !holdable(lot) || pg.turf.indexOf(lot) >= 0) continue;
+      seen.add(lot);
+      const b = bodiesOn(lot);
+      let c = ctl.get(lot);
+      const theirs = lot.building.gang && lot.building.gang !== pg.id ? gangRecById(lot.building.gang) : null;
+      if (b.posted < 1 || b.rivalN > 0) { if (c) c.t = 0; continue; }
+      if (!c) { c = { t: 0 }; ctl.set(lot, c); }
+      c.t += dt;
+      if (c.t < HOLD_T) continue;
+      ctl.delete(lot);
+      const fresh = takeLot(lot);
+      if (fresh) {
+        if (theirs) {
+          if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(theirs.id, 0.8);
+          if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(theirs.id, -12);
+        }
+        const who = liveMembers().find(function (m) { return m._post && m._post.lot === lot; });
+        if (who && dist(who.pos, CBZ.player.pos) < 30) say(who, theirs ? "They're gone. It's ours." : pick(["This corner's ours now.", "We got this block."]), 2.6);
+      }
+    }
+    // blocks you hold
+    for (const lot of pg.turf.slice()) {
+      if (lot.demolished) continue;
+      const b = bodiesOn(lot);
+      let c = ctl.get(lot);
+      if (b.mine > 0 || b.rivalN < 2) { if (c) c.t = 0; continue; }
+      if (!c) { c = { t: 0 }; ctl.set(lot, c); }
+      c.t += dt;
+      if (c.t < HOLD_T) continue;
+      ctl.delete(lot);
+      const to = gangRecById(b.rival);
+      if (to && !to.absorbed) loseLot(lot, to);
+    }
+    // the street money of a block goes to the man standing on it
+    pg._takeT = (pg._takeT || 0) + dt;
+    if (pg._takeT >= BLOCK_TICK) {
+      pg._takeT = 0;
+      for (const lot of pg.turf) {
+        if (lot.demolished) continue;
+        const on = [];
+        for (const m of liveMembers()) if (m._post && m._post.kind !== "follow" && m._post.lot === lot && calm(m) && atPost(m, 8)) on.push(m);
+        if (!on.length) continue;
+        const each = Math.round(BLOCK_TAKE / on.length);
+        for (const m of on) { m.cash = (m.cash || 0) + each; m._take = (m._take || 0) + each; }
+      }
+    }
+  }
+
+  // a man you never pay, or whose friends keep dying, walks
+  function tickLoyalty() {
+    // the street forgets a death in about a quarter of an hour
+    const pg = g.playerGang;
+    if (pg && pg.lost > 0) pg.lost = Math.max(0, pg.lost - 20 / 900);
+    if (!CBZ.cityMemberStats) return;
+    for (const m of liveMembers().slice()) {
+      const s = CBZ.cityMemberStats(m);
+      if (T - (m._pgPaidT || 0) > 600) { s.loyalty = Math.max(0, s.loyalty - 0.01); }
+      if (s.loyalty < 0.12 && calm(m) && CBZ.cityDismiss) {
+        CBZ.cityDismiss(m, { line: pick(["I'm done with this.", "Find somebody else.", "This ain't worth it. I'm out."]) });
+      }
+    }
+  }
+
+  /* ============================================================
+     A RIVAL BOSS, FACE TO FACE. Peace and land are his to sell, and he is
+     the only one who can: Truce (he names what peace costs, by how strong
+     he is and what his set thinks of you) and Buy the block (the district
+     under your feet, when his hold on it is weak enough to have a price;
+     city/turf.js cityPlayerBuyZone moves the lots).
+     ============================================================ */
+  function bossOf(p) {
+    if (!p || p.dead || !p.gang || !exists()) return null;
+    const rec = gangRecById(p.gang);
+    if (!rec || rec.isPlayer || rec.absorbed) return null;
+    return (p === rec.boss || p.isBoss || p.rank === "boss") ? rec : null;
+  }
+  function truceAsk(p) {
+    const rec = bossOf(p); if (!rec) return;
+    facePlayer(p, 6);
+    const st = (CBZ.cityGangStanding ? CBZ.cityGangStanding(rec.id) : 0) || 0;
+    if (st < -60) { say(p, "After what you did to my people? No.", 3); return; }
+    const price = Math.round((600 + strengthOf(rec) * 90 - st * 6) / 50) * 50;
+    p._pgAsk = { price: Math.max(300, price), until: T + 35, deal: "truce" };
+    say(p, money(p._pgAsk.price) + " and my people leave yours alone.", 3.2);
+  }
+  function blockAsk(p) {
+    const rec = bossOf(p); if (!rec) return;
+    facePlayer(p, 6);
+    const P = CBZ.player, z = CBZ.cityZoneAt ? CBZ.cityZoneAt(P.pos.x, P.pos.z) : null;
+    if (!z || z.owner !== rec.id) { say(p, "That's not mine to sell.", 2.6); return; }
+    if (z.strength > 0.7) { say(p, "This block? Not for sale.", 2.8); return; }
+    p._pgAsk = { price: 1500 + (z.heldStr || 0) * 400, until: T + 35, deal: "block" };
+    say(p, money(p._pgAsk.price) + ". Cash. Then it's yours.", 3.2);
+  }
+  function dealPay(p) {
+    const a = p && p._pgAsk, rec = bossOf(p);
+    if (!a || !rec || !askLive(p)) return;
+    facePlayer(p, 3);
+    if ((g.cash || 0) < a.price) { say(p, "Come back when you have it.", 2.4); return; }
+    if (a.deal === "truce") {
+      CBZ.city.spend(a.price);
+      rec.treasury = (rec.treasury || 0) + a.price;
+      if (CBZ.cityPlayerSetRelation) CBZ.cityPlayerSetRelation(rec.id, "ally");
+      if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(rec.id, 20);
+      rec.provoke = 0;
+      say(p, "Then we're good. For now.", 2.8);
+    } else if (a.deal === "block") {
+      // turf.js charges it and moves the lots (the same price it quoted us)
+      const ok = CBZ.cityPlayerBuyZone ? CBZ.cityPlayerBuyZone() : false;
+      say(p, ok ? "It's yours. Don't make me regret it." : "Not today.", 2.8);
+      if (ok && CBZ.cityTurfTagsDirty) CBZ.cityTurfTagsDirty();
+    }
+    p._pgAsk = null;
+  }
+
+  /* ============================================================
+     THE VERBS. All of the above, on the card of the person in front of you
+     (city/interactions.js). Nothing here opens anything.
+     ============================================================ */
+  function ccHas(act) {
+    const C = CBZ.compoundCrew;
+    if (!C || !C.menuEntries) return false;
+    let L = null; try { L = C.menuEntries(); } catch (e) { L = null; }
+    if (L) for (let i = 0; i < L.length; i++) if (L[i].act === act) return true;
+    return false;
+  }
+  (function wire() {
+    const I = CBZ.interactions;
+    if (!I || !I.register) return;
+    const mine = function (p) { return !!(p && !p.dead && isMember(p)); };
+    const following = function (p) { return postKind(p) === "follow" || !p._post; };
+    const others = function (p, f) { const L = earshot(30); for (let i = 0; i < L.length; i++) if (L[i] !== p && f(L[i])) return true; return false; };
+
+    // ---- somebody who is not yours ----
+    // (forceYes: the level gap is one of the things he weighs, in his own
+    // words, instead of the card going blank on a stranger)
+    I.register("ped:civ", { id: "ped-recruit", prio: 40, forceYes: true,
+      canShow: function (p) { return askable(p) && !askLive(p); },
+      label: "Recruit", onSelect: function (p) { ask(p); } });
+    I.register("ped:civ", { id: "pg-pay", prio: 75, forceYes: true,
+      canShow: function (p) { return askLive(p) && !p._pgAsk.deal && !isMember(p); },
+      label: function (p) { return "Pay " + money(p._pgAsk.price); }, onSelect: function (p) { pay(p); } });
+    // ---- a rival boss ----
+    I.register("ped:civ", { id: "pg-truce", prio: 41, forceYes: true,
+      canShow: function (p) { const rec = bossOf(p); return !!rec && !askLive(p) && !(CBZ.cityAreAllied && CBZ.cityAreAllied("player", rec.id)); },
+      label: "Truce", onSelect: truceAsk });
+    I.register("ped:civ", { id: "pg-block", prio: 39, forceYes: true,
+      canShow: function (p) { return !!bossOf(p) && !askLive(p) && !!CBZ.cityPlayerBuyZone; },
+      label: "Buy the block", onSelect: blockAsk });
+    I.register("ped:civ", { id: "pg-deal-pay", prio: 75, forceYes: true,
+      canShow: function (p) { return askLive(p) && !!p._pgAsk.deal; },
+      label: function (p) { return "Pay " + money(p._pgAsk.price); }, onSelect: dealPay });
+
+    // ---- one of yours ----
+    const opt = function (id, prio, label, canShow, onSelect, wheel) {
+      I.register("ped", { id: id, prio: prio, campaignSafe: true, anyone: true, wheel: !!wheel, label: label, canShow: canShow, onSelect: onSelect });
+    };
+    opt("pg-come", 72, "Come", function (p) { return mine(p) && !following(p); }, function (p) { order([p], "follow"); });
+    opt("pg-collect", 71, function (p) { return "Collect " + money(Math.floor(p._take || 0) - Math.round(Math.floor(p._take || 0) * (p.rank === "lt" ? 0.3 : CUT))); },
+      function (p) { return mine(p) && (p._take || 0) >= 4; }, collect);
+    opt("pg-hold", 69, "Hold here", function (p) { return mine(p) && following(p) && !p._cbzSeat; }, function (p) { order([p], "corner"); });
+    opt("pg-guard", 68, "Guard the door", function (p) { return mine(p) && postKind(p) !== "door" && !p._cbzSeat && !!doorSpot(p.pos, p); }, function (p) { order([p], "door"); });
+    opt("pg-sell", 67, "Sell here", function (p) { return mine(p) && postKind(p) !== "sell" && !p._cbzSeat; }, function (p) { order([p], "sell"); });
+    opt("pg-home", 66, "Go home", function (p) { return mine(p) && postKind(p) !== "home" && hasHome(); }, function (p) { order([p], "home"); });
+    // the same, to everybody in earshot (his wheel)
+    opt("pg-all-come", 34, "Everyone come", function (p) { return mine(p) && others(p, function (o) { return !following(o); }); },
+      function () { order(earshot(30), "follow"); }, true);
+    opt("pg-all-hold", 33, "Everyone hold", function (p) { return mine(p) && others(p, following); },
+      function () { order(earshot(30).filter(following), "corner"); }, true);
+    opt("pg-all-home", 32, "Everyone home", function (p) { return mine(p) && hasHome() && others(p, function (o) { return postKind(o) !== "home"; }); },
+      function () { order(earshot(30), "home"); }, true);
+    opt("pg-colours", 20, "Wear my colours", function (p) { const c = playerShirt(); return mine(p) && c != null && c !== ensure().color && vivid(c) && !flown(c); },
+      function (p) { recolour(playerShirt()); say(p, pick(["Looks better anyway.", "Alright. New colours."]), 2.2); }, true);
+    // the compound (city/compoundcrew.js): the people with you man it, the
+    // people on it come back, the driver takes the wheel
+    opt("pg-cc-post", 31, "Man the compound", function (p) { return mine(p) && following(p) && ccHas("cc-post"); },
+      function () { CBZ.compoundCrew.menuDo("cc-post"); }, true);
+    opt("pg-cc-back", 31, "Back with me", function (p) { return !!(p && !p.dead && p._compoundCrew) && ccHas("cc-back"); },
+      function () { CBZ.compoundCrew.menuDo("cc-back"); }, true);
+    opt("pg-cc-drive", 31, "Take the wheel", function (p) { return !!(p && !p.dead && (p._compoundCrew || mine(p))) && ccHas("cc-drive"); },
+      function () { CBZ.compoundCrew.menuDo("cc-drive"); }, true);
+  })();
+
+  /* GETTING MADE, asked of a member of the set you have been courting, once
+     they have seen enough: take the beating ("jump"), or do the hit ("work"). */
+  CBZ.cityGangInitiate = function (how) {
+    if (!prospecting || memb() || !initiationReady()) return false;
+    const rec = gangRecById(prospecting.gangId);
+    if (!rec || rec.absorbed) return false;
+    if (how === "work") return startWork(rec);
+    startJumpIn(rec);
+    return true;
+  };
+  CBZ.cityGangInitiateReady = function () { return !!(prospecting && !memb() && initiationReady() && !jumpedIn && !workContract); };
+  // walking away from a set you were courting
+  CBZ.cityProspectStop = function () { prospecting = null; };
 
   // ============================================================
   //  PROSPECT / INITIATION / MEMBERSHIP per-frame lifecycle. Runs even when you
@@ -1311,96 +1837,54 @@
       if (_autoPromoT <= 0) { _autoPromoT = 5; autoPromotePlayerCrew(); }
     }
 
-    // keep the status HUD live while prospecting / riding with a crew (the main
-    // orders tick only renders once you run your OWN gang)
-    if ((prospecting || memb()) && !(g.playerGang && g.playerGang.founded)) renderHud();
   });
   let _autoPromoT = 0;
 
-  // ---- keys ----
-  addEventListener("keydown", function (e) {
-    if (g.mode !== "city") return;
-    const k = e.key.toLowerCase();
-    if (menuEl && menuEl.style.display === "block") {
-      if (k === "o" || k === "escape") { e.preventDefault(); closeMenu(); return; }
-      if (k >= "1" && k <= "9") { e.preventDefault(); const a = menuActs[parseInt(k, 10) - 1]; if (a) doMenu(a); return; }
-      return;
-    }
-    if (g.state !== "playing" || CBZ.player.dead) return;
-    if (CBZ.cityMenuOpen) return;
-    if (k === "o") { e.preventDefault(); openMenu(); }
-  });
-
-  // ---- per-frame driver: keep orders honoured, prune dead, retreat finished ----
+  // ---- the gang's own tick: posts honoured, the dead dropped, money, turf ----
+  let slowT = 0, loyT = 0;
+  const known = new Set();
   CBZ.onUpdate(34.7, function (dt) {
-    if (g.mode !== "city") { if (hudEl) hudEl.style.display = "none"; return; }
+    if (g.mode !== "city") return;
+    T += dt || 0;
+    if (pendingClaim) { pendingClaim.t -= dt; if (pendingClaim.t <= 0 || !pendingClaim.rec || pendingClaim.rec.absorbed) pendingClaim = null; }
     const pg = g.playerGang;
-    if (pendingClaim) { pendingClaim.t -= dt; if (pendingClaim.t <= 0) pendingClaim = null; }
-    if (!pg || !pg.founded) { if (hudEl) hudEl.style.display = "none"; return; }
-
+    if (!pg || !pg.founded) return;
+    if (g.state !== "playing") return;
     const mem = liveMembers();
     g.cityCrew = mem.length;
     registerInGangList();
-
-    // LOYALTY: your gang NEVER turns on you. The turf-guard brain can read an
-    // armed+wanted boss standing on his own block as an "intruder" — scrub any
-    // rage aimed at the player (or another member) every frame.
+    // a man who died is counted (gangs.js has usually taken the body off the
+    // shared roster before this file sees it, so the count is kept by face)
+    for (const m of known) { if (m.dead) { known.delete(m); pg.lost = (pg.lost || 0) + 1; } else if (!isMember(m)) known.delete(m); }
+    for (let i = 0; i < mem.length; i++) known.add(mem[i]);
     const PA = CBZ.city.playerActor;
-    for (const m of mem) {
+    for (let i = 0; i < mem.length; i++) {
+      const m = mem[i];
+      // your gang never turns its guns on you or on each other from the
+      // turf-guard brain reading an armed boss on his own block as an intruder
+      // (a mutiny is city/orders.js's, and it dismisses the man first)
       if (m.rage === PA || (m.rage && m.rage.isPlayer)) m.rage = null;
-      if (m.rage && CBZ.cityPlayerGangIsMember(m.rage)) m.rage = null;
-      m.npcWanted = 0;   // your soldiers don't rack up their own heat for riding with you
-    }
-
-    if (pg.order === "follow") {
-      // make sure followers stay on the companion brain (a fight may have flipped one)
-      for (const m of mem) if (!m.companion && m._pgNo !== "follow") { m.companion = true; m.rage = null; m.guard = null; }
-    } else if (pg.order === "hold" || pg.order === "disperse" || pg.order === "fortify") {
-      // re-assert the guard post for any member that drifted off it (unless mid-fight)
-      for (const m of mem) {
-        if (m._pgNo === pg.order) continue;
-        if (m.companion) m.companion = false;
-        if (!m.guard) { const gp = (pg.order === "hold" ? (pg.holdPoint || pg.center) : (m.homeGuard || pg.center)); if (gp) m.guard = { x: gp.x, z: gp.z }; }
+      if (m.rage && isMember(m.rage)) m.rage = null;
+      if (m._wornOutfit !== FIT) dress(m);
+      const p = m._post;
+      if (!p || p.kind === "follow") {
+        if (!m.companion && !m._order && !m._cbzJob && !m._cbzWait && !(m.ko > 0) && !m.restraint) { m.companion = true; m.guard = null; }
+        continue;
       }
-    } else if (pg.order === "raid") {
-      // RAID STASH resolution: the crew standing on the stash block with the
-      // defenders cleared cracks it (then holds the block — a wiped owner's
-      // zone can flip through turf.js's existing wipe resolution).
-      const lot = pg.raidLot;
-      if (!lot) { pg.order = "follow"; applyOrder(); }
-      else {
-        pg.raidClock = (pg.raidClock == null ? 40 : pg.raidClock) - dt;
-        let onLot = 0;
-        for (const m of mem) {
-          const dx = m.pos.x - lot.cx, dz = m.pos.z - lot.cz;
-          if (dx * dx + dz * dz < 11 * 11) onLot++;
-        }
-        let defenders = 0;
-        const foe = pg.raidGangId ? gangRecById(pg.raidGangId) : null;
-        if (foe && !foe.absorbed) {
-          for (const m of foe.members) {
-            if (!m || m.dead || m.ko > 0) continue;
-            const dx = m.pos.x - lot.cx, dz = m.pos.z - lot.cz;
-            if (dx * dx + dz * dz < 13 * 13) defenders++;
-          }
-        }
-        if (onLot >= 2 && defenders === 0) {
-          crewCrackStash(lot, foe);
-          pg.raidLot = null; pg.raidGangId = null;
-          pg.order = "hold"; pg.holdPoint = { x: lot.cx, z: lot.cz };
-          applyOrder(); showOrdersHud();
-        } else if (pg.raidClock <= 0) {
-          CBZ.city.note("The raid stalled, crew pulls back.", 2.2);
-          if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) CBZ.fullMap.clearWaypoint("city");
-          pg.raidLot = null; pg.raidGangId = null;
-          pg.order = "disperse"; applyOrder(); showOrdersHud();
-        }
+      if (m.companion && !m._order) m.companion = false;
+      if (!m.guard && !m._order) m.guard = { x: p.x, z: p.z };
+      // on his post and calm: he stands the way the post faces
+      if (p.face != null && m.group && calm(m) && atPost(m, 1.2) && !(m._faceT > 0)) {
+        let d = p.face - m.group.rotation.y;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        m.group.rotation.y += d * Math.min(1, dt * 4);
       }
     }
-
-    // HUD lifecycle
-    if (hudHideT > 0) { hudHideT -= dt; if (hudHideT <= 0) { /* keep a quiet line while you have a gang */ } }
-    renderHud();
+    tickSellers(dt);
+    slowT += dt;
+    if (slowT >= 1) { tickTurf(slowT); slowT = 0; }
+    loyT += dt;
+    if (loyT >= 20) { loyT = 0; tickLoyalty(); }
   });
 
   // ---- reset (called from cityCareersReset, which we own) ----
@@ -1409,7 +1893,6 @@
     g.cityMembership = null; g.playerGangId = null;
     g.cityWasMember = false;
     pendingClaim = null; prospecting = null; jumpedIn = null; workContract = null;
-    if (hudEl) hudEl.style.display = "none";
-    if (menuEl) menuEl.style.display = "none";
+    ctl.clear(); known.clear();
   };
 })();

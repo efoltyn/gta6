@@ -1745,7 +1745,7 @@
     ["PISSWASSER", "the beer you've earned", 0x5a3a12, 0xf0c060],
     ["eCOLA", "now 30% more cola", 0x7a0d14, 0xffe9e9],
     ["VOLT ELECTRONICS", "phones smarter than you", 0x062a2a, 0x39d0c0],
-    ["KEYSTONE REALTY", "own the block, press Z", 0x0d3a2c, 0x4fd0a0, { tag: "Z" }],
+    ["KEYSTONE REALTY", "the key is on the sign", 0x0d3a2c, 0x4fd0a0],
     ["GRAND CASINO", "the house misses you", 0x2a1a05, 0xc9a227],
     ["BIGNESS BURGER", "supersize your debt", 0x3a0f0f, 0xffcf3a],
     ["BENNY'S CHOP SHOP", "no plate? no problem", 0x2a2308, 0xd0a23c],

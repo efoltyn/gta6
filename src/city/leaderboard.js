@@ -1,9 +1,10 @@
 /* ============================================================
-   city/leaderboard.js - the city power board.
+   city/leaderboard.js - the city's money, on Tab.
 
-   Tab is not a spreadsheet of fake rivals anymore. It is the street read for
-   Gang Life: who owns turf, who leads each crew, who would inherit the throne,
-   and which living people are carrying real money or protection right now.
+   Which living people are carrying real money or protection right now.
+   (The table of every crew's boss, heir, turf count, head count and status,
+   yours included, is deleted: a gang is read off the street, by the colours
+   on the people holding a block and the tag on its wall. No roster screen.)
 ============================================================ */
 (function () {
   "use strict";
@@ -11,7 +12,6 @@
   if (!CBZ) return;
   const g = CBZ.game;
 
-  const RANK_TIER = { prospect: 0, lookout: 1, runner: 2, soldier: 3, enforcer: 4, lt: 5, lieutenant: 5, boss: 6 };
   const WHALE_ARCH = { tycoon: 1, billionaire: 1, socialite: 1, heiress: 1, boss: 1, mobster: 1, made: 1 };
 
   // Fallback only, used while a fresh city is still spawning and no real targets
@@ -42,7 +42,6 @@
       return c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;";
     });
   }
-  function hex6(n) { return "#" + ("000000" + ((n >>> 0).toString(16))).slice(-6); }
   function money(n) { return "$" + fmt(n || 0); }
 
   function itemValue(name) {
@@ -109,9 +108,7 @@
   }
 
   // ---- HALL OF FAME: permanently-dead notables (city/identity.js) ----------
-  // gangState()/heirOf() above already solve this for gangs (a dead boss shows
-  // a 'succession' row with a named heir instead of the gang just vanishing).
-  // This is the same idea for VIPs/tycoons/racers: a kill that used to make a
+  // A kill that used to make a
   // "Magnate"/"Tycoon"/"Racer #N" vanish from the list with no record now
   // leaves a DECEASED row carrying their name, title, and final stats — read
   // entirely from CBZ.cityIdentities (vips.js/millionaires.js stamp p._identityId
@@ -252,47 +249,6 @@
     return { rank: rows.indexOf(me) + 1, total: rows.length, score: me.score };
   };
 
-  function heirOf(gang) {
-    const live = (gang.members || []).filter(function (m) { return m && !m.dead && m !== gang.boss; });
-    if (!live.length) return null;
-    live.sort(function (a, b) {
-      const ta = RANK_TIER[a.rank] == null ? 2 : RANK_TIER[a.rank];
-      const tb = RANK_TIER[b.rank] == null ? 2 : RANK_TIER[b.rank];
-      if (tb !== ta) return tb - ta;
-      const sa = a.gstat || {}, sb = b.gstat || {};
-      if ((sb.bodies || 0) !== (sa.bodies || 0)) return (sb.bodies || 0) - (sa.bodies || 0);
-      if ((sb.loyalty || 0) !== (sa.loyalty || 0)) return (sb.loyalty || 0) - (sa.loyalty || 0);
-      return (sb.contrib || 0) - (sa.contrib || 0);
-    });
-    return live[0];
-  }
-  function gangState(gang) {
-    if (gang.bossDead || !gang.boss || gang.boss.dead) return "succession";
-    if (gang.warWith) return "war";
-    if ((gang.hostility || 0) > 1.2) return "hunting you";
-    return gang.archLabel || gang.type || "crew";
-  }
-  function gangStandings() {
-    const gangs = (CBZ.cityGangs || []).filter(function (x) { return x && !x.absorbed; });
-    if (!gangs.length) return null;
-    const ctrl = CBZ.cityZoneControl ? CBZ.cityZoneControl() : { byGang: {}, neutral: 0, total: 0 };
-    const rows = [];
-    for (const gn of gangs) {
-      const zones = (ctrl.byGang && ctrl.byGang[gn.id]) || 0;
-      const crew = CBZ.cityGangStrength ? CBZ.cityGangStrength(gn) : (gn.members ? gn.members.length : 0);
-      const heir = heirOf(gn);
-      rows.push({
-        id: gn.id, name: gn.isPlayer ? "Your Gang" : (gn.name || "Crew"),
-        color: gn.color != null ? gn.color : 0x8a93a3,
-        zones: zones, crew: crew, isPlayer: !!gn.isPlayer, treasury: gn.treasury || 0,
-        boss: gn.boss && !gn.boss.dead ? gn.boss : null, heir: heir, state: gangState(gn),
-        score: zones * 1000 + crew * 12 + (gn.treasury || 0) / 35,
-      });
-    }
-    rows.sort(function (a, b) { return b.score - a.score; });
-    return { rows: rows, total: ctrl.total || 0, neutral: ctrl.neutral || 0 };
-  }
-
   function boardEl() {
     if (board) return board;
     board = document.createElement("div");
@@ -300,34 +256,6 @@
     board.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:47;display:none;width:min(760px,94vw);max-height:88vh;overflow:hidden;background:rgba(12,14,20,.97);border:2px solid #2c3140;border-radius:12px;padding:14px 18px;box-sizing:border-box;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 14px 44px rgba(0,0,0,.6)";
     document.body.appendChild(board);
     return board;
-  }
-
-  function renderGangs(st) {
-    if (!st || !st.rows.length) return "";
-    const rows = st.rows.slice(0, 7);
-    const cols = "24px 1.1fr 1.15fr 1fr 52px 62px 80px";
-    let h = "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140;padding-bottom:2px;margin-bottom:2px'>" +
-      "<span>#</span><span>Crew</span><span>Boss</span><span>Next</span><span style='text-align:right'>Turf</span><span style='text-align:right'>Crew</span><span>Status</span></div>";
-    rows.forEach(function (r, i) {
-      const col = hex6(r.color), boss = r.boss ? (r.boss.name || "Boss") : "vacant";
-      const heir = r.heir ? (r.heir.name || rankName(r.heir.rank)) : "none";
-      const hl = r.isPlayer ? "background:rgba(126,217,87,.14);border-radius:5px;font-weight:700" : "";
-      h += "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;align-items:center;font-size:12px;padding:2px 4px'>" +
-        "<span style='" + hl + "'>" + (i === 0 ? "1" : i + 1) + "</span>" +
-        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:" + (r.isPlayer ? "#7ed957" : "#e3e9f2") + "'><span style='display:inline-block;width:9px;height:9px;border-radius:2px;background:" + col + ";margin-right:6px'></span>" + esc(r.name) + "</span>" +
-        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:" + (r.boss ? "#ffd166" : "#ff8a8a") + "'>" + esc(boss) + "</span>" +
-        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#9fe6c8'>" + esc(heir) + "</span>" +
-        "<span style='text-align:right;color:#ffd166;font-weight:700'>" + r.zones + "</span>" +
-        "<span style='text-align:right;color:#9fe6c8'>" + r.crew + "</span>" +
-        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#aeb6c2'>" + esc(r.state) + "</span>" +
-        "</div>";
-    });
-    if (st.total) {
-      h += "<div style='font-size:11px;color:#8a93a3;margin-top:3px;display:flex;justify-content:space-between'>" +
-        "<span>" + (st.total - st.neutral) + "/" + st.total + " districts held</span>" +
-        (st.neutral ? "<span style='color:#6b7480'>" + st.neutral + " neutral</span>" : "<span></span>") + "</div>";
-    }
-    return h;
   }
 
   function renderTargets(rows, me) {
@@ -347,8 +275,7 @@
       // DECEASED rows (Hall of Fame — permanently-dead VIPs/tycoons/racers,
       // see deceasedNotables()) read dim/greyed with a skull tag instead of the
       // usual bright name, same "this entry is gone but on record" language
-      // renderGangs uses for a vacant boss (#ff8a8a) — here it's a flat grey
-      // since unlike a gang there's no living successor IN this row to flag.
+      // a flat grey: the entry is gone but on record.
       const nameCol = r.dead ? "#8a93a3" : "#e8eef7";
       h += "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;align-items:center;font-size:12px;padding:2px 4px;" + (r.dead ? "opacity:.6" : "") + "'>" +
         "<span style='color:#8a93a3'>" + (i + 1) + "</span>" +
@@ -381,20 +308,12 @@
     const el = boardEl();
     const me = playerRow();
     const rows = targetRows();
-    const leader = CBZ.cityTakeoverLeader ? CBZ.cityTakeoverLeader() : null;
     const pop = CBZ.cityPopulation ? CBZ.cityPopulation() : null;
-    let winLine = "no crew controls the city";
-    if (leader) {
-      const lc = CBZ.cityGangById ? CBZ.cityGangById(leader.id) : null;
-      const lcol = lc ? hex6(lc.color) : "#ffd166";
-      winLine = "<b style='color:" + lcol + "'>" + esc(leader.id === "player" ? "YOU" : (leader.name || "?")) + "</b> leading " + leader.zones + "/" + leader.total;
-    }
     let html = "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;gap:12px'>" +
-      "<div><div style='font-size:19px;font-weight:700'>City Power</div><div style='font-size:11px;color:#8a93a3'>Bosses, heirs, money, protection.</div></div>" +
-      "<div style='font-size:12px;color:#aeb6c2;text-align:right'>" + winLine +
-      (pop && pop.total ? "<br><span style='color:#8a93a3'>" + (pop.alive | 0).toLocaleString() + "/" + (pop.total | 0).toLocaleString() + " alive</span>" : "") +
+      "<div><div style='font-size:19px;font-weight:700'>City Money</div><div style='font-size:11px;color:#8a93a3'>Who is carrying it, and who stands in front of them.</div></div>" +
+      "<div style='font-size:12px;color:#aeb6c2;text-align:right'>" +
+      (pop && pop.total ? "<span style='color:#8a93a3'>" + (pop.alive | 0).toLocaleString() + "/" + (pop.total | 0).toLocaleString() + " alive</span>" : "") +
       "</div></div>";
-    html += renderGangs(gangStandings());
     html += renderTargets(rows, me);
     const tier = CBZ.cityEcon && CBZ.cityEcon.wealthTier ? CBZ.cityEcon.wealthTier(me.score) : null;
     html += "<div style='font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px;display:flex;justify-content:space-between;gap:10px'>" +

@@ -408,6 +408,10 @@
      are near enough to see it, dropped when you are not. */
   let _homeVis = null;      // {id, grp, n}
   function homeAnchor(h) {
+    // THE SAFE'S PLACE IS THE HOUSE'S OWN ANSWER (city/realestate.js: against
+    // the hall's side wall, off the walkway, with the gun rack and the
+    // wardrobe). The line below it is the fallback for a lot with no door.
+    if (CBZ.cityHomeSpot && h.lot) { try { const s = CBZ.cityHomeSpot(h.lot, "safe"); if (s) return s; } catch (e) {} }
     // 2.6 m inside the threshold, on the line from the door to the lot centre
     // — no door-normal convention to agree with, so it is right on any lot.
     let dx = (h.cx - h.x), dz = (h.cz - h.z);

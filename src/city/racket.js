@@ -253,25 +253,6 @@
     return out;
   };
 
-  // the [O] ledger line: your side's whole book at a glance (playergang's
-  // orders HUD renders it — a boss reads his books, that's not a tutorial).
-  CBZ.cityRacketBook = function () {
-    if (!on()) return null;
-    const gid = playerSideId();
-    if (!gid) return null;
-    let stores = 0, owed = 0;
-    for (const [lot, r] of state) {
-      if (lot.demolished || !isPlayerSide(r.gang)) continue;
-      stores++; if (r.by === "player") owed += r.owed;
-    }
-    if (!stores && !crewJob && hotCash <= 0) return null;
-    const j = crewJob;
-    const jobLabel = !j ? "" :
-      j.kind === "avenge" ? ("settle " + storeName(j.lot)) :
-      j.kind === "sign" ? ("sign " + storeName(j.lot)) : "walk the rounds";
-    return { stores: stores, owed: owed | 0, hot: hotCash | 0, job: jobLabel };
-  };
-
   // turf.js's zone recompute calls this (feature-detected there): protected
   // stores inside the zone count toward district control like turf lots do —
   // extorting a block's stores IS taking the block, which is the owner's

@@ -830,6 +830,16 @@
     return out;
   }
 
+  // A NIGHT IN A BED YOU OWN is the full reset, and it is the house's to give
+  // (city/realestate.js cityHomeSlept: healed, fed, wounds dressed, the heat
+  // off you, and that house is where you wake up from now on). It used to
+  // exist only as a row on a menu at the front door.
+  function homeNight(bed) {
+    if (!CBZ.cityHomeSlept || !bedOwned(bed)) return;
+    const lot = bed.lot || lotOf(bed);
+    if (lot) { try { CBZ.cityHomeSlept(lot); } catch (e) {} }
+  }
+
   // the time-skip fires ONCE, and only when the body has actually finished
   // lying down — you sleep after you're in the bed, not on the way to it.
   function bedDown(actor, bed) {
@@ -839,6 +849,7 @@
     if (g && g.tired != null) g.tired = 0;                 // rested
     let msg = skipped ? "Slept until morning." : "Resting…";
     try { msg += restPayoff(bed); } catch (e) {}
+    homeNight(bed);
     if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 2.6);
   }
   /* THE NIGHT, AS ITS OWN DECISION: the player already lying in `bed`
@@ -853,6 +864,7 @@
     if (g && g.tired != null) g.tired = 0;
     let line = "";
     try { line = restPayoff(bed); } catch (e) {}
+    homeNight(bed);
     return { skipped: skipped, owned: bedOwned(bed), line: line };
   };
   CBZ.propSleep = function (actor, bed, opts) {

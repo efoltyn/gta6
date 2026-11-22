@@ -134,10 +134,7 @@
   // are you and this ped patched into the SAME NPC crew?
   function crewmate(p) { const m = myMemb(); return !!(m && p.gang && p.gang === m.gangId); }
   function relOf(p) { return CBZ.cityRel ? CBZ.cityRel(p) : null; }
-  function hatesYou(p) { const r = relOf(p); return !!(r && (r.grudge > 45 || (CBZ.cityBond && CBZ.cityBond(p) < -0.3))); }
   function fearsYou(p) { const r = relOf(p); return !!(r && r.fear > 55 && !(r.respect > r.fear)); }
-  function tightWithYou(p) { const r = relOf(p); return !!(r && (r.loyalty > 55 || r.respect > 50 || (CBZ.cityBond && CBZ.cityBond(p) > 0.4))); }
-  function canAfford100() { return (g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100)); }
 
   // Can this ped's crew be PROSPECTED/JOINED by the player? You can court a crew
   // when you don't run your own gang, aren't already patched in, and the ped's
@@ -527,37 +524,26 @@
     CBZ.cityCrime && CBZ.cityCrime(160, { x: ped.pos.x, z: ped.pos.z, type: "armed-robbery" });
   }
 
-  // Advance the prospect/initiation/put-in-work relationship FROM THE STREET.
+  // Where you stand with a set, FROM THE STREET, in the mouth of the member
+  // you are talking to (CBZ.citySay): there is no menu to be pointed at.
   //   • Not yet courting this crew → start prospecting it (cityProspectGang).
   //   • Courting + this member is befriendable → do them a FAVOR, which raises
-  //     their affinity AND your gang standing (cityDoFavor) — the EARN-TRUST task.
-  //   • Standing maxed → point at the [O] menu for the initiation step.
-  //   • Already patched in → putting in work is a body kicked up.
+  //     their affinity AND your gang standing (cityDoFavor).
+  //   • They have seen enough → Get jumped in / Do a hit are their own verbs.
+  //   • Already patched in → he gives you the set's next job (cityCrewWork).
+  function tellMe(p, line) { if (CBZ.citySay && p && !p.dead) { try { CBZ.citySay(p, line, "#ffffff", 2.8); } catch (e) {} } }
   function prospectOrWork(p) {
     const rec = gangRec(p && p.gang);
-    if (myMemb()) {
-      // already patched in: putting in work is a body kicked up — call out the path.
-      CBZ.city.note("Drop a rival, kicked-up work moves you up the ladder. · O", 3);
-      return;
-    }
-    // not courting anyone yet (or not this crew) → start prospecting THIS crew.
+    // patched in: he tells you what the set needs done (city/careers.js)
+    if (myMemb()) { if (CBZ.cityCrewWork) CBZ.cityCrewWork(p); else tellMe(p, "Put one of the other side down. That's how you move up."); return; }
     const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
     if (!courting) {
       if (rec && CBZ.cityProspectGang) CBZ.cityProspectGang(rec);
       return;
     }
-    // standing maxed → the initiation step lives on the [O] menu.
-    if (myProspectStanding() >= 1) {
-      CBZ.city.note("They're ready to make you, get jumped in or put in work. · O", 2.6);
-      return;
-    }
-    // courting + this member is befriendable → do them a FAVOR to earn standing.
-    if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) {
-      CBZ.cityDoFavor(p);
-      return;
-    }
-    // can't befriend this one (grudge/dead) — nudge toward the task path.
-    CBZ.city.note("Hang on their turf and do members favors to earn trust. · O", 2.6);
+    if (myProspectStanding() >= 1) { tellMe(p, "You're ready. Take the beating or do a job for us."); return; }
+    if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) { CBZ.cityDoFavor(p); return; }
+    tellMe(p, "Be around. Do right by us. We'll see.");
   }
 
   // ---- police helpers -----------------------------------------------------
@@ -1105,8 +1091,8 @@
         const W = CS.warehouse();
         return { rack: true, x: W ? W.origin.x : px, z: W ? W.origin.z : pz };
       }
-      const h = CS.homeAt(px, pz);
-      if (h) return { home: h, x: h.x, z: h.z };
+      // (the floor safe in a house you own is city/realestate.js's: cash in
+      // and out by hand, and these same bags, on one card)
       return null;
     },
     options: [
@@ -1319,7 +1305,7 @@
   // under a card titled Marcus said it twice). Names live only in describe()
   // titles and in dialogue/notes, which are exempt.
   I.register("ped:civ", {
-    id: "ped-promote", slot: "i", prio: 60, canShow: (p) => inMyGang(p) && p.rank !== "lt" && !!CBZ.cityPlayerGangPromote,
+    id: "ped-promote", wheel: true, prio: 60, canShow: (p) => inMyGang(p) && p.rank !== "lt" && !!CBZ.cityPlayerGangPromote,
     label: "Promote",
     onSelect: (p) => CBZ.cityPlayerGangPromote(p),
   });
@@ -1339,47 +1325,34 @@
     label: "Help",
     onSelect: (p) => CBZ.cityDoFavor(p),
   });
-  // a rival whose BOSS you dropped: claim the whole crew (their colors are
-  // already in the card title — "(Vipers)" — so the label stays generic)
+  // (A crew whose boss you dropped is asked who it works for now with the
+  // same word as anybody else: Recruit, city/playergang.js THE ASK.)
+  // PROSPECT / JOIN this ped's crew. The label walks the courtship:
+  // Prospect → Help → (they have seen enough) Get jumped in / Do a hit.
+  const initReady = () => !!(CBZ.cityGangInitiateReady && CBZ.cityGangInitiateReady());
+  const courtedBy = (p) => !!(p && p.gang && CBZ.cityProspectGangId && CBZ.cityProspectGangId() === p.gang);
   I.register("ped:civ", {
-    id: "ped-claim-crew", slot: "k", prio: 44,
-    canShow: (p) => !!(p.gang && CBZ.cityGangById && CBZ.cityGangById(p.gang) && CBZ.cityGangById(p.gang).bossDead && CBZ.cityPlayerGangBossKilled),
-    label: "Claim",
-    onSelect: (p) => { const rec = CBZ.cityGangById(p.gang); CBZ.cityPlayerGangBossKilled(rec); CBZ.city.note("Their boss is gone, the crew's yours to claim. · O", 2.2); },
-  });
-  // PROSPECT / JOIN this ped's crew — the PRIMARY progression path, ranked
-  // above the generic recruit verb. The label walks the courtship:
-  // Prospect → Do-a-favor → Get-initiated.
-  I.register("ped:civ", {
-    id: "ped-prospect", slot: "k", prio: 43, canShow: (p) => !!joinableGangOf(p),
+    id: "ped-prospect", slot: "k", prio: 43, canShow: (p) => !!joinableGangOf(p) && !(initReady() && courtedBy(p)),
     label: function (p) {
       const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
-      if (myProspectStanding() >= 1) return "Join";
       if (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p)) return "Help";
       return "Prospect";
     },
     onSelect: function (p) {
       const rec = joinableGangOf(p);
       const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
-      if (myProspectStanding() >= 1 || (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p))) { prospectOrWork(p); return; }
+      if (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p)) { prospectOrWork(p); return; }
       if (rec && CBZ.cityProspectGang) CBZ.cityProspectGang(rec);
     },
   });
+  // GETTING MADE, asked of one of them to his face: the beating, or the job
+  I.register("ped:civ", { id: "ped-put-in-jump", prio: 46, forceYes: true, canShow: (p) => initReady() && courtedBy(p),
+    label: "Get jumped in", onSelect: () => CBZ.cityGangInitiate("jump") });
+  I.register("ped:civ", { id: "ped-put-in-hit", prio: 45, forceYes: true, canShow: (p) => initReady() && courtedBy(p),
+    label: "Do a hit", onSelect: () => CBZ.cityGangInitiate("work") });
   // a feared ped hands over cash without a fight
   I.register("ped:civ", { id: "ped-shakedown", slot: "k", prio: 42, bad: true, canShow: (p) => fearsYou(p), label: "Shake down", onSelect: (p) => demandRansom(p) });
-  // RECRUIT: one verb (it was four: Patch in, Recruit, Hire, Hire). Shown on
-  // somebody tight with you, or on a free stranger once you run a gang and can
-  // pay him; he joins your crew (CBZ.cityRecruit), and with a gang of your own
-  // he is enlisted as a soldier. Not for a sitting President: his office is
-  // staffed from the Chief of Staff's two names (city/president_staff.js).
-  I.register("ped:civ", {
-    id: "ped-recruit", slot: "k", prio: 40,
-    canShow: (p) => !!CBZ.cityRecruit && !p.recruited && !p.gang && !hatesYou(p) &&
-      !(CBZ.presidency && CBZ.presidency.seat && CBZ.presidency.seat()) &&
-      (tightWithYou(p) || (!!(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) && canAfford100())),
-    label: "Recruit",
-    onSelect: (p) => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) CBZ.cityPlayerGangEnlist(p, "soldier"); },
-  });
+  // (Recruit is city/playergang.js's: the question, and what he says to it.)
   I.register("ped:civ", { id: "ped-sell", slot: "k", prio: 38, bad: true, role: "dealer", needsItem: drugIn, label: "Sell", onSelect: (p) => CBZ.cityDealTo(p) });
 
   // ---- LIVING PED, slot L ----
@@ -1415,7 +1388,7 @@
     pawn:        { verb: "Pawn",    sub: "cash for your haul",               rich: true },
     bank:        { verb: "Bank",    sub: "deposit, withdraw, wire",          rich: true },
     clothing:    { verb: "Browse",  sub: "fits, change in back",             rich: true },
-    realtor:     { verb: "Browse",  sub: "buy or rent a home",               rich: false },
+    realtor:     { verb: "Browse",  sub: "buy or rent a home",               rich: true },
 
     gas:         { verb: "Pay",     sub: "snacks, fill the tank",            rich: false },
     drugs:       { verb: "Buy",     sub: "product",                          rich: false },
@@ -1449,6 +1422,7 @@
       case "pawn":     return !!(CBZ.cityPawnLive     && CBZ.cityPawnLive(lot));
       case "bank":     return !!(CBZ.cityBankLive     && CBZ.cityBankLive(lot));
       case "clothing": return !!(CBZ.cityClothingLive && CBZ.cityClothingLive(lot));
+      case "realtor":  return !!(CBZ.cityRealtyLive  && CBZ.cityRealtyLive(lot));
       default:         return false;
     }
   }
@@ -1585,8 +1559,8 @@
      a founded gang, and the ped card's one companion verb was "Follow me".
      A hostage in your back seat could only be let out by killing him.
 
-     These are the per-BODY half of the surface (the [O] menu is the group
-     half): five verbs, all of them additive, all of them gated on the person
+     These are the per-BODY orders (the same to everybody in earshot is on a
+     gang member's wheel, city/playergang.js): five verbs, all of them additive, all of them gated on the person
      in front of you actually being one of yours, and every one of them a
      single call into `CBZ.followerOrder`. Feature-detected end to end — with
      boarding.js absent not one of these rows can appear.

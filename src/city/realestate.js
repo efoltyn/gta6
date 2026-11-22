@@ -1,458 +1,817 @@
 /* ============================================================
-   city/realestate.js — the property ladder. From a rented flophouse
-   room up to a Skyline Penthouse with a private garage + elevator.
+   city/realestate.js — A HOUSE YOU BUY, AS A PLACE.
 
-   Buy/rent at Keystone Realty (a shop service) or at a residence's door.
-   An owned home is a SAFEHOUSE: heal & sleep, set it as your respawn
-   point, a money-safe (your bank), a GARAGE that stores cars, and (the
-   penthouse) an ELEVATOR up to the top floor. Rent (rented) and property
-   tax (owned) are recurring money sinks.
+   OWNER: "Improve the logic to buy a house." and "No dashboards are needed.
+   Everything can be existing in the world."
 
-   Exposes: cityHomeMenu (realtor), cityHomeNear, cityOpenHome,
-   cityBuyHome, cityRentRoom, cityRealEstateReset.
+   The deeds, the prices and the mortgages are city/zillow.js's ledger. The
+   FOR SALE sign in the yard is city/plots.js's. This file is everything a
+   house IS once those two exist, and there is no menu in it:
+
+   THE DOOR. A house on the market is locked. The sign in its yard has a
+   lockbox: take the key (E at the sign) and the front door, and every room
+   door behind it, opens for you while you look round. Buy it and the key
+   is yours for good (a real key in your pockets, city/keys.js); your crew
+   and your tenants walk in and out, nobody else does.
+
+   THE AGENT. Keystone Realty's keeper is a person with a book of houses.
+   Ask him and he tells you one, out loud: what it is, where it is, what it
+   costs. Dearer / Cheaper turns the page; See it puts the key in your hand
+   and the house on your map; Buy closes it there and then; Finance and Rent
+   are on his wheel. He is the one who sells the penthouse its hangar.
+
+   THE HOUSE, WHEN IT IS YOURS. In the hall, off the walkway:
+     the safe      cash goes in and comes out by hand (and the duffels
+                   city/cashstore.js always kept there)
+     the gun rack  the gun in your hands goes on a peg, where you can see
+                   it; take one down and it is in your hands
+     the wardrobe  change into the next thing you own
+   The bed is the house's own bed (city/propuse.js): sleeping in a bed you
+   own is the full night (healed, fed, rested, wounds dressed, the heat off
+   you) and makes that house the one you wake up in.
+   The car is in the drive. Leave a car you own on your driveway and it is
+   there when you come back, today or after a reload; drive it away and the
+   drive is empty. Nothing is "stored" and nothing is "retrieved".
+
+   (This file used to be two screens: the realtor's numbered list of five
+   homes, and a "safehouse menu" on your own front door with Sleep, Deposit,
+   Store car and Pull car as rows. Both are deleted, with the rented room
+   that had no room.)
+
+   Exposes: CBZ.cityHome { isHouse, hasKey, view, buy, sold, spot, stash,
+   cars, market }, CBZ.cityHomeSpot, CBZ.cityHomeKey, CBZ.cityHomeSlept,
+   CBZ.cityRealtyLive, CBZ.cityHomeMenu (the shop counter's "Homes" row: the
+   agent starts talking), CBZ.cityHomeSerialize / cityHomeRestore /
+   cityRealEstateReset (city/worldstate.js's save seam, unchanged).
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
+  const THREE = window.THREE;
   const g = CBZ.game;
   const C = () => CBZ.CITY || {};
 
-  let panel = null, mode = "buy", payT = 0, actions = [], rpage = 0;
-  // realtor home rows per page. Each home row can now carry up to THREE actions
-  // (Buy · Finance · Rent), so 3 rows keeps the numeric-key slots ≤ 9 and the
-  // menu on one screen. (Was 4 when rows had at most Buy+Rent.)
-  const RPAGE = 3;
-
-  function el() {
-    if (panel) return panel;
-    panel = document.createElement("div");
-    panel.id = "cityRealty";
-    panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;min-width:360px;max-width:480px;background:rgba(16,20,26,.96);border:2px solid #2f3a44;border-radius:16px;padding:14px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.5);pointer-events:auto";
-    // ONE DISPATCH, TWO INPUTS: this menu listened only for a keydown, so on
-    // a tablet you could look at a house and never buy it (owner, 2026-08-18).
-    panel.addEventListener("click", function (e) {
-      const row = e.target && e.target.closest ? e.target.closest("[data-k]") : null;
-      if (!row) return;
-      e.preventDefault(); e.stopPropagation();
-      pressKey(row.getAttribute("data-k"));
-    });
-    document.body.appendChild(panel);
-    return panel;
+  function money(n) { n = Math.round(+n); if (!isFinite(n)) n = 0; return (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("en-US"); }
+  function Z() { return CBZ.cityZillow || null; }
+  function arena() { return CBZ.city && CBZ.city.arena; }
+  function inCity() { return g && g.mode === "city"; }
+  function sfx(n) { if (CBZ.sfx) { try { CBZ.sfx(n); } catch (e) {} } }
+  function say(p, line, secs) {
+    if (!p || p.dead || !line || !CBZ.citySay) return false;
+    try { return !!CBZ.citySay(p, line, "#ffffff", secs || 3.2); } catch (e) { return false; }
   }
-  function money(n) { n = Math.round(+n); if (!isFinite(n)) n = 0; return (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(); }
+  function pick(a, salt) { return a[Math.abs((salt | 0)) % a.length]; }
+  let T = 0;                                    // this file's clock, seconds
 
-  // district + controlling gang chip for a home lot (the gang-takeover tie):
-  // green = your turf (cheaper at Zillow + earns more), red = a rival's.
-  function zoneChip(lot) {
-    const z = CBZ.cityZoneAt ? CBZ.cityZoneAt(lot.cx || 0, lot.cz || 0) : null;
-    const nm = z ? z.name : "the city";
-    const owner = z ? z.owner : null;
-    const mine = (g.playerGang && g.playerGang.founded) ? g.playerGang.id : null;
-    if (owner && (owner === mine || owner === "player")) return " <span style='color:#7ed957'>· " + nm + " (yours)</span>";
-    if (owner) {
-      const og = CBZ.cityGangById ? CBZ.cityGangById(owner) : null;
-      return " <span style='color:#ff8a7a'>· " + nm + " (" + (og && og.name ? og.name : "rival") + ")</span>";
-    }
-    return " <span style='color:#8a93a3'>· " + nm + "</span>";
+  /* ---- THE LOT ---------------------------------------------------------------
+     Everything is read off the lot record: its key, whether it is a house,
+     which way it faces. No coordinates. */
+  function lotKey(lot) { return Math.round(lot.cx) + "," + Math.round(lot.cz); }
+  function homeOf(lot) { return lot && lot.building && lot.building.home; }
+  // one household behind one front door (a town house, a street house): that
+  // door is the home's door. A tower's street door is a lobby everybody uses.
+  function isHouse(lot) {
+    const b = lot && lot.building;
+    if (!b || !b.home || lot.demolished) return false;
+    return lot.kind === "home" || b.name === "House" || (b.storeys | 0) <= 2;
   }
+  function owns(lot) { return !!(CBZ.cityOwnsLot && CBZ.cityOwnsLot(lot)); }
+  function renting(lot) { const z = Z(); return !!(z && z.isRentingLot && z.isRentingLot(lot)); }
+  function nameOf(lot) { const z = Z(); return (z && z.nameOfLot && z.nameOfLot(lot)) || (lot.building && lot.building.name) || "the house"; }
+  function addressOf(lot) { const z = Z(), rec = z && z.listingForLot ? z.listingForLot(lot) : null; return (rec && rec.address) || ""; }
+  function rectOf(lot) {
+    const b = lot.building || {};
+    const cx = b.ox != null ? b.ox : (b.x != null ? b.x : lot.cx), cz = b.oz != null ? b.oz : (b.z != null ? b.z : lot.cz);
+    return { cx: cx, cz: cz, hw: (b.w || lot.w || 16) / 2, hd: (b.d || lot.d || 16) / 2 };
+  }
+  // the front wall at the door: out of the house (ox, oz), along the wall
+  // (tx, tz). city/playergang.js publishes the same read; this is it again
+  // only because this file loads first.
+  function front(lot) {
+    if (CBZ.cityLotFront) return CBZ.cityLotFront(lot);
+    const b = lot && lot.building, d = b && b.door; if (!d) return null;
+    const r = rectOf(lot), dx = d.x - r.cx, dz = d.z - r.cz;
+    let ox = 0, oz = 0, fx, fz;
+    if (Math.abs(dx) / r.hw > Math.abs(dz) / r.hd) { ox = dx < 0 ? -1 : 1; fx = r.cx + ox * r.hw; fz = d.z; }
+    else { oz = dz < 0 ? -1 : 1; fx = d.x; fz = r.cz + oz * r.hd; }
+    return { x: fx, z: fz, ox: ox, oz: oz, tx: -oz, tz: ox, lot: lot };
+  }
+  function floorY(x, z) { if (CBZ.floorAt) { try { const y = +CBZ.floorAt(x, z); return isFinite(y) ? y : 0; } catch (e) {} } return 0; }
 
-  // ---- realtor: rent the room or buy any unowned residence ----
-  // ONE-SCREEN: compact rows, paginated (the homeLots list can be long). Each
-  // home shows its DISTRICT + controlling gang so you can buy in turf you hold
-  // (cheaper at Zillow, earns more). Buy + Rent share a row to save height.
-  CBZ.cityHomeMenu = function () {
-    if (CBZ.cityCloseShop) CBZ.cityCloseShop();
-    mode = "buy"; actions = [];
-    const homes = (CBZ.city.arena.homeLots || []).filter((l) => l.building.home && l.building.home.listed
-      && !l.building.home.owned
-      && !(CBZ.cityZillow && CBZ.cityZillow.isRentingLot && CBZ.cityZillow.isRentingLot(l)));
-    homes.sort((a, b) => a.building.home.tier - b.building.home.tier);
-
-    // build the row "entries" first so we can paginate, THEN flatten the visible
-    // page into the `actions[]` array the [1-9] keys index into.
-    const entries = [];
-    if (!g.cityRentTier && !g.cityHome) {
-      const room = (C().homes || [])[0];
-      if (room) entries.push({ html: "Rent " + room.name + " — " + money(room.rent) + "/period", fns: [{ key: "rent room", fn: () => rentRoom() }] });
+  /* ============================================================
+     1. THE KEY AND THE DOOR
+     ============================================================ */
+  function keyId(lot) { return "home:" + lotKey(lot); }
+  function viewing(lot) { const v = g.cityViewing; return !!(v && v.k === lotKey(lot) && T < v.until); }
+  function hasKey(lot) { return !!lot && (owns(lot) || renting(lot) || viewing(lot)); }
+  CBZ.cityHomeKey = hasKey;
+  // the tag on the key: the house's name, or its street when the name is just
+  // "House" (never the street NUMBER: the ledger hashes one until the house
+  // is built and reads the real plate after, and a key must not change name)
+  function keyLabel(lot) {
+    const n = nameOf(lot), street = addressOf(lot).replace(/^\d+\s+/, "");
+    const plain = !n || /^(house|apartments)$/i.test(n);
+    return "Key to " + (plain ? "the house" + (street ? " on " + street : "") : n + (street ? ", " + street : ""));
+  }
+  function grantKey(lot) {
+    const K = CBZ.cityKeys;
+    if (!K || !K.grant) return;
+    try { if (!K.has(keyId(lot))) K.grant(keyId(lot), keyLabel(lot)); } catch (e) {}
+  }
+  function dropKey(lot) { const K = CBZ.cityKeys; if (K && K.take) { try { K.take(keyId(lot)); } catch (e) {} } }
+  // the sign's lockbox: the house is open to you for a while
+  const VIEW_SECS = 480;
+  function view(lot, by) {
+    if (!lot || hasKey(lot)) return false;
+    g.cityViewing = { k: lotKey(lot), until: T + VIEW_SECS };
+    sfx("pickup");
+    if (by) say(by, pick(["Here's the key. Have a look round, then come and tell me.", "Take the key. Sign's out front, you can't miss it."], lot.cx + lot.cz));
+    if (CBZ.interactions && CBZ.interactions.refresh) { try { CBZ.interactions.refresh(); } catch (e) {} }
+    return true;
+  }
+  // a house on the market keeps its door shut to you until you hold a key
+  function lockTick() {
+    const A = arena(), P = CBZ.player; if (!A || !P || !P.pos) return;
+    for (const lot of A.homeLots || []) {
+      const b = lot.building; if (!b || !b.doors || !isHouse(lot)) continue;
+      const dx = lot.cx - P.pos.x, dz = lot.cz - P.pos.z;
+      if (dx * dx + dz * dz > 120 * 120) continue;
+      for (const dr of b.doors) if (dr && !dr._homeLot) { dr._homeLot = lot; dr._playerLock = doorLocked; }
     }
-    for (const lot of homes) {
-      const h = lot.building.home;
-      const tags = (h.sqft ? " ·" + h.sqft.toLocaleString() + "sqft" : "") + (h.garage ? " · " + h.garage + "-car garage" : "") + (h.elevator ? " · elevator" : "");
-      // show the LIVE Zillow price (market + your turf-control discount) so the
-      // realtor and Zillow never disagree — buyHome charges this same number.
-      const zp = (CBZ.cityZillow && CBZ.cityZillow.buyPriceForLot) ? CBZ.cityZillow.buyPriceForLot(lot) : null;
-      const ask = (zp != null) ? zp : h.price;
-      const fns = [{ key: "Buy " + money(ask), fn: () => buyHome(lot) }];
-      // FINANCE option (contract [E]): only the cash-purchase used to be offered.
-      // Pull the live financing quote from Zillow (down payment, and — when the
-      // bank loan engine is wired — the real rate/payment + an approval flag). The
-      // realtor and Zillow agree because both go through the same quote/transact
-      // path. If the bank declines (quote.approved===false) we don't dangle a
-      // dead button — we show why instead. Cash buy is always kept above.
-      const fq = (CBZ.cityZillow && CBZ.cityZillow.financeQuoteForLot) ? CBZ.cityZillow.financeQuoteForLot(lot) : null;
-      let finNote = "";
-      if (fq) {
-        if (fq.approved !== false) {
-          const tail = (fq.viaBank && fq.payment > 0) ? " (" + money(Math.round(fq.payment)) + "/cycle)" : "";
-          fns.push({ key: "Finance " + money(fq.down) + " down" + tail, fn: () => financeHome(lot) });
-        } else {
-          finNote = " <span style='color:#ff9e90;font-size:11px'>· no financing (" + (fq.reason || "declined") + ")</span>";
-        }
+    const v = g.cityViewing;
+    if (v && T >= v.until) g.cityViewing = null;
+    for (const h of ownedHomes()) if (h.lot && isHouse(h.lot)) grantKey(h.lot);
+  }
+  function doorLocked(dr) { const lot = dr && dr._homeLot; return !!lot && !lot.demolished && !dr._kicked && !hasKey(lot); }
+  // a locked door that is not yours can still be opened the other way: it is
+  // loud, it is a burglary, and the door stays broken
+  function kickIn(dr) {
+    if (!dr || !doorLocked(dr)) return;
+    dr._kicked = true; dr.open = true; dr.hold = 2.5;
+    sfx("door_open");
+    if (CBZ.cityAlarm) { try { CBZ.cityAlarm(dr.wx, dr.wz, 22, 0.7, CBZ.city && CBZ.city.playerActor); } catch (e) {} }
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(40, { x: dr.wx, z: dr.wz, type: "burglary" }); } catch (e) {} }
+  }
+  function lockedDoorAt(px, pz, r) {
+    const A = arena(); if (!A) return null;
+    let best = null, bd = r * r;
+    for (const lot of A.homeLots || []) {
+      const b = lot.building; if (!b || !b.doors) continue;
+      const dx0 = lot.cx - px, dz0 = lot.cz - pz;
+      if (dx0 * dx0 + dz0 * dz0 > 40 * 40) continue;
+      for (const dr of b.doors) {
+        if (!dr || !dr._playerLock || !doorLocked(dr)) continue;
+        const d = (dr.wx - px) * (dr.wx - px) + (dr.wz - pz) * (dr.wz - pz);
+        if (d < bd) { bd = d; best = dr; }
       }
-      const rentPer = zillowRentEstimate(lot);
-      if (rentPer != null) fns.push({ key: "Rent ~" + money(rentPer), fn: () => rentResidence(lot) });
-      entries.push({ html: "" + h.name + tags + zoneChip(lot) + finNote, fns });
     }
-
-    const pages = Math.max(1, Math.ceil(entries.length / RPAGE));
-    rpage = Math.max(0, Math.min(pages - 1, rpage));
-    const slice = entries.slice(rpage * RPAGE, rpage * RPAGE + RPAGE);
-
-    let html = "<div style='font-size:19px;font-weight:700;margin-bottom:4px'>Keystone Realty</div>";
-    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:9px'>Cash " + money(g.cash) + " · Bank " + money(g.cityBank || 0) + (g.cityHome ? " · Home: " + g.cityHome.name : "") + "</div>";
-
-    let n = 0;
-    for (const ent of slice) {
-      html += "<div style='padding:3px 0;font-size:13px;display:flex;justify-content:space-between;gap:10px;align-items:center'>"
-        + "<span style='min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>" + ent.html + "</span>"
-        + "<span style='flex:0 0 auto'>";
-      for (const f of ent.fns) {
-        actions.push({ label: f.key, fn: f.fn });
-        html += "<b style='color:#ffd166'>[" + actions.length + "]</b> <span style='color:#cfe0f5'>" + f.key + "</span>&nbsp;&nbsp;";
-      }
-      html += "</span></div>";
-      n++;
-    }
-    if (!slice.length) html += "<div style='font-size:12px;color:#8a93a3;padding:8px 0'>No homes on the market right now.</div>";
-
-    if (pages > 1) {
-      // pager uses [ / ] (and arrow keys) so numeric slots stay item-only (≤9)
-      html += "<div style='margin-top:8px;font-size:12px;color:#9fb0c6'>"
-        + "[<b style='color:#ffd166'>&larr;</b>] Prev &nbsp; [<b style='color:#ffd166'>&rarr;</b>] Next &nbsp; · Page <b style='color:#ffd166'>" + (rpage + 1) + "</b>/" + pages + " (" + entries.length + " listings)</div>";
-    }
-    if (!CBZ.touchMode) html += "<div style='font-size:11px;color:#6b7480;margin-top:8px'>[1–" + actions.length + "] select, [Esc] close. Shops and land for sale carry a sign at the curb.</div>";
-    open(html);
-    realtyPages = pages;
-  };
-  let realtyPages = 1;
-
-  // ---- standing at your own home: the safehouse menu ----
-  CBZ.cityHomeNear = function (x, z) {
-    if (!g.cityHome || g.cityHome.lot.demolished) return null;    // rubble — no safehouse menu to open
-    const lot = g.cityHome.lot, d = Math.hypot(x - lot.building.door.x, z - lot.building.door.z);
-    return d < 4.5 ? lot : null;
-  };
-  CBZ.cityOpenHome = function () {
-    if (!g.cityHome) return;
-    mode = "home"; actions = [];
-    const home = g.cityHome.lot.building.home;
-    actions.push({ label: "Sleep", fn: sleepHeal });
-    actions.push({ label: "Deposit", fn: () => { if (CBZ.cityBankDeposit) CBZ.cityBankDeposit(); else { g.cityBank = (g.cityBank || 0) + (g.cash || 0); g.cash = 0; } CBZ.cityHomeMenuRefresh(); } });
-    if (home.garage > 0) {
-      actions.push({ label: "Store car", fn: storeCar });
-      if ((g.cityGarage || []).length) actions.push({ label: "Pull car " + g.cityGarage.length + "/" + home.garage, fn: retrieveCar });
-    }
-    // ONE WAY UP. A home whose tower has a real walk-in lift serving its floor
-    // (city/elevators.js: the Spire's loft is a stop, every other penthouse
-    // lives on the roof the lift already reaches) is reached by riding it; the
-    // menu shortcut below is only for a tower that never got its lift built.
-    if (home.elevator && !liftServesHome(g.cityHome.lot)) actions.push({ label: "Penthouse", fn: elevatorUp });
-    // ---- AIRBASE: the penthouse's rooftop helipad + deck hangar (the WHY behind
-    // the apex price). The helicopter comes WITH the home (g.cityOwnsHeli); the
-    // hangar (→ F-22) is a separate add-on offered here once you own the tower.
-    const isPent = !!g.cityOwnsPenthouse || isPenthouse(home);
-    if (isPent && g.cityOwnsHangar) {
-      actions.push({ label: "Hangar", fn: () => { CBZ.city.note("Your F-35 sits in the deck hangar, walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
-    } else if (isPent) {
-      actions.push({ label: "Buy hangar " + money(hangarPrice()), fn: buyHangar });
-    }
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:6px'>" + home.name + "</div>";
-    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:10px'>Your home · safe " + money(g.cityBank || 0) + "</div>";
-    if (g.cityOwnsHeli) html += "<div style='font-size:12px;color:#7ed957;margin-bottom:8px'>Helicopter ready on the pad" + (g.cityOwnsHangar ? " · F-35 in the hangar" : "") + "</div>";
-    actions.forEach((a, i) => { html += "<div class='reRow' data-k='" + (i + 1) + "' style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
-    html += "<div class='reRow reBtn' data-k='escape'>CLOSE</div>";
-    open(html);
-  };
-  CBZ.cityHomeMenuRefresh = function () { if (panel && panel.style.display === "block") { if (mode === "home") CBZ.cityOpenHome(); else CBZ.cityHomeMenu(); } };
-
-  // delegate residence renting to Zillow (single source of lease truth)
-  function zillowRentEstimate(lot) {
-    return (CBZ.cityZillow && CBZ.cityZillow.rentEstimateForLot) ? CBZ.cityZillow.rentEstimateForLot(lot) : null;
-  }
-  function rentResidence(lot) {
-    if (CBZ.cityZillow && CBZ.cityZillow.rentByLot) CBZ.cityZillow.rentByLot(lot);
-    CBZ.cityHomeMenuRefresh();
+    return best;
   }
 
-  function rentRoom() {
-    const room = (C().homes || [])[0]; if (!room) return;
-    if (!CBZ.city.spend(room.rent)) { CBZ.city.note("Can't afford the first " + money(room.rent) + ".", 1.8); return; }
-    g.cityRentTier = 0;
-    g.citySpawnPoint = { x: CBZ.city.arena.spawn.x, z: CBZ.city.arena.spawn.z };
-    CBZ.city.note("Rented " + room.name + ". A roof over your head, and a respawn point.", 2.6);
-    CBZ.cityHomeMenuRefresh();
-  }
-  // BUY a home at the realtor. We route through Zillow's buy path so there's ONE
-  // source of truth: it registers the home in g.cityRealtyOwned, mirrors it to
-  // the world ledger (persist), charges the live Zillow price (market + the gang-
-  // control discount on your turf), and sets it as your home/respawn. Falls back
-  // to a self-contained buy only if Zillow isn't loaded.
-  // Is THIS home the flagship mega-tower penthouse? Match on the config id BLD
-  // tags the tower with ("penthouse") so realtor + Zillow + buildings.js all
-  // coordinate on one identifier. (flagship is the belt-and-suspenders fallback.)
-  function isPenthouse(home) { return !!home && (home.id === "penthouse" || home.flagship === true); }
-  // Buying the penthouse arms your airpower: the MISSILE HELICOPTER comes parked
-  // on its rooftop helipad (free with the home — Phase 3 spawns it there). The
-  // HANGAR (→ F-22) is a SEPARATE add-on bought later (see buyHangar). Guarded so
-  // a non-penthouse buy never trips these globals; safe to call after any buy.
-  // NOTE: zillow.js's takeResidence already arms the penthouse (the single
-  // buy/finance chokepoint, so the [Z] market and the realtor agree). This is the
-  // belt-and-suspenders for the Zillow-unavailable fallback buy below; it's
-  // idempotent (only fires the banner once) so the realtor route doesn't double it.
+  /* ============================================================
+     2. BUYING IT. One function, whoever you are standing in front of: the
+        sign (city/plots.js) or the agent. The money is zillow's to move.
+     ============================================================ */
+  // (the sign in the yard says SOLD for a minute and comes down: city/plots.js)
+  function sold(lot) { const Pl = CBZ.cityPlots; return !!(Pl && Pl.isSold && Pl.isSold(lot)); }
   function armPenthouse(lot) {
-    const h = lot && lot.building && lot.building.home;
-    if (!isPenthouse(h)) return;
-    if (g.cityOwnsPenthouse && g.cityOwnsHeli) return;   // already armed (Zillow path) — don't re-banner
-    g.cityOwnsPenthouse = true;
-    g.cityOwnsHeli = true;          // the chopper comes with the penthouse
-    CBZ.city.big("The missile helicopter is yours, parked on the pad.");
+    const h = homeOf(lot);
+    if (!h || !(h.id === "penthouse" || h.flagship === true)) return;
+    g.cityOwnsPenthouse = true; g.cityOwnsHeli = true;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
-  function buyHome(lot) {
-    const h = lot.building.home;
-    if (CBZ.cityZillow && CBZ.cityZillow.buyByLot) {
-      const price = (CBZ.cityZillow.buyPriceForLot && CBZ.cityZillow.buyPriceForLot(lot));
-      const ask = (price != null) ? price : h.price;
-      if (((g.cash || 0) + (g.cityBank || 0)) < ask) { CBZ.city.note("Need " + money(ask) + " (cash+bank).", 2); return; }
-      const bought = CBZ.cityZillow.buyByLot(lot);   // charges, persists, registers, sets home via takeResidence
-      if (bought) {
-        // ensure this is the active home/respawn even if the player already had one
-        if (CBZ.cityZillow.setHomeByLot) CBZ.cityZillow.setHomeByLot(lot);
-        armPenthouse(lot);                            // penthouse → helicopter + flags
-        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-        CBZ.cityHomeMenuRefresh();
-      }
-      return;
+  function buy(lot, how, by) {
+    const z = Z(); if (!z || !lot) return false;
+    if (owns(lot)) { if (by) say(by, "That one's already yours."); return false; }
+    const price = z.buyPriceForLot ? z.buyPriceForLot(lot) : null;
+    const have = (g.cash || 0) + (g.cityBank || 0);
+    if (how === "finance") {
+      const fq = z.financeQuoteForLot ? z.financeQuoteForLot(lot) : null;
+      if (!fq || fq.approved === false) { if (by) say(by, "The bank won't carry it. " + ((fq && fq.reason) || "Not this one.")); return false; }
+      if (have < fq.down) { if (by) say(by, "You'd need " + money(fq.down) + " down."); sfx("empty"); return false; }
+      z.financeByLot(lot);
+    } else if (how === "rent") {
+      if (!z.rentByLot) return false;
+      z.rentByLot(lot);
+      if (renting(lot)) { g.cityViewing = null; grantKey(lot); if (by) say(by, "It's yours while the rent comes in. Here's the key."); return true; }
+      if (by) say(by, (z.lastMessage && z.lastMessage()) || "Not that one.");
+      return false;
+    } else {
+      if (price == null) return false;
+      if (have < price) { if (by) say(by, pick(["You're short. It's " + money(price) + ".", money(price) + ". Come back when you have it, or ask me about the bank."], price)); sfx("empty"); return false; }
+      z.buyByLot(lot);
     }
-    // ---- fallback (Zillow unavailable) — keep the legacy self-contained buy ----
-    const total = (g.cash || 0) + (g.cityBank || 0);
-    if (total < h.price) { CBZ.city.note("Need " + money(h.price) + " (cash+bank).", 2); return; }
-    let owe = h.price; const fromCash = Math.min(g.cash || 0, owe); g.cash -= fromCash; owe -= fromCash; if (owe > 0) g.cityBank -= owe;
-    h.owned = true; g.cityRentTier = null;
-    if (g.cityHome) g.cityHome.lot.building.home.owned = false;     // moving up: release the old one
-    g.cityHome = { lot, tier: h.tier, id: h.id, name: h.name };
-    g.citySpawnPoint = { x: lot.building.door.x, z: lot.building.door.z };
-    CBZ.city.big("You bought " + h.name + "!");
-    CBZ.city.addRespect(Math.ceil(h.tier * 4));
-    armPenthouse(lot);                                // penthouse → helicopter + flags
+    if (!owns(lot)) { if (by) say(by, (z.lastMessage && z.lastMessage()) || "The sale didn't close."); return false; }
+    // IT IS YOURS: the key, the sign, the house you wake up in if you had none
+    g.cityViewing = null;
+    grantKey(lot);
+    armPenthouse(lot);
+    if (CBZ.cityPlots) { try { if (CBZ.cityPlots.sync) CBZ.cityPlots.sync(); if (CBZ.cityPlots.markSold) CBZ.cityPlots.markSold(lot); } catch (e) {} }
+    if (by) say(by, pick(["Congratulations. It's yours. Here are the keys.", "Done. The keys. Enjoy the place."], lot.cx));
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    CBZ.cityHomeMenuRefresh();
+    if (CBZ.interactions && CBZ.interactions.refresh) { try { CBZ.interactions.refresh(); } catch (e) {} }
+    return true;
   }
-  // FINANCE a home at the realtor (contract [E]). Routes through Zillow's
-  // financeByLot so there's ONE financing path: 20% down from cash+bank, the rest
-  // via the bank loan ENGINE (CBZ.cityBankLoan) when wired, else Zillow's
-  // self-contained mortgage. Zillow handles charging the down, registering the
-  // home, persisting, and setting it as home (takeResidence) — exactly like the
-  // cash buy, so the realtor and [Z] panel agree. If financing isn't possible
-  // (no Zillow market at all) we honestly fall back to the cash buy.
-  function financeHome(lot) {
-    const h = lot.building.home;
-    if (CBZ.cityZillow && CBZ.cityZillow.financeByLot) {
-      const owned = CBZ.cityZillow.financeByLot(lot);   // charges down, registers, sets home, opens the loan
-      if (owned) {
-        if (CBZ.cityZillow.setHomeByLot) CBZ.cityZillow.setHomeByLot(lot);
-        armPenthouse(lot);                              // penthouse → helicopter + flags
-        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-      }
-      CBZ.cityHomeMenuRefresh();
-      return;
+
+  /* ============================================================
+     3. THE AGENT. The keeper of the realty office (a real person: the lot's
+        own vendor, city/peds.js), with a book.
+     ============================================================ */
+  function isAgent(p) { return !!(p && !p.dead && p.vendor && p.vendor.building && p.vendor.building.realtor && !p.vendor.demolished && p.pos); }
+  // every home on the market, cheapest first
+  function market() {
+    const A = arena(), z = Z(); if (!A || !z || !z.canBuyLot) return [];
+    const out = [];
+    for (const lot of A.homeLots || []) {
+      if (!homeOf(lot) || lot.demolished || !z.canBuyLot(lot)) continue;
+      const p = z.buyPriceForLot(lot);
+      if (p != null) out.push({ lot: lot, price: p });
     }
-    // No Zillow market loaded → no mortgage system to finance against; do the
-    // honest thing and route to the cash buy (which has its own fallback).
-    buyHome(lot);
+    out.sort(function (a, b) { return a.price - b.price; });
+    return out;
   }
-  // ---- TASK 2: the HANGAR — a big-ticket add-on, offered only once you own the
-  // penthouse. Buying it sets g.cityOwnsHangar=true, which unlocks basing an F-22
-  // Raptor in the deck hangar (Phase 3 reads g.cityOwnsHangar). Charged from cash
-  // + bank like a home; price comes from the penthouse tier's hangarPrice.
+  function whereWords(from, lot) {
+    const dx = lot.cx - from.x, dz = lot.cz - from.z, d = Math.hypot(dx, dz);
+    const ns = dz < 0 ? "north" : "south", ew = dx < 0 ? "west" : "east";
+    const dir = Math.abs(dx) > Math.abs(dz) * 1.8 ? ew : Math.abs(dz) > Math.abs(dx) * 1.8 ? ns : ns + ew;
+    const far = d < 120 ? "a short walk " : d < 500 ? "a few blocks " : d < 1500 ? "a drive " : "a long drive ";
+    return far + dir;
+  }
+  function placeWords(lot) {
+    if (typeof lot.town === "string" && lot.town) return lot.town;
+    const zn = CBZ.cityZoneAt ? CBZ.cityZoneAt(lot.cx, lot.cz) : null;
+    return zn && zn.name ? zn.name : "";
+  }
+  function describe(m, from) {
+    const lot = m.lot, h = homeOf(lot), b = lot.building;
+    const bits = [];
+    const beds = (h && h.beds) || 1;
+    bits.push(beds > 1 ? beds + " bedrooms" : "one bedroom");
+    if (isHouse(lot)) { bits.push("its own front door"); if (standOf(lot)) bits.push("a drive"); }
+    else if (b && b.storeys) bits.push("top of a " + b.storeys + " storey block");
+    const place = placeWords(lot), addr = addressOf(lot);
+    const what = bits.join(", ") + ", " + whereWords(from, lot);
+    return nameOf(lot) + (addr ? ", " + addr : "") + (place && addr.indexOf(place) < 0 ? ", " + place : "") + ". " +
+      what.charAt(0).toUpperCase() + what.slice(1) + ". " + money(m.price) + ".";
+  }
+  function pitchOf(p) { const s = p && p._pitch; return s && T < s.until && s.list.length ? s : null; }
+  function tell(p) {
+    const s = pitchOf(p); if (!s) return;
+    s.until = T + 90;
+    say(p, describe(s.list[s.i], p.pos), 5.5);
+  }
+  function startPitch(p) {
+    const list = market();
+    if (!list.length) { say(p, "Nothing on the books today. Come back."); return; }
+    // open the book at the best house you could close on today
+    const have = (g.cash || 0) + (g.cityBank || 0);
+    let i = 0;
+    for (let k = 0; k < list.length; k++) if (list[k].price <= have) i = k;
+    p._pitch = { list: list, i: i, until: T + 90 };
+    tell(p);
+  }
+  function turn(p, d) {
+    const s = pitchOf(p); if (!s) return;
+    // the book is re-read (a house may have sold, a price may have moved)
+    const cur = s.list[s.i].lot;
+    s.list = market();
+    let i = s.list.findIndex(function (m) { return m.lot === cur; });
+    if (i < 0) i = Math.min(s.i, s.list.length - 1);
+    s.i = Math.max(0, Math.min(s.list.length - 1, i + d));
+    if (!s.list.length) { p._pitch = null; say(p, "That was the last of them."); return; }
+    tell(p);
+  }
+  function pitchLot(p) { const s = pitchOf(p); return s ? s.list[s.i].lot : null; }
   function hangarPrice() {
-    const home = g.cityHome && g.cityHome.lot.building.home;
-    return (home && home.hangarPrice) || (((C().homes || []).find((x) => x.id === "penthouse") || {}).hangarPrice) || 1200000;
+    const home = g.cityHome && homeOf(g.cityHome.lot);
+    return (home && home.hangarPrice) || (((C().homes || []).find(function (x) { return x.id === "penthouse"; }) || {}).hangarPrice) || 1200000;
   }
-  function buyHangar() {
-    if (!g.cityOwnsPenthouse) { CBZ.city.note("Buy the penthouse first, the hangar is its deck.", 2.2); return; }
-    if (g.cityOwnsHangar) { CBZ.city.note("You already own the hangar.", 1.8); return; }
+  function buyHangar(p) {
+    if (!g.cityOwnsPenthouse || g.cityOwnsHangar) return;
     const cost = hangarPrice();
-    const total = (g.cash || 0) + (g.cityBank || 0);
-    if (total < cost) { CBZ.city.note("Need " + money(cost) + " (cash+bank) for the hangar.", 2.4); return; }
+    if ((g.cash || 0) + (g.cityBank || 0) < cost) { say(p, "The deck hangar is " + money(cost) + ". You're not there yet."); sfx("empty"); return; }
     let owe = cost; const fromCash = Math.min(g.cash || 0, owe); g.cash -= fromCash; owe -= fromCash; if (owe > 0) g.cityBank = (g.cityBank || 0) - owe;
     g.cityOwnsHangar = true;
-    CBZ.city.big("HANGAR ACQUIRED");
     CBZ.city.addRespect(40);
-    if (CBZ.sfx) CBZ.sfx("coin");
+    sfx("coin");
+    say(p, "The hangar's yours. It's the deck under the tower.");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    CBZ.cityHomeMenuRefresh();
   }
-  // WHY a house matters #1 — RECOVER + LAY LOW. Minecraft's bed skips the night
-  // and sets spawn; GTA's safehouse heals you and lets the heat die down. Sleeping
-  // in YOUR home does all of it at once: full heal, fed, rested, wounds dressed,
-  // AND the cops lose your trail (heat bleeds way down). That's the reason a roof
-  // over your head is worth more than the cash — it's the only place you can
-  // truly reset. The catch: you can't sleep with cops actively on you (5★ raid),
-  // so it rewards getting clear FIRST, then holing up.
-  function sleepHeal() {
-    const P = CBZ.player;
+  // the office is staffed and this file is talking: the counter's text menu
+  // stands aside (city/interact.js richModuleLive)
+  CBZ.cityRealtyLive = function (lot) { return !!(lot && lot.building && lot.building.realtor && CBZ.interactions); };
+  // the shop counter's "Homes" row (city/shops.js): the agent starts talking
+  CBZ.cityHomeMenu = function () {
+    if (CBZ.cityCloseShop) { try { CBZ.cityCloseShop(); } catch (e) {} }
+    const P = CBZ.player; if (!P || !P.pos) return;
+    let best = null, bd = 14;
+    for (const p of CBZ.cityPeds || []) { if (!isAgent(p)) continue; const d = Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z); if (d < bd) { bd = d; best = p; } }
+    if (best) startPitch(best);
+  };
+
+  /* ============================================================
+     4. THE HALL OF A HOUSE YOU OWN: the safe, the gun rack, the wardrobe.
+        Each stands against a side wall of the hall behind the front door,
+        clear of the walkway, at a place read off the door.
+     ============================================================ */
+  // how far the hall runs sideways from the door's own line before something
+  // solid (the building's own colliders: a wall, or furniture already there)
+  function wallDist(lot, f, inn, sign) {
+    const cols = lot.building && lot.building.colliders;
+    if (!cols || !cols.length) return null;
+    const px = f.x - f.ox * inn, pz = f.z - f.oz * inn;
+    const dx = f.tx * sign, dz = f.tz * sign;
+    let best = null;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.y0 != null && c.y0 > 1.3) continue;
+      if (c.y1 != null && c.y1 < 0.9) continue;
+      let d;
+      if (dx !== 0) { if (pz < c.minZ - 0.05 || pz > c.maxZ + 0.05) continue; d = dx > 0 ? c.minX - px : px - c.maxX; }
+      else { if (px < c.minX - 0.05 || px > c.maxX + 0.05) continue; d = dz > 0 ? c.minZ - pz : pz - c.maxZ; }
+      if (d < 0.6 || d > 4.5) continue;
+      if (best == null || d < best) best = d;
+    }
+    return best;
+  }
+  const spotCache = new WeakMap();
+  function spots(lot) {
+    const built = !!(lot.building && lot.building.colliders && lot.building.colliders.length);
+    const hit = spotCache.get(lot);
+    if (hit && hit.built === built) return hit.s;
+    const f = front(lot); if (!f) return null;
+    const ix = -f.ox, iz = -f.oz;                        // into the house
+    const at = function (inn, lat, back) {
+      return { x: f.x + ix * inn + f.tx * lat, z: f.z + iz * inn + f.tz * lat, fx: f.tx * back, fz: f.tz * back };
+    };
+    // each thing's back is on the wall: its place is the wall less its depth
+    const side = function (inn, sign, depth) { const d = wallDist(lot, f, inn, sign); return sign * Math.max(0.75, (d != null ? d : 1.6) - depth); };
+    // one wall takes the wardrobe (by the door) and the safe (further in); the
+    // rack hangs on the other, near the door, clear of whatever the hall
+    // already has on its walls deeper in
+    const s = { safe: at(2.5, side(2.5, 1, 0.36), 1), rack: at(1.25, side(1.25, -1, 0.31), -1), wardrobe: at(0.95, side(0.95, 1, 0.32), 1) };
+    spotCache.set(lot, { built: built, s: s });
+    return s;
+  }
+  // (fx, fz) points from the room INTO the wall the thing has its back to
+  CBZ.cityHomeSpot = function (lot, what) { const s = lot ? spots(lot) : null; return s ? s[what || "safe"] : null; };
+
+  function stashes() { return g.cityHomeStash || (g.cityHomeStash = {}); }
+  function stashOf(lot) { const S = stashes(), k = lotKey(lot); return S[k] || (S[k] = { cash: 0, guns: [] }); }
+  function ownedHomes() {
+    try { return CBZ.cityRealtyOwnedHomes ? (CBZ.cityRealtyOwnedHomes() || []) : []; } catch (e) { return []; }
+  }
+  function homeNear(x, z, r) {
+    let best = null, bd = r * r;
+    for (const h of ownedHomes()) {
+      const lot = h.lot; if (!lot || lot.demolished) continue;
+      const d = (h.x - x) * (h.x - x) + (h.z - z) * (h.z - z);
+      if (d < bd) { bd = d; best = lot; }
+    }
+    return best;
+  }
+
+  // ---- what you see: built for the one owned house you are at ----
+  const cm = function (c) { return CBZ.cmat ? CBZ.cmat(c) : new THREE.MeshLambertMaterial({ color: c }); };
+  const box = function (w, h, d) { return CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d); };
+  let vis = null;            // { lot, grp, rack, sig }
+  function gunMesh(id) {
+    let m = null;
+    try { m = CBZ.buildActorWeapon ? CBZ.buildActorWeapon(id) : null; } catch (e) { m = null; }
+    if (!m) { m = new THREE.Mesh(box(0.5, 0.1, 0.05), cm(0x24272c)); return m; }
+    const sc = (CBZ.weaponWorldScale && CBZ.weaponWorldScale((m.userData && m.userData.weaponId) || id)) || 1;
+    m.scale.setScalar(sc);
+    return m;
+  }
+  function fillRack(lot) {
+    if (!vis || !vis.rack) return;
+    const R = vis.rack;
+    for (let i = R.children.length - 1; i >= 0; i--) if (R.children[i].userData && R.children[i].userData.gun) R.remove(R.children[i]);
+    const guns = stashOf(lot).guns;
+    for (let i = 0; i < guns.length && i < 6; i++) {
+      const m = gunMesh(guns[i]);
+      m.userData.gun = true;
+      // two columns of three pegs; a gun lies along the board, muzzle to one side
+      const col = i % 2, row = (i / 2) | 0;
+      m.position.set(-0.36 + col * 0.72, 1.55 - row * 0.34, 0.07);
+      m.rotation.set(0, Math.PI / 2, 0);
+      R.add(m);
+    }
+    vis.sig = guns.join(",");
+  }
+  function buildVis(lot) {
+    dropVis();
+    const A = arena(), s = spots(lot); if (!A || !A.root || !s) return;
+    const grp = new THREE.Group(); grp.userData.transient = true;
+    const wood = cm(0x6b4a2e), woodD = cm(0x4a3220), steel = cm(0x2b2f35), brass = cm(0xb89a4a);
+    // the gun rack: a board on the wall with pegs
+    const rk = new THREE.Group();
+    rk.position.set(s.rack.x - s.rack.fx * 0.02, floorY(s.rack.x, s.rack.z), s.rack.z - s.rack.fz * 0.02);
+    rk.rotation.y = Math.atan2(-s.rack.fx, -s.rack.fz);
+    const board = new THREE.Mesh(box(1.5, 1.15, 0.04), wood); board.position.set(0, 1.3, -0.28); rk.add(board);
+    const rail = new THREE.Mesh(box(1.56, 0.06, 0.07), woodD); rail.position.set(0, 1.9, -0.27); rk.add(rail);
+    for (let i = 0; i < 6; i++) {
+      const col = i % 2, row = (i / 2) | 0;
+      for (const dx of [-0.2, 0.2]) {
+        const peg = new THREE.Mesh(box(0.025, 0.025, 0.12), steel);
+        peg.position.set(-0.36 + col * 0.72 + dx, 1.5 - row * 0.34, -0.2); rk.add(peg);
+      }
+    }
+    const pegs = new THREE.Group(); pegs.position.set(0, 0, -0.26); rk.add(pegs);
+    grp.add(rk);
+    // the wardrobe: two doors, a plinth, a rail of hangers showing at the top
+    const wd = new THREE.Group();
+    wd.position.set(s.wardrobe.x + s.wardrobe.fx * 0.02, floorY(s.wardrobe.x, s.wardrobe.z), s.wardrobe.z + s.wardrobe.fz * 0.02);
+    wd.rotation.y = Math.atan2(-s.wardrobe.fx, -s.wardrobe.fz);
+    const carc = new THREE.Mesh(box(1.1, 2.0, 0.55), woodD); carc.position.set(0, 1.03, -0.02); carc.castShadow = true; wd.add(carc);
+    for (const sx of [-1, 1]) {
+      const door = new THREE.Mesh(box(0.52, 1.86, 0.03), wood); door.position.set(sx * 0.27, 1.05, 0.27); wd.add(door);
+      const knob = new THREE.Mesh(box(0.025, 0.12, 0.03), brass); knob.position.set(sx * 0.05, 1.05, 0.295); wd.add(knob);
+    }
+    const plinth = new THREE.Mesh(box(1.14, 0.06, 0.58), steel); plinth.position.set(0, 0.03, -0.02); wd.add(plinth);
+    grp.add(wd);
+    A.root.add(grp);
+    vis = { lot: lot, grp: grp, rack: pegs, sig: null };
+    fillRack(lot);
+  }
+  function dropVis() {
+    if (vis && vis.grp && vis.grp.parent) vis.grp.parent.remove(vis.grp);
+    vis = null;
+  }
+
+  // ---- what you do ----
+  function gunsOn() { return (CBZ.weaponInventory || []).filter(function (id) { return id && id !== "fists" && id !== "fist" && id !== "hands"; }); }
+  function gunName(id) {
+    try { const W = CBZ.WEAPONS || CBZ.weaponData; const w = W && W[id]; if (w && w.name) return w.name; } catch (e) {}
+    return String(id || "gun").replace(/^\w/, function (c) { return c.toUpperCase(); });
+  }
+  function heldGun() { const id = CBZ.currentWeaponId; return id && gunsOn().indexOf(id) >= 0 && !g.cityHolstered ? id : (gunsOn()[0] || null); }
+  function rackPut(lot) {
+    const id = heldGun(), S = stashOf(lot);
+    if (!id || !CBZ.lockWeapon || S.guns.length >= 6) return false;
+    if (!CBZ.lockWeapon(id)) return false;
+    S.guns.push(id);
+    sfx("pickup"); fillRack(lot); commit();
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  }
+  function rackTake(lot) {
+    const S = stashOf(lot);
+    if (!S.guns.length || !CBZ.unlockWeapon) return false;
+    const id = S.guns.pop();
+    CBZ.unlockWeapon(id, { select: true });
+    sfx("pickup"); fillRack(lot); commit();
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  }
+  function cashIn(lot) {
+    const n = Math.floor(g.cash || 0);
+    if (n < 1 || !(CBZ.city && CBZ.city.spend && CBZ.city.spend(n))) return false;
+    stashOf(lot).cash += n; sfx("coin"); commit();
+    return true;
+  }
+  function cashOut(lot) {
+    const S = stashOf(lot), n = Math.floor(S.cash || 0);
+    if (n < 1) return false;
+    S.cash = 0;
+    if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(n); else g.cash = (g.cash || 0) + n;
+    sfx("coin"); commit();
+    return true;
+  }
+  // the next thing you own (and your gang's colours, when you have a gang)
+  function wardrobeNext() {
+    if (!CBZ.cityWearOutfit) return false;
+    const own = g.cityOutfitsOwned || (g.cityOutfitsOwned = { street: true });
+    // what you take off hangs in the wardrobe: the clothes on your back are yours
+    if (g.cityOutfitId && g.cityOutfitId.indexOf("gang:") !== 0 && !own[g.cityOutfitId]) own[g.cityOutfitId] = true;
+    const ids = Object.keys(own).filter(function (k) { return own[k]; });
+    if (ids.indexOf("street") < 0) ids.unshift("street");
+    if (g.playerGang && g.playerGang.founded && ids.indexOf("gang:player") < 0) ids.push("gang:player");
+    if (ids.length < 2) return false;
+    const cur = ids.indexOf(g.cityOutfitId || "street");
+    for (let k = 1; k <= ids.length; k++) {
+      const id = ids[(cur + k + ids.length) % ids.length];
+      let ok = false; try { ok = CBZ.cityWearOutfit(id, { silent: true }); } catch (e) { ok = false; }
+      if (ok) { sfx("pickup"); return true; }
+    }
+    return false;
+  }
+  function wardrobeHas() {
+    const own = g.cityOutfitsOwned || {};
+    let n = 0; for (const k in own) if (own[k]) n++;
+    if (!own.street) n++;
+    if (g.cityOutfitId && g.cityOutfitId.indexOf("gang:") !== 0 && !own[g.cityOutfitId]) n++;
+    if (g.playerGang && g.playerGang.founded && !own["gang:player"]) n++;
+    return n >= 2;
+  }
+  function commit() { if (CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} } }
+
+  /* ============================================================
+     5. THE NIGHT. city/propuse.js lies you down and skips to morning; in a
+        bed you own it calls this. Full health, fed, rested, wounds dressed,
+        the heat bled off you while you were off the street, and this is the
+        house you wake up in from now on.
+     ============================================================ */
+  CBZ.cityHomeSlept = function (lot) {
+    const P = CBZ.player; if (!P || !lot) return false;
     const stars = g.wanted | 0;
     P.hp = P.maxHp || 100;
     P.stamina = P.maxStamina || 100;
-    g.hunger = 100;
-    g.tired = 0;
-    if (CBZ.cityHealWounds) CBZ.cityHealWounds();                 // wounds dressed overnight (systems/vitals.js)
-    g.citySpawnPoint = { x: g.cityHome.lot.building.door.x, z: g.cityHome.lot.building.door.z };
-    // LAY LOW: heat bleeds hard while you're off the streets. A light record
-    // (≤2★) goes fully cold; a serious one drops a couple stars but the manhunt
-    // doesn't just evaporate — you still surface hot.
-    let laid = "";
+    g.hunger = 100; g.tired = 0;
+    if (CBZ.cityHealWounds) { try { CBZ.cityHealWounds(); } catch (e) {} }
     if (CBZ.city && CBZ.city.addHeat && (g.heat || 0) > 0) {
       const before = g.heat || 0;
-      const cut = stars <= 2 ? before : Math.max(before - (CBZ.CITY.starHeat[Math.max(0, stars - 2)] || 0), before * 0.45);
+      const sh = (CBZ.CITY && CBZ.CITY.starHeat) || [];
+      const cut = stars <= 2 ? before : Math.max(before - (sh[Math.max(0, stars - 2)] || 0), before * 0.45);
       CBZ.city.addHeat(-cut);
-      const after = g.heat || 0;
-      laid = (g.wanted | 0) < stars ? " Heat cooled, you slipped the manhunt." : (after < before ? " Heat dropped while you laid low." : "");
     }
+    const z = Z();
+    if (homeOf(lot) && (!g.cityHome || g.cityHome.lot !== lot) && z && z.setHomeByLot && owns(lot)) z.setHomeByLot(lot);
+    const d = lot.building && lot.building.door;
+    if (d) g.citySpawnPoint = { x: d.x, z: d.z };
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("Slept it off, full health, fed, rested, patched up." + laid + " Respawn set to home.", 3.2);
-    close();
+    commit();
+    return true;
+  };
+
+  /* ============================================================
+     6. THE CAR IN THE DRIVE. A car you own, left standing on the driveway of
+        a house you own, belongs there: g.cityGarage carries it (model, paint,
+        every mod, and which house) and it is put back on the drive when you
+        come home to an empty one, today or after a reload. Drive it off and
+        the record goes with it.
+     ============================================================ */
+  // where a car stands at this house: the lot's own driveway
+  function standOf(lot) {
+    const b = lot && lot.building; if (!b) return null;
+    if (b.garage && isFinite(b.garage.x)) return { x: b.garage.x, z: b.garage.z, heading: b.garage.heading || 0 };
+    const f = front(lot);
+    if (!f || !isFinite(b.driveAt)) return null;
+    // the drive's centre along the street (city/house_yard.js plan), 4 m out
+    // from the garage wing's face, nose to the garage
+    const lat = (lot.cx + f.tx * b.driveAt - f.x) * f.tx + (lot.cz + f.tz * b.driveAt - f.z) * f.tz;
+    return { x: f.x + f.tx * lat + f.ox * 4.2, z: f.z + f.tz * lat + f.oz * 4.2, heading: Math.atan2(-f.ox, -f.oz) };
   }
-  function storeCar() {
-    const P = CBZ.player, home = g.cityHome.lot.building.home;
-    if (!P.driving || !P._vehicle) { CBZ.city.note("Drive a car home to store it.", 1.8); return; }
-    g.cityGarage = g.cityGarage || [];
-    if (g.cityGarage.length >= home.garage) { CBZ.city.note("Garage is full.", 1.6); return; }
-    const car = P._vehicle;
-    // full garage record — name + paint + every installed mod — so the war
-    // machine you park is the war machine you get back. (Old saves hold plain
-    // name strings; retrieveCar migrates them.)
-    const rec = { name: car.model ? car.model.name : "Sedan" };
-    if (car.color != null) rec.color = car.color;
-    if (car.mods) { try { rec.mods = JSON.parse(JSON.stringify(car.mods)); } catch (e) {} }
-    g.cityGarage.push(rec);
-    if (CBZ.cityExitVehicle) CBZ.cityExitVehicle();
-    if (car.group && car.group.parent) car.group.parent.remove(car.group);
-    const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1);
-    CBZ.city.note("Stored your car in the garage.", 1.8);
-    CBZ.cityHomeMenuRefresh();
+  function carCap(lot) { const h = homeOf(lot); return standOf(lot) ? Math.max(1, Math.min(2, (h && h.garage) | 0)) : 0; }
+  function standN(lot, n) {
+    const s = standOf(lot); if (!s || !n) return s;
+    // the second car stands behind the first, toward the street
+    return { x: s.x - Math.sin(s.heading) * 5.6 * n, z: s.z - Math.cos(s.heading) * 5.6 * n, heading: s.heading };
   }
-  function retrieveCar() {
-    g.cityGarage = g.cityGarage || [];
-    if (!g.cityGarage.length) return;
-    const entry = g.cityGarage.pop();
-    // migrate: old records are bare model-name strings; new ones carry
-    // { name, color, mods } so a modded ride comes back fully dressed.
-    const rec = (typeof entry === "string") ? { name: entry } : (entry || { name: "Sedan" });
-    const lot = g.cityHome.lot, gz = lot.building.garage || { x: lot.building.door.x, z: lot.building.door.z };
-    const car = CBZ.citySpawnOwnedCar ? CBZ.citySpawnOwnedCar(gz.x, gz.z, rec.name) : null;
-    if (car && CBZ.cityRestoreCarMods) { try { CBZ.cityRestoreCarMods(car, rec); } catch (e) {} }
-    CBZ.city.note("Your " + rec.name + " is out front.", 2);
-    close();
-  }
-  function liftServesHome(lot) {
-    const b = lot && lot.building, home = b && b.home;
-    if (!home || !CBZ.cityLiftServes) return false;
-    return CBZ.cityLiftServes(b, home.loftY != null ? home.loftY : b.h);
-  }
-  function elevatorUp() {
-    const lot = g.cityHome.lot, home = lot.building.home;
-    const P = CBZ.player;
-    // The Spire's living space is the LOFT — the top interior floor — so the
-    // elevator lands you ON that floor, centred in the open plan. Older homes
-    // (penthouse roof) keep going one flight up onto the open roof terrace.
-    let tx, ty, tz;
-    if (home.loftY != null) { tx = lot.cx; ty = home.loftY + 0.1; tz = lot.cz; }
-    else { tx = lot.cx + 1.4; ty = (home.floorY || 0) + (lot.building.FH || 4) + 0.2; tz = lot.cz; }
-    const note = home.loftY != null ? "The Spire loft, top of the world." : "Penthouse, top of the world.";
-    // THE SHARED LIFT RIDE (city/occupy.js) — the census found this exact
-    // reposition+sfx+note hand-rolled three times. One copy now; the inline
-    // branch below is the degrade-safe fallback.
-    if (!(CBZ.cityLiftRide && CBZ.cityLiftRide(tx, ty, tz, { note: note, noteSecs: 2, force: true }))) {
-      P.pos.set(tx, ty, tz);
-      P.vy = 0; P.grounded = true;
-      CBZ.playerChar.group.position.copy(P.pos);
-      CBZ.city.note(note, 2);
+  const live = new Map();                    // garage record -> the car in the world
+  function garage() { return g.cityGarage || (g.cityGarage = []); }
+  function carsOf(lot) { const k = lotKey(lot); return garage().filter(function (r) { return r && typeof r === "object" && !r.marine && r.lot === k; }); }
+  function recOfCar(car) { for (const [r, c] of live) if (c === car) return r; return null; }
+  function carGone(car) { return !car || car.dead || !CBZ.cityCars || CBZ.cityCars.indexOf(car) < 0; }
+  function driveTick() {
+    const P = CBZ.player; if (!P || !P.pos || !CBZ.cityCars) return;
+    const gar = garage();
+    // an old save's garage held bare cars with no house: they are at home
+    if (g.cityHome && g.cityHome.lot && carCap(g.cityHome.lot)) {
+      const hk = lotKey(g.cityHome.lot);
+      for (let i = 0; i < gar.length; i++) {
+        let r = gar[i];
+        if (typeof r === "string") r = gar[i] = { name: r };
+        if (r && !r.marine && !r.lot && !r.key && !r.berthId && carsOf(g.cityHome.lot).length < carCap(g.cityHome.lot)) r.lot = hk;
+      }
     }
-    close();
+    for (const h of ownedHomes()) {
+      const lot = h.lot, cap = lot ? carCap(lot) : 0;
+      if (!cap) continue;
+      const st = standOf(lot);
+      const dP = Math.hypot(st.x - P.pos.x, st.z - P.pos.z);
+      if (dP > 170) continue;
+      const recs = carsOf(lot);
+      // a car that was here and is being driven away is no longer here
+      for (const r of recs) {
+        const c = live.get(r);
+        if (!c) continue;
+        if (carGone(c)) { live.delete(r); continue; }                 // the world dropped it: it comes back
+        if (Math.hypot(c.pos.x - st.x, c.pos.z - st.z) > 22) {         // you took it
+          live.delete(r); const i = gar.indexOf(r); if (i >= 0) gar.splice(i, 1); commit();
+        }
+      }
+      // a car you own, left standing on the drive, stays
+      if (carsOf(lot).length < cap) {
+        for (const c of CBZ.cityCars) {
+          if (!c || c.dead || !(c.owned || c.stolen) || c.ai || !c.pos || c === P._vehicle || c.airClass || recOfCar(c)) continue;
+          if (Math.abs(c.v || 0) > 0.4) continue;
+          if (Math.hypot(c.pos.x - st.x, c.pos.z - st.z) > 7.5) continue;
+          const rec = { name: c.model ? c.model.name : "Sedan", lot: lotKey(lot) };
+          if (c.color != null) rec.color = c.color;
+          if (c.mods) { try { rec.mods = JSON.parse(JSON.stringify(c.mods)); } catch (e) {} }
+          gar.push(rec); live.set(rec, c); commit();
+          if (carsOf(lot).length >= cap) break;
+        }
+      }
+      // the drive is empty and the house has a car: it is on the drive
+      if (dP < 140) {
+        const now = carsOf(lot);
+        for (let n = 0; n < now.length; n++) {
+          const r = now[n];
+          if (live.get(r) || !CBZ.citySpawnOwnedCar) continue;
+          const sp = standN(lot, n);
+          let blocked = false;
+          for (const c of CBZ.cityCars) if (c && !c.dead && c.pos && Math.hypot(c.pos.x - sp.x, c.pos.z - sp.z) < 3.2) { blocked = true; break; }
+          if (blocked) continue;
+          let car = null;
+          try { car = CBZ.citySpawnOwnedCar(sp.x, sp.z, r.name); } catch (e) { car = null; }
+          if (!car) continue;
+          car.heading = sp.heading; car.v = 0; car.ai = false;
+          if (car.pos) { car.pos.x = sp.x; car.pos.z = sp.z; }
+          if (car.group) { car.group.position.x = sp.x; car.group.position.z = sp.z; car.group.rotation.y = sp.heading; }
+          if (CBZ.cityRestoreCarMods) { try { CBZ.cityRestoreCarMods(car, r); } catch (e) {} }
+          live.set(r, car);
+        }
+      }
+    }
   }
 
-  function open(html) { el().innerHTML = html; panel.style.display = "block"; CBZ.cityMenuOpen = true; if (document.exitPointerLock) try { document.exitPointerLock(); } catch (e) {} }
-  function close() { if (panel) panel.style.display = "none"; CBZ.cityMenuOpen = false; if (CBZ.requestLock && g.state === "playing") CBZ.requestLock(); }
-  CBZ.cityCloseRealty = close;
-
-  // ---- LEDGER GAP fix: serialize/restore the property ladder ----------------
-  // g.cityHome.lot is a LIVE lot reference (building meshes/colliders) — never
-  // JSON-safe to drop straight onto the world ledger. worldstate.js's commit()
-  // calls cityHomeSerialize() for a small plain descriptor instead; on the
-  // restore side, cityRealEstateReset() (below) calls cityHomeRestore() to
-  // re-find the matching lot. Because build() only runs city.arena ONCE per
-  // page load (mode.js's reset() reuses the same arena on every subsequent
-  // run/character-switch), the SAME lot object is still live all session, so
-  // matching by door position round-trips exactly. A true page reload rebuilds
-  // the arena from scratch (new lot objects) — we do our best via tier+id
-  // matching in that case, but an exact re-find isn't guaranteed; that's an
-  // inherent limit of a procedurally-rebuilt city, not a regression here.
-  CBZ.cityHomeSerialize = function () {
-    if (!g.cityHome || !g.cityHome.lot) return null;
-    const lot = g.cityHome.lot;
-    const door = lot.building && lot.building.door;
-    return {
-      tier: g.cityHome.tier, id: g.cityHome.id, name: g.cityHome.name,
-      doorX: door ? door.x : null, doorZ: door ? door.z : null,
+  /* ============================================================
+     7. THE VERBS (city/interactions.js), wired once the registry is up.
+     ============================================================ */
+  let wired = false;
+  function wire() {
+    const I = CBZ.interactions;
+    if (wired || !I || !I.registerZone || !I.register) return;
+    wired = true;
+    // one target object per thing: the card's hysteresis compares identity
+    const tgt = { safe: { pos: { x: 0, y: 0.6, z: 0 } }, rack: { pos: { x: 0, y: 1.4, z: 0 } }, wardrobe: { pos: { x: 0, y: 1.2, z: 0 } } };
+    const finder = function (what, reach) {
+      return function (px, pz) {
+        const lot = homeNear(px, pz, 14); if (!lot) return null;
+        const s = spots(lot); if (!s) return null;
+        const p = s[what];
+        if (Math.hypot(p.x - px, p.z - pz) > reach) return null;
+        const t = tgt[what]; t.x = t.pos.x = p.x; t.z = t.pos.z = p.z; t.lot = lot;
+        t.pos.y = floorY(p.x, p.z) + (what === "safe" ? 0.6 : 1.3);
+        return t;
+      };
     };
+    const bags = function (t) { const CS = CBZ.cashStore, h = CS && CS.homeAt ? CS.homeAt(t.x, t.z) : null; return h ? { h: h, st: CS.homeStored(h.id) } : null; };
+    I.registerZone({
+      id: "home-safe", kind: "homesafe", radius: 2.4, prio: 9, driving: false, find: finder("safe", 2.4),
+      options: [
+        { id: "home-safe-in", slot: "e", prio: 5, campaignSafe: true, canShow: function () { return Math.floor(g.cash || 0) >= 1; },
+          label: function () { return "Put in " + money(Math.floor(g.cash || 0)); }, onSelect: function (t) { cashIn(t.lot); } },
+        { id: "home-safe-out", slot: "e", hold: true, prio: 5, campaignSafe: true, canShow: function (t) { return stashOf(t.lot).cash >= 1; },
+          label: function (t) { return "Take out " + money(stashOf(t.lot).cash); }, onSelect: function (t) { cashOut(t.lot); } },
+        // the duffels city/cashstore.js keeps beside it
+        { id: "home-safe-bag", wheel: true, prio: 3, campaignSafe: true, canShow: function (t) { const b = bags(t); return !!(b && b.st.bags > 0); },
+          label: "Take a bag", onSelect: function (t) { const b = bags(t); if (b) CBZ.cashStore.homePull(b.h); } },
+      ],
+    });
+    I.registerZone({
+      id: "home-rack", kind: "homerack", radius: 2.2, prio: 9, driving: false, find: finder("rack", 2.2),
+      options: [
+        { id: "home-rack-put", slot: "e", prio: 5, campaignSafe: true, canShow: function (t) { return !!heldGun() && stashOf(t.lot).guns.length < 6; },
+          label: function () { return "Rack the " + gunName(heldGun()); }, onSelect: function (t) { rackPut(t.lot); } },
+        { id: "home-rack-take", slot: "e", hold: true, prio: 5, campaignSafe: true, canShow: function (t) { return stashOf(t.lot).guns.length > 0; },
+          label: function (t) { const G = stashOf(t.lot).guns; return "Take the " + gunName(G[G.length - 1]); }, onSelect: function (t) { rackTake(t.lot); } },
+      ],
+    });
+    I.registerZone({
+      id: "home-wardrobe", kind: "homewardrobe", radius: 2.2, prio: 9, driving: false, find: finder("wardrobe", 2.2),
+      options: [
+        { id: "home-wardrobe-change", slot: "e", prio: 5, campaignSafe: true, canShow: wardrobeHas, label: "Change", onSelect: function () { wardrobeNext(); } },
+      ],
+    });
+    // a house door that is locked to you
+    I.registerZone({
+      id: "home-door-locked", kind: "homedoor", radius: 2.4, prio: 7, driving: false,
+      find: function (px, pz) {
+        const dr = lockedDoorAt(px, pz, 2.4); if (!dr) return null;
+        const t = dr._lockTgt || (dr._lockTgt = { pos: { x: 0, y: 1.2, z: 0 } });
+        t.x = t.pos.x = dr.wx; t.z = t.pos.z = dr.wz; t.door = dr; t.lot = dr._homeLot;
+        return t;
+      },
+      options: [
+        { id: "home-door-try", slot: "e", prio: 4, campaignSafe: true, label: "Try the door", onSelect: function () { sfx("empty"); } },
+        { id: "home-door-kick", slot: "e", hold: true, bad: true, prio: 4, label: "Kick it in", onSelect: function (t) { kickIn(t.door); } },
+      ],
+    });
+    if (I.describe) {
+      I.describe("homedoor", function (t) { return { label: nameOf(t.lot), note: "locked" }; });
+      I.describe("homesafe", function (t) { const c = stashOf(t.lot).cash; return { label: "Safe", note: c >= 1 ? money(c) + " in it" : "empty" }; });
+      I.describe("homerack", function (t) { const n = stashOf(t.lot).guns.length; return { label: "Gun rack", note: n ? n + (n === 1 ? " gun" : " guns") : "empty" }; });
+      I.describe("homewardrobe", function () { return { label: "Wardrobe", note: "" }; });
+    }
+
+    // ---- the agent ----
+    const A = function (id, prio, label, canShow, onSelect, wheel) {
+      I.register("ped:vendor", { id: id, prio: prio, campaignSafe: true, forceYes: true, wheel: !!wheel, label: label, canShow: canShow, onSelect: onSelect });
+    };
+    A("home-ask", 70, "Ask about homes", function (p) { return isAgent(p) && !pitchOf(p); }, startPitch);
+    A("home-see", 74, "See it", function (p) { const l = isAgent(p) && pitchLot(p); return !!l && !hasKey(l); },
+      function (p) {
+        const l = pitchLot(p);
+        if (!view(l, p)) return;
+        const d = l.building && l.building.door;
+        if (d && CBZ.fullMap && CBZ.fullMap.setWaypoint) { try { CBZ.fullMap.setWaypoint(d.x, d.z, nameOf(l)); } catch (e) {} }
+      });
+    A("home-buy", 73, function (p) { const s = pitchOf(p); return s ? "Buy " + money(s.list[s.i].price) : "Buy"; },
+      function (p) { return isAgent(p) && !!pitchOf(p); },
+      function (p) { const l = pitchLot(p); if (buy(l, "cash", p)) p._pitch = null; });
+    A("home-dearer", 72, "Dearer", function (p) { const s = isAgent(p) && pitchOf(p); return !!s && s.i < s.list.length - 1; }, function (p) { turn(p, 1); });
+    A("home-cheaper", 71, "Cheaper", function (p) { const s = isAgent(p) && pitchOf(p); return !!s && s.i > 0; }, function (p) { turn(p, -1); });
+    A("home-finance", 30, function (p) { const l = pitchLot(p), z = Z(), fq = l && z && z.financeQuoteForLot ? z.financeQuoteForLot(l) : null; return fq ? "Finance " + money(fq.down) + " down" : "Finance"; },
+      function (p) { const l = isAgent(p) && pitchLot(p), z = Z(), fq = l && z && z.financeQuoteForLot ? z.financeQuoteForLot(l) : null; return !!(fq && fq.approved !== false); },
+      function (p) { const l = pitchLot(p); if (buy(l, "finance", p)) p._pitch = null; }, true);
+    A("home-rent", 29, function (p) { const l = pitchLot(p), z = Z(), r = l && z && z.rentEstimateForLot ? z.rentEstimateForLot(l) : null; return r != null ? "Rent " + money(r) : "Rent"; },
+      function (p) { const l = isAgent(p) && pitchLot(p), z = Z(); return !!(l && z && z.rentEstimateForLot && z.rentEstimateForLot(l) != null); },
+      function (p) { const l = pitchLot(p); if (buy(l, "rent", p)) p._pitch = null; }, true);
+    A("home-hangar", 28, function () { return "Buy the hangar " + money(hangarPrice()); },
+      function (p) { return isAgent(p) && !!g.cityOwnsPenthouse && !g.cityOwnsHangar; }, buyHangar, true);
+  }
+
+  /* ============================================================
+     8. THE TICK
+     ============================================================ */
+  let slow = 0, lockT = 0;
+  CBZ.onUpdate(40.8, function (dt) {
+    if (!inCity()) { if (vis) dropVis(); return; }
+    T += dt || 0;
+    wire();
+    lockT -= dt || 0;
+    if (lockT <= 0) { lockT = 0.7; lockTick(); }
+    slow -= dt || 0;
+    if (slow > 0) return;
+    slow = 1;
+    const P = CBZ.player;
+    if (!P || !P.pos || g.state !== "playing") return;
+    // the hall of the owned house you are at
+    const lot = homeNear(P.pos.x, P.pos.z, 45);
+    if (lot) {
+      if (!vis || vis.lot !== lot || vis.grp.parent !== (arena() && arena().root)) buildVis(lot);
+      else if (vis.sig !== stashOf(lot).guns.join(",")) fillRack(lot);
+    } else if (vis) dropVis();
+    driveTick();
+  });
+
+  // the property-empire economy tick (zillow owns the portfolio data): rent
+  // in, tax and mortgage out, on the engine clock
+  CBZ.onUpdate(38.4, function (dt) {
+    if (g.mode !== "city") return;
+    if (CBZ.cityZillowTick) CBZ.cityZillowTick(dt);
+  });
+
+  /* ============================================================
+     9. THE SAVE SEAM (city/worldstate.js calls these three; unchanged
+        names). The descriptor it stores now carries the safes and racks too.
+     ============================================================ */
+  CBZ.cityHomeSerialize = function () {
+    const out = {};
+    if (g.cityHome && g.cityHome.lot) {
+      const lot = g.cityHome.lot, door = lot.building && lot.building.door;
+      out.tier = g.cityHome.tier; out.id = g.cityHome.id; out.name = g.cityHome.name;
+      out.doorX = door ? door.x : null; out.doorZ = door ? door.z : null;
+      out.home = true;
+    }
+    const S = g.cityHomeStash || {};
+    const st = {};
+    let any = false;
+    for (const k in S) { const s = S[k]; if (s && ((s.cash | 0) > 0 || (s.guns && s.guns.length))) { st[k] = { cash: Math.round(s.cash || 0), guns: (s.guns || []).slice(0, 6) }; any = true; } }
+    if (any) out.stash = st;
+    return (out.home || any) ? out : null;
   };
   CBZ.cityHomeRestore = function (desc) {
     if (!desc) return false;
-    const A = CBZ.city && CBZ.city.arena;
-    const pool = A && A.homeLots;
+    if (desc.stash && typeof desc.stash === "object") {
+      g.cityHomeStash = {};
+      for (const k in desc.stash) { const s = desc.stash[k] || {}; g.cityHomeStash[k] = { cash: Math.max(0, +s.cash || 0), guns: Array.isArray(s.guns) ? s.guns.slice(0, 6) : [] }; }
+    }
+    if (desc.home === false || (desc.home == null && desc.id == null && desc.tier == null)) return true;
+    const A = arena(), pool = A && A.homeLots;
     if (!pool || !pool.length) return false;
     let best = null, bestD = Infinity;
     for (const lot of pool) {
-      const h = lot.building && lot.building.home;
+      const h = homeOf(lot);
       if (!h || (desc.id != null && h.id !== desc.id)) continue;
       const door = lot.building.door;
       const d = (door && desc.doorX != null) ? Math.hypot(door.x - desc.doorX, door.z - desc.doorZ) : 0;
       if (d < bestD) { bestD = d; best = lot; }
     }
-    if (!best) {
-      // last-resort: same tier, any lot (an exact id/door match failed —
-      // likely a fresh procedural rebuild across a real page reload)
-      for (const lot of pool) { const h = lot.building && lot.building.home; if (h && h.tier === desc.tier) { best = lot; break; } }
-    }
+    if (!best) for (const lot of pool) { const h = homeOf(lot); if (h && h.tier === desc.tier) { best = lot; break; } }
     if (!best) return false;
     best.building.home.owned = true;
     g.cityHome = { lot: best, tier: desc.tier, id: desc.id, name: desc.name };
     g.citySpawnPoint = g.citySpawnPoint || { x: best.building.door.x, z: best.building.door.z };
-    armPenthouse(best);   // re-arms the heli/penthouse flags if this is the flagship tower
+    armPenthouse(best);
     return true;
   };
-
   CBZ.cityRealEstateReset = function () {
     g.cityHome = null; g.cityRentTier = null; g.cityGarage = []; g.citySpawnPoint = null;
-    // apex-home airpower (penthouse helicopter + bought hangar) resets per run
     g.cityOwnsPenthouse = false; g.cityOwnsHeli = false; g.cityOwnsHangar = false;
-    payT = (C().rentTick || 90); rpage = 0;
-    const A = CBZ.city && CBZ.city.arena;
-    if (A && A.homeLots) for (const l of A.homeLots) if (l.building.home) l.building.home.owned = false;
-    if (panel) panel.style.display = "none";
-    // LEDGER GAP fix: mode.js's reset() calls this AFTER cityWorldBeginRun
-    // (which already re-pointed g.cityWorld at the correct character), so the
-    // hard-wipe above would otherwise permanently erase the property ladder
-    // on every run/character-switch. Re-hydrate from the CURRENT ledger right
-    // here — the one place guaranteed to run after both the wipe above and
-    // the ledger swap.
+    g.cityHomeStash = {}; g.cityViewing = null;
+    live.clear(); dropVis();
+    const A = arena();
+    if (A && A.homeLots) for (const l of A.homeLots) if (l.building && l.building.home) l.building.home.owned = false;
+    // mode.js's reset() calls this AFTER the ledger was re-pointed at the
+    // current character, so re-hydrate from it here (the one place guaranteed
+    // to run after both the wipe above and the ledger swap)
     const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
     if (w) {
-      g.cityRentTier = (w.cityRentTier != null) ? w.cityRentTier : null;
       g.cityGarage = Array.isArray(w.cityGarage) ? w.cityGarage.slice() : [];
       g.cityOwnsPenthouse = !!w.cityOwnsPenthouse;
       g.cityOwnsHeli = !!w.cityOwnsHeli;
@@ -461,73 +820,14 @@
     }
   };
 
-  function pressKey(k) {
-    if (!panel || panel.style.display !== "block" || !k) return false;
-    k = String(k).toLowerCase();
-    if (k === "escape") { close(); return true; }
-    // page the realtor list (only when it's the buy menu and has >1 page)
-    if (mode === "buy" && realtyPages > 1 && (k === "arrowleft" || k === "[" || k === "arrowright" || k === "]")) {
-      rpage = (k === "arrowleft" || k === "[") ? (rpage - 1 + realtyPages) % realtyPages : (rpage + 1) % realtyPages;
-      CBZ.cityHomeMenu();
-      return true;
-    }
-    if (k >= "1" && k <= "9") { const a = actions[parseInt(k, 10) - 1]; if (a) a.fn(); return true; }
-    return false;
-  }
-  addEventListener("keydown", function (e) {
-    if (g.mode !== "city" || g.state !== "playing") return;
-    if (panel && panel.style.display === "block") {
-      if (pressKey(e.key)) e.preventDefault();
-      return;
-    }
-  });
-
-  // YOUR FRONT DOOR IS A THING (city/interactions.js): E at it, or a tap on it,
-  // opens the safehouse menu. It used to be [H], a private key with no touch
-  // path at all.
-  let zoned = false;
-  function wireZone() {
-    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
-    zoned = true;
-    CBZ.interactions.registerZone({
-      id: "zone-home-door", kind: "home-door", radius: 4.5, prio: 8,
-      find: function (px, pz) {
-        const lot = CBZ.cityHomeNear(px, pz);
-        return lot && lot.building && lot.building.door ? lot.building.door : null;
-      },
-      options: [{ id: "home-open", slot: "e", prio: 5, campaignSafe: true, label: "Go in", onSelect: () => CBZ.cityOpenHome() }],
-    });
-  }
-  CBZ.onUpdate(40.8, function () { if (g.mode === "city") wireZone(); });
-
-  // ---- property-empire economy tick (Zillow owns the portfolio data) -------
-  // We run the single rent/income/mortgage tick HERE (careers.js owns the wage
-  // pay-tick and is off-limits). zillow.js exposes CBZ.cityZillowTick(dt) which
-  // revalues listings with the market, pays rent-out income, charges property
-  // tax + mortgage payments, and collects the rent the player owes (evicting on
-  // a miss). Keeping it on the engine clock means it runs even with the panel
-  // closed, so an empire earns / bleeds whether or not you're looking at it.
-  CBZ.onUpdate(38.4, function (dt) {
-    if (g.mode !== "city") return;
-    if (CBZ.cityZillowTick) CBZ.cityZillowTick(dt);
-  });
-
-  // ---- legacy FLOPHOUSE-room rent sink (the cheap C().homes[0] starter room) -
-  // NOTE: owned-home PROPERTY TAX is charged by the Zillow tick (38.4) on every
-  // owned unit including your residence — we must NOT tax g.cityHome again here
-  // or you'd pay double. This tick only collects rent on the legacy rented room
-  // (g.cityRentTier), which Zillow's lease system doesn't manage.
-  CBZ.onUpdate(38.5, function (dt) {
-    if (g.mode !== "city") return;
-    payT -= dt;
-    if (payT > 0) return;
-    payT = C().rentTick || 90;
-    if (g.cityRentTier != null) {
-      const room = (C().homes || [])[g.cityRentTier];
-      if (room && room.rent) {
-        if (CBZ.city.spend(room.rent)) CBZ.city.note("Rent due: -" + money(room.rent), 2);
-        else { g.cityRentTier = null; g.citySpawnPoint = null; CBZ.city.note("Evicted, couldn't make rent.", 2.4); }
-      }
-    }
-  });
+  CBZ.cityHome = {
+    isHouse: isHouse, hasKey: hasKey, view: view, buy: buy, sold: sold,
+    spot: function (lot, what) { return CBZ.cityHomeSpot(lot, what); },
+    stash: function (lot) { return stashOf(lot); },
+    stand: standOf,
+    cars: function (lot) { return carsOf(lot).map(function (r) { return { name: r.name, here: !!live.get(r) }; }); },
+    market: market,
+    // what the agent would say about a house from where you stand (a read)
+    describe: function (lot, from) { const z = Z(); return describe({ lot: lot, price: z.buyPriceForLot(lot) }, from || CBZ.player.pos); },
+  };
 })();

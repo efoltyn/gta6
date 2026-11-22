@@ -402,6 +402,8 @@
   // HOLD HERE / COME: the follower engine for a man walking with you
   // (boarding.js "wait" / "follow"), the _order spot for everyone else
   function holdHere(a) {
+    // a man of your gang takes the spot as his post (city/playergang.js)
+    if (CBZ.cityCrewPost && CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(a)) return CBZ.cityCrewPost(a, "corner");
     if (a.companion && CBZ.followerOrder && CBZ.followerOrder(a, "wait", {})) return true;
     if (!a._order) a._orderWas = { companion: !!a.companion };
     a._order = { kind: "hold", spot: { pos: { x: a.pos.x, y: a.pos.y, z: a.pos.z } }, t: 0 };
@@ -417,8 +419,8 @@
     }
     if (a._cbzWait && CBZ.followerOrder) CBZ.followerOrder(a, "follow", {});
     if (a._order) clear(a);
-    if (CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(a)) { a.companion = true; a.guard = null; a.rage = null; }
-    else if (a.recruited || a.kind === "crew") a.companion = true;
+    if (CBZ.cityCrewPost && CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(a)) return CBZ.cityCrewPost(a, "follow");
+    if (a.recruited || a.kind === "crew") a.companion = true;
     return true;
   }
   // THE BODY OF AN OBEYED ORDER, through the city's real seams
@@ -1001,7 +1003,7 @@
       onSelect: function (t) { order({ by: by(), verb: "take", target: t }); } });
     // THREATEN: anyone (THREATEN below)
     I.register("ped", { id: "threaten", prio: 64, harm: true, campaignSafe: true, forceYes: true, anyone: true,
-      canShow: threatenable, label: "Threaten", onSelect: function (t) { threaten(t); } });
+      canShow: threatenable, label: "Threaten", onSelect: function (t) { CBZ.cityOrders2.threaten(t); } });
     // BACK OFF: whoever of yours is on him lets him be
     I.register("ped", { id: "order-call-off", prio: 67, campaignSafe: true, forceYes: true, anyone: true,
       canShow: onHim, label: "Back off",
@@ -1036,16 +1038,18 @@
     // walk with the President. Stand down sends him back: protection.js
     // hands his body to this file while the order stands, and takes it back.
     const posted = function (p) { return !!(p && !p.dead && p._protUnit === "mansion" && p._protRole !== "counter-sniper" && !p._order); };
+    // (a man of your own GANG is told where to stand by city/playergang.js:
+    // Come, Hold here, Guard the door, Sell here, Go home. The two below are
+    // for everybody else who works for you: hired security, a detail, a dog.)
+    const gangMan = function (p) { return !!(CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p)); };
     I.register("ped", { id: "order-hold", prio: 27, campaignSafe: true, anyone: true,
-      canShow: function (p) { return on(p) && !posted(p) && !(p._order && p._order.kind === "hold") && !p._cbzWait && !p._cbzSeat; }, label: "Hold here",
+      canShow: function (p) { return on(p) && !gangMan(p) && !posted(p) && !(p._order && p._order.kind === "hold") && !p._cbzWait && !p._cbzSeat; }, label: "Hold here",
       onSelect: function (a) { tell(a, "hold"); } });
     I.register("ped", { id: "order-come", prio: 72, campaignSafe: true, anyone: true,
       canShow: function (p) {
-        if (!p || p.dead) return false;
+        if (!p || p.dead || gangMan(p)) return false;
         if ((p._order && p._order.kind === "hold") || (p._cbzWait && on(p))) return true;
-        if (posted(p) && on(p)) return true;
-        // a gang member at his own post walks with you on the word
-        return !p.companion && !p._order && !!(CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p));
+        return posted(p) && on(p);
       }, label: "Come",
       onSelect: function (a) { tell(a, "come"); } });
     // DISMISS: let one of your own people go (a crewman you recruited, a

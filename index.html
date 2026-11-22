@@ -1237,7 +1237,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/world.js?v=water1122a"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
 <script src="src/city/flags.js?v=r187a"></script>
-<script src="src/city/interior_programs.js?v=r187a"></script>
+<script src="src/city/interior_programs.js?v=world1122b"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1253,7 +1253,7 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=r187a"></script>
-<script src="src/city/buildings.js?v=keep1122d"></script>
+<script src="src/city/buildings.js?v=world1122b"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1508,17 +1508,17 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
 <script src="src/city/street_hardware.js?v=r187a"></script>
-<script src="src/city/props.js?v=lodlight1012"></script>
+<script src="src/city/props.js?v=world1122b"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
-<script src="src/city/propuse.js?v=night1022"></script>
+<script src="src/city/propuse.js?v=world1122b"></script>
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=pres1028"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=hands1022"></script>
-<script src="src/city/economy.js?v=isleopen1022"></script>
+<script src="src/city/economy.js?v=world1122b"></script>
 <script src="src/city/clothes.js?v=body1122f"></script>
 <script src="src/city/outfits.js?v=anatomy1122b"></script>
 <script src="src/entities/dutykit.js?v=anatomy1122"></script>
@@ -1534,9 +1534,9 @@ document.body.appendChild(b);}}catch(e){}})();
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=verbs2b"></script>
-<script src="src/city/gangs.js?v=rounds1013m"></script>
+<script src="src/city/gangs.js?v=world1122b"></script>
 <script src="src/city/social.js?v=voice1022"></script>
-<script src="src/city/realestate.js?v=f35one1022"></script>
+<script src="src/city/realestate.js?v=world1122b"></script>
 <script src="src/city/view.js?v=trunk1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
@@ -1776,7 +1776,7 @@ document.body.appendChild(b);}}catch(e){}})();
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
 <script src="src/city/jewelry.js?v=misleclstutte"></script>
-<script src="src/city/careers.js?v=dismiss1014"></script>
+<script src="src/city/careers.js?v=world1122b"></script>
 <script src="src/city/activities.js?v=nored0930"></script>
 <script src="src/city/heists.js?v=ijkl1022"></script>
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
@@ -1853,10 +1853,10 @@ document.body.appendChild(b);}}catch(e){}})();
      with real per-segment limits it wins automatically with no edit here.
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <script src="src/city/carcluster.js?v=speedunit1"></script>
-<script src="src/city/interact.js?v=people1022"></script>
+<script src="src/city/interact.js?v=world1122b"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=cmd1022o"></script>
+<script src="src/city/orders.js?v=world1122b"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -1886,7 +1886,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/camera.js?v=deathcam1009"></script>
 <script src="src/city/ragdoll.js?v=bodymove1022"></script>
 <script src="src/city/carstrike.js?v=protest1022"></script>
-<script src="src/city/leaderboard.js?v=rg0929"></script>
+<script src="src/city/leaderboard.js?v=world1122b"></script>
 <script src="src/city/zillow.js?v=fac1009"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <script src="src/city/bank.js?v=keep1122d"></script>
@@ -1959,15 +1959,19 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/construction.js?v=news0930"></script>
 <script src="src/city/companies.js?v=fallstay1"></script>
 <script src="src/city/citystaff.js?v=keep1122d"></script>
-<script src="src/city/playergang.js?v=cmd1022o"></script>
+<script src="src/city/playergang.js?v=world1122b"></script>
+<!-- WHO HOLDS A BLOCK, SPRAYED ON ITS WALL (city/turftags.js): the set's letters in
+     its colour on the front of every building it claims. Reads the lot record
+     through CBZ.cityLotFront (playergang.js above). -->
+<script src="src/city/turftags.js?v=world1122b"></script>
 <script src="src/city/promotion.js?v=rank1"></script>
 <script src="src/city/schedule.js?v=w09290219"></script>
 <script src="src/city/aigoals.js?v=dismiss1014"></script>
 <script src="src/city/officejobs.js?v=living1"></script>
 <script src="src/city/cityevents.js?v=street1009"></script>
 <script src="src/city/story.js?v=night1"></script>
-<script src="src/city/wealth.js?v=nodash1"></script>
-<script src="src/city/turf.js?v=news0930"></script>
+<script src="src/city/wealth.js?v=world1122b"></script>
+<script src="src/city/turf.js?v=world1122b"></script>
 <script src="src/city/gangops.js?v=cd0929"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
 <script src="src/city/militaryvehicles.js?v=isleground1022"></script>
@@ -2018,7 +2022,7 @@ document.body.appendChild(b);}}catch(e){}})();
      same game. Loads after interactions/interact (registers its verbs), after
      shops (cityTill is the only money source) and after gangs/turf (it steers
      crews and feeds zone control). Flag: RACKET_V1. -->
-<script src="src/city/racket.js?v=verbs2b"></script>
+<script src="src/city/racket.js?v=world1122b"></script>
 <script src="src/city/aim_dossier.js?v=popup1009b"></script>
 <script src="src/city/captives.js?v=trunk1022"></script>
 <script src="src/city/millionaires.js?v=ladder1022"></script>
@@ -2107,7 +2111,7 @@ document.body.appendChild(b);}}catch(e){}})();
      people running real verbs, Holler is the social feed where a post is the
      act); phone.js draws it in 3D on a canvas screen and routes taps onto
      the glass. Also the city's one text sink (CBZ.cityPhoneNotify). -->
-<script src="src/city/phone_apps.js?v=f35one1022"></script>
+<script src="src/city/phone_apps.js?v=world1122b"></script>
 <script src="src/city/phone.js?v=r187a"></script>
 <script src="src/city/killfeed.js?v=street1009"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
@@ -2680,7 +2684,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (it reads that file's published site record), storage.js (the property
      ledger it writes through) and inventory.js (CBZ.cashBags). Revert with
      ?cfg_CASH_STORE_V1=0. -->
-<script src="src/city/cashstore.js?v=r187a"></script>
+<script src="src/city/cashstore.js?v=world1122b"></script>
 <!-- A VAULT YOU BOUGHT, ON LAND YOU BOUGHT (city/propertyvault.js). The SAME
      CBZ.cityVaultRoom the bank uses, built into a property you own, paid for at
      the [G] desk, keyed through city/keys.js and banked through CBZ.cityTill.
@@ -2691,7 +2695,7 @@ document.body.appendChild(b);}}catch(e){}})();
      property panel at your address post, the contractor's demolition, locked
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
-<script src="src/city/plots.js?v=leave1014"></script>
+<script src="src/city/plots.js?v=world1122b"></script>
 <script src="src/city/compoundcrew.js?v=leave1014"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure

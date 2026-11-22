@@ -3083,8 +3083,10 @@
           id: "player", isPlayer: true, founded: !!(pg && pg.founded),
           name: (pg && pg.name) || gang.name || null,
           color: (pg && pg.color != null) ? pg.color : gang.color,
-          order: (pg && pg.order) || "follow",
           turf: packTurf(gang.turf), roster: packRoster(gang),
+          // the crew as PEOPLE (name, rank, post, the money on him): a man who
+          // died is not in it, so he does not come back
+          crew: CBZ.cityPlayerGangCrewSave ? CBZ.cityPlayerGangCrewSave() : null,
         });
         continue;
       }
@@ -3112,7 +3114,8 @@
     // a founded crew that never registered in the list still saves (edge)
     if (!seen.player && g.playerGang && g.playerGang.founded) {
       const pg = g.playerGang;
-      out.push({ id: "player", isPlayer: true, founded: true, name: pg.name, color: pg.color, order: pg.order || "follow", turf: packTurf(pg.turf), roster: {} });
+      out.push({ id: "player", isPlayer: true, founded: true, name: pg.name, color: pg.color, turf: packTurf(pg.turf), roster: {},
+        crew: CBZ.cityPlayerGangCrewSave ? CBZ.cityPlayerGangCrewSave() : null });
     }
     return { v: 1, seed: CBZ.WORLD_SEED >>> 0, gangs: out };
   }
@@ -3406,8 +3409,7 @@
     if (shapeT <= 0) { shapeT = 0.7; shapeAllGangs(0.7); }
 
     // ---- TERRITORY INCOME (GTA SA: every held block prints money) ----
-    // NPC crews bank a TREASURY that funds wars; the player's gang gets a real
-    // payday into the city bank, so holding turf finally MATTERS.
+    // NPC crews bank a TREASURY that funds wars.
     incomeT -= dt;
     if (incomeT <= 0) {
       incomeT = TURF_PAYDAY;
@@ -3415,26 +3417,9 @@
         const lots = gang.turf.length; if (!lots) continue;
         const take = lots * TURF_INCOME_PER_LOT;
         if (gang.isPlayer) {
-          // player payday — scaled by crew (more soldiers = more collected)
-          const crew = gangStrength(gang);
-          const pay = Math.round(take * (0.6 + Math.min(1, crew / 8)));
-          if (pay > 0) {
-            g.cityBank = (g.cityBank || 0) + pay;
-            if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-            // payday reads as takeover PROGRESS: blocks collected + districts held
-            const zc = CBZ.cityZoneControl ? CBZ.cityZoneControl() : null;
-            const zHeld = zc && zc.byGang ? (zc.byGang.player || 0) : 0;
-            CBZ.city && CBZ.city.note("Turf payday: +$" + pay + " (" + lots + " blocks" +
-              (zc && zc.total ? " · " + zHeld + "/" + zc.total + " districts" : "") + ") → bank", 2.2);
-          }
-          // credit each soldier's "earned" by their rank cut so YOUR crew also
-          // climbs on merit (autoPromotePlayerCrew reads gstat.earned). A bigger
-          // payday = faster promotions, mirroring the NPC economy.
-          let wsum = 0; for (const m of gang.members) { if (!m.dead) wsum += rankDef(m.rank).cut; }
-          if (wsum > 0) for (const m of gang.members) {
-            if (m.dead || m.isBoss) continue;
-            const s = memStats(m); s.earned += pay * (rankDef(m.rank).cut / wsum) * 0.5; s.loyalty = Math.min(1, s.loyalty + 0.01);
-          }
+          // YOUR blocks pay the men standing on them, in their pockets, and
+          // you collect it from them in person (city/playergang.js THE MONEY).
+          // (This branch used to wire a payday straight into your bank.)
         } else {
           // GTA/Levitt economics: turf prints money, but it's split SKEWED. Half
           // banks to the war chest; the rest is paid DOWN THE CHAIN by rank cut,

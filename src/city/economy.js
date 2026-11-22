@@ -1150,8 +1150,11 @@
   }
   // rank multiplier: a member of an NPC crew skims less than a boss of their own.
   function rankMul() {
+    // your OWN gang's blocks pay the men standing on them, and you collect it
+    // from them by hand (city/playergang.js THE MONEY): nothing arrives here.
+    // This faucet is the cut a MEMBER of somebody else's crew is paid.
     const pg = g.playerGang;
-    if (pg && pg.founded) return 1.0;             // you ARE the boss → full take
+    if (pg && pg.founded && !g.cityMembership) return 0;
     const mem = g.cityMembership;
     if (mem) {
       const r = mem.rank;

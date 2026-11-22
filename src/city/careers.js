@@ -403,8 +403,6 @@
   //  Andreas gang turf wars (kill rivals to take a hood, defend to keep
   //  it) and GTA Online crew/sell-mission structure.
   // ============================================================
-  let gcOffered = [];
-  const GC_ICON = { gcHit: "", gcTake: "", gcCollect: "", gcRun: "", gcDefend: "" };
 
   // who do you ride with? returns { kind:"member"|"boss", gangId, rank, name }
   // — works whether you JOINED an NPC crew or FOUNDED your own.
@@ -595,9 +593,7 @@
       if (CBZ.cityPlayerGangDefendTurf) CBZ.cityPlayerGangDefendTurf(j.x, j.z);
       CBZ.city.note("Get to the block and HOLD it, they're rolling up.", 2.8);
     }
-    if (CBZ.city.big) CBZ.city.big("CONTRACT · " + (c ? c.name : "the set"));
-    // (no third toast — the big + the HUD job line already carry it)
-    closeBoard();
+    if (board && board.style.display === "block") closeBoard();
   }
   CBZ.cityAcceptGangContract = acceptGangContract;
 
@@ -652,33 +648,24 @@
   }
   CBZ.cityGangContractFail = failGangContract;
 
-  // open the CREW CONTRACTS board (also folded into the main Job Board below,
-  // and callable on its own so a gang member / [Y] hub can surface it).
   function isGangJob(t) { return t && t.indexOf && t.indexOf("gc") === 0; }
-  CBZ.cityGangContracts = function () {
+  /* THE SET'S WORK, FROM ONE OF THE SET. You check in with a member of the
+     crew you ride with (the card's Check in, city/interact.js) and he tells
+     you what they need done: who, where, what it pays. Taking it is doing
+     it. (This used to be a "Contracts" view of the job board: a numbered
+     list of the same jobs, opened from a shop counter.) */
+  let _gcTurn = 0;
+  CBZ.cityCrewWork = function (who) {
     const c = myCrew();
-    if (!c) { CBZ.city.note("You're not in a crew. Prospect a set (or found your own) to pick up contracts.", 3); return; }
-    if (CBZ.cityCloseShop) CBZ.cityCloseShop();
-    gcOffered = rollGangContracts();
-    offered = gcOffered.slice();   // share the [1-9] accept handler
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>" + c.name + " · Contracts</div>";
-    html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>You: " +
-      (CBZ.cityRankName ? CBZ.cityRankName(c.rank) : c.rank) +
-      " <span style='color:#8a93a3'>· finish jobs to climb the ranks</span></div>";
-    if (!gcOffered.length) html += "<div style='color:#8a93a3'>No work right now.</div>";
-    gcOffered.forEach((j, i) => {
-      html += "<div class='jobRow' data-k='" + (i + 1) + "' style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " +
-        (GC_ICON[j.type] || "•") + " " + j.desc +
-        " <span style='color:#7ed957'>$" + j.reward + "</span>" +
-        (j.respect ? " <span style='color:#c792ea'>+" + j.respect + " rep</span>" : "") + "</div>";
-    });
-    html += "<div class='jobFoot'><span class='jobRow jobBtn' data-k='0'>FREELANCE</span>" +
-      "<span class='jobRow jobBtn' data-k='escape'>CLOSE</span></div>";
-    boardEl().innerHTML = html;
-    board.style.display = "block";
-    board._gang = true;
-    CBZ.cityMenuOpen = true;
-    if (document.exitPointerLock) try { document.exitPointerLock(); } catch (e) {}
+    if (!c) return false;
+    const tell = function (line) { if (who && !who.dead && CBZ.citySay) { try { CBZ.citySay(who, line, "#ffffff", 3.6); } catch (e) {} } };
+    if (g.cityJob) { tell(isGangJob(g.cityJob.type) ? "You got a job already. Go do it." : "Finish what you're on first."); return false; }
+    const jobs = rollGangContracts();
+    if (!jobs.length) { tell("Nothing for you right now. Stay close."); return false; }
+    const j = jobs[(_gcTurn++) % jobs.length];
+    tell(String(j.desc || "Work").replace(/\s*·\s*/g, ", ") + ". $" + Math.round(j.reward).toLocaleString("en-US") + " when it's done.");
+    acceptGangContract(j);
+    return !!g.cityJob;
   };
 
   // ---- job offers ----
@@ -780,10 +767,8 @@
   const ICON = { hit: "", delivery: "", heist: "", smuggle: "", getaway: "", protection: "", deaddrop: "" };
   CBZ.cityJobBoard = function () {
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
-    // if you ride with a crew, the board opens straight onto YOUR set's
-    // contracts (the climb-the-ranks work); [0] swaps to freelance hustles.
-    const crew = myCrew();
-    if (crew) { CBZ.cityGangContracts(); return; }
+    // (your own set's work is not on this board: a member of the set tells
+    // you, CBZ.cityCrewWork)
     offered = rollJobs();
     if (board) board._gang = false;
     const r = rankInfo(), nxt = RANKS[rankIdx() + 1];
@@ -791,8 +776,7 @@
     html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>Notoriety: " + r.name +
       (nxt ? " <span style='color:#8a93a3'>(" + (notoriety()) + "/" + nxt.xp + " → " + nxt.name + ", pay ×" + r.cut.toFixed(2) + ")</span>" : " <span style='color:#7ed957'>· MAX · pay ×" + r.cut.toFixed(2) + "</span>") + "</div>";
     offered.forEach((j, i) => { html += "<div class='jobRow' data-k='" + (i + 1) + "' style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + (ICON[j.type] || "•") + " " + j.desc + " <span style='color:#7ed957'>$" + j.reward + "</span></div>"; });
-    html += "<div class='jobFoot'>" + (myCrew() ? "<span class='jobRow jobBtn' data-k='0'>CREW</span>" : "") +
-      "<span class='jobRow jobBtn' data-k='escape'>CLOSE</span></div>";
+    html += "<div class='jobFoot'><span class='jobRow jobBtn' data-k='escape'>CLOSE</span></div>";
     boardEl().innerHTML = html;
     board.style.display = "block";
     CBZ.cityMenuOpen = true;
@@ -820,23 +804,6 @@
     closeBoard();
   }
 
-  // freelance hustle view, forced (used by [0] to leave the crew board)
-  function openFreelanceBoard() {
-    offered = rollJobs();
-    if (board) board._gang = false;
-    const r = rankInfo(), nxt = RANKS[rankIdx() + 1];
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>Freelance Hustles</div>";
-    html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>Notoriety: " + r.name +
-      (nxt ? " <span style='color:#8a93a3'>(" + (notoriety()) + "/" + nxt.xp + " → " + nxt.name + ")</span>" : " <span style='color:#7ed957'>· MAX</span>") +
-      "</div>";
-    offered.forEach((j, i) => { html += "<div class='jobRow' data-k='" + (i + 1) + "' style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + (ICON[j.type] || "•") + " " + j.desc + " <span style='color:#7ed957'>$" + j.reward + "</span></div>"; });
-    html += "<div class='jobFoot'>" + (myCrew() ? "<span class='jobRow jobBtn' data-k='0'>CREW</span>" : "") +
-      "<span class='jobRow jobBtn' data-k='escape'>CLOSE</span></div>";
-    boardEl().innerHTML = html;
-    board.style.display = "block";
-    CBZ.cityMenuOpen = true;
-  }
-
   /* ONE DISPATCH, TWO INPUTS. This board printed "[1-6] accept · [Esc] close"
      and listened only for a keydown, so on a tablet it was a list of jobs you
      could not accept. Every row carries its own key as `data-k` now and one
@@ -846,8 +813,6 @@
     if (!board || board.style.display !== "block" || !k) return false;
     k = String(k).toLowerCase();
     if (k === "escape") { closeBoard(); return true; }
-    // [0] toggles between the crew contract board and freelance hustles
-    if (k === "0" && myCrew()) { if (board._gang) openFreelanceBoard(); else CBZ.cityGangContracts(); return true; }
     if (k >= "1" && k <= "9") { accept(parseInt(k, 10) - 1); return true; }
     return false;
   }
@@ -1069,48 +1034,28 @@
     return g.cityPostedUp;
   };
 
-  // recruit a ped as crew (gangster) or worker (pimp/entrepreneur)
+  /* THE HIRE LANDS. Whether somebody says yes is not decided here: a stranger
+     is asked, and answers by who he is (city/playergang.js THE ASK); a man
+     with his hands up is taken (city/loyalty.js). This is the stamp the second
+     of those ends in: he joins your gang as a soldier, in its colours, and
+     the gang starts with him if he is the first. (It used to be the whole of
+     recruiting: anybody at all, for $100 or five respect, and a second branch
+     that turned a pimp's recruit into a "worker" who paid you every six
+     seconds from wherever he happened to be.) */
   CBZ.cityRecruit = function (ped) {
-    if (!ped || ped.dead || ped.vendor || ped.recruited) return;
-    const cost = 100;
-    if ((g.respect || 0) < 5 && !CBZ.city.canAfford(cost)) { CBZ.city.note("Need respect or $100 to recruit.", 1.8); return; }
-    if ((g.respect || 0) < 5) CBZ.city.spend(cost);
-    // running a car-resale yard? recruits become CREW (raid defenders); the
-    // pimp/entrepreneur path recruits WORKERS (passive income) instead.
-    // pimp/entrepreneur recruit passive WORKERS; everyone else gets a CREW
-    // bodyguard who travels with you and shoots to defend (costs a salary).
-    ped.recruited = true; ped.kind = (g.career === "pimp" || g.career === "entrepreneur") ? "worker" : "crew";
-    if (ped.kind === "crew") {
-      if (ped._hireAggr == null) ped._hireAggr = ped.aggr;   // his own temper back when he is let go (CBZ.cityDismiss)
-      ped.companion = true; ped.aggr = 0.96; ped.maxHp = 160; ped.hp = 160;
-      ped.armed = true; ped.weapon = ped.weapon && ped.weapon !== "Bat" ? ped.weapon : "Pistol"; ped.ammo = 999;
-      ped.faction = "player"; ped.gang = null; ped.npcWanted = 0;
-      if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
+    if (!ped || ped.dead || ped.vendor || ped.recruited || !CBZ.cityPlayerGangEnlist) return false;
+    if (ped.gang && ped.gang !== "player" && CBZ.cityGangById) {
+      const from = CBZ.cityGangById(ped.gang);
+      if (from && from.members) { const i = from.members.indexOf(ped); if (i >= 0) from.members.splice(i, 1); }
+      ped.gang = null;
     }
-    ped.tagColor = "#7ed957";
-    g.cityCrew = (g.cityCrew || 0) + 1;
+    if (!CBZ.cityPlayerGangEnlist(ped, "soldier")) return false;
     CBZ.city.addRespect(3);
-    // if you already run a gang, a new bodyguard joins it as a Soldier under
-    // your colours (city/playergang.js); otherwise it's a free-agent bodyguard
-    // and 3 of them unlock FOUNDing a gang via the [O] orders menu.
-    if (ped.kind === "crew" && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && CBZ.cityPlayerGangEnlist) {
-      CBZ.cityPlayerGangEnlist(ped, "soldier");
-      CBZ.city.note(ped.name + " patched into the " + g.playerGang.name + " as a Soldier. Crew: " + g.cityCrew, 2.4);
-    } else {
-      CBZ.city.note(ped.name + " is on your payroll (" + (ped.kind === "crew" ? "shooter" : ped.kind) + "). Crew: " + g.cityCrew +
-        (ped.kind === "crew" && g.cityCrew >= 3 && !(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) ? " That's enough muscle to found your own gang. · O" : ""), 2.6);
+    // taken from the driver's seat: he walks round to a door (city/boarding.js)
+    if (CBZ.followerOrder && CBZ.player && CBZ.player.driving && CBZ.player._vehicle) {
+      CBZ.followerOrder(ped, "board", { veh: CBZ.player._vehicle, role: "crew", run: true });
     }
-    /* HIRED FROM THE DRIVER'S SEAT — so get in. Recruiting through the car
-       window used to hand you a shooter who then jogged after your bumper for
-       the rest of the game, because nothing in the recruit path knew you were
-       in a vehicle. city/boarding.js walks him round to a free door and seats
-       him; with no seat left he simply stays on the pavement, which is the
-       honest outcome and reads as one. Feature-detected, one call. */
-    if (ped.kind === "crew" && CBZ.followerOrder && CBZ.player && CBZ.player.driving && CBZ.player._vehicle) {
-      if (!CBZ.followerOrder(ped, "board", { veh: CBZ.player._vehicle, role: "crew", run: true })) {
-        CBZ.city.note("No seat for " + ped.name + " · he'll catch up.", 1.8);
-      }
-    }
+    return true;
   };
 
   // count live hostile rival members standing on/near a block (used by TAKE).
@@ -1332,10 +1277,11 @@
     if (payT <= 0) {
       const E = (CBZ.CITY && CBZ.CITY.econ) || {};
       payT = E.payTick || 6;
-      const workers = CBZ.cityPeds.filter((p) => p.recruited && p.kind === "worker" && !p.dead).length;
-      if (workers > 0 && (g.wanted | 0) === 0) { const inc = workers * (E.workerCut || 7); CBZ.city.addCash(inc); CBZ.city.note("Workers earned you $" + inc, 1.4); }
-      // crew bodyguards are on SALARY — make payroll or one walks off the job
-      const crew = CBZ.cityPeds.filter((p) => p.companion && !p.dead);
+      // a hired companion who is NOT one of your gang is on salary: make
+      // payroll or he walks. (Your gang is paid by its cut of what it makes,
+      // city/playergang.js THE MONEY; the "workers" who paid you every tick
+      // from nowhere are gone with the branch that made them.)
+      const crew = CBZ.cityPeds.filter((p) => p.companion && !p.dead && !(CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p)));
       if (crew.length) {
         const wage = crew.length * (E.crewSalary || 14);
         if ((g.cash || 0) >= wage) { g.cash -= wage; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }

@@ -1136,6 +1136,9 @@
     if (d.forced) return true;                    // a kicked-in door shuts but no longer locks
     const lot = unitLot(d);
     if (lot && CBZ.cityOwnsLot && CBZ.cityOwnsLot(lot)) return true;
+    // the key to the house (owned, leased, or off the FOR SALE sign's lockbox
+    // for a viewing: city/realestate.js) is the key to its rooms
+    if (lot && CBZ.cityHomeKey && CBZ.cityHome && CBZ.cityHome.isHouse(lot) && CBZ.cityHomeKey(lot)) return true;
     return !!(CBZ.cityKeys && typeof CBZ.cityKeys.has === "function" && CBZ.cityKeys.has(d.id));
   }
   function unitDoorAt(px, pz, reach, py) {

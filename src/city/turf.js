@@ -15,8 +15,12 @@
      - ZONES derived from the lot grid (CBZ.cityZones / cityZoneOwner / cityZoneControl)
      - the takeover DIRECTOR (a cheap, time-sliced CBZ.onUpdate loop)
      - the ALLIANCE / relations graph (CBZ.cityAlliances)
-     - the one-screen takeover HUD: zone bar, headcount, alliances, kill feed
      - CBZ.cityTakeoverLeader() + the WIN check
+   It draws NOTHING. Who holds a district is the colours on the people
+   standing in it and the tag on its walls (city/turftags.js); a district
+   changing hands is a line of news (CBZ.news) like any other event. The
+   strip of district chips, the headcount, the alliance line and the feed
+   that sat on top of the screen are deleted.
 
    It reads gangs.js (rival crews, members, turf, captureLot) and playergang.js
    (the player's gang) and steers them — it never spawns peds itself.
@@ -166,19 +170,14 @@
   function gangName(id) { const x = (CBZ.cityGangs || []).find((y) => y.id === id); return x ? x.name : null; }
   function gangColorOf(id) { const x = (CBZ.cityGangs || []).find((y) => y.id === id); return x ? x.color : 0x8a93a3; }
 
-  // ---- ZONE-FLIP MOMENTS: every change of hands is a readable beat — a
-  //      minimap-adjacent toast under the zones bar ("EASTGATE falls to the
-  //      Vipers — 3/9 districts"), a kill-feed line, and a flash on the chip.
-  //      flipMuteT silences the announcements while a saved board is being
+  // ---- ZONE-FLIP MOMENTS: a district changing hands is news (the TV, the
+  //      phone). flipMuteT silences it while a saved board is being
   //      re-applied on reload (the ownership snap isn't news).
   let flipMuteT = 0;
-  const flipFeed = [];               // [{html, t}] merged into the kill feed
   CBZ.cityTurfMuteFlips = function (sec) { flipMuteT = Math.max(flipMuteT, sec || 3); };
 
   function onZoneFlip(z, prevId, newId) {
     if (!newId) return;
-    z._flashT = CBZ.now || 0;        // the chip flashes even on a muted flip
-    hudDirty = true;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (flipMuteT > 0) return;
     const you = newId === "player";
@@ -186,7 +185,6 @@
     const ctrl = CBZ.cityZoneControl();
     const held = (ctrl.byGang && ctrl.byGang[newId]) || 0;
     const score = held + "/" + ctrl.total + " districts";
-    const col = hex6(gangColorOf(newId));
     // signage law: no em dashes, no middle dots
     const line = you
       ? z.name.toUpperCase() + " is YOURS, " + score
@@ -207,9 +205,11 @@
     if (you) { CBZ.city && CBZ.city.addRespect(12); }
   }
 
-  // gangs.js calls this after an NPC↔NPC lot capture / playergang on claim —
-  // re-derive zone ownership and flag the HUD so colours follow turf instantly.
-  CBZ.cityRefreshTurfHud = function () { recomputeZones(false); hudDirty = true; };
+  // gangs.js calls this after an NPC↔NPC lot capture / playergang on a block
+  // changing hands: re-derive zone ownership now. (The name is history: there
+  // is no HUD behind it any more, only the zone map the radar, the full map
+  // and the wall tags read.)
+  CBZ.cityRefreshTurfHud = function () { recomputeZones(false); if (CBZ.cityTurfTagsDirty) CBZ.cityTurfTagsDirty(); };
 
   // ---- public zone API ----
   CBZ.cityZones = function () {
@@ -272,10 +272,9 @@
   CBZ.citySetRelation = function (a, b, status) {
     const v = status === "ally" ? 0.6 : status === "war" ? -0.6 : 0;
     setRel(a, b, v);
-    hudDirty = true;
   };
-  CBZ.cityForgeAlliance = function (a, b) { setRel(a, b, Math.max(getRel(a, b), 0.55)); hudDirty = true; };
-  CBZ.cityDeclareWar = function (a, b) { setRel(a, b, Math.min(getRel(a, b), -0.6)); hudDirty = true; };
+  CBZ.cityForgeAlliance = function (a, b) { setRel(a, b, Math.max(getRel(a, b), 0.55)); };
+  CBZ.cityDeclareWar = function (a, b) { setRel(a, b, Math.min(getRel(a, b), -0.6)); };
 
   // a gang's NATION (people / folk / neutral) — the real-world alliance bloc.
   function nationOf(id) {
@@ -619,7 +618,6 @@
     } else if (launched && CBZ.cityFeed) {
       try { CBZ.cityFlavor && CBZ.cityFlavor("The crews are uniting against " + ldr.name + ".", "#ff9b6b"); } catch (e) {}
     }
-    hudDirty = true;
   }
 
   // "fat treasury" / "cash-poor" thresholds — a gang sitting on real money can
@@ -703,7 +701,6 @@
         CBZ.city && CBZ.city.note(icon + " " + a.name + " & " + b.name + ": " + (word === "war" ? "war" : word === "alliance" ? "alliance" : "truce") + ".", 2.4);
       }
     }
-    hudDirty = true;
   }
 
   // ============================================================
@@ -766,7 +763,6 @@
     to.treasury = Math.max(0, (to.treasury || 0) - 80);  // signing cost
     if (nearPlayer(from.center.x, from.center.z, 180) || (to.isPlayer))
       CBZ.city && CBZ.city.note("↩ " + (ped.name || "A soldier") + " defected: " + from.name + " → " + to.name + ".", 2.4);
-    hudDirty = true;
   }
   CBZ.cityGangDefect = defect;
 
@@ -802,7 +798,6 @@
     }
     if (nearPlayer(target.cx, target.cz, 200))
       CBZ.city && CBZ.city.note("" + rich.name + " bought out " + target.name + ".", 2.4);
-    hudDirty = true;
   }
 
   // ============================================================
@@ -818,7 +813,7 @@
     if (z.strength > 0.7) { CBZ.city && CBZ.city.note(z.name + " is too strongly held to buy, take it by force.", 2.4); return false; }
     const owner = z.owner ? CBZ.cityGangById(z.owner) : null;
     const cost = 1500 + z.heldStr * 400;
-    if (!CBZ.cityPlayerGangExists || !CBZ.cityPlayerGangExists()) { CBZ.city && CBZ.city.note("Found a gang first ([O]).", 2); return false; }
+    if (!CBZ.cityPlayerGangExists || !CBZ.cityPlayerGangExists()) return false;
     if ((g.cash || 0) < cost) { CBZ.city && CBZ.city.note("We'd need $" + cost + " on hand to buy out " + z.name + ".", 2.4, { from: "Crew" }); return false; }
     g.cash -= cost; if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     const pg = CBZ.cityGangById("player");
@@ -831,7 +826,6 @@
     CBZ.city && CBZ.city.big("BOUGHT " + z.name);
     CBZ.city && CBZ.city.addRespect(10);
     recomputeZones(false);
-    hudDirty = true;
     return true;
   };
 
@@ -871,124 +865,8 @@
       CBZ.city && CBZ.city.note("You ride with the " + rec.name + " now.", 2.6);
     }
     CBZ.citySetRelation("player", gangId, "ally");
-    hudDirty = true;
     return true;
   };
-
-  // ============================================================
-  //  THE ONE-SCREEN TAKEOVER HUD — fits on screen, never scrolls.
-  //  Top-centre: a zone-control bar (owned-by colour) + the live HEADCOUNT.
-  //  Below it: a compact alliance strip. Bottom-left-ish: the KILL FEED.
-  //  All cheap DOM, re-rendered only when dirty or on a slow cadence.
-  // ============================================================
-  let hudRoot = null, zoneBarEl = null, headEl = null, allyEl = null, leadEl = null, feedEl = null;
-  let hudDirty = true, feedSig = "";
-  let toastEl = null, toastT = 0;
-
-  // the minimap-adjacent flip toast under the zones bar (one at a time; the
-  // freshest flip wins). Restarting the CSS animation makes repeats readable.
-  function showZoneToast(txt, color) {
-    // Kept as an internal compatibility seam; zone changes now live in News.
-    if (toastEl) { toastEl.textContent = ""; toastEl.style.display = "none"; }
-  }
-  function buildHud() {
-    if (hudRoot) return;
-    if (!document.getElementById("cTurfMetaCss")) {
-      const st = document.createElement("style");
-      st.id = "cTurfMetaCss";
-      st.textContent =
-        "#cTurfMeta{position:fixed;left:0;right:0;top:6px;z-index:21;pointer-events:none;font-family:Fredoka,system-ui,sans-serif;display:none}" +
-        "#cTurfMeta .wrap{width:min(560px,72vw);margin:0 auto;text-align:center}" +
-        "#cTurfMeta .zbar{display:flex;height:15px;border-radius:7px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.08)}" +
-        "#cTurfMeta .zseg{flex:1 1 0;min-width:2px;transition:background .3s}" +
-        "#cTurfMeta .zchip{display:flex;align-items:center;justify-content:center}" +
-        "#cTurfMeta .zchip span{font-size:9px;font-weight:800;color:#f2f6ff;text-shadow:0 1px 2px rgba(0,0,0,.9);letter-spacing:.4px;line-height:1}" +
-        "#cTurfMeta .zchip.zmine{box-shadow:inset 0 0 0 1px rgba(255,255,255,.6)}" +
-        "@keyframes zflash{0%{filter:brightness(2.8)}100%{filter:brightness(1)}}" +
-        "#cTurfMeta .zchip.zflash{animation:zflash 1.5s ease-out}" +
-        "#cTurfMeta .ztoast{margin-top:4px;font-size:13px;font-weight:700;letter-spacing:.3px;text-shadow:0 1px 3px rgba(0,0,0,.9);animation:ztIn .25s ease-out;display:none}" +
-        "@keyframes ztIn{0%{opacity:0;transform:translateY(-6px)}100%{opacity:1;transform:translateY(0)}}" +
-        "#cKillFeed .kfrow.zflip{background:rgba(10,16,26,.68)}" +
-        "#cTurfMeta .head{margin-top:3px;font-size:13px;font-weight:700;color:#e8eef7;text-shadow:0 1px 3px rgba(0,0,0,.8);letter-spacing:.3px}" +
-        "#cTurfMeta .head b{color:#ff8b6b}" +
-        "#cTurfMeta .lead{font-size:12px;margin-top:1px;text-shadow:0 1px 3px rgba(0,0,0,.85)}" +
-        "#cTurfMeta .ally{margin-top:3px;font-size:11px;color:#aeb6c2;text-shadow:0 1px 2px rgba(0,0,0,.85);line-height:1.5}" +
-        "#cTurfMeta .ally span{padding:0 4px}" +
-        "#cKillFeed{position:fixed;right:14px;top:120px;z-index:21;pointer-events:none;font-family:Fredoka,system-ui,sans-serif;width:230px;display:none}" +
-        "#cKillFeed .kfrow{background:rgba(8,11,17,.62);border-right:3px solid #c33;border-radius:4px;padding:2px 8px;margin-top:4px;color:#dfe6f0;font-size:12px;line-height:1.3;text-align:right;box-shadow:0 2px 6px rgba(0,0,0,.4);animation:kfIn .2s ease-out}" +
-        "#cKillFeed .kfrow b{color:#fff}" +
-        "#cKillFeed .kfrow.you{border-right-color:#ffd166;background:rgba(40,30,8,.7)}" +
-        "@keyframes kfIn{0%{opacity:0;transform:translateX(14px)}100%{opacity:1;transform:translateX(0)}}";
-      document.head.appendChild(st);
-    }
-    hudRoot = document.createElement("div");
-    hudRoot.id = "cTurfMeta";
-    hudRoot.innerHTML =
-      "<div class='wrap'>" +
-      "<div class='zbar' id='cZBar'></div>" +
-      "<div class='ztoast' id='cZToast'></div>" +
-      "<div class='head' id='cHead'></div>" +
-      "<div class='lead' id='cLead'></div>" +
-      "<div class='ally' id='cAlly'></div>" +
-      "</div>";
-    document.body.appendChild(hudRoot);
-    zoneBarEl = hudRoot.querySelector("#cZBar");
-    toastEl = hudRoot.querySelector("#cZToast");
-    headEl = hudRoot.querySelector("#cHead");
-    leadEl = hudRoot.querySelector("#cLead");
-    allyEl = hudRoot.querySelector("#cAlly");
-
-    feedEl = document.createElement("div");
-    feedEl.id = "cKillFeed";
-    document.body.appendChild(feedEl);
-  }
-
-  function hex6(n) { return "#" + ("000000" + ((n >>> 0).toString(16))).slice(-6); }
-
-  function renderZoneBar() {
-    if (!zoneBarEl) return;
-    let html = "";
-    const now = CBZ.now || 0;
-    for (const z of zones) {
-      const col = z.owner ? hex6(gangColorOf(z.owner)) : "#3a4151";
-      // strength → opacity (darker shade = stronger hold, GTA-SA style)
-      const op = z.owner ? (0.55 + z.strength * 0.45).toFixed(2) : "0.55";
-      // each district is a CHIP: initials on the owner's colour, a white inner
-      // ring on YOUR districts, a flash when it just changed hands.
-      const cls = "zseg zchip" +
-        (z.owner === "player" ? " zmine" : "") +
-        ((z._flashT && now - z._flashT < 1600) ? " zflash" : "");
-      // Ownership is already communicated by colour and the player's outline;
-      // district initials and hover tooltips were another permanent strip of
-      // HUD words. The phone/map carry the named ownership record.
-      html += "<div class='" + cls + "' aria-hidden='true' style='background:" + col + ";opacity:" + op + "'></div>";
-    }
-    zoneBarEl.innerHTML = html;
-  }
-
-  function renderHeadAndAllies() {
-    if (!headEl) return;
-    headEl.innerHTML = ""; headEl.style.display = "none";
-    if (leadEl) { leadEl.innerHTML = ""; leadEl.style.display = "none"; }
-    if (allyEl) { allyEl.innerHTML = ""; allyEl.style.display = "none"; }
-  }
-  function shortName(n) { if (!n) return "?"; const w = n.split(" "); return w.length > 1 ? w[w.length - 1] : n; }
-
-  // KILL FEED — reads CBZ.cityRecentDeaths (populated by killfeed.js) and
-  // merges in this file's own ZONE-FLIP lines, time-ordered, capped to 6 rows.
-  function renderKillFeed() {
-    if (!feedEl) return;
-    feedSig = "";
-    feedEl.innerHTML = "";
-    feedEl.style.display = "none";
-  }
-  function esc(s) { return String(s).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])); }
-
-  function showHud(on) {
-    buildHud();
-    hudRoot.style.display = on ? "block" : "none";
-    if (!on && feedEl) feedEl.style.display = "none";
-  }
 
   // ============================================================
   //  PERSISTENCE (rides gangs.js's GANG_PERSIST flag) — the relations graph +
@@ -1048,7 +926,6 @@
     for (const k in (b.rel || {})) rel[k] = clamp(+b.rel[k] || 0, -1, 1);
     won = !!b.won;
     flipMuteT = Math.max(flipMuteT, 3);        // the restored board isn't news
-    hudDirty = true;
   }
 
   // ============================================================
@@ -1058,12 +935,7 @@
     zones = []; zonesBuilt = false; won = false; startPop = 0;
     for (const k in rel) delete rel[k];
     _rallyCool = 0;
-    feedSig = "";
-    flipFeed.length = 0; toastT = 0; flipMuteT = 0;
-    if (toastEl) toastEl.style.display = "none";
-    if (hudRoot) hudRoot.style.display = "none";
-    if (feedEl) { feedEl.style.display = "none"; feedEl.innerHTML = ""; }
-    hudDirty = true;
+    flipMuteT = 0;
   };
 
   // ============================================================
@@ -1076,11 +948,10 @@
   let directorT = 0;         // AI expansion decisions
   let diploT = 0;            // alliance moves
   let econT = 0;             // defection / buyout cadence
-  let hudT = 0;              // HUD refresh cadence
   let slice = 0;             // round-robin so only one heavy job runs per tick
 
   CBZ.onUpdate(34.6, function (dt) {
-    if (g.mode !== "city") { if (hudRoot && hudRoot.style.display !== "none") showHud(false); return; }
+    if (g.mode !== "city") return;
 
     // persistence plumbing (rides GANG_PERSIST): install the ledger stamp
     // wraps once; adopt a changed ledger reference.
@@ -1097,17 +968,14 @@
           if (zonesBuilt) {
             seedAlliances();
             applyRelBlob();                    // saved relations/win latch beat the seeded graph
-            startPop = liveHeadcount(); showHud(true);
+            startPop = liveHeadcount();
           }
         }
       }
       return;
     }
-    showHud(true);
     if (_relNeedApply) applyRelBlob();   // ledger adopted mid-run (MP adopt) with zones already built
-    // zone-flip announcement timers (toast fade + the restore mute window)
-    if (flipMuteT > 0) flipMuteT -= dt;
-    if (toastT > 0) { toastT -= dt; if (toastT <= 0 && toastEl) toastEl.style.display = "none"; }
+    if (flipMuteT > 0) flipMuteT -= dt;   // the restore mute window
 
     // --- ownership recompute (cheap-ish; every ~1.2s) ---
     recomputeT -= dt;
@@ -1115,7 +983,6 @@
       recomputeT = 1.2;
       recomputeZones(false);
       checkWin();
-      hudDirty = true;
     }
 
     // --- round-robin the heavier directors so only ONE fires per tick ---
@@ -1149,11 +1016,5 @@
     // continuous slow alliance drift (very cheap)
     driftAlliances(dt);
 
-    // --- HUD refresh: zone bar + leader/allies only when dirty; headcount +
-    //     kill feed on a steady cadence (they change constantly). ---
-    hudT -= dt;
-    if (hudDirty) { renderZoneBar(); renderHeadAndAllies(); hudDirty = false; hudT = 0.4; }
-    if (hudT <= 0) { hudT = 0.5; renderHeadAndAllies(); }
-    renderKillFeed();
   });
 })();

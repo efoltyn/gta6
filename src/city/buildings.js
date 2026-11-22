@@ -3102,7 +3102,10 @@
     CBZ.sfx(open ? "door_open" : "door_close", { dist: dist, volume: volume });
   }
   function doorOccupied(dr, includeCars) {
-    if (playerAtDoor(dr)) return true;
+    // A HOUSE DOOR YOU HOLD NO KEY TO stays shut for you (city/realestate.js
+    // stamps _playerLock on a house's street door: the lockbox key off its
+    // FOR SALE sign, the deed, or the lease opens it).
+    if (playerAtDoor(dr) && !(dr._playerLock && dr._playerLock(dr))) return true;
     if (includeCars && CBZ.cityCars) {
       for (let k = 0; k < CBZ.cityCars.length; k++) {
         const c = CBZ.cityCars[k]; if (!c || c.dead || !c.pos) continue;
@@ -8547,8 +8550,17 @@
         let ccx = door.nx * (w / 2 - 2.8), ccz = door.nz * (d / 2 - 2.8);
         let cw = door.nx ? 0.8 : Math.min(w - 2, 4.5);
         let cd = door.nz ? 0.8 : Math.min(d - 2, 4.5);
-        ({ ccx, ccz, cw, cd } = fitCounter(b, door.nx, ccx, ccz, cw, cd));
-        b.lbox(ccx, 0.6, ccz, cw, 1.2, cd, 0x6b4a2a, { solid: true });
+        // THE GUN SHOP IS A SHOP-SIZED ROOM IN ITS SHELL (city/gunstore.js
+        // CBZ.gunShopPlan: the sales floor inside the door, the counter across
+        // it, a barred back room behind): the counter stands where that plan
+        // puts it, and gunstore.js builds it (a glass display counter is not
+        // a brown box). Every other trade keeps the back-wall counter.
+        const gunPlan = (shop.kind === "guns" && CBZ.gunShopPlan) ? CBZ.gunShopPlan(b) : null;
+        if (gunPlan) ({ ccx, ccz, cw, cd } = gunPlan.counterBox);
+        else {
+          ({ ccx, ccz, cw, cd } = fitCounter(b, door.nx, ccx, ccz, cw, cd));
+          b.lbox(ccx, 0.6, ccz, cw, 1.2, cd, 0x6b4a2a, { solid: true });
+        }
         const vsx = lot.cx + ccx + door.nx * 1.2, vsz = lot.cz + ccz + door.nz * 1.2;
         lot.kind = shop.kind;
         lot.building = {
@@ -8629,7 +8641,8 @@
           const inx = door.nx, inz = door.nz, tgx = -inz, tgz = inx;   // inward + wall-tangent units
           const halfIn = (inx !== 0 ? w : d) / 2;                       // door wall → room centre
           const halfTan = (inx !== 0 ? d : w) / 2;
-          lot.building.gunstore = {
+          // (a shell with a shop plan: the room, the gun wall and the counter are the plan's)
+          lot.building.gunstore = gunPlan ? gunPlan.descriptor(lot.cx, lot.cz, shop.name) : {
             name: shop.name,
             // the walkable interior footprint ("you're in the store")
             bounds: { minX: lot.cx - w / 2 + WT, maxX: lot.cx + w / 2 - WT, minZ: lot.cz - d / 2 + WT, maxZ: lot.cz + d / 2 - WT },

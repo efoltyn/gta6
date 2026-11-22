@@ -56,10 +56,7 @@ body.mode-city.state-playing #roofStashChip,
 body.mode-city.state-playing #beachLootChip,
 body.mode-city.state-playing #realtyPrompt,
 body.mode-city.state-playing #modshopHud,
-body.mode-city.state-playing #cityOrders,
 body.mode-city.state-playing #cityHeistHud,
-body.mode-city.state-playing #cKillFeed,
-body.mode-city.state-playing #cTurfMeta,
 body.mode-city.state-playing #streakHud,
 body.mode-city.state-playing #streakMeter,
 body.mode-city.state-playing > .panel[style*="bottom: 78px"],
@@ -115,9 +112,7 @@ body.mode-city.state-playing #raceLights .go { display: none !important; }
 
 /* Pausing is a clean break in the world view. City overlays used to keep
    drawing through the pause card (including the portrait in screenshot #1). */
-body:not(.state-playing) #cityHud,
-body:not(.state-playing) #cTurfMeta,
-body:not(.state-playing) #cKillFeed { display: none !important; }
+body:not(.state-playing) #cityHud { display: none !important; }
 
 /* ---- THE COUNTER IS TAPPABLE (2026-08-18) --------------------------------
    city/shops.js used to print [X] / [V] / [0-9] / [R] and listen only for a
@@ -179,13 +174,6 @@ body.touch #modshopPanel .msClose { min-height: 52px; background: rgba(255,255,2
 body.touch #cityCarBiz .ebRow { min-height: 44px; display: flex; align-items: center; padding: 8px 10px; margin: 3px 0; }
 body.touch #cityCarBiz .ebBtn { min-height: 48px; justify-content: center; background: rgba(255,255,255,.07); }
 
-/* the realty menu (city/realestate.js) */
-#cityRealty .reRow { cursor: pointer; border-radius: 8px; padding-left: 6px; padding-right: 6px; -webkit-tap-highlight-color: transparent; }
-#cityRealty .reRow:hover { background: rgba(255,209,102,.10); }
-#cityRealty .reRow:active { background: rgba(255,209,102,.20); }
-#cityRealty .reBtn { margin-top: 10px; padding: 9px 12px; border: 1px solid #2f3a44; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; }
-body.touch #cityRealty .reRow { min-height: 44px; display: flex; align-items: center; padding: 8px 10px; margin: 3px 0; }
-body.touch #cityRealty .reBtn { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
 
 /* the empire panel (city/wealth.js) — its action pills were spans */
 #cityEmpire .weRow { -webkit-tap-highlight-color: transparent; }

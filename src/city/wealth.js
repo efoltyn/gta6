@@ -706,14 +706,6 @@
     const inc = incomePerSec();
     h += "<div style='font-size:12px;color:#c9b98a;margin-bottom:6px'>Passive empire, <b style='color:#7ed957'>" + money(inc) + "/sec</b> · " +
       laundromats() + " laundering front" + (laundromats() === 1 ? "" : "s") + " · synergy ×" + empireSynergy().toFixed(2) + "</div>";
-    // turf street-tax faucet (economy.js) — shown so the player connects taking
-    // territory to passive income, the heart of the takeover loop.
-    const e0 = E();
-    if (e0.turfIncomeInfo) {
-      const ti = e0.turfIncomeInfo();
-      if (ti.zones > 0) h += "<div style='font-size:12px;color:#c9b98a;margin-bottom:8px'>Turf tax, <b style='color:#ff9e6b'>" + money(ti.perSec) + "/sec</b> from <b>" + ti.zones + "</b> block" + (ti.zones === 1 ? "" : "s") + " held · ×" + tierPerk("turfMul").toFixed(2) + " status</div>";
-      else h += "<div style='font-size:12px;color:#8a7d5a;margin-bottom:8px'>Take turf with your crew to collect street tax (passive $/sec).</div>";
-    }
     // raid-pressure banner — connect HIGH HEAT to the risk on your fronts.
     if ((g.wanted | 0) >= 3) {
       let exposed = 0; for (const id in state().cityEmpireBiz) if (raidChance(id) > 0) exposed++;

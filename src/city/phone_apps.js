@@ -628,7 +628,7 @@
     }
     if (id === "crew") {
       // the order goes to every man of the gang and each decides
-      // (playergang.js issueOrder -> systems/command.js); the voice on the
+      // (playergang.js cityPlayerGangOrder -> systems/command.js); the voice on the
       // line is the answer most of them gave
       const order = function (k, line) { return function () {
         if (!CBZ.cityPlayerGangOrder) return { ok: false, why: "Nobody picked up." };
@@ -640,8 +640,7 @@
       }; };
       return { line: "Yeah, boss?", choices: [
         { id: "follow", label: "Come to me", run: order("follow", "On our way.") },
-        { id: "hold", label: "Hold here", run: order("hold", "We'll hold it.") },
-        { id: "raid", label: "Hit their stash", run: order("raid", "Say less.") },
+        { id: "home", label: "Go home", run: order("home", "Heading back.") },
       ] };
     }
     if (id.indexOf("met:") === 0) {
