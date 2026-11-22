@@ -148,6 +148,14 @@
     const P = g.attributes.position.array, N = g.attributes.normal.array, cnt = g.attributes.position.count;
     _nm.getNormalMatrix(m);
     for (let i = 0; i < cnt; i += 3) {
+      // o.drop: faces of the template left out, by their LOCAL normal (+x 1,
+      // -x 2, +y 4, -y 8, +z 16, -z 32): a box standing on the ground has no
+      // underside anyone sees (city/house_yard.js asks; the island does not)
+      if (o.drop) {
+        const j0 = i * 3, lx = N[j0], ly = N[j0 + 1], lz = N[j0 + 2];
+        if (((o.drop & 1) && lx > 0.9) || ((o.drop & 2) && lx < -0.9) || ((o.drop & 4) && ly > 0.9) || ((o.drop & 8) && ly < -0.9)
+          || ((o.drop & 16) && lz > 0.9) || ((o.drop & 32) && lz < -0.9)) continue;
+      }
       for (let k = 0; k < 3; k++) {
         const j = (i + k) * 3;
         _tv[k].set(P[j], P[j + 1], P[j + 2]).applyMatrix4(m);

@@ -137,10 +137,20 @@
     if (CBZ.interactions && CBZ.interactions.refresh) { try { CBZ.interactions.refresh(); } catch (e) {} }
     return true;
   }
+  // every house there is right now: the town and city lots, and the metro
+  // suburbs' houses standing real round the player (city/house_metro.js)
+  function houseLots(A) {
+    const base = A.homeLots || [], MH = CBZ.metroHomes;
+    const live = MH && MH.live ? MH.live() : null;
+    if (!live || !live.length) return base;
+    const out = base.slice();
+    for (const e of live) if (e.lot) out.push(e.lot);
+    return out;
+  }
   // a house on the market keeps its door shut to you until you hold a key
   function lockTick() {
     const A = arena(), P = CBZ.player; if (!A || !P || !P.pos) return;
-    for (const lot of A.homeLots || []) {
+    for (const lot of houseLots(A)) {
       const b = lot.building; if (!b || !b.doors || !isHouse(lot)) continue;
       const dx = lot.cx - P.pos.x, dz = lot.cz - P.pos.z;
       if (dx * dx + dz * dz > 120 * 120) continue;
@@ -163,7 +173,7 @@
   function lockedDoorAt(px, pz, r) {
     const A = arena(); if (!A) return null;
     let best = null, bd = r * r;
-    for (const lot of A.homeLots || []) {
+    for (const lot of houseLots(A)) {
       const b = lot.building; if (!b || !b.doors) continue;
       const dx0 = lot.cx - px, dz0 = lot.cz - pz;
       if (dx0 * dx0 + dz0 * dz0 > 40 * 40) continue;
@@ -347,7 +357,7 @@
   const spotCache = new WeakMap();
   function spots(lot) {
     const b0 = lot.building;
-    const built = (b0 && b0.colliders && b0.colliders.length ? "b" : "") + (b0 && b0._house ? "h" : "") + (b0 && b0.group ? "g" : "");
+    const built = (b0 && b0.colliders && b0.colliders.length ? "b" : "") + (b0 && (b0._house || b0._flat) ? "h" : "") + (b0 && b0.group ? "g" : "");
     const hit = spotCache.get(lot);
     if (hit && hit.built === built) return hit.s;
     /* THE HOUSE SAYS WHERE (city/house_plan.js): the safe in the bedroom

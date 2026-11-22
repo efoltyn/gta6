@@ -126,6 +126,14 @@
   };
   CBZ.fitoutSiteOf = function (b) { return b ? SITES.get(siteKey(b)) || null : null; };
   CBZ.fitoutReset = function () { disposeAll(); SITES.clear(); SITE_LIST = null; };
+  // a building that is gone for good (city/house_metro.js: a metro house that
+  // went back to being part of its tile): its rooms are freed, its site forgotten
+  CBZ.fitoutForget = function (b) {
+    const key = b ? siteKey(b) : null, s = key ? SITES.get(key) : null;
+    if (!s) return false;
+    freeSite(s); SITES.delete(key); SITE_LIST = null;
+    return true;
+  };
 
   /* ========================================================================
      2. MATERIALS — a handful of canvas textures, built once, never freed.
@@ -1362,6 +1370,8 @@
      ======================================================================== */
   const PLANS = Object.create(null);
   CBZ.fitoutPlan = function (name, fn) { if (name && typeof fn === "function") PLANS[name] = fn; };
+  // (one plan calling another: a corridor of flats hands the owner's flat to the house planner)
+  CBZ.fitoutPlanOf = function (name) { return PLANS[name] || null; };
   CBZ.fitoutPlans = function () { return Object.keys(PLANS); };
   // the finish every declared floor gets when no planner claims it: a real
   // floor and a real light. Nothing else; the eager program is the room.

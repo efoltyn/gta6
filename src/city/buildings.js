@@ -6783,7 +6783,25 @@
   }
   CBZ.cityFurnishInterior = function (b, kind, door) { furnishInterior(b, kind, door); };
 
-  function furnishHome(b, rng, tier, baseY) {
+  /* THE LISTED HOME ON A TOWER'S TOP STOREY IS A FLAT ON THAT FLOOR, not the
+     whole 27 m plate. The storey is a corridor of flats like the ones under
+     it (interior_programs.js "residential"); one of them, a run of bays for
+     the bigger rungs of the ladder, is the home, and it gets a floor plan of
+     its own (city/house_plan.js furnishUnit: entry, living room and kitchen,
+     bedrooms, a bathroom) and the house fit-out. A plate that cannot be a
+     corridor of flats keeps the whole-plate dressing below. */
+  function furnishHome(b, rng, tier, baseY, lot) {
+    const HK = CBZ.cityHouse;
+    if (HK && HK.furnishUnit && interiorsV2() && CBZ.CONFIG.INTERIOR_COHERENCE_V1 !== false && baseY > 1) {
+      const t = (tier && tier.tier) || 1;
+      let res = null;
+      try { res = dressFloorWith(b, baseY, "residential", { home: { bays: t >= 4 ? 3 : t >= 3 ? 2 : 1 } }); } catch (e) { res = null; }
+      if (res) {
+        if (res.beds && res.beds.length) declareResidents(b, res.beds);
+        if (res.home) { try { HK.furnishUnit(b, lot || null, res.home); } catch (e) { if (window.console) console.warn("[home flat]", e); } }
+        return;
+      }
+    }
     return bounded(b, "home", function () { return furnishHomeBody(b, rng, tier, baseY); });
   }
   function furnishHomeBody(b, rng, tier, baseY) {
@@ -8944,7 +8962,7 @@
             const topY2 = (stC - 1) * FH;
             const pool2 = (!houseK && tierC.tier >= 4 && stC >= 3) ? Math.max(1, Math.min(stC - 2, stC - 2)) : -1;
             if (!houseK) {
-              furnishHome(bb, rng, tierC, topY2);
+              furnishHome(bb, rng, tierC, topY2, lotRef);
               for (let k = 0; k < stC - 1; k++) {
                 if (k === pool2) furnishPoolFloor(bb, k * FH);
                 else furnishApartmentFloor(bb, k * FH, (lotRef.i | 0) * 5 + (lotRef.j | 0) * 3 + k);
@@ -8978,7 +8996,7 @@
         // meant a bare plate). Every storey under it gets the generic
         // apartment dresser so the stair climb passes lived-in rooms.
         const topY = (storeys - 1) * FH;
-        furnishHome(b, rng, tierDef, topY);
+        furnishHome(b, rng, tierDef, topY, lot);
         // MANSION-tier homes (tier>=4, 3+ storeys) get a dedicated indoor POOL
         // floor just below the top home floor — the owner's explicit ask. Clamped
         // to a real interior storey (never ground or top); every other storey is a

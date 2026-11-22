@@ -367,6 +367,19 @@
     return job;
   };
 
+  /* A JOB ITS OWNER DECIDES ABOUT (city/house_metro.js: a metro suburb's
+     house made real while the player is on its street). Built now, under the
+     same capture and settle as a streamed job (so everything a builder
+     registers leaves with it); never listed, so the streamer neither parks
+     nor re-runs it. Its owner frees it. */
+  CBZ.streamOwnJob = function (rect, fn, name) {
+    if (typeof fn !== "function" || !CBZ.slice) return null;
+    const job = { rect: rect, fn: fn, steps: null, name: name || "own", pure: false, state: "queued", parent: null, own: true };
+    runCaptured(job); settle(job);
+    return job;
+  };
+  CBZ.streamOwnFree = function (job) { if (job && job.own && job.state !== "queued") freeJob(job); };
+
   // a whole landmass builder the boot skipped (city/worldmap.js)
   CBZ.streamQueueBuilder = function (key, rec, fn, replayed) {
     if (!CBZ.slice || !CBZ.slice.stream) return;

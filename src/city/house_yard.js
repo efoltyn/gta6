@@ -175,6 +175,337 @@
        ownGarage  the house grammar drew its own garage door (the ranch)
        lot    the lot record: its building learns where its car stands
      Returns { mesh, colliders, garageRect, stand }. */
+  /* ---- WHAT MOVES ON A LOT: THE GATE, THE GARAGE DOOR, THE CAR ON THE DRIVE --------
+     A lot is one merged mesh, and a merged mesh cannot swing. The leaves that
+     move are INSTANCES: one InstancedMesh for every gate of a kind in the
+     world and one for every garage door (four draw calls for all of them, not
+     one per house), given to the lots within LEAF_R of the player and taken
+     back when they fall behind or their lot is streamed out.
+
+       THE GATE on the walk is shut until you walk into it: it swings away
+         from you and stays where it is left (the front door's rule). E shuts
+         it, or opens it without walking through. It has no collider: a gate
+         that is shut is a gate you push.
+       THE GARAGE DOOR rolls up for whoever holds the house's key (E, on foot
+         or at the wheel). A locked one can be forced: that is loud and it is
+         a burglary (the same alarm and charge as a kicked-in front door).
+         Shut, it is a wall (its collider); open, the collider is out.
+       A RESIDENT'S CAR stands on the drive of seven houses in ten that
+         somebody lives in (not one of yours: the drive is then for your own
+         cars, city/realestate.js). It is a real parked car, of a make the
+         street can afford; drive it away and it is stolen, and gone.
+     The lot's record leaves with its stream job (the hook below). */
+  const RECS = [];
+  let RSEQ = 0;
+  const POOLS = Object.create(null);
+  const LEAF_R = 90, CAR_R = 75;
+  const M4 = new THREE.Matrix4(), QT = new THREE.Quaternion(), V1 = new THREE.Vector3(), V2 = new THREE.Vector3(), CL = new THREE.Color(), UP = new THREE.Vector3(0, 1, 0);
+  // [x0, x1, y0, y1, z0, z1, shade] boxes -> one geometry (white, shaded per box)
+  function boxesGeo(list) {
+    const n = list.length, P = new Float32Array(n * 72), N = new Float32Array(n * 72), C = new Float32Array(n * 72), I = new Uint16Array(n * 36);
+    let v = 0, ii = 0;
+    for (const b of list) {
+      const g = new THREE.BoxGeometry(b[1] - b[0], b[3] - b[2], b[5] - b[4]);
+      g.translate((b[0] + b[1]) / 2, (b[2] + b[3]) / 2, (b[4] + b[5]) / 2);
+      P.set(g.attributes.position.array, v * 3); N.set(g.attributes.normal.array, v * 3);
+      const sh = b[6] == null ? 1 : b[6];
+      for (let k = 0; k < 72; k++) C[v * 3 + k] = sh;
+      const ix = g.index.array; for (let k = 0; k < 36; k++) I[ii + k] = ix[k] + v;
+      v += 24; ii += 36; g.dispose();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(C, 3));
+    geo.setIndex(new THREE.BufferAttribute(I, 1));
+    geo._shared = true;
+    return geo;
+  }
+  // a leaf is one metre long from its hinge (x 0..1), scaled to its own length
+  const LEAF = {
+    picket: function () {
+      const L = [[0.02, 1, 0.24, 0.31, -0.015, 0.015], [0.02, 1, 0.72, 0.79, -0.015, 0.015]];
+      for (let i = 0; i < 7; i++) { const c = (i + 0.5) / 7; L.push([c - 0.035, c + 0.035, 0.07, 0.95, 0.015, 0.033]); }
+      return boxesGeo(L);
+    },
+    chain: function () {
+      const L = [[0, 1, 0.06, 0.095, -0.018, 0.018], [0, 1, 1.14, 1.175, -0.018, 0.018], [0, 0.036, 0.06, 1.175, -0.018, 0.018], [0.964, 1, 0.06, 1.175, -0.018, 0.018]];
+      for (let u = 0.2; u < 0.9; u += 0.175) L.push([u - 0.005, u + 0.005, 0.09, 1.14, -0.005, 0.005, 0.8]);
+      for (const y of [0.4, 0.78]) L.push([0.03, 0.97, y - 0.005, y + 0.005, -0.005, 0.005, 0.8]);
+      return boxesGeo(L);
+    },
+    iron: function () {
+      const L = [[0, 1, 0.1, 0.14, -0.02, 0.02], [0, 1, 1.03, 1.07, -0.02, 0.02]];
+      for (let u = 0.03; u <= 1; u += 0.125) L.push([u - 0.012, u + 0.012, 0.1, 1.18 + (Math.abs(u - 0.5) < 0.26 ? 0.1 : 0.03), -0.012, 0.012]);
+      return boxesGeo(L);
+    },
+    // a sectional door: x -0.5..0.5, y 0..1 (scaled to the opening), four panels on a darker back
+    garage: function () {
+      const L = [[-0.5, 0.5, 0, 1, 0, 0.02, 0.72]];
+      for (let k = 0; k < 4; k++) L.push([-0.5, 0.5, k / 4 + 0.007, (k + 1) / 4 - 0.007, 0.02, 0.05]);
+      for (let k = 0; k < 4; k++) for (const e of [-0.25, 0.25]) L.push([e - 0.19, e + 0.19, k / 4 + 0.05, (k + 1) / 4 - 0.05, 0.05, 0.058, 0.93]);
+      return boxesGeo(L);
+    },
+  };
+  let _leafMat = null;
+  function leafMat() {
+    if (_leafMat) return _leafMat;
+    _leafMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    _leafMat._shared = true; _leafMat.name = "house-lot-leaf";
+    return _leafMat;
+  }
+  function poolGrow(pl, cap) {
+    const old = pl.mesh;
+    const mesh = new THREE.InstancedMesh(old ? old.geometry : LEAF[pl.name](), leafMat(), cap);
+    mesh.name = "house-lot-" + pl.name; mesh.frustumCulled = false; mesh.castShadow = false; mesh.receiveShadow = true;
+    mesh.userData.dynamic = true; mesh.matrixAutoUpdate = false;
+    M4.makeScale(0, 0, 0); CL.setRGB(1, 1, 1);
+    for (let i = 0; i < cap; i++) { mesh.setMatrixAt(i, M4); mesh.setColorAt(i, CL); }
+    if (old) {
+      mesh.instanceMatrix.array.set(old.instanceMatrix.array);
+      mesh.instanceColor.array.set(old.instanceColor.array);
+      if (old.parent) old.parent.remove(old);
+      old.dispose();
+    }
+    for (let i = cap - 1; i >= pl.cap; i--) pl.free.push(i);
+    pl.cap = cap; pl.mesh = mesh;
+    CBZ.scene.add(mesh);
+  }
+  function poolOf(name) {
+    if (!CBZ.scene) return null;
+    let pl = POOLS[name];
+    if (pl && pl.mesh.parent === CBZ.scene) return pl;
+    pl = POOLS[name] = { name: name, cap: 0, mesh: null, free: [] };
+    poolGrow(pl, 32);
+    return pl;
+  }
+  function leafTake(name) { const pl = poolOf(name); if (!pl) return -1; if (!pl.free.length) poolGrow(pl, pl.cap * 2); return pl.free.pop(); }
+  function leafGive(name, i) {
+    const pl = POOLS[name];
+    if (!pl || i < 0 || i >= pl.cap) return;
+    M4.makeScale(0, 0, 0); pl.mesh.setMatrixAt(i, M4); pl.mesh.instanceMatrix.needsUpdate = true;
+    pl.free.push(i);
+  }
+  function leafPut(name, i, x, y, z, yaw, sx, sy, col) {
+    const pl = POOLS[name];
+    if (!pl || i < 0) return;
+    QT.setFromAxisAngle(UP, yaw); M4.compose(V1.set(x, y, z), QT, V2.set(sx, sy, 1));
+    pl.mesh.setMatrixAt(i, M4); pl.mesh.instanceMatrix.needsUpdate = true;
+    if (col) { pl.mesh.setColorAt(i, CL.setRGB(col[0], col[1], col[2])); pl.mesh.instanceColor.needsUpdate = true; }
+  }
+  // is this lot's mesh in the world right now (not parked, not freed)?
+  function attached(rec) { let o = rec.mesh, n = 0; while (o && n++ < 8) { if (o === CBZ.scene) return true; o = o.parent; } return false; }
+  const GATE_OPEN = 1.32;
+  function poseGate(rec) {
+    const g = rec.gate;
+    for (const lf of g.leaves) {
+      if (lf.inst < 0) continue;
+      // closed, the leaf lies along the fence from its hinge; open, it has
+      // turned by ang toward the house (+) or the street (-)
+      const c = Math.cos(g.ang), sn = Math.sin(g.ang);
+      const dx = g.tx * lf.dir * c - g.nx * sn, dz = g.tz * lf.dir * c - g.nz * sn;
+      leafPut(g.kind, lf.inst, lf.hx, g.y, lf.hz, Math.atan2(-dz, dx), lf.L, 1, g.col);
+    }
+  }
+  function poseDoors(rec) {
+    const yaw = Math.atan2(rec.nx, rec.nz), k = 1 - 0.95 * rec.open;
+    for (const d of rec.doors) if (d.inst >= 0) leafPut("garage", d.inst, d.x, d.y + d.h * (1 - k), d.z, yaw, d.w, d.h * k, d.col);
+  }
+  function doorSolid(rec, shut) {
+    for (const d of rec.doors) {
+      const c = d.solid; if (!c) continue;
+      const inIt = CBZ.colliders.indexOf(c) >= 0;
+      if (shut && !inIt) { if (CBZ.colliderAdd) CBZ.colliderAdd(c); else CBZ.colliders.push(c); }
+      else if (!shut && inIt) { if (CBZ.colliderRemove) CBZ.colliderRemove(c); else CBZ.colliders.splice(CBZ.colliders.indexOf(c), 1); }
+    }
+  }
+  function recOn(rec) {
+    rec.on = true;
+    if (rec.gate) { for (const lf of rec.gate.leaves) if (lf.inst < 0) lf.inst = leafTake(rec.gate.kind); poseGate(rec); }
+    if (rec.doors) { for (const d of rec.doors) if (d.inst < 0) d.inst = leafTake("garage"); poseDoors(rec); doorSolid(rec, rec.open < 0.5); }
+  }
+  function recOff(rec) {
+    rec.on = false;
+    if (rec.gate) for (const lf of rec.gate.leaves) if (lf.inst >= 0) { leafGive(rec.gate.kind, lf.inst); lf.inst = -1; }
+    if (rec.doors) for (const d of rec.doors) if (d.inst >= 0) { leafGive("garage", d.inst); d.inst = -1; }
+  }
+  /* ---- the resident's car ---- */
+  let CARS_BY_TIER = null;
+  function carsFor(tier) {
+    const E = CBZ.cityEcon, all = E && E.CARS;
+    if (!all || !all.length) return null;
+    if (!CARS_BY_TIER) {
+      const ok = function (c) { return c && !c.livery && c.value > 0; };
+      CARS_BY_TIER = {
+        poor: all.filter(function (c) { return ok(c) && c.value <= 9500; }),
+        mid: all.filter(function (c) { return ok(c) && c.value >= 4000 && c.value <= 42000; }),
+        rich: all.filter(function (c) { return ok(c) && c.value >= 30000; }),
+      };
+    }
+    const L = CARS_BY_TIER[tier];
+    return L && L.length ? L : null;
+  }
+  function lived(rec) {
+    const lot = rec.lot, b = lot && lot.building;
+    if (!b || !b.home || lot.demolished) return false;
+    // (every house nobody has bought carries a FOR SALE sign in this city and
+    // has its resident on the sofa all the same: the sign is not the test)
+    if (CBZ.cityOwnsLot && CBZ.cityOwnsLot(lot)) return false;
+    return true;
+  }
+  function carAtStand(st, r) {
+    for (const c of CBZ.cityCars || []) if (c && !c.dead && c.pos && Math.abs(c.pos.x - st.x) < r && Math.abs(c.pos.z - st.z) < r) return c;
+    return null;
+  }
+  function carTick(rec, d, canAdd) {
+    const st = rec.stand;
+    if (rec.car) {
+      const c = rec.car;
+      const gone = c.dead || !CBZ.cityCars || CBZ.cityCars.indexOf(c) < 0;
+      const moved = !gone && c.pos && Math.hypot(c.pos.x - st.x, c.pos.z - st.z) > 4;
+      if (gone || moved || c.player) { rec.car = null; rec.carDone = true; return false; }      // taken, or wrecked: it does not come back
+      if (d > CAR_R + 30 || !lived(rec)) { try { CBZ.cityScrapCar(c); } catch (e) {} rec.car = null; }
+      return false;
+    }
+    if (!canAdd || rec.carDone || d > CAR_R || !st || !CBZ.cityAddParkedCar) return false;
+    if (h01(rec.cx, rec.cz, 0x7f6) > 0.7 || !lived(rec)) { rec.carDone = true; return false; }   // out, or nobody's home
+    if (carAtStand(st, 3.2)) return false;
+    const L = carsFor(rec.tier);
+    const m = L ? L[(h01(rec.cx, rec.cz, 0x7f7) * L.length) | 0] : null;
+    let c = null;
+    try { c = CBZ.cityAddParkedCar(st.x, st.z, st.heading, m ? { modelName: m.name } : {}); } catch (e) { c = null; }
+    if (!c) { rec.carDone = true; return false; }
+    c._resident = rec.lot || true;
+    rec.car = c;
+    return true;
+  }
+  function dropRec(rec) {
+    recOff(rec);
+    if (rec.car) {
+      const c = rec.car, st = rec.stand;
+      if (!c.dead && !c.player && c.pos && st && Math.hypot(c.pos.x - st.x, c.pos.z - st.z) < 4) { try { CBZ.cityScrapCar(c); } catch (e) {} }
+      rec.car = null;
+    }
+    const i = RECS.indexOf(rec); if (i >= 0) RECS.splice(i, 1);
+  }
+  if (CBZ.streamBusHook) CBZ.streamBusHook({
+    mark: function () { return RSEQ; },
+    since: function (m) { const out = []; for (let i = RECS.length - 1; i >= 0 && RECS[i].seq > m; i--) out.push(RECS[i]); return out; },
+    drop: function (items) { for (const it of items) dropRec(it); },
+  });
+  let scanT = 0, NEAR = [], wired = false;
+  function gateOf(px, pz, r) {
+    let best = null, bd = r * r;
+    for (const rec of NEAR) { const g = rec.gate; if (!g || !rec.on) continue; const q = (g.x - px) * (g.x - px) + (g.z - pz) * (g.z - pz); if (q < bd) { bd = q; best = rec; } }
+    return best;
+  }
+  function garageOf(px, pz, r) {
+    let best = null, bd = r * r;
+    for (const rec of NEAR) { if (!rec.doors || !rec.on) continue; const q = (rec.gx - px) * (rec.gx - px) + (rec.gz - pz) * (rec.gz - pz); if (q < bd) { bd = q; best = rec; } }
+    return best;
+  }
+  function holdsKey(rec) { return !!(rec.lot && CBZ.cityHomeKey && CBZ.cityHomeKey(rec.lot)); }
+  function wire() {
+    const I = CBZ.interactions;
+    if (wired || !I || !I.registerZone) return;
+    wired = true;
+    // (ay: where a finger finds it on a touch screen, the middle of the leaf)
+    const tgt = function (rec, key, x, z, h) { const t = rec[key] || (rec[key] = { pos: { x: 0, y: rec.y0, z: 0 }, ay: rec.y0 + h, ar: 0.5 }); t.x = t.pos.x = x; t.z = t.pos.z = z; t.rec = rec; return t; };
+    I.registerZone({
+      id: "house-gate", kind: "housegate", radius: 1.7, prio: 5, driving: false,
+      find: function (px, pz) { const rec = gateOf(px, pz, 1.7); return rec ? tgt(rec, "_gateTgt", rec.gate.x, rec.gate.z, 0.6) : null; },
+      options: [
+        { id: "house-gate-shut", slot: "e", prio: 3, campaignSafe: true, label: "Shut the gate",
+          canShow: function (t) { return !!(t && t.rec && t.rec.gate.want !== 0); },
+          onSelect: function (t) { const g = t.rec.gate; g.want = 0; g.hold = true; } },
+        { id: "house-gate-open", slot: "e", prio: 3, campaignSafe: true, label: "Open the gate",
+          canShow: function (t) { return !!(t && t.rec && t.rec.gate.want === 0); },
+          onSelect: function (t) {
+            const g = t.rec.gate, P = CBZ.player;
+            const out = P && P.pos ? (P.pos.x - g.x) * g.nx + (P.pos.z - g.z) * g.nz : 1;
+            g.want = out >= 0 ? GATE_OPEN : -GATE_OPEN; g.hold = false;
+          } },
+      ],
+    });
+    if (I.describe) I.describe("housegate", function (t) { return { label: "Gate", note: t && t.rec && t.rec.gate.want !== 0 ? "open" : "shut" }; });
+    I.registerZone({
+      id: "house-garage", kind: "housegarage", radius: 3.4, prio: 5,
+      find: function (px, pz) { const rec = garageOf(px, pz, 3.4); return rec ? tgt(rec, "_garTgt", rec.gx, rec.gz, 1.1) : null; },
+      options: [
+        { id: "house-garage-open", slot: "e", prio: 3, campaignSafe: true, label: "Open the garage",
+          canShow: function (t) { return !!(t && t.rec && t.rec.want < 0.5 && (holdsKey(t.rec) || t.rec.forced)); },
+          onSelect: function (t) { t.rec.want = 1; if (CBZ.sfx) { try { CBZ.sfx("door_open"); } catch (e) {} } } },
+        { id: "house-garage-shut", slot: "e", prio: 3, campaignSafe: true, label: "Shut the garage",
+          canShow: function (t) { return !!(t && t.rec && t.rec.want > 0.5); },
+          onSelect: function (t) { t.rec.want = 0; if (CBZ.sfx) { try { CBZ.sfx("door_open"); } catch (e) {} } } },
+        { id: "house-garage-force", slot: "e", prio: 2, hold: true, bad: true, label: "Force the garage door",
+          canShow: function (t) { return !!(t && t.rec && t.rec.want < 0.5 && !t.rec.forced && !holdsKey(t.rec)); },
+          onSelect: function (t) {
+            const rec = t.rec;
+            rec.forced = true; rec.want = 1;
+            if (CBZ.sfx) { try { CBZ.sfx("door_open"); } catch (e) {} }
+            if (CBZ.cityAlarm) { try { CBZ.cityAlarm(rec.gx, rec.gz, 22, 0.7, CBZ.city && CBZ.city.playerActor); } catch (e) {} }
+            if (CBZ.cityCrime) { try { CBZ.cityCrime(40, { x: rec.gx, z: rec.gz, type: "burglary" }); } catch (e) {} }
+          } },
+      ],
+    });
+    if (I.describe) I.describe("housegarage", function (t) {
+      const rec = t && t.rec;
+      return { label: "Garage door", note: !rec ? "" : rec.want > 0.5 ? "open" : (holdsKey(rec) ? "shut" : rec.forced ? "forced" : "locked") };
+    });
+  }
+  function moversTick(dt) {
+    if (!RECS.length) return;
+    const P = CBZ.player;
+    if (!P || !P.pos || !CBZ.scene) return;
+    if (!(CBZ.game && CBZ.game.mode === "city")) { if (NEAR.length) { for (const r of RECS) if (r.on) recOff(r); NEAR = []; } return; }
+    wire();
+    const px = P.pos.x, pz = P.pos.z;
+    scanT -= dt;
+    if (scanT <= 0) {
+      scanT = 0.35;
+      NEAR = [];
+      let cars = 0, added = false;
+      for (const r of RECS) if (r.car) cars++;
+      const carCap = CBZ.qScale ? Math.round(CBZ.qScale(5, 16)) : 16;
+      for (let i = 0; i < RECS.length; i++) {
+        const rec = RECS[i];
+        const d = Math.hypot(rec.cx - px, rec.cz - pz);
+        const here = d < LEAF_R + (rec.on ? 15 : 0) && attached(rec);
+        if (here && !rec.on && (rec.gate || rec.doors)) recOn(rec);
+        else if (!here && rec.on) recOff(rec);
+        if (rec.stand && (rec.car || (here && !added && cars < carCap))) { if (carTick(rec, here ? d : 1e9, true)) { added = true; cars++; } }
+        if (here && d < 26) NEAR.push(rec);
+      }
+    }
+    for (let i = 0; i < NEAR.length; i++) {
+      const rec = NEAR[i];
+      if (!rec.on) continue;
+      const g = rec.gate;
+      if (g) {
+        const ax = (px - g.x) * g.nx + (pz - g.z) * g.nz, al = (px - g.x) * g.tx + (pz - g.z) * g.tz;
+        const at = Math.abs(al) < g.half + 0.15 && Math.abs(ax) < 0.85 && Math.abs((P.pos.y || 0) - g.y) < 2;
+        if (g.hold && !at && Math.hypot(px - g.x, pz - g.z) > 1.7) g.hold = false;
+        // walk into it and it swings away from you
+        if (at && !g.hold && g.want === 0 && !P.driving) g.want = ax >= 0 ? GATE_OPEN : -GATE_OPEN;
+        if (g.ang !== g.want) {
+          const st = 3.4 * dt;
+          g.ang = Math.abs(g.want - g.ang) <= st ? g.want : g.ang + Math.sign(g.want - g.ang) * st;
+          poseGate(rec);
+        }
+      }
+      if (rec.doors && rec.open !== rec.want) {
+        const st = dt / 1.6;
+        const was = rec.open;
+        rec.open = Math.abs(rec.want - rec.open) <= st ? rec.want : rec.open + Math.sign(rec.want - rec.open) * st;
+        poseDoors(rec);
+        if ((was < 0.5) !== (rec.open < 0.5)) doorSolid(rec, rec.open < 0.5);
+      }
+    }
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(40.9, function (dt) { try { moversTick(dt || 0.016); } catch (e) { if (window.console) console.warn("[house lot movers]", e); } });
+  HL.movers = function () { return RECS; };
+
   let _mat = null;
   function yardMat() {
     if (_mat) return _mat;
@@ -220,7 +551,16 @@
     const bx = function (acc, t0, t1, ya, yb, a0, a1, col, o) {
       if (t1 - t0 < 0.004 || yb - ya < 0.004 || a1 - a0 < 0.004) return;
       const c = W((t0 + t1) / 2, (a0 + a1) / 2);
+      // (what stands on the ground has no underside anybody sees)
+      if (ya <= y0 + 0.06 && !(o && o.drop)) { o = Object.assign({ drop: 8 }, o || {}); }
       K.box(acc, c[0], (ya + yb) / 2, c[1], alongX ? t1 - t0 : a1 - a0, yb - ya, alongX ? a1 - a0 : t1 - t0, 0, col, o || {});
+    };
+    // a thin board or wire standing in a fence's plane, from lot point p to q:
+    // its two faces and no edges (12 mm end-on is nothing; a box is 36 vertices)
+    const leaf2 = function (acc, pt, pa, qt, qa, ya, yb, col) {
+      const P = W(pt, pa), Q = W(qt, qa);
+      const a = new K.V3(P[0], ya, P[1]), b = new K.V3(Q[0], ya, Q[1]), c = new K.V3(Q[0], yb, Q[1]), d = new K.V3(P[0], yb, P[1]);
+      K.quad(acc, a, b, c, d, col, {}); K.quad(acc, b, a, d, c, col, {});
     };
     const solid = function (t0, t1, ya, yb, a0, a1, tag) {
       const P = W(t0, a0), Q = W(t1, a1);
@@ -249,7 +589,15 @@
         for (let i = 0; i < n; i++) {
           const u0 = s[0] + (s[1] - s[0]) * i / n, u1 = s[0] + (s[1] - s[0]) * (i + 1) / n;
           const P = along ? W(u0, a0) : W(t0, u0), Q = along ? W(u1, a0) : W(t0, u1);
+          const n0 = K.out.colliders.length;
           K.fenceBay("hedge", P[0], P[1], Q[0], Q[1], null, null);
+          // (the island's hedge collider is as long as the bush is round: 0.4 m
+          // past each end, which beside a gate left a 0.7 m gap nobody fits)
+          for (let q = n0; q < K.out.colliders.length; q++) {
+            const c = K.out.colliders[q];
+            if (Math.abs(Q[0] - P[0]) >= Math.abs(Q[1] - P[1])) { c.minX = Math.max(c.minX, Math.min(P[0], Q[0])); c.maxX = Math.min(c.maxX, Math.max(P[0], Q[0])); }
+            else { c.minZ = Math.max(c.minZ, Math.min(P[1], Q[1])); c.maxZ = Math.min(c.maxZ, Math.max(P[1], Q[1])); }
+          }
         }
       }
     };
@@ -259,14 +607,41 @@
       if (L < 0.6) return;
       const n = Math.max(1, Math.ceil(L / 2.4));
       const P = function (k) { return W(t0 + (t1 - t0) * k, a0 + (a1 - a0) * k); };
-      for (let i = 0; i <= n; i++) { const q = P(i / n); K.cylY(A.paint, q[0], y0 - 0.1, q[1], 0.028, 0.028, H + 0.15, 6, COL.galv, { ao: y0 }); }
+      for (let i = 0; i <= n; i++) { const q = P(i / n); K.cylY(A.paint, q[0], y0 - 0.1, q[1], 0.028, 0.028, H + 0.15, 6, COL.galv, { ao: y0, open: true }); }
       const s = P(0), e = P(1);
-      K.rod(A.paint, s[0], y0 + H, s[1], e[0], y0 + H, e[1], 0.02, 5, COL.galv, {});
-      for (const hh of [0.08, H * 0.35, H * 0.66]) K.beam(A.paint, s[0], y0 + hh, s[1], e[0], y0 + hh, e[1], 0.012, 0.012, K.shade(COL.galv, 0.8), {});
-      const m = Math.max(2, Math.round(L / 0.6));
-      for (let i = 1; i < m; i++) { const q = P(i / m); K.beam(A.paint, q[0], y0 + 0.05, q[1], q[0], y0 + H, q[1], 0.01, 0.01, K.shade(COL.galv, 0.8), {}); }
+      K.rod(A.paint, s[0], y0 + H, s[1], e[0], y0 + H, e[1], 0.02, 5, COL.galv, { open: true });
+      const WIRE = K.shade(COL.galv, 0.8);
+      for (const hh of [0.08, H * 0.35, H * 0.66]) leaf2(A.paint, t0, a0, t1, a1, y0 + hh - 0.007, y0 + hh + 0.007, WIRE);
+      const m = Math.max(2, Math.round(L / 0.6)), ut = (t1 - t0) / L * 0.007, ua = (a1 - a0) / L * 0.007;
+      for (let i = 1; i < m; i++) { const k = i / m, qt = t0 + (t1 - t0) * k, qa = a0 + (a1 - a0) * k; leaf2(A.paint, qt - ut, qa - ua, qt + ut, qa + ua, y0 + 0.05, y0 + H, WIRE); }
       const c = W(Math.min(t0, t1) - 0.04, Math.min(a0, a1) - 0.04), d = W(Math.max(t0, t1) + 0.04, Math.max(a0, a1) + 0.04);
       K.addCol(Math.min(c[0], d[0]), Math.max(c[0], d[0]), Math.min(c[1], d[1]), Math.max(c[1], d[1]), y0, y0 + H, "fence");
+    };
+    // a picket fence: posts, two rails, the pickets as leaves (the island's own
+    // picket run is boxes all through: 4,000 vertices on a 20 m front)
+    const picket = function (t0, a0, t1, a1, gaps) {
+      const along = Math.abs(t1 - t0) >= Math.abs(a1 - a0);
+      const fix = along ? a0 : t0;
+      let segs = [[along ? Math.min(t0, t1) : Math.min(a0, a1), along ? Math.max(t0, t1) : Math.max(a0, a1)]];
+      for (const g of (gaps || [])) {
+        const nxt = [];
+        for (const sg of segs) { const a = g.at - g.w / 2, b = g.at + g.w / 2; if (b <= sg[0] || a >= sg[1]) { nxt.push(sg); continue; } if (a - sg[0] > 0.5) nxt.push([sg[0], a]); if (sg[1] - b > 0.5) nxt.push([b, sg[1]]); }
+        segs = nxt;
+      }
+      const WH = COL.paintWhite;
+      const B2 = function (u0, u1, ya, yb, hw) { if (along) bx(A.wood, u0, u1, ya, yb, fix - hw, fix + hw, WH, {}); else bx(A.wood, fix - hw, fix + hw, ya, yb, u0, u1, WH, {}); };
+      for (const sg of segs) {
+        const L = sg[1] - sg[0], np = Math.max(1, Math.round(L / 2.4));
+        for (let i = 0; i <= np; i++) { const u = sg[0] + L * i / np; B2(u - 0.045, u + 0.045, y0 - 0.1, y0 + 1.05, 0.045); }
+        for (const ry of [0.24, 0.72]) B2(sg[0], sg[1], y0 + ry, y0 + ry + 0.07, 0.016);
+        const n = Math.max(2, Math.round(L / 0.15));
+        for (let i = 0; i < n; i++) {
+          const u = sg[0] + L * (i + 0.5) / n;
+          if (along) leaf2(A.wood, u - 0.037, fix + 0.02, u + 0.037, fix + 0.02, y0 + 0.07, y0 + 0.95, WH);
+          else leaf2(A.wood, fix + 0.02, u - 0.037, fix + 0.02, u + 0.037, y0 + 0.07, y0 + 0.95, WH);
+        }
+        if (along) solid(sg[0], sg[1], y0, y0 + 0.95, fix - 0.06, fix + 0.06, "fence"); else solid(fix - 0.06, fix + 0.06, y0, y0 + 0.95, sg[0], sg[1], "fence");
+      }
     };
     // a 1.8 m board fence (timber) or a rendered garden wall, back from the street or along it
     const tall = function (kind, t0, a0, t1, a1) {
@@ -283,7 +658,10 @@
       } else {
         const col = K.vary(COL.timber, h01(p.cx, p.cz, 0x7dc), 0.2);
         const n = Math.max(1, Math.round((hi - lo) / 0.6));
-        for (let i = 0; i < n; i++) { const u = lo + (hi - lo) * (i + 0.5) / n; B2(A.wood, u - (hi - lo) / n * 0.47, u + (hi - lo) / n * 0.47, y0 + 0.04, y0 + 1.8 - 0.03 * h01(u, fix, 0x7de), 0.012, K.vary(col, h01(u, fix + 1, 0x7df), 0.12), { ao: y0, aoK: 0.25 }); }
+        for (let i = 0; i < n; i++) {
+          const u = lo + (hi - lo) * (i + 0.5) / n, hwB = (hi - lo) / n * 0.47, top = y0 + 1.8 - 0.03 * h01(u, fix, 0x7de), bc = K.vary(col, h01(u, fix, 0x7dd), 0.12);
+          if (along) leaf2(A.wood, u - hwB, fix, u + hwB, fix, y0 + 0.04, top, bc); else leaf2(A.wood, fix, u - hwB, fix, u + hwB, y0 + 0.04, top, bc);
+        }
         for (const ry of [0.35, 1.45]) B2(A.wood, lo, hi, y0 + ry, y0 + ry + 0.09, 0.045, K.shade(col, 0.85), {});
         for (let u = lo; u <= hi + 0.01; u += 2.4) B2(A.wood, u - 0.05, u + 0.05, y0 - 0.1, y0 + 1.86, 0.06, K.shade(col, 0.8), { ao: y0 });
       }
@@ -291,27 +669,59 @@
     };
 
     // ---- THE GARAGE WING, or (a poor street) a carport over the drive ---------------
-    let garageRect = null;
+    let garageRect = null, garageDoors = null, gateRec = null;
     let gFront = hA1;                                               // where the drive ends
     if (G) {
       const g0 = G.t - G.w / 2, g1 = G.t + G.w / 2;
       gFront = hA1 - 0.3;
-      const gBack = gFront - G.d, gh = 2.9;
+      const gBack = gFront - G.d, gh = 2.9, wl = 0.16, dh = 2.18;
       const body = lin(pal.body), trim = lin(pal.trim), roofHex = pal.roof;
-      bx(A.paint, g0, g1, y0, y0 + gh, gBack, gFront, body, { ao: y0, aoK: 0.2, aoH: 0.6 });
-      bx(A.mason, g0 - 0.03, g1 + 0.03, y0 - 0.25, y0 + 0.2, gBack - 0.03, gFront + 0.03, lin(shadeHex(pal.body, 0.75)), {});
-      // the sectional door(s), recessed in a trimmed opening
+      const wallO = { ao: y0, aoK: 0.2, aoH: 0.6 };
+      // A ROOM, not a block: a slab, three walls, a ceiling, and a front wall
+      // with an opening for each door (the doors are instances that roll up)
+      bx(A.mason, g0, g1, y0 - 0.25, y0 + 0.03, gBack, gFront, K.shade(COL.concrete, 0.9), {});
+      bx(A.paint, g0, g1, y0, y0 + gh, gBack, gBack + wl, body, wallO);
+      bx(A.paint, g0, g0 + wl, y0, y0 + gh, gBack + wl, gFront, body, wallO);
+      bx(A.paint, g1 - wl, g1, y0, y0 + gh, gBack + wl, gFront, body, wallO);
+      bx(A.paint, g0 + wl, g1 - wl, y0 + gh - 0.1, y0 + gh, gBack + wl, gFront - wl, K.shade(body, 0.8), {});
+      bx(A.mason, g0 - 0.03, g1 + 0.03, y0 - 0.25, y0 + 0.2, gBack - 0.03, gBack + 0.02, lin(shadeHex(pal.body, 0.75)), {});
       const nD = G.w > 5 ? (h01(p.cx, p.cz, 0x7d2) < 0.5 ? 1 : 2) : 1;
       const dw = nD === 1 ? G.w - 0.9 : (G.w - 1.2) / 2;
       const dCol = lin(shadeHex(pal.trim, 0.97));
-      for (let i = 0; i < nD; i++) {
-        const c = nD === 1 ? G.t : G.t + (i ? 1 : -1) * (dw / 2 + 0.15);
-        const a = c - dw / 2, b = c + dw / 2;
-        bx(A.paint, a - 0.12, b + 0.12, y0, y0 + 2.3, gFront, gFront + 0.05, trim, {});
-        bx(A.paint, a, b, y0 + 0.02, y0 + 2.18, gFront + 0.02, gFront + 0.07, dCol, {});
-        for (let k = 1; k < 4; k++) bx(A.paint, a, b, y0 + 2.18 * k / 4 - 0.015, y0 + 2.18 * k / 4 + 0.015, gFront + 0.07, gFront + 0.085, K.shade(dCol, 0.8), {});
-        const np = Math.max(2, Math.round(dw / 0.65));
-        for (let k = 1; k < np; k++) { const tt = a + dw * k / np; bx(A.paint, tt - 0.012, tt + 0.012, y0 + 0.05, y0 + 2.13, gFront + 0.07, gFront + 0.08, K.shade(dCol, 0.86), {}); }
+      const ops = [];
+      for (let i = 0; i < nD; i++) { const c = nD === 1 ? G.t : G.t + (i ? 1 : -1) * (dw / 2 + 0.15); ops.push([c - dw / 2, c + dw / 2]); }
+      let cur = g0 + wl;
+      for (const op of ops.concat([[g1 - wl, g1 - wl]])) {
+        if (op[0] - cur > 0.02) { bx(A.paint, cur, op[0], y0, y0 + gh - 0.1, gFront - wl, gFront, body, wallO); solid(cur, op[0], y0, y0 + gh, gFront - wl, gFront, "garage"); }
+        cur = op[1];
+      }
+      garageDoors = [];
+      for (const op of ops) {
+        bx(A.paint, op[0], op[1], y0 + dh + 0.04, y0 + gh - 0.1, gFront - wl, gFront, body, {});       // over the door
+        for (const e of [[op[0] - 0.12, op[0]], [op[1], op[1] + 0.12]]) bx(A.paint, e[0], e[1], y0, y0 + dh + 0.14, gFront, gFront + 0.05, trim, {});
+        bx(A.paint, op[0] - 0.12, op[1] + 0.12, y0 + dh + 0.04, y0 + dh + 0.16, gFront, gFront + 0.05, trim, {});
+        const c = W((op[0] + op[1]) / 2, gFront - 0.1);
+        garageDoors.push({ x: c[0], z: c[1], y: y0 + 0.02, w: op[1] - op[0], h: dh + 0.02, col: dCol, inst: -1,
+          solid: solid(op[0], op[1], y0, y0 + dh, gFront - 0.14, gFront - 0.04, "garage-door") });
+      }
+      // what a garage keeps: a shelf across the back with paint tins and boxes
+      // on it, a workbench down one side of a double one
+      {
+        const TB = lin(0x6a5a44), s0 = g0 + wl + 0.25, s1 = g1 - wl - 0.25;
+        bx(A.wood, s0, s1, y0 + 1.35, y0 + 1.39, gBack + wl, gBack + wl + 0.36, TB, {});
+        bx(A.wood, s0, s1, y0 + 1.85, y0 + 1.89, gBack + wl, gBack + wl + 0.36, TB, {});
+        const TIN = [[0.5, 0.12, 0.1], [0.12, 0.25, 0.42], [0.6, 0.55, 0.42], [0.2, 0.2, 0.2], [0.45, 0.32, 0.16]];
+        const nt = Math.max(3, Math.round((s1 - s0) / 0.55));
+        for (let i = 0; i < nt; i++) {
+          const u = s0 + (s1 - s0) * (i + 0.5) / nt, hh = h01(u, gBack, 0x7f8), up = i & 1;
+          bx(A.paint, u - 0.11 - hh * 0.08, u + 0.11 + hh * 0.08, y0 + (up ? 1.89 : 1.39), y0 + (up ? 1.89 : 1.39) + 0.18 + hh * 0.16, gBack + wl + 0.05, gBack + wl + 0.3, TIN[(hh * TIN.length) | 0], {});
+        }
+        if (G.w > 5) {
+          const side = p.gs > 0 ? g1 - wl : g0 + wl, sg = p.gs > 0 ? -1 : 1;
+          bx(A.wood, Math.min(side, side + sg * 0.6), Math.max(side, side + sg * 0.6), y0 + 0.86, y0 + 0.92, gBack + 1.2, gBack + 3.4, TB, {});
+          bx(A.wood, Math.min(side, side + sg * 0.55), Math.max(side, side + sg * 0.55), y0, y0 + 0.86, gBack + 1.25, gBack + 3.35, K.shade(TB, 0.7), {});
+          solid(Math.min(side, side + sg * 0.6), Math.max(side, side + sg * 0.6), y0, y0 + 0.92, gBack + 1.2, gBack + 3.4, "bench");
+        }
       }
       // a coach lamp beside the door
       bx(A.paint, g1 + (p.gs > 0 ? -0.6 : 0.1), g1 + (p.gs > 0 ? -0.5 : 0.2), y0 + 1.7, y0 + 2.0, gFront, gFront + 0.06, COL.steelDark, {});
@@ -329,14 +739,16 @@
         gctx.dbox = gctx.lbox;
         try {
           const H = HP.begin(gctx, F);
-          H.roof({ kind: h01(p.cx, p.cz, 0x7d4) < 0.6 ? "gable" : "hip", axis: "z", base: gh, pitch: 0.55, step: 0.13, eave: 0.35, rake: 0.25,
+          H.roof({ kind: h01(p.cx, p.cz, 0x7d4) < 0.6 ? "gable" : "hip", axis: "z", base: gh, pitch: 0.55, step: 0.2, eave: 0.35, rake: 0.25,
             roof: roofHex, roof2: shadeHex(roofHex, 0.9), core: pal.body, coreProj: 0.05, soffit: pal.trim, fascia: pal.trim, ridge: shadeHex(roofHex, 0.8), rakeBoard: true, hipCaps: true });
         } catch (e) {}
       } else {
         // a flat roof: a fascia slab oversailing a little
         bx(A.paint, g0 - 0.3, g1 + 0.3, y0 + gh, y0 + gh + 0.3, gBack - 0.3, gFront + 0.3, lin(pal.flat ? pal.trim : pal.roof), {});
       }
-      solid(g0, g1, y0, y0 + gh, gBack, gFront, "garage");
+      solid(g0, g1, y0, y0 + gh, gBack, gBack + wl, "garage");
+      solid(g0, g0 + wl, y0, y0 + gh, gBack + wl, gFront, "garage");
+      solid(g1 - wl, g1, y0, y0 + gh, gBack + wl, gFront, "garage");
       garageRect = (function () { const a = W(g0, gBack), b = W(g1, gFront); return { minX: Math.min(a[0], b[0]), maxX: Math.max(a[0], b[0]), minZ: Math.min(a[1], b[1]), maxZ: Math.max(a[1], b[1]) }; })();
     } else if (!ownGarage && tier === "poor" && h01(p.cx, p.cz, 0x7e2) < 0.55 && Math.abs(dC) > 0.5) {
       // a carport: four posts and a tin roof over the head of the drive
@@ -420,6 +832,8 @@
       for (const s of segs) chain(s[0], fa, s[1], fa, 1.2);
     } else if (style === "hedge") {
       hedge(-halfT + 0.3, fa, halfT - 0.3, fa, gaps);
+    } else if (style === "picket") {
+      picket(-halfT + 0.3, fa, halfT - 0.3, fa, gaps);
     } else if (style !== "open") {
       run(style, -halfT + 0.3, fa, halfT - 0.3, fa, gaps, tone);
     }
@@ -428,40 +842,89 @@
       const gp = W(doorT, fa);
       if (style === "picket" || style === "wall") K.gatePosts(style, gp[0], gp[1], alongX, gateW, tone);
       else for (const sd of [-1, 1]) { const q = W(doorT + sd * (gateW / 2 + 0.06), fa); K.cylY(A.paint, q[0], y0 - 0.1, q[1], 0.04, 0.04, style === "chain" ? 1.4 : 1.25, 8, style === "chain" ? COL.galv : COL.steelDark, { ao: y0 }); }
-      // a leaf hinged on each post it needs, swung ~70 degrees in
+      // the leaves swing (they are instances, city/house_yard.js's movers): one
+      // hinged on a post, or a pair meeting in the middle of a rich walk
       const leaves = tier === "rich" ? [[-1, gateW / 2], [1, gateW / 2]] : [[-1, gateW - 0.06]];
+      const gk = style === "picket" ? "picket" : style === "chain" ? "chain" : "iron";
+      gateRec = { x: gp[0], z: gp[1], y: y0, nx: nx, nz: nz, tx: tx, tz: tz, half: gateW / 2, kind: gk, leaves: [], ang: 0, want: 0, hold: false,
+        col: gk === "picket" ? COL.paintWhite : gk === "chain" ? COL.galv : COL.steelDark };
       for (const lf of leaves) {
-        const hingeT = doorT + lf[0] * (gateW / 2 - 0.02), L = lf[1] - 0.04;
-        const ang = 1.2;
-        // the leaf's own direction, in the lot's frame: turned from along the street toward the house
-        const et = -lf[0] * Math.cos(ang), ea = -Math.sin(ang);
-        const at = function (u) { return W(hingeT + et * u, fa + ea * u); };
-        const yaw = (function () { const a = at(0), b = at(1); return Math.atan2(-(b[1] - a[1]), b[0] - a[0]); })();
-        const piece = function (acc, u0, u1, ya, yb, th, col) { const c = at((u0 + u1) / 2); K.box(acc, c[0], (ya + yb) / 2, c[1], u1 - u0, yb - ya, th, yaw, col, {}); };
-        if (style === "picket") {
-          for (const ry of [0.24, 0.72]) piece(A.wood, 0.02, L, y0 + ry, y0 + ry + 0.07, 0.03, COL.paintWhite);
-          for (let u = 0.06; u < L; u += 0.14) piece(A.wood, u - 0.035, u + 0.035, y0 + 0.07, y0 + 0.95, 0.018, COL.paintWhite);
-        } else if (style === "chain") {
-          for (const ry of [0.06, 1.14]) piece(A.paint, 0, L, y0 + ry, y0 + ry + 0.035, 0.035, COL.galv);
-          for (const u of [0.02, L - 0.02]) piece(A.paint, u - 0.018, u + 0.018, y0 + 0.06, y0 + 1.17, 0.035, COL.galv);
-          for (let u = 0.2; u < L - 0.1; u += 0.22) piece(A.paint, u - 0.005, u + 0.005, y0 + 0.08, y0 + 1.14, 0.01, K.shade(COL.galv, 0.8));
-        } else {
-          // iron: a frame, upright bars, a rail of finials
-          const IR = COL.steelDark, top = style === "wall" ? 1.25 : 1.15;
-          for (const ry of [0.1, top - 0.12]) piece(A.paint, 0, L, y0 + ry, y0 + ry + 0.04, 0.04, IR);
-          for (let u = 0.03; u <= L; u += 0.125) piece(A.paint, u - 0.012, u + 0.012, y0 + 0.1, y0 + top + (Math.abs(u - L / 2) < L / 4 ? 0.1 : 0.03), 0.024, IR);
+        const h = W(doorT + lf[0] * (gateW / 2 - 0.02), fa);
+        gateRec.leaves.push({ hx: h[0], hz: h[1], dir: -lf[0], L: lf[1] - 0.04, inst: -1 });
+      }
+    }
+    // A POOR STREET WITH NO FENCE IS STILL SOMEBODY'S YARD: what is left of an
+    // old fence, weeds on the line, earth worn bare, things left out the front
+    if (style === "open" && tier === "poor") {
+      const TW = K.shade(COL.timberGrey, 1.3);
+      const side = dC > 0 ? -1 : 1;                               // the side away from the drive
+      const f0 = side > 0 ? Math.max(doorT + 1.2, dC + driveHalf + 0.6) : -halfT + 0.4;
+      const f1 = side > 0 ? halfT - 0.4 : Math.min(doorT - 1.2, dC - driveHalf - 0.6);
+      if (f1 - f0 > 2.4) {
+        // the old fence: some posts still standing, a rail hanging off them
+        const n = Math.max(2, Math.round((f1 - f0) / 2.2));
+        for (let i = 0; i <= n; i++) {
+          if (h01(p.cx + i, p.cz, 0x801) < 0.25) continue;       // rotted out
+          const u = f0 + (f1 - f0) * i / n, lean = (h01(p.cx, p.cz + i, 0x802) - 0.5) * 0.3;
+          const a0 = W(u, fa), a1 = W(u + lean, fa - lean * 0.6);
+          K.beam(A.wood, a0[0], y0 - 0.1, a0[1], a1[0], y0 + 0.85, a1[1], 0.045, 0.045, TW, {});
         }
+        const r0 = W(f0, fa), r1 = W(f0 + (f1 - f0) * 0.6, fa);
+        K.beam(A.wood, r0[0], y0 + 0.62, r0[1], r1[0], y0 + 0.5, r1[1], 0.035, 0.012, TW, {});
+      }
+      // weeds along the street line
+      for (const e of [[-halfT * 0.55, halfT * 0.7], [halfT * 0.5, halfT * 0.6]]) {
+        if (Math.abs(e[0] - dC) < driveHalf + 0.8 || Math.abs(e[0] - doorT) < 1.0) continue;
+        const c = W(e[0], fa - 0.25);
+        K.drain(K.shrubs(c[0], c[1], alongX ? e[1] : 0.55, alongX ? 0.55 : e[1], 3, 0x803 + (e[0] > 0 ? 1 : 0), y0, false));
+      }
+      // bare earth where feet and tyres go
+      const ya = (hA1 + fa) / 2;
+      bx(A.soil, doorT + side * 1.4 - 1.3, doorT + side * 1.4 + 1.3, y0 - 0.02, y0 + 0.012, ya - 0.9, ya + 0.8, COL.soil, {});
+      bx(A.soil, dC - driveHalf - 0.5, dC + driveHalf + 0.5, y0 - 0.02, y0 + 0.01, hA1 + 0.2, hA1 + 1.4, K.shade(COL.soil, 1.15), {});
+      // what lives in the front yard: an old sofa against the house, a tyre in the grass
+      const st2 = doorT + side * Math.min(2.8, Math.max(1.9, (hT1 - hT0) / 2 - 1.6)), sa = hA1 + 0.62;
+      if (Math.abs(st2 - dC) > driveHalf + 1.2 && Math.abs(st2) < halfT - 1.2 && fa - hA1 > 2.2) {
+        const SF = [[0.33, 0.2, 0.16], [0.2, 0.25, 0.2], [0.35, 0.32, 0.3]][(hs * 3) | 0];
+        bx(A.paint, st2 - 0.9, st2 + 0.9, y0 + 0.02, y0 + 0.42, sa - 0.4, sa + 0.4, SF, { ao: y0 });
+        bx(A.paint, st2 - 0.9, st2 + 0.9, y0 + 0.42, y0 + 0.82, sa - 0.4, sa - 0.2, K.shade(SF, 0.9), {});
+        for (const e of [-1, 1]) bx(A.paint, st2 + e * 0.9 - 0.1, st2 + e * 0.9 + 0.1, y0 + 0.02, y0 + 0.6, sa - 0.4, sa + 0.4, K.shade(SF, 0.85), {});
+        solid(st2 - 1.0, st2 + 1.0, y0, y0 + 0.8, sa - 0.4, sa + 0.4, "sofa");
+      }
+      if (Math.abs(doorT - side * 2.4 - dC) > driveHalf + 0.6 && Math.abs(doorT - side * 2.4) < halfT - 0.6) {
+        const ty = W(doorT - side * 2.4, ya + 0.6);
+        K.cylY(A.paint, ty[0], y0, ty[1], 0.3, 0.3, 0.2, 10, [0.03, 0.03, 0.035], {});
       }
     }
     // the front yard's side line on the far side from the drive, low, in the street's style
     if (style === "picket" || style === "hedge" || style === "wall") {
       const st = -Math.sign(dC || p.gs) * (halfT - 0.3);
-      if (hA1 + 0.4 < fa - 0.5) { if (style === "hedge") hedge(st, hA1 + 0.4, st, fa - 0.45, null); else run(style, st, hA1 + 0.4, st, fa, null, tone); }
+      if (hA1 + 0.4 < fa - 0.5) { if (style === "hedge") hedge(st, hA1 + 0.4, st, fa - 0.45, null); else if (style === "picket") picket(st, hA1 + 0.4, st, fa, null); else run(style, st, hA1 + 0.4, st, fa, null, tone); }
     }
 
     // ---- THE BACK YARD -----------------------------------------------------------------
     // (each shared line is drawn by one lot: the +t side here, the back line
-    // only on lots facing +x / +z, so two neighbours never stack two fences)
+    // only on lots facing +x / +z, so two neighbours never stack two fences;
+    // a line nobody shares, a corner lot's street side or the back of a lot
+    // with nothing behind it, is this lot's own: p.open says which, else the
+    // arena's lots are asked who stands across it)
+    const alone = function (side) {                               // "lo" | "back"
+      if (p.open) return !!p.open[side];
+      const A = CBZ.city && CBZ.city.arena, L = A && A.lots;
+      if (!L || !p.lot) return false;
+      for (let i = 0; i < L.length; i++) {
+        const o = L[i];
+        if (!o || o === p.lot || o.demolished) continue;
+        const dx = o.cx - p.cx, dz = o.cz - p.cz;
+        if (Math.abs(dx) > 60 || Math.abs(dz) > 60) continue;
+        const dt = dx * tx + dz * tz, da = dx * nx + dz * nz;
+        const pw = o.parcel ? o.parcel.w : (o.w || 0) + 3, pd = o.parcel ? o.parcel.d : (o.d || 0) + 3;
+        const hT = (alongX ? pw : pd) / 2, hA = (alongX ? pd : pw) / 2;
+        if (side === "lo" && Math.abs(da) < halfA && Math.abs(-dt - halfT - hT) < 2.5) return false;
+        if (side === "back" && Math.abs(dt) < halfT && Math.abs(-da - halfA - hA) < 2.5) return false;
+      }
+      return true;
+    };
     const backKind = tier === "poor" ? (h01(p.cx, p.cz, 0x7db) < 0.6 ? "chain" : "none") : tier === "rich" ? "wall" : "board";
     const sideT = halfT - 0.05, backA = -halfA + 0.05;
     const yardA = hA0 + Math.min(1.0, p.hd * 0.2);                // the returns to the house's back corners
@@ -476,7 +939,8 @@
       if (sideT - hiEdge > 0.6) { if (gateSide > 0 && sideT - hiEdge > 1.8) line(hiEdge + 1.05, hiA, sideT, hiA); else line(hiEdge + 0.05, hiA, sideT, hiA); }
       if (loEdge + sideT > 0.6) { if (gateSide < 0 && loEdge + sideT > 1.8) line(-sideT, loA, loEdge - 1.05, loA); else line(-sideT, loA, loEdge - 0.05, loA); }
       line(sideT, backA, sideT, hiA);
-      if (nx + nz > 0) line(-sideT + 0.05, backA, sideT - 0.05, backA);
+      if (alone("lo")) line(-sideT, backA, -sideT, loA);
+      if (nx + nz > 0 || alone("back")) line(-sideT + 0.05, backA, sideT - 0.05, backA);
     }
     // what is in it
     {
@@ -578,6 +1042,7 @@
     for (const k in A) nv += A[k].p.length;
     const cols = K.out.colliders.slice(c0);
     if (!nv) return { mesh: null, colliders: cols, garageRect: garageRect, stand: stands[0] };
+    let rec = null;
     const P = new Float32Array(nv), N = new Float32Array(nv), C = new Float32Array(nv);
     let o = 0;
     for (const k in A) { const a = A[k]; P.set(a.p, o); N.set(a.n, o); C.set(a.c, o); o += a.p.length; }
@@ -592,7 +1057,13 @@
     mesh.name = "house-lot";
     root.add(mesh);
     for (const c of cols) if (c.dressing !== "fence") c.ref = mesh;
-    return { mesh: mesh, colliders: cols, garageRect: garageRect, stand: stands[0] };
+    // what moves here: the gate's leaves, the garage doors, a resident's car
+    rec = { seq: ++RSEQ, mesh: mesh, lot: p.lot || null, cx: p.cx, cz: p.cz, y0: y0, tier: tier, nx: nx, nz: nz,
+      gate: gateRec, doors: garageDoors, open: 0, want: 0, forced: false, on: false,
+      stand: stands[0] || null, car: null, carDone: false };
+    if (garageDoors) { const a = W(G.t, gFront + 0.6); rec.gx = a[0]; rec.gz = a[1]; }
+    RECS.push(rec);
+    return { mesh: mesh, colliders: cols, garageRect: garageRect, stand: stands[0], rec: rec };
   };
 
   CBZ.houseLot = HL;

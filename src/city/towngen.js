@@ -1217,14 +1217,25 @@
       const railIM = new THREE.InstancedMesh(new THREE.BoxGeometry(3.2, 0.18, 0.18), cmat(WOOD), railN);
       const postIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.18, 1.1, 0.18), cmat(WOOD), railN * 2);
       let pi = 0;
+      /* A RAIL STANDS BESIDE A SHOP'S DOOR, NOT ACROSS IT, AND NOT AT A HOUSE.
+         It was laid one metre out from the door point of any eight lots, 3.2 m
+         wide and solid: across the way into the shop, and at a house lot
+         across the front walk and its gate (nobody ties a horse to a
+         bungalow's gate). So: shops only, 2.6 m along the frontage from the
+         door. */
+      const homeAt = new Set();
+      for (const l of filled) if (l && l.kind === "home") homeAt.add(Math.round(l.cx * 2) + "," + Math.round(l.cz * 2));
+      let placed = 0;
       for (let i = 0; i < railN; i++) {
         const lt = lots[(i * 7) % lots.length];
-        const rx = lt.door.x + lt.door.nx * 1.0, rz = lt.door.z + lt.door.nz * 1.0;
+        if (!lt || !lt.door || homeAt.has(Math.round(lt.cx * 2) + "," + Math.round(lt.cz * 2))) continue;
+        const side = (i & 1) ? 1 : -1;
+        const rx = lt.door.x + lt.door.nx * 1.0 - lt.door.nz * 2.6 * side, rz = lt.door.z + lt.door.nz * 1.0 + lt.door.nx * 2.6 * side;
         const yaw90 = lt.door.nx !== 0;                 // rail runs along Z
         const ry = gy(rx, rz);
         dummy2.position.set(rx, ry + 1.0, rz);
         dummy2.rotation.set(0, yaw90 ? Math.PI / 2 : 0, 0); dummy2.scale.set(1, 1, 1);
-        dummy2.updateMatrix(); railIM.setMatrixAt(i, dummy2.matrix);
+        dummy2.updateMatrix(); railIM.setMatrixAt(placed++, dummy2.matrix);
         // the two posts the rail was always described as resting on: at the bar
         // ends, base on the ground, top just under the 1.09 bar underside.
         for (const ps of [-1.45, 1.45]) {
@@ -1236,6 +1247,7 @@
         // waist-high fence, and y1 = 1.09 is the bar's real top.
         solid(rx, rz, yaw90 ? 0.36 : 3.2, yaw90 ? 3.2 : 0.36, ry + 1.09);
       }
+      railIM.count = placed;
       railIM.instanceMatrix.needsUpdate = true; railIM.matrixAutoUpdate = false; railIM.castShadow = true; root.add(railIM);
       postIM.count = pi;
       postIM.instanceMatrix.needsUpdate = true; postIM.matrixAutoUpdate = false; postIM.castShadow = true; root.add(postIM);

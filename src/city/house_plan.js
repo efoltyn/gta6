@@ -136,13 +136,15 @@
      that wall from the door's centre, toward building-local +x (a door on a
      z face) or +z (a door on an x face). The same frame city/fitout_plans.js
      draws a flat in, so its kitchen and bathroom parts drop straight in. */
-  function frameOf(b) {
+  // (U: a flat on a storey of flats, interior_programs.js's unit record: its
+  // own rect, and its front door on the corridor in place of the street door)
+  function frameOf(b, U) {
     const wt = b.wt != null ? b.wt : 0.4;
-    const ld = b.localDoor || { x: 0, z: -b.d / 2, nx: 0, nz: 1 };
+    const ld = U ? { x: U.door.x, z: U.door.z, nx: U.inX, nz: U.inZ } : (b.localDoor || { x: 0, z: -b.d / 2, nx: 0, nz: 1 });
     const nx = Math.round(ld.nx), nz = Math.round(ld.nz);
     const alongX = Math.abs(nz) > 0.5;
-    const ix0 = -b.w / 2 + wt, ix1 = b.w / 2 - wt, iz0 = -b.d / 2 + wt, iz1 = b.d / 2 - wt;
-    const dx = ld.x + nx * wt, dz = ld.z + nz * wt;
+    const ix0 = U ? U.x0 : -b.w / 2 + wt, ix1 = U ? U.x1 : b.w / 2 - wt, iz0 = U ? U.z0 : -b.d / 2 + wt, iz1 = U ? U.z1 : b.d / 2 - wt;
+    const dx = U ? ld.x : ld.x + nx * wt, dz = U ? ld.z : ld.z + nz * wt;
     const F = { nx: nx, nz: nz, alongX: alongX, dx: dx, dz: dz, wt: wt,
       D: alongX ? iz1 - iz0 : ix1 - ix0,
       tLo: alongX ? ix0 - dx : iz0 - dz, tHi: alongX ? ix1 - dx : iz1 - dz,
@@ -231,10 +233,26 @@
     plan.floors[k].rooms.push(r);
     return r;
   }
-  function make(b, lot) {
-    const F = frameOf(b), wins = windowsOf(b, F);
-    const st = Math.max(1, b.storeys | 0), FH = b.FH || 3.2;
-    const tops = (Array.isArray(b.floorTops) && b.floorTops.length > st) ? b.floorTops
+  function make(b, lot, U) {
+    const F = frameOf(b, U), FH = b.FH || 3.2;
+    let wins = windowsOf(b, F);
+    if (U) {
+      // a flat sees the windows of its own storey in the walls that are the
+      // shell's: the facade behind it, and a side wall at the end of the rank
+      const wt = b.wt != null ? b.wt : 0.4, K = U.floor | 0;
+      const tOff = F.alongX ? F.dx : F.dz, half = (F.alongX ? b.w : b.d) / 2 - wt;
+      const extLo = F.tLo + tOff <= -half + 0.5, extHi = F.tHi + tOff >= half - 0.5;
+      wins = wins.filter(function (q) {
+        if (q.k !== K) return false;
+        if (q.wall === "back") return q.a1 > F.tLo + 0.1 && q.a0 < F.tHi - 0.1;
+        if (q.wall === "lo") return extLo && q.a1 > 0.1 && q.a0 < F.D - 0.1;
+        if (q.wall === "hi") return extHi && q.a1 > 0.1 && q.a0 < F.D - 0.1;
+        return false;
+      }).map(function (q) { return { wall: q.wall, a0: q.a0, a1: q.a1, y0: q.y0, y1: q.y1, k: 0 }; });
+    }
+    const st = U ? 1 : Math.max(1, b.storeys | 0);
+    const tops = U ? [U.y, U.y + FH]
+      : (Array.isArray(b.floorTops) && b.floorTops.length > st) ? b.floorTops
       : (function () { const o = [0.14]; for (let L = 1; L <= st; L++) o.push(L * FH); return o; })();
     const wealth = wealthOf(lot, b);
     const plan = { F: F, wins: wins, st: st, FH: FH, tops: tops, wealth: wealth, tier: tierOf(wealth),
@@ -249,8 +267,9 @@
       const ch = Math.min(CEIL_H, tops[k + 1] - 0.2 - tops[k] - 0.06);
       plan.floors.push({ k: k, y: tops[k], ceil: tops[k] + ch, ceilH: ch, rooms: [], walls: [] });
     }
+    if (U) { plan.flat = true; plan.unit = U; plan.s = (F.tHi + F.tLo) >= 0 ? 1 : -1; }
     if (st === 1 && (F.W < 9.4 || F.D < 7.6)) { plan.kind = "cottage"; cottage(plan); }
-    else hall(plan);
+    else { if (st >= 2 && F.W < 8.6) plan.kind = "narrow"; hall(plan); }
     spots(plan);
     return plan;
   }
@@ -274,16 +293,25 @@
   }
 
   /* THE CENTRE-HALL HOUSE (and, with a stair in the hall, every storey of a
-     taller one) */
+     taller one).
+     plan.kind "narrow": a town house too narrow for a room either side of a
+     hall (a metro's 7 to 9 m fronts). The front door opens into the living
+     room; the stair hall runs down one side wall, the stair against the wall;
+     the kitchen is the room across the back with a cloakroom in the corner
+     behind the stair. Upstairs the same walls make a front bedroom, a back
+     bedroom and the bathroom. */
   function hall(plan) {
     const F = plan.F, wins = plan.wins, st = plan.st, s = plan.s;
     const D = F.D, tLo = F.tLo, tHi = F.tHi;
     const stair = st >= 2;
+    const narrow = plan.kind === "narrow";
     const allK = []; for (let k = 0; k < st; k++) allK.push(k);
     // the hall strip: the walk on the living side, the stair's lane on the other
     let hLo = stair ? (s > 0 ? -0.75 - LANE_W : -0.9) : -0.9;
     let hHi = stair ? (s > 0 ? 0.9 : 0.75 + LANE_W) : 0.9;
-    if (stair) {
+    if (narrow) {
+      if (s > 0) { hLo = tLo; hHi = tLo + LANE_W + 0.9; } else { hHi = tHi; hLo = tHi - LANE_W - 0.9; }
+    } else if (stair) {
       // the lane-side wall, off the front wall's windows on every storey
       if (s > 0) hLo = snap(wins, ["front"], hLo - PW / 2, hLo - PW / 2 - 0.3, hLo - PW / 2 + 0.05, allK) + PW / 2;
       else hHi = snap(wins, ["front"], hHi + PW / 2, hHi + PW / 2 - 0.05, hHi + PW / 2 + 0.3, allK) - PW / 2;
@@ -307,8 +335,15 @@
     const BD = D - b0;
     const hc = (hLo + hHi) / 2;
     const bw = clamp(F.W * 0.2, 1.9, 2.5);
-    const bwalls = bathWalls(plan, hc, bw, tLo + 1.85, tHi - 1.85, allK);
-    let tA = bwalls[0], tB = bwalls[1];
+    let tA, tB;
+    if (narrow) {
+      // the bathroom in the back corner behind the stair, one wall of its own
+      if (s > 0) { tA = tLo - PW / 2; tB = snap(wins, ["back"], tLo + bw + PW / 2, tLo + 1.75 + PW / 2, tLo + 2.7 + PW / 2, allK); }
+      else { tB = tHi + PW / 2; tA = snap(wins, ["back"], tHi - bw - PW / 2, tHi - 2.7 - PW / 2, tHi - 1.75 - PW / 2, allK); }
+    } else {
+      const bwalls = bathWalls(plan, hc, bw, tLo + 1.85, tHi - 1.85, allK);
+      tA = bwalls[0]; tB = bwalls[1];
+    }
     // a side too narrow to be a room: the bathroom takes it
     const noLo = tA - PW / 2 - tLo < 1.7, noHi = tHi - tB - PW / 2 < 1.7;
     const bathLo = noLo ? tLo : tA + PW / 2, bathHi = noHi ? tHi : tB - PW / 2;
@@ -319,26 +354,35 @@
     // the door in the back wall of the front room on the stair's side (the
     // kitchen downstairs, a bedroom upstairs: the stair shuts its hall wall)
     const kd = s > 0 ? hLo - PW - 0.12 - DOOR_W / 2 : hHi + PW + 0.12 + DOOR_W / 2;
-    let cLo = Math.min(hLo - PW, doorB - BATH_W / 2 - 0.3, noLo ? 1e9 : doorL - DOOR_W / 2 - 0.3, s > 0 ? kd - DOOR_W / 2 - 0.3 : 1e9);
-    let cHi = Math.max(hHi + PW, doorB + BATH_W / 2 + 0.3, noHi ? -1e9 : doorR + DOOR_W / 2 + 0.3, s < 0 ? kd + DOOR_W / 2 + 0.3 : -1e9);
+    let cLo = Math.min(hLo - PW, doorB - BATH_W / 2 - 0.3, noLo ? 1e9 : doorL - DOOR_W / 2 - 0.3, s > 0 && !narrow ? kd - DOOR_W / 2 - 0.3 : 1e9);
+    let cHi = Math.max(hHi + PW, doorB + BATH_W / 2 + 0.3, noHi ? -1e9 : doorR + DOOR_W / 2 + 0.3, s < 0 && !narrow ? kd + DOOR_W / 2 + 0.3 : -1e9);
+    if (narrow) { cLo = Math.max(cLo, tLo); cHi = Math.min(cHi, tHi); }
     if (cLo - tLo < 1.0) cLo = tLo;
     if (tHi - cHi < 1.0) cHi = tHi;
     plan.g = { hLo: hLo, hHi: hHi, fD: fD, c0: c0, c1: c1, b0: b0, BD: BD, tA: tA, tB: tB, cLo: cLo, cHi: cHi, kd: kd,
       doorL: doorL, doorR: doorR, doorB: doorB, noLo: noLo, noHi: noHi, lane: lane, dS: dS };
 
+    /* A FLAT (plan.flat) has one wall of windows, the facade behind it, and
+       that is the back band here: so the living room is one of the two back
+       rooms (the wider) and the bedroom the other, and the windowless rooms
+       by the corridor are the dining room (open to the hall) and the kitchen. */
+    const flatLiving = !!plan.flat && !noLo && !noHi;
+    const wideSide = (tHi - tB) >= (tA - tLo) ? 1 : -1;
     for (let k = 0; k < st; k++) {
       const fl = plan.floors[k];
       const ground = k === 0, top = k === st - 1;
       // ---- the rooms ----
       const hallR = room(plan, k, ground ? "hall" : "landing", 0, c1, hLo, hHi, { cor: { d0: c0, d1: c1, t0: cLo, t1: cHi } });
       const liv = s > 0 ? [hHi + PW, tHi] : [tLo, hLo - PW], kit = s > 0 ? [tLo, hLo - PW] : [hHi + PW, tHi];
-      const frontA = room(plan, k, ground ? "living" : "bed", 0, fD, liv[0], liv[1]);
-      const frontB = room(plan, k, ground ? "kitchen" : "bed", 0, fD, kit[0], kit[1]);
+      const frontA = room(plan, k, ground ? (flatLiving ? "dining" : "living") : "bed", 0, fD, liv[0], liv[1]);
+      const frontB = narrow ? null : room(plan, k, ground ? "kitchen" : "bed", 0, fD, kit[0], kit[1]);
       if (!ground && top) frontA.master = true;
       // the back band: a room either side of the bathroom, each with the
       // passage's end as its closet nook
       const sideType = function (sd, wide) {
+        if (flatLiving) return sd === wideSide ? "living" : "bed";
         if (st === 1) return "bed";
+        if (narrow) return ground ? "kitchen" : "bed";
         if (ground) return sd === s ? "study" : "dining";
         return (BD >= 2.7 && wide >= 2.5) ? "bed" : (sd === s ? "dress" : "store");
       };
@@ -354,7 +398,8 @@
       const bath = room(plan, k, (stair && ground) ? "wc" : "bath", b0, D, bathLo, bathHi);
       if (st === 1) {
         // the bigger bedroom is the main one
-        const m = !backLo ? backHi : (!backHi ? backLo : ((backLo.t1 - backLo.t0) >= (backHi.t1 - backHi.t0) ? backLo : backHi));
+        const beds = [backLo, backHi].filter(function (q) { return q && q.type === "bed"; });
+        const m = beds.length < 2 ? beds[0] : ((backLo.t1 - backLo.t0) >= (backHi.t1 - backHi.t0) ? backLo : backHi);
         if (m) m.master = true;
       }
       // ---- the walls and their doorways ----
@@ -373,21 +418,27 @@
         hallR.doors.push({ wall: s > 0 ? "hi" : "lo", a: dd, w: DOOR_W });
       }
       fl.walls.push({ across: false, at: hallLiv, from: 0, to: fD + PW, gaps: gapsLiv });
-      fl.walls.push({ across: false, at: hallKit, from: 0, to: fD + PW, gaps: [] });
+      if (!narrow) fl.walls.push({ across: false, at: hallKit, from: 0, to: fD + PW, gaps: [] });
       // the front rooms' back wall, either side of the hall's mouth
       const kGap = ground ? { c: kd, w: KIT_W, h: 2.2, door: false }
         : { c: kd, w: DOOR_W, h: DOOR_H, door: true, hinge: s > 0 ? 1 : -1, side: -1, label: "the bedroom" };
-      const segLo = { across: true, at: dB, from: tLo, to: hLo - PW, gaps: s > 0 ? [kGap] : [] };
-      const segHi = { across: true, at: dB, from: hHi + PW, to: tHi, gaps: s < 0 ? [kGap] : [] };
-      fl.walls.push(segLo, segHi);
-      frontB.doors.push({ wall: "back", a: kd, w: kGap.w, leaf: !!kGap.door });
-      hallR.doors.push({ wall: "corFront", a: kd, w: kGap.w });
+      const segLo = { across: true, at: dB, from: tLo, to: hLo - PW, gaps: s > 0 && frontB ? [kGap] : [] };
+      const segHi = { across: true, at: dB, from: hHi + PW, to: tHi, gaps: s < 0 && frontB ? [kGap] : [] };
+      if (!narrow || s < 0) fl.walls.push(segLo);
+      if (!narrow || s > 0) fl.walls.push(segHi);
+      if (frontB) {
+        frontB.doors.push({ wall: "back", a: kd, w: kGap.w, leaf: !!kGap.door });
+        hallR.doors.push({ wall: "corFront", a: kd, w: kGap.w });
+      }
       // the passage's back wall: a door to each room behind it
       const gC = [];
-      if (backLo) { gC.push({ c: doorL, w: DOOR_W, h: DOOR_H, door: true, hinge: 1, side: 1, label: doorLabel(backLo.type) }); backLo.doors.push({ wall: "front", a: doorL, w: DOOR_W, leaf: true }); }
+      const kitBack = function (r) { return r.type === "kitchen" || r.type === "living"; };
+      if (backLo && kitBack(backLo)) { gC.push({ c: doorL, w: KIT_W, h: 2.2, door: false }); backLo.doors.push({ wall: "front", a: doorL, w: KIT_W }); }
+      else if (backLo) { gC.push({ c: doorL, w: DOOR_W, h: DOOR_H, door: true, hinge: 1, side: 1, label: doorLabel(backLo.type) }); backLo.doors.push({ wall: "front", a: doorL, w: DOOR_W, leaf: true }); }
       gC.push({ c: doorB, w: BATH_W, h: DOOR_H, door: true, hinge: bHinge, side: 1, label: "the bathroom" });
       bath.doors.push({ wall: "front", a: doorB, w: BATH_W, leaf: true });
-      if (backHi) { gC.push({ c: doorR, w: DOOR_W, h: DOOR_H, door: true, hinge: -1, side: 1, label: doorLabel(backHi.type) }); backHi.doors.push({ wall: "front", a: doorR, w: DOOR_W, leaf: true }); }
+      if (backHi && kitBack(backHi)) { gC.push({ c: doorR, w: KIT_W, h: 2.2, door: false }); backHi.doors.push({ wall: "front", a: doorR, w: KIT_W }); }
+      else if (backHi) { gC.push({ c: doorR, w: DOOR_W, h: DOOR_H, door: true, hinge: -1, side: 1, label: doorLabel(backHi.type) }); backHi.doors.push({ wall: "front", a: doorR, w: DOOR_W, leaf: true }); }
       fl.walls.push({ across: true, at: dC, from: cLo > tLo ? cLo - PW : tLo, to: cHi < tHi ? cHi + PW : tHi, gaps: gC });
       if (cLo > tLo) fl.walls.push({ across: false, at: cLo - PW / 2, from: fD, to: b0, gaps: [] });
       if (cHi < tHi) fl.walls.push({ across: false, at: cHi + PW / 2, from: fD, to: b0, gaps: [] });
@@ -704,6 +755,49 @@
       b.stairPlan = null;
     }
     try { if (plan.stair) buildStair(b, plan); } catch (e) { if (window.console) console.warn("[house] stair failed", e); }
+    raise(b, plan, true);
+    // a streamed shell that comes back is a NEW record on an old site
+    const site = CBZ.fitoutSiteOf ? CBZ.fitoutSiteOf(b) : null;
+    if (site) { site.b = b; site.wx = null; if (lot) site.lot = lot; }
+    HOUSES.push({ b: b, _seq: ++SEQ });
+    // the listing says what the house has (city/realestate.js's agent reads it)
+    const home = (lot && lot.building && lot.building.home) || b.home || null;
+    if (home) {
+      let nb = 0; for (const fl of plan.floors) for (const r of fl.rooms) if (r.type === "bed" || r.type === "studio") nb++;
+      home.beds = Math.max(1, nb);
+      home.floorY = 0;
+    }
+    return plan;
+  }
+  /* A FLAT IN A TOWER: the unit a storey of flats left for the listed home
+     (interior_programs.js `home`), planned as a one-storey house in the
+     unit's own frame. Its partitions and room doors are raised here; the
+     storey's fit-out (fitout_plans.js "residential") hands the unit to the
+     house planner when you walk in. */
+  function furnishUnit(b, lot, U) {
+    if (!b || typeof b.lbox !== "function" || !U || !U.door) return null;
+    if (b._flat && b._flat.group === b.group) return b._flat;
+    let plan = null;
+    try { plan = make(b, lot, U); } catch (e) { if (window.console) console.warn("[flat] plan failed", e); plan = null; }
+    if (!plan) return null;
+    b._flat = plan;
+    if (lot && lot.building && lot.building !== b) lot.building._flat = plan;
+    plan.lot = lot || null;
+    plan.group = b.group || null;
+    U.house = plan;
+    raise(b, plan, false);
+    const home = (lot && lot.building && lot.building.home) || b.home || null;
+    if (home) {
+      let nb = 0; for (const r of plan.floors[0].rooms) if (r.type === "bed" || r.type === "studio") nb++;
+      home.beds = Math.max(1, nb);
+    }
+    return plan;
+  }
+  // the plan's partitions and room doors, on every floor; `declare`: each
+  // floor is declared to the fit-out as a house's (a flat's storey is not:
+  // it is the corridor's)
+  function raise(b, plan, declare) {
+    const F = plan.F;
     const D = CBZ.cityUnitDoors;
     plan.doors = [];
     for (const fl of plan.floors) {
@@ -725,20 +819,8 @@
         }
       }
       // every floor is the fit-out's to finish (city/fitout_house.js)
-      if (CBZ.fitoutDeclare) CBZ.fitoutDeclare(b, fl.y, "house", { x0: F.ix0, x1: F.ix1, z0: F.iz0, z1: F.iz1, y: fl.y }, { house: plan, floor: fl.k, ceilH: fl.ceilH });
+      if (declare && CBZ.fitoutDeclare) CBZ.fitoutDeclare(b, fl.y, "house", { x0: F.ix0, x1: F.ix1, z0: F.iz0, z1: F.iz1, y: fl.y }, { house: plan, floor: fl.k, ceilH: fl.ceilH });
     }
-    // a streamed shell that comes back is a NEW record on an old site
-    const site = CBZ.fitoutSiteOf ? CBZ.fitoutSiteOf(b) : null;
-    if (site) { site.b = b; site.wx = null; if (lot) site.lot = lot; }
-    HOUSES.push({ b: b, _seq: ++SEQ });
-    // the listing says what the house has (city/realestate.js's agent reads it)
-    const home = (lot && lot.building && lot.building.home) || b.home || null;
-    if (home) {
-      let nb = 0; for (const fl of plan.floors) for (const r of fl.rooms) if (r.type === "bed" || r.type === "studio") nb++;
-      home.beds = Math.max(1, nb);
-      home.floorY = 0;
-    }
-    return plan;
   }
   /* A STREAMED HOUSE'S STAIR GOES WITH IT (core/citystream.js cannot see the
      stair system's link list; the colliders and platforms it can) */
@@ -781,7 +863,8 @@
           if (q < bd) { bd = q; best = dr; }
         }
         if (!best) return null;
-        const t = best._useTgt || (best._useTgt = { pos: { x: 0, y: 1.1, z: 0 } });
+        // (ay: where a finger finds it, the middle of the leaf; systems/touch.js taps there)
+        const t = best._useTgt || (best._useTgt = { pos: { x: 0, y: 0, z: 0 }, ay: 1.15, ar: 0.5 });
         t.x = t.pos.x = best.wx; t.z = t.pos.z = best.wz; t.door = best;
         return t;
       },
@@ -807,9 +890,11 @@
     spot: function (lot, what) {
       const b = lot && lot.building; if (!b) return null;
       if (b._house) return spotWorld(b, b._house, what);
+      if (b._flat) return spotWorld(b, b._flat, what);
       if (b.home && b.group && b.colliders && b.colliders.length) { const s = aptSpots(lot); return s ? s[what] || null : null; }
       return null;
     },
+    furnishUnit: furnishUnit,
     houses: function () { return HOUSES.map(function (h) { return h.b; }); },
     _wallLocal: wallLocal,
   };

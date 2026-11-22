@@ -1663,6 +1663,27 @@
     return top;
   }
 
+  /* A HOUSE'S PARTS, from its plan record: the garage wing inside the
+     footprint (width gW, on side gs of local x), the body beside it (centre
+     bx, half width bhw), and the drive metro_ground.js lays to it (offset
+     driveOff along local x, width driveW: that file's own rule and hash,
+     salt 71, repeated here because the garage has to stand where the drive
+     leads). city/house_metro.js builds the real house from the same numbers. */
+  function driveHash(x, z) {
+    let h = (Math.round(x * 8) * 374761393 + Math.round(z * 8) * 668265263 + 71 * 2246822519) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  function houseParts(b) {
+    const Wd = b.w;
+    // a double garage where the body beside it is still a house's width, a
+    // single one on a narrower front, none (the drive is the parking) under that
+    const gW = !b.garage ? 0 : Wd >= 15.4 ? 6.0 : Wd >= 12.2 ? 3.6 : 0;
+    const gs = driveHash(b.x, b.z) < 0.5 ? -1 : 1;
+    const driveW = b.garage ? 5.4 : 3.2;
+    return { gW: gW, gs: gs, bx: -gs * gW / 2, bhw: (Wd - gW) / 2, driveW: driveW,
+      driveOff: b.drive ? gs * Math.max(0, Wd / 2 - driveW / 2 - 1.2) : 0 };
+  }
   function house(P, b) {
     const rot = b.rot || 0;
     frame(b.x, b.z, rot);
@@ -1674,9 +1695,9 @@
     const flX = mode === M_STUCCO ? F_ARCH : (mode === M_HOUSE && (gr === "victorian" || (b.v && hq(b.x, b.z, 644) < 0.45)) ? F_SPEC : 0);
     const seed = seedOf(b), roofHex = b.roofCol || 0x444040;
     const trim = b.v && b.v.trim != null && mode !== M_STUCCO ? b.v.trim : mode === M_STUCCO ? shade(b.wall, 0.85) : 0xdcd8ce;
-    const gW = b.garage && Wd >= 12 ? Math.min(6.2, Wd * 0.42) : 0;
-    const gs = hq(b.x, b.z, 581) < 0.5 ? -1 : 1;
-    const bx = -gs * gW / 2, bhw = (Wd - gW) / 2;
+    const HP = houseParts(b);
+    const gW = HP.gW, gs = HP.gs;
+    const bx = HP.bx, bhw = HP.bhw;
     const yE = GY + st * fh + 0.3;
     const brush = function () { facade(b.wall, b.glass || 0x2b3238, mode, fh, 3.0, st * fh); bSeed = seed; bFl = flX; };
     brush();
@@ -3119,6 +3140,7 @@
     build: build, prepare: prepare, buildTile: buildTile, buildFarTile: buildFarTile, job: job, runJob: runJob,
     disposeTile: disposeTile, trim: trim, material: material, fadeMaterial: fadeMaterial, tick: tick, uniforms: U,
     cutBuilding: cutBuilding, applyCut: applyCut, afterCols: afterCols, setMaterial: setMaterial, tileOfBuilding: tileOfBuilding,
+    houseParts: houseParts,
     // facade cells: prepare() returns them as .kit; build one with
     // job(P, cell, "kit") + runJob, drop it with disposeKit
     // the fabric's view of every building of a plan (variants; the plan's own
