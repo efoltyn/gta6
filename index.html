@@ -401,7 +401,7 @@ document.body.appendChild(b);}}catch(e){}})();
      r128 build and its separate loader scripts are gone. -->
 <script src="src/vendor/three.r187.js?v=fire1102"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
-<script src="src/core/instcull.js?v=r187a"></script>
+<script src="src/core/instcull.js?v=ph1122"></script>
 <!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
      the terrain builder. BOTH must load before city/world.js runs, since
      buildCity() calls CBZ.buildTerrain() and routes groundHeightAt →
@@ -424,7 +424,7 @@ document.body.appendChild(b);}}catch(e){}})();
      rockscliffs.js's fractured boulders on the mountains you can actually walk on.
      MUST load AFTER terrain_overhaul.js (reads CBZ.terrainFogScale) and BEFORE
      city/biome_snow.js, which reads CBZ.mtn* at PARSE time. -->
-<script src="src/world/mountain_detail.js?v=sink1011"></script>
+<script src="src/world/mountain_detail.js?v=ph1122"></script>
 <!-- The massif SKIN: per-pixel snow/rock/forest shading on a lit Standard material.
      Reads CBZ.gfxRegisterPbr lazily; city/biome_snow.js calls CBZ.alpineSkin at build time. -->
 <script src="src/world/alpine_skin.js?v=wreal0929"></script>
@@ -436,7 +436,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=outside1122"></script>
+<script src="src/config.js?v=ph1122"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=r187a"></script>
@@ -590,7 +590,7 @@ document.body.appendChild(b);}}catch(e){}})();
      after core/batch.js has run would already be welded into a static buffer.
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
-<script src="src/systems/pushables.js?v=loose1013"></script>
+<script src="src/systems/pushables.js?v=ph1122"></script>
 <script src="src/world/carfx.js?v=r187a"></script>
 <script src="src/world/ground.js?v=outside1122"></script>
 <script src="src/world/cellblock.js?v=outside1122"></script>
@@ -1036,7 +1036,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=islesave1022"></script>
+<script src="src/systems/state.js?v=ph1122"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -2397,7 +2397,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/villagekit.js?v=fac1009"></script>
 <script src="src/city/countries.js?v=farcopy1013"></script>
 <!-- WHOSE GROUND IS THIS (city/borders.js): every point to one country, derived from the claims the world already makes; CBZ.countryAt / CBZ.countryList / CBZ.countryBorders for the map, the radar and every rule that cares. -->
-<script src="src/city/borders.js?v=isles1022n"></script>
+<script src="src/city/borders.js?v=ph1122"></script>
 <!-- REAL CASINOS — order-90 dress pass over every casino lot (mainland Golden
      Ace + composed town casinos): marquee/mast exterior, felt tables with
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after

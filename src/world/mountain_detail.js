@@ -140,7 +140,10 @@
   // resolution. 1 = the previous ~3.2 u/vertex. 1.45 ≈ 2.2 u/vertex, which is
   // what cliff/terrace detail needs to actually resolve. Lower it to claw back
   // vertices on a weak machine; the terrain SHAPE is unaffected.
-  if (CFG.MOUNT_MESH_DENSITY == null) CFG.MOUNT_MESH_DENSITY = 1.45;
+  // A phone or tablet takes a lower default (src/config.js, which loads after
+  // this file and is where the device is known, swaps it when it sees the
+  // _mountDensityDefault mark): see the note there.
+  if (CFG.MOUNT_MESH_DENSITY == null) { CFG.MOUNT_MESH_DENSITY = 1.45; CFG._mountDensityDefault = true; }
   // MOUNT_ADAPTIVE_GRID — spend the vertex budget where the geometry is:
   // a CDF over the mountain's own height profile concentrates grid lines on
   // summits/cliffs and thins them over the flat valley, at ZERO extra

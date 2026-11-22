@@ -748,6 +748,14 @@
     // further keeps its emissive glow. Pinned per boot, so no recompiles.
     if (CBZ.CONFIG.LIGHT_BUDGET_POINT == null) CBZ.CONFIG.LIGHT_BUDGET_POINT = CBZ.deviceClass === "phone" ? 3 : 4;
     if (CBZ.CONFIG.LIGHT_BUDGET_SPOT == null) CBZ.CONFIG.LIGHT_BUDGET_SPOT = CBZ.deviceClass === "phone" ? 1 : 2;
+    // Mountain mesh resolution (world/mountain_detail.js set 1.45 before the
+    // device was known). 0.85 is ~2.9x fewer vertices: the two Mount Mercy
+    // meshes (city/biome_snow.js greaterRangeGround + ground) were 1.6 s of
+    // a 1x-CPU phone boot and 9.3 s at 4x, nearly all of it the per-vertex
+    // concavity/snow pass. The terrain's SHAPE (physics, placement) comes from
+    // the height oracle, not the mesh, so only the facet size changes.
+    // (a ?cfg_MOUNT_MESH_DENSITY= override arrives as a string and is kept)
+    if (CBZ.CONFIG._mountDensityDefault && CBZ.CONFIG.MOUNT_MESH_DENSITY === 1.45) CBZ.CONFIG.MOUNT_MESH_DENSITY = 0.85;
   }
   // ---- PERF LEVERS (owner-facing, feel-testable via URL) ----------------------
   // Round-3 teardown (tools/perf-ab/LOG.md) named the three biggest costs and

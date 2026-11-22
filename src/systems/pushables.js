@@ -400,7 +400,15 @@
     // whose sphere is fitted round the pool's pieces (poolBounds): a room of
     // chairs behind you, or across the city, costs no draw.
     m.castShadow = false; m.receiveShadow = true;
+    // three r187 builds an InstancedMesh with frustumCulled = false, so the
+    // fitted sphere above was never asked: every pool in the scene drew from
+    // anywhere (measured: 35 chair pools at the Gang City spawn, behind and
+    // around the camera). The sphere is kept current (poolBounds), so ask it.
+    m.frustumCulled = true;
     m.userData.dynamic = true; m.userData.mover = true; m.userData.loosePool = true;
+    // a phone draws loose furniture only near it (core/instcull.js drawDist):
+    // a room of chairs inside a tower across the street is pixels behind glass
+    if (window.CBZ && window.CBZ.isMobileDevice) m.userData.drawDist = 60;
     m.name = "loose:" + P.gkey;
     P.parent.add(m);
     P.mesh = m; P.cap = cap;

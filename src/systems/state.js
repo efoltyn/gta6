@@ -616,12 +616,28 @@
        there until its 25 s deadline, which cannot be reached either because
        reaching it also needs a callback. Hand over immediately instead. */
     if (CBZ.CONFIG.RENDER_FRAMES === false) { done(); return; }
-    let cheap = 0, n = 0, prev = performance.now();
+    /* "CHEAP" WAS AN ABSOLUTE NUMBER, AND A PHONE NEVER REACHES IT. What this
+       wait exists for is the first-draw work (programs compiled, geometry and
+       textures uploaded). On the phone profile (4x CPU) Gang City's steady
+       frame is over 90 ms, so the card sat to its 25 s cap every time:
+       measured boot:frames = 26.7 s of a 64 s load, most of it the game
+       already drawing at its normal rate behind the card. So the card also
+       lets go once that work has visibly stopped: five frames in a row in
+       which the renderer compiled no program and uploaded no geometry or
+       texture. */
+    const info = CBZ.renderer && CBZ.renderer.info;
+    const sig = function () {
+      if (!info) return "";
+      return (info.programs ? info.programs.length : 0) + "|" + info.memory.geometries + "|" + info.memory.textures;
+    };
+    let cheap = 0, n = 0, prev = performance.now(), lastSig = sig(), still = 0;
     const deadline = prev + 25000;
     (function tick() {
       const t = performance.now(), d = t - prev; prev = t; n++;
       cheap = d < 90 ? cheap + 1 : 0;
-      if ((cheap >= 3 && n >= 4) || t > deadline) { done(); return; }
+      const s = sig();
+      still = (s === lastSig) ? still + 1 : 0; lastSig = s;
+      if ((cheap >= 3 && n >= 4) || (info && still >= 5 && n >= 6) || t > deadline) { done(); return; }
       requestAnimationFrame(tick);
     })();
   }

@@ -165,10 +165,34 @@
     if (g.boundingSphere === null) g.computeBoundingSphere();
     return f.intersectsSphere(_sph.copy(g.boundingSphere).applyMatrix4(object.matrixWorld));
   }
+  /* A DRAW DISTANCE FOR DETAIL POOLS. A pool whose owner set
+     userData.drawDist (metres) is not drawn once the main camera is farther
+     than that from it. Owners set it only where the detail is small enough
+     to vanish into a phone screen first (city/buildings.js facade trim,
+     systems/pushables.js loose furniture, on a phone or tablet): measured at
+     the Gang City rooftop spawn on the phone profile, office chairs inside
+     towers were 0.63 M of the frame's 7 M triangles and window trim 0.76 M,
+     none of it larger than a few pixels. The main camera's distance is used
+     for every pass (a shadow or mirror camera has no business drawing a pool
+     the view itself would drop). */
+  const _cp = new THREE.Vector3();
+  function tooFar(object, f) {
+    const dd = object.userData && object.userData.drawDist;
+    if (!(dd > 0)) return false;
+    const C = window.CBZ && window.CBZ.camera;
+    if (!C) return false;
+    _cp.setFromMatrixPosition(C.matrixWorld);
+    if (f === 1) return _box.distanceToPoint(_cp) > dd;
+    const g = object.geometry;
+    if (!g) return false;
+    if (g.boundingSphere === null) g.computeBoundingSphere();
+    _sph.copy(g.boundingSphere).applyMatrix4(object.matrixWorld);
+    return _sph.distanceToPoint(_cp) > dd;
+  }
   THREE.Frustum.prototype.intersectsObject = function (object) {
     if (object.isSkinnedMesh) return geoSphere(this, object);
     if (!object.isInstancedMesh) return baseIntersects.call(this, object);
-    if (!ctl.on || !predictable(object)) return geoSphere(this, object);
+    if (!ctl.on || !predictable(object)) return tooFar(object, 0) ? false : geoSphere(this, object);
     // not on the GPU yet: draw it (that first draw uploads the real matrices)
     if (!object.instanceMatrix._cbzUploaded) return true;
     ctl.tested++;
@@ -176,6 +200,7 @@
     if (b.all) return true;
     if (b.box.isEmpty()) { ctl.culled++; return false; }
     _box.copy(b.box).applyMatrix4(object.matrixWorld);
+    if (tooFar(object, 1)) { ctl.culled++; return false; }
     if (this.intersectsBox(_box)) return true;
     ctl.culled++;
     return false;

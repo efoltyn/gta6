@@ -327,16 +327,22 @@
   }
   function stepJob(J, budget) {
     if (J.empty) return true;
+    // The budget is checked every 16 cells, not once a row: a row is ~300
+    // cells of landAt + exact, and one row alone was measured at ~7 ms a
+    // frame on the phone profile (4x CPU) for the first seconds of play.
     const t0 = performance.now(), B = J.B, cell = J.cell, nx = J.nx;
     while (J.j < J.nz) {
-      const j = J.j++, z = B.minZ + (j + 0.5) * cell;
-      for (let i = 0; i < nx; i++) {
+      const j = J.j, z = B.minZ + (j + 0.5) * cell;
+      let i = J.i || 0;
+      for (; i < nx; i++) {
         const x = B.minX + (i + 0.5) * cell;
         const ld = landAt(x, z);
         J.land[j * nx + i] = ld ? 1 : 0;
         const id = exact(x, z, ld);
         J.grid[j * nx + i] = id ? (J.idx[id] || 0) : 0;
+        if (budget != null && (i & 15) === 15 && performance.now() - t0 > budget) { J.i = i + 1; return false; }
       }
+      J.i = 0; J.j++;
       if (budget != null && performance.now() - t0 > budget) break;
     }
     return J.j >= J.nz;
