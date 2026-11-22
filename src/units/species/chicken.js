@@ -6,14 +6,13 @@
    file (and shared helpers under src/units/kit/ if you must); never the
    battle's files.
 
-   TODAY (wave A) every hook below falls back to what the game already has:
-     body     the bestiary row's body: src/city/wildlife/beast_bodies.js
-     motion   the discovered gait rig: CBZ.wildlifeRig.buildGait / animateGait (city/wildlife_rig.js)
+     body     the bird kit's chicken (src/world/birdkit.js): a hen or a
+              rooster at real size, posed in the vertex shader
+     motion   the same file: planted feet (two-bone IK), the head-bob,
+              foraging pecks, a bolt with the wings beating; the battle
+              tumbles the dead (battle/death.js)
      fight    creature_combat's PECK, driven by
               the battle's beastFight with the numbers below
-   To redraw it: give `build` a lofted, skinned body (src/units/kit/loft.js,
-   quadrig.js) and `animate` a planted-foot gait (src/units/kit/gait.js); see
-   src/city/dogmodel.js for a complete animal built that way.
 
    STATS were the bestiary row + battle.html's derived beastTuning, baked
    here so the numbers live with the animal:
@@ -34,8 +33,7 @@
       dmg: 13.5, rate: 1.65,
       brave: false, prey: true,
     },
-    // build(ctx) { ... return group; }        ctx = { THREE, mat, rng, id }
-    // animate(unit, dt) { ... }               replaces the shared gait rig
-    // fight(unit, tgt, dt, opts) { ... }       replaces CBZ.creatureFight(unit, tgt, dt, opts)
+    build: function (ctx) { return CBZ.birdKit ? CBZ.birdKit.chickenBuild(ctx) : null; },
+    animate: function (unit, dt) { if (CBZ.birdKit) CBZ.birdKit.animateActor(unit, dt); },
   });
 })();

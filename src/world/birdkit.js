@@ -510,6 +510,14 @@
     geo.setIndex(G.ix);
     geo.computeVertexNormals();
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, S.wing.y * 0.8, 0), S.span * 0.55 + 0.1);
+    // the box a host measures (a battle's footprint, aim heights): the bird
+    // standing with its wings folded, not the spread rest pose
+    const bb = new THREE.Box3(), v = new THREE.Vector3();
+    for (let i = 0; i < G.n; i++) if (Math.round(SG[i * 4 + 1]) !== CHAIN.wing) bb.expandByPoint(v.set(G.p[i * 3], G.p[i * 3 + 1], G.p[i * 3 + 2]));
+    let wMax = 0;
+    S.body.forEach(function (b) { wMax = Math.max(wMax, b[3]); });
+    bb.min.z = Math.min(bb.min.z, -(wMax + S.fold.out + 0.012)); bb.max.z = Math.max(bb.max.z, wMax + S.fold.out + 0.012);
+    geo.boundingBox = bb;
     geo._shared = true;
     return geo;
   }
@@ -780,6 +788,7 @@
     for (const k in base.attributes) geo.setAttribute(k, base.attributes[k]);
     geo.setIndex(base.index);
     geo.boundingSphere = base.boundingSphere.clone();
+    geo.boundingBox = base.boundingBox.clone();
     const mk = function () { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4); a.setUsage(THREE.DynamicDrawUsage); return a; };
     const A = mk(), B = mk(), Cc = mk(), Dd = mk();
     geo.setAttribute("bA", A); geo.setAttribute("bB", B); geo.setAttribute("bC", Cc); geo.setAttribute("bD", Dd);
@@ -935,18 +944,21 @@
   }
 
   // ==========================================================================
-  //  THE CHICKEN in the bestiary (Gang City's farms): walks with the head-bob
-  //  (the head holds still in space through the stance, then thrusts), pecks
-  //  as it grazes, bolts with the wings beating when it flees
+  //  THE CHICKEN in the bestiary (Gang City's farms) and NPC War: a hen or a
+  //  rooster that walks with the head-bob (the head holds still in space
+  //  through the stance, then thrusts), forages with pecks when it is not
+  //  going anywhere, bolts with the wings beating when it flees. Both hosts
+  //  scale the group by the row's `scale`; the body carries the inverse.
   // ==========================================================================
   function chickenBuild(ctx) {
     const r = (ctx && ctx.rng) || Math.random;
-    const rig = build("chicken", Math.floor(r() * 1e9) + 1);
+    const seed = ctx && ctx.seed != null ? (ctx.seed | 0) * 7919 + 17 : Math.floor(r() * 1e9) + 1;
+    const rig = build("chicken", seed);
     if (!rig) return null;
     const sp = CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.chicken;
     const sc = sp && sp.scale ? sp.scale : 1;
     // real size: the engine multiplies the row's scale back in
-    rig.mesh.scale.setScalar(1 / sc);
+    rig.mesh.scale.setScalar(1 / sc); rig.meshFar.scale.setScalar(1 / sc);
     rig.group.userData.birdRig = rig;
     rig.group.name = "beast:chicken";
     return rig.group;
@@ -956,6 +968,8 @@
     if (!rig) return false;
     if (!(dt > 0)) dt = 0.016;
     const S = rig.species, P = rig.params, D = prep(rig.kind);
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (cam) rig.lod(Math.hypot(cam.x - grp.position.x, cam.y - grp.position.y, cam.z - grp.position.z));
     const st = a._bk || (a._bk = { px: null, pz: null, step: 0, peck: 0, peckT: 1 + rig.rng() * 2, look: 0, lookT: 0, flapPh: 0, flap: 0, w: 0 });
     // the hunger cue's whole-body swell is turned away (it would scale the bird)
     a._bodyMesh = null;
@@ -974,16 +988,18 @@
       rig.set(P);
       return true;
     }
-    const flee = a.state === "flee";
-    const graze = a.state === "graze";
+    const flee = a.state === "flee" || !!a.routed;
+    // grazing, or standing about with nothing to do: foraging
+    const graze = a.state === "graze" || (!flee && st.w < 0.15 && !a.tgt && a.state !== "charge");
     // the walk weight follows the speed (full stride by ~0.45 m/s; faster is cadence)
     st.w += (clamp(v / 0.45, 0, 1) - st.w) * Math.min(1, dt * 6);
     const strd = stride(rig.kind, st.w);
     st.step = frac(st.step + d / Math.max(0.02, strd));
     // the head-bob: held in space through the stance (the body slides under
     // it), thrust forward while the other foot swings
-    const half = frac(st.step * 2), hold = S.leg.duty;
-    const reach = Math.min(0.045, strd * 0.5 * hold);
+    // (the hold lasts as long as the neck's reach lets the head stay put)
+    const half = frac(st.step * 2), reach = Math.min(0.045, strd * 0.5 * S.leg.duty);
+    const hold = Math.min(S.leg.duty, reach / Math.max(1e-3, strd * 0.5));
     const bob = st.w > 0.05 ? (half < hold ? reach * (0.5 - half / hold) : reach * (-0.5 + (half - hold) / (1 - hold))) : 0;
     // pecking while it grazes; looking about while it stands
     st.peckT -= dt;

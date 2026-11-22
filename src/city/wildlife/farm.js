@@ -71,14 +71,18 @@
   });
 
   // ============================================================
-  //  CHICKEN — domestic hen. Reference: small plump white/brown body,
-  //  red COMB + red wattle, orange/yellow BEAK & legs, little wing
-  //  boxes, tail feathers up. Two legs only.
+  //  CHICKEN — the bird kit's chicken (world/birdkit.js) at real size: a
+  //  laying hen (Rhode Island Red, white Leghorn or black Australorp) or a
+  //  red rooster, with comb, wattles and earlobes, a feathered wing that
+  //  folds against the flank, a roofed tail, four-toed yellow feet. It
+  //  walks with the head-bob, pecks as it forages, and bolts with its
+  //  wings going (animate: wildlife.js's per-species hook).
   // ============================================================
   S({
     id: "chicken", name: "Chicken", biome: "farmland", rarity: "common",
     hp: 6, fur: "Feathers", furValue: 6, meat: "Chicken", meatValue: 6,
     herd: [4, 9], packs: 3, spd: 1.6, danger: 0, scale: 0.35, color: 0xf2f2f2,
-    build: function (ctx) { return CBZ.beastBodies ? CBZ.beastBodies.build("chicken", ctx) : null; },
+    build: function (ctx) { return CBZ.birdKit && CBZ.loftKit && CBZ.loftKit.sweep ? CBZ.birdKit.chickenBuild(ctx) : null; },
+    animate: function (a, dt) { return CBZ.birdKit ? CBZ.birdKit.animateActor(a, dt) : false; },
   });
 })();
