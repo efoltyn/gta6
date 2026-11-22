@@ -2046,6 +2046,7 @@
       if (!r) continue;
       any = true;
       const B = layerBuf(bite, S, el.layer);
+      if (B.n > BITE_VERTS) continue;
       const first = B.n, lift = (el.lift != null ? el.lift : SKIN_LIFT) / S.wsc;
       const src = r.src, bar = r.bary, uv = r.uv;
       for (let v = 0; v < r.n; v++) {
@@ -2062,19 +2063,28 @@
   }
 
   /* ---- THE MARK MESHES, THEIR LIFE, THEIR BUDGET ------------------------- */
+  /* THE BUDGET: meshes per body and in the world on the quality tier, and the
+     vertices all marks hold together (a phone's memory is the real limit: a
+     great white's bite on a tuna is a few thousand vertices). Oldest first. */
+  function skinVertCap() { return (CBZ.qScale ? CBZ.qScale(120000, 400000) : 240000) | 0; }
+  let SKIN_VERTS = 0;
+  const BITE_VERTS = 9000;               // one layer of one bite on one part, at most
   function skinDrop(i) {
     const r = SKIN.splice(i, 1)[0];
     if (!r) return;
     r.gone = true;
+    SKIN_VERTS -= r.verts || 0;
     if (r.m.parent) r.m.parent.remove(r.m);
     if (r.m.geometry) { try { r.m.geometry.dispose(); } catch (e) {} }
   }
-  function skinMake(actor) {
+  function skinMake(actor, nv) {
     // this body's own oldest first, then the world's
     let n = 0, first = -1;
     for (let i = 0; i < SKIN.length; i++) if (SKIN[i].actor === actor) { if (first < 0) first = i; n++; }
     if (n >= SKIN_PER_ACTOR && first >= 0) skinDrop(first);
     else if (SKIN.length >= skinCap()) skinDrop(0);
+    const cap = skinVertCap();
+    while (SKIN.length && SKIN_VERTS + nv > cap) skinDrop(0);
   }
   const ANIM = [];
   function buildMarks(bite) {
@@ -2112,7 +2122,7 @@
       m.raycast = NOOP;                        // nor a bullet, nor a camera ray
       m.castShadow = false; m.receiveShadow = false;
       m.renderOrder = SKIN_RO + (B.layer === "s" ? -0.01 : 0);
-      skinMake(bite.actor);
+      skinMake(bite.actor, B.n);
       host.add(m);
       const rec = {
         m: m, actor: bite.actor, host: host, layer: B.layer, age: 0, t: 0, gone: false,
@@ -2126,6 +2136,8 @@
         ANIM.push(rec);
         animStep(rec, 0);
       }
+      rec.verts = B.n;
+      SKIN_VERTS += B.n;
       SKIN.push(rec);
       made++;
       if (!lead && B.layer === "w" && S === bite.seatS) lead = m;
@@ -3231,6 +3243,10 @@
     const h = nearestAll(bite.surfs, x, y, z, hitRec());
     return h;
   }
+  const PAINT = new Map([
+    [TCELL.blood, 0], [TCELL.crater, 1], [TCELL.rake, 2], [TCELL.tear, 3], [TCELL.slit, 4], [TCELL.serrated, 5], [TCELL.puncture, 6],
+    [SCELL.soak, 0], [SCELL.bruise, 1], [SCELL.rip, 2], [SCELL.hole, 3],
+  ]);
   function elAt(layer, cell, h, T, sx, sy, dz, c, wc, anim, only) {
     return { layer: layer, cell: cell, P: { x: h.px, y: h.py, z: h.pz }, N: { x: h.nx, y: h.ny, z: h.nz }, T: T, sx: sx, sy: sy, dz: dz, c: c, wc: wc || null, anim: anim || null, only: only || null };
   }
@@ -3247,7 +3263,7 @@
       if (t.kind === "serrated") {
         // the blade went in at its full width and the close dragged it
         const len = t.L * (1.0 + 0.8 * D.saw * sev);
-        bite.els.push(elAt("w", TCELL.serrated, st, st.drag, (t.W * (0.95 + 0.25 * sev)) / 0.48, len / 0.86, dz, [Math.max(0.75, dScale), 0, 0, 1], null, healA, st.S));
+        bite.els.push(elAt("w", TCELL.serrated, st, st.drag, (t.W * (0.95 + 0.25 * sev)) / 0.48, len / 0.86, dz, [Math.max(0.75, dScale), 0, 0, 1], null, null, st.S));
       } else if (t.kind === "blade" || t.kind === "edge") {
         const len = t.kind === "edge" ? D.hw * 1.6 : t.W * 2.4;
         const along = onSkin(S.x, S.y, S.z, n, new THREE.Vector3()) || st.drag;
@@ -3285,7 +3301,7 @@
           const h = snap(bite, (a.px + b.px) * 0.5, (a.py + b.py) * 0.5, (a.pz + b.pz) * 0.5);
           if (!h) continue;
           const w = Math.max(a.t.W, b.t.W) * (0.30 + 0.35 * Math.max(D.saw, D.slice) * sev);
-          bite.els.push(elAt("w", TCELL.slit, h, new THREE.Vector3(dx, dy, dz), (d + a.t.W * 0.6) / 0.95, w / 0.12, Math.max(0.008, d * 0.4), [0.8, 0, 0, 1], null, healA));
+          bite.els.push(elAt("w", TCELL.slit, h, new THREE.Vector3(dx, dy, dz), (d + a.t.W * 0.6) / 0.95, w / 0.12, Math.max(0.008, d * 0.4), [0.8, 0, 0, 1], null, null));
           n++;
         }
       }
@@ -3312,7 +3328,9 @@
       }
       // 4. a big enough tear leaves a flap hanging: the cloth or the hide the
       //    shake pulled loose
-      if (longest && D.shake * sev >= 0.4 && (longest.cloth || coat === "fur")) flap(bite, longest);
+      //    (built after the marks on the skin: it stands off the body and
+      //    has to draw over whatever is on the skin behind it)
+      if (longest && D.shake * sev >= 0.4 && (longest.cloth || coat === "fur")) bite.flapAt = longest;
     }
     // 5. the teeth dragged along the line of travel: the rakes
     if (D.rake >= 0.25) {
@@ -3330,7 +3348,9 @@
     let mx = 0, my = 0, mz = 0;
     for (let i = 0; i < strikes.length; i++) { mx += strikes[i].px; my += strikes[i].py; mz += strikes[i].pz; }
     mx /= strikes.length; my /= strikes.length; mz /= strikes.length;
-    const mid = snap(bite, mx, my, mz);
+    // (round a limb the jaws closed on, the strikes ring it and their mean is
+    // inside it: the bite's middle is where the jaw met it, the seat)
+    const mid = wrap ? snap(bite, P.x, P.y, P.z) : snap(bite, mx, my, mz);
     const X = bite.ext, spanA = Math.max(0.01, X.aMax - X.aMin), spanB = Math.max(0.01, X.bMax - X.bMin);
     // 6. the flesh that went with the mouth: the crater's floor in the
     //    victim's own layers (painted on a rigid body, on the dug-out skin of
@@ -3378,9 +3398,12 @@
       bite.els.push(elAt("w", TCELL.blood, hB, upT, bloodR * 2 / 0.72, bloodR * 2.3 / 0.72, Math.max(0.02, bloodR * 0.5), [0, 0, 0, 0.95], null,
         wet ? [grow, { type: "alpha", from: 1, to: 0.3, T: 90, t0: 5 }] : grow, hB.S));
     }
-    // stamp everything so far
+    // stamp everything so far, the blood first and the tooth holes last (a
+    // later mark blends over an earlier one in the same mesh)
+    bite.els.sort(function (a, b) { return (PAINT.get(a.cell) || 0) - (PAINT.get(b.cell) || 0); });
     for (let i = 0; i < bite.els.length; i++) stampEl(bite, bite.els[i]);
     bite.els.length = 0;
+    if (bite.flapAt) { flap(bite, bite.flapAt); bite.flapAt = null; }
     // 11. on land, blood runs down the body along its real surface
     if (!wet && coat !== "fur" && sev > 0.3) {
       const lows = strikes.slice().sort(function (a, b) { return a.py - b.py; });
