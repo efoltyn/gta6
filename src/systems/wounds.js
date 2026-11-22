@@ -3213,8 +3213,38 @@
      take flesh where the mouth takes flesh, blood, and build the meshes.
      kind: "person" | "animal". Returns { made, lead, wet, region, P, removed,
      severed, strikes } or { why } when nothing could be laid. */
+  /* A body that keeps a light far shell on the same skeleton (a marine body,
+     a canid) is bitten on its full shell. Marks laid on the far shell's
+     coarse facets stand centimetres off the round near shell once it is
+     back, and a long rake laid straight across a facet sticks out into the
+     water where the real skin curves away from it (the orca's rakes on a
+     megalodon bitten before its LOD caught up with the eye). A bite is close
+     enough to matter: the near shell is shown now, through the body's own
+     state; its own LOD check swaps it back if the eye is far, where the
+     marks being a few centimetres off a far shell cannot be seen. */
+  function finestShell(actor) {
+    const ud = actor.group && actor.group.userData;
+    if (!ud) return;
+    const mb = ud.marineBody;
+    if (mb && mb.mesh && mb.tpl && mb.tpl.geo && mb.tpl.geo.length > 1) {
+      if ((mb.lod || 0) !== 0) {
+        mb.mesh.geometry = mb.tpl.geo[0];
+        mb.lod = 0;
+        const rig = actor.swim;
+        if (rig && rig.marine === mb) { rig.lod = 0; rig.lodT = Math.max(rig.lodT || 0, 0.3); }
+      }
+      return;
+    }
+    const cr = ud.canidRig;
+    if (cr && cr.lod && CBZ.canid && typeof CBZ.canid.collar === "function") {
+      cr.lod = 0;
+      try { CBZ.canid.collar(cr, cr.collarHex); } catch (e) {}
+      cr.lodT = Math.max(cr.lodT || 0, 0.4);
+    }
+  }
   function runBite(actor, wp, opts, kind, who, dent, sev) {
     const grp = actor.group;
+    if (kind === "animal") finestShell(actor);
     freshMats(grp, actor._mOn === false);
     const span = Math.max(dent.hw, dent.depth) + dent.gape;
     const R = span * 1.15 + 0.08;
@@ -3783,7 +3813,15 @@
     _fo1.copy(Bv).multiplyScalar(-Math.cos(phi)).addScaledVector(n, Math.sin(phi)).normalize();
     _fo2.copy(Bv).multiplyScalar(-Math.cos(phi + curl)).addScaledVector(n, Math.sin(phi + curl)).normalize();
     const lift = 0.002;
-    const cell = TCELL.flap, c = [0, 0, L.cloth ? 0.5 : 1, 1], wc = [_fc3[0], _fc3[1], _fc3[2]];
+    const cell = TCELL.flap, c = [0, 0, L.cloth ? 0.5 : 1, 1];
+    // the soak the stain layer gives the fabric (or the coat) round it, as
+    // an albedo: the dye raised to its cover (see stainMat), linearised
+    const tn = L.cloth ? TINT.soakCloth : TINT.soakFur;
+    const soakAt = function (cover) {
+      const out = [0, 0, 0];
+      for (let k = 0; k < 3; k++) out[k] = _fc3[k] * Math.pow(Math.max(0.001, Math.pow(tn[k], 1 / 2.2) * 0.9), cover * 2.2);
+      return out;
+    };
     const grid = [];
     for (let j = 0; j <= 2; j++) {
       for (let i = 0; i <= 3; i++) {
@@ -3793,7 +3831,7 @@
         if (j >= 2) _fv.addScaledVector(_fo2, height * 0.45);
         // a ragged free edge
         if (j === 2) _fv.addScaledVector(T, (Math.random() - 0.5) * hingeW * 0.12);
-        grid.push([_fv.x, _fv.y, _fv.z, (u + 0.5), j / 2]);
+        grid.push([_fv.x, _fv.y, _fv.z, (u + 0.5), j / 2, soakAt(0.95 - 0.12 * j - 0.08 * Math.random())]);
       }
     }
     const at = function (i, j) { return grid[j * 4 + i]; };
@@ -3804,7 +3842,7 @@
         _fw.set(b[0] - a[0], b[1] - a[1], b[2] - a[2]).cross(_fv.set(d[0] - a[0], d[1] - a[1], d[2] - a[2])).normalize();
         for (let k = 0; k < 6; k++) {
           const p = q[k];
-          vertWorld(B, hh, inv, p[0], p[1], p[2], _fw.x, _fw.y, _fw.z, cell[0] + p[3] * cell[2], cell[1] + p[4] * cell[3], c, wc, 0, 0, 0);
+          vertWorld(B, hh, inv, p[0], p[1], p[2], _fw.x, _fw.y, _fw.z, cell[0] + p[3] * cell[2], cell[1] + p[4] * cell[3], c, p[5], 0, 0, 0);
         }
       }
     }
