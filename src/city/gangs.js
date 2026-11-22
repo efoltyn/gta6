@@ -2334,7 +2334,10 @@
   CBZ.cityGangMemberDown = function (ped, imp) {
     const gang = gangById(ped.gang); if (!gang) return;
     const byPlayer = !imp || imp.byPlayer !== false;
-    gang.provoke = Math.min(1, gang.provoke + (byPlayer ? 0.5 : 0.25));
+    // a player's kill raises `provoke` (what the turf guards, shoot-first and
+    // the reprisal director read as "the set is on HIM") only if one of the
+    // set saw it: see the witness test below
+    if (!byPlayer) gang.provoke = Math.min(1, gang.provoke + 0.25);
     // RECENT-DEATH timer: while the player is actively massacring this crew, the
     // recruit tick stays shut off — a sustained push out-kills the trickle-back.
     if (byPlayer) gang.lastDownT = 6;
@@ -2349,6 +2352,12 @@
       // battle instead. STANDING always sinks — kin is kin, the books know.
       const own = gang.isPlayer || gang.playerFriendly || gang.id === myGangId();
       const w = nearestGangWitness(gang, ped);
+      // THE SET IS ON YOU ONLY IF IT SAW YOU. A brother dropping in front of
+      // them puts them on you now (this was +0.5 here and +0.5 in peds.js's
+      // cityKillPed, which no longer bumps it); a body nobody saw drop rattles
+      // them (morale, standing) but points them at nobody, so a clean hit stays
+      // clean and his colours can be worn.
+      if (w || own) gang.provoke = Math.min(1, gang.provoke + (gang.playerFriendly ? 0.5 : 1));
       if (own) {
         if (wasBoss) { /* killing your own boss = the takeover path below owns it */ }
         else if (w) loyaltyBattle(gang, ped);

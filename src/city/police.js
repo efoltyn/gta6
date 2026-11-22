@@ -169,11 +169,10 @@
   //    Corporal    moveon · partner · vouch    — may issue the move-along
   //                                              (scanDuty/disperse) and take a
   //                                              partner (pairUp); knows the
-  //                                              roster well enough to blow a
-  //                                              police disguise (outfits.js's
-  //                                              seniorSees already tested
-  //                                              `a.copRank` — with no producer
-  //                                              that test could never fire)
+  //                                              roster: clocks a stolen
+  //                                              uniform up close quicker
+  //                                              than a patrolman (outfits.js
+  //                                              the close look)
   //    Sergeant    roadblock                   — may close a road (rbMaintain)
   //    Lieutenant  swat                        — may commit the tactical unit
   //                                              (the SWAT ramp + the van)
@@ -265,11 +264,11 @@
   // corporals : 1 sergeant, repeating).
   //
   // `null` means a plain patrol officer who carries NO `copRank` at all, and
-  // that is deliberate: outfits.js's seniorSees() blows a police disguise when
-  // anyone with `a.copRank` is within 12 m, so stamping a word on every beat
-  // cop would have made a rookie as dangerous to a stolen uniform as a watch
-  // commander. "patrol" is the implicit bottom rung (factions.js's tierOf()
-  // reads an unstamped marked member as tier 0).
+  // that is deliberate: outfits.js's close look has anyone with `a.copRank`
+  // clock a stolen uniform faster than a patrolman does, so stamping a word on
+  // every beat cop would have made a rookie as sharp as a watch commander.
+  // "patrol" is the implicit bottom rung (factions.js's tierOf() reads an
+  // unstamped marked member as tier 0).
   const COP_SLOTS = [null, null, "corporal", null, null, "sergeant", null, "corporal"];
   let _badge = 0;
   function rosterRank() { return COP_SLOTS[(_badge++) % COP_SLOTS.length]; }
@@ -820,8 +819,8 @@
     if (gunStopScanT > 0) return;
     gunStopScanT = 0.5;
     // THE UNIFORM READS (outfits.js): a "cop" carrying iron is just a cop —
-    // beat officers don't gun-stop their own. But one who gets CLOSE clocks
-    // the face under the cap and the costume stops working for a while.
+    // beat officers don't gun-stop their own. Up close one may still clock the
+    // face under the cap; that is outfits.js's close look, not this scan.
     const trusted = !!(CBZ.cityOutfitCopTrust && CBZ.cityOutfitCopTrust());
     // nearest free ambient beat cop who can SEE the gun and isn't busy/hunting
     let best = null, bd = 13;
@@ -833,11 +832,7 @@
       const d = Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z);
       if (d > bd) continue;
       if (!LAW.sight(c, CBZ.city.playerActor, 13, false)) continue;   // he has to be LOOKING, and no wall between
-      if (trusted) {
-        // inside arm's reach the costume fails the face check — otherwise waved past
-        if (d < 3.2 && CBZ.cityOutfitBlow) CBZ.cityOutfitBlow(c);
-        continue;
-      }
+      if (trusted) continue;                    // waved past: one of ours
       bd = d; best = c;
     }
     if (best) beginStop(best);
@@ -2219,7 +2214,10 @@
       if (hitByPlayer && dmg > 0) {
         cop._firedUponT = copClock;
         g._copsFiredUponT = CBZ.now;
-        if (CBZ.cityCrime && (CBZ.now - (g._copWoundT || 0)) > 1500) {
+        // he felt it and saw who did it, so it is reported, unless this is the
+        // blow that kills him (the killing below goes to whoever saw it)
+        const lives = cop.hp - Math.max(0, dmg - Math.max(0, cop._armor | 0)) > 0;
+        if (lives && CBZ.cityCrime && (CBZ.now - (g._copWoundT || 0)) > 1500) {
           g._copWoundT = CBZ.now;
           CBZ.cityCrime(25, { instant: true, x: cop.pos.x, z: cop.pos.z, type: "assault-officer" });
         }
@@ -2302,8 +2300,8 @@
           fling: imp.fling != null ? imp.fling : 4 });
         else CBZ.body.hit(cop, { dir: { x: rng() - 0.5, z: rng() - 0.5 }, force: 4, fling: 5 });
       }
-      // who killed the officer? player → automatic 5 stars; another NPC → that
-      // NPC's offense; a cop / driverless car → nobody is charged.
+      // who killed the officer? the player → charged if anybody saw it; another
+      // NPC → that NPC's offense; a cop / driverless car → nobody is charged.
       const att = imp && imp.attacker && imp.attacker.pos ? imp.attacker : null;
       const byPlayer = imp ? imp.byPlayer !== false : true;
       if (att && att !== CBZ.city.playerActor) { if (att.kind !== "cop" && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, 140, "cop-killer"); }
@@ -2311,8 +2309,14 @@
         g._cityKillDetail = { cop: true, armed: true, victim: cop.name || "officer" };
         CBZ.city && CBZ.city.addKill();
         CBZ.city && CBZ.city.addRespect(8);
-        if (CBZ.cityCopKilled) CBZ.cityCopKilled();          // big heat spike (caps at 4★ for a lone act; 5★ only via a long spree — see wanted.js)
-        else if (CBZ.cityCrime) CBZ.cityCrime(120, { instant: true, x: cop.pos.x, z: cop.pos.z, type: "cop-kill" });
+        // A DEAD OFFICER CALLS NOTHING IN. The killing is charged the way every
+        // other killing is: whoever saw it (his partner, a passer-by, a cop down
+        // the street) reports it, and wanted.js scores it as a cop-killing (caps
+        // at 4★ for a lone act). A gunshot is heard on its own ("shots-fired").
+        // Done where nobody saw, it is not on you, which is what lets his
+        // uniform be worn at all. (It used to go straight to the stars.)
+        const PP = CBZ.player;
+        if (CBZ.cityCrime && PP && PP.pos) CBZ.cityCrime(9999, { x: PP.pos.x, z: PP.pos.z, type: "_copkill" });
       }
     } else if (imp && (imp.point || imp.shot) && shotOnRig(cop, imp, 1)) {
       // a round into a living officer: zone, caliber and steps on his rig
@@ -3189,12 +3193,16 @@
   // STICKY: the target he already has scores a bonus, so two offenders of
   // equal weight can never make him flip between them every retarget beat.
   const STICKY = 14;
+  // the player's police uniform still believed (outfits.js), read once a frame
+  let _uniformTrust = false;
   function chooseTarget(cop) {
     let best = null, bestScore = -1, bestPed = null;
     const cp = cop.pos, pa = CBZ.city.playerActor, cur = cop.curTarget;
     cop._blindToPlayer = false;
     let playerKnown = false;
-    if ((g.wanted | 0) >= 1 && !CBZ.player.dead) {
+    // a stolen uniform the force still believes (under 2★) is not picked out
+    // of a crowd: only an officer already on him keeps him
+    if ((g.wanted | 0) >= 1 && !CBZ.player.dead && !(_uniformTrust && !(cop.sees && cur === pa))) {
       playerKnown = (cop.sees && cur === pa) ||
         !!(CBZ.cityChopperPaints && CBZ.cityChopperPaints()) ||
         LAW.acquire(cop, pa, 48);
@@ -3259,6 +3267,7 @@
 
     const P = CBZ.player, camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     const stars = g.wanted | 0;
+    _uniformTrust = !!(CBZ.cityOutfitCopTrust && CBZ.cityOutfitCopTrust());
     const A = arenaW();
     const cops = CBZ.cityCops;
     for (let i = cops.length - 1; i >= 0; i--) {
@@ -3319,6 +3328,13 @@
       // a cop running a GUN STOP is driven by updateGunStop() — keep him out of the
       // normal hunt/arrest logic so he just stands you down over the weapon.
       if (c.gunstop) { c.sees = false; continue; }
+      // SIZING UP A UNIFORM (outfits.js's close look): he has stopped to ask a
+      // stranger in a police uniform who he is, and stands facing him
+      if (c._lookAt && c._lookAt.pos && CBZ.now < (c._lookUntil || 0)) {
+        c.sees = false;
+        standIdle(c, Math.atan2(c._lookAt.pos.x - c.pos.x, c._lookAt.pos.z - c.pos.z), dt, _near);
+        continue;
+      }
       // ---- LEAVING THE STATION (see spawnCop): to the front step, then the
       // beat or the hunt. Not while the man he is after is in the hall with
       // him; a leg that cannot be walked in 12 s is given up.
@@ -3385,7 +3401,7 @@
         if (c._losCD == null) c._losCD = rng() * 0.25;
         c._losCD -= dt;
         if (c._losCD <= 0) { c._losCD = 0.22 + rng() * 0.12; c._losClear = pd < 40 && !P.dead && LAW.sight(c, CBZ.city.playerActor, 40, !!c.sees); }
-        c.sees = pd < 40 && !P.dead && stars >= 1 && !!c._losClear;
+        c.sees = pd < 40 && !P.dead && stars >= 1 && !!c._losClear && !_uniformTrust;
         c.curTarget = c.sees ? CBZ.city.playerActor : null;    // feeds the aim pose + gun visibility
         // arrest-first: the wall is PRESSURE, not an execution squad — posted
         // officers hold fire until deep heat (4★+) or the force has been fired
