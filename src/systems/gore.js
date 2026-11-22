@@ -941,8 +941,18 @@
      sRGB hexes that land on screen (converted to linear once, because the
      output encoding still applies). Fog then mixes toward the scene's own
      already-graded fog colour, so distance and the water column still eat it. */
-  const PLUME_FRESH = 0x7a0c0e, PLUME_DEEP = 0x2a0608;   // display sRGB
-  const SLICK_COL = 0x5a0a0c;                             // display sRGB
+  /* BLOOD IN WATER ABSORBS; IT DOES NOT GLOW. Haemoglobin takes the blue
+     and the green out of the light that passes through it, and a cloud of it
+     is a FILTER on the water behind it: dark, murky, red-brown near the top,
+     near black a few metres down where the red has already gone. Drawn as a
+     translucent red PAINT over blue water it averaged to pink and mauve (the
+     owner's "water turns pink"). So the plume and the film are multiplied
+     onto what is behind them: the colours below are what a full-strength
+     cloud lets through (display sRGB), raised to the cloud's density, so a
+     faint wisp is a slight darkening and nothing can ever brighten or pink
+     the sea. */
+  const PLUME_FRESH = 0x8c3a33, PLUME_DEEP = 0x4a4444;   // display sRGB transmittance
+  const SLICK_COL = 0x9e4f45;                             // display sRGB transmittance
   function displayColor(hex) { return new THREE.Color(hex).convertSRGBToLinear(); }
   const PLUME_DARK_DEPTH = 6.5;         // metres under the swell to reach PLUME_DEEP
   const PUFF_VIS = 0.4, LID_GAP = 0.18; // drawn rim as a fraction of the quad; lid clearance
@@ -1054,12 +1064,26 @@
           "void main() {",
           "  float a = texture2D(map, vUv).a * vA;",
           "  if (a < 0.004) discard;",
-          "  gl_FragColor = vec4(mix(cFresh, cDeep, vDark), a);",
+          // what the cloud lets through, raised to its density (Beer-Lambert)
+          "  vec3 m = pow(clamp(mix(cFresh, cDeep, vDark), vec3(0.001), vec3(1.0)), vec3(a * 1.6));",
+          // the water column in front of it takes the filter away, not tints it
+          "  #ifdef USE_FOG",
+          "    #ifdef FOG_EXP2",
+          "      float wf = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);",
+          "    #else",
+          "      float wf = smoothstep(fogNear, fogFar, vFogDepth);",
+          "    #endif",
+          "    m = mix(m, vec3(1.0), clamp(wf, 0.0, 1.0));",
+          "  #endif",
+          "  gl_FragColor = vec4(m, 1.0);",
           "  #include <colorspace_fragment>",
-          "  #include <fog_fragment>",
           "}",
         ].join("\n"),
         transparent: true, depthWrite: false, fog: true, toneMapped: false,
+        // MULTIPLY, and the canvas keeps its own alpha
+        blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+        blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,
+        blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
       });
       mat.uniforms.map.value = murkTexture();
       mat._shared = true;
@@ -1155,7 +1179,8 @@
         if (P_VY[i] > 0) P_VY[i] = 0;
         if (!P_SURF[i]) {
           P_SURF[i] = 1;
-          surfaceSlick(P_X[i], P_Z[i], 0.35);
+          // what this puff still carries reaches the top: a few centilitres
+          filmAdd(P_X[i], P_Z[i], 0.02 * P_A[i] * Math.min(1.5, sc) * (1 - f));
           if (P_LIFE[i] - t > 1.5) P_LIFE[i] = t + 1.5;
         }
       }
@@ -1179,6 +1204,11 @@
     const U = plumeMesh.material.uniforms;
     U.uAbove.value = (cp && cp.y > camSea + 0.05) ? 1 : 0;
     U.uSeaY.value = camSea;
+    // what each puff covers of the view (its drawn disc over the frustum's
+    // cross-section where it is), for the lens budget below
+    const cam = CBZ.camera, me = cam && cam.matrixWorld ? cam.matrixWorld.elements : null;
+    const tanH = cam && cam.fov ? Math.tan(cam.fov * Math.PI / 360) : 0.6, asp = cam && cam.aspect ? cam.aspect : 1.6;
+    let cover = 0;
     for (let i = 0; i < n; i++) {
       const t = P_T[i], f = t / P_LIFE[i];
       const sc = P_S0[i] + (P_S1[i] - P_S0[i]) * Math.sqrt(f);
@@ -1202,17 +1232,41 @@
       const o = i * 4;
       ap[o] = P_X[i]; ap[o + 1] = P_Y[i]; ap[o + 2] = P_Z[i]; ap[o + 3] = sc;
       am[o] = alpha; am[o + 1] = dark; am[o + 2] = P_ROT[i]; am[o + 3] = 0;
+      if (me) {
+        // in front of the lens only, faded as the shader fades it when the
+        // lens is inside it
+        const rx = P_X[i] - me[12], ry = P_Y[i] - me[13], rz = P_Z[i] - me[14];
+        const vz = -(rx * me[8] + ry * me[9] + rz * me[10]);
+        if (vz > 0.05) {
+          const inLens = Math.max(0, Math.min(1, (vz - 0.35 * sc) / (0.55 * sc + 1.2)));
+          const half = vz * tanH, disc = Math.PI * (sc * PUFF_VIS) * (sc * PUFF_VIS);
+          cover += alpha * inLens * Math.min(1, disc / (4 * half * half * asp));
+        }
+      }
+    }
+    /* THE LENS BUDGET. However many puffs a kill puts round the camera, the
+       blood they add up to may filter at most LENS_COVER of the view (the
+       sum of each puff's density times the share of the screen it covers):
+       a kill under the lens is a murky cloud in front of you, never a screen
+       gone red. Every puff thins by the same factor, so the cloud keeps its
+       shape and only its density gives. */
+    PLUME_AUDIT.cover = cover;
+    if (cover > LENS_COVER) {
+      const k = LENS_COVER / cover;
+      for (let i = 0; i < n; i++) am[i * 4] *= k;
+      PLUME_AUDIT.lensCut++;
     }
     aPos.needsUpdate = true; aMisc.needsUpdate = true;
   }
+  const LENS_COVER = 0.45;
 
   // ONE BITE, ONE CLOUD. Several producers answer the same bite (wounds.js's
   // chunk burst, goreImpact, the fallback in marine_predation...) inside the
   // same few frames. A second bloom on the same spot is the "red wall" — it
   // is cut to a third instead of stacking.
   let lastBloomX = 1e9, lastBloomY = 0, lastBloomZ = 0, lastBloomT = -1;
-  let plumeClock = 0, lastBiteSlickT = -9;
-  const PLUME_AUDIT = { puffs: 0, blooms: 0, kills: 0, chumPuffs: 0 };   // lifetime emit counts (goreAudit)
+  let plumeClock = 0;
+  const PLUME_AUDIT = { puffs: 0, blooms: 0, kills: 0, chumPuffs: 0, cover: 0, lensCut: 0 };   // lifetime emit counts (goreAudit)
 
   // public: an UNDERWATER blood bloom at a wound. `amount` 0.3..3: ~0.5 is a
   // nick, 1 a real bite, 2+ a torn artery. A burst of small puffs thrown out
@@ -1255,10 +1309,8 @@
        thing: what you see from the surface is the dark patch ON it. So a
        wound near the top stains the water directly (its own budget, not the
        0.3 s arrival throttle, which a bite would lose to the trail). */
-    if (seaY(x, z) - y < 2 && plumeClock - lastBiteSlickT > 0.4) {
-      lastBiteSlickT = plumeClock;
-      CBZ.goreSlick(x, z, Math.min(1.4, 0.35 + amt * 0.35));
-    }
+    const topD = seaY(x, z) - y;
+    if (topD < 2) filmAdd(x, z, (0.35 + amt * 0.35) * FILM_L_PER_AMOUNT * (1 - topD / 2));
     // the haze: one or two faint, wide, slow puffs that are what is left
     const nh = Math.max(1, Math.round((0.6 + amt * 0.7) * lod));
     for (let i = 0; i < nh; i++) {
@@ -1269,35 +1321,55 @@
     }
   };
 
-  // public: a blood slick ON the water surface — what you see from a boat or
-  // from the shore. Reuses the existing splats[] records, blob geometries and
-  // bloodTexture; the `water:true` flag makes the shared updater re-read the
-  // LIVE surface height each frame (the surface moves) and drift with the
-  // current, instead of sitting on a fixed floorAt seat.
-  // A SLICK IS NOT A POOL, and it is not free. updateChum can emit ~10/s during
-  // a feeding frenzy and each one holds for 18-40s, so an unbounded slick
-  // population is an unbounded per-frame cost: the shared updater re-reads the
-  // LIVE surface height for every water splat every frame, and citySeaHeightAt
-  // walks the whole swell table in water_spec.js. ~300 of those a frame is a
-  // real budget. So slicks get: a POOLED material (never one per call), their
-  // own smaller cap, a spawn-distance LOD, and a throttled surface re-read.
-  const SLICK_MATS = [];          // free list — materials outlive their meshes
-  let slickN = 0;                 // live water splats (kept in step by freeSlick)
+  /* ---- THE FILM ON TOP: BLOOD AT THE SURFACE IS A LEDGER, NOT A TIMER -----
+     Blood is a little denser than sea water; it does not float. What reads
+     from above as a "slick" is the top of the cloud just under the surface,
+     so it can never be wider than the blood that is there, and it is gone in
+     seconds as that blood mixes down. Every producer (a bite's bloom, a
+     bleeder near the top, a kill, a puff reaching the lid, a drop punching
+     through, the swash) hands the LITRES it put in the top layer to filmAdd.
+     A deposit near a live patch joins it (no second disc on the same blood);
+     a patch's area follows the blood in it now (FILM_M2_PER_L a litre) and
+     never shrinks back, its density is that blood over that area, and the
+     blood mixes away with FILM_TAU. So a body bleeding at the top for a
+     minute holds a patch the size of a few seconds of its bleeding, and a
+     kill's patch is gone within ten seconds of the last blood reaching it.
+     Nothing is laid per tick, and nothing outlives its blood.
+     Drawn as a filter (multiply), like the cloud: a faint red-brown darkening
+     of the water, never a red sheet. The old film was a 4 m alpha disc per
+     call, held 14 s and faded over 9 more, laid by a dice roll every chum
+     tick: a sheet that spread metres wide and kept growing. */
+  const FILM_M2_PER_L = 2.0;       // area a litre covers at the threshold of being seen
+  const FILM_TAU = 2.6;            // s: the top layer's blood mixing down
+  const FILM_L_PER_AMOUNT = 0.12;  // goreSlick's 0.3..3 'amount' as litres at the top
+  const FILM_A = 0.6;              // the film's density at its freshest
+  const FILM_GONE = 0.004;         // litres: below this the patch is water again
+  const SLICK_MATS = [];           // free list — materials outlive their meshes
+  let slickN = 0;                  // live water films (kept in step by freeSlick)
   function slickCap() { return CBZ.qScale ? CBZ.qScale(8, 20) : 12; }
   function slickMat() {
     const m = SLICK_MATS.pop();
     if (m) { m.opacity = 0; return m; }
     const nm = new THREE.MeshBasicMaterial({
       color: 0xffffff, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false,
-      toneMapped: false,             // see PLUME_FRESH: the grade saturated it to candy red
+      toneMapped: false, fog: false,
+      // a FILTER on the water (see PLUME_FRESH): multiply, canvas alpha kept
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+      blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,
+      blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
     });
     nm.color.copy(displayColor(SLICK_COL));
+    nm.onBeforeCompile = function (sh) {
+      sh.fragmentShader = sh.fragmentShader.replace("#include <opaque_fragment>",
+        "#include <opaque_fragment>\ngl_FragColor.rgb = pow( clamp( gl_FragColor.rgb, vec3( 0.001 ), vec3( 1.0 ) ), vec3( clamp( gl_FragColor.a, 0.0, 1.0 ) ) );");
+    };
+    nm.customProgramCacheKey = function () { return "goreFilm1"; };
     // rm() must never dispose a pooled material — the repo's convention is a
     // _shared tag, and every disposal sweep in the game already honours it.
     nm._shared = true;
     return nm;
   }
-  // hand a retiring slick's mesh + material back. EVERY water-splat removal
+  // hand a retiring film's mesh + material back. EVERY water-splat removal
   // path goes through this, which is also what keeps slickN honest.
   function freeSlick(s) {
     if (!s) return;
@@ -1315,30 +1387,42 @@
     }
     rm(s.m);
   }
-  // evict the FARTHEST live slick (never the one under the player's nose)
+  // full: the patch with the least blood left goes (never the freshest)
   function recycleFarSlick() {
-    let worst = -1, worstD = -1;
+    let worst = -1, least = Infinity;
     for (let i = 0; i < splats.length; i++) {
       const s = splats[i];
       if (!s.water) continue;
-      const d = dist2Cam(s.m.position.x, s.m.position.z);
-      if (d > worstD) { worstD = d; worst = i; }
+      const v = (s.L || 0) - (dist2Cam(s.m.position.x, s.m.position.z) > 60 * 60 ? 1 : 0);
+      if (v < least) { least = v; worst = i; }
     }
     if (worst >= 0) { freeSlick(splats[worst]); splats.splice(worst, 1); }
   }
   const SLICK_LOD2 = 130 * 130;   // beyond this a film of blood on water is nothing
-  /* opts (all optional) — a slick that was THROWN somewhere rather than simply
-     bleeding where it lies. The swash uses all three: a wave lifts blood off
-     the sand, hurls it seaward at backwash speed (vx/vz, dying over `decay`
-     seconds as the sheet loses its run), and the cloud must not follow the
-     water DOWN through the beach when the sheet drains — `floorY` is the sand
-     it was lifted from, and the surface re-read never seats below it. */
-  CBZ.goreSlick = function (x, z, amount, opts) {
-    if (!waterOn() || !CBZ.scene) return;
-    if (dist2Cam(x, z) > SLICK_LOD2) return;              // distance LOD: don't spawn
+  const FILM_AUDIT = { added: 0, joined: 0, made: 0 };
+  // the litres that reached the top at x, z (opts: the swash's throw, below)
+  function filmAdd(x, z, litres, opts) {
+    if (!(litres > 0) || !waterOn() || !CBZ.scene) return;
+    if (dist2Cam(x, z) > SLICK_LOD2) return;               // distance LOD: don't spawn
+    FILM_AUDIT.added += litres;
+    // join the patch this blood lands in (or right beside)
+    let best = null, bd = Infinity;
+    for (let i = 0; i < splats.length; i++) {
+      const p = splats[i];
+      if (!p.water || p.bt > 0) continue;
+      const dx = p.m.position.x - x, dz = p.m.position.z - z, d = Math.sqrt(dx * dx + dz * dz);
+      if (d < (p.R || 0) + 0.6 && d < bd) { bd = d; best = p; }
+    }
+    if (best && !(opts && (opts.vx || opts.vz))) {
+      const k = litres / (best.L + litres);
+      best.m.position.x += (x - best.m.position.x) * k * 0.5;
+      best.m.position.z += (z - best.m.position.z) * k * 0.5;
+      best.L += litres;
+      FILM_AUDIT.joined++;
+      return;
+    }
     if (slickN >= slickCap()) recycleFarSlick();
     if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
-    const amt = Math.max(0.3, Math.min(3, amount == null ? 1 : amount));
     const o = opts || {};
     const floorY = isFinite(+o.floorY) ? +o.floorY : null;
     const m = new THREE.Mesh(blob(), slickMat());
@@ -1346,33 +1430,44 @@
     m.rotation.z = Math.random() * 6.28;
     const sy = seaY(x, z) + 0.06;
     m.position.set(x, floorY != null ? Math.max(sy, floorY + 0.03) : sy, z);
-    m.renderOrder = 3; m.scale.set(0.1, 0.1, 1);
+    m.renderOrder = 3; m.scale.set(0.05, 0.05, 1);
     scene().add(m);
-    const near = dist2Cam(x, z) < 24 * 24;
     const bt = Math.max(0, +o.decay || 0);
     slickN++;
+    FILM_AUDIT.made++;
     splats.push({
-      m, water: true, t: 0, grow: 0.4 + amt * 0.55, max: 0.4 + amt * 0.55, growT: 5,
-      hold: near ? 14 : 8, fade: 9,
+      m, water: true, t: 0, L: litres, R: 0, hold: Infinity, fade: 1, grow: 0, max: 0,
       ax: 0.82 + Math.random() * 0.36, az: 0.82 + Math.random() * 0.36,
       cx: 0, cz: 0, curT: 0, syT: 0,
       bx: +o.vx || 0, bz: +o.vz || 0, bt, bt0: bt || 1, floorY,
     });
+  }
+  /* public: blood ON the water surface (what a boat sees). `amount` is the
+     old 0.3..3 scale (a nick .. a kill), taken now as the litres it puts in
+     the top layer; opts: { vx, vz, decay, floorY } a film THROWN somewhere
+     (the swash lifting blood off the sand and hurling it seaward) instead of
+     simply bleeding where it is. */
+  CBZ.goreSlick = function (x, z, amount, opts) {
+    const amt = Math.max(0.3, Math.min(3, amount == null ? 1 : amount));
+    filmAdd(x, z, amt * FILM_L_PER_AMOUNT, opts);
   };
-
-  // ---- ONE BUDGET FOR "BLOOD REACHED THE SURFACE" ---------------------------
-  // Two paths now report an arrival at the waterline — a plume pinned under the
-  // lid, and a ballistic droplet punching through the swell — and both can fire
-  // in bursts of dozens. goreSlick's own cap is only slickCap() = 16-46 and
-  // updateChum can already spend ~10 slicks a second in a feeding frenzy, so
-  // an unthrottled arrival would evict the slicks the frenzy itself just laid
-  // (recycleFarSlick) and cost a live-surface re-read per decal per frame for
-  // nothing. ONE module timer, ~1 slick per 0.3 s, shared by both callers.
-  let surfSlickT = 0;
+  CBZ.goreFilmAudit = function () {
+    let n = 0, L = 0, area = 0, seen = 0, maxR = 0, maxA = 0;
+    for (let i = 0; i < splats.length; i++) {
+      const p = splats[i];
+      if (!p.water) continue;
+      const ar = Math.PI * (p.R || 0) * (p.R || 0) * p.ax * p.az;
+      n++; L += p.L || 0; area += ar; seen += ar * (p.filmA || 0) / FILM_A;
+      maxR = Math.max(maxR, (p.R || 0) * Math.max(p.ax, p.az)); maxA = Math.max(maxA, p.m.material.opacity || 0);
+    }
+    // area: every patch's outline; seen: that area weighted by how dense the
+    // blood in it still is (what reads as stained water)
+    return { films: n, litres: L, area: area, seen: seen, maxR: maxR, maxOpacity: maxA, added: FILM_AUDIT.added, joined: FILM_AUDIT.joined, made: FILM_AUDIT.made,
+      cover: PLUME_AUDIT.cover, lensCut: PLUME_AUDIT.lensCut, puffs: puffs.length };
+  };
+  // a drop or a stump reaching the top: its few centilitres join the film
   function surfaceSlick(x, z, amt) {
-    if (surfSlickT > 0) return false;
-    surfSlickT = 0.3;
-    CBZ.goreSlick(x, z, amt);
+    filmAdd(x, z, amt * 0.05);
     return true;
   }
 
@@ -1432,8 +1527,10 @@
     if (opts.trail !== false) {
       try { CBZ.goreChum(x, y, z, 0.8, 3 + size * 1.5); } catch (e) {}
     }
-    // and the stain overhead: from a boat, that dark patch IS the kill
-    CBZ.goreSlick(x, z, (0.7 + 0.5 * size) * (recent ? 0.5 : 1));
+    // and the stain overhead: from a boat, that dark patch IS the kill (the
+    // litres of it that reach the top layer from this depth)
+    const kd = seaY(x, z) - y;
+    if (kd < 3) filmAdd(x, z, (0.7 + 0.5 * size) * FILM_L_PER_AMOUNT * (recent ? 0.5 : 1) * (1 - kd / 3));
     return true;
   };
 
@@ -2120,6 +2217,7 @@
   // a moving swimmer trails from wherever it actually is.
   const chum = [], chumOut = [];
   const CHUM_CAP = 12;
+  const CHUM_FLOW = 0.12;          // litres a second from a bleeder at rate 1 (a torn artery's order)
   function cval(v) { return typeof v === "function" ? (+v() || 0) : (+v || 0); }
   CBZ.goreChum = function (x, y, z, rate, ttl) {
     if (!waterOn() || chum.length >= CHUM_CAP) return null;
@@ -2175,8 +2273,11 @@
         }
         // a torn artery PUMPS: now and then a small burst, not every tick
         if (c.rate > 0.75 && Math.random() < 0.12) CBZ.goreBloom(x, y, z, { amount: 0.5, arterial: true });
-        // a bleeder near the top stains the surface; one ten metres down does not
-        if (Math.random() < 0.03 + c.rate * 0.05 && seaY(x, z) - y < 2.5) CBZ.goreSlick(x, z, 0.25 + c.rate * 0.45);
+        // a bleeder near the top puts some of what it bleeds into the top
+        // layer (all of it at the surface, none from 1.5 m down): its flow
+        // over this tick, never a dice roll for a whole new patch
+        const cd = seaY(x, z) - y;
+        if (cd < 1.5) filmAdd(x, z, CHUM_FLOW * c.rate * 0.18 * 0.5 * (1 - Math.max(0, cd) / 1.5));
       }
     }
   }
@@ -4957,7 +5058,6 @@
   CBZ.onAlways(8, function (dt) {
     if (dt <= 0) return;
     wetEvent = false;                    // bound any leaked wet event to one frame
-    if (surfSlickT > 0) surfSlickT -= dt; // the shared surface-slick budget (see surfaceSlick)
     // the terrain-gradient memo is a ONE-FRAME cache: a sinkhole opening or a
     // crater collapsing rewrites floorAt under us, and a decal stamped next
     // frame must fit the ground that is there NOW.
@@ -5211,9 +5311,15 @@
             s.m.position.y = s.floorY != null ? Math.max(y, s.floorY + 0.03) : y;
           }
         }
-        const kw = Math.min(1, s.t / s.growT);
-        const scw = s.grow * (0.28 + 0.72 * Math.sqrt(kw));
-        s.m.scale.set(Math.max(0.1, scw * s.ax), Math.max(0.1, scw * s.az), 1);
+        // the blood in it mixes down; its area follows the blood in it and
+        // spreads to it in about a second, and never shrinks back: a fading
+        // film thins, it does not recede
+        s.L *= Math.exp(-dt / FILM_TAU);
+        const Rt = Math.sqrt(FILM_M2_PER_L * s.L / Math.PI);
+        if (Rt > s.R) s.R += (Rt - s.R) * Math.min(1, dt * 2.5);
+        s.m.scale.set(Math.max(0.05, s.R * s.ax), Math.max(0.05, s.R * s.az), 1);
+        s.filmA = FILM_A * Math.min(1, s.L / Math.max(1e-4, s.R * s.R * Math.PI / FILM_M2_PER_L));
+        if (s.L < FILM_GONE && s.t > 0.3) { freeSlick(s); splats.splice(i, 1); continue; }
       }
       // (land marks spread, draw and dry on the GPU off one clock — see the
       // STAIN IN THE FLOOR block; nothing to move here)
@@ -5240,7 +5346,7 @@
         const el = (cp.y - mp.y) / (Math.sqrt(hx * hx + hz * hz) + 0.5);
         seen = (el - 0.01) / 0.07; seen = seen < 0 ? 0 : (seen > 1 ? 1 : seen);
       }
-      if (s.water) s.m.material.opacity = 0.55 * seen * fadeIn * fadeOut * (1 - under) * (1 - dil);
+      if (s.water) s.m.material.opacity = (s.filmA || 0) * seen * fadeIn * (1 - dil);
       // a land mark fades by RECEDING as well as thinning (a translucent red
       // over pale concrete is pink), and what the swash ate comes off its edge
       else if (s.slot >= 0) ldSetFx(s.slot, fadeOut * (1 - under) * (1 - dil),
