@@ -236,6 +236,10 @@
     try { hit = CBZ.aimedActor(360); } catch (e) { hide(); return; }
     const a = hit && hit.actor;
     if (!a || a.isPlayer || (!a.animal && a.kind !== "cop" && !a.char && !a.relPlayer && !a.vendor)) { hide(); return; }
+    // A MAN WHOSE WHOLE POINT IS THAT YOU CANNOT TELL WHO HE IS wears no pill:
+    // the hitman's marks (two men in the same coat; a rifle hidden on a far
+    // roof beside a dummy) set `_noAimTag`, and the crosshair says nothing.
+    if (a._noAimTag) { hide(); return; }
     CBZ.cityAimDossierTarget = a; lastActor = a;
 
     if (OVERHEAD()) {

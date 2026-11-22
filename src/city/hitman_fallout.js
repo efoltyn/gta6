@@ -266,9 +266,9 @@
     tapeTex._shared = true;
     return tapeTex;
   }
-  function group(x, z) {
+  function group(x, z, y) {
     const grp = new THREE.Group();
-    grp.position.set(x, floorY(x, z), z);
+    grp.position.set(x, y != null ? y : floorY(x, z), z);
     grp.userData.transient = true; grp.userData.dynamic = true;
     const AR = A(); if (AR && AR.root) AR.root.add(grp);
     return grp;
@@ -285,7 +285,14 @@
     const inc = sc.inc;
     const body = sc.ped && sc.ped.pos ? sc.ped.pos : { x: inc.x, z: inc.z };
     const cx = body.x, cz = body.z;
-    const grp = group(cx, cz);
+    // A MAN SHOT ON A ROOF LIES ON THE ROOF. The tape and the sheet went down
+    // at street level under him (floorAt knows no storeys): a taped-off patch
+    // of somebody's lobby and a bare corpse five floors up. The scene is at
+    // the body's own height when he is off the ground, and the posts read
+    // the deck he is on.
+    const up = bodyUp(sc);
+    const deck = function (x, z) { try { return up != null && CBZ.groundAt ? CBZ.groundAt(x, z, up + 0.6) : floorY(x, z); } catch (e) { return floorY(x, z); } };
+    const grp = group(cx, cz, up != null ? deck(cx, cz) : null);
     const n = 5, R = 4.2;
     const pts = [];
     const rot = ((inc.x * 7 + inc.z * 3) % 6.28);
@@ -293,7 +300,8 @@
       const a = rot + i / n * Math.PI * 2;
       const r = R + ((i * 37) % 10) / 10 * 0.9;
       const px = Math.cos(a) * r, pz = Math.sin(a) * r;
-      const y = floorY(cx + px, cz + pz) - grp.position.y;
+      let y = deck(cx + px, cz + pz) - grp.position.y;
+      if (up != null && Math.abs(y) > 1.2) continue;       // off the edge of his roof: no post in the air
       pts.push({ x: px, z: pz, y: y });
       const post = new THREE.Mesh(geo("post", function () { return new THREE.CylinderGeometry(0.028, 0.034, 1.02, 6); }), mat("post", function () { return new THREE.MeshLambertMaterial({ color: 0x2b2d30 }); }));
       post.position.set(px, y + 0.51, pz);
@@ -303,8 +311,8 @@
       const t = tapeTexture();
       return new THREE.MeshLambertMaterial({ color: 0xffffff, map: t || null, side: THREE.DoubleSide });
     });
-    for (let i = 0; i < n; i++) {
-      const a = pts[i], b = pts[(i + 1) % n];
+    for (let i = 0; i < pts.length && pts.length > 1; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
       const len = Math.hypot(b.x - a.x, b.z - a.z);
       const gm = new THREE.PlaneGeometry(len, 0.075);
       const uv = gm.attributes.uv;
@@ -394,6 +402,13 @@
     c._hmScene = true;
     return c;
   }
+  // the height of a body that lies well off the street (a roof, an upper
+  // floor), or null for one on the ground
+  function bodyUp(sc) {
+    const p = sc.ped && sc.ped.pos ? sc.ped.pos : null;
+    if (!p || !isFinite(p.y)) return null;
+    return p.y - floorY(p.x, p.z) > 2 ? p.y : null;
+  }
   function stageScene(sc) {
     const inc = sc.inc;
     const bx = sc.ped && sc.ped.pos ? sc.ped.pos.x : inc.x, bz = sc.ped && sc.ped.pos ? sc.ped.pos.z : inc.z;
@@ -403,8 +418,9 @@
       const car = policeCar(k.x, k.z, k.h);
       if (car) sc.car = car;
     }
-    // two officers at the tape, facing out
-    for (let i = 0; i < 2; i++) {
+    // two officers at the tape, facing out (a body on a roof has the car at
+    // the kerb below and nobody standing in the wall under it)
+    for (let i = 0; i < 2 && bodyUp(sc) == null; i++) {
       const a = (i ? 2.4 : -0.7) + ((inc.x | 0) % 3);
       const fx = Math.cos(a), fz = Math.sin(a);
       const c = postCop(bx + fx * 5.2, bz + fz * 5.2, fx, fz);
@@ -436,6 +452,7 @@
       const bx = sc.ped && sc.ped.pos ? sc.ped.pos.x : sc.inc.x, bz = sc.ped && sc.ped.pos ? sc.ped.pos.z : sc.inc.z;
       if (sc.state === "pending") {
         // the response takes a while; it never appears in front of you
+        if (sc.hold > 0) { sc.hold -= dt; sc.t = Math.min(sc.t, 0); continue; }   // nobody has found him yet (holdScene)
         if (sc.t > 18 && unseen(bx, bz, 45)) stageScene(sc);
         else if (sc.t > 240) { sc.state = "gone"; }
       } else if (sc.state === "up") {
@@ -669,6 +686,13 @@
     clearDescription: clearDesc,
     policeCar: policeCar,
     kerbNear: kerbNear,
+    // NOBODY HAS FOUND HIM YET: keep the police away from this incident's body
+    // for `secs` more (0 lets them come). A man shot on a far roof with no
+    // witness lies there until somebody goes up; the caller says when.
+    holdScene: function (incId, secs) {
+      for (let i = 0; i < RT.scenes.length; i++) if (RT.scenes[i].inc.id === incId && RT.scenes[i].state === "pending") { RT.scenes[i].hold = Math.max(0, +secs || 0); return true; }
+      return false;
+    },
     incidents: function () { return (store().incidents || []).slice(); },
     audit: function () {
       const D = store().desc, dr = dropState();
