@@ -3189,6 +3189,9 @@
      as it always has); a cloud "in" five centimetres of rainwater is drawn
      under the road. */
   function seaWorld() {
+    // the water stack's own "is there a body of water in this world"
+    // (world/water_survival.js), or what it says when that file is absent
+    if (typeof CBZ.waterModeOn === "function") { try { return !!CBZ.waterModeOn(); } catch (e) { return false; } }
     const g = CBZ.game;
     return !!g && (cityMode() || !!(CBZ.islandModeOn && CBZ.islandModeOn(g.mode)));
   }
