@@ -1447,6 +1447,13 @@ document.body.appendChild(b);}}catch(e){}})();
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
 <script src="src/city/bunkers.js?v=fx1029"></script>
+<!-- THE BIRD KIT (world/birdkit.js): every bird is this one kit — the herring
+     gulls of the shark sim's pier, the wilderness crows, the farm chickens —
+     each a species row of real measurements, posed in the vertex shader so a
+     flock is one draw. Before the flocks (wild nature, the sea scene) and the
+     bestiary's chicken; it reads units/kit/loft.js (below) only when a body
+     is built. -->
+<script src="src/world/birdkit.js?v=bird1122a"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
@@ -2763,7 +2770,7 @@ document.body.appendChild(b);}}catch(e){}})();
      rules (engulf / bite / tip). After water_hulls + water_float, both of which
      it spends. -->
 <script src="src/world/sea_craft.js?v=wake1122a"></script>
-<script src="src/world/sea_scene.js?v=sharkscene1"></script>
+<script src="src/world/sea_scene.js?v=bird1122a"></script>
 <script src="src/world/water_impact.js?v=wake1122e"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
      citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's

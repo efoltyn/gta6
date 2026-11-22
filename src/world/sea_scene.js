@@ -22,12 +22,13 @@
        BUOYS with flashing lanterns leading in to it.
      • ROCK OUTCROPS breaking the surface around the island, and a SEA STACK
        with a skeletal beacon on it.
-     • SEABIRDS: gulls circling the pier head and the stack, a flock that
-       follows whichever boat is under way, and a few perched on posts and
-       rocks.
+     • SEABIRDS: herring gulls (world/birdkit.js) circling the pier head and
+       the stack, a flock that follows whichever boat is under way, gulls on
+       the posts and rocks, on the water and walking the pier head; they come
+       down, go up again, and flush when something comes close.
 
-   DRAW CALLS: 6 (pier+tower merged, rocks merged, floats, nav buoys, lanterns,
-   gulls). Everything static is merged into two Lambert vertex-colour meshes;
+   DRAW CALLS: 7 (pier+tower merged, rocks merged, floats, nav buoys, lanterns,
+   gulls near and far). Everything static is merged into two Lambert vertex-colour meshes;
    everything that moves is one InstancedMesh per shape.
 
    COLLISION. Pilings, rocks, the stack, the pontoon and the nav buoys are
@@ -651,55 +652,43 @@
     }
 
     // ============================================================
-    //  SEABIRDS — one gull geometry; the flap is the instance's Y scale
-    //  (the wings are a shallow V, so scaling Y through negative is a
-    //  downstroke). Perched birds fold: Z scale shrinks the span.
+    //  SEABIRDS — herring gulls from the bird kit at real size: 20 in the
+    //  air (two orbits and a boat flock), the rest down on the posts and
+    //  rocks, the water off the pier head and the stack, and the head's deck
     // ============================================================
-    {
-      const P = [], C = [];
-      const W = new THREE.Color(0xe6e6e0), Gr = new THREE.Color(0x8a939a), K = new THREE.Color(0x1a1a1a), Y = new THREE.Color(0xd8a020);
-      function tri(a, b, c, ca, cb, cc) {
-        P.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-        for (const q of [ca, cb || ca, cc || ca]) C.push(q.r, q.g, q.b);
-      }
-      const nose = [0.3, 0.01, 0], tail = [-0.26, 0.02, 0], top = [0.02, 0.07, 0], bot = [0.02, -0.06, 0];
-      const lft = [0.02, 0, 0.065], rgt = [0.02, 0, -0.065];
-      tri(nose, top, lft, Y, W, W); tri(nose, rgt, top, Y, W, W); tri(nose, lft, bot, Y, W, W); tri(nose, bot, rgt, Y, W, W);
-      tri(tail, lft, top, W); tri(tail, top, rgt, W); tri(tail, bot, lft, W); tri(tail, rgt, bot, W);
-      tri([-0.24, 0.02, 0.07], [-0.36, 0.02, 0], [-0.24, 0.02, -0.07], W);
-      for (const sd of [1, -1]) {
-        const rf = [0.08, 0.01, 0.05 * sd], rb = [-0.1, 0.01, 0.05 * sd];
-        const ef = [0.06, 0.13, 0.36 * sd], eb = [-0.12, 0.12, 0.34 * sd];   // the elbow
-        const tf = [-0.06, 0.06, 0.68 * sd], tb = [-0.2, 0.06, 0.64 * sd];    // the tip droops a little
-        tri(rf, ef, rb, Gr); tri(rb, ef, eb, Gr);
-        tri(ef, tf, eb, Gr, K, Gr); tri(eb, tf, tb, Gr, K, K);
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
-      geo.setAttribute("color", new THREE.Float32BufferAttribute(C, 3));
-      geo.computeVertexNormals();
-      const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide });
-      mat.name = "sea-scene-gulls";
+    S.birdSt = [];
+    if (CBZ.birdKit && CBZ.birdKit.flock && CBZ.loftKit && CBZ.loftKit.sweep) {
       const flocks = [
-        { kind: "orbit", x: S.pier.head.x, z: S.pier.head.z, r: 13, h: 9, n: 7 },
-        { kind: "orbit", x: S.stack.x, z: S.stack.z, r: 17, h: 14, n: 6 },
-        { kind: "follow", r: 9, h: 7, n: 7, x: balls[2].x, z: balls[2].z },
+        { kind: "orbit", x: S.pier.head.x, z: S.pier.head.z, r: 19, h: 10, n: 7 },
+        { kind: "orbit", x: S.stack.x, z: S.stack.z, r: 23, h: 15, n: 6 },
+        { kind: "follow", r: 15, h: 8, n: 7, x: balls[2].x, z: balls[2].z },
       ];
-      const st = S.birdSt = [];
-      flocks.forEach(function (F, fi) {
-        for (let i = 0; i < F.n; i++) {
-          st.push({ f: F, ph: h01(fi * 31 + i, 41) * 6.28, rr: F.r * (0.55 + h01(fi * 31 + i, 42) * 0.8),
-            w: (0.28 + h01(fi * 31 + i, 43) * 0.2) * (h01(fi, i + 44) > 0.2 ? 1 : -1),
-            hh: F.h + (h01(fi * 31 + i, 45) - 0.5) * 6, fl: h01(fi * 31 + i, 46) * 6.28, sc: 1.35 + h01(i, fi + 47) * 0.35 });
-        }
-      });
-      for (let i = 0; i < perches.length && i < 10; i++) {
-        const p = perches[i];
-        st.push({ perch: p, ph: h01(i, 51) * 6.28, sc: 1.35 });
+      const spots = [];
+      for (let i = 0; i < perches.length && i < 10; i++) spots.push({ kind: "perch", x: perches[i].x, y: perches[i].y, z: perches[i].z, by: null });
+      for (let i = 0; i < 14; i++) {
+        const c = i < 9 ? S.pier.head : S.stack;
+        const a = h01(i, 61) * 6.283, d = (i < 9 ? 11 : 15) + h01(i, 62) * 16;
+        const x = c.x + Math.cos(a) * d, z = c.z + Math.sin(a) * d;
+        if (blockedAt(x, z, 2.5) || ground(x, z) > SEA - 0.8) continue;
+        spots.push({ kind: "float", x: x, y: SEA, z: z, by: null });
       }
-      const im = new THREE.InstancedMesh(geo, mat, st.length);
-      im.name = "sea-scene-gulls"; im.frustumCulled = false;
-      root.add(im); S.birds = im;
+      const bux = Math.cos(S.pier.bearing), buz = Math.sin(S.pier.bearing);
+      // the head's deck in its own frame (along, across): the benches and the fish table kept clear
+      S.gullDeck = { x: S.pier.head.x, z: S.pier.head.z, ux: bux, uz: buz, y: S.pier.deckY, a: 2.9, l: 6.2,
+        avoid: [[2.3, 3.8], [2.3, -3.8], [-2.3, 4.6]] };
+      for (let i = 0; i < 3; i++) spots.push({ kind: "walk", x: S.pier.head.x, y: S.pier.deckY, z: S.pier.head.z, by: null });
+      S.gullSpots = spots; S.gullFlocks = flocks;
+      const st = S.birdSt;
+      flocks.forEach(function (F) { for (let i = 0; i < F.n; i++) { const g = newGull(st.length); joinFlock(g, F); st.push(g); } });
+      spots.forEach(function (sp, i) {
+        if ((sp.kind === "perch" && i % 4 === 3) || (sp.kind === "float" && i % 2)) return;   // leave some free
+        const g = newGull(st.length);
+        settle(g, sp);
+        st.push(g);
+      });
+      const fl = CBZ.birdKit.flock("gull", st.length, { name: "sea-scene-gulls" });
+      root.add(fl.mesh); root.add(fl.far);
+      S.birds = fl;
     }
 
     A.root.add(root);
@@ -775,14 +764,227 @@
     }
     return best;
   }
+  // ---- the gulls' lives --------------------------------------------------
+  // modes: fly (an orbit), land (a curve down to a spot, the flare at the
+  // end), perch, float, walk (the pier head), takeoff (hard beats, legs
+  // down, climbing away)
+  const GRAV = 9.81;
+  function newGull(i) {
+    return { i: i, F: null, mode: "fly", spot: null, dir: h01(i, 44) > 0.25 ? 1 : -1, ang: h01(i, 41) * 6.283,
+      rr0: 15, rr: 15, hh0: 9, hh: 9, v: 7.5 + h01(i, 43) * 2.0, ph: h01(i, 46) * 6.283,
+      x: 0, y: 0, z: 0, has: false, vx: 0, vy: 0, vz: 0, yaw: h01(i, 49) * 6.283, yawRate: 0, pitch: 0, roll: 0,
+      clk: {}, P: {}, T: 0, next: 15 + h01(i, 47) * 60, sc: 0.93 + h01(i, 48) * 0.14, rs: 1 + i * 7919,
+      look: 0, lk: 0, tilt: 0, tl: 0, lookT: 0, step: 0, wx: 0, wz: 0, wait: 0, peck: 0, L: null };
+  }
+  function rndOf(g) {
+    return g.rnd || (g.rnd = function () { g.rs = (g.rs * 16807) % 2147483647; return (g.rs - 1) / 2147483646; });
+  }
+  function joinFlock(g, F) {
+    g.F = F; g.mode = "fly";
+    g.rr0 = F.r * (0.75 + h01(g.i, 42) * 0.5); g.hh0 = F.h + (h01(g.i, 45) - 0.5) * 5;
+    if (!g.has) { g.rr = g.rr0; g.hh = g.hh0; return; }
+    // carry on from where it is: the orbit through its position, turning its way
+    g.rr = Math.max(10, Math.hypot(g.x - F.x, g.z - F.z)); g.ang = Math.atan2(g.z - F.z, g.x - F.x);
+    g.hh = g.y - seaY(g.x, g.z);
+    g.dir = (g.vx * -Math.sin(g.ang) + g.vz * Math.cos(g.ang)) >= 0 ? 1 : -1;
+  }
+  // the waterline sits a third of the way up a floating gull's body
+  function draft(g) { return 0.15 * g.sc; }
+  function deckPoint(k) {
+    const D = S.gullDeck;
+    for (let n = 0; n < 8; n++) {
+      const a = (h01(k, 71 + n) * 2 - 1) * D.a, l = (h01(k, 81 + n) * 2 - 1) * D.l;
+      let ok = true;
+      for (const o of D.avoid) if (Math.hypot(a - o[0], l - o[1]) < 1.3) ok = false;
+      if (ok) return { x: D.x + D.ux * a - D.uz * l, z: D.z + D.uz * a + D.ux * l };
+    }
+    return { x: D.x, z: D.z };
+  }
+  function settle(g, sp) {
+    g.spot = sp; sp.by = g; g.F = null; g.L = null;
+    g.mode = sp.kind;
+    if (sp.kind === "walk" && !g.has) { const p = deckPoint(g.i * 7); sp.x = p.x; sp.z = p.z; }
+    g.x = sp.x; g.z = sp.z;
+    g.y = sp.kind === "float" ? seaY(sp.x, sp.z) - draft(g) : sp.y;
+    g.wx = g.x; g.wz = g.z; g.wait = 0.5;
+    g.vx = g.vy = g.vz = 0; g.pitch = 0; g.roll = 0; g.has = true;
+    g.next = 20 + rndOf(g)() * 70;
+  }
+  function freeSpot(g) {
+    const L = S.gullSpots;
+    let best = null, bd = 90;
+    for (let j = 0; j < L.length; j++) {
+      const s = L[j];
+      if (s.by) continue;
+      const d = s.kind === "walk" ? Math.hypot(S.gullDeck.x - g.x, S.gullDeck.z - g.z) : Math.hypot(s.x - g.x, s.z - g.z);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  }
+  function startLanding(g, sp) {
+    sp.by = g; g.spot = sp; g.mode = "land";
+    if (sp.kind === "walk") { const p = deckPoint(g.i * 31 + ((S.t * 7) | 0)); sp.x = p.x; sp.z = p.z; }
+    const x1 = sp.x, z1 = sp.z, y1 = sp.kind === "float" ? seaY(x1, z1) - draft(g) : sp.y;
+    const dh = Math.hypot(x1 - g.x, z1 - g.z) || 1;
+    const T = Math.max(2.5, Math.min(8, (dh + Math.abs(g.y - y1) * 0.5) / 6.5));
+    // a Hermite curve from its velocity now to 1.5 m/s along the run-in
+    g.L = { x0: g.x, y0: g.y, z0: g.z, mx0: g.vx * T, my0: g.vy * T, mz0: g.vz * T,
+      x1: x1, y1: y1, z1: z1, mx1: (x1 - g.x) / dh * 1.5 * T, my1: -0.4 * T, mz1: (z1 - g.z) / dh * 1.5 * T, t: 0, T: T };
+  }
+  function takeOff(g, fx, fz) {
+    if (g.spot) { g.spot.by = null; g.spot = null; }
+    g.mode = "takeoff"; g.T = 0;
+    // away from whatever flushed it, else the way it faces
+    let dx = Math.cos(g.yaw), dz = -Math.sin(g.yaw);
+    if (fx != null) { const ex = g.x - fx, ez = g.z - fz, el = Math.hypot(ex, ez); if (el > 0.1) { dx = ex / el; dz = ez / el; } }
+    g.tdx = dx; g.tdz = dz;
+    g.vx = dx * 1.2; g.vz = dz * 1.2; g.vy = 2.0;
+    g.clk.phase = 0; g.clk.flapping = true; g.clk.flap = 1; g.clk.boutT = 2;
+  }
+  function nearestFlock(g) {
+    let best = S.gullFlocks[0], bd = 1e12;
+    for (const F of S.gullFlocks) { const d = Math.hypot(F.x - g.x, F.z - g.z); if (d < bd) { bd = d; best = F; } }
+    return best;
+  }
+  function turnTo(g, yaw, dt, rate) {
+    let d = yaw - g.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+    const m = rate * dt, k = d > m ? m : (d < -m ? -m : d);
+    g.yaw += k; g.yawRate = dt > 1e-4 ? k / dt : 0;
+  }
+  // a flying move: velocity from the step, the nose turned along it
+  function move(g, x, y, z, dt) {
+    if (g.has && dt > 1e-4) { g.vx = (x - g.x) / dt; g.vy = (y - g.y) / dt; g.vz = (z - g.z) / dt; }
+    g.x = x; g.y = y; g.z = z; g.has = true;
+    if (Math.hypot(g.vx, g.vz) > 0.3) turnTo(g, Math.atan2(-g.vz, g.vx), dt, 4);
+  }
+  function look(g, dt, P) {
+    g.lookT -= dt;
+    if (g.lookT <= 0) { const r = rndOf(g); g.look = (r() - 0.5) * 1.6; g.tilt = (r() - 0.5) * 0.5; g.lookT = 0.8 + r() * 2.5; }
+    // a bird's head moves in quick turns, then holds
+    g.lk += (g.look - g.lk) * Math.min(1, dt * 9); g.tl += (g.tilt - g.tl) * Math.min(1, dt * 7);
+    P.yaw = g.lk; P.tilt = g.tl;
+  }
+  function stepGull(g, dt, t) {
+    const BK = CBZ.birdKit, P = g.P;
+    if (g.mode === "fly") {
+      const F = g.F;
+      g.rr += (g.rr0 - g.rr) * Math.min(1, dt * 0.15); g.hh += (g.hh0 - g.hh) * Math.min(1, dt * 0.15);
+      const rr = Math.max(10, g.rr * (1 + Math.sin(t * 0.23 + g.ph * 2) * 0.1));
+      g.ang += g.dir * g.v / rr * dt;
+      const x = F.x + Math.cos(g.ang) * rr, z = F.z + Math.sin(g.ang) * rr;
+      move(g, x, seaY(x, z) + g.hh + Math.sin(t * 0.31 + g.ph) * 2.0, z, dt);
+      // a coordinated turn banks into the centre: tan(bank) = v^2 / (g r)
+      const hs = Math.hypot(g.vx, g.vz) || 1;
+      const side = ((F.x - g.x) * -g.vz + (F.z - g.z) * g.vx) >= 0 ? 1 : -1;
+      g.roll += (side * Math.atan(hs * hs / (GRAV * rr)) - g.roll) * Math.min(1, dt * 3);
+      g.pitch += (Math.atan2(g.vy, hs) * 0.8 + 0.04 - g.pitch) * Math.min(1, dt * 3);
+      BK.clock("gull", g.clk, dt, { climb: g.vy / hs, slow: hs < 7, rnd: rndOf(g) });
+      BK.params("gull", "flap", g.clk.phase, P); P.flap = g.clk.flap;
+      g.next -= dt;
+      if (g.next <= 0) { const sp = freeSpot(g); if (sp) startLanding(g, sp); else g.next = 10 + rndOf(g)() * 20; }
+      return;
+    }
+    if (g.mode === "land") {
+      const L = g.L; L.t += dt;
+      const s = Math.min(1, L.t / L.T), s2 = s * s, s3 = s2 * s;
+      const a0 = 2 * s3 - 3 * s2 + 1, b0 = s3 - 2 * s2 + s, a1 = -2 * s3 + 3 * s2, b1 = s3 - s2;
+      if (g.spot.kind === "float") L.y1 = seaY(L.x1, L.z1) - draft(g);
+      move(g, a0 * L.x0 + b0 * L.mx0 + a1 * L.x1 + b1 * L.mx1, a0 * L.y0 + b0 * L.my0 + a1 * L.y1 + b1 * L.my1, a0 * L.z0 + b0 * L.mz0 + a1 * L.z1 + b1 * L.mz1, dt);
+      const hs = Math.hypot(g.vx, g.vz), left = L.T - L.t;
+      g.roll += (Math.max(-0.8, Math.min(0.8, Math.atan(hs * g.yawRate / GRAV))) - g.roll) * Math.min(1, dt * 3);
+      if (left < 0.9) {
+        // the flare: wings up and forward, tail fanned and down, legs out, nose up, braking beats
+        g.clk.phase += dt * 3.6;
+        BK.params("gull", "land", g.clk.phase, P);
+        g.pitch += (0.5 - g.pitch) * Math.min(1, dt * 5);
+      } else {
+        BK.clock("gull", g.clk, dt, { climb: g.vy / Math.max(1, hs), rnd: rndOf(g) });
+        BK.params("gull", "flap", g.clk.phase, P); P.flap = g.clk.flap;
+        g.pitch += (Math.atan2(g.vy, Math.max(1, hs)) * 0.6 + 0.08 - g.pitch) * Math.min(1, dt * 3);
+      }
+      if (s >= 1) settle(g, g.spot);
+      return;
+    }
+    if (g.mode === "takeoff") {
+      g.T += dt;
+      const sp = Math.min(9, 1.2 + 5 * g.T), vy = Math.max(0.8, 2.6 - 0.6 * g.T);
+      move(g, g.x + g.tdx * sp * dt, g.y + vy * dt, g.z + g.tdz * sp * dt, dt);
+      g.clk.phase += dt * 3.6;
+      BK.params("gull", "flap", g.clk.phase, P); P.flap = 1;
+      P.legs = Math.max(0, 1 - g.T / 0.6);                 // the legs trail, then tuck
+      g.pitch += (0.3 - g.pitch) * Math.min(1, dt * 4); g.roll *= Math.max(0, 1 - dt * 3);
+      if (g.T > 2.2) { joinFlock(g, nearestFlock(g)); g.next = 25 + rndOf(g)() * 60; }
+      return;
+    }
+    // on a spot: perch, float, walk
+    g.vx = g.vy = g.vz = 0;
+    if (g.mode === "float") {
+      // paddling slowly about its spot, riding the swell
+      turnTo(g, g.yaw + Math.sin(t * 0.13 + g.ph) * 0.3, dt, 0.25);
+      let x = g.x + Math.cos(g.yaw) * 0.08 * dt, z = g.z - Math.sin(g.yaw) * 0.08 * dt;
+      const ex = x - g.spot.x, ez = z - g.spot.z, ed = Math.hypot(ex, ez);
+      if (ed > 4) { x = g.spot.x + ex / ed * 4; z = g.spot.z + ez / ed * 4; g.yaw += dt * 0.5; }
+      const e = 0.35, sx = (seaY(x + e, z) - seaY(x - e, z)) / (2 * e), sz = (seaY(x, z + e) - seaY(x, z - e)) / (2 * e);
+      const fx = Math.cos(g.yaw), fz = -Math.sin(g.yaw);
+      g.pitch = Math.atan(sx * fx + sz * fz); g.roll = -Math.atan(sx * -fz + sz * fx);
+      g.x = x; g.z = z; g.y = seaY(x, z) - draft(g);
+      g.step = (g.step + dt * 1.1) % 1;
+      BK.params("gull", "float", g.step, P);
+      look(g, dt, P);
+    } else if (g.mode === "walk") {
+      g.pitch = 0; g.roll = 0; g.y = S.gullDeck.y;
+      const dx = g.wx - g.x, dz = g.wz - g.z, dd = Math.hypot(dx, dz);
+      if (g.wait > 0 || dd < 0.12) {
+        // standing: a look round, a peck at the boards
+        if (g.wait <= 0) g.wait = 1 + rndOf(g)() * 4;
+        g.wait -= dt;
+        if (g.peck <= 0 && rndOf(g)() < dt * 0.6) g.peck = 1;
+        g.peck = Math.max(0, g.peck - dt * 2.5);
+        BK.params("gull", "perch", 0, P);
+        look(g, dt, P);
+        if (g.peck > 0) {
+          const k = Math.sin(Math.PI * (1 - g.peck)), pk = BK.prep("gull").peck;
+          P.pitch = pk.neck * k; P.head = pk.head * k; P.body = pk.body * k; P.yaw *= 1 - k;
+        }
+        if (g.wait <= 0) { const p = deckPoint(g.i * 97 + ((t * 3) | 0)); g.wx = p.x; g.wz = p.z; }
+      } else {
+        turnTo(g, Math.atan2(-dz, dx), dt, 2.5);
+        const fx = Math.cos(g.yaw), fz = -Math.sin(g.yaw);
+        const v = 0.45 * Math.max(0, (fx * dx + fz * dz) / dd);
+        g.x += fx * v * dt; g.z += fz * v * dt;
+        const w = Math.min(1, v / 0.45);
+        g.step = (g.step + v * dt / BK.stride("gull", Math.max(0.05, w))) % 1;
+        BK.params("gull", "walk", g.step, P); P.walk = w;
+      }
+    } else {
+      g.pitch = 0; g.roll = 0;
+      g.x = g.spot.x; g.y = g.spot.y; g.z = g.spot.z;
+      BK.params("gull", "perch", 0, P);
+      look(g, dt, P);
+    }
+    g.next -= dt;
+    if (g.next <= 0) takeOff(g, null, null);
+  }
+  // what flushes a gull on the ground or the water: the player, a boat under way
+  function flushers() {
+    const out = [];
+    const p = CBZ.player, q = p && (p.pos || (p.group && p.group.position) || p.position);
+    if (q && isFinite(q.x)) out.push(q.x, q.y || 0, q.z, 6);
+    const list = CBZ.seaCraft && CBZ.seaCraft.list ? CBZ.seaCraft.list() : null;
+    if (list) for (let i = 0; i < list.length; i++) {
+      const r = list[i];
+      if (r && !r.dead && r.pos && Math.hypot(r.vx || 0, r.vz || 0) + Math.abs(r.v || 0) > 1.2) out.push(r.pos.x, r.pos.y || 0, r.pos.z, 9);
+    }
+    return out;
+  }
+  const _gq = new THREE.Quaternion(), _ge = new THREE.Euler(0, 0, 0, "YZX"), _gm = new THREE.Matrix4(), _gs = new THREE.Vector3(), _gp = new THREE.Vector3();
   function tickBirds(dt) {
-    const im = S.birds; if (!im) return;
+    const fl = S.birds; if (!fl || !fl.begin) return;
     const t = S.t, st = S.birdSt;
     // the following flock eases its centre onto its boat
-    for (let i = 0; i < st.length; i++) {
-      const F = st[i].f;
-      if (!F || F.kind !== "follow" || F._t === t) continue;
-      F._t = t;
+    for (let i = 0; i < S.gullFlocks.length; i++) {
+      const F = S.gullFlocks[i];
+      if (F.kind !== "follow") continue;
       const b = followTarget(F);
       if (b) {
         const k = Math.min(1, dt * 0.8);
@@ -792,36 +994,23 @@
         F.z += (b.pos.z - Math.cos(h) * 6 - F.z) * k;
       }
     }
+    const fls = dt > 0 ? flushers() : [];
+    const cam = CBZ.camera && CBZ.camera.position;
+    fl.begin();
     for (let i = 0; i < st.length; i++) {
-      const b = st[i];
-      if (b.perch) {
-        const p = b.perch;
-        const bob = Math.sin(t * 0.7 + b.ph) * 0.12;
-        _e.set(0, b.ph + bob, 0, "YXZ"); _q.setFromEuler(_e);
-        _s.set(b.sc * 0.85, b.sc * 0.5, b.sc * 0.18);
-        _m4.compose(_p.set(p.x, p.y + 0.1, p.z), _q, _s);
-        im.setMatrixAt(i, _m4);
-        continue;
+      const g = st[i];
+      if (g.spot && g.mode !== "land") {
+        for (let k = 0; k < fls.length; k += 4) {
+          if (Math.abs(fls[k + 1] - g.y) < 4 && Math.hypot(fls[k] - g.x, fls[k + 2] - g.z) < fls[k + 3]) { takeOff(g, fls[k], fls[k + 2]); break; }
+        }
       }
-      const F = b.f;
-      const ang = b.ph + t * b.w;
-      const wob = Math.sin(t * 0.37 + b.ph * 2) * 0.25;
-      const rr = b.rr * (1 + wob * 0.5);
-      const x = F.x + Math.cos(ang) * rr, z = F.z + Math.sin(ang) * rr;
-      const y = seaY(x, z) + b.hh + Math.sin(t * 0.5 + b.ph) * 2.2;
-      // direction of travel is the tangent of the orbit
-      const dirx = -Math.sin(ang) * Math.sign(b.w), dirz = Math.cos(ang) * Math.sign(b.w);
-      const head = Math.atan2(dirz, dirx);
-      const bank = -Math.sign(b.w) * 0.42;
-      // gulls glide more than they flap: bursts of beats, then a long soar
-      const cyc = (t * 0.35 + b.fl) % 1;
-      const flap = cyc < 0.35 ? Math.cos(t * 11 + b.fl * 5) : 0.85 + Math.sin(t * 1.3 + b.ph) * 0.1;
-      _e.set(bank, -head, 0, "YXZ"); _q.setFromEuler(_e);
-      _s.set(b.sc, b.sc * flap, b.sc);
-      _m4.compose(_p.set(x, y, z), _q, _s);
-      im.setMatrixAt(i, _m4);
+      stepGull(g, dt, t);
+      _ge.set(g.roll, g.yaw, g.pitch, "YZX"); _gq.setFromEuler(_ge); _gs.setScalar(g.sc);
+      _gm.compose(_gp.set(g.x, g.y, g.z), _gq, _gs);
+      const far = !!cam && (cam.x - g.x) * (cam.x - g.x) + (cam.y - g.y) * (cam.y - g.y) + (cam.z - g.z) * (cam.z - g.z) > 40 * 40;
+      fl.add(_gm, g.P, far);
     }
-    im.instanceMatrix.needsUpdate = true;
+    fl.end();
   }
 
   // ============================================================
