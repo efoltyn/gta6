@@ -552,7 +552,7 @@ document.body.appendChild(b);}}catch(e){}})();
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=r187d"></script>
 <script src="src/world/materials.js?v=r187a"></script>
-<script src="src/world/fuel_station.js?v=r187a+bld1122b"></script>
+<script src="src/world/fuel_station.js?v=r187a+bld1122b+bld1122e"></script>
 <script src="src/world/prisonkit.js?v=day1122"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
@@ -1255,13 +1255,13 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=r187a+house1122"></script>
-<script src="src/city/buildings.js?v=shops1122d+house1122r2+sub1122a+bld1122a+sub1122b+bld1122c"></script>
+<script src="src/city/buildings.js?v=shops1122d+house1122r2+sub1122a+bld1122a+sub1122b+bld1122c+bld1122e"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
      govcomplex.js does to this same office shell: a spec at the call site.
      Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
-<script src="src/city/facade_kit.js?v=arrive1022+bld1122a"></script>
+<script src="src/city/facade_kit.js?v=arrive1022+bld1122a+bld1122e"></script>
 <script src="src/city/facades/brick.js?v=mrg10200048+bld1122b"></script>
 <script src="src/city/facades/stone.js?v=mrg10200048"></script>
 <script src="src/city/facades/mosque.js?v=mrg10200048"></script>
@@ -1285,7 +1285,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facades/pencil.js?v=faccom1020"></script>
 <script src="src/city/facades/postmodern.js?v=faccom1020"></script>
 <script src="src/city/facades/neogothic.js?v=faccom1020"></script>
-<script src="src/city/facades/megabrace.js?v=faccom1020"></script>
+<script src="src/city/facades/megabrace.js?v=faccom1020+bld1122e"></script>
 <!-- HOUSE GRAMMARS. The same contract written for the DOMESTIC end of the range:
      every one of these owns a real roof (gable, hip, tile, turret, floating
      plane) where the shell had a parapet, and every one dresses AROUND the base
@@ -1304,7 +1304,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facades/techhouse.js?v=door1122"></script>
 <script src="src/city/facades/ranch.js?v=house1020b"></script>
 <script src="src/city/facades/brickhouse.js?v=house1020b"></script>
-<script src="src/city/facades/commercial.js?v=bld1122a"></script>
+<script src="src/city/facades/commercial.js?v=bld1122a+bld1122e"></script>
 <script src="src/city/facade_demo.js?v=fk2"></script>
 <!-- THE HOUSE LOT: a detached house standing on its land (front yard, side yards, the
      garage wing on the driveway, walk, hedge / fence, back fence, mailbox). towngen.js and
@@ -1397,7 +1397,7 @@ document.body.appendChild(b);}}catch(e){}})();
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
 <script src="src/city/settlements.js?v=pres0929b"></script>
-<script src="src/city/towngen.js?v=house1020b+house1122r2+fixB1+bld1122a+bld1122d"></script>
+<script src="src/city/towngen.js?v=house1020b+house1122r2+fixB1+bld1122a+bld1122d+bld1122e"></script>
 <!-- THE ONE BET SLIP (city/betslip.js): every wager in the city is written on
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
@@ -1523,7 +1523,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
 <script src="src/city/street_hardware.js?v=r187a"></script>
-<script src="src/city/props.js?v=world1122b"></script>
+<script src="src/city/props.js?v=world1122b+bld1122e"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=world1122b"></script>
@@ -2625,7 +2625,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=plan1122-ph3"></script>
+<script src="src/city/govcomplex.js?v=plan1122-ph3+bld1122e"></script>
 <!-- THE PRISON'S OUTER PERIMETER (world/prisonoutside.js): the field past the
      wire, the staff lot and its drivable cars, the outer wall with the
      Executive Mansion's checkpoint for its gate, the break (out of the wire)

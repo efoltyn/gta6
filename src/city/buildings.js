@@ -8654,7 +8654,10 @@
           const st = CBZ.buildFuelStation({ parent: root, x: lot.cx, z: lot.cz, y: 0, rotY: Math.atan2(-nOut[0], -nOut[1]),
             frontage: fr - 1.0, depth: dp - 1.0, deck: 0.06, walkRise: 0.15, apron: 0 });
           lot.kind = shop.kind;
-          lot.building = { shop, name: shop.name, sign: shop.sign, side, door: st.door, vendorSpot: st.vendor,
+          // the mainland's door point is 1.6 m inside, its normal inward
+          // (doorInfo); the station hands back the walk 1.6 m outside the store
+          const sd = { x: st.door.x - st.door.nx * 3.2, z: st.door.z - st.door.nz * 3.2, nx: -st.door.nx, nz: -st.door.nz };
+          lot.building = { shop, name: shop.name, sign: shop.sign, side, door: sd, vendorSpot: st.vendor,
             gas: true, station: st.group, fuelStation: true, w: fr - 1.0, d: dp - 1.0 };
           placed.push(lot);
           continue;

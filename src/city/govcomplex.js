@@ -1868,10 +1868,13 @@
     };
     return { b: b, lot: lot, door: doorPt, n: n };
   }
-  // a plain block (barracks, annex, warehouse, garage) with no civic dressing
+  // a plain block (barracks, annex, warehouse, garage) with no civic order:
+  // a masonry walk-up block in the compound's own stone (city/facades/brick.js,
+  // sash windows, no shop front). It was a bare glass office shell, which is
+  // what the Executive Mansion's wing and garage read as beside the house.
   function block(root, x, z, w, d, storeys, hex, side, opts) {
     let b = null;
-    opts = Object.assign({ facade: "office", dress: false }, opts || {});   // plain shells stay plain (see civic())
+    opts = Object.assign({ facade: "office", dress: { style: "brick", walkup: true, noShop: true } }, opts || {});
     try { b = CBZ.cityMakeBuilding(root, x, z, w, d, storeys, hex, side, opts); }
     catch (e) { b = null; }
     if (b && _curSite) _shells.push({ site: _curSite, b: b, name: null });

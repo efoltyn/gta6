@@ -434,6 +434,9 @@
     const rise = opts.walkRise != null ? opts.walkRise : 0.15;
     const rotY = opts.rotY || 0;
     const ox = opts.x || 0, oz = opts.z || 0, oy = opts.y || 0;
+    // THE PHONE'S NEAR FORM (city/facade_kit.js CBZ.facadeLite): no hoses,
+    // nozzle grips, bare shelf boards or cage bars, and six-sided round parts
+    const LITE = opts.lite != null ? !!opts.lite : !!(CBZ.facadeLite && CBZ.facadeLite());
     // THE LOT: half-frontage W2 and half-depth D2 (the module's 12 x 13 when
     // the caller names none). FULL is the 24 x 26 layout, numbers unchanged.
     const W2 = opts.frontage ? Math.max(6, Math.min(W2F, opts.frontage / 2)) : W2F;
@@ -476,7 +479,7 @@
     }
     function bx(key, x, y, z, w, h, d, c) { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); return put(key, g, c); }
     function cy(key, x, y, z, rt, rb, h, c, seg, ts, tl) {
-      const g = new THREE.CylinderGeometry(rt, rb, h, seg || 10, 1, false, ts || 0, tl || Math.PI * 2);
+      const g = new THREE.CylinderGeometry(rt, rb, h, LITE ? Math.min(seg || 10, 6) : (seg || 10), 1, false, ts || 0, tl || Math.PI * 2);
       g.translate(x, y, z); return put(key, g, c);
     }
     // a flat quad facing `face` with optional atlas uv rect
@@ -495,6 +498,7 @@
       return put(key, g, c);
     }
     function tube(key, pts, r, c) {
+      if (LITE) return null;
       const curve = new THREE.CatmullRomCurve3(pts.map(function (p) { return new THREE.Vector3(p[0], p[1], p[2]); }));
       return put(key, new THREE.TubeGeometry(curve, 18, r, 5, false), c);
     }
@@ -604,8 +608,10 @@
           if (late()) yield 0;
           const bz = dz + nz, by = IY + 0.95;
           bx("solid", fx + sd * 0.05, by, bz, 0.1, 0.34, 0.14, C.black);                  // boot
-          bx("solid", fx + sd * 0.12, by + 0.1, bz, 0.08, 0.1, 0.26, ni ? C.stripe : C.rubber);   // grip
-          cy("solid", fx + sd * 0.12, by - 0.08, bz - 0.1, 0.012, 0.012, 0.22, C.steel, 6);        // spout
+          if (!LITE) {
+            bx("solid", fx + sd * 0.12, by + 0.1, bz, 0.08, 0.1, 0.26, ni ? C.stripe : C.rubber);   // grip
+            cy("solid", fx + sd * 0.12, by - 0.08, bz - 0.1, 0.012, 0.012, 0.22, C.steel, 6);        // spout
+          }
           tube("solid", [
             [ix + sd * 0.2, IY + DH + 0.05, bz * 0.6 + dz * 0.4],
             [fx + sd * 0.25, IY + DH - 0.15, bz],
@@ -705,7 +711,7 @@
       // (empty: see the GOODS note in the atlas)
       bx("glow", gc, fy + 0.8, gz, gl2, 1.6, 0.06, C.gondola);
       bx("glow", gc, fy + 0.07, gz, gl2, 0.14, 0.8, C.inDark);
-      for (const sd of [-1, 1]) for (let k = 0; k < 3; k++)
+      if (!LITE) for (const sd of [-1, 1]) for (let k = 0; k < 3; k++)
         bx("glow", gc, fy + 0.5 + k * 0.38, gz + sd * 0.2, gl2 - 0.04, 0.025, 0.38, C.gondola);
       bx("glow", gc, fy + 1.6, gz, gl2 + 0.02, 0.03, 0.12, C.inDark);
       solid(g0, g1, gz - 0.4, gz + 0.4, 0, fy + 1.6);
@@ -735,8 +741,8 @@
         bx("solid", (px0 + px1) / 2, deck + y, pz1, px1 - px0, 0.04, 0.04, C.steel);
         bx("solid", px1, deck + y, (pz0 + pz1) / 2, 0.04, 0.04, pz1 - pz0, C.steel);
       }
-      for (let i = 0; i < 9; i++) bx("solid", px1, deck + ph / 2, pz0 + (i + 0.5) * (pz1 - pz0) / 9, 0.02, ph, 0.02, C.steel);
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; !LITE && i < 9; i++) bx("solid", px1, deck + ph / 2, pz0 + (i + 0.5) * (pz1 - pz0) / 9, 0.02, ph, 0.02, C.steel);
+      for (let i = 0; !LITE && i < 4; i++) {
         bx("solid", px0 + (i + 0.5) * (px1 - px0) / 4, deck + ph / 2, pz0, 0.02, ph, 0.02, C.steel);
         bx("solid", px0 + (i + 0.5) * (px1 - px0) / 4, deck + ph / 2, pz1, 0.02, ph, 0.02, C.steel);
       }

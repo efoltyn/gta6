@@ -1093,9 +1093,20 @@
   CBZ.dressFacadeSteps = function (ctx) {
     return dressSteps(ctx, typeof ctx.solid !== "function" && typeof ctx.flag !== "function");
   };
+  /* THE PHONE'S NEAR FORM. On a phone (or any tier-0/1 device) ctx.lite is
+     set: a grammar leaves out its hairlines (panel joints, coursing lines,
+     glazing bars, a mullion between every pair) and keeps everything that
+     makes its silhouette and its openings. A joint is a pixel at arm's
+     length on a 390-point screen and a few hundred triangles a building. */
+  function liteTier() {
+    if (CBZ.deviceClass === "phone") return true;
+    return CBZ.qualityLevel != null && CBZ.qualityLevel <= 1;
+  }
+  CBZ.facadeLite = liteTier;
   function* dressSteps(ctx, sliced) {
     const r = resolve(ctx.dress, ctx.hash, ctx.storeys);
     if (!r) return null;
+    ctx.lite = liteTier();
 
     // ---- keep-clear carve + crown record (see KEEP-CLEAR COLUMNS above) ----
     const keep = Array.isArray(ctx.keepClear) && ctx.keepClear.length ? ctx.keepClear : null;

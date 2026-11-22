@@ -2160,6 +2160,9 @@
       for (const lot of doorLots()) {
         const d = lot.building && lot.building.door;
         if (!d) continue;
+        // a filling station's way in is its whole forecourt: nothing on the
+        // kerb along any side of its lot (world/fuel_station.js)
+        if (lot.building.fuelStation && Math.abs(x - lot.cx) < lot.w / 2 + 6 && Math.abs(z - lot.cz) < lot.d / 2 + 6) return true;
         const ex = d.x - d.nx * 4.8, ez = d.z - d.nz * 4.8;
         if (pointSegmentD2(x, z, d.x, d.z, ex, ez) < r2) return true;
       }

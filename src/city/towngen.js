@@ -502,6 +502,29 @@
     const mk = CBZ.cityMakeBuilding;
     const district = cfg.district || cfg.name || "town";
     const filled = [];
+    /* WHERE STREET FURNITURE MAY NOT STAND: in front of a way in. Every lot
+       says where its ways in are as it is decided (a shop's door, a house's
+       door and its drive, a filling station's whole forecourt), as a strip
+       from the lot's front edge out across the footway to the kerb; the lamp
+       and rail walks below test against it. It was the door point alone, and
+       only for the rails: a lamp and a rail stood across the Pinecrest
+       station's forecourt. Each: { x0, x1, z0, z1, kind }. */
+    const frontKeep = [];
+    function keepFront(lt, tOff, halfT, kind) {
+      const nx = lt.door.nx, nz = lt.door.nz, tx = -nz, tz = nx;
+      const hd = (nz ? lt.d : lt.w) / 2;
+      const a0 = hd - 1.0, a1 = hd + 9.0;                 // the lot's front strip out past the kerb
+      const xs = [], zs = [];
+      for (const a of [a0, a1]) for (const t of [tOff - halfT, tOff + halfT]) { xs.push(lt.cx + nx * a + tx * t); zs.push(lt.cz + nz * a + tz * t); }
+      frontKeep.push({ x0: Math.min.apply(null, xs), x1: Math.max.apply(null, xs), z0: Math.min.apply(null, zs), z1: Math.max.apply(null, zs), kind: kind });
+    }
+    function keptFront(x, z, pad, kinds) {
+      for (const k of frontKeep) {
+        if (kinds && !kinds[k.kind]) continue;
+        if (x > k.x0 - pad && x < k.x1 + pad && z > k.z0 - pad && z < k.z1 + pad) return k;
+      }
+      return null;
+    }
     function buildProbFor(ring) {
       // denser centre: ring0 ~density, falling ~25% per ring out
       const p = density * Math.pow(0.72, ring);
@@ -791,6 +814,13 @@
         // a fuel lot raises a filling station, not a shell: no far copy of a
         // shell may stand for it (city/metro.js BUILT reads this)
         if (isShop && sk === "gas" && stationFits(lt)) bb.fuelStation = true;
+        if (lt.door) {
+          const tx = -lt.door.nz, tz = lt.door.nx;
+          const doorT = (lt.door.x - lt.cx) * tx + (lt.door.z - lt.cz) * tz;
+          if (bb.fuelStation) keepFront(lt, 0, (lt.door.nz ? lt.w : lt.d) / 2, "forecourt");
+          else keepFront(lt, doorT, 1.9, "door");
+          if (HLOT && isFinite(HLOT.driveAt)) keepFront(lt, HLOT.driveAt, (HLOT.driveHalf || 1.6) + 0.6, "drive");
+        }
         // a house on a lot: where it stands and where its own drive runs
         // (city/approach.js lays the drive there instead of on the centreline)
         if (HLOT) { bb.x = bx; bb.z = bz; bb.w = w; bb.d = d; bb.driveAt = HLOT.driveAt; bb.driveHalf = HLOT.driveHalf; }
@@ -1171,6 +1201,8 @@
         // the arm reaches toward the carriageway; +Z is the road in lampMast's
         // frame, so the yaw is just the bearing from the lamp to the centreline
         const fx = seg.vertical ? -sgn : 0, fz = seg.vertical ? 0 : -sgn;
+        // never in front of a way in: a forecourt, a drive, a shop or house door
+        if (keptFront(lx, lz, 0.5, null)) continue;
         lampSpots.push({ x: lx, z: lz, ang: Math.atan2(fx, fz), fx: fx, fz: fz, half: half, off: off });
       }
     }
@@ -1243,6 +1275,10 @@
         const side = (i & 1) ? 1 : -1;
         const rx = lt.door.x + lt.door.nx * 1.0 - lt.door.nz * 2.6 * side, rz = lt.door.z + lt.door.nz * 1.0 + lt.door.nx * 2.6 * side;
         const yaw90 = lt.door.nx !== 0;                 // rail runs along Z
+        // beside a shop's own door by design, but never across a forecourt or
+        // a drive, nor in front of the neighbour's door
+        const RK = { forecourt: 1, drive: 1 };
+        if (keptFront(rx + (yaw90 ? 0 : -1.6), rz + (yaw90 ? -1.6 : 0), 0.2, RK) || keptFront(rx + (yaw90 ? 0 : 1.6), rz + (yaw90 ? 1.6 : 0), 0.2, RK)) continue;
         const ry = gy(rx, rz);
         dummy2.position.set(rx, ry + 1.0, rz);
         dummy2.rotation.set(0, yaw90 ? Math.PI / 2 : 0, 0); dummy2.scale.set(1, 1, 1);
