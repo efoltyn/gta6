@@ -142,9 +142,11 @@
   function houseLots(A) {
     const base = A.homeLots || [], MH = CBZ.metroHomes;
     const live = MH && MH.live ? MH.live() : null;
-    if (!live || !live.length) return base;
-    const out = base.slice();
-    for (const e of live) if (e.lot) out.push(e.lot);
+    const sub = MH && MH.saleLots ? MH.saleLots() : null;
+    if ((!live || !live.length) && (!sub || !sub.length)) return base;
+    const out = base.slice(), seen = new Set();
+    for (const e of live || []) if (e.lot && !seen.has(e.lot)) { seen.add(e.lot); out.push(e.lot); }
+    for (const l of sub || []) if (!seen.has(l)) { seen.add(l); out.push(l); }
     return out;
   }
   // a house on the market keeps its door shut to you until you hold a key
@@ -241,7 +243,7 @@
   function market() {
     const A = arena(), z = Z(); if (!A || !z || !z.canBuyLot) return [];
     const out = [];
-    for (const lot of A.homeLots || []) {
+    for (const lot of houseLots(A)) {
       if (!homeOf(lot) || lot.demolished || !z.canBuyLot(lot)) continue;
       const p = z.buyPriceForLot(lot);
       if (p != null) out.push({ lot: lot, price: p });
@@ -447,7 +449,10 @@
     const solid = function (sp, wide, d0, d1, ya, yb) {
       const cx = sp.x + sp.fx * (0.31 - (d0 + d1) / 2), cz = sp.z + sp.fz * (0.31 - (d0 + d1) / 2);
       const hx = Math.abs(sp.fx) > 0.5 ? (d1 - d0) / 2 : wide / 2, hz = Math.abs(sp.fx) > 0.5 ? wide / 2 : (d1 - d0) / 2;
-      const c = { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz, y0: ya, y1: yb, ref: grp, noStep: true, homeFixture: true };
+      // (a house on a skewed street: the box turned with the wall it is on)
+      const c = sp.yaw && CBZ.orientedCollider ? CBZ.orientedCollider(cx, cz, wide / 2, (d1 - d0) / 2, Math.atan2(sp.fx, sp.fz), ya, yb)
+        : { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz, y0: ya, y1: yb };
+      c.ref = grp; c.noStep = true; c.homeFixture = true;
       if (CBZ.colliderAdd) CBZ.colliderAdd(c); else if (CBZ.colliders) { CBZ.colliders.push(c); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
       cols.push(c);
     };
@@ -933,8 +938,8 @@
       for (const k in desc.stash) { const s = desc.stash[k] || {}; g.cityHomeStash[k] = { cash: Math.max(0, +s.cash || 0), guns: Array.isArray(s.guns) ? s.guns.slice(0, 6) : [] }; }
     }
     if (desc.home === false || (desc.home == null && desc.id == null && desc.tier == null)) return true;
-    const A = arena(), pool = A && A.homeLots;
-    if (!pool || !pool.length) return false;
+    const A = arena(), pool = A ? houseLots(A) : null;
+    if (!pool || !pool.length) { pendingHome = desc; return false; }
     let best = null, bestD = Infinity;
     for (const lot of pool) {
       const h = homeOf(lot);
@@ -943,14 +948,22 @@
       const d = (door && desc.doorX != null) ? Math.hypot(door.x - desc.doorX, door.z - desc.doorZ) : 0;
       if (d < bestD) { bestD = d; best = lot; }
     }
-    if (!best) for (const lot of pool) { const h = homeOf(lot); if (h && h.tier === desc.tier) { best = lot; break; } }
-    if (!best) return false;
+    // (a metro suburb's house is a long way from any town lot: one that far
+    // off is not the one the save means, it is not registered yet)
+    if (best && desc.doorX != null && bestD > 30 && !(CBZ.metroHomes && CBZ.metroHomes.registered && CBZ.metroHomes.registered())) { pendingHome = desc; best = null; }
+    if (!best) for (const lot of pool) { const h = homeOf(lot); if (h && h.tier === desc.tier && desc.doorX == null) { best = lot; break; } }
+    if (!best) { pendingHome = desc; return false; }
+    pendingHome = null;
     best.building.home.owned = true;
     g.cityHome = { lot: best, tier: desc.tier, id: desc.id, name: desc.name };
     g.citySpawnPoint = g.citySpawnPoint || { x: best.building.door.x, z: best.building.door.z };
     armPenthouse(best);
     return true;
   };
+  // the house the save says you live in may be a metro suburb's, whose lot
+  // exists once house_metro.js has put the suburb on the market: it asks again
+  let pendingHome = null;
+  CBZ.cityHomeRetry = function () { if (pendingHome) { const d = pendingHome; pendingHome = null; CBZ.cityHomeRestore(Object.assign({}, d, { stash: null })); } };
   CBZ.cityRealEstateReset = function () {
     g.cityHome = null; g.cityRentTier = null; g.cityGarage = []; g.citySpawnPoint = null;
     g.cityOwnsPenthouse = false; g.cityOwnsHeli = false; g.cityOwnsHangar = false;
@@ -958,6 +971,9 @@
     live.clear(); dropVis();
     const A = arena();
     if (A && A.homeLots) for (const l of A.homeLots) if (l.building && l.building.home) l.building.home.owned = false;
+    // the metro suburbs' houses too, and they read the save again on their next tick
+    const MH = CBZ.metroHomes;
+    if (MH && MH.ownedLots) { for (const l of MH.ownedLots()) if (l.home) l.home.owned = false; if (MH.rehydrate) MH.rehydrate(); }
     // mode.js's reset() calls this AFTER the ledger was re-pointed at the
     // current character, so re-hydrate from it here (the one place guaranteed
     // to run after both the wipe above and the ledger swap)

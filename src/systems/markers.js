@@ -83,11 +83,15 @@
     const p = CBZ.player && CBZ.player.pos;
     const cop = CBZ.game && CBZ.game.role === "cop";
     const all = CBZ.guards.concat(CBZ.npcs);
+    // ...except in the blackout, where the unlit fan would be the one bright
+    // thing on a black floor (entities/guards.js hides it there too)
+    const SB = CBZ.prisonSchedule;
+    const black = !!(SB && SB.enabled && SB.enabled() && SB.is("blackout"));
     for (const a of all) {
       if (!a) continue;
       // the wedge is not a marker: it belongs to the torch, and a guard 50 m
       // away must still show his beam.
-      if (guardish(a) && a.wedge) a.wedge.visible = !!a.flashlightOn;
+      if (guardish(a) && a.wedge) a.wedge.visible = !!a.flashlightOn && !black;
       if (!p || !a.group || a.dead || (a.ko || 0) > 0 || a.escaped) continue;
       const dx = a.group.position.x - p.x, dz = a.group.position.z - p.z;
       const d2 = dx * dx + dz * dz;

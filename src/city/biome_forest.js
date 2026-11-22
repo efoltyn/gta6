@@ -1287,16 +1287,13 @@
     const cabX = CX + 260, cabZ = CZ + 170;
     if (CBZ.cityMakeBuilding) {
       try {
-        CBZ.cityMakeBuilding(root, cabX, cabZ, 16, 12, 1, 0x6e5436, "south",
+        const cab = CBZ.cityMakeBuilding(root, cabX, cabZ, 16, 12, 1, 0x6e5436, "south",
           { retail: true, glassKind: "clear", facade: "retail", label: "RANGER STATION" });
+        // its name on its own fascia over the door, read on approach (the
+        // city's one shop-front maker). It was a board hanging in the air
+        // 2 m over the BACK wall's parapet.
+        if (cab && CBZ.cityShopFront) CBZ.cityShopFront(cab, "south", 16, 12, 0x3f5a3a, "Ranger Station", "ranger");
       } catch (e) { /* keep biome alive if building gen rejects opts */ }
-    }
-    // a ranger-station sign so it reads on approach.
-    if (CBZ.makeLabelSprite) {
-      const sign = CBZ.makeLabelSprite("RANGER STATION");
-      sign.position.set(cabX, 5.4, cabZ - 6.4);
-      sign.scale.set(10, 2.4, 1);
-      root.add(sign);
     }
 
     // ================================================================
@@ -1333,10 +1330,7 @@
     tcab.position.set(twX, twH + 1.7, twZ); tcab.castShadow = true; root.add(tcab);
     const roof = new THREE.Mesh(new THREE.ConeGeometry(6, 2.4, 4), mat(0x3a2c1a));
     roof.rotation.y = Math.PI / 4; roof.position.set(twX, twH + 4.4, twZ); roof.castShadow = true; root.add(roof);
-    if (CBZ.makeLabelSprite) {
-      const ts = CBZ.makeLabelSprite("FIRE LOOKOUT");
-      ts.position.set(twX, twH + 7, twZ); ts.scale.set(9, 2.2, 1); root.add(ts);
-    }
+    // (no caption floating over the lookout's roof: the tower is the landmark)
 
     // ---- THE CLIMB: a switchback stair up the +x face, TWO LANES.
     // What it was: both flights in ONE 1.2 m strip, the upper stacked straight
@@ -1469,10 +1463,7 @@
     const fire = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.1, 6),
       new THREE.MeshLambertMaterial({ color: 0xff7a18, emissive: 0xd24400, emissiveIntensity: 1.2 }));
     fire.position.set(campX, 0.6, campZ); root.add(fire);
-    if (CBZ.makeLabelSprite) {
-      const cs = CBZ.makeLabelSprite("CAMP HOLLOW");
-      cs.position.set(campX, 4.2, campZ); cs.scale.set(8, 2, 1); root.add(cs);
-    }
+    // (no caption floating 4 m over the fire: a campsite is read by its fire)
 
     // ================================================================
     //  LIFE — hikers / hunters / rangers via cityMakePed.

@@ -518,7 +518,7 @@
     const S = sched();
     if (!S || !S.enabled()) return;
     const id = S.id();
-    const bedTime = id === "night" || id === "secure";
+    const bedTime = id === "night" || id === "secure" || id === "blackout";
     const messTime = id === "mess" || id === "supper";
     const sitTime = id === "yard" || id === "work";
     const changed = id !== lastBlock;
@@ -670,7 +670,7 @@
     const w = warden();
     if (!w || w.dead) return;
     const p = w.group.position;
-    const night = (id === "night" || id === "secure");
+    const night = (id === "night" || id === "secure" || id === "blackout");
     const hot = (w.hunt || 0) > 0 || (w.alert || 0) > 0.25 || (w.ko | 0) > 0;
     const P = CBZ.player && CBZ.player.pos;
     const seen = P && (P.x - wardenBed.x) * (P.x - wardenBed.x) + (P.z - wardenBed.z) * (P.z - wardenBed.z) < WAKE_R * WAKE_R;

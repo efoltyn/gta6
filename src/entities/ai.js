@@ -1898,7 +1898,7 @@
     const S = CBZ.prisonSchedule;
     const block = S && S.enabled() ? S.id() : "";
     if (block === "mess" || block === "supper") return "He eats at the far tables.";
-    if (block === "secure" || block === "night") return "He's locked on his tier.";
+    if (block === "secure" || block === "night" || block === "blackout") return "He's locked on his tier.";
     const spot = homeSpot(n);
     const where = spot ? nearestLandmark(spot.x, spot.z) : "yard";
     if (where === "cell block") return "He's on the tier most days.";

@@ -345,7 +345,11 @@
     return P;
   }
   // the republic's own two bombers are the ones parked at Fort Brandt
-  function nativeBombers(id, type) {
+  // `load`: a bomber is WANTED now (a raid picks its carrier), so the base
+  // fleet may be built for it. The 5 s fleet sync only counts: it used to call
+  // fortBrandtFleet.ensure() from the downtown spawn, building the B-52 and
+  // the B-2 (11.6 MB of geometry on the phone profile) 3.4 km away at boot.
+  function nativeBombers(id, type, load) {
     if (id !== "republic") return [];
     let r = null;
     if (type === "b2") r = CBZ.strategicB2Rec ? CBZ.strategicB2Rec() : null;
@@ -355,7 +359,7 @@
       for (let i = 0; i < L.length; i++) if (L[i] && L[i].unitId === "b52" && L[i].stand) { r = L[i]; break; }
       // not on its stand yet: the base fleet loads when the player is near it,
       // or now, because the republic has a bomber to fly
-      if (!r && CBZ.fortBrandtFleet) { try { CBZ.fortBrandtFleet.ensure(); } catch (e) {} }
+      if (!r && (load || (CBZ.CONFIG && CBZ.CONFIG.WARROOM_FAR_FLEET === false)) && CBZ.fortBrandtFleet) { try { CBZ.fortBrandtFleet.ensure(); } catch (e) {} }
     }
     if (!r) return [];
     r.ownCrew = true;            // the air force has its crews; a trooper on the base still takes the seat
@@ -410,10 +414,36 @@
     const L = CBZ.cityMilitaryVehicles, j = L ? L.indexOf(rec) : -1;
     if (j >= 0) L.splice(j, 1);
   }
+  /* A STATION'S AEROPLANES STAND ONLY WHILE SOMEBODY CAN SEE THEM. A parked
+     airframe is a whole unit model (a B-52H is ~11 MB of geometry) and the
+     stations are kilometres out (8.5 km east for the second nation): the 5 s
+     sync stood every nation's fleet from the downtown spawn. Now the passive
+     sync parks a station's fleet only while the player is within
+     STATION_NEAR of it, and takes the idle ones down past STATION_FAR; a raid
+     that wants a carrier (freeCarrier) parks it on demand, wherever the
+     player is. What a nation OWNS is the ledger (milOf), not the models. */
+  const STATION_NEAR = 1600, STATION_FAR = 2000;
+  function stationDist(id) {
+    const s = stationOf(id), P = CBZ.player && CBZ.player.pos;
+    if (!s || !P) return 0;
+    return Math.hypot(P.x - s.x, P.z - s.z);
+  }
+  function idleAirframe(r) {
+    if (!r || r.lost || r.taken || r._aiActive) return false;
+    return CBZ.strategicBomberAvailable ? !!CBZ.strategicBomberAvailable(r) : true;
+  }
   // keep each station's parked fleet equal to what the nation OWNS
-  function syncFleet(id) {
+  function syncFleet(id, force) {
     const m = milOf(id);
     if (!m || !THREE) return;
+    if (!force && !(CBZ.CONFIG && CBZ.CONFIG.WARROOM_FAR_FLEET === false)) {   // (?cfg_WARROOM_FAR_FLEET=0: the A/B)
+      const d = stationDist(id);
+      if (d > STATION_FAR && PARK[id]) {
+        const P0 = PARK[id];
+        for (const t of ["heavy", "b2", "jet"]) P0[t] = P0[t].filter(function (r) { if (idleAirframe(r)) { dropAirframe(r); return false; } return true; });
+      }
+      if (d > STATION_NEAR) return;
+    }
     const wantJets = Math.max(0, Math.min(JET_SLOTS.length, (m.planes | 0) - (OUT[id] | 0)));
     // the republic's B-52 waiting on Fort Brandt's stand counts as owned
     const nh = nativeBombers(id, "heavy").length || (id === "republic" && CBZ.fortBrandtFleet ? CBZ.fortBrandtFleet.pending("bomber") : 0);
@@ -444,7 +474,7 @@
   function bombersOf(id, type) {
     const P = PARK[id];
     const own = P ? P[type] || [] : [];
-    return nativeBombers(id, type).concat(own);
+    return nativeBombers(id, type, true).concat(own);
   }
   function freeCarrier(id, payloadKey) {
     const T = A(), pl = T && T.payloads[payloadKey];
@@ -453,6 +483,8 @@
       const t = pl.carriers[i];
       if (t === "jet") continue;
       if (count(id, t) <= 0) continue;
+      // owned but not standing (the player is far from the station): park now
+      if (!bombersOf(id, t).length) { try { syncFleet(id, true); } catch (e) {} }
       const L = bombersOf(id, t);
       for (let k = 0; k < L.length; k++) {
         const ok = CBZ.strategicBomberAvailable ? CBZ.strategicBomberAvailable(L[k]) : !(L[k].taken || L[k]._aiActive);

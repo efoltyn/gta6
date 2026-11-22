@@ -66,6 +66,13 @@
     screw: K ? K.skin("galv", 0xb4bcc4) : CBZ.cmat(0xb4bcc4),
     hole: new THREE.MeshBasicMaterial({ color: 0x050607 }),
   };
+  // the hole is unlit near-black: in the blackout (systems/prisonnight.js)
+  // that near-black would be the only grey on the screen, so it goes to black
+  {
+    const face = { face: true, mat: HATCH.hole, kind: "allnight", tint: true, x: 0, z: 0, color: 0x050607 };
+    if (CBZ.prisonLights && CBZ.prisonLights.register) { try { CBZ.prisonLights.register(face); } catch (e) {} }
+    else (CBZ._prisonLateFixtures || (CBZ._prisonLateFixtures = [])).push(face);
+  }
   function floorHatch(x, z, name, accent, opts) {
     const k = (opts && opts.size ? opts.size : 1.75) / 1.75, f = (opts && opts.floor) || 0;
     const drain = !!(opts && (opts.grate || opts.drain));

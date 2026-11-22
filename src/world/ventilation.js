@@ -331,6 +331,17 @@
     const slots = tag(new THREE.Mesh(new THREE.PlaneGeometry(DW - 0.06, DH - 0.06), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c) })));
     slots.position.set(0, DH / 2, -DL + 0.01);
     scene.add(g);
+    /* ...and the light is the SKY's (systems/prisonnight.js drives both): the
+       slots carry daylight and go dark with the night; the leak along the
+       shell goes in the blackout, when nothing outside is lit at all. */
+    const faces = [
+      { face: true, mat: slots.material, kind: "sky", tint: true, x: 0, z: 0, color: 0xffffff },
+      { face: true, mat: inner, kind: "allnight", x: 0, z: 0, color: inner.color.getHex(), off: inner.color.getHex(), emissive: 0x1c1f22, ei: inner.emissiveIntensity },
+    ];
+    for (const f of faces) {
+      if (CBZ.prisonLights && CBZ.prisonLights.register) { try { CBZ.prisonLights.register(f); } catch (e) {} }
+      else (CBZ._prisonLateFixtures || (CBZ._prisonLateFixtures = [])).push(f);
+    }
     return {
       group: g, width: DW, height: DH, length: DL,
       // the world point `s` metres down the duct's centre line, on its floor

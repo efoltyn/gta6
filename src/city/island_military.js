@@ -53,12 +53,13 @@
   const MINX = CEN_X - HX, MAXX = CEN_X + HX; // -860 .. -380
   const MINZ = CEN_Z - HZ, MAXZ = CEN_Z + HZ; // -950 .. -450
 
-  // causeway deck (drivable bridge, widened to the 24m highway) from the
-  // mainland west edge to the base gate. z-span = 24m about the centreline.
-  // Island end = the base's east edge (tracks the world-layout dial); the
-  // MAINLAND end stays pinned at the authored shore point x=-133 — moving
-  // the island only stretches the deck, it never detaches either shore.
-  const CW_MINX = MAXX, CW_MAXX = -133;
+  // THE GATE APRON: the 24 m deck out of the east gate, ending where the
+  // world plan's Brandt Road takes over (src/world/worldplan.js brandt.eastX:
+  // 60 m out of the wire; the road runs on through the woods to the Mercy
+  // Valley road). It used to run on to the old island causeway's shore point
+  // x=-133, which made it a 2.8 km six-lane deck across the country.
+  const _WP_BRANDT = CBZ.worldPlan && CBZ.worldPlan.brandt;
+  const CW_MINX = MAXX, CW_MAXX = (_WP_BRANDT && isFinite(_WP_BRANDT.eastX) && _WP_BRANDT.eastX > MAXX) ? _WP_BRANDT.eastX : MAXX + 60;
   const CW_MINZ = CEN_Z - 12, CW_MAXZ = CEN_Z + 12;
   const CW_CZ = (CW_MINZ + CW_MAXZ) / 2;      // == CEN_Z, lines up with the base gate
 
@@ -715,8 +716,12 @@
       building: function (lx, lz, w, d, storeys, color, door, o) {
         if (!CBZ.cityMakeBuilding) return null;
         try {
+          // the base's own buildings are brick walk-up blocks (city/facades/
+          // brick.js, sash windows, no shop front): they were bare glass
+          // office shells in a coloured rim
           return CBZ.cityMakeBuilding(root, CEN_X + lx, CEN_Z + lz, w, d, storeys, color, door,
-            { facade: o.facade || "office", dress: false, stairs: storeys > 1, houseNumber: 1 });
+            { facade: o.facade || "office", dress: o.facade === "brick" ? { style: "brick", walkup: true, noShop: true } : false,
+              stairs: storeys > 1, houseNumber: 1 });
         } catch (e) { return null; }
       },
     };
@@ -1044,7 +1049,7 @@
       minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ, pad: 6,
     });
     CBZ.registerCityRegion(city, {
-      name: "Brandt Bridge", subtitle: "Military Reservation", kind: "rect",
+      name: "Brandt Gate Link", subtitle: "Military Reservation", kind: "rect",
       minX: CW_MINX, maxX: CW_MAXX, minZ: CW_MINZ, maxZ: CW_MAXZ, pad: 1,
     });
     // give traffic a road across the causeway (runs along X → not vertical)

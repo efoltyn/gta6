@@ -59,11 +59,15 @@
       pads: [], forecourts: [], diners: [], uniform: false, stats: null };
 
     // ---- what is already somebody's: every place, every road, every freeway
-    const places = [];
+    const places = [], builtPlaces = [];
+    const LAND_COVER = /^(desert|forest|farmland|snow)$/;
     for (const r of city.regions || []) {
       if (!r || r.kind === "circle" || r.underlay || r.biome === "wilds" || !isFinite(r.minX)) continue;
       if (ROADLIKE.test(r.name || "") && Math.min(r.maxX - r.minX, r.maxZ - r.minZ) <= 40) continue;
       places.push({ minX: r.minX - 40, maxX: r.maxX + 40, minZ: r.minZ - 40, maxZ: r.maxZ + 40 });
+      // a biome's whole ground (the Saltlands is one region 4.5 km across)
+      // refuses a farm, not a gas station on the road through it
+      if (!LAND_COVER.test(r.biome || "")) builtPlaces.push({ minX: r.minX - 20, maxX: r.maxX + 20, minZ: r.minZ - 20, maxZ: r.maxZ + 20 });
     }
     for (const r of city.regions || []) if (r && r.kind === "circle" && isFinite(r.cx)) places.push({ minX: r.cx - r.r - 40, maxX: r.cx + r.r + 40, minZ: r.cz - r.r - 40, maxZ: r.cz + r.r + 40 });
     for (const w of city.waterBodies || []) {
@@ -96,14 +100,21 @@
       for (const r of list) if (x1 > r.minX && x0 < r.maxX && z1 > r.minZ && z0 < r.maxZ) return true;
       return false;
     }
-    function free(x0, z0, x1, z1) {
+    // A HOME stands 70 m back from a freeway's edge (the owner: "houses too
+    // close to highway"). The zoning field's own buffer (Z.BUFFER, 30 m) is a
+    // city's sound-wall setback, where land is short; out here land is not,
+    // and a house on a country road that tees off a freeway, or beside a
+    // 3+3 causeway a place built for itself, used to stand 30 m off it.
+    const HOME_SETBACK = 72;
+    function free(x0, z0, x1, z1, setback) {
       if (hits(places, x0, z0, x1, z1) || hits(roads, x0, z0, x1, z1) || hits(taken, x0, z0, x1, z1)) return false;
       // protected land (bases, airfields, bunkers + their clear buffer): the
       // whole footprint, not a few sample points
       if (Z.protectedHit ? Z.protectedHit(x0, z0, x1, z1) : Z.protectedAt((x0 + x1) / 2, (z0 + z1) / 2)) return false;
       // the freeway buffer, sampled at the corners + centre
       const pts = [[x0, z0], [x1, z0], [x0, z1], [x1, z1], [(x0 + x1) / 2, (z0 + z1) / 2]];
-      for (const p of pts) if (Z.freewayEdge(p[0], p[1]) < Z.BUFFER) return false;
+      const buf = setback == null ? Z.BUFFER : setback;
+      for (const p of pts) if (Z.freewayEdge(p[0], p[1]) < buf) return false;
       // THE GEOGRAPHY (the world plan): a farm stands on land, back from the
       // shore; nobody farms the Saltlands' sand; and the range is not farmed.
       // (A country road crosses all three: the Overseas Highway runs down the
@@ -151,7 +162,7 @@
       const ext = function (eu, ev) { return ax ? { w: ev, d: eu } : { w: eu, d: ev }; };
       const A = toW(-36, 12), B = toW(36, 80);
       const x0 = Math.min(A.x, B.x), x1 = Math.max(A.x, B.x), z0 = Math.min(A.z, B.z), z1 = Math.max(A.z, B.z);
-      if (!free(x0, z0, x1, z1)) return false;
+      if (!free(x0, z0, x1, z1, HOME_SETBACK)) return false;
       take(x0, z0, x1, z1, 6);
       const f = h01(px, pz, 11) < 0.5 ? 1 : -1;             // mirror the yard
       const lk = SUB[(h01(px, pz, 12) * SUB.length) | 0];
@@ -179,7 +190,7 @@
       const off = half + setback + d / 2;
       const x = px + nx * off, z = pz + nz * off;
       const R = Math.max(w, d) / 2 + 8;
-      if (!free(x - R, z - R, x + R, z + R)) return false;
+      if (!free(x - R, z - R, x + R, z + R, HOME_SETBACK)) return false;
       take(x - R, z - R, x + R, z + R, 10);
       const lk = SUB[(h01(px, pz, 24) * SUB.length) | 0];
       const st = h01(px, pz, 25) < 0.4 ? 2 : 1;
@@ -189,6 +200,65 @@
         drive: { x: px + nx * (half + 2), z: pz + nz * (half + 2) } });
       if (h01(x, z, 30) < 0.8) tree(x - nx * (d / 2 + 6) + (nz !== 0 ? 5 : 0), z - nz * (d / 2 + 6) + (nx !== 0 ? 5 : 0), "yard");
       return true;
+    }
+
+    // ---- THE PLAN'S OWN ROADSIDE (src/world/worldplan.js `stops`, `towns`):
+    //      the gas stations and diners it stood where nobody else is (the long
+    //      desert leg of the Overseas Highway, Brandt Crossing's corner), and
+    //      the grain elevator of every elevator town, on the road beside it.
+    //      They claim their ground before any farm. A stop is not a farm: the
+    //      desert and the freeway buffer do not refuse it, only the sea, a
+    //      place, a road or another claim does.
+    const WPL = CBZ.worldPlan;
+    function stopFree(x0, z0, x1, z1) {
+      if (hits(builtPlaces, x0, z0, x1, z1) || hits(roads, x0, z0, x1, z1) || hits(taken, x0, z0, x1, z1)) return false;
+      if (WPL && WPL.landAt) for (const p of [[x0, z0], [x1, z0], [x0, z1], [x1, z1]]) if (WPL.landAt(p[0], p[1]) < 30) return false;
+      return true;
+    }
+    for (const S of (WPL && WPL.stops) || []) {
+      const ax = S.axis === "z";                        // the road runs along z: its normal is x
+      const at = function (along, side, off) { return ax ? { x: S.roadAt + side * (S.half + off), z: along } : { x: along, z: S.roadAt + side * (S.half + off) }; };
+      const F = at(S.along, S.side, 16);
+      if (stopFree(F.x - 14, F.z - 14, F.x + 14, F.z + 14)) {
+        take(F.x - 14, F.z - 14, F.x + 14, F.z + 14, 4);
+        const nx = ax ? S.side : 0, nz = ax ? 0 : S.side;
+        P.forecourts.push({ x: r2(F.x), z: r2(F.z), rotY: Math.round(Math.atan2(nx, nz) / (Math.PI / 2)) * (Math.PI / 2), road: S.road, name: S.name });
+      }
+      if (S.diner) {
+        const D = at(S.diner.along, S.diner.side, 16), bw = ax ? 14 : 24, bd = ax ? 24 : 14;
+        if (stopFree(D.x - bw / 2 - 8, D.z - bd / 2 - 8, D.x + bw / 2 + 8, D.z + bd / 2 + 8)) {
+          take(D.x - bw / 2 - 8, D.z - bd / 2 - 8, D.x + bw / 2 + 8, D.z + bd / 2 + 8, 4);
+          // the shopfront faces the road ("s" = -z, "n" = +z, the planner's faces)
+          const face = ax ? (S.diner.side > 0 ? "w" : "e") : (S.diner.side > 0 ? "s" : "n");
+          bld({ x: D.x, z: D.z, w: bw, d: bd, rot: 0, h: 5, st: 1, fh: 5, type: "strip", style: "strip", wall: 0xd8cbb0, glass: 0x33424c,
+            roof: "flat", shop: true, face: face, diner: true });
+          P.diners.push({ x: r2(D.x), z: r2(D.z), road: S.road });
+        }
+      }
+    }
+    // THE ELEVATORS: two rows of four concrete silos and the headhouse at
+    // their end, 30 m off the road beside the town (minicities.js lays the
+    // siding between them and the road). In road terms: u along the road
+    // from the town's link, v away from the road toward the town.
+    P.elevators = [];
+    for (const T of (WPL && WPL.towns) || []) {
+      if (T.reason !== "elevator") continue;
+      const vert = T.side === "E" || T.side === "W";
+      const vs = (T.side === "N" || T.side === "W") ? 1 : -1;         // +v is +z (N) / +x (W)
+      const w = function (u, v) { return vert ? { x: T.roadAt + vs * v, z: T.cz + u } : { x: T.cx + u, z: T.roadAt + vs * v }; };
+      const U0 = 96, V0 = T.half + 30, PITCH = 9.3;
+      const A = w(U0 - 4, V0 - 4), B = w(U0 + 4 * PITCH + 22, V0 + 2 * PITCH + 12);
+      const x0 = Math.min(A.x, B.x), x1 = Math.max(A.x, B.x), z0 = Math.min(A.z, B.z), z1 = Math.max(A.z, B.z);
+      if (hits(taken, x0, z0, x1, z1)) continue;
+      take(x0, z0, x1, z1, 4);
+      for (let r = 0; r < 2; r++) for (let k = 0; k < 4; k++) {
+        const c = w(U0 + k * PITCH + 4.5, V0 + r * PITCH + 4.5);
+        bld({ x: c.x, z: c.z, w: 9, d: 9, rot: 0, h: 34, st: 1, fh: 34, type: "silo", style: "metal", wall: 0xc9c4b8, roof: "dome", kind: "elevator", era: 1931 });
+      }
+      const Hd = w(U0 + 4 * PITCH + 9, V0 + PITCH);
+      const he = vert ? { w: 26, d: 14 } : { w: 14, d: 26 };
+      bld({ x: Hd.x, z: Hd.z, w: he.w, d: he.d, rot: 0, h: 48, st: 10, fh: 4.8, type: "office", style: "concrete", wall: 0xbdb6a8, glass: 0x2c353e, roof: "flat", kind: "elevator-head", era: 1931 });
+      P.elevators.push({ town: T.id, name: T.name + " Grain Elevator", x: r2(Hd.x), z: r2(Hd.z) });
     }
 
     // ---- FIRST the GAS STOP + DINER where a country road meets the Loop

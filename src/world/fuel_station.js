@@ -35,7 +35,16 @@
 
    Draw calls per station: ~8, shared materials across every station.
 
-   CBZ.buildFuelStation(opts) -> { group, footprint, deckY }
+   ANY LOT FROM 12 x 14 m UP. opts.frontage / opts.depth (metres, along the
+   road and away from it) size the station to its lot: the full 24 x 26 m
+   layout above is what a roadside stop and the island get (unchanged); a
+   town's 15-23 m shop lot gets the compact one, laid out from the same
+   parts: the store across the back of the lot (5 m deep, the same counter,
+   coolers, gondolas), the forecourt in front of it under a canopy over one
+   or two pump islands, the price sign at the front corner. No propane cage,
+   air machine, dumpster or parking stalls when the lot has no room for them.
+
+   CBZ.buildFuelStation(opts) -> { group, footprint, deckY, door, vendor }
      opts.parent    THREE.Object3D to add to (default CBZ.scene)
      opts.x, z, y   world position of the lot centre; y = ground under it
      opts.rotY      0 | PI/2 | PI | -PI/2
@@ -51,7 +60,7 @@
   "use strict";
   const CBZ = window.CBZ = window.CBZ || {};
 
-  const W2 = 12, D2 = 13;            // lot half-extents (frontage, depth)
+  const W2F = 12, D2F = 13;          // the full lot's half-extents (frontage, depth)
 
   // ---- colour helpers: author in sRGB hex, store LINEAR (vertex colours) --
   const _c = new THREE.Color();
@@ -425,6 +434,21 @@
     const rise = opts.walkRise != null ? opts.walkRise : 0.15;
     const rotY = opts.rotY || 0;
     const ox = opts.x || 0, oz = opts.z || 0, oy = opts.y || 0;
+    // THE LOT: half-frontage W2 and half-depth D2 (the module's 12 x 13 when
+    // the caller names none). FULL is the 24 x 26 layout, numbers unchanged.
+    const W2 = opts.frontage ? Math.max(6, Math.min(W2F, opts.frontage / 2)) : W2F;
+    const D2 = opts.depth ? Math.max(7, Math.min(D2F, opts.depth / 2)) : D2F;
+    const FULL = W2 >= W2F - 1e-6 && D2 >= D2F - 1e-6;
+    // the store: full lot, the left of the back of the lot with the propane
+    // cage beside it; compact, the whole back of the lot (5 m deep either way)
+    const SX0 = FULL ? -11.2 : -W2 + 0.6, SX1 = FULL ? 2.2 : W2 - 0.6;
+    const SZ1 = FULL ? 12.6 : D2 - 0.4, SZ0 = SZ1 - 5.0;
+    // the pump islands: two at x +-4 on the full lot; compact, two where the
+    // frontage takes them, else one down the middle; their run of z sits
+    // between the front stop line and the store's walk
+    const ISL = FULL ? [-4, 4] : (W2 >= 9 ? [-3.4, 3.4] : [0]);
+    const PZ0 = FULL ? -9.3 : -D2 + 1.6, PZ1 = FULL ? -2.7 : Math.min(PZ0 + 6.6, SZ0 - 2.6);
+    const pzc = (PZ0 + PZ1) / 2, pLen = PZ1 - PZ0;
     const group = new THREE.Group();
     group.name = "fuel-station";
     group.position.set(ox, oy, oz); group.rotation.y = rotY;
@@ -501,7 +525,7 @@
       if (opts.onPad) opts.onPad(aabbW(-W2, W2, -D2, D2), oy + deck);
     }
     // drive-in aprons out to the road edge (when the road doesn't cut its own)
-    const AP = [[-10, -4.6], [4.6, 10]];
+    const AP = FULL ? [[-10, -4.6], [4.6, 10]] : [[-W2 + 1.0, -W2 + 1.0 + Math.min(5.4, W2 - 2.0)], [W2 - 1.0 - Math.min(5.4, W2 - 2.0), W2 - 1.0]];
     AP.forEach(function (a) {
       const x0 = a[0], x1 = a[1];
       if (opts.onCut) opts.onCut(aabbW(x0 - 0.6, x1 + 0.6, -D2 - (opts.cutDepth || 2.3), -D2 + 0.01));
@@ -516,9 +540,12 @@
 
     if (late()) yield 0;
     // ---- CANOPY: columns on the islands, thick banded fascia, lit soffit ---
-    const CX0 = -8, CX1 = 8, CZ0 = -10.2, CZ1 = -1.8, CH = 4.7, FH = 1.15;
+    const cHalf = FULL ? 8 : Math.min(W2 - 0.8, Math.abs(ISL[ISL.length - 1]) + 3.6);
+    const CX0 = -cHalf, CX1 = cHalf, CZ0 = pzc - pLen / 2 - 0.9, CZ1 = pzc + pLen / 2 + 0.9, CH = 4.7, FH = 1.15;
     const ccx = (CX0 + CX1) / 2, ccz = (CZ0 + CZ1) / 2, cw = CX1 - CX0, cd = CZ1 - CZ0;
-    [[-4, -8.4], [-4, -3.6], [4, -8.4], [4, -3.6]].forEach(function (p) {
+    const colAt = [];
+    for (const ix of ISL) for (const dz of [-(pLen / 2 - 0.9), pLen / 2 - 0.9]) colAt.push([ix, pzc + dz]);
+    colAt.forEach(function (p) {
       bx("solid", p[0], deck + 0.18 + (CH - 0.18) / 2, p[1], 0.42, CH - 0.18, 0.42, C.column);
       bx("solid", p[0], deck + 0.18 + 0.55, p[1], 0.5, 1.1, 0.5, C.clad);           // kick cladding
       solid(p[0] - 0.25, p[0] + 0.25, p[1] - 0.25, p[1] + 0.25, 0, deck + CH);
@@ -539,10 +566,10 @@
     if (late()) yield 0;
     // ---- PUMP ISLANDS + DISPENSERS -------------------------------------------
     const IY = deck + 0.18;
-    for (let k = 0; k < 2; k++) {
-      const ix = k ? 4 : -4;
+    for (let k = 0; k < ISL.length; k++) {
+      const ix = ISL[k];
       if (late()) yield 0;
-      const z0 = -9.3, z1 = -2.7, zc = (z0 + z1) / 2, L = z1 - z0 - 1.3;
+      const z0 = PZ0, z1 = PZ1, zc = (z0 + z1) / 2, L = z1 - z0 - 1.3;
       bx("solid", ix, deck + 0.09, zc, 1.3, 0.18, L, C.island);
       cy("solid", ix, deck + 0.09, zc - L / 2, 0.65, 0.65, 0.18, C.island, 12, Math.PI / 2, Math.PI);
       cy("solid", ix, deck + 0.09, zc + L / 2, 0.65, 0.65, 0.18, C.island, 12, -Math.PI / 2, Math.PI);
@@ -590,15 +617,16 @@
       }
     }
     // oil stains where cars stand at the pumps, and a few in the lane
-    [[-6.2, -7.2], [-6.1, -4.4], [-1.9, -7.6], [-2.0, -4.9], [1.9, -6.8], [2.1, -4.2], [6.1, -7.4], [6.2, -4.6], [-0.2, -12.0], [0.4, 0.6]]
-      .forEach(function (p, i) {
+    const STAINS = FULL ? [[-6.2, -7.2], [-6.1, -4.4], [-1.9, -7.6], [-2.0, -4.9], [1.9, -6.8], [2.1, -4.2], [6.1, -7.4], [6.2, -4.6], [-0.2, -12.0], [0.4, 0.6]]
+      : [].concat.apply([], ISL.map(function (ix) { return [[ix - 2.2, pzc - 1.2], [ix + 2.1, pzc + 1.4]]; }));
+    STAINS.forEach(function (p, i) {
         const s = 0.9 + ((i * 37) % 7) * 0.12;
         quad("decal", p[0], deck + 0.004, p[1], s * 1.2, s * 1.6, "up", C.stain, uvRect(i & 1 ? R.stain2 : R.stain));
       });
 
     if (late()) yield 0;
     // ---- STORE ----------------------------------------------------------------
-    const SX0 = -11.2, SX1 = 2.2, SZ0 = 7.6, SZ1 = 12.6, WALL = 0.25, SH = 4.2, PAR = 4.9;
+    const WALL = 0.25, SH = 4.2, PAR = 4.9;
     const fy = deck + rise;                               // store / walk floor
     const sxc = (SX0 + SX1) / 2, sw = SX1 - SX0, sd = SZ1 - SZ0, szc = (SZ0 + SZ1) / 2;
     // store-front walk with a curb, awning above it
@@ -620,7 +648,7 @@
     solid(SX1 - WALL, SX1, SZ0, SZ1, 0, fy + PAR);
     solid(SX0, SX1, SZ0, SZ1, fy + SH, fy + PAR);
     // storefront: bulkhead, mullions, transom, sign band, door opening
-    const DOOR0 = -5.9, DOOR1 = -4.1;
+    const DOORC = FULL ? -5.0 : sxc - 1.5, DOOR0 = DOORC - 0.9, DOOR1 = DOORC + 0.9;
     const GY0 = fy + 0.45, GY1 = fy + 2.9;
     [[SX0, DOOR0], [DOOR1, SX1]].forEach(function (s) {
       const a = s[0] + (s[0] === SX0 ? WALL : 0), b = s[1] - (s[1] === SX1 ? WALL : 0);
@@ -648,8 +676,8 @@
     quad("glow", sxc, fy + 3.06, SZ0 - 0.75, sw + 0.3, 1.4, "dn", C.soffit);
     for (let i = 0; i < 6; i++) quad("glow", SX0 + 1.2 + i * (sw - 2.4) / 5, fy + 3.055, SZ0 - 0.75, 0.3, 0.3, "dn", C.ledWarm);
     // OPEN + 24 HOURS in the glass, lit
-    quad("sign", -7.6, fy + 2.2, SZ0 + 0.14, 0.9, 0.34, "nz", [1, 1, 1], uvRect(R.open));
-    quad("label", -2.8, fy + 2.35, SZ0 + 0.13, 0.7, 0.36, "nz", [1, 1, 1], uvRect(R.hours));
+    quad("sign", DOOR0 - 1.7, fy + 2.2, SZ0 + 0.14, 0.9, 0.34, "nz", [1, 1, 1], uvRect(R.open));
+    quad("label", DOOR1 + 1.3, fy + 2.35, SZ0 + 0.13, 0.7, 0.36, "nz", [1, 1, 1], uvRect(R.hours));
     // store-front bollards (a car can't reach the glass)
     for (let x = SX0 + 0.8; x < SX1; x += 2.2) if (x < DOOR0 - 0.6 || x > DOOR1 + 0.6) bollard(x, SZ0 - 1.22, fy);
     if (late()) yield 0;
@@ -665,12 +693,13 @@
     for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++)
       quad("glow", IX0 + 1.6 + i * (iw - 3.2) / 3, CEIL - 0.01, IZ0 + 1.3 + j * 2.4, 1.2, 0.3, "dn", C.panel);
     // wall coolers along the back
-    bx("glow", -6.6, fy + 1.05, IZ1 - 0.4, 7.6, 2.1, 0.8, C.inDark);
-    quad("sign", -6.6, fy + 1.05, IZ1 - 0.805, 7.4, 1.95, "nz", [1, 1, 1], uvRect(R.cooler));
-    solid(-10.4, -2.8, IZ1 - 0.8, IZ1, 0, fy + 2.1);
+    const KX0 = SX0 + 0.8, KX1 = SX1 - 5.0, kxc = (KX0 + KX1) / 2;
+    bx("glow", kxc, fy + 1.05, IZ1 - 0.4, KX1 - KX0, 2.1, 0.8, C.inDark);
+    quad("sign", kxc, fy + 1.05, IZ1 - 0.805, KX1 - KX0 - 0.2, 1.95, "nz", [1, 1, 1], uvRect(R.cooler));
+    solid(KX0, KX1, IZ1 - 0.8, IZ1, 0, fy + 2.1);
     // two gondola runs, stocked both faces
-    const gz = 9.75;
-    [[-10.3, -6.5], [-5.6, -1.8]].forEach(function (run) {
+    const gz = SZ0 + 2.15, GX0 = SX0 + 0.9, GX1 = SX1 - 4.0, gL = (GX1 - GX0 - 0.9) / 2;
+    [[GX0, GX0 + gL], [GX1 - gL, GX1]].forEach(function (run) {
       const g0 = run[0], g1 = run[1], gc = (g0 + g1) / 2, gl2 = g1 - g0;
       // a double-sided gondola: the spine, the base deck, four boards a side
       // (empty: see the GOODS note in the atlas)
@@ -682,23 +711,23 @@
       solid(g0, g1, gz - 0.4, gz + 0.4, 0, fy + 1.6);
     });
     // counter, register, back rack
-    bx("glow", -0.4, fy + 0.5, 9.7, 0.8, 1.0, 3.0, C.counter);
-    bx("glow", -0.4, fy + 1.02, 9.7, 0.9, 0.04, 3.1, C.inWall);
-    bx("glow", -0.35, fy + 1.2, 9.0, 0.3, 0.3, 0.35, C.inDark);
-    quad("glow", -0.52, fy + 1.3, 9.0, 0.24, 0.16, "nx", [0.35, 0.75, 0.9]);
-    bx("glow", 1.6, fy + 1.3, 10.0, 0.2, 2.2, 3.4, C.inDark);
-    for (let k = 0; k < 4; k++) bx("glow", 1.38, fy + 0.85 + k * 0.36, 10.0, 0.26, 0.025, 3.3, C.gondola);   // the back bar's shelves, bare
-    solid(-0.8, 0, 8.2, 11.2, 0, fy + 1.05);
-    solid(1.3, 1.7, 8.3, 11.7, 0, fy + 2.4);
+    bx("glow", SX1 - 2.6, fy + 0.5, SZ0 + 2.1, 0.8, 1.0, 3.0, C.counter);
+    bx("glow", SX1 - 2.6, fy + 1.02, SZ0 + 2.1, 0.9, 0.04, 3.1, C.inWall);
+    bx("glow", SX1 - 2.55, fy + 1.2, SZ0 + 1.4, 0.3, 0.3, 0.35, C.inDark);
+    quad("glow", SX1 - 2.72, fy + 1.3, SZ0 + 1.4, 0.24, 0.16, "nx", [0.35, 0.75, 0.9]);
+    bx("glow", SX1 - 0.6, fy + 1.3, SZ0 + 2.4, 0.2, 2.2, 3.4, C.inDark);
+    for (let k = 0; k < 4; k++) bx("glow", SX1 - 0.82, fy + 0.85 + k * 0.36, SZ0 + 2.4, 0.26, 0.025, 3.3, C.gondola);   // the back bar's shelves, bare
+    solid(SX1 - 3.0, SX1 - 2.2, SZ0 + 0.6, SZ0 + 3.6, 0, fy + 1.05);
+    solid(SX1 - 0.9, SX1 - 0.5, SZ0 + 0.7, SZ0 + 4.1, 0, fy + 2.4);
 
     if (late()) yield 0;
     // ---- ICE merchandiser, PROPANE cage, AIR machine, dumpster --------------
-    bx("solid", -10.2, fy + 0.62, SZ0 - 0.45, 1.6, 1.24, 0.75, C.iceWhite);
-    bx("solid", -10.2, fy + 1.27, SZ0 - 0.45, 1.64, 0.06, 0.79, C.blue);
-    quad("label", -10.2, fy + 0.8, SZ0 - 0.83, 1.0, 0.5, "nz", [1, 1, 1], uvRect(R.ice));
-    solid(-11.0, -9.4, SZ0 - 0.85, SZ0 - 0.05, 0, fy + 1.3);
-    // propane cage against the store's right wall
-    {
+    bx("solid", SX0 + 1.0, fy + 0.62, SZ0 - 0.45, 1.6, 1.24, 0.75, C.iceWhite);
+    bx("solid", SX0 + 1.0, fy + 1.27, SZ0 - 0.45, 1.64, 0.06, 0.79, C.blue);
+    quad("label", SX0 + 1.0, fy + 0.8, SZ0 - 0.83, 1.0, 0.5, "nz", [1, 1, 1], uvRect(R.ice));
+    solid(SX0 + 0.2, SX0 + 1.8, SZ0 - 0.85, SZ0 - 0.05, 0, fy + 1.3);
+    // propane cage against the store's right wall (the full lot has room)
+    if (FULL) {
       const px0 = 2.6, px1 = 4.4, pz0 = 8.2, pz1 = 11.0, ph = 1.9;
       [[px0, pz0], [px1, pz0], [px0, pz1], [px1, pz1]].forEach(function (p) { bx("solid", p[0], deck + ph / 2, p[1], 0.06, ph, 0.06, C.steel); });
       for (const y of [0.05, 0.95, ph]) {
@@ -722,7 +751,7 @@
       solid(px0, px1, pz0, pz1, 0, deck + ph);
     }
     // air / water machine on its own pad with bollards
-    {
+    if (FULL) {
       const ax = 9.8, az = 3.2;
       bx("solid", ax, deck + 0.05, az, 1.4, 0.1, 1.0, C.island);
       bx("solid", ax, deck + 0.5, az + 0.15, 0.12, 0.8, 0.12, C.steel);
@@ -735,7 +764,7 @@
       solid(ax - 0.35, ax + 0.35, az - 0.1, az + 0.4, 0, deck + 1.7);
     }
     // dumpster in a block enclosure behind the canopy side
-    {
+    if (FULL) {
       const dx = 8.8, dz = 10.6;
       bx("solid", dx, deck + 0.9, dz + 1.2, 3.4, 1.8, 0.2, C.stuccoDk);
       bx("solid", dx - 1.6, deck + 0.9, dz, 0.2, 1.8, 2.4, C.stuccoDk);
@@ -748,7 +777,7 @@
     if (late()) yield 0;
     // ---- PAINT: parking stalls + wheel stops in front of the store ----------
     const WHITE = uvRect(R.white);
-    for (let i = 0; i <= 4; i++) {
+    for (let i = 0; FULL && i <= 4; i++) {
       const x = SX0 + 0.6 + i * 2.9;
       quad("decal", x, deck + 0.003, SZ0 - 4.15, 0.1, 4.6, "up", C.paintW, WHITE);
       if (i < 4) {
@@ -757,13 +786,13 @@
       }
     }
     // stop line at the canopy exit + direction lines along the islands
-    quad("decal", 0, deck + 0.003, -10.9, 5.0, 0.3, "up", C.paintW, WHITE);
-    [-4, 4].forEach(function (ix) { quad("decal", ix, deck + 0.003, -6, 1.7, 7.4, "up", C.paintY, WHITE); });
+    quad("decal", 0, deck + 0.003, CZ0 - 0.7, Math.min(5.0, cw - 1), 0.3, "up", C.paintW, WHITE);
+    ISL.forEach(function (ix) { quad("decal", ix, deck + 0.003, pzc, 1.7, pLen + 0.8, "up", C.paintY, WHITE); });
 
     if (late()) yield 0;
     // ---- PRICE PYLON at the front corner --------------------------------------
     {
-      const px = -10.6, pz = -11.8, PH = 6.4;
+      const px = -W2 + 1.4, pz = -D2 + 1.2, PH = FULL ? 6.4 : 5.2;
       bx("solid", px, deck + 0.3, pz, 1.7, 0.6, 0.9, C.stuccoDk);
       bx("solid", px, deck + 0.6 + (PH - 3.2) / 2, pz, 0.34, PH - 3.2, 0.5, C.clad);
       bx("solid", px, deck + PH - 1.4, pz, 0.36, 2.9, 2.5, C.clad);
@@ -820,7 +849,13 @@
       colliders.push(rec);
     });
 
-    return { group: group, footprint: aabbW(-W2, W2, -D2, D2), deckY: oy + deck, toWorld: toW };
+    // where the shop's door is and where its clerk stands (behind the
+    // counter, facing the till), for a caller whose lot is a shop
+    const dW = toW(DOORC, SZ0 - 1.6), vW = toW(SX1 - 1.7, SZ0 + 2.1);
+    return { group: group, footprint: aabbW(-W2, W2, -D2, D2), deckY: oy + deck, toWorld: toW,
+      door: { x: dW[0], z: dW[1], nx: -sn, nz: -cs },
+      vendor: { x: vW[0], z: vW[1], face: Math.atan2(-cs, sn) } };
   };
-  CBZ.FUEL_STATION_SIZE = { frontage: W2 * 2, depth: D2 * 2 };
+  CBZ.FUEL_STATION_SIZE = { frontage: W2F * 2, depth: D2F * 2 };
+  CBZ.FUEL_STATION_MIN = { frontage: 12, depth: 14 };
 })();

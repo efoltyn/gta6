@@ -558,6 +558,8 @@
     if (!CFG.PRESIDENCY_SITROOM || !window.THREE) return false;
     const site = mansionSite();
     if (!site) return false;
+    // a compound streamed but not built yet (govcomplex.js site.job): its rooms are not there to fit
+    if (site.job && !site.built) return false;
     if (ROOM.builtFor === CBZ.govComplexes && ROOM.group) return true;
     teardownRoom();
     const A = CBZ.city && CBZ.city.arena;

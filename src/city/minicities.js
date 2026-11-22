@@ -353,6 +353,178 @@
     }
   }
 
+  /* ==========================================================================
+     THE GRAIN TOWNS (src/world/worldplan.js `towns`). The valleys were
+     fields with nobody in them: a farmstead every few hundred metres of
+     country road and no town between Gang City and Karvel. Each grain town
+     is a small grid of blocks round a main street, grown by the same
+     generator as every town (towngen.js: kerbs, shops, real houses from
+     house_plan.js), standing on the big road it is there for:
+       crossroads  where two roads meet (the countryside's gas station and
+                   diner on the corner, the town behind them)
+       elevator    the grain elevator (the countryside plans the silos and
+                   the headhouse) and its rail siding, laid here
+       river       the ford the road crosses at
+     A link road runs from the road's edge to the town's own street (on a
+     road along z it IS Main Street; on a road along x it meets the middle
+     cross street), drivable, on the traffic graph.
+     ========================================================================== */
+  const GRAIN = (CBZ.worldPlan && CBZ.worldPlan.towns) || [];
+  const GRAIN_W = 11, GRAIN_HALF = 5.5;          // a two-lane country link: highwaynet.js RURAL_W
+  function grainTemplate(T) {
+    const base = CBZ.CITY_TEMPLATES && CBZ.CITY_TEMPLATES.harvestmarket;
+    if (!base) return null;
+    const N = T.name.toUpperCase();
+    const R = { retail: true };
+    const civic = {
+      crossroads: [{ name: N + " CO-OP BANK", storeys: 2, color: 0xb7a279, shopKind: "bank", opts: { retail: true, facade: "office" }, lotKind: "shop" },
+                   { name: "GRANGE HALL", storeys: 2, color: 0xa9895c, shopKind: "bar", opts: R, lotKind: "shop" }],
+      elevator:   [{ name: N + " GRAIN EXCHANGE", storeys: 2, color: 0xb9ab8a, shopKind: "bank", opts: { retail: true, facade: "office" }, lotKind: "shop" },
+                   { name: "DEPOT TAVERN", storeys: 2, color: 0x9a7a52, shopKind: "bar", opts: R, lotKind: "shop" }],
+      river:      [{ name: "FORD TAVERN", storeys: 2, color: 0x8f7450, shopKind: "bar", opts: R, lotKind: "shop" },
+                   { name: N + " SAVINGS", storeys: 2, color: 0xb0a07c, shopKind: "bank", opts: { retail: true, facade: "office" }, lotKind: "shop" }],
+    }[T.reason] || base.prefabs.civic;
+    const commercial = {
+      crossroads: [{ name: "VALLEY GROCER", storeys: 1, color: 0xae8a55, shopKind: "food", opts: R, lotKind: "shop", w: 2 },
+                   { name: "FEED & SEED", storeys: 1, color: 0x9c7b4e, shopKind: "hardware", opts: R, lotKind: "shop", w: 2 },
+                   { name: "DRY GOODS", storeys: 1, color: 0x8a7a4a, shopKind: "clothing", opts: R, lotKind: "shop", w: 1 }],
+      elevator:   [{ name: "IMPLEMENT DEALER", storeys: 1, color: 0x9c7b4e, shopKind: "hardware", opts: R, lotKind: "shop", w: 2 },
+                   { name: "DEPOT CAFE", storeys: 1, color: 0xc06a3a, shopKind: "food", opts: R, lotKind: "shop", w: 1 },
+                   { name: "MERCANTILE", storeys: 1, color: 0x8a7a4a, shopKind: "clothing", opts: R, lotKind: "shop", w: 1 }],
+      river:      [{ name: "MILL STORE", storeys: 1, color: 0xae8a55, shopKind: "food", opts: R, lotKind: "shop", w: 2 },
+                   { name: "BAIT & TACKLE", storeys: 1, color: 0x7f8a6a, shopKind: "hardware", opts: R, lotKind: "shop", w: 1 },
+                   { name: "PAWN & LOAN", storeys: 1, color: 0x8a7a4a, shopKind: "pawn", opts: R, lotKind: "shop", w: 1 }],
+    }[T.reason] || base.prefabs.commercial;
+    return Object.assign({}, base, {
+      id: T.id, name: T.name, subtitle: "Grain Town", biome: T.id,
+      cols: 2, rows: 2, blockW: 56, blockD: 44, roadW: 12, density: 0.6,
+      prefabs: { civic: civic, commercial: commercial, residential: base.prefabs.residential, default: base.prefabs.default },
+    });
+  }
+  function grainCfg(T) {
+    const tpl = grainTemplate(T); if (!tpl) return null;
+    const hx = 74, hz = 62;
+    const rect = { minX: T.cx - hx, maxX: T.cx + hx, minZ: T.cz - hz, maxZ: T.cz + hz };
+    const rng = lcg((Math.abs(T.cx) * 73856093) ^ (Math.abs(T.cz) * 19349663) ^ (CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170));
+    return { tpl: tpl, rect: rect, cfg: Object.assign({}, tpl, {
+      cx: T.cx, cz: T.cz, rng: rng, region: rect, name: tpl.name, district: T.id,
+      skyline: tpl.skyline, integratedSkyline: true,
+    }) };
+  }
+  (CBZ.farPlans = CBZ.farPlans || []).push(function () {
+    if (!CBZ.planTown) return [];
+    let out = [];
+    for (const T of GRAIN) { const G = grainCfg(T); if (G) out = out.concat(CBZ.planTown(G.cfg)); }
+    return out;
+  });
+  // the road frame of a town: u along the road (0 at the link), v from the
+  // road's centreline toward the town
+  function grainFrame(T) {
+    const vert = T.side === "E" || T.side === "W";
+    const vs = (T.side === "N" || T.side === "W") ? 1 : -1;
+    return { vert: vert, vs: vs, w: function (u, v) { return vert ? { x: T.roadAt + vs * v, z: T.cz + u } : { x: T.cx + u, z: T.roadAt + vs * v }; } };
+  }
+  function grainLink(city, root, T, tpl, town) {
+    const F = grainFrame(T);
+    // the town street the link meets: the one parallel to the road, nearest it
+    let best = null;
+    for (const r of town.roads || []) {
+      if (!!r.vertical !== F.vert) continue;
+      const c = F.vert ? r.x : r.z;
+      if (!best || Math.abs(c - T.roadAt) < Math.abs((F.vert ? best.x : best.z) - T.roadAt)) best = r;
+    }
+    if (!best) return;
+    const sc = F.vert ? best.x : best.z;                      // that street's centreline
+    const vStreet = (sc - T.roadAt) * F.vs, vEdge = vStreet - (best.w || 12) / 2;
+    if (vEdge - T.half < 1) return;
+    const a = F.w(0, T.half), b = F.w(0, vEdge);
+    if (CBZ.buildHighway) {
+      CBZ.buildHighway(root, { path: [a, b], width: GRAIN_W, lanesPerDir: 1, median: false, laneW: 3.6, theme: "asphalt",
+        registerRoads: false, owner: T.id, guardrail: false });
+    }
+    const lo = F.w(0, T.half - 0.5), hi = F.w(0, vEdge + 0.5);
+    CBZ.registerCityRegion(city, { name: T.name + " Link", subtitle: "Country Road", kind: "rect", road: true,
+      minX: Math.min(lo.x, hi.x) - GRAIN_HALF, maxX: Math.max(lo.x, hi.x) + GRAIN_HALF,
+      minZ: Math.min(lo.z, hi.z) - GRAIN_HALF, maxZ: Math.max(lo.z, hi.z) + GRAIN_HALF, pad: 1 });
+    if (city.roads) {
+      // the record runs centreline to centreline (the road -> the town street)
+      const r0 = T.roadAt, r1 = sc, rl = Math.min(r0, r1), rh = Math.max(r0, r1);
+      const link = F.vert ? { x: (rl + rh) / 2, z: T.cz, vertical: false, len: rh - rl } : { x: T.cx, z: (rl + rh) / 2, vertical: true, len: rh - rl };
+      Object.assign(link, { district: "highway", w: GRAIN_W, lanesPerDir: 1, laneW: 3.6, rural: true, owner: T.id, name: T.name + " Link" });
+      if (CBZ.roadClamp) CBZ.roadClamp(link, { owner: T.id });
+      city.roads.push(link);
+    }
+  }
+  /* THE SIDING: a stub of track off the road side of the elevator, ballast,
+     ties and two rails, with a string of covered hoppers standing at the
+     silos. One merged mesh per material, colliders on the cars. */
+  function grainSiding(root, T) {
+    const F = grainFrame(T), V = T.half + 19, U0 = 70, U1 = 240;
+    const A = F.w(U0, V - 3), B = F.w(U1, V + 3);
+    if (CBZ.terrainFlattenUnder) CBZ.terrainFlattenUnder({ minX: Math.min(A.x, B.x), maxX: Math.max(A.x, B.x), minZ: Math.min(A.z, B.z), maxZ: Math.max(A.z, B.z), pad: 4, name: T.id + " siding" });
+    const geo = { ballast: [], tie: [], rail: [], car: [], roof: [] };
+    const box = function (list, u, y, v, lu, h, lv) {
+      const c = F.w(u, v), g = new THREE.BoxGeometry(F.vert ? lv : lu, h, F.vert ? lu : lv);
+      g.translate(c.x, y, c.z); list.push(g);
+    };
+    const L = U1 - U0, um = (U0 + U1) / 2;
+    box(geo.ballast, um, 0.12, V, L, 0.24, 3.4);
+    for (let u = U0 + 0.4; u < U1; u += 0.65) box(geo.tie, u, 0.28, V, 0.24, 0.1, 2.5);
+    for (const s of [-0.72, 0.72]) box(geo.rail, um, 0.4, V + s, L, 0.14, 0.08);
+    // the hoppers: 15 m covered cars, 1.2 m apart, at the silos
+    const cars = [];
+    for (let k = 0; k < 5; k++) {
+      const u = 100 + k * 16.2;
+      box(geo.car, u, 2.45, V, 15, 3.1, 3.0);                // the body
+      box(geo.car, u, 0.75, V, 13, 0.5, 2.4);                // the frame
+      box(geo.roof, u, 4.1, V, 14.4, 0.2, 2.6);              // the roof walk
+      const c = F.w(u, V), hu = 7.5, hv = 1.5;
+      cars.push(F.vert ? { minX: c.x - hv, maxX: c.x + hv, minZ: c.z - hu, maxZ: c.z + hu } : { minX: c.x - hu, maxX: c.x + hu, minZ: c.z - hv, maxZ: c.z + hv });
+    }
+    const add = function (list, col) {
+      if (!list.length) return;
+      const g = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(list) : list[0];
+      const m = new THREE.Mesh(g, cmat(col));
+      m.castShadow = col === 0x8a5a3c; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+      m.name = T.id + "-siding"; root.add(m);
+    };
+    add(geo.ballast, 0x6e6a62); add(geo.tie, 0x4a3a2c); add(geo.rail, 0x8a8c90); add(geo.car, 0x8a5a3c); add(geo.roof, 0x6a4a34);
+    if (CBZ.colliders) for (const c of cars) CBZ.colliders.push({ minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ, y0: 0, y1: 4.2 });
+  }
+  function buildGrainTown(city, T) {
+    const G = grainCfg(T);
+    if (!G || typeof CBZ.buildTown !== "function") return;
+    const root = city.root; if (!root) return;
+    const P0 = G.tpl.palette || {};
+    addPad(root, T.cx, T.cz, 148 + 18, 124 + 18, P0.verge != null ? P0.verge : 0xa89060, 0.018);
+    if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
+    const town = CBZ.buildTown(root, G.cfg);
+    if (!town) return;
+    CBZ.registerCityRegion(city, {
+      name: T.name, subtitle: G.tpl.subtitle, biome: T.id, kind: "rect",
+      minX: G.rect.minX, maxX: G.rect.maxX, minZ: G.rect.minZ, maxZ: G.rect.maxZ, pad: 8,
+    });
+    grainLink(city, root, T, G.tpl, town);
+    if (T.reason === "elevator") grainSiding(root, T);
+    if (CBZ.registerWorkAnchor && town.lots && town.lots.length) {
+      const shops = town.lots
+        .filter(function (l) { return l.building && l.building.shop && l.building.vendorSpot; })
+        .sort(function (a, b) { return Math.hypot(a.cx - T.cx, a.cz - T.cz) - Math.hypot(b.cx - T.cx, b.cz - T.cz); })
+        .slice(0, 2);
+      for (const s of shops) {
+        try {
+          CBZ.registerWorkAnchor({ biome: T.id, kind: "shop", role: "shopkeeper", x: s.cx, z: s.cz, cap: 1,
+            spots: [{ x: s.building.vendorSpot.x, z: s.building.vendorSpot.z }], home: { x: s.cx, z: s.cz } });
+        } catch (e) {}
+      }
+    }
+  }
+  for (const T of GRAIN) {
+    CBZ.addLandmass(function (city) {
+      try { buildGrainTown(city, T); } catch (e) { try { console.error("[graintown]", T.id, e); } catch (e2) {} }
+    }, 34);
+  }
+
   // ---- register ALL four as ONE landmass builder (order 34: after biomes/
   //      placement). Each city is independently try/caught so one bad city can
   //      never sink the rest of the world (worldmap contract). --------------

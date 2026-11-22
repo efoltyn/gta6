@@ -1919,6 +1919,11 @@
       resolve(CBZ) {
         const A = (CBZ.city && CBZ.city.arena) || CBZ._settlementArena;
         if (!A || !A.root) return null;                     // wait until the world can answer
+        // THE PLANNED LOT (src/world/worldplan.js sites.precinct, paved by
+        // city/precinct_site.js): downtown, its door on the street, its yard
+        // beside it. The search below is only for a world with no plan.
+        const PS = CBZ.cityPrecinctSite && CBZ.cityPrecinctSite();
+        if (PS) return { x: PS.x, z: PS.z, bounds: PS.bounds, site: PS };
         // The world-layout expansion moved the old `A.maxX + 46` apron into
         // open sea. Resolve the whole 48x50m block against the live coast,
         // shared height oracle and placement ledger instead of trusting one

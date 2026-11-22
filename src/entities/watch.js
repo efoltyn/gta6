@@ -1053,6 +1053,11 @@
   }
   function styleOf(r) {
     if (!r) return null;
+    // NO WATCH ON YOU IN THE PRISON (owner: the jail's 24-hour clock "isn't
+    // shown"). A commissary LCD on your own wrist would print the hour every
+    // time your hands are up. The sky, the PA and the screws tell it.
+    const G = CBZ.game;
+    if (r.rig === CBZ.playerChar && G && G.mode === "escape" && G.role !== "cop") return null;
     if (r.over) return r.over;
     if (r.role) return r.role;
     if (r.rig === CBZ.playerChar && !r.rig.child) return PLAYER_DEFAULT[r.tier] || "field";

@@ -1433,7 +1433,7 @@
     const W = CBZ.warden;
     const o = W && W.override ? W.override() : null;
     if (o && POST[o]) return o;
-    const want = W && W.duty ? W.duty(id) : (id === "secure" || id === "night" ? "quarters" : "office");
+    const want = W && W.duty ? W.duty(id) : (id === "secure" || id === "night" || id === "blackout" ? "quarters" : "office");
     if (!POST[want]) { unknownBlocks++; return "office"; }
     return want;
   }

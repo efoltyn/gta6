@@ -1498,6 +1498,9 @@
     };
   }
   function currentFile() {
+    // an authored side job (city/hitman.js CBZ.hitmanJobs) is the folder in his hands
+    const side = CBZ.hitmanJobs && CBZ.hitmanJobs.file ? CBZ.hitmanJobs.file() : null;
+    if (side) return side;
     const a = arc(); if (!a) return null;
     if (a.step === "opening" && RT.street) return streetFile();
     if (RT.op) return fileFor(RT.op);
@@ -2571,6 +2574,10 @@
     wireVerbs();
     if (campaignOwns() || isPresident()) return;
     tickPaper();
+    // A SIDE JOB IS IN HIS HANDS (city/hitman.js CBZ.hitmanJobs: the protected
+    // man, the general, ...). It owns the cork and the folder until its bag is
+    // collected, and the Bureau's own next step simply waits for him.
+    if (CBZ.hitmanJobs && CBZ.hitmanJobs.owns && CBZ.hitmanJobs.owns()) { RT.boardKey = ""; return; }
     syncBoard(dt);
     const s = a.step;
     if (s === "street" || s === "done") return;
@@ -2682,6 +2689,15 @@
       }
     },
     step: function () { const a = arc(); return a ? a.step : null; },
+    // is the arc using him right now (a job in hand, a call, a meeting under
+    // way)? city/hitman.js asks before the broker rings with side work.
+    busy: function () {
+      const a = arc(); if (!a) return false;
+      if (RT.ringing || RT.inCall || (RT.meet && RT.meet.started && !RT.meet.done)) return true;
+      return ["street", "meet1", "meet2", "done"].indexOf(a.step) < 0;
+    },
+    // a kill somebody else staged (a side job): the same fallout, paper and TV
+    report: report,
     // how the arc ended: "turned" (you shot Voss: the President's man) or null
     ending: function () { const a = arc(); return a ? (a.ending || null) : null; },
     file: currentFile,

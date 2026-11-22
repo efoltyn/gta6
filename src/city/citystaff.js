@@ -340,7 +340,8 @@
         // SHOT stays vacant. SWEPT comes back. That is the whole difference
         // between a consequence and a bug.
         if (ped.dead) { p.lost = true; dropPost(p, "dead"); continue; }
-        if (roster && roster.indexOf(ped) < 0) { dropPost(p, "swept"); continue; }
+        // (asleep on the phone budget, peds.js `_dormant`, is not swept: still his)
+        if (roster && !ped._dormant && roster.indexOf(ped) < 0) { dropPost(p, "swept"); continue; }
         if (ped.player || ped.driving) continue;   // somebody else owns this body now
         const dx = ped.pos ? ped.pos.x - P.x : p.x - P.x, dz = ped.pos ? ped.pos.z - P.z : p.z - P.z;
         // past his post's range, and out of sight (fitout's 48 m is indoors,

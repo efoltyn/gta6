@@ -6864,53 +6864,6 @@
         try { CBZ.placement.reserve({ minX: site.rect.minX, maxX: site.rect.maxX, minZ: site.rect.minZ, maxZ: site.rect.maxZ, zone: "world" }); } catch (e) {}
       }
 
-      // ---- draw it -------------------------------------------------------
-      let out = null;
-      _curSite = def.id;                 // parkingSea() files its bays under this
-      try {
-        // `city` rides along so a row can ask the SAME questions §6 asks (the
-        // Freeport asks which way the nearest road junction is, because that
-        // is what decides which edge its gate has to be on).
-        out = def.build({ root: root, rect: site.rect, cx: site.cx, cz: site.cz, site: site, city: city });
-      } catch (e) { console.error("[govcomplex] build " + def.id, e); }
-      _curSite = null;
-      site.gate = (out && out.gate) || { x: site.cx, z: site.rect.maxZ };
-      const main = (out && out.seat) || null;
-      if (main) {
-        site.lot = main.lot;
-        // which of the shells this complex raised IS the main hall, so §5c can
-        // tell it apart from the wings (the lot carries a shallow COPY of the
-        // record, so an identity test needs the original).
-        site.lot._rawMain = main.b;
-        // the principal stands on his own threshold, facing out: visible,
-        // guarded, and — the owner's word — assassinable.
-        const d = main.door, n = main.n;
-        site.seatPoint = { x: d.x - n.x * 4.2, z: d.z - n.z * 4.2, face: Math.atan2(-n.x, -n.z) };
-      } else {
-        site.seatPoint = { x: site.cx, z: site.cz + 6, face: 0 };
-      }
-
-      // ---- THE INSIDE (§5c) ----------------------------------------------
-      // Before the road and before the people: the rooms are static geometry
-      // and belong to the same build pass the shells did, so mode.js's one-shot
-      // batch swallows them. The bodies arrive later, through power.js, and
-      // land in these rooms because of the ledger dressComplex stamps.
-      // A slice / the streamed city (core/citystream.js) furnishes a complex
-      // only when it comes within sight: the rooms were most of the builder's
-      // ~51k meshes, and a phone at the downtown spawn built all ten sites'.
-      // With no slice, sliceAt runs it right here, exactly as before.
-      const dressIt = function () { try { dressComplex(site); } catch (e) { console.error("[govcomplex] interiors " + def.id, e); } };
-      // NEVER FREED, only parked: the rooms are drawn INTO the shells' own
-      // groups, which this job does not own (it captures what lands at the
-      // top of the city root), so a free took the colliders and left every
-      // mesh standing, and the re-run drew the whole interior a second time
-      // over it: two leaves in every doorway, the old one shut with no
-      // collider and a dead door record in front of the live one, so E at the
-      // Oval Office door "opened" a door that was no longer there. (metro.js's
-      // far tiles are noFree for the same reason.)
-      const ij = CBZ.sliceAt ? CBZ.sliceAt(site.rect, dressIt, { name: "gov interiors " + def.id }) : (dressIt(), null);
-      if (ij) ij.noFree = true;
-
       // ---- keep-out ------------------------------------------------------
       // hard  → nobody at all (the Agency, the Defence HQ)
       // civ   → posted staff belong here; the public does not (residences)
@@ -6923,54 +6876,127 @@
         });
       }
 
-      // ---- the road, then the people -------------------------------------
-      site.roads = linkRoad(city, site, streamFor(def.id + ":road"));
-      staffSite(city, site);
-      if (def.household) AUDIT.householdStations += def.household.length;
-      AUDIT.household += staffHousehold(city, site);
-      if (CBZ.cityStaffStations) CBZ.cityStaffStations("govcomplex", AUDIT.householdStations);
+      /* ---- THE COMPOUND ITSELF STREAMS (phone profile: the builder was
+         1.6 s at the downtown spawn, nine of its eleven sites kilometres
+         away). Its land, region, keep-out and map name are claimed above at
+         boot; the shells, rooms, access road, household posts and work
+         anchors are built when the site comes into the streamer's keep
+         circle (core/citystream.js sliceAt), as one job that is parked, never
+         freed (the rooms draw into the shells' own groups, and the module's
+         ledgers are written once). A site in range at boot (City Hall and the
+         County Jail downtown) is built right here exactly as before. The
+         principal is posted by the tick (§7) once his site is built. */
+      site.seatPoint = { x: site.cx, z: site.cz + 6, face: 0 };
+      site.gate = { x: site.cx, z: site.rect.maxZ };
+      const drawSite = (function (site, def) { return function () {
+        // ---- draw it -------------------------------------------------------
+        let out = null;
+        _curSite = def.id;                 // parkingSea() files its bays under this
+        try {
+          // `city` rides along so a row can ask the SAME questions §6 asks (the
+          // Freeport asks which way the nearest road junction is, because that
+          // is what decides which edge its gate has to be on).
+          out = def.build({ root: root, rect: site.rect, cx: site.cx, cz: site.cz, site: site, city: city });
+        } catch (e) { console.error("[govcomplex] build " + def.id, e); }
+        _curSite = null;
+        site.gate = (out && out.gate) || { x: site.cx, z: site.rect.maxZ };
+        const main = (out && out.seat) || null;
+        if (main) {
+          site.lot = main.lot;
+          // which of the shells this complex raised IS the main hall, so §5c can
+          // tell it apart from the wings (the lot carries a shallow COPY of the
+          // record, so an identity test needs the original).
+          site.lot._rawMain = main.b;
+          // the principal stands on his own threshold, facing out: visible,
+          // guarded, and — the owner's word — assassinable.
+          const d = main.door, n = main.n;
+          site.seatPoint = { x: d.x - n.x * 4.2, z: d.z - n.z * 4.2, face: Math.atan2(-n.x, -n.z) };
+        } else {
+          site.seatPoint = { x: site.cx, z: site.cz + 6, face: 0 };
+        }
 
-      // ---- the job people do here ---------------------------------------
-      // Anchors are pure data on the schedule/goal brain aigoals.js already
-      // runs; the gate and the forecourt are real posts, so staff commute to
-      // a real place instead of standing in an empty field.
-      if (CBZ.registerWorkAnchor) {
-        // keepOut is a good proxy for "what kind of job is this" and it covers
-        // nine of the ten rows — but not all: a county jail is a `civ` keep-out
-        // (its posted staff belong there) and is emphatically not staffed by
-        // office workers. A row may therefore name its own trade.
-        const wk = def.work || null;
-        CBZ.registerWorkAnchor({
-          biome: "city", kind: wk ? wk.kind : (def.keepOut === "hard" ? "security" : "cityhall"),
-          role: wk ? wk.role : (def.keepOut === "hard" ? "security guard" : "office worker"),
-          x: site.gate.x, z: site.gate.z, cap: 4,
-          patrol: wk ? !!wk.patrol : def.keepOut === "hard",
-          home: { x: site.cx, z: site.cz },
-          spots: [
-            { x: site.gate.x, z: site.gate.z },
-            { x: site.seatPoint.x, z: site.seatPoint.z },
-            { x: site.cx, z: site.cz },
-          ],
-        });
-        // ...and a SECOND anchor for the household, because a cook and a
-        // groundskeeper do not commute to a gatehouse. `kind: "estate"` is what
-        // citystaff.js's TRADES registers every household trade against, so
-        // these six jobs route through aigoals.js's existing schedule/goal
-        // brain exactly like a farmer routes to a field.
-        if (def.household && def.household.length) {
+        // ---- THE INSIDE (§5c) ----------------------------------------------
+        // Before the road and before the people: the rooms are static geometry
+        // and belong to the same build pass the shells did, so mode.js's one-shot
+        // batch swallows them. The bodies arrive later, through power.js, and
+        // land in these rooms because of the ledger dressComplex stamps.
+        // A slice / the streamed city (core/citystream.js) furnishes a complex
+        // only when it comes within sight: the rooms were most of the builder's
+        // ~51k meshes, and a phone at the downtown spawn built all ten sites'.
+        // With no slice, sliceAt runs it right here, exactly as before.
+        const dressIt = function () { try { dressComplex(site); } catch (e) { console.error("[govcomplex] interiors " + def.id, e); } };
+        // NEVER FREED, only parked: the rooms are drawn INTO the shells' own
+        // groups, which this job does not own (it captures what lands at the
+        // top of the city root), so a free took the colliders and left every
+        // mesh standing, and the re-run drew the whole interior a second time
+        // over it: two leaves in every doorway, the old one shut with no
+        // collider and a dead door record in front of the live one, so E at the
+        // Oval Office door "opened" a door that was no longer there. (metro.js's
+        // far tiles are noFree for the same reason.)
+        const ij = CBZ.sliceAt ? CBZ.sliceAt(site.rect, dressIt, { name: "gov interiors " + def.id }) : (dressIt(), null);
+        if (ij) ij.noFree = true;
+
+        // ---- the road, then the people -------------------------------------
+        site.roads = linkRoad(city, site, streamFor(def.id + ":road"));
+        if (def.household) AUDIT.householdStations += def.household.length;
+        AUDIT.household += staffHousehold(city, site);
+        if (CBZ.cityStaffStations) CBZ.cityStaffStations("govcomplex", AUDIT.householdStations);
+
+        // ---- the job people do here ---------------------------------------
+        // Anchors are pure data on the schedule/goal brain aigoals.js already
+        // runs; the gate and the forecourt are real posts, so staff commute to
+        // a real place instead of standing in an empty field.
+        if (CBZ.registerWorkAnchor) {
+          // keepOut is a good proxy for "what kind of job is this" and it covers
+          // nine of the ten rows — but not all: a county jail is a `civ` keep-out
+          // (its posted staff belong there) and is emphatically not staffed by
+          // office workers. A row may therefore name its own trade.
+          const wk = def.work || null;
           CBZ.registerWorkAnchor({
-            biome: "city", kind: "estate", role: "housekeeper",
-            x: site.cx, z: site.cz, cap: def.household.length,
+            biome: "city", kind: wk ? wk.kind : (def.keepOut === "hard" ? "security" : "cityhall"),
+            role: wk ? wk.role : (def.keepOut === "hard" ? "security guard" : "office worker"),
+            x: site.gate.x, z: site.gate.z, cap: 4,
+            patrol: wk ? !!wk.patrol : def.keepOut === "hard",
             home: { x: site.cx, z: site.cz },
             spots: [
+              { x: site.gate.x, z: site.gate.z },
               { x: site.seatPoint.x, z: site.seatPoint.z },
               { x: site.cx, z: site.cz },
-              { x: (site.cx + site.gate.x) / 2, z: (site.cz + site.gate.z) / 2 },
             ],
           });
+          // ...and a SECOND anchor for the household, because a cook and a
+          // groundskeeper do not commute to a gatehouse. `kind: "estate"` is what
+          // citystaff.js's TRADES registers every household trade against, so
+          // these six jobs route through aigoals.js's existing schedule/goal
+          // brain exactly like a farmer routes to a field.
+          if (def.household && def.household.length) {
+            CBZ.registerWorkAnchor({
+              biome: "city", kind: "estate", role: "housekeeper",
+              x: site.cx, z: site.cz, cap: def.household.length,
+              home: { x: site.cx, z: site.cz },
+              spots: [
+                { x: site.seatPoint.x, z: site.seatPoint.z },
+                { x: site.cx, z: site.cz },
+                { x: (site.cx + site.gate.x) / 2, z: (site.cz + site.gate.z) / 2 },
+              ],
+            });
+          }
         }
-      }
 
+        site.built = true;
+        // a site built late flushes its own flags (the boot flushes every site's at the end)
+        if (site.job && CBZ.flags) { try { CBZ.flags.flush(); } catch (e) {} }
+        if (site.job && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      }; })(site, def);
+      const streamIt = CFG.GOV_SITE_STREAM !== false && CBZ.slice && CBZ.slice.stream && CBZ.sliceAt && CBZ.sliceKeepsRect &&
+        !CBZ.sliceKeepsRect(site.rect.minX, site.rect.maxX, site.rect.minZ, site.rect.maxZ);
+      if (streamIt) {
+        site.job = CBZ.sliceAt(site.rect, drawSite, { name: "gov site " + def.id });
+        if (site.job) site.job.noFree = true;
+      } else {
+        drawSite();
+        staffSite(city, site);
+      }
       AUDIT.placed++;
     }
 
@@ -7022,6 +7048,7 @@
         const s = SITES[i];
         if (!s.rect) continue;
         if (!s.def.principal) continue;      // an unstaffed row (the Freeport)
+        if (!s.built) continue;              // a far compound not streamed in yet: nobody to post
         // THE PLAYER HAS NO STAND-IN. When the player holds this seat the
         // row's body used to stay posted at the door with _sid "player": a
         // second President standing on the perron, and shooting HIM ran the

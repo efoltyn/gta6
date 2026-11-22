@@ -542,6 +542,12 @@
       ["car", "carlot"], ["motors", "carlot"], ["chop", "chop"], ["fuel", "gas"], ["gas", "gas"],
       ["security", "security"], ["sheriff", "security"], ["customs", "bank"], ["realty", "realtor"], ["realtor", "realtor"],
     ];
+    // does this lot take a filling station (world/fuel_station.js's smallest)?
+    function stationFits(lt) {
+      if (!CBZ.buildFuelStation || !CBZ.FUEL_STATION_MIN) return false;
+      const fr = lt.door.nz ? lt.w : lt.d, dp = lt.door.nz ? lt.d : lt.w;
+      return fr - 0.4 >= CBZ.FUEL_STATION_MIN.frontage && dp - 0.4 >= CBZ.FUEL_STATION_MIN.depth;
+    }
     function inferShopKind(name) {
       if (!name) return null;
       const n = String(name).toLowerCase();
@@ -612,40 +618,18 @@
       return Math.min(TOWN_MAX_STOREYS, Math.max(1, Math.round((base || 1) * fall)));
     }
 
-    // THE SHOP FRONT: a sign board on the facade over the door, a canopy under
-    // it, and for the clinic (the hospital trade, the door a fallen player wakes
-    // outside) a deep entrance canopy on two posts with a lit soffit.
-    // BOTH ARE MEASURED OFF THE SHELL, NOT THE LOT: the shell is built 1.5 m
-    // narrower than its lot (w = lt.w - 1.5), so a board placed at the lot edge
-    // (the old `lt.w / 2 + 0.06`) hung 0.8 m in front of the wall in mid air,
-    // and its width came from lt.w even on a door that faces +-x. `bw`/`bd` are
-    // the shell's own footprint.
-    const SIGN_Y = 3.4;                                   // just above the canopy
-    const _boardMats = new Map();
-    function boardMat(color) {
-      const k = (pal.signBoard != null ? pal.signBoard : 0x2a2622) + "|" + color;
-      let m = _boardMats.get(k);
-      if (!m) { m = new THREE.MeshLambertMaterial({ color: pal.signBoard != null ? pal.signBoard : 0x2a2622, emissive: color, emissiveIntensity: 0.35 }); _boardMats.set(k, m); }
-      return m;
-    }
+    // THE SHOP FRONT is the mainland's (buildings.js CBZ.cityShopFront: the
+    // fascia in the trade colour with the name painted on it, the canvas
+    // awning over the glazing). Towns used to mount their own: a glowing board
+    // at a fixed 3.4 m with a name plate pressed on it and a slab canopy under
+    // it, a second design of the same thing. What stays here is the clinic's
+    // deep entrance canopy on two posts (the door a fallen player wakes
+    // outside), measured off the shell like everything on the front.
+    const CANOPY_TOP = 2.9;
     function frontOf(lt, bw, bd) {
       const nx = lt.door.nx, nz = lt.door.nz, alongZ = Math.abs(nx) > 0.5;
       const half = alongZ ? bw / 2 : bd / 2, span = alongZ ? bd : bw;
       return { nx: nx, nz: nz, tx: -nz, tz: nx, alongZ: alongZ, span: span, x: lt.cx + nx * half, z: lt.cz + nz * half };
-    }
-    function mountShopSign(lt, color, name, bw, bd) {
-      const f = frontOf(lt, bw, bd);
-      const fx = f.x + f.nx * 0.12, fz = f.z + f.nz * 0.12;          // 2 cm off the wall
-      const boardW = Math.min(f.span - 1.2, name.length * 0.5 + 2.4);
-      const board = new THREE.Mesh(new THREE.BoxGeometry(boardW, 1.0, 0.2), boardMat(color));
-      board.position.set(fx, SIGN_Y, fz);
-      if (f.alongZ) board.rotation.y = Math.PI / 2;       // face the wall normal
-      board.castShadow = false; root.add(board);
-      // name plate (cached sprite) pressed against the board, facing the street
-      if (CBZ.makeLabelSprite) {
-        const s = CBZ.makeLabelSprite(name, { color: pal.sign || "#f4e7c2" });
-        if (s) { s.position.set(fx + f.nx * 0.12, SIGN_Y, fz + f.nz * 0.12); s.scale.set(Math.min(boardW, name.length * 0.42 + 1.4), 0.9, 1); root.add(s); }
-      }
     }
     // canopies are collected here and merged after the lot loop: every canopy
     // in a town is one draw, every lit soffit another, every post a third.
@@ -661,14 +645,15 @@
     function frontBox(list, x, y, z, w, h, d) { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); list.push(g); }
     function shopCanopy(lt, bw, bd, trade) {
       const f = frontOf(lt, bw, bd), er = trade === "hospital";
-      const W = Math.min(f.span - 1.0, er ? 7.0 : 3.6);
+      if (!er) return;
+      const W = Math.min(f.span - 1.0, 7.0);
       if (W < 1.8) return;
       // never past the kerb: the shell stands `setback` inside its lot line and
       // the footway runs FOOTWAY beyond that (a rural lane has no footway)
       const setback = ((f.alongZ ? lt.w - bw : lt.d - bd) / 2) || 0;
       const D = Math.min(er ? 5.0 : 1.3, setback + (kit ? FOOTWAY : 1.2) - 0.45), th = er ? 0.28 : 0.14;
       if (D < 0.8) return;
-      const y0 = SIGN_Y - 0.5 - th;                       // the board stands on it
+      const y0 = CANOPY_TOP - th;
       const cx0 = f.x + f.nx * D / 2, cz0 = f.z + f.nz * D / 2;
       const sx = f.alongZ ? D : W, sz = f.alongZ ? W : D;
       frontBox(canopyGeo, cx0, y0 + th / 2, cz0, sx, th, sz);
@@ -761,6 +746,10 @@
           ? { x: bx + lt.door.nx * (HLOT.hd / 2 + 1.6), z: bz + lt.door.nz * (HLOT.hd / 2 + 1.6), nx: lt.door.nx, nz: lt.door.nz }
           : { x: lt.door.x + lt.door.nx * 1.6, z: lt.door.z + lt.door.nz * 1.6, nx: lt.door.nx, nz: lt.door.nz };
         if (PLAN) {
+          // a fuel lot raises a filling station, not a shell (buildShell
+          // below): no shell is planned, or its far copy would stand on the
+          // forecourt for good, a painted box in front of the pumps
+          if (isShop && (pick.shopKind || inferShopKind(pick.name) || "food") === "gas" && stationFits(lt)) continue;
           // the shell this lot will raise, as cityMakeBuilding will raise it
           // (its colour: buildings.js shellColorway, the shell's own answer)
           const cw = CBZ.cityShellColorway ? CBZ.cityShellColorway(bx, bz, color, shellOpts) : null;
@@ -799,6 +788,9 @@
         // and who lives there
         if (HLOT) { lotRec.parcel = { w: lt.w, d: lt.d }; lotRec.wealth = hWealth; }
         const bb = lotRec.building;
+        // a fuel lot raises a filling station, not a shell: no far copy of a
+        // shell may stand for it (city/metro.js BUILT reads this)
+        if (isShop && sk === "gas" && stationFits(lt)) bb.fuelStation = true;
         // a house on a lot: where it stands and where its own drive runs
         // (city/approach.js lays the drive there instead of on the centreline)
         if (HLOT) { bb.x = bx; bb.z = bz; bb.w = w; bb.d = d; bb.driveAt = HLOT.driveAt; bb.driveHalf = HLOT.driveHalf; }
@@ -824,7 +816,31 @@
         }
         const buildShell = function (late) {
           let b = null;
-          try { b = mk(root, bx, bz, w, d, storeys, color, sideArg, shellOpts); } catch (e) { b = null; }
+          // A TOWN'S FUEL SHOP IS A FILLING STATION (world/fuel_station.js, the
+          // one builder every forecourt in the game comes from, laid out to this
+          // lot): the canopy and the pumps in front, the store across the back,
+          // the price sign at the corner. It was a shop shell with a glass
+          // front and no pump anywhere. The shop keeps its counter and clerk
+          // (the station's), and city/fuel.js finds the pumps by its door.
+          if (sk === "gas" && stationFits(lt)) {
+            const fr = lt.door.nz ? lt.w : lt.d, dp = lt.door.nz ? lt.d : lt.w;
+            {
+              let st = null;
+              try {
+                st = CBZ.buildFuelStation({ parent: root, x: lt.cx, z: lt.cz, y: LOT_Y, rotY: Math.atan2(-lt.door.nx, -lt.door.nz),
+                  frontage: fr - 0.4, depth: dp - 0.4, deck: 0.05, walkRise: 0.15, apron: 0 });
+              } catch (e) { st = null; if (window.console) console.warn("[town fuel]", e); }
+              if (st) {
+                bb.door = st.door; bb.vendorSpot = st.vendor; bb.gas = true; bb.station = st.group;
+                return;
+              }
+            }
+          }
+          // a one-storey car dealer or chop shop wears what it is (city/facades/
+          // commercial.js); the automatic pick cannot tell them from a fuel depot
+          const tradeDress = isShop && storeys < 2 && shellOpts && shellOpts.showroom && !shellOpts.dress && (sk === "carlot" || sk === "chop")
+            ? Object.assign({}, shellOpts, { dress: { style: sk === "chop" ? "garage" : "showroom", accent: color } }) : shellOpts;
+          try { b = mk(root, bx, bz, w, d, storeys, color, sideArg, tradeDress); } catch (e) { b = null; }
           if (!b) return;
           // the shell's record under the data decided above (which wins, as the
           // object spread used to make it)
@@ -875,16 +891,11 @@
               try { CBZ.cityFurnishApartment(b, k * fh, (((lt.cx | 0) + (lt.cz | 0) * 3) ^ (k * 7)) & 0x7fffffff); } catch (e) {}
             }
           }
-          // CH3 — NO floating per-shop name sprite hovering at storeys*4 in the sky.
-          // A real town announces a shop on its STOREFRONT: a thin lit sign board
-          // mounted FLUSH on the facade above the door, with the (cached, draw-call
-          // neutral) name plate seated tight against the wall facing the street.
-          // cityMakeBuilding does NOT hang signAwning (that lives in the mainland
-          // shop pass), so the town mounts its own compact facade board here.
           // the house's land: garage wing, walk, front hedge or fence, back
           // fence, shrubs, mailbox (city/house_yard.js)
           if (HLOT) { try { CBZ.houseLot.dress(root, Object.assign({}, HLOT, { y: LOT_Y, storeys: bb.storeys, tier: hTier, wealth: hWealth, lot: lotRec })); } catch (e) { if (window.console) console.warn("[house lot]", e); } }
-          if (isShop && pick.name) mountShopSign(lt, color, pick.name, w, d);
+          // the shop's front: fascia, painted name, awning (one maker, the mainland's)
+          if (isShop && pick.name && CBZ.cityShopFront) CBZ.cityShopFront(b, sideArg, w, d, color, pick.name, sk);
           if (isShop) shopCanopy(lt, w, d, sk);
           // a late parcel's canopy is merged with it (the town's merge ran long
           // ago), and a late shop's shelves are planned now (city/storegoods.js)

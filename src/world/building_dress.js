@@ -305,6 +305,35 @@
     return p.done();
   }
 
+  // a telecom mast on a tall roof: a guyed lattice-look pole on a ballast
+  // frame, two panel antennas and a microwave dish, an aircraft warning light
+  function mastProto() {
+    const p = DK.proto();
+    p.box(2.2, 0.2, 2.2, STEEL_D, 0, 0.1, 0);                      // ballast frame
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) p.box(0.5, 0.25, 0.5, 0x8d8a84, sx * 0.85, 0.22, sz * 0.85);   // ballast blocks
+    p.cyl(0.07, 0.1, 7.2, 8, GALV, 0, 3.7, 0);                     // pole
+    for (const y of [1.6, 3.4, 5.2]) p.box(0.5, 0.04, 0.5, STEEL, 0, y, 0);   // climbing rest plates
+    for (const a of [0, 2.094, 4.189]) p.box(0.26, 1.3, 0.08, 0xdcdcd8, Math.cos(a) * 0.24, 6.4, Math.sin(a) * 0.24, 0, -a, 0);   // panel antennas
+    const dish = new THREE.SphereGeometry(0.42, 12, 4, 0, Math.PI * 2, 0, Math.PI / 3);
+    dish.rotateZ(Math.PI / 2);
+    p.add(dish, 0xe2e2de, 0.32, 4.6, 0);                           // microwave dish
+    p.cyl(0.04, 0.04, 0.3, 6, STEEL, 0.15, 4.6, 0, 0, 0, Math.PI / 2);
+    p.cyl(0.06, 0.06, 0.1, 6, 0xb3261e, 0, 7.35, 0);               // warning light
+    return p.done();
+  }
+  // a satellite dish on a non-penetrating mount
+  function dishProto() {
+    const p = DK.proto();
+    p.box(1.0, 0.12, 1.0, STEEL_D, 0, 0.06, 0);
+    for (const sx of [-1, 1]) p.box(0.3, 0.2, 0.9, 0x8d8a84, sx * 0.35, 0.22, 0);
+    p.cyl(0.04, 0.04, 0.9, 6, GALV, 0, 0.55, 0);
+    const dish = new THREE.SphereGeometry(0.5, 12, 4, 0, Math.PI * 2, 0, Math.PI / 3);
+    dish.rotateX(-Math.PI / 2 - 0.6);
+    p.add(dish, 0xe6e6e2, 0, 1.05, -0.12);
+    p.cyl(0.015, 0.015, 0.55, 5, STEEL, 0, 1.15, 0.12, 0.6, 0, 0);    // feed arm
+    return p.done();
+  }
+
   // =====================================================================
   //  INSTANCE POOLS. The engine is draw-call bound, so: the big pieces (RTU,
   //  fan, skylight, tank) pool per 400 m cell, so r128 frustum-culls cells and
@@ -371,6 +400,7 @@
     protos = {
       rtu: rtuProto(), fan: fanProto(), vent: ventProto(), drain: drainProto(),
       sky: skylightProto(), hatch: hatchProto(), tank: tankProto(),
+      mast: mastProto(), dish: dishProto(),
     };
     return protos;
   }
@@ -426,9 +456,10 @@
       vent: new Pools("vent", P.vent, false, true), drain: new Pools("drain", P.drain, false, true),
       sky: new Pools("skylight", P.sky, false), hatch: new Pools("hatch", P.hatch, false, true),
       tank: new Pools("tank", P.tank, true),
+      mast: new Pools("mast", P.mast, true), dish: new Pools("dish", P.dish, false),
     };
-    const count = { roofs: 0, rtu: 0, fan: 0, vent: 0, drain: 0, sky: 0, hatch: 0, tank: 0, colliders: 0 };
-    const MAX = { rtu: 220, fan: 160, tank: 24, sky: 150, vent: 720, drain: 600, hatch: 200 };
+    const count = { roofs: 0, rtu: 0, fan: 0, vent: 0, drain: 0, sky: 0, hatch: 0, tank: 0, mast: 0, dish: 0, colliders: 0 };
+    const MAX = { rtu: 220, fan: 160, tank: 48, sky: 150, vent: 720, drain: 600, hatch: 200, mast: 40, dish: 160 };
     const sets = [A.lots || []];
     if (A.annex && A.annex.lots) sets.push(A.annex.lots);
     const seen = new Set();
@@ -559,13 +590,28 @@
         }
       }
 
-      // ---- WATER TANK: rare, the 3-6 storey stock that really carries them --
-      if (b.storeys >= 3 && b.storeys <= 6 && area >= 120 && count.tank < MAX.tank && H(ox, oz, 0x5d70) < 0.16) {
+      // ---- WATER TANK: the masonry walk-ups and lofts that really carry them
+      // (a brick or stone block of 3-12 storeys, about half of them), rare on
+      // anything else of 3-6 -------------------------------------------------
+      const preWar = b.dressStyle === "brick" || b.dressStyle === "stone" || b.dressStyle === "artdeco" || b.dressStyle === "victorian";
+      const tankP = preWar && b.storeys >= 3 && b.storeys <= 12 ? 0.5 : (b.storeys >= 3 && b.storeys <= 6 ? 0.16 : 0);
+      if (area >= 120 && count.tank < MAX.tank && H(ox, oz, 0x5d70) < tankP) {
         const t = spot(0x5d71, 1.9, 1.9, 1.0, 30);
         if (t) {
           pools.tank.add(t.x, Y, t.z, H(t.x, t.z, 0x5d72) * Math.PI * 0.5, 1, G);
           claim(t.x, t.z, 1.9, 1.9); solid(t.x, t.z, 1.3, 1.3, 5.9); count.tank++;
         }
+      }
+
+      // ---- TELECOM MAST on a tall roof (a carrier leases the top of most
+      // towers over ~8 storeys), a SATELLITE DISH on a third of the rest ------
+      if (b.storeys >= 8 && area >= 150 && count.mast < MAX.mast && H(ox, oz, 0x5d80) < 0.55) {
+        const m = spot(0x5d81, 1.3, 1.3, 1.2, 30);
+        if (m) { pools.mast.add(m.x, Y, m.z, H(m.x, m.z, 0x5d82) * Math.PI, 1, G); claim(m.x, m.z, 1.3, 1.3); solid(m.x, m.z, 1.1, 1.1, 0.5); count.mast++; }
+      }
+      if (area >= 60 && count.dish < MAX.dish && H(ox, oz, 0x5d90) < 0.33) {
+        const q = spot(0x5d91, 0.6, 0.6, 0.8, 24);
+        if (q) { pools.dish.add(q.x, Y, q.z, (H(q.x, q.z, 0x5d92) - 0.5) * 1.2 + Math.PI, 1, G); claim(q.x, q.z, 0.6, 0.6); count.dish++; }
       }
     }
 
@@ -578,7 +624,7 @@
     count.pools = livePools.length;
     audit = count;
     if (CBZ.propPurgeCensus) {
-      try { CBZ.propPurgeCensus({ roofItems: count.rtu + count.fan + count.tank + count.sky + count.hatch }); } catch (e) { /* census optional */ }
+      try { CBZ.propPurgeCensus({ roofItems: count.rtu + count.fan + count.tank + count.sky + count.hatch + count.mast + count.dish }); } catch (e) { /* census optional */ }
     }
   }
 

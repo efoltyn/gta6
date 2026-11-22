@@ -66,7 +66,9 @@
       const stone = ctx.pal && ctx.pal.stone ? F.mix(ctx.pal.stone, 0xcfc6b0, 0.5) : 0xcfc6b0;
       const stoneD = F.shade(stone, 0.86);
       const iron = 0x2c3036;
-      const loft = ctx.hash(0x8b02) < 0.55;      // Chicago loft vs walk-up block
+      // Chicago loft vs walk-up block (spec.walkup: an institutional block, a
+      // barracks or an HQ, always the walk-up)
+      const loft = !(spec && spec.walkup) && ctx.hash(0x8b02) < 0.55;
       const FRONTS = [0x2c3036, 0x3b2a22, 0x2d3b33, 0x5b3324];
       const front = FRONTS[(ctx.hash(0x8b03) * FRONTS.length) | 0];
       const AWN = [null, 0x6a2a22, 0x2f4a3a, 0x3a3f5a, null];
@@ -82,7 +84,7 @@
       const WIN = loft ? 2.6 : 1.2;              // opening width in a bay
       const faces = F.faces(ctx);
       const df = F.face(ctx, ctx.doorSide);
-      const shop = ST >= 2;
+      const shop = ST >= 2 && !(spec && spec.noShop);   // spec.noShop: no storefront on the ground storey
       const sf = shop ? F.storefront(ctx, df, { frame: front, pierCol: brick, cornCol: stone, awning: awning,
         sign: F.shade(front, 1.15), bayW: 2.3 }) : null;
       const belt = shop ? sf.top : 0;            // top of the storefront assembly

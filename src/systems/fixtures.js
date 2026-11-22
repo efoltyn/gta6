@@ -43,7 +43,17 @@
    at while the lights are on, what survives lights-out, and whether it is a
    dusk-to-dawn fitting that is simply off in daylight. Kinds are LIVE records:
    a difficulty tier turns a regime up by writing `rig.kinds.ward.out`, never
-   by re-registering anything.
+   by re-registering anything. A kind with `sky: true` follows the daylight
+   instead of a circuit (a louvre that is lit by the sky behind it).
+
+   A BLACKOUT IS THE WHOLE CIRCUIT. `spec.blackout()` true = every fitting is
+   off, whatever its kind says (a kind may keep `black: v`). The switch is a
+   switch: the next drive writes it, no fade.
+
+   A FACE IS A LIT SURFACE THAT IS NOT WORTH PRICING AS A LIGHT: a 24 h
+   corridor tube, an exit sign, a desk lamp's bulb. `register({ face: true,
+   mat, kind })` drives its material on the same schedule but keeps it out of
+   `level()` and the pooled lights.
 
    NO WORLD REQUIRED. `THREE` is touched only by `pointPool()` and only when a
    caller asks for one; everything else is arithmetic over plain records, so a
@@ -95,13 +105,20 @@
     if (spec.kinds) for (const k in spec.kinds) kinds[k] = spec.kinds[k];
 
     const fixtures = [];
+    const faces = [];
     const regions = [];
     const pools = [];
     const fallbackKind = spec.defaultKind && kinds[spec.defaultKind] ? spec.defaultKind : "interior";
     const sky = typeof spec.sky === "function" ? spec.sky : defaultSky;
     const enabled = typeof spec.enabled === "function" ? spec.enabled : function () { return CFG.FIXTURES_V1 !== false; };
     const lightsOut = typeof spec.lightsOut === "function" ? spec.lightsOut : function () { return false; };
-    const MIN = spec.minSight != null ? spec.minSight : 0.40;   // range that survives total darkness
+    const blackout = typeof spec.blackout === "function" ? spec.blackout : function () { return false; };
+    // range that survives total darkness; a function when the dark itself changes
+    const MIN = typeof spec.minSight === "number" ? spec.minSight : 0.40;
+    const minSight = typeof spec.minSight === "function" ? spec.minSight : function () { return MIN; };
+    // the owner's own answer to "is this point inside a carried beam"; without
+    // one, a sensor's lit torch counts as a disc of TORCH metres round him
+    const litByBeam = typeof spec.lit === "function" ? spec.lit : null;
     const TORCH = spec.torchThrow != null ? spec.torchThrow : 15;
     const TORCH2 = TORCH * TORCH;
     // how fast a dusk fitting strikes: sky * this reaching 1 means "full day"
@@ -150,7 +167,11 @@
        rec.pool     a floor circle whose opacity follows the level
        rec.beam     an air cone, same
        rec.on()     an extra veto (a fitting on a dead circuit, a tier's rota)
-       rec.powered  false = hard off, whatever the schedule says            */
+       rec.powered  false = hard off, whatever the schedule says
+       rec.face     true = a lit surface only: driven, never priced as light
+       rec.mat      the material itself, when there is no one mesh to name
+       rec.ei       emissiveIntensity while lit (default: rides the level)
+       rec.tint     an unlit (Basic) surface: its colour is scaled by the level */
     function register(rec) {
       if (!rec) return null;
       rec.kind = kinds[rec.kind] ? rec.kind : fallbackKind;
@@ -159,23 +180,24 @@
       rec.color = rec.color != null ? rec.color : 0xffe9a8;
       rec.emissive = rec.emissive != null ? rec.emissive : 0xffcf66;
       rec.off = rec.off != null ? rec.off : 0x2b2b2b;
-      fixtures.push(rec);
+      (rec.face ? faces : fixtures).push(rec);
       return rec;
     }
 
-    function driveFixture(rec, dark) {
+    function driveFixture(rec, dark, black, out, s) {
       const L = kinds[rec.kind];
-      let v = lightsOut() ? L.out : L.day;
+      let v = black ? (L.black || 0) : L.sky ? s : (out ? L.out : L.day);
       if (L.darkOnly) v *= dark;                     // a dusk fitting by day is off
       if (rec.on && !rec.on()) v = 0;
       if (rec.powered === false) v = 0;
       rec.level = v;
-      const m = rec.mesh && rec.mesh.material;
+      const m = rec.mat || (rec.mesh && rec.mesh.material);
       if (!m) return;
       const lit = v > 0.02;
-      if (m.color) m.color.setHex(lit ? rec.color : rec.off);
+      if (rec.tint) { if (m.color) m.color.setHex(rec.color).multiplyScalar(v); }
+      else if (m.color) m.color.setHex(lit ? rec.color : rec.off);
       if (m.emissive) m.emissive.setHex(lit ? rec.emissive : 0x000000);
-      if (lit && m.emissiveIntensity != null) m.emissiveIntensity = 0.35 + v * 0.75;
+      if (lit && m.emissiveIntensity != null) m.emissiveIntensity = rec.ei != null ? rec.ei : 0.35 + v * 0.75;
       if (rec.pool) rec.pool.material.opacity = v * (rec.poolPeak || 0.3);
       if (rec.beam) rec.beam.material.opacity = v * (rec.beamPeak || 0.09);
     }
@@ -213,24 +235,30 @@
     }
 
     /* ---- WHAT A SENSOR GETS --------------------------------------------
-       MIN is the floor: even in true black a man still sees a body at arm's
-       length. A carried light is the exception that restores the whole range
-       — the beam IS the light, so being in it is being lit. */
+       minSight is the floor: even in true black a man still sees a body at
+       arm's length. A carried light is the exception that restores the whole
+       range — the beam IS the light, so being in it is being lit. When the
+       owner can say where the beams are (`spec.lit`), being inside ANY beam
+       is being lit, and the holder's own disc below is not used. */
     function scale(sensor, x, z) {
       if (!enabled()) return 1;
       let L = level(x, z);
-      /* WHERE THE SENSOR IS, whatever shape it came in. This read used to be
-         `sensor.group.position` only — the shape a ped or a guard has. The
-         engine's own PLAYER is not that shape: systems/physics.js's player
-         carries `.pos` and no group, and so does every one-shot page that
-         writes its own body. So the one clause that makes a carried light
-         WORTH carrying silently did nothing for the only actor who carries
-         one. Measured in games/night-watch.html: lamp on, thief at 10.4 m in
-         a black gallery, still invisible. */
-      const sp = sensor && ((sensor.group && sensor.group.position) || sensor.pos);
-      if (L < 0.95 && sensor && sensor.flashlightOn && sp) {
-        const dx = x - sp.x, dz = z - sp.z;
-        if (dx * dx + dz * dz < TORCH2) L = 0.95;
+      if (litByBeam) {
+        if (L < 0.95 && litByBeam(x, z)) L = 0.95;
+      } else {
+        /* WHERE THE SENSOR IS, whatever shape it came in. This read used to
+           be `sensor.group.position` only — the shape a ped or a guard has.
+           The engine's own PLAYER is not that shape: systems/physics.js's
+           player carries `.pos` and no group, and so does every one-shot page
+           that writes its own body. So the one clause that makes a carried
+           light WORTH carrying silently did nothing for the only actor who
+           carries one. Measured in games/night-watch.html: lamp on, thief at
+           10.4 m in a black gallery, still invisible. */
+        const sp = sensor && ((sensor.group && sensor.group.position) || sensor.pos);
+        if (L < 0.95 && sensor && sensor.flashlightOn && sp) {
+          const dx = x - sp.x, dz = z - sp.z;
+          if (dx * dx + dz * dz < TORCH2) L = 0.95;
+        }
       }
       /* A LIT TORCH LIGHTS ITS HOLDER TOO. The player carries the same
          `flashlightOn` a guard does (systems/playerflashlight.js); anyone
@@ -243,7 +271,8 @@
         if (px * px + pz * pz < 2.25) L = 0.95;
       }
       if (L >= 0.95) return 1;
-      return MIN + (1 - MIN) * clamp01(L * 1.5);
+      const min = minSight();
+      return min + (1 - min) * clamp01(L * 1.5);
     }
 
     /* ---- POOLED REAL LIGHTS ---------------------------------------------
@@ -305,8 +334,11 @@
        yet playing, so they wait. */
     function drive(withPools) {
       if (spec.before) { try { spec.before(); } catch (e) {} }
-      const dark = clamp01(1 - sky() * DUSK_GAIN);
-      for (let i = 0; i < fixtures.length; i++) driveFixture(fixtures[i], dark);
+      const s = sky();
+      const dark = clamp01(1 - s * DUSK_GAIN);
+      const black = !!blackout(), out = !!lightsOut();
+      for (let i = 0; i < fixtures.length; i++) driveFixture(fixtures[i], dark, black, out, s);
+      for (let i = 0; i < faces.length; i++) driveFixture(faces[i], dark, black, out, s);
       if (withPools !== false) for (let i = 0; i < pools.length; i++) drivePool(pools[i]);
     }
 
@@ -317,7 +349,12 @@
        multiply, late enough to be after weather's lightning bump and early
        enough that the tone-map finalize scales our result as it scales
        everyone else's. The colour goes with the intensity, or an ambient that
-       stays bright blue while dimming just reads as "everything is teal". */
+       stays bright blue while dimming just reads as "everything is teal".
+       `spec.skyCut()` (0..1) takes the rest away: the share of the night sky
+       that is simply gone — no moon, no sky glow — multiplies the key, the
+       ambient, the bounce and the fog colour down together. At 1 nothing but
+       a lamp or a torch lights anything. */
+    const skyCut = typeof spec.skyCut === "function" ? spec.skyCut : null;
     function darken(floorSpec, order) {
       if (!CBZ.onAlways) return;
       const get = typeof floorSpec === "function" ? floorSpec : function () { return floorSpec; };
@@ -325,6 +362,7 @@
       CBZ.onAlways(order != null ? order : 93.6, function (dt) {
         if (!enabled()) return;
         const night = 1 - sky();
+        const cut = skyCut ? clamp01(+skyCut() || 0) : 0;
         /* INDOORS AT NIGHT IS DARKER THAN OUTDOORS. The hemisphere light has
            no shadow, so a sealed room at lights-out was lit exactly like the
            open yard. Where the player stands inside a region, the sky light
@@ -335,10 +373,10 @@
         const r = p ? regionAt(p.x, p.z) : null;
         const want = r ? Math.min(1, Math.max(windowOf(r), ambientOf(r))) : 1;
         inside += (want - inside) * Math.min(1, (dt > 0 ? dt : 0.016) * 4);
-        if (night <= 0.002) return;
+        if (night <= 0.002 && cut <= 0) return;
         const floor = get();
-        if (floor == null || floor >= 1) return;
-        const f = 1 - night * (1 - floor);
+        if ((floor == null || floor >= 1) && cut <= 0) return;
+        const f = (floor == null || floor >= 1 ? 1 : 1 - night * (1 - floor)) * (1 - cut);
         const fin = 1 - night * (1 - inside);
         if (CBZ.sun) CBZ.sun.intensity *= f;
         if (CBZ.hemi) {
@@ -348,7 +386,7 @@
         }
         if (CBZ.bounce) CBZ.bounce.intensity *= f * fin;
         // fog too, or the horizon glows brighter than the ground under it
-        if (CBZ.scene && CBZ.scene.fog) CBZ.scene.fog.color.multiplyScalar(1 - night * 0.5);
+        if (CBZ.scene && CBZ.scene.fog) CBZ.scene.fog.color.multiplyScalar((1 - night * 0.5) * (1 - cut));
       });
     }
     if (spec.nightFloor != null) darken(spec.nightFloor, spec.nightFloorOrder);
@@ -369,13 +407,13 @@
 
     const R = {
       id: id || "rig",
-      fixtures: fixtures, regions: regions, kinds: kinds, pools: pools,
+      fixtures: fixtures, faces: faces, regions: regions, kinds: kinds, pools: pools,
       enabled: enabled,
       register: register, region: region,
       regionAt: regionAt, regionOf: regionOf,
-      level: level, scale: scale, sky: sky, lightsOut: lightsOut,
+      level: level, scale: scale, sky: sky, lightsOut: lightsOut, blackout: blackout,
       drive: drive, pointPool: pointPool, darken: darken,
-      torchThrow: TORCH, minSight: MIN,
+      torchThrow: TORCH, minSight: minSight,
       // the one spot the audit may sample: outside every region and out of
       // reach of every fixture. Only the caller knows where its world is empty.
       probe: spec.probe || null,
@@ -426,6 +464,8 @@
     rigs: rigs,
     get: function (id) { for (let i = 0; i < rigs.length; i++) if (rigs[i].id === id) return rigs[i]; return null; },
     kinds: BASE_KINDS,
+    // the plain sky curve, for an owner whose own `sky` wraps it
+    daySky: defaultSky,
   };
   CBZ.fixtureAudit = function () {
     let unknown = 0, n = 0, noon = 1;

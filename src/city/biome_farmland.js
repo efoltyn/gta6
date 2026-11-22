@@ -374,13 +374,6 @@
       }
       return m;
     }
-    function tag(group, text, y, scale) {
-      if (!CBZ.makeLabelSprite) return;
-      const s = CBZ.makeLabelSprite(text);
-      if (!s) return;
-      s.position.set(0, y, 0); s.scale.set(scale || 6, (scale || 6) * 0.24, 1);
-      group.add(s);
-    }
 
     // =====================================================================
     // 1) GROUND OWNERSHIP — the actual skin is built after parcel selection
@@ -662,8 +655,6 @@
       const door = { x: bx, z: bz - bd / 2 + 1.6, nx: 0, nz: 1 };
       barnLot = { cx: bx, cz: bz, w: bw, d: bd, kind: "barn", district: "farmland", building: { ...(b || {}), name: "Red Barn", door } };
       lots.push(barnLot);
-      tag(root, "RED BARN", 9, 7);
-      root.children[root.children.length - 1].position.set(bx, 9, bz);
     }
 
     // -- SILOS (cylinders, solid colliders) --
@@ -842,10 +833,6 @@
     const standX = ROAD_X + 14, standZ = MAXZ - 16, standW = 6, standD = 4;
     box(standX, 1.6, standZ, standW, 3.2, standD, M.woodLt, true);
     box(standX, 3.6, standZ, standW + 1.5, 0.4, standD + 1, M.barnRed, false);
-    if (CBZ.makeLabelSprite) {
-      const s = CBZ.makeLabelSprite("FARM STAND · FRESH PRODUCE");
-      if (s) { s.position.set(standX, 5.4, standZ); s.scale.set(9, 2.1, 1); root.add(s); }
-    }
     (function farmStandVendor() {
       // the road (ROAD_X=1180) sits WEST of the stand (standX=ROAD_X+14), so
       // the customer-facing counter/door is the -x face; door/vendorSpot both

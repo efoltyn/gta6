@@ -199,7 +199,10 @@
     // floor through the mask (under a deck: partly)
     "  float prVis = prMk.g > 0.5 ? 0.0 : ( prUpper ? 1.0 : prMk.r );\n" +
     "  reflectedLight.indirectDiffuse *= prIndoorAmb * ( prMk.g > 0.5 ? 0.8 : 1.0 );\n" +
+    // (where the directional loop could not be patched: the old blanket cut)
+    "  #ifndef PR_DIRCUT\n" +
     "  reflectedLight.directDiffuse *= prIndoorSun;\n  reflectedLight.directSpecular *= prIndoorSun;\n" +
+    "  #endif\n" +
     "  vec3 prSum = vec3( 0.0 );\n" +
     "  for ( int i = 0; i < " + MAX_LAMPS + "; i ++ ) {\n" +
     "    if ( i >= prLampN ) break;\n" +
@@ -223,7 +226,23 @@
     "  reflectedLight.directDiffuse += diffuseColor.rgb * prSum;\n" +
     "}\n";
 
-  const KEY = "prisonlook-v1";
+  /* THE SKY'S SHARE, NOT EVERY LAMP'S. The hall is roofed, so the key light
+     (sun or moon) and the ground bounce reach it only as prIndoorSun of what
+     they throw outside. That cut used to multiply ALL of directDiffuse after
+     the light loop, which also took every hand torch, guard spotlight and
+     flood lamp in the wing down to a seventh: in the dark the torch barely
+     lit the hall. It now multiplies the directional lights only, inside
+     three's own loop (the chunk inlined with one line added after each
+     directional light is read). */
+  const DIR_TOKEN = "getDirectionalLightInfo( directionalLight, directLight );";
+  function dirCutChunk() {
+    const src = THREE.ShaderChunk && THREE.ShaderChunk.lights_fragment_begin;
+    if (typeof src !== "string" || src.indexOf(DIR_TOKEN) < 0) return null;
+    return "float prDirK = ( prOn > 0.5 && prInWing( prWPos ) > 0.5 ) ? prIndoorSun : 1.0;\n" +
+      src.split(DIR_TOKEN).join(DIR_TOKEN + "\n\t\tdirectLight.color *= prDirK;");
+  }
+
+  const KEY = "prisonlook-v2";
   function patch(mat, kind) {
     if (!mat || mat._prKind === kind && mat.onBeforeCompile === mat._prWrap) return false;
     if (!(mat.isMeshLambertMaterial || mat.isMeshStandardMaterial || mat.isMeshPhongMaterial)) return false;
@@ -239,8 +258,11 @@
       for (const k in U) sh.uniforms[k] = U[k];
       sh.vertexShader = v.replace("#include <common>", "#include <common>\n" + VERT_PARS)
         .replace("#include <project_vertex>", "#include <project_vertex>\n" + VERT_MAIN);
-      sh.fragmentShader = f.replace("#include <common>", "#include <common>\n#define PR_KIND " + kind + "\n" + FRAG_PARS)
+      const dc = f.indexOf("#include <lights_fragment_begin>") >= 0 ? dirCutChunk() : null;
+      sh.fragmentShader = f.replace("#include <common>", "#include <common>\n#define PR_KIND " + kind + "\n" +
+          (dc ? "#define PR_DIRCUT 1\n" : "") + FRAG_PARS)
         .replace("#include <color_fragment>", "#include <color_fragment>\n" + FRAG_SURFACE)
+        .replace("#include <lights_fragment_begin>", function () { return dc || "#include <lights_fragment_begin>"; })
         .replace("#include <aomap_fragment>", "#include <aomap_fragment>\n" + FRAG_LIGHT);
     };
     const keyFn = function () { return prevKey + "|" + KEY + "|" + kind; };
@@ -331,10 +353,13 @@
     if (!lampsBuilt) collectLamps();
     const lamp = CBZ.ceilingLamp;
     const lit = !lamp || lamp.material.emissive.getHex() !== 0;
-    const cut = !!(CBZ.breaker && CBZ.breaker.sabotaged);
-    const k = Math.min(1, dt * 4);
-    level += ((lit ? 1 : 0) - level) * k;
-    nightLevel += ((!lit && !cut ? 1 : 0) - nightLevel) * k;
+    // a power cut (the breaker) or the blackout (systems/prisonnight.js) takes
+    // the night fittings too. A lamp is switched, not dimmed: the light here
+    // follows the fittings' own faces on the frame they change.
+    const PL = CBZ.prisonLights;
+    const cut = !!(CBZ.breaker && CBZ.breaker.sabotaged) || !!(PL && PL.blackout && PL.blackout());
+    level = lit ? 1 : 0;
+    nightLevel = !lit && !cut ? 1 : 0;
     let n = 0;
     for (const h of hall) {
       if (n >= MAX_LAMPS) break;
@@ -353,7 +378,7 @@
     // the sky's share through the barred windows: less still at night
     const day = CBZ.dayness == null ? 1 : Math.max(0, Math.min(1, CBZ.dayness * 2));
     U.prIndoorAmb.value = TUNE.amb + TUNE.ambDay * day;
-    U.prIndoorSun.value = TUNE.sun;
+    U.prIndoorSun.value = TUNE.sun;          // the sun's / moon's share only (see DIR_TOKEN)
     // (the cells' glass is clear now and the wall behind it a real opening,
     // world/cellblock.js: the sky is seen through it, not painted on it)
   }

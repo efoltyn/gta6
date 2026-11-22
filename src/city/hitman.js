@@ -443,6 +443,7 @@
        tick(dt), frame(dt)  5 Hz director, per-frame motion
        pinAt()              {x,z,label} for the one quiet map pin, or null
        isGuard(ped), onKill(ped, imp), onDead(inc), clear(), end(hard)
+       onShot(x, z, loud)   the player fired from (x,z); loud = not suppressed
      }
      CBZ.hitmanStart({ job: id })            put it in hand (the burner rings)
      CBZ.hitmanStart({ job: id, now: true }) straight to the folder (probes,
@@ -585,12 +586,36 @@
     const w = function (ped, imp) {
       const was = !ped || ped.dead;
       const r = orig.apply(this, arguments);
-      if (!was && ped && ped.dead && JOBS.job) { try { jobKill(JOBS.job, ped, imp || {}); } catch (e) {} }
+      // (once per body: a file that wraps cityKillPed over this one without
+      // carrying the latch has this wrapper put on twice, and both see the
+      // same death)
+      if (!was && ped && ped.dead && JOBS.job && !ped._hmJobKilled) { ped._hmJobKilled = true; try { jobKill(JOBS.job, ped, imp || {}); } catch (e) {} }
       return r;
     };
     for (const k in orig) if (Object.prototype.hasOwnProperty.call(orig, k) && k.charAt(0) === "_") w[k] = orig[k];
     w._hmJobWrap = true;
     CBZ.cityKillPed = w;
+  }
+  // every shot the player fires goes through CBZ.cityAlarm at his own feet
+  // (systems/fpsmode.js): the live job hears it, and whether it was suppressed
+  function jobWrapAlarm() {
+    if (typeof CBZ.cityAlarm !== "function" || CBZ.cityAlarm._hmJobWrap) return;
+    const orig = CBZ.cityAlarm;
+    const w = function (x, z, radius, intensity, offender) {
+      const j = JOBS.job, pl = P();
+      const key = (CBZ.now || 0) + ":" + x + ":" + z;
+      if (j && j.onShot && offender && pl && pl.pos && offender === (CBZ.city && CBZ.city.playerActor) &&
+          (radius || 0) >= 20 && d2(x, z, pl.pos.x, pl.pos.z) < 2.5 && JOBS.shotKey !== key) {
+        JOBS.shotKey = key;                                  // (once per shot, however many times this is wrapped)
+        let supp = false;
+        try { supp = !!(CBZ.gunModsSuppressed && CBZ.gunModsSuppressed(CBZ.currentWeaponId)); } catch (e) { supp = false; }
+        try { j.onShot(x, z, !supp); } catch (e) {}
+      }
+      return orig.apply(this, arguments);
+    };
+    for (const k in orig) if (Object.prototype.hasOwnProperty.call(orig, k)) w[k] = orig[k];
+    w._hmJobWrap = true;
+    CBZ.cityAlarm = w;
   }
   function jobBoard(j, dt) {
     const R = CBZ.hmRoom; if (!R || !R.board || !R.board.set || !j.board) return;
@@ -609,6 +634,7 @@
   function jobsTick(dt) {
     const L = jobLedger(), R = CBZ.hmRoom;
     jobWrapKills();
+    jobWrapAlarm();
     let S = L.live;
     if (!S) {
       // nothing in hand: the broker rings when he is home and nobody else is using him
@@ -742,9 +768,50 @@
     // per frame, after the car loop: a convoy, its riders, a ring on the move
     CBZ.onUpdate(37.35, function (dt) {
       if (JOBGEN !== CBZ._hmJobGen || !playing()) return;
+      glassTick(dt || 0);
       const j = JOBS.job;
       if (j && j.frame) { try { j.frame(dt || 0); } catch (e) { if (window.console) console.error("[hitman job] frame", e); } }
     });
+  }
+
+  /* ---------------- GLASS: what the lens is on is drawn --------------------
+     city/peds.js stops drawing a rig 95 m from the camera, which is right for
+     a street and wrong for a man looking down a ten-power scope: the square
+     he is watching from two hundred metres was empty. While a scope or the
+     binoculars are up, the living bodies inside the lens (and a margin to pan
+     into) carry `_farDraw` and are drawn at any range; the flag comes off
+     the moment the glass comes down. Costs nothing with the glass down. */
+  const GLASS = { t: 0, marked: [], dir: null };
+  function glassUp() {
+    try { if (CBZ.hmBinoculars && CBZ.hmBinoculars.active && CBZ.hmBinoculars.active()) return true; } catch (e) {}
+    try { return !!(CBZ.fpsScoped && CBZ.fpsScoped()); } catch (e) { return false; }
+  }
+  function glassTick(dt) {
+    const M = GLASS.marked;
+    if (!glassUp()) {
+      if (M.length) { for (let i = 0; i < M.length; i++) M[i]._farDraw = false; M.length = 0; }
+      GLASS.t = 0;
+      return;
+    }
+    if ((GLASS.t -= dt) > 0) return;
+    GLASS.t = 0.2;
+    const cam = CBZ.camera, T3 = window.THREE;
+    if (!cam || !T3 || !cam.getWorldDirection) return;
+    const dir = GLASS.dir || (GLASS.dir = new T3.Vector3());
+    cam.getWorldDirection(dir);
+    const cx = cam.position.x, cy = cam.position.y, cz = cam.position.z;
+    for (let i = 0; i < M.length; i++) M[i]._farDraw = false;
+    M.length = 0;
+    const L = CBZ.cityPeds || [];
+    for (let i = 0; i < L.length; i++) {
+      const p = L[i];
+      if (!p || !p.pos || p.dead) continue;                 // a body on the ground has its own 200 m rule
+      const dx = p.pos.x - cx, dy = (p.pos.y || 0) + 1 - cy, dz = p.pos.z - cz;
+      const dd = dx * dx + dy * dy + dz * dz;
+      if (dd < 80 * 80 || dd > 460 * 460) continue;
+      if ((dx * dir.x + dy * dir.y + dz * dir.z) / Math.sqrt(dd) < 0.93) continue;
+      p._farDraw = true; M.push(p);
+    }
   }
 
   /* ---------------- THE CORKBOARD --------------------------------------

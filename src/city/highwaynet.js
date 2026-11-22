@@ -74,14 +74,41 @@
   // centreline, fading back to full relief over the next 40m. Allocation-
   // free and cheap (AABB pre-rejects) — continent plate verts AND runtime
   // ground physics both call this.
+  /* THE GATE ASKS ONLY THE CORRIDORS NEAR IT. Every continent plate vertex
+     and every ground query calls this, and it walked every filleted segment
+     of the network per call: the single hottest function of the continent
+     build (364 ms self of its 2.2 s unthrottled, phone profile x4). A 256 m
+     grid of which segments' reach (AABB + half + 48) touches each cell gives
+     the same segments in the same order for any point, so the answer is the
+     same number; built once per corridor set. */
+  const GG_CELL = 256;
+  let _gg = null, _ggFor = null, _ggN = -1;
+  function gateGrid() {
+    if (_gg && _ggFor === _corridors && _ggN === _corridors.length) return _gg;
+    const B = _netBox, n = _corridors.length;
+    const nx = Math.max(1, Math.ceil((B.maxX - B.minX) / GG_CELL) + 1), nz = Math.max(1, Math.ceil((B.maxZ - B.minZ) / GG_CELL) + 1);
+    const cells = new Array(nx * nz);
+    for (let i = 0; i < n; i++) {
+      const c = _corridors[i], outer = c.half + 48;
+      const i0 = Math.max(0, Math.floor((c.minX - outer - B.minX) / GG_CELL)), i1 = Math.min(nx - 1, Math.floor((c.maxX + outer - B.minX) / GG_CELL));
+      const j0 = Math.max(0, Math.floor((c.minZ - outer - B.minZ) / GG_CELL)), j1 = Math.min(nz - 1, Math.floor((c.maxZ + outer - B.minZ) / GG_CELL));
+      for (let j = j0; j <= j1; j++) for (let k = i0; k <= i1; k++) { const q = j * nx + k; (cells[q] || (cells[q] = [])).push(c); }
+    }
+    _gg = { nx: nx, nz: nz, cells: cells, B: B }; _ggFor = _corridors; _ggN = n;
+    return _gg;
+  }
   CBZ.highwayNetReliefGate = function (x, z) {
-    const n = _corridors.length;
-    if (!n) return 1;
+    const n0 = _corridors.length;
+    if (!n0) return 1;
     const B = _netBox;
     if (x < B.minX || x > B.maxX || z < B.minZ || z > B.maxZ) return 1;
+    const G = gateGrid();
+    const list = G.cells[Math.min(G.nz - 1, Math.floor((z - B.minZ) / GG_CELL)) * G.nx + Math.min(G.nx - 1, Math.floor((x - B.minX) / GG_CELL))];
+    if (!list) return 1;
+    const n = list.length;
     let g = 1;
     for (let i = 0; i < n; i++) {
-      const c = _corridors[i];
+      const c = list[i];
       const inner = c.half + 8, outer = inner + 40;
       if (x < c.minX - outer || x > c.maxX + outer || z < c.minZ - outer || z > c.maxZ + outer) continue;
       // exact point-to-segment distance
@@ -166,9 +193,18 @@
     return Math.min((p1.r || radius) * Math.tan(turn / 2), la * 0.45, lb * 0.45);
   }
   // where every route meets another: its two ends
+  // (and where a grain town's link and a roadside stop meet the road: the
+  // plan's towns and stops, so no corner sweeps or S-bend drifts away from
+  // under a town's Main Street)
   function junctions(routes) {
     const J = [];
     for (const r of routes) { const p = r.pts; if (p.length) { J.push(p[0]); J.push(p[p.length - 1]); } }
+    const P = CBZ.worldPlan;
+    for (const t of (P && P.towns) || []) {
+      const vert = t.side === "E" || t.side === "W";
+      J.push(vert ? { x: t.roadAt, z: t.cz } : { x: t.cx, z: t.roadAt });
+    }
+    for (const s of (P && P.stops) || []) J.push(s.axis === "x" ? { x: s.along, z: s.roadAt } : { x: s.roadAt, z: s.along });
     return J;
   }
   // distance along the axis leg a->b to q, or null when q is not on it
@@ -187,6 +223,8 @@
     const sites = CBZ.metroLib && CBZ.metroLib.siteTable ? CBZ.metroLib.siteTable({}) : [];
     for (const s of sites) if (s.bounds) K.push({ minX: s.bounds.minX - 150, maxX: s.bounds.maxX + 150, minZ: s.bounds.minZ - 150, maxZ: s.bounds.maxZ + 150 });
     for (const r of routes) if (r.rural) for (const p of r.pts) K.push({ minX: p.x - 250, maxX: p.x + 250, minZ: p.z - 250, maxZ: p.z + 250 });
+    const P = CBZ.worldPlan;
+    for (const t of (P && P.towns) || []) K.push({ minX: t.cx - 250, maxX: t.cx + 250, minZ: t.cz - 250, maxZ: t.cz + 250 });
     return K;
   }
   // a drift may not wander into the sea: the whole strip it needs is land,

@@ -88,6 +88,9 @@ rect("Kingsport", "kingsport", K.minX, K.maxX, K.minZ, K.maxZ, { metro: 1 });
 rect("Gang City West", "cityborough", -1495, -255, -1335, -415, { metro: 1 });
 rect("Gang City North", "cityborough2", -545, 440, -1765, -955, { metro: 1 });
 for (const id in P.sites) { const s = P.sites[id]; rect(id, "gov:" + id, s.x - 130, s.x + 130, s.z - 120, s.z + 120); }
+// the grain towns (their real 148 x 124 m grid) and the roadside stops
+for (const t of P.towns || []) rect(t.name, "town:" + t.id, t.cx - 74, t.cx + 74, t.cz - 62, t.cz + 62);
+for (const s of P.stops || []) { const x = s.axis === "x" ? s.along : s.roadAt + s.side * (s.half + 16), z = s.axis === "x" ? s.roadAt + s.side * (s.half + 16) : s.along; rect(s.name, "stop:" + s.id, x - 14, x + 14, z - 14, z + 14); }
 
 const net = P.routes.map((r) => ({ id: r.id, n: r.name, w: r.kind === "road" ? 11 : 30.6, rural: r.kind === "road" ? 1 : 0, raw: r.pts.map((q) => [q[0], q[1]]), pts: r.pts.map((q) => [q[0], q[1]]) }));
 const highways = net.map((r) => ({ n: r.n, rt: r.id, w: r.w, L: 0, pts: r.pts, rural: r.rural, wet: [] }));

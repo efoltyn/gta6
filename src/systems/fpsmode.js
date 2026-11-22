@@ -279,6 +279,14 @@
     return !!(CBZ.carFpActive && CBZ.carFpActive() && armed() && CBZ.player && CBZ.player.driving && !CBZ.player._aircraft);
   }
   CBZ.fpsCarGun = carGun;
+  /* A TORCH HAS NO GUNSIGHT (owner: "the flashlight should not have a
+     crosshair anymore"). A lit flashlight with no gun drawn is what is in
+     your hand, and its beam already shows where it points. With a gun drawn
+     the torch rides the off hand or the rail and the reticle is the gun's. */
+  function torchInHand() {
+    const F = CBZ.playerFlashlight;
+    return !!(F && F.on && F.on() && !armed());
+  }
   function shoulderActive() {
     const p = CBZ.player;
     // The shoulder owner is strictly an alive, on-foot third-person state.
@@ -2738,6 +2746,18 @@
   // beside the element so setActive() can invalidate/update it when V toggles
   // between first person and the third-person shoulder owner.
   let _crossShown = null;
+  /* WHETHER THE RETICLE SHOWS — the one answer, asked by the per-frame pass
+     and by the eye toggle (setActive). Not on a parachute's risers, not on an
+     animal, not in cuffs, not down the sights (the sight on the gun IS the
+     reticle then), and not with a torch in an empty hand. */
+  function crosshairWanted() {
+    const chute = !!((CBZ.cityChuteState && CBZ.cityChuteState()) ||
+      (CBZ.playerChar && CBZ.playerChar.skydiving));
+    const aiming = fps.active || shoulderActive() || carGun();
+    const sighted = fps.active && !!(CBZ.fpsAdsK && CBZ.fpsAdsK() > 0.6);
+    return aiming && !chute && !aquaticRide() && !cuffedHands() && !sighted && !torchInHand() &&
+      CBZ.game.state === "playing";
+  }
   const reticleState = { blocked: false, target: "", x: 50, y: 50, conePx: 16 };
   CBZ.fpsReticleState = function () {
     return { blocked: reticleState.blocked, target: reticleState.target, x: reticleState.x, y: reticleState.y, conePx: reticleState.conePx };
@@ -2802,6 +2822,8 @@
   let hitMarkerT = 0, hitMarkerDur = 0.001, hitMarkerKill = false;
 
   function flashHitMarker(kill, head) {
+    // the marker splays round the reticle; with a torch in hand there is none
+    if (torchInHand()) return;
     const col = kill ? "#ff3b30" : (head ? "#fff0b0" : "#ffffff");
     for (let i = 0; i < hitMarker.ticks.length; i++) {
       hitMarker.ticks[i].style.background = col;
@@ -5329,11 +5351,10 @@
       // became true in the same call. The per-frame change-only cache still
       // remembered `true`, so it never restored the element in third person.
       // Resolve the final shared owner now and keep the cache honest.
-      // ...and not on an animal — same owner as the per-frame pass and the
-      // viewmodel above it. Without it, toggling the eye view mid-ride flashes
-      // a reticle for the frame before onAlways(52) catches up.
-      const show = (fps.active || shoulderActive()) && !aquaticRide() &&
-        CBZ.game.state === "playing";
+      // ...and the same rule as the per-frame pass (crosshairWanted): without
+      // it, toggling the eye view mid-ride or torch in hand flashes a reticle
+      // for the frame before onAlways(52) catches up.
+      const show = crosshairWanted();
       cross.style.display = show ? "block" : "none";
       _crossShown = show;
     }
@@ -5791,10 +5812,8 @@
 
        Same predicate as the hands, for the same reason, so the two cannot
        disagree about whether you are currently a person. */
-    // ...and not down the sights: the sight on the gun IS the reticle then
-    const sighted = fps.active && !!(CBZ.fpsAdsK && CBZ.fpsAdsK() > 0.6);
-    const crossShow = aiming && !chutePresentation && !aquaticRide() && !cuffs && !sighted &&
-      CBZ.game.state === "playing";
+    // (the whole rule, the torch included, is crosshairWanted() above)
+    const crossShow = crosshairWanted();
     const cross = crossEl();
     if (cross && crossShow !== _crossShown) { cross.style.display = crossShow ? "block" : "none"; _crossShown = crossShow; }
 

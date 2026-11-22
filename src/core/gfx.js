@@ -372,7 +372,13 @@
      written by the day clock each frame), and that IS the sky's brightness
      and hue. The IBL terms are scaled by it in the shader: 1.0 at any normal
      daylight level (so daytime is untouched in every mode), warm at dusk,
-     down to a few percent at night. Zero CPU, no new uniforms. */
+     down to a few percent at night. Zero CPU, no new uniforms.
+     THE FEW PERCENT IS NOT A FLOOR UNDER NO SKY AT ALL. The 0.10 minimum kept
+     a noon PMREM lighting every Standard surface at ~6% when the sky light
+     was zero (the prison's blackout), a grey world with nothing lighting it.
+     Only a sky that is effectively OFF (luminance under 1e-5: the isles'
+     darkest new-moon night is ~0.002) loses the floor; at or above that the
+     curve is the same float as before, in every mode. */
   (function envFollowsSky() {
     const SC = THREE.ShaderChunk;
     if (!SC || typeof SC.lights_fragment_maps !== "string" || SC.lights_fragment_maps.indexOf("cbzEnvSky") >= 0) return;
@@ -388,7 +394,7 @@
       "  {",
       "    vec3 cbzSky = hemisphereLights[ 0 ].skyColor;",
       "    float cbzSkyL = dot( cbzSky, vec3( 0.2126, 0.7152, 0.0722 ) );",
-      "    float cbzK = clamp( cbzSkyL / 0.45, 0.10, 1.0 );",
+      "    float cbzK = clamp( cbzSkyL / 0.45, min( 0.10, cbzSkyL * 10000.0 ), 1.0 );",
       "    cbzEnvSky = mix( vec3( 1.0 ), cbzSky / max( cbzSkyL, 1e-4 ), 0.35 ) * cbzK;",
       "  }",
       "#endif",

@@ -170,6 +170,19 @@
   CBZ.streamJobs = jobs;
 
   function rectKeeps(r, pad) { return CBZ.sliceKeepsRect(r.minX, r.maxX, r.minZ, r.maxZ, pad || 0); }
+  /* A SKIPPED BUILDER IS WANTED BY ITS CELLS, NOT THEIR BOX. Its rect is the
+     box round every 400 m cell it draws in, and a builder whose cells are
+     scattered (bunkers.js: three sites kilometres apart; metro_structs.js:
+     fifteen) has a box that holds the downtown spawn while not one of its
+     cells is in sight: the streamer built the whole builder at boot (the
+     bunkers' 7 MB of hidden interiors, ~400 ms on the phone profile). The
+     box still decides parking; wanting it asks the cells. */
+  function jobKeeps(j, pad) {
+    if (!rectKeeps(j.rect, pad)) return false;
+    const C = j.cells; if (!C || CFG.STREAM_BUILDER_CELLS === false) return true;   // (?cfg_STREAM_BUILDER_CELLS=0: the A/B)
+    for (let i = 0; i < C.length; i++) if (rectKeeps(C[i], pad)) return true;
+    return false;
+  }
   /* WHAT A JOB DRAWS IS NOT ITS RECT. A builder's rect is where it was asked
      to build; what it builds can stand past it (a lot's forecourt, a town's
      edge parcels, a pruned cell's long buildings): measured, up to 60 m and
@@ -389,8 +402,9 @@
       minX = Math.min(minX, c[0] * cell); maxX = Math.max(maxX, (c[0] + 1) * cell);
       minZ = Math.min(minZ, c[1] * cell); maxZ = Math.max(maxZ, (c[1] + 1) * cell);
     }
+    const cellRects = rec.cells.map(function (c) { return { minX: c[0] * cell, maxX: (c[0] + 1) * cell, minZ: c[1] * cell, maxZ: (c[1] + 1) * cell }; });
     jobs.push({
-      rect: { minX, maxX, minZ, maxZ }, name: key, pure: false, state: "queued", builder: true,
+      rect: { minX, maxX, minZ, maxZ }, cells: cellRects.length > 1 ? cellRects : null, name: key, pure: false, state: "queued", builder: true,
       fn: function () {
         const city = CBZ.city && CBZ.city.arena;
         if (!city) return;
@@ -943,13 +957,13 @@
       CBZ.streamStats.recentres++;
     }
     const want = [];
-    for (let i = 0; i < jobs.length; i++) { const j = jobs[i]; if (j.state !== "built" && rectKeeps(j.rect, spillOf(j))) want.push(j); }
+    for (let i = 0; i < jobs.length; i++) { const j = jobs[i]; if (j.state !== "built" && jobKeeps(j, spillOf(j))) want.push(j); }
     // nearest first, but what lies AHEAD of a moving player counts as nearer
     // (at 30 m/s the road ahead reaches view distance in seconds; the ground
     // beside and behind can wait): distance minus half its forward reach
     const hx = V > 3 && AH ? AH.hx : 0, hz = V > 3 && AH ? AH.hz : 0;
     for (const j of want) {
-      const r = j.rect, d = Math.sqrt(distTo(r, P.pos.x, P.pos.z));
+      const r = j.rect, d = Math.sqrt(jobDist(j, P.pos.x, P.pos.z));
       if (!hx && !hz) { j._key = d; continue; }
       const cx = (r.minX + r.maxX) / 2 - P.pos.x, cz = (r.minZ + r.maxZ) / 2 - P.pos.z;
       j._key = d - 0.5 * Math.max(0, cx * hx + cz * hz) * (d > 0 ? Math.min(1, 400 / (d + 1)) : 1);
@@ -969,9 +983,9 @@
       if (j.state === "built") continue;           // a parent's run built it inline
       if (force) { while (!bringIn(j, false)) {} continue; }
       const sp = spillOf(j), Vs = (VIEW + sp) * (VIEW + sp), Ss = (SOON + sp) * (SOON + sp);
-      if (distTo(j.rect, EYE.x, EYE.z) < Vs || distTo(j.rect, P.pos.x, P.pos.z) < Vs) { bringIn(j, true); continue; }
-      if (!soon && (distTo(j.rect, EYE.x, EYE.z) < Ss || distTo(j.rect, P.pos.x, P.pos.z) < Ss ||
-          (lead > 20 && distTo(j.rect, AH.x, AH.z) < Vs))) soon = true;
+      if (jobDist(j, EYE.x, EYE.z) < Vs || jobDist(j, P.pos.x, P.pos.z) < Vs) { bringIn(j, true); continue; }
+      if (!soon && (jobDist(j, EYE.x, EYE.z) < Ss || jobDist(j, P.pos.x, P.pos.z) < Ss ||
+          (lead > 20 && jobDist(j, AH.x, AH.z) < Vs))) soon = true;
       rest.push(j);
     }
     plan.want = rest; plan.wi = 0; plan.soon = soon;
@@ -1005,7 +1019,7 @@
     while (!stepping && plan.wi < plan.want.length) {
       if (did && performance.now() - t0 >= share) break;
       const j = plan.want[plan.wi++];
-      if (j.state === "built" || !rectKeeps(j.rect, spillOf(j))) continue;   // done meanwhile, or left range since the plan
+      if (j.state === "built" || !jobKeeps(j, spillOf(j))) continue;   // done meanwhile, or left range since the plan
       if (j.parent && jobs.indexOf(j) < 0) continue;                 // a freed parent's child
       if (!bringIn(j, false)) stepping = j;
       did = true;
@@ -1023,6 +1037,12 @@
   CBZ.streamTick = function (force) {
     planTick(!!force);
   };
+  // (a scattered builder: the distance to its nearest cell)
+  function jobDist(j, x, z) {
+    const C = j.cells; if (!C || CFG.STREAM_BUILDER_CELLS === false) return distTo(j.rect, x, z);
+    let b = Infinity; for (let i = 0; i < C.length; i++) { const d = distTo(C[i], x, z); if (d < b) b = d; }
+    return b;
+  }
   function distTo(r, x, z) {
     const cx = Math.max(r.minX, Math.min(x, r.maxX)), cz = Math.max(r.minZ, Math.min(z, r.maxZ));
     return (cx - x) * (cx - x) + (cz - z) * (cz - z);

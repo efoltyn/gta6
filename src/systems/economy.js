@@ -276,7 +276,7 @@
   function counting() { const b = blockId(); return b === "count" || b === "secure" || b === "wake"; }
   function yardTime() { const b = blockId(); return b === "yard" || b === "work"; }
   function chowTime() { const b = blockId(); return b === "mess" || b === "supper"; }
-  function afterDark() { const b = blockId(); return b === "night"; }
+  function afterDark() { const b = blockId(); return b === "night" || b === "blackout"; }
   // one number the verbs share: how well business goes at this hour
   function hourMood() {
     if (counting()) return -1;

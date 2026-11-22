@@ -89,7 +89,9 @@
     // a guard you paid (city/roles.js Bribe) looks the other way until it runs out
     const tNow = (typeof CBZ.now === "number" ? CBZ.now : Date.now()) / 1000;
     const paid = (guard._lookAwayUntil || 0) > tNow;
-    if (actor && !actor.dead && !paid && (CBZ.game.wanted | 0) >= 1) {
+    // (a man in this guard's own uniform, the cover holding, is one of his:
+    // outfits.js cityDisguiseFriend)
+    if (actor && !actor.dead && !paid && (CBZ.game.wanted | 0) >= 1 && !(CBZ.cityDisguiseFriend && CBZ.cityDisguiseFriend(guard))) {
       const dx = actor.pos.x - guard.pos.x, dz = actor.pos.z - guard.pos.z, d2 = dx * dx + dz * dz;
       if (d2 < bd) best = actor;
     }

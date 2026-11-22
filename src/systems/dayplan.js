@@ -135,7 +135,7 @@
     const enabled = typeof spec.enabled === "function" ? spec.enabled
       : function () { return CFG.DAY_PLAN_V1 !== false; };
     const listeners = [];
-    let cur = null, armed = false;
+    let cur = null, armed = false, kick = false;
 
     function hourNow() { return (clock.phase() * 24 + sunrise) % 24; }
     function secsPerHour() { return clock.dayLength() / 24; }
@@ -178,12 +178,15 @@
       clock.advance(dt || 0);
       if (spec.sun) driveSun(plan, clock.phase());
       const b = blockAt(hourNow());
-      if (!armed) { armed = true; const p = cur; cur = b; fire(b, p, true); }
-      else if (b !== cur) { const p = cur; cur = b; fire(b, p, false); }
+      if (!armed) { armed = true; kick = false; const p = cur; cur = b; fire(b, p, true); }
+      else if (b !== cur || kick) { kick = false; const p = cur; cur = b; fire(b, p, false); }
       return b;
     }
     // re-arm: the next poll lands silently again (a fresh run, a mode reset)
-    function rearm() { armed = false; cur = null; }
+    function rearm() { armed = false; cur = null; kick = false; }
+    // the clock was moved by hand (CBZ.dayJump): the next poll fires the
+    // block it lands in as a real change, even when it is the same block
+    function replay() { if (armed) kick = true; }
 
     const plan = {
       id: id || "plan",
@@ -209,6 +212,7 @@
       off: function (fn) { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); return plan; },
       poll: poll,
       rearm: rearm,
+      replay: replay,
       armed: function () { return armed; },
       audit: function () { return auditPlan(plan, list, blockAt, hourNow); },
     };
