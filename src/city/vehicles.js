@@ -6563,6 +6563,7 @@
             // a car that RAMPED into the bay is falling as well as travelling,
             // and the fall is most of the momentum that makes the splash big
             speed: Math.max(3, Math.hypot(vmag || 0, Math.abs(car._airVy || 0))),
+            vx: +car.vx || 0, vz: +car.vz || 0,
             src: car,
           });
         } catch (e) {}

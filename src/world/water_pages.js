@@ -48,6 +48,7 @@
     const y = Number.isFinite(+o.seaY) ? +o.seaY : 0;
     U.uSeaY.value = y;
     U.fixedSeaY = true;                 // the page's sea level, not the city's
+    if (CBZ.waterPageSeaY) CBZ.waterPageSeaY(y);   // what CBZ.waterSurfaceAt answers on this page
     U.uCauSeaY = { value: y };          // seabed caustics measure depth from it
     if (o.opaque) U.noClarity = true;   // nothing is drawn under it: no see-through
     if (o.clip) U.uClip.value.set(+o.clip[0] || 0, +o.clip[1] || 0, +o.clip[2] || -1, 1);

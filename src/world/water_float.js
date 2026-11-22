@@ -164,10 +164,19 @@
   // CBZ.waterSeaY() is mean sea level PLUS any live surge (water_spec.js), so
   // a flooded coast floats what it should. Falls back to the static mean.
   function seaMean() { return CBZ.waterSeaY ? CBZ.waterSeaY() : (CBZ.SEA_Y != null ? CBZ.SEA_Y : SEA_Y_FALLBACK); }
-  function surfaceAt(x, z, t) {
+  // The water's one query (sea, impact rings, a tsunami, a flood) plus every
+  // wake but `self`'s own, so a body bobs when a passing hull's wake reaches it.
+  const _wsF = {};
+  function surfaceAt(x, z, t, self) {
+    if (CBZ.waterSample && !Number.isFinite(t)) return CBZ.waterSample(x, z, _wsF, self).y;
     return CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z, t) : seaMean();
   }
+  const _wsW = {};
   function overWater(x, z, clearance) {
+    // the sea's one water query knows floodwater over a street too
+    if (typeof CBZ.waterSurfaceAt === "function" && CBZ.waterSample) {
+      return CBZ.waterSample(x, z, _wsW, null).depth > (clearance || 0) + 0.05;
+    }
     const wf = CBZ.waterField;
     if (wf && wf.isSurfaceWater) return !!wf.isSurfaceWater(x, z, clearance || 0);
     return !!(CBZ.cityWaterAt && CBZ.cityWaterAt(x, z));
@@ -247,16 +256,16 @@
     const h = +opts.heading || 0;
     const len = Number.isFinite(+opts.len) && +opts.len > 0 ? +opts.len : 1;
     const beam = Number.isFinite(+opts.beam) && +opts.beam > 0 ? +opts.beam : 1;
-    const t = opts.t;
+    const t = opts.t, self = opts.self || null;
     // vehicles.js's forward convention: (sin(heading), cos(heading)) in XZ.
     const fx = Math.sin(h), fz = Math.cos(h);
     const rx = fz, rz = -fx;                    // right-hand lateral axis
     const hl = len * 0.5, hb = beam * 0.5;
 
-    const yBow = surfaceAt(x + fx * hl, z + fz * hl, t);
-    const yStern = surfaceAt(x - fx * hl, z - fz * hl, t);
-    const yPort = surfaceAt(x + rx * hb, z + rz * hb, t);
-    const yStbd = surfaceAt(x - rx * hb, z - rz * hb, t);
+    const yBow = surfaceAt(x + fx * hl, z + fz * hl, t, self);
+    const yStern = surfaceAt(x - fx * hl, z - fz * hl, t, self);
+    const yPort = surfaceAt(x + rx * hb, z + rz * hb, t, self);
+    const yStbd = surfaceAt(x - rx * hb, z - rz * hb, t, self);
 
     // Gradients ALONG the body — the wave slope it actually feels. The 0.5 /
     // 0.4 floors keep a point-sized body from dividing by nothing.
@@ -430,7 +439,7 @@
     if (e.waterlog > 0) e.buoy = Math.max(0, e.buoy - e.waterlog * dt);
 
     // ---- the ride ----------------------------------------------------------
-    _rideOpts.heading = heading; _rideOpts.len = e.len; _rideOpts.beam = e.beam;
+    _rideOpts.heading = heading; _rideOpts.len = e.len; _rideOpts.beam = e.beam; _rideOpts.self = e.obj;
     const r = CBZ.waterRideAt(e.x, e.z, _rideOpts, _ride);
     const pl = clamp(evalTerm(e.plane, e) || 0, 0, 1);
     const settle = 1 - pl * 0.55;
@@ -482,7 +491,7 @@
     driftStep(e, dt);
     writePose(e, e.pitch, e.roll, heading);
   }
-  const _rideOpts = { heading: 0, len: 1, beam: 1, t: undefined };
+  const _rideOpts = { heading: 0, len: 1, beam: 1, t: undefined, self: null };
 
   // The current carries a floating body — but only onto more water. Rejecting
   // a step that leaves the surface is what stops the drift field from
@@ -498,13 +507,16 @@
     if (e.drift <= 0) { e.speed = 0; return; }
     const wf = CBZ.waterField;
     let cx = 0, cz = 0;
-    if (wf && wf.currentAt) { const c = wf.currentAt(e.x, e.z, undefined, _cur); cx = c.x; cz = c.z; }
+    // the sea's one water query carries every flow (current, tsunami, flood)
+    const one = typeof CBZ.waterSurfaceAt === "function" && CBZ.waterSample;
+    if (one) { const w = CBZ.waterSample(e.x, e.z, _wsF, e.obj); cx = w.vx; cz = w.vz; }
+    else if (wf && wf.currentAt) { const c = wf.currentAt(e.x, e.z, undefined, _cur); cx = c.x; cz = c.z; }
     if (CBZ.waterOrbitalAt && !e.sunk) {
       const o = CBZ.waterOrbitalAt(e.x, e.z, undefined, _orb);
       const follow = Math.max(0.25, 1 - e.len * 0.06);     // a long hull averages its orbit out
       cx += o.x * follow; cz += o.z * follow;
     }
-    if (CBZ.waterFlowAt) {
+    if (!one && CBZ.waterFlowAt) {
       const f = CBZ.waterFlowAt(e.x, e.z, _rf);
       if (f.f > 0.01) { cx += f.x * f.f; cz += f.z * f.f; }
     }

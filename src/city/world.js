@@ -160,12 +160,8 @@
       const k = CBZ.dayness != null ? CBZ.dayness : 1;
       seaMat.color.copy(seaNight).lerp(seaDay, k);
       if (CBZ.duskness) seaMat.color.lerp(seaDusk, CBZ.duskness * 0.5);
-      if (seaMat2) {
-        // the animated sea follows the same day/night tone (one colour copy;
-        // seaMat2.color IS the uSeaColor uniform value, aliased below)
-        seaMat2.color.copy(seaMat.color);
-        if (CBZ.waterDriveCommonUniforms) CBZ.waterDriveCommonUniforms(seaUniforms);
-      }
+      // the shader sea lights itself from the scene's key light and sky
+      if (seaMat2 && CBZ.waterDriveCommonUniforms) CBZ.waterDriveCommonUniforms(seaUniforms);
     });
 
     // ---- roads: the drivable centre-line records every system reads ----
@@ -972,24 +968,21 @@
         CBZ.citySea = fb;
         return;
       }
-      // Registered inland lakes must be known before the field bake (their
-      // footprint becomes the mask's alpha channel) and before the first
-      // frame (they damp the swells over a pond).
+      // Registered inland lakes must be known before the first frame (they
+      // calm the waves over a pond).
       if (CBZ.waterSyncInlandBodies) CBZ.waterSyncInlandBodies(city);
-      const inlandAt = CBZ.waterInlandFactorAt || function () { return 0; };
 
       const shoreAt = city.mapTerrain && typeof city.mapTerrain.shoreAt === "function"
         ? city.mapTerrain.shoreAt : null;
 
-      // ---- the baked shore field -----------------------------------------
-      // R: smooth land ramp centred 1.5m inland over a 9m band. The shader
-      //    discards R > 0.5, and because R interpolates the cut follows the
-      //    real coast smoothly instead of stepping texel to texel.
-      // G: waterline proximity, 1 at the shore falling to 0 at 22m out.
-      // B: normalised distance into deep water (the depth colour ramp).
-      // A: inland-water flag (lake vs. ocean look).
-      // 640² over the map bounds: ~1.5x the old texel density for ~1.5x the
-      // bake cost, which is the one part of this that is not free.
+      // ---- the baked shore field (world/water_spec.js reads it, GPU and CPU)
+      // R: smooth land ramp centred 1.5 m inland over a 9 m band; the sea
+      //    discards R > 0.5, and the ramp makes that cut follow the coast.
+      // G: 1 - depth/2.4 m and B: depth/30 m, the water column from
+      //    city/waterfield.js's bathymetry law (min(1.1 d, 1.1 + 0.075 d) at
+      //    d metres offshore). Waves shoal on it, the body colour reads it.
+      // A: surf exposure: breaking surf needs open water in front of it.
+      // 640² over the map bounds.
       let seaLandMaskTex = null;
       const seaLandBounds = new THREE.Vector4(0, 0, 1, 1);
       if (shoreAt && city.mapTerrain && city.mapTerrain.bounds) {
@@ -1005,28 +998,19 @@
             const signed = +shoreAt(wx, wz);
             sgn[mz * MS + mx] = signed;
             const land = Math.max(0, Math.min(1, 0.5 + (signed - 1.5) / 9));
-            // Surf is a narrow waterline treatment, not a wide second pale
-            // band — a wider field used to cover most of Redhollow Lake and
-            // visibly split it into alternating blue/white slabs.
-            const shoreNear = signed < 0 ? Math.max(0, Math.min(1, 1 - (-signed) / 22)) : 1;
-            const deep = signed < 0 ? Math.max(0, Math.min(1, (-signed) / 420)) : 0;
+            const d = signed < 0 ? -signed : 0;
+            const depth = d > 0 ? Math.min(1.1 * d, 1.1 + 0.075 * d, 62) : 0;
             const q = (mz * MS + mx) * 4;
             mask[q] = Math.round(land * 255);
-            mask[q + 1] = Math.round(shoreNear * 255);
-            mask[q + 2] = Math.round(deep * 255);
-            mask[q + 3] = Math.round(Math.max(0, Math.min(1, inlandAt(wx, wz))) * 255);
+            mask[q + 1] = Math.round(Math.max(0, Math.min(1, 1 - depth / 2.4)) * 255);
+            mask[q + 2] = Math.round(Math.max(0, Math.min(1, depth / 30)) * 255);
+            mask[q + 3] = 255;
           }
         }
-        /* SURF NEEDS OPEN WATER. The waterline band (G) drove a breaking-
-           surf ribbon along EVERY shore, so each quay of the downtown
-           channels and the Kings River wore a 20 m white stripe (measured
-           186-219 grey-white on both walls from 160 m up; hiding the plate
-           and the bed under it changed nothing: it was the foam). Waves that
-           break are built over open water; a 60 m channel has none. So the
-           band is scaled by the water's reach straight out from that shore:
-           the deepest this field gets within 200 m along the shore normal
-           (half a channel's width; hundreds of metres off a coast or across
-           a lake). Read off the samples just taken: no extra shore queries. */
+        /* SURF NEEDS OPEN WATER. A quay in a 60 m channel has no breaking
+           surf; a coast or a lake shore with hundreds of metres of water in
+           front of it does. Exposure = the deepest this field gets within
+           200 m straight out from the shore. Read off the samples just taken. */
         (function surfExposure() {
           const tx = (mb.maxX - mb.minX) / MS, tz = (mb.maxZ - mb.minZ) / MS;
           const at = function (ix, iz) {
@@ -1037,7 +1021,6 @@
           for (let mz = 0; mz < MS; mz++) for (let mx = 0; mx < MS; mx++) {
             const s0 = sgn[mz * MS + mx];
             if (!(s0 < 0 && s0 > -40)) continue;
-            // the field rises onto land: -grad points out over the water
             let gx = (at(mx + 1, mz) - at(mx - 1, mz)) / tx, gz = (at(mx, mz + 1) - at(mx, mz - 1)) / tz;
             const L = Math.hypot(gx, gz);
             if (!(L > 1e-6)) continue;
@@ -1054,8 +1037,7 @@
           for (let mz = 0; mz < MS; mz++) for (let mx = 0; mx < MS; mx++) {
             const i = mz * MS + mx;
             let e = expo[i];
-            // a land texel's G bleeds into the waterline under bilinear
-            // filtering: it takes its water neighbours' exposure
+            // a land texel takes its water neighbours' exposure (bilinear bleed)
             if (sgn[i] >= 0) {
               let m = -1;
               for (let k = 0; k < 4; k++) {
@@ -1067,7 +1049,7 @@
               if (m < 0) continue;
               e = m;
             }
-            if (e < 1) mask[i * 4 + 1] = Math.round(mask[i * 4 + 1] * e);
+            mask[i * 4 + 3] = Math.round(e * 255);
           }
         })();
         seaLandMaskTex = new THREE.DataTexture(mask, MS, MS, THREE.RGBAFormat);
@@ -1101,9 +1083,6 @@
       // the water it stands in must be the same blue-grey at the same
       // distance, or the land reads as lifted off its own sea.
       if (CBZ.aerialHaze) CBZ.aerialHaze(seaMat2);
-      // Preserve the old material.color update contract used by the day/night
-      // loop above; it aliases the actual shader uniform.
-      seaMat2.color = U.uSeaColor.value;
 
       const sea = new THREE.Mesh(CBZ.waterBuildSeaGeometry(), seaMat2);
       sea.name = "world-sea";

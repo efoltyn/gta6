@@ -560,6 +560,9 @@
       predict: 0,
     };
     f.predict = Math.hypot(f.obs.d, alt) / SOUND_SPEED;
+    // a front born over the sea draws no ring: on water an air shock is a
+    // band of ruffled, whitened water (the wake field's band, in the tick)
+    f.sea = !!(CBZ.cityWaterAt && CBZ.cityWaterAt(x, z));
     ev.fronts.push(f);
     return f;
   }
@@ -875,11 +878,33 @@
     const T0 = performance.now(), sp = {};
     ev.lastImpact = { cls: b.cls, x: +x.toFixed(1), z: +z.toFixed(1), t: +ev.t.toFixed(2), craterR: +cr.R.toFixed(1), W: +W.toFixed(0) };
     if (o.damage && o.damage.impact) { try { o.damage.impact(x, z, Object.assign({ r: cr.R * 1.4 }, b.spec || {}, { cls: b.cls, craterR: cr.R })); } catch (e) {} }
+    const big = b.cls === "impact";
+    // INTO THE SEA: the body's mass and speed go through the one water door
+    // (world/water_impact.js), which digs the crater in the water, throws the
+    // column and the spray, lays the foam and launches the ring waves; the
+    // plume is steam, not dust. The air blast and the flash are the same.
+    if (CBZ.waterHit && CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) {
+      const sy = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z) : gy;
+      const mass = (C.dens || 3300) * Math.PI / 6 * L * L * L;
+      let wet = false;
+      try { wet = !!CBZ.waterHit(x, sy, z, { kind: "meteor", mass: mass, speed: v, hot: true, vx: b.vx, vz: b.vz }); } catch (e) {}
+      if (wet) {
+        ev.craters.push({ x: +x.toFixed(1), z: +z.toFixed(1), r: +cr.R.toFixed(1), dug: false, sea: true, depth: 0, rim: 0, D: +cr.D.toFixed(1) });
+        // a flash of light, but no fireball on the water: the water goes up
+        // first and the steam rises over it a beat later
+        ev.lightPulses.push({ t: 0, life: big ? 1.6 : 0.5, k: big ? 0.8 : 0.3 });
+        ev.pending = ev.pending || [];
+        ev.pending.push({ t: big ? 2.5 : 0.8, fn: function () { plume(x, z, sy, cr.R, big, true); } });
+        launchFront(x, z, sy, 0, W, true, big, null);
+        if (CBZ.shake) CBZ.shake(big ? 1.0 : 0.3);
+        scheduleBang(x, sy, z, big ? 1 : 0.6, "explosion");
+        return;
+      }
+    }
     // THE HOLE: the shared carving, sized by the crater law. The placement
     // law can refuse (slope, water, a building on the spot): then the blanket
     // still lands, around a scar instead of a bowl.
     let shaft = null;
-    const big = b.cls === "impact";
     /* craters.js retires its OLDEST hole past CRATER_MAX, so a run of small
        strikes after the big one would fill the island in under it. A small
        body only digs while two slots are still free. */
@@ -1055,16 +1080,18 @@
 
   /* THE DUST PLUME: a column that climbs on its own heat, slows, and spreads
      at the top into a cap that hangs over the island */
-  function plume(x, z, gy, R, big) {
+  // the plume: dust off land, steam off the sea (white, rising faster)
+  function plume(x, z, gy, R, big, steam) {
     const n = big ? 70 : 10;
     for (let i = 0; i < n; i++) {
       const a = frnd() * Math.PI * 2, rr = R * 0.5 * Math.sqrt(frnd());
-      const vy = big ? 9 + frnd() * 16 : 3 + frnd() * 4;
+      const vy = (big ? 9 + frnd() * 16 : 3 + frnd() * 4) * (steam ? 1.3 : 1);
       const p = { x: x + Math.cos(a) * rr, y: gy + 1 + frnd() * 3, z: z + Math.sin(a) * rr };
       const delay = frnd() * (big ? 2.5 : 0.6);
+      const tint = steam ? (frnd() < 0.5 ? 0xe4eaee : 0xcfd8dd) : (frnd() < 0.5 ? 0x7d6e60 : 0x93857a);
       ev.pending = ev.pending || [];
       ev.pending.push({ t: delay, fn: function () {
-        puff(p.x, p.y, p.z, (big ? 3.5 : 1.6) + frnd() * 2.5, (big ? 50 : 14) + frnd() * 25, frnd() < 0.5 ? 0x7d6e60 : 0x93857a, big ? 2.2 : 1.2, vy, 0.45);
+        puff(p.x, p.y, p.z, (big ? 3.5 : 1.6) + frnd() * 2.5, (big ? 50 : 14) * (steam ? 0.7 : 1) + frnd() * 25, tint, big ? 2.2 : 1.2, vy, 0.45);
       } });
     }
   }
@@ -1173,8 +1200,16 @@
           const nd = f.big ? 3 : 1;
           for (let k = 0; k < nd && ev.budget.dust-- > 0; k++) {
             const a = frnd() * Math.PI * 2, px = f.x + Math.cos(a) * r, pz = f.z + Math.sin(a) * r;
+            if (CBZ.cityWaterAt && CBZ.cityWaterAt(px, pz)) continue;   // no dust off the sea
             puff(px, ev.floor(px, pz) + 0.8, pz, 1.2 + Math.min(3, dpr / 10), 3 + frnd() * 3, 0x9a8b7a, 1.2);
           }
+        }
+        // ...and over water the front is the slick: the water it crosses is
+        // ruffled and whitened in a band moving out at the front's own speed
+        if (CBZ.waterWakeBand && dpr > 0.3 && r > r0) {
+          CBZ.waterWakeBand(f.x, f.z, r0, r, {
+            width: 2 + r * 0.01, foam: Math.min(0.08, dpr / 150), ruffle: Math.min(0.03, Math.max(0.004, dpr / 400)),
+          });
         }
         f.r = r;
       }
@@ -1299,7 +1334,7 @@
     let rg = 0;
     const Rg = pl.ring;
     for (const f of ev.fronts) {
-      if (rg >= RING_CAP || f.r <= 0) continue;
+      if (rg >= RING_CAP || f.r <= 0 || f.sea) continue;
       const dp = overpressure(f.r, f.alt, f.W, f.surface);
       const k = Math.min(1, dp / 12);
       if (k < 0.04) continue;

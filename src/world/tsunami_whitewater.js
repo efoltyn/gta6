@@ -366,13 +366,9 @@
     const uni = THREE.UniformsUtils.clone(THREE.UniformsLib.fog);
     Object.assign(uni, {
       uT: { value: 0 }, uTurb: { value: 0.85 },
-      // LINEAR (through ACES + sRGB they land much lighter than they read)
-      uMud: { value: new THREE.Color(0.060, 0.050, 0.038) },
-      uSea: { value: new THREE.Color(0.037, 0.087, 0.099) },
-      uFoamC: { value: new THREE.Color(0.66, 0.68, 0.68) },
-      uFoamM: { value: new THREE.Color(0.40, 0.40, 0.375) },
     });
     uni.uSunDir = light.uSunDir; uni.uSunCol = light.uSunCol; uni.uSkyCol = light.uSkyCol; uni.uGndCol = light.uGndCol;
+    if (CBZ.waterLightUniforms) Object.assign(uni, CBZ.waterLightUniforms());
 
     const VERT = [
       "attribute vec4 iA;",   // x, base y, z, H (crest over base)
@@ -449,7 +445,8 @@
 
     const FRAG = [
       "uniform float uT, uTurb;",
-      "uniform vec3 uSunDir, uSunCol, uSkyCol, uGndCol, uMud, uSea, uFoamC, uFoamM;",
+      "uniform vec3 uSunDir, uSunCol, uSkyCol, uGndCol;",
+      CBZ.waterShadeGLSL(),
       "varying vec3 vW;",
       "varying vec3 vN;",
       "varying vec4 vF;",
@@ -473,17 +470,7 @@
       "  float bk = ( 1.0 - smoothstep( 0.15, 0.6, fp ) ) * 0.55;",
       "  if ( abs( det ) > 1e-6 ) N = normalize( N - bk * ( r1 * fx + r2 * fy ) / det );",
       "  float ndl = max( dot( N, uSunDir ), 0.0 );",
-      "  float wrap = clamp( ( dot( N, uSunDir ) + 0.55 ) / 1.55, 0.0, 1.0 );",
-      "  vec3 hemi = mix( uGndCol, uSkyCol, 0.5 + 0.5 * N.y );",
-      // the body: dark, a suspension (sea-green only while it is clean)
-      "  vec3 body = mix( uSea, uMud, clamp( uTurb * 1.15, 0.0, 1.0 ) ) * ( 0.62 + 0.55 * lumpV );",
-      "  vec3 Rv = reflect( -V, N );",
-      "  float fres = pow( 1.0 - clamp( dot( N, V ), 0.0, 1.0 ), 5.0 );",
-      "  vec3 bodyLit = body * ( hemi * 0.75 + uSunCol * ndl * 0.55 );",
-      "  bodyLit += mix( uGndCol, uSkyCol, smoothstep( -0.1, 0.6, Rv.y ) ) * ( 0.04 + 0.30 * fres ) * ( 1.0 - 0.5 * uTurb );",
-      "  vec3 Hh = normalize( uSunDir + V );",
-      "  bodyLit += uSunCol * pow( max( dot( N, Hh ), 0.0 ), 70.0 ) * 0.45;",
-      // the aerated roller: grey, lumpy, torn, never paper
+      // where it is aerated: the roller torn into lumps, the cascade's fall
       "  float cov;",
       "  if ( !casc ) {",
       "    float roll = smoothstep( 0.40, 0.56, p ) * ( 1.0 - 0.35 * smoothstep( 0.9, 1.0, p ) );",
@@ -493,11 +480,11 @@
       "    float fall = smoothstep( 0.5, 0.62, p );",
       "    cov = mix( 0.15 * smoothstep( 0.55, 0.8, fine ), 0.25 + 0.6 * smoothstep( 0.35, 0.75, fine ), fall );",
       "  }",
-      "  vec3 fAlb = mix( uFoamC, uFoamM, clamp( uTurb * ( 0.55 + 0.45 * ( 1.0 - p ) ), 0.0, 1.0 ) );",
-      "  float ao = 0.55 + 0.45 * smoothstep( 0.2, 0.8, lumpV );",
-      "  vec3 foamLit = fAlb * ( hemi * 0.85 * ao + uSunCol * wrap * 0.62 * ( 0.7 + 0.3 * ao ) );",
-      "  foamLit += uSunCol * pow( max( dot( N, Hh ), 0.0 ), 24.0 ) * 0.08;",
-      "  vec3 col = mix( bodyLit, foamLit, clamp( cov, 0.0, 1.0 ) );",
+      // ONE WATER: the bore on the land is the flood standing up, shaded by
+      // the sea's function with the flood's mud load and the one foam look
+      "  vec2 fq2 = vec2( vW.x + vW.z, vW.y * 1.4 + uT * ( casc ? 3.0 : 1.2 ) ) * 0.6;",
+      "  vec4 shW = cbzWaterShade( vW, fq2, N, V, 0.02 + 0.03 * lumpV, 30.0, uTurb, clamp( cov, 0.0, 1.0 ), 0.0, 0.0, fp, uT );",
+      "  vec3 col = shW.rgb;",
       "  gl_FragColor = vec4( col, 1.0 );",
       "  #include <tonemapping_fragment>",
       "  #include <colorspace_fragment>",
@@ -576,8 +563,8 @@
          read as a bank of beige dust. The mud stays in the body of the bore;
          what is torn off it is aerated water: grey-white, a little dirty low
          down, never brown. */
-      uFoamC: { value: new THREE.Color(0.80, 0.82, 0.82) },
-      uFoamM: { value: new THREE.Color(0.50, 0.50, 0.47) },
+      uFoamC: { value: new THREE.Color(0.88, 0.90, 0.90) },
+      uFoamM: { value: new THREE.Color(0.64, 0.62, 0.56) },
       uMist: { value: new THREE.Color(0.74, 0.77, 0.79) },
     });
     uni.uSunDir = light.uSunDir; uni.uSunCol = light.uSunCol; uni.uSkyCol = light.uSkyCol; uni.uGndCol = light.uGndCol;
@@ -683,6 +670,11 @@
     idx.setUsage(THREE.DynamicDrawUsage);
     geo.setIndex(idx);
     geo.setDrawRange(0, 0);
+    // `position` here is a 2-component quad corner, so three cannot derive
+    // bounds from it (it reads z as NaN, and a NaN depth poisons the sort of
+    // every transparent object in the frame). The particles' real positions
+    // are in aP; the mesh is never culled, so a finite stand-in is enough.
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1e6);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = name;
     mesh.frustumCulled = false;
@@ -1012,6 +1004,8 @@
     attach: attach, detach: detach,
     seaFront: function (spec) { S.seaFront = spec && Number.isFinite(spec.s) ? spec : null; },
     burst: burst,
+    // the wall and particle materials, built on demand, for a compile probe
+    materials: function () { build(); return S.built ? [S.wallMat, S.partMat] : []; },
     stats: function () {
       return {
         records: nRec, fronts: book.fronts, overWater: book.overWater, cascades: book.cascades, rapids: book.rapids,

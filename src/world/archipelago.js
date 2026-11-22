@@ -892,34 +892,17 @@
   }
   CBZ.onAlways(4.5, tick);
 
-  /* THE SEA FOLLOWS THE SKY. The shared sheet's body colour (uSeaColor /
-     uShallowColor) is an albedo the water shader never lights (it carries
-     itself, for a sunlit sea), so at 23:00 under a black sky the ocean was
-     noon turquoise. The isles grade it with the same clock survival.js
-     grades their light with (CBZ.survIslandDayF): day teal, a dimmed
-     slate-violet through dusk and dawn, near-black blue at night. What
-     lights a night sea is what really does: the moon's path (water_spec.js
-     uMoon, by the moon's phase), the sky it mirrors (already the night
-     fog / dome), and the shore's lamps (uSeaLamps, below). The sun's
-     glitter and sheen follow the sun's own share of the light, and the
-     foam (an unlit albedo too) dims with the dark instead of glowing. */
-  const SEA_DAY = new THREE.Color(0x155878), SEA_DAY_SH = new THREE.Color(0x3195a7);
-  const SEA_DUSK = new THREE.Color(0x1c2234), SEA_DUSK_SH = new THREE.Color(0x2a3646);
-  const SEA_NIGHT = new THREE.Color(0x010409), SEA_NIGHT_SH = new THREE.Color(0x02080e);
+  /* THE SEA FOLLOWS THE SKY by construction now: the water shader lights its
+     body, foam and glint with the scene's own key light and sky (world/
+     water_spec.js), so night, dusk and storm need no grading here. What this
+     adds is the shore's lamps on the water after dark (uSeaLamps). */
   const LAMP_RGB = new THREE.Color(1.0, 0.72, 0.42);
   const seaG = { lampT: 0, shore: null, shoreOf: null };
   function seaGrade(sea) {
     const u = sea && sea.material && sea.material.userData && sea.material.userData.waterUniforms;
-    if (!u || !u.uSeaColor) return;
+    if (!u) return;
     const ang = Number.isFinite(CBZ.sunAngle) ? CBZ.sunAngle : 0.95, up = Math.sin(ang);
     const dayF = CBZ.survIslandDayF ? CBZ.survIslandDayF(up) : 1;
-    const dusk = Math.max(0, 1 - Math.abs(up) * 3) * (1 - Math.abs(dayF - 0.5) * 1.2);
-    const illum = Number.isFinite(CBZ.moonIllum) ? Math.max(0, Math.min(1, CBZ.moonIllum)) : 0.8;
-    u.uSeaColor.value.copy(SEA_NIGHT).lerp(SEA_DAY, dayF).lerp(SEA_DUSK, Math.max(0, dusk) * 0.6);
-    if (u.uShallowColor) u.uShallowColor.value.copy(SEA_NIGHT_SH).lerp(SEA_DAY_SH, dayF).lerp(SEA_DUSK_SH, Math.max(0, dusk) * 0.6);
-    if (u.uSunColor) u.uSunColor.value.multiplyScalar(dayF);
-    if (u.uMoon) u.uMoon.value = (1 - dayF) * (0.15 + 0.85 * illum);
-    if (u.uFoamColor) u.uFoamColor.value.multiplyScalar(0.05 + 0.1 * illum + (0.85 - 0.1 * illum) * dayF);
     seaLamps(u, sea, dayF);
   }
   // the lamps on the waterfront of the island in force, the nearest few

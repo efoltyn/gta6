@@ -1,3 +1,20 @@
+# Backlog, 2026-11-22: left over from the water rework (waves, wakes, boats, swimmers, tsunami, impacts)
+
+Not started; pick what you want.
+1. Tsunami at sea is still staged: the director walks the wave front and sets its level and current. The flood on land is a real solver; extend that solver out over the shelf so drawdown, the wave growing as it shoals, the bore and the run-up are one simulation. The drawdown's hard-edged boundary on the sea goes with it.
+2. Never run on a phone or tablet. The ripple field's fallback texture format (for devices without half-float targets) has never executed. No speed measurement was taken; the tsunami storyboard read sim ticks 0.3 to 0.7 ms slower and up to 90 more draw calls.
+3. Only the disaster island and Shark Sim were photographed. Gang City's sea and The Isles run the same code but nobody has looked at them.
+4. The smallest chop (2 to 6 m waves) is drawn but boats do not feel it: hulls respond to waves of 6 m and longer.
+5. The ripple field has one wave speed, so a wake's angle depends on boat speed instead of the fixed angle real deep-water wakes have.
+6. NPC War's water arena loads the ripple field but nothing writes into it.
+7. A meteor blast front that starts over land still draws its ring where it crosses onto the sea.
+8. Flood mud does not brown or flatten the grass under it.
+9. Still approximated, not simulated: surf (bands along depth lines), whitecaps (a steepness threshold scaled to wind), shore run-up (sum of sines), stranded fish (a scripted flop).
+10. systems/flashflood.js paints its own colour over the water shading; systems/disasters.js still hands harbour boats to the debris field, which may fight the new hull physics.
+11. A person's entry splash still reads a little like cut shapes at 20 m.
+
+---
+
 # Backlog, 2026-11-22: left over from the anatomy pass (people rebuilt to real proportions)
 
 Not started; pick what you want.

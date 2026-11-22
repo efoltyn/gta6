@@ -78,9 +78,12 @@
     if (typeof CBZ.citySeaHeightAt === "function") { try { return CBZ.citySeaHeightAt(x, z); } catch (e) {} }
     return -0.48;
   }
+  // white water through the one door: `p` is how hard (0.4 a kayak rolling,
+  // 4 a cruiser rammed), turned into the mass and speed water_impact prices
   function splash(x, z, p) {
-    if (typeof CBZ.waterSplashAt !== "function") return;
-    try { CBZ.waterSplashAt(x, seaY(x, z), z, clamp(p, 0.4, 4)); } catch (e) {}
+    if (typeof CBZ.waterHit !== "function") return;
+    const s = clamp(p, 0.4, 4);
+    try { CBZ.waterHit(x, seaY(x, z), z, { kind: "vehicle", mass: 120 * s * s * s, speed: 2 + s * 1.6 }); } catch (e) {}
   }
   // A deterministic 0..1 off a couple of numbers — this file never draws from
   // Math.random, because where a boat is and how it breaks is gameplay state.
@@ -235,7 +238,7 @@
       maxHp: 120 + num(spec.massT, 1) * 40,
       ai: true, player: false,
       _hullMesh: hullMeshOf(group),
-      _heel: 0, _heelV: 0, _capsized: false, _swamp: 0, _holed: false,
+      _capsized: false, _swamp: 0, _holed: false,
       _sinking: false, _sinkT: 0, _engulf: null,
       _seats: berthsFor(spec), _ramCd: 0,
       jobKind: (o.job && JOBS[o.job]) ? o.job : null,
@@ -374,6 +377,7 @@
   }
 
   function moveAnchored(rec, dt) {
+    if (rec._brokeOut) { rec.anchored = false; moveDrifting(rec, dt); return; }
     /* A REAL ANCHOR RODE: the hull drifts on the current and is restrained by
        the scope, so it swings round the anchor instead of being pinned to a
        coordinate. That swing is what makes a line of anchored skiffs read as
@@ -713,7 +717,7 @@
       rec.pos.x += Math.sin(rec.heading) * s * dt;
       rec.pos.z += Math.cos(rec.heading) * s * dt;
       d = Math.hypot(x - rec.pos.x, z - rec.pos.z);
-    } else rec._apWake = true;           // the autopilot already threw this frame's wake
+    }
     return d;
   }
   // sailing: the course a boat can actually hold toward (x, z) with this wind
@@ -760,17 +764,20 @@
     if (wf && typeof wf.currentAt === "function") {
       try { const c = wf.currentAt(rec.pos.x, rec.pos.z); if (c) { cx = num(c.x, 0); cz = num(c.z, 0); } } catch (e) {}
     }
-    if (!cx && !cz) { const W = windNow(); cx = W.x * 0.28; cz = W.z * 0.28; }
+    // the current itself carries her in the seakeeping (water_stability.js);
+    // what is added here is leeway, the wind on her topsides
+    const W = windNow();
+    const lx = W.x * 0.28, lz = W.z * 0.28;
+    if (!cx && !cz) { cx = lx; cz = lz; }
     rec.v *= Math.max(0, 1 - dt * 0.5);
-    rec.pos.x += (cx + Math.sin(rec.heading) * rec.v) * dt;
-    rec.pos.z += (cz + Math.cos(rec.heading) * rec.v) * dt;
+    rec.pos.x += (lx + Math.sin(rec.heading) * rec.v) * dt;
+    rec.pos.z += (lz + Math.cos(rec.heading) * rec.v) * dt;
     const beam = Math.atan2(cx, cz) + Math.PI / 2;
     rec.heading += wrapA(beam - rec.heading) * Math.min(1, dt * 0.05);
     if (typeof CBZ.marineShoreBlock === "function") { try { CBZ.marineShoreBlock(rec, rec._hullSpec, dt); } catch (e) {} }
   }
 
   function helmTick(rec, dt) {
-    rec._apWake = false;
     const S = rec.mood;
     // nobody at the helm: the kill cord is out and she drifts
     if (!rec.crew.length && rec._hadCrew) {
@@ -1033,81 +1040,27 @@
     return true;
   }
 
-  /* THE RIDE. Seat the hull on the live surface with the wave attitude, then
-     compose whatever roll the stability owner has for it. water_buoyancy.js's
-     own pass only ever walks cityCars, which is exactly why this exists — and
-     it has to make the same three decisions that pass makes, or the shark
-     sim's boats sit in the water differently from the city's:
-
-       • PITCH SIGN. The sampler's pitch is positive when the bow's water is
-         higher; in this engine bow-UP is NEGATIVE rotation.x (water_helm.js
-         writes -trim, water_buoyancy.js says so in as many words). This pass
-         had the sign the other way, so every hull nosed INTO each swell it
-         rode up — the "boats don't sit right in the water".
-       • WAVE GAIN. The spec's own seakeeping number: below 1 the hull only
-         partly answers the swell (heave pulled toward mean sea level, the
-         gradients damped). A 4 m kayak at 1.25 lives on every ripple; a 14 m
-         cruiser at 0.55 rides through them. Ignored here, the cruiser
-         pitched like the kayak.
-       • LIFT. A body surfacing under a hull throws it UP (water_stability's
-         "under" heave). Composed in the city pass, never here — a breach
-         under a kayak rolled it without ever lifting it. */
+  /* THE RIDE. The hull's seakeeping (water_stability.js) integrates heave,
+     pitch and roll against the water under it and carries it on the water's
+     flow; this writes that pose onto the model. Pitch: bow-up is NEGATIVE
+     rotation.x in this engine. */
   function ride(rec, dt) {
-    const spec = rec._hullSpec;
-    _rideOpts.heading = rec.heading;
-    _rideOpts.len = num(spec.loa, 6);
-    _rideOpts.beam = num(spec.beam, 2);
-    let r = null;
-    if (typeof CBZ.waterRideAt === "function") {
-      try { r = CBZ.waterRideAt(rec.pos.x, rec.pos.z, _rideOpts, _ride); } catch (e) { r = null; }
+    const st = typeof CBZ.hullSeakeep === "function" ? CBZ.hullSeakeep(rec, dt) : null;
+    let y, pitch, roll;
+    if (st && st.init) {
+      y = st.Y; pitch = -st.th; roll = st.phi;
+    } else {
+      y = seaY(rec.pos.x, rec.pos.z) + num(rec._hullSpec && rec._hullSpec.rideAbove, 0.06);
+      pitch = num(rec._pitch, 0); roll = num(rec._roll, 0);
     }
-    let mean = r ? num(r.y, seaY(rec.pos.x, rec.pos.z)) : seaY(rec.pos.x, rec.pos.z);
-    let pitchW = r ? num(r.pitch, 0) : 0;
-    let rollW = r ? num(r.roll, 0) : 0;
-    const wg = num(spec.waveGain, 1);
-    if (wg !== 1) {
-      const flat = typeof CBZ.waterSeaY === "function" ? num(CBZ.waterSeaY(), mean) : mean;
-      mean = flat + (mean - flat) * wg;
-      pitchW *= wg; rollW *= wg;
-    }
-    // a planing hull flattens out: the bow lifts and the ride stops mirroring every ripple
-    const planing = clamp(num(rec._planing, 0), 0, 1);
-    pitchW *= 1 - planing * 0.55; rollW *= 1 - planing * 0.55;
-    const pitch = -pitchW + num(rec._pitch, 0);
-    // the rig's leeward heel (§3b sailHeel), eased off when she is not sailing
+    // the rig's leeward heel (sailHeel), eased off when she is not sailing
     if (!rec._sailFrame && rec._sailHeel) rec._sailHeel *= Math.max(0, 1 - dt * 0.8);
     rec._sailFrame = false;
-    let roll = rollW + num(rec._roll, 0) + num(rec._sailHeel, 0);
-    let y = mean + num(spec.rideAbove, 0.06) * (1 - 0.55 * planing);
-
-    // Extra roll, ride drop and lift from the stability owner (water_stability.js),
-    // feature-detected: without it §5's own small heel model is the answer.
-    if (typeof CBZ.hullStabTick === "function") {
-      try { CBZ.hullStabTick(rec, dt); } catch (e) {}
-    }
-    if (typeof CBZ.hullStabRoll === "function") {
-      try { roll += num(CBZ.hullStabRoll(rec), 0); } catch (e) {}
-    } else {
-      roll += num(rec._heel, 0);
-    }
-    if (typeof CBZ.hullStabDrop === "function") {
-      try { y -= num(CBZ.hullStabDrop(rec), 0); } catch (e) {}
-    } else if (rec._capsized) {
-      const st = stabOf(spec);
-      y -= num(st.freeboard, 0.4) + num(spec.draft, 0.4) * 0.3;
-    }
-    if (typeof CBZ.hullStabLift === "function") {
-      try { y += num(CBZ.hullStabLift(rec), 0); } catch (e) {}
-    }
-
     rec._pitchNow = pitch; rec._rollNow = roll;     // read by the crew (seatCrew)
     rec.group.position.set(rec.pos.x, y, rec.pos.z);
     _e.set(pitch, rec.heading, roll, "YXZ");
     rec.group.quaternion.setFromEuler(_e);
-
-    // the autopilot already threw this frame's wake for a hull it drove; a
-    // far hull's wake is spent on water nobody is looking at
-    if (typeof CBZ.waterWakeFor === "function" && !rec._capsized && !rec._apWake && !rec._far && Math.abs(rec.v) > 0.4) {
+    if (typeof CBZ.waterWakeFor === "function" && !rec._capsized) {
       try { CBZ.waterWakeFor(rec, dt); } catch (e) {}
     }
   }
@@ -1145,7 +1098,7 @@
     }
     rec.group.updateMatrixWorld(true);
     const roll = rollOf(rec);
-    const rate = rec._stab ? num(rec._stab.phiDot, 0) : num(rec._heelV, 0);
+    const rate = rec._stab ? num(rec._stab.phiDot, 0) : 0;
     for (let i = 0; i < rec.crew.length; i++) {
       const b = rec.crew[i];
       if (!b || b.dead || b._aboard !== rec || b._overboard) { rec.crew.splice(i--, 1); continue; }
@@ -1427,8 +1380,6 @@
       if (typeof CBZ.hullCapsized === "function") {
         try { if (CBZ.hullCapsized(rec)) onCapsize(rec); } catch (e) {}
       }
-    } else {
-      phi = heelFallback(rec, moment * sign);
     }
     // the shove, the white water and the beat of lens. The push runs along the
     // contact line, i.e. away from the animal that just hit her.
@@ -1455,46 +1406,6 @@
     AUDIT.rams++;
     return phi;
   };
-
-  // ---- §5. the fallback heel model (only when water_stability.js is absent)
-  /* A hull is a spring: righting = displacement * gm * sin(phi) up to the
-     angle of vanishing stability, and past it the sign flips and she goes.
-     This is that one line integrated, nothing more, so the TIP is real in a
-     build that does not have the stability file yet. When it IS there, none
-     of this runs (see ride()). */
-  function heelFallback(rec, moment) {
-    const s = rec._hullSpec, st = stabOf(s);
-    const disp = Math.max(0.02, num(s.massT, 1)) * 9.81;       // kN
-    const gm = Math.max(0.02, num(st.gm, 0.5));
-    const phiV = Math.max(0.3, num(st.phiV, 1.1));
-    const maxRight = disp * gm * Math.sin(phiV);
-    // the impulse arrives as angular velocity: I ~ disp*gm/omega^2, and the
-    // natural roll period of a small hull is about 2 s, so omega ~ 3 rad/s
-    const I = disp * gm / 9;
-    rec._heelV = num(rec._heelV, 0) + (moment / Math.max(0.02, I)) * 0.12;
-    if (Math.abs(moment) > maxRight) {
-      // past the angle of vanishing stability on this one hit: she goes over
-      rec._heel = Math.sign(moment) * Math.PI;
-      rec._heelV = 0;
-      onCapsize(rec);
-      return rec._heel;
-    }
-    return num(rec._heel, 0);
-  }
-  function heelTick(rec, dt) {
-    if (typeof CBZ.hullStabRoll === "function") return;     // B owns the roll
-    if (rec._capsized) { rec._heel = Math.sign(rec._heel || 1) * Math.PI; rec._heelV = 0; return; }
-    const s = rec._hullSpec, st = stabOf(s);
-    const disp = Math.max(0.02, num(s.massT, 1)) * 9.81;
-    const gm = Math.max(0.02, num(st.gm, 0.5));
-    const phiV = Math.max(0.3, num(st.phiV, 1.1));
-    const I = disp * gm / 9;
-    const phi = num(rec._heel, 0);
-    const right = -disp * gm * Math.sin(phi) * (Math.abs(phi) < phiV ? 1 : -1.2);
-    rec._heelV = num(rec._heelV, 0) + (right / I) * dt - num(rec._heelV, 0) * Math.min(1, dt * 1.6);
-    rec._heel = phi + rec._heelV * dt;
-    if (Math.abs(rec._heel) > phiV * 1.35) { rec._heel = Math.sign(rec._heel) * Math.PI; onCapsize(rec); }
-  }
 
   function onCapsize(rec) {
     if (rec._capsized) return;
@@ -1860,8 +1771,6 @@
     const lever = Math.max(0.1, nh * Math.abs(py - gp.y) + Math.abs(ny) * lat);
     if (typeof CBZ.hullHeelImpulse === "function") {
       try { CBZ.hullHeelImpulse(rec, dp * lever / 0.1, { from: ny < -0.6 ? "under" : "nudge", x: px, z: pz, dur: 0.1 }); } catch (e) {}
-    } else {
-      heelFallback(rec, dp * lever * 0.5 * ((px - gp.x) * Math.cos(h) - (pz - gp.z) * Math.sin(h) >= 0 ? -1 : 1));
     }
     const sh = clamp(dp / mB, 0, 4);
     rec.vx = num(rec.vx, 0) - nx * sh;
@@ -2142,7 +2051,7 @@
       rec._pullY += (J.y - rec._pullY) * k;
       rec.group.position.set(rec.pos.x, rec._pullY, rec.pos.z);
       rec.heading = num(a.heading, rec.heading);
-      _e.set(0.4 * (E.t / E.dur), rec.heading, num(rec._heel, 0), "YXZ");
+      _e.set(0.4 * (E.t / E.dur), rec.heading, num(rec._rollNow, 0), "YXZ");
       rec.group.quaternion.setFromEuler(_e);
       // the crew ride it into the mouth (calm: nobody falls off a boat in a jaw)
       seatCrew(rec, dt, true);
@@ -2586,7 +2495,6 @@
         continue;
       }
 
-      rec._apWake = false;
       if (rec.alarm > 0) rec.alarm = Math.max(0, rec.alarm - dt / (rec.mood === "calm" ? 6 : 20));
       if (spot) swimmersTick(rec);
       if (rec._capsized) moveDrifting(rec, dt);
@@ -2596,7 +2504,6 @@
       else if (rec.route) moveCruising(rec, dt);
       else moveDrifting(rec, dt);
 
-      heelTick(rec, dt);
       /* WATER COMES IN THROUGH A HOLE, NOT THROUGH A CAPSIZE. A hull with a
          bite out of it founders on its own class's timetable (swampT is the
          seconds of green water it can take, so a 5.5 m open skiff has minutes
@@ -2615,7 +2522,13 @@
       if (!rec._capsized && typeof CBZ.hullCapsized === "function" && CBZ.hullCapsized(rec)) onCapsize(rec);
       if (rec._swamp > 0 && rec._swamp >= num(stabOf(rec._hullSpec).swampT, 10)) { sink(rec); continue; }
 
-      if (rec._hidden) continue;          // past the fog: nobody can see where she sits
+      // the water moves every hull, seen or not (one past the fog at 10 Hz);
+      // the crew rig only where seen
+      if (rec._hidden) {
+        rec._rideAcc = num(rec._rideAcc, 0) + dt;
+        if (rec._rideAcc >= 0.1) { ride(rec, rec._rideAcc); rec._rideAcc = 0; }
+        continue;
+      }
       ride(rec, dt);
       seatCrew(rec, dt, false);
     }
@@ -2664,6 +2577,7 @@
     reset: function () {
       despawnAll();
       dropFar();
+      if (typeof CBZ.waterWakeReset === "function") CBZ.waterWakeReset();   // a new match starts on calm water
       AUDIT.spawned = AUDIT.eaten = AUDIT.tipped = AUDIT.sunk = 0;
       AUDIT.holed = AUDIT.overboard = AUDIT.rams = AUDIT.bites = 0;
       AUDIT.biggestEatenM = 0;

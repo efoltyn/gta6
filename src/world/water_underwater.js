@@ -448,6 +448,7 @@
 
   const _fogC = new THREE.Color();
   const _eye = new THREE.Vector3();
+  const _wsa = { y: 0, depth: 0, vx: 0, vz: 0, wet: 0 };
   const _probe = new THREE.Vector3();
 
   let overlay = null, rays = null, meniscus = null;
@@ -1590,6 +1591,13 @@
     const cam = CBZ.camera;
     if (!cam) return -1;
     cam.getWorldPosition(_eye);
+    // the true surface at the eye's own x,z (world/water_spec.js's one query:
+    // the drawn crest, the flood, the drawdown), and whether there is water there
+    if (CBZ.waterSurfaceAt) {
+      const s = CBZ.waterSurfaceAt(_eye.x, _eye.z, _wsa);
+      if (!s.wet) return -1;
+      return s.y - _eye.y;
+    }
     if (!CBZ.cityWaterAt || !CBZ.cityWaterAt(_eye.x, _eye.z)) return -1;
     const surf = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(_eye.x, _eye.z)
       : (CBZ.waterSeaY ? CBZ.waterSeaY() : (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48));

@@ -218,6 +218,7 @@
     debris:  { mass: 12,    speed: 9,   clear: 1.6, min: 0.25, max: 3.0 },
     drop:    { mass: 0.5,   speed: 5,   clear: 1.0, min: 0.10, max: 1.0 },
     blast:   { mass: 900,   speed: 20,  clear: 6.0, min: 0.20, max: 4.0 },
+    meteor:  { mass: 300,   speed: 9000, clear: 40, min: 1.0, max: 12 },
   };
   // Momentum (kg^0.5 * m/s) that scores strength 1.0 — a 78kg body going in at
   // 8 m/s, i.e. someone thrown off a quay. The 0.55 exponent compresses the
@@ -324,16 +325,13 @@
         ttl: 0.34 + fxRand() * 0.26, alpha: 0.95,
       });
     }
-    // and the pin-prick of white water it leaves behind
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.22 * s, grow: 1.9 * s, ttl: 0.5, ring: true, ride: true, alpha: 0.7 });
   }
 
   // DROP — a rain dimple. One ring, occasionally a single bead. Gated on foam
   // HEADROOM, because rain arrives at up to 46 Hz and a squall must never be
   // able to spend the pool a splash is about to need.
   function fxDrop(x, sy, z, s) {
-    if (CBZ.waterFoamFree && CBZ.waterFoamFree() < 40) return;
-    emit({ x: x, y: sy + 0.02, z: z, size: 0.10 * s, grow: 0.85, ttl: 0.7, ring: true, ride: true, alpha: 0.6 });
+    if (CBZ.waterWakeStamp) CBZ.waterWakeStamp({ x: x, z: z, r: 0.06 + 0.05 * s, amp: 0.006 * s, ff: 0.04, fs: 0, ring: false });
     if (fxRand() < 0.16 * s) {
       emit({ x: x, y: sy + 0.03, z: z, vy: 1.1 + fxRand() * 0.8, size: 0.05, grow: -0.02, ttl: 0.26, alpha: 0.75 });
     }
@@ -362,7 +360,7 @@
   // it: a body carrying speed does not throw a symmetric ring, it ploughs, and
   // the water goes downrange with it. Zero is the old symmetric behaviour and
   // is what a falling object still gets.
-  function fxCrown(x, sy, z, s, jet, hx, hz, profile) {
+  function fxCrown(x, sy, z, s, jet, hx, hz, profile, R) {
     const entry = entryOn() && profile && typeof profile === "object" ? profile : null;
     const area = entry ? clamp(+entry.area || 0, 0.04, 1) : 0.58;
     const quality = entry ? clamp(+entry.quality || 0, 0, 1) : 0;
@@ -381,59 +379,14 @@
     const lean0 = hs > 0.05 ? clamp(hs / (7 + s * 2.2), 0, 0.85) : 0;
     const lean = entry ? clamp(lean0 * (0.72 + area * 0.62), 0, 0.9) : lean0;
     const bx = Math.cos(bear), bz = Math.sin(bear);
-    // ---- the sheet -------------------------------------------------------
-    if (s > 0.5 && CBZ.waterCrown) {
-      CBZ.waterCrown({
-        // shifted downrange: the hole a moving body makes is under its NOSE,
-        // not under the point it first touched
-        x: x + bx * (0.35 + 0.5 * s) * lean, z: z + bz * (0.35 + 0.5 * s) * lean,
-        r: (0.22 + 0.45 * s) * width,        // narrow cut -> broad flank sheet
-        grow: (0.5 + 0.55 * s) * width,
-        h: (0.8 + 1.55 * s) * rise,
-        ttl: 0.5 + 0.10 * s,
-        // DELIBERATELY TRANSLUCENT. A sheet of thrown water is mostly air;
-        // the first cut ran to 0.92 and photographed as a milk bucket.
-        alpha: Math.min(0.72, 0.40 + s * 0.09),
-      });
-      /* A SECOND SHEET, DOWNRANGE, A BEAT LATER. A body moving across the
-         surface tears a TROUGH, not a hole — the water closes behind it while
-         it is still opening in front. One cone can only ever be a stone going
-         in; two, offset along the track and a tenth of a second apart, is the
-         shape of something that arrived travelling. Only when there is real
-         speed and real mass to justify a second draw call. */
-      if (lean > 0.28 && s > 1.4 && (!entry || area > 0.34)) {
-        const d2 = (1.1 + s * 0.7) * lean;
-        later(0.085 + 0.02 * s, function () {
-          if (!CBZ.waterCrown) return;
-          CBZ.waterCrown({
-            x: x + bx * d2, z: z + bz * d2,
-            r: (0.18 + 0.30 * s) * width, grow: (0.4 + 0.42 * s) * width,
-            h: (0.6 + 1.05 * s) * 0.8 * rise, ttl: 0.45 + 0.09 * s,
-            alpha: Math.min(0.58, 0.32 + s * 0.07),
-          });
-        });
-      }
-    }
-    // ---- the grain -------------------------------------------------------
-    const slots = free();
-    const grain = entry ? (0.58 + area * 0.74) : 1;
-    const nCrown = Math.max(5, Math.min(Math.round((8 + s * 13) * grain), Math.round(slots * 0.5)));
-    for (let i = 0; i < nCrown; i++) {
-      const a = (i / nCrown) * Math.PI * 2 + fxRand() * 0.5;
-      const r = (0.28 + fxRand() * 0.55 * s) * width;
-      const out = (1.6 + fxRand() * 2.2 * s) * width;
-      // downrange droplets are thrown FASTER and FLATTER (they are being pushed
-      // by the body); the ones behind it are thrown up and left behind
-      const face = Math.cos(a) * bx + Math.sin(a) * bz;     // -1 behind .. +1 ahead
-      const push = hs * lean * (0.30 + 0.35 * Math.max(0, face));
-      emit({
-        x: x + Math.cos(a) * r * 0.55, y: sy + 0.06, z: z + Math.sin(a) * r * 0.55,
-        vx: Math.cos(a) * out + bx * push,
-        vy: (2.0 + fxRand() * 3.0 * s) * rise * (1 - 0.30 * lean * Math.max(0, face)),
-        vz: Math.sin(a) * out + bz * push,
-        size: 0.10 + fxRand() * (0.09 + 0.05 * s) * (0.6 + s * 0.22), grow: -0.02,
-        ttl: 0.5 + fxRand() * (0.5 + s * 0.16), alpha: 0.95,
-      });
+    // ---- the water thrown up: sized by the cavity, not by a dial ---------
+    // A person off 14 m (R ~0.6) throws a crown ~1.5 m that is mostly drops
+    // and gone in about a second; a car and up throw a white mass of spray.
+    // The entry's projected area widens or narrows it (a spear entry cuts a
+    // narrow hole, a flank slams a broad sheet).
+    const Rc = Math.max(0.05, +R || 0.5);
+    if (CBZ.waterThrow) {
+      CBZ.waterThrow({ x: x, z: z, R: Rc * width, h: 2.2 * Rc * rise, hx: hx || 0, hz: hz || 0 });
     }
     if (jet > 0) {
       /* THE REBOUND SPIKE, AND IT IS *LATE ON PURPOSE*. A cavity does not throw
@@ -448,7 +401,8 @@
          at a size the eye reads as an answer to it, rather than being the whole
          splash arriving late. */
       const nJet = 3 + Math.round(Math.min(6, s * 1.3));
-      const v0 = (4.6 + s * 3.8) * jet;
+      // the rebound jet stands about half again as tall as the crown
+      const v0 = Math.sqrt(2 * 9.81 * 1.5 * 2.2 * Rc) * jet;
       const jx = x + bx * (0.5 + 0.6 * s) * lean, jz = z + bz * (0.5 + 0.6 * s) * lean;
       later(0.11 + Math.min(0.24, 0.055 * s), function () {
         for (let i = 0; i < nJet; i++) {
@@ -464,36 +418,8 @@
                ttl: 0.7 + 0.1 * s, ring: true, ride: true, alpha: 0.7 });
       });
     }
-    // ---- the water left behind -------------------------------------------
-    // A WASH (a filled patch of churned white, ride without ring) where the
-    // thing actually went in, and RINGS travelling away from it. The wash is
-    // what stops a big entry leaving a clean hole in the sea.
-    //
-    // THE SCAR OUTLIVES THE SPLASH. A tonne and a half of animal leaves white
-    // water on the sea for SECONDS after the noise has stopped — the old flat
-    // `0.8 + 0.2*s` meant a megalodon's entry was gone in 1.4 s and the sea
-    // was mirror-clean behind it, which is the tell that nothing had really
-    // happened there. It now runs with the cube root of the event, so a diver
-    // is unchanged and a big body leaves a mark you can still see when you
-    // turn round.
-    const scar = 0.8 + 1.5 * Math.cbrt(Math.max(0.2, s)) + (entry ? quality * 0.65 : 0);
-    emit({ x: x, y: sy + 0.03, z: z, size: (0.9 * s + 0.4) * width,
-           grow: 0.9 * s * width, ttl: scar, ride: true, alpha: 0.45 });
-    // and it DRIFTS with whatever went in — a wake, not a stamp
-    if (lean > 0.2) {
-      emit({ x: x + bx * (0.8 + s) * lean, y: sy + 0.03, z: z + bz * (0.8 + s) * lean,
-             size: (0.6 * s + 0.3) * width, grow: 0.7 * s * width,
-             ttl: scar * 0.8, ride: true, alpha: 0.34 });
-    }
-    // THE LEADING CREST is an ARC, not a circle, when the thing was moving:
-    // water_wake.js's ring primitive already draws a feathered crest over a
-    // bearing (it is how the Kelvin bow wave is drawn) and a body arriving at
-    // speed throws exactly that ahead of itself.
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.5 * s * width, grow: 2.4 * s * width, ttl: 1.1 + 0.14 * s,
-           ring: true, ride: true, alpha: 0.85,
-           bear: lean > 0.25 ? bear : 0, arc: lean > 0.25 ? 1.5 : 0 });
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.24 * s * width,
-           grow: 1.3 * s * width, ttl: 0.85, ring: true, ride: true, alpha: 0.68 });
+    // (the hole, the rings and the white water left behind are the field's:
+    // see fieldImpact, which every hit calls with its energy)
 
     /* A clean entry hides energy BELOW the surface instead of deleting it.  The
        narrow atmospheric cavity pinches off, pauses, then returns as seething
@@ -565,12 +491,7 @@
     // primitive as the entry sheet, different proportions; there is no second
     // column implementation to keep in step.
     later(t2, function () {
-      if (!CBZ.waterCrown) return;
-      CBZ.waterCrown({
-        x: x, z: z,
-        r: 0.5 + P * 0.55, grow: 0.7 + P * 0.6,
-        h: 5.0 + P * 6.0, ttl: 1.1 + P * 0.25, alpha: 0.68,
-      });
+      if (CBZ.waterThrow) CBZ.waterThrow({ x: x, z: z, R: 0.5 + P * 0.55, h: 5.0 + P * 6.0, column: true });
     });
     for (let w = 0; w < waves; w++) {
       later(t2 + w * 0.06, function () {
@@ -701,9 +622,129 @@
   }
 
   // ============================================================
+  //  6b. WHAT THE WATER DOES — sized by energy, the same law for everything
+  // ============================================================
+  /* The cavity an impact opens in water scales with its energy against the
+     water's weight: R ~ 0.6 (E / (rho g))^(1/4) metres. That one number
+     sizes the crater (stamped into the wake field as a displacement, so it
+     collapses into rings that spread for seconds), the white water left
+     standing (slow foam over ~1.7 R), the ring every floating body and
+     swimmer feels (the CPU twin), and, above WAVE_E, real gravity waves in
+     the sea itself (CBZ.waterSurfaceImpulse): amplitude ~0.25 R, wavelength
+     ~4 R + 2 m, travelling at the deep-water speed for that wavelength, which
+     every hull and swimmer reads from the sea's own height query.
+       bullet 0.008 kg @ 380 m/s    0.58 kJ   R 0.29 m   dimple 5 cm
+       person 78 kg @ 8 m/s          2.5 kJ   R 0.42 m   crater 0.15 m
+       person off 14 m (16.6 m/s)   10.7 kJ   R 0.61 m   crater 0.27 m
+       car 1.4 t @ 14 m/s            137 kJ   R 1.15 m   + sea waves 0.29 m, 6.6 m long
+       small meteor 14 kg @ 3 km/s    62 MJ   R 5.3 m    + sea waves 1.3 m, 23 m long
+       iron 300 kg @ 13 km/s          25 GJ   R 24 m     + sea waves 6 m, 98 m long */
+  const RHO_G = 1025 * 9.81;
+  const WAVE_E = 5e4;              // J: above this the sea itself is moved
+  const AIR_E = 150;               // J: below this nothing is thrown into the air
+                                   // (a swimmer's stroke ~20 J, a kick, a slow
+                                   // step in ~100 J: rings and foam only)
+  function cavityR(E) { return clamp(0.6 * Math.pow(Math.max(0, E) / RHO_G, 0.25), 0.05, 80); }
+  function fieldImpact(x, z, E, hx, hz) {
+    if (!(E > 0)) return;
+    const R = cavityR(E);
+    const small = Math.min(1, R / 0.8);          // tiny cavities are shallow
+    const hs = Math.hypot(hx, hz);
+    // a body arriving with way on ploughs: the hole is under its nose
+    const lean = hs > 0.5 ? clamp(hs / (8 + R * 3), 0, 0.8) : 0;
+    const ox = hs > 0.5 ? (hx / hs) * R * lean : 0, oz = hs > 0.5 ? (hz / hs) * R * lean : 0;
+    if (CBZ.waterWakeStamp) {
+      if (R < 1) {
+        // a small entry: its crater and the white water it leaves, at once
+        CBZ.waterWakeStamp({ x: x + ox, z: z + oz, r: R, amp: Math.min(1.8, 0.45 * R * small),
+          ff: Math.min(0.8, 0.6 * R), fs: Math.min(0.7, 0.35 * R), ring: false });
+        CBZ.waterWakeStamp({ x: x + ox * 1.6, z: z + oz * 1.6, r: R * 1.7, amp: 0, ff: 0,
+          fs: Math.min(0.55, 0.3 * R), ring: false });
+      } else {
+        /* A big one: the crater now, and the white water only where the
+           thrown water falls back, inside ~1.5 cavity radii (stamp r 0.75R:
+           its Gaussian is gone by 2r), building up over the seconds the
+           column collapses and the rain lands. The box is asked to hold it. */
+        const tFall = 2 * Math.sqrt(2 * 2.2 * R / GRAV);
+        if (CBZ.waterWakeHold) CBZ.waterWakeHold(x, z, 1.6 * R, tFall * 2 + 6);
+        CBZ.waterWakeStamp({ x: x + ox, z: z + oz, r: R * 0.6, amp: Math.min(1.8, 0.45 * R), ff: 0, fs: 0, ring: false });
+        for (let k = 1; k <= 4; k++) {
+          later(tFall * (0.35 + 0.3 * k), function () {
+            if (!CBZ.waterWakeStamp) return;
+            CBZ.waterWakeStamp({ x: x + ox, z: z + oz, r: R * (0.45 + 0.08 * k), amp: 0,
+              ff: 0.16, fs: 0.14, ring: false });
+          });
+        }
+      }
+    }
+    if (CBZ.waterWakeRing) CBZ.waterWakeRing(x, z, Math.min(1.2, 0.3 * R * small), Math.max(0.4, 0.6 * R));
+    if (E >= WAVE_E && entryOn() && typeof CBZ.waterSurfaceImpulse === "function") {
+      const lam = 4 * R + 2;
+      try {
+        CBZ.waterSurfaceImpulse(x, z, {
+          amplitude: clamp(0.25 * R, 0.05, 6), radius: R,
+          speed: Math.sqrt(9.81 * lam / (2 * Math.PI)), wavelength: lam,
+          life: clamp(3 + R * 0.15, 3, 14), energy: E,
+        });
+        stats.waves++;
+      } catch (e) {}
+    }
+  }
+  // a charge's yield as energy (power 1 ~ a hand grenade's 0.2 kg TNT), less
+  // the share a deep charge spends on the water above it
+  function blastEnergy(pw, depth) {
+    return pw * 0.8e6 * clamp(1 - depth / (6 + pw * 6), 0.15, 1);
+  }
+  /* A METEOR INTO THE SEA, sized by the same cavity law as everything else
+     (a 25 GJ iron: R ~24 m). The water goes UP: a central column ~4R tall
+     and a wall ~1.6R tall round a cavity ~R wide, both the lit sheet with
+     its rim breaking into drops; then the column comes back down as rain
+     over 1-3R, the cavity collapses into a wide foam field (fieldImpact and
+     the rain's own foam below), and a hot body's steam rises over it after
+     (meteor.js's plume). Times are the ballistic times of those heights. */
+  function fxMeteor(x, sy, z, E, hot) {
+    const R = cavityR(E);
+    const hCol = Math.min(400, 4 * R + 4), hWall = Math.min(160, 1.6 * R + 2);
+    const tCol = Math.sqrt(2 * hCol / GRAV), tWall = Math.sqrt(2 * hWall / GRAV);
+    // the column and the wall: a turbulent white mass of spray puffs and
+    // droplet streams on the ballistic law, the sheet only a faint core
+    if (CBZ.waterThrow) {
+      CBZ.waterThrow({ x: x, z: z, R: R, h: hCol, column: true });
+      later(0.12 + R * 0.004, function () { CBZ.waterThrow({ x: x, z: z, R: R, h: hWall }); });
+    }
+    // the column comes back down as rain over a wide ring
+    later(tCol * 0.9, function () {
+      const n = Math.max(8, Math.min(220, Math.round(free() * 0.3)));
+      for (let i = 0; i < n; i++) {
+        const a = fxRand() * Math.PI * 2, r = R * (0.3 + 2.7 * Math.sqrt(fxRand()));
+        const y0 = sy + hCol * (0.25 + 0.6 * fxRand());
+        emit({ x: x + Math.cos(a) * r, y: y0, z: z + Math.sin(a) * r,
+          vx: Math.cos(a) * (1 + fxRand() * 3), vy: -2 - fxRand() * 6, vz: Math.sin(a) * (1 + fxRand() * 3),
+          size: 0.12 + fxRand() * 0.12, ttl: Math.sqrt(2 * (y0 - sy) / GRAV) + 1, alpha: 0.9 });
+      }
+    });
+    // where the column's rain lands: foam inside ~1.5 cavity radii
+    later(tCol * 1.6, function () {
+      if (CBZ.waterWakeStamp) CBZ.waterWakeStamp({ x: x, z: z, r: R * 0.75, amp: 0, ff: 0.2, fs: 0.25, ring: false });
+    });
+    // a hot body flash-boils the water it went into: steam rises off the
+    // cavity a beat after the water (meteor.js draws the plume), here only
+    // the fine boiling spray over the hole
+    if (hot) {
+      const n = Math.max(6, Math.min(40, Math.round(free() * 0.05)));
+      for (let i = 0; i < n; i++) {
+        const a = fxRand() * Math.PI * 2, r = R * 0.6 * Math.sqrt(fxRand());
+        emit({ x: x + Math.cos(a) * r, y: sy + 0.3, z: z + Math.sin(a) * r,
+          vx: Math.cos(a) * 1.5, vy: 3 + fxRand() * 6, vz: Math.sin(a) * 1.5,
+          size: 0.08, ttl: 1.2 + fxRand(), alpha: 0.8 });
+      }
+    }
+  }
+
+  // ============================================================
   //  7. THE BLOCK — CBZ.waterHit
   // ============================================================
-  const stats = { bullet: 0, body: 0, vehicle: 0, debris: 0, blast: 0, drop: 0 };
+  const stats = { bullet: 0, body: 0, vehicle: 0, debris: 0, blast: 0, drop: 0, meteor: 0, waves: 0 };
   let lastEntryProfile = null;
   let frameBullets = 0;             // per-frame bullet-splash cap (minigun into the bay)
   const hasKind = function (k) { return Object.prototype.hasOwnProperty.call(KINDS, k); };
@@ -759,43 +800,13 @@
       };
     }
 
-    /* The impact changes THE SURFACE before any card or droplet is drawn over
-       it.  Generic body/vehicle/debris entries get the neutral shape; a marine
-       entry supplies its measured projected area and body span. */
-    if (entryOn() && typeof CBZ.waterSurfaceImpulse === "function" &&
-        (kind === "body" || kind === "vehicle" || kind === "debris")) {
-      const area = entry ? clamp(+entry.area || 0, 0.04, 1) : 0.58;
-      const span = entry ? Math.max(0.8, +entry.span || 2) : Math.max(1, strength * 1.2);
-      try {
-        CBZ.waterSurfaceImpulse(x, z, {
-          amplitude: clamp(0.025 + strength * (0.055 + area * 0.085), 0.035, 1.25),
-          radius: clamp(span * (0.055 + area * 0.19), 0.28, 8.5),
-          speed: clamp(2.2 + strength * (0.65 + area * 0.55), 1.5, 13),
-          life: clamp(1.15 + strength * 0.34 + span * 0.025, 1.1, 4.8),
-        });
-      } catch (e) {}
-    }
-    /* A round and a charge move the water too (WATER V3): a bullet leaves a
-       small, quick dimple and ring on the real surface (not just a sprite over
-       it), and a blast lifts a dome and throws a ring that every swimmer and
-       hull then feels, because the impulse field IS the height query. The
-       impulse pool replaces its weakest slot, so a burst of fire can only
-       ever displace other ripples, never a body's entry. */
-    if (entryOn() && typeof CBZ.waterSurfaceImpulse === "function") {
-      try {
-        if (kind === "bullet") {
-          CBZ.waterSurfaceImpulse(x, z, { amplitude: 0.035, radius: 0.22, speed: 1.6, life: 0.9 });
-        } else if (kind === "blast") {
-          const pw = +opts.power > 0 ? clamp(+opts.power, 0.15, 4) : strength;
-          const sub = clamp(1 - depth / (6 + pw * 6), 0.15, 1);      // a deep charge domes less
-          CBZ.waterSurfaceImpulse(x, z, {
-            amplitude: clamp(0.25 + pw * 0.28, 0.2, 1.25) * sub,
-            radius: clamp(1.6 + pw * 1.6, 1.2, 8.5),
-            speed: clamp(5 + pw * 2.2, 4, 13),
-            life: clamp(2.6 + pw * 0.6, 2.2, 5),
-          });
-        }
-      } catch (e) {}
+    // THE WATER ITSELF MOVES FIRST: the crater, the rings, the foam, and for
+    // a big enough event real gravity waves in the sea (fieldImpact).
+    const E = 0.5 * mass * speed * speed * coupling;
+    if (kind !== "drop") {
+      let pw = 0;
+      if (kind === "blast") pw = +opts.power > 0 ? clamp(+opts.power, 0.15, 4) : strength;
+      fieldImpact(x, z, kind === "blast" ? blastEnergy(pw, depth) : E, +opts.vx || 0, +opts.vz || 0);
     }
 
     // ---- the calibrated vocabulary ---------------------------------------
@@ -808,8 +819,13 @@
       // A blast is sized by YIELD, not by momentum — opts.power wins when the
       // caller knows it (every ordnance path does).
       fxBlast(x, Math.min(y, sy), z, sy, (+opts.power > 0 ? clamp(+opts.power, 0.15, 4) : strength), depth);
+    } else if (kind === "meteor") {
+      fxMeteor(x, sy, z, E, !!opts.hot);
+    } else if (E < AIR_E) {
+      // too little energy to throw water into the air (a hand slap, a kick, a
+      // slow step in): the field's small rings and foam are the whole event
     } else if (kind === "debris") {
-      fxCrown(x, sy, z, strength, 0, +opts.vx || 0, +opts.vz || 0, entry);   // compact crown, no jet
+      fxCrown(x, sy, z, strength, 0, +opts.vx || 0, +opts.vz || 0, entry, cavityR(E));   // compact crown, no jet
     } else {
       // body / vehicle: crown + rebound jet + settling ring. A vehicle lands
       // flatter and wider than a diver, so its jet is damped a little.
@@ -817,7 +833,7 @@
       // it leans the whole event downrange — see fxCrown.
       const jet = (kind === "vehicle" ? 0.75 : 1) *
         (entry ? (0.42 + clamp(+entry.area || 0, 0, 1) * 0.82) : 1);
-      fxCrown(x, sy, z, strength, jet, +opts.vx || 0, +opts.vz || 0, entry);
+      fxCrown(x, sy, z, strength, jet, +opts.vx || 0, +opts.vz || 0, entry, cavityR(E));
     }
 
     if (!opts.quiet) playHit(x, sy, z, loud, kind);
@@ -1097,8 +1113,8 @@
     }
 
     // --- peds and corpses (round-robin slice) ------------------------------
-    // The PLAYER is deliberately excluded: city/swim.js already announces the
-    // player's entry through CBZ.waterSplashAt, which now routes to this bus.
+    // The PLAYER is deliberately excluded: city/swim.js announces the
+    // player's entry through CBZ.waterHit itself, with the real fall speed.
     const peds = CBZ.cityPeds;
     if (peds && peds.length) {
       const n = Math.min(PED_SLICE, peds.length);
@@ -1106,6 +1122,15 @@
         if (pedCursor >= peds.length) pedCursor = 0;
         const p = peds[pedCursor++];
         if (p && p.pos) checkEntry(p, p.pos.x, p.pos.y, p.pos.z, "body", 78, 0, dt * (peds.length / Math.max(1, n)));
+      }
+    }
+
+    // --- survivor bots (the island's people) -------------------------------
+    const bots = CBZ.bots;
+    if (bots && bots.length) {
+      for (let i = 0; i < bots.length; i++) {
+        const b = bots[i];
+        if (b && b.pos && !b._aboard) checkEntry(b, b.pos.x, b.pos.y, b.pos.z, "body", 78, 0, dt);
       }
     }
 
@@ -1171,6 +1196,7 @@
     return {
       bullet: stats.bullet, body: stats.body, vehicle: stats.vehicle,
       debris: stats.debris, blast: stats.blast, drop: stats.drop,
+      meteor: stats.meteor, seaWaves: stats.waves,
       pending: pending.length, listeners: listeners.length,
       grenades: grenades.length,
       lastEntry: lastEntryProfile ? Object.assign({}, lastEntryProfile) : null,

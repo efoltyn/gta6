@@ -15,8 +15,10 @@
    (CBZ.waterWaveGLSL with the arena's live amp/chop and the shared clock),
    so the foam rides the waves instead of floating through them, and lifts
    the upstream bank a metre or so where the water is piling against the
-   wall. The fragment stage draws the bank, the corner tear, the wake V and
-   the eddy in the building's own flow frame, advected with the current.
+   wall. The fragment stage works out the foam cover (the bank, the corner
+   tear, the wake V) in the building's own flow frame and draws it with the
+   water's one foam look (world/water_spec.js cbzFoamLook), carried
+   downstream with the current.
 
    The CPU side is a 10 Hz pass over the building list (a few dozen records)
    that asks the ONE water oracle (CBZ.survSeaMeanY / waterFrontDropAt) how
@@ -35,34 +37,17 @@
   let acc = 0, live = false;
   const _m = new THREE.Matrix4();
   const _zero = new THREE.Matrix4().makeScale(0, 0, 0);
-  const _fs = {};
+  const _fs = {}, _mul = {};
 
   function arenaNow() { return CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena : null; }
 
-  function build(arena) {
-    const bs = arena.fragile || [];
-    maxN = bs.length;
-    if (!maxN || !CBZ.waterWaveGLSL || !CBZ.waterCommonUniforms) return false;
-    const geo = new THREE.PlaneGeometry(1, 1, SEG, SEG);
-    geo.rotateX(-Math.PI / 2);
-    const inst = geo;
-    rectAttr = new THREE.InstancedBufferAttribute(new Float32Array(maxN * 4), 4);
-    inst.setAttribute("aRect", rectAttr);
-    // THE WATER'S OWN HEADING AT EACH BUILDING (the run-up field's current
-    // round it): the bank piles on the face the water is actually hitting,
-    // which down a side street is not the face toward the sea
-    flowAttr = new THREE.InstancedBufferAttribute(new Float32Array(maxN * 2), 2);
-    inst.setAttribute("aFlow", flowAttr);
-
+  // the foam sheet's material (exported so a compile probe can build one)
+  function makeMaterial() {
     const U = CBZ.waterCommonUniforms();
+    // the island sea's swell / wind multipliers (CBZ.waterArenaMul)
     U.uAmp = { value: 1 }; U.uChop = { value: 1 };
     U.uFlow = { value: new THREE.Vector2(1, 0) };
     U.uSpd = { value: 2 };
-    U.uSed = { value: 1 };
-    U.uLight = { value: 1 };
-    U.uFoamDirty = { value: new THREE.Color(0x9a8d78) };
-    U.uFoamClean = { value: new THREE.Color(0xe9eef0) };
-    U.uEddy = { value: new THREE.Color(0x1d1a14) };
 
     const vs = [
       "uniform float uSeaTime;",
@@ -77,6 +62,7 @@
       "varying vec2 vL;",
       "varying vec4 vR;",
       "varying float vBank;",
+      "varying vec3 vW;",
       "#include <fog_pars_vertex>",
       "void main() {",
       "  vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);",
@@ -94,6 +80,7 @@
       // away over a few metres, scaled by how deep/fast the flood is there
       "  vBank = exp(-max(sd, 0.0) / 3.2) * smoothstep(0.35, -0.9, a) * aRect.z;",
       "  wp.y += twH + 0.07 + vBank * 1.4;",
+      "  vW = wp.xyz;",
       "  vec4 mvPosition = viewMatrix * wp;",
       "  gl_Position = projectionMatrix * mvPosition;",
       "  #include <fog_vertex>",
@@ -104,19 +91,13 @@
       "uniform float uSeaTime;",
       "uniform vec2 uFlow;",
       "uniform float uSpd;",
-      "uniform float uSed;",
-      "uniform float uLight;",
-      "uniform vec3 uFoamDirty;",
-      "uniform vec3 uFoamClean;",
-      "uniform vec3 uEddy;",
       "varying vec2 vL;",
       "varying vec4 vR;",
       "varying float vBank;",
       "varying vec2 vFlow;",
+      "varying vec3 vW;",
+      CBZ.waterShadeGLSL ? CBZ.waterShadeGLSL() : "",
       "#include <fog_pars_fragment>",
-      "float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }",
-      "float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
-      "  return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), f.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), f.x), f.y); }",
       "void main() {",
       "  vec2 q = abs(vL) - vR.xy;",
       "  float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);",
@@ -125,45 +106,57 @@
       "  float a = dot(vL, fl), c = dot(vL, cr);",
       "  float ha = abs(fl.x) * vR.x + abs(fl.y) * vR.y;",   // half extent along the flow
       "  float hc = abs(fl.y) * vR.x + abs(fl.x) * vR.y;",   // and across it
-      // the pattern is dragged downstream with the water
-      "  vec2 adv = vec2(a - uSeaTime * uSpd * 1.6, c);",
-      "  float n = vn(adv * 0.42 + vR.w * 17.0) * 0.6 + vn(adv * 1.3 + vR.w * 5.0) * 0.4;",
-      "  float streak = vn(vec2(a * 0.18 - uSeaTime * uSpd * 0.35, c * 1.7 + vR.w * 9.0));",
       // contact froth all the way round, heaviest on the upstream face
       "  float contact = exp(-max(sd, 0.0) / 0.8);",
       "  float bank = exp(-max(sd, 0.0) / 3.0) * smoothstep(0.3 * ha, -ha - 1.0, a);",
-      // the wake: two spreading foam lines off the downstream corners, and a
-      // dark sheltered eddy between them
+      // the wake: two spreading foam lines off the downstream corners
       "  float da = a - ha;",
       "  float behind = smoothstep(-0.5 * ha, 1.0, da);",
       "  float spread = hc + max(da, 0.0) * 0.32;",
       "  float edge = abs(abs(c) - spread);",
       "  float fade = exp(-max(da, 0.0) / 16.0);",
       "  float wake = exp(-edge / (1.1 + max(da, 0.0) * 0.06)) * behind * fade;",
-      "  float eddy = smoothstep(spread, spread * 0.4, abs(c)) * behind * fade * smoothstep(0.0, 3.0, da);",
       // corner tear: the flow accelerating round the upstream corners
       "  float corner = exp(-length(vec2(max(abs(c) - hc, 0.0), a + ha)) / 2.2) * smoothstep(hc * 0.6, hc + 0.5, abs(c));",
-      "  float foam = contact * 0.75 + bank * 1.15 + corner * 0.8 + wake * (0.55 + 0.6 * streak);",
-      "  foam *= 0.45 + 0.75 * n;",
-      "  foam = clamp(foam * vR.z, 0.0, 1.0);",
-      "  float fa = smoothstep(0.18, 0.62, foam);",
-      "  float ea = eddy * 0.32 * vR.z * (1.0 - fa);",
-      // dirty foam in a soup, cleaner as the water settles
-      "  vec3 fc = mix(uFoamClean, uFoamDirty, uSed) * (0.82 + 0.28 * n) * uLight;",
-      "  vec3 col = mix(uEddy * uLight, fc, fa / max(0.001, fa + ea));",
-      "  float alpha = clamp(fa * 0.92 + ea, 0.0, 0.95);",
-      "  if (alpha < 0.01) discard;",
-      "  gl_FragColor = vec4(col, alpha);",
+      "  float cov = clamp((contact * 0.75 + bank * 1.15 + corner * 0.8 + wake * 0.7) * vR.z, 0.0, 1.0);",
+      // the water's one foam look, its pattern carried downstream with the current
+      "  vec2 fq = vW.xz - fl * uSeaTime * uSpd;",
+      "  float fp = max(max(length(dFdx(vW.xz)), length(dFdy(vW.xz))), 0.002);",
+      "  vec4 fo = cbzFoamLook(fq, cov, vec3(0.0, 1.0, 0.0), fp, uSeaTime);",
+      "  if (fo.a < 0.01) discard;",
+      "  gl_FragColor = vec4(fo.rgb, fo.a);",
+      "  #include <tonemapping_fragment>",
+      "  #include <colorspace_fragment>",
       "  #include <fog_fragment>",
       "}",
     ].join("\n");
 
-    mat = new THREE.ShaderMaterial({
+    const m = new THREE.ShaderMaterial({
       uniforms: U, vertexShader: vs, fragmentShader: fs,
       transparent: true, depthWrite: false, fog: true,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
     });
-    mat.name = "tsunami-flow-foam";
+    m.name = "tsunami-flow-foam";
+    return m;
+  }
+  CBZ.tsunamiFlowMaterial = makeMaterial;
+
+  function build(arena) {
+    const bs = arena.fragile || [];
+    maxN = bs.length;
+    if (!maxN || !CBZ.waterWaveGLSL || !CBZ.waterCommonUniforms) return false;
+    const geo = new THREE.PlaneGeometry(1, 1, SEG, SEG);
+    geo.rotateX(-Math.PI / 2);
+    const inst = geo;
+    rectAttr = new THREE.InstancedBufferAttribute(new Float32Array(maxN * 4), 4);
+    inst.setAttribute("aRect", rectAttr);
+    // THE WATER'S OWN HEADING AT EACH BUILDING (the run-up field's current
+    // round it): the bank piles on the face the water is actually hitting,
+    // which down a side street is not the face toward the sea
+    flowAttr = new THREE.InstancedBufferAttribute(new Float32Array(maxN * 2), 2);
+    inst.setAttribute("aFlow", flowAttr);
+
+    mat = makeMaterial();
     mesh = new THREE.InstancedMesh(inst, mat, maxN);
     mesh.frustumCulled = false;
     mesh.renderOrder = 4;
@@ -198,15 +191,13 @@
     const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
     const U = mat.uniforms;
     if (CBZ.waterDriveCommonUniforms) CBZ.waterDriveCommonUniforms(U);
-    if (W) { U.uAmp.value = W.amp; U.uChop.value = W.chop; U.uSed.value = Math.min(1, W.sediment || 0); }
+    if (W && CBZ.waterArenaMul) { const m = CBZ.waterArenaMul(W.amp, W.chop, _mul); U.uAmp.value = m.s; U.uChop.value = m.w; }
     const drain = e.phase === "drain";
     const fx = (drain ? -1 : 1) * (+e.dx || 0), fz = (drain ? -1 : 1) * (+e.dz || 0);
     const fl = Math.hypot(fx, fz) || 1;
     U.uFlow.value.set(fx / fl, fz / fl);
     const flow = Math.abs(+e.flow || 0);
     U.uSpd.value = Math.min(4.5, 0.6 + flow * 0.5);
-    // the scene's own light level (the tsunami dims sun+hemi): foam must not glow
-    U.uLight.value = CBZ.sun && CBZ.hemi ? Math.min(1.25, 0.45 + 0.45 * (CBZ.sun.intensity || 0) + 0.35 * (CBZ.hemi.intensity || 0)) : 1;
 
     acc += dt || 0;
     if (acc < 0.1 && live) return;

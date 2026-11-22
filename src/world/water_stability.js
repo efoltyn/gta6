@@ -1,93 +1,47 @@
 /* ============================================================
-   src/world/water_stability.js — BOATS CAN GO OVER.
+   src/world/water_stability.js — HOW A HULL SITS IN MOVING WATER.
 
-   WHAT THIS REPLACES
-   ------------------------------------------------------------
-   Nothing in this game could tip a boat. Roll was two cosmetics:
-   water_helm.js eased `car._roll` toward a turn-heel clamped at `maxHeel`
-   (0.075 rad on the yacht, 0.26 on the RIB), and a shark bite did
-   `car.group.rotation.z += +-0.12..0.24` (marine_predation.js:1250) — a
-   one-frame wobble written straight onto the transform, which the very next
-   buoyancy pass at order 38.5 overwrote wholesale. A 30-tonne megalodon
-   hitting a 4-metre kayak produced a 0.2 rad twitch and then nothing.
+   Every hull in the water, every frame: heave, pitch and roll as damped
+   oscillators whose periods come from the hull's own numbers (loa, beam,
+   draft, massT, stab.gm), driven by the water sampled at five points of the
+   hull; flight and slamming when the water falls away faster than buoyancy
+   can follow; the water's own flow carrying the hull; grounding; green water;
+   capsize. Section 4 has the model and the numbers by hull size.
 
-   So: a real single-degree-of-freedom roll model, in ONE file, composed into
-   the ride the same way every other attitude term already is. A hull that
-   goes over STAYS over — floating inverted, keel up, people in the water —
-   and then floods and sinks or drifts, per its class.
-
-   THE MODEL (small, honest, tunable — every constant is at the top)
-   ------------------------------------------------------------
-   One state per hull: phi (roll about the keel axis, radians), phiDot, and
-   how much water is inside it.
-
-     I * phiDD = -disp*g*GZ(phi) - cL*phiDot - cQ*phiDot*|phiDot| + M_ext
-
-   GZ is the righting arm. Naval architecture in three lines:
+   ROLL keeps its naval-architecture core:
+     I * phiDD = -disp*g*GZ(phi - target) - cL*w - cQ*w*|w| + M_ext
+   target = the across-hull water slope + the turn/sail heel; w is the roll
+   rate relative to the water's. GZ is the righting arm:
      • small angles: GZ = gm*sin(phi)          (gm = metacentric height)
      • past 0.6*phiV it falls away, crossing zero at phiV, the ANGLE OF
-       VANISHING STABILITY — the hull's own weight now helps it over;
-     • past phiV it is negative all the way to phi = +-PI, where it crosses
-       back through zero: THE INVERTED STABLE POINT. A turtled hull sits
-       there. Its stiffness is INV_GM_FRAC of the upright one, so righting a
-       capsized hull takes a real counter-impulse — or, for a hull whose spec
-       declares `selfRight`, a slow roll back after a few seconds (a PWC).
+       VANISHING STABILITY;
+     • past phiV it is negative out to +-PI, where it crosses zero again: THE
+       INVERTED STABLE POINT. A turtled hull sits there at INV_GM_FRAC of the
+       upright stiffness; a hull whose spec declares `selfRight` (a PWC) is
+       rolled back after a few seconds.
+   One odd function: GZ(phi) = gm * sin(phi) * k(|phi|).
 
-   Written as ONE odd function of phi so the two branches cannot disagree:
-     GZ(phi) = gm * sin(phi) * k(|phi|),  k: +1 -> 0 at phiV -> -INV_GM_FRAC.
-   sin() takes care of the zero at PI for free, and the sign symmetry is
-   automatic.
+   UNITS: mass in TONNES. I is t*m^2, 1 kN*m == 1 t*m^2/s^2, so kN*m / I is
+   already rad/s^2. No 1000s anywhere.
 
-   UNITS — and the one thing that would otherwise be wrong. Mass is carried
-   in TONNES, not kilograms, because that is what the hull specs are written
-   in. In tonne units the roll inertia I is t*m^2, and 1 kN*m == 1 t*m^2/s^2
-   exactly, so a heeling moment in kN*m divided by I in t*m^2 is already
-   rad/s^2. No 1000s anywhere. (Do not "fix" that by multiplying by 1000.)
-
-   SIGN CONVENTION — verified against the two files that already write roll:
-     water_helm.js:554 writes `group.rotation.set(_pitch, heading, _roll)`;
-     water_buoyancy.js:232-236 composes the same `_roll` as the Z term of a
-     local-frame euler. The hull's local +Z is the BOW (water_hulls' build
-     convention) and its local +X is therefore up x fwd = Y x Z = +X, which
-     is the PORT side (water_float's four-probe sampler literally calls that
-     probe `yPort`). A positive rotation about +Z carries +X toward +Y, so it
-     lifts the PORT rail:
-        POSITIVE phi = HEELED TO STARBOARD  (port rail up, starboard rail
-        down) = clockwise seen from astern looking forward.
-     water_helm.js says the same thing in its own words at :406-:411
-     ("Positive _roll raises the port side, i.e. leans to starboard").
-     phi is ADDED to that cosmetic heel, never replaces it.
+   SIGN: the hull's local +Z is the bow and +X is PORT; a positive rotation
+   about +Z lifts the port rail. POSITIVE phi = heeled to STARBOARD. The same
+   sense as water_helm's `_roll` and water_float's `yPort` probe.
 
    THE SEAM
-   ------------------------------------------------------------
-     CBZ.hullStab(rec)                    -> the state object (created lazily)
-     CBZ.hullStabTick(rec, dt)            -> integrate one frame
+     CBZ.hullSeakeep(rec, dt)             -> integrate one frame; the state
+                                             carries Y (origin height), th
+                                             (pitch, bow up +), phi (roll), air
+     CBZ.hullStab(rec)                    -> the state object
      CBZ.hullHeelImpulse(rec, moment, o)  -> heel it; returns the new phi
-     CBZ.hullCapsize(rec, o)              -> force it over now
-     CBZ.hullCapsized(rec)                -> bool
-     CBZ.hullRight(rec)                   -> back upright
+     CBZ.hullCapsize(rec, o) / hullCapsized(rec) / hullRight(rec)
      CBZ.hullSwampAdd(rec, seconds)       -> green water aboard
-     CBZ.hullStabRoll(rec)                -> extra roll radians for the ride
-     CBZ.hullStabDrop(rec)                -> metres to LOWER the ride by
-     CBZ.hullStabAudit(opts)              -> counters (the preset reads THIS)
+     CBZ.hullStabRoll / hullStabDrop / hullStabLift (rec)
+     CBZ.hullStabAudit(opts), CBZ.hullSeakeepAudit(rec)
 
-   `rec` is anything with .group (Object3D), .pos, .heading and ._hullSpec:
-   a city/vehicles.js car and a world/sea_craft.js record both qualify.
-
-   WHERE IT RUNS. As its own post-pass at order 38.4 — one tick BEFORE
-   water_buoyancy at 38.5, so the buoyancy pass composes a phi computed this
-   frame rather than last frame's. It is a separate pass rather than a call
-   inside buoyancy's loop because sea craft (world/sea_craft.js) are not
-   cityCars and buoyancy never sees them: their owner calls hullStabTick +
-   hullStabRoll + hullStabDrop directly, and it must be the same function,
-   not a second copy living inside somebody else's loop.
-
-   STATE IS LAZY. A boat nobody has hit has no `_stab` at all and this file
-   costs it nothing — no allocation, no integration, no branch beyond one
-   truthy test. Everything below only exists once something heels a hull.
-
-   No flag. The old behaviour was a cosmetic twitch, not a feature; git is
-   the undo (CLAUDE.md).
+   `rec` is anything with .group, .pos, .heading and ._hullSpec: a
+   city/vehicles.js car (water_buoyancy.js calls seakeep) and a
+   world/sea_craft.js record (its ride() calls seakeep) both qualify.
 ============================================================ */
 (function () {
   "use strict";
@@ -293,6 +247,7 @@
   const AUDIT = {
     impulses: 0, capsizes: 0, swamps: 0, floods: 0, righted: 0,
     biggestPhi: 0, lastFrom: null, live: 0,
+    slams: 0, launches: 0, breakouts: 0,
   };
 
   function makeState(rec) {
@@ -304,7 +259,14 @@
       g: g,
       I: Math.max(1e-6, g.massT * Math.pow(GYR_BEAM * g.beam, 2)),
       spec: specOf(rec),
+      // seakeeping (section 4)
+      init: false, Y: 0, Yv: 0, Yt0: 0, th: 0, thv: 0, alpha: 0,
+      zeta0: 0, beta0: 0, alpha0: 0, yBow: 0, yPo: 0, ySt: 0,
+      air: false, airT: 0, grounded: false, slamCD: 0, slams: 0, launches: 0, maxTh: 0,
+      cvx: 0, cvz: 0, load: 0,
+      Teq: 0.1, wh: 6, wp: 7, kdLong: 1, kdLat: 1,
     };
+    skDerive(st);
     rec._stab = st;
     AUDIT.live++;
     return st;
@@ -318,6 +280,7 @@
       if (S !== st.spec) {          // the style cycler can change the hull
         st.spec = S; st.g = geomOf(rec);
         st.I = Math.max(1e-6, st.g.massT * Math.pow(GYR_BEAM * st.g.beam, 2));
+        skDerive(st);
       }
     }
     return st;
@@ -358,123 +321,366 @@
   }
 
   // ============================================================
-  //  4. THE TICK
+  //  4. SEAKEEPING — heave, pitch and roll from the hull's own numbers
   // ============================================================
-  function gunwaleAngle(g) { return Math.atan2(g.freeboard, Math.max(0.05, g.beam * 0.5)); }
+  /* Every hull in the water is three damped oscillators driven by the water
+     under it, and nothing in here knows what kind of boat it is:
 
-  // Is green water coming aboard right now? Two ways, and a hull only needs
-  // one: the rail is heeled under, or the sea itself is over the sheer at the
-  // low rail (the crest that fills a swamped boat the rest of the way).
-  function shippingWater(rec, st) {
+     SAMPLED where the hull is: centre, bow and stern (+-0.36 loa), both
+     sides (+-0.38 beam), through CBZ.waterSample (the sea, rings, a tsunami
+     bore or a flood, plus every OTHER hull's wake). The mean of those points
+     is what the hull feels, so a long hull averages out chop shorter than
+     itself and answers only the long waves; a jetski feels every one.
+
+     HEAVE. Waterplane Awp = 0.72 loa beam, equivalent draft Teq = massT /
+     (1.025 Awp), stiffness per unit mass g / (Teq (1 + added mass 0.8)):
+     periods kayak 0.54 s, PWC 0.97 s, 6 m runabout 1.1 s, 14 m cruiser
+     1.6 s, 140 m freighter 6.7 s. Damping is on the motion RELATIVE to the
+     water (radiation), 35% of critical (more on the plane). Water can only push UP: once the
+     hull's bottom is clear of the surface (it rose more than Teq above its
+     floating line) the only force is gravity, so a fast light hull that
+     meets a crest at speed leaves the water, flies, and slams back.
+     Planing lift stiffens the ride (x(1 + 1.5 planing)).
+
+     PITCH. The same spring 1.15x faster, toward the along-hull surface slope
+     plus the hull's own running trim. Airborne, it keeps its rate (the bow
+     drops slowly) and snaps to the water on landing.
+
+     ROLL. I phi'' = -disp g GZ(phi - alpha - heel) - damping + impulses, with
+     alpha the across-hull surface slope, heel the turn/sail heel, and GZ the
+     righting arm below. Period 0.80 beam / sqrt(gm): kayak 2.6 s, PWC
+     1.9 s, runabout 1.8 s, cruiser 2.8 s, freighter 9.8 s. Capsize is the
+     hull's angle RELATIVE TO THE WATER past phiV (a broaching hull on a
+     steep face goes over; one heeled with a wave does not).
+
+     THE WATER MOVES THE HULL TOO. The water's own velocity (current, surge,
+     a tsunami's flow, backwash) drags the hull with drag on the relative
+     velocity scaled by wetted area over mass (beam-on uses loa x draft,
+     head-on beam x draft): a kayak is taken at once, a cruiser over seconds,
+     a freighter barely. The mover's own speed is through the water, so an
+     engine beats a current only if it is stronger. Shear between bow and
+     stern turns the hull. Less water than the draft and the hull sits on
+     the bed, heeled onto its bilge; it stays where the water leaves it.
+     An anchored hull holds until the drag on it passes what a rode holds.
+     A hull climbing a face loses way, one running down it surges. */
+  const SAMPLE_A = 0.36, SAMPLE_B = 0.38;
+  const ADDED_MASS = 0.8, Z_HEAVE = 0.35, Z_PITCH = 0.32;
+  const SURGE_K = 0.45;              // fraction of g sin(slope) along the keel
+  const ANCHOR_HOLD = 2.5;           // m/s^2 of current drag a rode holds
+  const SLAM_CD = 0.25;              // s between slams
+  const AIR_NOSE = 0.35;             // rad/s^2 the bow drops while flying
+  const AIR_CLEAR = 0.03;            // m of clear air under the keel that is flight
+  const AIR_RATE = 1.2;              // rad/s: most pitch rate a hull leaves a crest with
+  const AIR_TAU = 0.6;               // s: pitch/roll rate decay in the air (rider, air)
+
+  function skDerive(st) {
     const g = st.g;
-    if (Math.abs(st.phi) > gunwaleAngle(g)) return true;
-    const p = rec.pos || (rec.group && rec.group.position);
-    if (!p || !CBZ.citySeaHeightAt) return false;
-    const h = rec.heading || 0;
-    // low rail = the side the hull is leaning toward. phi > 0 is starboard
-    // down, and local +X is PORT, so the low rail is at -sign(phi) * +X.
-    const rx = Math.cos(h), rz = -Math.sin(h);       // hull local +X in world
-    const sgn = st.phi >= 0 ? -1 : 1;
-    const hb = g.beam * 0.5;
-    const lx = p.x + rx * hb * sgn, lz = p.z + rz * hb * sgn;
-    const railY = (rec.group ? rec.group.position.y : p.y)
-      + g.freeboard * Math.cos(st.phi) - hb * Math.abs(Math.sin(st.phi));
-    return seaAt(lx, lz) > railY;
+    const Awp = 0.72 * g.loa * g.beam;
+    st.Teq = Math.max(0.04, g.massT / (1.025 * Awp));
+    st.wh = Math.sqrt(G / (st.Teq * (1 + ADDED_MASS)));
+    st.wp = st.wh * 1.15;
+    // per-tonne drag of the water on the hull (1/m), Cd ~1
+    st.kdLong = 0.5 * 1.025 * g.beam * g.draft / Math.max(0.005, g.massT);
+    st.kdLat = 0.5 * 1.025 * g.loa * g.draft / Math.max(0.005, g.massT);
   }
 
-  function tick(rec, dt) {
-    if (!rec || !(dt > 0)) return null;
-    const st = rec._stab;
-    if (!st) return null;                    // lazy: nothing has touched it
-    dt = Math.min(dt, MAX_DT);
-    st.t += dt;
-    st.lift *= Math.exp(-dt / LIFT_TAU);
-    if (st.lift < 1e-4) st.lift = 0;
-    rec._stabLift = st.lift;
+  const _c = {}, _bw = {}, _sn = {}, _pt = {}, _sb = {};
+  function sample(x, z, out, self) {
+    if (CBZ.waterSample) return CBZ.waterSample(x, z, out, self);
+    out.y = seaAt(x, z); out.depth = 8; out.vx = 0; out.vz = 0; out.wet = 1; out.wake = 0;
+    return out;
+  }
 
+  function gunwaleAngle(g) { return Math.atan2(g.freeboard, Math.max(0.05, g.beam * 0.5)); }
+
+  // Green water: the low rail under the sea, or the bow buried in a crest.
+  function shippingWater(rec, st, relPhi) {
     const g = st.g;
-    // Free-surface: water inside the hull eats the metacentric height.
-    const gm = Math.max(0.01, g.gm * (1 - FREE_SURFACE * st.swamp));
+    if (Math.abs(relPhi) > gunwaleAngle(g)) return true;
+    if (!st.init) return false;
+    const hb = g.beam * 0.5;
+    const railY = st.Y + g.freeboard * Math.cos(st.phi) - hb * Math.abs(Math.sin(st.phi));
+    const lowSea = st.phi >= 0 ? st.ySt : st.yPo;      // phi > 0: starboard rail down
+    if (lowSea > railY) return true;
+    const bowDeck = st.Y + g.freeboard * 1.25 + Math.sin(st.th) * g.loa * SAMPLE_A;
+    return st.yBow > bowDeck;
+  }
+
+  // The roll ODE alone (impulses resolve their first slice through this).
+  function rollStep(rec, st, dt, target, contact, stiff, av) {
+    const g = st.g;
+    const gm = Math.max(0.01, g.gm * (1 - FREE_SURFACE * st.swamp)) * stiff;
     const disp = g.massT;
-    const K = disp * G * gm;                 // kN*m per radian at small angles
+    const K = disp * G * gm;
     const I = st.I;
-    const bluff = Math.abs(st.phi) > g.phiV ? CAPSIZE_DAMP : 1;
+    const rel0 = wrapPi(st.phi - target);
+    const bluff = Math.abs(rel0) > g.phiV ? CAPSIZE_DAMP : 1;
     const cL = DAMP_L * Math.sqrt(Math.max(1e-9, I * K)) * bluff;
     const cQ = DAMP_Q * I * bluff;
-
-    // A hull that CAN come back does, after a beat inverted — a PWC rights
-    // itself when the rider swims it over. Everything else stays turtled.
     let selfRoll = false;
     if (st.capsized && !st.flooded && g.selfRight > 0) {
       st.overT += dt;
       selfRoll = st.overT > g.selfRight;
     } else st.overT = 0;
-
-    // Nothing is happening: skip the ODE entirely (an upright, dry, still
-    // hull is the common case and it must cost nothing).
-    if (st.phi === 0 && st.phiDot === 0 && st.swamp === 0 && !st.capsized) {
-      rec._stabDrop = 0;
-      return st;
-    }
-
     const cap = rateCap(g.loa);
     const steps = Math.max(1, Math.ceil(dt / SUB_DT));
     const h = dt / steps;
-    const wasOver = Math.abs(st.phi) > g.phiV;
     for (let i = 0; i < steps; i++) {
       if (selfRoll) {
-        // A PWC that has gone over is rolled back by hand, and that is a
-        // slow deliberate turn — NOT a second capsize in the other
-        // direction, which is what a moment big enough to beat the inverted
-        // branch actually produces (it whips through zero and turtles again).
-        // Driven kinematically for exactly that reason.
+        // a PWC is rolled back by hand: a slow deliberate turn, kinematic
         st.phiDot = 0;
+        const rel = wrapPi(st.phi - target);
         const step = SELF_RIGHT_RATE * h;
-        st.phi = Math.abs(st.phi) <= step ? 0 : st.phi - Math.sign(st.phi) * step;
+        st.phi = Math.abs(rel) <= step ? target : st.phi - Math.sign(rel) * step;
         continue;
       }
-      const gz = rightingArm(st.phi, gm, g.phiV);
-      const M = -disp * G * gz - cL * st.phiDot - cQ * st.phiDot * Math.abs(st.phiDot);
+      const rel = wrapPi(st.phi - target);
+      const gz = contact ? rightingArm(rel, gm, g.phiV) : 0;
+      // the waves roll her through the righting arm (the water's slope is in
+      // `target`); damping is on her own roll rate
+      const w = st.phiDot;
+      const M = -disp * G * gz - (contact ? (cL * w + cQ * w * Math.abs(w)) : 0);
       st.phiDot += (M / I) * h;
+      if (!contact) st.phiDot *= Math.exp(-h / AIR_TAU);
       st.phiDot = clamp(st.phiDot, -cap, cap);
       st.phi = wrapPi(st.phi + st.phiDot * h);
     }
     if (!Number.isFinite(st.phi) || !Number.isFinite(st.phiDot)) { st.phi = 0; st.phiDot = 0; }
-    const a = Math.abs(st.phi);
-    if (a > st.maxPhi) st.maxPhi = a;
-    if (a > AUDIT.biggestPhi) AUDIT.biggestPhi = a;
+  }
 
-    // ---- the capsize event ------------------------------------------------
-    if (!wasOver && a > g.phiV && !st.capsized) capsizeEvent(rec, st);
-    // Righted by physics (self-righting hull, or somebody hit it back over).
-    if (st.capsized && a < g.phiV * 0.6) {
+  function slam(rec, st, vImpact, x, y, z) {
+    const g = st.g;
+    st.slamCD = SLAM_CD;
+    st.slams++;
+    AUDIT.slams++;
+    const slamV = (st.spec && st.spec.slamV > 0) ? st.spec.slamV : 2.5;
+    const sev = clamp((vImpact - slamV * 0.6) / 5, 0, 1);
+    // the hull is stopped a little: way lost on every landing
+    const keep = 1 - 0.16 * sev;
+    if (Number.isFinite(rec.v)) rec.v *= keep;
+    if (Number.isFinite(rec.vx)) { rec.vx *= keep; rec.vz *= keep; }
+    // the bow is driven down into the water it landed on
+    st.thv -= 0.6 * sev;
+    if (CBZ.waterHit) {
+      try {
+        CBZ.waterHit(x, y, z, {
+          kind: "vehicle", mass: g.massT * 1000 * 0.5, speed: vImpact,
+          vx: rec.vx || 0, vz: rec.vz || 0, src: rec, quiet: vImpact < 3,
+        });
+      } catch (e) {}
+    }
+    if (rec.player && CBZ.shake) { try { CBZ.shake(Math.min(0.85, 0.15 + 0.6 * sev)); } catch (e) {} }
+    rec._slamT = 0;
+    rec._slamSev = sev;
+  }
+
+  /* CBZ.hullSeakeep(rec, dt) -> the state, with st.Y (the hull origin's
+     height), st.th (pitch, bow up +), st.phi (roll, port rail up +), st.air.
+     Movers call it once per frame after they moved the hull. */
+  function seakeep(rec, dt) {
+    if (!rec || !(dt > 0)) return null;
+    const st = stateOf(rec);
+    if (!st) return null;
+    dt = Math.min(dt, 0.1);
+    st.t += dt;
+    st.lift *= Math.exp(-dt / LIFT_TAU);
+    if (st.lift < 1e-4) st.lift = 0;
+    rec._stabLift = st.lift;
+    if (st.slamCD > 0) st.slamCD -= dt;
+    const g = st.g;
+    const p = rec.pos || (rec.group && rec.group.position);
+    if (!p) return st;
+    const hd = rec.heading || 0;
+    const fx = Math.sin(hd), fz = Math.cos(hd);
+    const rx = fz, rz = -fx;                       // hull local +X = PORT
+    const a = g.loa * SAMPLE_A, b = g.beam * SAMPLE_B;
+    sample(p.x, p.z, _c, rec);
+    sample(p.x + fx * a, p.z + fz * a, _bw, rec);
+    sample(p.x - fx * a, p.z - fz * a, _sn, rec);
+    sample(p.x + rx * b, p.z + rz * b, _pt, rec);
+    sample(p.x - rx * b, p.z - rz * b, _sb, rec);
+    const wetN = (_c.wet ? 2 : 0) + (_bw.wet ? 1 : 0) + (_sn.wet ? 1 : 0) + (_pt.wet ? 1 : 0) + (_sb.wet ? 1 : 0);
+    const wet = wetN >= 2;
+    const zeta = (2 * _c.y + _bw.y + _sn.y + _pt.y + _sb.y) / 6;
+    const beta = Math.atan2(_bw.y - _sn.y, 2 * a);
+    const alpha = Math.atan2(_pt.y - _sb.y, 2 * b);
+    st.yBow = _bw.y; st.yPo = _pt.y; st.ySt = _sb.y;
+    // the bed under the hull (the shallowest of the probes decides grounding)
+    const depth = Math.min(_c.depth, _bw.depth, _sn.depth);
+    const bedY = _c.y - _c.wake - _c.depth;
+
+    const S = st.spec;
+    const pl = clamp(+rec._planing || 0, 0, 1);
+    const trim = Number.isFinite(rec._trim) ? rec._trim : (S && S.trimRest) || 0;
+    const rideAbove = g.rideAbove;
+    const Yt = zeta + rideAbove * (1 - 0.55 * pl) - dropOf(st) + st.lift;
+    const Yrest = bedY + g.draft * 0.92 + rideAbove;  // keel on the bed
+
+    if (!st.init || Math.abs(zeta - st.zeta0) > 6) {
+      st.init = true;
+      st.Y = Math.max(Yt, Yrest); st.Yv = 0; st.th = beta + trim; st.thv = 0;
+      st.zeta0 = zeta; st.beta0 = beta; st.alpha0 = alpha; st.Yt0 = Yt; st.air = false;
+    }
+    const zv = clamp((zeta - st.zeta0) / dt, -20, 20);
+    const bv = clamp((beta - st.beta0) / dt, -6, 6);
+    const av = clamp((alpha - st.alpha0) / dt, -6, 6);
+    st.zeta0 = zeta; st.beta0 = beta; st.alpha0 = alpha;
+    const stiff = 1 + 1.5 * pl;
+    // a planing bottom is damped hard by its own lift (it skims, it does not bob)
+    const zH = Z_HEAVE + 0.45 * pl;
+
+    // ---- heave ----------------------------------------------------------
+    const wh = st.wh * Math.sqrt(stiff);
+    const n = Math.max(1, Math.min(16, Math.ceil(dt / Math.min(1 / 60, 0.25 / wh))));
+    const h = dt / n;
+    const wasAir = st.air;
+    let air = false, grounded = false;
+    for (let i = 0; i < n; i++) {
+      const tgt = st.Yt0 + (Yt - st.Yt0) * (i + 1) / n;
+      const dY = st.Y - tgt;
+      let acc;
+      // clear of the water: gravity alone (it is FLYING once the keel is a
+      // few centimetres clear, not merely kissing the surface)
+      if (!wet || dY >= st.Teq) { acc = -G; air = wet && dY > st.Teq + AIR_CLEAR; }
+      else {
+        // buoyancy saturates once the sea is over her sheer (she cannot
+        // displace more than her whole hull), and water rising past her
+        // drags her up no harder than her weight: a bore lifts and carries
+        // a hull, it does not fire it into the sky. A planing bottom meeting
+        // a face at speed gets its dynamic lift on top (up to 3 g): that is
+        // what kicks a fast light hull off a crest.
+        acc = -wh * wh * Math.max(dY, -g.freeboard)
+          - Math.max(-G * (1 + 2 * pl), 2 * zH * wh * (st.Yv - zv));
+      }
+      st.Yv += acc * h;
+      st.Y += st.Yv * h;
+      if (st.Y < Yrest && (depth < g.draft * 1.05 || !wet)) {
+        st.Y = Yrest; if (st.Yv < 0) st.Yv = 0; grounded = true; air = false;
+      }
+    }
+    st.Yt0 = Yt;
+    // a hull that lands back on the water hard slams
+    if (wasAir && !air && wet && st.slamCD <= 0) {
+      const vImp = -(st.Yv - zv);
+      if (vImp > 1.2) slam(rec, st, vImp, p.x + fx * a * 0.5, zeta, p.z + fz * a * 0.5);
+      // water is not a trampoline: a landing is a plastic impact
+      if (st.Yv < zv) st.Yv = zv + (st.Yv - zv) * 0.25;
+    }
+    if (air) st.airT += dt; else st.airT = 0;
+    if (air && !wasAir) { st.launches++; AUDIT.launches++; }
+    st.air = air; st.grounded = grounded;
+
+    // ---- pitch ----------------------------------------------------------
+    if (air) {
+      if (!wasAir) st.thv = clamp(st.thv, -AIR_RATE, AIR_RATE);
+      st.thv = st.thv * Math.exp(-dt / AIR_TAU) - AIR_NOSE * dt;
+      st.th += st.thv * dt;
+    } else {
+      const wp = st.wp * Math.sqrt(stiff);
+      const thT = (wet ? beta : 0) + trim;
+      for (let i = 0; i < n; i++) {
+        st.thv += (wp * wp * (thT - st.th) - 2 * Z_PITCH * wp * (st.thv - bv * 0.5)) * h;
+        st.th += st.thv * h;
+      }
+    }
+    st.th = clamp(st.th, -1.2, 1.2);
+    if (Math.abs(st.th) > st.maxTh) st.maxTh = Math.abs(st.th);
+
+    // ---- roll -----------------------------------------------------------
+    let heel = clamp(+rec._roll || 0, -0.6, 0.6) + (+rec._sailHeel || 0);
+    let target = (wet ? alpha : 0) + heel;
+    if (grounded && depth < g.draft * 0.8 && !st.capsized) {
+      // dried out: she lies over onto her bilge, the way she was leaning
+      const side = st.phi !== 0 ? Math.sign(st.phi) : 1;
+      target = side * (0.12 + 0.2 * clamp(1 - depth / (g.draft * 0.8), 0, 1));
+    }
+    const wasOver = Math.abs(wrapPi(st.phi - target)) > g.phiV;
+    rollStep(rec, st, dt, target, (wet && !air) || grounded, 1 + pl, wet ? av : 0);
+    st.alpha = target;
+    const rel = wrapPi(st.phi - target);
+    const ar = Math.abs(rel);
+    if (ar > st.maxPhi) st.maxPhi = ar;
+    if (ar > AUDIT.biggestPhi) AUDIT.biggestPhi = ar;
+    if (!wasOver && ar > g.phiV && !st.capsized && wet) capsizeEvent(rec, st);
+    if (st.capsized && ar < g.phiV * 0.6) {
       st.capsized = false; st.overT = 0;
       rec.engineDead = false; rec._helmDead = false;
       AUDIT.righted++;
     }
 
     // ---- green water ------------------------------------------------------
-    // An INVERTED hull is not shipping green water — it is sitting on a
-    // trapped bubble, which is precisely why a capsized boat floats keel-up
-    // for so long. It only waterlogs, slowly, as that air leaks out. Using
-    // the heel test here instead would drown every turtled hull in one
-    // swampT and there would be no turtled kayak to see from the beach.
-    if (!st.flooded) {
+    if (!st.flooded && wet) {
       if (st.capsized) {
         st.swamp = Math.min(1, st.swamp + dt / (g.swampT * INVERT_LEAK));
-      } else if (shippingWater(rec, st)) {
+      } else if (shippingWater(rec, st, rel)) {
         if (st.swamp === 0) AUDIT.swamps++;
         st.swamp = Math.min(1, st.swamp + dt / g.swampT);
+        // a sea coming aboard stops a small hull
+        const k = Math.exp(-dt * 1.5);
+        if (Number.isFinite(rec.v)) rec.v *= k;
+        if (Number.isFinite(rec.vx)) { rec.vx *= k; rec.vz *= k; }
       } else if (st.swamp > 0) {
         st.swamp = Math.max(0, st.swamp - (dt / g.swampT) * SWAMP_DRAIN);
       }
       if (st.swamp >= 1) floodEvent(rec, st);
     }
 
-    // ---- how the ride reads this frame ------------------------------------
+    // ---- the water's slope along the keel: lose way uphill, surf down -----
+    if (wet && !air && !grounded && Math.abs(+rec.v || 0) > 0.5) {
+      const dv = -G * Math.sin(beta) * SURGE_K * dt * Math.sign(rec.v);
+      rec.v += dv;
+      if (Number.isFinite(rec.vx)) { rec.vx += fx * dv; rec.vz += fz * dv; }
+    }
+
+    // ---- the water carries the hull --------------------------------------
+    const wvx = (2 * _c.vx + _bw.vx + _sn.vx) * 0.25, wvz = (2 * _c.vz + _bw.vz + _sn.vz) * 0.25;
+    if (wet && !grounded) {
+      const ex = wvx - st.cvx, ez = wvz - st.cvz;
+      const e = Math.hypot(ex, ez);
+      if (e > 1e-4) {
+        const side = Math.abs(ex * rx + ez * rz) / e;     // 1 = beam-on
+        const kd = st.kdLong + (st.kdLat - st.kdLong) * side;
+        st.load = kd * e * e;
+        if (rec.anchored) {
+          if (st.load > ANCHOR_HOLD) { rec.anchored = false; rec._brokeOut = true; AUDIT.breakouts++; }
+        }
+        const k = Math.min(1, kd * e * dt);
+        st.cvx += ex * k; st.cvz += ez * k;
+      } else st.load = 0;
+      // shear between bow and stern turns her
+      const shear = ((_bw.vx - _sn.vx) * rx + (_bw.vz - _sn.vz) * rz) / (2 * a);
+      if (Number.isFinite(shear) && shear !== 0) rec.heading = hd + clamp(shear, -1.5, 1.5) * dt * 0.6;
+    } else {
+      const k = Math.exp(-dt * (grounded ? 5 : 3));
+      st.cvx *= k; st.cvz *= k; st.load = 0;
+      if (grounded) {
+        const kk = Math.exp(-dt * 4);
+        if (Number.isFinite(rec.v)) rec.v *= kk;
+        if (Number.isFinite(rec.vx)) { rec.vx *= kk; rec.vz *= kk; }
+      }
+    }
+    if (rec.anchored && !rec._brokeOut) { st.cvx = 0; st.cvz = 0; }
+    if (st.cvx * st.cvx + st.cvz * st.cvz > 1e-6) {
+      p.x += st.cvx * dt; p.z += st.cvz * dt;
+      // swept into a wall: the hull stops against it and swings
+      if (CBZ.collide && (st.cvx * st.cvx + st.cvz * st.cvz) > 0.25) {
+        _probe.x = p.x; _probe.y = st.Y; _probe.z = p.z;
+        CBZ.collide(_probe, clamp(g.beam * 0.5, 0.5, 6), st.Y - g.draft, st.Y + g.freeboard + 1);
+        const px = _probe.x - p.x, pz = _probe.z - p.z, pm = Math.hypot(px, pz);
+        if (pm > 1e-3) {
+          p.x = _probe.x; p.z = _probe.z;
+          const nx = px / pm, nz = pz / pm, into = st.cvx * nx + st.cvz * nz;
+          if (into < 0) { st.cvx -= nx * into * 1.3; st.cvz -= nz * into * 1.3; }
+          rec.heading = (rec.heading || 0) + clamp((st.cvx * rx + st.cvz * rz) * 0.05, -0.3, 0.3);
+        }
+      }
+    }
+    rec._flowVx = st.cvx; rec._flowVz = st.cvz;
+    rec._skAir = air; rec._grounded = grounded;
     rec._stabDrop = dropOf(st);
     return st;
   }
+  const _probe = { x: 0, y: 0, z: 0 };
 
   function dropOf(st) {
     const g = st.g;
@@ -500,16 +706,17 @@
     if (!p) return;
     const g = st.g;
     const sy = seaAt(p.x, p.z);
-    // White water at BOTH rails — the hull is dumping its whole beam into
-    // the sea, not making one splash.
-    if (typeof CBZ.waterSplashAt === "function") {
+    // White water at BOTH rails: the hull's whole beam goes into the sea, at
+    // the speed a rail falls through its half-beam arc.
+    if (typeof CBZ.waterHit === "function") {
       const h = rec.heading || 0;
       const rx = Math.cos(h), rz = -Math.sin(h);
       const hb = g.beam * 0.5;
-      const power = 1.5 + g.loa * 0.15;
+      const v = Math.sqrt(2 * G * Math.max(0.2, hb + g.freeboard));
+      const m = g.massT * 1000 * 0.5;
       try {
-        CBZ.waterSplashAt(p.x + rx * hb, sy, p.z + rz * hb, power);
-        CBZ.waterSplashAt(p.x - rx * hb, sy, p.z - rz * hb, power);
+        CBZ.waterHit(p.x + rx * hb, sy, p.z + rz * hb, { kind: "vehicle", mass: m, speed: v, src: rec });
+        CBZ.waterHit(p.x - rx * hb, sy, p.z - rz * hb, { kind: "vehicle", mass: m, speed: v, src: rec, quiet: true });
       } catch (e) {}
     }
     if (typeof CBZ.shake === "function" && CBZ.player && CBZ.player.pos) {
@@ -639,7 +846,7 @@
   //  6. THE PUBLIC SEAM
   // ============================================================
   CBZ.hullStab = function (rec) { return stateOf(rec); };
-  CBZ.hullStabTick = tick;
+  CBZ.hullSeakeep = seakeep;
   CBZ.hullCapsized = function (rec) { return !!(rec && rec._stab && rec._stab.capsized); };
   CBZ.hullStabRoll = function (rec) {
     const st = rec && rec._stab;
@@ -707,7 +914,7 @@
     }
     // Resolve the first slice of the swing now so a caller that reads the
     // return value gets a phi that has actually moved.
-    tick(rec, Math.min(SUB_DT, 1 / 60));
+    rollStep(rec, st, Math.min(SUB_DT, 1 / 60), st.alpha, !st.air, 1, 0);
     return st.phi;
   };
 
@@ -769,28 +976,33 @@
       biggestPhi: AUDIT.biggestPhi,
       biggestPhiDeg: AUDIT.biggestPhi * 180 / Math.PI,
       lastFrom: AUDIT.lastFrom,
+      slams: AUDIT.slams, launches: AUDIT.launches, breakouts: AUDIT.breakouts,
     };
     if (opts && opts.reset) {
       AUDIT.impulses = 0; AUDIT.capsizes = 0; AUDIT.swamps = 0;
       AUDIT.floods = 0; AUDIT.righted = 0; AUDIT.biggestPhi = 0; AUDIT.lastFrom = null;
+      AUDIT.slams = 0; AUDIT.launches = 0; AUDIT.breakouts = 0;
     }
     return out;
   };
+  // One hull's seakeeping numbers: natural periods, and what it is doing now.
+  CBZ.hullSeakeepAudit = function (rec) {
+    const st = rec && rec._stab;
+    if (!st) return null;
+    const g = st.g;
+    return {
+      heaveT: +(2 * PI / st.wh).toFixed(2), pitchT: +(2 * PI / st.wp).toFixed(2),
+      rollT: +(2 * PI * Math.sqrt(st.I / (g.massT * G * Math.max(0.01, g.gm)))).toFixed(2),
+      air: st.air, airT: +st.airT.toFixed(2), slams: st.slams, launches: st.launches,
+      pitchDeg: +(st.th * 180 / PI).toFixed(1), maxPitchDeg: +(st.maxTh * 180 / PI).toFixed(1),
+      rollDeg: +(st.phi * 180 / PI).toFixed(1), grounded: st.grounded,
+      flow: +Math.hypot(st.cvx, st.cvz).toFixed(2), load: +st.load.toFixed(2),
+    };
+  };
 
   // ============================================================
-  //  7. THE PASS — order 38.4, one tick before water_buoyancy (38.5)
+  //  7. WHO CALLS IT: water_buoyancy.js (order 38.5) for every marine city
+  //  car, world/sea_craft.js's ride() for every sea-craft hull. One call per
+  //  hull per frame, after its mover.
   // ============================================================
-  // Only hulls that already carry state are ticked, so this loop is a length
-  // check and a truthy test for every boat nobody has touched.
-  if (typeof CBZ.onUpdate === "function") {
-    CBZ.onUpdate(38.4, function (dt) {
-      const cars = CBZ.cityCars;
-      if (!cars || !cars.length || !(dt > 0)) return;
-      for (let i = 0; i < cars.length; i++) {
-        const c = cars[i];
-        if (!c || !c._stab || !c.group) continue;
-        tick(c, dt);
-      }
-    });
-  }
 })();

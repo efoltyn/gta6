@@ -774,7 +774,9 @@
              "reflection, depth colour, foam, caustics, Snell's window) for " +
              "any sheet a page owns",
       needs: ["boot"],
-      files: ["world/water_spec.js", "world/water_pages.js"],
+      // + the wake field every sea samples (idle and free until something
+      //   on the page disturbs the water through CBZ.waterWakeFor/Stamp)
+      files: ["world/water_spec.js", "world/water_pages.js", "world/water_wake.js", "world/water_wakefield.js"],
       publishes: ["waterSeaMaterial", "waterWaveHeight", "waterAdoptSea"],
     },
     fx: {

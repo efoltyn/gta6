@@ -9,7 +9,7 @@
    1. THE DRAWDOWN. The bared shelf is not beach. It is dark, wet, glistening
       mud and sand with the reef showing through it, weed lying flat where the
       water dropped it, tide pools holding the sky, fish flapping on the mud,
-      and boats that were floating a minute ago lying on their sides.
+      and whatever was afloat there grounded where the water left it.
    2. THE AFTERMATH. Everywhere the water went it left a film of grey-brown
       silt, dark and shining while wet and paling as it dries, standing
       puddles, streaks combed seaward by the drain, a sharp wrack line where
@@ -20,12 +20,10 @@
    published event) — the tsunami's own director stays the single source of
    truth. Everything is built lazily on the first flood event of a session.
 
-   DRAW CALLS (all six, only while they have anything to show):
+   DRAW CALLS (all five, only while they have anything to show):
      band   the exposed-seabed skin (wet sheen, ripples, weed, pools)   1
      reef   rock + coral outcrops on the band (instanced)               1
      fish   stranded fish, flopping in the vertex shader (instanced)    1
-     boats  four lofted dinghies on their bilges (one each: the wave   4
-            lifts them, see buildBoats)
      mud    the silt drape over the island (64x64 DataTexture)          1
      stain  high-water marks on standing buildings (instanced)          1
    CPU: uniforms per frame; water queries / texture writes at 5 Hz, and
@@ -171,77 +169,85 @@
       uLee2: { value: new THREE.Vector4(20, 0, 0, 0) },
       uCenter: { value: new THREE.Vector2(cx, cz) },
     };
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, depthWrite: false });
-    mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -4;
-    mat.name = "tsunami-seabed-skin";
-    mat.onBeforeCompile = function (sh) {
-      Object.assign(sh.uniforms, BU, U);
-      sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nvarying vec3 vSbW;\nvarying float vSbT;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvSbW = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvSbT = uv.x;");
-      sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", [
-          "#include <common>",
-          "varying vec3 vSbW; varying float vSbT;",
-          "uniform float uSea; uniform vec4 uFront; uniform float uFrontS; uniform float uAhead;",
-          "uniform vec4 uLeeF; uniform vec4 uLee; uniform vec4 uLee2;",
-          CBZ.waterLeeGLSL || "float cbzLeeShadowP(vec2 xz, vec4 F, vec4 L, vec4 L2) { return 0.0; }",
-          "uniform float uDry; uniform float uOn; uniform vec2 uCenter; uniform float uTime;",
-          "uniform vec3 uSky; uniform vec3 uSunDir; uniform vec3 uSunCol;",
-          NOISE, SHEEN,
-          "float sbGloss; float sbPool; vec3 sbN;",
-        ].join("\n"))
-        .replace("#include <color_fragment>", [
-          "#include <color_fragment>",
-          "{",
-          "  vec2 p = vSbW.xz;",
-          // the sea's local level, front-aware: the CPU twin is CBZ.waterFrontDropAt
-          "  float fd = dot(p - uFront.xy, uFront.zw) - uFrontS;",
-          "  float fk = clamp((fd + 1.0) / 8.0, 0.0, 1.0);",
-          "  fk = fk * fk * (3.0 - 2.0 * fk);",
-          "  float seaL = uSea - uAhead * fk;",
-          "  if (uLee2.w > 0.5) seaL -= cbzLeeShadowP(p, uLeeF, uLee, uLee2) * mix(uLee.x, uLee.y, fk);",
-          "  float above = (vSbW.y - " + BAND_LIFT.toFixed(3) + ") - seaL;",
-          "  float vd = length(cameraPosition - vSbW);",
-          "  float nearK = 1.0 - smoothstep(14.0, 55.0, vd);",
-          "  float n1 = tsN(p * 0.21), n2 = tsN(p * 0.83 + 7.1), n3 = tsN(p * 3.3 + 2.7);",
-          // sand where the swash worked it, black-brown mud in the lows
-          "  vec3 sand = vec3(0.135, 0.112, 0.080);",
-          "  vec3 mud = vec3(0.060, 0.052, 0.040);",
-          "  float muddy = smoothstep(0.38, 0.72, n1 * 0.7 + n2 * 0.3);",
-          "  vec3 col = mix(sand, mud, muddy);",
-          // ripple marks running along the shore, warped so they are not rings
-          "  float rr = length(p - uCenter);",
-          "  float rip = sin(rr * 8.5 + n2 * 7.0 + n1 * 4.0);",
-          "  col *= 1.0 + 0.16 * rip * nearK * (1.0 - muddy * 0.7);",
-          // weed mats lying flat where the water dropped them
-          "  float wm = tsN(p * 0.095 + 3.3) * 0.72 + n3 * 0.18 + n2 * 0.1;",
-          "  float weed = smoothstep(0.60, 0.68, wm);",
-          "  vec3 weedC = mix(vec3(0.030, 0.045, 0.018), vec3(0.075, 0.058, 0.022), n2);",
-          "  weedC *= 0.8 + 0.4 * tsN(p * 6.0);",
-          "  col = mix(col, weedC, weed * 0.92);",
-          // tide pools in the lows (never on the weed)
-          "  float pm = tsN(p * 0.062 + 11.0) * 0.68 + n2 * 0.22 + n3 * 0.10;",
-          "  sbPool = smoothstep(0.64, 0.675, pm) * (1.0 - weed);",
-          "  col = mix(col, vec3(0.028, 0.030, 0.030), sbPool);",
-          // shell grit and pebbles, near the eye only
-          "  float sp = step(0.94, tsH(floor(p * 5.0))) * nearK * (1.0 - sbPool);",
-          "  col = mix(col, vec3(0.30, 0.28, 0.24), sp * 0.55);",
-          // wet: darkest and shiniest right behind the retreating water
-          "  float fresh = 1.0 - 0.45 * smoothstep(0.0, 3.5, above);",
-          "  sbGloss = mix(0.55 + 0.25 * weed, 1.0, sbPool) * fresh * (1.0 - uDry * 0.75);",
-          "  col *= mix(1.0, 0.78, sbGloss * (1.0 - sbPool));",
-          "  sbN = normalize(vec3((n3 - 0.5) * 0.18 * (1.0 - sbPool) + rip * 0.04 * nearK, 1.0, (n2 - 0.5) * 0.18 * (1.0 - sbPool)));",
-          "  diffuseColor.rgb = col;",
-          // only where the sea has actually left; soft at the band's two rims
-          "  float edge = smoothstep(0.0, 0.10, vSbT) * (1.0 - smoothstep(0.93, 1.0, vSbT));",
-          "  diffuseColor.a = uOn * edge * smoothstep(-0.35, 0.02, above);",
-          "  if (diffuseColor.a < 0.01) discard;",
-          "}",
-        ].join("\n"))
-        .replace("#include <envmap_fragment>", "#include <envmap_fragment>\noutgoingLight = tsSheen(outgoingLight, vSbW, sbN, sbGloss, sbPool);");
-    };
-    mat.customProgramCacheKey = () => "tsunami-scene-band";
+    /* THE BARED SHELF IS WET SAND, NOT PAINT. It is drawn as an overlay on
+       the seabed's own sand (the same sand as the beach): the soaking darkens
+       that ground, the film on it mirrors the sky through the one water
+       function, runnels and pools in the lows are real water, weed lies flat
+       in soft olive-brown mats, and the low end is darker silt. Every term is
+       smooth noise and relief (ripple marks are a normal, not stripes). */
+    const LU = CBZ.waterLightUniforms ? CBZ.waterLightUniforms() : {};
+    const uni = Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), BU, LU, { uTime: U.uTime });
+    const VS = [
+      "varying vec3 vSbW;",
+      "varying float vSbT;",
+      "#include <fog_pars_vertex>",
+      "void main() {",
+      "  vec4 wp = modelMatrix * vec4(position, 1.0);",
+      "  vSbW = wp.xyz; vSbT = uv.x;",
+      "  vec4 mvPosition = viewMatrix * wp;",
+      "  gl_Position = projectionMatrix * mvPosition;",
+      "  #include <fog_vertex>",
+      "}",
+    ].join("\n");
+    const FS = [
+      "varying vec3 vSbW; varying float vSbT;",
+      "uniform float uSea; uniform vec4 uFront; uniform float uFrontS; uniform float uAhead;",
+      "uniform vec4 uLeeF; uniform vec4 uLee; uniform vec4 uLee2;",
+      CBZ.waterLeeGLSL || "float cbzLeeShadowP(vec2 xz, vec4 F, vec4 L, vec4 L2) { return 0.0; }",
+      "uniform float uDry; uniform float uOn; uniform vec2 uCenter; uniform float uTime;",
+      NOISE,
+      CBZ.waterShadeGLSL ? CBZ.waterShadeGLSL() : "",
+      CBZ.waterWetGroundGLSL ? CBZ.waterWetGroundGLSL() : "",
+      "#include <fog_pars_fragment>",
+      "void main() {",
+      "  vec2 p = vSbW.xz;",
+      // the sea's local level, front-aware: the CPU twin is CBZ.waterFrontDropAt
+      "  float fd = dot(p - uFront.xy, uFront.zw) - uFrontS;",
+      "  float fk = clamp((fd + 1.0) / 8.0, 0.0, 1.0);",
+      "  fk = fk * fk * (3.0 - 2.0 * fk);",
+      "  float seaL = uSea - uAhead * fk;",
+      "  if (uLee2.w > 0.5) seaL -= cbzLeeShadowP(p, uLeeF, uLee, uLee2) * mix(uLee.x, uLee.y, fk);",
+      "  float above = (vSbW.y - " + BAND_LIFT.toFixed(3) + ") - seaL;",
+      "  float fp = max(max(length(dFdx(p)), length(dFdy(p))), 0.002);",
+      "  float fine = 1.0 - smoothstep(0.15, 0.6, fp);",
+      "  float n1 = tsN(p * 0.21), n2 = tsN(p * 0.83 + 7.1), n3 = mix(0.5, tsN(p * 3.3 + 2.7), fine);",
+      // ripple marks along the shore: relief, faded before they alias
+      "  vec2 rd = normalize(p - uCenter + vec2(0.001));",
+      "  float ph = length(p - uCenter) * 8.5 + n2 * 7.0 + n1 * 4.0;",
+      "  vec2 slope = rd * (cos(ph) * 0.11 * (1.0 - smoothstep(0.06, 0.25, fp)));",
+      "  slope += (vec2(n3, tsN(p * 3.1 - 4.4)) - 0.5) * 0.06 * fine;",
+      "  vec3 N = normalize(vec3(-slope.x, 1.0, -slope.y));",
+      "  vec3 V = normalize(cameraPosition - vSbW);",
+      // water left in the lows: pools, and runnels draining seaward
+      "  float low = tsN(p * 0.062 + 11.0) * 0.64 + n2 * 0.20 + n3 * 0.08 + tsN(p * 0.37 - 3.3) * 0.08;",
+      "  float film = max(0.0, low - 0.60) * 0.6;",
+      "  float rv = abs(tsN(vec2(dot(p - uCenter, rd) * 0.02, dot(p, vec2(-rd.y, rd.x)) * 0.11) + 2.0) - 0.5);",
+      "  film = max(film, (1.0 - smoothstep(0.0, 0.05, rv)) * 0.035 * smoothstep(0.2, 0.5, vSbT));",
+      // weed mats: soft-edged, olive-brown, with texture; not in the water
+      "  float wm = tsN(p * 0.095 + 3.3) * 0.72 + n3 * 0.18 + n2 * 0.1;",
+      "  float weed = smoothstep(0.58, 0.72, wm) * (0.55 + 0.45 * mix(0.5, tsN(p * 4.0 + 1.3), fine)) * (1.0 - smoothstep(0.004, 0.02, film));",
+      "  vec3 weedC = mix(vec3(0.085, 0.075, 0.030), vec3(0.12, 0.095, 0.045), n2);",
+      // the low end of the band is darker silt
+      "  float silt = smoothstep(0.45, 1.0, vSbT) * smoothstep(0.3, 0.75, n1 * 0.6 + n2 * 0.4) * 0.75;",
+      // soaked right behind the water, drying from the top of the band
+      "  float soak = (1.0 - 0.45 * smoothstep(0.0, 3.5, above)) * (1.0 - uDry * 0.75);",
+      "  vec4 wg = cbzWetGround(vSbW, N, V, soak, film, vec3(0.10, 0.092, 0.078), silt, weedC, weed * 0.9, 0.08, fp, uTime);",
+      // only where the sea has actually left; soft at the band's two rims
+      "  float edge = smoothstep(0.0, 0.10, vSbT) * (1.0 - smoothstep(0.93, 1.0, vSbT));",
+      "  float show = uOn * edge * smoothstep(-0.35, 0.02, above);",
+      "  float a = (1.0 - wg.w) * show;",
+      "  if (a < 0.004) discard;",
+      "  gl_FragColor = vec4(wg.rgb / max(1.0 - wg.w, 0.003), a);",
+      "  #include <tonemapping_fragment>",
+      "  #include <colorspace_fragment>",
+      "  #include <fog_fragment>",
+      "}",
+    ].join("\n");
+    const mat = new THREE.ShaderMaterial({
+      name: "tsunami-seabed-skin", uniforms: uni, vertexShader: VS, fragmentShader: FS,
+      transparent: true, depthWrite: false, fog: true,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+    });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = "tsunami-seabed-skin";
     mesh.receiveShadow = true; mesh.castShadow = false;
@@ -448,7 +454,7 @@
     F.attr.needsUpdate = true;
   }
 
-  // ---- stranded boats: four lofted dinghies lying on their bilges --------------
+  // ---- a dinghy hull (makeDinghy) -------------------------------------------------
   function addDinghy(P, C, I, M, o) {
     const NS = 14, J = 10, L = o.L, B = o.B, D = o.D;
     const hb = (u) => {
@@ -513,13 +519,9 @@
     plank(0.80, 0.80, 0.045, 0.10, D * 0.70);
     return start;
   }
-  /* THE BOATS ARE SEPARATE HULLS NOW (one mesh each, four draws), because
-     the wave PICKS THEM UP: lying on the mud through the drawdown, lifted
-     when the bore reaches them, carried inland on the flood and left in a
-     street when it goes (systems/disasters.js hands each one to the debris
-     field as a "boat"). When the island publishes a harbour (CBZ.island.
-     harbour), the first two lie off it: a harbour is where the boats are. */
-  // ONE HULL, its own mesh, built round its own origin (YXZ: yaw, then trim)
+  // ONE DINGHY HULL as its own mesh (YXZ: yaw, then trim), for a scene that
+  // moors a real boat (CBZ.tsunamiScene.makeDinghy). The tsunami places none:
+  // a hull on the bared shelf is a real craft the water strands, or nothing.
   let hullMat = null;
   function makeHull(o, mat) {
     const P = [], C = [], I = [];
@@ -539,58 +541,6 @@
     mesh.castShadow = false; mesh.receiveShadow = true;
     mesh.rotation.order = "YXZ";
     return mesh;
-  }
-  function buildBoats() {
-    const rnd = rngOf(4242 + events);
-    const appr = Math.atan2(-tsu.dz, -tsu.dx);
-    const oy = A.oceanY != null ? A.oceanY : -0.8;
-    const paints = [
-      [[0.34, 0.33, 0.30], [0.30, 0.05, 0.04]],   // white-ish, red bottom
-      [[0.03, 0.09, 0.20], [0.06, 0.06, 0.07]],   // navy
-      [[0.05, 0.16, 0.08], [0.25, 0.05, 0.04]],   // green
-      [[0.30, 0.20, 0.04], [0.06, 0.08, 0.12]],   // yellow
-    ];
-    const H = CBZ.island && CBZ.island.harbour;
-    const hx = H ? (Number.isFinite(H.x) ? H.x : H.center && H.center.x) : null;
-    const hz = H ? (Number.isFinite(H.z) ? H.z : H.center && H.center.z) : null;
-    const harbA = Number.isFinite(hx) && Number.isFinite(hz) ? Math.atan2(hz - A.center.z, hx - A.center.x) : null;
-    const spots = harbA != null ? [harbA - 0.05, harbA + 0.07, appr + 0.22, appr - 0.48] : [appr + 0.22, appr - 0.48, appr + 1.3, appr + Math.PI + 0.5];
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide });
-    mat.name = "tsunami-stranded-boats";
-    const v = new THREE.Vector3();
-    const group = new THREE.Group();
-    group.name = "tsunami-stranded-boats";
-    const hulls = [];
-    for (let b = 0; b < spots.length; b++) {
-      const Pt = bandPoint(spots[b], oy - 1.1 - rnd() * 2.8);
-      const L = 3.0 + rnd() * 1.4, Bm = L * (0.38 + rnd() * 0.05), D = 0.5 + rnd() * 0.12;
-      const pc = paints[b % paints.length];
-      const o = {
-        L, B: Bm, D,
-        paint: pc[0], bottom: pc[1],
-        stripe: [pc[0][0] * 0.6, pc[0][1] * 0.6, pc[0][2] * 0.6],
-        inner: [0.20, 0.19, 0.17], bilge: [0.07, 0.06, 0.045], wood: [0.17, 0.11, 0.06],
-      };
-      const mesh = makeHull(o, mat);
-      const P = mesh.geometry.attributes.position.array;
-      const roll = (rnd() < 0.5 ? -1 : 1) * (0.95 + rnd() * 0.35);   // on its bilge, gunwale to the mud
-      mesh.rotation.set((rnd() - 0.5) * 0.12, rnd() * 6.28, roll);
-      mesh.position.set(Pt.x, Pt.y, Pt.z);
-      mesh.updateMatrix();
-      // settle it: lowest point of the hull 12 cm into the mud
-      let minC = Infinity;
-      for (let i = 0; i < P.length / 3; i++) {
-        v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).applyMatrix4(mesh.matrix);
-        const cl = v.y - gh(v.x, v.z);
-        if (cl < minC) minC = cl;
-      }
-      mesh.position.y -= minC + 0.12;
-      mesh.userData.home = { p: mesh.position.clone(), r: mesh.rotation.clone() };
-      group.add(mesh);
-      hulls.push(mesh);
-    }
-    A.root.add(group);
-    return { mesh: group, hulls: hulls };
   }
 
   /* =============================================================================
@@ -649,63 +599,67 @@
       uMudS: { value: 1 / span },
       uDrain: { value: new THREE.Vector2(-1, 0) },
     };
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, depthWrite: false });
-    mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -4;
-    mat.name = "tsunami-silt";
-    mat.onBeforeCompile = function (sh) {
-      Object.assign(sh.uniforms, MU, U);
-      sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nvarying vec3 vMdW;\nvarying vec3 vMdN;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvMdW = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvMdN = normalize(mat3(modelMatrix) * objectNormal);");
-      sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", [
-          "#include <common>",
-          "varying vec3 vMdW; varying vec3 vMdN;",
-          "uniform sampler2D uMud; uniform vec2 uMudO; uniform float uMudS; uniform vec2 uDrain;",
-          "uniform float uTime; uniform vec3 uSky; uniform vec3 uSunDir; uniform vec3 uSunCol;",
-          NOISE, SHEEN, CBZ.floodResidueGLSL ? CBZ.floodResidueGLSL() : "",
-          "float mdGloss; float mdPud; float n2; float n3;",
-        ].join("\n"))
-        .replace("#include <color_fragment>", [
-          "#include <color_fragment>",
-          "{",
-          "  vec4 m = texture2D(uMud, (vMdW.xz - uMudO) * uMudS);",
-          "  if (m.r < 0.004) discard;",
-          "  float level = m.r * 25.0 - 2.0;",
-          // metres of water that stood over THIS point at the peak, off the real
-          // ground under the fragment: the inland limit is a contour, not a cell
-          "  float reach = level - (vMdW.y - " + MUD_LIFT.toFixed(3) + ");",
-          "  float wet = m.g;",
-          "  vec2 p = vMdW.xz;",
-          "  n2 = tsN(p * 0.71 + 5.0); n3 = tsN(p * 2.9 + 1.3);",
-          // THE ONE FLOOD RESIDUE (world/water_spec.js cbzFloodResidue):
-          // thick where the water stood deep, the wrack at the reach, combed
-          // seaward by the drain, wet-dark drying to a pale crust
-          // m.b IS the deposit (mudTick: peak depth x the load the water
-          // carried there). No floor: water that only wetted a place leaves
-          // it wet-dark for a while and then nothing.
-          "  float thick = clamp(m.b * 1.05, 0.0, 1.0);",
-          "  float edge = 1.0 - smoothstep(0.04, 0.42, reach);",
-          "  float rsG = 0.0;",
-          "  vec4 rs = cbzFloodResidue(p, thick, 1.0 - wet, edge, uDrain, rsG);",
-          "  vec3 col = rs.rgb;",
-          "  float a = rs.a * smoothstep(-0.04, 0.14, reach);",
-          "  mdPud = smoothstep(0.55, 0.9, rsG);",
-          "  mdGloss = rsG;",
-          "  diffuseColor.rgb = col;",
-          "  diffuseColor.a = clamp(a, 0.0, 1.0);",
-          "  if (diffuseColor.a < 0.01) discard;",
-          "}",
-        ].join("\n"))
-        .replace("#include <envmap_fragment>", [
-          "#include <envmap_fragment>",
-          "{",
-          "  vec3 mn = normalize(vMdN + vec3((n3 - 0.5) * 0.14, 0.0, (n2 - 0.5) * 0.14) * (1.0 - mdPud));",
-          "  outgoingLight = tsSheen(outgoingLight, vMdW, mn, mdGloss, mdPud);",
-          "}",
-        ].join("\n"));
-    };
-    mat.customProgramCacheKey = () => "tsunami-scene-silt";
+    /* WHAT THE FLOOD LEAVES, as wet ground over the ground that is there:
+       the deposit (CBZ.floodResidueGLSL: thick in the lows and behind the
+       wave's facing coast, a wrack line at the reach, drying paler and matte),
+       the soaking that darkens everything the water stood on, the film of
+       water on it while fresh and the puddles in the lows as real water, all
+       through cbzWetGround. The reach is a mottled contour, never a line. */
+    const LU = CBZ.waterLightUniforms ? CBZ.waterLightUniforms() : {};
+    const uni = Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), MU, LU, { uTime: U.uTime });
+    const VS = [
+      "varying vec3 vMdW;",
+      "varying vec3 vMdN;",
+      "#include <fog_pars_vertex>",
+      "void main() {",
+      "  vec4 wp = modelMatrix * vec4(position, 1.0);",
+      "  vMdW = wp.xyz; vMdN = normalize(mat3(modelMatrix) * normal);",
+      "  vec4 mvPosition = viewMatrix * wp;",
+      "  gl_Position = projectionMatrix * mvPosition;",
+      "  #include <fog_vertex>",
+      "}",
+    ].join("\n");
+    const FS = [
+      "varying vec3 vMdW; varying vec3 vMdN;",
+      "uniform sampler2D uMud; uniform vec2 uMudO; uniform float uMudS; uniform vec2 uDrain; uniform float uTime;",
+      NOISE,
+      CBZ.floodResidueGLSL ? CBZ.floodResidueGLSL() : "",
+      CBZ.waterShadeGLSL ? CBZ.waterShadeGLSL() : "",
+      CBZ.waterWetGroundGLSL ? CBZ.waterWetGroundGLSL() : "",
+      "#include <fog_pars_fragment>",
+      "void main() {",
+      "  vec4 m = texture(uMud, (vMdW.xz - uMudO) * uMudS);",
+      "  if (m.r < 0.004) discard;",
+      "  vec2 p = vMdW.xz;",
+      "  float fp = max(max(length(dFdx(p)), length(dFdy(p))), 0.002);",
+      "  float n1 = tsN(p * 0.13 + 4.0), n2 = tsN(p * 0.71 + 5.0), n3 = tsN(p * 2.9 + 1.3);",
+      "  float level = m.r * 25.0 - 2.0;",
+      // metres of water that stood over THIS point at the peak, off the real
+      // ground under the fragment, with the edge torn by the ground's own noise
+      "  float reach = level - (vMdW.y - " + MUD_LIFT.toFixed(3) + ") + (n1 - 0.5) * 0.5 + (n2 - 0.5) * 0.18;",
+      "  float wet = m.g;",
+      "  float thick = clamp(m.b * 1.05, 0.0, 1.0);",
+      "  float edge = 1.0 - smoothstep(0.04, 0.42, reach);",
+      "  float gloss = 0.0;",
+      "  vec4 rs = cbzFloodResidue(p, thick, 1.0 - wet, edge, uDrain, gloss);",
+      "  vec3 N = normalize(vMdN + vec3((n3 - 0.5) * 0.10, 0.0, (n2 - 0.5) * 0.10) * (1.0 - smoothstep(0.2, 0.8, fp)));",
+      "  vec3 V = normalize(cameraPosition - vMdW);",
+      // standing water in the deepest pockets of the fresh deposit
+      "  float pud = smoothstep(0.55, 0.9, gloss) * smoothstep(0.3, 0.8, thick);",
+      "  vec4 wg = cbzWetGround(vMdW, N, V, wet, pud * 0.04, rs.rgb, rs.a, vec3(0.0), 0.0, 0.7, fp, uTime);",
+      "  float a = (1.0 - wg.w) * smoothstep(-0.05, 0.25, reach);",
+      "  if (a < 0.004) discard;",
+      "  gl_FragColor = vec4(wg.rgb / max(1.0 - wg.w, 0.003), a);",
+      "  #include <tonemapping_fragment>",
+      "  #include <colorspace_fragment>",
+      "  #include <fog_fragment>",
+      "}",
+    ].join("\n");
+    const mat = new THREE.ShaderMaterial({
+      name: "tsunami-silt", uniforms: uni, vertexShader: VS, fragmentShader: FS,
+      transparent: true, depthWrite: false, fog: true,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+    });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = "tsunami-silt";
     mesh.receiveShadow = true; mesh.castShadow = false;
@@ -1014,7 +968,6 @@
     S.band = buildBand();
     S.reef = buildReef();
     S.fish = buildFish();
-    S.boats = buildBoats();
     S.mud = buildMud();
     S.stain = buildStain();
   }
@@ -1031,13 +984,6 @@
     tsu.active = false; flood.active = false;
     clearAftermath();
     if (!S) return;
-    // a new match: the hulls the last wave carried off go back on the shelf
-    const BG = S.boats;
-    if (BG && BG.hulls) for (const m of BG.hulls) {
-      const H = m.userData.home; if (!H) continue;
-      if (m.parent !== BG.mesh) BG.mesh.add(m);
-      m.position.copy(H.p); m.rotation.copy(H.r); m.visible = true;
-    }
     S.band.mesh.visible = false; S.band.U.uOn.value = 0;
     S.fish.mesh.visible = false; S.fish.show.fill(0);
     const fa = S.fish.attr.array; for (let i = 0; i < S.fish.N; i++) fa[i * 4 + 2] = 0;
@@ -1046,7 +992,7 @@
   function bindArena(arena) {
     if (A === arena) return;
     if (S && A) {                                  // a different arena: drop the old parts
-      for (const k of ["band", "reef", "fish", "boats", "mud", "stain"]) {
+      for (const k of ["band", "reef", "fish", "mud", "stain"]) {
         const m = S[k] && (S[k].mesh || S[k]);
         if (m && m.parent) m.parent.remove(m);
       }
@@ -1201,6 +1147,12 @@
       };
     },
     reset: clearAll,
+    // the wet-ground materials (bared shelf, flood deposit), built on demand,
+    // for a compile probe
+    materials() {
+      if (!S && A && A.root && typeof A.groundHeightAt === "function") ensureBuilt();
+      return S ? [S.band.mesh.material, S.mud.mesh.material] : [];
+    },
     /* THE CALM (systems/disasters.js settleWorld): the high-water marks fade
        off the walls over the next second or two and are gone before the
        next round; the silt on the ground keeps drying on its own clock. */
@@ -1211,8 +1163,8 @@
       settleReq = Math.max(1, +secs || 6);
       return true;
     },
-    // the four hulls on the bared shelf (Object3D each), for the wave to take
-    boats() { return S && S.boats && S.boats.hulls ? S.boats.hulls.slice() : []; },
+    // no placed hulls: the craft on this sea are real ones (CBZ.seaCraft)
+    boats() { return []; },
     /* one dinghy hull as its own mesh (L length, B beam, D depth, paint /
        bottom rgb), for a scene that wants a real boat without this file's
        island: the lab kit `tsunami` moors two in its harbour */

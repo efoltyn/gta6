@@ -378,7 +378,31 @@
      the same code path as being carried by a tide. Neither one is a second
      current model; this function only chooses which field is speaking. */
   const _curSample = {};
+  const _wsFlow = {};
+  const _orb = { x: 0, z: 0 };
+  /* THE WATER CARRIES YOU. With the sea's one water query present, a body in
+     the water goes where the water goes: its flow (current, a tsunami's
+     run-up and backwash, a flood down a street) moves you whole, and the
+     waves' orbital motion surges you forward on a crest and back in a trough.
+     Your stroke is through the water on top of that. Returns true when it
+     spoke (the older current paths below then stand down). */
+  function waterCarry(P, step) {
+    if (typeof CBZ.waterSurfaceAt !== "function" || !CBZ.waterSample) return false;
+    const w = CBZ.waterSample(P.pos.x, P.pos.z, _wsFlow, P);
+    if (!w.wet) return true;
+    let ox = 0, oz = 0;
+    if (CBZ.waterOrbitalAt) { const o = CBZ.waterOrbitalAt(P.pos.x, P.pos.z, undefined, _orb); ox = +o.x || 0; oz = +o.z || 0; }
+    P.pos.x += (w.vx + ox) * step;
+    P.pos.z += (w.vz + oz) * step;
+    return true;
+  }
   function applyCurrent(P, step) {
+    if (waterCarry(P, step)) return;
+    // the waves' orbital surge, on the sea-only path
+    if (CBZ.waterOrbitalAt) {
+      const o = CBZ.waterOrbitalAt(P.pos.x, P.pos.z, undefined, _orb);
+      P.pos.x += (+o.x || 0) * step; P.pos.z += (+o.z || 0) * step;
+    }
     if (survOn()) {
       // a ROUTED flood (systems/flashflood.js) speaks for its own water: the
       // current is the solved one at this point, down whichever channel
@@ -423,7 +447,8 @@
   let torT = 0;
   function torrent(P, fdt) {
     S.torrent = 0;
-    if (!CBZ.waterTurbidAt) return;
+    // the sea's one water query carries the body whole (waterCarry): one flow
+    if (!CBZ.waterTurbidAt || typeof CBZ.waterSurfaceAt === "function") return;
     const q = CBZ.waterTurbidAt(P.pos.x, P.pos.z, _torQ);
     const sp = q.speed;
     if (!(sp > 0.8)) return;
@@ -475,9 +500,12 @@
     return true;
   }
 
-  // Live surface Y at a point — the same crest the shader displaces and the
-  // boats ride (world/water_spec.js owns the one swell table).
+  // Live surface Y at a point: the water's one query (swell, impact rings, a
+  // tsunami bore, floodwater) plus every hull's wake reaching you, so a
+  // speedboat passing lifts and drops you and a steep crest goes over your head.
+  const _wsSurf = {};
   function surfAt(x, z) {
+    if (CBZ.waterSample) return CBZ.waterSample(x, z, _wsSurf, CBZ.player).y;
     if (survOn()) return CBZ.survSeaHeightAt(x, z);
     return CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z)
       : (CBZ.waterSeaY ? CBZ.waterSeaY() : (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48));
@@ -806,20 +834,15 @@
     P._swim = true;
     if (CBZ.playerChar) CBZ.playerChar.swimming = true;
     const fall = Math.max(0, fallSpeed != null ? fallSpeed : -(P.vy || 0));
-    /* Impact splash scales with how hard you hit it — a step off the quay
-       barely dimples the surface, a fall off a bridge throws real spray.
-       THROUGH THE MOMENTUM BUS, not the legacy strength dial: waterHit sizes
-       the crown, the rebound jet, the settling ring AND the audio gain from
-       sqrt(mass)*speed, so an 78 kg body entering at its real fall speed is
-       one number rather than a hand-tuned 0.55..2.15. water_wake.js still owns
-       the particles underneath; this only changes who does the arithmetic.
-       waterSplashAt stays as the fallback for a page loaded without the bus. */
+    /* The splash is the body's own mass at its real speed into the water,
+       through the one door: a step off the quay barely dimples the surface,
+       a fall off a bridge opens a cavity, throws a sheet and spreads rings. */
     if (CBZ.waterHit) {
+      const hs = Math.hypot(hvx || 0, hvz || 0);
       CBZ.waterHit(P.pos.x, P.pos.y, P.pos.z, {
-        kind: "body", mass: 78, speed: Math.max(2.2, fall), src: P,
+        kind: "body", mass: 78, speed: Math.max(2.2, Math.hypot(fall, hs)),
+        vx: hvx || 0, vz: hvz || 0, src: P,
       });
-    } else if (CBZ.waterSplashAt) {
-      CBZ.waterSplashAt(P.pos.x, P.pos.y, P.pos.z, 0.55 + Math.min(1.6, fall * 0.16));
     }
     // Carry the fall in as plunge momentum instead of discarding it: a dive
     // off the bridge should take you UNDER and let buoyancy bring you back.
@@ -859,7 +882,6 @@
     // hauling out drags a sheet of water up with you — same bus, a body
     // leaving slowly rather than a body arriving fast.
     if (CBZ.waterHit) CBZ.waterHit(P.pos.x, P.pos.y, P.pos.z, { kind: "body", mass: 78, speed: 1.6, src: P });
-    else if (CBZ.waterSplashAt) CBZ.waterSplashAt(P.pos.x, P.pos.y, P.pos.z, 0.55);
     if (spot) {
       P.pos.x = spot.x; P.pos.z = spot.z;
       // A spot that carries its own height is a BOAT deck (climbSpot's boat
@@ -1095,7 +1117,16 @@
     // must not buy you mode.js's idle stamina regen for free.
     const hard = !!(CBZ.keys && CBZ.keys["shift"]) && stepLen > 1e-4 &&
       (P.stamina == null || P.stamina > 0);
-    const want = (hard ? SWIM_SPEED_FAST : SWIM_SPEED) * swimFactor;
+    let want = (hard ? SWIM_SPEED_FAST : SWIM_SPEED) * swimFactor;
+    // swimming into the waves is slower: every crest pushes you back and you
+    // spend strokes climbing it (up to a third of your pace in a 1.5 m sea)
+    if (stepLen > 1e-4 && typeof CBZ.waterSeaState === "function") {
+      const ss = CBZ.waterSeaState();
+      if (ss && ss.windDir) {
+        const into = -((stepX / stepLen) * (+ss.windDir.x || 0) + (stepZ / stepLen) * (+ss.windDir.z || 0));
+        want *= 1 - 0.35 * Math.max(0, into) * clamp01((+ss.hs || 0) / 1.5);
+      }
+    }
     let desX = 0, desZ = 0;
     if (stepLen > 1e-4) { desX = (stepX / stepLen) * want; desZ = (stepZ / stepLen) * want; }
     let dvx = desX - S.vx, dvz = desZ - S.vz;
@@ -1114,12 +1145,15 @@
     // A weak coastline-aware current makes the sea feel like a moving body of
     // water. waterfield removes any shoreward component near land, so it can
     // drift a swimmer along a beach but never conveyor-belt them through it.
+    const cx0 = P.pos.x, cz0 = P.pos.z;
     applyCurrent(P, fdt);
+    const carX = P.pos.x - cx0, carZ = P.pos.z - cz0;      // what the water did
     if (CBZ.collideSlide) CBZ.collideSlide(P.pos, P.radius || 0.55, S.y + 0.25, S.y + BODY_H);
     else if (CBZ.collide) CBZ.collide(P.pos, P.radius || 0.55, S.y + 0.25, S.y + BODY_H);
     // If a wall ate the step, the velocity has to lose it too — otherwise you
     // build up a spring against the seawall and shoot off when you slide free.
-    S.vx = (P.pos.x - px) / fdt; S.vz = (P.pos.z - pz) / fdt;
+    // The water's own carry is not your velocity: it is re-applied each frame.
+    S.vx = (P.pos.x - px - carX) / fdt; S.vz = (P.pos.z - pz - carZ) / fdt;
 
     // 4. VERTICAL — a damped buoyancy oscillator around the live surface.
     const vin = CFG.WATER_DIVE === false ? 0 : verticalInput();
@@ -1236,6 +1270,7 @@
     // A hand only breaks the surface if the body is AT the surface. Underwater
     // the same stroke is silent, which is the whole point of being under.
     if (sub > 0.95 || S.headUnder) return;
+    P._swimBeat = true;                     // the wake sweep puts the arm's rings in
     const hard = S.mood < 0.5;              // gliding crawl, not sculling
     CBZ.waterHit(P.pos.x, surf, P.pos.z, {
       kind: "body",

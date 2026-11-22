@@ -46,10 +46,8 @@
    6. CLASS INERTIA. "Big things commit to a turn" is a cap on yaw
       ACCELERATION (~1/(L^2*m)), not a lower top speed. The yacht takes ~2.4s
       to answer the helm.
-   7. CURRENTS. CBZ.waterField.currentAt carries a drifting hull and crabs a
-      moving one.
-   Plus SLAMMING: re-entry after a crest at >slamV relative vertical velocity
-   fires an impulse, a shake and a CBZ.waterHit spray burst.
+   The water's flow (currents, a tsunami) and the hull's motion in waves
+   (heave, pitch, roll, flight and slam) are world/water_stability.js's.
 
    CONTRACTS THIS FILE HONOURS
    ------------------------------------------------------------
@@ -71,8 +69,6 @@
                                   CBZ.marineShoreBlock below. false -> boats
                                   drive up the beach and into town again.
      CBZ.CONFIG.BOAT_QUAY_COLLIDE (default true)  hulls stop at quays/seawalls
-     CBZ.CONFIG.BOAT_SLAM         (default true)  crest re-entry slams
-     CBZ.CONFIG.BOAT_CURRENT      (default true)  ocean current carries hulls
      CBZ.CONFIG.BOAT_AUDIO_VOICE  (default true)  per-hull engine voice;
                                   false -> every boat is the "truck" voice
                                   (today's behaviour) again.
@@ -85,8 +81,6 @@
   if (CFG.WATER_HELM == null) CFG.WATER_HELM = true;
   if (CFG.BOAT_NO_LAND == null) CFG.BOAT_NO_LAND = true;
   if (CFG.BOAT_QUAY_COLLIDE == null) CFG.BOAT_QUAY_COLLIDE = true;
-  if (CFG.BOAT_SLAM == null) CFG.BOAT_SLAM = true;
-  if (CFG.BOAT_CURRENT == null) CFG.BOAT_CURRENT = true;
   if (CFG.BOAT_AUDIO_VOICE == null) CFG.BOAT_AUDIO_VOICE = true;
 
   const G = 9.81;
@@ -100,9 +94,9 @@
   function overWater(x, z) { return !!(CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)); }
 
   // Scratch — this runs every frame for the driven hull; zero allocation.
-  const _cur = { x: 0, z: 0 };
   const _probe = { x: 0, y: 0, z: 0 };
   const _shoreN = { x: 0, z: 0 };
+  const _wsS = {};
 
   // ============================================================
   //  THE DRAG LAW  (research §A)
@@ -197,6 +191,8 @@
       const px = car.pos.x + fx * half * i, pz = car.pos.z + fz * half * i;
       const sd = WF.shoreAt(px, pz) + clear;          // > 0 -> this end is aground
       if (!(sd > 0)) continue;
+      // land under enough floodwater to float her is not a shore
+      if (CBZ.waterSample && CBZ.waterSample(px, pz, _wsS, car).depth > (S.draft || 0.4) + 0.2) continue;
       aground = true;
       const n = WF.shoreGradient(px, pz, 6, _shoreN); // points water -> land
       pushX -= n.x * sd; pushZ -= n.z * sd;
@@ -448,15 +444,9 @@
       }
     }
 
-    // ---- 11. CURRENT  (research §C / waterfield.js) ----------------------
-    // A drifting hull is CARRIED; a hull under way only crabs. Applied to
-    // position rather than velocity so it can never feed back into the sim.
-    if (CFG.BOAT_CURRENT !== false && CBZ.waterField && CBZ.waterField.currentAt) {
-      const cu = CBZ.waterField.currentAt(car.pos.x, car.pos.z, undefined, _cur);
-      const carry = 1 - 0.78 * Math.min(1, spd / 6);
-      car.pos.x += cu.x * carry * dt;
-      car.pos.z += cu.z * carry * dt;
-    }
+    // (The water's own flow, a current or a tsunami's, carries the hull in
+    // world/water_stability.js's seakeeping, on top of this through-water
+    // motion: an engine beats a current only if it is the stronger.)
 
     // ---- 11.5 THE WATERLINE ----------------------------------------------
     // Last thing to touch position before the seat, so the hull the camera and
@@ -530,37 +520,8 @@
     }
     if (car._hullBumpCD > 0) car._hullBumpCD -= dt;
 
-    // ---- 14. SLAMMING  (research §C) -------------------------------------
-    // The bow leaves a crest and comes back down. The signal is the vertical
-    // velocity of the SURFACE under the bow — at planing speed the hull
-    // traverses a whole wavelength several times a second, so the surface
-    // under the bow moves far faster than the swell itself ever does. A stiff
-    // (planing) hull takes the full hit; a heavy hull rides over it.
-    if (CFG.BOAT_SLAM !== false) {
-      const bx = car.pos.x + fx * S.loa * 0.42, bz = car.pos.z + fz * S.loa * 0.42;
-      const bowY = surfaceAt(bx, bz);
-      if (car._bowPrevY != null) {
-        const rel = ((bowY - car._bowPrevY) / dt) * (0.35 + 0.65 * plane);
-        car._slamCD = Math.max(0, (car._slamCD || 0) - dt);
-        // rel is bounded by the swell amplitude over dt, so a legitimate slam
-        // tops out around 8 m/s. Anything above 25 is a teleport (respawn,
-        // garage retrieval, a frame the helm did not own) and must not slam.
-        if (rel > S.slamV && rel < 25 && spd > 4 && car._slamCD <= 0) {
-          car._slamCD = 0.45;
-          const sev = Math.min(1, (rel - S.slamV) / 6);
-          u *= 1 - 0.10 * sev;                        // the hull is stopped dead a little
-          car.v = u;
-          car.vx = fx * u + rx * w; car.vz = fz * u + rz * w;
-          car._trim = Math.max(0, car._trim - 0.10 * sev);   // the bow is driven DOWN
-          car._pitch = -car._trim;
-          if (CBZ.shake) CBZ.shake(Math.min(0.85, 0.25 + sev * 0.6));
-          if (CBZ.waterHit) {
-            CBZ.waterHit(bx, bowY, bz, { speed: rel, mass: S.massT * 1000, kind: "vehicle" });
-          }
-        }
-      }
-      car._bowPrevY = bowY;
-    }
+    // (Flight and slamming are not here: world/water_stability.js's
+    // seakeeping lifts the hull off crests and lands it, for every hull.)
 
     // ---- 15. TRANSFORMS --------------------------------------------------
     // Written in the SAME shape the road path writes them, so water_buoyancy

@@ -40,7 +40,7 @@
 
    Reverts with CBZ.CONFIG.SHARK_HORROR = false (then wildlife.js's ordinary
    aquatic wander runs, exactly as before this file existed). The surface read
-   has its own four switches — SHARK_FIN_V2, SHARK_WAKE_V2, SHARK_SHADOW_V2,
+   has its own four switches — SHARK_FIN_V2, SHARK_SHADOW_V2,
    SHARK_SHADOW_VIEW — each a one-line revert to the look before this pass.
 ============================================================ */
 (function () {
@@ -79,8 +79,6 @@
   // ---- the four surface-read switches (see THE SURFACE PROXY below) -------
   // SHARK_FIN_V2      the scythe blade, species-measured, cut by the real
   //                   swell at the animal's real depth.   off -> the old cone.
-  // SHARK_WAKE_V2     a small bow + short ripple that only opens up on the
-  //                   rush.                               off -> the old big V.
   // SHARK_SHADOW_V2   a shark-SHAPED silhouette plus a separate sun-offset
   //                   shadow.                             off -> one ellipse.
   // SHARK_SHADOW_VIEW how deep you can see depends on where your eye is (a
@@ -96,7 +94,6 @@
   //                   swims.                              off -> all static.
   if (CBZ.CONFIG) {
     if (CBZ.CONFIG.SHARK_FIN_V2 == null) CBZ.CONFIG.SHARK_FIN_V2 = true;
-    if (CBZ.CONFIG.SHARK_WAKE_V2 == null) CBZ.CONFIG.SHARK_WAKE_V2 = true;
     if (CBZ.CONFIG.SHARK_SHADOW_V2 == null) CBZ.CONFIG.SHARK_SHADOW_V2 = true;
     if (CBZ.CONFIG.SHARK_SHADOW_VIEW == null) CBZ.CONFIG.SHARK_SHADOW_VIEW = true;
     if (CBZ.CONFIG.SHARK_TAIL_TIP == null) CBZ.CONFIG.SHARK_TAIL_TIP = true;
@@ -277,12 +274,8 @@
   //                     leaning BACK, and a distinctly CONCAVE trailing edge.
   //                     Mottled by a deterministic hash, pale and washed along
   //                     the trailing margin (the translucent read), lit.
-  //    2. THE WAKE    — ONE textured quad: a short trailing ripple that only
-  //                     becomes the heavy white V on the rush. A cruising
-  //                     shark makes almost no wake and the reference says so.
-  //    3. THE BOW     — a small crescent of disturbance at the fin's leading
-  //                     edge, the thing that says the fin is MOVING.
-  //    4. THE BODY    — the pale grey-brown torpedo you see through the water
+  //    (the water the fin cuts is the wake field's, world/water_wake.js)
+  //    4. THE BODY   — the pale grey-brown torpedo you see through the water
   //                     from a deck. Shark-SHAPED (torpedo + swept pectorals +
   //                     crescent tail). An ellipse is not a shark.
   //    5. THE TAIL    — the upper caudal lobe, the SECOND thing that cuts the
@@ -332,7 +325,7 @@
   //  itself the way two mirrored expressions can.
   //
   //  Reverts: SHARK_FIN_V2=false (cone + old fade + old visibility law),
-  //  SHARK_WAKE_V2=false (the old oversized V), SHARK_SHADOW_V2=false (the old
+  //  SHARK_SHADOW_V2=false (the old
   //  single soft ellipse), SHARK_SHADOW_VIEW=false (depth fade stops caring
   //  where the camera is). SHARK_SHADOW=false still removes it all.
   //
@@ -343,22 +336,15 @@
   //  128 kB-class canvas textures and one material per species; three small
   //  materials per shark, because their opacity animates with that one
   //  animal's depth and speed. Nothing is allocated per frame.
-  //  world/water_wake.js's audit wants this file's wake retired into
-  //  CBZ.waterWakeFor: NOT DONE and not a one-liner — the ribbon it would draw
-  //  is kind:"boat" only, claims one of 4-6 camera-ranked slots meant for
-  //  hulls, and is sized off a beam. A fin needs a one-metre disturbance, not
-  //  a foam highway. What this pass DID do is halve the private surface: two
-  //  stretched quads and their two carrier groups became one textured quad.
   // ============================================================
   let quadGeo = null, finGeo = null, finGeoV1 = null, shadowGeoV1 = null;
-  let wakeMat = null, bowMat = null, finMatV1 = null;
-  let silTex = null, wakeTex = null, bowTex = null, sprayTex = null;
+  let finMatV1 = null;
+  let silTex = null, sprayTex = null;
   const finMats = new Map();            // species blade colour -> one material
   let BLADE_CONCAVITY = 0;              // measured off the built outline
   let SIL_FILL = 0.785;                 // measured off the silhouette texture
 
   function fin2() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_FIN_V2 === false); }
-  function wake2() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_WAKE_V2 === false); }
   function shadow2() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_SHADOW_V2 === false); }
   function shadowView() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_SHADOW_VIEW === false); }
   function tailTip() { return fin2() && !(CBZ.CONFIG && CBZ.CONFIG.SHARK_TAIL_TIP === false); }
@@ -526,65 +512,7 @@
     return c;
   }
 
-  /* ---- 3. THE WAKE TEXTURE ----------------------------------------------
-     "The wake is SMALL — a low bow-disturbance at the leading edge and a short
-     trailing ripple. A big white V is wrong for a cruising shark; save the
-     heavy wake for the rush." So the V lives in the TEXTURE, feathered and
-     already fading out along its length, and the quad it rides is scaled down
-     to almost nothing at cruise and only opened up on the rush. u = along the
-     body axis (u=1 is the fin), v = across. */
-  function makeWakeTexture() {
-    const W = 192, H = 96;
-    const c = document.createElement("canvas");
-    c.width = W; c.height = H;
-    const ctx = c.getContext("2d");
-    const apex = [W - 6, H * 0.5];
-    for (let arm = -1; arm <= 1; arm += 2) {
-      for (let pass = 0; pass < 5; pass++) {
-        const spread = 0.30 + pass * 0.055;
-        const g = ctx.createLinearGradient(apex[0], 0, 0, 0);
-        g.addColorStop(0, "rgba(255,255,255," + (0.42 - pass * 0.07).toFixed(3) + ")");
-        g.addColorStop(0.45, "rgba(255,255,255," + (0.22 - pass * 0.04).toFixed(3) + ")");
-        g.addColorStop(1, "rgba(255,255,255,0)");
-        ctx.strokeStyle = g;
-        ctx.lineWidth = 2.4 + pass * 2.6;
-        ctx.beginPath();
-        ctx.moveTo(apex[0], apex[1]);
-        ctx.quadraticCurveTo(W * 0.45, apex[1] + arm * H * spread * 0.55,
-                             0, apex[1] + arm * H * spread);
-        ctx.stroke();
-      }
-    }
-    // the churn itself: a narrow band right behind the fin, gone within a
-    // couple of body lengths
-    const g2 = ctx.createLinearGradient(apex[0], 0, W * 0.25, 0);
-    g2.addColorStop(0, "rgba(255,255,255,0.34)");
-    g2.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = g2;
-    ctx.fillRect(0, H * 0.42, W, H * 0.16);
-    return c;
-  }
-  function makeBowTexture() {
-    const S = 64;
-    const c = document.createElement("canvas");
-    c.width = S; c.height = S;
-    const ctx = c.getContext("2d");
-    for (let pass = 0; pass < 4; pass++) {
-      ctx.strokeStyle = "rgba(255,255,255," + (0.30 - pass * 0.06).toFixed(3) + ")";
-      ctx.lineWidth = 2 + pass * 3;
-      ctx.beginPath();
-      // a crescent bulging forward (+u), open astern
-      ctx.arc(S * 0.30, S * 0.5, S * 0.30, -Math.PI * 0.42, Math.PI * 0.42);
-      ctx.stroke();
-    }
-    return c;
-  }
-  /* ---- 3b. THE SPRAY ----------------------------------------------------
-     A blade travelling at 11 m/s does not slice the water silently — it throws
-     a torn sheet of white off its trailing edge. Deterministic blob cluster,
-     dense and opaque at the waterline, torn and transparent at the top, which
-     is the only thing that makes a sprite read as water rather than as smoke.
-     u = along the blade (u=0 astern), v = up (v=1 is the waterline). */
+  /* ---- THE SPRAY TEXTURE: torn white off a blade at speed ---------------- */
   function makeSprayTexture() {
     const S = 64;
     const c = document.createElement("canvas");
@@ -627,17 +555,7 @@
     finGeoV1 = new THREE.ConeGeometry(0.5, 1.2, 4);        // the pre-V2 dorsal
     shadowGeoV1 = new THREE.CircleGeometry(0.5, 18);       // the pre-V2 ellipse
     silTex = canvasTex(makeSilTexture());
-    wakeTex = canvasTex(makeWakeTexture());
-    bowTex = canvasTex(makeBowTexture());
     sprayTex = canvasTex(makeSprayTexture());
-    wakeMat = new THREE.MeshBasicMaterial({
-      map: wakeTex, color: 0xe2edf2, transparent: true, opacity: 0.42,
-      depthWrite: false, side: THREE.DoubleSide,
-    });
-    bowMat = new THREE.MeshBasicMaterial({
-      map: bowTex, color: 0xeef6fa, transparent: true, opacity: 0.5,
-      depthWrite: false, side: THREE.DoubleSide,
-    });
     finMatV1 = new THREE.MeshLambertMaterial({ color: 0x59636b });   // pre-V2 cone
     // EVERY SHARK IN THE WORLD SHARES THESE OBJECTS, so the repo's disposal
     // sweeps must be told to keep their hands off: gore.js's rm(), the rig
@@ -648,7 +566,7 @@
     // animates with that one animal's depth — so only geometry and textures
     // join this pool.)
     quadGeo._shared = finGeo._shared = finGeoV1._shared = shadowGeoV1._shared = true;
-    wakeMat._shared = bowMat._shared = finMatV1._shared = true;
+    finMatV1._shared = true;
   }
   // One blade material per species colour, not per shark: a lit Lambert whose
   // vertex colours carry the mottling and the pale trailing margin.
@@ -801,17 +719,6 @@
       s.tail = tail;
     }
 
-    const wake = new THREE.Mesh(quadGeo, wakeMat);
-    wake.rotation.x = -Math.PI / 2;                         // lie flat on the water
-    wake.renderOrder = 4;
-    wake.castShadow = false;
-    root.add(wake);
-    const bow = new THREE.Mesh(quadGeo, bowMat);
-    bow.rotation.x = -Math.PI / 2;
-    bow.renderOrder = 4;
-    bow.castShadow = false;
-    root.add(bow);
-
     // The submerged mass, as seen from a deck: the pale body through the water
     // and the darker offset shadow under it. Both lie flat just OVER the
     // waterline — the sea depth-writes, so anything meant to read as "under
@@ -849,7 +756,7 @@
       }
     }
     parent.add(root);
-    s.root = root; s.fin = fin; s.wake = wake; s.bow = bow;
+    s.root = root; s.fin = fin;
     return root;
   }
 
@@ -1104,32 +1011,8 @@
       }
     } else if (s.spray) s.spray.visible = false;
 
-    // THE WAKE. Small by law: a cruising fin leaves a ripple you have to look
-    // for, and only the rush earns the white V. It also needs a surface to
-    // disturb — a shark two metres down leaves nothing at all.
-    const rush = s.state === "rush" || s.state === "seize";
-    const surfaced = exposed > -0.15 * finH;
-    const moving = s.spd > 0.6 && (wake2() ? surfaced : k > 0.02);
-    s.wake.visible = moving;
-    s.bow.visible = s.wake.visible && wake2();
-    if (s.wake.visible) {
-      let wl, ww;
-      if (wake2()) {
-        const boost = rush ? 2.3 : 1;
-        wl = (1.15 + Math.min(2.6, s.spd * 0.40)) * sz * boost;
-        ww = (0.42 + Math.min(0.75, s.spd * 0.075)) * sz * (rush ? 1.7 : 1);
-      } else {
-        wl = (2.2 + Math.min(9, s.spd * 0.85)) * sz;        // the pre-V2 V
-        ww = (0.35 + Math.min(1.1, s.spd * 0.09)) * sz * 2;
-      }
-      s.wake.scale.set(wl, ww, 1);
-      s.wake.position.x = plan.finX * sz - wl * 0.5;
-      if (s.bow.visible) {
-        const bw = plan.finBase * sz * (0.9 + Math.min(0.8, s.spd * 0.08));
-        s.bow.scale.set(bw, bw * 0.85, 1);
-        s.bow.position.x = plan.finX * sz + plan.finBase * sz * 0.45;
-      }
-    }
+    // (The water a surfaced fin cuts is the wake field's: world/water_wake.js
+    // sweeps every aquatic animal at the surface and stamps its fin and back.)
   }
 
   function dropProxy(a) {
@@ -1140,7 +1023,7 @@
     if (s.shadowMat && s.shadowMat.dispose) { try { s.shadowMat.dispose(); } catch (e) {} }
     if (s.bodyMat && s.bodyMat.dispose) { try { s.bodyMat.dispose(); } catch (e) {} }
     if (s.sprayMat && s.sprayMat.dispose) { try { s.sprayMat.dispose(); } catch (e) {} }
-    s.root = null; s.fin = null; s.wake = null; s.bow = null; s.finK = 0;
+    s.root = null; s.fin = null; s.finK = 0;
     s.tail = null; s.spray = null; s.sprayMat = null; s.tailExposed = 0;
     s.shadow = null; s.shadowMat = null; s.bodySil = null; s.bodyMat = null; s.shK = 0;
   }
@@ -2451,7 +2334,6 @@
         ? Number(s.sprayMat.opacity.toFixed(3)) : 0,
       planLenM: plan ? plan.planLen * sz : 0,
       planBeamM: plan ? plan.planBeam * sz : 0,
-      wakeLenM: s.wake && s.wake.visible ? s.wake.scale.x : 0,
       shapeFill: fin2() && shadow2() ? SIL_FILL : 0.785,
       meshes: s.root ? s.root.children.length : 0,
     };

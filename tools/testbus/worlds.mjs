@@ -67,6 +67,15 @@ export const WORLDS = {
     engine: "!!window.__battle", enter: "0", noFreeze: true,   // the battle runs on rAF: drive it with __battle.speed()
     ready: "!!(window.__battle && __battle.audit().started)",
   },
+  /* THE SHARK SIM on index.html (mode "sharksim"): the island sea with the
+     real fleet (world/sea_craft.js) and the full water stack. disaster.html
+     is a measured slice that may drop water files, so water probes that care
+     about wakes, floats or the impact bus belong here. */
+  sharksim: {
+    page: "index.html", seed: 90210, query: "mode=sharksim&cfg_BOOT_METER=0",
+    enter: "(function(){ if (CBZ.game.state==='playing') return; var m=document.querySelector('.mode-btn[data-mode=\"sharksim\"]'); if (m) m.click(); var b=document.getElementById('playBtn'); if (b) b.click(); })()",
+    ready: "CBZ.game.state==='playing' && CBZ.game.mode==='sharksim' && !!(CBZ.surv&&CBZ.surv.arena) && !!CBZ.seaCraft",
+  },
   /* THE ISLES (mode "archipelago", src/world/archipelago.js): islands far
      apart on one sea, the spawn island built whole at boot. `isles=<id>`
      in the query picks the spawn island. */
