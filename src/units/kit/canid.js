@@ -711,6 +711,8 @@
     if (!(m._atkAnim >= 0)) { RES.inRange = true; return RES; }
     if (m._atkAnim === 0) {
       cf.snapDone = false; cf.feint = false; cf.lastTick = -1; cf.gripped = false; cf.grip = null;
+      // a leap at the quarry: how far it must fly (its arc is drawn by the pose)
+      cf.leapD = mv.leap > 0.5 && t && t.pos ? Math.max(0, hypot(t.pos.x - m.pos.x, t.pos.z - m.pos.z) - (m.rad || 0.5) - (t.rad || 0.45)) : 0;
       cf.loc = mv.id === "hamstring" ? "hock" : mv.id === "arm" ? "arm" : mv.id === "throat" ? "throat" : (t && !t.beast ? "leg" : "flank");
       cf.biteY = t && t.pos ? biteHeight(t, cf.loc) : 0.5;
     }
@@ -2052,6 +2054,15 @@
     pX -= 0.05 * K * st.hold; pY -= 0.07 * K * st.hold; cX -= 0.02 * K * st.hold;
     const rise = st.rearUp * D.withers * 0.45;
     cY += rise; cR += Math.atan2(rise, Lb) * 0.7; pY -= 0.03 * K * st.rearUp;
+    // a leap: the body flies its ballistic arc (ctrl.airH, model metres),
+    // nose a little up on the take-off, down for the landing
+    const air = clamp(c.air || 0, 0, 1);
+    st.air = approach(st.air || 0, air, 25, dt);
+    if (st.air > 0.01) {
+      const ah = (c.airH || 0.18 * K) * st.air, tilt = (c.airTilt || 0) * 0.25;
+      pY += ah; cY += ah; pR += tilt; cR += tilt;
+    } else if (st.wasAir) { CBZ.quadGait.reset(G, gx / sc, gz / sc, h, ground, 0); }
+    st.wasAir = st.air > 0.3;
     const fl = st.flinch;
     cY -= 0.02 * K * fl; pY -= 0.015 * K * fl; cZ += 0.015 * K * fl * (st.flinchS || 1); cRx += 0.12 * fl * (st.flinchS || 1);
     // a shake-off: the trunk rolls fast, the wave running back from the head
@@ -2221,6 +2232,12 @@
       if (Lg === limpLeg && limpK > 0.65) { fx = lerp(fx, (front ? D.shj.x : D.hip.x) + (front ? 0.05 : -0.06) * K, 0.85); fy = lerp(fy, pad + D.legLen * 0.45, 0.85); aM = front ? -0.5 : -HALF - 0.6; }
       // rearing: the front paws leave the ground, folded
       if (front && st.rearUp > 0.02) { const k = st.rearUp; fx = lerp(fx, D.shj.x + 0.1 * K, k); fy = lerp(fy, by + 0.05 * K - (D.humL + D.radL) * 0.7, k); aM = lerp(aM, -0.6, k); }
+      // in the air: forelegs reach out ahead, hind legs stream out behind
+      if (st.air > 0.01) {
+        const k = st.air;
+        if (front) { fx = lerp(fx, D.shj.x + 0.32 * D.legLen, k); fy = lerp(fy, by - D.legLen * 0.62, k); aM = lerp(aM, -0.35, k); aT = lerp(aT, -0.25, k); }
+        else { fx = lerp(fx, D.hip.x - 0.38 * D.legLen, k); fy = lerp(fy, by - D.legLen * 0.7, k); aM = lerp(aM, -HALF - 0.75, k); aT = lerp(aT, -1.0, k); }
+      }
       // ---- posture feet
       let sx, sy, sa, saT;
       if (front) {
@@ -2772,6 +2789,15 @@
       gape = k < 0.28 ? 0.2 : k < 0.6 ? 0.2 + 0.8 * ((k - 0.28) / 0.32) : Math.max(0, 1 - (k - 0.6) / 0.06);
     }
     c.lunge = lungeE; c.gape = gape;
+    // a leap: airborne through the drive, an arc of a canid's ~25 degree launch
+    // over the distance it flies (apex = d tan 25 / 4)
+    c.air = 0; c.airH = 0; c.airTilt = 0;
+    if (ph === "lunge" && cf && cf.leapD > 0.3) {
+      const k = clamp(cf.pt / cf.lungeT, 0, 1), u = clamp((k - 0.2) / 0.45, 0, 1);
+      c.air = u > 0 && u < 1 ? sin(PI * u) : 0;
+      c.airH = 0.117 * cf.leapD / Math.max(0.3, (m.group.scale.x || 1) * rig.mesh.scale.x);
+      c.airTilt = 1 - 2 * u;
+    }
     const mY = D.mouth.y * rig.indiv;
     c.rearUp = (ph === "lunge" || ph === "hold") && cf ? clamp((cf.biteY - mY) / (D.withers * 0.9), 0, 1) * (ph === "lunge" ? Math.max(0, lungeE) : 1) : 0;
     c.lowBite = (ph === "lunge" || ph === "hold") && cf ? clamp((mY - cf.biteY) / (D.withers * 0.6), 0, 1) : 0;
