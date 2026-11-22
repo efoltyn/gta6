@@ -512,7 +512,7 @@
       jawCfg: spec.jaw || null, eyeCfg: spec.eye || null,
       pecs: [ix.pecR, ix.pecL].filter(function (q) { return q != null; }).map(function (q, n) { return { bone: B[q], s: n === 0 ? 1 : -1 }; }),
       style: plan === "flap" || plan === "flipper" ? plan : null, sph: 0,
-      lod: 0, lodT: 0, lodD: Math.max(28, 9 * tpl.len * ((a.group.scale && a.group.scale.x) || 1)),
+      lod: 0, lodT: 0, lodD: lodDistance(tpl.len * ((a.group.scale && a.group.scale.x) || 1)),
       xiRoot: chain[rootK].xi,
     };
     poseMarine(a.swim, 0, 0, 0, 0);
@@ -548,14 +548,18 @@
     const L = rig.L;
     const e1 = sm01(k / 0.55), e2 = sm01(k), e3 = sm01((k - 0.35) / 0.65), e4 = sm01((k - 0.55) / 0.40);
     const head = B[ix.head], jaw = B[ix.jaw], up = B[ix.upperJaw];
-    if (!rig.vert) head.rotation.z = (J.lift || 0) * e1;
-    jaw.rotation.z = -(J.drop || 0.6) * e2;
-    const r = rig.rest[ix.upperJaw], pr = J.protrude || [0, 0];
-    up.position.set(r.x + pr[0] * L * e3, r.y + pr[1] * L * e3, r.z);
+    if (!rig.vert && head) head.rotation.z = (J.lift || 0) * e1;
+    if (jaw) jaw.rotation.z = -(J.drop || 0.6) * e2;
+    if (up) {
+      const r = rig.rest[ix.upperJaw], pr = J.protrude || [0, 0];
+      up.position.set(r.x + pr[0] * L * e3, r.y + pr[1] * L * e3, r.z);
+    }
     const roll = J.eyeRoll, rm = (J.rollMax || 1.8) * e4;
     const eR = B[ix.eyeR], eL = B[ix.eyeL];
-    if (roll === "back") { eR.rotation.set(0, -rm, 0); eL.rotation.set(0, rm, 0); }
-    else if (roll === "membrane") { eR.rotation.set(-rm, 0, 0); eL.rotation.set(rm, 0, 0); }
+    if (eR && eL) {
+      if (roll === "back") { eR.rotation.set(0, -rm, 0); eL.rotation.set(0, rm, 0); }
+      else if (roll === "membrane") { eR.rotation.set(-rm, 0, 0); eL.rotation.set(rm, 0, 0); }
+    }
     rig.jawApplied = k;
   }
   // pectorals: aoa (+ leading edge up), drop (+ tips down), diff (+ the
@@ -629,6 +633,9 @@
       if (hd) hd.rotation.set(0, 0.04 * Math.sin(ph * 0.5), 0.03 * c);
     }
   }
+  // the near body inside ~nine body lengths, never further out than 28 m and
+  // never closer than forty lengths for a small fish (a sardine swaps at ~9 m)
+  function lodDistance(lenM) { return Math.max(Math.min(28, 40 * lenM), 9 * lenM); }
   function marineLod(a, rig) {
     const cam = CBZ.camera, mesh = rig.marine.mesh;
     if (!cam || !cam.matrixWorld || !mesh) return;

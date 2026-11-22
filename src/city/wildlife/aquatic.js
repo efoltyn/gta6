@@ -166,7 +166,7 @@
       if (c) return c;
       const fv = new Array(fields.length);
       c = CT[i] = {
-        i: i, p: S.pos(i), n: [N[i * 3], N[i * 3 + 1], N[i * 3 + 2]], tag: S.tag[i], m: S.m[i], memo: {},
+        i: i, p: S.pos(i), n: [N[i * 3], N[i * 3 + 1], N[i * 3 + 2]], tag: S.tag[i], m: S.m[i], memo: {}, lod: S.lod || 0,
         f: function (k) {
           const fo = S.forced.get(i);
           if (fo && fo[k] != null) return fo[k];
@@ -251,13 +251,17 @@
       for (let k = 0; k < fields.length; k++) splitPass(S, N, fields, k);
       const n = S.n;
       const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3);
-      const spe = new Float32Array(n), si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+      const spe = new Float32Array(n * 3), mk = new Float32Array(n * 3), si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
       for (let i = 0; i < n; i++) {
         pos[i * 3] = S.p[i * 3]; pos[i * 3 + 1] = S.p[i * 3 + 1]; pos[i * 3 + 2] = S.p[i * 3 + 2];
         nor[i * 3] = N[i * 3]; nor[i * 3 + 1] = N[i * 3 + 1]; nor[i * 3 + 2] = N[i * 3 + 2];
         const c = paint(ctxOf(S, N, i, fields));
         col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
-        spe[i] = c[3] == null ? 0.3 : c[3];
+        // specular strength, then a fish's scale size and the arc coordinate
+        // its scale rows are laid along (0 = no scales)
+        spe[i * 3] = c[3] == null ? 0.3 : c[3]; spe[i * 3 + 1] = c[4] || 0; spe[i * 3 + 2] = c[5] || 0;
+        // a fine marking the shader draws: its kind, strength and period
+        mk[i * 3] = c[6] || 0; mk[i * 3 + 1] = c[7] || 0; mk[i * 3 + 2] = c[8] || 0;
         // four strongest influences, normalised
         const w = S.w[i], pairs = [];
         for (let k = 0; k < w.length; k += 2) {
@@ -279,7 +283,8 @@
       geo.setAttribute("position", new T.BufferAttribute(pos, 3));
       geo.setAttribute("normal", new T.BufferAttribute(nor, 3));
       geo.setAttribute("color", new T.BufferAttribute(col, 3));
-      geo.setAttribute("mbSpec", new T.BufferAttribute(spe, 1));
+      geo.setAttribute("mbSpec", new T.BufferAttribute(spe, 3));
+      geo.setAttribute("mbMark", new T.BufferAttribute(mk, 3));
       geo.setAttribute("skinIndex", new T.BufferAttribute(si, 4));
       geo.setAttribute("skinWeight", new T.BufferAttribute(sw, 4));
       geo.setIndex(S.ix);
@@ -294,12 +299,18 @@
     /* ---- THE SHARED MATERIAL ---------------------------------------------
        Phong, so wet skin and eyes catch a highlight. Two additions through
        onBeforeCompile, one program for every marine body:
-         mbSpec  a per-vertex specular strength (a shark's skin is matte next
-                 to an orca's, a tuna's flank is a mirror, an eye is wet)
+         mbSpec  per vertex: specular strength (a shark's skin is matte next
+                 to an orca's, a tuna's flank is a mirror, an eye is wet), a
+                 bony fish's scale size, and the arc coordinate round the body
+                 its scale rows are laid along
          a fine object-space noise on the diffuse (the dermal grain of a
-                 shark, the scale glitter of a fish) so a hand's breadth of
-                 skin is never one flat colour. It reads the REST position,
-                 so the grain is fixed to the animal and swims with it. */
+                 shark, the glitter of a fish) so a hand's breadth of skin is
+                 never one flat colour
+         the scales: overlapping discs in staggered rows, each disc's free
+                 margin a dark arc toward the tail and its exposed face a
+                 little brighter; they fade out before they shrink below a
+                 pixel. All of it reads the REST position, so the pattern is
+                 fixed to the animal and swims with it. */
     let MAT = null;
     function material() {
       if (MAT) return MAT;
@@ -307,19 +318,61 @@
       MAT.name = "marineBody";
       MAT.onBeforeCompile = function (sh) {
         sh.vertexShader = sh.vertexShader
-          .replace("#include <common>", "#include <common>\nattribute float mbSpec;\nvarying float vMbSpec;\nvarying vec3 vMbP;")
-          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvMbSpec = mbSpec;\nvMbP = position;");
+          .replace("#include <common>", "#include <common>\nattribute vec3 mbSpec;\nattribute vec3 mbMark;\nvarying float vMbSpec;\nvarying vec2 vMbSc;\nvarying vec3 vMbP;\nvarying vec3 vMbMark;")
+          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvMbSpec = mbSpec.x;\nvMbSc = mbSpec.yz;\nvMbP = position;\nvMbMark = mbMark;");
         sh.fragmentShader = sh.fragmentShader
-          .replace("#include <common>", "#include <common>\nvarying float vMbSpec;\nvarying vec3 vMbP;\n" +
+          .replace("#include <common>", "#include <common>\nvarying float vMbSpec;\nvarying vec2 vMbSc;\nvarying vec3 vMbP;\nvarying vec3 vMbMark;\n" +
             "float mbH(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }\n" +
             "float mbN(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);\n" +
             "  return mix(mix(mix(mbH(i), mbH(i + vec3(1,0,0)), f.x), mix(mbH(i + vec3(0,1,0)), mbH(i + vec3(1,1,0)), f.x), f.y),\n" +
             "             mix(mix(mbH(i + vec3(0,0,1)), mbH(i + vec3(1,0,1)), f.x), mix(mbH(i + vec3(0,1,1)), mbH(i + vec3(1,1,1)), f.x), f.y), f.z); }")
           .replace("#include <color_fragment>", "#include <color_fragment>\n" +
-            "diffuseColor.rgb *= 0.94 + 0.08 * mbN(vMbP * 21.0) + 0.04 * mbN(vMbP * 67.0);")
-          .replace("#include <specularmap_fragment>", "#include <specularmap_fragment>\nspecularStrength = vMbSpec;");
+            "diffuseColor.rgb *= 0.94 + 0.08 * mbN(vMbP * 21.0) + 0.04 * mbN(vMbP * 67.0);\n" +
+            // no branch: derivatives must be taken on every fragment
+            "vec2 mbQ = vec2(-vMbP.x, vMbSc.y) / max(vMbSc.x, 1e-3);\n" +
+            "float mbFade = step(1e-5, vMbSc.x) * (1.0 - smoothstep(0.18, 0.5, max(fwidth(mbQ.x), fwidth(mbQ.y))));\n" +
+            "mbQ.y += 0.5 * mod(floor(mbQ.x), 2.0);\n" +
+            "vec2 mbF = fract(mbQ);\n" +
+            "float mbD = length(vec2(mbF.x, (mbF.y - 0.5) * 1.15));\n" +
+            "float mbRim = smoothstep(0.80, 0.95, mbD) * (1.0 - 0.5 * smoothstep(1.0, 1.12, mbD)) * mbFade;\n" +
+            "float mbFace = (1.0 - smoothstep(0.3, 0.9, mbD)) * mbFade;\n" +
+            "diffuseColor.rgb *= (1.0 - 0.18 * mbRim) * (1.0 + 0.06 * mbFace);\n" +
+            // the fine markings, in units of their period along the body (X)
+            // and round it (A): 1 a mackerel's wavy bars, 2 a marlin's bars
+            // of pale dots, 3 a tuna's rows of pale dots and lines, 4 a
+            // barracuda's oblique bars, 5 its blotches. They fade before
+            // they alias.
+            "vec2 mbPU = vec2(-vMbP.x, vMbSc.y) / max(vMbMark.z, 1e-3);\n" +
+            "float mbPF = max(fwidth(mbPU.x), fwidth(mbPU.y)) + 1e-4;\n" +
+            "float mbPS = vMbMark.y * (1.0 - smoothstep(0.22, 0.55, mbPF));\n" +
+            "if (mbPS > 0.002) {\n" +
+            "  float X = mbPU.x, A = mbPU.y, m;\n" +
+            "  if (vMbMark.x < 1.5) {\n" +
+            "    float b = X + 0.30 * sin(A * 2.1 + X * 0.6) + 0.12 * sin(A * 5.3 + X * 2.1);\n" +
+            "    m = 1.0 - smoothstep(0.2 - mbPF, 0.2 + mbPF, abs(fract(b) - 0.5));\n" +
+            "    diffuseColor.rgb *= 1.0 - 0.68 * m * mbPS;\n" +
+            "  } else if (vMbMark.x < 2.5) {\n" +
+            "    vec2 cc = vec2(fract(X) - 0.5, fract(A * 1.6) - 0.5);\n" +
+            "    m = 1.0 - smoothstep(0.2 - mbPF, 0.2 + mbPF, length(cc * vec2(1.0, 0.75)));\n" +
+            "    m = max(m, 0.55 * (1.0 - smoothstep(0.05 - mbPF, 0.05 + mbPF, abs(fract(X) - 0.5))));\n" +
+            "    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.40, 0.60, 0.92), 0.8 * m * mbPS);\n" +
+            "  } else if (vMbMark.x < 3.5) {\n" +
+            "    vec2 cc = vec2(fract(X) - 0.5, fract(A * 2.4) - 0.5);\n" +
+            "    m = 1.0 - smoothstep(0.16 - mbPF, 0.16 + mbPF, length(cc));\n" +
+            "    m = max(m, 1.0 - smoothstep(0.04 - mbPF, 0.04 + mbPF, abs(fract(X + 0.5) - 0.5)));\n" +
+            "    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.82, 0.86, 0.90), 0.4 * m * mbPS);\n" +
+            "  } else if (vMbMark.x < 4.5) {\n" +
+            "    float b = X + 0.55 * A + 0.15 * sin(A * 1.7);\n" +
+            "    m = 1.0 - smoothstep(0.17 - mbPF, 0.17 + mbPF, abs(fract(b) - 0.5));\n" +
+            "    diffuseColor.rgb *= 1.0 - 0.45 * m * mbPS;\n" +
+            "  } else {\n" +
+            "    m = smoothstep(0.70 - mbPF, 0.70 + mbPF, mbN(vec3(X * 1.3, A * 1.3, 7.1)));\n" +
+            "    diffuseColor.rgb *= 1.0 - 0.85 * m * mbPS;\n" +
+            "  }\n" +
+            "}")
+          .replace("#include <specularmap_fragment>", "#include <specularmap_fragment>\nspecularStrength = vMbSpec * (1.0 + 0.35 * mbFace);");
       };
-      MAT.customProgramCacheKey = function () { return "marineBody2"; };
+      MAT.customProgramCacheKey = function () { return "marineBody4"; };
       MAT._shared = true;
       return MAT;
     }
@@ -601,17 +654,19 @@
       let mouthInfo = null;
       if (hasMouth) mouthInfo = buildMouth(S, spec, lv, R, up, lo, iF, iC, mL, chain);
       // ---- eyes -------------------------------------------------------------
-      if (EY) for (let e = 0; e < 2; e++) buildEye(S, spec, EY[e], e === 0 ? B.eyeR : B.eyeL, lv);
+      if (EY) for (let e = 0; e < 2; e++) buildEye(S, spec, EY[e], spec.eye.fixed ? B.head : (e === 0 ? B.eyeR : B.eyeL), lv);
       // ---- fins -------------------------------------------------------------
       const finInfo = {};
       const fins = spec.fins || [];
       for (let f = 0; f < fins.length; f++) {
+        if (fins[f].lodMax != null && lod > fins[f].lodMax) continue;     // finlets: near only
         const fi = buildFin(S, spec, PF, fins[f], lv, chain, f + 1);
         if (fi) finInfo[fins[f].name] = fi;
       }
       // ---- species extras (tubercles, baleen, ...) ---------------------------
       if (spec.extras) spec.extras(S, { spec: spec, lv: lv, R: R, PF: PF, chain: chain, sectionAt: function (s) { return sectionAt(spec, PF, s); }, ringPoint: ringPoint, ringNormal: ringNormal, mouth: mouthInfo, TAG: TAG, dome: dome, chainWeights: chainWeights, B: spec.boneIx });
 
+      S.lod = lod;
       const geo = finalize(S, spec.paint, spec.fields || []);
       return { geo: geo, mouth: mouthInfo, fins: finInfo, eyes: EY, stations: R.length, M: M };
     }
@@ -639,8 +694,10 @@
         const P = ringPoint(R, phi), N = ringNormal(R, phi);
         const r = E.r * L;
         const look = nrm3([N[0] + (E.fwd || 0.12), N[1] + (E.lookUp || 0), N[2]]);
-        const C = [P[0] - N[0] * r * (1 - (E.out == null ? 0.42 : E.out)), P[1] - N[1] * r * (1 - (E.out == null ? 0.42 : E.out)),
-          P[2] - N[2] * r * (1 - (E.out == null ? 0.42 : E.out))];
+        // a flattened eye (a bony fish's: E.flat of its radius deep along the
+        // line of sight) is sunk so only E.out of r stands proud of the skin
+        const sink = (E.flat || 1) - (E.out == null ? 0.42 : E.out);
+        const C = [P[0] - N[0] * r * sink, P[1] - N[1] * r * sink, P[2] - N[2] * r * sink];
         out.push({ side: side, skin: P, n: N, c: C, r: r, look: look });
       });
       return out;
@@ -652,7 +709,7 @@
        back half out: a great white's eye rolling white at the bite. */
     function buildEye(S, spec, E, bone, lv) {
       const nU = lv.eyeSeg || 12, nV = lv.eyeRing || 8;
-      const f = E.look;
+      const f = E.look, fl = spec.eye.flat || 1;
       let upv = [0, 1, 0];
       const rgt = nrm3(crs(f, upv));
       upv = nrm3(crs(rgt, f));
@@ -663,9 +720,9 @@
         const ringN = v === 0 || v === nV ? 1 : nU;
         for (let u = 0; u < ringN; u++) {
           const ps = TAU * u / nU;
-          const dir = [f[0] * Math.cos(th) + (rgt[0] * Math.cos(ps) + upv[0] * Math.sin(ps)) * Math.sin(th),
-            f[1] * Math.cos(th) + (rgt[1] * Math.cos(ps) + upv[1] * Math.sin(ps)) * Math.sin(th),
-            f[2] * Math.cos(th) + (rgt[2] * Math.cos(ps) + upv[2] * Math.sin(ps)) * Math.sin(th)];
+          const dir = [f[0] * Math.cos(th) * fl + (rgt[0] * Math.cos(ps) + upv[0] * Math.sin(ps)) * Math.sin(th),
+            f[1] * Math.cos(th) * fl + (rgt[1] * Math.cos(ps) + upv[1] * Math.sin(ps)) * Math.sin(th),
+            f[2] * Math.cos(th) * fl + (rgt[2] * Math.cos(ps) + upv[2] * Math.sin(ps)) * Math.sin(th)];
           const P = [E.c[0] + dir[0] * E.r, E.c[1] + dir[1] * E.r, E.c[2] + dir[2] * E.r];
           row.push(S.v(P, [bone, 1], TAG.EYE, [th, ps, E.side, 0]));
         }
@@ -847,7 +904,9 @@
       for (let k = 0; k < pts.length; k++) {
         const P = pts[k], u = P.u;
         const centre = 1 - Math.abs(u - 0.5) * 2;           // 1 at the front, 0 at the corners
-        const h = row.h * L * (row.cornerK == null ? 0.42 : row.cornerK) + row.h * L * (1 - (row.cornerK == null ? 0.42 : row.cornerK)) * Math.pow(centre, 0.55);
+        // row.jag: teeth of unequal height (a barracuda's), fixed per tooth
+        const jag = row.jag ? 1 - row.jag * VAL[(k * 37 + (dir > 0 ? 11 : 53)) & 255] : 1;
+        const h = jag * (row.h * L * (row.cornerK == null ? 0.42 : row.cornerK) + row.h * L * (1 - (row.cornerK == null ? 0.42 : row.cornerK)) * Math.pow(centre, 0.55));
         const bw = Math.min(row.w * L * (0.55 + 0.45 * Math.pow(centre, 0.5)), h * 1.1);
         // inward (toward the mouth's middle, in plan) and the crown direction
         const inw = nrm3([ctr[0] - P.p[0], 0, ctr[2] - P.p[2]]);
@@ -971,7 +1030,8 @@
         if (F.scallop) te += F.scallop.d * root * Math.abs(Math.sin(t * Math.PI * F.scallop.n + 0.7 * Math.sin(t * 9.1))) * Math.sin(Math.PI * t);
         return te;
       }
-      const nS = lv.finSpan || 7, nC = lv.finChord || 6;
+      // F.res caps a small fin's resolution (a finlet needs a handful of quads)
+      const nS = Math.min(lv.finSpan || 7, F.res ? F.res[0] : 99), nC = Math.min(lv.finChord || 6, F.res ? F.res[1] : 99);
       const emb = (F.embed == null ? 0.25 : F.embed) * Math.max(span, root) * 0.4;
       const secs = [];
       const vs = [-emb, 0];
@@ -1089,15 +1149,15 @@
         const pc = ringPoint(Rc, mo.alphaC), pf = ringPoint(Rf, 0);
         hinge = [pc[0], pc[1], 0]; front = [pf[0], pf[1], 0];
       }
-      add("upperJaw", "head", front);
-      add("jaw", "neck", hinge);
+      // jaws, rolling eyes and trimming pectorals only where the body has
+      // them: a sardine in a school of seventy pays for its spine alone
+      if (mo) { add("upperJaw", "head", front); add("jaw", "neck", hinge); }
       const EY = spec.eye ? eyeCentres(spec, PF) : null;
-      add("eyeR", "head", EY ? EY[0].c : axis(bs.head));
-      add("eyeL", "head", EY ? EY[1].c : axis(bs.head));
+      if (EY && !spec.eye.fixed) { add("eyeR", "head", EY[0].c); add("eyeL", "head", EY[1].c); }
       const pecR = (spec.fins || []).filter(function (f) { return f.boneName === "pecR"; })[0];
       const pecL = (spec.fins || []).filter(function (f) { return f.boneName === "pecL"; })[0];
-      add("pecR", "root", pecR ? finOrigin(spec, PF, pecR) : axis(bs.root));
-      add("pecL", "root", pecL ? finOrigin(spec, PF, pecL) : axis(bs.root));
+      if (pecR) add("pecR", "root", finOrigin(spec, PF, pecR));
+      if (pecL) add("pecL", "root", finOrigin(spec, PF, pecL));
       const tailNames = [];
       let prev = "root";
       for (let k = 0; k < bs.tail.length; k++) { const nm = "t" + (k + 1); add(nm, prev, axis(bs.tail[k])); tailNames.push(nm); prev = nm; }
@@ -1290,6 +1350,27 @@
     const enamel = H(o.tooth || 0xf0eadb), root = H(o.toothRoot || 0xc99f94);
     const pupil = H(o.pupil || 0x010203), iris = H(o.iris || 0x0d171c), sclera = H(o.sclera || 0xc8cfcf), orbit = H(o.orbit || 0x14191c);
     const EY = o.eyes || null;
+    /* a bony fish's scales (drawn by the shader): their size, faded in over
+       the trunk between s0 and s1, and the arc coordinate round the body
+       (distance from the spine along the skin, the same on both flanks) */
+    const SC = o.scales || null, PT = o.pattern || null;
+    let PFs = null;
+    function scalesOf(c) {
+      if ((!SC && !PT) || c.tag !== TAG.SKIN) return [0, 0];
+      const s = c.m[0];
+      PFs = PFs || MB.makeProfile(o.spec);
+      const R = MB.sectionAt(o.spec, PFs, s);
+      const th = Math.acos(MB.cl(-c.m[1], -1, 1));
+      const r = Math.sqrt(0.5 * (0.25 * (R.top + R.bot) * (R.top + R.bot) + R.half * R.half));
+      const k = SC ? MB.sm((s - SC.s0) / 0.04) * (1 - MB.sm((s - SC.s1 + 0.04) / 0.04)) : 0;
+      return [k > 0.01 ? SC.size * L * k : 0, th * r];
+    }
+    // a fine marking drawn by the shader (see material()): kind, strength here, period
+    function patternOf(c) {
+      if (!PT || c.tag !== TAG.SKIN) return [0, 0, 0];
+      const k = PT.strength(c), kind = typeof PT.kind === "function" ? PT.kind(c) : PT.kind;
+      return [kind, k > 0 ? Math.min(1, k) : 0, PT.unit * L];
+    }
     function lineAt(m, c) {
       if (c && c.memo.line != null) return c.memo.line;
       // the line wanders with two noises along the body and a finer tooth
@@ -1350,7 +1431,7 @@
       fields: fields,
       paint: function (c) {
         const t = c.tag, m = c.m;
-        if (t === TAG.SKIN || t === TAG.CHIN) return skin(c).concat([up01(c) ? (o.specBack == null ? 0.25 : o.specBack) : (o.specBelly == null ? 0.18 : o.specBelly)]);
+        if (t === TAG.SKIN || t === TAG.CHIN) return skin(c).concat([up01(c) ? (o.specBack == null ? 0.25 : o.specBack) : (o.specBelly == null ? 0.18 : o.specBelly)], scalesOf(c), patternOf(c));
         if (t === TAG.PALATE || t === TAG.FLOOR) {
           // gum pink at the lips, darker inside, black down the throat
           const depth = m[0] >= 1 ? 1 : Math.max(m[0], 1 - Math.min(m[1], 1 - m[1]) * 4);
@@ -1399,3029 +1480,6 @@
     return MB.instance(tpl);
   }
   CBZ.marineBodyKit = MB;
-
-  /* ==========================================================================
-     THE SEA, REBUILT FROM THE REFERENCE SHEET (docs/SHARK-REFERENCE.md).
-
-     What was here before was a pile of axis-aligned boxes: every fin in the
-     ocean was `box(w, h, d)`, the countershading was one uniform ring cut, the
-     mouth had one row of cone teeth on a hairline gum, and the great white's
-     head could not open — the mandible swung and the skull stayed put.
-
-     Three shared builders now carry the whole file:
-
-       finGeom()   ONE fin grammar. Swept blade, concave (scythe) trailing
-                   edge, free rear tip, rounded-or-pointed apex, thickness that
-                   falls to a knife edge at both the tip and both edges. Every
-                   dorsal, pectoral, pelvic, anal, caudal lobe, keel, flipper,
-                   fluke and manta wing in this file is one call to it.
-       hullShell() ONE body grammar. Elliptical cross-sections, and a
-                   countershading boundary that is a FUNCTION OF THE RING plus
-                   deterministic raggedness — so the white kicks up behind the
-                   pectoral and over the gills instead of running dead level.
-       addSharkMouth() ONE mouth. Swept gum/lip bands (not boxes), three tooth
-                   rows merged into one mesh per jaw, a cavity that is a HOLE
-                   — an inside-out banded ellipsoid receding maroon-to-black
-                   (§6), never a convex pink mass — an upper jaw that SLIDES
-                   FORWARD AND DOWN while the rostrum lifts off it, and (§7)
-                   a lower jaw that IS the body: a chin cut from the species'
-                   own rings, dropping out of a hull notched along the seam,
-                   so a bite splits the head into its dark and white halves
-                   instead of swinging a clamp under a closed one.
-
-     BUDGET. Everything is built through a module-scope geometry cache keyed on
-     its own parameters, so a pack of three great whites — or a sixty-fish
-     sardine shoal — allocates each shape exactly once. The mouth alone went
-     from 81 meshes (fifty arc boxes + thirty per-tooth ConeGeometries, all
-     freshly allocated per animal) to 8 shared ones.
-
-     DETERMINISM. No Math.random() anywhere below. Skin marks, scars and the
-     ragged countershading edge come from CBZ.hash01 on integer indices, so
-     they are a property of the SPECIES, not of the individual — per-individual
-     variation belongs to whoever owns the spawner, not to a build function.
-     ========================================================================== */
-
-  function h01(a, b, salt) {
-    return CBZ.hash01 ? CBZ.hash01(a, b, salt | 0) : (((a * 73 + b * 151 + salt * 31) % 97) / 97);
-  }
-  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
-  function lerp(a, b, t) { return a + (b - a) * t; }
-  // read a small control array as a continuous curve over t in [0,1]
-  function sample(arr, t) {
-    if (!arr.length) return 0;
-    if (arr.length === 1) return arr[0];
-    const f = clamp(t, 0, 1) * (arr.length - 1);
-    const i = Math.min(arr.length - 2, Math.floor(f));
-    return lerp(arr[i], arr[i + 1], f - i);
-  }
-  /* A BODY IS A PROFILE, NOT A STACK OF BOXES. Every fish below is one call:
-     the length, the waterline the model rides at, a height curve, a width
-     curve, and how many cross-sections to spend on it. */
-  function bodyRings(x0, x1, y, hProfile, wProfile, n) {
-    const rings = [];
-    for (let i = 0; i < n; i++) {
-      const t = n > 1 ? i / (n - 1) : 0;
-      rings.push({
-        x: lerp(x0, x1, t), y: typeof y === "function" ? y(t) : y,
-        ry: sample(hProfile, t), rz: sample(wProfile, t),
-      });
-    }
-    return rings;
-  }
-
-  /* ---- geometry cache: build a shape once, hand it to every animal ------- */
-  const GEOM = new Map();
-  function cachedGeom(key, make) {
-    let g = GEOM.get(key);
-    if (!g) { g = make(); g._shared = true; GEOM.set(key, g); }
-    return g;
-  }
-
-  /* ---- THE SPLIT-BODY MOUTH SWITCH ---------------------------------------
-     Owner, with the orca photograph on the table (2026-08-21): the shark's
-     mouth "is a clamp detached from the shape of the shark". The orca is the
-     brief — when its mouth opens, the HEAD ITSELF splits: the black upper
-     half lifts, the white lower half drops, and both halves are continuations
-     of the body's own mass. So the sharks now open the same way: the hull
-     ends at the jaw corner and hands the whole head front to TWO JAW SHELLS
-     cut from the species' own rings — the dark upper half (addSnoutShell,
-     carrying the eyes and a real nose tip) and the white CHIN — with the
-     gums and tooth rows living INSIDE them, between palate and chin deck,
-     visible only when the body pries open. ?sharkmouth=off (or
-     CBZ.CONFIG.SHARK_MOUTH_SPLIT = false) reverts to the old band-clamp
-     mouth — that is what the before/after preset's BEFORE column renders. */
-  function mouthSplitOn() {
-    if (typeof location !== "undefined" && location.search &&
-        /(^|[?&])sharkmouth=off(&|$)/.test(location.search)) return false;
-    return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_MOUTH_SPLIT === false);
-  }
-  /* The SEAM — the closed-mouth line on the side of the head, y as a function
-     of x. It follows the gum arc: level at the front lip, rising toward the
-     jaw corner exactly like addSharkMouth's riseAt, so the hull notch, the
-     rostrum notch and the chin rim all land on the same line and the closed
-     head stays sealed. mo is the same options object addSharkMouth takes. */
-  function mouthSeamY(mo, x) {
-    const len = mo.length, A = mo.arcSpan == null ? Math.PI * 0.49 : mo.arcSpan;
-    const rise0 = mo.cornerRise == null ? mo.gap * 0.42 : mo.cornerRise;
-    const cx = len * 0.18, rad = len * 0.82;
-    const ca = clamp((x - mo.hingeX - cx) / rad, -1, 1);
-    const a = Math.min(A, Math.acos(ca));
-    return mo.hingeY - mo.gap * 0.27 + rise0 * Math.pow(a / (A || 1), 1.7);
-  }
-
-  /* ---- indexed shell builder -------------------------------------------
-     Vertices are deduplicated by quantised position, which is what gives the
-     hulls and fins SMOOTH normals across their rings without an explicit
-     normal pass, and which automatically welds a fin's two surfaces where the
-     foil thickness reaches zero at the leading/trailing edge. Triangles go
-     into numbered groups = material slots. */
-  function Shell() { this.p = []; this.k = new Map(); this.g = []; }
-  Shell.prototype.v = function (x, y, z) {
-    const key = ((x * 8192) | 0) + "," + ((y * 8192) | 0) + "," + ((z * 8192) | 0);
-    let i = this.k.get(key);
-    if (i === undefined) { i = this.p.length / 3; this.p.push(x, y, z); this.k.set(key, i); }
-    return i;
-  };
-  Shell.prototype.tri = function (g, a, b, c) {
-    if (a === b || b === c || a === c) return;
-    (this.g[g] || (this.g[g] = [])).push(a, b, c);
-  };
-  Shell.prototype.quad = function (g, a, b, c, d) { this.tri(g, a, b, c); this.tri(g, a, c, d); };
-  // a convex polygon (3..n points), wound to face `nrm`, fanned from its first
-  // point; the points are interned, so an edge shared with a neighbour welds
-  Shell.prototype.polyN = function (g, nrm, pts) {
-    if (pts.length < 3) return;
-    let nx = 0, ny = 0, nz = 0;                        // Newell
-    for (let i = 0; i < pts.length; i++) {
-      const a = pts[i], b = pts[(i + 1) % pts.length];
-      nx += (a[1] - b[1]) * (a[2] + b[2]); ny += (a[2] - b[2]) * (a[0] + b[0]); nz += (a[0] - b[0]) * (a[1] + b[1]);
-    }
-    const flip = nx * nrm[0] + ny * nrm[1] + nz * nrm[2] < 0;
-    const v = pts.map(function (q) { return this.v(q[0], q[1], q[2]); }, this);
-    for (let i = 1; i + 1 < v.length; i++) {
-      if (flip) this.tri(g, v[0], v[i + 1], v[i]); else this.tri(g, v[0], v[i], v[i + 1]);
-    }
-  };
-  /* THE LINE CUTS THE QUAD. A boundary painted per quad can only move in
-     quad-sized steps, and on a snout whose quads are a hand wide that is a
-     staircase, not a line. Given a signed value per corner (negative = the
-     `neg` slot, positive = the `pos` slot), split the quad along the zero
-     crossing and paint the two pieces: the boundary is then a true curve
-     through the faces, and the crossing points on a shared edge are the
-     same on both sides of it, so the pieces weld. */
-  Shell.prototype.quadSplit = function (neg, pos, nrm, p, f) {
-    let allNeg = true, allPos = true;
-    for (let i = 0; i < 4; i++) { if (f[i] > 0) allNeg = false; else allPos = false; }
-    if (allNeg) return this.polyN(neg, nrm, p);
-    if (allPos) return this.polyN(pos, nrm, p);
-    const A = [], B = [];
-    for (let i = 0; i < 4; i++) {
-      const j = (i + 1) % 4, fi = f[i], fj = f[j];
-      (fi <= 0 ? A : B).push(p[i]);
-      if ((fi <= 0) !== (fj <= 0)) {
-        const t = fi / (fi - fj);
-        const q = [lerp(p[i][0], p[j][0], t), lerp(p[i][1], p[j][1], t), lerp(p[i][2], p[j][2], t)];
-        A.push(q); B.push(q);
-      }
-    }
-    this.polyN(neg, nrm, A); this.polyN(pos, nrm, B);
-  };
-  // quad, wound to face `nrm`. p* are the four positions in order, v* the
-  // interned indices for the same points.
-  Shell.prototype.quadN = function (g, nrm, p, v) {
-    const ux = p[1][0] - p[0][0], uy = p[1][1] - p[0][1], uz = p[1][2] - p[0][2];
-    const wx = p[3][0] - p[0][0], wy = p[3][1] - p[0][1], wz = p[3][2] - p[0][2];
-    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
-    if (nx * nrm[0] + ny * nrm[1] + nz * nrm[2] >= 0) this.quad(g, v[0], v[1], v[2], v[3]);
-    else this.quad(g, v[3], v[2], v[1], v[0]);
-  };
-  // an axis-aligned plate lying in the (u,v) plane at `c`, used for scars,
-  // pores and skin folds so dozens of marks cost ONE mesh.
-  Shell.prototype.plate = function (g, c, u, v, w, h, n) {
-    const hu = [u[0] * w * 0.5, u[1] * w * 0.5, u[2] * w * 0.5];
-    const hv = [v[0] * h * 0.5, v[1] * h * 0.5, v[2] * h * 0.5];
-    const p = function (su, sv) {
-      return [c[0] + hu[0] * su + hv[0] * sv, c[1] + hu[1] * su + hv[1] * sv, c[2] + hu[2] * su + hv[2] * sv];
-    };
-    const pa = p(-1, -1), pb = p(1, -1), pd = p(1, 1), pe = p(-1, 1);
-    const a = this.v.apply(this, pa), b = this.v.apply(this, pb);
-    const d = this.v.apply(this, pd), e = this.v.apply(this, pe);
-    const nrm = n || cross3(u, v);
-    this.quadN(g, nrm, [pa, pb, pd, pe], [a, b, d, e]);
-  };
-  Shell.prototype.geom = function () {
-    const idx = [], groups = [];
-    let start = 0;
-    for (let i = 0; i < this.g.length; i++) {
-      const arr = this.g[i];
-      if (!arr || !arr.length) continue;
-      for (let j = 0; j < arr.length; j++) idx.push(arr[j]);
-      groups.push([start, arr.length, i]);
-      start += arr.length;
-    }
-    const geo = new T.BufferGeometry();
-    geo.setAttribute("position", new T.Float32BufferAttribute(this.p, 3));
-    geo.setIndex(idx);
-    for (let i = 0; i < groups.length; i++) geo.addGroup(groups[i][0], groups[i][1], groups[i][2]);
-    geo.computeVertexNormals(); geo.computeBoundingBox(); geo.computeBoundingSphere();
-    return geo;
-  };
-  // one group used => hand the mesh a single material so r128 issues ONE draw
-  // call and ignores the groups entirely.
-  function meshOf(geo, mats) {
-    let used = 0;
-    for (let i = 0; i < geo.groups.length; i++) used = Math.max(used, geo.groups[i].materialIndex + 1);
-    return new T.Mesh(geo, used > 1 ? mats : mats[0]);
-  }
-
-  /* ---- ONE DRAW CALL PER RIGID BODY, for the fish that come in hundreds ----
-     A mackerel was twenty draw calls (a three-colour hull, two eyes, three
-     median fins, two-colour pectorals, pelvics, a two-colour peduncle and two
-     two-colour tail lobes) and the sea holds ~120 of them plus sardines: two
-     thousand draws for bait on an iPad. schoolBody() bakes every material
-     colour (times the hull's dorsal shade ramp) into a vertex colour on ONE
-     shared vertex-coloured material, merges everything that never moves
-     relative to the trunk into the hull, and leaves exactly the parts
-     wildlife_rig.js animates (the tail chain and the two pectorals) as their
-     own meshes, each baked to one draw as well. Geometry is cached per
-     species, so every sardine in the sea shares the same buffers. */
-  const _bm = new T.Matrix4(), _bn = new T.Matrix3(), _bv = new T.Vector3();
-  function bakeColours(meshes, apply, dx) {
-    const pos = [], nrm = [], col = [];
-    for (let k = 0; k < meshes.length; k++) {
-      const mesh = meshes[k];
-      mesh.updateMatrix();
-      const src = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
-      const P = src.attributes.position, N = src.attributes.normal, C = src.attributes.color;
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      if (apply) _bm.copy(mesh.matrix); else _bm.identity();
-      _bn.getNormalMatrix(_bm);
-      if (dx) _bm.elements[12] -= dx;
-      const groups = src.groups.length ? src.groups : [{ start: 0, count: P.count, materialIndex: 0 }];
-      for (let gi = 0; gi < groups.length; gi++) {
-        const gr = groups[gi], mt = mats[gr.materialIndex] || mats[0];
-        const c = mt.color, shaded = !!(mt.vertexColors && C);
-        const end = Math.min(P.count, gr.start + gr.count);
-        for (let v = gr.start; v < end; v++) {
-          _bv.fromBufferAttribute(P, v).applyMatrix4(_bm); pos.push(_bv.x, _bv.y, _bv.z);
-          _bv.fromBufferAttribute(N, v).applyMatrix3(_bn).normalize(); nrm.push(_bv.x, _bv.y, _bv.z);
-          const s = shaded ? C.getX(v) : 1, s2 = shaded ? C.getY(v) : 1, s3 = shaded ? C.getZ(v) : 1;
-          col.push(c.r * s, c.g * s2, c.b * s3);
-        }
-      }
-      if (src !== mesh.geometry) src.dispose();
-    }
-    const geo = new T.BufferGeometry();
-    geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
-    geo.setAttribute("normal", new T.Float32BufferAttribute(nrm, 3));
-    geo.setAttribute("color", new T.Float32BufferAttribute(col, 3));
-    geo.computeBoundingBox(); geo.computeBoundingSphere();
-    return geo;
-  }
-  function schoolBody(g, m, key) {
-    const vc = shadedTwin(m(0xffffff));
-    const kids = g.children.slice();
-    let minX = 0, maxX = 0;
-    for (let i = 0; i < kids.length; i++) {
-      if (!kids[i].isMesh) continue;
-      if (kids[i].position.x < minX) minX = kids[i].position.x;
-      if (kids[i].position.x > maxX) maxX = kids[i].position.x;
-    }
-    const cut = minX * 0.5;                 // wildlife_rig.js buildSwimRig's own tail cut
-    const rigid = [], live = [];
-    for (let i = 0; i < kids.length; i++) {
-      const k = kids[i]; if (!k.isMesh) continue;
-      const fs = k.userData && k.userData.finShape;
-      const pec = fs && fs.under && fs.spanDir && Math.abs(fs.spanDir[2]) > 0.5 &&
-        k.position.x > 0 && Math.abs(k.position.z) > 0.05 && (fs.span || 0) >= 0.3;
-      if (k.position.x <= cut || pec) live.push(k); else rigid.push(k);
-    }
-    // The merged body's ORIGIN sits where the front-most part's origin was
-    // (geometry shifted back by the same amount): wildlife_rig.js measures a
-    // swimmer's length off its children's origins, and a body parked at 0
-    // halved it — half the tail sweep, and a school spaced for a fish half as
-    // long, i.e. fish swimming through each other.
-    const body = new T.Mesh(cachedGeom("school-body|" + key, function () { return bakeColours(rigid, true, maxX); }), vc);
-    body.position.x = maxX;
-    body.name = "fishHull";
-    for (let i = 0; i < rigid.length; i++) g.remove(rigid[i]);
-    g.add(body);
-    for (let i = 0; i < live.length; i++) {
-      const k = live[i];
-      k.geometry = cachedGeom("school-part|" + key + "|" + i, function () { return bakeColours([k], false); });
-      k.material = vc;
-    }
-    return g;
-  }
-
-  /* ======================================================================
-     THE FIN. One blade grammar for every fin in the ocean.
-
-     Built in a local frame: chord along +x (leading edge forward), span along
-     +y (root -> apex), thickness along ±z, then baked into whatever world
-     basis the caller asks for so left/right pairs, drooped pectorals and
-     raked caudal lobes need no Euler gymnastics at the call site.
-
-     The outline has FOUR corners, which is what a real fin has and a box does
-     not: root-leading, apex, free REAR TIP (the sharp corner that trails below
-     and behind the apex), root-trailing. The leading edge bows slightly
-     forward; the trailing edge between the rear tip and the apex is CONCAVE —
-     that scythe cut is the single thing that reads as "shark fin" from a boat.
-     ====================================================================== */
-  function norm3(v) {
-    const l = Math.hypot(v[0], v[1], v[2]) || 1;
-    return [v[0] / l, v[1] / l, v[2] / l];
-  }
-  function cross3(a, b) {
-    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-  }
-  function emitFin(sh, o) {
-    const span = o.span, cr = o.chordRoot;
-    const xL0 = cr * 0.5, xT0 = -cr * 0.5;
-    const xA = xL0 - span * Math.tan(o.sweep || 0);
-    const ct = o.chordTip == null ? cr * 0.16 : o.chordTip;
-    const hR = o.rearTipH == null ? 0.14 : o.rearTipH;
-    const xR = xT0 - (o.rearTipBack == null ? span * 0.12 : o.rearTipBack);
-    const con = o.concavity == null ? 0.20 : o.concavity;
-    const bow = o.leadBow == null ? 0.05 : o.leadBow;
-    const ar = o.apexRound == null ? 0.16 : o.apexRound;
-    const th0 = o.thick == null ? cr * 0.14 : o.thick;
-    const nS = o.spanSteps || 5, nC = o.chordSteps || 4;
-    // How far the blade is buried below its root plane. This is the fix for
-    // "the fin is a slab bolted to the shark": the root cap ends up inside the
-    // hull, so what the camera sees is a blade coming OUT of the skin.
-    const emb = o.embed == null ? cr * 0.30 : o.embed;
-    const tipDark = o.tipDark == null ? 2 : o.tipDark;      // >1 disables
-    const paleBase = o.paleBase == null ? -1 : o.paleBase;  // <0 disables
-    // Reference sheet §5: the above-water dorsal is "LIGHTER and slightly
-    // translucent along the trailing edge". That is a CHORDWISE band, not a
-    // spanwise one, so it needs its own term — the fraction of the chord back
-    // from the trailing edge that takes the pale material. 0 disables.
-    // Callers that set it must pass a 4th material.
-    const trailPale = o.trailPale == null ? 0 : o.trailPale;
-    const under = !!o.under;
-
-    // orthonormal basis: u = chord (forward), v = span (root->tip), w = u x v
-    const u = norm3(o.chordDir || [1, 0, 0]);
-    let v = o.spanDir || [0, 1, 0];
-    const d = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
-    v = norm3([v[0] - u[0] * d, v[1] - u[1] * d, v[2] - u[2] * d]);
-    const w = norm3(cross3(u, v));
-    /* WHICH FACE IS THE UNDERSIDE. The blade's two faces are +w and -w, and
-       slot 1 (the pale belly) used to be nailed to -w. But a left/right pair
-       is built by NEGATING spanDir, which negates w — so on exactly one side
-       of every animal the "underside" faced the sky. On a hammerhead, whose
-       cephalofoil wings are horizontal, that is not subtle: one wing came out
-       white from above and the other grey. Every shark's pectorals and pelvics
-       had the same flip at a shallower angle.
-
-       Countershading follows GRAVITY, not winding order. So ask which way the
-       thickness axis actually points in the model's own frame, and let the
-       lower face wear the belly. A vertical blade (dorsal, caudal — w is
-       horizontal) has no lower face, w[1] is ~0, and nothing changes for it. */
-    const flipFaces = w[1] < -1e-3;
-    const og = o.origin || [0, 0, 0];
-    function pt(x, y, z) {
-      return [og[0] + u[0] * x + v[0] * y + w[0] * z,
-        og[1] + u[1] * x + v[1] * y + w[1] * z,
-        og[2] + u[2] * x + v[2] * y + w[2] * z];
-    }
-    function lead(h) { return xL0 + (xA - xL0) * h + bow * span * Math.sin(Math.PI * h); }
-    function trail(h) {
-      if (h <= hR) return xT0 + (xR - xT0) * (hR > 0 ? h / hR : 1);
-      const t = (h - hR) / (1 - hR || 1);
-      return xR + ((xA - ct) - xR) * t + con * span * Math.sin(Math.PI * t);
-    }
-    function wide(h) {
-      if (ar <= 0 || h <= 1 - ar) return 1;
-      const t = (h - (1 - ar)) / ar;
-      return Math.sqrt(Math.max(0, 1 - t * t));
-    }
-
-    const rows = [];
-    const hMin = span > 1e-6 ? -emb / span : 0;
-    const nRoot = emb > 1e-6 ? 1 : 0;          // one extra row for the buried stub
-    for (let i = -nRoot; i <= nS; i++) {
-      const h = i < 0 ? hMin : i / nS;
-      // Below the root plane the outline is PRISMATIC — the root section
-      // extruded straight into the body — so the buried stub cannot pinch,
-      // twist or poke back out through the far side of the hull.
-      const hc = h < 0 ? 0 : h;
-      const xl = lead(hc), xt = trail(hc);
-      const mid = (xl + xt) * 0.5;
-      const half = Math.max(0.0008, (xl - xt) * 0.5) * wide(hc);
-      const tk = th0 * Math.pow(Math.min(1.3, 1 - h), 1.25) + th0 * 0.04;
-      const top = [], bot = [];
-      for (let j = 0; j <= nC; j++) {
-        const s = j / nC;
-        const x = mid + half * (2 * s - 1);
-        const prof = Math.pow(Math.max(0, 4 * s * (1 - s)), 0.55);
-        const z = tk * 0.5 * prof;
-        top.push(sh.v.apply(sh, pt(x, span * h, z)));
-        bot.push(sh.v.apply(sh, pt(x, span * h, -z)));
-      }
-      rows.push([top, bot]);
-    }
-    for (let i = 0; i < nS + nRoot; i++) {
-      const hm = ((i - nRoot) + 0.5) / nS;
-      const gUp = hm >= tipDark ? 2 : (hm < paleBase ? 3 : 0);
-      const gDn = hm >= tipDark ? 2 : (under ? 1 : (hm < paleBase ? 3 : 0));
-      // rows[i][0] is the +w face and rows[i][1] the -w face; which of those
-      // two is the upper one depends on the mirror (see flipFaces).
-      const gT = flipFaces ? gDn : gUp;
-      const gB = flipFaces ? gUp : gDn;
-      for (let j = 0; j < nC; j++) {
-        // s = 0 is the TRAILING edge (x = mid - half), s = 1 the leading edge.
-        const sm = (j + 0.5) / nC;
-        const trail = trailPale > 0 && sm < trailPale && hm < tipDark;
-        sh.quad(trail ? 3 : gT, rows[i][0][j], rows[i][0][j + 1], rows[i + 1][0][j + 1], rows[i + 1][0][j]);
-        sh.quad(trail ? 3 : gB, rows[i][1][j], rows[i + 1][1][j], rows[i + 1][1][j + 1], rows[i][1][j + 1]);
-      }
-    }
-    for (let j = 0; j < nC; j++) {   // root cap, so the blade is a closed solid
-      sh.quad(under ? 1 : 0, rows[0][0][j], rows[0][1][j], rows[0][1][j + 1], rows[0][0][j + 1]);
-    }
-  }
-  // mats: [main, under, tip, base]
-  function finMesh(mats, at, shape) {
-    const geo = cachedGeom("fin|" + JSON.stringify(shape), function () {
-      const sh = new Shell(); emitFin(sh, shape); return sh.geom();
-    });
-    const m = meshOf(geo, mats);
-    if (at) m.position.set(at[0], at[1], at[2]);
-    /* THE BLADE REMEMBERS ITS OWN RECIPE.
-
-       city/wildlife_shark.js draws the above-water dorsal itself, because the
-       body is LOD-hidden for most of an encounter and a fin has to keep
-       cutting the water after the shark stops being drawn. It had no way to
-       ask what the authored dorsal actually looks like, so it measured a
-       bounding box and re-guessed a blade — which means the fin you see at
-       forty metres and the fin you see at eight are two different shapes, and
-       the handover between them is a pop.
-
-       Recording the shape bag here closes that for every species at once, with
-       no naming convention to keep in sync: the proxy already finds the dorsal
-       geometrically, and can now read the exact options off the mesh it found
-       and hand them straight to CBZ.finBlade. One line, and the two fins
-       become the same fin. */
-    m.userData.finShape = shape;
-    if (at) m.userData.finAt = [at[0], at[1], at[2]];
-    return m;
-  }
-  /* Several blades in ONE mesh. A cetacean fluke has to be a single object:
-     the swim rig picks the rear-most child and decides fish-vs-whale from its
-     proportions, and two separate lobes each read as a tall narrow blade. */
-  function finsMesh(mats, at, shapes) {
-    const geo = cachedGeom("fins|" + JSON.stringify(shapes), function () {
-      const sh = new Shell();
-      for (let i = 0; i < shapes.length; i++) emitFin(sh, shapes[i]);
-      return sh.geom();
-    });
-    const m = meshOf(geo, mats);
-    if (at) m.position.set(at[0], at[1], at[2]);
-    return m;
-  }
-  /* ---- THE PUBLISHED SURFACE -------------------------------------------
-     Other marine builders (city/wildlife_orca.js, city/wildlife_shark.js's
-     surface proxy) must not grow a second fin grammar. Everything they need is
-     here, and CBZ.finBlade takes BOTH call shapes so a caller can ask for a
-     finished mesh or just the blade geometry:
-
-       CBZ.finBlade([mat, under, tip, pale], [x,y,z], shape)  -> T.Mesh
-       CBZ.finBlade(THREE, shape)                             -> BufferGeometry
-       CBZ.finBlade(shape)                                    -> BufferGeometry
-
-     `shape` is emitFin's option bag, and it also accepts the descriptive
-     spelling — {root:[x,y,z], tip:[x,y,z], chordRoot, chordTip, sweep,
-     concavity, thickRoot} — where root/tip give the origin, the span axis and
-     the span length in one, which is usually how you actually know a fin.
-     Geometry is cached on the shape, so a pack of six pays for one blade. */
-  function finShape(o) {
-    if (!o || (!o.root && !o.tip && o.thickRoot == null)) return o;
-    const s = {};
-    for (const k in o) if (Object.prototype.hasOwnProperty.call(o, k)) s[k] = o[k];
-    if (o.thickRoot != null && s.thick == null) s.thick = o.thickRoot;
-    if (o.root) s.origin = o.root;
-    if (o.root && o.tip) {
-      const d = [o.tip[0] - o.root[0], o.tip[1] - o.root[1], o.tip[2] - o.root[2]];
-      const l = Math.hypot(d[0], d[1], d[2]);
-      if (l > 1e-6) { s.span = l; s.spanDir = [d[0] / l, d[1] / l, d[2] / l]; }
-    }
-    delete s.root; delete s.tip; delete s.thickRoot; delete s.mat; delete s.tipMat;
-    return s;
-  }
-  function finBladeGeom(shape) {
-    const s = finShape(shape);
-    return cachedGeom("fin|" + JSON.stringify(s), function () {
-      const sh = new Shell(); emitFin(sh, s); return sh.geom();
-    });
-  }
-  CBZ.finBlade = function (a, b, c) {
-    if (Array.isArray(a)) return finMesh(a, b, finShape(c));   // (mats, at, shape)
-    if (a && a.BufferGeometry) return finBladeGeom(b);         // (THREE, shape)
-    return finBladeGeom(a);                                    // (shape)
-  };
-  CBZ.finBladeGeometry = finBladeGeom;
-  CBZ.aquaticFin = finMesh;     // the in-file spelling, kept: callers exist
-  CBZ.aquaticFins = finsMesh;   // several blades welded into ONE mesh (flukes)
-  // hull-from-rings, with the same shaped/ragged countershading the sharks use
-  CBZ.aquaticHull = function (mats, rings, o) { return hullMesh(mats, rings, o || {}); };
-  CBZ.aquaticHullGeometry = hullShell;
-  CBZ.aquaticBodyRings = bodyRings;
-  // ONE weld rule for the whole ocean: wildlife_orca.js builds its own hull
-  // from its own ring grammar, but a tail joint is a tail joint, and a second
-  // copy of this arithmetic is exactly how the two descriptions drifted apart
-  // in the first place. See weldedSleeve below.
-  CBZ.aquaticWeldedSleeve = function (hullRings, o) { return weldedSleeve(hullRings, o); };
-  CBZ.aquaticWeldedRostrum = function (hullRings, o) { return weldedRostrum(hullRings, o); };
-
-  /* ======================================================================
-     THE HULL. Elliptical cross-sections with a SHAPED countershading line.
-
-     `bellyCut` may now be a number (flat, as before), an array (one value per
-     ring) or a function(i, u). The value is the sine of the ring angle below
-     which a face belongs to the belly, so -1 is all-dark, +1 all-white, and a
-     value that rises at the pectoral ring makes the white KICK UP behind the
-     fin exactly the way the reference photographs do. A small deterministic
-     jitter per column breaks the line into a ragged edge instead of a
-     machine-straight seam.
-
-     THE LINE CUTS THE FACES, IT DOES NOT PICK THEM. The boundary used to be
-     decided per QUAD: a whole face was white or grey. On a bull shark whose
-     rings sit 0.6 m apart that turned the white kick-up behind the pectoral
-     into a pale RECTANGLE with a dead-straight top edge, and the gill slits
-     stood on it like a barcode on a label. The cut is now a signed value per
-     VERTEX (the ring's sine against the ring's cut, plus a gentler hash
-     wobble) and quadSplit divides each face along its zero crossing, so the
-     countershade line is one continuous curve down the flank.
-
-     AND THE GREY IS NOT ONE FLAT GREY. hullShell bakes a `color` attribute: a
-     dorsal-to-lateral ramp (darker along the spine, lighter toward the
-     countershade line) with an optional per-species tint (bronze-grey for a
-     bull shark, slate for a great white). hullMesh hands slot 0 a vertex-
-     coloured twin of the species' back material; the belly and the mouth
-     interior never read the attribute. Build-time only: zero per-frame cost.
-     ====================================================================== */
-  const SKIN_SPINE = 0.80, SKIN_FLANK = 1.14, SKIN_LO = -0.32;
-  /* rgb multiplier for the back material at ring-sine `sn` (-1 belly .. +1
-     spine) and station x. sp.tint colours the whole back; sp.fade0/fade1
-     (x) fade the ramp to neutral toward a head whose shell is painted flat,
-     so the weld to the snout shell has no tone step. */
-  function skinShade(sn, x, sp) {
-    const t = Math.pow(clamp((sn - SKIN_LO) / (1 - SKIN_LO), 0, 1), 0.85);
-    const k = lerp(SKIN_FLANK, SKIN_SPINE, t);
-    const tint = (sp && sp.tint) || null;
-    let r = k * (tint ? tint[0] : 1), gg = k * (tint ? tint[1] : 1), b = k * (tint ? tint[2] : 1);
-    if (sp && sp.fade1 != null && sp.fade0 != null && sp.fade1 > sp.fade0) {
-      const w = clamp((sp.fade1 - x) / (sp.fade1 - sp.fade0), 0, 1);
-      r = lerp(1, r, w); gg = lerp(1, gg, w); b = lerp(1, b, w);
-    }
-    /* sp.cape: a darker saddle over the back (a dolphin's dorsal cape, a
-       seal's darker spine), as a SMOOTH multiplier — sine-ramped across the
-       flank between s0 and s1 and feathered in and out along x between
-       x0 and x1 (feather f) — so it reads as a blended colour field, not
-       a staircase of painted quads. */
-    const cp = sp && sp.cape;
-    if (cp) {
-      const across = clamp((sn - cp.s0) / Math.max(1e-3, cp.s1 - cp.s0), 0, 1);
-      const f = cp.f || 0.3;
-      const along = clamp((x - cp.x0) / f, 0, 1) * clamp((cp.x1 - x) / f, 0, 1);
-      const w = across * across * (3 - 2 * across) * along;
-      const kk = lerp(1, cp.k, w);
-      r *= kk; gg *= kk; b *= kk;
-    }
-    return [r, gg, b];
-  }
-  /* A low dome raised off the skin: a tubercle, a barnacle, a knuckle on a
-     flipper. c = base centre, n = outward normal, r = base radius, h = height.
-     Six-sided, so a hundred of them in one Shell is still cheap. */
-  function dome(sh, gi, c, n, r, h) {
-    const t1 = norm3(Math.abs(n[0]) < 0.9 ? cross3(n, [1, 0, 0]) : cross3(n, [0, 1, 0]));
-    const t2 = norm3(cross3(n, t1));
-    const ring = [];
-    for (let k = 0; k < 6; k++) {
-      const a = k / 6 * Math.PI * 2, ca = Math.cos(a) * r, sa = Math.sin(a) * r;
-      ring.push([c[0] + t1[0] * ca + t2[0] * sa - n[0] * r * 0.2, c[1] + t1[1] * ca + t2[1] * sa - n[1] * r * 0.2,
-        c[2] + t1[2] * ca + t2[2] * sa - n[2] * r * 0.2]);
-    }
-    const mid = [], top = [c[0] + n[0] * h, c[1] + n[1] * h, c[2] + n[2] * h];
-    for (let k = 0; k < 6; k++) {
-      const p = ring[k];
-      mid.push([lerp(p[0], top[0], 0.45) + n[0] * h * 0.35, lerp(p[1], top[1], 0.45) + n[1] * h * 0.35, lerp(p[2], top[2], 0.45) + n[2] * h * 0.35]);
-    }
-    for (let k = 0; k < 6; k++) {
-      const k2 = (k + 1) % 6;
-      const fn = function (a, b, d) {
-        const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
-        const cr = cross3(e1, e2), mx = (a[0] + b[0] + d[0]) / 3 - c[0], my = (a[1] + b[1] + d[1]) / 3 - c[1], mz = (a[2] + b[2] + d[2]) / 3 - c[2];
-        return cr[0] * mx + cr[1] * my + cr[2] * mz >= 0 ? cr : [-cr[0], -cr[1], -cr[2]];
-      };
-      sh.polyN(gi, fn(ring[k], ring[k2], mid[k2]), [ring[k], ring[k2], mid[k2], mid[k]]);
-      sh.polyN(gi, fn(mid[k], mid[k2], top), [mid[k], mid[k2], top]);
-    }
-  }
-  /* A thin painted line lying ON the skin of `rings`: a mouth line, a
-     throat pleat, an eye stripe. pts = [[x, ang], ...] along the line; w =
-     width (m). Laid as a quad strip a few mm proud, facing the skin normal. */
-  function skinLine(sh, gi, rings, pts, w, lift) {
-    const L = [];
-    for (let i = 0; i < pts.length; i++) {
-      const sk = onSkin(rings, pts[i][0], pts[i][1], lift == null ? 0.004 : lift);
-      L.push(sk);
-    }
-    for (let i = 0; i < L.length - 1; i++) {
-      const a = L[i], b = L[i + 1];
-      const dir = norm3([b.p[0] - a.p[0], b.p[1] - a.p[1], b.p[2] - a.p[2]]);
-      const sa = norm3(cross3(a.n, dir)), sb = norm3(cross3(b.n, dir));
-      const ww = (i === 0 || i === L.length - 2) ? w * 0.6 : w;
-      const P = [
-        [a.p[0] - sa[0] * ww / 2, a.p[1] - sa[1] * ww / 2, a.p[2] - sa[2] * ww / 2],
-        [b.p[0] - sb[0] * ww / 2, b.p[1] - sb[1] * ww / 2, b.p[2] - sb[2] * ww / 2],
-        [b.p[0] + sb[0] * ww / 2, b.p[1] + sb[1] * ww / 2, b.p[2] + sb[2] * ww / 2],
-        [a.p[0] + sa[0] * ww / 2, a.p[1] + sa[1] * ww / 2, a.p[2] + sa[2] * ww / 2],
-      ];
-      sh.polyN(gi, a.n, P);
-    }
-  }
-  const SKIN_SHADE_MATS = new Map();   // source material -> its vertex-coloured twin
-  function shadedTwin(mat) {
-    if (!mat || !mat.isMaterial || mat.vertexColors) return mat;
-    let t = SKIN_SHADE_MATS.get(mat);
-    if (!t) {
-      t = mat.clone(); t.vertexColors = true; t._shared = true;
-      SKIN_SHADE_MATS.set(mat, t);
-    }
-    return t;
-  }
-  function hullShell(o) {
-    const rings = o.rings, n = rings.length, sides = Math.max(8, o.sides || 12);
-    const rag = o.ragged == null ? 0.06 : o.ragged;
-    const seed = o.seed || 11;
-    const cutRaw = o.bellyCut == null ? -0.16 : o.bellyCut;
-    // an array of cut values is SAMPLED across the rings, so a six-value
-    // countershading profile drapes correctly over a twelve-ring body.
-    const cutAt = typeof cutRaw === "function" ? cutRaw
-      : (Array.isArray(cutRaw)
-        ? function (i, u) { return sample(cutRaw, n > 1 ? i / (n - 1) : 0); }
-        : function () { return cutRaw; });
-    const paint = o.paint || null;
-    /* THE MOUTH NOTCH (split-body mouth). o.mouth carries the addSharkMouth
-       options (plus optional xOff/yOff for a shell built in a pivot-local
-       frame, and `lift` metres above the seam). Any vertex forward of the jaw
-       corner that would fall BELOW the seam line is raised onto it — so the
-       hull simply has no chin of its own in the mouth region. The raised
-       floor tucks inward in proportion to how far the vertex travelled, which
-       keeps the cheek wall flush above the seam while the palate hides inside
-       the dropping chin. Faces that got cut are painted with the interior
-       material (slot 2): when the jaws open, what you see up there is the
-       dark roof of the mouth, not a second, static chin. */
-    const mo = o.mouth || null;
-    const moX = mo ? (mo.xOff || 0) : 0, moY = mo ? (mo.yOff || 0) : 0;
-    const moLift = mo ? (mo.lift || 0) : 0;
-    const moFrom = mo ? mo.hingeX + mo.length * 0.05 - moX : 0;
-    const notched = mo ? [] : null;
-    const sh = new Shell(), id = [], pos = [];
-    for (let i = 0; i < n; i++) {
-      const r = rings[i], row = [], cutRow = [], prow = [];
-      let roof = -1e9;
-      if (mo && r.x > moFrom) roof = mouthSeamY(mo, r.x + moX) + moLift - moY;
-      for (let j = 0; j < sides; j++) {
-        const a = (j / sides) * Math.PI * 2;
-        let y = r.y + Math.sin(a) * r.ry, z = Math.cos(a) * r.rz;
-        const cut = y < roof;
-        if (cut) {
-          const deep = Math.min(1, (roof - y) / Math.max(0.05, r.ry));
-          y = roof;
-          z *= 1 - 0.30 * deep;
-        }
-        cutRow.push(cut);
-        row.push(sh.v(r.x, y, z));
-        prow.push([r.x, y, z]);
-      }
-      id.push(row); pos.push(prow);
-      if (notched) notched.push(cutRow);
-    }
-    function bucket(i, j) {
-      const nj = (j + 1) % sides;
-      if (notched) {
-        // interior-dark only when the quad lies fully inside the notch. The
-        // half-in transition quads (an intact ring on one side, a clamped one
-        // on the other) keep their skin paint: they are the tissue fold at
-        // the jaw corner, they slope INTO the mouth, and painting them dark
-        // put maroon patches on the outside of a closed head.
-        const r0 = notched[i], r1 = notched[i + 1];
-        const in0 = r0 && (r0[j] || r0[nj]), in1 = r1 && (r1[j] || r1[nj]);
-        if (r0 && r1 ? (in0 && in1) : (in0 || in1)) return 2;
-      }
-      const a0 = (j / sides) * Math.PI * 2, a1 = ((j + 1) / sides) * Math.PI * 2;
-      const s = (Math.sin(a0) + Math.sin(a1)) * 0.5;
-      // ragged: a per-column offset (a wandering line down the flank) plus a
-      // smaller per-ring wobble. Both are hash-derived, so the same species
-      // always tears the same way and the world stays byte-identical.
-      const jitter = (h01(j * 7 + 1, 0, seed) - 0.5) * 2 * rag
-        + (h01(j * 7 + 1, i * 13 + 3, seed + 1) - 0.5) * rag * 0.6;
-      const belly = s < cutAt(i, n > 1 ? i / (n - 1) : 0) + jitter;
-      if (paint) {
-        const over = paint(i, n > 1 ? i / (n - 1) : 0, j, s, belly);
-        if (over >= 0) return over;
-      }
-      return belly ? 1 : 0;
-    }
-    // the countershade line as a signed value per VERTEX (negative = belly):
-    // the ring's own sine against its cut, with a wobble about half the old
-    // per-quad jitter (a cut line needs far less: the steps WERE the rag)
-    function lineF(i, j) {
-      const a = (j / sides) * Math.PI * 2;
-      const jit = (h01(j * 7 + 1, 0, seed) - 0.5) * rag
-        + (h01(j * 7 + 1, i * 13 + 3, seed + 1) - 0.5) * rag * 0.35;
-      return Math.sin(a) - (cutAt(i, n > 1 ? i / (n - 1) : 0) + jit);
-    }
-    function isNotch(i, j) {
-      if (!notched) return false;
-      const nj = (j + 1) % sides, r0 = notched[i], r1 = notched[i + 1];
-      const in0 = r0 && (r0[j] || r0[nj]), in1 = r1 && (r1[j] || r1[nj]);
-      return !!(r0 && r1 ? (in0 && in1) : (in0 || in1));
-    }
-    function painted(i, j) {
-      if (!paint) return false;
-      const a0 = (j / sides) * Math.PI * 2, a1 = ((j + 1) / sides) * Math.PI * 2;
-      const s2 = (Math.sin(a0) + Math.sin(a1)) * 0.5;
-      const u = n > 1 ? i / (n - 1) : 0;
-      return paint(i, u, j, s2, s2 < cutAt(i, u)) >= 0;
-    }
-    for (let i = 0; i < n - 1; i++) {
-      for (let j = 0; j < sides; j++) {
-        const nj = (j + 1) % sides;
-        // an authored marking (paint) or the mouth notch owns the whole face
-        if (isNotch(i, j) || painted(i, j)) {
-          sh.quad(bucket(i, j), id[i][j], id[i + 1][j], id[i + 1][nj], id[i][nj]);
-          continue;
-        }
-        const P = [pos[i][j], pos[i + 1][j], pos[i + 1][nj], pos[i][nj]];
-        // wound exactly like the old quad (Newell of the same corner order),
-        // so no face flips when it is split
-        let nx = 0, ny = 0, nz = 0;
-        for (let q = 0; q < 4; q++) {
-          const A = P[q], B = P[(q + 1) % 4];
-          nx += (A[1] - B[1]) * (A[2] + B[2]); ny += (A[2] - B[2]) * (A[0] + B[0]); nz += (A[0] - B[0]) * (A[1] + B[1]);
-        }
-        if (Math.abs(nx) + Math.abs(ny) + Math.abs(nz) < 1e-12) {
-          sh.quad(bucket(i, j), id[i][j], id[i + 1][j], id[i + 1][nj], id[i][nj]);
-          continue;
-        }
-        sh.quadSplit(1, 0, [nx, ny, nz], P, [lineF(i, j), lineF(i + 1, j), lineF(i + 1, nj), lineF(i, nj)]);
-      }
-    }
-    // flat caps keep a deliberately blunt nose/tail instead of quietly turning
-    // the end ring back into a cone.
-    const rear = sh.v(rings[0].x, rings[0].y, 0);
-    const fr = rings[n - 1], front = sh.v(fr.x, fr.y, 0);
-    for (let j = 0; j < sides; j++) {
-      const nj = (j + 1) % sides;
-      sh.tri(bucket(0, j), rear, id[0][j], id[0][nj]);
-      sh.tri(bucket(n - 1, j), front, id[n - 1][nj], id[n - 1][j]);
-    }
-    const out = sh.geom();
-    if (o.shade !== false) {
-      const P = out.attributes.position, col = new Float32Array(P.count * 3);
-      for (let v = 0; v < P.count; v++) {
-        const x = P.getX(v), r = ringAt(rings, x);
-        const sn = clamp((P.getY(v) - r.y) / Math.max(1e-3, r.ry), -1, 1);
-        const c = skinShade(sn, x, o.shade);
-        col[v * 3] = c[0]; col[v * 3 + 1] = c[1]; col[v * 3 + 2] = c[2];
-      }
-      out.setAttribute("color", new T.Float32BufferAttribute(col, 3));
-    }
-    return out;
-  }
-  function hullMesh(mats, rings, o) {
-    o = o || {};
-    const shade = o.shade === false ? false : (o.shade || {});
-    const shape = {
-      rings: rings, sides: o.sides, bellyCut: o.bellyCut, ragged: o.ragged, seed: o.seed,
-      mouth: o.mouth || 0, shade: shade,
-    };
-    const key = "hull2|" + JSON.stringify(shape) + "|" + (o.paintKey || "");
-    const geo = cachedGeom(key, function () {
-      return hullShell({
-        rings: rings, sides: o.sides, bellyCut: o.bellyCut, ragged: o.ragged,
-        seed: o.seed, paint: o.paint, mouth: o.mouth, shade: shade,
-      });
-    });
-    // slot 0 (the back) reads the baked ramp; belly/markings/interior do not
-    if (shade !== false && mats && mats.length) mats = [shadedTwin(mats[0])].concat(mats.slice(1));
-    return meshOf(geo, mats);
-  }
-  // interpolate a cross-section, so details can be laid ON the skin instead of
-  // floating in front of it (the old gill slabs' whole problem).
-  function ringAt(rings, x) {
-    let i = 0;
-    while (i < rings.length - 2 && rings[i + 1].x < x) i++;
-    const a = rings[i], b = rings[i + 1];
-    const t = b.x === a.x ? 0 : clamp((x - a.x) / (b.x - a.x), 0, 1);
-    return { x: x, y: lerp(a.y, b.y, t), ry: lerp(a.ry, b.ry, t), rz: lerp(a.rz, b.rz, t) };
-  }
-
-  /* ======================================================================
-     THE TAIL WELD (owner, 2026-08-27: "where the tail meets the body the
-     tail part is much wider than the body part — the tail circle is much
-     bigger, when they should be identical so the tail looks connected").
-
-     A caudal peduncle is not a cone bolted to the back of an animal. It IS
-     the body, continued past the station where the hull mesh stops. But it
-     has to be a SEPARATE mesh, because the swim rig hinges it against a
-     rigid trunk — so for years every species here carried TWO independent
-     descriptions of the same cross-section: the hull's profile curve, and a
-     hand-typed front ring on the sleeve. Nothing kept them in step, and
-     nothing ever did: measured on the shipped models, the sleeve's front rim
-     was 1.03x the hull's circle on the great white, 1.13x on the hammerhead,
-     1.31x on the dolphin, 1.88x on the humpback and 2.06x on the orca. Seen
-     head-on, the orca's tail was a tube twice the diameter of the animal it
-     grew out of; seen from the side, the body tapered to a point and a
-     bigger cone started behind it.
-
-     `weldedSleeve` deletes the second description. The front ring is READ OFF
-     THE HULL at the station where the sleeve emerges, so the two circles are
-     the same circle by construction and cannot drift when either profile is
-     retuned later. The taper behind it also LEAVES at the hull's own slope:
-     the exponent of the power curve is solved from the hull's measured taper
-     at the weld, so the silhouette has no kink at the seam either — matching
-     radius alone still leaves a visible corner where the two skins meet.
-
-     What a species still declares is what only it knows: where the stock ends
-     and how thin it gets there.
-
-       at     [x, y] the sleeve mesh is placed at, in root space
-       x1     the WELD, in sleeve-local x (the sleeve's front face)
-       x0     the tip station, in sleeve-local x
-       tipRy  half-height / half-width at that tip
-       tipRz
-       sides  MUST be the hull's own side count: the two rings are then the
-              same polygon, not two polygons inscribed in the same ellipse.
-
-     WHY THE SLEEVE STILL LEAVES SLIGHTLY SHALLOWER THAN THE HULL (SLOPE_K):
-     on the sharks the sleeve is pushed a fifth of a metre INTO the hull, and
-     that buried overlap is what hides the wedge the swim rig's hinge opens
-     when the tail beats. Matching the hull's taper exactly would lay the two
-     skins on top of each other through that overlap and they would z-fight.
-     Leaving at 72% of the hull's slope diverges the sleeve outward from the
-     first millimetre — the hull's tail stays buried — while the seam still
-     reads as one curve, because the radii are equal AT the weld and it is a
-     step in radius, not a soft change of slope, that the eye reads as a joint.
-     ====================================================================== */
-  const SLOPE_K = 0.72;
-  function weldedSleeve(hullRings, o) {
-    const weldX = o.x1, tipX = o.x0, L = Math.max(1e-4, weldX - tipX);
-    const w = ringAt(hullRings, o.at[0] + weldX);            // the hull's own circle
-    // the hull's taper AT the weld, per unit of x — measured, never typed
-    const probe = ringAt(hullRings, o.at[0] + weldX + L * 0.25);
-    // ry(t) = tip + (weld - tip) * t^p, t = 0 at the tip, 1 at the weld.
-    // dry/dx at the weld is (weld - tip) * p / L, so p is the hull's slope
-    // expressed in the sleeve's own coordinates. Clamped: a hull that flares
-    // hard behind the weld must not be allowed to fold the stock into a waist
-    // (p too high) or blow it into a cylinder (p too low).
-    function expo(hullR, tipR) {
-      const drop = w[hullR] - o[tipR];
-      if (!(drop > 1e-4)) return 1;
-      const slope = Math.max(0, (probe[hullR] - w[hullR]) / (L * 0.25));
-      return clamp(slope * SLOPE_K * L / drop, 0.65, 2.6);
-    }
-    const py = expo("ry", "tipRy"), pz = expo("rz", "tipRz");
-    const n = Math.max(3, o.n || 5), out = [];
-    for (let i = 0; i < n; i++) {
-      const t = i / (n - 1);
-      out.push({
-        x: lerp(tipX, weldX, t),
-        y: w.y - o.at[1],                    // coaxial with the hull's tail
-        ry: o.tipRy + (w.ry - o.tipRy) * Math.pow(t, py),
-        rz: o.tipRz + (w.rz - o.tipRz) * Math.pow(t, pz),
-      });
-    }
-    return out;
-  }
-  /* ======================================================================
-     THE HEAD WELD — the same defect, at the other end of the animal.
-
-     Owner, 2026-08-30, with three photographs of a live great white: "the head
-     of the great white, like the tail, the former issue we had — the head
-     meets the body and the head is less wide in diameter than the body where
-     the geometry meets, and that should be fixed and streamlined like the tail
-     was."
-
-     He is right, and it is the same bug with the same cause. A shark's snout
-     forward of the jaw hinge is its own shell (it has to be: it LIFTS — see
-     addSnoutShell), and its rings were hand-typed exactly the way the tail
-     sleeve's were. Measured on the shipped great white by firing rays at the
-     built mesh, station by station from the nose back: the outline narrowed
-     into the joint, stepped OUT by 22 mm where the shell's rim emerged, and
-     changed slope in the same millimetre. That reads as a head plugged into a
-     body — a wall you can see in plan view — and no amount of retuning either
-     table fixes it, because there are two tables.
-
-     So the snout is generated the way the tailstock is: its rim is READ OFF
-     THE HULL at the weld station, and it leaves at the hull's own taper (times
-     SLOPE_K, for the same reason the sleeve does — an exactly matched slope
-     lays the two skins on each other through the buried overlap and they
-     z-fight). What a species still declares is only what is its own: where the
-     shell emerges, where the nose ends, and how blunt it is there.
-
-     THE ONE THING THE TAIL DOES NOT NEED: a rostrum swings. At full gape the
-     shell rotates up about the jaw hinge, so its rear rim cannot sit exactly
-     on the skin or the lift opens a crescent of daylight behind it. The first
-     ring is therefore BEHIND the weld and inside the head (buryK of the hull's
-     own circle), which is solid geometry to swing inside of.
-     ====================================================================== */
-  function weldedRostrum(hullRings, o) {
-    const weldX = o.x1, tipX = o.x0, L = Math.max(1e-4, tipX - weldX);
-    const w = ringAt(hullRings, weldX);                  // the hull's own circle
-    const probe = ringAt(hullRings, weldX - L * 0.25);   // ..and its taper behind it
-    function expo(hullR, tipR) {
-      const drop = w[hullR] - o[tipR];
-      if (!(drop > 1e-4)) return 1;
-      const slope = Math.max(0, (probe[hullR] - w[hullR]) / (L * 0.25));
-      return clamp(slope * SLOPE_K * L / drop, 0.55, 2.6);
-    }
-    const py = expo("ry", "tipRy"), pz = expo("rz", "tipRz");
-    const n = Math.max(3, o.n || 5);
-    const tipY = o.tipY == null ? w.y : o.tipY;
-    const out = [];
-    const bx = weldX - (o.bury == null ? L * 0.26 : o.bury);
-    const bw = ringAt(hullRings, bx), bk = o.buryK == null ? 0.88 : o.buryK;
-    out.push({ x: bx, y: bw.y, ry: bw.ry * bk, rz: bw.rz * bk });
-    for (let i = 0; i < n; i++) {
-      const t = 1 - i / (n - 1);            // 1 at the weld, 0 at the tip
-      const s = 1 - t;
-      out.push({
-        x: lerp(tipX, weldX, t),
-        // the snout RISES to the tip, which is the one thing about a shark's
-        // profile the ring radii cannot say. Smoothstepped so the crown line
-        // has no corner at the weld either.
-        y: w.y + (tipY - w.y) * (s * s * (3 - 2 * s)),
-        ry: o.tipRy + (w.ry - o.tipRy) * Math.pow(t, py),
-        rz: o.tipRz + (w.rz - o.tipRz) * Math.pow(t, pz),
-      });
-    }
-    return out;
-  }
-  // The countershading line has to cross the weld without a jog, so the
-  // snout's belly line is generated too: it leaves at the hull's own height
-  // at the weld station and runs to wherever the species puts it on the nose.
-  function bellyAt(rings, cuts, x) {
-    if (!Array.isArray(cuts)) return cuts == null ? -0.16 : cuts;
-    let i = 0;
-    while (i < rings.length - 2 && rings[i + 1].x < x) i++;
-    const a = rings[i], b = rings[i + 1];
-    const t = b.x === a.x ? 0 : clamp((x - a.x) / (b.x - a.x), 0, 1);
-    return lerp(cuts[i], cuts[Math.min(cuts.length - 1, i + 1)], t);
-  }
-  // the hull's own countershading boundary as a HEIGHT: the ring at x, and
-  // the authored cut on it, read back as world y
-  function hullLineY(rings, cuts, x) {
-    const r = ringAt(rings, x);
-    return r.y + r.ry * bellyAt(rings, cuts, x);
-  }
-  /* THE LINE IS A HEIGHT, NOT AN ANGLE. OWNER (2026-09-08, the head-on
-     reference against ours): "the white and gray on the front of the shark
-     face is not a pointy thing; on our shark the white is pointy like a
-     triangle on the face."
-
-     The snout used to carry its countershading the way the hull does — a
-     cut in sin-space per station, sampled between the weld's value and a
-     `tipCut` at the nose. That is fine on a body whose rings are all about
-     the same size. On the rostrum the rings shrink to a nose of a tenth of
-     the weld's depth, so the same cut lands higher and higher on the animal
-     as the sections get smaller, and head-on — where every section is a
-     concentric outline around the nose — the boundary is a straight run
-     from each mouth corner up to a point at the tip. A diamond, apex at eye
-     level. The photograph has the grey cap coming down OVER the nose to the
-     level of the nostrils, and the boundary a soft arch that is lowest at
-     the corners of the mouth.
-
-     So the species names a height on the nose front (`tipLine`, world y)
-     and the shell paints against a line in metres: the hull's own line
-     behind the weld, easing to tipLine at the nose. Where a section is
-     stretched down to the jaw (addSnoutShell's `deepen`) the paint follows
-     the stretched surface, which the angle never could. */
-  function rostrumLine(hullRings, hullBelly, snoutRings, x1, tipLine) {
-    const yW = hullLineY(hullRings, hullBelly, x1);
-    const xN = snoutRings[snoutRings.length - 1].x;
-    const yN = tipLine == null ? yW : tipLine;
-    return function (x) {
-      if (x <= x1) return hullLineY(hullRings, hullBelly, x);
-      const t = clamp((x - x1) / Math.max(1e-4, xN - x1), 0, 1);
-      return yW + (yN - yW) * (t * t * (3 - 2 * t));
-    };
-  }
-  /* Everything a species needs to say about its own snout, in one call: the
-     rings AND the belly line that has to cross the same seam. `belly` is the
-     same line read back as one sin-space cut per ring, for the shells that
-     still paint by angle (the unsplit rostrum behind ?sharkmouth=off). */
-  function rostrumOf(hullRings, hullBelly, o) {
-    const rings = weldedRostrum(hullRings, o);
-    const line = rostrumLine(hullRings, hullBelly, rings, o.x1, o.tipLine);
-    const belly = rings.map(function (r) { return clamp((line(r.x) - r.y) / Math.max(0.01, r.ry), -1, 1); });
-    return { rings: rings, belly: belly, line: line };
-  }
-
-  // build it, name it (every sleeve in this file used to be anonymous, which
-  // is why the tools that measure this joint have to find it by shape), and
-  // hang it on the animal at the one position the weld was solved for.
-  function tailSleeve(g, mats, hullRings, o) {
-    const ped = hullMesh(mats, weldedSleeve(hullRings, o), {
-      sides: o.sides || 12, bellyCut: o.bellyCut,
-      ragged: o.ragged == null ? 0.05 : o.ragged, seed: o.seed,
-      shade: { tint: o.tint || null },
-    });
-    ped.name = "tailSleeve";
-    ped.position.set(o.at[0], o.at[1], 0);
-    g.add(ped);
-    return ped;
-  }
-
-  function surfPt(rings, x, ang, out) {
-    const r = ringAt(rings, x);
-    return [x + (out || 0) * 0, r.y + Math.sin(ang) * r.ry, Math.cos(ang) * r.rz];
-  }
-  function surfNorm(rings, x, ang) {
-    const r = ringAt(rings, x);
-    return norm3([0, Math.sin(ang) / Math.max(0.01, r.ry), Math.cos(ang) / Math.max(0.01, r.rz)]);
-  }
-  // a point just PROUD of the skin, with the local outward normal — the pair
-  // every surface detail below is placed with.
-  function onSkin(rings, x, ang, lift) {
-    const p = surfPt(rings, x, ang), nn = surfNorm(rings, x, ang);
-    return { p: [p[0] + nn[0] * lift, p[1] + nn[1] * lift, p[2] + nn[2] * lift], n: nn };
-  }
-
-  /* THE COUNTERSHADING BELONGS TO A STATION, NOT TO A SLOT.
-
-     hullShell reads a bellyCut ARRAY by ring ORDINAL — `sample(cut, i/(n-1))`
-     — which is the right convention as long as n is the number of rings the
-     author wrote the array against. addSharkHull then throws rings away (the
-     snout shell owns the head) and adds one or two of its own, so n is NOT
-     that number, and the authored profile gets squeezed forward onto a
-     shorter body: values written for stations buried inside the rostrum land
-     on the last real body bands.
-
-     The megalodon is the worst case in the file — 8 authored values onto 5
-     surviving rings, over the longest single band on any shark here — and the
-     value it ended up wearing across the head/body junction was -0.100 where
-     the author wrote +0.18: a 14 degree step in the countershading line, on
-     the lower flank, opening forward and downward.
-
-     BE HONEST ABOUT WHY THIS IS HERE. It is NOT the black patch the owner
-     reported — a raycast into the live rig named that as the throat tube, and
-     the ring below is what covers it. This is a second, quieter bug found in
-     the same file, and fixing it is not optional once the ring goes in: the
-     insert changes n, and an ordinal-indexed profile would then move the belly
-     line on every snout-shell shark as a side effect of a geometry fix. So
-     resolve the array HERE, against the ring table it was actually written
-     for, and hand hullShell one value per surviving ring. Then truncation and
-     insertion cannot move the paint at all. */
-  function bellyForRings(cut, orig, kept) {
-    if (!Array.isArray(cut) || cut.length < 2 || !orig || orig.length < 2) return cut;
-    const last = orig.length - 1;
-    return kept.map(function (r) {
-      // the same walk ringAt does, so a station reads the same way twice
-      let i = 0;
-      while (i < last - 1 && orig[i + 1].x < r.x) i++;
-      const a = orig[i], b = orig[i + 1];
-      const t = b.x === a.x ? 0 : clamp((r.x - a.x) / (b.x - a.x), 0, 1);
-      return sample(cut, (i + t) / last);
-    });
-  }
-
-  function addSharkHull(g, o) {
-    let rings = o.rings || [];
-    if (rings.length < 2) return null;
-    // the split-body mouth notches the hull along the seam; the third material
-    // is the mouth-interior dark those cut faces take. Flag off -> the old
-    // closed hull, byte-identical.
-    const mo = (o.mouth && mouthSplitOn()) ? o.mouth : null;
-    let cutFor = o.bellyCut;
-    if (mo && mo.snoutShell) {
-      /* §7b: WHEN THE SPECIES HAS A SNOUT SHELL, THE HULL HANDS OVER THE
-         WHOLE HEAD FRONT. Everything forward of the jaw corner is the two
-         jaw shells now — the dark upper half (addSnoutShell) and the white
-         chin — so the hull that kept a static dome there would just be a
-         face that cannot open. It ends a shade past the hinge instead,
-         closed by a cap the notch paints as throat where it shows through
-         the open mouth. */
-      const endX = mo.hingeX + mo.length * 0.07;
-      const kept = rings.filter(function (r) { return r.x < endX; });
-      if (kept.length >= 2 && kept.length < rings.length) {
-        /* ---- THE NOTCH IS ONLY AS SHARP AS THE RING SPACING --------------
-           OWNER (2026-08-31): "megalodon has this little black triangle-ish
-           area in their underbody near where their head meets their body ...
-           there shouldn't be black underneath, it should be white."
-
-           hullShell's mouth notch is a PER-VERTEX operation: forward of
-           `moFrom` any vertex below the jaw seam is lifted onto it, so the
-           hull carries no chin of its own and the chin mesh covers the region.
-           But a vertex only exists at a ring, and the lift is therefore
-           interpolated across the whole quad band from the last un-notched
-           ring to the first notched one.
-
-           On the megalodon that band is x = 1.60 -> 2.4106: the ring table has
-           nothing between them, so the belly is dragged up from y = 0.04 to
-           the seam at 0.72 as one straight 0.81-unit ramp under the head — and
-           the chin does not start until 2.1. In the 1.7-2.0 stretch the ramp
-           stands ABOVE the black throat tube, whose own containment is solved
-           against the UN-notched ring radii (86% of them) and so knows nothing
-           about it. MEASURED by raycast into the live rig, ventral centreline:
-           the first thing a ray from below hits at x = 1.9 is sharkThroat
-           group 1, colour 0x020101 — near-black, unlit — 0.043 units proud of
-           the skin that should be covering it. A black wedge under the jaw,
-           tapering as the ramp climbs. That is the report.
-
-           The fix is a station, not a clamp: pin an UN-NOTCHED ring at the
-           notch's own leading edge, so the body keeps its true profile right
-           up to where the mouth begins and the lift happens over the short
-           span the chin actually covers. Every snout-shell shark gets a
-           cleaner jaw line out of it; the megalodon, whose band is 3.5x the
-           great white's, gets its belly back. */
-        const moFrom = mo.hingeX + mo.length * 0.05 - (mo.xOff || 0);
-        const last = kept[kept.length - 1];
-        if (moFrom > last.x + 1e-3 && moFrom < endX - 1e-4) {
-          const rN = ringAt(rings, moFrom);
-          kept.push({ x: moFrom, y: rN.y, ry: rN.ry, rz: rN.rz });
-        }
-        const rEnd = ringAt(rings, endX);
-        kept.push({ x: endX, y: rEnd.y, ry: rEnd.ry, rz: rEnd.rz });
-        cutFor = bellyForRings(o.bellyCut, rings, kept);
-        rings = kept;
-      }
-    }
-    /* the back's tone ramp (see hullShell). Where a snout shell takes the
-       head over, the ramp fades to neutral before the shell's root shows,
-       because the shell's grey is painted flat and a darker spine running
-       into it would be a tone step at the weld. */
-    const shade = { tint: o.tint || null };
-    if (mo && mo.snoutShell) {
-      shade.fade1 = mo.hingeX - mo.length * 0.20;
-      shade.fade0 = shade.fade1 - Math.max(0.45, mo.length * 0.9);
-    }
-    const hull = hullMesh([o.top, o.belly || o.top, o.interior || o.top], rings, {
-      sides: o.sides, bellyCut: cutFor, ragged: o.ragged, seed: o.seed,
-      mouth: mo, shade: shade,
-    });
-    hull.name = "sharkHull";
-    g.add(hull);
-    // what the face details need to lay gill creases in the skin's OWN colour
-    g._aquaticPaint = { rings: rings, cut: cutFor, top: o.top, belly: o.belly || o.top, shade: shade };
-    const maxWidth = rings.reduce(function (v, r) { return Math.max(v, r.rz * 2); }, 0);
-    const maxHeight = rings.reduce(function (v, r) { return Math.max(v, r.ry * 2); }, 0);
-    const fr = rings[rings.length - 1];
-    const len = rings[rings.length - 1].x - rings[0].x;
-    const cut = o.bellyCut;
-    let lo = 9, hi = -9;
-    if (Array.isArray(cut)) for (let i = 0; i < cut.length; i++) { lo = Math.min(lo, cut[i]); hi = Math.max(hi, cut[i]); }
-    else { lo = hi = (typeof cut === "number" ? cut : -0.16); }
-    g.userData.sharkShape = {
-      profile: o.profile || "broad-wedge",
-      noseWidth: fr.rz * 2, noseHeight: fr.ry * 2, headWidth: maxWidth,
-      noseWidthRatio: maxWidth > 0 ? (fr.rz * 2) / maxWidth : 0,
-      // plan-view read: what a lookout on a deck actually sees
-      hullLength: len, hullWidth: maxWidth, hullHeight: maxHeight,
-      planRatio: len > 0 ? maxWidth / len : 0,
-      bellyLineSpan: hi - lo,                 // 0 = the old dead-level seam
-      bellyLineRagged: o.ragged == null ? 0.06 : o.ragged,
-    };
-    return hull;
-  }
-
-  /* ======================================================================
-     FACE: eyes, ampullae pores, curved nostril SLITS, gill slots that are
-     cut INTO the skin instead of hovering in front of it.
-     ====================================================================== */
-  function addSharkFaceDetails(g, T_, m, o) {
-    const dark = m(o.dark || 0x10161a);
-    const rings = o.rings;
-    // the snout shell, when there is one, OWNS whatever is handed here:
-    // those details lift with the upper jaw instead of floating in place.
-    const snoutOf = function (mesh) {
-      if (!o.snout) { g.add(mesh); return; }
-      // Split-body snouts are children of the authored upper-envelope group,
-      // so their local position is no longer their root-space origin.  Keep the
-      // original builder-space origin on the shell and use it for every eye,
-      // nostril and pore.  Otherwise reparenting the real head geometry would
-      // leave its face details one hinge-length in front of it.
-      const origin = o.snout.userData && o.snout.userData._rootOrigin;
-      mesh.position.x -= origin ? origin.x : o.snout.position.x;
-      mesh.position.y -= origin ? origin.y : o.snout.position.y;
-      mesh.position.z -= origin ? origin.z : o.snout.position.z;
-      o.snout.add(mesh);
-    };
-    if (o.eyeSize !== 0) {
-      /* TWO HALVES, SO IT CAN ROLL. The dark half faces the world; the pale
-         back of the eyeball faces the skull. addSharkMouth's applyGape turns
-         the inner roller about the head's vertical axis as the bite commits,
-         and the pale half comes round — the eye-roll of a great white at
-         contact. The flattening (0.85, 1, 0.6) lives on the OUTER holder so
-         the socket keeps its shape while the pattern turns inside it. */
-      const size = o.eyeSize || 0.075;
-      /* THE ROLLED EYE IS STILL AN EYE. Owner, on the head-on cover at full
-         gape (2026-09-12): "this shows no eyes on the shark, why". The pale
-         half at 0x8c8a84 lands within a few values of the lit skin around it,
-         and rolled 144 degrees nothing dark was left — so at the one moment
-         the game photographs the animal, the eye vanished into the face. On
-         the animal the rolled sclera is a milky orb sitting in a DARK orbit,
-         and a sliver of the black still shows at the edge. So: a dark orbit
-         ring on the holder that never rolls, a colder off-white for the
-         sclera, and the roll capped at 112 degrees (applyGape) so a crescent
-         of black stays. */
-      const pale = m(o.eyeBack || 0xb9c4c8);
-      const halfPos = cachedGeom("eyehalf+|" + size, function () { return new T.SphereGeometry(size, 8, 6, 0, Math.PI); });
-      const halfNeg = cachedGeom("eyehalf-|" + size, function () { return new T.SphereGeometry(size, 8, 6, Math.PI, Math.PI); });
-      const orbitGeo = cachedGeom("eyeorbit|" + size, function () { return new T.TorusGeometry(size * 1.02, size * 0.26, 6, 16); });
-      /* AND IT FACES THE WAY THE HEAD DOES THERE. The eye is a disc flattened
-         along z, so it faced dead sideways on a snout that is narrowing
-         toward the nose; head-on the disc was edge-on and its own dome hid
-         it. The shell's plan slope at the eye station yaws the socket to the
-         skin it sits in, which is what turns the eye toward a head-on lens. */
-      let eyeYaw = 0;
-      if (o.snoutRings && o.snoutRings.length > 1) {
-        const rA = ringAt(o.snoutRings, o.eyeX - 0.06), rB = ringAt(o.snoutRings, o.eyeX + 0.06);
-        eyeYaw = Math.atan2(rA.rz - rB.rz, 0.12);
-      }
-      [-1, 1].forEach(function (side) {
-        const eye = new T.Group();
-        eye.name = "sharkEye";
-        const roller = new T.Group();
-        const front = new T.Mesh(side > 0 ? halfPos : halfNeg, dark); front.name = "sharkEye";
-        const back = new T.Mesh(side > 0 ? halfNeg : halfPos, pale); back.name = "sharkEyeBack";
-        roller.add(front); roller.add(back); eye.add(roller);
-        const orbit = new T.Mesh(orbitGeo, dark); orbit.name = "sharkEyeOrbit";
-        orbit.position.z = side * size * 0.35;     // proud of the skin, behind the lens
-        eye.add(orbit);
-        eye.position.set(o.eyeX, o.eyeY, side * o.eyeZ);
-        eye.rotation.y = -side * eyeYaw;
-        eye.scale.set(0.85, 1, 0.6);
-        // §7c: the eye lives on the head's UPPER HALF, so when that half is
-        // a jaw shell the eye rides it — look at the orca photograph: the
-        // eye rotates up with the bite. On the legacy rostrum path the eye
-        // stays on the body, exactly as before.
-        if (o.snout && o.snout.userData && o.snout.userData._splitShell) snoutOf(eye);
-        else g.add(eye);
-        if (g._aquaticMouth) (g._aquaticMouth.eyes = g._aquaticMouth.eyes || []).push({ roller: roller, side: side });
-      });
-    }
-
-    // NOSTRILS — short dark CURVED slits on the underside of the rostrum, not
-    // spheres. Swept from a tiny arc so they follow the snout's curve.
-    const nl = o.nostrilLen || 0.14, nw = o.nostrilWidth || 0.028;
-    const slit = cachedGeom("slit|" + nl + "|" + nw, function () {
-      const sh = new Shell(), n = 5, rows = [];
-      for (let i = 0; i <= n; i++) {
-        const t = i / n - 0.5;
-        const x = t * nl, z = -Math.cos(t * Math.PI * 0.9) * nl * 0.22;
-        rows.push([sh.v(x, 0, z - nw * 0.5), sh.v(x, 0, z + nw * 0.5),
-          sh.v(x, -nw * 0.9, z + nw * 0.5), sh.v(x, -nw * 0.9, z - nw * 0.5)]);
-      }
-      for (let i = 0; i < n; i++) {
-        for (let k = 0; k < 4; k++) {
-          const k2 = (k + 1) % 4;
-          sh.quad(0, rows[i][k], rows[i][k2], rows[i + 1][k2], rows[i + 1][k]);
-        }
-      }
-      return sh.geom();
-    });
-    [-1, 1].forEach(function (side) {
-      const nn = new T.Mesh(slit, dark);
-      nn.name = "sharkNostril";
-      nn.position.set(o.noseX, o.noseY, side * o.noseZ);
-      nn.rotation.y = side * (o.nostrilYaw == null ? 0.5 : o.nostrilYaw);
-      snoutOf(nn);
-    });
-
-    /* GILLS — five slits per side, each built ON the interpolated hull
-       cross-section so it hugs the flank, merged into ONE mesh per side.
-
-       THEY ARE CREASES IN THE SKIN, NOT A BARCODE. The last version was a
-       pale 0xc3cccd slot beside a near-black 0x1d2429 shadow bar, each as
-       wide as a finger, on a pale quad-stepped panel: five black-and-white
-       stripes that read as a label stuck to the flank. A real gill slit is
-       a thin curved fold of the same skin, 35-50% darker at its deepest,
-       lighter at the lip, tapering out at both ends, each a little shorter
-       than the one in front. So every vertex is coloured from the skin it
-       sits on — the back material through the same tone ramp the hull bakes
-       above the countershade line, the belly material below it — times a
-       crease profile across the slit: lip 0.90, core 0.52, flap edge 0.76,
-       all easing back to 1.0 at the ends. One vertex-coloured material, one
-       draw call per side. */
-    const gills = o.gills || 5;
-    if (rings && gills > 0) {
-      const gx = o.gillX, gstep = o.gillStep || 0.09;
-      const gh = o.gillHeight || 0.34, gAng = o.gillAngle == null ? 0.0 : o.gillAngle;
-      const gw = o.gillWidth || 0.022;
-      const gc = o.gillCenter == null ? 0.06 : o.gillCenter;
-      const paintOf = g._aquaticPaint || null;
-      const rgbOf = function (mat, fb) {
-        return mat && mat.color ? [mat.color.r, mat.color.g, mat.color.b] : fb;
-      };
-      const topC = rgbOf(paintOf && paintOf.top, [0.27, 0.30, 0.32]);
-      const belC = rgbOf(paintOf && paintOf.belly, [0.92, 0.94, 0.94]);
-      const pRings = paintOf ? paintOf.rings : rings;
-      const pCut = paintOf ? paintOf.cut : -0.16;
-      const skinAt = function (p) {
-        const r = ringAt(pRings, p[0]);
-        const sn = clamp((p[1] - r.y) / Math.max(1e-3, r.ry), -1, 1);
-        const cut = typeof pCut === "function" ? -0.16 : bellyAt(pRings, pCut, p[0]);
-        if (sn < cut) return belC;
-        const k = skinShade(sn, p[0], paintOf ? paintOf.shade : null);
-        return [topC[0] * k[0], topC[1] * k[1], topC[2] * k[2]];
-      };
-      const PROF = [0.90, 0.52, 0.56, 0.76];            // lip, core, core, flap edge
-      const OFF = [1.0, 0.18, -0.30, -1.0];             // across the slit, x hw
-      [-1, 1].forEach(function (side) {
-        const key = "gill3|" + [gills, gx, gstep, gh, gw, gAng, side, gc].join(",")
-          + "|" + JSON.stringify(rings) + "|" + topC.join(",") + "|" + belC.join(",")
-          + "|" + JSON.stringify(paintOf ? [paintOf.cut, paintOf.shade] : 0);
-        const geo = cachedGeom(key, function () {
-          const sh = new Shell(), cols = [];
-          const colOf = function (idx, c) { cols[idx] = c; return idx; };
-          const steps = 6;
-          for (let i = 0; i < gills; i++) {
-            const x = gx - i * gstep;
-            const hgt = gh * (1 - i * 0.07);
-            const bow = hgt * 0.07;                 // the slit bows gently tailward at mid-height
-            const ry0 = Math.max(0.05, ringAt(rings, x).ry);
-            const prev = [];
-            for (let k = 0; k <= steps; k++) {
-              const t = k / steps - 0.5;
-              const end = Math.sin(Math.PI * (k / steps));        // 0 at the ends, 1 mid
-              const ang = gc + t * (hgt / ry0);
-              const a = side > 0 ? ang : Math.PI - ang;
-              const sk = onSkin(rings, x - t * hgt * Math.sin(gAng) - bow * Math.cos(Math.PI * t), a, 0.004);
-              const c = sk.p, hw = gw * 0.5 * (0.30 + 0.70 * Math.pow(end, 0.6));
-              const base = skinAt(c);
-              const q = [], v = [];
-              for (let e = 0; e < 4; e++) {
-                const pp = [c[0] + OFF[e] * hw, c[1], c[2]];
-                const f = lerp(1, PROF[e], 0.35 + 0.65 * end);
-                q.push(pp);
-                v.push(colOf(sh.v(pp[0], pp[1], pp[2]), [base[0] * f, base[1] * f, base[2] * f]));
-              }
-              prev.push({ n: sk.n, p: q, v: v });
-              if (k > 0) {
-                const a0 = prev[k - 1], a1 = prev[k];
-                for (let e = 0; e < 3; e++) {
-                  sh.quadN(0, a1.n, [a0.p[e], a1.p[e], a1.p[e + 1], a0.p[e + 1]],
-                    [a0.v[e], a1.v[e], a1.v[e + 1], a0.v[e + 1]]);
-                }
-              }
-            }
-          }
-          const out = sh.geom();
-          const col = new Float32Array(out.attributes.position.count * 3);
-          for (let i = 0; i < cols.length; i++) {
-            const c2 = cols[i] || belC;
-            col[i * 3] = c2[0]; col[i * 3 + 1] = c2[1]; col[i * 3 + 2] = c2[2];
-          }
-          out.setAttribute("color", new T.Float32BufferAttribute(col, 3));
-          return out;
-        });
-        const gm = new T.Mesh(geo, shadedTwin(m(0xffffff)));
-        gm.name = "sharkGill";
-        g.add(gm);
-      });
-    }
-
-    // AMPULLAE OF LORENZINI — dozens of dark pores speckled over the WHITE
-    // underside of the rostrum. One merged mesh, hash-placed, so it is a
-    // species trait and costs a single draw call.
-    if (rings && o.pores !== 0) {
-      const count = o.pores || 46, pr = o.poreSize || 0.018;
-      const x0 = o.poreX0, x1 = o.poreX1, spread = o.poreSpread == null ? 0.85 : o.poreSpread;
-      const pRings = o.snoutRings || rings;
-      // A PORE NEEDS SKIN UNDER IT. These are hash-placed on the rostrum
-      // rings' theoretical underside, but on a split-body mouth that underside
-      // is the NOTCH: the skin there belongs to the chin, which swings away
-      // while the pores stay parented to the snout — grey plates floating in
-      // the open gape, and z-fighting the closed chin at rest. Inside the
-      // authored oral plan and below the seam, there is no snout skin, so no
-      // pore.
-      const mo2 = o.mouth && mouthSplitOn() ? o.mouth : null;
-      const key = "pore|v2|" + [count, pr, x0, x1, spread, o.poreSeed || 5, !!mo2].join(",") + "|" + JSON.stringify(pRings);
-      const geo = cachedGeom(key, function () {
-        const sh = new Shell();
-        for (let i = 0; i < count; i++) {
-          const u = h01(i * 3 + 1, 7, o.poreSeed || 5);
-          const w2 = h01(i * 3 + 2, 11, o.poreSeed || 5);
-          const x = lerp(x0, x1, u * u * 0.85 + 0.08);
-          const ang = -Math.PI * 0.5 + (w2 - 0.5) * 2 * spread;
-          const sk = onSkin(pRings, x, ang, 0.006);
-          if (mo2) {
-            const mu = (sk.p[0] - mo2.hingeX - mo2.length * 0.18) / (mo2.length * 0.82);
-            const mv = sk.p[2] / (mo2.width * 0.5);
-            if (mu * mu + mv * mv < 1.15 * 1.15 &&
-              sk.p[1] < mo2.hingeY + mo2.gap * 0.30) continue;
-          }
-          const tang = norm3(cross3(sk.n, [1, 0, 0]));
-          const fwd = norm3(cross3(tang, sk.n));
-          const s2 = pr * (0.65 + h01(i, 3, 9) * 0.7);
-          sh.plate(0, sk.p, fwd, tang, s2, s2, sk.n);
-        }
-        return sh.geom();
-      });
-      const pm = new T.Mesh(geo, m(o.poreColor || 0x3c4348));
-      pm.name = "sharkPores";
-      snoutOf(pm);
-      if (g.userData.sharkShape) g.userData.sharkShape.pores = count;
-    }
-  }
-
-  /* ======================================================================
-     SKIN: horizontal flank folds behind the head.
-
-     THE RAKE SCARS ARE GONE (owner, 2026-08-30: "find the white markers on
-     the backs of all sharks ... and get rid of them"). They were pale ribbons
-     (0x99a3a7 .. 0xaeb6b8) laid on the UPPER surfaces only, i.e. on the one
-     part of the animal that is dark — so on every shark in the game, from
-     every angle a chase camera or a swimmer actually uses, they did not read
-     as healed bite marks. They read as white stickers stuck to the back.
-     The intent was fine and the execution could not survive contact with the
-     countershading it was painted against, so the feature is deleted rather
-     than retuned: a scar you have to squint at is not worth four species'
-     worth of parameters and a per-species geometry cache entry.
-
-     `?cfg_SHARK_RAKE_SCARS=1` puts them back, for the before/after tool and
-     for anyone who wants to argue the other side with a picture.
-
-     The FOLDS stay. They are dark (0x4d565c), they sit on the flank where the
-     countershading boundary already is, and they are the cheap crease read
-     the reference sheet asked for. Nothing about them was the complaint.
-     ====================================================================== */
-  function rakeScarsOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.SHARK_RAKE_SCARS); }
-  function addSharkSkin(g, m, o) {
-    const rings = o.rings;
-    if (!rings) return;
-    const scars = rakeScarsOn() ? (o.scars == null ? 9 : o.scars) : 0;
-    const folds = o.folds == null ? 3 : o.folds;
-    if (!scars && !folds) return;
-    const seed = o.skinSeed || 17;
-    // scars stop at the jaw corner when the head front is jaw shells — a rake
-    // mark floating where the hull no longer is would be the old bug back in
-    // a new suit. (The shells carry their own ragged paint forward.)
-    const xCap = (o.mouth && o.mouth.snoutShell && mouthSplitOn())
-      ? o.mouth.hingeX + o.mouth.length * 0.02 : 1e9;
-    const key = "skin|" + [scars, folds, seed, o.scarLen || 0.4, o.foldX || 0, o.foldSpan || 0.5, xCap].join(",")
-      + "|" + JSON.stringify(rings);
-    const geo = cachedGeom(key, function () {
-      const sh = new Shell();
-      const x0 = rings[0].x, x1 = Math.min(xCap, rings[rings.length - 1].x);
-      for (let i = 0; i < scars; i++) {
-        const u = h01(i * 5 + 1, 2, seed);
-        const w2 = h01(i * 5 + 3, 4, seed);
-        const x = lerp(x0 + (x1 - x0) * 0.18, x0 + (x1 - x0) * 0.92, u);
-        const ang = Math.PI * 0.5 + (w2 - 0.5) * 1.9;      // upper (dark) surfaces only
-        const sk = onSkin(rings, x, ang, 0.006);
-        const tang = norm3(cross3(sk.n, [1, 0, 0]));
-        const fwd = norm3(cross3(tang, sk.n));
-        void sk; void tang; void fwd;
-        const len = (o.scarLen || 0.4) * (0.4 + h01(i, 9, seed) * 1.1);
-        const rot = (h01(i, 13, seed) - 0.5) * 1.5;
-        const hw = (o.scarWidth || 0.022) * (0.7 + h01(i, 21, seed) * 0.8) * 0.5;
-        const steps = 4;
-        const ry0 = Math.max(0.05, ringAt(rings, x).ry);
-        const dX = Math.cos(rot) * len, dA = Math.sin(rot) * len / ry0;
-        const st = [];
-        for (let k = 0; k <= steps; k++) {
-          const t = k / steps - 0.5;
-          st.push(onSkin(rings, clamp(x + dX * t, x0 + 0.03, x1 - 0.03), ang + dA * t, 0.006));
-        }
-        const side = [];
-        for (let k = 0; k <= steps; k++) {
-          const a = st[Math.max(0, k - 1)].p, b = st[Math.min(steps, k + 1)].p;
-          const dir = norm3([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
-          const tg = norm3(cross3(st[k].n, dir));
-          const q = st[k].p;
-          const p0 = [q[0] + tg[0] * hw, q[1] + tg[1] * hw, q[2] + tg[2] * hw];
-          const p1 = [q[0] - tg[0] * hw, q[1] - tg[1] * hw, q[2] - tg[2] * hw];
-          side.push({ n: st[k].n, p: [p0, p1], v: [sh.v(p0[0], p0[1], p0[2]), sh.v(p1[0], p1[1], p1[2])] });
-        }
-        for (let k = 1; k <= steps; k++) {
-          const a0 = side[k - 1], a1 = side[k];
-          sh.quadN(0, a1.n, [a0.p[0], a1.p[0], a1.p[1], a0.p[1]],
-            [a0.v[0], a1.v[0], a1.v[1], a0.v[1]]);
-        }
-      }
-      // WRINKLE FOLDS — long horizontal creases along the flank behind the
-      // head. Cheap, and per the reference sheet enormously effective.
-      for (let i = 0; i < folds; i++) {
-        const x = (o.foldX || 0) - i * (o.foldStep || 0.16);
-        const span = o.foldSpan || 0.5;
-        for (let side = -1; side <= 1; side += 2) {
-          const steps = 5, prev = [];
-          for (let k = 0; k <= steps; k++) {
-            const t = k / steps;
-            const ang = side > 0 ? lerp(-0.25, 0.75, t) : Math.PI - lerp(-0.25, 0.75, t);
-            const sk = onSkin(rings, x - t * span * 0.28, ang, 0.004);
-            const tang = norm3(cross3(sk.n, [1, 0, 0]));
-            const hw = (o.foldWidth || 0.03) * 0.5;
-            const pf = [sk.p[0] + tang[0] * hw, sk.p[1] + tang[1] * hw, sk.p[2] + tang[2] * hw];
-            const pb = [sk.p[0] - tang[0] * hw, sk.p[1] - tang[1] * hw, sk.p[2] - tang[2] * hw];
-            prev.push({ n: sk.n, p: [pf, pb], v: [sh.v(pf[0], pf[1], pf[2]), sh.v(pb[0], pb[1], pb[2])] });
-            if (k > 0) {
-              const a0 = prev[k - 1], a1 = prev[k];
-              sh.quadN(1, a1.n, [a0.p[0], a1.p[0], a1.p[1], a0.p[1]],
-                [a0.v[0], a1.v[0], a1.v[1], a0.v[1]]);
-            }
-          }
-        }
-      }
-      return sh.geom();
-    });
-    const mesh = meshOf(geo, [m(o.scarColor || 0xb9c0c2), m(o.foldColor || 0x4d565c)]);
-    mesh.name = "sharkSkinMarks";
-    g.add(mesh);
-    if (g.userData.sharkShape) {
-      g.userData.sharkShape.scars = scars;
-      g.userData.sharkShape.folds = folds;
-    }
-  }
-
-  /* ======================================================================
-     THE MOUTH.
-
-     Reference sheet §1, in order of how badly it was wrong:
-
-     1. THE UPPER JAW PROTRUDES. A great white does not hinge a lid; the
-        palatoquadrate SLIDES FORWARD AND DOWN out from under the snout and
-        the snout LIFTS off it. At full gape the upper tooth row ends up in
-        FRONT of the closed-mouth rostrum tip. The shared swim rig reads the
-        authored mouth contract and advances the real upper-head envelope; a
-        builder callback adds the rostrum lift and any small, species-authored
-        relative dental motion without creating a second animation owner.
-     2. The gape ROUNDS OUT — the corner pulls back, it is not a wedge.
-     3. Gums are a thick, wet, dark RED-PINK band, darkening in the corners.
-     4. The interior is dark PINK-RED. A near-black void reads as a hole in the
-        mesh, which is exactly what 0x10070a looked like.
-     5. THREE tooth rows, the rear ones smaller and raked further back, teeth
-        shrinking and raking toward the jaw corners, warm off-white with a
-        pink root where the enamel meets the gum. Serrated edges.
-
-     All of it merges to EIGHT meshes (was 81), every geometry cached.
-     ====================================================================== */
-  /* A TOOTH, not a cone. A flat triangular blade with SERRATED edges, a rake
-     curve toward the jaw corner, and a pinkish root band where the enamel
-     meets the gum. Emitted into a shared Shell so a whole three-row tooth
-     field is ONE mesh instead of forty freshly-allocated ConeGeometries.
-     groups: 0 = enamel, 1 = root. */
-  function emitTooth(sh, origin, wDir, hDir, t) {
-    const nDir = norm3(cross3(wDir, hDir));
-    const half = t.thick * 0.5;
-    function P(x, y, z) {
-      return [origin[0] + wDir[0] * x + hDir[0] * y + nDir[0] * z,
-        origin[1] + wDir[1] * x + hDir[1] * y + nDir[1] * z,
-        origin[2] + wDir[2] * x + hDir[2] * y + nDir[2] * z];
-    }
-    const ax = t.curve * t.w * 0.5, hgt = t.h;
-    const out = [];
-    out.push([t.w * 0.5, 0]);
-    const ns = t.serr > 0 ? 2 : 0;
-    for (let k = 1; k <= ns; k++) {
-      const f = k / (ns + 1);
-      const nudge = (k % 2 ? -1 : 1) * t.serr * t.w;
-      out.push([lerp(t.w * 0.5, ax, f) + nudge, hgt * f]);
-    }
-    out.push([ax, hgt]);
-    for (let k = ns; k >= 1; k--) {
-      const f = k / (ns + 1);
-      const nudge = (k % 2 ? 1 : -1) * t.serr * t.w;
-      out.push([lerp(-t.w * 0.5, ax, f) + nudge, hgt * f]);
-    }
-    out.push([-t.w * 0.5, 0]);
-    const gRoot = 1, gEn = 0;
-    const front = [], back = [];
-    for (let k = 0; k < out.length; k++) {
-      front.push(sh.v.apply(sh, P(out[k][0], out[k][1], half)));
-      back.push(sh.v.apply(sh, P(out[k][0], out[k][1], -half)));
-    }
-    const cF = sh.v.apply(sh, P(0, 0, half)), cB = sh.v.apply(sh, P(0, 0, -half));
-    const grpFor = function (k) { return out[k][1] < hgt * t.rootFrac ? gRoot : gEn; };
-    for (let k = 0; k < out.length - 1; k++) {
-      sh.tri(grpFor(k), cF, front[k], front[k + 1]);
-      sh.tri(grpFor(k), cB, back[k + 1], back[k]);
-      sh.quad(grpFor(k), front[k], back[k], back[k + 1], front[k + 1]);
-    }
-    sh.tri(gRoot, cF, front[out.length - 1], front[0]);
-    sh.tri(gRoot, cB, back[0], back[out.length - 1]);
-  }
-
-  /* ---- THE MOUTH INTERIOR (reference sheet §6) --------------------------
-     Owner, 2026-08-25: "when a shark opens its mouth you see deep inside its
-     massive mouth, not a protruding giant tongue."
-
-     Two generations of this failed the same way, and both failures were the
-     same mistake wearing different clothes: ONE BLOB, SCALED IN Y BY THE GAPE.
-
-       gen 1: an ellipsoid in the middle of the mouth, grown tenfold. It was
-              scaled about its own centre while the jaws swing about the hinge,
-              so at full gape a third of it hung in open water under the snout.
-              MeshLambert then lit its far wall to bright salmon: the tongue.
-       gen 2: the same trick anchored on the hinge and painted dark. Better
-              maths, same class of bug — a jaw ROTATES, and no amount of y-scale
-              tracks a 62-degree rotation. The front of the fan stayed out at
-              full jaw length while the real mandible tip had swung back and
-              down to two-fifths of it, so the bore still hung past the teeth.
-
-     There is no single mesh that can do this. An interior bounded by two parts
-     that move differently has to be built in the parts' own frames, so this is
-     THREE pieces, and each one is welded to whatever moves it:
-
-       ROOF   -> the upper jaw. The palate, arching up away from the gum band.
-       FLOOR  -> the mandible. The shallow basin the tongueless floor of a
-                 shark's mouth actually is; it travels with the chin.
-       THROAT -> the head. Behind the oral arc, where neither jaw reaches, a
-                 closed inside-out bore running a jaw-length back into the body
-                 and clamped inside the hull's own cross-section. This is the
-                 black at the back, and it is the only piece that has to fill a
-                 hole rather than skin a jaw.
-
-     Nothing scales. Nothing can protrude, because every surface is a fixed
-     distance from the bone that carries it. All of it is UNLIT and DoubleSide:
-     no light reaches the back of a throat, and a mouth interior seen from a
-     grazing angle must never turn into a hole in the mesh. */
-  const UNLIT_CACHE = new Map();
-  /* THESE HEX VALUES LOOK ABSURDLY DARK AND THEY ARE CORRECT. core/renderer.js
-     runs outputColorSpace = SRGBColorSpace with ColorManagement.enabled = false, so
-     an authored colour is treated as LINEAR and brightened on the way out:
-     0x53211f leaves the pipe at about rgb(140,85,70), a milk-chocolate brown.
-     That is the second half of why the old cavity read as a tongue — its wall
-     was never the dark it was written as. Author the throat in linear and it
-     lands where a throat belongs. 0x140505 -> ~rgb(80,43,43). */
-  function unlit(c) {
-    let mm = UNLIT_CACHE.get(c);
-    if (!mm) {
-      mm = new T.MeshBasicMaterial({ color: c, side: T.DoubleSide });
-      UNLIT_CACHE.set(c, mm);
-    }
-    return mm;
-  }
-
-  function addSharkMouth(g, T_, m, o) {
-    const hingeX = o.hingeX, hingeY = o.hingeY, len = o.length, width = o.width, gap = o.gap;
-    // Keep gingiva inside the moving head envelope.  A tall exposed band may
-    // technically connect teeth to skull, but in profile it is still a pink
-    // prosthetic rail.  The outer lip is a narrow skin fold; the roots and the
-    // bulk of the gum live behind it.
-    const gumH = o.gumHeight || gap * 0.18;
-    const lipH = gumH + gap * 0.035;
-    // The oral margin belongs just INSIDE the head silhouette. The previous
-    // front boxes were centred on the arc's furthest point and extended another
-    // 6.5% of jaw length into open water — the pink/white tusk-like lips the
-    // player could see in profile. Seat the shared band and its front seal
-    // behind the arc instead; pure-biting apex sharks have only subtle labial
-    // supports compared with suction feeders' conspicuous lip cartilages.
-    const lipRecess = o.lipRecess == null ? len * 0.035 : o.lipRecess;
-    const railIn = o.railIn || width * 0.11;
-    /* 0.055, NOT 0.10 — THE MOUTH IS BOUNDED BY THE HEAD, for every shark.
-       The hero was corrected to width*0.055 by hand (35c54e2) after its gum
-       rail came out past the cheek; the bull shark and megalodon kept the old
-       default and stood their lower band 0.11 outboard of the chin that is
-       supposed to be the outside of the animal there — a rail of gum and lip
-       running OUTSIDE a shut mouth, which is the "black shit protruding out
-       the lips" the owner sees on those two. */
-    const railOut = o.railOut || width * 0.055;
-    const toothH = o.toothHeight || gap * 0.48;
-    const toothW = o.toothWidth || toothH * 0.86;
-    const rowTeeth = o.rowTeeth || 17;
-    const A = o.arcSpan == null ? Math.PI * 0.49 : o.arcSpan;
-    const upperY = gap * 0.27, lowerY = -gap * 0.27;
-    const cx = len * 0.18, rad = len * 0.82, hw = width * 0.5;
-
-    /* WET GUM, NOT BUBBLEGUM. 0x8e3b42 left the pipe as rgb(195,130,140) and
-       then took the sun — the lower jaw at full gape was a salmon plank, the
-       biggest thing in the mouth. Authored in linear so it LANDS dark: 0x6a1c22
-       -> about rgb(170,90,100) lit, the wet red-pink of real gingiva, and the
-       corners darker still. Same correction to the tooth root. */
-    const gum = m(o.gum || 0x6a1c22), gumDark = m(o.gumDark || 0x3b0f14);
-    const enamel = m(o.tooth || 0xefe6d0), root = m(o.toothRoot || 0xc48d88);
-    const skin = m(o.skin || 0xdfe4e6);
-    /* THE PROTRUDED UPPER JAW IS ITS OWN TISSUE. When a great white commits,
-       the tooth-bearing upper jaw slides down and forward OUT of the snout,
-       and what shows between the snout's skin edge and the teeth is a band of
-       pale pink jaw tissue — not body-white skin. This is that band's colour;
-       the upper gum band's world-facing faces wear it (see faceGroup). */
-    /* ..and it is only FAINTLY pink, because the same faces are the front of
-       the CLOSED mouth too: at rest the front of this band shows under the
-       snout tip, and at 0x7a3f3a that read as a pink patch on a shut mouth
-       (the hammerhead's "protruding pinkish colour" in another coat). On the
-       animal the protruded jaw is white tissue with a pink cast; the red is
-       in the gum line, which the band's inner and bottom faces carry. */
-    /* ..SO THE COLOUR RIDES THE GAPE. One material cannot be white in a shut
-       mouth and pink in an open one — unless it is repainted as the jaw moves.
-       applyGape lerps it: the snout's own white at rest, wet pink at full
-       protrusion, which is also what the animal does (blood in the protruded
-       tissue). Cloned so the repaint never leaks into a shared cached material. */
-    const JAW_REST = new T.Color(0xd8c3bf), JAW_GAPE = new T.Color(0x7a3f3a);
-    const jawSkin = m(o.jawSkin || 0xd8c3bf).clone();
-    /* AND ONE DOUBLE-SIDED COPY OF IT. The buccal sack's outer wrap is swept
-       with ONE winding for both cheeks — they face opposite ways, so on one
-       flank of every shark in this game that wrap was back-facing and culled,
-       and the dark cavity wall behind it showed through the closed mouth as an
-       arch. Found by firing a ray through that arch and asking the scene what
-       it hit (the probe in tools/visual-presets/shark-head-weld.mjs):
-       sharkBuccalSack, on the side the winding loses. One material per animal,
-       no vertices moved, both flanks fixed. */
-    /* ..AND IT IS JAW TISSUE, NOT BELLY. The sack rides the protruding upper
-       jaw, so at full gape its wrapped cheeks and floor hang below the snout
-       with the teeth: painted body-white they were a rectangular white plank
-       under the nose (photographed 2026-09-01, the first protrusion build).
-       The protruded jaw of a real great white is pale PINK; so is this. */
-    const skinWrap = jawSkin.clone(); skinWrap.side = T_.DoubleSide;
-
-    // The jaw line is not level. It rises toward the corners so the whole arc
-    // follows the underside of the head — which is what actually seats the
-    // mouth inside the skull instead of hanging it off the chin.
-    const cornerRise = o.cornerRise == null ? gap * 0.42 : o.cornerRise;
-    function riseAt(a) { return cornerRise * Math.pow(Math.abs(a) / (A || 1), 1.7); }
-    function arcPt(a) { return [cx + rad * Math.cos(a), hw * Math.sin(a)]; }
-    function arcN(a) {   // outward normal in XZ
-      const tx = -rad * Math.sin(a), tz = hw * Math.cos(a);
-      const l = Math.hypot(tx, tz) || 1;
-      return [tz / l, -tx / l];
-    }
-
-    /* ---- the gum + lip band: one swept solid with an inner (gum) face and
-            an outer (skin) face, replacing ten overlapping boxes per jaw ---- */
-    function bandGeom(y, up, stations) {
-      const sh = new Shell(), rows = [];
-      for (let i = 0; i <= stations; i++) {
-        const a = -A + (i / stations) * 2 * A;
-        const p = arcPt(a), nn = arcN(a);
-        const yr = y + riseAt(a);
-        // Taper the world-facing rail inward only around the front bite line.
-        // The cheek/corner tissue keeps its full section and therefore stays
-        // joined to the head; the centre no longer grows a bumper beyond it.
-        const front = Math.pow(Math.max(0, 1 - Math.abs(a) / (A * 0.46)), 1.7);
-        const seat = lipRecess * front;
-        const corner = function (dn, dy) {
-          const d = dn - seat;
-          return sh.v(p[0] + nn[0] * d, yr + dy, p[1] + nn[1] * d);
-        };
-        // THE UPPER BAND IS A LIP, NOT A BUMPER. The protruded palatoquadrate
-        // in the reference photographs is a THIN pale wrap around the tooth
-        // row; built at the lower jaw's cross-section it read as a rigid grey
-        // roll bar across the mouth and, head-on at full rake, as a helmet
-        // over the snout. So the upper jaw takes a much slimmer section:
-        // shallower rails and under half the lip height — downward. UPWARD,
-        // in the split-body mouth, the outer face reaches tall: that is the
-        // pale membrane connecting the slid-out tooth row to the lifted
-        // snout, and it is what stopped the upper jaw reading as a floating
-        // denture ring with daylight behind it. At rest the tall part lives
-        // inside the rostrum shell, invisible.
-        const split = mouthSplitOn();
-        /* THE LOWER RAIL IS A CREASE, NOT A SHELF. Coloured by part, the jaw
-           line came out as four stacked rails — gum, lip, tooth base, chin
-           deck — each catching its own highlight, which is what read as white
-           slabs bolted along the mouth. In every reference photograph the
-           lower jaw is skin, then a thin dark crease, then teeth. Halving the
-           lower band's outward reach is what turns the stack back into a
-           line; the tissue is still there, it just stops standing out of the
-           face. */
-        /* AND THE UPPER BAND DOES NOT STAND OFF THE FACE EITHER. Removing the
-           skirt took the bumper's HEIGHT away; this takes its THICKNESS. At
-           half of railOut the upper band was still a pale rail proud of the
-           snout, catching its own highlight above the tooth row — the same
-           "protruding lip that doesn't exist in reality", just thinner. On a
-           real great white the upper teeth come straight out of the gum under
-           the snout and there is nothing outboard of them. 0.10 leaves the
-           band as a seam, not a rail. The lower jaw keeps its lip: it has one. */
-        /* THE LOWER GUM IS A THIN PALE RIM, NOT A SALMON RING. At full gape,
-           head-on, the lower band's TOP face is what the lens sees around the
-           whole U — and at a full railIn (0.079 m on the hero) that face was
-           a shelf of wet-red gum a fifth of the mouth's width on each side:
-           the owner's cover, a wide flat grin of pink with the teeth stuck
-           in it. In the storyboard (frames 8-9) the lower teeth stand in a
-           gum you can barely see — a thin pale line inside the white lip —
-           and the dark floor starts right behind them. So the lower band
-           reaches half as far in, and the replacement rows lie flat over
-           the dark floor instead of on a pink shelf. */
-        const kIn = up ? 0.75 : 0.5, kOut = (up ? 0.10 : 0.55) * (1 - front * 0.82);
-        /* ---- THE LIP COVERS THE TEETH, WHICH IS WHY A CLOSED SHARK MOUTH IS
-           A LINE ------------------------------------------------------------
-           Owner, 2026-08-30, on the front of the great white's mouth: "there
-           are too many pieces — it looks like white chunks all over, poorly
-           streamlined."  Photographed and counted (the part-map page): at rest
-           SIX surfaces were in that square centimetre — rostrum, upper gum,
-           upper tooth field, lower tooth field, lower gum, chin — with the
-           buccal sack showing between the crowns.
-
-           The cause is that the tooth row is 0.145 long and the lip band that
-           is supposed to cover it reached 0.0135 down: the crowns hung into
-           the gap between the two bands, and through that gap you could see
-           the inside of the animal. Every reference photograph of a closed
-           great white shows the opposite — skin, one dark crease, and the TIPS
-           of the upper teeth, with the gums nowhere. So each band's outer face
-           now carries a SKIRT that reaches most of a crown toward the other
-           jaw. Nothing is added and nothing is deleted: the same band is
-           simply as deep as the teeth it is the lip for. */
-        /* THE TWO SKIRTS ARE NOT THE SAME LENGTH, and that asymmetry IS the
-           closed-mouth silhouette: an upper lip that comes most of the way
-           down over its crowns, a lower lip that comes only a quarter of the
-           way up, and the tips of the upper teeth overhanging the gap between
-           them. Made them equal once and the mouth vanished into the face —
-           one blank white surface, which is a different wrong picture. */
-        /* ---- AND THE UPPER JAW HAS NO LIP AT ALL --------------------------
-           Owner, 2026-08-30, with three photographs on the table: "your bottom
-           mouth is good, the top mouth is weird, and there's this protruding
-           lip you have that doesn't exist in reality — and the teeth should be
-           scary and noticeable."
-
-           He is right and it was my own doing. Closing the front of the mouth
-           by hanging a skirt of skin down over the upper crowns did remove the
-           chunks, but it invented an anatomy: a white bumper along the top jaw
-           that no shark has. Look at what the photographs actually show — on a
-           CLOSED great white the upper teeth hang over the lower lip, bare,
-           and they are the most noticeable thing on the face. The lower jaw is
-           the one with a lip, and its skirt stays: in the same photographs the
-           lower crowns are tucked away behind it.
-
-           So the upper skirt is zero. What keeps the mouth from going back to
-           being a pile of pieces is the work that actually fixed it — the
-           buccal sack pulled behind the seal and inside the lips, and the gum
-           line above the tooth row, so the teeth stand against dark tissue
-           instead of white belly skin. */
-        const skirtK = up ? (o.lipSkirt == null ? 0 : o.lipSkirt)
-          : (o.lipSkirtLower == null ? 0.26 : o.lipSkirtLower);
-        /* AND IT DRAPES DEEPER AT THE CORNER, not shallower. The corner is
-           where the part map found the last of the chunks: a column of buccal
-           sack and tooth field showing between the end of the upper lip and
-           the chin's rim, which on a real animal is the deepest fold of skin
-           on the whole mouth. Tapering the skirt there (the first attempt)
-           opened that gap wider; growing it closes it. */
-        const corner3 = Math.pow(Math.abs(a) / (A || 1), 3);
-        const skirt = toothH * skirtK * (up ? 1 + corner3 * 0.55 : 1 - corner3 * 0.30);
-        const kGum = up ? 0.80 : 1, kLipDn = up ? 0.21 : 0.45;
-        // 0.72, not 1.05: the tall upper face only has to cover the snout's
-        // skin edge through a gap*0.40 drop now, and every millimetre past
-        // that is dark membrane showing below the nose
-        const kLipUp = up ? (split ? 0.72 : 0.21) : 0.45;
-        const c = [corner(-railIn * kIn, gumH * 0.5 * kGum), corner(-railIn * kIn, -gumH * 0.5 * kGum)];
-        let groups;
-        if (up && split) {
-          /* THE TOP OF THE MOUTH IS A HOLE, NOT A PIECE OF GUM. The band's
-             outer face was one flat pink rectangle 1.26 lipH tall — the
-             "membrane" that kept the snout's skin edge covered through the
-             protrusion — and once the jaw dropped more than half the gap
-             (the deeper snout) that whole rectangle hung below the snout at
-             full gape as a lit pink wall across the top of the mouth: the
-             owner's "big piece of gum in their mouth … too geometric, it's
-             supposed to be a hole" (great white and bull shark, 2026-09-08).
-             A rounded version of the same wall read as a bigger lip. What
-             the storyboard shows above the upper teeth is a THIN pale gum,
-             and above that shadow — the roof of the mouth — up to the
-             snout's skin. So the pink stays a gum's height, and the rest of
-             the membrane up into the snout is the cavity's own unlit dark:
-             skin, dark, a thin pink gum, teeth. */
-          const yBot = -lipH * kLipDn, yGum = lipH * 0.34, yTop = lipH * kLipUp;
-          const dOut = railOut * kOut;
-          c.push(corner(dOut, yBot), corner(dOut, yGum));
-          // the dark membrane leans back into the snout as it rises
-          c.push(corner(dOut - railIn * 0.25, yGum + (yTop - yGum) * 0.5), corner(dOut - railIn * 0.55, yTop));
-          groups = [0, 0, 3, 4, 4, 4];               // inner, bottom, pink gum, dark membrane x2, top
-        } else {
-          c.push(corner(railOut * kOut, -lipH * kLipDn - (up ? skirt : 0)),
-            corner(railOut * kOut, lipH * kLipUp + (up ? 0 : skirt)));
-          // face 0 inner, 1 bottom, 2 outer, 3 top.  Gingiva belongs on the wet
-          // inner/bottom faces; the world-facing lip is the same pale skin as
-          // the body around it.
-          /* ..and the top face of the lower band is the PALE jaw tissue the
-             upper jaw already wears (slot 3, the colour that rides the
-             gape), not the wet-red gum: what the reference shows around the
-             lower teeth is whitish-pink, and the red lives on the inner
-             face, seen only from inside the mouth. */
-          groups = up ? [0, 0, 3, 3] : [0, 1, 1, 3];
-        }
-        rows.push({ a: a, c: c, groups: groups });
-      }
-      for (let i = 0; i < stations; i++) {
-        const am = (rows[i].a + rows[i + 1].a) * 0.5;
-        const corner = Math.abs(am) > A * 0.60;
-        const M = rows[i].c.length;
-        for (let k = 0; k < M; k++) {
-          const k2 = (k + 1) % M;
-          let grp = rows[i].groups[k];
-          if (corner && (grp === 0 || grp === 2)) grp = 2;
-          sh.quad(grp, rows[i].c[k], rows[i].c[k2], rows[i + 1].c[k2], rows[i + 1].c[k]);
-        }
-      }
-      // the end caps, fanned from the inner-top point so any section closes
-      const F = rows[0].c, L = rows[stations].c;
-      for (let j = 1; j < F.length - 1; j++) { sh.tri(2, F[0], F[j + 1], F[j]); sh.tri(2, L[0], L[j], L[j + 1]); }
-      return sh.geom();
-    }
-    function band(y, up, name, parent) {
-      const key = "jawband6|" + mouthSplitOn() + "|" +
-        [y, up, gumH, lipH, lipRecess, railIn, railOut, len, width, A, cornerRise].join(",");
-      // 20 stations, not 14: the skirt's edge is now a visible line on the
-      // face, and at 14 the teeth behind it poked through between stations.
-      const geo = cachedGeom(key, function () { return bandGeom(y, up, 20); });
-      // both jaws' world-facing faces are the PALE jaw skin: in the
-      // photographs the protruded upper jaw is whitish-pink, and painting it
-      // the dark dorsal colour is exactly what made it read as a bolted-on
-      // grey object instead of the animal's own lip.
-      // slot 4: the dark membrane above the upper gum (see bandGeom), the
-      // same unlit cavity colour the sack's walls wear
-      const mesh = meshOf(geo, [gum, skin, gumDark, jawSkin, unlit(o.cavity || 0x140505)]);
-      mesh.name = name;
-      parent.add(mesh);
-      return mesh;
-    }
-
-    /* ---- one merged tooth field per jaw: three rows, tapering and raking
-            toward the corners, serrated, pink where enamel meets gum ------- */
-    /* THE TEETH WERE A WALL. Owner, 2026-09-01: "the top teeth seem to overlap
-       with the top of the mouth". Measured: the great white's front row was 19
-       teeth of 0.132 on an arc about 2.0 long — a pitch of 0.105 — so every
-       tooth overlapped its neighbours by a quarter and the row photographed as
-       one continuous white slab under the snout, which is exactly what a
-       "tooth" cannot look like. A real great white's functional row is broad
-       triangles that TOUCH AT THE BASE and no more; you can count them.
-       So the count comes down, and the width is CAPPED BY THE ARC: no tooth
-       may be wider than four fifths of the pitch it stands on, whatever the
-       species table says. The lower teeth are the narrower, more pointed
-       "fork" of the pair, as they are on the animal. */
-    function arcLen(a0, a1) {
-      let L = 0, prev = arcPt(a0);
-      for (let i = 1; i <= 24; i++) {
-        const p = arcPt(a0 + (a1 - a0) * i / 24);
-        L += Math.hypot(p[0] - prev[0], p[1] - prev[1]); prev = p;
-      }
-      return L;
-    }
-    function toothField(up) {
-      const nFront = Math.max(9, Math.round(rowTeeth * 0.79));
-      const pitch = arcLen(-A * 0.94, A * 0.94) / Math.max(1, nFront - 1);
-      const wK = up ? 0.82 : 0.66, hK = up ? 1.06 : 0.90;
-      const tW = Math.min(toothW * wK, pitch * 0.80), tH = toothH * hK;
-      const rows = o.toothRows || [
-        /* THE FRONT ROW IS ON THE ARC. It was pulled inboard to hide behind an
-           upper lip that no longer exists; on a real animal the working row IS
-           the edge of the jaw, which is why you can count the teeth in every
-           photograph ever taken of one. The replacement rows sit close behind
-           it and lie FLAT — folded back against the gum, the way they are in
-           the reference photographs — not standing up as a second comb. */
-        { n: nFront, r: 1.00, size: 1.00, rake: 0.22 },
-        /* ..and the replacement rows are SMALLER than they were: at 0.62
-           and 0.40 of the working row, lying flat, head-on at full gape they
-           were a second and third ring of white chips over the floor of the
-           mouth — the "grid of teeth" on the owner's cover. The storyboard
-           shows the rows behind as a much smaller echo of the front row. */
-        { n: nFront, r: 0.90, size: 0.50, rake: 1.05 },
-        { n: Math.max(5, (nFront * 0.60) | 0), r: 0.80, size: 0.30, rake: 1.30 },
-      ];
-      const key = "teeth|v3|" + [up, len, width, tH, tW, A, cornerRise, JSON.stringify(rows)].join(",");
-      const geo = cachedGeom(key, function () {
-        const sh = new Shell();
-        const sgn = up ? -1 : 1;                     // which way the crowns point
-        const baseY = up ? upperY - gumH * 0.22 : lowerY + gumH * 0.22;
-        for (let r = 0; r < rows.length; r++) {
-          const row = rows[r];
-          for (let i = 0; i < row.n; i++) {
-            const t = row.n === 1 ? 0.5 : i / (row.n - 1);
-            const a = -A * 0.94 + t * 2 * A * 0.94;
-            const corner = Math.abs(a) / A;
-            // front teeth are broad; they shrink and rake back toward the
-            // corners exactly as the reference sheet calls out
-            const sc = row.size * (1 - 0.44 * corner * corner);
-            const rk = row.rake + 0.5 * corner;
-            const p = arcPt(a), nn = arcN(a);
-            const px = cx + (p[0] - cx) * row.r, pz = p[1] * row.r;
-            const wDir = norm3([-rad * Math.sin(a), 0, hw * Math.cos(a)]);
-            const hDir = norm3([-nn[0] * Math.sin(rk), sgn * Math.cos(rk), -nn[1] * Math.sin(rk)]);
-            emitTooth(sh, [px, baseY + riseAt(a), pz], wDir, hDir, {
-              w: tW * sc, h: tH * sc, thick: tW * sc * 0.14,
-              serr: r === 0 ? 0.055 : 0, curve: 0.10 + corner * 0.28,
-              rootFrac: 0.30,
-            });
-          }
-        }
-        return sh.geom();
-      });
-      const mesh = meshOf(geo, [enamel, root]);
-      mesh.name = up ? "sharkUpperTooth" : "sharkLowerTooth";
-      return { mesh: mesh, count: rows.reduce(function (s, r) { return s + r.n; }, 0) };
-    }
-    /* ---------------------------------------------------------------- build */
-
-    // THE UPPER ENVELOPE is the real head, not the teeth.  `upper` is the
-    // articulation root that will also receive addSnoutShell's crown/rostrum;
-    // `dental` is the palatoquadrate nested inside it.  Sharks protrude that
-    // tooth-bearing cartilage relative to the lifting head, but because both
-    // start in one envelope the teeth cannot become a free denture hoop.
-    const upper = new T.Group(); upper.name = "sharkUpperEnvelope";
-    const dental = new T.Group(); dental.name = "sharkUpperJaw";
-    const lower = new T.Group(); lower.name = "sharkLowerJaw";
-    upper.position.set(hingeX, hingeY, 0);
-    lower.position.set(hingeX, hingeY, 0);   // this origin IS the physical hinge
-    upper.add(dental);
-    g.add(upper); g.add(lower);
-
-    band(upperY, true, "sharkUpperGum", dental);
-    band(lowerY, false, "sharkLowerGum", lower);
-
-    /* THE CHIN — the orca move, and the whole point of the split-body mouth.
-       The lower jaw used to be an arc of bands and a slab: a clamp, hanging
-       under a hull whose own white underside NEVER MOVED, so a bite read as
-       dentures swinging below a closed head. This is the body's actual front
-       underside, rebuilt from the species' own rings — the belly line is the
-       hull's belly line, the beam is the hull's beam pulled in a whisker so
-       the jaw seam reads as a crease — and parented at the hinge. When the
-       jaw drops, the white half of the head is what drops, and the notched
-       hull above shows the dark mouth roof: the black-over-white separation
-       of the reference photograph. The deck along its top is recessed and
-       painted interior-dark; the gum band and tooth row stand proud of it. */
-    function chinMesh() {
-      const rings = o.rings;
-      const key = "sharkchin|v6|" + [hingeX, hingeY, len, width, gap, cornerRise, A].join(",") +
-        "|" + JSON.stringify(rings);
-      const geo = cachedGeom(key, function () {
-        const sh = new Shell();
-        const N = 10, ARCP = 9;
-        // End the moving chin at the authored oral arc. Its former 1.04len
-        // station plus 0.03len cap recreated the old front lip's 6.5% beak,
-        // even after the soft seal itself was recessed.
-        const xB = -len * 0.30, xF = len * 0.99;
-        const lastX = rings[rings.length - 1].x;
-        const deckDrop = gap * 0.12;
-        const st = [];
-        for (let i = 0; i < N; i++) {
-          const t = i / (N - 1);
-          const lx = lerp(xB, xF, t);
-          const wx = hingeX + lx;
-          const b = ringAt(rings, Math.min(wx, lastX));
-          const ca = clamp((lx - cx) / rad, -1, 1);
-          const aA = Math.min(A, Math.acos(ca));
-          const rise = cornerRise * Math.pow(aA / (A || 1), 1.7);
-          // the rim rides the seam; at the very corner it reaches a little
-          // higher still, up behind the notched hull edge, so no sightline
-          // finds daylight between cheek and chin on a closed head
-          /* THE CORNER OF THE MOUTH IS SKIN, NOT A SLOT. Forward of the hull's
-             cut face there is no cheek: whatever covers the join between the
-             snout shell's seam and the chin has to BE the chin. At gap*0.10
-             with a sixth-power ramp it reached that seam only in the last few
-             degrees, and the part map found what was behind the gap — two
-             walls of buccal sack, framing a dark arch cut into the side of the
-             jaw from every low three-quarter angle. Reach the seam earlier and
-             further and the corner closes into a fold. */
-          const rim = lowerY - gumH * 0.12 + rise + gap * 0.26 * Math.pow(aA / (A || 1), 4);
-          let bot = Math.min((b.y - b.ry) - hingeY, rim - gap * 0.36);
-          let rz = Math.min(b.rz * 0.96, hw * 1.30);
-          if (wx > lastX) {
-            // past the hull's front cap: round the jaw off toward the lip
-            const f = clamp((wx - lastX) / Math.max(0.05, hingeX + xF - lastX), 0, 1);
-            rz = lerp(rz, width * 0.34, f * f);
-            bot = lerp(bot, rim - gap * 0.42, f * 0.55);
-          }
-          if (i === 0) { rz *= 0.72; bot = lerp(rim - gap * 0.30, bot, 0.45); }
-          bot += 0.006;      // a hair above the intact hull belly it duplicates
-          const dep = Math.max(gap * 0.10, rim - bot);
-          /* AND THE DECK NARROWS INTO THE JAW. The mouth's floor was carried
-             at a flat 55% of the section's width all the way to the last
-             station, so the forward cap — a fan from that wide flat deck to a
-             single point — came out as a WHITE BOX stuck on the front of the
-             chin, with the dark deck showing as a panel in it. Every reference
-             photograph has a lower jaw that closes to a rounded blade. Taper
-             the deck over the front fifth and the cap becomes that blade. */
-          /* THE FLOOR OF THE MOUTH ENDS AT THE GUM. The deck was carried at
-             55% of the chin's width from the hinge to the tip, and its side
-             walls (rim down to deck) ran the whole length with it, painted
-             floor-dark. Forward of the gum band's front the band is INSIDE
-             those walls, so at full gape — jaw swung 62 degrees down, tip
-             at the lens — the walls were a dark cap across the front of the
-             chin, under the lower teeth, with the chin's skin standing under
-             it like a second lip (owner, head-on, 2026-09-08: "this
-             protruding part of the mouth"; probed: sharkChin group 1 at
-             97% of the jaw, at the rim). On the animal the floor is the
-             dark inside the tooth arc and everything outside the arc is the
-             lower lip. So the deck's edge now follows the band's own plan —
-             the same ellipse the gum is swept on, less the band's inner
-             rail — and the walls between that edge and the chin's rim are
-             the lip: skin, lit, like the rest of the chin. */
-          const bu = clamp((lx - cx) / rad, -1, 1);
-          const bandHz = hw * Math.sqrt(Math.max(0, 1 - bu * bu));
-          /* THE CHIN NARROWS WITH THE MOUTH. Forward of the arc's widest
-             point the chin kept the hull's beam (0.34 width at the very tip)
-             while the tooth arc closed to a point, so the lip between the
-             band and the chin's rim was a wide flat triangle in plan — head-on
-             at full gape, a pale shelf under the lower teeth (owner,
-             2026-09-08: "fix the shark chin too"). The lower jaw of the
-             animal is a U no wider than its own gum plus a lip. */
-          const wf = Math.pow(Math.max(0, bu), 1.5);
-          rz = lerp(rz, Math.max(gap * 0.12, bandHz + railOut * 0.55 + lipRecess + gap * 0.05), wf);
-          const deckZ = Math.max(0, Math.min(rz * 0.55, bandHz - railIn * 0.6));
-          // ..and the floor stops before it becomes a sliver: at the tip the
-          // deck's two dark triangles converging to a point were the notches
-          const deckK = clamp(deckZ / (railIn * 0.6), 0, 1);
-          /* THE LIP IS A HARD EDGE. Shell.v interns vertices by position, so
-             the rim vertex where the white outer wall meets the dark deck wall
-             was ONE vertex, and computeVertexNormals averaged the wall's
-             outward normal with the deck wall's INWARD one — leaving the whole
-             top row of the chin's skin shaded as if it faced up or across the
-             mouth. Under the game's Lambert that is a dark band the length of
-             the closed jaw line, on every split-body shark: the owner's
-             "black shit protruding out the lips" on the great white, bull and
-             megalodon. The deck walls now start a hair inboard of the rim, so
-             the skin keeps its own edge and the interior its own. */
-          const pts = [], v = [], inner = [];
-          for (let k = 0; k < ARCP; k++) {
-            let p;
-            if (k <= 6) {                        // rim +z, around the belly, rim -z
-              const ph = (k / 6) * Math.PI;
-              p = [lx, rim - dep * Math.pow(Math.sin(ph), 0.8), Math.cos(ph) * rz];
-            } else if (k === 7) p = [lx, rim - deckDrop * deckK, -deckZ];
-            else p = [lx, rim - deckDrop * deckK, deckZ];
-            pts.push(p); v.push(sh.v(p[0], p[1], p[2]));
-          }
-          // the deck walls' own copies of the two rim points, 2 mm inboard
-          inner.push([lx, rim - 0.001, rz - 0.002], [lx, rim - 0.001, -rz + 0.002]);
-          inner.v = inner.map(function (q) { return sh.v(q[0], q[1], q[2]); });
-          st.push({ pts: pts, v: v, lx: lx, rim: rim, dep: dep, inner: inner, deckK: deckK });
-        }
-        for (let i = 0; i < N - 1; i++) {
-          const A0 = st[i], A1 = st[i + 1];
-          for (let k = 0; k < ARCP; k++) {
-            const k2 = (k + 1) % ARCP;
-            let nrm, grp;
-            if (k < 6) {                         // the white skin
-              grp = 0;
-              const my = (A0.pts[k][1] + A0.pts[k2][1]) * 0.5 - (A0.rim - A0.dep * 0.4);
-              const mz = (A0.pts[k][2] + A0.pts[k2][2]) * 0.5;
-              nrm = [0, my, mz];
-              if (Math.abs(nrm[1]) + Math.abs(nrm[2]) < 1e-4) nrm = [0, -1, 0];
-              sh.quadN(grp, nrm,
-                [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
-                [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
-            } else if (k === 7) {                // the deck; skin where it has closed to a line
-              /* THE FLOOR GOES DARK TOWARD THE THROAT. One flat unlit maroon
-                 from the teeth to the hinge is a plane, and head-on at full
-                 gape that plane was most of the open mouth: a pink panel,
-                 not a cavern. The storyboard's mouth is red tissue at the
-                 rim and black by the time the eye reaches the throat, so the
-                 deck is three shades along the jaw — the front third the
-                 tissue it was, the middle darker, the back near-black. */
-              const tDeck = (i + 0.5) / (N - 1);        // 0 = hinge, 1 = tip
-              grp = A0.deckK > 0.35 ? (tDeck > 0.66 ? 1 : (tDeck > 0.40 ? 2 : 3)) : 0; nrm = [0, 1, 0];
-              sh.quadN(grp, nrm,
-                [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
-                [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
-            } else {                             // the lip: rim down to the deck's edge, skin
-              grp = 0; nrm = [0, 0.35, k === 6 ? 1 : -1];
-              // k=6: rim(-z) -> deck(-z) uses inner[1]; k=8: deck(+z) -> rim(+z) uses inner[0]
-              const r0 = k === 6 ? A0.inner[1] : A0.inner[0], r1 = k === 6 ? A1.inner[1] : A1.inner[0];
-              const rv0 = k === 6 ? A0.inner.v[1] : A0.inner.v[0], rv1 = k === 6 ? A1.inner.v[1] : A1.inner.v[0];
-              const P = k === 6 ? [r0, A0.pts[k2], A1.pts[k2], r1] : [A0.pts[k], r0, r1, A1.pts[k]];
-              const V = k === 6 ? [rv0, A0.v[k2], A1.v[k2], rv1] : [A0.v[k], rv0, rv1, A1.v[k]];
-              sh.quadN(grp, nrm, P, V);
-            }
-          }
-        }
-        // caps: the visible jaw tip forward, the buried root aft
-        const F = st[N - 1], B = st[0];
-        const tip = [F.lx + len * 0.01, F.rim - F.dep * 0.45, 0];
-        const vt = sh.v(tip[0], tip[1], tip[2]);
-        const root = [B.lx - len * 0.02, B.rim - B.dep * 0.5, 0];
-        const vr = sh.v(root[0], root[1], root[2]);
-        for (let k = 0; k < ARCP; k++) {
-          const k2 = (k + 1) % ARCP;
-          // The forward cap is exposed outer anatomy from every profile angle.
-          // Painting its two deck wedges with the recessed interior material
-          // left a small pink rectangle at the chin tip that still read as a
-          // protruding lip. Keep the deck behind it dark, but close this cap
-          // entirely in the shark's pale skin.
-          sh.quadN(0, [1, 0, 0], [F.pts[k], F.pts[k2], tip, tip], [F.v[k], F.v[k2], vt, vt]);
-          sh.quadN(0, [-1, 0, 0], [B.pts[k], B.pts[k2], root, root], [B.v[k], B.v[k2], vr, vr]);
-        }
-        return sh.geom();
-      });
-      // THE DECK IS THE FLOOR OF THE MOUTH, not a stripe on the chin. Lit, its
-      // 0x45191d rendered as a broad salmon plank running the whole mandible —
-      // the single biggest thing inside an open gape, and half of what the
-      // owner was pointing at. It joins the buccal sack and the liner in the
-      // unlit interior palette instead.
-      /* 0x1c0708, NOT 0x0b0304: through the front of a CLOSED mouth (where
-         the snout's underside sits above the jaw line) the deck and its walls
-         are what you see behind the teeth, and at near-black they read as a
-         hole in the animal — the owner's "black shit in the mouth" on the
-         megalodon and bull. The same unlit dark red the mouth roof wears. */
-      /* ..and 0x2e0f12, not 0x1c0708: head-on at full gape the deck faces
-         the camera as a bar the width of the lower jaw, and at that hex it
-         was a black stripe under the lower teeth. The floor of a great
-         white's mouth is dark red tissue; this lands there. */
-      // slots 2 and 3: the same floor, deeper in (see the deck loop above)
-      return meshOf(geo, [skin, unlit(o.chinDeck || 0x2e0f12), unlit(o.chinDeckMid || 0x180708), unlit(o.chinDeckBack || 0x0a0303)]);
-    }
-
-    // the mandible: a slim seat under the lower gum — the pre-split clamp
-    // look, kept whole behind the flag so ?sharkmouth=off is a real revert.
-    const mandKey = "mandible|" + [lowerY, gumH, railIn, railOut, len, width, A, cornerRise].join(",");
-    const buildMandible = function () { return meshOf(cachedGeom(mandKey, function () {
-      const save = [gumH, lipH];
-      void save;
-      const sh = new Shell(), rows = [];
-      const y = lowerY - gumH * 0.62, h = gumH * 1.0, ri = railIn * 1.05, ro = railOut * 1.15;
-      for (let i = 0; i <= 14; i++) {
-        const a = -A + (i / 14) * 2 * A;
-        const p = arcPt(a), nn = arcN(a);
-        const yr = y + riseAt(a);
-        const corner = function (dn, dy) { return sh.v(p[0] + nn[0] * dn, yr + dy, p[1] + nn[1] * dn); };
-        rows.push([corner(-ri, h * 0.5), corner(-ri, -h * 0.4), corner(ro, -h * 0.5), corner(ro, h * 0.5)]);
-      }
-      for (let i = 0; i < 14; i++) {
-        for (let k = 0; k < 4; k++) {
-          const k2 = (k + 1) % 4;
-          sh.quad(0, rows[i][k], rows[i][k2], rows[i + 1][k2], rows[i + 1][k]);
-        }
-      }
-      sh.quad(0, rows[0][3], rows[0][2], rows[0][1], rows[0][0]);
-      sh.quad(0, rows[14][0], rows[14][1], rows[14][2], rows[14][3]);
-      return sh.geom();
-    }), [skin]); };
-
-    const bodySplit = mouthSplitOn() && !!(o.rings && o.rings.length > 1);
-    const mand = bodySplit ? chinMesh() : buildMandible();
-    mand.name = bodySplit ? "sharkChin" : "sharkMandible";
-    lower.add(mand);
-
-    const ut = toothField(true), lt = toothField(false);
-    dental.add(ut.mesh); lower.add(lt.mesh);
-
-    /* THE FRONT SEAL IS AN ARC, NOT TWO BOXES. The old `liptip` cuboids were
-       centred at x=len, 13% of len deep, so half of each block projected past
-       the jaw and read as a pink upper tusk plus a white lower beak. This short
-       swept seal follows the same oral curve as the gums, overlaps that band
-       behind the front line, and never reaches the theoretical arc tip. It
-       remains a named mesh because visual/physics contracts need a precise
-       boundary from which to measure gape. */
-    function frontLipGeom(y, up) {
-      const sh = new Shell(), rows = [], ST = 6, span = A * 0.20;
-      // Recessed does not mean paper-thin: let the two soft margins overlap the
-      // closed seam vertically while keeping their entire volume behind the
-      // head outline. This hides tooth roots at rest without rebuilding the
-      // protruding bumper silhouette.
-      const halfH = gap * (up ? 0.055 : 0.075);
-      const depth = Math.max(gap * 0.10, len * 0.040);
-      for (let i = 0; i <= ST; i++) {
-        const a = -span + (i / ST) * span * 2;
-        const p = arcPt(a), nn = arcN(a);
-        const yr = y + riseAt(a) + (up ? -gap * 0.035 : gap * 0.035);
-        // Both faces are behind the arc. The inner face reaches back into the
-        // full gum band so the seal is one connected piece of mouth tissue.
-        const outer = -lipRecess * 0.82;
-        const inner = outer - depth;
-        const q = function (dn, dy) {
-          return sh.v(p[0] + nn[0] * dn, yr + dy, p[1] + nn[1] * dn);
-        };
-        rows.push([
-          q(inner, halfH), q(inner, -halfH),
-          q(outer, -halfH * 0.72), q(outer, halfH * 0.72),
-        ]);
-      }
-      for (let i = 0; i < ST; i++) {
-        for (let k = 0; k < 4; k++) {
-          const k2 = (k + 1) % 4;
-          // The world-facing outer/top faces are body skin. Group 1 is kept
-          // for topology diagnostics, but the finished seal paints both
-          // groups as skin: the full gum band immediately behind it already
-          // supplies the wet oral margin without a pink tab at the snout.
-          const grp = (k === 0 || k === 1) ? 1 : 0;
-          sh.quad(grp, rows[i][k], rows[i][k2], rows[i + 1][k2], rows[i + 1][k]);
-        }
-      }
-      // These lateral caps are exposed in a profile/three-quarter view. They
-      // are outer lip skin, not a cross-section of bright gingiva; painting
-      // them wet-dark recreated a little pink tab at each mouth corner.
-      sh.quad(0, rows[0][3], rows[0][2], rows[0][1], rows[0][0]);
-      const L = rows[ST]; sh.quad(0, L[0], L[1], L[2], L[3]);
-      return sh.geom();
-    }
-    function frontLip(y, up, name, parent) {
-      const key = "frontLipArc|v1|" +
-        [y, up, gap, len, width, A, cornerRise, lipRecess].join(",");
-      // the upper seal is part of the protruded jaw and wears its tissue
-      const lipMat = up ? jawSkin : skin;
-      const mesh = meshOf(cachedGeom(key, function () { return frontLipGeom(y, up); }), [lipMat, lipMat]);
-      mesh.name = name; parent.add(mesh); return mesh;
-    }
-    frontLip(upperY, true, "sharkUpperLip", dental);
-    frontLip(lowerY, false, "sharkLowerLip", lower);
-
-    const restClose = 0.04;
-    lower.rotation.z = restClose;
-
-    // Two nested anatomical parts, one visually continuous envelope.  The
-    // crown carries almost all of the protrusion so the actual head advances
-    // with the teeth.  Builders may opt into a small relative palatoquadrate
-    // slide, but the shared default is zero: a large dental-only translation
-    // simply recreates the detached-denture failure under a moving snout.
-    const hasUpperEnvelope = bodySplit && !!o.snoutShell;
-    const protrude = o.envelopeProtrude == null ? (hasUpperEnvelope ? len * 0.22 : 0) : o.envelopeProtrude;
-    const upperDrop = o.envelopeDrop == null ? (hasUpperEnvelope ? gap * 0.035 : 0) : o.envelopeDrop;
-    /* THE UPPER JAW PROTRUDES OUT OF THE SNOUT — reference sheet §1, finally
-       done to the tooth row and not only to the head. With these at zero the
-       gum band lived entirely INSIDE the rostrum shell and the palate plane
-       cut straight through the tooth field: at full gape the upper teeth grew
-       out of the snout's white skin edge with no gum between, a comb glued to
-       the underside of the nose ("the top teeth overlap with the top of the
-       mouth"). Now the tooth-bearing jaw drops a quarter of the gap and slides
-       forward as the mouth opens, so the pale jaw band and the dark gum line
-       come out from under the skin and the teeth stand in tissue. The band's
-       tall outer face (kLipUp) is the membrane that keeps the snout's skin
-       edge covered through the whole travel — checked: at full rake the
-       band's top is still 8 cm inside the shell on the hero. */
-    /* ..AND FURTHER STILL, since addSnoutShell brought the snout's underside
-       down to the jaw line. With the old quarter-gap drop the upper roots
-       sat level with the deeper skin edge at full gape on every snout-shell
-       shark (measured: hero +2 mm, bull -17 mm, megalodon -87 mm) and the
-       pink band hid under the nose. The reference's protruded jaw is a full
-       band of tissue with the teeth standing in it: more than half the gap
-       of drop, twice the slide, and the snout lifts a little more. */
-    const dentalProtrude = o.dentalProtrude == null ? (hasUpperEnvelope ? len * 0.10 : 0) : o.dentalProtrude;
-    /* ..AND NOT SO FAR THAT THE BAND HANGS OUT. At gap*0.56 the whole upper
-       band — pink gum AND the dark membrane above it — came out from under
-       the snout at full gape as a thick bar across the top of the mouth
-       (owner, 2026-09-12: "the roof-of-mouth piece is pink and black and too
-       big and looks dumb"). 0.40 keeps the teeth out in tissue and the
-       membrane inside the snout where it belongs. */
-    const dentalDrop = o.dentalDrop == null ? (hasUpperEnvelope ? gap * 0.40 : 0) : o.dentalDrop;
-    const dentalRake = o.dentalRake == null ? (hasUpperEnvelope ? 0.08 : 0) : o.dentalRake;
-    const snoutLift = o.snoutLift == null ? (hasUpperEnvelope ? 0.20 : 0) : o.snoutLift;
-
-    /* §6: THE INTERIOR IS TWO PIECES, AND EACH IS WELDED TO A BONE.
-
-       Built here, at the end, because the throat's proportions ARE the travel
-       numbers: what has to be plugged behind the oral arc is exactly what the
-       mandible's `travel` and the snout's `snoutLift` open up.
-
-       THE BUCCAL SACK rides the upper jaw. It is a CLOSED shell — palate,
-       two side walls, floor, front and back caps — lofted over the same plan
-       ellipse the gum bands and tooth rows are swept along, and it is the
-       whole answer to "you should see deep inside". A surface pair (a roof and
-       a floor on separate bones) cannot be, because at a 62-degree gape the
-       two rims are nowhere near each other and a side-on sightline goes in one
-       cheek and straight out of the other. A sack has cheeks.
-
-       Its floor is CLAMPED to the animal's own belly line at every station via
-       ringAt — the same min() the chin is cut with — so at rest it is buried
-       inside the closed chin, and at full gape it can never be the silhouette.
-       That clamp is why the mouth is shallow at the snout and deepens toward
-       the throat, which is also what a shark's mouth does.
-
-       THE LINER rides the mandible: a thin dark skin over the inner face of
-       the lower jaw, because otherwise the gum band's lit gingiva is the
-       biggest thing in the open mouth and the cave reads pink. */
-    /* 0.84, NOT 0.92 — THE SACK LIVES INSIDE THE LIPS. Coloured by part, the
-       last chunks on the closed mouth were two columns of buccal sack standing
-       at the mouth CORNER, outboard of the gum band that is supposed to be the
-       outside of the animal there: from a low three-quarter view that read as
-       a dark arch cut into the jaw. The cavity is a cavity; it has no business
-       reaching the skin. Costs the open mouth nothing visible — the sack's
-       walls are still the cheeks you see down the throat. */
-    /* 0.68, NOT 0.78 — THE BLACK SQUARE (owner, 2026-08-30: "find the black
-       square in the mouth ... make it smaller it's sticking out"). Painted
-       part-by-part from the prey's eye it was this sack: one object filling
-       most of the gape, its corners clearing the tooth crowns and becoming the
-       silhouette, its front wall level with the tooth row so the first thing
-       you met looking into an open mouth was a slab. The cavity must RECEDE.
-       So the trim is where the sack STARTS and how far it reaches sideways,
-       not its depth: front wall 6% -> 16% of a jaw behind the seal, plan
-       half-width 0.78 -> 0.68 of the mouth's (the teeth ring it from every
-       angle), roof dome gap*0.62 -> 0.48 and floor dip 0.30 -> 0.22 so it is
-       a recess, not a box. The liner is cut from this same plan and narrows
-       with it; both cache keys were bumped so no stale geometry is served. */
-    function oralPlan(x) {
-      const u = clamp((x - cx) / rad, -1, 1);
-      return { u: u, hz: hw * Math.sqrt(Math.max(0, 1 - u * u)) * 0.68 };
-    }
-    /* THE FLOOR OF THE SACK STOPS AT THE CHIN'S DECK, and this is a hard
-       floor, not a preference. The chin is a SHELL: the deck is its top face,
-       and the space under it is the inside of a piece of the shark's body,
-       not room to put a mouth in. A sack dipping below the deck reads at rest
-       as a rust patch bleeding through the closed white chin — which is
-       exactly what it did on the first build. chinMesh cuts its deck at
-       rim - gap*0.12; sit a hair above that and the closed jaw hides
-       everything.
-
-       The depth the mouth loses here it gets back overhead: the palate can
-       arch as far up into the head as it likes, and behind it the throat runs
-       a jaw-length into the body. Depth belongs where there is body to put it
-       in, not hanging under a chin. */
-    // ..and its floor keeps further off the chin's deck than it used to: at
-    // gap*0.09 the wrap under the sack was surfacing through the closed chin
-    // in patches, which is the same defect pointing down instead of forward.
-    function sackFloorAt(rimY) { return rimY - gap * 0.03; }
-    function sackRoofAt(x, topY) {
-      if (!o.rings || o.rings.length < 2) return topY;
-      const r = ringAt(o.rings, hingeX + x);
-      return Math.min(topY, (r.y + r.ry * 0.55) - hingeY);
-    }
-
-    const sack = meshOf(cachedGeom("buccalSack|v5|" + [hingeX, hingeY, len, width,
-      gap, cx, rad, A, cornerRise, upperY, lowerY,
-      JSON.stringify(o.rings || null)].join(","), function () {
-      /* THE SACK STOPS BEHIND THE SEAL. Its front wall used to stand exactly
-         ON the arc's front point, which is where the lip band and the front
-         seal also are — so above and below the narrow band, a wall of mouth
-         cavity was the front of the animal. Painted green to find it, it came
-         out as two slabs standing proud of a closed jaw with the dark of the
-         cavity between them: the owner's "white chunks", most of them, in one
-         object. Six per cent of a jaw behind the seal there is skin in front
-         of it from every angle. */
-      const sh = new Shell(), N = 14, M = 10, xFront = cx + rad - len * 0.16, xBack = -len * 0.16;
-      const top = [], bot = [];
-      for (let i = 0; i <= N; i++) {
-        const ti = i / N, x = lerp(xFront, xBack, ti);
-        const pl = oralPlan(x);
-        // the loft ramps in over the first fifth so the plan's forward tip
-        // stays pinched behind the front seal instead of splitting it
-        const fx = clamp(ti / 0.22, 0, 1);
-        /* AND IT PINCHES AT THE BACK TOO. The rear cap sat at full plan width
-           a sixth of a jaw behind the hinge — right in the hull's mouth notch
-           — and the part map found it looking out through the corner of the
-           closed mouth as a tall dark ARCH cut into the side of the jaw, on
-           every low three-quarter view. A throat narrows; nothing about this
-           animal is a rectangular box at its widest where it meets the body. */
-        const bx = clamp((ti - 0.50) / 0.50, 0, 1);
-        const hzAt = pl.hz * (1 - 0.46 * bx * bx);
-        const tr = [], br = [];
-        for (let j = 0; j <= M; j++) {
-          const sg = -1 + (2 * j) / M, z = hzAt * sg;
-          const ang = Math.atan2(z / hw, pl.u), rise = riseAt(clamp(ang, -A, A));
-          const dome = (1 - sg * sg) * fx;
-          tr.push([x, sackRoofAt(x, upperY + rise + gap * 0.48 * dome), z]);
-          /* THE FLOOR IS SHALLOW AT THE FRONT. It used to sit on the chin's
-             deck from the first station, which is right where the sack is
-             buried in a CLOSED chin — but the sack rides the upper jaw, and
-             the moment that jaw protrudes the floor came out with it: a
-             skin-wrapped slab hanging a full gap below the upper teeth, with
-             the crowns half hidden against it. On the animal the tissue the
-             upper teeth stand in is about as deep as the teeth; below them is
-             open mouth down to the lower jaw. So the front of the floor hugs
-             the gum line and the sack deepens to the chin's deck only from a
-             third of the way back, where the cheeks really do run down to the
-             corner of the mouth. Nothing at rest changes: the closed chin
-             still covers all of it. */
-          const fb0 = clamp((ti - 0.12) / 0.42, 0, 1), fb = fb0 * fb0 * (3 - 2 * fb0);
-          const deepFloor = Math.max(lowerY + rise - gap * 0.22 * dome, sackFloorAt(lowerY + rise));
-          const gumFloor = upperY + rise - gumH * 1.2;
-          br.push([x, lerp(gumFloor, deepFloor, fb), z]);
-        }
-        top.push(tr); bot.push(br);
-      }
-      const band = function (ti) { return ti < 0.22 ? 0 : (ti < 0.45 ? 1 : (ti < 0.72 ? 2 : 3)); };
-      const q = function (g2, a2, b2, c2, d2) {
-        sh.quad(g2, sh.v(a2[0], a2[1], a2[2]), sh.v(b2[0], b2[1], b2[2]),
-          sh.v(c2[0], c2[1], c2[2]), sh.v(d2[0], d2[1], d2[2]));
-      };
-      for (let i = 0; i < N; i++) {
-        const grp = band((i + 0.5) / N);
-        for (let j = 0; j < M; j++) {
-          q(grp, top[i][j], top[i][j + 1], top[i + 1][j + 1], top[i + 1][j]);
-          q(grp, bot[i][j], bot[i][j + 1], bot[i + 1][j + 1], bot[i + 1][j]);
-        }
-        // THE CHEEKS: the two walls that stop a side-on sightline passing
-        // through the head, and the reason this is a sack and not two bowls
-        q(grp, top[i][0], bot[i][0], bot[i + 1][0], top[i + 1][0]);
-        q(grp, top[i][M], bot[i][M], bot[i + 1][M], top[i + 1][M]);
-      }
-      for (let j = 0; j < M; j++) {          // front and back caps
-        q(0, top[0][j], top[0][j + 1], bot[0][j + 1], bot[0][j]);
-        q(3, top[N][j], top[N][j + 1], bot[N][j + 1], bot[N][j]);
-      }
-      /* THE OUTSIDE OF A CHEEK IS THE ANIMAL, NOT THE MOUTH. Every face above
-         is interior — unlit near-black, DoubleSide — but the sack hangs off
-         the upper jaw, so the moment the chin swings away its cheeks' outer
-         sides, its floor's underside and its front pinch face the WORLD:
-         every shark wore a maroon curtain below its open mouth, its closed
-         tooth gaps punched maroon wedges, and the sack's own box was the
-         silhouette against open water. A gaping great white shows pale
-         protruded-jaw tissue there, so group 4 lays a thin outset wrap over
-         exactly those faces, painted with the body's lit skin. The offset
-         keeps it clear of the dark walls' depth without ever reaching the
-         chin deck below or the tooth arc outside. */
-      const wOff = gap * 0.022;
-      const qW = function (a2, b2, c2, d2, n2) {
-        const P = [a2, b2, c2, d2].map(function (p2) {
-          return [p2[0] + n2[0] * wOff, p2[1] + n2[1] * wOff, p2[2] + n2[2] * wOff];
-        });
-        sh.quadN(4, n2, P, P.map(function (p2) { return sh.v(p2[0], p2[1], p2[2]); }));
-      };
-      for (let i = 0; i < N; i++) {
-        for (let j = 0; j < M; j++)          // the floor's underside
-          qW(bot[i][j], bot[i][j + 1], bot[i + 1][j + 1], bot[i + 1][j], [0, -1, 0]);
-        // the cheeks' outer walls
-        qW(top[i][0], bot[i][0], bot[i + 1][0], top[i + 1][0], [0, 0, -1]);
-        qW(top[i][M], bot[i][M], bot[i + 1][M], top[i + 1][M], [0, 0, 1]);
-      }
-      for (let j = 0; j < M; j++)            // the front pinch
-        qW(top[0][j], top[0][j + 1], bot[0][j + 1], bot[0][j], [1, 0, 0]);
-      return sh.geom();
-    /* AND THE WRAP IS DOUBLE-SIDED, which is the whole reason it was not
-       working. The outer skin over the sack's cheeks is swept with ONE winding
-       for both walls — they face opposite ways, so on one flank of every shark
-       in this game the wrap was back-facing and culled, and the dark cavity
-       wall behind it showed through the closed mouth as an arch. Found by
-       firing a ray through that arch and asking the scene what it hit
-       (shark-head-weld's probe): sharkBuccalSack, on the side the winding
-       loses. Painting the wrap DoubleSide fixes both flanks without touching
-       a single vertex, and costs one material per animal. */
-    }), [unlit(o.cavity || 0x140505), unlit(o.cavityDeep || 0x070202),
-      unlit(0x020101), unlit(o.cavityEnd || 0x000000), skinWrap]);
-    sack.name = "sharkBuccalSack";
-    /* THE INSIDE SAYS SO. These three are cavity walls — unlit, wound with
-       their faces inward — and nothing that reads the rig's children as body
-       parts may treat them as one: systems/wounds.js used to find the throat
-       (it reaches forward of the hull on every snout-shell shark), sever it,
-       and throw it in the water as a floating black tube. See isInterior. */
-    sack.userData.interior = true;
-    dental.add(sack);
-
-    const liner = meshOf(cachedGeom("mandibleLiner|v4|" + [len, width, gap, cx, rad,
-      A, cornerRise, lowerY].join(","), function () {
-      const sh = new Shell(), N = 12, M = 10, xFront = cx + rad, xBack = 0;
-      const rows = [];
-      for (let i = 0; i <= N; i++) {
-        const ti = i / N, x = lerp(xFront, xBack, ti);
-        const pl = oralPlan(x), fx = clamp(ti / 0.22, 0, 1), row = [];
-        for (let j = 0; j <= M; j++) {
-          const sg = -1 + (2 * j) / M, z = pl.hz * sg;
-          const ang = Math.atan2(z / hw, pl.u);
-          // shallower than the chin's own recessed deck on purpose: dip below
-          // it and the deck wins the depth test, which is how a lit pink plank
-          // ended up being the biggest thing in an open mouth
-          row.push([x, lowerY + riseAt(clamp(ang, -A, A))
-            - gap * 0.075 * (1 - sg * sg) * fx, z]);
-        }
-        rows.push(row);
-      }
-      for (let i = 0; i < N; i++) {
-        const t = (i + 0.5) / N, grp = t < 0.3 ? 0 : (t < 0.65 ? 1 : 2);
-        for (let j = 0; j < M; j++) {
-          const p = [rows[i][j], rows[i][j + 1], rows[i + 1][j + 1], rows[i + 1][j]];
-          sh.quad(grp, sh.v(p[0][0], p[0][1], p[0][2]), sh.v(p[1][0], p[1][1], p[1][2]),
-            sh.v(p[2][0], p[2][1], p[2][2]), sh.v(p[3][0], p[3][1], p[3][2]));
-        }
-      }
-      return sh.geom();
-    }), [unlit(o.cavity || 0x140505), unlit(o.cavityDeep || 0x070202), unlit(0x020101)]);
-    liner.name = "sharkMandibleLiner";
-    liner.userData.interior = true;
-    lower.add(liner);
-
-    /* THE THROAT. Behind the oral arc neither jaw reaches, so this is the one
-       closed piece that fills a hole rather than skinning a bone: an
-       inside-out bore from inside the arc's back chord to a pole a full
-       jaw-length into the body, shut at both ends so no sightline escapes it.
-       Its section is clamped to the hull's own rings, which is the guarantee
-       the two scaled-blob generations never had — the bore is bounded by the
-       shark, so it can never become the shark's outline. */
-    const throat = meshOf(cachedGeom("sharkThroat|v1|" +
-      [hingeX, hingeY, len, width, gap, JSON.stringify(o.rings || null)].join(","),
-      function () {
-        const sh = new Shell(), SEG = 14, ST = 12;
-        const xF = len * 0.30, xB = -len * 1.05;
-        const rings = [];
-        for (let i = 0; i <= ST; i++) {
-          const t = i / ST, x = lerp(xF, xB, t);
-          const cap = Math.pow(Math.min(clamp((xF - x) / (len * 0.26), 0, 1),
-            clamp((x - xB) / (len * 0.34), 0, 1)), 0.55);
-          let ry = gap * 1.10 * cap, rz = width * 0.42 * cap;
-          if (o.rings && o.rings.length > 1) {
-            const r = ringAt(o.rings, hingeX + x);
-            const up = (r.y + r.ry * 0.86) - hingeY, dn = hingeY - (r.y - r.ry * 0.86);
-            ry = Math.min(ry, Math.max(gap * 0.10, Math.min(up, dn)));
-            rz = Math.min(rz, r.rz * 0.82);
-          }
-          const row = [];
-          for (let j = 0; j < SEG; j++) {
-            const th = (j / SEG) * Math.PI * 2;
-            row.push(sh.v(x, Math.sin(th) * ry, Math.cos(th) * rz));
-          }
-          rings.push(row);
-        }
-        for (let i = 0; i < ST; i++) {
-          const t = (i + 0.5) / ST;
-          const grp = t < 0.18 ? 0 : (t < 0.40 ? 1 : (t < 0.66 ? 2 : 3));
-          for (let j = 0; j < SEG; j++) {
-            const nj = (j + 1) % SEG;
-            // wound inside-out: the visible face is the INTERIOR (the pole
-            // rows degenerate to triangles inside Shell.quad, which skips them)
-            sh.quad(grp, rings[i][j], rings[i + 1][j], rings[i + 1][nj], rings[i][nj]);
-          }
-        }
-        return sh.geom();
-      }), [unlit(o.cavityDeep || 0x070202), unlit(0x020101), unlit(0x010000),
-      unlit(o.cavityEnd || 0x000000)]);
-    throat.name = "sharkThroat";
-    throat.userData.interior = true;
-    throat.position.set(hingeX, hingeY, 0);
-    g.add(throat);
-    // the authored-mouth contract still wants one named cavity handle; the
-    // throat is the piece that is a hole rather than a skinned jaw
-    const cavity = throat;
-
-    const contract = {
-      version: 5,
-      shape: "articulated-body-envelope",
-      hinge: { x: hingeX, y: hingeY, z: 0 },
-      // THE DAMAGE SOCKET follows the mouth DOWN. The upper jaw now drops and
-      // rakes as it protrudes, so a socket pinned to the hinge height ends up
-      // above the open tooth ring — i.e. damage resolving in clear water just
-      // over the teeth. Bias it to the centre of the open gape instead.
-      bite: { x: hingeX + len * 0.96, y: hingeY - (o.upperDrop == null ? gap * 0.34 : o.upperDrop) * 0.6 - dentalDrop * 0.5, z: 0 },
-      // THE THING BEING BITTEN SITS INSIDE THE MOUTH, not on the rostrum.
-      // `bite` remains the front-centre damage socket where the teeth first
-      // meet a surface. `grip` is a second authored point, one tooth-row deeper
-      // and lower, used only for the short contact hold while the jaws compress.
-      // Publishing both from the mouth builder keeps collision, damage and the
-      // visible jaw on one geometry contract instead of letting mounted-bite
-      // code invent a nearby point from species scale.
-      grip: { x: hingeX + len * 0.82, y: hingeY - (o.upperDrop == null ? gap * 0.34 : o.upperDrop) * 0.6 - gap * 0.28 - dentalDrop * 0.5, z: 0 },
-      maxOpen: o.maxOpen || 1.05,
-      travel: (o.maxOpen || 1.05) + restClose,
-      restClose: restClose,
-      protrude: protrude,
-      upperDrop: upperDrop,
-      dentalProtrude: dentalProtrude,
-      dentalDrop: dentalDrop,
-      dentalRake: dentalRake,
-      snoutLift: snoutLift,
-      lipProfile: "recessed-arc-seal",
-      lipRecess: lipRecess,
-      toothRows: (o.toothRows || [0, 0, 0]).length,
-      upperTeeth: ut.count,
-      lowerTeeth: lt.count,
-      // the lower jaw is the body's own white underside (see THE CHIN above),
-      // and the hull/rostrum are notched along the seam to make room for it
-      bodySplit: bodySplit,
-      articulatedEnvelope: hasUpperEnvelope,
-      lowerShell: mand.name,
-      // the fact the reference sheet is really asking for: how far past the
-      // closed rostrum tip the upper tooth row travels
-      upperReachX: hingeX + len + protrude + dentalProtrude,
-    };
-    g.userData.aquaticMouth = contract;
-    g._aquaticMouth = {
-      lower: lower, upper: upper, dental: dental, lowerShell: mand, cavity: cavity,
-      contract: contract, applyGape: null,
-    };
-
-    /* ---- THE PROTRUSION DRIVE ------------------------------------------
-       The shared rig advances the named upper-envelope group by the contract's
-       `protrude`/`upperDrop`. This builder callback adds the shark-specific
-       rostrum lift and optional relative dental rake while preserving that one
-       openness owner. CBZ.sharkJawProtrude exposes the same callback for tools
-       that deliberately pose an authored animal outside the runtime loop. */
-    function applyGape(k) {
-      const oo = clamp(k, 0, 1);
-      // The CROWN and the teeth now share this moving envelope.  The crown
-      // lifts and advances with its nested tooth-bearing jaw. Any optional
-      // species-authored relative dental motion remains inside that envelope
-      // and defaults to zero, so no daylight can open behind a naked hoop.
-      upper.rotation.z = oo * snoutLift;
-      dental.position.x = oo * dentalProtrude;
-      dental.position.y = -oo * dentalDrop;
-      dental.rotation.z = -oo * dentalRake;
-      /* THE EYES ROLL BACK. A great white has no nictitating membrane; at the
-         moment of the bite it rotates the whole eyeball backward into the
-         socket so the pale sclera faces out — the white-eyed shark of every
-         breach photograph. addSharkFaceDetails registers each eye's roller
-         here; the roll rides the last third of the gape so a cruising animal
-         looks at you and a committed one has already gone blind. */
-      jawSkin.color.copy(JAW_REST).lerp(JAW_GAPE, oo);
-      skinWrap.color.copy(jawSkin.color);
-      const eyes = g._aquaticMouth && g._aquaticMouth.eyes;
-      if (eyes) {
-        const rk0 = clamp((oo - 0.55) / 0.35, 0, 1), rk = rk0 * rk0 * (3 - 2 * rk0);
-        for (let i = 0; i < eyes.length; i++) eyes[i].roller.rotation.y = -eyes[i].side * rk * Math.PI * 0.62;
-      }
-      // NOTHING TO REVEAL. The roof rides `dental`, the floor rides `lower`
-      // and the throat is fixed in the head, so the interior opens because the
-      // jaws opened. The old scale-the-blob reveal is what put a lump in the
-      // mouth in the first place.
-    }
-    g._aquaticMouth.applyGape = applyGape;
-    return g._aquaticMouth;
-  }
-
-  // A driver that wants the full protrusion without going through swimJaw can
-  // call this: it does the slide, the drop, the tooth-row rake and the snout
-  // lift in one, and leaves the mandible to whoever owns the hinge.
-  CBZ.sharkJawProtrude = function (group, openness) {
-    const mouth = group && group._aquaticMouth;
-    if (!mouth) return false;
-    const c = mouth.contract, k = clamp(openness || 0, 0, 1);
-    mouth.upper.position.x = c.hinge.x + k * c.protrude;
-    mouth.upper.position.y = c.hinge.y - k * c.upperDrop;
-    if (mouth.applyGape) mouth.applyGape(k);
-    return true;
-  };
-
-  /* §7c. THE UPPER JAW IS THE BODY TOO (owner, 2026-08-21: "I want the mouth
-     inside the geometry and prying open the geometry — the colors already
-     show the part that needs to split").
-
-     The old rostrum was a closed ellipsoid shell over a still-closed hull: a
-     bite lifted a lid over a face that stayed a face. This is the head's
-     actual upper half — every cross-section runs from the mouth SEAM on one
-     side, up over the crown, back down to the seam on the other side — cut
-     from the same rings and painted with the same ragged countershade cut,
-     so the dark top and the white upper-lip band pry away from the white
-     chin along the line the colours already draw. Underneath it closes with
-     a dark palate (the roof of the mouth); the gum band and tooth rows hang
-     below that, INSIDE the closed head, and only exist to the eye when the
-     jaws part. And the nose finally ends in a NOSE: the sections taper into
-     a single slightly-upturned tip point instead of a sawn-off end cap. */
-  const SNOUT_SHADE_MATS = new Map();     // belly material -> its vertex-shaded twin
-  function addSnoutShell(g, mats, rings, o) {
-    const px = o.pivotX, py = o.pivotY;
-    const mo = o.mouth;
-    const len = mo.length, gap = mo.gap;
-    /* the countershading boundary as a HEIGHT along the snout (see
-       rostrumLine): world y at x. A bare number or a per-ring cut array is
-       still accepted, read against the ring table, so a species without a
-       solved rostrum paints the way it always did. */
-    const cutRaw = o.bellyCut == null ? -0.2 : o.bellyCut;
-    const lineOf = typeof o.bellyLine === "function" ? o.bellyLine : function (x) {
-      const r = ringAt(rings, x);
-      const c = Array.isArray(cutRaw) ? bellyAt(rings, cutRaw, x) : +cutRaw;
-      return r.y + r.ry * c;
-    };
-    const x0 = mo.hingeX - len * 0.24;                 // buried behind the corner
-    const xTip = rings[rings.length - 1].x + len * 0.07;
-    const seed = o.seed || 7;
-    // the ragged edge, in metres: the authored sin-space amount on the weld ring
-    const ragM = (o.ragged == null ? 0.05 : o.ragged) * rings[Math.min(1, rings.length - 1)].ry;
-    const lineKey = [];
-    for (let i = 0; i <= 12; i++) lineKey.push(lineOf(lerp(x0, xTip, i / 12)).toFixed(4));
-    const key = "snoutshell3|" + [px, py, gap, len, seed, ragM.toFixed(4)].join(",") +
-      "|" + JSON.stringify(rings) + "|" + lineKey.join(",") +
-      "|" + [mo.hingeX, mo.hingeY, mo.cornerRise].join(",");
-    const geo = cachedGeom(key, function () {
-      const sh = new Shell();
-      /* 13 x 14, not 11 x 10. This shell IS the front of the animal's face and
-         it is the one surface a player gets close to; at ten stations around
-         the arc the countershading boundary could only step in 20-degree
-         jumps, which is what turned the white under the snout into a row of
-         hard pale slabs. */
-      const N = 13, K = 14, M = K + 2;
-      const st = [];
-      for (let i = 0; i < N; i++) {
-        const t = i / (N - 1);
-        const x = lerp(x0, xTip - len * 0.10, t);
-        const r = ringAt(rings, x);
-        let ry = r.ry, rz = r.rz;
-        // the root tucks progressively inside the hull it overlaps (the old
-        // rostrum's tuck: 0.90, made continuous): full size only past the
-        // hull's cut face, so the two skins never share a surface
-        const inHull = clamp((mo.hingeX + len * 0.115 - x) / (len * 0.30), 0, 1);
-        const tuck = 1 - 0.13 * inHull;
-        ry *= tuck; rz *= tuck;
-        const seam = mouthSeamY(mo, x);
-        // where the seam crosses this section; below the ring entirely at the
-        // tip, where the snout is a full closed volume above the mouth line
-        const a0 = Math.asin(clamp((seam - r.y) / Math.max(0.02, ry), -1, 1));
-        /* THE PALATE SITS ABOVE THE GUM, NOT THROUGH THE TEETH. At seam +
-           0.26 gap this plane ran 8 cm BELOW the upper gum band's centre: the
-           band was buried in the snout and every upper tooth was cut off at
-           40% of its height, roots hidden, crowns sprouting from a lit grey
-           plane — the "top of the mouth" the owner saw the teeth overlapping.
-           The roof of a mouth is above the gum that hangs from it. Bounded by
-           the section's own crown so the nose stays a solid volume. */
-        const pal = Math.min(r.y + ry * 0.55, Math.max(seam + gap * 0.60, r.y - ry + gap * 0.05)) - py;
-        /* THE UNDERSIDE OF THE SNOUT REACHES THE JAW LINE. Forward of the
-           cheek the rings sit ABOVE the mouth seam (the great white's last
-           hull ring bottoms out 7 cm over it, the nose ring 20 cm), and this
-           section simply closed at the ring's own bottom — so from the jaw
-           corner to the nose the closed head had a slot between the snout's
-           skin and the chin's rim, and the gum band, the teeth and the cheek
-           wall stood in it: the owner's "mouth is not really inside the
-           body". In every head-on photograph the snout is a deep rounded
-           dome and the mouth is a crescent set into the BOTTOM of it. So
-           wherever the seam lies below the ring, the lower half of the
-           section is stretched down to meet it and filled out a little
-           sideways, and the mouth is inside the head. The palate and the
-           bands are unchanged: they live inside this deeper shell now. */
-        const deepen = Math.max(0, (r.y - ry) - seam);
-        const pts = [], v = [], ang = [];
-        for (let k = 0; k < K; k++) {
-          const a = a0 + (k / (K - 1)) * (Math.PI - 2 * a0);  // seam +z -> crown -> seam -z
-          const sn = Math.sin(a);
-          let yy = r.y + sn * ry - py, zz = Math.cos(a) * rz;
-          if (deepen > 0 && sn < 0) {
-            const d = Math.pow(-sn, 1.35);
-            yy -= deepen * d; zz *= 1 + 0.12 * d;
-          }
-          const p = [x - px, yy, zz];
-          pts.push(p); ang.push(a); v.push(sh.v(p[0], p[1], p[2]));
-        }
-        const zi = Math.cos(a0) * rz * 0.78;
-        [-zi, zi].forEach(function (zz) {
-          const p = [x - px, pal, zz];                 // the palate, closing it below
-          pts.push(p); ang.push(null); v.push(sh.v(p[0], p[1], p[2]));
-        });
-        st.push({ pts: pts, v: v, ang: ang, yc: r.y - py, ry: ry, rz: rz, x: x });
-      }
-      /* THE NOSE IS A DOME, NOT A FAN. The last station used to close to the
-         tip point with one ring of triangles, every one of them touching the
-         tip — so whichever of them the paint called white ran all the way up
-         to the ridge, and head-on the nose wore a white spike to the eyes.
-         The same envelope, cut into three courses: the lower ones can be
-         white and the tip stays grey. */
-      const F0 = st[N - 1];
-      const rT = ringAt(rings, xTip - len * 0.10);
-      const tip = [xTip - px, rT.y - py + rT.ry * 0.18, 0];
-      [0.45, 0.78].forEach(function (s) {
-        const pts = [], v = [], ang = [];
-        for (let k = 0; k < M; k++) {
-          const q = F0.pts[k];
-          const p = [lerp(q[0], tip[0], s), lerp(q[1], tip[1], s), lerp(q[2], tip[2], s)];
-          pts.push(p); ang.push(F0.ang[k]); v.push(sh.v(p[0], p[1], p[2]));
-        }
-        st.push({ pts: pts, v: v, ang: ang, yc: lerp(F0.yc, tip[1], s), ry: F0.ry * (1 - s), rz: F0.rz * (1 - s), x: lerp(F0.x, xTip, s), nose: true });
-      });
-      const NS = st.length;
-      function skinGrp(am, i, k, yMid, xMid) {
-        /* THE GUM LINE. Above the tooth row a shark is oral tissue, not belly:
-           in every reference photograph the upper teeth stand against a dark
-           margin, and that contrast IS what makes them read as teeth. This
-           shell painted its countershading white all the way down to the seam,
-           so at full gape the crowns were white-on-white and the whole upper
-           jaw came back as one blank bar — the owner's "white chunks" seen
-           from inside the mouth instead of outside it. The two courses nearest
-           the seam take the interior material, on both flanks. */
-        // ..and it is a MARGIN, not a course. Painting whole courses dark put
-        // a red stripe down the side of the head, because a course near the
-        // seam is nearly vertical and covers a lot of face. Measured against
-        // the station's own seam angle instead: eight degrees of oral tissue,
-        // and skin above it.
-        const seamA = st[i] && st[i].ang ? st[i].ang[0] : -1.4;
-        // 0.14 rad and no wider: at 0.30 the margin stopped following the jaw
-        // line and came out as a maroon patch in the middle of the snout's
-        // white underside, which is a blotch, not a gum.
-        if (am < seamA + 0.14 || am > Math.PI - seamA - 0.14) return 2;
-        /* THE RAGGED EDGE IS A HINT, NOT A SAW. When the jitter was wider
-           than the gap between two stations, adjacent quads flipped sides of
-           the line and the boundary came out as interlocking teeth of white
-           and grey. Kept to a couple of centimetres, it reads as the soft
-           irregular margin the photographs show. */
-        const jit = ((h01(k * 7 + 1, 0, seed) - 0.5) * 0.64
-          + (h01(k * 7 + 1, i * 13 + 3, seed + 1) - 0.5) * 0.36) * ragM;
-        // the quad's own height on the stretched surface against the line
-        // in metres: a small section near the nose reads the same line a
-        // big one at the weld does
-        return yMid + py < lineOf(xMid) + jit ? 1 : 0;
-      }
-      // the same line as a signed height per VERTEX, for the cut: below the
-      // line is negative (white). The ragged edge is a per-course offset
-      // with a smaller per-vertex one, so the line waves rather than saws.
-      const arch = o.lineArch == null ? 0.085 : o.lineArch;
-      function bellyF(stn, k) {
-        // a cut line needs far less raggedness than a stepped one did: the
-        // steps used to BE the irregularity, and the photograph's margin is
-        // nearly clean
-        const jit = ((h01(k * 7 + 1, 0, seed) - 0.5) * 0.64
-          + (h01(k * 7 + 1, Math.round(stn.x * 37) + 3, seed + 1) - 0.5) * 0.36) * ragM * 0.45;
-        /* THE ARCH CURVES DOWN AT THE SIDES OF THE NOSE. A line that is a
-           height in x alone cuts every nose section as a level chord — and
-           the great white's nose is a flat wide wedge (tipRz nearly three
-           times tipRy), so head-on the top of the white was one straight
-           horizontal edge across the nose front with two straight diagonals
-           to the mouth corners: a shield where the storyboard has a rounded
-           arch, highest on the centre line and curving down toward the
-           corners of the mouth. So the line is lowered by up to `arch`
-           metres at the lateral edge of each section, as the square of the
-           vertex's share of the section's half-width, fading in from the
-           back of the shell so the cheek line behind the weld is untouched. */
-        const p = stn.pts[k];
-        const w = Math.pow(clamp((stn.x - x0) / Math.max(1e-4, xTip - x0), 0, 1), 1.5);
-        const side = clamp(Math.abs(p[2]) / Math.max(0.02, stn.rz || 0.02), 0, 1);
-        return p[1] + py - (lineOf(stn.x) - arch * w * side * side) - jit;
-      }
-      for (let i = 0; i < NS - 1; i++) {
-        const A0 = st[i], A1 = st[i + 1];
-        const xMid = (A0.x + A1.x) * 0.5;
-        for (let k = 0; k < M; k++) {
-          const k2 = (k + 1) % M;
-          let grp, nrm;
-          if (k < K - 1) {                             // the outer skin
-            const am = (A0.ang[k] + A0.ang[k2]) * 0.5;
-            const yMid = (A0.pts[k][1] + A0.pts[k2][1] + A1.pts[k][1] + A1.pts[k2][1]) * 0.25;
-            grp = skinGrp(am, i, k, yMid, xMid);
-            nrm = [A1.nose ? 0.7 : 0, Math.sin(am), Math.cos(am)];
-            if (grp !== 2) {                           // belly/back: cut along the line
-              sh.quadSplit(1, 0, nrm, [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
-                [bellyF(A0, k), bellyF(A0, k2), bellyF(A1, k2), bellyF(A1, k)]);
-              continue;
-            }
-          } else if (A1.nose) {
-            /* the seam walls and the palate converging on the nose are the
-               underside of the nose tip: skin against the same line, never
-               the cavity — painted dark they were a wedge on the underside
-               of the nose, facing forward, the great white's "black lip"
-               standing out of a closed mouth */
-            sh.quadSplit(1, 0, [0.7, -1, 0], [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
-              [bellyF(A0, k), bellyF(A0, k2), bellyF(A1, k2), bellyF(A1, k)]);
-            continue;
-          } else {                                     // seam walls + palate: interior
-            /* AND IT IS UNLIT. Slot 2 is the species' lit "interior" material
-               (0x421a1e on the hero), and lit dark hex comes out of this
-               renderer as milk-chocolate grey — the flat grey plane over the
-               upper teeth in every head-on frame. The roof of a mouth is in
-               shadow; slot 3 is the same unlit cavity palette the buccal sack
-               and throat already use, appended by addSnoutShell. */
-            grp = 3;
-            nrm = k === K - 1 ? [0, -0.4, -1] : (k === K ? [0, -1, 0] : [0, -0.4, 1]);
-          }
-          sh.quadN(grp, nrm,
-            [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
-            [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
-        }
-      }
-      // THE NOSE TIP — a point, slightly upturned (reference §2), where the
-      // hull grammar used to leave a flat octagon. Only the last, smallest
-      // nose course fans into it now, so the point is one colour: the cap's.
-      const F = st[NS - 1];
-      const B = st[0];
-      const back = [x0 - px - len * 0.02, B.yc + gap * 0.15, 0];
-      const vb = sh.v(back[0], back[1], back[2]);
-      const fTip = tip[1] + py - lineOf(xTip);
-      for (let k = 0; k < M; k++) {
-        const k2 = (k + 1) % M;
-        sh.quadSplit(1, 0, [1, 0, 0], [F.pts[k], F.pts[k2], tip, tip], [bellyF(F, k), bellyF(F, k2), fTip, fTip]);
-        sh.quadN(0, [-1, 0, 0], [B.pts[k], B.pts[k2], back, back], [B.v[k], B.v[k2], vb, vb]);
-      }
-      const out = sh.geom();
-      /* THE UNDERSIDE OF THE SNOUT IS IN SHADOW. Owner's cover, head-on at
-         full gape, against the storyboard: our white was one flat lit slab
-         with a hard edge — a bib — and there was no depth under the nose at
-         all. In every reference frame the front of the snout below the
-         countershade line is a PALE GREY, not white, and it darkens all the
-         way into the overhang over the mouth; the bright white is the chin.
-         A lit material cannot do that on its own here (the sun at the
-         waterline lights the whole front of the face evenly), so the shade
-         is baked as a vertex colour on the white slot: 0.86 of white at the
-         line, falling to about half at the mouth seam, with the fall-off
-         concentrated in the last stretch over the jaw so the dome still
-         reads as one rounded pale surface and the shadow sits where the
-         snout overhangs the teeth. The grey cap and the cavity slots ignore
-         the attribute. */
-      const P = out.attributes.position, col = new Float32Array(P.count * 3);
-      for (let i = 0; i < P.count; i++) {
-        const wx = P.getX(i) + px, wy = P.getY(i) + py;
-        const L = lineOf(wx), S = mouthSeamY(mo, wx);
-        const f = clamp((L - wy) / Math.max(0.05, L - S), 0, 1);
-        const s = 0.84 - 0.42 * f * f;
-        col[i * 3] = s; col[i * 3 + 1] = s; col[i * 3 + 2] = s;
-      }
-      out.setAttribute("color", new T.Float32BufferAttribute(col, 3));
-      return out;
-    });
-    // the white slot reads the baked shade above: its own copy of the
-    // species' belly material, one per source material, never disposed
-    const white = mats[1];
-    let shaded = SNOUT_SHADE_MATS.get(white);
-    if (!shaded) {
-      shaded = white.clone(); shaded.vertexColors = true; shaded._shared = true;
-      SNOUT_SHADE_MATS.set(white, shaded);
-    }
-    // slot 3 = the mouth roof, unlit (see the seam-wall note in the loft)
-    const mesh = meshOf(geo, [mats[0], shaded, mats[2], unlit(mo.cavityRoof || 0x1c0708)]);
-    mesh.name = "sharkRostrum";
-    mesh.userData._splitShell = true;   // face details put the EYES on this one
-    mesh.userData._rootOrigin = { x: px, y: py, z: 0 };
-    const authored = g._aquaticMouth;
-    if (authored && authored.upper && authored.contract && authored.contract.articulatedEnvelope) {
-      // This is the decisive ownership change: the visible crown/rostrum is a
-      // child of the mouth's upper articulation root.  Its geometry remains in
-      // the exact same rest-space location, but every production CBZ.swimJaw
-      // call now lifts REAL HEAD VERTICES together with the embedded dentition.
-      mesh.position.set(px - authored.contract.hinge.x, py - authored.contract.hinge.y, 0);
-      authored.upper.add(mesh);
-      authored.upperShell = mesh;
-      authored.contract.upperShell = "sharkRostrum";
-    } else {
-      mesh.position.set(px, py, 0);
-      g.add(mesh);
-    }
-    g.userData._sharkRostrum = mesh;
-    return mesh;
-  }
-
-  /* The lifting snout. The hull is one static mesh, so the rostrum forward of
-     the jaw hinge is built as its OWN shell that overlaps back into the head.
-     It lifts and advances with the tooth-bearing upper envelope; at rest it is
-     simply the front of the animal, and at full gape no dental hoop can leave
-     it behind as a separate prosthesis. */
-  function addSharkRostrum(g, mats, rings, o) {
-    if (o.mouth && o.mouth.snoutShell && mouthSplitOn()) {
-      return addSnoutShell(g, mats, rings, o);
-    }
-    const px = o.pivotX, py = o.pivotY;
-    const local = rings.map(function (r) {
-      return { x: r.x - px, y: r.y - py, ry: r.ry * (r.x < px ? (o.tuck || 0.97) : 1), rz: r.rz * (r.x < px ? (o.tuck || 0.97) : 1) };
-    });
-    // The rostrum is the mouth's other body-half: it, too, loses everything
-    // under the seam (lifted to palate height, one gum-band above the chin's
-    // rim) so the lifted snout shows a dark mouth roof, not a round pale belly
-    // hanging into the gape. Same frame trick as the rings above: the shell
-    // lives in pivot-local coordinates, so the seam is offset to match.
-    const mo = (o.mouth && mouthSplitOn())
-      ? Object.assign({}, o.mouth, { xOff: px, yOff: py, lift: o.mouth.gap * 0.26 })
-      : null;
-    const mesh = hullMesh(mats, local, {
-      sides: o.sides, bellyCut: o.bellyCut, ragged: o.ragged, seed: o.seed,
-      mouth: mo,
-    });
-    mesh.name = "sharkRostrum";
-    mesh.position.set(px, py, 0);
-    g.add(mesh);
-    g.userData._sharkRostrum = mesh;
-    return mesh;
-  }
 
   /* ============================================================
      GREAT WHITE SHARK — Carcharodon carcharias.
@@ -4759,472 +1817,446 @@
   });
 
   /* ==========================================================================
-     THE BONY FISH.
-
-     Every one of these used to be a stack of three flat boxes with cone fins
-     glued on. They are now the same profiled hull + the same blade grammar as
-     the sharks: countershaded in one connected mesh, with a proper dorsal,
-     paired pectorals and pelvics, an anal fin and a real FORKED caudal —
-     because a fish seen beside a boat is mostly fin.
-
-     Markings (mackerel bars, marlin stripes, barracuda blotches) are PAINTED
-     INTO the hull as an extra material group, which costs one draw call and
-     zero extra geometry — the old bars were separate boxes punched through
-     the body.
+     THE BONY FISH. The same body kit as the sharks: one skinned mesh per
+     fish, a mouth that opens, eyes in the head, foil fins. What makes them
+     bony fish: a terminal mouth whose jaw drops and premaxilla slides out,
+     a gill cover (a crisp paler plate whose rear margin curves round behind
+     the head, a soft shadow behind it), big flat eyes with a dark pupil in a
+     metallic iris, scales drawn by the shader at their real size, and the
+     fine markings (a mackerel's wavy bars, a marlin's bars of pale dots, a
+     tuna's rows of pale dots, a barracuda's oblique bars and blotches)
+     drawn there too, so a fish in a school of seventy costs a few hundred
+     triangles and still carries its pattern up close.
      ========================================================================== */
+  function fishPaint(spec, o) {
+    return function (EY) {
+      const roles = {}, names = {};
+      spec.fins.forEach(function (f, i) { roles[i + 1] = f.role; names[i + 1] = f.name; });
+      const op = o.opercle;
+      const cheek = MB.hexc(o.cheek || 0xb9c2c6), iris = MB.hexc(o.iris || 0xb8b49a);
+      const pupil = MB.hexc(0x020304), irisDark = MB.hexc(0x1a2224);
+      // the gill cover's rear margin: s as a function of height on the head
+      function opS(h) { return op.s - op.k * (h - op.h) * (h - op.h); }
+      function opField(c) {
+        if (c.tag !== MB.TAG.SKIN) return NaN;
+        const s = c.m[0], h = -c.m[1];
+        if (s > op.s + 0.03 || h > op.top) return -1;
+        return (opS(h) - s) * 60;
+      }
+      return paintKit(Object.assign({
+        gum: 0xcfc4ba, gumDeep: 0x6d625a, throat: 0x161412, orbit: o.back,
+      }, o, {
+        L: spec.L, eyes: EY, finRole: roles, spec: spec,
+        mark: function (c) {
+          const a = opField(c), b = o.mark ? o.mark(c) : NaN;
+          if (isNaN(a)) return b;
+          return isNaN(b) ? a : Math.max(a, b);
+        },
+        skin: function (c, col, up) {
+          const s = c.m[0], h = -c.m[1];
+          if (s < op.s + 0.03) {
+            const d = s - opS(h);
+            if (d < 0 && h < op.top && c.f(1) >= 0) col = MB.mixc(col, up ? MB.mulc(col, 1.15) : cheek, (o.cheekK || 0.35) * (1 - MB.sm((h - op.top + 0.3) / 0.3)));
+            else if (d >= 0 && d < 0.02) col = MB.mulc(col, 1 - 0.18 * (1 - d / 0.02));
+          }
+          return o.skin ? o.skin(c, col, up) : col;
+        },
+        eye: function (c) {
+          const th = c.m[0];
+          if (th < 0.38) return pupil;
+          if (th < 0.90) return MB.mixc(MB.mulc(iris, 0.7), iris, MB.sm((th - 0.38) / 0.25));
+          return MB.mixc(iris, irisDark, MB.sm((th - 0.90) / 0.12));
+        },
+        finHook: o.finHook ? function (c, col, role) { return o.finHook(c, col, role, names[c.m[3]]); } : null,
+      }));
+    };
+  }
+  // a run of finlets along the back or the belly behind the soft fins
+  function finlets(name, from, to, n, down) {
+    const out = [];
+    for (let k = 0; k < n; k++) {
+      out.push({
+        name: name + (k + 1), role: "median", at: from + (to - from) * k / Math.max(1, n - 1), root: 0.018, span: 0.021,
+        dir: [0, down ? -1 : 1, 0], phi: down ? 0 : Math.PI, sweep: 0.85, tipC: 0.12, conc: 0.05, rear: 0.25, rearH: 0.3,
+        round: 0.3, tc: 0.10, tcTip: 0.08, embed: 0.5, res: [2, 2], lodMax: 0,
+      });
+    }
+    return out;
+  }
+  // the near and far bodies of a fish that comes in schools
+  const SCHOOL_LOD = [
+    { M: 20, ds: 0.022, headK: 0.6, noseRings: 3, eyeRings: true, gills: false, teeth: false, finSpan: 5, finChord: 4, eyeSeg: 10, eyeRing: 6, pharynx: 2 },
+    { M: 8, ds: 0.090, headK: 0.8, noseRings: 2, eyeRings: false, gills: false, teeth: false, finSpan: 2, finChord: 2, eyeSeg: 5, eyeRing: 3, pharynx: 2 },
+  ];
+  const BIG_FISH_LOD = [
+    { M: 28, ds: 0.018, headK: 0.6, noseRings: 4, eyeRings: true, gills: false, teeth: true, finSpan: 7, finChord: 6, eyeSeg: 12, eyeRing: 7, pharynx: 3 },
+    { M: 12, ds: 0.060, headK: 0.7, noseRings: 2, eyeRings: false, gills: false, teeth: false, finSpan: 3, finChord: 3, eyeSeg: 6, eyeRing: 4, pharynx: 2 },
+  ];
 
-  // ---- MACKEREL — Scomber scombrus. Iridescent green-blue back, silver
-  //      flank, wavy dark bars, deeply forked tail.
+  /* ---- ATLANTIC MACKEREL — Scomber scombrus. 40 cm. Fusiform and nearly
+     round (deepest ~16% TL at a third of the way back, width 0.7 of the
+     depth), a pointed snout, the big terminal mouth reaching under the eye,
+     the eye ~4% TL across. Two well separated dorsals (the first a
+     triangle of spines over the pectoral tip), five finlets above and five
+     below on the slender tail stock, two small keels each side at the tail
+     base, short high pectorals, a deeply forked caudal. Blue-green back
+     crossed by 23-33 dark wavy bars down to mid-flank; silver-white below.
+     1.82 model units at scale 0.22. */
+  const MACKEREL_SPEC = {
+    id: "fish", plan: "lateral", profileName: "mackerel",
+    L: 1.82, xNose: 0.82, axisY: 0.50, noseRound: 0.006, tubeEnd: 0.86, headEnd: 0.24,
+    profile: {
+      top: [[0, 0], [0.01, 0.008], [0.03, 0.018], [0.06, 0.030], [0.10, 0.042], [0.15, 0.054], [0.20, 0.064], [0.26, 0.072], [0.33, 0.077], [0.40, 0.077], [0.48, 0.071], [0.56, 0.060], [0.64, 0.046], [0.72, 0.031], [0.78, 0.020], [0.83, 0.013], [0.86, 0.011]],
+      bot: [[0, 0], [0.01, 0.007], [0.03, 0.015], [0.06, 0.026], [0.10, 0.038], [0.15, 0.050], [0.20, 0.060], [0.26, 0.068], [0.33, 0.072], [0.40, 0.071], [0.48, 0.064], [0.56, 0.053], [0.64, 0.040], [0.72, 0.027], [0.78, 0.017], [0.83, 0.011], [0.86, 0.010]],
+      half: [[0, 0], [0.01, 0.006], [0.03, 0.014], [0.06, 0.022], [0.10, 0.031], [0.15, 0.038], [0.20, 0.044], [0.26, 0.049], [0.33, 0.052], [0.40, 0.051], [0.48, 0.047], [0.56, 0.040], [0.64, 0.031], [0.72, 0.021], [0.78, 0.014], [0.83, 0.010], [0.86, 0.010]],
+      yo: [[0, -0.004], [0.08, -0.002], [0.2, 0], [0.86, 0]],
+      keel: [[0.78, 0], [0.82, 0.003], [0.85, 0.004], [0.86, 0.003]],
+    },
+    mouth: {
+      front: 0.006, corner: 0.085, alphaF: 1.55, alphaC: 1.30, shape: 0.6, snoutBlend: 0.006,
+      palate: 0.4, floor: 0.4, throat: 0.6, pharynx: 0.05, lipDrop: 0.0006, chinInset: 0.0008,
+    },
+    eye: { s: 0.075, up: 0.30, r: 0.024, flat: 0.55, out: 0.25, socket: 0.06, fwd: 0.05, fixed: true },
+    bones: { head: 0.10, neck: 0.22, root: 0.38, tail: [0.52, 0.64, 0.75, 0.86] },
+    fins: [
+      { name: "dorsal1", role: "median", at: 0.31, root: 0.115, span: 0.072, dir: [0, 1, 0], phi: Math.PI, sweep: 0.42, bow: 0.02, tipC: 0.06, conc: 0.05, rear: 0, rearH: 0, round: 0.15, tc: 0.06, tcTip: 0.03, embed: 0.4 },
+      { name: "dorsal2", role: "median", at: 0.58, root: 0.055, span: 0.048, dir: [0, 1, 0], phi: Math.PI, sweep: 0.55, bow: 0.02, tipC: 0.12, conc: 0.22, rear: 0.12, rearH: 0.25, round: 0.2, tc: 0.07, embed: 0.4 },
+      { name: "anal", role: "median", at: 0.60, root: 0.050, span: 0.040, dir: [0, -1, 0], phi: 0, sweep: 0.55, tipC: 0.12, conc: 0.22, rear: 0.12, rearH: 0.25, round: 0.2, tc: 0.07, embed: 0.4 },
+      { name: "pecR", role: "paired", at: 0.25, root: 0.035, span: 0.10, dir: [-0.62, 0.05, 0.78], phi: 1.75, sweep: 0.35, tipC: 0.12, conc: 0.08, rear: 0.1, rearH: 0.12, round: 0.3, tc: 0.08, embed: 0.3 },
+      { name: "pecL", role: "paired", at: 0.25, root: 0.035, span: 0.10, dir: [-0.62, 0.05, -0.78], phi: 2 * Math.PI - 1.75, sweep: 0.35, tipC: 0.12, conc: 0.08, rear: 0.1, rearH: 0.12, round: 0.3, tc: 0.08, embed: 0.3 },
+      { name: "pelvR", role: "paired", at: 0.30, root: 0.030, span: 0.045, dir: [-0.5, -0.7, 0.35], phi: 0.30, sweep: 0.4, tipC: 0.15, conc: 0.05, rear: 0.1, rearH: 0.15, round: 0.3, tc: 0.08, embed: 0.4 },
+      { name: "pelvL", role: "paired", at: 0.30, root: 0.030, span: 0.045, dir: [-0.5, -0.7, -0.35], phi: 2 * Math.PI - 0.30, sweep: 0.4, tipC: 0.15, conc: 0.05, rear: 0.1, rearH: 0.15, round: 0.3, tc: 0.08, embed: 0.4 },
+      { name: "caudalU", role: "median", originS: 0.855, originDy: 0.002, root: 0.05, span: 0.17, dir: [-0.60, 0.80, 0], sweep: 0.30, bow: 0.05, tipC: 0.06, conc: 0.10, rear: 0, rearH: 0, round: 0.05, tc: 0.07, tcTip: 0.04, embed: 0.5 },
+      { name: "caudalL", role: "median", originS: 0.855, originDy: -0.002, root: 0.05, span: 0.17, dir: [-0.60, -0.80, 0], sweep: 0.30, bow: 0.05, tipC: 0.06, conc: 0.10, rear: 0, rearH: 0, round: 0.05, tc: 0.07, tcTip: 0.04, embed: 0.5 },
+    ].concat(finlets("dfin", 0.655, 0.790, 5, false), finlets("afin", 0.670, 0.795, 5, true)),
+    // a fish opens by dropping the lower jaw, lifting the head a little and
+    // sliding the upper jaw out and down
+    jaw: { lift: 0.10, drop: 0.55, protrude: [0.008, -0.004], gap: 0.02 },
+    wave: { lambda: 1.0, amp: 0.095, env: [0.03, 0.0, 1.0], f0: 0.6, fK: 1.4, fMax: 8 },
+    finColor: 0x26403f,
+    lod: SCHOOL_LOD,
+  };
+  MACKEREL_SPEC.makePaint = fishPaint(MACKEREL_SPEC, {
+    back: 0x123c44, belly: 0xd8dde0, fin: 0x2a3a3c, cheek: 0xb4bcc0, iris: 0xa8b0a0,
+    line: [[0, 0.20], [0.10, 0.12], [0.25, 0.10], [0.50, 0.04], [0.75, 0.0], [0.86, 0.0]],
+    rag: 0.04, specBack: 0.45, specBelly: 0.7, specFin: 0.3,
+    opercle: { s: 0.255, h: -0.05, k: 0.030, top: 0.62 },
+    scales: { size: 0.006, s0: 0.24, s1: 0.86 },
+    // the wavy bars: on the back above mid-flank, faded into the line
+    pattern: { kind: 1, unit: 0.024, strength: function (c) {
+      const s = c.m[0];
+      return MB.sm((c.f(0) / 4 - 0.02) / 0.12) * MB.sm((s - 0.22) / 0.04) * (1 - MB.sm((s - 0.80) / 0.05));
+    } },
+    skin: function (c, col, up) {
+      // a pearly band along the silver just under the bars
+      if (!up) { const d = -c.f(0) / 4; if (d < 0.25) col = MB.mixc(col, MB.hexc(0xc9c2b4), 0.25 * (1 - d / 0.25)); }
+      return col;
+    },
+  });
   S({
     id: "fish", name: "Mackerel", biome: "water", rarity: "common",
     hp: 5, fur: "Fresh Fish", furValue: 8, meat: "Fish Fillet", meatValue: 5,
-    // real mackerel school by the hundreds of thousands; game-scaled this is
-    // "a proper swirling shoal", clearly smaller than a sardine ball
-    // SIZE: at scale 0.5 this "mackerel" was 1.13 m long, half the player's
-    // bull shark. A real one is 30-40 cm; game-scaled a touch up so a school
-    // still reads from the surface camera. Cruise ~2 m/s (it was ~4, i.e.
-    // ten body lengths a second at the new size), burst ~5.7.
     herd: [12, 30], packs: 4, spd: 1.1, danger: 0, aquatic: true,
-    scale: 0.22, color: 0x6a8fa8, swimDepth: 1.7,
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      const back = m(0x2b6a63), belly = m(0xdde5e7), bar = m(0x143039);
-      const rings = bodyRings(-0.86, 1.22, 0.50,
-        [0.05, 0.19, 0.27, 0.27, 0.24, 0.17, 0.09],
-        [0.035, 0.115, 0.175, 0.175, 0.145, 0.105, 0.055], 12);
-      const hull = hullMesh([back, belly, bar], rings, {
-        // the barred back ends at the lateral line; below it is silver
-        sides: 12, bellyCut: [0.02, 0.06, 0.08, 0.06, 0.04, 0.0], ragged: 0.06, seed: 81,
-        paintKey: "mackerel-bars",
-        paint: function (i, u, j, s, isBelly) {
-          if (isBelly || s < 0.06) return -1;
-          const wob = h01(j * 5 + 1, 0, 91) > 0.55 ? 1 : 0;
-          return ((i + wob) % 3) === 0 ? 2 : -1;
-        },
-      });
-      hull.name = "fishHull"; g.add(hull);
-      [0.085, -0.085].forEach(function (z) {
-        const e = new T.Mesh(cachedGeom("eye|0.038", function () {
-          return new T.SphereGeometry(0.038, 6, 5);
-        }), m(0x0d1114));
-        e.name = "fishEye";
-        e.position.set(1.03, 0.545, z); e.scale.set(0.85, 1, 0.7); g.add(e);
-      });
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([back], [0.30, 0.72, 0], {
-        span: 0.24, chordRoot: 0.26, chordTip: 0.03, sweep: 0.42, concavity: 0.22,
-        rearTipBack: 0.10, apexRound: 0.08, thick: 0.03, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([back], [-0.26, 0.68, 0], {
-        span: 0.14, chordRoot: 0.18, chordTip: 0.02, sweep: 0.40, concavity: 0.20,
-        rearTipBack: 0.06, apexRound: 0.08, thick: 0.02, spanSteps: 3, chordSteps: 3,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([back], [-0.30, 0.32, 0], {
-        span: 0.13, chordRoot: 0.16, chordTip: 0.02, sweep: 0.40, concavity: 0.20,
-        rearTipBack: 0.06, apexRound: 0.08, thick: 0.02, spanSteps: 3, chordSteps: 3,
-        spanDir: [0, -1, 0], chordDir: [1, 0, 0],
-      });
-      [1, -1].forEach(function (s2) {
-        fin([back, belly], [0.42, 0.44, s2 * 0.13], {
-          span: 0.30, chordRoot: 0.18, chordTip: 0.02, sweep: 0.55, concavity: 0.22,
-          rearTipBack: 0.06, apexRound: 0.06, thick: 0.02, spanSteps: 4, chordSteps: 3,
-          under: true, spanDir: [-0.45, -0.30, s2 * 0.84], chordDir: [1, 0, s2 * 0.1],
-        });
-        fin([belly], [0.08, 0.30, s2 * 0.07], {
-          span: 0.16, chordRoot: 0.13, chordTip: 0.02, sweep: 0.5, concavity: 0.2,
-          rearTipBack: 0.05, apexRound: 0.06, thick: 0.016, spanSteps: 3, chordSteps: 3,
-          spanDir: [-0.2, -0.86, s2 * 0.47], chordDir: [1, 0, 0],
-        });
-      });
-      tailSleeve(g, [back, belly], rings, {
-        at: [-0.92, 0.50], x0: -0.472, x1: 0.1, tipRy: 0.015, tipRz: 0.0108,
-        sides: 12, bellyCut: [-0.28], ragged: 0.04, seed: 82,
-      });
-      [1, -1].forEach(function (s2) {
-        fin([back, belly], [-1.22, 0.50 + s2 * 0.02, 0], {
-          span: 0.44, chordRoot: 0.20, chordTip: 0.03, sweep: 0.42, concavity: 0.30,
-          rearTipBack: 0.07, apexRound: 0.05, thick: 0.024, spanSteps: 5, chordSteps: 3,
-          spanDir: [-0.56, s2 * 0.83, 0], chordDir: [1, 0, 0],
-        });
-      });
-      return schoolBody(g, m, "mackerel");
-    },
+    scale: 0.22, color: 0x2b6a63, swimDepth: 1.7,
+    build: function () { return marineBuild(MACKEREL_SPEC); },
   });
 
-  /* ==========================================================================
-     THE OCEAN IS NOT FIVE FISH.
-
-     OWNER: "make water absolutely massive and make fish and potential predator
-     like shark spawn in like npc in that water".
-
-     A SPECIES IS A ROW. `clearance` is how far offshore this animal needs to
-     be and `swimDepth` is how far the model origin rides below the surface;
-     both are declared here rather than hard-coded name tables in wildlife.js,
-     which is the whole reason the sea reads as a place with regions in it.
-     ========================================================================== */
-
-  // ---- SARDINE — the bait ball. Sixty at a time, so it stays deliberately
-  //      cheap: ten-sided hull, five blades, every geometry shared.
+  /* ---- EUROPEAN PILCHARD (SARDINE) — Sardina pilchardus. 22 cm. A round,
+     slightly compressed body (deepest ~16% TL, width 0.6 of the depth) with
+     a keel of scutes along the belly, a short snout and a small upturned
+     mouth, a big eye; one dorsal fin at mid-body over the pelvics, low
+     pectorals, a long low anal fin far back, a forked caudal. Big scales
+     (about 28 down the side), a green-blue back over bright silver, a row
+     of dark spots along the upper flank. 1.10 model units at scale 0.2. */
+  const SARDINE_SPEC = {
+    id: "sardine", plan: "lateral", profileName: "sardine",
+    L: 1.10, xNose: 0.50, axisY: 0.40, noseRound: 0.008, tubeEnd: 0.84, headEnd: 0.22,
+    profile: {
+      top: [[0, 0], [0.01, 0.010], [0.03, 0.020], [0.06, 0.032], [0.10, 0.044], [0.15, 0.056], [0.21, 0.066], [0.28, 0.074], [0.36, 0.077], [0.44, 0.075], [0.52, 0.068], [0.60, 0.057], [0.68, 0.043], [0.75, 0.030], [0.80, 0.020], [0.84, 0.016]],
+      bot: [[0, 0], [0.01, 0.010], [0.03, 0.020], [0.06, 0.032], [0.10, 0.045], [0.15, 0.058], [0.21, 0.070], [0.28, 0.078], [0.36, 0.081], [0.44, 0.078], [0.52, 0.070], [0.60, 0.058], [0.68, 0.044], [0.75, 0.030], [0.80, 0.020], [0.84, 0.016]],
+      half: [[0, 0], [0.01, 0.008], [0.03, 0.016], [0.06, 0.024], [0.10, 0.032], [0.15, 0.039], [0.21, 0.044], [0.28, 0.047], [0.36, 0.048], [0.44, 0.046], [0.52, 0.042], [0.60, 0.036], [0.68, 0.028], [0.75, 0.020], [0.80, 0.014], [0.84, 0.011]],
+      yo: [[0, 0.004], [0.06, 0.002], [0.15, 0], [0.84, 0]],
+      nB: [[0, 2.0], [0.2, 1.7], [0.7, 1.8], [0.84, 2.0]],
+    },
+    mouth: {
+      front: 0.004, corner: 0.065, alphaF: 1.75, alphaC: 1.45, shape: 0.6, snoutBlend: 0.004,
+      palate: 0.4, floor: 0.4, throat: 0.6, pharynx: 0.05, lipDrop: 0.0005, chinInset: 0.0007,
+    },
+    eye: { s: 0.080, up: 0.25, r: 0.027, flat: 0.55, out: 0.25, socket: 0.06, fwd: 0.05, fixed: true },
+    bones: { head: 0.10, neck: 0.22, root: 0.40, tail: [0.54, 0.66, 0.76, 0.85] },
+    fins: [
+      { name: "dorsal1", role: "median", at: 0.40, root: 0.11, span: 0.075, dir: [0, 1, 0], phi: Math.PI, sweep: 0.30, bow: 0.04, tipC: 0.12, conc: 0.05, rear: 0.05, rearH: 0.1, round: 0.3, tc: 0.06, embed: 0.4 },
+      { name: "anal", role: "median", at: 0.70, root: 0.095, span: 0.025, dir: [0, -1, 0], phi: 0, sweep: 0.3, tipC: 0.5, conc: 0, rear: 0.1, rearH: 0.3, round: 0.3, tc: 0.06, embed: 0.4 },
+      { name: "pecR", role: "paired", at: 0.215, root: 0.030, span: 0.10, dir: [-0.80, -0.25, 0.55], phi: 0.60, sweep: 0.45, tipC: 0.12, conc: 0.05, rear: 0.05, rearH: 0.1, round: 0.3, tc: 0.06, embed: 0.3 },
+      { name: "pecL", role: "paired", at: 0.215, root: 0.030, span: 0.10, dir: [-0.80, -0.25, -0.55], phi: 2 * Math.PI - 0.60, sweep: 0.45, tipC: 0.12, conc: 0.05, rear: 0.05, rearH: 0.1, round: 0.3, tc: 0.06, embed: 0.3 },
+      { name: "pelvR", role: "paired", at: 0.47, root: 0.025, span: 0.05, dir: [-0.6, -0.65, 0.4], phi: 0.25, sweep: 0.4, tipC: 0.15, round: 0.3, tc: 0.06, embed: 0.4 },
+      { name: "pelvL", role: "paired", at: 0.47, root: 0.025, span: 0.05, dir: [-0.6, -0.65, -0.4], phi: 2 * Math.PI - 0.25, sweep: 0.4, tipC: 0.15, round: 0.3, tc: 0.06, embed: 0.4 },
+      { name: "caudalU", role: "median", originS: 0.835, originDy: 0.002, root: 0.045, span: 0.16, dir: [-0.62, 0.78, 0], sweep: 0.3, bow: 0.04, tipC: 0.06, conc: 0.12, rear: 0, rearH: 0, round: 0.05, tc: 0.06, tcTip: 0.04, embed: 0.5 },
+      { name: "caudalL", role: "median", originS: 0.835, originDy: -0.002, root: 0.045, span: 0.16, dir: [-0.62, -0.78, 0], sweep: 0.3, bow: 0.04, tipC: 0.06, conc: 0.12, rear: 0, rearH: 0, round: 0.05, tc: 0.06, tcTip: 0.04, embed: 0.5 },
+    ],
+    jaw: { lift: 0.08, drop: 0.50, protrude: [0.006, -0.002], gap: 0.02 },
+    wave: { lambda: 0.95, amp: 0.10, env: [0.03, 0.0, 1.0], f0: 0.7, fK: 1.4, fMax: 9 },
+    finColor: 0x5a6a6c,
+    lod: SCHOOL_LOD,
+  };
+  // the row of dark spots behind the gill cover
+  const SARDINE_SPOTS = [[0.255, 0.26], [0.300, 0.24], [0.345, 0.25], [0.392, 0.22], [0.440, 0.23]];
+  SARDINE_SPEC.makePaint = fishPaint(SARDINE_SPEC, {
+    back: 0x154048, belly: 0xdfe4e6, fin: 0x5a6a6c, cheek: 0xd2d8da, cheekK: 0.25, iris: 0xbfc2b8,
+    line: [[0, 0.40], [0.2, 0.36], [0.5, 0.34], [0.84, 0.36]],
+    rag: 0.03, specBack: 0.5, specBelly: 0.85, specFin: 0.3,
+    opercle: { s: 0.215, h: 0.0, k: 0.030, top: 0.55 },
+    scales: { size: 0.030, s0: 0.22, s1: 0.82 },
+    mark: function (c) {
+      if (c.tag !== MB.TAG.SKIN || c.lod > 0) return NaN;
+      const s = c.m[0], h = -c.m[1];
+      let best = -1;
+      for (let k = 0; k < SARDINE_SPOTS.length; k++) {
+        const ds = (s - SARDINE_SPOTS[k][0]) / 0.014, dh = (h - SARDINE_SPOTS[k][1]) / 0.16;
+        best = Math.max(best, 1 - ds * ds - dh * dh);
+      }
+      return best;
+    },
+    skin: function (c, col) {
+      if (c.f(1) >= 0 && c.m[0] > 0.24) return MB.hexc(0x10181c);
+      return col;
+    },
+  });
   S({
     id: "sardine", name: "Sardine", biome: "water", rarity: "common",
     hp: 3, fur: "Fresh Fish", furValue: 4, meat: "Fish Fillet", meatValue: 3,
-    // the biggest school in this sea, always — surveyed sardine schools run
-    // ~25 to millions; the RATIO to mackerel is what's kept here
-    // SIZE: 0.52 m at scale 0.34 (a real sardine is ~20 cm) -> ~0.3 m. The
-    // school now holds ~1.3 m under the surface as a VOLUME (wildlife.js
-    // SLOTS) instead of a sheet at 0.1-0.5 m that broke the surface.
     herd: [25, 70], spd: 0.95, danger: 0, aquatic: true,
     scale: 0.2, color: 0x9fb4c2, clearance: 14, swimDepth: 1.3,
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      const back = m(0x24565f), silver = m(0xeaf0f2);
-      const rings = bodyRings(-0.62, 0.82, 0.40,
-        [0.035, 0.13, 0.18, 0.17, 0.12, 0.06],
-        [0.025, 0.075, 0.105, 0.10, 0.07, 0.035], 8);
-      const hull = hullMesh([back, silver], rings,
-        // countershading: a sardine is dark only across the top third, the
-        // flanks are silver (the cut was -0.2: two-thirds of the fish dark)
-        { sides: 10, bellyCut: [0.34, 0.40, 0.38, 0.30], ragged: 0.06, seed: 83 });
-      hull.name = "fishHull"; g.add(hull);
-      [0.055, -0.055].forEach(function (z) {
-        const e = new T.Mesh(cachedGeom("eye|0.026", function () {
-          return new T.SphereGeometry(0.026, 6, 4);
-        }), m(0x0e1216));
-        e.name = "fishEye";
-        e.position.set(0.68, 0.425, z); e.scale.set(0.85, 1, 0.7); g.add(e);
-      });
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([back], [0.10, 0.55, 0], {
-        span: 0.15, chordRoot: 0.17, chordTip: 0.02, sweep: 0.40, concavity: 0.22,
-        rearTipBack: 0.06, apexRound: 0.08, thick: 0.018, spanSteps: 3, chordSteps: 3,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([silver], [-0.18, 0.28, 0], {
-        span: 0.10, chordRoot: 0.12, chordTip: 0.02, sweep: 0.40, concavity: 0.20,
-        rearTipBack: 0.04, apexRound: 0.08, thick: 0.014, spanSteps: 3, chordSteps: 3,
-        spanDir: [0, -1, 0], chordDir: [1, 0, 0],
-      });
-      [1, -1].forEach(function (s2) {
-        fin([silver], [0.26, 0.36, s2 * 0.07], {
-          span: 0.18, chordRoot: 0.11, chordTip: 0.02, sweep: 0.55, concavity: 0.2,
-          rearTipBack: 0.04, apexRound: 0.06, thick: 0.012, spanSteps: 3, chordSteps: 3,
-          spanDir: [-0.45, -0.30, s2 * 0.84], chordDir: [1, 0, 0],
-        });
-      });
-      tailSleeve(g, [back, silver], rings, {
-        at: [-0.66, 0.40], x0: -0.33, x1: 0.06, tipRy: 0.01, tipRz: 0.0076,
-        sides: 10, bellyCut: [-0.24], ragged: 0.04, seed: 84,
-      });
-      [1, -1].forEach(function (s2) {
-        fin([back, silver], [-0.86, 0.40 + s2 * 0.01, 0], {
-          span: 0.30, chordRoot: 0.13, chordTip: 0.02, sweep: 0.42, concavity: 0.30,
-          rearTipBack: 0.05, apexRound: 0.05, thick: 0.015, spanSteps: 4, chordSteps: 3,
-          spanDir: [-0.56, s2 * 0.83, 0], chordDir: [1, 0, 0],
-        });
-      });
-      return schoolBody(g, m, "sardine");
-    },
+    build: function () { return marineBuild(SARDINE_SPEC); },
   });
 
-  // ---- ATLANTIC BLUEFIN TUNA — a steel torpedo. Rigid crescent tail on a
-  //      keeled peduncle, the yellow finlet row, long sickle pectorals.
+  /* ---- ATLANTIC BLUEFIN TUNA — Thunnus thynnus. 2.4 m. A torpedo of
+     muscle: deepest ~25% TL at the first dorsal, nearly round (width 0.77
+     of the depth), a conical head with a small mouth and a small eye. The
+     spiny first dorsal folds back into a groove; the falcate second dorsal
+     and anal fins; eight to nine yellow finlets above and below, edged
+     black; short high pectorals (a fifth of the length) and small pelvics;
+     a stiff lunate tail on a pencil-thin tail stock with a strong black
+     keel between two small ones. Deep metallic navy above with an
+     iridescent blue band, silver below crossed by rows of pale dots and
+     lines. 2.64 model units (3.0 to the lobe tips) at scale 0.85. */
+  const TUNA_SPEC = {
+    id: "tuna", plan: "lateral", profileName: "tuna",
+    L: 2.64, xNose: 1.22, axisY: 0.78, noseRound: 0.006, tubeEnd: 0.875, headEnd: 0.24,
+    profile: {
+      top: [[0, 0], [0.01, 0.012], [0.03, 0.026], [0.06, 0.044], [0.10, 0.064], [0.15, 0.084], [0.21, 0.104], [0.28, 0.120], [0.35, 0.128], [0.42, 0.126], [0.50, 0.114], [0.58, 0.094], [0.66, 0.068], [0.73, 0.044], [0.78, 0.028], [0.82, 0.018], [0.85, 0.014], [0.875, 0.012]],
+      bot: [[0, 0], [0.01, 0.012], [0.03, 0.024], [0.06, 0.040], [0.10, 0.058], [0.15, 0.078], [0.21, 0.098], [0.28, 0.114], [0.35, 0.122], [0.42, 0.120], [0.50, 0.106], [0.58, 0.084], [0.66, 0.058], [0.73, 0.036], [0.78, 0.022], [0.82, 0.014], [0.85, 0.011], [0.875, 0.010]],
+      half: [[0, 0], [0.01, 0.010], [0.03, 0.022], [0.06, 0.036], [0.10, 0.052], [0.15, 0.068], [0.21, 0.082], [0.28, 0.092], [0.35, 0.096], [0.42, 0.093], [0.50, 0.084], [0.58, 0.069], [0.66, 0.050], [0.73, 0.032], [0.78, 0.021], [0.82, 0.015], [0.85, 0.014], [0.875, 0.014]],
+      yo: [[0, -0.004], [0.06, -0.002], [0.15, 0], [0.875, 0]],
+      keel: [[0.76, 0], [0.80, 0.008], [0.84, 0.016], [0.875, 0.012]],
+    },
+    mouth: {
+      front: 0.006, corner: 0.075, alphaF: 1.45, alphaC: 1.20, shape: 0.6, snoutBlend: 0.006,
+      palate: 0.4, floor: 0.4, throat: 0.6, pharynx: 0.05, lipDrop: 0.0006, chinInset: 0.0010,
+    },
+    eye: { s: 0.088, up: 0.28, r: 0.015, flat: 0.55, out: 0.25, socket: 0.08, fwd: 0.05, fixed: true },
+    bones: { head: 0.10, neck: 0.24, root: 0.40, tail: [0.56, 0.68, 0.78, 0.86, 0.94] },
+    fins: [
+      { name: "dorsal1", role: "median", at: 0.315, root: 0.17, span: 0.10, dir: [0, 1, 0], phi: Math.PI, sweep: 0.75, bow: 0.02, tipC: 0.03, conc: 0.30, rear: 0, rearH: 0, round: 0.08, tc: 0.05, tcTip: 0.03, embed: 0.4 },
+      { name: "dorsal2", role: "median", at: 0.52, root: 0.075, span: 0.11, dir: [0, 1, 0], phi: Math.PI, sweep: 0.62, bow: 0.08, tipC: 0.06, conc: 0.40, rear: 0.10, rearH: 0.06, round: 0.06, tc: 0.08, tcTip: 0.03, embed: 0.4 },
+      { name: "anal", role: "median", at: 0.56, root: 0.065, span: 0.10, dir: [0, -1, 0], phi: 0, sweep: 0.62, bow: 0.08, tipC: 0.06, conc: 0.40, rear: 0.10, rearH: 0.06, round: 0.06, tc: 0.08, tcTip: 0.03, embed: 0.4 },
+      { name: "pecR", role: "paired", boneName: "pecR", at: 0.255, root: 0.045, span: 0.20, dir: [-0.62, -0.18, 0.76], phi: 1.85, sweep: 0.45, bow: 0.05, tipC: 0.06, conc: 0.18, rear: 0.08, rearH: 0.12, round: 0.05, tc: 0.08, tcTip: 0.04, embed: 0.3 },
+      { name: "pecL", role: "paired", boneName: "pecL", at: 0.255, root: 0.045, span: 0.20, dir: [-0.62, -0.18, -0.76], phi: 2 * Math.PI - 1.85, sweep: 0.45, bow: 0.05, tipC: 0.06, conc: 0.18, rear: 0.08, rearH: 0.12, round: 0.05, tc: 0.08, tcTip: 0.04, embed: 0.3 },
+      { name: "pelvR", role: "paired", at: 0.30, root: 0.030, span: 0.06, dir: [-0.55, -0.70, 0.45], phi: 0.35, sweep: 0.4, tipC: 0.15, round: 0.2, tc: 0.08, embed: 0.4 },
+      { name: "pelvL", role: "paired", at: 0.30, root: 0.030, span: 0.06, dir: [-0.55, -0.70, -0.45], phi: 2 * Math.PI - 0.35, sweep: 0.4, tipC: 0.15, round: 0.2, tc: 0.08, embed: 0.4 },
+      { name: "caudalU", role: "median", originS: 0.870, originDy: 0.002, root: 0.06, span: 0.20, dir: [-0.52, 0.85, 0], sweep: 0.62, bow: 0.06, tipC: 0.03, conc: 0.10, rear: 0, rearH: 0, round: 0.03, tc: 0.10, tcTip: 0.05, embed: 0.5 },
+      { name: "caudalL", role: "median", originS: 0.870, originDy: -0.002, root: 0.06, span: 0.20, dir: [-0.52, -0.85, 0], sweep: 0.62, bow: 0.06, tipC: 0.03, conc: 0.10, rear: 0, rearH: 0, round: 0.03, tc: 0.10, tcTip: 0.05, embed: 0.5 },
+    ].concat(finlets("dfin", 0.615, 0.825, 9, false), finlets("afin", 0.645, 0.825, 8, true)),
+    jaw: { lift: 0.06, drop: 0.45, protrude: [0.003, -0.002], gap: 0.02 },
+    // thunniform: the front two-thirds hardly bend, the tail stock swings
+    wave: { lambda: 1.3, amp: 0.085, env: [0.012, 0.0, 1.0], f0: 0.4, fK: 1.3, fMax: 5 },
+    finColor: 0x101c2c,
+    lod: BIG_FISH_LOD,
+  };
+  TUNA_SPEC.makePaint = fishPaint(TUNA_SPEC, {
+    back: 0x08142a, belly: 0xd2d9de, fin: 0x101c2c, cheek: 0xc4ccd2, iris: 0x2a2e2c,
+    line: [[0, -0.05], [0.1, 0.0], [0.3, -0.05], [0.6, 0.0], [0.875, 0.05]],
+    rag: 0.03, specBack: 0.55, specBelly: 0.9, specFin: 0.4,
+    opercle: { s: 0.255, h: -0.10, k: 0.035, top: 0.55 },
+    scales: { size: 0.005, s0: 0.12, s1: 0.86 },
+    // rows of pale dots and lines down the silver flank
+    pattern: { kind: 3, unit: 0.022, strength: function (c) {
+      const s = c.m[0], h = -c.m[1];
+      return MB.sm((-c.f(0) / 4 - 0.03) / 0.1) * MB.sm((h + 0.75) / 0.15) * MB.sm((s - 0.28) / 0.04) * (1 - MB.sm((s - 0.78) / 0.05));
+    } },
+    skin: function (c, col, up) {
+      const s = c.m[0], h = -c.m[1];
+      // the iridescent blue band along the upper flank
+      if (up) {
+        const d = c.f(0) / 4;
+        const k = MB.sm(d / 0.08) * (1 - MB.sm((d - 0.30) / 0.12)) * MB.sm((s - 0.12) / 0.06) * (1 - MB.sm((s - 0.66) / 0.08));
+        if (k > 0) col = MB.mixc(col, MB.hexc(0x1d5d96), 0.42 * k);
+      } else if (-c.f(0) / 4 < 0.15) col = MB.mixc(col, MB.hexc(0xbfb68a), 0.22);
+      // the black central keel on the tail stock
+      if (s > 0.79 && Math.abs(h) < 0.35) col = MB.mixc(col, MB.hexc(0x06080a), MB.sm((s - 0.79) / 0.03) * (1 - MB.sm((Math.abs(h) - 0.2) / 0.15)));
+      return col;
+    },
+    finHook: function (c, col, role, name) {
+      if (/^[da]fin/.test(name)) return c.m[1] > 0.72 || c.m[0] > 0.85 ? MB.hexc(0x0a0c0c) : MB.hexc(0xc89a18);
+      if (name === "dorsal1") return MB.mixc(col, MB.hexc(0x5a5230), 0.45);
+      if (name === "dorsal2" || name === "anal") return MB.mixc(col, MB.hexc(0x6a5426), 0.55);
+      return col;
+    },
+  });
   S({
     id: "tuna", name: "Bluefin Tuna", biome: "water", rarity: "uncommon",
     hp: 55, fur: "Fresh Fish", furValue: 90, meat: "Fish Fillet", meatValue: 26,
-    // swimDepth 1.5 put the 1.5 m-tall first dorsal through the surface all
-    // the time: a tuna finning like a shark. Deeper, so it is a shape below.
-    // spd x the pelagic profile (2.4) is the cruise: 4.2 was a 10 m/s cruise
     herd: [3, 9], spd: 2.0, danger: 0, aquatic: true,
     scale: 0.85, color: 0x35506b, clearance: 90, swimDepth: 2.4,
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      const back = m(0x24364d), silver = m(0xc3ceD6), belly = m(0xeff3f5);
-      const finlet = m(0xd8b436), eye = m(0x0d1116);
-      const rings = bodyRings(-1.30, 1.72, 0.78,
-        [0.10, 0.36, 0.50, 0.52, 0.46, 0.34, 0.16],
-        [0.07, 0.26, 0.38, 0.39, 0.34, 0.25, 0.11], 12);
-      const hull = hullMesh([back, belly, silver], rings, {
-        sides: 14, bellyCut: [-0.40, -0.28, -0.18, -0.22, -0.34, -0.48], ragged: 0.07, seed: 85,
-        paintKey: "tuna-flank",
-        paint: function (i, u, j, s, isBelly) {
-          return (!isBelly && s < 0.10 && s > -0.42) ? 2 : -1;   // silver flank band
-        },
-      });
-      hull.name = "fishHull"; g.add(hull);
-      [0.26, -0.26].forEach(function (z) {
-        const e = new T.Mesh(cachedGeom("eye|0.075", function () {
-          return new T.SphereGeometry(0.075, 8, 6);
-        }), eye);
-        e.position.set(1.28, 0.90, z); e.scale.set(0.8, 1, 0.55); g.add(e);
-      });
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([back], [0.34, 1.20, 0], {          // tall spiny first dorsal
-        span: 0.60, chordRoot: 0.50, chordTip: 0.05, sweep: 0.50, concavity: 0.26,
-        rearTipBack: 0.18, apexRound: 0.08, thick: 0.05, spanSteps: 5, chordSteps: 4,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([back], [-0.34, 1.06, 0], {         // low soft second dorsal
-        span: 0.30, chordRoot: 0.30, chordTip: 0.03, sweep: 0.55, concavity: 0.28,
-        rearTipBack: 0.12, apexRound: 0.07, thick: 0.035, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([belly], [-0.34, 0.50, 0], {
-        span: 0.28, chordRoot: 0.28, chordTip: 0.03, sweep: 0.55, concavity: 0.28,
-        rearTipBack: 0.11, apexRound: 0.07, thick: 0.033, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, -1, 0], chordDir: [1, 0, 0],
-      });
-      [1, -1].forEach(function (s2) {
-        fin([back, belly], [0.72, 0.66, s2 * 0.30], {   // long sickle pectoral
-          span: 0.98, chordRoot: 0.30, chordTip: 0.03, sweep: 0.72, concavity: 0.30,
-          rearTipBack: 0.10, apexRound: 0.04, thick: 0.04, spanSteps: 5, chordSteps: 3,
-          under: true, spanDir: [-0.52, -0.24, s2 * 0.82], chordDir: [1, 0, s2 * 0.1],
-        });
-        fin([belly], [0.24, 0.44, s2 * 0.16], {
-          span: 0.34, chordRoot: 0.20, chordTip: 0.02, sweep: 0.55, concavity: 0.22,
-          rearTipBack: 0.07, apexRound: 0.05, thick: 0.024, spanSteps: 4, chordSteps: 3,
-          spanDir: [-0.2, -0.86, s2 * 0.47], chordDir: [1, 0, 0],
-        });
-      });
-      // THE FINLET ROW — the one detail that says "tuna" and nothing else.
-      // Merged: ten of them for one draw call.
-      const finlets = meshOf(cachedGeom("tuna-finlets", function () {
-        const sh = new Shell();
-        for (let i = 0; i < 5; i++) {
-          const x = -0.62 - i * 0.145;
-          const r = ringAt(rings, x);
-          for (let sgn = -1; sgn <= 1; sgn += 2) {
-            const y = r.y + sgn * r.ry * 0.94;
-            sh.plate(0, [x, y + sgn * 0.045, 0.0022], [1, 0, 0], [0, sgn, 0], 0.075, 0.09, [0, 0, 1]);
-            sh.plate(0, [x, y + sgn * 0.045, -0.0022], [1, 0, 0], [0, sgn, 0], 0.075, 0.09, [0, 0, -1]);
-          }
-        }
-        return sh.geom();
-      }), [finlet]);
-      g.add(finlets);
-      tailSleeve(g, [back, belly], rings, {
-        at: [-1.42, 0.78], x0: -0.588, x1: 0.14, tipRy: 0.0275, tipRz: 0.0162,
-        sides: 14, bellyCut: [-0.30], ragged: 0.04, seed: 86,
-      });
-      [1, -1].forEach(function (s2) {
-        fin([back], [-1.30, 0.78, s2 * 0.09], {   // the peduncle keel
-          span: 0.10, chordRoot: 0.30, chordTip: 0.06, sweep: 0.1, concavity: 0.04,
-          rearTipH: 0.2, rearTipBack: 0.03, apexRound: 0.5, thick: 0.025,
-          spanSteps: 3, chordSteps: 3, spanDir: [0, 0, s2], chordDir: [1, 0, 0],
-        });
-        fin([back, belly], [-1.80, 0.78 + s2 * 0.03, 0], {   // rigid crescent
-          span: 0.92, chordRoot: 0.34, chordTip: 0.04, sweep: 0.60, concavity: 0.34,
-          rearTipBack: 0.10, apexRound: 0.04, thick: 0.05, spanSteps: 5, chordSteps: 3,
-          spanDir: [-0.62, s2 * 0.78, 0], chordDir: [1, 0, 0],
-        });
-      });
-      return g;
-    },
+    build: function () { return marineBuild(TUNA_SPEC); },
   });
 
-  // ---- BLUE MARLIN — the trophy. A long SPEAR bill, a sail-like front
-  //      dorsal, cobalt stripes painted into the flank, a huge stiff crescent.
+  /* ---- BLUE MARLIN — Makaira nigricans. 3.6 m with the bill. The upper jaw
+     runs out into a round spear (~13% TL beyond the lower jaw), the forehead
+     rises steeply behind it; a deep, compressed body (~17% TL deep, width
+     0.6 of the depth); the first dorsal a high pointed lobe (lower than the
+     body is deep) falling at once into a long low crest; two small rear
+     dorsal and anal fins and a triangular first anal; long sickle pectorals
+     that fold flat, long ribbon pelvics; a huge stiff lunate tail on a
+     double-keeled stock. Blue-black above, silver-white below, about
+     fifteen bars of pale cobalt dots. 3.23 model units (3.4 to the lobe
+     tips) at scale 1.05. */
+  const MARLIN_SPEC = {
+    id: "marlin", plan: "lateral", profileName: "marlin",
+    L: 3.23, xNose: 1.45, axisY: 0.88, noseRound: 0.002, tubeEnd: 0.86, headEnd: 0.26,
+    profile: {
+      top: [[0, 0], [0.01, 0.0018], [0.05, 0.0040], [0.09, 0.0062], [0.13, 0.0085], [0.16, 0.026], [0.19, 0.046], [0.23, 0.066], [0.28, 0.082], [0.34, 0.090], [0.40, 0.090], [0.47, 0.085], [0.55, 0.074], [0.63, 0.058], [0.70, 0.042], [0.76, 0.028], [0.80, 0.019], [0.83, 0.014], [0.86, 0.012]],
+      bot: [[0, 0], [0.01, 0.0018], [0.05, 0.0040], [0.09, 0.0062], [0.13, 0.0110], [0.16, 0.024], [0.19, 0.040], [0.23, 0.056], [0.28, 0.070], [0.34, 0.078], [0.40, 0.080], [0.47, 0.076], [0.55, 0.064], [0.63, 0.050], [0.70, 0.036], [0.76, 0.024], [0.80, 0.016], [0.83, 0.012], [0.86, 0.011]],
+      half: [[0, 0], [0.01, 0.0018], [0.05, 0.0040], [0.09, 0.0062], [0.13, 0.0090], [0.16, 0.018], [0.19, 0.028], [0.23, 0.038], [0.28, 0.046], [0.34, 0.050], [0.40, 0.050], [0.47, 0.047], [0.55, 0.041], [0.63, 0.033], [0.70, 0.025], [0.76, 0.017], [0.80, 0.012], [0.83, 0.010], [0.86, 0.010]],
+      yo: [[0, 0.012], [0.13, 0.010], [0.18, 0.004], [0.25, 0], [0.86, 0]],
+      keel: [[0.76, 0], [0.80, 0.006], [0.84, 0.010], [0.86, 0.008]],
+    },
+    mouth: {
+      front: 0.130, corner: 0.195, alphaF: 0.55, alphaC: 1.25, shape: 0.6, snoutBlend: 0.01,
+      palate: 0.4, floor: 0.4, throat: 0.6, pharynx: 0.05, lipDrop: 0.0008, chinInset: 0.0012,
+    },
+    eye: { s: 0.200, up: 0.30, r: 0.0095, flat: 0.55, out: 0.25, socket: 0.08, fwd: 0.05, fixed: true },
+    bones: { head: 0.16, neck: 0.27, root: 0.42, tail: [0.56, 0.67, 0.76, 0.84, 0.93] },
+    fins: [
+      { name: "dorsal1", role: "median", at: 0.225, root: 0.10, span: 0.13, dir: [0, 1, 0], phi: Math.PI, sweep: 0.25, bow: 0.05, tipC: 0.15, conc: 0.45, rear: 0, rearH: 0, round: 0.15, tc: 0.05, tcTip: 0.03, embed: 0.4 },
+      { name: "crest", role: "median", at: 0.32, root: 0.30, span: 0.028, dir: [0, 1, 0], phi: Math.PI, sweep: 0.05, tipC: 0.85, conc: 0, rear: 0.02, rearH: 0.3, round: 0.3, tc: 0.04, embed: 0.4 },
+      { name: "dorsal2", role: "median", at: 0.715, root: 0.035, span: 0.030, dir: [0, 1, 0], phi: Math.PI, sweep: 0.5, tipC: 0.2, conc: 0.2, rear: 0.15, rearH: 0.25, round: 0.2, tc: 0.08, embed: 0.4 },
+      { name: "anal", role: "median", at: 0.53, root: 0.075, span: 0.065, dir: [0, -1, 0], phi: 0, sweep: 0.5, tipC: 0.1, conc: 0.3, rear: 0.05, rearH: 0.1, round: 0.1, tc: 0.06, embed: 0.4 },
+      { name: "anal2", role: "median", at: 0.725, root: 0.030, span: 0.025, dir: [0, -1, 0], phi: 0, sweep: 0.5, tipC: 0.2, conc: 0.2, rear: 0.15, rearH: 0.25, round: 0.2, tc: 0.08, embed: 0.4 },
+      { name: "pecR", role: "paired", boneName: "pecR", at: 0.245, root: 0.035, span: 0.17, dir: [-0.70, -0.35, 0.62], phi: 0.75, sweep: 0.40, bow: 0.04, tipC: 0.06, conc: 0.15, rear: 0.06, rearH: 0.12, round: 0.05, tc: 0.08, tcTip: 0.03, embed: 0.3 },
+      { name: "pecL", role: "paired", boneName: "pecL", at: 0.245, root: 0.035, span: 0.17, dir: [-0.70, -0.35, -0.62], phi: 2 * Math.PI - 0.75, sweep: 0.40, bow: 0.04, tipC: 0.06, conc: 0.15, rear: 0.06, rearH: 0.12, round: 0.05, tc: 0.08, tcTip: 0.03, embed: 0.3 },
+      { name: "pelvR", role: "paired", at: 0.265, root: 0.012, span: 0.12, dir: [-0.55, -0.82, 0.12], phi: 0.15, sweep: 0.2, tipC: 0.5, conc: 0, rear: 0.05, round: 0.4, tc: 0.10, embed: 0.4 },
+      { name: "pelvL", role: "paired", at: 0.265, root: 0.012, span: 0.12, dir: [-0.55, -0.82, -0.12], phi: 2 * Math.PI - 0.15, sweep: 0.2, tipC: 0.5, conc: 0, rear: 0.05, round: 0.4, tc: 0.10, embed: 0.4 },
+      { name: "caudalU", role: "median", originS: 0.855, originDy: 0.002, root: 0.055, span: 0.20, dir: [-0.48, 0.88, 0], sweep: 0.65, bow: 0.06, tipC: 0.03, conc: 0.10, rear: 0, rearH: 0, round: 0.03, tc: 0.09, tcTip: 0.04, embed: 0.5 },
+      { name: "caudalL", role: "median", originS: 0.855, originDy: -0.002, root: 0.055, span: 0.20, dir: [-0.48, -0.88, 0], sweep: 0.65, bow: 0.06, tipC: 0.03, conc: 0.10, rear: 0, rearH: 0, round: 0.03, tc: 0.09, tcTip: 0.04, embed: 0.5 },
+    ],
+    jaw: { lift: 0.08, drop: 0.40, protrude: [0, 0], gap: 0.015 },
+    wave: { lambda: 1.25, amp: 0.085, env: [0.012, 0.0, 1.0], f0: 0.3, fK: 1.2, fMax: 3.5 },
+    finColor: 0x0a1530,
+    lod: BIG_FISH_LOD,
+  };
+  MARLIN_SPEC.makePaint = fishPaint(MARLIN_SPEC, {
+    back: 0x051330, belly: 0xdfe5e9, fin: 0x0a1530, cheek: 0xc8d0d6, iris: 0x2a3036,
+    line: [[0, 0.2], [0.13, 0.15], [0.20, -0.05], [0.40, -0.10], [0.70, -0.05], [0.86, 0]],
+    rag: 0.04, specBack: 0.45, specBelly: 0.8, specFin: 0.35,
+    opercle: { s: 0.265, h: -0.15, k: 0.030, top: 0.5 },
+    // the bars of pale cobalt dots, spine to lower flank
+    pattern: { kind: 2, unit: 0.040, strength: function (c) {
+      const s = c.m[0], h = -c.m[1];
+      return MB.sm((s - 0.25) / 0.03) * (1 - MB.sm((s - 0.70) / 0.05)) * MB.sm((h + 0.45) / 0.15) * (1 - MB.sm((h - 0.75) / 0.12));
+    } },
+    skin: function (c, col) {
+      // the spear is dark and rough, the same blue-black on both faces
+      if (c.m[0] < 0.135) return MB.mixc(MB.hexc(0x0c1626), col, MB.sm((c.m[0] - 0.12) / 0.015));
+      return col;
+    },
+  });
   S({
     id: "marlin", name: "Blue Marlin", biome: "water", rarity: "rare",
     hp: 130, fur: "Marlin Bill", furValue: 420, meat: "Fish Fillet", meatValue: 34,
     packs: 1, spd: 2.1, danger: 0.15, aquatic: true,
-    // the sail stands 2.4 m over the origin: at 1.9 it was permanently in air
     scale: 1.05, color: 0x1c3f6d, clearance: 150, swimDepth: 3.2,
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      /* A BLUE MARLIN, not a candy cane: cobalt-black back over a silver-
-         white belly, crossed by FIFTEEN NARROW pale-cobalt bars (they were
-         broad alternating painted bands, a wasp), a small eye set well back
-         of the bill root, a bill that tapers to a point with the short lower
-         jaw under it, the high first dorsal running back as a long low
-         crest, and a tail that is the same colour on both faces. */
-      const back = m(0x14315f), belly = m(0xe9eef1), bar = m(0x7fa6de), eye = m(0x0a0d11);
-      const finBlue = m(0x1f4a8e);
-      const rings = bodyRings(-1.60, 1.86, 0.88,
-        [0.11, 0.42, 0.56, 0.56, 0.48, 0.36, 0.17],
-        [0.07, 0.24, 0.33, 0.33, 0.29, 0.22, 0.10], 15);
-      const hull = hullMesh([back, belly], rings, {
-        sides: 16, bellyCut: [-0.44, -0.30, -0.22, -0.24, -0.36, -0.50], ragged: 0.06, seed: 87,
-        shade: { cape: { k: 0.78, s0: 0.45, s1: 0.95, x0: -1.6, x1: 1.9, f: 0.4 } },
-      });
-      hull.name = "fishHull"; g.add(hull);
-      const bars = meshOf(cachedGeom("marlin-bars2", function () {
-        const sh = new Shell();
-        for (let k = 0; k < 15; k++) {
-          const x = lerp(-1.25, 1.20, k / 14);
-          [1, -1].forEach(function (s2) {
-            const pts = [];
-            for (let q = 0; q <= 5; q++) {
-              const a = lerp(1.25, -0.18, q / 5) + (h01(k, q, 89) - 0.5) * 0.06;
-              pts.push([x - q * 0.025, s2 > 0 ? a : Math.PI - a]);
-            }
-            skinLine(sh, 0, rings, pts, 0.045 * (1 - Math.abs(k - 7) / 14), 0.003);
-          });
-        }
-        return sh.geom();
-      }), [bar]);
-      g.add(bars);
-      // THE BILL — long, round, tapering to a point, and the whole silhouette
-      const bill = new T.Mesh(cachedGeom("marlin-bill2", function () {
-        return new T.CylinderGeometry(0.008, 0.10, 1.34, 10);
-      }), back);
-      bill.position.set(2.50, 0.99, 0); bill.rotation.z = -Math.PI / 2; g.add(bill);
-      const jaw = new T.Mesh(cachedGeom("marlin-jaw", function () {
-        return new T.CylinderGeometry(0.01, 0.075, 0.42, 8);
-      }), belly);
-      jaw.position.set(2.02, 0.90, 0); jaw.rotation.z = -Math.PI / 2 - 0.06; g.add(jaw);
-      [1, -1].forEach(function (s2) {
-        const sk = onSkin(rings, 1.62, s2 > 0 ? 0.30 : Math.PI - 0.30, -0.02);
-        const e = new T.Mesh(cachedGeom("eye|0.055", function () {
-          return new T.SphereGeometry(0.055, 8, 6);
-        }), eye);
-        e.position.set(sk.p[0], sk.p[1], sk.p[2]); g.add(e);
-      });
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      // the long low crest the sail falls into, back to the second dorsal
-      fin([finBlue], [0.05, 1.38, 0], {
-        span: 0.20, chordRoot: 1.10, chordTip: 0.60, sweep: 0.20, concavity: 0.10,
-        leadBow: 0.02, rearTipH: 0.30, rearTipBack: 0.05, apexRound: 0.10,
-        thick: 0.03, spanSteps: 3, chordSteps: 5, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      // THE SAIL — tall at the front, falling away into the crest
-      fin([finBlue], [0.92, 1.30, 0], {
-        span: 0.95, chordRoot: 0.80, chordTip: 0.08, sweep: 0.34, concavity: 0.28,
-        leadBow: 0.10, rearTipH: 0.06, rearTipBack: 0.42, apexRound: 0.22,
-        thick: 0.06, spanSteps: 5, chordSteps: 4, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([back], [-0.42, 1.20, 0], {
-        span: 0.24, chordRoot: 0.30, chordTip: 0.03, sweep: 0.55, concavity: 0.26,
-        rearTipBack: 0.12, apexRound: 0.08, thick: 0.03, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([belly], [-0.42, 0.56, 0], {
-        span: 0.24, chordRoot: 0.28, chordTip: 0.03, sweep: 0.55, concavity: 0.26,
-        rearTipBack: 0.11, apexRound: 0.08, thick: 0.03, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, -1, 0], chordDir: [1, 0, 0],
-      });
-      [1, -1].forEach(function (s2) {
-        fin([back, belly], [0.92, 0.70, s2 * 0.26], {
-          span: 1.14, chordRoot: 0.30, chordTip: 0.03, sweep: 0.72, concavity: 0.32,
-          rearTipBack: 0.10, apexRound: 0.04, thick: 0.04, spanSteps: 5, chordSteps: 3,
-          under: true, spanDir: [-0.55, -0.30, s2 * 0.78], chordDir: [1, 0, s2 * 0.1],
-        });
-        fin([back], [0.34, 0.50, s2 * 0.10], {   // the long ribbon pelvics
-          span: 0.52, chordRoot: 0.11, chordTip: 0.02, sweep: 0.40, concavity: 0.14,
-          rearTipBack: 0.04, apexRound: 0.04, thick: 0.02, spanSteps: 4, chordSteps: 2,
-          spanDir: [-0.25, -0.92, s2 * 0.30], chordDir: [1, 0, 0],
-        });
-      });
-      tailSleeve(g, [back, belly], rings, {
-        at: [-1.74, 0.88], x0: -0.646, x1: 0.16, tipRy: 0.0275, tipRz: 0.0162,
-        sides: 14, bellyCut: [-0.32], ragged: 0.04, seed: 88,
-      });
-      [1, -1].forEach(function (s2) {
-        fin([back, belly], [-2.12, 0.88 + s2 * 0.03, 0], {
-          span: 1.16, chordRoot: 0.40, chordTip: 0.05, sweep: 0.58, concavity: 0.34,
-          rearTipBack: 0.12, apexRound: 0.04, thick: 0.06, spanSteps: 5, chordSteps: 3,
-          spanDir: [-0.60, s2 * 0.80, 0], chordDir: [1, 0, 0],
-        });
-      });
-      return g;
-    },
+    build: function () { return marineBuild(MARLIN_SPEC); },
   });
 
-  // ---- GREAT BARRACUDA — a silver pike with an underslung jaw full of fangs,
-  //      dark blotches down the lower flank, two widely SEPARATED dorsals.
+  /* ---- GREAT BARRACUDA — Sphyraena barracuda. 1.3 m. Long and nearly
+     round (~13% TL deep), a long pointed head (~27% TL) with the lower jaw
+     jutting past the upper and a big mouth set with fangs of unequal size
+     (a pair of long canines at the front of each jaw); the eye big and
+     high; two widely separated dorsals (five spines over the pelvics, a
+     falcate second over the anal), small low pectorals, a forked tail with
+     a concave margin and pale lobe tips. Grey-green back over silver, faint
+     oblique bars above mid-flank, scattered black blotches low on the rear
+     half. 2.89 model units at scale 0.45. */
+  const CUDA_SPEC = {
+    id: "barracuda", plan: "lateral", profileName: "barracuda",
+    L: 2.89, xNose: 1.40, axisY: 0.55, noseRound: 0.006, tubeEnd: 0.875, headEnd: 0.28,
+    profile: {
+      top: [[0, 0], [0.01, 0.006], [0.04, 0.016], [0.08, 0.026], [0.12, 0.034], [0.17, 0.042], [0.23, 0.050], [0.30, 0.058], [0.38, 0.064], [0.46, 0.065], [0.54, 0.062], [0.62, 0.055], [0.70, 0.044], [0.76, 0.033], [0.81, 0.024], [0.85, 0.018], [0.875, 0.016]],
+      bot: [[0, 0], [0.01, 0.008], [0.04, 0.018], [0.08, 0.028], [0.12, 0.036], [0.17, 0.043], [0.23, 0.050], [0.30, 0.056], [0.38, 0.062], [0.46, 0.064], [0.54, 0.061], [0.62, 0.054], [0.70, 0.043], [0.76, 0.032], [0.81, 0.023], [0.85, 0.017], [0.875, 0.015]],
+      half: [[0, 0], [0.01, 0.006], [0.04, 0.014], [0.08, 0.022], [0.12, 0.028], [0.17, 0.034], [0.23, 0.040], [0.30, 0.045], [0.38, 0.049], [0.46, 0.050], [0.54, 0.048], [0.62, 0.043], [0.70, 0.035], [0.76, 0.027], [0.81, 0.020], [0.85, 0.015], [0.875, 0.014]],
+      yo: [[0, -0.008], [0.06, -0.005], [0.15, -0.002], [0.25, 0], [0.875, 0]],
+    },
+    mouth: {
+      front: 0.004, corner: 0.115, alphaF: 1.95, alphaC: 1.45, shape: 0.5, snoutBlend: 0.005,
+      palate: 0.5, floor: 0.45, throat: 0.7, pharynx: 0.06, lipDrop: 0.0008, chinInset: 0.0010,
+      teeth: {
+        upper: [
+          { n: 4, h: 0.016, w: 0.0060, inset: 0.0035, sink: 0.0020, rake: 0.05, rakeCorner: 0.1, tilt: 0.0, thick: 0.35, cornerK: 0.9, span: 0.10 },
+          { n: 26, h: 0.0062, w: 0.0035, inset: 0.0030, sink: 0.0015, rake: 0.25, rakeCorner: 0.3, tilt: 0.05, thick: 0.3, cornerK: 0.6, jag: 0.55, span: 0.86 },
+        ],
+        lower: [
+          { n: 2, h: 0.018, w: 0.0065, inset: 0.0030, sink: 0.0020, rake: 0.0, rakeCorner: 0.1, thick: 0.35, cornerK: 0.9, span: 0.06 },
+          { n: 24, h: 0.0068, w: 0.0036, inset: 0.0030, sink: 0.0015, rake: 0.2, rakeCorner: 0.3, tilt: -0.05, thick: 0.3, cornerK: 0.6, jag: 0.55, span: 0.86 },
+        ],
+      },
+    },
+    eye: { s: 0.135, up: 0.42, r: 0.018, flat: 0.55, out: 0.25, socket: 0.08, fwd: 0.05, fixed: true },
+    bones: { head: 0.12, neck: 0.25, root: 0.42, tail: [0.56, 0.67, 0.77, 0.86, 0.94] },
+    fins: [
+      { name: "dorsal1", role: "median", at: 0.37, root: 0.065, span: 0.065, dir: [0, 1, 0], phi: Math.PI, sweep: 0.45, bow: 0.03, tipC: 0.08, conc: 0.12, rear: 0, rearH: 0, round: 0.15, tc: 0.06, embed: 0.4 },
+      { name: "dorsal2", role: "median", at: 0.645, root: 0.060, span: 0.055, dir: [0, 1, 0], phi: Math.PI, sweep: 0.60, bow: 0.05, tipC: 0.06, conc: 0.35, rear: 0.15, rearH: 0.08, round: 0.06, tc: 0.07, embed: 0.4 },
+      { name: "anal", role: "median", at: 0.665, root: 0.058, span: 0.050, dir: [0, -1, 0], phi: 0, sweep: 0.60, bow: 0.05, tipC: 0.06, conc: 0.35, rear: 0.15, rearH: 0.08, round: 0.06, tc: 0.07, embed: 0.4 },
+      { name: "pecR", role: "paired", boneName: "pecR", at: 0.265, root: 0.030, span: 0.085, dir: [-0.80, -0.15, 0.58], phi: 0.95, sweep: 0.4, tipC: 0.15, conc: 0.05, rear: 0.1, rearH: 0.15, round: 0.3, tc: 0.07, embed: 0.3 },
+      { name: "pecL", role: "paired", boneName: "pecL", at: 0.265, root: 0.030, span: 0.085, dir: [-0.80, -0.15, -0.58], phi: 2 * Math.PI - 0.95, sweep: 0.4, tipC: 0.15, conc: 0.05, rear: 0.1, rearH: 0.15, round: 0.3, tc: 0.07, embed: 0.3 },
+      { name: "pelvR", role: "paired", at: 0.37, root: 0.025, span: 0.05, dir: [-0.55, -0.72, 0.42], phi: 0.30, sweep: 0.4, tipC: 0.15, round: 0.3, tc: 0.07, embed: 0.4 },
+      { name: "pelvL", role: "paired", at: 0.37, root: 0.025, span: 0.05, dir: [-0.55, -0.72, -0.42], phi: 2 * Math.PI - 0.30, sweep: 0.4, tipC: 0.15, round: 0.3, tc: 0.07, embed: 0.4 },
+      { name: "caudalU", role: "median", originS: 0.870, originDy: 0.002, root: 0.06, span: 0.15, dir: [-0.62, 0.78, 0], sweep: 0.45, bow: 0.05, tipC: 0.05, conc: 0.18, rear: 0, rearH: 0, round: 0.04, tc: 0.08, tcTip: 0.04, embed: 0.5 },
+      { name: "caudalL", role: "median", originS: 0.870, originDy: -0.002, root: 0.06, span: 0.15, dir: [-0.62, -0.78, 0], sweep: 0.45, bow: 0.05, tipC: 0.05, conc: 0.18, rear: 0, rearH: 0, round: 0.04, tc: 0.08, tcTip: 0.04, embed: 0.5 },
+    ],
+    jaw: { lift: 0.15, drop: 0.65, protrude: [0.004, 0], gap: 0.02 },
+    wave: { lambda: 0.95, amp: 0.09, env: [0.025, 0.0, 1.0], f0: 0.5, fK: 1.3, fMax: 6 },
+    finColor: 0x1c2428,
+    lod: BIG_FISH_LOD,
+  };
+  CUDA_SPEC.makePaint = fishPaint(CUDA_SPEC, {
+    back: 0x1e2e34, belly: 0xe8eced, fin: 0x1c2428, cheek: 0xc2cacc, iris: 0xb8b48c,
+    line: [[0, 0.25], [0.15, 0.15], [0.30, 0.12], [0.60, 0.10], [0.875, 0.10]],
+    rag: 0.03, specBack: 0.4, specBelly: 0.75, specFin: 0.3,
+    opercle: { s: 0.275, h: -0.05, k: 0.030, top: 0.6 },
+    scales: { size: 0.011, s0: 0.24, s1: 0.86 },
+    // faint oblique bars above mid-flank (kind 4); black blotches low on the
+    // rear half (kind 5): one kind per side of the line, faded to nothing
+    // across it so the switch never shows
+    pattern: { kind: function (c) { return c.f(0) >= 0 ? 4 : 5; }, unit: 0.040, strength: function (c) {
+      const s = c.m[0], d = c.f(0) / 4;
+      if (d >= 0) return 0.75 * MB.sm((d - 0.03) / 0.1) * MB.sm((s - 0.24) / 0.04) * (1 - MB.sm((s - 0.78) / 0.05));
+      return MB.sm((-d - 0.05) / 0.1) * MB.sm((s - 0.45) / 0.06) * (1 - MB.sm((s - 0.84) / 0.03));
+    } },
+    finHook: function (c, col, role, name) {
+      // the forked tail's pale lobe tips; the soft fins' pale tips
+      if (name === "caudalU" || name === "caudalL") return c.m[0] > 0.80 ? MB.mixc(col, MB.hexc(0xd6dadb), MB.sm((c.m[0] - 0.80) / 0.06)) : col;
+      if (name === "dorsal2" || name === "anal") return c.m[0] > 0.82 ? MB.mixc(col, MB.hexc(0xc8cccc), 0.7) : col;
+      return col;
+    },
+  });
   S({
     id: "barracuda", name: "Great Barracuda", biome: "water",
     rarity: "common", hp: 34, fur: "Fresh Fish", furValue: 46,
     meat: "Fish Fillet", meatValue: 14, herd: [1, 2], spd: 3.1, danger: 0.3,
-    // 0.6 drew a 2 m barracuda; a great barracuda is ~1-1.5 m
     bite: 10, aquatic: true, scale: 0.45, color: 0xa9b6bd,
     clearance: 26, swimDepth: 1.6,
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      const back = m(0x46565f), silver = m(0xb6c2c8), belly = m(0xf1f4f5);
-      const blotch = m(0x27313a), tooth = m(0xf6f7f6), eye = m(0x0d1014);
-      const rings = bodyRings(-1.24, 1.42, 0.55,
-        [0.07, 0.22, 0.28, 0.28, 0.26, 0.22, 0.13],
-        [0.05, 0.15, 0.20, 0.20, 0.19, 0.16, 0.09], 12);
-      const hull = hullMesh([silver, belly, blotch], rings, {
-        sides: 12, bellyCut: [-0.34, -0.26, -0.22, -0.26, -0.36], ragged: 0.09, seed: 89,
-        paintKey: "cuda-blotch",
-        paint: function (i, u, j, s, isBelly) {
-          if (isBelly || s > -0.05 || s < -0.55) return -1;
-          return h01(i * 3 + 1, j * 7 + 2, 93) > 0.62 ? 2 : -1;
-        },
-      });
-      hull.name = "fishHull"; g.add(hull);
-      // the pike head: a dark back cap, then an UNDERSLUNG jaw
-      const upper = hullMesh([back, silver], bodyRings(-0.18, 0.34, 0,
-        [0.075, 0.045], [0.085, 0.045], 3), { sides: 10, bellyCut: [-0.55], seed: 90 });
-      upper.position.set(1.56, 0.615, 0); g.add(upper);
-      const lower = hullMesh([silver, belly], bodyRings(-0.18, 0.40, 0,
-        [0.070, 0.042], [0.080, 0.042], 3), { sides: 10, bellyCut: [-0.10], seed: 91 });
-      lower.position.set(1.60, 0.470, 0); g.add(lower);
-      // the fang set: twelve teeth in ONE mesh, through the same tooth builder
-      // the sharks use, so a barracuda's underslung grin is not twelve cones.
-      const fangs = meshOf(cachedGeom("cuda-fangs", function () {
-        const sh = new Shell();
-        [0.06, -0.08, -0.22].forEach(function (dx, i) {
-          [0.045, -0.045].forEach(function (z) {
-            emitTooth(sh, [1.78 + dx, 0.560, z], [0, 0, 1], [0, -1, 0],
-              { w: 0.055, h: 0.115 - i * 0.015, thick: 0.016, serr: 0, curve: 0.35, rootFrac: 0.25 });
-            emitTooth(sh, [1.82 + dx, 0.505, z], [0, 0, 1], [0, 1, 0],
-              { w: 0.05, h: 0.10 - i * 0.012, thick: 0.015, serr: 0, curve: 0.35, rootFrac: 0.25 });
-          });
-        });
-        return sh.geom();
-      }), [tooth, tooth]);
-      g.add(fangs);
-      [0.115, -0.115].forEach(function (z) {
-        const e = new T.Mesh(cachedGeom("eye|0.055", function () {
-          return new T.SphereGeometry(0.055, 7, 5);
-        }), eye);
-        e.position.set(1.42, 0.655, z); g.add(e);
-      });
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([back], [0.42, 0.78, 0], {
-        span: 0.30, chordRoot: 0.24, chordTip: 0.03, sweep: 0.42, concavity: 0.24,
-        rearTipBack: 0.10, apexRound: 0.07, thick: 0.026, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([back], [-0.62, 0.76, 0], {
-        span: 0.26, chordRoot: 0.22, chordTip: 0.03, sweep: 0.48, concavity: 0.26,
-        rearTipBack: 0.09, apexRound: 0.07, thick: 0.024, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([belly], [-0.62, 0.34, 0], {
-        span: 0.24, chordRoot: 0.22, chordTip: 0.03, sweep: 0.48, concavity: 0.26,
-        rearTipBack: 0.09, apexRound: 0.07, thick: 0.024, spanSteps: 4, chordSteps: 3,
-        spanDir: [0, -1, 0], chordDir: [1, 0, 0],
-      });
-      [1, -1].forEach(function (s2) {
-        fin([silver, belly], [0.72, 0.46, s2 * 0.15], {
-          span: 0.38, chordRoot: 0.18, chordTip: 0.02, sweep: 0.60, concavity: 0.24,
-          rearTipBack: 0.07, apexRound: 0.05, thick: 0.022, spanSteps: 4, chordSteps: 3,
-          under: true, spanDir: [-0.48, -0.28, s2 * 0.83], chordDir: [1, 0, 0],
-        });
-        fin([belly], [0.30, 0.38, s2 * 0.09], {
-          span: 0.22, chordRoot: 0.15, chordTip: 0.02, sweep: 0.5, concavity: 0.2,
-          rearTipBack: 0.05, apexRound: 0.05, thick: 0.018, spanSteps: 3, chordSteps: 3,
-          spanDir: [-0.2, -0.88, s2 * 0.43], chordDir: [1, 0, 0],
-        });
-      });
-      tailSleeve(g, [silver, belly], rings, {
-        at: [-1.34, 0.55], x0: -0.472, x1: 0.1, tipRy: 0.0175, tipRz: 0.013,
-        sides: 12, bellyCut: [-0.30], ragged: 0.04, seed: 92,
-      });
-      [1, -1].forEach(function (s2) {
-        fin([back, belly], [-1.64, 0.55 + s2 * 0.02, 0], {
-          span: 0.58, chordRoot: 0.24, chordTip: 0.03, sweep: 0.48, concavity: 0.32,
-          rearTipBack: 0.08, apexRound: 0.05, thick: 0.03, spanSteps: 5, chordSteps: 3,
-          spanDir: [-0.56, s2 * 0.83, 0], chordDir: [1, 0, 0],
-        });
-      });
-      return g;
-    },
+    build: function () { return marineBuild(CUDA_SPEC); },
   });
 
   /* ==========================================================================
@@ -5762,142 +2794,99 @@
     build: function () { return marineBuild(TURTLE_SPEC); },
   });
 
-  /* ---- HARBOUR SEAL (Phoca vitulina). NOT a registered species: the city
+  /* ---- HARBOUR SEAL — Phoca vitulina. Not a registered species (the city
      sea does not spawn seals, and a defineSpecies() here would shift every
-     seeded spawn after it. It is a builder the Ocean game (games/ocean.js)
-     calls for its seal-haul prey, built on the same hull + fin grammar so the
-     shared swim rig drives it like any other swimmer.
-
-     1.6 m nose to hips, a fat spindle that is widest behind the shoulders,
-     a round earless head with a short dog-like muzzle, V nostrils and big wet
-     eyes. Short clawed fore flippers tucked under the chest; the two hind
-     flippers are the engine — fans held palm to palm, swept side to side,
-     which is exactly the lateral stroke the fish rig already makes. Coat is
-     blue-grey over a pale belly, broken by dark irregular spots. */
-  CBZ.buildHarborSeal = function (ctx) {
-    const m = (ctx && ctx.mat) || CBZ.cmat || function (c) { return new T.MeshLambertMaterial({ color: c }); };
-    const g = new T.Group();
-    const coat = m(0x5d6266), belly = m(0xbdb8ab), spot = m(0x24272a);
-    const flip = m(0x34373b), dark = m(0x0b0c0d), nose = m(0x1b1b1c), pad = m(0x63676a);
-    // y rises slightly through the neck so the head rides a touch high, the
-    // way a swimming seal carries it
-    const rings = bodyRings(-0.66, 0.90, function (t) { return t > 0.62 ? (t - 0.62) * 0.16 : 0; },
-      [0.065, 0.15, 0.205, 0.235, 0.24, 0.225, 0.19, 0.150, 0.135, 0.128, 0.108, 0.072, 0.034],
-      [0.075, 0.17, 0.235, 0.265, 0.27, 0.255, 0.21, 0.160, 0.142, 0.132, 0.106, 0.070, 0.034], 22);
-    const hull = hullMesh([coat, belly], rings, {
-      sides: 18, bellyCut: [-0.30, -0.18, -0.12, -0.14, -0.22, -0.30, -0.40], ragged: 0.10, seed: 211,
-    });
-    // THE SPOTS are decals laid ON the skin (irregular 7-gons a few mm proud
-    // of it, oval along the body), not painted quads — a painted quad is a
-    // square, and a seal is not a QR code.
-    const spots = meshOf(cachedGeom("seal-spots", function () {
-      const sh = new Shell();
-      for (let k = 0; k < 64; k++) {
-        const x = lerp(-0.52, 0.66, h01(k, 1, 217));
-        const ang = Math.PI * 0.5 + (h01(k, 2, 217) - 0.5) * 2.7;
-        const sk = onSkin(rings, x, ang, 0.004);
-        const tg = norm3(cross3(sk.n, [1, 0, 0])), fw = norm3(cross3(tg, sk.n));
-        const r = 0.012 + 0.026 * h01(k, 3, 217) * (x > 0.5 ? 0.6 : 1);
-        const pts = [];
-        for (let q = 0; q < 7; q++) {
-          const a = q / 7 * Math.PI * 2, rr = r * (0.7 + 0.5 * h01(k, 10 + q, 217));
-          const cu = Math.cos(a) * rr * 1.35, cv = Math.sin(a) * rr;
-          pts.push([sk.p[0] + fw[0] * cu + tg[0] * cv, sk.p[1] + fw[1] * cu + tg[1] * cv, sk.p[2] + fw[2] * cu + tg[2] * cv]);
-        }
-        sh.polyN(0, sk.n, pts);
-      }
-      return sh.geom();
-    }), [spot]);
-    g.add(spots);
-    hull.name = "sealHull"; g.add(hull);
-    // eyes: large, dark, set high and forward on the skull
-    const eyeGeo = cachedGeom("seal-eye", function () { return new T.SphereGeometry(0.036, 9, 7); });
-    const nostril = cachedGeom("seal-nostril", function () {
-      const sh = new Shell();
-      // a V-slit: two thin plates meeting below
-      sh.plate(0, [0, 0, 0], [0.30, 1, 0], [0, 0, 1], 0.028, 0.008, [1, 0, 0]);
-      return sh.geom();
-    });
-    const padGeo = cachedGeom("seal-whiskerpad", function () { return new T.SphereGeometry(0.05, 9, 7); });
-    [1, -1].forEach(function (s2) {
-      const e = new T.Mesh(eyeGeo, dark);
-      e.position.set(0.735, 0.090, s2 * 0.088); e.scale.set(0.8, 1, 0.9); g.add(e);
-      const pd = new T.Mesh(padGeo, pad);           // the swollen whisker pad
-      pd.position.set(0.830, 0.030, s2 * 0.038); pd.scale.set(0.8, 0.7, 0.75); g.add(pd);
-      const ns = new T.Mesh(nostril, nose);
-      ns.position.set(0.905, 0.052, s2 * 0.016); ns.rotation.y = s2 * 0.5; g.add(ns);
-    });
-    // vibrissae: a fan of fine whiskers per side, one merged mesh
-    const whisk = meshOf(cachedGeom("seal-whiskers", function () {
-      const sh = new Shell();
-      [1, -1].forEach(function (s2) {
-        for (let k = 0; k < 6; k++) {
-          const a = -0.35 + k * 0.14;
-          const root = [0.85, 0.035 - k * 0.006, s2 * 0.075];
-          const dir = norm3([-0.15, Math.sin(a) * 0.6, s2 * 0.95]);
-          const c = [root[0] + dir[0] * 0.055, root[1] + dir[1] * 0.055, root[2] + dir[2] * 0.055];
-          const nn = cross3(dir, [0, 1, 0]);
-          sh.plate(0, c, dir, [0, 1, 0], 0.11, 0.004, nn);             // both faces: a hair
-          sh.plate(0, c, dir, [0, 1, 0], 0.11, 0.004, [-nn[0], -nn[1], -nn[2]]);
-        }
-      });
-      return sh.geom();
-    }), [m(0xe8e4d8)]);
-    g.add(whisk);
-    function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-    // FORE FLIPPERS: short, broad, clawed paddles held against the chest
-    [1, -1].forEach(function (s2) {
-      fin([flip, flip, m(0x1c1a17)], [0.38, -0.12, s2 * 0.19], {
-        span: 0.21, chordRoot: 0.13, chordTip: 0.09, sweep: 0.20, concavity: 0.04,
-        leadBow: 0.04, rearTipH: 0.25, rearTipBack: 0.02, apexRound: 0.45,
-        thick: 0.04, spanSteps: 5, chordSteps: 3, under: true, tipDark: 0.84,
-        spanDir: [-0.80, -0.30, s2 * 0.52], chordDir: [1, 0, 0],
-      });
-    });
-    // HIND FLIPPERS: two fans behind the hips, palms together, the web
-    // standing vertical so the side-to-side stroke drives water. Each is a
-    // swept blade that WIDENS to the tip (chordTip > chordRoot) with a
-    // notched (concave) trailing edge between the outer digits.
-    [1, -1].forEach(function (s2) {
-      const f = fin([flip, flip], [-0.70, 0.005 * s2, s2 * 0.035], {
-        span: 0.40, chordRoot: 0.12, chordTip: 0.30, sweep: 0.0, concavity: 0.12,
-        leadBow: -0.04, rearTipH: 0.0, rearTipBack: 0.0, apexRound: 0.08,
-        thick: 0.035, spanSteps: 5, chordSteps: 3, embed: 0.05,
-        spanDir: [-1, 0, s2 * 0.12], chordDir: [0, 1, 0],
-      });
-      f.name = "sealHindFlipper";
-    });
-    return g;
+     seeded spawn after it); the Ocean game (games/ocean.js) builds its seals
+     here. 1.75 m nose to hind-flipper tips: a fat spindle, widest (~25% of
+     the length) behind the shoulders; a round earless head with a short
+     dog-like muzzle, a small mouth with conical teeth and big dark eyes;
+     short clawed fore flippers held low against the chest; the two hind
+     flippers are fans held sole to sole and swept side to side, the stroke
+     the lateral swimmer already makes. Blue-grey over a pale belly, dark
+     irregular spots all over. */
+  const SEAL_SPEC = {
+    id: "harbor_seal", plan: "lateral", profileName: "seal",
+    L: 1.75, xNose: 0.90, axisY: 0.0, noseRound: 0.02, tubeEnd: 0.83, headEnd: 0.22,
+    profile: {
+      top: [[0, 0], [0.02, 0.022], [0.05, 0.040], [0.09, 0.060], [0.13, 0.068], [0.17, 0.070], [0.21, 0.075], [0.27, 0.090], [0.35, 0.110], [0.45, 0.118], [0.55, 0.112], [0.65, 0.090], [0.73, 0.060], [0.79, 0.035], [0.83, 0.022]],
+      bot: [[0, 0], [0.02, 0.020], [0.05, 0.038], [0.09, 0.056], [0.13, 0.064], [0.17, 0.068], [0.21, 0.074], [0.27, 0.092], [0.35, 0.114], [0.45, 0.122], [0.55, 0.114], [0.65, 0.090], [0.73, 0.058], [0.79, 0.034], [0.83, 0.020]],
+      half: [[0, 0], [0.02, 0.022], [0.05, 0.040], [0.09, 0.062], [0.13, 0.070], [0.17, 0.068], [0.21, 0.072], [0.27, 0.095], [0.35, 0.118], [0.45, 0.125], [0.55, 0.118], [0.65, 0.094], [0.73, 0.062], [0.79, 0.036], [0.83, 0.022]],
+      yo: [[0, 0.020], [0.15, 0.012], [0.25, 0], [0.83, 0]],
+    },
+    mouth: {
+      front: 0.012, corner: 0.045, alphaF: 1.20, alphaC: 1.45, shape: 0.7, snoutBlend: 0.01,
+      palate: 0.45, floor: 0.4, throat: 0.6, pharynx: 0.05, lipDrop: 0.0010, chinInset: 0.0015,
+      teeth: {
+        upper: [{ n: 16, h: 0.0060, w: 0.0040, inset: 0.0030, sink: 0.0015, rake: 0.05, rakeCorner: 0.2, thick: 0.6, cornerK: 0.6, span: 0.85 }],
+        lower: [{ n: 16, h: 0.0055, w: 0.0038, inset: 0.0030, sink: 0.0015, rake: 0.05, rakeCorner: 0.2, thick: 0.6, cornerK: 0.6, span: 0.85 }],
+      },
+    },
+    eye: { s: 0.085, up: 0.45, r: 0.017, out: 0.40, socket: 0.15, fwd: 0.25, fixed: true },
+    bones: { head: 0.08, neck: 0.20, root: 0.42, tail: [0.58, 0.70, 0.80, 0.90] },
+    fins: [
+      { name: "foreR", role: "paired", at: 0.27, root: 0.05, span: 0.13, dir: [-0.75, -0.45, 0.48], phi: 0.55, sweep: 0.2, tipC: 0.6, conc: 0, rear: 0.05, rearH: 0.2, round: 0.45, tc: 0.22, tcTip: 0.15, embed: 0.3 },
+      { name: "foreL", role: "paired", at: 0.27, root: 0.05, span: 0.13, dir: [-0.75, -0.45, -0.48], phi: 2 * Math.PI - 0.55, sweep: 0.2, tipC: 0.6, conc: 0, rear: 0.05, rearH: 0.2, round: 0.45, tc: 0.22, tcTip: 0.15, embed: 0.3 },
+      // the hind flippers: fans pointing back, soles facing each other
+      { name: "hindR", role: "median", originS: 0.81, originDz: 0.012, root: 0.07, span: 0.18, dir: [-0.97, 0, 0.24], chordDir: [0, 1, 0], sweep: -0.12, tipC: 1.6, conc: 0.06, rear: 0, rearH: 0, round: 0.3, tc: 0.12, tcTip: 0.06, embed: 0.4 },
+      { name: "hindL", role: "median", originS: 0.81, originDz: -0.012, root: 0.07, span: 0.18, dir: [-0.97, 0, -0.24], chordDir: [0, 1, 0], sweep: -0.12, tipC: 1.6, conc: 0.06, rear: 0, rearH: 0, round: 0.3, tc: 0.12, tcTip: 0.06, embed: 0.4 },
+    ],
+    jaw: { lift: 0.10, drop: 0.50, protrude: [0, 0], gap: 0.02 },
+    wave: { lambda: 1.0, amp: 0.10, env: [0.02, 0.0, 1.0], f0: 0.4, fK: 0.9, fMax: 2.5 },
+    finColor: 0x34373b, dorsalName: "none", caudalName: "hindR",
+    lod: [
+      { M: 24, ds: 0.022, headK: 0.6, noseRings: 4, eyeRings: true, gills: false, teeth: true, finSpan: 6, finChord: 5, eyeSeg: 10, eyeRing: 7, pharynx: 3 },
+      { M: 12, ds: 0.060, headK: 0.7, noseRings: 2, eyeRings: false, gills: false, teeth: false, finSpan: 3, finChord: 3, eyeSeg: 6, eyeRing: 4, pharynx: 2 },
+    ],
   };
-
-  /* ONE GEOMETRY PER SPECIES, for instanced crowds (a bait ball is one
-     InstancedMesh). Builds the species, bakes every material colour into a
-     vertex colour (schoolBody's own baker), scales it to the species' real
-     size and turns its nose from the bestiary's +X to `opts.nose` ("z" for
-     the Ocean game's +Z-forward convention). Cached per (id, nose). */
-  CBZ.aquaticBakedGeometry = function (id, opts) {
-    const nose = (opts && opts.nose) || "x";
-    const key = "baked|" + id + "|" + nose;
-    return cachedGeom(key, function () {
-      const sp = CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES[id];
-      if (!sp || !sp.build) return null;
-      const mf = CBZ.cmat || function (c) { return new T.MeshLambertMaterial({ color: c }); };
-      const g = sp.build({ THREE: T, mat: mf, rng: function () { return 0.5; } });
-      const meshes = [];
-      g.updateMatrixWorld(true);
-      g.traverse(function (o) { if (o.isMesh) meshes.push(o); });
-      // bakeColours reads each mesh's LOCAL matrix; flatten nested children
-      // onto the group so a sleeve parented under another mesh lands right
-      const flat = meshes.map(function (o) {
-        const c = new T.Mesh(o.geometry, o.material);
-        o.matrixWorld.decompose(c.position, c.quaternion, c.scale);
-        return c;
-      });
-      const geo = bakeColours(flat, true);
-      geo.scale(sp.scale || 1, sp.scale || 1, sp.scale || 1);
-      if (nose === "z") geo.rotateY(-Math.PI / 2);
-      geo.computeBoundingBox(); geo.computeBoundingSphere();
-      return geo;
+  SEAL_SPEC.makePaint = function (EY) {
+    const roles = {};
+    SEAL_SPEC.fins.forEach(function (f, i) { roles[i + 1] = f.role; });
+    const L = SEAL_SPEC.L, spot = MB.hexc(0x1e2124), nose = MB.hexc(0x161718);
+    return paintKit({
+      L: L, eyes: EY, finRole: roles,
+      back: 0x3c4246, belly: 0x9c978c, fin: 0x34373b, gum: 0x8a4a4c, gumDeep: 0x4a2022, throat: 0x140608,
+      line: [[0, -0.40], [0.10, -0.20], [0.30, -0.25], [0.83, -0.30]],
+      rag: 0.08, specBack: 0.38, specBelly: 0.3, specFin: 0.3, iris: 0x0a0806, sclera: 0x1a1412, orbit: 0x26292c,
+      // the spots: cells of irregular size, everywhere but the muzzle
+      mark: function (c) {
+        if (c.tag !== MB.TAG.SKIN || c.lod > 0 || c.m[0] < 0.05) return NaN;
+        const w = MB.worley(c.p[0] * 16 / L, c.p[1] * 16 / L, c.p[2] * 16 / L, 71);
+        return 0.32 - w[0] - 0.12 * MB.vn(c.p[0] * 40 / L, c.p[1] * 40 / L, c.p[2] * 40 / L, 72);
+      },
+      skin: function (c, col, up) {
+        if (c.m[0] < 0.02) return nose;
+        if (c.f(1) >= 0) return MB.mixc(col, spot, up ? 0.85 : 0.6);
+        return col;
+      },
     });
+  };
+  CBZ.buildHarborSeal = function () { return marineBuild(SEAL_SPEC); };
+
+  /* ONE GEOMETRY PER SPECIES, for instanced crowds (games/ocean.js draws a
+     bait ball as one InstancedMesh): the species' far body in its rest pose,
+     vertex-coloured, scaled to the species' real size and turned so its nose
+     points along opts.nose ("z" for the Ocean game's +Z forward). */
+  const BAKED = new Map();
+  CBZ.aquaticBakedGeometry = function (id, opts) {
+    const nose = (opts && opts.nose) || "x", lod = opts && opts.lod != null ? opts.lod : 1;
+    const key = id + "|" + nose + "|" + lod;
+    if (BAKED.has(key)) return BAKED.get(key);
+    const sp = CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES[id];
+    const g = sp && sp.build ? sp.build({}) : null;
+    const mb = g && g.userData && g.userData.marineBody;
+    if (!mb) return null;
+    const src = mb.tpl.geo[Math.min(lod, mb.tpl.geo.length - 1)];
+    const geo = new T.BufferGeometry();
+    geo.setAttribute("position", src.attributes.position.clone());
+    geo.setAttribute("normal", src.attributes.normal.clone());
+    geo.setAttribute("color", src.attributes.color.clone());
+    geo.setIndex(src.index.clone());
+    const k = sp.scale || 1;
+    geo.scale(k, k, k);
+    if (nose === "z") geo.rotateY(-Math.PI / 2);
+    geo.computeBoundingBox(); geo.computeBoundingSphere();
+    geo._shared = true;
+    BAKED.set(key, geo);
+    return geo;
   };
 })();
