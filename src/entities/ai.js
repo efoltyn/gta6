@@ -3996,24 +3996,24 @@
         return n.baseSpeed * 1.1;
       }
       case "escape": {
-        const ez = (CBZ.WORLD && CBZ.WORLD.exit.z) || 52;
-        // A RUN NEEDS A WAY OUT. A man inside the cell house with the block
-        // gate racked shut has nowhere to run to, and this state used to run
-        // him at the leaf anyway — for the rest of the night (measured
-        // 2026-09-04, tools/prison-nav-check.mjs: 8 s pressed into the gate at
-        // (0,-8) once the wing's residents were let off their leash). He
-        // thinks better of it and goes back to his business.
-        if (blockGateShut(n)) { n.aiState = "wander"; n.aiTimer = 2 + rng() * 3; break; }
-        // ONE GAP IN THE WIRE, PICKED ONCE. This re-rolled the spot every
-        // think — up to six metres sideways — so a runner at the fence
-        // zigzagged along it and a runner 150 m off threw his route away
-        // each tick and re-planned from scratch (measured: 28 s of a count
-        // block stalled on one man). He picks his gap and keeps it.
-        if (n.aiTimer <= 0 || n._escX == null) { n._escX = (rng() - 0.5) * 6; n.aiTimer = 4 + rng() * 4; }
-        n.target.set(n._escX, 0, ez + 2);
-        if (n.group.position.z > ez - 2) {
-          n.escaped = true; n.group.visible = false;
+        /* A RUN IS THROUGH A WAY THAT IS OPEN. He used to run at a point past
+           the south wall and vanish there, through a shut sally port and in
+           plain view, on a 1.5 % roll. Now he goes only through a port that
+           came open (considerRun, below, is the decision; world/
+           prisonoutside.js knows the ground: the port, the field, the outer
+           gate's arch). "back": it shut before he reached it. "gone": out of
+           the outer gate and out of anybody's sight. */
+        const R = CBZ.prisonRun;
+        // a run decided elsewhere (an open yard gate at night, a plan) takes
+        // the nearest port; it still has to be open when he gets there
+        if (R && !n._runWay && R.nearest) {
+          n._runWay = R.nearest(n); n._runPh = 0;
+          if (n._runWay && !n._runHome) n._runHome = { x: n.group.position.x, z: n.group.position.z };
         }
+        // (shut in the cell house with the block gate racked: nowhere to run)
+        const st = R && n._runWay && !blockGateShut(n) ? R.steer(n, n._runWay) : "back";
+        if (st === "back") { n.aiState = "wander"; n._runWay = null; n._runPh = 0; n._runHome = null; n.aiTimer = 2 + rng() * 3; break; }
+        if (st === "gone") { n.escaped = true; n.group.visible = false; }
         return n.baseSpeed * 1.6;
       }
       default: { // wander
@@ -4040,7 +4040,8 @@
           }
           const pal = findPal(n);
           if (pal && rng() < 0.45) { n.aiState = "socialize"; n.social = pal; break; }
-          if (rng() < 0.015 && !blockGateShut(n)) { n.aiState = "escape"; break; }
+          // (a run for it is not rolled here: a way out has to come open,
+          // and then it is his own call, considerRun below)
           // HIS CAR'S ROUTINE: his car's end of the table at chow, its spot on
           // the yard, its phone, its turn in the shower (systems/prisoncars.js)
           if (PCARS() && PCARS().errand(n)) { /* target set */ }
@@ -4064,6 +4065,32 @@
   }
   CBZ.blockGateShut = blockGateShut;
 
+  /* A WAY OUT HAS OPENED NEAR HIM (world/prisonoutside.js asks once, on the
+     edge, and again when somebody makes it). Whether he goes is his: his
+     nerve and his guts, less what a screw looking right at him costs, plus
+     his crew already through it and every man who has made it. Not a roll:
+     the cautious stay, the bold go, the middle goes once he has watched
+     others get away with it. */
+  const RUN_BAR = 0.7;
+  function considerRun(n, way, d) {
+    if (!n || !way || !n.group || n.dead || n.escaped || n.cuffed || (n.ko > 0) || n.kind === "guard" || n.kind === "warden") return false;
+    if (n.aiState !== "wander" && n.aiState !== "socialize") return false;   // a man in the middle of something stays in it
+    if (heldInCell(n) || blockGateShut(n)) return false;
+    const b = behaviorOf(n), p = n.personality || {};
+    let want = (p.nerve != null ? p.nerve : 0.5) * 0.55 + b.guts * 0.45;
+    want -= watched(n) * (1 - b.guts) * 0.9;
+    if (n.gang >= 0 && way.crews && way.crews[n.gang] > 0) want += 0.22 * loyaltyOf(n);
+    want += Math.min(0.3, (way.made || 0) * 0.1);
+    if (n.role === "merchant" || n.role === "dealer" || n.isLeader) want -= 0.15;   // he runs something in here
+    want -= Math.min(0.25, Math.max(0, (d || 0) - 10) / 140);
+    if (want < RUN_BAR) return false;
+    n.aiState = "escape"; n._runWay = way; n._runPh = 0;
+    if (!n._runHome) n._runHome = { x: n.group.position.x, z: n.group.position.z };
+    n.aiTimer = 0;
+    return true;
+  }
+  CBZ.aiConsiderRun = considerRun;
+
   // called by systems/state.js on restart: revive everyone, re-elect leaders
   function aiReset() {
     if (CBZ.player) CBZ.player._leadsCar = -1;
@@ -4071,6 +4098,9 @@
     for (const n of CBZ.npcs) {
       n._swingDue = null; n._downAt = null; n._threats = null; n._resp = null; n._fairT = 0;
       n.dead = false; n.escaped = false; n.group.visible = true; n.group.rotation.z = 0;
+      // a runner from the last run starts this one where he decided to go
+      if (n._runHome) { n.group.position.x = n._runHome.x; n.group.position.z = n._runHome.z; n._runHome = null; }
+      n._runWay = null; n._runPh = 0;
       n.group.position.y = 0; n._lvy = 0;
       if (CBZ.prisonCorpseClear) CBZ.prisonCorpseClear(n);   // no sprawl in a revived man's shoulders
       n.snitchHeat = 0; n.snitchCop = false; n.snitchT = 0; n.snitchMeta = null;

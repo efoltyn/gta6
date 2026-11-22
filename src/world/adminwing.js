@@ -203,17 +203,23 @@
     if (PD && PD.floor) return PD.floor(x0, x1, z0, z1, kind || "vct", color);
     addBox((x0 + x1) / 2, 0.02, (z0 + z1) / 2, x1 - x0, 0.08, z1 - z0, color, { solid: false, cast: false });
   }
-  // corridor VCT: mid grey. At 0xc9 under five troffers it read as a white
-  // void through the staff door from the cell block (owner's screenshot).
-  floor(IX0, IX1, CORR_Z, IZ1, 0xa3a59f, "vct");
+  /* THE CORRIDOR IS A COURT (2026-11-22). The strip between the cell
+     house's north wall and the office range is open to the sky now: the
+     north-row cells' windows are real openings in that wall (world/
+     cellblock.js NWIN), and an office corridor behind them would have made
+     every cell window look into a ceiling and a strip light. A walled
+     service court is what a real cell window faces. Same walls, same doors,
+     same staff route; a poured slab underfoot, no roof, no lay-in ceiling. */
+  floor(IX0, IX1, CORR_Z, IZ1, 0x8e9296, "slab");
   floor(IX0, PX_A, IZ0, CORR_Z, 0xc3bdae, "vct");              // records
   floor(PX_A, PX_B, IZ0, CORR_Z, 0xbfc3bd, "vct");             // staff room
   floor(PX_B, IX1, QZ, CORR_Z, 0x6e5d4c, "carpet");            // the office gets carpet tile
   floor(PX_B, IX1, IZ0, QZ, 0x5f6670, "carpet");               // quarters
 
   // ---- ONE ROOF over the whole block (world/roofs.js's primitive) -------
+  // (the office range only: the court along the cell house is open)
   if (CBZ.prisonRoof) CBZ.prisonRoof({
-    id: "adminwing", x0: AW.x0, x1: AW.x1, z0: AW.z0, z1: AW.z1,
+    id: "adminwing", x0: AW.x0, x1: AW.x1, z0: AW.z0, z1: CORR_Z + PT / 2,
     top: H, over: WT / 2, deck: 0x616a75, soffit: false,   // the rooms have ceilings
   });
 
@@ -251,6 +257,7 @@
   if (PD && PD.ceiling) {
     for (let i = 0; i < ROOMS.length; i++) {
       const R = ROOMS[i], F = FACES[R.id];
+      if (R.id === "admin-corridor") continue;          // the court: open air, no dado, no ceiling
       PD.trim(F, F.doors, { dado: F.dado, dadoH: 1.0, base: 0x2b2d30, rail: F.rail });
       PD.ceiling(F, CEIL, { id: R.id, kind: "acoustic", lights: "troffer", along: R.axis,
         nx: R.axis === "x" ? R.n : 1, nz: R.axis === "x" ? 1 : R.n });
@@ -268,7 +275,7 @@
     return function () {
       if (done || !CBZ.prisonLights || !CBZ.prisonLights.rooms) return;
       done = true;
-      CBZ.prisonLights.rooms.push({ id: "admin", x0: AW.x0, x1: AW.x1, z0: AW.z0, z1: AW.z1 });
+      CBZ.prisonLights.rooms.push({ id: "admin", x0: AW.x0, x1: AW.x1, z0: AW.z0, z1: CORR_Z });
     };
   })());
 

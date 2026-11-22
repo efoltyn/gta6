@@ -322,8 +322,7 @@
   }
   const HALL_COL = new THREE.Color(1.0, 0.9, 0.74), NIGHT_COL = new THREE.Color(0.55, 0.68, 0.95);
   const TUNE = { hall: 2.2, night: 0.55, amb: 0.30, ambDay: 0.16, sun: 0.14 };
-  let level = 1, nightLevel = 0, glassDay = -1;
-  const GLASS_DAY = new THREE.Color(0xd4e6f0), GLASS_NIGHT = new THREE.Color(0x1b2432);
+  let level = 1, nightLevel = 0;
   function drive(dt) {
     const g = CBZ.game;
     const on = !!(g && g.mode === "escape" && CBZ.prisonRoot && CBZ.prisonRoot.visible);
@@ -355,13 +354,8 @@
     const day = CBZ.dayness == null ? 1 : Math.max(0, Math.min(1, CBZ.dayness * 2));
     U.prIndoorAmb.value = TUNE.amb + TUNE.ambDay * day;
     U.prIndoorSun.value = TUNE.sun;
-    // the cells' wired glass is lit by the sky behind it: pale daylight by
-    // day, a dark blue pane at night (one shared material, cellblock.js)
-    const gl = CBZ.cellWindowGlass;
-    if (gl && Math.abs(day - glassDay) > 0.01) {
-      glassDay = day;
-      gl.color.copy(GLASS_NIGHT).lerp(GLASS_DAY, day);
-    }
+    // (the cells' glass is clear now and the wall behind it a real opening,
+    // world/cellblock.js: the sky is seen through it, not painted on it)
   }
 
   let sweepT = 0, maskDone = false;

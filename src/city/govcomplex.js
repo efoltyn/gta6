@@ -3739,10 +3739,14 @@
      userData so the batcher leaves them alone, and `gate.step(dt)` animates
      them toward whatever protection.js last asked for.
      ==================================================================== */
-  function mansionSecurity(root, R, cx, cz, main, wing) {
-    const gz = R.maxZ;                       // the gate line; inside is -Z
-    const out = { gate: null, roof: null, walk: [], doors: {}, safe: null, footprints: [], gatePosts: [] };
-
+  /* THE CHECKPOINT ALONE: the gate line's working barrier (section 2b) with
+     no mansion behind it. Planter, lane divider, magnetometer arch, X-ray
+     belt, sentry kiosk, the drop arm and the anti-ram bollards, and the posts
+     its officers stand. `gz` is the gate line, inside is -Z, and the gap is
+     the 24 m the Mansion's wall leaves (cx-12 .. cx+12). The Mansion builds
+     it through here and so does the prison's outer gate (world/
+     prisonoutside.js, through CBZ.govGateKit): one checkpoint in the game. */
+  function gateCheckpoint(root, cx, gz) {
     // ---- the vehicle lane's west edge: a planter from the wall to the lane
     const planterZ = gz - 2.0;
     box(root, cx - 9.05, 0.45, planterZ, 6.5, 0.9, 0.8, M.stoneD);
@@ -3889,17 +3893,28 @@
     placeBollards(1);
     colOn(armCol, true);
     for (let i = 0; i < bolCols.length; i++) colOn(bolCols[i], true);
-    out.gate = G;
 
     // the posts at the gate (x, z, facing out to the road); `lockdown` posts
     // are manned only while the capital is locked down
-    out.gatePosts = [
+    const gatePosts = [
       { id: "arch", x: ax - 1.1, z: az - 1.4, face: 0, role: "gate" },
       { id: "lane", x: cx + 4.6, z: gz - 6.4, face: 0, role: "gate" },
       { id: "booth", x: cx - 5.4, z: gz - 6.0, face: 0, role: "gate" },
       { id: "lock0", x: cx - 2.2, z: gz - 5.8, face: 0, role: "gate", lockdown: true },
       { id: "lock1", x: cx + 2.0, z: gz - 5.8, face: 0, role: "gate", lockdown: true },
     ];
+    return { gate: G, gatePosts: gatePosts };
+  }
+  // the gate kit another world builds its own perimeter from (the prison's
+  // outer wall): the same wall, booth and checkpoint as the Executive Mansion
+  CBZ.govGateKit = { perimeter: perimeter, gatehouse: gatehouse, checkpoint: gateCheckpoint, M: M };
+
+  function mansionSecurity(root, R, cx, cz, main, wing) {
+    const gz = R.maxZ;                       // the gate line; inside is -Z
+    const out = { gate: null, roof: null, walk: [], doors: {}, safe: null, footprints: [], gatePosts: [] };
+    const cp = gateCheckpoint(root, cx, gz);
+    out.gate = cp.gate;
+    out.gatePosts = cp.gatePosts;
 
     // ---- THE ROOF STANDS
     const mb = main && main.b;

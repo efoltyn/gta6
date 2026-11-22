@@ -436,7 +436,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=wrap1029"></script>
+<script src="src/config.js?v=outside1122"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=r187a"></script>
@@ -592,8 +592,8 @@ document.body.appendChild(b);}}catch(e){}})();
      all resolved inside the per-frame driver, never at parse. -->
 <script src="src/systems/pushables.js?v=loose1013"></script>
 <script src="src/world/carfx.js?v=r187a"></script>
-<script src="src/world/ground.js?v=dsl3"></script>
-<script src="src/world/cellblock.js?v=race1121"></script>
+<script src="src/world/ground.js?v=outside1122"></script>
+<script src="src/world/cellblock.js?v=outside1122"></script>
 <script src="src/world/yard.js?v=tow929"></script>
 <script src="src/world/razorwire.js?v=dsl3"></script>
 <script src="src/world/towers.js?v=tow929"></script>
@@ -812,7 +812,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=own1122"></script>
 <script src="src/entities/npc.js?v=race1121"></script>
-<script src="src/entities/ai.js?v=shot1122"></script>
+<script src="src/entities/ai.js?v=outside1122b"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -820,7 +820,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=canvas1029"></script>
+<script src="src/world/adminwing.js?v=outside1122"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -883,7 +883,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
      prisonnight.js (CBZ.prisonLights.level prices the dark). -->
 <script src="src/systems/playerflashlight.js?v=night1022"></script>
-<script src="src/world/prisonlook.js?v=look1"></script>
+<script src="src/world/prisonlook.js?v=outside1122"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
      so every useBed() call silently degraded — measured: 21 props, 0 beds),
@@ -969,7 +969,7 @@ document.body.appendChild(b);}}catch(e){}})();
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
-<script src="src/systems/capture.js?v=arrestshot1122"></script>
+<script src="src/systems/capture.js?v=outside1122b"></script>
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
@@ -977,7 +977,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/markers.js?v=nopitch1022"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=leave1014"></script>
-<script src="src/systems/lockdown.js?v=nopitch1022"></script>
+<script src="src/systems/lockdown.js?v=outside1122"></script>
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
 <script src="src/systems/prisonwarden.js?v=map1122"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
@@ -1008,7 +1008,7 @@ document.body.appendChild(b);}}catch(e){}})();
      interactions.js: its capture-phase keys must run ahead of the pinned
      prompts' bound keys while you stand in a car. -->
 <script src="src/systems/liftpanel.js?v=lpanel1022"></script>
-<script src="src/systems/interactions.js?v=name1121"></script>
+<script src="src/systems/interactions.js?v=outside1122"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=jailv1001"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
@@ -1616,7 +1616,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=both1029"></script>
-<script src="src/city/vehicles.js?v=layout1122"></script>
+<script src="src/city/vehicles.js?v=outside1122b"></script>
 <script src="src/city/carinstances.js?v=stick187"></script>
 <script src="src/city/playerair.js?v=fx1029"></script>
 <script src="src/city/playeraircraft.js?v=islesmem1029"></script>
@@ -2576,7 +2576,15 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=r187a"></script>
+<script src="src/city/govcomplex.js?v=outside1122"></script>
+<!-- THE PRISON'S OUTER PERIMETER (world/prisonoutside.js): the field past the
+     wire, the staff lot and its drivable cars, the outer wall with the
+     Executive Mansion's checkpoint for its gate, the break (out of the wire)
+     and the win (out of that gate), and the inmates who run when a port comes
+     open. A prison builder (core/prisonlazy.js); AFTER govcomplex.js (it
+     builds the gate from CBZ.govGateKit) and entities/guards.js (its two gate
+     officers are CBZ.spawnGuard's). -->
+<script src="src/world/prisonoutside.js?v=outside1122"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's

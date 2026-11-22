@@ -1789,6 +1789,16 @@
       if (down.t >= LAW.BEAT && gdDist(gd) <= LAW.NEAR && lineTo(gd) && floorTake(gd)) return ESC.REACH;
       return ESC.REACH;
     }
+    // AT THE WHEEL OF A STAFF CAR (world/prisonoutside.js). A screw cannot
+    // cuff a man in a moving car; one that has stopped, he opens the door on
+    // and takes him out of, and the arrest goes on as on foot.
+    if (player.driving) {
+      const car = player._vehicle;
+      const sp = car ? Math.max(Math.abs(car.v || 0), Math.hypot(car.vx || 0, car.vz || 0)) : 0;
+      if (sp > 1.5 || gdDist(gd) > ESC.REACH + 2.2) return ARREST.STANDOFF;
+      if (CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
+      if (player.driving) return ARREST.STANDOFF;
+    }
     if (arrest) {
       if (arrest.gd !== gd) return ARREST.STANDOFF + 1.2;
       return arrest.phase === "order" ? ARREST.STANDOFF : arrest.phase === "chase" ? 1.2 : ESC.REACH;

@@ -197,7 +197,8 @@
      car left in CBZ.cityCars from an earlier session must never be solid on
      the island. Untagged records are Gang City's; a record built while
      another vehicle world was live carries `_world` = that mode. */
-  CBZ.VEHICLE_MODES = { city: 1, survival: 1, archipelago: 1 };
+  // escape: the prison's staff lot outside the wall (world/prisonoutside.js)
+  CBZ.VEHICLE_MODES = { city: 1, survival: 1, archipelago: 1, escape: 1 };
   CBZ.vehicleModeOn = function (m) { return !!CBZ.VEHICLE_MODES[m || (CBZ.game && CBZ.game.mode)]; };
   CBZ.vehicleInWorld = function (v, m) {
     return ((v && v._world) || "city") === (m || (CBZ.game && CBZ.game.mode) || "city");
@@ -263,6 +264,15 @@
     // PRISON_WINGS_V1 = false -> prisonwings.js draws nothing, yard.js closes
     // its gaps, and the clamp below falls back to the inner extents.
     wings: { x0: -124, x1: 124, z0: -116, z1: 128 },
+    // THE OUTER PERIMETER (world/prisonoutside.js). Owner 2026-11-22: out of
+    // the wire is not out; past it is a huge open field and another wall so
+    // far off you cannot see it from the prison (the prison fog closes at
+    // 360 m; this is 1.1 to 1.25 km off every side of the wire). The run is
+    // won at its one gate, the Executive Mansion's checkpoint (city/
+    // govcomplex.js), at (gateX, z1) on the south side. NOT part of the
+    // extents below: the nav window, the maps and the density grid stay the
+    // compound's own.
+    outer: { x0: -1250, x1: 1250, z0: -1250, z1: 1380, gateX: 0 },
     // overall extents used by the actor clamp + minimap (a touch of margin).
     // They frame the OUTER wire now: the minimap, the full map, the strategic
     // overview, systems/navigation.js and entities/ambientstate.js's density
