@@ -2226,7 +2226,7 @@
   // the face's plane, tail pointing along the drop's in-plane travel
   function wallDrop(px, py, pz, nx, nz, vx, vy, vz, g, col) {
     if (walls.length > 34) return false;             // the kills' own wall splats come first
-    if (waterOn()) {
+    if (seaColumn(px, pz)) {
       const w = submRaw(px, py, pz);
       if (w !== DRY && w > 0.02) { SEA_AUDIT.wall++; puffFromBit(px, py, pz, vx, vy, vz, g, false); return true; }
     }
@@ -2753,7 +2753,7 @@
       BLEED_AUDIT.litres += b.lps * dt;
       if (b.lps < 0.0003 && b.poolLit < 0.01) { bleedEnd(b); BLEEDS.splice(i, 1); continue; }
       b.probeT -= dt;
-      if (b.probeT <= 0) { b.probeT = 0.3; b.wet = waterOn() && woundInWater(b.x, b.y, b.z); }
+      if (b.probeT <= 0) { b.probeT = 0.3; b.wet = seaWound(b.x, b.y, b.z); }
       if (b.wet) {
         // IN THE SEA: the cloud's trail, riding this wound (or this mouth)
         BLEED_AUDIT.wetLitres += b.lps * dt;
@@ -2820,7 +2820,7 @@
     let dx = opts.dir ? (+opts.dir.x || 0) : 0, dy = opts.dir ? (+opts.dir.y || 0) : 0, dz = opts.dir ? (+opts.dir.z || 0) : 0;
     const dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (dl > 1e-3) { dx /= dl; dy /= dl; dz /= dl; } else { dx = dy = dz = 0; }
-    if (waterOn() && woundInWater(x, y, z)) {
+    if (seaWound(x, y, z)) {
       _wdir.x = dx; _wdir.y = dy; _wdir.z = dz;
       CBZ.goreBloom(x, y, z, { amount: 0.5 + amt, arterial: !!opts.arterial, dir: dl > 1e-3 ? _wdir : null });
       return;
@@ -3118,15 +3118,47 @@
      running over the sand takes them (GORE_SWASH). */
   const SEA_FLOOR_MIN = 0.03;      // m of standing water (mean column) that makes ground sea floor
   const SEA_AUDIT = { pools: 0, drops: 0, smearsCut: 0, wall: 0 };
+  /* ONLY A WORLD WITH A SEA HAS A SEA FLOOR. The prison, the arenas and the
+     city are stacked on one plane (escape z~0, the islands z~600, the city
+     z~-700), and the water queries are the CITY's: at the prison's
+     coordinates they answer for the city's own water there. Asked
+     "anywhere", they put a few centimetres of sea over the prison yard, and
+     a jail corpse laid about half its marks "into the water" (53 ground
+     marks where main lays 96 on the same tree). So the islands and the city
+     route blood into their sea and nothing else does: in the prison, ground
+     is ground, exactly as on main. And in the city only the SEA counts: a
+     street under rain or a surge keeps its stain (the wash below takes it,
+     as it always has); a cloud "in" five centimetres of rainwater is drawn
+     under the road. */
+  function seaWorld() {
+    const g = CBZ.game;
+    return !!g && (cityMode() || !!(CBZ.islandModeOn && CBZ.islandModeOn(g.mode)));
+  }
+  // the city's open water at (x, z), not what stands on its land
+  function citySeaColumn(x, z) {
+    if (!CBZ.cityWaterAt || !CBZ.cityWaterAt(x, z)) return false;
+    const W = CBZ.waterField;
+    if (W && typeof W.coastAt === "function") { const s = +W.coastAt(x, z); if (isFinite(s) && s >= 0) return false; }
+    return true;
+  }
+  // this world's sea at (x, z): the islands' is everywhere they say water,
+  // the city's is its open water, and nothing else has one
+  function seaColumn(x, z) {
+    if (!waterOn() || !seaWorld()) return false;
+    try { return cityMode() ? citySeaColumn(x, z) : true; } catch (e) { return false; }
+  }
+  // a wound in this world's sea (the bleeder's and a bite's own test; the
+  // kill path keeps main's woundInWater, untouched)
+  function seaWound(x, y, z) { return seaColumn(x, z) && woundInWater(x, y, z); }
   // metres of standing water over where a ground mark at (x, z) would be
   // seated, 0 on dry ground (or on a deck, a crate, a step above the water)
   function seaFloorDepth(x, z) {
-    if (!waterOn()) return 0;
+    if (!waterOn() || !seaWorld()) return 0;
     try {
       // the islands: the mean column over the ground (the same reading the
       // wash takes, so a wave's crest never decides it), minus anything a
       // mark would be seated on above that ground
-      if (CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)) {
+      if (!cityMode()) {
         if (!CBZ.survFloodDepthMeanAt) return 0;
         const d = +CBZ.survFloodDepthMeanAt(x, z);
         if (!(d > SEA_FLOOR_MIN)) return 0;
@@ -3134,20 +3166,15 @@
         const over = (isFinite(bed) ? bed : floorAt(x, z)) + d - decalFloorAt(x, z);
         return over > SEA_FLOOR_MIN ? over : 0;
       }
-      // the city: its floor under its water is a flat 0 nobody draws, so on
-      // the water mask anything not standing on a solid is in the water
-      if (cityMode()) {
-        if (!CBZ.cityWaterAt || !CBZ.cityWaterAt(x, z)) return 0;
-        const g = floorAt(x, z), seat = decalFloorAt(x, z);
-        if (seat <= g + 0.02) {
-          const d = CBZ.cityWaterDepthAt ? +CBZ.cityWaterDepthAt(x, z) : 1;
-          return isFinite(d) && d > SEA_FLOOR_MIN ? d : 1;
-        }
-        const w = submRaw(x, seat, z);
-        return w !== DRY && w > SEA_FLOOR_MIN ? w : 0;
+      // the city: its floor under its sea is a flat 0 nobody draws, so on
+      // the open water anything not standing on a solid is in the water
+      if (!citySeaColumn(x, z)) return 0;
+      const g = floorAt(x, z), seat = decalFloorAt(x, z);
+      if (seat <= g + 0.02) {
+        const d = CBZ.cityWaterDepthAt ? +CBZ.cityWaterDepthAt(x, z) : 1;
+        return isFinite(d) && d > SEA_FLOOR_MIN ? d : 1;
       }
-      // anywhere else: water standing over the seat itself
-      const w = submRaw(x, decalFloorAt(x, z), z);
+      const w = submRaw(x, seat, z);
       return w !== DRY && w > SEA_FLOOR_MIN ? w : 0;
     } catch (e) {}
     return 0;
@@ -3602,7 +3629,7 @@
     }
     const col = best.c;                                   // best is a reused record: hold it all now
     const nx = best.nx, nz = best.nz, hx = best.x, hz = best.z, cy = best.y;
-    if (waterOn()) {
+    if (seaColumn(hx, hz)) {
       const w = submRaw(hx, cy, hz);
       if (w !== DRY && w > 0.02) { SEA_AUDIT.wall++; CBZ.goreBloom(hx, cy, hz, { amount: Math.max(0.3, Math.min(2, amt)) }); return; }
     }
