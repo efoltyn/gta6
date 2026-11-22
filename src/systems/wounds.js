@@ -569,6 +569,9 @@
   const MAT_CLOTH = new THREE.MeshBasicMaterial({
     color: 0xffffff, vertexColors: true, transparent: true, depthWrite: false,
     blending: THREE.CustomBlending, blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,   // r128's MultiplyBlending (r187's wants premultiplied alpha)
+    // the canvas keeps its own alpha: the context has one, and a multiply
+    // that also multiplied it let the page show through as a pale quad
+    blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
     fog: false, toneMapped: false,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
@@ -1110,21 +1113,33 @@
     return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
   }
   function sstep(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+  // two octaves on rotated axes: no square grain from the lattice
+  function fbm(x, y, s) {
+    return 0.62 * vnoise(x * 0.8 + y * 0.6, y * 0.8 - x * 0.6, s) + 0.38 * vnoise(x * 1.25 - y * 1.6, y * 1.25 + x * 1.6, s + 3);
+  }
   // the angle's own noise, continuous round the circle
   function angN(th, s) { return vnoise(Math.cos(th) * 2.3 + 5, Math.sin(th) * 2.3 + 5, s); }
 
   /* ---- THE TWO ATLASES ------------------------------------------------------
-     TISSUE (4 x 2 cells of 128, linear DATA, not colour): per texel
-       R depth (0 skin level .. 1 the bottom of the wound)
-       G the torn epidermis lip      B wet blood on it      A cover
+     TISSUE (4 x 3 cells of 128, linear DATA, not colour): per texel
+       R depth (0 the cut's lip .. 1 the bottom of the wound)
+       G where the fat shows in the cut's wall (patchy, never a ring)
+       B wet blood on it      A cover (0 outside the opening and its blood)
      The tissue shader turns depth into the victim's own layers (see
      woundMat), so ONE puncture cell is a dog's bite in an arm, a cone's hole
-     in a shark and an orca's in a whale, each in its own flesh.
-     STAIN (2 x 2 cells of 128, display multipliers, drawn MULTIPLY): bruise,
-     soak (with the tide line blood leaves at its wicking front), the hole a
-     tooth leaves in cloth or fur, a rip. Multiply darkens whatever is under
-     it: denim stays blue round a black hole, white fur goes rust-dark, never
-     painted red.
+     in a shark and an orca's in a whale, each in its own flesh. The skin
+     round a wound is not painted here: it is the stain layer's.
+     STAIN (4 x 3 cells of 128, display multipliers, drawn MULTIPLY): RGB a
+     detail multiplier (never above 1), A how much of the stain there is.
+     The shader fades the multiplier to white by A, so where A is 0 nothing
+     changes, and a stain can only ever darken what is under it: blood in a
+     weave (wicking along the threads, heavier downhill), blood matting fur,
+     a film of blood on skin (thin blood is a dye: drawn as paint at half
+     cover it turns to mud), a bruise, the inflamed skin round a wound, the
+     hole a tooth tears in cloth, the coat parted round a hole, a rip, a
+     tooth's scrape.
+     Every shape fades to 0 well inside its cell (EDGE), so no mark ever ends
+     on the cell's straight border.
      Both are painted a few rows a frame after the first seconds of play; a
      bite that comes first finishes them on the spot. */
   const SKIN_GUT = 4;
@@ -1142,9 +1157,9 @@
       const y = (j + 0.5) / C * 2 - 1;
       for (let i = 0; i < C; i++) {
         const x = (i + 0.5) / C * 2 - 1;
-        if (fn) fn(x, y, px); else col(px, 0, 0, 0, 0);
-        // the gutter is forced clear, so a mark always ends in skin and a
-        // filtered sample never reaches the neighbouring cell
+        if (fn) fn(x, y, px); else col(px, 1, 1, 1, 0);
+        // the gutter is forced clear, so a filtered sample never reaches the
+        // neighbouring cell (the shapes are already clear long before it)
         const gut = i < SKIN_GUT || j < SKIN_GUT || i >= C - SKIN_GUT || j >= C - SKIN_GUT;
         const o = ((oy + j) * Wd + ox + i) * 4;
         data[o] = b255(px[0]); data[o + 1] = b255(px[1]); data[o + 2] = b255(px[2]);
@@ -1170,208 +1185,352 @@
     t._shared = true;
     return t;
   }
+  // the safety margin every shape is already inside of
+  function EDGE(x, y) { return 1 - sstep(0.86, 0.92, Math.max(Math.abs(x), Math.abs(y))); }
 
   // ---- the tissue cells (x, y in -1..1 across the cell; +y is "up" the mark)
-  // 0 PUNCTURE: a tooth's round hole. A bowl that drops steeply under a ragged
-  // lip, the skin split along two tension lines, an abraded stippled margin,
-  // blood standing in it and leaving downhill.
+  // the fat a cut shows: a thin band just inside its edge (e 0 at the edge,
+  // 1 well inside), broken into patches (blood covers more of it)
+  function fatBand(e, x, y, s) { return sstep(0.0, 0.03, e) * (1 - sstep(0.06, 0.12, e)) * sstep(0.6, 0.72, vnoise(x * 11, y * 11, s)); }
+  // 0 PUNCTURE: a conical tooth's hole. Round with a hint of the tooth's three
+  // sides, torn on along the drag (+x), a steep wall going black at the
+  // bottom, the fat showing in patches in the wall, blood welling in it and
+  // nothing outside it: the skin round it (inflamed, smeared with blood) is
+  // the stain layer's.
   function cPuncture(x, y, px) {
     const r = Math.hypot(x, y), th = Math.atan2(y, x);
-    const split = Math.pow(Math.max(0, Math.cos(2 * (th - 0.6))), 24) * 0.14;
-    const R0 = 0.40 * (1 + 0.18 * (angN(th, 31) - 0.5)) + split;
-    const hole = 1 - sstep(R0 - 0.05, R0 + 0.015, r);
-    const q = Math.min(1, r / Math.max(0.05, R0));
-    const depth = hole * (0.3 + 0.7 * Math.pow(Math.max(0, 1 - q * q), 0.5));
-    const lip = (1 - sstep(0.0, 0.06 + 0.05 * vnoise(x * 9, y * 9, 32), Math.abs(r - R0 - 0.03))) * (1 - hole * 0.75);
-    const abr = (1 - sstep(R0, R0 + 0.30, r)) * (0.3 + 0.45 * vnoise(x * 14, y * 14, 33));
-    let blood = hole * (0.5 + 0.3 * vnoise(x * 6, y * 6, 34));
-    if (y < 0 && r > R0 * 0.7) {
-      const w = 0.09 + 0.05 * vnoise(y * 5, 1, 35), run = -y - R0;
-      if (Math.abs(x - 0.04 * Math.sin(y * 7)) < w * (1 - Math.max(0, run) / 0.55) && run < 0.5) blood = Math.max(blood, 0.7);
-    }
-    const a = Math.max(hole, lip * 0.95, abr * 0.55, blood * 0.85) * (1 - sstep(0.86, 0.98, r));
-    col(px, depth, Math.max(lip, abr * 0.5), blood, a);
+    const R0 = 0.33 * (1 + 0.07 * Math.cos(3 * th + 0.4) + 0.22 * (angN(th, 31) - 0.5)) + 0.12 * Math.pow(Math.max(0, Math.cos(th)), 5);
+    const q = r / R0;
+    const open = 1 - sstep(0.86, 1.0, q);
+    const depth = open * Math.min(1, 0.3 + 0.8 * Math.pow(Math.max(0, 1 - q), 0.5));
+    const fat = fatBand(1 - q, x, y, 32);
+    const well = open * (0.3 + 0.45 * sstep(0.3, 0.75, vnoise(x * 5, y * 5, 34)));
+    col(px, depth, fat * (1 - well), well, open * EDGE(x, y));
   }
-  // 1 SERRATED: one serrated blade's cut. It enters at its widest (the base,
-  // -y) and the close drags it on toward +y; both edges are sawn.
+  // 1 PUNCTURE, SLANTED: a tooth that went in at an angle and ploughed on: a
+  // ragged slot, deepest where it entered (-x)
+  function cPuncture2(x, y, px) {
+    const ex = (x + 0.05) / 0.42, ey = y / 0.19;
+    const th = Math.atan2(ey, ex);
+    const q = Math.hypot(ex, ey) / (1 + 0.22 * (angN(th, 37) - 0.5) + 0.12 * Math.pow(Math.max(0, -Math.cos(th)), 4));
+    const open = 1 - sstep(0.84, 1.0, q);
+    const deep = 1 - sstep(-0.4, 0.5, x);
+    const depth = open * Math.min(1, 0.25 + (0.45 + 0.5 * deep) * Math.pow(Math.max(0, 1 - q), 0.5));
+    const fat = fatBand(1 - q, x, y, 38);
+    const well = open * (0.3 + 0.5 * sstep(0.35, 0.7, vnoise(x * 6, y * 6, 39)));
+    col(px, depth, fat * (1 - well), well, open * EDGE(x, y));
+  }
+  // 2 SERRATED: one serrated blade's cut. It enters at its widest (the base,
+  // -y) and the close drags it on toward +y; both edges sawn.
   function cSerrated(x, y, px) {
-    const t = (y + 0.82) / 1.72;
-    if (t < -0.06 || t > 1.04) { col(px, 0, 0, 0, 0); return; }
-    const hw0 = 0.48 * Math.max(0, 1 - Math.max(0, t)) * (1 + 0.12 * (vnoise(y * 4, 2, 41) - 0.5));
-    const saw = 0.032 * (0.5 + 0.5 * Math.sin(y * 64 + 1.3)) * (1 - Math.max(0, t));
+    const t = (y + 0.70) / 1.45;
+    if (t < -0.12 || t > 1.04) { col(px, 0, 0, 0, 0); return; }
+    const tt = Math.max(0, Math.min(1, t));
+    const b0 = -0.08 + 0.06 * (vnoise(x * 9, 5, 45) - 0.5);
+    const hw0 = 0.44 * (1 - tt) * (1 + 0.14 * (vnoise(y * 4, 2, 41) - 0.5)) * sstep(b0, b0 + 0.12, t);
+    const saw = 0.035 * (0.5 + 0.5 * Math.sin(y * 60 + 1.3)) * (1 - tt);
     const hw = Math.max(0, hw0 - saw);
-    const ax = Math.abs(x + 0.025 * Math.sin(y * 3.1));
-    const inside = (1 - sstep(hw - 0.025, hw + 0.01, ax)) * (t > -0.02 ? 1 : 0);
-    const depth = inside * (0.3 + 0.7 * (1 - sstep(0, Math.max(0.04, hw), ax)) * (1 - 0.45 * Math.max(0, t)));
-    const lip = (1 - sstep(0, 0.05, Math.abs(ax - hw))) * (t < 0.98 ? 1 : 0) * (1 - inside * 0.6);
-    let blood = inside * (0.45 + 0.3 * vnoise(x * 8, y * 8, 42));
-    if (t < 0.05 && ax < 0.16 && y > -0.98) blood = Math.max(blood, 0.6 * (1 - sstep(-0.82, -0.98, y)));
-    const a = Math.max(inside, lip * 0.9, blood * 0.8) * (1 - sstep(0.93, 0.99, Math.abs(y)));
-    col(px, depth, lip, Math.min(1, blood), a);
+    const ax = Math.abs(x + 0.025 * Math.sin(y * 3.1)) + 0.03 * (vnoise(y * 25, x > 0 ? 1 : 3, 43) - 0.5);
+    const open = 1 - sstep(hw - 0.025, hw + 0.008, ax);
+    const depth = open * (0.3 + 0.7 * (1 - sstep(0, Math.max(0.04, hw), ax)) * (1 - 0.5 * tt));
+    const fat = fatBand((hw - ax) / Math.max(0.02, hw) * 0.5, x, y, 44);
+    const blood = open * (0.4 + 0.35 * vnoise(x * 8, y * 8, 42));
+    col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y) * (1 - sstep(0.8, 0.86, Math.abs(y))));
   }
-  // 2 SLIT: a clean straight cut along x (a blade's edge, a beak, the saw
-  // line that joins a shark's tooth cuts into one incision)
+  // 3 SLIT: a clean cut along x (a blade's edge, a beak, a knife row)
   function cSlit(x, y, px) {
     const ax = Math.abs(x);
-    if (ax > 0.97) { col(px, 0, 0, 0, 0); return; }
-    const hw = 0.12 * Math.pow(Math.max(0, 1 - ax * ax), 0.6) * (1 + 0.2 * (vnoise(x * 6, 3, 51) - 0.5));
+    if (ax > 0.84) { col(px, 0, 0, 0, 0); return; }
+    const hw = 0.12 * Math.pow(Math.max(0, 1 - Math.pow(ax / 0.82, 2)), 0.6) * (1 + 0.2 * (vnoise(x * 6, 3, 51) - 0.5));
     const yc = 0.025 * Math.sin(x * 4.1) + 0.02 * (vnoise(x * 11, 4, 52) - 0.5);
     const ay = Math.abs(y - yc);
-    const inside = 1 - sstep(hw * 0.8, hw + 0.01, ay);
-    const depth = inside * (0.35 + 0.65 * (1 - sstep(0, Math.max(0.02, hw), ay)));
-    const lip = (1 - sstep(0, 0.04, Math.abs(ay - hw))) * (1 - sstep(0.82, 0.97, ax)) * (1 - inside * 0.5);
-    let blood = inside * 0.55;
-    if (y < yc - hw && y > yc - hw - 0.35) {
-      const k = Math.floor((x + 1) * 5), xc = -1 + (k + 0.5) / 5 + 0.05 * (h2(k, 3, 53) - 0.5);
-      if (h2(k, 9, 54) > 0.55 && Math.abs(x - xc) < 0.025 && (yc - hw - y) < 0.12 + 0.2 * h2(k, 5, 55)) blood = 0.7;
-    }
-    const a = Math.max(inside, lip * 0.8, blood * 0.85);
-    col(px, depth, lip * 0.8, blood, a);
+    const open = 1 - sstep(hw * 0.8, hw + 0.01, ay);
+    const depth = open * (0.35 + 0.65 * (1 - sstep(0, Math.max(0.02, hw), ay)));
+    const fat = fatBand((hw - ay) / Math.max(0.02, hw) * 0.5, x, y, 53);
+    const blood = open * (0.45 + 0.25 * vnoise(x * 7, 1, 54));
+    col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
   }
-  // 3 TEAR: a laceration the shake dragged out of a deep tooth. Torn, not
-  // cut: the line wanders, the edges are ragged, and one lip is the skin the
-  // tooth pulled up and back.
+  // 4 TEAR: a laceration the shake dragged out of a deep tooth. Torn, not
+  // cut: the line wanders, the edges are ragged, the width comes and goes.
   function cTear(x, y, px) {
     const ax = Math.abs(x);
-    if (ax > 0.97) { col(px, 0, 0, 0, 0); return; }
+    if (ax > 0.84) { col(px, 0, 0, 0, 0); return; }
     const yc = 0.10 * Math.sin(x * 2.3 + 0.4) + 0.10 * (vnoise(x * 3, 7, 61) - 0.5);
-    const hw = 0.22 * Math.pow(Math.max(0, 1 - Math.pow(ax, 1.7)), 0.8) * (0.5 + 0.9 * vnoise(x * 4.5, 1, 62));
+    const hw = 0.2 * Math.pow(Math.max(0, 1 - Math.pow(ax / 0.82, 1.7)), 0.8) * (0.45 + 0.9 * vnoise(x * 4.5, 1, 62));
     const dy = y - yc;
     const ay = Math.abs(dy) + 0.05 * (vnoise(x * 22, dy > 0 ? 1 : 5, 63) - 0.5);
-    const inside = 1 - sstep(hw * 0.78, hw + 0.012, ay);
-    const depth = inside * (0.3 + 0.55 * (1 - sstep(0, Math.max(0.03, hw), ay)));
-    const lipW = dy > 0 ? 0.10 : 0.05;
-    const lip = (1 - sstep(0, lipW, ay - hw)) * (ay > hw * 0.7 ? 1 : 0);
-    const blood = inside * (0.55 + 0.35 * vnoise(x * 7, y * 7, 64));
-    const a = Math.max(inside, lip * 0.85, blood * 0.85) * (1 - sstep(0.85, 0.97, ax));
-    col(px, depth, lip, blood, a);
+    const open = 1 - sstep(hw * 0.78, hw + 0.012, ay);
+    const depth = open * (0.3 + 0.55 * (1 - sstep(0, Math.max(0.03, hw), ay)));
+    const fat = fatBand((hw - ay) / Math.max(0.02, hw) * 0.5, x, y, 65);
+    const blood = open * (0.5 + 0.35 * vnoise(x * 7, y * 7, 64));
+    col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
   }
-  // 4 RAKE: one tooth dragged along the skin: a shallow line, tapering in and
-  // out, with a faint raised lip; the fresh ones bead with blood
+  // 5 RAKE: one tooth dragged along the skin: a shallow line tapering in and
+  // out, the skin scraped off and bleeding along it
   function cRake(x, y, px) {
     const ax = Math.abs(x);
-    if (ax > 0.97) { col(px, 0, 0, 0, 0); return; }
-    const taper = Math.pow(Math.max(0, 1 - Math.pow(ax / 0.95, 2)), 0.5);
+    if (ax > 0.84) { col(px, 0, 0, 0, 0); return; }
+    const taper = Math.pow(Math.max(0, 1 - Math.pow(ax / 0.82, 2)), 0.5);
     const yc = 0.05 * Math.sin(x * 3.3 + 0.7);
-    const hw = 0.30 * taper * (0.7 + 0.6 * vnoise(x * 10, 2, 71));
+    const hw = 0.26 * taper * (0.65 + 0.7 * vnoise(x * 10, 2, 71));
     const ay = Math.abs(y - yc);
-    const inside = 1 - sstep(hw * 0.55, hw, ay);
-    const lip = (1 - sstep(hw * 0.55, hw * 1.7, ay)) * 0.55 * taper;
-    const blood = inside * (0.15 + 0.4 * vnoise(x * 18, 3, 72));
-    col(px, inside * 0.3, lip, blood, Math.max(inside, lip * 0.7));
+    const open = 1 - sstep(hw * 0.5, hw, ay);
+    const blood = 0.62 + 0.3 * vnoise(x * 4, 3, 72);
+    col(px, open * (0.06 + 0.1 * (1 - ay / Math.max(0.01, hw))), 0, blood, open * 0.95 * EDGE(x, y));
   }
-  // 5 CRATER: where flesh was taken. A dish under a rim scalloped by the
-  // teeth that cut it, the cut muscle's grain across the floor, blood pooled
-  // in its lower half. Depth runs 0 at the rim to 1 at the floor's middle, so
-  // a whale's blubber band and a dog's thin fat show as rings of their own.
+  // 6 CRATER: where flesh was taken, an oval dish. Its rim scalloped by the
+  // teeth that cut it, the cut muscle's grain across the floor, the fat in
+  // patches in its wall, blood pooled in its lower half. Depth runs 0 at the
+  // rim to 1 at the middle, so a whale's blubber shows as its own band.
   function cCrater(x, y, px) {
     const r = Math.hypot(x, y), th = Math.atan2(y, x);
-    const sc = 0.5 + 0.5 * Math.cos(th * 15 + 1.7);
-    const R0 = 0.86 * (1 - 0.055 * sc - 0.05 * (angN(th, 81) - 0.5));
-    if (r > R0 + 0.12) { col(px, 0, 0, 0, 0); return; }
+    const sc = (0.5 + 0.5 * Math.cos(th * 15 + 1.7 + 2 * angN(th, 86))) * (0.3 + 0.9 * angN(th * 1.7, 87));
+    const R0 = 0.78 * (1 - 0.05 * sc - 0.06 * (angN(th, 81) - 0.5));
+    if (r > R0 + 0.04) { col(px, 0, 0, 0, 0); return; }
     const q = Math.min(1, r / R0);
-    const fib = 0.06 * Math.sin(x * 46 + y * 9 + 4 * vnoise(x * 3, y * 3, 82)) * (1 - q);
-    const depth = Math.max(0, Math.pow(Math.max(0, 1 - q * q), 0.45) + fib) * (1 - sstep(R0 - 0.02, R0 + 0.02, r));
-    const lip = (1 - sstep(0, 0.07, Math.abs(r - R0))) * (0.7 + 0.3 * vnoise(x * 12, y * 12, 83));
-    const blood = Math.min(0.85, ((1 - q) * 0.15 + sstep(0.0, -0.7, y) * 0.5) * (r < R0 ? 1 : 0) + 0.12 * vnoise(x * 7, y * 7, 84));
-    const a = Math.max(r < R0 ? 1 : 0, lip) * (1 - sstep(R0 + 0.02, R0 + 0.1, r));
-    col(px, Math.min(1, depth), lip, blood, a);
+    const fib = 0.025 * Math.sin(x * 46 + y * 9 + 4 * vnoise(x * 3, y * 3, 82)) * (1 - q) * (1 - q);
+    const open = 1 - sstep(R0 - 0.03, R0 + 0.01, r);
+    const depth = open * Math.min(0.97, Math.max(0, 0.08 + 0.9 * Math.pow(Math.max(0, 1 - q * q), 0.8) + fib));
+    const fat = fatBand(1 - r / R0, x, y, 83);
+    const blood = open * Math.min(0.85, Math.max(0.15 * (1 - q) + 0.55 * sstep(0.0, -0.7, y) + 0.15 * vnoise(x * 7, y * 7, 84), 0.7 * sstep(0.5, 0.72, vnoise(x * 6, y * 6, 85)) * sstep(0.55, 0.8, q)));
+    col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
   }
-  // 6 BLOOD: wet blood on bare skin, feathered, never a disc
+  // 7 GAPE: where a big mouth took a chunk, seen on the skin: wider than it
+  // is deep, its outline irregular (torn, not cut, between the tooth lines
+  // that bound it above and below), notched at tooth scale, skin tags
+  // hanging into it; steep walls, the floor deep and uneven, dark where it
+  // is deepest, blood standing in its lower part. The tooth cuts along its
+  // two edges are their own marks.
+  function cGape(x, y, px) {
+    const ex = x / 0.74, ey = (y + 0.02) / 0.52;
+    const r = Math.hypot(ex, ey), th = Math.atan2(ey, ex);
+    const R0 = 1 + 0.16 * (angN(th, 141) - 0.5) + 0.1 * (angN(th * 2 + 1.3, 142) - 0.5)
+      - 0.05 * Math.pow(Math.abs(Math.sin(th * 9 + 3 * angN(th, 143))), 6) + 0.025 * (vnoise(x * 22, y * 22, 147) - 0.5);
+    const q = r / R0;
+    const open = 1 - sstep(0.9, 1.0, q);
+    if (open <= 0) { col(px, 0, 0, 0, 0); return; }
+    const floor = vnoise(x * 4, y * 4, 144), lump = vnoise(x * 9, y * 9, 148);
+    const depth = open * Math.min(0.97, 0.3 + 0.62 * Math.pow(Math.max(0, 1 - q), 0.45) * (0.75 + 0.35 * floor) + 0.06 * (lump - 0.5));
+    const fat = fatBand(1 - q, x, y, 145);
+    const blood = open * Math.min(0.9, 0.55 * (1 - sstep(-0.6, 0.1, y)) + 0.3 * sstep(0.45, 0.8, vnoise(x * 6, y * 6, 146)));
+    col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
+  }
+  // 8 POOL: wet blood standing on bare skin under a wound: opaque (a pool is
+  // not a film), glossy, its edge short and irregular. The thin film round
+  // it is the stain layer's.
   function cBlood(x, y, px) {
-    const r = Math.hypot(x, y), th = Math.atan2(y, x);
-    const edge = 0.72 * (1 + 0.16 * Math.sin(th * 3 + 0.7) + 0.09 * Math.sin(th * 5 + 2.1) + 0.06 * Math.sin(th * 8 + 4.2)) + 0.1 * (angN(th, 91) - 0.5);
-    const a = (1 - sstep(edge * 0.65, edge, r)) * (0.65 + 0.35 * vnoise(x * 6, y * 6, 92));
-    col(px, 0.04, 0.0, 1.0, a * 0.9);
+    const yy = y - 0.05, ys = yy / (yy > 0 ? 0.7 : 1.0);
+    const r = Math.hypot(x, ys), th = Math.atan2(ys, x);
+    const edge = 0.6 * (1 + 0.14 * Math.sin(th * 3 + 0.7) + 0.08 * Math.sin(th * 5 + 2.1)) + 0.1 * (angN(th, 91) - 0.5);
+    const a = 1 - sstep(edge - 0.07, edge, r);
+    col(px, 0.03, 0, 1, a * EDGE(x, y));
   }
-  // 7 top: a RUN of blood (u across the run, v along it); bottom: a FLAP's
+  // 9 top: a RUN of blood (u across the run, v along it); bottom: a FLAP's
   // outline (torn cloth or hide), frayed on every free edge
   function cStripFlap(x, y, px) {
     if (y > 0.06) {
-      const prof = Math.pow(Math.max(0, 1 - x * x), 0.7) * (0.8 + 0.2 * vnoise(x * 4, y * 9, 95));
-      col(px, 0.03, 0.0, 1.0, prof * 0.95);
+      const prof = 1 - sstep(0.55 + 0.15 * vnoise(x * 3, y * 9, 95), 1.0, Math.abs(x));
+      col(px, 0.03, 0.0, 1.0, prof);
     } else if (y < -0.06) {
-      const fy = (y + 0.53) / 0.44;
-      const ex = 0.93 - 0.10 * vnoise(y * 30, 1, 96), ey = 0.93 - 0.12 * vnoise(x * 30, 2, 97);
-      const a = (1 - sstep(ex - 0.05, ex, Math.abs(x))) * (1 - sstep(ey - 0.06, ey, Math.abs(fy)));
+      const fy = (y + 0.53) / 0.44, k = Math.max(0, Math.min(1, (fy + 1) * 0.5));
+      const ex = (0.93 - 0.5 * k * k) * (1 - 0.14 * vnoise(y * 30, 1, 96)) + 0.08 * (vnoise(y * 5, 3, 98) - 0.5);
+      const ey = 0.93 - 0.18 * vnoise(x * 24, 2, 97);
+      const a = (1 - sstep(ex - 0.05, ex, Math.abs(x + 0.1 * k * (vnoise(1, 4, 99) - 0.5)))) * (1 - sstep(ey - 0.06, ey, Math.abs(fy)));
       col(px, 0, 0, 0, a);
     } else col(px, 0, 0, 0, 0);
   }
-  // ---- the stain cells (RGB = display multiplier detail, A = cover) ---------
+  // 11 RAGGED: a crushing bite's wound: torn open in lobes, tags of skin
+  // poking into it, the crushed meat mottled, blood in its lower part
+  function cRagged(x, y, px) {
+    const r = Math.hypot(x, y), th = Math.atan2(y, x);
+    const lobes = 0.18 * (angN(th, 161) - 0.5) + 0.12 * (angN(th * 2.3 + 1, 162) - 0.5);
+    const tags = 0.06 * Math.pow(Math.abs(Math.sin(th * 7 + 3 * angN(th, 163))), 8);
+    const R0 = 0.64 * (1 + lobes) - tags;
+    const q = r / Math.max(0.05, R0);
+    const open = 1 - sstep(0.88, 1.0, q);
+    const mott = vnoise(x * 6, y * 6, 164);
+    const depth = open * Math.min(1, Math.max(0, 0.3 + 0.6 * Math.pow(Math.max(0, 1 - q), 0.6) + 0.2 * (mott - 0.5)));
+    const fat = fatBand(1 - q, x, y, 165);
+    const blood = open * Math.min(0.9, 0.3 + 0.45 * sstep(0.35, 0.75, vnoise(x * 4, y * 4, 166)) + 0.2 * sstep(0, -0.6, y));
+    col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
+  }
+  // ---- the stain cells (RGB = a display multiplier's detail, A = cover; the
+  //      RGB runs on smoothly past the shape so filtering never fringes it)
+  // 0 BRUISE: blotchy, soft-edged, broken by the blood under the skin
   function sBruise(x, y, px) {
-    const r = Math.hypot(x, y);
-    const n = vnoise(x * 3.5, y * 3.5, 101), n2 = vnoise(x * 11, y * 11, 102);
-    const a = (1 - sstep(0.25, 0.95, r + 0.25 * (n - 0.5))) * (0.55 + 0.45 * n2);
-    const v = 0.9 + 0.1 * n2;
-    col(px, v, v, v, a);
-  }
-  function sSoak(x, y, px) {
     const r = Math.hypot(x, y), th = Math.atan2(y, x);
-    const edge = 0.8 * (1 + 0.14 * Math.sin(th * 3 + 0.2) + 0.08 * Math.sin(th * 7 + 1.1)) + 0.1 * (angN(th, 111) - 0.5);
-    const a = 1 - sstep(edge * 0.86, edge, r);
-    const tide = 1 - sstep(0, 0.08, Math.abs(r - edge * 0.9));
-    const v = 0.92 - 0.24 * tide - 0.06 * vnoise(x * 9, y * 9, 112);
-    col(px, v, v, v, a);
+    const n = fbm(x * 3.2, y * 3.2, 101), n2 = fbm(x * 7, y * 7, 102);
+    const R = 0.66 * (1 + 0.22 * (angN(th, 103) - 0.5));
+    const a = (1 - sstep(0.2, R, r + 0.22 * (n - 0.5))) * (0.62 + 0.38 * n2);
+    const v = 0.88 + 0.12 * n2;
+    col(px, v, v, v, a * EDGE(x, y));
   }
-  function sHole(x, y, px) {
-    const r = Math.hypot(x, y), th = Math.atan2(y, x);
-    const R0 = 0.40 * (1 + 0.35 * (angN(th * 1.7, 121) - 0.5));
-    const fibre = Math.pow(Math.abs(Math.sin(th * 23 + 3 * vnoise(x * 5, y * 5, 122))), 6);
-    const fr = R0 + 0.22 * fibre;
-    let v = 1, a = 0;
-    if (r < R0) { v = 0.08 + 0.1 * vnoise(x * 8, y * 8, 123); a = 1; }
-    else if (r < fr) { v = 0.42 + 0.35 * (r - R0) / 0.22; a = 1; }
-    else { a = (1 - sstep(fr, fr + 0.15, r)) * 0.45; v = 0.72; }
-    col(px, v, v, v, a * (1 - sstep(0.9, 0.98, r)));
+  // 1 SOAK, CLOTH: blood wicking into a weave. It travels fastest along the
+  // threads (a squarish front, ragged at thread scale), further down than up,
+  // and leaves its darker tide line at the front.
+  function sSoakCloth(x, y, px) {
+    const yy = y + 0.1, ys = yy / (yy > 0 ? 0.66 : 0.9);
+    const d = 0.62 * Math.hypot(x, ys) + 0.38 * Math.max(Math.abs(x), Math.abs(ys));
+    const th = Math.atan2(ys, x);
+    const e = 0.6 * (1 + 0.12 * Math.sin(th * 3 + 0.2) + 0.07 * Math.sin(th * 7 + 1.1)) + 0.1 * (angN(th, 111) - 0.5)
+      + 0.035 * (vnoise(x * 42, y * 2.5, 112) - 0.5) + 0.035 * (vnoise(x * 2.5, y * 42, 113) - 0.5);
+    const a = (1 - sstep(e - 0.09, e, d)) * (0.62 + 0.38 * (1 - sstep(0, e, d)) + 0.1 * (fbm(x * 5, y * 5, 114) - 0.5));
+    const tide = 1 - sstep(0.0, 0.06, Math.abs(d - (e - 0.05)));
+    const v = Math.min(1, 0.88 + 0.08 * fbm(x * 6, y * 6, 115) - 0.25 * tide);
+    col(px, v, v, v, a * EDGE(x, y));
   }
+  // 2 SOAK, FUR: blood mats the coat into dark wet locks along its lie (down
+  // the body); never paints it red
+  function sSoakFur(x, y, px) {
+    const yy = y + 0.12, ys = yy / (yy > 0 ? 0.62 : 0.92);
+    const r = Math.hypot(x, ys), th = Math.atan2(ys, x);
+    const e = 0.62 * (1 + 0.14 * (angN(th, 121) - 0.5));
+    // locks: clumps a little longer than wide, wandering, not a comb
+    const wx = x + 0.12 * (fbm(x * 2, y * 2, 124) - 0.5);
+    const lock = fbm(wx * 7, y * 3, 122);
+    const blob = 1 - sstep(e - 0.22, e + 0.12 * (lock - 0.5), r);
+    const v = 0.66 + 0.26 * fbm(x * 6, y * 3, 123);
+    col(px, v, v, v, blob * (0.6 + 0.4 * sstep(0.3, 0.7, lock)) * EDGE(x, y));
+  }
+  // 3 HOLE, CLOTH: a tooth's hole torn in a weave: it tears along the threads
+  // (squarish, its edge notched at thread scale), the fabric round it wet
+  // and darker toward the hole
+  function sHoleCloth(x, y, px) {
+    const th = Math.atan2(y, x);
+    const dm = 0.55 * Math.hypot(x, y) + 0.45 * Math.max(Math.abs(x), Math.abs(y));
+    const R0 = 0.34 * (1 + 0.3 * (angN(th * 1.3, 131) - 0.5)) + 0.025 * (vnoise(x * 26, y * 26, 132) - 0.5);
+    const hole = 1 - sstep(R0 - 0.02, R0 + 0.01, dm);
+    const wet = (1 - sstep(R0, R0 + 0.3, dm)) * (1 - hole);
+    const v = (0.55 + 0.3 * sstep(R0, R0 + 0.3, dm)) * (1 - hole) + (0.08 + 0.08 * vnoise(x * 8, y * 8, 135)) * hole;
+    col(px, v, v, v, Math.max(hole, wet * 0.6) * EDGE(x, y));
+  }
+  // 4 HOLE, FUR: the coat parted round a tooth's hole: the hole dark, the
+  // hair round it wet and clumped, drawn out down the lie of the coat
+  function sHoleFur(x, y, px) {
+    const yy = y + 0.06, ys = yy / (yy > 0 ? 0.8 : 1.0);
+    const r = Math.hypot(x, ys), th = Math.atan2(ys, x);
+    const R0 = 0.28 * (1 + 0.3 * (angN(th, 141) - 0.5));
+    const hole = 1 - sstep(R0 - 0.03, R0 + 0.01, r);
+    const clump = sstep(0.3, 0.7, fbm(x * 6, y * 4, 142));
+    const mat = (1 - sstep(R0, R0 + 0.26 + 0.1 * clump, r)) * (1 - hole);
+    const v = 0.1 * hole + (1 - hole) * (0.5 + 0.25 * clump);
+    col(px, v, v, v, Math.max(hole, mat * (0.45 + 0.4 * clump)) * EDGE(x, y));
+  }
+  // 5 RIP: a tear along x in a weave: the dark gap, edges notched at thread
+  // scale, a narrow frayed and wet band either side
   function sRip(x, y, px) {
     const ax = Math.abs(x);
-    if (ax > 0.96) { col(px, 1, 1, 1, 0); return; }
-    const hw = 0.10 * Math.pow(Math.max(0, 1 - ax * ax), 0.5) * (0.7 + 0.6 * vnoise(x * 5, 3, 131));
-    const ay = Math.abs(y - 0.03 * Math.sin(x * 5));
-    const fib = 0.08 * Math.pow(Math.abs(Math.sin(x * 60 + 2 * vnoise(x * 4, 1, 132))), 4);
-    let v = 1, a = 0;
-    if (ay < hw) { v = 0.1; a = 1; }
-    else if (ay < hw + fib + 0.02) { v = 0.48; a = 1; }
-    else { a = (1 - sstep(hw, hw + 0.15, ay)) * 0.3; v = 0.8; }
-    col(px, v, v, v, a);
+    const taper = Math.pow(Math.max(0, 1 - Math.pow(ax / 0.84, 2)), 0.5);
+    const yc = 0.03 * Math.sin(x * 5) + 0.02 * (vnoise(x * 9, 2, 151) - 0.5);
+    const ay = Math.abs(y - yc), up = y > yc;
+    const hw = 0.09 * taper * (0.7 + 0.6 * vnoise(x * 5, 3, 152));
+    const notch = 0.025 * (vnoise(x * 34, up ? 4 : 5, 153) - 0.5);
+    const gap = (1 - sstep(hw - 0.01, hw + 0.01, ay + notch)) * (taper > 0 ? 1 : 0);
+    const fray = (1 - sstep(hw, hw + 0.05 + 0.03 * vnoise(x * 20, up ? 6 : 7, 154), ay)) * (1 - gap) * taper;
+    const wet = (1 - sstep(hw, hw + 0.16, ay)) * (1 - gap) * taper;
+    const v = (0.5 + 0.3 * (1 - fray)) * (1 - gap) + 0.1 * gap;
+    col(px, v, v, v, Math.max(gap, fray * 0.75, wet * 0.35) * EDGE(x, y));
+  }
+  // 6 RIM: the skin round a wound, inflamed and bruised: darker and redder
+  // than itself (the tint makes it so), strongest at the wound
+  function sRim(x, y, px) {
+    const r = Math.hypot(x, y), th = Math.atan2(y, x);
+    const R = 0.66 * (1 + 0.2 * (angN(th, 161) - 0.5));
+    const n = vnoise(x * 7, y * 7, 162);
+    const a = (1 - sstep(0.1, R, r + 0.15 * (n - 0.5))) * (0.6 + 0.4 * n);
+    const v = 0.9 + 0.1 * vnoise(x * 13, y * 13, 163);
+    col(px, v, v, v, a * EDGE(x, y));
+  }
+  // 7 ABRASION: where a small tooth pressed or scraped and did not go in:
+  // a patch scratched along the drag
+  function sAbrasion(x, y, px) {
+    const ex = x / 0.68, ey = y / 0.34, q = Math.hypot(ex, ey) + 0.3 * (vnoise(x * 4, y * 4, 171) - 0.5);
+    const patch = 1 - sstep(0.55, 1.0, q);
+    const stri = sstep(0.3, 0.7, vnoise(x * 2.5, y * 20, 172));
+    const dots = sstep(0.74, 0.86, vnoise(x * 16, y * 16, 174));
+    const v = 0.74 + 0.2 * fbm(x * 8, y * 8, 173) - 0.55 * dots;
+    col(px, v, v, v, patch * Math.max(0.45 + 0.55 * stri, dots) * EDGE(x, y));
+  }
+  // 8 BLOOD ON SKIN: a film of blood is a dye, not a paint: it darkens and
+  // reddens the skin under it, thicker toward the wound, lying lower than
+  // it, a few fingers running on downhill
+  function sBloodSkin(x, y, px) {
+    const yy = y - 0.12, ys = yy / (yy > 0 ? 0.6 : 0.92);
+    const r = Math.hypot(x, ys), th = Math.atan2(ys, x);
+    const e = 0.56 * (1 + 0.13 * Math.sin(th * 3 + 0.9) + 0.07 * Math.sin(th * 6 + 2.0)) + 0.08 * (angN(th, 181) - 0.5);
+    let a = (1 - sstep(e - 0.16, e, r)) * (0.7 + 0.3 * (1 - r / Math.max(0.05, e)));
+    // the fingers: where the film's lower edge let go
+    const k = Math.floor((x + 1) * 5), xc = -1 + (k + 0.5) / 5 + 0.06 * (h2(k, 3, 182) - 0.5);
+    if (h2(k, 7, 183) > 0.5 && ys < 0 && Math.abs(xc) < 0.35) {
+      const L = 0.2 + 0.2 * h2(k, 5, 184), y0 = -e * 0.5, dy = (y0 - ys) / L;
+      if (dy > 0 && dy < 1) {
+        const w = 0.035 * (1 - dy * 0.6);
+        a = Math.max(a, (1 - sstep(w * 0.6, w, Math.abs(x - xc))) * (1 - sstep(0.75, 1, dy)) * 0.85);
+      }
+    }
+    const v = 0.9 + 0.1 * fbm(x * 6, y * 6, 185);
+    col(px, v, v, v, Math.min(1, a) * EDGE(x, y));
+  }
+  // 9 SMEAR: blood beaded and smeared round a tooth's hole, patchy
+  function sSmear(x, y, px) {
+    const r = Math.hypot(x, y), th = Math.atan2(y, x);
+    const R = 0.6 * (1 + 0.25 * (angN(th, 191) - 0.5));
+    const patch = sstep(0.38, 0.62, fbm(x * 5, y * 5, 192));
+    const a = (1 - sstep(R * 0.55, R, r)) * patch;
+    const v = 0.85 + 0.15 * fbm(x * 9, y * 9, 193);
+    col(px, v, v, v, a * EDGE(x, y));
   }
   // cell rectangles in uv (u0, v0, du, dv)
+  function cellRect(i, cols, rows) { return [(i % cols) / cols, Math.floor(i / cols) / rows, 1 / cols, 1 / rows]; }
   const TCELL = {
-    puncture: [0, 0, 0.25, 0.5], serrated: [0.25, 0, 0.25, 0.5], slit: [0.5, 0, 0.25, 0.5], tear: [0.75, 0, 0.25, 0.5],
-    rake: [0, 0.5, 0.25, 0.5], crater: [0.25, 0.5, 0.25, 0.5], blood: [0.5, 0.5, 0.25, 0.5],
-    strip: [0.75, 0.765, 0.25, 0.22], flap: [0.75, 0.515, 0.25, 0.22],
+    puncture: cellRect(0, 4, 3), puncture2: cellRect(1, 4, 3), serrated: cellRect(2, 4, 3), slit: cellRect(3, 4, 3),
+    tear: cellRect(4, 4, 3), rake: cellRect(5, 4, 3), crater: cellRect(6, 4, 3), gape: cellRect(7, 4, 3),
+    blood: cellRect(8, 4, 3), ragged: cellRect(11, 4, 3),
   };
-  const SCELL = { bruise: [0, 0, 0.5, 0.5], soak: [0.5, 0, 0.5, 0.5], hole: [0, 0.5, 0.5, 0.5], rip: [0.5, 0.5, 0.5, 0.5] };
+  (function () {
+    const c = cellRect(9, 4, 3);
+    TCELL.strip = [c[0], c[1] + c[3] * 0.53, c[2], c[3] * 0.44];
+    TCELL.flap = [c[0], c[1] + c[3] * 0.03, c[2], c[3] * 0.44];
+  })();
+  const SCELL = {
+    bruise: cellRect(0, 4, 3), soakCloth: cellRect(1, 4, 3), soakFur: cellRect(2, 4, 3), holeCloth: cellRect(3, 4, 3),
+    holeFur: cellRect(4, 4, 3), rip: cellRect(5, 4, 3), rim: cellRect(6, 4, 3), abrasion: cellRect(7, 4, 3),
+    bloodSkin: cellRect(8, 4, 3), smear: cellRect(9, 4, 3),
+  };
   let SKIN_JOBS = null;
   function skinJobs() {
     if (!SKIN_JOBS) SKIN_JOBS = {
-      tissue: texJob([cPuncture, cSerrated, cSlit, cTear, cRake, cCrater, cBlood, cStripFlap], 4, 2, 128),
-      stain: texJob([sBruise, sSoak, sHole, sRip], 2, 2, 128),
+      tissue: texJob([cPuncture, cPuncture2, cSerrated, cSlit, cTear, cRake, cCrater, cGape, cBlood, cStripFlap, null, cRagged], 4, 3, 128),
+      stain: texJob([sBruise, sSoakCloth, sSoakFur, sHoleCloth, sHoleFur, sRip, sRim, sAbrasion, sBloodSkin, sSmear, null, null], 4, 3, 128),
     };
     return SKIN_JOBS;
   }
 
   /* ---- THE VICTIM'S OWN TISSUE ---------------------------------------------
-     Display colours (linearised once). L = [fat starts, muscle starts, the
-     dark blood-filled bottom starts], in the tissue atlas's depth units:
-       mammal    skin over a thin yellow fat over red muscle (people, dogs,
-                 deer, bears)
-       cetacean  grey skin, a thick pale blubber layer, near-black muscle
-                 (myoglobin): a whale's wound is a pale ring round dark meat
-       shark     pale pinkish-white flesh all the way down
-       fish      white flesh; tuna and marlin are red-muscled fish */
+     LINEAR albedos, each solved through the game's own output transform
+     (core/renderer.js: exposure / 0.6, ACES, the grade, sRGB) to show as a
+     chosen colour on a face lit at 1.0: ACES pushes any red with little
+     green toward a pure, bright red, so a "dark red" hex reads as a sticker
+     on screen. What each shows:
+       mammal   cut skin wall 0.46/0.13/0.11 (darker and redder than any
+                skin), fat 0.76/0.66/0.48 (only in patches in the wall),
+                muscle 0.36/0.07/0.05 (deep red-brown), the bottom near
+                black, blood 0.38/0.03/0.03 (dark, wet)
+       cetacean grey skin cut 0.30/0.27/0.28, a thick blubber band
+                0.72/0.58/0.52, muscle near black-red 0.22/0.04/0.04
+       shark    pale pink flesh all the way down (0.78/0.60/0.56 .. 0.72/0.50/0.47)
+       fish     white flesh;  redfish  tuna and marlin, dark red meat 0.40/0.07/0.08
+     L = [fat starts, muscle starts, the dark blood-filled bottom starts], in
+     the tissue atlas's depth units; solid = 1 when the fat is a continuous
+     band (blubber), 0 when it only shows in patches in a cut's wall. */
   const TISSUE = {
-    mammal: { rim: 0xe4c6b9, dermis: 0xb8665c, fat: 0xe0c48c, muscle: 0x8c2020, deep: 0x260406, blood: 0x5c0b0e, scar: 0xd6b4a8, L: [0.16, 0.30, 0.78] },
-    cetacean: { rim: 0xd0cdc7, dermis: 0x9d9894, fat: 0xeadbc6, muscle: 0x4a0a0e, deep: 0x140303, blood: 0x4c080b, scar: 0xd8dddf, L: [0.04, 0.54, 0.86] },
-    shark: { rim: 0xd6d0ca, dermis: 0xe4ccc4, fat: 0xeedcd4, muscle: 0xd8aaa2, deep: 0x8a3c3c, blood: 0x580a0d, scar: 0xdfdfdf, L: [0.06, 0.56, 0.9] },
-    fish: { rim: 0xe8e8ea, dermis: 0xf0e2da, fat: 0xf4e8e0, muscle: 0xe8c8be, deep: 0x9c4e4a, blood: 0x5a0a0d, scar: 0xe6e6e6, L: [0.06, 0.5, 0.9] },
-    redfish: { rim: 0xe6e4e6, dermis: 0xd89a94, fat: 0xe2bab2, muscle: 0xa2262c, deep: 0x4a080e, blood: 0x560a0d, scar: 0xe0dcdc, L: [0.06, 0.24, 0.85] },
+    mammal: { dermis: [0.1609, 0.0364, 0.0233], fat: [0.3975, 0.2939, 0.1653], muscle: [0.1189, 0.0204, 0.0], deep: [0.0229, 0.0, 0.0], blood: [0.1295, 0.0145, 0.0], scar: [0.4604, 0.314, 0.2791], L: [0.10, 0.17, 0.80], solid: 0 },
+    cetacean: { dermis: [0.0859, 0.0751, 0.0765], fat: [0.3447, 0.2273, 0.1893], muscle: [0.067, 0.008, 0.0], deep: [0.0167, 0.0, 0.0], blood: [0.1047, 0.0111, 0.0], scar: [0.4411, 0.451, 0.4608], L: [0.05, 0.52, 0.86], solid: 1 },
+    shark: { dermis: [0.2034, 0.1498, 0.1447], fat: [0.4179, 0.2416, 0.2153], muscle: [0.3384, 0.176, 0.1606], deep: [0.0933, 0.0203, 0.009], blood: [0.1122, 0.014, 0.0], scar: [0.4771, 0.4887, 0.4804], L: [0.05, 0.30, 0.86], solid: 1 },
+    fish: { dermis: [0.2385, 0.2005, 0.2016], fat: [0.5455, 0.3869, 0.3419], muscle: [0.4565, 0.2935, 0.2614], deep: [0.1066, 0.0309, 0.0236], blood: [0.1122, 0.014, 0.0], scar: [0.5181, 0.5319, 0.5461], L: [0.05, 0.25, 0.86], solid: 1 },
+    redfish: { dermis: [0.1255, 0.0934, 0.0996], fat: [0.2357, 0.1355, 0.126], muscle: [0.1358, 0.022, 0.0121], deep: [0.0356, 0.0, 0.0], blood: [0.0969, 0.01, 0.0], scar: [0.4763, 0.4511, 0.461], L: [0.04, 0.12, 0.85], solid: 1 },
   };
-  function lin3(hex) {
-    const f = function (v) { return Math.pow(v / 255, 2.2); };
-    return new THREE.Color(f((hex >> 16) & 255), f((hex >> 8) & 255), f(hex & 255));
-  }
+  function lin3(a) { return new THREE.Color(a[0], a[1], a[2]); }
   function linArr(r, g, b) { return [Math.pow(r, 2.2), Math.pow(g, 2.2), Math.pow(b, 2.2)]; }
   let TEX_T = null, TEX_S = null;
   function tissueTex() { return TEX_T || (TEX_T = makeTex(skinJobs().tissue, false)); }
@@ -1379,23 +1538,27 @@
   const WMATS = Object.create(null);
   /* THE TISSUE SHADER. A Phong (wet tissue and blood catch the light; a
      wound in a dim sea is as dim as the body) whose diffuse is chosen per
-     pixel from the atlas depth through the victim's layers, the torn lip
-     where it is shallow, blood where the atlas says wet, a healed scar as
-     the rake ages, and a flap's own colour (cloth or hide outside, its raw or
-     lined underside behind). Per vertex: colour.r how deep this mark goes,
-     .g how healed, .b 1 = a hide flap / 0.5 = a cloth flap, .a its fade;
-     wCol the flap's outside colour. */
+     pixel from the atlas depth through the victim's layers: the cut skin
+     wall, the fat (a mammal's thin layer where the atlas lets it show just
+     inside a cut's edge, a whale's blubber as the band of depth it is), the
+     muscle, the black bottom, blood where the atlas says wet, a healed scar
+     as a rake ages, and a flap's own colour (cloth or hide outside, its raw
+     or lined underside behind). Per vertex: colour.r how deep this mark
+     goes (it caps the atlas depth: a shallow hole has the same sharp wall
+     and no black bottom), .g how healed, .b 1 = a hide flap / 0.5 = a cloth
+     flap, .a its fade; wCol the flap's outside colour. Blood and the open wound are glossy, the rest is
+     not. */
   function woundMat(kind) {
     const T = TISSUE[kind] || TISSUE.mammal;
     if (WMATS[kind]) return WMATS[kind];
     const U = {
-      uTRim: { value: lin3(T.rim) }, uTDermis: { value: lin3(T.dermis) }, uTFat: { value: lin3(T.fat) },
+      uTDermis: { value: lin3(T.dermis) }, uTFat: { value: lin3(T.fat) },
       uTMuscle: { value: lin3(T.muscle) }, uTDeep: { value: lin3(T.deep) }, uTBlood: { value: lin3(T.blood) },
-      uTScar: { value: lin3(T.scar) }, uTL: { value: new THREE.Vector3(T.L[0], T.L[1], T.L[2]) },
+      uTScar: { value: lin3(T.scar) }, uTL: { value: new THREE.Vector3(T.L[0], T.L[1], T.L[2]) }, uTSolid: { value: T.solid },
     };
     const m = new THREE.MeshPhongMaterial({
       map: tissueTex(), color: 0xffffff, vertexColors: true, transparent: true, depthWrite: false,
-      side: THREE.DoubleSide, shininess: 46, specular: new THREE.Color(0.20, 0.19, 0.19),
+      side: THREE.DoubleSide, shininess: 90, specular: new THREE.Color(0.07, 0.068, 0.066),
       polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
     });
     m.onBeforeCompile = function (sh) {
@@ -1404,46 +1567,57 @@
         .replace("#include <common>", "#include <common>\nattribute vec3 wCol;\nvarying vec3 vWCol;")
         .replace("#include <begin_vertex>", "#include <begin_vertex>\nvWCol = wCol;");
       sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying vec3 vWCol;\nuniform vec3 uTRim;\nuniform vec3 uTDermis;\nuniform vec3 uTFat;\nuniform vec3 uTMuscle;\nuniform vec3 uTDeep;\nuniform vec3 uTBlood;\nuniform vec3 uTScar;\nuniform vec3 uTL;\nfloat wWet = 0.0;")
+        .replace("#include <common>", "#include <common>\nvarying vec3 vWCol;\nuniform vec3 uTDermis;\nuniform vec3 uTFat;\nuniform vec3 uTMuscle;\nuniform vec3 uTDeep;\nuniform vec3 uTBlood;\nuniform vec3 uTScar;\nuniform vec3 uTL;\nuniform float uTSolid;\nfloat wWet = 0.0;")
         .replace("#include <map_fragment>", [
           "vec4 wT = texture2D( map, vMapUv );",
-          "float wD = clamp( wT.r * vColor.r, 0.0, 1.0 );",
-          "vec3 wC = mix( uTDermis, uTFat, smoothstep( uTL.x, uTL.x + 0.05, wD ) );",
-          "wC = mix( wC, uTMuscle, smoothstep( uTL.y, uTL.y + 0.06, wD ) );",
+          "float wD = clamp( min( wT.r, vColor.r ), 0.0, 1.0 );",
+          "vec3 wC = mix( uTDermis, uTMuscle, smoothstep( uTL.y, uTL.y + 0.12, wD ) );",
           "wC = mix( wC, uTDeep, smoothstep( uTL.z, 1.0, wD ) );",
-          "wC = mix( wC, uTRim, wT.g * ( 1.0 - smoothstep( 0.35, 0.6, wD ) ) );",
+          "float wFat = mix( wT.g * 0.9, smoothstep( uTL.x, uTL.x + 0.03, wD ) * ( 1.0 - smoothstep( uTL.y - 0.015, uTL.y + 0.03, wD ) ), uTSolid );",
+          "wC = mix( wC, uTFat, wFat );",
           "wC = mix( wC, uTBlood, wT.b );",
           "wC = mix( wC, uTScar, vColor.g );",
           "vec3 wBack = mix( vWCol * 0.45, uTDermis * 0.75, step( 0.75, vColor.b ) );",
           "wC = mix( wC, gl_FrontFacing ? vWCol : wBack, step( 0.25, vColor.b ) );",
-          "wWet = max( wT.b, smoothstep( 0.25, 0.7, wD ) ) * ( 1.0 - vColor.g ) * ( 1.0 - step( 0.25, vColor.b ) );",
+          "wWet = max( wT.b, smoothstep( 0.2, 0.6, wD ) ) * ( 1.0 - vColor.g ) * ( 1.0 - step( 0.25, vColor.b ) );",
           "diffuseColor.rgb = wC;",
           "diffuseColor.a *= wT.a;",
         ].join("\n"))
         .replace("#include <color_fragment>", "diffuseColor.a *= vColor.a;")
-        .replace("#include <specularmap_fragment>", "float specularStrength = 0.06 + 0.94 * wWet;");
+        .replace("#include <specularmap_fragment>", "float specularStrength = 0.05 + 0.95 * wWet;");
     };
-    m.customProgramCacheKey = function () { return "cbzWound2"; };
+    m.customProgramCacheKey = function () { return "cbzWound3"; };
     m._shared = true;
     m.name = "wound-" + kind;
     WMATS[kind] = m;
     return m;
   }
+  /* THE STAIN LAYER: MULTIPLY. What a stain does to light is absorb it: a
+     film of blood, a bruise, blood in a weave are dyes, so the multiplier
+     is the colour raised to its cover (Beer-Lambert: half as thick lets the
+     square root through), and the blend writes
+       out.rgb = dst.rgb * pow( map.rgb * tint, cover )   <= dst.rgb
+     where cover 0 is exactly 1: nothing it covers is ever lightened, and a
+     thin film is already red, not a pink-grey veil. The alpha factors keep the
+     canvas's own alpha: the WebGL context has one (three always asks for
+     it), and multiplying it by the stain's alpha let the page show through
+     every quad as a pale rectangle. */
   let SMAT = null;
   function stainMat() {
     if (SMAT) return SMAT;
     const m = new THREE.MeshBasicMaterial({
       map: stainTex(), color: 0xffffff, vertexColors: true, transparent: true, depthWrite: false,
-      blending: THREE.CustomBlending, blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+      blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,
+      blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
       fog: false, toneMapped: false,
       polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
     });
-    // multiply cannot fade by alpha: fade the multiplier itself toward white
     m.onBeforeCompile = function (sh) {
       sh.fragmentShader = sh.fragmentShader.replace("#include <opaque_fragment>",
-        "#include <opaque_fragment>\ngl_FragColor.rgb = mix( vec3( 1.0 ), gl_FragColor.rgb, clamp( gl_FragColor.a, 0.0, 1.0 ) );");
+        "#include <opaque_fragment>\ngl_FragColor.rgb = pow( clamp( gl_FragColor.rgb, vec3( 0.001 ), vec3( 1.0 ) ), vec3( clamp( gl_FragColor.a, 0.0, 1.0 ) ) );");
     };
-    m.customProgramCacheKey = function () { return "cbzStain2"; };
+    m.customProgramCacheKey = function () { return "cbzStain3"; };
     m._shared = true;
     m.name = "wound-stain";
     SMAT = m;
@@ -1465,8 +1639,8 @@
     skinWarmT += dt;
     if (skinWarmT < 2.5) return;
     const J = skinJobs();
-    if (!texJobStep(J.tissue, 6)) return;
-    if (!texJobStep(J.stain, 6)) return;
+    const a = texJobStep(J.tissue, 6), b = texJobStep(J.stain, 6);
+    if (!a || !b) return;
     skinWarmed = true;
     if (typeof CBZ.shaderQueue === "function") {
       try {
@@ -2037,7 +2211,7 @@
     if (_eT.lengthSq() < 1e-10) { _eT.set(-_eN.z, 0, _eN.x); if (_eT.lengthSq() < 1e-10) _eT.set(1, 0, 0); }
     _eT.normalize();
     _eB.crossVectors(_eN, _eT);
-    const sx = Math.max(1e-4, el.sx), sy = Math.max(1e-4, el.sy), sz = Math.max(1e-4, el.dz * 2);
+    const sx = Math.max(1e-4, el.sx), sy = Math.max(1e-4, el.sy), sz = Math.max(1e-4, el.dz * 2, Math.max(sx, sy) * 0.35);
     _eb.set(_eT.x * sx, _eB.x * sy, _eN.x * sz, el.P.x,
       _eT.y * sx, _eB.y * sy, _eN.y * sz, el.P.y,
       _eT.z * sx, _eB.z * sy, _eN.z * sz, el.P.z,
@@ -2181,10 +2355,10 @@
         let gg;
         if (t < a.T) gg = a.g0 + (g1 - a.g0) * Math.sqrt(t / a.T);
         else { const k = Math.min(1, (t - a.T) / (a.creep || 40)); gg = g1 + (1 - g1) * ease(k); if (k >= 1) a.done = true; }
-        const c = a.cell;
+        const c = a.cell, ax = a.ax || 0, ay = a.ay || 0;
         for (let v = a.a; v < a.a + a.n; v++) {
-          uv[v * 2] = c[0] + (UVC(fc[v * 2] / gg) + 0.5) * c[2];
-          uv[v * 2 + 1] = c[1] + (UVC(fc[v * 2 + 1] / gg) + 0.5) * c[3];
+          uv[v * 2] = c[0] + (UVC((fc[v * 2] - ax) / gg + ax) + 0.5) * c[2];
+          uv[v * 2 + 1] = c[1] + (UVC((fc[v * 2 + 1] - ay) / gg + ay) + 0.5) * c[3];
         }
         uvDirty = true;
       } else if (a.type === "alpha") {
@@ -2476,6 +2650,14 @@
     }
     const out = full ? { removedTris: 0, severedTris: 0, pushed: 0, edged: 0, loops: [], chunk: [], sever: [], W: W, WN: WN, wid: wid } : null;
     if (!nIn) return out;
+    // a dish narrower than the body's own triangles cannot be dug: the few
+    // vertices inside it pushed in would dent a facet many times the bite's
+    // size. Its floor is painted instead.
+    if (!op.through && nIn < 10) {
+      let cut2 = false;
+      for (let v = 0; v < nv && !cut2; v++) if (cls[v] === 2) cut2 = true;
+      if (!cut2) return out;
+    }
     // triangles: 1 = taken by the jaw, 2 = severed with something that left
     const tcl = new Uint8Array(nt);
     let anyCut = false;
@@ -2840,6 +3022,15 @@
     const dx = _ts.center.x - x, dy = _ts.center.y - y, dz = _ts.center.z - z;
     return Math.sqrt(dx * dx + dy * dy + dz * dz) <= _ts.radius + r;
   }
+  // how far a point is outside a part's bounding sphere (negative inside)
+  function sphereGap(m, x, y, z) {
+    const g = m.geometry;
+    if (!g) return Infinity;
+    if (m.isSkinnedMesh && m.boundingSphere) _ts.copy(m.boundingSphere);
+    else { if (!g.boundingSphere) g.computeBoundingSphere(); if (!g.boundingSphere) return Infinity; _ts.copy(g.boundingSphere); }
+    _ts.applyMatrix4(m.matrixWorld);
+    return Math.hypot(_ts.center.x - x, _ts.center.y - y, _ts.center.z - z) - _ts.radius;
+  }
   // which region of a person a part is (its skinSlots list), for the limp and
   // for what a big enough mouth can take off
   function regionOf(actor, mesh) {
@@ -2855,19 +3046,18 @@
     return "torso";
   }
   // every part of a person the jaw's reach can touch, and any garment worn
-  // over them; each knows whether it is cloth or skin
+  // over them, the NEAREST eight (a bite at the throat is the collar's and
+  // the neck's, not the first eight limbs in the rig's list); each knows
+  // whether it is cloth or skin
   function personSurfaces(actor, wp, R, headOnly) {
-    const S = actor.char.skinSlots, out = [], seen = [];
+    const S = actor.char.skinSlots, cand = [], seen = [];
     const keys = headOnly ? ["head"] : ["armsLower", "arms", "legsLower", "legs", "torso", "pelvis", "head", "hands", "collar"];
     const consider = function (m, garment) {
-      if (out.length >= 8 || !m || seen.indexOf(m) >= 0 || !skinOk(m) || m.isSkinnedMesh) return;
+      if (!m || seen.indexOf(m) >= 0 || !skinOk(m) || m.isSkinnedMesh) return;
       seen.push(m);
-      if (!nearP(m, wp.x, wp.y, wp.z, R)) return;
-      const s = surfaceOf(m, out.length);
-      if (!s) return;
-      s.region = regionOf(actor, m);
-      s.cloth = garment || (realOn() && clothedPart(actor, m, s.region));
-      out.push(s);
+      const d = sphereGap(m, wp.x, wp.y, wp.z);
+      if (!(d <= R)) return;
+      cand.push({ m: m, garment: garment, d: d });
     };
     for (let k = 0; k < keys.length; k++) {
       const L = S[keys[k]];
@@ -2877,6 +3067,15 @@
         consider(m, false);
         if (m && m.children) for (let j = 0; j < m.children.length; j++) consider(m.children[j], true);
       }
+    }
+    cand.sort(function (a, b) { return a.d - b.d; });
+    const out = [];
+    for (let i = 0; i < cand.length && out.length < 8; i++) {
+      const c = cand[i], s2 = surfaceOf(c.m, out.length);
+      if (!s2) continue;
+      s2.region = regionOf(actor, c.m);
+      s2.cloth = c.garment || (realOn() && clothedPart(actor, c.m, s2.region));
+      out.push(s2);
     }
     return out;
   }
@@ -2956,54 +3155,6 @@
       return out.lengthSq() > 0.5;
     } catch (e) { return false; }
   }
-  // the long axis of a part, in world: a rigid part's longest box axis, a
-  // skinned body's principal axis round the bite (a neck, a tail, a leg)
-  const _la = new THREE.Vector3();
-  function partLongAxis(m) {
-    const g = m.geometry;
-    if (!g.boundingBox) g.computeBoundingBox();
-    const bb = g.boundingBox, e = m.matrixWorld.elements;
-    const sx = (bb.max.x - bb.min.x) * Math.hypot(e[0], e[1], e[2]);
-    const sy = (bb.max.y - bb.min.y) * Math.hypot(e[4], e[5], e[6]);
-    const sz = (bb.max.z - bb.min.z) * Math.hypot(e[8], e[9], e[10]);
-    const ax = sx >= sy ? (sx >= sz ? 0 : 2) : (sy >= sz ? 1 : 2);
-    _la.set(e[ax * 4], e[ax * 4 + 1], e[ax * 4 + 2]).normalize();
-    return { dir: _la, len: Math.max(sx, sy, sz), thin: Math.min(sx, sy, sz) };
-  }
-  function limbAxis(S, P, r, gape, out) {
-    if (!S.skinned) {
-      const LA = partLongAxis(S.mesh);
-      if (LA.len > LA.thin * 1.6 && LA.thin < gape * 1.2) { out.copy(LA.dir); return true; }
-      return false;
-    }
-    const W = S.W, ci = S.cidx, r2 = r * r;
-    let n = 0, mx = 0, my = 0, mz = 0;
-    for (let k = 0; k < ci.length; k += 3) {
-      const v = ci[k] * 3, dx = W[v] - P.x, dy = W[v + 1] - P.y, dz = W[v + 2] - P.z;
-      if (dx * dx + dy * dy + dz * dz > r2) continue;
-      mx += W[v]; my += W[v + 1]; mz += W[v + 2]; n++;
-    }
-    if (n < 12) return false;
-    mx /= n; my /= n; mz /= n;
-    let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
-    for (let k = 0; k < ci.length; k += 3) {
-      const v = ci[k] * 3, dx0 = W[v] - P.x, dy0 = W[v + 1] - P.y, dz0 = W[v + 2] - P.z;
-      if (dx0 * dx0 + dy0 * dy0 + dz0 * dz0 > r2) continue;
-      const dx = W[v] - mx, dy = W[v + 1] - my, dz = W[v + 2] - mz;
-      xx += dx * dx; xy += dx * dy; xz += dx * dz; yy += dy * dy; yz += dy * dz; zz += dz * dz;
-    }
-    let vx = 1, vy = 0.3, vz = 0.2, l1 = 0;
-    for (let it = 0; it < 24; it++) {
-      const nx = xx * vx + xy * vy + xz * vz, ny = xy * vx + yy * vy + yz * vz, nz = xz * vx + yz * vy + zz * vz;
-      l1 = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
-      vx = nx / l1; vy = ny / l1; vz = nz / l1;
-    }
-    // elongated: the first axis holds well over half the spread
-    const tr = xx + yy + zz;
-    if (!(tr > 0) || l1 / tr < 0.62) return false;
-    out.set(vx, vy, vz);
-    return true;
-  }
   // the colour a flap of this part wears outside (garment or coat)
   function hostColour(S, h, out) {
     let m = S.mesh.material;
@@ -3033,7 +3184,7 @@
   /* ---- THE STRIKE --------------------------------------------------------- */
   const _P = new THREE.Vector3(), _N = new THREE.Vector3(), _F = new THREE.Vector3(), _U = new THREE.Vector3(), _S = new THREE.Vector3();
   const _U0 = new THREE.Vector3(), _O = new THREE.Vector3(), _T0 = new THREE.Vector3(), _tr = new THREE.Vector3(), _trT = new THREE.Vector3();
-  const _A = new THREE.Vector3(), _mid = new THREE.Vector3(), _gv = new THREE.Vector3(), _tq = new THREE.Vector3();
+  const _mid = new THREE.Vector3(), _gv = new THREE.Vector3(), _tq = new THREE.Vector3();
   const _H0 = hitRec(), _H1 = hitRec(), _H2 = hitRec(), _HS = hitRec();
   function copyHit(h) { return { S: h.S, t: h.t, i0: h.i0, i1: h.i1, i2: h.i2, b0: h.b0, b1: h.b1, b2: h.b2, px: h.px, py: h.py, pz: h.pz, nx: h.nx, ny: h.ny, nz: h.nz }; }
   // the line the jaw came in on: opts.dir, else attacker -> point
@@ -3075,7 +3226,7 @@
     const bite = {
       actor: actor, surfs: surfs, bufs: Object.create(null), keys: [], dent: dent, sev: sev, who: who, kind: kind,
       tissue: tissueOf(actor, kind), coat: coatOf(actor, kind), wet: false, seatS: null, made: 0, removed: 0, severed: 0,
-      els: [], strikes: null, ext: null,
+      els: [], strikes: null, ext: null, fold: 0,
     };
     // ---- THE SEAT: the first skin on the jaw's line, or the nearest skin
     const have = attackLine(opts, wp, _tr);
@@ -3100,67 +3251,104 @@
     // how far the jaw's line runs through the part before it leaves it
     const ex = castAll(surfs, _P.x + _F.x * 1e-4, _P.y + _F.y * 1e-4, _P.z + _F.z * 1e-4, _F.x, _F.y, _F.z, dent.gape * 2 + dent.depth, -1, _H1);
     const thickF = ex ? ex.t : Infinity;
-    let crossLimb = false;
-    if (!who.actor && thickF < dent.gape * 1.3 && limbAxis(seat.S, _P, Math.max(dent.hw * 1.6, 0.06), dent.gape, _A)) {
-      // a limb (or a neck, a tail) goes ACROSS the mouth: every biter takes an
-      // arm or a leg crosswise, the head rolled to it
-      _S.copy(_A).addScaledVector(_F, -_A.dot(_F));
-      if (_S.lengthSq() > 0.09) { _S.normalize(); crossLimb = true; }
-    }
-    if (!crossLimb) {
-      _S.crossVectors(_F, _U0);
-      if (_S.lengthSq() < 1e-4) _S.crossVectors(_F, _gv.set(1, 0, 0));
-      _S.normalize();
-    }
+    // the jaws open along the head's own up: what lies between them is what
+    // they close on
+    _S.crossVectors(_F, _U0);
+    if (_S.lengthSq() < 1e-4) _S.crossVectors(_F, _gv.set(1, 0, 0));
+    _S.normalize();
     _U.crossVectors(_S, _F).normalize();
     if (_U.dot(_U0) < 0) { _U.negate(); _S.negate(); }
-    // ---- DOES THE PART FIT BETWEEN THE JAWS?
+    // ---- DOES THE PART FIT BETWEEN THE JAWS? Its own extent along their
+    // closing, and nothing of the body past it within the gape: a thigh runs
+    // on into the hip and the knee, and no jaw closes round that
     _mid.copy(_P).addScaledVector(_F, Math.min(isFinite(thickF) ? thickF * 0.5 : dent.gape * 0.5, dent.gape * 0.5));
     const up = castAll(surfs, _mid.x, _mid.y, _mid.z, _U.x, _U.y, _U.z, dent.gape, -1, _H1);
     const upT = up ? up.t : Infinity;
     const dnH = castAll(surfs, _mid.x, _mid.y, _mid.z, -_U.x, -_U.y, -_U.z, dent.gape, -1, _H2);
     const dnT = dnH ? dnH.t : Infinity;
-    const wrap = isFinite(upT) && isFinite(dnT) && upT + dnT < dent.gape * 0.98 && thickF < dent.gape * 1.6 + dent.depth;
+    let wrap = isFinite(upT) && isFinite(dnT) && upT + dnT < dent.gape * 0.98 && thickF < dent.gape * 1.6 + dent.depth;
+    if (wrap) {
+      // a limb lying along the closing (a hanging arm, a standing leg, a
+      // neck) is longer that way than across: its ends sit inside the next
+      // part, and the jaws take its flank
+      const sl = castAll(surfs, _mid.x, _mid.y, _mid.z, _S.x, _S.y, _S.z, dent.gape, -1, _H1);
+      const sr = castAll(surfs, _mid.x, _mid.y, _mid.z, -_S.x, -_S.y, -_S.z, dent.gape, -1, _H2);
+      const across = (sl ? sl.t : dent.gape) + (sr ? sr.t : dent.gape);
+      if (upT + dnT > across * 1.3) wrap = false;
+    }
+    if (wrap) {
+      // and nothing of the body past its ends within the gape: not another
+      // part's outside, nor the inside of one its end is sunk in (a limb's
+      // end sits inside the shoulder, the hip)
+      const room = dent.gape - (upT + dnT) + 0.01, e = 0.003, seatM = seat.S.mesh;
+      const others = surfs.filter(function (S) { return S !== seat.S && S.mesh.parent !== seatM && seatM.parent !== S.mesh; });
+      if (castAll(others, _mid.x + _U.x * (upT + e), _mid.y + _U.y * (upT + e), _mid.z + _U.z * (upT + e), _U.x, _U.y, _U.z, room, 0, _H1) ||
+        castAll(others, _mid.x - _U.x * (dnT + e), _mid.y - _U.y * (dnT + e), _mid.z - _U.z * (dnT + e), -_U.x, -_U.y, -_U.z, room, 0, _H2) ||
+        castAll([seat.S], _mid.x + _U.x * (upT + e), _mid.y + _U.y * (upT + e), _mid.z + _U.z * (upT + e), _U.x, _U.y, _U.z, room, 1, _H1) ||
+        castAll([seat.S], _mid.x - _U.x * (dnT + e), _mid.y - _U.y * (dnT + e), _mid.z - _U.z * (dnT + e), -_U.x, -_U.y, -_U.z, room, 1, _H2)) wrap = false;
+    }
     const partU = wrap ? upT + dnT : 0;
     // ---- PLACE THE ARCH
     // every tooth of a shark's functional rows (24 + 22); a dolphin's eighty
     // needles thinned to as many
     const teeth = pickTeeth(dent.teeth, 48);
-    let Lfront = 0, xGrip = 0, ng = 0, Lmax = 0, Wavg = 0;
+    let Lfront = 0, xGrip = 0, ng = 0, Lmax = 0, Wavg = 0, Lg = 0;
     for (let i = 0; i < teeth.length; i++) {
       const t = teeth[i];
       if (t.L > Lmax) Lmax = t.L;
       Wavg += t.W;
       if (t.x < dent.depth * 0.3 && t.L > Lfront) Lfront = t.L;
-      if (deepKind(t.kind) && t.up) { xGrip += t.x; ng++; }
+      if (deepKind(t.kind) && t.up) { xGrip += t.x; Lg += t.L; ng++; }
     }
     Wavg /= Math.max(1, teeth.length);
     if (!Lfront) Lfront = Lmax;
     xGrip = ng ? xGrip / ng : dent.depth * 0.35;
-    let g;
+    Lg = ng ? Lg / ng : Lfront;
+    // THE FOLD. On the flank the flesh the jaws close on bulges into the
+    // mouth: to the gripping teeth and a little past them, further the
+    // harder the bite. A tooth behind the fold's back edge never touches
+    // it; the rest meet it where it reaches them, and when it lies flat again
+    // the upper arch's teeth sit on an arc above the bite's middle and the
+    // lower arch's on one below (the two arcs of every bite mark), the front
+    // teeth furthest out. The arcs are as wide as the arch is at the fold's
+    // depth, and a little less tall than wide.
+    let fold = (xGrip + 0.45 * Lg) * (0.8 + 0.4 * sev);
+    fold = Math.min(fold, dent.depth * 0.6 + Lfront * 0.5);
+    if (isFinite(thickF)) fold = Math.min(fold, Math.max(thickF * 0.8, Lfront));
+    const KF = 0.6, bMin = 0.15 * Lg;
+    // a thin part (a fin, an ear, a fluke) is in the mouth whole: no fold
+    // limits it, and the jaws meet it as far apart as they are when they
+    // close on it
+    const thinPart = isFinite(thickF) && thickF < Lmax * 1.4;
+    const foldX = thinPart ? Math.max(fold, dent.depth * 0.5) : fold;
+    const bThin = thinPart ? 0.5 * dent.pinch * (0.8 + 0.4 * sev) : 0;
+    let g = 0;
     if (wrap) {
       _O.copy(_mid).addScaledVector(_U, (upT - dnT) * 0.5).addScaledVector(_F, xGrip);
       g = partU + Lmax * 0.8;
-    } else {
-      const e = Lfront * (0.45 + 0.35 * sev) + dent.removes * dent.hw * 0.35 * sev + dent.crush * Lfront * 0.25;
-      _O.copy(_P).addScaledVector(_F, e);
-      g = dent.pinch * (0.8 + 0.4 * sev);
     }
-    // ---- EVERY TOOTH ALONG ITS PATH
+    // ---- EVERY TOOTH ALONG ITS PATH, AND HOW FAR IT WENT IN
     const strikes = [];
-    const back = dent.gape + dent.depth + 0.25;
+    const back = dent.gape + dent.depth + 0.25, reach = Math.max(0.05, Lmax * 2 + foldX);
     for (let i = 0; i < teeth.length; i++) {
       const t = teeth[i], ux = t.up ? 1 : -1;
-      _T0.copy(_O).addScaledVector(_S, t.s).addScaledVector(_F, -t.x).addScaledVector(_U, ux * g * 0.5);
-      let s = null, how = 0;
-      if (wrap) s = castAll(surfs, _T0.x, _T0.y, _T0.z, -ux * _U.x, -ux * _U.y, -ux * _U.z, g * 0.5 + t.L * 0.8, 1, _HS);
-      if (!s) {
-        s = castAll(surfs, _T0.x - _F.x * back, _T0.y - _F.y * back, _T0.z - _F.z * back, _F.x, _F.y, _F.z, back + t.L * 0.6, 1, _HS);
-        how = 1;
+      let s = null, contact = 1;
+      if (wrap) {
+        _T0.copy(_O).addScaledVector(_S, t.s).addScaledVector(_F, -t.x).addScaledVector(_U, ux * g * 0.5);
+        s = castAll(surfs, _T0.x, _T0.y, _T0.z, -ux * _U.x, -ux * _U.y, -ux * _U.z, g * 0.5 + t.L * 0.8, 1, _HS);
+      } else {
+        if (t.x > foldX) continue;
+        contact = Math.max(0.25, Math.min(1, (foldX - t.x) / (0.35 * foldX)));
+        const b = ux * Math.max((foldX - t.x) * KF + bMin, bThin);
+        _T0.copy(_P).addScaledVector(_S, t.s).addScaledVector(_U, b);
+        s = castAll(surfs, _T0.x - _F.x * reach, _T0.y - _F.y * reach, _T0.z - _F.z * reach, _F.x, _F.y, _F.z, reach + Math.max(0.05, foldX) + dent.depth * 0.6, 1, _HS);
       }
       if (!s) continue;
       const st = copyHit(s);
-      st.t = t; st.how = how; st.ux = ux;
+      st.t = t; st.ux = ux;
+      // how far it went in: the bite's force, where it met the fold, and
+      // the luck of where it landed (no two holes alike)
+      st.pen = Math.min(1.3, (0.55 + 0.6 * sev) * contact * (0.7 + 0.6 * Math.random()));
       // the way the close drags it through the skin
       st.drag = onSkin(-ux * _U.x, -ux * _U.y, -ux * _U.z, hN(st), new THREE.Vector3()) || onSkin(_S.x, _S.y, _S.z, hN(st), new THREE.Vector3()) || new THREE.Vector3(1, 0, 0);
       strikes.push(st);
@@ -3169,21 +3357,20 @@
       // nothing reached: the lunge still met the skin at the seat
       const st = copyHit(seat);
       st.t = teeth[0] || { up: true, s: 0, x: 0, L: dent.hw * 0.3, W: dent.hw * 0.2, kind: "canine" };
-      st.how = 1; st.ux = 1;
+      st.ux = 1; st.pen = 0.6 + 0.4 * sev;
       st.drag = onSkin(_U.x, _U.y, _U.z, _N, new THREE.Vector3()) || new THREE.Vector3(1, 0, 0);
       strikes.push(st);
     }
     bite.strikes = strikes;
+    bite.fold = wrap ? 0 : fold;
     // the strikes' spread round the seat, in the jaw's own axes
-    let aMin = 0, aMax = 0, bMin = 0, bMax = 0, cx = 0, cy = 0, cz = 0;
+    let aMin = Infinity, aMax = -Infinity, bMin2 = Infinity, bMax = -Infinity;
     for (let i = 0; i < strikes.length; i++) {
       const st = strikes[i], dx = st.px - _P.x, dy = st.py - _P.y, dz = st.pz - _P.z;
       const a = dx * _S.x + dy * _S.y + dz * _S.z, b = dx * _U.x + dy * _U.y + dz * _U.z;
-      if (a < aMin) aMin = a; if (a > aMax) aMax = a; if (b < bMin) bMin = b; if (b > bMax) bMax = b;
-      cx += st.px; cy += st.py; cz += st.pz;
+      if (a < aMin) aMin = a; if (a > aMax) aMax = a; if (b < bMin2) bMin2 = b; if (b > bMax) bMax = b;
     }
-    cx /= strikes.length; cy /= strikes.length; cz /= strikes.length;
-    bite.ext = { aMin: aMin, aMax: aMax, bMin: bMin, bMax: bMax, Wavg: Wavg, Lmax: Lmax };
+    bite.ext = { aMin: aMin, aMax: aMax, bMin: bMin2, bMax: bMax, Wavg: Wavg, Lmax: Lmax };
 
     // ---- FLESH THAT GOES WITH THE MOUTH (a body that owns its geometry)
     const seatS = seat.S;
@@ -3199,7 +3386,7 @@
       if (room && (thin || engulf || scoop)) {
         const through = thin || engulf;
         const rS = Math.max(dent.hw * 0.3, Math.max(-aMin, aMax) + Wavg * 0.6);
-        const rU = Math.max(dent.hw * 0.25, Math.max(-bMin, bMax) + Wavg * 0.6, wrap ? partU * 0.6 : 0);
+        const rU = Math.max(dent.hw * 0.25, Math.max(-bMin2, bMax) + Wavg * 0.6, wrap ? partU * 0.6 : 0);
         let rF = through ? (isFinite(thickF) ? thickF * 1.15 : Lmax * 2) + Lmax * 0.2
           : dent.removes * sev * (Lmax * 1.5 + dent.hw * 0.3);
         if (!through && isFinite(thickF)) rF = Math.min(rF, thickF * 0.6);
@@ -3243,110 +3430,188 @@
     return {
       made: bite.made, lead: lead, wet: bite.wet, region: seatS.region || "torso", P: _P, N: _N,
       removed: bite.removed, severed: bite.severed, strikes: strikes.length, family: dent.family, wrap: wrap,
-      size: Math.max(aMax - aMin, bMax - bMin) * 0.5 + Wavg,
+      size: Math.max(aMax - aMin, bMax - bMin2) * 0.5 + Wavg, fold: bite.fold,
     };
   }
 
   /* ---- WHAT THE TEETH LEAVE, AND WHAT THE BODY ANSWERS -------------------- */
-  const _c4 = [0, 0, 0, 1];
   function tint(r, g, b, a) { const l = linArr(r, g, b); return [l[0], l[1], l[2], a]; }
+  // the stain layer's colours (display multipliers; the 4th is how much)
   const TINT = {
-    bruise: tint(0.50, 0.30, 0.42, 1), bruiseSea: tint(0.80, 0.52, 0.52, 1),
-    soakCloth: tint(0.42, 0.07, 0.08, 1), soakFur: tint(0.30, 0.05, 0.05, 1),
-    holeCloth: tint(0.22, 0.2, 0.2, 1), holeFur: tint(0.32, 0.12, 0.1, 1), ripCloth: tint(0.25, 0.22, 0.22, 1),
+    bruise: tint(0.66, 0.40, 0.48, 1), bruiseSea: tint(0.80, 0.56, 0.56, 1),
+    rim: tint(0.80, 0.50, 0.47, 0.85), rimSea: tint(0.74, 0.58, 0.58, 0.7),
+    abrasion: tint(0.80, 0.50, 0.48, 0.8), abrasionSea: tint(0.80, 0.66, 0.66, 0.7),
+    soakCloth: tint(0.42, 0.06, 0.07, 1), soakFur: tint(0.36, 0.08, 0.07, 1), bloodSkin: tint(0.5, 0.06, 0.06, 1),
+    holeCloth: tint(0.40, 0.06, 0.07, 1), holeFur: tint(0.36, 0.08, 0.07, 1), ripCloth: tint(0.40, 0.06, 0.07, 1),
     scales: tint(0.82, 0.74, 0.74, 1),
   };
+  function withA(c, a) { return [c[0], c[1], c[2], a]; }
   function snap(bite, x, y, z) {
     const h = nearestAll(bite.surfs, x, y, z, hitRec());
     return h;
   }
+  function snapOn(S, x, y, z) {
+    const h = nearestAll([S], x, y, z, hitRec());
+    return h;
+  }
   const PAINT = new Map([
-    [TCELL.blood, 0], [TCELL.crater, 1], [TCELL.rake, 2], [TCELL.tear, 3], [TCELL.slit, 4], [TCELL.serrated, 5], [TCELL.puncture, 6],
-    [SCELL.soak, 0], [SCELL.bruise, 1], [SCELL.rip, 2], [SCELL.hole, 3],
+    [TCELL.blood, 0], [TCELL.crater, 2], [TCELL.gape, 2], [TCELL.ragged, 2], [TCELL.rake, 3], [TCELL.tear, 4],
+    [TCELL.slit, 5], [TCELL.serrated, 6], [TCELL.puncture2, 7], [TCELL.puncture, 7],
+    [SCELL.soakCloth, 0], [SCELL.soakFur, 0], [SCELL.bloodSkin, 0], [SCELL.bruise, 1], [SCELL.smear, 1], [SCELL.rim, 2], [SCELL.abrasion, 2], [SCELL.rip, 3], [SCELL.holeFur, 4], [SCELL.holeCloth, 4],
   ]);
   function elAt(layer, cell, h, T, sx, sy, dz, c, wc, anim, only) {
     return { layer: layer, cell: cell, P: { x: h.px, y: h.py, z: h.pz }, N: { x: h.nx, y: h.ny, z: h.nz }, T: T, sx: sx, sy: sy, dz: dz, c: c, wc: wc || null, anim: anim || null, only: only || null };
   }
+  // the in-plane direction that lays a cell drawn along its y on dir
+  function alongY(dir, n) { return new THREE.Vector3().crossVectors(dir, n).normalize(); }
+  // dir turned about n by up to +-a radians
+  function askew(dir, n, a) {
+    const th = (Math.random() * 2 - 1) * a, c = Math.cos(th), s2 = Math.sin(th);
+    const cx = n.y * dir.z - n.z * dir.y, cy = n.z * dir.x - n.x * dir.z, cz = n.x * dir.y - n.y * dir.x;
+    return new THREE.Vector3(dir.x * c + cx * s2, dir.y * c + cy * s2, dir.z * c + cz * s2).normalize();
+  }
+  function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
   function lay(bite, strikes, P, N, S, U, trav, wrap, cut, op) {
     const D = bite.dent, sev = bite.sev, wet = bite.wet, coat = bite.coat;
     const sea = bite.tissue === "cetacean" || bite.tissue === "shark";
     const healA = sea ? { type: "heal", T: 150, t0: 25, to: 0.85 } : null;
-    // 1. one mark per tooth that met the body
+    const rimT = sea ? TINT.rimSea : TINT.rim;
+    // the saw: where a shark's head shook, a run of its upper teeth was
+    // dragged sideways along the jaw's line, and only there
+    const sawed = new Set();
+    if (D.saw * sev >= 0.4) {
+      const row = strikes.filter(function (s) { return s.t.up && s.t.kind === "serrated" && (s.pen || 0) >= 0.45; }).sort(function (a, b) { return a.t.s - b.t.s; });
+      if (row.length >= 3) {
+        const k = Math.min(row.length, 3 + Math.floor(Math.random() * 4)), i0 = Math.floor(Math.random() * (row.length - k + 1));
+        for (let i = i0; i < i0 + k; i++) sawed.add(row[i]);
+      }
+    }
+    const rowN = [0, 0];
+    for (let i = 0; i < strikes.length; i++) if (deepKind(strikes[i].t.kind) || strikes[i].t.kind === "serrated") rowN[strikes[i].t.up ? 0 : 1]++;
+    // 1. one mark per tooth, as deep as that tooth went. A fang or a blade
+    //    that went in leaves a hole or a cut (its own size, one of two
+    //    shapes, its own depth); one that only pressed, a small bruise. The
+    //    small teeth between never punch: where they pressed hardest the skin
+    //    is scraped, and through cloth nothing shows. Round a hole the skin
+    //    is inflamed (stain), cloth is torn along its threads, fur is parted.
     for (let i = 0; i < strikes.length; i++) {
       const st = strikes[i], t = st.t, n = hN(st), cloth = !!st.S.cloth;
-      const dk = deepKind(t.kind);
-      const dScale = Math.min(1, 0.35 + 0.65 * Math.min(1, t.L / Math.max(1e-4, t.W * 1.6))) * (0.6 + 0.4 * (D.deep != null ? D.deep : 1));
+      const dk = deepKind(t.kind), cutter = t.kind === "serrated" || t.kind === "blade" || t.kind === "edge";
       const dz = Math.max(0.006, Math.min(t.L * 0.9, 0.05));
+      const pen = st.pen != null ? st.pen : 1;
+      if (!dk && !cutter) continue;
+      const crowd = rowN[t.up ? 0 : 1] > 5, small = crowd && t.W < 0.006;
+      if (pen < (small ? (cloth ? 0.95 : 0.7) : 0.32) || (crowd && Math.random() < 0.33)) {
+        if (!small && !cloth && coat !== "fur" && Math.random() < 0.6) bite.els.push(elAt("s", SCELL.rim, st, st.drag, t.W * 2.4 / 0.66, t.W * 2.4 / 0.66, dz, withA(rimT, 0.45), null, null, st.S));
+        continue;
+      }
+      if (small || crowd) {
+        const j = t.W * (small ? 1.2 : 0.9);
+        const jx = (Math.random() - 0.5) * j, jy = (Math.random() - 0.5) * j;
+        const tq = onSkin(st.drag.y * n.z - st.drag.z * n.y, st.drag.z * n.x - st.drag.x * n.z, st.drag.x * n.y - st.drag.y * n.x, n, new THREE.Vector3()) || st.drag;
+        st.px += st.drag.x * jx + tq.x * jy; st.py += st.drag.y * jx + tq.y * jy; st.pz += st.drag.z * jx + tq.z * jy;
+      }
+      const dScale = Math.min(1, 0.35 + 0.65 * Math.min(1, t.L / Math.max(1e-4, t.W * 1.6))) * (0.6 + 0.4 * (D.deep != null ? D.deep : 1));
+      const depthK = Math.max(0.3, Math.min(1, dScale * (0.5 + 0.5 * Math.min(1, pen))));
       if (t.kind === "serrated") {
-        // the blade went in at its full width and the close dragged it
-        const len = t.L * (1.0 + 0.8 * D.saw * sev);
-        bite.els.push(elAt("w", TCELL.serrated, st, st.drag, (t.W * (0.95 + 0.25 * sev)) / 0.48, len / 0.86, dz, [Math.max(0.75, dScale), 0, 0, 1], null, null, st.S));
+        // a blade tooth's cut is a short sawn slit along the jaw's line (the
+        // blade's width runs along the jaw), widest where it went in; each its
+        // own length, a little askew. The teeth the head shook sideways cut on
+        // along the line and join into one ragged incision there.
+        const sw = sawed.has(st);
+        const len = Math.max(t.W * 1.1, t.L * 0.7) * (0.65 + 0.7 * Math.random()) * (0.8 + 0.3 * Math.min(1, pen)) * (sw ? 1.9 + 1.4 * D.saw * sev : 1);
+        bite.els.push(elAt("w", TCELL.serrated, st, askew(st.drag, n, 0.3), (t.W * (0.35 + 0.15 * sev) * (0.7 + 0.6 * Math.random())) / 0.44, len / 0.72, dz, [Math.max(0.55, Math.min(0.75, depthK)), 0, 0, 1], null, null, st.S));
       } else if (t.kind === "blade" || t.kind === "edge") {
         const len = t.kind === "edge" ? D.hw * 1.6 : t.W * 2.4;
         const along = onSkin(S.x, S.y, S.z, n, new THREE.Vector3()) || st.drag;
-        bite.els.push(elAt("w", TCELL.slit, st, along, len / 0.95, (t.W * 0.45) / 0.12, dz, [0.85 * dScale, 0, 0, 1], null, null, st.S));
+        bite.els.push(elAt("w", TCELL.slit, st, along, len / 0.82, (t.W * 0.45) / 0.12, dz, [0.85 * depthK, 0, 0, 1], null, null, st.S));
       } else {
-        // a puncture: deep teeth punch; incisors, molars and flat teeth crush
-        const crushK = dk ? 1 : 0.7;
-        const diam = t.W * (0.85 + 0.35 * D.crush + 0.15 * sev) * crushK * (cloth ? 0.75 : 1);
-        const dd = dk ? dScale : (t.kind === "flat" || t.kind === "pad" || t.kind === "molar" ? 0.15 + 0.15 * D.crush : 0.45 * dScale);
-        bite.els.push(elAt("w", TCELL.puncture, st, st.drag, diam / 0.40, diam / 0.40 * (1 + 0.25 * D.crush), dz, [dd, 0, 0, 1], null, null, st.S));
+        const diam = t.W * (0.85 + 0.35 * D.crush + 0.15 * sev) * (0.8 + 0.4 * Math.random()) * (cloth ? 0.8 : 1);
+        if (Math.random() < 0.35) bite.els.push(elAt("w", TCELL.puncture2, st, st.drag, diam * 1.3 / 0.42, diam * 0.8 / 0.19, dz, [depthK, 0, 0, 1], null, null, st.S));
+        else bite.els.push(elAt("w", TCELL.puncture, st, st.drag, diam / 0.36, diam / 0.36 * (1 + 0.2 * D.crush), dz, [depthK, 0, 0, 1], null, null, st.S));
       }
-      if (cloth && (dk || t.kind === "serrated" || t.kind === "blade" || t.kind === "incisor")) {
-        // the fabric is punched through and frays wider than the tooth
-        const diam = t.W * 1.25 + t.L * 0.3;
-        bite.els.push(elAt("s", SCELL.hole, st, st.drag, diam / 0.40, diam / 0.40, dz, TINT.holeCloth, null, null, st.S));
-      } else if (coat === "fur" && dk) {
-        // the coat parts round the hole and the blood darkens it
-        const diam = t.W * 1.6;
-        bite.els.push(elAt("s", SCELL.hole, st, st.drag, diam / 0.40, diam / 0.40, dz, TINT.holeFur, null, null, st.S));
-      }
-    }
-    // 2. the saw joins a shark's tooth cuts into one scalloped incision; a
-    //    barracuda's knife row and a beak cut one straight line
-    if (D.saw >= 0.3 || D.slice >= 0.5) {
-      const rows = [[], []];
-      for (let i = 0; i < strikes.length; i++) rows[strikes[i].t.up ? 0 : 1].push(strikes[i]);
-      let n = 0;
-      for (let r = 0; r < 2 && n < 24; r++) {
-        const row = rows[r].sort(function (a, b) { return a.t.s - b.t.s; });
-        for (let i = 1; i < row.length && n < 24; i++) {
-          const a = row[i - 1], b = row[i];
-          const dx = b.px - a.px, dy = b.py - a.py, dz = b.pz - a.pz, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-          const lim = Math.max(a.t.W, b.t.W) * 3.2;
-          if (d < 1e-4 || d > lim) continue;
-          const h = snap(bite, (a.px + b.px) * 0.5, (a.py + b.py) * 0.5, (a.pz + b.pz) * 0.5);
-          if (!h) continue;
-          const w = Math.max(a.t.W, b.t.W) * (0.18 + 0.22 * Math.max(D.saw, D.slice) * sev);
-          bite.els.push(elAt("w", TCELL.slit, h, new THREE.Vector3(dx, dy, dz), (d + a.t.W * 0.6) / 0.95, w / 0.12, Math.max(0.008, d * 0.4), [0.8, 0, 0, 1], null, null));
-          n++;
+      if (cloth) {
+        // a fang punches the weave (a small one's hole is the wound's own)
+        if (dk && t.W >= 0.005) {
+          const diam = t.W * 1.05 + t.L * 0.1;
+          bite.els.push(elAt("s", SCELL.holeCloth, st, st.drag, diam / 0.34, diam / 0.34, dz, TINT.holeCloth, null, null, st.S));
+        }
+      } else if (coat === "fur") {
+        const diam = t.W * 1.8;
+        const g0 = onSkin(0, -1, 0, n, new THREE.Vector3());
+        bite.els.push(elAt("s", SCELL.holeFur, st, g0 ? alongY(g0.negate(), n) : st.drag, diam / 0.28, diam / 0.28, dz, TINT.holeFur, null, null, st.S));
+      } else if (coat === "skin") {
+        const diam = t.W * (2.0 + 1.2 * D.crush) * (0.8 + 0.4 * Math.min(1, pen));
+        if (!small) bite.els.push(elAt("s", SCELL.rim, st, st.drag, diam / 0.66, diam / 0.66, dz, rimT, null, null, st.S));
+        // blood beading out of it and smeared over its lip
+        if (!wet && Math.random() < 0.7) {
+          const sd = t.W * (1.6 + 1.4 * Math.random());
+          bite.els.push(elAt("s", SCELL.smear, st, st.drag, sd / 0.6, sd / 0.6, dz, withA(TINT.bloodSkin, 0.85), null, null, st.S));
         }
       }
     }
-    // 3. the shake tears the deep teeth out along the pull
-    if (D.shake >= 0.3) {
-      const deep = strikes.filter(function (s) { return deepKind(s.t.kind) || s.t.kind === "serrated"; })
+    // 1b. the small teeth between the fangs never punch: where a row of them
+    //     pressed hardest on bare skin it is scraped, one mark along the row
+    //     (broken by the cell, never a dotted line of them); through cloth
+    //     and fur nothing shows
+    for (let r = 0; r < 2; r++) {
+      const row = strikes.filter(function (s) { return s.t.up === (r === 0) && !deepKind(s.t.kind) && s.t.kind !== "serrated" && s.t.kind !== "blade" && s.t.kind !== "edge" && !s.S.cloth && (s.pen || 0) > 0.5; })
+        .sort(function (a, b) { return a.t.s - b.t.s; });
+      if (row.length < 2 || coat === "fur" || Math.random() < 0.3) continue;
+      const a = row[0], b = row[row.length - 1];
+      const dx = b.px - a.px, dy = b.py - a.py, dz = b.pz - a.pz, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const h = snap(bite, (a.px + b.px) * 0.5, (a.py + b.py) * 0.5, (a.pz + b.pz) * 0.5);
+      if (!h || h.S.cloth) continue;
+      let wsum = 0, psum = 0;
+      for (let i = 0; i < row.length; i++) { wsum += row[i].t.W; psum += row[i].pen; }
+      const W1 = wsum / row.length, P1 = psum / row.length;
+      const dir = onSkin(dx, dy, dz, hN(h), new THREE.Vector3()) || S;
+      bite.els.push(elAt("s", SCELL.abrasion, h, dir, (d + W1 * 2) / 0.68 * 0.75, W1 * 1.4 / 0.34, Math.max(0.01, d * 0.4),
+        withA(sea ? TINT.abrasionSea : TINT.abrasion, Math.min(0.85, 0.3 + 0.45 * P1)), null, null, h.S));
+    }
+    // 2. a knife row cuts one straight line (a barracuda's), through the
+    //    skin and through any cloth over it
+    for (let r = 0; r < 2; r++) {
+      const row = strikes.filter(function (s) { return s.t.up === (r === 0) && (s.t.kind === "serrated" || s.t.kind === "blade" || s.t.kind === "edge") && (s.pen || 0) >= 0.32; })
+        .sort(function (a, b) { return a.t.s - b.t.s; });
+      const knife = D.slice >= 0.5;
+      if (!knife) continue;
+      const use = row;
+      if (use.length < 2) continue;
+      const a = use[0], b = use[use.length - 1];
+      const dx = b.px - a.px, dy = b.py - a.py, dz = b.pz - a.pz, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d < 1e-4) continue;
+      const h = snap(bite, (a.px + b.px) * 0.5, (a.py + b.py) * 0.5, (a.pz + b.pz) * 0.5);
+      if (!h) continue;
+      const w = Math.max(a.t.W, b.t.W) * (0.35 + 0.3 * sev);
+      if (knife) bite.els.push(elAt("w", TCELL.slit, h, new THREE.Vector3(dx, dy, dz), (d + a.t.W) / 0.82, w / 0.12, Math.max(0.008, d * 0.4), [0.85, 0, 0, 1], null, null));
+      if (h.S.cloth) bite.els.push(elAt("s", SCELL.rip, h, new THREE.Vector3(dx, dy, dz), (d + a.t.W * 1.5) / 0.84, Math.max(0.006, w * 0.6) / 0.09, Math.max(0.008, d * 0.4), TINT.ripCloth, null, null, h.S));
+    }
+    // 4. the shake tears some of the holes on along the pull and leaves the
+    //    rest as they went in
+    if (D.shake >= 0.3 && sev > 0.3) {
+      const deep = strikes.filter(function (s) { return (deepKind(s.t.kind) || s.t.kind === "serrated") && (s.pen || 0) >= 0.5; })
         .sort(function (a, b) { return b.t.L - a.t.L; }).slice(0, 4);
+      shuffle(deep);
+      const nT = Math.min(deep.length, Math.max(1, Math.round((0.5 + 2.0 * D.shake * sev) * (0.45 + 0.6 * Math.random()))));
       let longest = null;
-      for (let i = 0; i < deep.length; i++) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      for (let i = 0; i < nT; i++) {
         const st = deep[i], n = hN(st), t = st.t;
-        const side = (i & 1) ? -1 : 1;
-        let pull = null;
         const px = (trav ? -trav.x * 0.8 : 0) + S.x * side * D.shake * 0.6, py = (trav ? -trav.y * 0.8 : 0) + S.y * side * D.shake * 0.6, pz = (trav ? -trav.z * 0.8 : 0) + S.z * side * D.shake * 0.6;
-        pull = onSkin(px, py, pz, n, new THREE.Vector3()) || st.drag;
-        const len = t.L * (1.0 + 2.8 * D.shake * sev) * (0.8 + 0.4 * D.crush);
-        const wid = t.W * (1.0 + 0.6 * D.crush);
+        const pull = onSkin(px, py, pz, n, new THREE.Vector3()) || st.drag;
+        const len = t.L * (1.0 + 2.4 * D.shake * sev) * (0.8 + 0.4 * D.crush) * (0.7 + 0.5 * Math.random());
+        const wid = t.W * (0.9 + 0.5 * D.crush);
         const h = snap(bite, st.px + pull.x * len * 0.42, st.py + pull.y * len * 0.42, st.pz + pull.z * len * 0.42);
         if (!h) continue;
         const cloth = !!h.S.cloth;
-        bite.els.push(elAt("w", TCELL.tear, h, pull, len / 0.95, wid / 0.2 * (cloth ? 0.7 : 1), Math.max(0.01, len * 0.3), [0.75, 0, 0, 1], null, null));
-        if (cloth) bite.els.push(elAt("s", SCELL.rip, h, pull, len * 1.15 / 0.95, wid * 0.9 / 0.1, Math.max(0.01, len * 0.3), TINT.ripCloth, null, null));
+        bite.els.push(elAt("w", TCELL.tear, h, pull, len / 0.82, wid / 0.2 * (cloth ? 0.7 : 1), Math.max(0.01, len * 0.3), [0.75, 0, 0, 1], null, null));
+        if (cloth) bite.els.push(elAt("s", SCELL.rip, h, pull, len * 1.15 / 0.84, wid * 0.9 / 0.09, Math.max(0.01, len * 0.3), TINT.ripCloth, null, null));
         if (!longest || len > longest.len) longest = { h: h, pull: pull, len: len, wid: wid, cloth: cloth };
       }
-      // 4. a big enough tear leaves a flap hanging: the cloth or the hide the
-      //    shake pulled loose
-      //    (built after the marks on the skin: it stands off the body and
-      //    has to draw over whatever is on the skin behind it)
+      // a big enough tear leaves a flap hanging: the cloth or the hide the
+      // shake pulled loose (built after the marks on the skin: it stands off
+      // the body and has to draw over whatever is on the skin behind it)
       if (longest && D.shake * sev >= 0.4 && (longest.cloth || coat === "fur")) bite.flapAt = longest;
     }
     // 5. the teeth dragged along the line of travel: the rakes
@@ -3355,29 +3620,63 @@
       for (let k = 0; k < n; k++) {
         const st = strikes[Math.floor(k * step)], nn = hN(st), t = st.t;
         const dir = (trav && onSkin(trav.x, trav.y, trav.z, nn, new THREE.Vector3())) || st.drag;
-        const len = Math.max(t.W * 3, Math.min(D.hw * 3, D.hw * (0.6 + 1.6 * D.rake * sev)));
+        const len = Math.max(t.W * 3, Math.min(D.hw * 3, D.hw * (0.6 + 1.6 * D.rake * sev))) * (0.6 + 0.5 * Math.random());
         const h = snap(bite, st.px + dir.x * len * 0.5, st.py + dir.y * len * 0.5, st.pz + dir.z * len * 0.5);
         if (!h) continue;
-        bite.els.push(elAt("w", TCELL.rake, h, dir, len / 0.95, (t.W * 0.75) / 0.3, Math.max(0.01, len * 0.25), [0.8, 0, 0, 1], null, healA));
+        bite.els.push(elAt("w", TCELL.rake, h, dir, len / 0.82, (t.W * 0.7) / 0.26, Math.max(0.01, len * 0.25), [0.8, 0, 0, 1], null, healA));
       }
     }
-    // the middle of the bite on the skin
-    let mx = 0, my = 0, mz = 0;
-    for (let i = 0; i < strikes.length; i++) { mx += strikes[i].px; my += strikes[i].py; mz += strikes[i].pz; }
-    mx /= strikes.length; my /= strikes.length; mz /= strikes.length;
-    // (round a limb the jaws closed on, the strikes ring it and their mean is
-    // inside it: the bite's middle is where the jaw met it, the seat)
-    const mid = wrap ? snap(bite, P.x, P.y, P.z) : snap(bite, mx, my, mz);
-    const X = bite.ext, spanA = Math.max(0.01, X.aMax - X.aMin), spanB = Math.max(0.01, X.bMax - X.bMin);
-    // 6. the flesh that went with the mouth: the crater's floor in the
-    //    victim's own layers (painted on a rigid body, on the dug-out skin of
-    //    a body that owns its geometry)
+    // the middle of the bite on the skin: between the arcs on the flank, the
+    // seat round a limb the jaws closed on
+    const X = bite.ext, seatM = bite.seatS.mesh;
+    let sa0 = Infinity, sa1 = -Infinity, sb0 = Infinity, sb1 = -Infinity;
+    for (let i = 0; i < strikes.length; i++) {
+      const st = strikes[i], Sx = st.S;
+      if (Sx !== bite.seatS && Sx.mesh.parent !== seatM && seatM.parent !== Sx.mesh) continue;
+      const dx = st.px - P.x, dy = st.py - P.y, dz = st.pz - P.z;
+      const a = dx * S.x + dy * S.y + dz * S.z, b = dx * U.x + dy * U.y + dz * U.z;
+      if (a < sa0) sa0 = a; if (a > sa1) sa1 = a; if (b < sb0) sb0 = b; if (b > sb1) sb1 = b;
+    }
+    if (!(sa1 >= sa0)) { sa0 = X.aMin; sa1 = X.aMax; sb0 = X.bMin; sb1 = X.bMax; }
+    const spanA = Math.max(0.01, sa1 - sa0), spanB = Math.max(0.01, sb1 - sb0);
+    const ac = (sa1 + sa0) * 0.5, bc = (sb1 + sb0) * 0.5;
+    const mid = wrap ? snap(bite, P.x, P.y, P.z) : snap(bite, P.x + S.x * ac + U.x * bc, P.y + S.y * ac + U.y * bc, P.z + S.z * ac + U.z * bc);
+    // 6. the flesh that went with the mouth
     if (op && !op.through) {
-      const h = snap(bite, op.C[0] + op.F[0] * op.rF * 0.6, op.C[1] + op.F[1] * op.rF * 0.6, op.C[2] + op.F[2] * op.rF * 0.6);
-      if (h) bite.els.push(elAt("w", TCELL.crater, h, S, op.rS * 2.05 / 0.86, op.rU * 2.05 / 0.86, op.rF * 1.3 + 0.02, [1, 0, 0, 1], null, null));
+      // the dug dish, floor and walls, in the victim's own layers: projected
+      // down the jaw's own line from where the skin was, centred on the dish
+      // it dug (its walls are steep: they take the paint too, or the skin
+      // shows through them)
+      const half = op.rF * 0.5 + 0.01;
+      const h = { px: op.C[0] + op.F[0] * half, py: op.C[1] + op.F[1] * half, pz: op.C[2] + op.F[2] * half, nx: -op.F[0], ny: -op.F[1], nz: -op.F[2] };
+      const el = elAt("w", TCELL.crater, h, S, op.rS * 2.3 / 0.78, op.rU * 2.3 / 0.78, half + 0.02, [1, 0, 0, 1], null, null);
+      el.minFacing = -0.5;
+      bite.els.push(el);
     } else if (!op && D.removes >= 0.5 && sev >= 0.5 && mid) {
-      // a rigid body (a person): the scoop between the arcs, painted
-      bite.els.push(elAt("w", TCELL.crater, mid, S, (spanA + X.Wavg) / 0.86, (spanB + X.Wavg) / 0.86 * 0.9, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
+      if (!wrap) {
+        // a rigid body (a person): the gape the jaws took, painted between
+        // the arcs and clipped to them: as wide as they are, a little less
+        // deep, the tooth cuts along its edges
+        const w = Math.max(X.Wavg * 3, spanA + X.Wavg * 0.5);
+        const hgt = Math.min(w * 0.8, Math.max(X.Wavg * 2, spanB + X.Wavg * 0.3));
+        if (D.crush >= 0.6) bite.els.push(elAt("w", TCELL.ragged, mid, S, w / 0.64, hgt / 0.64, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
+        else bite.els.push(elAt("w", TCELL.gape, mid, S, w / 0.74, hgt / 0.52, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
+      } else {
+        // round a limb: the flesh cut out along each jaw's line
+        for (let r = 0; r < 2; r++) {
+          const row = strikes.filter(function (s) { return s.t.up === (r === 0); }).sort(function (a, b) { return a.t.s - b.t.s; });
+          if (row.length < 3) continue;
+          let cx = 0, cy = 0, cz = 0;
+          for (let i = 0; i < row.length; i++) { cx += row[i].px; cy += row[i].py; cz += row[i].pz; }
+          const hr = snap(bite, cx / row.length, cy / row.length, cz / row.length);
+          if (!hr) continue;
+          const a = row[0], b = row[row.length - 1];
+          const d = Math.hypot(b.px - a.px, b.py - a.py, b.pz - a.pz);
+          const dir = onSkin(b.px - a.px, b.py - a.py, b.pz - a.pz, hN(hr), new THREE.Vector3()) || S;
+          bite.els.push(elAt("w", D.crush >= 0.6 ? TCELL.ragged : TCELL.gape, hr, dir, (d + X.Wavg) / (D.crush >= 0.6 ? 0.64 : 0.74),
+            X.Lmax * 2.4 / (D.crush >= 0.6 ? 0.64 : 0.52), Math.max(0.02, X.Lmax), [0.9, 0, 0, 1], null, null, hr.S));
+        }
+      }
     }
     // 7. the cut's own faces where a part came away
     if (cut && cut.loops.length) capFaces(bite, bite.seatS, cut.loops);
@@ -3388,36 +3687,56 @@
     for (let i = 0; i < bite.els.length; i++) stampEl(bite, bite.els[i]);
     bite.els.length = 0;
     if (bite.flapAt) { flap(bite, bite.flapAt); bite.flapAt = null; }
-    // 11. on land, blood runs down the body along its real surface
+    // 11. on land, blood runs down the body along its real surface, from
+    //     the lowest holes, onto whatever it meets
     if (!wet && coat !== "fur" && sev > 0.3) {
-      const lows = strikes.slice().sort(function (a, b) { return a.py - b.py; });
+      const lows = strikes.filter(function (s) { return (deepKind(s.t.kind) || s.t.kind === "serrated" || s.t.kind === "blade") && (s.pen || 0) >= 0.32; })
+        .sort(function (a, b) { return a.py - b.py; });
       let made = 0;
       const used = [];
       for (let i = 0; i < lows.length && made < 1 + Math.round(sev * 2); i++) {
         const st = lows[i];
-        if (st.S.cloth) continue;
         let near = false;
         for (let j = 0; j < used.length; j++) if (Math.hypot(used[j].px - st.px, used[j].py - st.py, used[j].pz - st.pz) < st.t.W * 2.5) near = true;
         if (near) continue;
-        if (bloodRun(bite, st, Math.max(0.0035, st.t.W * 0.35), 0.05 + 0.22 * sev)) { used.push(st); made++; }
+        if (st.S.cloth) {
+          // through cloth the run is a wet trail soaking down the fabric
+          if (bloodTrail(bite, st, sev)) { used.push(st); made++; }
+        } else if (bloodRun(bite, st, Math.max(0.0035, st.t.W * 0.35), 0.06 + 0.24 * sev)) { used.push(st); made++; }
       }
     }
   }
   // 8-10: what the bitten skin does round the teeth
   function bruiseAndBlood(bite, mid, S, spanA, spanB, X, sea, coat, wet, sev, D) {
     const grav = onSkin(0, -1, 0, hN(mid), new THREE.Vector3());
-    // 8. bruising between the jaws, darkening over the next twenty seconds
-    if (D.crush * sev > 0.15 && coat !== "fur" && !mid.S.cloth) {
-      const k = D.crush * sev * (sea ? 0.55 : 0.85);
-      bite.els.push(elAt("s", SCELL.bruise, mid, S, (spanA + X.Wavg * 3) / 0.9, (spanB + X.Wavg * 3) / 0.9, Math.max(0.02, spanA * 0.4),
-        sea ? TINT.bruiseSea : TINT.bruise, null, { type: "alpha", from: 0.05, to: Math.min(1, k * 1.2), T: 22 }, mid.S));
+    // 8. the crush bruise, on every bare surface the jaws closed on, round
+    //    the teeth that landed there: red at once, darkening for half a minute
+    if (D.crush * sev > 0.15 && coat !== "fur" && coat !== "scales") {
+      const k = Math.min(1, D.crush * sev * (sea ? 0.6 : 0.95));
+      const groups = new Map();
+      for (let i = 0; i < bite.strikes.length; i++) {
+        const st = bite.strikes[i];
+        if (st.S.cloth) continue;
+        let gp = groups.get(st.S);
+        if (!gp) groups.set(st.S, gp = { n: 0, x: 0, y: 0, z: 0, pts: [] });
+        gp.n++; gp.x += st.px; gp.y += st.py; gp.z += st.pz; gp.pts.push(st);
+      }
+      groups.forEach(function (gp, Sx) {
+        const h = snapOn(Sx, gp.x / gp.n, gp.y / gp.n, gp.z / gp.n);
+        if (!h) return;
+        let r = 0;
+        for (let i = 0; i < gp.pts.length; i++) r = Math.max(r, Math.hypot(gp.pts[i].px - h.px, gp.pts[i].py - h.py, gp.pts[i].pz - h.pz));
+        const d = Math.max(X.Wavg * 4, (r + X.Wavg * 1.5) * 2.1);
+        bite.els.push(elAt("s", SCELL.bruise, h, S, d / 0.66, d * 0.85 / 0.66, Math.max(0.02, d * 0.3),
+          withA(sea ? TINT.bruiseSea : TINT.bruise, k), null, { type: "alpha", from: 0.4, to: 1, T: 25 }, Sx));
+      });
     }
     // 9. scales torn off round a fish bite
     if (coat === "scales" && bite.kind === "animal" && (bite.tissue === "fish" || bite.tissue === "redfish")) {
-      bite.els.push(elAt("s", SCELL.bruise, mid, S, (spanA * 1.6 + X.Wavg * 4) / 0.9, (spanB * 1.6 + X.Wavg * 4) / 0.9, Math.max(0.02, spanA * 0.5), TINT.scales, null, null, mid.S));
+      bite.els.push(elAt("s", SCELL.bruise, mid, S, (spanA * 1.6 + X.Wavg * 4) / 0.66, (spanB * 1.6 + X.Wavg * 4) / 0.66, Math.max(0.02, spanA * 0.5), TINT.scales, null, null, mid.S));
     }
     // 10. BLOOD
-    const bloodR = (Math.max(spanA, spanB) * 0.6 + X.Wavg * 2 + 0.015) * (0.7 + 0.6 * sev);
+    const bloodR = (Math.max(spanA, spanB) * 0.5 + X.Wavg * 2 + 0.015) * (0.7 + 0.6 * sev);
     const lowG = grav ? 0.18 * bloodR : 0;
     const hb = grav ? snap(bite, mid.px + grav.x * lowG, mid.py + grav.y * lowG, mid.pz + grav.z * lowG) : mid;
     const hB = hb || mid;
@@ -3425,18 +3744,27 @@
     // (each stays on the surface it is on: blood does not jump the gap from
     // a trouser leg to the hand hanging beside it)
     if (hB.S.cloth) {
-      // through the cloth: it soaks and wicks down, darkening the fabric
-      bite.els.push(elAt("s", SCELL.soak, hB, upT, bloodR * 2.2 / 0.8, bloodR * 2.8 / 0.8, Math.max(0.02, bloodR * 0.5), TINT.soakCloth, null,
-        { type: "grow", g0: 0.3, g1: 0.62, T: 1.6, creep: 55 }, hB.S));
+      // through the cloth: it soaks and wicks, darkening the fabric, heavier
+      // and further below the wound
+      bite.els.push(elAt("s", SCELL.soakCloth, hB, upT, bloodR * 2.1 / 0.6, bloodR * 2.6 / 0.6, Math.max(0.02, bloodR * 0.5), TINT.soakCloth, null,
+        { type: "grow", g0: 0.18, g1: 0.42, T: 3, creep: 60, ay: 0.12 }, hB.S));
     } else if (coat === "fur") {
       // in fur it mats dark, it does not paint the coat red
-      bite.els.push(elAt("s", SCELL.soak, hB, upT, bloodR * 2.0 / 0.8, bloodR * 2.5 / 0.8, Math.max(0.02, bloodR * 0.5), TINT.soakFur, null,
-        { type: "grow", g0: 0.3, g1: 0.7, T: 1.4, creep: 40 }, hB.S));
+      bite.els.push(elAt("s", SCELL.soakFur, hB, upT, bloodR * 1.9 / 0.62, bloodR * 2.4 / 0.62, Math.max(0.02, bloodR * 0.5), TINT.soakFur, null,
+        { type: "grow", g0: 0.22, g1: 0.5, T: 2.5, creep: 40, ay: 0.12 }, hB.S));
     } else {
+      // bare skin: the film (a dye: it darkens and reddens the skin), and
+      // on land the wet pool standing under the wound, glossy
       const grow = { type: "grow", g0: 0.38, g1: 0.78, T: 1.2, creep: wet ? 20 : 45 };
       // in the sea the blood leaves the wound: thinner every minute
-      bite.els.push(elAt("w", TCELL.blood, hB, upT, bloodR * 2 / 0.72, bloodR * 2.3 / 0.72, Math.max(0.02, bloodR * 0.5), [0, 0, 0, 0.95], null,
+      bite.els.push(elAt("s", SCELL.bloodSkin, hB, upT, bloodR * 2 / 0.56, bloodR * 2.3 / 0.56, Math.max(0.02, bloodR * 0.5), withA(TINT.bloodSkin, wet ? 0.8 : 1), null,
         wet ? [grow, { type: "alpha", from: 1, to: 0.3, T: 90, t0: 5 }] : grow, hB.S));
+      if (!wet) {
+        const pr = bloodR * 0.42, pl = bloodR * 0.3;
+        const hp = grav ? (snapOn(hB.S, hB.px + grav.x * pl, hB.py + grav.y * pl, hB.pz + grav.z * pl) || hB) : hB;
+        bite.els.push(elAt("w", TCELL.blood, hp, upT, pr * 2 / 0.6, pr * 2.3 / 0.6, Math.max(0.02, pr * 0.5), [0, 0, 0, 0.92], null,
+          { type: "grow", g0: 0.3, g1: 0.75, T: 1.5, creep: 30 }, hB.S));
+      }
     }
   }
 
@@ -3445,7 +3773,7 @@
   const _fv = new THREE.Vector3(), _fw = new THREE.Vector3(), _fo1 = new THREE.Vector3(), _fo2 = new THREE.Vector3(), _fc3 = [0, 0, 0];
   function flap(bite, L) {
     const h = L.h, n = hN(h).clone(), T = L.pull.clone(), Bv = new THREE.Vector3().crossVectors(n, T).normalize();
-    const hingeW = L.len * 0.55, height = L.wid * (L.cloth ? 2.4 : 1.8);
+    const hingeW = L.len * 0.5, height = L.wid * (L.cloth ? 1.7 : 1.4);
     const hc = { x: h.px + Bv.x * L.wid * 0.5, y: h.py + Bv.y * L.wid * 0.5, z: h.pz + Bv.z * L.wid * 0.5 };
     const hh = snap(bite, hc.x, hc.y, hc.z);
     if (!hh) return;
@@ -3483,14 +3811,15 @@
   }
 
   // a run of blood traced downhill over the real surface from a wound, its
-  // front lengthening as it flows and slowing as it clots
+  // front lengthening as it flows and slowing as it clots. It follows the
+  // skin it reaches next (a neck's runs go on down the chest); where it
+  // meets cloth it soaks in there.
   const _bp1 = new THREE.Vector3(), _bq1 = new THREE.Vector3(), _bg1 = new THREE.Vector3(), _bs1 = new THREE.Vector3();
   function bloodRun(bite, st, width, Lmax) {
-    const S = st.S, only = [S];
-    const pts = [copyHit(st)];
+    let S = st.S, pts = [copyHit(st)], len = 0, total = 0, soakAt = null;
+    const segs = [];
     const step = Math.max(width * 2.2, 0.006);
-    let len = 0;
-    for (let k = 0; k < 48 && len < Lmax; k++) {
+    for (let k = 0; k < 64 && total < Lmax; k++) {
       const h = pts[pts.length - 1];
       // gravity along the skin
       const ny = h.ny;
@@ -3499,14 +3828,40 @@
       if (gl < 0.3) break;                            // facing up or down: it pools
       _bg1.multiplyScalar(1 / gl);
       _bq1.set(h.px + _bg1.x * step, h.py + _bg1.y * step, h.pz + _bg1.z * step);
-      const nh = nearestAll(only, _bq1.x, _bq1.y, _bq1.z, hitRec());
+      const nh = nearestAll(bite.surfs, _bq1.x, _bq1.y, _bq1.z, hitRec());
       if (!nh || nh.t > step * 0.7) break;            // over an edge, or off what we know
       const d = Math.hypot(nh.px - h.px, nh.py - h.py, nh.pz - h.pz);
       if (d < step * 0.25) break;
-      len += d;
+      if (nh.S !== S) {
+        if (nh.S.cloth) { soakAt = copyHit(nh); break; }
+        if (pts.length >= 3) segs.push({ S: S, pts: pts, len: len });
+        S = nh.S; pts = [copyHit(nh)]; len = 0; total += d;
+        continue;
+      }
+      len += d; total += d;
       pts.push(copyHit(nh));
     }
-    if (pts.length < 3) return false;
+    if (pts.length >= 3) segs.push({ S: S, pts: pts, len: len });
+    if (!segs.length && !soakAt) return false;
+    let delay = 0;
+    const tau = 4 + Math.random() * 5;
+    for (let q = 0; q < segs.length; q++) {
+      runStrip(bite, segs[q].S, segs[q].pts, segs[q].len, width * (1 - 0.3 * q / Math.max(1, segs.length)), tau, delay);
+      delay += tau * 0.9;
+    }
+    if (soakAt) {
+      // where the run met the cloth it soaks in and wicks on down
+      const g0 = onSkin(0, -1, 0, hN(soakAt), new THREE.Vector3());
+      const w = Math.max(width * 5, 0.02);
+      const T = g0 ? new THREE.Vector3().crossVectors(hN(soakAt), g0) : new THREE.Vector3(1, 0, 0);
+      const gl = g0 ? 0.35 * w * 2 : 0;
+      const hh = g0 ? (snapOn(soakAt.S, soakAt.px + g0.x * gl, soakAt.py + g0.y * gl, soakAt.pz + g0.z * gl) || soakAt) : soakAt;
+      stampEl(bite, elAt("s", SCELL.soakCloth, hh, T, w / 0.6, w * 2.6 / 0.6, Math.max(0.02, w), TINT.soakCloth, null,
+        { type: "grow", g0: 0.15, g1: 0.6, T: 2.5, creep: 50, t0: delay, ay: 0.4 }, soakAt.S));
+    }
+    return true;
+  }
+  function runStrip(bite, S, pts, len, width, tau, t0) {
     const B = layerBuf(bite, S, "w"), cell = TCELL.strip, first = B.n;
     const lift = 0.0018;
     const rows = [];
@@ -3535,7 +3890,20 @@
           cell[0] + quad[k][2] * cell[2], cell[1] + (0.04 + r.al * 0.92) * cell[3], c, null, 0, 0, r.al);
       }
     }
-    B.anims.push({ type: "front", a: first, n: B.n - first, tau: 4 + Math.random() * 5, cell: cell });
+    B.anims.push({ type: "front", a: first, n: B.n - first, tau: tau, t0: t0 || 0, cell: cell });
+  }
+  // through cloth a run is a trail: the blood soaks down the fabric below a
+  // hole, narrow and long, lengthening as it wicks
+  function bloodTrail(bite, st, sev) {
+    const n = hN(st), g0 = onSkin(0, -1, 0, n, new THREE.Vector3());
+    if (!g0) return false;
+    const L = (0.06 + 0.16 * sev) * (0.7 + 0.6 * Math.random()), w = Math.max(st.t.W * 2.2, 0.015);
+    const h = snapOn(st.S, st.px + g0.x * L * 0.45, st.py + g0.y * L * 0.45, st.pz + g0.z * L * 0.45);
+    if (!h) return false;
+    const T = new THREE.Vector3().crossVectors(hN(h), g0);
+    if (T.lengthSq() < 1e-8) return false;
+    stampEl(bite, elAt("s", SCELL.soakCloth, h, T.normalize(), w / 0.6, L / 0.6, Math.max(0.02, L * 0.4), TINT.soakCloth, null,
+      { type: "grow", g0: 0.15, g1: 0.5, T: 3, creep: 60, ay: 0.4 }, st.S));
     return true;
   }
 
