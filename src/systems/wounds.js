@@ -1296,23 +1296,59 @@
     col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
   }
   // 7 GAPE: where a big mouth took a chunk, seen on the skin: wider than it
-  // is deep, its outline irregular (torn, not cut, between the tooth lines
-  // that bound it above and below), notched at tooth scale, skin tags
-  // hanging into it; steep walls, the floor deep and uneven, dark where it
-  // is deepest, blood standing in its lower part. The tooth cuts along its
+  // is deep, its outline torn (not cut) between the tooth lines that bound
+  // it above and below, notched at tooth scale, a few tongues of skin left
+  // hanging into it. Inside, the layers the teeth went through, as they
+  // are: the torn skin at the lip, the fat under it as a lobed band in the
+  // wall, then the muscle, its bundles running along the bite with dark
+  // seams between them and the cut grain across them, the foot of the wall
+  // in shadow. Blood stands in the floor's lower part up to a level, fills
+  // the seams and runs down the wall from the upper lip. Black only in the
+  // seams: a hole that deep is meat, not a shadow. The tooth cuts along its
   // two edges are their own marks.
   function cGape(x, y, px) {
     const ex = x / 0.74, ey = (y + 0.02) / 0.52;
     const r = Math.hypot(ex, ey), th = Math.atan2(ey, ex);
+    // the tongues of skin: a few narrow lobes of the rim reaching in
+    const tag = 0.14 * Math.pow(Math.max(0, Math.sin(th * 5 + 2.2 + 2.5 * angN(th, 149))), 22) * sstep(0.45, 0.7, angN(th * 3, 150));
     const R0 = 1 + 0.16 * (angN(th, 141) - 0.5) + 0.1 * (angN(th * 2 + 1.3, 142) - 0.5)
-      - 0.05 * Math.pow(Math.abs(Math.sin(th * 9 + 3 * angN(th, 143))), 6) + 0.025 * (vnoise(x * 22, y * 22, 147) - 0.5);
+      - 0.05 * Math.pow(Math.abs(Math.sin(th * 9 + 3 * angN(th, 143))), 6) + 0.025 * (vnoise(x * 22, y * 22, 147) - 0.5) - tag;
     const q = r / R0;
     const open = 1 - sstep(0.9, 1.0, q);
     if (open <= 0) { col(px, 0, 0, 0, 0); return; }
-    const floor = vnoise(x * 4, y * 4, 144), lump = vnoise(x * 9, y * 9, 148);
-    const depth = open * Math.min(0.97, 0.3 + 0.62 * Math.pow(Math.max(0, 1 - q), 0.45) * (0.75 + 0.35 * floor) + 0.06 * (lump - 0.5));
-    const fat = fatBand(1 - q, x, y, 145);
-    const blood = open * Math.min(0.9, 0.55 * (1 - sstep(-0.6, 0.1, y)) + 0.3 * sstep(0.45, 0.8, vnoise(x * 6, y * 6, 146)));
+    const e = Math.max(0, 1 - q);                           // 0 at the lip .. 1 in the middle
+    // how thick the skin and the fat are here (they vary round the rim)
+    const skinE = 0.035 + 0.02 * angN(th * 2.1, 153);
+    const fatE = skinE + 0.12 + 0.1 * angN(th * 1.3, 152);
+    const wallE = fatE + 0.08;                               // the muscle wall's foot
+    // the muscle: bundles running along the bite (bent and uneven, as a
+    // muscle's are), each rounded toward the light, narrow dark seams
+    // between them, the cut fibres across them
+    const yy = y + 0.22 * (vnoise(x * 1.6, y * 1.6, 154) - 0.5) + 0.12 * x * (vnoise(2, y * 2, 160) - 0.5);
+    const ph = yy * (30 + 8 * (vnoise(x * 2, 5, 161) - 0.5));
+    const band = 0.5 + 0.5 * Math.sin(ph);                   // 1 on a bundle's crest, 0 in a seam
+    const inMuscle = sstep(fatE - 0.01, fatE + 0.04, e);
+    const seam = Math.pow(1 - band, 8) * sstep(0.0, 0.06, e - fatE);
+    const grain = 0.014 * Math.sin(x * 60 + 9 * vnoise(x * 3, yy * 12, 155)) * band;
+    // depth through the victim's own layers (woundMat): the torn skin and
+    // the fat shallow; a bundle's crest just into the muscle (lit, its
+    // sheen), its flanks the muscle itself, a seam near the dark bottom
+    const lip = 0.04 + 0.14 * sstep(0, skinE, e) + 0.12 * sstep(skinE, fatE, e);
+    const meat = 0.2 + 0.16 * (1 - band * band) + 0.04 * (vnoise(x * 6, y * 6, 156) - 0.5) + grain + 0.52 * seam
+      // the foot of the wall, where the floor meets it, is in its shadow
+      + 0.26 * Math.max(0, 1 - Math.abs(e - wallE) / 0.05);
+    let depth = lip + (meat - lip) * inMuscle;
+    depth = open * Math.min(0.97, Math.max(0.02, depth));
+    // the fat: a band in the wall, lobed (its lobules show as rounded bumps)
+    const lob = sstep(0.3, 0.62, vnoise(x * 14, y * 14, 157));
+    const fat = sstep(skinE * 0.7, skinE + 0.01, e) * (1 - sstep(fatE - 0.02, fatE + 0.01, e)) * (0.7 + 0.3 * lob);
+    // blood: standing in the floor's lower part up to a level (flat, not a
+    // gradient), in the seams, and run down the wall from the upper lip
+    const level = -0.24 + 0.07 * (vnoise(x * 3, 1, 158) - 0.5);
+    const pool = sstep(level + 0.035, level - 0.035, y) * sstep(skinE, fatE, e);
+    const runs = sstep(0.66, 0.8, vnoise(x * 9, 3, 159)) * sstep(-0.05, 0.3, y) * (1 - inMuscle * 0.5);
+    const film = 0.07 + 0.1 * vnoise(x * 7, y * 7, 146);
+    const blood = open * Math.min(0.95, Math.max(pool, 0.65 * seam, 0.75 * runs, film));
     col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
   }
   // 8 POOL: wet blood standing on bare skin under a wound: opaque (a pool is
@@ -3900,6 +3936,11 @@
   }
   // the in-plane direction that lays a cell drawn along its y on dir
   function alongY(dir, n) { return new THREE.Vector3().crossVectors(dir, n).normalize(); }
+  // T, or T turned round, so that a cell's lower half (where its blood
+  // stands) is the lower on the body as it stands (a cell's +y is n x T)
+  function poolDown(T, n) {
+    return n.z * T.x - n.x * T.z < 0 ? new THREE.Vector3(-T.x, -T.y, -T.z) : T;
+  }
   // dir turned about n by up to +-a radians
   function askew(dir, n, a) {
     const th = (Math.random() * 2 - 1) * a, c = Math.cos(th), s2 = Math.sin(th);
@@ -4103,8 +4144,9 @@
         // deep, the tooth cuts along its edges
         const w = Math.max(X.Wavg * 3, spanA + X.Wavg * 0.5);
         const hgt = Math.min(w * 0.8, Math.max(X.Wavg * 2, spanB + X.Wavg * 0.3));
-        if (D.crush >= 0.6) bite.els.push(elAt("w", TCELL.ragged, mid, S, w / 0.64, hgt / 0.64, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
-        else bite.els.push(elAt("w", TCELL.gape, mid, S, w / 0.74, hgt / 0.52, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
+        const Tg = poolDown(S, hN(mid));
+        if (D.crush >= 0.6) bite.els.push(elAt("w", TCELL.ragged, mid, Tg, w / 0.64, hgt / 0.64, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
+        else bite.els.push(elAt("w", TCELL.gape, mid, Tg, w / 0.74, hgt / 0.52, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
       } else {
         // round a limb: the flesh cut out along each jaw's line
         for (let r = 0; r < 2; r++) {
@@ -4116,7 +4158,7 @@
           if (!hr) continue;
           const a = row[0], b = row[row.length - 1];
           const d = Math.hypot(b.px - a.px, b.py - a.py, b.pz - a.pz);
-          const dir = onSkin(b.px - a.px, b.py - a.py, b.pz - a.pz, hN(hr), new THREE.Vector3()) || S;
+          const dir = poolDown(onSkin(b.px - a.px, b.py - a.py, b.pz - a.pz, hN(hr), new THREE.Vector3()) || S, hN(hr));
           bite.els.push(elAt("w", D.crush >= 0.6 ? TCELL.ragged : TCELL.gape, hr, dir, (d + X.Wavg) / (D.crush >= 0.6 ? 0.64 : 0.74),
             X.Lmax * 2.4 / (D.crush >= 0.6 ? 0.64 : 0.52), Math.max(0.02, X.Lmax), [0.9, 0, 0, 1], null, null, hr.S));
         }
@@ -4218,18 +4260,118 @@
   // a flap of cloth or hide hanging from the lip of the longest tear,
   // peeled back over it
   const _fv = new THREE.Vector3(), _fw = new THREE.Vector3(), _fo1 = new THREE.Vector3(), _fo2 = new THREE.Vector3(), _fc3 = [0, 0, 0];
+  /* A FLAP: the hide or cloth the shake tore loose, hinged along one side
+     of the tear and lifted off it. The hinge follows the skin (each column
+     of the flap stands on its own foot, in that spot's own frame), the flap
+     curls on as it goes out (a torn edge rolls), its free corners further
+     than its middle (it cups), and wherever it would pass into the body it
+     is laid on it instead. Its outside is its front face: the tissue
+     shader shows the hide or the soaked cloth there and the raw or lined
+     underside behind. */
+  const FLAP_NC = 5, FLAP_NR = 5;
+  // the triangles of a part within r of a point, as it was posed for the
+  // bite (a flap reaches past the bite's near list)
+  function localTris(S, cx, cy, cz, r) {
+    const W = S.W, idx = S.idx, nt = S.nt, out = [];
+    for (let t = 0; t < nt; t++) {
+      const a = idx ? idx[t * 3] : t * 3, b = idx ? idx[t * 3 + 1] : t * 3 + 1, c = idx ? idx[t * 3 + 2] : t * 3 + 2;
+      if (a === b || b === c || a === c) continue;
+      const a3 = a * 3, b3 = b * 3, c3 = c * 3;
+      const mx = (W[a3] + W[b3] + W[c3]) / 3, my = (W[a3 + 1] + W[b3 + 1] + W[c3 + 1]) / 3, mz = (W[a3 + 2] + W[b3 + 2] + W[c3 + 2]) / 3;
+      let r2 = (W[a3] - mx) * (W[a3] - mx) + (W[a3 + 1] - my) * (W[a3 + 1] - my) + (W[a3 + 2] - mz) * (W[a3 + 2] - mz);
+      let q = (W[b3] - mx) * (W[b3] - mx) + (W[b3 + 1] - my) * (W[b3 + 1] - my) + (W[b3 + 2] - mz) * (W[b3 + 2] - mz); if (q > r2) r2 = q;
+      q = (W[c3] - mx) * (W[c3] - mx) + (W[c3 + 1] - my) * (W[c3 + 1] - my) + (W[c3 + 2] - mz) * (W[c3 + 2] - mz); if (q > r2) r2 = q;
+      const lim = r + Math.sqrt(r2), dx = mx - cx, dy = my - cy, dz = mz - cz;
+      if (dx * dx + dy * dy + dz * dz <= lim * lim) out.push(a, b, c);
+    }
+    return out;
+  }
+  // the nearest point of those triangles, as a hit (bone weights, normal)
+  function nearestIn(S, list, qx, qy, qz, out) {
+    const W = S.W, WN = S.WN;
+    let best = Infinity;
+    _tQ.set(qx, qy, qz);
+    for (let k = 0; k < list.length; k += 3) {
+      const i0 = list[k], i1 = list[k + 1], i2 = list[k + 2];
+      _tA.fromArray(W, i0 * 3); _tB.fromArray(W, i1 * 3); _tC.fromArray(W, i2 * 3);
+      _tri.set(_tA, _tB, _tC);
+      _tri.closestPointToPoint(_tQ, _tO);
+      const d2 = _tO.distanceToSquared(_tQ);
+      if (d2 >= best) continue;
+      best = d2;
+      out.S = S; out.i0 = i0; out.i1 = i1; out.i2 = i2; out.px = _tO.x; out.py = _tO.y; out.pz = _tO.z; out.t = Math.sqrt(d2);
+    }
+    if (best === Infinity) return null;
+    _tA.fromArray(W, out.i0 * 3); _tB.fromArray(W, out.i1 * 3); _tC.fromArray(W, out.i2 * 3);
+    _tri.set(_tA, _tB, _tC);
+    _tO.set(out.px, out.py, out.pz);
+    _tri.getBarycoord(_tO, _tBc);
+    out.b0 = _tBc.x; out.b1 = _tBc.y; out.b2 = _tBc.z;
+    let nx = WN[out.i0 * 3] * out.b0 + WN[out.i1 * 3] * out.b1 + WN[out.i2 * 3] * out.b2;
+    let ny = WN[out.i0 * 3 + 1] * out.b0 + WN[out.i1 * 3 + 1] * out.b1 + WN[out.i2 * 3 + 1] * out.b2;
+    let nz = WN[out.i0 * 3 + 2] * out.b0 + WN[out.i1 * 3 + 2] * out.b1 + WN[out.i2 * 3 + 2] * out.b2;
+    // the face's own side wins where the smooth normal disagrees with it
+    // (a crease): what is outside is outside the triangle
+    _tri.getNormal(_tN3);
+    if (nx * _tN3.x + ny * _tN3.y + nz * _tN3.z < 0) { nx = _tN3.x; ny = _tN3.y; nz = _tN3.z; }
+    const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    out.nx = nx / l; out.ny = ny / l; out.nz = nz / l;
+    return out;
+  }
+  const _tN3 = new THREE.Vector3();
+  // the triangles of every part of the bite near a point, flat: S, a, b, c
+  function localAll(bite, cx, cy, cz, r) {
+    const out = [];
+    for (let s = 0; s < bite.surfs.length; s++) {
+      const S = bite.surfs[s];
+      if (!S || !S.W || !S.nt) continue;
+      const l = localTris(S, cx, cy, cz, r);
+      for (let k = 0; k < l.length; k += 3) out.push(S, l[k], l[k + 1], l[k + 2]);
+    }
+    return out;
+  }
+  // the first face a segment goes in through (from its front: into the
+  // body), as the fraction along it and that face's normal; null if none
+  const _segH = { t: 0, nx: 0, ny: 0, nz: 1 };
+  function segIn(L, px, py, pz, qx, qy, qz) {
+    const dx = qx - px, dy = qy - py, dz = qz - pz;
+    let best = Infinity;
+    for (let k = 0; k < L.length; k += 4) {
+      const Wt = L[k].W, a = L[k + 1] * 3, b = L[k + 2] * 3, c = L[k + 3] * 3;
+      const e1x = Wt[b] - Wt[a], e1y = Wt[b + 1] - Wt[a + 1], e1z = Wt[b + 2] - Wt[a + 2];
+      const e2x = Wt[c] - Wt[a], e2y = Wt[c + 1] - Wt[a + 1], e2z = Wt[c + 2] - Wt[a + 2];
+      const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+      if (nx * dx + ny * dy + nz * dz >= 0) continue;
+      const hx = dy * e2z - dz * e2y, hy = dz * e2x - dx * e2z, hz = dx * e2y - dy * e2x;
+      const det = e1x * hx + e1y * hy + e1z * hz;
+      if (det > -1e-14 && det < 1e-14) continue;
+      const f = 1 / det, sx = px - Wt[a], sy = py - Wt[a + 1], sz = pz - Wt[a + 2];
+      const u = f * (sx * hx + sy * hy + sz * hz);
+      if (u < 0 || u > 1) continue;
+      const rx = sy * e1z - sz * e1y, ry = sz * e1x - sx * e1z, rz = sx * e1y - sy * e1x;
+      const v = f * (dx * rx + dy * ry + dz * rz);
+      if (v < 0 || u + v > 1) continue;
+      const t = f * (e2x * rx + e2y * ry + e2z * rz);
+      if (t < 0 || t > 1 || t >= best) continue;
+      best = t;
+      const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      _segH.t = t; _segH.nx = nx / l; _segH.ny = ny / l; _segH.nz = nz / l;
+    }
+    return best < Infinity ? _segH : null;
+  }
+  const _ff = new THREE.Vector3(), _fT = new THREE.Vector3(), _fB = new THREE.Vector3(), _fN = new THREE.Vector3();
   function flap(bite, L) {
     const h = L.h, n = hN(h).clone(), T = L.pull.clone(), Bv = new THREE.Vector3().crossVectors(n, T).normalize();
     const hingeW = L.len * 0.5, height = L.wid * (L.cloth ? 1.7 : 1.4);
     const hc = { x: h.px + Bv.x * L.wid * 0.5, y: h.py + Bv.y * L.wid * 0.5, z: h.pz + Bv.z * L.wid * 0.5 };
     const hh = snap(bite, hc.x, hc.y, hc.z);
     if (!hh) return;
-    const S = hh.S, B = layerBuf(bite, S, "w"), inv = hostInverse(S, hh, new THREE.Matrix4());
+    const S = hh.S, B = layerBuf(bite, S, "w");
     hostColour(S, hh, _fc3);
-    const phi = 0.9 + Math.random() * 0.35, curl = 0.45;
-    _fo1.copy(Bv).multiplyScalar(-Math.cos(phi)).addScaledVector(n, Math.sin(phi)).normalize();
-    _fo2.copy(Bv).multiplyScalar(-Math.cos(phi + curl)).addScaledVector(n, Math.sin(phi + curl)).normalize();
-    const lift = 0.002;
+    // how far it stands off at the hinge, how much more it turns by its free
+    // edge, and how much further its corners turn than its middle
+    const phi = 0.85 + Math.random() * 0.35, curl = 0.6 + Math.random() * 0.4, cup = 0.14;
+    const lift = 0.002, clear = 0.003;
     const cell = TCELL.flap, c = [0, 0, L.cloth ? 0.5 : 1, 1];
     // the soak the stain layer gives the fabric (or the coat) round it, as
     // an albedo: the dye raised to its cover (see stainMat), linearised
@@ -4239,28 +4381,119 @@
       for (let k = 0; k < 3; k++) out[k] = _fc3[k] * Math.pow(Math.max(0.001, Math.pow(tn[k], 1 / 2.2) * 0.9), cover * 2.2);
       return out;
     };
-    const grid = [];
-    for (let j = 0; j <= 2; j++) {
-      for (let i = 0; i <= 3; i++) {
-        const u = i / 3 - 0.5;
-        _fv.set(hh.px, hh.py, hh.pz).addScaledVector(T, u * hingeW).addScaledVector(n, lift);
-        if (j >= 1) _fv.addScaledVector(_fo1, height * 0.55);
-        if (j >= 2) _fv.addScaledVector(_fo2, height * 0.45);
-        // a ragged free edge
-        if (j === 2) _fv.addScaledVector(T, (Math.random() - 0.5) * hingeW * 0.12);
-        grid.push([_fv.x, _fv.y, _fv.z, (u + 0.5), j / 2, soakAt(0.95 - 0.12 * j - 0.08 * Math.random())]);
+    const NC = FLAP_NC, NR = FLAP_NR, seg = height / (NR - 1);
+    const P = new Float32Array(NC * NR * 3), Q = new Array(NC * NR);
+    const reach = hingeW * 0.6 + height * 1.2 + 0.02;
+    const every = localAll(bite, hh.px, hh.py, hh.pz, reach), local = [];
+    for (let k = 0; k < every.length; k += 4) if (every[k] === S) local.push(every[k + 1], every[k + 2], every[k + 3]);
+    if (!local.length) return;
+    const nh = hN(hh).clone(), out0 = Math.min(0.05, Math.max(0.015, height * 1.5));
+    // the hinge: one foot a column, each the skin you see there (come down
+    // on from outside: the nearest skin can be a shell under another). It
+    // must be one unbroken edge of skin: where a foot finds nothing (the
+    // bite took it) or jumps (a fold, the next part over), the hinge is
+    // narrowed until it is; a tear with no such edge has no flap.
+    let hw = hingeW, feet = null;
+    for (let attempt = 0; attempt < 3 && !feet; attempt++, hw *= 0.6) {
+      feet = [];
+      let prevH = 0;
+      for (let i = 0; i < NC && feet; i++) {
+        const u = i / (NC - 1) - 0.5;
+        const tx = hh.px + T.x * u * hw, ty = hh.py + T.y * u * hw, tz = hh.pz + T.z * u * hw;
+        const sx = tx + nh.x * out0, sy = ty + nh.y * out0, sz = tz + nh.z * out0;
+        const ex = tx - nh.x * out0, ey = ty - nh.y * out0, ez = tz - nh.z * out0;
+        const dn = segIn(every, sx, sy, sz, ex, ey, ez);
+        if (!dn) { feet = null; break; }
+        const fx = sx + (ex - sx) * dn.t, fy = sy + (ey - sy) * dn.t, fz = sz + (ez - sz) * dn.t;
+        const hgt = (fx - hh.px) * nh.x + (fy - hh.py) * nh.y + (fz - hh.pz) * nh.z;
+        if (i && Math.abs(hgt - prevH) > 0.6 * hw / (NC - 1) + 0.003) { feet = null; break; }
+        prevH = hgt;
+        feet.push([fx, fy, fz, dn.nx, dn.ny, dn.nz, u]);
       }
     }
-    const at = function (i, j) { return grid[j * 4 + i]; };
-    for (let j = 0; j < 2; j++) {
-      for (let i = 0; i < 3; i++) {
-        const q = [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j), at(i + 1, j + 1), at(i, j + 1)];
-        const a = q[0], b = q[1], d = q[2];
-        _fw.set(b[0] - a[0], b[1] - a[1], b[2] - a[2]).cross(_fv.set(d[0] - a[0], d[1] - a[1], d[2] - a[2])).normalize();
-        for (let k = 0; k < 6; k++) {
-          const p = q[k];
-          vertWorld(B, hh, inv, p[0], p[1], p[2], _fw.x, _fw.y, _fw.z, cell[0] + p[3] * cell[2], cell[1] + p[4] * cell[3], c, p[5], 0, 0, 0);
+    if (!feet) return;
+    hw /= 0.6;
+    const soak = [];
+    for (let j = 0; j < NR; j++) soak.push(soakAt(0.95 - 0.24 * j / (NR - 1) - 0.08 * Math.random()));
+    for (let i = 0; i < NC; i++) {
+      const u = feet[i][6];
+      // the column's foot, seated on its part (its bones), in the skin's frame there
+      const fx = feet[i][0], fy = feet[i][1], fz = feet[i][2];
+      const f = nearestIn(S, local, fx, fy, fz, hitRec()) || copyHit(hh);
+      Q[i] = f;
+      f.px = fx; f.py = fy; f.pz = fz;
+      if (feet[i][3] * f.nx + feet[i][4] * f.ny + feet[i][5] * f.nz < 0.3) { f.nx = feet[i][3]; f.ny = feet[i][4]; f.nz = feet[i][5]; }
+      // every column turns in the hinge's own frame: the flap is one sheet
+      // (columns in frames of their own fan apart or cross where the skin
+      // under the hinge curves)
+      _fN.copy(nh);
+      _fT.copy(T).addScaledVector(_fN, -T.dot(_fN));
+      if (_fT.lengthSq() < 1e-10) _fT.copy(T);
+      _fT.normalize();
+      _fB.crossVectors(_fN, _fT);
+      let x = f.px + _fN.x * lift, y = f.py + _fN.y * lift, z = f.pz + _fN.z * lift;
+      P[i * 3] = x; P[i * 3 + 1] = y; P[i * 3 + 2] = z;
+      let lx = 0, ly = 0, lz = 0, lying = false;
+      for (let j = 1; j < NR; j++) {
+        const k = j / (NR - 1);
+        const ang = phi + curl * Math.pow(k, 1.4) + cup * Math.abs(u * 2) * k * k;
+        _ff.copy(_fB).multiplyScalar(-Math.cos(ang)).addScaledVector(_fN, Math.sin(ang));
+        // once it lies on the skin it goes on along it, not into it
+        if (lying) {
+          const dn = _ff.x * lx + _ff.y * ly + _ff.z * lz;
+          if (dn < 0) { _ff.x -= lx * dn; _ff.y -= ly * dn; _ff.z -= lz * dn; const l = _ff.length(); if (l > 1e-6) _ff.multiplyScalar(1 / l); }
         }
+        let nx = x + _ff.x * seg, ny = y + _ff.y * seg, nz = z + _ff.z * seg;
+        // a ragged free edge
+        if (j === NR - 1) { const r = (Math.random() - 0.5) * hw * 0.12; nx += _fT.x * r; ny += _fT.y * r; nz += _fT.z * r; }
+        // never into the body: where the step would go in through the skin
+        // it meets it and slides on along it the rest of the way, standing
+        // off it a little (the slide is tried too: off one face it can be
+        // into the next)
+        for (let it = 0; it < 3; it++) {
+          const hit = segIn(every, x, y, z, nx, ny, nz);
+          if (!hit) break;
+          const t = Math.max(0, hit.t - 1e-3);
+          const hx = x + (nx - x) * t + hit.nx * clear, hy = y + (ny - y) * t + hit.ny * clear, hz = z + (nz - z) * t + hit.nz * clear;
+          let rx = (nx - x) * (1 - t), ry = (ny - y) * (1 - t), rz = (nz - z) * (1 - t);
+          const rn = rx * hit.nx + ry * hit.ny + rz * hit.nz;
+          rx -= hit.nx * rn; ry -= hit.ny * rn; rz -= hit.nz * rn;
+          lx = hit.nx; ly = hit.ny; lz = hit.nz; lying = true;
+          if (it === 2) { nx = hx; ny = hy; nz = hz; if (segIn(every, x, y, z, nx, ny, nz)) { nx = x; ny = y; nz = z; } break; }
+          x = hx; y = hy; z = hz;
+          nx = hx + rx; ny = hy + ry; nz = hz + rz;
+        }
+        x = nx; y = ny; z = nz;
+        Q[j * NC + i] = nearestIn(S, local, x, y, z, hitRec()) || f;
+        const o = (j * NC + i) * 3;
+        P[o] = x; P[o + 1] = y; P[o + 2] = z;
+      }
+    }
+    // smooth normals, the outside's: across x along (the front face's)
+    const NV = new Float32Array(NC * NR * 3);
+    for (let j = 0; j < NR; j++) for (let i = 0; i < NC; i++) {
+      const i0 = Math.max(0, i - 1), i1 = Math.min(NC - 1, i + 1), j0 = Math.max(0, j - 1), j1 = Math.min(NR - 1, j + 1);
+      const ax = P[(j * NC + i1) * 3] - P[(j * NC + i0) * 3], ay = P[(j * NC + i1) * 3 + 1] - P[(j * NC + i0) * 3 + 1], az = P[(j * NC + i1) * 3 + 2] - P[(j * NC + i0) * 3 + 2];
+      const bx = P[(j1 * NC + i) * 3] - P[(j0 * NC + i) * 3], by = P[(j1 * NC + i) * 3 + 1] - P[(j0 * NC + i) * 3 + 1], bz = P[(j1 * NC + i) * 3 + 2] - P[(j0 * NC + i) * 3 + 2];
+      let nx = by * az - bz * ay, ny = bz * ax - bx * az, nz = bx * ay - by * ax;
+      const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      NV[(j * NC + i) * 3] = nx / l; NV[(j * NC + i) * 3 + 1] = ny / l; NV[(j * NC + i) * 3 + 2] = nz / l;
+    }
+    // each point seated through the skin nearest it: the flap bends where
+    // the body under it bends
+    const INV = new Array(NC * NR);
+    for (let k = 0; k < NC * NR; k++) INV[k] = hostInverse(S, Q[k], new THREE.Matrix4());
+    const put = function (i, j) {
+      const k = j * NC + i, o = k * 3;
+      vertWorld(B, Q[k], INV[k], P[o], P[o + 1], P[o + 2], NV[o], NV[o + 1], NV[o + 2],
+        cell[0] + (i / (NC - 1)) * cell[2], cell[1] + (j / (NR - 1)) * cell[3], c, soak[j], 0, 0, 0);
+    };
+    // wound so the front face is the outside: (along, across) turns from
+    // the outward direction to the hinge's
+    for (let j = 0; j < NR - 1; j++) {
+      for (let i = 0; i < NC - 1; i++) {
+        put(i, j); put(i + 1, j + 1); put(i + 1, j);
+        put(i, j); put(i, j + 1); put(i + 1, j + 1);
       }
     }
   }
