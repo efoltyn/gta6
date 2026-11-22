@@ -580,10 +580,15 @@
     const verbs = list.filter(function (p) { return !p.label; }).sort(function (a, b) { return b.row - a.row; });
     const ordered = name.concat(verbs);
     let bw = 0, bh = 0;
+    // the buttons are as wide as the longest VERB; the name above never
+    // widens them (it used to stretch every capsule to "Bishop  Black
+    // Guerrilla Family") and is right-aligned, free to run further left
     for (let i = 0; i < ordered.length; i++) {
       const s = natSize(ordered[i], "wdock");
-      bw = Math.max(bw, s.w); bh += s.h + (i ? gap : 0);
+      if (!ordered[i].label) bw = Math.max(bw, s.w);
+      bh += s.h + (i ? gap : 0);
     }
+    if (!bw) for (let i = 0; i < ordered.length; i++) bw = Math.max(bw, ordered[i]._nat.w);
     bw = Math.ceil(bw);
     const spot = dockSpot(bw, bh);
     let y = spot.y;

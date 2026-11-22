@@ -721,7 +721,9 @@
     const box = bodyBoxFn(a);
     const d2 = touchUI() ? 0 : d2Of(a);
     const who = whoFor(a);
-    const name = who.name + (who.role ? "  " + who.role : "");
+    // just the name (owner 2026-11-21): no gang, no title over his buttons.
+    // His gang reads off the man himself and his own words when you join.
+    const name = who.name;
     let row = 0;
     if (who.name) {
       CBZ.prisonPrompt("person-who", "@prisonNoop", name,
