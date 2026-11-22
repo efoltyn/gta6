@@ -152,6 +152,33 @@
   } catch (e) {}
   o.lots = (A.lots || []).map(l => ({ x: r1(l.cx), z: r1(l.cz), w: l.w, d: l.d, k: l.kind || (l.building && l.building.kind) || null,
     dist: l.district && l.district.name, wet: (wet(l.cx, l.cz) || wet(l.cx - l.w / 2, l.cz - l.d / 2) || wet(l.cx + l.w / 2, l.cz + l.d / 2)) ? 1 : 0 }));
+  // ---- the VENUES: every mounted game package (its group's position is its
+  //      origin), every shop lot with a kind, the motel, and the law's desk.
+  //      tools/citymap/zoom.py letters them; the map checks they stand on land
+  //      by a street, not on a beach and not inside another building.
+  o.venues = [];
+  try {
+    const V3 = new THREE.Vector3();
+    CBZ.scene.traverse(function (q) {
+      if (!q.userData || !q.userData.gamePkg || !q.parent) return;
+      for (let p = q.parent; p; p = p.parent) if (p.userData && p.userData.gamePkg) return;      // a venue's own child
+      q.getWorldPosition(V3);
+      o.venues.push({ id: "pkg:" + q.userData.gamePkg, x: r1(V3.x), z: r1(V3.z), wet: wet(V3.x, V3.z) });
+    });
+  } catch (e) {}
+  try {
+    for (const l of (A.shopLots || [])) {
+      if (!l || !l.kind) continue;
+      const d = l.building && l.building.door;
+      o.venues.push({ id: "shop:" + l.kind, n: (l.building && (l.building.name || l.building.label)) || null, x: r1(l.cx), z: r1(l.cz), w: l.w, d: l.d,
+        door: d ? [r1(d.x), r1(d.z)] : null, wet: wet(l.cx, l.cz) });
+    }
+  } catch (e) {}
+  try { const m = CBZ.cityFindMotelLot && CBZ.cityFindMotelLot(); if (m) o.venues.push({ id: "motel", x: r1(m.cx), z: r1(m.cz), w: m.w, d: m.d, wet: wet(m.cx, m.cz) }); } catch (e) {}
+  try { const s = CBZ.cityPoliceStation && CBZ.cityPoliceStation(); if (s) o.venues.push({ id: "policeStation", x: r1(s.x), z: r1(s.z), wet: wet(s.x, s.z) }); } catch (e) {}
+  try { const j = CBZ.cityJailAnchors && CBZ.cityJailAnchors(); if (j && j.weak) o.venues.push({ id: "jailWeakGate", x: r1(j.weak.x), z: r1(j.weak.z), wet: wet(j.weak.x, j.weak.z) }); } catch (e) {}
+  try { if (A.spawn) o.venues.push({ id: "arenaSpawn", x: r1(A.spawn.x), z: r1(A.spawn.z), wet: wet(A.spawn.x, A.spawn.z) }); } catch (e) {}
+  try { const fc = CBZ.fuelForecourts || []; for (const f of fc) if (f && Number.isFinite(f.cx)) o.venues.push({ id: "fuel", x: r1(f.cx), z: r1(f.cz), wet: wet(f.cx, f.cz) }); } catch (e) {}
   // the geography the plan states, when there is one (the map draws the built
   // world; this is only so a label can name a cape or a bay)
   try { o.plan = CBZ.worldPlan && CBZ.worldPlan.mapData ? CBZ.worldPlan.mapData() : null; } catch (e) { o.plan = null; }

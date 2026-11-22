@@ -193,9 +193,18 @@
     return Math.min((p1.r || radius) * Math.tan(turn / 2), la * 0.45, lb * 0.45);
   }
   // where every route meets another: its two ends
+  // (and where a grain town's link and a roadside stop meet the road: the
+  // plan's towns and stops, so no corner sweeps or S-bend drifts away from
+  // under a town's Main Street)
   function junctions(routes) {
     const J = [];
     for (const r of routes) { const p = r.pts; if (p.length) { J.push(p[0]); J.push(p[p.length - 1]); } }
+    const P = CBZ.worldPlan;
+    for (const t of (P && P.towns) || []) {
+      const vert = t.side === "E" || t.side === "W";
+      J.push(vert ? { x: t.roadAt, z: t.cz } : { x: t.cx, z: t.roadAt });
+    }
+    for (const s of (P && P.stops) || []) J.push(s.axis === "x" ? { x: s.along, z: s.roadAt } : { x: s.roadAt, z: s.along });
     return J;
   }
   // distance along the axis leg a->b to q, or null when q is not on it
@@ -214,6 +223,8 @@
     const sites = CBZ.metroLib && CBZ.metroLib.siteTable ? CBZ.metroLib.siteTable({}) : [];
     for (const s of sites) if (s.bounds) K.push({ minX: s.bounds.minX - 150, maxX: s.bounds.maxX + 150, minZ: s.bounds.minZ - 150, maxZ: s.bounds.maxZ + 150 });
     for (const r of routes) if (r.rural) for (const p of r.pts) K.push({ minX: p.x - 250, maxX: p.x + 250, minZ: p.z - 250, maxZ: p.z + 250 });
+    const P = CBZ.worldPlan;
+    for (const t of (P && P.towns) || []) K.push({ minX: t.cx - 250, maxX: t.cx + 250, minZ: t.cz - 250, maxZ: t.cz + 250 });
     return K;
   }
   // a drift may not wander into the sea: the whole strip it needs is land,

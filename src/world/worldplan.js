@@ -236,7 +236,9 @@
     veridia: { at: [8500, -250], authored: [2000, -400], why: "Veridia City and Lowport: the east-coast harbour at the end of the Valley Highway" },
     kesh:    { at: [7900, -2475], authored: [1900, -1600], why: "Keshtown and its villages: the hill kingdom in the foothills of the range's east end" },
     solara:  { at: [5900, 8150], authored: [2200, 600], why: "the island city-state, on the last of the Keys, at the end of the Overseas Highway" },
-    mbeya:   { at: [-4440, -1600], authored: [-2200, -1200], why: "Mbeya's villages: fishing harbours on Mbeya Bay at the Redhollow's mouth" },
+    // (220 m further west than the redesign stood it: from Mbeya City you
+    //  could not see the bay its fishing villages are named for)
+    mbeya:   { at: [-4660, -1600], authored: [-2200, -1200], why: "Mbeya's villages: fishing harbours on Mbeya Bay at the Redhollow's mouth" },
   };
   // The two metros (city/metro.js siteTable reads these: centre, reach, the
   // land they may use). Their rivers, lakes and rail stay in metro.js, which
@@ -253,14 +255,47 @@
   const SITES = {
     capitol:     { x: 2306, z: -4461, why: "the Capitol, at the foot of the range under the Capitol Gap" },
     execmansion: { x: -2175, z: -4416, why: "the Executive Mansion, on the road up to Mercy Pass" },
-    governor:    { x: -4760, z: -4366, why: "the Governor's Residence, in the Redhollow Hills" },
+    // (it stood in the Redhollow Hills, 2.6 km from any road: its drive ran
+    //  over the hills to Mbeya's lanes. An estate is where its road is.)
+    governor:    { x: -2160, z: -3300, why: "the Governor's Residence, on the wooded foot of Mercy Pass, its drive off the pass road" },
     cliffhouse:  { x: -1680, z: -7330, why: "the Cliff House: over the pass, on the north coast" },
     defence:     { x: 120, z: 4720, why: "Defence Headquarters on Kings Point, watching the gulf's mouth" },
-    agency:      { x: -5420, z: 700, why: "the Bureau, in the open country north-west of Kingsport, on its own road" },
+    // (it stood alone north-west of Kingsport, its drive 2.2 km over open
+    //  country to Mbeya's lanes; the metros plan after the compounds, so
+    //  Kingsport's streets were not there for it to meet)
+    agency:      { x: -2720, z: -1330, why: "the Bureau, behind its own gate off the Coast Freeway, where the Mbeya Road leaves it" },
     freeport:    { x: -1850, z: 4700, why: "the bonded freight yard, on the shore of Kings Harbour beside the port" },
     compound:    { x: 8130, z: 2600, why: "the Compound, where the desert road gives out under the Salt Hills" },
     finca:       { x: 9020, z: 3650, why: "La Finca, an estate on the empty east coast behind the Salt Hills" },
+    // (govcomplex.js reads only its own ids from this table; the precinct
+    //  is games/police.js's, read through CBZ.cityPrecinctSite below)
+    precinct:    { x: -240, z: -1046, why: "the police station, across the north moat from the downtown between the borough's two arterials, its door on the street the County Jail stands on, its yard beside it" },
   };
+  /* THE PRECINCT'S LOT, as one record (city/precinct_site.js paves it,
+     games/police.js stands the building on it, the law's flows read it):
+       x, z     the building's origin (games/police.js builds in local
+                metres about it: walls x -16..16, z -21..11, the street door
+                at local z +10 facing +z)
+       door     the street door, its outward normal
+       kerb     the z of the street's kerb in front of it (the street runs
+                along x: Gang City North's z -1015 street, 20 m)
+       bounds   the building's own ground (police.js reserves it)
+       yard     the fenced cruiser yard beside the building, open to the
+                street; `bays` where a car stands in it (nose to the back
+                fence, facing +z out to the street: heading is the yaw a
+                car model facing +z needs, i.e. 0)
+       lot      the whole claim (building + forecourt + yard)            */
+  const PRECINCT = (function () {
+    const s = SITES.precinct, x = s.x, z = s.z;
+    const yard = { minX: x + 26, maxX: x + 57, minZ: z - 30, maxZ: z + 21 };
+    const bays = [];
+    for (let k = 0; k < 5; k++) bays.push({ x: yard.minX + 3.5 + k * 6, z: yard.minZ + 6, heading: 0 });
+    return { x: x, z: z, door: { x: x, z: z + 10, nx: 0, nz: 1 }, kerb: z + 21,
+      bounds: { minX: x - 24, maxX: x + 24, minZ: z - 30, maxZ: z + 20 },
+      yard: Object.assign(yard, { bays: bays }),
+      lot: { minX: x - 24, maxX: yard.maxX, minZ: z - 30, maxZ: z + 21 }, why: s.why };
+  })();
+  CBZ.cityPrecinctSite = function () { return PRECINCT; };
 
   // ------------------------------------------------------------------
   //  THE ROUTES (city/highwaynet.js builds them; every leg that carries
@@ -274,8 +309,15 @@
   //  centreline to its kerb. The drivable record runs on to the point
   //  itself, so traffic hops the junction. No trim = a free end.
   const at = function (id) { return PLACES[id].at; };
-  const BRANDT_Z = at("military")[1];     // Fort Brandt's deck runs east along the fort's own centreline (city/island_military.js)...
-  const BRANDT_EAST_X = -133;             // ...and ends here, north of Gang City
+  // FORT BRANDT'S ROAD. The fort's east gate stands on its own centreline
+  // (city/island_military.js: the base is 480 m wide); its gate apron runs
+  // 60 m out of the wire and Brandt Road takes over there, a two-lane road
+  // through the woods to the Mercy Valley road. (It was a 2.8 km six-lane
+  // deck from the gate to a point north of the city, the fort's old island
+  // causeway stretched across the country when the fort moved inland.)
+  const BRANDT_Z = at("military")[1];
+  const BRANDT_GATE_X = at("military")[0] + 240;                   // the wire's east face (the gate)
+  const BRANDT_EAST_X = BRANDT_GATE_X + 60;                        // the end of the gate apron: Brandt Road starts here
   const MERCY_X = at("snow")[0] + 120;    // the Mercy Valley road: city/biome_snow.js's lane, straight down from Mount Mercy
   const SPINE_Z = at("desert")[1] - 40;   // the Saltlands spine through Dry Gulch (city/biome_desert.js HWY_Z)
   const GULCH_WEST_X = at("desert")[0] - 90;                       // Dry Gulch's first street: where the town takes the road over
@@ -287,7 +329,7 @@
     // THE COAST FREEWAY: from Kingsport's port north through the city, past
     // Neon Reef, up to Fort Brandt's road. The settled west hangs off it.
     { id: "R1", name: "Coast Freeway", kind: "freeway", sweep: true,
-      pts: [[-2380, 4250], [-2380, BRANDT_Z]], trimB: 14.4 },
+      pts: [[-2380, 4250], [-2380, BRANDT_Z]], trimB: 5.5 },
     // off the Coast Freeway to the airport and the downtown causeway
     { id: "R5", name: "West Shore Highway", kind: "freeway",
       pts: [[-2380, -700], [-1500, -700], [-1500, -420], [0, -420]], trimA: 15.3, trimB: 14.4 },
@@ -309,9 +351,16 @@
     // Kingsport's cross-town freeway, out to the gulf shore above Cape Harbor
     { id: "R8", name: "Gulf Freeway", kind: "freeway",
       pts: [[-2380, 2650], [520, 2650]], trimA: 15.3 },
-    // Fort Brandt's road, from the end of its deck to the valley road
-    { id: "R7", name: "Brandt Road", kind: "freeway",
+    // BRANDT ROAD: from the fort's gate apron east through the woods, past
+    // the foot of the Coast Freeway and the Mercy Pass Road, to the Mercy
+    // Valley road at Brandt Crossing
+    { id: "R7", name: "Brandt Road", kind: "road",
       pts: [[BRANDT_EAST_X, BRANDT_Z], [MERCY_X, BRANDT_Z]], trimB: 14.4 },
+    // THE MERCY VALLEY ROAD: the farm road on across the valley floor from
+    // Brandt Crossing, over the Mercy at Mercy Ford, and north up the far
+    // side of the valley to the Valley Highway
+    { id: "C11", name: "Mercy Valley Road", kind: "road", sweep: true,
+      pts: [[MERCY_X, BRANDT_Z], [1850, BRANDT_Z], [1850, -3250]], trimA: 14.4, trimB: 15.3 },
     // THE SALTLANDS HIGHWAY: the long empty one. Off the speedway's access
     // road, down the harbour's east shore, along the head of the gulf, down
     // the desert's gulf shore and east along the basin's spine into Dry
@@ -322,7 +371,7 @@
     // OVER THE PASS: off the fort road, up through Mercy Pass and down to
     // the north coast. A country road, and the only way north.
     { id: "C1", name: "Mercy Pass Road", kind: "road", sweep: true,
-      pts: [[-1950, BRANDT_Z], [-1950, -7100]], trimA: 14.4 },
+      pts: [[-1950, BRANDT_Z], [-1950, -7100]], trimA: 5.5 },
     // THE OVERSEAS HIGHWAY: out of Dry Gulch dead straight down the desert,
     // off Cape Solara and across the Keys to the island city.
     { id: "C2", name: "Overseas Highway", kind: "road",
@@ -338,6 +387,46 @@
     { id: "C8", name: "Ruvu Lane", kind: "road", pts: [[MB[0] + 78, MB[1] + 24], [MB[0] + 213.6, MB[1] + 24]], trimA: 6, trimB: 5.5 },
     { id: "C9", name: "Kolo Lane", kind: "road", pts: [[MB[0] - 213.9, MB[1] + 24], [MB[0] - 78, MB[1] + 24]], trimA: 5.5, trimB: 6 },
     { id: "C10", name: "Tende Lane", kind: "road", pts: [[MB[0] + 0.1, MB[1] - 177.3], [MB[0] + 0.1, MB[1] - 72]], trimA: 5.5, trimB: 6 },
+  ];
+
+  // ------------------------------------------------------------------
+  //  THE GRAIN TOWNS: the valleys' small towns, each on a big road and
+  //  each there for a reason (city/minicities.js grows them with the town
+  //  generator: a grid of blocks round a main street, real houses; the
+  //  elevator and its siding, the gas station and the diner are the
+  //  countryside's, city/countryside.js).
+  //    cx, cz      the town's centre (a 2 x 2 block grid, 148 x 124 m)
+  //    road        the route the town hangs on, `side` where that road runs
+  //                (N: north of the town, W: west of it ...), `roadAt` its
+  //                centreline across, `half` its deck half width. The link
+  //                runs from the road's edge to the town's own street: on a
+  //                road along x it meets the town's middle cross street, on
+  //                a road along z it IS the main street.
+  //    reason      "elevator" (a grain elevator and a rail siding by the
+  //                road), "crossroads" (a gas station and a diner at the
+  //                junction), "river" (the ford the road crosses at)
+  //  A town stands 80 m back from a freeway (no house within 70 m of one)
+  //  and close against a country road.
+  // ------------------------------------------------------------------
+  const TOWNS = [
+    { id: "brandtcrossing", name: "Brandt Crossing", cx: MERCY_X - 170, cz: BRANDT_Z + 81.5, road: "R7", side: "N", roadAt: BRANDT_Z, half: 5.5,
+      reason: "crossroads", why: "where Brandt Road crosses the Mercy Valley road: the gas station and the diner on the corner, the town behind them" },
+    { id: "mercyford", name: "Mercy Ford", cx: 1580, cz: BRANDT_Z + 81.5, road: "C11", side: "N", roadAt: BRANDT_Z, half: 5.5,
+      reason: "river", why: "where the Mercy Valley Road crosses the Mercy: the old ford, now the bridge at the end of Main Street" },
+    { id: "harlan", name: "Harlan", cx: 2650, cz: -3250 + 15.3 + 80 + 62, road: "R3", side: "N", roadAt: -3250, half: 15.3,
+      reason: "elevator", why: "the grain elevator on the Valley Highway, where Mercy Valley's wheat goes out by rail" },
+    { id: "keshjunction", name: "Kesh Junction", cx: 7050 + 15.3 + 80 + 74, cz: -2360, road: "R3", side: "W", roadAt: 7050, half: 15.3,
+      reason: "crossroads", why: "where the Kesh Road leaves the Valley Highway: the gas station and the diner, Main Street off the highway" },
+    { id: "coylesiding", name: "Coyle Siding", cx: 7050 + 15.3 + 80 + 74, cz: -1300, road: "R3", side: "W", roadAt: 7050, half: 15.3,
+      reason: "elevator", why: "the Coyle Plain's grain elevator and its siding, on the highway down to Veridia" },
+  ];
+  // THE ROADSIDE STOPS: a gas station and a diner where nobody else is.
+  // `axis` the way the road runs, `roadAt` its centreline across, `along`
+  // where the forecourt stands, `side` +1/-1 which side of the road (+ = +x
+  // or +z), `diner` the diner's `along` and `side`.
+  const STOPS = [
+    { id: "brandtcrossing", name: "Brandt Crossing Gas", road: "Brandt Road", axis: "x", roadAt: BRANDT_Z, half: 5.5, along: MERCY_X - 50, side: -1, diner: { along: MERCY_X - 104, side: -1 } },
+    { id: "saltwell", name: "Saltwell Gas", road: "Overseas Highway", axis: "z", roadAt: 5900, half: 5.5, along: 4300, side: 1, diner: { along: 4306, side: -1 } },
   ];
 
   // ------------------------------------------------------------------
@@ -645,14 +734,14 @@
   CBZ.worldPlan = {
     bounds: BOUNDS, settled: SETTLED,
     coast: COAST, islands: ISLANDS, range: RANGE, passes: PASSES, lobes: LOBES, rivers: RIVERS,
-    places: PLACES, metros: METROS, sites: SITES, routes: ROUTES, labels: LABELS,
-    brandt: { z: BRANDT_Z, eastX: BRANDT_EAST_X }, mercyX: MERCY_X, spineZ: SPINE_Z, saltlandsHighwayZ: SALT_Z,
+    places: PLACES, metros: METROS, sites: SITES, routes: ROUTES, labels: LABELS, towns: TOWNS, stops: STOPS, precinct: PRECINCT,
+    brandt: { z: BRANDT_Z, gateX: BRANDT_GATE_X, eastX: BRANDT_EAST_X }, mercyX: MERCY_X, spineZ: SPINE_Z, saltlandsHighwayZ: SALT_Z,
     landAt: landAt, reliefAt: reliefAt, coverAt: coverAt, riverDist: riverDist, metroBounds: metroBounds, smoothClosed: smoothClosed,
     LAND_REACH: LAND_REACH,
     // a short string that changes when the geography does (cache keys)
     signature: function () {
       let h = 2166136261;
-      const s = JSON.stringify([BOUNDS, COAST, ISLANDS, RANGE, LOBES, RIVERS, PLACES, METROS, SITES, ROUTES]);
+      const s = JSON.stringify([BOUNDS, COAST, ISLANDS, RANGE, LOBES, RIVERS, PLACES, METROS, SITES, ROUTES, TOWNS, STOPS]);
       for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
       return (h >>> 0).toString(36);
     },

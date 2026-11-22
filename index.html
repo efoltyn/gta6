@@ -411,7 +411,7 @@ document.body.appendChild(b);}}catch(e){}})();
      valleys, rivers, where every place stands, the highway routes). Must
      load before terrain + every biome/island file: they take their
      positions from it (CBZ.worldPlan, CBZ.worldOff, CBZ.worldFoot). -->
-<script src="src/world/worldplan.js?v=plan1122"></script>
+<script src="src/world/worldplan.js?v=wm2a"></script>
 <script src="src/world/rockscliffs.js?v=rock2"></script>
 <script src="src/world/terrain.js?v=nodash1"></script>
 <!-- terrain overhaul: overrides terrainHeight/buildTerrain with a SOLID
@@ -445,7 +445,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=beach1020"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=plan1122-ph3"></script>
+<script src="src/core/slice.js?v=wm2a"></script>
 <!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
 <script src="src/core/sight.js?v=farcopy1013"></script>
@@ -1440,7 +1440,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/army.js?v=inf1028f"></script>
 <!-- ONE UNIT, BUILT FOR THE CITY (city/unitmodels.js): CBZ.milModels, the one path that builds a units/vehicles machine outside the battle (Fort Brandt, the player's F-35, the airbase, The Isles' army). After army.js (its loader), before island_military. -->
 <script src="src/city/unitmodels.js?v=f35one1022"></script>
-<script src="src/city/island_military.js?v=shops1122d"></script>
+<script src="src/city/island_military.js?v=wm2a"></script>
 <script src="src/city/biome_desert.js?v=plan1122-ph2"></script>
 <script src="src/city/biome_forest.js?v=plan1122"></script>
 <script src="src/city/biome_farmland.js?v=plan1122"></script>
@@ -2007,7 +2007,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=winhole1014"></script>
 <script src="src/city/citytemplates.js?v=pres0929b"></script>
-<script src="src/city/minicities.js?v=plan1122"></script>
+<script src="src/city/minicities.js?v=wm2a"></script>
 <!-- REAL CITIES AT REAL SCALE (owner: "realistically large ... not just one mass of tall buildings"):
      metroplan.js is the pure urban planner (land value -> zoning -> arterials -> blocks -> parcels),
      metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
@@ -2018,7 +2018,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/metroplan.js?v=layout1122"></script>
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
-<script src="src/city/countryside.js?v=plan1122"></script>
+<script src="src/city/countryside.js?v=wm2a"></script>
+<!-- THE PRECINCT'S LOT (city/precinct_site.js): the world plan's police station site paved, its yard fenced, claimed after the boroughs plan (order 44). -->
+<script src="src/city/precinct_site.js?v=wm2a"></script>
+<!-- KINGSPORT'S DOCKS (city/kingsport_docks.js): the container terminal on Kings Harbour east of the river mouth, its dock road off the south arterial (order 44). -->
+<script src="src/city/kingsport_docks.js?v=wm2a"></script>
 <script src="src/city/metro_fabric.js?v=promote1020+house1122r2"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
@@ -2766,7 +2770,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/games/airport.js?v=nopanel1122"></script>
 <script src="src/games/military.js?v=nopanel1122"></script>
 <script src="src/games/government.js?v=nopanel1122"></script>
-<script src="src/games/police.js?v=nopanel1122"></script>
+<script src="src/games/police.js?v=police2c"></script>
 <script src="src/games/jail.js?v=prisoncut1122"></script>
 <script src="src/systems/newlife.js?v=islesave1022"></script>
 
