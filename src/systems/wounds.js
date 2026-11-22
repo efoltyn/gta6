@@ -1265,34 +1265,48 @@
     const blood = open * (0.5 + 0.35 * vnoise(x * 7, y * 7, 64));
     col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
   }
-  // 5 RAKE: one tooth dragged along the skin: a shallow line tapering in and
-  // out, the skin scraped off and bleeding along it
+  // 5 RAKE: a tooth dragged along the skin: a flat scratch of even width
+  // with blunt ends (a capsule along x), the skin scraped off down its
+  // middle (a darker raw line, wet) and torn back along its edges (paler,
+  // dry). Nothing in it stands up from the skin.
   function cRake(x, y, px) {
-    const ax = Math.abs(x);
-    if (ax > 0.84) { col(px, 0, 0, 0, 0); return; }
-    const taper = Math.pow(Math.max(0, 1 - Math.pow(ax / 0.82, 2)), 0.5);
-    const yc = 0.05 * Math.sin(x * 3.3 + 0.7);
-    const hw = 0.26 * taper * (0.65 + 0.7 * vnoise(x * 10, 2, 71));
-    const ay = Math.abs(y - yc);
-    const open = 1 - sstep(hw * 0.5, hw, ay);
-    const blood = 0.62 + 0.3 * vnoise(x * 4, 3, 72);
-    col(px, open * (0.06 + 0.1 * (1 - ay / Math.max(0.01, hw))), 0, blood, open * 0.95 * EDGE(x, y));
+    const core = 0.58, rad = 0.28 * (0.88 + 0.24 * vnoise(x * 5, 2, 71));
+    const yc = 0.04 * Math.sin(x * 2.6 + 0.7);
+    const dx = Math.max(0, Math.abs(x) - core), dy = y - yc;
+    const d = Math.sqrt(dx * dx + dy * dy) / rad;              // 0 on the line .. 1 at its edge
+    if (d > 1.05) { col(px, 0, 0, 0, 0); return; }
+    const open = 1 - sstep(0.82, 1.0, d);
+    const raw = 1 - sstep(0.3, 0.5, d);                        // the raw middle
+    const depth = open * (0.09 + 0.02 * (1 - d) + 0.15 * raw * (0.85 + 0.3 * vnoise(x * 9, 4, 72)));
+    const blood = open * raw * (0.35 + 0.25 * vnoise(x * 6, 3, 73));
+    col(px, depth, 0, blood, open * EDGE(x, y));
   }
-  // 6 CRATER: where flesh was taken, an oval dish. Its rim scalloped by the
-  // teeth that cut it, the cut muscle's grain across the floor, the fat in
-  // patches in its wall, blood pooled in its lower half. Depth runs 0 at the
-  // rim to 1 at the middle, so a whale's blubber shows as its own band.
+  // 6 CRATER: where flesh was taken, an oval dish dug into the body. Its rim
+  // scalloped by the teeth that cut it, a steep wall down through the
+  // victim's layers (a whale's blubber is the band of depth it is; a
+  // mammal's fat shows only in broken slivers under the lip), the floor cut
+  // muscle: bundles with dark seams between them and the cut grain across
+  // them, the wall's foot in shadow, blood in the seams and a thin pool low
+  // in it. No black disc: a dug floor is meat.
   function cCrater(x, y, px) {
     const r = Math.hypot(x, y), th = Math.atan2(y, x);
     const sc = (0.5 + 0.5 * Math.cos(th * 15 + 1.7 + 2 * angN(th, 86))) * (0.3 + 0.9 * angN(th * 1.7, 87));
     const R0 = 0.78 * (1 - 0.05 * sc - 0.06 * (angN(th, 81) - 0.5));
     if (r > R0 + 0.04) { col(px, 0, 0, 0, 0); return; }
-    const q = Math.min(1, r / R0);
-    const fib = 0.025 * Math.sin(x * 46 + y * 9 + 4 * vnoise(x * 3, y * 3, 82)) * (1 - q) * (1 - q);
+    const q = Math.min(1, r / R0), e = 1 - q;
     const open = 1 - sstep(R0 - 0.03, R0 + 0.01, r);
-    const depth = open * Math.min(0.97, Math.max(0, 0.08 + 0.9 * Math.pow(Math.max(0, 1 - q * q), 0.8) + fib));
-    const fat = fatBand(1 - r / R0, x, y, 83);
-    const blood = open * Math.min(0.85, Math.max(0.15 * (1 - q) + 0.55 * sstep(0.0, -0.7, y) + 0.15 * vnoise(x * 7, y * 7, 84), 0.7 * sstep(0.5, 0.72, vnoise(x * 6, y * 6, 85)) * sstep(0.55, 0.8, q)));
+    const wall = sstep(0.0, 0.3, e);
+    const yy = y + 0.2 * (vnoise(x * 1.7, y * 1.7, 88) - 0.5);
+    const band = 0.5 + 0.5 * Math.sin(yy * (26 + 6 * (vnoise(x * 2, 4, 89) - 0.5)));
+    const seam = Math.pow(1 - band, 8) * sstep(0.25, 0.45, e);
+    const grain = 0.025 * Math.sin(x * 64 + 8 * vnoise(x * 3, yy * 12, 82)) * band;
+    let depth = 0.06 + 0.62 * wall + wall * (0.04 * (1 - band * band) + grain + 0.2 * seam);
+    depth += 0.1 * Math.max(0, 1 - Math.abs(e - 0.32) / 0.07);
+    depth = open * Math.min(0.95, Math.max(0.02, depth));
+    const arc = sstep(0.5, 0.66, angN(th * 1.6 + 0.3, 83));
+    const fat = arc * sstep(0.02, 0.05, e) * (1 - sstep(0.09, 0.13, e)) * (0.6 + 0.4 * sstep(0.35, 0.6, vnoise(x * 14, y * 14, 90)));
+    const pool = sstep(-0.25, -0.5, y) * sstep(0.2, 0.4, e);
+    const blood = open * Math.min(0.85, Math.max(0.55 * pool, 0.6 * seam, 0.12 + 0.12 * vnoise(x * 7, y * 7, 84)));
     col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
   }
   // 7 GAPE: where a big mouth took a chunk, seen on the skin: wider than it
@@ -1317,9 +1331,10 @@
     const open = 1 - sstep(0.9, 1.0, q);
     if (open <= 0) { col(px, 0, 0, 0, 0); return; }
     const e = Math.max(0, 1 - q);                           // 0 at the lip .. 1 in the middle
-    // how thick the skin and the fat are here (they vary round the rim)
-    const skinE = 0.035 + 0.02 * angN(th * 2.1, 153);
-    const fatE = skinE + 0.12 + 0.1 * angN(th * 1.3, 152);
+    // how thick the skin and the fat are here (they vary round the rim);
+    // both lie inside the outline's soft edge (q 0.9 .. 1), where they show
+    const skinE = 0.11 + 0.03 * angN(th * 2.1, 153);
+    const fatE = skinE + 0.05 + 0.05 * angN(th * 1.3, 152);
     const wallE = fatE + 0.08;                               // the muscle wall's foot
     // the muscle: bundles running along the bite (bent and uneven, as a
     // muscle's are), each rounded toward the light, narrow dark seams
@@ -1339,16 +1354,20 @@
       + 0.26 * Math.max(0, 1 - Math.abs(e - wallE) / 0.05);
     let depth = lip + (meat - lip) * inMuscle;
     depth = open * Math.min(0.97, Math.max(0.02, depth));
-    // the fat: a band in the wall, lobed (its lobules show as rounded bumps)
+    // the fat: only where the cut wall bares it, in broken slivers just
+    // under the skin, lobed, thin, never all round
     const lob = sstep(0.3, 0.62, vnoise(x * 14, y * 14, 157));
-    const fat = sstep(skinE * 0.7, skinE + 0.01, e) * (1 - sstep(fatE - 0.02, fatE + 0.01, e)) * (0.7 + 0.3 * lob);
+    const arc = sstep(0.38, 0.54, angN(th * 1.7 + 0.4, 162)) * sstep(0.18, 0.4, vnoise(x * 4, y * 4, 163));
+    const fat = arc * sstep(skinE * 0.7, skinE + 0.008, e) * (1 - sstep(fatE - 0.012, fatE + 0.008, e)) * (0.6 + 0.4 * lob);
     // blood: standing in the floor's lower part up to a level (flat, not a
     // gradient), in the seams, and run down the wall from the upper lip
     const level = -0.24 + 0.07 * (vnoise(x * 3, 1, 158) - 0.5);
     const pool = sstep(level + 0.035, level - 0.035, y) * sstep(skinE, fatE, e);
     const runs = sstep(0.66, 0.8, vnoise(x * 9, 3, 159)) * sstep(-0.05, 0.3, y) * (1 - inMuscle * 0.5);
     const film = 0.07 + 0.1 * vnoise(x * 7, y * 7, 146);
-    const blood = open * Math.min(0.95, Math.max(pool, 0.65 * seam, 0.75 * runs, film));
+    // (smeared over the lip and the fat in it)
+    const smear = 0.55 * sstep(0.45, 0.7, vnoise(x * 5 + 3, y * 5, 164)) * (1 - sstep(fatE, fatE + 0.06, e));
+    const blood = open * Math.min(0.95, Math.max(pool, 0.65 * seam, 0.75 * runs, film, smear));
     col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
   }
   // 8 POOL: wet blood standing on bare skin under a wound: opaque (a pool is
@@ -1549,19 +1568,20 @@
      green toward a pure, bright red, so a "dark red" hex reads as a sticker
      on screen. What each shows:
        mammal   cut skin wall 0.46/0.13/0.11 (darker and redder than any
-                skin), fat 0.76/0.66/0.48 (only in patches in the wall),
+                skin), fat 0.70/0.56/0.47 (a dull pale yellow-pink, only in
+                broken patches in the wall),
                 muscle 0.36/0.07/0.05 (deep red-brown), the bottom near
                 black, blood 0.38/0.03/0.03 (dark, wet)
        cetacean grey skin cut 0.30/0.27/0.28, a thick blubber band
-                0.72/0.58/0.52, muscle near black-red 0.22/0.04/0.04
+                0.72/0.58/0.52, muscle a dark meat red 0.36/0.10/0.09
        shark    pale pink flesh all the way down (0.78/0.60/0.56 .. 0.72/0.50/0.47)
        fish     white flesh;  redfish  tuna and marlin, dark red meat 0.40/0.07/0.08
      L = [fat starts, muscle starts, the dark blood-filled bottom starts], in
      the tissue atlas's depth units; solid = 1 when the fat is a continuous
      band (blubber), 0 when it only shows in patches in a cut's wall. */
   const TISSUE = {
-    mammal: { dermis: [0.1609, 0.0364, 0.0233], fat: [0.3975, 0.2939, 0.1653], muscle: [0.1189, 0.0204, 0.0], deep: [0.0229, 0.0, 0.0], blood: [0.1295, 0.0145, 0.0], scar: [0.4604, 0.314, 0.2791], L: [0.10, 0.17, 0.80], solid: 0 },
-    cetacean: { dermis: [0.0859, 0.0751, 0.0765], fat: [0.3447, 0.2273, 0.1893], muscle: [0.067, 0.008, 0.0], deep: [0.0167, 0.0, 0.0], blood: [0.1047, 0.0111, 0.0], scar: [0.4411, 0.451, 0.4608], L: [0.05, 0.52, 0.86], solid: 1 },
+    mammal: { dermis: [0.1609, 0.0364, 0.0233], fat: [0.3226, 0.2133, 0.1608], muscle: [0.1189, 0.0204, 0.0], deep: [0.0229, 0.0, 0.0], blood: [0.1295, 0.0145, 0.0], scar: [0.4604, 0.314, 0.2791], L: [0.10, 0.17, 0.80], solid: 0 },
+    cetacean: { dermis: [0.0859, 0.0751, 0.0765], fat: [0.3447, 0.2273, 0.1893], muscle: [0.1165, 0.0267, 0.0145], deep: [0.0167, 0.0, 0.0], blood: [0.1047, 0.0111, 0.0], scar: [0.4411, 0.451, 0.4608], L: [0.05, 0.52, 0.86], solid: 1 },
     shark: { dermis: [0.2034, 0.1498, 0.1447], fat: [0.4179, 0.2416, 0.2153], muscle: [0.3384, 0.176, 0.1606], deep: [0.0933, 0.0203, 0.009], blood: [0.1122, 0.014, 0.0], scar: [0.4771, 0.4887, 0.4804], L: [0.05, 0.30, 0.86], solid: 1 },
     fish: { dermis: [0.2385, 0.2005, 0.2016], fat: [0.5455, 0.3869, 0.3419], muscle: [0.4565, 0.2935, 0.2614], deep: [0.1066, 0.0309, 0.0236], blood: [0.1122, 0.014, 0.0], scar: [0.5181, 0.5319, 0.5461], L: [0.05, 0.25, 0.86], solid: 1 },
     redfish: { dermis: [0.1255, 0.0934, 0.0996], fat: [0.2357, 0.1355, 0.126], muscle: [0.1358, 0.022, 0.0121], deep: [0.0356, 0.0, 0.0], blood: [0.0969, 0.01, 0.0], scar: [0.4763, 0.4511, 0.461], L: [0.04, 0.12, 0.85], solid: 1 },
@@ -1572,6 +1592,19 @@
   function tissueTex() { return TEX_T || (TEX_T = makeTex(skinJobs().tissue, false)); }
   function stainTex() { return TEX_S || (TEX_S = makeTex(skinJobs().stain, true)); }
   const WMATS = Object.create(null);
+  // a growing mark's cell coordinates, grown per pixel (see animStep)
+  const GROW_GLSL = [
+    "varying vec4 vCg;",
+    "float cbzHash( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }",
+    "float cbzNoise( vec2 p ) { vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f ); return mix( mix( cbzHash( i ), cbzHash( i + vec2( 1.0, 0.0 ) ), f.x ), mix( cbzHash( i + vec2( 0.0, 1.0 ) ), cbzHash( i + vec2( 1.0, 1.0 ) ), f.x ), f.y ); }",
+    "vec2 cbzGrowUv( vec2 uv, vec4 c ) {",
+    "  if ( c.z <= 0.001 || c.z >= 0.999 ) return uv;",
+    "  vec2 cs = vec2( 0.25, 1.0 / 3.0 );",
+    "  vec2 org = uv - ( c.xy + 0.5 ) * cs;",
+    "  vec2 f = clamp( ( c.xy - vec2( 0.0, c.w ) ) / c.z + vec2( 0.0, c.w ), -0.47, 0.47 );",
+    "  return org + ( f + 0.5 ) * cs;",
+    "}",
+  ].join("\n");
   /* THE TISSUE SHADER. A Phong (wet tissue and blood catch the light; a
      wound in a dim sea is as dim as the body) whose diffuse is chosen per
      pixel from the atlas depth through the victim's layers: the cut skin
@@ -1600,13 +1633,18 @@
     m.onBeforeCompile = function (sh) {
       for (const k in U) sh.uniforms[k] = U[k];
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec3 wCol;\nvarying vec3 vWCol;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvWCol = wCol;");
+        .replace("#include <common>", "#include <common>\nattribute vec3 wCol;\nvarying vec3 vWCol;\nattribute vec4 cg;\nvarying vec4 vCg;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvWCol = wCol;\nvCg = cg;");
       sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying vec3 vWCol;\nuniform vec3 uTDermis;\nuniform vec3 uTFat;\nuniform vec3 uTMuscle;\nuniform vec3 uTDeep;\nuniform vec3 uTBlood;\nuniform vec3 uTScar;\nuniform vec3 uTL;\nuniform float uTSolid;\nfloat wWet = 0.0;")
+        .replace("#include <common>", "#include <common>\nvarying vec3 vWCol;\nuniform vec3 uTDermis;\nuniform vec3 uTFat;\nuniform vec3 uTMuscle;\nuniform vec3 uTDeep;\nuniform vec3 uTBlood;\nuniform vec3 uTScar;\nuniform vec3 uTL;\nuniform float uTSolid;\nfloat wWet = 0.0;\nfloat wHgt = 0.0;\n" + GROW_GLSL)
         .replace("#include <map_fragment>", [
-          "vec4 wT = texture2D( map, vMapUv );",
+          "vec4 wT = texture2D( map, cbzGrowUv( vMapUv, vCg ) );",
           "float wD = clamp( min( wT.r, vColor.r ), 0.0, 1.0 );",
+          // the wound's own relief: deeper is lower, blood stands on it, and
+          // wet blood is never glass-smooth (clots, threads): a fine relief on
+          // it, faded out before it is finer than a pixel
+          "float wFq = 300.0, wFade = 1.0 - smoothstep( 0.3, 0.8, length( fwidth( vMapUv * wFq ) ) );",
+          "wHgt = -0.012 * wD + 0.003 * wT.b + 0.0008 * wT.b * wFade * cbzNoise( vMapUv * wFq );",
           "vec3 wC = mix( uTDermis, uTMuscle, smoothstep( uTL.y, uTL.y + 0.12, wD ) );",
           "wC = mix( wC, uTDeep, smoothstep( uTL.z, 1.0, wD ) );",
           "float wFat = mix( wT.g * 0.9, smoothstep( uTL.x, uTL.x + 0.03, wD ) * ( 1.0 - smoothstep( uTL.y - 0.015, uTL.y + 0.03, wD ) ), uTSolid );",
@@ -1620,9 +1658,24 @@
           "diffuseColor.a *= wT.a;",
         ].join("\n"))
         .replace("#include <color_fragment>", "diffuseColor.a *= vColor.a;")
-        .replace("#include <specularmap_fragment>", "float specularStrength = 0.05 + 0.95 * wWet;");
+        .replace("#include <specularmap_fragment>", "float specularStrength = 0.05 + 0.6 * wWet;")
+        // the light the wound catches follows its own relief (its cut walls,
+        // its bundles, the blood standing on it), not the smooth limb under
+        // it: a decal shaded by the limb alone shows one clean band of shine
+        .replace("#include <normal_fragment_maps>", [
+          "#include <normal_fragment_maps>",
+          "{",
+          "  vec3 wdpx = dFdx( - vViewPosition ), wdpy = dFdy( - vViewPosition );",
+          "  vec2 wdH = vec2( dFdx( wHgt ), dFdy( wHgt ) );",
+          "  vec3 wr1 = cross( wdpy, normal ), wr2 = cross( normal, wdpx );",
+          "  float wdet = dot( wdpx, wr1 ) * faceDirection;",
+          "  vec3 wgrad = sign( wdet ) * ( wdH.x * wr1 + wdH.y * wr2 );",
+          "  vec3 wbn = normalize( abs( wdet ) * normal - wgrad );",
+          "  normal = mix( wbn, normal, step( 0.25, vColor.b ) );",
+          "}",
+        ].join("\n"));
     };
-    m.customProgramCacheKey = function () { return "cbzWound3"; };
+    m.customProgramCacheKey = function () { return "cbzWound4"; };
     m._shared = true;
     m.name = "wound-" + kind;
     WMATS[kind] = m;
@@ -1650,10 +1703,16 @@
       polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
     });
     m.onBeforeCompile = function (sh) {
+      sh.vertexShader = sh.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute vec4 cg;\nvarying vec4 vCg;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvCg = cg;");
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", "#include <common>\n" + GROW_GLSL)
+        .replace("#include <map_fragment>", "vec4 sampledDiffuseColor = texture2D( map, cbzGrowUv( vMapUv, vCg ) );\ndiffuseColor *= sampledDiffuseColor;");
       sh.fragmentShader = sh.fragmentShader.replace("#include <opaque_fragment>",
         "#include <opaque_fragment>\ngl_FragColor.rgb = pow( clamp( gl_FragColor.rgb, vec3( 0.001 ), vec3( 1.0 ) ), vec3( clamp( gl_FragColor.a, 0.0, 1.0 ) ) );");
     };
-    m.customProgramCacheKey = function () { return "cbzStain3"; };
+    m.customProgramCacheKey = function () { return "cbzStain4"; };
     m._shared = true;
     m.name = "wound-stain";
     SMAT = m;
@@ -1746,6 +1805,7 @@
         g.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1], 2));
         g.setAttribute("color", new THREE.Float32BufferAttribute([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], 4));
         g.setAttribute("wCol", new THREE.Float32BufferAttribute([1, 1, 1, 1, 1, 1, 1, 1, 1], 3));
+        g.setAttribute("cg", new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0], 4));
         const gq = new THREE.Group();
         gq.add(new THREE.Mesh(g, woundMat("mammal")), new THREE.Mesh(g, markMat("w", "mammal")), new THREE.Mesh(g, stainMat()));
         // and the skinned variants a mark on a one-mesh animal draws with
@@ -2323,46 +2383,70 @@
   const _eb = new THREE.Matrix4(), _ebi = new THREE.Matrix4();
   const _eT = new THREE.Vector3(), _eB = new THREE.Vector3(), _eN = new THREE.Vector3();
   const _dirA = [0, 0, 1];
-  function stampEl(bite, el) {
-    if (!CBZ.surfaceDecal || !CBZ.surfaceDecal.project) return false;
-    _eN.set(el.N.x, el.N.y, el.N.z).normalize();
-    _eT.set(el.T.x, el.T.y, el.T.z).addScaledVector(_eN, -(el.T.x * _eN.x + el.T.y * _eN.y + el.T.z * _eN.z));
-    if (_eT.lengthSq() < 1e-10) { _eT.set(-_eN.z, 0, _eN.x); if (_eT.lengthSq() < 1e-10) _eT.set(1, 0, 0); }
-    _eT.normalize();
-    _eB.crossVectors(_eN, _eT);
-    const sx = Math.max(1e-4, el.sx), sy = Math.max(1e-4, el.sy), sz = el.depthExact ? Math.max(1e-4, el.dz * 2) : Math.max(1e-4, el.dz * 2, Math.max(sx, sy) * 0.35);
-    _eb.set(_eT.x * sx, _eB.x * sy, _eN.x * sz, el.P.x,
-      _eT.y * sx, _eB.y * sy, _eN.y * sz, el.P.y,
-      _eT.z * sx, _eB.z * sy, _eN.z * sz, el.P.z,
-      0, 0, 0, 1);
-    _ebi.copy(_eb).invert();
-    _dirA[0] = _eN.x; _dirA[1] = _eN.y; _dirA[2] = _eN.z;
-    const cell = el.cell;
-    let any = false;
-    for (let s = 0; s < bite.surfs.length; s++) {
-      const S = bite.surfs[s];
-      if (!S || !S.nc || (el.only && el.only !== S)) continue;
-      const px = proxyNear(S, el.P.x, el.P.y, el.P.z, 0.5 * Math.sqrt(sx * sx + sy * sy + sz * sz));
-      if (!px) continue;
-      let r = null;
-      try { r = CBZ.surfaceDecal.project(px, _ebi.elements, { dir: _dirA, minFacing: el.minFacing != null ? el.minFacing : 0.12, maxTris: 700 }); } catch (e) { r = null; }
-      if (!r) continue;
-      any = true;
-      const B = layerBuf(bite, S, el.layer);
-      if (B.n > BITE_VERTS) continue;
-      const first = B.n, lift = (el.lift != null ? el.lift : SKIN_LIFT) / S.wsc;
-      const src = r.src, bar = r.bary, uv = r.uv;
-      for (let v = 0; v < r.n; v++) {
-        const ub = uv[v * 2], vb = uv[v * 2 + 1];
-        vertBary(B, src[v * 3], src[v * 3 + 1], src[v * 3 + 2], bar[v * 3], bar[v * 3 + 1], bar[v * 3 + 2],
-          cell[0] + ub * cell[2], cell[1] + vb * cell[3], el.c, el.wc, lift, ub - 0.5, vb - 0.5, 0);
-      }
-      if (el.anim) {
-        const list = Array.isArray(el.anim) ? el.anim : [el.anim];
-        for (let k = 0; k < list.length; k++) B.anims.push(Object.assign({ a: first, n: B.n - first, cell: cell }, list[k]));
-      }
+  // a mark projected onto the skin a part at a time: a big one (a crater, a
+  // film of blood) on a body refined under the bite meets thousands of
+  // triangles, and a mark cut short at a triangle count ends in a staircase
+  // along the body's own grid
+  const STAMP_TRIS = 600;                // the skin's triangles a slice projects onto
+  function stampEl(bite, el) {           // all of it at once
+    while (!stampPart(bite, el)) { /* part by part */ }
+    return !!el._any;
+  }
+  // true when the mark is done
+  function stampPart(bite, el) {
+    if (!CBZ.surfaceDecal || !CBZ.surfaceDecal.project) return true;
+    if (!el._box) {
+      _eN.set(el.N.x, el.N.y, el.N.z).normalize();
+      _eT.set(el.T.x, el.T.y, el.T.z).addScaledVector(_eN, -(el.T.x * _eN.x + el.T.y * _eN.y + el.T.z * _eN.z));
+      if (_eT.lengthSq() < 1e-10) { _eT.set(-_eN.z, 0, _eN.x); if (_eT.lengthSq() < 1e-10) _eT.set(1, 0, 0); }
+      _eT.normalize();
+      _eB.crossVectors(_eN, _eT);
+      const sx = Math.max(1e-4, el.sx), sy = Math.max(1e-4, el.sy), sz = el.depthExact ? Math.max(1e-4, el.dz * 2) : Math.max(1e-4, el.dz * 2, Math.max(sx, sy) * 0.35);
+      _eb.set(_eT.x * sx, _eB.x * sy, _eN.x * sz, el.P.x,
+        _eT.y * sx, _eB.y * sy, _eN.y * sz, el.P.y,
+        _eT.z * sx, _eB.z * sy, _eN.z * sz, el.P.z,
+        0, 0, 0, 1);
+      _ebi.copy(_eb).invert();
+      el._box = Float64Array.from(_ebi.elements);
+      el._dir = [_eN.x, _eN.y, _eN.z];
+      el._r = 0.5 * Math.sqrt(sx * sx + sy * sy + sz * sz);
+      el._s = 0; el._px = null; el._off = 0; el._any = false;
     }
-    return any;
+    while (el._s < bite.surfs.length) {
+      const S = bite.surfs[el._s];
+      if (!S || !S.nc || (el.only && el.only !== S)) { el._s++; continue; }
+      if (!el._px) {
+        const px = proxyNear(S, el.P.x, el.P.y, el.P.z, el._r);
+        if (!px) { el._s++; continue; }
+        el._px = px.index.array.slice();             // (proxyNear's own is scratch)
+        el._off = 0;
+      }
+      const all = el._px, end = Math.min(all.length, el._off + STAMP_TRIS * 3);
+      const sub = { attributes: S.proxy.attributes, index: { array: all.subarray(el._off, end) } };
+      el._off = end;
+      if (end >= all.length) { el._s++; el._px = null; }
+      let r = null;
+      try { r = CBZ.surfaceDecal.project(sub, el._box, { dir: el._dir, minFacing: el.minFacing != null ? el.minFacing : 0.12, maxTris: STAMP_TRIS * 8 }); } catch (e) { r = null; }
+      if (r && r.n) {
+        el._any = true;
+        const B = layerBuf(bite, S, el.layer);
+        if (B.n <= BITE_VERTS) {
+          const cell = el.cell, first = B.n, lift = (el.lift != null ? el.lift : SKIN_LIFT) / S.wsc;
+          const src = r.src, bar = r.bary, uv = r.uv;
+          for (let v = 0; v < r.n; v++) {
+            const ub = uv[v * 2], vb = uv[v * 2 + 1];
+            vertBary(B, src[v * 3], src[v * 3 + 1], src[v * 3 + 2], bar[v * 3], bar[v * 3 + 1], bar[v * 3 + 2],
+              cell[0] + ub * cell[2], cell[1] + vb * cell[3], el.c, el.wc, lift, ub - 0.5, vb - 0.5, 0);
+          }
+          if (el.anim) {
+            const list = Array.isArray(el.anim) ? el.anim : [el.anim];
+            for (let k = 0; k < list.length; k++) B.anims.push(Object.assign({ a: first, n: B.n - first, cell: cell }, list[k]));
+          }
+        }
+      }
+      return el._s >= bite.surfs.length;
+    }
+    return true;
   }
 
   /* ---- THE MARK MESHES, THEIR LIFE, THEIR BUDGET ------------------------- */
@@ -2371,7 +2455,7 @@
      great white's bite on a tuna is a few thousand vertices). Oldest first. */
   function skinVertCap() { return (CBZ.qScale ? CBZ.qScale(120000, 400000) : 240000) | 0; }
   let SKIN_VERTS = 0;
-  const BITE_VERTS = 9000;               // one layer of one bite on one part, at most
+  const BITE_VERTS = 16000;              // one layer of one bite on one part, at most
   function skinDrop(i) {
     const r = SKIN.splice(i, 1)[0];
     if (!r) return;
@@ -2402,6 +2486,11 @@
       geo.setAttribute("uv", new THREE.BufferAttribute(B.uv.out(), 2));
       geo.setAttribute("color", new THREE.BufferAttribute(B.col.out(), 4));
       if (B.layer === "w") geo.setAttribute("wCol", new THREE.BufferAttribute(B.wcol.out(), 3));
+      // the cell coordinates at full size (x, y), how far grown (1 = full)
+      // and the growth's anchor along y
+      const fcA = B.fc.out(), cgA = new Float32Array(B.n * 4);
+      for (let v = 0; v < B.n; v++) { cgA[v * 4] = fcA[v * 2]; cgA[v * 4 + 1] = fcA[v * 2 + 1]; cgA[v * 4 + 2] = 1; }
+      geo.setAttribute("cg", new THREE.BufferAttribute(cgA, 4));
       if (S.skinned) {
         geo.setAttribute("skinIndex", new THREE.BufferAttribute(B.si.out(), 4));
         geo.setAttribute("skinWeight", new THREE.BufferAttribute(B.sw.out(), 4));
@@ -2429,7 +2518,7 @@
       host.add(m);
       const rec = {
         m: m, actor: bite.actor, host: host, layer: B.layer, age: 0, t: 0, gone: false,
-        anims: B.anims.length ? B.anims : null, fc: B.fc.out(), along: B.along.out(),
+        anims: B.anims.length ? B.anims : null, fc: fcA, along: B.along.out(),
         a0: null,
       };
       if (rec.anims) {
@@ -2454,7 +2543,6 @@
      front  a run of blood lengthening down the body, slowing as it clots
      heal   a rake ageing to the pale scar every sea mammal and shark carries */
   function ease(k) { return k <= 0 ? 0 : (k >= 1 ? 1 : 1 - (1 - k) * (1 - k)); }
-  function UVC(x) { return x < -0.47 ? -0.47 : (x > 0.47 ? 0.47 : x); }
   function animStep(rec, dt) {
     rec.t += dt;
     const g = rec.m.geometry, A = rec.anims;
@@ -2471,11 +2559,10 @@
         let gg;
         if (t < a.T) gg = a.g0 + (g1 - a.g0) * Math.sqrt(t / a.T);
         else { const k = Math.min(1, (t - a.T) / (a.creep || 40)); gg = g1 + (1 - g1) * ease(k); if (k >= 1) a.done = true; }
-        const c = a.cell, ax = a.ax || 0, ay = a.ay || 0;
-        for (let v = a.a; v < a.a + a.n; v++) {
-          uv[v * 2] = c[0] + (UVC((fc[v * 2] - ax) / gg + ax) + 0.5) * c[2];
-          uv[v * 2 + 1] = c[1] + (UVC((fc[v * 2 + 1] - ay) / gg + ay) + 0.5) * c[3];
-        }
+        // (the shader grows it per pixel: clamped per vertex, a growing mark
+        // on big triangles bent into their shapes)
+        const ay = a.ay || 0, cg = g.attributes.cg.array;
+        for (let v = a.a; v < a.a + a.n; v++) { cg[v * 4 + 2] = gg; cg[v * 4 + 3] = ay; }
         uvDirty = true;
       } else if (a.type === "alpha") {
         const k = Math.min(1, t / a.T), f = a.from + (a.to - a.from) * ease(k);
@@ -2496,7 +2583,7 @@
       }
       if (!a.done) live = true;
     }
-    if (uvDirty) g.attributes.uv.needsUpdate = true;
+    if (uvDirty) g.attributes.cg.needsUpdate = true;
     if (colDirty) g.attributes.color.needsUpdate = true;
     return live;
   }
@@ -2710,16 +2797,15 @@
     const mixc = function (a, b, k) { return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]; };
     c = mixc(c, tis._fat, sstep(L[0], L[0] + 0.05, d));
     c = mixc(c, tis._muscle, sstep(L[1], L[1] + 0.06, d));
-    c = mixc(c, tis._deep, sstep(L[2], 1, d) * 0.6);
+    c = mixc(c, tis._deep, sstep(L[2], 1, d) * 0.25);
     out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
     return out;
   }
+  // (the palettes are linear albedos already: they were hex once, and read
+  // as hex they all came out black, so every dug floor was painted black)
   function tisLin(kind) {
     const T = TISSUE[kind] || TISSUE.mammal;
-    if (!T._dermis) {
-      const f = function (h) { return [Math.pow(((h >> 16) & 255) / 255, 2.2), Math.pow(((h >> 8) & 255) / 255, 2.2), Math.pow((h & 255) / 255, 2.2)]; };
-      T._dermis = f(T.dermis); T._fat = f(T.fat); T._muscle = f(T.muscle); T._deep = f(T.deep); T._rim = f(T.rim);
-    }
+    if (!T._dermis) { T._dermis = T.dermis; T._fat = T.fat; T._muscle = T.muscle; T._deep = T.deep; }
     return T;
   }
   const _tc3 = [0, 0, 0];
@@ -2783,7 +2869,7 @@
         const cc = dx * F[0] + dy * F[1] + dz * F[2]; if (cc < cmin) cmin = cc;
       }
       if (cmin > op.rF * 1.5) continue;
-      if (rmin > 1.69 && !inTri2(A0, B0)) continue;
+      if (rmin > 1.44 && !inTri2(A0, B0)) continue;
       const e1x = W[i1 * 3] - W[i0 * 3], e1y = W[i1 * 3 + 1] - W[i0 * 3 + 1], e1z = W[i1 * 3 + 2] - W[i0 * 3 + 2];
       const e2x = W[i2 * 3] - W[i0 * 3], e2y = W[i2 * 3 + 1] - W[i0 * 3 + 1], e2z = W[i2 * 3 + 2] - W[i0 * 3 + 2];
       const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
@@ -3921,7 +4007,7 @@
         bite.phase = 2; bite.k = 0;
         return false;
       case 2:                            // one mark onto the skin
-        if (bite.k < bite.els.length) { stampEl(bite, bite.els[bite.k++]); return false; }
+        if (bite.k < bite.els.length) { if (stampPart(bite, bite.els[bite.k])) bite.k++; return false; }
         bite.els.length = 0; bite.phase = 3;
         return false;
       case 3:                            // the flap
@@ -4182,16 +4268,34 @@
     const D = bite.dent, sev = bite.sev, wet = bite.wet, coat = bite.coat;
     const sea = bite.tissue === "cetacean" || bite.tissue === "shark";
     const healA = sea ? { type: "heal", T: 150, t0: 25, to: 0.85 } : null;
-    // 5. the teeth dragged along the line of travel: the rakes
+    // 5. the teeth dragged across the skin: the rakes. The jaw moved one
+    //    way, so they all run one way (the line of travel, else the jaw's
+    //    own line), never fanning out of the wound; neighbouring teeth drag
+    //    side by side, so they come in pairs; each is a flat scratch a tooth
+    //    wide (1-2 cm), as long as the drag was
     if (D.rake >= 0.25) {
-      const n = Math.min(14, strikes.length), step = strikes.length / n;
-      for (let k = 0; k < n; k++) {
-        const st = strikes[Math.floor(k * step)], nn = hN(st), t = st.t;
-        const dir = (trav && onSkin(trav.x, trav.y, trav.z, nn, new THREE.Vector3())) || st.drag;
-        const len = Math.max(t.W * 3, Math.min(D.hw * 3, D.hw * (0.6 + 1.6 * D.rake * sev))) * (0.6 + 0.5 * Math.random());
-        const h = snap(bite, st.px + dir.x * len * 0.5, st.py + dir.y * len * 0.5, st.pz + dir.z * len * 0.5);
-        if (!h) continue;
-        bite.els.push(elAt("w", TCELL.rake, h, dir, len / 0.82, (t.W * 0.7) / 0.26, Math.max(0.01, len * 0.25), [0.8, 0, 0, 1], null, healA));
+      const way = trav || S;
+      const pairs = [];
+      for (let r = 0; r < 2; r++) {
+        const row = strikes.filter(function (s) { return s.t.up === (r === 0) && (s.pen || 0) > 0.2; }).sort(function (a, b) { return a.t.s - b.t.s; });
+        if (row.length < 2) continue;
+        const np = Math.min(2, row.length >> 1);
+        for (let k = 0; k < np; k++) {
+          const i = Math.floor(Math.random() * (row.length - 1));
+          pairs.push([row[i], row[i + 1]]);
+        }
+      }
+      const len0 = Math.min(0.25, Math.max(0.04, D.hw * (0.5 + 1.2 * D.rake * sev)));
+      for (let p = 0; p < pairs.length; p++) {
+        const len = len0 * (0.7 + 0.5 * Math.random());
+        for (let k = 0; k < 2; k++) {
+          const st = pairs[p][k], nn = hN(st), t = st.t;
+          const dir = onSkin(way.x, way.y, way.z, nn, new THREE.Vector3()) || onSkin(S.x, S.y, S.z, nn, new THREE.Vector3()) || st.drag;
+          const w = Math.max(0.01, Math.min(0.02, t.W));
+          const h = snap(bite, st.px + dir.x * len * 0.5, st.py + dir.y * len * 0.5, st.pz + dir.z * len * 0.5);
+          if (!h) continue;
+          bite.els.push(elAt("w", TCELL.rake, h, dir, len / 0.86, w / 0.28, Math.max(0.01, len * 0.25), [0.8, 0, 0, 1], null, healA));
+        }
       }
     }
   }
@@ -4318,7 +4422,8 @@
     }
     // 9. scales torn off round a fish bite
     if (coat === "scales" && bite.kind === "animal" && (bite.tissue === "fish" || bite.tissue === "redfish")) {
-      bite.els.push(elAt("s", SCELL.bruise, mid, S, (spanA * 1.6 + X.Wavg * 4) / 0.66, (spanB * 1.6 + X.Wavg * 4) / 0.66, Math.max(0.02, spanA * 0.5), TINT.scales, null, null, mid.S));
+      // (round the wound, a little past its edge: not the whole flank)
+      bite.els.push(elAt("s", SCELL.bruise, mid, S, (spanA * 1.15 + X.Wavg * 2) / 0.66, (spanB * 1.15 + X.Wavg * 2) / 0.66, Math.max(0.02, spanA * 0.4), TINT.scales, null, null, mid.S));
     }
     // 10. BLOOD
     const bloodR = (Math.max(spanA, spanB) * 0.5 + X.Wavg * 2 + 0.015) * (0.7 + 0.6 * sev);
@@ -4342,7 +4447,8 @@
       // on land the wet pool standing under the wound, glossy
       const grow = { type: "grow", g0: 0.38, g1: 0.78, T: 1.2, creep: wet ? 20 : 45 };
       // in the sea the blood leaves the wound: thinner every minute
-      bite.els.push(elAt("s", SCELL.bloodSkin, hB, upT, bloodR * 2 / 0.56, bloodR * 2.3 / 0.56, Math.max(0.02, bloodR * 0.5), withA(TINT.bloodSkin, wet ? 0.8 : 1), null,
+      const fR = wet ? bloodR * 0.6 : bloodR;
+      bite.els.push(elAt("s", SCELL.bloodSkin, hB, upT, fR * 2 / 0.56, fR * 2.3 / 0.56, Math.max(0.02, fR * 0.5), withA(TINT.bloodSkin, wet ? 0.8 : 1), null,
         wet ? [grow, { type: "alpha", from: 1, to: 0.3, T: 90, t0: 5 }] : grow, hB.S));
       if (!wet) {
         const pr = bloodR * 0.42, pl = bloodR * 0.3;
