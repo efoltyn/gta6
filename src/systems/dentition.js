@@ -260,6 +260,10 @@
     african_elephant: ["none", 1.0], white_rhino: ["none", 1.0], humpback_whale: ["none", 1.0], manta_ray: ["none", 1.0],
     jackrabbit: ["lagomorph", 1.0], snowshoe_hare: ["lagomorph", 1.0], cottontail_rabbit: ["lagomorph", 0.85],
     raccoon: ["procyonid", 1.0], chicken: ["peck", 1.0], sea_turtle: ["beak", 1.0],
+    // the snakes are also told apart by their rows (snake, venom, constrictor),
+    // named here so a bite resolves before the bestiary batch has loaded
+    rattlesnake: ["viper", 1.0], king_cobra: ["viper", 1.15], black_mamba: ["viper", 1.05],
+    green_anaconda: ["constrictor", 1.4], garter_snake: ["constrictor", 0.3],
     tuna: ["fish", 1.0], marlin: ["fish", 1.2], fish: ["fish", 0.5], sardine: ["fish", 0.2],
   };
   function speciesRow(sid) { return (CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES[sid]) || null; }
@@ -374,10 +378,12 @@
     };
   }
 
-  // the generic carnivore: a canid's proportions sized from the jaw alone
-  function genericArch(jaw) {
-    const hl = clamp(jaw, 0.02, 1.5) / 0.19;
-    return canidArch({ headL: 1, W: hl, muzW: 0.12, muzK: 0.5, cheek: 1, mass: 30, kind: "wild" });
+  /* the generic carnivore: a wolf's skull. An unknown biter's jaw number is
+     creature_combat's 0.10 + 0.16 x the animal's scale (a wolf-sized animal
+     says 0.25), so jaw / 0.25 is its size against a wolf, within a band. */
+  function genericArch() {
+    return canidArch((CBZ.canid && CBZ.canid.ROWS && CBZ.canid.ROWS.gray_wolf) ||
+      { headL: 0.4, W: 0.71, muzW: 0.12, muzK: 0.5, cheek: 1, mass: 34, kind: "wild" });
   }
 
   function scaleArch(A, k) {
@@ -439,7 +445,7 @@
     if (fam === "canid") {
       const rig = actor && actor.group && actor.group.userData && actor.group.userData.canidRig;
       const R = (rig && rig.D && rig.D.row) || canidRow(sid) || (CBZ.canid && CBZ.canid.ROWS && (CBZ.canid.ROWS[sid] || CBZ.canid.ROWS.mutt));
-      A = R ? canidArch(R) : genericArch(jaw || 0.05);
+      A = R ? canidArch(R) : genericArch();
       // the canid seam passes its own measured jaw (the individual's size);
       // other callers pass coarse numbers, so the band is an individual's
       // spread, not a licence to draw a wolf's bite half a metre wide
@@ -485,9 +491,9 @@
       const kj = jaw > 0 ? clamp(jaw / (F.jawRef * per), 0.85, 1.2) : 1;
       k = per * (actor ? clamp(actorSize(actor, sid), 0.5, 1.8) : kj);
     } else {
-      A = genericArch(jaw || 0.2);
-      // the unknown biter: the jaw is all there is
-      if (jaw > 0 && A.jawRef > 0) k = clamp(jaw / A.jawRef, 0.4, 3);
+      A = genericArch();
+      // the unknown biter: its size from the jaw number, against a wolf's
+      if (jaw > 0) k = clamp(jaw / 0.25, 0.5, 2);
     }
     const out = scaleArch(A, k);
     out.family = fam; out.sid = sid;

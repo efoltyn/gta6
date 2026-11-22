@@ -3123,7 +3123,9 @@
     const wrap = isFinite(upT) && isFinite(dnT) && upT + dnT < dent.gape * 0.98 && thickF < dent.gape * 1.6 + dent.depth;
     const partU = wrap ? upT + dnT : 0;
     // ---- PLACE THE ARCH
-    const teeth = pickTeeth(dent.teeth, 30);
+    // every tooth of a shark's functional rows (24 + 22); a dolphin's eighty
+    // needles thinned to as many
+    const teeth = pickTeeth(dent.teeth, 48);
     let Lfront = 0, xGrip = 0, ng = 0, Lmax = 0, Wavg = 0;
     for (let i = 0; i < teeth.length; i++) {
       const t = teeth[i];
@@ -3315,7 +3317,7 @@
           if (d < 1e-4 || d > lim) continue;
           const h = snap(bite, (a.px + b.px) * 0.5, (a.py + b.py) * 0.5, (a.pz + b.pz) * 0.5);
           if (!h) continue;
-          const w = Math.max(a.t.W, b.t.W) * (0.30 + 0.35 * Math.max(D.saw, D.slice) * sev);
+          const w = Math.max(a.t.W, b.t.W) * (0.18 + 0.22 * Math.max(D.saw, D.slice) * sev);
           bite.els.push(elAt("w", TCELL.slit, h, new THREE.Vector3(dx, dy, dz), (d + a.t.W * 0.6) / 0.95, w / 0.12, Math.max(0.008, d * 0.4), [0.8, 0, 0, 1], null, null));
           n++;
         }
