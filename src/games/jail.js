@@ -1105,13 +1105,37 @@
     if (g.mode !== "escape") return false;
     g.jailSentence = 0; g._jailSentenceIn = 0; g._jailBailIn = 0;
     g.escapedConvict = false; g.escapedFromJail = false;
+    g._cityArrestRun = false;
     if (!g.cityWorld) {                       // no city run behind this prison
       if (CBZ.winGame) { try { CBZ.winGame("route"); } catch (e) {} }
       return true;
     }
-    if (CBZ.setMode) CBZ.setMode("city");
+    // back to the world that sent him: an island collar is released on the
+    // islands (at their station's step), a Gang City one outside the County Jail
+    const isles = g._arrestFrom === "archipelago";
+    g._arrestFrom = null;
+    if (CBZ.setMode) CBZ.setMode(isles ? "archipelago" : "city");
     if (CBZ.setRole) CBZ.setRole("inmate");
     if (CBZ.startRun) CBZ.startRun();
+    if (isles) {
+      if (CBZ.cityEvidenceReturn) CBZ.cityEvidenceReturn();
+      const ist = CBZ.cityPoliceStation && CBZ.cityPoliceStation(), PP = CBZ.player;
+      if (ist && ist.out && PP && PP.pos) {
+        const y = CBZ.floorAt ? CBZ.floorAt(ist.out.x, ist.out.z, 50) : 0;
+        PP.pos.set(ist.out.x, isFinite(y) ? y : 0, ist.out.z); PP.vy = 0;
+        if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(PP.pos);
+        if (CBZ.bodyTeleported) { try { CBZ.bodyTeleported(PP); } catch (e) {} }
+      }
+      if (CBZ.cityWantedReset) { try { CBZ.cityWantedReset(); } catch (e) {} }
+      if (reason === "served") g.cityOpenCharge = null;
+      else if (reason === "bail") {
+        const cost = g._bailCost | 0;
+        if (cost > 0) g.cash = Math.max(0, (g.cash || 0) - cost);
+        g._bailCost = 0; g._bailCrew = false;
+      }
+      if (CBZ.arrestCount) CBZ.arrestCount("releases");
+      return true;
+    }
     // AFTER the city reset (which restores the character ledger, and whose
     // ledger records an EMPTY loadout because the guns were in evidence when it
     // was committed): hand the property back and put you on the precinct step.
@@ -1137,9 +1161,39 @@
     if (CBZ.cityWantedReset) { try { CBZ.cityWantedReset(); } catch (e) {} }
     if (CBZ.cityClearConvict) { try { CBZ.cityClearConvict(); } catch (e) {} }
     if (CBZ.arrestCount) CBZ.arrestCount("releases");
+    // OUT ON BAIL (city/wanted.js CBZ.cityBail, from the yard phones): the
+    // money leaves the wallet the street restored, the charge stays open.
+    // SERVED: the charge is closed.
+    if (reason === "bail") {
+      const cost = g._bailCost | 0;
+      if (cost > 0) g.cash = Math.max(0, (g.cash || 0) - cost);
+      if (g._bailCrew && CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(-4);
+      g._bailCost = 0; g._bailCrew = false;
+      if (CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} }
+    } else if (reason === "served") g.cityOpenCharge = null;
     return true;
   }
   CBZ.cityJailRelease = jailRelease;
+
+  /* OVER THE WALL. A man Gang City sent here who gets out of the prison by
+     playing its escape comes out in the city he was taken from: outside the
+     County Jail's back gate (city/mode.js places a jailbreak entry there),
+     in the jumpsuit he escaped in, as an escaped convict on three stars, his
+     property still in the evidence locker. No end card (systems/state.js
+     winGame hands an arrest run straight here). */
+  function jailBreakout(reason) {
+    if (g.mode !== "escape" || !g.cityWorld) return false;
+    g.escapedConvict = true;
+    g.jailSentence = 0; g._jailSentenceIn = 0; g._jailBailIn = 0;
+    g._cityArrestRun = false;
+    g._breakoutJumpsuit = true;                 // city/mode.js dresses him in it
+    if (CBZ.arrestCount) CBZ.arrestCount("escapes");
+    if (CBZ.setMode) CBZ.setMode("city");
+    if (CBZ.setRole) CBZ.setRole("inmate");
+    if (CBZ.startRun) CBZ.startRun();
+    return true;
+  }
+  CBZ.cityJailBreakout = jailBreakout;
 
   /* ==========================================================
      5. JAILOR SHIFT — sign on, walk the block, stop the breaks.

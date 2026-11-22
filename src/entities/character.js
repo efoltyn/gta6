@@ -10148,6 +10148,40 @@
   CBZ.forEachCharacter = function (fn) {
     RIGS.forEach(function (r) { const ch = r.deref(); if (ch) fn(ch); else RIGS.delete(r); });
   };
+  /* THE BODY-PART CACHES FORGET WHAT NOBODY WEARS (phone). LIMB_GEO, SHAPE
+     and TORSO_GEO keep every limb loft, head form and torso bake (per body
+     shape, garment cut and LOD) for the page's life: ~18 MB of geometry at
+     the downtown spawn, most of it for bodies long gone (the dead, the
+     culled, the sleepers whose rigs were let go, the far LOD of a body now
+     near). Every GEO_TRIM_EVERY s a phone walks the live rigs and drops the
+     cache entries no rig has worn for GEO_IDLE s; a body that needs one again
+     bakes it again (the same function of the same inputs). Nothing is
+     disposed here: a geometry still on some rig stays where it is.
+     ?cfg_PHONE_GEO_TRIM=0 keeps them all. */
+  const GEO_TRIM_EVERY = 10, GEO_IDLE = 45000;
+  let _geoTrimT = 0;
+  function geoTrim() {
+    const now = performance.now();
+    const seen = new Set();
+    CBZ.forEachCharacter(function (ch) { if (ch.group) ch.group.traverse(function (o) { if (o.geometry) seen.add(o.geometry); }); });
+    let n = 0;
+    [LIMB_GEO, SHAPE, TORSO_GEO].forEach(function (C) {
+      for (const k in C) {
+        const g = C[k];
+        if (!g) continue;
+        if (seen.has(g) || g._cbzWornAt == null) { g._cbzWornAt = now; continue; }
+        if (now - g._cbzWornAt > GEO_IDLE) { delete C[k]; n++; }
+      }
+    });
+    return n;
+  }
+  CBZ.charGeoTrim = geoTrim;
+  if (typeof CBZ.onAlways === "function") CBZ.onAlways(97.6, function (dt) {
+    if (!CBZ.isMobileDevice || (CBZ.CONFIG && CBZ.CONFIG.PHONE_GEO_TRIM === false)) return;
+    if ((_geoTrimT -= (dt || 0.016)) > 0) return;
+    _geoTrimT = GEO_TRIM_EVERY;
+    try { geoTrim(); } catch (e) {}
+  });
   CBZ.charProfile = charProfile;
   // Published so city/clothes.js can stop keeping its own copy of it — a
   // duplicated geometry constant that drifts is a seam nobody notices until

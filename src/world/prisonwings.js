@@ -20,7 +20,7 @@
    is why the place reads small no matter how well the rooms are dressed.
 
    ---- THE ONE RULE THAT MADE THIS SAFE: HOLD EVERY AUTHORED COORDINATE ----
-   world/layout.js's stage-5 desert is the precedent, and it is stated there:
+   the old layout dial's stage-5 desert is the precedent, and it was stated there:
    a 10x basin worked because it grew EAST AND SOUTH off a held north-west
    corner, so every dock, strait and causeway that had already been measured
    stayed measured. The same discipline applies here and is the reason this

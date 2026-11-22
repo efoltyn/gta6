@@ -727,6 +727,13 @@
     // built as three boxes around it and no platform record covers it, so you
     // can fall in. A decorative notch you cannot fall into would be a lie.
     const WELL_Z = BZ + L.wellZ, WELL_HZ = 3.4, WELL_X0 = QX - 12;
+    /* THE HARD STAND: where the travel lift sets a hull down, on the quay
+       just south of the well (captain.js fences a cradle on it). It stood
+       at a fixed BZ - 30 that the solved layout put in open water off the
+       quay's south end, with the yacht brokerage over the well beside it.
+       The slab runs on south far enough to carry the yard. */
+    const YARD = { x: QX - 12, z: WELL_Z - 14.2, hw: 3.6, hd: 7.6 };
+    const QS0 = Math.min(QZ0, YARD.z - YARD.hd - 2.5);  // the slab's south end (quay + hard stand)
     {
       // THE QUAY WALL: poured concrete at real texture scale, a lighter
       // precast coping along the water edge, and the dark wet/weed band the
@@ -742,13 +749,13 @@
         }
         plat(x0, x1, z0, z1, QUAY_TOP);
       }
-      slabBox(QW0, QW1, QZ0, WELL_Z - WELL_HZ);              // south of the well
+      slabBox(QW0, QW1, QS0, WELL_Z - WELL_HZ);              // south of the well (and the hard stand)
       slabBox(QW0, QW1, WELL_Z + WELL_HZ, QZ1);              // north of the well
       slabBox(QW0, WELL_X0, WELL_Z - WELL_HZ, WELL_Z + WELL_HZ);  // landward side of it
       if (K) {
         // coping + wet band on the seaward face, either side of the lift well,
         // and round the well's own three faces
-        const runs = [[QZ0, WELL_Z - WELL_HZ], [WELL_Z + WELL_HZ, QZ1]];
+        const runs = [[QS0, WELL_Z - WELL_HZ], [WELL_Z + WELL_HZ, QZ1]];
         for (const r of runs) {
           const L = r[1] - r[0], cz = (r[0] + r[1]) / 2;
           coping.push(K.put(K.boxM(0.6, 0.04, L, 1), QW1 - 0.3, QUAY_TOP + 0.015, cz));
@@ -1340,7 +1347,12 @@
     }
     // -- the brokerage building: the dealer's showroom, glass to the water.
     //    boatyard.js registers its sales desk at deskX/deskZ (exposed below).
-    const DESK = { x: QX - 6.5, z: BZ + DEAL_Z + 4 };
+    // (clear of the travel lift: the solved layout puts the well 6 m from the
+    // demo dock's line, and the showroom stood half over the open well with a
+    // gantry leg through its floor; it is moved along the quay until its south
+    // wall stands a walkway north of the gantry's legs)
+    const SHOW_Z = Math.max(BZ + DEAL_Z + 4, WELL_Z + 12);
+    const DESK = { x: QX - 6.5, z: SHOW_Z };
     /* THE SHOWROOM YOU CAN WALK INTO. It was a solid white box with its
        sales desk ENTOMBED inside the box's collider (the desk marker sat
        2.5 m inside a 13 x 11 m solid), a glass slab stuck on one face and a
@@ -1351,7 +1363,7 @@
        name on the fascia. Colliders are the walls, the glazing either side
        of the door, and the desk. */
     {
-      const bx = QX - 9, bz = BZ + DEAL_Z + 4, Y = QUAY_TOP;
+      const bx = QX - 9, bz = SHOW_Z, Y = QUAY_TOP;
       const BW = 13, BD = 11, BH = 5.4;
       const DOOR_Z = bz + 2.6, DOOR_W = 2.4;
       if (!K) {
@@ -1364,7 +1376,31 @@
         const wall = [], frame = [], glassG = [], floor = [], lit = [], desk = [], deskTop = [];
         const T = 0.25, xb = bx - BW / 2, xf = bx + BW / 2;
         wall.push(K.put(K.boxM(T, BH, BD, 1), xb + T / 2, Y + BH / 2, bz));
-        for (const sg of [-1, 1]) wall.push(K.put(K.boxM(BW, BH, T, 1), bx, Y + BH / 2, bz + sg * (BD / 2 - T / 2)));
+        /* A SHOWROOM IS GLASS ROUND THE CORNER, not a white box with one
+           glazed face: each side wall is a rendered pier at the back (the
+           office behind the floor) and floor-to-ceiling glass for the rest,
+           the same mullion rhythm as the water face. From the yard and the
+           quay it reads as the shop it is. Same draws (the kit merges). */
+        // (a phone keeps the glass and leaves out the pier, the mullions and
+        // the staff door: one pane where the plaster wall was, the same cost)
+        const LITE = !!(CBZ.facadeLite && CBZ.facadeLite());
+        const PIER = LITE ? 0 : 2.6;
+        for (const sg of [-1, 1]) {
+          const zf = bz + sg * (BD / 2 - T / 2);
+          if (PIER > 0) wall.push(K.put(K.boxM(PIER, BH, T, 1), xb + PIER / 2, Y + BH / 2, zf));
+          const g0 = xb + Math.max(PIER, T), g1 = xf - 0.1, GL = g1 - g0;
+          glassG.push(K.put(new THREE.BoxGeometry(GL, BH - 0.6, 0.05), (g0 + g1) / 2, Y + (BH - 0.6) / 2 + 0.05, zf));
+          if (LITE) continue;
+          const nm = Math.max(1, Math.round(GL / 1.5));
+          for (let i = 0; i <= nm; i++) frame.push(K.put(new THREE.BoxGeometry(0.08, BH - 0.5, 0.12), g0 + i * GL / nm, Y + (BH - 0.5) / 2, zf));
+          frame.push(K.put(new THREE.BoxGeometry(GL, 0.12, 0.14), (g0 + g1) / 2, Y + 0.06, zf));
+          frame.push(K.put(new THREE.BoxGeometry(GL, 0.1, 0.14), (g0 + g1) / 2, Y + BH - 0.5, zf));
+        }
+        // the staff door in the back wall, onto the yard side of the quay
+        if (!LITE) {
+          frame.push(K.put(new THREE.BoxGeometry(0.06, 2.25, 1.16), xb - 0.03, Y + 1.12, bz - BD / 4));
+          lit.push(K.put(new THREE.BoxGeometry(0.03, 0.2, 0.3), xb - 0.05, Y + 2.55, bz - BD / 4));
+        }
         solid(xb + T / 2, bz, T, BD, null, 0, Y + BH);
         for (const sg of [-1, 1]) solid(bx, bz + sg * (BD / 2 - T / 2), BW, T, null, 0, Y + BH);
         // the water face: glazing either side of the door, mullions every 1.5 m
@@ -1549,7 +1585,7 @@
       navHead(southArm.x1, southArm.hookZ, 0xd42f2f);
       navHead(northArm.x1, northArm.hookZ, 0x2fbd57);
     } else {
-      navHead(QW1 - 1.2, QZ0 + 2.0, 0xd42f2f, QUAY_TOP);
+      navHead(QW1 - 1.2, QS0 + 2.0, 0xd42f2f, QUAY_TOP);
       navHead(QW1 - 1.2, QZ1 - 2.0, 0x2fbd57, QUAY_TOP);
     }
     {
@@ -1623,8 +1659,9 @@
     }
 
     site = {
-      QX: QX, BZ: BZ, quay: { x0: QW0, x1: QW1, z0: QZ0, z1: QZ1, top: QUAY_TOP },
+      QX: QX, BZ: BZ, quay: { x0: QW0, x1: QW1, z0: QS0, z1: QZ1, top: QUAY_TOP },
       desk: DESK, well: { x: QX - 6, z: WELL_Z },
+      yard: YARD, office: HARBOUR_MASTER,
       fuel: { x: QX + FUEL_X, z: BZ + FUEL_Z },
       med: { z: MEDZ }, root: root, group: pontoonGrp,
       decks: decks, localPlats: localPlats,
@@ -1664,7 +1701,7 @@
       // liveaboards live ON the docks, so they follow the dock field
       person("cityResident", QX + 6, BZ + L.dockZ[0] - 3, { kind: "civilian", archetype: "resident", job: "liveaboard", wealth: 0.42, aggr: 0.1 }, "liveaboard");
       person("cityResident", QX + 22, BZ + L.dockZ[L.dockZ.length - 1] + 2, { kind: "civilian", archetype: "resident", job: "liveaboard", wealth: 0.44, aggr: 0.1 }, "liveaboard");
-      person("cityResident", QX - 6.5, BZ + DEAL_Z + 6, { kind: "civilian", archetype: "resident", job: "yacht broker", wealth: 0.95, aggr: 0.04 }, "broker");
+      person("cityResident", QX - 6.5, DESK.z + 2, { kind: "civilian", archetype: "resident", job: "yacht broker", wealth: 0.95, aggr: 0.04 }, "broker");
 
       if (NL && NL.definePopulation) {
         NL.definePopulation("marina-authored", {

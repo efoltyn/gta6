@@ -170,6 +170,13 @@ export async function launch(opts = {}) {
       try { s.ws.close(); } catch (_) {}
       try { process.kill(-chrome.pid); } catch (_) { try { chrome.kill(); } catch (_) {} }
       try { process.kill(-server.pid); } catch (_) { try { server.kill(); } catch (_) {} }
+      // A killed Chrome keeps writing its profile for a moment, so a profile
+      // removed straight after the signal came back as a few-file folder in
+      // /tmp after every close. Wait for the group to exit (5 s at most, then
+      // SIGKILL), then remove it.
+      const alive = () => { try { process.kill(-chrome.pid, 0); return true; } catch (_) { return false; } };
+      for (let i = 0; i < 50 && alive(); i++) await sleep(100);
+      if (alive()) { try { process.kill(-chrome.pid, "SIGKILL"); } catch (_) {} await sleep(300); }
       await rm(profile, { recursive: true, force: true }).catch(() => {});
     },
   };

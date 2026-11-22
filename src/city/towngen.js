@@ -108,6 +108,55 @@
     if (!CBZ.colliders) return;
     CBZ.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, y0: 0, y1: y1 == null ? 30 : y1 });
   }
+  /* A VILLAGE'S GROUND IS WORN INTO THE LAND (ruralGround, in buildTown).
+     Two flat shapes, both with edges that wander so nothing reads as a
+     ruled plate: a BLOB (a rounded patch, a superellipse whose radius is
+     nudged per vertex by a position hash) for a yard or a square, and a
+     TRACK (a ribbon down a lane, its half width nudged every few metres and
+     eased in at its ends). Position + normal + uv, like PlaneGeometry, so
+     either merges with anything else the town lays. Pure geometry. */
+  function h01(x, z, s) { return CBZ.hash01 ? CBZ.hash01(x, z, s) : 0.5; }
+  function mixHex(a, b, t) {
+    const m = function (sh) { const p = (a >> sh) & 255, q = (b >> sh) & 255; return Math.round(p + (q - p) * t) << sh; };
+    return m(16) | m(8) | m(0);
+  }
+  function flatGeo(pos, idx) {
+    const n = pos.length / 3, nor = new Float32Array(n * 3), uv = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) { nor[i * 3 + 1] = 1; uv[i * 2] = pos[i * 3] * 0.1; uv[i * 2 + 1] = pos[i * 3 + 2] * 0.1; }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    return g;
+  }
+  function blobGeo(cx, cz, rx, rz, y, salt, n) {
+    n = n || 16;
+    const pos = [cx, y, cz], idx = [], P = 3.2;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+      const r = Math.pow(Math.pow(Math.abs(c), P) + Math.pow(Math.abs(s), P), -1 / P) * (0.84 + 0.16 * h01(cx + i * 7.3, cz - i * 3.1, salt));
+      pos.push(cx + rx * r * c, y, cz + rz * r * s);
+      idx.push(0, 1 + ((i + 1) % n), 1 + i);
+    }
+    return flatGeo(pos, idx);
+  }
+  function trackGeo(seg, half, y, salt, step) {
+    const L = seg.len, n = Math.max(2, Math.round(L / step)), pos = [], idx = [];
+    for (let i = 0; i <= n; i++) {
+      const t = -L / 2 + (L * i) / n;
+      const ax = seg.vertical ? seg.x : seg.x + t, az = seg.vertical ? seg.z + t : seg.z;
+      const ease = Math.min(1, 0.55 + 0.45 * Math.min(i, n - i) / 2);
+      for (const sg of [-1, 1]) {
+        const hw = half * ease * (0.86 + 0.14 * h01(ax + sg * 11, az - sg * 5, salt));
+        pos.push(seg.vertical ? ax + sg * hw : ax, y, seg.vertical ? az : az + sg * hw);
+      }
+      if (i < n) { const k = i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+    }
+    // wind every quad up (+y) whichever way the lane runs
+    if (seg.vertical) for (let i = 0; i < idx.length; i += 3) { const k = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = k; }
+    return flatGeo(pos, idx);
+  }
   /* THE TOWN WELL — the square's landmark when the recipe names no flagpole.
      A draw well as a mason and a carpenter build one: a coursed stone drum
      2.3 m across and 0.85 m high (sitting height, so nobody falls in), a
@@ -351,8 +400,14 @@
     if (P && P.seedFromColliders) { try { P.seedFromColliders(); } catch (e) {} }
     function reserveRect(r) { if (P && P.reserve) { try { P.reserve(r); } catch (e) {} } }
 
-    // the settled ground the town stands on (and what shows outside the grid)
-    if (!PLAN) mergeAdd(root, [planeGeo(cx, cz, maxX - minX + 6, maxZ - minZ + 6, 0.03)], cmat(RURAL ? GROUND : (pal.verge != null ? pal.verge : GROUND)), { receive: true });
+    /* NO PLATE. This was a sheet 3 m past the town on every side, under the
+       caller's own pad: on a kerbed town every square metre inside the grid
+       is the street kit's (carriageway, footway, lot pads), so all it ever
+       showed was a 3 m band of verge colour framing the town on the grass
+       (cream at Mbeya, snow white at Lowport); on a dirt village it was the
+       village, a flat sand plate with huts on it. The caller's pad carves the
+       country under a kerbed town; a village stands on the land itself, on
+       its lanes, yards and square (ruralGround below). */
 
     // ----- the street RECORDS: exactly the cross-section that is drawn, so
     // traffic, lamps, approaches and the junction solver read the real street
@@ -369,7 +424,10 @@
         ? { x: xLines[k], z: (minZ + maxZ) / 2, vertical: true, len: maxZ - minZ }
         : { x: (minX + maxX) / 2, z: zLines[k], vertical: false, len: maxX - minX };
       Object.assign(seg, { district: cfg.district || "town", w, lanesPerDir, laneW, litByTown: true,
-        kit: true, footway: RURAL ? 0 : FOOTWAY, rural: RURAL || undefined, main: (!vertical && k === spineJ) || undefined });
+        kit: true, footway: RURAL ? 0 : FOOTWAY, rural: RURAL || undefined, main: (!vertical && k === spineJ) || undefined,
+        // a village lane is a dirt track worn into the land (section 2): the
+        // country's ground skin lays no gravel shoulder or road bed along it
+        track: RURAL || undefined });
       townRoads.push(seg);
       // T1: town streets go on the REAL arena road list (traffic/citynav)
       if (cfg.pushCityRoads !== false && A && A.roads) A.roads.push(seg);
@@ -397,10 +455,22 @@
       } catch (e) { try { console.error("[towngen] street kit", cfg.name, e); } catch (e2) {} kit = null; }
     }
     if (!kit && !PLAN) {
-      // RURAL LANES: swept dirt, flush with the ground, no kerb and no paint
-      const roadGeoms = [];
-      for (const s of townRoads) roadGeoms.push(s.vertical ? planeGeo(s.x, s.z, s.w, s.len, 0.05) : planeGeo(s.x, s.z, s.len, s.w, 0.05));
-      mergeAdd(root, roadGeoms, layerMat(pal.road != null ? pal.road : 0x5a4f3e, 2), { receive: true });
+      // RURAL LANES: tracks worn into the land, no kerb and no paint. The
+      // wheels keep a 7.5 m band bare (both 3.6 m lanes of the record) and its
+      // edge wanders; a fringe of thin, trodden grass runs either side. They
+      // were full-width rectangles laid on a sand plate the size of the town.
+      const LITE = CBZ.facadeLite ? CBZ.facadeLite() : false, STEP = LITE ? 5 : 2.5;
+      // (flat ground takes the whole sun and sky: a palette tone written for
+      // walls reads as pale sand on it, so the ground's are taken down)
+      const DIRT = mixHex(pal.road != null ? pal.road : 0x5a4f3e, 0, 0.45);
+      const trackG = [], fringeG = [];
+      for (const s of townRoads) {
+        const half = Math.min(s.w / 2, 3.75);
+        trackG.push(trackGeo(s, half, 0.05, 0x71a, STEP));
+        fringeG.push(trackGeo(s, half + 1.3, 0.04, 0x71b, STEP));
+      }
+      mergeAdd(root, fringeG, layerMat(mixHex(DIRT, 0x3d4622, 0.55), 1), { receive: true });
+      mergeAdd(root, trackG, layerMat(DIRT, 2), { receive: true });
       for (const s of townRoads) { s.footway = 0; s.rural = true; }
     }
     // the ground under a point of this town: the kit's surface (road 0.05,
@@ -502,6 +572,29 @@
     const mk = CBZ.cityMakeBuilding;
     const district = cfg.district || cfg.name || "town";
     const filled = [];
+    /* WHERE STREET FURNITURE MAY NOT STAND: in front of a way in. Every lot
+       says where its ways in are as it is decided (a shop's door, a house's
+       door and its drive, a filling station's whole forecourt), as a strip
+       from the lot's front edge out across the footway to the kerb; the lamp
+       and rail walks below test against it. It was the door point alone, and
+       only for the rails: a lamp and a rail stood across the Pinecrest
+       station's forecourt. Each: { x0, x1, z0, z1, kind }. */
+    const frontKeep = [];
+    function keepFront(lt, tOff, halfT, kind) {
+      const nx = lt.door.nx, nz = lt.door.nz, tx = -nz, tz = nx;
+      const hd = (nz ? lt.d : lt.w) / 2;
+      const a0 = hd - 1.0, a1 = hd + 9.0;                 // the lot's front strip out past the kerb
+      const xs = [], zs = [];
+      for (const a of [a0, a1]) for (const t of [tOff - halfT, tOff + halfT]) { xs.push(lt.cx + nx * a + tx * t); zs.push(lt.cz + nz * a + tz * t); }
+      frontKeep.push({ x0: Math.min.apply(null, xs), x1: Math.max.apply(null, xs), z0: Math.min.apply(null, zs), z1: Math.max.apply(null, zs), kind: kind });
+    }
+    function keptFront(x, z, pad, kinds) {
+      for (const k of frontKeep) {
+        if (kinds && !kinds[k.kind]) continue;
+        if (x > k.x0 - pad && x < k.x1 + pad && z > k.z0 - pad && z < k.z1 + pad) return k;
+      }
+      return null;
+    }
     function buildProbFor(ring) {
       // denser centre: ring0 ~density, falling ~25% per ring out
       const p = density * Math.pow(0.72, ring);
@@ -666,6 +759,7 @@
         solid(px, pz, 0.32, 0.32, y0);
       }
     }
+    let pendingBank = null;                                 // a bank whose shell could not hold a vault, waiting for one that can
     for (const lt of lots) {
       // DETERMINISM-SACRED: exactly the same two cfg.rng() draws per lot as the
       // baseline — draw #1 (density roll) then, if not skipped, draw #2 (wpick).
@@ -701,7 +795,12 @@
         // clean glass shell; buildings.js deliberately normalizes the removed
         // residential/fortified punched-window archetypes to office glass.
         const sideArg = V2 && SIDE_IDX[lt.doorSide] != null ? SIDE_IDX[lt.doorSide] : lt.doorSide;
-        const baseOpts = pick.opts || (V2 && !isShop ? { stairs: true } : { retail: true });
+        const baseOpts0 = pick.opts || (V2 && !isShop ? { stairs: true } : { retail: true });
+        // A TOWN THAT BUILDS IN ITS OWN MATERIAL (cfg.shopDress, a facade kit
+        // style: Kesh builds in mud brick): its shops wear it wherever the
+        // prefab named none, instead of the neighbourhood's brick or stone.
+        const baseOpts = cfg.shopDress && isShop && baseOpts0.dress === undefined && storeysBase <= 4
+          ? Object.assign({}, baseOpts0, { dress: { style: cfg.shopDress } }) : baseOpts0;
         /* THE SHELL FITS ITS FACADE ON ITS OWN LOT. A town lot is its parcel
            (the footway runs round the block outside it, the next lot abuts
            it), and the shell used to be the lot less 0.75 m a side whatever
@@ -749,7 +848,9 @@
           // a fuel lot raises a filling station, not a shell (buildShell
           // below): no shell is planned, or its far copy would stand on the
           // forecourt for good, a painted box in front of the pumps
-          if (isShop && (pick.shopKind || inferShopKind(pick.name) || "food") === "gas" && stationFits(lt)) continue;
+          // (it is still SAID: a `station` record holds the spot, so no
+          // other far source can fill it either; city/metro.js BUILT)
+          if (isShop && (pick.shopKind || inferShopKind(pick.name) || "food") === "gas" && stationFits(lt)) { planned.push({ x: lt.cx, z: lt.cz, station: true }); continue; }
           // the shell this lot will raise, as cityMakeBuilding will raise it
           // (its colour: buildings.js shellColorway, the shell's own answer)
           const cw = CBZ.cityShellColorway ? CBZ.cityShellColorway(bx, bz, color, shellOpts) : null;
@@ -763,7 +864,21 @@
         // shop's lot.kind must be the real trade key (food/bank/bar/...), or its
         // counter menu won't open. Homes stay kind:"home". Without a shopKind a
         // shop defaults to a buyable 'food' diner — never a typeless lot.
-        const sk = isShop ? (pick.shopKind || inferShopKind(pick.name) || "food") : null;
+        let sk = isShop ? (pick.shopKind || inferShopKind(pick.name) || "food") : null;
+        /* A BANK HAS A VAULT. A shell too small for a strongroom (city/bank.js
+           CBZ.cityVaultFits, the numbers cityVaultRoom refuses on) is not the
+           bank: it trades as the general store, and the bank goes to the next
+           shop shell down the street that can hold one. No rng draw. */
+        if (isShop && CBZ.cityVaultFits) {
+          const vaultOk = CBZ.cityVaultFits(w, d, 0.4, !!lt.door.nz);
+          if (sk === "bank" && !vaultOk) { pendingBank = pendingBank || pick; pick = Object.assign({}, pick, { name: "General Store", shopKind: "hardware" }); sk = "hardware"; }
+          else if (sk !== "bank" && pendingBank && vaultOk && !(anchorPlan && anchorPlan.has(lt)) && sk !== "casino") { pick = pendingBank; pendingBank = null; sk = "bank"; }
+        }
+        /* A FILLING STATION NEEDS ITS FORECOURT. A fuel pick on a lot too
+           small for world/fuel_station.js's smallest was a shop shell with
+           "Basin Filling Station" on the fascia and no pump anywhere. It
+           trades as the general store. No rng draw. */
+        if (isShop && sk === "gas" && CBZ.buildFuelStation && CBZ.FUEL_STATION_MIN && !stationFits(lt)) { pick = Object.assign({}, pick, { name: "General Store", shopKind: "hardware" }); sk = "hardware"; }
         const kind = isShop ? sk : "home";
         /* THE LOT IS DATA NOW, THE BUILDING WHEN IT CAN BE SEEN. Everything a
            system asks of a town lot (its kind, door, shop, owner, home, where the
@@ -791,6 +906,13 @@
         // a fuel lot raises a filling station, not a shell: no far copy of a
         // shell may stand for it (city/metro.js BUILT reads this)
         if (isShop && sk === "gas" && stationFits(lt)) bb.fuelStation = true;
+        if (lt.door) {
+          const tx = -lt.door.nz, tz = lt.door.nx;
+          const doorT = (lt.door.x - lt.cx) * tx + (lt.door.z - lt.cz) * tz;
+          if (bb.fuelStation) keepFront(lt, 0, (lt.door.nz ? lt.w : lt.d) / 2, "forecourt");
+          else keepFront(lt, doorT, 1.9, "door");
+          if (HLOT && isFinite(HLOT.driveAt)) keepFront(lt, HLOT.driveAt, (HLOT.driveHalf || 1.6) + 0.6, "drive");
+        }
         // a house on a lot: where it stands and where its own drive runs
         // (city/approach.js lays the drive there instead of on the centreline)
         if (HLOT) { bb.x = bx; bb.z = bz; bb.w = w; bb.d = d; bb.driveAt = HLOT.driveAt; bb.driveHalf = HLOT.driveHalf; }
@@ -853,7 +975,7 @@
             // wall (buildings.js's mainland counter math, slid clear of the stair
             // core the shell reserved) + the full trade-specific interior dresser + dressed
             // upper floors. Town shops were bare boxes before this.
-            if (V2 && b.lbox) {
+            if (V2 && b.lbox && sk !== "bank") {
               const inx = -lt.door.nx, inz = -lt.door.nz;              // inward unit
               let ccx = inx * (w / 2 - 2.8), ccz = inz * (d / 2 - 2.8);
               let cw = inx ? 0.8 : Math.min(w - 2, 4.5);
@@ -902,6 +1024,8 @@
           if (late) { flushCanopies(); if (isShop && CBZ.storeGoodsPlan) CBZ.storeGoodsPlan(lotRec); }
           // a casino shell that landed after the order-90 dress pass
           if (late && kind === "casino" && CBZ.dressCasino) CBZ.dressCasino(root, lotRec);
+          // a bank shell that landed after the order-90 pass: its strongroom, teller line and staff (city/bank.js)
+          if (late && kind === "bank" && CBZ.cityBankDress) CBZ.cityBankDress(lotRec);
         };
         let lateShell = false;
         if (CBZ.sliceAt) {
@@ -946,8 +1070,13 @@
             // enterable-hut wall AABBs axis-aligned with the hut mesh (their
             // doorway gap follows this quantized facing). V2 off → the original
             // free rotation, byte-identical.
-            const rot = pick.rot != null ? pick.rot
+            const rot0 = pick.rot != null ? pick.rot
               : (V2 ? (Math.floor(rng() * 4) * Math.PI / 2) : rng() * Math.PI * 2);
+            // A VILLAGE HUT'S DOOR FACES THE LANE (a stall's counter, the
+            // well's windlass with them): their front is local -Z, and the
+            // dealt quarter turn stood half of them with their doors to the
+            // neighbour's back wall. The draw above is still taken.
+            const rot = (def.zone === "village" && pick.rot == null && lt.door) ? Math.atan2(-lt.door.nx, -lt.door.nz) : rot0;
             const scale = pick.scale || 1;
             const grp = new THREE.Group();
             def.build({ group: grp, x: lt.cx, z: lt.cz, rot, rng, scale });
@@ -956,6 +1085,7 @@
             grp.scale.set(scale, scale, scale);
             grp.updateMatrix(); grp.matrixAutoUpdate = false;
             root.add(grp);
+            lt._yard = true;                                 // a swept yard round it (ruralGround)
             if (!def.noCollide && CBZ.colliders) {
               const fp = CBZ.assets.rotatedFootprint(def, rot);
               CBZ.colliders.push({ minX: lt.cx - fp.hx, maxX: lt.cx + fp.hx, minZ: lt.cz - fp.hz, maxZ: lt.cz + fp.hz, y0: def.y0 || 0, y1: def.y1 == null ? 30 : def.y1, ref: grp });
@@ -980,7 +1110,8 @@
       // swept plaza sheet.
       const Y0 = kit ? LOT_Y : 0.06;
       const inW = kit ? sw - FOOTWAY * 2 : sw - 3, inD = kit ? sd - FOOTWAY * 2 : sd - 3;
-      if (!kit) mergeAdd(root, [planeGeo(sx, sz, inW, inD, 0.06)], layerMat(pal.plaza != null ? pal.plaza : SIDEWALK, 3), { receive: true });
+      // (a village's: beaten earth, its edge worn round, not a ruled sheet)
+      if (!kit) mergeAdd(root, [blobGeo(sx, sz, inW / 2 + 1, inD / 2 + 1, 0.06, 0x71c, 22)], layerMat(mixHex(pal.plaza != null ? pal.plaza : SIDEWALK, 0, 0.4), 3), { receive: true });
       reserveRect({ minX: sx - sw / 2, maxX: sx + sw / 2, minZ: sz - sd / 2, maxZ: sz + sd / 2 });
       // central landmark — a stone WELL (cylinder base + low ring) by default,
       // or a flagpole if the recipe asks. Decor with a thin collider.
@@ -1063,6 +1194,27 @@
     }
 
     // =====================================================================
+    //  5a) A VILLAGE'S YARDS. Round every hut and shop a swept-earth yard
+    //      to the edge of its plot (its rim wandering), and a trodden path
+    //      from the plot's front to the lane. An empty plot stays grass. One
+    //      merged mesh for the village. (A kerbed town's lots are 5b's.)
+    // =====================================================================
+    if (!kit) {
+      const yardG = [];
+      const n = (CBZ.facadeLite && CBZ.facadeLite()) ? 10 : 16;
+      for (const lt of lots) {
+        if (!lt._rec && !lt._yard) continue;
+        yardG.push(blobGeo(lt.cx, lt.cz, lt.w / 2 - 0.3, lt.d / 2 - 0.3, 0.035, 0x71d, n));
+        const dr = lt.door;
+        if (!dr) continue;
+        // the lane's worn band starts (ROAD/2 - 3.75) past the plot line
+        const run = Math.max(1, ROAD / 2 - 3.75) + 1.6, mx = dr.x + dr.nx * (run / 2 - 0.8), mz = dr.z + dr.nz * (run / 2 - 0.8);
+        yardG.push(planeGeo(mx, mz, dr.nx ? run : 1.4, dr.nx ? 1.4 : run, 0.035));
+      }
+      if (yardG.length) mergeAdd(root, yardG, layerMat(mixHex(GROUND, 0, 0.4), 1), { receive: true });
+    }
+
+    // =====================================================================
     //  5b) THE LOT GROUND — one pad per block inside its footway, wearing
     //      city/cityground.js: built parcels get their lawn/beds/slab/pavers
     //      from what stands on them, empty ones are grass or a poured slab
@@ -1074,7 +1226,12 @@
       const groundLots = [];
       for (const lt of lots) {
         const rec = lt._rec || null;
-        const kind = lt.zone === "residential" ? "residential" : (yard ? "industrial" : (lt.zone === "civic" ? "core" : "commercial"));
+        // what stands on the parcel decides it, not the ring it is in: a
+        // house in the commercial ring has a lawn, not a paved forecourt to
+        // its walls, and a plot nobody built on is rough grass, not a poured
+        // slab or an empty asphalt yard (Mbeya's and Lowport's pebble pads,
+        // the Foundry's acres of tarmac with nothing on them)
+        const kind = !rec ? "vacant" : rec.kind === "home" || lt.zone === "residential" ? "residential" : (yard ? "industrial" : (lt.zone === "civic" ? "core" : "commercial"));
         groundLots.push({ cx: lt.cx, cz: lt.cz, w: lt.w, d: lt.d, groundKind: kind,
           groundWealth: lt.zone === "civic" ? 0.7 : (lt.zone === "commercial" ? 0.55 : 0.45),
           building: rec ? rec.building : null });
@@ -1171,6 +1328,8 @@
         // the arm reaches toward the carriageway; +Z is the road in lampMast's
         // frame, so the yaw is just the bearing from the lamp to the centreline
         const fx = seg.vertical ? -sgn : 0, fz = seg.vertical ? 0 : -sgn;
+        // never in front of a way in: a forecourt, a drive, a shop or house door
+        if (keptFront(lx, lz, 0.5, null)) continue;
         lampSpots.push({ x: lx, z: lz, ang: Math.atan2(fx, fz), fx: fx, fz: fz, half: half, off: off });
       }
     }
@@ -1243,6 +1402,10 @@
         const side = (i & 1) ? 1 : -1;
         const rx = lt.door.x + lt.door.nx * 1.0 - lt.door.nz * 2.6 * side, rz = lt.door.z + lt.door.nz * 1.0 + lt.door.nx * 2.6 * side;
         const yaw90 = lt.door.nx !== 0;                 // rail runs along Z
+        // beside a shop's own door by design, but never across a forecourt or
+        // a drive, nor in front of the neighbour's door
+        const RK = { forecourt: 1, drive: 1 };
+        if (keptFront(rx + (yaw90 ? 0 : -1.6), rz + (yaw90 ? -1.6 : 0), 0.2, RK) || keptFront(rx + (yaw90 ? 0 : 1.6), rz + (yaw90 ? 1.6 : 0), 0.2, RK)) continue;
         const ry = gy(rx, rz);
         dummy2.position.set(rx, ry + 1.0, rz);
         dummy2.rotation.set(0, yaw90 ? Math.PI / 2 : 0, 0); dummy2.scale.set(1, 1, 1);

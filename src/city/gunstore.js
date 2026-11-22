@@ -1133,6 +1133,9 @@
     const name = (S.lot.building && S.lot.building.name) || S.gs.name || "Firearms";
     S.cases = [];
 
+    // ---- 0. THE ROOM'S WALLS: the partitions that make the shop a room in its shell ----
+    cityWalls(S, k, at, FY, uvBox);
+
     // ---- 1. THE GUN WALL behind the clerk: every long gun the shop sells, twice over ----
     const nStand = Math.max(S.longNames.length, Math.floor((S.gs.rack.span - 0.5) / 0.4));
     const stand = [];
@@ -1363,6 +1366,58 @@
     sh.quad(k, sh.cell("target1", 256, 384, artTarget()), -0.22, FY + 2.32, 0.02, 0.3, 0.45);
     sh.quad(k, sh.cell("target2", 256, 384, artTarget("#7a1f1a")), 0.22, FY + 2.32, 0.02, 0.3, 0.45);
     k.build(group);
+  }
+
+  /* THE ROOM'S WALLS. The partitions round the sales floor and the back room
+     (the gun wall's partition with the barred door's opening in it, the back
+     room's rear wall, the side walls where there is hall beyond them with the
+     staff door in one). They are this file's, built with the displays and
+     drawn with them: the lazy fit-out stood them only within 9 m of the
+     building, so from across the street the racks and cases stood in the
+     open hall with no walls round them. Solid, floor to the slab above. */
+  function cityWalls(S, k, at, FY, uvBox) {
+    const P = S.plan, T = P.T, b = S.lot.building;
+    const top = (b && Array.isArray(b.floorTops) && b.floorTops[1] != null && b.floorTops[1] > FY + 2.4) ? b.floorTops[1] - 0.03 : FY + 3.0;
+    const PAINT = 0xcfc9bb, SKIRT = 0x3a3d40, CASING = 0x2a2d31;
+    const H = top - FY;
+    // one run of partition: along u at depth v (du=1) or along v at lateral u (du=0)
+    const run = function (alongU, at0, s0, s1, gaps) {
+      const seg = function (a, c, y0, y1) {
+        if (c - a < 0.02 || y1 - y0 < 0.02) return;
+        const m = (a + c) / 2;
+        if (alongU) { at(m, at0, 0, 1); uvBox(m, at0, c - a, T, FY + y0, FY + y1); }
+        else { at(at0, m, 1, 0); uvBox(at0, m, T, c - a, FY + y0, FY + y1); }
+        k.box(0, FY + (y0 + y1) / 2, 0, c - a, y1 - y0, T, PAINT);
+        if (y0 < 0.01) for (const sd of [-1, 1]) k.box(0, FY + 0.05, sd * (T / 2 + 0.006), c - a, 0.1, 0.012, SKIRT);
+      };
+      let cur = s0;
+      for (const g of (gaps || [])) {
+        const g0 = g.c - g.w / 2, g1 = g.c + g.w / 2;
+        seg(cur, g0, 0, H);
+        seg(g0, g1, g.h, H);                                   // over the doorway
+        if (g.casing) {
+          const gm = (g0 + g1) / 2;
+          if (alongU) at(gm, at0, 0, 1); else at(at0, gm, 1, 0);
+          for (const sx of [-1, 1]) k.box(sx * (g.w / 2 + 0.03), FY + g.h / 2, 0, 0.06, g.h, T + 0.04, CASING);
+          k.box(0, FY + g.h + 0.03, 0, g.w + 0.12, 0.06, T + 0.04, CASING);
+        }
+        cur = g1;
+      }
+      seg(cur, s1, 0, H);
+    };
+    const u0 = P.ua - (P.wallA ? T : 0), u1 = P.ub + (P.wallB ? T : 0);
+    run(true, P.SD + T / 2, u0, u1, [{ c: P.gateU, w: P.gateW, h: 2.12 }]);       // the gun wall's partition (cityGate frames the opening)
+    if (P.backWall) run(true, P.SD + T + P.BD + T / 2, u0, u1, null);
+    if (P.wallA) run(false, P.ua - T / 2, P.wt, P.vEnd, null);
+    if (P.wallB) run(false, P.ub + T / 2, P.wt, P.vEnd, P.staffDoor ? [{ c: P.staffDoor.v, w: P.staffDoor.w, h: 2.1, casing: true }] : null);
+    // the staff door's leaf, swung open flat against the hall side of the wall
+    // (a doorway with no door in it reads as a building site)
+    if (P.staffDoor) {
+      const sd = P.staffDoor;
+      at(P.ub + T + 0.025, sd.v + sd.w, 1, 0);
+      k.box(0, FY + 1.05, 0, sd.w - 0.04, 2.08, 0.04, 0x55595e);
+      k.box(0.3, FY + 1.0, 0.04, 0.12, 0.03, 0.03, 0xb4b8bd, "metal");
+    }
   }
 
   /* THE BACK ROOM. Steel shelving of cased rounds down the rear wall, a pine
@@ -1774,6 +1829,11 @@
     k.cyl(lx + 0.32, T + 0.42, lz + 0.1, 0.03, 0.065, 0.08, 0x22252a, "metal", 0.35, 0, -0.5);
     k.cyl(lx + 0.34, T + 0.385, lz + 0.115, 0.055, 0.055, 0.004, 0xfff1d8, "glow", 0.35, 0, -0.5);
     k.build(group);
+    // THE BENCH IS A PLACE TO WORK: stand at it with a gun in your hands and
+    // its parts come off and go on (city/gunmods.js CBZ.gunModsBench)
+    const bp = k.world(0, 0.05);
+    S.benchCand = { bench: true, store: S, name: "Workbench", x: bp.x, y: T + 0.15, z: bp.z, reach: 2.3, dot: 0.45, sold: false };
+    S.slots.push(S.benchCand);
     // the island's back-room bench is a solid thing to walk round
     if (S.kind === "island") {
       const q = Math.abs(Math.sin(yaw)) > 0.5;
@@ -1999,6 +2059,37 @@
     for (const S of STORES) if (!S.dead && S.dressed && S.near && inBounds(S, px, pz)) return S;
     return null;
   }
+  // THE WORKBENCH'S VERBS: per slot of the gun in your hands, take off what
+  // is on it, or fit what your parts box holds for it (city/gunmods.js)
+  function benchVerbs() {
+    const GB = function () { return CBZ.gunModsBench || null; };
+    const out = [];
+    const slots = ["scope", "mag", "muzzle", "under"];
+    slots.forEach(function (sl, i) {
+      out.push({ id: "gunwall-bench-off-" + sl, slot: "e", prio: 7 - i * 0.1,
+        label: function () { const f = GB() && GB().fitted(sl); return f ? "Take off the " + f.mod.name : "Take off"; },
+        canShow: function (s) { return !!s.bench && !!GB() && !!GB().fitted(sl); },
+        onSelect: function () { GB().off(sl); } });
+      out.push({ id: "gunwall-bench-on-" + sl, prio: 6.5 - i * 0.1,
+        label: function () { const f = GB() && GB().loose(sl); return f ? "Fit the " + f.mod.name : "Fit"; },
+        canShow: function (s) { return !!s.bench && !!GB() && !!GB().loose(sl); },
+        onSelect: function () { GB().on(sl); } });
+    });
+    // nothing in your hands to work on: the bench says what it is for
+    out.push({ id: "gunwall-bench-idle", slot: "e", prio: 1, label: "Work on a gun",
+      canShow: function (s) { return !!s.bench && !!GB() && !GB().gun(); },
+      onSelect: function () { if (CBZ.city && CBZ.city.note) CBZ.city.note("Have the gun you want to work on in your hands.", 2.2); } });
+    // a gun in your hands with nothing on it and nothing in the box for it
+    out.push({ id: "gunwall-bench-bare", prio: 1, label: "Nothing to fit",
+      canShow: function (s) {
+        const B2 = GB();
+        if (!s.bench || !B2 || !B2.gun()) return false;
+        for (const sl of slots) if (B2.fitted(sl) || B2.loose(sl)) return false;
+        return true;
+      },
+      onSelect: function () { if (CBZ.city && CBZ.city.note) CBZ.city.note("Parts go on from the accessory wall out front, or from your parts box.", 2.4); } });
+    return out;
+  }
   const _list = [];
   let fixturesWired = false;
   function wireFixtures() {
@@ -2060,8 +2151,26 @@
             if (v && CBZ.citySay) { try { CBZ.citySay(v, "Okay. Okay. It's open.", null, { secs: 2.2, force: true }); } catch (e) {} }
             openGate(s.store, "insider");
             if (s.store.till) s.store.till.report(120, true);
+            // and he goes in ahead of you, to stand by the safe he knows the combination of
+            const sf = s.store.safe, P = s.store.plan;
+            if (v && sf && P && CBZ.cityKeeper && CBZ.cityKeeper.walkTo) {
+              // round the counter's end, through the barred door, to the safe's side
+              const way = [P.w(P.gateU, P.SD - 0.6), P.w(P.gateU, P.SD + P.T + 0.8), P.w(P.ua + 1.5, P.SD + P.T + P.BD - 0.8)];
+              if (P.plan(v.pos.x, v.pos.z).v < P.cv) way.unshift(P.w(P.gateU, P.cv - P.CD / 2 - 0.5));   // out front: through the staff gap first
+              // at the safe he works the dial himself (city/bank.js: an insider's open, a robbery somebody saw)
+              CBZ.cityKeeper.walkTo(v, way, function (who) {
+                if (sf.open || !CBZ.citySafeOpen) return;
+                clerkSays(s.store, "Okay. Okay. It's open. Take it.");
+                CBZ.citySafeOpen(sf, "insider");
+              });
+            }
           } },
-      ],
+        // a customer with a gun to work on: the clerk lets him through to the bench
+        { id: "gunwall-gate-ask", slot: "e", prio: 6.5, label: "Ask to use the bench",
+          canShow: (s) => !!s.gate && !s.store.gate.open && !gateKey(s.store) && !gateInsider(s.store) && !!s.store.bench && tillOpen(s) &&
+            !!(s.store.clerk && !(s.store.clerk.cowed && s.store.clerk.cowed())) && !!(CBZ.gunModsBench && CBZ.gunModsBench.gun()),
+          onSelect: (s) => { clerkSays(s.store, "Bench is in the back. Hands off the safe."); openGate(s.store, "clerk"); s.store.gate.lent = true; s.store.gate.lentOut = 0; } },
+      ].concat(benchVerbs()),
     });
   }
 
@@ -2199,6 +2308,18 @@
     if (S.gate) {
       const G = S.gate, to = G.open ? 1.5 : 0;
       if (G.swing !== to) { G.swing += Math.sign(to - G.swing) * Math.min(Math.abs(to - G.swing), dt * 2.4); G.leaf.rotation.y = G.yaw - G.swing; }
+      // let through to the bench: once you are back out front (or gone) he shuts it behind you
+      if (G.open && G.lent && S.plan) {
+        const q = S.plan.plan(P.pos.x, P.pos.z), back = q.v > S.plan.SD - 0.2 && q.v < S.plan.vEnd + 0.5 && q.u > S.plan.ua - 0.5 && q.u < S.plan.ub + 0.5;
+        G.lentOut = back ? 0 : (G.lentOut || 0) + dt;
+        const cv = S.clerk && S.clerk.body ? S.clerk.body() : null;
+        if (!cv || cv.dead) G.lent = false;
+        else if (G.lentOut > 3) {
+          G.open = false; G.lent = false;
+          if (CBZ.colliders.indexOf(G.col) < 0) { CBZ.colliders.push(G.col); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+          if (CBZ.sfx && inside) CBZ.sfx("door_close");
+        }
+      }
       // its key rides on the clerk, and the safe behind it is his to open
       const v = S.clerk && S.clerk.body ? S.clerk.body() : null;
       if (v && !v.dead && v._gunKeyOf !== G.id && CBZ.cityKeys && CBZ.cityKeys.givePed) {

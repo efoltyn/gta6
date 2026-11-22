@@ -107,7 +107,11 @@
   };
   // a town on its own land builds what that land builds (its district key)
   const DISTRICT_STYLES = { desert: ["adobe", "ranch", "desertmod"], snow: ["manor", "queenanne", "greekrev"], capeharbor: ["queenanne", "brickhouse", "ranch"],
-    goldspire: ["techhouse", "greekrev", "romanvilla"], neonreef: ["desertmod", "ranch", "adobe"], foundry: ["brickhouse", "ranch"], farmland: ["ranch", "queenanne"], forest: ["manor", "ranch"] };
+    goldspire: ["techhouse", "greekrev", "romanvilla"], neonreef: ["desertmod", "ranch", "adobe"], foundry: ["brickhouse", "ranch"], farmland: ["ranch", "queenanne"], forest: ["manor", "ranch"],
+    // the nations build their own way (city/countries.js): Kesh's capital in
+    // mud brick and flat-roofed render, Mbeya's in bungalows and mud brick
+    // (both were Greek Revival porticoes and Queen Anne turrets by wealth)
+    keshtown: ["adobe", "desertmod"], mbeyacity: ["ranch", "adobe"] };
   function styleFor(lot, storeys, wealth) {
     if (!CBZ.facadeDef) return null;
     const st = Math.max(1, storeys | 0);

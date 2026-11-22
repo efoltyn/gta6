@@ -1031,6 +1031,10 @@
       return Math.hypot(p.x - CBZ.player.pos.x, p.z - CBZ.player.pos.z);
     }
     if (kind === "ped" || kind === "inmate") {
+      // a person E can already reach is in reach for the finger too: the
+      // cutman on the apron is 2.8 m from your corner stool, across the ropes,
+      // and walking "closer" walked you into the ropes until the walk gave up
+      if (kind === "ped" && CBZ.interactions && CBZ.interactions.candidateFor && CBZ.interactions.candidateFor(rec)) return 0;
       const p = rec.pos || (rec.group && rec.group.position);
       if (!p || !CBZ.player.pos) return Infinity;
       return Math.hypot(p.x - CBZ.player.pos.x, p.z - CBZ.player.pos.z);

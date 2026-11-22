@@ -178,6 +178,7 @@
      The deck is the shared highway builder's (lane paint, shoulders, junction
      gaps where it meets the town street), not a bare plane. */
   const LINK_W = 24, LINK_HALF = 14.4;       // highways.js deck half for a 24 m 3+3 record
+  const SHOULDER = 0x5f5c56;                 // the gravel at a road's edge (a town pad's only visible strip)
   function resolvePlug(place) {
     if (place.road !== "network") return place.road ? { x: place.road.x, z: place.road.z, rx: place.road.x, rz: place.road.z } : null;
     const table = CBZ.highwayNetTable ? CBZ.highwayNetTable() : [];
@@ -308,20 +309,20 @@
     // byte-identical because at zero offset authored == world. (townCfg
     // seeds from the authored anchor.)
 
-    // (a) GROUND PAD — a settled town floor under the whole footprint, a touch
-    //     above grade so it reads as reclaimed land/plaza, then seed placement so
-    //     the generator's prop scatter respects what we (and others) already laid.
-    // (the VERGE colour: this pad is the land round the town, and the recipe's
-    // ground tone — Neon Reef's purple, Goldspire's grey — read as a void of
-    // asphalt a district wide)
-    const P0 = tpl.palette || {};
-    addPad(root, cx, cz, hx * 2 + 18, hz * 2 + 18, P0.verge != null ? P0.verge : (P0.ground != null ? P0.ground : 0x6f7480), 0.018);
+    // (a) seed placement so the generator's prop scatter respects what we
+    //     (and others) already laid; the ground pad goes down after the town
+    //     (below), sized to the grid it drew
     if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
 
     // (b)+(c) GROW THE TOWN — now that T1 wired the arena, all shops/homes/roads
     //     register automatically into Zillow/shops/jobs/vendor-staffing.
     const town = CBZ.buildTown(root, T.cfg);
     if (!town) return;
+    // the pad goes under the town's own street grid, 10 cm past its outer
+    // street edges, in a road shoulder's gravel: laid to the placement's
+    // extents (+9 m) it was a 30 m flat frame of verge colour round the city
+    // on the open grass, and a metre past the grid it was still a frame
+    { const R0 = town.rect; addPad(root, (R0.minX + R0.maxX) / 2, (R0.minZ + R0.maxZ) / 2, R0.maxX - R0.minX + 0.2, R0.maxZ - R0.minZ + 0.2, SHOULDER, 0.018); }
 
     // (e) REGISTER the walkable region + a causeway to the network, so the
     //     placement reads as a real landmass and you can drive there. The
@@ -477,6 +478,11 @@
       const u = 100 + k * 16.2;
       box(geo.car, u, 2.45, V, 15, 3.1, 3.0);                // the body
       box(geo.car, u, 0.75, V, 13, 0.5, 2.4);                // the frame
+      // the two trucks it rides on (it was a crate standing on its frame on
+      // the ties), in the ties' colour: no extra draw
+      for (const e of [-5.2, 5.2]) box(geo.tie, u + e, 0.62, V, 2.6, 0.55, 2.3);
+      // the three discharge hoppers between them
+      for (const e of [-3, 0, 3]) box(geo.roof, u + e, 0.72, V, 1.8, 0.4, 2.2);
       box(geo.roof, u, 4.1, V, 14.4, 0.2, 2.6);              // the roof walk
       const c = F.w(u, V), hu = 7.5, hv = 1.5;
       cars.push(F.vert ? { minX: c.x - hv, maxX: c.x + hv, minZ: c.z - hu, maxZ: c.z + hu } : { minX: c.x - hu, maxX: c.x + hu, minZ: c.z - hv, maxZ: c.z + hv });
@@ -485,21 +491,25 @@
       if (!list.length) return;
       const g = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(list) : list[0];
       const m = new THREE.Mesh(g, cmat(col));
-      m.castShadow = col === 0x8a5a3c; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+      m.castShadow = col === 0x5a3b28; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
       m.name = T.id + "-siding"; root.add(m);
     };
-    add(geo.ballast, 0x6e6a62); add(geo.tie, 0x4a3a2c); add(geo.rail, 0x8a8c90); add(geo.car, 0x8a5a3c); add(geo.roof, 0x6a4a34);
+    // (the cars' rust brown is taken down for the sun: 0x8a5a3c came out a pale
+    // tan crate)
+    add(geo.ballast, 0x6e6a62); add(geo.tie, 0x2c241d); add(geo.rail, 0x8a8c90); add(geo.car, 0x5a3b28); add(geo.roof, 0x3e2c22);
     if (CBZ.colliders) for (const c of cars) CBZ.colliders.push({ minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ, y0: 0, y1: 4.2 });
   }
   function buildGrainTown(city, T) {
     const G = grainCfg(T);
     if (!G || typeof CBZ.buildTown !== "function") return;
     const root = city.root; if (!root) return;
-    const P0 = G.tpl.palette || {};
-    addPad(root, T.cx, T.cz, 148 + 18, 124 + 18, P0.verge != null ? P0.verge : 0xa89060, 0.018);
     if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
     const town = CBZ.buildTown(root, G.cfg);
     if (!town) return;
+    // the pad under the town's own grid, 10 cm past its outer street edges in
+    // a road shoulder's gravel (a metre past them in sand, and at +9 m before
+    // that, it was a band of bare sand framing the town on the grass)
+    { const R0 = town.rect; addPad(root, (R0.minX + R0.maxX) / 2, (R0.minZ + R0.maxZ) / 2, R0.maxX - R0.minX + 0.2, R0.maxZ - R0.minZ + 0.2, SHOULDER, 0.018); }
     CBZ.registerCityRegion(city, {
       name: T.name, subtitle: G.tpl.subtitle, biome: T.id, kind: "rect",
       minX: G.rect.minX, maxX: G.rect.maxX, minZ: G.rect.minZ, maxZ: G.rect.maxZ, pad: 8,

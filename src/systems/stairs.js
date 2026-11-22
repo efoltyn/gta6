@@ -240,6 +240,24 @@
     if (!liveSet || liveLen !== plats.length) { liveSet = new Set(plats); liveLen = plats.length; }
     return liveSet.has(p);
   }
+  // is there floor at this level all the way from a to b (one sample every
+  // 2 m, and both ends)? A body on the street is always supported, so street
+  // hops between buildings stay; a landing-to-landing hop through air fails.
+  function walkable(a, b, d) {
+    const G = CBZ.groundAt;
+    if (typeof G !== "function") return true;
+    const y = Math.max(a.y, b.y);
+    // ends the ground cannot see (a district whose floors are not loaded,
+    // a caller's point in mid-air) give no evidence either way: trusted
+    if (!(G(a.x, a.z, y + 0.3) >= y - LEVEL_DY) || !(G(b.x, b.z, y + 0.3) >= y - LEVEL_DY)) return true;
+    const n = Math.max(1, Math.ceil(d / 2));
+    for (let k = 1; k < n; k++) {
+      const t = k / n, x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
+      const g = G(x, z, y + 0.3);
+      if (!(g >= y - LEVEL_DY)) return false;
+    }
+    return true;
+  }
   // opts.ladders: include kind "ladder" links (a near-vertical climb no
   // walking AI can do on its ramp-less feet); off by default
   function route(from, to, opts) {
@@ -262,6 +280,12 @@
     P[0] = from; P[1] = to;
     for (let i = 0; i < cand.length; i++) { P[2 + 2 * i] = cand[i].a; P[3 + 2 * i] = cand[i].b; }
     const D = new Float64Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1), done = new Uint8Array(N);
+    function ownerAt(i) { return i >= 2 ? cand[(i - 2) >> 1].owner : undefined; }
+    function floorJoins(u, v, pu, pv, d2) {
+      const ou = ownerAt(u);
+      if (ou != null && ou === ownerAt(v)) return true;
+      return walkable(pu, pv, Math.sqrt(d2));
+    }
     D[0] = 0;
     for (;;) {
       let u = -1, best = Infinity;
@@ -275,7 +299,13 @@
         const c = D[u] + cand[li].len * 1.15;       // stairs are a little slower than floor
         if (c < D[other]) { D[other] = c; prev[other] = u; }
       }
-      // across a floor, to any node on the same level within reach
+      // across a floor, to any node on the same level within reach, and only
+      // over a FLOOR: two ends of one owner's links (one building's stair
+      // core) share that owner's floors; anything else (another building,
+      // the caller's own from/to) has to be walkable, ground under every
+      // couple of metres of the hop at this level, or it is open air. (It
+      // used to join a third-floor landing to the next tower's third floor
+      // 70 m across the street.)
       for (let v = 1; v < N; v++) {
         if (done[v] || v === u) continue;
         const pv = P[v];
@@ -283,7 +313,7 @@
         const d2 = dist2(pu.x, pu.z, pv.x, pv.z);
         if (d2 > S2 && v !== 1) continue;
         const c = D[u] + Math.sqrt(d2) + 0.5;
-        if (c < D[v]) { D[v] = c; prev[v] = u; }
+        if (c < D[v] && floorJoins(u, v, pu, pv, d2)) { D[v] = c; prev[v] = u; }
       }
     }
     if (!(D[1] < Infinity)) return null;

@@ -234,7 +234,10 @@
       // door can be worked at all (city/bank.js: 2.6 m)
       if (k.stuckT > 2.5 && k.way.length === 1 && d2(p, v.x, v.z) < 2.5 * 2.5) { k.way.shift(); return; }
       p.surrender = true; p.state = "surrender"; p.poseHandsUp = true;
-      p._keepThrough = true;
+      // (busy at your order: the gunpoint sweep keeps him covered but does not
+      // freeze him where he stands, which held him at his post for as long as
+      // you kept the gun on him: the walk only ever happened when you looked away)
+      p._keepThrough = true; p._keepBusy = true; p.pause = 0;
       p.moveOrder = { x: w.x, z: w.z, speed: (p.baseSpeed || 1.3) * 0.85, stop: 0.3, t: CBZ.now || 0 };
       return;
     }
@@ -267,12 +270,19 @@
   function asideThink(p, k, dt) {
     const a = k.aside;
     k.asideT = (k.asideT || 0) + dt;
-    if (!a || k.asideT > 5 || d2(p, a.x, a.z) < 0.35 * 0.35) {
-      k.mode = "loose"; k.aside = null; p._keepThrough = false; p.moveOrder = null;
+    if (a && k.asideWay && k.asideWay.length && d2(p, a.x, a.z) < 0.4 * 0.4) { k.aside = k.asideWay.shift(); return; }
+    if (!a || k.asideT > (k.asideMax || 5) || d2(p, a.x, a.z) < 0.35 * 0.35) {
+      // (walked somewhere at gunpoint: he stands there with his hands up a while)
+      if (a && k.asideMax) {
+        p.surrender = true; p.surrenderT = 10; p.state = "surrender"; p.poseHandsUp = true;
+        const done = k.asideDone; k.asideDone = null;
+        if (done && d2(p, a.x, a.z) < 1.2 * 1.2) { try { done(p); } catch (e) {} }
+      }
+      k.mode = "loose"; k.aside = null; k.asideMax = 0; p._keepThrough = false; p._keepBusy = false; p.moveOrder = null;
       return;
     }
     p.surrender = true; p.surrenderT = Math.max(p.surrenderT || 0, 1.5); p.state = "surrender"; p.poseHandsUp = true;
-    p._keepThrough = true;
+    p._keepThrough = true; p._keepBusy = true; p.pause = 0;
     p.moveOrder = { x: a.x, z: a.z, speed: (p.baseSpeed || 1.3) * 0.9, stop: 0.3, t: CBZ.now || 0 };
   }
   function endEscort(p, k) {
@@ -317,6 +327,24 @@
     if (p._keepFree) {
       // LOOSE: the ordinary brain has him (fleeing, fighting). Calm again,
       // with the trouble gone, he goes back to work.
+      // THE TROUBLE IS OVER when no gun is on the room and nothing is going
+      // off near him: then his fear runs down and he stops running (the flee
+      // brain alone never let go of a man trapped in his own banking hall:
+      // he ran laps of it at fear 10 for as long as you watched)
+      // (a man who fought you lets it go once you are out of his shop)
+      const pd2 = d2(p, Pl.pos.x, Pl.pos.z);
+      const threat = (playerArmed() && pd2 < 16 * 16) || (!!p.rage && p.rage === PA() && pd2 < 20 * 20);
+      const quietPanic = CBZ.cityPanicAt ? CBZ.cityPanicAt(p.pos.x, p.pos.z) : 0;
+      if (!threat && quietPanic < 0.25 && !p.restraint && !hurt && !(p.rage && p.rage !== PA())) k.quiet = (k.quiet || 0) + dt;
+      else k.quiet = 0;
+      if (k.quiet > 6 && p.rage) { p.rage = null; p.mem = null; if (p.state === "fight") p.state = "idle"; }
+      if (k.quiet > 6) {
+        p.fear = Math.max(0, (p.fear || 0) - dt * 1.2);
+        if ((p.fear || 0) <= 3) {
+          if (p.state === "flee") { p.state = "idle"; p.path = null; }
+          if (p.surrender) { p.surrender = false; p.surrenderT = 0; p.poseHandsUp = false; if (p.state === "surrender") p.state = "idle"; }
+        }
+      }
       const busy = p.rage || p.state === "flee" || p.state === "fight" || p.surrender || (p.fear || 0) > 3 || p.restraint;
       const post = postOf(p);
       if (busy || !post || k.alarmed && t - (p._keepAlarmAt || 0) < 40) { k.calmT = 0; return false; }
@@ -324,6 +352,7 @@
       if (k.calmT < 12) return false;
       if (d2(p, post.x, post.z) < 0.6 * 0.6) {
         p._keepFree = false; p.moveOrder = null; p.state = "idle"; k.mode = "post"; k.held = false; k.fear = 0;
+        if (k.gunDown) { k.gunDown = false; p.armed = true; }
         if (CBZ.cityPedFaceYaw && post.face != null) CBZ.cityPedFaceYaw(p, post.face, 1.5);
         return true;
       }
@@ -353,9 +382,29 @@
     if (cov) {
       k.held = true; k.heldAt = t; k.alarmRolled = false;
       if (p.armed && p.poseAimBack) {
-        // THE STAND-OFF ENDS. He levelled his own; hold yours on him and he fires.
+        // THE STAND-OFF ENDS: he backs down, or he fires. He levelled his own
+        // the moment yours came up; a second later he has measured you. Close
+        // in over his own counter, or with your men's guns on him too, he
+        // lays it down and his hands come up (and then he is a man held up
+        // like any other: the back room's key, the safe, the till). Otherwise
+        // hold yours on him and he fires. (He always fired: an armed keeper
+        // could not be held up at all.)
         k.standoff += dt;
         if (k.standoff > 0.6 && once(k, "standoff", 10)) say(p, pick(["Put it down. Now.", "You don't want to do this here."], p));
+        if (k.standoff > 1.3 && k.yields == null) {
+          const nerve = p.nerve != null ? p.nerve : 0.5;
+          const close = d2(p, Pl.pos.x, Pl.pos.z) < 4.5 * 4.5;
+          const odds = 0.5 + (crewCovered(p) ? 0.35 : 0) + (close ? 0.15 : 0) - nerve * 0.35;
+          const roll = ((p.slice || 0) * 0.291 + t * 0.37) % 1;
+          k.yields = roll < odds;
+        }
+        if (k.yields) {
+          p.armed = false; p._holster = false; k.gunDown = true;
+          p.poseAimBack = false; p.surrender = true; p.surrenderT = 2; p.poseHandsUp = true; p.state = "surrender";
+          k.fear = Math.max(k.fear, 0.6);
+          say(p, pick(["Okay! Okay. It's down. It's down.", "Alright! I'm putting it down."], p), 2.4);
+          return false;
+        }
         if (k.standoff > 2.6) { fight(p, k); return false; }
         return false;
       }
@@ -369,6 +418,9 @@
       return false;
     }
     k.standoff = Math.max(0, k.standoff - dt);
+    if (k.standoff <= 0) k.yields = null;
+    // the gun he laid down goes back under the counter once it is long over
+    if (k.gunDown && t - k.lastCovered > 25 && !k.alarmed) { k.gunDown = false; p.armed = true; }
     // HELD UP, AND YOU LOOKED AWAY. A keeper with any nerve hits the button.
     if (k.held && !k.alarmed) {
       const away = t - k.lastCovered;
@@ -396,6 +448,14 @@
   CBZ.cityKeeper = {
     think: think,
     demandVault: demandVault, emptyDrawer: emptyDrawer,
+    // walk a held-up keeper somewhere with his hands up (city/gunstore.js: the
+    // clerk who opened the back room goes in ahead of you, to the safe)
+    walkTo: function (p, pts, done) {
+      if (!p || p.dead || !pts || !pts.length) return false;
+      const k = K(p); free(p); k.asideDone = done || null;
+      k.mode = "aside"; k.asideT = 0; k.asideMax = 20; k.asideWay = pts.slice(1); k.aside = pts[0];
+      return true;
+    },
     state: function (p) { const k = p && p._keep; return k ? { mode: k.mode, fear: +k.fear.toFixed(2), held: k.held, alarmed: k.alarmed, free: !!p._keepFree, demand: k.demand } : null; },
   };
 

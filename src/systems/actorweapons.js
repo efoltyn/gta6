@@ -2477,14 +2477,29 @@
   // to carry it in the ready pose so it never droops to the hip while standing
   // or walking. "Out" respects intent: holstered/lowered/hidden actors are
   // skipped (and kept stowed) so escalation cues and wall-stows actually read.
-  function poseList(list, dt) {
+  // (a phone: an armed body not drawn and past FAR_D of the eye runs the
+  // discipline one frame in four on the time it banked; nothing of it shows)
+  const FAR_D2 = 100 * 100;
+  let _awFrame = 0;
+  function poseList(list, dt0) {
     if (!list) return;
+    const phone = !!CBZ.isMobileDevice && CBZ.CONFIG.PHONE_AW_STRIDE !== false, cam = CBZ.camera && CBZ.camera.position;
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
       if (!a || a.dead || a._parked || (a.ko > 0) || !a.armed) continue;
       // A culled ped's group is out of the scene (city/peds.js removes it);
       // posing arms nobody can see is a walk over ~700 actors for nothing.
       if (a.culled) continue;
+      let dt = dt0;
+      if (phone && cam && a.pos && a.group && a.group.visible === false) {
+        const fx = a.pos.x - cam.x, fz = a.pos.z - cam.z;
+        if (fx * fx + fz * fz > FAR_D2) {
+          a._awBank = (a._awBank || 0) + dt0;
+          if (((i + _awFrame) & 3) !== 0) continue;
+          dt = a._awBank;
+        }
+      }
+      a._awBank = 0;
       // character.js owns every limb during a vault/mantle. A late gun-ready
       // overwrite would pin one arm forward and erase the hand plant/grab that
       // makes the obstacle contact physically readable.
@@ -2534,6 +2549,7 @@
   }
   if (CBZ.onUpdate) CBZ.onUpdate(36, function (dt) {
     if (!CBZ.game || CBZ.game.mode !== "city") return;
+    _awFrame++;
     poseList(CBZ.cityPeds, dt); poseList(CBZ.cityCops, dt);
   });
 

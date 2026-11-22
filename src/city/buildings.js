@@ -2664,8 +2664,183 @@
     }
 
   }
-  // PUBLIC primitive for city/fracture.js (ledger/caps/persistence live there)
-  CBZ.cityCarveWall = carveHole;
+  // PUBLIC primitive for city/fracture.js (ledger/caps/persistence live there).
+  // (a carve near a shell whose upper storeys are parked wakes them first: the
+  // wall it is aimed at has to be in the broadphase to be found)
+  CBZ.cityCarveWall = function (x, y, z, r, opts) {
+    if (CBZ.cityShellsWakeNear) { try { CBZ.cityShellsWakeNear(x, z, (r || 1.2) + 4); } catch (e) {} }
+    return carveHole(x, y, z, r, opts);
+  };
+
+  /* ---- A FAR SHELL'S UPPER STOREYS ARE ONE SHELL, NOT 2,500 BOXES (phone) --
+     Measured at the downtown spawn on the phone profile: ~39k of the city's
+     ~43k colliders stood within 450 m of the player, ~31k of them short,
+     thin, storey-banded pieces of building shells: the facade's piers, sills
+     and lintels between windows and the interior partitions, ~67 a storey
+     (a 38-storey tower: 2,554). Above the street storey nobody reaches them
+     unless he is at that building.
+     So on a phone a shell the player and the eye are both more than PARK_M
+     from keeps its STREET STOREY and its roof whole and swaps everything
+     above the street storey (every collider banded above FH whose stand-in
+     is hidden, glass or ref-less: the static structure; anything drawn, a
+     door, a lift, furniture keeps its own) for its OUTER SHELL: four boxes
+     on its four faces from the top of the street storey to the parapet, so
+     what flies, falls or drives into it from outside still stops at its
+     face. Inside UNPARK_M (or when a carve or a collapse reaches it) the
+     pieces come back exactly as they were and the shell boxes go. The
+     pieces are the same records throughout (taken out of the broadphase
+     and put back, never rebuilt), the line-of-sight blockers and the
+     drawn building are untouched, and a shell that was carved or collapsed
+     is never parked again. ?cfg_PHONE_SHELL_PARK=0 parks nothing.
+     (The pieces' hidden meshes stay: line of sight (core/losgrid.js reads
+     their boxes off the meshes and hands the mesh back as the hit), the
+     carve (core/batch.js keys each wall's slice of the merged shell by its
+     mesh), the collapse (city/collapse.js reads the merged shell's walls
+     and their geometry) and the bullet decals (systems/gore.js raycasts the
+     collider's mesh) all read them.) */
+  const PARK_M = 135, UNPARK_M = 115, SHELL_SCAN = 10;
+  const SHELL_UD = Object.freeze({});
+  const SHELL_MAT = Object.freeze({ transparent: false, opacity: 1, visible: true });
+  function ShellRef(group) { this.parent = group; }
+  ShellRef.prototype.isShellRef = true;
+  ShellRef.prototype.visible = false;
+  ShellRef.prototype.name = "shell-proxy";
+  ShellRef.prototype.material = SHELL_MAT;
+  ShellRef.prototype.userData = SHELL_UD;
+  const shellPark = { root: null, list: [], cursor: 0, idx: null, idxAt: 0, st: new Map(), stats: { parked: 0, unparked: 0, colsOut: 0 } };
+  function shellOn() {
+    return !!(CBZ.isMobileDevice && CBZ.CONFIG.PHONE_SHELL_PARK !== false && CBZ.game && CBZ.game.mode === "city" && CBZ.colliderRemoveMany && CBZ.colliderAddMany);
+  }
+  function inScene(o) { let r = o; while (r && r.parent) r = r.parent; return r === CBZ.scene; }
+  // the shells inside a streamed job are the streamer's to park (core/citystream.js)
+  function jobTops() {
+    const s = new Set(), J = CBZ.streamJobs || [];
+    for (let i = 0; i < J.length; i++) { const objs = J[i].objs; if (objs) for (let k = 0; k < objs.length; k++) if (objs[k] && objs[k].o) s.add(objs[k].o); }
+    return s;
+  }
+  function shellOfRef(ref) {
+    for (let p = ref, n = 0; p && n < 8; p = p.parent, n++) if (p.userData && p.userData.bld) return p.userData.bld;
+    return null;
+  }
+  // which shell owns each parkable collider: one walk over the broadphase, once
+  function indexShells() {
+    const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+    const shells = (root && root.userData && root.userData.shells) || [];
+    const tops = jobTops();
+    const byShell = new Map();
+    const owner = new Map();
+    for (const b of shells) {
+      if (!b || !b.group || !(b.storeys >= 2) || !(b.FH > 0)) continue;
+      let streamed = false;
+      for (let p = b.group; p; p = p.parent) if (tops.has(p)) { streamed = true; break; }
+      if (streamed || !inScene(b.group)) continue;
+      const e = b.group.rotation;
+      if (Math.abs(e.y) > 1e-4 || Math.abs(e.x) > 1e-4 || Math.abs(e.z) > 1e-4) continue;   // the outer shell is an axis-aligned box
+      byShell.set(b, []);
+      for (const c of b.colliders || []) if (c && !c.ref) owner.set(c, b);
+    }
+    const doors = new Set();
+    for (const b of byShell.keys()) for (const dr of b.doors || []) if (dr && dr.col) doors.add(dr.col);
+    const cols = CBZ.colliders;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || c.y0 == null || c.y1 == null || c._cbzSub || c._cbzS || c.mover || doors.has(c)) continue;
+      let b = null;
+      if (!c.ref) b = owner.get(c) || null;
+      else if (c.ref.isGlassRef || (c.ref.isMesh && c.ref.visible === false)) b = shellOfRef(c.ref);
+      if (!b) continue;
+      const L = byShell.get(b);
+      if (!L || c.y0 < b.FH - 0.05) continue;          // the street storey stays whole
+      L.push(c);
+    }
+    shellPark.list = [];
+    byShell.forEach(function (L, b) { if (L.length >= 24) { shellPark.list.push(b); shellPark.st.set(b, { b: b, cols: L, shell: null, parked: false, never: false }); } });
+    shellPark.root = root;
+  }
+  function outerShell(b) {
+    const T = Math.max(0.2, b.wt || 0.3), x0 = b.ox - b.w / 2, x1 = b.ox + b.w / 2, z0 = b.oz - b.d / 2, z1 = b.oz + b.d / 2;
+    const y0 = b.FH, y1 = (b.h || b.storeys * b.FH) + (b.parapetH || 1);
+    const ref = new ShellRef(b.group);
+    const box = function (a, c, e, f) { return { minX: a, maxX: c, minZ: e, maxZ: f, y0: y0, y1: y1, ref: ref, noBreach: true, noCam: true, noStep: true, _shellProxy: true }; };
+    return [box(x0, x1, z0, z0 + T), box(x0, x1, z1 - T, z1), box(x0, x0 + T, z0, z1), box(x1 - T, x1, z0, z1)];
+  }
+  function rectD2(b, x, z) {
+    const dx = Math.max(0, Math.abs(x - b.ox) - b.w / 2), dz = Math.max(0, Math.abs(z - b.oz) - b.d / 2);
+    return dx * dx + dz * dz;
+  }
+  function unparkShell(S, never) {
+    if (never) S.never = true;
+    if (!S.parked) return;
+    S.parked = false;
+    if (S.shell) { CBZ.colliderRemoveMany(S.shell); S.shell = null; }
+    // the pieces come back as they were: one a carve took down, a collapse
+    // filed, or whose mesh left the shell, stays out
+    const back = [];
+    for (let i = 0; i < S.cols.length; i++) {
+      const c = S.cols[i];
+      if (c._cbzGone || c._cbzSub) continue;
+      const r = c.ref;
+      if (r && (r._breached || (r.isMesh && !r.parent))) continue;
+      back.push(c);
+    }
+    CBZ.colliderAddMany(back);
+    shellPark.stats.unparked++;
+  }
+  function parkShell(S, drop, add) {
+    if (S.parked || S.never) return;
+    S.parked = true;
+    S.shell = outerShell(S.b);
+    for (let i = 0; i < S.cols.length; i++) drop.add(S.cols[i]);
+    for (let i = 0; i < S.shell.length; i++) add.push(S.shell[i]);
+    shellPark.stats.parked++;
+  }
+  // wake every parked shell within r of (x, z) for good (a carve, a collapse)
+  CBZ.cityShellsWakeNear = function (x, z, r) {
+    if (!shellPark.list.length) return;
+    const r2 = r * r;
+    for (const b of shellPark.list) { if (rectD2(b, x, z) > r2) continue; const S = shellPark.st.get(b); if (S) unparkShell(S, true); }
+  };
+  CBZ.cityShellWake = function (b) { const S = b && shellPark.st.get(b); if (S) unparkShell(S, true); };
+  CBZ.cityShellParkAudit = function () {
+    let parked = 0, out = 0;
+    shellPark.st.forEach(function (S) { if (S.parked) { parked++; out += S.cols.length; } });
+    return Object.assign({ shells: shellPark.list.length, parkedNow: parked, piecesOut: out }, shellPark.stats);
+  };
+  let _shellT = 0;
+  if (CBZ.onUpdate) CBZ.onUpdate(37.95, function (dt) {
+    if (!shellOn()) {
+      // (switched off, or not the city: everything parked comes back)
+      if (shellPark.st.size) { shellPark.st.forEach(function (S) { if (S.parked && S.b.group && inScene(S.b.group)) unparkShell(S); }); }
+      return;
+    }
+    const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+    if (shellPark.root !== root) { shellPark.st.clear(); shellPark.list = []; shellPark.root = null; shellPark.idxAt = 0; }
+    if ((_shellT -= dt) > 0) return;
+    _shellT = 0.25;
+    // the index waits for the world to settle (the batch, the street furniture)
+    if (!shellPark.root) {
+      if (!(CBZ.game.elapsed > 3) || !root) return;
+      indexShells();
+      return;
+    }
+    const P = CBZ.player, cam = CBZ.camera;
+    if (!P || !P.pos) return;
+    const px = P.pos.x, pz = P.pos.z, cx = cam ? cam.position.x : px, cz = cam ? cam.position.z : pz;
+    const L = shellPark.list;
+    const drop = new Set(), add = [];
+    const n = Math.min(L.length, SHELL_SCAN);
+    for (let k = 0; k < n; k++) {
+      if (shellPark.cursor >= L.length) shellPark.cursor = 0;
+      const b = L[shellPark.cursor++], S = shellPark.st.get(b);
+      if (!S || S.never) continue;
+      // a shell that left the world (demolished, swapped out) is forgotten
+      if (!b.group || !inScene(b.group)) { if (S.parked) { S.parked = false; if (S.shell) CBZ.colliderRemoveMany(S.shell); S.shell = null; } S.never = true; continue; }
+      const d2 = Math.min(rectD2(b, px, pz), rectD2(b, cx, cz));
+      if (S.parked && d2 < UNPARK_M * UNPARK_M) unparkShell(S);
+      else if (!S.parked && d2 > PARK_M * PARK_M) parkShell(S, drop, add);
+    }
+    if (drop.size) { shellPark.stats.colsOut += CBZ.colliderRemoveMany(drop); CBZ.colliderAddMany(add); }
+  });
   /* THE FACADE LEDGER, in numbers a report can print. carveDbg already existed
      for one-shot debugging; this is the cumulative read a before/after gate
      needs: how many openings are standing, how much facade area is actually
@@ -3289,6 +3464,9 @@
   // frame to treat an open leaf as a passable gap. Read-only consumer; the
   // door sim above remains the sole writer.
   CBZ.cityDoorsGet = function () { return cityDoors; };
+  // the hinged street door, for a builder that lays its own walls round a
+  // doorway (city/govcomplex.js's motor pools): same leaf, collider, opener
+  CBZ.cityDoorPanel = makeDoorPanel;
 
   // Business catalogue. `sign` = awning/sign colour; `name` shown on the
   // door + HUD; `kind` = the shop kind city/shops.js switches on.
@@ -8654,7 +8832,10 @@
           const st = CBZ.buildFuelStation({ parent: root, x: lot.cx, z: lot.cz, y: 0, rotY: Math.atan2(-nOut[0], -nOut[1]),
             frontage: fr - 1.0, depth: dp - 1.0, deck: 0.06, walkRise: 0.15, apron: 0 });
           lot.kind = shop.kind;
-          lot.building = { shop, name: shop.name, sign: shop.sign, side, door: st.door, vendorSpot: st.vendor,
+          // the mainland's door point is 1.6 m inside, its normal inward
+          // (doorInfo); the station hands back the walk 1.6 m outside the store
+          const sd = { x: st.door.x - st.door.nx * 3.2, z: st.door.z - st.door.nz * 3.2, nx: -st.door.nx, nz: -st.door.nz };
+          lot.building = { shop, name: shop.name, sign: shop.sign, side, door: sd, vendorSpot: st.vendor,
             gas: true, station: st.group, fuelStation: true, w: fr - 1.0, d: dp - 1.0 };
           placed.push(lot);
           continue;

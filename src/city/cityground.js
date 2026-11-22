@@ -414,6 +414,14 @@
         g = 1; wear = Math.max(wear, 0.5); tone = 0.4;
         if (dB < 1.1) g = 0;            // the perimeter walk every block of flats has
         break;
+      case "vacant":                    // a plot nobody built on: rough grass, bald in patches, a track across it
+        g = 1; tone = 0.5;
+        wear = Math.max(wear, 0.2 + 0.42 * sm(clamp01((vn(x / 4.3, z / 4.3, 97) - 0.4) / 0.4)));
+        if (o.track) {                  // the short cut people walk across it
+          const dd = Math.abs(lx * 0.6 - lz * 0.8 * o.track) + (vn(x / 2.1, z / 2.1, 98) - 0.5) * 0.6;
+          wear = Math.max(wear, 0.9 * Math.exp(-(dd * dd) / 0.3));
+        }
+        break;
       default:                          // residential
         g = 1; tone = 0.35;
         if (dB < 0.75) { g = 0; e = 1; tone = 0.03; }                       // planting bed at the facade
@@ -506,6 +514,8 @@
       // poorer streets wear harder; a crew's building lets its yard go
       wear: 0.08 + (1 - D.wealth) * 0.22 + (lot.kind === "abandoned" ? 0.4 : 0),
       park: null, b: null, face: faceOf(lot, b), front: 0, walk: null,
+      // a vacant plot: a short cut worn across it on some (+1 / -1 its diagonal)
+      track: D.kind === "vacant" ? [0, 0, 1, -1][(hash3(Math.round(lot.cx), Math.round(lot.cz), 99) * 4) | 0] : 0,
     };
     if (b && b.park) {
       const w = lot.w || 30, d = lot.d || 30, bo = Math.min(w, d) * 0.23;
@@ -651,6 +661,7 @@
      Until then it reads as plain concrete — out past the draw-in distance. */
   const queue = [];
   const BUDGET_MS = 3;
+  let passRan = false;              // this world's order-68 paint has run
   function enqueue(state) {
     if (queue.indexOf(state) < 0) { state.cursor = 0; state.painted = false; queue.push(state); }
   }
@@ -843,7 +854,7 @@
     const M = dataTex(THREE, new Uint8Array(NS * NS * 4), NS, false, true);
     const state = { S, M, x0, z0, cell, N: NS, main, lots: ctx.lots || [], districts: ctx.districts || [] };
     watchUpload(state);
-    if (main) { live = state; states = [state]; }     // a new world: the downtown is laid first
+    if (main) { live = state; states = [state]; passRan = false; }     // a new world: the downtown is laid first
     else states.push(state);
     // The landmass pass (order 68) paints once buildings exist; painting the
     // bare lots first as well would only double the boot cost. Without the
@@ -852,6 +863,10 @@
     // same pass, when approach.js has laid its driveways; one built on its
     // own (a studio page) paints at once, its buildings already stand.
     if (!CBZ.addLandmass || (!main && ctx.paintNow !== false)) paint(state);
+    // A TOWN THAT ARRIVES AFTER THAT PASS (a streamed town, built when it is
+    // first seen) was waiting for a pass that had already run: its square,
+    // yards and lawns stayed plain concrete for good. It joins the queue.
+    else if (!main && passRan) enqueue(state);
 
     const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, envMapIntensity: 0.2 });
     mat.name = "city-ground";
@@ -955,6 +970,7 @@
   if (CBZ.addLandmass) CBZ.addLandmass(function cityGroundPaint(city) {
     if (live && city && city.lots) live.lots = city.lots;
     queue.length = 0;
+    passRan = true;
     for (const st of states) {
       if (st.main) paint(st);          // the downtown: now, it is where you are
       else enqueue(st);                // each town: after the load, a few parcels a frame

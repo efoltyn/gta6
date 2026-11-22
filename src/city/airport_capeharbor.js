@@ -14,7 +14,7 @@
    WHERE, and why there. Cape Harbor is the port mini-city (city/minicities.js
    authored anchor 430,175). The field sits on its own reclaimed ground beyond
    the town's far shore, on the SAME world-layout dial as the town — author
-   the anchor once, and if `world/layout.js` slides Cape Harbor, its airport
+   the anchor once, and if `world/worldplan.js` moves Cape Harbor, its airport
    slides with it and no number in this file changes. The footprint was
    measured against every neighbour at the live stage-5 offsets, and against
    the two CAUSEWAYS that cross this quarter of the map — which is the check

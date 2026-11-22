@@ -2719,7 +2719,7 @@
           // losses on the abstract branch are real bodies too
           for (let i = 0; i < RAID.agents.length && i < 2; i++) {
             const a = RAID.agents[i];
-            if (a && !a.dead && CBZ.cityKillPed) { try { CBZ.cityKillPed(a, { fatal: true }, "shot"); } catch (e) {} }
+            if (a && !a.dead && CBZ.cityKillPed) { try { CBZ.cityKillPed(a, { fatal: true, byPlayer: false }, "shot"); } catch (e) {} }
           }
         }
         finishRaid(won, false);

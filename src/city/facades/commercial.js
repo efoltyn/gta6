@@ -120,8 +120,8 @@
         }
         F.cladAround(ctx, f, BASEH, rTop, holes, SKIN, PANEL);
         for (const h of holes) F.box(ctx, f, (h.t0 + h.t1) / 2, (h.y0 + h.y1) / 2, h.t1 - h.t0, h.y1 - h.y0, 0.02, GL, -0.06);
-        // ribs every 1.2 m, broken round the ribbon glass
-        const nR = Math.max(2, Math.round(f.span / 1.2));
+        // ribs every 1.2 m, broken round the ribbon glass (every 3.6 m on a phone)
+        const nR = Math.max(2, Math.round(f.span / (ctx.lite ? 3.6 : 1.2)));
         for (let i = 1; i < nR; i++) {
           const t = -f.span / 2 + i * f.span / nR;
           let y = BASEH;
@@ -160,11 +160,11 @@
       F.signPanel(ctx, df, PH - 0.35 - sH / 2, sH, PW - 1.4, PP + 0.03);
       for (const sg of [-1, 1]) F.rib(ctx, df, sg * (PW / 2 - 0.25), cY + 0.12, PH, 0.5, PP + 0.04, F.shade(accent, 0.8));
       // the ACM joints on the brand wall: horizontal every 0.6 m, vertical 1.2 m
-      for (let y = cY + 0.12 + 0.6; y < PH - 0.2; y += 0.6) F.box(ctx, df, 0, y, PW - 1.0, 0.025, PP + 0.012, F.shade(accent, 0.62));
+      if (!ctx.lite) for (let y = cY + 0.12 + 0.6; y < PH - 0.2; y += 0.6) F.box(ctx, df, 0, y, PW - 1.0, 0.025, PP + 0.012, F.shade(accent, 0.62));
       const nV = Math.max(2, Math.round((PW - 1) / 1.2));
-      for (let i = 1; i < nV; i++) F.rib(ctx, df, -(PW - 1) / 2 + i * (PW - 1) / nV, cY + 0.12, PH - 0.05, 0.025, PP + 0.012, F.shade(accent, 0.62));
+      if (!ctx.lite) for (let i = 1; i < nV; i++) F.rib(ctx, df, -(PW - 1) / 2 + i * (PW - 1) / nV, cY + 0.12, PH - 0.05, 0.025, PP + 0.012, F.shade(accent, 0.62));
       // the panel joints on the plain fascia either side of the portal
-      for (const sg of [-1, 1]) {
+      if (!ctx.lite) for (const sg of [-1, 1]) {
         const a = PW / 2, b = df.span / 2;
         const n = Math.max(1, Math.round((b - a) / 1.2));
         for (let i = 1; i < n; i++) F.rib(ctx, df, sg * (a + i * (b - a) / n), fas0, parTop, 0.025, SKIN + 0.052, JOINT);
@@ -209,11 +209,11 @@
         F.cladAround(ctx, f, 0, parTop, holes, SKIN, block);
         for (const h of holes) {
           F.box(ctx, f, (h.t0 + h.t1) / 2, (h.y0 + h.y1) / 2, h.t1 - h.t0, h.y1 - h.y0, 0.02, GL, -0.06);
-          for (let i = 1; i < 5; i++) F.rib(ctx, f, h.t0 + i * (h.t1 - h.t0) / 5, h.y0, h.y1, 0.03, SKIN + 0.04, STEEL);
+          if (!ctx.lite) for (let i = 1; i < 5; i++) F.rib(ctx, f, h.t0 + i * (h.t1 - h.t0) / 5, h.y0, h.y1, 0.03, SKIN + 0.04, STEEL);
           F.box(ctx, f, (h.t0 + h.t1) / 2, h.y0 - 0.06, h.t1 - h.t0 + 0.2, 0.12, SKIN + 0.07, F.shade(block, 0.9));
         }
         // coursing: a bed joint every 0.4 m, broken round the windows
-        for (let y = 0.4; y < parTop - 0.15; y += 0.4) {
+        for (let y = 0.4; !ctx.lite && y < parTop - 0.15; y += 0.4) {
           const cuts = holes.filter((h) => y > h.y0 - 0.02 && y < h.y1 + 0.02).map((h) => [h.t0 - 0.02, h.t1 + 0.02]).sort((a, b) => a[0] - b[0]);
           let a = -f.span / 2;
           for (const c of cuts) { if (c[0] - a > 0.1) F.box(ctx, f, (a + c[0]) / 2, y, c[0] - a, 0.02, SKIN + 0.008, JOINT); a = c[1]; }

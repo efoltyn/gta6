@@ -2333,6 +2333,37 @@
             if (ok) { homeSide = sides[s]; homeU0 = u0; homeN = n; }
           }
     }
+    /* A PARTY WALL IS NOT BUILT ACROSS THE WAY IN. A flat is kept where its
+       front door is walkable, but the wall between two kept flats stood
+       wherever the bay boundary fell, and on a plate whose run splits into
+       an even number of bays that boundary is the run's centre: the street
+       door's centre line. The ground storey's lobby then had a partition
+       from the front door to the corridor down the middle of its entrance
+       aisle (measured, the brutalist tower at -78,-570). So a flat is also
+       kept only where the party-wall lines at both its ends are clear of
+       the entrance aisle; the bays either side of a blocked line stay open
+       lobby, and the next flat out is closed off as any other gap is.
+       (A stair core or lift chase on the line is not a reason: the run is
+       clipped round those, as before.) */
+    const shaftHit = function (x, z) {
+      const R = (h.b.shaftRects || []).concat(h.b.keepRects || []);
+      for (let i = 0; i < R.length; i++) { const q = R[i]; if (x > q.x0 - 0.3 && x < q.x1 + 0.3 && z > q.z0 - 0.3 && z < q.z1 + 0.3) return true; }
+      return false;
+    };
+    const lineOk = { "-1": [], "1": [] };
+    for (let s = 0; s < sides.length; s++) {
+      const side = sides[s], key = side < 0 ? "-1" : "1";
+      const c0 = side < 0 ? crossLo + 0.5 : cHi + 0.3, c1 = side < 0 ? cLo - 0.3 : crossHi - 0.5;
+      for (let k = 1; k < units; k++) {
+        const at = runLo + k * UW;
+        let ok = true;
+        for (let c = c0; c <= c1 + 1e-6 && ok; c += 0.5) {
+          const q = P(at, c);
+          if (!h.clear(q.x, q.z, 0.1) && !shaftHit(q.x, q.z)) ok = false;
+        }
+        lineOk[key][k] = ok;
+      }
+    }
     for (let u = 0; u < units; u++) {
       const a = runLo + u * UW, b2 = a + UW;
       const mid = (a + b2) / 2;
@@ -2341,7 +2372,9 @@
         const side = sides[s], key = side < 0 ? "-1" : "1";
         const crossAt = side < 0 ? cLo : cHi;
         const dp = P(mid, crossAt);
-        if (!inRect(r, dp.x, dp.z, 0.2) || !h.clear(dp.x, dp.z, 0.8)) { kept[key][u] = false; continue; }
+        if (!inRect(r, dp.x, dp.z, 0.2) || !h.clear(dp.x, dp.z, 0.8) ||
+            (!(homeN && side === homeSide && u >= homeU0 && u < homeU0 + homeN) &&
+             ((u > 0 && !lineOk[key][u]) || (u < units - 1 && !lineOk[key][u + 1])))) { kept[key][u] = false; continue; }
         kept[key][u] = true; live++;
         if (homeN && side === homeSide && u >= homeU0 && u < homeU0 + homeN) {
           if (u !== homeU0) continue;                                // the run was built with its first bay

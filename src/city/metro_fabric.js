@@ -1352,9 +1352,10 @@
       v.trim = pick(PAL.trim, 642);
       v.vW = [0, 0, 1, 3][(h(643) * 4) | 0];
     } else if (b.type === "ware") {
-      const brick = b.style === "brick" || (kind === "powerhouse") || h(650) < 0.3;
+      const brick = b.style === "brick" || (kind === "powerhouse") || (kind !== "elevator-head" && h(650) < 0.3);
       v.style = brick ? "brick" : "metal";
-      v.wall = brick ? aged(pick(PAL.brick, 651), era) : pick(PAL.panel.concat([0x8c9296, 0x9a8f7c, 0x7a8a7e]), 651);
+      // (a headhouse is galvanised sheet, weathered: not the concrete of the bins)
+      v.wall = brick ? aged(pick(PAL.brick, 651), era) : kind === "elevator-head" ? pick([0xa3a8aa, 0x979ea1, 0xadb0ac, 0x8e979b], 651) : pick(PAL.panel.concat([0x8c9296, 0x9a8f7c, 0x7a8a7e]), 651);
       v.vH = kind === "powerhouse" ? 3 : 0;
     } else if (b.type === "tank" || b.type === "silo") {
       if (kind === "stack") { v.stack = true; v.wall = aged(pick(PAL.brick, 660), era); }
@@ -1828,6 +1829,63 @@
     return ridge;
   }
 
+  /* A GRAIN ELEVATOR'S HEADHOUSE (city/metroplan.js grainElevator, the one
+     plan every elevator on the map comes from). A steel-clad shaft over the
+     silos: blank corrugated cladding on its girts all the way up, the truck
+     doors of the drive-through pit at its foot on both ends, the narrower
+     head floor on top with its one band of small windows, the bucket leg
+     standing up its back, and the enclosed conveyor gallery that runs from
+     the shaft out over the silo tops to the far end of the bins. It was a
+     shed 48 m tall (one "storey" with a band of clerestory glass at the top
+     and loading docks along the foot) in the towns, and a twelve-storey
+     office in the metros. About as many quads as the shed's parapet and
+     roof plant; one more part of the tile's merged draw. */
+  function headhouse(P, b) {
+    frame(0, 0, 0);
+    const hw = b.w / 2, hd = b.d / 2, H = b.h, yE = GY + H, seed = seedOf(b), deck = deckOf(b);
+    const alongX = hw >= hd;                         // the long side runs across the silo rows
+    const ends = alongX ? [1, 3] : [0, 2];           // the short faces: the drive-through pit
+    const BASE = 6;
+    // the foot: blank cladding, the truck doors in both short faces
+    facade(b.wall, b.glass, M_METAL, BASE, 4.6, 4.5); bSeed = seed;
+    walls(b.x, b.z, hw, hd, FOOT, GY + BASE, function (k) { const e = ends.indexOf(k) >= 0; bFl = e ? F_DOCK | F_DOOR : F_BLANK; if (e) bDoor = 0; });
+    // the shaft: girts and corrugation, no windows
+    facade(b.wall, b.glass, M_METAL, H, 4.5, H); bSeed = seed; bFl = F_BLANK;
+    walls(b.x, b.z, hw, hd, GY + BASE, yE + 0.5);
+    parapet(b.x, b.z, hw, hd, yE, yE + 0.5, 0.25, b.wall, deck);
+    // the head floor: set in from the long faces, its window band under the eave
+    const thw = alongX ? hw - 3 : hw - 1.2, thd = alongX ? hd - 1.2 : hd - 3, yT = yE + 6.5;
+    if (thw > 1 && thd > 1) {
+      facade(shade(b.wall, 1.05), b.glass, M_METAL, 6.5, 2.2, 6.5); bSeed = seed;
+      walls(b.x, b.z, thw, thd, yE, yT);
+      plain(shade(b.wall, 0.82), M_METALROOF); topQuad(b.x, b.z, thw + 0.3, thd + 0.3, yT);
+    }
+    // the bucket leg: a cased shaft up the back face, past the eave into the head
+    {
+      const back = alongX ? { x: b.x, z: b.z - hd - 0.8 } : { x: b.x - hw - 0.8, z: b.z };
+      facade(shade(b.wall, 0.9), 0, M_METAL, H, 1.6, H); bSeed = seed; bFl = F_BLANK;
+      walls(back.x, back.z, alongX ? 1.1 : 0.8, alongX ? 0.8 : 1.1, FOOT, yE + 3.5);
+      plain(shade(b.wall, 0.8)); topQuad(back.x, back.z, alongX ? 1.1 : 0.8, alongX ? 0.8 : 1.1, yE + 3.5);
+    }
+    // the gallery over the bins
+    const g = b.gallery;
+    if (g && isFinite(g.x) && isFinite(g.z)) {
+      const dx = g.x - b.x, dz = g.z - b.z, y0 = GY + g.y - 0.6, y1 = y0 + 2.8;
+      facade(shade(b.wall, 0.95), b.glass, M_METAL, 2.8, 3.0, 2.8); bSeed = seed; bFl = F_BLANK;
+      if (Math.abs(dx) >= Math.abs(dz)) {
+        const x0 = b.x + Math.sign(dx) * (hw - 0.2), x1 = g.x - Math.sign(dx) * 4.5;
+        if (Math.abs(x1 - x0) > 2) walls((x0 + x1) / 2, g.z, Math.abs(x1 - x0) / 2, 1.5, y0, y1);
+        plain(shade(b.wall, 0.8), M_METALROOF); topQuad((x0 + x1) / 2, g.z, Math.abs(x1 - x0) / 2, 1.6, y1);
+      } else {
+        const z0 = b.z + Math.sign(dz) * (hd - 0.2), z1 = g.z - Math.sign(dz) * 4.5;
+        if (Math.abs(z1 - z0) > 2) walls(g.x, (z0 + z1) / 2, 1.5, Math.abs(z1 - z0) / 2, y0, y1);
+        plain(shade(b.wall, 0.8), M_METALROOF); topQuad(g.x, (z0 + z1) / 2, 1.6, Math.abs(z1 - z0) / 2, y1);
+      }
+    }
+    aabb(b.x - hw, b.x + hw, b.z - hd, b.z + hd, 0, yE + 0.5);
+    return yT;
+  }
+
   function warehouse(P, b) {
     frame(0, 0, 0);
     const hw = b.w / 2, hd = b.d / 2, hgt = b.h, brick = b.style === "brick";
@@ -2170,7 +2228,7 @@
       case "office": case "apt": return b.style === "row" ? row(P, Object.assign({}, b, { face: b.face || "s" })) : slab(P, b, mask);
       case "row": return row(P, b);
       case "house": return house(P, b);
-      case "ware": return warehouse(P, b);
+      case "ware": return b.kind === "elevator-head" ? headhouse(P, b) : warehouse(P, b);
       case "tank": case "silo": return tank(P, b);
       case "strip": return strip(P, b);
       case "mall": return mall(P, b);

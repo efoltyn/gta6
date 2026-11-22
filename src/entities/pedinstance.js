@@ -491,7 +491,15 @@
       st.unbindTexture();
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
-      // 2. the page, taller and empty
+      // 2. the page, taller and empty. DISPOSED FIRST: three r187 allocates a
+      // page with texStorage2D, which is immutable, and its texture cache key
+      // has no size in it, so a taller image on the same texture object was
+      // uploaded into the OLD storage. Every page past its first height kept
+      // its first rows, every slot above them was written out of bounds, and
+      // every instance on it sampled a v scaled for a page that did not exist:
+      // the striped torsos and missing trousers on suits, uniforms and every
+      // other paged outfit. A disposed texture is allocated again at its size.
+      P.tex.dispose();
       P.tex.image = { data: null, width: C.PW, height: PH };
       P.tex.needsUpdate = true;
       R.initTexture(P.tex);
@@ -575,6 +583,7 @@
         if (!old && P.gpuOnly) old = readOldRows(R, P);
         if (!old) throw new Error("no rows to carry");
         P.data = null;
+        P.tex.dispose();                         // (immutable storage: see gpuGrow)
         P.tex.image = { data: null, width: C.PW, height: PH };
         P.tex.needsUpdate = true;
         R.initTexture(P.tex);
@@ -593,7 +602,7 @@
         // back; a GPU-only page whose rows could not be read stays as it is,
         // and the class opens a new page instead)
         if (!old) return false;
-        P.data = old; P.gpuOnly = false; P.tex.image = pageImage(C, oldPH, old); P.tex.needsUpdate = true;
+        P.data = old; P.gpuOnly = false; P.tex.dispose(); P.tex.image = pageImage(C, oldPH, old); P.tex.needsUpdate = true;
       }
     }
     if (!P.data) return false;
@@ -601,6 +610,7 @@
     img.data.set(P.data, (PH - P.PH) * C.PW * 4);
     P.data = img.data; P.PH = PH;
     P.cap = C.cols * Math.floor(PH / C.sh);
+    P.tex.dispose();                             // (immutable storage: see gpuGrow)
     P.tex.image = img;
     P.tex.needsUpdate = true;
     pageFullUploads++;
@@ -861,12 +871,16 @@
     return s;
   }
 
-  // vUv lands in the slot: after uv_vertex (which already applied the page's
-  // identity uvTransform), scale+offset by this instance's pinUv
+  // the map's uv lands in the slot: after uv_vertex (which already applied
+  // the page's identity mapTransform), scale+offset by this instance's pinUv.
+  // r187 samples `map` through vMapUv, not vUv (r128 used vUv for both): the
+  // r187 port left this writing vUv only, so every paged body sampled the
+  // WHOLE page, a row of other outfits squeezed onto each box (the striped
+  // suits; a trouser box landing on the page's empty rows drew nothing).
   function pagePatch(shader) {
     shader.vertexShader = "attribute vec4 pinUv;\n" + shader.vertexShader.replace(
       "#include <uv_vertex>",
-      "#include <uv_vertex>\n#ifdef USE_UV\n\tvUv = vUv * pinUv.zw + pinUv.xy;\n#endif");
+      "#include <uv_vertex>\n#ifdef USE_MAP\n\tvMapUv = vMapUv * pinUv.zw + pinUv.xy;\n#endif\n#ifdef USE_UV\n\tvUv = vUv * pinUv.zw + pinUv.xy;\n#endif");
   }
   // the wrapper a paged pool draws: the (shared) base geometry's own buffers,
   // plus this pool's own per-instance slot attribute

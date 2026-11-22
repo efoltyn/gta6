@@ -347,7 +347,16 @@
       return pool[i % pool.length];
     }
 
+    /* A VILLAGE IS HUTS AND MUD-BRICK SHOPS. Its anchors were the towns':
+       a "House" shell (which the facade kit dressed as a Queen Anne or a
+       Tudor villa) and shop shells in brick and plate glass, so Kolo and
+       Nur Hollow were a suburb's corner on a sand plate. A village home is a
+       hut from city/villagekit.js (the bedroll in it is the bed this anchor
+       guarantees), a village shop is the same furnished shell in mud brick
+       (city/facades/adobe.js). siteRng only, as every pick here. */
+    const VILLAGE = flavor === "village";
     function archPrefab(archKey) {
+      if (archKey === "home" && VILLAGE) return { asset: siteRng() < 0.6 ? "hut_round" : "hut_square", _arch: "home" };
       if (archKey === "home") {
         return {
           name: "House", storeys: 1,
@@ -359,9 +368,9 @@
       return {
         name: nameFor(archKey),
         shopKind: a.shopKind,
-        storeys: a.storeys,
+        storeys: VILLAGE ? 1 : a.storeys,
         color: a.color != null ? a.color : pal[a.colorKey] != null ? pal[a.colorKey] : (cfg.palette && cfg.palette.wood) || 0x9c7b4e,
-        opts: a.opts ? Object.assign({}, a.opts) : { retail: true },
+        opts: a.opts ? Object.assign({}, a.opts) : (VILLAGE ? { retail: true, dress: { style: "adobe" } } : { retail: true }),
         lotKind: "shop",
         _arch: archKey,
       };

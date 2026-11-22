@@ -141,7 +141,9 @@
     const b = e.b, root = arenaRoot();
     if (!root || !CBZ.cityMakeBuilding) return false;
     const foot = axisFoot(b);
-    if (!foot || NO_SHELL[b.type] || Math.abs(+b.y || 0) > 0.6 || !(b.h > 3)) return false;
+    // (a grain elevator's headhouse is a steel shaft, not storeys: as a shell
+    // it came out a fifteen-storey office, so it shatters like the silos)
+    if (!foot || NO_SHELL[b.type] || b.kind === "elevator-head" || Math.abs(+b.y || 0) > 0.6 || !(b.h > 3)) return false;
     const fh = b.fh > 2.4 && b.fh < 8 ? +b.fh : 3.2;
     const storeys = Math.max(1, b.st > 0 ? Math.round(b.st) : Math.round(b.h / fh));
     const side = b.face === "n" ? 0 : b.face === "s" ? 1 : 1;

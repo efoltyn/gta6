@@ -262,6 +262,16 @@
     const p = posOf(a);
     if (!p) return;
     if (!early) stats.bodies++;
+    // FAR FROM THE EYE, A WALKING STEP: the skip below, asked before the
+    // exemption list (~20 field reads a body, the net's biggest cost with a
+    // city crowd). Same answer either way: nothing out there is swept.
+    if (!early && a._bnTp !== f && a._bnF === f - 1) {
+      const ox = p.x - cx, oz = p.z - cz;
+      if (ox * ox + oz * oz > FAR_SKIP * FAR_SKIP) {
+        const mx = p.x - a._bnX, mz = p.z - a._bnZ, m2 = mx * mx + mz * mz;
+        if (m2 < WALK_SAFE * WALK_SAFE && !isDown(a) && !(VB && VB.sessionOf && VB.sessionOf(a))) { stats.skipped++; stamp(a, p, f); return; }
+      }
+    }
     if (a._bnTp === f || a._bnF !== f - 1 || exempt(a)) {
       if (early) return;
       if (a._bnTp === f) stats.teleports++;

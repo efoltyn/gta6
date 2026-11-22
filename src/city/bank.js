@@ -906,8 +906,7 @@
     // elevators and planes". So the vault is now a real strongroom built by the
     // BANK_VAULT_V1 pass below (a partition, an opening, a door that swings,
     // shelves, and money you carry out in your hands), and this lobby build
-    // only has to point S.vault at it so cityBankVault()/cityBankVaultGlow()
-    // keep answering for every existing consumer.
+    // only has to point S.vault at it.
     if (lot._vaultRoom) {
       const RV = lot._vaultRoom;
       S.vault = { x: RV.x, z: RV.z, door: RV.leaf, doorMat: RV.doorMat, hub: RV.wheel, room: RV };
@@ -1762,6 +1761,21 @@
     return { inx: axisX ? sgn : 0, inz: axisX ? 0 : sgn };
   };
 
+  /* CAN THIS SHELL HOLD A STRONGROOM? The same numbers cityVaultRoom refuses
+     on (a Gang City shell, door on a `w` or `d` face), so a town decides
+     where its bank goes before it builds one that has no vault. */
+  CBZ.cityVaultFits = function (w, d, wt, doorOnW, tier) {
+    wt = wt != null ? wt : 0.4;
+    const hx = w / 2 - wt, hz = d / 2 - wt;
+    const ok = function (hDeep, hTan) {
+      const rd = Math.min(tier === "reserve" ? 6.2 : 4.6, Math.max(2.9, hDeep * 0.55));
+      const rw = Math.min(tier === "reserve" ? 8.4 : 6.4, Math.max(3.4, hTan * 0.86));
+      return !(hDeep < rd + 2.6 || hTan < rw + 0.4);
+    };
+    if (doorOnW === true) return ok(hz, hx);
+    if (doorOnW === false) return ok(hx, hz);
+    return ok(hz, hx) || ok(hx, hz);
+  };
   CBZ.cityVaultRoom = function (lot, spec) {
     if (CBZ.CONFIG.BANK_VAULT_V1 === false) return null;
     spec = spec || {};
@@ -2154,7 +2168,6 @@
     // truthful to add, so it falls back to what it always said.
     return (L.line || "The vault is locked.") + behind;
   };
-  CBZ.cityVaultCanOpen = function (v) { return !!(v && !v.open && vaultLock(v).open); };
   CBZ.cityVaultTry = function (v) {
     if (!v || v.open) return false;
     const L = vaultLock(v);
@@ -2616,6 +2629,7 @@
     return best;
   };
 
+  let BANK_STATIONS = 0;
   if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
     if (CBZ.CONFIG.BANK_VAULT_V1 === false) return;
     const A = city || CBZ._settlementArena || (CBZ.city && CBZ.city.arena) || null;
@@ -2640,6 +2654,25 @@
         if (!lot || lot.kind !== "bank" || !lot.building || lot.demolished) continue;
         const key = Math.round(lot.cx) + "," + Math.round(lot.cz);
         if (seen.has(key)) continue; seen.add(key);
+        stations += dressBankLot(lot);
+      }
+    };
+    scan(A.shopLots); scan(A.lots);
+    BANK_STATIONS = stations;
+    if (CBZ.cityStaffStations) CBZ.cityStaffStations("bank", stations);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }, 90);
+
+  /* ONE BANK: its strongroom and its people (a teller per window, the
+     manager, the vault guard). The order-90 pass above runs it over every
+     bank the world built; a town bank whose shell is streamed in later
+     (city/towngen.js) runs it when its shell stands (CBZ.cityBankDress).
+     Returns the stations it posted. */
+  function dressBankLot(lot) {
+    const TL = CBZ.cityTill;
+    let stations = 0;
+    {
+      {
         const tier = (TL && TL.vaultTier) ? (TL.vaultTier(lot) || "branch") : "branch";
         let v = null;
         try {
@@ -2655,7 +2688,25 @@
                                        lat: side * 2.2,
                                        till: { src: lot, point: "vault" } });
         } catch (e) { v = null; }
-        if (!v) continue;
+        if (!v) return 0;
+        // A BANK WITHOUT THE FLAGSHIP'S LOBBY (a town's) still has its teller
+        // line: a counter 1.9 m in front of the strongroom, with the staff gap
+        // in line with its door (the flagship's is buildDisplays').
+        const bL = lot.building;
+        if (!v.framed && typeof bL.lbox === "function" && lot !== primaryBankLot(CBZ.city && CBZ.city.arena)) {
+          const hTanL = Math.abs(v.inx) * ((bL.d / 2) - (bL.wt != null ? bL.wt : 0.4)) + Math.abs(v.inz) * ((bL.w / 2) - (bL.wt != null ? bL.wt : 0.4));
+          const ttx = -v.inz, ttz = v.inx;
+          const dep = (v.plx * v.inx + v.plz * v.inz) - 1.9;
+          const cLen = Math.max(2.6, 2 * hTanL - 1.4), GAPW = 1.7, gl = Math.max(-cLen / 2 + GAPW / 2, Math.min(cLen / 2 - GAPW / 2, v.lat || 0));
+          for (const r of [[-cLen / 2, gl - GAPW / 2], [gl + GAPW / 2, cLen / 2]]) {
+            const len = r[1] - r[0];
+            if (len < 0.35) continue;
+            const lm = (r[0] + r[1]) / 2, cx = v.inx * dep + ttx * lm, cz = v.inz * dep + ttz * lm;
+            const cw = Math.abs(ttx) * len + Math.abs(ttz) * 0.7, cd = Math.abs(ttz) * len + Math.abs(ttx) * 0.7;
+            const draw = function () { bL.lbox(cx, 0.55, cz, cw, 1.1, cd, 0x5a4636, { solid: true }); return bL.lbox(cx, 1.12, cz, cw + 0.06, 0.05, cd + 0.06, 0xd8d2c4); };
+            if (CBZ.interiorBounded) CBZ.interiorBounded(bL, draw, "bank-teller-counter"); else draw();
+          }
+        }
         // ---- THE PEOPLE. A hall with a counter, a vault and nobody in it is
         // the "stage set" citystaff.js was written to end. These are POSTS —
         // pure data until you are 170 m away — which is the only reason a real
@@ -2730,11 +2781,18 @@
           }
         }
       }
-    };
-    scan(A.shopLots); scan(A.lots);
-    if (CBZ.cityStaffStations) CBZ.cityStaffStations("bank", stations);
+    }
+    return stations;
+  }
+  // a town bank's shell that stood after the order-90 pass (city/towngen.js)
+  CBZ.cityBankDress = function (lot) {
+    if (CBZ.CONFIG.BANK_VAULT_V1 === false || !lot || lot.kind !== "bank" || !lot.building || lot._vaultRoom) return 0;
+    let n = 0;
+    try { n = dressBankLot(lot); } catch (e) { console.error("[bank late]", e); }
+    if (n && CBZ.cityStaffStations) CBZ.cityStaffStations("bank", (BANK_STATIONS += n));
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-  }, 90);
+    return n;
+  };
 
   /* ---- the vault tick: the swing, the heat glow, and nothing else ------------
      It early-outs on an empty registry, and the visibility gate keeps a city's
@@ -2820,39 +2878,6 @@
   // the dumb generic "Shop here" vendor verb when the branch self-prompts.
   CBZ.cityBankLive = function (lot) { return !!(S.built && S.lot && (!lot || lot === S.lot)); };
   CBZ.cityBankLot = function () { return (S.built && S.lot) || null; };
-  // THE VAULT (contract for heists.js): where is the real steel vault, what is
-  // IN it, and how to light it up mid-crack. heists.js drills THIS spot for
-  // the BANK score so the grab happens at the actual vault, not just "the lot
-  // centre".
-  //
-  // This used to end "the branch's own cash pool is untouched; the heist mints
-  // its own bag" — an honest confession that the score came from nowhere and
-  // that a branch could be drilled every night forever. A TAKE IS A TRANSFER
-  // now: `holds` is the branch's real vault balance out of city/shops.js's
-  // CBZ.cityTill (derived from what the businesses in this district actually
-  // bank — which is why it lands inside the researched $120k-$250k band that
-  // heists.js used to type by hand), and drilling it MOVES that balance. A
-  // branch you emptied on Monday is a thin score on Tuesday.
-  //
-  // BANK_VAULT_V1 UPDATE: the branch no longer has to be BUILT (its lobby is
-  // lazy and only ever attaches to one lot) for this to answer — the vault
-  // rooms are dressed at world build for EVERY bank, so a heist cased at any
-  // branch in the world gets the real steel. `open`/`hp` are published so
-  // heists.js can watch the physical door instead of running a drill meter.
-  CBZ.cityBankVault = function (lot) {
-    const target = lot || (S.built && S.lot) || null;
-    const v = (target && target._vaultRoom) || (VAULTS.length ? VAULTS[0] : null);
-    if (v) {
-      const h = vaultHolds(v);
-      return { x: v.x, z: v.z, rx: v.rx, rz: v.rz, lot: v.lot, tier: v.tier,
-               holds: h.amount || 0, of: h.of || 0, open: !!v.open, hp: Math.max(0, Math.round(v.hp)),
-               hp0: v.hp0, bags: v.bags.length, id: v.id };
-    }
-    if (!(S.built && S.vault)) return null;
-    const TL = CBZ.cityTill;
-    const h = (TL && S.lot) ? TL.holds(S.lot, { point: "vault" }) : null;
-    return { x: S.vault.x, z: S.vault.z, lot: S.lot || null, holds: h ? h.amount : 0, of: h ? h.of : 0, open: false };
-  };
   // what is in the lobby machine right now (and what it holds when full) —
   // one read for a UI, a marker, or anybody who wants to crack it open.
   CBZ.cityBankATM = function () {
@@ -2861,18 +2886,6 @@
     atmService(box);
     const h = CBZ.cityTill.holds(box, {});
     return { holds: h.amount, of: box._atmOf, name: h.name };
-  };
-  // glow the vault door (0..1) while it's being drilled; 0 clears it. Safe no-op
-  // if the branch isn't built (headless / not near a bank).
-  CBZ.cityBankVaultGlow = function (amt, lot) {
-    amt = Math.max(0, Math.min(1, +amt || 0));
-    const v = (lot && lot._vaultRoom) || (S.lot && S.lot._vaultRoom) || (VAULTS.length ? VAULTS[0] : null);
-    // the real door owns its own heat now (vaultBlast writes `glow` off actual
-    // damage) — a caller can still force it, e.g. a scripted set piece.
-    if (v) { v.glow = amt; return; }
-    if (!(S.built && S.vault && S.vault.doorMat && S.vault.doorMat.emissive)) return;
-    const r = Math.round(0x66 * amt), gC = Math.round(0x22 * amt);
-    try { S.vault.doorMat.emissive.setRGB(r / 255, gC / 255, 0); } catch (e) {}
   };
   // headless/harness handles for the in-world actions
   CBZ.cityBankDeposit = function () { return deposit(null); };

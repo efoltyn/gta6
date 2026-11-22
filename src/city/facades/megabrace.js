@@ -99,8 +99,9 @@
           if (y1 - y0 > 0.05) F.band(ctx, f, (y0 + y1) / 2, y1 - y0, 0.05, SPAND, 0.05);
         }
         const a = -f.span / 2 + CW, b = f.span / 2 - CW;
+        // (a phone keeps every other mullion: the module still reads, at half the ribs)
         const n = Math.max(2, Math.round((b - a) / MOD));
-        for (let i = 1; i < n; i++) F.rib(ctx, f, a + (b - a) * i / n, yPod + SP_UP, H, 0.08, 0.13, METAL_L);
+        for (let i = 1; i < n; i++) if (!ctx.lite || (i & 1) === 0) F.rib(ctx, f, a + (b - a) * i / n, yPod + SP_UP, H, 0.08, 0.13, METAL_L);
       }
 
       // ================================================================
@@ -113,7 +114,7 @@
         for (const f of faces) {
           const a = f.span / 2 - CW - BW * 0.3;
           const ya = y0 + 0.6, yb = y1 - 0.6;
-          const n = Math.max(6, Math.round(Math.hypot(2 * a, yb - ya) / 1.4));
+          const n = Math.max(6, Math.round(Math.hypot(2 * a, yb - ya) / (ctx.lite ? 2.8 : 1.4)));   // coarser steps on a phone
           for (const dir of [1, -1]) {
             for (let s = 0; s < n; s++) {
               const u = (s + 0.5) / n, t = dir * (-a + 2 * a * u), y = ya + (yb - ya) * u;

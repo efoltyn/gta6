@@ -255,8 +255,8 @@
     // rects above enclose 92 x 195 m (1.79 ha): fifty body-lengths across, when
     // a real medium-security perimeter runs 300-400 m a side. This rect is the
     // new wire, and NOTHING above it moved to make room — the wings grow AROUND
-    // the authored compound (the held-corner discipline world/layout.js's
-    // stage-5 desert states), so every spawn, route, waypoint and anchor in the
+    // the authored compound (the held-corner discipline the old layout dial's
+    // stage-5 desert followed), so every spawn, route, waypoint and anchor in the
     // old prison is byte-identical and what was the yard's boundary wall is now
     // an internal division fence with four gates cut in it.
     //   92 x 195 (1.79 ha)  ->  248 x 244 (6.05 ha)
@@ -799,13 +799,6 @@
   // pixel-parity pass (artifacts/visual-comparisons/localinst-parity2 + the
   // OFF-vs-OFF noise control) on top of ROUND 3b's measured −30% draw calls.
   if (CBZ.CONFIG.LOCAL_INSTANCING == null) CBZ.CONFIG.LOCAL_INSTANCING = true;
-  // WORLD ENLARGE V2 (map-enlargement stage 2): non-zero world-layout offsets
-  // spread every biome/island/nation radially outward from the mainland and
-  // grow the FLAT terrain contract + continent margin to match. The flag is
-  // READ (and self-defaulted, plus URL-sniffed) in world/layout.js because
-  // that file parses before this one; the line below only documents the
-  // default for the one-line revert: false = the stage-1 compact world.
-  if (CBZ.CONFIG.WORLD_ENLARGE_V2 == null) CBZ.CONFIG.WORLD_ENLARGE_V2 = true;
   // BUILDING MASSING V2 (reference adoption: SkyscraperGenerator tripartite
   // grammar). On → taller city/town towers get a base belt cornice, projecting
   // string courses up the shaft, a two-step roofline cornice, corner pinnacles,
@@ -872,16 +865,6 @@
   // GAPPED wherever the deck crosses a registered road, so bridge walls only
   // exist over real water/gap spans — never across intersections/mouths.
   if (CBZ.CONFIG.BRIDGE_WALL_RULES == null) CBZ.CONFIG.BRIDGE_WALL_RULES = true;
-  // HIGHWAY NETWORK V2 (owner: "completely redo the highway and road system
-  // to make it significantly significantly bigger, and extendable and
-  // natural"). On → city/highwaynet.js builds the 7-route, ~19km continental
-  // highway system as DATA (a named-route table, dial-derived coordinates):
-  // filleted sweeping bends, one merged deck + 2 paint meshes per route,
-  // per-leg drivable city.roads records + "Link" map regions, and country
-  // relief flattened under every corridor (continent.js reads the gate).
-  // The hand-placed causeways keep their decks — routes dock flush into
-  // them. Flip false for today's causeway-only network, byte-identical.
-  if (CBZ.CONFIG.HIGHWAY_NET_V2 == null) CBZ.CONFIG.HIGHWAY_NET_V2 = true;
   // MAP RESERVE V1 (owner's #1 map gripe: "tons of terrain overlaps each other").
   // Each hand-authored landmass (biome floor + feather skirt + mountain massif +
   // island POI) registers its true footprint into a map-level AABB ledger
@@ -904,13 +887,10 @@
   // leaves about 1.2 km of real, driveable country beyond the authored POI
   // union; the old 360 m belt still made an aerial world read like a diorama.
   if (CBZ.CONFIG.CONTINENT_EXPANSION_V2 == null) CBZ.CONFIG.CONTINENT_EXPANSION_V2 = true;
-  // The enlarged (WORLD_ENLARGE_V2) world needs the wider 2200 belt: the
-  // backdrop-relief band rises ≈2050u past the FLAT edge, and FLAT now hugs
-  // the spread region union — a 1200 belt would leave the ring's far side on
-  // unlabeled open-sea cells (reads as "city on mountain" in the terrain
-  // audit). Compact world keeps the authored 1200.
-  if (CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN == null)
-    CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN = (CBZ.CONFIG.WORLD_ENLARGE_V2 !== false) ? 2200 : 1200;
+  // The spread world needs the wider 2200 belt: the backdrop-relief band
+  // rises about 2050u past the FLAT edge, and FLAT hugs the spread region
+  // union, so a 1200 belt would leave the ring's far side on open-sea cells.
+  if (CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN == null) CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN = 2200;
   // PROCEDURAL BACKDROP TERRAIN. Default OFF: decorative horizon mountains are
   // not geography. Real elevation belongs to registered, reachable landmasses
   // (Mount Mercy publishes an actual ground-height field); no fake skyline ring.

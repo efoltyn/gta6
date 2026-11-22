@@ -262,6 +262,13 @@
       cageGate: null, fireDoor: null, car: null, card: null, steak: null,
       flickTubes: [], detLamp: null, coffeeLamp: null,
       now: 0, used: false, gateHeld: false, gateOpen: false, leave: null, _cur: {}, _pose: {}, _there: {}, _nav: {} };
+    // THE BUILDING TAKES ITS OWN GROUND. Whatever site it is given (the
+    // planned one, or the scan below), anything another system already stood
+    // inside its walls (a beach's loungers and towels, a bush, a bench) is
+    // taken out: hidden, its collider dropped, its seat or bed unregistered.
+    // The site is not this file's to choose; its footprint is.
+    clearFootprint(venue);
+    V_clearT = [2, 15, 45];
     const B = (x, y, z, w, h, d, col, ry) => ctx.box(g, x, y, z, w, h, d, ctx.mat(col), ry);
     const wallRun = (x, y, z, w, h, d, col) => { B(x, y, z, w, h, d, col || PAL.wall); ctx.solid(x - w / 2, z - d / 2, x + w / 2, z + d / 2); };
     /* PRECINCT 13 (2026-10-31 rebuild). The shell stays the shell (walls are
@@ -1628,8 +1635,101 @@
      9. UPDATE — distance-gated sim + roster ped drive
      ========================================================== */
   function onTheBlock(lx, lz) { return lx > -18 && lx < 23 && lz > -28 && lz < 17; }
+  /* ---- THE FOOTPRINT: the shell's walls (local x -16..16, z -20..10) plus a
+     metre. Props streamed in after the build are caught by the re-sweeps
+     update() runs a few times early on. */
+  const FOOT = { x0: -17, x1: 17, z0: -21, z1: 11 };
+  let V_clearT = null, clearClock = 0;
+  const _bs = new THREE.Sphere(), _iv = new THREE.Vector3(), _im = new THREE.Matrix4(), _zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  function clearFootprint(venue) {
+    const o = venue && venue.origin, own = venue && venue.group;
+    if (!o) return 0;
+    const x0 = o.x + FOOT.x0, x1 = o.x + FOOT.x1, z0 = o.z + FOOT.z0, z1 = o.z + FOOT.z1;
+    const inF = (x, z) => x > x0 && x < x1 && z > z0 && z < z1;
+    let n = 0;
+    // colliders that are not the precinct's own
+    const L = CBZ.colliders || [];
+    for (let i = L.length - 1; i >= 0; i--) {
+      const c = L[i];
+      if (!c || c.ref === own || c._precinct) continue;
+      const w = c.maxX - c.minX, d = c.maxZ - c.minZ;
+      if (!(w < 14 && d < 14)) continue;                       // a building, a wall run: not a prop
+      if (!inF((c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2)) continue;
+      if (CBZ.colliderRemove) CBZ.colliderRemove(c, i); else L.splice(i, 1);
+      n++;
+    }
+    if (n && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // meshes and instances: props are small; ground, terrain and merged
+    // districts are not touched
+    const scene = CBZ.scene;
+    if (scene && scene.traverse) {
+      scene.traverse(function (m) {
+        if (!m.isMesh || !m.visible || !m.geometry) return;
+        // never the precinct itself, a living body (a rig tags itself dynamic)
+        // or a vehicle
+        for (let q = m; q; q = q.parent) if (q === own || (q.userData && (q.userData.dynamic || q.userData.vehicleDims))) return;
+        const geo = m.geometry;
+        if (m.isInstancedMesh) {
+          let hit = 0;
+          for (let k = 0; k < m.count; k++) {
+            m.getMatrixAt(k, _im);
+            _im.premultiply(m.matrixWorld);
+            _iv.setFromMatrixPosition(_im);
+            if (inF(_iv.x, _iv.z) && _iv.y < 6) { m.setMatrixAt(k, _zero); hit++; }
+          }
+          if (hit) { m.instanceMatrix.needsUpdate = true; n += hit; }
+          return;
+        }
+        if (!geo.boundingSphere) { try { geo.computeBoundingSphere(); } catch (e) { return; } }
+        if (!geo.boundingSphere) return;
+        _bs.copy(geo.boundingSphere).applyMatrix4(m.matrixWorld);
+        if (_bs.radius > 4.5 || _bs.center.y > 6) return;
+        if (!inF(_bs.center.x, _bs.center.z)) return;
+        m.visible = false; m.userData._precinctCleared = true; n++;
+      });
+    }
+    // seats and beds another builder registered inside the walls
+    if (CBZ.propUnregister) {
+      const gone = [];
+      if (CBZ.propSeatsIn) { try { CBZ.propSeatsIn(x0, x1, z0, z1, null, gone); } catch (e) {} }
+      if (CBZ.propNearestBed) {
+        for (let k = 0; k < 24; k++) {
+          const b = CBZ.propNearestBed(o.x, o.z - 5, 24);
+          if (!b || !inF(b.x, b.z) || gone.indexOf(b) >= 0) break;
+          gone.push(b); CBZ.propUnregister([b]);
+        }
+      }
+      const own2 = gone.filter(function (r) { return r && !r._precinct; });
+      if (own2.length) n += CBZ.propUnregister(own2) | 0;
+    }
+    return n;
+  }
+
+  /* THE STATION RECORD. city/police.js's CBZ.cityPoliceStation() returns this
+     whenever the precinct is standing, so the arrest arc (city/wanted.js), the
+     petty release, the jail's fallback anchor and anybody else read ONE
+     record for "the police station": the kerb a unit pulls up at, the door,
+     the walk in (path), the booking desk (Sgt. Kowalczyk's front desk) and
+     the step you are released onto. */
+  CBZ.cityPrecinct = function () {
+    if (!V || !V.origin) return null;
+    const o = V.origin, w = function (lx, lz) { return { x: o.x + lx, z: o.z + lz }; };
+    const door = w(0, 10.3), kerb = w(0, 17), step = w(0, 11.6), inside = w(0, 6.4), desk = w(-5.4, 4.9);
+    return {
+      x: door.x, z: door.z, precinct: true, name: "Precinct 13",
+      lot: { cx: o.x, cz: o.z - 5, building: { door: { x: door.x, z: door.z, nx: 0, nz: -1 } } },
+      kerb: kerb, step: step, inside: inside, desk: desk,
+      out: { x: step.x, z: step.z + 1.4, nx: 0, nz: 1 },
+      path: [step, inside, desk],
+    };
+  };
+
   function update(ctx, dt) {
     if (!V || (V._venue && ctx.venue !== V._venue)) return;
+    if (V_clearT && V_clearT.length) {
+      clearClock += (dt > 0 && dt < 0.5) ? dt : 0.05;
+      if (clearClock >= V_clearT[0]) { V_clearT.shift(); try { clearFootprint(V._venue); } catch (e) {} }
+    }
     if (V.pending && V.pending.length) drainCast();
     if (!dt || dt > 0.4) dt = 0.05;
 

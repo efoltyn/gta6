@@ -1290,7 +1290,9 @@
         if (r.kind === "circle") { if ([r.cx, r.cz, r.r].every(Number.isFinite)) lfCircle(F, r.cx, r.cz, r.r + (r.pad || 0)); continue; }
         if (![r.minX, r.maxX, r.minZ, r.maxZ].every(Number.isFinite)) continue;
         lfRect(F, r.minX, r.maxX, r.minZ, r.maxZ);
-        if (r.metro) lfRect(fTown, r.minX, r.maxX, r.minZ, r.maxZ);
+        // (a village has no town floor to name it a town: its region says so,
+        // or the crop fields ran in under its huts)
+        if (r.metro || r.settlement) lfRect(fTown, r.minX, r.maxX, r.minZ, r.maxZ);
       }
       const an = city.annex;
       if (an && [an.cx, an.cz, an.radius].every(Number.isFinite)) { lfCircle(fPlace, an.cx, an.cz, an.radius); lfCircle(fTown, an.cx, an.cz, an.radius); }
@@ -1908,7 +1910,11 @@
         if (n === seen) return;
         seen = n;
         const hw = CBZ.highwayNetCorridors ? CBZ.highwayNetCorridors() : [];
-        CBZ.groundRoadField.build(rect, (city.roads || []).filter(function (r) { return r && !r.metro; }),
+        // (a village's dirt track, towngen.js `track`, has no gravel shoulder
+        // and no road bed: the land runs to the edge of its own worn band.
+        // A record replayed from the slice manifest says it the old way: a
+        // town street, `kit`, that is `rural`.)
+        CBZ.groundRoadField.build(rect, (city.roads || []).filter(function (r) { return r && !r.metro && !r.track && !(r.rural && r.kit); }),
           hw.map(function (s) { return { x0: s.x0, z0: s.z0, x1: s.x1, z1: s.z1, half: Math.max(1, s.half - 2) }; }), 2048);
       };
       CBZ.groundRoadField.follow();

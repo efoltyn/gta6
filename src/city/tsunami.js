@@ -553,7 +553,7 @@
         }
         if (a.hp != null) a.hp -= info.damage;
         if ((a.hp == null || a.hp <= 0) && CBZ.cityKillPed) {
-          try { CBZ.cityKillPed(a, { fromX: a.pos.x - info.dirX * 3, fromZ: a.pos.z - info.dirZ * 3, force: info.force, fling: 3.5 }, info.cause); } catch (e) {}
+          try { CBZ.cityKillPed(a, { fromX: a.pos.x - info.dirX * 3, fromZ: a.pos.z - info.dirZ * 3, force: info.force, fling: 3.5, byPlayer: false }, info.cause); } catch (e) {}
         } else if (CBZ.body && CBZ.body.hit) {
           try { CBZ.body.hit(a, { dir: { x: info.dirX, z: info.dirZ }, force: info.force, fling: 3 }); } catch (e) {}
         }

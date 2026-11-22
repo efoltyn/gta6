@@ -846,6 +846,50 @@
   CBZ.gunModsCanFit = canFit;
   CBZ.gunModsFit = fit;
   CBZ.gunModsSet = setSlot;
+
+  /* THE BENCH (a gun shop's back room, city/gunstore.js). At the bench you
+     work on the gun in your hands: a part comes off it into your parts box
+     (g.cityGunParts, what you own and have not got fitted), and a part in the
+     box goes on it (what it replaces goes into the box). No money moves: they
+     are your parts. */
+  function parts() { if (!Array.isArray(g.cityGunParts)) g.cityGunParts = []; return g.cityGunParts; }
+  // the part fitted in `slot` of the gun in your hands -> { id, gun, mod }, or null
+  function benchFitted(slot) {
+    const id = equippedGunId();
+    if (!id) return null;
+    const r = store()[id], modId = r && r[slot];
+    return modId && MODS[modId] ? { gun: id, mod: MODS[modId] } : null;
+  }
+  // the first part in your box for `slot` that the gun in your hands takes (and is not already wearing)
+  function benchLoose(slot) {
+    const id = equippedGunId();
+    if (!id) return null;
+    const cur = (store()[id] || {})[slot] || null, P = parts();
+    for (let i = 0; i < P.length; i++) { const m = MODS[P[i]]; if (m && m.slot === slot && m.id !== cur && m.fits(id)) return { gun: id, mod: m }; }
+    return null;
+  }
+  function benchOff(slot) {
+    const f = benchFitted(slot);
+    if (!f) return false;
+    setSlot(f.gun, slot, null);
+    parts().push(f.mod.id);
+    if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (e) {} }
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(f.mod.name + " off the " + gunLabel(f.gun) + ". It's in your parts box.", 2.4);
+    return true;
+  }
+  function benchOn(slot) {
+    const f = benchLoose(slot);
+    if (!f) return false;
+    const P = parts(), i = P.indexOf(f.mod.id);
+    if (i >= 0) P.splice(i, 1);
+    const prev = recOf(f.gun)[slot] || null;
+    setSlot(f.gun, slot, f.mod.id);
+    if (prev) P.push(prev);
+    if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (e) {} }
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(f.mod.name + " on the " + gunLabel(f.gun) + (prev && MODS[prev] ? ". The " + MODS[prev].name + " goes in the box." : "."), 2.4);
+    return true;
+  }
+  CBZ.gunModsBench = { slots: SLOTS, label: SLOT_LABEL, fitted: benchFitted, loose: benchLoose, off: benchOff, on: benchOn, parts: function () { return parts().slice(); }, gun: equippedGunId };
   CBZ.gunModsBuy = function (modId) {
     const m = MODS[modId];
     if (!m || !CBZ.city) return false;
@@ -868,5 +912,5 @@
     if (!dressed && CBZ.fpsWeaponModels && CBZ.fpsWeaponModels.length) { dressAll(); dressed = true; }
   });
   // a fresh run wipes fitted mods (weapons reset too) — re-dress clean next time
-  CBZ.gunModsReset = function () { g.cityGunMods = {}; dressed = false; dressAll(); };
+  CBZ.gunModsReset = function () { g.cityGunMods = {}; g.cityGunParts = []; dressed = false; dressAll(); };
 })();

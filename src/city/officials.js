@@ -432,7 +432,11 @@
     // through. Skipped when the victim IS the player: a corpse does not get
     // charged with its own murder, and leaving a 5-star bounty on a fresh
     // respawn is the "stranded state" this whole path exists to avoid.
-    if (!selfInflicted && CBZ.cityCrime) { try { CBZ.cityCrime(300, { type: "murder" }); } catch (e) {} }
+    // ONLY WHEN YOU DID IT. This charge used to fire on every officeholder's
+    // death, whoever or whatever killed him (a fall, a stray round from a
+    // gang war, his own detail): a murder charge on a player who was across
+    // town. `info.byPlayer` is the kill's own attribution (cityKillPed's imp).
+    if (!selfInflicted && info.byPlayer && CBZ.cityCrime) { try { CBZ.cityCrime(300, { type: "murder" }); } catch (e) {} }
 
     // (e) X6: notify relations.js (and any future subscriber) — the actual
     // country-degradation logic lives entirely over there, not here.
@@ -445,10 +449,17 @@
     // "principal.dead" branch handle the mourn/despawn — nothing more to do here.
   }
 
-  function handleOfficialDeath(ped, sid) {
+  // did the player do it: the imp says so, or names him as the attacker
+  function byPlayerImp(imp) {
+    if (!imp || typeof imp !== "object") return false;
+    const P = CBZ.player, PA = CBZ.city && CBZ.city.playerActor, a = imp.attacker || imp.by;
+    return imp.byPlayer === true || (!!a && (a === P || a === PA || a.isPlayer === true));
+  }
+  function handleOfficialDeath(ped, sid, imp) {
     const info = officeOf(sid);
     if (!info) return;
     info.ped = ped || null;
+    info.byPlayer = byPlayerImp(imp);
     succeed(info, sid, (ped && ped.name) || nameOf(sid), false);
   }
 
@@ -459,7 +470,7 @@
       const wasDead = !ped || ped.dead;
       const ret = orig.apply(this, arguments);
       if (sid && !wasDead && ped && ped.dead) {
-        try { handleOfficialDeath(ped, sid); } catch (e) {}
+        try { handleOfficialDeath(ped, sid, imp); } catch (e) {}
       }
       return ret;
     };
@@ -836,6 +847,29 @@
       return true;
     },
     identityOf: identityOf,
+    /* A CITY'S COUNCIL. The polity has a mayor and a deputy per city and
+       nothing below them, so the chamber at City Hall (games/government.js)
+       used to seat whoever held ANY office anywhere: foreign presidents, a
+       queen and two governors voting on a docklands rezoning. A city's
+       council is its own people: minted once, on first ask, as real ledger
+       identities (same mint as every officeholder), persisted with the rest
+       of this file's state, and the same names every night. Seat 0 is the
+       council president (the Speaker); 1..n are ward members. */
+    councilOf: function (rec, n) {
+      if (!rec || !rec.id) return [];
+      const S = ensureState();
+      const C = S.council || (S.council = {});
+      const L = C[rec.id] || (C[rec.id] = []);
+      for (let i = L.length - 1; i >= 0; i--) if (!(CBZ.cityLedgerEntry && CBZ.cityLedgerEntry(L[i])) && !(CBZ.cityLedgerLive && CBZ.cityLedgerLive(L[i]))) L.splice(i, 1);
+      while (L.length < n) {
+        const gnd = rng() < 0.5 ? "f" : "m";
+        const p = mintIdentity({ name: mintName(gnd), gender: gnd, archetype: "official", job: L.length ? "city councillor" : "council president",
+          wealth: 0.5 + 0.2 * rng(), aggr: 0.12, cash: 1500 + Math.round(rng() * 4000) });
+        if (!p) break;
+        L.push(p._sid);
+      }
+      return L.slice(0, n);
+    },
     /* THE ONE TITLE DERIVATION. Re-measured 2026-07-29: EIGHT files carry a
        kind->title block (officials · officialdom · contracts · civic ·
        statecraft · candidacy · elections · games/government) plus a ninth
@@ -859,6 +893,7 @@
         mayorSid: g.officials.mayorSid || null, deputySid: g.officials.deputySid || null,
         govSids: Object.assign({}, g.officials.govSids), presidentSid: g.officials.presidentSid || null,
         vacantSince: Object.assign({}, g.officials.vacantSince),
+        council: JSON.parse(JSON.stringify(g.officials.council || {})),
       };
     },
     apply: function (obj) {
@@ -870,6 +905,7 @@
       g.officials.govSids = Object.assign({}, obj.govSids || {});
       g.officials.presidentSid = obj.presidentSid || null;
       g.officials.vacantSince = Object.assign({}, obj.vacantSince || {});
+      g.officials.council = JSON.parse(JSON.stringify(obj.council || {}));
       // polity.js's OWN serialize()/apply() carries office.holder/deputy/termDay
       // already (its header says so) — but NOT `.vacuum` (P1 shipped before
       // this field existed). Re-stamp it here, onto the already-restored

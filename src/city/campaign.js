@@ -18,7 +18,7 @@
   const CBZ = window.CBZ;
   // Halloran Field set-pieces below (spy insertion/intel, the DEPARTURES
   // arc) are staged at AUTHORED airport coordinates; the field itself rides
-  // the world-layout dial (world/layout.js), so every airport-space literal
+  // the world plan (world/worldplan.js), so every airport-space literal
   // here rides the SAME dial or the missions mount 220u east of the island.
   const _AIRW = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };
   const THREE = window.THREE;
@@ -2156,7 +2156,7 @@
       if (active()) {
         if (g.cityCampaignPending) CBZ.cityCampaignRestore(g.cityCampaignPending);
         state();
-        g.cityJob = null; g.cityGig = null; g.cityHeist = null; g.cityActivity = null;
+        g.cityJob = null; g.cityGig = null; g.cityActivity = null;
         // worldstate may have restored a legacy sandbox arsenal after mode.js's
         // initial campaign loadout pass. Reassert the authored kit at the final
         // reset seam so the opening is a hitman story, not an RPG test bench.

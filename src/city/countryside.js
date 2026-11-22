@@ -251,14 +251,14 @@
       const x0 = Math.min(A.x, B.x), x1 = Math.max(A.x, B.x), z0 = Math.min(A.z, B.z), z1 = Math.max(A.z, B.z);
       if (hits(taken, x0, z0, x1, z1)) continue;
       take(x0, z0, x1, z1, 4);
-      for (let r = 0; r < 2; r++) for (let k = 0; k < 4; k++) {
-        const c = w(U0 + k * PITCH + 4.5, V0 + r * PITCH + 4.5);
-        bld({ x: c.x, z: c.z, w: 9, d: 9, rot: 0, h: 34, st: 1, fh: 34, type: "silo", style: "metal", wall: 0xc9c4b8, roof: "dome", kind: "elevator", era: 1931 });
-      }
-      const Hd = w(U0 + 4 * PITCH + 9, V0 + PITCH);
-      const he = vert ? { w: 26, d: 14 } : { w: 14, d: 26 };
-      bld({ x: Hd.x, z: Hd.z, w: he.w, d: he.d, rot: 0, h: 48, st: 10, fh: 4.8, type: "office", style: "concrete", wall: 0xbdb6a8, glass: 0x2c353e, roof: "flat", kind: "elevator-head", era: 1931 });
-      P.elevators.push({ town: T.id, name: T.name + " Grain Elevator", x: r2(Hd.x), z: r2(Hd.z) });
+      // the silos and the headhouse: the metro planner's grain elevator
+      // (city/metroplan.js grainElevator, the one builder), u along the road
+      // from U0 and v away from it from V0
+      const E = L.grainElevator(function (a0, a1, b0, b1, rec) {
+        const p = w(U0 + a0, V0 + b0), q = w(U0 + a1, V0 + b1);
+        return bld(Object.assign({ x: (p.x + q.x) / 2, z: (p.z + q.z) / 2, w: Math.abs(q.x - p.x), d: Math.abs(q.z - p.z), rot: 0 }, rec));
+      }, { n: 4, siloH: 34, headH: 48, era: 1931 });
+      if (E.head) P.elevators.push({ town: T.id, name: T.name + " Grain Elevator", x: r2(E.head.x), z: r2(E.head.z) });
     }
 
     // ---- FIRST the GAS STOP + DINER where a country road meets the Loop

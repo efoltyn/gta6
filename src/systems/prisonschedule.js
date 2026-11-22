@@ -1683,7 +1683,10 @@
   }
   function moveTick(step) {
     const b = live();
-    if (!move && outKey !== dayKey() && outBlock(b) && !morningHold && !count && !countDue && !search) {
+    // (a new arrival from Gang City is counted in his locked cell first:
+    // systems/capture.js's intake; the move out waits for it)
+    const intake = !!(CBZ.prisonIntakeActive && CBZ.prisonIntakeActive());
+    if (!move && outKey !== dayKey() && outBlock(b) && !morningHold && !count && !countDue && !search && !intake) {
       if (lockdownOn()) outKey = dayKey();          // a lockdown cancels the yard
       else startMoveOut();
     }

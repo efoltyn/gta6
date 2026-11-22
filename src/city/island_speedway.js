@@ -64,7 +64,9 @@
   // the old numbers only as a floor on the ground.
   const BOWL_R = 420;
   function eyeD() { const S = CBZ.sight ? CBZ.sight() : null; return S ? Math.hypot(S.x - VX, S.z - VZ) : Infinity; }
-  function buildR() { return Math.max(1300, (CBZ.sight ? CBZ.sight().reach : 0) + BOWL_R + 150); }
+  // (a phone builds it only when some of it can be seen: its fog is ~380 m,
+  // and the 1300 m floor built the whole bowl at the downtown spawn)
+  function buildR() { const r = (CBZ.sight ? CBZ.sight().reach : 0) + BOWL_R + 150; return CBZ.isMobileDevice ? r : Math.max(1300, r); }
   function showR() { return Math.max(2600, (CBZ.sight ? CBZ.sight().reach : 0) + BOWL_R); }
   const SHOW_R = 2600;          // (the floor; the race file reads it)
   const QUALITY = ("ontouchstart" in window) || navigator.maxTouchPoints > 0 ? "low" : "high";

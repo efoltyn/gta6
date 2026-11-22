@@ -52,8 +52,8 @@
    at your feet in a red cloud. Break their line of sight and it never
    fires.
 
-   Public: CBZ.cityStickup { took, hits, covering, state, payCrew },
-   CBZ.cityHeistPayCrew (the name city/cashstore.js settles through).
+   Public: CBZ.cityStickup { took, hits, covering, state, payCrew }
+   (city/cashstore.js settles the crew's cut through payCrew).
 ============================================================ */
 (function () {
   "use strict";
@@ -1040,8 +1040,6 @@
       };
     },
   };
-  // city/cashstore.js settles the crew's end of stored duffels through this name
-  CBZ.cityHeistPayCrew = payCrew;
   // (city/factions.js's census still lists the old score file's membership read)
   if (CBZ.factionMigrated) CBZ.factionMigrated("memb:heists");
 })();

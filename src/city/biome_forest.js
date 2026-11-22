@@ -350,7 +350,7 @@
     //  radius is still cut absolutely, because these circles are
     //  RESERVATIONS, not decoration — clearings[0] is the lake (shrink it
     //  and a trunk stands in the water), and the cabin pad, campsite and
-    //  causeway landing each carry a building or a road that layout.js has
+    //  causeway landing each carry a building or a road that the world plan has
     //  already reserved at exactly c.r. So the authored disc is untouched
     //  and a ragged band is added beyond it, which is what the eye now
     //  reads as the tree line; the perfect circle survives only where the
@@ -397,7 +397,7 @@
     // the RESERVATION regardless of what this function says. MEASURED: routing
     // the thicket through a 0.42r keep-out moved `nearThicket` 636 -> 636, not
     // one instance. Opening the floor means shrinking the reservations other
-    // systems place against, which is a layout.js wave, not a biome one.
+    // systems place against, which is a world-plan job, not a biome one.
     function inClearing(x, z) {
       for (let i = 0; i < clearings.length; i++) {
         const c = clearings[i];

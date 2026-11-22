@@ -3190,6 +3190,22 @@
     const K = CBZ.airportKit;
     const liveries = [0x2d5fb0, 0xb33636, 0x1f7a4d, 0xc78a1f, 0x7a4ea8, 0x2b6f7a];
     ap.parked = [];
+    /* AIRFLEET_LATER: the parked fleet stands when somebody comes near (phone).
+       A parked airliner is ~90 nodes and 3-6 MB of geometry, a business jet
+       ~70 and 1.3 MB, and the field they stand on is ~700 m from the downtown
+       spawn, past a phone's 380 m fog. On a phone each one is placed on its
+       stand (the same call, the same records) the first time the player or
+       the eye comes within FLEET_NEAR_M of it; the stand's chocks, cones and
+       ground power stand from the start, and the jet bridge docks when its
+       aeroplane arrives (the dock watcher below). The field's FIRST airliner
+       stands from the start all the same: it is the one the airline
+       (systems/airline.js) claims at its boot and flies as the field's
+       shuttle, so a phone has the same flights. A stand an arriving shuttle
+       took in the meantime keeps the shuttle and gets no parked aeroplane.
+       ?cfg_PHONE_FLEET_LATER=0 parks the fleet at the load as before. */
+    const laterFleet = [];
+    let shuttleStood = false;
+    function fleetLater() { return !!(CBZ.isMobileDevice && CBZ.CONFIG.PHONE_FLEET_LATER !== false && CBZ.onUpdate); }
     // spec.parked: ["ID"] or ["ID:widebody"]
     const parkedType = {};
     for (const pk of spec.parked || []) { const q = String(pk).split(":"); parkedType[q[0]] = q[1] || "narrowbody"; }
@@ -3218,14 +3234,19 @@
       if (K && K.airliner && K.boardable && type) {
         try {
           const livery = liveries[(i + ap.code.charCodeAt(0)) % liveries.length];
-          const grp = (type === "widebody" && K.widebody) ? K.widebody(g.x, g.z, g.worldHeading, livery) : K.airliner(g.x, g.z, g.worldHeading, livery);
           const env = DIM(type === "widebody" ? "widebody" : "narrowbody");
-          K.boardable(grp, g.x, g.z, g.worldHeading, env.span * 0.6, env.length * 0.6, type === "widebody" ? "Widebody Airliner" : "Airliner");
-          g.occupant = "parked";
-          g.parkedGroup = grp;
-          ap.parked.push(grp);
-          const d = doorOf(grp);
-          if (d) g.doorL = d;
+          const place = function () {
+            if (g.occupant && typeof g.occupant === "object") return;   // a shuttle stands there
+            const grp = (type === "widebody" && K.widebody) ? K.widebody(g.x, g.z, g.worldHeading, livery) : K.airliner(g.x, g.z, g.worldHeading, livery);
+            K.boardable(grp, g.x, g.z, g.worldHeading, env.span * 0.6, env.length * 0.6, type === "widebody" ? "Widebody Airliner" : "Airliner");
+            g.occupant = "parked";
+            g.parkedGroup = grp;
+            ap.parked.push(grp);
+            const d = doorOf(grp);
+            if (d) g.doorL = d;
+          };
+          // (a phone parks it on the stand when somebody comes near: AIRFLEET_LATER)
+          if (fleetLater() && shuttleStood) laterFleet.push({ x: g.x, z: g.z, place: place }); else { place(); shuttleStood = true; }
           // chocks at the nose gear, cones off the wingtips and at the tail, a GPU at the nose
           const gz = SP.standZ + env.noseGear;
           standDress.chocks.push([st.lx, gz + 0.9, 0], [st.lx, gz - 0.9, 0]);
@@ -3306,11 +3327,34 @@
         const w = toW(j.lx, j.lz);
         const hd = yaw + (j.heading == null ? -Math.PI / 2 : j.heading);
         try {
-          const grp = K.jet(w.x, w.z, hd, [0x355c8a, 0x6a3a6a, 0x2d2f33, 0x8a6a35][i % 4]);
-          K.boardable(grp, w.x, w.z, hd, 14, 12, "Private Jet");
-          ap.parked.push(grp);
+          const placeJet = function () {
+            const grp = K.jet(w.x, w.z, hd, [0x355c8a, 0x6a3a6a, 0x2d2f33, 0x8a6a35][i % 4]);
+            K.boardable(grp, w.x, w.z, hd, 14, 12, "Private Jet");
+            ap.parked.push(grp);
+          };
+          if (fleetLater()) laterFleet.push({ x: w.x, z: w.z, place: placeJet }); else placeJet();
         } catch (e) {}
       }
+    }
+
+    if (laterFleet.length) {
+      const NEAR = function () { const S = CBZ.sight ? CBZ.sight() : null; return ((S && S.reach) || 400) + 150; };
+      let acc = 1;
+      CBZ.onUpdate(41.65, function (dt) {
+        if (!laterFleet.length || !F.parent) return;
+        if ((acc += dt || 0) < 1) return;
+        acc = 0;
+        const P = CBZ.player, cam = CBZ.camera;
+        if (!P || !P.pos) return;
+        const R = NEAR(), R2 = R * R;
+        for (let k = laterFleet.length - 1; k >= 0; k--) {
+          const q = laterFleet[k];
+          const a = q.x - P.pos.x, b = q.z - P.pos.z, c = cam ? q.x - cam.position.x : a, d = cam ? q.z - cam.position.z : b;
+          if (a * a + b * b > R2 && c * c + d * d > R2) continue;
+          laterFleet.splice(k, 1);
+          try { q.place(); } catch (e) { try { console.error("[airfield] fleet", ap.id, e); } catch (e2) {} }
+        }
+      });
     }
 
     // ================= (7) THE TOWER =================

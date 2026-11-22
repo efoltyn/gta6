@@ -164,7 +164,7 @@
   //  (grep "x3harness" / see the reported output).
   //
   //  STAGE-2 MAP ENLARGEMENT: each nation now rides the world-layout dial
-  //  (world/layout.js) like the biomes do — the per-country offsets below
+  //  (world/worldplan.js) like the biomes do — the per-country offsets below
   //  are added to every settlement's authored cx/cz, so the whole nation
   //  (settlements, pads, regions, work anchors, econ records) translates
   //  as one unit and moves OUTWARD at least as far as the biomes nearest
@@ -207,6 +207,9 @@
     },
     {
       id: "kesh", name: "Kingdom of Kesh", wealthLevel: 0.35, govType: "monarchy",
+      // the hill kingdom builds its shops in mud brick (facades/adobe.js);
+      // its houses are city/house_plan.js's (DISTRICT_STYLES keshtown)
+      shopDress: "adobe",
       // M1: currencyId placeholder filled — Kesh Dinar (KSD), the royal-
       // treasury coinage a monarchy's culture reads as.
       currencyId: "KSD",
@@ -373,6 +376,8 @@
     return m;
   }
 
+  const SHOULDER = 0x5f5c56;          // the gravel at a road's edge
+
   function unionOfSettlements(settlements) {
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (let i = 0; i < settlements.length; i++) {
@@ -398,7 +403,8 @@
     if (!tpl) return null;
     const cx = s.cx, cz = s.cz, hx = s.hx, hz = s.hz;
     const rect = { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz };
-    return { tpl: tpl, rect: rect, cfg: Object.assign({}, tpl, { cx: cx, cz: cz, rng: rngFor(cx, cz), region: rect }) };
+    // shopDress: a nation that builds in its own material (towngen.js)
+    return { tpl: tpl, rect: rect, cfg: Object.assign({}, tpl, { cx: cx, cz: cz, rng: rngFor(cx, cz), region: rect, shopDress: cd.shopDress || undefined }) };
   }
   (CBZ.farPlans = CBZ.farPlans || []).push(function () {
     if (!CBZ.planTown) return [];
@@ -418,16 +424,27 @@
     const cx = s.cx, cz = s.cz, hx = s.hx, hz = s.hz;
     const rect = T.rect;
 
-    const P0 = tpl.palette || {};
-    addPad(root, cx, cz, hx * 2 + 16, hz * 2 + 16, P0.verge != null ? P0.verge : (P0.ground != null ? P0.ground : 0x6f7480), 0.018);
     if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
 
     const town = CBZ.buildTown(root, T.cfg);
     if (!town) return;
+    // the pad under the town's own grid, tucked 10 cm past its outer street
+    // edges in the colour of a road shoulder (laid to the settlement's
+    // extents it framed every town in a 20-30 m band of flat white or sand,
+    // and a metre past the grid in verge colour it was still a frame). A
+    // village has none: it stands on the land (towngen.js ruralGround), the
+    // country graded flat under it (VILLAGE GROUND, below).
+    if (tpl.streetStyle !== "rural") { const R0 = town.rect; addPad(root, (R0.minX + R0.maxX) / 2, (R0.minZ + R0.maxZ) / 2, R0.maxX - R0.minX + 0.2, R0.maxZ - R0.minZ + 0.2, SHOULDER, 0.018); }
+    // VILLAGE GROUND: with no pad to carve the country out and grade it, a
+    // village says it is built ground, and the country is graded flat under
+    // it and drawn there: grass between its lanes and yards (the continent is
+    // laid at landmass order 97, after this)
+    else if (CBZ.terrainFlattenUnder) { const R0 = town.rect; CBZ.terrainFlattenUnder({ minX: R0.minX, maxX: R0.maxX, minZ: R0.minZ, maxZ: R0.maxZ, pad: 4, name: s.name + " ground" }); }
 
     CBZ.registerCityRegion(city, {
       name: s.name, subtitle: s.subtitle || (s.capital ? "Capital" : "Settlement"), biome: s.id, kind: "rect",
       minX: rect.minX, maxX: rect.maxX, minZ: rect.minZ, maxZ: rect.maxZ, pad: 8,
+      settlement: true,             // a town: the country's crop fields start past it (city/continent.js)
     });
 
     if (s.capital && CBZ.registerWorkAnchor && town.lots && town.lots.length) {

@@ -1147,6 +1147,7 @@
   CBZ.carDoors = function (car) {
     const rig = doorRigOf(car);
     if (!rig) return null;
+    if (rig._lazy && !rig._made) return rig._specs.slice();
     return rig.doors.map((g) => g.userData.carDoor);
   };
   /* Pose one door: t 0 = shut, 1 = fully open. Re-assert every frame you want
@@ -1205,11 +1206,13 @@
     return liveLid(car);
   }
   CBZ.carLid = function (car) {
+    const rig = doorRigOf(car);
+    if (rig && rig._lazy && !rig._made) return rig._lidSpec;
     const g = lidOf(car);
     return g ? g.userData.carLid : null;
   };
   CBZ.carLidGroup = function (car) { return lidOf(car); };
-  CBZ.carLidOpenT = function (car) { const g = lidOf(car); return g ? (g._cbzOpenT || 0) : 0; };
+  CBZ.carLidOpenT = function (car) { const rig = doorRigOf(car); if (rig && rig._lazy && !rig._made) return 0; const g = lidOf(car); return g ? (g._cbzOpenT || 0) : 0; };
   // t 0 = shut, 1 = up. Unlike a door it STAYS where it is put: nobody's
   // sweep shuts a trunk lid, its owner (cartrunk.js) does.
   CBZ.carLidPose = function (car, t) {
@@ -1233,6 +1236,7 @@
   CBZ.carDoorOpenT = function (car, id) {
     const rig = doorRigOf(car);
     if (!rig) return null;
+    if (rig._lazy && !rig._made) { for (let i = 0; i < rig._specs.length; i++) if (rig._specs[i].id === id) return 0; return null; }
     for (let i = 0; i < rig.doors.length; i++) if (rig.doors[i].userData.carDoor.id === id) return rig.doors[i]._cbzOpenT || 0;
     return null;
   };
@@ -2476,7 +2480,7 @@
     const key = lookKey(style, model);
     let tpl = _bodyTpl.get(key);
     if (tpl === undefined) { tpl = finishBody(style, model); _bodyTpl.set(key, tpl); }
-    return { style: style, tpl: tpl };
+    return { style: style, tpl: tpl, key: key };
   }
   /* THE FIRST OF A LOOK IS BUILT BEFORE IT IS NEEDED. Finishing a look the
      first time is the expensive part (the style's loft, cabin and doors in
@@ -2582,14 +2586,35 @@
     if (rig) {
       const shut = [];
       for (const o of v.children) if (o.userData && o.userData.doorsShut) shut.push(o);
-      const lid = rig.lid ? rig.lid.clone(true) : null;
-      if (lid) lid._cbzOpenT = 0;
-      v._cbzDoorRig = {
-        doors: rig.doors.map(function (d) { const c = d.clone(true); c._cbzOpenT = 0; return c; }),
-        lid: lid, shut: shut, split: false,
-      };
+      v._cbzDoorRig = lazyDoorRig(rig, shut);
     }
     return v;
+  }
+  /* A DOOR IS CLONED WHEN SOMEBODY USES IT. Every car used to clone its four
+     live door leaves and its lid (each a group of meshes) beside the baked
+     shut copy it draws: ~3.4k objects on the parked fleet at the downtown
+     spawn, for doors that never open. The leaves are now cloned the first
+     time anything asks for them (rig.doors / rig.lid: a door posed, a lid
+     opened, gore, a respray of an opened car); until then the specs answer
+     from the look's own leaves and a respray is remembered (`_paint`,
+     playercars.js recolorBody) and painted on when they are made. */
+  function lazyDoorRig(rig, shut) {
+    const R = { shut: shut, split: false, _lazy: true, _made: false, _paint: null, _d: null, _l: null,
+      _specs: rig.doors.map(function (d) { return d.userData.carDoor; }), _lidSpec: rig.lid ? rig.lid.userData.carLid : null };
+    function make() {
+      if (R._made) return;
+      R._made = true;
+      R._d = rig.doors.map(function (d) { const c = d.clone(true); c._cbzOpenT = 0; return c; });
+      R._l = rig.lid ? rig.lid.clone(true) : null;
+      if (R._l) R._l._cbzOpenT = 0;
+      if (R._paint != null && CBZ.cityRecolorCarBody) {
+        for (let i = 0; i < R._d.length; i++) CBZ.cityRecolorCarBody(R._d[i], R._paint);
+        if (R._l) CBZ.cityRecolorCarBody(R._l, R._paint);
+      }
+    }
+    Object.defineProperty(R, "doors", { enumerable: true, configurable: true, get: function () { make(); return R._d; }, set: function (v) { make(); R._d = v; } });
+    Object.defineProperty(R, "lid", { enumerable: true, configurable: true, get: function () { make(); return R._l; }, set: function (v) { make(); R._l = v; } });
+    return R;
   }
   CBZ.cityCarBodyTemplates = function () { return { looks: _bodyTpl.size }; };
 
@@ -2598,16 +2623,18 @@
   // no more swap-on-entry (a car was a small box rig until you stole it, then
   // popped into a different hero mesh of a different colour). Falls back to the
   // lightweight box rig when the visual system isn't loaded (headless / gallery).
-  function buildCar(model) {
+  function buildCar(model, paintKeep) {
     if (!CBZ.cityBuildPlayerCarVisual || !CBZ.cityInferCarStyle) return buildCarBox(model);
     const grp = new THREE.Group();
     const bt = modelBodyKind(model);
     const baseColor = model ? model.color : 0x3c6fd6;
     // per-car clearcoat tint so a row of one model still reads as varied
+    // (a body built again after it was shed keeps the paint it had: paintKeep)
     const tint = 0.86 + rng() * 0.28;
-    const paintHex = new THREE.Color(baseColor).multiplyScalar(tint).getHex();
+    const paintHex = paintKeep != null ? paintKeep : new THREE.Color(baseColor).multiplyScalar(tint).getHex();
     // (the street catalogue is a vehicle world's: the jail's yard van is not a reason to build it)
-    if (!warmQ && (g.mode === "city" || (CBZ.islandModeOn && CBZ.islandModeOn(g.mode)))) {
+    // (a phone builds a look when the first car of it comes into range, never the catalogue)
+    if (!warmQ && !(CBZ.isMobileDevice && g.mode === "city") && (g.mode === "city" || (CBZ.islandModeOn && CBZ.islandModeOn(g.mode)))) {
       const own = g.mode === "survival" && CBZ.islandTownModels ? CBZ.islandTownModels() : null;
       warmIdle(own);
     }
@@ -2621,6 +2648,8 @@
     grp.userData.bodyKind = bt;
     grp.userData.designStyle = (model && model.designStyle) || bt;
     grp.userData.vehicleDims = visual.userData.vehicleDims;
+    grp.userData.paintHex = paintHex;
+    grp.userData.lookKey = L.key;
     if (CBZ.carLodPrepare) CBZ.carLodPrepare(grp);   // city/carlod.js: queue this style's far-LOD twins (built over frames, once per style)
     return grp;
   }
@@ -2806,11 +2835,12 @@
   function materializeCar(c) {
     if (!c._deferred) return;
     c._deferred = false;
-    const built = buildCar(c.model);
+    c._shed = false;
+    const built = buildCar(c.model, c.group && c.group.userData ? c.group.userData.paintHex : null);
     const grp = c.group;
     while (built.children.length) grp.add(built.children[0]);
     for (const k in built.userData) grp.userData[k] = built.userData[k];
-    grp.visible = true;
+    grp.visible = !c._sleep;          // (a shed sleeper built by its cell stays hidden until it wakes)
     const prof = vehicleProfile(c.model, grp.userData && grp.userData.bodyKind);
     c._bk = grp.userData && grp.userData.bodyKind;
     const d = grp.userData && grp.userData.vehicleDims;
@@ -2818,13 +2848,16 @@
     c.mass = prof.mass; c.armor = prof.armor; c.repair = prof.repair;
     tagTailMeshes(c);
     addOccupants(c);
-    const hooks = c._afterBuild; c._afterBuild = null;
+    // (a body built again after a shed is dressed again: c._dress keeps every dressing)
+    const hooks = c._afterBuild || (c._wasShed ? c._dress : null); c._afterBuild = null;
     if (hooks) for (const f of hooks) { try { f(c); } catch (e) { console.error("[car after-build]", e); } }
+    c._builtN = c.group.children.length;
   }
   CBZ.cityMaterializeCar = materializeCar;
   // dress a car (livery, lightbar...) now, or the moment its body exists
   CBZ.cityWhenCarBuilt = function (c, fn) {
     if (!c) return;
+    (c._dress || (c._dress = [])).push(fn);
     if (c._deferred) (c._afterBuild || (c._afterBuild = [])).push(fn);
     else fn(c);
   };
@@ -2887,6 +2920,7 @@
     if (model && model.rarity >= 0.975 && rng() < 0.10) c.mods = { booster: true, factoryBooster: true };
     tagTailMeshes(c);                     // one traverse per car, at build time
     addOccupants(c);                      // visible driver (+ sometimes a passenger) through the real glass
+    c._builtN = grp.children.length;
     if (g.mode !== "city" && CBZ.vehicleModeOn && CBZ.vehicleModeOn()) c._world = g.mode;
     CBZ.cityCars.push(c);
     return c;
@@ -2925,7 +2959,9 @@
   CBZ.spawnCityTraffic = function (n) {
     clearCars();
     const A = CBZ.city.arena; if (!A) return;
-    warmNow(fleetModels());          // under the load: the first unit of a chase is a clone
+    // under the load: the first unit of a chase is a clone (a phone builds
+    // each fleet look when its first unit is called: no warm at all)
+    if (!CBZ.isMobileDevice) warmNow(fleetModels());
     _s = 1234 + n;
     const econ = CBZ.cityEcon;
     const reckFrac = TR().recklessFrac != null ? TR().recklessFrac : 0.18;
@@ -3657,7 +3693,8 @@
       syncOccupants(cc);                    // parked = empty; no ghost driver
     };
     if (opts.color != null) c.color = opts.color;
-    if (c._deferred) (c._afterBuild || (c._afterBuild = [])).push(dress); else dress(c);
+    (c._dress || (c._dress = [])).push(dress);
+    if (c._deferred) (c._afterBuild || (c._afterBuild = [])).push(dress); else { dress(c); c._builtN = c.group.children.length; }
     return c;
   };
 
@@ -5082,7 +5119,7 @@
   function killNpcDriverInCar(car) {
     const ped = car.npcDriver;
     ejectNpcDriver(car);                                  // body drops out, visible
-    if (ped && !ped.dead && CBZ.cityKillPed) CBZ.cityKillPed(ped, { fromX: car.pos.x, fromZ: car.pos.z, force: 5, fling: 2 }, "killed in the crash");
+    if (ped && !ped.dead && CBZ.cityKillPed) CBZ.cityKillPed(ped, { fromX: car.pos.x, fromZ: car.pos.z, force: 5, fling: 2, byPlayer: !!car._burnByPlayer }, "killed in the crash");
     car.npcWanted = 0; car.stolen = false; car.roadRageTarget = null; car.roadRageT = 0; car.pullover = 0;
     car.abandoned = true;
     car.wreckT = Math.max(car.wreckT || 0, 1.0);
@@ -7382,18 +7419,174 @@
     c._sleep = true;
     if (c.group) c.group.visible = false;
     sleepers.push(c);
+    if (shedable(c)) shedCar(c);
   }
   function wakeCar(c) {
     if (!c) return;
     if (c._proxy && CBZ.carInstances) CBZ.carInstances.release(c);
     if (!c._sleep) return;
     c._sleep = false;
+    if (c._shed) materializeCar(c);
     if (c.group) c.group.visible = true;
     const i = sleepers.indexOf(c);
     if (i >= 0) { sleepers[i] = sleepers[sleepers.length - 1]; sleepers.pop(); }
   }
   CBZ.cityWakeCar = wakeCar;
   CBZ.citySleepCar = sleepCar;
+
+  /* ---- A PARKED CAR PAST THE FOG SHEDS ITS BODY (phone) -----------------
+     A sleeping parked car (above: past the fog, hidden) kept its whole body:
+     its nodes, its own paint material, and through them its look's
+     geometry, so every car the streamer ever built stayed built (measured:
+     11 MB of geometry only sleepers used at the downtown spawn, and it grows
+     with every street you drive down). On a phone an untouched sleeper goes
+     back to the state it was placed in (_deferred: the record, an empty
+     group) and keeps what it needs to come back the same: its paint
+     (userData.paintHex) and its dressing (c._dress, every cityWhenCarBuilt /
+     cityAddParkedCar dressing, replayed). wakeCar builds it again, two a
+     frame (wakeSlice), past the fog. A car anything happened to (damaged,
+     dented, owned, stolen, left by the player, a wreck, an emergency or
+     cargo unit, modded, something hung on it) keeps its body.
+     ?cfg_PHONE_CAR_SHED=0 keeps every body. */
+  function shedable(c) {
+    if (!CBZ.isMobileDevice || CBZ.CONFIG.PHONE_CAR_SHED === false || g.mode !== "city") return false;
+    const grp = c.group;
+    if (!grp || c._deferred || c._shed || !grp.userData || !grp.userData.carVisual || grp.userData.paintHex == null) return false;
+    if (c.crumple || (c.engineHp != null && c.engineHp < 100) || c.owned || c.stolen || c._playerLeft || c.abandoned || c._wrecked) return false;
+    if (c._emergency || c._lockupRec || c.mods || c._cargoFleet || c._husk || c._onFire || c._smoking || c._burnByPlayer) return false;
+    if (grp.scale.x !== 1 || grp.scale.y !== 1 || grp.scale.z !== 1) return false;
+    if (c._builtN == null || grp.children.length !== c._builtN) return false;
+    if (c.occ && (c.occ.rigs || c.occ.jacked)) return false;
+    const rig = grp.userData.carVisual._cbzDoorRig;
+    if (rig && rig.split) return false;
+    return true;
+  }
+  function disposeOwn(root) {
+    root.traverse(function (o) {
+      const m = o.material;
+      // (only the car's own paint, minted for it by recolorBody: everything else on a body is shared)
+      if (Array.isArray(m)) { for (let i = 0; i < m.length; i++) if (m[i] && m[i]._bodyPaint && !m[i]._shared && m[i].dispose) m[i].dispose(); }
+      else if (m && m._bodyPaint && !m._shared && m.dispose) m.dispose();
+    });
+  }
+  const SHED_KEYS = ["carVisual", "carStyle", "bodyKind", "designStyle", "lookKey", "sourceParts", "drawMeshes"];
+  function shedCar(c) {
+    const grp = c.group, vis = grp.userData.carVisual;
+    if (CBZ.carLodRestore) { try { CBZ.carLodRestore(c); } catch (e) {} }
+    c._lodTrack = null;
+    disposeOwn(grp);
+    const rig = vis && vis._cbzDoorRig;
+    if (rig && (!rig._lazy || rig._made)) { for (let i = 0; i < rig.doors.length; i++) disposeOwn(rig.doors[i]); if (rig.lid) disposeOwn(rig.lid); }
+    while (grp.children.length) grp.remove(grp.children[0]);
+    for (let i = 0; i < SHED_KEYS.length; i++) delete grp.userData[SHED_KEYS[i]];
+    c.seatOcc = null; c.occ = null; c._occDriver = null; c._occPass = null; c._occFrame = null;
+    c._tailMeshes = null; c._tailVisual = null; c._brakeOn = false;
+    c._deferred = true; c._shed = true; c._wasShed = true;
+    grp.visible = false;
+    shedStats.shed++;
+  }
+  const shedStats = { shed: 0, lookDrops: 0, geoFreed: 0, styleDrops: 0 };
+  CBZ.cityCarShedAudit = function () {
+    let shed = 0, built = 0, deferred = 0;
+    for (const c of CBZ.cityCars || []) { if (c._shed) shed++; else if (c._deferred) deferred++; else built++; }
+    return Object.assign({ shedNow: shed, built: built, deferred: deferred, looks: _bodyTpl.size, merge: _mergeCache.size, vc: _vcGeoCache.size }, shedStats);
+  };
+  /* ---- A LOOK NOBODY DRAWS IS LET GO (phone). A finished look (_bodyTpl: a
+     whole body template, MBs) with no built car of it for LOOK_GRACE s is
+     dropped with the merged geometry only it used (and that geometry's far
+     LOD twins); a style's raw template (playercars.js) goes once no kept
+     look is of that style. The next car of that look builds it again; the
+     looks of the cars about to be built (deferred, inside the keep ring)
+     are finished ahead in idle time so that build is a clone. */
+  const LOOK_GRACE = 30000, LOOK_SWEEP = 3000;
+  const _lookSeen = new Map();
+  let _lookT = 0;
+  const _prefetch = [];
+  let _prefetchOn = false;
+  function prefetchStep(dl) {
+    _prefetchOn = false;
+    if (dl && !dl.didTimeout && dl.timeRemaining() < 8) { schedulePrefetch(); return; }
+    while (_prefetch.length) {
+      const m = _prefetch.shift();
+      if (!m || !CBZ.cityInferCarStyle) continue;
+      const key = lookKey(CBZ.cityInferCarStyle(m) || "tesla-3", m);
+      if (_bodyTpl.has(key)) continue;
+      try { lookOf(m); } catch (e) {}
+      break;
+    }
+    if (_prefetch.length) schedulePrefetch();
+  }
+  function schedulePrefetch() {
+    if (_prefetchOn) return; _prefetchOn = true;
+    if (window.requestIdleCallback) window.requestIdleCallback(prefetchStep, { timeout: 2000 }); else setTimeout(prefetchStep, 100);
+  }
+  function lookSweep(now) {
+    if (!CBZ.isMobileDevice || CBZ.CONFIG.PHONE_CAR_LOOK_DROP === false || g.mode !== "city") return;
+    if (now - _lookT < LOOK_SWEEP) return;
+    _lookT = now;
+    const live = new Set();
+    const cars = CBZ.cityCars || [];
+    const cam = CBZ.camera && CBZ.camera.position;
+    const pre = SLEEP_D2 * 1.6;
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i], ud = c.group && c.group.userData;
+      if (ud && ud.lookKey && ud.carVisual) live.add(ud.lookKey);
+      else if (c._deferred && c.model && cam && CBZ.cityInferCarStyle && _prefetch.length < 32) {
+        const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z;
+        if (dx * dx + dz * dz < pre) {
+          const key = lookKey(CBZ.cityInferCarStyle(c.model) || "tesla-3", c.model);
+          if (!_bodyTpl.has(key) && _prefetch.indexOf(c.model) < 0) { _prefetch.push(c.model); schedulePrefetch(); }
+          live.add(key);
+        }
+      }
+    }
+    let dropped = null;
+    _bodyTpl.forEach(function (tpl, key) {
+      if (live.has(key) || !tpl) { _lookSeen.set(key, now); return; }
+      const t = _lookSeen.get(key);
+      if (t == null) { _lookSeen.set(key, now); return; }
+      if (now - t < LOOK_GRACE) return;
+      _bodyTpl.delete(key); _lookSeen.delete(key);
+      (dropped || (dropped = [])).push(tpl);
+      shedStats.lookDrops++;
+    });
+    if (!dropped) return;
+    // the geometry only the dropped looks drew: out of the merge caches, off the GPU
+    const mine = new Set();
+    const takeTo = function (S) { return function (r) { if (r && r.traverse) r.traverse(function (o) { if (o.geometry) S.add(o.geometry); }); }; };
+    const tMine = takeTo(mine);
+    for (let i = 0; i < dropped.length; i++) { tMine(dropped[i]); const r = dropped[i]._cbzDoorRig; if (r) { r.doors.forEach(tMine); tMine(r.lid); } }
+    const used = new Set(), tUsed = takeTo(used);
+    tUsed(CBZ.scene);
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i]; if (!c.group) continue;
+      tUsed(c.group);
+      const vis = c.group.userData && c.group.userData.carVisual, r = vis && vis._cbzDoorRig;
+      if (r && (!r._lazy || r._made)) { r.doors.forEach(tUsed); tUsed(r.lid); }
+      const tr = c._lodTrack; if (tr && tr.full) for (let k = 0; k < tr.full.length; k++) used.add(tr.full[k]);
+    }
+    _bodyTpl.forEach(function (t) { if (t) { tUsed(t); const r = t._cbzDoorRig; if (r) { r.doors.forEach(tUsed); tUsed(r.lid); } } });
+    // the raw style templates no kept look needs go first, so their geometry counts as free
+    if (CBZ.cityCarTemplateTrim) {
+      const keep = new Set();
+      _bodyTpl.forEach(function (t, key) { keep.add(key.split("|")[0]); });
+      const P = CBZ.player, pv = P && P._vehicle && P._vehicle.group && P._vehicle.group.userData;
+      if (pv && pv.carStyle) keep.add(pv.carStyle);
+      shedStats.styleDrops += CBZ.cityCarTemplateTrim(keep);
+    }
+    if (CBZ.cityCarTemplates) CBZ.cityCarTemplates().forEach(tUsed);
+    if (CBZ.carWheelCacheTrim) { try { shedStats.wheelDrops = (shedStats.wheelDrops || 0) + CBZ.carWheelCacheTrim(used); } catch (e) {} }
+    [_mergeCache, _vcGeoCache].forEach(function (M) {
+      M.forEach(function (geo, key) {
+        if (!mine.has(geo) || used.has(geo)) return;
+        M.delete(key);
+        if (CBZ.carLodForget) { try { CBZ.carLodForget(geo); } catch (e) {} }
+        geo.dispose();
+        shedStats.geoFreed++;
+      });
+    });
+  }
+  if (CBZ.onAlways) CBZ.onAlways(37.9, function () { if (CBZ.isMobileDevice) lookSweep(performance.now()); });
   function sleepable(c) {
     return !c.player && !c.dead && !c.ai && !c._heldBy && !c._runaway && !c._raceCar && !(c.wreckT > 0) &&
       !c._onFire && !c._smoking && !c._husk && !(c.occ && c.occ.jacked) && !c.npcDriver && !c._disaster;
@@ -7456,12 +7649,17 @@
   function wakeSlice(camx, camz) {
     sleepRing();                        // the fog can change with the quality tier / weather
     const n = Math.min(WAKE_SLICE, sleepers.length);
+    let builds = 0;
     for (let k = 0; k < n; k++) {
       if (!sleepers.length) return;
       if (_wakeCursor >= sleepers.length) _wakeCursor = 0;
       const c = sleepers[_wakeCursor];
       const dx = c.pos.x - camx, dz = c.pos.z - camz;
-      if (c.dead || !sleepable(c) || dx * dx + dz * dz < WAKE_D2) wakeCar(c);   // swap-remove: this index now holds another sleeper
+      // (a shed body is built again on waking: two a frame, the rest next frame)
+      if (c.dead || !sleepable(c) || dx * dx + dz * dz < WAKE_D2) {
+        if (c._shed && !c.dead && sleepable(c) && ++builds > 2) { _wakeCursor++; continue; }
+        wakeCar(c);   // swap-remove: this index now holds another sleeper
+      }
       else _wakeCursor++;
     }
   }

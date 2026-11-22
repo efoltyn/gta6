@@ -12,7 +12,7 @@
   if (!CBZ || !THREE || !CBZ.player || !CBZ.playerChar) return;
 
   const P = CBZ.player, ch = CBZ.playerChar, keys = CBZ.keys || {};
-  // Mount Mercy rides the world-layout snow dial (world/layout.js): every
+  // Mount Mercy rides the world-layout snow dial (world/worldplan.js): every
   // authored coordinate below shifts by (SNX,SNZ) so the controller follows
   // the island wherever the map-enlargement pass parks it.
   const _SN = (CBZ.worldOff && CBZ.worldOff("snow")) || { dx: 0, dz: 0 };

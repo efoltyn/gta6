@@ -2157,14 +2157,20 @@
   };
 
   // ---- the PRECINCT DESK (city/restrain.js's citizen-collar pipeline) -------
-  // There is no dedicated station building yet — the law's intake desk fronts
-  // City Hall (falls back to the bank, then any shop door). Revalidated against
+  // The station is Precinct 13 (games/police.js CBZ.cityPrecinct) when it is
+  // standing; without it the law's intake desk fronts City Hall (falls back to
+  // the bank, then any shop door). Revalidated against
   // the LIVE arena so a rebuilt world can't leave a stale point behind.
   let _station = null;
   CBZ.cityPoliceStation = function () {
     // on the islands the law has a building: the island's police station
     // (world/island_police.js), its front door on the street
     if (onIsles()) return CBZ.islandPolice && CBZ.islandPolice.station ? CBZ.islandPolice.station() : null;
+    // THE PRECINCT (games/police.js, Precinct 13) is the city's police station
+    // whenever it stands, wherever the world plan sited it: one record (its
+    // kerb, door, walk-in path, booking desk, release step) for every reader
+    const pc = CBZ.cityPrecinct ? CBZ.cityPrecinct() : null;
+    if (pc) return pc;
     const A = CBZ.city && CBZ.city.arena;
     if (!A || !A.shopLots || !A.shopLots.length) return null;
     if (_station && A.shopLots.indexOf(_station.lot) >= 0) return _station;

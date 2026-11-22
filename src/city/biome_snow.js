@@ -2545,7 +2545,11 @@
           let sites = [];
           const BKEY = "snow-belt-" + o.salt;
           let BSIG = null;
-          try { BSIG = CBZ.bakeSig ? CBZ.bakeSig(BKEY + "|" + CBZ.bakeHash({ b: [o.minX, o.maxX, o.minZ, o.maxZ, o.cell, o.floorY, o.treeline, o.fade, o.density, o.salt, o.count], cfg: CBZ.CONFIG })) : null; } catch (e) { BSIG = null; }
+          // (keyed on what PASS 1 reads: the belt, and the forest look's
+          // groves. It was keyed on the whole of CBZ.CONFIG, which modules
+          // fill in at their own pace, so the key never repeated: a miss on
+          // every boot, ~1 s of a phone's load)
+          try { BSIG = CBZ.bakeSig ? CBZ.bakeSig(BKEY + "|" + CBZ.bakeHash({ b: [o.minX, o.maxX, o.minZ, o.maxZ, o.cell, o.floorY, o.treeline, o.fade, o.density, o.salt, o.count], look: FLK ? 1 : 0, tdm: FLK && FLK.density ? FLK.density("mountain") : null, td: CBZ.CONFIG.TREE_DENSITY || null })) : null; } catch (e) { BSIG = null; }
           const BB = BSIG && CBZ.bakeGet ? CBZ.bakeGet(BKEY, BSIG) : null;
           if (BB && BB.s) sites = Array.from(BB.s);
           else for (let j = 0; j < nz; j++) {

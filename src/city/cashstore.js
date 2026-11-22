@@ -38,8 +38,8 @@
      • ownership plumbing — city/storage.js's property ledger. The Freeport
        is a fourth PROPERTIES row there, so it inherits the vehicle bays, the
        ammo locker, the [G] menu and the save slot for free.
-     • the crew's cut — city/heists.js's CBZ.cityHeistPayCrew, the same
-       routing an abstract score has always used.
+     • the crew's cut — city/stickup.js's CBZ.cityStickup.payCrew, the
+       same routing a stick-up settles through.
 
    THE THREE DESIGN CALLS, stated so the next person can argue with them:
 
@@ -328,9 +328,9 @@
     s.crewDebt = Math.max(0, s.crewDebt - paid);
     s.crewPaid += paid;
     let routed = false;
-    if (CBZ.cityHeistPayCrew) { try { CBZ.cityHeistPayCrew(paid); routed = true; } catch (e) {} }
+    if (CBZ.cityStickup && CBZ.cityStickup.payCrew) { try { CBZ.cityStickup.payCrew(paid); routed = true; } catch (e) {} }
     if (!routed) {
-      // degrade: heists.js absent from this build — the crew still gets paid,
+      // degrade: stickup.js absent from this build — the crew still gets paid,
       // through the treasury it would have used.
       if (g.playerGang) g.playerGang.treasury = (g.playerGang.treasury || 0) + paid;
       else if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(paid);

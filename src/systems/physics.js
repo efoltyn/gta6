@@ -2736,8 +2736,8 @@
     if (CBZ.game.mode !== "city" || !ped || ped.dead) return;
     if (impactSpeed <= FALL_SAFE + 3) return;    // peds shrug off small drops
     const excess = impactSpeed - FALL_SAFE;
-    if (impactSpeed > 22 && CBZ.cityKillPed) { CBZ.cityKillPed(ped, { fromX: ped.pos.x, fromZ: ped.pos.z }, "fell"); return; }
-    if (ped.hp != null) { ped.hp -= FALL_K * excess * excess; if (ped.hp <= 0 && CBZ.cityKillPed) CBZ.cityKillPed(ped, { fromX: ped.pos.x, fromZ: ped.pos.z }, "fell"); }
+    if (impactSpeed > 22 && CBZ.cityKillPed) { CBZ.cityKillPed(ped, { fromX: ped.pos.x, fromZ: ped.pos.z, byPlayer: false }, "fell"); return; }
+    if (ped.hp != null) { ped.hp -= FALL_K * excess * excess; if (ped.hp <= 0 && CBZ.cityKillPed) CBZ.cityKillPed(ped, { fromX: ped.pos.x, fromZ: ped.pos.z, byPlayer: false }, "fell"); }
   };
 
   // ============================================================

@@ -2892,6 +2892,8 @@
 
   // the scratching hind leg, over the IK result: up to the neck, fast strokes
   function scratchPose(rig, st) {
+    // (a rig posed before its idle state exists, a city dog fresh off the
+    // kennel or a wild canid's first frame, has no st yet: nothing to scratch)
     if (!st || st.act !== "scratch" || rig.ragdoll || rig._limp) return;
     const b = rig.bones, s = st.actSide || 1, Lg = s < 0 ? 2 : 3, ids = LEGB[Lg];
     const e = sstep(0, 0.2, st.actT) * (1 - sstep(st.actDur - 0.2, st.actDur, st.actT));

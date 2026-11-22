@@ -2131,16 +2131,13 @@
       let a = LA * 0.05;
       if (nearWater && nearRail && elevators < 2) {
         // GRAIN ELEVATORS: two rows of silos and the headhouse at their end
+        // (grainElevator, below: the same builder as every town's)
         elevators++;
-        const n = 8, dS = 9, pitch = 9.3;
-        for (let r = 0; r < 2; r++) for (let k = 0; k < n; k++) {
-          put(a + k * pitch, a + k * pitch + dS, 8 + r * pitch, 8 + r * pitch + dS,
-            { h: 36, st: 1, fh: 36, type: "silo", style: "metal", wall: 0xc9c4b8, roof: "dome", kind: "elevator", era: 1924 });
-        }
-        put(a + n * pitch + 2, a + n * pitch + 16, 4, 30,
-          { h: 57.6, st: 12, fh: 4.8, type: "office", style: "concrete", wall: 0xbdb6a8, glass: 0x2c353e, roof: "flat", kind: "elevator-head", era: 1924 });
+        const n = 8, a1 = a;
+        grainElevator(function (p0, p1, q0, q1, rec) { return put(a1 + p0, a1 + p1, q0, q1, rec); },
+          { n: n, b0: 8, siloH: 36, headH: 52, era: 1924 });
         P.landmarks.push({ kind: "elevator", x: alongX ? A0 + a + 60 : B0 + 20, z: alongX ? B0 + 20 : A0 + a + 60, name: P.name + " Grain Elevator" });
-        a += n * pitch + 30;
+        a += n * 9.3 + 30;
       } else {
         // THE FACTORY: four to six storeys of concrete frame and brick on the street
         const fl = Math.min(LA - a - LA * 0.05, LA * lerp(0.62, 0.86, hh)), fd = Math.min(62, LB * 0.18);
@@ -2601,6 +2598,45 @@
   }
 
   // =====================================================================
+  //  THE GRAIN ELEVATOR — the one builder for every elevator on the map: a
+  //  metro's by the river and the rail (plantBlock above) and each elevator
+  //  town's beside the road (city/countryside.js). Two rows of concrete
+  //  silos and, at the end of the rows, the HEADHOUSE: a steel-clad shaft
+  //  that stands well over them (the bucket legs lift the grain to its top
+  //  and spout it down into the bins), its truck doors at the foot and its
+  //  conveyor gallery out over the silo tops (city/metro_fabric.js draws a
+  //  "ware" of kind elevator-head as that shaft). The metro's headhouse was
+  //  a twelve-storey "office", a block of office windows on a grain
+  //  elevator; the towns' had been put right by hand, so the two had drifted.
+  //  In the caller's frame: `a` along the rows, `b` across them, both from
+  //  the rows' near corner. emit(a0, a1, b0, b1, rec) stands one building on
+  //  that rect and returns it (world x, z), or null when it cannot.
+  //  o: { n silos a row, b0 the rows' offset across, siloH, headH, era }
+  // =====================================================================
+  function grainElevator(emit, o) {
+    o = o || {};
+    const n = o.n || 4, dS = 9, pitch = 9.3, b0 = o.b0 || 0, era = o.era || 1924;
+    const siloH = o.siloH || 34, headH = o.headH || Math.round(siloH * 1.45);
+    const silos = [], first = [null, null];
+    for (let r = 0; r < 2; r++) for (let k = 0; k < n; k++) {
+      const s = emit(k * pitch, k * pitch + dS, b0 + r * pitch, b0 + r * pitch + dS,
+        { h: siloH, st: 1, fh: siloH, type: "silo", style: "metal", wall: 0xc9c4b8, roof: "dome", kind: "elevator", era: era });
+      if (s) { silos.push(s); if (!first[r]) first[r] = s; }
+    }
+    const bm = b0 + (pitch + dS) / 2, a0 = n * pitch + 2;
+    const head = emit(a0, a0 + 14, bm - 13, bm + 13,
+      { h: headH, st: 1, fh: headH, type: "ware", style: "metal", wall: 0xbdb6a8, glass: 0x2c353e, roof: "flat", kind: "elevator-head", era: era });
+    if (head && first[0] && first[1]) {
+      // the gallery runs from the shaft's face to the far end of the rows,
+      // between them, a little over the silo tops: its far end is the middle
+      // of the farthest pair of bins standing (each row's first)
+      const f0 = first[0], f1 = first[1];
+      head.gallery = { x: Math.round((f0.x + f1.x) * 50) / 100, z: Math.round((f0.z + f1.z) * 50) / 100, y: siloH + 1.2 };
+    }
+    return { silos: silos, head: head };
+  }
+
+  // =====================================================================
   //  TRANSLATE — a plan made in one frame, moved to another. A COPY of a
   //  city (city/metro.js `frame`) is planned where its source stands, so
   //  every position hash is the source's and the copy is the same city
@@ -2628,6 +2664,7 @@
       b.x += dx; b.z += dz;
       if (b.tiers) for (const t of b.tiers) { t.x += dx; t.z += dz; }
       if (b.drive) pt(b.drive);
+      if (b.gallery) pt(b.gallery);                                // a grain elevator's conveyor gallery
     }
     for (const t of P.trees) pt(t);
     for (const v of P.vacant || []) pt(v);
@@ -2857,7 +2894,7 @@
     return out;
   }
 
-  const API = { plan: plan, stats: stats, audit: audit, translatePlan: translatePlan, ceremonialSquare: ceremonialSquare, TIERS: TIERS, LOOKS: LOOKS, h01: h01, vnoise: vnoise, segDist: segDist, FRONTAGE: FRONTAGE };
+  const API = { plan: plan, stats: stats, audit: audit, translatePlan: translatePlan, ceremonialSquare: ceremonialSquare, grainElevator: grainElevator, TIERS: TIERS, LOOKS: LOOKS, h01: h01, vnoise: vnoise, segDist: segDist, FRONTAGE: FRONTAGE };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (G && G.CBZ) {
     G.CBZ.metroPlan = plan; G.CBZ.metroPlanStats = stats; G.CBZ.metroPlanAudit = audit; G.CBZ.metroPlanLib = API;
