@@ -155,13 +155,22 @@
         [0.00, 0.76, 0.78, 0.00], [0.22, 0.82, 0.84, 0.01], [0.60, 0.70, 0.76, 0.00],
         [0.90, 0.54, 0.70, 0.00], [0.965, 0.54, 0.70, 0.00], [1.00, 0.50, 0.66, 0.00]] },
     },
+    /* THE THIGHS MEET (owner 2026-11-22: "middle crotch ... still looks like
+       diaper"). Two ROUND thighs side by side leave a deep V between them
+       front and back, so the hips above had to bridge it with a flat panel,
+       and that panel over two round legs is what read as a brief. A thigh at
+       the top is not round: pressed against the other one it is a rounded
+       square. Rows may carry a 5th value, the section's squareness (2 = an
+       ellipse, the default; 3.4 = a rounded square): the top of the thigh is
+       square and turns round by mid-thigh, so the two legs make one flat
+       front with a seam down the middle, and the hips lie flush on them. */
     legUp: {
       bare: { top: 0.85, bot: 1, rows: [
-        [0.00, 0.94, 0.96, 0.00], [0.12, 1.00, 1.00, 0.02], [0.45, 0.87, 0.92, 0.06],
-        [0.80, 0.70, 0.75, 0.03], [1.00, 0.66, 0.68, 0.01]] },
+        [0.00, 0.99, 0.99, 0.00, 3.4], [0.12, 1.00, 1.00, 0.02, 3.2], [0.45, 0.87, 0.92, 0.06, 2.4],
+        [0.80, 0.70, 0.75, 0.03, 2], [1.00, 0.66, 0.68, 0.01, 2]] },
       cloth: { top: 0.85, bot: 1, rows: [
-        [0.00, 0.96, 0.98, 0.00], [0.14, 1.00, 1.00, 0.01], [0.55, 0.88, 0.90, 0.02],
-        [1.00, 0.75, 0.77, 0.00]] },
+        [0.00, 1.00, 1.00, 0.00, 3.4], [0.14, 1.00, 1.00, 0.01, 3.2], [0.55, 0.88, 0.90, 0.02, 2.3],
+        [1.00, 0.75, 0.77, 0.00, 2]] },
     },
     legLo: {   // the knee (t 0) .. the sole line inside the shoe (t 1)
       bare: { top: 1, bot: 0.22, rows: [
@@ -191,7 +200,7 @@
       let i = 0;
       while (i < rows.length - 2 && rows[i + 1][0] < t) i++;
       const A = rows[i], B = rows[i + 1] || A, u = B[0] > A[0] ? Math.min(1, Math.max(0, (t - A[0]) / (B[0] - A[0]))) : 0;
-      return [t, lerpN(A[1], B[1], u), lerpN(A[2], B[2], u), lerpN(A[3], B[3], u)];
+      return [t, lerpN(A[1], B[1], u), lerpN(A[2], B[2], u), lerpN(A[3], B[3], u), lerpN(A[4] || 2, B[4] || 2, u)];
     };
     const out = [at(t0)];
     for (const r of rows) if (r[0] > t0 + 1e-4 && r[0] < t1 - 1e-4) out.push(r.slice());
@@ -220,12 +229,12 @@
     const t0 = cut ? cut[0] : 0, t1 = cut ? cut[1] : 1;
     for (let k = nd + 1; k >= 1; k--) {         // top dome: apex first
       const th = (Math.PI / 2) * k / (nd + 1), c = Math.cos(th);
-      rings.push([-t0 + domeH(r0, topK) * Math.sin(th), r0[1] * c, r0[2] * c, r0[3]]);
+      rings.push([-t0 + domeH(r0, topK) * Math.sin(th), r0[1] * c, r0[2] * c, r0[3], r0[4] || 2]);
     }
-    for (let i = 0; i < rows.length; i++) rings.push([-rows[i][0], rows[i][1], rows[i][2], rows[i][3]]);
+    for (let i = 0; i < rows.length; i++) rings.push([-rows[i][0], rows[i][1], rows[i][2], rows[i][3], rows[i][4] || 2]);
     for (let k = 1; k <= nd + 1; k++) {         // bottom dome: apex last
       const th = (Math.PI / 2) * k / (nd + 1), c = Math.cos(th);
-      rings.push([-t1 - domeH(rN, botK) * Math.sin(th), rN[1] * c, rN[2] * c, rN[3]]);
+      rings.push([-t1 - domeH(rN, botK) * Math.sin(th), rN[1] * c, rN[2] * c, rN[3], rN[4] || 2]);
     }
     const RV = 4 * (n + 1), nv = rings.length * RV;
     const P = new Float32Array(nv * 3), U = new Float32Array(nv * 2);
@@ -245,7 +254,10 @@
       const R = rings[i], v = vB + vA * Math.min(1, Math.max(0, 1 + R[0]));
       for (let f = 0; f < 4; f++) for (let k = 0; k <= n; k++) {
         const al = -Math.PI / 4 + f * Math.PI / 2 + (k / n) * Math.PI / 2;
-        P[o * 3] = R[1] * Math.sin(al); P[o * 3 + 1] = R[0]; P[o * 3 + 2] = R[3] + R[2] * Math.cos(al);
+        // (R[4]: the section's squareness — a superellipse, 2 = the plain ellipse)
+        let sx = Math.sin(al), cx = Math.cos(al);
+        if (R[4] && R[4] !== 2) { const e = 2 / R[4]; sx = Math.sign(sx) * Math.pow(Math.abs(sx), e); cx = Math.sign(cx) * Math.pow(Math.abs(cx), e); }
+        P[o * 3] = R[1] * sx; P[o * 3 + 1] = R[0]; P[o * 3 + 2] = R[3] + R[2] * cx;
         const u = k / n;
         U[o * 2] = (f + u) / 4; U[o * 2 + 1] = v;
         F[o] = f; Q[o] = u;
@@ -849,7 +861,7 @@
     // (longer in the leg than the man for her height, a slimmer lower leg, a
     // longer neck, a head a touch narrower: the second pass, "much more real
     // and attractive")
-    legUp: 0.585, legLo: 0.655, legW: 0.252, hipX: 0.129, shinK: 0.84, neckK: 1.12, headX: 0.74,
+    legUp: 0.585, legLo: 0.655, legW: 0.262, hipX: 0.134, shinK: 0.80, neckK: 1.12, headX: 0.74,
     armUp: 0.435, armLo: 0.54, armW: 0.160, armX: 0.244,
     pelvisW: 0.475, pelvisH: 0.19, pelvisD: 0.33,
     torsoH: 0.80, torsoW: 0.396, torsoD: 0.275,
@@ -3562,22 +3574,28 @@
     const topF = Math.min(0.93 * pd, lerpN(wZ0, 0.88, 0.5) * D + 0.006 * vs);
     const topB = Math.min(0.91 * pd, lerpN(bW0, 0.84, 0.5) * D + 0.010 * vs);
     const pel = ringTable([
-      // THE HEM. The block ends 3 cm under the hip joint in a hem that lies ON
-      // the thigh tops (2-4 mm proud all round, the shape of the two thighs
-      // side by side), then turns in under itself at once. So what shows is a
-      // thin line where the seat of the trousers meets the legs — not a band
-      // standing out round the hips with the thighs domed in under it (a
-      // centimetre of ledge: the padded look), and not a brief hanging to the
-      // crotch. Below the hem the block is well inside the thighs: only the
-      // gusset between them.
-      { y: pBot,                a: Math.min(Math.max(0.26 * pw, P.hipX - P.legW / 2 + 0.05), 0.40 * thighOut), zf: Math.min(0.40 * pd, 0.45 * thighF), zb: 0.50 * pd, zc: 0, n: 2.2, tw: 0 },
-      { y: hipY - 0.085 * pk,   a: 0.55 * thighOut, zf: 0.55 * thighF, zb: 0.80 * pd, zc: 0, n: 2.3, tw: 0 },
-      { y: hipY - 0.055 * pk,   a: thighOut - 0.05, zf: 0.70 * thighF, zb: 0.95 * pd, zc: 0, n: 2.4, tw: 0 },
-      // (5 mm proud at the hem: the thigh is a 12-sided loft whose flats sit 3 mm
-      // inside its round, and a hem nearer than that let them saw through it)
-      { y: hipY - 0.03 * pk,    a: P.hipX + thighF * 0.975 + 0.007, zf: thighF + 0.009, zb: 0.98 * pd, zc: 0, n: 2.6, tw: 0 },
-      { y: hipY + 0.05 * pk,    a: hipOut + 0.003, zf: Math.min(0.92 * pd, lerpN(thighF + 0.009, topF, 0.6)), zb: lerpN(0.98 * pd, topB, 0.25), zc: 0, n: 2.5, tw: 0 },
-      { y: hipY + 0.10 * pk,    a: Math.min(hipOut, lerpN(hipOut, pw, 0.6)) * 0.985, zf: lerpN(thighF + 0.009, topF, 0.9), zb: lerpN(0.98 * pd, topB, 0.7), zc: 0, n: 2.45, tw: 0 },
+      /* WHERE THE HIPS END (owner 2026-11-22, three rounds: "middle crotch on
+         men and women still looks like diaper"). Every version of a hip block
+         that hangs over the thighs reads as something WORN over the trousers:
+         proud of them it is padding, level round the hips it is a band with a
+         tab, cut in a V it is a brief. So in trousers the block does not hang
+         over the thighs at all: it ends ON the hip joint line, its front the
+         exact outline of the two thigh tops side by side and 1 mm proud of
+         them (torsoBake snaps it: the thighs are squared and full width there,
+         LIMB_SHAPES legUp), turns in at once, and the legs run up to the hips as legs,
+         with a seam between them. Behind, it still dips under the seat (tb):
+         a seat hangs lower than the hip joint, and the fold under it is the
+         one line a pair of trousers really shows.
+         A BRIEF is the other case (bare thighs under a swimsuit: partRings
+         spec.brief): there the hem is cut along the groin, from the hip at the
+         side down to the crotch in front (tf), and stands a few millimetres
+         proud of the thighs, because that IS a garment over the legs. */
+      { y: pBot,                a: Math.min(Math.max(0.26 * pw, P.hipX - P.legW / 2 + 0.05), 0.40 * thighOut), zf: Math.min(0.40 * pd, 0.45 * thighF), zb: 0.55 * thighF, zc: 0, n: 2.2, tw: 0 },
+      { y: hipY - 0.06 * pk,    a: 0.62 * thighOut, zf: 0.60 * thighF, zb: 0.70 * thighF, zc: 0, n: 2.3, tw: 0.52 },
+      { y: hipY - 0.012 * pk,   a: thighOut - 0.045, zf: 0.74 * thighF, zb: 0.80 * thighF, zc: 0, n: 2.4, tw: 1 },
+      { y: hipY,                a: thighOut + 0.0015, zf: thighF + 0.0015, zb: lerpN(0.98 * pd, thighF, 0.4), zc: 0, n: 4, tw: 1 },
+      { y: hipY + 0.06 * pk,    a: hipOut + 0.002, zf: Math.min(0.92 * pd, lerpN(thighF, topF, 0.6)), zb: lerpN(0.98 * pd, topB, 0.25), zc: 0, n: 3.3, tw: 0.3 },
+      { y: hipY + 0.10 * pk,    a: Math.min(hipOut, lerpN(hipOut, pw, 0.6)) * 0.985, zf: lerpN(thighF, topF, 0.9), zb: lerpN(0.98 * pd, topB, 0.7), zc: 0, n: 2.8, tw: 0.08 },
       { y: pTop,                a: Math.min(0.95 * pw, 0.97 * hipOut), zf: topF, zb: topB, zc: 0, n: 2.45, tw: 0 },
     ]);
     // ---- the COLUMN (chest + waist + shoulders), rows in D/W units ----------
@@ -3689,6 +3707,9 @@
     S = TORSO_SPECS[key] = {
       key, P, vs, base, hipY, neckY, shoulderY, pivotY, yN, tf, tb, sp, W, D, R, AX,
       nRx, nRz, nZc, pTop, pBot, hipOut, pw, pd, pk, at, pel,
+      // the pelvis hem's tilt (front centre down to the crotch, back under the seat) and the heights its rings must sit on
+      pelTf: 0.095 * pk, pelTb: -0.09 * pk, thighF, thighOut,
+      pelYs: [hipY - 0.06 * pk, hipY - 0.012 * pk, hipY, hipY + 0.06 * pk, hipY + 0.10 * pk],
       yBot: kY(-0.05), yTop: yN, chestBot: base + waistH, waistH,
       // shape weights (features), by sex, physique and age
       fem, kW,
@@ -3696,7 +3717,7 @@
       bust: fem * ph.bust, bustK: 0.665 - 0.05 * elder,
       belly: (P.child ? 0 : ph.belly * (P.fem ? 0.6 : 1)) + 0.35 * elder,
       scap: ph.scap * (0.4 + 0.6 * kidK), spine: ph.spine * (0.4 + 0.6 * kidK), elder,
-      glute: (1 + 0.6 * fem) * (ph.soft ? 1.25 : ph === PHYSIQUE.slim ? 0.8 : 1) * (0.5 + 0.5 * kidK),
+      glute: (1 + 1.5 * fem) * (ph.soft ? 1.25 : ph === PHYSIQUE.slim ? 0.8 : 1) * (0.5 + 0.5 * kidK),
     };
     return S;
   }
@@ -3713,7 +3734,7 @@
       // THE BUST: a lobe each side, full below (a short underside) and sloping
       // away to the collarbone above, ~4 cm proud on an average woman (was
       // 1.9: under a shirt it did not read at all)
-      if (S.bust > 0) dz += S.bust * 0.46 * D * gss(k - S.bustK, k > S.bustK ? 0.13 : 0.07) * gss(ax - 0.42, 0.25) * fw;
+      if (S.bust > 0) dz += S.bust * 0.60 * D * gss(k - S.bustK, k > S.bustK ? 0.115 : 0.07) * gss(ax - 0.44, 0.235) * fw;
       if (S.belly > 0) dz += S.belly * 0.16 * D * gss(k - 0.27, k > 0.27 ? 0.15 : 0.10) * gss(xn, 0.55) * fw;
     } else if (c < 0) {
       const bw = Math.pow(-c, 0.8);
@@ -3728,7 +3749,8 @@
     let dz = 0;
     if (c < 0) {
       const bw = Math.pow(-c, 0.8);
-      dz -= S.glute * 0.16 * pd * gss(y - (S.hipY - 0.015 * pk), 0.055 * pk) * gss(ax - 0.45, 0.30) * bw;
+      // (two cheeks, fullest a little under the hip joint, standing out over the fold the hem draws under them)
+      dz -= S.glute * 0.17 * pd * gss(y - (S.hipY - 0.025 * pk), y > S.hipY - 0.025 * pk ? 0.08 * pk : 0.055 * pk) * gss(ax - 0.46, 0.28) * bw;
       dz += 0.025 * pd * gss(xn, 0.06) * sm01((S.hipY + 0.03 * pk - y) / (0.03 * pk)) * bw;       // the cleft
     } else if (c > 0 && S.belly > 0) {
       dz += S.belly * 0.05 * pd * gss(y - (S.pTop - 0.03 * pk), 0.05 * pk) * gss(xn, 0.6) * Math.pow(c, 0.8);
@@ -3755,7 +3777,13 @@
     const x = R.a * Math.sign(s) * Math.pow(Math.abs(s), e);
     _rp.x = x; _rp.xn = R.a > 1e-6 ? x / R.a : 0; _rp.c = c;
     _rp.z = R.zc + (c >= 0 ? R.zf : R.zb) * Math.sign(c) * Math.pow(Math.abs(c), e);
-    _rp.y = R.y + (R.tw || 0) * (c > 0 ? -(R.tf || 0) * Math.pow(c, 1.5) : (R.tb || 0) * Math.pow(-c, 1.5));
+    // (R.vx: a tilt laid out ACROSS the body instead of by front-ness — a V
+    // from the side down to the front centre, a shallow bowl behind: the
+    // pelvis's hem along the groin and under the seat)
+    if (R.vx) {
+      const ax = Math.min(1, Math.abs(_rp.xn) / R.vx);
+      _rp.y = R.y + (R.tw || 0) * (c > 0 ? -(R.tf || 0) * Math.pow(1 - ax, 1.25) : (R.tb || 0) * (1 - ax * ax));
+    } else _rp.y = R.y + (R.tw || 0) * (c > 0 ? -(R.tf || 0) * Math.pow(c, 1.5) : (R.tb || 0) * Math.pow(-c, 1.5));
     return _rp;
   }
   // Ring heights for [y0, y1] spaced by ARC LENGTH through the shape (width,
@@ -4013,8 +4041,21 @@
     const S = spec.S, far = lod >= 2 ? 1 : 0, part = spec.part;
     const rings = [];
     if (part === "pelvis") {
-      const ys = sampleYs(S.pel, null, S.pBot, S.pTop, TORSO_COUNTS.pelvis[far]);
-      for (let i = ys.length - 1; i >= 0; i--) { const r = S.pel(ys[i]); r.k = -1; rings.push(r); }
+      // (rings ON the hem rows, so the hem is a crisp edge and not a smear between two samples)
+      let ys = sampleYs(S.pel, null, S.pBot, S.pTop, TORSO_COUNTS.pelvis[far]).concat(S.pelYs || []).sort((a, b) => a - b);
+      ys = ys.filter((y, i) => i === 0 || y - ys[i - 1] > 0.004 * S.pk || (S.pelYs || []).indexOf(y) >= 0);
+      ys = ys.filter((y, i) => i === ys.length - 1 || ys[i + 1] - y > 0.004 * S.pk || (S.pelYs || []).indexOf(y) >= 0);
+      for (let i = ys.length - 1; i >= 0; i--) {
+        const r = S.pel(ys[i]); r.k = -1;
+        // the fold under the seat always; the V of the groin only on a brief,
+        // which also stands proud of the thighs it is worn over (fading up to the waistband)
+        r.tf = spec.brief ? S.pelTf : 0; r.tb = S.pelTb; r.vx = 1;
+        if (spec.brief && ys[i] >= S.hipY - 1e-6) {
+          const up = 0.0055 * cl01((S.pTop - ys[i]) / Math.max(1e-6, S.pTop - S.hipY));
+          r.a += up; r.zf += up;
+        }
+        rings.push(r);
+      }
       // the waistband: a ledge that slopes in and up under the shirt
       const t = S.pel(S.pTop);
       rings.unshift({ y: S.pTop + 0.012 * S.vs, a: t.a * 0.84, zf: t.zf * 0.84, zb: t.zb * 0.84, zc: 0, n: t.n, tw: 0, k: -1 });
@@ -4156,7 +4197,7 @@
     // a jacket a few mm off the body needs finer columns than the body: two
     // lofts of different squareness cut different chords between vertices
     // (a woman's chest is finer round: seven columns a side drew her bust as two facets)
-    const nq = lod >= 2 ? 3 : (part === "jacket" ? 11 : (S.bust > 0.5 ? 9 : 7)), RV = 4 * (nq + 1);
+    const nq = lod >= 2 ? 3 : (part === "jacket" ? 11 : (S.bust > 0.5 ? 11 : 7)), RV = 4 * (nq + 1);
     const capTop = part === "chest" || part === "waist" || part === "pelvis" || (part === "collar" && !spec.bare);
     const capBot = part === "chest" || part === "waist" || part === "pelvis";
     const nv = rings.length * RV + 2 * (2 * RV + 1);              // rings + room for either cap kind
@@ -4178,7 +4219,22 @@
         // v never sits ON the row edge (the next atlas row is a cut jacket);
         // taken before the lift, so the painted hem follows the cutaway
         const v = 0.01 + 0.98 * (R.v != null ? R.v : cl01((p.y - bb) / bh));
-        if (part === "pelvis") z += pelvisFeatZ(S, p.y, p.xn, p.c);
+        if (part === "pelvis") {
+          z += pelvisFeatZ(S, p.y, p.xn, p.c);
+          // THE HEM IS THE THIGHS' OWN OUTLINE: at the hip line the front of the
+          // block is the two squared thigh tops side by side (flat between
+          // their centres, each one's rounded corner outside), a hair proud,
+          // easing into the block's own section by 5 cm above. A plain
+          // superellipse there crossed in and out of the thighs: a ragged hem.
+          if (p.c > 0 && R.y >= S.hipY - 1e-6 && S.thighF > 0) {
+            const w = cl01((S.hipY + 0.05 * S.pk - R.y) / (0.05 * S.pk));
+            if (w > 0) {
+              const r = S.thighF, d = Math.abs(p.x) - S.P.hipX, q = d <= 0 ? 0 : Math.min(1, d / r);
+              const zH = r * Math.pow(1 - Math.pow(q, 3.4), 1 / 3.4) + (spec.brief ? 0.005 : 0.0015);
+              z = lerpN(z, zH, w);
+            }
+          }
+        }
         else if (part !== "collar") z += featZ(S, R.k, p.xn, p.c) * shellRelief;
         if (lap && p.c > 0.15) z += lapelRoll(S, lap, p.x, 1 - v) * Math.min(1, (p.c - 0.15) / 0.3);
         let x = p.x, y = p.y;
@@ -4294,7 +4350,7 @@
     // painted-collar pools one per neck, not one per body type
     const who = part === "collar" ? "N" + [S.nRx, S.nRz, S.nZc, S.tf, S.tb, S.vs].map((x) => x.toFixed(4)).join(",") : S.key;
     if (part === "collar") sp.key = who + "|collar|" + (sp.bare ? 1 : 0) + "|" + [box.w, box.h, box.d].map((x) => (+x).toFixed(4)).join(",");
-    else sp.key = who + "|" + part + "|" + [box.w, box.h, box.d, box.y, origin, sp.y0 || 0, sp.y1 || 0, sp.off || 0, sp.flat || 0, sp.bare ? 1 : 0, sp.seated ? 1 : 0].map((x) => (+x).toFixed(4)).join(",") +
+    else sp.key = who + "|" + part + "|" + [box.w, box.h, box.d, box.y, origin, sp.y0 || 0, sp.y1 || 0, sp.off || 0, sp.flat || 0, sp.bare ? 1 : 0, sp.seated ? 1 : 0, sp.brief ? 1 : 0].map((x) => (+x).toFixed(4)).join(",") +
       (sp.lapel ? "|L" + [sp.lapel.xr, sp.lapel.yb, sp.lapel.g0].map((x) => (+x).toFixed(4)).join(",") : "");
     return sp;
   }
@@ -4702,7 +4758,10 @@
     const TS = torsoSpec(P, form, elder, headZ);
     // c.pelvis: the hips in their own colour (swim briefs over bare thighs).
     const pelvisY = hipY + 0.03;
-    const pelvis = partMesh(partSpec(TS, "pelvis", { w: P.pelvisW, h: P.pelvisH, d: P.pelvisD, y: pelvisY }, pelvisY),
+    // A BRIEF or the top of the trousers (torsoSpec: WHERE THE HIPS END): bare
+    // thighs, or hips in a cloth of their own, wear the brief's cut
+    const briefCut = c.legs === skinC || (c.pelvis != null && c.pelvis !== c.legs && c.pelvis !== skinC);
+    const pelvis = partMesh(partSpec(TS, "pelvis", { w: P.pelvisW, h: P.pelvisH, d: P.pelvisD, y: pelvisY }, pelvisY, { brief: briefCut }),
       cmat(c.pelvis != null ? c.pelvis : c.legs));
     pelvis.position.set(0, pelvisY, 0);
     body.add(pelvis);

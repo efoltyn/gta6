@@ -607,7 +607,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=anatomy1122d"></script>
+  <script src="src/entities/character.js?v=hips1122e"></script>
   <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -1344,7 +1344,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=pres1028"></script>
 <script src="src/city/economy.js?v=isleopen1022"></script>
-<script src="src/city/clothes.js?v=people1102"></script>
+<script src="src/city/clothes.js?v=hips1122e"></script>
 <script src="src/entities/dutykit.js?v=anatomy1122"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
@@ -1406,7 +1406,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=both1029"></script>
-<script src="src/city/vehicles.js?v=wake1122a"></script>
+<script src="src/city/vehicles.js?v=layout1122"></script>
 <script src="src/city/carinstances.js?v=stick187"></script>
 <script src="src/city/playeraircraft.js?v=islesmem1029"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1634,6 +1634,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/helditems.js?v=arms1009b"></script>
 <script src="src/city/carstrike.js?v=protest1022"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
+<!-- THE PEOPLE BEHIND THE COUNTER (city/keepers.js): the brain a shop vendor
+     and a posted bank body run at their post (peds.js think() asks it first),
+     and the bank gunpoint rows (Open the vault, Empty the drawer). After
+     bank.js (CBZ.cityVaultOpenBy) and interact.js (the registry). -->
+<script src="src/city/keepers.js?v=keep1122"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
      near you, plus its real catalog stock as the real item models, buyable
@@ -1694,7 +1699,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE WORLD'S ONE ZONING FIELD (layout wave): intensity, use, the ceiling a grown district may rise to,
      the freeway frontage buffer. Pure data off the regions + highway table; metro.js plans with it. -->
 <script src="src/city/zoning.js?v=base1012"></script>
-<script src="src/city/metroplan.js?v=reach1013"></script>
+<script src="src/city/metroplan.js?v=layout1122"></script>
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
 <script src="src/city/countryside.js?v=fortb1009"></script>
@@ -1704,7 +1709,7 @@ document.body.appendChild(b);}}catch(e){}})();
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=r187a"></script>
 <script src="src/city/metro_ground.js?v=r187c"></script>
-<script src="src/city/metro.js?v=mrg10200048"></script>
+<script src="src/city/metro.js?v=layout1122"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- WHO A PERSON IS AND WHAT YOU CAN DO TO HIM: the role -> verbs table the
      registry filters every street verb through, the one-line title over a

@@ -60,6 +60,24 @@ const subjects = [
   { id: "hips-threeq", label: "Hips, close: three-quarter", studio: true, view: "threeq", frame: "hips",
     who: [inmate("black"), inmate("white", "inmate_tank"), woman(0, { wear: "street" })],
     focus: "The same from 40 degrees: the front of the hip and the seat." },
+  { id: "hips-back", label: "Hips, close: back", studio: true, view: "back", frame: "hips",
+    who: [inmate("black"), inmate("white", "inmate_tank"), woman(0, { wear: "street" })],
+    focus: "The seat from behind: it should stand out over the back of the thigh with a fold under it." },
+  { id: "women-swim-front", label: "Women in a two-piece: front", studio: true, view: "front", fit: "swim",
+    who: [woman(0), woman(1), woman(2), woman(3)],
+    focus: "The game's own beach two-piece (top, bare middle, brief, bare legs): the body with nothing hiding it. Waist into hips into thighs, the line of the brief along the groin." },
+  { id: "women-swim-threeq", label: "Women in a two-piece: three-quarter", studio: true, view: "threeq", fit: "swim",
+    who: [woman(0), woman(1), woman(2), woman(3)],
+    focus: "Bust, the small of the back, the seat, the thigh." },
+  { id: "women-swim-side", label: "Women in a two-piece: side", studio: true, view: "side", fit: "swim",
+    who: [woman(0), woman(1), woman(2), woman(3)],
+    focus: "In profile: chest, flat middle, a seat that stands out behind." },
+  { id: "women-swim-back", label: "Women in a two-piece: back", studio: true, view: "back", fit: "swim",
+    who: [woman(0), woman(1), woman(2), woman(3)],
+    focus: "From behind: shoulders, waist, hips, seat." },
+  { id: "men-swim-front", label: "Men in trunks: front", studio: true, view: "front", fit: "swim",
+    who: [man(0), man(1), man(2), man(3)],
+    focus: "Bare chest and legs with a brief: the groin line on a man." },
   { id: "men-front", label: "Men, four body types: front", studio: true, view: "front", fit: "gym",
     who: [man(0), man(1), man(2), man(3)],
     focus: "Average, slim, heavy, muscular. Read the shoulder line from the neck to the arm, how far the arms hang from the ribs, the length of the forearm and the leg, and the size of the head on the body." },
@@ -214,7 +232,12 @@ export async function stagePeople(input) {
     if (w.physique) c.physique = w.physique;
     if (w.age != null) c.age = w.age;
     if (w.hairStyle) c.hairStyle = w.hairStyle;
-    if (fit === "gym") {
+    if (fit === "swim") {
+      // the beach's own two-piece / trunks (city/beach.js beachSwimwear): bare skin, a top, a brief
+      const all = { torso: w.skin, collar: w.skin, arms: w.skin, waist: w.skin, pelvis: w.skin, legs: w.skin, shins: w.skin };
+      if (w.build === "f") Object.assign(c, all, { torso: 0x2a3a8a, pelvis: 0x2a3a8a });
+      else Object.assign(c, all, { pelvis: 0x1f3d4d });
+    } else if (fit === "gym") {
       // bare arms and legs; the women a bare midriff: the body is the subject
       if (w.build === "f") Object.assign(c, { torso: 0x8a2f4a, collar: w.skin, arms: w.skin, waist: w.skin, pelvis: 0x20242c, legs: 0x20242c, shins: w.skin });
       else Object.assign(c, { torso: 0x34404c, collar: w.skin, arms: w.skin, pelvis: 0x1d2530, legs: 0x1d2530, shins: w.skin });
