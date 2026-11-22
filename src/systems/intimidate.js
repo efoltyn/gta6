@@ -151,6 +151,14 @@
     }
   }
 
+  // a GUN (not a shank: prisonshanks.js sets `armed` for the blade but never
+  // hasGun) in his hand right now
+  function gunInHand(a) {
+    if (!a || a._holstered || a._gunHidden) return false;
+    if (a.kind === "guard" || a.kind === "warden") return !!(a._sidearm || (a.armed && a.weapon));
+    return !!(a.hasGun && a.armed);
+  }
+
   // first contact: surrender (hands up) or draw, based on stats + situation.
   function decideReaction(n, lethal) {
     const p = n.personality || {}, r = n.ratings || {};
@@ -193,6 +201,19 @@
        The other two land in the SAME `scared` body as an empty-handed man: he
        put the thing away (or on the floor) and got his hands up, which is
        exactly what the surrender pose already draws. Nothing to special-case. */
+    /* A GUN ALREADY IN HIS HAND IS NEVER A SURRENDER (owner, 2026-11-21:
+       "they put their hands up when you point a gun at them when they already
+       had a gun out"). In here a man with a gun has it out (prisondrops.js
+       armNpc shows it the moment he picks it up), so there is nothing to draw
+       and nothing to roll: the muzzle comes up on you. Hands up is only ever
+       the answer of a man with empty hands. */
+    if (gunInHand(n)) {
+      n.intimidMode = "standoff";
+      n.poseHandsUp = false; n.poseAimBack = true;
+      if (n.char) { n.char.handsUp = false; n.char.surrender = false; }
+      n.intimidFireT = 0.8 + ((n.personality && n.personality.nerve) || 0.5) * 1.7;
+      return;
+    }
     if (CBZ.prisonShankGunpoint) {
       let blade = null;
       try { blade = CBZ.prisonShankGunpoint(n, { lethal: lethal, dist: playerDist(n) }); } catch (e) {}
@@ -319,7 +340,9 @@
        The warden nearly never folds — it is HIS block — and a man already
        mid-chase is committed. No rng ceremony beyond one roll. */
     const d = playerDist(gd);
-    let fold = gd.kind === "warden" ? 0.2 : 0.75;
+    // HIS GUN IS ALREADY OUT (a gunfight sidearm, a tower rifle): a screw
+    // with a weapon in his hand answers yours with it, never with his hands
+    let fold = gunInHand(gd) ? -1 : gd.kind === "warden" ? 0.2 : 0.75;
     if (d > 8) fold -= 0.3;
     if (gd.hunt > 0) fold -= 0.25;
     if (rng() < fold) {
@@ -343,7 +366,7 @@
     }
   }
   // the body above is decided; this is what (if anything) he says about it
-  const AIM_HOW = { scared: "handsUp", draw: "draw", run: "sprint", charge: "fight" };
+  const AIM_HOW = { scared: "handsUp", draw: "draw", standoff: "draw", run: "sprint", charge: "fight" };
   function voiceAim(n) {
     const how = AIM_HOW[n.intimidMode];
     if (how && CBZ.voice) CBZ.voice.react(n, "aimedAt", { by: CBZ.player, how: how, why: "gun" });
@@ -479,7 +502,10 @@
             // code reads like it should work.
           }
         } else if (n.intimidMode === "standoff") {
-          if (aimedHere) {
+          if (aimedHere && n._gunPose === "aim") {
+            // systems/brain_prison.js's engage owns his trigger (combatIQ's
+            // fire token): a second cadence here doubled his rate of fire
+          } else if (aimedHere) {
             // you're still pointing at him — he steels himself, then fires
             n.intimidFireT -= dt;
             if (n.intimidFireT <= 0) {
@@ -582,6 +608,23 @@
     // he answers for the gun (guardReleased), he does not shrug it off.
     if (t.kind === "guard" || t.kind === "warden") guardReleased(t);
     else endIntimid(t);
+  };
+
+  /* A man who backed down to words (ai.js CBZ.prisonThreaten) stands in the
+     same body a muzzle gets: hands up, facing you, frozen, for `secs`. The
+     panel then offers the gunpoint set (Rob / Tie / Release). Who backs down
+     is decided there, not here. */
+  CBZ.intimidateHold = function (n, secs) {
+    if (!n || !n.group || !alive(n) || n.cuffed) return false;
+    if (!n._intimidInit) initN(n);
+    if (n.intimidMode && n.intimidMode !== "scared") return false;
+    // a man with a gun in his hand never backs down with his hands up
+    if (gunInHand(n)) return false;
+    n.intimidMode = "scared";
+    n.intimidT = Math.max(n.intimidT || 0, secs || 5);
+    n.poseHandsUp = true; n.poseAimBack = false;
+    if (n.char) n.char.handsUp = true;
+    return true;
   };
 
   const intimidate = {

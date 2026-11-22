@@ -143,7 +143,7 @@
       { axis: "z", bevel: 0.3 * S, y: Yb(52), z: Z(303), holes: [
         MM([[-9, 4], [9, 4], [9, 16], [-9, 16]]), MM([[-9, 21], [9, 21], [9, 30], [-9, 30]]), MM([[-9, 34], [9, 34], [9, 38], [-9, 38]])] });
     K.prof(g, "mgl.post", MM([[-14, 0], [14, 0], [14, 30], [10, 30], [10, 8], [2, 8], [2, 29], [-2, 29], [-2, 8], [-10, 8], [-10, 30], [-14, 30]]),
-      8 * S, mat.black, { axis: "z", bevel: 0.4 * S, y: Yb(44), z: Z(486) });
+      8 * S, mat.black, { axis: "z", bevel: 0.4 * S, y: Yb(48.5), z: Z(486) });
 
     // the hand on the fire grip (top centre a few mm down the grip)
     const ax = [-Math.sin(R), -Math.cos(R)], nr = [Math.cos(R), -Math.sin(R)];
@@ -181,7 +181,12 @@
       stock: [0, Yb(-44), Z(0)],
       bolt: null,
       charge: [0, Yb(CYL_Y), Z(507)],
-      sight: { rear: [0, Yb(73), Z(303)], front: [0, Yb(73), Z(486)], eyeRelief: 0.08, type: "iron" },
+      // the post's tip (48.5 + 29) centred in the leaf's middle window
+      // (73..82), the eye on a cheek weld ~14 cm behind the leaf. (It was
+      // 8 cm, the eye over the receiver: the leaf frame spanned a fifth of
+      // the screen and the strap and rail sat inside the near plane; and the
+      // post's tip sat ON the window's bottom bar instead of inside it.)
+      sight: { rear: [0, Yb(77.5), Z(303)], front: [0, Yb(77.5), Z(486)], eyeRelief: 0.14, type: "iron" },
       optic: { type: "iron", mag: 1 },
     });
     return g;

@@ -466,7 +466,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
      in front of him (threat by sight, the one line picker, panic by sight).
      Before read.js / peds.js / prisonvoice.js, which all call it. -->
-<script src="src/systems/voice.js?v=trunk1022"></script>
+<script src="src/systems/voice.js?v=hold1122"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -593,7 +593,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/pushables.js?v=loose1013"></script>
 <script src="src/world/carfx.js?v=r187a"></script>
 <script src="src/world/ground.js?v=dsl3"></script>
-<script src="src/world/cellblock.js?v=cmd1022o"></script>
+<script src="src/world/cellblock.js?v=race1121"></script>
 <script src="src/world/yard.js?v=tow929"></script>
 <script src="src/world/razorwire.js?v=dsl3"></script>
 <script src="src/world/towers.js?v=tow929"></script>
@@ -739,25 +739,25 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/economy.js?v=venue1022"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/weapon-data.js?v=slotkey1013"></script>
+<script src="src/weapons/weapon-data.js?v=hold1122"></script>
 <script src="src/weapons/ballistics.js?v=inf1028c"></script>
 <script src="src/weapons/weapon-scale.js?v=nations1026"></script>
 <script src="src/weapons/optics.js?v=anchor1"></script>
-<script src="src/weapons/appearances/sidearm.js?v=mce86a5"></script>
-<script src="src/weapons/appearances/shotgun.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/sidearm.js?v=hold1122"></script>
+<script src="src/weapons/appearances/shotgun.js?v=hold1122"></script>
 <script src="src/weapons/appearances/carbine.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/smg.js?v=mce86a5"></script>
-<script src="src/weapons/appearances/taser.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/taser.js?v=hold1122"></script>
 <script src="src/weapons/appearances/bazooka.js?v=mc9fb2f"></script>
-<script src="src/weapons/appearances/glauncher.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/glauncher.js?v=hold1122"></script>
 <script src="src/weapons/appearances/grenade.js?v=anchor1"></script>
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
 <!-- systems/smoketrail.js: every rocket's and volcanic bomb's trail as a shaded smoke tube (CBZ.smokeTrail) -->
 <script src="src/systems/smoketrail.js?v=r187a"></script>
 <script src="src/weapons/munitions.js?v=fx1029"></script>
-<script src="src/weapons/appearances/ak47.js?v=mce86a5"></script>
-<script src="src/weapons/appearances/revolver.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/ak47.js?v=hold1122"></script>
+<script src="src/weapons/appearances/revolver.js?v=hold1122"></script>
 <script src="src/weapons/appearances/deagle.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/uzi.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/sniper.js?v=mce86a5"></script>
@@ -766,7 +766,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <script src="src/weapons/flashlight.js?v=anchor1"></script>
-<script src="src/systems/actorweapons.js?v=nations1026"></script>
+<script src="src/systems/actorweapons.js?v=hold1122"></script>
 <script src="src/city/weapon_thumbnails.js?v=stall1022"></script>
 <script src="src/systems/holsterprops.js?v=bodyfix1009b"></script>
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -807,12 +807,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
-<script src="src/entities/heritage.js?v=w09290250"></script>
+<script src="src/entities/heritage.js?v=race1121"></script>
 <!-- THE CARS: the yard sorts itself by race (heritage -> car), no colours.
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=nopitch1022"></script>
-<script src="src/entities/npc.js?v=nopitch1022"></script>
-<script src="src/entities/ai.js?v=wrap1029"></script>
+<script src="src/entities/npc.js?v=race1121"></script>
+<script src="src/entities/ai.js?v=hold1122"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -979,18 +979,18 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reinforcements.js?v=leave1014"></script>
 <script src="src/systems/lockdown.js?v=nopitch1022"></script>
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=cmd1022o"></script>
+<script src="src/systems/prisonwarden.js?v=hold1122"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
-<script src="src/systems/reactions.js?v=looks1022b"></script>
+<script src="src/systems/reactions.js?v=hold1122"></script>
 <script src="src/systems/facial.js?v=tvanchor1020"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=pace1015"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/combat.js?v=mvoice1butt10"></script>
 <script src="src/systems/killstreaks.js?v=jailv1001"></script>
-<script src="src/systems/interact.js?v=contact1122"></script>
+<script src="src/systems/interact.js?v=contact1122b"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
 <script src="src/systems/prisontrade.js?v=icon1028"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
@@ -1008,7 +1008,7 @@ document.body.appendChild(b);}}catch(e){}})();
      interactions.js: its capture-phase keys must run ahead of the pinned
      prompts' bound keys while you stand in a car. -->
 <script src="src/systems/liftpanel.js?v=lpanel1022"></script>
-<script src="src/systems/interactions.js?v=btn1121"></script>
+<script src="src/systems/interactions.js?v=name1121"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=jailv1001"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
@@ -1070,9 +1070,9 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=pres1028"></script>
-<script src="src/systems/fpsmode.js?v=stall1022"></script>
+<script src="src/systems/fpsmode.js?v=hold1122"></script>
 <script src="src/systems/gunfx.js?v=canvas1029"></script>
-<script src="src/systems/intimidate.js?v=stall1022"></script>
+<script src="src/systems/intimidate.js?v=hold1122"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
      Additive: registers its own updaters (gated by game.mode) and builds
@@ -1771,7 +1771,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
      person, reticles at infinity on red-dot glass, a real scope (magnified
      second camera in the ocular), sway + breath, the 3P cheek weld. -->
-<script src="src/systems/sights.js?v=r187d"></script>
+<script src="src/systems/sights.js?v=hold1122"></script>
 <!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>

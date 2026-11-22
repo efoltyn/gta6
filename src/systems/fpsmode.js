@@ -5030,8 +5030,8 @@
     // shoulder before it can fire — switching itself stays instant.
     shotCD = Math.max((WEAPONS[fps.weapon] && WEAPONS[fps.weapon].equip) || 0, Math.min(shotCD, 0.08));
     syncAmmo();
-    weaponModels.forEach((m, i) => { m.visible = i === fps.weapon; });
-    carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });
+    weaponModels.forEach((m, i) => { if (m) m.visible = i === fps.weapon; });
+    carriedModels.forEach((m, i) => { if (m) m.visible = i === fps.weapon; });
     muzzle.position.copy(weaponModels[fps.weapon].userData.muzzle);
     CBZ.sfx && CBZ.sfx("switch");
     // the boxed hotbar highlights the slot you just switched to, which is the
@@ -5069,8 +5069,8 @@
     fps.reloading = 0;
     shotCD = Math.max((WEAPONS[fps.weapon] && WEAPONS[fps.weapon].equip) || 0, Math.min(shotCD, 0.08));  // heavy guns take a beat to shoulder
     syncAmmo();
-    weaponModels.forEach((m, i) => { m.visible = i === fps.weapon; });
-    carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });
+    weaponModels.forEach((m, i) => { if (m) m.visible = i === fps.weapon; });
+    carriedModels.forEach((m, i) => { if (m) m.visible = i === fps.weapon; });
     if (weaponModels[fps.weapon] && weaponModels[fps.weapon].userData.muzzle) muzzle.position.copy(weaponModels[fps.weapon].userData.muzzle);
     CBZ.sfx && CBZ.sfx("switch");
     // the boxed hotbar highlights the slot you just switched to, which is the
@@ -5357,8 +5357,9 @@
     normalizeWeapon();
     fps.reloading = 0;
     syncAmmo();
-    weaponModels.forEach((m, i) => { m.visible = i === fps.weapon; });
-    carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });
+    // lazily built: a slot can hold undefined until its model is first drawn
+    weaponModels.forEach((m, i) => { if (m) m.visible = i === fps.weapon; });
+    carriedModels.forEach((m, i) => { if (m) m.visible = i === fps.weapon; });
     setAmmoHud();
     if (CBZ.game.mode === "city" && CBZ.cityHudDirty) CBZ.cityHudDirty();
     // (the view follows the gun on its own: CBZ.viewForHands)
@@ -6002,8 +6003,8 @@
       }
     }
 
-    weaponModels.forEach((m, i) => { m.visible = i === fps.weapon; });
-    carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });
+    weaponModels.forEach((m, i) => { if (m) m.visible = i === fps.weapon; });
+    carriedModels.forEach((m, i) => { if (m) m.visible = i === fps.weapon; });
     // THE RACK: one stroke (CBZ.gunReload.rack), on the viewmodel and the carried gun
     const RLk = CBZ.gunReload;
     const rackDz = RLk ? RLk.rackAt(pumpT) : Math.sin(pumpT * Math.PI) * 0.22;

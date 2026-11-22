@@ -90,6 +90,10 @@ node tools/shot/req.mjs --world president --preset timeline --setup 'cfg_SOME_FL
 ```
 
 - presets: `glance` (chase), `orbit` (chase, 3 orbits, top, first person), `timeline` (0/2/5/10 s)
+- `--world prison --preset ads`: every gun the jail hands out raised to the eye, shot through
+  the game's own lens with a cyan cross on the point of aim (cam `ads:<weaponId>`);
+  `--preset adsside` is the same moment from beside the head, eye = magenta ball
+  (cam `ads:<weaponId>:side`); `hip:<weaponId>` = the gun at rest
 - setup: `at=x,z` (look point, default the player), `heading=deg`, `dist=m`; every other
   key is a page param (`cfg_FLAG=1`, `seed=7`, `mode=...`), or JS with `S` = `CBZ.player`
 - cams: `chase`, `fp`, `top`, `orbit:<yaw>:<pitch>[:dist]`, `at:<x,y,z>:<lx,ly,lz>`

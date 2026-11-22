@@ -66,8 +66,11 @@
     ], 0.040, steel, { bevel: 0.004 });
     K.prof(g, "ak.fsbWings", [[-0.028, 0], [0.028, 0], [0.028, 0.060], [0.016, 0.060], [0.010, 0.016],
       [-0.010, 0.016], [-0.016, 0.060], [-0.028, 0.060]], 0.022, steel, { axis: "z", bevel: 0.003, y: 0.090, z: -1.102 });
-    // the post: round stem, its tip level with the rear notch's floor
-    K.lathe(g, "ak.post", [[0.0035, 0], [0.0035, 0.018], [0.0028, 0.020], [0, 0.020]], 8, mat.black, 0, 0.100, -1.102, { axis: "y" });
+    // the post: round stem, its tip level with the rear notch's SHOULDERS
+    // (0.126), the sight picture: the post fills the U up to its top. (It
+    // stopped at the notch's floor, so down the sights the post's tip only
+    // grazed the bottom of the U and the eye saw an empty notch.)
+    K.lathe(g, "ak.post", [[0.0035, 0], [0.0035, 0.024], [0.0028, 0.026], [0, 0.026]], 8, mat.black, 0, 0.100, -1.102, { axis: "y" });
     K.prof(g, "ak.brake", [[1.150, 0.012], [1.246, 0.012], [1.246, 0.042], [1.214, 0.060], [1.150, 0.060]],
       0.046, mat.black, { bevel: 0.006 });
     const bore = cyl(g, 0.011, 0.006, mat.bore || mat.black, 0, BORE, -1.249, Math.PI / 2);
@@ -124,7 +127,7 @@
         new THREE.Vector3(WELL[0] - MAG[0], WELL[1] - MAG[1], WELL[2] - MAG[2]).normalize()) },
       stock: [0, -0.095, 0.489],
       charge: [0.060, 0.050, -0.285],
-      sight: { rear: [0, 0.120, -0.304], front: [0, 0.120, -1.102], eyeRelief: 0.30, type: "iron" },
+      sight: { rear: [0, 0.126, -0.304], front: [0, 0.126, -1.102], eyeRelief: 0.30, type: "iron" },
       optic: { type: "iron", mag: 1 },
     });
     return g;

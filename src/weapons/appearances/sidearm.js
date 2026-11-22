@@ -303,8 +303,11 @@
       trigger: trig,
       // the thumb: round the back strap, then forward along the left of the
       // frame, riding high (the modern thumbs-forward grip)
-      thumbAim: new THREE.Vector3().copy(u).negate().addScaledVector(fwd, -0.35).addScaledVector(axis, 0.10),
-      thumbAim2: new THREE.Vector3(-0.30, 0.10, -1),
+      // (a builder may aim it itself: a straight stock's thumb goes over the
+      // top of the wrist and forward down the far flank, not up the grip)
+      thumbAim: h.thumbAim ? new THREE.Vector3(h.thumbAim[0], h.thumbAim[1], h.thumbAim[2])
+        : new THREE.Vector3().copy(u).negate().addScaledVector(fwd, -0.35).addScaledVector(axis, 0.10),
+      thumbAim2: h.thumbAim2 ? new THREE.Vector3(h.thumbAim2[0], h.thumbAim2[1], h.thumbAim2[2]) : new THREE.Vector3(-0.30, 0.10, -1),
       at: top.clone(),
     };
     /* Slide the hand along the grip. The web goes as HIGH as the grip allows

@@ -62,7 +62,7 @@
    model that publishes no anchors. One hand or two is not decided here:
    that is CBZ.holds (systems/actorweapons.js).
 
-   ENGINE CONTRACT: plain IIFE on window.CBZ, THREE r128. The pure parts
+   ENGINE CONTRACT: plain IIFE on window.CBZ, THREE r187. The pure parts
    (resolve / fpPose) run headless in tools/ads-check.mjs.
 ============================================================ */
 (function () {

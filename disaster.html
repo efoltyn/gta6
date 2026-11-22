@@ -469,7 +469,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
      in front of him (threat by sight, the one line picker, panic by sight).
      Before read.js / peds.js / prisonvoice.js, which all call it. -->
-<script src="src/systems/voice.js?v=trunk1022"></script>
+<script src="src/systems/voice.js?v=hold1122"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -585,7 +585,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
 <script src="src/world/carfx.js?v=r187a"></script>
-<script src="src/world/cellblock.js?v=cmd1022o"></script>
+<script src="src/world/cellblock.js?v=race1121"></script>
 <!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
      CBZ.spawnPiece at parse time, so they must load after chunks.js/
      pieces.js define it. Nothing else in this file's original 283-284 slot
@@ -753,7 +753,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
-<script src="src/entities/heritage.js?v=w09290250"></script>
+<script src="src/entities/heritage.js?v=race1121"></script>
 <!-- THE CARS: the yard sorts itself by race (heritage -> car), no colours.
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=nopitch1022"></script>
@@ -895,7 +895,7 @@ document.body.appendChild(b);}}catch(e){}})();
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=cmd1022o"></script>
+<script src="src/systems/prisonwarden.js?v=hold1122"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
 <script src="src/systems/weather.js?v=pace1015"></script>
@@ -917,7 +917,7 @@ document.body.appendChild(b);}}catch(e){}})();
      interactions.js: its capture-phase keys must run ahead of the pinned
      prompts' bound keys while you stand in a car. -->
 <script src="src/systems/liftpanel.js?v=lpanel1022"></script>
-<script src="src/systems/interactions.js?v=btn1121"></script>
+<script src="src/systems/interactions.js?v=name1121"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=jailv1001"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'

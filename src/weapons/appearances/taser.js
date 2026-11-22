@@ -57,6 +57,13 @@
     K.prof(g, "x26.trig", PS([[88, -37], [94, -37], [93, -46], [90, -53], [86, -57], [87, -51], [88.5, -45]]), 7 * S, black, { bevel: 0.6 * S });
     // ambidextrous SAFETY switch, top rear, proud of both flanks
     K.prof(g, "x26.safety", PS([[20, -6], [34, -6], [35, -11], [21, -12]]), 35.4 * S, black, { bevel: 0.4 * S });
+    // SIGHTS (the X26 has fixed ones moulded on top: a square-notch rear
+    // at the back of the hump and a front blade just behind the cartridge
+    // bay). Black, so they read against the yellow; the blade's top is
+    // level with the notch's shoulders.
+    K.prof(g, "x26.rsight", MM([[-7, 0], [7, 0], [7, 5], [1.9, 5], [1.9, 2], [-1.9, 2], [-1.9, 5], [-7, 5]]),
+      5 * S, black, { axis: "z", bevel: 0.4 * S, y: Yb(0), z: Z(15) });
+    K.prof(g, "x26.fsight", PS([[128, 0], [140, 0], [140, 5], [131, 5], [128, 2.5]]), 3 * S, black, { bevel: 0.3 * S });
     // CID display on the back face of the rear housing
     K.prof(g, "x26.cid", MM([[-9, -6.5], [9, -6.5], [9, -13.5], [-9, -13.5]]), 1 * S, K.fin("lens"), { axis: "z", bevel: 0, y: Y0, z: Z(-2.8) });
     // LASER + LED windows on the front of the lower frame
@@ -106,7 +113,10 @@
         quat: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)) },
       stock: null, bolt: null,
       charge: [16.9 * S, Yb(-9), Z(27)],
-      optic: { type: "none", mag: 1 },
+      // irons, held out at the arms like a pistol (it had no sight at all:
+      // aiming did nothing, the device stayed at the hip)
+      sight: { rear: [0, Yb(5), Z(15)], front: [0, Yb(5), Z(138)], eyeRelief: 0.42, type: "iron" },
+      optic: { type: "iron", mag: 1 },
     });
     return g;
   };

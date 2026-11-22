@@ -120,16 +120,19 @@
     // SIGHTS: adjustable rear on the top strap, ramped front blade with its
     // red insert facing the eye
     K.prof(g, "py.rsBase", PS([[5, 16], [31, 16], [31, 19.5], [27, 21.2], [8, 21.2], [5, 19.5]]), 12 * S, blue, { bevel: 0.6 * S });
-    K.prof(g, "py.rsBlade", MM([[-7, 0], [7, 0], [7, 7], [1.5, 7], [1.5, 3.5], [-1.5, 3.5], [-1.5, 7], [-7, 7]]),
+    K.prof(g, "py.rsBlade", MM([[-7, 0], [7, 0], [7, 7], [2.1, 7], [2.1, 3.5], [-2.1, 3.5], [-2.1, 7], [-7, 7]]),
       4 * S, black, { axis: "z", bevel: 0.4 * S, y: Yb(21), z: Z(10) });
     cyl(g, 1.4 * S, 2 * S, K.fin("edge"), 6.8 * S, Yb(23.5), Z(20), 0, 0, Math.PI / 2);   // windage screw
     K.prof(g, "py.front", PS([[247, 17], [266, 17], [266, 19.5], [249.5, 29.5], [247, 29.5]]), 3.2 * S, blue, { bevel: 0.3 * S });
     K.prof(g, "py.insert", PS([[246.6, 21.5], [249, 21.5], [249, 28.8], [246.6, 28.8]]), 2.6 * S, red, { bevel: 0 });
 
-    // HAMMER with the checkered spur, raked back over the web of the hand
-    K.prof(g, "py.hammer", PS([[10, 12], [6, 20], [0, 24], [-8, 27], [-16, 28.5], [-21, 27], [-19, 24.5],
-      [-12, 23], [-4, 19], [0, 10], [1, 0], [6, 2]]), 7 * S, blue, { bevel: 0.6 * S });
-    const spurTop = (f) => f < -16 ? 27 + (f + 21) * 0.3 : 28.5 - (f + 16) * 0.1875;
+    // HAMMER with the checkered spur, raked back over the web of the hand.
+    // Its spur stays UNDER the rear notch's floor (24.5): the eye looks over
+    // it into the notch. (It used to crest at 28.5, above the notch's top,
+    // and from the aiming eye it filled the notch and hid the front blade.)
+    K.prof(g, "py.hammer", PS([[10, 12], [6, 18], [0, 20.5], [-8, 22], [-16, 23], [-21, 22], [-19, 19.5],
+      [-12, 18], [-4, 15], [0, 10], [1, 0], [6, 2]]), 7 * S, blue, { bevel: 0.6 * S });
+    const spurTop = (f) => f < -16 ? 22 + (f + 21) * 0.2 : 23 - (f + 16) * 0.125;
     const teeth = [];
     for (let f = -19; f <= -7; f += 2.2) { const y = spurTop(f + 0.5); teeth.push(PS([[f, y - 0.9], [f + 1, y - 0.9], [f + 1, y + 0.5], [f, y + 0.5]])); }
     K.prof(g, "py.spur", teeth, 7.8 * S, black, { bevel: 0 });
@@ -164,7 +167,7 @@
 
     const muzzle = [0, Y0, Z(267)];
     g.userData.muzzle = new THREE.Vector3(muzzle[0], muzzle[1], muzzle[2]);
-    const gc = at(0.38, 0.5), cylC = [0, Yb(CYL_Y), Z(94)], spur = P(-13, 26.5);
+    const gc = at(0.38, 0.5), cylC = [0, Yb(CYL_Y), Z(94)], spur = P(-13, 22);
     // WHERE THE HANDS GO — see systems/gunhands.js. A wheelgun is fed
     // through the cylinder, which swings out to the gun's LEFT.
     g.userData.grips = {
@@ -176,7 +179,9 @@
     const well = [0, Y0, Z(72.6)];
     const magQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0),
       new THREE.Vector3(well[0] - cylC[0], well[1] - cylC[1], well[2] - cylC[2]).normalize());
-    const rs = [0, Yb(24.5), Z(10)], fs = P(247.6, 29.5);
+    // the sight picture: the front blade's top level with the rear notch's
+    // TOP (28), centred in it (the notch floor is 24.5)
+    const rs = [0, Yb(28), Z(10)], fs = P(247.6, 29.5);
     K.anchors(g, {
       k: K_REAL,
       grip: { pos: [0, gc[1], -gc[0]], rake: R },

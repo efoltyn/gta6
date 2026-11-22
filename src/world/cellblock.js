@@ -2700,6 +2700,19 @@
     return seat;
   }
 
+  // one wing, no two men with the same name: re-roll off his heritage's list
+  const usedNames = Object.create(null);
+  function residentName(look, c) {
+    let nm = "";
+    for (let k = 0; k < 8; k++) {
+      nm = (look.heritage && CBZ.heritageName) ? CBZ.heritageName(look.heritage, "name cell " + c.tag + " " + c.i + " " + k)
+        : pick(NAMES, c.x, c.z, 6005 + k);
+      if (!usedNames[nm]) break;
+    }
+    usedNames[nm] = 1;
+    return nm;
+  }
+
   let cast = false;
   function dealCast() {
     if (cast || typeof CBZ.spawnJailNpc !== "function") return;
@@ -2714,6 +2727,12 @@
       const seat = postIn(c, pose);
       const hh = h01(c.x, c.z, 6001);
       let n = null;
+      // WHO HE IS: a resident rolls a heritage off his cell (entities/
+      // heritage.js) — skin range, hair, facial hair, ink, top tied at the
+      // waist; the flat colour pools above are the fallback without that file.
+      const look = CBZ.heritageRoll
+        ? Object.assign(jump(0, 0), CBZ.heritageRoll(null, CBZ.heritageSeeded("cell " + c.tag + " " + c.i)))
+        : jump(pick(SKIN, c.x, c.z, 6003), pick(HAIR, c.x, c.z, 6004));
       try {
         n = CBZ.spawnJailNpc({
           pos: [seat.x, seat.z],
@@ -2723,15 +2742,12 @@
           role: "inmate", speed: 1.3 + hh * 0.7, forceNeutral: true,
           behavior: pick(BEH, c.x, c.z, 6002),
           tagText: "Inmate", tagColor: "#cfe9ff",
-          // WHO HE IS: a resident rolls a heritage off his cell (entities/
-          // heritage.js) — skin range, hair, facial hair, ink, top tied at the
-          // waist — instead of the two flat colour pools above (kept as the
-          // fallback for a boot without that file).
-          skin: CBZ.heritageRoll
-            ? Object.assign(jump(0, 0), CBZ.heritageRoll(null, CBZ.heritageSeeded("cell " + c.tag + " " + c.i)))
-            : jump(pick(SKIN, c.x, c.z, 6003), pick(HAIR, c.x, c.z, 6004)),
+          skin: look,
           data: {
-            name: pick(NAMES, c.x, c.z, 6005), pool: "goods",
+            // his name comes from his heritage's list (heritage.js), not a
+            // shared pool: a man's name fits his face
+            name: residentName(look, c),
+            pool: "goods",
             cell: c.tag,
           },
         });

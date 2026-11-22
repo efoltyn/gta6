@@ -85,11 +85,85 @@
     R.render(CBZ.scene, C);
     return true;
   };
-  S.cams = ["chase", "fp", "top", "orbit:<yawDeg>:<pitchDeg>[:dist]", "at:<x,y,z>:<lx,ly,lz>"];
+  /* THE SIGHT PICTURE (--preset ads): `ads:<weaponId>` puts that gun in the
+     player's hands in first person, holds aim, steps the sim until the raise
+     has settled, and shoots through the GAME's own lens (its ADS fov, the
+     viewmodel on the camera), with a thin cyan cross on the screen centre =
+     the point of aim (bullets fly the camera ray). `ads:<id>:side` is the
+     same moment seen from beside the head (a debug camera 0.55 m to the
+     right), so the eye-to-sight geometry itself is visible. `hip:<id>`: the
+     gun at rest in first person. */
+  var adsOn = null;
+  function adsStage(id, aim) {
+    var key = id + "|" + (aim ? 1 : 0);
+    if (adsOn === key) return true;
+    var P = player();
+    if (!P || !CBZ.unlockWeapon) return false;
+    if (CBZ.unlockWeapon) CBZ.unlockWeapon(id, { select: true });
+    if (CBZ.setCurrentWeapon) CBZ.setCurrentWeapon(id);
+    if (CBZ.game) { CBZ.game.prisonHolstered = false; CBZ.game.cityHolstered = false; }
+    if (CBZ.fpsSelectWeaponId) CBZ.fpsSelectWeaponId(id);
+    if (CBZ.fpsSetActive) CBZ.fpsSetActive(true);
+    if (CBZ.fpsSetAim) CBZ.fpsSetAim(false);
+    var step = function (n) { for (var i = 0; i < n; i++) { P.hp = Math.max(P.hp || 0, 100); if (window.__tb) __tb.step(1); else CBZ.stepSim(1 / 60); } };
+    step(45);                                    // the draw / swap
+    if (CBZ.fps) CBZ.fps.fp = -0.04;
+    if (CBZ.fpsSetAim) CBZ.fpsSetAim(!!aim);
+    step(aim ? 60 : 10);                         // the raise (the slowest optic is 0.55 s)
+    adsOn = key;
+    return true;
+  }
+  function centreMark(R, fmt) {
+    var src = R.domElement, c = document.createElement("canvas");
+    c.width = src.width; c.height = src.height;
+    var g = c.getContext("2d");
+    g.drawImage(src, 0, 0);
+    var x = c.width / 2, y = c.height / 2;
+    g.strokeStyle = "rgba(0,255,255,0.85)"; g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(x - 40, y + 0.5); g.lineTo(x - 6, y + 0.5); g.moveTo(x + 6, y + 0.5); g.lineTo(x + 40, y + 0.5);
+    g.moveTo(x + 0.5, y - 40); g.lineTo(x + 0.5, y - 6); g.moveTo(x + 0.5, y + 6); g.lineTo(x + 0.5, y + 40);
+    g.stroke();
+    return c.toDataURL(fmt || "image/png");
+  }
+  function adsShot(parts, W, H, fmt) {
+    var R = CBZ.renderer, C = CBZ.camera;
+    if (!adsStage(parts[1], parts[0] === "ads")) return { error: "could not arm " + parts[1] };
+    var save = { aspect: C.aspect };
+    try {
+      if (R.getPixelRatio() !== 1) R.setPixelRatio(1);
+      var sz = R.getSize(new THREE.Vector2());
+      if (sz.x !== W || sz.y !== H) R.setSize(W, H, false);
+      C.aspect = W / H; C.updateProjectionMatrix(); C.updateMatrixWorld(true);
+      if (parts[2] === "side") {
+        var D = new THREE.PerspectiveCamera(40, W / H, 0.01, 200);
+        var eye = new THREE.Vector3().setFromMatrixPosition(C.matrixWorld);
+        var fw = new THREE.Vector3(0, 0, -1).transformDirection(C.matrixWorld);
+        var rt = new THREE.Vector3(1, 0, 0).transformDirection(C.matrixWorld);
+        var up = new THREE.Vector3(0, 1, 0).transformDirection(C.matrixWorld);
+        var look = eye.clone().addScaledVector(fw, 0.42).addScaledVector(up, -0.06);
+        D.position.copy(look).addScaledVector(rt, 1.25).addScaledVector(up, 0.08);
+        D.up.copy(up); D.lookAt(look); D.updateMatrixWorld(true);
+        // the eye itself: a small magenta ball on the camera point
+        var ball = new THREE.Mesh(new THREE.SphereGeometry(0.012, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff00ff, depthTest: false, transparent: true }));
+        ball.renderOrder = 2000; ball.position.copy(eye); CBZ.scene.add(ball);
+        var line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([eye, eye.clone().addScaledVector(fw, 1.6)]), new THREE.LineBasicMaterial({ color: 0x00ffff, depthTest: false, transparent: true }));
+        line.renderOrder = 2001; CBZ.scene.add(line);
+        try { R.render(CBZ.scene, D); }
+        finally { CBZ.scene.remove(ball); CBZ.scene.remove(line); ball.geometry.dispose(); line.geometry.dispose(); }
+        return { url: R.domElement.toDataURL(fmt || "image/png") };
+      }
+      R.render(CBZ.scene, C);
+      return { url: centreMark(R, fmt) };
+    } finally { C.aspect = save.aspect; C.updateProjectionMatrix(); }
+  }
+  S.cams = ["chase", "fp", "top", "orbit:<yawDeg>:<pitchDeg>[:dist]", "at:<x,y,z>:<lx,ly,lz>", "ads:<weaponId>[:side]", "hip:<weaponId>"];
   S.shot = function (cam, W, H, fmt) {
     W = Math.max(64, Math.min(2048, W | 0 || 640)); H = Math.max(64, Math.min(2048, H | 0 || 400));
     var R = CBZ.renderer, C = CBZ.camera;
     if (!R || !C) return { error: "no renderer/camera" };
+    var ap = String(cam || "").split(":");
+    if (ap[0] === "ads" || ap[0] === "hip") return adsShot(ap, W, H, fmt);
     var F = frame(cam);
     if (!F) return { error: "unknown cam \"" + cam + "\" (know: " + S.cams.join(", ") + ")" };
     var save = { pos: C.position.clone(), q: C.quaternion.clone(), fov: C.fov, aspect: C.aspect, near: C.near, far: C.far };
