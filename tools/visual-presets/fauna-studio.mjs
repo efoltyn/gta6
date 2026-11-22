@@ -36,6 +36,7 @@ const subjects = [
   { id: "wild-red_fox", kind: "species", species: "red_fox", label: "Red fox, as the world's wildlife builds it", focus: "" },
   { id: "dog-trot", kind: "dog-move", breed: "shepherd", speed: 2.6, label: "Dog: trotting, four moments", focus: "Diagonal pairs, feet planted while in stance, back level." },
   { id: "dog-gallop", kind: "dog-move", breed: "pit", speed: 7.5, label: "Dog: galloping, four moments", focus: "Spine flexes and extends, both phases of flight." },
+  { id: "dog-rest", kind: "dog-rest", label: "Dogs at rest on the ground", focus: "Mastiff on its side, mastiff sitting, shepherd lying down, shepherd dead; a low lens at ground level shows what touches the ground and what goes into it." },
   { id: "gull-studio", kind: "bird", bird: "gull", label: "Bird: herring gull", focus: "White head and body, grey mantle, black wingtips, yellow bill, real wing shape." },
   { id: "gull-flap", kind: "bird-flap", bird: "gull", label: "Bird: gull wingbeat, four moments", focus: "Downstroke with the wing spread, upstroke with the wing folded at the wrist." },
   { id: "songbird-studio", kind: "bird", bird: "songbird", label: "Bird: the wilderness flock bird", focus: "What Gang City's flocks are made of, up close." },
@@ -298,6 +299,49 @@ async function stage(input) {
         D.fit();
         const st = D.studio(), d = D.dirs();
         D.view(d.side, st.center, st.len * 1.05, x, y, w, h);
+      });
+    };
+  } else if (k === "dog-rest") {
+    // four rests, each built, posed and settled for 4 s on flat ground at y = 0;
+    // the lowest posed vertex of each is measured (negative = into the ground)
+    const M = CBZ.dogModel;
+    if (!M || !M.build) throw new Error("no CBZ.dogModel");
+    const cases = [["mastiff", "side"], ["mastiff", "sit"], ["shepherd", "lie"], ["shepherd", "dead"]];
+    const rigs = cases.map(function (cs, i) {
+      const rig = M.build(cs[0], 2 + i);
+      // the studio floor IS the ground (left null, the kit asks the world, and at
+      // the shark sim's origin the world is seabed 1.5 m down)
+      // ...and there is no water on the stage (the kit swims a dog that stands in
+      // the world's sea; water far under the floor = dry ground)
+      const c = { x: 0, z: 0, y: 0, heading: 0, posture: cs[1], alert: 0.2, ground: function () { return 0; }, water: -1000, dead: cs[1] === "dead" };
+      for (let t = 0; t < 120; t++) M.animate(rig, 1 / 30, c);
+      rig.group.updateMatrixWorld(true);
+      return rig;
+    });
+    const v = new T.Vector3();
+    const lowest = function (g) {
+      let lo = 1e9;
+      g.traverseVisible(function (m) {
+        if (!m.isMesh || !m.geometry || !m.geometry.attributes.position) return;
+        const pos = m.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          v.fromBufferAttribute(pos, i);
+          if (m.isSkinnedMesh && m.applyBoneTransform) m.applyBoneTransform(i, v);
+          v.applyMatrix4(m.matrixWorld);
+          if (v.y < lo) lo = v.y;
+        }
+      });
+      return lo;
+    };
+    const lows = rigs.map(function (r) { return Math.round(lowest(r.group) * 1000); });
+    D.m = { lowestMm: lows.join(" ") };
+    D.job = function () {
+      D.layoutFour(function (i, x, y, w, h) {
+        D.setSubject(rigs[i].group, new T.Vector3(1, 0, 0), 0);
+        const st = D.studio(), d = D.dirs();
+        // a lens almost at ground level, from the side, so the contact reads
+        const dir = d.side.clone(); dir.y = 0.06; dir.normalize();
+        D.view(dir, st.center.clone().setY(Math.max(0.12, st.center.y * 0.6)), st.len * 0.95, x, y, w, h);
       });
     };
   } else if (k === "bird") {
