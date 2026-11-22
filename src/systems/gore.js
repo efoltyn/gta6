@@ -182,8 +182,8 @@
   // builds every PolyhedronGeometry non-indexed — each triangle carries its own
   // copy of its three corners — so index-keyed jitter would tear the solid open
   // along every edge. Same direction in, same displacement out, seams closed by
-  // construction. (blobGeo() below plays the identical trick in 2D on the
-  // pools, for the identical reason.)
+  // construction. (filmGeo() below wobbles a water film's outline the same
+  // way, by direction.)
   function chunkGeo() {
     const g = new THREE.IcosahedronGeometry(0.5, 0);
     const pos = g.attributes.position;
@@ -201,26 +201,6 @@
   }
   const G_CHUNK = [chunkGeo(), chunkGeo(), chunkGeo()];
   function chunk() { return G_CHUNK[(Math.random() * 3) | 0]; }
-
-  // the WATER slick's outline (land marks use the atlas): a circle with
-  // per-vertex radial jitter (sum of randomly-phased sines) baked ONCE at
-  // startup. 3 shared geometries, randomly picked + spun + stretched per
-  // decal, so no two pools share a silhouette and none is a perfect circle.
-  function blobGeo() {
-    const g = new THREE.CircleGeometry(1, 16);
-    const pos = g.attributes.position;
-    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), y = pos.getY(i);
-      if (x * x + y * y < 0.25) continue;             // centre vertex stays put
-      const a = Math.atan2(y, x);
-      const k = 1 + 0.16 * Math.sin(a * 3 + p1) + 0.13 * Math.sin(a * 5 + p2) + 0.09 * Math.sin(a * 7 + p3);
-      pos.setXY(i, x * k, y * k);
-    }
-    return g;
-  }
-  const G_BLOB = [blobGeo(), blobGeo(), blobGeo()];
-  function blob() { return G_BLOB[(Math.random() * 3) | 0]; }
 
   // ---- shared materials (cloned only when a unique per-bit color is needed) --
   const matCache = new Map();
@@ -1364,50 +1344,267 @@
   const FILM_L_PER_AMOUNT = 0.12;  // goreSlick's 0.3..3 'amount' as litres at the top
   const FILM_A = 0.6;              // the film's density at its freshest
   const FILM_GONE = 0.004;         // litres: below this the patch is water again
-  const SLICK_MATS = [];           // free list — materials outlive their meshes
   let slickN = 0;                  // live water films (kept in step by freeSlick)
   function slickCap() { return CBZ.qScale ? CBZ.qScale(8, 20) : 12; }
-  function slickMat() {
-    const m = SLICK_MATS.pop();
-    if (m) { m.opacity = 0; return m; }
-    const nm = new THREE.MeshBasicMaterial({
-      color: 0xffffff, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false,
-      toneMapped: false, fog: false,
+
+  /* A FILM LIES ON THE SEA THAT IS DRAWN, ALL OF IT. It was a flat disc set
+     6 cm over the swell's height at its middle, and the sea writes depth, so
+     wherever the drawn surface rose more than that under its spread (the
+     swell across a 3 m patch, the rings and wakes of the wake field, the
+     entry rings) the crests came through it as sea-coloured holes in a
+     ragged edge. Now it is a fine grid, and while one of the two sanctioned
+     sheets is drawn (the island's ocean, the city's sea: city/waterfield.js
+     names them) every point of it is moved by THAT SHEET'S OWN VERTEX
+     PROGRAM: its source, re-read from the live material, with its uniform
+     objects shared by reference. Same swell rows at the same clock, the same
+     shoaling and mesh-spacing cut, the same wake field and entry rings, the
+     same floods; the only change is that the film's points are where they are
+     in the world instead of round the camera. Whatever the sea learns to do,
+     the film does too. With no such sheet (a battle arena's own CPU swell)
+     the grid is seated point by point on the surface the game reads, which
+     is the surface those arenas draw. Two shared materials; a film's own
+     numbers go up in onBeforeRender. */
+  // ~0.3 m between points on a 2.5 m film: a wake ring 1-2 m long and a hand
+  // high, which the sea carries at its own 0.5 m spacing, stays under it
+  const FILM_RINGS = 9, FILM_SEG = 56;
+  const FILM_LIFT = 0.07;                // m over the drawn surface (both meshes are linear between points)
+  const FILM_GEOS = [];                  // free list: a film's grid outlives it
+  // a disc of rings, its outline wobbled by randomly phased sines of the
+  // direction (no two films share a silhouette, none is a perfect circle);
+  // the texture's round falloff is stretched to that outline
+  function filmGeo() {
+    const g = FILM_GEOS.pop();
+    if (g) {
+      const P = g.attributes.position.array;
+      for (let i = 2; i < P.length; i += 3) P[i] = 0;
+      g.attributes.position.needsUpdate = true;
+      return g;
+    }
+    const nv = 1 + FILM_RINGS * FILM_SEG;
+    const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), idx = [];
+    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
+    uv[0] = 0.5; uv[1] = 0.5;
+    for (let r = 0; r < FILM_RINGS; r++) {
+      const rr = (r + 1) / FILM_RINGS;
+      for (let k = 0; k < FILM_SEG; k++) {
+        const a = k / FILM_SEG * 6.2832, v = 1 + r * FILM_SEG + k;
+        const w = 1 + 0.16 * Math.sin(a * 3 + p1) + 0.13 * Math.sin(a * 5 + p2) + 0.09 * Math.sin(a * 7 + p3);
+        pos[v * 3] = Math.cos(a) * rr * w; pos[v * 3 + 1] = Math.sin(a) * rr * w;
+        uv[v * 2] = Math.cos(a) * rr * 0.5 + 0.5; uv[v * 2 + 1] = Math.sin(a) * rr * 0.5 + 0.5;
+      }
+    }
+    for (let k = 0; k < FILM_SEG; k++) idx.push(0, 1 + k, 1 + (k + 1) % FILM_SEG);
+    for (let r = 0; r + 1 < FILM_RINGS; r++) for (let k = 0; k < FILM_SEG; k++) {
+      const a0 = 1 + r * FILM_SEG + k, a1 = 1 + r * FILM_SEG + (k + 1) % FILM_SEG, b0 = a0 + FILM_SEG, b1 = a1 + FILM_SEG;
+      idx.push(a0, b0, b1, a0, b1, a1);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    geo.userData.filmGrid = true;
+    return geo;
+  }
+
+  const FILM_FS = [
+    "uniform sampler2D uFilmMap;",
+    "uniform vec3 uFilmCol;",
+    "uniform vec3 uFilmGrey;",
+    "uniform float uFilmA;",
+    "varying vec2 vFilmUv;",
+    BLOOD_FILTER_GLSL,
+    "void main() {",
+    "  float a = clamp(texture2D(uFilmMap, vFilmUv).a * uFilmA, 0.0, 1.0);",
+    "  if (a < 0.004) discard;",
+    "  gl_FragColor = vec4(cbzBloodFilter(uFilmGrey, uFilmCol, a, 1.0), 1.0);",
+    "  #include <colorspace_fragment>",
+    "}",
+  ].join("\n");
+  function filmUniforms() {
+    return {
+      uFilmMap: { value: bloodTexture() },
+      uFilmCol: { value: displayColor(SLICK_COL) },
+      uFilmGrey: { value: displayColor(SLICK_GREY) },
+      uFilmA: { value: 0 },
+      uFilmLift: { value: FILM_LIFT },
+      uFilmFloor: { value: -1e9 },
+    };
+  }
+  function filmMaterial(vs, uniforms, defines) {
+    const m = new THREE.ShaderMaterial({
+      name: "gore-film", uniforms: uniforms, vertexShader: vs, fragmentShader: FILM_FS,
+      transparent: true, depthWrite: false, depthTest: true, fog: false, toneMapped: false,
       // a FILTER on the water (see PLUME_FRESH): multiply, canvas alpha kept
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
       blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,
       blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
+      // the same nudge every sheet riding the sea takes (world/tsunami_flow.js)
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
     });
-    nm.color.copy(displayColor(SLICK_COL));
-    const grey = displayColor(SLICK_GREY);
-    nm.onBeforeCompile = function (sh) {
-      sh.uniforms.uFilmGrey = { value: grey };
-      sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\nuniform vec3 uFilmGrey;\n" + BLOOD_FILTER_GLSL)
-        // grey where it is thin, the red filter as it thickens
-        .replace("#include <opaque_fragment>",
-          "#include <opaque_fragment>\ngl_FragColor.rgb = cbzBloodFilter( uFilmGrey, gl_FragColor.rgb, clamp( gl_FragColor.a, 0.0, 1.0 ), 1.0 );");
-    };
-    nm.customProgramCacheKey = function () { return "goreFilm2"; };
-    // rm() must never dispose a pooled material — the repo's convention is a
-    // _shared tag, and every disposal sweep in the game already honours it.
-    nm._shared = true;
-    return nm;
+    if (defines) m.defines = Object.assign({}, defines);
+    // rm() never disposes a _shared material; these two live as long as their sea
+    m._shared = true;
+    return m;
   }
-  // hand a retiring film's mesh + material back. EVERY water-splat removal
-  // path goes through this, which is also what keeps slickN honest.
+  // the CPU-seated grid: its points carry their own heights (filmSeat)
+  let filmFlat = null;
+  function filmFlatMat() {
+    if (!filmFlat) filmFlat = filmMaterial([
+      "varying vec2 vFilmUv;",
+      "void main() {",
+      "  vFilmUv = uv;",
+      "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
+      "}",
+    ].join("\n"), filmUniforms(), null);
+    return filmFlat;
+  }
+  // the sanctioned sheet in the scene now, if it is one of the shared sea
+  // programs (an "arena" or "city" kind: world/water_spec.js waterSeaMaterial)
+  function liveSeaMesh() {
+    const cands = [CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.ocean, CBZ.citySea];
+    for (let i = 0; i < cands.length; i++) {
+      const m = cands[i];
+      if (!m || !m.isMesh || m.visible === false) continue;
+      const ud = m.material && m.material.userData;
+      if (!ud || !ud.waterUniforms || (ud.waterKind !== "arena" && ud.waterKind !== "city")) continue;
+      let o = m;
+      while (o.parent) o = o.parent;
+      if (o === CBZ.scene) return m;
+    }
+    return null;
+  }
+  // the sea's own vertex program with the film's points in place of the
+  // camera disc's, lifted FILM_LIFT, held over a floor, and carrying its uv
+  const SEA_MAIN = "void main() {", SEA_PROJ = "  vec4 mvPosition = viewMatrix * vec4(wWorld, 1.0);";
+  const SEA_DISC = "vec2 wXZ = vec2(cameraPosition.x + wBase.x, cameraPosition.z + wBase.z);", SEA_WORLD = "vec2 wXZ = wBase.xz;";
+  function filmSeaVS(src) {
+    if (typeof src !== "string" || src.indexOf(SEA_MAIN) < 0 || src.indexOf(SEA_PROJ) < 0) return null;
+    if (src.indexOf(SEA_DISC) >= 0) src = src.replace(SEA_DISC, SEA_WORLD);
+    else if (src.indexOf(SEA_WORLD) < 0) return null;
+    return src
+      .replace(SEA_MAIN, "uniform float uFilmLift;\nuniform float uFilmFloor;\nvarying vec2 vFilmUv;\n" + SEA_MAIN)
+      .replace(SEA_PROJ, "  wWorld.y = max(wWorld.y + uFilmLift, uFilmFloor);\n  vFilmUv = uv;\n" + SEA_PROJ);
+  }
+  let filmSea = null;        // { sea, src, mat } while a shared sea program is drawn
+  let filmSeaNo = null;      // a sea material whose program could not be read (not retried)
+  // (the frame loop moves every film onto the material filmSync hands it)
+  function filmSeaDrop() {
+    const old = filmSea;
+    filmSea = null;
+    if (!old) return;
+    if (filmWarmMesh) filmWarmMesh.material = filmFlatMat();
+    old.mat.dispose();
+  }
+  // once a frame while films live: the material every film draws with now
+  function filmSync() {
+    const sea = liveSeaMesh();
+    if (filmSea && (!sea || sea.material !== filmSea.src)) filmSeaDrop();
+    if (sea && !filmSea && sea.material !== filmSeaNo) {
+      const vs = filmSeaVS(sea.material.vertexShader);
+      if (!vs) filmSeaNo = sea.material;
+      else {
+        // the sea's uniform OBJECTS (its clock, rows, field, wake, rings) and the film's own
+        const U = Object.assign({}, sea.material.uniforms, filmUniforms());
+        filmSea = { sea: sea, src: sea.material, mat: filmMaterial(vs, U, sea.material.defines) };
+      }
+    }
+    if (filmSea) filmSea.sea = sea;
+    return filmSea ? filmSea.mat : filmFlatMat();
+  }
+  /* THE FIRST KILL DOES NOT COMPILE IT. The film's program is the sea's whole
+     vertex program, so it is built the first second a sea is drawn with gore
+     on and queued with the game's other programs (core/fxwarm.js
+     CBZ.shaderQueue: the driver compiles it off the frame), not compiled on
+     the frame of the first kill. The stand-in carries a film grid's
+     attributes (position, uv), which is what keys the program. */
+  let filmWarmT = 0, filmWarmMesh = null;
+  function filmWarm(dt) {
+    if ((filmWarmT -= dt) > 0) return;
+    filmWarmT = 1;
+    if (!waterOn() || !CBZ.shaderQueue) return;
+    const mat = filmSync();
+    if (!filmSea || (filmWarmMesh && filmWarmMesh.material === mat)) return;
+    if (!filmWarmMesh) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(9), 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(6), 2));
+      filmWarmMesh = new THREE.Mesh(g, mat);
+      filmWarmMesh.name = "gore-film-warm";
+    }
+    filmWarmMesh.material = mat;
+    try { CBZ.shaderQueue(filmWarmMesh, { full: true }); } catch (e) {}
+  }
+  // a film's own numbers, set on the shared material just before it draws
+  function filmBeforeRender(renderer, scene, camera, geometry, material) {
+    const s = this.userData.film, U = material && material.uniforms;
+    if (!s || !U || !U.uFilmA) return;
+    U.uFilmA.value = s.drawA || 0;
+    U.uFilmFloor.value = s.floorW != null ? s.floorW : -1e9;
+    material.uniformsNeedUpdate = true;
+  }
+  let filmCpuDear = false;           // (per scene: clearGore resets it)
+  // where the film lies: on a shared sea program the sheet's rest height (its
+  // program adds the swell, rings and wake per point) and a floor; otherwise
+  // every point on the surface the game reads. Neither ever goes under the
+  // sand the film was born on, or under standing floodwater it is in.
+  function filmSeat(s) {
+    const m = s.m;
+    let floor = s.floorY != null ? s.floorY + 0.03 : -1e9;
+    if (CBZ.groundWaterSurfaceY) {
+      try { const gw = +CBZ.groundWaterSurfaceY(m.position.x, m.position.z); if (isFinite(gw)) floor = Math.max(floor, gw + FILM_LIFT); } catch (e) {}
+    }
+    s.floorW = floor;
+    const g = m.geometry, P = g.attributes.position.array, nv = P.length / 3;
+    if (filmSea && m.material === filmSea.mat) {
+      if (s.zSet) {               // heights a CPU seat left in the grid
+        for (let i = 2; i < P.length; i += 3) P[i] = 0;
+        g.attributes.position.needsUpdate = true;
+        s.zSet = false;
+      }
+      filmSea.sea.updateWorldMatrix(true, false);
+      m.position.y = filmSea.sea.matrixWorld.elements[13];
+      return;
+    }
+    const c = Math.cos(m.rotation.z), sn = Math.sin(m.rotation.z), sx = m.scale.x, sy = m.scale.y;
+    const ox = m.position.x, oz = m.position.z;
+    const base = Math.max(seaY(ox, oz) + FILM_LIFT, floor);
+    m.position.y = base;
+    if (filmCpuDear) {
+      // the surface the game reads is too dear to read at every point (a
+      // full sea twin with no sea program found): flat at its middle's height
+      if (s.zSet) {
+        for (let i = 2; i < P.length; i += 3) P[i] = 0;
+        g.attributes.position.needsUpdate = true;
+        s.zSet = false;
+      }
+      return;
+    }
+    const t0 = performance.now();
+    for (let v = 0; v < nv; v++) {
+      const lx = P[v * 3] * sx, ly = P[v * 3 + 1] * sy;
+      // (the film lies on its back: local x stays x, local y runs along -z)
+      const wx = ox + lx * c - ly * sn, wz = oz - (lx * sn + ly * c);
+      P[v * 3 + 2] = Math.max(seaY(wx, wz) + FILM_LIFT, floor) - base;
+    }
+    g.attributes.position.needsUpdate = true;
+    s.zSet = true;
+    // a battle arena's swell reads all 505 points in ~0.03 ms; a sea twin
+    // would take tens of ms a seat: once is enough to know
+    if (performance.now() - t0 > 4) filmCpuDear = true;
+  }
+  // retire a splat: a land mark's slot goes back to its layer, a film's grid to
+  // the free list (its material is one of the two shared ones). EVERY splat
+  // removal path goes through this, which is also what keeps slickN honest.
   function freeSlick(s) {
     if (!s) return;
     if (s.slot != null) { ldRelease(s); return; }   // a land mark: slot + transform back to the pool
     if (s.water) {
       slickN--;
       if (slickN < 0) slickN = 0;
-      const mat = s.m && s.m.material;
-      if (mat && mat._shared) {
-        // rm() will not free a _shared material, so an over-full pool disposes
-        // by hand rather than orphaning a GPU program.
-        if (SLICK_MATS.length < 64) SLICK_MATS.push(mat);
-        else if (mat.dispose) mat.dispose();
+      if (s.m) s.m.userData.film = null;
+      const geo = s.m && s.m.geometry;
+      if (geo && geo.userData && geo.userData.filmGrid) {
+        if (FILM_GEOS.length < slickCap()) FILM_GEOS.push(geo); else geo.dispose();
       }
     }
     rm(s.m);
@@ -1450,12 +1647,13 @@
     if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
     const o = opts || {};
     const floorY = isFinite(+o.floorY) ? +o.floorY : null;
-    const m = new THREE.Mesh(blob(), slickMat());
+    const m = new THREE.Mesh(filmGeo(), filmSync());
     m.rotation.x = -Math.PI / 2;
     m.rotation.z = Math.random() * 6.28;
-    const sy = seaY(x, z) + 0.06;
-    m.position.set(x, floorY != null ? Math.max(sy, floorY + 0.03) : sy, z);
+    m.position.set(x, seaY(x, z), z);
     m.renderOrder = 3; m.scale.set(0.05, 0.05, 1);
+    m.frustumCulled = false;          // its points ride the sea: the grid's own bounds are not where it draws
+    m.onBeforeRender = filmBeforeRender;
     scene().add(m);
     const bt = Math.max(0, +o.decay || 0);
     slickN++;
@@ -1465,7 +1663,10 @@
       ax: 0.82 + Math.random() * 0.36, az: 0.82 + Math.random() * 0.36,
       cx: 0, cz: 0, curT: 0, syT: 0,
       bx: +o.vx || 0, bz: +o.vz || 0, bt, bt0: bt || 1, floorY, bedK: filmBedK(x, z),
+      drawA: 0, floorW: -1e9,
     });
+    m.userData.film = splats[splats.length - 1];
+    filmSeat(splats[splats.length - 1]);
   }
   /* OVER A BRIGHT BED IT IS FAINTER STILL. In the clear shallows the sand a
      metre down is the brightest thing under the film, and any filter over it
@@ -1494,7 +1695,7 @@
       if (!p.water) continue;
       const ar = Math.PI * (p.R || 0) * (p.R || 0) * p.ax * p.az;
       n++; L += p.L || 0; area += ar; seen += ar * (p.filmA || 0) / FILM_A;
-      maxR = Math.max(maxR, (p.R || 0) * Math.max(p.ax, p.az)); maxA = Math.max(maxA, p.m.material.opacity || 0);
+      maxR = Math.max(maxR, (p.R || 0) * Math.max(p.ax, p.az)); maxA = Math.max(maxA, p.drawA || 0);
     }
     // area: every patch's outline; seen: that area weighted by how dense the
     // blood in it still is (what reads as stained water)
@@ -5105,6 +5306,8 @@
     if (CBZ.scene && (!ldMesh || ldMesh.parent !== CBZ.scene)) landLayer();
     // ...and the air layer's, for the same reason
     if (CBZ.scene && !airMesh) airReady();
+    // ...and the water film's, while a sea is drawn
+    filmWarm(dt);
     // NOTHING PAINTS THE VIEW RED (owner: "the screen turning red ... is
     // dumb"): a kill beside you is the blood on the floor and on the walls.
 
@@ -5261,6 +5464,7 @@
       if (b.life <= 0) { rm(m); bits.splice(i, 1); }
     }
 
+    const filmMat = slickN > 0 ? filmSync() : null;
     for (let i = splats.length - 1; i >= 0; i--) {
       const s = splats[i]; s.t += dt;
       /* WATER TAKES THE BLOOD BACK (GORE_WASH). The island's headline events
@@ -5336,15 +5540,16 @@
         // this used to run for every slick every frame — up to ~300 full swell
         // evaluations a frame during a frenzy, to move decals nobody can see by
         // a few centimetres. ~15Hz inside 60u is indistinguishable.
+        if (filmMat && s.m.material !== filmMat) { s.m.material = filmMat; filmSeat(s); }
         s.syT -= dt;
         if (s.syT <= 0) {
           s.syT = 0.066;
           if (dist2Cam(s.m.position.x, s.m.position.z) < 60 * 60) {
-            const y = seaY(s.m.position.x, s.m.position.z) + 0.06;
             // a slick born ON THE SAND never sinks through it: when the sheet
             // drains out from under a washed cloud what is left is a diluted
             // film lying on wet sand, not a decal chasing a surface that left.
-            s.m.position.y = s.floorY != null ? Math.max(y, s.floorY + 0.03) : y;
+            // (every point of it, on the live surface where it lies)
+            filmSeat(s);
             s.bedK = filmBedK(s.m.position.x, s.m.position.z);
           }
         }
@@ -5383,7 +5588,7 @@
         const el = (cp.y - mp.y) / (Math.sqrt(hx * hx + hz * hz) + 0.5);
         seen = (el - 0.01) / 0.07; seen = seen < 0 ? 0 : (seen > 1 ? 1 : seen);
       }
-      if (s.water) s.m.material.opacity = (s.filmA || 0) * seen * fadeIn * (1 - dil);
+      if (s.water) s.drawA = (s.filmA || 0) * seen * fadeIn * (1 - dil);
       // a land mark fades by RECEDING as well as thinning (a translucent red
       // over pale concrete is pink), and what the swash ate comes off its edge
       else if (s.slot >= 0) ldSetFx(s.slot, fadeOut * (1 - under) * (1 - dil),
@@ -5436,10 +5641,7 @@
       const m = s.m;
       m.updateMatrixWorld(true);
       for (let k = 0; k < _RIM.length; k++) {
-        // a blob's geometry is a unit circle, so local (±1,0)/(0,±1) IS the rim;
-        // the plane used by streaks is a unit quad, so ±0.5 — near enough for a
-        // conformance probe, and deliberately the same four samples for both.
-        // every land mark is a unit quad now; `rim` is where its visible edge
+        // every land mark is a unit quad; `rim` is where its visible edge
         // sits inside it, so this samples the mark and not the empty corners
         const rr = s.rim || 0.5;
         _rv.set(_RIM[k][0] * rr, _RIM[k][1] * rr, 0).applyMatrix4(m.matrixWorld);
@@ -5530,6 +5732,7 @@
     for (let e = 0; e < EM_MAX; e++) stopStream(e);
     if (airMesh && airMesh.parent) airMesh.parent.remove(airMesh);       // re-added on the next frame
     for (const s of splats) freeSlick(s); splats.length = 0; slickN = 0;
+    filmSeaDrop(); filmSeaNo = null; filmCpuDear = false;
     for (const w of walls) ldRelease(w); walls.length = 0;
     while (vehRecs.length) vdDrop(vehRecs.length - 1);
     if (ldMesh && ldMesh.parent) ldMesh.parent.remove(ldMesh);          // re-added on the next mark
