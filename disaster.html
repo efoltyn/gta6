@@ -1123,7 +1123,7 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=water1122g"></script>
+<script src="src/world/water_spec.js?v=sea1122f"></script>
 <!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_runup.js?v=tsu1122"></script>
 <!-- where the water is brown: the silt the run-up scoured off the land, carried out to sea by the backwash, spread and settled (the sea shader's turbidity mask), and CBZ.waterTurbidAt, the one turbidity + current query the underwater medium and the swimmer read -->
@@ -1303,7 +1303,7 @@ document.body.appendChild(b);}}catch(e){}})();
      flock is one draw. Before the flocks (wild nature, the sea scene) and the
      bestiary's chicken; it reads units/kit/loft.js (below) only when a body
      is built. -->
-<script src="src/world/birdkit.js?v=bird1122b"></script>
+<script src="src/world/birdkit.js?v=bird1122e"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
@@ -1317,7 +1317,7 @@ document.body.appendChild(b);}}catch(e){}})();
      mode is this one body, a breed or a species being a row of real
      measurements. Before the bestiary rows that build it; it reads
      units/kit/loft.js and gait.js (below) only when a body is built. -->
-<script src="src/units/kit/canid.js?v=dog1122d"></script>
+<script src="src/units/kit/canid.js?v=dog1122f"></script>
 <script src="src/city/wildlife/beast_bodies.js?v=bird1122a"></script>
 <script src="src/city/wildlife/aquatic.js?v=sea1122b"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
@@ -2407,7 +2407,7 @@ document.body.appendChild(b);}}catch(e){}})();
      rules (engulf / bite / tip). After water_hulls + water_float, both of which
      it spends. -->
 <script src="src/world/sea_craft.js?v=wake1122a"></script>
-<script src="src/world/sea_scene.js?v=bird1122a"></script>
+<script src="src/world/sea_scene.js?v=gull1122a"></script>
 <script src="src/world/water_impact.js?v=wake1122e"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
      citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's

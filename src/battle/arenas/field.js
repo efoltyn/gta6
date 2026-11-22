@@ -194,16 +194,20 @@ function buildMap(id) {
     SEA.on = true; SEA.t = 0; SEA.boats.length = 0; SEA.under = null; SEA.fogSurface = null;
     /* the fourth shim, same pattern as queryCollidersNear/floorAt/collide up
        top: creature_combat's restY() resolves an aquatic body to
-       CBZ.citySeaHeightAt(x,z) minus its own swimDepth, so without these two
+       CBZ.citySeaHeightAt(x,z) minus its own swimDepth, so without these
        names the shared strike driver would rest a shark at CBZ.SEA_Y and
-       fight this page's own depth every frame. Route the name, never fork
-       the file. (stepDepth keeps actor.swimDepth in step with actor.swimD.) */
-    CBZ.citySeaHeightAt = function (x, z) { return swellAt(x, z); };
+       fight this page's own depth every frame, and a dog would never find
+       the water to swim in. Route the names, never fork the files: every
+       water question the engine asks is answered from this swell
+       (seaWorldWater, after the sheet is adopted so the door hears the
+       moving surface last). (stepDepth keeps actor.swimDepth in step with
+       actor.swimD.) */
     cx = 0; cz = 0;
     seaBuildSwell();
     // the bed first, so the surface blends over something and not over sky
     seabed(SEA.seabed);
     seaSurface(cx, cz);
+    seaWorldWater();
     if (Q.get("reef") !== "0") seaReef(cx, cz);
     groundAt = function (x, z) { return swellAt(x, z); };
     // a side of MEN is a side that came off boats — see seaFleet
