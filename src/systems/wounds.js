@@ -669,7 +669,7 @@
      one string store on a path that was about to abandon the call anyway, and
      two counter increments on the path that succeeds. Read it with
      CBZ.woundDecalAudit().lastRefusal — one probe call instead of a bisect. */
-  const LEDGER = { biteCalls: 0, biteMarks: 0, personBites: 0, animalBites: 0, woundCalls: 0, woundMarks: 0, refusals: 0, lastRefusal: "", lastBite: null, jobs: 0, jobsDropped: 0, biteMsMax: 0, sliceMsMax: 0, jobFrameMsMax: 0 };
+  const LEDGER = { biteCalls: 0, biteMarks: 0, personBites: 0, animalBites: 0, woundCalls: 0, woundMarks: 0, refusals: 0, lastRefusal: "", lastBite: null, jobs: 0, jobsDropped: 0, jobErrors: 0, lastJobError: "", biteMsMax: 0, sliceMsMax: 0, jobFrameMsMax: 0 };
   function refuse(why) { LEDGER.refusals++; LEDGER.lastRefusal = why; }
 
   function dist2Cam(x, z) {
@@ -1668,15 +1668,75 @@
     if (typeof CBZ.waterVeilMaterial !== "function") return base;
     try { return CBZ.waterVeilMaterial(base) || base; } catch (e) { return base; }
   }
+  /* THE FIRST BITE BEFORE IT HAPPENS. A bite's code runs cold the first
+     time (the engine compiles it, then interprets it until it is hot): the
+     first bite of a session cost 20-45 ms in one frame and its job's first
+     stamps as much again. Once the atlases are painted, one bite is made on
+     a small body nobody sees (it hangs from a holder that is never in the
+     scene), its job runs through the same slices as any other, and
+     everything it made is freed: the first real bite starts warm. */
+  const WARM_SEGS = [[16, 8]];
+  let warmState = 0, warmActor = null, warmN = 0;
+  const WARM_HOLD = new THREE.Object3D();
+  function warmBody(k) {
+    // a fat skinned torso, two bones along it, the size of a dolphin's
+    const g = new THREE.CylinderGeometry(0.34, 0.34, 1.6, WARM_SEGS[k][0], WARM_SEGS[k][1], false);
+    g.rotateZ(Math.PI / 2);
+    const P = g.attributes.position, n = P.count;
+    const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) { const t = Math.max(0, Math.min(1, (P.getX(i) + 0.8) / 1.6)); si[i * 4 + 1] = 1; sw[i * 4] = 1 - t; sw[i * 4 + 1] = t; }
+    g.setAttribute("skinIndex", new THREE.BufferAttribute(si, 4));
+    g.setAttribute("skinWeight", new THREE.BufferAttribute(sw, 4));
+    const b0 = new THREE.Bone(), b1 = new THREE.Bone();
+    b0.position.x = -0.8; b1.position.x = 0.8; b0.add(b1);
+    const m = new THREE.SkinnedMesh(g, new THREE.MeshLambertMaterial({ color: 0x8090a0 }));
+    m.name = "body";
+    m.add(b0);
+    const grp = new THREE.Group();
+    grp.add(m);
+    grp.position.set(0, -400, 0);
+    WARM_HOLD.add(grp);
+    grp.updateMatrixWorld(true);
+    m.bind(new THREE.Skeleton([b0, b1]));
+    m.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1.2);
+    return { group: grp, _warm: true };
+  }
+  function warmStep() {
+    if (warmState === 0) {
+      warmState = 1;
+      try {
+        warmActor = warmBody(warmN);
+        const opts = { by: "great_white_shark", jaw: 0.16, sev: 0.9, dir: { x: 0, y: 0, z: -1 }, warm: true };
+        const who = biterOf(opts), wp = new THREE.Vector3(0.1, -400, 0.34);
+        const res = runBite(warmActor, wp, opts, "animal", who, dentOf(who, 0.16), 0.9);
+        if (!res || !res.bite) warmState = 2;
+      } catch (e) { warmState = 2; }
+      if (warmState === 2) warmEnd();
+      return;
+    }
+    for (let i = 0; i < JOBS.length; i++) if (JOBS[i].actor === warmActor) return;
+    warmEnd();
+    warmState = ++warmN < WARM_SEGS.length ? 0 : 2;
+  }
+  function warmEnd() {
+    const a = warmActor;
+    warmActor = null;
+    if (!a) return;
+    try {
+      CBZ.creatureBiteChunkRestore(a);
+      const m = a.group.children[0];
+      WARM_HOLD.remove(a.group);
+      if (m) { m.geometry.dispose(); m.material.dispose(); if (m.skeleton) m.skeleton.dispose(); }
+    } catch (e) {}
+  }
+  CBZ.woundsWarmed = function () { return warmState === 2; };
   // the warm-up: a few rows a frame after the first seconds of play, then the
   // GL programs queued (core/fxwarm.js) with the attributes a real mark has
   let skinWarmT = 0, skinWarmed = false;
   function skinWarm(dt) {
     skinWarmT += dt;
     if (skinWarmT < 2.5) return;
-    const J = skinJobs();
-    const a = texJobStep(J.tissue, 6), b = texJobStep(J.stain, 6);
-    if (!a || !b) return;
+    if (!atlasRows(2)) return;
     skinWarmed = true;
     if (typeof CBZ.shaderQueue === "function") {
       try {
@@ -3548,7 +3608,7 @@
     const bite = {
       actor: actor, surfs: surfs, bufs: Object.create(null), keys: [], dent: dent, sev: sev, who: who, kind: kind,
       tissue: tissueOf(actor, kind), coat: coatOf(actor, kind), wet: false, seatS: null, made: 0, removed: 0, severed: 0,
-      els: [], strikes: null, ext: null, fold: 0,
+      els: [], strikes: null, ext: null, fold: 0, warm: !!opts.warm,
     };
     // ---- THE SEAT: the first skin on the jaw's line, or the nearest skin
     const have = attackLine(opts, wp, _tr);
@@ -3758,6 +3818,9 @@
     return !!(a && a.group && a.group.parent && !a.culled);
   }
   // one slice; true when the bite is finished
+  // a piece of a bite's work that threw: counted and named in the audit
+  // (the job goes on without it)
+  function jobErr(bite, e) { LEDGER.jobErrors++; LEDGER.lastJobError = "phase " + bite.phase + ": " + String((e && e.message) || e).slice(0, 120); }
   function biteSlice(bite) {
     switch (bite.phase) {
       case 0: {                          // the dig: the body's own copy
@@ -3774,9 +3837,14 @@
           bite.lods = [];
           own.map.forEach(function (o) { if (o !== bite.g0) bite.lods.push(o); });
           bite.refined = 0;
-        } catch (e) { bite.op = null; bite.phase = 17; bite.k = 0; }
+          bite.phase = 10;
+        } catch (e) { jobErr(bite, e); bite.op = null; bite.phase = 17; bite.k = 0; }
         return false;
       }
+      case 10:                           // which corners are one point (a species' first bite works it out)
+        try { const g0 = bite.g0; widOf(g0, g0.attributes.position.array, g0.attributes.position.count); } catch (e) { jobErr(bite, e); }
+        bite.phase = 11;
+        return false;
       case 11:                           // a coarse body refined under the dish, a level a slice
         try {
           const g0 = bite.g0, nv0 = g0.attributes.position.count;
@@ -3789,7 +3857,7 @@
           }
           if (!bite.op.through && bite.refined < REFINE_LEVELS && refineLevel(g0, bite.op, bite.rst)) { bite.refined++; return false; }
           if (g0.attributes.position.count !== nv0) bite.refined++;
-        } catch (e) {}
+        } catch (e) { jobErr(bite, e); }
         bite.phase = 12;
         return false;
       case 12: {                         // the dig itself
@@ -3804,27 +3872,27 @@
             bite.removed = cut.removedTris + cut.pushed; bite.severed = cut.severedTris;
           }
           bite.cut = cut;
-        } catch (e) { bite.cut = null; }
+        } catch (e) { jobErr(bite, e); bite.cut = null; }
         bite.phase = 13;
         return false;
       }
       case 13:                           // the other LODs' copies, one a slice
         if (bite.lods && bite.lods.length) {
           const o = bite.lods.shift();
-          try { if (!bite.op.through) refineAll(o, bite.op); applyRemove(bite.own, o, bite.op, false); } catch (e) {}
+          try { if (!bite.op.through) refineAll(o, bite.op); applyRemove(bite.own, o, bite.op, false); } catch (e) { jobErr(bite, e); }
           return false;
         }
         bite.phase = 14;
         return false;
       case 14: {                         // the marks are laid on the body as it now is, posed as it was
         const seatS = bite.seatS;
-        try { surfaceRefresh(seatS, bite.g0); surfacePose(seatS, seatS.M); } catch (e) {}
+        try { surfaceRefresh(seatS, bite.g0); surfacePose(seatS, seatS.M); } catch (e) { jobErr(bite, e); }
         bite.phase = 16;
         return false;
       }
       case 16: {                         // the triangles near the bite on it
         const seatS = bite.seatS;
-        try { surfaceNear(seatS, bite.wp.x, bite.wp.y, bite.wp.z, bite.R); } catch (e) {}
+        try { surfaceNear(seatS, bite.wp.x, bite.wp.y, bite.wp.z, bite.R); } catch (e) { jobErr(bite, e); }
         bite.phase = 17; bite.k = 0;
         return false;
       }
@@ -3840,8 +3908,16 @@
         lay(bite, bite.strikes, bite.P, bite.N, bite.S, bite.U, bite.trav, bite.wrap, bite.cut, bite.op);
         bite.phase = 15;
         return false;
-      case 15:                           // the plan: what the bite does round them
+      case 15:                           // the plan: the rakes
         lay2(bite, bite.strikes, bite.P, bite.N, bite.S, bite.U, bite.trav, bite.wrap, bite.cut, bite.op);
+        bite.phase = 18;
+        return false;
+      case 18:                           // the plan: the flesh that went, the cut faces
+        lay3(bite, bite.strikes, bite.P, bite.N, bite.S, bite.U, bite.trav, bite.wrap, bite.cut, bite.op);
+        bite.phase = 19;
+        return false;
+      case 19:                           // the plan: the bruise and the blood
+        lay4(bite, bite.S);
         bite.phase = 2; bite.k = 0;
         return false;
       case 2:                            // one mark onto the skin
@@ -3859,7 +3935,7 @@
         return false;
       case 5: {                          // the piece that left
         const cut = bite.cut;
-        if (cut && (cut.sever.length || cut.chunk.length)) { try { shedFrom(bite, bite.seatS, cut, bite.who.actor); } catch (e) {} }
+        if (cut && !bite.warm && (cut.sever.length || cut.chunk.length)) { try { shedFrom(bite, bite.seatS, cut, bite.who.actor); } catch (e) { jobErr(bite, e); } }
         bite.phase = 6;
         return false;
       }
@@ -3889,7 +3965,7 @@
       if (worked && performance.now() - t0 + SLICE_MS[ph] > budget) break;
       const ts = performance.now();
       let done = true;
-      try { done = biteSlice(bite); } catch (e) { done = true; }
+      try { done = biteSlice(bite); } catch (e) { done = true; jobErr(bite, e); }
       const d = performance.now() - ts;
       SLICE_MS[ph] = SLICE_MS[ph] ? SLICE_MS[ph] * 0.7 + d * 0.3 : d;
       if (d > LEDGER.sliceMsMax) LEDGER.sliceMsMax = d;
@@ -3904,7 +3980,13 @@
     for (let i = JOBS.length - 1; i >= 0; i--) if (!actor || JOBS[i].actor === actor) JOBS.splice(i, 1);
   }
   function atlasesReady() { const J = skinJobs(); return J.tissue.done && J.stain.done; }
-  function atlasSlice() { const J = skinJobs(); texJobStep(J.tissue, 10); texJobStep(J.stain, 10); }
+  // the atlases painted a row at a time for at most ms (a row at least)
+  function atlasRows(ms) {
+    const J = skinJobs(), t0 = performance.now();
+    do { texJobStep(J.tissue, 1); texJobStep(J.stain, 1); } while (!(J.tissue.done && J.stain.done) && performance.now() - t0 < ms);
+    return J.tissue.done && J.stain.done;
+  }
+  function atlasSlice() { atlasRows(1.5); }
 
   /* ---- WHAT THE TEETH LEAVE, AND WHAT THE BODY ANSWERS -------------------- */
   function tint(r, g, b, a) { const l = linArr(r, g, b); return [l[0], l[1], l[2], a]; }
@@ -4110,6 +4192,10 @@
         bite.els.push(elAt("w", TCELL.rake, h, dir, len / 0.82, (t.W * 0.7) / 0.26, Math.max(0.01, len * 0.25), [0.8, 0, 0, 1], null, healA));
       }
     }
+  }
+  // the third: the middle of the bite, the flesh that went, the cut faces
+  function lay3(bite, strikes, P, N, S, U, trav, wrap, cut, op) {
+    const D = bite.dent, sev = bite.sev;
     // the middle of the bite on the skin: between the arcs on the flank, the
     // seat round a limb the jaws closed on
     const X = bite.ext, seatM = bite.seatS.mesh;
@@ -4166,7 +4252,15 @@
     }
     // 7. the cut's own faces where a part came away
     if (cut && cut.loops.length) capFaces(bite, bite.seatS, cut.loops);
-    if (mid) bruiseAndBlood(bite, mid, S, spanA, spanB, X, sea, coat, wet, sev, D);
+    bite.mid = mid ? copyHit(mid) : null; bite.spanA = spanA; bite.spanB = spanB;
+  }
+  // the fourth: what the bitten skin does round the teeth, and the order
+  // the marks go on in
+  function lay4(bite, S) {
+    const D = bite.dent, sev = bite.sev, wet = bite.wet, coat = bite.coat, X = bite.ext;
+    const sea = bite.tissue === "cetacean" || bite.tissue === "shark";
+    const mid = bite.mid;
+    if (mid) bruiseAndBlood(bite, mid, S, bite.spanA, bite.spanB, X, sea, coat, wet, sev, D);
     // stamp everything, the blood first and the tooth holes last (a later
     // mark blends over an earlier one in the same mesh)
     // stamped a mark at a time by the bite's job, the blood first and the
@@ -5105,7 +5199,7 @@
       refusals: LEDGER.refusals, lastRefusal: LEDGER.lastRefusal,
       // a bite's work after its instant (BITE JOBS): pending, dropped with
       // their bodies, and the longest the instant / one frame's slice took
-      biteJobs: JOBS.length, jobsDropped: LEDGER.jobsDropped, biteMsMax: LEDGER.biteMsMax, sliceMsMax: LEDGER.sliceMsMax, jobFrameMsMax: LEDGER.jobFrameMsMax,
+      biteJobs: JOBS.length, jobsDropped: LEDGER.jobsDropped, biteMsMax: LEDGER.biteMsMax, sliceMsMax: LEDGER.sliceMsMax, jobFrameMsMax: LEDGER.jobFrameMsMax, jobErrors: LEDGER.jobErrors, lastJobError: LEDGER.lastJobError,
     };
   };
 
@@ -5625,6 +5719,7 @@
       LEDGER.jobFrameMsMax = Math.max(LEDGER.jobFrameMsMax, performance.now() - t0);
     }
     if (!skinWarmed) skinWarm(dt);  // paint the bite atlases ahead of the first bite
+    else if (warmState < 2) warmStep();  // then run one bite nobody sees, so the first real one runs warm
     if (BITTEN.length || OWNED.length || BLEED.length) {
       sweepT += dt; if (sweepT > 1.1) { sweepT = 0; bittenSweep(); }
       // a death has to read on the frame it happens, not on the 1.1 s sweep
