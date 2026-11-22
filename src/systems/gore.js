@@ -817,8 +817,9 @@
   // the surface tests a metre of clear air above the swell, reads "air", and
   // rains droplets into the sea — the exact bug this block exists to kill. So
   // a wound is also wet when it sits within a body-height of the surface over
-  // water deep enough to be IN rather than to stand in. A knee-deep wader at
-  // the shoreline still bleeds onto the beach, which is correct.
+  // water deep enough to be IN rather than to stand in. A knee-deep wader's
+  // wound is in the air, and what it throws lands in the water it stands in
+  // (seaFloorDepth: no stain on ground under standing water).
   const SWIMMABLE = 1.2;
   function woundInWater(x, y, z) {
     const d = submRaw(x, y, z);
@@ -1712,7 +1713,9 @@
     // area: every patch's outline; seen: that area weighted by how dense the
     // blood in it still is (what reads as stained water)
     return { films: n, litres: L, area: area, seen: seen, maxR: maxR, maxOpacity: maxA, added: FILM_AUDIT.added, joined: FILM_AUDIT.joined, made: FILM_AUDIT.made,
-      cover: PLUME_AUDIT.cover, lensCut: PLUME_AUDIT.lensCut, puffs: puffs.length };
+      cover: PLUME_AUDIT.cover, lensCut: PLUME_AUDIT.lensCut, puffs: puffs.length,
+      // marks that would have been stamped on ground under standing water, sent into it instead
+      intoSea: { pools: SEA_AUDIT.pools, drops: SEA_AUDIT.drops, smearsCut: SEA_AUDIT.smearsCut, wall: SEA_AUDIT.wall } };
   };
   // a drop or a stump reaching the top: its few centilitres join the film
   function surfaceSlick(x, z, amt) {
@@ -2093,6 +2096,10 @@
   // the face's plane, tail pointing along the drop's in-plane travel
   function wallDrop(px, py, pz, nx, nz, vx, vy, vz, g, col) {
     if (walls.length > 34) return false;             // the kills' own wall splats come first
+    if (waterOn()) {
+      const w = submRaw(px, py, pz);
+      if (w !== DRY && w > 0.02) { SEA_AUDIT.wall++; puffFromBit(px, py, pz, vx, vy, vz, g, false); return true; }
+    }
     const c = claimLand();
     if (!c) return false;
     const m = c.m;
@@ -2723,6 +2730,66 @@
 
   // the land decal budget (read live; the quality tier can move mid-run)
   function landCap() { return CBZ.qScale ? CBZ.qScale(85, 300) : 170; }
+
+  /* BLOOD UNDER THE SEA IS NOT A STAIN ON THE SEA FLOOR. (Shark Sim: the
+     automatic bite kills a wader in the clear shallows.) A wader's wound is
+     in the air, so the dry branch runs: pools under the body, impact
+     splats, the drops that reach the bottom between their water checks, a
+     bleeding body's pools, a smear dragged into the sea. Every one of those
+     was stamped on the sand the sea stands on and drawn through the clear
+     water until the wash took it a frame or two later. Blood that reaches
+     ground under standing water is IN the water: a pool, an impact or a
+     smear becomes a cloud over the spot (and, that close to the top, the
+     film over it); a droplet becomes a wisp. Every ground and wall mark asks
+     first. The swash band above mean sea level keeps its marks: a wave
+     running over the sand takes them (GORE_SWASH). */
+  const SEA_FLOOR_MIN = 0.03;      // m of standing water (mean column) that makes ground sea floor
+  const SEA_AUDIT = { pools: 0, drops: 0, smearsCut: 0, wall: 0 };
+  // metres of standing water over where a ground mark at (x, z) would be
+  // seated, 0 on dry ground (or on a deck, a crate, a step above the water)
+  function seaFloorDepth(x, z) {
+    if (!waterOn()) return 0;
+    try {
+      // the islands: the mean column over the ground (the same reading the
+      // wash takes, so a wave's crest never decides it), minus anything a
+      // mark would be seated on above that ground
+      if (CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)) {
+        if (!CBZ.survFloodDepthMeanAt) return 0;
+        const d = +CBZ.survFloodDepthMeanAt(x, z);
+        if (!(d > SEA_FLOOR_MIN)) return 0;
+        const bed = CBZ.survSeaBedYAt ? +CBZ.survSeaBedYAt(x, z) : floorAt(x, z);
+        const over = (isFinite(bed) ? bed : floorAt(x, z)) + d - decalFloorAt(x, z);
+        return over > SEA_FLOOR_MIN ? over : 0;
+      }
+      // the city: its floor under its water is a flat 0 nobody draws, so on
+      // the water mask anything not standing on a solid is in the water
+      if (cityMode()) {
+        if (!CBZ.cityWaterAt || !CBZ.cityWaterAt(x, z)) return 0;
+        const g = floorAt(x, z), seat = decalFloorAt(x, z);
+        if (seat <= g + 0.02) {
+          const d = CBZ.cityWaterDepthAt ? +CBZ.cityWaterDepthAt(x, z) : 1;
+          return isFinite(d) && d > SEA_FLOOR_MIN ? d : 1;
+        }
+        const w = submRaw(x, seat, z);
+        return w !== DRY && w > SEA_FLOOR_MIN ? w : 0;
+      }
+      // anywhere else: water standing over the seat itself
+      const w = submRaw(x, decalFloorAt(x, z), z);
+      return w !== DRY && w > SEA_FLOOR_MIN ? w : 0;
+    } catch (e) {}
+    return 0;
+  }
+  // what the mark would have been, in the water instead
+  function bleedIntoSea(x, z, depth, kind, size) {
+    const y = decalFloorAt(x, z) + Math.min(0.3, depth * 0.5);
+    if (kind === "dot" || kind === "drop" || size < 0.12) {
+      SEA_AUDIT.drops++;
+      puffFromBit(x, y, z, 0, 0, 0, size, false);
+      return;
+    }
+    SEA_AUDIT.pools++;
+    CBZ.goreBloom(x, y, z, { amount: Math.max(0.3, Math.min(3, size * 0.8)) });
+  }
   // out of instance slots (walls + ground together): give up the oldest mark,
   // far ones first, and take its slot. Water slicks never hold a slot.
   function claimLand() {
@@ -2753,9 +2820,11 @@
        "dot"   a droplet that fell straight down (default otherwise)
      `color` is ignored: the shade is the blood's age and depth, not the caller's. */
   function spawnSplat(x, z, grow, color, linger, o) {
-    if (splats.length > landCap()) recycleFarSplat();
     o = o || NO_OPTS;
     const kind = o.kind || (linger ? "pool" : "dot");
+    const sea = seaFloorDepth(x, z);
+    if (sea > 0) { bleedIntoSea(x, z, sea, kind, grow); return null; }
+    if (splats.length > landCap()) recycleFarSplat();
     const s = slopeOn() ? groundGrad(x, z) : null;
     // a slope cannot hold a pool — the steeper it is, the less stays put (and
     // the rest leaves as the trickle below).
@@ -2824,6 +2893,22 @@
   // shader from the start (under the body) to the end over ~half a second,
   // thinning into striations the way a dragged pool does.
   function spawnStreak(x0, z0, dx, dz, len) {
+    // a smear dragged into the sea stops at the waterline: the rest of it is
+    // a cloud where it went in
+    const d0 = seaFloorDepth(x0, z0);
+    if (d0 > 0) { bleedIntoSea(x0, z0, d0, "smear", len * 0.3); return null; }
+    const d1 = seaFloorDepth(x0 + dx * len, z0 + dz * len);
+    if (d1 > 0) {
+      let lo = 0, hi = len;
+      for (let k = 0; k < 6; k++) {
+        const mid = (lo + hi) * 0.5;
+        if (seaFloorDepth(x0 + dx * mid, z0 + dz * mid) > 0) hi = mid; else lo = mid;
+      }
+      SEA_AUDIT.smearsCut++;
+      bleedIntoSea(x0 + dx * hi, z0 + dz * hi, d1, "smear", (len - lo) * 0.3);
+      len = lo;
+      if (len < 0.4) return null;
+    }
     if (splats.length > landCap()) recycleFarSplat();
     const c = claimLand();
     if (!c) return null;
@@ -3144,6 +3229,10 @@
     }
     const col = best.c;                                   // best is a reused record: hold it all now
     const nx = best.nx, nz = best.nz, hx = best.x, hz = best.z, cy = best.y;
+    if (waterOn()) {
+      const w = submRaw(hx, cy, hz);
+      if (w !== DRY && w > 0.02) { SEA_AUDIT.wall++; CBZ.goreBloom(hx, cy, hz, { amount: Math.max(0.3, Math.min(2, amt)) }); return; }
+    }
     const c = claimLand();
     if (!c) return;
     // 2 cm off the struck face: the collider box IS the drawn wall in the
