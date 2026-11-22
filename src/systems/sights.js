@@ -81,8 +81,8 @@
     cheek: 0.14,          // eye forward of the butt at a cheek weld
     dotMin: 0.07,         // never closer than this to a red dot's rear glass
     ironMin: 0.03,        // …or to a rear aperture
-    pistolArm: 0.42,      // rear sight ahead of the eye, two hands out
-    stubArm: 0.36,        // a stockless SMG (Uzi) held out at the eye
+    pistolArm: 0.52,      // rear sight ahead of the eye, two hands out (arms nearly straight from real shoulders)
+    stubArm: 0.30,        // a stockless SMG (Uzi) held out at the eye
   };
   // weapon-data optic id -> the picture it makes
   const ROW_TYPE = { none: "none", iron: "iron", dot: "reddot", holo: "holo", mgo: "scope", acog: "scope", m3a: "scope", pgo7: "scope" };

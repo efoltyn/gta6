@@ -399,6 +399,11 @@
   const gun = new THREE.Group();
   // index === weapon slot; a slot's two models exist once it is drawn (or the
   // idle builder below got to it): a hole until then (forEach skips holes)
+  // WHAT A WRIST CAN DO (wristOf, far below, explains the decomposition). It
+  // lives here because fitOffHand reads it while the gun models are BUILT, at
+  // load: declared after that loop it was a use-before-define that killed this
+  // whole file on startup (no first person at all).
+  const WRIST_LIM = { ext: 60 * Math.PI / 180, flex: 60 * Math.PI / 180, uln: 30 * Math.PI / 180, rad: 20 * Math.PI / 180 };
   const weaponModels = new Array(WEAPONS.length);
   const carriedGun = new THREE.Group();
   const carriedModels = new Array(WEAPONS.length);
@@ -412,7 +417,7 @@
     polymer: new THREE.MeshLambertMaterial({ color: 0x232a24 }),
     brass: new THREE.MeshLambertMaterial({ color: 0xd6a33b, emissive: 0x2b1600, emissiveIntensity: 0.2 }),
     redShell: new THREE.MeshLambertMaterial({ color: 0x9d2523, emissive: 0x210000, emissiveIntensity: 0.12 }),
-    skin: new THREE.MeshLambertMaterial({ color: 0xf0c39a }),
+    skin: new THREE.MeshLambertMaterial({ color: 0xde8b52 }),   // the player's skin (entities/player.js)
   };
 
   function box(parent, sx, sy, sz, mat, x, y, z, rx, ry, rz) {
@@ -494,7 +499,7 @@
     const W = new THREE.Vector3(), hq = new THREE.Quaternion();
     let kM = 1;
     for (let p = fire; p && p !== model; p = p.parent) { p.updateMatrix(); W.applyMatrix4(p.matrix); hq.premultiply(p.quaternion); kM *= p.scale.x; }
-    const L = FORE_REAL * kM, margin = 0.004 * kM;
+    const L = (FPH.bodyArmLens ? FPH.bodyArmLens(1)[1] : FORE_REAL) * kM, margin = 0.004 * kM;
     const base = new THREE.Vector3(0, 0, 1).applyQuaternion(hq);
     const side = new THREE.Vector3(1, 0, 0), down = new THREE.Vector3(0, -1, 0);
     const d = new THREE.Vector3(), p = new THREE.Vector3();
@@ -539,6 +544,26 @@
       fire.userData.foreLocal = new THREE.Vector3(0, 0, 1);
     }
     model.userData.fpFire = fire;
+    /* A REAL HAND ON A REAL GUN. The gun kit closed every hand at ONE size
+       (2.0 model units per hand metre), but each gun is modelled at its own
+       scale (its anchors' k, userData.unitsPerMetre: the pistols 2.25-2.4,
+       the long guns 1.58-1.98), so the hand was 11-17% small on a pistol —
+       4-6 cm of bare grip under the little finger — and up to 27% large on a
+       rifle. The hand is re-closed at the gun's own scale: a life-size hand
+       on a life-size gun (and the arm, sized off the hand, follows). */
+    if (fire && fire.userData.graspSpec && model.userData.unitsPerMetre > 0 && fire.parent && fire.parent.userData.fireGrip) {
+      let ps = 1;
+      for (let p = fire.parent; p && p !== model; p = p.parent) ps *= p.scale.x || 1;
+      const kWant = model.userData.unitsPerMetre / ps;
+      if (Math.abs(kWant - fire.userData.graspSpec.k) > 1e-4) {
+        fire.userData.graspSpec = FPH.fireGraspSpec(fire.parent.userData.fireGrip, kWant);
+        fire.scale.setScalar(kWant);
+        if (!fire.userData.grasp || !FPH.regraspWithSolids) {
+          const G = FPH.grasp(fire.userData.graspSpec);
+          fire.position.copy(G.p); fire.quaternion.copy(G.q); fire.userData.grasp = G;
+        }
+      }
+    }
     if (fire && fire.userData.grasp) {
       // the gun is finished now: the thumb re-closes on the whole of it
       FPH.regraspWithSolids(fire, model);
@@ -555,59 +580,23 @@
       if (gr && fg && gr.mag && !(w && w.melee)) model.userData.fpReloadHand = reloadOnlyHand(model, fg, fire);
       return;
     }
-    // the off hand is the same size as the firing hand, in MODEL units
+    // the off hand is the same size as the firing hand, in MODEL units; the
+    // grip itself is fphands' recipe (supportGraspSpec), the one a body uses
+    // in third person too
     const k = fg.k * (fire.parent && fire.parent !== model ? fire.parent.scale.x : 1);
     const V = (x, y, z) => new THREE.Vector3(x, y, z);
-    let spec, foreDir, maxDev = 0;
-    if (hold && hold.kind === "guard") {
-      // cupped under the handguard, yawed: fingers up the far side and forward
-      const yaw = 0.62;
-      spec = {
-        side: -1, k: k, name: "guard:" + [hold.y, hold.z, hold.w, hold.h].join("/"),
-        prism: { o: V(0, hold.y, hold.z), axis: V(0, 0, -1), u: V(1, 0, 0), hw: hold.w / 2, hh: hold.h / 2, rc: hold.rc, hl: hold.len ? hold.len / 2 : Infinity },
-        n: V(-0.30, -1, 0),
-        heading: V(Math.cos(yaw), 0.18, -Math.sin(yaw)),
-        // a touch behind the part's middle: the elbow stays bent under the gun
-        at: V(0, hold.y, hold.z + (hold.slide == null ? 0.03 : hold.slide)),
-        palm: [0.004, -FPH.PALM.th * 0.5, -0.056],
-        thumbAim: V(-0.10, 0.22, -1),
-        thumbBend: [0.9, 0.7, 0.5],
-      };
-      foreDir = V(-0.55, -0.62, 0.56);          // wrist -> elbow: down, back, out to the left
-    } else if (hold && hold.kind === "vgrip") {
-      const ax = V(0, Math.cos(hold.rake || 0), -Math.sin(hold.rake || 0));
-      const u = V(1, 0, 0), fwd = new THREE.Vector3().crossVectors(ax, u);
-      const top = V(0, hold.y, hold.z);
-      spec = {
-        side: -1, k: k, name: "vgrip:" + [hold.y, hold.z, hold.w, hold.d].join("/"),
-        prism: { o: top, axis: ax, u: u, hw: hold.w / 2, hh: hold.d / 2, rc: Math.min(hold.w, hold.d) * 0.22 },
-        n: u.clone().negate().addScaledVector(fwd, -0.22),
-        heading: fwd.clone(),
-        at: top.clone().addScaledVector(ax, -0.050 * k),
-        palm: [0, -FPH.PALM.th * 0.5, -(0.096 - hold.d * 0.5 / k - 0.004)],
-        thumbAim: u.clone().addScaledVector(fwd, -0.35).addScaledVector(ax, 0.10),
-      };
-      foreDir = V(-0.45, -0.55, 0.70);
-    } else {
-      // THUMBS FORWARD on a pistol: over the firing fist, from the left
-      const P = fg.prism, e = 0.020 * k;             // the firing fingers' thickness
-      const fwd = P.v.clone();                       // front strap side
-      spec = {
-        side: -1, k: k, name: "cup:" + fg.pose.name,
-        prism: { o: P.o.clone(), axis: P.axis.clone(), u: P.u.clone(), hw: P.hw + e, hh: P.hh + e * 0.8, rc: P.rc + e },
-        n: P.u.clone().negate().addScaledVector(fwd, -0.30),
-        heading: fwd.clone().multiplyScalar(0.90).addScaledVector(P.axis, -0.60),
-        at: P.o.clone().addScaledVector(P.axis, -0.034 * k),
-        palm: [0.006, -FPH.PALM.th * 0.5, -0.050],
-        thumbAim: V(0.25, -0.10, -1),
-        thumbAim2: V(0.12, -0.02, -1),
-      };
+    const spec = FPH.supportGraspSpec(hold, k, fg);
+    if (!spec) { model.userData.fpSupport = null; return; }
+    let foreDir, maxDev = 0;
+    if (spec.kind === "guard") foreDir = V(-0.55, -0.62, 0.56);   // wrist -> elbow: down, back, out to the left
+    else if (spec.kind === "vgrip") foreDir = V(-0.45, -0.55, 0.70);
+    else {
       /* THE WATCH READS. The player's watch (entities/watch.js) sits 2.6 cm
          up this forearm, i.e. at this wrist — and the cup's wrist hung so
          low at the hip that the watch sat ON the bottom edge of the frame:
          the Desert Eagle's case ran from 74% to 106% down the lens, cut in
          half (the revolver's touched the edge, the Glock's reached 90%).
-         The cup now closes 1.2 cm higher on the firing fist (at) with its
+         The cup closes 1.2 cm higher on the firing fist (at) with its
          fingers raked further down the grip (heading), which lifts the
          wrist, and its forearm leaves back and out to the left, low but not
          plunging, held near that line (maxDev): the case sits whole in the
@@ -627,6 +616,8 @@
     // the forearm's natural line, in the hand's own frame (so it rides every rack, dip and kick)
     hand.userData.foreLocal = foreDir.normalize().applyQuaternion(hand.quaternion.clone().invert());
     if (maxDev) hand.userData.foreLocal.maxDev = maxDev;      // gunArm's wrist limit for this hold
+    // the thumbs-forward support wrist is cammed forward and locked: it gives 40 degrees ulnar
+    if (spec.kind === "cup") hand.userData.wristLim = Object.assign({}, WRIST_LIM, { uln: 40 * Math.PI / 180 });
     hand.userData.pose0 = hand.userData.pose;
     hand.userData.baseQ = hand.quaternion.clone();
     hand.userData.basePos = hand.position.clone();
@@ -827,7 +818,7 @@
   // the live body every frame by fphands.dressOf (heritage skin comes through
   // the rig). The jumpsuit literals are only the floor with no body at all.
   const FIST_SLEEVE_FALLBACK = 0xff7a1a;
-  const FIST_SKIN_FALLBACK = 0xf0c39a;
+  const FIST_SKIN_FALLBACK = 0xde8b52;
   const fistSleeve = new THREE.MeshLambertMaterial({ color: FIST_SLEEVE_FALLBACK });
   const fistUpper = new THREE.MeshLambertMaterial({ color: FIST_SLEEVE_FALLBACK });
   const HAND_K = 1.9;                 // FP hand size (the viewmodel world is ~2x real)
@@ -842,8 +833,6 @@
   const armR = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }, 1) : new THREE.Group();
   const armL = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }, -1) : new THREE.Group();
   fpArms.add(armR, armL);
-  // systems/wounds.js mirrors a hole in your rig's arm onto these
-  CBZ.fpViewArms = { r: armR, l: armL };
   let armSleeved = false;
   let fistSleeveHex = -1, fistUpperHex = -1, fistSkinHex = -1;
   function dressFists() {
@@ -855,6 +844,19 @@
     if (fistSleeveHex !== foreHex) { fistSleeveHex = foreHex; fistSleeve.color.setHex(foreHex); }
     if (fistUpperHex !== upperHex) { fistUpperHex = upperHex; fistUpper.color.setHex(upperHex); }
     if (fistSkinHex !== handHex) { fistSkinHex = handHex; mat.skin.color.setHex(handHex); }
+  }
+  /* THE HAND WEARS THE BODY'S HAND: the rig's own hand material (skin tone,
+     glove, the ink chart its hand carries, the same shading model) as a
+     viewmodel twin (fphands bodyHandMaterial), so the hand on the gun is the
+     hand the chase camera sees. mat.skin (tinted by dressFists) is only the
+     floor with no body. tattoo.js may swap in its first-person ink twin of
+     whatever this hand wears as it draws; that twin is left alone. */
+  function wearBodyHand(h) {
+    if (!h || !h.isMesh || !h.visible) return;
+    const want = (FPH.bodyHandMaterial && FPH.bodyHandMaterial(h.userData.side < 0 ? -1 : 1, mat.skin)) || mat.skin;
+    const cur = h.material;
+    if (cur === want || (cur && cur.userData && cur.userData.cbzFp && h.userData.inkBase === want)) return;
+    h.material = want;
   }
 
   vm.add(gun, fists, fpArms);
@@ -1449,7 +1451,12 @@
      move the hands against the shoulders the way a real body does. The elbow
      pole is always down and OUT on the arm's own side. */
   const SHOULDER_CAM = [[0.30, -0.45, 0.12], [-0.30, -0.45, 0.12]];
-  const ARM_FIST = [0.46, 0.44];            // upper, fore (vm metres at HAND_K)
+  /* upper, fore (vm metres at HAND_K): the BODY's arm at the fist's scale
+     (fphands bodyArmLens, read per frame off the player rig: the arm drawn is
+     the rig's own). These are a real man's, for when there is no body. They
+     were 0.46 / 0.44 — a 24 cm upper arm on a 23 cm forearm, a child's arm on
+     a man's fist. */
+  const ARM_FIST = [0.30 * 1.9, 0.265 * 1.9];
   /* ARMED, THE BODY IS THE GUN'S SCALE. The viewmodel is a ~2.56x world (the
      guns are built ~2x real and vm scales them 1.28), and the old arms were
      not: shoulders 0.30 m out and 0.45 down with 0.60/0.62 bones, so a
@@ -1467,11 +1474,24 @@
   // where each forearm LEAVES the frame (camera space, wrist -> elbow): down
   // and back toward its own bottom corner, never at the lens
   const ARM_EXIT = [[0.30, -1, 0.30], [-0.50, -1, 0.30]];
+  // each elbow's swing (camera space): down and out on its own side, a little back (armSolve)
+  const ARM_POLE = [[0.5, -1, 0.4], [-0.35, -0.9, 0.3]];
+  const FOLDED = 0.65;               // a firing wrist this close (share of the arm) to its shoulder: a stock in the shoulder
+  const ARM_STRAIGHT = [0.6, 0.3];                          // how far each forearm is laid along its hand's own line (gunArm)
   const _vmInv = new THREE.Matrix4();
   const _aS = new THREE.Vector3(), _aW = new THREE.Vector3(), _aE = new THREE.Vector3(), _aAlong = new THREE.Vector3();
   const _aQ = new THREE.Quaternion(), _aP = new THREE.Vector3();
   const _sArr = [0, 0, 0], _wArr = [0, 0, 0], _pArr = [0, 0, 0];
+  /* THE SHOULDERS ARE THE BODY'S (fphands bodyShoulder): the player rig's
+     own shoulder joints measured from its own eyes (a man's ~20 cm out, 27
+     cm under and 9 cm behind the eye; a woman's and a child's their own), at
+     the hand's scale — the same scale the arm drawn from them is at. The
+     constants (SHOULDER_CAM / SHOULDER_BODY) are only the floor with no
+     body. Read per frame (cached per rig in fphands), so a new body brings
+     its own. */
   function shoulderVm(i, out) {
+    const b = FPH && FPH.bodyShoulder ? FPH.bodyShoulder(i === 0 ? 1 : -1) : null;
+    if (b) return out.set(b[0] * HAND_K, b[1] * HAND_K, b[2] * HAND_K).applyMatrix4(_vmInv);
     const s = SHOULDER_CAM[i];
     return out.set(s[0], s[1], s[2]).applyMatrix4(_vmInv);
   }
@@ -1603,13 +1623,14 @@
         FPH.setPose(hand, T.curl);
         _aW.set(T.x, T.y, T.z);
         shoulderVm(i, _aS);
-        elbowFor(i, _aW, _aS, defaultPole(side, T.hook, _poleArr), ARM_FIST, _aE);
+        elbowFor(i, _aW, _aS, defaultPole(side, T.hook, _poleArr), FPH.bodyArmLens ? FPH.bodyArmLens(HAND_K, undefined, side) : ARM_FIST, _aE);
         _aAlong.subVectors(_aW, _aE);
         FPH.orientAlong(side, _aAlong, T.roll, T.bend, hand.quaternion);
         if (T.plantW > 0 && T.plantQ) hand.quaternion.slerp(T.plantQ, T.plantW);   // flat on the ledge (fpPlants)
         else if (T.handW > 0 && T.handQ) hand.quaternion.slerp(T.handQ, T.handW);   // a held thing's own frame (city/phone.js)
         hand.position.copy(_aW);
         FPH.poseArm(arm, _aW, _aE, _aS, hand.quaternion, HAND_K, armSleeved);
+        wearBodyHand(hand);
       }
       return;
     }
@@ -1622,13 +1643,16 @@
     const sup = model && (model.userData.fpSupport ||
       (rh && CBZ.gunReloadPose && CBZ.gunReloadPose().active ? rh : null));
     fpReloadHands(model, fire, sup);
-    armR.visible = !!fire;
-    if (fire) gunArm(0, fire, armR);
     /* HOW MANY HANDS (systems/actorweapons.js CBZ.holds): a handgun is two
        hands only down the sights, one at the hip; the off hand comes up onto
        the gun with the sight blend and drops back out of the frame below
        it. A reload always brings it (it works the magazine). */
     const k2 = fpSupportK(sup, dt);
+    const w0 = WEAPONS[fps.weapon];
+    // the hip carry where the body's arms hold this gun (fitHip), blended out down the sights
+    if (!(fps.reloading > 0)) applyHip(model, fire, (sup && sup === model.userData.fpSupport && CBZ.holds && w0 && CBZ.holds.hands(w0, { view: "fp", aimed: false }) >= 2) ? sup : null, CBZ.fpsAdsK ? CBZ.fpsAdsK() : 0);
+    armR.visible = !!fire;
+    if (fire) gunArm(0, fire, armR);
     armL.visible = !!sup && k2 > 0.02;
     if (sup) sup.visible = k2 > 0.02;
     if (sup && k2 > 0.02) {
@@ -1636,6 +1660,7 @@
       if (k2 < 1) sup.position.addScaledVector(FP_SUP_DROP, (1 - k2) * (1 - k2) / worldScaleInVm(sup.parent));
       gunArm(1, sup, armL);
     }
+    wearBodyHand(fire); wearBodyHand(sup);
   }
   // the off hand's share of a one-hand-at-the-hip gun (eased: it travels)
   let fpSupEase = 1;
@@ -1653,18 +1678,31 @@
   }
   const _aF = new THREE.Vector3(), _eArr = [0, 0, 0], _fArr = [0, 0, 0];
   function armShoulderVm(i, k, out) {
-    const s = SHOULDER_BODY[i];
+    const s = (FPH && FPH.bodyShoulder && FPH.bodyShoulder(i === 0 ? 1 : -1)) || SHOULDER_BODY[i];   // the body's own (shoulderVm)
     return out.set(s[0] * k, s[1] * k, s[2] * k).applyMatrix4(_vmInv);
   }
+  /* An elbow (vm space) the lens never sees: below the shoulder line's
+     height under the eye and out of the cone in front of it (ELBOW_DOWN
+     below the eye, or behind the eye's plane, or steeper than ELBOW_CONE). */
+  const ELBOW_DOWN = 0.16, ELBOW_CONE = 0.75;
+  const _eOk = new THREE.Vector3();
+  function elbowOk(E, k) {
+    _eOk.copy(E).applyMatrix4(vm.matrix);                   // camera space
+    return -_eOk.y > ELBOW_DOWN * k && (_eOk.z > -0.02 * k || -_eOk.y > -_eOk.z * ELBOW_CONE);
+  }
+  const REACH_MAX = 0.97;           // share of the arm a hip-carry hand may sit from its shoulder (fitHip)
   // one gun arm: the forearm heads for its bottom corner of the frame, as far
   // as the wrist allows off the hand's natural line; the upper arm joins it
   // to a shoulder at the hand's own scale (below and behind the lens)
   const _vmQi = new THREE.Quaternion();
-  function gunArm(i, hand, arm) {
+  // one gun arm, solved (not drawn): wrist _aW / hand _aQ / elbow _aE /
+  // shoulder _aS in vm space, for the vm as it stands; returns the hand's k
+  function armSolve(i, hand) {
     const k = worldScaleInVm(hand);
     inVm(hand, null, _aW, _aQ);
     armShoulderVm(i, k, _aS);
-    const lens = [ARM_BODY[0] * k, ARM_BODY[1] * k];
+    // the body's own bones at the hand's scale (the arm drawn is the rig's)
+    const lens = FPH.bodyArmLens ? FPH.bodyArmLens(k, undefined, i === 0 ? 1 : -1) : [ARM_BODY[0] * k, ARM_BODY[1] * k];
     const x = ARM_EXIT[i];
     _vmQi.copy(vm.quaternion).invert();
     _aE.set(x[0], x[1], x[2]).normalize().applyQuaternion(_vmQi).multiplyScalar(lens[1]).add(_aW);
@@ -1677,7 +1715,156 @@
       const e = FPH.math.clampFore(_wArr, _eArr, _fArr, fl.maxDev || WRIST_DEV[i], lens[1]);   // a hold may keep its forearm nearer its own line (the pistol cup)
       _aE.set(e[0], e[1], e[2]);
     }
+    /* THE ARM COMES FROM BELOW, ALWAYS. The arm is solved from the body's
+       own shoulder with the body's own bones (two-bone IK): every elbow that
+       joins them lies on one circle round the shoulder -> wrist line. The
+       elbow is taken DOWN AND OUT on its own side (ARM_POLE) and may swivel
+       only SWIVEL_MAX either way from there, never up past it, and never to
+       less than ELBOW_UNDER below its own wrist or above its shoulder — so
+       with a pistol at the eye both forearms rise from the bottom corners.
+       (A free swivel, chasing the wrist's range, lifted the support elbow to
+       eye level: the sleeve came in from the left edge at sight height and
+       filled a quarter of the view. A wrist the low elbow cannot give is the
+       HOLD's to change — fphands supportGraspSpec — not the elbow's.)
+       Within that, the swivel takes the least wrist excess (wristOf, the
+       hold's own limits), then the forearm nearest the hand's own line
+       (foreLocal blended toward the exit line), then the least swivel. Out
+       of reach the arm is straight and the hand is still on the gun. */
+    const side = i === 0 ? 1 : -1;
+    _sArr[0] = _aS.x; _sArr[1] = _aS.y; _sArr[2] = _aS.z;
+    _wArr[0] = _aW.x; _wArr[1] = _aW.y; _wArr[2] = _aW.z;
+    vm.updateMatrix();
+    // the forearm line wanted (wrist -> elbow)
+    _aF.subVectors(_aE, _aW).normalize();
+    if (fl && ARM_STRAIGHT[i] > 0) _aF.lerp(_aP.copy(fl).applyQuaternion(_aQ), ARM_STRAIGHT[i]).normalize();
+    _swF.copy(_aF);
+    // the circle's frame: its axis (shoulder -> wrist) and the pole squared to it
+    _swU.subVectors(_aW, _aS).normalize();
+    // (a firing arm folded to a stock in the shoulder — its wrist within
+    // FOLDED of the arm's length from the shoulder — is never in the lens:
+    // its elbow may swing round to wherever the wrist is kindest, still under
+    // its wrist, beside the body on its own side and not above the shoulder)
+    const folded = i === 0 && _aS.distanceTo(_aW) < FOLDED * (lens[0] + lens[1]);
+    _swA.set(ARM_POLE[i][0], ARM_POLE[i][1], ARM_POLE[i][2]).applyQuaternion(_vmQi);
+    _swA.addScaledVector(_swU, -_swA.dot(_swU));
+    if (_swA.lengthSq() < 1e-8) _swA.set(0, -1, 0).addScaledVector(_swU, -_swU.y);
+    _swA.normalize();
+    _swB.crossVectors(_swU, _swA);
+    // the pole's own elbow, and the camera-space heights everything is held to
+    let e0 = FPH.math.solveElbow(_sArr, _wArr, [_swA.x, _swA.y, _swA.z], lens[0], lens[1]);
+    _swE0.set(e0[0], e0[1], e0[2]);
+    const yOf = (v) => _swC.copy(v).applyMatrix4(vm.matrix).y;
+    const yPole = yOf(_swE0), yW = yOf(_aW), yS = yOf(_aS);
+    const lim = hand.userData.wristLim || null;
+    let best = null;
+    const steps = folded ? 18 : SWIVEL_STEPS, range = folded ? Math.PI : SWIVEL_MAX;
+    for (let t = -steps; t <= steps; t++) {
+      const a = range * t / steps;
+      _pArr[0] = _swA.x * Math.cos(a) + _swB.x * Math.sin(a);
+      _pArr[1] = _swA.y * Math.cos(a) + _swB.y * Math.sin(a);
+      _pArr[2] = _swA.z * Math.cos(a) + _swB.z * Math.sin(a);
+      const e = FPH.math.solveElbow(_sArr, _wArr, _pArr, lens[0], lens[1]);
+      _swE.set(e[0], e[1], e[2]);
+      const ye = yOf(_swE);
+      let c = wristOf(side, _aW, _swE, _aQ, null, lim).viol * 4;
+      _swC.subVectors(_swE, _aW).normalize();
+      c += 0.5 * (1 - _swC.dot(_swF)) + 0.05 * Math.abs(a);
+      if (ye > yW - ELBOW_UNDER * k) c += 10 + (ye - yW) / k;           // under its own wrist
+      if (ye > yS) c += 10;                                              // never above the shoulder
+      if (!folded && ye > yPole + 0.01 * k) c += 10;                     // never up past the pole
+      if (folded && side * _swC.copy(_swE).applyMatrix4(vm.matrix).x < 0.05 * k) c += 10;   // on its own side of the body
+      if (!best || c < best.c) best = { c: c, x: e[0], y: e[1], z: e[2] };
+    }
+    _aE.set(best.x, best.y, best.z);
+    _aReach = _aS.distanceTo(_aW) / (lens[0] + lens[1]);
+    return k;
+  }
+  const _swU = new THREE.Vector3(), _swA = new THREE.Vector3(), _swB = new THREE.Vector3(), _swE = new THREE.Vector3(), _swE0 = new THREE.Vector3();
+  const _swF = new THREE.Vector3(), _swC = new THREE.Vector3();
+  // the elbow's swivel either way from down-and-out, in steps; how far under its wrist it stays
+  const SWIVEL_MAX = 25 * Math.PI / 180, SWIVEL_STEPS = 5, ELBOW_UNDER = 0.08;
+  let _aReach = 0;
+  function gunArm(i, hand, arm) {
+    const k = armSolve(i, hand);
     FPH.poseArm(arm, _aW, _aE, _aS, _aQ, k, armSleeved);
+  }
+  /* WHAT A WRIST CAN DO. The hand's angle off its forearm, decomposed the
+     way a wrist moves: extension (back of the hand toward the forearm) and
+     flexion, radial (thumb side) and ulnar deviation — measured in the
+     forearm's own frame (its axis elbow -> wrist, its dorsal and thumb sides
+     the hand's, squared to the axis). Limits are a real wrist's comfortable
+     range. Returns the excess past them (radians, summed). */
+  // (WRIST_LIM itself is declared up top, before the gun models are built: the
+  // support hand reads it at build time)
+  const _wa = { ext: 0, dev: 0, viol: 0 };
+  const _wF = new THREE.Vector3(), _wD = new THREE.Vector3(), _wY = new THREE.Vector3(), _wX = new THREE.Vector3();
+  function wristOf(side, W, E, Q, out, lim) {
+    out = out || _wa;
+    const L = lim || WRIST_LIM;
+    _wF.subVectors(W, E).normalize();                                   // the forearm, toward the hand
+    _wD.set(0, 0, -1).applyQuaternion(Q);                               // wrist -> knuckles
+    _wY.set(0, 1, 0).applyQuaternion(Q); _wY.addScaledVector(_wF, -_wY.dot(_wF)).normalize();   // dorsal
+    _wX.set(side < 0 ? 1 : -1, 0, 0).applyQuaternion(Q);                 // the thumb side
+    _wX.addScaledVector(_wF, -_wX.dot(_wF)).addScaledVector(_wY, -_wX.dot(_wY)).normalize();
+    const along = _wD.dot(_wF);
+    out.ext = Math.atan2(_wD.dot(_wY), along);                          // + extension, - flexion
+    out.dev = Math.atan2(_wD.dot(_wX), along);                          // + radial, - ulnar
+    out.viol = Math.max(0, out.ext - L.ext) + Math.max(0, -out.ext - L.flex) +
+      Math.max(0, out.dev - L.rad) + Math.max(0, -out.dev - L.uln);
+    return out;
+  }
+  /* THE GUN AT THE HIP IS WHERE THE ARMS HOLD IT. The hip carry was a fixed
+     viewmodel spot authored with no body behind it: from a real shoulder the
+     firing wrist had to bend up to 90 degrees to reach a rifle's grip there,
+     and a long gun's handguard sat past the support arm's reach. So, once
+     per gun (and body), the hip carry is searched: the gun moved forward,
+     down, sideways and pitched by up to a few centimetres / degrees from the
+     authored spot, scored on both wrists' excess past their range
+     (wristOf), any arm out of reach, an elbow in the frame, and the size of
+     the move (the hip look stays as near as the arms allow). Applied at the
+     hip and blended out down the sights (the approved sight picture is
+     untouched). */
+  const HIP_POS = [0.36, -0.34, -0.72], HIP_PITCH = -0.10;
+  // (real metres at the gun's scale: x right, y up, z back toward the eye)
+  const HIP_TRY = { dx: [0, -0.05, -0.10, -0.15, 0.05], dy: [0, -0.05, -0.10, -0.15], dz: [0, -0.06, -0.12, 0.06, 0.12, 0.18], pitch: [0, -0.15, 0.15, 0.3] };
+  const _hpP = new THREE.Vector3(), _hpQ = new THREE.Quaternion(), _hpE = new THREE.Vector3();
+  function hipScore(fire, sup) {
+    let cost = 0;
+    const hands = sup ? [[0, fire, 1], [1, sup, -1]] : [[0, fire, 1]];
+    for (const h of hands) {
+      const k = armSolve(h[0], h[1]);
+      cost += wristOf(h[2], _aW, _aE, _aQ, null, h[1].userData.wristLim).viol * 4;
+      if (_aReach > REACH_MAX) cost += (_aReach - REACH_MAX) * 100;   // an arm out of reach is not a hold
+      if (!elbowOk(_aE, k)) cost += 0.5;
+    }
+    return cost;
+  }
+  function fitHip(model, fire, sup) {
+    const ud = model.userData;
+    const sig = FPH.bodyShoulder ? String(FPH.bodyShoulder(1)) : "-";
+    if (ud.fpHip && ud.fpHip.sig === sig) return ud.fpHip;
+    _hpP.copy(vm.position); _hpQ.copy(vm.quaternion);
+    const km = worldScaleInVm(fire);                       // vm units per real metre
+    let best = null;
+    for (const dx of HIP_TRY.dx) for (const dy of HIP_TRY.dy) for (const dz of HIP_TRY.dz) for (const pt of HIP_TRY.pitch) {
+      vm.position.set(HIP_POS[0] + dx * km, HIP_POS[1] + dy * km, HIP_POS[2] + dz * km);
+      vm.rotation.set(HIP_PITCH + pt, 0, 0);
+      vm.updateMatrix(); _vmInv.copy(vm.matrix).invert();
+      const c = hipScore(fire, sup) + 1.5 * (Math.abs(dx) + Math.abs(dy) + Math.abs(dz)) + 0.15 * Math.abs(pt);
+      if (!best || c < best.c) best = { c: c, dx: dx * km, dy: dy * km, dz: dz * km, pt: pt };
+    }
+    vm.position.copy(_hpP); vm.quaternion.copy(_hpQ);
+    vm.updateMatrix(); _vmInv.copy(vm.matrix).invert();
+    ud.fpHip = { sig: sig, off: new THREE.Vector3(best.dx, best.dy, best.dz), pitch: best.pt };
+    return ud.fpHip;
+  }
+  const _hipQ = new THREE.Quaternion(), _hipX = new THREE.Vector3(1, 0, 0);
+  function applyHip(model, fire, sup, adsK) {
+    if (!(adsK < 1) || !fire) return;
+    const H = fitHip(model, fire, sup), w = 1 - adsK;
+    vm.position.addScaledVector(H.off, w);
+    if (H.pitch) vm.quaternion.multiply(_hipQ.setFromAxisAngle(_hipX, H.pitch * w));
+    vm.updateMatrix(); _vmInv.copy(vm.matrix).invert();
   }
   // THE TORCH HAND (systems/playerflashlight.js CBZ.fpTorchHold): called right
   // after poseFpArms with this view of the viewmodel, so a lit torch can take

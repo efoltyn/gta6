@@ -616,7 +616,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=peak1014"></script>
+  <script src="src/systems/fphands.js?v=hands1122"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
@@ -628,7 +628,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <!-- sunglasses FITTED to the head they are worn on (every pair: bling, the detail kit, the portrait, warlord); after character.js + jewelry_kit.js (its street environment) -->
   <script src="src/entities/eyewear.js?v=armourm1011"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
-  <script src="src/entities/watch.js?v=memflat1029"></script>
+  <script src="src/entities/watch.js?v=hands1122"></script>
   <!-- STICK CITY: the hat library (every hat procedural, one merged geometry each) and the stick look (?stick=1 or CBZ.STICK_LOOK; off = nothing). After character.js and the dressing modules it stubs (footwear, headwear, jewelry_kit, eyewear, watch, tattoo); before player.js (the player body is built at load) and crowdgpu.js (its hat gear compiles off CBZ.stickLook). -->
   <script src="src/entities/hats.js?v=stick1103"></script>
   <!-- the jewellery library (watches, bracelets, chains + pendants, rings, earrings, grills): after hats.js (its modelling kit) and jewelry_kit.js (the metals' environment) -->
@@ -715,7 +715,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/eyes.js?v=rounds1013"></script>
 <script src="src/systems/vitals.js?v=shot1122"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
-<script src="src/entities/player.js?v=body1122f"></script>
+<script src="src/entities/player.js?v=hands1122"></script>
 <script src="src/entities/coins.js"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
@@ -743,8 +743,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/weapons/ballistics.js?v=inf1028c"></script>
 <script src="src/weapons/weapon-scale.js?v=nations1026"></script>
 <script src="src/weapons/optics.js?v=anchor1"></script>
-<script src="src/weapons/appearances/sidearm.js?v=hold1122"></script>
-<script src="src/weapons/appearances/shotgun.js?v=hold1122"></script>
+<script src="src/weapons/appearances/sidearm.js?v=hands1122"></script>
+<script src="src/weapons/appearances/shotgun.js?v=hands1122"></script>
 <script src="src/weapons/appearances/carbine.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/smg.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/taser.js?v=hold1122"></script>
@@ -757,16 +757,16 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/smoketrail.js?v=r187a"></script>
 <script src="src/weapons/munitions.js?v=fx1029"></script>
 <script src="src/weapons/appearances/ak47.js?v=hold1122"></script>
-<script src="src/weapons/appearances/revolver.js?v=hold1122"></script>
-<script src="src/weapons/appearances/deagle.js?v=mce86a5"></script>
-<script src="src/weapons/appearances/uzi.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/revolver.js?v=hands1122"></script>
+<script src="src/weapons/appearances/deagle.js?v=hands1122"></script>
+<script src="src/weapons/appearances/uzi.js?v=hands1122"></script>
 <script src="src/weapons/appearances/sniper.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/lmg.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/shank.js?v=anchor1"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <script src="src/weapons/flashlight.js?v=anchor1"></script>
-<script src="src/systems/actorweapons.js?v=hold1122"></script>
+<script src="src/systems/actorweapons.js?v=hands1122"></script>
 <script src="src/city/weapon_thumbnails.js?v=stall1022"></script>
 <script src="src/systems/holsterprops.js?v=anatomy1122"></script>
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -774,7 +774,7 @@ document.body.appendChild(b);}}catch(e){}})();
      frame (instead of the old hand-tuned Euler guess, which could not
      know which gun was out) and choreographs the reload the same way.
      After holsterprops — it reads the gun that module just placed. -->
-<script src="src/systems/gunhands.js?v=mce86a5"></script>
+<script src="src/systems/gunhands.js?v=hands1122"></script>
 <script src="src/systems/prisondrops.js?v=icon1028"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
@@ -1070,7 +1070,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=pres1028"></script>
-<script src="src/systems/fpsmode.js?v=shot1122"></script>
+<script src="src/systems/fpsmode.js?v=hands1122"></script>
 <script src="src/systems/gunfx.js?v=canvas1029"></script>
 <script src="src/systems/intimidate.js?v=hold1122"></script>
 
@@ -1771,7 +1771,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
      person, reticles at infinity on red-dot glass, a real scope (magnified
      second camera in the ocular), sway + breath, the 3P cheek weld. -->
-<script src="src/systems/sights.js?v=hold1122"></script>
+<script src="src/systems/sights.js?v=hands1122"></script>
 <!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
@@ -2095,7 +2095,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=isleopen1022"></script>
-<script src="src/city/charpanel.js?v=r187a"></script>
+<script src="src/city/charpanel.js?v=hands1122"></script>
 <!-- THE PHOTO BOOTH: one offscreen rig that photographs any body in the
      outfit it is ACTUALLY wearing (CBZ.cityMugshot). The hitman contract
      card on the phone shows the mark instead of describing him. -->
@@ -2181,7 +2181,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- projected decals: blood cut out of the struck mesh's own triangles (cars) -->
 <script src="src/systems/surfacedecal.js?v=carblood930"></script>
 <script src="src/systems/gore.js?v=r187a"></script>
-<script src="src/systems/wounds.js?v=r187a"></script>
+<script src="src/systems/wounds.js?v=hands1122"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused

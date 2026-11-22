@@ -140,10 +140,16 @@
     const mid = gp((M0 + M1) / 2, MI + MD / 2), well = gp(GL, MI + MD / 2), hc = gp(0.100, GD / 2);
     // WHERE THE HANDS GO — see systems/gunhands.js. Mag-in-grip, so the off
     // hand has no handguard: it wraps the receiver's nose ahead of the guard.
+    // (The hold sat at z -0.27 with a 16 cm span — centred on the GRIP's front
+    // strap, behind the trigger at -0.312: the off hand's fingers closed
+    // through the firing hand's, 14 mm deep. The receiver's nose is the stretch
+    // between the trigger guard's front, ~-0.36, and the barrel nut at -0.43.)
     g.userData.grips = {
-      support: new THREE.Vector3(0, 0.000, -0.290),
+      support: new THREE.Vector3(0, 0.000, -0.385),
       // the part the first-person off hand closes on (fpsmode.js fitOffHand)
-      hold: { kind: "guard", y: 0.037, z: -0.270, w: 0.090, h: 0.134, rc: 0.012, len: 0.16, slide: 0 },
+      // (the lower half of the receiver: the whole 13 cm height let the
+      // fingers wrap over its top into the sight picture)
+      hold: { kind: "guard", y: 0.005, z: -0.385, w: 0.090, h: 0.070, rc: 0.012, len: 0.05, slide: 0 },
       mag: new THREE.Vector3(0, mid[1], -mid[0]),       // the magazine IS the grip
       charge: new THREE.Vector3(0, 0.126, -0.336),      // top-cover cocking knob
       style: "mag",
@@ -152,13 +158,13 @@
       k: K_M,
       grip: { pos: [0, hc[1], -hc[0]], rake: R },
       trigger: [0, -0.070, -0.313],
-      support: { pos: [0, 0.037, -0.290], kind: "frame", len: 0.16 },
+      support: { pos: [0, 0.037, -0.385], kind: "frame", len: 0.05 },
       muzzle: muzzle,
       mag: { pos: [0, mid[1], -mid[0]], well: [0, well[1], -well[0]], rake: R },
       stock: { pos: [0.084, 0.033, -0.340], folded: true },
       charge: [0, 0.126, -0.336],
       // the Micro Uzi is shot folded, held out at the chin: a long relief
-      sight: { rear: [0, 0.142, -0.046], front: [0, 0.142, -0.404], eyeRelief: 0.36, type: "iron" },
+      sight: { rear: [0, 0.142, -0.046], front: [0, 0.142, -0.404], eyeRelief: 0.26, type: "iron" },
       optic: { type: "iron", mag: 1 },
     });
     return g;

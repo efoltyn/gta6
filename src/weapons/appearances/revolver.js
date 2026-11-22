@@ -146,7 +146,7 @@
 
     // WALNUT TARGET GRIPS: raked, a finger swell on the front strap, flared
     // heel, and a checkered panel (diamonds proud of the cut field) per side
-    const R = 0.30, gd = 44 * S, gl = 96 * S;
+    const R = 0.30, gd = 44 * S, gl = 86 * S;     // (96: 2.5 cm of bare grip under a life-size hand)
     const gff = P(44, -42);
     const gp = K.grip(gff[0], gff[1], gd, gl, R, { swellF: 4 * S, swellB: 3 * S, grooves: 2 });
     K.prof(g, "py.grip", gp, 38 * S, wood, { bevel: 2.2 * S });
@@ -191,7 +191,7 @@
       mag: { pos: cylC, well: well, quat: magQ },
       stock: null, bolt: null,
       charge: [0, spur[1], -spur[0]],
-      sight: { rear: rs, front: [0, fs[1], -fs[0]], eyeRelief: 0.42, type: "iron" },
+      sight: { rear: rs, front: [0, fs[1], -fs[0]], eyeRelief: 0.52, type: "iron" },
       optic: { type: "iron", mag: 1 },
     });
     return g;

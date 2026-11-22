@@ -280,71 +280,14 @@
     // hands (NPC props) passes ctx.noHand
     if (ctx.display || ctx.noHand || !ctx.mat.skin) return null;
     const FPH = CBZ.fpHands;
-    if (!FPH || !FPH.grasp) return null;
-    const THREE = ctx.THREE;
+    if (!FPH || !FPH.fireGraspSpec) return null;
     const k = GUN_K / ((parent && parent.scale && parent.scale.x) || 1);
-    const R = h.rake || 0;
-    const axis = new THREE.Vector3(0, Math.cos(R), -Math.sin(R));       // up the grip
-    const u = new THREE.Vector3(1, 0, 0);
-    const fwd = new THREE.Vector3().crossVectors(axis, u);               // front strap side
-    const top = new THREE.Vector3(0, h.at[0], h.at[1]);
-    const prism = { o: top, axis: axis, u: u, hw: h.gripW * 0.5, hh: h.gripD * 0.5, rc: Math.min(h.gripW, h.gripD) * 0.22 };
-    // the pad presses the FRONT face of the blade
-    const trig = h.trigger ? new THREE.Vector3(0, h.trigger[0], h.trigger[1] - 0.007) : null;
-    const hhM = h.gripD * 0.5 / k;
-    const spec = {
-      side: 1, k: k, prism: prism, name: "fire:" + [h.at, R.toFixed(3), h.gripW, h.gripD, h.trigger, k.toFixed(3)].join("/"),
-      n: new THREE.Vector3().copy(u).addScaledVector(fwd, -0.22),           // back of the hand out, a touch rearward
-      // fingers across the front strap; a steep stock wrist (the shotgun) is
-      // taken diagonally, fingers along the bore, the way a hand really
-      // closes on it (square to it the forearm would point at your eye)
-      heading: h.heading ? new THREE.Vector3(h.heading[0], h.heading[1], h.heading[2]) : fwd.clone(),
-      palm: [0, -FPH.PALM.th * 0.5, -(0.096 - hhM - 0.004)],            // knuckles just past the front strap
-      trigger: trig,
-      // the thumb: round the back strap, then forward along the left of the
-      // frame, riding high (the modern thumbs-forward grip)
-      // (a builder may aim it itself: a straight stock's thumb goes over the
-      // top of the wrist and forward down the far flank, not up the grip)
-      thumbAim: h.thumbAim ? new THREE.Vector3(h.thumbAim[0], h.thumbAim[1], h.thumbAim[2])
-        : new THREE.Vector3().copy(u).negate().addScaledVector(fwd, -0.35).addScaledVector(axis, 0.10),
-      thumbAim2: h.thumbAim2 ? new THREE.Vector3(h.thumbAim2[0], h.thumbAim2[1], h.thumbAim2[2]) : new THREE.Vector3(-0.30, 0.10, -1),
-      at: top.clone(),
-    };
-    /* Slide the hand along the grip. The web goes as HIGH as the grip allows
-       (the thumb-side edge of the palm, web or index knuckle, whichever a
-       diagonal hold lifts higher, stays just under the top) and comes down
-       only as far as the trigger needs: the index knuckle within a finger's
-       reach of the pad (4.5-7.2 cm). It used to aim for a fixed 7 cm AND for
-       the knuckle level with the trigger, which on a rifle (the trigger sits
-       ABOVE the grip's top) slid the whole hand 2.4 cm down the grip: on the
-       M4 the ring finger hung half off the bottom and the little finger
-       closed on nothing, reaching forward under the grip. Sliding moves every
-       point of the hand 1:1 along the axis, so one grasp measures the whole
-       family and the search is arithmetic. */
-    let t = -0.045 * k;
-    spec.at.copy(top).addScaledVector(axis, t);
-    {
-      const G = FPH.grasp(spec);
-      const idx0 = G.toM([FPH.FINGERS[0].x, 0, FPH.FINGERS[0].z]).clone();
-      const hi0 = Math.max(G.toM([-FPH.PALM.hw, 0, -0.030]).clone().sub(top).dot(axis),
-        G.toM([-FPH.PALM.hw * 0.8, 0, -0.090]).clone().sub(top).dot(axis));
-      const tMax = t + (-0.004 * k - hi0);
-      let best = tMax;
-      if (trig) {
-        let bestC = Infinity;
-        for (let tt = tMax; tt > tMax - 0.10 * k; tt -= 0.002 * k) {
-          const d = idx0.clone().addScaledVector(axis, tt - t).distanceTo(trig) / k;
-          if (d >= 0.045 && d <= 0.072) { best = tt; break; }        // the highest hold that reaches
-          const c = Math.max(0.045 - d, d - 0.072);
-          if (c < bestC) { bestC = c; best = tt; }
-        }
-      }
-      t = best;
-    }
-    spec.at.copy(top).addScaledVector(axis, t);
+    // the recipe is fphands' (fireGraspSpec): a body holding this gun in third
+    // person (actorweapons.js CBZ.gunHold) closes its hand by the same one
+    const spec = FPH.fireGraspSpec(h, k);
     const hd = FPH.graspHand(parent, spec, ctx.mat.skin);
     hd.userData.fpGripHand = true;
-    hd.userData.foreLocal = new THREE.Vector3(0, 0, 1);                    // a straight wrist
+    hd.userData.foreLocal = new ctx.THREE.Vector3(0, 0, 1);                // a straight wrist
     return hd;
   }
 
@@ -621,7 +564,11 @@
     // GRIP: 22-degree rake, finger grooves on the front strap, beavertail
     const R = 22 * Math.PI / 180, dx = -Math.sin(R), dy = -Math.cos(R), nx = Math.cos(R), ny = -Math.sin(R);
     const front = [], back = [];
-    const f0 = [0.094, -0.046], b0 = [-0.026, -0.030], L = 0.236;
+    // (L was 0.236: a 10.5 cm grip, 16.3 cm tall with the slide — a real
+    // G17 is 13.9 — and a life-size hand left 3.6 cm of bare grip under its
+    // little finger. 0.186: three fingers under the guard, a finger's width
+    // of grip below them)
+    const f0 = [0.094, -0.046], b0 = [-0.026, -0.030], L = 0.186;
     for (let i = 0; i <= 6; i++) {
       const t = (i / 6) * L;
       const bump = (i === 2 || i === 3 || i === 4) ? 0.004 * ((i % 2) ? 1 : -0.5) : 0;
@@ -643,7 +590,7 @@
     // shot: the support hand wraps the firing hand from the gun's LEFT.
     g.userData.grips = {
       support: new THREE.Vector3(-0.085, -0.150, -0.020),
-      mag: new THREE.Vector3(0, -0.262, 0.030),
+      mag: new THREE.Vector3(0, -0.216, 0.011),
       charge: new THREE.Vector3(0, 0.034, -0.045),     // rear slide serrations
       style: "mag",
     };
@@ -656,11 +603,11 @@
       grip: { pos: down(0.090), rake: R },
       trigger: [0, -0.066, -0.128],
       support: { pos: [-0.034, down(0.090)[1], down(0.090)[2]], kind: "cup", len: 0 },
-      mag: { pos: down(0.130), well: down(0.222), rake: R },
+      mag: { pos: down(0.105), well: down(0.172), rake: R },
       stock: null,
       charge: [0, 0.034, -0.045],
       // U-notch (ears' top line, between the ears) -> front post top
-      sight: { rear: [0, 0.083, -0.022], front: [0, 0.086, -0.384], eyeRelief: 0.42, type: "iron" },
+      sight: { rear: [0, 0.083, -0.022], front: [0, 0.086, -0.384], eyeRelief: 0.52, type: "iron" },
       optic: { type: "iron", mag: 1 },
     });
     return g;

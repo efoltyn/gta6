@@ -441,7 +441,7 @@
       // a plain player-skin rig — recolored each redraw to match g.cityFit
       const rig = CBZ.makeCharacter({
         legs: 0x39414f, torso: 0xf2f2f2, collar: 0xf2f2f2, arms: 0xf2f2f2,
-        skin: 0xf0c39a, hair: 0x4a3526, shoes: 0x2b2b2b,
+        skin: 0xde8b52, hair: 0x4a3526, shoes: 0x2b2b2b,   // the player's skin (entities/player.js)
       });
       rig.group.position.y = 0;
       rig._inkFrom = "player";          // the portrait wears the player's own ink (entities/tattoo.js)

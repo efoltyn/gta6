@@ -480,42 +480,19 @@
     }
     return geo;
   }
+  /* THE FIRST-PERSON HAND IS THE BODY'S HAND, FINER. It was built as
+     separate capsules — a cylinder per phalanx with a ball at every joint
+     and a proud ball per knuckle — which down the lens read as a stack of
+     bones: every phalanx its own white sausage, a rib of balls across the
+     knuckles (owner: "too many fingers and white af hands"). Now it is the
+     body hand's construction (buildBodyHandGeo, the third-person hand) at
+     lod 0: each finger ONE continuous tapered tube from inside the palm to a
+     rounded pad, ten-sided, with a ring at every joint a touch fuller than
+     the bone either side (the knuckle bulges a real finger has) and the
+     palm's smooth mass it grows out of; the thumb the same, rooted in the
+     thenar web. One recipe for both views. */
   function buildHandGeo(side, pose) {
-    const p = resolvePose(pose);
-    const parts = [palmGeo(p.cup || 0.004)];
-    // wrist stub: the hand's own skin, closed, its top a dome on the wrist
-    // pivot that turns inside the forearm's end when the wrist bends
-    lathe(parts, stubRings(0, true), STUB_LATHE.fp[0], STUB_LATHE.fp[1]);
-    FINGERS.forEach(function (f, i) {
-      const pts = p._joints.fingers[i];
-      const rs = [f.r * 1.04, f.r * 0.95, f.r * 0.86, f.r * 0.78];
-      // knuckle (a touch proud on the back of the hand), the two finger joints, the pad of the tip
-      ball(parts, [pts[0][0], pts[0][1] + 0.002, pts[0][2]], f.r * 1.12, 1, 0.95, 1);
-      for (let s = 0; s < 3; s++) {
-        seg(parts, pts[s], pts[s + 1], rs[s], rs[s + 1], { col: i, s: s });
-        ball(parts, pts[s + 1], rs[s + 1] * (s === 2 ? 1 : 1.04));
-      }
-      // the web between knuckles: a flat bridge so the fingers leave a palm, not a comb
-      if (i < 3) {
-        const nx = FINGERS[i + 1];
-        seg(parts, [f.x + 0.003, -0.001, f.z + 0.004], [nx.x - 0.003, -0.001, nx.z + 0.004], 0.008, 0.008);
-      }
-    });
-    // thumb: CMC on the heel's thumb side, three segments along authored directions
-    const tpts = p._joints.thumb;
-    for (let s = 0; s < 3; s++) {
-      const r0 = THUMB.r[s] * (s === 0 ? 1.25 : 1), r1 = s < 2 ? THUMB.r[s + 1] : THUMB.r[2] * 0.85;
-      seg(parts, tpts[s], tpts[s + 1], r0, r1);
-      ball(parts, tpts[s + 1], r1 * 1.03);
-    }
-    // the fleshy web from thumb to palm (the thumb grows OUT of the hand)
-    const mid = [(tpts[0][0] + tpts[1][0]) / 2 + 0.006, (tpts[0][1] + tpts[1][1]) / 2 + 0.003, (tpts[0][2] + tpts[1][2]) / 2 - 0.004];
-    ball(parts, mid, 0.016, 1.0, 0.72, 1.35);
-    const geo = mergeParts(parts);
-    if (side < 0) mirrorX(geo);
-    geo.computeBoundingSphere();
-    geo._shared = true; geo.userData._shared = true;
-    return geo;
+    return buildBodyHandGeo(side < 0 ? -1 : 1, pose, 0);
   }
   const GEO = {};
   /* A grasp's pose carries its own solved joints and used to be keyed by a
@@ -660,8 +637,8 @@
   const SQ2 = Math.SQRT2;
   function buildBodyHandGeo(side, pose, lod) {
     const p = resolvePose(pose);
-    const far = lod >= 2;
-    const parts = [palmGeo(p.cup || 0.004, far ? [4, 3] : [6, 4])];
+    const far = lod >= 2, fine = lod <= 0;
+    const parts = [palmGeo(p.cup || 0.004, far ? [4, 3] : fine ? [18, 12] : [6, 4])];
     if (far) {
       // THE FAR WRIST. The far hand had no stub at all, so past ~30 m the
       // palm's heel stopped ~3 cm short of the forearm's crease and every
@@ -684,7 +661,8 @@
       // wrist onto the grip: its stub is only the pivot dome, which a bend
       // turns about its own centre inside the forearm's end.
       const back = p.stub != null ? p.stub : 0.070;
-      lathe(parts, stubRings(back, false), STUB_LATHE.body[0], STUB_LATHE.body[1]);
+      if (fine) lathe(parts, stubRings(0, true), STUB_LATHE.fp[0], STUB_LATHE.fp[1]);
+      else lathe(parts, stubRings(back, false), STUB_LATHE.body[0], STUB_LATHE.body[1]);
     }
     const chains = p._joints.fingers;
     if (!far) {
@@ -700,6 +678,17 @@
         // its flats at 0.94 r) is round at that distance, and a ring that is
         // a touch fatter at each joint than the bone either side is the
         // knuckle line a hand is recognised by.
+        if (fine) {
+          // lod 0: a ring mid-way along each phalanx a little slimmer than the
+          // joints either side, so the knuckles read; a little flattened on
+          // the palm side (a finger is not a round pipe), ten-sided
+          const mid = function (a, b) { return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]; };
+          const P8 = [root, pts[0], mid(pts[0], pts[1]), pts[1], mid(pts[1], pts[2]), pts[2], mid(pts[2], pts[3]), pts[3]];
+          const K8 = [1.02, 1.06, 0.97, 1.00, 0.90, 0.92, 0.82, 0.76];
+          const A8 = [-0.08, 0, 1 / 6, 1 / 3, 1 / 2, 2 / 3, 5 / 6, 1];
+          tube(parts, P8, K8.map(function (kk) { const r = f.r * kk; return [r, r * 0.92]; }), 10, 0, f.r * 0.72, { col: i, a: A8 });
+          return;
+        }
         const rs = [1.10, 1.07, 0.97, 0.90, 0.74].map(function (k) { const r = f.r * k * 1.08; return [r, r]; });
         tube(parts, [root].concat(pts), rs, 6, Math.PI / 6, f.r * 0.70, { col: i, a: [-0.08, 0, 1 / 3, 2 / 3, 1] });
       });
@@ -733,7 +722,19 @@
       return [r * k, r * k];
     });
     if (far) tube(parts, [tpts[0], tpts[1], tpts[3]], [trs[0], trs[1], trs[3]], 3, Math.PI / 2, THUMB.r[2] * 0.6);
-    else tube(parts, tpts, trs, 6, Math.PI / 6, THUMB.r[2] * 0.7);
+    else if (fine) {
+      // the thumb grows out of the thenar web (a soft mass between it and the
+      // palm), one tube, its joints a touch full
+      const m01 = [(tpts[0][0] + tpts[1][0]) / 2, (tpts[0][1] + tpts[1][1]) / 2, (tpts[0][2] + tpts[1][2]) / 2];
+      const m12 = [(tpts[1][0] + tpts[2][0]) / 2, (tpts[1][1] + tpts[2][1]) / 2, (tpts[1][2] + tpts[2][2]) / 2];
+      const m23 = [(tpts[2][0] + tpts[3][0]) / 2, (tpts[2][1] + tpts[3][1]) / 2, (tpts[2][2] + tpts[3][2]) / 2];
+      const R0 = THUMB.r[0] * 1.30, R1 = THUMB.r[1], R2 = THUMB.r[2];
+      tube(parts, [tpts[0], m01, tpts[1], m12, tpts[2], m23, tpts[3]],
+        [[R0, R0], [R0 * 0.90, R0 * 0.88], [R1 * 1.04, R1], [R1 * 0.94, R1 * 0.90], [R2 * 1.02, R2 * 0.96], [R2 * 0.92, R2 * 0.86], [R2 * 0.84, R2 * 0.78]],
+        10, 0, R2 * 0.75);
+      const web = [(tpts[0][0] + tpts[1][0]) / 2 + 0.006, (tpts[0][1] + tpts[1][1]) / 2 + 0.003, (tpts[0][2] + tpts[1][2]) / 2 - 0.004];
+      ball(parts, web, 0.016, 1.0, 0.72, 1.35);
+    } else tube(parts, tpts, trs, 6, Math.PI / 6, THUMB.r[2] * 0.7);
     const geo = mergeParts(parts);
     if (side < 0) mirrorX(geo);
     geo.computeBoundingSphere();
@@ -747,7 +748,7 @@
      dispose it, never mutate it; size it with mesh.scale. */
   function bodyHandGeometry(side, pose, lod) {
     lod = lod == null ? 1 : lod | 0;
-    if (lod <= 0) return handGeometry(side, pose);
+    if (lod <= 0) return handGeometry(side, pose);       // (the same construction, finer: buildHandGeo)
     const key = (side < 0 ? "L:" : "R:") + poseKey(pose || "relaxed") + ":" + (lod >= 2 ? 2 : 1);
     return GEO[key] || (GEO[key] = buildBodyHandGeo(side < 0 ? -1 : 1, pose || "relaxed", lod >= 2 ? 2 : 1));
   }
@@ -997,10 +998,48 @@
     return h;
   }
 
-  /* An arm: forearm (+ cuff) and upper arm with an elbow ball. `pose()` lays
-     it from a wrist to an elbow to a shoulder, in its parent's space. */
-  // side: -1 left, +1 right (which ink chart the forearm wears); omitted, the
-  // first poseArm reads it off the shoulder (+x = right, the viewmodel frame)
+  /* ==== THE ARM IS THE BODY'S ARM ========================================
+     Owner: "make hands and arms look real holding the gun. The way they look
+     in third person and first person should look the same and realer."
+
+     Every first-person arm in the game (the gun arms, the fists, the car
+     cabin, the cockpit, the pickup lens, the bailout) used to be a private
+     lathe: a tapered tube of ONE flat Lambert colour per segment (dressOf
+     guessed the colour off the body), so down the lens a jumpsuit sleeve was
+     a fat yellow sausage while the chase camera showed the same sleeve as the
+     body's lofted cloth limb with its painted garment, cuff and shading.
+
+     Now the arm down the lens IS the body's arm. makeArm() keeps two pivots,
+     a shoulder (`sh`) and an elbow (`lo`), and every frame poseArm() mirrors
+     whatever hangs off the PLAYER RIG's own arm into them: the upper-arm loft,
+     its bare piece under a short sleeve, the forearm loft, the watch, the
+     holes and blood wounds.js stamped on the limb, a cuff or an armband: the
+     SAME geometry objects and a viewmodel twin of the SAME material (bodyTwin:
+     the body's own material, cloned once, with only the viewmodel's render
+     queue flags changed and its colour, map and opacity copied every frame,
+     so a hit flash, an ink chart or a redress shows on both). The hand and
+     anything in it stay the caller's (it is posed on the thing it holds).
+
+     SCALE. The arm is drawn at its REAL size: the caller's k is its units
+     per real metre (the first-person hand is a life-size hand at k), and
+     the rig's own scales give metres per rig unit (mpr), so the viewmodel's
+     2.56x world gets the body's arm at 2.56x, not a fatter tube — and not
+     the body hand's own exaggeration either (character.js may draw the body
+     hand larger than life for read at distance; the forearm loft is the
+     body's real forearm, whose wrist fits a life-size hand).
+
+     POSE. The caller still solves the arm (wrist, elbow, shoulder). The
+     forearm is laid from the wrist along the caller's forearm line at the
+     body's own forearm length; its loft is rolled so its front (the thumb
+     side, where the body's loft has its belly) follows the hand's thumb, which
+     is what character.js's wrist twist does in third person. The upper arm
+     runs from that elbow to the shoulder with the bicep toward the forearm;
+     where the shoulder is out of the body's reach the upper arm stretches (up
+     to 40%: it is the part the lens barely sees) and is anchored AT THE
+     ELBOW, so the joint never opens.
+
+     No body (a menu, a node tool, a mode without a player rig): the lathe
+     arm below draws instead, as before. */
   function makeArm(mats, side) {
     const g = new THREE.Group();
     g.name = "fp_arm";
@@ -1013,6 +1052,13 @@
     [fore, cuff, upper, elbow].forEach(function (m) { m.castShadow = false; g.add(m); });
     cuff.visible = false;
     g.userData.parts = { fore, cuff, upper, elbow };
+    // the body's arm: two pivots the rig's own limb pieces are mirrored into
+    const sh = new THREE.Group(), lo = new THREE.Group();
+    sh.name = "fp_body_shoulder"; lo.name = "fp_body_elbow";
+    sh.visible = lo.visible = false;
+    g.add(sh, lo);
+    g.userData.body = { sh: sh, lo: lo, map: new Map(), rig: null, like: mats.fore || null, frame: 0 };
+    g.userData.bodyOn = false;
     return g;
   }
   const _w = new THREE.Vector3(), _e = new THREE.Vector3(), _s = new THREE.Vector3(), _d = new THREE.Vector3();
@@ -1029,7 +1075,10 @@
   }
   /* wrist, elbow, shoulder: Vector3 in the arm's parent space. handQ: the
      hand's orientation there (its +Y = the back of the hand), so the forearm's
-     flat face rolls with the wrist. k = thickness scale at the wrist. */
+     flat face rolls with the wrist. k = the hand's scale (units per hand
+     metre). With a player body the body's own arm is drawn (poseBodyArm);
+     the lathe parts are still laid (tools and the watch read their frame)
+     but hidden. */
   function poseArm(arm, wrist, elbow, shoulder, handQ, k, sleeved) {
     const P = arm.userData.parts;
     arm.userData.sleeved = !!sleeved;
@@ -1054,6 +1103,214 @@
       P.upper.scale.set(k, k, lu);
       P.upper.visible = true;
     } else P.upper.visible = false;
+    const on = poseBodyArm(arm, wrist, elbow, shoulder, handQ, k);
+    if (on !== arm.userData.bodyOn) {
+      arm.userData.bodyOn = on;
+      P.fore.visible = P.elbow.visible = !on;
+      if (on) P.cuff.visible = false;
+    }
+    if (on) { P.cuff.visible = false; P.upper.visible = false; }
+  }
+
+  // ---- the body's arm, mirrored -------------------------------------------
+  /* The player rig's arm on `side` (+1 right = rig.parts.ra, -1 = la):
+     the shoulder pivot, the elbow pivot, the forearm loft, the hand and its
+     fit, and the two bone lengths in rig units. null = no body to mirror. */
+  function bodyArmSource(ch, side) {
+    const part = ch && ch.parts && (side < 0 ? ch.parts.la : ch.parts.ra);
+    const ud = part && part.userData;
+    const low = ud && ud.low, lower = ud && ud.lower, cap = ud && ud.cap;
+    const fit = cap && cap.userData && cap.userData.fit;
+    if (!low || !lower || !fit || !(fit.s > 0) || !(fit.wristY < 0)) return null;
+    // metres per rig unit: the rig's own scales from the arm's parent up
+    // (model.scale = HUMAN_SCALE; a child's group scale) — the arm's REAL size
+    let mpr = 1;
+    for (let p = part.parent; p; p = p.parent) { mpr *= p.scale.x || 1; if (p === ch.group) break; }
+    return { part: part, low: low, lower: lower, cap: cap, fit: fit, L1: low.position.length(), L2: -fit.wristY, mpr: mpr };
+  }
+  /* bodyArmLens(k, ch): the body's upper arm and forearm (shoulder -> elbow,
+     elbow -> wrist crease) at hand scale k, for a caller's IK. Falls back to a
+     real man's 0.30 / 0.265 m when there is no body. */
+  function bodyArmLens(k, ch, side) {
+    const src = bodyArmSource(ch === undefined ? CBZ.playerChar : ch, side || 1);
+    if (!src) return [0.30 * k, 0.265 * k];
+    const s = k * src.mpr;
+    return [src.L1 * s, src.L2 * s];
+  }
+  /* bodyShoulder(side, ch): WHERE THIS BODY'S SHOULDER JOINT IS FROM ITS OWN
+     EYES, in the first-person camera's frame (+x right, +y up, -z ahead) and
+     in HAND METRES (the caller scales by its hand scale k, as it does the
+     bones), measured off the rig itself: the arm pivot (rig.parts.ra / la,
+     the joint the upper-arm loft hangs from) against the midpoint of the two
+     eyeballs (rig.face.eyeL / eyeR), through the rig's REST transforms
+     (positions and scales; no animated rotation of the neck, head or arms),
+     so a man, a woman and a child each see their arms from where their own
+     shoulders are. null with no body (the caller keeps its constants).
+     Cached per rig. */
+  const _shM = new THREE.Matrix4(), _shL = new THREE.Matrix4(), _shQ = new THREE.Quaternion(), _shV = new THREE.Vector3();
+  function restTo(o, root, out) {
+    out.identity();
+    for (let p = o; p && p !== root; p = p.parent) { _shL.compose(p.position, _shQ, p.scale); out.premultiply(_shL); }
+    return out;
+  }
+  function bodyShoulder(side, ch) {
+    ch = ch === undefined ? CBZ.playerChar : ch;
+    const src = bodyArmSource(ch, side < 0 ? -1 : 1);
+    const f = ch && ch.face, body = src && src.part.parent;
+    if (!src || !f || !f.eyeL || !f.eyeR || !body) return null;
+    const key = "_fpShoulder" + (side < 0 ? "L" : "R");
+    const c = ch[key];
+    if (c && c.part === src.part && c.s === src.mpr) return c.v;
+    // the eyes' midpoint and the shoulder joint, both in the body's frame (rig units)
+    const e = _shV.set(0, 0, 0).applyMatrix4(restTo(f.eyeL, body, _shM)).clone();
+    e.add(new THREE.Vector3().applyMatrix4(restTo(f.eyeR, body, _shM))).multiplyScalar(0.5);
+    const sp = src.part.position.clone();          // the arm pivot sits in the body's frame
+    const d = sp.sub(e).multiplyScalar(src.mpr);        // rig units -> metres (the caller's k is per metre)
+    // body frame: +X the body's left (the semantic right arm is at -X), +Z
+    // forward. Camera: +x right, -z ahead.
+    const v = [-d.x, d.y, -d.z];
+    Object.defineProperty(ch, key, { value: { part: src.part, s: src.mpr, v: v }, writable: true, configurable: true, enumerable: false });
+    return v;
+  }
+  /* bodyTwin(src, like): the viewmodel's copy of a body material. Cloned once
+     per (material, render flags) and re-synced every call: colour, emissive,
+     map, opacity, visibility follow the body's material live. `like` (the
+     caller's own material) lends the render-queue flags (transparent /
+     depthTest / depthWrite): the gun viewmodel draws in the late queue after
+     a depth clear, a car cabin in the ordinary one. */
+  const TWINS = new WeakMap();
+  function bodyTwin(src, like) {
+    if (!src) return like || null;
+    if (Array.isArray(src)) return src.map(function (m) { return bodyTwin(m, like); });
+    const tr = like ? !!(like.transparent || src.transparent) : !!src.transparent;
+    const dt = like ? !!(like.depthTest && src.depthTest) : !!src.depthTest;
+    const dw = src.transparent ? !!src.depthWrite : (like ? !!like.depthWrite : !!src.depthWrite);
+    const key = (tr ? 1 : 0) | (dt ? 2 : 0) | (dw ? 4 : 0);
+    let per = TWINS.get(src);
+    if (!per) TWINS.set(src, per = {});
+    let m = per[key];
+    if (!m) {
+      m = src.clone();
+      m.userData = Object.assign({}, src.userData, { cbzBodyTwin: true });
+      m.transparent = tr; m.depthTest = dt; m.depthWrite = dw;
+      m.needsUpdate = true;
+      per[key] = m;
+    }
+    if (m.color && src.color) m.color.copy(src.color);
+    if (m.emissive && src.emissive) { m.emissive.copy(src.emissive); m.emissiveIntensity = src.emissiveIntensity; }
+    if (m.map !== src.map) { m.map = src.map; m.needsUpdate = true; }
+    m.opacity = src.opacity;
+    m.visible = src.visible;
+    if (m.side !== src.side) { m.side = src.side; m.needsUpdate = true; }
+    return m;
+  }
+  /* The hand's material off the body (glove, heritage skin, ink chart) as a
+     viewmodel twin, or null with no body. */
+  function bodyHandMaterial(side, like, ch) {
+    ch = ch === undefined ? CBZ.playerChar : ch;
+    const part = ch && ch.parts && (side < 0 ? ch.parts.la : ch.parts.ra);
+    const cap = part && part.userData && part.userData.cap;
+    const m = cap && cap.material;
+    return m && !Array.isArray(m) ? bodyTwin(m, like) : null;
+  }
+  const _bM = new THREE.Matrix4(), _bL = new THREE.Matrix4(), _bQ0 = new THREE.Quaternion();
+  const _bE = new THREE.Vector3(), _bX = new THREE.Vector3(), _bY = new THREE.Vector3(), _bZ = new THREE.Vector3();
+  const _bT = new THREE.Vector3();
+  // the mesh's matrix relative to its pivot; the forearm loft's own twist is
+  // left out (the elbow pivot here is already rolled with the hand)
+  function relMatrix(o, pivot, lower, out) {
+    out.identity();
+    for (let p = o; p && p !== pivot; p = p.parent) {
+      if (p === lower) _bL.compose(p.position, _bQ0, p.scale);
+      else { p.updateMatrix(); _bL.copy(p.matrix); }
+      out.premultiply(_bL);
+    }
+    return out;
+  }
+  function mirrorInto(B, node, pivot, target, src, ro, stamp) {
+    const ch = node.children;
+    for (let i = 0; i < ch.length; i++) {
+      const o = ch[i];
+      if (o === src.cap || o === src.low || o.visible === false) continue;
+      if (o.userData && (o.userData.isSocket || o.userData.fpSkip)) continue;
+      if ((o.isMesh || o.isLine) && !o.isInstancedMesh && !o.isSkinnedMesh && o.geometry) {
+        let px = B.map.get(o);
+        if (!px) {
+          px = new THREE.Mesh(o.geometry, null);
+          px.name = "fp_body_" + (o.name || "part");
+          px.matrixAutoUpdate = false;
+          px.castShadow = false; px.receiveShadow = false;
+          px.frustumCulled = false;
+          B.map.set(o, px);
+        }
+        if (px.parent !== target) target.add(px);
+        px.geometry = o.geometry;
+        px.material = bodyTwin(o.material, B.like);
+        relMatrix(o, pivot, src.lower, px.matrix);
+        px.renderOrder = ro + Math.max(0, Math.min(20, (o.renderOrder || 0) - (src.lower.renderOrder || 0)));
+        px.visible = true;
+        px.userData.seen = stamp;
+      }
+      if (o.children.length) mirrorInto(B, o, pivot, target, src, ro, stamp);
+    }
+  }
+  function poseBodyArm(arm, wrist, elbow, shoulder, handQ, k) {
+    const B = arm.userData.body;
+    if (!B) return false;
+    const side = arm.userData.side < 0 ? -1 : 1;
+    const src = arm.userData.bodyOff ? null : bodyArmSource(CBZ.playerChar, side);
+    if (!src) { B.sh.visible = B.lo.visible = false; return false; }
+    if (B.rig !== src.part) {
+      // a new body: drop every piece of the old one
+      B.map.forEach(function (px) { if (px.parent) px.parent.remove(px); });
+      B.map.clear();
+      B.rig = src.part;
+    }
+    const s = k * src.mpr, L2 = src.L2 * s, L1 = src.L1 * s;
+    // THE FOREARM: from the wrist, along the caller's forearm line, the body's length
+    _bY.subVectors(elbow, wrist);
+    if (_bY.lengthSq() < 1e-12) _bY.set(0, -1, 0);
+    _bY.normalize();
+    _bE.copy(wrist).addScaledVector(_bY, L2);
+    // its front (+Z, the thumb side) follows the hand's thumb
+    _bT.set(side > 0 ? -1 : 1, 0, 0).applyQuaternion(handQ);
+    _bZ.copy(_bT).addScaledVector(_bY, -_bT.dot(_bY));
+    if (_bZ.lengthSq() < 1e-8) { _bZ.set(0, 0, 1).applyQuaternion(handQ); _bZ.addScaledVector(_bY, -_bZ.dot(_bY)); }
+    _bZ.normalize();
+    _bX.crossVectors(_bY, _bZ);
+    _bM.makeBasis(_bX, _bY, _bZ);
+    B.lo.quaternion.setFromRotationMatrix(_bM);
+    B.lo.position.copy(_bE);
+    B.lo.scale.setScalar(s);
+    B.lo.visible = true;
+    // THE UPPER ARM: elbow -> shoulder, the bicep toward the forearm
+    if (shoulder) {
+      _bY.subVectors(shoulder, _bE);
+      const d = _bY.length() || 1e-6;
+      _bY.multiplyScalar(1 / d);
+      _bT.subVectors(wrist, _bE);
+      _bZ.copy(_bT).addScaledVector(_bY, -_bT.dot(_bY));
+      if (_bZ.lengthSq() < 1e-8) { _bZ.set(0, 0, 1).applyQuaternion(B.lo.quaternion); _bZ.addScaledVector(_bY, -_bZ.dot(_bY)); }
+      _bZ.normalize();
+      _bX.crossVectors(_bY, _bZ);
+      _bM.makeBasis(_bX, _bY, _bZ);
+      B.sh.quaternion.setFromRotationMatrix(_bM);
+      const st = Math.max(0.8, Math.min(1.4, d / L1));
+      B.sh.scale.set(s, s * st, s);
+      B.sh.position.copy(_bE).addScaledVector(_bY, L1 * st);   // anchored at the elbow
+      B.sh.visible = true;
+    } else B.sh.visible = false;
+    // the pieces: everything the body's arm wears, this frame
+    const stamp = ++B.frame;
+    const ro = arm.renderOrder || 0;
+    mirrorInto(B, src.part, src.part, B.sh, src, ro, stamp);
+    mirrorInto(B, src.low, src.low, B.lo, src, ro, stamp);
+    B.map.forEach(function (px, o) {
+      if (px.userData.seen === stamp) return;
+      px.visible = false;
+      if (!o.parent) { if (px.parent) px.parent.remove(px); B.map.delete(o); }   // gone from the body for good
+    });
+    return true;
   }
 
   // ------------------------------------------------------------ GRASP
@@ -1271,7 +1528,7 @@
     };
     const CONTACT = 0.0012;                      // a pad pressed within 1.2 mm is ON the surface
     const SOFT_MAX = [1.45, 1.75, 1.15];
-    const fingers = [], contacts = { tips: [], trigger: null, thumb: null };
+    const fingers = [], contacts = { tips: [], trigger: null, thumb: null }, held = [];
     FINGERS.forEach(function (f, i) {
       const rs = [f.r * 1.04, f.r * 0.95, f.r * 0.86, f.r * 0.78];
       if (i === 0 && spec.trigger) {
@@ -1304,7 +1561,15 @@
         return;
       }
       const flex = [0.04, 0.05, 0.04];
-      const sp = spec.splay ? spec.splay[i] : null;
+      // FINGERS TOGETHER ROUND ONE THING: a hand closed on a grip holds its
+      // fingers adducted (side by side, touching), not fanned; the old
+      // default let each keep part of its open-hand splay, so the four tips
+      // spread like a rake down a grip (spec.splay may still ask for one)
+      // (and converging a little toward the middle finger: the four knuckles
+      // sit 2 cm apart but the fingertips are thinner than the roots, so
+      // parallel fingers opened a 5-7 mm slot at every tip; a closed hand's
+      // fingers lie against each other the whole way)
+      const sp = spec.splay ? spec.splay[i] : FINGER_CONVERGE * (1.5 - i);
       const segGapF = function (a, b, ra, rb) { return segGap(a, b, ra, rb, null, sdfF); };
       let touched = false;
       for (let j = 0; j < 3; j++) {
@@ -1339,18 +1604,79 @@
           let lo = flex[0], hi = flex[0] + 0.02;
           for (let it = 0; it < 6; it++) {
             const mid = (lo + hi) / 2; flex[0] = mid;
-            const pts = fingerChain(f, flex, spec.splay ? spec.splay[i] : null);
+            const pts = fingerChain(f, flex, sp);
             if (segGapF(pts[0], pts[1], rs[0], rs[1]) < CONTACT) hi = mid; else lo = mid;
           }
           flex[0] = lo;
         }
       }
-      const pts = fingerChain(f, flex, spec.splay ? spec.splay[i] : null);
+      // a finger that met NOTHING (or whose tip still hangs in the air) closes on into the palm like a fist (it
+      // used to stop at SOFT_MAX, half curled, pointing into the air beside
+      // the grip: the support index finger hung 2 cm off a pistol), as far
+      // as it can without entering the part
+      const tipOff = sdfF(fingerChain(f, flex, sp)[3]) - rs[3];
+      let rested = false;
+      if (!touched || tipOff > 0.008) {
+        /* A FINGER PAST THE END OF THE GRIP RESTS ON THE GUN. The little
+           finger under a short grip (the taser, the sniper's stock wrist)
+           closed on into the palm and hung curled under the butt, its pad
+           2 cm off anything. A real one tucks up under the magazine floor /
+           the butt and rests its pad there: the joint angles (knuckle,
+           middle; the last joint follows the middle at 0.6) whose pad lands
+           ON the nearest drawn surface with no segment inside it. Failing a
+           surface within 1 cm, it closes into the palm as before. */
+        const minGap = function (q) { return Math.min(segGapF(q[0], q[1], rs[0], rs[1]), segGapF(q[1], q[2], rs[1], rs[2]), segGapF(q[2], q[3], rs[2], rs[3])); };
+        const g0 = Math.min(0, minGap(fingerChain(f, flex, sp))) - 0.0015;      // a pad presses 1.5 mm
+        let best = null;
+        for (let a0 = -0.2; a0 <= JOINT_MAX[0] + 1e-6; a0 += 0.1) {
+          for (let a1 = 0; a1 <= JOINT_MAX[1] + 1e-6; a1 += 0.1) for (let r2 = 0.3; r2 <= 1.01; r2 += 0.35) {
+            const tf = [a0, a1, Math.min(JOINT_MAX[2], a1 * r2)];
+            const q = fingerChain(f, tf, sp);
+            if (minGap(q) < g0) continue;
+            const tg = sdfF(q[3]) - rs[3];
+            const cost = Math.abs(tg) + 0.0015 * Math.abs(a0 - flex[0]);
+            if (!best || cost < best.cost) best = { cost: cost, tg: tg, tf: tf };
+          }
+        }
+        if (best && Math.abs(best.tg) <= 0.010) { flex[0] = best.tf[0]; flex[1] = best.tf[1]; flex[2] = best.tf[2]; rested = true; }
+        else {
+          const FIST = POSES.fist.flex[i];
+          const f0 = flex.slice();
+          for (let st = 1; st <= 10; st++) {
+            const tf = [f0[0] + (FIST[0] - f0[0]) * st / 10, f0[1] + (FIST[1] - f0[1]) * st / 10, f0[2] + (FIST[2] - f0[2]) * st / 10];
+            if (minGap(fingerChain(f, tf, sp)) < g0) break;
+            flex[0] = tf[0]; flex[1] = tf[1]; flex[2] = tf[2];
+          }
+        }
+      }
+      const pts = fingerChain(f, flex, sp);
       fingers.push(pts);
+      held[i] = { flex: flex.slice(), sp: sp, rs: rs, gap: segGapF };
       // a finger that met nothing (past the end of a drawn grip) closed into
       // the palm like a fist: it has no surface to be measured against
-      contacts.tips.push(touched || sdfF === sdfH ? sdfF(pts[3]) - rs[3] : null);
+      contacts.tips.push(touched || rested || sdfF === sdfH ? sdfF(pts[3]) - rs[3] : null);
     });
+    /* ALL FOUR IN ONE CURL (spec.together: the thumbs-forward cup). Each
+       finger closed on its own until it touched, so neighbours stopped at
+       different curls and their tips stood 4-7 mm apart: a fan. Here they
+       take ONE curl, the mean of theirs, each backed off toward its own only
+       as far as it must to stay out of what it holds. */
+    if (spec.together) {
+      const idx = [];
+      for (let i = 0; i < 4; i++) if (held[i]) idx.push(i);
+      if (idx.length > 1) {
+        const mean = [0, 1, 2].map(function (j) { let t = 0; idx.forEach(function (i) { t += held[i].flex[j]; }); return t / idx.length; });
+        idx.forEach(function (i) {
+          const H0 = held[i], f = FINGERS[i];
+          const ok = function (q) { return Math.min(H0.gap(q[0], q[1], H0.rs[0], H0.rs[1]), H0.gap(q[1], q[2], H0.rs[1], H0.rs[2]), H0.gap(q[2], q[3], H0.rs[2], H0.rs[3])) >= -0.0015; };
+          for (let t = 1; t >= -1e-6; t -= 0.1) {
+            const fl = [0, 1, 2].map(function (j) { return H0.flex[j] + (mean[j] - H0.flex[j]) * t; });
+            const q = fingerChain(f, fl, H0.sp);
+            if (t <= 1e-6 || ok(q)) { fingers[i] = q; break; }
+          }
+        });
+      }
+    }
     // THE THUMB: segment by segment toward the axis from an aimed start
     const th = [THUMB.base.slice()];
     const d0 = spec.thumbAim ? dirH(spec.thumbAim) : [-0.3, -0.7, -0.6];
@@ -1495,13 +1821,26 @@
     if (!spec || !h.parent) return h;
     const sol = solidsOf(root, h.parent);
     if (!sol.length) return h;
+    const R = graspOnSolids(spec, sol);
+    const G = R.G;
+    h.position.copy(G.p);
+    h.quaternion.copy(G.q);
+    h.userData.grasp = G;
+    h.userData.graspSpec = R.spec;
+    h.userData.pose = G.pose;
+    h.geometry = handGeometry(G.side, G.pose);
+    return h;
+  }
+  /* graspOnSolids(spec, solids): the grasp re-closed on the whole drawn gun
+     (fingers and thumb on the solids round the held part). A hand pushed so
+     high that the root of its thumb is buried in the frame / the stock's
+     wrist above the grip comes down the grip until it is not, and its pad
+     lies on the gun (tried every 3 mm down to 3 cm; the index re-solves onto
+     the trigger) — but never so far that a finger slips off the bottom of a
+     short grip and hangs in the air. Returns { G, spec } (the spec it used). */
+  function graspOnSolids(spec, sol) {
     const s2 = Object.assign({}, spec, { solids: sol, fingersOnSolids: true, thumbFlank: true, name: (spec.name || "g") + "+solids", at: spec.at.clone() });
     let G = grasp(s2);
-    // a hand pushed so high that the root of its thumb is buried in the
-    // frame / the stock's wrist above the grip comes down the grip until it
-    // is not, and its pad lies on the gun (tried every 3 mm down to 3 cm;
-    // the index re-solves onto the trigger) — but never so far that a
-    // finger slips off the bottom of a short grip and hangs in the air
     if (G.contacts.wedged || Math.abs(G.contacts.thumb) > 0.004) {
       const down = spec.prism.axis.clone().normalize().multiplyScalar(-0.003 * spec.k);
       const hangs = function (g) { return g.contacts.tips.some(function (t) { return t != null && t > 0.008; }); };
@@ -1518,13 +1857,217 @@
       s2.at.copy(at0).addScaledVector(down, bestI);
       G = best;
     }
-    h.position.copy(G.p);
-    h.quaternion.copy(G.q);
-    h.userData.grasp = G;
-    h.userData.graspSpec = s2;
-    h.userData.pose = G.pose;
-    h.geometry = handGeometry(G.side, G.pose);
-    return h;
+    return { G: G, spec: s2 };
+  }
+
+  /* ==== THE GUN'S GRIPS: ONE RECIPE, BOTH VIEWS ============================
+     Owner: "the way they look in third person and first person should look
+     the same." The hand down your lens closed on the gun's REAL grip (the
+     grasp: palm flush, fingers curled until they touch, the index pad on the
+     trigger, the thumb on the frame); a body in third person held the same
+     gun with a TABLE pose (trigNN: a fixed curl of the nearest radius, the
+     index laid along the frame) oriented by a separate frame solve. Two
+     answers to one question. These build the grasp specs both views solve:
+     the gun kit's firing hand and fpsmode's off hand (first person), and
+     CBZ.gunHold's body hands (third person, actorweapons.js) — so a man
+     across the yard holds his pistol with exactly the hand you see down your
+     own sights, only at the body LOD.
+
+     fireGraspSpec(h, k): the firing hand on a kit grip h ({at, rake, gripW,
+       gripD, trigger, heading, thumbAim, thumbAim2}, model units) at k model
+       units per hand metre. The palm lies flush on the right panel with the
+       web as high as the tang allows, the index knuckle within a finger's
+       reach of the trigger (4.5-7.2 cm), three fingers round the front strap,
+       the index pad on the trigger's face, the thumb round the back strap and
+       forward along the left flank.
+     supportGraspSpec(hold, k, fire): the off hand on userData.grips.hold
+       (guard: cupped under a handguard / pump, yawed, fingers up the far
+       side, thumb forward along the near side; vgrip: wrapped round a
+       vertical foregrip) or, hold undefined and `fire` the firing grasp, the
+       thumbs-forward cup over a pistol's firing fist. null = no off hand. */
+  /* THE HAND RIDES HIGH ON A GRIP AND THE FOREARM RUNS INTO IT. The palm's
+     long axis (wrist -> middle knuckle) was laid square across the grip
+     (`fwd`, perpendicular to the grip's rake), i.e. pointing forward and
+     DOWN by the rake: its straight-wrist line ran back and UP from the grip,
+     at the shooter's eye, and any real arm reaching the gun from a shoulder
+     below it met the hand 40-50 degrees off that line (the sleeve's end
+     stood in front of the hand). On a real grip the heel of the hand sits
+     low on the backstrap and the knuckles high on the front strap: wrist ->
+     knuckle points forward and a little UP, and the forearm leaves the grip
+     back and DOWN toward the elbow. The palm's axis now points forward and
+     up by GRIP_RISE (rise over run, ~19 degrees) whatever the grip's rake,
+     so the forearm can arrive along it from a real shoulder below the gun;
+     a builder's own `heading` (the shotgun's steep wrist) still wins. */
+  const GRIP_RISE = 0.35;
+  function fireGraspSpec(h, k) {
+    // the highest wrist line (GRIP_RISE down in 0.1 steps) whose index still
+    // reaches the trigger face: a short-reach trigger (the taser's) takes the
+    // hand a little flatter rather than leaving the pad off the blade
+    // (a builder's own heading — the shotgun's steep wrist — is kept as asked)
+    let spec = null, best = null;
+    const tries = h.heading ? [0] : [0, -0.1, -0.2, -0.3, -0.4, -0.5];
+    for (let t = 0; t < tries.length; t++) {
+      spec = fireGraspAt(h, k, (h.heading ? 0 : GRIP_RISE) + tries[t]);
+      if (!h.trigger) break;
+      const c = grasp(spec).contacts.trigger;
+      if (c != null && (!best || c < best.c)) best = { c: c, spec: spec };
+      if (c != null && c <= 0.009) break;
+    }
+    return best && best.c > 0.009 ? best.spec : spec;
+  }
+  function fireGraspAt(h, k, rise) {
+    const R = h.rake || 0;
+    const axis = new THREE.Vector3(0, Math.cos(R), -Math.sin(R));       // up the grip
+    const u = new THREE.Vector3(1, 0, 0);
+    const fwd = new THREE.Vector3().crossVectors(axis, u);               // front strap side
+    const top = new THREE.Vector3(0, h.at[0], h.at[1]);
+    const prism = { o: top, axis: axis, u: u, hw: h.gripW * 0.5, hh: h.gripD * 0.5, rc: Math.min(h.gripW, h.gripD) * 0.22 };
+    // the pad presses the FRONT face of the blade
+    const trig = h.trigger ? new THREE.Vector3(0, h.trigger[0], h.trigger[1] - 0.007) : null;
+    const hhM = h.gripD * 0.5 / k;
+    const spec = {
+      side: 1, k: k, prism: prism, name: "fire:" + [h.at, R.toFixed(3), h.gripW, h.gripD, h.trigger, k.toFixed(3)].join("/"),
+      n: new THREE.Vector3().copy(u).addScaledVector(fwd, -0.22),           // back of the hand out, a touch rearward
+      // fingers across the front strap; a steep stock wrist (the shotgun) is
+      // taken diagonally, fingers along the bore, the way a hand really
+      // closes on it (square to it the forearm would point at your eye)
+      heading: h.heading ? new THREE.Vector3(h.heading[0], h.heading[1] + rise, h.heading[2])
+        : new THREE.Vector3(0, rise, -1).normalize(),
+      palm: [0, -PALM.th * 0.5, -(0.096 - hhM - 0.004)],                 // knuckles just past the front strap
+      trigger: trig,
+      // the thumb: round the back strap, then forward along the left of the
+      // frame, riding high (the modern thumbs-forward grip); a builder may
+      // aim it itself (a straight stock's thumb goes over the top of the
+      // wrist and forward down the far flank, not up the grip)
+      thumbAim: h.thumbAim ? new THREE.Vector3(h.thumbAim[0], h.thumbAim[1], h.thumbAim[2])
+        : new THREE.Vector3().copy(u).negate().addScaledVector(fwd, -0.35).addScaledVector(axis, 0.10),
+      thumbAim2: h.thumbAim2 ? new THREE.Vector3(h.thumbAim2[0], h.thumbAim2[1], h.thumbAim2[2]) : new THREE.Vector3(-0.30, 0.10, -1),
+      at: top.clone(),
+    };
+    /* Slide the hand along the grip. The web goes as HIGH as the grip allows
+       (the thumb-side edge of the palm, web or index knuckle, whichever a
+       diagonal hold lifts higher, stays just under the top) and comes down
+       only as far as the trigger needs: the index knuckle within a finger's
+       reach of the pad (4.5-7.2 cm). Sliding moves every point of the hand
+       1:1 along the axis, so one grasp measures the whole family and the
+       search is arithmetic. */
+    let t = -0.045 * k;
+    spec.at.copy(top).addScaledVector(axis, t);
+    const G = grasp(spec);
+    const idx0 = G.toM([FINGERS[0].x, 0, FINGERS[0].z]).clone();
+    const hi0 = Math.max(G.toM([-PALM.hw, 0, -0.030]).clone().sub(top).dot(axis),
+      G.toM([-PALM.hw * 0.8, 0, -0.090]).clone().sub(top).dot(axis));
+    const tMax = t + (-0.004 * k - hi0);
+    let best = tMax;
+    if (trig) {
+      let bestC = Infinity;
+      for (let tt = tMax; tt > tMax - 0.10 * k; tt -= 0.002 * k) {
+        const d = idx0.clone().addScaledVector(axis, tt - t).distanceTo(trig) / k;
+        if (d >= 0.045 && d <= 0.072) { best = tt; break; }        // the highest hold that reaches
+        const c = Math.max(0.045 - d, d - 0.072);
+        if (c < bestC) { bestC = c; best = tt; }
+      }
+    }
+    spec.at.copy(top).addScaledVector(axis, best);
+    return spec;
+  }
+  // the thumbs-forward support hand (supportGraspSpec, the cup): see there
+  const FINGER_CONVERGE = 0.16;             // rad between neighbouring closed fingers (grasp)
+  // the support fingers' dip below the bore line (rad); the palm's middle below
+  // the grip top (hand metres); the back of the hand's tilt down. The cant is
+  // what a cammed wrist gives a forearm rising from a LOW elbow (ulnar <= 40
+  // degrees, fpsmode armSolve keeps the elbow down and out): 0.35, not the
+  // 0.62 that only an elbow at eye level could reach
+  const CUP_CANT = 0.35, CUP_AT = 0.040, CUP_NDOWN = -0.40;
+  /* The support hand under a handguard: the back of the hand turned a
+     little OUT to the left (GUARD_NX +0.3, was -0.3) and the palm's axis
+     raked a little down the guard (GUARD_RISE -0.3, was +0.18), so the
+     forearm that reaches it from the left shoulder meets the hand inside a
+     wrist's range: ulnar deviation 44 -> 30 degrees at worst down the
+     sights, extension under 40 (fpsmode wristOf, measured on every long gun
+     in the jail at the hip and down the sights). */
+  const GUARD_YAW = 0.62, GUARD_NX = 0.30, GUARD_RISE = -0.30;
+  // the firing fingers' thickness the cup closes over (hand metres; 2.0 cm
+  // left the support fingers 8 mm inside the firing fingers once the hand
+  // was drawn at its real size on the pistols)
+  const CUP_E = 0.026;
+  // o (optional): { yaw, nx, rise } overrides for the hand's lay on the part
+  // (a hold record may carry its own: hold.yaw / hold.nx / hold.rise)
+  function supportGraspSpec(hold, k, fire, o) {
+    const V = function (x, y, z) { return new THREE.Vector3(x, y, z); };
+    o = o || {};
+    const pick = function (key, d) { return o[key] != null ? o[key] : (hold && hold[key] != null ? hold[key] : d); };
+    if (hold && hold.kind === "guard") {
+      // cupped under the handguard, yawed: fingers up the far side and forward
+      const yaw = pick("yaw", GUARD_YAW);
+      return {
+        side: -1, k: k, name: "guard:" + [hold.y, hold.z, hold.w, hold.h].join("/") + ":" + k.toFixed(3), kind: "guard",
+        prism: { o: V(0, hold.y, hold.z), axis: V(0, 0, -1), u: V(1, 0, 0), hw: hold.w / 2, hh: hold.h / 2, rc: hold.rc, hl: hold.len ? hold.len / 2 : Infinity },
+        n: V(pick("nx", GUARD_NX), -1, 0),
+        heading: V(Math.cos(yaw), pick("rise", GUARD_RISE), -Math.sin(yaw)),
+        // a touch behind the part's middle: the elbow stays bent under the gun
+        at: V(0, hold.y, hold.z + (hold.slide == null ? 0.03 : hold.slide)),
+        palm: [0.004, -PALM.th * 0.5, -0.056],
+        thumbAim: V(-0.10, 0.22, -1),
+        thumbBend: [0.9, 0.7, 0.5],
+      };
+    }
+    if (hold && hold.kind === "vgrip") {
+      const ax = V(0, Math.cos(hold.rake || 0), -Math.sin(hold.rake || 0));
+      const u = V(1, 0, 0), fwd = new THREE.Vector3().crossVectors(ax, u);
+      const top = V(0, hold.y, hold.z);
+      return {
+        side: -1, k: k, name: "vgrip:" + [hold.y, hold.z, hold.w, hold.d].join("/") + ":" + k.toFixed(3), kind: "vgrip",
+        prism: { o: top, axis: ax, u: u, hw: hold.w / 2, hh: hold.d / 2, rc: Math.min(hold.w, hold.d) * 0.22 },
+        n: u.clone().negate().addScaledVector(fwd, -0.22),
+        heading: fwd.clone(),
+        at: top.clone().addScaledVector(ax, -0.050 * k),
+        palm: [0, -PALM.th * 0.5, -(0.096 - hold.d * 0.5 / k - 0.004)],
+        thumbAim: u.clone().addScaledVector(fwd, -0.35).addScaledVector(ax, 0.10),
+      };
+    }
+    if (hold || !fire || !fire.prism) return null;
+    /* THUMBS FORWARD ON A PISTOL, the way a shooter really holds it (gun
+       frame: bore -Z, +Y up, +X the shooter's right). The support palm's heel
+       presses the bare LEFT panel, palm facing +X into the grip; the four
+       fingers leave the knuckles FORWARD and ~40 degrees DOWN (the support
+       wrist cammed forward), pass in front of the front strap right under
+       the trigger guard and wrap to the RIGHT over the firing hand's lower
+       three fingers, together, all four in one curl, tips finishing on the
+       right side over the firing knuckles; the thumb lies forward along the
+       left of the frame under the slide. (The last version raised the palm's
+       axis UP the grip: an open claw standing beside the slide at sight
+       height.) The part it closes on is the firing grip grown by what the
+       firing hand puts there: its fingers on the front strap and wrapped to
+       the right side (CUP_E), only a thumb's skin on the bare left panel. */
+    const P = fire.prism, e = CUP_E * k, eL = 0.004 * k;
+    const cant = pick("cant", CUP_CANT);
+    const o2 = P.o.clone().addScaledVector(P.u, (e - eL) * 0.5);       // grown more to the right than the left
+    return {
+      side: -1, k: k, name: "cup:" + (fire.pose && fire.pose.name) + ":" + cant.toFixed(2), kind: "cup",
+      prism: { o: o2, axis: P.axis.clone(), u: P.u.clone(), hw: P.hw + (e + eL) * 0.5, hh: P.hh + e * 0.8, rc: P.rc + eL },
+      // the back of the hand faces out to the left, a touch down
+      n: V(-1, pick("nDown", CUP_NDOWN), 0),
+      // the fingers' line: forward and down
+      heading: V(0, -Math.sin(cant), -Math.cos(cant)),
+      // the palm's middle level with the firing hand's middle finger, just
+      // under the trigger guard
+      at: P.o.clone().addScaledVector(P.axis, -pick("at", CUP_AT) * k),
+      palm: [0.006, -PALM.th * 0.5, -0.050],
+      thumbAim: V(0.10, -0.16, -1),
+      thumbAim2: V(0.05, -0.08, -1),
+      together: true,
+    };
+  }
+  /* A solved grasp as a named pose, so a BODY hand (character.js setHandPose
+     takes POSES names; bodyHandGeometry caches per name and LOD, pedinstance
+     pools by geometry) can wear exactly the fingers a grasp closed. Named by
+     its content: the same grasp is the same pose, the same cached geometry.
+     stub 0: a gun hold hangs at the crease and bends the wrist. */
+  function registerPose(pose) {
+    const name = "g:" + poseKey(pose);
+    if (!POSES[name]) POSES[name] = { joints: pose.joints, cup: pose.cup, stub: 0, name: name };
+    return name;
   }
 
   /* THE WRIST HAS LIMITS. The shoulder IK puts the elbow where the arm can
@@ -1652,7 +2195,9 @@
     POSES, PALM, FINGERS, THUMB, PLANT_CONTACT, CARD_PINCH,
     handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre, contactOf,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
-    grasp, graspHand, regraspWithSolids, solidsOf, solidsSdf, prismSdf, holdPose, HOLD_RADII, TORCH, torchMount,
+    bodyArmLens, bodyTwin, bodyHandMaterial, bodyArmSource, bodyShoulder,
+    grasp, graspHand, regraspWithSolids, graspOnSolids, fireGraspSpec, supportGraspSpec, registerPose,
+    solidsOf, solidsSdf, prismSdf, holdPose, HOLD_RADII, TORCH, torchMount,
     math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore, foreHalf, stubRings },
     WRIST, STUB_LATHE, FORE_NOM, FORE_DOME, CUFF_PROFILE,
     ELBOW: { R: ELBOW_R, W: ELBOW_W, H: ELBOW_H }, UPPER_R0, UPPER_R1,

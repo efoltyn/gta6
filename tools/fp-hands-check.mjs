@@ -214,7 +214,7 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
     let ddT = -1; const fps = { weapon: 0 }; const WEAPONS = [];
     let punchT = 0, vmPunch = 0, guardK = 0;
     const fistT = [{ vis: false }, { vis: false }];
-  ` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")
+  ` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  /* EVERY GUN IS BUILT WHEN IT IS FIRST NEEDED")
     + block(FPS, "  const fists = new THREE.Group();", "  vm.add(gun, fists, fpArms);")
     + `  vm.add(gun, fists, fpArms); fists.visible = false;`
     + block(FPS, "  /* ---- THE ARMS, SOLVED EVERY FRAME", "  let aimHeld = false;")
@@ -329,12 +329,22 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
       G.pose.joints.fingers.forEach((pts, fi) => {
         // a finger past the end of the drawn grip (its tip null: it closed
         // into the palm) is measured against the drawn gun, not the endless prism
+        // (a hand regrasped on the DRAWN solids, fphands regraspWithSolids,
+        // closes its fingers on the drawn gun, which can be slimmer than the
+        // grip's stand-in prism (the shotgun's stock wrist under the little
+        // finger): such a finger is buried only if it is inside BOTH the
+        // prism and the drawn gun — a finger in the trigger guard's opening
+        // is near drawn triangles but outside the prism, a finger on a slim
+        // drawn wrist is inside the prism but outside the drawn gun)
+        const drawn = !!(h.userData.graspSpec && h.userData.graspSpec.fingersOnSolids);
         const free = c.tips[fi] === null && !(fi === 0 && c.trigger != null);
         for (let s = 0; s < 3; s++) for (let u = 0.25; u <= 1.0001; u += 0.25) {
           const hp = [pts[s][0] + (pts[s + 1][0] - pts[s][0]) * u, pts[s][1] + (pts[s + 1][1] - pts[s][1]) * u, pts[s][2] + (pts[s + 1][2] - pts[s][2]) * u];
           if (free) { buried = Math.min(buried, gunDist(handToModel(h, hp)) / handKM(h) - 0.0095 * 0.85); continue; }
           const q = G.toM(hp);
-          buried = Math.min(buried, H.prismSdf(P, q.x, q.y, q.z) / G.k - 0.0095 * 0.85);
+          let bp = H.prismSdf(P, q.x, q.y, q.z) / G.k - 0.0095 * 0.85;
+          if (drawn && bp < -0.003) bp = Math.max(bp, gunDist(handToModel(h, hp)) / handKM(h) - 0.0095 * 0.85);
+          buried = Math.min(buried, bp);
         }
       });
       check(buried > -0.003, `${id} ${nm}: no finger buried in the part (${(buried * 1000).toFixed(1)} mm)`);
@@ -660,7 +670,7 @@ console.log("HANDS ON THE LEDGE (fpPlants -> poseFpArms)");
       { x: 0.10, y: -0.12, z: 0.20, roll: 0.9, bend: -0.2, vis: true, curl: "relaxed", hook: 0 },
       { x: -0.30, y: -0.14, z: 0.22, roll: 0.9, bend: -0.2, vis: true, curl: "relaxed", hook: 0 },
     ];
-  ` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")
+  ` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  /* EVERY GUN IS BUILT WHEN IT IS FIRST NEEDED")
     + block(FPS, "  const fists = new THREE.Group();", "  vm.add(gun, fists, fpArms);")
     + `  vm.add(gun, fists, fpArms); fists.visible = true; vm.visible = true;`
     + block(FPS, "  /* ---- HANDS ON THE LEDGE, DOWN THE LENS", "  /* ---- THE ARMS, SOLVED EVERY FRAME")
@@ -754,6 +764,91 @@ console.log("HANDS ON THE LEDGE (fpPlants -> poseFpArms)");
   edges.forEach((cnt, key) => { if (cnt !== 1) return; const [p0, p1] = key.split(":").map(Number); if (Math.abs(up.getZ(p0)) > 1e-6 || Math.abs(up.getZ(p1)) > 1e-6) openAway++; });
   check(openAway === 0, `upper arm: the only open rim is inside the elbow ball (${openAway} open edges elsewhere)`);
   console.log(`  elbow: ball facets at ${(inR * 1000).toFixed(1)} mm; forearm end ${(foreEnd * 1000).toFixed(1)} mm, upper end ${(upEnd * 1000).toFixed(1)} mm`);
+}
+
+// ---------------------------------------------------------------- THE ARM IS THE BODY'S ARM
+/* Owner: "the way they look in third person and first person should look the
+   same." With a player body, every FP arm draws the RIG's own arm (fphands
+   poseBodyArm): the same limb geometry objects, a viewmodel twin of the same
+   materials, at the body's size next to the same hand, the forearm's crease
+   ON the hand's wrist and the upper arm's elbow on the forearm's. Run on a
+   real rig (character.js) in its own context. */
+console.log("BODY ARM (the rig's own arm down the lens)");
+{
+  const bx = vm.createContext({ console, Math, performance });
+  bx.window = bx; bx.self = bx;
+  bx.CBZ = { CONFIG: {}, onAlways() {}, onUpdate() {}, on() {} };
+  for (const f of ["src/vendor/three.r187.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js"]) vm.runInContext(read(f), bx, { filename: f });
+  const BT = bx.THREE, BC = bx.CBZ, BH = BC.fpHands;
+  const look = { skin: 0xb87955, torso: 0xff7a1a, collar: 0xff7a1a, arms: 0xff7a1a, legs: 0xff7a1a, shoes: 0x201a18, hair: 0x2b1b12 };
+  const like = new BT.MeshLambertMaterial({ color: 0xff7a1a }); like.transparent = true;
+  const V3 = (x, y, z) => new BT.Vector3(x, y, z);
+  for (const [tag, o] of [["man", {}], ["woman", { build: "f" }], ["tee", { shortSleeve: true }]]) {
+    const rig = BC.makeCharacter(Object.assign({}, look, o));
+    rig.group.updateMatrixWorld(true);
+    BC.playerChar = rig;
+    for (const side of [1, -1]) {
+      const src = BH.bodyArmSource(rig, side);
+      check(!!src, `${tag} ${side}: the rig's arm is readable`);
+      if (!src) continue;
+      const arm = BH.makeArm({ fore: like, upper: like }, side);
+      arm.renderOrder = 1000;
+      const k = 2.56, lens = BH.bodyArmLens(k, rig, side);
+      const W = V3(0.10 * side, -0.25, -1.0), S = V3(0.17 * side * k, -0.24 * k, 0.06 * k);
+      const E = new BT.Vector3().fromArray(BH.math.solveElbow(S.toArray(), W.toArray(), [side * 0.5, -1, 0.2], lens[0], lens[1]));
+      const hq = BH.orientAlong(side, W.clone().sub(E), 0.9, 0, new BT.Quaternion());
+      BH.poseArm(arm, W, E, S, hq, k, false);
+      arm.updateMatrixWorld(true);
+      const B = arm.userData.body, P = arm.userData.parts;
+      check(arm.userData.bodyOn === true && !P.fore.visible && !P.upper.visible, `${tag} ${side}: the body's arm draws, the stand-in lathe does not`);
+      const px = [...B.map.entries()].filter(([, m]) => m.visible);
+      const geos = new Set(px.map(([, m]) => m.geometry));
+      check(geos.has(src.lower.geometry) && geos.has(src.part.userData.main.geometry), `${tag} ${side}: the forearm and upper arm ARE the rig's limb geometry`);
+      if (tag === "tee") check(px.some(([so]) => so === src.part.userData.main.userData.bare && so.material === src.lower.material), `${tag} ${side}: a short sleeve's bare arm comes too`);
+      let twinOk = true, flagOk = true, roOk = true;
+      for (const [so, m] of px) {
+        const sm = so.material, tm = m.material;
+        if (tm === sm || !tm.color || tm.color.getHex() !== sm.color.getHex() || tm.type !== sm.type || tm.map !== sm.map) twinOk = false;
+        if (!tm.transparent) flagOk = false;
+        if (m.renderOrder < 1000) roOk = false;
+      }
+      check(twinOk, `${tag} ${side}: every piece wears a twin of the rig's own material (type, colour, map)`);
+      check(flagOk && roOk, `${tag} ${side}: twins ride the viewmodel's late queue (transparent, renderOrder >= the arm's)`);
+      const crease = V3(0, -src.L2, 0).applyMatrix4(B.lo.matrixWorld);
+      check(crease.distanceTo(W) < 1e-5, `${tag} ${side}: the forearm's crease is ON the hand's wrist (${(crease.distanceTo(W) * 1000).toFixed(3)})`);
+      const elb = V3(0, -src.L1, 0).applyMatrix4(B.sh.matrixWorld), lo0 = V3(0, 0, 0).applyMatrix4(B.lo.matrixWorld);
+      check(elb.distanceTo(lo0) < 1e-5, `${tag} ${side}: the upper arm's elbow is the forearm's elbow`);
+      const sc = new BT.Vector3().setFromMatrixScale(B.lo.matrixWorld).x;
+      check(Math.abs(sc - k * src.mpr) < 1e-6, `${tag} ${side}: the arm is the body's, at its real size beside a life-size hand (${sc.toFixed(3)})`);
+      // the forearm's thumb side (+Z) follows the hand's thumb
+      const tz = V3(0, 0, 1).transformDirection(B.lo.matrixWorld), th = V3(side > 0 ? -1 : 1, 0, 0).applyQuaternion(hq);
+      check(tz.dot(th) > 0.5, `${tag} ${side}: the forearm rolls with the hand (${tz.dot(th).toFixed(2)})`);
+      // live: a recolour of the body shows down the lens on the next pose
+      const lowerPx = B.map.get(src.lower);
+      const was = src.lower.material;
+      src.lower.material = BC.cmat(0x2050a0);
+      BH.poseArm(arm, W, E, S, hq, k, false);
+      check(lowerPx.material.color.getHex() === 0x2050a0, `${tag} ${side}: a redress follows down the lens`);
+      src.lower.material = was;
+      // the hand wears the body's hand
+      const hm = BH.bodyHandMaterial(side, like, rig);
+      check(!!hm && hm.color.getHex() === src.cap.material.color.getHex() && hm.transparent, `${tag} ${side}: the FP hand wears the body hand's material`);
+      // no body: the stand-in comes back
+      BC.playerChar = null;
+      BH.poseArm(arm, W, E, S, hq, k, false);
+      check(arm.userData.bodyOn === false && P.fore.visible && !B.lo.visible, `${tag} ${side}: with no body the stand-in arm draws`);
+      BC.playerChar = rig;
+      // a new body replaces every piece of the old
+      const rig2 = BC.makeCharacter(Object.assign({}, look, { arms: 0x203040 }));
+      BC.playerChar = rig2;
+      BH.poseArm(arm, W, E, S, hq, k, false);
+      const old = [...B.map.keys()].some((so) => { for (let q = so; q; q = q.parent) if (q === src.part) return true; return false; });
+      check(!old, `${tag} ${side}: a new body drops the old body's pieces`);
+      BC.playerChar = rig;
+    }
+  }
+  const lm = BH.bodyArmLens(1, BC.playerChar, 1);
+  console.log(`  man: upper arm ${(lm[0] * 100).toFixed(1)} cm, forearm ${(lm[1] * 100).toFixed(1)} cm (hand metres)`);
 }
 
 // ---------------------------------------------------------------- THE OLD RIG (on record)

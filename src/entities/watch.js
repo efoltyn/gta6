@@ -46,8 +46,9 @@
    cloth: the strap wraps the real wrist inside the sleeve (hidden), and the
    head sits at the hem, sunk under the fabric's surface, so the lower part
    of the dial peeks out past the cuff and nothing floats over the fabric.
-   First person: fpHands.poseArm is wrapped, so every FP arm in the game (the
-   fists, the gun arms, the car cabin, the pickup lens) carries the PLAYER's
+   First person: every FP arm with a player body IS the body's arm
+   (fphands poseBodyArm mirrors the rig's arm, this watch included). With no
+   body, fpHands.poseArm is wrapped, so the stand-in arm carries the PLAYER's
    watch on its left forearm, riding the pose it was just given.
 
    COST. Geometry is shared (head per style, strap per style x wrist fit),
@@ -1197,7 +1198,9 @@
     const lx = shoulder ? shoulder.x : (elbow.x - wrist.x);
     const left = arm && arm.userData && arm.userData.side != null ? arm.userData.side < 0 : lx < 0;
     const style = left ? styleOf(recOf(CBZ.playerChar)) : null;
-    if (!style || arm.visible === false) { if (st && st.inst) st.inst.visible = false; return; }
+    // an arm drawn as the BODY's own arm (fphands poseBodyArm) already wears
+    // the body's watch, mirrored off the rig's wrist: no second one here
+    if (!style || arm.visible === false || arm.userData.bodyOn) { if (st && st.inst) st.inst.visible = false; return; }
     if (!st) st = arm.userData.ww = { inst: null, key: "" };
     const lf = Math.max(1e-4, P.fore.scale.z);
     const kk = k || 1;

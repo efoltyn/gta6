@@ -24,9 +24,8 @@
        dumb"). Only a cap recycles one, and the global cap picks the hole
        furthest from the lens / behind it, never the one you are looking at.
      • THE PLAYER TOO: the city's playerActor (no .char) resolves to
-       capture.js's CBZ.playerWoundActor, and a hole in your forearm or
-       upper arm is mirrored onto the first-person viewmodel arm
-       (CBZ.fpViewArms, published by fpsmode.js).
+       capture.js's CBZ.playerWoundActor; the first-person arm is the rig's
+       own arm (fphands poseBodyArm), so a hole in it shows down the lens.
      • a shotgun blast scatters 2-3 wounds (per-pellet calls collapse into
        one burst).
 
@@ -916,90 +915,12 @@
   }
 
   // ---- THE FIRST-PERSON ARMS CARRY YOUR HOLES TOO ---------------------------
-  // fpsmode.js's viewmodel arms are their own meshes (systems/fphands.js
-  // makeArm: a lathed forearm along local +z, wrist 0 -> elbow 1, posed with
-  // scale (k, k, length); an upper arm the same way, elbow 0 -> shoulder 1).
-  // A hole in the player's rig forearm / upper arm is mirrored onto the same
-  // place on the matching viewmodel arm on the frame of the hit: the same
-  // hole + cloth hole + ring, at real size (the viewmodel is ~real scale, not
-  // the rig's caricature). The arm's scale is non-uniform and re-posed every
-  // frame, so each mark's own scale is counter-set per frame (fpTick) to stay
-  // round. Capped per arm; cleared with the player's other holes.
-  const FPW = [];                      // { m, arm, mesh, s, k }
-  const FP_PER_ARM = 18;
-  // fpsmode.js publishes its two arm groups as CBZ.fpViewArms = { r, l }
-  const _fpQ = new THREE.Quaternion(), _fpM = new THREE.Matrix4();
-  const _fpX = new THREE.Vector3(), _fpY = new THREE.Vector3(), _fpZ = new THREE.Vector3();
-  function fpClear() {
-    for (let i = 0; i < FPW.length; i++) { const w = FPW[i]; if (w.m.parent) w.m.parent.remove(w.m); }
-    FPW.length = 0;
-  }
-  function fpStamp(arm, mesh, a, u, rx, ry, geo, mat, ro, r) {
-    let n = 0, old = -1;
-    for (let i = 0; i < FPW.length; i++) if (FPW[i].arm === arm) { n++; if (old < 0) old = i; }
-    if (n >= FP_PER_ARM && old >= 0) { const w = FPW.splice(old, 1)[0]; if (w.m.parent) w.m.parent.remove(w.m); }
-    const m = new THREE.Mesh(geo, mat);
-    m.renderOrder = 1000 + ro;           // after the arm (renderOrder 1000), in the viewmodel queue
-    m.frustumCulled = false;
-    m.castShadow = m.receiveShadow = false;
-    const ca = Math.cos(a), sa = Math.sin(a);
-    m.position.set(ca * rx * 1.03, sa * ry * 1.03, u);
-    // decal x = around the arm, y = along it (+z), normal = out of the skin
-    _fpX.set(-sa, ca, 0); _fpY.set(0, 0, 1); _fpZ.set(ca, sa, 0);
-    _fpM.makeBasis(_fpX, _fpY, _fpZ);
-    m.quaternion.setFromRotationMatrix(_fpM);
-    mesh.add(m);
-    const w = { m, arm, mesh, s: r };
-    FPW.push(w);
-    fpSize(w);
-    return m;
-  }
-  function fpSize(w) {
-    const ps = w.mesh.scale;
-    const kx = ps.x || 1, kz = ps.z || 1;
-    // the arm's k already sizes its section; the mark sits at real size in
-    // viewmodel units: r * k across, r * k along (the length axis is scaled
-    // by the posed length, so divide it back out)
-    w.m.scale.set(w.s, w.s * kx / kz, 1);
-  }
-  function fpTick() {
-    for (let i = FPW.length - 1; i >= 0; i--) {
-      const w = FPW[i];
-      if (!w.m.parent) { FPW.splice(i, 1); continue; }
-      fpSize(w);
-    }
-  }
-  // the rig hole (part-local lp on `part`) -> the same place on the viewmodel
-  function fpMirror(actor, region, part, lp, holeR, clothed, kind) {
-    const VA = CBZ.fpViewArms;
-    if (!VA || (region !== "armL" && region !== "armR")) return;
-    const ch = actor.char, S = ch && ch.skinSlots;
-    if (!S) return;
-    const isFore = S.armsLower && S.armsLower.indexOf(part) >= 0;
-    const isUpper = !isFore && S.arms && S.arms.indexOf(part) >= 0;
-    if (!isFore && !isUpper) return;
-    const arm = region === "armL" ? VA.l : VA.r;
-    const P = arm && arm.userData && arm.userData.parts;
-    const mesh = P && (isFore ? P.fore : P.upper);
-    if (!mesh) return;
-    const g = part.geometry;
-    if (!g.boundingBox) g.computeBoundingBox();
-    const bb = g.boundingBox, h = Math.max(1e-4, bb.max.y - bb.min.y);
-    // rig: the hanging limb's low end is distal (wrist / elbow); fp: z 0 is distal
-    let u = (lp.y - bb.min.y) / h;
-    u = Math.max(0.12, Math.min(0.88, u));
-    const a = Math.atan2(lp.x * (region === "armL" ? -1 : 1), lp.z) + Math.PI * 0.5;
-    // section radii of the fp limb at u (fphands: forearm ~4.6 x 4.1 cm at the
-    // belly, upper arm ~5 cm); a touch proud so the mark never sinks in
-    const rx = isFore ? 0.044 : 0.05, ry = isFore ? 0.040 : 0.05;
-    // real size: the rig hole is RIG_MAG x life at the head; on the limb the
-    // viewmodel is ~real, so take the hole back to real millimetres x 1.6
-    const r = Math.max(0.0035, Math.min(0.012, holeR / RIG_MAG * 1.6));
-    const blade = kind === "blade";
-    fpStamp(arm, mesh, a, u, rx, ry, G_RING[0], MAT_RING, 1, r * (clothed ? 2.3 : 1.6) * RING_K);
-    if (clothed) fpStamp(arm, mesh, a, u, rx, ry, blade ? G_CLOTH_SLIT : G_CLOTH_HOLE, MAT_CLOTH, 2, r * 2.3);
-    fpStamp(arm, mesh, a, u, rx, ry, blade ? G_SLIT : G_ENTRY, blade ? MAT_TORN : MAT_FRESH, 3, r);
-  }
+  // with no code here: the first-person arm IS the player rig's arm
+  // (systems/fphands.js poseBodyArm mirrors every piece hanging off the rig's
+  // limb into the viewmodel each frame), so a hole stamped on the rig's
+  // forearm or upper arm below is drawn down the lens in the same place, at
+  // the same size, on the same cloth. (It used to be re-stamped onto a
+  // separate lathe arm by hand, with its own size guess and cap.)
 
   // ---- THE BLOOD RING: a small tight ring of blood round a hole --------------
   // a child of the SAME part, seated on the SAME face, under the hole; stamped
@@ -2354,7 +2275,6 @@
       const rW = Math.max(halfW * 1.6, clothed ? cW : 0);
       const rL = Math.max(halfL, clothed ? cL : 0);
       spawnRing(actor, part, lp, ax, rW, pad, { spin: spin, kx: 1, ky: Math.min(3.2, rL / Math.max(1e-4, rW)) });
-      if (actor.isPlayer) fpMirror(actor, pick.region, part, lp, rW, clothed, "blade");
       return;
     }
 
@@ -2497,7 +2417,6 @@
     // The clothes keep their colour; the blood is on the ground (gore.js).
     spawnRing(actor, part, lp, ax, Math.max(rad * geo._maxR, cr * G_CLOTH_HOLE._maxR), padE);
     if (exitAt) spawnRing(actor, part, exitAt, exitAt.ax, exitR, exitPad);
-    if (actor.isPlayer) fpMirror(actor, pick.region, part, lp, rad, clothOn, "shot");
   };
 
   // ---- RATCHET: CBZ.woundDecalAudit() ---------------------------------------
@@ -4525,7 +4444,6 @@
       if (r.actor) { r.actor._woundN = 0; if (r.actor.char) r.actor.char.legHurt = null; }
     }
     wounds.length = 0;
-    fpClear();
   };
   // ONE BODY'S HOLES, gone: the rig is being handed to a new person (crowd.js
   // promotion) or the player respawned. Never called on a timer.
@@ -4534,7 +4452,6 @@
     if (actor.isPlayer && !actor.char && CBZ.playerWoundActor) actor = CBZ.playerWoundActor;
     for (let i = wounds.length - 1; i >= 0; i--) if (wounds[i].actor === actor) dropWound(i);
     actor._woundN = 0;
-    if (actor === CBZ.playerWoundActor || actor.isPlayer) fpClear();
   };
 
   // chain onto CBZ.clearGore (match reset / scene swap) — checked lazily every
@@ -4564,7 +4481,6 @@
     // creep / wash / leak sweep on the same 0.8 s clock as the decals
     if (SKIN_GROW.length) skinGrowStep(dt);
     if (SKIN.length) { skinT += dt; if (skinT > 0.8) { skinSweep(skinT); skinT = 0; } }
-    if (FPW.length) fpTick();
     if (!wounds.length) return;   // the whole system sleeps
     tick += dt;
     if (tick < 0.8) return;

@@ -1314,8 +1314,16 @@
            in one pocket is unreachable by the other hand by construction.
            The weapon comes to the chest (and the body blades, bladeTick),
            which is where a third-person rifle reads from anyway. */
-        _rt.lerp(_sh, 0.38);
-        _rt.y -= 0.05;
+        /* (it was 38% of the way to the OTHER shoulder and 5 cm under the
+           joint: the butt on the breastbone, the bore 17-22 cm under the
+           eye. With the support hand held to a real shoulder (actorweapons
+           inReach: the arm no longer leaves the socket to reach) and
+           sliding back along the handguard when the gun is long, the butt
+           goes where a shooter puts it: the hollow in front of the firing
+           shoulder, a little above the joint, and the head comes down onto
+           the comb (bladeTick, CHEEK_PITCH).) */
+        _rt.lerp(_sh, POCKET_IN);
+        _rt.y += POCKET_UP;
         // the pocket is the chest's FRONT surface, not the shoulder joint's
         // centre inside the torso (that put the firing wrist in the chest)
         ch.body.getWorldQuaternion(_bodyQ);
@@ -1477,6 +1485,11 @@
      Runs before holsterprops (54) so the gun is aimed and seated off the
      turned body in the same frame. */
   const BLADE = GH.BLADE, BLADE_NECK = GH.BLADE_NECK;   // the NPC ready pose blades the same
+  const POCKET_IN = 0.14, POCKET_UP = 0.08;    // the butt's pocket: as actorweapons' ready solve (POCKET_IN / POCKET_Y)
+  // the cheek weld: the head nods down onto the stock while a long gun is presented
+  // (0.55 rad slid the head forward off the neck: a skin stump stood up behind
+  // the skull in third person. A real weld is a small nod; the gun comes up.)
+  const CHEEK_PITCH = 0.2;
   let bladeK = 0, bladeRig = null, proneK = 0;
   const PRONE_BLADE = 0.44;
   /* ---- THE HOLD IS AN OVERLAY ON THE ANIMATION, NOT AN INPUT TO IT --------
@@ -1539,6 +1552,11 @@
     snap.by = ch.body.rotation.y;
     return true;
   }
+  // the cheek nod comes off before the pose runs (bladeTick lays it on again)
+  if (CBZ.onUpdate) CBZ.onUpdate(9.985, function () {
+    const ch = CBZ.playerChar;
+    if (ch && ch.neck && ch._bladeNod) { ch.neck.rotation.x -= ch._bladeNod; ch._bladeNod = 0; }
+  });
   if (CBZ.onUpdate) CBZ.onUpdate(9.99, function () {
     if (snap.live) snapRestore();
     ranUpdate = true;
@@ -1552,7 +1570,8 @@
     snap.live = !!(snapTake(ch) && CBZ.tpHandWeapon && CBZ.tpHandWeapon());
     if (bladeRig && bladeRig !== ch) {        // a rig swap: back the neck out of the old one
       if (bladeRig.neck && bladeRig._bladeNeck) bladeRig.neck.rotation.y -= bladeRig._bladeNeck;
-      if (bladeRig) bladeRig._bladeNeck = 0;
+      if (bladeRig.neck && bladeRig._bladeNod) bladeRig.neck.rotation.x -= bladeRig._bladeNod;
+      if (bladeRig) { bladeRig._bladeNeck = 0; bladeRig._bladeNod = 0; }
       bladeK = 0;
     }
     bladeRig = ch || null;
@@ -1586,6 +1605,12 @@
       const want = -a * BLADE_NECK;
       ch.neck.rotation.y += want - (ch._bladeNeck || 0);
       ch._bladeNeck = want;
+      // (the pose DAMPS the neck's pitch toward its own target each frame, so
+      // the nod is laid on here and lifted off again before the pose runs
+      // (unNod, onUpdate 9.985): the pose never sees it, it never builds up)
+      const nod = CHEEK_PITCH * bladeK;
+      ch.neck.rotation.x += nod;
+      ch._bladeNod = nod;
     }
   }
 

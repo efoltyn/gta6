@@ -128,7 +128,7 @@
     g.userData.grips = {
       support: new THREE.Vector3(0, -0.040, -0.660),
       // the part the first-person off hand closes on (fpsmode.js fitOffHand)
-      hold: { kind: "guard", y: 0.025, z: -0.660, w: 0.066, h: 0.078, rc: 0.022, len: 0.284 },   // the pump (the hand rides it)
+      hold: { kind: "guard", y: 0.025, z: -0.660, w: 0.066, h: 0.078, rc: 0.022, len: 0.284, slide: 0.10 },   // the pump (the hand rides it), held on its rear half: a real arm reaches it there
       mag: new THREE.Vector3(0, -0.050, -0.170),
       charge: new THREE.Vector3(0, -0.040, -0.660),    // racking IS the pump
       style: "shell",

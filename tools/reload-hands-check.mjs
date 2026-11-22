@@ -324,7 +324,7 @@ const armSrc = `
   let ddT = -1; const fps = { weapon: 0 }; const WEAPONS = [];
   let punchT = 0, vmPunch = 0, guardK = 0;
   const fistT = [{ vis: false }, { vis: false }];
-` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")
+` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  /* EVERY GUN IS BUILT WHEN IT IS FIRST NEEDED")
   + block(FPS, "  const fists = new THREE.Group();", "  vm.add(gun, fists, fpArms);")
   + `  vm.add(gun, fists, fpArms); fists.visible = false;`
   + block(FPS, "  /* ---- THE ARMS, SOLVED EVERY FRAME", "  let aimHeld = false;")

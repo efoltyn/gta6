@@ -64,7 +64,9 @@
     box(g, 0.012, 0.056, 0.012, mat.black, 0, -0.096, -0.132, -0.2);    // trigger
     // big raked GRIP in black rubber + mag baseplate
     const R = 18 * Math.PI / 180;
-    const gp = K.grip(0.084, -0.070, 0.142, 0.250, R, { grooves: 3, swellB: 0.008 });
+    // (0.250 was a 10.4 cm grip: 3.7 cm of it bare under a life-size hand's
+    // little finger; 0.195 is the Eagle's own ~8 cm under the guard)
+    const gp = K.grip(0.084, -0.070, 0.142, 0.195, R, { grooves: 3, swellB: 0.008 });
     K.prof(g, "de.grip", gp, 0.086, rubber, { bevel: 0.006 });
     const b0 = gp[8], b1 = gp[9];
     K.tag(box(g, 0.090, 0.018, 0.150, ss, 0, (b0[1] + b1[1]) / 2 - 0.006, -(b0[0] + b1[0]) / 2, -R), "part_mag");
@@ -76,7 +78,7 @@
     // WHERE THE HANDS GO — see systems/gunhands.js.
     g.userData.grips = {
       support: new THREE.Vector3(-0.110, -0.180, 0.000),
-      mag: new THREE.Vector3(0, -0.320, 0.070),
+      mag: new THREE.Vector3(0, -0.268, 0.053),
       charge: new THREE.Vector3(0, 0.050, -0.040),     // rear slide serrations
       style: "mag",
     };
@@ -89,11 +91,11 @@
       grip: { pos: down(0.100), rake: R },
       trigger: [0, -0.098, -0.136],
       support: { pos: [-0.043, down(0.100)[1], down(0.100)[2]], kind: "cup", len: 0 },
-      mag: { pos: down(0.140), well: down(0.236), rake: R },
+      mag: { pos: down(0.112), well: down(0.181), rake: R },
       stock: null,
       charge: [0, 0.050, -0.040],
       // rear notch (ears' top line) -> front post top
-      sight: { rear: [0, 0.119, 0.004], front: [0, 0.122, -0.570], eyeRelief: 0.42, type: "iron" },
+      sight: { rear: [0, 0.119, 0.004], front: [0, 0.122, -0.570], eyeRelief: 0.52, type: "iron" },
       optic: { type: "iron", mag: 1 },
     });
     return g;

@@ -219,6 +219,13 @@
      Pure maths is on CBZ.gunHold.math for tools/gun-hold-check.mjs. */
   const GH = (function () {
     const BEND_MAX = 0.70;            // rad the wrist may bend off the forearm line (~40°)
+    /* A grasped hand's bend is measured from its LEAD (graspOf), a line
+       already up to 0.6 rad below the straight wrist: the ready search may
+       not trade the shoulder seat for a straighter wrist on its account (it
+       scored a bend past BEND_MAX as a bad hold and walked the rifle out
+       along `fwd` until the wrist came straight: a rifle held out like a
+       pistol). Only a wrist past this is a bad hold. */
+    const GRASP_BEND = 1.15;
     const TILT = { fire: 0.30, guard: 0.45, vgrip: 0.25 };   // fist axis off the part axis
     const ROLL = { fire: 0.30, guard: 1.10, vgrip: 0.50 };   // round the part, off the preferred side
     const WEB = 0.040;                // m (hand): grip centre below the web / top of a grip
@@ -268,8 +275,11 @@
     }
     /* Turn a hand frame (and anything welded to it) so its straight-wrist line
        comes within `max` of the forearm: dq = the minimal rotation. */
-    function clampBend(hq, f, max, dqOut) {
-      _z.set(0, 0, 1).applyQuaternion(hq);
+    // (lead: the forearm's natural line in the hand's own frame; default the
+    // straight wrist, hand +Z. A grasp names its own: see graspOf)
+    const Z0 = new THREE.Vector3(0, 0, 1);
+    function clampBend(hq, f, max, dqOut, lead) {
+      _z.copy(lead || Z0).applyQuaternion(hq);
       const b = Math.acos(Math.max(-1, Math.min(1, _z.dot(f))));
       dqOut.identity();
       if (b <= max) return b;
@@ -352,6 +362,12 @@
       // body's hands is one-handed, so it has no support grip to solve
       if (sup && CBZ.holds.hands(prop, { view: "tp" }) < 2) sup = null;
       const spec = fire ? { fire, sup } : null;
+      if (spec) {
+        // what the grasp needs (sized): the grip record and the part it is on.
+        // Not enumerable: Object3D.copy JSON-clones userData, a prop must not
+        // drag itself into its own clone.
+        Object.defineProperty(spec, "_g", { value: { prop: prop, owner: owner, h: owner ? owner.userData.fireGrip : null, M: M, sc: sc, hold: hold && (hold.kind === "guard" || hold.kind === "vgrip") ? hold : null }, enumerable: false, configurable: true });
+      }
       ud._holdSpec = spec;
       return spec;
     }
@@ -362,7 +378,7 @@
       if (spec._k === k) return spec._z;
       const H = CBZ.fpHands;
       const f = spec.fire, s = spec.sup;
-      const z = spec._z || { fc: new THREE.Vector3(), sc: new THREE.Vector3(), fPose: "pistol", sPose: "support" };
+      const z = spec._z || { fc: new THREE.Vector3(), sc: new THREE.Vector3(), fPose: "pistol", sPose: "support", fQ: null, fH: null, sQ: null, sH: null, fL: Z0, sL: Z0 };
       z.fc.copy(f.top).addScaledVector(f.axis, -WEB * k);
       z.fPose = H && H.holdPose ? H.holdPose("trig", Math.sqrt(f.hw * f.hh) / k) : "pistol";
       if (s) {
@@ -370,9 +386,100 @@
         if (s.kind === "vgrip") z.sc.addScaledVector(s.axis, -(WEB + 0.010) * k);
         z.sPose = H && H.holdPose ? H.holdPose("hold", Math.sqrt(s.hw * s.hh) / k) : "support";
       }
+      /* THE SAME GRASP AS THE LENS. Where the gun carries its grip record
+         (every kit gun), the body's hand takes the grasp first person uses
+         (fphands fireGraspSpec / supportGraspSpec, closed on the drawn gun):
+         the fingers curled onto the grip until they touch, the index pad on
+         the trigger, the thumb on the frame, the off hand cupped under the
+         handguard / round the foregrip — fixed to the gun as the grasp put
+         it (z.fQ / z.sQ, prop space), its fingers a registered pose the body
+         hand wears (z.fPose / z.sPose), and the point of the hand that sits
+         on z.fc / z.sc (z.fH / z.sH, hand frame) — so everything below that
+         pins "this point of the hand on that point of the gun" is unchanged.
+         Without a record (the unknown-id fallback), the table hold above. */
+      const gf = graspOf(spec, k, "f"), gsu = s ? graspOf(spec, k, "s") : null;
+      z.fQ = gf ? gf.q : null; z.fH = gf ? gf.toH(z.fc, new THREE.Vector3()) : null;
+      z.fL = gf ? gf.lead : Z0;
+      if (gf) z.fPose = gf.pose;
+      z.sQ = gsu ? gsu.q : null; z.sH = gsu ? gsu.toH(z.sc, new THREE.Vector3()) : null;
+      z.sL = gsu ? gsu.lead : Z0;
+      if (gsu) z.sPose = gsu.pose;
       spec._k = k; spec._z = z;
       return z;
     }
+    /* One grasp per (gun, grip, hand size to 1%), shared by every body that
+       holds that gun at that size: the solve runs once, not once per man.
+       Result in PROP space. */
+    const GRASPS = new Map();
+    function graspOf(spec, k, which) {
+      const H = CBZ.fpHands, g = spec._g;
+      if (!H || !H.fireGraspSpec || !H.registerPose || !g || !g.prop) return null;
+      const kq = Math.round(Math.log(k) * 100);                 // 1% buckets
+      const kk = Math.exp(kq / 100);
+      let gs, space, M = null;
+      if (which === "f") {
+        if (!g.h || !g.owner) return null;
+        space = g.owner;
+        M = g.M;
+      } else {
+        if (!g.hold) return null;
+        space = g.prop;
+      }
+      const key = which + "|" + (g.prop.userData.weaponId || "") + "|" + JSON.stringify(which === "f" ? g.h : g.hold) + "|" + (M ? M.elements.map(function (e) { return e.toFixed(4); }).join(",") : "") + "|" + kq;
+      let R = GRASPS.get(key);
+      if (R !== undefined) return R;
+      R = null;
+      try {
+        // (the fire grip is solved in its owner's own space: the taser builds it in a 0.82 group)
+        gs = which === "f" ? H.fireGraspSpec(g.h, kk / g.sc) : H.supportGraspSpec(g.hold, kk, null);
+        if (gs) {
+          // (the grip prism alone, not re-closed on every drawn solid: that
+          // search is ~3 s of a node core per gun, a hitch the first time a
+          // squad draws; the body LOD hand's thumb does not show the difference)
+          const G = H.grasp(gs);
+          const q = G.q.clone(), p = G.p.clone();
+          let ks = G.k;
+          if (M) {
+            const t = new THREE.Vector3(), r = new THREE.Quaternion(), sv = new THREE.Vector3();
+            M.decompose(t, r, sv);
+            q.premultiply(r); p.applyMatrix4(M); ks *= sv.x;
+          }
+          const qi = q.clone().invert();
+          /* WHERE THE FOREARM COMES FROM. A grasp's straight-wrist line (hand
+             +Z) on a firing grip runs straight back along the bore, and on a
+             handguard back along the gun: an arm led in along it put the
+             elbow at the shooter's ear, the gun at his forehead and, carried,
+             the firing arm over his head. A real forearm leaves the grip
+             BELOW that line, the wrist cocked within its range: the firing
+             forearm back, down and a little out to its own side (FP's
+             ARM_EXIT, within its 0.70 rad wrist), the support forearm down,
+             back and out to the left (FP's guard / foregrip foreDir). The
+             lead is that line in the hand's own frame; the body's arm is led
+             in along it and the wrist bend is measured from it. */
+          const hz = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+          const want = which === "f" ? new THREE.Vector3(0.30, -1, 0.35)
+            : (g.hold.kind === "vgrip" ? new THREE.Vector3(-0.45, -0.55, 0.70) : new THREE.Vector3(-0.55, -0.62, 0.56));
+          want.normalize();
+          const ang = hz.angleTo(want), cap = which === "f" ? 0.60 : 0.95;
+          const lead = hz.clone();
+          if (ang > 1e-4) {
+            const ax = new THREE.Vector3().crossVectors(hz, want).normalize();
+            lead.applyAxisAngle(ax, Math.min(ang, cap));
+          }
+          lead.applyQuaternion(qi).normalize();             // prop -> hand frame
+          R = {
+            q: q, pose: H.registerPose(G.pose), lead: lead,
+            // a point of the gun (prop space) in the hand's own frame (hand metres)
+            toH: function (v, out) { return out.copy(v).sub(p).applyQuaternion(qi).multiplyScalar(1 / ks); },
+          };
+        }
+      } catch (e) { R = null; }
+      GRASPS.set(key, R);
+      return R;
+    }
+    // the point of each hand that holds its grip centre (hand frame, hand metres)
+    function fireCentre(z, out) { return z.fH ? out.copy(z.fH) : gripCentreOf(z.fPose, 1, out); }
+    function supCentre(z, out) { return z.sH ? out.copy(z.sH) : gripCentreOf(z.sPose, -1, out); }
     const _gc = new THREE.Vector3();
     function gripCentreOf(pose, side, out) {
       const H = CBZ.fpHands;
@@ -395,9 +502,17 @@
     const _f = new THREE.Vector3(), _x0 = new THREE.Vector3(), _n = new THREE.Vector3();
     const _w = new THREE.Vector3(), _c = new THREE.Vector3(), _o = new THREE.Vector3(), _s = new THREE.Vector3();
     const last = { fireBend: 0, supBend: 0, supGap: 0, slide: 0 };
+    // a grasp's hand is FIXED on the gun (z.fQ): the hand frame is the gun's
+    // times it, and what is left is the wrist bend off this forearm
+    function graspBend(q, lead) {
+      _hq.copy(_gq).multiply(q);
+      _z.copy(lead).applyQuaternion(_hq);
+      return Math.acos(Math.max(-1, Math.min(1, _z.dot(_f))));
+    }
     function frameFire(spec, low) {
       low.getWorldQuaternion(_lq);
       _f.set(0, 1, 0).applyQuaternion(_lq);
+      if (spec._z && spec._z.fQ && spec._k != null) return graspBend(spec._z.fQ, spec._z.fL);
       _x0.copy(spec.fire.x0).applyQuaternion(_gq);
       _n.copy(spec.fire.n).applyQuaternion(_gq);
       return solveFrame(_hq, _x0, _n, _f, spec.fire.tilt, ROLL.fire);
@@ -416,10 +531,15 @@
       // bad": a switch on a threshold flickers.
       CBZ.charArmTo.crease(ch, "r", _w);
       if (lift) _w.y += lift;
-      _s.set(0, 0, 1).applyQuaternion(_hq);
+      _s.copy(z.fL).applyQuaternion(_hq);
       CBZ.charArmTo.wrist(ch, _w, "r", _s, 1);
       let bend = frameFire(spec, low);
-      if (aimed && bend > BEND_MAX - 0.10) {
+      /* (a GRASPED fist never drags the wrist out: its bend is measured from
+         the lead, which is already the cocked wrist, and moving the wrist
+         onto that line straightened the arm and carried the gun out to arm's
+         length — the stock half a metre off the shoulder. The elbow bends;
+         the gun stays seated. See GRASP_BEND.) */
+      if (aimed && !z.fQ && bend > BEND_MAX - 0.10) {
         /* The barrel is locked to the aim, so the wrist has to come to the
            gun: move the WRIST to where the forearm arrives along the hand's
            straight-wrist line (elbow on the upper arm's sphere, as near the
@@ -432,7 +552,7 @@
           const l1 = -low.position.y * _s.x, l2 = -fit.wristY * _s.x;
           CBZ.charArmTo.crease(ch, "r", _w);
           part.getWorldPosition(_o);                      // the shoulder
-          _c.set(0, 0, 1).applyQuaternion(_hq);           // the hand's own forearm line
+          _c.copy(z.fL).applyQuaternion(_hq);              // the hand's own forearm line (its lead)
           _x0.copy(_w).addScaledVector(_c, l2).sub(_o).normalize();
           _n.copy(_o).addScaledVector(_x0, l1).addScaledVector(_c, -l2);   // wrist with a straight wrist
           // continuous in the bend (a step here flickers frame to frame)
@@ -442,7 +562,7 @@
         }
       }
       if (!aimed && bend > BEND_MAX) {
-        bend = clampBend(_hq, _f, BEND_MAX, _dq);
+        bend = clampBend(_hq, _f, BEND_MAX, _dq, z.fL);
         _gq.premultiply(_dq);                         // the gun turns with the fist
       }
       last.fireBend = bend;
@@ -452,7 +572,7 @@
       hand.position.set(0, fit.wristY, 0);
       // the gun: its grip centre in the fist's
       hand.updateMatrixWorld(true);
-      gripCentreOf(z.fPose, 1, _c);
+      fireCentre(z, _c);
       hand.localToWorld(_c);
       prop.parent.updateWorldMatrix(true, false);
       prop.parent.matrixWorld.decompose(_w, _pq, _s);
@@ -492,6 +612,33 @@
       return ud._stockZ;
     }
 
+    /* The butt plate's centre, in the prop's own (model) units: the middle of
+       the drawn rear face (every vertex within 6 mm of the rearmost). A
+       launcher that names its shoulder point (shoulderZ) rests there. */
+    function buttPlate(prop) {
+      const ud = prop.userData;
+      if (ud._buttPlate) return ud._buttPlate;
+      if (ud.shoulderZ != null) return (ud._buttPlate = new THREE.Vector3(0, 0, ud.shoulderZ));
+      prop.updateWorldMatrix(true, true);
+      _bbInv.copy(prop.matrixWorld).invert();
+      const pts = [], v = new THREE.Vector3();
+      let maxZ = -Infinity;
+      prop.traverse(function (o) {
+        const pos = o.isMesh && o.visible !== false && o.geometry && o.geometry.attributes && o.geometry.attributes.position;
+        if (!pos) return;
+        _bbM.multiplyMatrices(_bbInv, o.matrixWorld);
+        for (let i = 0; i < pos.count; i++) {
+          v.fromBufferAttribute(pos, i).applyMatrix4(_bbM);
+          pts.push(v.x, v.y, v.z);
+          if (v.z > maxZ) maxZ = v.z;
+        }
+      });
+      const c = new THREE.Vector3();
+      let n = 0;
+      for (let i = 0; i < pts.length; i += 3) if (pts[i + 2] > maxZ - 0.012) { c.x += pts[i]; c.y += pts[i + 1]; c.z += pts[i + 2]; n++; }
+      return (ud._buttPlate = n ? c.multiplyScalar(1 / n) : new THREE.Vector3(0, 0, Math.max(0, maxZ)));
+    }
+
     /* ---- NPC READY: BOTH HANDS ON THE GUN, SOLVED ONCE, THEN COPIED --------
        The old ready pose was a table of Euler angles with the barrel run down
        the forearm: every NPC long gun was held out at arm's length like a
@@ -511,6 +658,17 @@
        Per frame this is copies — no solve, for every armed NPC, not a
        budgeted few. */
     const BLADE = 0.60, BLADE_NECK = 0.85;
+    /* THE BUTT IN THE SHOULDER POCKET. The ready solve sat the butt 38% of
+       the way across to the OTHER shoulder, 5 cm (rig) under the joint, and
+       let its search walk the gun up to 26 cm out from the chest to buy the
+       support hand its reach: the butt on the breastbone 10-15 cm off the
+       body and, on the shotgun, the gun at arm's length. The support hand no
+       longer pulls the shoulder out of its socket for reach (inReach): where
+       a long handguard is past the arm it lands further back along it
+       (supportLand) — so the butt can stay where a shooter puts it: in the
+       hollow just inboard of the firing shoulder joint, at its height, the
+       search only nudging it (2-7 cm out, a little further inboard). */
+    const POCKET_IN = 0.14, POCKET_Y = 0.08;   // share of the way to the other shoulder; rig units above the joint
     const ONE_HAND_REACH = 0.93;      // share of the arm (shoulder to crease) a one-hand aim holds out
     const _rd = new THREE.Vector3(), _ro = new THREE.Vector3(), _rc = new THREE.Vector3();
     const _rbq = new THREE.Quaternion(), _rwq = new THREE.Quaternion(), _rm = new THREE.Matrix4();
@@ -628,7 +786,16 @@
         // the butt sits IN the shoulder pocket: on the FRONT of the body as
         // worn (the shaped chest, or the plate carrier strapped over it), not
         // at the shoulder joint's centre inside the torso
-        if (long) { _ro.y -= 0.07; _ro.z = pocketZ(ch, _ro.x, _ro.y); _ro.addScaledVector(_rd, stock + (fwd || 0)); }
+        if (long) {
+          _ro.y += POCKET_Y; _ro.z = pocketZ(ch, _ro.x, _ro.y);
+          // the butt PLATE'S CENTRE on the pocket: the plate as drawn (its
+          // drop below the bore line included) at the gun's drawn scale. (It
+          // was the bore line's end at the model's UNSCALED length: with the
+          // prop drawn at 0.72-0.88 of its model units the butt stood 5-13
+          // cm in front of the shoulder, and a dropped stock 5 cm low.)
+          _rpa.copy(buttPlate(prop)).multiplyScalar(prop.scale.x || 1).applyQuaternion(_rbq);
+          _ro.sub(_rpa).addScaledVector(_rd, fwd || 0);
+        }
         else {
           /* ONE HAND (CBZ.holds: a handgun in a body's hands). The arm goes
              OUT from its own shoulder down the aim, a touch inboard so the
@@ -636,7 +803,7 @@
              arm), the off arm left to whoever has it. Pitched, the arm swings
              from the shoulder like a boom: the gun stays at arm's length. */
           // the crease at ONE_HAND_REACH of the arm, the grip a fist ahead of it
-          gripCentreOf(z.fPose, 1, _rpa);
+          fireCentre(z, _rpa);
           const reach = (-ra.userData.low.position.y - fit.wristY) * ONE_HAND_REACH + _rpa.length() * fit.s;
           _rpa.copy(_rd).multiplyScalar(reach + (fwd || 0));
           _ro.add(_rpa);
@@ -668,7 +835,7 @@
         body.localToWorld(_ro);
         seatProp(prop, _ro, _rwq);
         // the firing arm to the grip, the forearm led in along the fist
-        gripCentreOf(z.fPose, 1, _gc);
+        fireCentre(z, _gc);
         if (ch.setHandPose) ch.setHandPose("r", z.fPose);
         for (let i = 0; i < 3; i++) {
           _gq.copy(_rwq);
@@ -677,7 +844,7 @@
           _s.setFromMatrixScale(low.matrixWorld);
           _w.copy(_gc).multiplyScalar(fit.s * _s.x).applyQuaternion(_hq);
           _w.subVectors(_rc, _w);
-          _s.set(0, 0, 1).applyQuaternion(_hq);
+          _s.copy(z.fL).applyQuaternion(_hq);
           CBZ.charArmTo.wrist(ch, _w, "r", _s, 1);
         }
         seatProp(prop, _ro, _rwq);
@@ -692,7 +859,7 @@
           body.localToWorld(_rpa).sub(_s);
           _w.add(_rpa);
           hr.getWorldQuaternion(_pq);
-          CBZ.charArmTo.wrist(ch, _w, "r", _c.set(0, 0, 1).applyQuaternion(_pq), 1);
+          CBZ.charArmTo.wrist(ch, _w, "r", _c.copy(z.fL).applyQuaternion(_pq), 1);
           prop.getWorldPosition(_ro);
           seatProp(prop, _ro, _rwq);                              // still down-range
           fire(ch, prop, true, 0);
@@ -708,7 +875,7 @@
          rolled forward (prot), and the attempt that leaves the least arm
          inside the body and the support hand on the gun wins. Solved once per body + gun +
          pitch level, so the search costs nothing per frame. */
-      const inb0 = long ? 0.38 : 0.10;
+      const inb0 = long ? POCKET_IN : 0.10;
       const inBody = function () {
         // (a one-handed gun's off arm is not this solve's: it goes back after)
         const ar = CBZ.charArmTo.armPen ? Math.max(spec.sup ? CBZ.charArmTo.armPen(ch, "l") : 0, CBZ.charArmTo.armPen(ch, "r")) : 0;
@@ -718,7 +885,7 @@
       // any amount of arm in the body); then the least arm/gun inside the
       // body; then the textbook placement
       const score = function (g, pen, fwd, inb, prot, lift) {
-        return (g != null && spec.sup && g > 0.02 ? 10 + g * 20 : 0) + (fireBend > BEND_MAX + 0.005 ? 5 : 0) +
+        return (g != null && spec.sup && g > 0.02 ? 10 + g * 20 : 0) + (fireBend > (spec._z && spec._z.fQ ? GRASP_BEND : BEND_MAX) + 0.005 ? 5 : 0) +
           pen * 12 + Math.abs(fwd) * 0.08 + Math.abs(inb - inb0) * 0.05 + prot * 0.10 + Math.abs(lift) * 0.06;
       };
       const place = { inb: inb0, fwd: 0, prot: 0, lift: 0 };
@@ -740,8 +907,8 @@
         // (one hand: nearer the body is a more bent elbow; up is the arm over
         // a plate carrier's shoulder)
         const AX = long ? [
-          ["fwd", [0, 0.04, 0.08, 0.13, 0.19, 0.26]],
-          ["inb", [0.38, 0.30, 0.46, 0.22, 0.14]],
+          ["fwd", [0, 0.02, 0.04, 0.07]],
+          ["inb", [POCKET_IN, POCKET_IN + 0.08, POCKET_IN + 0.16, POCKET_IN + 0.24]],
         ] : [
           ["fwd", [0, -0.03, -0.06, 0.02]],
           ["inb", [0.10, 0.04, 0.16, 0.22, 0]],
@@ -1113,6 +1280,7 @@
     function frameSupport(spec, low) {
       low.getWorldQuaternion(_lq);
       _f.set(0, 1, 0).applyQuaternion(_lq);
+      if (spec._z && spec._z.sQ && spec._k != null) return graspBend(spec._z.sQ, spec._z.sL);
       _x0.copy(spec.sup.x0).applyQuaternion(_gq);
       _n.copy(spec.sup.n).applyQuaternion(_gq);
       return solveFrame(_hq, _x0, _n, _f, TILT[spec.sup.kind], ROLL[spec.sup.kind]);
@@ -1127,7 +1295,7 @@
       prop.getWorldQuaternion(_gq);
       supportTarget(spec, z, prop, slide || 0, _cw);
       if (floorY != null && _cw.y < floorY) _cw.y = floorY;
-      gripCentreOf(z.sPose, -1, _gc);
+      supCentre(z, _gc);
       low.updateWorldMatrix(true, false);
       _s.setFromMatrixScale(low.matrixWorld);
       const sw = fit.s * _s.x;
@@ -1136,14 +1304,15 @@
         bend = frameSupport(spec, low);
         // a wrist that would bend past the cap gives at the wrist, and the
         // ARM carries the grip centre back onto the part
-        if (bend > BEND_MAX) bend = clampBend(_hq, _f, BEND_MAX, _dq);
+        if (bend > BEND_MAX) bend = clampBend(_hq, _f, BEND_MAX, _dq, z.sL);
         _w.copy(_gc).multiplyScalar(sw).applyQuaternion(_hq);
         _w.subVectors(_cw, _w);                            // where the wrist must be
-        _s.set(0, 0, 1).applyQuaternion(_hq);
+        inReach(ch, _w);
+        _s.copy(z.sL).applyQuaternion(_hq);
         CBZ.charArmTo.wrist(ch, _w, "l", _s, blend == null ? 1 : blend);
       }
       bend = frameSupport(spec, low);
-      if (bend > BEND_MAX) bend = clampBend(_hq, _f, BEND_MAX, _dq);
+      if (bend > BEND_MAX) bend = clampBend(_hq, _f, BEND_MAX, _dq, z.sL);
       hand.quaternion.copy(_lq).invert().multiply(_hq);
       if (CBZ.charWristTwist) CBZ.charWristTwist(ch, "l");          // the forearm pronates with the hand
       hand.position.set(0, fit.wristY, 0);
@@ -1153,6 +1322,36 @@
       last.supBend = bend;
       last.supGap = _gcw.distanceTo(_cw);
       return last.supGap;
+    }
+    /* THE SHOULDER STAYS IN ITS SOCKET. character.js's arm solve reaches
+       past the arm's length by sliding the whole shoulder pivot forward
+       (scapular protraction, capped at 0.24 rig = 17 cm), so a support hand
+       sent to a handguard out of reach got there by pulling the arm out of
+       the torso: 13-17 cm on a presented shotgun (the owner: "arm is getting
+       disconnected from the body"). A real shoulder gives ~4 cm. The wrist
+       target is held within the arm's length plus PROTRACT_MAX of the
+       shoulder at rest; past that the hand falls short of the grip, and the
+       callers' supportLand walks the grip back along the handguard toward
+       the receiver until the arm lands it — the hand on the gun, the
+       shoulder in the body. */
+    const PROTRACT_MAX = 0.06;                 // rig units (~4 cm)
+    const SUPPORT_REACH = 0.95;
+    const _rsS = new THREE.Vector3(), _rsD = new THREE.Vector3();
+    function inReach(ch, w) {
+      const part = ch.parts && ch.parts.la, low = part && part.userData.low, cap = part && part.userData.cap;
+      if (!part || !low || !cap || !cap.userData.fit || !part.parent) return w;
+      const rest = part.userData._armRestZ != null ? part.userData._armRestZ : 0;
+      part.parent.updateWorldMatrix(true, false);
+      _rsS.set(part.position.x, part.position.y, rest);
+      part.parent.localToWorld(_rsS);
+      _rsD.setFromMatrixScale(part.parent.matrixWorld);
+      // (0.95 of the arm: the support elbow keeps a soft bend, ~40 degrees)
+      const l = (-low.position.y - cap.userData.fit.wristY) * SUPPORT_REACH + PROTRACT_MAX;
+      const maxD = l * _rsD.x;
+      _rsD.subVectors(w, _rsS);
+      const d = _rsD.length();
+      if (d > maxD) w.copy(_rsS).addScaledVector(_rsD, maxD / d);
+      return w;
     }
     /* Walk a handguard grip back toward the receiver until the arm lands it
        (bisection on the measured gap: no reach model to be wrong). */
@@ -1182,7 +1381,7 @@
       if (ch.setHandPose) ch.setHandPose("l", z.sPose);
       prop.getWorldQuaternion(_gq);
       let bend = frameSupport(spec, hand.parent);
-      if (bend > BEND_MAX) clampBend(_hq, _f, BEND_MAX, _dq);
+      if (bend > BEND_MAX) clampBend(_hq, _f, BEND_MAX, _dq, z.sL);
       hand.quaternion.copy(_lq).invert().multiply(_hq);
       if (w > 0) hand.quaternion.slerp(REST_L, Math.min(1, w));
       if (CBZ.charWristTwist) CBZ.charWristTwist(ch, "l");          // the forearm pronates with the hand
@@ -1201,7 +1400,7 @@
     return {
       fire, ready, pitchNpc, lowReady, carry, isLong, gunInBody, readyDecay, support, supportLand, supportOrient, supportPoint, specOf, stockZ, last,
       BEND_MAX, TILT, ROLL, BLADE, BLADE_NECK,
-      math: { solveFrame, clampBend, sized, gripCentreOf },
+      math: { solveFrame, clampBend, sized, gripCentreOf, fireCentre, supCentre },
     };
   })();
   CBZ.gunHold = GH;

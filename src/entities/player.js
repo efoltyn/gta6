@@ -27,7 +27,13 @@
   // orange prison jumpsuit with darker stripes — unmistakably "the convict"
   const playerChar = CBZ.makeCharacter({
     legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a,
-    skin: 0xf0c39a, hair: 0x4a3526, shoes: 0x2b2b2b,
+    // SKIN, NOT BONE. This was 0xf0c39a, a fair skin picked as a screen colour.
+    // The renderer takes a hex as already-linear and then tone-maps and
+    // sRGB-encodes it (core/renderer.js), so that value came out cream-white:
+    // the player's hands (first person and third) read as white plastic.
+    // 0xde8b52 is the same skin decoded to linear, which lands on screen as
+    // the fair skin it was meant to be (about 211,174,133 under the block's lights).
+    skin: 0xde8b52, hair: 0x4a3526, shoes: 0x2b2b2b,
     stripes: 0xc85c00, belt: 0x6b4a2a,
     build: playerBuild, longHair: playerBuild === "f", physique: "average", stature: 1,
   });
