@@ -382,7 +382,7 @@
      the joint; a `low` pivot group sits AT the joint with the lower loft
      inside it. `kind` "arm" | "leg"; vUp / vLo "bare" | "cloth". The boxes
      these replaced are still the spec (w x upperH, 0.9w x lowerH+0.06). */
-  function limb(kind, w, upperH, lowerH, d, color, lowerColor, vUp, vLo) {
+  function limb(kind, w, upperH, lowerH, d, color, lowerColor, vUp, vLo, lowK) {
     const grp = new THREE.Group();
     const upper = limbMesh({ kind: kind + "Up", variant: vUp, w, d, len: upperH - LIMB_TUCK, y0: upperH / 2, boxH: upperH }, color);
     upper.position.y = -upperH / 2;
@@ -394,7 +394,7 @@
     grp.add(low);
     grp.userData.low = low;
 
-    const lw = w * 0.9, ld = d * 0.9;
+    const lw = w * (lowK || 0.9), ld = d * (lowK || 0.9);     // (lowK: a slimmer shin, P.shinK)
     const lower = limbMesh({ kind: kind + "Lo", variant: vLo, w: lw, d: ld, len: lowerH, y0: (lowerH - LIMB_OVERLAP) / 2, boxH: lowerH + LIMB_OVERLAP },
       lowerColor != null ? lowerColor : color);
     lower.position.y = (LIMB_OVERLAP - lowerH) / 2;
@@ -845,12 +845,15 @@
      small of the back are the TORSO block's (torsoSpec fem rows, featZ). */
   const ADULT_F = Object.assign(profileBase(), {
     key: "f", fem: true,
-    statureMul: 0.936,                       // 1.67 m beside the male 1.79 m
-    legUp: 0.567, legLo: 0.633, legW: 0.246, hipX: 0.126,
+    statureMul: 0.946,                       // 1.69 m beside the male 1.79 m
+    // (longer in the leg than the man for her height, a slimmer lower leg, a
+    // longer neck, a head a touch narrower: the second pass, "much more real
+    // and attractive")
+    legUp: 0.585, legLo: 0.655, legW: 0.252, hipX: 0.129, shinK: 0.84, neckK: 1.12, headX: 0.74,
     armUp: 0.435, armLo: 0.54, armW: 0.160, armX: 0.244,
     pelvisW: 0.475, pelvisH: 0.19, pelvisD: 0.33,
-    torsoH: 0.82, torsoW: 0.396, torsoD: 0.275,
-    waistShare: 0.325, waistW: 0.335, waistD: 0.25,
+    torsoH: 0.80, torsoW: 0.396, torsoD: 0.275,
+    waistShare: 0.325, waistW: 0.335, waistD: 0.235,
     collarW: 0.42, collarH: 0.16, collarD: 0.30,
     headSize: 0.55,
     jacketW: 0.456, jacketH: 0.87, jacketD: 0.375,
@@ -938,7 +941,7 @@
   // stack torsoSpec builds (hip, column, the neck showing, the head as drawn)
   function crownOf(p) {
     const nk = p.headSize > 0 ? Math.max(0, Math.min(1, 1 - p.neckDrop / (p.headSize * 0.17))) : 1;
-    return p.legUp + p.legLo - 0.02 + p.torsoH * (1 + NECK_LEN * nk * (p.headK || 1) / 0.95) - 0.6 * p.neckDrop + p.headSize * (p.headK || 1);
+    return p.legUp + p.legLo - 0.02 + p.torsoH * (1 + NECK_LEN * nk * (p.headK || 1) * (p.neckK || 1) / 0.95) - 0.6 * p.neckDrop + p.headSize * (p.headK || 1);
   }
   function childProfile(build, age) {
     const G = growthAt(age);
@@ -963,8 +966,8 @@
        shape, so 17.9 and 18 are the same height. */
     {
       const adult = crownOf(ADULT_M) * (1 + (ADULT_F.statureMul - 1) * fb);
-      const neckK = 1 + NECK_LEN * G.nk * HEAD_DRAW / 0.95;
-      const f = (G.h * adult + 0.02 - headSize * HEAD_DRAW + 0.6 * neckDrop) / (legLen + torsoTotal * neckK);
+      const neckUp = 1 + NECK_LEN * G.nk * HEAD_DRAW * (1 + (ADULT_F.neckK - 1) * fb) / 0.95;
+      const f = (G.h * adult + 0.02 - headSize * HEAD_DRAW + 0.6 * neckDrop) / (legLen + torsoTotal * neckUp);
       legLen *= f; torsoTotal *= f;
     }
 
@@ -1017,8 +1020,11 @@
     // A young child has no neck: the head sits straight on the shoulders.
     p.neckDrop = neckDrop;
     // ...and a rounder head: the skull narrows to the adult's through childhood
-    // (two shapes, in step with headForm: the lids are built for the form's)
+    // (in step with headForm: the lids are built for the form's)
     if (age < 12) { p.headX = EYE_HX.c; p.headZ = 0.94; }
+    else if (fem) p.headX = EYE_HX.f;
+    p.neckK = 1 + (ADULT_F.neckK - 1) * fb;
+    p.shinK = 0.9 + (ADULT_F.shinK - 0.9) * fb;
 
     p.jacketW = p.torsoW + 0.06; p.jacketD = p.torsoD + 0.10;
     p.jacketH = torsoTotal * 1.05;
@@ -1322,7 +1328,9 @@
     // and squeezed across (HEAD_DRAW, HEAD_SX), and the neck must come out a
     // real one: 12 cm on a man, a slim 10 on a woman. It was 15 and 11.5.)
     m: { jaw: 0.60, brow: 0.026, round: 0.150, neck: [0.176, 0.194], nose: 1.00, ear: 1.00, chin: 0.012 },
-    f: { jaw: 0.50, brow: 0.012, round: 0.170, neck: [0.160, 0.177], nose: 0.84, ear: 0.88, chin: 0.004 },
+    // (a woman's: a narrower, softer jaw to a small chin, a smooth brow, a
+    // smaller nose and ears — owner 2026-11-22: "much much more real and attractive")
+    f: { jaw: 0.46, brow: 0.008, round: 0.180, neck: [0.160, 0.177], nose: 0.76, ear: 0.84, chin: 0.006, cheek: 0.39 },
     c: { jaw: 0.72, brow: 0.004, round: 0.195, neck: [0.165, 0.180], nose: 0.70, ear: 0.95, chin: 0.000 },
   };
   const NOSE_W = [0.082, 0.102, 0.128];          // narrow | medium | broad bridge-to-nostril width (authored; drawn x HEAD_SX)
@@ -1331,7 +1339,7 @@
   function jawMul(F, u, z) {
     const front = cl01((z + 0.05) / 0.30);
     const jw = lerpN(1 - (1 - F.jaw) * 0.55, F.jaw, front);   // the back of the jaw tapers less
-    return lerpN(jw, 1, sm01(u / 0.32));
+    return lerpN(jw, 1, sm01(u / (F.cheek || 0.32)));    // (cheek: where the taper ends — a woman's runs up to the cheekbone)
   }
   function headForm(P) { return (P.child && (P.ageYears == null || P.ageYears < 12)) ? "c" : (P.fem ? "f" : "m"); }
   /* The skull of form F as a signed distance (face frame: u 0 chin .. 0.60
@@ -1482,9 +1490,9 @@
      iris is painted the same ratio wider so it draws round. A face comes out
      about five eye-widths across, as a face is. */
   const EYE_SQ = 0.88;
-  const EYE_HX = { m: HEAD_SX, f: HEAD_SX, c: 0.84 };      // the head's own squeeze, by form (childProfile keeps to it)
+  const EYE_HX = { m: HEAD_SX, f: 0.74, c: 0.84 };      // the head's own squeeze, by form (childProfile keeps to it)
   function eyeSpread(form) { return (EYE_HX[form] || HEAD_SX) / EYE_SQ; }
-  const EYE_R = { m: 0.057, f: 0.059, c: 0.063 };
+  const EYE_R = { m: 0.057, f: 0.0615, c: 0.063 };
   function eyeR(form) { return EYE_R[form] || EYE_R.m; }
   // eU/eL: open elevation (rad) of the upper/lower lid edge at the pupil line;
   // tilt: the outer corner's lift; azc: the half-width (azimuth) of the opening
@@ -1497,7 +1505,7 @@
   ];
   function lidShape(si, fk) {
     const S = EYE_SHAPES[si] || EYE_SHAPES[1];
-    const b = fk === "f" ? 0.03 : (fk === "c" ? 0.05 : 0);
+    const b = fk === "f" ? 0.04 : (fk === "c" ? 0.05 : 0);
     return { eU: S.eU + b, eL: S.eL - b * 0.3, tilt: S.tilt, azc: S.azc };
   }
   // how far (rad) the upper lid rotates to meet the lower one, with overlap
@@ -1688,7 +1696,7 @@
      the face frame, shifted so the mesh origin is (0, BROW_REST_Y, 0.303). */
   const BROW_FORM = {
     m: { xi: 0.070, xt: 0.218, y0: 0.424, arch: 0.009, drop: 0.013, wi: 0.032, wt: 0.009, th: 0.0050 },
-    f: { xi: 0.078, xt: 0.212, y0: 0.428, arch: 0.017, drop: 0.017, wi: 0.021, wt: 0.005, th: 0.0035 },
+    f: { xi: 0.078, xt: 0.212, y0: 0.431, arch: 0.021, drop: 0.017, wi: 0.018, wt: 0.005, th: 0.0035 },
     c: { xi: 0.074, xt: 0.205, y0: 0.425, arch: 0.009, drop: 0.010, wi: 0.020, wt: 0.006, th: 0.0035 },
   };
   function browGeometry(form, expr) {
@@ -1928,7 +1936,9 @@
           const ph = -azm + 2 * azm * i / NA;
           const e0 = lidEdge("U", S, ph, s);
           const q = Math.min(1, Math.abs(ph) / S.azc), w = 0.3 + 0.7 * Math.sqrt(Math.max(0, 1 - q * q));
-          const rows = [[e0 + 0.05 * w, rad * 1.004], [e0 - 0.055 * w, rad * (1 + 0.075 * w)]];
+          // (a woman's lash line is darker and longer: liner and lashes)
+          const lk = fk === "f" ? 2.4 : 1;
+          const rows = [[e0 + 0.05 * w * lk, rad * 1.004], [e0 - 0.055 * w, rad * (1 + 0.075 * w * lk)]];
           for (let k = 0; k < 2; k++) {
             const th = rows[k][0], r = rows[k][1], cp = Math.cos(ph);
             P.push(s * EYE.x * eyeSpread(form) + r * Math.sin(ph), r * cp * Math.sin(th), r * cp * Math.cos(th));
@@ -2260,7 +2270,7 @@
      leg is straight: hip -> knee is legUp - LIMB_TUCK, knee -> sole is
      legLo + LIMB_TUCK, so hip -> sole = legUp + legLo = hipY. */
   function addFoot(leg, P) {
-    const lw = P.legW * 0.9;
+    const lw = P.legW * (P.shinK || 0.9);
     const H = P.shoeH * 0.8 + 0.03;
     const sole = -(P.legLo + LIMB_TUCK);                   // the sole's bottom, knee frame
     const aY = CBZ.footwear ? CBZ.footwear.ANKLE_Y : 0.52;
@@ -3508,7 +3518,7 @@
     // then the shoulders: never so high that the trapezius cannot pass under the chin
     // (a head drawn at HEAD_DRAW carries a neck column that much shorter, so
     // the chin rides that much lower over the column top: same buried depth)
-    const pivotY = neckY + NECK_LEN * vs * nk * (P.headK || 1) - 0.6 * P.neckDrop;
+    const pivotY = neckY + NECK_LEN * vs * nk * (P.headK || 1) * (P.neckK || 1) - 0.6 * P.neckDrop;
     const shoulderY = Math.min(neckY - SHOULDER_DROP * vs * (0.4 + 0.6 * nk), pivotY - 0.075 * vs - 0.43 * R);
     const ph = PHYSIQUE[P.physique] || PHYSIQUE.average;
     const fem = P.fem ? (P.child ? cl01((P.ageYears - 11) / 5) : 1) : 0;
@@ -3531,15 +3541,44 @@
     // outer line plus a hair of cloth, never a ledge wider than the legs
     // (a man's pelvisW put it 1.6 cm out past his thighs — half the "shorts
     // over trousers" read). A woman's still comes out of her own hipX.
-    const hipOut = P.hipX + P.legW / 2 + 0.012;
+    /* NOT A DIAPER (owner 2026-11-22: "everyone looks like they are wearing a
+       diaper"). The hip block stood PROUD of everything round it: 1.2 cm
+       outside the thighs at the side, 2 cm in front of them, and on a woman
+       2.4 cm in front of her belly and 3 cm behind the small of her back at
+       the waistband. So its lower edge drew a leg hole across each thigh and
+       its top stood out like padding. Now the THIGHS carry the outline from
+       the hip joint down (the block is inside them there: what shows is a leg
+       coming out of a body, a crease at the groin), the block only fills
+       between and above them, and at the waistband it is the depth of the
+       waist it meets. Behind, the seat still stands out of the thigh: that
+       one is anatomy. */
+    const thighOut = P.hipX + P.legW / 2, thighF = P.legW / 2;
+    const hipOut = thighOut + lerpN(0.004, 0.008, fem);
     const pTop = hipY + 0.03 + P.pelvisH / 2, pBot = hipY - 0.115 * pk;
+    // the waist this block meets (the column's own rows above it, in metres of rig)
+    const ph0 = PHYSIQUE[P.physique] || PHYSIQUE.average;
+    const wZ0 = P.waistShare > 0 ? (P.waistD / 2) / D : (ph0.soft ? 1.04 : 0.90);
+    const bW0 = 0.76 + 0.14 * ph0.soft - 0.05 * fem;
+    const topF = Math.min(0.93 * pd, lerpN(wZ0, 0.88, 0.5) * D + 0.006 * vs);
+    const topB = Math.min(0.91 * pd, lerpN(bW0, 0.84, 0.5) * D + 0.010 * vs);
     const pel = ringTable([
-      { y: pBot,                a: Math.max(0.26 * pw, P.hipX - P.legW / 2 + 0.05), zf: 0.40 * pd, zb: 0.50 * pd, zc: 0, n: 2.2, tw: 0 },
-      { y: hipY - 0.07 * pk,    a: 0.64 * hipOut, zf: 0.72 * pd, zb: 0.86 * pd, zc: 0, n: 2.4, tw: 0 },
-      { y: hipY - 0.01 * pk,    a: lerpN(0.94, 0.985, fem) * hipOut, zf: 0.86 * pd, zb: 0.98 * pd, zc: 0, n: 2.6, tw: 0 },
-      { y: hipY + 0.05 * pk,    a: hipOut,        zf: 0.92 * pd, zb: 0.98 * pd, zc: 0, n: 2.7, tw: 0 },
-      { y: hipY + 0.10 * pk,    a: Math.min(hipOut, lerpN(hipOut, pw, 0.6)) * 0.985, zf: 0.93 * pd, zb: 0.93 * pd, zc: 0, n: 2.7, tw: 0 },
-      { y: pTop,                a: Math.min(0.95 * pw, 0.97 * hipOut), zf: 0.93 * pd, zb: 0.91 * pd, zc: 0, n: 2.7, tw: 0 },
+      // THE HEM. The block ends 3 cm under the hip joint in a hem that lies ON
+      // the thigh tops (2-4 mm proud all round, the shape of the two thighs
+      // side by side), then turns in under itself at once. So what shows is a
+      // thin line where the seat of the trousers meets the legs — not a band
+      // standing out round the hips with the thighs domed in under it (a
+      // centimetre of ledge: the padded look), and not a brief hanging to the
+      // crotch. Below the hem the block is well inside the thighs: only the
+      // gusset between them.
+      { y: pBot,                a: Math.min(Math.max(0.26 * pw, P.hipX - P.legW / 2 + 0.05), 0.40 * thighOut), zf: Math.min(0.40 * pd, 0.45 * thighF), zb: 0.50 * pd, zc: 0, n: 2.2, tw: 0 },
+      { y: hipY - 0.085 * pk,   a: 0.55 * thighOut, zf: 0.55 * thighF, zb: 0.80 * pd, zc: 0, n: 2.3, tw: 0 },
+      { y: hipY - 0.055 * pk,   a: thighOut - 0.05, zf: 0.70 * thighF, zb: 0.95 * pd, zc: 0, n: 2.4, tw: 0 },
+      // (5 mm proud at the hem: the thigh is a 12-sided loft whose flats sit 3 mm
+      // inside its round, and a hem nearer than that let them saw through it)
+      { y: hipY - 0.03 * pk,    a: P.hipX + thighF * 0.975 + 0.007, zf: thighF + 0.009, zb: 0.98 * pd, zc: 0, n: 2.6, tw: 0 },
+      { y: hipY + 0.05 * pk,    a: hipOut + 0.003, zf: Math.min(0.92 * pd, lerpN(thighF + 0.009, topF, 0.6)), zb: lerpN(0.98 * pd, topB, 0.25), zc: 0, n: 2.5, tw: 0 },
+      { y: hipY + 0.10 * pk,    a: Math.min(hipOut, lerpN(hipOut, pw, 0.6)) * 0.985, zf: lerpN(thighF + 0.009, topF, 0.9), zb: lerpN(0.98 * pd, topB, 0.7), zc: 0, n: 2.45, tw: 0 },
+      { y: pTop,                a: Math.min(0.95 * pw, 0.97 * hipOut), zf: topF, zb: topB, zc: 0, n: 2.45, tw: 0 },
     ]);
     // ---- the COLUMN (chest + waist + shoulders), rows in D/W units ----------
     const waistA = P.waistShare > 0 ? (P.waistW / 2) / W : ph.waist;
@@ -3657,7 +3696,7 @@
       bust: fem * ph.bust, bustK: 0.665 - 0.05 * elder,
       belly: (P.child ? 0 : ph.belly * (P.fem ? 0.6 : 1)) + 0.35 * elder,
       scap: ph.scap * (0.4 + 0.6 * kidK), spine: ph.spine * (0.4 + 0.6 * kidK), elder,
-      glute: (1 + 0.45 * fem) * (ph.soft ? 1.25 : ph === PHYSIQUE.slim ? 0.8 : 1) * (0.5 + 0.5 * kidK),
+      glute: (1 + 0.6 * fem) * (ph.soft ? 1.25 : ph === PHYSIQUE.slim ? 0.8 : 1) * (0.5 + 0.5 * kidK),
     };
     return S;
   }
@@ -3674,7 +3713,7 @@
       // THE BUST: a lobe each side, full below (a short underside) and sloping
       // away to the collarbone above, ~4 cm proud on an average woman (was
       // 1.9: under a shirt it did not read at all)
-      if (S.bust > 0) dz += S.bust * 0.42 * D * gss(k - S.bustK, k > S.bustK ? 0.13 : 0.06) * gss(ax - 0.42, 0.25) * fw;
+      if (S.bust > 0) dz += S.bust * 0.46 * D * gss(k - S.bustK, k > S.bustK ? 0.13 : 0.07) * gss(ax - 0.42, 0.25) * fw;
       if (S.belly > 0) dz += S.belly * 0.16 * D * gss(k - 0.27, k > 0.27 ? 0.15 : 0.10) * gss(xn, 0.55) * fw;
     } else if (c < 0) {
       const bw = Math.pow(-c, 0.8);
@@ -3741,7 +3780,7 @@
     return out;
   }
   const TORSO_COUNTS = {   // [near, far] rings
-    chest: [20, 10], chestTop: [16, 8], waist: [7, 4], pelvis: [9, 5], jacket: [20, 10], band: [3, 2], vest: [12, 6],
+    chest: [20, 10], chestTop: [16, 8], waist: [7, 4], pelvis: [12, 6], jacket: [20, 10], band: [3, 2], vest: [12, 6],
   };
   const JACKET_HUG = 0.003;    // the least a jacket stands off the body (model units): under the 4 mm cloth tolerance, clear of a z-fight
   // x of the arm's INNER surface at body height y: below the shoulder pivot
@@ -4116,7 +4155,8 @@
     const rings = partRings(spec, lod);
     // a jacket a few mm off the body needs finer columns than the body: two
     // lofts of different squareness cut different chords between vertices
-    const nq = lod >= 2 ? 3 : (part === "jacket" ? 11 : 7), RV = 4 * (nq + 1);
+    // (a woman's chest is finer round: seven columns a side drew her bust as two facets)
+    const nq = lod >= 2 ? 3 : (part === "jacket" ? 11 : (S.bust > 0.5 ? 9 : 7)), RV = 4 * (nq + 1);
     const capTop = part === "chest" || part === "waist" || part === "pelvis" || (part === "collar" && !spec.bare);
     const capBot = part === "chest" || part === "waist" || part === "pelvis";
     const nv = rings.length * RV + 2 * (2 * RV + 1);              // rings + room for either cap kind
@@ -4634,8 +4674,8 @@
     const skinC = c.skin != null ? c.skin : 0xcf9a72;
     const vOf = (hex) => (hex != null && hex === skinC ? "bare" : "cloth");
     const shinC = c.shins != null ? c.shins : c.legs;
-    const ll = limb("leg", P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shins, vOf(c.legs), vOf(shinC));
-    const rl = limb("leg", P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shins, vOf(c.legs), vOf(shinC));
+    const ll = limb("leg", P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shins, vOf(c.legs), vOf(shinC), P.shinK);
+    const rl = limb("leg", P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shins, vOf(c.legs), vOf(shinC), P.shinK);
     // the ANKLE (addFoot): the shoe itself is entities/footwear.js's, fitted
     // once the rig exists (CBZ.footwear.dress below), by role
     addFoot(ll, P); addFoot(rl, P);
@@ -4830,9 +4870,10 @@
     brow.position.set(0, BROW_REST_Y, 0.303);
     // MOUTH: two lips in a lip tone off the skin (fuller for f and for c.lips —
     // heritage.js rolls it), closed; the inside + teeth only exist when open
-    const lipM = cmat(c.lip != null ? c.lip : lipTone(skinHex));
-    const lipSx = form === "c" ? 0.84 : (form === "f" ? 0.94 : 1);
-    const lipSy = (form === "f" ? 1.12 : (form === "c" ? 0.92 : 1)) * (c.lips ? 1.25 : 1);
+    // (a woman's lips: fuller, and a rose over the skin's own lip tone)
+    const lipM = cmat(c.lip != null ? c.lip : (form === "f" ? mixHex(lipTone(skinHex), 0xa8303e, 0.40) : lipTone(skinHex)));
+    const lipSx = form === "c" ? 0.84 : (form === "f" ? 0.99 : 1);
+    const lipSy = (form === "f" ? 1.16 : (form === "c" ? 0.92 : 1)) * (c.lips ? 1.25 : 1);
     const mouth = new THREE.Mesh(lipGeometry("U", "n"), lipM);
     const lipLow = new THREE.Mesh(lipGeometry("L", "n"), lipM);
     mouth.position.set(0, MOUTH_REST_Y, 0); lipLow.position.set(0, MOUTH_REST_Y, 0);
@@ -4996,7 +5037,7 @@
     }
     // the sleeve is shoulder -> wrist crease (the hand is skin, not garment)
     const armLen = P.armUp + foreH, legLen = P.legUp + P.legLo;
-    const alw = P.armW * 0.9, llw = P.legW * 0.9;
+    const alw = P.armW * 0.9, llw = P.legW * (P.shinK || 0.9);
     tagCloth(la.userData.main, [P.armW, P.armUp, P.armW], [1 - P.armUp / armLen, 1]);
     tagCloth(ra.userData.main, [P.armW, P.armUp, P.armW], [1 - P.armUp / armLen, 1]);
     tagCloth(la.userData.lower, [alw, foreH + 0.06, alw], [0, (foreH + 0.06) / armLen]);

@@ -38,7 +38,28 @@ const WOMEN = [
 const man = (i, extra) => Object.assign({ build: "m" }, MEN[i], extra || {});
 const woman = (i, extra) => Object.assign({ build: "f" }, WOMEN[i], extra || {});
 
+const inmate = (heritage, wear, extra) => Object.assign({ build: "m", heritage, wear: wear || "inmate" }, extra || {});
+const YARD = ["black", "latino", "white", "eastasian"];
+
 const subjects = [
+  { id: "prison-front", label: "Prison: four inmates, front", studio: true, view: "front",
+    who: YARD.map((h) => inmate(h)),
+    focus: "The prison game's own men (heritage tables, the DOC jumpsuit). Read the hips: the trousers should run from the waist into the legs, not sit on them like a padded brief." },
+  { id: "prison-tank", label: "Prison: jumpsuit tied at the waist, tank", studio: true, view: "front",
+    who: YARD.map((h) => inmate(h, "inmate_tank")),
+    focus: "Bare arms and shoulders on the yard's men, and the tied waist over the hips." },
+  { id: "prison-threeq", label: "Prison: three-quarter", studio: true, view: "threeq",
+    who: YARD.map((h) => inmate(h)),
+    focus: "Turned 40 degrees: the seat, the front of the hips, the shoulder." },
+  { id: "prison-back", label: "Prison: back", studio: true, view: "back",
+    who: YARD.map((h) => inmate(h)),
+    focus: "The view the play camera has: back, seat and legs." },
+  { id: "hips-close", label: "Hips, close: inmates and a woman", studio: true, view: "front", frame: "hips",
+    who: [inmate("black"), inmate("white", "inmate_tank"), woman(0, { wear: "street" })],
+    focus: "Waist to knee. Before: the hip block stands out round the thighs and its lower edge draws a leg hole. After: the thighs come out of the body." },
+  { id: "hips-threeq", label: "Hips, close: three-quarter", studio: true, view: "threeq", frame: "hips",
+    who: [inmate("black"), inmate("white", "inmate_tank"), woman(0, { wear: "street" })],
+    focus: "The same from 40 degrees: the front of the hip and the seat." },
   { id: "men-front", label: "Men, four body types: front", studio: true, view: "front", fit: "gym",
     who: [man(0), man(1), man(2), man(3)],
     focus: "Average, slim, heavy, muscular. Read the shoulder line from the neck to the arm, how far the arms hang from the ribs, the length of the forearm and the leg, and the size of the head on the body." },
@@ -183,7 +204,12 @@ export async function stagePeople(input) {
 
   // ---- a person: the rig's own flat slots, or the city wardrobe ------------
   const JEAN = 0x39414f, TEE = 0xf2f2f2;
-  function lookOf(w, fit) {
+  const DOC = { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, stripes: 0xc85c00, shoes: 0x2b2b2b };
+  function lookOf(w, fit, seed) {
+    if (w.heritage) {                              // one of the yard's men, rolled from his heritage's own tables
+      if (CBZ.heritageRoll) return Object.assign({}, DOC, CBZ.heritageRoll(w.heritage, "anatomy|" + w.heritage + "|" + seed, w.wear === "inmate_tank" ? { tank: true } : null));
+      return Object.assign({}, DOC, { skin: 0xc08a5a, hair: 0x222222 });
+    }
     const c = { build: w.build, skin: w.skin, hair: w.hair, shoes: 0x2b2b2b };
     if (w.physique) c.physique = w.physique;
     if (w.age != null) c.age = w.age;
@@ -196,9 +222,16 @@ export async function stagePeople(input) {
     } else Object.assign(c, { torso: TEE, collar: TEE, arms: TEE, legs: JEAN, shortSleeve: true });
     return c;
   }
-  function dress(ch, w) {
+  function dress(ch, w, look) {
     if (!w.wear) return "flat";
     try {
+      if (w.heritage) {
+        if (CBZ.heritageApply && look && look.heritage) CBZ.heritageApply(ch, look);
+        const cat = CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null, rec = cat && (cat[w.wear] || cat.inmate);
+        if (rec && CBZ.cityRecolorRig) CBZ.cityRecolorRig(ch, rec.colors, rec);
+        if (ch.skinSlots && ch.skinSlots.stripes) for (const st of ch.skinSlots.stripes) if (st) st.visible = false;
+        return w.wear;
+      }
       if (w.wear === "street") {
         const colors = { legs: JEAN, torso: TEE, collar: TEE, arms: TEE, shoes: 0x2b2b2b };
         if (CBZ.cityRecolorRig) { CBZ.cityRecolorRig(ch, colors, { id: "civvies", colors, composite: { shirt: TEE, legs: JEAN, items: [] } }); return "street"; }
@@ -229,17 +262,18 @@ export async function stagePeople(input) {
     S.mode = "studio"; S.view = null;
     const who = subject.who, n = who.length;
     const frame = subject.frame || "body";
-    const gap = frame === "face" ? 0.46 : frame === "chest" ? 0.86 : 1.06;
+    const gap = frame === "face" ? 0.46 : frame === "chest" ? 0.86 : frame === "hips" ? 0.78 : 1.06;
     const yaw = subject.view === "threeq" ? -0.70 : subject.view === "side" ? -Math.PI / 2 : subject.view === "back" ? Math.PI : 0;
     for (let i = 0; i < n; i++) {
       const w = who[i];
-      const ch = CBZ.makeCharacter(lookOf(w, w.wear ? "street" : subject.fit));
+      const look = lookOf(w, w.wear ? "street" : subject.fit, i);
+      const ch = CBZ.makeCharacter(look);
       ch.group.userData.dynamic = true;
       ch.group.position.set((i - (n - 1) / 2) * gap, 0, 0.6);
       ch.group.rotation.y = yaw;                 // the rig faces +Z as built: the lens is on +Z
       S.studio.add(ch.group);
       ch.group.updateMatrixWorld(true);
-      fits.push(dress(ch, w));
+      fits.push(dress(ch, w, look));
       S.rigs.push(ch);
     }
     if (subject.pose === "arms") for (const ch of S.rigs) {
@@ -257,6 +291,7 @@ export async function stagePeople(input) {
     const c = S.cam;
     if (frame === "face") { c.position.set(0, 1.60, 1.95); c.lookAt(0, 1.57, 0.6); }
     else if (frame === "chest") { c.position.set(0, 1.46, 2.85); c.lookAt(0, 1.40, 0.6); }
+    else if (frame === "hips") { c.position.set(0, 0.98, 2.75); c.lookAt(0, 0.90, 0.6); }
     else { c.position.set(0, 1.02, 7.1); c.lookAt(0, 0.96, 0.6); }
     // measurements of the FIRST figure on the page (front pages read true)
     try {
