@@ -3962,7 +3962,10 @@
     // skirt (that hangs from the shell now: character.js THE JACKET COVERS
     // THE SEAT). A one-piece SEAT wears its own colour.
     const pv = set.parts.jacket && set.parts.trousers && set.parts.trousers.hex != null ? set.parts.trousers
-      : (set.parts.seat && set.parts.seat.hex != null ? set.parts.seat : null);
+      // (a one-piece with no jacket wears its OWN atlas's seat row, in the same
+      // paint and shade as its legs: the shared tinted mask drew the seat a
+      // different orange from the trouser legs under it, a block at the crotch)
+      : (set.parts.seat && set.parts.seat.hex != null && set.parts.jacket ? set.parts.seat : null);
     const pm = pv ? pelvisMat(pv.hex) : null;
     if (pm) dressHips(s.pelvis, (opts && opts.iso) ? isoMat(ch, "pelvis~" + (pv.hex | 0), pm) : pm,
       pv === set.parts.trousers ? TROUSER_PAINTER : SEAT_PAINTER);
@@ -4260,7 +4263,10 @@
       neck = tie != null ? { tie: tie, fp: 1 } : bow ? { bow: c.bow, fp: 1 } : collar ? { fp: 1, collar: 1 } : { fp: 1, band: tone2(shirt, -0.08) };
     }
     L.fill(hx(legs)); L.shade();
-    return { torso: 1, arms: 1, legs: 1, fp: 1, neck: neck };
+    // (hips: the pelvis wears the trousers' own paint. It kept a FLAT tint of the
+    // leg colour between a painted shirt and painted legs: a block of a
+    // different cloth at the crotch on every street-clothes body.)
+    return { torso: 1, arms: 1, legs: 1, hips: 1, fp: 1, neck: neck };
   };
   // the recipe a list of composable ids adds up to (the last piece in a slot wins)
   function compRecipe(items, shirt, legs) {

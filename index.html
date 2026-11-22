@@ -621,7 +621,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=anatomy1122d"></script>
+  <script src="src/entities/character.js?v=hips1122e"></script>
   <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -1324,12 +1324,12 @@ document.body.appendChild(b);}}catch(e){}})();
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
 <script src="src/city/waterfield.js?v=ffroute1014"></script>
-<script src="src/city/highways.js?v=r187a"></script>
+<script src="src/city/highways.js?v=layout1122"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
      continent plate reads its relief-corridor gate). -->
-<script src="src/city/highwaynet.js?v=maplabels1009"></script>
+<script src="src/city/highwaynet.js?v=layout1122"></script>
 <!-- THE INTERCHANGE: the R5/R1 flyover (planned by highwaynet at order 91,
      built in highways.js's late pass at 97.5). -->
 <script src="src/city/interchange.js?v=flick1"></script>
@@ -1519,7 +1519,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=hands1022"></script>
 <script src="src/city/economy.js?v=isleopen1022"></script>
-<script src="src/city/clothes.js?v=people1102"></script>
+<script src="src/city/clothes.js?v=hips1122e"></script>
 <script src="src/city/outfits.js?v=anatomy1122b"></script>
 <script src="src/entities/dutykit.js?v=anatomy1122"></script>
 <script src="src/city/hunger.js?v=stam1009"></script>
@@ -1527,7 +1527,7 @@ document.body.appendChild(b);}}catch(e){}})();
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->
 <script src="src/city/law.js?v=cmd1022o"></script>
-<script src="src/city/wanted.js?v=noobj1022"></script>
+<script src="src/city/wanted.js?v=prisoncut1122"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=islesave1022"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
@@ -1540,7 +1540,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=trunk1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=pres1028"></script>
+<script src="src/city/peds.js?v=keep1122"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1616,7 +1616,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=both1029"></script>
-<script src="src/city/vehicles.js?v=wake1122a"></script>
+<script src="src/city/vehicles.js?v=layout1122"></script>
 <script src="src/city/carinstances.js?v=stick187"></script>
 <script src="src/city/playerair.js?v=fx1029"></script>
 <script src="src/city/playeraircraft.js?v=islesmem1029"></script>
@@ -1763,8 +1763,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/shopfloor.js: what every counter shop shares (the clerk, the till of
      goods in your hands not yet paid for, hot goods, the islands' shop rooms
      and showcase glass). Before gunstore.js, jewelry.js, pawnshop.js. -->
-<script src="src/city/shopfloor.js?v=misleopstutte"></script>
-<script src="src/city/gunstore.js?v=misleopstutte"></script>
+<script src="src/city/shopfloor.js?v=keep1122"></script>
+<script src="src/city/gunstore.js?v=keep1122"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <script src="src/city/gunmods.js?v=isleopen1022"></script>
@@ -1870,7 +1870,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the trunk: a lid that opens, a body that rides in it (restrain.js's stow puts him there) -->
 <script src="src/city/cartrunk.js?v=trunk1022"></script>
 <script src="src/city/custody.js?v=people1022"></script>
-<script src="src/city/combat.js?v=mpeoplegoods1"></script>
+<script src="src/city/combat.js?v=keep1122"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
      entries above). Loads right after city/combat.js, whose lightAttack/
@@ -1889,7 +1889,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/leaderboard.js?v=rg0929"></script>
 <script src="src/city/zillow.js?v=fac1009"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<script src="src/city/bank.js?v=isledaylife1022"></script>
+<script src="src/city/bank.js?v=keep1122"></script>
+<!-- THE PEOPLE BEHIND THE COUNTER (city/keepers.js): the brain a shop vendor
+     and a posted bank body run at their post (peds.js think() asks it first),
+     and the bank gunpoint rows (Open the vault, Empty the drawer). After
+     bank.js (CBZ.cityVaultOpenBy) and interact.js (the registry). -->
+<script src="src/city/keepers.js?v=keep1122"></script>
 <script src="src/city/pawnshop.js?v=misleopstutte"></script>
 <script src="src/city/clothingstore.js?v=isleopen1022"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
@@ -1953,7 +1958,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/empire.js?v=rounds1013m"></script>
 <script src="src/city/construction.js?v=news0930"></script>
 <script src="src/city/companies.js?v=fallstay1"></script>
-<script src="src/city/citystaff.js?v=stick1102"></script>
+<script src="src/city/citystaff.js?v=keep1122"></script>
 <script src="src/city/playergang.js?v=cmd1022o"></script>
 <script src="src/city/promotion.js?v=rank1"></script>
 <script src="src/city/schedule.js?v=w09290219"></script>
@@ -1984,7 +1989,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE WORLD'S ONE ZONING FIELD (layout wave): intensity, use, the ceiling a grown district may rise to,
      the freeway frontage buffer. Pure data off the regions + highway table; metro.js plans with it. -->
 <script src="src/city/zoning.js?v=base1012"></script>
-<script src="src/city/metroplan.js?v=reach1013"></script>
+<script src="src/city/metroplan.js?v=layout1122"></script>
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
 <script src="src/city/countryside.js?v=fortb1009"></script>
@@ -1994,7 +1999,7 @@ document.body.appendChild(b);}}catch(e){}})();
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=r187a"></script>
 <script src="src/city/metro_ground.js?v=r187c"></script>
-<script src="src/city/metro.js?v=mrg10200048"></script>
+<script src="src/city/metro.js?v=layout1122"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
