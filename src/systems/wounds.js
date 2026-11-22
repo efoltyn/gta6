@@ -669,7 +669,7 @@
      one string store on a path that was about to abandon the call anyway, and
      two counter increments on the path that succeeds. Read it with
      CBZ.woundDecalAudit().lastRefusal — one probe call instead of a bisect. */
-  const LEDGER = { biteCalls: 0, biteMarks: 0, personBites: 0, animalBites: 0, woundCalls: 0, woundMarks: 0, refusals: 0, lastRefusal: "", lastBite: null };
+  const LEDGER = { biteCalls: 0, biteMarks: 0, personBites: 0, animalBites: 0, woundCalls: 0, woundMarks: 0, refusals: 0, lastRefusal: "", lastBite: null, jobs: 0, jobsDropped: 0, jobErrors: 0, lastJobError: "", biteMsMax: 0, sliceMsMax: 0, jobFrameMsMax: 0 };
   function refuse(why) { LEDGER.refusals++; LEDGER.lastRefusal = why; }
 
   function dist2Cam(x, z) {
@@ -1296,23 +1296,59 @@
     col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
   }
   // 7 GAPE: where a big mouth took a chunk, seen on the skin: wider than it
-  // is deep, its outline irregular (torn, not cut, between the tooth lines
-  // that bound it above and below), notched at tooth scale, skin tags
-  // hanging into it; steep walls, the floor deep and uneven, dark where it
-  // is deepest, blood standing in its lower part. The tooth cuts along its
+  // is deep, its outline torn (not cut) between the tooth lines that bound
+  // it above and below, notched at tooth scale, a few tongues of skin left
+  // hanging into it. Inside, the layers the teeth went through, as they
+  // are: the torn skin at the lip, the fat under it as a lobed band in the
+  // wall, then the muscle, its bundles running along the bite with dark
+  // seams between them and the cut grain across them, the foot of the wall
+  // in shadow. Blood stands in the floor's lower part up to a level, fills
+  // the seams and runs down the wall from the upper lip. Black only in the
+  // seams: a hole that deep is meat, not a shadow. The tooth cuts along its
   // two edges are their own marks.
   function cGape(x, y, px) {
     const ex = x / 0.74, ey = (y + 0.02) / 0.52;
     const r = Math.hypot(ex, ey), th = Math.atan2(ey, ex);
+    // the tongues of skin: a few narrow lobes of the rim reaching in
+    const tag = 0.14 * Math.pow(Math.max(0, Math.sin(th * 5 + 2.2 + 2.5 * angN(th, 149))), 22) * sstep(0.45, 0.7, angN(th * 3, 150));
     const R0 = 1 + 0.16 * (angN(th, 141) - 0.5) + 0.1 * (angN(th * 2 + 1.3, 142) - 0.5)
-      - 0.05 * Math.pow(Math.abs(Math.sin(th * 9 + 3 * angN(th, 143))), 6) + 0.025 * (vnoise(x * 22, y * 22, 147) - 0.5);
+      - 0.05 * Math.pow(Math.abs(Math.sin(th * 9 + 3 * angN(th, 143))), 6) + 0.025 * (vnoise(x * 22, y * 22, 147) - 0.5) - tag;
     const q = r / R0;
     const open = 1 - sstep(0.9, 1.0, q);
     if (open <= 0) { col(px, 0, 0, 0, 0); return; }
-    const floor = vnoise(x * 4, y * 4, 144), lump = vnoise(x * 9, y * 9, 148);
-    const depth = open * Math.min(0.97, 0.3 + 0.62 * Math.pow(Math.max(0, 1 - q), 0.45) * (0.75 + 0.35 * floor) + 0.06 * (lump - 0.5));
-    const fat = fatBand(1 - q, x, y, 145);
-    const blood = open * Math.min(0.9, 0.55 * (1 - sstep(-0.6, 0.1, y)) + 0.3 * sstep(0.45, 0.8, vnoise(x * 6, y * 6, 146)));
+    const e = Math.max(0, 1 - q);                           // 0 at the lip .. 1 in the middle
+    // how thick the skin and the fat are here (they vary round the rim)
+    const skinE = 0.035 + 0.02 * angN(th * 2.1, 153);
+    const fatE = skinE + 0.12 + 0.1 * angN(th * 1.3, 152);
+    const wallE = fatE + 0.08;                               // the muscle wall's foot
+    // the muscle: bundles running along the bite (bent and uneven, as a
+    // muscle's are), each rounded toward the light, narrow dark seams
+    // between them, the cut fibres across them
+    const yy = y + 0.22 * (vnoise(x * 1.6, y * 1.6, 154) - 0.5) + 0.12 * x * (vnoise(2, y * 2, 160) - 0.5);
+    const ph = yy * (30 + 8 * (vnoise(x * 2, 5, 161) - 0.5));
+    const band = 0.5 + 0.5 * Math.sin(ph);                   // 1 on a bundle's crest, 0 in a seam
+    const inMuscle = sstep(fatE - 0.01, fatE + 0.04, e);
+    const seam = Math.pow(1 - band, 8) * sstep(0.0, 0.06, e - fatE);
+    const grain = 0.014 * Math.sin(x * 60 + 9 * vnoise(x * 3, yy * 12, 155)) * band;
+    // depth through the victim's own layers (woundMat): the torn skin and
+    // the fat shallow; a bundle's crest just into the muscle (lit, its
+    // sheen), its flanks the muscle itself, a seam near the dark bottom
+    const lip = 0.04 + 0.14 * sstep(0, skinE, e) + 0.12 * sstep(skinE, fatE, e);
+    const meat = 0.2 + 0.16 * (1 - band * band) + 0.04 * (vnoise(x * 6, y * 6, 156) - 0.5) + grain + 0.52 * seam
+      // the foot of the wall, where the floor meets it, is in its shadow
+      + 0.26 * Math.max(0, 1 - Math.abs(e - wallE) / 0.05);
+    let depth = lip + (meat - lip) * inMuscle;
+    depth = open * Math.min(0.97, Math.max(0.02, depth));
+    // the fat: a band in the wall, lobed (its lobules show as rounded bumps)
+    const lob = sstep(0.3, 0.62, vnoise(x * 14, y * 14, 157));
+    const fat = sstep(skinE * 0.7, skinE + 0.01, e) * (1 - sstep(fatE - 0.02, fatE + 0.01, e)) * (0.7 + 0.3 * lob);
+    // blood: standing in the floor's lower part up to a level (flat, not a
+    // gradient), in the seams, and run down the wall from the upper lip
+    const level = -0.24 + 0.07 * (vnoise(x * 3, 1, 158) - 0.5);
+    const pool = sstep(level + 0.035, level - 0.035, y) * sstep(skinE, fatE, e);
+    const runs = sstep(0.66, 0.8, vnoise(x * 9, 3, 159)) * sstep(-0.05, 0.3, y) * (1 - inMuscle * 0.5);
+    const film = 0.07 + 0.1 * vnoise(x * 7, y * 7, 146);
+    const blood = open * Math.min(0.95, Math.max(pool, 0.65 * seam, 0.75 * runs, film));
     col(px, depth, fat * (1 - blood), blood, open * EDGE(x, y));
   }
   // 8 POOL: wet blood standing on bare skin under a wound: opaque (a pool is
@@ -1632,15 +1668,75 @@
     if (typeof CBZ.waterVeilMaterial !== "function") return base;
     try { return CBZ.waterVeilMaterial(base) || base; } catch (e) { return base; }
   }
+  /* THE FIRST BITE BEFORE IT HAPPENS. A bite's code runs cold the first
+     time (the engine compiles it, then interprets it until it is hot): the
+     first bite of a session cost 20-45 ms in one frame and its job's first
+     stamps as much again. Once the atlases are painted, one bite is made on
+     a small body nobody sees (it hangs from a holder that is never in the
+     scene), its job runs through the same slices as any other, and
+     everything it made is freed: the first real bite starts warm. */
+  const WARM_SEGS = [[16, 8]];
+  let warmState = 0, warmActor = null, warmN = 0;
+  const WARM_HOLD = new THREE.Object3D();
+  function warmBody(k) {
+    // a fat skinned torso, two bones along it, the size of a dolphin's
+    const g = new THREE.CylinderGeometry(0.34, 0.34, 1.6, WARM_SEGS[k][0], WARM_SEGS[k][1], false);
+    g.rotateZ(Math.PI / 2);
+    const P = g.attributes.position, n = P.count;
+    const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) { const t = Math.max(0, Math.min(1, (P.getX(i) + 0.8) / 1.6)); si[i * 4 + 1] = 1; sw[i * 4] = 1 - t; sw[i * 4 + 1] = t; }
+    g.setAttribute("skinIndex", new THREE.BufferAttribute(si, 4));
+    g.setAttribute("skinWeight", new THREE.BufferAttribute(sw, 4));
+    const b0 = new THREE.Bone(), b1 = new THREE.Bone();
+    b0.position.x = -0.8; b1.position.x = 0.8; b0.add(b1);
+    const m = new THREE.SkinnedMesh(g, new THREE.MeshLambertMaterial({ color: 0x8090a0 }));
+    m.name = "body";
+    m.add(b0);
+    const grp = new THREE.Group();
+    grp.add(m);
+    grp.position.set(0, -400, 0);
+    WARM_HOLD.add(grp);
+    grp.updateMatrixWorld(true);
+    m.bind(new THREE.Skeleton([b0, b1]));
+    m.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1.2);
+    return { group: grp, _warm: true };
+  }
+  function warmStep() {
+    if (warmState === 0) {
+      warmState = 1;
+      try {
+        warmActor = warmBody(warmN);
+        const opts = { by: "great_white_shark", jaw: 0.16, sev: 0.9, dir: { x: 0, y: 0, z: -1 }, warm: true };
+        const who = biterOf(opts), wp = new THREE.Vector3(0.1, -400, 0.34);
+        const res = runBite(warmActor, wp, opts, "animal", who, dentOf(who, 0.16), 0.9);
+        if (!res || !res.bite) warmState = 2;
+      } catch (e) { warmState = 2; }
+      if (warmState === 2) warmEnd();
+      return;
+    }
+    for (let i = 0; i < JOBS.length; i++) if (JOBS[i].actor === warmActor) return;
+    warmEnd();
+    warmState = ++warmN < WARM_SEGS.length ? 0 : 2;
+  }
+  function warmEnd() {
+    const a = warmActor;
+    warmActor = null;
+    if (!a) return;
+    try {
+      CBZ.creatureBiteChunkRestore(a);
+      const m = a.group.children[0];
+      WARM_HOLD.remove(a.group);
+      if (m) { m.geometry.dispose(); m.material.dispose(); if (m.skeleton) m.skeleton.dispose(); }
+    } catch (e) {}
+  }
+  CBZ.woundsWarmed = function () { return warmState === 2; };
   // the warm-up: a few rows a frame after the first seconds of play, then the
   // GL programs queued (core/fxwarm.js) with the attributes a real mark has
   let skinWarmT = 0, skinWarmed = false;
   function skinWarm(dt) {
     skinWarmT += dt;
     if (skinWarmT < 2.5) return;
-    const J = skinJobs();
-    const a = texJobStep(J.tissue, 6), b = texJobStep(J.stain, 6);
-    if (!a || !b) return;
+    if (!atlasRows(2)) return;
     skinWarmed = true;
     if (typeof CBZ.shaderQueue === "function") {
       try {
@@ -1804,8 +1900,8 @@
     };
   }
   // re-read the geometry (a body that now owns a wounded copy) and re-pose
-  function surfaceRefresh(S) {
-    const g = S.mesh.geometry;
+  function surfaceRefresh(S, geo) {
+    const g = geo || S.mesh.geometry;
     S.geo = g; S.P = g.attributes.position.array; S.N = g.attributes.normal.array;
     S.idx = g.index ? g.index.array : null; S.nv = g.attributes.position.count;
     S.nt = g.index ? (g.index.count / 3) | 0 : (S.nv / 3) | 0;
@@ -1827,8 +1923,8 @@
     return out;
   }
   // every vertex of a skinned geometry posed by bone matrices M into W (+ WN)
-  function poseSkinned(P, N, SI, SW, M, nv, W, WN) {
-    for (let i = 0; i < nv; i++) {
+  function poseSkinned(P, N, SI, SW, M, nv, W, WN, from) {
+    for (let i = from || 0; i < nv; i++) {
       const i3 = i * 3, i4 = i * 4;
       const px = P[i3], py = P[i3 + 1], pz = P[i3 + 2];
       let x = 0, y = 0, z = 0, nx = 0, ny = 0, nz = 0;
@@ -1850,13 +1946,16 @@
       if (WN) { const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; WN[i3] = nx / l; WN[i3 + 1] = ny / l; WN[i3 + 2] = nz / l; }
     }
   }
-  function surfacePose(S) {
+  // (the posed arrays are the surface's own, not scratch: a bite's work is
+  // spread over frames and other bites may pose in between; the matrices are
+  // the ones of the bite's instant, kept with it)
+  function surfacePose(S, M) {
     const nv = S.nv, P = S.P, N = S.N;
-    const W = S.W = scrF(S.slot * 2, nv * 3), WN = S.WN = scrF(S.slot * 2 + 1, nv * 3);
-    const mw = S.mesh.matrixWorld;
+    const W = S.W = new Float32Array(nv * 3), WN = S.WN = new Float32Array(nv * 3);
+    const mw = S.MW || (S.MW = S.mesh.matrixWorld.clone());
     S.wsc = Math.cbrt(Math.abs(mw.determinant())) || 1;
     if (S.skinned) {
-      S.M = boneMats(S.mesh, S.M);
+      if (!M) S.M = boneMats(S.mesh, S.M);
       const g = S.geo;
       poseSkinned(P, N, g.attributes.skinIndex.array, g.attributes.skinWeight.array, S.M, nv, W, WN);
       return;
@@ -1895,8 +1994,8 @@
       const dx = W[i * 3] - cx, dy = W[i * 3 + 1] - cy, dz = W[i * 3 + 2] - cz;
       flag[i] = dx * dx + dy * dy + dz * dz <= R2 ? 1 : 0;
     }
-    const ci = scrU(S.slot, nt * 3), cs = scrF(16 + S.slot, nt * 4);
-    let n = 0;
+    const ci = scrU(S.slot, nt * 3), cs = scrF(16 + S.slot, nt * 4), ct = scrU(32 + S.slot, nt);
+    let n = 0, rmax = 0, rsum = 0;
     for (let t = 0; t < nt; t++) {
       const a = idx ? idx[t * 3] : t * 3, b = idx ? idx[t * 3 + 1] : t * 3 + 1, c = idx ? idx[t * 3 + 2] : t * 3 + 2;
       if (a === b || b === c || a === c) continue;                 // a removed (collapsed) triangle
@@ -1906,11 +2005,14 @@
       let r2 = (W[a3] - mx) * (W[a3] - mx) + (W[a3 + 1] - my) * (W[a3 + 1] - my) + (W[a3 + 2] - mz) * (W[a3 + 2] - mz);
       let q = (W[b3] - mx) * (W[b3] - mx) + (W[b3 + 1] - my) * (W[b3 + 1] - my) + (W[b3 + 2] - mz) * (W[b3 + 2] - mz); if (q > r2) r2 = q;
       q = (W[c3] - mx) * (W[c3] - mx) + (W[c3 + 1] - my) * (W[c3 + 1] - my) + (W[c3 + 2] - mz) * (W[c3 + 2] - mz); if (q > r2) r2 = q;
+      const rr = Math.sqrt(r2);
       ci[n * 3] = a; ci[n * 3 + 1] = b; ci[n * 3 + 2] = c;
-      cs[n * 4] = mx; cs[n * 4 + 1] = my; cs[n * 4 + 2] = mz; cs[n * 4 + 3] = Math.sqrt(r2);
+      cs[n * 4] = mx; cs[n * 4 + 1] = my; cs[n * 4 + 2] = mz; cs[n * 4 + 3] = rr;
+      ct[n] = t;
+      rsum += rr; if (rr > rmax) rmax = rr;
       n++;
     }
-    S.cidx = ci.subarray(0, n * 3); S.csph = cs; S.nc = n; S.grid = null;
+    S.cidx = ci.slice(0, n * 3); S.csph = cs.slice(0, n * 4); S.ctri = ct.slice(0, n); S.nc = n; S.grid = null; S.rmax = rmax; S.rsum = rsum;
     S.proxy = {
       attributes: { position: { array: W, itemSize: 3, count: S.nv }, normal: { array: S.WN, itemSize: 3, count: S.nv } },
       index: { array: S.cidx },
@@ -1992,27 +2094,35 @@
   let _gq = 0;
   const GB = 4096;                        // hash buckets (a power of two)
   function gridOf(S) {
-    if (S.grid) return S.grid;
+    if (!S.grid || S.grid.built < S.nc) gridBuild(S, Infinity);
+    return S.grid;
+  }
+  // the grid filed a part at a time (n more triangles; true when all are)
+  function gridBuild(S, n) {
+    let G = S.grid;
+    if (G && G.built >= S.nc) return true;
     const cs = S.csph, nc = S.nc;
-    // a cell is at least two of the biggest triangles across, so a triangle
-    // filed by its centre touches only the cells next to its own
-    let rmax = 0, rs = 0;
-    for (let k = 0; k < nc; k++) { const r = cs[k * 4 + 3]; rs += r; if (r > rmax) rmax = r; }
-    const h = Math.max(1e-3, rmax * 2, (rs / Math.max(1, nc)) * 3);
-    const G = S.gridMem && S.gridMem.cx.length >= nc ? S.gridMem : (S.gridMem = {
-      cx: new Int32Array(Math.max(nc, 256)), cy: new Int32Array(Math.max(nc, 256)), cz: new Int32Array(Math.max(nc, 256)),
-      next: new Int32Array(Math.max(nc, 256)), seen: new Int32Array(Math.max(nc, 256)), head: new Int32Array(GB),
-    });
-    G.head.fill(-1);
-    for (let k = 0; k < nc; k++) {
+    if (!G) {
+      // a cell is at least two of the biggest triangles across, so a
+      // triangle filed by its centre touches only the cells next to its own
+      const h = Math.max(1e-3, S.rmax * 2, (S.rsum / Math.max(1, nc)) * 3);
+      G = S.gridMem && S.gridMem.cx.length >= nc ? S.gridMem : (S.gridMem = {
+        cx: new Int32Array(Math.max(nc, 256)), cy: new Int32Array(Math.max(nc, 256)), cz: new Int32Array(Math.max(nc, 256)),
+        next: new Int32Array(Math.max(nc, 256)), seen: new Int32Array(Math.max(nc, 256)), head: new Int32Array(GB),
+      });
+      G.head.fill(-1);
+      G.h = h; G.built = 0;
+      S.grid = G;
+    }
+    const h = G.h, end = Math.min(nc, G.built + n);
+    for (let k = G.built; k < end; k++) {
       const ix = Math.floor(cs[k * 4] / h), iy = Math.floor(cs[k * 4 + 1] / h), iz = Math.floor(cs[k * 4 + 2] / h);
       G.cx[k] = ix; G.cy[k] = iy; G.cz[k] = iz;
       const b = (Math.imul(ix, 73856093) ^ Math.imul(iy, 19349663) ^ Math.imul(iz, 83492791)) & (GB - 1);
       G.next[k] = G.head[b]; G.head[b] = k;
     }
-    G.h = h;
-    S.grid = G;
-    return G;
+    G.built = end;
+    return end >= nc;
   }
   function nearestAll(surfs, qx, qy, qz, out) {
     let best = Infinity;
@@ -2050,11 +2160,20 @@
         }
       }
       if (!settled && !(best < Infinity && (2.5 * h) * (2.5 * h) >= best)) {
-        // a point far from this part: every triangle, nearest sphere first out
-        const cs = S.csph;
-        for (let k = 0; k < S.nc; k++) {
+        // a point far from this part. A triangle is no nearer than its
+        // sphere's near side and no farther than its far side: the nearest
+        // far side bounds the answer, and only a triangle whose near side
+        // beats it is tested
+        const cs = S.csph, nc = S.nc;
+        let ub = best < Infinity ? Math.sqrt(best) : Infinity;
+        for (let k = 0; k < nc; k++) {
+          const sx = cs[k * 4] - qx, sy = cs[k * 4 + 1] - qy, sz = cs[k * 4 + 2] - qz;
+          const far = Math.sqrt(sx * sx + sy * sy + sz * sz) + cs[k * 4 + 3];
+          if (far < ub) ub = far;
+        }
+        for (let k = 0; k < nc; k++) {
           const sx = cs[k * 4] - qx, sy = cs[k * 4 + 1] - qy, sz = cs[k * 4 + 2] - qz, sr = Math.sqrt(sx * sx + sy * sy + sz * sz) - cs[k * 4 + 3];
-          if (sr > 0 && sr * sr >= best) continue;
+          if (sr > ub || (sr > 0 && sr * sr >= best)) continue;
           test(k);
         }
       }
@@ -2076,7 +2195,7 @@
   // world -> the part's own space at a surface point: rigid = the inverse
   // world matrix; skinned = the inverse of the bone blend at that point
   function hostInverse(S, h, out) {
-    if (!S.skinned) return out.copy(S.mesh.matrixWorld).invert();
+    if (!S.skinned) return out.copy(S.MW || S.mesh.matrixWorld).invert();
     const e = out.elements;
     for (let k = 0; k < 16; k++) e[k] = 0;
     const SI = S.geo.attributes.skinIndex.array, SW = S.geo.attributes.skinWeight.array, M = S.M;
@@ -2211,7 +2330,7 @@
     if (_eT.lengthSq() < 1e-10) { _eT.set(-_eN.z, 0, _eN.x); if (_eT.lengthSq() < 1e-10) _eT.set(1, 0, 0); }
     _eT.normalize();
     _eB.crossVectors(_eN, _eT);
-    const sx = Math.max(1e-4, el.sx), sy = Math.max(1e-4, el.sy), sz = Math.max(1e-4, el.dz * 2, Math.max(sx, sy) * 0.35);
+    const sx = Math.max(1e-4, el.sx), sy = Math.max(1e-4, el.sy), sz = el.depthExact ? Math.max(1e-4, el.dz * 2) : Math.max(1e-4, el.dz * 2, Math.max(sx, sy) * 0.35);
     _eb.set(_eT.x * sx, _eB.x * sy, _eN.x * sz, el.P.x,
       _eT.y * sx, _eB.y * sy, _eN.y * sz, el.P.y,
       _eT.z * sx, _eB.z * sy, _eN.z * sz, el.P.z,
@@ -2271,11 +2390,11 @@
     while (SKIN.length && SKIN_VERTS + nv > cap) skinDrop(0);
   }
   const ANIM = [];
-  function buildMarks(bite) {
-    let lead = null, made = 0;
-    for (let q = 0; q < bite.keys.length; q++) {
-      const B = bite.bufs[bite.keys[q]];
-      if (!B || B.n < 3) continue;
+  // one layer's mesh on one surface (a slice of the bite's job)
+  function buildMark(bite, key) {
+    {
+      const B = bite.bufs[key];
+      if (!B || B.n < 3) return null;
       const S = B.S, host = S.mesh;
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(B.pos.out(), 3));
@@ -2323,12 +2442,9 @@
       rec.verts = B.n;
       SKIN_VERTS += B.n;
       SKIN.push(rec);
-      made++;
-      if (!lead && B.layer === "w" && S === bite.seatS) lead = m;
-      if (!lead && B.layer === "w") lead = m;
+      bite.made = (bite.made || 0) + 1;
+      return m;
     }
-    bite.made = made;
-    return lead || null;
   }
 
   /* ---- TIME ON A WOUND -------------------------------------------------------
@@ -2454,9 +2570,21 @@
     if (!o) {
       o = copyGeo(g, rec);
       rec.map.set(g, o);
-      for (let i = 0; i < rec.ops.length; i++) { try { applyRemove(rec, o, rec.ops[i], false); } catch (e) {} }
+      for (let i = 0; i < rec.ops.length; i++) {
+        try { if (!rec.ops[i].through) refineAll(o, rec.ops[i]); applyRemove(rec, o, rec.ops[i], false); } catch (e) {}
+      }
     }
     return o;
+  }
+  // a template geometry's welded ids, shared by every copy of it (positions
+  // equal until a dig or a refinement changes the copy)
+  const TWID = new WeakMap();
+  function widOf(geo, P, nv) {
+    const u = geo.userData || (geo.userData = {});
+    if (u.wid && u.wid.length === nv) return u.wid;
+    u.wid = weldIds(P, nv);
+    if (u.tpl && u.tpl.attributes && u.tpl.attributes.position && u.tpl.attributes.position.count === nv && !u.refined) TWID.set(u.tpl, u.wid);
+    return u.wid;
   }
   function copyGeo(g, rec) {
     const o = new THREE.BufferGeometry();
@@ -2472,7 +2600,7 @@
     for (let i = 0; i < g.groups.length; i++) o.addGroup(g.groups[i].start, g.groups[i].count, g.groups[i].materialIndex);
     o.boundingBox = g.boundingBox ? g.boundingBox.clone() : null;
     o.boundingSphere = g.boundingSphere ? g.boundingSphere.clone() : null;
-    o.userData = { cbzOwnOf: rec, mbTag: g.userData ? g.userData.mbTag : undefined, ownAttrs: own, ownIndex: false };
+    o.userData = { cbzOwnOf: rec, mbTag: g.userData ? g.userData.mbTag : undefined, ownAttrs: own, ownIndex: false, wid: TWID.get(g) || null, tpl: g };
     o._shared = true;
     o.name = (g.name || "body") + "+wounds";
     return o;
@@ -2595,35 +2723,257 @@
     return T;
   }
   const _tc3 = [0, 0, 0];
-  function applyRemove(rec, geo, op, full) {
+  /* ---- A CRATER ON A COARSE BODY ------------------------------------------
+     A dolphin's or a megalodon's triangles are as big as the bite: pushing
+     the few vertices inside the dish in would dent a facet many times its
+     size, so the dish used to be painted only. Before the dig, the triangles
+     under the dish that face the jaw are split, each long edge at its middle
+     and every neighbour that shares a split edge with it (the closure: a
+     triangle with two split edges splits its third), so the surface never
+     cracks, until their edges are a fraction of the dish (REFINE_K), at most
+     REFINE_LEVELS times. A new vertex is the average of its edge's ends in
+     every attribute (position, normal renormalised, colour, uv, a marine
+     body's skin data) and the four strongest of their bones. One level per
+     call: a bite's job runs one a frame. Returns true while more is due. */
+  const REFINE_LEVELS = 5, REFINE_K = 0.38;
+  // (only the triangles round the dish are touched: the rest of the body is
+  // copied through, so a level costs the dish, not the whale)
+  /* st, the caller's, kept from level to level: W, WN the posed body (grown
+     with each level's new vertices, posed alone); test, the triangles worth
+     testing at the next level (this level's region's children); seed, the
+     instant's near triangles, tested at the first level instead of all */
+  function refineLevel(geo, op, st) {
+    if (!geo.index || (geo.groups && geo.groups.length > 1)) return false;
+    const AT = geo.attributes;
+    for (const k in AT) if (AT[k].isInterleavedBufferAttribute) return false;
+    if (!AT.normal || !AT.skinIndex || !AT.skinWeight) return false;
+    const u = geo.userData || (geo.userData = {});
+    st = st || {};
+    const P = AT.position.array, N = AT.normal.array, nv = AT.position.count;
+    const SI = AT.skinIndex.array, SW = AT.skinWeight.array;
+    const idx = geo.index.array, nt = (idx.length / 3) | 0;
+    let W = st.W, WN = st.WN;
+    if (!W || W.length !== nv * 3) {
+      W = new Float32Array(nv * 3); WN = new Float32Array(nv * 3);
+      poseSkinned(P, N, SI, SW, op.M, nv, W, WN);
+      st.test = null; st.seed = null;
+    }
+    const wid = widOf(geo, P, nv);
+    const C = op.C, S = op.S, U = op.U, F = op.F, target = REFINE_K * Math.min(op.rS, op.rU), t2 = target * target;
+    // edge keys as small integers (a hash key that is a boxed double is slow)
+    const KB = nv * 4 + 8 < 32768 ? 32768 : (nv * 4 + 8 < 1048576 ? 1048576 : 0);
+    if (!KB) return false;
+    const eK = function (p, q) { return p < q ? p * KB + q : q * KB + p; };
+    // 1. the triangles under the dish that face the jaw: their long edges split
+    const test = st.test || st.seed || null, ntest = test ? test.length : nt;
+    const split = new Set();
+    const mark = new Uint8Array(nv);          // by welded id: an end of a split edge
+    const A0 = _rfA, B0 = _rfB;
+    for (let ti = 0; ti < ntest; ti++) {
+      const t = test ? test[ti] : ti;
+      if (t >= nt) continue;
+      const i0 = idx[t * 3], i1 = idx[t * 3 + 1], i2 = idx[t * 3 + 2];
+      if (i0 === i1 || i1 === i2 || i0 === i2) continue;
+      let rmin = Infinity, cmin = Infinity;
+      for (let k = 0; k < 3; k++) {
+        const v = (k === 0 ? i0 : k === 1 ? i1 : i2) * 3, dx = W[v] - C[0], dy = W[v + 1] - C[1], dz = W[v + 2] - C[2];
+        const aa = (dx * S[0] + dy * S[1] + dz * S[2]) / op.rS, bb = (dx * U[0] + dy * U[1] + dz * U[2]) / op.rU;
+        A0[k] = aa; B0[k] = bb;
+        const r2 = aa * aa + bb * bb; if (r2 < rmin) rmin = r2;
+        const cc = dx * F[0] + dy * F[1] + dz * F[2]; if (cc < cmin) cmin = cc;
+      }
+      if (cmin > op.rF * 1.5) continue;
+      if (rmin > 1.69 && !inTri2(A0, B0)) continue;
+      const e1x = W[i1 * 3] - W[i0 * 3], e1y = W[i1 * 3 + 1] - W[i0 * 3 + 1], e1z = W[i1 * 3 + 2] - W[i0 * 3 + 2];
+      const e2x = W[i2 * 3] - W[i0 * 3], e2y = W[i2 * 3 + 1] - W[i0 * 3 + 1], e2z = W[i2 * 3 + 2] - W[i0 * 3 + 2];
+      const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+      const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      if ((nx * F[0] + ny * F[1] + nz * F[2]) / nl > 0.35) continue;
+      for (let k = 0; k < 3; k++) {
+        const p = k === 0 ? i0 : k === 1 ? i1 : i2, qv = k === 0 ? i1 : k === 1 ? i2 : i0;
+        const dx = W[p * 3] - W[qv * 3], dy = W[p * 3 + 1] - W[qv * 3 + 1], dz = W[p * 3 + 2] - W[qv * 3 + 2];
+        if (dx * dx + dy * dy + dz * dz > t2) { split.add(eK(wid[p], wid[qv])); mark[wid[p]] = 1; mark[wid[qv]] = 1; }
+      }
+    }
+    if (!split.size) return false;
+    // 2. the region: every triangle with a corner at an end of a split edge.
+    // Whatever shares a split edge is in it, across seams too, and the
+    // closure only ever splits edges between such corners (a triangle with
+    // two split edges has all three corners on them)
+    const region = [];
+    for (let t = 0; t < nt; t++) {
+      if (mark[wid[idx[t * 3]]] | mark[wid[idx[t * 3 + 1]]] | mark[wid[idx[t * 3 + 2]]]) region.push(t);
+    }
+    // a triangle with two split edges splits its third too (no slivers, no
+    // hanging vertices)
+    for (let pass = 0; pass < 8; pass++) {
+      let changed = false;
+      for (let ri = 0; ri < region.length; ri++) {
+        const t = region[ri], i0 = idx[t * 3], i1 = idx[t * 3 + 1], i2 = idx[t * 3 + 2];
+        const k0 = eK(wid[i0], wid[i1]), k1 = eK(wid[i1], wid[i2]), k2 = eK(wid[i2], wid[i0]);
+        const c = (split.has(k0) ? 1 : 0) + (split.has(k1) ? 1 : 0) + (split.has(k2) ? 1 : 0);
+        if (c === 2) { split.add(k0); split.add(k1); split.add(k2); changed = true; }
+      }
+      if (!changed) break;
+    }
+    // 3. one new vertex per split edge per side of a seam
+    const mids = new Map();
+    let nn = nv;
+    const ends = [];
+    for (let ri = 0; ri < region.length; ri++) {
+      const t = region[ri];
+      for (let k = 0; k < 3; k++) {
+        const p = idx[t * 3 + k], qv = idx[t * 3 + (k + 1) % 3];
+        if (!split.has(eK(wid[p], wid[qv]))) continue;
+        const key = eK(p, qv);
+        if (!mids.has(key)) { mids.set(key, nn++); ends.push(p, qv); }
+      }
+    }
+    if (nn === nv) return false;
+    const nm = nn - nv;
+    for (const name in AT) {
+      const A = AT[name], sz = A.itemSize, src = A.array;
+      if (name === "skinIndex" || name === "skinWeight") continue;
+      const dst = new src.constructor(nn * sz);
+      dst.set(src);
+      for (let m = 0; m < nm; m++) {
+        const p = ends[m * 2], qv = ends[m * 2 + 1], o = (nv + m) * sz;
+        for (let c = 0; c < sz; c++) dst[o + c] = (src[p * sz + c] + src[qv * sz + c]) * 0.5;
+        if (name === "normal") {
+          const l = Math.sqrt(dst[o] * dst[o] + dst[o + 1] * dst[o + 1] + dst[o + 2] * dst[o + 2]) || 1;
+          dst[o] /= l; dst[o + 1] /= l; dst[o + 2] /= l;
+        }
+      }
+      geo.setAttribute(name, new THREE.BufferAttribute(dst, sz, A.normalized));
+    }
+    // the bones: both ends' influences, the four strongest, renormalised
+    const nSI = new SI.constructor(nn * 4), nSW = new SW.constructor(nn * 4);
+    nSI.set(SI); nSW.set(SW);
+    for (let m = 0; m < nm; m++) {
+      const p = ends[m * 2], qv = ends[m * 2 + 1], o = (nv + m) * 4;
+      let n = 0;
+      for (let e = 0; e < 2; e++) {
+        const v = e ? qv : p;
+        for (let k = 0; k < 4; k++) {
+          const w = SW[v * 4 + k] * 0.5;
+          if (!(w > 0)) continue;
+          const bn = SI[v * 4 + k];
+          let j = 0;
+          while (j < n && _wIdx[j] !== bn) j++;
+          if (j === n) { _wIdx[n] = bn; _wAcc[n] = 0; n++; }
+          _wAcc[j] += w;
+        }
+      }
+      let tot = 0;
+      for (let k = 0; k < 4; k++) {
+        let best = -1;
+        for (let j = 0; j < n; j++) if (_wAcc[j] > 0 && (best < 0 || _wAcc[j] > _wAcc[best])) best = j;
+        if (best < 0) { nSI[o + k] = 0; nSW[o + k] = 0; continue; }
+        nSI[o + k] = _wIdx[best]; nSW[o + k] = _wAcc[best]; tot += _wAcc[best]; _wAcc[best] = 0;
+      }
+      if (tot > 0) for (let k = 0; k < 4; k++) nSW[o + k] /= tot;
+    }
+    geo.setAttribute("skinIndex", new THREE.BufferAttribute(nSI, 4, AT.skinIndex.normalized));
+    geo.setAttribute("skinWeight", new THREE.BufferAttribute(nSW, 4, AT.skinWeight.normalized));
+    // 4. the triangles: the region's kept, halved or quartered; the rest as
+    // they were. The region's children are the next level's to test.
+    const inR = new Uint8Array(nt);
+    let extra = 0;
+    for (let ri = 0; ri < region.length; ri++) {
+      const t = region[ri];
+      inR[t] = 1;
+      const k = (mids.has(eK(idx[t * 3], idx[t * 3 + 1])) ? 1 : 0) + (mids.has(eK(idx[t * 3 + 1], idx[t * 3 + 2])) ? 1 : 0) + (mids.has(eK(idx[t * 3 + 2], idx[t * 3])) ? 1 : 0);
+      extra += k === 0 ? 0 : (k === 1 ? 1 : 3);
+    }
+    const I = (nn > 65535 ? new Uint32Array((nt + extra) * 3) : new Uint16Array((nt + extra) * 3));
+    const next = [];
+    let o = 0;
+    for (let t = 0; t < nt; t++) {
+      const a = idx[t * 3], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
+      if (!inR[t]) { I[o++] = a; I[o++] = b; I[o++] = c; continue; }
+      const mab = mids.get(eK(a, b)), mbc = mids.get(eK(b, c)), mca = mids.get(eK(c, a));
+      const k = (mab != null ? 1 : 0) + (mbc != null ? 2 : 0) + (mca != null ? 4 : 0);
+      const t0 = o / 3;
+      next.push(t0); if (k) { next.push(t0 + 1); if (k !== 1 && k !== 2 && k !== 4) next.push(t0 + 2, t0 + 3); }
+      if (k === 0) { I[o++] = a; I[o++] = b; I[o++] = c; }
+      else if (k === 1) { I[o++] = a; I[o++] = mab; I[o++] = c; I[o++] = mab; I[o++] = b; I[o++] = c; }
+      else if (k === 2) { I[o++] = a; I[o++] = b; I[o++] = mbc; I[o++] = a; I[o++] = mbc; I[o++] = c; }
+      else if (k === 4) { I[o++] = a; I[o++] = b; I[o++] = mca; I[o++] = mca; I[o++] = b; I[o++] = c; }
+      else {
+        I[o++] = a; I[o++] = mab; I[o++] = mca; I[o++] = mab; I[o++] = b; I[o++] = mbc;
+        I[o++] = mca; I[o++] = mbc; I[o++] = c; I[o++] = mab; I[o++] = mbc; I[o++] = mca;
+      }
+    }
+    geo.setIndex(new THREE.BufferAttribute(o === I.length ? I : I.slice(0, o), 1));
+    // the welded ids grow with the new vertices: a new one can only share a
+    // place with another new one (the two sides of a seam split together)
+    const nw = new Int32Array(nn);
+    nw.set(wid);
+    const seen = new Map();
+    for (let m = 0; m < nm; m++) {
+      const key = eK(wid[ends[m * 2]], wid[ends[m * 2 + 1]]);
+      const f = seen.get(key);
+      if (f != null) nw[nv + m] = f; else { seen.set(key, nv + m); nw[nv + m] = nv + m; }
+    }
+    u.wid = nw;
+    u.ownAttrs = Object.keys(geo.attributes); u.ownIndex = true;
+    u.comp = null;
+    u.refined = (u.refined || 0) + 1;
+    u.refinedVerts = (u.refinedVerts || 0) + nm;
+    // the next level's pose (the old vertices' as they were, the new ones
+    // posed alone) and what it tests
+    const W2 = new Float32Array(nn * 3), WN2 = new Float32Array(nn * 3);
+    W2.set(W); WN2.set(WN);
+    poseSkinned(geo.attributes.position.array, geo.attributes.normal.array, nSI, nSW, op.M, nn, W2, WN2, nv);
+    st.W = W2; st.WN = WN2; st.test = next; st.seed = null;
+    return true;
+  }
+  const _rfA = [0, 0, 0], _rfB = [0, 0, 0];
+  // (a, b) of a triangle's corners round the dish's centre
+  function inTri2(a, b) {
+    const d1 = a[0] * b[1] - b[0] * a[1], d2 = a[1] * b[2] - b[1] * a[2], d3 = a[2] * b[0] - b[2] * a[0];
+    return (d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0);
+  }
+  function refineAll(geo, op) { const st = {}; for (let g = 0; g < REFINE_LEVELS && refineLevel(geo, op, st); g++) { /* level by level */ } return st; }
+
+  /* pre: { W, WN } the posed body of the bite's instant for this very
+     geometry (the job hands it in: no second pose) */
+  function applyRemove(rec, geo, op, full, pre) {
     const pa = geo.attributes.position, P = pa.array, nv = pa.count;
     const N = geo.attributes.normal.array;
     const ca = geo.attributes.color, Cc = ca ? ca.array : null, cs = ca ? ca.itemSize : 3;
     const SI = geo.attributes.skinIndex.array, SW = geo.attributes.skinWeight.array;
     const M = op.M;
-    const W = new Float32Array(nv * 3), WN = new Float32Array(nv * 3);
-    poseSkinned(P, N, SI, SW, M, nv, W, WN);
+    let W, WN;
+    if (pre && pre.W && pre.W.length === nv * 3) { W = pre.W; WN = pre.WN; }
+    else { W = new Float32Array(nv * 3); WN = new Float32Array(nv * 3); poseSkinned(P, N, SI, SW, M, nv, W, WN); }
     const idx = geo.index ? geo.index.array : null;
     const nt = idx ? (idx.length / 3) | 0 : (nv / 3) | 0;
     const T3 = function (t, k) { return idx ? idx[t * 3 + k] : t * 3 + k; };
-    const wid = (geo.userData && geo.userData.wid && geo.userData.wid.length === nv) ? geo.userData.wid : weldIds(P, nv);
-    if (geo.userData) geo.userData.wid = wid;
-    // the pieces of the body as they were
-    const par = ufNew(nv);
-    for (let t = 0; t < nt; t++) {
-      const a = T3(t, 0), b = T3(t, 1), c = T3(t, 2);
-      if (a === b || b === c || a === c) continue;
-      ufJoin(par, wid[a], wid[b]); ufJoin(par, wid[b], wid[c]);
+    const ud = geo.userData || (geo.userData = {});
+    const wid = widOf(geo, P, nv);
+    // the pieces of the body as they were (kept with the geometry until a
+    // cut or a refinement changes them)
+    let CP = ud.comp;
+    if (!CP || CP.nv !== nv || CP.nt !== nt) {
+      const par0 = ufNew(nv);
+      for (let t = 0; t < nt; t++) {
+        const a = T3(t, 0), b = T3(t, 1), c = T3(t, 2);
+        if (a === b || b === c || a === c) continue;
+        ufJoin(par0, wid[a], wid[b]); ufJoin(par0, wid[b], wid[c]);
+      }
+      const ct = new Map();
+      for (let t = 0; t < nt; t++) {
+        const a = T3(t, 0);
+        if (a === T3(t, 1)) continue;
+        const r = ufFind(par0, wid[a]);
+        ct.set(r, (ct.get(r) || 0) + 1);
+      }
+      let h0 = -1, hN = -1;
+      ct.forEach(function (n, r) { if (n > hN) { hN = n; h0 = r; } });
+      CP = ud.comp = { nv: nv, nt: nt, par: par0, compTris: ct, hull: h0 };
     }
-    const compTris = new Map();
-    for (let t = 0; t < nt; t++) {
-      const a = T3(t, 0);
-      if (a === T3(t, 1)) continue;
-      const r = ufFind(par, wid[a]);
-      compTris.set(r, (compTris.get(r) || 0) + 1);
-    }
-    let hull = -1, hullN = -1;
-    compTris.forEach(function (n, r) { if (n > hullN) { hullN = n; hull = r; } });
+    const par = CP.par, compTris = CP.compTris, hull = CP.hull;
     const comp = function (v) { return ufFind(par, wid[v]); };
     // which vertices the jaw holds
     const C = op.C, S = op.S, U = op.U, F = op.F;
@@ -2797,6 +3147,7 @@
     for (let t = 0; t < nt; t++) if (tcl[t] === 1 || tcl[t] === 2) cutN++;
     if (cutN) {
       ownIndex(geo);
+      ud.comp = null;
       const I = geo.index.array;
       for (let t = 0; t < nt; t++) {
         if (tcl[t] !== 1 && tcl[t] !== 2) continue;
@@ -2831,6 +3182,7 @@
       if (l < 1e-12) continue;
       N[v * 3] = acc[o] / l; N[v * 3 + 1] = acc[o + 1] / l; N[v * 3 + 2] = acc[o + 2] / l;
     }
+    ud.dug = true;
     pa.needsUpdate = true;
     geo.attributes.normal.needsUpdate = true;
     if (ca) ca.needsUpdate = true;
@@ -3256,7 +3608,7 @@
     const bite = {
       actor: actor, surfs: surfs, bufs: Object.create(null), keys: [], dent: dent, sev: sev, who: who, kind: kind,
       tissue: tissueOf(actor, kind), coat: coatOf(actor, kind), wet: false, seatS: null, made: 0, removed: 0, severed: 0,
-      els: [], strikes: null, ext: null, fold: 0,
+      els: [], strikes: null, ext: null, fold: 0, warm: !!opts.warm,
     };
     // ---- THE SEAT: the first skin on the jaw's line, or the nearest skin
     const have = attackLine(opts, wp, _tr);
@@ -3432,37 +3784,211 @@
         }
       }
     }
-    let cut = null;
-    if (removalOp) {
-      try {
-        const own = ownBody(actor, seatS.mesh);
-        own.ops.push(removalOp);
-        cut = applyRemove(own, own.cur, removalOp, true);
-        own.map.forEach(function (o) { if (o !== own.cur) { try { applyRemove(own, o, removalOp, false); } catch (e) {} } });
-        if (cut) {
-          if (cut.pushed) own.craters++;
-          own.removed += cut.removedTris; own.severed += cut.severedTris;
-          bite.removed = cut.removedTris + cut.pushed; bite.severed = cut.severedTris;
-        }
-        // the marks below are laid on the body as it now is
-        surfaceRefresh(seatS); surfacePose(seatS); surfaceNear(seatS, wp.x, wp.y, wp.z, R);
-      } catch (e) { cut = null; }
-    }
-
-    // ---- WHAT EACH TOOTH LEAVES
-    lay(bite, strikes, _P, _N, _S, _U, trav, wrap, cut, removalOp);
-    // ---- THE PIECE THAT LEFT
-    if (cut && (cut.sever.length || cut.chunk.length)) {
-      try { shedFrom(bite, seatS, cut, who.actor); } catch (e) {}
-    }
-    const lead = buildMarks(bite);
-    if (!bite.made && !bite.removed) return { why: "nothing-landed" };
+    // ---- THE REST IS WORK, NOT THE INSTANT: dug, laid, stamped and built a
+    // slice a frame (see BITE JOBS). What the caller needs now is above.
+    bite.P = _P.clone(); bite.N = _N.clone(); bite.S = _S.clone(); bite.U = _U.clone(); bite.F = _F.clone();
+    bite.trav = trav ? trav.clone() : null; bite.wrap = wrap; bite.op = removalOp; bite.cut = null;
+    bite.R = R; bite.wp = { x: wp.x, y: wp.y, z: wp.z }; bite.geo0 = seatS.geo;
+    bite.phase = 0; bite.k = 0; bite.t0 = performance.now();
+    JOBS.push(bite);
+    LEDGER.jobs++;
     return {
-      made: bite.made, lead: lead, wet: bite.wet, region: seatS.region || "torso", P: _P, N: _N,
-      removed: bite.removed, severed: bite.severed, strikes: strikes.length, family: dent.family, wrap: wrap,
-      size: Math.max(aMax - aMin, bMax - bMin2) * 0.5 + Wavg, fold: bite.fold,
+      made: 1, pending: true, lead: null, host: seatS.mesh, wet: bite.wet, region: seatS.region || "torso", P: bite.P, N: bite.N,
+      removed: removalOp ? 1 : 0, severed: 0, strikes: strikes.length, family: dent.family, wrap: wrap,
+      size: Math.max(aMax - aMin, bMax - bMin2) * 0.5 + Wavg, fold: bite.fold, bite: bite,
     };
   }
+
+  /* ---- BITE JOBS ---------------------------------------------------------
+     The instant of a bite (where the jaws met the body, every tooth's
+     strike, what flesh goes) is computed when it happens, on the body as it
+     is then. Everything that follows from it is a job worked a slice a
+     frame, inside BITE_BUDGET ms: the dig (the body's own geometry, refined
+     where it is coarse), the marks planned, each mark projected, the flap,
+     the runs, the cut faces, the piece that left, the atlases if they are
+     still being painted, the meshes. It all reads the bite's own copies of
+     the posed body and the matrices of its instant, so a body that swims on
+     in between is marked where it was bitten. A body that leaves the world
+     drops its job; CBZ.woundsFlush() finishes every job now (a reset, a
+     tool). */
+  const JOBS = [];
+  const BITE_BUDGET = 2.5;               // ms of bite work in a frame
+  function jobAlive(bite) {
+    const a = bite.actor;
+    return !!(a && a.group && a.group.parent && !a.culled);
+  }
+  // one slice; true when the bite is finished
+  // a piece of a bite's work that threw: counted and named in the audit
+  // (the job goes on without it)
+  function jobErr(bite, e) { LEDGER.jobErrors++; LEDGER.lastJobError = "phase " + bite.phase + ": " + String((e && e.message) || e).slice(0, 120); }
+  function biteSlice(bite) {
+    switch (bite.phase) {
+      case 0: {                          // the dig: the body's own copy
+        const op = bite.op, seatS = bite.seatS;
+        if (!op) { bite.phase = 17; bite.k = 0; return false; }
+        bite.phase = 11;
+        try {
+          const own = ownBody(bite.actor, seatS.mesh);
+          own.ops.push(op);
+          // the copy of the geometry the bite was struck on (the template's
+          // own copy, made now on a first bite); every other LOD's after
+          bite.own = own;
+          bite.g0 = bite.geo0 && bite.geo0.userData && bite.geo0.userData.cbzOwnOf === own ? bite.geo0 : (own.map.get(bite.geo0) || own.cur);
+          bite.lods = [];
+          own.map.forEach(function (o) { if (o !== bite.g0) bite.lods.push(o); });
+          bite.refined = 0;
+          bite.phase = 10;
+        } catch (e) { jobErr(bite, e); bite.op = null; bite.phase = 17; bite.k = 0; }
+        return false;
+      }
+      case 10:                           // which corners are one point (a species' first bite works it out)
+        try { const g0 = bite.g0; widOf(g0, g0.attributes.position.array, g0.attributes.position.count); } catch (e) { jobErr(bite, e); }
+        bite.phase = 11;
+        return false;
+      case 11:                           // a coarse body refined under the dish, a level a slice
+        try {
+          const g0 = bite.g0, nv0 = g0.attributes.position.count;
+          // the instant's pose and its near triangles, when it posed this
+          // geometry or the template this untouched copy was made from
+          if (!bite.rst) {
+            const sS = bite.seatS, gu = g0.userData || {};
+            const same = sS.geo === g0 || (gu.tpl === sS.geo && !gu.refined && !gu.dug);
+            bite.rst = same && sS.W && sS.W.length === nv0 * 3 ? { W: sS.W, WN: sS.WN, seed: sS.ctri } : {};
+          }
+          if (!bite.op.through && bite.refined < REFINE_LEVELS && refineLevel(g0, bite.op, bite.rst)) { bite.refined++; return false; }
+          if (g0.attributes.position.count !== nv0) bite.refined++;
+        } catch (e) { jobErr(bite, e); }
+        bite.phase = 12;
+        return false;
+      case 12: {                         // the dig itself
+        const own = bite.own, g0 = bite.g0, seatS = bite.seatS, op = bite.op;
+        try {
+          // the instant's pose (grown with the refinement's new vertices)
+          const pre = bite.rst && bite.rst.W ? bite.rst : (seatS.geo === g0 ? { W: seatS.W, WN: seatS.WN } : null);
+          const cut = applyRemove(own, g0, op, true, pre);
+          if (cut) {
+            if (cut.pushed) own.craters++;
+            own.removed += cut.removedTris; own.severed += cut.severedTris;
+            bite.removed = cut.removedTris + cut.pushed; bite.severed = cut.severedTris;
+          }
+          bite.cut = cut;
+        } catch (e) { jobErr(bite, e); bite.cut = null; }
+        bite.phase = 13;
+        return false;
+      }
+      case 13:                           // the other LODs' copies, one a slice
+        if (bite.lods && bite.lods.length) {
+          const o = bite.lods.shift();
+          try { if (!bite.op.through) refineAll(o, bite.op); applyRemove(bite.own, o, bite.op, false); } catch (e) { jobErr(bite, e); }
+          return false;
+        }
+        bite.phase = 14;
+        return false;
+      case 14: {                         // the marks are laid on the body as it now is, posed as it was
+        const seatS = bite.seatS;
+        try { surfaceRefresh(seatS, bite.g0); surfacePose(seatS, seatS.M); } catch (e) { jobErr(bite, e); }
+        bite.phase = 16;
+        return false;
+      }
+      case 16: {                         // the triangles near the bite on it
+        const seatS = bite.seatS;
+        try { surfaceNear(seatS, bite.wp.x, bite.wp.y, bite.wp.z, bite.R); } catch (e) { jobErr(bite, e); }
+        bite.phase = 17; bite.k = 0;
+        return false;
+      }
+      case 17:                           // every surface's search grid, a part a slice
+        while (bite.k < bite.surfs.length) {
+          const S = bite.surfs[bite.k];
+          if (!S || !S.nc || gridBuild(S, 1200)) { bite.k++; continue; }
+          return false;
+        }
+        bite.phase = 1;
+        return false;
+      case 1:                            // the plan: the teeth
+        lay(bite, bite.strikes, bite.P, bite.N, bite.S, bite.U, bite.trav, bite.wrap, bite.cut, bite.op);
+        bite.phase = 15;
+        return false;
+      case 15:                           // the plan: the rakes
+        lay2(bite, bite.strikes, bite.P, bite.N, bite.S, bite.U, bite.trav, bite.wrap, bite.cut, bite.op);
+        bite.phase = 18;
+        return false;
+      case 18:                           // the plan: the flesh that went, the cut faces
+        lay3(bite, bite.strikes, bite.P, bite.N, bite.S, bite.U, bite.trav, bite.wrap, bite.cut, bite.op);
+        bite.phase = 19;
+        return false;
+      case 19:                           // the plan: the bruise and the blood
+        lay4(bite, bite.S);
+        bite.phase = 2; bite.k = 0;
+        return false;
+      case 2:                            // one mark onto the skin
+        if (bite.k < bite.els.length) { stampEl(bite, bite.els[bite.k++]); return false; }
+        bite.els.length = 0; bite.phase = 3;
+        return false;
+      case 3:                            // the flap
+        if (bite.flapAt) { flap(bite, bite.flapAt); bite.flapAt = null; }
+        bite.phase = 4; bite.k = 0;
+        bite.lows = runsFrom(bite);
+        return false;
+      case 4:                            // one run of blood
+        if (bite.k < bite.lows.length) { runOne(bite, bite.lows[bite.k++]); return false; }
+        bite.phase = 5;
+        return false;
+      case 5: {                          // the piece that left
+        const cut = bite.cut;
+        if (cut && !bite.warm && (cut.sever.length || cut.chunk.length)) { try { shedFrom(bite, bite.seatS, cut, bite.who.actor); } catch (e) { jobErr(bite, e); } }
+        bite.phase = 6;
+        return false;
+      }
+      case 6:                            // the atlases, if a first bite came before they were painted
+        if (!atlasesReady()) { atlasSlice(); return false; }
+        bite.phase = 7; bite.k = 0; bite.made = 0;
+        return false;
+      case 7: {                          // the meshes, one a slice
+        if (bite.k < bite.keys.length) { buildMark(bite, bite.keys[bite.k++]); return false; }
+        bite.phase = 8;
+        const nt = bite.note;
+        if (nt) { nt.meshes = bite.made; nt.removed = bite.removed || 0; nt.severed = bite.severed || 0; nt.ms = Math.round(performance.now() - bite.t0); }
+        return true;
+      }
+    }
+    return true;
+  }
+  // what a slice of each phase has cost lately (a running mean)
+  const SLICE_MS = new Float64Array(32);
+  function jobsRun(budget) {
+    const t0 = performance.now();
+    let worked = 0;
+    while (JOBS.length) {
+      const bite = JOBS[0];
+      if (!jobAlive(bite)) { JOBS.shift(); LEDGER.jobsDropped++; continue; }
+      const ph = bite.phase & 31;
+      if (worked && performance.now() - t0 + SLICE_MS[ph] > budget) break;
+      const ts = performance.now();
+      let done = true;
+      try { done = biteSlice(bite); } catch (e) { done = true; jobErr(bite, e); }
+      const d = performance.now() - ts;
+      SLICE_MS[ph] = SLICE_MS[ph] ? SLICE_MS[ph] * 0.7 + d * 0.3 : d;
+      if (d > LEDGER.sliceMsMax) LEDGER.sliceMsMax = d;
+      worked++;
+      if (done) JOBS.shift();
+      if (performance.now() - t0 >= budget) break;
+    }
+    return worked;
+  }
+  CBZ.woundsFlush = function () { jobsRun(Infinity); };
+  function jobsForget(actor) {
+    for (let i = JOBS.length - 1; i >= 0; i--) if (!actor || JOBS[i].actor === actor) JOBS.splice(i, 1);
+  }
+  function atlasesReady() { const J = skinJobs(); return J.tissue.done && J.stain.done; }
+  // the atlases painted a row at a time for at most ms (a row at least)
+  function atlasRows(ms) {
+    const J = skinJobs(), t0 = performance.now();
+    do { texJobStep(J.tissue, 1); texJobStep(J.stain, 1); } while (!(J.tissue.done && J.stain.done) && performance.now() - t0 < ms);
+    return J.tissue.done && J.stain.done;
+  }
+  // (a bite waiting on them paints on top of the warm-up's own rows: its
+  // marks are not held back longer than they must be)
+  function atlasSlice() { atlasRows(2.4); }
 
   /* ---- WHAT THE TEETH LEAVE, AND WHAT THE BODY ANSWERS -------------------- */
   function tint(r, g, b, a) { const l = linArr(r, g, b); return [l[0], l[1], l[2], a]; }
@@ -3494,6 +4020,11 @@
   }
   // the in-plane direction that lays a cell drawn along its y on dir
   function alongY(dir, n) { return new THREE.Vector3().crossVectors(dir, n).normalize(); }
+  // T, or T turned round, so that a cell's lower half (where its blood
+  // stands) is the lower on the body as it stands (a cell's +y is n x T)
+  function poolDown(T, n) {
+    return n.z * T.x - n.x * T.z < 0 ? new THREE.Vector3(-T.x, -T.y, -T.z) : T;
+  }
   // dir turned about n by up to +-a radians
   function askew(dir, n, a) {
     const th = (Math.random() * 2 - 1) * a, c = Math.cos(th), s2 = Math.sin(th);
@@ -3644,6 +4175,13 @@
       // the body and has to draw over whatever is on the skin behind it)
       if (longest && D.shake * sev >= 0.4 && (longest.cloth || coat === "fur")) bite.flapAt = longest;
     }
+  }
+  // the second slice of the plan: rakes, the flesh taken, the cut faces,
+  // the bruise and the blood
+  function lay2(bite, strikes, P, N, S, U, trav, wrap, cut, op) {
+    const D = bite.dent, sev = bite.sev, wet = bite.wet, coat = bite.coat;
+    const sea = bite.tissue === "cetacean" || bite.tissue === "shark";
+    const healA = sea ? { type: "heal", T: 150, t0: 25, to: 0.85 } : null;
     // 5. the teeth dragged along the line of travel: the rakes
     if (D.rake >= 0.25) {
       const n = Math.min(14, strikes.length), step = strikes.length / n;
@@ -3656,6 +4194,10 @@
         bite.els.push(elAt("w", TCELL.rake, h, dir, len / 0.82, (t.W * 0.7) / 0.26, Math.max(0.01, len * 0.25), [0.8, 0, 0, 1], null, healA));
       }
     }
+  }
+  // the third: the middle of the bite, the flesh that went, the cut faces
+  function lay3(bite, strikes, P, N, S, U, trav, wrap, cut, op) {
+    const D = bite.dent, sev = bite.sev;
     // the middle of the bite on the skin: between the arcs on the flank, the
     // seat round a limb the jaws closed on
     const X = bite.ext, seatM = bite.seatS.mesh;
@@ -3681,6 +4223,7 @@
       const h = { px: op.C[0] + op.F[0] * half, py: op.C[1] + op.F[1] * half, pz: op.C[2] + op.F[2] * half, nx: -op.F[0], ny: -op.F[1], nz: -op.F[2] };
       const el = elAt("w", TCELL.crater, h, S, op.rS * 2.3 / 0.78, op.rU * 2.3 / 0.78, half + 0.02, [1, 0, 0, 1], null, null);
       el.minFacing = -0.5;
+      el.depthExact = true;            // the dish and no deeper: not the body's far side
       bite.els.push(el);
     } else if (!op && D.removes >= 0.5 && sev >= 0.5 && mid) {
       if (!wrap) {
@@ -3689,8 +4232,9 @@
         // deep, the tooth cuts along its edges
         const w = Math.max(X.Wavg * 3, spanA + X.Wavg * 0.5);
         const hgt = Math.min(w * 0.8, Math.max(X.Wavg * 2, spanB + X.Wavg * 0.3));
-        if (D.crush >= 0.6) bite.els.push(elAt("w", TCELL.ragged, mid, S, w / 0.64, hgt / 0.64, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
-        else bite.els.push(elAt("w", TCELL.gape, mid, S, w / 0.74, hgt / 0.52, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
+        const Tg = poolDown(S, hN(mid));
+        if (D.crush >= 0.6) bite.els.push(elAt("w", TCELL.ragged, mid, Tg, w / 0.64, hgt / 0.64, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
+        else bite.els.push(elAt("w", TCELL.gape, mid, Tg, w / 0.74, hgt / 0.52, Math.max(0.02, X.Lmax), [0.95, 0, 0, 1], null, null, mid.S));
       } else {
         // round a limb: the flesh cut out along each jaw's line
         for (let r = 0; r < 2; r++) {
@@ -3702,7 +4246,7 @@
           if (!hr) continue;
           const a = row[0], b = row[row.length - 1];
           const d = Math.hypot(b.px - a.px, b.py - a.py, b.pz - a.pz);
-          const dir = onSkin(b.px - a.px, b.py - a.py, b.pz - a.pz, hN(hr), new THREE.Vector3()) || S;
+          const dir = poolDown(onSkin(b.px - a.px, b.py - a.py, b.pz - a.pz, hN(hr), new THREE.Vector3()) || S, hN(hr));
           bite.els.push(elAt("w", D.crush >= 0.6 ? TCELL.ragged : TCELL.gape, hr, dir, (d + X.Wavg) / (D.crush >= 0.6 ? 0.64 : 0.74),
             X.Lmax * 2.4 / (D.crush >= 0.6 ? 0.64 : 0.52), Math.max(0.02, X.Lmax), [0.9, 0, 0, 1], null, null, hr.S));
         }
@@ -3710,31 +4254,42 @@
     }
     // 7. the cut's own faces where a part came away
     if (cut && cut.loops.length) capFaces(bite, bite.seatS, cut.loops);
-    if (mid) bruiseAndBlood(bite, mid, S, spanA, spanB, X, sea, coat, wet, sev, D);
+    bite.mid = mid ? copyHit(mid) : null; bite.spanA = spanA; bite.spanB = spanB;
+  }
+  // the fourth: what the bitten skin does round the teeth, and the order
+  // the marks go on in
+  function lay4(bite, S) {
+    const D = bite.dent, sev = bite.sev, wet = bite.wet, coat = bite.coat, X = bite.ext;
+    const sea = bite.tissue === "cetacean" || bite.tissue === "shark";
+    const mid = bite.mid;
+    if (mid) bruiseAndBlood(bite, mid, S, bite.spanA, bite.spanB, X, sea, coat, wet, sev, D);
     // stamp everything, the blood first and the tooth holes last (a later
     // mark blends over an earlier one in the same mesh)
+    // stamped a mark at a time by the bite's job, the blood first and the
+    // tooth holes last (a later mark blends over an earlier one in the same
+    // mesh)
     bite.els.sort(function (a, b) { return (PAINT.get(a.cell) || 0) - (PAINT.get(b.cell) || 0); });
-    for (let i = 0; i < bite.els.length; i++) stampEl(bite, bite.els[i]);
-    bite.els.length = 0;
-    if (bite.flapAt) { flap(bite, bite.flapAt); bite.flapAt = null; }
-    // 11. on land, blood runs down the body along its real surface, from
-    //     the lowest holes, onto whatever it meets
-    if (!wet && coat !== "fur" && sev > 0.3) {
-      const lows = strikes.filter(function (s) { return (deepKind(s.t.kind) || s.t.kind === "serrated" || s.t.kind === "blade") && (s.pen || 0) >= 0.32; })
-        .sort(function (a, b) { return a.py - b.py; });
-      let made = 0;
-      const used = [];
-      for (let i = 0; i < lows.length && made < 1 + Math.round(sev * 2); i++) {
-        const st = lows[i];
-        let near = false;
-        for (let j = 0; j < used.length; j++) if (Math.hypot(used[j].px - st.px, used[j].py - st.py, used[j].pz - st.pz) < st.t.W * 2.5) near = true;
-        if (near) continue;
-        if (st.S.cloth) {
-          // through cloth the run is a wet trail soaking down the fabric
-          if (bloodTrail(bite, st, sev)) { used.push(st); made++; }
-        } else if (bloodRun(bite, st, Math.max(0.0035, st.t.W * 0.35), 0.06 + 0.24 * sev)) { used.push(st); made++; }
-      }
+  }
+  // 11. on land, blood runs down the body along its real surface, from the
+  //     lowest holes, onto whatever it meets: the holes it runs from
+  function runsFrom(bite) {
+    const sev = bite.sev;
+    if (bite.wet || bite.coat === "fur" || sev <= 0.3) return [];
+    const lows = bite.strikes.filter(function (s) { return (deepKind(s.t.kind) || s.t.kind === "serrated" || s.t.kind === "blade") && (s.pen || 0) >= 0.32; })
+      .sort(function (a, b) { return a.py - b.py; });
+    const out = [];
+    for (let i = 0; i < lows.length && out.length < 1 + Math.round(sev * 2); i++) {
+      const st = lows[i];
+      let near = false;
+      for (let j = 0; j < out.length; j++) if (Math.hypot(out[j].px - st.px, out[j].py - st.py, out[j].pz - st.pz) < st.t.W * 2.5) near = true;
+      if (!near) out.push(st);
     }
+    return out;
+  }
+  function runOne(bite, st) {
+    // through cloth the run is a wet trail soaking down the fabric
+    if (st.S.cloth) bloodTrail(bite, st, bite.sev);
+    else bloodRun(bite, st, Math.max(0.0035, st.t.W * 0.35), 0.06 + 0.24 * bite.sev);
   }
   // 8-10: what the bitten skin does round the teeth
   function bruiseAndBlood(bite, mid, S, spanA, spanB, X, sea, coat, wet, sev, D) {
@@ -3801,18 +4356,118 @@
   // a flap of cloth or hide hanging from the lip of the longest tear,
   // peeled back over it
   const _fv = new THREE.Vector3(), _fw = new THREE.Vector3(), _fo1 = new THREE.Vector3(), _fo2 = new THREE.Vector3(), _fc3 = [0, 0, 0];
+  /* A FLAP: the hide or cloth the shake tore loose, hinged along one side
+     of the tear and lifted off it. The hinge follows the skin (each column
+     of the flap stands on its own foot, in that spot's own frame), the flap
+     curls on as it goes out (a torn edge rolls), its free corners further
+     than its middle (it cups), and wherever it would pass into the body it
+     is laid on it instead. Its outside is its front face: the tissue
+     shader shows the hide or the soaked cloth there and the raw or lined
+     underside behind. */
+  const FLAP_NC = 5, FLAP_NR = 5;
+  // the triangles of a part within r of a point, as it was posed for the
+  // bite (a flap reaches past the bite's near list)
+  function localTris(S, cx, cy, cz, r) {
+    const W = S.W, idx = S.idx, nt = S.nt, out = [];
+    for (let t = 0; t < nt; t++) {
+      const a = idx ? idx[t * 3] : t * 3, b = idx ? idx[t * 3 + 1] : t * 3 + 1, c = idx ? idx[t * 3 + 2] : t * 3 + 2;
+      if (a === b || b === c || a === c) continue;
+      const a3 = a * 3, b3 = b * 3, c3 = c * 3;
+      const mx = (W[a3] + W[b3] + W[c3]) / 3, my = (W[a3 + 1] + W[b3 + 1] + W[c3 + 1]) / 3, mz = (W[a3 + 2] + W[b3 + 2] + W[c3 + 2]) / 3;
+      let r2 = (W[a3] - mx) * (W[a3] - mx) + (W[a3 + 1] - my) * (W[a3 + 1] - my) + (W[a3 + 2] - mz) * (W[a3 + 2] - mz);
+      let q = (W[b3] - mx) * (W[b3] - mx) + (W[b3 + 1] - my) * (W[b3 + 1] - my) + (W[b3 + 2] - mz) * (W[b3 + 2] - mz); if (q > r2) r2 = q;
+      q = (W[c3] - mx) * (W[c3] - mx) + (W[c3 + 1] - my) * (W[c3 + 1] - my) + (W[c3 + 2] - mz) * (W[c3 + 2] - mz); if (q > r2) r2 = q;
+      const lim = r + Math.sqrt(r2), dx = mx - cx, dy = my - cy, dz = mz - cz;
+      if (dx * dx + dy * dy + dz * dz <= lim * lim) out.push(a, b, c);
+    }
+    return out;
+  }
+  // the nearest point of those triangles, as a hit (bone weights, normal)
+  function nearestIn(S, list, qx, qy, qz, out) {
+    const W = S.W, WN = S.WN;
+    let best = Infinity;
+    _tQ.set(qx, qy, qz);
+    for (let k = 0; k < list.length; k += 3) {
+      const i0 = list[k], i1 = list[k + 1], i2 = list[k + 2];
+      _tA.fromArray(W, i0 * 3); _tB.fromArray(W, i1 * 3); _tC.fromArray(W, i2 * 3);
+      _tri.set(_tA, _tB, _tC);
+      _tri.closestPointToPoint(_tQ, _tO);
+      const d2 = _tO.distanceToSquared(_tQ);
+      if (d2 >= best) continue;
+      best = d2;
+      out.S = S; out.i0 = i0; out.i1 = i1; out.i2 = i2; out.px = _tO.x; out.py = _tO.y; out.pz = _tO.z; out.t = Math.sqrt(d2);
+    }
+    if (best === Infinity) return null;
+    _tA.fromArray(W, out.i0 * 3); _tB.fromArray(W, out.i1 * 3); _tC.fromArray(W, out.i2 * 3);
+    _tri.set(_tA, _tB, _tC);
+    _tO.set(out.px, out.py, out.pz);
+    _tri.getBarycoord(_tO, _tBc);
+    out.b0 = _tBc.x; out.b1 = _tBc.y; out.b2 = _tBc.z;
+    let nx = WN[out.i0 * 3] * out.b0 + WN[out.i1 * 3] * out.b1 + WN[out.i2 * 3] * out.b2;
+    let ny = WN[out.i0 * 3 + 1] * out.b0 + WN[out.i1 * 3 + 1] * out.b1 + WN[out.i2 * 3 + 1] * out.b2;
+    let nz = WN[out.i0 * 3 + 2] * out.b0 + WN[out.i1 * 3 + 2] * out.b1 + WN[out.i2 * 3 + 2] * out.b2;
+    // the face's own side wins where the smooth normal disagrees with it
+    // (a crease): what is outside is outside the triangle
+    _tri.getNormal(_tN3);
+    if (nx * _tN3.x + ny * _tN3.y + nz * _tN3.z < 0) { nx = _tN3.x; ny = _tN3.y; nz = _tN3.z; }
+    const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    out.nx = nx / l; out.ny = ny / l; out.nz = nz / l;
+    return out;
+  }
+  const _tN3 = new THREE.Vector3();
+  // the triangles of every part of the bite near a point, flat: S, a, b, c
+  function localAll(bite, cx, cy, cz, r) {
+    const out = [];
+    for (let s = 0; s < bite.surfs.length; s++) {
+      const S = bite.surfs[s];
+      if (!S || !S.W || !S.nt) continue;
+      const l = localTris(S, cx, cy, cz, r);
+      for (let k = 0; k < l.length; k += 3) out.push(S, l[k], l[k + 1], l[k + 2]);
+    }
+    return out;
+  }
+  // the first face a segment goes in through (from its front: into the
+  // body), as the fraction along it and that face's normal; null if none
+  const _segH = { t: 0, nx: 0, ny: 0, nz: 1 };
+  function segIn(L, px, py, pz, qx, qy, qz) {
+    const dx = qx - px, dy = qy - py, dz = qz - pz;
+    let best = Infinity;
+    for (let k = 0; k < L.length; k += 4) {
+      const Wt = L[k].W, a = L[k + 1] * 3, b = L[k + 2] * 3, c = L[k + 3] * 3;
+      const e1x = Wt[b] - Wt[a], e1y = Wt[b + 1] - Wt[a + 1], e1z = Wt[b + 2] - Wt[a + 2];
+      const e2x = Wt[c] - Wt[a], e2y = Wt[c + 1] - Wt[a + 1], e2z = Wt[c + 2] - Wt[a + 2];
+      const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+      if (nx * dx + ny * dy + nz * dz >= 0) continue;
+      const hx = dy * e2z - dz * e2y, hy = dz * e2x - dx * e2z, hz = dx * e2y - dy * e2x;
+      const det = e1x * hx + e1y * hy + e1z * hz;
+      if (det > -1e-14 && det < 1e-14) continue;
+      const f = 1 / det, sx = px - Wt[a], sy = py - Wt[a + 1], sz = pz - Wt[a + 2];
+      const u = f * (sx * hx + sy * hy + sz * hz);
+      if (u < 0 || u > 1) continue;
+      const rx = sy * e1z - sz * e1y, ry = sz * e1x - sx * e1z, rz = sx * e1y - sy * e1x;
+      const v = f * (dx * rx + dy * ry + dz * rz);
+      if (v < 0 || u + v > 1) continue;
+      const t = f * (e2x * rx + e2y * ry + e2z * rz);
+      if (t < 0 || t > 1 || t >= best) continue;
+      best = t;
+      const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      _segH.t = t; _segH.nx = nx / l; _segH.ny = ny / l; _segH.nz = nz / l;
+    }
+    return best < Infinity ? _segH : null;
+  }
+  const _ff = new THREE.Vector3(), _fT = new THREE.Vector3(), _fB = new THREE.Vector3(), _fN = new THREE.Vector3();
   function flap(bite, L) {
     const h = L.h, n = hN(h).clone(), T = L.pull.clone(), Bv = new THREE.Vector3().crossVectors(n, T).normalize();
     const hingeW = L.len * 0.5, height = L.wid * (L.cloth ? 1.7 : 1.4);
     const hc = { x: h.px + Bv.x * L.wid * 0.5, y: h.py + Bv.y * L.wid * 0.5, z: h.pz + Bv.z * L.wid * 0.5 };
     const hh = snap(bite, hc.x, hc.y, hc.z);
     if (!hh) return;
-    const S = hh.S, B = layerBuf(bite, S, "w"), inv = hostInverse(S, hh, new THREE.Matrix4());
+    const S = hh.S, B = layerBuf(bite, S, "w");
     hostColour(S, hh, _fc3);
-    const phi = 0.9 + Math.random() * 0.35, curl = 0.45;
-    _fo1.copy(Bv).multiplyScalar(-Math.cos(phi)).addScaledVector(n, Math.sin(phi)).normalize();
-    _fo2.copy(Bv).multiplyScalar(-Math.cos(phi + curl)).addScaledVector(n, Math.sin(phi + curl)).normalize();
-    const lift = 0.002;
+    // how far it stands off at the hinge, how much more it turns by its free
+    // edge, and how much further its corners turn than its middle
+    const phi = 0.85 + Math.random() * 0.35, curl = 0.6 + Math.random() * 0.4, cup = 0.14;
+    const lift = 0.002, clear = 0.003;
     const cell = TCELL.flap, c = [0, 0, L.cloth ? 0.5 : 1, 1];
     // the soak the stain layer gives the fabric (or the coat) round it, as
     // an albedo: the dye raised to its cover (see stainMat), linearised
@@ -3822,28 +4477,119 @@
       for (let k = 0; k < 3; k++) out[k] = _fc3[k] * Math.pow(Math.max(0.001, Math.pow(tn[k], 1 / 2.2) * 0.9), cover * 2.2);
       return out;
     };
-    const grid = [];
-    for (let j = 0; j <= 2; j++) {
-      for (let i = 0; i <= 3; i++) {
-        const u = i / 3 - 0.5;
-        _fv.set(hh.px, hh.py, hh.pz).addScaledVector(T, u * hingeW).addScaledVector(n, lift);
-        if (j >= 1) _fv.addScaledVector(_fo1, height * 0.55);
-        if (j >= 2) _fv.addScaledVector(_fo2, height * 0.45);
-        // a ragged free edge
-        if (j === 2) _fv.addScaledVector(T, (Math.random() - 0.5) * hingeW * 0.12);
-        grid.push([_fv.x, _fv.y, _fv.z, (u + 0.5), j / 2, soakAt(0.95 - 0.12 * j - 0.08 * Math.random())]);
+    const NC = FLAP_NC, NR = FLAP_NR, seg = height / (NR - 1);
+    const P = new Float32Array(NC * NR * 3), Q = new Array(NC * NR);
+    const reach = hingeW * 0.6 + height * 1.2 + 0.02;
+    const every = localAll(bite, hh.px, hh.py, hh.pz, reach), local = [];
+    for (let k = 0; k < every.length; k += 4) if (every[k] === S) local.push(every[k + 1], every[k + 2], every[k + 3]);
+    if (!local.length) return;
+    const nh = hN(hh).clone(), out0 = Math.min(0.05, Math.max(0.015, height * 1.5));
+    // the hinge: one foot a column, each the skin you see there (come down
+    // on from outside: the nearest skin can be a shell under another). It
+    // must be one unbroken edge of skin: where a foot finds nothing (the
+    // bite took it) or jumps (a fold, the next part over), the hinge is
+    // narrowed until it is; a tear with no such edge has no flap.
+    let hw = hingeW, feet = null;
+    for (let attempt = 0; attempt < 3 && !feet; attempt++, hw *= 0.6) {
+      feet = [];
+      let prevH = 0;
+      for (let i = 0; i < NC && feet; i++) {
+        const u = i / (NC - 1) - 0.5;
+        const tx = hh.px + T.x * u * hw, ty = hh.py + T.y * u * hw, tz = hh.pz + T.z * u * hw;
+        const sx = tx + nh.x * out0, sy = ty + nh.y * out0, sz = tz + nh.z * out0;
+        const ex = tx - nh.x * out0, ey = ty - nh.y * out0, ez = tz - nh.z * out0;
+        const dn = segIn(every, sx, sy, sz, ex, ey, ez);
+        if (!dn) { feet = null; break; }
+        const fx = sx + (ex - sx) * dn.t, fy = sy + (ey - sy) * dn.t, fz = sz + (ez - sz) * dn.t;
+        const hgt = (fx - hh.px) * nh.x + (fy - hh.py) * nh.y + (fz - hh.pz) * nh.z;
+        if (i && Math.abs(hgt - prevH) > 0.6 * hw / (NC - 1) + 0.003) { feet = null; break; }
+        prevH = hgt;
+        feet.push([fx, fy, fz, dn.nx, dn.ny, dn.nz, u]);
       }
     }
-    const at = function (i, j) { return grid[j * 4 + i]; };
-    for (let j = 0; j < 2; j++) {
-      for (let i = 0; i < 3; i++) {
-        const q = [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j), at(i + 1, j + 1), at(i, j + 1)];
-        const a = q[0], b = q[1], d = q[2];
-        _fw.set(b[0] - a[0], b[1] - a[1], b[2] - a[2]).cross(_fv.set(d[0] - a[0], d[1] - a[1], d[2] - a[2])).normalize();
-        for (let k = 0; k < 6; k++) {
-          const p = q[k];
-          vertWorld(B, hh, inv, p[0], p[1], p[2], _fw.x, _fw.y, _fw.z, cell[0] + p[3] * cell[2], cell[1] + p[4] * cell[3], c, p[5], 0, 0, 0);
+    if (!feet) return;
+    hw /= 0.6;
+    const soak = [];
+    for (let j = 0; j < NR; j++) soak.push(soakAt(0.95 - 0.24 * j / (NR - 1) - 0.08 * Math.random()));
+    for (let i = 0; i < NC; i++) {
+      const u = feet[i][6];
+      // the column's foot, seated on its part (its bones), in the skin's frame there
+      const fx = feet[i][0], fy = feet[i][1], fz = feet[i][2];
+      const f = nearestIn(S, local, fx, fy, fz, hitRec()) || copyHit(hh);
+      Q[i] = f;
+      f.px = fx; f.py = fy; f.pz = fz;
+      if (feet[i][3] * f.nx + feet[i][4] * f.ny + feet[i][5] * f.nz < 0.3) { f.nx = feet[i][3]; f.ny = feet[i][4]; f.nz = feet[i][5]; }
+      // every column turns in the hinge's own frame: the flap is one sheet
+      // (columns in frames of their own fan apart or cross where the skin
+      // under the hinge curves)
+      _fN.copy(nh);
+      _fT.copy(T).addScaledVector(_fN, -T.dot(_fN));
+      if (_fT.lengthSq() < 1e-10) _fT.copy(T);
+      _fT.normalize();
+      _fB.crossVectors(_fN, _fT);
+      let x = f.px + _fN.x * lift, y = f.py + _fN.y * lift, z = f.pz + _fN.z * lift;
+      P[i * 3] = x; P[i * 3 + 1] = y; P[i * 3 + 2] = z;
+      let lx = 0, ly = 0, lz = 0, lying = false;
+      for (let j = 1; j < NR; j++) {
+        const k = j / (NR - 1);
+        const ang = phi + curl * Math.pow(k, 1.4) + cup * Math.abs(u * 2) * k * k;
+        _ff.copy(_fB).multiplyScalar(-Math.cos(ang)).addScaledVector(_fN, Math.sin(ang));
+        // once it lies on the skin it goes on along it, not into it
+        if (lying) {
+          const dn = _ff.x * lx + _ff.y * ly + _ff.z * lz;
+          if (dn < 0) { _ff.x -= lx * dn; _ff.y -= ly * dn; _ff.z -= lz * dn; const l = _ff.length(); if (l > 1e-6) _ff.multiplyScalar(1 / l); }
         }
+        let nx = x + _ff.x * seg, ny = y + _ff.y * seg, nz = z + _ff.z * seg;
+        // a ragged free edge
+        if (j === NR - 1) { const r = (Math.random() - 0.5) * hw * 0.12; nx += _fT.x * r; ny += _fT.y * r; nz += _fT.z * r; }
+        // never into the body: where the step would go in through the skin
+        // it meets it and slides on along it the rest of the way, standing
+        // off it a little (the slide is tried too: off one face it can be
+        // into the next)
+        for (let it = 0; it < 3; it++) {
+          const hit = segIn(every, x, y, z, nx, ny, nz);
+          if (!hit) break;
+          const t = Math.max(0, hit.t - 1e-3);
+          const hx = x + (nx - x) * t + hit.nx * clear, hy = y + (ny - y) * t + hit.ny * clear, hz = z + (nz - z) * t + hit.nz * clear;
+          let rx = (nx - x) * (1 - t), ry = (ny - y) * (1 - t), rz = (nz - z) * (1 - t);
+          const rn = rx * hit.nx + ry * hit.ny + rz * hit.nz;
+          rx -= hit.nx * rn; ry -= hit.ny * rn; rz -= hit.nz * rn;
+          lx = hit.nx; ly = hit.ny; lz = hit.nz; lying = true;
+          if (it === 2) { nx = hx; ny = hy; nz = hz; if (segIn(every, x, y, z, nx, ny, nz)) { nx = x; ny = y; nz = z; } break; }
+          x = hx; y = hy; z = hz;
+          nx = hx + rx; ny = hy + ry; nz = hz + rz;
+        }
+        x = nx; y = ny; z = nz;
+        Q[j * NC + i] = nearestIn(S, local, x, y, z, hitRec()) || f;
+        const o = (j * NC + i) * 3;
+        P[o] = x; P[o + 1] = y; P[o + 2] = z;
+      }
+    }
+    // smooth normals, the outside's: across x along (the front face's)
+    const NV = new Float32Array(NC * NR * 3);
+    for (let j = 0; j < NR; j++) for (let i = 0; i < NC; i++) {
+      const i0 = Math.max(0, i - 1), i1 = Math.min(NC - 1, i + 1), j0 = Math.max(0, j - 1), j1 = Math.min(NR - 1, j + 1);
+      const ax = P[(j * NC + i1) * 3] - P[(j * NC + i0) * 3], ay = P[(j * NC + i1) * 3 + 1] - P[(j * NC + i0) * 3 + 1], az = P[(j * NC + i1) * 3 + 2] - P[(j * NC + i0) * 3 + 2];
+      const bx = P[(j1 * NC + i) * 3] - P[(j0 * NC + i) * 3], by = P[(j1 * NC + i) * 3 + 1] - P[(j0 * NC + i) * 3 + 1], bz = P[(j1 * NC + i) * 3 + 2] - P[(j0 * NC + i) * 3 + 2];
+      let nx = by * az - bz * ay, ny = bz * ax - bx * az, nz = bx * ay - by * ax;
+      const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      NV[(j * NC + i) * 3] = nx / l; NV[(j * NC + i) * 3 + 1] = ny / l; NV[(j * NC + i) * 3 + 2] = nz / l;
+    }
+    // each point seated through the skin nearest it: the flap bends where
+    // the body under it bends
+    const INV = new Array(NC * NR);
+    for (let k = 0; k < NC * NR; k++) INV[k] = hostInverse(S, Q[k], new THREE.Matrix4());
+    const put = function (i, j) {
+      const k = j * NC + i, o = k * 3;
+      vertWorld(B, Q[k], INV[k], P[o], P[o + 1], P[o + 2], NV[o], NV[o + 1], NV[o + 2],
+        cell[0] + (i / (NC - 1)) * cell[2], cell[1] + (j / (NR - 1)) * cell[3], c, soak[j], 0, 0, 0);
+    };
+    // wound so the front face is the outside: (along, across) turns from
+    // the outward direction to the hinge's
+    for (let j = 0; j < NR - 1; j++) {
+      for (let i = 0; i < NC - 1; i++) {
+        put(i, j); put(i + 1, j + 1); put(i + 1, j);
+        put(i, j); put(i, j + 1); put(i + 1, j + 1);
       }
     }
   }
@@ -4081,12 +4827,15 @@
     const who = biterOf(opts);
     const dent = dentOf(who, jaw);
     let res = null;
+    const tb = performance.now();
     try { res = runBite(actor, wp, opts, "person", who, dent, sev); } catch (e) { res = { why: "error:" + (e && e.message) }; }
+    LEDGER.biteMsMax = Math.max(LEDGER.biteMsMax, performance.now() - tb);
     if (!res || !res.made) { refuse("bite:" + ((res && res.why) || "nothing")); return; }
     LEDGER.biteMarks++; LEDGER.personBites++;
     LEDGER.lastBite = biteNote(res, who, dent);
-    // BLEEDING INTO THE SEA: the trail leaves from the bite itself
-    if (res.wet) bleedFor(actor, res.lead, Math.max(0.35, Math.min(1, 0.4 + sev * 0.6)), 18 + sev * 14);
+    if (res.bite) res.bite.note = LEDGER.lastBite;
+    // BLEEDING INTO THE SEA: the trail leaves from the bitten part itself
+    if (res.wet) bleedFor(actor, res.lead || res.host, Math.max(0.35, Math.min(1, 0.4 + sev * 0.6)), 18 + sev * 14);
 
     // A MAULED LEG is a collapse: character.js's own legHurt channel
     const region = res.region;
@@ -4450,6 +5199,9 @@
       lastBite: LEDGER.lastBite,
       woundCalls: LEDGER.woundCalls, woundMarks: LEDGER.woundMarks,
       refusals: LEDGER.refusals, lastRefusal: LEDGER.lastRefusal,
+      // a bite's work after its instant (BITE JOBS): pending, dropped with
+      // their bodies, and the longest the instant / one frame's slice took
+      biteJobs: JOBS.length, jobsDropped: LEDGER.jobsDropped, biteMsMax: LEDGER.biteMsMax, sliceMsMax: LEDGER.sliceMsMax, jobFrameMsMax: LEDGER.jobFrameMsMax, jobErrors: LEDGER.jobErrors, lastJobError: LEDGER.lastJobError,
     };
   };
 
@@ -4513,10 +5265,13 @@
     const who = biterOf(opts);
     const dent = dentOf(who, jaw);
     let res = null;
+    const tb = performance.now();
     try { res = runBite(actor, wp, opts, "animal", who, dent, sev); } catch (e) { res = { why: "error:" + (e && e.message) }; }
+    LEDGER.biteMsMax = Math.max(LEDGER.biteMsMax, performance.now() - tb);
     if (!res || (!res.made && !res.removed)) { refuse("chunk:" + ((res && res.why) || "nothing")); return false; }
     LEDGER.biteMarks++; LEDGER.animalBites++;
     LEDGER.lastBite = biteNote(res, who, dent);
+    if (res.bite) res.bite.note = LEDGER.lastBite;
     const B = bittenRec(actor);
     B.n++; B.removed += res.removed || 0; B.severed += res.severed || 0;
     _cbv.copy(res.P);
@@ -4533,7 +5288,7 @@
       try { CBZ.goreBloom(res.P.x, res.P.y, res.P.z, _bloomOpts); } catch (e) {}
     }
     if (opts.bleed !== false) {
-      bleedFor(actor, res.lead, Math.max(0.25, Math.min(1, 0.3 + sev * 0.6 + (res.removed ? 0.25 : 0))),
+      bleedFor(actor, res.lead || res.host, Math.max(0.25, Math.min(1, 0.3 + sev * 0.6 + (res.removed ? 0.25 : 0))),
         Math.max(6, Math.min(70, (opts.bleedS || 14) * (1 + B.n * 0.22))));
     }
     return true;
@@ -4864,6 +5619,7 @@
      sweeps below drop records and free memory; they never heal a body that
      is still in the world. */
   CBZ.creatureBiteChunkRestore = function (actor) {
+    jobsForget(actor);
     for (let i = OWNED.length - 1; i >= 0; i--) if (!actor || OWNED[i].actor === actor) freeOwn(OWNED[i]);
     skinForget(actor);
     bleedStop(actor);
@@ -4919,6 +5675,7 @@
 
   // ---- reset: detach everything ---------------------------------------------
   CBZ.clearWounds = function () {
+    jobsForget(null);
     CBZ.creatureBiteChunkRestore(null);
     bleedStop(null);
     piecesClear();                 // pieces are scene-parented: they do NOT go with the rigs
@@ -4939,6 +5696,7 @@
     if (actor.isPlayer && !actor.char && CBZ.playerWoundActor) actor = CBZ.playerWoundActor;
     for (let i = wounds.length - 1; i >= 0; i--) if (wounds[i].actor === actor) dropWound(i);
     actor._woundN = 0;
+    jobsForget(actor);
     skinForget(actor);
   };
 
@@ -4957,7 +5715,13 @@
   let tick = 0, sweepT = 0, deadT = 0, skinT = 0;
   CBZ.onAlways(9, function (dt) {
     if (CBZ.clearGore && !CBZ.clearGore._wounds) wrapClearGore();
+    if (JOBS.length) {
+      const t0 = performance.now();
+      jobsRun(BITE_BUDGET);
+      LEDGER.jobFrameMsMax = Math.max(LEDGER.jobFrameMsMax, performance.now() - t0);
+    }
     if (!skinWarmed) skinWarm(dt);  // paint the bite atlases ahead of the first bite
+    else if (warmState < 2) warmStep();  // then run one bite nobody sees, so the first real one runs warm
     if (BITTEN.length || OWNED.length || BLEED.length) {
       sweepT += dt; if (sweepT > 1.1) { sweepT = 0; bittenSweep(); }
       // a death has to read on the frame it happens, not on the 1.1 s sweep
