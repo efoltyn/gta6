@@ -566,6 +566,8 @@
     const grimeTex = texOf(THREE, grimeCanvas(), false);
     const grimeMat = new THREE.MeshBasicMaterial({ map: grimeTex, fog: false, toneMapped: false, depthWrite: false,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor, blendDst: THREE.ZeroFactor,
+      // keep the canvas's own alpha, or the grime shows the page through as a pale patch
+      blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -6 });
     [footMat, kerbMat, tactMat, white, yellow, ironMat].forEach(function (m) { if (CBZ.terrainFogScale) CBZ.terrainFogScale(m, 0.10); });
     _look = { footMat, kerbMat, kerbTex, tactMat, white, yellow, ironMat, grimeMat };

@@ -1044,6 +1044,8 @@
     if (!crackMat) {
       crackMat = new THREE.MeshBasicMaterial({
         color: 0xffffff, blending: THREE.CustomBlending, blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,   // r128's MultiplyBlending (r187's wants premultiplied alpha)
+        // the canvas has an alpha channel: keep its alpha, or the page shows through as a pale patch
+        blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
         transparent: true, depthWrite: false,
         fog: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
       });
