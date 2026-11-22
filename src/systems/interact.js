@@ -114,6 +114,18 @@
     steal:    { label: "Pickpocket", fn: (a) => CBZ.econ.steal(a) },
     // PUNCH on the man whose verbs you tapped (the fire button swings at
     // whoever is in front). combat.js punch writes the blow into the jail's law.
+    /* HIS ANSWER IS THE NEXT FOUR (entities/ai.js CBZ.prisonResp): what he
+       held out, what he said, what you called him over for. One word each. */
+    accept:   { label: "Accept",    fn: (a) => CBZ.prisonResp.accept(a) },
+    more:     { label: "More",      fn: (a) => CBZ.prisonResp.more(a) },
+    leave:    { label: "Leave",     fn: (a) => CBZ.prisonResp.leave(a) },
+    fight:    { label: "Fight",     fn: (a) => CBZ.prisonResp.fight(a) },
+    order:    { label: "Order",     fn: (a) => CBZ.prisonResp.order(a) },
+    guard:    { label: "Guard",     fn: (a) => CBZ.prisonResp.guard(a) },
+    press:    { label: "Threaten",  fn: (a) => CBZ.prisonResp.press(a) },
+    recruit:  { label: "Recruit",   fn: (a) => CBZ.prisonResp.recruit(a) },
+    attack:   { label: "Attack",    fn: (a) => CBZ.prisonResp.attack(a) },
+    seize:    { label: "Grab",      fn: (a) => CBZ.prisonResp.seize(a) },
     // THREATEN took Punch's seat on the panel (owner 2026-11-21: the red
     // button already punches). systems/intimidate.js reads him against you.
     threaten: { label: "Threaten",  fn: (a) => (CBZ.prisonThreaten ? CBZ.prisonThreaten(a) : { ok: false, msg: "" }) },
@@ -375,6 +387,21 @@
     }
     // HELD AT GUNPOINT: a drawn gun outranks a conversation
     if (a.intimidMode === "scared") return CBZ.game.role === "cop" ? ["detain", "search", "release"] : ["rob", "restrain", "release"];
+    // HE JUST ANSWERED YOU, or you called him over: his answer is the set
+    const RS = CBZ.prisonResp, resp = RS && CBZ.game.role !== "cop" ? RS.of(a) : null;
+    if (resp) {
+      if (resp.kind === "offer") return ["accept", "more", "leave"];
+      if (resp.kind === "price") return ["accept", "threaten", "leave"];
+      if (resp.kind === "letsgo") return ["fight", "leave"];
+      if (resp.kind === "refused") return RS.crew() > 0 ? ["threaten", "leave", "attack", "seize"] : ["threaten", "leave"];
+      if (resp.kind === "order") {
+        if (resp.who === "join") return ["recruit", "leave"];
+        // one of your men: at your shoulder already, Leave sends him off;
+        // an order he balked at stays on him to push (Guard) or press (Threaten)
+        if (CBZ.prisonCrew && CBZ.prisonCrew.has(a)) return ["leave"];
+        return resp.said ? ["guard", "press", "leave"] : ["guard", "leave"];
+      }
+    }
     // YOU ARE SNITCHING TO HIM: the card is what you know
     const telling = CBZ.prisonSnitch && CBZ.prisonSnitch.menu ? CBZ.prisonSnitch.menu(a) : null;
     if (telling) return telling;
@@ -455,7 +482,9 @@
     // FOUR SEATS, ALWAYS FILLED (owner on iPad: "there's not enough"): with no
     // headline the fourth is a threat (the fist is the red button's). Trade stays first because it is
     // the E key, and E on a man you happen to face must never be an assault.
-    return head ? [head, "trade", "steal", "grab"] : ["trade", "steal", "grab", "threaten"];
+    // the fourth seat is what you are to him: a man you lead (or could bring
+    // in) is given an Order; anybody else is leaned on
+    return head ? [head, "trade", "steal", "grab"] : ["trade", "steal", "grab", RS && RS.canOrder(a) ? "order" : "threaten"];
   }
 
   // a payoff cleans heat; with nothing on your file it would buy nothing

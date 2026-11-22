@@ -1089,8 +1089,14 @@
     lead: function (man) { return man.isLeader ? 1 : 0; },
     // an inmate told by an officer (you): his body does it. Officers carry
     // the warden's own closure (opts.exec), never this.
-    exec: function (man, o) {
+    exec: function (man, o, target, from) {
       if (staffK(man)) return null;
+      // YOUR OWN MEN (you lead their car): stand with me, go on, and him
+      if (isYou(from) && CBZ.prisonPlayerLeads && man.gang >= 0 && CBZ.prisonPlayerLeads(man.gang)) {
+        if (o === "guard" || o === "come") return !!(CBZ.prisonCrew && CBZ.prisonCrew.enlist(man));
+        if (o === "go") { if (CBZ.prisonCrew) CBZ.prisonCrew.dismiss(man); return true; }
+        if ((o === "kill" || o === "take") && target) return !!(CBZ.prisonCrewSet && CBZ.prisonCrewSet(man, target, o === "kill"));
+      }
       if (o === "back") { man.aiState = "flee"; man.fleeT = 2.2; man.foe = null; return true; }
       if (o === "drop") { if (!man._shankOut) return false; man._shankOut = false; man._steelT = 0; return true; }
       if (o === "hold" || o === "line" || o === "search") { man.pause = Math.max(man.pause || 0, 4); man.aiState = "wander"; man.foe = null; return true; }

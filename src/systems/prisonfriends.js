@@ -629,6 +629,39 @@
   }
 
   // ---- the surface systems/interact.js reads -------------------------------
+  /* A LEADER'S MEN (entities/ai.js: you took a car off its shotcaller). GUARD
+     puts one of them at your shoulder through the same crew this file already
+     runs (the cap, the tray, shadowPlayer); LEAVE sends him back to his day
+     without wiping what he owed you. The men stood with you right now are the
+     ones an ATTACK or a GRAB is given to. */
+  function enlist(a) {
+    if (!on() || !alive(a)) return false;
+    if (a.pfFriend) { shadow(a, true); return true; }
+    syncCrew();
+    if (full()) return false;
+    a.pfFriend = true; a.pfOrdered = true;
+    a.pfMissed = 0; a.pfFedSit = -1; a.pfFedDay = -1; a.pfHeldSaid = false;
+    shadow(a, true);
+    syncCrew();
+    return true;
+  }
+  function dismiss(a) {
+    if (!a || !a.pfFriend) return false;
+    a.pfFriend = false; a.pfOrdered = false;
+    unshadow(a);
+    syncCrew();
+    return true;
+  }
+  function withYou(range) {
+    const out = [], r = range || 10;
+    for (const a of list()) {
+      if (dist2ToPlayer(a) > r * r) continue;
+      if (a.cuffed || (a.ko || 0) > 0 || a.aiState === "flee") continue;
+      out.push(a);
+    }
+    return out;
+  }
+  CBZ.prisonCrew = { enlist: enlist, dismiss: dismiss, withYou: withYou, has: function (a) { return !!(a && a.pfFriend); }, full: function () { syncCrew(); return full(); } };
   CBZ.prisonFriendOffered = offered;
   CBZ.prisonFriendReason = reasonFor;
   CBZ.prisonFriendAccept = accept;

@@ -2258,7 +2258,39 @@
      what makes that safe beside systems/prisonfriends.js, which wraps the
      same killstreakOnDown the same lazy way: a flag on our own wrapper alone
      made the two re-wrap each other every frame, forever. */
+  /* YOUR OWN MEN STOP TAKING YOUR WORD (systems/command.js mutiny: enough
+     refusals, enough strain, in a car you lead). The car is not yours any
+     more: the man carrying the most against you has it, and he and one more
+     come to say so. */
+  let _mutinyHooked = false;
+  function hookMutiny() {
+    if (_mutinyHooked || !CBZ.command || !CBZ.command.on) return;
+    _mutinyHooked = true;
+    CBZ.command.on("mutiny", function (m) {
+      const P = CBZ.player;
+      if (!m || m.from !== P || !P || !(P._leadsCar >= 0) || !CBZ.game || CBZ.game.mode !== "escape") return;
+      const car = P._leadsCar;
+      let top = null, tg = -1;
+      for (const n of CBZ.npcs || []) {
+        if (!alive(n) || n.gang !== car) continue;
+        if (CBZ.prisonCrew && CBZ.prisonCrew.has(n)) CBZ.prisonCrew.dismiss(n);
+        const w = (n.playerGrudge || 0) + ((n.personality && n.personality.nerve) || 0.5) * 3;
+        if (w > tg) { tg = w; top = n; }
+      }
+      P._leadsCar = -1;
+      addGangStanding(car, -12);
+      if (!top) return;
+      top.isLeader = true; leaders[car] = top;
+      let sent = 0;
+      for (const n of CBZ.npcs || []) {
+        if (sent >= 2) break;
+        if (!alive(n) || n.gang !== car || playerDist(n) > 16) continue;
+        if (n === top || (n.playerGrudge || 0) >= 4) { if (requestHunt(n, 10, "own")) sent++; }
+      }
+    });
+  }
   function ensureContractWraps() {
+    hookMutiny();
     CBZ.wrapOnce(CBZ, "killstreakOnDown", "contract", function (inner) {
       return function (actor, how) {
         try {
@@ -3429,8 +3461,8 @@
        shoulder. Anything realer still takes him (the gun, the law and the
        cuffs above; a fight, a hunt, a run, a report below), and the table
        folds itself when one does. */
-    if (CBZ.prisonTrade && CBZ.prisonTrade.partner && CBZ.prisonTrade.partner() === n &&
-        !((n.huntPlayer || 0) > 0) && n.aiState !== "fight" && n.aiState !== "flee" && n.aiState !== "snitch") {
+    if (((CBZ.prisonTrade && CBZ.prisonTrade.partner && CBZ.prisonTrade.partner() === n) || respOf(n)) &&
+        !((n.huntPlayer || 0) > 0) && n.aiState !== "fight" && n.aiState !== "flee" && n.aiState !== "snitch" && n.aiState !== "demandPlayer") {
       const pp = CBZ.player.pos, gp = n.group.position;
       const d = Math.hypot(pp.x - gp.x, pp.z - gp.z);
       n.aiTimer = Math.max(n.aiTimer || 0, 1);              // no wander re-think mid-deal
@@ -4016,7 +4048,7 @@
     if (CBZ.player) CBZ.player._leadsCar = -1;
     _ownChallenger = null;
     for (const n of CBZ.npcs) {
-      n._swingDue = null; n._downAt = null; n._threats = null;
+      n._swingDue = null; n._downAt = null; n._threats = null; n._resp = null; n._fairT = 0;
       n.dead = false; n.escaped = false; n.group.visible = true; n.group.rotation.z = 0;
       n.group.position.y = 0; n._lvy = 0;
       if (CBZ.prisonCorpseClear) CBZ.prisonCorpseClear(n);   // no sprawl in a revived man's shoulders
@@ -4075,6 +4107,10 @@
     victim._provokeHp = hpNow;
     const struck = !!opts.started || (opts.why == null && hpNow < hpWas - 0.5);
     if (struck && !wasOnYou && victim.kind !== "guard" && victim.kind !== "warden") reportPlayerFight(victim);
+    if (struck && !wasOnYou && CBZ.prisonCrew && victim.kind !== "guard" && victim.kind !== "warden") {
+      const men = CBZ.prisonCrew.withYou(10);
+      for (let i = 0; i < men.length && i < 3; i++) crewSet(men[i], victim, false);
+    }
     // ...and thrown at one of YOUR OWN it is your car's business too
     if (struck && !wasOnYou && playerCar() >= 0 && playerCar() === carK(victim) && PCARS() && PCARS().ownStrike) PCARS().ownStrike(victim);
 
@@ -4137,6 +4173,10 @@
       if (m.aiState === "fight" || m.aiState === "snitch" || heldInCell(m)) continue;
       const d = Math.hypot(ap.x - m.group.position.x, ap.z - m.group.position.z);
       if (d > 16) continue;
+      if (own && isP && (victim._fairT || 0) > ((CBZ.game && +CBZ.game.elapsed) || 0)) {
+        if (CBZ.npcStare) CBZ.npcStare(m, 3 + rng() * 2);          // "Then let's go." was said: nobody steps in
+        continue;
+      }
       if (own) {
         const l = loyaltyOf(m);
         const forV = (victim.isLeader ? l * 8 : 0) + (isP ? (m.playerGrudge || 0) * 1.7 : beefWith(m, aggressor));
@@ -4425,12 +4465,13 @@
     if (!P || !P.pos) return false;
     const t = (CBZ.game && +CBZ.game.elapsed) || 0;
     // you led this car and one of its men just put you on the floor
-    if (_ownChallenger && P._leadsCar >= 0 && playerDownedNow()) {
+    if (_ownChallenger && playerDownedNow()) {
       const c = _ownChallenger; _ownChallenger = null;
-      if (alive(c) && c.gang === P._leadsCar) {
+      if (alive(c) && P._leadsCar >= 0 && c.gang === P._leadsCar) {
         c.isLeader = true; leaders[c.gang] = c; P._leadsCar = -1;
         addGangStanding(c.gang, -10);
-      }
+      } else if (alive(c) && carK(c) >= 0) addGangStanding(carK(c), -4);    // you lost it in front of your own
+      if (alive(c)) c._fairT = 0;
     }
     if ((n.huntPlayer || 0) > 0 || playerDownedNow() || playerDist(n) > 14) return false;
     // HELD BACK, NOT FORGOTTEN: he would not swing in front of a screw
@@ -4452,6 +4493,11 @@
   }
   function playerDownedOwn(actor) {
     const P = CBZ.player;
+    if (actor && _ownChallenger === actor) {
+      _ownChallenger = null; actor._fairT = 0;
+      actor.playerGrudge = 0; actor.playerFear = Math.min(14, (actor.playerFear || 0) + 3);
+      if (carK(actor) >= 0 && !actor.isLeader) addGangStanding(carK(actor), 4);
+    }
     if (!P || !actor || !actor.isLeader || !(actor.gang >= 0)) return;
     if (playerCar() !== carK(actor) || (CBZ.game && CBZ.game.carClaim !== "in")) return;
     actor.isLeader = false;
@@ -4478,23 +4524,63 @@
     }
     return k;
   }
-  const THREAT_HOLD = 5;
-  function threatenPerson(n) {
-    if (!n || !n.group || !alive(n) || n.cuffed || n.role === "merchant") return { ok: false, msg: "" };
-    if (n.intimidMode && n.intimidMode !== "scared") return { ok: false, msg: "" };
+  /* ==========================================================================
+     HE ANSWERS, AND HIS ANSWER IS YOUR NEXT FOUR BUTTONS (owner 2026-11-22).
+
+     A press on a man is not a menu: it is a thing said to him, and what he
+     does back is the next situation. That situation is kept on him as
+     n._resp = { kind, until, ... } for a few seconds while he stands with
+     you (the same stand a deal gets, above in aiThink), and systems/
+     interact.js reads it to pick the buttons:
+
+       offer     he holds something out to make you go away
+                   Accept (take it) · More (push) · Leave (send him off)
+       refused   "Fuck off."
+                   Threaten (again) · Leave (you back down, the yard saw)
+                   + Attack · Grab while your men are stood with you
+       letsgo    "Then let's go." (a man of your own car, or its shotcaller)
+                   Fight (one-on-one, nobody steps in) · Leave (you back down)
+       order     you called him over to tell him something
+                   Guard · Leave (your man)   Recruit · Leave (he could join)
+       price     what he wants for coming over to you
+                   Accept · Threaten · Leave
+       turned    he is the heavier man: "No. You pay me." This is the demand
+                 ladder the file already has (beginDemand) and its buttons.
+
+     Nothing here keeps its own ledger. Fear, grudge, respect, car standing,
+     the hunt, the crew and the command layer are the ones already in the sim.
+     ========================================================================== */
+  const RESP_S = 12;
+  function nowS() { return (CBZ.game && +CBZ.game.elapsed) || 0; }
+  function respOf(n) {
+    const r = n && n._resp;
+    if (!r) return null;
+    if (nowS() > r.until || !alive(n) || n.cuffed || playerDist(n) > 6.5) { n._resp = null; return null; }
+    return r;
+  }
+  function setResp(n, kind, data) {
+    n._resp = Object.assign({ kind: kind, until: nowS() + RESP_S }, data || {});
+    return n._resp;
+  }
+  function walkOff(n, secs) {
+    n._resp = null;
+    const g = n.group.position, pp = CBZ.player.pos;
+    const ax = g.x - pp.x, az = g.z - pp.z, al = Math.hypot(ax, az) || 1;
+    n.aiState = "flee"; n.fleeT = secs || 3; n._fleeX = null; n.foe = null;
+    if (n.target) n.target.set(g.x + ax / al * 14, 0, g.z + az / al * 14);
+  }
+  // the two sides of the yard, as he reads them (see the header on carNear)
+  function weigh(n) {
     const P = CBZ.player, p = n.personality || {}, r = n.ratings || {};
-    const t = (CBZ.game && CBZ.game.elapsed) || performance.now() / 1000;
-    // how many times you have leaned on him lately (a minute's memory)
-    const T = n._threats && t - n._threats.t < 60 ? n._threats : (n._threats = { k: 0, t: t });
-    T.k++; T.t = t;
     const myCar = playerCar(), hisCar = carK(n);
     const sameCar = myCar >= 0 && hisCar === myCar;
     const rivalCar = myCar >= 0 && hisCar >= 0 && hisCar !== myCar;
     const gun = CBZ.currentGun && CBZ.currentGun();
     const inHand = gun ? (gun.melee ? 0.25 : 0.5) : ((CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Shiv")) ? 0.1 : 0);
     const g = n.group.position, pp = P.pos;
+    const crew = CBZ.prisonCrew ? CBZ.prisonCrew.withYou(10).length : 0;
     const RANK = { shotcaller: 0.5, enforcer: 0.35, collector: 0.25 };
-    const his = (RANK[n.crewRole] != null ? RANK[n.crewRole] : (hisCar >= 0 ? 0.1 : 0))
+    const his = (n.isLeader ? 0.5 : RANK[n.crewRole] != null ? RANK[n.crewRole] : (hisCar >= 0 ? 0.1 : 0))
       + ((r.fighting || 40) + (r.toughness || 40)) / 200
       + (p.nerve != null ? p.nerve : 0.5) * 0.6
       + Math.min(3, carNear(hisCar, g.x, g.z, 10, n)) * 0.18
@@ -4502,82 +4588,337 @@
       + (rivalCar ? 0.15 : 0)
       + Math.min(0.3, (n.playerGrudge || 0) * 0.03);
     const yours = Math.max(-0.5, Math.min(1.5, (n.rep || 0) / 45))
-      + Math.min(3, carNear(myCar, pp.x, pp.z, 10, n)) * 0.18
+      + Math.min(3, Math.max(crew, carNear(myCar, pp.x, pp.z, 10, n))) * 0.18
       + inHand
       + Math.min(0.4, (n.playerFear || 0) * 0.04);
-    const margin = his - yours;          // > 0: his side is heavier
+    return { margin: his - yours, sameCar: sameCar, rivalCar: rivalCar, inHand: inHand, hisCar: hisCar,
+      yoursToLead: sameCar && P._leadsCar >= 0 && P._leadsCar === hisCar };
+  }
+  // he snaps: swings now, swings later (a screw is looking), or runs
+  function snap(n, W) {
+    const t = nowS();
+    n._resp = null;
+    if (n._threats) n._threats.k = 0;
+    const holdsIt = watched(n) && rng() > behaviorOf(n).guts;
+    if (W.margin >= 0) {
+      if (holdsIt) {
+        n._swingDue = { until: t + 120, why: "threat", crew: W.rivalCar ? 1 : 0 };
+        say(n, "Not here.", null, 1.6);
+        walkOff(n, 2.5);
+        return "later";
+      }
+      say(n, "That's enough.", null, 1.6);
+      provokeGang(n, 8, { crew: W.rivalCar ? 1 : 0, why: "threat", standing: 2 });
+      if ((n.huntPlayer || 0) > 0) return "fight";
+      // the hunt was refused (a gun is out, the cap is full): he backs off instead
+    }
+    walkOff(n, 4 + rng() * 2);
+    emote(n, "!");
+    if (CBZ.econ && CBZ.econ.witnessRespect) CBZ.econ.witnessRespect(n, 3, 14);
+    addBuzz("fear", 4, actorName(n));
+    return "flee";
+  }
+  // what he will hold out to make you go away: a share of his cigarettes
+  // (more the more he fears you), else one thing off him, else nothing
+  function makeOffer(n) {
+    const E = CBZ.econ;
+    const load = E && E.rollLoadout ? E.rollLoadout(n) : null;
+    if (!load || n.looted) return null;
+    const fear = Math.min(1, (n.playerFear || 0) / 14);
+    if (load.cigs > 0) return { cigs: Math.max(1, Math.min(load.cigs, Math.ceil(load.cigs * (0.3 + fear * 0.4)))), item: null };
+    if (load.items && load.items.length) return { cigs: 0, item: load.items[0] };
+    return null;
+  }
+  const TURN_LINES = { demand: ["No. You pay me."], warn: ["I said pay."], show: ["Last chance."], comply: ["That's right."],
+    left: ["This ain't over."], fled: ["Run, then."] };
+
+  function threatenPerson(n) {
+    if (!n || !n.group || !alive(n) || n.cuffed || n.role === "merchant") return { ok: false, msg: "" };
+    if (n.intimidMode && n.intimidMode !== "scared") return { ok: false, msg: "" };
+    const P = CBZ.player;
+    const t = nowS();
+    // how many times you have leaned on him lately (a minute's memory)
+    const T = n._threats && t - n._threats.t < 60 ? n._threats : (n._threats = { k: 0, t: t });
+    T.k++; T.t = t;
+    const W = weigh(n), margin = W.margin;
     // what he will take before he breaks: a hard man less, a man well beneath you more
     const patience = Math.max(1, Math.min(4, Math.round(2.5 - margin * 2)));
-
-    n.playerFear = Math.min(14, (n.playerFear || 0) + 1 + inHand * 2);
+    n.playerFear = Math.min(14, (n.playerFear || 0) + 1 + W.inHand * 2);
     n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
     n.grudgeWhy = "you got in my face";
     if (n.gang >= 0) noteGangIncident(n, "disrespect", T.k > patience ? 4 : 2, { source: "threat", noResponders: true });
-
-    // a man well above you does not even let the first one land
-    // and a man with a gun in his hand never backs down to words
-    // A man of a car YOU lead takes it (that is what leading is) until what
-    // he holds against you clears his own bar.
-    const yoursToLead = sameCar && P._leadsCar >= 0 && P._leadsCar === hisCar;
-    const breaks = !!(n.hasGun && n.armed && !n._holstered) ||
-      (yoursToLead ? (n.playerGrudge || 0) >= playerBar(n) : (T.k > patience || margin > 0.6));
-    if (!breaks) {
-      if (CBZ.intimidateHold) CBZ.intimidateHold(n, THREAT_HOLD);
-      // the yard standing there saw him fold (not his own set)
-      if (CBZ.econ && CBZ.econ.witnessRespect) CBZ.econ.witnessRespect(n, 1, 12);
-      say(n, T.k > 1 ? "I heard you." : "Alright, alright.", null, 1.8);
-      return { ok: true, msg: "", answer: "cowed" };
-    }
-    T.k = 0;
     if (CBZ.intimidateRelease && n.intimidMode) CBZ.intimidateRelease(n);
-    const run = function () {
-      n.aiState = "flee"; n.fleeT = 4 + rng() * 2; n._fleeX = null; n.foe = null;
-      const ax = g.x - pp.x, az = g.z - pp.z, al = Math.hypot(ax, az) || 1;
-      if (n.target) n.target.set(g.x + ax / al * 16, 0, g.z + az / al * 16);
-      emote(n, "!");
-    };
-    // THE OPENING. Nobody starts it in front of a screw unless he has the
-    // guts not to care: he holds it, walks, and it comes due when nobody is
-    // looking (ownDue, on his next re-thinks, for the next two minutes).
-    const holdsIt = watched(n) && rng() > behaviorOf(n).guts;
-    if (sameCar) {
-      // one of your own. Leaning on him is a strike with your car either way
-      // (systems/prisoncars.js ownStrike); he swings only with enough against
-      // you to clear what his loyalty asks, and then it is between you two.
-      if (!yoursToLead && PCARS() && PCARS().ownStrike) PCARS().ownStrike(n);
+    const armed = !!(n.hasGun && n.armed && !n._holstered);     // a gun in his hand never backs down to words
+
+    // ONE OF YOUR OWN (or the man who leads you): leaning on him is your
+    // car's business (prisoncars.js ownStrike). With enough against you to
+    // clear what his loyalty asks, or as the shotcaller you just fronted, he
+    // calls it: "Then let's go." Under the bar he walks.
+    if (W.sameCar && !armed) {
+      const pushed = W.yoursToLead ? (n.playerGrudge || 0) >= playerBar(n) : (T.k > patience || margin > 0.6);
+      if (!pushed) {
+        say(n, T.k > 1 ? "I heard you." : "Easy.", null, 1.6);
+        setResp(n, "refused");
+        return { ok: true, msg: "", answer: "refused" };
+      }
+      T.k = 0;
+      if (!W.yoursToLead && PCARS() && PCARS().ownStrike) PCARS().ownStrike(n);
       if (CBZ.econ && CBZ.econ.addRespect) CBZ.econ.addRespect(n, -8);
-      if ((yoursToLead || margin >= 0) && (n.playerGrudge || 0) >= playerBar(n)) {
-        if (holdsIt) {
+      if (n.isLeader || W.yoursToLead || (margin >= 0 && (n.playerGrudge || 0) >= playerBar(n))) {
+        if (watched(n) && rng() > behaviorOf(n).guts) {
           n._swingDue = { until: t + 120, why: "own" };
           say(n, "Not here.", null, 1.6);
+          walkOff(n, 2.5);
           return { ok: true, msg: "", answer: "later" };
         }
-        if (requestHunt(n, 8, "own")) {
-          _ownChallenger = n;
-          say(n, "That's enough.", null, 1.6);
-          return { ok: true, msg: "", answer: "fight" };
-        }
+        say(n, "Then let's go.", null, 1.8);
+        setResp(n, "letsgo");
+        return { ok: true, msg: "", answer: "letsgo" };
       }
-      run();
       say(n, "We're supposed to be on the same side.", null, 2);
+      walkOff(n, 3);
       return { ok: true, msg: "", answer: "walk" };
     }
-    if (margin >= 0) {
-      if (holdsIt) {
-        n._swingDue = { until: t + 120, why: "threat", crew: rivalCar ? 1 : 0 };
-        say(n, "Not here.", null, 1.6);
-        return { ok: true, msg: "", answer: "later" };
-      }
-      say(n, "That's enough.", null, 1.6);
-      provokeGang(n, 8, { crew: rivalCar ? 1 : 0, why: "threat", standing: 2 });
-      if ((n.huntPlayer || 0) > 0) return { ok: true, msg: "", answer: "fight" };
-      // the hunt was refused (a gun is out, the cap is full): he backs off instead
+
+    // HE IS THE HEAVIER MAN BY A DISTANCE: he does not answer it, he turns it
+    if (!armed && margin > 0.9 && T.k === 1 && ((CBZ.game && CBZ.game.cigs) || 0) > 0 &&
+        beginDemand(n, "robbed", { cost: 2 + Math.round(margin * 3), lines: TURN_LINES })) {
+      n._resp = null;
+      return { ok: true, msg: "", answer: "turned" };
     }
-    run();
-    if (CBZ.econ && CBZ.econ.witnessRespect) CBZ.econ.witnessRespect(n, 3, 14);
-    addBuzz("fear", 4, actorName(n));
-    return { ok: true, msg: "", answer: "flee" };
+    // PUSHED PAST WHAT HE WILL TAKE (or he never took the first one)
+    if (armed || T.k > patience || margin > 0.6) return { ok: true, msg: "", answer: snap(n, W) };
+
+    // YOUR SIDE IS THE HEAVIER: he buys you off, if he has anything
+    if (margin < 0) {
+      const off = makeOffer(n);
+      if (off) {
+        setResp(n, "offer", { cigs: off.cigs, item: off.item, raised: 0 });
+        say(n, off.cigs > 0 ? "Take it. " + off.cigs + "." : "Take it.", null, 2);
+        if (CBZ.econ && CBZ.econ.witnessRespect) CBZ.econ.witnessRespect(n, 1, 12);
+        return { ok: true, msg: "", answer: "offer" };
+      }
+      say(n, "I got nothing.", null, 1.6);
+      walkOff(n, 2.5);
+      return { ok: true, msg: "", answer: "nothing" };
+    }
+    // even enough that he stands on it
+    say(n, T.k > 1 ? "I said fuck off." : "Fuck off.", null, 1.6);
+    setResp(n, "refused");
+    return { ok: true, msg: "", answer: "refused" };
   }
+
+  // ---- what his answer lets you do ------------------------------------------
+  const NO = { ok: false, msg: "" }, YES = { ok: true, msg: "" };
+  // ACCEPT what he holds out: it moves off his own load into your pockets
+  function respAccept(n) {
+    const r = respOf(n);
+    if (!r || (r.kind !== "offer" && r.kind !== "price")) return NO;
+    const E = CBZ.econ;
+    if (r.kind === "price") {
+      if (((CBZ.game && CBZ.game.cigs) || 0) < r.cost) { say(n, r.cost + ". You don't have it.", null, 1.8); return NO; }
+      E.addCigs(-r.cost);
+      CBZ.sfx && CBZ.sfx("coin");
+      return joinsYou(n);
+    }
+    const load = E && E.rollLoadout ? E.rollLoadout(n) : null;
+    if (load) {
+      if (r.cigs > 0) { const k = Math.min(load.cigs, r.cigs); load.cigs -= k; if (k > 0) E.addCigs(k); }
+      if (r.item) { const i = load.items.indexOf(r.item); if (i >= 0) { load.items.splice(i, 1); if (E.addItem) E.addItem(r.item); } }
+      CBZ.sfx && CBZ.sfx("coin");
+    }
+    // you squeezed him: he carries it, and his set hears
+    n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 2);
+    n.grudgeWhy = "what you took off me";
+    if (n.gang >= 0) noteGangIncident(n, "disrespect", 4, { source: "squeeze", noResponders: true });
+    if (CBZ.reportCrime) CBZ.reportCrime(10, { type: "steal", actorRole: CBZ.game.role });
+    walkOff(n, 3);
+    return YES;
+  }
+  // MORE: he adds to it, or it is one push too many
+  function respMore(n) {
+    const r = respOf(n);
+    if (!r || r.kind !== "offer") return NO;
+    const W = weigh(n);
+    const E = CBZ.econ, load = E && E.rollLoadout ? E.rollLoadout(n) : null;
+    n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1.5);
+    const left = load ? load.cigs - r.cigs : 0;
+    const spare = load && load.items ? load.items.filter(function (x) { return x !== r.item; }) : [];
+    if (r.raised < 2 && W.margin < 0.2 - r.raised * 0.25 && (left > 0 || spare.length)) {
+      r.raised++;
+      if (left > 0) r.cigs += Math.max(1, Math.ceil(left * 0.5));
+      else if (!r.item) r.item = spare[0];
+      r.until = nowS() + RESP_S;
+      say(n, r.cigs > 0 ? r.cigs + ". That's it." : "That's all I got.", null, 2);
+      return YES;
+    }
+    if (!(left > 0 || spare.length) && W.margin < 0) { say(n, "That's all I got.", null, 1.8); r.until = nowS() + RESP_S; return NO; }
+    return { ok: true, msg: "", answer: snap(n, W) };
+  }
+  /* LEAVE. In front of an offer or a price, or on a man you called over, it
+     is said TO him and he goes. In front of a "Fuck off." or a "Then let's
+     go." it is you who walks: the yard standing there saw it, and inside
+     your own car it is face lost with the set. */
+  function respLeave(n) {
+    const r = respOf(n);
+    if (!r) return NO;
+    if (r.kind === "offer" || r.kind === "price" || r.kind === "order") {
+      if (r.kind === "order" && CBZ.prisonCrew && CBZ.prisonCrew.has(n)) {
+        // one of your men at your shoulder: he goes back to his day
+        if (CBZ.command && CBZ.command.issue) CBZ.command.issue(CBZ.player, [n], "go", null, { game: "prison", quiet: true });
+        if (CBZ.prisonCrew.has(n)) CBZ.prisonCrew.dismiss(n);
+        n._resp = null;
+        return YES;
+      }
+      if (r.kind === "offer") n.playerGrudge = Math.max(0, (n.playerGrudge || 0) - 1);   // you did not take it
+      walkOff(n, 2.5);
+      return YES;
+    }
+    // you back down
+    n._resp = null;
+    if (n._threats) n._threats.k = 0;
+    n.playerFear = Math.max(0, (n.playerFear || 0) - 2);
+    if (CBZ.econ && CBZ.econ.witnessRespect) CBZ.econ.witnessRespect(n, -2, 12);
+    if (CBZ.econ && CBZ.econ.addRespect) CBZ.econ.addRespect(n, -3);
+    if (r.kind === "letsgo" && playerCar() >= 0) addGangStanding(playerCar(), -3);
+    return YES;
+  }
+  // FIGHT: the one-on-one he called. Nobody of the set steps in (answerFor).
+  function respFight(n) {
+    const r = respOf(n);
+    if (!r || r.kind !== "letsgo") return NO;
+    n._resp = null;
+    n._fairT = nowS() + 60;
+    if (!requestHunt(n, 12, "own")) { n._fairT = 0; return NO; }
+    _ownChallenger = n;
+    return YES;
+  }
+
+  /* ---- ORDERS: your men, and the men who could be ----
+     canOrder   you lead a car and he is one of its men, or a man of that car
+                who runs with nobody yet (he can be brought in)
+     Guard      CBZ.command.issue "guard": obeyed, he joins the crew at your
+                shoulder (systems/prisonfriends.js, its cap and its tray);
+                "You sure?" and "No." leave the order on him to be pushed
+                (the same button again) or pressed (Threaten: command.threaten)
+     Recruit    not an order, an ask: what he thinks of you and of the car
+                decides yes, a price, or no
+     Attack/Grab  given to the men stood with you, about the man you tapped */
+  function leadCar() { const P = CBZ.player; return P && P._leadsCar >= 0 ? P._leadsCar : -1; }
+  function canOrder(n) {
+    const L = leadCar();
+    if (L < 0 || !n || !alive(n) || n.kind === "guard" || n.kind === "warden" || n.role === "merchant") return "";
+    if (n.gang === L) return "man";
+    if (carK(n) === L && !(n.gang >= 0)) return "join";
+    return "";
+  }
+  function orderOpen(n) {
+    const k = canOrder(n);
+    if (!k) return NO;
+    setResp(n, "order", { who: k });
+    return YES;
+  }
+  function orderGuard(n) {
+    const r = respOf(n);
+    if (!r || r.kind !== "order" || r.who !== "man" || !CBZ.command) return NO;
+    if (CBZ.prisonCrew && CBZ.prisonCrew.full() && !CBZ.prisonCrew.has(n)) { say(n, "You got enough people.", null, 1.8); return NO; }
+    const res = CBZ.command.issue(CBZ.player, [n], "guard", null, { game: "prison" });
+    if (res.obey.length) { n._resp = null; return YES; }
+    if (res.turn.length) { n._resp = null; return NO; }
+    r.until = nowS() + RESP_S;            // "You sure?" / "No.": the order stays on him to push or press
+    r.said = res.hesitate.length ? "hesitate" : "refuse";
+    return NO;
+  }
+  // THREATEN on a man who just said no to your order: fear, or it breaks him
+  function orderPress(n) {
+    const r = respOf(n);
+    if (!r || r.kind !== "order" || !CBZ.command || !CBZ.command.threaten) return NO;
+    const gun = CBZ.currentGun && CBZ.currentGun();
+    const res = CBZ.command.threaten(CBZ.player, n, { game: "prison", armed: !!gun, aimed: !!(gun && CBZ.isAimingWeapon && CBZ.isAimingWeapon()) });
+    if (res.answer !== "cowed" && res.answer !== "none") n._resp = null;
+    else r.until = nowS() + RESP_S;
+    return res.answer === "obey" ? YES : NO;
+  }
+  function joinsYou(n) {
+    const L = leadCar();
+    n._resp = null;
+    if (L < 0) return NO;
+    setClique(n, L);
+    n.playerTrust = Math.min(14, (n.playerTrust || 0) + 3);
+    addGangStanding(L, 2);
+    say(n, "I'm with you.", null, 1.8);
+    return YES;
+  }
+  function recruit(n) {
+    const r = respOf(n);
+    if (!r || r.kind !== "order" || r.who !== "join") return NO;
+    const L = leadCar(), p = n.personality || {};
+    // what he thinks of you, of the car, and what he is sore about
+    const score = (n.rep || 0) / 45 + (n.playerTrust || 0) * 0.06 + (n.playerFear || 0) * 0.03 + gangStanding(L) / 60
+      - (n.playerGrudge || 0) * 0.08 + ((p.loyalty != null ? p.loyalty : 0.5) - 0.5) * 0.3;
+    if (score > 0.55) return joinsYou(n);
+    if (score > 0.05) {
+      const cost = Math.max(2, Math.round((0.7 - score) * 10 + (p.greed != null ? p.greed : 0.5) * 4));
+      setResp(n, "price", { cost: cost });
+      say(n, cost + ".", null, 1.8);
+      return NO;
+    }
+    say(n, "No.", null, 1.4);
+    n._recruitNoT = nowS() + 90;
+    walkOff(n, 2.5);
+    return NO;
+  }
+  // one of your men goes at him (fists, or steel when that is what you ordered)
+  function crewSet(man, target, steel) {
+    if (!alive(man) || !alive(target) || man === target || man.cuffed || man.aiState === "fight") return false;
+    if (target.kind === "guard" || target.kind === "warden") return false;
+    if (steel) man._steelT = 25;
+    startFight(man, target);
+    return true;
+  }
+  CBZ.prisonCrewSet = crewSet;
+  function crewWith() { return CBZ.prisonCrew ? CBZ.prisonCrew.withYou(10) : []; }
+  // ATTACK: the men stood with you, on the man you tapped. What is in your
+  // hand is the order's weight: steel out, they bring steel.
+  function crewAttack(n) {
+    const men = crewWith();
+    if (!men.length || !alive(n)) return NO;
+    const gun = CBZ.currentGun && CBZ.currentGun();
+    n._resp = null;
+    let sent = 0;
+    if (CBZ.command && CBZ.command.issue && leadCar() >= 0) {
+      const res = CBZ.command.issue(CBZ.player, men, gun ? "kill" : "take", n, { game: "prison" });
+      sent = res.obey.length;
+    }
+    // men who are with you as friends, not as your car's men, come anyway
+    for (let i = 0; i < men.length && sent < 3; i++) if (!(men[i].gang >= 0 && men[i].gang === leadCar()) && crewSet(men[i], n, !!gun)) sent++;
+    if (sent && n.gang >= 0) addGangStanding(n.gang, -4);
+    return sent ? YES : NO;
+  }
+  // GRAB, given to your men: outnumbered he gives it up (the held body a
+  // muzzle gets: Rob / Tie / Release), or he fights the man who reached for him
+  function crewSeize(n) {
+    const men = crewWith();
+    if (!men.length || !alive(n)) return NO;
+    n._resp = null;
+    const W = weigh(n);
+    if (W.margin < 0.5 && !(n.hasGun && n.armed && !n._holstered) && CBZ.intimidateHold && CBZ.intimidateHold(n, 14)) {
+      const m = men[0], g = n.group.position;
+      if (m.target) m.target.set(g.x, 0, g.z);
+      if (CBZ.npcStare) CBZ.npcStare(m, 4, g);
+      n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 2);
+      return YES;
+    }
+    startFight(n, men[0]);
+    for (let i = 0; i < men.length && i < 3; i++) crewSet(men[i], n, false);
+    return NO;
+  }
+  CBZ.prisonResp = {
+    of: respOf, crew: function () { return crewWith().length; },
+    accept: respAccept, more: respMore, leave: respLeave, fight: respFight,
+    canOrder: canOrder, order: orderOpen, guard: orderGuard, press: orderPress, recruit: recruit,
+    attack: crewAttack, seize: crewSeize,
+  };
 
   // shove an actor away from a point (impact reaction)
   /* A SHOVE IS A STEP, NOT A TELEPORT. This wrote `force` metres straight
