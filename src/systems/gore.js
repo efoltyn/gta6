@@ -893,7 +893,9 @@
      are in THE CLOUD IS A LEDGER, below):
        • it is RED from above, below and the side: a deep red, darker where
          it is dense and deeper down (never pink, brown, black, olive or
-         green: the owner banned those on 2026-08-30).
+         green: the owner banned those on 2026-08-30), and it has NO EDGE:
+         swirls of thicker and thinner blood falling off softly into the
+         water. From above it is UNDER the water, seen through the surface.
        • it BILLOWS from the wound: born small, it opens up in its first
          second and fades in over a quarter second instead of arriving whole.
        • it DIFFUSES for tens of seconds: its radius grows and the blood in it
@@ -951,7 +953,6 @@
     "}",
   ].join("\n");
   function displayColor(hex) { return new THREE.Color(hex).convertSRGBToLinear(); }
-  const PLUME_DARK_DEPTH = 6.5;         // metres under the swell where the cloud has gone dark neutral
   const PUFF_VIS = 0.4, LID_GAP = 0.18; // drawn rim as a fraction of the quad; lid clearance
   const PUFF_MAX = 512;                 // hard allocation; the live cap is puffCap()
   function puffCap() { return CBZ.qScale ? CBZ.qScale(180, 440) : 300; }
@@ -1006,69 +1007,121 @@
      times CLOUD_SEEN, because a cloud of red cells is seen well before its
      green absorption alone would darken the water (they scatter far more
      than they absorb). The colours are display sRGB, as the slick's are.
-     THE EDGE IS SHORT. Red laid thinly over turquoise or blue is grey or
-     mauve, and over the bright surface from below it is pink; no blend
-     avoids that, so the cloud does not linger there: it comes in between
-     seen depths CLOUD_RIM[0] and [1] (the soft edge of a billow), and is a
-     red that hides what is behind it a little way inside. Diluting, it
-     loses its edges first and goes out lobe by lobe, red to the last. */
+     NO EDGE ANYWHERE (round ten: a short, hard rim read as red cotton wool,
+     clusters of opaque red balls, and the trail as a dotted line of rings).
+     Blood in water has no edge: its density falls off smoothly into the
+     water, with darker and lighter swirls through it. So every puff is a
+     swirl of density with a long soft fall-off (cloudTexture), its opacity
+     grows smoothly with it (never a floor, never a threshold), and no puff
+     is denser through its middle than CLOUD_D_CAP: past that its opacity
+     would saturate almost to its rim and the rim would harden again.
+     SEEN FROM ABOVE IT IS UNDER THE WATER (round ten: drawn as a billboard
+     slid onto the surface, its top half stood out of the sea as a solid red
+     object). Every point of a puff knows how far under the live surface it
+     is: what would stand above the water is not drawn, and the rest is
+     seen through the surface the way world/water_spec.js's sea sees
+     everything under it, with this point's own depth for the column (the
+     sea's sheet can only use the bed's): the surface reflects Fresnel's
+     share; the water over it takes it away, red first, on the daylight's
+     way down to the blood and on its way back up the refracted line of
+     sight (CLOUD_VEIL: the live cloud's own 0.3 a metre straight down,
+     which is what near-shore water does to a thing's contrast, not the
+     sea's clear-water absorption alone); a low look over deep water sees
+     nothing under it; and deeper is softer (its texture is read from a
+     blurrier level). From under the water it is lit by the daylight that
+     reaches its depth (WATER_EXT), and the water between it and the eye is
+     the fog. */
   const TAU_PER_L = 12.65;              // green optical depth through a sphere's middle: per litre, per m^2 of radius^2
   const CLOUD_SEEN = 2.5;               // what is drawn: the ledger's optical depth, as seen
-  const CLOUD_OVER = 5.0;               // in-scatter opacity per unit of seen depth
-  const CLOUD_ABS = [0.05, 2.2, 3.0];   // absorption per unit of seen depth: red passes, green and blue go
-  const CLOUD_RIM = [0.1, 0.25];        // seen depth over which a cloud's edge comes in
+  const CLOUD_D_CAP = 1.8;              // seen depth through a puff's middle, at most (its rim stays soft)
+  const CLOUD_OVER = 1.8;               // in-scatter opacity per unit of seen depth
+  const CLOUD_ABS = [0.03, 0.8, 1.0];   // absorption per unit of seen depth: red passes, green and blue go
   const CLOUD_EDGE = 0xa01313;          // display sRGB: a thin cloud's red, lit
   const CLOUD_CORE = 0x5e090a;          // display sRGB: a dense cloud's red
-  const CLOUD_DEEP = 0x560a0c;          // display sRGB: deep down, the red light going
-  const CLOUD_CORE_D = [0.4, 1.8];      // seen depth from which the dense red takes over, to where it has
+  const CLOUD_CORE_D = [0.4, 1.8];      // seen depth from which the dense red comes in, to where it has
+  const WATER_EXT = [0.37, 0.065, 0.04];// per metre: the sea's own clear water (cbzWaterShade's ab + 0.02): the daylight down to the blood
+  const CLOUD_VEIL = [0.32, 0.15, 0.14];// per metre of sight line: what the water over it takes of a cloud seen from above (the live cloud's own 0.3 a metre down, red first)
   const L_TAU = 140;                    // s: the water taking a cloud's blood below seeing
   const CHUM_LPS = 0.025;               // L/s at chum rate 1: a femoral or carotid artery opened (1.5 L/min)
   const LENS_FLOOR = 0.35;              // a cloud the lens is inside still shows this much of itself
   const glslF = (v) => (Math.round(v * 1000) / 1000).toFixed(3);
   const glslV3 = (a) => "vec3(" + a.map(glslF).join(", ") + ")";
 
-  // FOUR BILLOWS, NOT ONE BLOT: a 2x2 atlas of cauliflower clusters, a
-  // softer body ringed by rounder, denser lobes with thinner water between
-  // them, so the puffs of one cloud overlap into a lobed mass (each lobe
-  // darker where it is dense, see the in-scatter's colour) instead of a pile
-  // of identical discs. Each lobe holds most of its density to two thirds of
-  // its radius and falls off over the last third, so a cloud's soft edge is
-  // short and a thinning cloud goes out lobe by lobe (see THE EDGE IS SHORT)
-  let cloudTex = null;
+  // FOUR SWIRLS, NOT FOUR BALLS: a 2x2 atlas of density, each cell a disc
+  // whose coordinates a slow noise field has pushed round (so its outline is
+  // ragged and its fall-off long, never a circle) with streaks of thicker
+  // and thinner blood through it, fading to nothing well inside the cell.
+  // Overlapping, turned and growing at their own rates, the puffs of one
+  // cloud make a mass with no seam, no disc and no ring in it. Its mip levels
+  // are what a deeper cloud is read from. Value noise over one small table of
+  // dice, computed a couple of dozen rows a frame once a sea is drawn (about
+  // a quarter second, never a hitch), or all at once if a bite comes first.
+  const CT_N = 256, CT_C = 128;
+  let cloudTex = null, cloudData = null, cloudLat = null, cloudDens = null, cloudRow = 0, cloudWarm = false;
+  function cloudRows(n) {
+    if (cloudRow >= 4 * CT_C) return false;
+    if (!cloudData) {
+      cloudData = new Uint8Array(CT_N * CT_N * 4);
+      cloudDens = new Float32Array(CT_C * CT_C);
+      cloudLat = new Float32Array(64 * 64);
+      let sd = 977;
+      for (let i = 0; i < cloudLat.length; i++) { sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0; cloudLat[i] = sd / 4294967296; }
+    }
+    const L = cloudLat, D = cloudDens;
+    const noise = function (x, y) {
+      const x0 = Math.floor(x), y0 = Math.floor(y);
+      let fx = x - x0, fy = y - y0;
+      fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+      const ix = x0 & 63, iy = y0 & 63, ix1 = (ix + 1) & 63, iy1 = (iy + 1) & 63;
+      const a = L[iy * 64 + ix], b = L[iy * 64 + ix1], c = L[iy1 * 64 + ix], d = L[iy1 * 64 + ix1];
+      return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+    };
+    const fbm = function (x, y) {
+      return noise(x, y) * 0.5714 + noise(x * 2.03 + 17.1, y * 2.03 + 3.7) * 0.2857 + noise(x * 4.1 + 5.3, y * 4.1 + 29.9) * 0.1429;
+    };
+    const end = Math.min(4 * CT_C, cloudRow + n);
+    for (; cloudRow < end; cloudRow++) {
+      const k = (cloudRow / CT_C) | 0, y = cloudRow % CT_C, s = 7.3 + k * 13.1;
+      const py = (y + 0.5) / CT_C * 2 - 1;
+      for (let x = 0; x < CT_C; x++) {
+        const px = (x + 0.5) / CT_C * 2 - 1;
+        // the swirl: the disc's own coordinates pushed round by a slow field
+        const qx = px + (fbm(px * 1.7 + s, py * 1.7 + 7.7) - 0.5) * 0.75;
+        const qy = py + (fbm(px * 1.7 + s + 23.3, py * 1.7 + 41.9) - 0.5) * 0.75;
+        const r2 = (qx * qx + qy * qy) / (0.86 * 0.86);
+        // a long soft fall-off to nothing, ragged where the swirl pushed it,
+        // and nothing near the cell's own border whatever the swirl did
+        const e1 = r2 >= 1 ? 0 : 1 - r2, env = e1 * e1 * Math.pow(e1, 0.4);
+        const pr = Math.sqrt(px * px + py * py), edge = pr >= 0.97 ? 0 : (pr <= 0.78 ? 1 : 1 - Math.pow((pr - 0.78) / 0.19, 2));
+        // thicker and thinner blood through it
+        let nn = fbm(qx * 2.6 + s + 5.0, qy * 2.6 - 3.0 + s);
+        nn = nn * nn * (3 - 2 * nn);
+        D[y * CT_C + x] = env * edge * (0.3 + 0.95 * nn);
+      }
+      if (y === CT_C - 1) {
+        // the cell is done: into the atlas, its densest point full
+        let mx = 0;
+        for (let i = 0; i < D.length; i++) if (D[i] > mx) mx = D[i];
+        const ox = (k & 1) * CT_C, oy = (k >> 1) * CT_C;
+        for (let yy = 0; yy < CT_C; yy++) for (let x = 0; x < CT_C; x++) {
+          const o = ((oy + yy) * CT_N + ox + x) * 4;
+          cloudData[o] = cloudData[o + 1] = cloudData[o + 2] = 255;
+          cloudData[o + 3] = Math.round(255 * D[yy * CT_C + x] / (mx || 1));
+        }
+      }
+    }
+    return cloudRow < 4 * CT_C;
+  }
   function cloudTexture() {
     if (cloudTex) return cloudTex;
-    const N = 128, C = 64;
-    const c = document.createElement("canvas"); c.width = c.height = N;
-    const g = c.getContext("2d");
-    let sd = 977;
-    const rnd = function () { sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0; return sd / 4294967296; };
-    const lump = function (x, y, r, a, k) {
-      const gr = g.createRadialGradient(x, y, 0, x, y, r);
-      gr.addColorStop(0, "rgba(255,255,255," + a + ")");
-      gr.addColorStop(k, "rgba(255,255,255," + (a * 0.86) + ")");
-      gr.addColorStop(1, "rgba(255,255,255,0)");
-      g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.fill();
-    };
-    for (let k = 0; k < 4; k++) {
-      const ox = (k & 1) * C, oy = (k >> 1) * C, cx = ox + C * 0.5, cy = oy + C * 0.5;
-      g.save(); g.beginPath(); g.rect(ox + 1, oy + 1, C - 2, C - 2); g.clip();
-      // the body
-      lump(cx, cy, C * 0.3, 0.42, 0.62);
-      // the lobes round it, each its own round billow
-      const n = 6 + k, a0 = rnd() * 6.2832;
-      for (let i = 0; i < n; i++) {
-        const a = a0 + (i + rnd() * 0.6) * 6.2832 / n, d = C * (0.13 + rnd() * 0.1), r = C * (0.1 + rnd() * 0.07);
-        lump(cx + Math.cos(a) * d, cy + Math.sin(a) * d, r, 0.34 + rnd() * 0.2, 0.7);
-      }
-      // and a few inside, so the middle is not flat
-      for (let i = 0; i < 3; i++) {
-        const a = rnd() * 6.2832, d = Math.sqrt(rnd()) * C * 0.1, r = C * (0.08 + rnd() * 0.05);
-        lump(cx + Math.cos(a) * d, cy + Math.sin(a) * d, r, 0.25 + rnd() * 0.15, 0.62);
-      }
-      g.restore();
-    }
-    cloudTex = new THREE.CanvasTexture(c);
+    cloudRows(4 * CT_C);
+    cloudTex = new THREE.DataTexture(cloudData, CT_N, CT_N, THREE.RGBAFormat);
+    cloudTex.generateMipmaps = true;
+    cloudTex.minFilter = THREE.LinearMipmapLinearFilter;
+    cloudTex.magFilter = THREE.LinearFilter;
     cloudTex.wrapS = cloudTex.wrapT = THREE.ClampToEdgeWrapping;
+    cloudTex.needsUpdate = true;
+    cloudLat = null; cloudDens = null;
     return cloudTex;
   }
 
@@ -1099,9 +1152,8 @@
       const t = P_T[i], f = t / P_LIFE[i], r = puffR(i, t), L = puffL(i, t);
       const fin = t < P_IN[i] ? t / P_IN[i] : 1;
       const depth = P_SY[i] - P_Y[i];
-      let dark = depth > 0 ? depth / PLUME_DARK_DEPTH : 0; dark = Math.min(1, dark * 0.85 + f * 0.2);
       const tau = TAU_PER_L * L / (r * r) * fin * (f > 0.75 ? 1 - (f - 0.75) / 0.25 : 1);
-      out.push({ x: P_X[i], y: P_Y[i], z: P_Z[i], r: r, L: L, tau: tau, seen: tau * CLOUD_SEEN, dark: dark, t: t });
+      out.push({ x: P_X[i], y: P_Y[i], z: P_Z[i], r: r, L: L, tau: tau, seen: Math.min(CLOUD_D_CAP, tau * CLOUD_SEEN), depth: depth, t: t });
     }
     return out;
   };
@@ -1110,46 +1162,76 @@
   let plumeMesh = null, scatMesh = null, plumeGeo = null, aPos = null, aMisc = null;
   const PLUME_VS = [
     "attribute vec4 iPos;",   // xyz centre, w = quad size (m)
-    "attribute vec4 iMisc;",  // x green optical depth through the middle, y darkness 0..1, z rotation, w billow cell 0..3
-    "uniform float uAbove; uniform float uSeaY;",
-    "varying vec2 vUv; varying float vA; varying float vDark; varying float vLit; varying float vLid;",
+    "attribute vec4 iMisc;",  // x seen optical depth through the middle, y the live surface over it, z rotation, w swirl cell 0..3
+    "uniform float uAbove;",
+    "varying vec4 vAff; varying float vLitW; varying float vA; varying vec3 vTint; varying float vSee; varying float vBias;",
     "#include <fog_pars_vertex>",
     "void main() {",
-    "  vUv = vec2(mod(iMisc.w, 2.0), floor(iMisc.w * 0.5 + 0.01)) * 0.5 + (uv * 0.96 + 0.02) * 0.5;",
+    "  vec2 cuv = vec2(mod(iMisc.w, 2.0), floor(iMisc.w * 0.5 + 0.01)) * 0.5 + (uv * 0.96 + 0.02) * 0.5;",
     "  vec4 mvPosition = modelViewMatrix * vec4(iPos.xyz, 1.0);",
     "  float vz = -mvPosition.z;",
-    "  float w = iPos.w, veil = 1.0;",
-    /* SEEN FROM ABOVE THE SEA. The sea writes depth at the surface and
-       veils what is under it by the column to the SEABED (it reads the
-       opaque depth, and a transparent plume has none), so a plume under
-       it drew either nothing or a ghost. From above, the puff is slid
-       along its own view ray up to where that ray meets the surface and
-       shrunk by the same factor: identical on screen, but now in front
-       of the sea's depth. Its own depth becomes the veil instead, and a
-       grazing look at the sea is the sea's own mirror: a cloud under it
-       shows as the view steepens. */
-    "  if (uAbove > 0.5 && iPos.y < uSeaY) {",
-    "    float k = clamp(0.97 * (cameraPosition.y - uSeaY) / max(0.001, cameraPosition.y - iPos.y), 0.02, 1.0);",
-    "    mvPosition.xyz *= k; w *= k;",
-    "    veil = exp(-(uSeaY - iPos.y) * 0.3);",
-    "    veil *= smoothstep(0.02, 0.15, (cameraPosition.y - iPos.y) / max(0.5, length(iPos.xyz - cameraPosition)));",
-    "  }",
     "  float c = cos(iMisc.z), s = sin(iMisc.z);",
-    "  vec2 q = position.xy * w;",
+    "  vec2 q = position.xy * iPos.w;",
     "  vec2 rq = vec2(c * q.x - s * q.y, s * q.x + c * q.y);",
     "  mvPosition.xy += rq;",
-    "  vLit = rq.y / max(w, 0.001) + 0.5;",        // how far up the puff this corner is, on screen
-    // how far under the surface this corner stands (seen from below: what
-    // would stand above the water is cut; from above there is no cut)
-    "  vLid = uAbove > 0.5 ? 9.0 : uSeaY - (iPos.y + rq.x * viewMatrix[1][0] + rq.y * viewMatrix[1][1]);",
-    // A LENS INSIDE THE CLOUD sees murk, not a red screen
-    "  vA = iMisc.x * veil * mix(" + LENS_FLOOR.toFixed(3) + ", 1.0, smoothstep(0.35 * iPos.w, 0.9 * iPos.w + 1.2, vz));",
-    "  vDark = iMisc.y;",
+    "  float lit = rq.y / max(iPos.w, 0.001) + 0.5;",        // how far up the puff this corner is, on screen
+    // this corner in the world, and how far under the live surface over the
+    // puff it stands: what would stand above the water is not drawn, from
+    // either side of it
+    "  vec3 wp = iPos.xyz + vec3(viewMatrix[0][0] * rq.x + viewMatrix[0][1] * rq.y, viewMatrix[1][0] * rq.x + viewMatrix[1][1] * rq.y, viewMatrix[2][0] * rq.x + viewMatrix[2][1] * rq.y);",
+    "  float lid = iMisc.y - wp.y;",
+    "  float h = max(lid, 0.0);",
+    "  vA = iMisc.x;",
+    "  if (uAbove > 0.5) {",
+    // THROUGH THE SURFACE (see NO EDGE ANYWHERE): Fresnel, red taken first
+    // over the path down and back up the refracted sight line, a low look
+    // over deep water seeing nothing under it, deeper read softer
+    "    vec3 toEye = cameraPosition - wp;",
+    "    float ndv = clamp(toEye.y / max(length(toEye), 0.001), 0.0, 1.0);",
+    "    float F = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);",
+    "    float cosT = sqrt(max(0.0, 1.0 - (1.0 - ndv * ndv) / 1.7769));",
+    "    vec3 Tv = exp(-" + glslV3(CLOUD_VEIL) + " * h * (1.0 + 1.0 / max(cosT, 0.2)));",
+    // (blood that has reached the top is in the surface, not under it: the
+    // part within a hand's depth of it shows clear, as the film over it does)
+    "    vSee = (1.0 - F * smoothstep(0.0, 0.35, h)) * Tv.g * mix(1.0, smoothstep(0.22, 0.55, ndv), smoothstep(0.3, 1.5, h));",
+    "    vTint = max(Tv / max(Tv.g, 0.001), vec3(0.3));",
+    "    vBias = clamp(h * 0.7, 0.0, 2.5);",
+    /* Then this corner is slid along its own line of sight to just over
+       the surface (a few percent of the eye's height over it): the same
+       place on screen, now in front of the sea's depth, and still behind
+       whatever stands out of the water there (the body floating in it). */
+    "    float lift = clamp(0.03 * (cameraPosition.y - iMisc.y), 0.02, 0.3);",
+    "    float up = cameraPosition.y - iMisc.y - lift;",
+    // (a crest over the puff higher than the eye: left where it is, behind it)
+    "    mvPosition.xyz *= up > 0.0 ? clamp(up / max(0.001, cameraPosition.y - wp.y), 0.02, 1.0) : 1.0;",
+    "  } else {",
+    // UNDER IT: lit by the daylight that reaches this depth (red first); the
+    // water between the blood and the eye is the fog. A LENS INSIDE THE
+    // CLOUD sees murk, not a red screen.
+    "    vTint = max(exp(-" + glslV3(WATER_EXT) + " * h), vec3(0.3));",
+    "    vSee = 1.0;",
+    "    vBias = 0.0;",
+    "    vA *= mix(" + LENS_FLOOR.toFixed(3) + ", 1.0, smoothstep(0.35 * iPos.w, 0.9 * iPos.w + 1.2, vz));",
+    "  }",
     "  gl_Position = projectionMatrix * mvPosition;",
+    // (the corners were slid along their sight lines by different amounts:
+    // their texture, rim and light are spread over the quad as the screen
+    // sees it, not weighted by those depths, or the swirl would be dragged
+    // toward the nearer corners)
+    "  vAff = vec4(cuv, lid, 1.0) * gl_Position.w;",
+    "  vLitW = lit * gl_Position.w;",
     "  #ifdef USE_FOG",
     "  vFogDepth = vz;",
     "  #endif",
     "}",
+  ].join("\n");
+  // the fragment's share of it: the swirl's coordinates, how far under the
+  // surface it is, how high up the puff
+  const PLUME_FS_AFF = [
+    "  float iw = 1.0 / vAff.w;",
+    "  vec2 vUv = vAff.xy * iw;",
+    "  float vLid = vAff.z * iw;",
+    "  float vLit = vLitW * iw;",
   ].join("\n");
   const PLUME_FOG_GLSL = [
     "  float wf = 0.0;",
@@ -1182,21 +1264,24 @@
         uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
           map: { value: null },
           uAbove: { value: 0 },
-          uSeaY: { value: 0 },
         }]),
         vertexShader: PLUME_VS,
         fragmentShader: [
-          "uniform sampler2D map;",
-          "varying vec2 vUv; varying float vA; varying float vDark; varying float vLit; varying float vLid;",
+          "uniform sampler2D map; uniform float uAbove;",
+          "varying vec4 vAff; varying float vLitW; varying float vA; varying vec3 vTint; varying float vSee; varying float vBias;",
           "#include <fog_pars_fragment>",
           "void main() {",
-          // the seen optical depth through this column of the puff
-          "  float d = texture2D(map, vUv).a * vA * smoothstep(0.0, 0.25, vLid);",
-          "  if (d < " + glslF(CLOUD_RIM[0]) + ") discard;",
-          // (past its rim a cloud is never thinner than its rim: it goes out
-          // lobe by lobe, never as a pale ghost of itself)
-          "  float rim = smoothstep(" + glslF(CLOUD_RIM[0]) + ", " + glslF(CLOUD_RIM[1]) + ", d);",
-          "  vec3 m = exp(-max(d, " + glslF(CLOUD_RIM[1]) + ") * rim * " + glslV3(CLOUD_ABS) + ");",
+          PLUME_FS_AFF,
+          // the seen optical depth through this column of the puff (read
+          // softer the deeper it is under the surface)
+          "  float tx = texture2D(map, vUv, vBias).a;",
+          // what would stand above the water is not drawn: seen from above,
+          // the cut is as ragged as the swirl itself (the swell is not flat
+          // and the blood at the top spreads along it), never a ruled line
+          "  float d = tx * vA * (uAbove > 0.5 ? smoothstep(-0.25, 0.4, vLid + (tx - 0.4) * 0.5) : smoothstep(0.0, 0.25, vLid));",
+          "  if (d < 0.004) discard;",
+          // what it filters out of the light coming up through the surface
+          "  vec3 m = mix(vec3(1.0), exp(-d * " + glslV3(CLOUD_ABS) + "), vSee);",
           // the water column in front of it takes the filter away, not tints it
           PLUME_FOG_GLSL,
           "  m = mix(m, vec3(1.0), wf);",
@@ -1225,20 +1310,23 @@
           map: { value: null },
           cEdge: { value: displayColor(CLOUD_EDGE) },
           cCore: { value: displayColor(CLOUD_CORE) },
-          cDeep: { value: displayColor(CLOUD_DEEP) },
           uLight: { value: 1 },
         }]),
         vertexShader: PLUME_VS,
         fragmentShader: [
-          "uniform sampler2D map; uniform vec3 cEdge; uniform vec3 cCore; uniform vec3 cDeep; uniform float uLight;",
-          "varying vec2 vUv; varying float vA; varying float vDark; varying float vLit; varying float vLid;",
+          "uniform sampler2D map; uniform vec3 cEdge; uniform vec3 cCore; uniform float uLight; uniform float uAbove;",
+          "varying vec4 vAff; varying float vLitW; varying float vA; varying vec3 vTint; varying float vSee; varying float vBias;",
           "#include <fog_pars_fragment>",
           "void main() {",
-          "  float d = texture2D(map, vUv).a * vA * smoothstep(0.0, 0.25, vLid);",
-          "  if (d < " + glslF(CLOUD_RIM[0]) + ") discard;",
-          "  float a = smoothstep(" + glslF(CLOUD_RIM[0]) + ", " + glslF(CLOUD_RIM[1]) + ", d) * (1.0 - exp(-max(d, " + glslF(CLOUD_RIM[1]) + ") * " + glslF(CLOUD_OVER) + "));",
-          "  vec3 c = mix(cEdge, cCore, smoothstep(" + glslF(CLOUD_CORE_D[0]) + ", " + glslF(CLOUD_CORE_D[1]) + ", d));",
-          "  c = mix(c, cDeep, vDark);",
+          PLUME_FS_AFF,
+          "  float tx = texture2D(map, vUv, vBias).a;",
+          "  float d = tx * vA * (uAbove > 0.5 ? smoothstep(-0.25, 0.4, vLid + (tx - 0.4) * 0.5) : smoothstep(0.0, 0.25, vLid));",
+          "  if (d < 0.004) discard;",
+          // its opacity grows smoothly with the blood in the column: no
+          // floor, no threshold, so it has no edge; seen from above, what
+          // of it the surface and the water over it let through
+          "  float a = (1.0 - exp(-d * " + glslF(CLOUD_OVER) + ")) * vSee;",
+          "  vec3 c = mix(cEdge, cCore, smoothstep(" + glslF(CLOUD_CORE_D[0]) + ", " + glslF(CLOUD_CORE_D[1]) + ", d)) * vTint;",
           // the light it sends back is the daylight it has: at night it is a
           // dark cloud, not a lamp
           "  c *= (0.82 + 0.18 * smoothstep(0.1, 0.95, vLit)) * uLight;",
@@ -1255,7 +1343,7 @@
       });
       smat.uniforms.map.value = cloudTexture();
       // one camera state for both passes
-      smat.uniforms.uAbove = mat.uniforms.uAbove; smat.uniforms.uSeaY = mat.uniforms.uSeaY;
+      smat.uniforms.uAbove = mat.uniforms.uAbove;
       smat._shared = true;
       scatMesh = new THREE.Mesh(plumeGeo, smat);
       scatMesh.frustumCulled = false;
@@ -1310,7 +1398,7 @@
   // third leave a wisp of their own, or a burst of forty drops is forty clouds.
   function puffFromBit(x, y, z, vx, vy, vz, size, mist) {
     if (Math.random() > (mist ? 0.15 : 0.3)) return;
-    puff(x, y, z, vx * 0.08, 0, vz * 0.08, 0.004 + Math.min(0.03, size * 0.05), 0.05, 0.12 + Math.min(0.5, size), 0.005, 8 + Math.random() * 6, 0.2);
+    puff(x, y, z, vx * 0.08, 0, vz * 0.08, 0.004 + Math.min(0.03, size * 0.05), 0.1, 0.12 + Math.min(0.5, size), 0.005, 8 + Math.random() * 6, 0.2);
   }
 
   function updatePuffs(dt) {
@@ -1370,15 +1458,20 @@
     const camSea = cp ? seaY(cp.x, cp.z) : 0;
     const camAtLine = !!cp && Math.abs(cp.y - camSea) < 1.5;
     /* WHICH SIDE OF THE SEA IS THE LENS ON. The sea writes depth and draws in
-       the transparent pass (renderOrder -1/0). Drawn AFTER it (the old 5),
-       a plume seen from above was depth-rejected by the surface; drawn
-       before it, the sea veiled it by the whole column to the seabed. So it
-       draws after the sea and, from above, the vertex shader lifts each puff
-       along its view ray onto the surface (see uAbove in the shader). */
-    plumeMesh.renderOrder = 5; scatMesh.renderOrder = 5.5;
+       the transparent pass (renderOrder -1/0). Drawn before it, the sea's
+       sheet veils what is under it by the BED's column and adds a sand
+       estimate's colour over it (it cannot know how deep a cloud is, and a
+       red one under the turquoise shallows came out teal). So the cloud draws
+       after the sea, and from above every corner of a puff is seen through
+       the surface by its own depth and then slid along its own sight line to
+       just over the surface (see THROUGH THE SURFACE in the shader). Seen
+       from above it draws before the film on the surface (3): the blood
+       that has reached the top lies over the blood under it. From below,
+       last of the water's layers, in front of the surface and its film. */
+    const above = !!(cp && cp.y > camSea + 0.05);
+    plumeMesh.renderOrder = above ? 2 : 5; scatMesh.renderOrder = above ? 2.5 : 5.5;
     const U = plumeMesh.material.uniforms;
-    U.uAbove.value = (cp && cp.y > camSea + 0.05) ? 1 : 0;
-    U.uSeaY.value = camSea;
+    U.uAbove.value = above ? 1 : 0;
     {
       const nA = CBZ.nightAmount;
       scatMesh.material.uniforms.uLight.value = 1 - 0.7 * (typeof nA === "number" && isFinite(nA) ? Math.max(0, Math.min(1, nA)) : 0);
@@ -1406,11 +1499,13 @@
       const rimGap = depth - Math.min(rr, 0.5) - LID_GAP;      // 0 when pinned
       let sf = rimGap / 1.2; sf = sf < 0 ? 0 : (sf > 1 ? 1 : sf);
       alpha *= camAtLine && !(cp.y > camSea) ? 0.45 + 0.55 * sf : 0.7 + 0.3 * sf;
-      let dark = depth > 0 ? depth / PLUME_DARK_DEPTH : 0;
-      dark = dark * 0.85 + f * 0.2; if (dark > 1) dark = 1;
+      // (no denser through its middle than the cap: its rim stays soft)
+      if (alpha > CLOUD_D_CAP) alpha = CLOUD_D_CAP;
       const o = i * 4;
       ap[o] = P_X[i]; ap[o + 1] = P_Y[i]; ap[o + 2] = P_Z[i]; ap[o + 3] = sc;
-      am[o] = alpha; am[o + 1] = dark; am[o + 2] = P_ROT[i]; am[o + 3] = P_SH[i];
+      // (the live surface over it: what stands above the water is cut, and
+      // from above its depth is the column it is seen through)
+      am[o] = alpha; am[o + 1] = P_SY[i]; am[o + 2] = P_ROT[i]; am[o + 3] = P_SH[i];
       LC_W[i] = 0; LC_N[i] = 0;
       if (me) {
         // in front of the lens only, thinned as the shader thins it when the
@@ -1503,7 +1598,7 @@
       const sp = (art ? 1.0 : 0.6) + Math.random() * 0.6;
       puff(x + Math.cos(a) * r, y + (Math.random() - 0.5) * 0.15, z + Math.sin(a) * r,
         dx * sp + Math.cos(a) * sp * 0.35, dy * sp * 0.5, dz * sp + Math.sin(a) * sp * 0.35,
-        litres / nb, 0.1 + Math.random() * 0.08, (0.3 + Math.random() * 0.35) * big,
+        litres / nb, 0.16 + Math.random() * 0.1, (0.3 + Math.random() * 0.35) * big,
         0.005 + Math.random() * 0.004, 24 + Math.random() * 14, 0.18);
     }
     /* FROM ABOVE, THE STAIN IS THE BLOOD AS WELL. A wound near the top puts
@@ -1714,7 +1809,10 @@
   function filmWarm(dt) {
     if ((filmWarmT -= dt) > 0) return;
     filmWarmT = 1;
-    if (!waterOn() || !CBZ.shaderQueue) return;
+    if (!waterOn()) return;
+    // the cloud's swirls are computed while a sea is drawn and nothing bleeds
+    if (!cloudTex && liveSeaMesh()) cloudWarm = true;
+    if (!CBZ.shaderQueue) return;
     const mat = filmSync();
     if (!filmSea || (filmWarmMesh && filmWarmMesh.material === mat)) return;
     if (!filmWarmMesh) {
@@ -2936,12 +3034,16 @@
          stack of them); when the body has moved out of it, or it is a few
          seconds old, a new puff starts where the wound is now. So a still
          bleeder grows a cloud and a moving one leaves a ribbon behind it that
-         widens and thins, and the line of them IS the trail. */
+         widens and thins, and the line of them IS the trail. They start a
+         fifth of a metre apart and wider than that (round ten: started 0.45 m
+         apart and smaller, they read as a dotted line of rings), each a
+         different size and opening at its own rate, so the ribbon is one
+         streak of uneven density, never a row of beads. */
       const flow = CHUM_LPS * Math.pow(c.rate, 1.2) * Math.min(1, c.ttl / 3);
       c.lit = (c.lit || 0) + flow * dt;
       c.acc += dt;
       const mx = c.px == null ? 0 : x - c.px, mz = c.pz == null ? 0 : z - c.pz;
-      if (c.acc >= 0.35 || mx * mx + mz * mz > 0.45 * 0.45) {
+      if (c.acc >= 0.25 || mx * mx + mz * mz > 0.2 * 0.2) {
         c.acc = 0;
         if (dist2Cam(x, z) < 90 * 90) {
           let k = puffIndex(c.pid);
@@ -2954,8 +3056,9 @@
           if (k < 0) {
             // (shed into the body's wake, not thrown as a jet: born small and
             // slow to open, so the line is dark at the wound and thins behind)
-            c.pid = puff(x + (Math.random() - 0.5) * 0.1, y + (Math.random() - 0.5) * 0.1, z + (Math.random() - 0.5) * 0.1,
-              0, 0, 0, c.lit, 0.06 + c.rate * 0.04, 0.1 + c.rate * 0.1, 0.004 + c.rate * 0.004, 20 + c.rate * 20 + Math.random() * 6, 0.3);
+            c.pid = puff(x + (Math.random() - 0.5) * 0.24, y + (Math.random() - 0.5) * 0.12, z + (Math.random() - 0.5) * 0.24,
+              0, 0, 0, c.lit, (0.15 + c.rate * 0.08) * (0.75 + Math.random() * 0.5), (0.12 + c.rate * 0.14) * (0.6 + Math.random() * 0.8),
+              (0.004 + c.rate * 0.004) * (0.7 + Math.random() * 0.6), 20 + c.rate * 20 + Math.random() * 6, 0.3);
             c.px = x; c.pz = z;
           }
           PLUME_AUDIT.chumPuffs++; PLUME_AUDIT.chumLitres += c.lit;
@@ -5880,6 +5983,8 @@
     if (CBZ.scene && !airMesh) airReady();
     // ...and the water film's, while a sea is drawn
     filmWarm(dt);
+    // ...and the cloud's swirls, a couple of dozen rows a frame
+    if (cloudWarm && !cloudTex && !cloudRows(24)) cloudTexture();
     // NOTHING PAINTS THE VIEW RED (owner: "the screen turning red ... is
     // dumb"): a kill beside you is the blood on the floor and on the walls.
 
