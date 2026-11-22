@@ -1154,12 +1154,47 @@
       return g;
     }
 
+    /* Swap an animal onto another variant of its species (an orca bull's
+       blade and paddles against a cow's): same skeleton, different geometry.
+       The variants must share every bone position. */
+    function retemplate(g, spec) {
+      const mb = g && g.userData && g.userData.marineBody;
+      if (!mb) return false;
+      const tpl = template(spec);
+      if (tpl.bones.length !== mb.tpl.bones.length) return false;
+      for (let i = 0; i < tpl.bones.length; i++) {
+        const a = tpl.bones[i].p, b = mb.tpl.bones[i].p;
+        if (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) > 1e-6) return false;
+      }
+      mb.tpl = tpl;
+      mb.mesh.geometry = tpl.geo[Math.min(mb.lod || 0, tpl.geo.length - 1)];
+      mb.mesh.boundingBox = tpl.box.clone(); mb.mesh.boundingSphere = tpl.sphere.clone();
+      mb.len = tpl.len; mb.beam = tpl.beam; mb.height = tpl.height; mb.backY = tpl.backY; mb.trunk = tpl.trunk;
+      if (tpl.sharkFin) g.userData.sharkFin = Object.assign({}, tpl.sharkFin);
+      return true;
+    }
+    /* One fin on its own, unskinned, with its root at the origin: for a
+       surface proxy that has to draw the very blade the body carries. */
+    function finGeometry(spec, name, colour) {
+      const PF = makeProfile(spec);
+      const F = (spec.fins || []).filter(function (f) { return f.name === name; })[0];
+      if (!F) return null;
+      const S = new Store();
+      buildFin(S, spec, PF, Object.assign({}, F, { bone: null }), spec.lod[0], { b: [0], J: [], hw: [] }, 1);
+      const O = finOrigin(spec, PF, F);
+      for (let i = 0; i < S.n; i++) { S.p[i * 3] -= O[0]; S.p[i * 3 + 1] -= O[1]; S.p[i * 3 + 2] -= O[2]; }
+      const geo = finalize(S, colour || function () { return [1, 1, 1, 0.3]; }, []);
+      geo.deleteAttribute("skinIndex"); geo.deleteAttribute("skinWeight");
+      return geo;
+    }
+
     return {
       TAG: TAG, curve: curve, fbm: fbm, vn: vn, hexc: hexc, mixc: mixc, mulc: mulc, mix: mix, sm: sm, cl: cl,
       nrm3: nrm3, crs: crs, sub3: sub3, dt3: dt3, Store: Store, finalize: finalize, material: material,
       buildSwimmer: buildSwimmer, sectionAt: sectionAt, ringPoint: ringPoint, ringNormal: ringNormal,
       makeProfile: makeProfile, chainWeights: chainWeights, buildFin: buildFin, buildEye: buildEye,
       eyeCentres: eyeCentres, scaleW: scale, finOrigin: finOrigin, template: template, instance: instance,
+      retemplate: retemplate, finGeometry: finGeometry,
     };
   })();
 
@@ -5124,74 +5159,151 @@
      narrow caudal blade and the whale would swim like a shark.
      ========================================================================== */
 
-  // ---- ORCA. Gloss black over a white chin/belly, the white eye patch and
-  //      the pale saddle PAINTED into the hull, a towering dorsal.
+  /* ============================================================
+     ORCA — Orcinus orca. A robust dolphin: deepest ~20% TL and a little
+     narrower than deep, a short blunt conical head with no beak, the mouth
+     line running from the snout tip back to just under the eye, 10-12
+     conical interlocking teeth per jaw side, the eye small and set just
+     above and behind the mouth corner, the blowhole a sixth of the way back
+     on top, a laterally compressed keeled tail stock, broad notched flukes
+     with white undersides, and large rounded paddle flippers. Sexually
+     dimorphic: a cow's dorsal is falcate and ~14% TL tall; a bull's is an
+     erect triangle ~21% TL tall, and his flippers and flukes are bigger.
+     The markings that name the animal: jet black over crisp white, the
+     white chin and throat, the white post-ocular eye patch (a teardrop
+     three times as long as it is tall, its narrow end just behind the eye),
+     the white flank lobe sweeping up behind the dorsal, and the grey saddle
+     behind the fin. 6.85 model units at scale 0.95 is a 6.5 m adult.
+     The two sexes share one skeleton; city/wildlife_orca.js picks one per
+     individual (CBZ.marineOrca.retemplate).
+     ============================================================ */
+  function orcaSpec(bull) {
+    const sp = {
+      id: bull ? "orca_bull" : "orca_cow", plan: "vertical", profileName: "orca",
+      L: 6.85, xNose: 3.25, axisY: 1.05, noseRound: 0.045, tubeEnd: 0.90, headEnd: 0.22,
+      profile: {
+        top: [[0, 0], [0.02, 0.024], [0.05, 0.046], [0.09, 0.066], [0.14, 0.083], [0.20, 0.095], [0.28, 0.103], [0.36, 0.106], [0.45, 0.103], [0.55, 0.094], [0.65, 0.078], [0.74, 0.058], [0.80, 0.044], [0.86, 0.032], [0.90, 0.022]],
+        bot: [[0, 0], [0.02, 0.020], [0.05, 0.038], [0.09, 0.056], [0.14, 0.072], [0.20, 0.086], [0.28, 0.094], [0.36, 0.096], [0.45, 0.092], [0.55, 0.082], [0.65, 0.066], [0.74, 0.048], [0.80, 0.036], [0.86, 0.026], [0.90, 0.018]],
+        half: [[0, 0], [0.02, 0.022], [0.05, 0.042], [0.09, 0.058], [0.14, 0.070], [0.20, 0.078], [0.28, 0.082], [0.36, 0.083], [0.45, 0.079], [0.55, 0.068], [0.65, 0.050], [0.74, 0.032], [0.80, 0.022], [0.86, 0.015], [0.90, 0.011]],
+        yo: [[0, -0.010], [0.08, -0.004], [0.16, 0], [0.9, 0]],
+        nT: [[0, 2.0], [0.70, 2.0], [0.84, 1.55], [0.90, 1.45]],
+        nB: [[0, 2.2], [0.20, 2.0], [0.70, 2.0], [0.84, 1.6], [0.90, 1.5]],
+      },
+      mouth: {
+        front: 0.008, corner: 0.118, alphaF: 0.95, alphaC: 1.42, shape: 0.7, snoutBlend: 0.01,
+        palate: 0.5, floor: 0.45, throat: 0.6, pharynx: 0.05, lipDrop: 0.0006, chinInset: 0.0012,
+        teeth: {
+          upper: [{ n: 24, h: 0.0075, w: 0.0046, inset: 0.0016, sink: 0.0040, rake: 0.10, rakeCorner: 0.25, tilt: -0.15, thick: 0.85, cornerK: 0.6 }],
+          lower: [{ n: 24, h: 0.0072, w: 0.0044, inset: 0.0016, sink: 0.0038, rake: 0.10, rakeCorner: 0.25, tilt: -0.15, thick: 0.85, cornerK: 0.6 }],
+        },
+      },
+      eye: { s: 0.138, up: 0.10, r: 0.0026, out: 0.36, socket: 0.2, fwd: 0.05 },
+      bones: { head: 0.11, neck: 0.20, root: 0.42, tail: [0.56, 0.68, 0.78, 0.86, 0.94] },
+      fins: [
+        bull
+          ? { name: "dorsal1", role: "median", at: 0.350, root: 0.150, span: 0.210, dir: [0, 1, 0], phi: Math.PI, sweep: 0.10, bow: 0.02, tipC: 0.08, conc: 0.03, rear: 0.22, rearH: 0.06, round: 0.10, tc: 0.16, tcTip: 0.06, embed: 0.4 }
+          : { name: "dorsal1", role: "median", at: 0.360, root: 0.135, span: 0.135, dir: [0, 1, 0], phi: Math.PI, sweep: 0.58, bow: 0.07, tipC: 0.06, conc: 0.36, rear: 0.20, rearH: 0.07, round: 0.16, tc: 0.14, tcTip: 0.05, embed: 0.4 },
+        { name: "pecR", role: "median", boneName: "pecR", at: 0.225, root: 0.075, span: bull ? 0.190 : 0.125, dir: [-0.28, -0.45, 0.85], phi: 0.78, sweep: 0.22, bow: 0.10, tipC: bull ? 0.66 : 0.62, conc: 0.02, rear: 0.08, rearH: 0.2, round: bull ? 0.60 : 0.55, tc: 0.16, tcTip: 0.10, embed: 0.3 },
+        { name: "pecL", role: "median", boneName: "pecL", at: 0.225, root: 0.075, span: bull ? 0.190 : 0.125, dir: [-0.28, -0.45, -0.85], phi: 2 * Math.PI - 0.78, sweep: 0.22, bow: 0.10, tipC: bull ? 0.66 : 0.62, conc: 0.02, rear: 0.08, rearH: 0.2, round: bull ? 0.60 : 0.55, tc: 0.16, tcTip: 0.10, embed: 0.3 },
+        { name: "flukeR", role: "paired", originS: 0.90, originDz: 0.010, root: 0.13, span: bull ? 0.140 : 0.120, dir: [0, 0, 1], chordDir: [1, 0, 0], sweep: 0.52, bow: 0.06, tipC: 0.06, conc: 0.20, rear: 0.10, rearH: 0.12, round: 0.06, tc: 0.12, tcTip: 0.05, embed: 0.3 },
+        { name: "flukeL", role: "paired", originS: 0.90, originDz: -0.010, root: 0.13, span: bull ? 0.140 : 0.120, dir: [0, 0, -1], chordDir: [1, 0, 0], sweep: 0.52, bow: 0.06, tipC: 0.06, conc: 0.20, rear: 0.10, rearH: 0.12, round: 0.06, tc: 0.12, tcTip: 0.05, embed: 0.3 },
+      ],
+      // a whale opens the lower jaw; nothing lifts and nothing protrudes
+      jaw: { lift: 0, drop: 0.55, protrude: [0, 0], gap: 0.04 },
+      // the flukes beat up and down; the front of the body barely moves
+      wave: { lambda: 1.1, amp: 0.070, env: [0.02, 0.0, 1.0], f0: 0.35, fK: 0.80, fMax: 2.0 },
+      finColor: 0x06080a, saddleS: 0.30,
+      lod: [
+        { M: 32, ds: 0.020, headK: 0.6, noseRings: 6, eyeRings: true, gills: false, teeth: true, finSpan: 8, finChord: 7, eyeSeg: 10, eyeRing: 7, pharynx: 3 },
+        { M: 14, ds: 0.060, headK: 0.6, noseRings: 3, eyeRings: false, gills: false, teeth: false, finSpan: 4, finChord: 3, eyeSeg: 6, eyeRing: 4, pharynx: 2 },
+      ],
+    };
+    sp.makePaint = function (EY) {
+      const roles = {};
+      sp.fins.forEach(function (f, i) { roles[i + 1] = f.role; });
+      return paintKit({
+        L: sp.L, eyes: EY, finRole: roles,
+        back: 0x06080a, belly: 0xf1f3f1, fin: 0x06080a,
+        // upper jaw black to the lip; the white chin and throat; the band of
+        // black between the flippers; the white flank lobe behind the dorsal
+        line: [[0, -0.66], [0.01, -0.60], [0.03, -0.47], [0.06, -0.34], [0.09, -0.24], [0.118, -0.18], [0.15, -0.30], [0.20, -0.50], [0.26, -0.62], [0.34, -0.58], [0.42, -0.45], [0.50, -0.25], [0.57, 0.08], [0.63, 0.18], [0.69, -0.05], [0.76, -0.42], [0.84, -0.60], [0.90, -0.66]],
+        rag: 0.025, specBack: 0.75, specBelly: 0.55, specFin: 0.75, iris: 0x1a1208, sclera: 0x2a2620,
+        orbit: 0x06080a,
+        // the eye patch: a teardrop, narrow end just behind the eye, rising back
+        mark: function (c) {
+          if (c.tag !== MB.TAG.SKIN) return NaN;
+          const s = c.m[0], h = -c.m[1];
+          const u = (s - 0.172) / 0.052;
+          if (u < -1.4 || u > 1.4) return -1;
+          const h0 = 0.26 + 0.09 * u, w = 0.105 * (0.50 + 0.50 * MB.sm((u + 1) / 2));
+          return 1 - u * u - ((h - h0) / w) * ((h - h0) / w);
+        },
+        skin: function (c, col, up) {
+          if (!up) return col;
+          if (c.f(1) >= 0) return MB.hexc(0xf1f3f1);
+          // the saddle: a soft grey crescent behind the dorsal
+          const s = c.m[0], h = -c.m[1];
+          const d = ((s - 0.53) / 0.07) * ((s - 0.53) / 0.07) + ((h - 0.86) / 0.26) * ((h - 0.86) / 0.26);
+          if (d < 1.6) col = MB.mixc(col, MB.hexc(0x5a6670), 0.85 * MB.sm((1.6 - d) / 1.2));
+          return col;
+        },
+        finHook: function (c, col, role) {
+          // the flukes' white undersides keep a black trailing margin
+          if (role === "paired" && c.f(0) < 0 && c.m[1] > 0.82) return MB.hexc(0x06080a);
+          return col;
+        },
+      });
+    };
+    return sp;
+  }
+  const ORCA_COW = orcaSpec(false), ORCA_BULL = orcaSpec(true);
+  /* What city/wildlife_orca.js needs of the body: a builder per sex, the
+     swap between them, the blade on its own for the surface proxy, and the
+     measurements its acts and proxies are placed by. */
+  CBZ.marineOrca = {
+    cow: ORCA_COW, bull: ORCA_BULL,
+    build: function (sex) {
+      const spec = sex === "bull" ? ORCA_BULL : ORCA_COW;
+      const g = marineBuild(spec);
+      const d = CBZ.marineOrca.dims();
+      g.userData.orca = {
+        len: d.x1 - d.x0, y: d.y, x0: d.x0, x1: d.x1,
+        blow: { x: d.blowX, y: d.blowY, z: 0 }, dorsal: { x: d.dorsalX, y: d.backY },
+        bullSpan: d.bullSpan, cowSpan: d.cowSpan,
+        marks: { eyePatch: true, saddle: true, flankFlare: true, whiteChin: true, flukeUnder: true },
+        dimorphic: true, blowhole: true, horizontalFlukes: true,
+      };
+      return g;
+    },
+    retemplate: function (g, sex) { return MB.retemplate(g, sex === "bull" ? ORCA_BULL : ORCA_COW); },
+    finGeometry: function (sex) {
+      return MB.finGeometry(sex === "bull" ? ORCA_BULL : ORCA_COW, "dorsal1", function () { return [1, 1, 1, 0.5]; });
+    },
+    dims: function () {
+      if (this._dims) return this._dims;
+      const cow = MB.template(ORCA_COW), bull = MB.template(ORCA_BULL);
+      const PF = MB.makeProfile(ORCA_COW), L = ORCA_COW.L;
+      const blowS = 0.175, Rb = MB.sectionAt(ORCA_COW, PF, blowS);
+      let top = 0;
+      for (let k = 0; k <= 40; k++) { const R = MB.sectionAt(ORCA_COW, PF, 0.9 * k / 40); top = Math.max(top, R.yc + R.top - ORCA_COW.axisY); }
+      return (this._dims = {
+        x1: ORCA_COW.xNose, x0: ORCA_COW.xNose - ORCA_COW.tubeEnd * L, y: ORCA_COW.axisY, top: top,
+        len: cow.len, blowX: Rb.x, blowY: Rb.yc + Rb.top,
+        dorsalX: cow.fins.dorsal1.origin[0], backY: cow.sharkFin ? cow.sharkFin.backY : ORCA_COW.axisY + top,
+        cowSpan: cow.sharkFin ? cow.sharkFin.height : 0.9, bullSpan: bull.sharkFin ? bull.sharkFin.height : 1.4,
+        planBeam: cow.box.max.z - cow.box.min.z,
+      });
+    },
+  };
   S({
     id: "orca", name: "Orca", biome: "water", rarity: "rare",
     hp: 620, fur: "Orca Hide", furValue: 520, meat: "Whale Meat", meatValue: 44,
     // transient pods run 2-7, residents 5-50; [3,8] is the game-scaled band
-    // (wildlife_orca.js re-registers this species — keep its herd in step)
-    // (and its size and bite: real 6-8 m adults, see wildlife_orca.js)
+    // (city/wildlife_orca.js re-registers this species with the pod, the
+    // acts and the sexes; it builds this same body)
     herd: [3, 8], spd: 3.4, danger: 0.5, bite: 33, aquatic: true,
-    scale: 0.95, color: 0x14171b, clearance: 110, swimDepth: 2.6,
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      const black = m(0x14171b), white = m(0xf4f6f6), saddle = m(0x4b545c), eye = m(0x06070a);
-      // THE TAILSTOCK IS PART OF THE BODY CURVE. The first pair of numbers is
-      // where the hull hands over to the tail sleeve, and while the sleeve was
-      // free to be any size the hull was allowed to taper to a spindle there
-      // and let a fatter cone start behind it. Welded, that spindle would be
-      // the whole tailstock — so it carries the depth the cone used to fake,
-      // laterally compressed the way a cetacean's peduncle actually is.
-      const rings = bodyRings(-2.30, 3.20, 1.00,
-        [0.40, 0.64, 0.82, 0.86, 0.80, 0.66, 0.42],      // [0] = the tail weld
-        [0.24, 0.57, 0.74, 0.78, 0.72, 0.58, 0.34], 13);
-      const hull = hullMesh([black, white, saddle], rings, {
-        sides: 14, bellyCut: [-0.52, -0.34, -0.30, -0.34, -0.30, -0.10, 0.30],
-        ragged: 0.05, seed: 95, paintKey: "orca-marks",
-        paint: function (i, u, j, s, isBelly) {
-          if (isBelly) return -1;
-          if (u > 0.80 && u < 0.90 && s > 0.10 && s < 0.62) return 1;   // white eye patch
-          if (u > 0.42 && u < 0.56 && s > 0.55) return 2;               // pale saddle
-          return -1;
-        },
-      });
-      hull.name = "cetaceanHull"; g.add(hull);
-      [0.60, -0.60].forEach(function (z) {
-        const e = new T.Mesh(cachedGeom("eye|0.09", function () {
-          return new T.SphereGeometry(0.09, 8, 6);
-        }), eye);
-        e.position.set(2.34, 1.16, z); g.add(e);
-      });
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([black], [0.30, 1.72, 0], {          // the tower
-        span: 1.95, chordRoot: 1.05, chordTip: 0.10, sweep: 0.34, concavity: 0.22,
-        leadBow: 0.05, rearTipH: 0.08, rearTipBack: 0.28, apexRound: 0.14,
-        thick: 0.20, spanSteps: 6, chordSteps: 4, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      [1, -1].forEach(function (s2) {
-        fin([black, white], [1.35, 0.62, s2 * 0.62], {   // big paddle pectoral
-          span: 1.18, chordRoot: 0.86, chordTip: 0.20, sweep: 0.40, concavity: 0.10,
-          leadBow: 0.10, rearTipH: 0.16, rearTipBack: 0.18, apexRound: 0.30,
-          thick: 0.17, spanSteps: 5, chordSteps: 4, under: true,
-          spanDir: [-0.36, -0.34, s2 * 0.87], chordDir: [1, 0, s2 * 0.1],
-        });
-      });
-      tailSleeve(g, [black, white], rings, {
-        at: [-2.60, 1.00], x0: -1.026, x1: 0.3, tipRy: 0.10, tipRz: 0.062,
-        sides: 14, bellyCut: [-0.42], ragged: 0.04, seed: 96,
-      });
-      const fluke = finsMesh([black, white], [-3.20, 1.00, 0], [1, -1].map(function (s2) {
-        return {
-          span: 1.30, chordRoot: 0.86, chordTip: 0.06, sweep: 0.62, concavity: 0.26,
-          rearTipH: 0.10, rearTipBack: 0.22, apexRound: 0.05, thick: 0.13,
-          spanSteps: 5, chordSteps: 4, under: true,
-          spanDir: [0, 0, s2], chordDir: [1, 0, 0], origin: [0, 0, s2 * 0.06],
-        };
-      }));
-      g.add(fluke);
-      return g;
-    },
+    scale: 0.95, color: 0x06080a, clearance: 110, swimDepth: 2.4,
+    build: function () { return CBZ.marineOrca.build("cow"); },
   });
 
   // ---- BOTTLENOSE DOLPHIN. Grey back into a pale belly, a tall FALCATE
