@@ -980,64 +980,42 @@
   }
 
   /* ---- THE BANK'S PAPER -----------------------------------------------------
-     One sheet, drawn on a canvas and held up to your eyes. It stands on the
-     right of the view so the person you are dealing with stays in it. */
-  const PAPER = { cv: null, kind: null };
-  function sheet() {
-    // (core/texfree.js shrinks a canvas to 1x1 once its texture has sat on the
-    //  GPU for 30 s: the next slip is written on a new one, not on that)
-    if (PAPER.cv && PAPER.cv.width !== 1500) PAPER.cv = null;
-    if (!PAPER.cv) { PAPER.cv = document.createElement("canvas"); PAPER.cv.width = 1500; PAPER.cv.height = 1000; }
-    const c = PAPER.cv.getContext("2d");
-    c.clearRect(0, 0, 1500, 1000);
-    return c;
-  }
+     The bank's sheets are city/paper.js's (CBZ.cityPaper): one sheet you hold,
+     standing on the right of the view so the person you are dealing with
+     stays in it. This file only says what is written on each. (It used to
+     draw them on a private canvas with its own hold / update plumbing.)
+     The offer and the statement are STICKY: a tap on the screen does not
+     lower them, so on a phone you tap the officer for his verbs, or tap the
+     sheet itself: its pencil boxes, a loan's line, the signature line. */
+  const PAPER = { kind: null };
   function inWords(n) { return fmt$(n).replace("$", "") + " dollars"; }
   function stampDay() { const d = CBZ.worldDay ? (CBZ.worldDay() | 0) : 0; return "DAY " + (d + 1); }
   function acctNo() { const s = String(Math.abs(Math.round((S.cx || 7) * 131 + (S.cz || 3) * 17)) % 100000); return "0041-" + ("00000" + s).slice(-5); }
-  function paperBase(c, x, y, w, h, title, tone) {
-    c.save();
-    c.shadowColor = "rgba(0,0,0,.45)"; c.shadowBlur = 26; c.shadowOffsetY = 10;
-    c.fillStyle = tone || "#f7f3e8"; c.fillRect(x, y, w, h);
-    c.restore();
-    c.fillStyle = "#1d3a5c"; c.fillRect(x, y, w, 74);
-    c.fillStyle = "#f7f3e8"; c.textAlign = "left"; c.textBaseline = "middle";
-    c.font = "700 34px Georgia, 'Times New Roman', serif"; c.fillText(bankName().toUpperCase(), x + 28, y + 38);
-    c.textAlign = "right"; c.font = "600 22px Helvetica, Arial, sans-serif"; c.fillText(title, x + w - 28, y + 39);
-    c.textAlign = "left"; c.fillStyle = "#26231d";
-  }
-  function line(c, x, y, w, label, value, big) {
-    c.fillStyle = "#6a6458"; c.font = "600 21px Helvetica, Arial, sans-serif"; c.textAlign = "left"; c.fillText(label, x, y);
-    c.fillStyle = "#16140f"; c.font = (big ? "700 40px" : "600 28px") + " 'Courier New', Courier, monospace"; c.textAlign = "right"; c.fillText(value, x + w, y);
-    c.strokeStyle = "#b9b2a0"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, y + (big ? 26 : 20)); c.lineTo(x + w, y + (big ? 26 : 20)); c.stroke();
-  }
-  function hold(kind) {
-    PAPER.kind = kind;
-    const H = CBZ.hmHold;
-    if (!H || !H.open) return false;
-    if (H.isOpen() && H.canvas() === PAPER.cv) { H.update(PAPER.cv); return true; }
-    const ok = H.open(PAPER.cv, { kind: "paper", onClose: function () { PAPER.kind = null; } });
-    PAPER.kind = kind;            // (opening over an older sheet runs that sheet's onClose first)
+  function hold(kind, spec) {
+    const K = CBZ.cityPaper;
+    if (!K || !K.show) return false;
+    spec.key = "bank-" + kind;
+    spec.org = bankName();
+    spec.onClose = function () { if (PAPER.kind === kind) PAPER.kind = null; };
+    const ok = K.show(spec);
+    PAPER.kind = ok ? kind : null;      // (opening over an older sheet runs that sheet's onClose first)
     return ok;
   }
-  function paperUp(kind) { const H = CBZ.hmHold; return !!(H && H.isOpen && H.isOpen() && H.canvas() === PAPER.cv && (!kind || PAPER.kind === kind)); }
-  function paperDown() { const H = CBZ.hmHold; if (paperUp() && H.close) H.close(); PAPER.kind = null; }
+  function paperUp(kind) { const K = CBZ.cityPaper; return !!(K && PAPER.kind && K.isUp("bank-" + PAPER.kind) && (!kind || PAPER.kind === kind)); }
+  function paperDown() { const K = CBZ.cityPaper; if (paperUp() && K) K.down(); PAPER.kind = null; }
   // a deposit or withdrawal slip, the teller's stamp on it
   function drawSlip(what, amount, balance) {
-    const c = sheet(), x = 820, y = 250, w = 620, h = 500;
-    paperBase(c, x, y, w, h, what === "deposit" ? "DEPOSIT" : "WITHDRAWAL", what === "deposit" ? "#f7f3e8" : "#f3f0f7");
-    line(c, x + 34, y + 130, w - 68, "ACCOUNT", acctNo());
-    line(c, x + 34, y + 198, w - 68, "DATE", stampDay());
-    line(c, x + 34, y + 282, w - 68, what === "deposit" ? "CASH RECEIVED" : "CASH PAID", fmt$(amount), true);
-    c.fillStyle = "#6a6458"; c.font = "italic 20px Georgia, serif"; c.textAlign = "left"; c.fillText(inWords(amount), x + 34, y + 336);
-    line(c, x + 34, y + 398, w - 68, "BALANCE", fmt$(balance));
-    // the teller's stamp
-    c.save(); c.translate(x + w - 150, y + h - 62); c.rotate(-0.16);
-    c.strokeStyle = "#a3261f"; c.lineWidth = 4; c.strokeRect(-110, -30, 220, 60);
-    c.fillStyle = "#a3261f"; c.font = "800 26px Helvetica, Arial, sans-serif"; c.textAlign = "center"; c.textBaseline = "middle";
-    c.fillText(what === "deposit" ? "RECEIVED" : "PAID", 0, 0);
-    c.restore();
-    hold("slip");
+    const dep = what === "deposit";
+    hold("slip", {
+      title: dep ? "DEPOSIT" : "WITHDRAWAL", tone: dep ? "#f7f3e8" : "#f3f0f7",
+      lines: [
+        { k: "ACCOUNT", v: acctNo() },
+        { k: "DATE", v: stampDay() },
+        { k: dep ? "CASH RECEIVED" : "CASH PAID", v: fmt$(amount), big: true, sub: inWords(amount) },
+        { k: "BALANCE", v: fmt$(balance) },
+      ],
+      stamp: dep ? "RECEIVED" : "PAID",
+    });
   }
 
   // ---- THE TELLER -------------------------------------------------------------
@@ -1131,63 +1109,45 @@
     const amt = LOAN.amt = clampPersonalAmt(LOAN.amt), term = LOAN.term;
     const o = offer("personal", amt, {});
     const pay = o.approved ? paymentFor(o.principal, o.rate, term) : 0;
-    const c = sheet(), x = 800, y = 110, w = 650, h = 780;
-    paperBase(c, x, y, w, h, "PERSONAL LOAN");
-    c.fillStyle = "#6a6458"; c.font = "italic 21px Georgia, serif"; c.fillText("Offered to the bearer on the terms below.", x + 34, y + 110);
+    const lines = [{ text: "Offered to the bearer on the terms below.", italic: true, dim: true }];
     if (!o.approved) {
-      c.fillStyle = "#a3261f"; c.font = "800 44px Helvetica, Arial, sans-serif"; c.fillText("DECLINED", x + 34, y + 220);
-      c.fillStyle = "#26231d"; c.font = "500 26px Georgia, serif";
-      wrap(c, o.reason || "The bank cannot lend on this application.", x + 34, y + 290, w - 68, 36);
+      lines.push({ text: "DECLINED", big: true, ink: "#a3261f" });
+      lines.push({ text: o.reason || "The bank cannot lend on this application." });
     } else {
-      line(c, x + 34, y + 190, w - 68, "PRINCIPAL", fmt$(o.principal), true);
-      line(c, x + 34, y + 272, w - 68, "RATE", (o.rate * 100).toFixed(1).replace(/\.0$/, "") + "% A YEAR");
-      line(c, x + 34, y + 340, w - 68, "TERM", term + " CYCLES");
-      line(c, x + 34, y + 408, w - 68, "PAYMENT", fmt$(pay) + " A CYCLE", true);
-      line(c, x + 34, y + 490, w - 68, "TOTAL REPAID", fmt$(pay * term));
-      c.fillStyle = "#6a6458"; c.font = "500 19px Helvetica, Arial, sans-serif"; c.textAlign = "left";
-      wrap(c, "Paid each cycle out of cash, then the account. Net worth on file " + fmt$(netWorth()) + "; the bank will lend up to " + fmt$(Math.max(0, personalCapacity())) + " unsecured.", x + 34, y + 548, w - 68, 26);
+      // the pencil boxes beside a figure: more / less, longer / shorter
+      const can = !signed;
+      lines.push({ k: "PRINCIPAL", v: fmt$(o.principal), big: true,
+        minus: can && LOAN.amt > MIN_PRINCIPAL ? function () { loanChange(-1, 0); } : null,
+        plus: can && LOAN.amt < personalCapacity() ? function () { loanChange(1, 0); } : null });
+      lines.push({ k: "RATE", v: (o.rate * 100).toFixed(1).replace(/\.0$/, "") + "% A YEAR" });
+      lines.push({ k: "TERM", v: term + " CYCLES",
+        minus: can && term > 12 ? function () { loanChange(0, -12); } : null,
+        plus: can && term < 120 ? function () { loanChange(0, 12); } : null });
+      lines.push({ k: "PAYMENT", v: fmt$(pay) + " A CYCLE", big: true });
+      lines.push({ k: "TOTAL REPAID", v: fmt$(pay * term) });
     }
-    // the signature line
-    c.strokeStyle = "#26231d"; c.lineWidth = 2; c.beginPath(); c.moveTo(x + 34, y + h - 90); c.lineTo(x + w - 230, y + h - 90); c.stroke();
-    c.fillStyle = "#6a6458"; c.font = "600 17px Helvetica, Arial, sans-serif"; c.textAlign = "left"; c.fillText("BORROWER", x + 34, y + h - 66);
-    c.textAlign = "right"; c.fillText(stampDay(), x + w - 34, y + h - 66);
-    if (signed) {
-      c.strokeStyle = "#1a2a66"; c.lineWidth = 3.5; c.lineCap = "round"; c.beginPath();
-      let px = x + 60, py = y + h - 100; c.moveTo(px, py);
-      for (let i = 0; i < 9; i++) { const nx = px + 34, ny = y + h - 100 + (i % 2 ? 14 : -26) * (1 - i / 14); c.quadraticCurveTo(px + 10, ny - 16, nx, ny); px = nx; py = ny; }
-      c.stroke();
-      c.save(); c.translate(x + w - 130, y + h - 150); c.rotate(-0.14);
-      c.strokeStyle = "#2e7d4f"; c.lineWidth = 4; c.strokeRect(-96, -28, 192, 56);
-      c.fillStyle = "#2e7d4f"; c.font = "800 26px Helvetica, Arial, sans-serif"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("FUNDED", 0, 0);
-      c.restore();
-    }
-    hold("offer");
+    hold("offer", {
+      title: "PERSONAL LOAN", lines: lines, sticky: true,
+      foot: o.approved ? "Paid each cycle out of cash, then the account. Net worth on file " + fmt$(netWorth()) + "; the bank will lend up to " + fmt$(Math.max(0, personalCapacity())) + " unsecured." : "",
+      // the signature line: signing it is tapping it (or "Sign it" on the officer)
+      sign: { label: "BORROWER", date: stampDay(), scribble: !!signed, tap: !signed && o.approved ? loanSign : null },
+      stamp: signed ? "FUNDED" : "", stampInk: "#2e7d4f",
+    });
     return o;
-  }
-  function wrap(c, text, x, y, w, lh) {
-    const words = String(text).split(/\s+/); let ln = "";
-    for (let i = 0; i < words.length; i++) {
-      const t = ln ? ln + " " + words[i] : words[i];
-      if (c.measureText(t).width > w && ln) { c.fillText(ln, x, y); y += lh; ln = words[i]; } else ln = t;
-    }
-    if (ln) c.fillText(ln, x, y);
-    return y;
   }
   function loanName(r) { return r.kind === "mortgage" ? "MORTGAGE" : r.kind === "auto" ? "AUTO NOTE" : "PERSONAL LOAN"; }
   function drawStatement() {
     const open = liveLoans();
-    const c = sheet(), x = 800, y = 150, w = 650, h = 700;
-    paperBase(c, x, y, w, h, "STATEMENT");
-    line(c, x + 34, y + 130, w - 68, "ACCOUNT " + acctNo(), fmt$(balNow()));
-    if (!open.length) { c.fillStyle = "#26231d"; c.font = "500 28px Georgia, serif"; c.textAlign = "left"; c.fillText("Nothing owing.", x + 34, y + 230); }
+    const lines = [{ k: "ACCOUNT " + acctNo(), v: fmt$(balNow()) }];
+    if (!open.length) lines.push({ text: "Nothing owing." });
     for (let i = 0; i < Math.min(5, open.length); i++) {
-      const r = open[i], yy = y + 220 + i * 84;
-      line(c, x + 34, yy, w - 68, loanName(r) + "  " + (Math.max(0, (r.termTicks | 0) - (r.paidTicks | 0))) + " CYCLES LEFT", fmt$(Math.round(r.balance)), true);
-      c.fillStyle = "#6a6458"; c.font = "500 18px Helvetica, Arial, sans-serif"; c.textAlign = "left";
-      c.fillText(fmt$(r.payment) + " a cycle at " + Math.round(num(r.rate, 0) * 100) + "%", x + 34, yy + 46);
+      const r = open[i], n = i;
+      // (a tap on a loan's line pays $500 off it)
+      lines.push({ k: loanName(r) + "  " + (Math.max(0, (r.termTicks | 0) - (r.paidTicks | 0))) + " CYCLES LEFT", v: fmt$(Math.round(r.balance)), big: true,
+        sub: fmt$(r.payment) + " a cycle at " + Math.round(num(r.rate, 0) * 100) + "%", tap: function () { payDown(n, false); } });
     }
-    line(c, x + 34, y + h - 60, w - 68, "TOTAL OWING", fmt$(totalOwed()), true);
-    hold("statement");
+    lines.push({ k: "TOTAL OWING", v: fmt$(totalOwed()), big: true });
+    hold("statement", { title: "STATEMENT", lines: lines, sticky: true });
   }
   // sit the player down opposite him (the client's chair at the desk), when there is one
   function sitDown() {

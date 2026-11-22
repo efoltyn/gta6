@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 424
+     Natural Disaster Survival, standing alone: index.html minus the 423
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -1648,7 +1648,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and a posted bank body run at their post (peds.js think() asks it first),
      and the bank gunpoint rows (Open the vault, Empty the drawer). After
      bank.js (CBZ.cityVaultOpenBy) and interact.js (the registry). -->
-<script src="src/city/keepers.js?v=keep1122d"></script>
+<script src="src/city/keepers.js?v=nopanel1122"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
      near you, plus its real catalog stock as the real item models, buyable
@@ -1743,7 +1743,8 @@ document.body.appendChild(b);}}catch(e){}})();
      same game. Loads after interactions/interact (registers its verbs), after
      shops (cityTill is the only money source) and after gangs/turf (it steers
      crews and feeds zone control). Flag: RACKET_V1. -->
-<script src="src/city/racket.js?v=world1122b"></script>
+<script src="src/city/racket.js?v=nopanel1122"></script>
+<script src="src/city/stickup.js?v=nopanel1122"></script>
 <script src="src/city/stuntjumps.js?v=metro0929"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
@@ -1830,7 +1831,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The hitman's world is physical (2026-09-27): paper he reads, hands that
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
-<script src="src/city/hitman_hands.js?v=r187a"></script>
+<script src="src/city/hitman_hands.js?v=nopanel1122"></script>
 <script src="src/city/hitman_room.js?v=r187a"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=roofscene1122"></script>

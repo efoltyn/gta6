@@ -696,9 +696,13 @@
       const dst = pick(lots);
       jobs.push({ type: "delivery", dest: lotDoor(dst), reward: payout(180, 320), desc: "Run a package across town" });
     }
-    // HEIST — knock over a store register
-    if (shops.length) {
-      const s = pick(shops);
+    // ROB A PLACE: one with money in it to take (a register, a safe, a vault
+    // on city/shops.js's ledger), named. It is done when you have really
+    // robbed it, however you did it (see the job tick).
+    const marks = shops.filter((l) => l && l.building && l.building.name && !l.demolished &&
+      CBZ.cityTill && CBZ.cityTill.points && CBZ.cityTill.points(l).length > 0);
+    if (marks.length) {
+      const s = pick(marks);
       jobs.push({ type: "heist", lot: s, reward: payout(400, 900), desc: "Knock over " + s.building.name });
     }
     // DEAD DROP — a fence pays you to place/retrieve a package at a NAMED roof
@@ -1257,9 +1261,14 @@
       } else if (j.type === "delivery" && j.dest) {
         if (Math.hypot(P.x - j.dest.x, P.z - j.dest.z) < 4) { CBZ.city.note("Package delivered.", 1.6); finishJob(CBZ.player.driving ? 80 : 0); }
       } else if (j.type === "heist" && j.lot) {
-        const ped = j.lot.building.vendor;
-        if (ped && j._robBase === undefined) j._robBase = !!ped.robbed;   // baseline at activation
-        if (ped && ped.robbed && !j._robBase) { CBZ.city.note("Register cleared.", 1.6); finishJob(); }   // only a FRESH rob counts — a pre-robbed store can't instant-complete
+        // "Knock over <place>" is done when money has left that place by your
+        // hand since you took the job: its register at gunpoint, the drawer
+        // with nobody watching it, its safe, a teller's window, its vault.
+        // city/stickup.js counts every such take off the till ledger itself,
+        // so there is no second way to finish this and no way to fake it.
+        const n = (CBZ.cityStickup && CBZ.cityStickup.hits) ? CBZ.cityStickup.hits(j.lot) : 0;
+        if (j._robBase === undefined) j._robBase = n;            // baseline at activation: only a fresh one counts
+        if (n > j._robBase) { CBZ.city.note("That's " + ((j.lot.building && j.lot.building.name) || "the place") + " done.", 1.8); finishJob(); }
       } else if (j.type === "smuggle") {
         if (!j.got) {
           if (Math.hypot(P.x - j.pickup.x, P.z - j.pickup.z) < 4) {

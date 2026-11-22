@@ -30,8 +30,10 @@
      · CAUSEWAY GATE + BOOM ...... the only way off the island; extraction is
                                    crashing a stolen vehicle through it. LOCKS
                                    at RED alert (on-foot exit sealed).
-     · THE FIXER (ctx.npc) ....... hands you the three-job contract and pays
-                                   REAL cash on completion + extraction.
+     · THE FIXER (ctx.npc) ....... TELLS you the three-job contract, hands you
+                                   the job sheet (a paper you hold), marks
+                                   the targets on your map when asked, and
+                                   pays REAL cash, by phone, as each job lands.
      · PROTOTYPE + REVETMENT ..... photo job; the 3 revetment walls are real
                                    CBZ.losBlockers, so the shot needs the open
                                    side — cover is the puzzle.
@@ -45,15 +47,22 @@
      · PERIMETER LIGHTS .......... the thing the generator kills (measurable).
      · SEARCHLIGHTS .............. sensors that sweep FASTER as alert climbs.
      · ELECTRIFIED FENCE (signed)  the tell: signed live runs zap + spike alert.
-     · THE BRIG (real cell) ...... caught once = thrown in; a lockpick minigame
-                                   (cell-block-z homage) is the way out. Caught
-                                   twice = court-martial, the run is LOST.
+     · THE BRIG (real cell) ...... caught once = thrown in. The cell door has a
+                                   real lock and a turnkey walks a beat outside:
+                                   you work the lock while his back is turned
+                                   (the engine's sight test again). Caught
+                                   twice = court-martial: thrown off the base,
+                                   the run is LOST.
+
+   NO PANEL. The contract briefing, the "extracted" and "court martial" cards
+   and the lockpick bar were HTML on the shared package panel. They are a man
+   who talks, a sheet of paper, a voice on the phone, and a lock on a door.
      · GUARDS (ctx.npc peds) ..... real city peds (aggr brain, gunpoint hands-up,
                                    cityKillPed death), patrolled by this file and
                                    read by the engine's guardSees.
 
    Determinism: build paths use ctx.rand/ctx.stream only (multiplayer law).
-   Runtime FX (alarm, patrol reroutes, the lockpick marker) may use Math.random.
+   Runtime FX (alarm, patrol reroutes) may use Math.random.
    Revert: CBZ.CONFIG.PKG_MILITARY = false (or the master GAME_PACKAGES).
 ============================================================ */
 (function () {
@@ -112,11 +121,9 @@
   }
 
   /* ------------------------------------------------------------ config -- */
-  // constants FALLBACK — read from city/island_military.js (its module locals
-  // CEN_X/CEN_Z/HX/HZ). resolve() prefers the live "Fort Brandt" region; this
-  // is the byte-stable backstop when the region registry is not up yet.
-  const _MOFF = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 };
-  const BASE = { cx: -620 + _MOFF.dx, cz: -700 + _MOFF.dz, hx: 240, hz: 250 };
+  // the reservation's half-size (city/island_military.js HX/HZ): how near the
+  // player must be for the night to tick, and the dev harness's bounds
+  const BASE = { hx: 240, hz: 250 };
 
   const VIEW_DIST = 22, VIEW_HALF = 0.62;          // guard cone (~35°, 22u)
   const GATE_VIEW_DIST = 26;
@@ -150,7 +157,8 @@
     photoT: 0, tapT: 0, hintCd: 0,
     genUntil: 0,                 // simT until which generator sabotage darkens
     messOn: false, messT: 18,
-    brig: { active: false, pins: [], marker: 50, dir: 1, spd: 46, pin: 0, keyH: null },
+    brig: { active: false, picking: false, work: 0, pin: 0, warned: false },   // work: seconds on the lock, pin: pins seated
+    briefed: false,              // the fixer has told you the job (his next row is "Take the contract")
     outcome: "none",             // last resolved arc end: none|win|lose
     testGuard: null,             // api.placeTestGuard — an isolated probe cone
   };
@@ -169,50 +177,60 @@
     else if (C) C.hud.feed(msg, col || "#cfe3ff");
   }
   const player = () => CBZ.player;
-  // a sentry's words go over HIS head: the nearest live guard to the player
+  // a label that prints as written (city/verbword.js would cut it to its verb)
+  function asIs(s) { const VW = CBZ.cityVerbWord; if (VW && VW.keep) VW.keep(s); return s; }
+  // a person answers over his own head, in breaths (systems/speech.js cuts a
+  // line to a few words; CBZ.speech.lines says a longer one piece by piece)
+  function tell(h, line) {
+    if (!h || !line) return false;
+    const p = h.ped, Sp = CBZ.speech;
+    if (p) { if (p.dead || !Sp || !Sp.lines) return false; Sp.lines([{ by: p, line: line }]); return true; }
+    if (h.say) { h.say(line, 3.0); return true; }      // the bare-harness dummy
+    return false;
+  }
+  // something passing from his hand to yours: the reach, then what it does
+  function handed(h, then) {
+    const p = h && h.ped, Vb = CBZ.verbs;
+    let S0 = null, done = false;
+    const fin = function () { if (done) return; done = true; then(); };
+    if (p && !p.dead && Vb && Vb.takeFrom) { try { S0 = Vb.takeFrom(CBZ.player, p, { at: "wristR", kind: "cash", pose: "card", dur: 0.55, onTaken: fin }); } catch (e) { S0 = null; } }
+    if (!S0) fin();
+  }
+  // the fixer when you are not standing in front of him: a voice on the phone
+  function phone(line) { const Sp = CBZ.speech; if (Sp && Sp.lines && line) Sp.lines([{ by: "phone", line: line }]); }
+  // a sentry SHOUTS it: the nearest live guard to the player, over his own
+  // head, and a shout carries across the yard (ear: 75 m; off screen it rides
+  // the screen edge). False when nobody is near enough to shout.
   function guardSay(line) {
-    const P = CBZ.player; if (!P || !V) return;
+    const P = CBZ.player; if (!P || !V) return false;
     let best = null, bd = 1e9;
     for (const gd of V.guards) {
       const h = gd.handle; if (!h || !h.say || (gd.ped && gd.ped.dead)) continue;
       const d = d2(P.pos.x, P.pos.z, V.origin.x + gd.lx, V.origin.z + gd.lz);
-      if (d < bd) { bd = d; best = h; }
+      if (d < bd) { bd = d; best = gd; }
     }
-    if (best && bd < 60) best.say(line);
+    if (!best || bd > 70) return false;
+    if (best.ped && CBZ.citySay) return !!CBZ.citySay(best.ped, line, null, { secs: 3, force: true, important: true, ear: 75 });
+    best.handle.say(line);
+    return true;
   }
   function floorY(x, z) { return CBZ.floorAt ? (CBZ.floorAt(x, z) || 0) : 0; }
 
   /* ============================================================
-     resolve() — site anchor. Prefer the live region named "Fort Brandt"
-     (registerCityRegion, city/island_military.js); fall back to CBZ._militaryBase
-     (that file's exported constants) and finally to the hard BASE constants.
-     Returns null until an arena exists so the engine keeps retrying.
+     resolve() — site anchor: the BUILT base (CBZ._militaryBase, published by
+     city/island_military.js at the end of its build). Null until then, so the
+     engine keeps retrying.
+     It used to accept the region NAMED "Fort Brandt" first. A world that
+     streams its landmasses registers that region long before the base is
+     built, so the package mounted early, found no plan (site() below), and
+     put the brig, the mess and the patrols on fallback literals typed
+     against a base layout that no longer exists.
   ============================================================ */
   function resolve(CBZ) {
     try {
-      const A = CBZ.city && CBZ.city.arena;
-      if (!A) return null;
-      let cx = BASE.cx, cz = BASE.cz, minX = BASE.cx - BASE.hx, maxX = BASE.cx + BASE.hx,
-        minZ = BASE.cz - BASE.hz, maxZ = BASE.cz + BASE.hz, via = "constants";
-      // 1) region by NAME (the archipelago contract)
-      const regs = A.regions || [];
-      let reg = null;
-      for (let i = 0; i < regs.length; i++) {
-        if (regs[i] && /fort brandt/i.test(regs[i].name || "")) { reg = regs[i]; break; }
-      }
-      // 2) exported constants handle from island_military.js
-      const mb = CBZ._militaryBase;
-      if (reg && isFinite(reg.minX)) {
-        minX = reg.minX; maxX = reg.maxX; minZ = reg.minZ; maxZ = reg.maxZ;
-        cx = (minX + maxX) / 2; cz = (minZ + maxZ) / 2; via = "region";
-      } else if (mb && isFinite(mb.minX)) {
-        minX = mb.minX; maxX = mb.maxX; minZ = mb.minZ; maxZ = mb.maxZ;
-        cx = mb.center.x; cz = mb.center.z; via = "militaryBase";
-      } else if (!regs.length && !mb) {
-        // arena present but base not built yet → wait
-        return null;
-      }
-      return { x: cx, z: cz, via, bounds: { minX, maxX, minZ, maxZ } };
+      const A = CBZ.city && CBZ.city.arena, mb = CBZ._militaryBase;
+      if (!A || !mb || !isFinite(mb.minX) || !mb.center) return null;
+      return { x: mb.center.x, z: mb.center.z, via: "militaryBase", bounds: { minX: mb.minX, maxX: mb.maxX, minZ: mb.minZ, maxZ: mb.maxZ } };
     } catch (e) { return null; }
   }
 
@@ -244,7 +262,10 @@
       proto: null, comms: null, gen: null, brigCell: null, barrier: null,
       guards: [], baseGuardCount: 0, lights: [], beams: [], fence: [], messLight: null,
     };
-    // ensure a fresh, resumable night bag exists
+    // the persisted bag (wins / losses / the resumable night). It was declared
+    // and never loaded: nightBag() answered null, so the fixer's briefing threw
+    // on open and no contract could ever start.
+    state = ctx.state(() => ({ wins: 0, losses: 0, best: 0 }));
     nightBag();
 
     // a counter-offset child so searchlight pools/cones can live in WORLD coords
@@ -275,13 +296,30 @@
     if (V.kit) { const fix = new THREE.Group(); fix.name = "base-fixtures"; V.kit.build(fix); g.add(fix); V.kit = null; }
 
     // ---- ZONES: the interface surface (interactions #14) ----
-    ctx.zone({ id: "fixer", label: "[E] The fixer's contract", pos: [V.fixerAt[0], V.fixerAt[1]], r: 3.4, onUse: openBriefing });
+    // the fixer's asks are on the man (giveFixerVerbs, I J K L) and on the
+    // spot he stands at (E / hold E / the wheel)
     ctx.zone({
-      id: "sabotage", label: "[E] Sabotage the generator", pos: [V.gen.lx, V.gen.lz], r: 3.2,
-      canShow: () => simT >= RT.genUntil, onUse: () => sabotageGenerator(),
+      id: "fixer", name: "Fixer", note: () => (nightBag().active ? "Contract running" : "Has work inside the wire"),
+      pos: [V.fixerAt[0], V.fixerAt[1] - 1.6], at: [V.fixerAt[0], V.fixerAt[1]], y: 1.5, r: 3.0,
+      verbs: FIXER_ASKS.map((a) => ({
+        id: a.id, slot: a.key === "wheel" ? null : "e", hold: a.key === "hold", wheel: a.key === "wheel",
+        label: () => asIs(a.label()), canShow: () => fixerUp() && a.show(), onSelect: () => a.run(),
+      })),
     });
-    // (photo + tap are proximity/hold mechanics driven in update(); the brig
-    //  lockpick is a live panel. No decorative zones.)
+    ctx.zone({
+      id: "sabotage", name: "Generator", note: "Feeds the perimeter lights and the searchlights",
+      pos: [V.gen.lx + 2.2, V.gen.lz + 3.2], at: [V.gen.lx + 2.2, V.gen.lz + 2.1], y: 1.4, r: 3.2,
+      verbs: [{ id: "cut", slot: "e", label: () => asIs("Throw the breakers"), canShow: () => simT >= RT.genUntil, onSelect: () => sabotageGenerator() }],
+    });
+    // the cell door's lock: worked from inside, while nobody is looking
+    const bc = V.brigCell;
+    ctx.zone({
+      id: "lock", name: "Cell door", note: () => (RT.brig.picking ? (RT.seen ? "He's looking" : "Working the lock") : "Locked"),
+      pos: [bc.lx + 0.35, bc.lz + 1.5], at: [bc.lx + LOCK_X, bc.lz + 2.5], y: 1.15, r: 1.9,
+      verbs: [{ id: "pick", slot: "e", label: () => asIs("Pick the lock"), canShow: () => RT.brig.active && !RT.brig.picking, onSelect: () => { RT.brig.picking = true; RT.brig.warned = false; } }],
+    });
+    // (photo + tap are proximity/hold mechanics driven in update(). No
+    //  decorative zones.)
   }
 
   /* ------------------------------------------------------------- GATE ---- */
@@ -337,7 +375,11 @@
     }
     bar.visible = false;
     V.barrier = { mesh: bar, col: null, y: gy + 1.4, lx: lGateX + 1.4 };
-    V.fixerAt = [lGateX - 14, 8];                      // fixer stands just inside
+    // THE FIXER STANDS OUTSIDE THE WIRE, on the verge south of the gate road.
+    // (He stood 14 m inside it, in a traffic lane: city/wanted.js makes the
+    // base's whole rect a five-star incursion, so asking him about the job got
+    // you shot.)
+    V.fixerAt = [lGateX + 9, 17];
   }
   function gateLock(on) {
     const B = V.barrier; if (!B) return;
@@ -357,12 +399,14 @@
   /* ------------------------------------------------------------ FIXER ---- */
   function buildFixer(ctx) {
     // a REAL city ped (brain + gunpoint hands-up + death funnel), pinned at the
-    // gate. [E] Talk gives flavour; the contract panel is the fixer zone.
+    // gate. Talk gives flavour; the contract is what you ask him (FIXER_ASKS).
     if (!ctx.npc) return;
     V.fixer = ctx.npc({
-      role: "vendor", name: "The Fixer", outfit: 0x2a2f26,
-      at: [V.fixerAt[0], V.fixerAt[1]], face: -Math.PI / 2, post: "pinned", pose: "stand",
-      sayColor: "#d8e6b0", talkLabel: "Talk to the Fixer",
+      // (named "Fixer", not "The Fixer": the card strips the words of a
+      //  target's name out of its verbs, and "the" is in most of his)
+      role: "vendor", name: "Fixer", outfit: 0x2a2f26,
+      at: [V.fixerAt[0], V.fixerAt[1]], face: Math.PI, post: "pinned", pose: "stand",          // watching the road
+      sayColor: "#d8e6b0",
       dialogue: [
         "Photo of the prototype. Tap on the mast. Out in something loud.",
         "I did six years in there. Food was better than my ex's.",
@@ -559,7 +603,8 @@
     for (const s of V.beams) s.disabled = 999;
     // it's LOUD: auto-escalate to at least YELLOW
     setAlarm(Math.max(RT.alarm, TIER_AT[1] + 2));
-    if (C) { C.hud.toast("GENERATOR DOWN"); guardSay("Lights are out! Check the generator!"); }
+    // somebody notices (and says so); the note is only for an empty yard
+    if (!guardSay("Lights are out! Check the generator!") && C) C.hud.toast("GENERATOR DOWN");
     if (CBZ.shake) CBZ.shake(0.35);
     return { until: RT.genUntil, tier: TIERS[RT.tierIdx] };
   }
@@ -600,12 +645,16 @@
   }
 
   /* ------------------------------------------------------------- BRIG ---- */
+  const DOOR_W = 1.1;                    // the cell door: a barred leaf hinged on its west post
+  const LOCK_X = DOOR_W / 2 - 0.16;      // the lock case, at the leaf's free edge (cell-local x)
+  const DOOR_OPEN = -1.95;               // swung out past square
   function buildBrig(ctx, gy) {
     const [lx, lz] = site("brig", [70, 120]);
     const g = V.group;
     // a block cell: CMU walls with mortar courses, a slab roof, a front of
-    // round bars with flat straps, a steel bunk with a mattress, a steel toilet
-    const k = V.kit;
+    // round bars with flat straps and a barred DOOR in the middle of it, a
+    // steel bunk with a mattress, a steel toilet
+    const k = V.kit, hw = DOOR_W / 2;
     if (k) {
       k.frame(lx, gy, lz, 0);
       k.box(0, 1.8, -2.6, 6, 3.6, 0.4, 0x8a8a82); k.box(-2.8, 1.8, 0, 0.4, 3.6, 5.2, 0x8a8a82); k.box(2.8, 1.8, 0, 0.4, 3.6, 5.2, 0x8a8a82);
@@ -615,23 +664,77 @@
         for (const e of [-1, 1]) { k.box(e * 3.005, y, 0, 0.01, 0.012, 5.2, 0x6a6a64); }
       }
       k.box(0, 3.72, 0, 6.4, 0.24, 5.8, 0x7a7a72);
-      k.box(0, 0.1, 2.5, 5.2, 0.2, 0.12, M.bar, "metal");
-      k.box(0, 3.5, 2.5, 5.2, 0.16, 0.14, M.bar, "metal");
-      for (const y of [1.2, 2.4]) k.box(0, y, 2.5, 5.2, 0.06, 0.012, M.bar, "metal");
-      for (let i = 0; i <= 40; i++) k.cyl(-2.6 + i * 0.13, 1.8, 2.5, 0.018, 0.018, 3.4, 0x3a3f45, "metal", 0, 0, 0, 6);
+      k.box(0, 3.5, 2.5, 5.2, 0.16, 0.14, M.bar, "metal");                                                  // head rail
+      for (const e of [-1, 1]) {                                                                            // the fixed bars either side of the door
+        const w = 2.6 - hw, cx = e * (hw + w / 2);
+        k.box(cx, 0.1, 2.5, w, 0.2, 0.12, M.bar, "metal");
+        for (const y of [1.2, 2.4]) k.box(cx, y, 2.5, w, 0.06, 0.012, M.bar, "metal");
+        k.box(e * (hw + 0.05), 1.75, 2.5, 0.1, 3.5, 0.14, M.bar, "metal");                                  // door post
+        for (let x = hw + 0.18; x <= 2.6; x += 0.13) k.cyl(e * x, 1.8, 2.5, 0.018, 0.018, 3.4, 0x3a3f45, "metal", 0, 0, 0, 6);
+      }
       k.box(-1.6, 0.42, -1.75, 2.0, 0.06, 0.8, 0x5a5e66, "metal");                                         // bunk
       k.box(-1.6, 0.5, -1.75, 1.9, 0.12, 0.74, 0x4a5a3a);                                                   // mattress
       for (const e of [-1, 1]) k.box(-1.6 + e * 0.95, 0.21, -1.4, 0.05, 0.42, 0.05, 0x5a5e66, "metal");
       k.cyl(1.9, 0.22, -1.9, 0.22, 0.2, 0.44, 0xb0b6c0, "metal", 0, 0, 0, 12);                              // steel toilet
       k.box(1.9, 0.6, -2.25, 0.5, 0.4, 0.2, 0xb0b6c0, "metal");
     }
+    // THE DOOR: its own group, hinged at the west post, so it really swings.
+    // It stands open while the cell is empty; a capture slams it (gateLock's
+    // pattern: a mesh and a collider that come and go together).
+    const door = new THREE.Group(); door.position.set(lx - hw, gy, lz + 2.5); door.rotation.y = DOOR_OPEN; g.add(door);
+    const dk = CBZ.storeFixtureKit ? CBZ.storeFixtureKit.create() : null;
+    if (dk) {
+      dk.frame(0, 0, 0, 0);
+      for (const y of [0.12, 3.36]) dk.box(hw, y, 0, DOOR_W, 0.08, 0.08, M.bar, "metal");                   // rails
+      for (const x of [0.04, DOOR_W - 0.04]) dk.box(x, 1.74, 0, 0.08, 3.3, 0.08, M.bar, "metal");           // stiles
+      for (const y of [1.2, 2.4]) dk.box(hw, y, 0, DOOR_W, 0.06, 0.014, M.bar, "metal");
+      for (let x = 0.17; x < DOOR_W - 0.3; x += 0.13) dk.cyl(x, 1.74, 0, 0.018, 0.018, 3.2, 0x3a3f45, "metal", 0, 0, 0, 6);
+      // the lock: a steel case on the free edge, a brass keyway on both faces
+      dk.box(DOOR_W - 0.16, 1.15, 0, 0.28, 0.4, 0.16, 0x2a2d33, "metal");
+      for (const e of [-1, 1]) {
+        dk.cyl(DOOR_W - 0.16, 1.2, e * 0.085, 0.05, 0.05, 0.012, 0xc9a13a, "metal", Math.PI / 2, 0, 0, 12);
+        dk.box(DOOR_W - 0.16, 1.11, e * 0.086, 0.022, 0.09, 0.012, 0x14100c);
+      }
+      dk.build(door);
+    }
+    // the three block walls stop a sentry's eyes as well as your feet (the
+    // bars do not): invisible slabs in the engine's LOS set, like the revetment
+    const wallMat = new THREE.MeshBasicMaterial({ visible: false });
+    [[0, -2.6, 6, 0.4], [-2.8, 0, 0.4, 5.2], [2.8, 0, 0.4, 5.2]].forEach((w) => {
+      const m = ctx.box(g, lx + w[0], gy + 1.8, lz + w[1], w[2], 3.6, w[3], wallMat);
+      if (CBZ.losBlockers) CBZ.losBlockers.push(m);
+    });
     C.solid(lx - 3, lz - 2.8, lx + 3, lz - 2.2, 0, 3.6);
     C.solid(lx - 3, lz - 2.8, lx - 2.4, lz + 2.8, 0, 3.6);
     C.solid(lx + 2.4, lz - 2.8, lx + 3, lz + 2.8, 0, 3.6);
+    C.solid(lx - 2.6, lz + 2.25, lx - hw, lz + 2.75, 0, 3.6);                                             // the fixed bars
+    C.solid(lx + hw, lz + 2.25, lx + 2.6, lz + 2.75, 0, 3.6);
     ctx.light(lx, gy + 3.2, lz, M.lamp, 0.5, 8);
     signPlate(ctx, lx, gy + 2.9, lz - 2.35, "BRIG", 0);
     V.brigCell = { lx, lz, wx: V.origin.x + lx, wz: V.origin.z + lz, y: gy };
-    V.brigDoor = null;                                 // toggled collider on capture
+    V.brigDoor = { mesh: door, col: null, ang: DOOR_OPEN, shut: false };
+  }
+  // shut = the leaf is home and a real collider fills the doorway
+  function brigDoorSet(shut) {
+    const D = V.brigDoor, cell = V.brigCell; if (!D || !cell) return;
+    D.shut = !!shut;
+    if (shut && !D.col) {
+      D.col = C.solid(cell.lx - DOOR_W / 2, cell.lz + 2.25, cell.lx + DOOR_W / 2, cell.lz + 2.75, 0, 3.6);
+      D.ang = 0; D.mesh.rotation.y = 0;                 // slammed, not eased
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    } else if (!shut && D.col) {
+      const arr = CBZ.colliders, i = arr ? arr.indexOf(D.col) : -1;
+      if (i >= 0) arr.splice(i, 1);
+      D.col = null;
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
+  }
+  function tickBrigDoor(dt) {
+    const D = V.brigDoor; if (!D) return;
+    const want = D.shut ? 0 : DOOR_OPEN;
+    if (Math.abs(D.ang - want) < 0.002) return;
+    D.ang += (want - D.ang) * Math.min(1, dt * 5);
+    D.mesh.rotation.y = D.ang;
   }
 
   /* -------------------------------------------------- PERIMETER LIGHTS ---- */
@@ -795,6 +898,16 @@
     // GATE post — stationed, scanning into the base
     const gp = (R.gate && R.gate[0]) || [210, -8];
     makeGuard(ctx, [gp], { name: "Gate Sentry", mode: "post", station: gp, face: -Math.PI / 2, viewDist: GATE_VIEW_DIST });
+    // THE TURNKEY: walks out from the cell door and back. Coming in he is
+    // looking straight through the bars; going out his back is to them, and
+    // that is when a lock gets picked. The beat is longer than he can see
+    // (VIEW_DIST), so a lock popped behind his back leaves time to get round
+    // the side of the block before he is looking at the door again.
+    const bc = V.brigCell;
+    if (bc) {
+      const tk = makeGuard(ctx, [[bc.lx + 0.4, bc.lz + 4.6], [bc.lx + 0.4, bc.lz + 32]], { name: "Brig Sentry", speed: 2.2 });
+      if (tk) { tk.turnkey = true; V.turnkey = tk; }
+    }
     V.baseGuardCount = V.guards.length;
   }
   function stepGuard(gd, dt) {
@@ -869,8 +982,9 @@
     else if (wantExtras < haveExtras) { despawnExtras(); if (wantExtras) spawnExtras(wantExtras); }
     if (!C) return;
     if (nt > oldIdx) {
-      C.hud.toast("ALERT " + (nt === 1 ? "YELLOW" : nt === 2 ? "ORANGE" : "RED"));
-      guardSay(nt === 1 ? "Hey. Who's there?" : nt === 2 ? "Movement on the wire! Double up!" : "Seal the gate! Find him!");
+      // the alert is what a sentry shouts; a note only when nobody is in earshot
+      if (!guardSay(nt === 1 ? "Hey. Who's there?" : nt === 2 ? "Movement on the wire! Double up!" : "Seal the gate! Find him!"))
+        C.hud.toast("ALERT " + (nt === 1 ? "YELLOW" : nt === 2 ? "ORANGE" : "RED"));
       if (nt >= 2 && CBZ.shake) CBZ.shake(nt === 3 ? 0.5 : 0.3);
     }
   }
@@ -886,7 +1000,7 @@
     const mx = V.mess.lx, mz = V.mess.lz;
     let sent = 0;
     for (const gd of V.guards) {
-      if (gd.mode === "post" || gd.mode === "hunt" || gd.extra) continue;
+      if (gd.mode === "post" || gd.mode === "hunt" || gd.extra || gd.turnkey) continue;
       if (RT.messOn && sent < 2) {
         gd.messRoute = [[mx - 6, mz + 7], [mx + 6, mz + 7], [gd.route[0][0], gd.route[0][1]]];
         gd.mode = "mess"; gd.seg = 0; sent++;
@@ -920,12 +1034,11 @@
     const nb = nightBag();
     if (!nb || nb[name]) return false;
     nb[name] = true; save();
-    if (C) {
-      C.wallet.give(PAY[name] || 0, name === "photo" ? "Prototype photographed"
-        : name === "tap" ? "Comms mast tapped" : "Military vehicle stolen");
-      C.hud.toast((name === "photo" ? "PHOTO SECURED" : name === "tap" ? "COMMS TAPPED" : "HARDWARE STOLEN"));
-    }
-    if (nb.photo && nb.tap && nb.steal && CBZ.speech && CBZ.speech.phone) CBZ.speech.phone("That's all three. Bring something loud through the gate.");
+    const pay = PAY[name] || 0;
+    if (C) C.wallet.give(pay, name === "photo" ? "Prototype photographed" : name === "tap" ? "Comms mast tapped" : "Military vehicle stolen");
+    // the man who pays says so, on the phone
+    const got = (name === "photo" ? "Got the picture. " : name === "tap" ? "The tap's live. " : "Nice ride. ") + money(pay) + ".";
+    phone(nb.photo && nb.tap && nb.steal ? got + " That's all three. Now bring it out through the gate." : got);
     return true;
   }
   function isPilotingMilitary() {
@@ -981,7 +1094,8 @@
     nb.active = false; RT.outcome = "win";
     if (state) { state.wins = (state.wins || 0) + 1; state.best = Math.max(state.best || 0, payout); }
     save();
-    if (C) { C.hud.toast("CONTRACT PAID"); openWinPanel(payout); if (CBZ.shake) CBZ.shake(0.8); }
+    phone("You're through. " + money(payout) + ", as agreed. Now lose that thing.");
+    if (CBZ.shake) CBZ.shake(0.8);
     return { won: true, payout, cashBefore, cashAfter, jobs: { photo: nb.photo, tap: nb.tap, steal: nb.steal } };
   }
 
@@ -995,147 +1109,147 @@
     return { caught: nb.caught, brig: true };
   }
   function enterBrig(reason) {
-    RT.brig.active = true;
+    const bk = RT.brig;
+    bk.active = true; bk.picking = false; bk.work = 0; bk.pin = 0; bk.warned = false;
     RT.alarm = 0; RT.tierIdx = 0; gateLock(false); despawnExtras();
     // reset any hunters
     for (const gd of V.guards) if (gd.mode === "hunt") { gd.mode = "patrol"; gd.seg = 0; }
     const P = player(), cell = V.brigCell;
     if (P && cell) { P.pos.set(cell.wx, floorY(cell.wx, cell.wz) + 0.1, cell.wz); P.vy = 0; if (P.driving && CBZ.cityExitArmor) try { CBZ.cityExitArmor(); } catch (e) {} }
-    // slam the cell door (a real collider) until the lock is picked
-    if (!V.brigDoor) V.brigDoor = C.solid(cell.lx - 2.4, cell.lz + 2.2, cell.lx + 2.4, cell.lz + 2.8, 0, 3.6);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (C) C.hud.toast("THE BRIG");
+    brigDoorSet(true);                                  // the door slams: a real collider until the lock is picked
+    if (V.turnkey) tell(V.turnkey.handle, "In you go. Next time it's a court martial.");
+    if (CBZ.sfx) CBZ.sfx("hit");
     if (CBZ.shake) CBZ.shake(0.7);
-    startLockpick();
   }
   function escapeBrig() {
     if (!RT.brig.active) return;
-    RT.brig.active = false;
-    if (V.brigDoor) { const i = CBZ.colliders ? CBZ.colliders.indexOf(V.brigDoor) : -1; if (i >= 0) CBZ.colliders.splice(i, 1); V.brigDoor = null; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
-    const P = player(), cell = V.brigCell;
-    if (P && cell) { P.pos.set(cell.wx, floorY(cell.wx, cell.wz) + 0.1, cell.wz + 4); P.vy = 0; }
-    setAlarm(TIER_AT[1] + 2);                          // back out at YELLOW, they're looking
-    if (RT.brig.keyH) { window.removeEventListener("keydown", RT.brig.keyH); RT.brig.keyH = null; }
-    if (C) { C.hud.closePanel(); C.hud.toast("LOCK PICKED"); }
+    RT.brig.active = false; RT.brig.picking = false;
+    brigDoorSet(false);                                 // the leaf swings out; you walk
+    setAlarm(TIER_AT[1] + 2);                           // back out at YELLOW, they're looking
   }
   function courtMartial() {
-    RT.brig.active = false; RT.outcome = "lose";
-    gateLock(false); despawnExtras();
+    RT.brig.active = false; RT.brig.picking = false; RT.outcome = "lose";
     if (state) state.losses = (state.losses || 0) + 1;
-    const nb = nightBag(); nb.active = false;
-    save();
-    if (C) openCourtPanel();
+    // thrown out: the night is wiped and you land outside the wire, in front
+    // of the fixer, who tells you what it cost
+    resetArc();
   }
   function resetArc() {
-    // court-martial dismissed → wipe the night, drop the player back at the gate
     state.night = { active: false, photo: false, tap: false, steal: false, caught: 0 };
-    RT.alarm = 0; RT.tierIdx = 0; RT.photoT = RT.tapT = 0; gateLock(false); despawnExtras();
+    RT.alarm = 0; RT.tierIdx = 0; RT.photoT = RT.tapT = 0; RT.briefed = false; gateLock(false); despawnExtras();
+    brigDoorSet(false);
     restoreLights(); RT.genUntil = 0;
     const P = player();
-    if (P && V) { const wx = V.origin.x + V.fixerAt[0], wz = V.origin.z + V.fixerAt[1] + 4; P.pos.set(wx, floorY(wx, wz) + 0.1, wz); P.vy = 0; }
+    if (P && V) { const wx = V.origin.x + V.fixerAt[0], wz = V.origin.z + V.fixerAt[1] - 2.4; P.pos.set(wx, floorY(wx, wz) + 0.1, wz); P.vy = 0; }
     save();
-    if (C) C.hud.closePanel();
-    if (V && V.fixer && V.fixer.say) V.fixer.say("Twice in one night. We start over.");
+    tell(V && V.fixer, "They threw you out. Twice in one night, no pay.");
   }
 
-  /* ---- LOCKPICK minigame (cell-block-z homage) — a 3-pin timing lock ----
-     A marker sweeps a bar (driven by ctx.anim); SET (button or Space) when it's
-     in the green zone to seat a pin. Seat all 3 to pop the lock. Miss = the
-     marker jitters faster (never a hard fail — the brig is escapable). */
-  function startLockpick() {
-    const bk = RT.brig;
-    bk.pins = [0, 1, 2].map(() => { const c = 30 + Math.random() * 40; return { lo: c - 9, hi: c + 9, set: false }; });
-    bk.pin = 0; bk.marker = 5; bk.dir = 1; bk.spd = 46;
-    renderLockpick();
-    if (!bk.keyH) { bk.keyH = (e) => { if (e.code === "Space" && RT.brig.active) { e.preventDefault(); tryPin(); } }; window.addEventListener("keydown", bk.keyH); }
-    // animate the marker; ctx.anim returns false to end when the brig closes
-    C.anim(function (dt) {
-      if (!RT.brig.active) return false;
-      const bk = RT.brig;
-      bk.marker += bk.dir * bk.spd * dt;
-      if (bk.marker >= 100) { bk.marker = 100; bk.dir = -1; }
-      else if (bk.marker <= 0) { bk.marker = 0; bk.dir = 1; }
-      const el = document.getElementById("milPickMarker");
-      if (el) el.style.left = bk.marker.toFixed(1) + "%";
-      return true;
-    });
-  }
-  function tryPin() {
-    const bk = RT.brig; const p = bk.pins[bk.pin]; if (!p) return;
-    if (bk.marker >= p.lo && bk.marker <= p.hi) {
-      p.set = true; bk.pin++;
-      if (CBZ.sfx) CBZ.sfx("coin");
-      if (bk.pin >= bk.pins.length) { escapeBrig(); return; }
-      bk.marker = 5; bk.dir = 1; renderLockpick();
+  /* ---- THE LOCK: worked under the turnkey's nose ---------------------------
+     Three pins, PIN_T seconds of work each, and the work only counts while NO
+     guard has eyes on you (the same RT.seen the comms tap reads). A seated pin
+     stays seated; caught at it, the pin you were on drops and he says so. The
+     readout is CBZ.workLine on the lock itself. (This was an HTML bar with a
+     sweeping marker and a SET button.) */
+  const PIN_T = 1.6, PINS = 3;
+  function lockPoint() { const c = V.brigCell; return { x: c.wx + LOCK_X, y: c.y + 1.45, z: c.wz + 2.5 }; }
+  function tickBrig(dt) {
+    const bk = RT.brig; if (!bk.active) return;
+    const P = player(), cell = V.brigCell; if (!P || !cell) return;
+    // not in the cell any more (died, carried off): the cell stands open again
+    if (d2(P.pos.x, P.pos.z, cell.wx, cell.wz) > 14) { bk.active = false; bk.picking = false; brigDoorSet(false); return; }
+    if (!bk.picking) return;
+    const L = lockPoint();
+    if (d2(P.pos.x, P.pos.z, L.x, L.z) > 3.0) { bk.picking = false; return; }     // went to the back of the cell
+    if (RT.seen) {
+      bk.work = Math.max(bk.pin * PIN_T, bk.work - dt * 2.2);
+      if (!bk.warned) {
+        bk.warned = true;
+        if (!(V.turnkey && tell(V.turnkey.handle, "Hands off that door!"))) guardSay("Hands off that door!");
+        if (CBZ.sfx) CBZ.sfx("hit");
+      }
     } else {
-      bk.spd = Math.min(80, bk.spd + 8);               // slipped — it gets twitchier
-      if (CBZ.sfx) CBZ.sfx("hit");
-      hint("Pin slipped");
+      bk.warned = false;
+      bk.work += dt;
+      if (bk.work >= (bk.pin + 1) * PIN_T) {
+        bk.pin++;
+        if (CBZ.sfx) CBZ.sfx("coin");
+        if (bk.pin >= PINS) { escapeBrig(); return; }
+      }
     }
-  }
-  function renderLockpick() {
-    const bk = RT.brig;
-    const p = bk.pins[bk.pin] || { lo: 45, hi: 55 };
-    const pins = bk.pins.map((x, i) => "<span style='display:inline-block;width:22px;height:22px;border-radius:5px;margin-right:5px;background:" + (x.set ? "#35d07a" : i === bk.pin ? "#e8b64c" : "#26343c") + "'></span>").join("");
-    const html =
-      "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#e8b64c;font-size:17px'>PICK THE LOCK</b>" +
-      "<span style='font-size:12px'>pin " + (bk.pin + 1) + " / " + bk.pins.length + "</span></div>" +
-      "<div>" + pins + "</div>" +
-      "<div style='position:relative;height:26px;margin:10px 0;background:#12181c;border-radius:8px;overflow:hidden'>" +
-      "<div style='position:absolute;top:0;bottom:0;left:" + p.lo + "%;width:" + (p.hi - p.lo) + "%;background:rgba(53,208,122,.55)'></div>" +
-      "<div id='milPickMarker' style='position:absolute;top:0;bottom:0;left:" + bk.marker + "%;width:3px;background:#fff6e2'></div>" +
-      "</div>" +
-      "<span data-act='set' style='display:inline-block;padding:9px 18px;border-radius:11px;background:#1c6b40;font-weight:800;cursor:pointer'>SET</span>";
-    C.hud.panel(html, { set: () => tryPin() });
+    if (CBZ.workLine) CBZ.workLine("mil-lock", L, bk.work / (PIN_T * PINS));
   }
 
-  /* ------------------------------------------------------- PANELS -------- */
-  const BTN = "display:inline-block;margin:4px 8px 4px 0;padding:9px 15px;border-radius:11px;cursor:pointer;font-weight:800;font-size:14px;";
-  function openBriefing() {
-    const nb = nightBag();
-    const jrow = (done, label) => "<div style='margin:2px 0'>" + (done ? "" : "▫") + " " + label + "</div>";
-    const html =
-      "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#d8e6b0;font-size:17px'>FORT HALSTEAD</b>" +
-      "<span style='font-size:13px'>cash <b style='color:#ffd451'>$" + C.wallet.cash().toLocaleString() + "</b></span></div>" +
-      jrow(nb.photo, "Photograph the prototype. $" + PAY.photo.toLocaleString()) +
-      jrow(nb.tap, "Tap the comms mast. $" + PAY.tap.toLocaleString()) +
-      jrow(nb.steal, "Steal a military vehicle. $" + PAY.steal.toLocaleString()) +
-      jrow(false, "Crash the gate. $" + PAY.extract.toLocaleString()) +
-      "<div style='margin-top:8px'>" +
-      (nb.active
-        ? "<span style='" + BTN + "background:#26343c;color:#8fe39a'>CONTRACT ACTIVE</span>"
-        : "<span data-act='accept' style='" + BTN + "background:#1c6b40;color:#eafff0'>Take the contract</span>") +
-      "<span data-act='close' style='" + BTN + "background:#26343c;color:#dfe7ff'>Leave</span></div>" +
-      "<div style='font-size:11px;opacity:.6;margin-top:6px'>Won " + ((state && state.wins) || 0) + ", lost " + ((state && state.losses) || 0) + "</div>";
-    if (!nb.active && V.fixer && V.fixer.say) V.fixer.say("Three jobs, one night.");
-    C.hud.panel(html, {
-      accept: () => { startNight(); openBriefing(); },
-      close: () => C.hud.closePanel(),
-    });
+  /* ---- THE FIXER'S CONTRACT: told, written down, marked on your map --------
+     OWNER: "No dashboards are needed. Everything can be existing."
+     Ask him about the job and he tells it and hands you the sheet (a paper
+     you hold, city/paper.js: the four lines and what each pays; the ones you
+     have done are struck through). Take it. Ask him where a target is and he
+     says which way and puts it on your map. He pays by phone as each job
+     lands. (This was a checklist panel with a "Take the contract" button, an
+     "EXTRACTED" card and a "COURT MARTIAL / Reset the night" card.) */
+  function money(n) { return "$" + Math.round(n || 0).toLocaleString("en-US"); }
+  function fixerUp() { const f = V && V.fixer; return !!(f && (f.ped ? !f.ped.dead : true)); }
+  function jobSheet() {
+    const K = CBZ.cityPaper, nb = nightBag(); if (!K || !nb) return false;
+    return K.show({ key: "halstead-job", hand: true, colw: [0.72, 0.28], lines: [
+      { cols: ["Photo of the prototype", money(PAY.photo)], strike: !!nb.photo },
+      { cols: ["Tap on the comms mast", money(PAY.tap)], strike: !!nb.tap },
+      { cols: ["One of their vehicles", money(PAY.steal)], strike: !!nb.steal },
+      { cols: ["Out the gate in it", money(PAY.extract)] },
+      { gap: 14 },
+      { text: "Photo: get a clear line on it and hold still." },
+      { text: "Tap: only while no sentry has eyes on you." },
+      { text: "Caught once is the brig. Twice and there is no pay." },
+    ] });
+  }
+  function briefJob() {
+    RT.briefed = true;
+    const again = state && (state.wins || state.losses);
+    tell(V.fixer, (again ? "Same three as before. " : "Three jobs, one night. ") + "It's all on the sheet. " +
+      money(PAY.extract) + " when you're out through the gate.");
+    handed(V.fixer, jobSheet);
   }
   function startNight() {
     const nb = nightBag();
     nb.active = true; nb.photo = nb.tap = nb.steal = false; nb.caught = 0;
-    RT.alarm = 0; RT.tierIdx = 0; RT.outcome = "none"; RT.photoT = RT.tapT = 0;
+    RT.alarm = 0; RT.tierIdx = 0; RT.outcome = "none"; RT.photoT = RT.tapT = 0; RT.briefed = false;
     save();
-    C.hud.toast("CONTRACT ACTIVE");
+    tell(V && V.fixer, "Clock's running. Don't get pinched twice.");
   }
-  function openWinPanel(payout) {
-    C.hud.panel(
-      "<b style='letter-spacing:2px;color:#35d07a;font-size:18px'>EXTRACTED</b>" +
-      "<div style='font-size:15px'>Contract paid: <b style='color:#ffd451'>$" + payout.toLocaleString() + "</b></div>" +
-      "<div style='margin-top:10px'><span data-act='close' style='" + BTN + "background:#1c6b40;color:#eafff0'>Nice</span></div>",
-      { close: () => C.hud.closePanel() }
-    );
+  const WINDS = ["North", "North-east", "East", "South-east", "South", "South-west", "West", "North-west"];
+  // he says which way and how far (north is -z, east is +x) and pins it
+  function pointOut(t, label, tip) {
+    if (!t) return;
+    const fx = V.origin.x + V.fixerAt[0], fz = V.origin.z + V.fixerAt[1];
+    const dx = t.wx - fx, dz = t.wz - fz;
+    const wind = WINDS[((Math.round(Math.atan2(dx, -dz) / (Math.PI / 4)) % 8) + 8) % 8];
+    const M = CBZ.fullMap;
+    if (M && M.setWaypoint) {
+      const fh = CBZ.flashHint; CBZ.flashHint = null;          // he says it; no "waypoint set" toast
+      try { M.setWaypoint(t.wx, t.wz, label); } catch (e) {} finally { CBZ.flashHint = fh; }
+    }
+    tell(V.fixer, wind + ", about " + (Math.round(Math.hypot(dx, dz) / 10) * 10) + " metres in. It's on your map. " + tip);
   }
-  function openCourtPanel() {
-    C.hud.panel(
-      "<b style='letter-spacing:2px;color:#ff5a4a;font-size:18px'>COURT MARTIAL</b>" +
-      "<div style='margin-top:10px'><span data-act='reset' style='" + BTN + "background:#7a2b2b;color:#ffe0e0'>Reset the night</span></div>",
-      { reset: () => resetArc() }
-    );
+  const FIXER_ASKS = [
+    { id: "take", key: "e", label: () => "Take the contract", show: () => !nightBag().active && RT.briefed, run: startNight },
+    { id: "ask", key: "e", label: () => "Ask about the job", show: () => !nightBag().active && !RT.briefed, run: briefJob },
+    { id: "sheet", key: "hold", label: () => "Read the job sheet", show: () => nightBag().active || RT.briefed, run: jobSheet },
+    { id: "proto", key: "wheel", label: () => "Ask where the prototype is", show: () => nightBag().active && !nightBag().photo,
+      run: () => pointOut(V.proto, "Prototype", "Behind the sand walls. Shoot it from the open side.") },
+    { id: "mast", key: "wheel", label: () => "Ask where the mast is", show: () => nightBag().active && !nightBag().tap,
+      run: () => pointOut(V.comms, "Comms mast", "The box at its foot.") },
+    { id: "gen", key: "wheel", label: () => "Ask about the lights", show: () => nightBag().active,
+      run: () => pointOut(V.gen && { wx: V.origin.x + V.gen.lx, wz: V.origin.z + V.gen.lz }, "Generator", "Throw the breakers: a minute of dark. They'll notice.") },
+  ];
+  function giveFixerVerbs() {
+    const I = CBZ.interactions, p = V && V.fixer && V.fixer.ped;
+    if (!p || p._halsteadVerbs || !I || !I.registerFor) return;
+    p._halsteadVerbs = true;
+    FIXER_ASKS.forEach((a, i) => I.registerFor(p, {
+      id: "military-fixer-" + a.id, prio: 90 - i, forceYes: true, campaignSafe: true,
+      label: () => asIs(a.label()), canShow: (t) => !!t && !t.dead && a.show(), onSelect: () => a.run(),
+    }));
   }
 
   /* ============================================================ update === */
@@ -1154,6 +1268,8 @@
     if (RT.genUntil && simT >= RT.genUntil) { restoreLights(); RT.genUntil = 0; }
     if (!near) return;                                  // idle when the player's away
 
+    giveFixerVerbs();
+    tickBrigDoor(dt);
     updateBeams(dt);
     updateMess(dt);
 
@@ -1192,6 +1308,7 @@
       if (huntTouch || pointBlank) triggerCaught("Grabbed by a sentry.");
     }
 
+    tickBrig(dt);
     updateJobs(dt);
   }
 
@@ -1257,7 +1374,13 @@
     caught: () => { const nb = nightBag(); return nb ? nb.caught : 0; },
     brigActive: () => RT.brig.active,
     forceCatch: (reason) => triggerCaught(reason || "test"),
-    brigPick: (ok) => { if (!RT.brig.active) return { active: false }; if (ok === false) { tryPin(); return { active: RT.brig.active }; } escapeBrig(); return { escaped: true, active: RT.brig.active }; },
+    // ok === false: caught at it (the pin you were on drops); otherwise the lock gives
+    brigPick: (ok) => { const bk = RT.brig; if (!bk.active) return { active: false }; if (ok === false) { bk.work = bk.pin * PIN_T; return { active: true, pin: bk.pin }; } escapeBrig(); return { escaped: true, active: bk.active }; },
+    brig: () => Object.assign({ doorShut: !!(V && V.brigDoor && V.brigDoor.shut) }, RT.brig),
+    // what the fixer will do for you right now (labels), and one of them run
+    asks: () => FIXER_ASKS.filter((a) => a.show()).map((a) => a.id + ":" + a.label()),
+    ask: (id) => { const a = FIXER_ASKS.find((k) => k.id === id); if (!a || !a.show()) return false; a.run(); return true; },
+    cast: () => ({ fixer: V && V.fixer && V.fixer.ped, turnkey: V && V.turnkey && V.turnkey.ped }),
     outcome: () => RT.outcome,
 
     // ---- JOBS / WIN math (rig via api) ----

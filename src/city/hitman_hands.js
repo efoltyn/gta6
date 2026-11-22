@@ -117,6 +117,13 @@
     H.tex.needsUpdate = true;
     m.material.map = H.tex; m.material.needsUpdate = true;
     H.canvas = canvas; H.kind = opts.kind || "paper"; H.onClose = opts.onClose || null;
+    // A SHEET MAY DECLARE ITS OWN TAP TARGETS (city/paper.js: a line you sign,
+    // a row you mark). opts.onTap(u, v): a tap that lands ON the sheet, u, v
+    // 0..1 across its canvas (v down); true = it hit a target, the sheet stays
+    // up. opts.sticky: a tap elsewhere does not lower it either (you can tap
+    // the person you are dealing with while you hold it). Neither given: any
+    // tap lowers the paper, as before.
+    H.onTap = typeof opts.onTap === "function" ? opts.onTap : null; H.sticky = !!opts.sticky;
     H.out = false; H.t = 0; H.openedAt = now();
     m.visible = true;
     bino.toggle(false);
@@ -135,7 +142,7 @@
   }
   function holdFinish() {
     if (H.mesh) H.mesh.visible = false;
-    const f = H.onClose; H.onClose = null; H.canvas = null; H.out = false;
+    const f = H.onClose; H.onClose = null; H.canvas = null; H.out = false; H.onTap = null; H.sticky = false;
     if (f) { try { f(); } catch (e) {} }
   }
   function placeHeld(k) {
@@ -156,6 +163,21 @@
     m.position.set(Math.sin(t * 0.9) * sway, -vh * (1 - e) * 1.1 + Math.sin(t * 1.3) * sway * 0.7 - vh * 0.01, -d);
     m.rotation.set(-0.06 * (1 - e) - 0.02, 0, Math.sin(t * 0.7) * 0.006 + (H.kind === "news" ? -0.012 : 0.004));
   }
+  // where on the held sheet a client point lands: { u, v } 0..1 across its
+  // canvas (v down), or null when the point is off the sheet
+  function heldUV(cx, cy) {
+    const cam = CBZ.camera, m = H.mesh, R = CBZ.renderer;
+    if (!cam || !m || !m.visible || !R || !R.domElement) return null;
+    const rect = R.domElement.getBoundingClientRect();
+    if (!(rect.width > 0) || !(rect.height > 0)) return null;
+    const nx = ((cx - rect.left) / rect.width) * 2 - 1, ny = -((cy - rect.top) / rect.height) * 2 + 1;
+    const d = -m.position.z;
+    if (!(d > 0)) return null;
+    const hh = d * Math.tan((cam.fov || 60) * Math.PI / 360), hw = hh * (cam.aspect || 1.6);
+    const px = nx * hw - m.position.x, py = ny * hh - m.position.y;       // the point on the sheet's plane, from its centre
+    const u = px / m.scale.x + 0.5, v = 0.5 - py / m.scale.y;
+    return (u >= 0 && u <= 1 && v >= 0 && v <= 1) ? { u: u, v: v } : null;
+  }
   function tickHold(dt) {
     if (!H.mesh || !H.mesh.visible) return;
     if (!playing() || (P() && P().dead)) { holdFinish(); return; }
@@ -174,6 +196,9 @@
     isOpen: function () { return !!(H.mesh && H.mesh.visible && !H.out); },
     kind: function () { return H.mesh && H.mesh.visible ? H.kind : null; },
     canvas: function () { return H.canvas; },
+    // does a tap at this client point belong to the held sheet? (systems/touch.js
+    // asks before it treats the tap as a tap on the world behind the paper)
+    tapClaims: function (x, y) { return !!(H.mesh && H.mesh.visible && !H.out && (H.onTap || H.sticky) && heldUV(x, y)); },
   };
 
   /* ================================================================
@@ -484,7 +509,16 @@
       else if (dy > 70) inspectExit();
       return;
     }
-    if (CBZ.hmHold.isOpen() && Math.abs(dx) < 14 && Math.abs(dy) < 14 && dt < 0.35 && now() - H.openedAt > 0.3) holdClose();
+    if (CBZ.hmHold.isOpen() && Math.abs(dx) < 14 && Math.abs(dy) < 14 && dt < 0.35 && now() - H.openedAt > 0.3) {
+      // a sheet with its own tap targets: a tap on one keeps it up; a sticky
+      // sheet is not lowered by a tap at all
+      if (H.onTap || H.sticky) {
+        const uv = heldUV(t1.clientX, t1.clientY);
+        if (uv && H.onTap) { let hit = false; try { hit = !!H.onTap(uv.u, uv.v); } catch (err) { hit = false; } if (hit) return; }
+        if (H.sticky) return;
+      }
+      holdClose();
+    }
   }, { capture: true, passive: true });
 
   /* ================================================================

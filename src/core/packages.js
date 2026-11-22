@@ -38,7 +38,7 @@
                                                                  card + wallet payout, all for one call. Never
                                                                  null — inert handle if the block is absent.
        ctx.wallet.cash()/spend(n)/give(n)/canAfford(n)           REAL city money (#6b via CBZ.city)
-       ctx.hud.feed/toast/panel(html,handlers)/closePanel        player-facing surface
+       ctx.hud.feed/toast                                        short status chips (no panel: see ctx.zone verbs)
        ctx.rand(a,b,salt) ctx.stream(name)                       DETERMINISM LAW (#12): never Math.random
        ctx.anim(fn(dt,t))                                        per-frame animator; return false to end
        ctx.state(init)                                           package save-bag (localStorage-mirrored)
@@ -249,67 +249,16 @@
     });
   }
 
-  /* ---------------- the package panel (one DOM overlay, engine-owned) ----- */
-  let panelEl = null, panelHandlers = null;
-  function touchPanel() {
-    if (CBZ.touchMode) return true;
-    try {
-      if (document.body && document.body.classList.contains("touch")) return true;
-      // Fallback for the frame before systems/touch.js has stamped body.touch.
-      // CBZ.isTouchDevice (config.js) — not a bare `pointer: coarse`, which an
-      // iPad with a trackpad attached answers "fine" to.
-      return CBZ.isTouchDevice();
-    } catch (e) { return false; }
-  }
-  // Package authors historically put "Esc closes" in their heading. The
-  // package panel is shared by racing/casino/airport/police/government, so
-  // scrub that desktop-only copy once here instead of chasing every game.
-  function scrubTouchCloseHints(el) {
-    if (!touchPanel() || !el || !document.createTreeWalker) return;
-    const walk = document.createTreeWalker(el, 4);
-    let n;
-    while ((n = walk.nextNode())) {
-      n.nodeValue = n.nodeValue
-        .replace(/(\s*[·•]\s*)?Esc(?:ape)?\s+closes?\b/gi, "")
-        .replace(/\s*\(\s*Esc(?:ape)?\s*\)/gi, "")
-        .replace(/\[\s*Esc(?:ape)?\s*\]/gi, "");
-    }
-  }
-  function ensurePanel() {
-    if (panelEl) return panelEl;
-    panelEl = document.createElement("div");
-    panelEl.id = "pkgPanel";
-    panelEl.style.cssText = "position:fixed;left:50%;bottom:14px;transform:translateX(-50%);width:min(860px,96vw);" +
-      "padding:13px 16px 14px;z-index:40;display:none;background:rgba(10,22,17,.85);backdrop-filter:blur(6px);" +
-      "border:2px solid rgba(232,182,76,.4);border-radius:14px;color:#fff6e2;" +
-      "font-family:'Trebuchet MS','Segoe UI',Verdana,system-ui,sans-serif;pointer-events:auto;";
-    panelEl.addEventListener("click", (e) => {
-      const el = e.target && e.target.closest ? e.target.closest("[data-act]") : e.target;
-      const act = el && el.getAttribute && el.getAttribute("data-act");
-      // Pass the actual control. Package rows commonly carry data-i/data-s;
-      // without this, every repeated TAKE/STAKE button silently selected row 0.
-      if (act && panelHandlers && panelHandlers[act]) panelHandlers[act](el, e);
-    });
-    document.body.appendChild(panelEl);
-    window.addEventListener("keydown", (e) => { if (e.code === "Escape" && panelEl.style.display !== "none") closePanel(); });
-    return panelEl;
-  }
-  function openPanel(html, bodyOrHandlers, handlers) {
-    ensurePanel();
-    // Both are sanctioned authoring forms:
-    //   panel(html, handlers)
-    //   panel(headerHtml, bodyHtml, handlers)
-    // The second form already had many honest consumers, but JavaScript's
-    // ignored extra argument made their body become the handler table.
-    if (typeof bodyOrHandlers === "string") {
-      html = (html || "") + bodyOrHandlers;
-      panelHandlers = handlers || null;
-    } else panelHandlers = bodyOrHandlers || null;
-    panelEl.innerHTML = html || "";
-    scrubTouchCloseHints(panelEl);
-    panelEl.style.display = "block";
-  }
-  function closePanel() { if (!panelEl) return; panelEl.style.display = "none"; panelEl.innerHTML = ""; panelHandlers = null; }
+  /* ---------------- there is no package panel -----------------------------
+     Every venue game used to share one HTML overlay (ctx.hud.panel: a card of
+     data-act buttons at the bottom of the screen, #pkgPanel). The casino, the
+     ocean kiosk, boxing, the airport, the precinct, City Hall and the base
+     now put what the player does on people, paper and objects (ctx.zone with
+     verbs, CBZ.interactions.registerFor on a cast ped, CBZ.cityPaper), so the
+     overlay, its click delegation and its Esc listener are deleted.
+     ctx.hud.closePanel stays as a no-op for the one caller that only ever
+     closed it (games/jail.js). */
+  function closePanel() {}
 
   /* ---------------- world-verb vocabularies ------------------------------
      Names, not numbers. "dusk" is the thing an author means; 0.5 is the thing
@@ -562,7 +511,7 @@
       hud: {
         feed(msg, color) { if (CBZ.cityFeed) CBZ.cityFeed(msg, color || "#e8dcc0"); },
         toast(msg) { if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 2.4); else ctx.hud.feed(msg, "#ffd166"); },
-        panel: openPanel, closePanel,
+        closePanel,
       },
       /* -------- THE WORLD VERBS: time · water · weather --------------------
          The cast, the props, the money and the missions were already one-liners.

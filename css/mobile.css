@@ -609,13 +609,12 @@ body.tveh-on #cityFlightHud { display: none !important; }
    DOM controls; the click handlers these panels already use fire on tap. */
 @media (pointer: coarse) {
   .btn, .mode-btn, .role-btn, .origin-btn, .iopt, summary,
-  [data-act], #pkgPanel button, #fullMapClose, #fullMapClear, #fullMapLaunch, #fullMapLegend > * {
+  [data-act], #fullMapClose, #fullMapClear, #fullMapLaunch, #fullMapLegend > * {
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
   }
   .btn { min-height: 52px; }
   .mode-btn, .role-btn, .origin-btn { min-height: 48px; }
   #interactOpts .iopt { min-height: 44px; padding: 10px 8px; }
-  #pkgPanel button, #pkgPanel [data-act] { min-height: 44px; padding: 10px 14px; }
   #fullMapClose { min-height: 44px; padding: 8px 14px; }
   /* NO KEYBOARD ⇒ NO KEY LEGEND. The footer's "[Space] clear waypoint" was the
      only clear affordance in the game and a Space bar does not exist here, so
@@ -625,8 +624,6 @@ body.tveh-on #cityFlightHud { display: none !important; }
     border: 1px solid rgba(125,231,255,.5); background: rgba(31,67,82,.72);
     color: #dffaff; font: 700 12px Fredoka, system-ui, sans-serif;
   }
-  /* keep the shared bottom panel clear of the home-indicator / rounded corner */
-  #pkgPanel { bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important; }
 }
 /* THE PRISON BRIEFING's keyboard/touch swap lives in css/title_hub.css, next
    to the Controls block it switches. */

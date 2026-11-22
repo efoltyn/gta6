@@ -8,11 +8,11 @@
 // two thirds of it were false: there was no road record and there is no water
 // within 220 m of this place. Driving is real now — see THE SITE below. There
 // is no boat and there must not be one; a pier on dry land is a lie.)
-// It has a boxing ring with a LIVE, self-running
-// NPC bout (the showcase for the improved fight poses: kicks, blocks, dodges,
-// staggers, KO crumples), an MMA cage the player can step into, a beast pit
-// that stages creature-vs-creature bouts via CBZ.creatureFight, and a bounded
-// cast of live grandstand spectators watching it all.
+// It has a boxing ring (the ring is built here; every bout in it, the house
+// card and your own, is run by games/boxing.js with its referee, bell, judges
+// and corner: see CBZ.arenaRing below), an MMA cage the player can step into,
+// a beast pit that stages creature-vs-creature bouts via CBZ.creatureFight,
+// and a bounded cast of live grandstand spectators watching it all.
 //
 // THE BUILDING lives in city/arena_venue.js (raked bowl, concourse, roof,
 // light rig, jumbotron, instanced crowd). THIS file owns the FIGHT SURFACES
@@ -32,7 +32,7 @@
 //  - Static geometry is draw-call disciplined: everything is batched into a
 //    handful of per-material InstancedMeshes via instBoxes(); the cage fence is
 //    ONE merged alpha-tested quad batch; the bowl/crowd are arena_venue's.
-//  - ALL simulation is distance gated (see RING_SIM / PIT_SIM, both derived
+//  - ALL simulation is distance gated (see PIT_SIM, derived
 //    from the venue footprint so a spectator in the back row never watches a
 //    frozen bout). When you're across the map the whole file costs a couple of
 //    Math.hypot calls per frame.
@@ -49,7 +49,7 @@ if(!mat||typeof CBZ.addLandmass!=="function"||typeof CBZ.onUpdate!=="function")r
 
 var CFG=CBZ.CONFIG||(CBZ.CONFIG={});
 // ARENA_FIGHTS — the whole Ironjaw complex (island, causeway, ring, cage, pit,
-// bouts, betting). The file had NO flag at all, which broke the house rule that
+// the cage and pit bouts, the pit betting). The file had NO flag at all, which broke the house rule that
 // every risky feature is a one-line revert. ON → the venue exists.
 // Flip false (or ?cfg_ARENA_FIGHTS=0) to remove it from the world entirely.
 if(CFG.ARENA_FIGHTS==null)CFG.ARENA_FIGHTS=true;
@@ -135,33 +135,27 @@ var PX=CX, PZ=CZ, PITY=PY+0.02;            // beast pit centre + sand height
 var RING_HALF   = 4.1;                       // corner-post & rope half-span
 var RING_APRON  = RING_HALF + 0.7;           // 4.8 — canvas + apron half-width
 var RING_INSET  = 0.9;                       // fighters stay this far inside the ropes
-var RING_FIGHT  = RING_HALF - RING_INSET;    // 3.2 — clampRing / startBout radius
+var RING_FIGHT  = RING_HALF - RING_INSET;    // 3.2 — how far from centre a boxer may stand (CBZ.arenaRing.fight)
 var CAGE_POST_R = 6.3;                       // fence-post ring radius
 var CAGE_MAT_R  = 6.6;                       // mat disc radius
 var CAGE_INSET  = 1.1;                       // fighters stay this far off the fence
-var CAGE_FIGHT  = CAGE_POST_R - CAGE_INSET;  // 5.2 — clampCage / startBout radius
+var CAGE_FIGHT  = CAGE_POST_R - CAGE_INSET;  // 5.2 — clampCage / startCageFight radius
 var PIT_WALL_R  = 9.2;                       // pit wall ring radius
 var PIT_SAND_R  = 8.6;                       // sand floor radius
 var PIT_INSET   = 1.8;                       // beasts stay this far off the wall
 var PIT_FIGHT   = PIT_WALL_R - PIT_INSET;    // 7.4 — clampPitXZ radius
 // Prompt zones: the venue footprint plus a standing-room margin — and now that
 // the three surfaces are in a row, those margins are what PARTITION the floor
-// between them. RING_ZONE + PIT_ZONE and CAGE_ZONE + PIT_ZONE both equal
-// FIGHT_SPAN, so each boundary falls exactly on the midpoint of its walkway and
-// no point on the floor can ever offer two different fights on the SAME KEY.
-// (The old margins summed to 27 against a 24.7 separation, so a 2.3 m band
-// already answered [J] with the boxing match or a beast bout depending on
-// registration order — at 21 m apart those numbers would have made that band
-// 6 m wide. This is the bug the re-lay would have caused if the radii had been
-// left alone, which is exactly why they were derived from the span.)
+// between them. CAGE_ZONE + PIT_ZONE equals FIGHT_SPAN, so the boundary falls
+// exactly on the midpoint of the walkway and no point on the floor can ever
+// offer two different fights on the SAME KEY. (The ring has no prompt zone:
+// what you do there is asked of the people round it, games/boxing.js.)
 var PIT_ZONE    = PIT_WALL_R + 2.4;          // 11.6 — 2.4 m of rail to stand at
-var RING_ZONE   = FIGHT_SPAN - PIT_ZONE;     // 9.4  — RING_APRON + 4.6
 var CAGE_ZONE   = FIGHT_SPAN - PIT_ZONE;     // 9.4  — CAGE_MAT_R + 2.8, past its ramp
 // Simulation gating: a bout must keep running while ANY spectator seat can see
 // it, so the radius is (offset of the surface from the venue centre) + the
 // furthest walkable point of the bowl. Grow the bowl and these grow with it.
 var VENUE_REACH = 118;
-var RING_SIM    = Math.hypot(RX-CX,RZ-CZ)+VENUE_REACH+8;   // ~158
 var PIT_SIM     = Math.hypot(PX-CX,PZ-CZ)+VENUE_REACH+8;   // ~180
 
 // ============================================================== THE SITE
@@ -228,7 +222,6 @@ var siteInfo=null;                   // {fencePanels, gates, bays, keepouts, par
 // siteInfo, because the audit that reports them lives out here too — declared
 // inside the landmass builder they read as undefined the moment anyone asks.
 var yawOriented=0, yawSlack=0;
-var redCh=null, blueCh=null, refCh=null;
 
 function note(msg,secs,opts){ if(CBZ.city&&typeof CBZ.city.note==="function")CBZ.city.note(msg,secs||3,opts); }
 function money(n){ n=Math.round(n); try{ return "$"+n.toLocaleString("en-US"); }catch(e){ return "$"+n; } }
@@ -334,7 +327,8 @@ function cardTonight(){
   return CBZ.hash01?(CBZ.hash01(day*37.1,day*11.7,0xF1)<0.58):true;
 }
 function eventNow(){
-  if(pfight)return pfight.box?"box":"mma";
+  if(pfight)return "mma";
+  if(CBZ.arenaRing&&CBZ.arenaRing.event)return CBZ.arenaRing.event;
   if(pitBout)return "pit";
   var night=(CBZ.nightAmount==null?0:CBZ.nightAmount);
   return (night>0.34&&cardTonight())?"card":null;
@@ -464,16 +458,19 @@ CBZ.addLandmass(function(city){
         {x:CX,z:CZ,y:PY,angle:0.62,intensity:1.1},
         {x:PX,z:PZ,y:PITY,angle:0.5,intensity:1.5}
       ],
-      // Ringside chairs, and BOTH radii are the surface's own furniture, not a
-      // taste. The ring's walk-up stair reaches RING_APRON + 2.3 = 7.1, so the
-      // first band starts past it at 7.6 and the second (9.1) still stops 2.3 m
-      // short of the pit's 9.6 wall. The cage carries its step-up ramp out to
+      // Ringside chairs, and the radii are the surface's own furniture, not a
+      // taste. The ring's walk-up stair reaches RING_APRON + 2.3 = 7.1 and the
+      // boxing card's own furniture stands in the 4.8 to 8.6 band round the
+      // apron (the judges' table, the bookmaker, the belt: games/boxing.js),
+      // so the ring gets ONE band at 9.1, which still stops 2.3 m short of the
+      // pit's 9.6 wall. (It had a second at 7.6: those chairs stood inside the
+      // judges' table and the bookmaker's kiosk.) The cage carries its step-up ramp out to
       // CAGE_MAT_R + 2.4 = 9.0 on its -x face, so its band starts at 9.4 — and
       // it gets ONE band, because a second at 10.9 would put a chair 0.5 m from
       // the pit rail on the -z side. (The old 7.0 put a chair ON the ring stair;
       // its comment claimed the opposite.)
       floorSeatRings:[
-        {x:RX,z:RZ,r0:7.6,rings:2},
+        {x:RX,z:RZ,r0:9.1,rings:1},
         {x:CGX,z:CGZ,r0:9.4,rings:1}
       ]
     });
@@ -1449,20 +1446,12 @@ CBZ.addLandmass(function(city){
     }
   }
 
-  // ---- resident fighters + referee ----------------------------------------
-  if(typeof CBZ.makeCharacter==="function"){
-    redCh=CBZ.makeCharacter({legs:0xcc2233,torso:0xf0c8a0,collar:0xf0c8a0,arms:0xf0c8a0,skin:0xf0c8a0,hair:0x201810,shoes:0xbb2222});
-    blueCh=CBZ.makeCharacter({legs:0x2244cc,torso:0x8a5a3a,collar:0x8a5a3a,arms:0x8a5a3a,skin:0x8a5a3a,hair:0x111111,shoes:0x2233bb});
-    refCh=CBZ.makeCharacter({legs:0x16181d,torso:0xe8e8e8,collar:0x16181d,arms:0xe8e8e8,skin:0xe8c8a8,hair:0x555555,shoes:0x111111});
-    redCh.group.position.set(RX-1.8,RY,RZ);
-    blueCh.group.position.set(RX+1.8,RY,RZ);
-    refCh.group.position.set(RX-3.1,RY,RZ+3.1);
-    root.add(redCh.group); root.add(blueCh.group); root.add(refCh.group);
-  }
+  // (the ring's fighters, referee, judges and corner men are real people:
+  //  games/boxing.js casts them through core/packages.js ctx.npc)
 
   // ---- map regions ---------------------------------------------------------
-  // games/boxing.js anchors SOUTHPAW PALACE by finding /Ironjaw Arena/i in
-  // city.regions — the name is a compatibility contract, do not rename it.
+  // games/boxing.js mounts on the ring through CBZ.arenaRing, and looks for
+  // this region's name to know the arena was built in this world: keep it.
   if(typeof CBZ.registerCityRegion==="function"){
     CBZ.registerCityRegion(city,{name:"Ironjaw Arena",subtitle:"Fight Complex",biome:"arena",
       kind:"circle",cx:CX,cz:CZ,r:R,pad:6});
@@ -1586,27 +1575,31 @@ if(CBZ.venueSite&&CBZ.venueSite.census){
 }
 
 // ============================================================ BET SLIP
-// The ring and the pit write their tickets on THE one slip (city/betslip.js);
-// this venue only knows the two sides, their odds and when it is over.
-// cfg={title, aLabel,bLabel, aOdds,bOdds, onPlace(side,stake,odds)} side="a"|"b"
+// The pit writes its ticket on THE one slip (city/betslip.js); this venue only
+// knows the two sides, their odds and when it is over. (The ring's book is the
+// bookmaker's, games/boxing.js, on the same slip.)
+// cfg={title, aLabel,bLabel, aOdds,bOdds, onPlace(side,stake,odds), onDone()}
+// side="a"|"b". onDone: the slip left your hands, bet or no bet.
 function openBetOverlay(cfg){
-  if(!CBZ.betSlip)return;
-  CBZ.betSlip.open({
-    key:"ironjaw", title:cfg.title, sub:"Ironjaw Arena, ringside window",
+  if(!CBZ.betSlip)return false;
+  var done=function(){ if(cfg.onDone){ var f=cfg.onDone; cfg.onDone=null; f(); } };
+  return CBZ.betSlip.open({
+    key:"ironjaw", title:cfg.title, sub:"Ironjaw Arena, pit rail",
     min:25, max:2500, step:25, stake:50,
-    picks:[{id:"a",label:cfg.aLabel,odds:cfg.aOdds,color:"#ff9a9a"},
-           {id:"b",label:cfg.bLabel,odds:cfg.bOdds,color:"#9ad0ff"}],
-    onPlace:function(p,stake,odds){ cfg.onPlace(p.id,stake,odds); }
+    picks:[{id:"a",label:cfg.aLabel,odds:cfg.aOdds},
+           {id:"b",label:cfg.bLabel,odds:cfg.bOdds}],
+    onPlace:function(p,stake,odds){ cfg.onPlace(p.id,stake,odds); done(); },
+    skip:{label:"No bet, let them fight",fn:done},
+    onClose:done
   });
 }
 function settleTicket(t,won){ return CBZ.betSlip?CBZ.betSlip.settle(t,won):0; }
 
-// ============================================================ RING NPC BOUT
+// ============================================================ THE FIGHTERS
 var NAMES=["Rico \"Hammer\" Vega","Sonny Malone","Dee \"Cobra\" Kane","Marek Stone",
   "Otis Braddock","\"Iron\" Ada Cole","Felix Marrow","Juno Blackwood","Big Tam Docherty",
   "Ray \"Cyclone\" Ito","Vusi Dlamini","Karla \"Nitro\" Reyes"];
 var PUNCHES=["jab","cross","hook","upper"];
-var bout=null, boutSeq=0, ringBet=null, nearRing=false, ringSuspended=false;
 
 // ================================================================ FIGHTER CAREER
 // PURSES ARE LOGIC, NOT NUMBERS. There is no purse table and no cap. A purse
@@ -1690,155 +1683,52 @@ function recordLoss(box){
 /* EVERY BLOW HERE IS CBZ.verbs (systems/verbs_strike.js): a fighter is an
    actor the verbs can read ({char, group, pos, hp}); his punches are real
    strikes that land where the fist lands, his cover is his forearms, his
-   KO is a fall in his own rig. The ring pair box through two CBZ.verbs
-   fighters (combinations, reads, footwork); the file only keeps score. */
+   KO is a fall in his own rig. */
 function VB(){ return (CBZ.verbs&&CBZ.verbs.strike)?CBZ.verbs:null; }
 function fighterActor(ch,name,hp){
   return {char:ch,group:ch.group,pos:ch.group.position,hp:hp,maxHp:hp,name:name,dead:false,ko:0};
 }
-function resetFighter(a,x){
-  if(!a)return;
-  var ch=a.char, Vb=VB();
-  ch.group.position.set(x,RY,RZ);
-  if(Vb){ Vb.cancelStrike(a); if(ch.fall&&ch.fall.on)Vb.getUp(a); Vb.guard(a,true); }
-  a.ko=0;
-}
-function newBout(){
-  if(!redCh||!blueCh)return;
-  boutSeq++;
-  var i1=(Math.random()*NAMES.length)|0, i2=(Math.random()*NAMES.length)|0;
-  if(i2===i1)i2=(i2+1)%NAMES.length;
-  var p=0.35+Math.random()*0.30; // red's true win prob
-  bout={id:boutSeq,state:"circle",t:2.5,ang:Math.random()*Math.PI*2,
-    dir:(Math.random()<0.5)?-1:1,winner:null,pRed:p,
-    red:fighterActor(redCh,NAMES[i1],100),blue:fighterActor(blueCh,NAMES[i2],100),
-    oddsRed:Math.round(94/p)/100,oddsBlue:Math.round(94/(1-p))/100}; // ~6% vig
-  resetFighter(bout.red,RX-1.8); resetFighter(bout.blue,RX+1.8);
-  board("BOUT #"+bout.id,bout.red.name+"  vs  "+bout.blue.name,
-        "RED @"+bout.oddsRed.toFixed(2)+"   ·   BLUE @"+bout.oddsBlue.toFixed(2));
-  if(nearRing)note("Next bout. RED "+bout.red.name+" @"+bout.oddsRed.toFixed(2)+
-    " vs BLUE "+bout.blue.name+" @"+bout.oddsBlue.toFixed(2)+"  [E] ringside to bet",6);
-}
-// The ring bound: derived from RING_HALF, never hand-typed. Fighters stay
-// RING_INSET inside the ropes so a punch thrown at the rail still lands inside.
-function clampRing(p){
-  p.x=Math.min(RX+RING_FIGHT,Math.max(RX-RING_FIGHT,p.x));
-  p.z=Math.min(RZ+RING_FIGHT,Math.max(RZ-RING_FIGHT,p.z));
-  p.y=RY;
-}
-// a ring blow that LANDED (the verbs call this on the fist's frame): what it
-// costs, and the knockdown that ends the bout
-function ringLanded(res){
-  var b=bout, D=res.target, A=res.attacker;
-  if(!b||b.state!=="exchange"||!D||D.hp<=0||(D!==b.red&&D!==b.blue)){ res.reaction="none"; return; }
-  D.hp-=(7+Math.random()*6)*res.dmgMul;
-  if(D.hp>0)return;
-  D.hp=0; res.reaction="none";
-  var Vb=VB(); if(Vb)Vb.knockdown(D,{dir:res.dir,ko:true,dur:6,power:res.power});
-  b.winner=(D===b.red)?"blue":"red";
-  b.state="ko"; b.t=3.5;
-  var w0=(b.winner==="red")?b.red:b.blue;
-  board("DOWN!",w0.name+" drops "+D.name,"the referee is counting");
-  if(nearRing)note("DOWN! "+w0.name+" drops "+D.name+" · the ref is counting...",3,{urgent:true});
-  void A;
-}
-var RING_O={perform:true,onLand:ringLanded};
-function settleRingBet(b){
-  if(!ringBet)return;
-  if(ringBet.boutId!==b.id){ ringBet=null; return; }
-  var won=ringBet.side===b.winner, pay=settleTicket(ringBet,won);
-  if(won)note("Bet cashed: +"+money(pay),4,{urgent:true});
-  else note("Bet lost, "+money(ringBet.stake)+" gone to the house.",4);
-  ringBet=null;
-}
-function tickRing(dt){
-  var b=bout; if(!b)return;
-  var r=b.red,u=b.blue, rp=r.pos, up=u.pos;
-  if(b.state==="circle"){
-    b.t-=dt; b.ang+=dt*0.55*b.dir;
-    moveTo(rp,RX+Math.cos(b.ang)*1.7,RZ+Math.sin(b.ang)*1.7,1.6*dt);
-    moveTo(up,RX-Math.cos(b.ang)*1.7,RZ-Math.sin(b.ang)*1.7,1.6*dt);
-    clampRing(rp); clampRing(up);
-    face(r.char,up.x,up.z); face(u.char,rp.x,rp.z);
-    anim(r.char,0.7,dt); anim(u.char,0.7,dt);
-    // the walk-out: then they fight until one of them is down (the fighters
-    // take their own rests between combinations, and circle on their own feet)
-    if(b.t<=0)b.state="exchange";
-  }else if(b.state==="exchange"){
-    var dx=up.x-rp.x,dz=up.z-rp.z,d=Math.hypot(dx,dz)||0.001,mv=0.3;
-    var Vb=VB(), busy=!!(Vb&&(Vb.strikeOf(r)||Vb.strikeOf(u)));
-    if(d>1.9&&!busy){
-      // walk into range; inside it the fighters own their feet (and nothing moves a man mid-blow)
-      var s=Math.min(1.4*dt,(d-1.7)*0.8);
-      rp.x+=dx/d*s; rp.z+=dz/d*s; up.x-=dx/d*s; up.z-=dz/d*s; mv=1.3;
-    }
-    // the fight works its way back off the ropes: a pair pinned in a corner
-    // cannot step in, and the clamp would eat every lunge
-    var mx=(rp.x+up.x)*0.5-RX, mz=(rp.z+up.z)*0.5-RZ, md=Math.hypot(mx,mz);
-    if(md>0.4&&!busy){ var k=Math.min(md-0.4,0.6*dt)/md; rp.x-=mx*k; rp.z-=mz*k; up.x-=mx*k; up.z-=mz*k; }
-    clampRing(rp); clampRing(up);
-    anim(r.char,mv,dt); anim(u.char,mv,dt);
-    if(Vb&&d<2.4){
-      // the favourite presses more: his odds are his edge in the ring
-      Vb.fighter(r,{skill:0.3+0.5*b.pRed,aggression:0.35+0.5*b.pRed}).tick(dt,u,RING_O);
-      if(b.state==="exchange")Vb.fighter(u,{skill:0.3+0.5*(1-b.pRed),aggression:0.35+0.5*(1-b.pRed)}).tick(dt,r,RING_O);
-    }else{ face(r.char,up.x,up.z); face(u.char,rp.x,rp.z); }
-  }else if(b.state==="ko"){
-    b.t-=dt;
-    var W=(b.winner==="red")?r:u, L=(b.winner==="red")?u:r;
-    // the finish: the winner jumps on him and pounds him until the ref dives in
-    // (verbs_strike: a fighter whose man is down mounts him; ringLanded ignores
-    // blows after the knockdown, so this is the finish, not more scoring)
-    if(b.t>1.3&&VB()&&Math.hypot(W.pos.x-L.pos.x,W.pos.z-L.pos.z)<2.4)VB().fighter(W,{}).tick(dt,L,RING_O);
-    else if(VB()&&VB().dismount)VB().dismount(W);
-    if(W.char.fightStance&&VB())VB().guard(W,false);
-    anim(W.char,0.5,dt); anim(L.char,0,dt);
-    var refMoved=refCh?moveTo(refCh.group.position,L.pos.x+0.9,L.pos.z,1.9*dt):0;
-    if(refCh){ refCh.group.position.y=RY; face(refCh,L.pos.x,L.pos.z); anim(refCh,refMoved>0?1.2:0.15,dt); }
-    if(b.t<=0){
-      board("WINNER BY KO",W.name,"IRONJAW ARENA");
-      if(nearRing)note((b.winner==="red"?"RED ":"BLUE ")+W.name+" wins by KO!",4,{urgent:true});
-      settleRingBet(b);
-      b.state="reset"; b.t=4;
-    }
-  }else if(b.state==="reset"){
-    b.t-=dt;
-    anim(r.char,0,dt); anim(u.char,0,dt);
-    if(refCh){ moveTo(refCh.group.position,RX-3.1,RZ+3.1,1.6*dt); refCh.group.position.y=RY; anim(refCh,0.4,dt); }
-    if(b.t<=0)newBout();
+
+/* THE RING IS BOXED BY games/boxing.js. This file builds the ring and keeps
+   what the whole house shares: the fighter's career (one record, one fame,
+   two belts, with the cage), the big screen and whether the house is in.
+   The boxing card reads the ring's own numbers from here so nothing is typed
+   twice, and says when YOUR bout is on (event) so the bowl fills for it. */
+var RING=CBZ.arenaRing={
+  x:RX, z:RZ, y:RY, deck:PY, half:RING_HALF, fight:RING_FIGHT, apron:RING_APRON,
+  names:NAMES,
+  event:null,                                   // "box" while your boxing bout is on
+  board:function(a,b,c){ board(a,b,c); },
+  houseIn:function(){ return !!EVENT.active; },
+  career:{
+    state:function(){ return careerState(); },
+    rank:function(){ return rankLabel(careerState().fame); },
+    booked:function(){ return bookedOpp(true); },
+    title:function(){ return isTitle(careerState(),true); },
+    purse:function(opp){ return purseFor(careerState(),opp||bookedOpp(true),true); },
+    win:function(opp,ko,war,purse){ recordWin(opp,true,!!ko,!!war,purse); },
+    loss:function(){ recordLoss(true); }
   }
-  if(refCh&&b.state!=="ko"&&b.state!=="reset"){
-    face(refCh,RX,RZ); anim(refCh,0.1,dt);
-  }
-}
+};
 
 // ============================================================ PLAYER v CAGE
 var pfight=null;
-function startBout(box){
+function startCageFight(){
   if(pfight){ note("You're already in a bout.",2); return; }
   if(!arenaRoot||typeof CBZ.makeCharacter!=="function"){ note("The card is closed tonight.",3); return; }
   if(CBZ.player&&CBZ.player.dead){ return; }
-  var c=careerState(), card=bookedOpp(box);
-  // ONE radius per discipline, straight off the GEOMETRY LAW — the ring used to
-  // spawn at 3.1 while clampRing held 3.2, an invisible 0.1 desync.
-  var cx=box?RX:CGX, cz=box?RZ:CGZ, cy=box?RY:CGY, rad=box?RING_FIGHT:CAGE_FIGHT;
-  if(box){
-    // the player takes over the RING: refund any live ringside bet, park the
-    // house fighters out of sight, resume the card after.
-    if(ringBet&&bout&&ringBet.boutId===bout.id){ if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(ringBet.stake); note("Card interrupted, your stake is refunded.",3); }
-    ringBet=null; bout=null; ringSuspended=true;
-    if(redCh)redCh.group.visible=false; if(blueCh)blueCh.group.visible=false; if(refCh)refCh.group.visible=false;
-  }
-  var opp=CBZ.makeCharacter({legs:0x111111,torso:box?0x8a1f1f:0x40342a,collar:box?0x8a1f1f:0x40342a,arms:box?0x8a1f1f:0x40342a,
+  var c=careerState(), card=bookedOpp(false);
+  var cx=CGX, cz=CGZ, cy=CGY, rad=CAGE_FIGHT;
+  var opp=CBZ.makeCharacter({legs:0x111111,torso:0x40342a,collar:0x40342a,arms:0x40342a,
     skin:0xc89878,hair:0x0a0a0a,shoes:0x222222});
   opp.group.position.set(cx+rad*0.7,cy,cz);
   arenaRoot.add(opp.group);
-  // Put the player ON the deck, not through it: the ring canvas and cage mat
-  // are now real platforms, and physics only adopts a platform within STEP_UP
-  // of the feet it is asked about.
+  // Put the player ON the deck, not through it: the cage mat is a real
+  // platform, and physics only adopts a platform within STEP_UP of the feet
+  // it is asked about.
   if(CBZ.player&&CBZ.player.pos)CBZ.player.pos.set(cx-rad*0.7,cy,cz);
-  var purse=purseFor(c,card,box);
-  pfight={opp:opp,card:card,box:!!box,purse:purse,cx:cx,cz:cz,cy:cy,rad:rad,t:0,
+  var purse=purseFor(c,card,false);
+  pfight={opp:opp,card:card,purse:purse,cx:cx,cz:cz,cy:cy,rad:rad,t:0,
     oppHp:100*(0.75+card.skill*0.8),oppHpMax:100*(0.75+card.skill*0.8),
     myHp:60,ocd:1.4,over:0,won:false,name:card.name};
   // HE IS A BODY YOUR FISTS CAN FIND. The only damage he takes is a blow of
@@ -1848,21 +1738,15 @@ function startBout(box){
   oa.meleeHit=function(res,dmg){ cageLanded(res,dmg); };
   if(VB())VB().guard(oa,true);
   cageTargets.length=0; cageTargets.push(oa);
-  board((box?"BOXING":"MMA")+(isTitle(c,box)?" TITLE BOUT":" BOUT"),
+  board("MMA"+(isTitle(c,false)?" TITLE BOUT":" BOUT"),
         "YOU  vs  "+card.name,"purse "+money(purse));
-  note((box?"BOXING":"MMA")+(isTitle(c,box)?" TITLE":"")+" bout vs "+card.name+" ("+card.wins+"-"+card.losses+
+  note("MMA"+(isTitle(c,false)?" TITLE":"")+" bout vs "+card.name+" ("+card.wins+"-"+card.losses+
     "), purse "+money(purse)+".",6,{urgent:true});
 }
-function startCageFight(){ startBout(false); }
-function startBoxMatch(){ startBout(true); }
 function endCageFight(){
   if(!pfight)return;
   cageTargets.length=0;
   if(arenaRoot&&pfight.opp)arenaRoot.remove(pfight.opp.group);
-  if(pfight.box){ // hand the ring back to the house card
-    ringSuspended=false;
-    if(redCh)redCh.group.visible=true; if(blueCh)blueCh.group.visible=true; if(refCh)refCh.group.visible=true;
-  }
   pfight=null;
   board("IRONJAW ARENA","FIGHT NIGHT","BOXING / MMA / BEAST PIT");
 }
@@ -1875,15 +1759,12 @@ function clampCage(p){
 var cageTargets=[];
 CBZ.arenaFightSite={x:CX,z:CZ,name:"Ironjaw Arena"};  // shop counters point here (shops.js fightCard)
 CBZ.cityMeleeTargets=cageTargets;       // city/combat.js swings can land on these
-// the cage and the ring as a probe drives them (tools/verbs-route-check.mjs)
+// the cage as a probe drives it
 CBZ.arenaFightProbe={
   root:function(r){ if(r)arenaRoot=r; return arenaRoot; },
-  startCage:function(box){ startBout(!!box); return pfight; },
+  startCage:function(){ startCageFight(); return pfight; },
   endCage:function(){ endCageFight(); },
-  tickCage:function(dt,pp){ tickCage(dt,pp||CBZ.player.pos); return pfight; },
-  newBout:function(){ newBout(); return bout; },
-  tickRing:function(dt){ tickRing(dt); return bout; },
-  rigs:function(r,b){ redCh=r; blueCh=b; }
+  tickCage:function(dt,pp){ tickCage(dt,pp||CBZ.player.pos); return pfight; }
 };
 // one of YOUR blows landed on him (res from CBZ.verbs, dmg already scaled by
 // where it landed): that is the only way his health goes down
@@ -1902,7 +1783,7 @@ function tickCage(dt,pp){
     return;
   }
   var d=Math.hypot(pp.x-og.position.x,pp.z-og.position.z);
-  if(d>22){ note("You fled the "+(f.box?"ring":"cage")+". No purse for runners.",4); recordLoss(f.box); endCageFight(); return; }
+  if(d>22){ note("You fled the cage. No purse for runners.",4); recordLoss(false); endCageFight(); return; }
   f.t+=dt;
   var sk=(f.card&&f.card.skill)||0.45;
   var mv=0.3;
@@ -1928,7 +1809,7 @@ function tickCage(dt,pp){
       f.myHp-=res.blocked?took*0.3:took;
     };
     if(pa){
-      if(!f.box&&Math.random()<0.25)Vb.kick(oa,pa,{kind:Math.random()<0.5?"roundKick":"lowKick",onLand:hit}); // kicks are MMA-only
+      if(Math.random()<0.25)Vb.kick(oa,pa,{kind:Math.random()<0.5?"roundKick":"lowKick",onLand:hit});
       else Vb.strike(oa,pa,{kind:PUNCHES[(Math.random()*PUNCHES.length)|0],onLand:hit});
     }
   }
@@ -1939,12 +1820,12 @@ function tickCage(dt,pp){
     var war=f.t>30&&f.myHp<=24;                              // a genuine WAR, not a walkover
     board("WINNER BY KO","YOU","purse "+money(f.purse));
     note("You KO "+f.name+"! Purse +"+money(f.purse)+".",5,{urgent:true});
-    recordWin(f.card,f.box,true,war,f.purse);
+    recordWin(f.card,false,true,war,f.purse);
     f.won=true; f.over=4;
   }else if(f.myHp<=0||(CBZ.player&&CBZ.player.dead)){
     board("WINNER BY KO",f.name,"no purse tonight");
     note(f.name+" leaves you folded. No purse tonight, and your stock just dropped.",5,{urgent:true});
-    recordLoss(f.box);
+    recordLoss(false);
     f.over=3;
   }
 }
@@ -1991,20 +1872,30 @@ function startWildPit(){
   var A=spawnBeast(pool[i1],PX-PIT_FIGHT*0.6,PZ), B=spawnBeast(pool[i2],PX+PIT_FIGHT*0.6,PZ);
   if(!A||!B){ if(A)arenaRoot.remove(A.group); if(B)arenaRoot.remove(B.group);
     note("The beasts refused the pit.",3); return; }
-  pitBout={a:A,b:B,kind:"wild",done:false,over:0};
+  var P0=pitBout={a:A,b:B,kind:"wild",done:false,over:0,held:0};
   board("THE BEAST PIT",prettySpecies(A.species).toUpperCase()+"  vs  "+prettySpecies(B.species).toUpperCase(),
         "both @1.88");
   note("PIT BOUT: "+prettySpecies(A.species)+" vs "+prettySpecies(B.species)+"!",4,{urgent:true});
-  openBetOverlay({
+  // THE BEASTS ARE HELD AT THEIR GATES WHILE THE SLIP IS IN YOUR HANDS. The
+  // slip is a paper you hold now, not a card that stops the world: let loose
+  // at once, the bout was often over (and the book shut) before you had marked
+  // it, and a ticket handed in after the finish paid on the NEXT pair.
+  var opened=openBetOverlay({
     title:"Beast Pit, place your money",
     aLabel:prettySpecies(A.species), bLabel:prettySpecies(B.species),
     aOdds:1.88, bOdds:1.88,
     onPlace:function(side,stake,odds){
+      if(pitBout!==P0||P0.done){             // too late: the money goes back
+        if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(stake);
+        note("Too late, that one is over. Your "+money(stake)+" is back.",3); return;
+      }
       pitBet={side:side,stake:stake,odds:odds};
       note("Pit bet down: "+money(stake)+" on the "+
         prettySpecies(side==="a"?A.species:B.species)+".",3);
-    }
+    },
+    onDone:function(){ if(pitBout===P0)P0.held=0; }
   });
+  if(opened)P0.held=40;                      // the handlers wait this long, no longer
 }
 function startPetPit(){
   if(pitBout){ note("A pit bout is already running.",3); return; }
@@ -2060,11 +1951,12 @@ function endPit(){
   }
   if(P.a&&P.a.isPet)P.a.group.rotation.z=0;
   pitBout=null; pitBet=null;
-  if(!bout&&!pfight)board("IRONJAW ARENA","FIGHT NIGHT","BOXING / MMA / BEAST PIT");
+  if(!pfight&&!RING.event)board("IRONJAW ARENA","FIGHT NIGHT","BOXING / MMA / BEAST PIT");
 }
 function tickPit(dt){
   var P=pitBout; if(!P)return;
   if(P.over>0){ P.over-=dt; if(P.over<=0)endPit(); return; }
+  if(P.held>0){ P.held-=dt; return; }       // at their gates until your slip is in (or torn up)
   var A=P.a,B=P.b;
   if(typeof CBZ.creatureFight==="function"&&!A.dead&&!B.dead){
     try{
@@ -2082,43 +1974,21 @@ function tickPit(dt){
 // ============================================================ ON-MAP PROMPTS
 // Every radius here is derived from the GEOMETRY LAW block, so moving or
 // resizing a fight surface moves its prompt with it — automatically.
-if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="function"){
-  CBZ.interactions.registerZone({
-    id:"arena_ring", kind:"arena_ring", prio:4,
-    find:function(px,pz){ return Math.hypot(px-RX,pz-RZ)<RING_ZONE?{x:RX,z:RZ}:null; },
-    options:[{
-      id:"arena_ring_bet", slot:"e",
-      // no bout, a bout ending, or money already down are states, not buttons
-      canShow:function(){ return !!bout&&bout.state!=="ko"&&bout.state!=="reset"&&!(ringBet&&ringBet.boutId===bout.id); },
-      label:function(){ return "Bet"; },
-      onSelect:function(){
-        if(!bout){ note("No bout scheduled right now.",2); return; }
-        if(bout.state==="ko"||bout.state==="reset"){ note("Too late, wait for the next matchup.",2); return; }
-        if(ringBet&&ringBet.boutId===bout.id){ note("Your money's already down on this one.",2); return; }
-        var b=bout;
-        openBetOverlay({
-          title:"Ironjaw Ring. Bout #"+b.id,
-          aLabel:"RED "+b.red.name, bLabel:"BLUE "+b.blue.name,
-          aOdds:b.oddsRed, bOdds:b.oddsBlue,
-          onPlace:function(side,stake,odds){
-            ringBet={boutId:b.id,side:(side==="a")?"red":"blue",stake:stake,odds:odds};
-            note("Bet down: "+money(stake)+" on "+ringBet.side.toUpperCase()+" @"+odds.toFixed(2),3);
-          }
-        });
-      }
-    },{
-      id:"arena_ring_box", slot:"j",
-      canShow:function(){ return !pfight; },
-      label:function(){
-        var c=careerState(),o=bookedOpp(true);
-        return "Fight "+money(purseFor(c,o,true));
-      },
-      onSelect:startBoxMatch
-    }]
-  });
+// (one stable token per zone: the card compares targets by identity, and a
+//  fresh object every frame was a new target every frame)
+var CAGE_TOK={x:CGX,z:CGZ}, PIT_TOK={x:PX,z:PZ};
+// WIRED ON THE FIRST TICK, NOT AT PARSE. This file loads before
+// city/interactions.js (index.html), so the `CBZ.interactions` test that used
+// to guard this block at parse time was always false: the cage and the pit
+// (and the ring's old Bet / Fight) never had a prompt at all, on any key.
+var promptsWired=false;
+function wirePrompts(){
+if(promptsWired||!CFG.ARENA_FIGHTS||!CBZ.interactions||typeof CBZ.interactions.registerZone!=="function")return;
+promptsWired=true;
+{
   CBZ.interactions.registerZone({
     id:"arena_cage", kind:"arena_cage", prio:4,
-    find:function(px,pz){ return Math.hypot(px-CGX,pz-CGZ)<CAGE_ZONE?{x:CGX,z:CGZ}:null; },
+    find:function(px,pz){ return Math.hypot(px-CGX,pz-CGZ)<CAGE_ZONE?CAGE_TOK:null; },
     options:[{
       id:"arena_cage_fight", slot:"i",
       canShow:function(){ return !pfight; },
@@ -2131,7 +2001,7 @@ if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="f
   });
   CBZ.interactions.registerZone({
     id:"arena_pit", kind:"arena_pit", prio:4,
-    find:function(px,pz){ return Math.hypot(px-PX,pz-PZ)<PIT_ZONE?{x:PX,z:PZ}:null; },
+    find:function(px,pz){ return Math.hypot(px-PX,pz-PZ)<PIT_ZONE?PIT_TOK:null; },
     options:[
       {
         id:"arena_pit_wild", slot:"j",
@@ -2148,11 +2018,6 @@ if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="f
     ]
   });
   if(typeof CBZ.interactions.describe==="function"){
-    CBZ.interactions.describe("arena_ring",function(){
-      var c=careerState();
-      return {label:"Ironjaw Ring"+(c.beltBox?" · BOXING CHAMP":""),
-        note:c.wins+c.losses>0?("You: "+c.wins+"-"+c.losses+" ("+c.kos+" KO) · "+rankLabel(c.fame)):"Live bout, bet ringside"};
-    });
     CBZ.interactions.describe("arena_cage",function(){
       var c=careerState();
       return {label:"Ironjaw Cage"+(c.beltMMA?" · MMA CHAMP":""),
@@ -2160,6 +2025,7 @@ if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="f
     });
     CBZ.interactions.describe("arena_pit",function(){return{label:"Beast Pit",note:"Where animals settle it"};});
   }
+}
 }
 
 // ============================================ A SEATED BODY CAN GET UP AND RUN
@@ -2378,6 +2244,7 @@ CBZ.arenaAudit=function(){
 CBZ.onUpdate(40,function(dt){
   if(!dt||dt>0.5)dt=0.05;
   if(!arenaRoot||!CBZ.player||!CBZ.player.pos)return;
+  if(!promptsWired)wirePrompts();
   var pp=CBZ.player.pos;
   // ---- THE HOUSE: full when a card is on, near-empty when it is dark -------
   if(CFG.ARENA_CROWD_EVENT!==false&&venue&&venue.crowdFill){
@@ -2406,13 +2273,6 @@ CBZ.onUpdate(40,function(dt){
   // crowd by distance, and repaint the jumbotron when the card changed.
   if(venue&&venue.tick)venue.tick(Math.hypot(pp.x-CX,pp.z-CZ),dt);
   tickPanic(dt,pp);
-  // ring bout: only simulate while a spectator could actually see it, and
-  // while the ring isn't handed over to the player's own boxing match.
-  nearRing=Math.hypot(pp.x-RX,pp.z-RZ)<RING_SIM;
-  if(nearRing&&!ringSuspended){
-    if(!bout)newBout();
-    tickRing(dt);
-  }
   // player cage bout: only exists after [I] at the cage
   if(pfight)tickCage(dt,pp);
   // pit bout: only exists after [J]/[I] at the pit; frozen if you wander far

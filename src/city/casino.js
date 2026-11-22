@@ -197,7 +197,7 @@
       take(lat - 0.36, lat + 0.36, dep - 0.34, dep + 0.34); take(sl - 0.3, sl + 0.3, dep - 0.3, dep + 0.3);
       const p = W(F, lat, dep);
       L.slots.push({ x: p.x, z: p.z, yaw: yawOf(F, dLat, 0), hue: L.slots.length });
-      CBZ._casinoSlots.push({ x: p.x, y: F.slab, z: p.z, yaw: yawOf(F, dLat, 0), kind: "sl", lot: lot });
+      CBZ._casinoSlots.push({ x: p.x, y: F.ff != null ? F.ff : F.slab, z: p.z, yaw: yawOf(F, dLat, 0), kind: "sl", lot: lot });
       collide(lat - 0.3, lat + 0.3, dep - 0.3, dep + 0.3, 1.9);
       seat(sl, dep, -dLat, 0, 0.68);
       return true;
@@ -247,7 +247,9 @@
       const p = W(F, lat, d);
       const T = { x: p.x, z: p.z, yaw: yawOf(F, 0, -1), kind: roulette ? "roulette" : "blackjack" };   // players face the back
       L.tables.push(T);
-      CBZ._casinoTables.push({ x: p.x, y: F.slab, z: p.z, yaw: T.yaw, kind: roulette ? "rl" : "bj", lot: lot });
+      // y is the finished floor the furniture stands on (the felt is 0.773 above
+      // it): games/casino.js lays its cards and chips from this
+      CBZ._casinoTables.push({ x: p.x, y: F.ff != null ? F.ff : F.slab, z: p.z, yaw: T.yaw, kind: roulette ? "rl" : "bj", lot: lot });
       collide(lat - (roulette ? 1.3 : 1.0), lat + (roulette ? 1.3 : 1.0), d - (roulette ? 0.62 : 0.47), d + (roulette ? 0.62 : 0.45), 0.95);
       // stools: an arc on the players' side (blackjack), both long sides (roulette)
       if (!roulette) {

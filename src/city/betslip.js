@@ -86,19 +86,25 @@
     if (cfg.sub) lines.push({ text: cfg.sub, italic: true, dim: true });
     lines.push({ cols: ["", "PAYS"], head: true });
     for (const r of cfg.picks || []) {
-      lines.push({ cols: [r.label + (r.sub ? "  (" + r.sub + ")" : ""), odd(r.odds) + " x"], mark: !!p && String(p.id) === String(r.id) });
+      const id = r.id;
+      // (a tap on a runner's row circles him)
+      lines.push({ cols: [r.label + (r.sub ? "  (" + r.sub + ")" : ""), odd(r.odds) + " x"], mark: !!p && String(p.id) === String(r.id),
+        tap: function () { pickId = id; msg = ""; draw(); } });
     }
     lines.push({ gap: 14 });
-    lines.push({ k: "STAKE", v: money(stake), big: true });
+    // (the pencil boxes beside the stake: down and up the window's stakes)
+    lines.push({ k: "STAKE", v: money(stake), big: true,
+      minus: stakeStep(-1) !== stake ? function () { setStake(-1); } : null,
+      plus: stakeStep(1) !== stake ? function () { setStake(1); } : null });
     if (p) lines.push({ k: "IF " + String(p.label).toUpperCase() + " WINS", v: money(Math.round(stake * p.odds)) });
     if (cfg.ticket) lines.push({ text: cfg.ticket });
+    if (p && !cfg.locked) lines.push({ btn: "HAND IT IN", tap: place });
     return K.show({
       key: "betslip", org: cfg.title || "Bet slip", title: "BET SLIP", ink: "#5a2418", tone: "#f6efdc",
-      colw: [0.72, 0.28], lines: lines,
+      colw: [0.72, 0.28], lines: lines, sticky: true,
       foot: msg || cfg.locked || "Win only. Stakes are not returned.",
-      // (putting the paper down is not tearing it up: a tap on a touch screen
-      //  lowers any held paper, and the slip has to outlive that tap. It is
-      //  still yours to mark or hand in until you put it away or walk off.)
+      // (lowering the paper is not tearing it up: it is still yours to mark
+      //  or hand in until you tear it up or walk away from the window)
     });
   }
   // the same paper, once it is handed in: your ticket

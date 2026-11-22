@@ -29,6 +29,8 @@
      - FEAR BUILDS while the gun stays on him, and is what a demand spends.
      - LOOK AWAY from a man you held up and he may hit the alarm under the
        counter (a real report: CBZ.cityCrime, instant), then gets down.
+       Unless one of your men has his own gun on him (city/stickup.js: the
+       crew covering the room): then he is still held.
      - GUNFIRE IN THE ROOM: he cowers at his post.
      - HURT: an armed keeper fights (the ordinary fight brain, his own gun);
        an unarmed one runs (the ordinary flee brain).
@@ -37,9 +39,10 @@
        carrying the vault's key (city/keys.js: the manager and the vault
        guard) can open it. A teller says so and points at who can. The man
        with the key stalls until his fear is up, then walks to the door with
-       his hands up, works the lock while you keep the gun on him, and the
-       door swings (city/bank.js CBZ.cityVaultOpenBy). Lose him, and he
-       stops, hits the alarm and runs.
+       his hands up, works the lock while you keep the gun on him (or one
+       of your men does), and the door swings (city/bank.js
+       CBZ.cityVaultOpenBy); then he backs out of the doorway along the
+       wall. Lose him, and he stops, hits the alarm and runs.
      - THE DRAWER (a teller, gunpoint row "Empty the drawer"): his own
        window's drawer, through city/bank.js's one drawer-take.
 
@@ -82,7 +85,12 @@
     }
     return k;
   }
-  function covered(p) { return !!(p._covered && (p.surrender || p.poseHandsUp || p.poseAimBack || p._keepBusy)); }
+  // A GUN ON HIM IS YOURS, OR ONE OF YOUR MEN'S. city/stickup.js stamps the
+  // people the crew are covering while you hold the room; to a keeper that is
+  // the same thing as your own muzzle: his fear builds, his hands stay up, he
+  // keeps walking to the vault, and he cannot reach the alarm.
+  function crewCovered(p) { return (p._stickCov || -99) > now() - 0.9 && !!(p.surrender || p.poseHandsUp || p._keepBusy); }
+  function covered(p) { return crewCovered(p) || !!(p._covered && (p.surrender || p.poseHandsUp || p.poseAimBack || p._keepBusy)); }
   function playerArmed() { return !!(CBZ.cityHasGun && CBZ.cityHasGun()); }
   function once(k, key, secs) {
     const t = now();
@@ -221,6 +229,10 @@
       // at arm's length from the door and held there (a body on the floor in
       // front of it): that is close enough to reach the wheel
       if (k.stuckT > 1.2 && k.way.length === 1 && d2(p, v.x, v.z) < 1.7 * 1.7) { k.way.shift(); return; }
+      // a colleague standing frozen in the strip behind the windows (the room
+      // is being held): he reaches the wheel past him, from as far as the
+      // door can be worked at all (city/bank.js: 2.6 m)
+      if (k.stuckT > 2.5 && k.way.length === 1 && d2(p, v.x, v.z) < 2.5 * 2.5) { k.way.shift(); return; }
       p.surrender = true; p.state = "surrender"; p.poseHandsUp = true;
       p._keepThrough = true;
       p.moveOrder = { x: w.x, z: w.z, speed: (p.baseSpeed || 1.3) * 0.85, stop: 0.3, t: CBZ.now || 0 };
@@ -238,11 +250,30 @@
       const ok = CBZ.cityVaultOpenBy ? CBZ.cityVaultOpenBy(v, p) : false;
       endEscort(p, k);
       if (ok) {
-        // he did it; now he wants to be anywhere else
+        // he did it; now he wants to be anywhere else. First out of the
+        // doorway (a man with his hands up in it is a door still shut): he
+        // backs along the wall beside it, away from you, and stays there.
         p.surrender = true; p.surrenderT = 3; p.state = "surrender"; p.poseHandsUp = true;
         say(p, "It's open. Take it. Just take it.", 2.4);
+        const tx = -v.inz, tz = v.inx;
+        const ax = v.x - v.inx * 0.45, az = v.z - v.inz * 0.45;
+        const sd = (Pl.pos.x - ax) * tx + (Pl.pos.z - az) * tz >= 0 ? -1 : 1;
+        k.mode = "aside"; k.asideT = 0;
+        k.aside = { x: ax + tx * sd * 1.45, z: az + tz * sd * 1.45 };
       }
     }
+  }
+  // stepping clear of the vault's doorway, hands still up
+  function asideThink(p, k, dt) {
+    const a = k.aside;
+    k.asideT = (k.asideT || 0) + dt;
+    if (!a || k.asideT > 5 || d2(p, a.x, a.z) < 0.35 * 0.35) {
+      k.mode = "loose"; k.aside = null; p._keepThrough = false; p.moveOrder = null;
+      return;
+    }
+    p.surrender = true; p.surrenderT = Math.max(p.surrenderT || 0, 1.5); p.state = "surrender"; p.poseHandsUp = true;
+    p._keepThrough = true;
+    p.moveOrder = { x: a.x, z: a.z, speed: (p.baseSpeed || 1.3) * 0.9, stop: 0.3, t: CBZ.now || 0 };
   }
   function endEscort(p, k) {
     k.mode = "loose"; k.demand = false; k.way = null; k.openT = 0;
@@ -277,6 +308,7 @@
 
     // walking to the vault / working its lock
     if (k.mode === "escort" || k.mode === "open") { escortThink(p, k, dt); return true; }
+    if (k.mode === "aside") { asideThink(p, k, dt); return true; }
 
     // HURT. Who did it is the man in the room with a gun (a stray from
     // outside is still a reason to get down or get out).

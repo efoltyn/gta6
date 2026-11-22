@@ -34,8 +34,10 @@
      - SPEECH LAW: a person's words go over THEIR head: the npc handle's
        .say(line) (or CBZ.speech.say(actor, line); a phone/PA voice is
        CBZ.speech.phone(line)). Never put an NPC's line, "X says...",
-       or reported speech in a panel, ctx.hud.feed or ctx.hud.toast.
-       Panels are bare buttons; toasts are short status chips ("WINNER").
+       or reported speech in ctx.hud.feed or ctx.hud.toast.
+       NO PANELS: what the player does is a verb on a person or a thing
+       (ctx.zone({ verbs }), CBZ.interactions.registerFor on a cast ped),
+       what he reads is a sheet he holds (CBZ.cityPaper).
        No popups that explain the game: people talk, the world shows.
        On-screen text: no em dashes, no middle dots.
 ============================================================ */
@@ -82,11 +84,16 @@
       HOST = host;
       ctx.idle && host.ped && host.ped.char && 0; // (idle bob comes free on peds)
 
-      // the entry point: one zone, one panel
-      ctx.zone({
-        id: "play", label: "[E] Play MY GAME", pos: [0, -1.2], r: 1.6,
-        onUse: () => openPanel(),
-      });
+      // the entry point: the host is a person, and what you do is asked of
+      // HIM (a person in front of you is the card's target before any spot
+      // on the floor). The same verb is on the spot too, for a venue whose
+      // host is dead. There is no panel: ctx.zone({ verbs }) and
+      // CBZ.interactions.registerFor are the whole surface.
+      const play = { id: "play", slot: "e", label: () => keep("Play, $25"), canShow: () => true, onSelect: () => playOnce() };
+      ctx.zone({ id: "table", name: "MY GAME", note: () => "Best " + bag().best, pos: [0, -1.2], r: 1.6, verbs: [play] });
+      if (host.ped && CBZ.interactions && CBZ.interactions.registerFor) {
+        CBZ.interactions.registerFor(host.ped, { id: "mygame-play", prio: 90, forceYes: true, label: play.label, onSelect: () => playOnce() });
+      }
 
       // ---- the WORLD verbs: you do not build weather, sea or a clock ----
       // COORDINATE LAW: what you BUILD is venue-LOCAL (above); what you ASK
@@ -109,28 +116,18 @@
     api: {
       rules: { scoreFor },
       state: () => (S ? JSON.parse(JSON.stringify(S)) : null),
-      open: () => C && openPanel(),
+      play: () => C && playOnce(),
     },
   });
 
-  function openPanel() {
-    const s = bag();
-    if (HOST && HOST.say) HOST.say("Twenty-five to play.");   // his line, over his head
-    C.hud.panel(
-      "<b style='letter-spacing:2px;color:#e8b64c'>MY GAME</b>" +
-      "<div style='margin:6px 0'>Best: " + s.best + ", cash $" + C.wallet.cash().toLocaleString() + "</div>" +
-      "<span data-act='go' style='display:inline-block;padding:9px 16px;border-radius:11px;background:#1c6b40;font-weight:800;cursor:pointer'>PLAY $25</span>" +
-      "<span data-act='close' style='display:inline-block;padding:9px 16px;border-radius:11px;background:#26343c;font-weight:800;cursor:pointer;margin-left:6px'>Leave</span>",
-      {
-        go: () => {
-          if (!C.wallet.spend(25, "MY GAME buy-in")) return;
-          const won = Math.random() < 0.5; // runtime RNG is fine
-          if (won) { C.wallet.give(60, "MY GAME payout"); C.hud.toast("WINNER"); if (HOST && HOST.say) HOST.say("Winner. Don't get used to it."); }
-          const s2 = bag(); s2.plays++; if (won) s2.best++; C.saveState();
-          openPanel();
-        },
-        close: () => C.hud.closePanel(),
-      }
-    );
+  // a label that prints as written (city/verbword.js would cut it to its verb)
+  function keep(s) { const VW = CBZ.cityVerbWord; if (VW && VW.keep) VW.keep(s); return s; }
+  // one play: money to the host, his line over his head, the result said by him
+  function playOnce() {
+    if (!C.wallet.spend(25)) { if (HOST && HOST.say) HOST.say("Twenty-five to play."); return; }
+    const won = Math.random() < 0.5; // runtime RNG is fine
+    if (won) C.wallet.give(60);
+    if (HOST && HOST.say) HOST.say(won ? "Winner. Sixty to you. Don't get used to it." : "House takes it.");
+    const s = bag(); s.plays++; if (won) s.best++; C.saveState();
   }
 })();

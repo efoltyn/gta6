@@ -398,8 +398,8 @@
       const P = playerPos(), t = m.target();
       return (P && t) ? dist2d(P.x, P.z, t.x, t.z) : Infinity;
     };
-    // advance past the current leg (a caller with its own phase machine —
-    // heists.js — drives this by hand; tracked goals call it themselves).
+    // advance past the current leg (a caller with its own phase machine
+    // drives this by hand; tracked goals call it themselves).
     m.advance = function () { if (m.state === "active") finishStage(m, m.stage()); return m; };
     m.retarget = function (t, label, color) {
       const st = m.stage(); if (!st) return m;
@@ -603,7 +603,7 @@
     // or "hold out" leg pinned a glowing marker over the bank you just robbed
     // and told the map that was still where you were going. Callers had to
     // retire-and-retake a whole handle to get rid of it (careers.js's getaway
-    // leg does exactly that, and heists.js could not). clearBeacon() is
+    // leg does exactly that). clearBeacon() is
     // idempotent, so this is a no-op on every frame after the first.
     if (!t) {
       if (beacon || ring) clearBeacon();
@@ -769,7 +769,6 @@
      objective/completion/reward machine. The number may only go DOWN. */
   const LEGACY = [
     { id: "city/gigs.js", what: "gig loops (delivery/taxi/uber/smuggle)", probe: function () { return !!CBZ.cityGig; } },
-    { id: "city/heists.js", what: "planned scores", probe: function () { return !!CBZ.cityStartHeist; } },
     // careers.js was missing from the census's own list of seven — it owns the
     // freelance contract board AND the gang crew contracts, each with its own
     // objective, its own completion tick and its own payout, which is the exact

@@ -28,7 +28,7 @@
         garage doors, and the night lights (three shared materials; no real
         THREE lights: r128 recompiles every shader when the light count moves).
      4. Verbs (city/interactions.js zones, wired lazily): gate open/lock,
-        stash, garage "Park it" / "Get a car".
+        stash. (A garage has none: a car left inside it stays, city/storage.js.)
      5. Blueprints ("perimeter", "towers", "lights", "starter") placing REAL
         pieces through CBZ.building.place, charged once, and a section on the
         property panel (CBZ.cityPlots.addPanelSection).
@@ -1385,6 +1385,23 @@
     live.garage.forEach(function (p) { if (p.alive && plotOf(p)) n += (p.defRef && p.defRef.bays) || 2; });
     return n;
   }
+  /* THE GARAGES ON YOUR LAND, AS PLACES A CAR STAYS. A car you leave inside
+     one is kept there by city/storage.js (the same rule as a lock-up: a
+     record with its spot and heading in the garage's own frame, the body put
+     back when you are near, gone from the record when you drive it out).
+     This is what that file needs to know about a garage: its centre, the
+     axis along its front (ax, az), the axis going in from the door (ix, iz),
+     the half-size of the room inside the walls, how many cars, door shut. */
+  function garages() {
+    const out = [];
+    live.garage.forEach(function (p) {
+      if (!p.alive || !plotOf(p)) return;
+      const a = alongDir(p.rot), o = outDir(p.rot);
+      out.push({ id: p.id, x: p.pos.x, z: p.pos.z, ax: a.x, az: a.z, ix: -o.x, iz: -o.z,
+        hw: GA_W / 2 - GW, hd: GA_D / 2 - GW, bays: (p.defRef && p.defRef.bays) || 2, shut: p._slide === 0 });
+    });
+    return out;
+  }
 
   /* ================= TICKS ================================================ */
   const PEDS_R2 = 4.5 * 4.5;
@@ -1592,36 +1609,8 @@
           onSelect: function (t) { stashMove(t, -10000); } },
       ],
     });
-    I.registerZone({
-      id: "ck-garage", kind: "garage", radius: 9,
-      find: function (px, pz, ctx) {
-        let best = null, bd = 81;
-        live.garage.forEach(function (p) {
-          if (!p.alive || !isMine(p)) return;
-          const inside = insideGarage(p, px, pz);
-          const d0 = lpt(p, 0, -GA_D / 2 - 1.2);
-          const dd = (px - d0.x) * (px - d0.x) + (pz - d0.z) * (pz - d0.z);
-          const ok = (ctx && ctx.driving) ? (inside || dd < 16) : (dd < 12 || inside);
-          if (ok && dd < bd) { bd = dd; best = p; }
-        });
-        return best;
-      },
-      options: [
-        {
-          id: "ck-garage-park", slot: "e", prio: 3,
-          canShow: function (t, ctx) { return !!(ctx && ctx.driving) && !(CBZ.player && CBZ.player._aircraft); },
-          label: "Park it",
-          onSelect: function () { if (CBZ.cityStorage && CBZ.cityStorage.storeVehicle) CBZ.cityStorage.storeVehicle(); },
-        },
-        {
-          id: "ck-garage-get", slot: "e", prio: 3,
-          // (the last one parked comes out first; this used to open the storage menu)
-          canShow: function (t, ctx) { const S = CBZ.cityStorage; return !(ctx && ctx.driving) && !!(S && S.storedVehicleCount && S.storedVehicleCount() > 0); },
-          label: "Take out",
-          onSelect: function () { const S = CBZ.cityStorage; if (S && S.retrieveLast) S.retrieveLast(); },
-        },
-      ],
-    });
+    // (a garage has no verbs: its door opens for you, and a car you leave
+    //  inside stays there. city/storage.js keeps it, through garages().)
   }
 
   /* ================= THE CAGE'S MONEY ====================================== */
@@ -1732,6 +1721,7 @@
     bunks: bunks,
     cameras: cameras,
     garageBays: garageBays,
+    garages: garages,
     gridOf: gridOf,
     plotAt: plotAt,
     plotOf: plotOf,

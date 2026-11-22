@@ -85,6 +85,11 @@ body.mode-city #waypointGuide { bottom: calc(104px + env(safe-area-inset-bottom,
 /* The start gantry's lamps say GO; the word is redundant. */
 body.mode-city.state-playing #raceLights .go { display: none !important; }
 
+/* A sheet of paper you are marking (city/paper.js, a sticky sheet: a bet
+   slip, a loan offer) fills your hands: the bar steps aside so a finger on
+   the sheet's bottom line lands on the paper. */
+body.paper-held #hotbar { display: none !important; }
+
 /* Pausing is a clean break in the world view. City overlays used to keep
    drawing through the pause card (including the portrait in screenshot #1). */
 body:not(.state-playing) #cityHud { display: none !important; }

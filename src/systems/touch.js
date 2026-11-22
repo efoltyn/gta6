@@ -698,7 +698,7 @@
   // one never starts the joystick / look-drag or a world tap. .screen already
   // covers title/pause/win/lose overlays. #verbWheel is the tap-a-thing verb
   // column, and #cRadar / #minimap taps open the full map (fullmap.js).
-  const UI_SEL = "#tbtns, #tveh, #interact, .screen, #pkgPanel, #cpPanel, #fullMap, " +
+  const UI_SEL = "#tbtns, #tveh, #interact, .screen, #fullMap, " +
     "#raceBoard, #speedwayStandings, " +
     // #hotbar (systems/inventory.js) is a div bar of divs — no <button> in it —
     // so it was never covered by the `button` selector, and on a phone the
@@ -1134,6 +1134,9 @@
     if (!tapRay || !CBZ.camera || !CBZ.player || !CBZ.player.pos || CBZ.game.state !== "playing") return false;
     if (CBZ.cityMenuOpen) return false;
     if (CBZ.player.driving || CBZ.player._aircraft || (CBZ.cityArmorActive && CBZ.cityArmorActive())) return false;
+    // a tap on a sheet of paper you are holding that has its own tap targets
+    // (city/hitman_hands.js) is a tap on the paper, not on the world behind it
+    if (CBZ.hmHold && CBZ.hmHold.tapClaims && CBZ.hmHold.tapClaims(x, y)) return true;
     const canvas = CBZ.renderer && CBZ.renderer.domElement;
     const rect = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0, width: innerWidth, height: innerHeight };
     tapNdc.set(((x - rect.left) / Math.max(1, rect.width)) * 2 - 1, -((y - rect.top) / Math.max(1, rect.height)) * 2 + 1);

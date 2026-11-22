@@ -15,8 +15,35 @@
    exit smells the stash on the way out = alarm, unless you tossed it the
    steak from the break room. The metal detector at the door trips on a
    drawn/metal weapon = immediate heat (real inventory/weapon state).
-   Endings: WIN both · PARTIAL one · LOSE (heat maxes → booked, cell-block-z
-   homage) · LEAVE (walk out empty, clean).
+   Endings: WIN both · PARTIAL one · LOSE (made inside: the desk calls it in
+   and the CITY's police want you, city/wanted.js) · LEAVE (walk out empty).
+
+   ─── THERE IS NO PANEL (owner: "No dashboards are needed. Everything can
+   be existing.") ────────────────────────────────────────────────────────
+   Nothing here opens a card, a list or a result screen. What the old four
+   panels did is asked of the person who does it, and he answers out loud:
+     • LOU (the booth outside): ask about the sergeant, he names his price,
+       "Buy the word" is then his row; the word is a note in his handwriting
+       (city/paper.js). A loan is the same: he quotes the vig, you take it,
+       the money comes out of his hand with a marker. What you owe him is on
+       him too ("Pay Lou back"), and he lends nothing while you owe.
+     • CLERK DA SILVA (the glass): ask about bail, she quotes it as of this
+       minute, "Post bail" is her row, the receipt comes back through the
+       tray. The charge sheet is a sheet she hands you.
+     • SGT. KOWALCZYK (the front desk): say the word, he names his price,
+       "Pay him" is his row.
+     • THE CAGE CLERK (Pye or Mercer, read the nameplate): ask to sign the
+       duffel out, show him what you have; if it checks out he unlocks the
+       gate, WALKS to the shelf, carries the bag back and holds it out. You
+       take it from him and it is on your shoulder (never an inventory row).
+       The lock is on the gate ("Pick the lock"), the bag is on its shelf.
+     • TINO (the wheelman at the beater): the job is his to tell, the time
+       left is his to say, and the ending is "Tell him to drive": he takes
+       the bag, Decker gets in, the car LEAVES. Nothing is announced.
+   What you ask of a person is on the person (I.registerFor: E / I J K L /
+   the wheel / a tap on him). The THINGS (the badge on the lectern, Reyes'
+   file, the cage lock, the shelf, the document tray, the fridge, the K-9
+   pen) are spots with one verb each (ctx.zone verbs).
 
    ─── WHAT IS PORTED vs REBUILT ─────────────────────────────────────────
    PORTED (pure logic salvaged verbatim from games/police.html, the 1823-line
@@ -178,12 +205,12 @@
   let V = null;       // venue 3D refs
   let S = null;       // the live run (null until started)
   let Sbag = null;    // persisted stats bag
-  let near = false, panelMode = null, lastPhase = "lit", lastCage = "PYE";
+  let near = false, lastCage = "PYE", lastBoard = -1, lastErr = null;
 
-  function bag() { return Sbag || (Sbag = C.state(() => ({ attempts: 0, wins: 0, partials: 0, busted: 0, bestTimeLeft: 0 }))); }
+  // debt: what you owe Lou. It outlives the run (he lends nothing while you owe).
+  function bag() { return Sbag || (Sbag = C.state(() => ({ attempts: 0, wins: 0, partials: 0, busted: 0, bestTimeLeft: 0, debt: 0 }))); }
   function saveStats() { C && C.saveState(); }
   function fmtT(s) { s = Math.max(0, s); const m = Math.floor(s / 60), ss = Math.floor(s % 60); return String(m).padStart(2, "0") + ":" + String(ss).padStart(2, "0"); }
-  function toast(m) { C && C.hud.toast(m); }
 
   function freshRun() {
     return {
@@ -201,6 +228,9 @@
       posterMemoryUntil: 0, veteranStrikes: 0,
       deckerLoc: "holding", stashLoc: "cage",
       detectorTrippedT: -1e9, prevZ: 99, extractDone: false,
+      fetch: null,          // the cage clerk's walk to the shelf and back ({ who, leg, dir, hold })
+      dwalk: null,          // Decker on his feet between two places ({ path, pose, face, line })
+      briefed: false,
     };
   }
   function statSpent() { return S ? S.paid + S.loanOwed - S.loanGot : 0; }
@@ -227,10 +257,11 @@
     if (venue.anchor && venue.anchor.bounds && CBZ.worldLayout && CBZ.worldLayout.reserve) {
       CBZ.worldLayout.reserve("pkg:precinct13", venue.anchor.bounds, { pad: 3, kind: "venue", source: "games/police" });
     }
-    V = { origin: venue.origin, _venue: venue, pending: [], staff: {}, decker: null, lou: null, rex: null,
+    V = { origin: venue.origin, _venue: venue, g: g, pending: [], specs: {}, staff: {}, decker: null, lou: null, wheel: null, rex: null,
       roster: null, rosterCanvas: null, rosterTex: null, plate: null, plateCanvas: null, plateTex: null,
-      cageGate: null, fireDoor: null,
-      flickTubes: [], detLamp: null, coffeeLamp: null };
+      cageGate: null, fireDoor: null, car: null, card: null, steak: null,
+      flickTubes: [], detLamp: null, coffeeLamp: null,
+      now: 0, used: false, gateHeld: false, gateOpen: false, leave: null, _cur: {}, _pose: {}, _there: {}, _nav: {} };
     const B = (x, y, z, w, h, d, col, ry) => ctx.box(g, x, y, z, w, h, d, ctx.mat(col), ry);
     const wallRun = (x, y, z, w, h, d, col) => { B(x, y, z, w, h, d, col || PAL.wall); ctx.solid(x - w / 2, z - d / 2, x + w / 2, z + d / 2); };
     /* PRECINCT 13 (2026-10-31 rebuild). The shell stays the shell (walls are
@@ -341,8 +372,9 @@
       for (const e of [-1, 0, 1]) k.box(e * 1.5, t2 + 0.6, 0.0, 0.05, 1.24, 0.08, PAL.trim, "metal");
       k.box(0, t2 + 0.03, 0.05, 0.4, 0.04, 0.3, 0x8a9098, "metal");                    // the deal tray
       k.box(0, 3.2, 0, 3.4, 0.5, 0.5, PAL.steel, "metal");                             // window frame top
-      // VISITOR PODIUM: a lectern with the visitor log
-      k.frame(12, 0, 6, 0);
+      // VISITOR PODIUM: a lectern with the visitor log, by the door (out of the
+      // bail clerk's eyeline now that she faces the lobby from behind her glass)
+      k.frame(PODIUM[0], 0, PODIUM[1], 0);
       k.box(0, 0.04, 0, 0.7, 0.08, 0.6, 0x16181c);
       k.box(0, 0.62, 0, 0.56, 1.1, 0.42, PAL.desk, "gloss");
       k.box(0, 1.2, 0.04, 0.72, 0.04, 0.56, 0x84765a, "gloss", 0.2);
@@ -352,10 +384,10 @@
     signPanel(ctx, g, -6, 2.9, 4.25, 3.4, 0.7, "#0c1118", "#e8b23a", ["FRONT DESK", "ALL VISITORS SIGN IN"], 28);
     ctx.solid(6.6, 2.95, 9.8, 3.85);
     signPanel(ctx, g, 8.2, 2.5, 3.9, 2.6, 0.6, "#101722", "#9fd0ff", ["BAIL / BOND WINDOW"], 26);
-    ctx.solid(11.35, 5.55, 12.65, 6.45);
+    ctx.solid(PODIUM[0] - 0.65, PODIUM[1] - 0.45, PODIUM[0] + 0.65, PODIUM[1] + 0.45);
     // the escort BADGE: a gold seven-point shield on the lectern
     V.badgeMesh = badgeModel();
-    V.badgeMesh.position.set(12.18, 1.245, 6.05); V.badgeMesh.rotation.x = -Math.PI / 2 + 0.2; g.add(V.badgeMesh);
+    V.badgeMesh.position.set(PODIUM[0] + 0.18, 1.245, PODIUM[1] + 0.05); V.badgeMesh.rotation.x = -Math.PI / 2 + 0.2; g.add(V.badgeMesh);
 
     // ---- WANTED BOARD (your own poster; Brisco studies it) ------------------
     signPanel(ctx, g, 15.6, 2.4, 0, 0.5, 2.6, "#12161d", "#c8402f", ["WANTED"], 34, Math.PI / 2, 2.6);
@@ -386,6 +418,8 @@
     ctx.solid(-15.25, -3.1, -13.95, -0.9); ctx.solid(-15.2, -5.8, -14, -4.6);
     // Reyes' desk + the case FILE tray (the case number lives here)
     deskCluster(ctx, g, k, -10, -6, 0);
+    deskCluster(ctx, g, k, -12.6, -9.4, 0);      // Voss
+    deskCluster(ctx, g, k, -9, -9.4, 0);         // Mercer, off the cage
     if (k) {
       k.frame(-10.6, 0, -6.4, 0);
       k.box(0, 0.79, 0, 0.36, 0.04, 0.28, 0x2a2d33, "metal");                          // the tray
@@ -418,6 +452,9 @@
       const uv = pl.geometry.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 1.94 / 0.6, uv.getY(i) * 3.22 / 0.6);
       gate.add(pl);
       ctx.box(gate, 0.06, 1.15, 1.85, 0.08, 0.2, 0.08, ctx.pmat(0x2a2d33, 30));      // the padlock hasp
+      // core/staticfreeze.js bakes every matrix under the city root at build:
+      // a thing that MOVES says so (the gate never visibly opened before)
+      gate.userData.mover = true;
       V.cageGate = gate;
     }
     V.cageGateCol = ctx.solid(-7.17, -14, -6.83, -12);
@@ -428,6 +465,7 @@
       for (const e of [-1, 1]) for (const f of [-1, 1]) k.box(e * 0.58, 0.33, f * 0.28, 0.04, 0.66, 0.04, 0x5a5e66, "metal");
     }
     V.duffel = duffelModel();
+    V.duffel.userData.mover = true;              // it leaves the shelf on a shoulder (see staticfreeze note at the gate)
     V.duffel.position.set(-11, 0.68, -15); g.add(V.duffel);
     // clerk desk facing the gate + the NAMEPLATE (swaps PYE/MERCER — READ IT)
     if (k) {
@@ -470,16 +508,23 @@
       k.box(0, 1.12, 0, 0.6, 0.06, 0.9, 0x5a5e66, "metal");
       k.box(0, 1.16, 0, 0.5, 0.02, 0.8, 0x8a9098, "metal");
     }
-    ctx.solid(9.7, -15.7, 12.3, -14.3);
+    ctx.solid(10.2, -15.45, 11.8, -14.55);       // the table (its two chairs are sat in)
     B(6, 0.55, -14, 0.5, 1.1, 6, PAL.wall); ctx.solid(5.75, -17, 6.25, -11);         // sill (solid below)
     B(6, 4.15, -14, 0.5, 2.0, 6, PAL.wall);                                          // head (solid above)
     { const glass = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.0, 5.4),
         new THREE.MeshPhongMaterial({ color: 0x7a8a94, specular: 0xffffff, transparent: true, opacity: 0.32, shininess: 120, depthWrite: false }));
       glass.position.set(6, 2.1, -14); glass.renderOrder = 1; g.add(glass); }                    // the one-way glass
     V.docTray = new THREE.Object3D(); V.docTray.position.set(6, 1.16, -12.4); g.add(V.docTray);
+    V.card = ctx.box(g, 6.02, 1.172, -12.4, 0.09, 0.002, 0.055, ctx.mat(0xf2eedc), 0.3);   // Ferro's card, once it is in the tray
+    V.card.visible = false;
 
     // ---- HOLDING bars (where the boy starts; the LOSE arc's cell) -----------
     barRun(ctx, k, 12, -4, 12, -8);     // cell A bars along x=12
+    if (k) {                              // the bench the boy waits on, against the east wall
+      k.frame(15.42, 0, -6, -Math.PI / 2);
+      k.box(0, 0.45, 0, 2.6, 0.06, 0.44, 0x5a5e66, "metal");
+      for (const e of [-1.1, 0, 1.1]) k.box(e, 0.21, 0, 0.06, 0.42, 0.4, 0x3a3e46, "metal");
+    }
     signPanel(ctx, g, 12.4, 3.3, -6, 0.4, 0.9, "#0c0f14", "#8a929c", ["HOLDING"], 22, Math.PI / 2);
 
     // ---- REAR FIRE DOOR (opens from inside; the stash route out) ------------
@@ -510,6 +555,8 @@
       k.cyl(-0.8, 0.05, -0.8, 0.14, 0.12, 0.08, 0x8a9098, "metal", 0, 0, 0, 14);       // the water bowl
     }
     buildRex(ctx, g, 0, -24);
+    V.steak = ctx.box(g, 0.75, 0.04, -23.5, 0.2, 0.035, 0.14, ctx.mat(0x8a2f2a), 0.5);   // the steak, once it is in the pen
+    V.steak.visible = false;
 
     // ---- BONDSMAN booth (outside the front, east) — both money paths start --
     if (k) {
@@ -529,13 +576,13 @@
     ctx.solid(19.85, 3.55, 21.15, 4.85);   // safe
     signPanel(ctx, g, 18.5, 2.7, 6.9, 3, 0.7, "#1a0f18", "#e8b23a", ["LOU'S BONDS", "OPEN ALL NIGHT"], 24);
 
-    // ---- EXTRACTION beater at the curb (WIN/PARTIAL reads here) -------------
-    if (k) beaterCar(k, 10, 14);
-    for (const z of [13.62, 14.38]) {
-      const hl = ctx.box(g, 7.83, 0.68, z, 0.02, 0.12, 0.26, new THREE.MeshBasicMaterial({ color: 0xffe9b0 })); // headlight ON
-      void hl;
-    }
-    V.extract = { x: 10, z: 14, r: 3.6 };
+    // ---- EXTRACTION beater at the curb. Its own group and its own merged
+    //      meshes, because the ending is this car LEAVING (see carLeaves).
+    V.car = new THREE.Group(); V.car.userData.mover = true; V.car.position.set(CAR[0], 0, CAR[1]); g.add(V.car);
+    if (K) { const kb = K.create(); beaterCar(kb, 0, 0); kb.build(V.car); }
+    { const lamp = new THREE.MeshBasicMaterial({ color: 0xffe9b0 });                       // headlights ON: he is waiting
+      for (const z of [-0.38, 0.38]) ctx.box(V.car, -2.17, 0.68, z, 0.02, 0.12, 0.26, lamp); }
+    V.extract = { x: CAR[0], z: CAR[1], r: 3.6 };
 
     if (k) k.build(g);
     if (meshGeos.length && THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries) {
@@ -598,6 +645,10 @@
       const h = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.008, 6, 12, Math.PI), webbing);
       h.position.set(e * 0.14, 0.32, e * 0.03); h.rotation.y = Math.PI / 2; grp.add(h);
     }
+    // it rides people's shoulders: entities/pedinstance.js pools every mesh
+    // it finds under a rig (and hides the original on layer 30). The bag
+    // draws itself.
+    grp.traverse(function (o) { if (o.isMesh) o.userData.pedInstSkip = true; });
     return grp;
   }
   function deskCluster(ctx, g, k, x, z, ry) {
@@ -618,7 +669,9 @@
       k.box(0, 0.47, 0.75, 0.5, 0.08, 0.48, 0x2a3a4c, "gloss");
       k.box(0, 0.8, 0.98, 0.46, 0.52, 0.06, 0x2a3a4c, "gloss", 0.12);
     }
-    ctx.solid(x - 1.45, z - 0.85, x + 1.45, z + 0.85);
+    // the desk itself: its chair is where a body SITS, and a body inside a
+    // collider is pushed out of it (systems/bodymove.js)
+    ctx.solid(x - 0.85, z - 0.45, x + 0.85, z + 0.45);
   }
   function cageWall(ctx, k, linkPanel, x, z, w, d) {
     const along = w > d, len = Math.max(w || 0, d || 0);
@@ -796,36 +849,88 @@
         catalog fits WITHOUT a cop flag (CAT.precinct / CAT.detective), post:"pinned" → kind:"staff". Never
         kind:"cop", never the cop:true "police" catalog fit. See header.
      ========================================================== */
-  // POSTS (venue-LOCAL). home = where they stand; coffee = the machine.
+  // POSTS (venue-LOCAL: x, z, facing; facing 0 looks at +z, the street door).
+  // Whoever works a counter stands BEHIND it and faces the public. (The
+  // sergeant and the bail clerk stood on the public side with their backs to
+  // you, the cage clerk stood in front of his own nameplate, and two of the
+  // three people "at their desks" sat on nothing inside the one desk.)
   const POSTS = {
-    KOWALCZYK: [-6, 4.6, Math.PI], BRISCO: [4, 6.2, Math.PI], DASILVA: [8.2, 4.6, Math.PI],
-    PYE_DESK: [-9, -6.2, 0], MERCER_DESK: [-11, -6.2, 0], REYES_DESK: [-10, -4.6, 0],
-    VOSS_DESK: [-12, -8, 0], CAGE: [-5.4, -11.6, Math.PI], RECORDS: [-11, -17, -Math.PI / 2],
-    INTERROGATION: [11, -12.5, -Math.PI / 2], WANTED: [14.6, 0.6, -Math.PI / 2], COFFEE: [-13, -1.2, -Math.PI / 2],
+    KOWALCZYK: [-6, 2.1, 0], BRISCO: [4, 6.2, Math.PI], DASILVA: [8.2, 2.4, 0],
+    PYE_DESK: [-13.6, -7.4, -Math.PI / 2], MERCER_DESK: [-9, -8.65, Math.PI], REYES_DESK: [-10, -5.25, Math.PI],
+    VOSS_DESK: [-12.6, -8.65, Math.PI], CAGE: [-4.2, -12.6, -Math.PI / 2], RECORDS: [-12.6, -11.1, Math.PI],
+    INTERROGATION: [11, -13.7, Math.PI], WANTED: [14.6, 0.6, Math.PI / 2], COFFEE: [-13, -1.2, -Math.PI / 2],
   };
+  const SEAT = { REYES: "REYES_DESK", VOSS: "VOSS_DESK", MERCER: "MERCER_DESK" };   // who sits, and at which post
+  // THE AISLES. Nobody walks through a desk: systems/bodymove.js nets every
+  // body that crosses a collider, so a straight line between two posts left
+  // the walker pinned against the first desk on it (and then popped him 6 m).
+  // The room is a handful of clear points and the strides between them; a man
+  // changing post takes the shortest way along them (lane()).
+  const NODE = { H1: [-7.2, -3.0], HW: [-11.8, -3.2], A1: [-12.5, -7.5], A2: [-10.8, -7.5], A3: [-9, -7.5], H3: [-7.2, -7.5],
+    H2: [-7.0, -11.0], C1: [-4.2, -11.3], R1: [-10.8, -11.0], L1: [8.5, -9.5], B1: [10.6, 5.2] };
+  const EDGE = ["COFFEE-HW", "HW-H1", "HW-REYES_DESK", "HW-A1", "A1-A2", "A2-A3", "A3-H3", "H3-H1", "H3-H2", "H2-C1", "C1-CAGE",
+    "A1-PYE_DESK", "A1-VOSS_DESK", "A3-MERCER_DESK", "A2-R1", "R1-RECORDS", "R1-H2", "H1-DASILVA", "H1-L1", "L1-INTERROGATION",
+    "BRISCO-B1", "B1-WANTED"];
+  function spot(k) { return NODE[k] || POSTS[k]; }
+  let _adj = null;
+  function adj() {
+    if (_adj) return _adj;
+    _adj = {};
+    for (const e of EDGE) { const ab = e.split("-"); (_adj[ab[0]] || (_adj[ab[0]] = [])).push(ab[1]); (_adj[ab[1]] || (_adj[ab[1]] = [])).push(ab[0]); }
+    return _adj;
+  }
+  // the points to walk, in order, from one place to another (the first excluded)
+  function lane(from, to) {
+    if (from === to) return [];
+    const A = adj(), dist = {}, prev = {}, open = [from];
+    dist[from] = 0;
+    while (open.length) {
+      let bi = 0;
+      for (let i = 1; i < open.length; i++) if (dist[open[i]] < dist[open[bi]]) bi = i;
+      const u = open.splice(bi, 1)[0];
+      if (u === to) break;
+      const pu = spot(u);
+      for (const v of (A[u] || [])) {
+        const pv = spot(v), d = dist[u] + Math.hypot(pu[0] - pv[0], pu[1] - pv[1]);
+        if (dist[v] == null || d < dist[v]) { dist[v] = d; prev[v] = u; if (open.indexOf(v) < 0) open.push(v); }
+      }
+    }
+    if (prev[to] == null) return [to];            // no aisle between them: straight there
+    const out = [];
+    for (let k = to; k !== from; k = prev[k]) out.unshift(k);
+    return out;
+  }
+  // the boy: the bench in holding, the far chair in the box, the lobby floor
+  const HOLD = [15.36, -6, -Math.PI / 2], BOX = [11, -15.75, 0], LOBBY = [2.5, 3.0];
+  // the getaway: where the beater waits and where its driver leans
+  const CAR = [10, 14], TINO = [8.9, 12.25, -Math.PI / 2];
+  const PODIUM = [14, 7.2];          // the visitor lectern, by the street door
+  const WALK = 2.2;                  // m/s, anybody on their feet in here
+
   function queueStaff() {
+    const at = (k) => POSTS[k].slice(0, 2), chair = { cushion: 0.51 };
     // uniformed officers — city/outfits.js CAT.precinct: the patrol uniform and duty belt, NO cop flag.
     qNPC("KOWALCZYK", { role: "sergeant", name: "Sgt. Kowalczyk", outfit: "precinct", skin: 0xdca87e,
-      at: POSTS.KOWALCZYK.slice(0, 2), face: POSTS.KOWALCZYK[2], post: "pinned", pose: "stand",
+      at: at("KOWALCZYK"), face: POSTS.KOWALCZYK[2], post: "pinned", pose: "stand",
       dialogue: ["Visiting hours. Sit or don't.", "Name? Take a number.", "Third double this week. Don't test me."], sayColor: "#dfe7ff" });
     qNPC("BRISCO", { role: "officer", name: "Ofc. Brisco", outfit: "precinct", skin: 0x9a6a48,
-      at: POSTS.BRISCO.slice(0, 2), face: POSTS.BRISCO[2], post: "pinned", pose: "stand",
+      at: at("BRISCO"), face: POSTS.BRISCO[2], post: "pinned", pose: "stand",
       dialogue: ["Move it along, friend.", "That your face on the board?", "Coffee machine ate my dollar again."] });
     qNPC("DASILVA", { role: "clerk", name: "Clerk da Silva", outfit: 0x5a6478, skin: 0xd8a882,
-      at: POSTS.DASILVA.slice(0, 2), face: POSTS.DASILVA[2], post: "pinned", pose: "stand",
+      at: at("DASILVA"), face: POSTS.DASILVA[2], post: "pinned", pose: "stand",
       dialogue: ["Cash only.", "No hoods at my window, sir.", "Next."] });
     qNPC("PYE", { role: "clerk", name: "Ofc. Pye", outfit: "precinct", skin: 0xe8c098,
-      at: POSTS.CAGE.slice(0, 2), face: POSTS.CAGE[2], post: "pinned", pose: "stand",
+      at: at("CAGE"), face: POSTS.CAGE[2], post: "pinned", pose: "stand",
       dialogue: ["Rookie on the cage. Lucky me.", "Pal, I just work here.", "Six months in. Still get lost down here."] });
     qNPC("MERCER", { role: "sergeant", name: "Sgt. Mercer", outfit: "precinct", skin: 0xba8a66,
-      at: POSTS.MERCER_DESK.slice(0, 2), face: POSTS.MERCER_DESK[2], post: "pinned", pose: "sit",
+      at: at("MERCER_DESK"), face: POSTS.MERCER_DESK[2], post: "pinned", pose: "sit", seatRef: chair,
       dialogue: ["Twenty-two years. I know a real star from a laminate.", "Son, I've seen every trick twice.", "Eighteen months to my pension."] });
     // detectives — CAT.detective: shirt and tie, shield on the belt (still kind:"staff", not cops).
     qNPC("REYES", { role: "detective", name: "Det. Reyes", outfit: "detective", skin: 0xc08a5e,
-      at: POSTS.REYES_DESK.slice(0, 2), face: POSTS.REYES_DESK[2], post: "pinned", pose: "sit",
+      at: at("REYES_DESK"), face: POSTS.REYES_DESK[2], post: "pinned", pose: "sit", seatRef: chair,
       dialogue: ["That desk bites. Walk on.", "Case files are need-to-know."] });
     qNPC("VOSS", { role: "detective", name: "Det. Voss", outfit: "detective", skin: 0xe0b090,
-      at: POSTS.VOSS_DESK.slice(0, 2), face: POSTS.VOSS_DESK[2], post: "pinned", pose: "sit",
+      at: at("VOSS_DESK"), face: POSTS.VOSS_DESK[2], post: "pinned", pose: "sit", seatRef: chair,
       dialogue: ["Your boy in there won't stop talking. Good.", "Every word's another charge."] });
     // LOU the bondsman — loud shirt, a civilian fixer (never a cop).
     qNPC("LOU", { role: "bondsman", name: "Lou", outfit: 0xa04a68, skin: 0xe0b088,
@@ -834,276 +939,720 @@
         "The vig keeps me sentimental.", "I bonded out his father too."] });
     // THE BOY — Lt. Decker, crew teal, a civilian in custody (driven manually).
     qNPC("DECKER", { role: "detainee", name: "Lt. Decker", outfit: 0x1f6f6a, skin: 0xc89878,
-      at: [12, -6], face: -Math.PI / 2, post: "pinned", pose: "sit",
+      at: HOLD.slice(0, 2), face: HOLD[2], post: "pinned", pose: "sit", seatRef: { cushion: 0.48 },
       dialogue: ["Kid. Get me out before they move me downtown.",
         "I didn't say nothing. Yet.", "Ma thinks I'm at work.",
         "Voss keeps smiling at me. I hate that."], sayColor: "#ffe9b8" });
+    // THE WHEELMAN — Tino, the same crew teal as the boy (you can see whose car
+    // it is). The job is his to tell and the ending is his to drive.
+    qNPC("TINO", { role: "driver", name: "Tino", outfit: 0x1f6f6a, skin: 0xb07a52,
+      at: TINO.slice(0, 2), face: TINO[2], post: "pinned", pose: "stand",
+      dialogue: ["Engine's warm. So is the block.", "I drive. I don't go inside.", "Decker owes me forty bucks. Bring him out."], sayColor: "#ffe9b8" });
   }
-  function qNPC(tag, spec) { if (V && V.pending) V.pending.push({ tag, spec }); }
+  function qNPC(tag, spec) { if (V) V.specs[tag] = spec; if (V && V.pending) V.pending.push(tag); }
   function arenaLive() { return !!(CBZ.city && CBZ.city.arena && CBZ.city.arena.root); }
+  function who(tag) { return !V ? null : tag === "LOU" ? V.lou : tag === "DECKER" ? V.decker : tag === "TINO" ? V.wheel : V.staff[tag]; }
+  // cast one of them (again: Tino and the boy leave in the car and are back next shift)
+  function spawn(tag) {
+    const spec = V.specs[tag]; if (!spec || !C.npc) return null;
+    const h = C.npc(spec);
+    if (tag === "DECKER") V.decker = h; else if (tag === "LOU") V.lou = h; else if (tag === "TINO") V.wheel = h; else V.staff[tag] = h;
+    return h;
+  }
+  function castOff(tag) {
+    const h = who(tag); if (!h) return;
+    try { h.remove(); } catch (e) {}
+    if (tag === "DECKER") V.decker = null; else if (tag === "LOU") V.lou = null; else if (tag === "TINO") V.wheel = null; else delete V.staff[tag];
+  }
   function drainCast() {
     if (!V || !V.pending) return;
     if (C.npc && !arenaLive() && !(V._venue && V._venue.group && V._venue.group.parent)) return;
     const pend = V.pending; V.pending = null;   // null first → idempotent
-    for (const item of pend) {
-      const h = C.npc(item.spec);
-      if (item.tag === "DECKER") V.decker = h;
-      else if (item.tag === "LOU") V.lou = h;
-      else { V.staff[item.tag] = h; V.staffPost = V.staffPost || {}; }
-    }
+    for (const tag of pend) spawn(tag);
   }
+  // PUT somebody somewhere (the next shift, not a walk): systems/bodymove.js
+  // nets every body that crosses a collider between two frames unless the
+  // move says it is a relocation
+  function place(h, x, z, f) {
+    if (!h || !h.at) return;
+    h.at(x, z, f);
+    if (h.ped && CBZ.bodyTeleported) CBZ.bodyTeleported(h.ped);
+  }
+  function alive(tag) { const h = who(tag); return !h || !h.ped || !h.ped.dead; }   // no body (a bare harness) counts as on duty
+  function scared(p) { return !p || p.dead || p.ko > 0 || p.surrender || p.state === "surrender"; }
 
   /* ==========================================================
-     6. ZONES — every mechanic is an [E] zone (the interface)
+     6. THE HANDS, THE VOICE, THE PAPER — how a thing gets from them
+        to you. Nothing in this package draws a card.
      ========================================================== */
   function pNear(lx, lz, r) {
     const P = CBZ.player; if (!P || !P.pos || !V) return false;
     const dx = P.pos.x - (V.origin.x + lx), dz = P.pos.z - (V.origin.z + lz);
     return dx * dx + dz * dz < r * r;
   }
-  function buildZones(ctx) {
-    ctx.zone({ id: "sarge", pos: [-6, 5.2], r: 2.6, label: labelSarge, onUse: () => openSergeant() });
-    ctx.zone({ id: "bail", pos: [8.2, 5.0], r: 2.6, label: labelBail, onUse: () => openBail() });
-    ctx.zone({ id: "podium", pos: [12, 6], r: 2.0, label: () => S && S.inv.badge ? "" : "[E] Lift the visitor-escort badge", onUse: liftBadge });
-    ctx.zone({ id: "case", pos: [-10, -4.4], r: 2.2, label: () => S && S.inv.caseNo ? "" : "[E] Flip through Reyes' case file", onUse: stealCase });
-    ctx.zone({ id: "cage", pos: [-6, -11.6], r: 2.4, label: labelCage, onUse: () => openEvidence() });
-    ctx.zone({ id: "grab", pos: [-11, -15], r: 2.2, label: () => (S && S.cageOpen && S.stashLoc === "cage") ? "[E] Take the duffel (no signature)" : "", onUse: grabDuffel });
-    ctx.zone({ id: "lawyer", pos: [6, -12.4], r: 2.2, label: labelLawyer, onUse: slideLawyer });
-    ctx.zone({ id: "fridge", pos: [-14.6, -5.2], r: 2.2, label: () => (S && !S.inv.steak && !S.steakDeployed) ? "[E] Take the break-room steak" : "", onUse: takeSteak });
-    ctx.zone({ id: "steak", pos: [0, -23], r: 3.0, label: labelSteak, onUse: tossSteak });
-    ctx.zone({ id: "lou", pos: [18.5, 5.0], r: 2.6, label: () => "[E] Lou the bondsman", onUse: () => openBondsman() });
-    ctx.zone({ id: "extract", pos: [V ? V.extract.x : 10, V ? V.extract.z : 14], r: V ? V.extract.r : 3.6, label: labelExtract, onUse: () => finishRun() });
-    ctx.zone({ id: "boy", pos: [12, -6], r: 3.2, label: labelBoy, onUse: talkBoy });
+  // labels carry a noun or a price: city/verbword.js prints them as authored
+  function asIs(s) { const VW = CBZ.cityVerbWord; if (VW && VW.keep) VW.keep(s); return s; }
+  function money(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
+
+  // A person's words go over HIS head. No body in the room, no line.
+  // ONE BUBBLE HOLDS 56 CHARACTERS (systems/speech.js cuts a longer line back
+  // to the sentences that fit, so a price at the end of a long line was never
+  // said). So: say() is one short line; tell() is a man giving his terms, one
+  // short line after another on the venue's own clock.
+  function utter(tag, line, secs) {
+    const h = typeof tag === "string" ? who(tag) : tag, p = h && h.ped;
+    if (!line || !h) return;
+    if (p && !p.dead && CBZ.citySay) {
+      const crew = tag === "DECKER" || tag === "TINO";
+      try { CBZ.citySay(p, line, crew ? "#ffe9b8" : "#dfe7ff", { secs: secs || 3, force: true }); return; } catch (e) {}
+    }
+    if (h.say) h.say(line, secs);
   }
-  // dynamic labels (also arm the run on first approach)
-  function labelSarge() { armStart(); const r = S; if (!r) return "[E] Precinct 13. GET YOUR BOY OUT";
-    if (r.bribed) return "[E] The desk sergeant (charges lost)";
-    if (r.password && !r.released && r.releaseAt == null) return "[E] Whisper the word to the sergeant. $" + BOND.BRIBE;
-    return "[E] Talk to the desk sergeant"; }
-  function labelBail() { const r = S; if (!r) return "[E] Bail window"; if (r.chargesKicked || r.released || r.releaseAt != null) return "[E] Bail window (settled)";
-    const q = bailQuote(r.charges); return q == null ? "[E] Bail window (CLOSED. RICO referral)" : "[E] Post bail. $" + q; }
-  function labelCage() { const r = S; if (!r) return "[E] Evidence cage"; if (r.inv.duffel) return "[E] Evidence cage (stash out)";
-    return rosterAt(r.t, r.lawyered).cage ? "[E] Evidence cage, sign-out / work the lock" : "[E] Evidence cage (clerk away)"; }
-  function labelLawyer() { const r = S; if (!r || !r.inv.card || r.lawyered) return ""; return r.deckerLoc === "interrogation" ? "[E] Slide the lawyer card through the tray" : ""; }
-  function labelSteak() { const r = S; if (!r || !r.inv.steak) return ""; return "[E] Toss the steak to REX"; }
-  function labelExtract() { const r = S; if (!r) return "[E] The crew's beater"; return "[E] Slip away in the beater"; }
-  function labelBoy() { const r = S; if (!r) return "[E] Talk to Decker"; if (r.released) return r.following ? "" : "[E] Bring Decker";
-    return (r.deckerLoc === "holding") ? "[E] Talk to Decker (holding)" : ""; }
+  const LATER = [];
+  function hush(tag) { for (let i = LATER.length - 1; i >= 0; i--) if (LATER[i].tag === tag) LATER.splice(i, 1); }
+  function say(tag, line, secs) { hush(tag); utter(tag, line, secs); }
+  function sayLater(tag, line, wait, secs) { LATER.push({ at: V.now + (wait || 2.6), tag: tag, line: line, secs: secs }); }
+  function tell(tag, lines) {
+    hush(tag); utter(tag, lines[0], 3.2);
+    for (let i = 1; i < lines.length; i++) sayLater(tag, lines[i], 3.1 * i, 3.2);
+  }
+  function sayDue() {
+    for (let i = 0; i < LATER.length; i++) if (V.now >= LATER[i].at) { const q = LATER.splice(i--, 1)[0]; utter(q.tag, q.line, q.secs); }
+  }
+  // REX is not a ped: his bark hangs over the pen
+  const _bark = new THREE.Vector3();
+  function bark(line) {
+    if (!CBZ.speech || !CBZ.speech.say || !V || !V.rex) return;
+    V.rex.group.getWorldPosition(_bark);
+    try { CBZ.speech.say(_bark, line, { secs: 2.6, headY: 0.95, force: true }); } catch (e) {}
+  }
+
+  // OUT OF HIS HAND INTO YOURS (or yours into his): the consequence lands on
+  // the grab frame (systems/verbs_pickup.js takeFrom), never before the reach.
+  function handed(tag, then) {
+    const h = who(tag), p = h && h.ped, Vb = CBZ.verbs;
+    let S0 = null, done = false;
+    const fin = function () { if (done) return; done = true; then(); };
+    if (p && Vb && Vb.takeFrom) { try { S0 = Vb.takeFrom(CBZ.player, p, { at: "wristR", kind: "cash", pose: "card", dur: 0.55, onTaken: fin }); } catch (e) { S0 = null; } }
+    if (!S0) fin();
+  }
+  // a reach to a place in the room: the tray under the glass, the fridge, the
+  // padlock. (Its own key each time: the verb drops a second take of the SAME
+  // key while the first hand is still coming back, consequence and all.)
+  let reachN = 0;
+  function reach(lx, y, lz, kind, then, more) {
+    const Vb = CBZ.verbs, o = V.origin;
+    let P0 = null, done = false;
+    const fin = function () { if (done) return; done = true; then(); };
+    if (Vb && Vb.pickup) {
+      const opts = { pose: "card", key: "pct:" + (++reachN), onTaken: fin };
+      if (more) for (const k in more) opts[k] = more[k];
+      try { P0 = Vb.pickup(CBZ.player, { x: o.x + lx, y: y, z: o.z + lz, kind: kind }, opts); } catch (e) { P0 = null; }
+    }
+    if (!P0) fin();
+  }
+  // a thing in the room leaves it in your hand: taken() on the grab frame,
+  // after() once the hand is back
+  function take(obj, pose, keep, taken, after) {
+    const Vb = CBZ.verbs;
+    let P0 = null, a = false, b = false;
+    const onTaken = function () { if (a) return; a = true; if (taken) taken(); };
+    const onDone = function () { if (b) return; b = true; onTaken(); if (after) after(); };
+    if (obj && Vb && Vb.pickup) { try { P0 = Vb.pickup(CBZ.player, obj, { pose: pose, keep: !!keep, onTaken: onTaken, onDone: onDone }); } catch (e) { P0 = null; } }
+    if (!P0) onDone();
+  }
+  function paper(spec) { const K = CBZ.cityPaper; if (K && K.show) { try { return K.show(spec); } catch (e) {} } return false; }
+  const INK = "#24407a";
+
+  // ON A SHOULDER. The bag you signed out is the bag on your shoulder, then
+  // on the wheelman's: never a row in an inventory. Solved off the arm pivot
+  // in the rig's own frame (the recipe is city/inventory.js mountOnBody's:
+  // everything under a rig's model is in its 0.70 space, not metres). The
+  // LEFT shoulder: a cash duffel from city/inventory.js rides the right.
+  const _mv = new THREE.Vector3(), _mp = new THREE.Vector3(), _mq = new THREE.Quaternion(), _ms = new THREE.Vector3();
+  function shoulder(ch, mesh) {
+    const host = ch && (ch.body || ch.group);
+    if (!host || !mesh) return false;
+    host.add(mesh);
+    if (ch.group) ch.group.updateMatrixWorld(true); else host.updateMatrixWorld(true);
+    host.matrixWorld.decompose(_mp, _mq, _ms);
+    const declared = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 0;
+    const hs = declared > 0.01 ? declared : (Math.abs(_ms.x) > 1e-4 ? _ms.x : 1);
+    mesh.scale.setScalar(1 / hs);
+    const sh = ch.parts && ch.parts.la;
+    if (sh) {
+      sh.getWorldPosition(_mv); host.worldToLocal(_mv);
+      const side = _mv.x >= 0 ? 1 : -1;
+      mesh.position.set(_mv.x + side * 0.02 / hs, _mv.y - 0.52 / hs, _mv.z - 0.24 / hs);
+    } else mesh.position.set(-0.26 / hs, 0.8 / hs, -0.24 / hs);
+    mesh.rotation.set(0, 0, 1.25);          // the long axis hangs down the back
+    mesh.visible = true;
+    return true;
+  }
+  function under(obj, top) { for (let n = obj; n; n = n.parent) if (n === top) return true; return false; }
+  function bagOnPlayer() { const ch = CBZ.playerChar; return !!(V && V.duffel && ch && ch.group && under(V.duffel, ch.group)); }
+  function shelve() {                        // the bag back on its shelf in the cage
+    const d = V.duffel; if (!d) return;
+    if (CBZ.pedInstanceReveal) CBZ.pedInstanceReveal(d);
+    V.g.add(d); d.position.set(-11, 0.68, -15); d.rotation.set(0, 0, 0); d.scale.setScalar(1); d.visible = true;
+  }
+  function dropBag() {                       // made with the bag on you: it is on the floor where you stood
+    const d = V.duffel, P = CBZ.player; if (!d || !P || !bagOnPlayer()) return;
+    if (CBZ.pedInstanceReveal) CBZ.pedInstanceReveal(d);
+    V.g.add(d); d.scale.setScalar(1); d.rotation.set(0, 0.7, 0);
+    d.position.set(P.pos.x - V.origin.x + 0.45, (P.pos.y || 0) + 0.02, P.pos.z - V.origin.z + 0.3); d.visible = true;
+  }
+  function gateCollider(on) {
+    const c = V.cageGateCol, L = CBZ.colliders; if (!c || !L) return;
+    const i = L.indexOf(c);
+    if (on && i < 0) L.push(c); else if (!on && i >= 0) L.splice(i, 1); else return;
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
 
   /* ==========================================================
-     7. ACTIONS
+     7. WHAT YOU ASK OF THEM. Each list is one person, best first.
+        Ask a man his terms and he says them out loud; for a while after
+        (until you walk off, or he has waited long enough) your answer is
+        his top row. A person takes I J K L in this order (E is the
+        first of them); wheel:true keeps a row off the keys (the Q wheel,
+        a tap), bad:true marks the one that ends the job.
      ========================================================== */
-  function armStart() { if (!S) { S = freshRun(); const s = bag(); s.attempts++; saveStats(); } if (S && !S.started) S.started = true; }
-
-  function openSergeant() {
-    armStart();
-    if (S.bribed) { sergeantSay("Paperwork's moving. Slow. Like me."); return; }
-    if (S.password && !S.released && S.releaseAt == null) {
-      // the corrupt release path — needs the word bought from Lou + real cash.
-      if (!C.wallet.spend(BOND.BRIBE, "Sergeant's 'clerical error'")) { sergeantSay("That phrase costs $" + BOND.BRIBE + ". Come back heavy."); return; }
-      S.paid += BOND.BRIBE; S.bribed = true; S.chargesKicked = true; S.talking = false;
-      startRelease(); toast("CHARGES KICKED");
-      sergeantSay("Huh. Seems Decker's arrest sheet never got filed. Clerical.");
-      return;
-    }
-    sergeantSay(pick(["Visiting hours. Bench is there.", "You lost? Bail window's the glass."]));
-  }
-  function sergeantSay(l) { staffSay("KOWALCZYK", l); }
-  // a staffer's words go over HIS head. No body in the room, no line.
-  function staffSay(name, l) { const h = V && V.staff[name]; if (h && h.say) h.say(l); }
-
-  function openBondsman() {
-    armStart();
-    if (!S.password) staffSay("LOU", "The sarge is on the take. I sell the word.");
-    const owe = S.loanOwed ? "you owe Lou $" + S.loanOwed : "";
-    C.hud.panel(
-      hHead("LOU'S BONDS", owe) +
-      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Cash <b>" + fmtCash(C.wallet.cash()) + "</b></div>" +
-      hBtn("word", S.password ? "WORD BOUGHT" : "Buy the word on the sarge. $" + BOND.PASSWORD, S.password ? "#26343c" : "#8a1f1f", S.password) +
-      hBtn("loan", S.loanGot ? "LOAN TAKEN" : "Loan. $" + BOND.LOAN_NOW + " now, $" + BOND.LOAN_OWED + " owed", S.loanGot ? "#26343c" : "#1f4e8a", !!S.loanGot) +
-      "<div style='margin-top:8px'>" + hBtn("close", "Leave", "#26343c") + "</div>",
-      {
-        word: () => { if (S.password) return; if (!C.wallet.spend(BOND.PASSWORD, "The word on Kowalczyk")) { staffSay("LOU", "Short. Loans are the other thing I do."); return; }
-          S.paid += BOND.PASSWORD; S.password = true; toast("WORD BOUGHT"); staffSay("LOU", "The word is half-caf, extra vig. Tell the sarge."); openBondsman(); },
-        loan: () => { if (S.loanGot) return; C.wallet.give(BOND.LOAN_NOW, "Lou's loan"); S.loanGot = BOND.LOAN_NOW; S.loanOwed = BOND.LOAN_OWED; toast("LOAN"); openBondsman(); },
-        close: () => C.hud.closePanel(),
-      });
+  const TALK = { k: null, t: -1e9, tag: null };       // the terms somebody just quoted you
+  function quoted(k) { return TALK.k === k && V.now - TALK.t < 45; }
+  function quote(k, tag) { TALK.k = k; TALK.t = V.now; TALK.tag = tag; }
+  function unquote() { TALK.k = null; }
+  function live() { return !!(S && S.started && !S.ended); }
+  function armStart() {
+    if (S) { if (!S.started) S.started = true; return; }
+    if (V && V.used) resetWorld();
+    S = freshRun(); S.started = true;
+    if (V) V.used = true;
+    const s = bag(); s.attempts++; S.loanOwed = s.debt | 0; saveStats();
   }
 
-  function openBail() {
-    armStart();
-    if (S.chargesKicked || S.released || S.releaseAt != null) { staffSay("DASILVA", "You're square. He's being processed."); return; }
-    if (!rosterAt(S.t, S.lawyered).bail) return;   // the shade is down; the window shows it
-    const q = bailQuote(S.charges);
-    if (q == null) { staffSay("DASILVA", "It's above my pay grade now. The DA has the file."); return; }
-    staffSay("DASILVA", S.talking ? "$" + q + ". Goes up every word he says." : "Bail's $" + q + ".");
-    C.hud.panel(
-      hHead("BAIL WINDOW", "charges: " + chargeTier(S.charges)) +
-      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Bail <b>$" + q + "</b>. Cash <b>" + fmtCash(C.wallet.cash()) + "</b></div>" +
-      hBtn("pay", "Post bail. $" + q, "#1c6b40") + hBtn("close", "Leave", "#26343c"),
-      {
-        pay: () => { const qq = bailQuote(S.charges); if (qq == null) { staffSay("DASILVA", "Too late. RICO referral. Window's shut."); C.hud.closePanel(); return; }
-          if (!C.wallet.spend(qq, "Bail posted")) { staffSay("DASILVA", "Bail is $" + qq + ". You're short."); return; }
-          S.paid += qq; S.bailPaid = true; startRelease(); toast("BAIL POSTED");
-          staffSay("DASILVA", "Receipt. Processing takes a minute."); C.hud.closePanel(); },
-        close: () => C.hud.closePanel(),
-      });
+  /* ---- LOU: the word on the sergeant, and the loan ---- */
+  function louDebt() { return bag().debt | 0; }
+  const LOU_ASKS = [
+    { id: "word-buy", label: () => "Buy the word " + money(BOND.PASSWORD), show: () => quoted("word") && !S.password, run: buyWord },
+    { id: "loan-take", label: () => "Take the loan, " + money(BOND.LOAN_NOW) + " now", show: () => quoted("loan") && !louDebt(), run: takeLoan },
+    { id: "word-ask", label: () => "Ask about the sergeant", show: () => !S.password && !quoted("word"), run: function () {
+      quote("word", "LOU"); tell("LOU", ["The sergeant on the front desk is on the take.", "I sell the word that opens him. " + money(BOND.PASSWORD) + "."]); } },
+    { id: "loan-ask", label: () => "Ask for a loan", show: () => !louDebt() && !quoted("loan"), run: function () {
+      quote("loan", "LOU"); tell("LOU", [money(BOND.LOAN_NOW) + " in your hand tonight.", money(BOND.LOAN_OWED) + " comes back to me. That's the vig."]); } },
+    { id: "loan-pay", label: () => "Pay Lou back " + money(louDebt()), show: () => louDebt() > 0, run: payLou },
+    { id: "word-again", wheel: true, label: () => "Ask for the word again", show: () => S.password && !S.bribed && !S.released, run: function () {
+      tell("LOU", ["Half-caf, extra vig. Say it to the sergeant.", "And bring him " + money(BOND.BRIBE) + "."]); wordNote(); } },
+  ];
+  function buyWord() {
+    if (S.password) return;
+    if (!C.wallet.spend(BOND.PASSWORD)) { say("LOU", "You're short. Loans are the other thing I do."); return; }
+    S.paid += BOND.PASSWORD; S.password = true; unquote();
+    tell("LOU", ["It's on the paper. Say it to the sergeant.", "Bring " + money(BOND.BRIBE) + " for his trouble."]);
+    handed("LOU", wordNote);
   }
-
-  // TAKEN WITH A HAND (systems/verbs_pickup.js): the badge leaves the podium
-  // in the hand. (It used to stay on the podium after you had it.)
-  function handTake(obj, key, then) {
-    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, obj || null, { pose: "card", key: key, onTaken: then });
-    else then();
+  // the word is a note in Lou's handwriting
+  function wordNote() {
+    paper({ key: "pct-word", hand: true, lines: [{ text: "Half-caf, extra vig." }, { gap: 14 },
+      { text: "Say it to Sgt. Kowalczyk at the front desk. He wants " + money(BOND.BRIBE) + " with it." }, { gap: 14 },
+      { text: "You never met me.", dim: true }] });
   }
-  function liftBadge() {
-    armStart(); if (S.inv.badge) return;
-    const w = observed();
-    if (w) { S.heat += 25; toast("HEY!"); w.say("Hands off the podium."); return; }
-    handTake(V && V.badgeMesh, "police-badge", function () {
-      if (S.inv.badge) return;
-      S.inv.badge = true; toast("BADGE LIFTED");
+  function takeLoan() {
+    if (louDebt()) return;
+    const s = bag(); s.debt = BOND.LOAN_OWED; saveStats();
+    S.loanGot = BOND.LOAN_NOW; S.loanOwed = BOND.LOAN_OWED; unquote();
+    say("LOU", "Count it. " + money(BOND.LOAN_OWED) + " comes back to this booth.");
+    handed("LOU", function () {
+      C.wallet.give(BOND.LOAN_NOW); if (CBZ.sfx) CBZ.sfx("coin");
+      paper({ key: "pct-marker", org: "Lou's Bonds", title: "MARKER", ink: "#5a2440",
+        lines: [{ k: "ADVANCED", v: money(BOND.LOAN_NOW) }, { k: "THE VIG", v: money(BOND.LOAN_OWED - BOND.LOAN_NOW) }, { k: "OWED TO LOU", v: money(BOND.LOAN_OWED), big: true }],
+        foot: "No new paper until this one is square.", sign: "Lou" });
     });
   }
-  function stealCase() {
-    armStart(); if (S.inv.caseNo) return;
-    if (rosterAt(S.t, S.lawyered).bullpenDesk === "REYES") { staffSay("REYES", "That desk bites. Walk on."); S.heat += 8; return; }
-    const w = observed();
-    if (w) { S.heat += 25; toast("HEY!"); w.say("Step away from the detective's desk."); return; }
-    S.inv.caseNo = CASE_NO; toast("CASE " + CASE_NO);
+  function payLou() {
+    const d = louDebt(); if (!d) return;
+    if (!C.wallet.spend(d)) { say("LOU", "That isn't " + money(d) + ". Come back when it is."); return; }
+    const s = bag(); s.debt = 0; saveStats();
+    S.paid += d; S.loanOwed = 0; S.loanGot = 0;
+    say("LOU", "And we're square. Pleasure.", 3);
+    handed("LOU", function () { if (CBZ.sfx) CBZ.sfx("coin"); });
   }
 
-  function openEvidence() {
-    armStart();
-    if (S.inv.duffel) return;
-    const clerk = rosterAt(S.t, S.lawyered).cage;
-    if (clerk && flickerPhaseAt(S.t) !== "dark" && !S.cageOpen) clerkSay(clerk, S.inv.caseNo ? "Case number and a badge. Let's see 'em." : "Sign-out needs a case number and a badge, pal.");
-    C.hud.panel(
-      hHead("EVIDENCE CAGE", S.inv.caseNo ? "case " + S.inv.caseNo : "") +
-      hBtn("sign", "Sign the duffel out", "#1f4e8a", !clerk || S.stashLoc !== "cage") +
-      hBtn("pick", S.cageOpen ? "GATE OPEN" : "Pick the cage lock", "#8a1f1f", S.cageOpen || !S.inv.picks) +
-      "<div style='margin-top:8px'>" + hBtn("close", "Back off", "#26343c") + "</div>",
-      {
-        sign: () => signOut(),
-        pick: () => { for (let i = 0; i < 3; i++) pickTick(1.0); openEvidence(); },
-        close: () => C.hud.closePanel(),
-      });
+  /* ---- CLERK DA SILVA: bail, through the glass ---- */
+  function bailOpen() { return !(S.chargesKicked || S.released || S.releaseAt != null); }
+  function atWindow() { return rosterAt(S.t, S.lawyered).bail === "DASILVA" && alive("DASILVA") && atPost("DASILVA"); }
+  function chargeWords(c) { return c >= 100 ? "A RICO referral" : c >= 70 ? "Trafficking" : c >= 45 ? "Possession with intent" : "Possession"; }
+  const BAIL_ASKS = [
+    { id: "pay", label: () => "Post bail " + money(bailQuote(S.charges) || 0), show: () => quoted("bail") && bailOpen() && bailQuote(S.charges) != null && atWindow(), run: postBail },
+    { id: "ask", label: () => "Ask about bail", show: atWindow, run: askBail },
+    { id: "sheet", label: () => "Ask for the charge sheet", show: atWindow, run: chargeSheet },
+  ];
+  function askBail() {
+    if (!bailOpen()) { say("DASILVA", S.released ? "He's been released. Try the lobby." : "You're square. He's being processed."); return; }
+    const q = bailQuote(S.charges);
+    if (q == null) { tell("DASILVA", ["It's a RICO referral now. No bail.", "The DA has the file."]); return; }
+    quote("bail", "DASILVA");
+    const terms = ["Decker. " + chargeWords(S.charges) + ".", "Bail is " + money(q) + ", cash."];
+    if (S.talking) terms.push("It goes up every word he says in there.");
+    tell("DASILVA", terms);
   }
-  function signOut() {
-    const clerk = rosterAt(S.t, S.lawyered).cage;
+  function postBail() {
+    const q = bailQuote(S.charges);
+    if (q == null) { unquote(); say("DASILVA", "Too late. RICO referral. The window's shut on him."); return; }
+    if (!C.wallet.spend(q)) { say("DASILVA", "Bail is " + money(q) + ". You're short."); return; }
+    S.paid += q; S.bailPaid = true; startRelease(); unquote();
+    const tier = chargeTier(S.charges);
+    tell("DASILVA", ["Receipt. Processing takes a minute.", "He comes out to the lobby."]);
+    // the money goes into the tray under the glass and the receipt comes back out of it
+    reach(8.2, 1.0, 3.5, "card", function () {
+      if (CBZ.sfx) CBZ.sfx("coin");
+      paper({ key: "pct-bail", org: "Precinct 13", title: "BAIL RECEIPT", ink: INK,
+        lines: [{ k: "DEFENDANT", v: "DECKER, LT." }, { k: "CHARGE", v: tier }, { k: "RECEIVED, CASH", v: money(q), big: true }],
+        foot: "Release in about a minute. Collect him in the lobby.", stamp: "PAID" });
+    });
+  }
+  // his sheet as of this minute: what he is charged with, and what it becomes
+  // if he keeps talking (the ladder the bail climbs)
+  function chargeSheet() {
+    const c = S.charges, q = bailQuote(c), t = chargeTier(c);
+    say("DASILVA", "That's his sheet as of right now.");
+    reach(8.2, 1.0, 3.5, "card", function () {
+      paper({ key: "pct-sheet", org: "Precinct 13", title: "CHARGE SHEET", ink: INK, colw: [0.6, 0.4],
+        lines: [{ k: "DEFENDANT", v: "DECKER, LT." }, { k: "CHARGE", v: t, big: true },
+          { k: "BAIL TODAY", v: S.chargesKicked ? "NOT FILED" : q == null ? "NONE" : money(q) }, { gap: 8 },
+          { cols: ["IF THE INTERVIEW GOES ON", "BAIL"], head: true },
+          { cols: ["POSSESSION", "from " + money(680)], mark: t === "POSSESSION" },
+          { cols: ["POSS. W/ INTENT", "from " + money(760)], mark: t === "POSS. W/ INTENT" },
+          { cols: ["TRAFFICKING", "from " + money(960)], mark: t === "TRAFFICKING" },
+          { cols: ["RICO REFERRAL", "no bail"], mark: t === "RICO REFERRAL" }],
+        foot: S.lawyered ? "Counsel present. Interview suspended." : "Interviewing officer: Det. Voss. Counsel not yet present." });
+    }, { copy: false });
+  }
+
+  /* ---- SGT. KOWALCZYK: the front desk, and the word ---- */
+  function canBribe() { return S.password && !S.bribed && !S.released && S.releaseAt == null; }
+  const SARGE_ASKS = [
+    { id: "pay", label: () => "Pay him " + money(BOND.BRIBE), show: () => quoted("bribe") && canBribe(), run: bribe },
+    { id: "word", label: () => "Say the word", show: () => canBribe() && !quoted("bribe"), run: function () {
+      quote("bribe", "KOWALCZYK"); tell("KOWALCZYK", ["Half-caf, extra vig. Huh.", "That order runs " + money(BOND.BRIBE) + ". And a sheet goes missing."]); } },
+    { id: "ask", label: () => "Ask about Decker", show: () => true, run: function () {
+      say("KOWALCZYK", S.bribed ? (S.released ? "Never heard of him. Take him home." : "Paperwork's moving. Slow. Like me.")
+        : S.released ? "He's out. Take him and go."
+        : S.releaseAt != null ? "He's being processed. Sit."
+        : pick(["Decker? Holding. Bail window's the glass.", "Visiting hours. Bench is there.", "You lost? Bail window's the glass."])); } },
+  ];
+  function bribe() {
+    if (!canBribe()) return;
+    if (!C.wallet.spend(BOND.BRIBE)) { say("KOWALCZYK", "That phrase costs " + money(BOND.BRIBE) + ". Come back heavy."); return; }
+    S.paid += BOND.BRIBE; S.bribed = true; S.chargesKicked = true; S.talking = false; unquote();
+    startRelease();
+    handed("KOWALCZYK", function () { if (CBZ.sfx) CBZ.sfx("coin"); });
+    tell("KOWALCZYK", ["Huh. Decker's arrest sheet never got filed.", "Clerical. Give it a minute."]);
+  }
+
+  /* ---- THE EVIDENCE CAGE: the clerk, the gate, the shelf ---- */
+  // who is behind the cage desk RIGHT NOW: on the roster, alive, and standing there
+  function cageMan() {
+    if (!S || S.fetch) return null;
+    const c = rosterAt(S.t, S.lawyered).cage;
+    return c && alive(c) && atPost(c) ? c : null;
+  }
+  const CAGE_ASKS = [
+    { id: "take", label: () => "Take the duffel", show: () => !!(S.fetch && S.fetch.dir === 0), run: takeFromClerk },
+    { id: "show", label: () => (S.inv.badge ? "Show the badge and case" : "Give the case number"),
+      show: () => quoted("sign") && !!S.inv.caseNo && S.stashLoc === "cage" && !!cageMan(), run: () => signOut() },
+    { id: "ask", label: () => "Sign out the duffel", show: () => S.stashLoc === "cage" && !!cageMan(), run: function () {
+      const c = cageMan(); if (!c) return;
+      quote("sign", c);
+      say(c, S.inv.caseNo ? "Case number and a badge. Let's see them." : "Sign-out needs a case number and a badge, pal."); } },
+  ];
+  function signOut(instant) {
+    const clerk = cageMan();
     if (!clerk) return;   // nobody at the log desk
-    if (!S.inv.caseNo) { clerkSay(clerk, "Sign-out needs a case number and a badge, pal."); return; }
+    if (!S.inv.caseNo) { say(clerk, "Sign-out needs a case number and a badge, pal."); return; }
     const r = custodyCheck(S.inv.caseNo, S.inv.badge ? 1 : 0, S.t, S.lawyered);
+    unquote();
     if (!r.accept) {
       if (!r.badgeOk && clerk === "MERCER") {
-        S.veteranStrikes++; S.heat += 22; clerkSay("MERCER", "Escort badge? Twenty-two years, son. Walk away.");
-        if (S.veteranStrikes >= 2) { S.heat = 100; detain(); }   // the vet makes you on a second try
-      } else if (!r.caseOk) { clerkSay(clerk, "That case number doesn't check out."); S.heat += 10; }
-      else { clerkSay(clerk, "That does not check out."); S.heat += 6; }
-      C.hud.closePanel(); return;
+        S.veteranStrikes++; S.heat += 22; say("MERCER", "Escort badge? Twenty-two years, son. Walk away.");
+        if (S.veteranStrikes >= 2) { S.heat = 100; detain(who("MERCER")); }   // the vet makes you on a second try
+      } else if (!r.caseOk) { say(clerk, "That case number doesn't check out."); S.heat += 10; }
+      else { say(clerk, "No badge, no bag. That does not check out."); S.heat += 6; }
+      return;
     }
     S.custody.push({ t: fmtT(S.t), item: "E-3312 (duffel, narcotics)", caseNo: S.inv.caseNo, badge: "VISITOR-ESCORT", clerk, action: "SIGN-OUT" });
-    S.inv.duffel = true; S.stashLoc = "hand"; if (V.duffel) V.duffel.visible = false;
-    toast("SIGNED OUT"); clerkSay(clerk, "Transfer to the DA run, right? Sign here.");
-    C.hud.closePanel();
-  }
-  function clerkSay(name, l) { staffSay(name, l); }
-  function pickTick(dt) {
-    if (S.cageOpen) return;
-    const clerk = rosterAt(S.t, S.lawyered).cage;
-    const blind = !clerk || flickerPhaseAt(S.t) === "dark";
-    if (blind) {
-      S.pickProgress += dt;
-      if (S.pickProgress >= 3) { S.cageOpen = true; if (V.cageGate) V.cageGate.rotation.y = 1.7;
-        if (V.cageGateCol && CBZ.colliders) { const i = CBZ.colliders.indexOf(V.cageGateCol); if (i >= 0) CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
-        toast("CAGE OPEN"); }
-    } else { S.heat += 9 * dt; if (clerk) clerkSay(clerk, "Step AWAY from the cage."); }
-  }
-  function grabDuffel() {
-    armStart(); if (!S.cageOpen || S.stashLoc !== "cage") return;
-    handTake(V && V.duffel, "police-duffel", function () {
-      if (S.stashLoc !== "cage") return;
+    const h = who(clerk);
+    if (instant || !h || !h.ped) {            // no body to walk it out (a probe, a bare harness)
       S.inv.duffel = true; S.stashLoc = "hand"; if (V.duffel) V.duffel.visible = false;
-      toast("THE STASH");
+      return;
+    }
+    // HE FETCHES IT: through the gate, to the shelf, back with the bag (driveFetch)
+    say(clerk, "E-3312, for the DA run. Wait there.");
+    S.fetch = { who: clerk, leg: 0, dir: 1, hold: 0 };
+  }
+  // he is holding it out to you
+  function takeFromClerk() {
+    const F = S.fetch; if (!F || F.dir !== 0 || F.taking) return;
+    F.taking = true;
+    const run = S;
+    take(V.duffel, "grip", false, function () {
+      if (S !== run) return;
+      S.inv.duffel = true; S.stashLoc = "hand";
+    }, function () {
+      if (S !== run) return;
+      fetchOver();
+      shoulder(CBZ.playerChar, V.duffel);
+      custodyPaper();
     });
   }
-
-  function slideLawyer() {
-    armStart(); if (!S.inv.card || S.lawyered || S.deckerLoc !== "interrogation") return;
-    S.inv.card = false; S.lawyered = true; S.talking = false;
-    toast("HE SHUT UP"); if (V.decker && V.decker.say) V.decker.say("...I want my lawyer. Miss Ferro. Now.");
+  // the form he had you sign: the cage's own log, your line the last on it
+  function custodyPaper() {
+    const rows = S.custody.map(function (c, i) {
+      return { cols: [(c.action === "SIGN-OUT" ? "OUT " : "IN ") + c.t, String(c.item).replace(/\s*\(.*\)/, ""), c.caseNo, c.clerk], mark: i === S.custody.length - 1 };
+    });
+    paper({ key: "pct-custody", org: "Precinct 13", title: "CHAIN OF CUSTODY", ink: INK, colw: [0.27, 0.25, 0.22, 0.26],
+      lines: [{ cols: ["LOG", "EXHIBIT", "CASE", "CLERK"], head: true }].concat(rows, [{ gap: 10 }, { k: "RELEASED ON BADGE", v: "VISITOR-ESCORT" }]),
+      foot: "E-3312 leaves the cage for the District Attorney's run.", sign: "DA courier", stamp: "SIGNED OUT" });
+  }
+  // THE LOCK IS ON THE GATE. Nobody at the desk, or the tube overhead in one
+  // of its dark spells, and it gives. In the light, in front of the clerk, it
+  // does not: he sees a man with a pick in his padlock.
+  function pickLock() {
+    if (S.cageOpen || S.fetch) return;
+    const c = rosterAt(S.t, S.lawyered).cage, clerk = c && alive(c) ? c : null;
+    const blind = !clerk || flickerPhaseAt(S.t) === "dark";
+    const run = S;
+    reach(-6.94, 1.15, -12.15, "key", function () {
+      if (S !== run || S.cageOpen) return;
+      if (blind) { S.pickProgress = 3; S.cageOpen = true; if (CBZ.sfx) CBZ.sfx("key"); }
+      else { S.heat += 27; say(clerk, "Step AWAY from the cage.", 3); }
+    }, { copy: false, pose: "grip" });
+  }
+  // off the shelf, in your hand, onto your shoulder
+  function grabDuffel() {
+    if (!S.cageOpen || S.stashLoc !== "cage" || S.fetch) return;
+    const run = S;
+    take(V.duffel, "grip", false, function () {
+      if (S !== run || S.stashLoc !== "cage") return;
+      S.inv.duffel = true; S.stashLoc = "hand";
+    }, function () { if (S === run && S.inv.duffel) shoulder(CBZ.playerChar, V.duffel); });
   }
 
+  /* ---- the things lying about: the badge, the file, the card, the steak ---- */
+  function liftBadge() {
+    if (S.inv.badge) return;
+    const w = observed();
+    if (w) { S.heat += 25; say(w, "Hands off the podium."); return; }
+    const run = S;
+    take(V.badgeMesh, "card", false, function () { if (S === run) S.inv.badge = true; });
+  }
+  // Reyes' file: the case number is something you READ, so it is a page in your hands
+  function readCase() {
+    if (rosterAt(S.t, S.lawyered).bullpenDesk === "REYES" && alive("REYES")) { say("REYES", "That desk bites. Walk on."); S.heat += 8; return; }
+    const w = observed();
+    if (w) { S.heat += 25; say(w, "Step away from the detective's desk."); return; }
+    const run = S;
+    reach(-10.6, 0.86, -6.4, "card", function () {
+      if (S !== run) return;
+      S.inv.caseNo = CASE_NO;
+      paper({ key: "pct-case", org: "Precinct 13", title: "CASE FILE", ink: INK,
+        lines: [{ k: "CASE", v: CASE_NO, big: true }, { k: "DEFENDANT", v: "DECKER, LT." }, { k: "EXHIBIT", v: "E-3312 DUFFEL" },
+          { k: "HELD", v: "EVIDENCE CAGE" }, { k: "DETECTIVE", v: "REYES" }],
+        foot: "Exhibit transfers to the District Attorney at shift change. Sign-out at the cage: this case number and a badge." });
+    }, { copy: false });
+  }
+  function slideLawyer() {
+    if (!S.inv.card || S.lawyered || S.deckerLoc !== "interrogation") return;
+    S.inv.card = false;
+    const run = S; let done = false;
+    const fin = function () {
+      if (done || S !== run) return; done = true;
+      S.lawyered = true; S.talking = false;
+      if (V.card) V.card.visible = true;
+      say("DECKER", "...I want my lawyer. Miss Ferro. Now.", 3.4);
+      sayLater("VOSS", "And there goes my afternoon.", 2.8);
+    };
+    const Vb = CBZ.verbs;
+    let P0 = null;
+    if (Vb && Vb.putDown && V.card) { try { P0 = Vb.putDown(CBZ.player, V.card, null, { pose: "card", onPlaced: fin, onDone: fin }); } catch (e) { P0 = null; } }
+    if (!P0) fin();
+  }
   function takeSteak() {
-    armStart(); if (S.inv.steak || S.steakDeployed) return;
-    S.inv.steak = true; toast("STEAK");
+    if (S.inv.steak || S.steakDeployed) return;
+    const run = S;
+    reach(-14.22, 1.1, -5.2, "box", function () { if (S === run) S.inv.steak = true; }, { pose: "grip" });
   }
   function tossSteak() {
-    armStart(); if (!S.inv.steak) return;
+    if (!S.inv.steak) return;
     S.inv.steak = false; S.steakDeployed = true; S.dogEatUntil = S.t + 90;
-    toast("GOOD BOY");
+    if (V.steak) {                              // on the ground in the pen; REX is up and on it (buildRex's animator)
+      const gy = CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(V.origin.x + 0.75, V.origin.z - 23.5) || 0) : 0;
+      V.steak.position.y = Math.max(0.04, gy + 0.03); V.steak.updateMatrix();
+      V.steak.visible = true;
+    }
   }
 
-  function talkBoy() {
-    armStart();
-    if (S.released && !S.following) { S.following = true; if (V.decker && V.decker.say) V.decker.say("Right behind you. Walk normal."); return; }
-    if (V.decker && V.decker.say) V.decker.say(pick(["Tell Ma I'm fine. Don't tell her where.", "How long have I been in here?", "They took my shoelaces, man.", "I didn't say nothing. Yet."]));
+  /* ---- THE BOY ---- */
+  const DECKER_ASKS = [
+    { id: "follow", label: () => "Tell to follow", show: () => S.released && !S.following && !S.dwalk, run: function () {
+      S.following = true; say("DECKER", "Right behind you. Walk normal."); } },
+    { id: "wait", label: () => "Tell to wait", show: () => S.following, run: function () {
+      S.following = false; say("DECKER", "Here? Fine. Don't be long."); } },
+  ];
+
+  /* ---- TINO: the job, the clock, the ending ---- */
+  function haul() { return !!(S.inv.duffel || (S.released && S.following)); }
+  function minutesLeft() { return Math.max(1, Math.ceil((SHIFT_LEN - S.t) / 60)); }
+  const TINO_ASKS = [
+    { id: "go", label: () => "Tell him to drive", show: haul, run: () => finishRun() },
+    { id: "job", label: () => "Ask about the job", show: () => !haul(), run: tellJob },
+    { id: "off", wheel: true, bad: true, label: () => "Call it off", show: () => !haul(), run: () => finishRun() },
+  ];
+  function tellJob() {
+    const m = minutesLeft();
+    if (!S.briefed) {
+      S.briefed = true;
+      tell("TINO", ["Decker's in holding. The stash is in evidence.", "Both go downtown at the whistle. " + m + " minutes.",
+        "Bail's the straight way. Lou sells the crooked one.", "The bag wants a case number and a badge."]);
+    } else {
+      say("TINO", S.released ? "Decker's out. Bring him and the bag. " + m + " minutes." : m + " minutes to the whistle. The boy first.");
+    }
   }
 
-  /* ---- release + endings ---- */
+  /* ---- the asks, on the people themselves ---- */
+  // A PERSON in front of you is the card's target before any spot near him,
+  // so what you ask of him has to be on HIM (I.registerFor: never filtered by
+  // role). `mine` narrows a shared list to the one body it is about now.
+  function giveVerbs(tag, asks, mine) {
+    const I = CBZ.interactions, h = who(tag), p = h && h.ped;
+    if (!p || p._pctVerbs || !I || !I.registerFor) return;
+    p._pctVerbs = true;
+    asks.forEach(function (a, i) {
+      I.registerFor(p, {
+        id: "police-" + tag.toLowerCase() + "-" + a.id, prio: 90 - i, forceYes: true, campaignSafe: true,
+        wheel: !!a.wheel, bad: !!a.bad,
+        label: function () { return asIs(a.label()); },
+        canShow: function () { return live() && !scared(p) && (!mine || mine()) && !!a.show(); },
+        onSelect: function () { if (live()) a.run(); },
+      });
+    });
+  }
+  function giveCastVerbs() {
+    giveVerbs("KOWALCZYK", SARGE_ASKS);
+    giveVerbs("DASILVA", BAIL_ASKS);
+    giveVerbs("PYE", CAGE_ASKS, function () { return (S.fetch ? S.fetch.who : cageMan()) === "PYE"; });
+    giveVerbs("MERCER", CAGE_ASKS, function () { return (S.fetch ? S.fetch.who : cageMan()) === "MERCER"; });
+    giveVerbs("LOU", LOU_ASKS);
+    giveVerbs("DECKER", DECKER_ASKS);
+    giveVerbs("TINO", TINO_ASKS);
+  }
+  function buildZones(ctx) {
+    // a spot with one thing to do at it
+    const one = function (id, label, show, run) {
+      return [{ id: id, slot: "e", label: function () { return asIs(label); }, canShow: function () { return live() && !!show(); }, onSelect: function () { if (live()) run(); } }];
+    };
+    // THE PEOPLE CARRY THEIR OWN VERBS (giveCastVerbs). A second card hung on
+    // the counter in front of a man sat over his face and over what he was
+    // saying, so the front desk, the bail window, the cage desk, Lou's booth
+    // and the car have no spot of their own: you ask the person. What is left
+    // here are the THINGS: a badge, a file, a lock, a shelf, a tray, a fridge.
+    ctx.zone({ id: "podium", name: "Visitor log", pos: [PODIUM[0], PODIUM[1] + 1.2], at: [PODIUM[0] + 0.18, PODIUM[1] + 0.05], y: 1.3, r: 1.8,
+      verbs: one("lift", "Lift the escort badge", function () { return !S.inv.badge; }, liftBadge) });
+    ctx.zone({ id: "case", name: "Det. Reyes' desk", pos: [-10.6, -7.6], at: [-10.6, -6.4], y: 0.95, r: 1.5,
+      verbs: one("read", "Read the case file", function () { return true; }, readCase) });
+    ctx.zone({ id: "gate", name: "Cage gate", note: "Padlocked", pos: [-6.5, -12.7], at: [-6.97, -12.25], y: 1.15, r: 1.25,
+      verbs: one("pick", "Pick the lock", function () { return !S.cageOpen && !S.fetch && S.inv.picks && S.stashLoc === "cage"; }, pickLock) });
+    ctx.zone({ id: "grab", name: "Evidence shelf", note: "E-3312", pos: [-11, -14.0], at: [-11, -15], y: 0.9, r: 1.7,
+      verbs: one("take", "Take the duffel", function () { return S.cageOpen && S.stashLoc === "cage" && !S.fetch; }, grabDuffel) });
+    ctx.zone({ id: "lawyer", name: "Viewing window", note: "Document tray", pos: [5.0, -12.4], at: [6, -12.4], y: 1.25, r: 1.6,
+      verbs: one("slide", "Slide Ferro's card through", function () { return S.inv.card && !S.lawyered && S.deckerLoc === "interrogation"; }, slideLawyer) });
+    ctx.zone({ id: "fridge", name: "Break room fridge", pos: [-13.5, -5.2], at: [-14.25, -5.2], y: 1.2, r: 1.5,
+      verbs: one("take", "Take the steak", function () { return !S.inv.steak && !S.steakDeployed; }, takeSteak) });
+    ctx.zone({ id: "steak", name: "K-9 pen", note: "Rex", pos: [0, -21.3], at: [0, -24], y: 0.8, r: 2.8,
+      verbs: one("toss", "Toss the steak", function () { return S.inv.steak; }, tossSteak) });
+  }
+
+  /* ==========================================================
+     8. RELEASE, THE ENDINGS, THE NEXT SHIFT
+     ========================================================== */
   function startRelease() { S.releaseAt = S.t + 22; }
   function releaseTick() {
     if (S.releaseAt != null && !S.released && S.t >= S.releaseAt) {
       S.released = true; S.releaseAt = null; S.talking = false;
       S.deckerLoc = "lobby";
-      if (V.decker) { V.decker.pose && V.decker.pose("stand"); V.decker.at && V.decker.at(2.5, 3.0, Math.PI); }
-      toast("RELEASED"); if (V.decker && V.decker.say) V.decker.say("I'm out. Get me outta here.");
+      deckerOut();                    // he WALKS out to the lobby and says so when he gets there
     }
   }
-  function finishRun() {
-    armStart(); if (S.ended) return;
-    const boy = S.released && S.following;
-    const stash = S.inv.duffel;
-    if (boy && stash) endRun("WIN", "CLEAN GETAWAY", "Boy and bag, gone before the whistle. Nobody even looked up.");
-    else if (boy) endRun("PARTIAL", "HALF A JOB", "Decker rides shotgun. The stash rides to the DA at shift end.");
-    else if (stash) endRun("PARTIAL", "HALF A JOB", "The bag is out. Decker watches you drive off through the bars.");
-    else endRun("LEAVE", "YOU WALKED", "Empty hands, clean record. The precinct never knew your name. Decker did.");
+  // the boy on his feet between two places
+  function deckerWalk(path, pose, face, line) {
+    if (!V.decker || !V.decker.ped) return;
+    const o = V.origin, p0 = V.decker.ped.pos;
+    S.dwalk = { cur: [p0.x - o.x, p0.z - o.z], path: path.map((p) => p.slice()), pose: pose, face: face, line: line };
+    V.decker.pose("stand");
   }
-  function endRun(kind, title, why) {
-    if (S.ended) return;
-    S.ended = true; S.ending = kind; S.endWhy = why;
+  function deckerToBox() { deckerWalk([[14, -8.7], [12.95, -13.4], [12.95, -15.9], BOX], "sit", BOX[2], null); }
+  function deckerOut() {
+    if (!V.decker || !V.decker.ped) return;
+    const o = V.origin, p = V.decker.ped.pos, cx = p.x - o.x, cz = p.z - o.z;
+    const path = cz > -9 ? [[14, -3.3]] : (cx < 12.5 && cz < -14.4) ? [[12.95, -15.9], [12.95, -13.4], [8.5, -10]] : [[8.5, -10]];
+    path.push(LOBBY);
+    deckerWalk(path, "stand", null, "I'm out. Get me outta here.");
+  }
+
+  // AT THE CAR. What you bring Tino is the ending: he says what it was, takes
+  // the bag onto his own shoulder, the boy gets in, the car leaves.
+  function finishRun() {
+    if (!live()) return;
+    const dk = V.decker && V.decker.ped;
+    if (S.released && S.following && dk && Math.hypot(dk.pos.x - V.origin.x - CAR[0], dk.pos.z - V.origin.z - CAR[1]) > 12) {
+      say("TINO", "Decker's still coming. Give him a second."); return;
+    }
+    const boy = S.released && S.following, stash = S.inv.duffel, m = minutesLeft();
+    let kind, lines;
+    if (boy && stash) { kind = "WIN"; lines = ["The boy and the bag. Nobody looked up.", m + " minutes on the clock. You walk home slow."]; }
+    else if (boy) { kind = "PARTIAL"; lines = ["Decker's in. Half a job.", "The bag rides to the DA at the whistle."]; }
+    else if (stash) { kind = "PARTIAL"; lines = ["The bag's in. Half a job.", "Decker watches us go through the bars."]; }
+    else { kind = "LEAVE"; lines = ["Empty hands. Decker's going to remember that."]; }
+    endRun(kind, lines.join(" "));
+    tell("TINO", lines);
+    if (boy) sayLater("DECKER", "Drive, Tino. Drive.", 4.4);
+    if (stash && V.wheel && V.wheel.ped && V.wheel.ped.char) shoulder(V.wheel.ped.char, V.duffel);   // the bag is his now
+    carLeaves(boy, lines.length > 1 ? 6.2 : 3.2);
+  }
+  function endRun(kind, why) {
+    if (!S || S.ended) return;
+    S.ended = true; S.ending = kind; S.endWhy = why || ""; S.fetch = null;
+    unquote(); V.gateHeld = false;
     const s = bag();
     if (kind === "WIN") { s.wins++; if (CBZ.city && CBZ.city.addRespect) { try { CBZ.city.addRespect(10); } catch (e) {} } }
     else if (kind === "PARTIAL") s.partials++;
     else if (kind === "LOSE") s.busted++;
     if (kind === "WIN" || kind === "PARTIAL") s.bestTimeLeft = Math.max(s.bestTimeLeft, Math.round(SHIFT_LEN - S.t));
     saveStats();
-    openResult();
   }
-  // LOSE — heat maxes → you're booked. The cell-block-z homage: cell B, camera
-  // behind bars, "Z WUZ HERE" on the wall. Panel-arc (movement is engine-owned).
-  function detain() {
+  function nearestStaff() {
+    const P = CBZ.player; let best = null, bd = 30;
+    if (!P || !P.pos) return null;
+    for (const n in V.staff) {
+      const h = V.staff[n], p = h && h.ped; if (!p || p.dead) continue;
+      const d = Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z);
+      if (d < bd) { bd = d; best = h; }
+    }
+    return best;
+  }
+  // MADE. The heat maxed: whoever made you says so, the desk calls it in, and
+  // the CITY's police want you (city/wanted.js: the real stars, the real
+  // arrest). The bag is on the floor where you stood and Tino does not wait.
+  function detain(by) {
     if (!S || S.detained || S.ended) return;
-    S.detained = true; S.heat = 100;
-    toast("BOOKED");
-    setTimeout(() => { if (S && S.detained && !S.ended) {
-      S.ended = true; S.ending = "LOSE"; S.endWhy = "Cuffs, prints, cell B.";
-      const s = bag(); s.busted++; saveStats(); openResult();
-    } }, 1200);
+    S.detained = true; S.heat = 100; S.heatPeak = 100;
+    const bagOn = bagOnPlayer();
+    endRun("LOSE", "Made inside Precinct 13.");
+    say(by || nearestStaff(), pick(["That's the face off the board. Call it in.", "He's made. Nobody walks out with him.", "Precinct 13 to dispatch. One at the desk, running."]));
+    if (bagOn) dropBag();
+    if (CBZ.cityAddStars) { try { CBZ.cityAddStars(Math.max(1, 2 - ((CBZ.cityStars && CBZ.cityStars()) | 0)), "Evidence Tampering"); } catch (e) {} }
+    if (CBZ.sfx) CBZ.sfx("alarm");
+    say("TINO", "You're burned. I was never here.", 3);
+    carLeaves(false, 2.2);
+  }
+  // the whistle with the job undone
+  function shiftChange() {
+    if (pNear(V.extract.x, V.extract.z, V.extract.r + 2)) { finishRun(); return; }
+    const bagOn = bagOnPlayer();
+    endRun("LOSE", "Shift change.");
+    tell("KOWALCZYK", ["That's the whistle. Evidence goes to the DA.", "Your boy goes downtown."]);
+    if (bagOn) dropBag();
+    say("TINO", "That's the whistle. I was never here.", 3);
+    carLeaves(false, 2.2);
+  }
+  // off the block on your own feet: what you carried is what you got
+  function walkedOff() {
+    if (!S.ended) {
+      const boy = S.released && S.following, stash = S.inv.duffel;
+      endRun(boy && stash ? "WIN" : (boy || stash) ? "PARTIAL" : "LEAVE", "Out on foot.");
+    }
+    nextShift();
+  }
+  // they get in, and the car is what you watch go
+  function carLeaves(boy, wait) { if (V.car) V.leave = { t: -(wait || 2), boy: !!boy, v: 0, seated: false }; }
+  function carStep(dt) {
+    const L = V.leave; L.t += dt;
+    if (L.t < 0) return;
+    if (!L.seated) {
+      L.seated = true;
+      const w = V.wheel && V.wheel.ped;
+      if (V.duffel && w && under(V.duffel, w.group)) { V.g.add(V.duffel); V.duffel.visible = false; }   // in the car with him
+      castOff("TINO"); if (L.boy) castOff("DECKER");
+      if (CBZ.sfx) CBZ.sfx("door_close");
+    }
+    if (L.t < 0.7) return;
+    L.v = Math.min(18, L.v + 5.5 * dt);
+    V.car.position.x -= L.v * dt;
+    if (V.car.position.x < CAR[0] - 80) { V.car.visible = false; V.leave = null; }
+  }
+  // THE NEXT SHIFT: everything back where the day starts. A bag you carried
+  // off on your own shoulder stays there until you are back on the block.
+  function nextShift() {
+    const keep = bagOnPlayer();
+    S = null;
+    resetWorld(keep);
+  }
+  function resetWorld(keepBag) {
+    if (!V) return;
+    V.used = !!keepBag; V.leave = null; V.gateHeld = false; V.gateOpen = false;
+    LATER.length = 0; unquote();
+    if (!keepBag) shelve();
+    if (V.badgeMesh) V.badgeMesh.visible = true;
+    if (V.card) V.card.visible = false;
+    if (V.steak) V.steak.visible = false;
+    if (V.cageGate) V.cageGate.rotation.y = 0;
+    gateCollider(true);
+    if (V.car) { V.car.position.set(CAR[0], 0, CAR[1]); V.car.visible = true; }
+    if (V.detLamp) V.detLamp.material.color.setHex(PAL.green);
+    if (V.pending) return;                       // the cast has not landed yet
+    V._cur = {}; V._pose = {}; V._there = {}; V._nav = {};
+    for (const tag in V.specs) {                 // whoever left, or died on the last shift, is back on this one
+      const h = who(tag);
+      if (h && h.ped && h.ped.dead) castOff(tag);
+      if (!who(tag)) spawn(tag);
+    }
+    for (const name in V.staff) {
+      const h = V.staff[name], key = officerPost(name, 0), t = key && POSTS[key];
+      if (h && h.at && t) { place(h, t[0], t[1], t[2]); h.pose(SEAT[name] === key ? "sit" : "stand"); }
+    }
+    if (V.decker) { place(V.decker, HOLD[0], HOLD[1], HOLD[2]); V.decker.pose("sit"); }
+    if (V.wheel) place(V.wheel, TINO[0], TINO[1], TINO[2]);
+    lastCage = "PYE"; lastBoard = -1; drawPlate("PYE"); drawRoster(0);
   }
 
   /* ==========================================================
-     8. UPDATE — distance-gated sim + roster ped drive + HUD
+     9. UPDATE — distance-gated sim + roster ped drive
      ========================================================== */
+  function onTheBlock(lx, lz) { return lx > -18 && lx < 23 && lz > -28 && lz < 17; }
   function update(ctx, dt) {
     if (!V || (V._venue && ctx.venue !== V._venue)) return;
     if (V.pending && V.pending.length) drainCast();
     if (!dt || dt > 0.4) dt = 0.05;
 
     const P = CBZ.player, o = V.origin;
-    near = !!(P && P.pos && Math.hypot(P.pos.x - o.x, P.pos.z - o.z) < 70);
-    if (!near) return;                 // across the map: nothing ticks
+    if (!P || !P.pos) return;
+    const lx = P.pos.x - o.x, lz = P.pos.z - o.z, d = Math.hypot(lx, lz);
+    near = d < 70;
+    if (!near) { if (S) walkedOff(); return; }   // across the map: nothing ticks
 
+    V.now += dt;
+    giveCastVerbs();
+    sayDue();
+    // the cage gate swings on its hinge (open: the lock gave, or the clerk is
+    // through it), and its collider goes with the leaf. It never shuts on you:
+    // inside the cage when he comes out, it stays open until you are out too.
+    if (V.cageGate) {
+      const inCage = lx > -15 && lx < -7.0 && lz > -18 && lz < -12;
+      const open = !!(S && (S.cageOpen || (!S.ended && (V.gateHeld || (V.gateOpen && inCage)))));
+      if (open !== V.gateOpen) { V.gateOpen = open; gateCollider(!open); }
+      const dy = (open ? -1.6 : 0) - V.cageGate.rotation.y;
+      if (Math.abs(dy) > 0.002) V.cageGate.rotation.y += dy * Math.min(1, dt * 6);
+    }
+    if (V.leave) carStep(dt);
     // flicker tube visuals always cheap while near (telegraphs the dark window)
     if (S && V.flickTubes.length) {
       const ph = flickerPhaseAt(S.t);
@@ -1111,109 +1660,208 @@
       for (const m of V.flickTubes) m.color.setHex(col);
       if (V.cageLight) V.cageLight.intensity = ph === "dark" ? 0.12 : ph === "warn" ? 0.5 : 0.9;
     }
-    if (!S || !S.started || S.ended) return;
+    // a shift that is over stays over until you are off the block
+    if (S && S.ended) { if (d > 45 && !V.leave) nextShift(); return; }
+    // on the block: the clock is running (Tino tells you so)
+    if (!S) { if (onTheBlock(lx, lz) && !V.pending) armStart(); return; }
+    if (!S.started) return;
+    // terms go stale when you walk away from the person who quoted them
+    if (TALK.k) {
+      const h = who(TALK.tag), p = h && h.ped;
+      if (!p || p.dead || Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z) > 7.5) unquote();
+    }
 
     stepSim(dt);
+    if (!live()) return;
     driveRoster(dt);
     driveDecker(dt);
+    if (V.steak && V.steak.visible && S.t >= S.dogEatUntil) V.steak.visible = false;   // eaten
 
     // positional mechanics use the REAL player transform (venue-local)
-    const px = P.pos.x - o.x, pz = P.pos.z - o.z;
-    checkDetector(px, pz);
-    checkK9(px, pz);
-
-    if (panelMode === "result") { /* result panel is static */ }
+    checkDetector(lx, lz);
+    if (live()) checkK9(lx, lz);
   }
 
   // headless-safe core step (also driven by api.simShift for the gate).
   function stepSim(dt) {
     if (!S || S.ended) return;
     S.t += dt;
-    if (S.t >= SHIFT_LEN) {
-      // shift change: the whistle ends the run unless you're already at the car.
-      if (pNear(V.extract.x, V.extract.z, V.extract.r)) finishRun();
-      else endRun("LOSE", "SHIFT CHANGE", "The whistle. Fresh uniforms fill the lobby, the DA van backs up to the cage, and somebody finally reads the wanted board.");
-      return;
-    }
+    if (S.t >= SHIFT_LEN) { shiftChange(); return; }   // the whistle ends the run unless you are already at the car
     releaseTick();
     // CHARGE METER: climbs while he talks in the box; freezes on the lawyer card.
     S.talking = chargeTalking() && rosterAt(S.t, S.lawyered).interrogation === "VOSS";
     if (S.talking) S.charges = Math.min(100, S.charges + dt * (100 / 900));
     // the boy gets walked to the box at t=120 (if not already released)
-    if (S.t >= 120 && S.deckerLoc === "holding" && S.releaseAt == null && !S.released) S.deckerLoc = "interrogation";
-    // heat decay + booking
+    if (S.t >= 120 && S.deckerLoc === "holding" && S.releaseAt == null && !S.released) { S.deckerLoc = "interrogation"; deckerToBox(); }
+    // heat decay + being made
     S.heat = Math.max(0, S.heat - dt * 1.6);
     S.heatPeak = Math.max(S.heatPeak, S.heat);
-    if (S.heat >= 100) detain();
-    // boards
+    if (S.heat >= 100) { detain(); return; }
+    // boards: the nameplate when the cage changes hands, the roster every 20 s
+    // (once: it used to repaint and re-upload every frame of that second)
     const cage = rosterAt(S.t, S.lawyered).cage;
     if (cage !== lastCage) { drawPlate(cage); lastCage = cage; }
-    const ph = flickerPhaseAt(S.t);
-    if (ph !== lastPhase) { lastPhase = ph; }
-    if (Math.floor(S.t) % 20 === 0) drawRoster(S.t);
+    const b = Math.floor(S.t / 20);
+    if (b !== lastBoard) { lastBoard = b; drawRoster(S.t); }
   }
 
-  // ROSTER-DRIVEN PED MOVEMENT — reuse the pinned staff peds by lerping their
-  // staffPost between posts on the visible shift timer (coffee pulls, cage
-  // swaps, records run, Voss→box). handle.at() moves both pos and staffPost.
-  function officerTarget(name, t) {
-    const away = awayAt(name, t);
-    if (away) return POSTS.COFFEE;
+  // ROSTER-DRIVEN PED MOVEMENT — the pinned staff WALK between posts on the
+  // visible shift timer (coffee pulls, cage swaps, records run, Voss to the
+  // box) at a walking pace, in a straight line. handle.at() moves both pos and
+  // staffPost; it is called while a body is moving and once on arrival, never
+  // while he stands (so he can still turn to look at whoever is talking to him).
+  // which post the roster gives him right now (a POSTS key)
+  function officerPost(name, t) {
+    if (awayAt(name, t)) return "COFFEE";
     switch (name) {
-      case "KOWALCZYK": return POSTS.KOWALCZYK;
-      case "DASILVA": return POSTS.DASILVA;
-      case "BRISCO": { for (const w of STUDY) if (t >= w[0] && t < w[1]) return POSTS.WANTED; return POSTS.BRISCO; }
-      case "REYES": return (t >= RECORDS_RUN[0] && t < RECORDS_RUN[1]) ? POSTS.RECORDS : POSTS.REYES_DESK;
-      case "VOSS": return (t >= 120 && !S.lawyered && !S.released && S.releaseAt == null) ? POSTS.INTERROGATION : POSTS.VOSS_DESK;
-      case "PYE": return cageClerkAt(t) === "PYE" ? POSTS.CAGE : POSTS.PYE_DESK;
-      case "MERCER": return cageClerkAt(t) === "MERCER" ? POSTS.CAGE : POSTS.MERCER_DESK;
+      case "KOWALCZYK": return "KOWALCZYK";
+      case "DASILVA": return "DASILVA";
+      case "BRISCO": { for (const w of STUDY) if (t >= w[0] && t < w[1]) return "WANTED"; return "BRISCO"; }
+      case "REYES": return (t >= RECORDS_RUN[0] && t < RECORDS_RUN[1]) ? "RECORDS" : "REYES_DESK";
+      case "VOSS": return (t >= 120 && S && !S.lawyered && !S.released && S.releaseAt == null) ? "INTERROGATION" : "VOSS_DESK";
+      case "PYE": return cageClerkAt(t) === "PYE" ? "CAGE" : "PYE_DESK";
+      case "MERCER": return cageClerkAt(t) === "MERCER" ? "CAGE" : "MERCER_DESK";
     }
     return null;
   }
+  // is he standing at the post the roster gives him (not on his way to it)?
+  function atPost(name) { return !V || V._there[name] !== false; }
+  // one step toward a point; true once there
+  function walkTo(cur, tx, tz, step) {
+    const dx = tx - cur[0], dz = tz - cur[1], dd = Math.hypot(dx, dz);
+    if (dd <= step || dd < 0.02) { cur[0] = tx; cur[1] = tz; return true; }
+    cur[0] += dx / dd * step; cur[1] += dz / dd * step;
+    return false;
+  }
+  function setPose(name, h, want) { if (h.pose && V._pose[name] !== want) { h.pose(want); V._pose[name] = want; } }
   function driveRoster(dt) {
-    V._cur = V._cur || {}; V._pose = V._pose || {};
     for (const name in V.staff) {
-      const h = V.staff[name]; if (!h || !h.ped) continue;
-      const tgt = officerTarget(name, S.t); if (!tgt) continue;
-      const cur = V._cur[name] || (V._cur[name] = [tgt[0], tgt[1]]);
-      const k = 1 - Math.exp(-3 * dt);
-      cur[0] += (tgt[0] - cur[0]) * k; cur[1] += (tgt[1] - cur[1]) * k;
-      const moving = Math.hypot(tgt[0] - cur[0], tgt[1] - cur[1]) > 0.15;
-      if (h.at) h.at(cur[0], cur[1], tgt[2]);
-      // only re-pose on CHANGE (avoid fighting the ped anim layer every frame)
-      const want = moving ? "stand" : (tgt === POSTS.REYES_DESK || tgt === POSTS.VOSS_DESK || tgt === POSTS.MERCER_DESK) ? "sit" : "stand";
-      if (h.pose && V._pose[name] !== want) { h.pose(want); V._pose[name] = want; }
+      const h = V.staff[name]; if (!h || !h.ped || h.ped.dead) continue;
+      if (S.fetch && S.fetch.who === name) { driveFetch(h, name, dt); continue; }
+      const key = officerPost(name, S.t); if (!key) continue;
+      const post = POSTS[key];
+      const N = V._nav[name] || (V._nav[name] = { at: key, goal: key, path: [] });
+      const cur = V._cur[name] || (V._cur[name] = [post[0], post[1]]);
+      if (N.goal !== key) {
+        // a new post: finish the stride he is on, then the aisles from there
+        const from = N.path.length ? N.path[0] : N.at;
+        N.path = (N.path.length ? [from] : []).concat(lane(from, key));
+        N.goal = key;
+      }
+      if (N.path.length) {
+        V._there[name] = false;
+        const p = spot(N.path[0]), dx = p[0] - cur[0], dz = p[1] - cur[1];
+        if (walkTo(cur, p[0], p[1], WALK * dt)) N.at = N.path.shift();
+        const done = !N.path.length;
+        h.at(cur[0], cur[1], done ? post[2] : (dx || dz) ? Math.atan2(dx, dz) : undefined);
+        setPose(name, h, done && SEAT[name] === key ? "sit" : "stand");
+        if (done) V._there[name] = true;
+      } else if (V._there[name] !== true) {
+        V._there[name] = true;
+        h.at(cur[0], cur[1], post[2]);
+        setPose(name, h, SEAT[name] === key ? "sit" : "stand");
+      } else seat(h, cur);
     }
   }
-  function driveDecker(dt) {
-    const h = V.decker; if (!h || !h.ped) return;
-    if (S.following) {
-      const P = CBZ.player, o = V.origin;
-      const lx = P.pos.x - o.x, lz = P.pos.z - o.z;
-      const cx = h.ped.pos.x - o.x, cz = h.ped.pos.z - o.z;
-      const dx = lx - cx, dz = lz - cz, d = Math.hypot(dx, dz);
-      if (d > 2.2) { const sp = Math.min(3.4, d) * dt * 1.4; h.at && h.at(cx + dx / d * sp, cz + dz / d * sp, Math.atan2(dx, dz)); }
+  // shoved off his spot (you walked into him): back on it, facing wherever he was facing
+  function seat(h, cur) {
+    const o = V.origin, p = h.ped.pos;
+    if (Math.abs(p.x - o.x - cur[0]) > 0.04 || Math.abs(p.z - o.z - cur[1]) > 0.04) h.at(cur[0], cur[1]);
+  }
+  // THE CLERK FETCHES THE BAG. Round the south end of his desk (round YOU,
+  // if you are standing in that lane), down the alley to the gate, which
+  // swings in for him, to the shelf, the bag onto his shoulder, back out, the
+  // gate shut behind him, and up to you at arm's length (dir 0: your row on
+  // him is "Take the duffel").
+  function fetchPath() {
+    const P = CBZ.player, o = V.origin, px = P.pos.x - o.x, pz = P.pos.z - o.z;
+    const z = (px > -7.6 && px < -3.2 && pz > -12.2 && pz < -10.0) ? pz + 1.25 : -11.2;
+    return [[-4.2, z], [-6.6, z], [-6.6, -13.0], [-8.3, -13.0], [-10.6, -14.2]];
+  }
+  function driveFetch(h, name, dt) {
+    const F = S.fetch, cur = V._cur[name] || (V._cur[name] = [POSTS.CAGE[0], POSTS.CAGE[1]]);
+    if (!F.path) F.path = fetchPath();
+    V._there[name] = false;
+    setPose(name, h, "stand");
+    if (F.dir === 0) { seat(h, cur); return; }       // holding it out: waiting on you
+    if (F.hold > 0) { F.hold -= dt; return; }
+    let tgt = F.path[F.leg];
+    if (F.dir < 0 && F.leg === 0) {
+      // out of the alley: the last stretch is to YOU, as far as arm's length
+      // (not onto your toes). Wandered off? He waits at the end of his desk.
+      const P = CBZ.player, o = V.origin, px = P.pos.x - o.x, pz = P.pos.z - o.z;
+      const gap = Math.hypot(px - cur[0], pz - cur[1]);
+      if (gap < 6 && px > -6.9 && pz > -11.6) {
+        if (gap <= 1.35) tgt = cur;
+        else tgt = [px - (px - cur[0]) / gap * 1.3, pz - (pz - cur[1]) / gap * 1.3];
+      }
+    }
+    const dx = tgt[0] - cur[0], dz = tgt[1] - cur[1];
+    const there = walkTo(cur, tgt[0], tgt[1], WALK * dt);
+    h.at(cur[0], cur[1], (dx || dz) ? Math.atan2(dx, dz) : undefined);
+    V.gateHeld = F.leg >= 2;                          // open from the alley in, shut once he is out of it
+    if (!there) return;
+    if (F.dir > 0) {
+      if (F.leg < F.path.length - 1) { F.leg++; return; }
+      // at the shelf: the bag comes off it onto his shoulder
+      F.dir = -1; F.leg--; F.hold = 0.8;
+      h.at(cur[0], cur[1], Math.atan2(-11 - cur[0], -15 - cur[1]));
+      if (h.ped.char) shoulder(h.ped.char, V.duffel);
       return;
     }
-    // park him per location
-    if (S.deckerLoc === "interrogation") h.at && h.at(11, -12.5, -Math.PI / 2);
-    else if (S.deckerLoc === "lobby") h.at && h.at(2.5, 3.0, Math.PI);
+    if (F.leg > 0) { F.leg--; return; }
+    // out front with it
+    F.dir = 0; V.gateHeld = false;
+    const P = CBZ.player, o = V.origin;
+    h.at(cur[0], cur[1], Math.atan2(P.pos.x - o.x - cur[0], P.pos.z - o.z - cur[1]));
+    say(name, name === "MERCER" ? "E-3312. Sign for it, then it's yours." : "Transfer to the DA run, right? Sign here.");
+  }
+  // done at the cage: back round the desk to his post
+  function fetchOver() {
+    const F = S && S.fetch; if (!F) return;
+    const N = V._nav[F.who];
+    if (N) { N.at = "C1"; N.goal = "CAGE"; N.path = ["C1", "CAGE"]; }
+    V._there[F.who] = false;
+    S.fetch = null; V.gateHeld = false;
+  }
+  function driveDecker(dt) {
+    const h = V.decker; if (!h || !h.ped || h.ped.dead) return;
+    const o = V.origin, cx = h.ped.pos.x - o.x, cz = h.ped.pos.z - o.z;
+    if (S.following) {
+      const P = CBZ.player, dx = P.pos.x - o.x - cx, dz = P.pos.z - o.z - cz, dd = Math.hypot(dx, dz);
+      if (dd > 2.2) { const sp = Math.min(3.6 * dt, dd - 2.0); h.at(cx + dx / dd * sp, cz + dz / dd * sp, Math.atan2(dx, dz)); }
+      return;
+    }
+    const W = S.dwalk; if (!W) return;
+    const cur = W.cur, tgt = W.path[0], dx = tgt[0] - cur[0], dz = tgt[1] - cur[1];
+    const there = walkTo(cur, tgt[0], tgt[1], WALK * dt);
+    h.at(cur[0], cur[1], (dx || dz) ? Math.atan2(dx, dz) : undefined);
+    if (!there) return;
+    W.path.shift();
+    if (W.path.length) return;
+    // arrived: sat down in the box, or stood in the lobby looking for you
+    S.dwalk = null;
+    const P = CBZ.player;
+    h.at(cur[0], cur[1], W.face != null ? W.face : Math.atan2(P.pos.x - o.x - cur[0], P.pos.z - o.z - cur[1]));
+    h.pose(W.pose || "stand");
+    if (W.line) say("DECKER", W.line, 3.4);
   }
 
   // METAL DETECTOR — trip on an INWARD crossing (z from >8 to <8) while the
-  // REAL weapon state reads a drawn gun or a held melee. Immediate heat.
+  // REAL weapon state reads a drawn gun or a held melee. Immediate heat. The
+  // lamp over the arch goes red; whoever is watching says so.
   function checkDetector(px, pz) {
     if (S.prevZ === 99) { S.prevZ = pz; return; }   // first frame: seed the prior side, never trip on spawn
     const w = liveWeaponState();
     const crossedIn = S.prevZ > 8 && pz <= 8 && px > -1.6 && px < 1.6;
     if (crossedIn && armedEntry(w) && (S.t - S.detectorTrippedT) > 3) {
       S.detectorTrippedT = S.t; S.heat = Math.min(100, S.heat + 45);
-      toast("BEEP");
-      const eye = observed(); if (eye) eye.say("Whoa. What's on your hip?");
+      if (CBZ.sfx) CBZ.sfx("alarm");
+      const eye = observed(); if (eye) say(eye, "Whoa. What's on your hip?");
       if (V.detLamp) V.detLamp.material.color.setHex(0xc8402f);
-      if (S.heat >= 100) detain();
+      if (S.heat >= 100) detain(eye);
     } else if (V.detLamp && (S.t - S.detectorTrippedT) > 1.5) V.detLamp.material.color.setHex(0x2fd06a);
-    S.prevZ = pz;
+    if (S) S.prevZ = pz;
   }
   function liveWeaponState() {
     const gg = CBZ.game || {};
@@ -1231,8 +1879,8 @@
     if (pz < -20.5 && dogD < 6.0) {
       const eating = S.t < S.dogEatUntil;
       if (k9Alarm({ duffel: S.inv.duffel, steakDeployed: S.steakDeployed, dogEating: eating })) {
-        toast("K-9 ALARM"); S.heat = 100; detain();
-      } else if (!S.inv.duffel && S.dogBarkCd <= 0) { S.dogBarkCd = 12; S.heat = Math.min(100, S.heat + 4); }
+        bark("WOOF! WOOF! WOOF!"); S.heat = 100; detain();
+      } else if (!S.inv.duffel && S.dogBarkCd <= 0) { S.dogBarkCd = 12; S.heat = Math.min(100, S.heat + 4); if (!eating) bark("Grrrrr."); }
     }
   }
 
@@ -1246,10 +1894,10 @@
   const OBS_R = 7;
   const _obsOpts = { range: OBS_R, eyeY: 1.5, targetY: 1.2 };
   function observed() {
-    if (!V || !CBZ.player) return null;
+    if (!V || !S || !CBZ.player) return null;
     const P = CBZ.player, B = CBZ.brain;
     const pa = (CBZ.city && CBZ.city.playerActor) || P;
-    for (const name in V.staff) { const h = V.staff[name]; if (!h || !h.ped) continue;
+    for (const name in V.staff) { const h = V.staff[name]; if (!h || !h.ped || h.ped.dead) continue;
       if (awayAt(name, S.t)) continue;
       if (Math.hypot(h.ped.pos.x - P.pos.x, h.ped.pos.z - P.pos.z) >= OBS_R) continue;
       if (B && B.perception && B.perception.sees) { if (B.perception.sees(h.ped, pa, _obsOpts)) return h; }
@@ -1258,32 +1906,6 @@
     return null;
   }
 
-  /* ==========================================================
-     9. PANELS (engine-owned overlay)
-     ========================================================== */
-  const BTN = "display:inline-block;margin:3px 5px 3px 0;padding:9px 15px;border-radius:11px;cursor:pointer;font-weight:800;font-size:14px;user-select:none;box-shadow:0 3px 0 rgba(0,0,0,.4);";
-  function hBtn(act, label, bg, dis) { return "<span data-act='" + act + "' style='" + BTN + "background:" + (bg || "#1c6b40") + ";" + (dis ? "opacity:.4;pointer-events:none;" : "") + "'>" + label + "</span>"; }
-  function hHead(title, sub) {
-    return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#e8b23a'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + (sub || "") + "</span></div>";
-  }
-  function fmtCash(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
-
-  function openResult() {
-    panelMode = "result";
-    const s = bag(), kind = S.ending;
-    const col = kind === "WIN" ? "#5db87a" : kind === "LOSE" ? "#c8402f" : "#e8b23a";
-    const title = kind === "WIN" ? "CLEAN GETAWAY" : kind === "LOSE" ? (S.detained ? "BOOKED" : "SHIFT CHANGE") : kind === "PARTIAL" ? "HALF A JOB" : "YOU WALKED";
-    C.hud.panel(
-      "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>" +
-        "<b style='letter-spacing:2px;color:" + col + ";font-size:18px'>PRECINCT 13: " + title + "</b></div>" +
-      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>" + S.endWhy + "</div>" +
-      "<div style='font-size:13px;margin:8px 0'>Time left <b>" + fmtT(SHIFT_LEN - S.t) + "</b>, charges <b>" + Math.round(S.charges) + " (" + chargeTier(S.charges) + ")</b>, cash spent <b>" + fmtCash(statSpent()) + "</b>, heat peak <b>" + Math.round(S.heatPeak) + "</b><br>" +
-        "Record: " + s.wins + " clean, " + s.partials + " partial, " + s.busted + " booked" + "</div>" +
-      hBtn("again", "Run it back", "#8a1f1f") + hBtn("close", "Leave", "#26343c"),
-      { again: () => { S = null; panelMode = null; C.hud.closePanel(); armStart(); },
-        close: () => { S = null; panelMode = null; C.hud.closePanel(); } });
-  }
   /* ==========================================================
      10. REGISTER — SITE venue (no police lotKind exists in towngen;
          city/police.js fronts intake at City Hall). Resolve to open
@@ -1341,7 +1963,8 @@
       },
     },
     build(ctx, venue) { build(ctx, venue); },
-    update(ctx, dt) { try { update(ctx, dt); } catch (e) { /* never break the frame loop */ } },
+    // never break the frame loop, but never eat the reason either (api.lastError)
+    update(ctx, dt) { try { update(ctx, dt); } catch (e) { if (!lastErr && window.console) console.error("[precinct13]", e); lastErr = e; } },
 
     /* probe surface — the numeric gate asserts THROUGH this */
     api: {
@@ -1366,7 +1989,14 @@
       _state: () => S,                       // live object (mutable) for rig-and-observe
       near: () => near,
       origin: () => (V ? { x: V.origin.x, z: V.origin.z } : null),
-      cast: () => (V ? { staff: Object.keys(V.staff).length, decker: !!V.decker, lou: !!V.lou, rex: !!V.rex } : null),
+      cast: () => (V ? { staff: Object.keys(V.staff).length, decker: !!V.decker, lou: !!V.lou, wheel: !!V.wheel, rex: !!V.rex } : null),
+      // the bodies and props a rig drives and looks at (handles: .ped, .say, .at)
+      who: (tag) => who(tag),
+      venue: () => V,
+      asks: { LOU: LOU_ASKS, DASILVA: BAIL_ASKS, KOWALCZYK: SARGE_ASKS, CAGE: CAGE_ASKS, DECKER: DECKER_ASKS, TINO: TINO_ASKS },
+      quoted: () => (TALK.k && quoted(TALK.k) ? TALK.k : null),
+      lastError: () => (lastErr ? String(lastErr && lastErr.stack || lastErr) : null),
+      nextShift() { if (S) nextShift(); else resetWorld(); return true; },
 
       // advance the shift headlessly; charge meter + roster + endings step here.
       simShift(sec) {
@@ -1382,14 +2012,15 @@
       detectorTrip(w) { return armedEntry(w); },
       // K-9: run the real alarm against a rigged fact set
       k9Trip(o) { return k9Alarm(o); },
-      // custody quick-truth for a clerk at time t
+      // the rules of each act, run at once (no walk, no reach): what a probe asserts
       act: {
-        signOut: () => { armStart(); signOut(); return runView(); },
+        signOut: () => { armStart(); signOut(true); return runView(); },
         lift: () => { armStart(); liftBadge(); return runView(); },
-        stealCase: () => { armStart(); stealCase(); return runView(); },
+        stealCase: () => { armStart(); readCase(); return runView(); },
         lawyer: () => { armStart(); slideLawyer(); return runView(); },
-        steak: () => { armStart(); takeSteak(); tossSteak(); return runView(); },
-        bribe: () => { armStart(); S.password = true; openSergeant(); return runView(); },
+        steak: () => { armStart(); S.inv.steak = true; tossSteak(); return runView(); },
+        bribe: () => { armStart(); S.password = true; bribe(); return runView(); },
+        finish: () => { armStart(); finishRun(); return runView(); },
       },
     },
   });

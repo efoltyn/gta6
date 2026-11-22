@@ -256,7 +256,8 @@
   };
   function canRobTill(kind) {
     // banks/realtors/services-only counters and vehicle lots don't have a
-    // stick-up-able register here (banks are heists handled elsewhere).
+    // stick-up-able register here (a bank's money is its tellers' drawers and
+    // its vault, city/bank.js).
     if (kind === "bank" || kind === "realtor" || kind === "carlot" || kind === "chop") return false;
     return TILL[kind] != null;
   }
@@ -751,9 +752,9 @@
   // typed: it is the sum of what every shop in the district drops into its
   // safe, split across the branches serving that district, over a weekly
   // pickup cycle. Sanity: ~20 shops × ~$60/h cash × 24 h × 7 d ≈ $200k for a
-  // single branch — which lands inside heists.js's own researched
-  // $120k-$250k vault band. The research validates the derivation; it is no
-  // longer the source of the number.
+  // single branch — which lands inside the researched $120k-$250k band for a
+  // high-street branch's cash vault. The research validates the derivation;
+  // it is not the source of the number.
   /* ==========================================================================
      THE RESERVE — WHY ONE VAULT IN THE WORLD HOLDS TENS OF MILLIONS.
 
@@ -986,6 +987,14 @@
       // is also exactly conservative on the register.
       if (opts.rob && (h.point === "register" || h.point === "safe")) { s.hits = Math.min(6, hitsNow(src) + 1); s.hitAt = now; }
       books(src, want, h.point);
+    }
+    // A HOSTILE TAKE BY YOUR HAND IS A ROBBERY, whatever was robbed: a
+    // register at gunpoint, a drawer nobody is watching, a drop safe, a
+    // teller's window, a vault, a truck. They all pass through this line and
+    // nowhere else, so this is where city/stickup.js hears of it: the take
+    // is hot until you are clear, and the men who were in on it are owed.
+    if (opts.by === "player" && (opts.rob || (src._tillSpec && src._tillSpec.kind === "armored")) && CBZ.cityStickup) {
+      try { CBZ.cityStickup.took(src, want, h.point); } catch (e) {}
     }
     _audit.takes++; _audit.taken += want;
     res.taken = want; res.emptied = want >= h.amount;
@@ -1468,6 +1477,22 @@
   // the old five-minute `_tillSneakT` refill timer is DELETED: the drawer is
   // empty because you emptied it, and it refills at the rate the shop
   // actually trades. That is not a cooldown, it is the balance.
+  /* WHAT YOU TOOK IS IN YOUR HANDS: notes in your pocket, or, past what a
+     jacket holds, duffels on the floor at your feet that you (and the men
+     with you) carry out. One call, CBZ.cashBags.payout, decides which; every
+     counter robbery pays through here (the stick-up at gunpoint in
+     city/racket.js too) so a fat safe is canvas and a drawer is notes. */
+  function toHands(lot, amount) {
+    const B = CBZ.cashBags, P = CBZ.player;
+    if (!(amount > 0)) return;
+    if (B && B.payout && P && P.pos) {
+      const vs = lot && lot.building && lot.building.vendorSpot;
+      let x = P.pos.x, z = P.pos.z;
+      if (vs) { const dx = vs.x - x, dz = vs.z - z, l = Math.hypot(dx, dz) || 1; x += dx / l * 0.7; z += dz / l * 0.7; }
+      B.payout(x, P.pos.y || 0, z, amount, { src: lot || null, srcName: (lot && lot.building && lot.building.name) || "the take", spread: 0.7, cap: 6, onFloor: false });
+    } else CBZ.city.addCash(amount);
+  }
+  CBZ.cityTakeToHands = toHands;
   function quietTill(lot) {
     const r = CBZ.cityTill.take(lot, { point: "register", frac: 0.45 + Math.random() * 0.35, by: "player", rob: true });
     const d = lot.building && lot.building.door;
@@ -1475,7 +1500,7 @@
       CBZ.city.note("Drawer's empty, nothing in it to take.", 1.8);
       return;
     }
-    CBZ.city.addCash(r.taken);
+    toHands(lot, r.taken);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.cityCrime) CBZ.cityCrime(40, { x: d ? d.x : CBZ.player.pos.x, z: d ? d.z : CBZ.player.pos.z, type: "till grab" });
     CBZ.city.note("Cleaned the drawer · " + fmt$(r.taken) + ". Nobody watching.", 2);
@@ -1490,7 +1515,7 @@
     const d = lot.building && lot.building.door;
     const x = d ? d.x : CBZ.player.pos.x, z = d ? d.z : CBZ.player.pos.z;
     if (!(r.taken > 0)) { CBZ.city.note("Safe's already been emptied into the night deposit.", 2); return; }
-    CBZ.city.addCash(r.taken);
+    toHands(lot, r.taken);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.cityCrime) CBZ.cityCrime(150, { x: x, z: z, type: "burglary" });
     if (CBZ.cityAlarm) CBZ.cityAlarm(x, z, 20, 1, CBZ.city.playerActor);

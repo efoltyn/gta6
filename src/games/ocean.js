@@ -692,8 +692,8 @@
     sign.rotation.y = Math.atan2(ux, uz);
     g.add(sign);
     // the dock vendor — a REAL city ped (brain + wardrobe + death funnel),
-    // pinned behind the counter. [E] Talk gives wreck/price flavour; the
-    // Charter zone below is the actual economy panel.
+    // pinned behind the counter. She talks, and the kiosk's verbs are hers
+    // (giveMonaVerbs) as well as the hut's.
     if (ctx.npc) V.mona = ctx.npc({
       role: "vendor", name: "Mona", outfit: "vendor",
       at: [kx + ux * 1.1, kz + uz * 1.1], face: Math.atan2(-ux, -uz),
@@ -749,6 +749,18 @@
     // ---- ZONES: the charter board + sell salvage (at the kiosk) ----
     C = C || ctx;
     ctx.zone({ id: "charter", name: "Dead Water Charter", note: charterNote, pos: [kx, kz], r: 2.6, verbs: charterVerbs() });
+    V.monaVerbs = false;
+  }
+  // Mona keeps the kiosk: a person in front of you is the card's target before
+  // the hut is, so what the kiosk does is asked of HER too (I J K L on her).
+  function giveMonaVerbs() {
+    const I = CBZ.interactions, p = V && V.mona && V.mona.ped;
+    if (!p || !I || !I.registerFor || V.monaVerbs || p._charterVerbs) { if (p && p._charterVerbs && V) V.monaVerbs = true; return; }
+    V.monaVerbs = true; p._charterVerbs = true;
+    charterVerbs().forEach(function (v, i) {
+      I.registerFor(p, { id: "ocean-mona-" + v.id, prio: 90 - i, forceYes: true, campaignSafe: true,
+        label: v.label, canShow: function () { return !p.dead && v.canShow(); }, onSelect: function () { v.onSelect(C); } });
+    });
   }
 
   /* ============================ ecology sim ============================= */
@@ -1642,6 +1654,7 @@
   function update(ctx, dt) {
     if (!V) return;
     C = C || ctx;
+    if (!V.monaVerbs) giveMonaVerbs();
     if (CBZ.game && CBZ.game.mode && CBZ.game.mode !== "city") { if (chain.sharks.length || chain.schools.length) despawnAll(); if (RT.playerShark) detachShark(); return; }
     dt = Math.min(0.05, dt || 0);
     simT += dt;
@@ -1719,6 +1732,8 @@
     build,
     update,
     api: {
+      // where the charter kiosk stands in the world (its verbs are on it)
+      kiosk: () => (V ? { x: V.origin.x - V.ux * 7, z: V.origin.z - V.uz * 7 } : null),
       simChain,
       o2Rate,
       O2_TIERS,

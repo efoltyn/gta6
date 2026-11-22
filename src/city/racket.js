@@ -409,8 +409,11 @@
   }
 
   // ============================================================
-  //  ROB — the counter verb. Every dollar out of cityTill; consequences are
-  //  robTill's (shops.js) plus the ledger's memory + protector response.
+  //  ROB — the counter verb. Every dollar out of cityTill; the consequences
+  //  are the law's (cityCrime), the ledger's memory and the protector's
+  //  response. What the robbery leaves you holding (the take is hot until
+  //  you are clear, the men with you are owed their cut) is city/stickup.js,
+  //  which hears of the take from the till itself.
   // ============================================================
   const ARMED_KINDS = { jewelry: 1, casino: 1, security: 1, drugs: 1, guns: 1 };
 
@@ -441,9 +444,12 @@
     }
 
     // A GUN-COUNTER KEEPER GOES FOR HIS IRON. The armed trades resist: how
-    // often is your intimidation (respect + drip + the drawn gun), same curve
-    // as shops.js's robTill so the two stick-up paths read as one rule.
-    const intimidation = Math.min(0.9, 0.45 + (g.respect || 0) / 600 + playerDrip() / 150 + (armed ? 0.2 : 0));
+    // often is your intimidation: your respect, your drip, the drawn gun,
+    // and every man of yours who has his own gun on the room
+    // (city/stickup.js: the crew covering). One gun he may try; three he
+    // will not.
+    const guns = (CBZ.cityStickup && CBZ.cityStickup.covering) ? CBZ.cityStickup.covering(lot) : 0;
+    const intimidation = Math.min(0.97, 0.45 + (g.respect || 0) / 600 + playerDrip() / 150 + (armed ? 0.2 : 0) + guns * 0.14);
     const resisted = ARMED_KINDS[lot.kind] && Math.random() > intimidation;
     if (resisted && v && v.armed) {
       // the counterman draws instead of paying — now it's a gunfight.
@@ -460,7 +466,9 @@
     const r = CBZ.cityTill.take(lot, { point: "register", frac: resisted ? (0.3 + Math.random() * 0.3) : 1, by: "player", rob: true });
     const take = (r && r.taken) | 0;
     if (take > 0) {
-      CBZ.city.addCash(take);
+      // into your hands: notes in your pocket, or duffels on the floor when it
+      // is more than a jacket holds (city/shops.js toHands, CBZ.cashBags)
+      if (CBZ.cityTakeToHands) CBZ.cityTakeToHands(lot, take); else CBZ.city.addCash(take);
       big((armed ? "REGISTER EMPTIED" : "TILL GRABBED") + " +$" + take);
       if (CBZ.sfx) CBZ.sfx("coin");
     } else {
@@ -472,7 +480,7 @@
     if (v && CBZ.cityRelShift) CBZ.cityRelShift(v, "robbed");
     if (v && CBZ.citySay) CBZ.citySay(v, take > 0 ? "Take it, take it and GO." : "There's nothing IN it, man!", "#ffb09b", 2.2);
 
-    // heat + panic: the exact robTill consequence block (shops.js) — one rule.
+    // heat + panic
     if (CBZ.cityCrime) CBZ.cityCrime(resisted ? 220 : (armed ? 170 : 90), { instant: armed, x: door.x, z: door.z, type: armed ? "store robbery" : "till grab" });
     if (CBZ.cityAlarm) CBZ.cityAlarm(door.x, door.z, 22, resisted ? 1.4 : 1, pa);
     if (CBZ.cityPanic && armed) CBZ.cityPanic(door.x, door.z, 1.2, pa);
