@@ -754,6 +754,13 @@
     // a 1x-CPU phone boot and 9.3 s at 4x, nearly all of it the per-vertex
     // concavity/snow pass. The terrain's SHAPE (physics, placement) comes from
     // the height oracle, not the mesh, so only the facet size changes.
+    // Gang crews per held block (city/gangs.js reads CBZ.CITY.gangPerTurf when
+    // it seeds the rosters): [2, 4] fielded ~105 armed bodies round the
+    // downtown spawn on the phone profile, the largest owned group the phone
+    // population budget (city/peds.js PHONE_PED_BUDGET) cannot put to sleep.
+    if (Array.isArray(CBZ.CITY && CBZ.CITY.gangPerTurf) && CBZ.CITY.gangPerTurf[0] === 2 && CBZ.CITY.gangPerTurf[1] === 4) {
+      CBZ.CITY.gangPerTurf = CBZ.deviceClass === "phone" ? [1, 3] : [2, 3];
+    }
     // (a ?cfg_MOUNT_MESH_DENSITY= override arrives as a string and is kept)
     if (CBZ.CONFIG._mountDensityDefault && CBZ.CONFIG.MOUNT_MESH_DENSITY === 1.45) CBZ.CONFIG.MOUNT_MESH_DENSITY = 0.85;
   }

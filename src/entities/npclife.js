@@ -382,7 +382,9 @@
     while (n && made < budget && scanned < n) {
       const i = pop.cursor++ % n; scanned++;
       const old = pop.actors[i];
-      if (old && roster.indexOf(old) >= 0) continue;
+      // (a body the phone population budget put to sleep, city/peds.js, is
+      // still this slot's: refilling it grew the roster without end)
+      if (old && (old._dormant || roster.indexOf(old) >= 0)) continue;
       pop.actors[i] = null;
       const e = pop.entries[i] || {};
       const placement = merge(e.placement, { parent: (e.placement && e.placement.parent) || pop.root });
@@ -410,6 +412,9 @@
   }
 
   function syncAttached(actor, dt) {
+    // asleep under the phone population budget (city/peds.js): the rig is off
+    // its seat and actor.pos must stay the world point it was put down at
+    if (actor && actor._dormant) return;
     const rec = actor && actor._npcAttached;
     if (!rec || !actor.group) return;
     if (actor.dead || !rec.parent || !rec.parent.parent) {

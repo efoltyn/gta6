@@ -791,6 +791,13 @@
       if (mine.length < 2) { for (const it of job.objs) if (it.o) compactTree(it.o); return; }
       const G = new window.THREE.Group();
       G.name = "stream-job"; G.userData.streamJob = true;
+      // THE PER-FRAME PACKER MAY HAVE BEEN FIRST. A pruned cell is queued for
+      // packing (packQ) the moment it parks, and this pass waits for
+      // CBZ.afterBoot: when the packer won, the cell's meshes reach the merge
+      // with position = null (16-bit copy in _cbzQ) and bakeMergeV2 threw
+      // (seen on the phone profile: "[park batch pruned -1,0]", the meshes of
+      // city/airport_kit.js's "terminal" group). Unpack, merge, pack again.
+      for (const it of mine) expandTree(it.o);
       for (const it of mine) G.add(it.o);
       const los = L && job.los && job.los.length ? job.los : null;
       const base = L ? L.length : 0;

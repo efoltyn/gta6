@@ -2409,6 +2409,8 @@
   }
 
   CBZ.clearCityPeds = function () {
+    // the phone budget's sleepers are part of the roster being cleared
+    if (CBZ.cityDormantReturn) CBZ.cityDormantReturn();
     // Release moving-parent placements (aircraft seats, authored posts) before
     // disposing the roster. The shared NPC-life layer drops its cabin/actor
     // references here so a rebuilt city never points at disposed character rigs.
@@ -2523,6 +2525,113 @@
     });
   }
   CBZ.cityDespawnPed = removeVendor;
+
+  /* ---- THE PHONE POPULATION BUDGET: the crowd nobody can see sleeps ------
+     Measured on the phone profile (390x844 iPhone UA, seed 90210, Gang City
+     spawn): ~400 bodies on CBZ.cityPeds against the jail game's ~156, and
+     every street system (the ped tick, bodymove, reactions, humancontact,
+     combat scans, cityevents, actorweapons ...) walks that list every frame:
+     ~60% of a 34 ms sim. ~220 of them stood past 150 m, far outside a
+     phone's 45-110 m ped draw.
+
+     So on a phone or tablet, when the live list is over budget, the AMBIENT
+     bodies farthest from both the eye and the player (past SLEEP_M) leave
+     it: off CBZ.cityPeds, out of the scene, released from the street brain
+     (it re-adopts on demand) and from the corpse / gunpoint indexes - the
+     same steps removeVendor takes, minus the dispose and the home release.
+     The person is KEPT: home, work, wallet, identity. When the player or
+     the eye comes within WAKE_M of where they stand they are put back
+     exactly as they were, whatever the budget, so the street round the
+     player is never thinner than before.
+
+     AMBIENT is everybody nobody else owns: no gang or faction, no posted
+     role (city/occupy.js `_occupySrc`), no vendor / staff / guard post, not
+     a companion, recruit, wanted, armed, alarmed or busy body. Those stay
+     live wherever they are; the budget is met only from the rest.
+     CONFIG.PHONE_PED_BUDGET (phone 120, tablet 160; 0 = off; desktop off). */
+  const DORM_ON = !!CBZ.isMobileDevice;
+  if (CBZ.CONFIG.PHONE_PED_BUDGET == null) CBZ.CONFIG.PHONE_PED_BUDGET = DORM_ON ? (CBZ.deviceClass === "phone" ? 120 : 160) : 0;
+  const SLEEP_M = 190, WAKE_M = 160;
+  const _dorm = [];
+  CBZ.cityDormantPeds = _dorm;
+  function ambient(p) {
+    if (!p || p.dead || p.isPlayer || p._parked || p.inCar || p.culled) return false;
+    if (p.gang || p.faction || p._occupySrc || p.vendor || p.staffPost || p.guard || p._post || p.homeGuard) return false;
+    if (p.companion || p.controlled || p.recruited || p.isBoss || p._vip || p.kind === "cop" || p.kind === "gang") return false;
+    if ((p.npcWanted | 0) > 0 || p.armed || p.rage || p.reportState || p.approach || p.alarmed > 0 || p.npcHeat > 0) return false;
+    if (p.ko > 0 || p._boardOwn || p._climb || p._bumHunt || p._killer || p._fugitive || p.enterT > 0) return false;
+    // a seated passenger (entities/npclife.js attach: airliner cabins, ferry
+    // decks) sleeps with the rest: measured, 75 of the far bodies at the
+    // downtown spawn were cabin passengers kilometres away. Woken, the rig
+    // goes back on its own seat (_dormParent).
+    if (g && p === g.cityPartner) return false;
+    return true;
+  }
+  function sleepPed(p, i) {
+    if (CBZ.cityBrain && CBZ.cityBrain.release) { try { CBZ.cityBrain.release(p); } catch (e) {} }
+    CBZ.cityPeds.splice(i, 1);
+    _corpseDrop(p); _coverDrop(p);
+    p._dormParent = p.group ? p.group.parent : null;
+    if (p.group && p.group.parent) p.group.parent.remove(p.group);
+    p._dormant = true; p._dtBank = 0;
+    _dorm.push(p);
+  }
+  function wakePed(p, k) {
+    _dorm.splice(k, 1);
+    p._dormant = false;
+    const A = pedArena();
+    const parent = (p._dormParent && p._dormParent.parent) ? p._dormParent : (A && A.root);
+    if (parent && p.group) parent.add(p.group);
+    p._dormParent = null;
+    if (CBZ.cityPeds.indexOf(p) < 0) CBZ.cityPeds.push(p);
+  }
+  // a rebuilt or cleared city takes the sleepers with the roster
+  CBZ.cityDormantReturn = function () {
+    for (let k = _dorm.length - 1; k >= 0; k--) { const p = _dorm[k]; p._dormant = false; p._dormParent = null; CBZ.cityPeds.push(p); }
+    _dorm.length = 0;
+  };
+  let _dormT = 0;
+  CBZ.onUpdate(35.45, function (dt) {
+    const budget = +CBZ.CONFIG.PHONE_PED_BUDGET || 0;
+    if (!budget && !_dorm.length) return;
+    if (!econ()) return;
+    _dormT -= dt; if (_dormT > 0) return;
+    _dormT = 0.5;
+    const P = CBZ.player, cam = CBZ.camera;
+    if (!P || !P.pos) return;
+    const px = P.pos.x, pz = P.pos.z, cx = cam ? cam.position.x : px, cz = cam ? cam.position.z : pz;
+    const near = function (x, z, r) {
+      const a = x - px, b = z - pz, c = x - cx, d = z - cz;
+      return a * a + b * b < r * r || c * c + d * d < r * r;
+    };
+    // wake first: anybody the player is coming to, whatever the budget; and
+    // anybody an owner put back on the roster itself (a biome's resident
+    // re-registering, city/biome_desert.js / biome_snow.js / marina.js), or
+    // who died or was claimed while asleep
+    const roster = CBZ.cityPeds;
+    for (let k = _dorm.length - 1; k >= 0; k--) {
+      const p = _dorm[k];
+      if (!p.pos || near(p.pos.x, p.pos.z, WAKE_M) || !budget || p.dead || roster.indexOf(p) >= 0) wakePed(p, k);
+    }
+    const peds = CBZ.cityPeds;
+    let over = peds.length - budget;
+    if (over <= 0 || !budget) return;
+    // then the farthest ambient bodies past SLEEP_M, a few per beat
+    const cand = [];
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p.pos || near(p.pos.x, p.pos.z, SLEEP_M) || !ambient(p)) continue;
+      const a = p.pos.x - px, b = p.pos.z - pz;
+      cand.push([a * a + b * b, p]);
+    }
+    if (!cand.length) return;
+    cand.sort(function (u, v) { return v[0] - u[0]; });
+    const n = Math.min(over, cand.length, 40);
+    for (let k = 0; k < n; k++) {
+      const p = cand[k][1], i = peds.indexOf(p);
+      if (i >= 0) sleepPed(p, i);
+    }
+  });
   CBZ.onUpdate(35.4, function () {
     if (!CBZ.CONFIG.LAZY_VENDORS) return;
     if (CBZ.game && CBZ.game.mode !== "city") return;
