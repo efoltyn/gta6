@@ -2627,6 +2627,13 @@
         if (a.enterT > 0 || (a.group && !a.group.visible)) continue; // indoors / not rendered
         const dx = a.pos.x - px, dz = a.pos.z - pz;
         if (dx * dx + dz * dz > 22 * 22) continue;
+        // a man with his back to you, past arm's reach, is nobody watching
+        // either (the bartender wiping the counter on the far side of the
+        // street door saw every strip in the alley behind his bar)
+        if (dx * dx + dz * dz > 36 && a.group) {
+          const ry = a.group.rotation.y, d = Math.hypot(dx, dz) || 1;
+          if ((Math.sin(ry) * -dx + Math.cos(ry) * -dz) / d < -0.15) continue;
+        }
         // a wall between you is nobody watching
         if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(a.pos.x, (a.pos.y || 0) + 1.55, a.pos.z, px, py + 1.0, pz)) continue;
         return a;

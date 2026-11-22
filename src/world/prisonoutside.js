@@ -34,10 +34,12 @@
         is won past the outer gate's line (or anywhere past the outer wall).
      6. THE GATE'S MIND. Calm, the drop arm lifts for a car that comes up to
         it slowly from inside (staff cars come and go), and a car that hits
-        it hard snaps it. Once the alarm is up (you were seen, the prison is
-        locked down, or the count has had 90 s to find you gone) the
-        bollards rise across the vehicle lane and stay up: from then on the
-        way out is on foot, through the arch, past the officers.
+        it hard snaps it. A count that finds you gone puts the gate on
+        notice (no more waving cars through); once the alarm is up (you were
+        seen, or the search was called off as an escape and the prison
+        locked down) the bollards rise across the vehicle lane and stay up:
+        from then on the way out is on foot, through the arch, past the two
+        officers, who hold the gate instead of joining the hunt.
      7. THE WAYS OUT, FOR EVERYONE. The three sally ports' inner doors are
         the ways out of the compound. When one comes open (the Gate Key, a
         charge), the men near it are asked, on that edge and not per frame,
@@ -89,6 +91,7 @@
     armBroken: false, armPassT: 0,
     lastElapsed: -1,
     ways: [], beatT: 0,
+    officers: [],           // the two who stand the gate (entities/guards.js records)
   };
 
   function hash01(x, z, salt) {
@@ -196,8 +199,8 @@
       if (CBZ.spawnGuard) {
         const post = function (id) { for (let i = 0; i < S.posts.length; i++) if (S.posts[i].id === id) return S.posts[i]; return null; };
         const lane = post("lane"), booth = post("booth"), arch = post("arch");
-        if (lane && booth) CBZ.spawnGuard([[booth.x, booth.z], [lane.x, lane.z]], 2.0, 16, 0.62, { post: "outergate" });
-        if (arch) CBZ.spawnGuard([[arch.x, arch.z], [arch.x, arch.z - 3.5]], 1.6, 16, 0.62, { post: "outergate" });
+        if (lane && booth) S.officers.push(CBZ.spawnGuard([[booth.x, booth.z], [lane.x, lane.z]], 2.0, 16, 0.62, { post: "outergate" }));
+        if (arch) S.officers.push(CBZ.spawnGuard([[arch.x, arch.z], [arch.x, arch.z - 3.5]], 1.6, 16, 0.62, { post: "outergate" }));
       }
     }
     S.built = true;
@@ -351,6 +354,8 @@
         cars: S.cars.length, queued: S.queue.length, spots: S.spots.length,
         gate: S.gate ? { arm: +S.gate.armT.toFixed(2), bollards: +S.gate.bolT.toFixed(2), broken: S.armBroken } : null,
         ways: S.ways.map(function (w) { return { id: w.id, open: w.open, made: w.made, gone: w.gone }; }),
+        officers: S.officers.map(function (gd) { const p = gd.group.position; return { x: +p.x.toFixed(1), z: +p.z.toFixed(1), state: gd.state, sus: +(gd.sus || 0).toFixed(2), torch: !!gd.flashlightOn }; }),
+        notice: !!S.notice,
       };
     },
   };
@@ -364,11 +369,35 @@
     if (isFinite(vx) && isFinite(vz) && (Math.abs(vx) + Math.abs(vz)) > 0.01) return Math.hypot(vx, vz);
     return Math.abs(c.v || 0);
   }
+  /* WHEN THE GATE HEARS. Not a timer from the moment you went through the
+     wire: the gate hears what the prison KNOWS.
+       ON NOTICE  a count found the cell empty (systems/prisonschedule.js:
+                  "Count's short." and the search inside the wire). The gate
+                  is told to stop waving cars through: the arm stays down for
+                  a car that comes up to it slowly. A car that hits it hard
+                  still takes it off.
+       ALARM      seen going, the heat of a chase, or the search called off
+                  as an escape (the warden's lockdown). The bollards come up:
+                  from then on the way out is on foot, past the officers.
+     A man who goes after the lights-out count has the dark until somebody
+     counts again, and the search inside the wire before the perimeter is
+     sealed. A prison with no day plan keeps a flat while instead. */
+  const NO_PLAN_T = 240;
+  function planOn() { const SC = CBZ.prisonSchedule; return !!(SC && SC.enabled && SC.enabled()); }
+  function alarmDue(t) {
+    if (S.seen || lockdownOn() || (g.detection || 0) >= 60) return true;
+    return planOn() ? false : t - S.outAt > NO_PLAN_T;
+  }
+  function noticeDue() {
+    const SC = CBZ.prisonSchedule;
+    return !!(planOn() && SC.searching && SC.searching());
+  }
   function gateTick(dt) {
     const G = S.gate;
     if (!G) return;
     const t = g.elapsed || 0;
-    S.alarm = S.alarm || (S.out && (S.seen || lockdownOn() || (g.detection || 0) >= 60 || t - S.outAt > 90));
+    S.alarm = S.alarm || (S.out && alarmDue(t));
+    S.notice = S.notice || S.alarm || (S.out && noticeDue());
     const P = CBZ.player;
     const car = P && P.driving ? P._vehicle : null;
     const veh = G.vehicle || { minX: GX - 5.8, maxX: GX + 6.3, z: GZ - 1.6 };
@@ -399,19 +428,68 @@
       const bz = G.bollards ? G.bollards.z : GZ - 4.2;
       const over = car && car.pos && car.pos.x > veh.minX - 1 && car.pos.x < veh.maxX + 1 && Math.abs(car.pos.z - bz) < 3.2;
       if (!over) G.setBollards(true);
+      // UP, THEY STOP A CAR. Eight steel posts 1.5 m apart: the car's own
+      // collider pass let a car driven at them slip the 1.2 m gaps (measured:
+      // a staff car through raised bollards at 14 m/s and out). The nose
+      // stops at the posts, hard, and the way out is on foot.
+      if (G.bolT > 0.4 && car && car.pos && car.pos.x > veh.minX - 1.2 && car.pos.x < veh.maxX + 1.2) {
+        const hl = ((car.dims && +car.dims.length) || 4.5) * 0.5;
+        const front = car.pos.z + Math.abs(Math.cos(car.heading || 0)) * hl;
+        if (car.pos.z < bz && front > bz - 0.35) {
+          const sp = carSpeed(car);
+          car.pos.z -= front - (bz - 0.35);
+          car.v = 0; car.vx = 0; car.vz = 0;
+          if (car.group) car.group.position.z = car.pos.z;
+          if (P && P.driving && P._vehicle === car) P.pos.z = car.pos.z;
+          if (sp > 3) {
+            if (car.engineHp != null) car.engineHp = Math.max(0, car.engineHp - sp * 3);
+            if (CBZ.worldSfx) { try { CBZ.worldSfx("crash", car.pos.x, bz, { ref: 20 }); } catch (e) {} }
+            if (CBZ.shake) CBZ.shake(Math.min(1, 0.2 + sp * 0.04));
+          }
+        }
+      }
     } else {
       G.setBollards(false);
       // a car that comes up to the arm from inside, slowly, is waved through
-      if (carNear && carSpeed(car) < 6) { S.armPassT = 4; }
+      // (not once the gate is on notice: then it is a car to be looked at)
+      if (carNear && carSpeed(car) < 6 && !S.notice) { S.armPassT = 4; }
       if (S.armPassT > 0) S.armPassT -= dt;
       if (!S.armBroken) G.setArm(S.armPassT > 0);
       G.setLamp(S.armPassT > 0 ? "pass" : "idle");
     }
     G.step(dt);
   }
+  /* THE GATE IS HELD. The two officers on the outer gate are the perimeter:
+     a lockdown inside the wire (systems/lockdown.js whips every guard into a
+     hunt from the last place the block had you) or a radio call does not
+     walk them a kilometre up the road and leave the gate standing open. They
+     chase what they see at the gate, and they stand to at their posts while
+     the prison is locked down. Runs before entities/guards.js thinks (20) and after the
+     lockdown's whip (72) of the frame before. */
+  const HOLD_R = 70;
+  function holdGate() {
+    if (!S.officers.length || !playing()) return;
+    const P = CBZ.player;
+    if (!P || !P.pos) return;
+    const near = Math.hypot(P.pos.x - GX, P.pos.z - GZ) < HOLD_R;
+    for (let i = 0; i < S.officers.length; i++) {
+      const gd = S.officers[i];
+      if (!gd || gd.dead || gd.ko > 0) continue;
+      // standing to while the prison is locked down: at his post he stops
+      // walking his beat and watches (the lockdown over, he walks it again,
+      // the bollards still up)
+      const post = gd.waypoints && gd.waypoints[0], p = gd.group.position;
+      if (S.alarm && lockdownOn() && post && Math.hypot(p.x - post.x, p.z - post.z) < 2.5) gd.alert = Math.max(gd.alert || 0, 0.5);
+      if (near) continue;
+      if (gd.hunt > 0) { gd.hunt = 0; gd._chase = null; }
+      const iv = gd.investigate;
+      if (iv && Math.hypot(iv.x - GX, iv.z - GZ) > HOLD_R - 10) gd.investigate = null;
+    }
+  }
+  CBZ.onUpdate(19.9, function () { if (S.built && g && g.mode === "escape") holdGate(); });
   function gateReset() {
     const G = S.gate;
-    S.armBroken = false; S.armPassT = 0; S.alarm = false;
+    S.armBroken = false; S.armPassT = 0; S.alarm = false; S.notice = false;
     if (!G) return;
     if (G.arm) G.arm.visible = true;
     G.setArm(false); G.setBollards(false); G.setLamp("idle");
@@ -564,7 +642,7 @@
   function newRun() {
     leaveCarInPlace();
     if (S.portExit && CBZ.EXIT && CBZ.EXIT.set) CBZ.EXIT.set(S.portExit.x, 0, S.portExit.z);
-    S.out = false; S.outAt = 0; S.how = null; S.reason = null; S.seen = false;
+    S.out = false; S.outAt = 0; S.how = null; S.reason = null; S.seen = false; S.notice = false;
     gateReset();
     for (let i = 0; i < S.ways.length; i++) { const w = S.ways[i]; w.made = 0; w.gone = 0; w.crews = {}; w.open = false; w.evalT = 0; }
     resetFleet();

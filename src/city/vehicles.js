@@ -6975,7 +6975,7 @@
     const cast = castRoster();             // the city's peds, or this world's own cast
     for (let ci = 0; ci < cast.length; ci++) {
       const p = cast[ci];
-      if (p.dead || p.inCar || p.culled) continue;
+      if (p.dead || p.inCar || p.culled || !p.pos) continue;      // (the prison's cast has no .pos)
       const dx = p.pos.x - car.pos.x, dz = p.pos.z - car.pos.z;
       if (dx * dx + dz * dz > reach * reach) continue;
       // the car's own footprint, swept by this frame's travel (carstrike.js);
@@ -7022,7 +7022,11 @@
   function runOver(car, vmag) {
     const P = CBZ.player;
     const cityHit = g.mode === "city";
-    if (!car.player && !P.dead && !P.driving && !(car.playerHitCD > 0)) {
+    // (a prisoner shut in the back of a cruiser is inside a car, not a man on
+    // the road: a unit speeding to the call through that car is a crash, never
+    // a run-over that kills him on the back bench, city/wanted.js ride)
+    const caged = !!(CBZ.cityArrestSeated && CBZ.cityArrestSeated());
+    if (!car.player && !P.dead && !P.driving && !caged && !(car.playerHitCD > 0)) {
       const pdx = P.pos.x - car.pos.x, pdz = P.pos.z - car.pos.z;
       // YOU ARE HIT BY THE CAR'S SHAPE, like everybody else (carstrike.js:
       // the footprint swept over this frame's travel; a 1.9 m circle round
@@ -7068,7 +7072,10 @@
     const near = bodiesNear(_pedBodyGrid, _pedCand, car.pos.x, car.pos.z, _reach);   // near-miss ring: d2 < 34
     for (let ni = 0; ni < near.length; ni++) {
       const p = near[ni];
-      if (p.dead || p.inCar) continue;
+      // (a body with no .pos, the prison's inmates and guards, is not struck
+      // here: city/carstrike.js answers null for it, and the near-miss and
+      // cut-off lines below are the city's)
+      if (p.dead || p.inCar || !p.pos) continue;
       const dx = p.pos.x - car.pos.x, dz = p.pos.z - car.pos.z;
       const _d2 = dx * dx + dz * dz;
       if (_d2 > _reach * _reach) continue;
@@ -7718,7 +7725,9 @@
   const BODY_CELL = 8, BODY_MARGIN = 3;
   let _pedBodyGrid = null, _wildBodyGrid = null, _bodyStamp = -1;
   const _pedCand = [], _wildCand = [], _laneCand = [];
-  function _bodyVec(o) { return o.pos; }
+  // (the prison's cast keeps its place on group.position and has no .pos)
+  function _bodyVec(o) { return o.pos || (o.group && o.group.position) || _noVec; }
+  const _noVec = { x: 1e9, z: 1e9 };
   const _wildLive = [];
   let _wildReach = 2.3;
   let _wildStamp = -1;

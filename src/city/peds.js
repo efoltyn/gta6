@@ -1199,7 +1199,9 @@
     // always match the uniform. See §A UNIT IS A PYRAMID above for why this is a
     // roster slot and no longer a probability ladder.
     let milRank = null;
-    if (/soldier|military|marine/i.test(opts.job || "")) {
+    // (a gang's "soldier" is a gang rank, city/gangs.js job "gang soldier":
+    // no army stripes, and he is not one of Fort Brandt's men)
+    if (/soldier|military|marine/i.test(opts.job || "") && !/^gang\b/i.test(opts.job || "")) {
       const mr = r();                 // ONE draw, in the exact place the old one was
       // A SOLDIER ON LEAVE IS NOT IN THIS UNIT'S CHAIN OF COMMAND. He is a
       // professional the city casts at random (see the rare-archetype pass

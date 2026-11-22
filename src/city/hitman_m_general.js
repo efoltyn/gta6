@@ -379,7 +379,21 @@
     const hx = hq.x - B.center.x, hz = hq.z - B.center.z;                // hq, plan-local
     const xe = hx + hw + 12, zc = mid(R.cross, "z"), xw = mid(R.west, "x"), zm = mid(R.main, "z"), z0 = hz + 4, gx = gate.x - 34;
     const pts = function (arr) { return arr.map(function (q) { return bw(B, q[0], q[1]); }); };
-    if (R.cross && R.west && R.main) {
+    // THE SHORT WAY TO THE GATE: east down the car park's aisle, across the
+    // motor pool's back lane behind the truck row, down its far side and onto
+    // the gate road at the plaza. It used to go by the plan's roads only, and
+    // the only road from headquarters to the gate road is the WEST road: the
+    // car drove 120 m away from the gate first and 500 m round to it.
+    const pv = function (id) { const Lp = (B.plan && B.plan.pave) || []; for (let i = 0; i < Lp.length; i++) if (Lp[i].id === id) return Lp[i]; return null; };
+    const lot = pv("parking"), mp = pv("motor-pool");
+    if (R.main && lot && mp) {
+      const zl = (lot.z0 + lot.z1) / 2, za = mp.z0 + 6, xs = mp.x1 - 12;
+      L.carHome = bw(B, xe, z0);
+      L.carOut = pts([[xe, z0], [lot.x0 - 2, zl], [lot.x1 + 2, zl], [mp.x0 + 2, za], [xs - 6, za], [xs, zm - 14], [gx, zm + 3.5]]);
+      L.carBack = pts([[gx, zm + 3.5], [gx + 17, zm + 3.5], [gx + 23, zm], [gx + 17, zm - 3.5], [xs, zm - 14], [xs - 6, za], [mp.x0 + 2, za], [lot.x1 + 2, zl], [lot.x0 - 2, zl], [xe, z0]]);
+      L.carAtGate = bw(B, gx, zm + 3.5);
+      L.inspect = bw(B, gx + 6, zm - 9);
+    } else if (R.cross && R.west && R.main) {
       L.carHome = bw(B, xe, z0);
       L.carOut = pts([[xe, z0], [xe - 4, z0 + 9], [xe - 9, z0], [xe - 9, zc - 3], [xw - 3, zc - 3], [xw - 3, zm + 3.5], [gx, zm + 3.5]]);
       L.carBack = pts([[gx, zm + 3.5], [gx + 17, zm + 3.5], [gx + 23, zm], [gx + 17, zm - 3.5], [xw + 3, zm - 3.5], [xw + 3, zc + 3], [xe, zc + 3], [xe, z0]]);
