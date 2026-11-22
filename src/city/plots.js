@@ -84,9 +84,12 @@
   }
   function hex6(c) { return "#" + ("000000" + ((c >>> 0).toString(16))).slice(-6); }
 
+  // the town's lots, and the metro suburbs' houses on the market or yours
+  // (city/house_metro.js keeps one lot record per such house, real or not)
   function allLots() {
     const A = arena(); if (!A) return [];
-    return [].concat(A.lots || [], (A.annex && A.annex.lots) || []);
+    const MH = CBZ.metroHomes, sub = MH && MH.saleLots ? MH.saleLots() : null;
+    return [].concat(A.lots || [], (A.annex && A.annex.lots) || [], sub || []);
   }
   function lotKey(lot) { return Math.round(lot.cx) + "," + Math.round(lot.cz); }
   function lotRect(lot) {
@@ -137,6 +140,15 @@
   function lockDoors(lot, on) {
     const b = lot.building; if (!b || !b.doors) return;
     for (const dr of b.doors) if (dr) { dr._ownerLock = !!on; dr._ownerLot = on ? lot : null; }
+  }
+  // a metro suburb's house is rebuilt each time you walk back to it: its new
+  // doors are locked to others again (cheap: a flag per door, only when new)
+  function relockMetro() {
+    for (const plot of plots.values()) {
+      const lot = plot.lot, b = lot && lot.building;
+      if (!lot || !lot.metroHome || !b || !b.doors || b._plotLocked) continue;
+      b._plotLocked = true; lockDoors(lot, true);
+    }
   }
   function makePlot(lot) {
     const id = "plot:" + lotKey(lot);
@@ -525,6 +537,10 @@
     return (b.ox - b.w / 2) - f.x;
   }
   function spotAt(lot, inset, sideSign) {
+    // a lot that knows its own kerb (a metro suburb's house, on whatever yaw
+    // its street runs): the sign by the walk, the post inside the line
+    const own = sideSign > 0 ? lot.signAt : lot.postAt;
+    if (own) return { x: own.x, z: own.z, yaw: own.yaw, f: null };
     const r = lotRect(lot), f = frontOf(lot, r);
     const gap = frontGap(lot, f);
     const ins = gap > inset + 0.8 ? inset : Math.max(-1.1, gap - 0.7);
@@ -917,6 +933,7 @@
     if (syncT <= 0) {
       syncT = 0.5;
       syncPlots(false);
+      relockMetro();
       _loadingT -= 0.5; if (_loadingT <= 0) _loading = false;
       refreshMarkers();
     }

@@ -564,9 +564,16 @@
     const sp = plan.spots[what]; if (!sp) return null;
     const p = plan.F.P(sp.d, sp.t);
     const F = plan.F;
-    const fx = F.nx * sp.fd + (F.alongX ? sp.ft : 0), fz = F.nz * sp.fd + (F.alongX ? 0 : sp.ft);
-    return { x: (b.ox || 0) + p.x, y: plan.tops[sp.k], z: (b.oz || 0) + p.z, fx: fx, fz: fz, k: sp.k,
-      house: true, drawn: what === "wardrobe" };
+    let fx = F.nx * sp.fd + (F.alongX ? sp.ft : 0), fz = F.nz * sp.fd + (F.alongX ? 0 : sp.ft);
+    let px = p.x, pz = p.z;
+    // a house built square and turned onto a skewed street (city/house_metro.js)
+    if (b.frameYaw) {
+      const c = Math.cos(b.frameYaw), s = Math.sin(b.frameYaw);
+      const qx = px * c + pz * s, qz = -px * s + pz * c, gx = fx * c + fz * s, gz = -fx * s + fz * c;
+      px = qx; pz = qz; fx = gx; fz = gz;
+    }
+    return { x: (b.ox || 0) + px, y: plan.tops[sp.k], z: (b.oz || 0) + pz, fx: fx, fz: fz, k: sp.k,
+      house: true, drawn: what === "wardrobe", yaw: b.frameYaw || 0 };
   }
 
   /* ---- A FLAT IN A TOWER: clear wall on the flat's own floor, by its bed ----

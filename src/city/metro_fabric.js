@@ -106,6 +106,9 @@
   const GY = 0.16;                 // the lot / pad level every building stands on
   const FOG_SCALE = 0.10;          // == metro_ground.js's ground material: one haze for the city and its ground
   const FOOT = GY - 0.3;           // walls run this far below it: no gap on a slope seam
+  // the height a wall's facade counts its storeys from (a house counts from
+  // its own floor, y = 0, as the real shell does; everything else from GY)
+  let VOFF = GY;
 
   // ---------------------------------------------------------------------
   //  hashing (position-seeded, same family as metroplan.js)
@@ -899,7 +902,7 @@
       if (bDoor === DOOR_MID) { bays = oddBays(len); bDoor = bays >> 1; }
       bBays = bays;
       const ax = ox + f.lx * hw, az = oz + f.lz * hd, bx = ax + f.rx * len, bz = az + f.rz * len;
-      quad(ax, y0, az, bx, y0, bz, bx, y1, bz, ax, y1, az, f.nx, 0, f.nz, 0, y0 - GY, bays, y1 - GY);
+      quad(ax, y0, az, bx, y0, bz, bx, y1, bz, ax, y1, az, f.nx, 0, f.nz, 0, y0 - VOFF, bays, y1 - VOFF);
       if (FAR) winCells(ax, az, bx, bz, f.nx, f.nz, y0, y1, bays);
     }
     bFl = fl0; bDoor = d0;
@@ -1021,7 +1024,7 @@
       // left-to-right from outside: right = (n.z, -n.x)
       const rx = h[1], rz = -h[0];
       const ua = ((a[0] - ox) * rx + (a[1] - oz) * rz + hc) / (2 * hc) * bays, ub = ((b[0] - ox) * rx + (b[1] - oz) * rz + hc) / (2 * hc) * bays;
-      tri(a[0], yE, a[1], b[0], yE, b[1], c[0], yR, c[1], h[0], 0, h[1], ua, yE - GY, ub, yE - GY, bays / 2, yR - GY);
+      tri(a[0], yE, a[1], b[0], yE, b[1], c[0], yR, c[1], h[0], 0, h[1], ua, yE - VOFF, ub, yE - VOFF, bays / 2, yR - VOFF);
     }
     return yR;
   }
@@ -1684,55 +1687,141 @@
     return { gW: gW, gs: gs, bx: -gs * gW / 2, bhw: (Wd - gW) / 2, driveW: driveW,
       driveOff: b.drive ? gs * Math.max(0, Wd / 2 - driveW / 2 - 1.2) : 0 };
   }
-  function house(P, b) {
-    const rot = b.rot || 0;
-    frame(b.x, b.z, rot);
-    const Wd = b.w, Dp = b.d, hd = Dp / 2;
-    const st = b.st || 1, fh = 3.0;
+  /* ONE HOUSE, TWO LEVELS OF DETAIL. A suburb house used to be described
+     twice: here (a painted box with a gable) and again by the real house
+     (city/house_metro.js: a shell in some grammar picked off the district),
+     and the two disagreed on the roof, the colours and the windows, so a
+     house changed shape as you walked up to it. houseSpec is the house,
+     once: its body and garage wing, storeys, wall / trim / roof colours, the
+     roof's form, pitch, eave and the height it springs from, the bays its
+     windows stand in and their size, the door (the middle bay of the front),
+     its colour, the shutters, the chimney, the hood over the door. The tile
+     below draws it in paint; the real house (house_metro.js's "metrohouse"
+     grammar on a buildings.js shell, house_yard.js's garage) builds the same
+     numbers in boxes. Everything is in the record's own frame: +z is the
+     street, x along it, y up from the house's floor (y = 0 is the real
+     shell's ground, the tile draws on the same zero). Pure: plan + hashes. */
+  const HOUSE_FH = 3.2, HOUSE_BAY = 3.0, HOUSE_PITCH_G = 0.55;
+  function hBays(len) { return Math.max(1, Math.round(len / HOUSE_BAY)); }
+  function hOddBays(len) { let n = hBays(len); if (!(n & 1)) n += len / HOUSE_BAY > n ? 1 : -1; return Math.max(1, n); }
+  function hex3(r, g, b) { return (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255); }
+  const SPEC = new WeakMap();
+  function houseSpecOf(P, b) {
+    let s = SPEC.get(b);
+    if (s) return s;
+    const rot = +b.rot || 0, co = Math.cos(rot), si = Math.sin(rot);
     const gr = grammarOf(P, b);
     const hm = b.v && b.v.houseMode;
-    const mode = hm ? (hm === "stucco" ? M_STUCCO : hm === "brick" ? M_BRICK : M_HOUSE) : gr === "spanish" ? M_STUCCO : M_HOUSE;
-    const flX = mode === M_STUCCO ? F_ARCH : (mode === M_HOUSE && (gr === "victorian" || (b.v && hq(b.x, b.z, 644) < 0.45)) ? F_SPEC : 0);
-    const seed = seedOf(b), roofHex = b.roofCol || 0x444040;
-    const trim = b.v && b.v.trim != null && mode !== M_STUCCO ? b.v.trim : mode === M_STUCCO ? shade(b.wall, 0.85) : 0xdcd8ce;
+    const mode = hm ? hm : gr === "spanish" ? "stucco" : "wood";
+    const M = mode === "stucco" ? M_STUCCO : mode === "brick" ? M_BRICK : M_HOUSE;
+    const seed = seedOf(b);
     const HP = houseParts(b);
-    const gW = HP.gW, gs = HP.gs;
-    const bx = HP.bx, bhw = HP.bhw;
-    const yE = GY + st * fh + 0.3;
-    const brush = function () { facade(b.wall, b.glass || 0x2b3238, mode, fh, 3.0, st * fh); bSeed = seed; bFl = flX; };
+    const st = Math.max(1, Math.min(3, Math.round(b.st > 0 ? b.st : 1)));
+    const hd = b.d / 2, bx = HP.bx, bhw = HP.bhw, rTop = st * HOUSE_FH;
+    const px = b.x + bx * co, pz = b.z - bx * si;             // the body's centre, world
+    // the real shell's parapet (buildings.js: its position hash on the body
+    // centre), so the roof springs where the parapet is buried in it
+    const pp = 0.55 + (Math.abs(Math.sin(px * 12.9898 + pz * 78.233) * 43758.5453) % 1) * 0.5;
+    const kind = b.roof === "hip" ? "hip" : "gable";
+    const pitch = mode === "stucco" ? 0.42 : kind === "hip" ? 0.5 : 0.62, eave = 0.5;
+    const cop = rTop + pp + 0.12;
+    const base = Math.max(rTop + 0.05, Math.min(rTop + pp - 0.005, cop - pitch * Math.max(0, eave - 0.14)));
+    const alongX = bhw >= hd;
+    const ridge = base + (alongX ? hd : bhw) * pitch;
+    const wall = b.wall != null ? b.wall : 0xcfc8b8;
+    const trim = b.v && b.v.trim != null && mode !== "stucco" ? b.v.trim : mode === "stucco" ? shade(wall, 0.85) : 0xdcd8ce;
+    const shutters = mode === "wood" && (gr === "victorian" || (!!b.v && hq(b.x, b.z, 644) < 0.45));
+    const vW = (b.v && b.v.vW) | 0;
+    // the window in its bay cell (MF_MAIN's PUNCHED branch, house / brick / stucco)
+    let lo = [0.3, 0.3], hi = [0.7, 0.8];
+    if (M === M_BRICK) { lo = [0.31, 0.27]; hi = [0.69, 0.83]; }
+    let hx = (hi[0] - lo[0]) / 2;
+    if (vW === 1) hx *= 0.72; else if (vW === 2) hx = Math.min(hx * 1.32, 0.44); else if (vW === 3) hx = Math.min(hx * 1.22, 0.42);
+    // the door's colour: the shader's own pick for the front face (seed, 17, face)
+    const fnx = si, fnz = co, qx = n8(fnx), qz = n8(fnz), L = Math.hypot(qx, qz) || 1;
+    const faceId = Math.floor((((Math.atan2(qz / L, qx / L) * 0.63662 + 4.5) % 4) + 4) % 4);
+    const dh = mfHjs(seed, 17, faceId);
+    let door = dh < 0.25 ? hex3(0.14, 0.25, 0.18) : dh < 0.5 ? hex3(0.35, 0.11, 0.11) : dh < 0.75 ? hex3(0.11, 0.16, 0.27) : hex3(0.42, 0.29, 0.19);
+    if (M === M_HOUSE && dh > 0.6) door = hex3(0.86, 0.85, 0.8);
+    const sh = mfHjs(seed, 5, 1);
+    const shut = sh < 0.25 ? hex3(0.12, 0.2, 0.14) : sh < 0.5 ? hex3(0.08, 0.08, 0.09) : sh < 0.75 ? hex3(0.2, 0.12, 0.09) : hex3(0.12, 0.16, 0.24);
+    const front = hOddBays(2 * bhw), side = hBays(2 * hd);
+    let garage = null;
+    if (HP.gW > 0) {
+      const gd = Math.min(6.6, b.d - 0.5), gf = hd - 0.3;
+      garage = { cx: HP.gs * (b.w / 2 - HP.gW / 2), hw: HP.gW / 2, z0: gf - gd, z1: gf, h: 2.9, kind: hq(b.x, b.z, 0x7d4) < 0.6 ? "gable" : "hip",
+        pitch: HOUSE_PITCH_G, eave: 0.35, doors: HP.gW > 5 ? (hq(b.x, b.z, 0x7d2) < 0.5 ? 1 : 2) : 1 };
+    }
+    const chim = hq(b.x, b.z, 591) < 0.45 ? { x: bx + (hq(b.x, b.z, 592) < 0.5 ? -1 : 1) * (bhw - 0.7), z: -hd * 0.25, hw: 0.5, y0: base - 1.0, y1: ridge + 0.9 } : null;
+    s = {
+      x: b.x, z: b.z, rot: rot, w: b.w, d: b.d, st: st, fh: HOUSE_FH, mode: mode, seed: seed,
+      wall: wall, trim: trim, roof: b.roofCol || 0x444040, glass: b.glass || 0x2b3238, door: door, shutters: shutters ? shut : null, arch: mode === "stucco",
+      body: { cx: bx, hw: bhw, hd: hd }, px: px, pz: pz, pp: pp, rTop: rTop,
+      kind: kind, pitch: pitch, eave: eave, rake: 0.3, base: base, ridge: ridge, alongX: alongX,
+      bays: [front, side, front, side], win: { lo: lo[1], hi: hi[1], hx: hx, paired: vW === 3 },
+      doorW: 1.1, doorH: 2.25, hood: { w: 2.4, d: 1.3, y: 2.6 },
+      chimney: chim, garage: garage, gs: HP.gs, driveOff: HP.driveOff, driveW: HP.driveW,
+    };
+    SPEC.set(b, s);
+    return s;
+  }
+  function houseSpec(P, i) { const b = P && P.bldgs && P.bldgs[i]; return b && b.type === "house" ? houseSpecOf(P, vbOf(P, i)) : null; }
+  function house(P, b) {
+    try { return houseDraw(P, b); } finally { VOFF = GY; }
+  }
+  function houseDraw(P, b) {
+    const S = houseSpecOf(P, b);
+    const rot = S.rot;
+    frame(b.x, b.z, rot);
+    const Wd = b.w, Dp = b.d, hd = S.body.hd;
+    const fh = S.fh;
+    const mode = S.mode === "stucco" ? M_STUCCO : S.mode === "brick" ? M_BRICK : M_HOUSE;
+    const flX = S.arch ? F_ARCH : (S.shutters != null ? F_SPEC : 0);
+    const seed = S.seed, roofHex = S.roof, trim = S.trim;
+    const bx = S.body.cx, bhw = S.body.hw;
+    const yE = S.base;
+    VOFF = 0;
+    const brush = function () { facade(S.wall, S.glass, mode, fh, HOUSE_BAY, S.st * fh); bSeed = seed; bFl = flX; };
     brush();
-    const bays = baysFor(2 * bhw), doorBay = Math.floor(bays / 2);
     walls(bx, 0, bhw, hd, FOOT, yE, function (k) {
       bFl = flX;
-      if (k === 0) { bFl |= F_DOOR; bDoor = doorBay; }
-      if (gW > 0 && ((gs > 0 && k === 1) || (gs < 0 && k === 3))) bFl |= F_BLANK;   // the wall the garage leans on
+      if (k === 0) { bFl |= F_DOOR; bDoor = DOOR_MID; }
     });
     let ridge;
-    const pitch = mode === M_STUCCO ? 0.42 : (b.roof === "hip" ? 0.5 : 0.62);
-    if (b.roof === "hip") ridge = hip(bx, 0, bhw, hd, yE, pitch, 0.55, roofHex, trim);
-    else ridge = gable(bx, 0, bhw, hd, yE, pitch, 0.5, bhw >= hd, roofHex, trim, brush);
-    if (gW > 0) {
-      const gx = gs * (Wd / 2 - gW / 2), gy = GY + 2.9;
-      facade(b.wall, 0x2b3238, mode, 3.0, gW, 3.0); bSeed = seed;
-      walls(gx, 0, gW / 2, hd, FOOT, gy, function (k) {
-        if ((gs > 0 && k === 3) || (gs < 0 && k === 1)) return false;
+    if (S.kind === "hip") ridge = hip(bx, 0, bhw, hd, yE, S.pitch, S.eave, roofHex, trim);
+    else ridge = gable(bx, 0, bhw, hd, yE, S.pitch, S.eave, S.alongX, roofHex, trim, brush);
+    const G = S.garage;
+    if (G) {
+      // the garage wing house_yard.js builds: set 0.3 m back, its own depth,
+      // a gable (or hip) whose end faces the street
+      const gzc = (G.z0 + G.z1) / 2, ghd = (G.z1 - G.z0) / 2, gy = GY + G.h;
+      facade(S.wall, 0x2b3238, mode, 3.0, G.hw * 2, 3.0); bSeed = seed;
+      walls(G.cx, gzc, G.hw, ghd, FOOT, gy, function (k) {
         bFl = k === 0 ? (F_GARAGE | F_BLANK) : F_BLANK;
       });
-      hip(gx, 0, gW / 2, hd, gy, 0.4, 0.4, roofHex, trim);
+      if (G.kind === "hip") hip(G.cx, gzc, G.hw, ghd, gy, G.pitch, G.eave, roofHex, trim);
+      else gable(G.cx, gzc, G.hw, ghd, gy, G.pitch, G.eave, false, roofHex, trim, function () { plain(S.wall, M_KIT); });
     }
+    VOFF = GY;
     if (FAR) { frame(0, 0, 0); oriented(b.x, b.z, Wd / 2, Dp / 2, rot, 0, ridge); return ridge; }
-    // a door hood over the front door
-    const dx = bx - bhw + (doorBay + 0.5) * (2 * bhw / bays);
+    // a door hood over the front door (the middle bay)
+    const dx = bx, H = S.hood, hw2 = H.w / 2;
     plain(roofHex, M_SHINGLE);
-    quad(dx - 1.2, GY + 2.75, hd, dx + 1.2, GY + 2.75, hd, dx + 1.2, GY + 2.45, hd + 1.3, dx - 1.2, GY + 2.45, hd + 1.3, 0, 1, 0.2, 0, 0, 2.4, 1.33);
+    quad(dx - hw2, H.y + 0.15, hd, dx + hw2, H.y + 0.15, hd, dx + hw2, H.y - 0.15, hd + H.d, dx - hw2, H.y - 0.15, hd + H.d, 0, 1, 0.2, 0, 0, H.w, 1.33);
     plain(trim);
-    quad(dx - 1.2, GY + 2.6, hd, dx + 1.2, GY + 2.6, hd, dx + 1.2, GY + 2.3, hd + 1.3, dx - 1.2, GY + 2.3, hd + 1.3, 0, -1, 0, 0, 0, 2.4, 1.3);
-    quad(dx - 1.2, GY + 2.3, hd + 1.3, dx + 1.2, GY + 2.3, hd + 1.3, dx + 1.2, GY + 2.45, hd + 1.3, dx - 1.2, GY + 2.45, hd + 1.3, 0, 0, 1, 0, 0, 2.4, 0.15);
-    // chimney at one end of the body
-    if (hq(b.x, b.z, 591) < 0.45) {
+    quad(dx - hw2, H.y, hd, dx + hw2, H.y, hd, dx + hw2, H.y - 0.3, hd + H.d, dx - hw2, H.y - 0.3, hd + H.d, 0, -1, 0, 0, 0, H.w, 1.3);
+    quad(dx - hw2, H.y - 0.3, hd + H.d, dx + hw2, H.y - 0.3, hd + H.d, dx + hw2, H.y - 0.15, hd + H.d, dx - hw2, H.y - 0.15, hd + H.d, 0, 0, 1, 0, 0, H.w, 0.15);
+    if (S.chimney) {
       plain(0x7a4a3a);
-      const cx = bx + (hq(b.x, b.z, 592) < 0.5 ? -1 : 1) * (bhw - 0.7);
-      box(cx, -hd * 0.25, 0.5, 0.5, yE - 1.0, ridge + 0.9);
+      box(S.chimney.x, S.chimney.z, S.chimney.hw, S.chimney.hw, S.chimney.y0, S.chimney.y1);
+    }
+    // THE LOT, far: its fence lines, walk and carport (city/house_metro.js
+    // reads the lot off the ground and gives them in this frame)
+    const MH = CBZ.metroHomes;
+    const far = MH && MH.farLot ? MH.farLot(P, bId) : null;
+    if (far) for (const q of far) {
+      plain(q[6], M_KIT);
+      box((q[0] + q[1]) / 2, (q[2] + q[3]) / 2, (q[1] - q[0]) / 2, (q[3] - q[2]) / 2, q[4], q[5], q[7]);
     }
     frame(0, 0, 0);
     oriented(b.x, b.z, Wd / 2, Dp / 2, rot, 0, ridge);
@@ -3140,7 +3229,7 @@
     build: build, prepare: prepare, buildTile: buildTile, buildFarTile: buildFarTile, job: job, runJob: runJob,
     disposeTile: disposeTile, trim: trim, material: material, fadeMaterial: fadeMaterial, tick: tick, uniforms: U,
     cutBuilding: cutBuilding, applyCut: applyCut, afterCols: afterCols, setMaterial: setMaterial, tileOfBuilding: tileOfBuilding,
-    houseParts: houseParts,
+    houseParts: houseParts, houseSpec: houseSpec,
     // facade cells: prepare() returns them as .kit; build one with
     // job(P, cell, "kit") + runJob, drop it with disposeKit
     // the fabric's view of every building of a plan (variants; the plan's own

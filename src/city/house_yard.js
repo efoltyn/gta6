@@ -685,7 +685,7 @@
       bx(A.paint, g1 - wl, g1, y0, y0 + gh, gBack + wl, gFront, body, wallO);
       bx(A.paint, g0 + wl, g1 - wl, y0 + gh - 0.1, y0 + gh, gBack + wl, gFront - wl, K.shade(body, 0.8), {});
       bx(A.mason, g0 - 0.03, g1 + 0.03, y0 - 0.25, y0 + 0.2, gBack - 0.03, gBack + 0.02, lin(shadeHex(pal.body, 0.75)), {});
-      const nD = G.w > 5 ? (h01(p.cx, p.cz, 0x7d2) < 0.5 ? 1 : 2) : 1;
+      const nD = G.doors != null ? G.doors : G.w > 5 ? (h01(p.cx, p.cz, 0x7d2) < 0.5 ? 1 : 2) : 1;
       const dw = nD === 1 ? G.w - 0.9 : (G.w - 1.2) / 2;
       const dCol = lin(shadeHex(pal.trim, 0.97));
       const ops = [];
@@ -739,7 +739,8 @@
         gctx.dbox = gctx.lbox;
         try {
           const H = HP.begin(gctx, F);
-          H.roof({ kind: h01(p.cx, p.cz, 0x7d4) < 0.6 ? "gable" : "hip", axis: "z", base: gh, pitch: 0.55, step: 0.2, eave: 0.35, rake: 0.25,
+          // (a metro house's garage is its spec's: city/metro_fabric.js draws the same one far)
+          H.roof({ kind: G.kind || (h01(p.cx, p.cz, 0x7d4) < 0.6 ? "gable" : "hip"), axis: "z", base: gh, pitch: G.pitch || 0.55, step: 0.2, eave: G.eave != null ? G.eave : 0.35, rake: 0.25,
             roof: roofHex, roof2: shadeHex(roofHex, 0.9), core: pal.body, coreProj: 0.05, soffit: pal.trim, fascia: pal.trim, ridge: shadeHex(roofHex, 0.8), rakeBoard: true, hipCaps: true });
         } catch (e) {}
       } else {
@@ -750,7 +751,7 @@
       solid(g0, g0 + wl, y0, y0 + gh, gBack + wl, gFront, "garage");
       solid(g1 - wl, g1, y0, y0 + gh, gBack + wl, gFront, "garage");
       garageRect = (function () { const a = W(g0, gBack), b = W(g1, gFront); return { minX: Math.min(a[0], b[0]), maxX: Math.max(a[0], b[0]), minZ: Math.min(a[1], b[1]), maxZ: Math.max(a[1], b[1]) }; })();
-    } else if (!ownGarage && tier === "poor" && h01(p.cx, p.cz, 0x7e2) < 0.55 && Math.abs(dC) > 0.5) {
+    } else if (!ownGarage && (p.carport != null ? p.carport : (tier === "poor" && h01(p.cx, p.cz, 0x7e2) < 0.55)) && Math.abs(dC) > 0.5) {
       // a carport: four posts and a tin roof over the head of the drive
       const c0t = dC - driveHalf + 0.1, c1t = dC + driveHalf - 0.1, ca0 = hA1 - 0.2, ca1 = hA1 + 4.4;
       for (const tt of [c0t, c1t]) for (const aa of [ca0 + 0.1, ca1 - 0.1]) { const q = W(tt, aa); K.cylY(A.paint, q[0], y0, q[1], 0.05, 0.05, 2.3, 6, COL.galv, { ao: y0 }); solid(tt - 0.06, tt + 0.06, y0, y0 + 2.3, aa - 0.06, aa + 0.06, "post"); }
@@ -940,7 +941,7 @@
       if (loEdge + sideT > 0.6) { if (gateSide < 0 && loEdge + sideT > 1.8) line(-sideT, loA, loEdge - 1.05, loA); else line(-sideT, loA, loEdge - 0.05, loA); }
       line(sideT, backA, sideT, hiA);
       if (alone("lo")) line(-sideT, backA, -sideT, loA);
-      if (nx + nz > 0 || alone("back")) line(-sideT + 0.05, backA, sideT - 0.05, backA);
+      if ((p.backOwn != null ? p.backOwn : nx + nz > 0) || alone("back")) line(-sideT + 0.05, backA, sideT - 0.05, backA);
     }
     // what is in it
     {
@@ -1037,10 +1038,12 @@
     const b = p.lot && p.lot.building;
     if (b && (!b.garage || b.garage.approach || b.garage.house)) b.garage = { x: stands[0].x, z: stands[0].z, heading: heading, stands: stands, spots: [], house: true };
 
+    // ---- WHAT IS SOLID: the fence as runs, the walls, the shed; not the small things ---
+    const cols = solidPass(K.out.colliders.slice(c0));
+
     // ---- ONE MESH ------------------------------------------------------------------------
     let nv = 0;
     for (const k in A) nv += A[k].p.length;
-    const cols = K.out.colliders.slice(c0);
     if (!nv) return { mesh: null, colliders: cols, garageRect: garageRect, stand: stands[0] };
     let rec = null;
     const P = new Float32Array(nv), N = new Float32Array(nv), C = new Float32Array(nv);
@@ -1064,6 +1067,68 @@
     if (garageDoors) { const a = W(G.t, gFront + 0.6); rec.gx = a[0]; rec.gz = a[1]; }
     RECS.push(rec);
     return { mesh: mesh, colliders: cols, garageRect: garageRect, stand: stands[0], rec: rec };
+  };
+
+  /* A LOT IS A FEW BOXES. The fence came as one collider a bay (a hedge is
+     twenty bushes), and the patio table, the barbecue, the loungers, the
+     mailbox and the bin were each solid: ninety colliders round four houses.
+     A fence is a run: bays that touch along one line are one box (the gaps,
+     a gate or the drive, stay open). The things you could step round are
+     not solid. */
+  const SOFT = { table: 1, bbq: 1, lounger: 1, mailbox: 1, bin: 1, bench: 1, post: 1, junk: 1, sofa: 1 };
+  function solidPass(list) {
+    const C = CBZ.colliders, drop = new Set();
+    for (const c of list) if (SOFT[c.dressing]) drop.add(c);
+    const fence = list.filter(function (c) { return !drop.has(c) && (c.dressing === "fence" || c.dressing === "hedge" || c.dressing === "wall" || c.dressing === "yard"); });
+    for (let pass = 0; pass < 3; pass++) {
+      for (const a of fence) {
+        if (drop.has(a)) continue;
+        const ax = a.maxX - a.minX >= a.maxZ - a.minZ;
+        for (const c of fence) {
+          if (c === a || drop.has(c)) continue;
+          const cx = c.maxX - c.minX >= c.maxZ - c.minZ;
+          if (cx !== ax) continue;
+          const ok = ax ? (Math.abs(c.minZ - a.minZ) < 0.12 && Math.abs(c.maxZ - a.maxZ) < 0.12 && c.minX <= a.maxX + 0.06 && c.maxX >= a.minX - 0.06)
+            : (Math.abs(c.minX - a.minX) < 0.12 && Math.abs(c.maxX - a.maxX) < 0.12 && c.minZ <= a.maxZ + 0.06 && c.maxZ >= a.minZ - 0.06);
+          if (!ok) continue;
+          a.minX = Math.min(a.minX, c.minX); a.maxX = Math.max(a.maxX, c.maxX); a.minZ = Math.min(a.minZ, c.minZ); a.maxZ = Math.max(a.maxZ, c.maxZ);
+          a.y0 = Math.min(a.y0, c.y0); a.y1 = Math.max(a.y1, c.y1);
+          drop.add(c);
+        }
+      }
+    }
+    if (!drop.size) return list;
+    // (appended this build and not yet indexed: taken straight off the list)
+    let w = 0; for (let i = 0; i < C.length; i++) if (!drop.has(C[i])) C[w++] = C[i];
+    C.length = w;
+    return list.filter(function (c) { return !drop.has(c); });
+  }
+
+  /* A LOT BUILT IN ITS HOUSE'S OWN FRAME (city/house_metro.js: a house on a
+     skewed street) is turned onto the street afterwards: its meshes and
+     colliders by the caller, its moving parts' records and the car's stand
+     here. X: { pt(x, z), dir(x, z) }. */
+  HL.turnRec = function (res, X, b) {
+    const rec = res && res.rec;
+    const tp = function (o, kx, kz) { if (!o) return; const q = X.pt(o[kx], o[kz]); o[kx] = q[0]; o[kz] = q[1]; };
+    const td = function (o, kx, kz) { if (!o) return; const q = X.dir(o[kx], o[kz]); o[kx] = q[0]; o[kz] = q[1]; };
+    const th = function (st) { if (!st) return; tp(st, "x", "z"); const d = X.dir(Math.sin(st.heading || 0), Math.cos(st.heading || 0)); st.heading = Math.atan2(d[0], d[1]); };
+    if (rec) {
+      tp(rec, "cx", "cz"); td(rec, "nx", "nz");
+      if (rec.gx != null) tp(rec, "gx", "gz");
+      if (rec.gate) { tp(rec.gate, "x", "z"); td(rec.gate, "nx", "nz"); td(rec.gate, "tx", "tz"); for (const lf of rec.gate.leaves) tp(lf, "hx", "hz"); }
+      if (rec.doors) for (const d of rec.doors) tp(d, "x", "z");
+      if (rec.stand && rec.stand !== (b && b.garage && b.garage.stands && b.garage.stands[0])) th(rec.stand);
+    }
+    if (b && b.garage && b.garage.stands) {
+      const S0 = b.garage.stands;
+      for (const st of S0) th(st);
+      b.garage.x = S0[0].x; b.garage.z = S0[0].z; b.garage.heading = S0[0].heading;
+    }
+    if (res && res.garageRect) {
+      const g = res.garageRect, a = X.pt(g.minX, g.minZ), c = X.pt(g.maxX, g.maxZ), d = X.pt(g.minX, g.maxZ), e = X.pt(g.maxX, g.minZ);
+      res.garageRect = { minX: Math.min(a[0], c[0], d[0], e[0]), maxX: Math.max(a[0], c[0], d[0], e[0]), minZ: Math.min(a[1], c[1], d[1], e[1]), maxZ: Math.max(a[1], c[1], d[1], e[1]) };
+    }
   };
 
   CBZ.houseLot = HL;

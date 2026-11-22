@@ -1139,6 +1139,11 @@
     // the key to the house (owned, leased, or off the FOR SALE sign's lockbox
     // for a viewing: city/realestate.js) is the key to its rooms
     if (lot && CBZ.cityHomeKey && CBZ.cityHome && CBZ.cityHome.isHouse(lot) && CBZ.cityHomeKey(lot)) return true;
+    // ...and a listed flat's own front door in a tower (the agent's "See it"
+    // hands you that flat's key: the tower is not a house, its other flats
+    // stay their tenants')
+    const fl = lot && lot.building && lot.building._flat;
+    if (fl && fl.unit && fl.unit.id === d.id && CBZ.cityHomeKey && CBZ.cityHomeKey(lot)) return true;
     return !!(CBZ.cityKeys && typeof CBZ.cityKeys.has === "function" && CBZ.cityKeys.has(d.id));
   }
   function unitDoorAt(px, pz, reach, py) {

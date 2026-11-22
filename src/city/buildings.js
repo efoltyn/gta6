@@ -3130,6 +3130,21 @@
     // stamps _playerLock on a house's street door: the lockbox key off its
     // FOR SALE sign, the deed, or the lease opens it).
     if (!dr.noAuto && playerAtDoor(dr) && !(dr._playerLock && dr._playerLock(dr))) return true;
+    /* A HOUSE'S FRONT DOOR opens for a body IN its doorway, not for one
+       standing about on the path: the shop door's reach (4.6 m out, 5.8 m
+       in) kept a house door open while a bystander lingered on the walk, so
+       the player's "Shut the door" (and his next taps on it) were undone the
+       next frame. No car ever opens one. */
+    if (dr.home) {
+      if (CBZ.cityPeds) for (let k = 0; k < CBZ.cityPeds.length; k++) {
+        const pd = CBZ.cityPeds[k]; if (!pd || pd.dead || !pd.pos || pd.enterT > 0) continue;
+        const ax = pd.pos.x - dr.wx, az = pd.pos.z - dr.wz;
+        if (ax * ax + az * az > 4) continue;
+        if (dr._ownerLock && !(CBZ.cityPlotFriendly && CBZ.cityPlotFriendly(pd, dr))) continue;
+        if (Math.abs(ax * dr.inx + az * dr.inz) < 0.8 && Math.abs(az * dr.inx - ax * dr.inz) < 0.85) return true;
+      }
+      return false;
+    }
     if (includeCars && CBZ.cityCars) {
       for (let k = 0; k < CBZ.cityCars.length; k++) {
         const c = CBZ.cityCars[k]; if (!c || c.dead || !c.pos) continue;
