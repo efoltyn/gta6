@@ -154,3 +154,13 @@ Items marked **[partial]** have unmerged work sitting in a stopped builder's wor
 ## H. Housekeeping
 67. Clean up stopped worktrees under `.claude/worktrees/` once their partial work has been salvaged or dropped.
 68. Keep `docs/npcwar/ARCHITECTURE.md` vehicle and drone rows current.
+
+## I. Guns, arms and hands leftovers (2026-11-22, after eb7a4cd2)
+69. Colour wash, game-wide: hex colours go in as linear and the tone map washes fair skin toward cream and the orange jumpsuit toward yellow. Only the player's skin was re-picked (0xde8b52). The real fix decodes skin and cloth colours where their materials are made (character.js, outfits.js, heritage.js, clothes.js) and re-picks the dark heritage tones at the same time.
+70. Shotgun, third person low ready: the butt sits 8-9 cm off the shoulder (the stock's toe pushes the gun out when pitched down). Presenting is seated.
+71. Shotgun, first person: trigger finger pad about 2 cm short of the trigger; the support arm at the hip is 3-11% past its reach.
+72. Sniper: the ring and little fingers float 1.5-2.5 cm off the stock; the stock's grip needs reshaping under them.
+73. Pistol two-hand grip: the support index sits about half a finger low, and the support thumb rides the bottom edge of the slide.
+74. Hands are one size for a given gun: a woman's first-person hands are not smaller.
+75. Unarmed punch pose tables were not re-tuned for the longer (real) first-person arms.
+76. tools/visual-presets/gunpoint-studio.mjs is rotted (cast never reacts, armed men show no gun); gun-hold-reload sometimes stages a subject in first person; gun-hold-check / fp-hands-check / ads-check still expect the old fixed hand poses and pistol distances.
