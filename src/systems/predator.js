@@ -1127,8 +1127,20 @@
     return isFinite(out.x) && isFinite(out.y) && isFinite(out.z);
   }
 
+  // a survivor bot (entities/survivorbot.js) has its own damage bus, the one
+  // that knows its ragdoll, its killfeed line and its gore
+  function survBot(v) { return !!(v && CBZ.surv && CBZ.surv.hurt && CBZ.bots && CBZ.bots.indexOf(v) >= 0); }
+  const _survOpts = { fromX: 0, fromZ: 0, force: 4, fling: 1, cause: "", point: null, by: null, medium: "water", lens: false };
+  function survHurt(h, dmg) {
+    const ap = actorPos(h.attacker);
+    _survOpts.fromX = ap ? ap.x : 0; _survOpts.fromZ = ap ? ap.z : 0;
+    _survOpts.cause = h.cause; _survOpts.point = h.jaw; _survOpts.by = h.attacker; _survOpts.medium = h.medium;
+    try { CBZ.surv.hurt(h.victim, dmg, _survOpts); } catch (e) {}
+    _survOpts.by = null;
+  }
   function hurtVictim(h, dmg) {
     if (dmg <= 0) return;
+    if (!h.isPlayer && survBot(h.victim)) { survHurt(h, dmg); return; }
     const ap = actorPos(h.attacker);
     if (h.isPlayer) {
       // THE PLAYER IS NEVER DAMAGED BY A RAW `.hp -=`. cityHurtPlayer is the
@@ -1196,6 +1208,7 @@
       }
       return;
     }
+    if (survBot(v)) { if (!v.dead) survHurt(h, 1e6); return; }
     if (v && v.animal) {
       // AN ANIMAL HAS A KILL CONTRACT TOO, AND THIS BRANCH USED TO SKIP IT.
       // The comment this replaces said "wildlife has no cityKillPed contract",

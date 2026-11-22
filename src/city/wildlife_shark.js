@@ -2216,8 +2216,24 @@
       return false;
     }
 
+    /* WHO IT HUNTS. You, when you are in the water inside its sense; if you
+       are not, the nearest person swimming out of their depth (a survivor
+       bot), so a shark off a beach full of swimmers takes one of them the
+       way it would take you. The stalk machine is the same either way. */
+    let quarry = player;
+    const senseR = (s.opts && s.opts.senseR) || SENSE_R;
+    if (!(dist < senseR && inWater(player)) && CBZ.bots && CBZ.bots.length) {
+      let best = senseR, pick = null;
+      for (let i = 0; i < CBZ.bots.length; i++) {
+        const b = CBZ.bots[i];
+        if (!b || b.dead || !b.swim || !b.pos) continue;
+        const d = Math.hypot(b.pos.x - grp.position.x, b.pos.z - grp.position.z);
+        if (d < best) { best = d; pick = b; }
+      }
+      if (pick) quarry = pick;
+    }
     let st = null;
-    try { st = hunt(a, player, dt, s.opts); } catch (e) { st = null; }
+    try { st = hunt(a, quarry, dt, s.opts); } catch (e) { st = null; }
     if (!st || st === "cruise") {
       if (s.state !== "cruise") onState(a, "cruise");
       proxy(a, s, dist, dt);
