@@ -610,56 +610,19 @@
     else endIntimid(t);
   };
 
-  /* THREATEN — the person-panel verb, bare words, no muzzle (owner
-     2026-11-21: Punch left the panel because the red button already
-     punches; Threaten took its seat). He reads YOU against himself: his
-     nerve, his hands, his toughness, his temper, his crew within reach and
-     what he already holds against you, set against your standing in here
-     and what is in your hand. Three answers, the same bodies a gun gets:
-       backs down  hands up, facing you, frozen a few seconds (the panel
-                   turns into Rob / Tie / Release, the gunpoint set)
-       squares up  he comes for you (ai.js huntPlayer) and remembers it
-       bolts       a man with no nerve and somewhere to go runs
-     Returns { ok, msg, answer }. */
-  const THREAT_HOLD = 6;
-  CBZ.prisonThreaten = function (n) {
-    if (!n || !n.group || !alive(n) || n.cuffed || n.intimidMode) return { ok: false, msg: "" };
+  /* A man who backed down to words (ai.js CBZ.prisonThreaten) stands in the
+     same body a muzzle gets: hands up, facing you, frozen, for `secs`. The
+     panel then offers the gunpoint set (Rob / Tie / Release). Who backs down
+     is decided there, not here. */
+  CBZ.intimidateHold = function (n, secs) {
+    if (!n || !n.group || !alive(n) || n.cuffed) return false;
     if (!n._intimidInit) initN(n);
-    const p = n.personality || {}, r = n.ratings || {};
-    const nerve = p.nerve != null ? p.nerve : 0.5;
-    const fight = (r.fighting || 40) / 100, tough = (r.toughness || 40) / 100;
-    const beh = CBZ.BEHAVIORS && CBZ.BEHAVIORS[n.behavior];
-    const guts = beh && beh.guts != null ? beh.guts : 0.4;
-    const P = CBZ.player || {};
-    const rep = Math.max(-1, Math.min(1, (P.rep || 0) / 50));
-    const gun = CBZ.currentGun && CBZ.currentGun();
-    const inHand = gun ? (gun.melee ? 0.18 : 0.35) : 0;
-    let stand = nerve * 0.4 + fight * 0.25 + tough * 0.15 + guts * 0.2
-      + (gangNearby(n) ? 0.15 : 0) + Math.min(0.2, (n.playerGrudge || 0) * 0.02)
-      - rep * 0.2 - inHand + (rng() - 0.5) * 0.2;
-    const say = function (line) { if (CBZ.speech) CBZ.speech.say(n, line, { secs: 2, force: true }); };
-    if (stand > 0.55) {
-      n.huntPlayer = Math.max(n.huntPlayer || 0, 8);
-      n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 3);
-      n.grudgeWhy = "you got in my face";
-      say("Say that again.");
-      return { ok: true, msg: "", answer: "fight" };
-    }
-    if (stand < 0.25 && nerve < 0.35 && playerDist(n) > 1.5) {
-      const pp = P.pos, g = n.group.position, ax = g.x - pp.x, az = g.z - pp.z, al = Math.hypot(ax, az) || 1;
-      n.aiState = "flee"; n.fleeT = 3 + rng() * 2; n._fleeX = null;
-      if (n.target) n.target.set(g.x + ax / al * 14, 0, g.z + az / al * 14);
-      n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
-      return { ok: true, msg: "", answer: "flee" };
-    }
+    if (n.intimidMode && n.intimidMode !== "scared") return false;
     n.intimidMode = "scared";
-    n.intimidT = THREAT_HOLD;
+    n.intimidT = Math.max(n.intimidT || 0, secs || 5);
     n.poseHandsUp = true; n.poseAimBack = false;
     if (n.char) n.char.handsUp = true;
-    n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
-    if (CBZ.econ && CBZ.econ.addRespect) CBZ.econ.addRespect(P, 1);
-    say("Alright, alright.");
-    return { ok: true, msg: "", answer: "cowed" };
+    return true;
   };
 
   const intimidate = {

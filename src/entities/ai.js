@@ -4289,6 +4289,113 @@
     return { ok: false, msg: "" };
   }
 
+  /* THREATEN — the person-panel verb that took Punch's seat (owner
+     2026-11-21: the red button already punches). Owner, same day: "enough
+     threatening makes them punch you or run away depending on your gang
+     affiliation and respect and their gang affiliation and respect".
+
+     Nothing new is tracked. Every threat feeds what this file already keeps
+     on a man: playerFear and playerGrudge (both 0..14), his car's standing
+     with you (noteGangIncident "disrespect" — his set hears it, the rest
+     remember), and the respect ledger (economy.js a.rep). The first threats
+     COW him (intimidate.js hold: hands up; Rob / Tie / Release follow). Push
+     past what he will take and he BREAKS, one of two ways, decided by the two
+     sides of the yard standing there:
+
+       his side   his rank (shotcaller > enforcer / collector > soldier >
+                  loner), his hands (fighting / toughness), his nerve,
+                  his car's men within reach, his car's standing against you
+                  (a rival car leans in), what he already holds against you
+       your side  his respect for you (economy.js a.rep — the respect
+                  ledger is per man, what HE thinks of you), your car's men
+                  within reach, what is in your hand, how scared of you he is
+
+     His side heavier -> he swings (provokeGang: requestHunt with its hunt cap
+     and its "nobody walks at a muzzle" rule, his car answers). Yours heavier
+     -> he runs, and the yard sees you run a man off (respect, fear buzz).
+     A man of your own car never swings at you over words: pushed past it he
+     walks, and your own set thinks less of you for leaning on one of theirs. */
+  function carNear(car, x, z, r, skip) {
+    if (!(car >= 0)) return 0;
+    let k = 0;
+    for (const m of CBZ.npcs || []) {
+      if (m === skip || !alive(m) || !m.group || carK(m) !== car) continue;
+      if (Math.hypot(m.group.position.x - x, m.group.position.z - z) < r) k++;
+    }
+    return k;
+  }
+  const THREAT_HOLD = 5;
+  function threatenPerson(n) {
+    if (!n || !n.group || !alive(n) || n.cuffed || n.role === "merchant") return { ok: false, msg: "" };
+    if (n.intimidMode && n.intimidMode !== "scared") return { ok: false, msg: "" };
+    const P = CBZ.player, p = n.personality || {}, r = n.ratings || {};
+    const t = (CBZ.game && CBZ.game.elapsed) || performance.now() / 1000;
+    // how many times you have leaned on him lately (a minute's memory)
+    const T = n._threats && t - n._threats.t < 60 ? n._threats : (n._threats = { k: 0, t: t });
+    T.k++; T.t = t;
+    const myCar = playerCar(), hisCar = carK(n);
+    const sameCar = myCar >= 0 && hisCar === myCar;
+    const rivalCar = myCar >= 0 && hisCar >= 0 && hisCar !== myCar;
+    const gun = CBZ.currentGun && CBZ.currentGun();
+    const inHand = gun ? (gun.melee ? 0.25 : 0.5) : ((CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Shiv")) ? 0.1 : 0);
+    const g = n.group.position, pp = P.pos;
+    const RANK = { shotcaller: 0.5, enforcer: 0.35, collector: 0.25 };
+    const his = (RANK[n.crewRole] != null ? RANK[n.crewRole] : (hisCar >= 0 ? 0.1 : 0))
+      + ((r.fighting || 40) + (r.toughness || 40)) / 200
+      + (p.nerve != null ? p.nerve : 0.5) * 0.6
+      + Math.min(3, carNear(hisCar, g.x, g.z, 10, n)) * 0.18
+      + (hisCar >= 0 ? Math.max(-0.3, Math.min(0.3, -gangStanding(n.gang) / 60)) : 0)
+      + (rivalCar ? 0.15 : 0)
+      + Math.min(0.3, (n.playerGrudge || 0) * 0.03);
+    const yours = Math.max(-0.5, Math.min(1.5, (n.rep || 0) / 45))
+      + Math.min(3, carNear(myCar, pp.x, pp.z, 10, n)) * 0.18
+      + inHand
+      + Math.min(0.4, (n.playerFear || 0) * 0.04);
+    const margin = his - yours;          // > 0: his side is heavier
+    // what he will take before he breaks: a hard man less, a man well beneath you more
+    const patience = Math.max(1, Math.min(4, Math.round(2.5 - margin * 2)));
+
+    n.playerFear = Math.min(14, (n.playerFear || 0) + 1 + inHand * 2);
+    n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
+    n.grudgeWhy = "you got in my face";
+    if (n.gang >= 0) noteGangIncident(n, "disrespect", T.k > patience ? 4 : 2, { source: "threat", noResponders: true });
+
+    // a man well above you does not even let the first one land
+    const breaks = T.k > patience || margin > 0.6;
+    if (!breaks) {
+      if (CBZ.intimidateHold) CBZ.intimidateHold(n, THREAT_HOLD);
+      // the yard standing there saw him fold (not his own set)
+      if (CBZ.econ && CBZ.econ.witnessRespect) CBZ.econ.witnessRespect(n, 1, 12);
+      say(n, T.k > 1 ? "I heard you." : "Alright, alright.", null, 1.8);
+      return { ok: true, msg: "", answer: "cowed" };
+    }
+    T.k = 0;
+    if (CBZ.intimidateRelease && n.intimidMode) CBZ.intimidateRelease(n);
+    const run = function () {
+      n.aiState = "flee"; n.fleeT = 4 + rng() * 2; n._fleeX = null; n.foe = null;
+      const ax = g.x - pp.x, az = g.z - pp.z, al = Math.hypot(ax, az) || 1;
+      if (n.target) n.target.set(g.x + ax / al * 16, 0, g.z + az / al * 16);
+      emote(n, "!");
+    };
+    if (sameCar) {
+      // one of your own: he walks, and your set remembers you leaned on him
+      run();
+      if (CBZ.econ && CBZ.econ.addRespect) CBZ.econ.addRespect(n, -8);
+      say(n, "We're supposed to be on the same side.", null, 2);
+      return { ok: true, msg: "", answer: "walk" };
+    }
+    if (margin >= 0) {
+      say(n, "That's enough.", null, 1.6);
+      provokeGang(n, 8, { crew: rivalCar ? 1 : 0, why: "threat", standing: 2 });
+      if ((n.huntPlayer || 0) > 0) return { ok: true, msg: "", answer: "fight" };
+      // the hunt was refused (a gun is out, the cap is full): he backs off instead
+    }
+    run();
+    if (CBZ.econ && CBZ.econ.witnessRespect) CBZ.econ.witnessRespect(n, 3, 14);
+    addBuzz("fear", 4, actorName(n));
+    return { ok: true, msg: "", answer: "flee" };
+  }
+
   // shove an actor away from a point (impact reaction)
   /* A SHOVE IS A STEP, NOT A TELEPORT. This wrote `force` metres straight
      into the group position on one frame (a player's prison round moved a
@@ -4450,6 +4557,7 @@
   };
   CBZ.prisonCrewWork = { can: canCrewWork, take: crewWork };
   CBZ.resolveKnownSnitch = resolveKnownSnitch;
+  CBZ.prisonThreaten = threatenPerson;
 
   CBZ.knownSnitchCost = knownSnitchCost;
 
