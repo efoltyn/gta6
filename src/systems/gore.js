@@ -3208,9 +3208,11 @@
     if (!waterOn() || !seaWorld()) return false;
     try { return cityMode() ? citySeaColumn(x, z) : true; } catch (e) { return false; }
   }
-  // a wound in this world's sea (the bleeder's and a bite's own test; the
-  // kill path keeps main's woundInWater, untouched)
-  function seaWound(x, y, z) { return seaColumn(x, z) && woundInWater(x, y, z); }
+  // a wound in this world's water (the bleeder's and a bite's own test; the
+  // kill path keeps main's woundInWater, untouched). Any water the world has,
+  // a flooded street with a bull shark in it included: only the marks a
+  // street keeps under rain are the sea's business above
+  function seaWound(x, y, z) { return waterOn() && seaWorld() && woundInWater(x, y, z); }
   // metres of standing water over where a ground mark at (x, z) would be
   // seated, 0 on dry ground (or on a deck, a crate, a step above the water)
   function seaFloorDepth(x, z) {
