@@ -1206,8 +1206,8 @@
   }
 
   // ============================================================
-  // THE SHOP: a driving:true interaction zone at the mod-garage bay, + an
-  // HTML menu panel (styled after gunstore/clothingstore).
+  // THE SHOP: a driving:true interaction zone at the mod-garage bay; what it
+  // does to your car is its verbs (bayRows below). No menu.
   // ============================================================
   function modLot() {
     const A = CBZ.city && CBZ.city.arena;
@@ -1219,38 +1219,7 @@
     return null;
   }
 
-  // ---- the menu panel --------------------------------------------------------
-  const S = { panel: null, open: false, tab: "sell", prevMenu: undefined };
   function fmt$(n) { return "$" + ((n | 0).toLocaleString ? (n | 0).toLocaleString("en-US") : ("" + (n | 0))); }
-  function cash() { return (g.cash | 0) || 0; }
-
-  function panelEl() {
-    if (S.panel) return S.panel;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "modshopPanel";
-    d.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;display:none;" +
-      "background:rgba(13,16,21,.96);border:1px solid #4a5a3a;border-radius:16px;padding:18px 22px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;font-size:15px;min-width:360px;max-width:88vw;box-shadow:0 18px 60px rgba(0,0,0,.6)";
-    // ONE DISPATCH, TWO INPUTS: the panel printed "[1-7] tab · [a-d] buy" and
-    // listened only for a keydown, so on a tablet the mod garage was a price
-    // list you could not buy from. Rows carry their key; the click runs it.
-    d.addEventListener("click", function (e) {
-      const row = e.target && e.target.closest ? e.target.closest("[data-k]") : null;
-      if (!row) return;
-      e.preventDefault(); e.stopPropagation();
-      panelKey(row.getAttribute("data-k"));
-    });
-    document.body.appendChild(d);
-    S.panel = d;
-    return d;
-  }
-
-  const TABS = [
-    ["sell", "Sell"], ["respray", "Respray"], ["armor", "Armor"], ["wedge", "Ram Wedge"],
-    ["booster", "Booster"], ["turret", "Turret"], ["launcher", "Launcher"],
-    ["perf", "Performance"], ["glow", "Underglow"],
-  ];
 
   function sellPayout(car) {
     // mirror sellToChop math: base value × owned/stolen fraction × condition.
@@ -1272,123 +1241,43 @@
     return { pay: Math.round(base * frac * (cond.valueMul || 1) * modBonus), cond: cond };
   }
 
-  function rowsFor(car, tab) {
-    // each row: { label, price (0=free/owned), action, owned }
-    const m = car.mods || {};
-    switch (tab) {
-      case "sell": {
-        const sp = sellPayout(car);
-        return [{ label: "SELL this " + (car.model ? car.model.name : "car"), price: -sp.pay,
-          sub: (sp.cond.label ? sp.cond.label + ", " : "") + "payout", action: function () { doSell(car); } }];
-      }
-      case "respray":
-        return [{ label: "Respray + restyle", price: PRICE.respray, sub: "fresh paint, sheds heat",
-          action: function () { doRespray(car); } }];
-      case "armor":
-        return [
-          { label: "Light plating", price: PRICE.armor.light, sub: "shrugs ~50% small-arms",
-            owned: m.armor === "light", action: function () { doMod(car, "armor", "light", PRICE.armor.light); } },
-          { label: "Heavy plating", price: PRICE.armor.heavy, sub: "shrugs ~80% small-arms, RPG still kills",
-            owned: m.armor === "heavy", action: function () { doMod(car, "armor", "heavy", PRICE.armor.heavy); } },
-        ];
-      case "booster":
-        return [{ label: "Rocket booster", price: PRICE.booster, sub: "[Shift] burst, recharges",
-          owned: !!m.booster, action: function () { doMod(car, "booster", null, PRICE.booster); } }];
-      case "turret":
-        return [{ label: "Roof MG turret", price: PRICE.turret, sub: "aim with camera, hold L-click",
-          owned: !!m.turret, action: function () { doMod(car, "turret", null, PRICE.turret); } }];
-      case "launcher": {
-        const rows = [{ label: "Twin rocket launcher", price: PRICE.launcher, sub: "L-click, " + TUNE.launcherAmmoMax + " rockets",
-          owned: !!m.launcher, action: function () { doMod(car, "launcher", null, PRICE.launcher); } }];
-        if (m.launcher) rows.push({ label: "Resupply",
-          price: PRICE.launcherAmmo, sub: "currently " + ((m.launcher.ammo) | 0) + " loaded",
-          action: function () { doResupply(car); } });
-        return rows;
-      }
-      case "wedge":
-        return [{ label: "Hydraulic ram wedge", price: PRICE.wedge,
-          sub: "ram traffic over " + TUNE.wedgeMinSpeed + " m/s and they flip",
-          owned: !!m.wedge, action: function () { doMod(car, "wedge", null, PRICE.wedge); } }];
-      case "perf": {
-        const cur = m.perf | 0;
-        const sub = { 1: "faster, chrome exhaust", 2: "grippier, intercooler + vents", 3: "top stage, scoop + big wing" };
-        return [1, 2, 3].map(function (t) {
-          return { label: "Performance stage " + t, price: PRICE.perf[t], sub: sub[t],
-            owned: cur >= t, action: function () { doMod(car, "perf", t, PRICE.perf[t]); } };
-        });
-      }
-      case "glow":
-        return Object.keys(GLOW_COLORS).map(function (name) {
-          return { label: "Underglow " + name.toLowerCase(), price: PRICE.glow, sub: "neon kit, pulses",
-            owned: m.glow === name, action: function () { doMod(car, "glow", name, PRICE.glow); } };
-        });
-      default: return [];
+  /* WHAT THE BAY WILL DO TO THE CAR YOU DROVE IN, each with its price, as
+     verbs on the bay (city/interactions.js: from the driver's seat they are
+     round the wheel, Q or a tap). What is already bolted on is not offered
+     again; performance offers its next stage; underglow offers the next
+     colour. (This was a nine-tab HTML panel: "[1-9] tab, [a-d] buy".) */
+  function bayRows(car) {
+    const m = car.mods || {}, R = [];
+    const add = function (label, price, fn) { R.push({ label: label + " " + fmt$(price), fn: fn }); };
+    add("Respray it", PRICE.respray, function () { doRespray(car); });
+    if (!m.armor) add("Light plating", PRICE.armor.light, function () { doMod(car, "armor", "light", PRICE.armor.light); });
+    if (m.armor !== "heavy") add("Heavy plating", PRICE.armor.heavy, function () { doMod(car, "armor", "heavy", PRICE.armor.heavy); });
+    if (!m.wedge) add("Ram wedge", PRICE.wedge, function () { doMod(car, "wedge", null, PRICE.wedge); });
+    if (!m.booster) add("Rocket booster", PRICE.booster, function () { doMod(car, "booster", null, PRICE.booster); });
+    if (!m.turret) add("Roof gun", PRICE.turret, function () { doMod(car, "turret", null, PRICE.turret); });
+    if (!m.launcher) add("Rocket pods", PRICE.launcher, function () { doMod(car, "launcher", null, PRICE.launcher); });
+    else if ((m.launcher.ammo | 0) < TUNE.launcherAmmoMax) add("Load the rockets", PRICE.launcherAmmo, function () { doResupply(car); });
+    const stage = (m.perf | 0) + 1;
+    if (stage <= 3) add("Performance stage " + stage, PRICE.perf[stage], function () { doMod(car, "perf", stage, PRICE.perf[stage]); });
+    const cols = Object.keys(GLOW_COLORS);
+    if (cols.length) {
+      const next = cols[(cols.indexOf(m.glow) + 1) % cols.length];
+      add("Underglow, " + next.toLowerCase(), PRICE.glow, function () { doMod(car, "glow", next, PRICE.glow); });
     }
+    const sp = sellPayout(car);
+    R.push({ label: "Sell it to the shop " + fmt$(sp.pay), fn: function () { doSell(car); } });
+    return R;
   }
-
-  function renderPanel() {
-    const d = panelEl(); if (!d) return;
-    const car = liveCar();
-    if (!car) { closePanel(); return; }
-    let html = "<div style='font-weight:700;font-size:18px;margin-bottom:2px;color:#bfe39a'>Mod Garage</div>";
-    html += "<div style='color:#8a93a3;font-size:12px;margin-bottom:10px'>" +
-      "<span style='color:#7ed957'>" + fmt$(cash()) + "</span> on hand</div>";
-    // tab bar (keys [1]-[7])
-    html += "<div style='display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px'>";
-    TABS.forEach(function (t, i) {
-      const on = S.tab === t[0];
-      html += "<span class='msRow' data-k='" + (i + 1) + "' style='padding:3px 8px;border-radius:8px;font-size:12px;cursor:pointer;" +
-        (on ? "background:#3c5a2a;color:#dff5c8" : "background:#22262c;color:#9aa3ad") + "'>" +
-        t[1] + "</span>";
-    });
-    html += "</div>";
-    const rows = rowsFor(car, S.tab);
-    S._rows = rows;
-    if (!rows.length) html += "<div style='color:#9aa0a6'>Nothing here.</div>";
-    rows.forEach(function (r, i) {
-      const owned = r.owned;
-      const priceTxt = r.price < 0
-        ? "<span style='color:#7ed957'>+" + fmt$(-r.price) + "</span>"
-        : owned ? "<span style='color:#7ed957'>✓ installed</span>"
-        : (cash() >= r.price ? "<span style='color:#e7c84f'>" + fmt$(r.price) + "</span>"
-                             : "<span style='color:#c46a6a'>" + fmt$(r.price) + "</span>");
-      html += "<div class='msRow' data-k='" + String.fromCharCode(97 + i) + "' style='display:flex;justify-content:space-between;gap:16px;padding:5px 0;border-top:1px solid #262b22;cursor:pointer'>" +
-        "<span>" + r.label + (r.sub ? "<span style='color:#7f8794;margin-left:8px'>" + r.sub + "</span>" : "") + "</span>" +
-        "<span>" + priceTxt + "</span></div>";
-    });
-    html += "<div style='border-top:1px solid #2a3122;margin:12px 0 4px'></div>";
-    html += "<div class='msRow msClose' data-k='escape'>CLOSE</div>";
-    d.innerHTML = html;
+  const BAY_ROWS = 12;
+  let _bayCar = null, _bayAt = -1, _bay = [];
+  function bay() {
+    const car = liveCar(), now = CBZ.now || 0;
+    if (!car) { _bayCar = null; _bay = []; return _bay; }
+    if (car === _bayCar && now - _bayAt < 200) return _bay;
+    _bayCar = car; _bayAt = now; _bay = bayRows(car);
+    return _bay;
   }
-
-  function openPanel() {
-    const d = panelEl(); if (!d) return;
-    if (!liveCar()) { if (CBZ.city && CBZ.city.note) CBZ.city.note("Pull your car into the bay first.", 1.4); return; }
-    S.open = true;
-    S.prevMenu = CBZ.cityMenuOpen;
-    CBZ.cityMenuOpen = true;
-    if (S.tab == null) S.tab = "sell";
-    renderPanel();
-    d.style.display = "block";
-  }
-  function closePanel() {
-    if (S.panel) S.panel.style.display = "none";
-    if (S.open) CBZ.cityMenuOpen = S.prevMenu;
-    S.open = false; S.prevMenu = undefined;
-  }
-  CBZ.cityModShopOpen = openPanel;   // headless / harness handle
-
-  function panelKey(k) {
-    k = String(k || "").toLowerCase();
-    if (k === "escape" || k === "e") { closePanel(); return; }
-    const n = parseInt(k, 10);
-    if (!isNaN(n) && n >= 1 && n <= TABS.length) { S.tab = TABS[n - 1][0]; renderPanel(); return; }
-    // letter = buy/select the matching row
-    if (k.length === 1 && k >= "a" && k <= "z") {
-      const idx = k.charCodeAt(0) - 97;
-      if (S._rows && S._rows[idx] && S._rows[idx].action) { S._rows[idx].action(); renderPanel(); }
-    }
-  }
+  CBZ.cityModShopOpen = function () { return false; };     // (there is no menu to open)
 
   // ---- shop actions ----------------------------------------------------------
   function doMod(car, modId, tier, price) {
@@ -1427,7 +1316,6 @@
     if (car.mods) applyMods(car);
     if (CBZ.sfx) CBZ.sfx("switch");
     if (CBZ.city && CBZ.city.note) CBZ.city.note("Fresh paint" + (restyled ? " + new lines" : "") + ", looks clean.", 1.8);
-    renderPanelSafe();
   }
   function recolor(car, col) {
     const visual = car._playerCarVisual || (car.group && car.group.userData && car.group.userData.carVisual);
@@ -1451,19 +1339,7 @@
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(2);
     if (CBZ.city && CBZ.city.big) CBZ.city.big("SOLD " + (car.model ? car.model.name : "car") + " + " + fmt$(sp.pay));
     if (CBZ.sfx) CBZ.sfx("coin");
-    closePanel();
   }
-  function renderPanelSafe() { if (S.open) renderPanel(); }
-
-  // ---- panel keyboard (capture so we win the key over interact.js) -----------
-  addEventListener("keydown", function (e) {
-    if (!S.open) return;
-    const k = (e.key || "").toLowerCase();
-    e.preventDefault();
-    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-    e.stopPropagation();
-    panelKey(k);
-  }, true);
 
   // ============================================================
   // ZONE registration: a driving:true zone at the mod garage bay.
@@ -1482,12 +1358,18 @@
         if (!lot._modZTarget) lot._modZTarget = { x: mz.x, z: mz.z, lot: lot };
         return lot._modZTarget;
       },
-      options: [{
-        id: "modshop-open", slot: "i",
-        label: function () { return "Tune up"; },
-        onSelect: function () { openPanel(); },
-      }],
+      options: (function () {
+        const out = [];
+        for (let i = 0; i < BAY_ROWS; i++) {
+          out.push({ id: "modshop-row-" + i, wheel: true, prio: 30 - i, forceYes: true,
+            canShow: function () { return !!bay()[i]; },
+            label: function () { const r = bay()[i]; const s = r ? r.label : ""; const VW = CBZ.cityVerbWord; if (VW && VW.keep) VW.keep(s); return s; },
+            onSelect: function () { const r = bay()[i]; _bayAt = -1; if (r) r.fn(); } });
+        }
+        return out;
+      })(),
     });
+    if (I.describe) I.describe("modshop", function () { return { label: "Mod bay", note: "" }; });
   }
 
   // install the zone once interactions exist (retry on the update loop until then)

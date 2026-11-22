@@ -373,21 +373,20 @@
     sfx("coin");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     commit();
-    if (open_) render();
   }
 
   function buy(key) {
     if (C.BOAT_DEALER === false) return false;
     const entry = entryByKey(key);
     if (!entry) { flash("That hull isn't on the books.", "bad"); return false; }
-    if (owned(key)) { flash("You already own the " + entry.label + ".", "bad"); if (open_) render(); return false; }
+    if (owned(key)) { flash("You already own the " + entry.label + ".", "bad"); return false; }
     const modelName = bridgeModel(entry);
     if (!modelName) { flash("The yard can't put that hull in the water yet.", "bad"); return false; }
     const price = priceOf(entry);
     if (!canAfford(price)) {
       flash("Need " + money(price) + " cash + bank to close. Try financing.", "bad");
       note("Need " + money(price) + " to close on the " + entry.label + ".", 2.4); sfx("empty");
-      if (open_) render(); return false;
+      return false;
     }
     if (!charge(price)) return false;
     finish(record(entry, modelName, price), entry, "Bought the " + entry.label);
@@ -412,12 +411,12 @@
     const price = priceOf(entry);
     const down = Math.round(price * DOWN_FRAC / 500) * 500;
     const principal = Math.max(0, price - down);
-    if (!canAfford(down)) { flash("Need " + money(down) + " down to finance.", "bad"); sfx("empty"); if (open_) render(); return false; }
+    if (!canAfford(down)) { flash("Need " + money(down) + " down to finance.", "bad"); sfx("empty"); return false; }
     const offer = bl.offer("auto", principal, { kind: "auto", value: price, down: down, vessel: entry.key, loa: entry.loa });
     if (!offer || !offer.approved) {
       const why = (offer && offer.reason) ? offer.reason : "the bank declined the marine loan";
       flash("Declined, " + why + ".", "bad"); note("Marine finance declined: " + why + ".", 2.4); sfx("empty");
-      if (open_) render(); return false;
+      return false;
     }
     if (!charge(down)) return false;
     const loanId = bl.take(offer);
@@ -428,7 +427,7 @@
       g.cash = (g.cash || 0) + down;
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       flash("The note wouldn't book, your deposit is back.", "bad"); commit();
-      if (open_) render(); return false;
+      return false;
     }
     const rec = record(entry, modelName, down);
     rec.loanId = loanId;
@@ -455,7 +454,6 @@
     if (rec.loanId != null) note("The note on her is still yours. The bank doesn't care who owns the hull.", 3);
     sfx("coin"); commit();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    if (open_) render();
     return true;
   }
 
@@ -505,7 +503,6 @@
     if (!charge(owe)) { flash("Need " + money(owe) + " to clear the dues.", "bad"); sfx("empty"); return false; }
     for (const r of fleet()) r.arrears = 0;
     flash("Back dues cleared, " + money(owe) + ".", "ok"); sfx("coin"); commit();
-    if (open_) render();
     return true;
   }
 
@@ -732,26 +729,20 @@
     if (_zoneWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     _zoneWired = true;
     const I = CBZ.interactions;
+    // (what the broker does for you: BROKER_ASKS below. On his desk E asks,
+    //  hold E is the second thing, the wheel is all of it; on the man himself
+    //  the same asks are I J K L.)
     I.registerZone({
       id: "boatyard-desk", kind: "boatbroker", radius: 5.0,
       find: deskTarget,
-      options: [
-        {
-          id: "boatyard-browse", slot: "e",
-          // The verb only exists while the man does. `brokerPost` null means
-          // citystaff.js is not loaded at all, in which case the desk keeps its
-          // old, person-free behaviour rather than becoming unusable.
-          canShow: function () { return !brokerPost || !!brokerBody(); },
-          label: function () { return "Browse"; },
-          onSelect: function () { open("buy"); },
-        },
-        {
-          id: "boatyard-fleet", slot: "i",
-          canShow: function () { return fleet().length > 0; },
-          label: function () { return "Manage " + fleet().length; },
-          onSelect: function () { open("fleet"); },
-        },
-      ],
+      options: BROKER_ASKS.map(function (a, i) {
+        const o = { id: "boatyard-" + a.id, prio: 30 - i, forceYes: true, campaignSafe: true,
+          label: function () { return asIs(a.label()); }, canShow: function () { return manned() && a.show(); }, onSelect: function () { a.run(); } };
+        if (a.key === "e") o.slot = "e";
+        else if (a.key === "hold") { o.slot = "e"; o.hold = true; }
+        else o.wheel = true;
+        return o;
+      }),
     });
     if (I.describe) I.describe("boatbroker", function () {
       const manned = !brokerPost || !!brokerBody();
@@ -779,119 +770,107 @@
     if (!_zoneWired) wireZone();
     if (!brokerPost) wireBroker();
   });
-  wireZone();
 
   /* ============================================================
-     7) THE PANEL — the brokerage listing + your fleet.
+     7) THE BROKER'S PITCH — there is no listing screen.
+        You ask the man about boats and he tells you ONE hull: what she is,
+        how long, how fast, what she costs. Your answers are on him and on his
+        desk: Buy her, Finance her, Something bigger, Something smaller.
+        Walking off is no.
+        Your own boats: he hands you the yard's sheet on them (city/paper.js:
+        berth, what each costs a day, what is overdue) and will have one
+        brought round, sell one, or take the dues.
+        (This was a two-tab HTML panel, "[B] brokerage, [F] your fleet", with
+        numbered rows.)
      ============================================================ */
-  let panel = null, open_ = false, tab = "buy", flash_ = "", actions = [];
-  function flash(msg, kind) { flash_ = "<span style='color:" + (kind === "bad" ? "#ff8b7a" : "#7ed957") + "'>" + msg + "</span>"; if (open_) render(); }
-  function el() {
-    if (panel) return panel;
-    panel = document.createElement("div");
-    panel.id = "cityBoatyard";
-    panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;" +
-      "min-width:400px;max-width:560px;max-height:78vh;overflow:auto;background:rgba(12,20,28,.97);border:2px solid #2b4356;" +
-      "border-radius:16px;padding:14px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.55);pointer-events:auto";
-    panel.addEventListener("click", function (e) {
-      if (!CBZ.touchMode || !open_) return;
-      if (e.target.closest && e.target.closest("[data-bclose]")) { close(); return; }
-      const r = e.target.closest ? e.target.closest("[data-bi]") : null;
-      if (r) { const a = actions[+r.getAttribute("data-bi")]; if (a) a.fn(); }
-    });
-    document.body.appendChild(panel);
-    return panel;
+  function kts(n) { return n ? Math.round(n) + " knots" : ""; }
+  function ft(m) { return Math.round(m / M_PER_FT) + " feet"; }
+  function asIs(s) { const VW = CBZ.cityVerbWord; if (VW && VW.keep) VW.keep(s); return s; }
+  function brokerSay(text, secs) {
+    const b = brokerBody();
+    if (b && CBZ.citySay) { try { CBZ.citySay(b, text, null, { secs: secs || 3.2, force: true }); return true; } catch (e) {} }
+    return false;
   }
-  function kts(n) { return n ? Math.round(n) + " kn" : "n/a"; }
-  function ft(m) { return Math.round(m / M_PER_FT) + "'"; }
-  function render() {
-    actions = [];
-    const cash = (g.cash || 0), bank = (g.cityBank || 0);
-    let html = "<div style='font-size:19px;font-weight:700'>CASSALINE MARINE</div>";
-    html += "<div style='font-size:11px;color:#7fa8c4;margin-bottom:6px'>Brokerage &amp; yard, " + (CBZ.cityMarina && CBZ.cityMarina.exists() ? "Marina berths available" : "Roadstead moorings only") + "</div>";
-    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:9px'>Cash " + money(cash) + ", Bank " + money(bank) + (fleet().length ? ", Upkeep " + money(fleetDaily()) + "/day" : "") + "</div>";
-    if (flash_) html += "<div style='font-size:12px;margin-bottom:7px'>" + flash_ + "</div>";
-    html += "<div style='font-size:11px;color:#6b7480;margin-bottom:7px'>[B] brokerage, [F] your fleet</div>";
-
-    if (tab === "buy") {
-      for (const e of catalog()) {
-        const have = owned(e.key);
-        const p = priceOf(e);
-        html += "<div style='padding:6px 0;border-top:1px solid rgba(255,255,255,.07)'>";
-        html += "<b style='color:#cfe0f5'>" + e.label + "</b> <span style='color:#8a93a3;font-size:11px'>" +
-          ft(e.loa) + " LOA, " + e.beam.toFixed(1) + "m beam, " + kts(e.topKts) + "</span>";
-        html += "<div style='font-size:12px;color:#ffd166'>" + money(p) + "</div>";
-        html += "</div>";
-        if (have) actions.push({ label: e.label + ", OWNED (locate her)", fn: function () { locate(have); } });
-        else {
-          actions.push({ label: "Buy " + e.label + ": " + money(p), fn: function () { buy(e.key); } });
-          if (bankLoan()) actions.push({ label: "Finance " + e.label + ": " + money(Math.round(p * DOWN_FRAC / 500) * 500) + " down", fn: function () { financeBuy(e.key); } });
-        }
-      }
-      if (catalog().length === 1 && catalog()[0].soloFallback) {
-        html += "<div style='font-size:11px;color:#6b7480;margin-top:8px'>The yard only has the one hull in stock.</div>";
-      }
-    } else {
-      const f = fleet();
-      if (!f.length) html += "<div style='font-size:13px;color:#9fb0c6'>You don't own a boat yet.</div>";
-      for (const r of f) {
-        const live = liveHull(r);
-        html += "<div style='padding:6px 0;border-top:1px solid rgba(255,255,255,.07)'>";
-        html += "<b style='color:#cfe0f5'>" + (r.label || r.name) + "</b> <span style='color:#8a93a3;font-size:11px'>" + ft(r.loa || 6.2) + ", berth " + (r.berthId || "n/a") + "</span>";
-        html += "<div style='font-size:11px;color:" + (r.arrears ? "#ff8b7a" : "#8a93a3") + "'>" +
-          money(dailyCost(r)) + "/day" + (r.arrears ? ", " + money(r.arrears) + " OVERDUE" : "") +
-          (r.loanId != null ? ", financed" : "") + (live ? ", afloat" : ", laid up") + "</div>";
-        html += "</div>";
-        actions.push({ label: (live ? "Locate " : "Bring out ") + (r.label || r.name), fn: function () { locate(r); } });
-        actions.push({ label: "Sell " + (r.label || r.name) + ": " + money(Math.round(r.price * SELL_FRAC)), fn: function () { sell(r.key); } });
-      }
-      if (totalArrears() > 0) actions.push({ label: "Pay dues " + money(totalArrears()), fn: payArrears });
-    }
-
-    if (CBZ.touchMode) {
-      actions.forEach(function (a, i) { html += "<div data-bi='" + i + "' style='padding:10px 8px;margin:3px 0;font-size:14px;border:1px solid rgba(232,236,242,.16);border-radius:9px;background:rgba(255,255,255,.05)'>" + a.label + "</div>"; });
-      html += "<button type='button' class='tpill tpill-sm' data-bclose='1' style='margin-top:9px'>CLOSE</button>";
-    } else {
-      actions.forEach(function (a, i) { if (i < 9) html += "<div style='padding:3px 0;font-size:13px'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
-      html += "<div style='font-size:11px;color:#6b7480;margin-top:9px'>[1-" + Math.min(9, actions.length) + "] select, [Esc] close</div>";
-    }
-    el().innerHTML = html;
+  function flash(msg) { if (!brokerSay(msg)) note(msg, 2.4); }
+  function manned() { return !brokerPost || !!brokerBody(); }
+  const PITCH = { i: -1, t: -1e9 };
+  function pitchLive() {
+    if (PITCH.i < 0 || (CBZ.now || 0) - PITCH.t > 40000) return null;
+    const d = deskPoint(), P = CBZ.player;
+    if (d && P && P.pos && Math.hypot(P.pos.x - d.x, P.pos.z - d.z) > 9) { PITCH.i = -1; return null; }
+    const list = catalog();
+    return list.length ? list[PITCH.i % list.length] : null;
   }
+  function pitchSay(e) {
+    const have = owned(e.key);
+    const bits = [ft(e.loa), kts(e.topKts)].filter(Boolean).join(", ");
+    brokerSay(have ? "The " + e.label + ". She's yours already, at her berth." : "The " + e.label + ". " + bits + ". " + money(priceOf(e)) + " and she's in the water today.", 4);
+  }
+  function pitchStart() {
+    const list = catalog();
+    if (!list.length) { brokerSay("Nothing on the books this week."); return; }
+    PITCH.i = 0; PITCH.t = CBZ.now || 0;
+    pitchSay(list[0]);
+  }
+  // the next hull up the yard's list (dir 1: bigger) or down it (dir -1)
+  function pitchNext(dir) {
+    const list = catalog();
+    if (list.length < 2) { brokerSay("She's the only hull in the yard."); return; }
+    const k = PITCH.i + (dir < 0 ? -1 : 1);
+    if (k < 0) { brokerSay("That's the smallest thing I sell."); return; }
+    if (k >= list.length) { brokerSay("Nothing bigger than her on this coast."); return; }
+    PITCH.i = k; PITCH.t = CBZ.now || 0;
+    pitchSay(list[PITCH.i]);
+  }
+  function downOf(e) { return Math.round(priceOf(e) * DOWN_FRAC / 500) * 500; }
   function locate(rec) {
     const car = deliver(rec, { mark: true });
-    if (car) { car._boatRec = rec; note((rec.label || rec.name) + " is at her berth, waypoint set.", 2.6); }
-    else note("Couldn't find water to put her in.", 2.2);
-    close();
+    if (car) { car._boatRec = rec; flash((rec.label || rec.name) + " is at her berth. I've marked it for you."); }
+    else flash("There's no water free to put her in.");
   }
-  function open(which) {
-    if (CBZ.cityMenuOpen && !open_) return;
-    tab = which || "buy"; open_ = true; flash_ = "";
-    CBZ.cityMenuOpen = true;
-    el().style.display = "block";
-    render();
-    if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
+  // the yard's sheet on what you keep here
+  function fleetPaper() {
+    const K = CBZ.cityPaper, f = fleet();
+    if (!f.length) { brokerSay("You don't keep a boat with us yet."); return; }
+    brokerSay(totalArrears() > 0 ? "You're " + money(totalArrears()) + " behind on the dues." : "All paid up. " + money(fleetDaily()) + " a day for the lot.", 3.4);
+    if (!K) return;
+    const lines = [{ cols: ["HULL", "BERTH", "A DAY"], head: true }];
+    for (const r of f) lines.push({ cols: [r.label || r.name, r.berthId || (liveHull(r) ? "afloat" : "laid up"), money(dailyCost(r))] });
+    lines.push({ gap: 12 });
+    lines.push({ k: "BERTHS AND UPKEEP", v: money(fleetDaily()) + " a day", big: true });
+    if (totalArrears() > 0) lines.push({ k: "OVERDUE", v: money(totalArrears()) });
+    K.show({ key: "fleet", org: "Cassaline Marine", title: "YOUR ACCOUNT", ink: "#1f4258", colw: [0.5, 0.25, 0.25], lines: lines,
+      foot: "Hulls in arrears are held at the yard." });
   }
-  function close() {
-    open_ = false;
-    if (panel) panel.style.display = "none";
-    CBZ.cityMenuOpen = false;
-    if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
+  // what you can say to the broker, best first
+  const BROKER_ASKS = [
+    { id: "buy", key: "e", label: function () { const e = pitchLive(); return "Buy her " + money(e ? priceOf(e) : 0); },
+      show: function () { const e = pitchLive(); return !!e && !owned(e.key); }, run: function () { const e = pitchLive(); if (e && buy(e.key)) PITCH.i = -1; } },
+    { id: "ask", key: "e", label: function () { return "Ask about boats"; }, show: function () { return !pitchLive(); }, run: pitchStart },
+    { id: "next", key: "hold", label: function () { return "Something bigger"; }, show: function () { return !!pitchLive(); }, run: function () { pitchNext(1); } },
+    { id: "prev", key: "wheel", label: function () { return "Something smaller"; }, show: function () { return !!pitchLive() && PITCH.i > 0; }, run: function () { pitchNext(-1); } },
+    { id: "finance", key: "wheel", label: function () { const e = pitchLive(); return "Finance her, " + money(e ? downOf(e) : 0) + " down"; },
+      show: function () { const e = pitchLive(); return !!e && !owned(e.key) && !!bankLoan() && downOf(e) >= 1000; }, run: function () { const e = pitchLive(); if (e && financeBuy(e.key)) PITCH.i = -1; } },
+    { id: "mine", key: "wheel", label: function () { return "My boats"; }, show: function () { return fleet().length > 0; }, run: fleetPaper },
+    { id: "dues", key: "wheel", label: function () { return "Pay the dues " + money(totalArrears()); }, show: function () { return totalArrears() > 0; }, run: payArrears },
+  ];
+  for (let n = 0; n < 4; n++) {
+    BROKER_ASKS.push({ id: "out" + n, key: "wheel", label: function () { const r = fleet()[n]; return r ? (liveHull(r) ? "Where is the " : "Bring round the ") + (r.label || r.name) : ""; },
+      show: function () { return !!fleet()[n]; }, run: function () { const r = fleet()[n]; if (r) locate(r); } });
+    BROKER_ASKS.push({ id: "sell" + n, key: "wheel", label: function () { const r = fleet()[n]; return r ? "Sell the " + (r.label || r.name) + " " + money(Math.round(r.price * SELL_FRAC)) : ""; },
+      show: function () { return !!fleet()[n]; }, run: function () { const r = fleet()[n]; if (r) sell(r.key); } });
   }
-  CBZ.cityOpenBoatyard = function (which) { open(which); };
-
-  addEventListener("keydown", function (e) {
-    if (!open_) return;
-    const k = (e.key || "").toLowerCase();
-    if (k === "escape") { e.preventDefault(); close(); return; }
-    if (k === "b") { e.preventDefault(); tab = "buy"; flash_ = ""; render(); return; }
-    if (k === "f") { e.preventDefault(); tab = "fleet"; flash_ = ""; render(); return; }
-    if (k >= "1" && k <= "9") {
-      e.preventDefault();
-      const a = actions[parseInt(k, 10) - 1];
-      if (a) a.fn();
-      return;
-    }
-  });
+  // the same asks on the man himself (a person's options are I J K L)
+  function giveBrokerVerbs() {
+    const I = CBZ.interactions, b = brokerBody();
+    if (!b || b._boatVerbs || !I || !I.registerFor) return;
+    b._boatVerbs = true;
+    BROKER_ASKS.forEach(function (a, i) {
+      I.registerFor(b, { id: "broker-" + a.id, prio: 90 - i, forceYes: true, campaignSafe: true,
+        label: function () { return asIs(a.label()); }, canShow: function () { return a.show(); }, onSelect: function () { a.run(); } });
+    });
+  }
+  CBZ.cityOpenBoatyard = function () { return false; };     // (there is no listing screen)
 
   /* ============================================================
      8) HOUSEKEEPING — reconcile owned records once in a while (cheap), and
@@ -905,6 +884,7 @@
     _recT = 4;
     catalog();      // idempotent; installs the SPECIAL_VEHICLES bridge early
     reconcile();
+    giveBrokerVerbs();
   });
   CBZ.cityBoatyardReset = function () { _catalog = null; _lastDay = null; };
 
@@ -929,6 +909,6 @@
     berthForModel: berthForModel, berthOf: berthOf,
     dailyCost: dailyCost, fleetDaily: fleetDaily, arrears: totalArrears, payArrears: payArrears,
     upkeepTick: upkeepTick, anchorToggle: anchorToggle, anchored: anchored,
-    open: open, close: close,
+    pitch: function () { return pitchLive(); }, asks: BROKER_ASKS,
   };
 })();

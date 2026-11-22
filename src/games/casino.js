@@ -18,8 +18,12 @@
    streak. Decor with no job: none.
    Interiors: order-88 claim marks the flagship casino lot; the
    city/casino.js dresser keeps the exterior and skips the interior.
-   Every town casino's tables also route here: CBZ.cityOpenCasino opens
-   this hub (the old activities.js menu casino is deleted).
+   NO PANEL. You play standing at the thing: a table or a machine is a
+   STATION with its verbs on it (deal, hit, stand, a bet on red, pull), the
+   dealer is a person who says the count, your bet is chips on the felt and
+   your stack sits by your hand. Every town casino's tables and machines
+   (city/casino.js) are stations of this same game. The cage and the Shark
+   are people you ask.
 ============================================================ */
 (function () {
   "use strict";
@@ -89,17 +93,19 @@
   }
 
   /* ---------------- session state ---------------------------------------- */
-  let C = null;          // ctx once mounted (or a hub ctx when only the panel runs)
-  let V = null;          // flagship venue 3D refs {bj:[], rl, slots:[], gCards, gChips}
+  let C = null;          // ctx: the flagship's once it is built, a venue-less one before that
+  let V = null;          // flagship venue 3D refs {bj:[], rl, slots:[], npcs, cast}
   let S = null;          // persisted bag: {chips, debt, streak, stats}
+  const THREE = window.THREE;
+  function ctx() { return C || (C = CBZ.games.hubCtx("casino")); }
   function bag() {
     if (S) return S;
-    S = C.state(() => ({ chips: 0, debt: 0, streak: 0, stats: { hands: 0, spins: 0, pulls: 0, biggestWin: 0, drinks: 0 } }));
+    S = ctx().state(() => ({ chips: 0, debt: 0, streak: 0, stats: { hands: 0, spins: 0, pulls: 0, biggestWin: 0, drinks: 0 } }));
     return S;
   }
-  function save() { C.saveState(); }
+  function save() { ctx().saveState(); }
   function fmt(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
-  function chipsHUD() { return "chips <b>" + bag().chips.toLocaleString() + "</b>, cash <b>" + fmt(C.wallet.cash()) + "</b>" + (bag().debt ? ", <span style='color:#ff9aa2'>marker " + fmt(bag().debt) + "</span>" : ""); }
+  function cash() { return (CBZ.game && CBZ.game.cash) || 0; }
   function winStreak(profit) {
     const s = bag();
     if (profit > 0) { s.streak++; if (profit > s.stats.biggestWin) s.stats.biggestWin = profit; if (s.streak === LIMITS.COMP_STREAK) pitBossBark("hot"); }
@@ -108,23 +114,122 @@
   }
   function bustWatch() {
     const s = bag();
-    if (s.chips >= 5 || C.wallet.cash() >= 15) return;
+    if (s.chips >= 5 || cash() >= 15) return;
     pitBossBark("cold");
   }
+  // a label that prints as written (city/verbword.js would cut it to its verb)
+  function asIs(s) { const VW = CBZ.cityVerbWord; if (VW && VW.keep) VW.keep(s); return s; }
 
-  /* ---------------- panel UI (engine panel, data-act delegation) ---------- */
-  const BTN = "display:inline-block;margin:3px 6px 3px 0;padding:9px 16px;border-radius:11px;cursor:pointer;" +
-    "font-weight:800;font-size:14px;user-select:none;";
-  function btn(act, label, bg, dis) {
-    return "<span data-act='" + act + "' style='" + BTN + "background:" + (bg || "#1c6b40") + ";" +
-      (dis ? "opacity:.4;pointer-events:none;" : "") + "box-shadow:0 3px 0 rgba(0,0,0,.4);'>" + label + "</span>";
+  /* ======================= STATIONS =======================================
+     OWNER: "No dashboards are needed. Everything can be existing."
+
+     This game used to be played in an HTML panel at the bottom of the screen
+     (a "floor" hub of buttons, a blackjack panel of +$5 / DEAL / HIT pills, a
+     37-cell roulette grid of spans, a slots panel, a cage panel, a loan
+     panel). The cards, chips, wheel and reels were already real; only the
+     player's hands were on a panel. Now a STATION is a thing on a casino
+     floor you stand at: a blackjack table, a roulette table, a slot machine.
+     What you can do there is on the thing itself (city/interactions.js: E,
+     I J K L, the wheel, a tap), the dealer says the count out loud, your
+     bet is chips on the felt, and what you have left is the stack in front
+     of you.
+
+     A station: { kind "bj"|"rl"|"sl", x, y (floor), z, yaw, lot?, cast?,
+     wheel?, reels? }. yaw's local +Z is the players' side (the fixture frame
+     city/casino.js builds every table in), so one set of felt coordinates
+     serves the Golden Ace and every town casino. */
+  const STATIONS = [];                    // the flagship's (town ones live on city/casino.js's records)
+  const NAME = { bj: "Blackjack", rl: "Roulette", sl: "Lucky 7s" };
+  const STAND = { bj: 1.3, rl: 1.5, sl: 0.8 };    // how far out on the players' side you stand
+  const REACH = { bj: 1.6, rl: 1.8, sl: 0.7 };
+  function w2(st, lx, lz) { const c = Math.cos(st.yaw), s = Math.sin(st.yaw); return { x: st.x + lx * c + lz * s, z: st.z - lx * s + lz * c }; }
+  function prep(st) {
+    if (st._prep) return st;
+    st._prep = true;
+    const p = w2(st, 0, STAND[st.kind]);
+    st.sx = p.x; st.sz = p.z;
+    st.pos = { x: st.x, y: st.y + (st.kind === "sl" ? 1.3 : 1.0), z: st.z };   // where its card hangs
+    return st;
   }
-  function head(title, sub) {
-    return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#e8b64c'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + sub + "</span></div>";
+  function stationAt(px, pz, py) {
+    let best = null, bd = 1e9;
+    const scan = function (list) {
+      if (!list) return;
+      for (let i = 0; i < list.length; i++) {
+        const st = prep(list[i]);
+        if (Math.abs(st.y - py) > 2.2) continue;
+        const r = REACH[st.kind], dx = st.sx - px, dz = st.sz - pz, d = dx * dx + dz * dz;
+        if (d < r * r && d < bd) { bd = d; best = st; }
+      }
+    };
+    scan(STATIONS); scan(CBZ._casinoTables); scan(CBZ._casinoSlots);
+    return best;
   }
+  // the thing a round's cards and chips are laid on: a group in the table's own frame
+  function stGroup(st) {
+    const root = CBZ.scene;
+    if (st.grp && st.grp.parent === root) return st.grp;
+    st.grp = new THREE.Group(); st.grp.name = "casino-play";
+    st.grp.position.set(st.x, st.y, st.z); st.grp.rotation.y = st.yaw;
+    st.cards = new THREE.Group(); st.chips = new THREE.Group(); st.rack = new THREE.Group();
+    st.grp.add(st.cards); st.grp.add(st.chips); st.grp.add(st.rack);
+    st.dolly = null; st.face = null;
+    root.add(st.grp);
+    return st.grp;
+  }
+  function empty(grp) {
+    if (!grp) return;
+    while (grp.children.length) { const m = grp.children[0]; grp.remove(m); if (m.material && m.material._own) m.material.dispose(); }
+  }
+  function stDrop(st) {
+    if (!st.grp) return;
+    empty(st.cards); empty(st.chips); empty(st.rack);
+    if (st.face) { st.face.tex.dispose(); st.face.m.material.dispose(); st.face.m.geometry.dispose(); }
+    if (st.grp.parent) st.grp.parent.remove(st.grp);
+    st.grp = st.cards = st.chips = st.rack = st.dolly = st.face = null;
+  }
+
+  /* ---- who is working the table ---- */
+  function staffPed(x, z, re, r) {
+    const peds = CBZ.cityPeds || [];
+    let best = null, bd = r * r;
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p || p.dead || (p.ko || 0) > 0 || !p.pos || !re.test(String(p.job || ""))) continue;
+      const dx = p.pos.x - x, dz = p.pos.z - z, d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best;
+  }
+  function scared(p) { return !!(p && (p.dead || p.surrender || p.poseHandsUp || p.rage || p._keepFree || p.state === "flee")); }
+  // the person dealing at this table right now (null: nobody, so no game). A
+  // town table's croupier is a posted body found by where he stands; looked
+  // up at most twice a second.
+  function dealerOf(st) {
+    if (st.kind === "sl") return null;
+    if (st.cast) {
+      const h = V && V.cast && V.cast[st.cast];
+      return h && !scared(h.ped) ? h : null;
+    }
+    const t = (CBZ.now || 0);
+    if (st._dealAt != null && t - st._dealAt < 500) return st._deal;
+    const d = w2(st, 0, st.kind === "rl" ? -0.95 : -0.85);
+    const p = staffPed(d.x, d.z, /croupier|dealer/i, 2.2);
+    st._dealAt = t; st._deal = p && !scared(p) ? p : null;
+    return st._deal;
+  }
+  function sayOf(who, line, secs) {
+    if (!who || !line) return;
+    if (typeof who.say === "function") { who.say(line, secs || 2.8); return; }
+    if (CBZ.citySay) { try { CBZ.citySay(who, line, null, { secs: secs || 2.8, force: true }); } catch (e) {} }
+  }
+  function tell(st, line, secs) { if (st) sayOf(dealerOf(st), line, secs); }
+  function staffSay(tag, line) { sayOf(V && V.cast && V.cast[tag], line, 2.8); }
 
   /* ======================= BLACKJACK ====================================== */
+  const SUITS = ["♠", "♥", "♦", "♣"];
+  const CARD_WORD = { A: "an ace", 2: "a two", 3: "a three", 4: "a four", 5: "a five", 6: "a six", 7: "a seven", 8: "an eight", 9: "a nine", 10: "a ten", J: "a jack", Q: "a queen", K: "a king" };
+  const STAKES = [25, 50, 100, 250, 500, 1000];
   let SHOE = [];
   function buildShoe() {
     SHOE = [];
@@ -132,68 +237,108 @@
     for (let d = 0; d < 6; d++) for (let s = 0; s < 4; s++) for (let r = 0; r < 13; r++) SHOE.push({ r: ranks[r], s });
     for (let i = SHOE.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = SHOE[i]; SHOE[i] = SHOE[j]; SHOE[j] = t; }
   }
-  function draw() { if (SHOE.length < 78) { buildShoe(); dealerSay("Fresh shoe."); } return SHOE.pop(); }
-  const BJ = { phase: "bet", hands: [], act: 0, dealer: [], stake: 0, splitDone: false, tableIx: 0 };
-  function bjDeal() {
+  function draw() { if (SHOE.length < 78) { buildShoe(); tell(BJ.st, "Fresh shoe."); } return SHOE.pop(); }
+  // phase: bet (nothing dealt) | deal (cards in the air) | player | dealer | done
+  const BJ = { phase: "bet", st: null, hands: [], act: 0, dealer: [], dealerMeshes: [], stake: LIMITS.BJ_MIN, splitDone: false };
+  function bjIdle() { return BJ.phase === "bet" || BJ.phase === "done"; }
+  function bjTurn(st) { return BJ.st === st && BJ.phase === "player"; }
+  function bjHand() { return BJ.hands[BJ.act]; }
+  function handWord(cards) { const hv = handValue(cards); return (hv.soft && hv.v < 21 ? "soft " : "") + hv.v; }
+  function stakeStep(dir) {
+    const i = STAKES.indexOf(BJ.stake), cap = Math.min(LIMITS.BJ_MAX, bag().chips);
+    if (dir > 0) { for (let k = Math.max(0, i + 1); k < STAKES.length; k++) if (STAKES[k] > BJ.stake) return STAKES[k] <= cap ? STAKES[k] : BJ.stake; return BJ.stake; }
+    for (let k = STAKES.length - 1; k >= 0; k--) if (STAKES[k] < BJ.stake) return STAKES[k];
+    return BJ.stake;
+  }
+  function bjDeal(st) {
     const s = bag();
-    if (BJ.stake < LIMITS.BJ_MIN) { dealerSay("Table minimum is $" + LIMITS.BJ_MIN + "."); return; }
-    if (s.chips < BJ.stake) { dealerSay("Not enough chips. The cage sells them."); return; }
+    if (!bjIdle()) return;
+    if (BJ.st && BJ.st !== st) clearRound(BJ.st);
+    BJ.st = st;
+    if (s.chips < BJ.stake) {
+      if (s.chips >= LIMITS.BJ_MIN) { BJ.stake = stakeStep(-1); tell(st, "You haven't the chips for that. " + fmt(BJ.stake) + "?"); }
+      else tell(st, "Chips play here. The cage sells them.");
+      return;
+    }
     s.chips -= BJ.stake; save();
-    BJ.phase = "player"; BJ.act = 0; BJ.splitDone = false;
+    BJ.phase = "deal"; BJ.act = 0; BJ.splitDone = false;
     BJ.hands = [{ cards: [], bet: BJ.stake, done: false, meshes: [] }];
     BJ.dealer = []; BJ.dealerMeshes = [];
-    v3ClearRound();
-    BJ.hands[0].cards.push(draw()); v3Card(0, BJ.hands[0].cards[0], true, 60);
-    BJ.dealer.push(draw()); v3Card("D", BJ.dealer[0], true, 340);
-    BJ.hands[0].cards.push(draw()); v3Card(0, BJ.hands[0].cards[1], true, 620);
-    BJ.dealer.push(draw()); v3Card("D", BJ.dealer[1], false, 900);
-    v3Chips(BJ.stake);
+    clearRound(st);
+    BJ.hands[0].cards.push(draw()); putCard(st, 0, BJ.hands[0].cards[0], true, 60);
+    BJ.dealer.push(draw()); putCard(st, "D", BJ.dealer[0], true, 340);
+    BJ.hands[0].cards.push(draw()); putCard(st, 0, BJ.hands[0].cards[1], true, 620);
+    BJ.dealer.push(draw()); putCard(st, "D", BJ.dealer[1], false, 900);
+    betChips(st, BJ.stake); rack(st);
     s.stats.hands++;
     setTimeout(() => {
+      if (BJ.st !== st || BJ.phase !== "deal") return;
       const up = BJ.dealer[0], upTen = handValue([up]).v === 10 || up.r === "A";
       if (upTen && isNatural(BJ.dealer)) { bjFinish(true, false, true); return; }
       if (isNatural(BJ.hands[0].cards)) { bjFinish(false, false, true); return; }
-      renderBJ();
+      BJ.phase = "player";
+      tell(st, "You have " + handWord(BJ.hands[0].cards) + ". I'm showing " + CARD_WORD[up.r] + ".");
     }, 1150);
-    renderBJ("Dealing…");
   }
-  function bjHand() { return BJ.hands[BJ.act]; }
-  function bjHit() { const h = bjHand(); h.cards.push(draw()); v3Card(BJ.act, h.cards[h.cards.length - 1], true, 0); if (handValue(h.cards).v > 21) { h.done = true; bjNext(); } else renderBJ(); }
-  function bjStand() { bjHand().done = true; bjNext(); }
+  function bjHit() {
+    const st = BJ.st, h = bjHand(); if (!h || BJ.phase !== "player") return;
+    h.cards.push(draw()); putCard(st, BJ.act, h.cards[h.cards.length - 1], true, 0);
+    const v = handValue(h.cards).v;
+    if (v > 21) { tell(st, v + ". Too many."); h.done = true; bjNext(); }
+    else tell(st, handWord(h.cards) + ".");
+  }
+  function bjStand() { if (BJ.phase !== "player") return; bjHand().done = true; bjNext(); }
+  function canDouble() { const h = bjHand(); return !!h && h.cards.length === 2 && bag().chips >= h.bet; }
   function bjDouble() {
     const s = bag(), h = bjHand();
-    if (h.cards.length !== 2 || s.chips < h.bet) return;
+    if (BJ.phase !== "player" || !canDouble()) return;
     s.chips -= h.bet; h.bet *= 2; save();
-    h.cards.push(draw()); v3Card(BJ.act, h.cards[h.cards.length - 1], true, 0);
-    h.done = true; setTimeout(bjNext, 400); renderBJ("Doubled down.");
+    betChips(BJ.st, BJ.hands.reduce((a, x) => a + x.bet, 0)); rack(BJ.st);
+    h.cards.push(draw()); putCard(BJ.st, BJ.act, h.cards[h.cards.length - 1], true, 0);
+    tell(BJ.st, "Doubled. " + handValue(h.cards).v + ".");
+    h.done = true; BJ.phase = "deal"; setTimeout(function () { BJ.phase = "player"; bjNext(); }, 400);
+  }
+  function canSplit() {
+    const h = BJ.hands[0];
+    return !!h && !BJ.splitDone && BJ.hands.length === 1 && h.cards.length === 2 &&
+      handValue([h.cards[0]]).v === handValue([h.cards[1]]).v && bag().chips >= h.bet;
   }
   function bjSplit() {
-    const s = bag(), h = BJ.hands[0];
-    if (BJ.splitDone || BJ.hands.length > 1 || h.cards.length !== 2) return;
-    if (handValue([h.cards[0]]).v !== handValue([h.cards[1]]).v || s.chips < h.bet) return;
+    const s = bag(), h = BJ.hands[0], st = BJ.st;
+    if (BJ.phase !== "player" || !canSplit()) return;
     s.chips -= h.bet; save(); BJ.splitDone = true;
     const moved = h.cards.pop();
     BJ.hands.push({ cards: [moved], bet: h.bet, done: false, meshes: [] });
-    v3Split();
+    splitCard(st);
+    betChips(st, h.bet * 2); rack(st);
     const aces = h.cards[0].r === "A";
+    BJ.phase = "deal";
     [0, 1].forEach((hi) => {
-      setTimeout(() => { const hh = BJ.hands[hi]; hh.cards.push(draw()); v3Card(hi, hh.cards[1], true, 0); if (aces) hh.done = true; }, 350 + hi * 350);
+      setTimeout(() => { const hh = BJ.hands[hi]; hh.cards.push(draw()); putCard(st, hi, hh.cards[1], true, 0); if (aces) hh.done = true; }, 350 + hi * 350);
     });
-    setTimeout(() => { if (aces) bjNext(); else { BJ.act = 0; renderBJ(); } }, 1100);
+    setTimeout(() => {
+      BJ.phase = "player";
+      if (aces) bjNext(); else { BJ.act = 0; tell(st, "Two hands. First one, " + handWord(BJ.hands[0].cards) + "."); }
+    }, 1100);
   }
   function bjNext() {
-    if (BJ.act < BJ.hands.length - 1 && !BJ.hands[BJ.act + 1].done) { BJ.act++; renderBJ(); return; }
+    if (BJ.act < BJ.hands.length - 1 && !BJ.hands[BJ.act + 1].done) {
+      BJ.act++;
+      tell(BJ.st, "Second hand, " + handWord(bjHand().cards) + ".");
+      return;
+    }
     const anyLive = BJ.hands.some((h) => handValue(h.cards).v <= 21);
     bjFinish(false, !anyLive, false);
   }
   function bjFinish(dealerNatural, allBusted, skipDraw) {
-    BJ.phase = "dealer"; renderBJ();
-    v3Reveal();
+    const st = BJ.st;
+    BJ.phase = "dealer";
+    turnHole();
     let delay = 700;
     if (!dealerNatural && !allBusted && !skipDraw) {
       (function loop() {
         if (handValue(BJ.dealer).v < 17) {
-          setTimeout(() => { BJ.dealer.push(draw()); v3Card("D", BJ.dealer[BJ.dealer.length - 1], true, 0); loop(); }, delay);
+          setTimeout(() => { BJ.dealer.push(draw()); putCard(st, "D", BJ.dealer[BJ.dealer.length - 1], true, 0); loop(); }, delay);
           delay = 560; return;
         }
         setTimeout(bjSettle, delay + 260);
@@ -201,6 +346,7 @@
     } else setTimeout(bjSettle, 820);
   }
   function bjSettle() {
+    const st = BJ.st;
     BJ.phase = "done";
     const s = bag(), naturalOK = BJ.hands.length === 1 && !BJ.splitDone;
     let totalBet = 0, totalRet = 0; const lines = [];
@@ -211,188 +357,294 @@
       const pv = handValue(h.cards).v, dv = handValue(BJ.dealer).v;
       let tag;
       if (pv > 21) tag = "bust";
-      else if (naturalOK && isNatural(h.cards) && !isNatural(BJ.dealer)) tag = "BLACKJACK. 3:2";
-      else if (isNatural(BJ.dealer) && !isNatural(h.cards)) tag = "dealer blackjack";
+      else if (naturalOK && isNatural(h.cards) && !isNatural(BJ.dealer)) tag = "Blackjack, pays three to two";
+      else if (isNatural(BJ.dealer) && !isNatural(h.cards)) tag = "dealer has blackjack";
       else if (dv > 21) tag = "dealer busts on " + dv;
-      else tag = pv > dv ? pv + " beats " + dv : (pv === dv ? "push " + pv : dv + " beats " + pv);
-      lines.push((BJ.hands.length > 1 ? "Hand " + (i + 1) + ": " : "") + tag);
+      else tag = pv > dv ? pv + " beats " + dv : (pv === dv ? "push on " + pv : dv + " beats " + pv);
+      lines.push((BJ.hands.length > 1 ? (i ? "Second hand, " : "First hand, ") : "") + tag);
     });
     s.chips += totalRet;
     const profit = totalRet - totalBet;
     winStreak(profit); save();
-    if (lines.some((l) => l.indexOf("BLACKJACK") >= 0)) C.hud.toast("BLACKJACK! Pays 3:2");
-    dealerSay(lines.join(". ") + ".");
-    renderBJ(); bustWatch();
+    let line = lines.join(". ") + ".";
+    line = line.charAt(0).toUpperCase() + line.slice(1);
+    if (totalRet > 0 && profit !== 0) line += " " + fmt(totalRet) + " to you.";
+    tell(st, line, 3.4);
+    // the bet leaves the spot: paid into your stack, or raked
+    if (st && st.chips) empty(st.chips);
+    rack(st);
+    if (CBZ.sfx && profit > 0) CBZ.sfx("coin");
+    bustWatch();
   }
-  function renderBJ(msg) {
-    let body = "";
-    if (BJ.phase === "bet") {
-      body = "<div style='margin:4px 0 8px'>Stake <b>" + fmt(BJ.stake) + "</b>, " + chipsHUD() + "</div>" +
-        [5, 25, 100, 500].map((d) => btn("chip" + d, "+$" + d, "#5a3a1a")).join("") +
-        btn("deal", "DEAL", "#c98f22", BJ.stake < LIMITS.BJ_MIN) + btn("clear", "Clear", "#26343c") + btn("hub", "Floor", "#26343c");
-    } else if (BJ.phase === "player") {
-      const h = bjHand(), hv = handValue(h.cards);
-      body = "<div style='margin:4px 0 8px'>" + (BJ.hands.length > 1 ? "<b>Hand " + (BJ.act + 1) + "</b>, " : "") +
-        "You: <b>" + hv.v + (hv.soft ? " soft" : "") + "</b> (" + h.cards.map(cardName).join(" ") + ") vs dealer " + cardName(BJ.dealer[0]) + "</div>" +
-        btn("hit", "HIT", "#1c6b40") + btn("standp", "STAND", "#c98f22") +
-        btn("dbl", "DOUBLE", "#7c1626", h.cards.length !== 2 || bag().chips < h.bet) +
-        btn("split", "SPLIT", "#26343c", !(!BJ.splitDone && BJ.hands.length === 1 && h.cards.length === 2 && handValue([h.cards[0]]).v === handValue([h.cards[1]]).v && bag().chips >= h.bet));
-    } else if (BJ.phase === "dealer") {
-      body = "<div style='margin:8px 0'>" + (msg || "") + "</div>";
-    } else {
-      body = "<div style='margin:4px 0 8px'>Dealer <b>" + handValue(BJ.dealer).v + "</b> (" + BJ.dealer.map(cardName).join(" ") + "), " + chipsHUD() + "</div>" +
-        btn("deal", "REBET " + fmt(BJ.stake), "#c98f22", bag().chips < BJ.stake) + btn("changebet", "CHANGE BET", "#26343c") + btn("hub", "Floor", "#26343c");
-    }
-    C.hud.panel(head("BLACKJACK", "$" + LIMITS.BJ_MIN + " to $" + LIMITS.BJ_MAX) + (msg && BJ.phase !== "dealer" ? "<div style='margin:2px 0 6px;opacity:.8'>" + msg + "</div>" : "") + body, {
-      chip5: () => { bjChip(5); }, chip25: () => { bjChip(25); }, chip100: () => { bjChip(100); }, chip500: () => { bjChip(500); },
-      deal: bjDeal, clear: () => { BJ.stake = 0; renderBJ(); }, changebet: () => { BJ.phase = "bet"; BJ.stake = 0; renderBJ(); },
-      hit: bjHit, standp: bjStand, dbl: bjDouble, split: bjSplit, hub: openHub,
-    });
-  }
-  function bjChip(d) { if (BJ.stake + d <= LIMITS.BJ_MAX && bag().chips >= BJ.stake + d) { BJ.stake += d; renderBJ(); } }
-  const SUITS = ["♠", "♥", "♦", "♣"];
-  function cardName(c) { return c.r + SUITS[c.s]; }
+
   /* ======================= ROULETTE ======================================= */
-  const RL = { bets: {}, unit: 25, spinning: false, hist: [] };
+  const RL = { st: null, bets: {}, unit: 25, num: 17, spinning: false, hist: [] };
+  const UNITS = [5, 25, 100];
   function rlStake() { let s = 0; for (const k in RL.bets) s += RL.bets[k]; return s; }
-  function rlPlace(key) {
+  function rlPlace(st, key) {
     if (RL.spinning) return;
+    if (RL.st !== st) {
+      if (RL.st && rlStake()) { tell(st, "You've money down at another wheel."); return; }
+      RL.st = st;
+    }
     const s = bag(), amt = Math.min(RL.unit, s.chips);
-    if (amt <= 0) { staffSay("croupier", "No chips, no bet."); return; }
-    if (rlStake() + amt > LIMITS.RL_MAX) { staffSay("croupier", "Table cap is $" + LIMITS.RL_MAX + "."); return; }
-    s.chips -= amt; RL.bets[key] = (RL.bets[key] || 0) + amt; save(); renderRL();
+    if (amt <= 0) { tell(st, "No chips, no bet. The cage sells them."); return; }
+    if (rlStake() + amt > LIMITS.RL_MAX) { tell(st, "Table limit is $" + LIMITS.RL_MAX + "."); return; }
+    s.chips -= amt; RL.bets[key] = (RL.bets[key] || 0) + amt; save();
+    layoutChips(st); rack(st);
+    if (CBZ.sfx) CBZ.sfx("coin");
   }
-  function rlClear() { if (RL.spinning) return; bag().chips += rlStake(); RL.bets = {}; save(); renderRL(); }
-  function rlSpin() {
-    if (RL.spinning || !rlStake()) { if (!rlStake()) staffSay("croupier", "Place your bets."); return; }
-    RL.spinning = true; bag().stats.spins++; save(); renderRL();
-    staffSay("croupier", "No more bets.");
+  function rlClear(st) {
+    if (RL.spinning || RL.st !== st || !rlStake()) return;
+    bag().chips += rlStake(); RL.bets = {}; save();
+    layoutChips(st); rack(st);
+  }
+  function rlSpin(st) {
+    if (RL.spinning || RL.st !== st) return;
+    if (!rlStake()) { tell(st, "Place your bets."); return; }
+    RL.spinning = true; bag().stats.spins++; save();
+    tell(st, "No more bets.");
+    if (st.dolly) st.dolly.visible = false;
     const outcome = Math.floor(Math.random() * 37);
-    if (V && V.rl) v3Wheel(outcome, () => rlSettle(outcome));
-    else setTimeout(() => rlSettle(outcome), 1400);
+    spinWheel(st, outcome, () => rlSettle(st, outcome));
   }
-  function rlSettle(n) {
+  function rlSettle(st, n) {
     const s = bag(), stake = rlStake(), ret = rlPayout(RL.bets, n);
     s.chips += ret; RL.bets = {};
     const profit = ret - stake;
     RL.hist.unshift(n); if (RL.hist.length > 9) RL.hist.pop();
     winStreak(profit); save();
-    const name = n + (n === 0 ? " GREEN" : (RED_SET[n] ? " RED" : " BLACK"));
-    if (profit >= 500) C.hud.toast(name);
-    staffSay("croupier", name + "." + (ret > 0 ? " Paying " + ret + "." : ""));
-    RL.spinning = false; renderRL(); bustWatch();
-  }
-  function rcell(label, key, bg, wide) {
-    const amt = RL.bets[key];
-    return "<span data-act='b_" + key + "' style='position:relative;display:inline-block;width:" + (wide ? 52 : 30) + "px;height:26px;line-height:26px;" +
-      "text-align:center;margin:1px;border-radius:5px;background:" + bg + ";font-size:12px;font-weight:800;cursor:pointer'>" + label +
-      (amt ? "<span style='position:absolute;right:-4px;top:-7px;background:#e8b64c;color:#3a2803;border-radius:9px;font-size:10px;padding:0 4px'>" + amt + "</span>" : "") + "</span>";
-  }
-  function renderRL() {
-    let rows = "";
-    for (let row = 0; row < 3; row++) {
-      let r = row === 1 ? rcell("0", "n0", "#0f7a44") : "<span style='display:inline-block;width:30px;margin:1px'></span>";
-      for (let col = 0; col < 12; col++) {
-        const n = col * 3 + (3 - row);
-        r += rcell(String(n), "n" + n, RED_SET[n] ? "#a41f2f" : "#1a1f24");
-      }
-      r += rcell("C" + (3 - row), "col" + (3 - row), "#2c4438");
-      rows += "<div>" + r + "</div>";
-    }
-    rows += "<div>" + rcell("1st12", "dz1", "#2c4438", 1) + rcell("2nd12", "dz2", "#2c4438", 1) + rcell("3rd12", "dz3", "#2c4438", 1) +
-      rcell("1-18", "low", "#2c4438", 1) + rcell("EVEN", "even", "#2c4438", 1) + rcell("RED", "red", "#a41f2f", 1) +
-      rcell("BLK", "black", "#1a1f24", 1) + rcell("ODD", "odd", "#2c4438", 1) + rcell("19-36", "high", "#2c4438", 1) + "</div>";
-    const hist = RL.hist.length ? "<div style='margin:4px 0;opacity:.85'>Last: " + RL.hist.map((h) => "<b style='color:" + (h === 0 ? "#3ad17a" : RED_SET[h] ? "#ff6b7a" : "#cfd6dd") + "'>" + h + "</b>").join(" ") + "</div>" : "";
-    const body = "<div style='margin:2px 0 6px'>" + (RL.spinning ? "" : "On the felt <b>" + fmt(rlStake()) + "</b>, unit $" + RL.unit + ", " + chipsHUD()) + "</div>" +
-      rows + hist +
-      [5, 25, 100].map((d) => btn("unit" + d, "$" + d + (RL.unit === d ? " ✓" : ""), "#5a3a1a")).join("") +
-      btn("spin", "SPIN", "#c98f22", RL.spinning || !rlStake()) + btn("clearrl", "CLEAR", "#26343c", RL.spinning || !rlStake()) + btn("hub", "Floor", "#26343c");
-    const handlers = { spin: rlSpin, clearrl: rlClear, hub: openHub, unit5: () => { RL.unit = 5; renderRL(); }, unit25: () => { RL.unit = 25; renderRL(); }, unit100: () => { RL.unit = 100; renderRL(); } };
-    ["red", "black", "even", "odd", "low", "high", "dz1", "dz2", "dz3", "col1", "col2", "col3"].forEach((k) => { handlers["b_" + k] = () => rlPlace(k); });
-    for (let n = 0; n <= 36; n++) handlers["b_n" + n] = () => rlPlace("n" + n);
-    C.hud.panel(head("ROULETTE", "straight 35:1, cap $" + LIMITS.RL_MAX), body, handlers);
+    tell(st, n + (n === 0 ? ", green" : (RED_SET[n] ? ", red" : ", black")) + "." + (ret > 0 ? " Paying " + fmt(ret) + "." : ""), 3.2);
+    RL.spinning = false;
+    layoutChips(st); placeDolly(st, n); rack(st);
+    if (CBZ.sfx && ret > 0) CBZ.sfx("coin");
+    bustWatch();
   }
 
   /* ======================= SLOTS ========================================== */
-  const SL = { bet: 5, spinning: false, last: null };
-  function slPull() {
+  const SL = { st: null, bet: 5, spinning: false, last: null };
+  function slPull(st) {
     if (SL.spinning) return;
     const s = bag();
-    if (s.chips < SL.bet) return;
+    SL.st = st;
+    if (s.chips < SL.bet) { SL.last = null; slotFace(st, "NO CREDIT"); if (CBZ.sfx) CBZ.sfx("empty"); return; }
     s.chips -= SL.bet; s.stats.pulls++; save();
-    SL.spinning = true; renderSL();
+    SL.spinning = true; SL.last = null; slotFace(st);
     const stops = [Math.floor(Math.random() * 22), Math.floor(Math.random() * 22), Math.floor(Math.random() * 22)];
-    if (V && V.slots.length) v3Reels(stops, () => slSettle(stops));
-    else setTimeout(() => slSettle(stops), 1100);
+    spinReels(st, stops, () => slSettle(st, stops));
   }
-  function slSettle(stops) {
+  function slSettle(st, stops) {
     const s = bag(), syms = stops.map((k) => SLOT_STRIP[k]);
     const mult = slotPay(syms[0], syms[1], syms[2]), win = mult * SL.bet;
     SL.last = { syms, win };
-    if (win > 0) {
-      s.chips += win;
-      if (mult >= 200) C.hud.toast("JACKPOT! " + syms.join(" "));
-    }
+    if (win > 0) { s.chips += win; if (CBZ.sfx) CBZ.sfx("coin"); }
     winStreak(win - SL.bet); save();
-    SL.spinning = false; renderSL(); bustWatch();
-  }
-  function renderSL() {
-    const body = "<div style='margin:2px 0 8px'>" +
-      (SL.last ? "Last: <b>" + SL.last.syms.join(" ") + "</b>" + (SL.last.win ? ", paid " + SL.last.win : "") + ", " : "") +
-      "bet <b>$" + SL.bet + "</b>, " + chipsHUD() +
-      "<br><span style='opacity:.6;font-size:12px'>DIA 500x, 7s 250x, BAR 40x, BELL 20x, fruit 12/8/6x</span></div>" +
-      LIMITS.SLOT_BETS.map((b) => btn("sb" + b, "$" + b + (SL.bet === b ? " ✓" : ""), "#5a3a1a")).join("") +
-      btn("pull", SL.spinning ? "SPINNING…" : "PULL", "#7c1626", SL.spinning) + btn("hub", "Floor", "#26343c");
-    C.hud.panel(head("LUCKY 7s", ""), body, {
-      pull: slPull, hub: openHub,
-      sb5: () => { SL.bet = 5; renderSL(); }, sb10: () => { SL.bet = 10; renderSL(); }, sb25: () => { SL.bet = 25; renderSL(); },
-    });
+    SL.spinning = false;
+    slotFace(st);
+    bustWatch();
   }
 
-  /* ======================= CAGE / SHARK / HUB ============================= */
-  function renderCage() {
-    const s = bag();
-    if (s.debt > 0) staffSay("cashier", "The Shark gets paid first.");
-    const body = "<div style='margin:2px 0 8px'>" + chipsHUD() + "</div>" +
-      btn("buy100", "Buy 100", "#1c6b40", C.wallet.cash() < 100) + btn("buy250", "Buy 250", "#1c6b40", C.wallet.cash() < 250) +
-      btn("buy1000", "Buy 1,000", "#1c6b40", C.wallet.cash() < 1000) +
-      btn("cashout", "CASH OUT " + s.chips.toLocaleString(), "#c98f22", s.chips <= 0) + btn("hub", "Floor", "#26343c");
-    C.hud.panel(head("THE CAGE", ""), body, {
-      buy100: () => cageBuy(100), buy250: () => cageBuy(250), buy1000: () => cageBuy(1000), cashout: cageOut, hub: openHub,
-    });
+  /* ======================= THE CAGE, THE SHARK ============================
+     The cashier is a person behind bars and glass; the Shark is a man in a
+     booth. What they do for you is asked of them. */
+  function handed(who, then) {
+    const p = who && who.ped ? who.ped : (who && who.pos && who.char ? who : null), Vb = CBZ.verbs;
+    let S0 = null, done = false;
+    const fin = function () { if (done) return; done = true; then(); };
+    if (p && Vb && Vb.takeFrom) { try { S0 = Vb.takeFrom(CBZ.player, p, { at: "wristR", kind: "cash", pose: "card", dur: 0.55, onTaken: fin }); } catch (e) { S0 = null; } }
+    if (!S0) fin();
   }
-  function cageBuy(n) { if (!C.wallet.spend(n, "Bought " + n + " chips")) return; bag().chips += n; save(); renderCage(); }
-  function cageOut() {
-    const s = bag(); let amt = s.chips; s.chips = 0;
+  function cageBuy(who, n) {
+    if (!ctx().wallet.spend(n)) { sayOf(who, "That's " + fmt(n) + ". You're short."); return false; }
+    sayOf(who, fmt(n) + " in chips. Good luck.");
+    handed(who, function () { bag().chips += n; save(); if (CBZ.sfx) CBZ.sfx("coin"); });
+    return true;
+  }
+  function cageOut(who) {
+    const s = bag(); let amt = s.chips;
+    if (amt <= 0) { sayOf(who, "You've nothing to cash."); return false; }
+    s.chips = 0;
     const toShark = Math.min(amt, s.debt);
-    if (toShark > 0) { s.debt -= toShark; amt -= toShark; staffSay("cashier", fmt(toShark) + " goes to the Shark's marker first."); }
-    if (amt > 0) C.wallet.give(amt, "Cashed out chips");
-    save(); renderCage();
+    if (toShark > 0) { s.debt -= toShark; amt -= toShark; }
+    save();
+    sayOf(who, toShark > 0 ? fmt(toShark) + " goes to the Shark's marker first." + (amt > 0 ? " " + fmt(amt) + " is yours." : "") : fmt(amt) + ". Count it in front of me.", 3.2);
+    if (amt > 0) handed(who, function () { ctx().wallet.give(amt); if (CBZ.sfx) CBZ.sfx("coin"); });
+    return true;
   }
-  function renderShark() {
-    // HIS words go over HIS head; the panel keeps only the terms + buttons
+  const CAGE_BUYS = [100, 500, 2500];
+  // (id, label(), show(), run(who)) for whoever is behind a cage: the flagship's
+  // cashier (a zone on her window) and a town casino's clerk (his counter rows)
+  const CAGE_ASKS = CAGE_BUYS.map(function (n) {
+    return { id: "buy" + n, label: function () { return "Buy " + fmt(n) + " in chips"; }, show: function () { return cash() >= n; }, run: function (who) { cageBuy(who, n); } };
+  }).concat([
+    { id: "cashout", label: function () { return "Cash out " + fmt(bag().chips); }, show: function () { return bag().chips > 0; }, run: function (who) { cageOut(who); } },
+  ]);
+  const SHARK = { askedAt: -1e9 };
+  function sharkAsk() {
     const s = bag();
-    sharkSay(s.debt > 0 ? "You still owe me. Pay first, then we talk."
-      : "I'll front you " + LIMITS.LOAN_GIVE + " in chips. You owe me " + fmt(LIMITS.LOAN_OWE) + ".");
-    const body = s.debt > 0
-      ? "<div style='margin:6px 0'>Marker outstanding: <b>" + fmt(s.debt) + "</b></div>" + btn("hub", "Walk away", "#26343c")
-      : "<div style='margin:6px 0'>+<b>" + LIMITS.LOAN_GIVE.toLocaleString() + "</b> chips now, <b>" + fmt(LIMITS.LOAN_OWE) + "</b> owed.</div>" +
-        btn("takeloan", "Take the marker (+" + LIMITS.LOAN_GIVE + " chips)", "#7c1626") + btn("hub", "Walk away", "#26343c");
-    C.hud.panel(head("THE SHARK", ""), body, {
-      hub: openHub,
-      takeloan: () => { s.chips += LIMITS.LOAN_GIVE; s.debt += LIMITS.LOAN_OWE; save(); sharkSay("Don't make me come find you."); openHub(); },
+    if (s.debt > 0) { sharkSay("You still owe me " + fmt(s.debt) + ". Pay at the cage, then we talk."); return; }
+    SHARK.askedAt = CBZ.now || 0;
+    sharkSay("I'll front you " + LIMITS.LOAN_GIVE + " in chips. You owe me " + fmt(LIMITS.LOAN_OWE) + ".");
+  }
+  function sharkOffered() { return bag().debt <= 0 && (CBZ.now || 0) - SHARK.askedAt < 25000; }
+  function sharkTake() {
+    const s = bag();
+    if (!sharkOffered()) return;
+    SHARK.askedAt = -1e9;
+    sharkSay("Don't make me come find you.");
+    handed(V && V.shark, function () { s.chips += LIMITS.LOAN_GIVE; s.debt += LIMITS.LOAN_OWE; save(); });
+  }
+
+  /* ======================= THE VERBS ON A STATION =========================
+     One zone for every table and machine on every floor. Its target is the
+     station you are standing at; each verb says which kind it belongs to. */
+  function chipsNote() {
+    const s = bag();
+    return (s.chips > 0 ? fmt(s.chips) + " in chips" : "no chips") + (s.debt > 0 ? ", " + fmt(s.debt) + " owed" : "");
+  }
+  // every verb of every kind of station: { kind, id, label(st), show(st), run(st), key }
+  // key: "e" | "hold" (hold E) | "wheel" on the table itself; on the dealer
+  // (a person: I J K L in this order) the same verbs, best first.
+  const VERBS = [];
+  (function () {
+    const add = function (kind, id, key, label, show, run) { VERBS.push({ kind: kind, id: id, key: key, label: label, show: show, run: run }); };
+    const open = function (st) { return !!dealerOf(st); };
+    // ---- blackjack
+    add("bj", "deal", "e", function (st) { return (BJ.phase === "done" && BJ.st === st ? "Same again, " : "Deal me in, ") + fmt(BJ.stake); },
+      function (st) { return bjIdle() && open(st); }, bjDeal);
+    add("bj", "more", "hold", function () { return "Bet " + fmt(stakeStep(1)); }, function (st) { return bjIdle() && open(st) && stakeStep(1) > BJ.stake; }, function () { BJ.stake = stakeStep(1); });
+    add("bj", "less", "wheel", function () { return "Bet " + fmt(stakeStep(-1)); }, function (st) { return bjIdle() && open(st) && stakeStep(-1) < BJ.stake; }, function () { BJ.stake = stakeStep(-1); });
+    add("bj", "hit", "e", function () { return "Hit"; }, bjTurn, bjHit);
+    add("bj", "stand", "hold", function () { return "Stand"; }, bjTurn, bjStand);
+    add("bj", "double", "wheel", function () { const h = bjHand(); return "Double down, " + fmt(h ? h.bet : 0) + " more"; }, function (st) { return bjTurn(st) && canDouble(); }, bjDouble);
+    add("bj", "split", "wheel", function () { return "Split them"; }, function (st) { return bjTurn(st) && canSplit(); }, bjSplit);
+    // ---- roulette
+    const rlOpen = function (st) { return !RL.spinning && open(st); };
+    const down = function (st) { return RL.st === st && rlStake() > 0; };
+    add("rl", "spin", "e", function () { return "Spin it, " + fmt(rlStake()) + " down"; }, function (st) { return rlOpen(st) && down(st); }, rlSpin);
+    const bet = function (id, key, slot, words) {
+      add("rl", id, slot, function () { return fmt(RL.unit) + " on " + (typeof words === "function" ? words() : words); },
+        slot === "e" ? function (st) { return rlOpen(st) && !down(st); } : (id === "red2" ? function (st) { return rlOpen(st) && down(st); } : rlOpen),
+        function (st) { rlPlace(st, typeof key === "function" ? key() : key); });
+    };
+    bet("red", "red", "e", "red"); bet("black", "black", "hold", "black");
+    bet("red2", "red", "wheel", "red"); bet("odd", "odd", "wheel", "odd"); bet("even", "even", "wheel", "even");
+    bet("num", function () { return "n" + RL.num; }, "wheel", function () { return "number " + RL.num; });
+    add("rl", "other", "wheel", function () { return "Another number"; }, rlOpen, function () { RL.num = (RL.num + 1 + Math.floor(Math.random() * 35)) % 37; });
+    bet("low", "low", "wheel", "1 to 18"); bet("high", "high", "wheel", "19 to 36");
+    bet("dz1", "dz1", "wheel", "the first dozen"); bet("dz2", "dz2", "wheel", "the second dozen"); bet("dz3", "dz3", "wheel", "the third dozen");
+    add("rl", "unit", "wheel", function () { return "Play " + fmt(UNITS[(UNITS.indexOf(RL.unit) + 1) % UNITS.length]) + " chips"; }, rlOpen,
+      function () { RL.unit = UNITS[(UNITS.indexOf(RL.unit) + 1) % UNITS.length]; });
+    add("rl", "clear", "wheel", function () { return "Take the bets back"; }, function (st) { return rlOpen(st) && down(st); }, rlClear);
+    // ---- slots
+    add("sl", "pull", "e", function () { return "Pull, " + fmt(SL.bet); }, function () { return !SL.spinning; }, slPull);
+    add("sl", "bet", "hold", function () { const b = LIMITS.SLOT_BETS; return "Play " + fmt(b[(b.indexOf(SL.bet) + 1) % b.length]) + " a pull"; },
+      function () { return !SL.spinning; }, function (st) { const b = LIMITS.SLOT_BETS; SL.bet = b[(b.indexOf(SL.bet) + 1) % b.length]; SL.st = st; slotFace(st); });
+  })();
+  let wired = false;
+  function wire() {
+    const I = CBZ.interactions;
+    if (wired || !I || !I.registerZone) return;
+    wired = true;
+    I.registerZone({
+      id: "casino-play", kind: "casinoplay", prio: 9, driving: false,
+      find: function (px, pz, c) {
+        const py = c && c.pos ? c.pos.y : ((CBZ.player && CBZ.player.pos.y) || 0);
+        return stationAt(px, pz, py);
+      },
+      options: VERBS.map(function (v, i) {
+        const o = { id: "casino-" + v.kind + "-" + v.id, prio: 30 - i * 0.1, forceYes: true, campaignSafe: true,
+          label: function (st) { return asIs(v.label(st)); },
+          canShow: function (st) { return st.kind === v.kind && v.show(st); },
+          onSelect: function (st) { v.run(st); } };
+        if (v.key === "e") o.slot = "e";
+        else if (v.key === "hold") { o.slot = "e"; o.hold = true; }
+        else o.wheel = true;
+        return o;
+      }),
+    });
+    if (I.describe) I.describe("casinoplay", function (st) { return { label: NAME[st.kind] || "Table", note: chipsNote() }; });
+  }
+  // THE DEALER TAKES THE SAME WORDS. A person's options are I J K L on him, so
+  // looking at the dealer you say Hit / Stand / Double to HIM; looking at the
+  // felt, E hits and hold E stands. Hung on the man himself (registerFor) the
+  // first time you sit at his table.
+  function dealerBody(st) { const d = st ? dealerOf(st) : null; return d ? (d.ped || (d.pos && d.char ? d : null)) : null; }
+  function giveDealerVerbs(st) {
+    const I = CBZ.interactions, p = dealerBody(st);
+    if (!p || p._casinoVerbs || !I || !I.registerFor) return;
+    p._casinoVerbs = true;
+    let n = 0;
+    VERBS.forEach(function (v) {
+      if (v.kind !== st.kind || v.id === "red2") return;
+      I.registerFor(p, {
+        id: "casino-dealer-" + v.kind + "-" + v.id, prio: 90 - (n++), forceYes: true, campaignSafe: true,
+        label: function () { return asIs(v.label(liveSt)); },
+        canShow: function () { return !!liveSt && liveSt.kind === v.kind && dealerBody(liveSt) === p && v.show(liveSt); },
+        onSelect: function () { if (liveSt) v.run(liveSt); },
+      });
     });
   }
-  function openHub() {
-    const body = "<div style='margin:2px 0 8px'>" + chipsHUD() + "</div>" +
-      btn("gobj", "Blackjack", "#1c6b40") + btn("gorl", "Roulette", "#a41f2f") + btn("gosl", "Slots", "#26343c") +
-      btn("gocage", "The Cage", "#5a3a1a") + btn("goshark", "The Shark", "#7c1626") + btn("leave", "Step away", "#26343c");
-    C.hud.panel(head("THE GOLDEN ACE", ""), body, {
-      gobj: () => { BJ.phase = "bet"; BJ.stake = Math.max(BJ.stake, 0); renderBJ(); },
-      gorl: renderRL, gosl: renderSL, gocage: renderCage, goshark: renderShark,
-      leave: () => C.hud.closePanel(),
-    });
+  // THE CASHIER AND THE SHARK ARE PEOPLE: what you ask of them is on them (a
+  // person in front of you is the card's target before any spot on the floor
+  // is), as well as on the window and the booth.
+  function giveCastVerbs() {
+    const I = CBZ.interactions;
+    if (!V || !I || !I.registerFor) return;
+    const cashier = V.cast && V.cast.cashier && V.cast.cashier.ped;
+    if (cashier && !cashier._casinoVerbs) {
+      cashier._casinoVerbs = true;
+      CAGE_ASKS.forEach(function (a, i) {
+        I.registerFor(cashier, { id: "casino-cashier-" + a.id, prio: 90 - i, forceYes: true, campaignSafe: true,
+          label: function () { return asIs(a.label()); }, canShow: function () { return !scared(cashier) && a.show(); },
+          onSelect: function () { a.run(V && V.cast && V.cast.cashier); } });
+      });
+    }
+    const shark = V.shark && V.shark.ped;
+    if (shark && !shark._casinoVerbs) {
+      shark._casinoVerbs = true;
+      I.registerFor(shark, { id: "casino-shark-take", prio: 91, forceYes: true, campaignSafe: true,
+        label: function () { return asIs("Take his marker, " + fmt(LIMITS.LOAN_GIVE) + " in chips"); }, canShow: sharkOffered, onSelect: sharkTake });
+      I.registerFor(shark, { id: "casino-shark-ask", prio: 90, forceYes: true, campaignSafe: true,
+        label: function () { return asIs("Ask him for a marker"); }, canShow: function () { return !sharkOffered(); }, onSelect: sharkAsk });
+    }
   }
+  // a town casino's cashier is the clerk behind its counter (city/shops.js rows)
+  (CBZ._counterAsks || (CBZ._counterAsks = [])).push(function (v, lot, kind, add) {
+    if (kind !== "casino") return;
+    for (let i = 0; i < CAGE_ASKS.length; i++) {
+      const a = CAGE_ASKS[i];
+      if (a.show()) add("cage-" + a.id, a.label(), function (vv) { a.run(vv); });
+    }
+  });
+  // your stack is on the felt while you are at a table; a floor you have
+  // walked away from keeps nothing of yours on it
+  let liveSt = null, tickT = 0;
+  if (CBZ.onUpdate) CBZ.onUpdate(41.3, function (dt) {
+    const g = CBZ.game, P = CBZ.player;
+    if (!g || g.mode !== "city" || !P || !P.pos) { if (liveSt) { stDrop(liveSt); liveSt = null; } return; }
+    wire();
+    tickT -= dt; if (tickT > 0) return;
+    tickT = 0.3;
+    giveCastVerbs();
+    const at = P.driving ? null : stationAt(P.pos.x, P.pos.z, P.pos.y);
+    if (at && at !== liveSt) {
+      const busy = liveSt && ((BJ.st === liveSt && !bjIdle()) || (RL.st === liveSt && (RL.spinning || rlStake() > 0)) || (SL.st === liveSt && SL.spinning));
+      if (liveSt && !busy) { if (BJ.st === liveSt) { BJ.phase = "bet"; BJ.st = null; } stDrop(liveSt); liveSt = null; }
+      if (!liveSt) { liveSt = at; stGroup(at); if (at.kind === "sl") slotFace(at); else { rack(at); giveDealerVerbs(at); } }
+    } else if (at && at === liveSt && at.kind !== "sl") {
+      giveDealerVerbs(at);
+    } else if (!at && liveSt) {
+      const far = Math.hypot(P.pos.x - liveSt.x, P.pos.z - liveSt.z) > 7;
+      const busy = (BJ.st === liveSt && !bjIdle()) || (RL.st === liveSt && RL.spinning) || (SL.st === liveSt && SL.spinning);
+      if (far && !busy) {
+        // bets left on a wheel you walked away from come back to your stack
+        if (RL.st === liveSt && rlStake() > 0) { bag().chips += rlStake(); RL.bets = {}; save(); }
+        if (BJ.st === liveSt) { BJ.phase = "bet"; BJ.st = null; }
+        stDrop(liveSt); liveSt = null;
+      }
+    }
+  });
 
   /* ======================= THE CAST (real city peds) ===================== */
   /* Every dealer/croupier/cashier/guard/pit boss/shark/patron is a REAL city
@@ -484,20 +736,20 @@
   function pickLine(pool, salt) { const s = bag().stats; return pool[(s.hands + s.spins + s.pulls + (salt || 0)) % pool.length]; }
   function pitBossBark(mood) { const h = V && V.pitBoss; if (h && h.say) h.say(pickLine(mood === "hot" ? PITBOSS_HOT : PITBOSS_COLD, mood === "hot" ? 0 : 1)); }
   function sharkSay(line) { const h = V && V.shark; if (h && h.say) h.say(line, 3.2); }
-  // a staffer's words go over HIS head. No body in the room, no line.
-  function staffSay(tag, line) { const h = V && V.cast && V.cast[tag]; if (h && h.say) h.say(line, 2.8); }
-  function dealerSay(line) { staffSay("dealer" + (BJ.tableIx || 0), line); }
 
-  /* ======================= FLAGSHIP VENUE (3D) ============================ */
-  /* Card/chip/wheel/reel glue — every fn no-ops without the flagship venue. */
+  /* ======================= WHAT IS ON THE FELT ============================
+     Cards, bet chips, your own stack, the roulette dolly, a machine's face:
+     real meshes in the station's own frame (stGroup), so the same code lays
+     a hand at the Golden Ace and at a town casino. Table tops are 0.773 m. */
   const PAL_BRASS = 0xc9a227;
   const CHIP_COLS = { 5: 0xc22323, 25: 0x1c8a4e, 100: 0x26262c, 500: 0x6a3aa0, 1000: 0xc9a227 };
-  let cardGeo = null, chipGeo = null; const cardTexCache = {};
+  const FELT_Y = 0.777, LAYOUT_Y = 0.762;
+  let cardGeo = null, chipGeo = null; const cardTexCache = {}, chipMats = {};
   function cardTexture(c) {
     const key = c.r + c.s;
     if (cardTexCache[key]) return cardTexCache[key];
     const red = c.s === 1 || c.s === 2;
-    cardTexCache[key] = C.canvasTex(128, 180, (g) => {
+    cardTexCache[key] = ctx().canvasTex(128, 180, (g) => {
       g.fillStyle = "#f8f4ea"; g.fillRect(0, 0, 128, 180);
       g.strokeStyle = "#c9bfa4"; g.lineWidth = 4; g.strokeRect(2, 2, 124, 176);
       g.fillStyle = red ? "#b0242e" : "#1c1c22";
@@ -509,50 +761,111 @@
   }
   let backTex = null;
   function cardBack() {
-    backTex = backTex || C.canvasTex(128, 180, (g) => {
+    backTex = backTex || ctx().canvasTex(128, 180, (g) => {
       g.fillStyle = "#6e1524"; g.fillRect(0, 0, 128, 180);
       g.strokeStyle = "#c9a227"; g.lineWidth = 3; g.strokeRect(7, 7, 114, 166);
       for (let y = 20; y < 170; y += 24) for (let x = 18; x < 118; x += 24) { g.beginPath(); g.moveTo(x, y - 9); g.lineTo(x + 9, y); g.lineTo(x, y + 9); g.lineTo(x - 9, y); g.closePath(); g.stroke(); }
     });
     return backTex;
   }
-  function v3Table() { return V && V.bj[BJ.tableIx || 0]; }
-  function v3ClearRound() { if (!V) return; while (V.gCards.children.length) V.gCards.remove(V.gCards.children[0]); while (V.gChips.children.length) V.gChips.remove(V.gChips.children[0]); }
-  function v3Card(hi, card, faceUp, delayMs) {
-    const T = v3Table(); if (!T) return;
-    cardGeo = cardGeo || new C.THREE.PlaneGeometry(0.088, 0.123);   // 1.4x a poker card: reads from the rail
-    const m = new C.THREE.Mesh(cardGeo, new C.THREE.MeshLambertMaterial({ map: faceUp ? cardTexture(card) : cardBack(), side: C.THREE.DoubleSide }));
+  function chipMat(d) { return chipMats[d] || (chipMats[d] = new THREE.MeshLambertMaterial({ color: CHIP_COLS[d] })); }
+  function clearRound(st) { if (!st) return; empty(st.cards); empty(st.chips); if (st.dolly) st.dolly.visible = false; }
+  // hi: 0 | 1 = your hand, "D" = the dealer's
+  function putCard(st, hi, card, faceUp, delayMs) {
+    stGroup(st);
+    cardGeo = cardGeo || new THREE.PlaneGeometry(0.088, 0.123);   // 1.4x a poker card: reads from the rail
+    const mat = new THREE.MeshLambertMaterial({ map: faceUp ? cardTexture(card) : cardBack(), side: THREE.DoubleSide });
+    mat._own = true;
+    const m = new THREE.Mesh(cardGeo, mat);
     m.rotation.x = -Math.PI / 2; m.userData.card = card; m.userData.hole = !faceUp;
     const idx = hi === "D" ? BJ.dealer.length - 1 : BJ.hands[hi].cards.length - 1;
-    const spot = hi === "D" ? T.dealerSpot : (hi === 0 ? T.playerSpot : T.splitSpot);
-    m.position.set(spot[0] - 0.1 + idx * 0.05, spot[1] + 0.001 + idx * 0.0008, spot[2] + (hi === "D" ? 0 : -idx * 0.018));
+    m.position.set((hi === 1 ? 0.36 : 0) + 0.1 - idx * 0.05, FELT_Y + idx * 0.0008, hi === "D" ? -0.2 : 0.2 + idx * 0.018);
     m.visible = false;
-    setTimeout(() => { m.visible = true; }, delayMs || 0);
+    setTimeout(() => { m.visible = true; if (CBZ.sfx) { try { CBZ.sfx("pickup"); } catch (e) {} } }, delayMs || 0);
     if (hi === "D") BJ.dealerMeshes.push(m); else BJ.hands[hi].meshes.push(m);
-    V.gCards.add(m);
+    st.cards.add(m);
   }
-  function v3Reveal() { if (!V || !BJ.dealerMeshes) return; const hole = BJ.dealerMeshes[1]; if (hole && hole.userData.hole) { hole.material.map = cardTexture(hole.userData.card); hole.material.needsUpdate = true; hole.userData.hole = false; } }
-  function v3Split() { const T = v3Table(); if (!T) return; const m = BJ.hands[0].meshes.pop(); if (m) { BJ.hands[1].meshes.push(m); m.position.set(T.splitSpot[0] - 0.1, T.splitSpot[1] + 0.001, T.splitSpot[2]); } }
-  function v3Chips(amount) {
-    const T = v3Table(); if (!T) return;
-    chipGeo = chipGeo || new C.THREE.CylinderGeometry(0.0195, 0.0195, 0.0034, 16);   // a real 39 mm chip
+  function turnHole() {
+    const hole = BJ.dealerMeshes && BJ.dealerMeshes[1];
+    if (hole && hole.userData.hole) { hole.material.map = cardTexture(hole.userData.card); hole.material.needsUpdate = true; hole.userData.hole = false; }
+  }
+  function splitCard(st) {
+    const m = BJ.hands[0].meshes.pop();
+    if (m) { BJ.hands[1].meshes.push(m); m.position.set(0.36 + 0.1, FELT_Y, 0.2); }
+  }
+  // stacks of chips by denomination, a column apiece, starting at (x, z)
+  function stack(grp, amount, x, y, z, dx, maxEach) {
+    chipGeo = chipGeo || new THREE.CylinderGeometry(0.0195, 0.0195, 0.0034, 16);   // a real 39 mm chip
     const denoms = [1000, 500, 100, 25, 5]; let col = 0;
+    amount = Math.max(0, Math.floor(amount));
     for (const d of denoms) {
-      let n = Math.floor(amount / d); amount -= n * d; n = Math.min(n, 8);
+      let n = Math.floor(amount / d); amount -= n * d;
+      n = Math.min(n, maxEach);
       for (let i = 0; i < n; i++) {
-        const m = new C.THREE.Mesh(chipGeo, C.mat(CHIP_COLS[d]));
-        m.position.set(T.betSpot[0] + col * 0.042, T.betSpot[1] + 0.0017 + i * 0.0035, T.betSpot[2]);
-        V.gChips.add(m);
+        const m = new THREE.Mesh(chipGeo, chipMat(d));
+        m.position.set(x + col * dx, y + 0.0017 + i * 0.0035, z);
+        grp.add(m);
       }
       if (n) col++;
     }
   }
+  // your bet on the blackjack spot
+  function betChips(st, amount) { stGroup(st); empty(st.chips); stack(st.chips, amount, -0.14, FELT_Y - 0.004, 0.13, -0.042, 8); }
+  // what you have left, stacked on the felt at your right hand
+  function rack(st) {
+    if (!st || st.kind === "sl") return;
+    stGroup(st); empty(st.rack);
+    if (st.kind === "bj") stack(st.rack, bag().chips, 0.26, FELT_Y - 0.004, 0.3, 0.042, 14);
+    else stack(st.rack, bag().chips, 0.92, LAYOUT_Y, 0.46, 0.042, 14);
+  }
+  /* THE ROULETTE LAYOUT, in the table's own frame (city/casino.js roulette():
+     a 3 x 12 grid from x -0.2, cells 0.1167 x 0.22, the zero at the wheel
+     end). A bet is chips on its square; the outside bets sit on the felt
+     strip along the players' side, the dozens on the far one. */
+  const GX0 = -0.2, CW = (2 * 1.25 - 1.1) / 12, CH = 0.22;
+  function rlSpot(key) {
+    if (key[0] === "n") {
+      const n = parseInt(key.slice(1), 10);
+      if (n === 0) return [GX0 - 0.07, 0];
+      const c = Math.floor((n - 1) / 3), r = 3 - (n - c * 3);
+      return [GX0 + (c + 0.5) * CW, (r - 1) * CH];
+    }
+    const near = { low: 1, even: 3, red: 5, black: 7, odd: 9, high: 11 };
+    if (near[key] != null) return [GX0 + near[key] * CW, 0.43];
+    const far = { dz1: 2, dz2: 6, dz3: 10 };
+    if (far[key] != null) return [GX0 + far[key] * CW, -0.43];
+    return [GX0 + 6 * CW, 0.43];
+  }
+  function layoutChips(st) {
+    stGroup(st); empty(st.chips);
+    if (RL.st !== st) return;
+    for (const k in RL.bets) {
+      if (!RL.bets[k]) continue;
+      const p = rlSpot(k);
+      stack(st.chips, RL.bets[k], p[0] - 0.02, LAYOUT_Y, p[1], 0.04, 8);
+    }
+  }
+  // the croupier's marker on the number that came up
+  function placeDolly(st, n) {
+    stGroup(st);
+    if (!st.dolly) {
+      st.dolly = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.018, 0.05, 12), new THREE.MeshPhongMaterial({ color: 0xf2efe6, shininess: 80 }));
+      st.grp.add(st.dolly);
+    }
+    const p = rlSpot("n" + n);
+    st.dolly.position.set(p[0] + 0.02, LAYOUT_Y + 0.025, p[1]);
+    st.dolly.visible = true;
+  }
   function pocketAngle(i) { return Math.PI / 2 - ((i + 0.5) / 37) * Math.PI * 2; }
-  function v3Wheel(outcome, done) {
-    const W = V.rl, idx = WHEEL_ORDER.indexOf(outcome);
+  // the Golden Ace's rotor, turret and ball are live meshes; a town wheel is
+  // part of its table's casting, so there the croupier's call is the result
+  function spinWheel(st, outcome, done) {
+    const W = st.wheel;
+    if (!W) { setTimeout(done, 3200); return; }
+    const idx = WHEEL_ORDER.indexOf(outcome);
     let t = 0, ballA = 0, R = W.rTrack || 0.372; const DUR = 5.2;
     const R0 = W.rTrack || 0.372, R1 = W.rPocket || 0.27;
-    C.anim((dt) => {
+    ctx().anim((dt) => {
       t += dt;
       const w = 2.6 * Math.max(0.22, 1 - (t / DUR) * 0.85);
       W.theta += w * dt; W.disc.rotation.z = W.theta; W.turret.rotation.y = W.theta;
@@ -568,18 +881,68 @@
     });
   }
   function slotStopAngle(k) { return ((k + 0.5) / 22) * Math.PI * 2; }
-  function v3Reels(stops, done) {
-    const M = V.slots[0];
+  function spinReels(st, stops, done) {
+    const reels = st.reels;
+    if (!reels) { setTimeout(done, 1500); return; }
     let t = 0; const stopT = [1.1, 1.6, 2.1], stopped = [false, false, false];
-    C.anim((dt) => {
+    ctx().anim((dt) => {
       t += dt; let all = true;
       for (let r = 0; r < 3; r++) {
         if (stopped[r]) continue;
-        if (t < stopT[r]) { M.reels[r].rotation.x -= dt * 13; all = false; }
-        else { const cur = M.reels[r].rotation.x, target = slotStopAngle(stops[r]); M.reels[r].rotation.x = target - Math.PI * 2 * Math.ceil((target - cur) / (Math.PI * 2)); stopped[r] = true; all = false; }
+        if (t < stopT[r]) { reels[r].rotation.x -= dt * 13; all = false; }
+        else { const cur = reels[r].rotation.x, target = slotStopAngle(stops[r]); reels[r].rotation.x = target - Math.PI * 2 * Math.ceil((target - cur) / (Math.PI * 2)); stopped[r] = true; all = false; }
       }
       if (all && t > stopT[2] + 0.1) { done(); return false; }
     });
+  }
+  const SYM_COL = { CHR: "#c22", LEM: "#e8c62c", ORN: "#e8862c", BELL: "#d9a712", BAR: "#222", SEV: "#c22", DIA: "#3ec6d9" };
+  function drawSym(gg, sy, cx, cy, s) {
+    gg.fillStyle = SYM_COL[sy] || "#888";
+    if (sy === "BAR" || sy === "SEV") { gg.font = "800 " + Math.round((sy === "BAR" ? 15 : 40) * s) + "px Verdana"; gg.textAlign = "center"; gg.textBaseline = "middle"; gg.fillText(sy === "BAR" ? "BAR" : "7", cx, cy); }
+    else if (sy === "DIA") { gg.beginPath(); gg.moveTo(cx, cy - 15 * s); gg.lineTo(cx + 12 * s, cy); gg.lineTo(cx, cy + 15 * s); gg.lineTo(cx - 12 * s, cy); gg.closePath(); gg.fill(); }
+    else { gg.beginPath(); gg.arc(cx, cy, 12 * s, 0, 7); gg.fill(); }
+  }
+  /* A MACHINE'S FACE. A reel machine (the Golden Ace) shows its symbols on
+     its reels, so its face is the credit meter under the window. A video
+     machine (every town casino) shows the three symbols on its screen. Both
+     show the bet, what the last pull paid, and the chips you have in it. */
+  function slotFace(st, msg) {
+    stGroup(st);
+    const video = !st.reels;
+    if (!st.face) {
+      const cv = document.createElement("canvas"); cv.width = 256; cv.height = video ? 160 : 44;
+      const tex = new THREE.CanvasTexture(cv);
+      const R = CBZ.renderer;
+      if (R && THREE.SRGBColorSpace && R.outputColorSpace === THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex }));
+      if (video) { m.scale.set(0.5, 0.31, 1); m.position.set(0, 1.34, 0.122); }
+      else { m.scale.set(0.26, 0.045, 1); m.position.set(0, 1.215, 0.108); }
+      st.grp.add(m);
+      st.face = { cv: cv, tex: tex, m: m };
+    }
+    const cv = st.face.cv, gg = cv.getContext("2d"), mine = SL.st === st;
+    gg.fillStyle = "#07090c"; gg.fillRect(0, 0, cv.width, cv.height);
+    const last = mine ? SL.last : null;
+    const meter = msg || (mine && SL.spinning ? "GOOD LUCK" : (last ? (last.win ? "WIN " + last.win : "NO WIN") : "BET " + SL.bet));
+    if (video) {
+      for (let i = 0; i < 3; i++) {
+        gg.fillStyle = "#f4ead2"; gg.fillRect(14 + i * 78, 12, 72, 86);
+        if (last) drawSym(gg, last.syms[i], 50 + i * 78, 55, 1.5);
+        else if (!(mine && SL.spinning)) drawSym(gg, ["SEV", "BAR", "DIA"][i], 50 + i * 78, 55, 1.5);
+      }
+      gg.fillStyle = last && last.win ? "#ffd451" : "#ff6a4a";
+      gg.font = "800 22px Verdana"; gg.textAlign = "left"; gg.textBaseline = "middle";
+      gg.fillText(meter, 14, 122);
+      gg.textAlign = "right"; gg.fillStyle = "#9fe0ff";
+      gg.fillText("BET " + SL.bet, 242, 122);
+      gg.fillStyle = "#cfd6dd"; gg.font = "700 16px Verdana"; gg.textAlign = "left";
+      gg.fillText("CHIPS " + bag().chips.toLocaleString("en-US"), 14, 146);
+    } else {
+      gg.fillStyle = last && last.win ? "#ffd451" : "#ff6a4a";
+      gg.font = "800 24px Verdana"; gg.textAlign = "center"; gg.textBaseline = "middle";
+      gg.fillText(meter + "   " + bag().chips.toLocaleString("en-US"), 128, 23);
+    }
+    st.face.tex.needsUpdate = true;
   }
 
   /* THE FLOOR (2026-10-31 rebuild). The Golden Ace is drawn with the SAME
@@ -649,8 +1012,11 @@
   function buildVenue(ctx, venue) {
     const THREE = ctx.THREE, g = venue.group;
     const FX = CBZ.casinoFixtures, KIT = CBZ.storeFixtureKit;
-    V = { bj: [], rl: null, slots: [], gCards: new THREE.Group(), gChips: new THREE.Group(), npcs: [], pitBoss: null, shark: null, pendingCast: [], _venue: venue };
-    g.add(V.gCards); g.add(V.gChips);
+    V = { rl: null, npcs: [], pitBoss: null, shark: null, pendingCast: [], _venue: venue };
+    // this floor's tables and machines, as stations (world coordinates)
+    const O = venue.origin || { x: 0, z: 0 };
+    for (let i = STATIONS.length - 1; i >= 0; i--) { stDrop(STATIONS[i]); STATIONS.splice(i, 1); }
+    liveSt = null; BJ.phase = "bet"; BJ.st = null; RL.st = null; RL.bets = {}; RL.spinning = false; SL.st = null; SL.spinning = false;
     const lot = venue.lot, bld = lot && lot.building;
     const hx = lot ? Math.max(5, Math.min(8, lot.w / 2 - 1.6)) : 8;
     const hz = lot ? Math.max(4, Math.min(6, lot.d / 2 - 1.6)) : 6;
@@ -687,9 +1053,7 @@
       const print = new THREE.Mesh(printGeo, printMat);
       print.rotation.x = -Math.PI / 2; print.position.set(cx, ff + 0.7735, cz + 0.12); print.renderOrder = 2; g.add(print);
       ctx.solid(cx - 1.02, cz - 0.52, cx + 1.02, cz + 0.5);
-      const fy = ff + 0.773;
-      const T = { cx, cz, dealerSpot: [cx, fy, cz + 0.26], playerSpot: [cx, fy, cz - 0.02], splitSpot: [cx + 0.34, fy, cz - 0.02], betSpot: [cx, fy, cz - 0.13] };
-      V.bj.push(T);
+      STATIONS.push({ kind: "bj", x: O.x + cx, y: ff, z: O.z + cz, yaw: Math.PI, cast: "dealer" + which });
       queueCast({
         // role "dealer" → the facade dresses house waiter-blacks (the vest-and-collar
         // dealer read) and pins them behind the felt, hands over the table.
@@ -700,7 +1064,6 @@
         const dealer = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: which ? 0x8a5c34 : 0xc2905c, vest: 0x1c6e46 }).at(cx, cz + 0.85, Math.PI).deal();
         g.add(dealer.g); ctx.idle(dealer, which * 1.7); return dealer;
       }, "dealer" + which);
-      ctx.zone({ id: "bj" + which, label: "Blackjack, $25 min", pos: [cx, cz - 1.3], r: 1.5, onUse: () => { BJ.tableIx = which; BJ.phase = "bet"; renderBJ(); } });
       ctx.light(cx, ff + 2.6, cz, 0xffd9a0, 0.8, 7);
     });
 
@@ -750,7 +1113,7 @@
         const boss = ctx.rig({ shirt: 0x14100c, pants: 0x14100c, skin: 0xd9a066, vest: 0x211a12, hair: 0x777c82 }).at(cx + 2.6, cz - 0.6, 2.6).fold();
         g.add(boss.g); ctx.idle(boss, 4.1); return boss;
       }, "pitboss");
-      ctx.zone({ id: "roulette", label: "European Roulette", pos: [cx, cz - 1.5], r: 1.7, onUse: renderRL });
+      STATIONS.push({ kind: "rl", x: O.x + cx, y: ff, z: O.z + cz, yaw: Math.PI, cast: "croupier", wheel: V.rl });
       ctx.light(cx, ff + 2.6, cz, 0xffd9a0, 0.85, 8);
     }
 
@@ -784,8 +1147,7 @@
         reel.position.set(-0.144 + r * 0.144, 1.34, -0.03); grp.add(reel); reels.push(reel);
       }
       ctx.solid(sx - 0.3, sz - 0.31, sx + 0.3, sz + 0.31);
-      V.slots.push({ reels });
-      ctx.zone({ id: "slot" + i, label: "Lucky 7s slots", pos: [sx - 0.8, sz], r: 0.6, onUse: renderSL });
+      STATIONS.push({ kind: "sl", x: O.x + sx, y: ff, z: O.z + sz, yaw: -Math.PI / 2, reels: reels });
     }
     ctx.light(sx - 0.8, ff + 2.4, -hz * 0.45 + 1.0, 0xff9adf, 0.5, 5);
 
@@ -814,7 +1176,14 @@
         const guard = ctx.rig({ shirt: 0x2c3038, pants: 0x14100c, skin: 0x704c28, cap: 0x2c3038 }).at(cx + 1.6, cz + 2.2, 2.4).fold();
         g.add(guard.g); ctx.idle(guard, 3.3); return guard;
       });
-      ctx.zone({ id: "cage", label: "The Cage: buy in, cash out", pos: [cx + 1.5, cz], r: 1.6, onUse: renderCage });
+      ctx.zone({
+        id: "cage", name: "The Cage", note: chipsNote, pos: [cx + 1.5, cz], at: [cx + 0.6, cz], y: ff + 1.35, r: 1.6,
+        verbs: CAGE_ASKS.map(function (a) {
+          return { id: a.id, label: function () { return asIs(a.label()); },
+            canShow: function () { const h = V && V.cast && V.cast.cashier; return !!h && !scared(h.ped) && a.show(); },
+            onSelect: function () { a.run(V && V.cast && V.cast.cashier); } };
+        }),
+      });
       ctx.light(cx + 1, ff + 2.6, cz, 0xffd48a, 0.8, 8);
     }
 
@@ -851,10 +1220,9 @@
         k.cyl(0.08, 0.774, 0.92, 0.008, 0.008, 0.12, 0x4a2a14, "solid", 0, 0, Math.PI / 2, 6);
       }
       ctx.solid(cx - 1.3, cz - 0.9, cx + 1.3, cz + 0.9);
-      // No `dialogue` on purpose: his [E] is the LOAN PANEL (the ctx.zone below);
-      // his line goes over his head via sharkSay() when that panel opens, so the
-      // panel always wins the interaction. role "shark" → the facade's high-roller look,
-      // seated in the booth.
+      // No `dialogue` on purpose: what he does for you is the zone below (ask
+      // him for a marker, take it); his terms go over his head via sharkSay().
+      // role "shark" → the facade's high-roller look, seated in the booth.
       queueCast({
         role: "shark", name: "The Shark", post: "pinned", pose: "sit",
         at: [cx, cz + 0.35], face: Math.PI,
@@ -862,7 +1230,13 @@
         const shark = ctx.rig({ shirt: 0x39424e, pants: 0x14100c, skin: 0xb87c4c, hair: 0x555a60, shades: true }).at(cx, cz + 0.35, Math.PI).sit();
         shark.g.position.y -= 0.28; g.add(shark.g); ctx.idle(shark, 5.2); return shark;
       }, "shark");
-      ctx.zone({ id: "shark", label: "The Shark", pos: [cx, cz - 1.3], r: 1.5, onUse: renderShark });
+      ctx.zone({
+        id: "shark", name: "The Shark", note: chipsNote, pos: [cx, cz - 1.3], at: [cx, cz + 0.35], y: ff + 1.25, r: 1.6,
+        verbs: [
+          { id: "take", slot: "e", label: function () { return asIs("Take his marker, " + fmt(LIMITS.LOAN_GIVE) + " in chips"); }, canShow: function () { return !!(V && V.shark) && sharkOffered(); }, onSelect: sharkTake },
+          { id: "ask", slot: "e", label: function () { return asIs("Ask him for a marker"); }, canShow: function () { return !!(V && V.shark) && !sharkOffered(); }, onSelect: sharkAsk },
+        ],
+      });
       ctx.light(cx - 0.25, ff + 1.3, cz - 0.25, 0xff9a4e, 0.6, 5.5);
     }
     if (k) {
@@ -894,26 +1268,22 @@
   CBZ.games.register({
     id: "casino", title: "THE GOLDEN ACE",
     venue: { lotKind: "casino" },
-    build(ctx, venue) { C = C || ctx; buildVenue(ctx, venue); buildShoe(); },
+    build(ctx, venue) { C = ctx; buildVenue(ctx, venue); buildShoe(); },
     // Drain the queued cast into REAL peds on the first live tick (the arena root
     // is published by now, so ctx.npc requisitions real peds instead of dummies).
     update(ctx) { if (V && ctx && ctx.venue === V._venue) tryDrainCast(ctx); },
     api: {
       rules: { handValue, settleBJ, rlPayout, slotPay, slotRTP, wheel: WHEEL_ORDER, red: RED_SET, strip: SLOT_STRIP },
-      open: () => { if (C) openHub(); },
       state: () => (S ? JSON.parse(JSON.stringify(S)) : null),
       // roster of the flagship cast (real peds via ctx.npc, or rig fallbacks) —
       // exposed for tools/probes to assert the cast built.
       cast: () => (V && V.npcs ? V.npcs.length : 0),
       bj: BJ, rl: RL, sl: SL,
+      // the stations of every floor, and the one you are standing at
+      stations: () => STATIONS.concat(CBZ._casinoTables || [], CBZ._casinoSlots || []).map(prep),
+      at: () => liveSt,
+      asks: { cage: CAGE_ASKS, deal: bjDeal, hit: bjHit, stand: bjStand, double: bjDouble, split: bjSplit, place: rlPlace, spin: rlSpin, clear: rlClear, pull: slPull },
     },
   });
 
-  /* every OTHER casino's tables (city/casino.js zone -> cityOpenCasino) open
-     this same hub: the one casino game. (The old activities.js menu casino it
-     used to wrap is deleted.) */
-  CBZ.cityOpenCasino = function () {
-    C = C || CBZ.games.hubCtx("casino");
-    openHub();
-  };
 })();

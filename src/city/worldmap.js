@@ -193,6 +193,10 @@
       for (let i = 0; i < spec.sources.length; i++) {
         const s = spec.sources[i];
         const dx = Math.abs((x + wx - s.x) / s.rx), dz = Math.abs((z + wz - s.z) / s.rz);
+        // q >= max(dx, dz): past 1.16 on either axis this lobe adds nothing
+        // (the same answer without three Math.pow; a cover of many lobes,
+        // the plan's forest country, is asked for every plate vertex)
+        if (dx >= 1.16 || dz >= 1.16) continue;
         const q = Math.pow(Math.pow(dx, p) + Math.pow(dz, p), 1 / p);
         const v = Math.max(0, 1.16 - q);
         sum += v * v * v;
@@ -509,6 +513,15 @@
       if (CFGW.BIOME_ORGANIC_EDGES === false || !CBZ.biomeBlendDominantAt) return reg.biome;
       const own = blendFor(specs, reg.biome);
       if (!own) return reg.biome;
+      // A SHAPED biome (the desert: its floor is a rectangle because a mesh
+      // is, its basin is the world plan's lobes inside it) is its shape, not
+      // its rect: ground in the rectangle's corners is whatever the country
+      // round it is. Its floor is painted and flattened to match there, so
+      // this is the truth about ground the player can see.
+      if (own.shaped && CBZ.biomeBlendWeightAt(own, x, z) < 0.42) {
+        const o = CBZ.biomeBlendDominantAt(specs, x, z);
+        return o && o.weight >= 0.42 ? o.biome : "wilds";
+      }
       if (insideDepth(reg, x, z) > seamBand(own)) return reg.biome;   // deep interior: fast path
       const near = CBZ.biomeBlendDominantAt(specs, x, z);
       if (near && near.biome !== reg.biome && near.weight >= 0.42) return near.biome;

@@ -43,25 +43,17 @@
   //      forest(-560,-1350), snow(350,-1450), farmland(1180,-880)).
   //      Each city is its OWN biome string so crowd/regionlife populate it. The
   //      `road` point is where its causeway plugs toward the existing network.
-  //      STAGE-2 MAP ENLARGEMENT: each city rides the world-layout dial
-  //      (world/layout.js) like the biomes — neonreef/foundry slide west with
-  //      the airport (preserving the authored Neon Reef 50u seam), goldspire/
-  //      capeharbor slide south off the mainland shore. Mainland-side `road`
-  //      plug points stay authored; neonreef's plugs the AIRPORT's west edge,
+  //      WHERE EACH STANDS IS THE WORLD PLAN'S (world/worldplan.js `places`,
+  //      read as CBZ.worldOff from the authored anchors below): Goldspire on
+  //      the harbour's south bank, Cape Harbor down the gulf's west shore,
+  //      Neon Reef and the Foundry west of the airport. Goldspire's and the
+  //      Foundry's `road` plug points stay authored; neonreef's fallback plugs the AIRPORT's west edge,
   //      so it re-derives from the airport anchor (butt-exact — the old fixed
   //      -860 overlapped Halloran Field by 40u, a standing audit clash). ----
   const _MOFF = function (id) { return (CBZ.worldOff && CBZ.worldOff(id)) || { dx: 0, dz: 0 }; };
   const _OG = _MOFF("goldspire"), _OC = _MOFF("capeharbor"), _ON = _MOFF("neonreef"), _OF = _MOFF("foundry");
-  // Halloran Field west edge (island_airport.js A_MINX). Only the ENLARGED
-  // world butts the causeway to it — the compact world keeps its authored
-  // -860 plug (40u inside the field) so the flag-off world stays identical.
-  const _EN = !!(CBZ.CONFIG && CBZ.CONFIG.WORLD_ENLARGE_V2 !== false);
-  const _NR_PLUG_X = _EN ? (-900 + _MOFF("airport").dx) : -860;
-  // WORLD_LAYOUT_V2 (world/layout.js owns the flag; this only mirrors the
-  // default for a build without it). Two behaviours ride it here — see
-  // buildMiniCity: AUTHORED-FRAME SEEDING and the SIZE GRADIENT.
-  if (CBZ.CONFIG && CBZ.CONFIG.WORLD_LAYOUT_V2 == null) CBZ.CONFIG.WORLD_LAYOUT_V2 = true;
-  const LAYOUT_V2 = function () { return !!(CBZ.CONFIG && CBZ.CONFIG.WORLD_LAYOUT_V2 !== false); };
+  // Halloran Field west edge (island_airport.js A_MINX): Neon Reef's fallback plug.
+  const _NR_PLUG_X = -900 + _MOFF("airport").dx;
   // `ax`/`az` are the STAGE-1 AUTHORED anchors — the same literals cx/cz are
   // built from, before the dial. They exist so a city's INTERIOR can be
   // seeded from where it was DESIGNED rather than from where it currently
@@ -70,8 +62,9 @@
     // FINANCE — south-central plains, WEST of the (now much larger) desert.
     // Moved off its old SE spot (760,430), which the enlarged desert swallowed.
     { id: "goldspire",  ax: 150,   az: 470,  cx: 150 + _OG.dx,   cz: 470 + _OG.dz,  hx: 118, hz: 120, road: { x: 340, z: 470 } },
-    // PORT — south coast, south of the speedway, west of the desert.
-    { id: "capeharbor", ax: 430,   az: 175,  cx: 430 + _OC.dx,   cz: 175 + _OC.dz,  hx: 120, hz: 120, road: { x: 470, z: -130 } },
+    // PORT — down the gulf's west shore. road "network": it docks on the
+    // Gulf Freeway, which the plan runs past its north side.
+    { id: "capeharbor", ax: 430,   az: 175,  cx: 430 + _OC.dx,   cz: 175 + _OC.dz,  hx: 120, hz: 120, road: "network", fallbackRoad: { x: 430 + _OC.dx, z: 175 + _OC.dz - 430 } },
     // CASINO — west plains, west of the military base.
     // road "network": dock on the nearest highwaynet lane (the Continental
     // Loop's west leg, 130 m off its west edge). Its old plug was the
@@ -92,15 +85,10 @@
   // from a landmass builder would make the answer depend on build ORDER,
   // i.e. non-deterministic in the one way this repo cannot tolerate. No
   // rect -> 0 -> no gradient: degrade-safe, never a broken town.
-  // WORLD_SCALE_V5: read the PINNED reference rect when world/layout.js
-  // publishes one (CBZ.WORLD_RIM_REF — the stage-4 FLAT). "How rim-side is
-  // this town" has to be asked against where the world's PEOPLE are, not
-  // against its total extent: stage 5 grew an empty 21 km^2 erg and a 108 km
-  // sea, which walks the FLAT centre 1.6 km east and would have handed
-  // Goldspire 17 storeys and Cape Harbor its full crown back, purely because
-  // a desert three biomes away got bigger. Degrade-safe both ways — no
-  // layout.js, or a stage that publishes no reference, and this is the old
-  // rect byte for byte.
+  // It reads the PINNED reference rect the world plan publishes
+  // (CBZ.WORLD_RIM_REF). "How rim-side is this town" has to be asked against
+  // where the world's PEOPLE are, not against the country's total extent: an
+  // empty desert or a wider sea must not vote on how tall the casino is.
   function rimFraction(cx, cz) {
     const F = CBZ.WORLD_RIM_REF || CBZ.WORLD_ENLARGE_FLAT;
     if (!F || !isFinite(F.minX)) return 0;
@@ -128,7 +116,7 @@
   const SIZE_IN = 0.45, SIZE_OUT = 0.95, SIZE_FLOOR = 0.55;
   function skylineForPlace(tpl, cx, cz) {
     const sky = tpl && tpl.skyline;
-    if (!sky || !LAYOUT_V2()) return sky;
+    if (!sky) return sky;
     let t = (rimFraction(cx, cz) - SIZE_IN) / (SIZE_OUT - SIZE_IN);
     t = t < 0 ? 0 : (t > 1 ? 1 : t);
     const k = 1 - (1 - SIZE_FLOOR) * (t * t * (3 - 2 * t));    // 1 central -> 0.55 at the rim
@@ -281,8 +269,8 @@
     if (!tpl) return null;
     const cx = place.cx, cz = place.cz, hx = place.hx, hz = place.hz;
     const rect = { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz };
-    const seedX = (LAYOUT_V2() && place.ax != null) ? place.ax : cx;
-    const seedZ = (LAYOUT_V2() && place.az != null) ? place.az : cz;
+    const seedX = place.ax != null ? place.ax : cx;
+    const seedZ = place.az != null ? place.az : cz;
     const rng = lcg((Math.abs(seedX) * 73856093) ^ (Math.abs(seedZ) * 19349663) ^ (CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170));
     return { tpl: tpl, rect: rect, cfg: Object.assign({}, tpl, {
       cx: cx, cz: cz, rng: rng, region: rect,
@@ -310,8 +298,8 @@
     const root = city.root; if (!root) return;
     const cx = place.cx, cz = place.cz, hx = place.hx, hz = place.hz;
     const rect = T.rect;
-    // AUTHORED-FRAME SEEDING (WORLD_LAYOUT_V2). This stream used to be keyed
-    // on the town's WORLD centre, so the world-layout dial doubled as a
+    // AUTHORED-FRAME SEEDING. This stream used to be keyed
+    // on the town's WORLD centre, so moving a town on the map doubled as a
     // re-roll button: sliding a city 300m re-dealt its whole street plan and
     // moved the math gate's golden lot/shop counts with it (the gate's own
     // comment — "recal: snow move re-rolled Pinecrest" — is the scar). Keying

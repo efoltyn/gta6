@@ -671,14 +671,33 @@
     for (let i = 0; i < b.length; i++) b[i].classList.toggle("on", i < w);
   }
 
+  /* ---- [Shift+O]: A CLEAN FRAME. Hides the city HUD until pressed again;
+     the bar (systems/inventory.js) and the ammo gauge (systems/fpsmode.js)
+     ask hudHidden() and go with it. (This lived in city/charpanel.js, the
+     [I] inventory overlay, which is deleted: what you wear is on your body
+     and what you carry is the bar.) The object keeps the name its readers
+     know. ---- */
+  let hudHidden = false;
+  CBZ.cityCharPanel = {
+    hideHud: function (on) { hudHidden = !!on; },
+    hudHidden: function () { return hudHidden; },
+  };
+  window.addEventListener("keydown", function (e) {
+    if ((e.key || "").toLowerCase() !== "o" || !e.shiftKey) return;
+    if (g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen) return;
+    if ((CBZ.fullMap && CBZ.fullMap.active) || (CBZ.player && CBZ.player.dead)) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    hudHidden = !hudHidden;
+  }, true);
+
   CBZ.onAlways(46, function () {
     build();
     const city = g.mode === "city";
+    if (!city) hudHidden = false;
     // the wallet and the stars are up wherever money is real (Gang City and
     // the islands); the radar, the objective and the reticle are the city's
     const show = city || !!(CBZ.economyMode && CBZ.economyMode(g.mode));
-    // respect the [Shift+O] hide-HUD toggle (charpanel.js)
-    const hudHidden = show && CBZ.cityCharPanel && CBZ.cityCharPanel.hudHidden && CBZ.cityCharPanel.hudHidden();
     const rDisp = (show && !hudHidden) ? "block" : "none";
     if (root._cbzDisp !== rDisp) { root._cbzDisp = rDisp; root.style.display = rDisp; }
     if (document.body._cbzModeCity !== city) { document.body._cbzModeCity = city; document.body.classList.toggle("mode-city", city); }

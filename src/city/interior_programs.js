@@ -1207,6 +1207,20 @@
     // hang (or take down) a door's real leaf now, as walking up to it does
     dress: function (d, on) { dress(d, on !== false); return !!d.dressed; },
     openCount: function () { let n = 0; for (let i = 0; i < UNIT_DOORS.length; i++) if (UNIT_DOORS[i].open) n++; return n; },
+    /* A HOUSE'S ROOM DOORS (city/house_plan.js) are these doors: a leaf anybody
+       may open, hung in the doorway at building-local (lx, lz) on floor y of
+       shell b. `extra` rides onto the record (style: "state" = painted
+       joinery). Returns the record, or null where the host drew nothing. */
+    freeDoor: function (b, y, lx, lz, runX, w, hh, hex, hinge, side, label, k, extra) {
+      const h = host({ b: b });
+      if (!h) return null;
+      const d = freeDoor(h, y, lx, lz, runX, w, hh, hex, hinge, side, label, k);
+      if (d && extra) for (const q in extra) d[q] = extra[q];
+      return d;
+    },
+    // the one panelled leaf (and its paint or wood) every hinged door here
+    // wears: a house's street door hangs the same joinery (city/buildings.js)
+    leafGeometry: leafGeometry, leafMaterial: leafMaterial,
   };
   function unitDrop(rec) {
     if (!rec) return;
@@ -2295,6 +2309,25 @@
     // the way in.
     const kept = { "-1": [], "1": [] };
     let live = 0;
+    /* THE LISTED HOME'S OWN FLAT (opts.home: { bays }, the top storey of a
+       tower on the property ladder): a run of bays on one side thrown into
+       ONE unit behind one front door in the middle of it. The unit planner
+       does not plan it and no tenant's bed stands in it: it is returned as
+       `home`, and city/house_plan.js furnishUnit gives it a house's floor
+       plan (buildings.js furnishHomeFlat). The first run whose doors are all
+       walkable wins; a floor that cannot hold the run gets a shorter one. */
+    const wantHome = unitPlanner && opts && opts.home ? Math.max(1, Math.min(units, (opts.home.bays | 0) || 1)) : 0;
+    let homeSide = 0, homeU0 = -1, homeN = 0, homeUnit = null;
+    if (wantHome) {
+      const can = function (side, run) { const dp = P(run, side < 0 ? cLo : cHi); return inRect(r, dp.x, dp.z, 0.2) && h.clear(dp.x, dp.z, 0.8); };
+      for (let n = wantHome; n >= 1 && !homeN; n--)
+        for (let s = 0; s < sides.length && !homeN; s++)
+          for (let u0 = 0; u0 + n <= units && !homeN; u0++) {
+            let ok = can(sides[s], runLo + (u0 + n / 2) * UW);
+            for (let q = 0; q < n && ok; q++) ok = can(sides[s], runLo + (u0 + q + 0.5) * UW);
+            if (ok) { homeSide = sides[s]; homeU0 = u0; homeN = n; }
+          }
+    }
     for (let u = 0; u < units; u++) {
       const a = runLo + u * UW, b2 = a + UW;
       const mid = (a + b2) / 2;
@@ -2305,6 +2338,31 @@
         const dp = P(mid, crossAt);
         if (!inRect(r, dp.x, dp.z, 0.2) || !h.clear(dp.x, dp.z, 0.8)) { kept[key][u] = false; continue; }
         kept[key][u] = true; live++;
+        if (homeN && side === homeSide && u >= homeU0 && u < homeU0 + homeN) {
+          if (u !== homeU0) continue;                                // the run was built with its first bay
+          const hb = runLo + (homeU0 + homeN) * UW, hMid = (a + hb) / 2;
+          const hrb = homeU0 + homeN === units ? runFaceHi : hb;
+          wallRun(crossAt, ra, hrb, hMid, 1.0);
+          const hn = u * sides.length + s;
+          const hLabel = "Unit " + (floorK + 1) + String.fromCharCode(65 + (hn % 26));
+          unitDoor(h, y, alongX ? "x" : "z", crossAt, hMid, 1.0, wallH, addr + ":" + hn, hLabel);
+          if (u > 0) { if (side < 0) wallCross(a, faceLo, cLo); else wallCross(a, cHi, faceHi); }
+          const cIn = side < 0 ? -1 : 1;
+          const c0 = side < 0 ? faceLo : cHi + PWT / 2, c1 = side < 0 ? cLo - PWT / 2 : faceHi;
+          const r0 = (u === 0 ? runFaceLo : a + PWT / 2), r1 = (homeU0 + homeN === units ? runFaceHi : hb - PWT / 2);
+          const lo = P(r0, c0), hi = P(r1, c1);
+          homeUnit = {
+            id: addr + ":" + hn, label: hLabel, n: hn, floor: floorK, y: y, home: true, bays: homeN,
+            x0: Math.min(lo.x, hi.x), x1: Math.max(lo.x, hi.x), z0: Math.min(lo.z, hi.z), z1: Math.max(lo.z, hi.z),
+            door: P(hMid, crossAt + cIn * PWT / 2),
+            inX: alongX ? 0 : cIn, inZ: alongX ? cIn : 0,
+            alongX: alongX, partyLo: u > 0, partyHi: homeU0 + homeN < units,
+          };
+          fitUnits.push(homeUnit);
+          // (its far party wall is the next flat's low one, or the close below)
+          for (let q = 1; q < homeN; q++) kept[key][u + q] = true;
+          continue;
+        }
         wallRun(crossAt, unitPlanner ? ra : a, unitPlanner ? rb : b2, mid, 1.0);   // the corridor wall...
         // ...and the flat's own LOCKED front door filling the gap in it. This
         // is the one interior wall the owner asked for by name: "locked
@@ -2382,8 +2440,11 @@
       alongX ? 0.3 : Math.min(runLen - 1.0, 14), P.light,
       { emissive: P.light, ei: 0.26, cast: false }));
     RES_TALLY.floors++; RES_TALLY.units += live; RES_TALLY.beds += beds.length;
-    return { anchors: anchors, beds: beds, units: live,
-             fit: { units: fitUnits, corridor: { alongX: alongX, runLo: runFaceLo, runHi: runFaceHi, cLo: cLo, cHi: cHi } } };
+    const fit = { units: fitUnits, corridor: { alongX: alongX, runLo: runFaceLo, runHi: runFaceHi, cLo: cLo, cHi: cHi } };
+    // (the home's storey is under the roof: its ceiling hangs at a house's
+    // height, clear of the wall head where the sun's shadow map lets go)
+    if (homeUnit) fit.ceilH = 2.62;
+    return { anchors: anchors, beds: beds, units: live, home: homeUnit, fit: fit };
   }
   const P_KIT = { body: 0x55606e, top: 0xc9ccd2 };   // existing kitchen buckets
   const RES_TALLY = { floors: 0, units: 0, beds: 0 };

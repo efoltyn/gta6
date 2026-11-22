@@ -7,7 +7,7 @@
    puts a building or a street inside their footprint + clear buffer.
 
    Runs the exact placement code the game runs, in plain node (no browser):
-     world/layout.js        the layout dial (where Fort Brandt actually is)
+     world/worldplan.js     the world plan (where Fort Brandt actually is)
      city/zoning.js         the protected sites + their buffers
      city/metro.js +        every planned city: Kingsport, Karvel, Gang City
      city/metroplan.js      West + North, the Goldspire / Cape Harbor / Neon
@@ -38,7 +38,7 @@ const argv = process.argv.slice(2);
 const SEEDS = (argv.indexOf("--seeds") >= 0 ? argv[argv.indexOf("--seeds") + 1] : "90210,1337,4242").split(",").map(Number);
 const VERBOSE = argv.includes("-v");
 const snap = JSON.parse(readFileSync(path.join(ROOT, "tools/metro-world-snapshot.json"), "utf8"));
-const SRC = ["src/world/layout.js", "src/city/zoning.js", "src/city/metroplan.js", "src/city/countryside.js", "src/city/metro.js"].map((f) => path.join(ROOT, f));
+const SRC = ["src/world/worldplan.js", "src/city/zoning.js", "src/city/metroplan.js", "src/city/countryside.js", "src/city/metro.js"].map((f) => path.join(ROOT, f));
 
 function boot(seed) {
   for (const f of SRC) delete require.cache[f];

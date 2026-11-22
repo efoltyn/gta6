@@ -2967,7 +2967,21 @@
       const lcx = -tx * (lw / 2) * L.side, lcz = -tz * (lw / 2) * L.side;
       const stile = Math.min(0.15, lw * 0.14), rail = Math.min(0.17, dh * 0.09);
       let leaf;
-      if (opts.glazed) {
+      const KIT = opts.home && CBZ.cityUnitDoors && CBZ.cityUnitDoors.leafGeometry ? CBZ.cityUnitDoors : null;
+      if (KIT) {
+        /* A HOUSE'S STREET DOOR: the panelled leaf every hinged door in the
+           city wears (interior_programs.js leafGeometry: stiles and rails,
+           six raised panels, a brass knob on its rose, hinge knuckles), in a
+           front-door paint. A pair of them fills the opening, as the Natural
+           Disaster island's houses have. The pivot, the collider and the
+           lock are the ones every street door has. */
+        const dxl = -tx * L.side, dzl = -tz * L.side, th = Math.atan2(-dzl, dxl);
+        const hf = (Math.sin(th) * nx + Math.cos(th) * nz) >= 0 ? 1 : -1;
+        const GK = KIT.leafGeometry(lw - 0.012, dh, hf);
+        leaf = new THREE.Mesh(GK.wood, CBZ.cmat(opts.paint != null ? opts.paint : 0x24503a));
+        const brass = new THREE.Mesh(GK.brass, CBZ.cmat(0xc9a45a));
+        for (const m of [leaf, brass]) { m.rotation.y = th; m.position.y = -dh / 2; m.castShadow = false; m.receiveShadow = true; pivot.add(m); }
+      } else if (opts.glazed) {
         // a glazed leaf is a FRAME with glass in it, not a slab behind glass
         const parts = [];
         const addF = function (wid, hei, lat, yy) {
@@ -3017,10 +3031,13 @@
         }
       }
       // a vertical push bar near the free edge, proud of the street face
-      const freeLat = -(lw - 0.12) * L.side;
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.05 : 0.04, dh * 0.4, along ? 0.04 : 0.05), doorBarMat());
-      bar.position.set(tx * freeLat + nx * outSgn * (slabT / 2 + 0.05), -0.02, tz * freeLat + nz * outSgn * (slabT / 2 + 0.05));
-      bar.castShadow = false; pivot.add(bar);
+      // (a house door has its knob)
+      if (!KIT) {
+        const freeLat = -(lw - 0.12) * L.side;
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.05 : 0.04, dh * 0.4, along ? 0.04 : 0.05), doorBarMat());
+        bar.position.set(tx * freeLat + nx * outSgn * (slabT / 2 + 0.05), -0.02, tz * freeLat + nz * outSgn * (slabT / 2 + 0.05));
+        bar.castShadow = false; pivot.add(bar);
+      }
       L.pivot = pivot; L.leaf = leaf;
       made.push(L);
     }
@@ -3042,6 +3059,7 @@
       inx: nx, inz: nz,                            // inward normal (for proximity test)
       leaf: made[0].leaf, rails: made[0].rails || null,   // so a facade can paint this door
       glazed: !!opts.glazed, recess: rec0,
+      home: !!opts.home,                            // a house's own door: left as it is left (see the opener)
     };
     if (made[1]) { rec.pivot2 = made[1].pivot; rec.maxAng2 = -made[1].side * 1.66; rec.leaf2 = made[1].leaf; rec.rails2 = made[1].rails || null; }
     cityDoors.push(rec);
@@ -3074,6 +3092,12 @@
     // Horizontal-only proximity made every storefront under a flying B-2 open:
     // a person/car may operate a ground door; an aircraft never may, and the
     // player's body must agree with the door's physical floor in Y.
+    // a house's door is WALKED INTO (it does not sweep open from across the
+    // yard like a shop's): within a stride of the leaf, in its opening
+    if (P && dr.home && !player.driving && !player._aircraft) {
+      const ax = P.x - dr.wx, az = P.z - dr.wz;
+      return Math.abs(P.y - doorWorldY(dr)) < 3.5 && Math.abs(ax * dr.inx + az * dr.inz) < 1.3 && Math.abs(az * dr.inx - ax * dr.inz) < 1.0;
+    }
     return !!(P && !player._aircraft &&
       Math.abs(P.y - doorWorldY(dr)) < (player.driving ? 5.5 : 3.5) &&
       doorNearActor(dr, P.x, P.z, player.driving ? 4.6 : 1.7));
@@ -3105,7 +3129,7 @@
     // A HOUSE DOOR YOU HOLD NO KEY TO stays shut for you (city/realestate.js
     // stamps _playerLock on a house's street door: the lockbox key off its
     // FOR SALE sign, the deed, or the lease opens it).
-    if (playerAtDoor(dr) && !(dr._playerLock && dr._playerLock(dr))) return true;
+    if (!dr.noAuto && playerAtDoor(dr) && !(dr._playerLock && dr._playerLock(dr))) return true;
     if (includeCars && CBZ.cityCars) {
       for (let k = 0; k < CBZ.cityCars.length; k++) {
         const c = CBZ.cityCars[k]; if (!c || c.dead || !c.pos) continue;
@@ -3178,7 +3202,14 @@
       const wasOpen = dr.open;
       const playerNear = playerAtDoor(dr);
       const near = doorOccupied(dr, true);
-      if (near) { dr.open = true; dr.hold = 1.8; }
+      /* A HOUSE'S DOOR STAYS WHERE YOU LEAVE IT (the Natural Disaster island's
+         rule: nothing closes a door but a person). Walk into it and it is
+         shoved open and stays open; E at it shuts it (city/house_plan.js's
+         verb sets stay / noAuto), and it then keeps shut until you step away
+         and come at it again. Somebody else going through shuts it behind. */
+      if (dr.home && dr.noAuto && !playerNear) dr.noAuto = false;
+      if (near) { dr.open = true; dr.hold = 1.8; if (dr.home && playerNear && !dr.noAuto && !(dr._playerLock && dr._playerLock(dr))) dr.stay = true; }
+      else if (dr.stay) { /* left open */ }
       else if (dr.hold > 0) { dr.hold -= dt; if (dr.hold <= 0) dr.open = false; }
       if (dr.open !== wasOpen) {
         if (dr.open) dr.playerSoundCycle = playerNear;
@@ -3230,7 +3261,7 @@
   // restore every door to CLOSED for a new game (collider back in place)
   CBZ.cityDoorsReset = function () {
     for (const dr of cityDoors) {
-      dr.open = false; dr.hold = 0; dr.t = 0; dr.playerSoundCycle = false; dr.pivot.rotation.y = 0;
+      dr.open = false; dr.hold = 0; dr.t = 0; dr.playerSoundCycle = false; dr.pivot.rotation.y = 0; dr.stay = false; dr.noAuto = false;
       if (dr.pivot2) dr.pivot2.rotation.y = 0;
       if (dr.demolished) continue;                 // demolition owns this door's collider until rebuilt
       if (!dr.colIn) { if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliders.push(dr.col); dr.colIn = true; }
@@ -4689,8 +4720,11 @@
       {
         const dr = makeDoorPanel(bgroup, ox, oz, localDoor, DOORW, {
           recess: FO.DOOR.LEAF_RECESS, y0: 0.155, y1: leafTop,
-          double: doorKind === "lobby" || doorKind === "office",
+          double: doorKind === "lobby" || doorKind === "office" || doorKind === "house" || doorKind === "townhouse",
           glazed: doorKind === "office" || doorKind === "shop",
+          // a house: a pair of panelled leaves in a front-door paint
+          home: doorKind === "house" || doorKind === "townhouse",
+          paint: FO.DOOR_PAINTS ? FO.DOOR_PAINTS[(h01b(0x1d4) * FO.DOOR_PAINTS.length) | 0] : null,
           weathered: doorKind === "derelict" });
         if (dr) doorRecs.push(dr);
       }
@@ -6749,7 +6783,25 @@
   }
   CBZ.cityFurnishInterior = function (b, kind, door) { furnishInterior(b, kind, door); };
 
-  function furnishHome(b, rng, tier, baseY) {
+  /* THE LISTED HOME ON A TOWER'S TOP STOREY IS A FLAT ON THAT FLOOR, not the
+     whole 27 m plate. The storey is a corridor of flats like the ones under
+     it (interior_programs.js "residential"); one of them, a run of bays for
+     the bigger rungs of the ladder, is the home, and it gets a floor plan of
+     its own (city/house_plan.js furnishUnit: entry, living room and kitchen,
+     bedrooms, a bathroom) and the house fit-out. A plate that cannot be a
+     corridor of flats keeps the whole-plate dressing below. */
+  function furnishHome(b, rng, tier, baseY, lot) {
+    const HK = CBZ.cityHouse;
+    if (HK && HK.furnishUnit && interiorsV2() && CBZ.CONFIG.INTERIOR_COHERENCE_V1 !== false && baseY > 1) {
+      const t = (tier && tier.tier) || 1;
+      let res = null;
+      try { res = dressFloorWith(b, baseY, "residential", { home: { bays: t >= 4 ? 3 : t >= 3 ? 2 : 1 } }); } catch (e) { res = null; }
+      if (res) {
+        if (res.beds && res.beds.length) declareResidents(b, res.beds);
+        if (res.home) { try { HK.furnishUnit(b, lot || null, res.home); } catch (e) { if (window.console) console.warn("[home flat]", e); } }
+        return;
+      }
+    }
     return bounded(b, "home", function () { return furnishHomeBody(b, rng, tier, baseY); });
   }
   function furnishHomeBody(b, rng, tier, baseY) {
@@ -8900,18 +8952,27 @@
           const lotRef = lot, stC = storeys, colC = color, sideC = side, dkC = dk, sbC = setback, wC = w, dC = d, tierC = tierDef;
           homeCell(lot, function () {
             const hl = HLOT;
+            // A HOUSE ON A HOUSE LOT IS A HOUSE INSIDE TOO (city/house_plan.js):
+            // its own stair instead of a block's service core, and below, in
+            // place of the flat on every floor, a house's floor plan
+            const houseK = hl && CBZ.cityHouse && stC <= 4 ? CBZ.cityHouse : null;
             const bb = makeBuilding(root, hl ? hl.x : lotRef.cx, hl ? hl.z : lotRef.cz, wC, dC, stC, colC, sideC,
-              hl ? { district: dkC, facade: "office", dress: streetDress(lotRef, stC, false) || false }
+              hl ? { district: dkC, facade: "office", dress: streetDress(lotRef, stC, false) || false, stairs: houseK ? false : undefined }
                  : { district: dkC, facade: "office", dress: streetDress(lotRef, stC, false) || false, reach: sbC });
             const topY2 = (stC - 1) * FH;
-            furnishHome(bb, rng, tierC, topY2);
-            const pool2 = (tierC.tier >= 4 && stC >= 3) ? Math.max(1, Math.min(stC - 2, stC - 2)) : -1;
-            for (let k = 0; k < stC - 1; k++) {
-              if (k === pool2) furnishPoolFloor(bb, k * FH);
-              else furnishApartmentFloor(bb, k * FH, (lotRef.i | 0) * 5 + (lotRef.j | 0) * 3 + k);
+            const pool2 = (!houseK && tierC.tier >= 4 && stC >= 3) ? Math.max(1, Math.min(stC - 2, stC - 2)) : -1;
+            if (!houseK) {
+              furnishHome(bb, rng, tierC, topY2, lotRef);
+              for (let k = 0; k < stC - 1; k++) {
+                if (k === pool2) furnishPoolFloor(bb, k * FH);
+                else furnishApartmentFloor(bb, k * FH, (lotRef.i | 0) * 5 + (lotRef.j | 0) * 3 + k);
+              }
             }
             resFacade(bb, sideC, wC, dC, bb.wallColor != null ? bb.wallColor : colC, lotRef);
-            if (hl) { try { CBZ.houseLot.dress(root, Object.assign({}, hl, { y: city.street && city.street.yLot != null ? city.street.yLot : 0.03 })); } catch (e) {} }
+            if (hl) {
+              const hw = houseK ? houseK.wealth(lotRef) : 0.5;
+              try { CBZ.houseLot.dress(root, Object.assign({}, hl, { y: city.street && city.street.yLot != null ? city.street.yLot : 0.03, storeys: stC, wealth: hw, tier: houseK ? houseK.tierOf(hw) : "mid", lot: lotRef })); } catch (e) {}
+            }
             // the record keeps what it said (door, home, owner...); the shell's fields join it
             // (the data keys are the ones it had before its first shell: a re-run
             // after the streamer freed it must take the NEW shell's fields)
@@ -8921,6 +8982,7 @@
             Object.assign(rec, bb, keep);
             rec.deferred = false;
             if (pool2 >= 1) rec.poolY = pool2 * FH;
+            if (houseK) { try { houseK.furnish(rec, lotRef); } catch (e) { console.warn("[house]", e); } }
           });
           homeLots.push(lot);
           placed.push(lot);
@@ -8934,7 +8996,7 @@
         // meant a bare plate). Every storey under it gets the generic
         // apartment dresser so the stair climb passes lived-in rooms.
         const topY = (storeys - 1) * FH;
-        furnishHome(b, rng, tierDef, topY);
+        furnishHome(b, rng, tierDef, topY, lot);
         // MANSION-tier homes (tier>=4, 3+ storeys) get a dedicated indoor POOL
         // floor just below the top home floor — the owner's explicit ask. Clamped
         // to a real interior storey (never ground or top); every other storey is a

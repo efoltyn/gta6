@@ -1019,6 +1019,7 @@
     for (const c of cars) {
       if (!c || c.dead || c.player || !c.group) continue;
       if (!c._rbBar && !c._patrolCar && !c._cruiser) continue;   // marked units only
+      if (seats() && !arrestSeatId(c, null)) continue;            // no free back seat
       const dd = (c.pos.x - P.pos.x) * (c.pos.x - P.pos.x) + (c.pos.z - P.pos.z) * (c.pos.z - P.pos.z);
       if (dd < bd) { bd = dd; best = c; }
     }
@@ -1027,10 +1028,15 @@
     // NOBODY WATCHES A CRUISER APPEAR. roadPick is the only sanctioned way to
     // put a vehicle on a road here, and `unseen` is its view-cone test — a unit
     // rolls up from off-screen, it does not materialise at your elbow.
-    const spot = CBZ.roadPick ? CBZ.roadPick({
-      near: { x: P.pos.x, z: P.pos.z }, minDist: 14, maxDist: 46,
-      cls: "emergency", unseen: true, tries: 20,
-    }) : null;
+    // ...and when no lane that close is out of view (a tasered man lying in
+    // an open square), the unit comes from further down the road: a car
+    // rolling up from 100 m beats a perp walk across half the city.
+    let spot = null;
+    if (CBZ.roadPick) {
+      spot = CBZ.roadPick({ near: { x: P.pos.x, z: P.pos.z }, minDist: 14, maxDist: 46, cls: "emergency", unseen: true, tries: 20 })
+        || CBZ.roadPick({ near: { x: P.pos.x, z: P.pos.z }, minDist: 20, maxDist: 110, cls: "emergency", unseen: true, tries: 30 })
+        || CBZ.roadPick({ near: { x: P.pos.x, z: P.pos.z }, minDist: 30, maxDist: 110, tries: 30 });
+    }
     if (!spot) return null;
     const x = spot.x, z = spot.z, heading = spot.heading, vertical = !!spot.vertical;
     let car = null;
@@ -1236,6 +1242,7 @@
       // in custody, and serving the stretch walks you out clean
       if (CBZ.cityWantedReset) { try { CBZ.cityWantedReset(); } catch (e) {} }
       if (CBZ.cityClearConvict) { try { CBZ.cityClearConvict(); } catch (e) {} }
+      g._arrestIntake = true;                     // systems/state.js: no aerial opening
       try { toJail(); } catch (e) { console.error("[arrest] to prison", e); }
       setTimeout(function () {
         el.textContent = "";
@@ -1716,6 +1723,21 @@
         return;
       }
       const target = (!sc._atGate && gate.gate) ? gate.gate : (gate.desk || gate);
+      // NOBODY WALKS A PRISONER ACROSS TOWN. Far from the door with no unit:
+      // keep calling one, and the moment it is there, the walk is to its door.
+      if (!sc.car && P && Math.hypot(target.x - P.pos.x, target.z - P.pos.z) > 45) {
+        sc._unitT = (sc._unitT || 0) - dt;
+        if (sc._unitT <= 0) {
+          sc._unitT = 2;
+          const found = findCruiser(P, cop);
+          if (found) {
+            if (sc.take && !sc.take.done) { sc.take.path = null; }
+            sc.car = found.car; sc.ourCar = found.ours; sc.car.ai = false; sc.car._arrestRide = true; sc.car.v = 0;
+            sc.phase = "walk"; sc.t = 0; sc._cap = null; sc._seatId = null; sc._inCap = null; sc._walkTake = false; sc._unitT = 0;
+            return;
+          }
+        }
+      }
       // cuffed and walked in by the take (a fresh one after the ride)
       const AR = CBZ.arrest;
       if (!sc.take && !sc._walkTake && AR && AR.take && cop && !cop.dead) {
@@ -1831,7 +1853,9 @@
   // the kerb-side back seat (the car's right), else the other back seat, else up front
   function arrestSeatId(car, prefer) {
     const S = seats(); if (!S || !car) return null;
-    const order = prefer === "rearL" ? ["rearL", "rearR", "shotgun"] : ["rearR", "rearL", "shotgun"];
+    // a prisoner rides in the BACK, behind the cage: never up front beside
+    // the officer (a unit with both rear seats taken is not his ride)
+    const order = prefer === "rearL" ? ["rearL", "rearR"] : ["rearR", "rearL"];
     for (let i = 0; i < order.length; i++) {
       if (S.seat(car, order[i]) && !S.occupant(car, order[i])) return order[i];
     }
@@ -2020,6 +2044,7 @@
   function startRideCamera(sc) {
     if (!CBZ.cinePlay || (CBZ.cineBusy && CBZ.cineBusy())) return;
     const carOf = () => sc.car;
+    if (sc.car) fitCage(sc.car);
     const shot = (ox, oy, oz, lx, ly, lz) => function () {
       const car = carOf(); if (!car) return null;
       const h = car.heading, fx = Math.sin(h), fz = Math.cos(h), rx = Math.cos(h), rz = -Math.sin(h);
@@ -2028,18 +2053,56 @@
         look: { x: car.pos.x + rx * lx + fx * lz, y: (car.pos.y || 0) + ly, z: car.pos.z + rz * lx + fz * lz },
       };
     };
+    // THE BACK SEAT, FROM THE FRONT. The lens sits between the front seats at
+    // eye height and looks back through the cage at you on the bench, the
+    // side window behind you and the street going past it. Read off the real
+    // seat model, so it is right in any cruiser body.
+    const backSeat = function () {
+      const car = carOf(), S = seats();
+      const me = car && S && sc.seated ? S.seat(car, sc.seated) : null;
+      const dr = car && S ? S.seat(car, "driver") : null;
+      if (!me || !dr) return shot(0, 1.3, 0.2, -0.42, 1.0, -0.78)();
+      const eyeY = (me.eye && me.eye.y) || (me.cushionY || 0.5) + 0.62;
+      return shot(-me.x * 0.35, eyeY + 0.1, dr.z - 0.05, me.x * 1.15, eyeY - 0.18, me.z)();
+    };
     const steps = [
-      // pulling away — held from the kerb, the street watching you go
+      // pulling away, held from the kerb, the street watching you go
       { dur: LEG_T * 0.55, track: true, cam: shot(4.6, 2.4, -7.0, 0, 1.0, 0) },
-      // CUT to the back bench: the ride is a sealed interior, and the whole
-      // world handoff happens behind this shot (the elevator law).
-      { dur: LEG_T * 1.1, cut: true, track: true, hideRig: false, cam: shot(-0.42, 1.15, -0.9, 0.1, 0.9, 6.0) },
-      // the gate coming up through the windscreen. Deliberately longer than the
-      // drive needs: the arc aborts the scene the moment you are out of the
-      // car, so the lens can never expire mid-ride and snap back inside a boot.
-      { dur: RIDE_MAX + 10, track: true, cam: shot(-1.9, 1.5, -3.2, 0, 1.0, 5.0) },
+      // CUT inside: you in the back, behind the cage, the city in the window
+      { dur: 9, cut: true, track: true, rigid: true, hideRig: false, cam: backSeat },
+      // the car in the street, from behind
+      { dur: 10, cut: true, track: true, cam: shot(-1.9, 1.5, -3.2, 0, 1.0, 5.0) },
+      // and back inside for the rest of the drive. Deliberately longer than
+      // the drive: the arc aborts the scene the moment you are out of the car.
+      { dur: RIDE_MAX + 10, cut: true, track: true, rigid: true, hideRig: false, cam: backSeat },
     ];
     sc.cine = CBZ.cinePlay(steps, { ride: sc }, function () { sc.cine = false; }, { noHolster: false });
+  }
+
+  /* THE CAGE. A unit that carries a prisoner has the partition between the
+     front seats and the back bench: a frame and bars, fitted to the seat
+     model of that body the first time it carries somebody. */
+  let cageMat = null;
+  function fitCage(car) {
+    if (!car || !car.group || car._cage || !window.THREE) return;
+    const S = seats();
+    const dr = S && S.seat(car, "driver"), rr = S && (S.seat(car, "rearR") || S.seat(car, "rearL"));
+    if (!dr || !rr) return;
+    const T = window.THREE;
+    if (!cageMat) cageMat = new T.MeshStandardMaterial({ color: 0x1c1f24, metalness: 0.6, roughness: 0.45 });
+    const z = (dr.z + rr.z) * 0.5 + 0.08;
+    const half = Math.max(Math.abs(dr.x), Math.abs(rr.x)) + 0.28;
+    const y0 = Math.max(0.35, (rr.cushionY || 0.5) + 0.05);
+    const y1 = Math.max(y0 + 0.5, (rr.roofY || dr.roofY || 1.4) - 0.06);
+    const g = new T.Group(); g.name = "prisoner_cage";
+    const box = (w, h, d, x, y) => { const m = new T.Mesh(new T.BoxGeometry(w, h, d), cageMat); m.position.set(x, y, z); g.add(m); };
+    box(half * 2, 0.05, 0.05, 0, y1);              // the frame
+    box(half * 2, 0.05, 0.05, 0, y0);
+    box(half * 2, 0.04, 0.04, 0, (y0 + y1) * 0.5);
+    const n = 13;
+    for (let i = 0; i <= n; i++) box(0.022, y1 - y0, 0.022, -half + (2 * half) * i / n, (y0 + y1) * 0.5);
+    car.group.add(g);
+    car._cage = g;
   }
 
   /* THE RIDE DRIVES THE STREETS (owner, 2026-10-22: "when a cop car is taking

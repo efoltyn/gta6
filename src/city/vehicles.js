@@ -8252,6 +8252,11 @@
         seatCar(c, dt);
         continue;
       }
+      // a highway bend starting here (highwaynet.js): the curve is the road
+      if (r.district === "highway" && !c.turning && !c.pullover && !c.roadRageTarget && takeBend(c, r, moveAxisZ)) {
+        seatCar(c, dt);
+        continue;
+      }
 
       // approaching the end of the road: commit to turning off at the next
       // intersection; if there is none left, U-TURN at the dead end (swing into
@@ -8558,6 +8563,42 @@
     }
     return out;
   };
+  /* HIGHWAY BENDS (city/highwaynet.js CBZ.highwayBendFor). Between two
+     axis-aligned legs the deck sweeps a wide corner or an S-bend; a car
+     reaching the curve's tangent point drives the deck's own centreline,
+     offset by its lane, onto the next leg (same lane index). Always taken:
+     there is no other road to stay on. */
+  function takeBend(c, r, moveAxisZ) {
+    const e = CBZ.highwayBendFor ? CBZ.highwayBendFor(r, c.dirSign) : null;
+    if (!e) return false;
+    const carAlong = moveAxisZ ? c.pos.z : c.pos.x;
+    const d = (e.along - carAlong) * c.dirSign;
+    if (d > 0 || d < -60) return false;
+    const P = e.pts, n = P.length;
+    // the car's lateral offset, measured on the left normal of its travel
+    const tx0 = moveAxisZ ? 0 : c.dirSign, tz0 = moveAxisZ ? c.dirSign : 0;
+    const latX = moveAxisZ ? c.pos.x - r.x : 0, latZ = moveAxisZ ? 0 : c.pos.z - r.z;
+    const off = latX * -tz0 + latZ * tx0;
+    const poly = [{ x: c.pos.x, z: c.pos.z }];
+    for (let k = 1; k < n - 1; k++) {
+      const a = P[k - 1], b = P[k + 1], L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      const tx = (b.x - a.x) / L, tz = (b.z - a.z) / L;
+      poly.push({ x: P[k].x - tz * off, z: P[k].z + tx * off });
+    }
+    const X = e.exit, vert = !!X.vertical, idx = c.laneIdx != null ? c.laneIdx : 0;
+    const lane = laneOffset(X, e.exitDir, idx);
+    const outAlong = e.exitAlong + e.exitDir * 4;
+    const endP = vert ? { x: X.x + lane, z: outAlong } : { x: outAlong, z: X.z + lane };
+    poly.push(endP);
+    const cum = [0];
+    for (let k = 1; k < poly.length; k++) cum.push(cum[k - 1] + Math.hypot(poly[k].x - poly[k - 1].x, poly[k].z - poly[k - 1].z));
+    c.turning = { poly: poly, cum: cum, seg: 0, len: cum[cum.length - 1], t: 0, P2: endP,
+      road: X, vertical: vert, dirSign: e.exitDir, lane: lane, laneIdx: idx,
+      endH: vert ? (e.exitDir > 0 ? 0 : Math.PI) : (e.exitDir > 0 ? Math.PI / 2 : -Math.PI / 2),
+      vMax: 31 };                                         // a 750 m sweep is taken at cruise
+    c._mustTurn = false;
+    return true;
+  }
   function trySlip(c, r, moveAxisZ) {
     const E = slipEntries();
     if (!E || !E.length) return false;

@@ -12,10 +12,12 @@
    open at that landing (the roof, with the whole city under you).
    You walk in; you walk out. The alcove lives INSIDE on purpose: a lift you
    board off the sidewalk reads like a prop, one you walk a lobby
-   to reads like a building. Cops and peds have no shaft — the lift
-   is a clean ESCAPE (the closed doors are a real collider, so
-   nothing follows you in) — while the fire escapes are the LOUD
-   way up: open stairs anyone can chase you on.
+   to reads like a building. The street crowd never takes the lift on
+   its own (the closed doors are a real collider), so it is still the
+   quiet way up; but a body with a reason to follow you can be sent up
+   in it (CBZ.cityLiftSend: the same machine, the same doors), and you
+   hear the machine and the floor chime from outside the car. The fire
+   escapes are the LOUD way up: open stairs anyone can chase you on.
    Both rigs read the lot's door-face data first: the lobby alcove
    picks an interior wall clear of the door aisle / stair strip /
    counter stamps, and a fire escape never hangs on (or across the
@@ -1067,14 +1069,26 @@
   function travel(el, m, dt, P) {
     const riding = m.st === "ride", from = m.at, to = m.dest;
     const dur = riding ? rideTime(el, from, to) : comeTime(el, from, to);
+    if (m.t <= dt + 1e-6) motorStart(el, dur);       // the machine in the headhouse, heard from outside the car
     if (!riding) return m.t >= dur;
     const p = Math.min(1, m.t / dur), env = rideEnvelope(p);
-    if (m.t <= dt + 1e-6) { shakeT = 0; humT = 0; if (CBZ.shake) CBZ.shake(0.2); }
-    shakeT += dt;
-    if (shakeT > 0.32) { shakeT = 0; if (CBZ.shake) CBZ.shake(0.025 + 0.075 * env); }
-    humT += dt;
-    if (humT > (1.4 - 0.5 * env) && CBZ.sfx) { humT = 0; CBZ.sfx("rumble"); }
-    if (!m.moved && m.t >= dur * 0.5 && P) { swap(el, from, to, P); m.moved = true; }
+    // the shake, the cab rumble and the relocation are the RIDER's: with a
+    // scripted body in the car and the player on the roof, the old
+    // unconditional swap pulled the player into a car he was not in
+    const aboard = !!P && (m.moved ? insideCab(el, to, P) : insideCab(el, from, P));
+    if (aboard) {
+      if (m.t <= dt + 1e-6) { shakeT = 0; humT = 0; if (CBZ.shake) CBZ.shake(0.2); }
+      shakeT += dt;
+      if (shakeT > 0.32) { shakeT = 0; if (CBZ.shake) CBZ.shake(0.025 + 0.075 * env); }
+      humT += dt;
+      if (humT > (1.4 - 0.5 * env) && CBZ.sfx) { humT = 0; CBZ.sfx("rumble"); }
+    }
+    if (!m.moved && m.t >= dur * 0.5) {
+      if (aboard) swap(el, from, to, P);
+      const rd = el.rider;
+      if (rd && rd.body && insideCab(el, from, rd.body)) swapBody(el, from, to, rd.body);
+      m.moved = true;
+    }
     // the panel's floor display counts THROUGH toward the destination
     const f0 = el.stops[from].no, f1 = el.stops[to].no;
     el.tick = { fl: Math.round(f0 + (f1 - f0) * p), up: f1 > f0 };
@@ -1082,21 +1096,274 @@
   }
 
   function ioFor(el, P) {
+    const rb = el.rider && el.rider.body ? el.rider.body : null;      // a scripted body using the lift (below)
     return {
-      inside: (i) => insideCab(el, i, P),
-      doorway: (i) => inDoorway(el, i, P),
+      inside: (i) => insideCab(el, i, P) || (!!rb && insideCab(el, i, rb)),
+      doorway: (i) => inDoorway(el, i, P) || (!!rb && inDoorway(el, i, rb)),
       doorOpen: (i) => el.stops[i].rig.open,
-      door: (i, open) => setDoorTarget(el.stops[i].rig, open, nearStop(el.stops[i], P)),
+      door: (i, open) => {
+        const s = el.stops[i], near = nearStop(s, P);
+        // out of the old 10 m "at this cab" circle the doors still have a place
+        if (setDoorTarget(s.rig, open, near) && !near && P && P.pos && CBZ.sfxAt) {
+          CBZ.sfxAt(open ? "door_open" : "door_close", s.pad.x, s.pad.z, { y: s.base + 1.2, volume: 0.7, ghost: true, force: true });
+        }
+      },
       seal: (i) => gateDoor(el.stops[i].rig),
       travel: (m, dt) => travel(el, m, dt, P),
       // riding: a new floor is taken until the halfway swap (the sealed cab
       // has not "passed" anything before it)
       reach: (m, j) => !m.moved && j !== m.at,
-      arrive: (i, rode) => { if (rode && CBZ.shake) CBZ.shake(0.25); },
+      arrive: (i, rode) => { if (rode && CBZ.shake && P && insideCab(el, i, P)) CBZ.shake(0.25); },
       lit: (on) => setLit(el, on),
-      sfx: (s) => { if (CBZ.sfx && nearStop(el.stops[el.m.at], P)) CBZ.sfx(s); },
+      // "blip" was the arrival and no such cue exists (an unmapped-sfx warning
+      // and silence): the car's arrival is the floor chime, at the landing
+      sfx: (s) => {
+        if (s === "blip") { const st = el.stops[el.m.dest >= 0 ? el.m.dest : el.m.at]; if (st) liftChime(st.pad.x, st.base + 2.6, st.pad.z); return; }
+        if (CBZ.sfx && nearStop(el.stops[el.m.at], P)) CBZ.sfx(s);
+      },
     };
   }
+
+  // ---- THE LIFT'S OWN VOICE ------------------------------------------------
+  // A lift you are not standing at was silent: every cue was gated on "the
+  // player is within 10 m of this cab", and the arrival cue did not exist. A
+  // lift is something you HEAR working from the next room, the corridor, the
+  // roof: the traction machine in the headhouse over the shaft, and the
+  // chime when a car lands. Both are synthesized into the sfx bus and placed:
+  // level falls with distance, and a storey of concrete between you and it
+  // takes the top off (a low-pass), so "below me" and "on this floor" differ.
+  function ear() { const P = CBZ.player; return P && P.pos ? P.pos : (CBZ.camera ? CBZ.camera.position : null); }
+  function voiceAt(x, y, z, ref) {
+    const e = ear(); if (!e) return null;
+    const dy = y - ((e.y || 0) + 1.6);
+    const d = Math.hypot(x - e.x, dy, z - e.z);
+    const level = 1 / (1 + (d / (ref || 7)) * (d / (ref || 7)));
+    return { d: d, level: level, cut: Math.abs(dy) > 2.4 ? Math.max(380, 2400 - Math.abs(dy) * 110) : 6000 };
+  }
+  function liftChime(x, y, z) {
+    const ctx = CBZ.getAudioCtx && CBZ.getAudioCtx(), bus = CBZ.audioSfxBus && CBZ.audioSfxBus();
+    const v = voiceAt(x, y, z, 9);
+    if (!ctx || !bus || !v || v.level < 0.012) return;
+    const t = ctx.currentTime;
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = v.cut;
+    lp.connect(bus);
+    // one struck bar: a fundamental and two inharmonic partials, a long tail
+    const part = [[1174.7, 0.11, 1.5], [2349.3, 0.035, 0.7], [3165, 0.018, 0.4]];
+    for (let i = 0; i < part.length; i++) {
+      const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = part[i][0];
+      const gn = ctx.createGain();
+      gn.gain.setValueAtTime(0, t);
+      gn.gain.linearRampToValueAtTime(part[i][1] * v.level, t + 0.006);
+      gn.gain.exponentialRampToValueAtTime(0.0001, t + part[i][2]);
+      o.connect(gn); gn.connect(lp);
+      o.start(t); o.stop(t + part[i][2] + 0.05);
+    }
+  }
+  CBZ.cityLiftChime = liftChime;
+  // the machine: a hum under a faint gear whine, for as long as the car moves
+  let motor = null;
+  function motorStop() {
+    const mv = motor; motor = null;
+    if (!mv) return;
+    try {
+      const t = mv.ctx.currentTime;
+      mv.out.gain.cancelScheduledValues(t); mv.out.gain.setTargetAtTime(0.0001, t, 0.12);
+      for (let i = 0; i < mv.osc.length; i++) mv.osc[i].stop(t + 0.6);
+    } catch (e) {}
+  }
+  function motorStart(el, dur) {
+    const ctx = CBZ.getAudioCtx && CBZ.getAudioCtx(), bus = CBZ.audioSfxBus && CBZ.audioSfxBus();
+    const top = el.stops[el.stops.length - 1], P = CBZ.player;
+    if (!ctx || !bus || !top) return;
+    // in the car you hear the car (the rumble cue above), not the headhouse
+    if (P && (insideCab(el, el.m.at, P) || (el.m.dest >= 0 && insideCab(el, el.m.dest, P)))) return;
+    const v = voiceAt(top.pad.x, top.base + 2.6, top.pad.z, 11);
+    if (!v || v.level < 0.01) return;
+    motorStop();
+    const t = ctx.currentTime;
+    const out = ctx.createGain(); out.gain.setValueAtTime(0.0001, t);
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = Math.min(v.cut, 1400);
+    lp.connect(out); out.connect(bus);
+    const osc = [];
+    const voice = function (type, f0, f1, g) {
+      const o = ctx.createOscillator(); o.type = type;
+      o.frequency.setValueAtTime(f0 * 0.6, t);
+      o.frequency.linearRampToValueAtTime(f0, t + Math.min(0.5, dur * 0.3));
+      o.frequency.linearRampToValueAtTime(f1, t + dur);
+      const gn = ctx.createGain(); gn.gain.value = g;
+      o.connect(gn); gn.connect(lp); o.start(t); osc.push(o);
+    };
+    voice("sawtooth", 49, 46, 0.5);
+    voice("triangle", 98, 92, 0.3);
+    voice("sine", 412, 398, 0.07);                    // the gear whine
+    motor = { ctx: ctx, out: out, lp: lp, osc: osc, el: el, x: top.pad.x, y: top.base + 2.6, z: top.pad.z, end: t + dur };
+    out.gain.linearRampToValueAtTime(0.16 * v.level, t + 0.18);
+  }
+  function motorTick() {
+    const mv = motor; if (!mv) return;
+    const t = mv.ctx.currentTime;
+    if (t >= mv.end || g.mode !== "city") { motorStop(); return; }
+    const v = voiceAt(mv.x, mv.y, mv.z, 11);
+    if (!v) return;
+    try {
+      mv.out.gain.setTargetAtTime(Math.max(0.0001, 0.16 * v.level), t, 0.15);
+      mv.lp.frequency.setTargetAtTime(Math.min(v.cut, 1400), t, 0.2);
+    } catch (e) {}
+  }
+
+  // ======================================================================
+  //  SOMEBODY ELSE RIDES IT — CBZ.cityLiftSend(lot, body, to)
+  //
+  //  The header of this file says "cops and peds have no shaft". That made
+  //  every roof in the city a place nobody could follow you to: the stair
+  //  cores stop a storey under a crowned roof, and the lift was the player's
+  //  alone. A scripted body now rides the SAME machine the player does: he
+  //  presses Call at his landing (the car comes if it is elsewhere, the doors
+  //  open), walks in, presses a floor, the doors shut, the car runs, the
+  //  doors open at the far end and he walks out onto that landing. Nothing
+  //  about the trip is special to him: the same LiftCore states, the same
+  //  doors and collider, the same mid-ride relocation inside the sealed car.
+  //
+  //    const ride = CBZ.cityLiftSend(lot, ped, to)     to: stop index, or
+  //                                                    "roof" / "ground"
+  //    ride.phase   call | board | shut | ride | exit | done | fail
+  //    ride.done    true once he stands on the far landing (or it failed)
+  //    ride.cancel()
+  //  The body must be a city ped standing within a few metres of the lift's
+  //  landing on his own level. While he is in the car this file owns his feet
+  //  (ped._boardOwn: the crowd brain and mover skip him) and gives him back
+  //  on the far landing. One rider per lift; a second request fails.
+  // ======================================================================
+  function swapBody(el, from, to, B) {
+    const a = el.stops[from], b2 = el.stops[to];
+    const L = a.loc(B.pos.x, B.pos.z);
+    const pt = b2.pt(clamp(L.lat, -0.7, 0.7), clamp(L.dep, 0.35, b2.door - 0.5));
+    B.pos.set(pt.x, b2.floor + 0.02, pt.z);
+    if (B.target && B.target.set) B.target.set(pt.x, 0, pt.z);
+    if (a.fwd && b2.fwd && B.group) B.group.rotation.y += Math.atan2(b2.fwd.x, b2.fwd.z) - Math.atan2(a.fwd.x, a.fwd.z);
+    // (occupy.js's floor sweep must not pull him back to the storey he left)
+    if (B._occupyY != null) B._occupyY = 0;
+  }
+  function stopOfBody(el, B) {
+    let best = -1, bd = 1.6;
+    for (let i = 0; i < el.stops.length; i++) { const dy = Math.abs(B.pos.y - el.stops[i].base); if (dy < bd) { bd = dy; best = i; } }
+    return best;
+  }
+  function riderWalk(B, x, z, y, dt, speed) {
+    const dx = x - B.pos.x, dz = z - B.pos.z, d = Math.hypot(dx, dz);
+    const stepLen = Math.min(d, speed * dt);
+    if (d > 1e-4) {
+      B.pos.x += dx / d * stepLen; B.pos.z += dz / d * stepLen;
+      if (B.group) {
+        const want = Math.atan2(dx, dz);
+        let dy = want - B.group.rotation.y; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
+        B.group.rotation.y += dy * Math.min(1, dt * 12);
+      }
+    }
+    B.pos.y = y;
+    B.speed = d > 0.05 ? speed : 0;
+    if (CBZ.animChar && B.char) CBZ.animChar(B.char, d > 0.05 ? speed : 0, dt);
+    return d - stepLen;
+  }
+  // the landing's own walk height outside the car (the lobby floor, the roof deck)
+  function landY(x, z, st) {
+    const gy = CBZ.groundAt ? CBZ.groundAt(x, z, st.base + 0.6) : st.base;
+    return Math.abs(gy - st.base) < 0.7 ? gy : st.base;
+  }
+  function riderEnd(el, why) {
+    const rd = el.rider; if (!rd) return;
+    el.rider = null;
+    rd.done = true; rd.phase = why || "done";
+    const B = rd.body;
+    if (B) {
+      B._boardOwn = rd.hadOwn || false;
+      if (B.target && B.target.set) B.target.set(B.pos.x, 0, B.pos.z);
+      if (CBZ.moves && CBZ.moves.reset && CBZ.moves.motor) { try { CBZ.moves.reset(CBZ.moves.motor(B), B.pos); } catch (e) {} }
+    }
+  }
+  function riderTick(el, dt, P) {
+    const rd = el.rider; if (!rd) return;
+    const B = rd.body, m = el.m;
+    if (!B || B.dead || !B.pos || (B.ko || 0) > 0) { riderEnd(el, "fail"); return; }
+    rd.t += dt;
+    const io = ioFor(el, P);
+    const from = el.stops[rd.from], dest = el.stops[rd.to];
+    const hurry = rd.speed || 3.4;
+    if (rd.phase === "call") {
+      // at the landing, a finger on the button: the car comes, the doors open
+      if (riderWalk(B, from.pad.x, from.pad.z, landY(from.pad.x, from.pad.z, from), dt, hurry) > 0.25) { if (rd.t > 9) riderEnd(el, "fail"); return; }
+      if (m.st === "open" && m.at === rd.from) { if (from.rig.open > 0.72) { rd.phase = "board"; rd.t = 0; } return; }
+      rd.callT = (rd.callT || 0) - dt;
+      if (rd.callT <= 0) { rd.callT = 0.5; LiftCore.call(m, rd.from, io); }
+      if (rd.t > 14) riderEnd(el, "fail");            // somebody is holding the car: he finds another way
+      return;
+    }
+    if (rd.phase === "board") {
+      const pt = from.pt(0, from.door * 0.42);
+      const left = riderWalk(B, pt.x, pt.z, from.floor + 0.02, dt, hurry);
+      if (m.st !== "open" || m.at !== rd.from) { if (!insideCab(el, rd.from, B)) { rd.phase = "call"; rd.t = 0; } return; }
+      if (left < 0.12 && insideCab(el, rd.from, B)) {
+        if (LiftCore.go(m, rd.to, io)) { rd.phase = "shut"; rd.t = 0; }
+        else if (rd.t > 6) riderEnd(el, "fail");
+      }
+      return;
+    }
+    if (rd.phase === "shut" || rd.phase === "ride") {
+      // he stands in the car and turns to the doors
+      const at = m.st === "ride" && m.moved ? dest : (m.st === "open" && m.at === rd.to ? dest : from);
+      const face = at.pt(0, at.door + 1.2);
+      if (B.group) {
+        const want = Math.atan2(face.x - B.pos.x, face.z - B.pos.z);
+        let dy = want - B.group.rotation.y; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
+        B.group.rotation.y += dy * Math.min(1, dt * 6);
+      }
+      B.speed = 0;
+      if (CBZ.animChar && B.char) CBZ.animChar(B.char, 0, dt);
+      if (m.st === "ride") rd.phase = "ride";
+      if (m.st === "open" && m.at === rd.to) { rd.phase = "exit"; rd.t = 0; return; }
+      // the trip was cancelled under him (someone in the doorway, a re-call)
+      if (m.st === "open" && m.at === rd.from && rd.t > 1.2) { if (!LiftCore.go(m, rd.to, io) && rd.t > 8) riderEnd(el, "fail"); return; }
+      if (m.st === "idle" && rd.t > 1.5) { LiftCore.rescue(m, stopOfBody(el, B) >= 0 ? stopOfBody(el, B) : rd.from, io); }
+      if (rd.t > 30) riderEnd(el, "fail");
+      return;
+    }
+    if (rd.phase === "exit") {
+      if (dest.rig.open < 0.6) { if (CBZ.animChar && B.char) CBZ.animChar(B.char, 0, dt); if (rd.t > 6) riderEnd(el, "fail"); return; }
+      const out = dest.pt(0, dest.door + 1.25);
+      const inCar = insideCab(el, rd.to, B);
+      if (riderWalk(B, out.x, out.z, inCar ? dest.floor + 0.02 : landY(B.pos.x, B.pos.z, dest), dt, hurry) < 0.15) riderEnd(el, "done");
+    }
+  }
+  CBZ.cityLiftSend = function (lot, body, to, opts) {
+    const b = lot && (lot.building || lot);
+    let el = null;
+    for (const e of elevators) if (e.b === b || e.lot === lot || (b && e.b && e.b.group === b.group)) { el = e; break; }
+    if (!el || !body || !body.pos || el.rider) return null;
+    const from = stopOfBody(el, body);
+    if (to === "roof") to = el.stops.length - 1; else if (to === "ground") to = 0;
+    to = to | 0;
+    if (from < 0 || to < 0 || to >= el.stops.length || to === from) return null;
+    const s = el.stops[from];
+    if (Math.hypot(body.pos.x - s.pad.x, body.pos.z - s.pad.z) > 8) return null;
+    const rd = { body: body, from: from, to: to, phase: "call", t: 0, done: false, speed: opts && opts.speed, hadOwn: !!body._boardOwn,
+      cancel: function () { if (el.rider === rd) riderEnd(el, "fail"); } };
+    body._boardOwn = true;                           // the crowd brain and mover leave him to this file
+    body.path = null; body.moveOrder = null;
+    el.rider = rd;
+    return rd;
+  };
+  // where a body walks to before it asks for the lift, and where it steps off
+  CBZ.cityLiftLanding = function (lot, which) {
+    const b = lot && (lot.building || lot);
+    for (const e of elevators) {
+      if (e.b !== b && e.lot !== lot && !(b && e.b && e.b.group === b.group)) continue;
+      const i = which === "roof" ? e.stops.length - 1 : (which | 0);
+      const s = e.stops[i]; if (!s) return null;
+      const o = s.pt(0, s.door + 1.25);
+      return { x: s.pad.x, y: s.base, z: s.pad.z, out: { x: o.x, z: o.z }, at: e.m.at, st: e.m.st, stops: e.stops.length };
+    }
+    return null;
+  };
 
   // ---- the controls: Call pinned over the button; the car's panel inside --
   // Armed every frame from the update below; the pill (tap) and the bound key
@@ -1212,8 +1479,10 @@
       for (const s of el.stops) { animRig(s.rig, dt); gateDoor(s.rig); }
     }
 
+    motorTick();
     for (const el of elevators) {
       const m = el.m;
+      if (el.rider) riderTick(el, dt, P);
       if (m.st === "idle") {
         if (m.cool > 0) m.cool = Math.max(0, m.cool - dt);
         // RESCUE: a player standing inside a sealed idle cab gets its doors
@@ -1227,8 +1496,9 @@
       }
       // player gone (died / got in a car): the doors open where they are,
       // close themselves shortly after, and the car goes back to idle, so
-      // nobody's corpse is sealed in a box.
-      if (!P || P.dead || P.driving) {
+      // nobody's corpse is sealed in a box. (Not while somebody else is
+      // using the lift: it is his trip.)
+      if ((!P || P.dead || P.driving) && !el.rider) {
         const where = m.st === "ride" && m.moved ? m.dest : m.at;
         const r = el.stops[where].rig;
         setDoorTarget(r, true, false); r.autoClose = 2.0; r.autoCloseAudible = false;
@@ -1328,7 +1598,11 @@
       : (function () { const o = [0.14]; for (let L = 1; L <= (b.storeys || 1); L++) o.push(L * FHl); return o; })();
     const nFloors = tops.length - 1;                       // interior floors (tops[nFloors] is the roof)
     if (nFloors < 2) return null;
-    const roofAccess = opts.roof !== false && !b.roofCrowned && !!b.roofSlab;
+    // opts.roof === true: surface on the roof even where the facade crowned it.
+    // (Nearly every shell is "crowned" by its dress, a balustrade or a cornice
+    // round the rim with a flat deck inside it, so the default left almost no
+    // roof in the city reachable on foot. A caller that needs one asks.)
+    const roofAccess = (opts.roof === true || (opts.roof !== false && !b.roofCrowned)) && !!b.roofSlab;
     const kTop = roofAccess ? nFloors : nFloors - 1;       // the highest level the stair reaches
     let P = b.stairPlan || null;
     if (!P && CBZ.cityStairPlan) {

@@ -7,8 +7,8 @@
    to a garment or a dressed form and TAKE it (it is in your hands), try it
    on at the full-length mirror or in the fitting room, and PAY at the
    counter. Walk out with it unpaid and it is a theft, through the one shop
-   ledger every store keeps (city/shopfloor.js CBZ.shopFloor.till). The mirror also opens your wardrobe (mix what
-   you own; the tuxedo is taken off its form there).
+   ledger every store keeps (city/shopfloor.js CBZ.shopFloor.till). At the mirror you
+   also change into what you own, piece by piece, and take the tuxedo off its form.
 
    ONE FILE, EVERY STORE: Gang City's outfitter is one instance; every island
    outfitter and tailor (world/island_shops.js, CBZ.clothingStoreMount) is
@@ -1022,7 +1022,6 @@
     CBZ.interactions.registerFixtures({
       id: "clothes-rack", kind: "clothes-rack", prio: 9, islands: true,
       list: function (ctx, px, pz) {
-        if (UI.open) return null;
         _list.length = 0;
         for (const S of STORES) if (S.dressed && S.near && inStore(S, px, pz)) for (const s of S.slots) _list.push(s);
         return _list.length ? _list : null;
@@ -1040,7 +1039,11 @@
         { id: "clothes-putback", slot: "e", prio: 5, label: "Put back", canShow: (s) => isItem(s) && !!holding(s.visualId), onSelect: putBack },
         { id: "clothes-tryon", slot: "e", prio: 6, label: "Try on",
           canShow: (s) => mirrorish(s) && HELD.store === s.store && HELD.items.some(function (h) { return !h.tried; }), onSelect: tryOn },
-        { id: "clothes-wardrobe", slot: "e", prio: 4, label: "Wardrobe", canShow: (s) => s.kind === "mirror", onSelect: (s) => openPanel(s.store) },
+        // AT THE MIRROR, WHAT YOU OWN: each piece is a verb (put it on, take it
+        // off), and the store's tuxedo comes off its form here. Round the
+        // wheel, or a tap on the glass. (This was the "Wardrobe" panel: a
+        // numbered HTML list.)
+        ...mirrorVerbs(),
         { id: "clothes-pay", slot: "e", prio: 7, label: () => "Pay " + fmt$(heldTotal()),
           canShow: (s) => s === (s.store && s.store.till) && HELD.store === s.store && HELD.items.length > 0, onSelect: (s) => pay(s.store) },
       ],
@@ -1048,26 +1051,10 @@
   }
 
   // ============================================================
-  //  THE WARDROBE PANEL (at the mirror): list OWNED composables grouped by
-  //  slot — number keys wear, the slot letter strips it — plus the store's
-  //  apex piece (the tuxedo) to take to the counter. A fixed centre card,
-  //  Esc/E closes, number keys act. Built lazily, repopulated each open.
+  //  THE MIRROR: what you own, to put on or take off (the verbs above), and
+  //  the store's apex piece (the tuxedo) to take to the counter.
   // ============================================================
-  const UI = { open: false, panel: null, rows: null, prevMenu: undefined, store: null };
-  function panelEl() {
-    if (UI.panel) return UI.panel;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "clothingPanel";
-    d.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;display:none;" +
-      "background:rgba(13,16,21,.96);border:1px solid #6a4f7a;border-radius:16px;padding:18px 22px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;font-size:15px;min-width:320px;max-width:86vw;box-shadow:0 18px 60px rgba(0,0,0,.6)";
-    document.body.appendChild(d);
-    UI.panel = d;
-    return d;
-  }
-  // the owned composables grouped by their composable slot (shirt/jacket/neck/
-  // legs), each row a number key to wear; the worn ones marked.
+  // the owned composables, the worn ones marked
   function ownedRows() {
     const e = econ();
     const list = (e && e.itemsByTag) ? e.itemsByTag("clothing") : [];
@@ -1078,7 +1065,7 @@
       const it = list[i];
       if (!it || !it.visualId) continue;
       const sp = CBZ.cityComposableSpec && CBZ.cityComposableSpec(it.visualId);
-      if (!sp || sp.painted) continue;                 // the tuxedo has its own row
+      if (!sp || sp.painted) continue;                 // the tuxedo has its own verb
       if (!(CBZ.cityOwnsItem && CBZ.cityOwnsItem(it.visualId))) continue;
       if (holding(it.visualId)) continue;              // on trial, not yours yet
       rows.push({ visualId: it.visualId, label: it.label, slot: sp.slot || "item", worn: !!wornSet[it.visualId] });
@@ -1086,65 +1073,43 @@
     return rows;
   }
   function tuxLabel(t) { return String(t.label || t.name).replace(" (Composable)", ""); }
-  function renderPanel() {
-    const d = panelEl(); if (!d) return;
-    const S = UI.store, rows = ownedRows();
-    let html = "<div style='font-weight:700;font-size:18px;margin-bottom:12px;color:#e2c2f4'>Wardrobe</div>";
-    UI.rows = rows;
-    rows.forEach((r, i) => {
-      const mark = r.worn ? "<span style='color:#7ed957'> ✓</span>" : "";
-      html += "<div style='display:flex;justify-content:space-between;gap:14px;padding:3px 0'>" +
-        "<span><b style='color:#e2c2f4'>" + (i + 1) + "</b> &nbsp;" + r.label + mark + "</span>" +
-        "<span style='color:#7f8794'>" + r.slot + "</span></div>";
-    });
-    // the apex piece: the tuxedo, taken off its form here and paid for at the counter
-    const tux = S && S.tux;
-    if (tux) {
-      const own = CBZ.cityOwnsItem && CBZ.cityOwnsItem(tux.visualId) && !holding(tux.visualId);
-      const held = !!holding(tux.visualId);
-      html += "<div style='border-top:1px solid #3a3140;margin:12px 0 8px'></div>";
-      html += "<div style='display:flex;justify-content:space-between;gap:14px;padding:3px 0'>" +
-        "<span><b style='color:#ffd166'>T</b> &nbsp;" + tuxLabel(tux) + (own ? "<span style='color:#7ed957'> ✓</span>" : "") + "</span>" +
-        "<span style='color:#d9a8ee'>" + (own ? "Wear" : held ? "Put back" : "Take " + fmt$(priceOf(S, tux.name))) + "</span></div>";
-    }
-    html += "<div style='border-top:1px solid #3a3140;margin:12px 0 4px'></div>";
-    if (!CBZ.touchMode) html += "<div style='color:#8a93a3;font-size:12px'>[Esc] / [E] close</div>";
-    d.innerHTML = html;
+  let _mirAt = -1, _mir = [];
+  function mirrorRows() {
+    const now = CBZ.now || 0;
+    if (now - _mirAt < 250) return _mir;
+    _mirAt = now; _mir = ownedRows();
+    return _mir;
   }
-  function openPanel(S) {
-    const d = panelEl(); if (!d) return;
-    UI.open = true; UI.store = S || null;
-    // remember the engine's prior fire-block state, then hold it true while
-    // styling (CBZ.cityMenuOpen is the engine's existing fire chokepoint).
-    UI.prevMenu = CBZ.cityMenuOpen;
-    CBZ.cityMenuOpen = true;
-    renderPanel();
-    d.style.display = "block";
-  }
-  function closePanel() {
-    if (UI.panel) UI.panel.style.display = "none";
-    UI.open = false; UI.store = null;
-    CBZ.cityMenuOpen = UI.prevMenu;                     // restore EXACTLY what it was
-    UI.prevMenu = undefined;
-  }
-  function panelKey(k) {
-    if (k === "escape" || k === "e") { closePanel(); return; }
-    const S = UI.store;
-    if (k === "t" && S && S.tux) {
-      const t = S.tux, slot = { store: S, name: t.name, visualId: t.visualId, label: tuxLabel(t) };
-      if (holding(t.visualId)) putBack(slot);
-      else if (CBZ.cityOwnsItem && CBZ.cityOwnsItem(t.visualId)) { if (CBZ.cityWear) CBZ.cityWear(t.visualId); }
-      else take(slot);
-      renderPanel();
-      return;
+  function mirrorVerbs() {
+    const asIs = function (s) { const VW = CBZ.cityVerbWord; if (VW && VW.keep) VW.keep(s); return s; };
+    const out = [];
+    for (let n = 0; n < 10; n++) {
+      out.push({ id: "clothes-own-" + n, wheel: true, prio: 3,
+        canShow: (s) => s.kind === "mirror" && !!mirrorRows()[n],
+        label: () => { const r = mirrorRows()[n]; return r ? asIs((r.worn ? "Take off the " : "Put on the ") + r.label) : ""; },
+        onSelect: () => {
+          const r = mirrorRows()[n]; _mirAt = -1;
+          if (!r) return;
+          if (r.worn) { if (CBZ.cityUnwear) CBZ.cityUnwear(r.visualId); }
+          else if (CBZ.cityWear) CBZ.cityWear(r.visualId);
+        } });
     }
-    const n = parseInt(k, 10);
-    if (!isNaN(n) && n >= 1 && UI.rows && n <= UI.rows.length) {
-      const r = UI.rows[n - 1];
-      if (r.worn) { if (CBZ.cityUnwear) CBZ.cityUnwear(r.visualId); }
-      else { if (CBZ.cityWear) CBZ.cityWear(r.visualId); }
-      renderPanel();
-    }
+    const tuxSlot = (S) => { const t = S.tux; return { store: S, name: t.name, visualId: t.visualId, label: tuxLabel(t) }; };
+    out.push({ id: "clothes-tux", wheel: true, prio: 2,
+      canShow: (s) => s.kind === "mirror" && !!(s.store && s.store.tux),
+      label: (s) => {
+        const t = s.store.tux;
+        if (holding(t.visualId)) return asIs("Put back the " + tuxLabel(t));
+        if (CBZ.cityOwnsItem && CBZ.cityOwnsItem(t.visualId)) return asIs("Put on the " + tuxLabel(t));
+        return asIs("Take the " + tuxLabel(t) + " " + fmt$(priceOf(s.store, t.name)));
+      },
+      onSelect: (s) => {
+        const t = s.store.tux, slot = tuxSlot(s.store);
+        if (holding(t.visualId)) putBack(slot);
+        else if (CBZ.cityOwnsItem && CBZ.cityOwnsItem(t.visualId)) { if (CBZ.cityWear) CBZ.cityWear(t.visualId); }
+        else take(slot);
+      } });
+    return out;
   }
 
   // ---- Gang City's store: find the lot + frame it (self-healing) -------------
@@ -1238,7 +1203,6 @@
       dispose: function () {
         if (HELD.store === S) dropAll(false);
         if (S.ledger && S.ledger.clerk && S.ledger.clerk.standDown) S.ledger.clerk.standDown();
-        if (UI.open && UI.store === S) closePanel();
         undress(S);
         S.built = false;
         const i = STORES.indexOf(S); if (i >= 0) STORES.splice(i, 1);
@@ -1253,7 +1217,6 @@
     if (cityOn) ensureCity();
     if (!econOn) {
       for (const S of STORES) { if (S.group) S.group.visible = false; if (S.winGroup) S.winGroup.visible = false; S.near = false; }
-      if (UI.open) closePanel();
       if (HELD.items.length) dropAll(false);
       return;
     }
@@ -1286,7 +1249,6 @@
         if (S.winGroup.visible !== winVis) S.winGroup.visible = winVis;
       }
       S.near = near;
-      if (UI.open && UI.store === S && (!near || g.state !== "playing" || P.dead || P.driving)) closePanel();
     }
     // what is in your hands: out of the door with it is the clerk's business;
     // dead, or the store gone, it simply drops
@@ -1298,15 +1260,6 @@
     // the island clerks keep their own time (out in the doorway, back again)
     for (const S of STORES) if (S.ledger && S.ledger.clerk && S.near) S.ledger.clerk.tick(dt);
   });
-
-  // the wardrobe panel is modal: it owns every key while it is up
-  addEventListener("keydown", function (e) {
-    if (!UI.open) return;
-    e.preventDefault();
-    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-    e.stopPropagation();
-    panelKey((e.key || "").toLowerCase());
-  }, true);
 
   // ---- public hooks (interact/shops feature-detect; harness drives) ----------
   // is the store live (for this lot)? interact.js hides the clerk's "Browse the
@@ -1347,7 +1300,13 @@
         name: s.name, visualId: s.visualId, price: priceOf(CITY, s.name), drip: s.drip,
         owned: owned(s), mannequin: !!s.mannequin })),
       tux: CITY.tux ? { name: CITY.tux.name, visualId: CITY.tux.visualId, price: priceOf(CITY, CITY.tux.name) } : null,
-      panelOpen: !!UI.open, held: CBZ.clothingHeld(),
+      held: CBZ.clothingHeld(),
+      // where the mirror stands, and what it offers you right now
+      mirror: (function () { const m = CITY.slots.find((s) => s.kind === "mirror"); return m ? { x: m.x, y: m.y, z: m.z } : null; })(),
+      mirrorVerbs: (function () {
+        const m = CITY.slots.find((s) => s.kind === "mirror"); if (!m) return [];
+        return mirrorVerbs().filter((v) => v.canShow(m)).map((v) => v.label(m));
+      })(),
     };
   };
   // EXPORT ONLY (a gate/probe calls this; nothing in the game does). What the

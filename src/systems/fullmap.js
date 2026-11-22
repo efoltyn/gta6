@@ -2780,6 +2780,30 @@
         size: 11, fill: "rgba(150,215,240,.88)", haloC: "rgba(0,20,35,.75)",
       });
     }
+    drawGeographyNames(p);
+  }
+  /* ---- THE COUNTRY'S OWN NAMES ------------------------------------------
+     The seas, the gulf and the bays, the range and its passes, the capes:
+     the WORLD PLAN's `labels` (src/world/worldplan.js). They are geography,
+     not registered places, so no region carries them; without them the map
+     showed a gulf five kilometres long with no name on it. Water in the
+     water's colour, land in a quiet grey, the big ones bigger; all through
+     mapLabel, so they declutter against the towns and the audit counts them. */
+  function drawGeographyNames(p) {
+    const L = CBZ.worldPlan && CBZ.worldPlan.labels;
+    if (!L) return;
+    for (let i = 0; i < L.length; i++) {
+      const g = L[i];
+      if (g.kind === "town") continue;               // lettered from the town itself (drawSettlementsLive)
+      const nx = p.x(g.x), ny = p.z(g.z);
+      if (nx < -80 || nx > W + 80 || ny < -40 || ny > H + 40) continue;
+      const water = g.kind === "sea" || g.kind === "water";
+      mapLabel(g.kind === "sea" || g.kind === "range" ? String(g.n).toUpperCase() : g.n, nx, ny, {
+        size: g.kind === "sea" ? 14 : (g.kind === "range" ? 13 : 11),
+        fill: water ? "rgba(150,215,240,.9)" : "rgba(226,222,206,.86)",
+        haloC: water ? "rgba(0,20,35,.75)" : "rgba(0,0,0,.6)",
+      });
+    }
   }
 
   /* ---- ROAD NAMES -------------------------------------------------------

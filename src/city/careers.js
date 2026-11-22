@@ -1,11 +1,12 @@
 /* ============================================================
    city/careers.js — the many ways to make money.
 
-   • Job board (any shop): a deep CONTRACT BOARD — HIT, DELIVERY,
-     store HEIST, SMUGGLING run, GETAWAY-DRIVER, PROTECTION racket.
-     Pay & danger scale with your NOTORIETY rank (Nobody → Kingpin),
-     GTA-style: do dirt, get bigger jobs. (Real rank/standing progression
-     comes from GANG MEMBERSHIP + crew contracts, not freelance body count.)
+   • Freelance work, asked of the person behind a counter ("Ask about
+     work"): he tells you one job and you take it or ask what else. A bar,
+     a trap, a pawnbroker, a chop shop and a casino have the dirt (HIT,
+     store HEIST, SMUGGLING run, GETAWAY-DRIVER, PROTECTION, DEAD DROP);
+     any other counter has a DELIVERY of its own. Pay & danger scale with
+     your NOTORIETY rank (Nobody → Kingpin). There is no board.
    • Drug dealing: a real loop — buy WHOLESALE at the trap house
      ([U] when near a dealer / trap lot), build a CUSTOMER BASE that
      re-ups from you, sell on the street where TERRITORY (your gang's
@@ -29,7 +30,7 @@
   const THREE = window.THREE;
   const g = CBZ.game;
 
-  let beacon = null, board = null, payT = 0;
+  let beacon = null, payT = 0;
   let _s = 8675309;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
   function pick(a) { return a[(rng() * a.length) | 0]; }
@@ -62,7 +63,7 @@
       // DELETES any note that neither matches its keyword list nor names a
       // sender, and this line matched nothing — the one moment the game tells
       // you your record just opened heavier work never reached the player.
-      CBZ.city.note("Word's getting around, heavier jobs hit the board now.", 2.2, { from: "Dispatch", app: "missions" });
+      CBZ.city.note("Word's getting around. People have heavier work for you now.", 2.2, { from: "Dispatch", app: "missions" });
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -593,7 +594,6 @@
       if (CBZ.cityPlayerGangDefendTurf) CBZ.cityPlayerGangDefendTurf(j.x, j.z);
       CBZ.city.note("Get to the block and HOLD it, they're rolling up.", 2.8);
     }
-    if (board && board.style.display === "block") closeBoard();
   }
   CBZ.cityAcceptGangContract = acceptGangContract;
 
@@ -749,48 +749,96 @@
     return jobs;
   }
 
-  function boardEl() {
-    if (board) return board;
-    board = document.createElement("div");
-    board.id = "cityJobs";
-    board.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:49;display:none;min-width:340px;background:rgba(14,16,22,.96);border:2px solid #3a3140;border-radius:16px;padding:16px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.55);pointer-events:auto";
-    board.addEventListener("click", function (e) {
-      const row = e.target && e.target.closest ? e.target.closest("[data-k]") : null;
-      if (!row) return;
-      e.preventDefault(); e.stopPropagation();
-      pressKey(row.getAttribute("data-k"));
-    });
-    document.body.appendChild(board);
-    return board;
+  /* FREELANCE WORK, FROM THE PERSON WHO HAS IT. You ask the man behind a
+     counter about work (his card's "Ask about work", city/shops.js) and he
+     tells you ONE job: what it is and what it pays. Your answers are on him:
+     Take it, or What else (he thinks of the next one). Walking off is a no.
+     Taken, he writes it down and hands you the paper (city/paper.js).
+     WHO HAS WHAT: a bar, a trap house, a pawnbroker, a chop shop and a casino
+     know people who need things done; every other counter has a package of
+     its own it wants run across town.
+     (This was the "Contract Board": an HTML list of the same jobs with a
+     notoriety readout, opened from any counter in the city.) */
+  const SHADY = { bar: 1, drugs: 1, pawn: 1, chop: 1, casino: 1, raceway: 1 };
+  const PITCH_HOLD = 30;                 // seconds an offer stands
+  function lotOf(v) { return (v && v.vendor) || null; }
+  function shopName(v) { const l = lotOf(v); return (l && l.building && l.building.name) || "the shop"; }
+  function tellFrom(v, line, secs) {
+    if (v && !v.dead && CBZ.citySay) { try { CBZ.citySay(v, line, "#ffffff", secs || 3.6); return; } catch (e) {} }
+    CBZ.city.note(line, 2.4);
   }
-  let offered = [];
-  const ICON = { hit: "", delivery: "", heist: "", smuggle: "", getaway: "", protection: "", deaddrop: "" };
-  CBZ.cityJobBoard = function () {
-    // (your own set's work is not on this board: a member of the set tells
-    // you, CBZ.cityCrewWork)
-    offered = rollJobs();
-    if (board) board._gang = false;
-    const r = rankInfo(), nxt = RANKS[rankIdx() + 1];
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>Contract Board</div>";
-    html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>Notoriety: " + r.name +
-      (nxt ? " <span style='color:#8a93a3'>(" + (notoriety()) + "/" + nxt.xp + " → " + nxt.name + ", pay ×" + r.cut.toFixed(2) + ")</span>" : " <span style='color:#7ed957'>· MAX · pay ×" + r.cut.toFixed(2) + "</span>") + "</div>";
-    offered.forEach((j, i) => { html += "<div class='jobRow' data-k='" + (i + 1) + "' style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + (ICON[j.type] || "•") + " " + j.desc + " <span style='color:#7ed957'>$" + j.reward + "</span></div>"; });
-    html += "<div class='jobFoot'><span class='jobRow jobBtn' data-k='escape'>CLOSE</span></div>";
-    boardEl().innerHTML = html;
-    board.style.display = "block";
-    CBZ.cityMenuOpen = true;
-    if (document.exitPointerLock) try { document.exitPointerLock(); } catch (e) {}
+  function jobsFor(v) {
+    const lot = lotOf(v), kind = lot && lot.kind;
+    if (SHADY[kind]) return rollJobs().filter((j) => j.type !== "delivery");
+    // a counter's own packages: up to three doors, the far ones pay more
+    const from = lot && lot.building && lot.building.door ? lot.building.door : (v && v.pos) || { x: 0, z: 0 };
+    // a door in this town (a courier on foot or in a car, not a sea crossing)
+    const lots = CBZ.city.arena.lots.filter((l) => l.building && l.building.door && l !== lot && l.building.name &&
+      Math.hypot(l.building.door.x - from.x, l.building.door.z - from.z) < 900);
+    const out = [], seen = new Set();
+    for (let i = 0; i < 12 && out.length < 3 && lots.length; i++) {
+      const dst = pick(lots);
+      if (seen.has(dst)) continue;
+      seen.add(dst);
+      const far = Math.hypot(dst.building.door.x - from.x, dst.building.door.z - from.z);
+      const pay = Math.max(60, Math.round(payout(90, 120) * (0.6 + Math.min(4, far / 260)) / 10) * 10);
+      out.push({ type: "delivery", dest: lotDoor(dst), to: dst.building.name, reward: pay, desc: "Run this over to " + dst.building.name });
+    }
+    return out;
+  }
+  function pitchOf(v) {
+    const w = v && v._work;
+    if (!w) return null;
+    const P = CBZ.player;
+    if (v.dead || g.cityJob || (CBZ.now || 0) / 1000 - w.t > PITCH_HOLD ||
+        (P && P.pos && Math.hypot(P.pos.x - v.pos.x, P.pos.z - v.pos.z) > 9)) { v._work = null; return null; }
+    return w;
+  }
+  function pitchLine(j) {
+    const d = String(j.desc || "Work").replace(/\s*·\s*/g, ", ");
+    return d.charAt(0).toUpperCase() + d.slice(1) + ". $" + Math.round(j.reward).toLocaleString("en-US") + " when it's done.";
+  }
+  CBZ.cityWorkPitch = function (v) { const w = pitchOf(v); return w ? w.list[w.i] : null; };
+  CBZ.cityAskWork = function (v) {
+    if (!v || v.dead) return false;
+    if (CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()) { tellFrom(v, "You've got your own business to see to."); return false; }
+    if (g.cityJob) { tellFrom(v, "Finish what you're on first."); return false; }
+    const list = jobsFor(v);
+    if (!list.length) { tellFrom(v, "Nothing going. Try me another day."); return false; }
+    v._work = { list: list, i: 0, t: (CBZ.now || 0) / 1000 };
+    v._faceT = Math.max(v._faceT || 0, 2.4);
+    tellFrom(v, pitchLine(list[0]));
+    return true;
   };
-  function closeBoard() { if (board) { board.style.display = "none"; board._gang = false; } CBZ.cityMenuOpen = false; if (CBZ.requestLock && g.state === "playing") CBZ.requestLock(); }
-  function accept(i) {
-    const j = offered[i]; if (!j) return;
-    if (CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()) {
-      if (CBZ.campaignUI && CBZ.campaignUI.open) CBZ.campaignUI.open("missions");
-      closeBoard();
+  CBZ.cityWorkNext = function (v) {
+    const w = pitchOf(v);
+    if (!w) return false;
+    w.t = (CBZ.now || 0) / 1000;
+    if (w.list.length < 2) { tellFrom(v, "That's all I've got."); return true; }
+    w.i = (w.i + 1) % w.list.length;
+    tellFrom(v, (w.i === 0 ? "Then it's back to this. " : "") + pitchLine(w.list[w.i]));
+    return true;
+  };
+  // the paper he hands you: a shop's delivery note, or a few words in pen
+  function jobPaper(v, j) {
+    const K = CBZ.cityPaper;
+    if (!K) return;
+    const pay = "$" + Math.round(j.reward).toLocaleString("en-US");
+    if (j.type === "delivery") {
+      K.show({ key: "job", org: shopName(v), title: "DELIVERY NOTE", ink: "#3d4a36",
+        lines: [{ k: "DELIVER TO", v: j.to || "the address marked" }, { k: "FROM", v: shopName(v) }, { k: "PAID ON DELIVERY", v: pay, big: true }],
+        foot: "One parcel. Hand it over at the door.", sign: v && v.name ? v.name.split(" ")[0] : "" });
       return;
     }
-    // gang contracts route through the crew-job path (beacon + rank reward)
-    if (isGangJob(j.type)) { acceptGangContract(j); return; }
+    const d = String(j.desc || "").replace(/\s*·\s*/g, ", ");
+    K.show({ key: "job", hand: true, lines: [{ text: d.charAt(0).toUpperCase() + d.slice(1) + "." }, { gap: 12 }, { text: pay + " after." }, { gap: 12 }, { text: "You didn't get this from me.", dim: true }] });
+  }
+  CBZ.cityWorkTake = function (v) {
+    const w = pitchOf(v);
+    if (!w) return false;
+    const j = w.list[w.i];
+    v._work = null;
+    if (!j || g.cityJob) return false;
     g.cityJob = j;
     if (j.type === "smuggle") makeBeacon(j.pickup.x, j.pickup.z, 0xffd166);
     else if (j.type === "deaddrop") makeBeacon(j.roof.foot.x, j.roof.foot.z, 0xc792ea);
@@ -799,23 +847,15 @@
     else if (j.dest) makeBeacon(j.dest.x, j.dest.z, 0x7ed957);
     else if (j.type === "hit" && j.target) markLive(j.target, 0xff5b5b);   // a mark that walks
     else if (j.type === "heist" && j.lot) makeBeacon(j.lot.building.door.x, j.lot.building.door.z, 0xff9e6b);
-    CBZ.city.note("You're on: " + j.desc, 2.4, { from: "Dispatch" });
-    closeBoard();
-  }
-
-  /* ONE DISPATCH, TWO INPUTS. This board printed "[1-6] accept · [Esc] close"
-     and listened only for a keydown, so on a tablet it was a list of jobs you
-     could not accept. Every row carries its own key as `data-k` now and one
-     delegated click runs the same dispatch. (owner, 2026-08-18: "figure out
-     what sucks around buttons") */
-  function pressKey(k) {
-    if (!board || board.style.display !== "block" || !k) return false;
-    k = String(k).toLowerCase();
-    if (k === "escape") { closeBoard(); return true; }
-    if (k >= "1" && k <= "9") { accept(parseInt(k, 10) - 1); return true; }
-    return false;
-  }
-  addEventListener("keydown", function (e) { if (pressKey(e.key)) e.preventDefault(); });
+    tellFrom(v, j.type === "delivery" ? "It's on the note. Don't drop it." : "Don't come back until it's done.", 2.6);
+    // out of his hand into yours, then you are reading it
+    const V = CBZ.verbs;
+    let S0 = null, done = false;
+    const read = function () { if (done) return; done = true; jobPaper(v, j); };
+    if (V && V.takeFrom) { try { S0 = V.takeFrom(CBZ.player, v, { at: "wristR", kind: "cash", pose: "card", dur: 0.55, onTaken: read }); } catch (e) { S0 = null; } }
+    if (!S0) read();
+    return true;
+  };
 
   function finishJob(bonus) {
     const j = g.cityJob; if (!j) return;

@@ -644,6 +644,7 @@
     return R[lo];
   }
 
+  const _pickNear = [];
   CBZ.roadPick = function (opts) {
     opts = opts || {};
     const A = arena(); const R = A && A.roads;
@@ -658,17 +659,31 @@
     // convoy).
     const spacing = opts.spacing != null ? opts.spacing : 7.5;
     const cam = CBZ.camera && CBZ.camera.position;
+    // A PICK NEAR A POINT DRAWS FROM THE ROADS NEAR THAT POINT. Drawing from
+    // the whole map and throwing away everything outside maxDist almost never
+    // hit on a city this size (a unit called to an arrest found no lane 46 m
+    // away in twenty tries, every time), so the near set is drawn from, and
+    // the spot is put along the segment where the point projects onto it.
+    let nearR = null;
+    if (opts.near && opts.maxDist && !opts.district && CBZ.roadsNear) {
+      nearR = CBZ.roadsNear(opts.near.x, opts.near.z, opts.maxDist, _pickNear);
+      if (!nearR.length) nearR = null;
+    }
     for (let t = 0; t < tries; t++) {
       const r = opts.district
         ? R[(rnd() * R.length) | 0]
-        : drawSeg(R, rnd);
+        : nearR ? nearR[(rnd() * nearR.length) | 0] : drawSeg(R, rnd);
       if (!r) continue;
       if (opts.district && String(r.district || "") !== opts.district) continue;
       if (!CBZ.roadOpen(r, opts.cls)) continue;
       if (opts.filter && !opts.filter(r)) continue;
       // spread along the segment, but never bunch a long highway at one end
       const spread = Math.min((r.len || 0) * 0.45, opts.spread || 1e9);
-      const along = (rnd() - 0.5) * 2 * spread;
+      let along = (rnd() - 0.5) * 2 * spread;
+      if (nearR) {
+        const at = r.vertical ? opts.near.z - r.z : opts.near.x - r.x;
+        along = Math.max(-spread, Math.min(spread, at + (rnd() - 0.5) * 1.6 * opts.maxDist));
+      }
       const dirSign = rnd() < 0.5 ? 1 : -1;
       const laneIdx = (rnd() * lanesPerDir(r)) | 0;
       const lane = laneCenter(r, dirSign, laneIdx);

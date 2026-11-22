@@ -3,8 +3,9 @@
 
    A ladder of scores by risk/reward, each a real little arc:
 
-     CASE  → walk up to a target (or call a plan from the [H]eist board),
-             pay a small SETUP cost (masks/tools/intel), pick your crew cut.
+     CASE  → walk into a place worth hitting; the place itself offers
+             "Hit the place" (city/interactions.js). You pay a small SETUP
+             cost (masks/tools/intel) and it is loud from that second.
      HIT   → an EXECUTE phase: grab the bag over a few seconds while a heat
              METER fills. Witnesses panic, alarms trip, cops roll in. Stay in
              the take-zone; leaving early banks only what you've grabbed.
@@ -23,8 +24,12 @@
    cracks (any hit = instant 3★, lose the cops to keep the bag), and the
    multi-phase bank finale (setup fee, crew cut split, big take + heavy heat).
 
-   Self-contained: owns its own [H] board, a floating progress HUD, and one
-   CBZ.onUpdate loop (gated to city). Touches only feature-detected CBZ.*.
+   No board, no heist key, no panel: the score is started and ended by
+   verbs on the place, the bag's size is on the "Grab and go" verb, the
+   heat is the wanted stars. (The "score board" on [H], the floating status
+   card with its key legends, and a menu entry that conjured a box-shaped
+   armored truck in front of you are deleted; the real armored truck drives
+   the roads, city/armored.js.) One CBZ.onUpdate loop, gated to the city.
    Public API: CBZ.cityStartHeist(tierId) / CBZ.cityHeistState() /
    CBZ.cityHeistTargets() / CBZ.cityAbortHeist().
    ============================================================ */
@@ -126,12 +131,6 @@
       desc: "Guns up, glass down.",
     },
     {
-      id: "armored", name: "Armored-Truck Crack", icon: "", tier: 4,
-      take: 14000, setup: 600, stars: 3, grabTime: 9, heatRate: 55, minCrew: 1, gun: true,
-      kinds: null,            // spawns its own truck near you
-      desc: "Crack the truck, take the cases.",
-    },
-    {
       id: "bank", name: "BANK JOB", icon: "", tier: 5,
       // VAULT is the real prize: a branch realistically holds tens of thousands to
       // a couple hundred grand in its cash vault (small branches ~$50k, larger up
@@ -226,7 +225,6 @@
     // a fresh city life wipes a mid-job score. RETIRE it: the run is over, not
     // botched — nobody should get a FAILED card for a life they didn't live.
     scoreEnd("retire", "new run");
-    cleanupTruck();
     cleanupGuards(true);
     const h = ensure();
     h.phase = "idle"; h.tierId = null; h.target = null;
@@ -236,7 +234,6 @@
     h.physical = false; h.vaultId = null; h.crewOwed = 0; h._sawOpen = false;
     h.dyeFrac = 0; h.dyed = false; h.silent = false;
     if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0); } catch (e) {}
-    hideHud();
   }
   CBZ.cityHeistReset = reset;
 
@@ -295,7 +292,6 @@
     const here = lotKindHere();
     const nearKind = here ? here.kind : null;
     for (const t of TIERS) {
-      if (t.id === "armored") { out.push({ tier: t, ready: true, target: null }); continue; }
       if (!t.kinds) continue;
       const lot = nearestLotFor(t, 8);
       const onIt = nearKind && t.kinds.indexOf(nearKind) >= 0;
@@ -304,221 +300,6 @@
     return out;
   }
   CBZ.cityHeistTargets = availableHere;
-
-  // ------------------------------------------------------------ armored truck prop
-  let truckMesh = null, truckObj = null;
-  function spawnTruck() {
-    cleanupTruck();
-    const A = CBZ.city && CBZ.city.arena;
-    if (!A || !A.root || !THREE) return null;
-    // place it a short way out on the street in front of the player
-    const y = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(y), fz = -Math.cos(y);
-    const px = CBZ.player.pos.x + fx * 9, pz = CBZ.player.pos.z + fz * 9;
-    const gy = (CBZ.floorAt ? CBZ.floorAt(px, pz) : 0) || 0;
-    const grp = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(2.4, 2.6, 5.2),
-      new THREE.MeshLambertMaterial({ color: 0x3a4654 })
-    );
-    body.position.y = 1.5;
-    grp.add(body);
-    const cab = new THREE.Mesh(
-      new THREE.BoxGeometry(2.3, 1.6, 1.8),
-      new THREE.MeshLambertMaterial({ color: 0x222a33 })
-    );
-    cab.position.set(0, 1.4, 3.0);
-    grp.add(cab);
-    // cash-door (the bit you crack) — glows when being worked
-    const doorMat = new THREE.MeshLambertMaterial({ color: 0x6b5320, emissive: 0x000000 });
-    const door = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.9, 0.2), doorMat);
-    door.position.set(0, 1.4, -2.7);
-    grp.add(door);
-    grp.position.set(px, gy, pz);
-    grp.rotation.y = y;
-    A.root.add(grp);
-    truckMesh = grp;
-    truckObj = { x: px, z: pz, door: door, doorMat: doorMat, body: body };
-    return truckObj;
-  }
-  function cleanupTruck() {
-    if (truckMesh && truckMesh.parent) truckMesh.parent.remove(truckMesh);
-    truckMesh = null; truckObj = null;
-  }
-
-  // ------------------------------------------------------------ HUD (own panel)
-  let hud = null;
-  function buildHud() {
-    if (hud) return;
-    hud = document.createElement("div");
-    hud.id = "cityHeistHud";
-    hud.style.cssText =
-      "position:fixed;left:50%;top:14%;transform:translateX(-50%);z-index:60;" +
-      "min-width:280px;max-width:420px;padding:12px 16px;border-radius:12px;" +
-      "background:rgba(12,14,20,.86);border:1px solid #2c3140;color:#e8eef7;" +
-      "font:600 14px/1.35 system-ui,Segoe UI,Roboto,sans-serif;" +
-      "box-shadow:0 8px 30px rgba(0,0,0,.5);display:none;text-align:center;" +
-      "pointer-events:none;backdrop-filter:blur(3px)";
-    document.body.appendChild(hud);
-  }
-  function showHud() { buildHud(); hud.style.display = "block"; }
-  function hideHud() { if (hud) hud.style.display = "none"; }
-  function renderHud() {
-    const h = g.cityHeist; if (!h || h.phase === "idle") { hideHud(); return; }
-    buildHud();
-    const tier = tierById(h.tierId);
-    let html = "";
-    if (h.phase === "case") {
-      html =
-        "<div style='font-size:16px;color:#ffd479'>" + (tier ? tier.icon + " " + tier.name : "Casing") + "</div>" +
-        "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>Get in position, then start the grab.</div>" +
-        "<div style='margin-top:8px'><span style='color:#7ed957'>[H]</span> GO LOUD, start the grab" +
-        "&nbsp;&nbsp;<span style='color:#ff9a9a'>[K]</span> back out</div>";
-    } else if (h.phase === "execute") {
-      const heatPct = Math.round(h.heat * 100);
-      if (tier && tier.bank && h.physical) {
-        // THE PHYSICAL JOB HAS NO PROGRESS BAR TO SHOW, because there is no
-        // progress — there is a shut door or an open one, and then there is
-        // however much canvas you have picked up. The panel reports the WORLD.
-        const shut = h.drilled < 1;
-        html =
-          "<div style='font-size:16px;color:#ff9e6b'>" + tier.icon + (shut ? " THE DOOR IS SHUT" : " THE DOOR IS OPEN") + "</div>" +
-          (shut
-            ? "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>Blow it with explosives, or put a gun on a bank officer.<br>Behind it: <b style='color:#ffd479'>" + fmt$(h.vaultTotal) + "</b></div>"
-            : "<div style='margin-top:6px;font-weight:500'>" + fmt$(h.bag) + " carried out of " + fmt$(h.bagMax) + " on the floor</div>") +
-          bar("HEAT", heatPct, heatPct > 70 ? "#ff5b5b" : "#ffb347") +
-          "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>One bag at a time. <span style='color:#ffd479'>[H]</span> call it and RUN</div>";
-      } else if (tier && tier.bank) {
-        // the live stage in words; how far through the drill / the bag you
-        // are hangs on the vault itself (CBZ.workLine in the tick), not here.
-        const drilling = h.drilled < 1;
-        html =
-          "<div style='font-size:16px;color:#ff9e6b'>" + tier.icon + (drilling ? " DRILLING THE VAULT" : " EMPTYING THE VAULT") + "</div>" +
-          (drilling
-            ? "<div style='margin-top:4px;font-weight:500;color:#aeb8c6'>Vault holds ~" + fmt$(h.vaultTotal) + " · breach it to start bagging.</div>"
-            : "<div style='margin-top:4px;font-weight:500'>" + fmt$(h.bag) + " of " + fmt$(h.bagMax) + " bagged</div>") +
-          bar("HEAT", heatPct, heatPct > 70 ? "#ff5b5b" : "#ffb347") +
-          "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>Stay on the vault. <span style='color:#ffd479'>[H]</span> grab &amp; GO with what you've got</div>";
-      } else {
-        html =
-          "<div style='font-size:16px;color:#ff9e6b'>" + (tier ? tier.icon + " GRABBING · " + tier.name : "GRABBING") + "</div>" +
-          "<div style='margin-top:4px;font-weight:500'>" + fmt$(h.bag) + " in the bag</div>" +
-          bar("HEAT", heatPct, heatPct > 70 ? "#ff5b5b" : "#ffb347") +
-          "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>Stay on it. <span style='color:#ffd479'>[H]</span> grab &amp; GO with what you've got</div>";
-      }
-    } else if (h.phase === "escape") {
-      const stars = g.wanted | 0;
-      // bank: show the dye-pack/bait clock until it's beaten or it blows
-      let dyeLine = "";
-      if (tier && tier.bank && !h.dyed && h.getawayMax > 0) {
-        const gpct = Math.round((h.getaway / h.getawayMax) * 100);
-        dyeLine = bar("DYE-PACK CLOCK (break line of sight!)", gpct, gpct < 35 ? "#ff5b5b" : "#ff9a4d");
-      } else if (tier && tier.bank && h.dyed) {
-        dyeLine = "<div style='margin-top:6px;font-weight:500;color:#ff7a7a'>Dye pack blew, stained cash lost.</div>";
-      }
-      html =
-        "<div style='font-size:16px;color:#ff5b5b'>GET CLEAR WITH " + fmt$(h.bag) + "</div>" +
-        dyeLine +
-        "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>" +
-        (stars > 0 ? "Lose the cops (" + "★".repeat(stars) + ") to BANK the score." : "You're clean, banking the take…") +
-        "</div>" +
-        "<div style='margin-top:6px;font-weight:500'>Mask up <span style='color:#ffd479'>[T]</span>, break line of sight, lay low.</div>";
-    }
-    hud.innerHTML = html;
-    showHud();
-  }
-  function bar(label, pct, color) {
-    return "<div style='margin-top:8px;text-align:left;font-size:11px;color:#8a93a3'>" + label +
-      "<div style='margin-top:2px;height:8px;border-radius:4px;background:#1b2029;overflow:hidden'>" +
-      "<div style='height:100%;width:" + clamp(pct, 0, 100) + "%;background:" + color + ";transition:width .15s'></div></div></div>";
-  }
-
-  // ------------------------------------------------------------ the planning board
-  let board = null;
-  function buildBoard() {
-    if (board) return;
-    board = document.createElement("div");
-    board.id = "cityHeistBoard";
-    board.style.cssText =
-      "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:120;" +
-      "width:min(560px,92vw);max-height:84vh;overflow:auto;padding:18px 20px;border-radius:16px;" +
-      "background:rgba(14,16,22,.96);border:1px solid #2c3140;color:#e8eef7;" +
-      "font:600 14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;box-shadow:0 16px 60px rgba(0,0,0,.6);display:none";
-    document.body.appendChild(board);
-    board.addEventListener("click", function (e) {
-      const close = e.target.closest && e.target.closest(".hb-close");
-      if (close) { hideBoard(); return; }
-      const card = e.target.closest && e.target.closest(".hb-card");
-      if (card && card.dataset.id && !card.classList.contains("locked")) { startCase(card.dataset.id); hideBoard(); }
-    });
-  }
-  function renderBoard() {
-    buildBoard();
-    const h = ensure();
-    const here = availableHere();
-    const crew = crewOnHand();
-    const rows = TIERS.map((t) => {
-      const a = here.find((x) => x.tier.id === t.id);
-      const ready = a && a.ready;
-      const needGun = t.gun && !hasGun();
-      const needCrew = t.minCrew > crew;
-      const canStart = ready && !needGun && h.phase === "idle" && h.cooldown <= 0;
-      // WHAT IS ACTUALLY IN THERE. The board used to quote tier.take — the
-      // same number for every corner store in the world, forever. It now
-      // reads the standing target's real balance, so casing the block is a
-      // real decision: this bar tonight, not that one; after close, not at
-      // opening. tier.take is the fallback when no target is in reach.
-      const tgt = a && a.target;
-      let est = Math.round(t.take * crewMul(Math.min(crew, 4)) * repPremium());
-      let live = false;
-      if (tgt && CBZ.cityTill) {
-        const hold = CBZ.cityTill.holds(tgt, { point: "best" });
-        if (hold.point) { est = Math.min(est, hold.amount); live = true; }
-      }
-      let why = "";
-      if (h.cooldown > 0) why = "lay low (" + Math.ceil(h.cooldown) + "s)";
-      else if (!ready) why = t.id === "armored" ? "stand on a street" : "walk up to a " + (t.kinds[0]) + "-type spot";
-      else if (needGun) why = "needs a gun";
-      else if (needCrew) why = "better with " + t.minCrew + "+ crew (you: " + crew + ")";
-      const lock = canStart ? "" : " locked";
-      const fee = t.setup ? fmt$(t.setup) + " setup" : "no setup";
-      return "<button class='hb-card" + lock + "' data-id='" + t.id + "' style='" +
-        "display:block;width:100%;text-align:left;margin:8px 0;padding:12px 14px;border-radius:12px;" +
-        "border:1px solid " + (canStart ? "#3a4a36" : "#2c3140") + ";background:" + (canStart ? "rgba(40,60,38,.5)" : "rgba(30,34,42,.6)") + ";" +
-        "color:#e8eef7;cursor:" + (canStart ? "pointer" : "default") + ";opacity:" + (canStart ? "1" : ".6") + "'>" +
-        "<div style='display:flex;justify-content:space-between;align-items:center'>" +
-        "<span style='font-size:15px'>" + t.icon + " " + t.name + "</span>" +
-        "<span style='color:" + (live && est <= 0 ? "#ff7a7a" : "#7ed957") + ";font-size:13px'>" +
-        (live ? (est > 0 ? fmt$(est) + " in there now" : "empty right now") : "~" + fmt$(est)) + "</span></div>" +
-        "<div style='margin-top:4px;font-weight:500;color:#aeb8c6;font-size:12px'>" + t.desc + "</div>" +
-        "<div style='margin-top:6px;font-size:11px;color:#8a93a3'>" +
-        "★".repeat(t.stars) + " heat · " + fee + " · " + (t.gun ? "armed" : "unarmed-ok") +
-        (canStart ? " · <span style='color:#7ed957'>READY</span>" : " · <span style='color:#ff9e6b'>" + why + "</span>") +
-        "</div></button>";
-    }).join("");
-    board.innerHTML =
-      "<div style='display:flex;justify-content:space-between;align-items:flex-start'>" +
-      "<div style='font-size:18px;color:#ffd479'>SCORE BOARD</div>" +
-      "<button class='hb-close' style='background:none;border:1px solid #2c3140;color:#aeb8c6;border-radius:8px;padding:6px 12px;cursor:pointer'>Close</button></div>" +
-      "<div style='margin-top:6px;font-size:12px;color:#8a93a3'>Crew on hand: <b style='color:#7fd0ff'>" + crew + "</b>" +
-      (crew ? " (+" + Math.round((crewMul(crew) - 1) * 100) + "% take, " + Math.round((1 - cutForCrew(crew)) * 100) + "% to the crew)" : "") +
-      "</div>" + rows +
-      "<div style='margin-top:12px;font-size:11px;color:#8a93a3;border-top:1px solid #2c3140;padding-top:8px'>" +
-      "Lifetime scores: " + (h.completed || 0) + " · biggest take: " + fmt$(h.biggest || 0) + "</div>";
-  }
-  function showBoard() {
-    if (g.mode !== "city" || g.state !== "playing") return;
-    if (CBZ.player.driving) { note("Get out of the car to plan a score.", 1.6); return; }
-    renderBoard();
-    board.style.display = "block";
-    CBZ.cityMenuOpen = true;
-    if (document.exitPointerLock) try { document.exitPointerLock(); } catch (e) {}
-  }
-  function hideBoard() {
-    if (!board) return;
-    board.style.display = "none";
-    CBZ.cityMenuOpen = false;
-    if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
-  }
 
   // your cut shrinks as the crew grows (they earn a share) but the bigger bag
   // more than makes up for it — classic GTA crew-cut math.
@@ -626,13 +407,9 @@
 
     // pin the target spot
     let target = null;
-    if (tier.id === "armored") {
-      const t = spawnTruck();
-      if (!t) { note("No room on the street for the truck, try elsewhere.", 1.8); return; }
-      target = { x: t.x, z: t.z, name: "Armored Truck", lotKind: null, truck: true };
-    } else {
+    {
       const lot = nearestLotFor(tier, 9) || (lotKindHere() && tier.kinds.indexOf(lotKindHere().kind) >= 0 ? lotKindHere().lot : null);
-      if (!lot) { note("Walk up to a " + tier.kinds[0] + "-type spot to case it.", 2); return; }
+      if (!lot) return;
       const kind = (lot.building.shop && lot.building.shop.kind) || lot.kind;
       const name = (lot.building.name) || (kind + " store");
       // BANK: the take-zone is the real STEEL VAULT (bank.js exposes its spot),
@@ -667,7 +444,7 @@
 
     // SETUP FEE (masks/tools/intel) — never refunded, GTA-style.
     if (tier.setup > 0) {
-      if (!CBZ.city.canAfford(tier.setup)) { note("Setup costs " + fmt$(tier.setup) + " (masks, tools, intel).", 2); cleanupTruck(); return; }
+      if (!CBZ.city.canAfford(tier.setup)) { note("Setup costs " + fmt$(tier.setup) + " (masks, tools, intel).", 2); return; }
       CBZ.city.spend(tier.setup);
       note("Paid " + fmt$(tier.setup) + " to set it up.", 1.6);
     }
@@ -732,8 +509,6 @@
     if (!(h.bagMax > 0)) {
       note("Cased it, there's nothing in there right now. Come back when they've traded.", 3);
       h.phase = "idle"; h.tierId = null; h.target = null; h.tillSrc = null;
-      cleanupTruck();
-      renderHud();
       return;
     }
 
@@ -744,9 +519,6 @@
     scoreEnd("retire", "replanned");
     score = startScoreMission(tier, h);
 
-    big(tier.icon + " CASING: " + tier.name);
-    note("In position? Press [H] to GO LOUD. Crew on hand: " + crew + ".", 2.6);
-    renderHud();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   if (CBZ.factionMigrated) CBZ.factionMigrated("memb:heists");
@@ -755,7 +527,8 @@
       if (CBZ.campaignUI && CBZ.campaignUI.open) CBZ.campaignUI.open("missions");
       return false;
     }
-    if (tierId) startCase(tierId); else showBoard();
+    if (!tierId) return false;
+    startCase(tierId);
     return true;
   };
 
@@ -814,7 +587,6 @@
       }
       if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0.15); } catch (e) {}
       if (CBZ.shake) CBZ.shake(0.5);
-      renderHud();
       return;
     }
 
@@ -825,8 +597,6 @@
     const crimeType = tier.id === "armored" ? "armed-robbery" : "armed-robbery";
     if (CBZ.cityCrime) CBZ.cityCrime(180, { instant: true, x: x, z: z, type: crimeType });
     if (CBZ.shake) CBZ.shake(0.4);
-    if (truckObj && truckObj.doorMat) truckObj.doorMat.emissive.setHex(0x3a2a00);
-    renderHud();
   }
 
   // bank what's grabbed so far and move to ESCAPE (or finish clean)
@@ -841,7 +611,6 @@
     // the score's own HUD panel owns the getaway from here.)
     if (score && CBZ.fullMap && CBZ.fullMap.clearWaypoint) { try { CBZ.fullMap.clearWaypoint("city"); } catch (e) {} }
     const tier = tierById(h.tierId);
-    if (truckObj && truckObj.doorMat) truckObj.doorMat.emissive.setHex(0x000000);
     if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0); } catch (e) {}
     // THE MONEY LEAVES THE BUILDING HERE. Up to this frame the bag was a
     // promise; the grab is over, so the dollars actually move out of the
@@ -872,7 +641,6 @@
     } else {
       note("Lose the cops to BANK the score. Drop the bag if you get busted.", 2.6);
     }
-    renderHud();
   }
 
   /* PAY THE CREW — the ONE implementation, and it is now shared by both ends
@@ -995,7 +763,6 @@
     // you. Read h.phase first: finish() below resets it.
     if (h.phase === "case") scoreEnd("retire", "plan's off");
     else scoreEnd("fail", msg || "the score fell apart");
-    cleanupTruck();
     if (msg) note(msg, 2);
     finish(4);
   }
@@ -1005,7 +772,6 @@
   function fail(reason) {
     const h = ensure();
     scoreEnd("fail", reason);             // a REAL bust: the card and the faction hook both hear it
-    cleanupTruck();
     big("SCORE BLOWN · " + reason);
     note("Lost the bag (" + fmt$(h.bag) + "). Heal up and try again.", 2.8);
     finish(10);
@@ -1018,7 +784,6 @@
     // have already stated the real verdict, so by the time we arrive the handle
     // is closed and this is a no-op.
     scoreEnd("retire", "score wrapped");
-    cleanupTruck();
     cleanupGuards();
     h.phase = "idle"; h.tierId = null; h.target = null;
     h.bag = 0; h.bagMax = 0; h.grabbed = 0; h.t = 0; h.heat = 0; h.crew = 0; h.downed = false;
@@ -1027,7 +792,6 @@
     h.dyeFrac = 0; h.dyed = false; h.silent = false;
     if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0); } catch (e) {}
     h.cooldown = cooldown || 0;
-    hideHud();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
@@ -1041,24 +805,13 @@
   };
 
   // ------------------------------------------------------------ per-frame loop
-  let promptT = 0;
   CBZ.onUpdate(40, function (dt) {
-    if (g.mode !== "city") { if (hud && hud.style.display !== "none") hideHud(); return; }
+    if (g.mode !== "city") return;
     const h = ensure();
 
     // cooldown bleeds off whenever you're not mid-job
     if (h.phase === "idle") {
       if (h.cooldown > 0) h.cooldown = Math.max(0, h.cooldown - dt);
-      // ambient prompt: when you stand near a casable target, nudge [H]
-      promptT += dt;
-      if (g.state === "playing" && !CBZ.player.dead && !CBZ.cityMenuOpen && !CBZ.player.driving && promptT > 1.2) {
-        promptT = 0;
-        if (h.cooldown <= 0) {
-          const here = availableHere();
-          const ready = here.find((a) => a.ready && a.tier.id !== "armored" && (!a.tier.gun || hasGun()));
-          if (ready && Math.random() < 0.5) note("You could case this " + (ready.tier.kinds[0]) + " · press [H].", 1.6);
-        }
-      }
       return;
     }
 
@@ -1118,9 +871,10 @@
         if (Math.random() < 0.5 && CBZ.sfxAt) CBZ.sfxAt("siren", sxP, szP);
       }
       if (Math.random() < dt * (0.5 + h.heat)) { if (CBZ.cityPanic) CBZ.cityPanic(tgt.x, tgt.z, 1.2, CBZ.city.playerActor); }
-      // NO HARD TIMEOUT AND NO AUTO-ADVANCE. You leave when you decide to
-      // leave, carrying what you decided to carry — [H] runs.
-      renderHud();
+      // NO HARD TIMEOUT. You leave when you decide to leave, carrying what
+      // you decided to carry: walking out of the bank is the run (the verb on
+      // the strongroom, "Grab and go", calls it from inside).
+      if (dist2(CBZ.player.pos.x, CBZ.player.pos.z, tgt.x, tgt.z) > 34) { grabAndGo(); return; }
       return;
     }
 
@@ -1170,7 +924,6 @@
       }
       // hard timeout: cops overwhelm the scene — bail with what you've grabbed
       if (h.t > (tier.drillTime + tier.grabTime) * 1.8) { note("They're swarming the lobby. GO with what you've got!", 1.4); grabAndGo(); }
-      renderHud();
       return;
     }
 
@@ -1206,7 +959,6 @@
         if (Math.random() < dt * 2) note("Get back on the target to keep grabbing!", 1.0);
       }
       if (h.t > tier.grabTime * 2.6) { note("Cops are swarming. GO with what you've got!", 1.4); grabAndGo(); }
-      renderHud();
       return;
     }
 
@@ -1257,7 +1009,6 @@
       } else {
         h._clearT = null;
       }
-      renderHud();
       return;
     }
 
@@ -1273,50 +1024,47 @@
       } else {
         h._clearT = null;
       }
-      renderHud();
       return;
     }
   });
 
-  // ------------------------------------------------------------ input: [H]
-  // [H] is the heist key. Realestate.js uses [H] too (home menu), but only when
-  // NO menu is open and you're not driving — we run FIRST priority while a heist
-  // is live or a casable target is in reach, otherwise we yield to it.
-  addEventListener("keydown", function (e) {
-    if (g.mode !== "city" || g.state !== "playing") return;
-    if (e.repeat) return;
-    const k = (e.key || "").toLowerCase();
-
-    // [K] backs out of a cased/queued score (the board uses its own clicks)
-    if (k === "k" && !CBZ.cityMenuOpen && !e.defaultPrevented && !(CBZ.cityInteractHasSlot && CBZ.cityInteractHasSlot("k"))) {
-      const h = ensure();
-      if (h.phase === "case") { e.preventDefault(); abort("Backed out of the score."); return; }
-    }
-
-    if (k !== "h") return;
-    if (CBZ.cityMenuOpen) return;            // a menu (incl. our board) owns input
-    if (CBZ.player.driving) return;          // realestate/other systems handle driving
-
-    const h = ensure();
-    // mid-job: [H] advances the arc (case→execute→grab&go)
-    if (h.phase === "case") { e.preventDefault(); e.stopImmediatePropagation(); goLoud(); return; }
-    if (h.phase === "execute") { e.preventDefault(); e.stopImmediatePropagation(); grabAndGo(); return; }
-    if (h.phase === "escape") { return; }    // nothing to press; just run
-
-    // idle: if a casable score is in reach, open the board. (Your front door is
-    // a thing in the interaction registry now: realestate.js, E or a tap.)
-    if (h.cooldown <= 0) {
-      const here = availableHere();
-      const anyReady = here.some((a) => a.ready);
-      if (anyReady) { e.preventDefault(); e.stopImmediatePropagation(); showBoard(); return; }
-    }
-    // no score nearby → don't consume the key (home menu / others may use it)
-  }, true);
-
-  /* THE SCORE IS A THING YOU CAN TOUCH (city/interactions.js). Standing at the
-     target of a cased job, its next beat is a verb on it: E, Q or a tap goes
-     loud, then grabs and goes. [H] still advances it from anywhere. */
+  /* THE SCORE IS A THING YOU CAN TOUCH (city/interactions.js). There is no
+     score board and no heist key. Standing in a place worth hitting, the
+     place itself offers it: "Hit the place" (you pay for what the job needs,
+     and it is loud from that second). While it runs, the same spot's verb
+     is the bag: "Grab and go" with what is in it so far. Walking out of a
+     cased place before it goes loud drops it. */
   let zoned = false;
+  const _idleTok = { x: 0, z: 0, pos: { x: 0, y: 1.1, z: 0 }, tier: null, lot: null };
+  function idleTarget(px, pz) {
+    const h = ensure();
+    if (h.phase !== "idle" || h.cooldown > 0 || CBZ.player.driving) return null;
+    if (CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()) return null;
+    const here = availableHere();
+    let best = null;
+    for (const a of here) {
+      if (!a.ready || !a.target || (a.tier.gun && !hasGun())) continue;
+      if (!best || a.tier.tier > best.tier.tier) best = a;
+    }
+    if (!best) return null;
+    // the spot is just inside the door (a clerk at his counter is his own
+    // target, robbed with his own verbs: city/keepers.js, city/racket.js)
+    const lot = best.target, d = lot.building && lot.building.door;
+    let ax = lot.cx, az = lot.cz;
+    if (d) {
+      const ix = lot.cx - d.x, iz = lot.cz - d.z, il = Math.hypot(ix, iz) || 1;
+      ax = d.x + ix / il * 1.8; az = d.z + iz / il * 1.8;
+    }
+    _idleTok.x = _idleTok.pos.x = ax; _idleTok.z = _idleTok.pos.z = az;
+    _idleTok.pos.y = (CBZ.player.pos.y || 0) + 1.1;
+    _idleTok.tier = best.tier; _idleTok.lot = lot;
+    return Math.hypot(px - ax, pz - az) <= 3.2 ? _idleTok : null;
+  }
+  function hitPlace(t) {
+    if (!t || !t.tier) return;
+    startCase(t.tier.id);
+    if (ensure().phase === "case") goLoud();
+  }
   function wireZone() {
     if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     zoned = true;
@@ -1330,10 +1078,24 @@
       options: [
         { id: "heist-loud", slot: "e", prio: 6, bad: true, forceYes: true, campaignSafe: true, label: "Hold up",
           canShow: () => ensure().phase === "case", onSelect: goLoud },
-        { id: "heist-grab", slot: "e", prio: 6, forceYes: true, campaignSafe: true, label: "Grab",
+        { id: "heist-grab", slot: "e", prio: 6, forceYes: true, campaignSafe: true,
+          label: () => "Grab and go, " + fmt$(ensure().bag || 0),
           canShow: () => ensure().phase === "execute", onSelect: grabAndGo },
       ],
     });
+    // the place, before anything has started
+    CBZ.interactions.registerZone({
+      id: "zone-heist-idle", kind: "heistspot", radius: 3.2, prio: 3, driving: false,
+      find: idleTarget,
+      options: [
+        { id: "heist-hit", wheel: true, bad: true, prio: 2,
+          label: (t) => "Hit the place" + (t.tier.setup ? ", " + fmt$(t.tier.setup) + " to set up" : ""),
+          onSelect: hitPlace },
+      ],
+    });
+    if (CBZ.interactions.describe) {
+      CBZ.interactions.describe("heistspot", function (t) { return { label: (t.lot.building && t.lot.building.name) || "The place", note: "" }; });
+    }
   }
   if (CBZ.onUpdate) CBZ.onUpdate(41.2, function () { if (g.mode === "city") wireZone(); });
 })();

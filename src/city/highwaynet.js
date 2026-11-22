@@ -1,72 +1,41 @@
 /* ============================================================
-   city/highwaynet.js — THE HIGHWAY NETWORK AS DATA.
+   city/highwaynet.js — THE HIGHWAY NETWORK, BUILT FROM THE WORLD PLAN.
 
-   OWNER MANDATE: "completely redo the highway and road system to make it
-   significantly significantly bigger, and extendable and natural."
+   The routes are the plan's (src/world/worldplan.js `routes`): each goes
+   from somewhere to somewhere and says why there. This file turns that data
+   into roads: the deck and its paint, the drivable city.roads records, the
+   map regions and the terrain-relief corridor ALL derive from the same route
+   record, so they can never desync.
 
-   WHY a data table instead of more hand-placed causeways: every highway so
-   far was placed inside whichever island module needed it, so the network
-   could never be seen, extended or audited in one place — and coordinate
-   drift between a deck and its paint/records is exactly how the owner's
-   "floating yellow line" class of bug happens. THIS file is the single
-   source of truth: a table of named ROUTES, each a polyline of waypoints
-   with a per-route cross-section. Deck, lane paint, drivable city.roads
-   records, map regions and the terrain-relief corridor ALL derive from the
-   same route record, so they can never desync.
+   It used to hold the table itself, as one grand rectangular loop round the
+   desert plus spurs, with seven "free-country lane" literals that had to be
+   re-measured every time the layout dial slid the land out from under them.
+   A ring round a rectangle goes nowhere; that table is gone.
 
-   THE NETWORK (≈19km of new 3+3 divided highway; ~24km total with the
-   causeways it docks into). Coordinates derive from the world-layout dial
-   (CBZ.worldOff) — move a landmass and its docks follow:
-
-     • ROUTE 1 "Continental Loop" — the grand ring: docks the Brandt
-       (military) causeway, runs the forest/military corridor west, sweeps
-       south past Neon Reef/The Foundry, crosses the southern plains below
-       Goldspire, climbs the eastern frontier past the Saltlands/Coyle
-       rim (clear of the nations — they stay air/boat only), crests along
-       the Greater Mercy foothill line and drops back down the snow/desert
-       gap to close on its own southern leg. Junctions with the Redhollow
-       (forest) road and the Saltlands causeway where they cross.
-     • ROUTE 2 "Cape Spine" — Diamond Causeway ↔ Cape Harbor's link road.
-     • ROUTE 3 "Goldspire Run" — Goldspire's link road north, bending east
-       onto Route 2: the finance city joins the speedway/annex chain.
-     • ROUTE 4 "Foundry Row" — The Foundry's link road east to Route 3:
-       the southwest factory belt joins the southern system.
-     • ROUTE 5 "West Shore Highway" — Route 1 west leg ↔ the Halloran
-       (airport) causeway, threading military-south / airport-north.
-     • ROUTE 6 "Southgate Spur" — Route 1 south leg ↔ Foundry Row.
-     • ROUTE 7 "Mercy Connector" — Route 1 ↔ the Mercy Causeway's west
-       edge: the alpine road joins the loop without touching Mount Mercy.
-
-   RULES THE TABLE OBEYS (checked at build time, deterministically):
-     • every leg is axis-aligned (traffic/vehicles/props assume vertical or
-       horizontal centrelines); bends between legs are FILLETED into arcs
-       by the builder (buildHighway smooth mode) — natural, no L-corners;
-     • routes stay OUT of every registered landmass footprint and water
-       body; they END flush against the causeway/link decks they dock into
-       (the hand-placed causeways keep their decks — they are the mouths);
-     • the harbor bay ring around the mainland is never crossed (the three
-       existing mainland causeways own those crossings);
-     • pure data + closed-form math — no rng anywhere, so worlds stay
-       byte-identical per seed (multiplayer determinism law).
+   RULES A ROUTE OBEYS:
+     • every leg that carries traffic is axis-aligned (traffic/vehicles/
+       props assume vertical or horizontal centrelines); the corners sweep
+       on wide radii and long open legs get S-bends (THE SHAPE OF THE ROAD
+       below), and cars drive those curves on the deck's own centreline
+       (CBZ.highwayBendFor);
+     • a deck stops FLUSH at the edge of the deck or street it meets (the
+       plan's trimA / trimB) while its drivable RECORD runs on to that
+       road's centreline, so vehicles.js findRoad can hop the junction;
+     • pure data + closed-form math, no rng anywhere.
 
    INTEGRATION: one city.roads record per leg (district "highway", real
-   lane data — traffic seeds/drives them, the map draws them gold), one
-   "<Route> Link n" region per leg (fullmap casing/waterfield deck
-   semantics; the Link name keeps polwar's causeway-front search and the
-   shore field's land-holding both blind to them, exactly like the
-   existing causeway link regions), and CBZ.highwayNetReliefGate — the
-   continent's country relief flattens under every corridor the same way
-   it already does for the frontier loop, so decks never hover over hills.
+   lane data: traffic seeds/drives them, the map draws them gold), one
+   "<Route> Link" region per leg (fullmap casing/waterfield deck semantics;
+   the Link name keeps the shore field's land-holding blind to them, so a
+   route that crosses water is a deck over it), and CBZ.highwayNetReliefGate:
+   the continent's relief flattens under every corridor, which is what makes
+   a pass a pass.
 
    DRAW BUDGET: highways.js merges each route per ~400 m chunk (deck, paint,
    furniture); far chunks drop paint/furniture. The R5/R1 interchange
    (city/interchange.js) is planned here and built in the late pass.
 
-   EXTEND IT: push another entry into routeTable() — a polyline + width —
-   and the builder does the rest (fillets, records, regions, relief).
-
-   REVERT: CBZ.CONFIG.HIGHWAY_NET_V2 = false → today's network exactly
-   (no routes, no records, no relief gating).
+   EXTEND IT: add a route to the plan.
 ============================================================ */
 (function () {
   "use strict";
@@ -74,7 +43,6 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   if (!CBZ.CONFIG) CBZ.CONFIG = {};
-  if (CBZ.CONFIG.HIGHWAY_NET_V2 == null) CBZ.CONFIG.HIGHWAY_NET_V2 = true;
 
   // THE CROSS-SECTION (highways.js builds it; these are the numbers the table
   // docks by). 3+3 lanes of 3.6 m either side of a 3.0 m median (a 0.6 m
@@ -130,269 +98,180 @@
   };
 
   // ============================================================
-  //  THE ROUTE TABLE — every coordinate derives from the layout dial
-  //  anchors, so the network follows any future world move for free.
-  // ============================================================
-  function routeTable() {
-    const off = function (id) { return (CBZ.worldOff && CBZ.worldOff(id)) || { dx: 0, dz: 0 }; };
-    const MIL = off("military"), SNW = off("snow"), SPD = off("speedway");
-    const GLD = off("goldspire"), CPH = off("capeharbor"), FND = off("foundry");
-
-    // ---- causeway-mouth anchors (each names its owning module's constant) --
-    const brandtZ = -700 + MIL.dz;             // island_military CW_CZ (-850)
-    const mercyX = 470 + SNW.dx;               // biome_snow causeway lane (470)
-    const diamondZ = -540 + SPD.dz;            // island_speedway causewayZ (-540)
-    const halloranX = 0;                       // island_airport causeway (pinned)
-    const goldX = 150 + GLD.dx, goldMouthZ = 470;      // minicities goldspire cx / road plug z
-    const capeX = 430 + CPH.dx, capeMouthZ = -130;     // minicities capeharbor cx / road plug z
-    const foundryMouthX = -380, foundryRowZ = 225 + FND.dz;  // minicities foundry road plug
-    // island_military CW_MAXX: the Brandt deck's EAST end is pinned at the
-    // authored mainland shore point while the base slides with the dial
-    const brandtEastX = -133;
-    // WHAT FOUNDRY ROW ACTUALLY MEETS. It was written to "T flush onto Route
-    // 3's deck", but Route 3 runs NORTH from the Goldspire mouth; once the
-    // re-lay pushed Foundry Row south of that mouth it met the Goldspire LINK
-    // (minicities.js, a 24 m causeway deck, half 14.4) instead — and stopped
-    // 15.3 m short of the line, i.e. ~1 m of grass short of that deck with a
-    // square end. Dock on whichever deck is really there.
-    const r4EndX = foundryRowZ > goldMouthZ ? goldX - CW_HALF : goldX - HALF;
-
-    // ---- the loop's free-country lanes (verified ≥40m clear of every
-    //      registered footprint incl. Greater Mercy and the nations — the
-    //      build-time clearance sweep below re-proves this every build) -----
-    // WORLD_LAYOUT_V2 MOVED THE LAND UNDERNEATH THESE. Every DOCK in this file
-    // derives from CBZ.worldOff and therefore followed its landmass when the
-    // stage-3 spread pushed the regions apart — but these seven free-country
-    // lane constants are raw literals measured against the stage-2 gaps, so
-    // they stayed put while the continents moved out from under them. The
-    // build-time clearanceSweep below only console.warns, so nothing threw:
-    // route R1 simply began cutting through Fort Brandt, the Saltlands, Coyle
-    // Valley and the speedway, silently.
-    //
-    // WORLD_SCALE_V4 MOVED IT AGAIN — AND THIS TIME THE BIOMES GREW TOO, so a
-    // lane that was 40 m clear of a rect could be inside it without the rect
-    // having moved at all. All seven are re-measured below against the stage-4
-    // geometry, each showing the two edges it threads between; the eighth
-    // literal (R5's dog-leg) and R7's crossing z are re-derived further down.
-    // A lane is chosen as the MIDPOINT of the corridor it runs in wherever the
-    // corridor has two sides, so the next world move has the largest possible
-    // margin before it needs this table again.
-    // The STAGE layout.js resolved to, not the raw flag — WORLD_SCALE_V4 rides
-    // on top of WORLD_LAYOUT_V2, and a stage-2 world must keep stage-2 lanes.
-    //
-    // WORLD_SCALE_V5 MOVED TWO OF THEM, AND ONLY TWO. The Saltlands went 10x
-    // by area (x 1719..6171, z -301..4455), which puts the Continental Loop's
-    // south leg (southZ 1650) and its east leg (eastX 3700) INSIDE the basin —
-    // 2 km and 2.5 km of six-lane motorway through open erg respectively. The
-    // other five lanes are untouched because the basin grew east and south,
-    // away from every one of them: dunesX 1300 still threads the snow/desert
-    // gap (desert minX did not move), timberX/corridorZ/westX/foothillZ are
-    // all west or north of a biome that only went the other way.
-    const V5 = (CBZ.WORLD_LAYOUT_STAGE || 1) >= 5;
-    const V4 = (CBZ.WORLD_LAYOUT_STAGE || 1) >= 4;
-    //  name        stage-4 value   the corridor it threads (stage-4 world AABBs)
-    //  timberX      -560   forest maxX -894 .. snow minX -196; also >= 273 off
-    //                      the mainland harbour band (x -165 +- 97) and inside
-    //                      the Brandt deck's x-span (-1280 .. -133).
-    //  corridorZ   -1600   forest maxZ -1771 .. military minZ -1430 (midpoint
-    //                      -1600.5): 151 m clear of the trees, 150 of the base.
-    //  westX       -2380   west of foundry minX -2245 and neonreef minX -2240
-    //                      by 115/120 m, and 1734 m east of mbeya_east -4114.
-    //  southZ       1650   south of goldspire maxZ 1490 by 140 m (the civic
-    //                      campus ends at 1378) and 448 m south of the desert.
-    //  eastX        3700   east of farmland maxX 3200 (480 m) and desert maxX
-    //                      3124 (556), west of keshtown minX 4200 (488).
-    //  foothillZ   -3400   south of Greater Mercy maxZ -4279 by 879 m, north of
-    //                      farmland minZ -2570 by 810.
-    //  dunesX       1300   snow maxX 896 .. desert minX 1716: 392 m of dune and
-    //                      404 m of snowfield either side.
-    const timberX = V4 ? -560 : -400;          // forest/snow corridor
-    const corridorZ = V4 ? -1600 : -1415;      // forest/military gap
-    const westX = V4 ? -2380 : -1960;          // west of neonreef/foundry
-    //  stage-5 re-measure (the two the basin now covers):
-    //  southZ       4700   south of desert maxZ 4455 by 245 m and 3.2 km south
-    //                      of goldspire maxZ 1490; still 2.0 km inside the
-    //                      stage-5 plate's south edge (z 6700).
-    //  eastX        6800   east of desert maxX 6171 (629 m), west of keshtown
-    //                      minX 7400 (600) and veridia minX 7455 — the
-    //                      midpoint of the corridor between the erg's new east
-    //                      shore and the nations that moved to clear it.
-    const southZ = V5 ? 4700 : (V4 ? 1650 : 1230);   // south of goldspire/desert
-    const eastX = V5 ? 6800 : (V4 ? 3700 : 2560);    // east of desert/farmland
-    const foothillZ = V4 ? -3400 : -3250;      // south of Greater Mercy
-    const dunesX = V4 ? 1300 : 1200;           // snow/desert gap
-
-    // Deck endpoints stop FLUSH at the docked deck's edge (±HALF); the road
-    // RECORD extends to the docked road's centreline (recA/recB) so
-    // vehicles.js findRoad (9m snap) can hop the junction — the HWY-4
-    // connector doctrine, folded into the table.
-    return [
-      {
-        id: "R1", name: "Continental Loop", width: WIDTH, lanesPerDir: 3, fillet: 140,
-        pts: [
-          { x: timberX, z: brandtZ - CW_HALF },          // dock: Brandt causeway north edge
-          { x: timberX, z: corridorZ },
-          { x: westX, z: corridorZ },
-          { x: westX, z: southZ },
-          { x: eastX, z: southZ },
-          { x: eastX, z: foothillZ },
-          { x: dunesX, z: foothillZ },
-          { x: dunesX, z: southZ - HALF },               // closes onto its own south leg
-        ],
-        recA: brandtZ, recB: southZ,
-        docks: [{ x: timberX, z: brandtZ, note: "Brandt causeway" }],
-      },
-      {
-        id: "R2", name: "Cape Spine", width: WIDTH, lanesPerDir: 3, fillet: 60,
-        pts: [
-          { x: capeX, z: diamondZ + CW_HALF },           // dock: Diamond causeway south edge
-          { x: capeX, z: capeMouthZ },                   // dock: Cape Harbor link mouth
-        ],
-        recA: diamondZ, recB: capeMouthZ + 20,
-        docks: [{ x: capeX, z: diamondZ, note: "Diamond causeway" },
-                { x: capeX, z: capeMouthZ, note: "Cape Harbor link" }],
-      },
-      {
-        id: "R3", name: "Goldspire Run", width: WIDTH, lanesPerDir: 3, fillet: 60,
-        pts: [
-          { x: goldX, z: goldMouthZ },                   // dock: Goldspire link mouth
-          { x: goldX, z: -200 },
-          { x: capeX - HALF, z: -200 },                  // T flush onto Route 2's deck
-        ],
-        recA: goldMouthZ + 20, recB: capeX,
-        docks: [{ x: goldX, z: goldMouthZ, note: "Goldspire link" }],
-      },
-      {
-        id: "R4", name: "Foundry Row", width: WIDTH, lanesPerDir: 3, fillet: 60,
-        pts: [
-          { x: foundryMouthX, z: foundryRowZ },          // dock: Foundry link mouth
-          { x: r4EndX, z: foundryRowZ },                 // T flush onto the Goldspire link / Route 3
-        ],
-        recA: foundryMouthX - 20, recB: goldX,
-        docks: [{ x: foundryMouthX, z: foundryRowZ, note: "Foundry link" }],
-      },
-      {
-        id: "R5", name: "West Shore Highway", width: WIDTH, lanesPerDir: 3, fillet: 60,
-        pts: [
-          { x: westX + HALF, z: -700 },                  // T flush onto Route 1's west deck
-          // -1500, not -1200: WORLD_LAYOUT_V2 widened Fort Brandt's span to
-          // x[-1420,-940], so the old dog-leg ran straight through the base.
-          // RE-MEASURED for WORLD_SCALE_V4 and deliberately UNCHANGED: the base
-          // moved to x[-1760,-1280] z[-1430,-930], so -1500 is now inside its
-          // x-span — but this leg runs z -700..-420, which is 230 m SOUTH of
-          // the base's southern edge, so it never meets it. What the leg does
-          // have to clear is the airport (x[-1120,70] z[-280,40]): the turn
-          // east at z -420 passes 120 m north of its apron. Both hold.
-          { x: -1500, z: -700 },
-          { x: -1500, z: -420 },
-          { x: halloranX - CW_HALF, z: -420 },           // dock: Halloran causeway west edge
-        ],
-        recA: westX, recB: halloranX,
-        docks: [{ x: halloranX, z: -420, note: "Halloran causeway" }],
-      },
-      {
-        id: "R6", name: "Southgate Spur", width: WIDTH, lanesPerDir: 3, fillet: 60,
-        pts: [
-          // -280, not -240: originally chosen to clear the Goldspire Civic
-          // Campus (minX -230 after the spread), which the old x cut through.
-          // The campus was deleted 2026-08-15; the spur stays at -280 because
-          // every deck T, fillet and dock length downstream is solved off it —
-          // moving it now would reroute the network for no gain.
-          { x: -280, z: southZ - HALF },                 // T flush onto Route 1's south deck
-          { x: -280, z: foundryRowZ + HALF },            // T flush onto Foundry Row's deck
-        ],
-        recA: southZ, recB: foundryRowZ,
-        docks: [],
-      },
-      {
-        id: "R7", name: "Mercy Connector", width: WIDTH, lanesPerDir: 3, fillet: 60,
-        // THE EIGHTH LITERAL, NOW DERIVED. This crossing was authored as
-        // z = -1000, which is the value `brandtZ` happened to have when it was
-        // written — i.e. it is the Brandt causeway's own centreline, the south
-        // end of Route 1's first leg, and it only looked like a constant. Left
-        // as -1000 a world move would have floated this connector off the leg
-        // it T's into and off the Mercy lane it docks against. It is the same
-        // number in the stage-3 world, so this changes nothing there.
-        //
-        // AND IT STARTS WHERE THE BRANDT DECK ENDS. "T flush onto Route 1's
-        // first leg" stopped being true when the base moved north: brandtZ is
-        // the Brandt causeway's own centreline, so this connector was laid ON
-        // TOP of that causeway from Route 1 to its pinned east end (411 m of
-        // two decks stacked, two sets of lane paint 0.9 m apart), and the
-        // Brandt deck's paint, rumble strips and median ended abruptly in the
-        // middle of this one. Where the Brandt deck reaches past Route 1, the
-        // connector now carries on from its end, flush, end to end.
-        pts: [
-          { x: Math.max(timberX + HALF, brandtEastX), z: brandtZ },   // Brandt deck end (or T onto Route 1)
-          { x: mercyX - CW_HALF, z: brandtZ },           // dock: Mercy causeway west edge
-        ],
-        recA: brandtEastX > timberX + HALF ? brandtEastX - 20 : timberX, recB: mercyX,
-        docks: [{ x: mercyX, z: brandtZ, note: "Mercy causeway" }],
-      },
-    ].concat(V5 ? townLinks(eastX, westX) : []);
-  }
-
-  // ============================================================
-  //  THE COUNTRY ROADS (layout wave 2, 2026-10-08). tools/layout-audit.mjs
-  //  measured nine settlements whose streets touched no other road: the
-  //  nations east of the Loop (Veridia + Lowport, Keshtown + Nur Hollow +
-  //  Adar's Well, Solara) and Mbeya with its three villages in the west.
-  //  You could only reach them across open grass. Each now has a REAL
-  //  two-lane country road from the same kit as every highway (one 3.6 m
-  //  lane each way, 1.9 m shoulders, centre line, edge furniture, relief
-  //  flattened under it by the same corridor gate, a drivable record per
-  //  leg that T's at grade into the Loop exactly as Routes 5/6 do — the
-  //  Loop's barriers gap at every junction a record makes).
-  //
-  //  Every coordinate is a TOWN STREET's centreline or edge, read off the
-  //  towngen grids these places build (countries.js; numbers measured on
-  //  the live world, seed-independent: the nations' grids are authored).
-  //  A deck stops flush at the street edge it meets and its record runs on
-  //  to the street's centreline (recA / recB), the HWY-4 dock doctrine.
-  //  The route's final point is always inside the place it serves, so the
-  //  clearance law (roadrules.js) lets the arriving leg in.
+  //  THE ROUTE TABLE, from the plan. A plan route is centreline points
+  //  junction to junction plus how far the deck stops short of each end
+  //  (trimA / trimB); here that becomes the deck's own end points and the
+  //  record's (recA / recB), which is the shape the builder below takes.
   // ============================================================
   const RURAL_W = 11;                          // 3.6 + 3.6 lanes + 1.9 m shoulders
-  function townLinks(eastX, westX) {
-    const LX = eastX + HALF, WX = westX - HALF;   // the Loop's east / west deck edges
-    const R = function (id, name, pts, recA, recB, fillet) {
-      return { id: id, name: name, width: RURAL_W, lanesPerDir: 1, median: false, rural: true, fillet: fillet || 40,
-        pts: pts, recA: recA, recB: recB, docks: [] };
-    };
-    return [
-      // east of the Loop: the nations
-      R("C1", "Veridia Road", [{ x: LX, z: -400 }, { x: 7465, z: -400 }], eastX, 7472),
-      R("C2", "Lowport Lane", [{ x: 7600, z: -624 }, { x: 7600, z: -523 }], -630, -516),
-      R("C3", "Kesh Road", [{ x: LX, z: -2265.5 }, { x: 7411, z: -2265.5 }], eastX, 7417.5),
-      R("C4", "Nur Hollow Lane", [{ x: 7501.5, z: -2157 }, { x: 7501.5, z: -2069 }], -2163.5, -2063.5),
-      R("C5", "Adar's Well Lane", [{ x: 7589, z: -2238.5 }, { x: 7705.6, z: -2238.5 }], 7582.5, 7711.1),
-      R("C6", "Solara Road", [{ x: LX, z: 1620 }, { x: 7679.5, z: 1620 }], eastX, 7686),
-      // west of the Loop: Mbeya and its villages. The road leaves the Loop's
-      // west leg 60 m south of the corner fillet's end (the arc spans z
-      // -1600..-1460) and turns on 40 m fillets onto Ruvu's main street.
-      R("C7", "Mbeya Road", [{ x: WX, z: -1400 }, { x: -2700, z: -1400 }, { x: -2700, z: -1558.5 }, { x: -4130.2, z: -1558.5 }], westX, -4135.7),
-      R("C8", "Ruvu Lane", [{ x: -4356, z: -1576 }, { x: -4231.9, z: -1576 }], -4362, -4226.4),
-      R("C9", "Kolo Lane", [{ x: -4648.4, z: -1576 }, { x: -4524, z: -1576 }], -4653.9, -4518),
-      R("C10", "Tende Lane", [{ x: -4439.9, z: -1771.8 }, { x: -4439.9, z: -1678 }], -1777.3, -1672),
-    ].concat(saltlandsRoad(eastX));
+  function routeTable() {
+    const plan = CBZ.worldPlan;
+    const src = (plan && plan.routes) || [];
+    const out = [];
+    for (const r of src) {
+      const pts = r.pts.map(function (q) { return { x: q[0], z: q[1] }; });
+      if (pts.length < 2) continue;
+      const rural = r.kind === "road";
+      const rec = { id: r.id, name: r.name, width: rural ? RURAL_W : WIDTH, lanesPerDir: rural ? 1 : 3,
+        fillet: rural ? 40 : 60, sweep: !!r.sweep, pts: pts, docks: [] };
+      if (rural) { rec.median = false; rec.rural = true; }
+      const n = pts.length;
+      const vA = Math.abs(pts[1].x - pts[0].x) < 0.5, vB = Math.abs(pts[n - 1].x - pts[n - 2].x) < 0.5;
+      if (r.trimA) {
+        rec.recA = vA ? pts[0].z : pts[0].x;
+        const d = unitTo(pts[0], pts[1]);
+        pts[0] = { x: pts[0].x + d.x * r.trimA, z: pts[0].z + d.z * r.trimA };
+      }
+      if (r.trimB) {
+        rec.recB = vB ? pts[n - 1].z : pts[n - 1].x;
+        const d = unitTo(pts[n - 1], pts[n - 2]);
+        pts[n - 1] = { x: pts[n - 1].x + d.x * r.trimB, z: pts[n - 1].z + d.z * r.trimB };
+      }
+      out.push(rec);
+    }
+    return out;
   }
-  // The Saltlands spine (biome_desert.js, published as CBZ.DESERT_SPINE) ran
-  // to the basin's east shore and stopped in the sand. It carries on to the
-  // Continental Loop's east leg, so Dry Gulch is reached from both sides.
-  function saltlandsRoad(eastX) {
-    const S = CBZ.DESERT_SPINE;
-    if (!S || !isFinite(S.z) || !isFinite(S.east) || S.east >= eastX - HALF - 20) return [];
-    return [{ id: "C11", name: "Saltlands Road", width: RURAL_W, lanesPerDir: 1, median: false, rural: true, fillet: 40,
-      pts: [{ x: eastX - HALF, z: S.z }, { x: S.east, z: S.z }], recA: eastX, recB: S.east, docks: [] }];
+  function unitTo(a, b) { const L = Math.hypot(b.x - a.x, b.z - a.z) || 1; return { x: (b.x - a.x) / L, z: (b.z - a.z) / L }; }
+
+  // ============================================================
+  //  THE SHAPE OF THE ROAD (owner: "highways that are rectangular loops
+  //  with right-angle corners running hard against the cities"). The table
+  //  above says WHERE a route runs; this says how it runs there:
+  //    • its corners SWEEP: each a 750 m radius unless a junction on either
+  //      leg needs the road straight sooner (a T must meet a straight deck);
+  //    • its long legs across open country carry gentle S-BENDS: the road
+  //      drifts 230 m to one side over 1.15 km on a 3.2 km radius, runs on,
+  //      and drifts back. Never within 1.5 km of a corner, 700 m of a
+  //      junction, or near a metro, a biome or a town it would cut into —
+  //      all read from the layout's own records (footprints, the metro
+  //      site table, the other routes), never from coordinates of its own.
+  //  Every leg between the bends is still axis-aligned and carries the
+  //  drivable record; a car crosses a bend on the bend's own curve
+  //  (CBZ.highwayBendFor below, driven by vehicles.js), never across grass.
+  // ============================================================
+  const SWEEP_R = 750;
+  const S_R = 3200, S_AMP = 230, S_RAMP = 1150, S_HOLD_MIN = 700, S_HOLD_MAX = 2600;
+  const S_END = 1100, S_JUNC = 700, S_MIN_LEG = 4200, S_CLEAR = 260;
+  function isAxis(a, b) { return Math.abs(a.x - b.x) < 0.5 || Math.abs(a.z - b.z) < 0.5; }
+  function legLen(a, b) { return Math.hypot(b.x - a.x, b.z - a.z); }
+  // the tangent length the smooth path will give the corner at pts[i]
+  // (highways.js highwaySmoothPath's own clamp, repeated: one answer)
+  function cornerT(pts, i, radius) {
+    const p0 = pts[i - 1], p1 = pts[i], p2 = pts[i + 1];
+    let ax = p1.x - p0.x, az = p1.z - p0.z, bx = p2.x - p1.x, bz = p2.z - p1.z;
+    const la = Math.hypot(ax, az) || 1e-6, lb = Math.hypot(bx, bz) || 1e-6;
+    const dot = Math.max(-1, Math.min(1, (ax * bx + az * bz) / (la * lb)));
+    const turn = Math.acos(dot);
+    if (turn < 0.02) return 0;
+    return Math.min((p1.r || radius) * Math.tan(turn / 2), la * 0.45, lb * 0.45);
+  }
+  // where every route meets another: its two ends
+  function junctions(routes) {
+    const J = [];
+    for (const r of routes) { const p = r.pts; if (p.length) { J.push(p[0]); J.push(p[p.length - 1]); } }
+    return J;
+  }
+  // distance along the axis leg a->b to q, or null when q is not on it
+  function alongLeg(q, a, b, tol) {
+    const vert = Math.abs(a.x - b.x) < 0.5;
+    const lat = vert ? Math.abs(q.x - a.x) : Math.abs(q.z - a.z);
+    const s = vert ? (q.z - a.z) * Math.sign(b.z - a.z) : (q.x - a.x) * Math.sign(b.x - a.x);
+    return lat < tol && s > -tol && s < legLen(a, b) + tol ? s : null;
+  }
+  // what a bend must keep clear of: the biomes, the metros, the towns the
+  // country roads serve, the desert spine
+  function keepOuts(routes) {
+    const K = [];
+    const F = CBZ.WORLD_FOOTPRINTS || {};
+    for (const id in F) { const f = F[id]; K.push({ minX: f.minX, maxX: f.maxX, minZ: f.minZ, maxZ: f.maxZ }); }
+    const sites = CBZ.metroLib && CBZ.metroLib.siteTable ? CBZ.metroLib.siteTable({}) : [];
+    for (const s of sites) if (s.bounds) K.push({ minX: s.bounds.minX - 150, maxX: s.bounds.maxX + 150, minZ: s.bounds.minZ - 150, maxZ: s.bounds.maxZ + 150 });
+    for (const r of routes) if (r.rural) for (const p of r.pts) K.push({ minX: p.x - 250, maxX: p.x + 250, minZ: p.z - 250, maxZ: p.z + 250 });
+    return K;
+  }
+  // a drift may not wander into the sea: the whole strip it needs is land,
+  // by the plan's own coast
+  function onLand(R) {
+    const P = CBZ.worldPlan; if (!P || !P.landAt) return true;
+    for (let i = 0; i <= 6; i++) for (let j = 0; j <= 2; j++) {
+      const x = R.minX + (R.maxX - R.minX) * (R.maxX - R.minX > R.maxZ - R.minZ ? i / 6 : j / 2);
+      const z = R.minZ + (R.maxZ - R.minZ) * (R.maxX - R.minX > R.maxZ - R.minZ ? j / 2 : i / 6);
+      if (P.landAt(x, z) < 90) return false;
+    }
+    return true;
+  }
+  function meander(route, J, K) {
+    const out = [route.pts[0]];
+    let nS = 0;
+    for (let i = 0; i + 1 < route.pts.length; i++) {
+      const a = route.pts[i], b = route.pts[i + 1], L = legLen(a, b);
+      if (isAxis(a, b) && L >= S_MIN_LEG) {
+        const vert = Math.abs(a.x - b.x) < 0.5, ux = vert ? 0 : Math.sign(b.x - a.x), uz = vert ? Math.sign(b.z - a.z) : 0;
+        // forbidden stretches: the ends, and every junction on the leg
+        const bad = [[-1e9, S_END], [L - S_END, 1e9]];
+        for (const q of J) { const s = alongLeg(q, a, b, HALF + 30); if (s != null) bad.push([s - S_JUNC, s + S_JUNC]); }
+        bad.sort(function (p, q) { return p[0] - q[0]; });
+        const free = []; let s0 = 0;
+        for (const f of bad) { if (f[0] > s0) free.push([s0, Math.min(f[0], L)]); s0 = Math.max(s0, f[1]); }
+        for (const sp of free) {
+          const len = sp[1] - sp[0];
+          if (len < 2 * S_RAMP + S_HOLD_MIN) continue;
+          const hold = Math.min(S_HOLD_MAX, len - 2 * S_RAMP), st = sp[0] + (len - 2 * S_RAMP - hold) / 2;
+          const P = function (s, lat) { return { x: a.x + ux * s + (vert ? lat : 0), z: a.z + uz * s + (vert ? 0 : lat) }; };
+          const pref = ((i + nS) % 2) ? 1 : -1;
+          let side = 0;
+          for (const sg of [pref, -pref]) {
+            // the room the drift needs: clear ground on the side it drifts to
+            // (the road already runs where it runs on the other)
+            const p0 = P(st - S_CLEAR, -sg * (HALF + 20)), p1 = P(st + 2 * S_RAMP + hold + S_CLEAR, sg * (S_AMP + HALF + S_CLEAR));
+            const R = { minX: Math.min(p0.x, p1.x), maxX: Math.max(p0.x, p1.x), minZ: Math.min(p0.z, p1.z), maxZ: Math.max(p0.z, p1.z) };
+            if (!K.some(function (k) { return rectsOverlap(R, k.minX, k.maxX, k.minZ, k.maxZ); }) && onLand(R)) { side = sg; break; }
+          }
+          if (!side) continue;
+          const q0 = P(st, 0), q1 = P(st + S_RAMP, side * S_AMP), q2 = P(st + S_RAMP + hold, side * S_AMP), q3 = P(st + 2 * S_RAMP + hold, 0);
+          q0.r = q1.r = q2.r = q3.r = S_R;
+          out.push(q0, q1, q2, q3);
+          nS++;
+        }
+      }
+      out.push(b);
+    }
+    route.pts = out;
+    route.bends = nS;
+  }
+  // the corners: as wide as the junctions on their two legs allow
+  function sweep(route, J) {
+    const pts = route.pts;
+    for (let i = 1; i + 1 < pts.length; i++) {
+      const v = pts[i], p = pts[i - 1], n = pts[i + 1];
+      if (v.r || !isAxis(p, v) || !isAxis(v, n)) continue;
+      let room = Math.min(legLen(p, v), legLen(v, n)) * 0.45;
+      for (const q of J) {
+        if (Math.hypot(q.x - v.x, q.z - v.z) < HALF + 30) continue;           // the corner's own dock
+        const s1 = alongLeg(q, v, p, HALF + 30), s2 = alongLeg(q, v, n, HALF + 30);
+        if (s1 != null) room = Math.min(room, s1 - HALF - 150);
+        if (s2 != null) room = Math.min(room, s2 - HALF - 150);
+      }
+      v.r = Math.max(route.fillet || 60, Math.min(SWEEP_R, room));            // a 90 degree corner: t == r
+    }
+    let tMax = route.fillet || 60;
+    for (let i = 1; i + 1 < pts.length; i++) tMax = Math.max(tMax, cornerT(pts, i, route.fillet || 60));
+    route.fillet = Math.round(tMax);
+  }
+  function shapeRoutes(routes) {
+    const J = junctions(routes), K = keepOuts(routes);
+    for (const r of routes) {
+      if (!r.sweep) continue;
+      meander(r, J, K);
+      sweep(r, J);
+    }
+    return routes;
   }
 
-  // The table is pure data off the layout dial, so a builder that runs
-  // BEFORE the network (a mini-city at order 34) can ask where the lanes will
-  // be and dock onto one instead of plugging into empty country.
-  CBZ.highwayNetTable = function () {
-    if (!CBZ.CONFIG || CBZ.CONFIG.HIGHWAY_NET_V2 === false) return [];
-    return routeTable();
-  };
+  // The table is pure data off the plan, so a builder that runs BEFORE the
+  // network (a mini-city at order 34, a metro at 43) can ask where the lanes
+  // will be and dock onto one instead of plugging into empty country.
+  CBZ.highwayNetTable = function () { return shapeRoutes(routeTable()); };
   CBZ.HIGHWAY_NET_HALF = HALF;
 
   // ============================================================
@@ -513,10 +392,51 @@
   //  the HWY-4 arterial connectors (90), before the continent plate (97)
   //  reads the relief gate and the archipelago shoals dodge the records.
   // ============================================================
+  /* THE BENDS, AS TRAFFIC DRIVES THEM. A lane follower holds an axis-
+     aligned record; between two such legs the deck sweeps a 750 m corner
+     or an S-bend. For every pair of consecutive axis legs this publishes,
+     per record and direction of travel, where the curve leaves the leg
+     (`along`, the tangent point), the deck's centreline through the curve
+     (`pts`, the very path the deck was built on) and the leg and direction
+     it joins. vehicles.js offsets the centreline by the car's own lane and
+     drives it as a turning polyline, so a car takes the curve the deck
+     takes. CBZ.highwayBendFor(record, dirSign) -> entry | null. */
+  let _bends = new Map();
+  CBZ.highwayBendFor = function (r, dir) {
+    const l = _bends.get(r);
+    return l ? (dir > 0 ? l.pos : l.neg) : null;
+  };
+  function bendEntries(route, legRec, sp) {
+    const pts = route.pts;
+    const nearest = function (p) { let bi = 0, bd = 1e18; for (let k = 0; k < sp.length; k++) { const d = (sp[k].x - p.x) * (sp[k].x - p.x) + (sp[k].z - p.z) * (sp[k].z - p.z); if (d < bd) { bd = d; bi = k; } } return bi; };
+    const unit = function (a, b) { const L = legLen(a, b) || 1; return { x: (b.x - a.x) / L, z: (b.z - a.z) / L }; };
+    for (let i = 0; i < legRec.length; i++) {
+      if (!legRec[i]) continue;
+      let j = i + 1;
+      while (j < legRec.length && !legRec[j] && !isAxis(pts[j], pts[j + 1])) j++;
+      if (j >= legRec.length || !legRec[j]) continue;
+      const ri = legRec[i], rj = legRec[j];
+      if (ri.noTraffic || rj.noTraffic) continue;
+      const di = unit(pts[i], pts[i + 1]), dj = unit(pts[j], pts[j + 1]);
+      const ti = cornerT(pts, i + 1, route.fillet), tj = cornerT(pts, j, route.fillet);
+      if (ti < 20 && j === i + 1) continue;                                  // no real curve: the junction turn does it
+      const S = { x: pts[i + 1].x - di.x * ti, z: pts[i + 1].z - di.z * ti };
+      const E = { x: pts[j].x + dj.x * tj, z: pts[j].z + dj.z * tj };
+      const k0 = nearest(S), k1 = nearest(E);
+      if (k1 <= k0 + 1) continue;
+      const mid = sp.slice(k0 + 1, k1).map(function (p) { return { x: p.x, z: p.z }; });
+      const fwd = [S].concat(mid, [E]), rev = fwd.slice().reverse();
+      const dirI = ri.vertical ? Math.sign(di.z) : Math.sign(di.x), dirJ = rj.vertical ? Math.sign(dj.z) : Math.sign(dj.x);
+      const put = function (rec, dir, e) { let l = _bends.get(rec); if (!l) _bends.set(rec, l = { pos: null, neg: null }); if (dir > 0) l.pos = e; else l.neg = e; };
+      put(ri, dirI, { along: ri.vertical ? S.z : S.x, pts: fwd, exit: rj, exitDir: dirJ, exitAlong: rj.vertical ? E.z : E.x });
+      put(rj, -dirJ, { along: rj.vertical ? E.z : E.x, pts: rev, exit: ri, exitDir: -dirI, exitAlong: ri.vertical ? S.z : S.x });
+    }
+  }
+
   if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
-    if (!CBZ.CONFIG || CBZ.CONFIG.HIGHWAY_NET_V2 === false) return;
+    _bends = new Map();
     if (!CBZ.buildHighway || !CBZ.highwaySmoothPath) return;
-    const routes = routeTable();
+    const routes = CBZ.highwayNetTable();
     _routes = routes;
 
     clearanceSweep(city, routes);
@@ -559,8 +479,31 @@
       // ---- drivable records (one per axis-aligned leg) + link regions -----
       route.roads = [];
       const pts = route.pts, roads = city.roads;
+      const legRec = [];
       for (let i = 0; i < pts.length - 1; i++) {
         const a = pts[i], b = pts[i + 1];
+        if (!isAxis(a, b)) {
+          // AN S-BEND'S DRIFT LEG: no lane follower can hold a diagonal, so
+          // cars cross it on the bend's own curve (bendEntries); the graph
+          // still joins through two closed records on its L, and the map and
+          // the shore field get the deck as a chain of short link rects
+          if (roads) for (const q of [[a.x, a.z, b.x, a.z], [b.x, a.z, b.x, b.z]]) {
+            const v = Math.abs(q[0] - q[2]) < 0.5, len = v ? Math.abs(q[3] - q[1]) : Math.abs(q[2] - q[0]);
+            if (len < 1) continue;
+            const seg = v ? { x: q[0], z: (q[1] + q[3]) / 2, vertical: true, len: len } : { x: (q[0] + q[2]) / 2, z: q[1], vertical: false, len: len };
+            Object.assign(seg, { district: "highway", w: route.width, lanesPerDir: route.lanesPerDir, laneW: LANE_W, route: route.id, noTraffic: true, bendLink: true });
+            if (route.median !== false) { seg.median = true; seg.medianW = MEDIAN_W; }
+            roads.push(seg); route.roads.push(seg);
+          }
+          const L = legLen(a, b), n = Math.max(1, Math.ceil(L / 60)), h = route.width / 2;
+          for (let k = 0; k < n; k++) {
+            const p0 = { x: a.x + (b.x - a.x) * k / n, z: a.z + (b.z - a.z) * k / n }, p1 = { x: a.x + (b.x - a.x) * (k + 1) / n, z: a.z + (b.z - a.z) * (k + 1) / n };
+            CBZ.registerCityRegion(city, { name: route.name + " Link", subtitle: "Highway", kind: "rect", road: true, route: route.id,
+              minX: Math.min(p0.x, p1.x) - h, maxX: Math.max(p0.x, p1.x) + h, minZ: Math.min(p0.z, p1.z) - h, maxZ: Math.max(p0.z, p1.z) + h, pad: 1 });
+          }
+          legRec.push(null);
+          continue;
+        }
         const vertical = Math.abs(b.x - a.x) < 0.5;
         // record span: leg ends, stretched to the docked centrelines at the
         // route's two extremities (recA/recB) so junction hops snap.
@@ -568,7 +511,7 @@
         if (i === 0 && route.recA != null) a0 = route.recA;
         if (i === pts.length - 2 && route.recB != null) b0 = route.recB;
         const lo = Math.min(a0, b0), hi = Math.max(a0, b0);
-        if (hi - lo < 1) continue;
+        if (hi - lo < 1) { legRec.push(null); continue; }
         const seg = vertical
           ? { x: a.x, z: (lo + hi) / 2, vertical: true, len: hi - lo }
           : { x: (lo + hi) / 2, z: a.z, vertical: false, len: hi - lo };
@@ -582,6 +525,7 @@
         // allowed in and a leg that merely passes a town is cut at the kerb.
         if (CBZ.roadClamp) CBZ.roadClamp(seg, { dest: pts[pts.length - 1], owner: route.id, city: city });
         if (roads) { roads.push(seg); route.roads.push(seg); }
+        legRec.push(seg);
         // map/waterfield region — "Link" name: fullmap draws it as road,
         // polwar's front search (/causeway|bridge/) and the shore field's
         // land-holding both ignore it (established link semantics).
@@ -593,6 +537,7 @@
           pad: 1,
         });
       }
+      bendEntries(route, legRec, sp);
     }
     // ---- THE INTERCHANGE (city/interchange.js): Route 5 T's onto Route 1's
     //      west leg on flat open country — the flyover carries the crossing

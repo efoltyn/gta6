@@ -14,10 +14,11 @@
    ARCHIPELAGO CONTRACT (worldmap.js):
      CBZ.addLandmass(builder, order)  — builder gets the live `city`.
      CBZ.registerCityRegion(city, reg) — declare the walkable land.
-   Footprint: PUBLISHED BY world/layout.js (CBZ.worldFoot("desert")) — the
-   authored rect is centre (1120,150), half-extents (440,470), and the world
-   dial plus the stage-4 footprint scale are applied there, in the one place
-   that holds all three. Do not re-type a half-extent from this file; ask.
+   Footprint: THE WORLD PLAN'S (world/worldplan.js, CBZ.worldFoot("desert")):
+   where the basin's ground stands and how big it is. The authored rect was
+   centre (1120,150), half-extents (440,470). Do not re-type a half-extent
+   from this file; ask. The basin's SHAPE inside that ground is the plan's
+   `desert` lobes (basinAt below).
    Causeway: a ~14-wide desert highway deck from the desert's west
    edge (~x670, z-300) to the speedway island's east edge (~x670,
    z-330, the circle center 470,-330 r200). Registered as its own
@@ -58,14 +59,10 @@
   // is open country east of it; the desert sprawls EAST and DEEP to the south.
   // A genuinely vast empty tan basin you drive across, not a lobby.
   //
-  // THE RECT IS NOT TYPED HERE ANY MORE. world/layout.js owns the anchor, the
-  // world-layout dial AND the stage-4 footprint scale, and publishes the three
-  // composed (CBZ.worldFoot). This file was one of two that another file
-  // hand-copied a half-extent from (biome_farmland.js re-typed our north shore
-  // as `-320 + dz`), so a scale applied here would have gone stale there. The
-  // authored literals stay as the degrade-safe fallback — a build without
-  // layout.js gets exactly the old rect.
-  const _WOFF = (CBZ.worldOff && CBZ.worldOff("desert")) || { dx: 0, dz: 0 };   // world-layout dial
+  // THE RECT IS NOT TYPED HERE. The world plan (world/worldplan.js) states
+  // where the basin stands and how big its ground is (CBZ.worldFoot). The
+  // authored literals are only the fallback for a build without the plan.
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("desert")) || { dx: 0, dz: 0 };   // the plan's offset from the authored anchor
   const _FOOT = (CBZ.worldFoot && CBZ.worldFoot("desert")) ||
     { cx: 1120 + _WOFF.dx, cz: 150 + _WOFF.dz, hx: 440, hz: 470 };
   const CX = _FOOT.cx, CZ = _FOOT.cz, HX = _FOOT.hx, HZ = _FOOT.hz;
@@ -73,58 +70,23 @@
   const MINX = CX - HX, MAXX = CX + HX;   // authored 680 .. 1560
   const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // authored -320 .. 620
 
-  // ---- causeway (land-bridge to the speedway island) -----------------------
-  // IT HAS TO LAND ON BOTH SHORES, AND FOR TWO STAGES IT DID NOT. The deck's
-  // z was the literal `-300 + speedway.dz` and its west end the literal
-  // `speedwayCX + 170`, both measured when the basin's north shore sat at
-  // z -320. Stage 3 then slid the desert 300 u SOUTH and nothing told this
-  // line: the east end has been ending 280 u short of its own biome, in open
-  // country, ever since.
-  //
-  // So both ends derive from the shapes they dock into. The centreline is the
-  // authored z CLAMPED into the basin's own z-span (45 u inside the edge, so
-  // the deck's 12 u half-width plus the region pad still sits on land), and the
-  // west end is the speedway CIRCLE's east rim AT THAT z — a chord, not a
-  // radius, which is what the old +170 was silently assuming.
-  const _SPOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };
-  const _SPD_CX = 490 + _SPOFF.dx, _SPD_CZ = -350 + _SPOFF.dz, _SPD_R = 210;  // island_speedway CX/CZ/R
-  const CW = 14;                          // road width
-  // Gated on the STAGE layout.js actually resolved to, never on the flag
-  // alone: WORLD_SCALE_V4 rides on top of WORLD_LAYOUT_V2, so reading the raw
-  // flag would re-derive this deck in a world that is otherwise stage 2.
-  const _CW_DERIVE = (CBZ.WORLD_LAYOUT_STAGE || 1) >= 4;
-  // WORLD_SCALE_V5 — the 10x basin. Read the same way (the STAGE, never the
-  // raw flag). Four things in this file answer to it and each says so where it
-  // stands: this deck's inland corner, the corridor gate, the erg mesh, and
-  // the natural-scatter density.
-  const _V5 = (CBZ.WORLD_LAYOUT_STAGE || 1) >= 5;
-  const CW_Z = _CW_DERIVE
-    ? Math.max(MINZ + 45, Math.min(MAXZ - 45, -300 + _SPOFF.dz))
-    : (-300 + _SPOFF.dz);                 // causeway centerline z
-  const _CW_CHORD = Math.sqrt(Math.max(0, _SPD_R * _SPD_R - (CW_Z - _SPD_CZ) * (CW_Z - _SPD_CZ)));
-  const CW_X0 = _CW_DERIVE
-    ? (_SPD_CX + _CW_CHORD - 34)          // noses 34u inside the speedway's east rim at THIS z
-    : ((490 + _SPOFF.dx) + 170);          // authored: rim-at-the-equator + a guess
-  // Inland end of the deck. 6 u is a tuck into the shore and nothing more,
-  // which was fine while the basin's spine sat 700 m away. On the 10x basin
-  // the spine is 2.3 km south of this dock (see the layout header: the erg
-  // grows east and south so its north-west corner can stay put), so the deck
-  // TURNS here and runs down to the highway — and a corner needs to be far
-  // enough inside the shore that a 24 m deck plus its region pad is on land.
-  const CW_X1 = _V5 ? (MINX + 30) : (MINX + 6);
+  // ---- THE ROADS IN ARE THE WORLD PLAN'S -----------------------------------
+  // This file used to lay its own causeway to the speedway and an "approach
+  // leg" down its west shore, each re-derived a different way every time the
+  // layout moved (the deck spent two stages ending 280 m short of its own
+  // biome). The plan (src/world/worldplan.js `routes`) now runs the Saltlands
+  // Highway round the head of the gulf, down the basin's gulf shore and along
+  // this file's spine into Dry Gulch, and the Overseas Highway south out of
+  // it; city/highwaynet.js builds them. What this file owes them is flat
+  // ground: see corridorGate below.
+  const CW = 14;                          // the corridor gate's design road width
+  const PLAN = CBZ.worldPlan || null;
 
-  // NATURAL SCATTER RIDES THE AREA on the 10x basin, and only there. The
-  // saguaro field, the brush and the tumbleweeds are fixed candidate counts
-  // (90 / 110 / 24) laid over whatever rect this biome happens to have, so
-  // their DENSITY has silently fallen with every footprint scale — 109 per
-  // km^2 as authored, 42 by stage 4, and 4 per km^2 on a 21 km^2 erg, which
-  // is one saguaro every 490 m: not a desert, a beach. Holding the STAGE-4
-  // density rather than the authored one is deliberate — it leaves today's
-  // world untouched, which is what makes the flag a real one-line revert.
-  // Everything here is instanced, so 900 saguaros cost the same draw call as
-  // 90, and the counts stay deterministic (build-time constants over the
-  // biome's own seeded stream, replayed whole on every rebuild).
-  const SCAT = _V5 ? Math.max(1, Math.round((FSC / 1.60) * (FSC / 1.60))) : 1;
+  // NATURAL SCATTER RIDES THE AREA. The saguaro field, the brush and the
+  // tumbleweeds are fixed candidate counts (90 / 110 / 24) written for a
+  // 1.6x basin; held at that DENSITY on this one (everything is instanced,
+  // so 900 saguaros cost the same draw call as 90).
+  const SCAT = Math.max(1, Math.round((FSC / 1.60) * (FSC / 1.60)));
 
   // ---- palette (warm tan basin; one shared material per color) -------------
   const SAND      = 0xcdb486;             // sun-worn ochre, not yellow plastic
@@ -159,15 +121,13 @@
   // (the spine sits HZ-40 south of the shore, not 600). One published number,
   // one junction, and the deck follows any future scale.
   CBZ.DESERT_HWY_Z = HWY_Z;
-  // THE SPINE IS A REAL ROAD (layout wave 2): one 3.6 m lane each way from
-  // the shared highway kit, with drivable records, so the Saltlands causeway,
-  // the Coyle causeway and Dry Gulch are one network (the audit found Dry
-  // Gulch a road island: the spine was a flat asphalt PLANE with painted
-  // dashes and no record, which traffic, the map and the router never saw).
-  // highwaynet.js's Saltlands Road docks on its east end and runs on to the
-  // Continental Loop.
+  // THE SPINE IS A REAL ROAD: one 3.6 m lane each way from the shared highway
+  // kit, with drivable records. WEST of Dry Gulch it is the plan's Saltlands
+  // Highway (city/highwaynet.js lays it, right up to the town's first
+  // street); the town owns its main street; EAST of the town this file lays
+  // the run out to the basin's far rim, where the road gives out.
   const SPINE_HALF = 5.5, SPINE_W = 11;
-  CBZ.DESERT_SPINE = { z: HWY_Z, west: MINX + 30, east: MAXX - 4, half: SPINE_HALF };
+  CBZ.DESERT_SPINE = { z: HWY_Z, west: TOWN_CX - TOWN_HX + 10, east: MAXX - 4, half: SPINE_HALF };
   // The town generator's three 64m blocks + road shoulders occupy this exact
   // stretch. The regional highway stops at its two edges, then Dry Gulch owns
   // the main street itself—no duplicate asphalt/decal planes fighting at y=0.
@@ -353,53 +313,24 @@
   }
 
   // A 55 m DUNE MAY NOT STAND ON A ROAD. The basin's own benches (in
-  // desertHeightAt below) were sized for 30 m crests and only ever covered
-  // THIS biome's own highway spine and its four buildings — every road that
-  // ARRIVES from somewhere else crossed raw dune field, which was survivable
-  // at 30 m and is not at 55.
-  //   This is not a second corridor system. It is the same distance grammar
-  // CBZ.highwayNetReliefGate already uses (flat inside a band, smoothly back
-  // to full relief over a fade), applied to the two hand-placed causeway decks
-  // this biome docks with — the two roads that arrive from outside and that
-  // the basin's own benches never covered.
-  //   FLAT within half-width + 26 m of a centreline, back to full relief over
-  //   the next 150 m — nearly four times the road gate's 40 m fade, because
-  //   the thing being eased down is nearly four times as tall.
+  // desertHeightAt below) cover THIS biome's spine and its buildings; a road
+  // that arrives from outside crosses raw dune field unless the field gives
+  // way under it. So the dunes go flat within half a road + 26 m of every
+  // plan route that enters the basin and come back to full relief over the
+  // next 150 m (nearly four times the country's 40 m road fade, because the
+  // thing being eased down is nearly four times as tall).
+  //   The routes are DATA at parse time, which is what lets this biome bake
+  // its mesh (order 31) against roads the network only lays at order 91: the
+  // bake and every later query read the same smooth centreline the deck is
+  // built on (CBZ.highwayNetTable + CBZ.highwaySmoothPath), so the drawn dune
+  // and the physics floor cannot disagree about where the road is.
   const CORRIDOR_FLAT = CW / 2 + 26, CORRIDOR_FADE = 150;
-  // The Coyle causeway drops out of the farm county and runs 600 m INTO this
-  // basin before it meets the desert highway. biome_farmland.js owns that deck
-  // but it parses AFTER this file, so its geometry is re-derived here from the
-  // published rects both files read (x = the farm county's centreline; the deck
-  // ends 600 m inside our north shore) rather than waiting for a record that
-  // does not exist yet. Null when the farm county is absent.
-  const _FARM = (CBZ.worldFoot && CBZ.worldFoot("farmland")) || null;
-  const COYLE_X = _FARM ? _FARM.cx : null;
-  // …AND IT ENDS WHERE THE DECK ENDS, WHICH IS NOT "600 m IN". biome_farmland
-  // runs that deck to `max(our MINZ + 600, our HWY_Z + 6)` — it aims at the
-  // SPINE, not at a fixed depth — so the 600 was only ever right while the two
-  // happened to coincide. On the 10x basin the spine is 2.3 km inside the
-  // shore and the old literal would have flattened the first 600 m and left
-  // the remaining 1.7 km of a real, drivable highway buried under 55 m draa.
-  // Same expression as the deck's, so the flat band cannot fall short of it
-  // again. Held at the literal below stage 5 (that world's deck overruns by
-  // 142 m and the 150 m fade covers it, so nothing there changes).
-  const COYLE_Z1 = _V5 ? Math.max(MINZ + 600, HWY_Z + 6) : (MINZ + 600);
-  // (c) THE SALTLANDS APPROACH — the leg the deck turns onto at CW_X1 and
-  // runs south to the spine. Only exists on the 10x basin; see CW_X1.
-  const APPROACH_Z0 = Math.min(CW_Z, HWY_Z), APPROACH_Z1 = Math.max(CW_Z, HWY_Z);
+  const CORRIDOR_REACH = CORRIDOR_FLAT + CORRIDOR_FADE;   // past this a deck cannot matter
   function bandGate(d) {
     if (d <= CORRIDOR_FLAT) return 0;
     if (d >= CORRIDOR_FLAT + CORRIDOR_FADE) return 1;
     return smooth01((d - CORRIDOR_FLAT) / CORRIDOR_FADE);
   }
-  // A DECK IS A SEGMENT, NOT A LINE, and on the 10x basin that stops being a
-  // pedantic distinction. Gating on |x - lineX| inside a z window puts a CLIFF
-  // at the window's edge — full relief on one side of an invisible line, dead
-  // flat on the other, with no road within 150 m of it — and a 40 m draa flank
-  // standing on nothing is exactly the kind of thing the corridor gate exists
-  // to prevent. Point-to-segment distance rounds the cap instead, so a
-  // corridor ENDS where its deck ends. Same grammar CBZ.highwayNetReliefGate
-  // uses; stage <= 4 keeps the infinite-line form byte for byte.
   function segDist(x, z, ax, az, bx, bz) {
     const vx = bx - ax, vz = bz - az;
     const L2 = vx * vx + vz * vz;
@@ -408,55 +339,63 @@
     const px = ax + vx * t - x, pz = az + vz * t - z;
     return Math.sqrt(px * px + pz * pz);
   }
-  const CW_XMIN = Math.min(CW_X0, CW_X1), CW_XMAX = Math.max(CW_X0, CW_X1);
-  const CORRIDOR_REACH = CORRIDOR_FLAT + CORRIDOR_FADE;   // past this a deck cannot matter
+  // every stretch of a plan route within reach of the basin, as chains of
+  // short segments with one bounding box per chain: [minX, maxX, minZ, maxZ, pts]
+  let _legs = null;
+  function planLegs() {
+    if (_legs) return _legs;
+    _legs = [];
+    const table = CBZ.highwayNetTable ? CBZ.highwayNetTable() : [];
+    for (const route of table) {
+      let sp = route.pts;
+      try { if (CBZ.highwaySmoothPath) sp = CBZ.highwaySmoothPath(route.pts, route.fillet, 9); } catch (e) { sp = route.pts; }
+      let run = null;
+      for (let i = 0; i + 1 < sp.length; i++) {
+        const a = sp[i], b = sp[i + 1];
+        const near = Math.max(a.x, b.x) > MINX - CORRIDOR_REACH && Math.min(a.x, b.x) < MAXX + CORRIDOR_REACH &&
+                     Math.max(a.z, b.z) > MINZ - CORRIDOR_REACH && Math.min(a.z, b.z) < MAXZ + CORRIDOR_REACH;
+        if (!near) { run = null; continue; }
+        if (!run || run.pts.length > 40) {
+          run = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, pts: [a] };
+          _legs.push(run);
+        }
+        run.pts.push(b);
+        for (const q of [a, b]) {
+          if (q.x < run.minX) run.minX = q.x; if (q.x > run.maxX) run.maxX = q.x;
+          if (q.z < run.minZ) run.minZ = q.z; if (q.z > run.maxZ) run.maxZ = q.z;
+        }
+      }
+    }
+    return _legs;
+  }
   function corridorGate(x, z) {
     if (CFG.DESERT_DUNES_V3 === false) return 1;
+    const L = planLegs();
     let g = 1;
-    // (a) the Saltlands causeway: horizontal, docking on our west shore.
-    //     Unbounded in x, this band was a dead-flat strip running the FULL
-    //     width of the erg at the causeway's z — 1.4 km of it hidden against
-    //     the shore falloff, and 4.5 km of it not hidden at all.
-    if (_V5) {
-      if (x > CW_XMIN - CORRIDOR_REACH && x < CW_XMAX + CORRIDOR_REACH &&
-          z > CW_Z - CORRIDOR_REACH && z < CW_Z + CORRIDOR_REACH) {
-        g = bandGate(segDist(x, z, CW_XMIN, CW_Z, CW_XMAX, CW_Z));
-        if (g <= 0) return 0;
+    for (let k = 0; k < L.length; k++) {
+      const run = L[k];
+      if (x < run.minX - CORRIDOR_REACH || x > run.maxX + CORRIDOR_REACH || z < run.minZ - CORRIDOR_REACH || z > run.maxZ + CORRIDOR_REACH) continue;
+      const p = run.pts;
+      for (let i = 0; i + 1 < p.length; i++) {
+        const t = bandGate(segDist(x, z, p[i].x, p[i].z, p[i + 1].x, p[i + 1].z));
+        if (t <= 0) return 0;
+        if (t < g) g = t;
       }
-    } else if (x > CW_XMIN - CORRIDOR_FADE) {
-      g = bandGate(Math.abs(z - CW_Z));
-      if (g <= 0) return 0;
-    }
-    // (b) the Coyle causeway: vertical, dropping in from the north. Its north
-    //     end is off our shore (the deck comes from the farm county), so the
-    //     segment starts outside the basin where our height field is 0 anyway.
-    if (COYLE_X != null && z < COYLE_Z1 + CORRIDOR_REACH) {
-      const t = _V5
-        ? bandGate(segDist(x, z, COYLE_X, MINZ - 400, COYLE_X, COYLE_Z1))
-        : (z < COYLE_Z1 + CORRIDOR_FADE ? bandGate(Math.abs(x - COYLE_X)) : 1);
-      if (t <= 0) return 0;
-      if (t < g) g = t;
-    }
-    // (c) the Saltlands approach: the leg the deck turns onto at CW_X1 and
-    //     runs south to the spine. It is what makes the basin's only land
-    //     entrance reach the only road in it.
-    if (_V5 && z > APPROACH_Z0 - CORRIDOR_REACH && z < APPROACH_Z1 + CORRIDOR_REACH) {
-      const t = bandGate(segDist(x, z, CW_X1, APPROACH_Z0, CW_X1, APPROACH_Z1));
-      if (t <= 0) return 0;
-      if (t < g) g = t;
     }
     return g;
   }
-  // NOT CONSULTED HERE, AND THE REASON IS LOAD ORDER: CBZ.highwayNetReliefGate
-  // is empty until city/highwaynet.js builds at order 91 and this biome bakes
-  // its mesh at order 31, so reading it would flatten the PHYSICS oracle under
-  // a corridor the DRAWN dune still stands in — precisely the mesh/oracle
-  // divergence CBZ.groundMatchAudit() exists to catch. It also is not needed:
-  // roadrules.js's clearance law forbids a route from crossing a registered
-  // place it is not going to, so a highway cannot legally enter this basin.
-  // The two decks above are parse-time constants and therefore identical to
-  // the bake and to every later query.
-
+  /* THE BASIN HAS AN EDGE WITH A SHAPE (the world plan's `desert` lobes). The
+     floor this file lays is a rectangle, because a mesh is; the DESERT is the
+     plan's basin inside it. Dunes die away toward that edge and the sand
+     gives way to scrub (ergVertexColor), so what stands in the rectangle's
+     corners is flat scrub country, and the map and the game both report it
+     as that (city/worldmap.js cityBiomeAt reads the same lobes). 1 = erg,
+     0 = out of the basin. */
+  function basinAt(x, z) {
+    if (!PLAN || !PLAN.coverAt) return 1;
+    return smooth01((PLAN.coverAt(x, z, "desert") - 0.30) / 0.45);
+  }
+  CBZ.desertBasinAt = basinAt;
   // the mesa term of the last in-basin desertHeightAt call: the tiled bake
   // keeps it per grid point so the vertex colour never evaluates it twice
   let _lastMesa = NaN;
@@ -483,6 +422,7 @@
     h *= corridorGate(x, z);
     const edge = Math.min(x - MINX, MAXX - x, z - MINZ, MAXZ - z);
     h *= smooth01(edge / 34);
+    if (h > 0) h *= basinAt(x, z);
     return Math.max(0, h);
   }
 
@@ -656,7 +596,6 @@
     if (layout) {
       if (HAS_TOWN) layout.reserve("desert:dry-gulch", TOWN, { pad: 12 });
       layout.reserve("desert:highway", { minX: MINX, maxX: MAXX, minZ: HWY_Z - 7, maxZ: HWY_Z + 7 }, { pad: 4 });
-      layout.reserve("desert:causeway", { minX: Math.min(CW_X0, CW_X1), maxX: Math.max(CW_X0, CW_X1), minZ: CW_Z - 12, maxZ: CW_Z + 12 }, { pad: 3 });
       MESAS.forEach(function (m, i) {
         layout.reserve("desert:mesa:" + i, { minX: m.x - m.w / 2, maxX: m.x + m.w / 2, minZ: m.z - m.d / 2, maxZ: m.z + m.d / 2 }, { pad: 10 });
       });
@@ -709,15 +648,6 @@
     //     it the instant we start placing things.
     // =====================================================================
     CBZ.registerCityRegion(city, { name: "The Saltlands", subtitle: "Desert Mesa", biome: "desert", kind: "rect", minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ, pad: 8 });
-    // causeway widened to the 24m highway deck (z-span ±12 about the centreline)
-    CBZ.registerCityRegion(city, { name: "Saltlands Causeway", subtitle: "Desert Mesa", kind: "rect", minX: Math.min(CW_X0, CW_X1), maxX: Math.max(CW_X0, CW_X1), minZ: CW_Z - 12, maxZ: CW_Z + 12, pad: 1 });
-    // give traffic a road across the causeway (runs along X → not vertical)
-    if (city.roads) {
-      city.roads.push({ x: (CW_X0 + CW_X1) / 2, z: CW_Z, vertical: false, len: Math.abs(CW_X1 - CW_X0), district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
-      // the 10x basin's approach leg down to the spine: drawn by the
-      // causeway's buildHighway below, and now drivable on record as well
-      if (_V5) city.roads.push({ x: CW_X1, z: (CW_Z + HWY_Z) / 2, vertical: true, len: Math.abs(HWY_Z - CW_Z), district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
-    }
 
     // =====================================================================
     //  1) THE BASIN — one big merged sand plane (warm tan) + a scatter of
@@ -740,7 +670,7 @@
     // puts 13 vertices across the shortest (72 m) ridge. At the authored size
     // the floors bind and the expressions return 176/188 exactly.
     //
-    //   WORLD_SCALE_V5 BREAKS BOTH ENDS OF THAT SENTENCE, so the 10x basin
+    //   A 4.4 x 4.7 km BASIN BREAKS BOTH ENDS OF THAT SENTENCE, so it
     // takes a different bake — same field, same colours, three changes:
     //
     //   (1) IT IS TILED. One 4453 x 4756 m plane is a single mesh with a 3.3 km
@@ -769,11 +699,12 @@
     // the erg cracks, and `centre + half` vs `centre + width - half` is not.
     // One global formula, one answer. UVs are global for the same reason —
     // the grain sheet is ONE sheet over the basin, not 36 copies of one.
-    const ERG_TILES = _V5 ? 6 : 1;
-    const GSEG_X = _V5
+    const TILED = CFG.DESERT_TERRAIN_V2 !== false;
+    const ERG_TILES = TILED ? 6 : 1;
+    const GSEG_X = TILED
       ? Math.max(8, Math.round(HX * 2 / ERG_TILES / 7))
       : Math.min(264, Math.max(176, Math.round(HX * 2 / 5)));
-    const GSEG_Z = _V5
+    const GSEG_Z = TILED
       ? Math.max(8, Math.round(HZ * 2 / ERG_TILES / 7))
       : Math.min(264, Math.max(188, Math.round(HZ * 2 / 5)));
     const GRID_X = GSEG_X * ERG_TILES, GRID_Z = GSEG_Z * ERG_TILES;   // cells across the whole basin
@@ -802,11 +733,12 @@
       // continent continues this exact hue through its organic influence,
       // so the allocation rectangle has no visible colour seam from above.
       const edgeDist = Math.min(wx - MINX, MAXX - wx, wz - MINZ, MAXZ - wz);
-      ergEdgeC.copy(ergEdge).lerp(out, smooth01(edgeDist / 105));
+      // ...and the basin's own planned edge inside the rectangle (basinAt)
+      ergEdgeC.copy(ergEdge).lerp(out, smooth01(edgeDist / 105) * basinAt(wx, wz));
       out.copy(ergEdgeC);
       return out;
     }
-    // ---- the ONE-PLANE bake (stage <= 4 and the flag-off world) -------------
+    // ---- the ONE-PLANE bake (DESERT_TERRAIN_V2 off: a flat floor) -------------
     function buildErgSinglePlane() {
       const geo = CFG.DESERT_TERRAIN_V2 !== false
         ? new THREE.PlaneGeometry(HX * 2, HZ * 2, GSEG_X, GSEG_Z)
@@ -836,7 +768,7 @@
       if (CFG.DESERT_TERRAIN_V2 !== false) m.position.set(CX, 0, CZ);
       return [m];
     }
-    // ---- the TILED bake (WORLD_SCALE_V5) ------------------------------------
+    // ---- the TILED bake ------------------------------------------------------
     /* THE STREAMED ERG IS BAKED STRAIGHT INTO ITS RECORDS (memfit, 2026-10).
        The streamed (phone/tablet) city keeps every tile as a compact record
        (height per vertex, 8-bit normal and paint: 10 bytes a vertex) and
@@ -856,7 +788,7 @@
       let RSIG = null, RB = null;
       if (CBZ.bakeSig && CBZ.bakeGet) {
         try {
-          RSIG = CBZ.bakeSig("ergrec|" + CBZ.bakeHash({ MINX: MINX, MINZ: MINZ, HX: HX, HZ: HZ, SX: STEP_X, SZ: STEP_Z, GX: GSEG_X, GZ: GSEG_Z, T: T, GRX: GRID_X, GRZ: GRID_Z, cfg: CFG }));
+          RSIG = CBZ.bakeSig("ergrec|" + (PLAN ? PLAN.signature() : "") + "|" + CBZ.bakeHash({ MINX: MINX, MINZ: MINZ, HX: HX, HZ: HZ, SX: STEP_X, SZ: STEP_Z, GX: GSEG_X, GZ: GSEG_Z, T: T, GRX: GRID_X, GRZ: GRID_Z, cfg: CFG }));
           RB = CBZ.bakeGet("desert-erg-rec", RSIG);
           if (RB && !(RB.y && RB.y.length === NV && RB.n && RB.n.length === NV * 3 && RB.c && RB.c.length === NV * 3)) RB = null;
         } catch (e) { RSIG = null; RB = null; }
@@ -910,7 +842,7 @@
       const EP = [], EN = [], EC = [];
       if (CBZ.bakeSig && CBZ.bakeGet) {
         try {
-          ESIG = CBZ.bakeSig("erg|" + CBZ.bakeHash({ MINX: MINX, MINZ: MINZ, HX: HX, HZ: HZ, SX: STEP_X, SZ: STEP_Z, GX: GSEG_X, GZ: GSEG_Z, T: ERG_TILES, GRX: GRID_X, GRZ: GRID_Z, cfg: CFG }));
+          ESIG = CBZ.bakeSig("erg|" + (PLAN ? PLAN.signature() : "") + "|" + CBZ.bakeHash({ MINX: MINX, MINZ: MINZ, HX: HX, HZ: HZ, SX: STEP_X, SZ: STEP_Z, GX: GSEG_X, GZ: GSEG_Z, T: ERG_TILES, GRX: GRID_X, GRZ: GRID_Z, cfg: CFG }));
           EB = CBZ.bakeGet("desert-erg", ESIG);
           const nv = (GSEG_X + 1) * (GSEG_Z + 1) * 3 * ERG_TILES * ERG_TILES;
           if (EB && !(EB.p && EB.p.length === nv && EB.n && EB.n.length === nv && EB.c && EB.c.length === nv)) EB = null;
@@ -1038,8 +970,7 @@
       groundMesh.name = total > 1 ? ("saltlands-desert-surface-" + mi) : "saltlands-desert-surface";
       root.add(groundMesh);
     }
-    const ergMeshes = (_V5 && CFG.DESERT_TERRAIN_V2 !== false)
-      ? buildErgTiles() : buildErgSinglePlane();
+    const ergMeshes = TILED ? buildErgTiles() : buildErgSinglePlane();
     for (let mi = 0; mi < ergMeshes.length; mi++) dressErg(ergMeshes[mi], mi, ergMeshes.length);
     if (CFG.DESERT_TERRAIN_V2 !== false && CBZ.registerCityGroundHeight) {
       CBZ.registerCityGroundHeight(ergSurfaceAt, { name: "Saltlands dunes and mesas", biome: "desert" });
@@ -1080,6 +1011,11 @@
         // desert you cross rather than a tan tile. Left absolute it would have
         // become proportionally SMALLER every time the basin grew.
         spread: { west: 70 * FSC, east: 620 * FSC, north: 170 * FSC, south: 520 * FSC },
+        // THE BASIN'S REAL SHAPE is the world plan's (its `desert` lobes): the
+        // land cover, the biome the game reports and the dunes' own edge
+        // (basinAt above) are that one shape. `shaped`: inside this file's
+        // rectangle but outside the basin is not desert (worldmap.js).
+        sources: (PLAN && PLAN.lobes && PLAN.lobes.desert) || null, shaped: true,
         inner: 0x9b8b5f, outer: 0x68744e, featherNorm: 0.23,
         y: 0.005, seed: 0x5dec7,
       });
@@ -1253,7 +1189,7 @@
       rockIM.instanceMatrix.needsUpdate = true; rockIM.matrixAutoUpdate = false; rockIM.userData.sceneryScale = true;
       root.add(rockIM);
     }
-    // published for CBZ.worldScaleAudit(): 0 is the owner's answer.
+    // published as CBZ.desertRockScatterCount: 0 is the owner's answer.
     CBZ.desertRockScatterCount = ROCKS ? boulders.length : 0;
 
     // =====================================================================
@@ -1410,12 +1346,12 @@
     //     cars + telephone poles live. WHY a road in the wild: it's the
     //     only reason any of these outposts exist out here.
     // =====================================================================
-    // The west end is the Saltlands causeway's approach leg (x CW_X1 on the
-    // 10x basin), which runs down onto it: the spine starts flush at that
-    // deck's east edge; the record runs on to its centreline.
-    const roadMin = _V5 ? CW_X1 + 14.4 : MINX + 4, roadMax = MAXX - 4;
-    const recMin = _V5 ? CW_X1 : roadMin;
-    const spineRuns = HAS_TOWN ? [[roadMin, TOWN_SPINE_MIN], [TOWN_SPINE_MAX, roadMax]] : [[roadMin, roadMax]];
+    // West of the town the spine is the plan's Saltlands Highway
+    // (city/highwaynet.js lays it up to TOWN_SPINE_MIN); this is the run east
+    // of the town, out to the basin's far rim.
+    const roadMin = TOWN_SPINE_MIN, roadMax = MAXX - 4;
+    const recMin = roadMin;
+    const spineRuns = HAS_TOWN ? [[TOWN_SPINE_MAX, roadMax]] : [[roadMin, roadMax]];
     const highwayGeoms = [];
     if (CBZ.buildHighway) {
       for (const run of spineRuns) {
@@ -1459,40 +1395,6 @@
     dashIM.count = dashXs.length;
     dashIM.instanceMatrix.needsUpdate = true; dashIM.matrixAutoUpdate = false;
     if (dashXs.length) root.add(dashIM);
-
-    // ---- CAUSEWAY: a REAL wide highway land-bridge to the speedway -----------
-    const cwLen = Math.abs(CW_X1 - CW_X0);
-    if (CBZ.buildHighway) {
-      // heightAt: grade-follow world/terrain.js relief (0 over this rect's
-      // flat playable footprint — a free, safe hook for the backdrop rim).
-      // THE APPROACH LEG. On the 10x basin the deck does not stop at the
-      // shore: it turns south at CW_X1 and runs to the spine, because the
-      // basin grew away from this dock (the layout header explains why it had
-      // to) and a 2.3 km walk over open draa is not an entrance. Three points,
-      // no fillet — this is a T onto the highway, and buildHighway registers
-      // the new leg as a drivable segment for free (HWY-3), deduping the
-      // horizontal one this file already pushed in section 0.
-      const cwPath = [{ x: CW_X0, z: CW_Z }, { x: CW_X1, z: CW_Z }];
-      if (_V5) cwPath.push({ x: CW_X1, z: HWY_Z + (HWY_Z > CW_Z ? SPINE_HALF : -SPINE_HALF) });
-      CBZ.buildHighway(root, {
-        path: cwPath,
-        width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
-        guardrail: false, elevated: false, rng: rng,
-        heightAt: CBZ.terrainHeight,
-      });
-    } else {
-      // ---- fallback: bespoke narrow deck (only if buildHighway absent) ----
-      mergeAdd([plane((CW_X0 + CW_X1) / 2, CW_Z, cwLen, CW, 0.05)], cmat(ASPHALT), { receive: true });
-      const nCw = Math.max(6, (cwLen / 6) | 0);
-      const cwDashIM = new THREE.InstancedMesh(new THREE.PlaneGeometry(2.0, 0.28), cmat(LINE_PALE), nCw);
-      for (let i = 0; i < nCw; i++) {
-        const x = Math.min(CW_X0, CW_X1) + 4 + i * ((cwLen - 8) / nCw);
-        dummy.position.set(x, 0.07, CW_Z); dummy.rotation.set(-Math.PI / 2, 0, 0);
-        dummy.scale.set(1, 1, 1); dummy.updateMatrix(); cwDashIM.setMatrixAt(i, dummy.matrix);
-      }
-      cwDashIM.instanceMatrix.needsUpdate = true; cwDashIM.matrixAutoUpdate = false;
-      root.add(cwDashIM);
-    }
 
     if (CFG.DESERT_PROP_SCATTER === true) {
     // =====================================================================

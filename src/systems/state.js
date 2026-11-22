@@ -563,7 +563,11 @@
     // flash and made a direct test start feel like another forced intro. Real
     // authored origin scenes and explicit prison runs still use the cinematic.
     const plainCitySandbox = g.mode === "city" && !cityIntro && !campaignEscapeTP;
-    if (!plainCitySandbox) CBZ.startIntro(introOpts);
+    // BROUGHT IN FROM GANG CITY (city/wanted.js's arrest cut): you fade up in
+    // your cell as a new arrival, not on the prison's aerial opening.
+    const arrestIntake = g.mode === "escape" && !!g._arrestIntake;
+    g._arrestIntake = false;
+    if (!plainCitySandbox && !arrestIntake) CBZ.startIntro(introOpts);
     CBZ.requestLock();
   }
   CBZ.startRun = startRun;

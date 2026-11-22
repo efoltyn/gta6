@@ -53,7 +53,10 @@ try {
     var C = CBZ, root = C.city.arena.root, cell = ${trace.cell || 400}, out = {}, seen = new Set();
     var v = new THREE.Vector3(), m4 = new THREE.Matrix4(), box = new THREE.Box3();
     root.updateMatrixWorld(true);
-    function bytes(g){ if (seen.has(g)) return 0; seen.add(g); var b = 0, a = g.attributes || {}; for (var k in a) if (a[k] && a[k].array) b += a[k].array.byteLength; if (g.index) b += g.index.array.byteLength; return b; }
+    // (an attribute's array may be gone: the engine frees it once it is on
+    //  the GPU. Its size is still count x itemSize; 4 bytes a float.)
+    function abytes(a){ return !a ? 0 : (a.array ? a.array.byteLength : (a.count || 0) * (a.itemSize || 1) * 4); }
+    function bytes(g){ if (seen.has(g)) return 0; seen.add(g); var b = 0, a = g.attributes || {}; for (var k in a) b += abytes(a[k]); if (g.index) b += abytes(g.index); return b; }
     function add(x, z, d, t, b){ var k = Math.floor(x / cell) + "," + Math.floor(z / cell); var e = out[k] || (out[k] = [0, 0, 0]); e[0] += d; e[1] += t; e[2] += b; }
     root.traverse(function(o){
       if (!(o.isMesh || o.isPoints || o.isLine) || !o.geometry) return;
@@ -62,11 +65,14 @@ try {
       var g = o.geometry; if (!g.boundingBox) g.computeBoundingBox();
       var p = g.attributes.position; if (!p) return;
       var tris = (g.index ? g.index.count : p.count) / 3, b = bytes(g);
-      if (o.isInstancedMesh) {
-        var n = Math.max(1, o.count); b += o.instanceMatrix.array.byteLength;
+      if (o.isInstancedMesh && o.instanceMatrix && o.instanceMatrix.array) {
+        var n = Math.max(1, o.count); b += abytes(o.instanceMatrix);
         for (var i = 0; i < o.count; i++) { o.getMatrixAt(i, m4); v.setFromMatrixPosition(m4).applyMatrix4(o.matrixWorld); add(v.x, v.z, 1 / n, tris, b / n); }
         return;
       }
+      // (an instanced mesh whose matrices are already only on the GPU is
+      //  counted whole at its own centre, like any other mesh)
+      if (o.isInstancedMesh) { b += abytes(o.instanceMatrix); tris *= Math.max(1, o.count); }
       box.copy(g.boundingBox).applyMatrix4(o.matrixWorld); box.getCenter(v);
       add(v.x, v.z, 1, tris, b);
     });

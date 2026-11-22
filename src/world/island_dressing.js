@@ -148,6 +148,14 @@
     const P = g.attributes.position.array, N = g.attributes.normal.array, cnt = g.attributes.position.count;
     _nm.getNormalMatrix(m);
     for (let i = 0; i < cnt; i += 3) {
+      // o.drop: faces of the template left out, by their LOCAL normal (+x 1,
+      // -x 2, +y 4, -y 8, +z 16, -z 32): a box standing on the ground has no
+      // underside anyone sees (city/house_yard.js asks; the island does not)
+      if (o.drop) {
+        const j0 = i * 3, lx = N[j0], ly = N[j0 + 1], lz = N[j0 + 2];
+        if (((o.drop & 1) && lx > 0.9) || ((o.drop & 2) && lx < -0.9) || ((o.drop & 4) && ly > 0.9) || ((o.drop & 8) && ly < -0.9)
+          || ((o.drop & 16) && lz > 0.9) || ((o.drop & 32) && lz < -0.9)) continue;
+      }
       for (let k = 0; k < 3; k++) {
         const j = (i + k) * 3;
         _tv[k].set(P[j], P[j + 1], P[j + 2]).applyMatrix4(m);
@@ -295,7 +303,7 @@
 
     // ---- colliders near the island (for clearance tests) ----------------
     const near = [];
-    const COLS = CBZ.colliders || [];
+    const COLS = ctx.colliders || CBZ.colliders || [];
     for (let i = 0; i < COLS.length; i++) {
       const c = COLS[i];
       if (c.maxX < cx - R - 80 || c.minX > cx + R + 80 || c.maxZ < cz - R - 80 || c.minZ > cz + R + 80) continue;
@@ -716,6 +724,18 @@
       rod(A.paint, x - 0.19, gy + 0.42, z, x + 0.19, gy + 0.42, z, 0.045, 8, c, {});
       rod(A.paint, x, gy + 0.4, z, x, gy + 0.4, z - 0.2, 0.06, 8, c, {});
       out.hydrants.push({ x: x, z: z });
+    }
+
+    /* THE YARD KIT, FOR ANOTHER WORLD'S HOUSE LOTS. city/house_yard.js lays
+       Gang City's fences, gate posts, paths, mailboxes, bins and shrubs with
+       the builders above, so a fence there is this fence. ctx.kitOnly:
+       nothing of the island is laid; the caller gets the builders and the
+       accumulators they fill and makes its own mesh of them (ctx.colliders:
+       the few colliders its clearance tests should know about). */
+    if (ctx.kitOnly) {
+      return { A: A, out: out, COL: COL, fenceBay: fenceBay, fenceRun: fenceRun, gatePosts: gatePosts, pathSeg: pathSeg,
+        mailbox: mailbox, wheelieBin: wheelieBin, shrubs: shrubs, planterBox: planterBox, addCol: addCol,
+        box: box, cylY: cylY, beam: beam, rod: rod, blob: blob, quad: quad, tri: tri, V3: V3, drain: drain, vary: vary, shade: shade };
     }
 
     /* ==================================================================

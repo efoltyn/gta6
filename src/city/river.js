@@ -1,100 +1,44 @@
 /* ============================================================
-   city/river.js — THE RIVER. The marina's way to the sea.
+   city/river.js — THE RIVERS. Authored courses, carved as real water.
 
-   OWNER WANT (2026-08-15)
-   -----------------------
-   "the city marina needs a single river that takes all the way to the ocean.
-    why would there be a marina in an island if it didn't go connect ocean
-    somewhere? and that's ingress egress too but if marina"
+   The courses are the WORLD PLAN's (src/world/worldplan.js `rivers`): each
+   rises in the Mercy Range and runs to the sea, or into a city's own river.
+   The Mercy comes down Mercy Valley to the head of the gulf beside Gang
+   City; the Redhollow runs out through the woods to Mbeya Bay; the upper
+   Kings and Karvel feed the two metros' rivers.
 
-   AND HE IS RIGHT, AND IT IS WORSE THAN "NO RIVER"
-   ------------------------------------------------
-   The marina was a POND. Measured, not guessed: a flood fill over
-   CBZ.cityWaterAt from a marina berth, 8 m step, reaches 465 cells and stops
-   314 m out. Rays fired from the quay in sixteen bearings find no wet run
-   longer than 240 m within six kilometres. The world sea spans +/-54,000.
+   This file used to SEARCH for one river: the downtown harbour was a closed
+   moat 7 km from any coast, so a grid router hunted a way from the marina to
+   the sea round whatever happened to be built (it ran 8.7 km north through
+   the mountains). The plan brings the sea to the harbour, so that search is
+   gone and so is the lake-outlet router that reused it: a river is drawn
+   where the geography puts it, and a place that stands in a river's way is a
+   mistake on the map (tools/citymap marks it), not something to route round.
 
-   The cause is in city/continent.js and it is one function. `bayDist` is a
-   CHEBYSHEV distance outside the city rect, and the harbour pass opens water
-   between BAY0 = 28 and BAY1 = 95 of it. That is a 67 m MOAT around the city
-   rect — closed, on all four sides, with no outlet anywhere. Everything that
-   floats in this game floats in it: the marina's 80 berths, world.js's three
-   harbour hulls, the beach's dock, the yacht roadstead. A harbour ring with
-   no river is a water feature, not a harbour, and the nearest real coast is
-   7.0 km away.
+   WHAT THIS FILE DOES WITH A COURSE
+     · smooths it, lets it wander a little (hash noise, none at either end),
+       tapers it from a stream at the source to an estuary at the mouth;
+     · registers ONE `path` water body (city/continent.js's shore field
+       carves it like any other water: it renders, you can swim it, boats
+       float on it, wildlife navigates it, the map shows it);
+     · bridges every road record that crosses it: a link region (water is
+       carved under it, the deck reads as land above: the name is load-
+       bearing, see below) plus piers and parapets so it reads as a bridge;
+     · gives its banks three fishing stations.
 
-   WHAT THIS FILE ADDS
-   -------------------
-   ONE river, from the bay ring to the open sea, carved by the SAME signed
-   shore field that carves everything else — so it is water the way the ocean
-   is water, with no second oracle to disagree with the first:
+   A BOAT CAN PASS UNDER A BRIDGE: waterfield.js's isSurfaceWater() answers
+   "not water" over any deck (right for a road car), so a marine hull asks
+   CBZ.cityNavWaterAt, which lets a registered channel through under a deck.
+   CBZ.cityChannelAt below is that registration.
 
-     · it renders (continent.js lowers the plate wherever shoreField < 0 and
-       the sea plane shows through),
-     · you can swim it (city/swim.js reads cityWaterAt),
-     · boats float and drive it (water_buoyancy / the marine hulls),
-     · wildlife navigates it (isNavigableWater),
-     · it is on the map (systems/fullmap.js samples mapTerrain.shoreAt),
+   CBZ.cityRiverAudit() flood fills from a real marina berth, through the
+   BOAT's oracle, and reports whether it reaches open sea.
 
-   ...because all five of those already read `city.mapTerrain.shoreAt`, and
-   that function already folds in `city.waterBodies`. This file registers ONE
-   body. It does not draw a single triangle of water.
+   DETERMINISM: pure geometry plus CBZ.hash01 for the wander. No Math.random.
+   FLAGS: CBZ.CONFIG.CITY_RIVER (carve them), CITY_RIVER_BRIDGES (crossings).
 
-   THE ROUTE IS A SEARCH, and it had to become one. The first version fanned
-   straight corridors off the harbour and scored them; its own diagnostics
-   then reported that EVERY bearing out of the marina's water is walled —
-   east by the Commerce Annex and the Ironjaw Arena, north by the County Jail
-   and Mount Mercy, and the other two faces are not the marina's water at
-   all. There is a way out; it simply is not straight. So the route is a
-   weighted grid search over the whole plate: POIs are walls (a river through
-   the Defence Headquarters is worse than no river), roads and decks are
-   PRICED, and the winner is string-pulled back into the few bends the
-   country actually forces. On the shipping seed it runs 8.7 km north and
-   crosses one road.
-
-   THE HARBOUR IS NOT ONE POND EITHER. Walking the bay ring shows it chopped
-   into five arcs — the County Jail and City Hall sit ON it and hold their
-   land, the east bridge and the Halloran causeway are decks that read as
-   land. A river dug from the west arc drains the west arc and leaves the
-   marina exactly as landlocked as it found it. That is not a hypothetical:
-   it is what the first working version shipped and what the audit caught. So
-   the arc containing the marina's own water is flood filled first, and a
-   route may only start inside it.
-
-   AND A BOAT COULD NOT PASS UNDER A BRIDGE. This is the finding underneath
-   all of it. waterfield.js's isSurfaceWater() answers "not water" over any
-   deck — right for a road car, since vehicles.js floods anything on water,
-   and fatal for the hull passing beneath, which is what the bridge is FOR.
-   This country carries 31 highway link regions and there is no route from
-   the harbour to any coast that avoids them all, so with decks as walls the
-   router correctly reported that no river can exist. Putting the exception
-   in the shared oracle instead made the gate fail with CARS ON WATER: 1 — a
-   car floating on its own bridge. The split is therefore by ASKER, in
-   vehicles.js, where the asker is known: a marine hull reads the new
-   CBZ.cityNavWaterAt (surface water, plus a registered channel under a
-   deck), and everything with wheels keeps CBZ.cityWaterAt unchanged.
-
-   THE CROSSINGS this file adds for its own river are REGIONS, not models:
-   continent.js's inSolidRegion() skips /bridge|causeway|link/ names so the
-   water is carved under them, and overDeck() matches the same names so the
-   deck reads as land above. The piers and parapets drawn here are so the
-   crossing READS as a bridge; they are not what makes it one. A crossing is
-   never laid inside the bay ring — one there would sever the harbour, which
-   is a mistake this file made once and now refuses by construction.
-
-   THE RATCHET IS THE WHOLE POINT OF THE FEATURE. CBZ.cityRiverAudit() flood
-   fills from a real marina berth, through the BOAT's oracle, and reports
-   whether it reaches open sea. Not "did we register a river" — whether a
-   boat can get out. Pin `connected` true.
-
-   DETERMINISM: pure geometry plus CBZ.hash01 for the meander. No Math.random.
-
-   FLAGS (one-line revert each):
-     CBZ.CONFIG.CITY_RIVER         (true)  — carve it at all
-     CBZ.CONFIG.CITY_RIVER_BRIDGES (true)  — the crossings' decks + regions
-
-   Exposes: CBZ.cityRiver, CBZ.cityRiverAudit, CBZ.cityRivers, CBZ.cityChannelAt,
-   CBZ.cityLakeOutletCarve (a large lake's way to the sea, same router).
+   Exposes: CBZ.cityRiversCarve (continent.js calls it), CBZ.cityRiver (the
+   harbour's river), CBZ.cityRivers, CBZ.cityRiverAudit, CBZ.cityChannelAt.
 ============================================================ */
 (function () {
   "use strict";
@@ -104,48 +48,19 @@
   if (C.CITY_RIVER == null) C.CITY_RIVER = true;
   if (C.CITY_RIVER_BRIDGES == null) C.CITY_RIVER_BRIDGES = true;
 
-  /* ---- THE WIDTH, and it is set by the PLATE, not by taste ---------------
-     continent.js builds the ground on a grid whose cell is PLATE_CELL = 38 m
-     (it says so, and it derives its segment count from that constant rather
-     than typing one). A channel narrower than about three cells cannot be
-     resolved by that mesh: it renders as a ragged notch that closes and
-     re-opens along its length, which is worse than no river because it looks
-     like a bug. 58 m of half-width is 116 m across — three cells and a
-     margin — and it flares at the mouth the way a river actually meets a sea.
-     The bay ring it joins is 67 m wide, so the taper at the top end matches
-     the harbour rather than swallowing it. */
-  const HALF_MID = 58, HALF_MOUTH = 92, HALF_HEAD = 40;
-  const MEANDER = 130;        // metres of lateral wander
+  /* THE WIDTH IS SET BY THE PLATE. continent.js builds the ground on a ~38 m
+     grid; a channel narrower than about two cells renders as a notch that
+     closes and re-opens along its length. So even a source is 48 m across,
+     and every river widens to its mouth. */
+  const MEANDER = 70;         // metres of lateral wander
   const WAVE = 950;           // metres per meander cycle
-  const STEP = 165;           // polyline spacing (a plate cell is 38)
+  const STEP = 120;           // polyline spacing
 
-  let river = null;           // { pts, half[], side, bridges[], length }
-  const outlets = [];         // lake outlets, same record shape
-  let gridCache = null;       // the router's cost grid, shared within one build
-  // an outlet is a lowland river leaving a lake: a touch narrower than the
-  // harbour's, widening to an estuary where it meets the sea
-  const OUT_HEAD = 62, OUT_MID = 50, OUT_MOUTH = 88;
+  let river = null;           // the harbour's river { pts, half[], bridges[], length, body, name }
+  const outlets = [];         // every other carved river, same record shape
   let audit = { built: false, reason: "not run", length: 0, points: 0, bridges: 0, crossings: 0 };
 
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
-  // Decided once per NAME: the router asks these of every region for every
-  // grid cell it scores, and a regex per region per cell was a real slice of
-  // the world build. Names are strings, so a renamed region gets its own entry.
-  const _linkMemo = new Map(), _wildMemo = new Map();
-  function isLinkName(n) {
-    if (!n) return false;
-    let v = _linkMemo.get(n);
-    if (v === undefined) { v = /bridge|causeway|link/i.test(n); _linkMemo.set(n, v); }
-    return v;
-  }
-  function isWildName(n) {
-    if (!n) return false;
-    let v = _wildMemo.get(n);
-    if (v === undefined) { v = /backcountry|wilds/i.test(n); _wildMemo.set(n, v); }
-    return v;
-  }
-
-  // ---- deterministic smooth noise, the shape continent.js/expansion.js use
   function sm01(t) { return t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t); }
   function wobble(t, salt) {
     if (!CBZ.hash01) return 0;
@@ -153,65 +68,53 @@
     const a = CBZ.hash01(i0 * WAVE, salt, 5501), b = CBZ.hash01((i0 + 1) * WAVE, salt, 5501);
     return (a + (b - a) * f) * 2 - 1;
   }
+  // Catmull-Rom through the control points (open), sampled about every `step`
+  function smoothOpen(ctrl, step) {
+    const P = [ctrl[0]].concat(ctrl, [ctrl[ctrl.length - 1]]), out = [];
+    for (let i = 1; i + 2 < P.length; i++) {
+      const p0 = P[i - 1], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2];
+      const n = Math.max(2, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / step));
+      for (let k = 0; k < n; k++) {
+        const t = k / n, t2 = t * t, t3 = t2 * t;
+        out.push({
+          x: 0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+          z: 0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
+        });
+      }
+    }
+    const e = ctrl[ctrl.length - 1];
+    out.push({ x: e[0], z: e[1] });
+    return out;
+  }
 
   /* ============================================================
-     CBZ.cityRiverCarve(city, ctx) — CALLED BY city/continent.js.
-     ------------------------------------------------------------
-     WHY IT IS A CALLBACK AND NOT A LANDMASS BUILDER, which is the whole
-     lesson of this pass: a river has to know where the SEA is, and until
-     continent.js has built its shore field nothing in this world does.
-     Registering at order 96.5 and asking CBZ.cityWaterAt put this file
-     straight into the trap the marina had just been pulled out of — before
-     order 97, waterfield.js answers every water question with its boot-time
-     fallback ("outside the city rect and outside every region IS water"), so
-     the corridor walk found the "sea" 2.2 km inland at the first gap between
-     two regions and stopped there.
-
-     continent.js now calls this the moment its own shoreField exists and
-     before it folds inland bodies in — so `ctx.shoreAt` is the REAL coast
-     with no river in it yet, which is exactly the oracle "how far to the
-     sea" needs. The returned body goes straight into the array that field
-     reads. One hook, one direction of dependency, no guessing.
-
-       ctx.shoreAt(x, z)  signed metres to the coast (negative = water)
-       ctx.plate          { minX, maxX, minZ, maxZ } of the ground plate
-     Returns the water body to carve, or null.
+     CBZ.cityRiversCarve(city) — CALLED BY city/continent.js, once its coast
+     exists and before it folds inland water in. Returns the bodies to carve.
+     It is a callback and not a landmass builder because the crossings have
+     to see every road record (the highway network lays its own at order 91)
+     and the bodies have to reach the continent's shore field before the
+     plate is baked.
      ============================================================ */
-  function carveImpl(city, ctx, lake) {
-    // `lake` null = THE harbour river (module state `river`/`audit`); a lake
-    // record {cx, cz, r, name} = that lake's OUTLET to the sea, which shares
-    // the router, the shaping, the bridges and the channel oracle but keeps
-    // the harbour's audit untouched.
-    const HARB = !lake;
-    const AUD = { built: false, reason: "off", length: 0, points: 0, bridges: 0, crossings: 0 };
-    if (HARB) { river = null; audit = AUD; outlets.length = 0; gridCache = null; }
-    if (C.CITY_RIVER === false) return null;
-    if (!city || !isFinite(city.minX)) { AUD.reason = "no city rect"; return null; }
-    if (!ctx || typeof ctx.shoreAt !== "function") { AUD.reason = "no coastline oracle"; return null; }
-
-    const regs = city.regions || [], roads = city.roads || [];
-    // The bay ring's own numbers, from continent.js's harbour pass. Kept here
-    // as the two constants they are there (BAY0 = the swim.js QUAY line,
-    // BAY1 = the outer edge) rather than re-derived, because a river that
-    // starts anywhere else does not touch the water it exists to drain.
-    const BAY0 = 28, BAY1 = 95, RING_MID = (BAY0 + BAY1) / 2;
-
-    /* ---- WHAT A CORRIDOR WOULD HAVE TO CUT THROUGH --------------------- */
-    /* The router asks both of these for every 80 m cell of the plate: a grid
-       over the regions and the roads (core/rectgrid.js) keeps each scan to
-       the few that can touch the cell, in the same order, so the same region
-       and the same road list come back. */
-    const RPAD = 160;
-    let REG_G = null;
-    function regGrid() {
-      if (REG_G && REG_G.n === regs.length) return REG_G;
-      REG_G = CBZ.rectGrid ? CBZ.rectGrid(regs.length, function (i) {
-        const r = regs[i];
-        if (r.kind === "circle") { const R = r.r + (r.pad || 0); return [r.cx - R, r.cx + R, r.cz - R, r.cz + R]; }
-        return [r.minX, r.maxX, r.minZ, r.maxZ];
-      }, RPAD) : null;
-      return REG_G;
+  CBZ.cityRiversCarve = function (city) {
+    river = null; outlets.length = 0;
+    audit = { built: false, reason: "off", length: 0, points: 0, bridges: 0, crossings: 0 };
+    if (C.CITY_RIVER === false) return [];
+    const plan = CBZ.worldPlan;
+    if (!plan || !plan.rivers || !plan.rivers.length) { audit.reason = "the world plan states no rivers"; return []; }
+    const out = [];
+    for (let i = 0; i < plan.rivers.length; i++) {
+      try { const b = carveOne(city, plan.rivers[i], i); if (b) out.push(b); }
+      catch (e) { console.error("[river] " + plan.rivers[i].name, e); }
     }
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    return out;
+  };
+
+  function carveOne(city, def, index) {
+    const HARB = !!def.harbour;
+    const regs = city.regions || [], roads = city.roads || [];
+    const BAY1 = 95;                       // continent.js's harbour ring, outer edge
+    const RPAD = 160;
     let ROAD_G = null, ROAD_W = 0;
     function roadGrid() {
       if (ROAD_G && ROAD_G.n === roads.length) return ROAD_G;
@@ -222,22 +125,6 @@
         return r.vertical ? [r.x, r.x, r.z - hl, r.z + hl] : [r.x - hl, r.x + hl, r.z, r.z];
       }, RPAD) : null;
       return ROAD_G;
-    }
-    function regionAt(x, z, m) {
-      const G = regGrid();
-      const L = G && m <= RPAD ? G.list(x, z) : null;
-      const n = L ? L.length : regs.length;
-      for (let j = 0; j < n; j++) {
-        const r = regs[L ? L[j] : j];
-        if (isLinkName(r.name)) continue;                 // decks are crossed, not avoided
-        // The backcountry IS the open country this river is supposed to run
-        // through; it is a label on the wilds, not a place with a wall.
-        if (isWildName(r.name)) continue;
-        if (r.kind === "circle") {
-          if (Math.hypot(x - r.cx, z - r.cz) < r.r + (r.pad || 0) + m) return r;
-        } else if (x > r.minX - m && x < r.maxX + m && z > r.minZ - m && z < r.maxZ + m) return r;
-      }
-      return null;
     }
     function roadsCrossing(x, z, m) {
       const out = [];
@@ -253,312 +140,40 @@
       }
       return out;
     }
-    // WATER PER THE CALLER'S OWN COASTLINE. Never CBZ.cityWaterAt here: at
-    // the moment this runs, waterfield.js is still answering from its
-    // boot-time fallback (see the header) and would report open country as
-    // sea. ctx.shoreAt IS continent.js's shoreField with no river in it yet.
-    const CELL = 80;                                       // the router's grid pitch
-    function wet(x, z) { return ctx.shoreAt(x, z) < 0; }
 
-    /* WATER A BOAT CAN ACTUALLY BE IN, which is not the same thing and is the
-       distinction this file was missing. waterfield.js's isSurfaceWater()
-       tests overDeck() FIRST and answers "not water" anywhere a bridge or
-       causeway deck is registered — so a deck does not merely span the water,
-       it REPLACES it, and the bay ring is cut wherever one crosses. That rule
-       exists so a car on a causeway is not swimming, and it is the same rule
-       the audit's flood fill obeys at the far end of this pipe.
-
-       So the head of the river has to be chosen against THIS test, not
-       against the raw coastline: the first cut used the bare shore field,
-       found the ring continuous, dug from the west face — and the audit
-       reported the marina still landlocked, because between the two lay the
-       Halloran causeway and the east bridge. Replicated here rather than
-       called, because CBZ.cityWaterAt cannot be trusted at this order. */
-    function overDeck(x, z, m) {
-      m = m == null ? 0.6 : m;                             // 0.6 == waterfield's own margin
-      const B = city.bridge;
-      if (B && x >= B.minX - m && x <= B.maxX + m && z >= B.minZ - m && z <= B.maxZ + m) return true;
-      for (let i = 0; i < regs.length; i++) {
-        const r = regs[i];
-        if (!isLinkName(r.name)) continue;
-        if (r.kind === "circle") { if (Math.hypot(x - r.cx, z - r.cz) <= r.r + (r.pad || 0) + m) return true; }
-        else if (x >= r.minX - m && x <= r.maxX + m && z >= r.minZ - m && z <= r.maxZ + m) return true;
-      }
-      return false;
-    }
-    function boatWet(x, z) { return wet(x, z) && !overDeck(x, z); }
-    /* THE ROUTER'S OWN DECK TEST, and it is DELIBERATELY FATTER than the one
-       above. The search grid samples a cell CENTRE every 80 m; the airport
-       causeway's deck is 24 m wide. A point test on that grid walks straight
-       over it and reports a clear route — which is exactly what happened:
-       the first solved river crossed the causeway at (-40, -1180), a single
-       dry cell in fifty-two, and the audit's flood fill stopped dead there.
-       The margin is the half-channel plus a cell, so a deck cannot hide
-       between two samples. */
-    function deckBlocks(x, z) { return overDeck(x, z, HALF_MID + CELL); }
-
-    /* ---- THE SEARCH ----------------------------------------------------
-       Four sides; down each, a fan of parallel corridors. A corridor is
-       walked outward until it reaches water that is NOT the bay ring — that
-       is the sea, and the walk's length is the river's length. Rejected
-       outright if it would cut a POI; charged 1 point per road it must
-       bridge; length is the tiebreak, in kilometres, so a corridor never
-       trades a whole extra bridge for two hundred metres.
-
-       COARSE ON PURPOSE (60 m): this is ~90 walks of up to 9 km and the
-       winner is re-walked at full resolution. A 60 m stride cannot miss a
-       POI — every region in this world is wider than that — and it cannot
-       miss a road, because roadsCrossing() is asked with the road's own
-       half-width plus a margin at every step.                            */
-    /* ---- WHICH PIECE OF THE RING THE MARINA IS ACTUALLY IN ------------
-       THE RING IS NOT ONE POND, IT IS SEVERAL. Measured by walking it: the
-       County Jail and City Hall sit ON it and hold their land, and the east
-       bridge and the Halloran causeway are decks that read as land — so the
-       67 m moat is chopped into five separate arcs. A river dug from the
-       WEST arc drains the west arc. The marina is on the EAST waterfront
-       (city/marina.js searches east from maxX + 26 and always has), so a
-       west river leaves the harbour exactly as landlocked as it found it —
-       which is what the first cut of this file did, and the audit caught it.
-
-       So the arc is FLOOD FILLED from the east waterfront, and a corridor
-       may only start in it. This is the same question the audit asks at the
-       other end of the pipe, asked here at build time: not "is there water
-       at the head" but "is that water the water the boats are in".        */
-    const ARC = new Set(), ARC_STEP = 20;
-    if (HARB) (function fillArc() {
-      const pad = BAY1 + 80;
-      const lo = { x: city.minX - pad, z: city.minZ - pad };
-      const hi = { x: city.maxX + pad, z: city.maxZ + pad };
-      const key = function (x, z) { return Math.round(x / ARC_STEP) + "," + Math.round(z / ARC_STEP); };
-      // seed on the EAST face, the one marina.js builds on
-      let seed = null;
-      for (let z = city.minZ - BAY1; z <= city.maxZ + BAY1 && !seed; z += 12) {
-        for (let d = BAY0 + 4; d <= BAY1 - 4 && !seed; d += 8) {
-          if (boatWet(city.maxX + d, z)) seed = { x: city.maxX + d, z: z };
-        }
-      }
-      if (!seed) return;
-      // SNAP THE SEED TO THE LATTICE. The fill walks in ARC_STEP hops from
-      // wherever it started, so its keys live on the seed's own offset grid —
-      // while inArc() keys a corridor head off the world origin. Two lattices
-      // one rounding apart never share a cell, so the veto silently passed
-      // everything and the river went on draining the wrong arc.
-      seed = { x: Math.round(seed.x / ARC_STEP) * ARC_STEP, z: Math.round(seed.z / ARC_STEP) * ARC_STEP };
-      const q = [seed]; ARC.add(key(seed.x, seed.z));
-      for (let head = 0; head < q.length && q.length < 8000; head++) {
-        const p = q[head];
-        const nb = [[ARC_STEP, 0], [-ARC_STEP, 0], [0, ARC_STEP], [0, -ARC_STEP]];
-        for (let i = 0; i < 4; i++) {
-          const nx = p.x + nb[i][0], nz = p.z + nb[i][1];
-          if (nx < lo.x || nx > hi.x || nz < lo.z || nz > hi.z) continue;
-          const k = key(nx, nz);
-          if (ARC.has(k)) continue;
-          if (!boatWet(nx, nz)) continue;
-          ARC.add(k); q.push({ x: nx, z: nz });
-        }
-      }
-    })();
-    function inArc(x, z) {
-      if (!ARC.size) return true;                          // no fill: do not veto
-      return ARC.has(Math.round(x / ARC_STEP) + "," + Math.round(z / ARC_STEP));
-    }
-
-    /* ---- THE ROUTE IS A SEARCH, because a straight line cannot solve this
-       map and the diagnostics said so in as many words. Fanning corridors
-       off the harbour arc, every bearing was walled: east by the Commerce
-       Annex and the Ironjaw Arena, north by the County Jail and Mount Mercy,
-       and the other two faces are not the marina's water at all. There is a
-       way out — it just is not straight, and a river that cannot bend is not
-       a router, it is a ruler.
-
-       So: a weighted grid search from the harbour arc to open sea over the
-       whole plate. Blocked cells are POIs (never carved — a river through
-       the Defence Headquarters is worse than no river) and DECKS (a bridge
-       region reads as land to everything, so a channel cannot pass under
-       one in this engine; treating them as walls here is what keeps the
-       route honest about the water it produces). Roads are passable but
-       PRICED, so the search spends a few hundred metres of detour to save a
-       bridge and takes the bridge when it must.
-
-       COST: one blocked/priced pass over ~45k cells is ~100 ms at build,
-       and it happens once. The BFS itself is a few milliseconds.          */
-    const P = ctx.plate || { minX: city.minX - 8000, maxX: city.maxX + 8000, minZ: city.minZ - 8000, maxZ: city.maxZ + 8000 };
-    const GX = Math.max(4, Math.ceil((P.maxX - P.minX) / CELL));
-    const GZ = Math.max(4, Math.ceil((P.maxZ - P.minZ) / CELL));
-    const N = GX * GZ;
-    const cellX = function (i) { return P.minX + (i % GX + 0.5) * CELL; };
-    const cellZ = function (i) { return P.minZ + ((i / GX) | 0 + 0) * CELL + CELL * 0.5; };
-    // THE COST GRID IS SHARED by every carve of one world build (the harbour
-    // river and each lake outlet ask the same coastline over the same
-    // regions): it is the ~100 ms part, the search itself is milliseconds.
-    const cacheOK = gridCache && gridCache.shore === ctx.shoreAt && gridCache.N === N &&
-      gridCache.minX === P.minX && gridCache.minZ === P.minZ;
-    const blocked = cacheOK ? gridCache.blocked : new Uint8Array(N);
-    const priced = cacheOK ? gridCache.priced : new Uint8Array(N);
-    const isSea = cacheOK ? gridCache.isSea : new Uint8Array(N);
-    let seaCells = cacheOK ? gridCache.seaCells : 0;
-    if (!cacheOK) for (let i = 0; i < N; i++) {
-      const x = cellX(i), z = cellZ(i);
-      if (regionAt(x, z, HALF_MID + 10)) { blocked[i] = 1; continue; }
-      // A DECK IS A TOLL, NOT A WALL. It was a wall in the first working
-      // version and the search then correctly reported that no route exists:
-      // 31 highway "Link" regions criss-cross this country, so every path
-      // from the harbour to any coast crosses at least one. Pricing them at
-      // forty cells means the river goes a long way out of its way to avoid
-      // a bridge and takes one only when the map leaves it no choice — which
-      // is also how a real river valley and a real road network negotiate.
-      if (deckBlocks(x, z)) priced[i] = 6;
-      else if (roadsCrossing(x, z, HALF_MID + 10).length) priced[i] = 1;
-      // OPEN SEA: water, and far enough out that the bay ring itself can
-      // never be mistaken for the destination.
-      const cheb = Math.max(Math.max(city.minX - x, x - city.maxX), Math.max(city.minZ - z, z - city.maxZ));
-      if (cheb > BAY1 + 400 && wet(x, z)) { isSea[i] = 1; seaCells++; }
-    }
-    if (!cacheOK) gridCache = { shore: ctx.shoreAt, N: N, minX: P.minX, minZ: P.minZ, blocked: blocked, priced: priced, isSea: isSea, seaCells: seaCells };
-    if (!seaCells) { AUD.reason = "no open sea on the plate"; AUD.arcCells = ARC.size; return null; }
-
-    // starts: every grid cell the harbour arc touches
-    const dist = new Float64Array(N).fill(Infinity);
-    const from = new Int32Array(N).fill(-1);
-    const heap = [];
-    function push(i, d) { dist[i] = d; heap.push([d, i]); }
-    let starts = 0;
-    if (!HARB) {
-      // a lake drains from its own water: every cell well inside the basin
-      const r0 = Math.max(CELL, lake.r - 30);
-      for (let i = 0; i < N; i++) {
-        if (blocked[i]) continue;
-        const x = cellX(i), z = cellZ(i);
-        // the lake's OWN shore when the caller has one (lobed basins), else its circle
-        const inLake = typeof lake.inside === "function" ? lake.inside(x, z) : Math.hypot(x - lake.cx, z - lake.cz) < r0;
-        if (inLake) { push(i, 0); starts++; }
-      }
-    }
-    if (HARB) ARC.forEach(function (k) {
-      const c = k.split(","), ax = +c[0] * ARC_STEP, az = +c[1] * ARC_STEP;
-      const gi = Math.floor((ax - P.minX) / CELL), gj = Math.floor((az - P.minZ) / CELL);
-      if (gi < 0 || gj < 0 || gi >= GX || gj >= GZ) return;
-      const i = gj * GX + gi;
-      if (blocked[i] || dist[i] === 0) return;
-      push(i, 0); starts++;
-    });
-    if (!starts) { AUD.reason = HARB ? "harbour arc has no cell on the plate" : "lake has no open cell"; AUD.arcCells = ARC.size; return null; }
-
-    // Dijkstra with a lazy binary heap — the graph is 45k nodes and 8-way,
-    // so an unsorted scan would be O(n^2) and this is O(n log n).
-    function siftUp(n) { while (n > 0) { const p = (n - 1) >> 1; if (heap[p][0] <= heap[n][0]) break; const t = heap[p]; heap[p] = heap[n]; heap[n] = t; n = p; } }
-    function siftDown(n) { for (;;) { const l = n * 2 + 1, r = l + 1; let m = n; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === n) break; const t = heap[m]; heap[m] = heap[n]; heap[n] = t; n = m; } }
-    for (let i = 0; i < heap.length; i++) siftUp(i);
-    let goal = -1;
-    const NB = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]];
-    while (heap.length) {
-      const top = heap[0];
-      const last = heap.pop();
-      if (heap.length) { heap[0] = last; siftDown(0); }
-      const d = top[0], i = top[1];
-      if (d > dist[i]) continue;
-      if (isSea[i]) { goal = i; break; }
-      const gi = i % GX, gj = (i / GX) | 0;
-      for (let k = 0; k < 8; k++) {
-        const ni = gi + NB[k][0], nj = gj + NB[k][1];
-        if (ni < 0 || nj < 0 || ni >= GX || nj >= GZ) continue;
-        const j = nj * GX + ni;
-        if (blocked[j]) continue;
-        // a road costs six cells of detour: cheap enough that the search will
-        // not walk a kilometre around one, dear enough that it prefers the gap
-        const nd = d + NB[k][2] + (priced[j] === 6 ? 40 : priced[j] ? 6 : 0);
-        if (nd < dist[j]) { dist[j] = nd; from[j] = i; heap.push([nd, j]); siftUp(heap.length - 1); }
-      }
-    }
-    if (goal < 0) { AUD.reason = "no navigable route from the harbour to open sea"; AUD.arcCells = ARC.size; return null; }
-
-    // ---- unwind, then STRAIGHTEN: a grid path is a staircase, and a river
-    // is not. Drop any waypoint whose neighbours can see each other over
-    // unblocked ground; what is left are the bends the terrain actually
-    // forced. Cheap and deterministic.
-    let raw = [];
-    for (let i = goal; i >= 0; i = from[i]) raw.push({ x: cellX(i), z: cellZ(i) });
-    raw.reverse();
-    function clearLine(a, b) {
-      const d = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(d / 40));
-      for (let i = 0; i <= n; i++) {
-        const t = i / n, x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
-        if (regionAt(x, z, HALF_MID + 10)) return false;
-      }
-      return true;
-    }
-    const knots = [raw[0]];
-    for (let i = 1; i < raw.length - 1; i++) {
-      if (!clearLine(knots[knots.length - 1], raw[i + 1])) knots.push(raw[i]);
-    }
-    knots.push(raw[raw.length - 1]);
-    // …and push the last knot well past the coast: the sea is already water
-    // out there, shoreField takes the minimum, so an overshoot costs nothing
-    // while a shortfall leaves the river ending one plate cell short of it.
+    // ---- the course: the plan's line, smoothed, then walked at a fixed
+    //      spacing with a wander that dies away at both ends (the source
+    //      stays where it rises, the mouth stays pointed at its water)
+    const line = smoothOpen(def.pts, 60);
+    // run the mouth on past its last point: the sea (or the city's river) is
+    // already water there and the shore field takes the minimum, so an
+    // overshoot costs nothing while a shortfall leaves a dam of dry land
     {
-      const a = knots[knots.length - 2], b = knots[knots.length - 1];
+      const a = line[line.length - 2], b = line[line.length - 1];
       const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz) || 1;
-      knots.push({ x: b.x + dx / L * 400, z: b.z + dz / L * 400 });
+      line.push({ x: b.x + dx / L * 260, z: b.z + dz / L * 260 });
     }
-    /* ---- THE POLYLINE. The knots are the route; this walks them at a fixed
-       spacing and adds the wander that makes a river a river rather than a
-       canal. The meander is DECORATION and the route is the DECISION, so a
-       wandered point that would enter a POI is pulled back onto the knot line
-       rather than allowed through — the search already proved the knot line
-       is clear, and nothing downstream may overrule it.                   */
-    const pts = [], halves = [];
-    // cumulative length along the knots, so `u` is real distance and the
-    // taper lands where it is meant to rather than where the knots happen
-    // to be dense
-    const segLen = [];
-    let total = 0;
-    for (let i = 0; i + 1 < knots.length; i++) {
-      const L = Math.hypot(knots[i + 1].x - knots[i].x, knots[i + 1].z - knots[i].z);
-      segLen.push(L); total += L;
-    }
-    if (!(total > 400)) { AUD.reason = "route too short to build"; AUD.arcCells = ARC.size; return null; }
+    const cum = [0];
+    for (let i = 1; i < line.length; i++) cum.push(cum[i - 1] + Math.hypot(line[i].x - line[i - 1].x, line[i].z - line[i - 1].z));
+    const total = cum[cum.length - 1];
+    if (!(total > 300)) return null;
     function atDist(d) {
-      let acc = 0;
-      for (let i = 0; i < segLen.length; i++) {
-        if (acc + segLen[i] >= d || i === segLen.length - 1) {
-          const t = segLen[i] > 0 ? clamp((d - acc) / segLen[i], 0, 1) : 0;
-          const a = knots[i], b = knots[i + 1];
-          const dx = (b.x - a.x) / (segLen[i] || 1), dz = (b.z - a.z) / (segLen[i] || 1);
-          return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, nx: -dz, nz: dx };
-        }
-        acc += segLen[i];
-      }
-      const b = knots[knots.length - 1];
-      return { x: b.x, z: b.z, nx: 0, nz: 1 };
+      let i = 1;
+      while (i < cum.length - 1 && cum[i] < d) i++;
+      const L = (cum[i] - cum[i - 1]) || 1, t = clamp((d - cum[i - 1]) / L, 0, 1), a = line[i - 1], b = line[i];
+      return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, nx: -(b.z - a.z) / L, nz: (b.x - a.x) / L };
     }
-    for (let d = 0; d <= total; d += STEP) {
-      const u = d / total;
-      const base = atDist(d);
-      // no wander at either end: the head has to stay in the harbour it
-      // drains, and the mouth has to stay pointed at the sea
-      const taper = Math.sin(Math.PI * clamp(u * 1.15 - 0.05, 0, 1));
-      let off = wobble(d, HARB ? 17 : 29 + Math.round(lake.cx + lake.cz) % 97) * MEANDER * taper;
-      let x = base.x + base.nx * off, z = base.z + base.nz * off;
-      let guard = 0;
-      while (regionAt(x, z, HALF_MID + 10) && guard++ < 6) {
-        off *= 0.5; x = base.x + base.nx * off; z = base.z + base.nz * off;
-      }
-      if (regionAt(x, z, HALF_MID + 10)) { x = base.x; z = base.z; }
-      pts.push({ x: x, z: z });
-      // narrow where it leaves the harbour, widest where it meets the sea
-      const hH = HARB ? HALF_HEAD : OUT_HEAD, hM = HARB ? HALF_MID : OUT_MID, hO = HARB ? HALF_MOUTH : OUT_MOUTH;
-      halves.push(u < 0.08 ? hH + (hM - hH) * (u / 0.08)
-                : u > 0.86 ? hM + (hO - hM) * ((u - 0.86) / 0.14)
-                : hM);
+    const h0 = Math.max(24, +def.half[0] || 26), h1 = Math.max(h0, +def.half[1] || 54);
+    const pts = [], halves = [];
+    const n = Math.max(3, Math.ceil(total / STEP));
+    for (let k = 0; k <= n; k++) {
+      const d = total * k / n, u = k / n, base = atDist(d);
+      const taper = Math.sin(Math.PI * clamp(u * 1.2 - 0.08, 0, 1));
+      const off = wobble(d, 17 + index * 13) * MEANDER * taper;
+      pts.push({ x: base.x + base.nx * off, z: base.z + base.nz * off });
+      // a stream at the source, widening all the way down, an estuary at the mouth
+      halves.push(h0 + (h1 - h0) * (0.55 * u + 0.45 * sm01((u - 0.72) / 0.28)));
     }
-    if (pts.length < 3) { AUD.reason = "route too short to build"; AUD.arcCells = ARC.size; return null; }
-
-    /* ---- REGISTER IT. One body, one kind, and the kind is new: a POLYLINE.
-       Registering 43 separate rects would have worked and would also have
-       made continent.js's inlandWaterField — which is called for every plate
-       vertex, every ground query, every water test in the game — 43 times
-       more expensive. `bbox` rejects the whole country in one test and
-       `bucket` narrows the rest to two or three segments. */
     const bbox = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
     for (let i = 0; i < pts.length; i++) {
       const h = halves[i] + 4;
@@ -567,82 +182,91 @@
       if (pts[i].z - h < bbox.minZ) bbox.minZ = pts[i].z - h;
       if (pts[i].z + h > bbox.maxZ) bbox.maxZ = pts[i].z + h;
     }
-    // NAMED FOR WHERE IT GOES, read off the mouth's own bearing from the
-    // city rather than off a side the router no longer has an opinion about.
-    const mouth = pts[pts.length - 1];
-    const bx = mouth.x - (city.minX + city.maxX) / 2, bz = mouth.z - (city.minZ + city.maxZ) / 2;
-    const axis = Math.abs(bx) > Math.abs(bz) ? "x" : "z";
-    const bearing = axis === "x" ? (bx < 0 ? "west" : "east") : (bz < 0 ? "north" : "south");
-    const body = {
-      kind: "path", pts: pts, half: halves, axis: axis, bbox: bbox,
-      name: !HARB ? (lake.name || "The Outlet") : "The " + (bearing === "west" ? "Kesh" : bearing === "east" ? "Veridia"
-            : bearing === "north" ? "Mercy" : "Solara") + " River",
-    };
+    const a0 = pts[0], a1 = pts[pts.length - 1];
+    const body = { kind: "path", pts: pts, half: halves, bbox: bbox, name: def.name, river: def.id,
+      axis: Math.abs(a1.x - a0.x) > Math.abs(a1.z - a0.z) ? "x" : "z" };
     if (CBZ.registerCityWaterBody) CBZ.registerCityWaterBody(city, body);
 
-    /* ---- THE CROSSINGS. Re-derived from the FINAL polyline, not carried
-       over from the search: the meander moved the channel, so a road the
-       straight corridor cleared can be one the river now cuts, and the other
-       way about. Every road within the channel gets a link region — which is
-       both halves of a bridge (see the header) — and a pier line so it reads
-       as one from the water.                                              */
+    /* ---- THE CROSSINGS, from the final polyline. Every road record within
+       the channel gets a link region (which is both halves of a bridge: water
+       carved under it, deck read as land above it) and a pier line so it
+       reads as one from the water.                                        */
     const bridges = [];
     if (C.CITY_RIVER_BRIDGES !== false) {
       const claimed = new Set();
+      // probed every ~40 m, not only at the polyline's own vertices: a country
+      // road is narrower than the vertex spacing and must not slip between two
+      const probe = [], probeH = [];
       for (let i = 0; i < pts.length; i++) {
-        const h = halves[i];
-        for (const r of roadsCrossing(pts[i].x, pts[i].z, h + 14)) {
-          const k = (r.vertical ? "V" : "H") + Math.round(r.x) + "," + Math.round(r.z);
-          if (claimed.has(k)) continue;
-          /* NEVER BRIDGE THE HARBOUR ITSELF. A link region is land to
-             everything that asks, so one laid across the bay ring severs the
-             ring — the first cut of this file put "Kesh River Bridge 1" on
-             the west face and cut the moat in two, which the ring walk caught
-             by name. Inside the ring band the road already crosses water and
-             already has whatever deck it was built with; this file does not
-             get to add another. */
-          const cheb = Math.max(Math.max(city.minX - pts[i].x, pts[i].x - city.maxX),
-                                Math.max(city.minZ - pts[i].z, pts[i].z - city.maxZ));
-          if (cheb < BAY1 + 40) continue;
-          claimed.add(k);
-          // the deck spans the channel plus an abutment either side
-          const span = h * 2 + 90, deckW = (r.w || 18) + 8;
-          const b = {
-            road: r, x: r.vertical ? r.x : pts[i].x, z: r.vertical ? pts[i].z : r.z,
-            vertical: !!r.vertical, span: span, w: deckW,
-          };
-          bridges.push(b);
-          const reg = {
-            // THE NAME IS LOAD-BEARING, twice over: continent.js's
-            // isLinkReg() and waterfield.js's overDeck() both test
-            // /bridge|causeway|link/ against it. Rename this and the deck
-            // starts holding its land (no water under the bridge) AND stops
-            // reading as land (cars swim on it).
-            name: body.name + " Bridge " + (bridges.length),
-            subtitle: "River Crossing", biome: "wilds", kind: "rect", pad: 0,
-            minX: b.vertical ? b.x - deckW / 2 : b.x - span / 2,
-            maxX: b.vertical ? b.x + deckW / 2 : b.x + span / 2,
-            minZ: b.vertical ? b.z - span / 2 : b.z - deckW / 2,
-            maxZ: b.vertical ? b.z + span / 2 : b.z + deckW / 2,
-          };
-          // through the shared registrar, not a raw push: it owns pad
-          // defaults, the map-reserve ledger and the collider dirty flag.
-          if (CBZ.registerCityRegion) CBZ.registerCityRegion(city, reg); else regs.push(reg);
-          b.region = reg;
+        probe.push(pts[i]); probeH.push(halves[i]);
+        if (i + 1 < pts.length) for (let k = 1; k < 3; k++) {
+          probe.push({ x: pts[i].x + (pts[i + 1].x - pts[i].x) * k / 3, z: pts[i].z + (pts[i + 1].z - pts[i].z) * k / 3 });
+          probeH.push(halves[i] + (halves[i + 1] - halves[i]) * k / 3);
         }
       }
+      /* ONE BRIDGE PER ROAD, AND IT COVERS THE WHOLE CROSSING. A river rarely
+         meets a road square-on: on a slant the channel runs beside the road
+         for a while before it is under it. So every probe within reach of a
+         road is gathered first, and the deck is laid over the full stretch
+         of them (its middle is the middle of the crossing, its length the
+         stretch plus the channel plus an abutment either side). It used to
+         be centred on the FIRST probe to come within reach, which on a slant
+         is one bank: the far half of the channel was left with a road record
+         over open water and no deck. */
+      const cross = new Map();
+      for (let i = 0; i < probe.length; i++) {
+        const h = probeH[i];
+        for (const r of roadsCrossing(probe[i].x, probe[i].z, h + 14)) {
+          /* NEVER BRIDGE THE HARBOUR ITSELF. A link region is land to
+             everything that asks, so one laid across the bay ring severs the
+             ring. Inside the ring band the road already crosses water and
+             already has whatever deck it was built with; this file does not
+             get to add another. */
+          const cheb = Math.max(Math.max(city.minX - probe[i].x, probe[i].x - city.maxX),
+                                Math.max(city.minZ - probe[i].z, probe[i].z - city.maxZ));
+          if (cheb < BAY1 + 40) continue;
+          const along = r.vertical ? probe[i].z : probe[i].x;
+          let c = cross.get(r);
+          if (!c) cross.set(r, c = { lo: along, hi: along, h: h });
+          if (along < c.lo) c.lo = along; if (along > c.hi) c.hi = along; if (h > c.h) c.h = h;
+        }
+      }
+      cross.forEach(function (c, r) {
+        const k = (r.vertical ? "V" : "H") + Math.round(r.x) + "," + Math.round(r.z);
+        if (claimed.has(k)) return;
+        claimed.add(k);
+        // never past the road's own ends: the deck is that road's deck
+        const r0 = (r.vertical ? r.z : r.x) - r.len / 2, r1 = (r.vertical ? r.z : r.x) + r.len / 2;
+        const lo = Math.max(r0, c.lo - c.h - 45), hi = Math.min(r1, c.hi + c.h + 45);
+        if (!(hi - lo > 8)) return;
+        const mid = (lo + hi) / 2, span = hi - lo, deckW = (r.w || 18) + 8;
+        const b = { road: r, x: r.vertical ? r.x : mid, z: r.vertical ? mid : r.z, vertical: !!r.vertical, span: span, w: deckW };
+        bridges.push(b);
+        const reg = {
+          // THE NAME IS LOAD-BEARING, twice over: continent.js's
+          // isLinkReg() and waterfield.js's overDeck() both test
+          // /bridge|causeway|link/ against it. Rename this and the deck
+          // starts holding its land (no water under the bridge) AND stops
+          // reading as land (cars swim on it).
+          name: body.name + " Bridge " + (bridges.length),
+          subtitle: "River Crossing", biome: "wilds", kind: "rect", pad: 0,
+          minX: b.vertical ? b.x - deckW / 2 : b.x - span / 2,
+          maxX: b.vertical ? b.x + deckW / 2 : b.x + span / 2,
+          minZ: b.vertical ? b.z - span / 2 : b.z - deckW / 2,
+          maxZ: b.vertical ? b.z + span / 2 : b.z + deckW / 2,
+        };
+        // through the shared registrar, not a raw push: it owns pad
+        // defaults, the map-reserve ledger and the collider dirty flag.
+        if (CBZ.registerCityRegion) CBZ.registerCityRegion(city, reg); else regs.push(reg);
+        b.region = reg;
+      });
     }
 
-    const rec = { pts: pts, half: halves, side: bearing, bridges: bridges,
-              length: Math.round(total), body: body, name: body.name };
-    if (HARB) river = rec; else outlets.push(rec);
-    const fin = { built: true, reason: "", length: rec.length, points: pts.length,
-              bridges: bridges.length, crossings: bridges.length, side: bearing,
-              name: body.name,
-              // the marina's arc, in 20 m cells. A ZERO here means the veto
-              // that keeps the river on the harbour's own water was inert.
-              arcCells: ARC.size, head: [Math.round(pts[0].x), Math.round(pts[0].z)] };
-    if (HARB) audit = fin; else rec.audit = fin;
+    const rec = { pts: pts, half: halves, bridges: bridges, length: Math.round(total), body: body, name: body.name, id: def.id };
+    if (HARB && !river) river = rec; else outlets.push(rec);
+    const fin = { built: true, reason: "", length: rec.length, points: pts.length, bridges: bridges.length, crossings: bridges.length,
+      name: body.name, head: [Math.round(pts[0].x), Math.round(pts[0].z)] };
+    if (HARB && river === rec) audit = fin; else rec.audit = fin;
 
     /* ---- AND THE THING YOU CAN SEE: piers and parapets at each crossing.
        Drawn LAST and drawn cheap — two merged meshes for the whole river —
@@ -697,9 +321,8 @@
       merge(piers, 0x8b9097, true);
       merge(rails, 0xb4b9bf, false);
     }
-    /* ---- AND A REASON TO BE ON IT. 8.7 km of navigable water with nothing
-       on its banks is the same "geometry with nobody in it" this repo keeps
-       catching — the marina's own header is about exactly that. Three bank
+    /* ---- AND A REASON TO BE ON IT. Kilometres of navigable water with
+       nothing on the banks is "geometry with nobody in it". Three bank
        stations, on alternating sides, at quarter/half/three-quarter of the
        run: city/fishing.js validates each one against the water point it is
        given and REFUSES a station whose water is not water, so a bank that a
@@ -727,20 +350,8 @@
       });
     }
 
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return body;
   }
-  CBZ.cityRiverCarve = function (city, ctx) { return carveImpl(city, ctx, null); };
-  /* CBZ.cityLakeOutletCarve(city, ctx, lake) — A LAKE THAT DRAINS. Called by
-     city/continent.js for every large inland lake (Kings Lake): the same
-     router finds the lake's way to the open sea, and the same crossings,
-     piers and channel oracle make it a river rather than a painted ditch.
-     Returns the path body to carve, or null (reason on the returned list's
-     audit via CBZ.cityRivers()). */
-  CBZ.cityLakeOutletCarve = function (city, ctx, lake) {
-    if (!lake || ![lake.cx, lake.cz, lake.r].every(Number.isFinite)) return null;
-    return carveImpl(city, ctx, lake);
-  };
 
   /* ============================================================
      THE RATCHET — CBZ.cityRiverAudit()
@@ -869,6 +480,6 @@
     bridges: function () { return river ? river.bridges.slice() : []; },
     info: function () { return river; },
   };
-  // every carved river (the harbour's first, then each lake outlet)
+  // every carved river (the harbour's first, then the rest)
   CBZ.cityRivers = function () { return (river ? [river] : []).concat(outlets); };
 })();

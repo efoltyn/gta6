@@ -1,40 +1,33 @@
 /* ============================================================
-   city/inventory.js — INVENTORY V2: the Minecraft-like city inventory.
+   city/inventory.js — THE THINGS YOU DROP, STASH AND CARRY OUT.
 
-   WHAT THIS IS (owner's order): guns live in your inventory like items,
-   the inventory is a real slot GRID you can rearrange ([I], hosted by
-   charpanel's overlay — this module renders the interactive grid into
-   it), anything can be DROPPED on the ground as a pickup, any armed
-   death drops the guns (the existing NPC/cop drops stay; this module
-   adds the PLAYER's death drop by wrapping CBZ.cityKillPlayer), and
-   CHESTS can be placed in the world to stash excess loot. Crafting is
-   DELETED outright (owner mandate; systems/craft.js is gone).
+   There is no inventory screen. What you carry is the one bar
+   (systems/inventory.js #hotbar: the guns, the blade, the phone, the keys)
+   and what is in your hands; what you own is where you left it. This file
+   is the physical half of that:
 
-   DESIGN: a slot-grid VIEW over the two existing truth stores — never a
-   third store. g.cityInv ({name:count}, CBZ.cityEcon add/take/count) is
-   the count truth for items; CBZ.weaponInventory (engine id strings) +
-   g.cityMeleeWeapon are the truth for weapons. Rearranging slots never
-   touches truth; truth only moves on the three real operations:
-     • drop to ground  → CBZ.cityDropItem world pickup (physical prop)
-     • chest transfer  → cityEcon.take/add or weaponInventory splice/unlock
-     • death drop      → cityKillPlayer wrap (guns leave the corpse)
-   resync() reconciles the grid against truth with STABLE placement (the
-   systems/inventory.js pattern): correctly-placed stacks never move.
+     DROPS    CBZ.cityDropItem: a thing on the ground is a real prop you
+              walk up to and pick up (a gun, a blade, a stack, cash).
+     CORPSES  what a dead man was carrying lies by him as props.
+     DEATH    an armed death costs the gun in your hand: it hits the
+              pavement as a pickup (wraps CBZ.cityKillPlayer).
+     CHESTS   a box you buy and set down anywhere. Standing at it:
+                Put in the <gun in your hands>      E, with a gun out
+                Take the <last thing in>            E
+                Take everything                     hold E
+                Put in what you're carrying         product, valuables, materials
+                Take the <thing>                    each thing, round the wheel (Q)
+                Pick up the chest                   when it is empty
+              and its card says what is inside. Saved in the world ledger
+              (w.chests), rebuilt when the arena changes.
+     BAGS     CBZ.cashBags: money over $25,000 is a duffel you carry.
 
-   HOTBAR: every game has ONE bar, systems/inventory.js (#hotbar, the
-   prison bar, CBZ.inventory). It is the inventory the
-   player sees; this module keeps the truth behind it (drops, chests,
-   death) and draws no bar of its own. (A fallback #invHotbar used to live
-   here; css/city.css hid it in every city frame, so it was deleted.)
+   (2026-11-22: this file used to draw a 27-slot grid you rearranged with a
+   mouse cursor, hosted by an [I] overlay in city/charpanel.js, and a second
+   27-slot grid in an HTML panel for every chest. Both grids, their slot
+   arrangement save, their stack caps and their stylesheet are deleted.)
 
-   PERSISTENCE: worldstate ledger (the storage.js pattern) — add-only
-   fields w.invSlots (slot arrangement) + w.chests ([{id,x,z,slots}]),
-   hydrated once per run behind g._cityInvHydrated/g._cityChestsHydrated,
-   plain JSON only (never a mesh). Chest meshes rebuild on arena change.
-
-   Feature flag: CBZ.CONFIG.INVENTORY_V2 (config.js, default true) — flip
-   false and this whole module inerts (charpanel falls back to its old
-   read-only grid; player death keeps guns again).
+   Feature flag: CBZ.CONFIG.INVENTORY_V2 (config.js, default true).
 ============================================================ */
 (function () {
   "use strict";
@@ -75,23 +68,9 @@
   // ============================================================
   //  CATALOG GLUE
   // ============================================================
-  const MAIN_N = 27, CHEST_N = 27;
+  const CHEST_N = 27;                    // different things one chest holds
   const REACH = 2.2;                     // chest open reach
   const CHEST_COST = 250;
-
-  // stack caps by econ tag (Minecraft-ish: bulk stacks big, weapons never)
-  const STACK_BY_TAG = {
-    weapon: 1, resource: 64, drug: 32, ammo: 16, throwable: 16,
-    food: 16, tool: 16, valuable: 16, wearable: 8,
-  };
-  const STACK_DEFAULT = 16;
-
-  function itemTag(name) { const it = items()[name]; return (it && it.tag) || null; }
-  function stackCap(name) {
-    const t = itemTag(name);
-    const cap = t != null && STACK_BY_TAG[t] != null ? STACK_BY_TAG[t] : STACK_DEFAULT;
-    return cap;
-  }
 
   // the "Chest" item itself — registered into the live catalog at runtime so
   // no shop/economy file needs an edit (ITEMS is exported by reference).
@@ -113,145 +92,21 @@
     return id;
   }
 
-  // ---- ITEM FACES ---------------------------------------------------------
-  // This module used to carry its OWN name->glyph table (one of four in the
-  // game), and every entry in it had been emptied to "" by the repo-wide emoji
-  // strip — so `ICON[name] || TAG_ICON[tag] || "▪"` resolved to "▪" for EVERY
-  // item you have ever carried. That is the owner's "super unclear icons".
-  // city/itemicons.js draws the real thing from the item's KIND (so a pelt
-  // registered at runtime by a species added tomorrow is drawn too, in that
-  // animal's own colour). The "▪" stays only as the flag-off fallback.
-  function iconFor(name) { return "▪"; }
-  function itemFace(name, cls) {
-    if (CBZ.itemIconHtml) { const h = CBZ.itemIconHtml(name, items()[name], cls); if (h) return h; }
-    return "<span class='ic'>" + iconFor(name) + "</span>";
-  }
-  function itemTitle(name, count) {
-    if (CBZ.itemTip) { try { return CBZ.itemTip(name, items()[name], count); } catch (e) {} }
-    return String(name);
-  }
-  // A GUN IN A WEAPON SLOT AND A GUN IN AN ITEM SLOT MUST BE THE SAME PICTURE.
-  // This used to call weapon_thumbnails.js directly — a second offscreen
-  // renderer with its own 180x100 frame — so the grid could show the same
-  // pistol two ways depending on which store held it. itemicons.js photographs
-  // everything now, guns included (in idle time: "" until it lands, then the item face).
-  function weaponFace(id, name, className) {
-    let src = "";
-    try { if (CBZ.itemIconGun) src = CBZ.itemIconGun(id || name); } catch (e) {}
-    return src ? "<img class='" + (className || "gunThumb") + "' src='" + src + "' alt=''>"
-      : itemFace(name, "");
-  }
-
   // ============================================================
-  //  SLOT MODEL — entries are plain JSON (never a mesh / THREE ref):
-  //    null
+  //  WHAT A CHEST HOLDS: plain JSON entries (never a mesh / THREE ref)
   //    { kind:"item",   name, count }
-  //    { kind:"weapon", id, name }             (gun — weaponInventory truth)
+  //    { kind:"weapon", id, name }             (a gun: weaponInventory truth)
   //    { kind:"weapon", melee:true, name }     (g.cityMeleeWeapon truth)
   // ============================================================
-  const MAIN = new Array(MAIN_N).fill(null);
-  let cursor = null;             // entry held on the mouse
-  let cursorSrc = "p";           // which container it was lifted from: "p"|"c"
-  const ptr = { x: 0, y: 0 };
 
-  function entryLabel(e) { return e ? e.name : ""; }
-  function isGun(e) { return !!(e && e.kind === "weapon" && !e.melee); }
-  function isMelee(e) { return !!(e && e.kind === "weapon" && e.melee); }
-  function entryCap(e) { return !e ? 0 : (e.kind === "weapon" ? 1 : stackCap(e.name)); }
-  function cloneEntry(e) { return e ? JSON.parse(JSON.stringify(e)) : null; }
-
-  function firstFree(grid) { for (let i = 0; i < grid.length; i++) if (!grid[i]) return i; return -1; }
-
-  // does the melee equip ALSO exist as a counted city item? (craft path adds
-  // Hatchet to cityInv AND equips it) — then the item stack already shows it
-  // and the pseudo melee entry would double-display.
+  // is the melee piece on your belt also a counted item in your pockets?
   function meleeShownAsItem() {
     const m = g.cityMeleeWeapon;
     return !!(m && econ() && econ().count(m) > 0);
   }
 
-  // ---- resync: reconcile the grid VIEW against the truth stores. Stable:
-  //      a correctly-placed stack never moves; new stuff lands in firstFree.
-  function resync() {
-    if (!on()) return;
-    ensureHydrated();
-    const E = econ(); if (!E) return;
-    const inv = g.cityInv || {};
-    const wids = CBZ.weaponInventory || [];
-
-    // 1) prune entries whose referent vanished (+ dedupe weapon ids)
-    const seenW = {};
-    for (let i = 0; i < MAIN_N; i++) {
-      const s = MAIN[i]; if (!s) continue;
-      if (s.kind === "item") { if (!((inv[s.name] | 0) > 0)) MAIN[i] = null; }
-      else if (s.melee) { if (g.cityMeleeWeapon !== s.name || meleeShownAsItem()) MAIN[i] = null; }
-      else {
-        if (wids.indexOf(s.id) < 0 || seenW[s.id]) MAIN[i] = null;
-        else seenW[s.id] = true;
-      }
-    }
-
-    // 2) reconcile item counts (cursor counts toward "have" so an open pick
-    //    isn't re-materialized into the grid)
-    for (const name in inv) {
-      const target = inv[name] | 0; if (target <= 0) continue;
-      let have = 0;
-      for (let i = 0; i < MAIN_N; i++) { const s = MAIN[i]; if (s && s.kind === "item" && s.name === name) have += s.count; }
-      if (cursor && cursor.kind === "item" && cursor.name === name && cursorSrc === "p") have += cursor.count;
-      if (have < target) {
-        let need = target - have;
-        const cap = stackCap(name);
-        // top up existing partial stacks first
-        for (let i = 0; i < MAIN_N && need > 0; i++) {
-          const s = MAIN[i];
-          if (s && s.kind === "item" && s.name === name && s.count < cap) { const d = Math.min(cap - s.count, need); s.count += d; need -= d; }
-        }
-        // then new stacks in free slots
-        while (need > 0) {
-          const f = firstFree(MAIN);
-          if (f < 0) {
-            // grid full: overflow onto the first stack of this name so the
-            // inventory never LIES about what you own (display over cap).
-            let dumped = false;
-            for (let i = 0; i < MAIN_N; i++) { const s = MAIN[i]; if (s && s.kind === "item" && s.name === name) { s.count += need; need = 0; dumped = true; break; } }
-            if (!dumped) need = 0;   // no slot at all — invisible but still owned
-            break;
-          }
-          const c = Math.min(stackCap(name), need);
-          MAIN[f] = { kind: "item", name, count: c };
-          need -= c;
-        }
-      } else if (have > target) {
-        let extra = have - target;
-        for (let i = MAIN_N - 1; i >= 0 && extra > 0; i--) {
-          const s = MAIN[i];
-          if (s && s.kind === "item" && s.name === name) {
-            const d = Math.min(s.count, extra); s.count -= d; extra -= d;
-            if (s.count <= 0) MAIN[i] = null;
-          }
-        }
-      }
-    }
-    // prune item stacks whose name left inv entirely was done in (1)
-
-    // 3) weapons not yet shown get a slot
-    for (let w = 0; w < wids.length; w++) {
-      const id = wids[w];
-      let shown = false;
-      for (let i = 0; i < MAIN_N; i++) { const s = MAIN[i]; if (isGun(s) && s.id === id) { shown = true; break; } }
-      if (!shown && cursor && isGun(cursor) && cursor.id === id) shown = true;
-      if (!shown) { const f = firstFree(MAIN); if (f >= 0) MAIN[f] = { kind: "weapon", id, name: gunName(id) }; }
-    }
-    if (g.cityMeleeWeapon && !meleeShownAsItem()) {
-      let shown = false;
-      for (let i = 0; i < MAIN_N; i++) { const s = MAIN[i]; if (isMelee(s) && s.name === g.cityMeleeWeapon) { shown = true; break; } }
-      if (!shown && cursor && isMelee(cursor) && cursor.name === g.cityMeleeWeapon) shown = true;
-      if (!shown) { const f = firstFree(MAIN); if (f >= 0) MAIN[f] = { kind: "weapon", melee: true, name: g.cityMeleeWeapon }; }
-    }
-  }
-
   // ============================================================
-  //  TRUTH MUTATIONS — the only places a slot op touches the stores.
+  //  TRUTH MUTATIONS — the only places a chest op touches the stores.
   // ============================================================
   function removeGunFromLoadout(id) {
     const wids = CBZ.weaponInventory; if (!wids) return;
@@ -284,11 +139,6 @@
     }
     if (CBZ.unlockWeapon) CBZ.unlockWeapon(entry.id, { select: false });
     return true;
-  }
-  // an entry crossing between the player grid ("p") and a chest grid ("c")
-  function crossTransfer(entry, count, to) {
-    if (to === "c") return truthRemove(entry, count);
-    return truthAdd(entry, count);
   }
 
   // ============================================================
@@ -700,19 +550,6 @@
     }
   }
 
-  // drop the cursor stack (or a grid slot) to the ground at the player's feet
-  function dropEntryToGround(entry) {
-    const P = CBZ.player; if (!P || !entry) return false;
-    // leaving the player's possession is a truth removal (if it was theirs)
-    const h = (P.heading || 0);
-    const x = P.pos.x + Math.sin(h) * 1.2 + (Math.random() - 0.5) * 0.4;
-    const z = P.pos.z + Math.cos(h) * 1.2 + (Math.random() - 0.5) * 0.4;
-    if (entry.kind === "item") CBZ.cityDropItem(x, z, { name: entry.name, count: entry.count, y: P.pos.y });
-    else if (entry.melee) CBZ.cityDropItem(x, z, { melee: entry.name, y: P.pos.y });
-    else CBZ.cityDropItem(x, z, { weaponId: entry.id, ammo: 0, y: P.pos.y });
-    return true;
-  }
-
   // ============================================================
   //  PLAYER DEATH DROP. Wraps CBZ.cityKillPlayer. A death costs the GUN IN
   //  YOUR HAND (it hits the pavement as a real pickup you can run back for)
@@ -775,18 +612,13 @@
   }
 
   // ============================================================
-  //  PERSISTENCE — worldstate ledger, add-only fields (storage.js pattern)
+  //  PERSISTENCE — the chests, in the worldstate ledger (w.chests)
   // ============================================================
-  function serializeSlots(grid) { return grid.map(cloneEntry); }
-  function persistSlots() {
-    if (!CBZ.cityWorldEnsure) return;
-    const w = CBZ.cityWorldEnsure(); if (!w) return;
-    w.invSlots = serializeSlots(MAIN);
-  }
+  function cloneEntry(e) { return e ? JSON.parse(JSON.stringify(e)) : null; }
   function persistChests() {
     if (!CBZ.cityWorldEnsure) return;
     const w = CBZ.cityWorldEnsure(); if (!w) return;
-    w.chests = chests.map((c) => ({ id: c.id, x: c.x, z: c.z, y: c.y, slots: serializeSlots(c.slots) }));
+    w.chests = chests.map((c) => ({ id: c.id, x: c.x, z: c.z, y: c.y, slots: c.slots.filter(Boolean).map(cloneEntry) }));
   }
   function commit() { if (CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} } }
 
@@ -797,23 +629,12 @@
     if (e.kind === "weapon" && typeof e.id === "string") return { kind: "weapon", id: e.id, name: e.name || gunName(e.id) };
     return null;
   }
-  function ensureHydrated() {
-    if (g._cityInvHydrated || !CBZ.cityWorldEnsure) return;
-    g._cityInvHydrated = true;
-    const w = CBZ.cityWorldEnsure();
-    if (w && Array.isArray(w.invSlots)) {
-      for (let i = 0; i < MAIN_N; i++) MAIN[i] = validEntry(w.invSlots[i]);
-    }
-    // truth wins over any stale arrangement — resync prunes/refills (callers
-    // of ensureHydrated are inside resync already; pruning happens right after)
-  }
 
   // ============================================================
   //  CHESTS — placeable world stashes: { id, x, z, mesh, slots[27] }
   // ============================================================
   const chests = [];
   let _chestRoot = null;
-  let openChestRef = null;
 
   // THE CHEST IN YOUR BAG IS THE CHEST ON THE GROUND: city/itemassets.js's
   // `chest` builder (a banded wooden trunk, same 1.0 x 0.8 x 0.8 footprint),
@@ -849,16 +670,12 @@
     if (!w || !Array.isArray(w.chests)) return;
     for (const rec of w.chests) {
       if (!rec || rec.x == null || rec.z == null) continue;
-      const slots = new Array(CHEST_N).fill(null);
-      if (Array.isArray(rec.slots)) for (let i = 0; i < CHEST_N; i++) slots[i] = validEntry(rec.slots[i]);
+      const slots = Array.isArray(rec.slots) ? rec.slots.map(validEntry).filter(Boolean) : [];
       chests.push({ id: rec.id || ("c" + chests.length), x: rec.x, z: rec.z, y: rec.y, slots, mesh: buildChestMesh(rec.x, rec.z, rec.y) });
     }
     _chestRoot = arenaRoot();
   }
   function teardownChests() {
-    // close FIRST: closeChest persists — persisting after the clear below
-    // would stamp an empty w.chests over the ledger (data loss).
-    if (openChestRef) closeChest();
     for (const c of chests) { if (c.mesh && c.mesh.parent) c.mesh.parent.remove(c.mesh); c.mesh = null; }
     chests.length = 0;
     g._cityChestsHydrated = false;
@@ -910,9 +727,8 @@
       return false;
     }
     const cy = restY(x, z, P.pos.y);
-    const c = { id: "c" + Date.now().toString(36) + ((Math.random() * 1e4) | 0), x, z, y: cy, slots: new Array(CHEST_N).fill(null), mesh: buildChestMesh(x, z, cy) };
+    const c = { id: "c" + Date.now().toString(36) + ((Math.random() * 1e4) | 0), x, z, y: cy, slots: [], mesh: buildChestMesh(x, z, cy) };
     chests.push(c);
-    note("Chest placed, walk up and press [E] to open it.", 2.4);
     persistChests(); commit();
     return true;
   }
@@ -923,385 +739,119 @@
     chests.splice(at, 1);
     registerChestItem();
     if (econ()) econ().add("Chest", 1);
-    note("Chest packed up.", 1.6);
     persistChests(); commit();
     return true;
   }
 
   // ============================================================
-  //  CSS (self-mounted once) — matches the charpanel / hud.mc look
+  //  WHAT IS IN A CHEST, AND THE HANDS THAT MOVE IT. A chest is a box in the
+  //  world with things in it. There is no screen: standing at it you put in
+  //  the gun in your hands or what you are carrying, and you take things out
+  //  by name (E the last thing in, hold E all of it, Q each thing).
   // ============================================================
-  function ensureCss() {
-    if (CBZ.itemIconCss) { try { CBZ.itemIconCss(); } catch (e) {} }   // shared item-icon sizing
-    if (typeof document === "undefined" || !document.head || document.getElementById("ci2Css")) return;
-    const st = document.createElement("style");
-    st.id = "ci2Css";
-    st.textContent =
-      // slot grid cells (Minecraft bevel, matching #cityHud.mc's .cSlot skin)
-      ".ci2Grid{display:grid;grid-template-columns:repeat(9,46px);gap:4px;justify-content:start}" +
-      ".ci2Slot{position:relative;width:46px;height:46px;box-sizing:border-box;border-radius:4px;background:rgba(10,12,16,.66);" +
-      "border:2px solid #0a0c10;box-shadow:inset 2px 2px 0 rgba(0,0,0,.5),inset -2px -2px 0 rgba(255,255,255,.10);" +
-      "display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none}" +
-      ".ci2Slot:hover{box-shadow:inset 0 0 0 2px rgba(125,231,255,.55),inset 2px 2px 0 rgba(0,0,0,.35)}" +
-      ".ci2Slot .ic{font-size:22px;line-height:1;pointer-events:none;filter:drop-shadow(0 1px 1px rgba(0,0,0,.6))}" +
-      ".ci2Slot .gunThumb{display:block;width:42px;height:30px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
-      ".ci2Slot .ct{position:absolute;right:2px;bottom:1px;font-size:11px;font-weight:800;color:#fff;pointer-events:none;text-shadow:1px 1px 0 #000,0 0 3px #000}" +
-      ".ci2Slot .eq{position:absolute;left:2px;top:1px;font-size:9px;font-weight:800;color:#7de7ff;pointer-events:none;text-shadow:0 1px 2px #000}" +
-      ".ci2Slot.equipped{box-shadow:0 0 0 2px rgba(125,231,255,.8),inset 2px 2px 0 rgba(0,0,0,.35)}" +
-      ".ci2Foot{grid-column:1/-1;display:flex;gap:6px;margin-top:4px}" +
-      ".ci2Btn{font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.3px;color:#9fb0c6;background:rgba(255,255,255,.04);" +
-      "border:1px solid rgba(232,236,242,.12);border-radius:8px;padding:6px 10px;cursor:pointer}" +
-      ".ci2Btn:hover{border-color:rgba(125,231,255,.5);color:#e8ecf2}" +
-      ".ci2Hint{grid-column:1/-1;font-size:10px;color:#7f8ba0;margin-top:2px}" +
-      // cursor ghost
-      "#ci2Cursor{position:fixed;z-index:250;pointer-events:none;display:none;transform:translate(-50%,-50%);font-size:24px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.7))}" +
-      "#ci2Cursor .gunThumb{width:64px;height:40px;object-fit:contain}" +
-      "#ci2Cursor .ct{font-size:12px;font-weight:800;color:#fff;text-shadow:1px 1px 0 #000;vertical-align:bottom}" +
-      // chest panel
-      "#ci2Chest{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:130;display:none;flex-direction:column;gap:10px;" +
-      "background:rgba(10,13,20,.94);border:1px solid rgba(232,236,242,.14);border-radius:16px;padding:16px 18px;" +
-      "font-family:Fredoka,system-ui,sans-serif;color:#e8ecf2;box-shadow:0 18px 60px rgba(0,0,0,.6)}" +
-      "#ci2Chest .ttl{font-size:13px;font-weight:800;letter-spacing:1px;color:#9fb0c6;text-transform:uppercase}";
-    document.head.appendChild(st);
+  function chestList(c) { return c.slots.filter(Boolean); }
+  function entryText(e) { return e.kind === "item" && e.count > 1 ? e.count + " " + e.name : e.name; }
+  // what the card says is inside, without opening anything
+  function chestRead(c) {
+    const l = chestList(c);
+    if (!l.length) return "empty";
+    const head = l.slice(-3).reverse().map(entryText).join(", ");
+    return l.length > 3 ? head + " and " + (l.length - 3) + " more" : head;
+  }
+  function sameEntry(a, b) {
+    if (a.kind !== b.kind) return false;
+    if (a.kind === "item") return a.name === b.name;
+    return a.melee ? (!!b.melee && a.name === b.name) : (!b.melee && a.id === b.id);
+  }
+  function saveChests() { persistChests(); commit(); }
+  // entry leaves you and goes in the box
+  function chestPut(c, entry) {
+    if (!c || !entry) return false;
+    let l = chestList(c);
+    const stack = entry.kind === "item" ? l.find((s) => sameEntry(s, entry)) : null;
+    if (!stack && l.length >= CHEST_N) { note("It's full.", 1.4); return false; }
+    if (!truthRemove(entry, entry.kind === "item" ? entry.count : 1)) return false;
+    if (stack) stack.count += entry.count;
+    else l.push(cloneEntry(entry));
+    c.slots = l;
+    sfx("pickup");
+    saveChests();
+    return true;
+  }
+  // entry i comes out of the box and is yours
+  function chestTake(c, i) {
+    const l = chestList(c), e = l[i];
+    if (!e) return false;
+    if (!truthAdd(e, e.kind === "item" ? e.count : 1)) return false;
+    l.splice(i, 1);
+    c.slots = l;
+    sfx("pickup");
+    saveChests();
+    return true;
+  }
+  function chestTakeAll(c) {
+    let any = false;
+    for (let i = chestList(c).length - 1; i >= 0; i--) if (chestTake(c, i)) any = true;
+    return any;
+  }
+  // the gun you have out
+  function heldGun() {
+    const id = CBZ.currentWeaponId;
+    if (!id || !(CBZ.cityHasGun && CBZ.cityHasGun())) return null;
+    if ((CBZ.weaponInventory || []).indexOf(id) < 0) return null;
+    return { kind: "weapon", id: id, name: gunName(id) };
+  }
+  // what you are carrying that a box is for: product, valuables, materials
+  const LOOT_TAG = { drug: 1, valuable: 1, resource: 1 };
+  function lootOnYou() {
+    const inv = g.cityInv || {}, IT = items(), out = [];
+    for (const name in inv) {
+      const n = inv[name] | 0, it = IT[name];
+      if (n > 0 && it && LOOT_TAG[it.tag]) out.push({ kind: "item", name: name, count: n });
+    }
+    return out;
+  }
+  function putLoot(c) {
+    let any = false;
+    for (const e of lootOnYou()) if (chestPut(c, e)) any = true;
+    return any;
   }
 
-  // ============================================================
-  //  RENDER — player grid (into charpanel's .cpGrid) + chest grids
-  // ============================================================
-  let attachedGridEl = null;         // charpanel's .cpGrid, once attached
-  let cursorEl = null;
-  let chestPanel = null, chestGridEl = null, chestPlayerGridEl = null;
 
-  function attr(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/'/g, "&#39;").replace(/</g, "&lt;"); }
-  function cellHtml(e, gridKey, i) {
-    let inner = "";
-    if (e) {
-      const equipped = isGun(e) ? (CBZ.currentWeaponId === e.id && !g.cityHolstered) : (isMelee(e) && g.cityMeleeWeapon === e.name);
-      inner = (isGun(e) ? weaponFace(e.id, e.name) : itemFace(e.name)) +
-        (e.kind === "item" && e.count > 1 ? "<span class='ct'>" + e.count + "</span>" : "") +
-        (equipped ? "<span class='eq'>EQ</span>" : "");
-      // the tooltip says what it IS and what it is FOR — a pelt names its fence
-      // price, a steak names its fill. "You can't even hold it" was half an icon
-      // problem and half nobody ever telling you what the thing was worth.
-      let tip = e.kind === "weapon"
-        ? String(e.name) + "\nweapon  ·  right-click to equip"
-        : itemTitle(e.name, e.count);
-      const v = e.kind === "item" && CBZ.itemVerb ? CBZ.itemVerb(e.name, items()[e.name]) : null;
-      if (v && v.id !== "sell") tip += "\nshift + right-click: " + v.label;
-      return "<div class='ci2Slot" + (equipped ? " equipped" : "") + "' data-g='" + gridKey + "' data-i='" + i +
-        "' title='" + attr(tip) + "'>" + inner + "</div>";
-    }
-    return "<div class='ci2Slot' data-g='" + gridKey + "' data-i='" + i + "'></div>";
-  }
-  function renderGridInto(el, grid, gridKey, withFooter) {
-    if (!el) return;
-    ensureCss();
-    el.classList.add("ci2Grid");
-    // inline layout so a host panel's own id-scoped grid rules (charpanel's
-    // "#cpInv .cpGrid" auto-fill) can't out-specificity the 9-wide slot grid
-    el.style.display = "grid";
-    el.style.gridTemplateColumns = "repeat(9,46px)";
-    el.style.gap = "4px";
-    el.style.justifyContent = "start";
-    let html = "";
-    for (let i = 0; i < grid.length; i++) html += cellHtml(grid[i], gridKey, i);
-    if (withFooter) {
-      html += "<div class='ci2Hint'>Click: move stack · Right-click: half / place one · Weapons: right-click equips · " +
-        "<b style='color:#9fd8a0'>Shift + right-click: eat / use</b> · Shift-click: quick-move · Click backdrop with an item held: drop it</div>";
-    }
-    el.innerHTML = html;
-  }
-  function renderAllGrids() {
-    if (attachedGridEl) renderGridInto(attachedGridEl, MAIN, "p", true);
-    if (openChestRef && chestPanel && chestPanel.style.display !== "none") {
-      renderGridInto(chestGridEl, openChestRef.slots, "c", false);
-      renderGridInto(chestPlayerGridEl, MAIN, "p", false);
-    }
-    renderCursor();
-  }
-  function renderCursor() {
-    if (!cursorEl) {
-      if (typeof document === "undefined" || !document.body) return;
-      ensureCss();
-      cursorEl = document.createElement("div");
-      cursorEl.id = "ci2Cursor";
-      document.body.appendChild(cursorEl);
-      addEventListener("mousemove", function (e) {
-        ptr.x = e.clientX; ptr.y = e.clientY;
-        if (cursor && cursorEl) { cursorEl.style.left = ptr.x + "px"; cursorEl.style.top = ptr.y + "px"; }
-      });
-    }
-    if (cursor) {
-      cursorEl.style.display = "block";
-      cursorEl.innerHTML = (isGun(cursor) ? weaponFace(cursor.id, cursor.name) : itemFace(cursor.name, "lg")) +
-        (cursor.kind === "item" && cursor.count > 1 ? "<span class='ct'>" + cursor.count + "</span>" : "");
-      cursorEl.style.left = ptr.x + "px"; cursorEl.style.top = ptr.y + "px";
-    } else cursorEl.style.display = "none";
-  }
-
-  // ============================================================
-  //  SLOT INTERACTION (shared by the [I] grid and the chest panel)
-  // ============================================================
-  function gridByKey(k) { return k === "c" ? (openChestRef && openChestRef.slots) : MAIN; }
-
-  function equipEntry(e) {
-    if (isGun(e)) { g.cityMeleeWeapon = null; g.cityHolstered = false; if (CBZ.setCurrentWeapon) CBZ.setCurrentWeapon(e.id); note("Equipped " + e.name, 1.2); }
-    else if (isMelee(e)) { if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(e.name); }
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-  }
-
-  // returns true if the op happened (truth transfers may refuse)
-  function slotClick(gridKey, i, right, shift) {
-    const grid = gridByKey(gridKey); if (!grid) return;
-    const s = grid[i];
-
-    // SHIFT + RIGHT-CLICK: USE the thing. The hotbar is still the primary way
-    // to use things (a number key, a tap on touch: systems/inventory.js), but a
-    // bag you can only rearrange is the "you can't even hold it" complaint, so
-    // the grid gets the verb too. Deliberately NOT plain right-click: that is
-    // the Minecraft stack split and it has to stay. Chest grids are excluded —
-    // nothing in a box is in your hands.
-    if (shift && right && s && s.kind === "item" && gridKey === "p" && CBZ.cityUseItem) {
-      const before = econ() ? econ().count(s.name) : 0;
-      CBZ.cityUseItem(s.name);
-      if (!econ() || econ().count(s.name) !== before) resync();
-      renderAllGrids();
-      return;
-    }
-
-    // SHIFT-CLICK: quick-move a whole stack to the other container (chest open)
-    if (shift && s && openChestRef) {
-      const toKey = gridKey === "p" ? "c" : "p";
-      const to = gridByKey(toKey);
-      // merge into an existing partial stack first (items only), then free slot
-      if (s.kind === "item") {
-        const cap = stackCap(s.name);
-        for (let j = 0; j < to.length && s.count > 0; j++) {
-          const t = to[j];
-          if (t && t.kind === "item" && t.name === s.name && t.count < cap) {
-            const d = Math.min(cap - t.count, s.count);
-            if (!crossTransfer({ kind: "item", name: s.name, count: d }, d, toKey)) return;
-            t.count += d; s.count -= d;
-          }
-        }
-        if (s.count > 0) {
-          const f = firstFree(to);
-          if (f >= 0) {
-            if (!crossTransfer({ kind: "item", name: s.name, count: s.count }, s.count, toKey)) { renderAllGrids(); return; }
-            to[f] = { kind: "item", name: s.name, count: s.count }; s.count = 0;
-          }
-        }
-        if (s.count <= 0) grid[i] = null;
-      } else {
-        const f = firstFree(to);
-        if (f >= 0 && crossTransfer(s, 1, toKey)) { to[f] = s; grid[i] = null; }
-      }
-      persistSlots(); persistChests();
-      renderAllGrids();
-      return;
-    }
-
-    // RIGHT-CLICK, empty cursor: weapons equip; stacks split in half
-    if (right && !cursor) {
-      if (!s) return;
-      if (s.kind === "weapon") { if (gridKey === "p") equipEntry(s); renderAllGrids(); return; }
-      // a melee/gun carried as a COUNTED item (craft/shop paths park Bat/
-      // Hatchet in cityInv) equips through the existing city bridge instead
-      // of splitting — right-click means "use/equip" for weapons everywhere.
-      const cat = items()[s.name];
-      if (gridKey === "p" && cat && (cat.melee || cat.gun)) {
-        // a GUN item converts into the engine loadout (consume one so it isn't
-        // represented twice); a melee item equips in place (craft convention:
-        // the tool stays a counted item while g.cityMeleeWeapon points at it).
-        if (cat.gun && !cat.melee) {
-          const E = econ();
-          if (E && E.take(s.name, 1) && CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(s.name);
-          resync();
-        } else if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(s.name);
-        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-        renderAllGrids();
-        return;
-      }
-      const half = Math.ceil(s.count / 2);
-      cursor = { kind: "item", name: s.name, count: half }; cursorSrc = gridKey;
-      s.count -= half;
-      if (s.count <= 0) grid[i] = null;
-      renderAllGrids();
-      return;
-    }
-    // RIGHT-CLICK with a cursor: place exactly one
-    if (right && cursor) {
-      if (cursor.kind !== "item") return;             // guns don't deal out
-      if (!s) {
-        if (cursorSrc !== gridKey && !crossTransfer({ kind: "item", name: cursor.name, count: 1 }, 1, gridKey)) return;
-        grid[i] = { kind: "item", name: cursor.name, count: 1 };
-      } else if (s.kind === "item" && s.name === cursor.name && s.count < stackCap(s.name)) {
-        if (cursorSrc !== gridKey && !crossTransfer({ kind: "item", name: cursor.name, count: 1 }, 1, gridKey)) return;
-        s.count += 1;
-      } else return;
-      cursor.count -= 1;                 // the remainder is still from cursorSrc
-      if (cursor.count <= 0) cursor = null;
-      persistSlots(); persistChests();
-      renderAllGrids();
-      return;
-    }
-
-    // LEFT-CLICK
-    if (!cursor) {
-      if (!s) return;
-      cursor = s; cursorSrc = gridKey; grid[i] = null;
-      renderAllGrids();
-      return;
-    }
-    // place / merge / swap (crossing containers moves truth)
-    const crossing = cursorSrc !== gridKey;
-    if (!s) {
-      if (crossing && !crossTransfer(cursor, cursor.kind === "item" ? cursor.count : 1, gridKey)) { renderAllGrids(); return; }
-      grid[i] = cursor; cursor = null;
-    } else if (s.kind === "item" && cursor.kind === "item" && s.name === cursor.name) {
-      const cap = stackCap(s.name);
-      const d = Math.min(cap - s.count, cursor.count);
-      if (d > 0) {
-        if (crossing && !crossTransfer({ kind: "item", name: s.name, count: d }, d, gridKey)) { renderAllGrids(); return; }
-        s.count += d; cursor.count -= d;
-      }
-      if (cursor.count <= 0) cursor = null;
-    } else {
-      // swap: both entries cross when the containers differ
-      if (crossing) {
-        const backKey = cursorSrc;
-        if (!crossTransfer(cursor, cursor.kind === "item" ? cursor.count : 1, gridKey)) { renderAllGrids(); return; }
-        if (!crossTransfer(s, s.kind === "item" ? s.count : 1, backKey)) {
-          // roll the first transfer back
-          crossTransfer(cursor, cursor.kind === "item" ? cursor.count : 1, backKey);
-          renderAllGrids(); return;
-        }
-      }
-      // NOTE: cursorSrc stays as-is — when the containers differ, the swapped-
-      // out entry's truth just moved to the OLD cursorSrc side, so that is the
-      // new cursor's truth home too (placing it back re-crosses correctly).
-      const t = s; grid[i] = cursor; cursor = t;
-    }
-    persistSlots(); persistChests();
-    renderAllGrids();
-  }
-
-  function onGridMouseDown(e) {
-    const cell = e.target.closest && e.target.closest(".ci2Slot");
-    if (cell) {
-      e.preventDefault(); e.stopPropagation();
-      slotClick(cell.dataset.g, +cell.dataset.i, e.button === 2, e.shiftKey);
-      return;
-    }
-    const btn = e.target.closest && e.target.closest(".ci2Btn");
-    if (btn) {
-      e.preventDefault(); e.stopPropagation();
-      renderAllGrids();
-    }
-  }
-  function bindGridEl(el) {
-    if (!el || el._ci2Bound) return;
-    el._ci2Bound = true;
-    el.addEventListener("mousedown", onGridMouseDown);
-    el.addEventListener("contextmenu", function (e) { e.preventDefault(); });
-  }
-
-  // return whatever is on the cursor to its home container (panel closing)
-  function stashCursor() {
-    if (!cursor) return;
-    const fromChest = cursorSrc === "c";
-    const home = fromChest && openChestRef ? openChestRef.slots : MAIN;
-    // merge back into a partial stack, else first free.
-    if (cursor.kind === "item") {
-      const cap = stackCap(cursor.name);
-      for (let i = 0; i < home.length && cursor.count > 0; i++) {
-        const s = home[i];
-        if (s && s.kind === "item" && s.name === cursor.name && s.count < cap) { const d = Math.min(cap - s.count, cursor.count); s.count += d; cursor.count -= d; }
-      }
-      if (cursor.count > 0) { const f = firstFree(home); if (f >= 0) { home[f] = cursor; cursor = null; } }
-      if (cursor && cursor.count <= 0) cursor = null;
-    } else {
-      const f = firstFree(home);
-      if (f >= 0) { home[f] = cursor; cursor = null; }
-    }
-    // homeless leftovers: a "p"-origin entry is still in truth (resync will
-    // re-materialize it), but a chest-origin entry's ONLY record is the cursor
-    // — hand it to the player's truth so it can never silently vanish.
-    if (cursor && fromChest) truthAdd(cursor, cursor.kind === "item" ? cursor.count : 1);
-    cursor = null;
-    resync();
-  }
-
-  // ============================================================
-  //  CHEST PANEL — its own overlay (charpanel edits stay minimal)
-  // ============================================================
-  function buildChestPanel() {
-    if (chestPanel || typeof document === "undefined" || !document.body) return;
-    ensureCss();
-    chestPanel = document.createElement("div");
-    chestPanel.id = "ci2Chest";
-    chestPanel.innerHTML =
-      "<div class='ttl'>Chest</div><div class='ci2Grid' data-grid='c'></div>" +
-      "<div class='ttl'>Inventory</div><div class='ci2Grid' data-grid='p'></div>" +
-      "<div class='ci2Hint'>Shift-click: quick-move · [E]/[Esc] close · empty chest: [Pick up] below</div>" +
-      "<div style='display:flex;gap:6px'><button type='button' class='ci2Btn' data-act='pickup'>Pick up chest</button>" +
-      "<button type='button' class='ci2Btn' data-act='close'>Close</button></div>";
-    document.body.appendChild(chestPanel);
-    chestGridEl = chestPanel.querySelector("[data-grid='c']");
-    chestPlayerGridEl = chestPanel.querySelector("[data-grid='p']");
-    bindGridEl(chestPanel);
-    chestPanel.addEventListener("mousedown", function (e) {
-      const btn = e.target.closest && e.target.closest(".ci2Btn");
-      if (!btn) return;
-      if (btn.dataset.act === "close") { e.preventDefault(); closeChest(); }
-      else if (btn.dataset.act === "pickup") {
-        e.preventDefault();
-        const c = openChestRef;
-        if (c && chestEmpty(c)) { closeChest(); pickupEmptyChest(c); }
-        else note("Empty it first.", 1.4);
-      }
-    });
-  }
-  function openChest(c) {
-    if (!on() || !c || openChestRef) return;
-    if (CBZ.cityMenuOpen || CBZ.invOpen) return;          // another overlay owns the screen
-    buildChestPanel(); if (!chestPanel) return;
-    openChestRef = c;
-    CBZ.cityMenuOpen = true;
-    resync();
-    renderAllGrids();
-    chestPanel.style.display = "flex";
-    if (!CBZ.touchMode && document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-  }
-  function closeChest() {
-    if (!openChestRef) return;
-    stashCursor();
-    openChestRef = null;
-    if (chestPanel) chestPanel.style.display = "none";
-    CBZ.cityMenuOpen = false;
-    persistSlots(); persistChests(); commit();
-    if (!CBZ.touchMode && playing() && CBZ.requestLock) CBZ.requestLock();
-  }
-
-  // THE CHEST IS A CANDIDATE (city/interactions.js registerFixtures): E opens
-  // the one you face, a tap on it opens it. The chest panel is modal: E or Esc
-  // closes it. No proximity chip and no private E listener.
-  function onChestKey(e) {
-    if (!openChestRef) return;
-    const k = (e.key || "").toLowerCase();
-    if (k === "e" || k === "escape") { e.preventDefault(); e.stopPropagation(); closeChest(); }
-  }
-  if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onChestKey);
   let chestWired = false;
   function wireChests() {
     if (chestWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
     chestWired = true;
+    if (CBZ.interactions.describe) CBZ.interactions.describe("chest", function (c) { return { label: "Chest", note: chestRead(c) }; });
     CBZ.interactions.registerFixtures({
       id: "chest", kind: "chest", prio: 8,
-      list: function () { return on() && cityNow() && !openChestRef && !CBZ.invOpen ? chests : null; },
+      list: function () { return on() && cityNow() ? chests : null; },
       reach: function () { return REACH; },
       dot: function () { return 0.55; },
-      verbs: [{ id: "chest-open", slot: "e", prio: 5, label: "Open", onSelect: openChest }],
+      verbs: (function () {
+        const V = [
+          { id: "chest-put-gun", slot: "e", prio: 6, canShow: function () { return !!heldGun(); },
+            label: function () { const h = heldGun(); return "Put in the " + (h ? h.name : "gun"); },
+            onSelect: function (c) { const h = heldGun(); if (h) chestPut(c, h); } },
+          { id: "chest-take-last", slot: "e", prio: 5, canShow: function (c) { return !heldGun() && chestList(c).length > 0; },
+            label: function (c) { const l = chestList(c); return "Take the " + entryText(l[l.length - 1]); },
+            onSelect: function (c) { chestTake(c, chestList(c).length - 1); } },
+          { id: "chest-take-all", slot: "e", hold: true, prio: 5, canShow: function (c) { return chestList(c).length > 0; },
+            label: "Take everything", onSelect: function (c) { chestTakeAll(c); } },
+          { id: "chest-put-loot", prio: 4, canShow: function () { return lootOnYou().length > 0; },
+            label: "Put in what you're carrying", onSelect: function (c) { putLoot(c); } },
+          { id: "chest-pack", wheel: true, prio: 1, canShow: function (c) { return chestEmpty(c); },
+            label: "Pick up the chest", onSelect: function (c) { pickupEmptyChest(c); } },
+        ];
+        // each thing in it, by name, round the wheel
+        for (let n = 0; n < 8; n++) {
+          V.push({ id: "chest-take-" + n, wheel: true, prio: 3,
+            canShow: function (c) { const l = chestList(c); return !!l[n] && (n !== l.length - 1 || !!heldGun()); },   // (the last one in is E)
+            label: function (c) { const e = chestList(c)[n]; return e ? "Take the " + entryText(e) : ""; },
+            onSelect: function (c) { chestTake(c, n); } });
+        }
+        return V;
+      })(),
     });
     CBZ.interactions.registerFixtures({
       id: "ground-item", kind: "ground-item", prio: 7,
@@ -1320,10 +870,7 @@
   //  PER-FRAME — chest prompts, item drops, arena-change hygiene
   // ============================================================
   CBZ.onUpdate(37.4, function (dt) {
-    if (!on() || !cityNow()) {
-      if (openChestRef) closeChest();
-      return;
-    }
+    if (!on() || !cityNow()) return;
     registerChestItem();
     // arena swapped underneath us → rebuild chest meshes + drop the loose drops
     const root = arenaRoot();
@@ -1345,12 +892,9 @@
 
   // fresh run / mode switch: same lazy reset-chain hook storage.js uses
   function teardownAll() {
-    g._cityInvHydrated = false;
     teardownChests();
     clearItemDrops();
     _chestRoot = null;
-    cursor = null;
-    if (openChestRef) closeChest();
   }
   function bindResetChain() {
     if (CBZ.cityVehiclesReset && !CBZ.cityVehiclesReset._inv2Wrapped) {
@@ -1381,35 +925,11 @@
   // the one census.)
 
   // ============================================================
-  //  PUBLIC SURFACE — charpanel.js hosts the [I] grid through this
+  //  PUBLIC SURFACE
   // ============================================================
   CBZ.cityInventory = {
     enabled: on,
-    slots() { return MAIN; },
-    resync,
-    attach(gridEl) { if (!on() || !gridEl) return; attachedGridEl = gridEl; bindGridEl(gridEl); },
-    renderPlayerGrid(gridEl) {
-      if (!on()) return false;
-      if (gridEl && gridEl !== attachedGridEl) { attachedGridEl = gridEl; bindGridEl(gridEl); }
-      resync();
-      renderGridInto(attachedGridEl, MAIN, "p", true);
-      renderCursor();
-      return true;
-    },
-    onOpen() { if (!on()) return; resync(); },
-    onClose() { if (!on()) return; stashCursor(); persistSlots(); commit(); if (cursorEl) cursorEl.style.display = "none"; },
-    hasCursor() { return !!cursor; },
-    dropCursorToGround() {
-      if (!cursor) return false;
-      // the cursor stack leaves the player's possession for real
-      const e = cursor; cursor = null;
-      if (cursorSrc === "p") truthRemove(e, e.kind === "item" ? e.count : 1);
-      dropEntryToGround(e);
-      resync(); persistSlots(); persistChests();
-      renderAllGrids();
-      return true;
-    },
-    placeChest, chestNear, openChest, closeChest,
+    placeChest, chestNear, chestPut, chestTake, chestTakeAll, chestRead,
     chests() { return chests; },
   };
 

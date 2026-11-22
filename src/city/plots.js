@@ -29,11 +29,20 @@
         on a house, take the lockbox key and look round first, city/
         realestate.js), and when it sells it says SOLD and then it is gone.
         (It used to open a listing card with the same two buttons on it.)
-     3. THE PANEL. E at your own lot's address post: what you own, what it is
-        worth, KNOCK IT DOWN (a contractor's controlled demolition: the real
-        collapse, pancaked into its own footprint, then the rubble is carted
-        off and the lot stays a bare poured pad for as long as you own it),
-        sell it, and whatever the builder and the crew add to it.
+     3. THE ADDRESS POST. Every lot you own has one at its gate, and what you
+        do with the lot you do there, with your hands: look it over (a line,
+        what it is worth and what the bank is owed on it), STAND ITS FOR SALE
+        SIGN BACK UP (the sign goes up at the kerb with your price on it, and
+        when a buyer takes it the sign says SOLD and the money is yours; take
+        the sign down again and it is not for sale), KNOCK IT DOWN (a
+        contractor's controlled demolition: the real collapse, pancaked into
+        its own footprint, then the rubble is carted off and the lot stays a
+        bare poured pad for as long as you own it), and whatever the builder
+        and the crew add to it (their works and their hires are on the post's
+        wheel). The estate agent sells a lot for you too, and he and the
+        bank's counter take a mortgage payment (city/realestate.js).
+        (This was a panel: Value, Status, Demolish, Mortgage, Compound, Crew
+        and Sell as rows of buttons. It is deleted.)
      4. THE LOCK. The doors of a building you own swing for you and your
         people, nobody else (buildings.js reads dr._ownerLock).
      5. THE MAP. Owned lots are painted in your colour (systems/fullmap.js
@@ -58,7 +67,6 @@
   function inCity() { return g && g.mode === "city"; }
   function playing() { return inCity() && g.state === "playing"; }
   function Z() { return CBZ.cityZillow || null; }
-  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function canAfford(amt) { return ((g.cash || 0) + (g.cityBank || 0)) >= amt; }
   function charge(amt) {
     amt = Math.max(0, Math.round(+amt) || 0);
@@ -203,6 +211,7 @@
       for (const p of pcs) { try { if (p && p.alive) CBZ.building.remove(p.id); } catch (e) {} }
     }
     if (lot.demolished && CBZ.cityDemolition && CBZ.cityDemolition.hold) CBZ.cityDemolition.hold(lot, false);
+    if (plot.data) delete plot.data.sale;              // its sign came down with the deed
     plot._rec.cleared = false; plot.cleared = false;
     persist();
   }
@@ -290,13 +299,17 @@
     byId: function (id) { return plots.get(id) || null; },
     canBuild: canBuild,
     onChange: function (fn) { if (typeof fn === "function") listeners.push(fn); },
+    // what a system adds to a lot you own (fn(plot) -> { title, rows: [{ text,
+    // sub, buttons: [{ label, onClick, disabled }] }] }): each button is a verb
+    // on the lot's address post. (The name is from when they were a panel's rows.)
     addPanelSection: function (fn) { if (typeof fn === "function" && sections.indexOf(fn) < 0) sections.push(fn); },
     save: function () { persist(); },
-    open: function (plot) { openPanel(plot || plotAt(CBZ.player.pos.x, CBZ.player.pos.z, 2)); },
     markSold: markSold, isSold: isSold,
+    // a lot of yours with its sign up; put it up / take it down
+    listed: function (lot) { return !!mySale(lot); },
+    putUpForSale: function (plot) { return listForSale(plot); }, takeDown: function (plot) { return unlist(plot); },
     // the signs standing near you right now (a read)
     signs: function () { const out = []; for (const sg of signs) if (sg.lot && sg.group.visible) out.push({ x: sg.x, z: sg.z, lot: sg.lot, text: sg.text }); return out; },
-    close: function () { closePanel(); },
     demolish: function (plot) { return orderDemolition(plot); },
     demolitionQuote: function (plot) { return demoQuote(plot); },
     rename: function (plot, name) { if (plot && name) { plot.name = String(name).slice(0, 40); persist(); } },
@@ -340,7 +353,6 @@
     if (!q.ok) { note(q.reason, 2.2); sfx("empty"); return false; }
     if (pendingDemo) { note("The crew is already on a job.", 1.8); return false; }
     if (!charge(q.cost)) { note("Need " + money(q.cost) + " for the demolition crew.", 2.2); sfx("empty"); return false; }
-    closePanel();
     pendingDemo = { plot: plot, count: -1, waitNote: 0 };
     if (CBZ.cityDemolition && CBZ.cityDemolition.hold) CBZ.cityDemolition.hold(plot.lot, true);
     note("Demolition paid. The crew is setting charges, get clear of the building.", 3.2);
@@ -575,8 +587,55 @@
   }
   function saleEligible(lot) {
     const z = Z(); if (!z || !z.canBuyLot) return false;
+    if (mySale(lot)) return true;                      // yours, with its sign stood back up
     if (lot.demolished || !lot.building || lot.building.park) return false;
     return z.canBuyLot(lot) || seizable(lot);
+  }
+  /* ---- SELLING IT: THE SIGN GOES BACK UP ----------------------------------------
+     A lot you own is put on the market the way every lot in this city is: a
+     FOR SALE sign at its kerb, with the price on it (what the market pays
+     you today). It stands a while; then a buyer takes it, the sign says SOLD
+     and the money is in your account. Take the sign down first and nothing
+     is sold. The listing rides the plot's own saved record. */
+  const SALE_SECS = 40;
+  function mySale(lot) {
+    if (!lot) return null;
+    const pl = plots.get("plot:" + lotKey(lot));
+    return pl && pl.data && pl.data.sale ? pl : null;
+  }
+  function listForSale(plot) {
+    if (!plot || !plots.has(plot.id) || plot.data.sale) return false;
+    soldT.delete(plot.lot);                            // (the SOLD board from when you bought it comes off)
+    plot.data.sale = { left: SALE_SECS };
+    sfx("pickup"); note("The sign is up. " + plot.name + " is for sale.", 2.6);
+    lastSX = 1e9; persist();
+    return true;
+  }
+  function unlist(plot) {
+    if (!plot || !plot.data || !plot.data.sale) return false;
+    plot.data.sale = null; delete plot.data.sale;
+    sfx("pickup"); note("The sign is down. " + plot.name + " is not for sale.", 2.4);
+    lastSX = 1e9; persist();
+    return true;
+  }
+  function tickSales(dt) {
+    for (const plot of plots.values()) {
+      const sl = plot.data && plot.data.sale;
+      if (!sl) continue;
+      sl.left = (+sl.left || 0) - dt;
+      if (sl.left > 0) continue;
+      const z = Z(), lot = plot.lot, price = z && z.sellPriceForLot ? z.sellPriceForLot(lot) : null, name = plot.name;
+      delete plot.data.sale;
+      let ok = false;
+      try { ok = !!(z && z.sellByLot && z.sellByLot(lot)); } catch (e) { ok = false; }
+      if (!ok) { note((z && z.lastMessage && z.lastMessage()) || "Nobody bought " + name + ".", 2.6); lastSX = 1e9; persist(); continue; }
+      markSold(lot);
+      sfx("coin");
+      note(name + " sold" + (price != null ? " for " + money(price) : "") + ".", 3.2);
+      syncPlots(true);
+      refreshSigns(true);
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    }
   }
   // a gang op on YOUR turf (or whose crew trusts you) is taken over, not bought
   function seizable(lot) { const z = Z(); return !!(z && z.canSeizeLot && z.canSeizeLot(lot)); }
@@ -616,11 +675,12 @@
   }
   function priceOf(lot) {
     const z = Z(); if (!z) return null;
+    if (mySale(lot)) return z.sellPriceForLot ? z.sellPriceForLot(lot) : null;   // your sign: what you get
     if (seizable(lot) && z.seizePriceForLot) return z.seizePriceForLot(lot);
     return z.buyPriceForLot ? z.buyPriceForLot(lot) : null;
   }
   function paintSignFor(s, lot) {
-    const gone = isSold(lot);
+    const gone = isSold(lot) && !mySale(lot);
     const p = gone ? null : priceOf(lot);
     const tag = gone ? "SOLD" : "FOR SALE";
     const txt = tag + "|" + (p != null ? money(p) : "");
@@ -651,84 +711,14 @@
   }
 
   /* ============================================================
-     6. THE PANELS — the listing card (at a sign) and your property (at your
-        address post). One overlay element, re-rendered on every action.
+     6. THE DEAL, AT THE SIGN. A house goes through city/realestate.js (the
+        key, the house you wake up in); a shop, a block or a plot is the
+        ledger's own buy; an operation on your turf is taken over. What tells
+        you it closed is the sign: it says SOLD.
      ============================================================ */
-  let panel = null, panelMode = null, panelPlot = null;
-  function injectCss() {
-    if (document.getElementById("plotsCss")) return;
-    const st = document.createElement("style"); st.id = "plotsCss";
-    st.textContent =
-      "#plotPanel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:49;display:none;width:min(440px,94vw);max-height:86vh;overflow:auto;" +
-      "background:linear-gradient(180deg,rgba(22,26,32,.97),rgba(14,17,21,.97));border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:16px 18px 14px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;box-shadow:0 22px 60px rgba(0,0,0,.55);pointer-events:auto}" +
-      "#plotPanel .ph{font-size:20px;font-weight:700;line-height:1.15}" +
-      "#plotPanel .ps{font-size:12.5px;color:#93a1b3;margin-top:3px}" +
-      "#plotPanel .pv{display:flex;gap:10px;margin:12px 0 4px}" +
-      "#plotPanel .pv div{flex:1;background:rgba(255,255,255,.05);border-radius:9px;padding:7px 9px}" +
-      "#plotPanel .pv b{display:block;font-size:16px;color:#fff}" +
-      "#plotPanel .pv span{font-size:11px;color:#8d9aab;text-transform:uppercase;letter-spacing:.06em}" +
-      "#plotPanel .sec{margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}" +
-      "#plotPanel .st{font-size:11px;color:#8d9aab;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}" +
-      "#plotPanel .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0;font-size:13.5px}" +
-      "#plotPanel .row .sub{display:block;font-size:11.5px;color:#8d9aab}" +
-      "#plotPanel .bts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}" +
-      "#plotPanel button{font:600 13px Fredoka,system-ui,sans-serif;border:0;border-radius:8px;padding:7px 11px;cursor:pointer;background:#2c3947;color:#e8f1ff}" +
-      "#plotPanel button.ok{background:#2f7d4a;color:#fff}#plotPanel button.bad{background:#7a2a2a;color:#fff}" +
-      "#plotPanel button[disabled]{opacity:.45;cursor:default}" +
-      "#plotPanel .msg{font-size:12.5px;color:#ffcf7a;margin-top:8px;min-height:1em}" +
-      "#plotPanel .x{position:absolute;right:12px;top:10px;font-size:18px;color:#8d9aab;cursor:pointer;background:none;padding:2px 6px}";
-    document.head.appendChild(st);
-  }
-  function el() {
-    if (panel) return panel;
-    injectCss();
-    panel = document.createElement("div"); panel.id = "plotPanel";
-    panel.addEventListener("click", function (e) {
-      const b = e.target && e.target.closest ? e.target.closest("[data-a]") : null;
-      if (!b || b.disabled) return;
-      e.preventDefault(); e.stopPropagation();
-      const fn = actions[+b.getAttribute("data-a")];
-      if (typeof fn === "function") { try { fn(); } catch (err) { console.warn("[plots] action", err); } }
-    });
-    document.body.appendChild(panel);
-    return panel;
-  }
-  let actions = [], msg = "";
-  function act(fn) { actions.push(fn); return actions.length - 1; }
-  function btn(label, fn, tone, disabled) {
-    return "<button data-a='" + act(fn) + "'" + (tone ? " class='" + tone + "'" : "") + (disabled ? " disabled" : "") + ">" + esc(label) + "</button>";
-  }
-  function openShell() {
-    if (CBZ.cityMenuOpen && !(panel && panel.style.display === "block")) return false;
-    el().style.display = "block";
-    CBZ.cityMenuOpen = true;
-    if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-    return true;
-  }
-  function closePanel() {
-    if (!panel || panel.style.display !== "block") return;
-    panel.style.display = "none";
-    panelMode = null; panelPlot = null; msg = "";
-    CBZ.cityMenuOpen = false;
-    if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
-  }
-  function lotFacts(lot) {
-    const b = lot.building || {};
-    const w = Math.round(lot.w || 0), d = Math.round(lot.d || 0);
-    const bits = [];
-    if (w && d) bits.push(w + " x " + d + " m lot");
-    if (lot.demolished) bits.push("cleared pad");
-    else if (b.storeys) bits.push(b.storeys + (b.storeys === 1 ? " storey" : " storeys"));
-    return bits.join(", ");
-  }
-  /* THE DEAL, AT THE SIGN. A house goes through city/realestate.js (the key,
-     the house you wake up in); a shop, a block or a plot is the ledger's own
-     buy; an operation on your turf is taken over. What tells you it closed is
-     the sign: it says SOLD. */
   function isHouseLot(lot) { const H = CBZ.cityHome; return !!(H && H.isHouse && H.isHouse(lot)); }
   function dealAt(lot, how) {
-    const z = Z(); if (!z || !lot || isSold(lot)) return false;
+    const z = Z(); if (!z || !lot || isSold(lot) || mySale(lot)) return false;
     const had = ownsLot(lot);
     const can = z.canBuyLot ? z.canBuyLot(lot) : false;
     if (!can && seizable(lot)) { if (z.seizeByLot) z.seizeByLot(lot); }
@@ -741,78 +731,12 @@
     refreshSigns(true);
     return got;
   }
-  function openPanel(plot) {
-    if (!plot) return;
-    if (!openShell()) return;
-    panelMode = "own"; panelPlot = plot; msg = "";
-    renderPanel();
-  }
-  function renderPanel() {
-    const plot = panelPlot; if (!plot || !plots.has(plot.id)) return closePanel();
-    actions = [];
-    const z = Z(), lot = plot.lot;
-    const val = z && z.listingForLot ? (listing(lot) || {}).value : null;
-    const sellP = z && z.sellPriceForLot ? z.sellPriceForLot(lot) : null;
-    let h = "<button class='x' data-a='" + act(closePanel) + "'>x</button>";
-    h += "<div class='ph'>" + esc(plot.name) + "</div>";
-    h += "<div class='ps'>" + esc(plot.title && plot.title !== plot.name ? plot.title + ", " : "") + esc(lotFacts(lot)) + "</div>";
-    h += "<div class='pv'><div><span>Value</span><b>" + (val != null ? money(val) : "n/a") + "</b></div>" +
-      "<div><span>Status</span><b style='font-size:13px'>" + (lot.demolished ? (CBZ.cityDemolition && CBZ.cityDemolition.phaseOf && CBZ.cityDemolition.phaseOf(lot) === 1 ? "Rubble, hauling" : "Bare pad, ready to build") : (pendingDemo && pendingDemo.plot === plot ? "Charges set" : "Building standing")) + "</b></div></div>";
-
-    // ---- the land itself -----------------------------------------------
-    h += "<div class='sec'><div class='st'>The lot</div>";
-    if (!lot.demolished) {
-      const q = demoQuote(plot);
-      h += "<div class='row'><span>Knock it down<span class='sub'>" + (q.ok ? "Controlled demolition, rubble hauled off, a poured pad left to build on." : esc(q.reason)) + "</span></span><span class='bts'>" +
-        btn(q.ok ? "Demolish " + money(q.cost) : "Demolish", function () { orderDemolition(plot); }, "bad", !q.ok || !!pendingDemo || (q.ok && !canAfford(q.cost))) + "</span></div>";
-    } else {
-      h += "<div class='row'><span>Build on it<span class='sub'>Press N standing on the lot to place walls, gates and buildings piece by piece.</span></span></div>";
-    }
-    const mort = z && z.mortgageForLot ? z.mortgageForLot(lot) : null;
-    if (mort && mort.balance > 0) {
-      const half = Math.round(mort.balance * 0.5);
-      h += "<div class='row'><span>Mortgage<span class='sub'>" + money(mort.balance) + " still owed to the bank.</span></span><span class='bts'>" +
-        btn("Pay " + money(half), function () { msg = z.payMortgageByLot(lot, 0.5) || ""; renderPanel(); }, null, !canAfford(half)) +
-        btn("Pay off", function () { msg = z.payMortgageByLot(lot, 1) || ""; renderPanel(); }, "ok", !canAfford(mort.balance)) + "</span></div>";
-    }
-    h += "</div>";
-
-    // ---- what the builder and the crew add --------------------------------
-    for (const fn of sections) {
-      let s = null;
-      try { s = fn(plot); } catch (e) { s = null; console.warn("[plots] section", e); }
-      if (!s || !s.rows || !s.rows.length) continue;
-      h += "<div class='sec'>" + (s.title ? "<div class='st'>" + esc(s.title) + "</div>" : "");
-      for (const r of s.rows) {
-        h += "<div class='row'><span>" + esc(r.text || "") + (r.sub ? "<span class='sub'>" + esc(r.sub) + "</span>" : "") + "</span><span class='bts'>";
-        for (const b of (r.buttons || [])) {
-          h += btn(b.label, (function (bb) { return function () { const res = bb.onClick && bb.onClick(); if (typeof res === "string") msg = res; if (panelMode === "own") renderPanel(); }; })(b), b.tone || null, !!b.disabled);
-        }
-        h += "</span></div>";
-      }
-      h += "</div>";
-    }
-
-    // ---- let it go --------------------------------------------------------
-    h += "<div class='sec'><div class='row'><span>Sell<span class='sub'>Whatever you built on it is stripped with the sale.</span></span><span class='bts'>" +
-      btn("Sell " + (sellP != null ? money(sellP) : ""), function () {
-        if (!confirmSell) { confirmSell = plot.id; msg = "Press Sell again to close the sale."; renderPanel(); return; }
-        confirmSell = null;
-        if (z && z.sellByLot) z.sellByLot(lot);
-        syncPlots(true);
-        closePanel(); refreshSigns(true);
-      }, "bad") + "</span></div></div>";
-    h += "<div class='msg'>" + esc(msg) + "</div>";
-    panel.innerHTML = h;
-  }
-  let confirmSell = null;
-  addEventListener("keydown", function (e) {
-    if (!panel || panel.style.display !== "block") return;
-    if ((e.key || "").toLowerCase() === "escape") { e.preventDefault(); e.stopPropagation(); closePanel(); }
-  }, true);
 
   /* ============================================================
-     7. THE VERBS — E at a sale sign, E at your address post.
+     7. THE VERBS. At a sale sign: take the key, buy it, finance it (or, on
+        your own sign, take it down). At your own lot's address post: look it
+        over, stand the sign up, have it knocked down, and every works order
+        and hire the builder and the crew add (CBZ.cityPlots.addPanelSection).
      ============================================================ */
   let verbsWired = false;
   function saleLabel(t) {
@@ -821,6 +745,46 @@
     const take = !(z && z.canBuyLot && z.canBuyLot(lot)) && seizable(lot);
     return (take ? "Take over " : "Buy ") + (p != null ? money(p) : "");
   }
+  function lotFacts(lot) {
+    const b = lot.building || {};
+    if (lot.demolished) return CBZ.cityDemolition && CBZ.cityDemolition.phaseOf && CBZ.cityDemolition.phaseOf(lot) === 1 ? "rubble, being hauled off" : "a bare pad, ready to build on";
+    if (pendingDemo && pendingDemo.plot && pendingDemo.plot.lot === lot) return "charges set";
+    return b.storeys ? b.storeys + (b.storeys === 1 ? " storey" : " storeys") + " standing" : "standing";
+  }
+  // one line, said once: what it is, what it is worth, what the bank is owed
+  function lookOver(plot) {
+    const z = Z(), lot = plot.lot;
+    const val = z && z.listingForLot ? (listing(lot) || {}).value : null;
+    const mort = z && z.mortgageForLot ? z.mortgageForLot(lot) : null;
+    note(plot.name + (plot.title && plot.title !== plot.name ? " (" + plot.title + ")" : "") + ": " + lotFacts(lot) +
+      (val != null ? ", worth " + money(val) : "") + (mort && mort.balance > 0 ? ", " + money(mort.balance) + " owed to the bank" : "") +
+      (plot.data.sale ? ". The sign is up." : "."), 4);
+  }
+  /* WHAT THE BUILDER AND THE CREW ADD TO A LOT, as things to do at its post.
+     Their sections still hand back rows of buttons (the shape a panel took);
+     each button is one verb here. Read at most twice a second: a section may
+     price a whole blueprint to label its button. */
+  const ACT_N = 10;
+  const actCache = new Map();        // plot.id -> { t, list }
+  function lotActions(plot) {
+    if (!plot) return [];
+    const hit = actCache.get(plot.id);
+    if (hit && clock - hit.t < 0.5) return hit.list;
+    const list = [];
+    for (const fn of sections) {
+      let sec = null;
+      try { sec = fn(plot); } catch (e) { sec = null; }
+      if (!sec || !sec.rows) continue;
+      for (const r of sec.rows) for (const b of (r.buttons || [])) {
+        if (!b || !b.label || b.disabled) continue;
+        const pre = /^(Build|Built)/.test(b.label) || b.label.length < 12;
+        list.push({ label: pre && r.text ? r.text + ": " + b.label : b.label, onClick: b.onClick });
+      }
+    }
+    actCache.set(plot.id, { t: clock, list: list });
+    return list;
+  }
+  let sureDemo = null, sureDemoT = 0;
   function wireVerbs() {
     if (verbsWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     verbsWired = true;
@@ -842,21 +806,25 @@
         return t;
       },
       options: [
+        // your own sign: it comes down again
+        { id: "plots-sale-down", slot: "e", prio: 4, campaignSafe: true, label: "Take the sign down",
+          canShow: function (t) { return !!(t && t.lot && mySale(t.lot)); },
+          onSelect: function (t) { unlist(mySale(t.lot)); refreshSigns(true); } },
         // a house: the lockbox on the post. Look round before you buy.
         { id: "plots-sale-key", slot: "e", prio: 3, campaignSafe: true, label: "Take the key",
-          canShow: function (t) { const H = CBZ.cityHome; return !!(t && t.lot && !isSold(t.lot) && isHouseLot(t.lot) && H.hasKey && !H.hasKey(t.lot)); },
+          canShow: function (t) { const H = CBZ.cityHome; return !!(t && t.lot && !mySale(t.lot) && !isSold(t.lot) && isHouseLot(t.lot) && H.hasKey && !H.hasKey(t.lot)); },
           onSelect: function (t) { CBZ.cityHome.view(t.lot); } },
         // a shop, a block, a plot: E buys it. A house is a deliberate hand.
         { id: "plots-sale-buy", slot: "e", prio: 2, campaignSafe: true, label: saleLabel,
-          canShow: function (t) { return !!(t && t.lot && !isSold(t.lot) && !isHouseLot(t.lot)); },
+          canShow: function (t) { return !!(t && t.lot && !mySale(t.lot) && !isSold(t.lot) && !isHouseLot(t.lot)); },
           onSelect: function (t) { dealAt(t.lot, "cash"); } },
         { id: "plots-sale-buy-house", slot: "e", hold: true, prio: 2, campaignSafe: true, label: saleLabel,
-          canShow: function (t) { return !!(t && t.lot && !isSold(t.lot) && isHouseLot(t.lot)); },
+          canShow: function (t) { return !!(t && t.lot && !mySale(t.lot) && !isSold(t.lot) && isHouseLot(t.lot)); },
           onSelect: function (t) { dealAt(t.lot, "cash"); } },
         { id: "plots-sale-finance", wheel: true, prio: 1, campaignSafe: true,
           label: function (t) { const z = Z(), fq = z && z.financeQuoteForLot ? z.financeQuoteForLot(t.lot) : null; return fq ? "Finance " + money(fq.down) + " down" : "Finance"; },
           canShow: function (t) {
-            const z = Z(); if (!t || !t.lot || !z || isSold(t.lot) || !z.financeByLot || !(z.canBuyLot && z.canBuyLot(t.lot))) return false;
+            const z = Z(); if (!t || !t.lot || !z || mySale(t.lot) || isSold(t.lot) || !z.financeByLot || !(z.canBuyLot && z.canBuyLot(t.lot))) return false;
             const fq = z.financeQuoteForLot ? z.financeQuoteForLot(t.lot) : null;
             return !!(fq && fq.approved !== false);
           },
@@ -866,8 +834,44 @@
     if (I.describe) I.describe("sale-sign", function (t) {
       if (!t || !t.lot) return { label: "For sale", note: "" };
       const p = priceOf(t.lot);
+      if (mySale(t.lot)) return { label: nameFor(t.lot), note: "your sign" + (p != null ? ", " + money(p) : "") };
       return { label: nameFor(t.lot), note: isSold(t.lot) ? "sold" : ((addressFor(t.lot) ? addressFor(t.lot) + ", " : "") + (p != null ? money(p) : "")) };
     });
+    // ---- your own lot's address post ----
+    const postOpts = [
+      { id: "plots-own-look", slot: "e", prio: 4, campaignSafe: true, label: "Look it over",
+        canShow: function (t) { return !!(t && t.plot); }, onSelect: function (t) { lookOver(t.plot); } },
+      { id: "plots-own-sell", slot: "e", hold: true, prio: 4, campaignSafe: true,
+        label: function (t) { const z = Z(), p = t && t.plot && z && z.sellPriceForLot ? z.sellPriceForLot(t.plot.lot) : null; return "Put it up for sale" + (p != null ? " " + money(p) : ""); },
+        canShow: function (t) { return !!(t && t.plot && !t.plot.data.sale); },
+        onSelect: function (t) { if (listForSale(t.plot)) refreshSigns(true); } },
+      { id: "plots-own-unsell", slot: "e", hold: true, prio: 4, campaignSafe: true, label: "Take the sign down",
+        canShow: function (t) { return !!(t && t.plot && t.plot.data.sale); },
+        onSelect: function (t) { if (unlist(t.plot)) refreshSigns(true); } },
+      // the contractor: asked for twice, because it cannot be put back
+      { id: "plots-own-demolish", wheel: true, prio: 3, campaignSafe: true, bad: true,
+        label: function (t) { const q = t && t.plot ? demoQuote(t.plot) : null; return (sureDemo === (t && t.plot && t.plot.id) && clock < sureDemoT ? "Yes, knock it down " : "Have it knocked down ") + (q && q.ok ? money(q.cost) : ""); },
+        canShow: function (t) { const q = t && t.plot && !t.plot.lot.demolished && !pendingDemo ? demoQuote(t.plot) : null; return !!(q && q.ok && canAfford(q.cost)); },
+        onSelect: function (t) {
+          const plot = t.plot;
+          if (sureDemo !== plot.id || clock >= sureDemoT) { sureDemo = plot.id; sureDemoT = clock + 8; note("A contractor takes " + plot.name + " down to a bare pad. Ask again and it is ordered.", 3.4); return; }
+          sureDemo = null;
+          orderDemolition(plot);
+        } },
+    ];
+    for (let i = 0; i < ACT_N; i++) {
+      postOpts.push({ id: "plots-own-act-" + i, wheel: true, prio: 2, campaignSafe: true,
+        label: (function (k) { return function (t) { const a = t && t.plot ? lotActions(t.plot)[k] : null; return a ? a.label : ""; }; })(i),
+        canShow: (function (k) { return function (t) { return !!(t && t.plot && lotActions(t.plot)[k]); }; })(i),
+        onSelect: (function (k) {
+          return function (t) {
+            const a = t && t.plot ? lotActions(t.plot)[k] : null; if (!a || typeof a.onClick !== "function") return;
+            let res = null; try { res = a.onClick(); } catch (e) { res = null; console.warn("[plots] action", e); }
+            if (typeof res === "string" && res) note(res, 2.8);
+            actCache.delete(t.plot.id);
+          };
+        })(i) });
+    }
     I.registerZone({
       id: "plots-own", kind: "property", radius: RADIUS,
       find: function (px, pz) {
@@ -881,11 +885,11 @@
         t.x = t.pos.x = best.x; t.z = t.pos.z = best.z; t.plot = plots.get(best.plot.id); t.name = t.plot.name;
         return t;
       },
-      options: [{
-        id: "plots-own-manage", slot: "e", prio: 2, campaignSafe: true,
-        label: "Manage",
-        onSelect: function (t) { if (t && t.plot) openPanel(t.plot); },
-      }],
+      options: postOpts,
+    });
+    if (I.describe) I.describe("property", function (t) {
+      if (!t || !t.plot) return { label: "Your lot", note: "" };
+      return { label: t.plot.name, note: t.plot.data.sale ? "for sale" : "yours" };
     });
   }
 
@@ -894,7 +898,7 @@
      ============================================================ */
   let syncT = 0, lastInside = null, insideNoteT = 0, lastArena = null;
   CBZ.onUpdate(46.2, function (dt) {
-    if (!inCity()) { if (panel && panel.style.display === "block") closePanel(); return; }
+    if (!inCity()) return;
     wrapSaves();
     hydrate();
     const A = arena();
@@ -919,6 +923,7 @@
     wireVerbs();
     tickDemolition(dt);
     tickClearWatch();
+    if (g.state === "playing") tickSales(dt);
     signT -= dt;
     if (signT <= 0) { signT = 1.0; refreshSigns(false); }
     if (_persistT > 0) { _persistT -= dt; if (_persistT <= 0 && CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} } }
@@ -933,17 +938,9 @@
         lastInside = here;
       }
     }
-    if (panel && panel.style.display === "block") {
-      if (g.state !== "playing") return;
-      // re-render the owned panel as the lot changes state underneath it
-      panelT -= dt;
-      if (panelT <= 0 && panelMode === "own") { panelT = 1; if (!document.activeElement || document.activeElement === document.body) renderPanel(); }
-    }
   });
-  let panelT = 0;
 
   CBZ.cityPlotsReset = function () {
-    closePanel();
     pendingDemo = null; watchClear.length = 0;
     for (const plot of plots.values()) lockDoors(plot.lot, false);
     plots.clear(); ownSig = "";
@@ -952,5 +949,6 @@
     for (const s of signs) { s.lot = null; s.group.visible = false; }
     lastSX = lastSZ = 1e9;
     _spHydrated = null;
+    actCache.clear();
   };
 })();

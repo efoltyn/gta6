@@ -681,7 +681,6 @@
   const REACH = 3.2;
   const V = {
     arena: null, group: null, built: false, deskBuilt: false, stations: [],
-    panel: null, panelOpen: false, venue: "airport", msg: "",
   };
 
   let VM = null;
@@ -815,107 +814,65 @@
   function fmtRate(r) { return r >= 1 ? r.toFixed(2) : r.toFixed(4); }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 
-  // THE COUNTERS ARE CANDIDATES (city/interactions.js registerFixtures): E at
-  // the kiosk or the desk opens it, a tap on it opens it. No private prompt.
+  /* THE COUNTERS ARE THINGS YOU STAND AT (city/interactions.js
+     registerFixtures). E has the clerk's rate card pushed across to you: a
+     sheet you hold (city/paper.js) with each currency, what one of it costs
+     and what you are holding. Buying and selling are verbs on the counter
+     (round the wheel, or a tap): "$100 into VDM", "Sell 100 VDM".
+     (This was an HTML card of Buy / Sell buttons per currency.) */
   let fixturesWired = false;
+  function asIs(s) { const VW = CBZ.cityVerbWord; if (VW && VW.keep) VW.keep(s); return s; }
+  function held(id) { return CBZ.currency ? CBZ.currency.walletGet(id) : 0; }
+  function sellable(id) { return Math.max(0, Math.min(100, Math.floor(held(id)))); }
+  function rateCard(st) {
+    const K = CBZ.cityPaper; if (!K) return;
+    const spread = SPREAD[st.venue] != null ? SPREAD[st.venue] : SPREAD.airport;
+    const lines = [{ cols: ["", "ONE COSTS", "YOU HOLD"], head: true }];
+    list().forEach(function (r) { lines.push({ cols: [r.id, "$" + fmtRate(r.rate), held(r.id).toFixed(2)] }); });
+    lines.push({ gap: 12 });
+    lines.push({ k: "YOUR DOLLARS", v: fmt$(held("LBD")) });
+    K.show({ key: "fxrates", org: st.label, title: "RATES TODAY", ink: "#1f4a38", colw: [0.3, 0.36, 0.34], lines: lines,
+      foot: "The house keeps " + Math.round(spread * 100) + " cents on the dollar, each way." });
+  }
+  function trade(st, from, to, amt) {
+    const res = amt > 0.005 ? convert(from, to, amt, st.venue) : { ok: false, reason: "insufficient" };
+    if (res && !res.ok) { if (CBZ.city && CBZ.city.note) CBZ.city.note(res.reason === "insufficient" ? "You haven't got that much." : "The counter won't take that.", 1.8); }
+    else if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    if (CBZ.cityPaper && CBZ.cityPaper.isUp("fxrates")) rateCard(st);     // the figures on the card in your hand move
+  }
   function wireFixtures() {
     if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
     fixturesWired = true;
+    const verbs = [{ id: "fx-rates", slot: "e", prio: 5, label: function () { return asIs("The rates"); }, onSelect: rateCard }];
+    for (let n = 0; n < 6; n++) {
+      verbs.push({ id: "fx-buy-" + n, wheel: true, prio: 4,
+        canShow: function () { return !!list()[n]; },
+        label: function () { const r = list()[n]; return r ? asIs("$100 into " + r.id) : ""; },
+        onSelect: function (st) { const r = list()[n]; if (r) trade(st, "LBD", r.id, 100); } });
+      verbs.push({ id: "fx-sell-" + n, wheel: true, prio: 3,
+        canShow: function () { const r = list()[n]; return !!r && sellable(r.id) > 0; },
+        label: function () { const r = list()[n]; return r ? asIs("Sell " + sellable(r.id) + " " + r.id) : ""; },
+        onSelect: function (st) { const r = list()[n]; if (r) trade(st, r.id, "LBD", Math.min(100, held(r.id))); } });
+    }
     CBZ.interactions.registerFixtures({
       id: "fx-counter", kind: "fx-counter", prio: 8,
-      list: function () { return V.panelOpen ? null : V.stations; },
+      list: function () { return V.stations; },
       reach: function (st) { return st.reach || REACH; },
       dot: function () { return -2; },            // free-standing props: plain distance
       name: function (st) { return st.label; },
-      verbs: [{ id: "fx-open", slot: "e", prio: 5, label: "Exchange", onSelect: (st) => openPanel(st.venue) }],
+      verbs: verbs,
     });
   }
 
-  // ---- the trade panel --------------------------------------------------
-  function panelEl() {
-    if (V.panel) return V.panel;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "fxPanel";
-    d.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;display:none;" +
-      "background:rgba(13,16,21,.96);border:1px solid #2c4a3a;border-radius:16px;padding:16px 18px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;width:min(420px,88vw);box-shadow:0 18px 60px rgba(0,0,0,.6)";
-    document.body.appendChild(d);
-    V.panel = d;
-    return d;
-  }
-  function renderPanel() {
-    const el = V.panel; if (!el) return;
-    const spread = SPREAD[V.venue] != null ? SPREAD[V.venue] : SPREAD.airport;
-    let html = "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>" +
-      "<div style='font-weight:800;font-size:16px'>" + (V.venue === "desk" ? "Exchange Desk" : "Airport FX Counter") + "</div>" +
-      "<div style='font-size:11px;color:#7f8794'>" + Math.round(spread * 100) + "% spread</div></div>";
-    html += "<div style='font-size:12px;color:#9fb0c8;margin-bottom:10px'>Wallet · " + fmt$(CBZ.currency ? CBZ.currency.walletGet("LBD") : 0) + " LBD</div>";
-    const rows = list();
-    rows.forEach(function (r) {
-      const bal = CBZ.currency ? CBZ.currency.walletGet(r.id) : 0;
-      const sellN = Math.max(0, Math.min(100, Math.floor(bal)));
-      html += "<div style='background:rgba(255,255,255,.04);border-radius:10px;padding:9px 11px;margin-bottom:7px'>" +
-        "<div style='display:flex;justify-content:space-between;align-items:baseline'>" +
-        "<span style='font-weight:700;font-size:14px'>" + r.id + "</span>" +
-        "<span style='color:#9fb0c8;font-size:12px'>1 " + r.id + " = $" + fmtRate(r.rate) + "</span></div>" +
-        "<div style='font-size:11px;color:#7f8794;margin:2px 0 7px'>You hold " + bal.toFixed(2) + " " + r.id + "</div>" +
-        "<div style='display:flex;gap:6px'>" +
-        "<button data-fx='buy' data-ccy='" + r.id + "' style='flex:1;cursor:pointer;background:#1e7a44;border:1px solid #2a9c58;color:#eafff0;border-radius:8px;padding:6px;font-family:inherit'>Buy $100</button>" +
-        "<button data-fx='sell' data-ccy='" + r.id + "' style='flex:1;cursor:pointer;background:#7a2c2c;border:1px solid #9c3a3a;color:#ffeaea;border-radius:8px;padding:6px;font-family:inherit' " +
-        (sellN <= 0 ? "disabled" : "") + ">Sell " + sellN + "</button>" +
-        "</div></div>";
-    });
-    if (V.msg) html += "<div style='font-size:11px;color:#ffd166;margin:2px 0 8px'>" + V.msg + "</div>";
-    html += "<button data-fxclose='1' style='width:100%;cursor:pointer;background:#2b3340;border:1px solid #3a4150;color:#e8eef7;border-radius:10px;padding:8px;font-family:inherit'>Close [E]/[Esc]</button>";
-    el.innerHTML = html;
-    el.querySelectorAll("[data-fx]").forEach(function (b) {
-      b.onclick = function () {
-        const ccy = b.getAttribute("data-ccy"), action = b.getAttribute("data-fx");
-        V.msg = "";
-        let res = null;
-        if (action === "buy") res = convert("LBD", ccy, 100, V.venue);
-        else {
-          const bal = CBZ.currency ? CBZ.currency.walletGet(ccy) : 0;
-          const amt = Math.min(100, bal);
-          if (amt > 0.005) res = convert(ccy, "LBD", amt, V.venue);
-          else res = { ok: false, reason: "insufficient" };
-        }
-        if (res && !res.ok) V.msg = res.reason === "insufficient" ? "Not enough funds." : "Trade failed.";
-        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-        renderPanel();
-      };
-    });
-    const cl = el.querySelector("[data-fxclose]");
-    if (cl) cl.onclick = closePanel;
-  }
-  function openPanel(venue) {
-    const el = panelEl(); if (!el) return;
-    V.panelOpen = true; V.venue = venue || "airport"; V.msg = "";
-    CBZ.cityMenuOpen = true;
-    renderPanel();
-    el.style.display = "block";
-    if (typeof document !== "undefined" && document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-  }
-  function closePanel() {
-    V.panelOpen = false;
-    if (V.panel) V.panel.style.display = "none";
-    CBZ.cityMenuOpen = false;
-    if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
-  }
+  // where the counters stand (a probe's way to walk up to one)
+  CBZ.forex.counters = function () { return V.stations.slice(); };
+  CBZ.forex.rateCard = rateCard;
 
-  // ---- per-frame: build the counters, keep the panel honest
+  // ---- per-frame: build the counters
   CBZ.onUpdate(38.45, function () {
-    if (!g || g.mode !== "city") { if (V.panelOpen) closePanel(); return; }
+    if (!g || g.mode !== "city") return;
     if (!ensure()) return;
     wireFixtures();
-    if (V.panelOpen && (g.state !== "playing" || (CBZ.player && (CBZ.player.driving || CBZ.player.dead)))) closePanel();
   });
-
-  // the trade panel is modal: E or Esc closes it
-  addEventListener("keydown", function (e) {
-    if (!V.panelOpen) return;
-    const k = (e.key || "").toLowerCase();
-    if (k === "escape" || k === "e") { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); e.stopPropagation(); closePanel(); }
-  }, true);
 })();

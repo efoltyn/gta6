@@ -422,7 +422,8 @@
   function buildHomeVisual(h) {
     const root = arenaRoot(); if (!root || !THREE) return;
     dropHomeVisual();
-    const a = homeAnchor(h), y = floorY(a.x, a.z);
+    // (the house's own answer carries its floor: a flat's safe is up in the flat)
+    const a = homeAnchor(h), y = a.y != null ? a.y : floorY(a.x, a.z);
     const grp = new THREE.Group();
     grp.position.set(a.x, y, a.z);
     // FACE THE DOOR. `a.fx/fz` points from the threshold into the room, so the

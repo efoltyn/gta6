@@ -126,6 +126,14 @@
   };
   CBZ.fitoutSiteOf = function (b) { return b ? SITES.get(siteKey(b)) || null : null; };
   CBZ.fitoutReset = function () { disposeAll(); SITES.clear(); SITE_LIST = null; };
+  // a building that is gone for good (city/house_metro.js: a metro house that
+  // went back to being part of its tile): its rooms are freed, its site forgotten
+  CBZ.fitoutForget = function (b) {
+    const key = b ? siteKey(b) : null, s = key ? SITES.get(key) : null;
+    if (!s) return false;
+    freeSite(s); SITES.delete(key); SITE_LIST = null;
+    return true;
+  };
 
   /* ========================================================================
      2. MATERIALS — a handful of canvas textures, built once, never freed.
@@ -608,7 +616,10 @@
     const FH = b.FH || 3.2;
     const y0 = floor.y;                               // slab top
     const nextTop = floorTopOf(b, floor.k + 1);
-    const ceil = (floor.k + 1 < (Array.isArray(b.floorTops) ? b.floorTops.length : (b.storeys | 0) + 1))
+    // (floor.info.ceilH: a declared ceiling lower than the slab, a house's
+    // top storey under its roof carpentry)
+    const ceil = (floor.info && floor.info.ceilH > 1.8) ? y0 + floor.info.ceilH
+      : (floor.k + 1 < (Array.isArray(b.floorTops) ? b.floorTops.length : (b.storeys | 0) + 1))
       ? nextTop - 0.2 : y0 + FH - 0.2;                // underside of the slab above
     // finished floor top: 4 mm over the eager covering (CBZ.INTERIOR_FINISH,
     // itself 8 mm over the slab), so the floor you see is the floor you stand
@@ -778,6 +789,50 @@
         const m = V(0, e * hh, 0, 0, e, 0, 0, 0), ring = [];
         for (let i = 0; i <= n; i++) { const a = i / n * 2 * Math.PI; ring.push(V(rx * Math.cos(a), e * hh, rz * Math.sin(a), 0, e, 0, rx * Math.cos(a), rz * Math.sin(a))); }
         for (let i = 0; i < n; i++) { if (e > 0) tri(m, ring[i + 1], ring[i]); else tri(m, ring[i], ring[i + 1]); }
+      }
+      return true;
+    }
+    /* A BAR BETWEEN TWO POINTS (building-local): a handrail, a stair's
+       stringer, a sloped soffit board, a brace. `sv` is its section up the
+       bar's own vertical, `sl` across it; o.mat / o.glow as box(). A box()
+       turns about the vertical only, and a stair is the one thing in a house
+       that is not level. Never core-guarded: the caller is drawing the stair. */
+    function beam(x0, y0, z0, x1, y1, z1, sv, sl, color, o) {
+      o = o || {};
+      let ax = x1 - x0, ay = y1 - y0, az = z1 - z0;
+      const L = Math.hypot(ax, ay, az);
+      if (!(L > 0.01 && sv > 0.002 && sl > 0.002)) return null;
+      ax /= L; ay /= L; az /= L;
+      let lx = az, lz = -ax;                            // across the bar, level
+      const ll = Math.hypot(lx, lz);
+      if (ll < 1e-5) { lx = 1; lz = 0; } else { lx /= ll; lz /= ll; }
+      const vx = lz * ay, vy = lx * az - lz * ax, vz = -lx * ay;   // the bar's own up
+      const key = o.glow ? "glow" : (o.mat || "flat");
+      const bk = bucket(key);
+      const c = hexRGB(color == null ? 0xffffff : color);
+      const sc = bk.tex ? (o.uv || TEX_SCALE[key] || 2) : 1;
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+      const A = [ax * L / 2, ay * L / 2, az * L / 2], V = [vx * sv / 2, vy * sv / 2, vz * sv / 2], S = [lx * sl / 2, 0, lz * sl / 2];
+      const Q = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+      const face = function (N, U, W, sg, ul, wl) {
+        const nx = N[0] * sg, ny = N[1] * sg, nz = N[2] * sg;
+        const nl = Math.hypot(nx, ny, nz) || 1;
+        const base = bk.pos.length / 3;
+        for (let i = 0; i < 4; i++) {
+          bk.pos.push(cx + nx + U[0] * Q[i][0] + W[0] * Q[i][1], cy + ny + U[1] * Q[i][0] + W[1] * Q[i][1], cz + nz + U[2] * Q[i][0] + W[2] * Q[i][1]);
+          bk.nor.push(nx / nl, ny / nl, nz / nl);
+          bk.col.push(c[0], c[1], c[2]);
+          if (bk.tex) bk.uv.push(Q[i][0] * ul / sc, Q[i][1] * wl / sc);
+        }
+        // wound to face along the normal
+        const kx = U[1] * W[2] - U[2] * W[1], ky = U[2] * W[0] - U[0] * W[2], kz = U[0] * W[1] - U[1] * W[0];
+        if (kx * nx + ky * ny + kz * nz >= 0) bk.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+        else bk.idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
+      };
+      for (const sg of [1, -1]) {
+        if (!o.noEnds) face(A, S, V, sg, sl / 2, sv / 2);
+        face(V, A, S, sg, L / 2, sl / 2);
+        face(S, A, V, sg, L / 2, sv / 2);
       }
       return true;
     }
@@ -1076,7 +1131,7 @@
     const B = {
       site: site, b: b, floor: floor, lot: site.lot, k: floor.k, y0: y0, fy: fy, ceil: ceil, FH: FH,
       ox: ox, oz: oz, rect: floor.rect, info: floor.info || {},
-      box: box, plane: plane, wall: wall, skin: skin, light: light, lamp: lamp, furn: furn, solid: solid, loose: loose,
+      box: box, beam: beam, plane: plane, wall: wall, skin: skin, light: light, lamp: lamp, furn: furn, solid: solid, loose: loose,
       fixture: function (x, z, o) { o = o || {}; fixture(x, z, o.kind || "panel", o, o.color == null ? 0xfff1d6 : o.color); },
       pieces: pieces,
       // SOMEBODY IN THE ROOM. spec {x, z (local), face, job, seat|bed (a propuse
@@ -1315,6 +1370,8 @@
      ======================================================================== */
   const PLANS = Object.create(null);
   CBZ.fitoutPlan = function (name, fn) { if (name && typeof fn === "function") PLANS[name] = fn; };
+  // (one plan calling another: a corridor of flats hands the owner's flat to the house planner)
+  CBZ.fitoutPlanOf = function (name) { return PLANS[name] || null; };
   CBZ.fitoutPlans = function () { return Object.keys(PLANS); };
   // the finish every declared floor gets when no planner claims it: a real
   // floor and a real light. Nothing else; the eager program is the room.

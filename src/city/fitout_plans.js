@@ -839,7 +839,7 @@
         // a mat, and a peephole/knocker height plate on some doors
         const mx = ax ? dc : faceC + side * 0.35, mz = ax ? faceC + side * 0.35 : dc;
         if (B.h(dc, i, 0x4A12) < 0.7) B.box(mx, fy + 0.006, mz, ax ? 0.8 : 0.5, 0.012, ax ? 0.5 : 0.8, [0x4a3a2a, 0x3a4a5a, 0x5a2a2a][i % 3], { faces: 4 });
-        drawUnit(B, U);
+        if (U.house) drawHomeUnit(B, U); else drawUnit(B, U);
       }
       // ground floor: a mailbox bank by the way in
       if (B.k === 0 && B.b.localDoor) {
@@ -856,9 +856,22 @@
         }
       }
     } else {
-      for (let i = 0; i < units.length; i++) drawUnit(B, units[i]);
+      for (let i = 0; i < units.length; i++) { if (units[i].house) drawHomeUnit(B, units[i]); else drawUnit(B, units[i]); }
     }
   });
+  /* THE LISTED HOME'S FLAT on a storey of flats: it has a floor plan of its own
+     (city/house_plan.js furnishUnit: an entry, living room and kitchen,
+     bedrooms, a bathroom), so the house planner fits it out, on this builder,
+     inside the unit's walls. */
+  function drawHomeUnit(B, U) {
+    const fn = CBZ.fitoutPlanOf ? CBZ.fitoutPlanOf("house") : null;
+    const plan = U.house;
+    if (!fn || !plan || !plan.floors || !plan.floors[0]) return;
+    const B2 = Object.create(B);
+    B2.info = { house: plan, floor: 0, ceilH: plan.floors[0].ceilH, unit: U };
+    B2.rect = { x0: U.x0, x1: U.x1, z0: U.z0, z1: U.z1 };
+    try { fn(B2); } catch (e) { if (window.console) console.warn("[home flat fit-out]", e); }
+  }
 
   /* ========================================================================
      "flat" — the one-dwelling storey (buildings.js furnishApartmentFloor)
@@ -902,5 +915,12 @@
       B.box(x, B.fy + 0.006, z, sw ? 1.7 : 2.4, 0.012, sw ? 2.4 : 1.7, RUG[(H(x, z, 0x2A6) * RUG.length) | 0], { faces: 4 });
     });
   }
-  CBZ.fitoutProps = { plant: plant, drawTV: drawTV, drawLaptop: drawLaptop };
+  /* the parts a home is made of, for the other planners of homes
+     (city/fitout_house.js draws a whole house out of the same kitchen run,
+     WC, vanity, bedside table and lamp a flat is made of). frame(U) is the
+     (d, t) frame every one of them is authored in. */
+  CBZ.fitoutProps = { plant: plant, drawTV: drawTV, drawLaptop: drawLaptop,
+    frame: frame, fbox: fbox, skinAt: skinAt, kitchen: drawKitchen, toilet: toilet, vanity: vanity,
+    nightstand: nightstand, tableLamp: tableLamp, frameArt: frameArt, highChair: highChair,
+    PAINT: PAINT, ACCENT: ACCENT, SOFA: SOFA, LINEN: LINEN, RUG: RUG, WOOD: WOOD, ART: ART, COATS: COATS };
 })();
