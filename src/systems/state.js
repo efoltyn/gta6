@@ -632,16 +632,27 @@
     const info = CBZ.renderer && CBZ.renderer.info;
     const sig = function () {
       if (!info) return "";
-      return (info.programs ? info.programs.length : 0) + "|" + info.memory.geometries + "|" + info.memory.textures;
+      return (info.programs ? info.programs.length : 0) + "|" + (V2 ? "" : info.memory.geometries + "|") + info.memory.textures;
     };
     let cheap = 0, n = 0, prev = performance.now(), lastSig = sig(), still = 0;
-    const deadline = prev + 25000;
+    const deadline = prev + (CBZ.isMobileDevice && V2 ? 15000 : 25000);
     (function tick() {
       const t = performance.now(), d = t - prev; prev = t; n++;
       cheap = d < 90 ? cheap + 1 : 0;
       const s = sig();
+    /* WHAT "STILL" MEANS. It counted geometries too, and in the streamed city
+       the geometry count never holds still: the crowd's rigs, the streamer's
+       nearby jobs and the far cells it parks change it every frame for as
+       long as you play (phone profile: 581 -> 740 over the first frames,
+       still climbing when the card hit its cap). The first-draw cost the card
+       hides is the PROGRAMS (a synchronous compile is the long frame) and the
+       textures; a geometry upload is a few ms. So the card waits for those to
+       stop, and on a phone or tablet a 15 s cap (the old 25 s was the whole
+       wait every time, the game drawing behind the card). */
+    // (?cfg_BOOT_CARD_V2=0: the old rule, for an A/B)
+    const V2 = CBZ.CONFIG.BOOT_CARD_V2 !== false;
       still = (s === lastSig) ? still + 1 : 0; lastSig = s;
-      if ((cheap >= 3 && n >= 4) || (info && still >= 5 && n >= 6) || t > deadline) { done(); return; }
+      if ((cheap >= 3 && n >= 4) || (info && (V2 ? still >= 4 && n >= 5 : still >= 5 && n >= 6)) || t > deadline) { done(); return; }
       requestAnimationFrame(tick);
     })();
   }

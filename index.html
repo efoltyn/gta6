@@ -445,14 +445,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=beach1020"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=plan1122"></script>
+<script src="src/core/slice.js?v=plan1122-ph2"></script>
 <!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
 <script src="src/core/sight.js?v=farcopy1013"></script>
 <!-- the far night lights (GTA "LOD lights"): one sprite per real lamp, lit window, car, beacon and airfield light; three draws, to the horizon -->
 <script src="src/core/lodlights.js?v=r187a"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=ph1122b+house1122r2"></script>
+<script src="src/core/citystream.js?v=ph1122b+house1122r2-ph2"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -805,7 +805,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/keycard.js?v=jas1020"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
-<script src="src/entities/npclife.js?v=ph1122b"></script>
+<script src="src/entities/npclife.js?v=ph1122b-ph2"></script>
 <!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
@@ -1038,7 +1038,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=intake1122"></script>
+<script src="src/systems/state.js?v=intake1122-ph2"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1322,7 +1322,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/expansion.js?v=ground1001"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=plan1122"></script>
+<script src="src/city/worldmap.js?v=plan1122-ph2"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1332,7 +1332,7 @@ document.body.appendChild(b);}}catch(e){}})();
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
      continent plate reads its relief-corridor gate). -->
-<script src="src/city/highwaynet.js?v=plan1122"></script>
+<script src="src/city/highwaynet.js?v=wm2a-ph2"></script>
 <!-- THE INTERCHANGE: the R5/R1 flyover (planned by highwaynet at order 91,
      built in highways.js's late pass at 97.5). -->
 <script src="src/city/interchange.js?v=flick1"></script>
@@ -1441,7 +1441,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ONE UNIT, BUILT FOR THE CITY (city/unitmodels.js): CBZ.milModels, the one path that builds a units/vehicles machine outside the battle (Fort Brandt, the player's F-35, the airbase, The Isles' army). After army.js (its loader), before island_military. -->
 <script src="src/city/unitmodels.js?v=f35one1022"></script>
 <script src="src/city/island_military.js?v=shops1122d"></script>
-<script src="src/city/biome_desert.js?v=plan1122"></script>
+<script src="src/city/biome_desert.js?v=plan1122-ph2"></script>
 <script src="src/city/biome_forest.js?v=plan1122"></script>
 <script src="src/city/biome_farmland.js?v=plan1122"></script>
 <script src="src/city/biome_snow.js?v=plan1122"></script>
@@ -1554,7 +1554,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=trunk1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=ph1122b"></script>
+<script src="src/city/peds.js?v=fixA1122-ph2"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1571,7 +1571,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
-<script src="src/city/occupy.js?v=ladder1022"></script>
+<script src="src/city/occupy.js?v=ladder1022-ph2"></script>
 <!-- CHILDHOOD: age bands, the growth curve, child proportions and gait. After
      peds.js (the ped factory) and after the character rig it extends. Without
      this tag children get correct proportions but never grow. -->
@@ -1980,7 +1980,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/empire.js?v=nopanel1122"></script>
 <script src="src/city/construction.js?v=news0930"></script>
 <script src="src/city/companies.js?v=fallstay1"></script>
-<script src="src/city/citystaff.js?v=keep1122d"></script>
+<script src="src/city/citystaff.js?v=keep1122d-ph2"></script>
 <script src="src/city/playergang.js?v=world1122b"></script>
 <!-- WHO HOLDS A BLOCK, SPRAYED ON ITS WALL (city/turftags.js): the set's letters in
      its colour on the front of every building it claims. Reads the lot record
@@ -2670,7 +2670,7 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=borders1022"></script>
+<script src="src/city/warroom.js?v=borders1022-ph2"></script>
 <script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=protestcpu1022"></script>
 <script src="src/city/president_public.js?v=r187a"></script>

@@ -375,6 +375,7 @@
     return pop;
   }
 
+  const POP_NEAR_M = 320;
   function fillPopulation(pop, budget) {
     if (!pop || !pop.root || !pop.root.parent || !budget) return 0;
     const roster = CBZ.cityPeds || [];
@@ -385,8 +386,19 @@
       // (a body the phone population budget put to sleep, city/peds.js, is
       // still this slot's: refilling it grew the roster without end)
       if (old && (old._dormant || roster.indexOf(old) >= 0)) continue;
-      pop.actors[i] = null;
       const e = pop.entries[i] || {};
+      // A PHONE DOES NOT CAST A TOWN NOBODY IS IN. A population is cast in
+      // whatever place defined it (the desert's six, the snow resort's, the
+      // airport's lounges), kilometres from the player; the phone budget
+      // (city/peds.js) then put them to sleep. On a phone or tablet a slot
+      // whose stand is past POP_NEAR_M of the player waits: the tick casts
+      // it when he comes (a seated slot's world point is not known here, so
+      // it is cast as before).
+      if (CBZ.isMobileDevice && CBZ.CONFIG.POP_NEAR_LAZY !== false && e.placement && e.placement.x != null && e.placement.z != null) {
+        const P = CBZ.player && CBZ.player.pos;
+        if (P) { const dx = e.placement.x - P.x, dz = e.placement.z - P.z; if (dx * dx + dz * dz > POP_NEAR_M * POP_NEAR_M) continue; }
+      }
+      pop.actors[i] = null;
       const placement = merge(e.placement, { parent: (e.placement && e.placement.parent) || pop.root });
       const a = spawnCity(e.profile || "cityResident", placement, e.overrides);
       if (!a) continue;

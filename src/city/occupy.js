@@ -268,6 +268,7 @@
       if (ped.group && ped.group.parent) ped.group.parent.remove(ped.group);
       const arr = CBZ.cityPeds;
       if (arr) { const i = arr.indexOf(ped); if (i >= 0) arr.splice(i, 1); }
+      if (CBZ.cityDormDrop) CBZ.cityDormDrop(ped);   // asleep on the phone budget (peds.js)
     } catch (e) { return false; }
     return true;
   };
@@ -716,7 +717,8 @@
       if (!rec.b || !groupLive(rec.b.group)) { REG.splice(i, 1); continue; }
       for (let q = rec.peds.length - 1; q >= 0; q--) {
         const p = rec.peds[q];
-        if (!p || p.culled || (CBZ.cityPeds && CBZ.cityPeds.indexOf(p) < 0)) rec.peds.splice(q, 1);
+        // (asleep on the phone budget, peds.js `_dormant`, is still posted here)
+        if (!p || p.culled || (CBZ.cityPeds && !p._dormant && CBZ.cityPeds.indexOf(p) < 0)) rec.peds.splice(q, 1);
       }
       used += rec.peds.length;
     }

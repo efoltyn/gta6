@@ -2514,6 +2514,7 @@
     if (CBZ.cityHomeRelease) { try { CBZ.cityHomeRelease(ped); } catch (e) {} }
     const i = CBZ.cityPeds.indexOf(ped);
     if (i >= 0) CBZ.cityPeds.splice(i, 1);
+    CBZ.cityDormDrop(ped);     // asleep (the phone budget): never woken again
     _corpseDrop(ped);          // off the roster ⇒ off every index built from it
     _coverDrop(ped);
     if (ped.group && ped.group.parent) ped.group.parent.remove(ped.group);
@@ -2567,6 +2568,37 @@
     if (g && p === g.cityPartner) return false;
     return true;
   }
+  /* THE OWNED CROWD SLEEPS TOO, by distance, not by budget (phone tier).
+     Measured at the downtown spawn on the phone profile: 290 live bodies with
+     the budget met, ~150 of them POSTED: 77 gang HQ garrison up the towers
+     (city/occupy.js via gangs.js), 41 venue staff (city/citystaff.js), and
+     gate-lounge, speedway, sunbather, civic and shop posts kilometres away.
+     None of them is drawn past the rig's 95 m cut, and a posted body does
+     nothing but stand there, so a posted body past OWNED_SLEEP_M (an upper
+     floor's garrison past INDOOR_SLEEP_M: walls hide him) sleeps exactly as
+     an ambient one does and wakes as the player comes. Its owner keeps it:
+     the owners that re-man a "swept" post (citystaff.js, occupy.js
+     liveBudget) read `_dormant` as present, so nobody is replaced.
+     Never asleep: principals and their details (govcomplex / power /
+     protection: hitman and succession code finds them on the roster), a
+     body in a fight, alarmed, wanted, on an errand, or a campaign mark. */
+  const OWNED_SLEEP_M = 130, OWNED_WAKE_M = 112, INDOOR_SLEEP_M = 75, INDOOR_WAKE_M = 60;
+  const KEEP_SRC = /^(govcomplex|power|protection|interior:robbery|hitman|agency)/;
+  // (?cfg_PHONE_OWNED_SLEEP=0: the A/B switch)
+  if (CBZ.CONFIG.PHONE_OWNED_SLEEP == null) CBZ.CONFIG.PHONE_OWNED_SLEEP = true;
+  function ownedSleepM(p) {
+    if (!DORM_ON || CBZ.CONFIG.PHONE_OWNED_SLEEP === false || !p || p.dead || p.isPlayer || p._parked || p.inCar || p.culled) return 0;
+    const posted = p._occupyGarrison || p._occupySrc || p.staffPost;
+    if (!posted) return 0;
+    if (p._occupySrc && KEEP_SRC.test(p._occupySrc)) return 0;
+    if (p.isBoss || p._vip || p.vip || p._vipGuard || p._milli || p._milliGuard || p._campaignTarget || p._protUnit) return 0;
+    if (p.companion || p.controlled || p.recruited || p._farDraw || p.moveOrder) return 0;
+    if ((p.npcWanted | 0) > 0 || p.rage || p.reportState || p.approach || p.alarmed > 0 || p._occupyAwake || p.state === "fight" || p.state === "flee") return 0;
+    if (p.ko > 0 || p._boardOwn || p._climb || p._killer || p._fugitive || p._ladder || p.enterT > 0) return 0;
+    if (CBZ.custody && CBZ.custody.holds && CBZ.custody.holds(p)) return 0;
+    if (g && p === g.cityPartner) return 0;
+    return (p._occupyY || 0) > 2.5 ? INDOOR_SLEEP_M : OWNED_SLEEP_M;
+  }
   function sleepPed(p, i) {
     if (CBZ.cityBrain && CBZ.cityBrain.release) { try { CBZ.cityBrain.release(p); } catch (e) {} }
     CBZ.cityPeds.splice(i, 1);
@@ -2585,9 +2617,17 @@
     p._dormParent = null;
     if (CBZ.cityPeds.indexOf(p) < 0) CBZ.cityPeds.push(p);
   }
+  // an owner took the body out of the world while it slept (city/occupy.js
+  // cityUnpostNpc, removeVendor): it leaves the sleepers too, or the next
+  // wake would put a disposed rig back on the roster
+  CBZ.cityDormDrop = function (p) {
+    if (!p || !p._dormant) return;
+    const k = _dorm.indexOf(p); if (k >= 0) _dorm.splice(k, 1);
+    p._dormant = false; p._dormOwned = 0; p._dormParent = null;
+  };
   // a rebuilt or cleared city takes the sleepers with the roster
   CBZ.cityDormantReturn = function () {
-    for (let k = _dorm.length - 1; k >= 0; k--) { const p = _dorm[k]; p._dormant = false; p._dormParent = null; CBZ.cityPeds.push(p); }
+    for (let k = _dorm.length - 1; k >= 0; k--) { const p = _dorm[k]; p._dormant = false; p._dormOwned = 0; p._dormParent = null; CBZ.cityPeds.push(p); }
     _dorm.length = 0;
   };
   let _dormT = 0;
@@ -2611,9 +2651,22 @@
     const roster = CBZ.cityPeds;
     for (let k = _dorm.length - 1; k >= 0; k--) {
       const p = _dorm[k];
-      if (!p.pos || near(p.pos.x, p.pos.z, WAKE_M) || !budget || p.dead || roster.indexOf(p) >= 0) wakePed(p, k);
+      const wr = p._dormOwned ? p._dormOwned : WAKE_M;
+      if (!p.pos || near(p.pos.x, p.pos.z, wr) || (!budget && !p._dormOwned) || p.dead || roster.indexOf(p) >= 0) { p._dormOwned = 0; wakePed(p, k); }
     }
     const peds = CBZ.cityPeds;
+    // the owned posts past their range, whatever the budget (a few per beat)
+    if (DORM_ON) {
+      let n = 0;
+      for (let i = peds.length - 1; i >= 0 && n < 40; i--) {
+        const p = peds[i];
+        if (!p.pos) continue;
+        const sm = ownedSleepM(p);
+        if (!sm || near(p.pos.x, p.pos.z, sm)) continue;
+        p._dormOwned = sm === INDOOR_SLEEP_M ? INDOOR_WAKE_M : OWNED_WAKE_M;
+        sleepPed(p, i); n++;
+      }
+    }
     let over = peds.length - budget;
     if (over <= 0 || !budget) return;
     // then the farthest ambient bodies past SLEEP_M, a few per beat

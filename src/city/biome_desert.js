@@ -793,40 +793,63 @@
           if (RB && !(RB.y && RB.y.length === NV && RB.n && RB.n.length === NV * 3 && RB.c && RB.c.length === NV * 3)) RB = null;
         } catch (e) { RSIG = null; RB = null; }
       }
-      const Y = RB ? RB.y : new Float32Array(NV), Nq = RB ? RB.n : new Int8Array(NV * 3), Cq = RB ? RB.c : new Uint8Array(NV * 3);
-      if (!RB) {
-        const hw = GSEG_X + 3, hh = GSEG_Z + 3;
-        const H = new Float32Array(hw * hh), MG = new Float64Array(hw * hh);
-        const q8 = function (v) { v = Math.round(v * 127); return v < -127 ? -127 : v > 127 ? 127 : v; };
-        const u8 = function (v) { v = Math.round(v * 255); return v < 0 ? 0 : v > 255 ? 255 : v; };
-        for (let tj = 0; tj < T; tj++) for (let ti = 0; ti < T; ti++) {
-          const g0 = ti * GSEG_X, h0 = tj * GSEG_Z, base = (tj * T + ti) * nvT;
-          for (let b = 0; b < hh; b++) {
-            const wz = MINZ + (h0 + b - 1) * STEP_Z;
-            for (let a = 0; a < hw; a++) {
-              H[b * hw + a] = desertHeightAt(MINX + (g0 + a - 1) * STEP_X, wz);
-              MG[b * hw + a] = _lastMesa;
-            }
-          }
-          for (let row = 0; row <= GSEG_Z; row++) for (let col = 0; col <= GSEG_X; col++) {
-            const i = row * (GSEG_X + 1) + col, v = base + i;
-            const wx = MINX + (g0 + col) * STEP_X, wz = MINZ + (h0 + row) * STEP_Z;
-            const hI = (row + 1) * hw + (col + 1), y = H[hI];
-            ergN.set(-(H[hI + 1] - H[hI - 1]) / (2 * STEP_X), 1, -(H[hI + hw] - H[hI - hw]) / (2 * STEP_Z)).normalize();
-            ergVertexColor(wx, wz, y, ergN, ergC, MG[hI]);
-            // (through float32, exactly as the old path read them back off its arrays)
-            Y[v] = y;
-            Nq[v * 3] = q8(Math.fround(ergN.x)); Nq[v * 3 + 1] = q8(Math.fround(ergN.y)); Nq[v * 3 + 2] = q8(Math.fround(ergN.z));
-            Cq[v * 3] = u8(Math.fround(ergC.r)); Cq[v * 3 + 1] = u8(Math.fround(ergC.g)); Cq[v * 3 + 2] = u8(Math.fround(ergC.b));
+      /* ONE TILE'S RECORD, evaluated when somebody first needs it. On a
+         first visit (no bake hit) every tile used to be evaluated at boot,
+         wherever the player stood: ~320 ms unthrottled (the phone profile's
+         desert builder was 2 s at the downtown spawn, 6 km away) and 4.4 MB
+         of records held for tiles nobody was near. Now a tile's job fills
+         its own record the first time it runs (the same maths, the same
+         quantisation, so the tile is the tile it always was), and the
+         records stay with the tiles that were built. A bake hit still serves
+         all of them at once, as before. */
+      const q8 = function (v) { v = Math.round(v * 127); return v < -127 ? -127 : v > 127 ? 127 : v; };
+      const u8 = function (v) { v = Math.round(v * 255); return v < 0 ? 0 : v > 255 ? 255 : v; };
+      const hw = GSEG_X + 3, hh = GSEG_Z + 3;
+      let H = null, MG = null;
+      function fillTile(ti, tj, Y, Nq, Cq, base) {
+        if (!H) { H = new Float32Array(hw * hh); MG = new Float64Array(hw * hh); }
+        const g0 = ti * GSEG_X, h0 = tj * GSEG_Z;
+        for (let b = 0; b < hh; b++) {
+          const wz = MINZ + (h0 + b - 1) * STEP_Z;
+          for (let a = 0; a < hw; a++) {
+            H[b * hw + a] = desertHeightAt(MINX + (g0 + a - 1) * STEP_X, wz);
+            MG[b * hw + a] = _lastMesa;
           }
         }
-        if (RSIG && CBZ.bakePut) CBZ.bakePut("desert-erg-rec", RSIG, { y: Y, n: Nq, c: Cq });
+        for (let row = 0; row <= GSEG_Z; row++) for (let col = 0; col <= GSEG_X; col++) {
+          const i = row * (GSEG_X + 1) + col, v = base + i;
+          const wx = MINX + (g0 + col) * STEP_X, wz = MINZ + (h0 + row) * STEP_Z;
+          const hI = (row + 1) * hw + (col + 1), y = H[hI];
+          ergN.set(-(H[hI + 1] - H[hI - 1]) / (2 * STEP_X), 1, -(H[hI + hw] - H[hI - hw]) / (2 * STEP_Z)).normalize();
+          ergVertexColor(wx, wz, y, ergN, ergC, MG[hI]);
+          // (through float32, exactly as the old path read them back off its arrays)
+          Y[v] = y;
+          Nq[v * 3] = q8(Math.fround(ergN.x)); Nq[v * 3 + 1] = q8(Math.fround(ergN.y)); Nq[v * 3 + 2] = q8(Math.fround(ergN.z));
+          Cq[v * 3] = u8(Math.fround(ergC.r)); Cq[v * 3 + 1] = u8(Math.fround(ergC.g)); Cq[v * 3 + 2] = u8(Math.fround(ergC.b));
+        }
+      }
+      // (?cfg_DESERT_ERG_LAZY=0: every tile at boot and into the bake, as before)
+      const LAZY = !RB && CFG.DESERT_ERG_LAZY !== false;
+      let Y = null, Nq = null, Cq = null;
+      if (!LAZY) {
+        Y = RB ? RB.y : new Float32Array(NV); Nq = RB ? RB.n : new Int8Array(NV * 3); Cq = RB ? RB.c : new Uint8Array(NV * 3);
+        if (!RB) {
+          for (let tj = 0; tj < T; tj++) for (let ti = 0; ti < T; ti++) fillTile(ti, tj, Y, Nq, Cq, (tj * T + ti) * nvT);
+          H = MG = null;
+          if (RSIG && CBZ.bakePut) CBZ.bakePut("desert-erg-rec", RSIG, { y: Y, n: Nq, c: Cq });
+        }
       }
       for (let k = 0; k < T * T; k++) {
         const ti = k % T, tj = (k / T) | 0, o = k * nvT;
-        const rec = { y: Y.subarray(o, o + nvT), n: Nq.subarray(o * 3, (o + nvT) * 3), c: Cq.subarray(o * 3, (o + nvT) * 3), g0: ti * GSEG_X, h0: tj * GSEG_Z };
+        const rec = LAZY ? { y: null, n: null, c: null, g0: ti * GSEG_X, h0: tj * GSEG_Z }
+          : { y: Y.subarray(o, o + nvT), n: Nq.subarray(o * 3, (o + nvT) * 3), c: Cq.subarray(o * 3, (o + nvT) * 3), g0: ti * GSEG_X, h0: tj * GSEG_Z };
         const x0 = MINX + rec.g0 * STEP_X, z0 = MINZ + rec.h0 * STEP_Z;
-        CBZ.sliceAt({ minX: x0, maxX: x0 + TW, minZ: z0, maxZ: z0 + TD }, ergJob(rec, nvT, k, T * T), { name: "desert erg " + ti + "," + tj });
+        const draw = ergJob(rec, nvT, k, T * T);
+        const job = !LAZY ? draw : function () {
+          if (!rec.y) { rec.y = new Float32Array(nvT); rec.n = new Int8Array(nvT * 3); rec.c = new Uint8Array(nvT * 3); fillTile(ti, tj, rec.y, rec.n, rec.c, 0); }
+          draw();
+        };
+        CBZ.sliceAt({ minX: x0, maxX: x0 + TW, minZ: z0, maxZ: z0 + TD }, job, { name: "desert erg " + ti + "," + tj });
       }
       return [];
     }

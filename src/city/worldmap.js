@@ -181,12 +181,22 @@
     const seed = spec.seed || 1;
     const cell = Math.max(110, Math.min(spec.hx || 300, spec.hz || 300) * 0.48);
     const warp = Math.max(18, Math.min(spec.hx || 200, spec.hz || 200) * 0.13);
-    const wx = (blendNoise2(x, z, cell, seed ^ 0x51f2) - 0.5) * warp * 2;
-    const wz = (blendNoise2(x, z, cell, seed ^ 0x9e37) - 0.5) * warp * 2;
     const edge = (blendNoise2(x, z, Math.max(56, cell * 0.38), seed ^ 0x27d4) - 0.5) * 0.22;
     const p = spec.roundness || 3.35;
+    const multi = Array.isArray(spec.sources) && spec.sources.length;
+    // (a point further than the warp's reach past every lobe's 1.16 extent
+    // gets no lobe whatever the warp says: the two warp noises are skipped,
+    // the answer is the same number. Asked for every continent plate vertex.)
+    let anyLobe = !multi;
+    if (multi) for (let i = 0; i < spec.sources.length; i++) {
+      const s = spec.sources[i];
+      if (Math.abs(x - s.x) < 1.16 * s.rx + warp && Math.abs(z - s.z) < 1.16 * s.rz + warp) { anyLobe = true; break; }
+    }
+    if (!anyLobe) return blendSmooth01((-0.16 + edge + (spec.featherNorm || 0.20)) / ((spec.featherNorm || 0.20) * 2));
+    const wx = (blendNoise2(x, z, cell, seed ^ 0x51f2) - 0.5) * warp * 2;
+    const wz = (blendNoise2(x, z, cell, seed ^ 0x9e37) - 0.5) * warp * 2;
     let signed = -Infinity;
-    if (Array.isArray(spec.sources) && spec.sources.length) {
+    if (multi) {
       // Smooth union of mountain/forest lobes: their feet merge organically,
       // but empty corners between distant peaks stay ordinary country.
       let sum = 0;
