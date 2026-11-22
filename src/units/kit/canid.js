@@ -2710,8 +2710,8 @@
   /* bite(attacker, rig, victim, info) -> contact | null
        info.sev 0..1, info.loc (what the fight went for: arm leg throat flank
        hock rump nose), info.kill; the attacker is the actor (for fromX/Z).
-     People: CBZ.bodyBite(victim, point, { jaw, sev, by, dir, part, fromX, fromZ });
-     animals: CBZ.creatureBiteChunk(victim, point, { jaw, sev, by, dir }).    */
+     People: CBZ.bodyBite(victim, point, { jaw, sev, by, byActor, dir, part, fromX, fromZ });
+     animals: CBZ.creatureBiteChunk(victim, point, { jaw, sev, by, byActor, dir, part, bleedS }). */
   function bite(att, rig, victim, info) {
     if (!rig || !victim || !W.THREE) return null;
     info = info || {};
@@ -2730,11 +2730,13 @@
     try {
       if (person) {
         if (typeof CBZ.bodyBite === "function") {
-          CBZ.bodyBite(victim, { x: ct.x, y: ct.y, z: ct.z }, { jaw: facts.jaw, sev: facts.sev, by: facts.by, dir: facts.dir, part: facts.part,
+          // byActor: the biter itself, so wounds.js can roll the head with the
+          // shake and keep a torn-off piece in this mouth
+          CBZ.bodyBite(victim, { x: ct.x, y: ct.y, z: ct.z }, { jaw: facts.jaw, sev: facts.sev, by: facts.by, byActor: att || null, dir: facts.dir, part: facts.part,
             fromX: att && att.pos ? att.pos.x : undefined, fromZ: att && att.pos ? att.pos.z : undefined, kill: !!info.kill });
         }
       } else if (typeof CBZ.creatureBiteChunk === "function") {
-        CBZ.creatureBiteChunk(victim, { x: ct.x, y: ct.y, z: ct.z }, { jaw: facts.jaw, sev: facts.sev, by: facts.by, dir: facts.dir, part: facts.part });
+        CBZ.creatureBiteChunk(victim, { x: ct.x, y: ct.y, z: ct.z }, { jaw: facts.jaw, sev: facts.sev, by: facts.by, byActor: att || null, dir: facts.dir, part: facts.part, bleedS: 12 });
       }
     } catch (e) {}
     ct.facts = facts;
