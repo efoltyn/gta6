@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 436
+     Natural Disaster Survival, standing alone: index.html minus the 434
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -607,8 +607,8 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=everyone1103f"></script>
-  <script src="src/entities/headwear.js?v=armourm1011"></script>
+  <script src="src/entities/character.js?v=anatomy1122"></script>
+  <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
   <!-- sunglasses FITTED to the head they are worn on (every pair: bling, the detail kit, the portrait, warlord); after character.js + jewelry_kit.js (its street environment) -->
@@ -898,6 +898,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisonwarden.js?v=own1122"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
+<script src="src/systems/facial.js?v=anatomy1122"></script>
 <script src="src/systems/weather.js?v=pace1015"></script>
 <script src="src/systems/compass.js"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
@@ -1007,7 +1008,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_night.js?v=lampglow1022"></script>
 <script src="src/systems/grapple.js?v=contact1122"></script>
 <script src="src/entities/survivorbot.js?v=people1022"></script>
-<script src="src/modes/survival.js?v=noobj1022"></script>
+<script src="src/modes/survival.js?v=anatomy1122"></script>
 <!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
      instant death, i-frames, no chip, physical shelter, regen. survival.js's
      surv.hurt hands the player to it. -->
@@ -1343,7 +1344,8 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=pres1028"></script>
 <script src="src/city/economy.js?v=isleopen1022"></script>
-<script src="src/entities/dutykit.js?v=duty1103d"></script>
+<script src="src/city/clothes.js?v=people1102"></script>
+<script src="src/entities/dutykit.js?v=anatomy1122"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->

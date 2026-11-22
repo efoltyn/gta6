@@ -1,3 +1,17 @@
+# Backlog, 2026-11-22: left over from the anatomy pass (people rebuilt to real proportions)
+
+Not started; pick what you want.
+1. Look at the new body in motion: sitting in cars and on chairs, aiming every gun, prone, ladders, cuffed. Legs are 11% longer and forearms 8 cm longer; the code reads those lengths, but nobody has watched those poses yet.
+2. Warlord kit (webbing, chest pouches) is laid out in fixed numbers for the old wide chest: the webbing sits 27 mm into the forearm.
+3. Suit jackets on a seated teenager: the sleeve head sits 9 mm into the jacket body at the armpit.
+4. Girls' dresses (age ~11): the skirt sits 2 cm into the hanging forearm (it did before too).
+5. Afro on a woman touches the collar by 1 cm on a walking turn.
+6. Kid's hoodie: the hood lies exactly on the upper back in a few spots and may shimmer.
+7. Natural Disaster: the other 99 survivors still wear flat bright colours; only the player wears real clothes.
+8. Toddlers (age 3): shoulder joint check still fails in a few arm poses (it did before too).
+
+---
+
 # Backlog, 2026-11-02 (owner stopped every agent; nothing is running)
 
 ## three.js r187 (r187 on WebGL is LIVE; the WebGPU parts below are not)

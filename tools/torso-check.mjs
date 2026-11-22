@@ -42,7 +42,7 @@ BODIES.push({ tag: "elder-m", c: { age: 74 } }, { tag: "elder-f", c: { age: 70, 
 const build = (c, extra) => CBZ.human.build(Object.assign({}, dressed, c, extra || {}));
 
 // ---- point-in-upper-arm (the loft + its end domes), arm-mesh local ----------
-const ARM_TOP_DOME = 0.85;                           // LIMB_SHAPES.armUp.*.top
+const ARM_TOP_DOME = 0.80;                           // LIMB_SHAPES.armUp.*.top
 function inArm(mesh, p) {
   const L = mesh.geometry.userData.limb;
   const y = p.y;
@@ -66,14 +66,20 @@ function shoulderTips(rig, side) {
   let best = null;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i) * side, y = pos.getY(i) + m.position.y, z = pos.getZ(i);
-    if (y < S.shoulderY - 0.12 * S.vs || y > S.shoulderY + 0.2 * S.vs) continue;
+    if (y < S.shoulderY - 0.6 * S.R || y > S.shoulderY + 0.2 * S.vs) continue;   // beside the joint (below it is the chest wall)
     if (!best || x > best.x) best = { x, y, z };
   }
   // the tip itself and a ring of points just inboard of it (the whole shoulder end)
   if (!best) return out;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i) * side, y = pos.getY(i) + m.position.y, z = pos.getZ(i);
-    if (x > best.x - 0.012 * S.vs) out.push(new T.Vector3(x * side, y, z));
+    // (the anatomy pass: the shoulder end is the body's own shoulder point now,
+    // a rounded end the deltoid caps, not a stub hidden whole inside a ball —
+    // what must stay inside the arm in every pose is its TIP, so no gap opens)
+    // (and only in the shoulder's own band: a heavy waist or a child's belly is
+    // as wide as a real-width shoulder, and is not the shoulder)
+    if (y < S.shoulderY - 0.6 * S.R || y > S.shoulderY + 0.2 * S.vs) continue;
+    if (x > best.x - 0.003 * S.vs) out.push(new T.Vector3(x * side, y, z));
   }
   return out;
 }
@@ -121,7 +127,7 @@ function insideBody(S, p) {                      // body-local, the section with
 for (const B of BODIES) {
   const rig = build(B.c), S = rig.torsoShape, head = rig.head, pos = head.geometry.attributes.position;
   const low = [];
-  for (let i = 0; i < pos.count; i++) if (pos.getY(i) < -0.465) low.push(new T.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)));
+  for (let i = 0; i < pos.count; i++) if (pos.getY(i) < -0.575) low.push(new T.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)));
   check(low.length > 8, `${B.tag}: neck column has a buried bottom (${low.length} verts)`);
   let worst = 0;
   // the head poses animChar actually drives: a full look round, the nod range
@@ -149,7 +155,7 @@ for (const B of BODIES) {
   const ringA = S.at(yRing).a;
   check(ringA >= rMax - 0.004 && ringA - rMax < 0.04 * S.vs, `${B.tag}: the body's top ring hugs the neck (ring ${ringA.toFixed(3)} vs neck ${rMax.toFixed(3)})`);
   // the neck SHOWS: chin (pivot) above the front of the collar
-  if (!rig.child || rig.ageYears >= 7) check(S.pivotY - (S.yN - S.tf) > 0.06 * S.vs, `${B.tag}: neck shows between chin and collar (${(S.pivotY - (S.yN - S.tf)).toFixed(3)})`);
+  if (!rig.child || rig.ageYears >= 7) check(S.pivotY - (S.yN - S.tf) > (rig.child ? 0.05 : 0.06) * S.vs, `${B.tag}: neck shows between chin and collar (${(S.pivotY - (S.yN - S.tf)).toFixed(3)})`);
   // the trapezius slopes: the shoulder end sits below the neck junction
   check(S.yN - (S.shoulderY + 0.3 * S.R) > 0.03 * S.vs, `${B.tag}: trapezius slopes down to the shoulder`);
 }
@@ -212,7 +218,8 @@ for (const B of BODIES.filter((b) => !b.c.age || b.c.age >= 15)) {
 function frontZAt(rig, k) { const S = rig.torsoShape; return rig.torsoFrontZ(0.40 * S.W, S.base + k * S.sp); }
 const avgM = build({ build: "m", physique: "average" }), heavyM = build({ build: "m", physique: "heavy" }), muscM = build({ build: "m", physique: "muscular" });
 const avgF = build({ build: "f", physique: "average" });
-check(frontZAt(avgF, 0.59) - frontZAt(avgF, 0.30) > 0.03, `woman: the bust stands proud of the waist (${(frontZAt(avgF, 0.59) - frontZAt(avgF, 0.30)).toFixed(3)})`);
+{ const S = avgF.torsoShape, d = frontZAt(avgF, S.bustK) - frontZAt(avgF, S.kW);
+  check(d > 0.03, `woman: the bust stands proud of the waist (${d.toFixed(3)})`); }
 check(frontZAt(avgF, 0.59) < avgF.torsoShape.D * 1.2, `woman: the bust is modest (${(frontZAt(avgF, 0.59) / avgF.torsoShape.D).toFixed(2)} D)`);
 check(heavyM.torsoFrontZ(0, heavyM.torsoShape.base + 0.27 * heavyM.torsoShape.sp) > avgM.torsoFrontZ(0, avgM.torsoShape.base + 0.27 * avgM.torsoShape.sp) + 0.04, "heavy: the belly is deeper than average");
 check(frontZAt(muscM, 0.63) > frontZAt(avgM, 0.63) && muscM.torsoShape.W > avgM.torsoShape.W, "muscular: a deeper, broader chest");

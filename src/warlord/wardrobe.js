@@ -352,6 +352,7 @@
       if (n && n.parent) n.parent.remove(n);
     }
     rig._wlKit = null;
+    if (CBZ.humanArmGear) CBZ.humanArmGear(rig, "wl-kit", null);
     if (rig._wlCuffBase != null) { rig.armOutZ = rig._wlCuffBase; rig._wlCuffBase = null; }
   }
   // how far in front of the chest an ornament has to sit to clear whatever is
@@ -435,7 +436,8 @@
       const wTop = hs * 0.28 + 0.15 * k;
       let wBot = hs * 0.28 - 0.15 * k;
       const yp = yoke && yoke.geometry && yoke.geometry.parameters;
-      if (yp && yoke.parent === neck.parent) wBot = Math.max(wBot, yoke.position.y + yp.height / 2 - neck.position.y + 0.015 * k);
+      // (a body length into the neck's frame: over the scale the head is drawn at)
+      if (yp && yoke.parent === neck.parent) wBot = Math.max(wBot, (yoke.position.y + yp.height / 2 - neck.position.y) / (neck.scale.y || 1) + 0.015 * k);
       const wire = box(0.022 * k, (wTop - wBot) / Math.cos(0.14), 0.022 * k, 0xd2cec5);
       wire.position.set(hs * 0.44, (wTop + wBot) / 2, -hs * 0.06); wire.rotation.z = 0.14; add(neck, wire);
     }
@@ -739,8 +741,11 @@
         const pz = zOn(-cb.w * 0.43, cb.w * 0.43, cb.h * 0.02 - cb.h * 0.31, cb.h * 0.02 + cb.h * 0.31) - 0.02;
         pl.position.set(0, cb.h * 0.02, pz); add(chest, pl);
         for (let i = 0; i < 3; i++) {
-          const pouch = box(0.16, 0.13, 0.09, shade(K.plate, -0.18));
-          pouch.position.set(-0.20 + i * 0.20, -cb.h * 0.20, pz + 0.025); add(chest, pouch);
+          // (across THIS chest: 0.16 pouches 0.20 apart were laid out on a 0.53
+          // chest box and hung past a real one's ribs into the arms)
+          const pk = Math.min(1, cb.w / 0.53);
+          const pouch = box(0.16 * pk, 0.13, 0.09, shade(K.plate, -0.18));
+          pouch.position.set((-0.20 + i * 0.20) * pk, -cb.h * 0.20, pz + 0.025); add(chest, pouch);
         }
       }
       if (K.scarf != null) {
@@ -749,6 +754,8 @@
       }
     }
     rig._wlKit = out;
+    // the arms hang clear of whatever this kit put on the hips (webbing, pouches)
+    if (CBZ.humanArmGearFit) CBZ.humanArmGearFit(rig, "wl-kit", out.filter(function (m) { return m && m.parent && (m.parent === rig.body || m.parent.parent === rig.body); }), 0.006);
     return out.length;
   }
 

@@ -82,7 +82,18 @@ const needed = new Set(manifest.needed || []);
    lights compiled the whole island again and kept it: shader programs climbed
    41 -> 377 over three matches on the phone build and never came down
    (tools/probes/disaster-leak.mjs). index.html always had it; on a phone it
-   pins the same 3 nearest lights there. */
+   pins the same 3 nearest lights there.
+
+   2026-11-21 + city/clothes.js (bytes: 265 KB) + systems/facial.js (21 KB).
+   Owner: "look at player in nat disaster and it should be same as other
+   games." The search dropped both: the island boots without a wardrobe or a
+   living face. But without clothes.js the player stood on the island in the
+   convict's flat orange jumpsuit (every other game dresses the rig; nothing
+   here could), and without facial.js no face on the island ever blinked or
+   looked at anything, and every one of the hundred stayed on the NEAR eye
+   tier at any distance (five eye meshes a body: facial.js is also what drops
+   a far face to one). modes/survival.js dresses the player through
+   clothes.js's closet recipe. */
 const pin = new Set(manifest.pin || []);
 for (const p of pin) { drop.delete(p); needed.delete(p); }
 
