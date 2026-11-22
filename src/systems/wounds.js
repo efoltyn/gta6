@@ -3995,7 +3995,8 @@
           if (!S || !S.nc || gridBuild(S, 1200)) { bite.k++; continue; }
           return false;
         }
-        bite.phase = 1;
+        bite.phase = bite.stain ? 2 : 1;      // (the blood on a mouth: no teeth, no flesh, just its marks)
+        bite.k = 0;
         return false;
       case 1:                            // the plan: the teeth
         lay(bite, bite.strikes, bite.P, bite.N, bite.S, bite.U, bite.trav, bite.wrap, bite.cut, bite.op);
@@ -4974,6 +4975,7 @@
     if (res.bite) res.bite.note = LEDGER.lastBite;
     // BLEEDING INTO THE SEA: the trail leaves from the bitten part itself
     if (res.wet) bleedFor(actor, res.lead || res.host, Math.max(0.35, Math.min(1, 0.4 + sev * 0.6)), 18 + sev * 14);
+    biteBlood(actor, res, opts, who, sev, "person");
 
     // A MAULED LEG is a collapse: character.js's own legHurt channel
     const region = res.region;
@@ -5415,7 +5417,8 @@
     _cbv.copy(res.P);
     actor.group.worldToLocal(_cbv);
     B.lx = _cbv.x; B.ly = _cbv.y; B.lz = _cbv.z;
-    if (!res.wet) return true;           // land: the caller owns the ground's blood
+    biteBlood(actor, res, opts, who, sev, "animal");
+    if (!res.wet) return true;           // land: biteBlood has it (the caller's spray is not doubled)
     /* BLOOD IN THE WATER: it erupts from the flank along the wound's own
        outward normal, and an animal (not each hole) trails it */
     if (CBZ.goreBloom) {
@@ -5431,6 +5434,157 @@
     }
     return true;
   };
+
+  /* ---- EVERY BITE BLEEDS, AND SO DO THE JAWS THAT DID IT --------------------
+     (owner, 2026-11-22: "improve the blood ... attack in water and on land").
+     A bite on land used to leave the marks on the skin and nothing on the
+     ground unless its caller fired gore at the jaw, and nothing after it.
+     Now, through gore.js's own blood (the jail's: its spray, drips, pools,
+     smears, streams, and in the sea its cloud):
+       • THE BITE BLEEDS at once: gore.js's goreBite throws the spray (heavy
+         drops and a short stream, sized from the wound) unless the caller's
+         gore at the jaw already did, and in the sea a gush into the cloud
+       • THE BODY GOES ON BLEEDING (goreBleed): a flow from the wound in
+         litres a second, sized from the wound and the vessel under it. An
+         opened carotid or femoral pours ~1.3 L/min and spurts; an arm's
+         artery less; torn muscle a few millilitres a second. Drips while it
+         stands, a pool under it once it is down, a smear when it is dragged.
+       • THE JAWS CARRY IT: blood drips from the attacker's mouth on land and
+         trails behind it in the sea for a few seconds, and its muzzle, lips
+         and teeth are stained (the fur mats dark, bare skin takes a red
+         film), the water washing it off over the next minute. */
+  const _bbM = new THREE.Matrix4(), _bbL = new THREE.Vector3(), _bbD = new THREE.Vector3(), _bbN = new THREE.Vector3();
+  // the vessel under a bite: the part the attacker went for when it says,
+  // else where on a person the wound is (a thigh, an upper arm, the throat)
+  function vesselOf(actor, res, opts, kind) {
+    const part = String((opts && opts.part) || "");
+    if (/throat|neck/i.test(part)) return "neck";
+    if (/thigh|haunch|hind/i.test(part)) return "thigh";
+    if (/upperarm/i.test(part)) return "arm";
+    if (kind !== "person" || !res.host) return null;
+    const S = actor.char && actor.char.skinSlots;
+    if (!S) return null;
+    for (let k = 0, m = res.host; k < 3 && m; k++, m = m.parent) {
+      if (S.legs && S.legs.indexOf(m) >= 0) return "thigh";
+      if (S.arms && S.arms.indexOf(m) >= 0) return "arm";
+      if (S.collar && S.collar.indexOf(m) >= 0) return "neck";
+      if (S.head && S.head.indexOf(m) >= 0) {
+        // the lowest third of the head is the throat
+        const g = m.geometry;
+        if (!g || !g.attributes || !g.attributes.position) return null;
+        if (!g.boundingBox) g.computeBoundingBox();
+        const bb = g.boundingBox;
+        m.updateWorldMatrix(true, false);
+        _bbL.set(res.P.x, res.P.y, res.P.z).applyMatrix4(_bbM.copy(m.matrixWorld).invert());
+        return _bbL.y < bb.min.y + (bb.max.y - bb.min.y) * 0.33 ? "neck" : null;
+      }
+    }
+    return null;
+  }
+  function biteBlood(actor, res, opts, who, sev, kind) {
+    if (!res || !res.P || typeof CBZ.goreBite !== "function") return;
+    const P = res.P, N = res.N || _bbN.set(0, 1, 0);
+    const vessel = vesselOf(actor, res, opts, kind);
+    const artery = vessel === "neck" || vessel === "thigh";
+    const size = Math.max(0.02, Math.min(0.4, res.size || 0.06));
+    // 1. the bite's own spray (land) or gush (sea), sized from the wound
+    const amt = Math.max(0.3, Math.min(1.7, 0.35 + size * 4 + sev * 0.5 + (artery ? 0.4 : 0) + (res.removed ? 0.25 : 0)));
+    try { CBZ.goreBite(P.x, P.y, P.z, { dir: N, amount: amt, arterial: artery }); } catch (e) {}
+    // 2. the body goes on bleeding (in the sea bleedFor already trails it;
+    //    a body dragged out of the sea onto land carries on here)
+    if (!res.wet && typeof CBZ.goreBleed === "function") {
+      let lps = vessel === "neck" ? 0.022 : vessel === "thigh" ? 0.02 : vessel === "arm" ? 0.007 : 0.0015 + size * 0.03;
+      lps *= 0.6 + 0.6 * sev;
+      if (res.removed) lps *= 1.4;
+      const host = res.host || null;
+      let local = null, dir = null;
+      if (host && host.matrixWorld) {
+        host.updateWorldMatrix(true, false);
+        _bbM.copy(host.matrixWorld).invert();
+        local = _bbL.set(P.x, P.y, P.z).applyMatrix4(_bbM);
+        dir = _bbD.set(N.x, N.y, N.z).transformDirection(_bbM);
+      }
+      try { CBZ.goreBleed(actor, { node: host, local: local, dir: dir, lps: lps, tau: vessel ? 70 : 35, vessel: vessel }); } catch (e) {}
+    }
+    // 3. the jaws that did it
+    const att = who && who.actor;
+    if (att && att !== actor && att.group && typeof CBZ.goreBleed === "function" && typeof CBZ.goreMouthAt === "function") {
+      try {
+        CBZ.goreBleed(att, { mouth: true, at: function (out) { return CBZ.goreMouthAt(att, out); },
+          lps: Math.min(0.012, 0.002 + amt * 0.004), tau: res.wet ? 12 : 8 });
+      } catch (e) {}
+      try { stainMouth(att, !!res.wet, amt); } catch (e) {}
+    }
+  }
+  // the blood on an attacker's muzzle, lips and teeth: a mark on its own
+  // body like any other (one job, no teeth and no flesh), a few a body
+  const _mw = { x: 0, y: 0, z: 0 };
+  function stainMouth(att, wet, amt) {
+    if (!att.group.parent || att.culled) return false;
+    const now = performance.now();
+    if (now - (att._mouthStainT || -1e9) < 5000 || (att._mouthStainN || 0) >= 3) return false;
+    if (!CBZ.goreMouthAt(att, _mw)) return false;
+    const g = att.group, ud = g.userData || {};
+    let jr = 0.12;
+    try {
+      if (ud.marineBody && CBZ.marineJawRadius) jr = CBZ.marineJawRadius(g) || jr;
+      else if (ud.canidRig && CBZ.canid && CBZ.canid.jawRadius) jr = CBZ.canid.jawRadius(ud.canidRig) || jr;
+      else if (CBZ.creatureJawRadius) jr = CBZ.creatureJawRadius(att) || jr;
+    } catch (e) {}
+    jr = Math.max(0.04, Math.min(0.6, jr));
+    const P = { x: _mw.x, y: _mw.y, z: _mw.z };
+    const surfs = animalSurfaces(att, P, jr * 2 + 0.2);
+    if (!surfs.length) return false;
+    let nc = 0;
+    for (let i = 0; i < surfs.length; i++) { surfacePose(surfs[i]); nc += surfaceNear(surfs[i], P.x, P.y, P.z, jr * 2); }
+    if (!nc) return false;
+    const h = nearestAll(surfs, P.x, P.y, P.z, _H0);
+    if (!h) return false;
+    const seat = copyHit(h);
+    const coat = coatOf(att, "animal");
+    const n = new THREE.Vector3(seat.nx, seat.ny, seat.nz);
+    const T = new THREE.Vector3().crossVectors(n, Math.abs(n.y) < 0.9 ? _gv.set(0, 1, 0) : _gv.set(1, 0, 0)).normalize();
+    const bite = {
+      actor: att, surfs: surfs, bufs: Object.create(null), keys: [], dent: null, sev: 0.2, who: { actor: null, sid: "" }, kind: "animal",
+      tissue: tissueOf(att, "animal"), coat: coat, wet: wet, seatS: seat.S, made: 0, removed: 0, severed: 0,
+      els: [], strikes: [], ext: null, fold: 0, warm: false, stain: true, op: null, cut: null, flapAt: null,
+      R: jr * 2, wp: P, phase: 17, k: 0, t0: now,
+    };
+    // long along the lips, short up the face: the jaws and the teeth in
+    // them, the chin and the muzzle round them, not the eyes above
+    const k = 0.85 + 0.15 * Math.min(1.5, amt);
+    const along = jr * 1.6 * k, up = jr * 0.8 * k, deep = Math.max(0.03, jr * 0.6);
+    // in the sea the water takes it off over the next minute; on land it stays
+    const grow = { type: "grow", g0: 0.35, g1: 0.75, T: 1.2, creep: 20 };
+    const anim = wet ? [grow, { type: "alpha", from: 1, to: 0, T: 50, t0: 4 }] : grow;
+    if (coat === "fur") bite.els.push(elAt("s", SCELL.soakFur, seat, T, along / 0.62, up / 0.62, deep, TINT.soakFur, null, anim, null));
+    else {
+      bite.els.push(elAt("s", SCELL.bloodSkin, seat, T, along / 0.56, up / 0.56, deep, withA(TINT.bloodSkin, wet ? 0.85 : 1), null, anim, null));
+      if (!wet) bite.els.push(elAt("w", TCELL.blood, seat, T, along * 0.6 / 0.6, up * 0.6 / 0.6, deep, [0, 0, 0, 0.9], null, grow, null));
+    }
+    // and the outside of the muzzle in front of it (the snout, the lips, the
+    // chin): seated on the skin just ahead of the mouth, projected along that
+    // skin's own normal
+    {
+      const gp = g.getWorldPosition(_bbL);
+      let fx = P.x - gp.x, fz = P.z - gp.z;
+      const fl = Math.hypot(fx, fz);
+      if (fl > 1e-3) {
+        fx /= fl; fz /= fl;
+        const h2 = nearestAll(surfs, P.x + fx * jr * 0.45, P.y - jr * 0.2, P.z + fz * jr * 0.45, _H1);
+        if (h2) {
+          const out = copyHit(h2), n2 = new THREE.Vector3(out.nx, out.ny, out.nz);
+          const T2 = new THREE.Vector3().crossVectors(n2, Math.abs(n2.y) < 0.9 ? _gv.set(0, 1, 0) : _gv.set(1, 0, 0)).normalize();
+          if (coat === "fur") bite.els.push(elAt("s", SCELL.soakFur, out, T2, along * 0.8 / 0.62, up * 0.6 / 0.62, deep, TINT.soakFur, null, anim, null));
+          else bite.els.push(elAt("s", SCELL.bloodSkin, out, T2, along * 0.8 / 0.56, up * 0.6 / 0.56, deep, withA(TINT.bloodSkin, wet ? 0.8 : 0.95), null, anim, null));
+        }
+      }
+    }
+    JOBS.push(bite);
+    LEDGER.jobs++; LEDGER.mouthStains = (LEDGER.mouthStains || 0) + 1;
+    att._mouthStainT = now; att._mouthStainN = (att._mouthStainN || 0) + 1;
+    return true;
+  }
 
   /* ---- ONE TRAIL PER ANIMAL, not one per hole -----------------------------
      gore.js caps the whole game at twelve chum handles and city/
