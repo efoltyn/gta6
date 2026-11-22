@@ -653,6 +653,8 @@
      ladder escalates). From then on the input is the struggle.
      ============================================================ */
   let live = null;
+  const TAKEDOWN = 0.6;            // contest progress at which a standing cuff becomes a takedown
+  A.TAKEDOWN = TAKEDOWN;
   A.active = function () { return live && !live.done ? live : null; };
   function end(h, outcome, why) {
     if (!h || h.done) return;
@@ -739,6 +741,7 @@
     if (down && Vb.cuffDown) {
       const o = sessOpts(h);
       o.far = 6;
+      o.lift = true;                    // cuffed, he comes up off his knee with a hand on your arm
       o.onOutcome = function (S, k) { if (k === "cuffed") h._tied = true; };
       const S = Vb.cuff(h.officer, pa, o);
       h.cuffS = S || null;
@@ -824,6 +827,27 @@
         if (!h.said.hands) { h.said.hands = true; say(off, h.pinned || h.onGround ? "Stay down! Hands behind your back!" : "Hands behind your back!"); }
       }
       if (h.phase === "cuffing" && S.cst && S.cst.prog > 0.35 && !h.said.resist) { h.said.resist = true; say(off, "Stop resisting!"); }
+      /* TAKEN TO THE FLOOR. A man fighting the cuffs on his feet and winning
+         (the contest more than TAKEDOWN of the way off the grip) is not let
+         go of: the officer drives him forward onto his face along the line
+         he holds him on, and kneels on him for the rest of it (the ground
+         cuff, pinned odds). Once per take; a man who wins it again on the
+         floor is loose. */
+      if (h.phase === "cuffing" && !S.done && !S.ground && !h._tdown && S.cst && S.cst.prog > TAKEDOWN && Vb.knockdown) {
+        h._tdown = true;
+        const op = posOf(off);
+        let dx = P.pos.x - op.x, dz = P.pos.z - op.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+        S.cancel();
+        let downed = false;
+        try { downed = !!Vb.knockdown(Vb.playerActor(), { dir: { x: dx, z: dz }, variant: "face", dur: 3.2, ko: false, power: 0.55, travel: 0.35 }); } catch (e) {}
+        if (CBZ.sfx) { try { CBZ.sfx("punch"); } catch (e) {} }
+        if (CBZ.shake) { try { CBZ.shake(0.4); } catch (e) {} }
+        say(off, "Get down! Get on the ground!");
+        if (!downed) { end(h, "escaped", "struggle"); cb(h, "onEscaped", "struggle"); return; }
+        h.pinned = true; h.t0 = clock; h.cuffS = null; h.phase = "reach"; h.reachT = 0; h.onGround = false;
+        A.subdue(1.4, "pinned");
+        return;
+      }
       if (h.phase === "cuffing" && !S.done && (playerInVehicle() || !A.contact(off, Vb.playerActor(), true, 2.4))) {
         S.cancel();
         end(h, "escaped", "apart"); cb(h, "onEscaped", "apart");
@@ -874,6 +898,22 @@
         return;
       }
       if (S.phase !== "hold") return;
+      /* HE FEELS YOU PULL. Half way off his grip, the officer is yanked a step
+         toward you and re-sets it (a stagger on his body, and the hold
+         clamps: the next beat is a brace); a second time only after he had
+         it back under control. */
+      if (S.cst) {
+        if (S.cst.prog > 0.5 && !h._yank) {
+          h._yank = true;
+          const op = posOf(off);
+          if (Vb.react && op) {
+            let dx = P.pos.x - op.x, dz = P.pos.z - op.z; const l = Math.hypot(dx, dz) || 1;
+            try { Vb.react(off, { reaction: "stagger", zone: "body", power: 0.35, stagger: true, dir: { x: dx / l, z: dz / l } }); } catch (e) {}
+          }
+          S.cst.beat = 0;                               // the re-grip: straight into a brace
+          if (!h.said.resist) { h.said.resist = true; say(off, "Stop resisting!"); }
+        } else if (S.cst.prog < 0.25) h._yank = false;
+      }
       // DEAD WEIGHT: crouch and he has to drag you (and a lone man can trip on it)
       const keys = CBZ.keys || {};
       const crouch = !!(keys.c || keys.control);
