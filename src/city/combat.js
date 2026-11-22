@@ -282,7 +282,7 @@
   function cityCandidates(out) {
     const cops = CBZ.cityCops, peds = CBZ.cityPeds;
     if (cops) for (let i = 0; i < cops.length; i++) { const c = cops[i]; if (c && !c.dead) out.push(c); }
-    if (peds) for (let i = 0; i < peds.length; i++) { const p = peds[i]; if (p && !p.dead && !p.vendor && !p.inCar) out.push(p); }
+    if (peds) for (let i = 0; i < peds.length; i++) { const p = peds[i]; if (p && !p.dead && !p.inCar) out.push(p); }
     // bodies another system scores itself (the arena cage opponent): a landed
     // blow is handed to its meleeHit(res, dmg) instead of the street's paths
     const ex = CBZ.cityMeleeTargets;
@@ -362,7 +362,7 @@
       if (score < bd) { bd = score; best = a; }
     };
     for (const c of CBZ.cityCops) consider(c);
-    for (const p of CBZ.cityPeds) if (!p.vendor) consider(p);
+    for (const p of CBZ.cityPeds) consider(p);
     return best;
   }
 

@@ -433,6 +433,8 @@
       im.frustumCulled = true;
       im.name = "facade-trim";
       im.userData.glassPool = true;              // the pane pools' lifecycle (distance sweep, audits)
+      // a phone draws a sector's frames and sills only near it (core/instcull.js drawDist)
+      if (CBZ.isMobileDevice) im.userData.drawDist = 140;
       root.add(im); glassPools.push(im);
     });
   }
@@ -5984,8 +5986,15 @@
     // case were all shut in a 5.5 m strip you reached through a 1.7 m hole in a
     // grey partition. A shop's stockroom is a room BESIDE the counter, which is
     // what fitout_work.js's buildStockroom stands whenever this wall is absent.
+    // NOT THE BANK. Its back of house is the strongroom city/bank.js stands
+    // rd (<= 4.6 m) off the back wall, with the tellers in front of it. This
+    // wall at 5.5 m stood a metre in FRONT of that partition, so the vault door
+    // (offset 2.2 m to one side) was walled in behind solid plaster with only
+    // the centred doorway into the gap, and the teller line and the manager
+    // were squeezed into a 1 m slot between two walls.
     const BACK_OF_HOUSE = { bank: 1, cityhall: 1, courthouse: 1, federal: 1, cityannex: 1, postoffice: 1, dmv: 1, library: 1 };
-    const backWalled = !!BACK_OF_HOUSE[kind] && (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
+    const vaultBack = kind === "bank" && !(CBZ.CONFIG && CBZ.CONFIG.BANK_VAULT_V1 === false);
+    const backWalled = !!BACK_OF_HOUSE[kind] && !vaultBack && (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
     if (backWalled) {
       const WALLH = FHl - 0.05;
       const backDepth = 2 * halfIn - 5.5;            // wall sits ~5.5u in front of the back wall

@@ -5013,13 +5013,21 @@
     // would re-arm him and wipe the surrender/rage fields every tick, which is
     // how a cuffed crew member kept shooting with his hands behind his back.
     if (ped.companion) { if (!ped.restraint) companionThink(ped, dt, active); return; }
-    if (ped.dead || ped.vendor || ped.ko > 0) return;
+    if (ped.dead || ped.ko > 0) return;
     if (ped.controlled) return;     // city/social.js drives companions/hostages/kidnap victims
+    // THE PERSON BEHIND THE COUNTER (a shop's vendor, a bank's teller, its
+    // manager, its guard): city/keepers.js is his brain while he holds his
+    // post — fear under a gun, cowering, the alarm, opening the vault. When
+    // it lets him go (_keepFree: he bolts, he fights, he walks to the vault)
+    // the ordinary brain below runs him like anybody else.
+    if (ped.vendor || ped.staffPost) {
+      if (CBZ.cityKeeper && CBZ.cityKeeper.think(ped, dt)) return;
+      if (!ped._keepFree) { if (ped.staffPost) staffThink(ped, dt); return; }
+    }
     // ON THE DEMAND LADDER (city/ladder.js -> CBZ.brain.demand): a mugger, a
     // doorman, a crew on its corner mid "give me your money" — the ladder
     // steps him every frame; the routine brain keeps off him meanwhile
     if (ped._ladder && CBZ.cityLadder && CBZ.cityLadder.hold(ped, dt)) return;
-    if (ped.staffPost) { staffThink(ped, dt); return; }   // posted package staff: rooted brain, gunpoint-aware
     const B = A0();
     const P = CBZ.player, px = P.pos.x, pz = P.pos.z;
     const ddx = ped.pos.x - px, ddz = ped.pos.z - pz, dpl = Math.hypot(ddx, ddz);
@@ -5736,7 +5744,7 @@
   }
 
   function markGunpoint(ped, hold) {
-    if (!ped || ped.dead || ped.ko > 0 || ped.vendor || ped.controlled) return false;
+    if (!ped || ped.dead || ped.ko > 0 || ped.controlled) return false;
     const B = A0();
     const boldEnough = ped.aggr >= (B.crook || 0.72) && (ped.armed || ped.aggr >= (B.violent || 0.88));
     if (ped.armed || boldEnough) return false;   // armed peds draw + aim back, never surrender
@@ -5754,7 +5762,7 @@
     // city peds (mirrors the jail npc flag); char.handsUp keeps the base pose.
     ped.poseHandsUp = true; ped.poseAimBack = false;
     if (ped.reportState) cancelReport(ped);
-    if (ped.group && CBZ.player && CBZ.player.pos) {
+    if (ped.group && CBZ.player && CBZ.player.pos && !ped._pointAt) {
       const dx = CBZ.player.pos.x - ped.pos.x, dz = CBZ.player.pos.z - ped.pos.z;
       if (dx * dx + dz * dz > 0.04) faceYaw(ped, Math.atan2(dx, dz), 1.0);
     }
@@ -5970,7 +5978,7 @@
   }
 
   CBZ.cityScare = function (a, threat, opts) {
-    if (!a || a.dead || a.ko > 0 || a.isPlayer || a.controlled || a.vendor) return "hold";
+    if (!a || a.dead || a.ko > 0 || a.isPlayer || a.controlled) return "hold";
     opts = opts || {};
     const now = (CBZ.now != null ? CBZ.now : (typeof performance !== "undefined" ? performance.now() : 0));
     if ((a._scareUntil || 0) > now) return a._scareChoice || "hold";
@@ -6010,6 +6018,8 @@
     a.rage = null; a.pause = 0;
     a.fear = Math.max(a.fear || 0, 10);
     a.alarmed = Math.max(a.alarmed || 0, 6);
+    // a keeper who bolts leaves his post (city/keepers.js lets the legs go)
+    if (a.vendor || a.staffPost) a._keepFree = true;
     if (tp) fleeFrom(a, tp.x, tp.z); else a.state = "flee";
     // the first ring knows why ("He's got a gun!"), and is news to the next
     if (CBZ.voice) CBZ.voice.react(a, attArmed ? "seeGun" : "seeRun", { by: threat || null, how: "sprint", why: attArmed ? "gun" : null, ring: 0 });
@@ -6034,7 +6044,7 @@
   // ONE body's answer to the levelled gun. Shared by both routes below so the
   // grid path cannot drift from the linear one.
   function _gunpointOne(ped, dt, px, pz, fx, fz, B, P) {
-    if (!ped || ped.dead || ped.vendor || ped.ko > 0 || ped.controlled || ped.companion || ped._parked || ped.recruited) return;
+    if (!ped || ped.dead || ped.ko > 0 || ped.controlled || ped.companion || ped._parked || ped.recruited) return;
     const dx = ped.pos.x - px, dz = ped.pos.z - pz, d2 = dx * dx + dz * dz;
     if (d2 > 121) {                                  // out of 11m gunpoint range → relax
       if (ped._covered) { _relaxGunpoint(ped, dt); }
@@ -6046,6 +6056,9 @@
       ped._coverGrace = 0.6;                          // hold the pose for a beat after look-away
       ped._covered = true;
       _coverAdd(ped);                                 // so the relax pass can find it anywhere
+      // a keeper with his hands busy at your order (city/keepers.js: working
+      // the vault's timelock) stays covered, but nobody re-poses him
+      if (ped._keepBusy || ped._keepCalm) return;
       // ANYONE holding a gun squares up and levels it BACK — a guy with a gun
       // never throws his hands up. A fearless unarmed bruiser also stands his
       // ground. Everyone else (unarmed, not fearless) throws their hands up.
@@ -6102,7 +6115,7 @@
         const ped = _coverList[i];
         if (!ped._covered) { ped._inCoverList = false; _coverList.splice(i, 1); continue; }
         if (ped._gpSeen === frame) continue;
-        if (ped.dead || ped.vendor || ped.ko > 0 || ped.controlled || ped.companion || ped._parked || ped.recruited) continue;
+        if (ped.dead || ped.ko > 0 || ped.controlled || ped.companion || ped._parked || ped.recruited) continue;
         _relaxGunpoint(ped, dt);
       }
       return;
@@ -6319,14 +6332,14 @@
         return;
       }
     }
-    if (ped.vendor) { standStill(ped, dt, false); if (animate) animChar(ped.char, 0, dt); return; }
-    if (ped.staffPost) {
-      // POSTED STAFF root exactly like a vendor (no movement integration, no
-      // wander) BUT — unlike a vendor — they SHOW the gunpoint hands-up. The
-      // gunpointSweep/markGunpoint set ped.surrender (they aren't ped.vendor, so
-      // the sweep sees them); we return before move()'s own surrender→char.handsUp
-      // translation, so mirror it here. The held pose (ped.char.pose, via animChar)
-      // shows while calm; hands-up overrides it (animChar's arm precedence).
+    if ((ped.vendor || ped.staffPost) && !ped._keepFree) {
+      // A KEEPER AT HIS POST (a shop vendor, posted bank staff): rooted, no
+      // movement integration, no wander, but he SHOWS the gunpoint hands-up.
+      // The gunpointSweep/markGunpoint set ped.surrender; we return before
+      // move()'s own surrender->char.handsUp translation, so mirror it here.
+      // The held pose (ped.char.pose, via animChar) shows while calm; hands-up
+      // overrides it (animChar's arm precedence). Once city/keepers.js lets
+      // him go (_keepFree) he moves like anybody else.
       if (ped.surrenderT > 0) { ped.surrenderT = Math.max(0, ped.surrenderT - dt); ped.surrender = true; }
       const surr = ped.surrender || ped.surrenderT > 0 || ped.state === "surrender";
       if (ped.char) { ped.char.surrender = false; ped.char.handsUp = !!surr; }
@@ -6736,7 +6749,9 @@
       o.face = Math.atan2(_cf.pos.x - ped.pos.x, _cf.pos.z - ped.pos.z); o.strafe = true;
     } else if (ped._faceHold > 0 && (cmdSpd <= 0 || m.arrived)) o.face = ped._faceYaw;
     else if (ped._faceHold > 0 && cmdSpd > 0) ped._faceHold = 0;   // a walker faces where he walks: the look is spent
-    if (lod === 0 && (cmdSpd > 0 || o.vffX || o.vffZ)) {
+    // (a keeper walked to the vault at gunpoint squeezes past his colleagues
+    // at their windows: city/keepers.js _keepThrough)
+    if (lod === 0 && !ped._keepThrough && (cmdSpd > 0 || o.vffX || o.vffZ)) {
       const n = gatherNbrs(ped, !order && (st === "walk" || st === "wander"));
       if (n) { o.nbrs = _nbrO; o.nbrN = n; }
     }
@@ -6988,6 +7003,8 @@
   // case while costing nothing at all in the normal one, where the deadline
   // buys far more than eight.
   const SIM_MIN_THINKS = 8;
+  const MOBILE_STAGGER = !!CBZ.isMobileDevice;
+  const FAR_STAGGER_D2 = 160 * 160;
   CBZ.onUpdate(34, function (dtFrame) {
     let dt = dtFrame;
     if (!econ()) return;
@@ -7228,7 +7245,12 @@
       // pays it back so distance never changes anybody's effective speed.
       if (CBZ.CONFIG.PED_BRAIN_STAGGER && d2 > VIS_D2 &&
           !(p.alarmed > 0 || p.npcHeat > 0 || p.rage || p.controlled || p.reportState)) {
-        if (((i + frame) % 3) !== 0) { p._dtBank = (p._dtBank || 0) + dt; continue; }
+        // a phone thins the far crowd harder: past 160 m (well beyond its
+        // 45 m ped draw) a body thinks and walks one frame in eight. Measured
+        // on the phone profile at the Gang City spawn: ~220 of ~400 peds
+        // stand past 150 m, and they were a third of the ped tick.
+        const every = (MOBILE_STAGGER && d2 > FAR_STAGGER_D2) ? 8 : 3;
+        if (((i + frame) % every) !== 0) { p._dtBank = (p._dtBank || 0) + dt; continue; }
         if (p._dtBank) { dt += p._dtBank; p._dtBank = 0; }
       } else if (p._dtBank) { dt += p._dtBank; p._dtBank = 0; }
       // Names, levels and job titles belong in conversation/phone surfaces,
@@ -7423,8 +7445,11 @@
               // point. The shoulder rolls a touch inboard so the arm crosses
               // onto the centre line rather than pointing past your ear.
               const P2 = CBZ.player;
-              if (P2 && !P2.dead && !p._npcAttached && !p.inCar && !ch.sitting) {
-                faceTo(p, P2.pos.x, P2.pos.z, 0.3);
+              // (a keeper pointing you at the man with the key: city/keepers.js
+              // sets _pointAt, and the arm goes down HIS sight line, not yours)
+              const PT = p._pointAt || P2;
+              if (PT && PT.pos && !(PT === P2 && P2.dead) && !p._npcAttached && !p.inCar && !ch.sitting) {
+                faceTo(p, PT.pos.x, PT.pos.z, 0.3);
               }
               ch.parts.ra.rotation.set(-1.55, 0, 0.08);
               if (J.ra) J.ra.rotation.x = -0.02;             // arm straight to the fingertip

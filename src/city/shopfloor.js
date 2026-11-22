@@ -116,22 +116,29 @@
     return true;
   }
 
-  // GANG CITY: the vendor peds.js posts at the shop's counter (lazily, by day)
+  // GANG CITY: the vendor peds.js posts at the shop's counter (lazily, by day).
+  // He is a whole person (city/keepers.js is his brain at the post): he can be
+  // away from it (run off, fighting, walking back), held up, or on the floor,
+  // and a till only rings up while he is standing behind it.
   function cityClerk(lot) {
     const C = {
       kind: "city",
       body: function () { const b = lot && lot.building; return (b && b.vendor) || null; },
-      alive: function () { const v = C.body(); return !!(v && !v.dead && !((v.ko || 0) > 0)); },
-      sees: function (x, z) { return C.alive() && faceSees(C.body(), x, z, 16); },
+      alive: function () { const v = C.body(); return !!(v && !v.dead && !((v.ko || 0) > 0) && !v._keepFree); },
+      sees: function (x, z) { const v = C.body(); return !!(v && !v.dead && !((v.ko || 0) > 0)) && faceSees(v, x, z, 18); },
       say: function (topic, ctx) { return speak(C.body(), topic, ctx); },
       look: function () {},
+      cowed: function () { const v = C.body(); return !!(v && (v.surrender || v.poseHandsUp || (v.surrenderT || 0) > 0)); },
       // the city's gun vendor carries his own piece (peds.js postVendor):
-      // turning him on you is his own fight brain
+      // turning him on you is his own fight brain (city/keepers.js sees the
+      // rage and lets him off his post with it); an unarmed one calls it in
       defend: function () {
         const v = C.body(), pa = CBZ.city && CBZ.city.playerActor;
-        if (v && !v.dead && v.armed && pa) { v.rage = pa; v.state = "fight"; }
+        if (!v || v.dead || !pa) return;
+        if (v.armed) { v.rage = pa; v.mem = pa; v.state = "fight"; }
+        else { v.mem = pa; v.poseCower = Math.max(v.poseCower || 0, 1.5); }
       },
-      busy: function () { return false; },
+      busy: function () { const v = C.body(); return !!(v && (v.rage || v.state === "fight")); },
       tick: function () {},
       dispose: function () {},
     };
@@ -276,7 +283,7 @@
      ================================================================== */
   function till(o) {
     const T = {
-      held: [], warned: 0, behindSaid: false,
+      held: [], warned: 0, behindSaid: false, seenAt: -99,
       clerk: o.clerk,
       hold: function (item) { if (item && T.held.indexOf(item) < 0) T.held.push(item); T.warned = 0; return item; },
       release: function (item) { const i = T.held.indexOf(item); if (i >= 0) T.held.splice(i, 1); return i >= 0; },
@@ -315,7 +322,9 @@
           if (it.name && it.hot !== false) CBZ.cityMarkHot(it.name, 1, o.where);
         }
         const x = Pl ? Pl.pos.x : 0, z = Pl ? Pl.pos.z : 0;
-        const saw = !!(T.clerk && T.clerk.sees(x, z));
+        // he saw you go: the doorway is a wall's width, and the man behind
+        // the counter watched you walk to it with the thing in your hands
+        const saw = !!(T.clerk && (T.clerk.sees(x, z) || now() - T.seenAt < 3));
         if (saw) T.clerk.say("thief");
         T.report(Math.min(160, 60 + worth / 40), saw);
         if (saw && T.clerk.defend) T.clerk.defend();
@@ -338,6 +347,7 @@
         }
         if (!T.held.length) return;
         if (Pl.dead) { T.dropAll(); return; }
+        if (T.clerk && T.clerk.sees(Pl.pos.x, Pl.pos.z)) T.seenAt = now();
         if (!o.inStore(Pl.pos.x, Pl.pos.z)) { T.steal(); return; }
         // heading for the door with it: the warning, once
         if (!T.warned && o.nearDoor && o.nearDoor(Pl.pos.x, Pl.pos.z) && T.clerk && T.clerk.sees(Pl.pos.x, Pl.pos.z)) {
@@ -348,8 +358,34 @@
         }
       },
     };
+    TILLS.push(T);
+    if (TILLS.length > 64) TILLS.splice(0, TILLS.length - 64);
+    wirePay();
     return T;
   }
+  /* PAY THE MAN. Whatever you are holding off his shelves or his wall, the
+     man behind the counter rings it up: tap him (E) the way you would hand
+     it over. The register on the counter still takes it too. */
+  const TILLS = [];
+  function tillOfClerk(v) {
+    for (let i = TILLS.length - 1; i >= 0; i--) {
+      const T = TILLS[i];
+      if (T.held.length && T.clerk && T.clerk.body && T.clerk.body() === v) return T;
+    }
+    return null;
+  }
+  function wirePay() {
+    const I = CBZ.interactions;
+    if (wirePay.done || !I || !I.register) return;
+    wirePay.done = true;
+    I.register("ped:vendor", {
+      id: "till-pay-clerk", slot: "e", prio: 40,
+      label: function (v) { const T = tillOfClerk(v); return "Pay " + fmt$(T ? T.total() : 0); },
+      canShow: function (v) { const T = tillOfClerk(v); return !!(T && T.open()); },
+      onSelect: function (v) { const T = tillOfClerk(v); if (T) T.pay(); },
+    });
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(46.95, function () { if (!wirePay.done && TILLS.length) wirePay(); });
 
   /* ==================================================================
      ISLAND GLASS
@@ -703,6 +739,8 @@
   CBZ.shopFloor = {
     till: till, cityClerk: cityClerk, postedClerk: postedClerk, clerkRoute: clerkRoute,
     plan: plan, shell: shell, shellSteps: shellSteps, gunDescriptor: gunDescriptor, counterZone: counterZone, register: register, dressShop: dressShop, dressShopSteps: dressShopSteps,
+    // the clerk whose goods you are holding unpaid (he put them in your hands)
+    handedBy: function (v) { return tillOfClerk(v); },
     whereKey: whereKey, disposeTree: disposeTree, dropCols: dropCols, yawToward: yawToward, fmt$: fmt$,
     audit: function () { return { glass: IG.length, hot: Object.keys(hotMap()).length }; },
   };

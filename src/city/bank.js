@@ -1768,27 +1768,21 @@
   // are the island's people too (world/island_people.js)
   const _none = [];
   function staffBodies() { return CBZ.cityPeds || _none; }
-  // ---- WHO IS IN THE ROOM WITH YOU -------------------------------------------
-  // "Only NPCs or physical bombs can open them." This is the NPC half: a member
-  // of this bank's own staff, within reach of the door, with their hands up.
-  // It reuses peds.js's EXISTING gunpoint/surrender grammar wholesale — there is
-  // no vault-specific duress state, and shaking somebody down at a vault is the
-  // same act as shaking them down on the street.
-  function insiderAt(v) {
-    const list = staffBodies();
-    if (!list.length) return null;
-    for (let i = 0; i < list.length; i++) {
-      const p = list[i];
-      if (!p || p.dead || p.isPlayer || p.controlled || !p.pos) continue;
-      if (!(p._vaultStaff === v.id || p._venueStaff === "bank" || p._venueStaff === "casino")) continue;
-      if (!(p.surrender || p.gunpoint || p.poseHandsUp || (p.surrenderT || 0) > 0 || (p.char && p.char.handsUp))) continue;
-      const dx = p.pos.x - v.x, dz = p.pos.z - v.z;
-      if (dx * dx + dz * dz > 9 * 9) continue;
-      if (Math.abs((p.pos.y || 0) - v.y) > 2.6) continue;
-      return p;
-    }
-    return null;
-  }
+  /* WHO OPENS IT FROM THE INSIDE. This used to be "any member of this bank's
+     staff with their hands up within 9 m of the door": hold a teller up
+     across the hall and the strongroom opened on a button press at the door.
+     A teller has no key. The man who opens it now is a real person with
+     access (city/keys.js: the manager, the vault guard) who was made to walk
+     to the door and work it (city/keepers.js), and he calls this himself
+     when the lock is worked. */
+  CBZ.cityVaultOpenBy = function (v, ped) {
+    if (!v || v.open || !ped || ped.dead) return false;
+    if (!(CBZ.cityKeys && CBZ.cityKeys.pedHas && CBZ.cityKeys.pedHas(ped, v.id))) return false;
+    if (Math.hypot(ped.pos.x - v.x, ped.pos.z - v.z) > 2.6) return false;
+    // the man who opened it under a gun is a witness, and the room knows
+    if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(v.x, v.z, 0.9);
+    return vaultBreach(v, "insider", CBZ.player);
+  };
 
   /* THE LOCK — ONE adoption of city/loyalty.js's CBZ.cityLock, and the first
      consumer its `vault` grant has ever had. `have` is this door's own key
@@ -1806,7 +1800,7 @@
   function keyHeld(v) { return !!(CBZ.cityKeys && CBZ.cityKeys.has && CBZ.cityKeys.has(v.id)); }
   function keyKeeper(v) { return (CBZ.cityKeys && CBZ.cityKeys.holderOf) ? CBZ.cityKeys.holderOf(v.id) : null; }
   function vaultLock(v) {
-    const dur = insiderAt(v);
+    const dur = null;               // the inside man opens it himself (CBZ.cityVaultOpenBy)
     const key = keyHeld(v);
     if (CBZ.cityLock) {
       const L = CBZ.cityLock({ id: v.id, label: v.tier === "reserve" ? "The cash centre" : "The vault",
@@ -2031,11 +2025,6 @@
     if (L.keyed) {
       note("Your key turns the boltwork. It swings.", 2.0);
       return vaultBreach(v, "key", CBZ.player);
-    }
-    if (L.insider) {
-      note("He works the timelock. It swings.", 2.0);
-      // the man who opened it under a gun is a witness, and the room knows.
-      if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(v.x, v.z, 0.9);
     }
     return vaultBreach(v, "insider", CBZ.player);
   };
@@ -2552,9 +2541,11 @@
             if (dr) { dr.y = v.y; DRAWERS.push(dr); }
             stations++;
           }
-          // the officer who can legally open the door, at the desk beside it
-          const mx = ox + v.plx - v.inx * 2.6 + tx * (v.rw * 0.5 + 1.1);
-          const mz = oz + v.plz - v.inz * 2.6 + tz * (v.rw * 0.5 + 1.1);
+          // the officer who can legally open the door, on the staff side of the
+          // counter at the end of the teller line (he stood 2.6 m out, on the
+          // public side, in front of the counter he works behind)
+          const mx = ox + v.plx - v.inx * 1.15 + tx * (v.rw * 0.5 + 1.1);
+          const mz = oz + v.plz - v.inz * 1.15 + tz * (v.rw * 0.5 + 1.1);
           CBZ.cityStaffPost({
             venue: "bank", id: v.id + ":manager", job: "bank manager",
             archetype: "professional", x: mx, z: mz,
@@ -2576,8 +2567,10 @@
           // and the man standing at the door itself. The reserve gets two.
           const nG = tier === "reserve" ? 2 : 1;
           for (let q = 0; q < nG; q++) {
-            const gx = ox + v.plx - v.inx * 1.9 + tx * (q ? -1 : 1) * (v.dw / 2 + 0.9);
-            const gz = oz + v.plz - v.inz * 1.9 + tz * (q ? -1 : 1) * (v.dw / 2 + 0.9);
+            // beside the door on the staff side (1.9 m out was the counter's
+            // own depth: he stood inside the teller counter)
+            const gx = ox + v.plx - v.inx * 0.7 + tx * (q ? -1 : 1) * (v.dw / 2 + 0.6);
+            const gz = oz + v.plz - v.inz * 0.7 + tz * (q ? -1 : 1) * (v.dw / 2 + 0.6);
             CBZ.cityStaffPost({
               venue: "bank", id: v.id + ":guard" + q, job: "vault guard",
               archetype: "security", x: gx, z: gz,

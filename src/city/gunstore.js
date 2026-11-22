@@ -413,7 +413,8 @@
       clerk: o.clerk, inStore: o.inStore, cols: [], tillCand: null, till: null,
     };
     const SFx = SF();
-    S.till = SFx ? SFx.till({ clerk: o.clerk, inStore: o.inStore, nearDoor: o.nearDoor, behind: o.behind, where: o.where }) : null;
+    // walking out with a gun off the wall is a robbery, not a candy bar
+    S.till = SFx ? SFx.till({ clerk: o.clerk, inStore: o.inStore, nearDoor: o.nearDoor, behind: o.behind, where: o.where, crime: "robbery" }) : null;
     // the register: where you pay for what you are holding (the counter's
     // customer edge, in front of the till)
     const C = gs.counter;
@@ -1161,6 +1162,18 @@
     if (!lot) return null;
     CITY.arena = arena;
     const gs = lot.building.gunstore, B = gs.bounds;
+    // THE CLERK STANDS AT HIS REGISTER, not in front of the wall: posted at
+    // the counter's middle (buildings.js vendorSpot) he stood between you and
+    // every rifle on the rack, and the wall could not be looked at past him.
+    // The register is at the counter's -L/2 end (makeStore's tillCand).
+    const C0 = gs.counter, vs = lot.building.vendorSpot;
+    if (C0 && vs && !vs._atTill) {
+      const L0 = Math.max(C0.w, C0.d);
+      const u = -L0 / 2 + 0.55;
+      vs.x += C0.tx * u; vs.z += C0.tz * u; vs._atTill = true;
+      const v0 = lot.building.vendor;
+      if (v0 && !v0.dead && !v0._keepFree) { v0.pos.x = vs.x; v0.pos.z = vs.z; if (v0.group) v0.group.position.set(vs.x, v0.group.position.y, vs.z); }
+    }
     const clerk = SF() ? SF().cityClerk(lot) : null;
     cityStore = makeStore({
       kind: "city", lot: lot, gs: gs, fy: floorY(lot.building), root: arena.root || CBZ.scene, clerk: clerk, where: "city",
