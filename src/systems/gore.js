@@ -953,6 +953,22 @@
      the sea. */
   const PLUME_FRESH = 0x8c3a33, PLUME_DEEP = 0x4a4444;   // display sRGB transmittance
   const SLICK_COL = 0x9e4f45;                             // display sRGB transmittance
+  /* ...BUT ONLY WHERE IT IS THICK. A little blood in clear water is a faint,
+     nearly neutral brown-grey haze: spread thin, the cloud's own turbidity
+     and the water round it hide its colour, and only near the wound, where it
+     is dense, does it read red. Filtered red at every density, the thin edge
+     of a patch (most of its area) took a third of the green and blue out of
+     whatever was under it: over bright sand in the clear shallows, salmon
+     pink. So the filter is this grey at the thin end, and the red comes in as
+     the density goes from 0.35 to 0.9. */
+  const PLUME_GREY = 0xdcd2c8, SLICK_GREY = 0xcabaab;     // display sRGB transmittance, the thin end
+  // the one filter both draw with: grey to red by density d, raised to d * k
+  const BLOOD_FILTER_GLSL = [
+    "vec3 cbzBloodFilter(vec3 grey, vec3 red, float d, float k) {",
+    "  vec3 c = mix(grey, red, smoothstep(0.35, 0.9, d));",
+    "  return pow(clamp(c, vec3(0.001), vec3(1.0)), vec3(d * k));",
+    "}",
+  ].join("\n");
   function displayColor(hex) { return new THREE.Color(hex).convertSRGBToLinear(); }
   const PLUME_DARK_DEPTH = 6.5;         // metres under the swell to reach PLUME_DEEP
   const PUFF_VIS = 0.4, LID_GAP = 0.18; // drawn rim as a fraction of the quad; lid clearance
@@ -1019,6 +1035,7 @@
           map: { value: null },
           cFresh: { value: displayColor(PLUME_FRESH) },
           cDeep: { value: displayColor(PLUME_DEEP) },
+          cGrey: { value: displayColor(PLUME_GREY) },
           uAbove: { value: 0 },
           uSeaY: { value: 0 },
         }]),
@@ -1058,14 +1075,16 @@
           "}",
         ].join("\n"),
         fragmentShader: [
-          "uniform sampler2D map; uniform vec3 cFresh; uniform vec3 cDeep;",
+          "uniform sampler2D map; uniform vec3 cFresh; uniform vec3 cDeep; uniform vec3 cGrey;",
           "varying vec2 vUv; varying float vA; varying float vDark;",
           "#include <fog_pars_fragment>",
+          BLOOD_FILTER_GLSL,
           "void main() {",
           "  float a = texture2D(map, vUv).a * vA;",
           "  if (a < 0.004) discard;",
-          // what the cloud lets through, raised to its density (Beer-Lambert)
-          "  vec3 m = pow(clamp(mix(cFresh, cDeep, vDark), vec3(0.001), vec3(1.0)), vec3(a * 1.6));",
+          // what the cloud lets through, raised to its density (Beer-Lambert):
+          // grey where it is thin, the red filter as it thickens
+          "  vec3 m = cbzBloodFilter(cGrey, mix(cFresh, cDeep, vDark), a, 1.6);",
           // the water column in front of it takes the filter away, not tints it
           "  #ifdef USE_FOG",
           "    #ifdef FOG_EXP2",
@@ -1335,8 +1354,9 @@
      minute holds a patch the size of a few seconds of its bleeding, and a
      kill's patch is gone within ten seconds of the last blood reaching it.
      Nothing is laid per tick, and nothing outlives its blood.
-     Drawn as a filter (multiply), like the cloud: a faint red-brown darkening
-     of the water, never a red sheet. The old film was a 4 m alpha disc per
+     Drawn as a filter (multiply), like the cloud: a faint grey-brown
+     darkening of the water where it is thin, red only where it is thick,
+     never a red sheet. The old film was a 4 m alpha disc per
      call, held 14 s and faded over 9 more, laid by a dice roll every chum
      tick: a sheet that spread metres wide and kept growing. */
   const FILM_M2_PER_L = 2.0;       // area a litre covers at the threshold of being seen
@@ -1359,11 +1379,16 @@
       blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
     });
     nm.color.copy(displayColor(SLICK_COL));
+    const grey = displayColor(SLICK_GREY);
     nm.onBeforeCompile = function (sh) {
-      sh.fragmentShader = sh.fragmentShader.replace("#include <opaque_fragment>",
-        "#include <opaque_fragment>\ngl_FragColor.rgb = pow( clamp( gl_FragColor.rgb, vec3( 0.001 ), vec3( 1.0 ) ), vec3( clamp( gl_FragColor.a, 0.0, 1.0 ) ) );");
+      sh.uniforms.uFilmGrey = { value: grey };
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", "#include <common>\nuniform vec3 uFilmGrey;\n" + BLOOD_FILTER_GLSL)
+        // grey where it is thin, the red filter as it thickens
+        .replace("#include <opaque_fragment>",
+          "#include <opaque_fragment>\ngl_FragColor.rgb = cbzBloodFilter( uFilmGrey, gl_FragColor.rgb, clamp( gl_FragColor.a, 0.0, 1.0 ), 1.0 );");
     };
-    nm.customProgramCacheKey = function () { return "goreFilm1"; };
+    nm.customProgramCacheKey = function () { return "goreFilm2"; };
     // rm() must never dispose a pooled material — the repo's convention is a
     // _shared tag, and every disposal sweep in the game already honours it.
     nm._shared = true;
@@ -1439,8 +1464,19 @@
       m, water: true, t: 0, L: litres, R: 0, hold: Infinity, fade: 1, grow: 0, max: 0,
       ax: 0.82 + Math.random() * 0.36, az: 0.82 + Math.random() * 0.36,
       cx: 0, cz: 0, curT: 0, syT: 0,
-      bx: +o.vx || 0, bz: +o.vz || 0, bt, bt0: bt || 1, floorY,
+      bx: +o.vx || 0, bz: +o.vz || 0, bt, bt0: bt || 1, floorY, bedK: filmBedK(x, z),
     });
+  }
+  /* OVER A BRIGHT BED IT IS FAINTER STILL. In the clear shallows the sand a
+     metre down is the brightest thing under the film, and any filter over it
+     shows; in deep water the column under it is dark. The film's density is
+     scaled by how much water is under it: two fifths in ankle-deep water,
+     all of it from three metres. */
+  function filmBedK(x, z) {
+    let d = 3;
+    if (CBZ.cityWaterDepthAt) { try { const w = +CBZ.cityWaterDepthAt(x, z); if (isFinite(w)) d = w; } catch (e) {} }
+    const t = Math.max(0, Math.min(1, (d - 0.6) / 2.4));
+    return 0.4 + 0.6 * t * t * (3 - 2 * t);
   }
   /* public: blood ON the water surface (what a boat sees). `amount` is the
      old 0.3..3 scale (a nick .. a kill), taken now as the litres it puts in
@@ -5309,6 +5345,7 @@
             // drains out from under a washed cloud what is left is a diluted
             // film lying on wet sand, not a decal chasing a surface that left.
             s.m.position.y = s.floorY != null ? Math.max(y, s.floorY + 0.03) : y;
+            s.bedK = filmBedK(s.m.position.x, s.m.position.z);
           }
         }
         // the blood in it mixes down; its area follows the blood in it and
@@ -5318,7 +5355,7 @@
         const Rt = Math.sqrt(FILM_M2_PER_L * s.L / Math.PI);
         if (Rt > s.R) s.R += (Rt - s.R) * Math.min(1, dt * 2.5);
         s.m.scale.set(Math.max(0.05, s.R * s.ax), Math.max(0.05, s.R * s.az), 1);
-        s.filmA = FILM_A * Math.min(1, s.L / Math.max(1e-4, s.R * s.R * Math.PI / FILM_M2_PER_L));
+        s.filmA = FILM_A * (s.bedK != null ? s.bedK : 1) * Math.min(1, s.L / Math.max(1e-4, s.R * s.R * Math.PI / FILM_M2_PER_L));
         if (s.L < FILM_GONE && s.t > 0.3) { freeSlick(s); splats.splice(i, 1); continue; }
       }
       // (land marks spread, draw and dry on the GPU off one clock — see the
