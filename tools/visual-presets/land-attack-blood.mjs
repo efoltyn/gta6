@@ -4,7 +4,7 @@
    mean attack in water and on land blood". This is the land half (the water
    half is shark-attack-swimmer). Boots ?mode=survival, stands the player on
    dry grass inland, and lets a hungry gray wolf (a brown bear when the wolf
-   does not exist) find them through the game's own hunt; nothing about the
+   does not exist), spawned 6 m off, find them through the game's own hunt; nothing about the
    attack is staged. The player is healed every tick so no death screen ends
    the run; the wounds and the bleeding are the game's own.
 
@@ -64,9 +64,11 @@ async function stage(input) {
       ground(x, z) { const A = CBZ.surv.arena; return A.groundHeightAt ? A.groundHeightAt(x, z) : 0; },
       lenses() {
         const P = CBZ.player; if (!P) return;
-        const ax = D.ax || 1, az = D.az || 0, nx = -az, nz = ax;
+        const ax = D.ax || 1, az = D.az || 0;
+        const nx = -az * (D.side || 1), nz = ax * (D.side || 1);
         const gy = D.ground(P.pos.x, P.pos.z);
-        D.camA = { p: new T.Vector3(P.pos.x + nx * 4.5, gy + 1.5, P.pos.z + nz * 4.5), t: new T.Vector3(P.pos.x, gy + 0.6, P.pos.z) };
+        // high and oblique (3 m up, 3.5 m off): over hedges, walls and cars
+        D.camA = { p: new T.Vector3(P.pos.x + nx * 3.5, gy + 3.0, P.pos.z + nz * 3.5), t: new T.Vector3(P.pos.x, gy + 0.4, P.pos.z) };
         D.camB = { p: new T.Vector3(P.pos.x + 0.01, gy + 3.5, P.pos.z), t: new T.Vector3(P.pos.x, gy, P.pos.z) };
         const cam = CBZ.camera; cam.position.copy(D.camA.p); cam.lookAt(D.camA.t); cam.updateMatrixWorld(true);
       },
@@ -108,11 +110,12 @@ async function stage(input) {
     async function maul() {
       if (!await D.boot()) throw new Error("survival never started");
       const A = CBZ.surv.arena, P = CBZ.player;
-      // dry, flat grass well inland
+      // dry, flat, OPEN ground: the upper beach (no building or tree within a
+      // lens's reach), falling back to the island's interior
       let spot = null;
       for (let k = 0; k < 24 && !spot; k++) {
         const a = 0.5 + k * 0.26;
-        for (let r = A.radius * 0.35; r < A.radius * 0.8 && !spot; r += 6) {
+        for (let r = A.radius - 8; r > A.radius * 0.35 && !spot; r -= 4) {
           const x = A.center.x + Math.cos(a) * r, z = A.center.z + Math.sin(a) * r;
           const g = D.ground(x, z);
           if (g > D.seaY(x, z) + 1.5 && Math.abs(D.ground(x + 3, z) - g) < 0.3 && Math.abs(D.ground(x, z + 3) - g) < 0.3) spot = { a, x, z, g };
@@ -122,25 +125,60 @@ async function stage(input) {
       P.pos.x = spot.x; P.pos.z = spot.z; P.pos.y = spot.g; if (P.vel) { P.vel.x = 0; P.vel.y = 0; P.vel.z = 0; }
       D.follow = function () { D.lenses(); };
       D.sec(1.0);
-      let id = "gray_wolf", W = CBZ.cityWildlifeSpawnAt ? CBZ.cityWildlifeSpawnAt(id, spot.x + Math.cos(spot.a) * 14, spot.z + Math.sin(spot.a) * 14) : null;
-      if (!W) { id = "brown_bear"; W = CBZ.cityWildlifeSpawnAt ? CBZ.cityWildlifeSpawnAt(id, spot.x + Math.cos(spot.a) * 14, spot.z + Math.sin(spot.a) * 14) : null; }
+      // 6 m off, on the open side (the hunt still decides when it commits)
+      let id = "gray_wolf", W = CBZ.cityWildlifeSpawnAt ? CBZ.cityWildlifeSpawnAt(id, spot.x + Math.cos(spot.a) * 6, spot.z + Math.sin(spot.a) * 6) : null;
+      if (!W) { id = "brown_bear"; W = CBZ.cityWildlifeSpawnAt ? CBZ.cityWildlifeSpawnAt(id, spot.x + Math.cos(spot.a) * 6, spot.z + Math.sin(spot.a) * 6) : null; }
       if (!W) throw new Error("no predator spawned");
       W.hunger = 1;
       D.W = W;
       // the game's own hunt until it commits (its rush or seize) inside 6 m, or anything closing inside 2 m
       let t = 0, best = 1e9, prev = 1e9;
-      for (; t < 90 * 60; t++) {
+      const T_MAX = 150;
+      // THE GAME DECIDES THE HOLD BY A ROLL (creature_combat.js trySeize: a maul on
+      // the player seizes only on a random draw). Inside 4 m the roll is made to
+      // come up "seize", so the strip shows the hold the game itself plays some
+      // of the time; every other random draw is the real one.
+      const rnd0 = Math.random;
+      const rollSeize = function () { const st = (new Error()).stack || ""; return st.indexOf("trySeize") >= 0 ? 0.0001 : rnd0(); };
+      for (; t < T_MAX * 60; t++) {
+        const dd = Math.hypot(W.pos.x - P.pos.x, W.pos.z - P.pos.z);
+        Math.random = dd < 4 ? rollSeize : rnd0;
         D.step(1);
         const d = Math.hypot(W.pos.x - P.pos.x, W.pos.z - P.pos.z);
         if (d < best) best = d;
         const h = W._hunt, committed = !!(h && (h.st === "rush" || h.st === "seize"));
-        if ((committed && d < 6) || (d < 2 && d < prev - 0.02)) break;
+        const held = !!(CBZ.predatorSeized && CBZ.predatorSeized(P));
+        if (held || (d < 2 && d < prev - 0.02)) break;
         prev = d;
       }
+      Math.random = rnd0;
+      D.held = !!(CBZ.predatorSeized && CBZ.predatorSeized(P));
       const dx = P.pos.x - W.pos.x, dz = P.pos.z - W.pos.z, l = Math.hypot(dx, dz) || 1;
       D.ax = dx / l; D.az = dz / l;
+      // the side lens on whichever side has a clear line to the player (a tree
+      // or a wall between them is not a picture of the attack)
+      const gy = D.ground(P.pos.x, P.pos.z);
+      const clear = function (sd) {
+        const o = new T.Vector3(P.pos.x, gy + 1.0, P.pos.z), d = new T.Vector3(-D.az * sd, 0.1, D.ax * sd).normalize();
+        const rc = new T.Raycaster(o, d, 0.6, 4.6), bx = new T.Box3(), out = [];
+        let blocked = false;
+        CBZ.scene.traverseVisible(function (m) {
+          if (blocked || !m.isMesh || m.isInstancedMesh || m.isSkinnedMesh || !m.geometry || !m.matrixWorld) return;
+          if (CBZ.playerChar && CBZ.playerChar.group && CBZ.playerChar.group.getObjectById(m.id)) return;
+          if (W.group && W.group.getObjectById(m.id)) return;
+          try {
+            if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+            bx.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);
+            if (bx.distanceToPoint(o) > 5) return;
+            out.length = 0; m.raycast(rc, out);
+            if (out.length) blocked = true;
+          } catch (e) {}
+        });
+        return !blocked;
+      };
+      D.side = clear(1) ? 1 : (clear(-1) ? -1 : 1);
       D.lenses();
-      D.m = { predator: id, found: t < 90 * 60 ? 1 : 0, secs: +(t / 60).toFixed(1), closest: +best.toFixed(1) };
+      D.m = { predator: id, found: t < T_MAX * 60 ? 1 : 0, held: D.held ? 1 : 0, secs: +(t / 60).toFixed(1), closest: +best.toFixed(1) };
     },
     async function after() {
       D.sec(1.0);
@@ -160,7 +198,7 @@ export default {
   beforeLabel: "BEFORE",
   afterLabel: "AFTER",
   pairNote: "Same island, same spot, same animal, the game's own hunt",
-  method: "Boots ?mode=survival, freezes the frame loop, stands the player on dry flat grass inland and spawns a hungry gray wolf 14 m away with CBZ.cityWildlifeSpawnAt; steps the sim until it commits (its rush or seize inside 6 m), then shoots 6 frames 0.4 s apart and 3 more 2 s apart; the player is healed each tick.",
+  method: "Boots ?mode=survival, freezes the frame loop, stands the player on dry flat grass inland and spawns a hungry gray wolf 6 m away with CBZ.cityWildlifeSpawnAt; steps the sim until it commits (its rush or seize inside 6 m, or the player seized), then shoots 6 frames 0.4 s apart and 3 more 2 s apart; the player is healed each tick.",
   beforeParams: { mode: "survival", seed: "90210", cfg_BOOT_METER: "0" },
   afterParams: { mode: "survival", seed: "90210", cfg_BOOT_METER: "0" },
   stageTimeoutMs: 600000,
