@@ -1960,10 +1960,16 @@
   }
   const FRONT = [0, 1], HIND = [2, 3];
   function pose(rig, dt, c) {
-    if (rig.ragdoll) return rig.st;
+    c = c || {};
+    // a corpse something else lays down (the ragdoll, a tumble) rests bodily
+    if (rig.ragdoll || ((c.dead || c.posture === "dead") && tipped(rig.group))) {
+      if (!rig.ragdoll && !rig._limp) { limpPose(rig); rig._limp = true; }
+      restCorpse(rig, c);
+      return rig.st || (rig.st = newState(rig));
+    }
+    if (rig._limp || rig.mesh.position.y !== 0 || rig.mesh.position.x !== 0 || rig.mesh.position.z !== 0) { rig._limp = false; rig._rc = null; rig.mesh.position.set(0, 0, 0); }
     if (!(dt > 0)) dt = 0.016;
     if (dt > 0.1) dt = 0.1;
-    c = c || {};
     const D = rig.D, R = D.row, K = D.K, b = rig.bones, bp = rig.bindPos, mesh = rig.mesh;
     const st = rig.st || (rig.st = newState(rig));
     st.t += dt;
@@ -2093,11 +2099,28 @@
     pR = pR * wSt + P.sit.R * wS + P.lie.R * wL + P.bow.R * wB;
     cR = cR * wSt + P.sit.R * wS + P.lie.R * wL + P.bow.R * wB;
     pRx = pRx * (1 - wD) + wD * 1.45; cRx = cRx * (1 - wD) + wD * 1.45;
+    // at rest the trunk sits on what touches the ground (restSolve)
+    const RS = st.rest;
+    if (RS && RS.on) { cY += RS.Fa; pY += RS.Ba; }
+    // lying down on a slope the body lies along it: the trunk turns with the
+    // ground about the ground under it (and the legs, posed in its own frame
+    // toward targets that turn with it, follow unchanged)
+    const lyK = wD + wL;
+    let tA = 0, tC = 0;
+    if (lyK > 0.01 && typeof c.ground === "function") {
+      const e = 0.5, ch = cos(h), sh = sin(h);
+      const a1 = c.ground(gx + e * ch, gz + e * sh), a0 = c.ground(gx - e * ch, gz - e * sh);
+      const c1 = c.ground(gx - e * sh, gz + e * ch), c0 = c.ground(gx + e * sh, gz - e * ch);
+      if (isFinite(a1) && isFinite(a0)) tA = Math.atan((a1 - a0) / (2 * e)) * lyK;
+      if (isFinite(c1) && isFinite(c0)) tC = -Math.atan((c1 - c0) / (2 * e)) * (wD + 0.7 * wL);
+    }
+    st.tA = approach(st.tA || 0, clamp(tA, -0.6, 0.6), 4, dt); st.tC = approach(st.tC || 0, clamp(tC, -0.6, 0.6), 4, dt);
     // ---- write the trunk
     b[BN.pelvis].position.set(pX, pY, pZ); rxyz(b[BN.pelvis], pRx, pRy, pR);
     b[BN.chest].position.set(cX, cY, cZ); rxyz(b[BN.chest], cRx, cRy, cR);
     b[BN.loin].position.set((pX + cX) / 2 + (D.loin.x - (D.pelv.x + D.chest.x) / 2), (pY + cY) / 2 + (D.loin.y - (D.pelv.y + D.chest.y) / 2), (pZ + cZ) / 2);
     rxyz(b[BN.loin], (pRx + cRx) / 2, (pRy + cRy) / 2, (pR + cR) / 2);
+    if (abs(st.tA) + abs(st.tC) > 1e-4) tiltTrunk(rig, st.tA, st.tC, (pX + cX) / 2);
     // ---- legs
     const TT = rig._T || (rig._T = {});
     TT.pX = pX; TT.pY = pY; TT.pZ = pZ; TT.pR = pR; TT.pRx = pRx; TT.pRy = pRy; TT.cX = cX; TT.cY = cY; TT.cZ = cZ; TT.cR = cR; TT.cRx = cRx; TT.cRy = cRy;
@@ -2108,9 +2131,20 @@
     KK.sitK = sitK; KK.lieK = lieK; KK.sideK = sideK; KK.bowK = bowK; KK.fl = fl; KK.turn = st.turn; KK.liftH = liftH;
     headNeck(rig, st, c, dt, KK);
     tail(rig, st, dt, KK);
+    if (RS && RS.on) { b[BN.neck].quaternion.multiply(RS.qNa); b[BN.tail0].quaternion.multiply(RS.qTa); }
     breath(rig, st, dt, effort);
+    if (RS && RS.on) {
+      // the flank settled onto the ground: the ribs down along the world's down
+      const rbn = b[BN.ribs];
+      rbn.position.copy(bp[BN.ribs]);
+      if (RS.sagA > 1e-6) { restTemps(); _rV.set(0, -RS.sagA, 0).applyQuaternion(_rQi.copy(b[BN.chest].quaternion).invert()); rbn.position.add(_rV); }
+    }
     const hk = Math.max(st.aggr * 0.7, st.threat, st.fear * 0.5) * (1 - st.dead);
     b[BN.hackle].position.set(bp[BN.hackle].x, bp[BN.hackle].y + 0.03 * K * hk, 0);
+    // ---- held up by what touches the ground while it rests
+    const RW = st.restW || (st.restW = { sit: 0, lie: 0, side: 0, bow: 0 });
+    RW.sit = sitK; RW.lie = lieK; RW.side = sideK; RW.bow = bowK;
+    restStep(rig, st, c, dt, RW);
     // ---- the live mouth (bites, holds and the hosts' jaw seams read it)
     if (rig.trackMouth) mouthWorld(rig, rig.mouthW);
     return st;
@@ -2198,6 +2232,255 @@
     P.cX = P.pX + cos(R) * cx0 - sin(R) * cy0; P.cY = P.pY + sin(R) * cx0 + cos(R) * cy0;
   }
 
+  // ==========================================================================
+  //  AT REST — a body lying, sitting or dead is held up by what touches the
+  //  ground. A sparse set of the shell's own vertices is skinned on the CPU
+  //  (the same weighted sum the GPU does). The trunk's front and back are let
+  //  down or lifted until their lowest points touch: the flank, the hip and
+  //  the shoulder on its side, the rump sitting, the sternum and the belly
+  //  lying. Each foot is lifted out of the ground or let down onto it, the
+  //  head and the tail are laid on it, and a corpse something else lays down
+  //  (the ragdoll, a tumble) is lifted bodily off whatever sank. Solved a few
+  //  times a second while the body rests, applied every frame, eased.
+  // ==========================================================================
+  const RC_NECK = 5, RC_TAIL = 6;          // chains: 0 trunk, 1..4 legs, 5 neck and head, 6 tail
+  function restSet(rig) {
+    if (rig._rs) return rig._rs;
+    const geo = shapeOf(rig.D, 0).geo;
+    const P = geo.attributes.position.array, SI = geo.attributes.skinIndex.array, SW = geo.attributes.skinWeight.array;
+    const N = P.length / 3;
+    const chainOf = new Uint8Array(NB), proxOf = new Uint8Array(NB), frontOf = new Uint8Array(NB);
+    for (let Lg = 0; Lg < 4; Lg++) {
+      for (let k = 0; k < LEGB[Lg].length; k++) {
+        const bn = LEGB[Lg][k];
+        chainOf[bn] = 1 + Lg; frontOf[bn] = Lg < 2 ? 1 : 0;
+        // the shoulder and the upper arm, the thigh: part of what the trunk rests on
+        proxOf[bn] = (Lg < 2 ? k < 2 : k < 1) ? 1 : 0;
+      }
+    }
+    [BN.neck, BN.neck1, BN.head, BN.jaw, BN.tongue, BN.earL, BN.earR, BN.collar].forEach(function (bn) { chainOf[bn] = RC_NECK; frontOf[bn] = 1; });
+    [BN.tail0, BN.tail1, BN.tail2, BN.tail3, BN.tail4].forEach(function (bn) { chainOf[bn] = RC_TAIL; });
+    // the root of the neck and of the tail ride the trunk (turning them cannot lift their own base)
+    [BN.root, BN.pelvis, BN.loin, BN.chest, BN.ribs, BN.hackle, BN.neck, BN.tail0].forEach(function (bn) { proxOf[bn] = 1; });
+    frontOf[BN.chest] = 1; frontOf[BN.ribs] = 1; frontOf[BN.hackle] = 1;
+    // every vertex (a few thousand: the lowest point is often a small one, a
+    // jaw, an ear tip, a toe)
+    const n = N;
+    const S = { n: n, p: new Float32Array(n * 3), b: new Uint8Array(n * 4), w: new Float32Array(n * 4),
+      chain: new Uint8Array(n), prox: new Uint8Array(n), front: new Uint8Array(n), rib: new Uint8Array(n), q: new Float32Array(n * 3) };
+    for (let j = 0; j < n; j++) {
+      const i = j;
+      S.p[j * 3] = P[i * 3]; S.p[j * 3 + 1] = P[i * 3 + 1]; S.p[j * 3 + 2] = P[i * 3 + 2];
+      let bw = -1, bb = 0;
+      for (let k = 0; k < 4; k++) {
+        S.b[j * 4 + k] = SI[i * 4 + k]; S.w[j * 4 + k] = SW[i * 4 + k];
+        if (SW[i * 4 + k] > bw) { bw = SW[i * 4 + k]; bb = SI[i * 4 + k]; }
+      }
+      S.chain[j] = chainOf[bb]; S.prox[j] = proxOf[bb]; S.front[j] = frontOf[bb]; S.rib[j] = bb === BN.ribs ? 1 : 0;
+      if (bb === BN.loin) S.front[j] = P[i * 3] > rig.D.loin.x ? 1 : 0;
+    }
+    rig._rs = S;
+    return S;
+  }
+  // world positions of the set (or of one chain), from the skeleton's bone matrices
+  function skinRest(rig, S, chain) {
+    const m = rig.skeleton.boneMatrices, p = S.p, q = S.q, bi = S.b, ww = S.w;
+    for (let j = 0; j < S.n; j++) {
+      if (chain >= 0 && S.chain[j] !== chain) continue;
+      const px = p[j * 3], py = p[j * 3 + 1], pz = p[j * 3 + 2];
+      let x = 0, y = 0, z = 0;
+      for (let k = 0; k < 4; k++) {
+        const w = ww[j * 4 + k];
+        if (!(w > 0)) continue;
+        const o = bi[j * 4 + k] * 16;
+        x += w * (m[o] * px + m[o + 4] * py + m[o + 8] * pz + m[o + 12]);
+        y += w * (m[o + 1] * px + m[o + 5] * py + m[o + 9] * pz + m[o + 13]);
+        z += w * (m[o + 2] * px + m[o + 6] * py + m[o + 10] * pz + m[o + 14]);
+      }
+      q[j * 3] = x; q[j * 3 + 1] = y; q[j * 3 + 2] = z;
+    }
+  }
+  // the ground under the body: a plane through five samples of the host's floor
+  // (its own slope), or level at the body's placement
+  function restGround(rig, c, G) {
+    const e = rig.group.matrixWorld.elements, x0 = e[12], z0 = e[14];
+    const fn = c && c.ground;
+    let y0 = c && c.y != null ? c.y : e[13], gx = 0, gz = 0;
+    if (typeof fn === "function") {
+      const d = 0.4;
+      const s0 = fn(x0, z0), sx1 = fn(x0 + d, z0), sx0 = fn(x0 - d, z0), sz1 = fn(x0, z0 + d), sz0 = fn(x0, z0 - d);
+      if (s0 != null && isFinite(s0)) y0 = s0;
+      if (sx1 != null && sx0 != null && isFinite(sx1) && isFinite(sx0)) gx = (sx1 - sx0) / (2 * d);
+      if (sz1 != null && sz0 != null && isFinite(sz1) && isFinite(sz0)) gz = (sz1 - sz0) / (2 * d);
+    }
+    G.x0 = x0; G.z0 = z0; G.y0 = y0; G.gx = gx; G.gz = gz;
+    return G;
+  }
+  function overGround(G, x, y, z) { return y - (G.y0 + G.gx * (x - G.x0) + G.gz * (z - G.z0)); }
+  function lowest(S, G, chain) {
+    let h = 1e9;
+    for (let j = 0; j < S.n; j++) {
+      if (chain >= 0 && S.chain[j] !== chain) continue;
+      const v = overGround(G, S.q[j * 3], S.q[j * 3 + 1], S.q[j * 3 + 2]);
+      if (v < h) h = v;
+    }
+    return h;
+  }
+  function worldScale(rig) { return (rig.mesh.scale.x || 1) * ((rig.group && rig.group.scale.x) || 1); }
+  const _rG = { x0: 0, z0: 0, y0: 0, gx: 0, gz: 0 };
+  let _rQ0 = null, _rQd = null, _rV = null, _rQi = null, _rAX = null;
+  function restTemps() {
+    if (_rQ0) return;
+    const THREE = W.THREE;
+    _rQ0 = new THREE.Quaternion(); _rQd = new THREE.Quaternion(); _rV = new THREE.Vector3(); _rQi = new THREE.Quaternion();
+    _rAX = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+  }
+  // the turn of a chain's root bone (its own axes) that brings the chain's
+  // lowest point to the ground: the most effective axis, one Newton step
+  const REST_GAP = 0.001;                  // what a resting body aims for: a hair over the ground
+  function restTurn(rig, S, G, chain, bone, h0, down, qT, qA) {
+    if (!(h0 < 1e8)) { qT.copy(qA); return; }
+    const e0 = h0 - REST_GAP, want = e0 < 0 ? -e0 : -e0 * down;
+    if (Math.abs(want) < 0.0015) { qT.copy(qA); return; }
+    const b = rig.bones[bone], d = 0.05;
+    _rQ0.copy(b.quaternion);
+    let best = -1, rate = 0;
+    for (let a = 0; a < 3; a++) {
+      b.quaternion.copy(_rQ0).multiply(_rQd.setFromAxisAngle(_rAX[a], d));
+      b.updateMatrixWorld(true); rig.skeleton.update();
+      skinRest(rig, S, chain);
+      const r = (lowest(S, G, chain) - h0) / d;
+      if (Math.abs(r) > Math.abs(rate)) { rate = r; best = a; }
+    }
+    b.quaternion.copy(_rQ0); b.updateMatrixWorld(true); rig.skeleton.update();
+    if (best < 0 || Math.abs(rate) < 0.02) { qT.copy(qA); return; }
+    // (damped: the chain's lowest point can change hands as it turns)
+    qT.copy(qA).multiply(_rQd.setFromAxisAngle(_rAX[best], clamp(0.7 * want / rate, -0.25, 0.25)));
+  }
+  function restState(st) {
+    const THREE = W.THREE;
+    if (!st.rest) st.rest = { t: 0, calm: 0, wk: 0, F: 0, B: 0, Fa: 0, Ba: 0, sag: 0, sagA: 0, L: [0, 0, 0, 0], La: [0, 0, 0, 0],
+      qN: new THREE.Quaternion(), qNa: new THREE.Quaternion(), qT: new THREE.Quaternion(), qTa: new THREE.Quaternion(), on: false };
+    return st.rest;
+  }
+  // one solve: measure the posed shell against the ground, set the targets
+  function restSolve(rig, st, c, w) {
+    restTemps();
+    const S = restSet(rig), r = restState(st), D = rig.D, K = D.K;
+    rig.group.updateMatrixWorld(true); rig.skeleton.update();
+    const G = restGround(rig, c, _rG);
+    skinRest(rig, S, -1);
+    let hF = 1e9, hB = 1e9, hN = 1e9, hT = 1e9, hR = 1e9;
+    const hL = [1e9, 1e9, 1e9, 1e9];
+    for (let j = 0; j < S.n; j++) {
+      const h = overGround(G, S.q[j * 3], S.q[j * 3 + 1], S.q[j * 3 + 2]), ch = S.chain[j];
+      if (S.rib[j] && h < hR) hR = h;
+      if (S.prox[j]) { if (S.front[j]) { if (h < hF) hF = h; } else if (h < hB) hB = h; }
+      else if (ch >= 1 && ch <= 4) { if (h < hL[ch - 1]) hL[ch - 1] = h; }
+      else if (ch === RC_NECK) { if (h < hN) hN = h; }
+      else if (ch === RC_TAIL) { if (h < hT) hT = h; }
+    }
+    const sc = worldScale(rig);
+    // the trunk: always out of the ground; let down onto it where it rests
+    const downF = clamp(w.lie + w.side, 0, 1), downB = clamp(w.sit + w.lie + w.side, 0, 1);
+    hF -= REST_GAP; hB -= REST_GAP;
+    if (hF < 1e8) r.F = clamp(r.Fa + (hF < 0 ? -hF : -hF * downF) / sc, -0.3 * K, 0.4 * K);
+    if (hB < 1e8) r.B = clamp(r.Ba + (hB < 0 ? -hB : -hB * downB) / sc, -0.3 * K, 0.4 * K);
+    // the soft flank settles onto the ground it lies on (a narrow chest
+    // between a broad shoulder and thigh would otherwise hang over it)
+    if (hR < 1e8) r.sag = clamp(r.sagA + (hR - REST_GAP) * clamp(w.side + 0.5 * w.lie, 0, 1) / sc, 0, 0.04 * K);
+    // the feet: out of the ground; sitting and lying on the ground, and on its
+    // side the lower pair (the upper pair rests on them)
+    for (let Lg = 0; Lg < 4; Lg++) {
+      if (!(hL[Lg] < 1e8)) continue;
+      const down = clamp(w.sit + w.lie + (Lg % 2 === 1 ? w.side : 0), 0, 1), e = hL[Lg] - REST_GAP;
+      r.L[Lg] = clamp(r.La[Lg] + 0.85 * (e < 0 ? -e : -e * down) / sc, -0.15 * K, 0.3 * K);
+    }
+    // the head on the ground when it lies on its side; the tail whenever it rests
+    restTurn(rig, S, G, RC_NECK, BN.neck, hN, clamp(w.side, 0, 1), r.qN, r.qNa);
+    restTurn(rig, S, G, RC_TAIL, BN.tail0, hT, clamp(w.side + w.lie + w.sit, 0, 1), r.qT, r.qTa);
+  }
+  // each frame: solve a few times a second while resting, ease what is applied
+  function restStep(rig, st, c, dt, w) {
+    const r = restState(st);
+    const resting = Math.max(w.sit, w.lie, w.side, w.bow) > 0.02;
+    if (resting) {
+      r.on = true;
+      r.t -= dt;
+      // a posture still changing wakes the solve; a settled body is re-checked slowly
+      const wk = w.sit * 1 + w.lie * 2 + w.side * 4 + w.bow * 8;
+      if (Math.abs(wk - r.wk) > 0.02) { r.calm = 0; r.wk = wk; }
+      if (r.t <= 0) {
+        const F0 = r.F, B0 = r.B, L0 = r.L[0] + r.L[1] + r.L[2] + r.L[3], s0 = r.sag;
+        restSolve(rig, st, c, w);
+        const moved = Math.abs(r.F - F0) + Math.abs(r.B - B0) + Math.abs(r.L[0] + r.L[1] + r.L[2] + r.L[3] - L0) + Math.abs(r.sag - s0);
+        r.calm = moved * worldScale(rig) < 0.0015 ? r.calm + 1 : 0;
+        r.t = (rig.lod === 0 ? 0.1 : 0.45) * (r.calm >= 2 ? 6 : 1);
+      }
+    } else if (r.on) {
+      r.F = 0; r.B = 0; r.sag = 0; r.L[0] = r.L[1] = r.L[2] = r.L[3] = 0; r.qN.identity(); r.qT.identity(); r.t = 0;
+      if (Math.abs(r.Fa) + Math.abs(r.Ba) + r.sagA + Math.abs(r.La[0]) + Math.abs(r.La[1]) + Math.abs(r.La[2]) + Math.abs(r.La[3]) < 1e-4 &&
+        1 - Math.abs(r.qNa.w) < 1e-6 && 1 - Math.abs(r.qTa.w) < 1e-6) r.on = false;
+    }
+    if (!r.on) return;
+    const k = Math.min(1, dt * 10);
+    r.Fa += (r.F - r.Fa) * k; r.Ba += (r.B - r.Ba) * k; r.sagA += (r.sag - r.sagA) * k;
+    for (let i = 0; i < 4; i++) r.La[i] += (r.L[i] - r.La[i]) * k;
+    r.qNa.slerp(r.qN, k); r.qTa.slerp(r.qT, k);
+  }
+  // a corpse laid down by something else (the ragdoll, a tumble): lifted
+  // bodily out of whatever sank, the world's up through the group's own turn,
+  // until its lowest point rests on the ground (never pulled down: a corpse
+  // the solver floats on water is not on the bed)
+  function restCorpse(rig, c) {
+    restTemps();
+    const S = restSet(rig), mesh = rig.mesh, grp = rig.group;
+    const last = rig._rc || (rig._rc = { e: new Float64Array(16), still: 0 });
+    grp.updateMatrixWorld(false);
+    // a body that has not moved since the last solve keeps its lift
+    const e = grp.matrixWorld.elements;
+    let moved = false;
+    for (let i = 0; i < 16; i++) if (Math.abs(e[i] - last.e[i]) > 1e-5) { moved = true; break; }
+    if (!moved && rig._rcBones === rig._rcStamp) return;
+    for (let i = 0; i < 16; i++) last.e[i] = e[i];
+    rig._rcStamp = rig._rcBones;
+    mesh.position.set(0, 0, 0);
+    grp.updateMatrixWorld(true); rig.skeleton.update();
+    const G = restGround(rig, c, _rG);
+    skinRest(rig, S, -1);
+    const h = lowest(S, G, -1) - REST_GAP;
+    if (!(h < 0)) return;
+    _rV.set(0, -h, 0).applyQuaternion(_rQi.copy(grp.quaternion).invert()).divideScalar(grp.scale.x || 1);
+    mesh.position.copy(_rV);
+    mesh.updateMatrixWorld(true);
+  }
+  // a corpse's bones: let go, the head and tail fallen, the jaw slack
+  function limpPose(rig) {
+    const b = rig.bones, bp = rig.bindPos;
+    for (let i = 0; i < NB; i++) { b[i].position.copy(bp[i]); b[i].rotation.set(0, 0, 0); b[i].scale.set(1, 1, 1); }
+    b[BN.collar].scale.setScalar(rig.collarHex == null ? 1e-4 : 1);
+    b[BN.jaw].rotation.set(0, 0, -0.22);
+    b[BN.tail0].rotation.set(0, 0.2, 0.35); b[BN.tail1].rotation.set(0, 0.15, 0.12);
+    b[BN.earL].rotation.set(-0.3, 0, 0.6); b[BN.earR].rotation.set(0.3, 0, 0.6);
+    b[BN.neck].rotation.set(0, 0, -0.35); b[BN.neck1].rotation.set(0, 0, -0.2);
+  }
+  // the trunk's three bones turned about the ground under the body's middle:
+  // along the body (tA, nose up), across it (tC, about the long axis)
+  function tiltTrunk(rig, tA, tC, px) {
+    restTemps();
+    const b = rig.bones;
+    _rQi.setFromAxisAngle(_rAX[2], tA).multiply(_rQd.setFromAxisAngle(_rAX[0], tC));
+    const ids = [BN.pelvis, BN.chest, BN.loin];
+    for (let i = 0; i < 3; i++) {
+      const bn = b[ids[i]];
+      _rV.set(bn.position.x - px, bn.position.y, bn.position.z).applyQuaternion(_rQi);
+      bn.position.set(_rV.x + px, _rV.y, _rV.z);
+      bn.quaternion.premultiply(_rQi);
+    }
+  }
+  // laid over by something else: the group's own up has left the vertical
+  function tipped(grp) { const q = grp.quaternion; return 1 - 2 * (q.x * q.x + q.z * q.z) < 0.8; }
+
   // ---- the legs: gait or posture feet, 3-D IK, scapula swing, pasterns, toes
   const _lp = { x: 0, y: 0, z: 0 };
   function legs(rig, st, P, T, wS, wL, wB, wD, c) {
@@ -2276,6 +2559,8 @@
         fz = lerp(fz, -D.legLen * 0.55 - (upper ? 0.03 * K : 0), wD);
         aM = lerp(aM, front ? -0.9 : -HALF - 0.3, wD);
       }
+      // at rest the foot comes out of the ground or down onto it (restSolve)
+      if (st.rest && st.rest.on) fy += st.rest.La[Lg];
       // ---- into the parent's frame (the pastern and toe angles were world
       //      angles; the trunk under them is pitched)
       aM -= brz; aT -= brz;
@@ -2524,7 +2809,7 @@
 
   // the scratching hind leg, over the IK result: up to the neck, fast strokes
   function scratchPose(rig, st) {
-    if (st.act !== "scratch") return;
+    if (!st || st.act !== "scratch" || rig.ragdoll || rig._limp) return;
     const b = rig.bones, s = st.actSide || 1, Lg = s < 0 ? 2 : 3, ids = LEGB[Lg];
     const e = sstep(0, 0.2, st.actT) * (1 - sstep(st.actDur - 0.2, st.actDur, st.actT));
     const fq = 5.2 * Math.pow(rig.D.mass / 30, -0.2), osc = sin(TAU * fq * st.actT);
@@ -2771,6 +3056,7 @@
     const st0 = rig.st;
     c.x = m.pos.x; c.z = m.pos.z; c.y = m.pos.y; c.heading = typeof m.heading === "number" ? m.heading : 0;
     c.ground = CBZ.floorAt || null;
+    c.dead = !!m.dead;
     const cf = m._cf, t = m.tgt && !m.tgt.dead ? m.tgt : null;
     const dT = t ? hypot(t.pos.x - m.pos.x, t.pos.z - m.pos.z) : 1e9;
     const fleeing = m.state === "flee" || m.routed || m.slot === "fallback";
@@ -2834,8 +3120,8 @@
     } else u.idleAct = 0;
     c.sniff = u.idleAct === 1 ? 1 : 0;
     c.howl = u.idleAct === 3 ? 1 : 0;
-    c.posture = still && u.still > 30 ? "lie" : still && u.still > 14 ? "sit" : "stand";
-    c.idle = !t;
+    c.posture = m.dead ? "dead" : still && u.still > 30 ? "lie" : still && u.still > 14 ? "sit" : "stand";
+    c.idle = !t && !m.dead;
     if (t) {
       const h = c.heading;
       c.lookYaw = -wrapPi(atan2(t.pos.z - m.pos.z, t.pos.x - m.pos.x) - h);
@@ -2860,12 +3146,7 @@
     function limp() {
       if (reset) return;
       reset = true; rig.ragdoll = true;
-      for (let i = 0; i < NB; i++) { b[i].position.copy(bp[i]); b[i].rotation.set(0, 0, 0); b[i].scale.set(1, 1, 1); }
-      b[BN.collar].scale.setScalar(rig.collarHex == null ? 1e-4 : 1);
-      b[BN.jaw].rotation.set(0, 0, -0.22);
-      b[BN.tail0].rotation.set(0, 0.2, 0.35); b[BN.tail1].rotation.set(0, 0.15, 0.12);
-      b[BN.earL].rotation.set(-0.3, 0, 0.6); b[BN.earR].rotation.set(0.3, 0, 0.6);
-      b[BN.neck].rotation.set(0, 0, -0.35); b[BN.neck1].rotation.set(0, 0, -0.2);
+      limpPose(rig);
     }
     const bodyY = Math.max(D.shj.y, D.hip.y) * 1.02;
     const cols = [], KX = [], KY = [], KZ = [];
@@ -2890,6 +3171,7 @@
         if (v2.lengthSq() < 1e-8) return;
         v2.normalize().applyQuaternion(q2.copy(q1).invert());
         b[ids[front ? 2 : 1]].quaternion.setFromUnitVectors(B2[Lg], v2);
+        rig._rcBones = (rig._rcBones || 0) + 1;
       } }, rotation: { x: 0, y: 0, z: 0, set: function () {} } };
       cols.push({ x: J.x * s0, z: z * s0, top: bodyY * s0, h: bodyY * s0, parts: [{ m: knee, bx: J.x * s0, by: kneeY * s0 }, { m: foot, bx: J.x * s0, by: footY * s0 }] });
     }
@@ -2904,6 +3186,7 @@
       const yaw = atan2(-zz, dx);
       b[BN.neck].rotation.set(0, yaw * 0.6, clamp(pitch * 0.6, -1.3, 1.0));
       b[BN.neck1].rotation.set(0, yaw * 0.4, clamp(pitch * 0.4, -1.0, 0.8));
+      rig._rcBones = (rig._rcBones || 0) + 1;
     } }, rotation: { x: 0, y: 0, z: 0, set: function () {} } };
     const gait = { cols: cols, head: [{ m: head, bx: hp.x * s0, by: hp.y * s0 }], headMesh: null, amp: 0.1, freq: 2, step: 0, k: 0, grazeK: 0, _canid: true };
     // the corpse solver (and anything that discovers a gait rig) sees the
@@ -2911,7 +3194,7 @@
     try {
       Object.defineProperty(m, "gait", { configurable: true, enumerable: false, get: function () { if (m.dead) limp(); return m.dead ? gait : undefined; }, set: function () {} });
     } catch (e) {}
-    rig.unragdoll = function () { reset = false; rig.ragdoll = false; };
+    rig.unragdoll = function () { reset = false; rig.ragdoll = false; rig._rc = null; rig.mesh.position.set(0, 0, 0); };
   }
 
   // ==========================================================================
@@ -2946,7 +3229,15 @@
       a._jawGripL = { x: a._jawL.x - 0.03 * rig.D.K, y: a._jawL.y - 0.015 * rig.D.K, z: 0 };
       a.biteId = biteId(rig);
     }
-    if (a.dead) return true;
+    if (a.dead) {
+      // laid down by the ragdoll or a tumble: rests bodily on the ground (a
+      // skinned husk is let sink away by the engine)
+      if (!a.skinned && (rig.ragdoll || tipped(grp))) {
+        if (!rig.ragdoll && !rig._limp) { limpPose(rig); rig._limp = true; }
+        restCorpse(rig, { ground: CBZ.floorAt || null });
+      }
+      return true;
+    }
     // the hunger cue swells the belly (ribs + loin bones), not the whole
     // skinned mesh: wildlife_traits' named-hull swell is turned away here
     a._bodyMesh = null;
