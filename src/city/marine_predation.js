@@ -1073,7 +1073,8 @@
         jaw: woundR(gapeOf(a) * (kin ? 0.34 : 0.45), t),
         sev: clamp((frac || 0.1) * 6 + sizeOf(a) / Math.max(0.2, sizeOf(t)) * 0.4, 0.3, 1) * (kin ? 0.7 : 1),
         dir: _cd,
-        by: a,
+        // who bit, by species, with the animal itself beside it
+        by: (a.species && a.species.id) || "", byActor: a,
         bleedS: 16,
       });
       if (took) AUDIT.chunks = (AUDIT.chunks || 0) + 1;

@@ -621,7 +621,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=anatomy1122d"></script>
+  <script src="src/entities/character.js?v=sea1122a"></script>
   <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -1497,7 +1497,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (predatorKit, marineGape, marineHurt) is asked for at CALL time, so its
      position here is about readability, not load order. -->
 <script src="src/systems/bite_angles.js?v=biteangles1"></script>
-<script src="src/city/creature_combat.js?v=sweep0929"></script>
+<script src="src/city/creature_combat.js?v=sea1122a"></script>
 <script src="src/city/companions.js?v=allmain1"></script>
 <!-- IRONJAW ARENA. arena_venue.js is the BUILDING (raked bowl, concourse,
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
@@ -1941,7 +1941,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/fitout_work.js?v=loose1013"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
 <script src="src/city/family.js?v=ekey2"></script>
-<script src="src/city/swim.js?v=wake1122a"></script>
+<script src="src/city/swim.js?v=sea1122a"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage
@@ -2180,7 +2180,7 @@ document.body.appendChild(b);}}catch(e){}})();
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
      same brain. After wounds.js (routes through CBZ.bodyBite). -->
-<script src="src/systems/predator.js?v=feel1020"></script>
+<script src="src/systems/predator.js?v=sea1122a"></script>
 <!-- The LAND sibling of the swim rig. Land animals had no jaw articulation and
      no spine bend at all — a bear grabbing you moved nothing. Discovery is
      geometric (no species table), so all 45 species animate from one change.

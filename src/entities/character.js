@@ -6896,6 +6896,55 @@
     return true;
   }
 
+  /* HELD IN THE JAWS. A swimmer a shark has hold of (systems/predator.js
+     places and turns ch.group every frame so the bitten part sits between
+     the teeth; this writes only the joints). st.part "torso": taken across
+     the middle, the body folds round the bite with the legs kicking under
+     it; "leg" (st.side +1 the left, -1 the right): that leg straight in the
+     mouth, the free one kicking at the head, the body arched away from it.
+     Either way one arm stretches for the surface and the other beats at the
+     head. st.t the clock, st.k how hard it fights (0 limp .. 1 frantic). */
+  function poseSeizedSwimmer(ch, st) {
+    if (!ch || !ch.group || !st) return false;
+    ch.swimming = true;
+    legRootsHome(ch);
+    beginCharacterHipFrame(ch);
+    const t = st.t || 0, k = Math.max(0, Math.min(1, st.k == null ? 1 : st.k));
+    const f1 = Math.sin(t * 7.3), f2 = Math.sin(t * 5.1 + 1.3), f3 = Math.sin(t * 9.7 + 0.4);
+    const torso = st.part !== "leg", left = st.side !== -1;
+    if (ch.body) {
+      ch.body.rotation.x = torso ? 0.55 + 0.25 * k * f2 : -0.35 + 0.20 * k * f2;
+      ch.body.rotation.y = 0.25 * k * f1;
+      ch.body.rotation.z = 0.20 * k * f3;
+      ch.body.position.set(0, 0, 0);
+    }
+    const up = -2.75 * (st.reach == null ? 1 : st.reach), beat = -1.25;
+    if (ch.parts) {
+      if (ch.parts.la) { ch.parts.la.rotation.x = (left ? up : beat) + 0.5 * k * f1; ch.parts.la.rotation.z = 0.35 + 0.30 * k * f3; ch.parts.la.rotation.y = 0; }
+      if (ch.parts.ra) { ch.parts.ra.rotation.x = (left ? beat : up) - 0.5 * k * f2; ch.parts.ra.rotation.z = -(0.35 + 0.30 * k * f1); ch.parts.ra.rotation.y = 0; }
+      if (torso) {
+        if (ch.parts.ll) { ch.parts.ll.rotation.x = 0.90 + 0.60 * k * f2; ch.parts.ll.rotation.z = -0.10; }
+        if (ch.parts.rl) { ch.parts.rl.rotation.x = 0.90 - 0.60 * k * f2; ch.parts.rl.rotation.z = 0.10; }
+      } else {
+        const bit = left ? ch.parts.ll : ch.parts.rl, free = left ? ch.parts.rl : ch.parts.ll;
+        if (bit) { bit.rotation.x = 0.15; bit.rotation.z = left ? -0.12 : 0.12; }
+        if (free) { free.rotation.x = 0.80 + 0.80 * k * f1; free.rotation.z = left ? 0.20 : -0.20; }
+      }
+    }
+    if (ch.low) {
+      if (ch.low.la) ch.low.la.rotation.x = -(0.30 + 0.60 * k * Math.max(0, f2));
+      if (ch.low.ra) ch.low.ra.rotation.x = -(0.30 + 0.60 * k * Math.max(0, f1));
+      const bitK = torso ? -1 : (left ? 0 : 1);
+      if (ch.low.ll) ch.low.ll.rotation.x = bitK === 0 ? 0.08 : 0.35 + 0.70 * k * Math.max(0, f3);
+      if (ch.low.rl) ch.low.rl.rotation.x = bitK === 1 ? 0.08 : 0.35 + 0.70 * k * Math.max(0, -f3);
+    }
+    if (ch.neck) { ch.neck.rotation.x = -0.60; ch.neck.rotation.y = 0.40 * k * f3; }
+    if (ch.model) ch.model.position.y = 0;
+    lockCharacterHips(ch);
+    legRootsFollow(ch);
+    return true;
+  }
+
   function poseSwimmer(ch, st, opts) {
     if (!ch || !ch.group || !st) return false;
     const o = opts || {};
@@ -10131,6 +10180,7 @@
   CBZ.makeSwimAnim = makeSwimAnim;
   CBZ.swimAnimStep = swimAnimStep;
   CBZ.poseSwimmer = poseSwimmer;
+  CBZ.poseSeizedSwimmer = poseSeizedSwimmer;
   CBZ.lockCharacterHips = lockCharacterHips;
   CBZ.gaitPhaseDelta = gaitPhaseDelta;
   CBZ.deathPose = deathPose;

@@ -1233,6 +1233,13 @@
      biteWound below asks twice, once for each question, and says which. */
   function biteJawRadius(attacker, style, victim) {
     var jaw = Math.max(0.12, Math.min(1.2, 0.10 + actorScale(attacker) * 0.16));
+    // a sea animal's real mouth: half its width across the tooth rows, at its
+    // live size (city/wildlife/aquatic.js builds it, wildlife_rig.js measures it)
+    var g0 = attacker && attacker.group;
+    if (g0 && g0.userData && g0.userData.aquaticMouth && typeof CBZ.marineJawRadius === 'function') {
+      var mj = CBZ.marineJawRadius(g0);
+      if (mj > 0.02) jaw = mj;
+    }
     // A TUSK PAIR IS NARROWER THAN A JAW: same paired-crescent wound, less span.
     if (style === 'gore' || style === 'ram') jaw = Math.max(0.10, jaw * GORE_SPAN);
     if (victim) {
@@ -1343,14 +1350,23 @@
       var dl2 = Math.sqrt(_bd2.x * _bd2.x + _bd2.z * _bd2.z);
       if (dl2 > 0.001) { _bd2.x /= dl2; _bd2.z /= dl2; } else { _bd2.x = 1; _bd2.z = 0; }
       _bo.dir = _bd2;
+      // A SEA ANIMAL'S BITE, AS A FACT ABOUT WHO BIT (the wounds seam): by is
+      // the species id with the actor beside it, the line is the way the head
+      // is pointing in three dimensions, the radius is its own mouth's
+      var sea = attacker.species && attacker.species.aquatic;
+      if (sea) {
+        _bo.byActor = attacker; _bo.by = attacker.species.id;
+        if (!(o && o.dir) && CBZ.marineHeadAxes && CBZ.marineHeadAxes(g, _hax2)) { _bd2.x = _hax2.fx; _bd2.y = _hax2.fy; _bd2.z = _hax2.fz; }
+      }
       CBZ.bodyBite(target, _bp, _bo);
     } catch (e) {}
-    _bo.by = null;                       // the scratch must not pin an actor
+    _bo.by = null; _bo.byActor = null;   // the scratch must not pin an actor
   }
   // module-scope scratch for biteWound (allocation-free hot path)
   var _bp = { x: 0, y: 0, z: 0 };
   var _bd2 = { x: 0, y: 0, z: 0 };
-  var _bo = { jaw: 0.22, sev: 0.7, sever: false, fromX: 0, fromZ: 0, dir: null, by: null };
+  var _bo = { jaw: 0.22, sev: 0.7, sever: false, fromX: 0, fromZ: 0, dir: null, by: null, byActor: null };
+  var _hax2 = { fx: 1, fy: 0, fz: 0, ux: 0, uy: 1, uz: 0, sx: 0, sy: 0, sz: 1 };
 
   function endAttack(actor) {
     // remove any residual lunge offset so repeated attacks don't drift

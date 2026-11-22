@@ -2510,7 +2510,7 @@
         marinePodNeeded: typeof CBZ.marinePodNeeded === "function",
         wildlifeSize: typeof CBZ.wildlifeSize === "function",
         goreChum: typeof CBZ.goreChum === "function",
-        aquaticFin: typeof CBZ.aquaticFin === "function",
+        marineOrca: !!CBZ.marineOrca,
         predatorStagger: typeof CBZ.predatorStagger === "function",
       },
       counters: AUDIT,

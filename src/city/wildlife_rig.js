@@ -549,7 +549,12 @@
     const e1 = sm01(k / 0.55), e2 = sm01(k), e3 = sm01((k - 0.35) / 0.65), e4 = sm01((k - 0.55) / 0.40);
     const head = B[ix.head], jaw = B[ix.jaw], up = B[ix.upperJaw];
     if (!rig.vert && head) head.rotation.z = (J.lift || 0) * e1;
-    if (jaw) jaw.rotation.z = -(J.drop || 0.6) * e2;
+    // the lower jaw hangs off the neck (the snout lifts without it), so it
+    // takes the head's own yaw (and a whale's head pitch) to stay under it
+    if (jaw) {
+      jaw.rotation.z = -(J.drop || 0.6) * e2 + (rig.vert && head ? head.rotation.z : 0);
+      jaw.rotation.y = head ? head.rotation.y : 0;
+    }
     if (up) {
       const r = rig.rest[ix.upperJaw], pr = J.protrude || [0, 0];
       up.position.set(r.x + pr[0] * L * e3, r.y + pr[1] * L * e3, r.z);
@@ -635,6 +640,72 @@
   }
   // the near body inside ~nine body lengths, never further out than 28 m and
   // never closer than forty lengths for a small fish (a sardine swaps at ~9 m)
+  /* WHERE THE TEETH ARE. The mouth contract's points (bite: between the
+     front teeth; grip: further back between the jaws; hinge) carried by the
+     live jaw bones, so a held body follows the head through every shake and
+     every change of gape. Between the jaws = the mean of where the upper and
+     the lower jaw each carry the point. */
+  const _mwA = TH3 ? new TH3.Vector3() : null, _mwB = TH3 ? new TH3.Vector3() : null;
+  function marineMouthWorld(g, which, out) {
+    const ud = g && g.userData, mb = ud && ud.marineBody, c = ud && ud.aquaticMouth;
+    if (!mb || !c || !_mwA) return false;
+    const p = c[which] || c.bite, sk = mb.mesh.skeleton, ix = mb.ix;
+    g.updateMatrixWorld(true);
+    const jb = ix.jaw != null ? ix.jaw : ix.head, ub = ix.upperJaw != null ? ix.upperJaw : ix.head;
+    _mwA.set(p.x, p.y, p.z).applyMatrix4(sk.boneInverses[jb]).applyMatrix4(sk.bones[jb].matrixWorld);
+    _mwB.set(p.x, p.y, p.z).applyMatrix4(sk.boneInverses[ub]).applyMatrix4(sk.bones[ub].matrixWorld);
+    out.x = (_mwA.x + _mwB.x) * 0.5; out.y = (_mwA.y + _mwB.y) * 0.5; out.z = (_mwA.z + _mwB.z) * 0.5;
+    // the jaws' opening at that point, in metres
+    out.open = _mwA.distanceTo(_mwB);
+    return isFinite(out.x) && isFinite(out.y) && isFinite(out.z);
+  }
+  // the head's axes in the world: f forward (out of the snout), u up, s left
+  function marineHeadAxes(g, out) {
+    const mb = g && g.userData && g.userData.marineBody;
+    if (!mb) return false;
+    const e = mb.bones[mb.ix.head].matrixWorld.elements;
+    const lf = Math.hypot(e[0], e[1], e[2]) || 1, lu = Math.hypot(e[4], e[5], e[6]) || 1, ls = Math.hypot(e[8], e[9], e[10]) || 1;
+    out.fx = e[0] / lf; out.fy = e[1] / lf; out.fz = e[2] / lf;
+    out.ux = e[4] / lu; out.uy = e[5] / lu; out.uz = e[6] / lu;
+    out.sx = e[8] / ls; out.sy = e[9] / ls; out.sz = e[10] / ls;
+    return true;
+  }
+  /* The gape that closes the teeth on a body of diameter D (metres): the jaw
+     setting whose opening between the front teeth is D, measured once per
+     species on a scratch pose (capped at the full gape: a torso wider than
+     the gape takes the teeth in). */
+  function marineClampFor(a, D) {
+    const rig = a && a.swim, g = a && a.group;
+    if (!rig || !rig.marine || !rig.jawCfg || !g) return 0.6;
+    const tpl = rig.marine.tpl, sc = (g.scale && g.scale.x) || 1;
+    if (!tpl._open) {
+      const was = rig.jawApplied, tmp = {};
+      tpl._open = [];
+      for (let i = 0; i <= 8; i++) {
+        const k = i / 8;
+        applyMarineJaw(rig, k);
+        marineMouthWorld(g, "bite", tmp);
+        tpl._open.push(tmp.open / sc);
+      }
+      applyMarineJaw(rig, was >= 0 ? was : 0);
+    }
+    const O = tpl._open, want = D / sc;
+    if (want <= O[0]) return 0;
+    for (let i = 1; i < O.length; i++) if (O[i] >= want) return (i - 1 + (want - O[i - 1]) / Math.max(1e-6, O[i] - O[i - 1])) / 8;
+    return 1;
+  }
+  // the radius of the bite: half the mouth's width across its tooth rows, at
+  // the animal's size (metres)
+  function marineJawRadius(g) {
+    const c = g && g.userData && g.userData.aquaticMouth;
+    if (!c) return 0;
+    return c.width * 0.5 * ((g.scale && g.scale.x) || 1);
+  }
+  CBZ.marineJawRadius = marineJawRadius;
+  CBZ.marineMouthWorld = marineMouthWorld;
+  CBZ.marineHeadAxes = marineHeadAxes;
+  CBZ.marineClampFor = marineClampFor;
+
   function lodDistance(lenM) { return Math.max(Math.min(28, 40 * lenM), 9 * lenM); }
   function marineLod(a, rig) {
     const cam = CBZ.camera, mesh = rig.marine.mesh;
@@ -1001,6 +1072,17 @@
     rig.curl += (curlWant - rig.curl) * ez(6, dt);
     const bend = (Math.max(-0.12, Math.min(0.12, rig.turn * 0.09)) * (rig.vert ? 0 : 1) + rig.curl * CURL_AMP) * rig.L;
     poseMarine(rig, A, rig.ph, bend, dt);
+    // a seize's head shake and clamped jaw (systems/predator.js writes
+    // a._mSeize every frame it holds something): the head saws, the neck and
+    // the tail stock swing against it, the jaw stays shut on what it holds
+    const ms = a._mSeize;
+    if (ms && ms.on) {
+      const B = rig.marine.bones, ix = rig.marine.ix;
+      if (B[ix.head]) B[ix.head].rotation.y += ms.yaw;
+      if (B[ix.neck]) B[ix.neck].rotation.y -= ms.yaw * 0.45;
+      if (ix.t1 != null && B[ix.t1]) B[ix.t1].rotation.y -= ms.yaw * 0.30;
+      applyMarineJaw(rig, ms.jaw >= 0 ? ms.jaw : (rig.jawK < 0 ? 0 : rig.jawK));
+    }
     if (rig.style) strokeMarine(a, rig, dt);
     else if (rig.pecs.length) {
       // trim: leading edge up to climb, down to dive; flare on braking;
