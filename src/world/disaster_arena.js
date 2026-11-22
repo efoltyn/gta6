@@ -3981,6 +3981,302 @@
       return { x0: Math.min(a[0], b[0]), x1: Math.max(a[0], b[0]), z0: Math.min(a[1], b[1]), z1: Math.max(a[1], b[1]) };
     }
 
+    /* ============================================================
+       THE STREET DOOR. Every building's entrance used to be a bare hole: the
+       "doors" were two flat brown planks folded back flat against the inside
+       walls, so from the street you saw them edge-on or not at all, and a
+       bank, a cottage and a town hall all had the same one. This builds a
+       real door set in the opening, by what the building is:
+
+         home    a pair of panelled entry doors in a painted colour (raised
+                 panels below, a glazed light with glazing bars above on
+                 some), a knob and a letter plate
+         shop    glazed shop doors: stiles and rails round full glass, a push
+                 bar, a kick plate, a dark or a timber frame
+         civic   tall panelled doors, three panels a leaf, long brass pulls
+
+       Each has a frame in the opening, a head, a glazed transom over the
+       doors and a metal threshold. The leaves stand AJAR into the room (the
+       street door of a building people run into when the wave comes is never
+       shut, and never in the way: they are not colliders), which is also
+       what shows them: an open door seen from the street is a door.
+       One merged mesh a building, plus one for its glass. */
+    let _doorMat = null, _doorGlassMat = null;
+    function doorMats() {
+      if (!_doorMat) {
+        _doorMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+        _doorMat.name = "island-door";
+        _doorGlassMat = new THREE.MeshLambertMaterial({ color: 0x3f6470, transparent: true, opacity: 0.38, depthWrite: false });
+        _doorGlassMat.name = "island-door-glass";
+      }
+      return _doorMat;
+    }
+    const DOOR_PAINTS = [0x24503a, 0x1c3460, 0x8a2420, 0x1c1c1c, 0x6e4526, 0xe6e0d2, 0x35606e, 0x9a7222];
+    const DOOR_SHOPS = [0x1c1c1e, 0x2a2622, 0x5a3d24, 0x1f3a2c, 0x33383d, 0x6b4a2a];
+    const DOOR_CIVIC = [0x4a2f1a, 0x3a2a1c, 0x24352c, 0x2a2622];
+    function doorKindOf(kind) {
+      if (kind === "house" || kind === "villa") return "home";
+      if (kind === "civic") return "civic";
+      return "shop";
+    }
+    /* THE DOORS SWING, AND STAY WHERE THEY ARE LEFT. They start shut. Run into
+       one (you or anybody else) and it is shoved open AWAY from you, the way
+       you are going, and it stays open: nothing closes a door but a person.
+       Stand at one and press E to shut it, or to open it without walking
+       through. A leaf is never a collider: it is already swinging when you
+       reach it. */
+    const DOORS = CBZ._islandDoors || (CBZ._islandDoors = []);   // one list, one stepper, however many islands are built
+    function doorSet(bgroup, o) {
+      // o: { w (opening), h (opening top), z0 (wall outer face), wt, kind, seed, floorY }
+      doorMats();
+      const rgb = function (hex, k) {
+        // authored as you see them: this renderer treats material colour as LINEAR and lifts it on screen
+        const lin = function (v) { return Math.pow(v / 255, 2.2); };
+        k = k == null ? 1 : k; return [lin((hex >> 16) & 255) * k, lin((hex >> 8) & 255) * k, lin(hex & 255) * k];
+      };
+      const FACES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+      const CORN = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
+      const newBuf = function () { return { P: [], N: [], C: [], GP: [], GN: [] }; };
+      const box = function (B, cx, cy, cz, sx, sy, sz, hex, glass, shade) {
+        const c = glass ? null : rgb(hex, shade), hx = sx / 2, hy = sy / 2, hz = sz / 2;
+        for (const f of FACES) {
+          // two axes across the face, ordered so the triangle winds outward
+          const u = f[0] ? [0, 1, 0] : f[1] ? [0, 0, 1] : [1, 0, 0];
+          const v = [f[1] * u[2] - f[2] * u[1], f[2] * u[0] - f[0] * u[2], f[0] * u[1] - f[1] * u[0]];
+          for (const q of CORN) {
+            (glass ? B.GP : B.P).push(cx + f[0] * hx + u[0] * q[0] * hx + v[0] * q[1] * hx,
+              cy + f[1] * hy + u[1] * q[0] * hy + v[1] * q[1] * hy, cz + f[2] * hz + u[2] * q[0] * hz + v[2] * q[1] * hz);
+            (glass ? B.GN : B.N).push(f[0], f[1], f[2]);
+            if (!glass) B.C.push(c[0], c[1], c[2]);
+          }
+        }
+      };
+      const meshOf = function (B, parent) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(B.P, 3));
+        geo.setAttribute("normal", new THREE.Float32BufferAttribute(B.N, 3));
+        geo.setAttribute("color", new THREE.Float32BufferAttribute(B.C, 3));
+        const m = new THREE.Mesh(geo, _doorMat);
+        m.name = "island-door"; m.castShadow = false; m.receiveShadow = true;
+        parent.add(m);
+        if (B.GP.length) {
+          const gg = new THREE.BufferGeometry();
+          gg.setAttribute("position", new THREE.Float32BufferAttribute(B.GP, 3));
+          gg.setAttribute("normal", new THREE.Float32BufferAttribute(B.GN, 3));
+          const gm = new THREE.Mesh(gg, _doorGlassMat);
+          gm.name = "island-door-glass"; gm.castShadow = false; gm.renderOrder = 2;
+          m.add(gm);
+        }
+        return m;
+      };
+      const h01 = function (k) { const v = Math.sin((o.seed + k * 7.13) * 127.1) * 43758.5453; return v - Math.floor(v); };
+      const kind = o.kind, W = o.w, fy = o.floorY || 0.06;
+      const zc = o.z0 + o.wt * 0.5;                      // the frame sits mid-wall
+      const leafTop = Math.min(o.h - 0.42, kind === "civic" ? 2.55 : 2.14);
+      const FR = 0.07;                                   // frame section
+      const frameHex = kind === "shop" ? DOOR_SHOPS[(h01(1) * DOOR_SHOPS.length) | 0] : kind === "civic" ? 0x3a2a1c : 0xf0ece2;
+      const brass = 0xc79a3e, steel = 0xa9aeb2;
+      // ---- the frame: jambs, head, the transom bar and the glass over it
+      const FB = newBuf();
+      box(FB, -W / 2 + FR / 2, (fy + o.h) / 2, zc, FR, o.h - fy, 0.14, frameHex);
+      box(FB, W / 2 - FR / 2, (fy + o.h) / 2, zc, FR, o.h - fy, 0.14, frameHex);
+      box(FB, 0, o.h - FR / 2, zc, W, FR, 0.14, frameHex);
+      box(FB, 0, leafTop + FR / 2, zc, W - FR * 2, FR, 0.14, frameHex);
+      if (o.h - FR - (leafTop + FR) > 0.12) {
+        box(FB, 0, (leafTop + FR + o.h - FR) / 2, zc, W - FR * 2, o.h - FR - (leafTop + FR), 0.012, 0, true);
+        if (kind !== "shop") box(FB, 0, (leafTop + FR + o.h - FR) / 2, zc, 0.03, o.h - FR - (leafTop + FR), 0.03, frameHex);
+      }
+      box(FB, 0, fy + 0.012, zc, W - FR * 2, 0.024, o.wt + 0.06, steel, false, 0.8);   // threshold
+      meshOf(FB, bgroup);
+      // ---- the leaves, each its own mesh on its hinge
+      const lw = (W - FR * 2) / 2 - 0.006, lh = leafTop - fy - 0.02, T = 0.046;
+      const paint = kind === "home" ? DOOR_PAINTS[(h01(2) * DOOR_PAINTS.length) | 0]
+        : kind === "civic" ? DOOR_CIVIC[(h01(2) * DOOR_CIVIC.length) | 0] : frameHex;
+      const lite = kind === "home" && h01(3) < 0.55;     // a glazed light in the upper part
+      const rec = { g: bgroup, w: W, zc: zc, leaves: [], t: 0, hold: 0, shove: false, pd: 9, ps: 1, pAt: -1 };
+      for (const sg of [-1, 1]) {
+        const B = newBuf();
+        const cx = -sg * lw / 2, cy = fy + 0.02 + lh / 2;   // hinge-local: the leaf runs from the hinge to the middle
+        const L = function (x, y, sx, sy, sz, hex, glass, shade) { box(B, cx + x * -sg, cy + y, 0, sx, sy, sz, hex, glass, shade); };
+        if (kind === "shop") {
+          const ST = 0.085, TOP = 0.10, BOT = 0.24;
+          L(-lw / 2 + ST / 2, 0, ST, lh, T, paint); L(lw / 2 - ST / 2, 0, ST, lh, T, paint);
+          L(0, lh / 2 - TOP / 2, lw - ST * 2, TOP, T, paint); L(0, -lh / 2 + BOT / 2, lw - ST * 2, BOT, T, paint);
+          L(0, (BOT - TOP) / 2, lw - ST * 2, lh - TOP - BOT, 0.012, 0, true);
+          L(0, -lh / 2 + BOT / 2, lw - ST * 2 - 0.04, BOT - 0.06, T + 0.012, steel, false, 0.75);      // kick plate
+          L(0, 1.05 - lh / 2, lw - 0.1, 0.035, T + 0.11, steel);                                       // push bar
+          L(-lw / 2 + ST / 2, 1.05 - lh / 2, 0.03, 0.035, T + 0.11, steel); L(lw / 2 - ST / 2, 1.05 - lh / 2, 0.03, 0.035, T + 0.11, steel);
+        } else {
+          L(0, 0, lw, lh, T, paint);
+          const pw = lw - 0.26, R = T + 0.022;
+          const rows = kind === "civic" ? [[0.16, 0.62], [0.86, 0.92], [1.86, 0.5]] : lite ? [[0.16, 0.78]] : [[0.16, 0.78], [1.06, 0.92]];
+          for (const r of rows) {
+            if (r[0] + r[1] > lh - 0.1) continue;
+            L(0, r[0] + r[1] / 2 - lh / 2, pw, r[1], R, paint, false, 0.8);                        // the field of the panel
+            L(0, r[0] + r[1] / 2 - lh / 2, pw - 0.1, r[1] - 0.1, R + 0.014, paint, false, 1.12);   // its raised centre
+          }
+          if (lite) {
+            const y0 = 1.08, hh = Math.min(0.86, lh - y0 - 0.14);
+            L(0, y0 + hh / 2 - lh / 2, pw, hh, 0.012, 0, true);
+            L(0, y0 + hh / 2 - lh / 2, pw + 0.05, 0.03, R, paint, false, 1.1);
+            L(0, y0 + hh / 2 - lh / 2, 0.03, hh + 0.05, R, paint, false, 1.1);
+            L(0, y0 - 0.02 - lh / 2, pw + 0.06, 0.04, R + 0.01, paint, false, 1.1);
+            L(0, y0 + hh + 0.02 - lh / 2, pw + 0.06, 0.04, R + 0.01, paint, false, 1.1);
+          }
+          if (kind === "civic") L(lw / 2 - 0.09, 1.15 - lh / 2, 0.028, 0.5, T + 0.075, brass);
+          else {
+            L(lw / 2 - 0.075, 1.02 - lh / 2, 0.05, 0.16, T + 0.02, brass, false, 0.9);       // back plate
+            L(lw / 2 - 0.075, 1.04 - lh / 2, 0.055, 0.055, T + 0.13, brass);                 // the knob
+            if (sg > 0) L(-0.02, 0.98 - lh / 2, 0.24, 0.05, T + 0.014, brass, false, 0.95);  // letter plate
+          }
+        }
+        const m = meshOf(B, bgroup);
+        m.position.set(sg * (W / 2 - FR), 0, zc);
+        rec.leaves.push({ m: m, sg: sg, a: 0, k: 0.85 + 0.3 * h01(6 + sg) });
+      }
+      DOORS.push(rec);
+      return rec;
+    }
+    /* one pass a frame over the doors near the lens: who is at each doorway,
+       which way they are going, and the leaves following */
+    const _doorActors = [];
+    function stepDoors(dt) {
+      if (!DOORS.length || !(dt > 0)) return;
+      if (CBZ.now != null) { if (CBZ.now === CBZ._islandDoorAt) return; CBZ._islandDoorAt = CBZ.now; }   // once a tick, whoever calls
+      const cam = CBZ.camera ? CBZ.camera.position : null;
+      const A = _doorActors; A.length = 0;
+      const pl = CBZ.player;
+      if (pl && pl.pos && !pl.dead) A.push(pl.pos);
+      const bots = CBZ.bots || [];
+      for (let i = 0; i < bots.length; i++) { const b = bots[i]; if (b && b.pos && !b.dead) A.push(b.pos); }
+      for (let i = DOORS.length - 1; i >= 0; i--) {
+        const D = DOORS[i], g = D.g;
+        if (!g.parent) { DOORS.splice(i, 1); continue; }
+        const gx = g.position.x, gy = g.position.y, gz = g.position.z;
+        if (cam && (cam.x - gx) * (cam.x - gx) + (cam.z - gz) * (cam.z - gz) > 140 * 140) continue;
+        const co = Math.cos(g.rotation.y), si = Math.sin(g.rotation.y);
+        if (D.hold > 0) D.hold -= dt;
+        let near = 9, nside = 0;
+        for (let k = 0; k < A.length; k++) {
+          const p = A[k], wx = p.x - gx, wz = p.z - gz;
+          if (wx * wx + wz * wz > 900 || Math.abs(p.y - gy) > 2.6) continue;
+          const lx = wx * co - wz * si, lz = wx * si + wz * co - D.zc;    // the doorway's own frame
+          if (Math.abs(lx) > D.w / 2 + 0.2) continue;
+          const d = Math.abs(lz);
+          if (k === 0 && pl && p === pl.pos && d < 2.4) { D.pd = d; D.ps = lz < 0 ? 1 : -1; D.pAt = CBZ.now; }
+          if (d < near) { near = d; nside = lz < 0 ? 1 : -1; }           // outside shoves it in, inside shoves it out
+        }
+        // somebody is ON the door: it goes the way they are going, never back at them
+        if (near < 1.0 && !(D.hold > 0)) {
+          const push = nside * 1.5;
+          D.t = nside > 0 ? Math.max(D.t || 0, push) : Math.min(D.t || 0, push);
+        }
+        const target = D.t || 0;
+        let moving = false;
+        for (const lf of D.leaves) {
+          const t = target * lf.k, da = t - lf.a;
+          if (Math.abs(da) < 0.0005) continue;
+          const rate = (D.shove ? 3.2 : 11) * dt;                        // a shove is fast, a hand on the door is not
+          lf.a += Math.max(-rate, Math.min(rate, da));
+          lf.m.rotation.y = lf.sg * lf.a;
+          moving = true;
+        }
+        if (!moving) D.shove = false;
+        D.moving = moving;
+      }
+    }
+    CBZ._islandDoorTick = stepDoors;
+    // which side of a doorway a point is on (+1 outside, -1 in the room), and how far from its plane
+    function doorSide(D, pos, out) {
+      const g = D.g, co = Math.cos(g.rotation.y), si = Math.sin(g.rotation.y);
+      const wx = pos.x - g.position.x, wz = pos.z - g.position.z;
+      const lz = wx * si + wz * co - D.zc;
+      out.lx = wx * co - wz * si; out.d = Math.abs(lz); out.side = lz < 0 ? 1 : -1;
+      return out;
+    }
+    const _ds = {};
+    function doorToggle(D) {
+      const pl = CBZ.player;
+      const open = Math.abs(D.leaves[0].a) > 0.15;
+      const sd = pl && pl.pos ? doorSide(D, pl.pos, _ds).side : 1;
+      D.t = open ? 0 : sd * 1.45;                        // shut it, or open it away from you
+      D.hold = 0.9; D.shove = true;
+      return true;
+    }
+    // E at a door: shut it if it is open, open it if it is shut
+    CBZ._islandDoorUse = function () {
+      const pl = CBZ.player;
+      if (!pl || !pl.pos || pl.dead) return false;
+      let best = null, bd = 2.2;
+      for (const D of DOORS) {
+        if (!D.g.parent || Math.abs(pl.pos.y - D.g.position.y) > 2.6) continue;
+        doorSide(D, pl.pos, _ds);
+        if (Math.abs(_ds.lx) > D.w / 2 + 0.6 || !(_ds.d < bd)) continue;
+        bd = _ds.d; best = D;
+      }
+      return best ? doorToggle(best) : false;
+    };
+    /* ON A TOUCH SCREEN THERE IS NO E: you tap the door. A tap (a finger down
+       and up in the same place, not a drag to look round) is cast into the
+       scene, and if it lands on a door within arm's reach of you, anywhere
+       on either leaf, that door does what E would do. */
+    CBZ._islandDoorTap = function (cx, cy) {
+      const pl = CBZ.player, cam = CBZ.camera, cv = CBZ.renderer && CBZ.renderer.domElement;
+      if (!pl || !pl.pos || pl.dead || !cam || !cv) return false;
+      const r = cv.getBoundingClientRect();
+      if (!(r.width > 0) || cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return false;
+      const ray = CBZ._islandDoorRay || (CBZ._islandDoorRay = new THREE.Raycaster());
+      ray.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), cam);
+      let best = null, bd = 1e9;
+      for (const D of DOORS) {
+        if (!D.g.parent) continue;
+        const dx = pl.pos.x - D.g.position.x, dz = pl.pos.z - D.g.position.z;
+        if (dx * dx + dz * dz > 30 * 30 || Math.abs(pl.pos.y - D.g.position.y) > 2.6) continue;
+        doorSide(D, pl.pos, _ds);
+        if (_ds.d > 3.2 || Math.abs(_ds.lx) > D.w / 2 + 2.2) continue;   // arm's reach of the doorway
+        for (const lf of D.leaves) {
+          const hit = ray.intersectObject(lf.m, true);
+          if (hit.length && hit[0].distance < bd) { bd = hit[0].distance; best = D; }
+        }
+        // the doorway itself is the door too: an open leaf has swung away from where it was
+        {
+          const g = D.g, co = Math.cos(g.rotation.y), si = Math.sin(g.rotation.y), O = ray.ray.origin, V = ray.ray.direction;
+          const ox = O.x - g.position.x, oz = O.z - g.position.z;
+          const lz0 = ox * si + oz * co, vz = V.x * si + V.z * co;
+          if (Math.abs(vz) > 1e-4) {
+            const t = (D.zc - lz0) / vz;
+            if (t > 0 && t < bd) {
+              const lx = (ox + V.x * t) * co - (oz + V.z * t) * si, ly = O.y + V.y * t - g.position.y;
+              if (Math.abs(lx) < D.w / 2 && ly > 0 && ly < 2.3) { bd = t; best = D; }
+            }
+          }
+        }
+      }
+      return best ? doorToggle(best) : false;
+    };
+    if (typeof window !== "undefined" && !CBZ._islandDoorKey) {
+      CBZ._islandDoorKey = true;
+      window.addEventListener("keydown", function (e) {
+        if (e.repeat || (e.key !== "e" && e.key !== "E")) return;
+        const g = CBZ.game;
+        if (!g || g.state !== "playing" || g.mode !== "survival") return;
+        CBZ._islandDoorUse();
+      });
+      let tp = null;
+      window.addEventListener("pointerdown", function (e) {
+        tp = e.pointerType === "touch" || e.pointerType === "pen" ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() } : null;
+      }, true);
+      window.addEventListener("pointerup", function (e) {
+        const p = tp; tp = null;
+        if (!p || p.id !== e.pointerId) return;
+        if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 14 || performance.now() - p.t > 400) return;   // a drag or a hold is not a tap
+        const g = CBZ.game;
+        if (!g || g.state !== "playing" || g.mode !== "survival") return;
+        CBZ._islandDoorTap(e.clientX, e.clientY);
+      }, true);
+    }
+    if (CBZ.onUpdate && !CBZ._islandDoorStep) { CBZ._islandDoorStep = true; CBZ.onUpdate(41.7, function (dt) { CBZ._islandDoorTick(dt); }); }
+
     function* makeBuilding(ox, oz, w, d, storeys, color, gy, style, yaw, bo) {
       yaw = yaw || 0; bo = bo || {};
       const snap = recSnap();
@@ -4061,17 +4357,8 @@
           wall(0, DOORW / 2 + side / 2, ly, -d / 2 + WT / 2, side, FH, WT);
           // door lintel above the opening (so the facade reads as a doorway)
           lbox(0, FH - 0.35, -d / 2 + WT / 2, DOORW, 0.7, WT, color, { los: true, merge: true });
-          // THE DOORS THEMSELVES: a pair of panelled leaves, hooked back open
-          // against the jambs inside (the street door of a building people run
-          // into when the wave comes; it is never in the way)
-          {
-            const lw = DOORW / 2 - 0.04, lh = FH - 0.7 - 0.12, lz = -d / 2 + WT + lw / 2 + 0.02;
-            for (const sg of [-1, 1]) {
-              lbox(sg * (DOORW / 2 - 0.05), 0.06 + lh / 2, lz, 0.05, lh, lw, 0x5a3f2c, { merge: true });
-              lbox(sg * (DOORW / 2 - 0.05) - sg * 0.035, 0.06 + lh * 0.72, lz, 0.02, lh * 0.3, lw * 0.7, 0x4a3324, { merge: true });
-              lbox(sg * (DOORW / 2 - 0.05) - sg * 0.035, 0.06 + lh * 0.3, lz, 0.02, lh * 0.36, lw * 0.7, 0x4a3324, { merge: true });
-            }
-          }
+          // the doors themselves (doorSet above)
+          doorSet(bgroup, { w: DOORW, h: FH - 0.7, z0: -d / 2, wt: WT, kind: doorKindOf(bo.kind), seed: ox * 0.37 + oz * 0.91 });
         } else {
           wall(0, 0, ly, -d / 2 + WT / 2, w, FH, WT);
         }
@@ -4569,6 +4856,8 @@
       wallT(0, -(DW + pw) / 2, realH / 2, fz, pw, realH, TW);
       wallT(0, (DW + pw) / 2, realH / 2, fz, pw, realH, TW);
       wallT(0, 0, (DOORH + realH) / 2, fz, DW, realH - DOORH, TW);   // lintel above the doorway
+      // the lobby doors: glazed, a pair, standing open (doorSet)
+      doorSet(g, { w: DW, h: DOORH, z0: -d / 2, wt: TW, kind: "shop", seed: ox * 0.37 + oz * 0.91, floorY: 0.18 });
 
       // ---- per-floor landings + roof: a slab frame around the central shaft ----
       // (the walk records exactly as before; the visible slab is structure
@@ -5129,9 +5418,9 @@
         b = CBZ.islandLots.steps ? yield* CBZ.islandLots.steps(l, lo) : CBZ.islandLots.build(l, lo);
         if (b) sites.push(b);
       } else if (l.kind === "tower" || l.kind === "hotel") {
-        b = yield* makeTower(l.x, l.z, l.w, l.d, l.storeys * FH, color, l.style, l.lot, { helipad: !!l.helipad });
+        b = yield* makeTower(l.x, l.z, l.w, l.d, l.storeys * FH, color, l.style, l.lot, { helipad: !!l.helipad, kind: l.kind });
       } else {
-        b = yield* makeBuilding(l.x, l.z, l.w, l.d, l.storeys, color, l.gy, l.style, l.yaw, { helipad: !!l.helipad, lot: l.lot });
+        b = yield* makeBuilding(l.x, l.z, l.w, l.d, l.storeys, color, l.gy, l.style, l.yaw, { helipad: !!l.helipad, lot: l.lot, kind: l.kind });
       }
       if (b) {
         b.lot = l.lot; b.district = l.district; b.kind = l.kind; b.name = l.name || null; b.planId = l.id;

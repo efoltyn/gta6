@@ -1534,28 +1534,22 @@
         // the street line of the lot, and how far back the building stands
         const frontN = st.at + st.side * RC2.WALK;
         const bFront = st.vertical ? (st.side > 0 ? l.bx0 : l.bx1) : (st.side > 0 ? l.bz0 : l.bz1);
-        const setback = Math.abs(bFront - frontN);
-        const n = frontN + st.side * Math.max(0.45, Math.min(setback * 0.5, 2.0));
-        // beside the building's front corner, away from a driveway
-        const a0 = st.vertical ? l.lot.z0 : l.lot.x0, a1 = st.vertical ? l.lot.z1 : l.lot.x1;
-        const w = Math.max(1.6, Math.min(4.2, 0.6 + it.chars * 0.27)), h = 0.72;
-        const dr = l.driveway ? l.driveway.rect : null;
-        const drA = dr ? (st.vertical ? (dr.z0 + dr.z1) / 2 : (dr.x0 + dr.x1) / 2) : null;
-        let along = (drA != null && drA < (a0 + a1) / 2) ? a1 - w / 2 - 0.6 : a0 + w / 2 + 0.6;
-        // a building right on the setback: put the sign square in front of
-        // its door instead of beside the corner
-        if (setback < 1.2) along = (a0 + a1) / 2 + (h01(l.x, l.z, 0x5c4) - 0.5) * 2;
+        /* THE SIGN IS ON THE BUILDING. It used to be a board on two steel
+           posts planted in the front setback or out over the pavement, and
+           where the lot's street line and the building did not agree it ended
+           up on a lawn across the road from the place it named. A name goes
+           over the door: a fascia board flat on the front wall, between the
+           door head and the first-floor windows, no wider than the frontage.
+           (The showroom is a glass box with its own lettering: it gets none.) */
+        if (l.kind === "showroom" || bFront == null || !isFinite(bFront)) return;
+        const front = st.vertical ? Math.abs(l.bz1 - l.bz0) : Math.abs(l.bx1 - l.bx0);
+        const h = 0.5, w = Math.max(1.4, Math.min(4.2, 0.6 + it.chars * 0.27, (front || 6) - 1.0));
+        const tall = l.kind === "tower" || l.kind === "hotel";
+        const n = bFront - st.side * 0.4;                 // proud of the wall and its mouldings, on the street side
+        const along = st.vertical ? l.z : l.x;            // the door is in the middle of the front
         const x = st.vertical ? n : along, z = st.vertical ? along : n;
-        if (treeNear(x, z, 1.0) || isWalk(x, z)) return;
-        const gy = gh(x, z);
-        const H = setback < 1.2 ? 2.55 : 1.55;      // over the walk in front of a shop door; at eye level in a yard
-        // two steel posts (merged), the panel (its own mesh)
-        const rx = Math.cos(yaw), rz = -Math.sin(yaw);
-        for (const sd of [-1, 1]) {
-          const px = x + rx * sd * (w / 2 - 0.12), pz = z + rz * sd * (w / 2 - 0.12);
-          cylY(A.paint, px, gy - 0.2, pz, 0.045, 0.04, H + h + 0.2, 8, COL.steelDark, { ao: gy });
-          addCol(px - 0.06, px + 0.06, pz - 0.06, pz + 0.06, gy, gy + H + h, "signpost");
-        }
+        const gy = l.gy != null ? l.gy : gh(x, z);
+        const H = (tall ? 3.2 : 2.82);                    // the board's foot: over the door head
         const geo = new THREE.BoxGeometry(w, h, 0.06);
         const uv = geo.attributes.uv;
         for (let i = 0; i < uv.count; i++) uv.setXY(i, it.u0 + uv.getX(i) * (it.u1 - it.u0), it.v0 + uv.getY(i) * (it.v1 - it.v0));

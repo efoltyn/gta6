@@ -44,7 +44,11 @@
       const topMetal = H.hash(0x7e04) < 0.35;                 // dark metal top instead of timber
       const top = topMetal ? metal : timber, topD = HP.shade(top, 0.78);
       const SK = 0.06;
-      const split = ST >= 2 ? FH : -1;                         // the material change
+      /* a single-storey one used to get NO second material at all: a bare
+         rendered box with a canopy. It changes material above the window
+         heads instead, so the timber (or the metal) is a deep band under the
+         roof, and it gets the picture frame and a roof plate too. */
+      const split = ST >= 2 ? FH : 2.78;                       // the material change
 
       H.publish({ body: render, trim: metal, roof: metal, flat: true });
 
@@ -84,6 +88,11 @@
       }
       H.belt(-0.3, 0.15, holes, SK + 0.02, 0x5a5a58);
       H.belt(parTop, parTop + 0.06, [], SK + 0.08, metal);                // the coping
+      if (ST === 1) {
+        // the roof plate oversails the street side, and a dark fascia rings the house under it
+        H.belt(parTop - 0.28, parTop, [], SK + 0.1, metal);
+        H.fb(df, -S / 2 - 0.35, S / 2 + 0.35, parTop - 0.06, parTop + 0.08, 0, 0.95, metal);
+      }
       // the roof deck the coping rings, and a solar array on it
       H.ab(-H.W / 2 + 0.2, H.W / 2 - 0.2, rTop + 0.02, rTop + 0.12, -H.D / 2 + 0.2, H.D / 2 - 0.2, 0x6c6e6c);
       if ((spec && spec.solar) || H.hash(0x7e06) < 0.55) {
@@ -97,7 +106,7 @@
       // ---- THE PICTURE FRAME round the big upper window -------------------------------
       for (const op of holes) {
         if (op.door) continue;
-        const f = op.f, big = op.t1 - op.t0 > 2.2 && op.k >= 1;
+        const f = op.f, big = op.t1 - op.t0 > 2.2 && (op.k >= 1 || (ST === 1 && f.s === df.s));
         if (big) {
           const fw = 0.26, d0 = SK - 0.01, d1 = SK + 0.7;
           H.fb(f, op.t0 - fw, op.t0 - 0.015, op.y0 - fw, op.y1 + fw, d0, d1, dark ? 0xd8d6d0 : metal);
