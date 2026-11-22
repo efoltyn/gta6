@@ -945,8 +945,9 @@
   //             jail, camera on city/cinematics.js's director. The mode/place
   //             handoff happens INSIDE the sealed car — the elevator law —
   //             never as a visible teleport.
-  //    book   — games/jail.js's compound, which stops being the destination
-  //             and becomes the BOOKING stop (CBZ.cityBookIn).
+  //    book   — at the County Jail's sally port (games/jail.js cityJailGate):
+  //             a black cut, and you are in your cell in the prison game
+  //             (mode "escape"). See bookIn / cutToPrison.
   //
   //  Flag OFF (or no cruiser / no jail venue / a scripted arrest that asks for
   //  it) = the legacy 2.2-3.0 s pose + cityBustOverlay + straight to the
@@ -960,7 +961,7 @@
   CBZ.arrestCount = function (k, n) { if (k in TALLY) TALLY[k] += (n == null ? 1 : n) | 0; };
 
   const HANDS_T = 0.9, CUFF_T = 0.8, DOOR_T = 1.15, LEG_T = 3.6, ARRIVE_T = 1.3;
-  const WALK_SPD = 1.45, MARCH_MAX = 11, RIDE_SPD = 11.5, ARC_MAX = 120;
+  const WALK_SPD = 1.45, MARCH_MAX = 11, RIDE_SPD = 11.5, ARC_MAX = 200;
   // car-local rear-bench + driver offsets. The ONE copy lives in
   // city/cinematics.js (its RIDE scene's seatLocal); we ask for it and only
   // fall back to a literal if that file is absent.
@@ -1088,6 +1089,7 @@
     });
   }
   CBZ.cityArrestActive = function () { return !!(arrestScene && !arrestScene.finished && arrestScene.phase !== "legacy"); };
+  CBZ.cityArrestPhase = function () { return arrestScene ? arrestScene.phase : null; };
 
   // THE FORFEIT — cooperating (hands up) costs you a quarter, being dragged in
   // costs you half. Charged EXACTLY ONCE per arrest, at the booking desk, by
@@ -1180,42 +1182,69 @@
     else toJail();
   }
 
-  // BOOKING: the compound at the end of the ride takes custody. If it cannot
-  // (no package, flag off, venue never mounted) the legacy overlay + straight
-  // transfer still concludes the arrest — an arrest may never evaporate.
+  // BOOKING. A petty collar is fined and walked out of the precinct; the
+  // islands lock you in their own station first. Everything else is booked at
+  // the door the cruiser brought you to and goes to PRISON: the prison game
+  // (mode "escape"), in your own cell, with the stretch the one sentence
+  // formula gives (games/jail.js CBZ.cityJailSentence) and your guns in the
+  // evidence locker. The switch happens behind a black cut, never on screen.
+  // (This used to hand you to games/jail.js's County holding cell, a second
+  // escape game inside the city, and a van timer before the real prison.)
   function bookIn(sc) {
     if (!sc || sc.finished) return;
     if (sc.petty) { pettyRelease(sc); return; }
     if (onIsles() && islandHold(sc)) return;
-    const lost = forfeit(sc);
-    let took = false;
-    if (CBZ.cityBookIn) {
-      try {
-        // `atDesk` is a FACT, not an assumption: true only if the perp walk
-        // actually reached the booking desk. False routes games/jail.js down
-        // its counted degrade (CBZ.arrestAudit().legacyTeleports), which is the
-        // only thing stopping "just move his coordinates" becoming normal again.
-        took = !!CBZ.cityBookIn(Object.assign({}, sc.opts || {}, {
-          lost, stars: sc.stars0 || (g.wanted | 0), cop: sc.cop, atDesk: !!sc.atDesk,
-        }));
-      } catch (e) { console.error("[arrest] booking", e); took = false; }
-    }
     sc.finished = true;
-    endCarJob(sc);
-    if (took) {
-      TALLY.bookings++;
-      // custody is the jail's now: the officer stands down, the input lock and
-      // the ties are released by games/jail.js when it finishes processing.
-      if (sc.cop) sc.cop._arrestingPlayer = false;
-      if (sc.car) { sc.car._arrestRide = false; sc.car.ai = !!sc.car.road; }
-      if (sc.cine && CBZ.cineAbort) { try { CBZ.cineAbort(); } catch (e) {} }
-      sc.cine = false;
-      arrestScene = null;
-      return;
-    }
-    if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(lost, toJail, { note: (sc.opts || {}).note });
-    else toJail();
+    const lost = forfeit(sc);
+    evidenceSeize();
+    const stars = Math.max(1, Math.min(5, sc.stars0 || (g.wanted | 0) || 1));
+    const S = CBZ.cityJailSentence ? CBZ.cityJailSentence(stars) : { prison: 84 + 36 * stars, bail: 500 + 850 * stars };
+    g._jailSentenceIn = S.prison | 0;
+    g._jailBailIn = S.bail | 0;
+    TALLY.bookings++;
+    const charges = CBZ.cityArrestCharges(stars, g.cityCrimeLabel);
+    const opts = sc.opts || {};
+    const mins = Math.max(1, Math.round(S.prison / 60));
+    const line = opts.note || (charges.slice(0, 2).join(", ") + ". " + mins + (mins === 1 ? " minute" : " minutes") + " inside." + (lost > 0 ? " $" + lost + " gone." : ""));
+    cutToPrison(line);
   }
+
+  /* THE CUT. The screen goes black over the booking door, one line (what you
+     are in for, how long), and the world behind it changes: the city is put
+     away and the prison is stood up with you in your cell. Then the black
+     lifts on the cell. Wall-clock timers, so a frozen frame loop (a tab in
+     the background, a probe) can never strand the black over a live game. */
+  let cutEl = null;
+  function cutCard() {
+    if (cutEl) return cutEl;
+    cutEl = document.createElement("div");
+    cutEl.id = "arrestCut";
+    cutEl.style.cssText = "position:fixed;inset:0;z-index:60;background:#000;opacity:0;pointer-events:none;display:none;align-items:center;justify-content:center;transition:opacity .7s ease;font-family:Fredoka,system-ui,sans-serif;color:#d9dde6;font-size:clamp(16px,2.4vw,24px);letter-spacing:.5px;text-align:center;padding:0 24px";
+    document.body.appendChild(cutEl);
+    return cutEl;
+  }
+  function cutToPrison(line) {
+    const el = cutCard();
+    el.textContent = "";
+    el.style.display = "flex";
+    void el.offsetWidth;
+    el.style.opacity = "1";
+    if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
+    setTimeout(function () { el.textContent = line || ""; }, 700);
+    setTimeout(function () {
+      // the collar ends the manhunt (escaped-convict floor included): you are
+      // in custody, and serving the stretch walks you out clean
+      if (CBZ.cityWantedReset) { try { CBZ.cityWantedReset(); } catch (e) {} }
+      if (CBZ.cityClearConvict) { try { CBZ.cityClearConvict(); } catch (e) {} }
+      try { toJail(); } catch (e) { console.error("[arrest] to prison", e); }
+      setTimeout(function () {
+        el.textContent = "";
+        el.style.opacity = "0";
+        setTimeout(function () { if (el.style.opacity === "0") el.style.display = "none"; }, 800);
+      }, 900);
+    }, 2600);
+  }
+  CBZ.cityArrestCut = cutToPrison;
   /* ============================================================
      THE ISLAND LOCK-UP. A heavy collar on the islands is walked into a cell
      of the island's own station (world/island_police.js). He is turned loose
@@ -1697,17 +1726,22 @@
       if (sc.take) {
         sc._goal = target;
         if (sc.take.phase === "arrived") {
-          if (!sc._atGate && gate.gate) { sc._atGate = true; sc.t = 0; if (sc.take.resume) sc.take.resume(); return; }
+          // at the sally port: a prison collar is booked here (the cut);
+          // only a petty one is walked on in to the precinct desk
+          if (!sc._atGate && gate.gate && sc.petty) { sc._atGate = true; sc.t = 0; if (sc.take.resume) sc.take.resume(); return; }
           sc.take.finish(); sc.take = null;
           sc.atDesk = true;                 // you WALKED in — no teleport happened
           bookIn(sc); return;
         }
-        if (sc.t >= MARCH_MAX * 2.2) { sc.take.finish(); sc.take = null; bookIn(sc); }
+        // the walk gets as long as the walk is (the kerb can be 40 m from the
+        // sally port): his pace, with slack, never less than the old cap
+        if (sc._inCap == null && P) sc._inCap = Math.max(MARCH_MAX * 2.2, Math.hypot(target.x - P.pos.x, target.z - P.pos.z) / WALK_SPD * 1.6 + 6);
+        if (sc.t >= (sc._inCap || MARCH_MAX * 2.2)) { sc.take.finish(); sc.take = null; bookIn(sc); }
         return;
       }
       const moved = marchTo(P, ch, cop, target.x, target.z, dt);
       if (moved <= 0.0001) {
-        if (!sc._atGate && gate.gate) { sc._atGate = true; sc.t = 0; return; }
+        if (!sc._atGate && gate.gate && sc.petty) { sc._atGate = true; sc.t = 0; return; }
         sc.atDesk = true;                 // you WALKED in — no teleport happened
         bookIn(sc); return;
       }
@@ -2003,7 +2037,7 @@
       // the gate coming up through the windscreen. Deliberately longer than the
       // drive needs: the arc aborts the scene the moment you are out of the
       // car, so the lens can never expire mid-ride and snap back inside a boot.
-      { dur: LEG_T * 3.0, track: true, cam: shot(-1.9, 1.5, -3.2, 0, 1.0, 5.0) },
+      { dur: RIDE_MAX + 10, track: true, cam: shot(-1.9, 1.5, -3.2, 0, 1.0, 5.0) },
     ];
     sc.cine = CBZ.cinePlay(steps, { ride: sc }, function () { sc.cine = false; }, { noHolster: false });
   }
@@ -2020,7 +2054,10 @@
      The sealed cut (you are on the back bench, the camera inside the car)
      still shortens a long drive, but only ALONG the route: the car is moved
      to the last stretch of the same road path, never off it. */
-  const RIDE_LAT = 3.2, RIDE_BRAKE = 2.6, RIDE_ACC = 4.5, RIDE_TAIL = 60, RIDE_MAX = 45;
+  // the drive is DRIVEN: only a ride longer than RIDE_LONG is shortened, and
+  // then to its last RIDE_TAIL metres (owner: "the car actually drives you to
+  // the station")
+  const RIDE_LAT = 3.2, RIDE_BRAKE = 2.6, RIDE_ACC = 4.5, RIDE_TAIL = 260, RIDE_LONG = 520, RIDE_MAX = 75;
   function rideWorld() {
     const RG = CBZ.roadGraph;
     if (!RG || !RG.plan) return null;
@@ -2091,7 +2128,7 @@
       // stretch while the camera is on the back bench (the elevator law) ----
       if (!sc.cut && sc.rideT >= LEG_T) {
         sc.cut = true;
-        if (R.len - sc.rs > RIDE_TAIL + 25) {
+        if (R.len - sc.rs > RIDE_LONG) {
           sc.rs = R.len - RIDE_TAIL;
           sc.rv = Math.min(sc.rv, CBZ.roadGraph.capAt(R, sc.rs, R.capC));
           placeOnPath(car, R, sc.rs, 0);

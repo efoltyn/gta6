@@ -822,7 +822,15 @@
       const airportSpawn = preferredAirportSpawn(A);
       const jailbreakEntry = !!game.escapedConvict;
       let placedAtGate = false, gateX = 0, gateZ = 0;      // gate coords saved for the post-origin re-assert
-      if (!airportSpawn && jailbreakEntry && CBZ.cityPoliceStation) {
+      // OVER THE WALL: a breakout lands you outside the County Jail's weak
+      // gate, the prison you were driven to (games/jail.js anchors), running.
+      const JA = jailbreakEntry && CBZ.cityJailAnchors ? CBZ.cityJailAnchors() : null;
+      if (JA && JA.weak && JA.weakOut) {
+        gateX = JA.weak.x + JA.weakOut.x * 6; gateZ = JA.weak.z + JA.weakOut.z * 6;
+        P.pos.set(gateX, 0, gateZ);
+        placedAtGate = true;
+        if (CBZ.cityAddStars) { try { CBZ.cityAddStars(3, "jailbreak"); } catch (e) {} }
+      } else if (!airportSpawn && jailbreakEntry && CBZ.cityPoliceStation) {
         const st = CBZ.cityPoliceStation();
         const d = st && st.lot && st.lot.building && st.lot.building.door;
         if (st) {
@@ -893,7 +901,7 @@
       // required set-piece position such as the prologue helipad.
       const introLive = !!(originResult && originResult.introActive);
       let airportPlaced = false;
-      if (airportSpawn && !introLive) {
+      if (airportSpawn && !introLive && !placedAtGate) {
         airportPlaced = placePreferredCitySpawn(A, true);
       }
       // The view is the hands' call (systems/fpsmode.js CBZ.viewForHands):
