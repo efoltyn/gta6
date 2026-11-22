@@ -997,6 +997,9 @@
     const near = instanced(kind, o.coat, n, false), farI = instanced(kind, o.coat, n, true);
     near.mesh.name = o.name || ("birds-" + kind); farI.mesh.name = (o.name || ("birds-" + kind)) + "-far";
     near.mesh.frustumCulled = false; farI.mesh.frustumCulled = false;
+    // a flock casts its shadow, and the shadow beats its wings: the depth
+    // material runs the same pose as the bird
+    near.mesh.castShadow = true; farI.mesh.castShadow = true;
     let nn = 0, nf = 0;
     return {
       mesh: near.mesh, far: farI.mesh, kind: kind,
