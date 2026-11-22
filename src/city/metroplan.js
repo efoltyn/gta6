@@ -45,6 +45,14 @@
         riverside park strip), a RAIL line (level crossings, a central
         station, a freight yard), and the EXISTING FREEWAYS read from the
         highway table (overpasses, diamond interchanges).
+     5b. THE FORM (owner, 2026-11: "perfect rectangles of one grid"): the
+        city stops where the envelope and the site's own bounds say, with
+        a ragged fringe (void, exurb, half-built edge superblocks, houses
+        thinning out on a ground-scale ripple); a skewed sector or two
+        whose streets run on one turned grid meeting the arterials; dropped
+        local streets, neighbourhood greens, a riverfront park on the bank;
+        and THE FREEWAY BUFFER (fwEdge): no home within FREEWAY_BUF of a
+        deck edge, the strip given to big boxes, sheds and embankment.
      6. DISTRICTS: connected superblocks of one class, named, and given ONE
         fixed look each — the same "one style per district" rule the
         downtown's street identity table follows (buildings.js STREET_STYLE).
@@ -95,6 +103,8 @@
      ends exactly on the building's own land. A terrace already stands
      behind a 1.5 m front step and a house behind its yard. */
   const FRONTAGE = 1.2;
+  // no home's wall nearer a freeway carriageway edge than this (see fwEdge)
+  const FREEWAY_BUF = 70;
   function lerp(a, b, t) { return a + (b - a) * t; }
   function r2(v) { return Math.round(v * 100) / 100; }
 
@@ -231,10 +241,12 @@
     function envelope(x, z) {
       const dx = (x - cx) / rx, dz = (z - cz) / rz;
       const ang = Math.atan2(dz, dx);
-      // a noise-warped radius: lobes along the arterial corridors and the
-      // river, bays where the country presses in — never a clean ellipse
-      const warp = 1 + 0.16 * (vnoise(seed, Math.cos(ang) * 3 + 11, Math.sin(ang) * 3 + 7, 1, 31) - 0.5) * 2
-                     + 0.07 * (vnoise(seed, x, z, 900, 32) - 0.5) * 2;
+      // a noise-warped radius: broad lobes and bays (2-3 per side), shorter
+      // fingers where growth ran out along a road, and a ground-scale ripple,
+      // so the edge of town is ragged at every scale and never a ruled line
+      const warp = 1 + 0.24 * (vnoise(seed, Math.cos(ang) * 2.2 + 11, Math.sin(ang) * 2.2 + 7, 1, 31) - 0.5) * 2
+                     + 0.12 * (vnoise(seed, Math.cos(ang) * 6 + 3, Math.sin(ang) * 6 + 5, 1, 33) - 0.5) * 2
+                     + 0.09 * (vnoise(seed, x, z, 700, 32) - 0.5) * 2;
       return Math.hypot(dx, dz) / warp;
     }
     // secondary centres: MIDTOWN on the far side of the CBD from the river,
@@ -284,6 +296,48 @@
       return clamp(v, 0, 1);
     }
     P.landValue = landValue; P.envelope = envelope; P.subcentres = subs;
+    // THE SKEWED SECTORS: one or two wedges of the outer city whose
+    // neighbourhood streets run on a grid turned 14-32 degrees off the
+    // arterials (spec.skew: false to keep one survey everywhere)
+    const rotSectors = [];
+    if (DET && spec.skew !== false) {
+      const n = 1 + (h01(seed, 5, 1, 44) < 0.6 ? 1 : 0);
+      const b0 = h01(seed, 5, 2, 45) * Math.PI * 2;
+      for (let k = 0; k < n; k++) {
+        const deg = (h01(seed, k, 3, 46) < 0.5 ? -1 : 1) * lerp(14, 32, h01(seed, k, 4, 47));
+        const sp = lerp(80, 96, h01(seed, k, 5, 48));
+        rotSectors.push({ b: b0 + k * Math.PI * lerp(0.8, 1.2, h01(seed, k, 6, 49)), w: lerp(0.55, 0.8, h01(seed, k, 7, 50)),
+          th: deg * Math.PI / 180, sp: sp, cross: sp * lerp(2.6, 3.6, h01(seed, k, 8, 52)), ph: h01(seed, k, 9, 53) * sp, ph2: h01(seed, k, 10, 54) * sp * 3 });
+      }
+    }
+    // HOW FAR OUT a point is, for where the city stops: the envelope, and
+    // the plan's own bounds (a site is cut to the land it has, and a city
+    // that ran right up to that cut would end on a ruled line)
+    function edgeE(x, z) {
+      const dB = Math.min(x - B.minX, B.maxX - x, z - B.minZ, B.maxZ - z);
+      // (a borough or a ring grown round a core keeps its cut: its bounds are
+      // the land between the core and its neighbours, already irregular)
+      return spec.tier === "metro" ? Math.max(envelope(x, z), 1.3 - dB / 650) : envelope(x, z);
+    }
+    P.edgeE = edgeE;
+    function rotSectorAt(x, z) {
+      if (!rotSectors.length || envelope(x, z) < 0.42) return null;
+      const a = Math.atan2(z - cz, x - cx);
+      for (const s of rotSectors) { let d = a - s.b; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; if (Math.abs(d) < s.w) return s; }
+      return null;
+    }
+    // the infinite line o + t d clipped to a rect (Liang-Barsky), or null
+    function clipLine(ox, oz, dx, dz, x0, z0, x1, z1) {
+      let t0 = -1e9, t1 = 1e9;
+      const p = [-dx, dx, -dz, dz], q = [ox - x0, x1 - ox, oz - z0, z1 - oz];
+      for (let i = 0; i < 4; i++) {
+        if (Math.abs(p[i]) < 1e-9) { if (q[i] < 0) return null; continue; }
+        const t = q[i] / p[i];
+        if (p[i] < 0) t0 = Math.max(t0, t); else t1 = Math.min(t1, t);
+      }
+      if (t0 >= t1) return null;
+      return [{ x: ox + dx * t0, z: oz + dz * t0 }, { x: ox + dx * t1, z: oz + dz * t1 }];
+    }
 
     // ---------------------------------------------------------------
     // 1. ARTERIAL LINES — the grid, centred so the CBD is a superblock
@@ -566,6 +620,33 @@
       }
       return false;
     }
+    /* THE FREEWAY BUFFER. Owner: "houses too close to highway". No home
+       within FREEWAY_BUF metres of a freeway carriageway edge, wherever the
+       freeways go: the strip is what real cities put there — sheds, a big
+       box and its car park, a planted embankment — and homes face their
+       own streets behind it. fwEdge(x, z) is the distance to the nearest
+       deck edge: the world zoning field's smooth freeway paths when the
+       caller passes them (spec.zoning.edge), and this plan's own grade-
+       separated corridors either way. */
+    const edgeZ = ZN && ZN.edge ? ZN.edge : null;
+    function fwEdge(x, z) {
+      let best = edgeZ ? edgeZ(x, z) : 1e9;
+      for (const c of corridors) {
+        if (c.grade) continue;
+        const f = c.fillet || 0;
+        const d = c.ax === "x" ? Math.hypot(x - c.at, Math.max(0, c.a0 - f - z, z - c.a1 - f))
+                               : Math.hypot(z - c.at, Math.max(0, c.a0 - f - x, x - c.a1 - f));
+        if (d - c.half < best) best = d - c.half;
+      }
+      return best;
+    }
+    function rectFw(x0, z0, x1, z1) {
+      let best = 1e9;
+      for (let a = 0; a <= 4; a++) for (let b = 0; b <= 4; b++) best = Math.min(best, fwEdge(lerp(x0, x1, a / 4), lerp(z0, z1, b / 4)));
+      return best;
+    }
+    function nearFw(x, z, rad) { return fwEdge(x, z) - (rad || 0) < FREEWAY_BUF; }
+    P.fwEdge = fwEdge;
 
     // ---------------------------------------------------------------
     // 4. SUPERBLOCK CELLS + ZONING
@@ -602,13 +683,9 @@
         if (d < spec.port.r) s += 0.7 * (1 - d / spec.port.r);
       }
       // a FREEWAY pulls warehouses to it (trucks); an ordinary road does not
-      let fw = 0;
-      for (const cr of corridors) {
-        if (cr.grade) continue;
-        const d = cr.ax === "x" ? Math.abs(c.cx - cr.at) : Math.abs(c.cz - cr.at);
-        if (d < A * 0.6) fw = 0.18;
-      }
-      s += fw;
+      // (a superblock a freeway runs through or along is the trucking belt)
+      const fe = rectFw(c.x0, c.z0, c.x1, c.z1);
+      s += fe < 20 ? 0.34 : fe < A * 0.35 ? 0.2 : 0;
       s += (h01(seed, c.i, c.j, 71) - 0.5) * 0.3;
       if (c.L > 0.62 || c.e > 1.1) s -= 1;
       return s;
@@ -616,9 +693,14 @@
     const minFree = 0.18;
     for (const c of cells) {
       if (c.free < minFree) { c.use = "void"; continue; }
-      const L = c.L, e = c.e;
-      if (e > 1.45) { c.use = h01(seed, c.i, c.j, 73) < 0.75 ? "farm" : "void"; continue; }
-      if (e > 1.12) { c.use = h01(seed, c.i, c.j, 74) < 0.55 ? "exurb" : "farm"; continue; }
+      const L = c.L, e = edgeE(c.cx, c.cz) + (spec.tier === "metro" ? (h01(seed, c.i, c.j, 76) - 0.5) * 0.3 : 0);
+      // past the envelope the city simply stops: open country, not a plate
+      // of farm superblocks. A fringe of exurb and fields hangs off the
+      // built edge (pruned below to cells that touch the city), and a few
+      // outer suburban superblocks were never built at all.
+      if (e > 1.32) { c.use = "void"; continue; }
+      if (e > 1.06) { const r = h01(seed, c.i, c.j, 74); c.use = r < 0.5 ? "exurb" : r < 0.72 ? "farm" : "void"; continue; }
+      if (e > 0.9 && h01(seed, c.i, c.j, 75) < 0.16) { c.use = "void"; continue; }
       if (spec.tier !== "town" && industrialScore(c) > (DET ? 0.36 : 0.42)) { c.use = "industrial"; continue; }
       if (L > 0.80) c.use = "cbd";
       else if (L > 0.62) c.use = "midtown";
@@ -629,6 +711,19 @@
     // a town has no CBD towers: its best cells are its main street
     if (spec.tier === "town") for (const c of cells) if (c.use === "cbd" || c.use === "midtown") c.use = "inner";
     if (spec.tier === "city") for (const c of cells) if (c.use === "cbd" && c.L < 0.86) c.use = "midtown";
+    // the fringe only where it touches the built city (a farm superblock
+    // out on its own is just the country, which countryside.js plants)
+    {
+      const built = function (u) { return u && u !== "void" && u !== "farm" && u !== "exurb"; };
+      const drop = [];
+      for (const c of cells) {
+        if (c.use !== "exurb" && c.use !== "farm") continue;
+        let touch = false;
+        for (const o of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const n = cellAt(c.i + o[0], c.j + o[1]); if (n && built(n.use)) touch = true; }
+        if (!touch) drop.push(c);
+      }
+      for (const c of drop) c.use = "void";
+    }
     // UNDER A CEILING the band is what the height allows: a tower district
     // that may only rise 7 storeys is a walk-up district, not stubby towers
     if (ceilAt) for (const c of cells) {
@@ -983,8 +1078,21 @@
       for (let k = 1; k <= n; k++) inner.push(a0 + k * step);
       return inner;
     }
+    // a ground-scale ripple on the envelope: the last superblocks of the
+    // city are half built, and where they stop is ragged, not ruled
+    function beyondEdge(x, z) { return edgeE(x, z) + (vnoise(seed, x, z, 150, 37) - 0.5) * 0.3 > 1.0; }
+    // a home's plot the freeway buffer took: the planted embankment
+    function freewayVerge(x, z) {
+      if (h01(seed, x, z, 381) < 0.55 && fwEdge(x, z) > 6 && treeOK(x, z)) addTree(x, z, "park");
+    }
+    // a local street is dropped now and then (a long block, a superblock
+    // that was assembled for a works or a school), never in the core
+    function thinLines(list, c, salt) {
+      if (c.use === "cbd" || list.length < 2) return list;
+      return list.filter(function (v, k) { return h01(seed, c.i * 7 + k, c.j, salt) > 0.16; });
+    }
     function gridCell(c, pxPitch, pzPitch, kind) {
-      const lx = localLines(c.x0, c.x1, pxPitch), lz = localLines(c.z0, c.z1, pzPitch);
+      const lx = thinLines(localLines(c.x0, c.x1, pxPitch), c, 391), lz = thinLines(localLines(c.z0, c.z1, pzPitch), c, 392);
       const X = [c.x0].concat(lx, [c.x1]), Z = [c.z0].concat(lz, [c.z1]);
       // local streets (clipped to buildable land)
       for (const x of lx) addLocalRun("x", x, c.z0, c.z1, c);
@@ -1004,9 +1112,77 @@
         blk.sw = kind === "cbd" ? 4.5 : kind === "midtown" ? 4 : kind === "industrial" ? 2.5 : 3.2;
         blk.r = kind === "industrial" ? 6 : 5;
         blk.L = landValue((blk.x0 + blk.x1) / 2, (blk.z0 + blk.z1) / 2);
+        // WHAT A BLOCK IS FOR, before what it holds: a home block inside the
+        // freeway buffer is the freeway's (sheds, a big box, an embankment);
+        // one on the river bank is the riverfront park; now and then one is
+        // a neighbourhood green
+        if (kind === "inner" || kind === "rows") {
+          const bx = (blk.x0 + blk.x1) / 2, bz = (blk.z0 + blk.z1) / 2;
+          if (rectFw(blk.x0, blk.z0, blk.x1, blk.z1) < FREEWAY_BUF) { freewayBlock(blk, c); continue; }
+          if (P.river && h01(seed, bx, bz, 393) < 0.75) {
+            let rd = 1e9;
+            for (let a = 0; a <= 3; a++) for (let b = 0; b <= 3; b++) rd = Math.min(rd, riverDist(lerp(blk.x0, blk.x1, a / 3), lerp(blk.z0, blk.z1, b / 3)));
+            if (rd < P.river.half + 45) { greenBlock(blk, c, "riverfront"); continue; }
+          }
+          if (h01(seed, bx, bz, 394) < 0.045) { greenBlock(blk, c, "green"); continue; }
+          if (beyondEdge(bx, bz)) continue;                // the edge of town: not built (yet)
+        }
         P.blocks.push(blk);
         fillBlock(blk, c);
       }
+    }
+    function greenBlock(blk, c, kind) {
+      blk.use = "green";
+      P.blocks.push(blk);
+      const x0 = blk.x0 + blk.sw, x1 = blk.x1 - blk.sw, z0 = blk.z0 + blk.sw, z1 = blk.z1 - blk.sw;
+      P.parks.push({ x0: x0, x1: x1, z0: z0, z1: z1, kind: kind === "verge" ? "verge" : "park", dist: c.dist });
+      if (kind === "verge") { treesInRect(x0 + 4, z0 + 4, x1 - 4, z1 - 4, 9, "park"); return; }
+      treesAlong(x0 + 4, z0 + 4, x1 - 4, z0 + 4, 11, "avenue"); treesAlong(x0 + 4, z1 - 4, x1 - 4, z1 - 4, 11, "avenue");
+      treesAlong(x0 + 4, z0 + 15, x0 + 4, z1 - 15, 11, "avenue"); treesAlong(x1 - 4, z0 + 15, x1 - 4, z1 - 15, 11, "avenue");
+      treesInRect(x0 + 18, z0 + 18, x1 - 18, z1 - 18, 22, "park");
+    }
+    // a home block the freeway buffer took. What real cities put there:
+    // a big-box store backed onto the freeway with its car park on the
+    // street, a run of sheds and yards, or a planted embankment
+    function freewayBlock(blk, c) {
+      const x0 = blk.x0 + blk.sw, x1 = blk.x1 - blk.sw, z0 = blk.z0 + blk.sw, z1 = blk.z1 - blk.sw;
+      const W = x1 - x0, D = z1 - z0, h = h01(seed, x0, z0, 395);
+      const tooNear = rectFw(x0, z0, x1, z1) < 8;        // a sliver against the deck: trees only
+      if (!tooNear && W > 64 && D > 56 && h < 0.45) {
+        // the side nearest the freeway is the store's back wall
+        const sides = [
+          { f: "n", d: fwEdge((x0 + x1) / 2, z1) }, { f: "s", d: fwEdge((x0 + x1) / 2, z0) },
+          { f: "e", d: fwEdge(x1, (z0 + z1) / 2) }, { f: "w", d: fwEdge(x0, (z0 + z1) / 2) },
+        ].sort(function (p, q) { return p.d - q.d; });
+        const back = sides[0].f, ns = back === "n" || back === "s";
+        const bw = (ns ? W : D) * 0.86, bd = Math.min((ns ? D : W) * 0.5, 64);
+        const across = ns ? D : W;
+        if (across - bd > 26) {
+          const front = { n: "s", s: "n", e: "w", w: "e" }[back];
+          let bx, bz, bW, bD, pk;
+          if (ns) {
+            bW = bw; bD = bd; bx = (x0 + x1) / 2; bz = back === "n" ? z1 - 3 - bd / 2 : z0 + 3 + bd / 2;
+            pk = back === "n" ? { x0: x0 + 2, x1: x1 - 2, z0: z0 + 2, z1: bz - bd / 2 - 2 } : { x0: x0 + 2, x1: x1 - 2, z0: bz + bd / 2 + 2, z1: z1 - 2 };
+          } else {
+            bW = bd; bD = bw; bz = (z0 + z1) / 2; bx = back === "e" ? x1 - 3 - bd / 2 : x0 + 3 + bd / 2;
+            pk = back === "e" ? { x0: x0 + 2, x1: bx - bd / 2 - 2, z0: z0 + 2, z1: z1 - 2 } : { x0: bx + bd / 2 + 2, x1: x1 - 2, z0: z0 + 2, z1: z1 - 2 };
+          }
+          if (!blocked(bx - bW / 2, bz - bD / 2, bx + bW / 2, bz + bD / 2, 0) && !occupied(bx, bz, Math.hypot(bW, bD) / 2 - 4)) {
+            blk.use = "industrial"; P.blocks.push(blk);
+            addBldg({ x: bx, z: bz, w: bW, d: bD, rot: 0, h: 9, st: 1, fh: 9, type: "strip", style: "strip", kind: "bigbox",
+              wall: [0xcfc6b4, 0xbdb8ae, 0xd8cdb6][(h * 30 | 0) % 3], glass: 0x33424c, roof: "flat", shop: true, face: front, dist: c.dist });
+            occupy(bx, bz, Math.hypot(bW, bD) / 2);
+            P.parking.push(Object.assign(pk, { kind: "lot", dist: c.dist }));
+            return;
+          }
+        }
+      }
+      if (!tooNear && W > 40 && D > 40 && h < 0.8) {
+        blk.use = "industrial"; P.blocks.push(blk);
+        industrialBlock(blk, x0, z0, x1, z1, c);
+        return;
+      }
+      greenBlock(blk, c, "verge");
     }
     function shrinkBlock(b) {
       // try trimming each side by steps until clear; keep the biggest result
@@ -1461,6 +1637,8 @@
       const cx0 = c.x0 + artHalf + 8, cx1 = c.x1 - artHalf - 8, cz0 = c.z0 + artHalf + 8, cz1 = c.z1 - artHalf - 8;
       if (x - rad < cx0 || x + rad > cx1 || z - rad < cz0 || z + rad > cz1) return;
       if (blocked(x - rad, z - rad, x + rad, z + rad, 2)) return;
+      if (nearFw(x, z, rad)) { freewayVerge(x, z); return; }
+      if (c.use === "suburb" && beyondEdge(x, z)) return;
       const rot = Math.atan2(-nx, -nz);               // the front faces the street
       const walls = lk.walls, roofs = lk.roofs || [0x444040];
       const st = two ? 2 : 1;
@@ -1775,7 +1953,28 @@
       const span = alongX ? (c.z1 - c.z0) : (c.x1 - c.x0);
       const n = Math.max(2, Math.round(span / lerp(76, 90, h01(seed, c.i, c.j, 802))));
       const grid = [];
-      for (let k = 1; k < n; k++) {
+      // A SKEWED SURVEY (a whole sector of the outer city laid out by another
+      // hand, at another angle): the streets run on ONE rotated grid shared
+      // by every superblock of the sector, so they line up across the
+      // arterials and the two grids meet at them, the way an old town
+      // plat meets the section-line roads round it
+      const rot = avenues.length ? null : rotSectorAt(c.cx, c.cz);
+      if (rot) {
+        const th = rot.th + (alongX ? 0 : Math.PI / 2);
+        const sets = [{ th: th, sp: rot.sp, ph: rot.ph }, { th: th + Math.PI / 2, sp: rot.cross, ph: rot.ph2 }];
+        for (const set of sets) {
+          const dx = Math.cos(set.th), dz = Math.sin(set.th), nx = -dz, nz = dx;
+          const vs = [c.x0 * nx + c.z0 * nz, c.x1 * nx + c.z0 * nz, c.x0 * nx + c.z1 * nz, c.x1 * nx + c.z1 * nz];
+          const v0 = Math.min.apply(null, vs), v1 = Math.max.apply(null, vs);
+          for (let v = Math.ceil((v0 - set.ph) / set.sp) * set.sp + set.ph; v < v1; v += set.sp) {
+            const seg = clipLine(nx * v, nz * v, dx, dz, c.x0, c.z0, c.x1, c.z1);
+            if (!seg || Math.hypot(seg[1].x - seg[0].x, seg[1].z - seg[0].z) < 70) continue;
+            const s = landStreet("loc", [{ x: r2(seg[0].x), z: r2(seg[0].z) }, { x: r2(seg[1].x), z: r2(seg[1].z) }], tier.locW - 1, { cell: key, mouth: true });
+            if (s) { hashStreet(s); grid.push(s); }
+          }
+        }
+      }
+      for (let k = 1; !rot && k < n; k++) {
         const v = r2((alongX ? c.z0 : c.x0) + k * span / n);
         const pts = alongX ? [{ x: c.x0, z: v }, { x: c.x1, z: v }] : [{ x: v, z: c.z0 }, { x: v, z: c.z1 }];
         const s = landStreet("loc", pts, tier.locW - 1, { cell: key, mouth: true });
@@ -1790,6 +1989,15 @@
       }
       for (const s of avenues) mainStreet(s, c);
       const brick = look(c).id === "hood-brick";
+      if (rot) {
+        // the skewed survey: houses on both street sets, street trees along them
+        for (const s of grid) {
+          housesAlongD(s, c, brick);
+          const a = s.pts[0], b = s.pts[1], L = Math.hypot(b.x - a.x, b.z - a.z), tx = (b.x - a.x) / L, tz = (b.z - a.z) / L, off = s.w / 2 + 1.1;
+          for (let side = -1; side <= 1; side += 2) treesAlong(a.x + tx * 14 - tz * off * side, a.z + tz * 14 + tx * off * side, b.x - tx * 14 - tz * off * side, b.z - tz * 14 + tx * off * side, 13, "street");
+        }
+        return;
+      }
       for (const s of grid) {
         housesAlongD(s, c, brick);
         const a = s.pts[0], b = s.pts[1], off = s.w / 2 + 1.1;
@@ -1826,6 +2034,7 @@
           const bx0 = Math.min(cs[0].x, cs[1].x, cs[2].x, cs[3].x), bx1 = Math.max(cs[0].x, cs[1].x, cs[2].x, cs[3].x);
           const bz0 = Math.min(cs[0].z, cs[1].z, cs[2].z, cs[3].z), bz1 = Math.max(cs[0].z, cs[1].z, cs[2].z, cs[3].z);
           if (blocked(bx0, bz0, bx1, bz1, 0)) continue;
+          if (nearFw(x, z, Math.hypot(uw, dd) / 2)) continue;   // flats over the shops: the buffer holds
           let hitOther = false;
           for (const o of mainList) if (Math.abs(o.x - x) < 30 && Math.abs(o.z - z) < 30 && obbOverlap(o, b0)) { hitOther = true; break; }
           if (hitOther) continue;
@@ -1875,6 +2084,8 @@
       const lx0 = c.x0 + artHalf + PADIN + 2, lx1 = c.x1 - artHalf - PADIN - 2, lz0 = c.z0 + artHalf + PADIN + 2, lz1 = c.z1 - artHalf - PADIN - 2;
       if (x - rad < lx0 || x + rad > lx1 || z - rad < lz0 || z + rad > lz1) return;
       if (blocked(x - rad, z - rad, x + rad, z + rad, 2)) return;
+      if (nearFw(x, z, rad)) { freewayVerge(x, z); return; }
+      if (beyondEdge(x, z)) return;
       const rot = r2(Math.atan2(-nx, -nz));
       const hv = h01(seed, x, z, 821);
       // an empty lot: the house is gone, the yard trees stayed
@@ -2328,12 +2539,14 @@
     //     the verge, a screen of trees between the lanes and the street
     //     behind. Measured before: 713 homes within 25 m of a freeway edge.
     // ---------------------------------------------------------------
-    if (ZN && ZN.buffer) {
+    // (the planner's own buffer, FREEWAY_BUF from every deck edge: the
+    // placement rules above already keep homes out of it, this is the net)
+    {
       const HOME = { house: 1, row: 1, apt: 1 };
       let cut = 0;
       const keep = [];
       for (const b of P.bldgs) {
-        if (HOME[b.type] && ZN.buffer(b.x, b.z, Math.max(b.w, b.d) / 2)) {
+        if ((HOME[b.type] || b.kind === "mainstreet") && fwEdge(b.x, b.z) - Math.max(b.w, b.d) / 2 < FREEWAY_BUF) {
           cut++;
           // (its own plot: still in the occupancy hash, so not treeOK's test)
           if (roadClear(b.x, b.z, 2) >= 0 && !corridorHit(b.x - 2, b.z - 2, b.x + 2, b.z + 2, 4)) addTree(b.x, b.z, "park");

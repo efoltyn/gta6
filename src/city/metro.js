@@ -165,9 +165,10 @@
       id: "kingsport", name: "Kingsport", tier: "metro", biome: "kingsport", style: "detroit",
       cx: -3705, cz: 3000, rx: 2500, rz: 1650,
       bounds: { minX: -5080, maxX: -330, minZ: 950, maxZ: 4660 },
-      river: { axis: "z", at: -3450, from: 1010, to: 5000, amp: 150, wave: 1300, name: "Kings River",
-        pins: [{ a: 1650, off: 60, r: 260 }, { a: 1950, off: 60, r: 260 }, { a: 2250, off: 60, r: 260 }, { a: 2600, off: 60, r: 300 },
-               { a: 3000, off: 60, r: 320 }, { a: 3400, off: 60, r: 300 }, { a: 3750, off: 60, r: 260 }],
+      // pinned along the downtown waterfront only (the riverfront avenue
+      // keeps its bank); everywhere else it meanders and the grid gives way
+      river: { axis: "z", at: -3450, from: 1010, to: 5000, amp: 250, wave: 1750, name: "Kings River",
+        pins: [{ a: 2700, off: 60, r: 260 }, { a: 3050, off: 60, r: 280 }, { a: 3400, off: 60, r: 240 }],
         island: { a0: 1650, a1: 2250, half: 70, arm: 40, keep: "west", name: "Kings Island" } },
       lakes: [
         { name: "Kings Pond", x: -3450, z: 1010, r: 125 },
@@ -202,7 +203,7 @@
         seedKey: "kingsport", frame: { dx: KX, dz: KZ },
         cx: -2780 + KX, cz: 3050 + KZ, rx: 2150, rz: 1650,
         bounds: { minX: -4530 + KX, maxX: -1030 + KX, minZ: 950 + KZ, maxZ: 4130 + KZ },
-        river: { axis: "z", at: -3450 + KX, from: 1310 + KZ, phaseFrom: 1010 + KZ, to: 3890 + KZ, amp: 150, wave: 1300, name: "Karvel River",
+        river: { axis: "z", at: -3450 + KX, from: 1310 + KZ, phaseFrom: 1010 + KZ, to: 3890 + KZ, amp: 250, wave: 1500, name: "Karvel River",
           pins: [{ a: 1310 + KZ, off: 0, r: 150 }, { a: 3890 + KZ, off: 0, r: 250 }] },
         lakes: [
           { name: "Karvel Pond", x: -3450 + KX, z: 1340 + KZ, r: 100 },
@@ -323,6 +324,22 @@
       const fillet = route.fillet || 0;
       for (let i = 0; i + 1 < pts.length; i++) {
         const a = pts[i], b = pts[i + 1];
+        // a sweeping corner (or an S-bend's kink) cuts across the inside of
+        // the corner: the land between its two tangent points is the deck's
+        if (i > 0 && pts[i].r) {
+          const p = pts[i - 1], q = pts[i + 1], v = pts[i];
+          const t = Math.min(pts[i].r, Math.hypot(v.x - p.x, v.z - p.z) * 0.45, Math.hypot(q.x - v.x, q.z - v.z) * 0.45);
+          const la = Math.hypot(v.x - p.x, v.z - p.z) || 1, lb = Math.hypot(q.x - v.x, q.z - v.z) || 1;
+          const S = { x: v.x - (v.x - p.x) / la * t, z: v.z - (v.z - p.z) / la * t }, E = { x: v.x + (q.x - v.x) / lb * t, z: v.z + (q.z - v.z) / lb * t };
+          const R = { minX: Math.min(S.x, E.x, v.x) - H - 10, maxX: Math.max(S.x, E.x, v.x) + H + 10, minZ: Math.min(S.z, E.z, v.z) - H - 10, maxZ: Math.max(S.z, E.z, v.z) + H + 10 };
+          if (hit(R, box)) obstacles.push(Object.assign(R, { name: route.name, pad: 10 }));
+        }
+        if (Math.abs(a.x - b.x) > 1e-3 && Math.abs(a.z - b.z) > 1e-3) {
+          // an S-bend's drift leg (never planned near a metro; kept clear if it is)
+          const R = { minX: Math.min(a.x, b.x) - H, maxX: Math.max(a.x, b.x) + H, minZ: Math.min(a.z, b.z) - H, maxZ: Math.max(a.z, b.z) + H };
+          if (hit(R, box)) obstacles.push(Object.assign(R, { name: route.name, pad: 30 }));
+          continue;
+        }
         const vert = Math.abs(a.x - b.x) < 1e-3;
         const R = vert ? { minX: a.x - H, maxX: a.x + H, minZ: Math.min(a.z, b.z) - fillet, maxZ: Math.max(a.z, b.z) + fillet }
                        : { minX: Math.min(a.x, b.x) - fillet, maxX: Math.max(a.x, b.x) + fillet, minZ: a.z - H, maxZ: a.z + H };
@@ -385,7 +402,9 @@
     const Z = CBZ.zoningFor ? CBZ.zoningFor(city) : null;
     const zoning = Z ? {
       ceiling: site.coreKey ? function (x, z) { return Z.ceilingAt(x + dx, z + dz, site.coreKey); } : null,
-      buffer: function (x, z, ext) { return Z.inFreewayBuffer(x + dx, z + dz, ext); },
+      // the distance to the nearest freeway deck edge (the smooth paths the
+      // decks are drawn on): metroplan.js keeps homes FREEWAY_BUF off it
+      edge: function (x, z) { return Z.freewayEdge(x + dx, z + dz); },
     } : null;
     const P = CBZ.metroPlan({
       id: site.id, name: site.name, tier: site.tier, seed: CBZ.WORLD_SEED | 0, seedKey: site.seedKey, style: site.style, uniform: site.uniform, zoning: zoning,

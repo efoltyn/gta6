@@ -67,7 +67,8 @@
   CBZ.cityHighways = function () { return _highways; };
 
   // ============================================================
-  //  SMOOTH POLYLINE (highwaynet): fillet every interior corner into an arc.
+  //  SMOOTH POLYLINE (highwaynet): fillet every interior corner into an arc
+  //  (radius: the waypoint's own `r`, else the route's).
   // ============================================================
   CBZ.highwaySmoothPath = function (pts, radius, step) {
     radius = radius || 60; step = step || 9;
@@ -81,7 +82,9 @@
       const dot = Math.max(-1, Math.min(1, ax * bx + az * bz));
       const turn = Math.acos(dot);
       if (turn < 0.02) { out.push({ x: p1.x, z: p1.z }); continue; }
-      let r = radius, t = r * Math.tan(turn / 2);
+      // a waypoint may carry its own radius (highwaynet.js: the sweeping
+      // corners and the long shallow S-bends across open country)
+      let r = p1.r || radius, t = r * Math.tan(turn / 2);
       const tMax = Math.min(la * 0.45, lb * 0.45);
       if (t > tMax) { t = tMax; r = t / Math.tan(turn / 2); }
       const Ax = p1.x - ax * t, Az = p1.z - az * t;
