@@ -36,7 +36,15 @@
   const GT = CBZ.prisonGroundTex;
   if (!GT) return;
 
-  // huge base ground so the world continues past the exit gate
+  /* THE FIELD RUNS TO THE OUTER WALL AND PAST IT (2026-11-22). It was a
+     420 x 520 m sheet round the compound, all anybody reached before the run
+     was won at the wire. The run now goes on across open ground to an outer
+     perimeter 1.1-1.25 km out (CBZ.WORLD.outer, world/prisonoutside.js), so
+     the same one sheet, the same grass at the same ~26 m tile, runs 400 m
+     past that wall on every side: one mesh, one draw, nothing to pop. */
+  const OW = (CBZ.WORLD && CBZ.WORLD.outer) || { x0: -210, x1: 210, z0: -220, z1: 300 };
+  const FX0 = Math.min(-210, OW.x0 - 400), FX1 = Math.max(210, OW.x1 + 400);
+  const FZ0 = Math.min(-220, OW.z0 - 400), FZ1 = Math.max(300, OW.z1 + 400);
   let baseMat;
   {
     // The country outside the wall was one flat green sheet. Same mean colour
@@ -45,12 +53,12 @@
     // 2026-09-27: the city's #57b257 lawn read as mint under the yard fog; a
     // prison's country is rough, dry pasture. Prison-only tones, passed in.
     const field = GT("field-grass", { a: "#6a7a44", b: "#5b6b3a" });
-    field.repeat.set(16, 20);
+    field.repeat.set(Math.round((FX1 - FX0) / 26.25), Math.round((FZ1 - FZ0) / 26));
     baseMat = new THREE.MeshLambertMaterial({ map: field });
   }
-  const base = new THREE.Mesh(new THREE.PlaneGeometry(420, 520), layer(baseMat, -0.02));
+  const base = new THREE.Mesh(new THREE.PlaneGeometry(FX1 - FX0, FZ1 - FZ0), layer(baseMat, -0.02));
   base.rotation.x = -Math.PI / 2;
-  base.position.set(0, -0.02, 40);
+  base.position.set((FX0 + FX1) / 2, -0.02, (FZ0 + FZ1) / 2);
   base.receiveShadow = true;
   scene.add(base);
 

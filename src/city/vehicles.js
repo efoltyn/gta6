@@ -2833,7 +2833,10 @@
      config.js) under the island's, so a car parked there is hidden and torn
      down with the island, never with a city that may not exist. */
   function vehicleRoot() {
-    const A = (g.mode !== "city" && CBZ.surv && CBZ.surv.arena && CBZ.islandModeOn && CBZ.islandModeOn(g.mode))
+    // the prison's staff lot (world/prisonoutside.js): its cars live in its
+    // own dynamic group under the prison root, shown and hidden with the jail
+    if (g.mode === "escape") return CBZ.prisonCarRoot || null;
+    const A =(g.mode !== "city" && CBZ.surv && CBZ.surv.arena && CBZ.islandModeOn && CBZ.islandModeOn(g.mode))
       ? CBZ.surv.arena : (CBZ.city && CBZ.city.arena);
     return (A && A.root) || null;
   }

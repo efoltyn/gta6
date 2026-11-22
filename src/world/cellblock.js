@@ -247,11 +247,45 @@
      parses first sets it and the other no-ops. */
   const SG = CFG.PRISON_ADMIN_WING !== false ? { x0: -4.2, x1: -2.2, z: -44, h: 2.6, t: 1 } : null;
   CBZ.cellblockStaffGap = SG;
+  /* THE CELL WINDOWS ARE HOLES IN THIS WALL (2026-11-22). Owner: "the
+     window in the jail cell should actually see outside". Each north-row
+     cell's window (cellWindow, section 4) was a frosted pane glued to a
+     solid 1 m wall, its colour following the sky. The wall is now built
+     round a real 1.50 x 1.40 opening behind every one of them, both tiers,
+     and the glass is clear: what you see through it is the open-air court
+     between this wall and the administration block (world/adminwing.js),
+     the sky, and from the upper tier the country over the admin roof.
+     Every piece keeps its own collider, banded to its own height, so the
+     opening is 1.40 m tall over a 1.60 m sill with wall above it: no body
+     fits through it, and the bars stand in it. NWIN.xs are the north-row
+     cell centres (NORTH_ROW, section 2: A-1 -11.00, A-2 -6.86, A-3 6.86,
+     A-4 11.00); cellWindow below draws a window only where one is. */
+  // tierY is FY (section 1: CH 3.6 + RT 0.30), declared further down
+  const NWIN = { xs: [-11.0, -6.86, 6.86, 11.0], w: 1.50, h: 1.40, y: 2.30, tierY: 3.90 };
+  function northRun(a, b) {
+    const half = NWIN.w / 2;
+    const bands = [[NWIN.y - NWIN.h / 2, NWIN.y + NWIN.h / 2], [NWIN.tierY + NWIN.y - NWIN.h / 2, NWIN.tierY + NWIN.y + NWIN.h / 2]];
+    const piece = function (x0, x1, y0, y1) {
+      if (x1 - x0 < 0.01 || y1 - y0 < 0.01) return;
+      addBox((x0 + x1) / 2, (y0 + y1) / 2, -44, x1 - x0, y1 - y0, 1, WALL, { solid: true, blockLOS: true, y0: y0, y1: y1 });
+    };
+    let at = a;
+    for (let i = 0; i < NWIN.xs.length; i++) {
+      const hx = NWIN.xs[i];
+      if (hx - half < a || hx + half > b) continue;
+      piece(at, hx - half, 0, WH);                               // the pier
+      let y = 0;
+      for (const bd of bands) { piece(hx - half, hx + half, y, bd[0]); y = bd[1]; }
+      piece(hx - half, hx + half, y, WH);                        // over the upper window
+      at = hx + half;
+    }
+    piece(at, b, 0, WH);
+  }
   if (!SG) {
-    addBox(0, WH / 2, -44, 32, WH, 1, WALL, { solid: true, blockLOS: true });   // north, unbroken
+    northRun(-16, 16);                                                           // north, windows only
   } else {
-    addBox((-16 + SG.x0) / 2, WH / 2, -44, SG.x0 + 16, WH, 1, WALL, { solid: true, blockLOS: true });  // west of the gap
-    addBox((SG.x1 + 16) / 2, WH / 2, -44, 16 - SG.x1, WH, 1, WALL, { solid: true, blockLOS: true });   // east of the gap
+    northRun(-16, SG.x0);                                                        // west of the gap
+    northRun(SG.x1, 16);                                                         // east of the gap
     // the door HEAD: wall above the opening. Never solid — a full-height AABB
     // here would seal the doorway for every body in the game (systems/
     // actorcollide.js clamps NPCs with no vertical span, so a y-gated collider
@@ -1294,7 +1328,9 @@
        sill, a dark steel frame with a transom, wired safety glass lit by the
        sky outside (world/prisonlook.js follows the day with it), and five
        round bars set into the head and the sill. */
-    const Z = IZN, W = 1.50, H = 1.40, Y = 2.30, D = 0.16;
+    // the opening in the wall behind it is NWIN's (the shell, section 0)
+    if (!NWIN.xs.some(function (v) { return Math.abs(v - x) < 0.01; }) || Math.abs(NWIN.tierY - FY) > 1e-6) return;
+    const Z = IZN, W = NWIN.w, H = NWIN.h, Y = NWIN.y, D = 0.16;
     dbox(x, Y + H / 2 + 0.07, Z + D / 2, W + 0.28, 0.14, D, 0x9aa0a4);                 // head
     for (const s of [-1, 1]) dbox(x + s * (W / 2 + 0.07), Y, Z + D / 2, 0.14, H, D, 0x9aa0a4);   // jambs
     // the sill: deeper than the reveal, its top falling away from the glass
@@ -1318,20 +1354,22 @@
     const g = new THREE.PlaneGeometry(W - 0.06, H - 0.06);
     g.translate(x, Y + LIFT, Z + 0.015);   // 15 mm off the wall face: never sharing its depth
     GLASS.push(g);
+    // the outside: a cast sill under the opening on the court face, falling
+    // away from the wall, so the hole reads as a window from out there too
+    dbox(x, Y - H / 2 - 0.04, Z - 1.0 - 0.07, W + 0.2, 0.08, 0.14, 0x9aa0a4);
   }
-  // wired, lightly frosted safety glass. ONE material for every cell window
-  // in the wing; its colour is the sky (prisonlook.js drives it).
+  // wired safety glass, CLEAR: a faint green-grey cast and the wire mesh,
+  // and through it the real outside (the wall behind is a hole, section 0).
+  // It was an opaque frosted pane painted the sky's colour. ONE material for
+  // every cell window in the wing; lit, so it is not a lamp at night.
   const GLASS = [];
   const GLASS_MAT = (function () {
     const cv = document.createElement("canvas");
     cv.width = cv.height = 128;
     const q = cv.getContext("2d");
-    q.fillStyle = "#ffffff"; q.fillRect(0, 0, 128, 128);
-    for (let i = 0; i < 128; i += 4) {                         // the frosting: faint vertical streaks
-      q.fillStyle = "rgba(120,140,150," + (0.03 + ((i * 37) % 11) / 220).toFixed(3) + ")";
-      q.fillRect(i, 0, 2, 128);
-    }
-    q.strokeStyle = "rgba(70,78,84,0.45)"; q.lineWidth = 1;    // the wire, a 16 px square mesh
+    q.clearRect(0, 0, 128, 128);
+    q.fillStyle = "rgba(196,214,210,0.10)"; q.fillRect(0, 0, 128, 128);   // the glass's own cast
+    q.strokeStyle = "rgba(58,64,70,0.55)"; q.lineWidth = 1;    // the wire, a 16 px square mesh
     for (let i = 0; i <= 128; i += 16) {
       q.beginPath(); q.moveTo(i + 0.5, 0); q.lineTo(i + 0.5, 128); q.stroke();
       q.beginPath(); q.moveTo(0, i + 0.5); q.lineTo(128, i + 0.5); q.stroke();
@@ -1339,7 +1377,7 @@
     const t = new THREE.CanvasTexture(cv);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(6, 5.6);                                     // ~2.4 cm wire squares on a 1.44 x 1.34 pane
-    const m = new THREE.MeshBasicMaterial({ color: 0xd4e6f0, map: t });
+    const m = new THREE.MeshLambertMaterial({ color: 0xffffff, map: t, transparent: true, depthWrite: false, side: THREE.DoubleSide });
     m._prSkip = true;
     return m;
   })();

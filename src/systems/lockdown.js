@@ -202,6 +202,9 @@
     return !!((n.huntPlayer || 0) > 0 || n.foe || n._demand || n.intimidMode ||
       s === "fight" || s === "snitch" || s === "flee" || s === "demandPlayer" ||
       s === "interceptThreat" || s === "diversion" ||
+      // a man running for the outer gate is not walked back to count
+      // (world/prisonoutside.js: he is the reason for this lockdown)
+      s === "escape" ||
 
       s === "rumorHuddle");
   }

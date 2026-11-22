@@ -1866,11 +1866,25 @@
     }
     const plan = CBZ.escapePlan;
     if (ex * ex + ez * ez < 9) {
-      if (!plan || plan.mayWin("gate", "prison-exit")) getOut("gate");
+      if (!plan || plan.mayWin("gate", "prison-exit")) breakOut("gate", "prison-exit");
     } else if (routeWin) {
       const kind = routeWin.kind || (routeWin.name === "culvert" ? "culvert" : "gate");
-      if (!plan || plan.mayWin(kind, routeWin.name)) getOut("route");
+      if (!plan || plan.mayWin(kind, routeWin.name)) breakOut("route", routeWin.name);
     }
+    // THE RUN IS WON AT THE OUTER WALL (world/prisonoutside.js): through its
+    // checkpoint, on foot or in a car, or anywhere past it
+    const O = CBZ.prisonOutside;
+    if (O && O.ready() && O.isOut() && O.won(player.pos.x, player.pos.z)) getOut(O.reason());
+  }
+  // THROUGH THE WIRE IS NOT OUT. Every place the run used to be won (the
+  // main port's win point, an alt port's, the culvert mouth, clear of the
+  // wall) now puts you in the field between the wire and the outer
+  // perimeter, a kilometre and more from its gate. Only a prison with no
+  // outer perimeter built ends the run here, as it always did.
+  function breakOut(reason, name) {
+    const O = CBZ.prisonOutside;
+    if (O && O.ready()) { O.breakout(name, reason); return; }
+    getOut(reason);
   }
   // YOU ARE OUT, AND THE WORLD KEEPS GOING: the run out (systems/escapeend.js)
   // owns the ending and calls winGame itself after the fade.
