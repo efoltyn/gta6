@@ -488,19 +488,40 @@
         if (!CBZ.interactions || !CBZ.interactions.registerZone) return null;
         const o = venue.origin;
         const wx = o.x + z.pos[0], wz = o.z + z.pos[1], r = z.r || 1.6;
+        // one stable target per zone (the card's hysteresis compares identity);
+        // z.at = [x, z] puts the card on the thing itself (a table, a machine)
+        // when the place you stand to use it is somewhere else
+        const ax = z.at ? o.x + z.at[0] : wx, az = z.at ? o.z + z.at[1] : wz;
+        const tok = { x: ax, z: az, pos: { x: ax, y: z.y != null ? z.y : 1.1, z: az }, pkg: def.id, zid: z.id, name: z.name || null, note: z.note || null };
+        /* A ZONE WITH VERBS IS A THING YOU DO SEVERAL THINGS AT (a card table,
+           a cashier's window): z.verbs = [{ id, label, slot?, hold?, wheel?,
+           bad?, prio?, canShow(ctx), onSelect(ctx) }]. Each is an ordinary
+           option on the card: E / I J K L / the wheel / a tap. This is what a
+           package uses INSTEAD of ctx.hud.panel. z.name / z.note (strings or
+           functions) head the card. */
+        const options = Array.isArray(z.verbs) ? z.verbs.map(function (v, i) {
+          return {
+            id: def.id + ":" + z.id + ":" + (v.id || i), slot: v.slot, hold: !!v.hold, wheel: !!v.wheel, bad: !!v.bad,
+            prio: v.prio != null ? v.prio : 30 - i, forceYes: true,
+            label: v.label,
+            canShow: v.canShow ? function () { return !!v.canShow(ctx); } : null,
+            cuffOk: !!z.cuffOk,
+            onSelect() { v.onSelect(ctx); },
+          };
+        }) : [{
+          id: def.id + ":" + z.id + ":use", slot: "e", prio: 30,
+          label: z.label,
+          canShow: z.canShow || null,
+          cuffOk: !!z.cuffOk,           // usable with your hands cuffed (a booking desk)
+          onSelect() { z.onUse(ctx); },
+        }];
         return CBZ.interactions.registerZone({
           id: def.id + ":" + z.id, kind: "gamepkg",
           find(px, pz) {
             const dx = px - wx, dz = pz - wz;
-            return (dx * dx + dz * dz <= r * r) ? { x: wx, z: wz, pkg: def.id, zid: z.id } : null;
+            return (dx * dx + dz * dz <= r * r) ? tok : null;
           },
-          options: [{
-            id: def.id + ":" + z.id + ":use", slot: "e", prio: 30,
-            label: z.label,
-            canShow: z.canShow || null,
-            cuffOk: !!z.cuffOk,           // usable with your hands cuffed (a booking desk)
-            onSelect() { z.onUse(ctx); },
-          }],
+          options: options,
         });
       },
       // ctx.mission(spec) — hand the player a TRACKED, PAID objective.
@@ -742,7 +763,8 @@
     if (CBZ.interactions && CBZ.interactions.describe) {
       CBZ.interactions.describe("gamepkg", function (t) {
         const d = t && t.pkg ? defs.find((dd) => dd.id === t.pkg) : null;
-        return { label: (d && (d.title || d.id)) || "—", note: "" };
+        const val = function (x) { try { return typeof x === "function" ? x() : x; } catch (e) { return ""; } };
+        return { label: (t && val(t.name)) || (d && (d.title || d.id)) || "—", note: (t && val(t.note)) || "" };
       });
     }
     // package venues claim lots at order 88 — BEFORE interior dressers (casino.js runs at 90)

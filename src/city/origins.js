@@ -2401,18 +2401,9 @@
   }
 
   function wheelOpen() { return wheelEl && wheelEl.style.display === "block"; }
-  // KEY OWNERSHIP (see captives.js's matching block): [U] is contextual and
-  // three-way shared with captives.js's custody HUD and wealth.js's business
-  // panel. wealth.js already sets CBZ.cityMenuOpen while its panel is open,
-  // which the guard above already blocks on; this extra check is defense in
-  // depth for captives.js specifically, since its own capture-phase handler
-  // is the one that actually decides whether the wheel even sees the
-  // keypress (it only lets U fall through when it has nothing of its own to
-  // show or isn't itself open).
   function openWheel() {
     if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) return;
     if (g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen) return;
-    if (CBZ.cityCaptivesHudOpen && CBZ.cityCaptivesHudOpen()) return;
     const P = CBZ.player;
     if (!P || P.dead || g.busted) return;
     if (P.driving) { if (CBZ.city) CBZ.city.note("Park it first, no switching from the driver's seat.", 1.8); return; }

@@ -1289,7 +1289,6 @@
     handOver(v, "box", function () { acquire(lot, name, 1, 0, true, true); });
   }
   function career(kind) { if (CBZ.cityStartCareer) CBZ.cityStartCareer(kind); }
-  function acts(tab) { if (CBZ.cityOpenActivities) CBZ.cityOpenActivities(tab); }
 
   /* THE ROWS, for the clerk you are looking at. Built from what his counter
      is: the trade, the stock he keeps behind it (anything his shop sells that
@@ -1297,6 +1296,13 @@
      what he buys, the civic desk's business. Memoised per clerk for a moment
      (every option's gate and label asks). */
   const ROW_MAX = 14;
+  /* WHAT ELSE A CLERK DOES. A file that gives a counter a job registers one
+     function here: fn(v, lot, kind, add) is asked every time the rows are
+     built and calls add(id, label, run(v), sub?) for each thing this clerk
+     will do for you right now. (This is how the things that used to be
+     panels are asked of a person: no file opens a screen from a counter.) */
+  const ASKS = CBZ._counterAsks || (CBZ._counterAsks = []);
+  CBZ.cityCounterAsk = function (fn) { if (typeof fn === "function" && ASKS.indexOf(fn) < 0) ASKS.push(fn); };
   let _rowsOf = null, _rowsAt = -1, _rows = [];
   // is this lot's floor a flagship file's (its goods are on its own racks)?
   function flagship(lot) {
@@ -1323,7 +1329,7 @@
     //  sells and serves, it starts no side job, bet or bout under the contract)
     let owned = false;
     try { owned = !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()); } catch (e) { owned = false; }
-    const SIDE = { tables: 1, horses: 1, dogs: 1, card: 1, match: 1, routes: 1, civic: 1, contracts: 1, yard: 1, guard: 1, corner: 1, crew: 1, work: 1 };
+    const SIDE = { horses: 1, dogs: 1, card: 1, yard: 1, guard: 1, corner: 1, crew: 1, work: 1 };
     // (what you ask a clerk FOR is not the clerk: the row prints as written, not
     //  cut down to its verb, city/verbword.js)
     const VW = CBZ.cityVerbWord;
@@ -1332,24 +1338,31 @@
       if (VW && VW.keep) VW.keep(label);
       R.push({ id: id, label: label, fn: fn, sub: sub || "" });
     };
+    // ---- he has just told you about a job (city/careers.js): your answers
+    //      to it are the only things on him until you give one or walk off
+    if (CBZ.cityWorkPitch && CBZ.cityWorkPitch(v)) {
+      add("work-take", "Take it", function (vv) { CBZ.cityWorkTake(vv); });
+      add("work-next", "What else", function (vv) { CBZ.cityWorkNext(vv); });
+      return R;
+    }
     // ---- the trade
     if (kind === "hospital") add("heal", "Get patched up " + fmt$(200), heal);
     if (kind === "gym") add("train", "Train " + fmt$(100), train);
     if (kind === "bar") add("round", "A round " + fmt$(12), drink);
     if (kind === "barber") for (const cut of HAIRCUTS) add("cut-" + cut.style, cut.name + " " + fmt$(cut.cost), function (vv) { cutHair(vv, cut); });
-    if (kind === "casino") add("tables", "The tables", function () { if (CBZ.cityOpenCasino) CBZ.cityOpenCasino(); });
     if (kind === "racepark") {
-      add("horses", "Bet the horses", function () { if (CBZ.cityTrackBook) CBZ.cityTrackBook("horses"); });
-      add("dogs", "Bet the dogs", function () { if (CBZ.cityTrackBook) CBZ.cityTrackBook("dogs"); });
+      add("horses", "Bet the horses", function (vv) { if (CBZ.cityTrackBook) CBZ.cityTrackBook("horses", vv); });
+      add("dogs", "Bet the dogs", function (vv) { if (CBZ.cityTrackBook) CBZ.cityTrackBook("dogs", vv); });
     }
     if (kind === "gym" || kind === "arena") add("card", "Fight card", fightCard);
-    if (kind === "paintball") add("match", "Sign up for a match", function () { acts("Combat"); });
-    if (kind === "transit") add("routes", "Routes", function () { acts("Transit"); });
-    if (kind === "cityhall") add("civic", "Civic business", function () { acts("Civic"); });
-    if (kind === "airfield") add("contracts", "Contracts", function () { acts("Emergency"); });
     if (kind === "chop") add("chop", "Sell a car", function (vv) { tell(vv, "Drive it into the bay out front. I pay on the hook."); });
-    if (kind === "carlot" && CBZ.cityOpenCarBiz) add("yard", (g.cityCarBiz && g.cityCarBiz.open) ? "Your yard" : "Open a yard " + fmt$(2000), function () { CBZ.cityOpenCarBiz(); });
     if (kind === "realtor" && CBZ.cityHomeMenu && !(CBZ.cityRealtyLive && CBZ.cityRealtyLive(lot))) add("homes", "Homes", function () { CBZ.cityHomeMenu(); });
+    // ---- what another file has this clerk do (CBZ.cityCounterAsk above):
+    //      the car dealer's trade-in, your own manager's takings and books,
+    //      the yacht broker's hulls, the bookmaker's card
+    for (let i = 0; i < ASKS.length; i++) {
+      try { ASKS[i](v, lot, kind, add); } catch (e) { if (!ASKS[i]._warned) { ASKS[i]._warned = true; console.error("[counter ask]", e); } }
+    }
     // ---- the civic desks (city/civic.js keeps its rows next to their logic)
     if (CBZ.civic && CBZ.civic.services) {
       for (const r of CBZ.civic.services(kind)) {
@@ -1377,7 +1390,7 @@
     if (kind === "security") add("guard", "Guard work", function () { career("security"); });
     if (kind === "drugs") add("corner", "Work a corner", function () { career("dealer"); });
     if (kind === "bar") add("crew", "Run the night crew", function () { career("pimp"); });
-    if (CBZ.cityJobBoard) add("work", "Ask about work", function () { CBZ.cityJobBoard(); });
+    if (CBZ.cityAskWork) add("work", "Ask about work", function (vv) { CBZ.cityAskWork(vv); });
     return R;
   }
   CBZ.cityCounterRows = function (v) { return counterRows(v).map(function (r) { return { id: r.id, label: r.label }; }); };

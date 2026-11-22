@@ -56,7 +56,6 @@ body.mode-city.state-playing #roofStashChip,
 body.mode-city.state-playing #beachLootChip,
 body.mode-city.state-playing #realtyPrompt,
 body.mode-city.state-playing #modshopHud,
-body.mode-city.state-playing #cityHeistHud,
 body.mode-city.state-playing #streakHud,
 body.mode-city.state-playing #streakMeter,
 body.mode-city.state-playing > .panel[style*="bottom: 78px"],
@@ -86,76 +85,10 @@ body.mode-city #waypointGuide { bottom: calc(104px + env(safe-area-inset-bottom,
 /* The start gantry's lamps say GO; the word is redundant. */
 body.mode-city.state-playing #raceLights .go { display: none !important; }
 
-/* ============================================================
-   City activity directory ([Y])
-============================================================ */
-#cityActivities {
-  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  z-index: 62; display: none; width: min(760px, 94vw); max-height: min(82vh, 760px);
-  background: rgba(13, 16, 22, .97); border: 2px solid #2f3a44; border-radius: 14px;
-  color: var(--hud-ink, #e8ecf2); font-family: Fredoka, system-ui, sans-serif;
-  box-shadow: 0 22px 60px rgba(0, 0, 0, .62); pointer-events: auto; overflow: hidden;
-}
-#cityActivities .ca-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px 8px; }
-#cityActivities .ca-title { font-size: 22px; font-weight: 700; }
-#cityActivities .ca-sub { font-size: 12px; color: #8a93a3; margin-top: 2px; }
-#cityActivities .ca-close { border: 0; background: rgba(255,255,255,.06); color: #aeb8c6; border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; }
-#cityActivities .ca-tabs { display: flex; gap: 6px; padding: 0 14px 10px; border-bottom: 1px solid #26313a; overflow-x: auto; }
-#cityActivities .ca-tab { flex: 0 0 auto; border: 1px solid #2d3843; background: rgba(255,255,255,.04); color: #aeb8c6; border-radius: 8px; padding: 7px 10px; cursor: pointer; font: inherit; font-size: 12px; }
-#cityActivities .ca-tab.on { background: #2f6fed; border-color: #4f8bff; color: #fff; font-weight: 700; }
-#cityActivities .ca-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 9px; padding: 12px 14px 14px; overflow-y: auto; max-height: 58vh; }
-#cityActivities .ca-card { text-align: left; border: 1px solid #28313b; background: rgba(255,255,255,.04); color: #e8eef7; border-radius: 10px; padding: 10px 11px; cursor: pointer; font: inherit; }
-#cityActivities .ca-card:hover { border-color: #4f8bff; background: rgba(79,139,255,.12); }
-#cityActivities .ca-name { font-size: 15px; font-weight: 700; }
-#cityActivities .ca-desc { font-size: 12px; color: #9fb0c6; margin: 2px 0 7px; line-height: 1.25; }
-#cityActivities .ca-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: var(--money, #7ed957); font-variant-numeric: tabular-nums; }
-
 /* Pausing is a clean break in the world view. City overlays used to keep
    drawing through the pause card (including the portrait in screenshot #1). */
 body:not(.state-playing) #cityHud { display: none !important; }
 
-/* the job board (city/careers.js): it printed "[1-6] accept" and listened
-   only for a keydown; its rows are controls. */
-#cityJobs .jobRow { cursor: pointer; border-radius: 8px; padding-left: 6px; padding-right: 6px; -webkit-tap-highlight-color: transparent; }
-#cityJobs .jobRow:hover { background: rgba(255,209,102,.10); }
-#cityJobs .jobRow:active { background: rgba(255,209,102,.20); }
-#cityJobs .jobFoot { display: flex; gap: 10px; margin-top: 12px; }
-#cityJobs .jobBtn { flex: 1; padding: 9px 12px; border: 1px solid #3a3140; border-radius: 10px; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; }
-body.touch #cityJobs { min-width: 320px; max-width: min(520px, 94vw); }
-body.touch #cityJobs .jobRow { min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin: 3px 0; border: 1px solid rgba(232,236,242,.14); background: rgba(255,255,255,.05); }
-body.touch #cityJobs .jobBtn { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
-
-/* the mod garage (city/modshop.js) */
-#modshopPanel .msRow { border-radius: 8px; -webkit-tap-highlight-color: transparent; }
-#modshopPanel .msRow:hover { background: rgba(191,227,154,.10); }
-#modshopPanel .msRow:active { background: rgba(191,227,154,.20); }
-#modshopPanel .msClose { margin-top: 10px; padding: 9px 12px; border: 1px solid #4a5a3a; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; cursor: pointer; }
-body.touch #modshopPanel .msRow { min-height: 44px; align-items: center; padding: 8px 10px; margin: 3px 0; }
-body.touch #modshopPanel .msClose { min-height: 52px; background: rgba(255,255,255,.07); }
-
-/* the car lot (city/empire.js) */
-#cityCarBiz .ebRow { cursor: pointer; border-radius: 8px; padding-left: 6px; padding-right: 6px; -webkit-tap-highlight-color: transparent; }
-#cityCarBiz .ebRow:hover { background: rgba(255,209,102,.10); }
-#cityCarBiz .ebRow:active { background: rgba(255,209,102,.20); }
-#cityCarBiz .ebFoot { display: flex; gap: 8px; margin: 6px 0; }
-#cityCarBiz .ebBtn { flex: 1; padding: 8px 10px; border: 1px solid #3a3140; border-radius: 10px; color: #cdd6e3; font-size: 12px; font-weight: 700; letter-spacing: .5px; text-align: center; }
-body.touch #cityCarBiz .ebRow { min-height: 44px; display: flex; align-items: center; padding: 8px 10px; margin: 3px 0; }
-body.touch #cityCarBiz .ebBtn { min-height: 48px; justify-content: center; background: rgba(255,255,255,.07); }
-
-
-/* the empire panel (city/wealth.js) — its action pills were spans */
-#cityEmpire .weRow { -webkit-tap-highlight-color: transparent; }
-#cityEmpire .weRow:hover { filter: brightness(1.25); }
-#cityEmpire .weRow:active { filter: brightness(.85); }
-#cityEmpire .weClose { padding: 9px 12px; border: 1px solid #5a4a2a; border-radius: 10px; color: #c9b98a; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; cursor: pointer; }
-body.touch #cityEmpire .weRow { min-height: 38px; display: inline-flex; align-items: center; }
-body.touch #cityEmpire .weClose { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
-
-/* the power board (city/leaderboard.js) */
-#cityBoard .lbFoot, .lbFoot { display: flex; gap: 10px; margin-top: 10px; }
-.lbBtn { flex: 1; padding: 9px 12px; border: 1px solid #2c3140; border-radius: 10px; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.lbBtn:hover { background: rgba(255,255,255,.07); }
-body.touch .lbBtn { min-height: 52px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.07); }
 
 /* ============================================================
    GANG CITY VERBS — how every button in the city looks.

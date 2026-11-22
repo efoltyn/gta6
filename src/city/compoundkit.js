@@ -1104,7 +1104,7 @@
     stashRefresh(p);
   };
   hooksReplay.stash = function (p) { hooksPlace.stash(p); };
-  hooksRemove.stash = function (p) { if (stashPanelPiece === p) closeStash(); };
+  hooksRemove.stash = function () {};
   track("gate"); track("garage"); track("stash");
 
   /* ================= plots, grids, ownership ============================== */
@@ -1569,13 +1569,27 @@
     I.registerZone({
       id: "ck-stash", kind: "stash", radius: 2.8,
       find: function (px, pz) { return nearestLive(live.stash, px, pz, 2.8); },
+      // THE CAGE IS A BOX YOU PUT MONEY IN: what you carry goes in on E, what
+      // is in it comes out on hold E, and a part of it round the wheel (the
+      // house safe's grammar, city/realestate.js). Someone else's cage offers
+      // nothing. (This was an HTML card of PUT IN / TAKE OUT amount pills.)
       options: [
-        {
-          id: "ck-stash-open", slot: "e", prio: 2,
-          canShow: function (t) { return isMine(t); },   // someone else's cage: a locked status, not a button
-          label: function (t) { return "Open " + money(stashCash(t)); },
-          onSelect: function (t) { if (!isMine(t)) { note("Locked.", 1.2); return; } openStash(t); },
-        },
+        { id: "ck-stash-in", slot: "e", prio: 3,
+          canShow: function (t) { return isMine(t) && Math.floor(g.cash || 0) >= 1; },
+          label: function () { return "Put in " + money(Math.floor(g.cash || 0)); },
+          onSelect: function (t) { stashMove(t, Math.floor(g.cash || 0)); } },
+        { id: "ck-stash-out", slot: "e", hold: true, prio: 3,
+          canShow: function (t) { return isMine(t) && stashCash(t) >= 1; },
+          label: function (t) { return "Take out " + money(stashCash(t)); },
+          onSelect: function (t) { stashMove(t, -stashCash(t)); } },
+        { id: "ck-stash-in10", wheel: true, prio: 2,
+          canShow: function (t) { return isMine(t) && Math.floor(g.cash || 0) > 10000; },
+          label: function () { return "Put in " + money(10000); },
+          onSelect: function (t) { stashMove(t, 10000); } },
+        { id: "ck-stash-out10", wheel: true, prio: 2,
+          canShow: function (t) { return isMine(t) && stashCash(t) > 10000; },
+          label: function () { return "Take out " + money(10000); },
+          onSelect: function (t) { stashMove(t, -10000); } },
       ],
     });
     I.registerZone({
@@ -1601,85 +1615,34 @@
         },
         {
           id: "ck-garage-get", slot: "e", prio: 3,
-          canShow: function (t, ctx) { return !(ctx && ctx.driving); },
+          // (the last one parked comes out first; this used to open the storage menu)
+          canShow: function (t, ctx) { const S = CBZ.cityStorage; return !(ctx && ctx.driving) && !!(S && S.storedVehicleCount && S.storedVehicleCount() > 0); },
           label: "Take out",
-          onSelect: function () {
-            const S = CBZ.cityStorage;
-            if (S && S.openVirtual) S.openVirtual({ id: "compound-garage", name: "Compound Garage", kind: "garage", blurb: "" });
-            else if (S && S.open) S.open();
-          },
+          onSelect: function () { const S = CBZ.cityStorage; if (S && S.retrieveLast) S.retrieveLast(); },
         },
       ],
     });
   }
 
-  /* ================= STASH PANEL =========================================== */
-  let stashPanelPiece = null, spEl = null, spBody = null;
-  function spMake() {
-    if (spEl || typeof document === "undefined" || !document.body) return;
-    spEl = document.createElement("div");
-    spEl.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9001;" +
-      "width:min(380px,92vw);font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;color:#eef;" +
-      "background:rgba(14,16,20,0.96);border:1px solid rgba(160,190,150,0.35);border-radius:12px;" +
-      "padding:14px 16px;display:none;box-shadow:0 18px 60px rgba(0,0,0,0.7);";
-    spBody = document.createElement("div");
-    spEl.appendChild(spBody);
-    spEl.addEventListener("click", function (e) {
-      const b = e.target.closest ? e.target.closest("[data-sk]") : null;
-      if (!b || !stashPanelPiece) return;
-      stashAct(b.getAttribute("data-sk"));
-    });
-    document.body.appendChild(spEl);
-  }
-  function stashAct(k) {
-    const p = stashPanelPiece; if (!p) return;
-    if (k === "close") { closeStash(); return; }
-    const onYou = Math.max(0, Math.floor(g.cash || 0));
-    if (k.charAt(0) === "d") {
-      const amt = k === "dall" ? onYou : Math.min(onYou, +k.slice(1));
-      if (amt > 0) { g.cash = onYou - amt; stashDeposit(p, amt); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} } }
-    } else if (k.charAt(0) === "t") {
-      const amt = k === "tall" ? stashCash(p) : +k.slice(1);
-      const took = stashTake(p, amt);
-      if (took > 0) { pay(took); if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} } }
+  /* ================= THE CAGE'S MONEY ====================================== */
+  // amt > 0: off you, into the cage. amt < 0: out of the cage, onto you.
+  function stashMove(p, amt) {
+    if (!p || !isMine(p)) return 0;
+    let moved = 0;
+    if (amt > 0) {
+      const onYou = Math.max(0, Math.floor(g.cash || 0));
+      moved = Math.min(onYou, Math.floor(amt));
+      if (moved > 0) { g.cash = onYou - moved; stashDeposit(p, moved); }
+    } else if (amt < 0) {
+      moved = stashTake(p, Math.floor(-amt));
+      if (moved > 0) pay(moved);
     }
-    renderStash();
+    if (moved > 0) {
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
+    }
+    return moved;
   }
-  function btn(k, label, off) {
-    return "<span data-sk='" + k + "' style='display:inline-block;cursor:pointer;margin:3px 6px 3px 0;padding:6px 11px;border-radius:7px;" +
-      "background:" + (off ? "rgba(255,255,255,0.05);color:#6c7480" : "rgba(126,217,87,0.16);color:#d9f7c8") + ";font:600 12px system-ui'>" + label + "</span>";
-  }
-  function renderStash() {
-    const p = stashPanelPiece; if (!p || !spBody) return;
-    const inCage = stashCash(p), onYou = Math.max(0, Math.floor(g.cash || 0));
-    let h = "<div style='font:700 16px system-ui;margin-bottom:2px'>Cash cage</div>";
-    h += "<div style='font-size:12px;color:#9fb0a0;margin-bottom:10px'>In the cage " + money(inCage) + ". On you " + money(onYou) + ".</div>";
-    h += "<div style='font:700 11px system-ui;letter-spacing:1px;color:#9fb6da;margin:4px 0'>PUT IN</div>";
-    h += btn("d1000", "$1,000", onYou < 1) + btn("d10000", "$10,000", onYou < 1) + btn("dall", "All of it", onYou < 1);
-    h += "<div style='font:700 11px system-ui;letter-spacing:1px;color:#9fb6da;margin:10px 0 4px'>TAKE OUT</div>";
-    h += btn("t1000", "$1,000", inCage < 1) + btn("t10000", "$10,000", inCage < 1) + btn("tall", "All of it", inCage < 1);
-    h += "<div style='margin-top:12px'>" + btn("close", "Close") + "<span style='font-size:11px;color:#6b7480'>Esc closes</span></div>";
-    spBody.innerHTML = h;
-  }
-  function openStash(p) {
-    if (CBZ.cityMenuOpen) return;
-    spMake(); if (!spEl) return;
-    stashPanelPiece = p;
-    CBZ.cityMenuOpen = true;
-    renderStash();
-    spEl.style.display = "block";
-    if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-  }
-  function closeStash() {
-    if (!stashPanelPiece) return;
-    stashPanelPiece = null;
-    if (spEl) spEl.style.display = "none";
-    CBZ.cityMenuOpen = false;
-    if (CBZ.requestLock && g.state === "playing") { try { CBZ.requestLock(); } catch (e) {} }
-  }
-  addEventListener("keydown", function (e) {
-    if (stashPanelPiece && (e.key === "Escape" || e.key === "escape")) { e.preventDefault(); closeStash(); }
-  });
 
   /* ================= PROPERTY PANEL SECTION ================================ */
   const _estCache = new Map();

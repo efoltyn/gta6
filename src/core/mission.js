@@ -770,13 +770,12 @@
   const LEGACY = [
     { id: "city/gigs.js", what: "gig loops (delivery/taxi/uber/smuggle)", probe: function () { return !!CBZ.cityGig; } },
     { id: "city/heists.js", what: "planned scores", probe: function () { return !!CBZ.cityStartHeist; } },
-    { id: "city/activities.js", what: "activity board + hitman contracts", probe: function () { return !!CBZ.cityOpenActivities; } },
     // careers.js was missing from the census's own list of seven — it owns the
     // freelance contract board AND the gang crew contracts, each with its own
     // objective, its own completion tick and its own payout, which is the exact
     // definition this audit uses. Adding it makes the universe honest; it is
     // already migrated, so the PENDING count does not move.
-    { id: "city/careers.js", what: "freelance board + gang crew contracts", probe: function () { return !!CBZ.cityJobBoard; } },
+    { id: "city/careers.js", what: "freelance work off a counter + gang crew contracts", probe: function () { return !!CBZ.cityAskWork; } },
     { id: "systems/quests.js", what: "jail favors / reputation", probe: function () { return !!CBZ.quests; } },
     { id: "city/campaign.js", what: "authored hitman spine", probe: function () { return !!CBZ.cityCampaignOwnsMission; } },
     { id: "games/jail.js", what: "player arrest arc", probe: function () { return pkgLoaded("jail"); } },

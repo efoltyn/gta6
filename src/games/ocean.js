@@ -747,11 +747,8 @@
     }
 
     // ---- ZONES: the charter board + sell salvage (at the kiosk) ----
-    ctx.zone({ id: "charter", label: "Charter board",
-      pos: [kx, kz], r: 2.4, onUse: openCharter });
-    ctx.zone({ id: "sell", label: "Sell salvage",
-      pos: [kx + ux * 1.6, kz + uz * 1.6], r: 2.0,
-      canShow: () => bag().cargo.length > 0, onUse: sellSalvage });
+    C = C || ctx;
+    ctx.zone({ id: "charter", name: "Dead Water Charter", note: charterNote, pos: [kx, kz], r: 2.6, verbs: charterVerbs() });
   }
 
   /* ============================ ecology sim ============================= */
@@ -1604,42 +1601,34 @@
     else ctx.hud.toast("Sold the hold for $" + v.toLocaleString());
   }
 
-  /* ============================== the panel ============================= */
-  const BTN = "display:inline-block;margin:4px 8px 4px 0;padding:9px 15px;border-radius:11px;cursor:pointer;font-weight:800;font-size:14px;user-select:none;";
-  const on = "background:#2a8a9a;color:#04170a;", off = "background:rgba(255,255,255,.08);color:#e8f2f5;";
-  function openCharter() {
+  /* ====================== the charter kiosk's verbs ======================
+     What the kiosk does for you is on the kiosk (ctx.zone verbs: E, hold E,
+     the wheel, a tap): which charter you are out on, the gear it sells, and
+     selling what is in your hold. (This was an HTML panel of pills.) */
+  function asIs(s) { const VW = CBZ.cityVerbWord; if (VW && VW.keep) VW.keep(s); return s; }
+  function charterNote() {
     const s = bag();
-    const nextO2 = O2_TIERS[s.o2Tier + 1], costO2 = O2_COST[s.o2Tier + 1];
-    const canO2 = s.o2Tier < 3 && C.wallet.canAfford(costO2 || 1e9);
-    const canBolt = C.wallet.canAfford(BOLT_COST) && s.bolts < 12;
-    const canChum = C.wallet.canAfford(CHUM_COST) && s.chum < 5;
-    const html =
-      "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-        "<b style='letter-spacing:2px;color:#f0a028;font-size:17px'>DEAD WATER. CHARTER</b>" +
-        "<span style='font-size:13px'>cash <b style='color:#ffd451'>$" + C.wallet.cash().toLocaleString() + "</b></span></div>" +
-      "<div>" +
-        "<span data-act='roleSalvage' style='" + BTN + (RT.role === "salvage" ? on : off) + "'>SALVAGE DIVER</span>" +
-        "<span data-act='roleShark' style='" + BTN + (RT.role === "shark" ? on : off) + "'>THE SHARK</span>" +
-      "</div>" +
-      (RT.role === "salvage"
-        ? "<div style='font-size:12px;opacity:.85;margin:8px 0 4px'>F harpoon, C chum. Hold <b>$" + cargoValue().toLocaleString() + "</b>, best haul <b>$" + s.hiSalvage.toLocaleString() + "</b></div>" +
-          "<div>" +
-          "<span data-act='buyO2' style='" + BTN + (canO2 ? on : off) + "'>O2 tank → " + (nextO2 ? nextO2 + "s ($" + costO2 + ")" : "MAX") + "</span>" +
-          "<span data-act='buyBolt' style='" + BTN + (canBolt ? on : off) + "'>Harpoon x4 ($" + BOLT_COST + "), have " + s.bolts + "</span>" +
-          "<span data-act='buyChum' style='" + BTN + (canChum ? on : off) + "'>Chum x1 ($" + CHUM_COST + "), have " + s.chum + "</span>" +
-          "</div>"
-        : "<div style='font-size:12px;opacity:.85;margin:8px 0 4px'>Best score <b>" + s.hiShark + "</b></div>") +
-      "<div style='margin-top:8px'><span data-act='sell' style='" + BTN + off + "'>Sell salvage</span>" +
-        "<span data-act='close' style='" + BTN + off + "'>Close (Esc)</span></div>";
-    C.hud.panel(html, {
-      roleSalvage() { setRole("salvage"); openCharter(); },
-      roleShark() { setRole("shark"); openCharter(); },
-      buyO2() { if (canO2 && C.wallet.spend(costO2, "O2 tank upgraded")) { s.o2Tier++; RT.o2 = o2cap(); save(); } openCharter(); },
-      buyBolt() { if (canBolt && C.wallet.spend(BOLT_COST, "Harpoon bolts")) { s.bolts = Math.min(12, s.bolts + 4); save(); } openCharter(); },
-      buyChum() { if (canChum && C.wallet.spend(CHUM_COST, "Chum bucket")) { s.chum = Math.min(5, s.chum + 1); save(); } openCharter(); },
-      sell() { sellSalvage(C); openCharter(); },
-      close() { C.hud.closePanel(); },
-    });
+    if (RT.role !== "salvage") return "Out as the shark. Best score " + s.hiShark;
+    return "Tank " + (O2_TIERS[s.o2Tier] || 0) + "s, " + s.bolts + " harpoons, " + s.chum + " chum. Hold $" + cargoValue().toLocaleString("en-US");
+  }
+  function charterVerbs() {
+    const s = bag;
+    const o2 = function () { const b = s(); return b.o2Tier < 3 ? { secs: O2_TIERS[b.o2Tier + 1], cost: O2_COST[b.o2Tier + 1] } : null; };
+    return [
+      { id: "sell", slot: "e", label: function () { return asIs("Sell the hold, $" + cargoValue().toLocaleString("en-US")); },
+        canShow: function () { return s().cargo.length > 0; }, onSelect: function (c) { sellSalvage(c); } },
+      { id: "shark", slot: "e", hold: true, label: function () { return asIs("Go out as the shark"); }, canShow: function () { return RT.role !== "shark"; }, onSelect: function () { setRole("shark"); } },
+      { id: "salvage", slot: "e", hold: true, label: function () { return asIs("Go out as a salvage diver"); }, canShow: function () { return RT.role !== "salvage"; }, onSelect: function () { setRole("salvage"); } },
+      { id: "o2", wheel: true, label: function () { const n = o2(); return asIs(n ? "A " + n.secs + " second tank $" + n.cost : ""); },
+        canShow: function () { return RT.role === "salvage" && !!o2(); },
+        onSelect: function () { const n = o2(), b = s(); if (n && C.wallet.spend(n.cost)) { b.o2Tier++; RT.o2 = o2cap(); save(); } } },
+      { id: "bolts", wheel: true, label: function () { return asIs("Four harpoons $" + BOLT_COST); },
+        canShow: function () { return RT.role === "salvage" && s().bolts < 12; },
+        onSelect: function () { const b = s(); if (C.wallet.spend(BOLT_COST)) { b.bolts = Math.min(12, b.bolts + 4); save(); } } },
+      { id: "chum", wheel: true, label: function () { return asIs("A bucket of chum $" + CHUM_COST); },
+        canShow: function () { return RT.role === "salvage" && s().chum < 5; },
+        onSelect: function () { const b = s(); if (C.wallet.spend(CHUM_COST)) { b.chum = Math.min(5, b.chum + 1); save(); } } },
+    ];
   }
   function setRole(r) {
     if (RT.role === r) return;

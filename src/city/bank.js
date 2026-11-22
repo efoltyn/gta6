@@ -984,6 +984,9 @@
      right of the view so the person you are dealing with stays in it. */
   const PAPER = { cv: null, kind: null };
   function sheet() {
+    // (core/texfree.js shrinks a canvas to 1x1 once its texture has sat on the
+    //  GPU for 30 s: the next slip is written on a new one, not on that)
+    if (PAPER.cv && PAPER.cv.width !== 1500) PAPER.cv = null;
     if (!PAPER.cv) { PAPER.cv = document.createElement("canvas"); PAPER.cv.width = 1500; PAPER.cv.height = 1000; }
     const c = PAPER.cv.getContext("2d");
     c.clearRect(0, 0, 1500, 1000);
@@ -1013,7 +1016,9 @@
     const H = CBZ.hmHold;
     if (!H || !H.open) return false;
     if (H.isOpen() && H.canvas() === PAPER.cv) { H.update(PAPER.cv); return true; }
-    return H.open(PAPER.cv, { kind: "paper", onClose: function () { PAPER.kind = null; } });
+    const ok = H.open(PAPER.cv, { kind: "paper", onClose: function () { PAPER.kind = null; } });
+    PAPER.kind = kind;            // (opening over an older sheet runs that sheet's onClose first)
+    return ok;
   }
   function paperUp(kind) { const H = CBZ.hmHold; return !!(H && H.isOpen && H.isOpen() && H.canvas() === PAPER.cv && (!kind || PAPER.kind === kind)); }
   function paperDown() { const H = CBZ.hmHold; if (paperUp() && H.close) H.close(); PAPER.kind = null; }

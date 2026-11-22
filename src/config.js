@@ -118,7 +118,6 @@
                            //   a 3★ floor + harder cops until CBZ.cityClearConvict()
     career: null,          // active money-making path (hitman/dealer/…)
     cityWorld: null,       // persistent city truth ledger (city/worldstate.js)
-    cityActivity: null,    // timed hub activity currently resolving
     detection: 0,
     invuln: 0,
     elapsed: 0,

@@ -16,8 +16,10 @@
        a stool; a bar (back bar with bottles from club.js's venue fixtures);
        the cashier cage dressed on the room's counter: brass bars, glass,
        windows. Lamps over each table hang from the fit-out ceiling.
-     • INTERACTION: walking up to any table surfaces "[E] Sit at the table",
-       which opens the live casino floor (blackjack/roulette/slots).
+     • PLAY: every table and machine laid out here is a station of the one
+       casino game (games/casino.js reads CBZ._casinoTables / _casinoSlots):
+       you play at the felt, with its croupier, through verbs on the table.
+       There is no "Sit" that opens a screen.
      • STAFF: a croupier per table at its dealer side, a bartender, a pit
        boss, a count clerk; cityStaffPost keeps them data until you're near.
 
@@ -39,10 +41,10 @@
 
   const GOLD = 0xc9a227;
   const FELT = 0x1d5e3a;
-  const REACH = 3.2;
   const BUILD_R = 70, FREE_R = 120;
 
-  CBZ._casinoTables = CBZ._casinoTables || [];
+  CBZ._casinoTables = CBZ._casinoTables || [];   // {x, y, z, yaw, kind: "bj"|"rl", lot}: local +Z of yaw = the players' side
+  CBZ._casinoSlots = CBZ._casinoSlots || [];     // {x, y, z, yaw, kind: "sl", lot}
   let _casinoStations = 0;
   const LOTS = [];                 // every laid-out casino (lazy dressing reads these)
 
@@ -195,6 +197,7 @@
       take(lat - 0.36, lat + 0.36, dep - 0.34, dep + 0.34); take(sl - 0.3, sl + 0.3, dep - 0.3, dep + 0.3);
       const p = W(F, lat, dep);
       L.slots.push({ x: p.x, z: p.z, yaw: yawOf(F, dLat, 0), hue: L.slots.length });
+      CBZ._casinoSlots.push({ x: p.x, y: F.slab, z: p.z, yaw: yawOf(F, dLat, 0), kind: "sl", lot: lot });
       collide(lat - 0.3, lat + 0.3, dep - 0.3, dep + 0.3, 1.9);
       seat(sl, dep, -dLat, 0, 0.68);
       return true;
@@ -244,7 +247,7 @@
       const p = W(F, lat, d);
       const T = { x: p.x, z: p.z, yaw: yawOf(F, 0, -1), kind: roulette ? "roulette" : "blackjack" };   // players face the back
       L.tables.push(T);
-      CBZ._casinoTables.push({ x: p.x, y: F.slab, z: p.z, lot: lot });
+      CBZ._casinoTables.push({ x: p.x, y: F.slab, z: p.z, yaw: T.yaw, kind: roulette ? "rl" : "bj", lot: lot });
       collide(lat - (roulette ? 1.3 : 1.0), lat + (roulette ? 1.3 : 1.0), d - (roulette ? 0.62 : 0.47), d + (roulette ? 0.62 : 0.45), 0.95);
       // stools: an arc on the players' side (blackjack), both long sides (roulette)
       if (!roulette) {
@@ -515,36 +518,13 @@
     } catch (e) {}
   }
 
-  // ---- the single global casino-table interaction zone ----------------------
-  function openTable() {
-    if (CBZ.cityOpenCasino) CBZ.cityOpenCasino();
-  }
-  if (CBZ.interactions && CBZ.interactions.registerZone && !CBZ._casinoZoneReg) {
-    CBZ._casinoZoneReg = true;
-    CBZ.interactions.registerZone({
-      id: "casino-table", kind: "casino-table", prio: 7, driving: false,
-      find: function (px, pz, ctx) {
-        const py = ctx && ctx.pos ? ctx.pos.y : 0;
-        let best = null, bd = REACH * REACH;
-        const list = CBZ._casinoTables;
-        for (let i = 0; i < list.length; i++) {
-          const t = list[i];
-          if (Math.abs((t.y || 0) - py) > 2.2) continue;
-          const dx = t.x - px, dz = t.z - pz, dsq = dx * dx + dz * dz;
-          if (dsq < bd) { bd = dsq; best = t; }
-        }
-        return best;
-      },
-      options: [{ id: "sit-table", slot: "e", label: "Sit", onSelect: function () { openTable(); } }],
-    });
-  }
-
   // ---- ORDER-90 DRESS PASS --------------------------------------------------
   CBZ.addLandmass(function (city) {
     const A = city || CBZ._settlementArena || (CBZ.city && CBZ.city.arena) || null;
     const root = (city && city.root) || (A && A.root) || null;
     if (!A || !root) return;
     CBZ._casinoTables.length = 0;
+    CBZ._casinoSlots.length = 0;
     for (let i = 0; i < LOTS.length; i++) free(LOTS[i]);
     LOTS.length = 0;
     _casinoStations = 0;

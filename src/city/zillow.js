@@ -479,6 +479,10 @@
     const own = [];
     for (const id in ownedSet()) if (ownedSet()[id]) own.push(id);
     w.assets.realtyOwned = own;
+    // what each business is holding for you (the manager's envelope)
+    const tk = {};
+    for (const id in takings()) if (takings()[id] > 0 && ownedSet()[id]) tk[id] = Math.floor(takings()[id]);
+    w.assets.takings = tk;
   }
   /* …and the other half. Hydration is idempotent and self-validating: an id
      that no longer matches a listing in THIS world is dropped rather than
@@ -501,6 +505,8 @@
       set[rec.id] = true; rec.ownerId = "player";
       takeResidence(rec);
     }
+    const tk = w.assets.takings;
+    if (tk && typeof tk === "object") for (const id in tk) if (set[id] && tk[id] > 0) takings()[id] = Math.floor(tk[id]);
   }
 
   /* WHICH HOUSES ARE YOURS, as PLACES — the seam city/cashstore.js consumes
@@ -799,6 +805,35 @@
     return { count, value, equity: Math.round(eq), debt: Math.round(debt) };
   }
 
+  /* THE TAKINGS. What a business you own has made since you last came by,
+     kept at the business: g.cityTakings {listing id: dollars}. A manager only
+     holds so many cycles' worth (TAKINGS_CYCLES) before the rest is "expenses",
+     so a business is somewhere you go, not a number that grows by itself. */
+  const TAKINGS_CYCLES = 16;
+  function takings() { return (g.cityTakings = g.cityTakings || {}); }
+  function hasCounter(rec) {
+    const b = rec && rec.lot && rec.lot.building;
+    return !!(b && b.vendorSpot && rec.category !== "residence" && !rec.lot.demolished);
+  }
+  function collectTakings(rec) {
+    const tk = takings(), n = Math.floor(tk[rec.id] || 0);
+    if (n <= 0) return 0;
+    tk[rec.id] = 0;
+    CBZ.city.addCash(n);
+    persist();
+    return n;
+  }
+  function books(rec) {
+    const t = tenants()[rec.id];
+    return {
+      id: rec.id, name: nameOf(rec), address: rec.address || "", kind: rec.kind, value: mval(rec),
+      gross: rec._cycleGross || 0, tax: rec._cycleTax != null ? rec._cycleTax : Math.max(0, Math.round(mval(rec) * TAX_PER_TICK)),
+      net: rec._cycleNet || 0, takings: Math.floor(takings()[rec.id] || 0), holdsUpTo: Math.max(0, Math.round((rec._cycleNet || 0) * TAKINGS_CYCLES)),
+      open: !t || t.occupied !== false, mortgage: Math.round(mortgageBalanceOf(rec)), cycle: INCOME_TICK,
+      control: controlClass(rec),
+    };
+  }
+
   // ---- the property economy TICK (driven by realestate.js at order 38.4) ----
   let incomeT = INCOME_TICK;
   function economyTick(dt) {
@@ -807,6 +842,7 @@
     incomeT = INCOME_TICK;
     const r = reg(); if (!r) return;
     let net = 0, n = 0, vac = 0, evicted = null;
+    const held = [];
 
     for (const rec of r.listings) {
       if (!isOwned(rec)) continue;
@@ -847,9 +883,18 @@
       // AD TIE (adboard.js): billboards you rent that push THIS business bump
       // its take — owning the skyline literally pays the till.
       const income = t.occupied ? round5(v * (TENANT_YIELD[rec.category] || 0.01) * ctrlPayMul(rec) * (CBZ.cityAdBoost ? CBZ.cityAdBoost(rec) : 1)) : 0;
-      net += income - tax;
+      // A BUSINESS WITH A COUNTER KEEPS ITS PROFIT UNTIL YOU COME FOR IT: the
+      // manager holds the takings and hands them over (city/wealth.js). Rent on
+      // everything else is still paid to you each cycle, below.
+      if (hasCounter(rec) && income - tax > 0) { held.push(rec); rec._cycleNet = income - tax; rec._cycleGross = income; rec._cycleTax = tax; }
+      else { net += income - tax; if (hasCounter(rec)) { rec._cycleNet = income - tax; rec._cycleGross = income; rec._cycleTax = tax; } }
     }
     if (n > 0 && net > 0) net = Math.round(net / (1 + PORTFOLIO_DRAG * n));
+    for (const rec of held) {
+      const add = Math.round(rec._cycleNet / (1 + PORTFOLIO_DRAG * n));
+      const tk = takings();
+      tk[rec.id] = Math.min(add * TAKINGS_CYCLES, (tk[rec.id] || 0) + add);
+    }
 
     if (net > 0) { CBZ.city.addCash(net); CBZ.city.note("Portfolio +" + money(net) + " (" + n + " unit" + (n === 1 ? "" : "s") + (vac ? ", " + vac + " vacant" : "") + ")", 2); }
     else if (net < 0) {
@@ -881,7 +926,7 @@
     g.cityRealtyOwned = {};
     _hydrated = false;       // a fresh arena re-reads the ledger
 
-    g.cityRentals = {}; g.cityMortgages = {}; g.cityTenants = {}; g.cityRentedHome = null;
+    g.cityRentals = {}; g.cityMortgages = {}; g.cityTenants = {}; g.cityRentedHome = null; g.cityTakings = {};
     // apex-home airpower (penthouse → helicopter; bought hangar → jet) is per-run
     g.cityOwnsPenthouse = false; g.cityOwnsHeli = false; g.cityOwnsHangar = false;
     incomeT = INCOME_TICK;
@@ -942,6 +987,12 @@
     sellPriceForLot: (lot) => { const rec = recForLot(lot); return rec ? Math.round(mval(rec) * SELL_CUT) : null; },
     nameOfLot: (lot) => { const rec = recForLot(lot); return rec ? nameOf(rec) : null; },
     ownedLots: () => { const r = reg(); if (!r) return []; const out = []; for (const rec of r.listings) if (isOwned(rec)) out.push(rec.lot); return out; },
+    // A BUSINESS YOU OWN, AT THE BUSINESS (city/wealth.js: its manager): what
+    // it is holding for you, handing it over, and the figures for its books
+    takingsForLot: (lot) => { const rec = recForLot(lot); return rec && isOwned(rec) ? Math.floor(takings()[rec.id] || 0) : 0; },
+    collectByLot: (lot) => { const rec = recForLot(lot); return rec && isOwned(rec) ? collectTakings(rec) : 0; },
+    booksForLot: (lot) => { const rec = recForLot(lot); return rec && isOwned(rec) ? books(rec) : null; },
+    ownedBusinesses: () => { const r = reg(); if (!r) return []; const out = []; for (const rec of r.listings) if (isOwned(rec) && hasCounter(rec)) out.push(rec.lot); return out; },
   };
 
   // The buyable inventory as rows, DERIVED from the live registry (which

@@ -608,7 +608,6 @@ body.campaign-active.mode-city:not(.campaign-endless) #cKillFeed,
    stays VISIBLE in the campaign — owner asked for it back (2026-07-11). */
 body.campaign-active.mode-city:not(.campaign-endless) #cityOrders,
 body.campaign-active.mode-city #cityGigBar,
-body.campaign-active.mode-city #cityHeistHud,
 body.campaign-active.mode-city #raceHud,
 body.campaign-active.mode-city #raceLights .go,
 body.campaign-active.mode-city #cityFlightHud,

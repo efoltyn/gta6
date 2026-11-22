@@ -436,7 +436,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=outside1122-ph2"></script>
+<script src="src/config.js?v=nopanel1122"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=r187a"></script>
@@ -565,7 +565,7 @@ document.body.appendChild(b);}}catch(e){}})();
      completion detection + the g.cityJob HUD line + map waypoint + world beacon +
      phone card + payout. MUST precede every consumer: careers.js, activities.js,
      gigs.js, heists.js and core/packages.js (which reads CBZ.mission.NULL at parse). -->
-<script src="src/core/mission.js?v=markphoto1"></script>
+<script src="src/core/mission.js?v=nopanel1122"></script>
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
@@ -1059,7 +1059,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
 <script src="src/systems/runstats.js?v=end1"></script>
-<script src="src/systems/touch.js?v=goods1022p"></script>
+<script src="src/systems/touch.js?v=nopanel1122"></script>
 <script src="src/systems/touch_vehicle.js?v=islesmem1029"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
@@ -1378,7 +1378,7 @@ document.body.appendChild(b);}}catch(e){}})();
      guard towers, floodlights, cameras, garage, helipad, stash, bunks, registered
      into systems/building.js's CATALOG. City-only; everything city-side is looked
      up lazily. -->
-<script src="src/city/compoundkit.js?v=cd0929"></script>
+<script src="src/city/compoundkit.js?v=nopanel1122"></script>
 <!-- F7 — world/props.js migrated onto CBZ.spawnPiece (moved from the
      "2. world geometry" wave above, right after towers.js): it needs
      spawnPiece to exist at parse time. (world/crates.js, the five yard
@@ -1399,7 +1399,7 @@ document.body.appendChild(b);}}catch(e){}})();
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
      through it into the betting ledger. Before every venue that uses it. -->
-<script src="src/city/betslip.js?v=shops1122d"></script>
+<script src="src/city/betslip.js?v=nopanel1122"></script>
 <!-- THE BULLRING: the racing modules (src/race/: circuit, stadium, cars,
      tyre physics, drivers, rules), the SAME ones games/race.html runs. The
      place is city/island_speedway.js; the race is run IN THE WORLD by
@@ -1760,7 +1760,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/tornado.js?v=fx1121"></script>
 <script src="src/city/aircraftimpact.js?v=jetbound1022"></script>
 <script src="src/city/metro_promote.js?v=mrg10200048"></script>
-<script src="src/city/shops.js?v=shops1122d"></script>
+<script src="src/city/shops.js?v=nopanel1122"></script>
 <!-- city/shopfloor.js: what every counter shop shares (the clerk, the till of
      goods in your hands not yet paid for, hot goods, the islands' shop rooms
      and showcase glass). Before gunstore.js, jewelry.js, pawnshop.js. -->
@@ -1777,9 +1777,12 @@ document.body.appendChild(b);}}catch(e){}})();
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
 <script src="src/city/jewelry.js?v=misleclstutte"></script>
-<script src="src/city/careers.js?v=shops1122d"></script>
-<script src="src/city/activities.js?v=shops1122d"></script>
-<script src="src/city/heists.js?v=shops1122d"></script>
+<!-- A SHEET OF PAPER SOMEBODY HANDS YOU (CBZ.cityPaper): the job a man wrote
+     down, a manager's ledger, a race card, a ticket. What is left of a list
+     in the world; drawn here, held up through CBZ.hmHold. -->
+<script src="src/city/paper.js?v=nopanel1122"></script>
+<script src="src/city/careers.js?v=nopanel1122"></script>
+<script src="src/city/heists.js?v=nopanel1122"></script>
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
 <script src="src/city/verbword.js?v=btn1011"></script>
@@ -1887,17 +1890,16 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/camera.js?v=deathcam1009"></script>
 <script src="src/city/ragdoll.js?v=bodymove1022"></script>
 <script src="src/city/carstrike.js?v=protest1022"></script>
-<script src="src/city/leaderboard.js?v=world1122b"></script>
-<script src="src/city/zillow.js?v=fac1009"></script>
+<script src="src/city/zillow.js?v=nopanel1122"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<script src="src/city/bank.js?v=shops1122d"></script>
+<script src="src/city/bank.js?v=nopanel1122"></script>
 <!-- THE PEOPLE BEHIND THE COUNTER (city/keepers.js): the brain a shop vendor
      and a posted bank body run at their post (peds.js think() asks it first),
      and the bank gunpoint rows (Open the vault, Empty the drawer). After
      bank.js (CBZ.cityVaultOpenBy) and interact.js (the registry). -->
 <script src="src/city/keepers.js?v=keep1122d"></script>
 <script src="src/city/pawnshop.js?v=misleopstutte"></script>
-<script src="src/city/clothingstore.js?v=isleopen1022"></script>
+<script src="src/city/clothingstore.js?v=nopanel1122"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
      near you, plus its real catalog stock as the real item models, buyable
@@ -1962,7 +1964,7 @@ document.body.appendChild(b);}}catch(e){}})();
      on CBZ.cityTsunami() unless ?cfg_TSUNAMI_AUTO=1. After swim.js and
      waterfield.js. Revert with ?cfg_TSUNAMI=0. -->
 <script src="src/city/tsunami.js?v=news0930"></script>
-<script src="src/city/empire.js?v=rounds1013m"></script>
+<script src="src/city/empire.js?v=nopanel1122"></script>
 <script src="src/city/construction.js?v=news0930"></script>
 <script src="src/city/companies.js?v=fallstay1"></script>
 <script src="src/city/citystaff.js?v=keep1122d"></script>
@@ -1977,7 +1979,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/officejobs.js?v=living1"></script>
 <script src="src/city/cityevents.js?v=street1009"></script>
 <script src="src/city/story.js?v=night1"></script>
-<script src="src/city/wealth.js?v=world1122b"></script>
+<script src="src/city/wealth.js?v=nopanel1122"></script>
 <script src="src/city/turf.js?v=world1122b"></script>
 <script src="src/city/gangops.js?v=cd0929"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
@@ -2031,12 +2033,11 @@ document.body.appendChild(b);}}catch(e){}})();
      crews and feeds zone control). Flag: RACKET_V1. -->
 <script src="src/city/racket.js?v=world1122b"></script>
 <script src="src/city/aim_dossier.js?v=notag1122"></script>
-<script src="src/city/captives.js?v=trunk1022"></script>
 <script src="src/city/millionaires.js?v=ladder1022"></script>
 <script src="src/city/regionlife.js?v=street1009"></script>
-<script src="src/city/modshop.js?v=cd0929"></script>
+<script src="src/city/modshop.js?v=nopanel1122"></script>
 <script src="src/city/stuntjumps.js?v=metro0929"></script>
-<script src="src/city/storage.js?v=f35one1022"></script>
+<script src="src/city/storage.js?v=nopanel1122"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
      at its own dock. Buying reuses zillow.js's cash AND financed paths (no 7th
@@ -2045,7 +2046,7 @@ document.body.appendChild(b);}}catch(e){}})();
      — CBZ.cityBerth wraps citySpawnOwnedCar so every existing retrieval path
      became water-aware without a caller changing. -->
 <script src="src/city/marina.js?v=fac1009"></script>
-<script src="src/city/boatyard.js?v=cd0929"></script>
+<script src="src/city/boatyard.js?v=nopanel1122"></script>
 <!-- THE APPROACH: how you get IN and OUT of a property. Every block in the
      city was ringed by an UNBROKEN kerb and every home's retrieved car was
      delivered at the pedestrian door on a hard-coded heading of 0 — sideways
@@ -2096,13 +2097,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/pelts.js?v=nodash1"></script>
 <!-- 4d-4. GIG + CRIMINAL ECONOMY: player gig loops + own-a-company + NPC drivers -->
 <script src="src/city/gigs.js?v=w09290250y"></script>
-<script src="src/city/gigfleet.js?v=nodash1"></script>
 <script src="src/city/giglife.js?v=w09290250y"></script>
-<script src="src/city/hud.js?v=isles1022m"></script>
+<script src="src/city/hud.js?v=nopanel1122"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=isleopen1022"></script>
-<script src="src/city/charpanel.js?v=hands1122"></script>
 <!-- THE PHOTO BOOTH: one offscreen rig that photographs any body in the
      outfit it is ACTUALLY wearing (CBZ.cityMugshot). The hitman contract
      card on the phone shows the mark instead of describing him. -->
@@ -2112,7 +2111,7 @@ document.body.appendChild(b);}}catch(e){}})();
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
-<script src="src/city/inventory.js?v=stall1022"></script>
+<script src="src/city/inventory.js?v=nopanel1122"></script>
 <!-- THE PHONE: a real handset in your hand, one for every Gang City player.
      phone_apps.js is what it does (News is NEWS ONE's store, Calls are real
      people running real verbs, Holler is the social feed where a post is the
@@ -2136,7 +2135,7 @@ document.body.appendChild(b);}}catch(e){}})();
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=r187a"></script>
+<script src="src/city/origins.js?v=nopanel1122"></script>
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
@@ -2286,7 +2285,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/familytree.js?v=w09290219"></script>
 <script src="src/city/inheritance.js?v=famtree1"></script>
 <script src="src/city/births.js?v=w09290219"></script>
-<script src="src/city/familypanel.js?v=nodash1"></script>
 <!-- kinship.js — the BODY for the family/friends arithmetic: bonded walkers,
      greetings, grief, homecoming. Loads after familypanel (reads the whole
      family cluster lazily; only hard dep is entities/poses.js far above). -->
@@ -2318,7 +2316,7 @@ document.body.appendChild(b);}}catch(e){}})();
      BEFORE city/countries.js/polity.js/polwar.js/civilwar.js/migration.js —
      fine, every cross-module read it does is guarded and resolved at CALL
      time (its own onNewDay tick), not at parse time. See that file's header. -->
-<script src="src/sim/forex.js?v=tap0929"></script>
+<script src="src/sim/forex.js?v=nopanel1122"></script>
 <!-- M3: centralbank.js — governor NPCs, the policy rate feeding bank.js's
      RATES (a compatibility-accessor design so day one is byte-identical —
      see that file's own header) + the reserve-requirement credit cap.
@@ -2417,7 +2415,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Ace + composed town casinos): marquee/mast exterior, felt tables with
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after
      countries.js and its deps (interactions.js, activities.js, worldmap). -->
-<script src="src/city/casino.js?v=pf0930a"></script>
+<script src="src/city/casino.js?v=nopanel1122"></script>
 <!-- THE RIVER: the marina's way to the sea. The harbour pass in continent.js
      opens a 67 m bay ring around the city rect and closes it on all four
      sides, so every boat in the game floated in a moat — a flood fill from a
@@ -2726,9 +2724,9 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=peak1014c"></script>
-<script src="src/games/casino.js?v=onebet1"></script>
-<script src="src/games/ocean.js?v=nodash1"></script>
+<script src="src/core/packages.js?v=nopanel1122"></script>
+<script src="src/games/casino.js?v=nopanel1122"></script>
+<script src="src/games/ocean.js?v=nopanel1122"></script>
 <!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
      was a dumb idea, but it's really what this whole game's point is: get
      enough people recruited, or get enough money, or enough guns, or somehow

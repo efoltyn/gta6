@@ -20,8 +20,9 @@
    the exact pattern wealth.js uses for w.luxury). EVERY cross-module call is
    feature-detected so a missing sibling degrades gracefully and nothing throws.
 
-   Walk up to a property spot and press E (or tap it) for its menu (Buy if unowned, else
-   Store / Retrieve / ammo). Boarding the parked military jet steals it (4★).
+   Walk up to a property's sign: what you do there is on it (Buy it; Park it
+   inside from the driver's seat; Bring out a car by name; Load out and
+   stock the locker). No menu. Boarding the parked military jet steals it (4★).
 
    Exposes: CBZ.cityStorage, CBZ.cityOpenStorage, CBZ.cityStorageHangarHit,
    CBZ.cityStorageReset.
@@ -392,7 +393,6 @@
        duffels. It grants ownership back through grant() below. */
     if (prop.id === "freeport" && CBZ.cashStore && CBZ.cashStore.buy) {
       CBZ.cashStore.buy();
-      if (open_) render();
       return;
     }
     if (!canAfford(prop.cost)) { note("Need " + money(prop.cost) + " (cash + bank) for the " + prop.name + ".", 2.4); sfx("hit"); return; }
@@ -403,7 +403,6 @@
     sfx("coin");
     persist();
     refreshSigns();
-    if (open_) render();
   }
 
   /* GRANT — mark a property owned WITHOUT charging for it, for a caller that
@@ -416,7 +415,6 @@
     if (!prop || owns(id)) return false;
     state().owned[id] = true;
     persist();
-    if (open_) render();
     return true;
   }
 
@@ -446,7 +444,6 @@
     big("Stored your " + model);
     note(car.stolen ? "A hot ride, laundered, it's yours now." : "Safely stored.", 2.4);
     persist();
-    if (open_) render();
   }
 
   function retrieveVehicle(i) {
@@ -483,7 +480,6 @@
       if (CBZ.fullMap && CBZ.fullMap.setWaypoint) { try { CBZ.fullMap.setWaypoint(berthed.x, berthed.z, v.model); } catch (e) {} }
     } else note("Your " + (v.kind === "jet" ? "F-35" : v.model) + " is out front.", 2.4);
     persist();
-    close();
   }
 
   // ============================================================
@@ -505,7 +501,6 @@
     note("Stocked " + crate.label + " · locker " + stashCount(crate.id) + "/" + cap + ".", 2);
     sfx("coin");
     persist();
-    if (open_) render();
   }
   function loadOut() {
     if (!ownedWarehouse()) { note("No ammo locker, buy the warehouse or the Freeport.", 1.8); return; }
@@ -518,182 +513,74 @@
     big("Loaded out · " + moved + " rounds from the locker");
     sfx("coin");
     persist();
-    if (open_) render();
   }
 
   // ============================================================
-  //  THE PROPERTY MENU  (proximity-gated overlay; number keys act)
+  //  THE PROPERTY IS A THING YOU STAND AT (city/interactions.js). Its sign is
+  //  in the world (makeSign) and what you do there is on it: E, the wheel, a
+  //  tap, on foot or at the wheel.
+  //    not yours     Buy it $X
+  //    yours, in a car        Park it inside
+  //    yours, on foot         Bring out the <last one in>   (each car by name
+  //                           round the wheel), Load out the locker, Stock a
+  //                           crate (a warehouse's ammo locker)
+  //  and its card says what is in it. (This was a numbered HTML menu: a cash
+  //  readout, a blurb, a table of stored vehicles, a table of ammo crates.)
   // ============================================================
-  let panel = null, open_ = false, curSpot = null, actions = [];
-  function el() {
-    if (panel) return panel;
-    panel = document.createElement("div");
-    panel.id = "cityStorage";
-    panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;" +
-      "min-width:360px;max-width:480px;background:rgba(14,18,24,.96);border:2px solid #2f3a44;border-radius:16px;" +
-      "padding:14px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.5);pointer-events:auto";
-    // TOUCH ONLY: rows act on tap (desktop stays number-keys, byte-identical)
-    panel.addEventListener("click", function (e) {
-      if (!CBZ.touchMode || !open_) return;
-      if (e.target.closest && e.target.closest("[data-sclose]")) { close(); return; }
-      const r = e.target.closest ? e.target.closest("[data-si]") : null;
-      if (r) { const a = actions[+r.getAttribute("data-si")]; if (a) a.fn(); }
-    });
-    document.body.appendChild(panel);
-    return panel;
+  function asIs(s) { const VW = CBZ.cityVerbWord; if (VW && VW.keep) VW.keep(s); return s; }
+  function vehName(v) { return v ? (v.kind === "jet" ? "F-35" : v.model) : ""; }
+  function lockerProp(prop) { return !!(prop && (prop.virtual ? false : (prop.kind === "warehouse" || prop.kind === "compound"))); }
+  function stashTotal() { const a = state().ammo; let n = 0; for (const k in a) n += a[k] | 0; return n; }
+  function contentsNote(prop) {
+    if (!prop.virtual && !owns(prop.id)) return prop.blurb || "";
+    const v = state().vehicles;
+    let s = canStoreVehicleHere(prop) ? (v.length ? v.length + " of " + vehCapTotal() + " bays: " + v.slice(-3).reverse().map(vehName).join(", ") + (v.length > 3 ? " and " + (v.length - 3) + " more" : "") : "bays empty") : "";
+    if (lockerProp(prop)) s += (s ? ". " : "") + (stashTotal() ? stashTotal() + " rounds in the locker" : "locker empty");
+    return s;
   }
-  function render() {
-    if (!curSpot) return;
-    const prop = curSpot.prop;
-    actions = [];
-    let html = "<div style='font-size:19px;font-weight:700;margin-bottom:3px'>" + prop.emoji + " " + prop.name + "</div>";
-    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:9px'>Cash " + money(g.cash || 0) + " · Bank " + money(g.cityBank || 0) + "</div>";
-
-    if (!prop.virtual && !owns(prop.id)) {
-      html += "<div style='font-size:13px;color:#cfe0f5;margin-bottom:8px'>" + prop.blurb + "</div>";
-      // THE ONE PROPERTY YOU CAN PART-PAY IN CASH BAGS. cashstore.js holds the
-      // escrow; the desk quotes what is LEFT, so the two figures can never
-      // disagree with each other.
-      const CS = prop.id === "freeport" ? CBZ.cashStore : null;
-      const owe = CS && CS.remaining ? CS.remaining() : prop.cost;
-      if (CS && owe < prop.cost) {
-        html += "<div style='font-size:12px;color:#ffd166;margin-bottom:6px'>Paid down " + money(prop.cost - owe) + " in bags · " + money(owe) + " to go</div>";
-      }
-      if (CS) html += "<div style='font-size:11px;color:#8a93a3;margin-bottom:8px'>Carry duffels to the sale board by the gate to pay in cash.</div>";
-      actions.push({ label: "Buy " + money(owe), fn: () => buy(prop) });
-    } else {
-      html += "<div style='font-size:12px;color:#7ed957;margin-bottom:6px'>OWNED ✓</div>";
-      if (canStoreVehicleHere(prop)) {
-        html += "<div style='font-size:12px;color:#9fb0c6;margin-bottom:6px'>Vehicles " + storedVehicleCount() + "/" + vehCapTotal() + " stored</div>";
-        actions.push({ label: "Store the vehicle you're driving", fn: storeCurrentVehicle });
-        const s = state();
-        s.vehicles.forEach((v, i) => {
-          actions.push({ label: "Pull out: " + (v.kind === "jet" ? "F-35A" : v.model), fn: () => retrieveVehicle(i) });
-        });
-      }
-      if (prop.kind === "hangar") {
-        html += "<div style='font-size:13px;color:#cfe0f5;margin-bottom:6px'>" + (g.cityOwnsJet ? "Your F-35 lives here." : "Land a STOLEN F-35 inside to keep it.") + "</div>";
-      }
-      /* THE STASH. The Freeport is the only property whose contents are
-         MONEY, and the desk reports it the way it reports vehicles: what is
-         physically in the building right now. The verbs that MOVE it live at
-         the racks themselves (you walk to the shelf) — the only one offered
-         here is the wire, because a wire is a thing you do at a desk. */
-      if (prop.kind === "compound" && CBZ.cashStore) {
-        const st = CBZ.cashStore.stored();
-        const owedCrew = CBZ.cashStore.crewDebt ? CBZ.cashStore.crewDebt() : 0;
-        html += "<div style='font-size:12px;color:#ffd166;margin-top:8px'>RACKS · " + st.bags + "/" + st.cap + " bags · " + money(st.value) + "</div>";
-        if (st.stained) html += "<div style='font-size:11px;color:#d98a84'>" + money(st.stained) + " of it is dye-stained (30% fence cut to wire out)</div>";
-        if (owedCrew) html += "<div style='font-size:11px;color:#d98a84'>Crew owed " + money(owedCrew) + " — they take it off the rack as you stock it.</div>";
-        if (st.value > 0) actions.push({ label: "Wire the racks out", fn: function () { CBZ.cashStore.bankIt(); render(); } });
-      }
-      /* BUY YOUR OWN VAULT FOR IT. The add-on the owner asked for, and it is
-         an add-on in the same sense zillow.js's deck hangar is: a second
-         purchase against a property you already hold, priced on its own, that
-         changes what the place can DO. The steel itself is city/bank.js's
-         CBZ.cityVaultRoom — the identical room the branch has — so the thing
-         you buy is not a stat, it is a building somebody can blow open. */
-      const PV = prop.virtual ? null : CBZ.cityPropVault;
-      if (PV) {
-        const cur = PV.list().filter(function (r) { return r.propId === prop.id; })[0] || null;
-        html += "<div style='font-size:12px;color:#9fd6ff;margin-top:8px;margin-bottom:3px'>YOUR VAULT</div>";
-        if (cur) {
-          const st = cur.stored;
-          html += "<div style='font-size:12px;color:#ffd166'>" + PV.tierOf({ tier: cur.tier }).name + " · " +
-            st.bags + "/" + st.cap + " bags · " + money(st.value) +
-            (cur.built ? "" : " · not standing yet") + "</div>";
-          html += "<div style='font-size:11px;color:#8a93a3;margin-bottom:4px'>The bags go on the shelves behind the door — walk in and stow them.</div>";
-        } else {
-          html += "<div style='font-size:11px;color:#8a93a3;margin-bottom:4px'>Nothing here but land. A strongroom is where duffels stop being loot.</div>";
-        }
-        for (const t of PV.TIERS) {
-          if (cur && cur.tier === t.id) continue;
-          const owe = cur ? Math.max(0, t.cost - PV.TIERS.filter(function (q) { return q.id === cur.tier; })[0].cost) : t.cost;
-          if (cur && owe <= 0) continue;                       // never sell a downgrade
-          actions.push({
-            label: (cur ? "Upgrade to " : "Build a ") + t.name + " · " + money(owe) + "  [" + t.cap + " bags]",
-            fn: function () { PV.buy(prop.id, t.id); render(); },
-          });
-        }
-      }
-      if (prop.kind === "warehouse" || prop.kind === "compound") {
-        html += "<div style='font-size:12px;color:#cdb8ff;margin-top:8px;margin-bottom:3px'>AMMO LOCKER · cap " + ammoCapTotal() + "/weapon</div>";
-        for (const c of AMMO_CRATES) {
-          actions.push({ label: "Buy " + c.label + " (+" + c.qty + ") · " + money(c.cost) + "  [have " + stashCount(c.id) + "]", fn: () => buyAmmo(c) });
-        }
-        actions.push({ label: "Load out", fn: loadOut });
-      }
-    }
-    // TOUCH: no number/Esc key hints — rows are fat tap targets (data-si) and a
-    // CLOSE pill replaces [Esc]. Desktop branch is the original, byte-identical.
-    if (CBZ.touchMode) {
-      actions.forEach((a, i) => { html += "<div data-si='" + i + "' style='padding:10px 8px;margin:3px 0;font-size:14px;border:1px solid rgba(232,236,242,.16);border-radius:9px;background:rgba(255,255,255,.05)'>" + a.label + "</div>"; });
-      html += "<button type='button' class='tpill tpill-sm' data-sclose='1' style='margin-top:9px'>CLOSE</button>";
-    } else {
-      actions.forEach((a, i) => { html += "<div style='padding:3px 0;font-size:13px'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
-      html += "<div style='font-size:11px;color:#6b7480;margin-top:9px'>[1–" + Math.min(9, actions.length) + "] select · [Esc] close</div>";
-    }
-    el().innerHTML = html;
-  }
-  function open(spot) {
-    if (CBZ.cityMenuOpen && !open_) return;
-    hydrate();
-    curSpot = spot; open_ = true; CBZ.cityMenuOpen = true;
-    el().style.display = "block";
-    render();
-    if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-  }
-  function close() {
-    open_ = false; curSpot = null;
-    if (panel) panel.style.display = "none";
-    CBZ.cityMenuOpen = false;
-    if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
-  }
-  // a building you raised yourself (a compound garage): the same menu, no
-  // purchase row, no vault upsell. prop = {id, name, kind:"garage"}.
-  function openVirtual(prop) {
-    open({ prop: Object.assign({ emoji: "", blurb: "", cost: 0 }, prop, { virtual: true }) });
-  }
-  CBZ.cityOpenStorage = function () {
-    const P = CBZ.player; if (!P) return;
-    const s = nearestSpot(P.pos.x, P.pos.z);
-    if (s) open(s);
-  };
-
-  // ============================================================
-  //  THE PROPERTY IS A CANDIDATE (city/interactions.js): E at a spot opens
-  //  its menu (Buy if unowned), a tap on it does the same, on foot or at the
-  //  wheel. It used to be [G] with a private prompt: G is the grenade, so
-  //  standing at your garage with a frag in your bag did both. Number keys
-  //  and Esc stay the open menu's own.
-  // ============================================================
-  function activeCtx() { return g.mode === "city" && g.state === "playing"; }
-  addEventListener("keydown", function (e) {
-    if (!activeCtx() || !open_) return;
-    const k = (e.key || "").toLowerCase();
-    if (k === "escape") { e.preventDefault(); close(); return; }
-    if (k >= "1" && k <= "9") { e.preventDefault(); const a = actions[parseInt(k, 10) - 1]; if (a) a.fn(); }
-  });
+  // the last vehicle put in comes out first
+  function retrieveLast() { const n = state().vehicles.length; if (n) retrieveVehicle(n - 1); return n > 0; }
+  CBZ.cityOpenStorage = function () { return false; };     // (there is no menu to open)
   let zoned = false;
   function wireZone() {
     if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     zoned = true;
     const owe = (prop) => (prop.id === "freeport" && CBZ.cashStore && CBZ.cashStore.remaining) ? CBZ.cashStore.remaining() : prop.cost;
+    const mine = (s) => owns(s.prop.id);
+    const onFoot = (ctx) => !(ctx && ctx.driving);
+    const opts = [
+      { id: "property-buy", slot: "e", prio: 5, campaignSafe: true, label: (s) => asIs("Buy it " + money(owe(s.prop))),
+        canShow: (s) => !mine(s), onSelect: (s) => buy(s.prop) },
+      { id: "property-park", slot: "e", prio: 6, campaignSafe: true, label: () => asIs("Park it inside"),
+        canShow: (s, ctx) => mine(s) && !onFoot(ctx) && canStoreVehicleHere(s.prop), onSelect: () => storeCurrentVehicle() },
+      { id: "property-out", slot: "e", prio: 5, campaignSafe: true,
+        label: () => { const v = state().vehicles; return asIs("Bring out the " + vehName(v[v.length - 1])); },
+        canShow: (s, ctx) => mine(s) && onFoot(ctx) && canStoreVehicleHere(s.prop) && state().vehicles.length > 0, onSelect: () => retrieveLast() },
+      { id: "property-loadout", prio: 4, campaignSafe: true, label: () => asIs("Load out, " + stashTotal() + " rounds"),
+        canShow: (s, ctx) => mine(s) && onFoot(ctx) && lockerProp(s.prop) && stashTotal() > 0, onSelect: () => loadOut() },
+    ];
+    for (let n = 0; n < 8; n++) {
+      opts.push({ id: "property-out-" + n, wheel: true, prio: 3, campaignSafe: true,
+        label: () => asIs("Bring out the " + vehName(state().vehicles[n])),
+        canShow: (s, ctx) => mine(s) && onFoot(ctx) && canStoreVehicleHere(s.prop) && !!state().vehicles[n] && n !== state().vehicles.length - 1,
+        onSelect: () => retrieveVehicle(n) });
+    }
+    AMMO_CRATES.forEach((crate) => {
+      opts.push({ id: "property-crate-" + crate.id, wheel: true, prio: 2, campaignSafe: true,
+        label: () => asIs("Stock a " + crate.label + " " + money(crate.cost)),
+        canShow: (s, ctx) => mine(s) && onFoot(ctx) && lockerProp(s.prop) && stashCount(crate.id) < ammoCapTotal(),
+        onSelect: () => buyAmmo(crate) });
+    });
     CBZ.interactions.registerZone({
       id: "zone-property", kind: "property", radius: SPOT_R, prio: 7,
       find: function (px, pz) {
         const P = CBZ.player;
-        if (open_ || !P || P._aircraft) return null;
+        if (!P || P._aircraft) return null;
         return nearestSpot(px, pz);
       },
-      options: [
-        { id: "property-buy", slot: "e", prio: 5, campaignSafe: true, label: (s) => "Buy " + money(owe(s.prop)),
-          canShow: (s) => !owns(s.prop.id), onSelect: open },
-        { id: "property-open", slot: "e", prio: 5, campaignSafe: true, label: "Open",
-          canShow: (s) => owns(s.prop.id), onSelect: open },
-      ],
+      options: opts,
     });
-    CBZ.interactions.describe("property", function (s) { return { label: (s && s.prop && s.prop.name) || "" }; });
+    CBZ.interactions.describe("property", function (s) { return { label: (s && s.prop && s.prop.name) || "", note: s && s.prop ? contentsNote(s.prop) : "" }; });
   }
   CBZ.onUpdate(13.5, function () {
     if (g.mode !== "city" || !arenaRoot()) return;
@@ -709,8 +596,6 @@
   function teardown() {
     g._cityStorageHydrated = false;
     _spots = null; _spotsRoot = null;
-    if (panel) panel.style.display = "none";
-    open_ = false; curSpot = null;
   }
   CBZ.cityStorageReset = teardown;
 
@@ -741,7 +626,7 @@
     owns, buy, grant, state,
     storeVehicle: storeCurrentVehicle, retrieveVehicle, vehCapTotal, storedVehicleCount,
     buyAmmo, loadOut, stashCount, ammoCapTotal,
-    open: CBZ.cityOpenStorage, openVirtual, close,
+    retrieveLast, contentsNote,
     spots: buildSpots,
   };
 })();
