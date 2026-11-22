@@ -857,6 +857,18 @@
       const B = v.body ? v.body(who) : null;
       up = !(B && B.down && B.down());
       t = who;
+      /* THE MAN A GAME CHOSE MAY BE A FEW STEPS OFF. The jail's Grab / Pick up
+         buttons hand over the man the card is about with no options, and
+         verbs.js refuses anybody past arm's reach (about 1.6 m): the button
+         did nothing unless you were already touching him. Measure him; past
+         reach, you walk in (verbs.js opts.far). */
+      if (!opts || opts.far == null) {
+        const A = v.body ? v.body(pa) : null;
+        if (A && A.pos && B && B.pos) {
+          const d = Math.hypot(B.pos.x - A.pos.x, B.pos.z - A.pos.z);
+          if (d > 1.2 && d < 7) opts = Object.assign({}, opts || {}, { far: d + 0.6 });
+        }
+      }
     } else {
       const C = CANDS();
       const u = v.pick(pa, "grab", { look: true, candidates: C });

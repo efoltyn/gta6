@@ -216,7 +216,7 @@
     if (CBZ.vitals && CBZ.vitals.weak) {
       try { const w = CBZ.vitals.weak(isPlayer(a) ? realPlayerActor() : a) || 0; s *= 1 + 0.6 * clamp(w, 0, 1); } catch (e) { /* no vitals */ }
     }
-    if (role === "A") s *= 0.85;
+    if (role === "A") s *= 0.72;            // he chose it: shoulder set, weight driving through
     if (held(a)) s *= 1.2;                  // a man over your shoulder: top-heavy
     return s;
   }
@@ -367,8 +367,9 @@
     downs++;
     dropHeld(a, 1);
     let done = false;
+    const after = afterDir(o, nx, nz);
     if (V && V.knockdown && ch) {
-      try { done = !!V.knockdown(a, { dir: _dir, power: clamp(o.e / 4.5, 0.5, 1), dur: 1.0 + clamp(o.e - T_DOWN, 0, 2) * 0.5, ko: false, noKo: !koMode(m) }); } catch (e) { done = false; }
+      try { done = !!V.knockdown(a, { dir: _dir, power: clamp(o.e / 4.5, 0.5, 1), travel: after.travel, dur: 1.0 + clamp(o.e - T_DOWN, 0, 2) * 0.5, ko: false, noKo: !koMode(m) }); } catch (e) { done = false; }
     }
     if (!done) {
       if (CBZ.body && CBZ.body.knockdown && a.group) CBZ.body.knockdown(a, { dir: _dir, force: 3 + dv * 1.5, t: 1.2 });
@@ -377,6 +378,39 @@
     }
     if (a.group && o.spin) a.group.rotation.y += o.spin;
   }
+  /* A BODY FALLS THE WAY IT IS STILL MOVING. The push on a runner who hits a
+     man points back at him, so he used to sit down BACKWARD out of a full
+     sprint, and the man he hit dropped on the spot with none of the 3 m/s he
+     had just been given. The direction and the ground covered are the body's
+     velocity the instant after the impact (its own run less what the impact
+     took, or the push itself for a man who stood still). Leaves the unit
+     direction in _dir. */
+  const _after = { travel: 0, speed: 0 };
+  function afterDir(o, nx, nz) {
+    let vx = o.vx, vz = o.vz;
+    if (vx == null || vz == null) { vx = nx * (o.dv || 0); vz = nz * (o.dv || 0); }
+    const sp = Math.hypot(vx, vz);
+    // (only a body still really travelling falls along its travel: two men
+    // who met head on are left with a crawl of residual speed, and go over
+    // backward off each other, not forward on top of each other)
+    if (sp > 2 || (sp > 0.5 && vx * nx + vz * nz > 0)) { _dir.x = vx / sp; _dir.z = vz / sp; } else { _dir.x = nx; _dir.z = nz; }
+    _after.speed = sp;
+    _after.travel = clamp(sp * 0.34, 0.3, 1.7);
+    return _after;
+  }
+  // the player's run is broken by a hit: no sprint, a slowed stride (physics.js hitT)
+  function breakStride(secs) {
+    const P = CBZ.player;
+    if (P && !(P.hitT > secs)) P.hitT = secs;
+  }
+  // what is left of your own motion after the impact that the slowed legs do
+  // not already carry: you keep going INTO him, you do not bounce back off him
+  function carry(o, nx, nz, k) {
+    const P = CBZ.player;
+    let vx = o.vx, vz = o.vz;
+    if (vx == null || vz == null) { vx = nx * (o.dv || 0); vz = nz * (o.dv || 0); }
+    kick({ pos: P.pos, r: P.radius || 0.55 }, vx * k, vz * k);
+  }
   function applyPlayer(tier, o, m) {
     const P = CBZ.player;
     if (!P || P.dead) return;
@@ -384,11 +418,13 @@
     const pa = realPlayerActor(m);
     if (tier === BRUSH) {
       kick({ pos: P.pos, r: P.radius || 0.55 }, nx * dv * 0.5, nz * dv * 0.5);
+      if (dv > 0.7) breakStride(0.12);
       return;
     }
     if (tier === SHOVE || tier === STUMBLE) {
       const stumble = tier === STUMBLE;
-      kick({ pos: P.pos, r: P.radius || 0.55 }, nx * dv * (stumble ? 1.05 : 0.8), nz * dv * (stumble ? 1.05 : 0.8));
+      breakStride(stumble ? 0.55 : 0.3);
+      carry(o, nx, nz, stumble ? 0.75 : 0.6);
       if (CBZ.verbs && CBZ.verbs.react) { try { _dir.x = nx; _dir.z = nz; CBZ.verbs.react(pa, { reaction: "stagger", zone: "body", dir: _dir, power: stumble ? 0.75 : 0.45 }); } catch (e) { /* no rig */ } }
       if (CBZ.shake) CBZ.shake(stumble ? 0.12 : 0.05);
       if (stumble) dropHeld(pa, 0.4);
@@ -396,10 +432,22 @@
     }
     downs++;
     dropHeld(pa, 1);
-    if (CBZ.body && CBZ.body.knockdown) {
-      _dir.x = nx; _dir.z = nz;
-      CBZ.body.knockdown(pa, { dir: _dir, force: 3 + dv * 1.4, t: 1.1 + clamp((o.e || 0) - T_DOWN, 0, 2) * 0.3 });
-    } else kick({ pos: P.pos, r: P.radius || 0.55 }, nx * dv, nz * dv);
+    breakStride(0.6);
+    const after = afterDir(o, nx, nz);
+    /* IN THE JAIL YOU FELL AS A PLANK. CBZ.body.knockdown on the prison's
+       player has no rig fall behind it: the whole group tipped 90 degrees
+       about the feet in a fifth of a second and tipped back up. The inmates
+       already go down in their own rig (knees, hips, back or face, then the
+       get-up); so do you now, along the way you were still moving, carried
+       over the ground your momentum had left. */
+    let done = false;
+    if (m === "escape" && CBZ.verbs && CBZ.verbs.knockdown) {
+      try { done = !!CBZ.verbs.knockdown(pa, { dir: _dir, power: clamp((o.e || 0) / 4.5, 0.5, 1), travel: after.travel, dur: 0.7 + clamp((o.e || 0) - T_DOWN, 0, 2) * 0.3, ko: false }); } catch (e) { done = false; }
+    }
+    if (!done) {
+      if (CBZ.body && CBZ.body.knockdown) CBZ.body.knockdown(pa, { dir: _dir, force: 3 + dv * 1.4, t: 1.1 + clamp((o.e || 0) - T_DOWN, 0, 2) * 0.3 });
+      else kick({ pos: P.pos, r: P.radius || 0.55 }, nx * dv, nz * dv);
+    }
     if (CBZ.shake) CBZ.shake(0.3);
     if (CBZ.sfx) { try { CBZ.sfx("hit"); } catch (e) { /* no audio */ } }
   }
@@ -645,8 +693,28 @@
     const me = isPlayer(a) ? realPlayerActor() : a;
     return S.t === me && !S.tFree;
   }
+  /* GOING DOWN IS NOT GONE. The frame a man's fall started he became "a body
+     on the floor": no collider, stepped over. So the runner who hit him ran
+     on at full speed straight THROUGH a man still upright with his knees
+     folding, and then tripped over him 0.1 s later. For the first beats of a
+     fall (the buckle, until the hips are down) and the last of a get-up (off
+     his knees, rising) he is still a standing body: solid, pushed along by
+     whoever is driving into him, but he trades no new impact (he is already
+     on his way down). */
+  const FALL_SOLID = 0.36, RISE_SOLID = 0.95;
+  function going(a) {
+    if (!a || a.dead) return false;
+    const ch = (isPlayer(a) && !a._remote) ? CBZ.playerChar : (a.char || a.ch);
+    const f = ch && ch.fall;
+    if (!f || !f.on) return false;
+    if (f.variant === "liver" || f.variant === "kneel") return false;
+    if (f.phase === "fall") return (f.t || 0) < FALL_SOLID;
+    if (f.phase === "getup") return (f.gt || 0) > RISE_SOLID;
+    return false;
+  }
   function lying(a) {
     if (!a) return false;
+    if (going(a)) return false;
     if (isPlayer(a) && !a._remote) {
       // YOU, ON THE FLOOR (tased, tackled, knocked down: the rig's fall) are a
       // body on the floor like any other: stepped over, never a standing
@@ -681,6 +749,10 @@
   function cooling(A, B) {
     return (A._bcWith === B && clock - A._bcAt < PAIR_CD) || (B._bcWith === A && clock - B._bcAt < PAIR_CD);
   }
+  // the last pass found these two overlapping (one slot a body: the man he is pressed on)
+  function inContact(A, B) {
+    return (A._bcCon === B && clock - A._bcConT < 0.12) || (B._bcCon === A && clock - B._bcConT < 0.12);
+  }
   function markPair(A, B) { A._bcWith = B; A._bcAt = clock; B._bcWith = A; B._bcAt = clock; }
 
   function swimming(a) {
@@ -689,6 +761,7 @@
   }
   function impact(A, B, nx, nz, m) {
     if (cooling(A, B)) return;
+    if (A._bcGoing || B._bcGoing) return;                // already on his way down: pushed, not hit again
     if (swimming(A) || swimming(B)) return;              // water takes a push, nobody falls over in it
     const vAx = A._bcVx || 0, vAz = A._bcVz || 0, vBx = B._bcVx || 0, vBz = B._bcVz || 0;
     const vc = (vAx - vBx) * nx + (vAz - vBz) * nz;
@@ -726,9 +799,14 @@
     eo.nx = -nx; eo.nz = -nz; eo.dv = _o.dvA; eo.e = _o.eA; eo.spin = _o.spinA; eo.side = 1; eo.source = B;
     const tA = _o.tierA, tB = _o.tierB;
     const dvB = _o.dvB, eB = _o.eB, spinB = _o.spinB;
+    // what each body is still doing the instant after: its own velocity plus
+    // the change the impact made (the runner is slower, the man he hit is moving)
+    eo.vx = vAx - nx * _o.dvA; eo.vz = vAz - nz * _o.dvA;
     apply(A, tA, eo);
     eo.nx = nx; eo.nz = nz; eo.dv = dvB; eo.e = eB; eo.spin = spinB; eo.side = 1; eo.source = A;
+    eo.vx = vBx + nx * dvB; eo.vz = vBz + nz * dvB;
     apply(B, tB, eo);
+    eo.vx = eo.vz = undefined;
     if (remote && CBZ.net && CBZ.net.sendEv) {
       const R = remote._remote, rTier = remote === A ? tA : tB, lTier = remote === A ? tB : tA;
       const rn = remote === A ? -1 : 1;
@@ -765,6 +843,38 @@
     if (!isPlayer(src) && !src._remote && reactionLevel(src) < 0.5 && !src.dead && isPlayer(victim) && CBZ.voice && rng() < 0.3) CBZ.voice.say(src, "bumpSorry", { by: victim });
   }
 
+  /* HOW HARD A BODY IS TO PUSH ALONG (px,pz). A standing man is planted (his
+     feet: x3). Against YOU a man is planted unless he is already walking the
+     way you push: a man walking into you used to count as "moving", so you
+     slid him backward across the yard at a jog. A man whose legs are going
+     (the first beat of a fall) is pushed along by whoever is driving in. */
+  function plant(a, px, pz, self, vsPlayer) {
+    if (self) return 1;
+    if (a._bcGoing) return 0.5;
+    if (vsPlayer) return ((a._bcVx || 0) * px + (a._bcVz || 0) * pz) > 1.0 ? 1 : PLANT;
+    return speedOf(a) < 0.3 ? PLANT : 1;
+  }
+  /* LEANING ON A MAN. Walking into somebody and keeping the stick forward is
+     not an impact (nothing closes fast), so nothing happened: he stood there
+     and you ground against him. Half a second of your weight on him and he
+     gives the half step a shoulder brush gets, and hears about it. */
+  let passDt = 0;
+  function press(H, nx, nz, m) {
+    const P = CBZ.player;
+    if (!P || H._bcGoing || H._remote) return;
+    const into = PV.x * nx + PV.z * nz;
+    if (!(into > 0.5) && !((P.speed || 0) > 0.5)) return;
+    if (H._bcPressAt == null || clock - H._bcPressAt > 0.3) H._bcPress = 0;
+    H._bcPressAt = clock;
+    H._bcPress = (H._bcPress || 0) + passDt;
+    if (H._bcPress < 0.3) return;
+    H._bcPress = 0;
+    _ev.mode = m; _ev.nx = nx; _ev.nz = nz; _ev.dv = 0.6; _ev.e = T_BRUSH; _ev.spin = 0; _ev.source = playerOf(m);
+    _ev.side = (H._contactIndex & 1) ? 1 : -1; _ev.vx = _ev.vz = undefined;
+    apply(H, BRUSH, _ev);
+    social(_ev.source, H, BRUSH, T_BRUSH, m);
+  }
+  function playerOf(m) { for (let i = 0; i < _live.length; i++) if (isPlayer(_live[i])) return _live[i]; return cityPlayer; }
   /* where the pair touches and how they are pushed apart */
   function separatePair(A, B, m, relax) {
     const ap = posOf(A), bp = posOf(B); if (!ap || !bp) return;
@@ -779,7 +889,13 @@
     const stamped = !relax && A._bcFresh && B._bcFresh && A._bcX != null && B._bcX != null;
     const r0x = stamped ? B._bcX - A._bcX : 0, r0z = stamped ? B._bcZ - A._bcZ : 0;
     const r02 = r0x * r0x + r0z * r0z;
-    const touching = stamped && r02 < (min + 0.05) * (min + 0.05);
+    /* "Already touching" used to be a 5 cm band outside the contact distance.
+       A sprint closes 10.7 cm a frame, so about half of all run-ins put the
+       frame before contact inside that band, were read as a lean, and never
+       became an impact at all: you bulldozed a standing man like a sled. A
+       pair is touching when the last pass left them IN contact (it leaves a
+       pair at exactly `min`, or a soft pair inside it). */
+    const touching = stamped && (r02 < (min + 0.004) * (min + 0.004) || inContact(A, B));
     if (stamped && !touching) {
       /* SWEPT (CCD): the relative path r0 -> r1 since the last stamp. The
          first moment it reaches min is the real contact, and the normal
@@ -826,8 +942,8 @@
     if (!touching && !relax) impact(A, B, nx, nz, m);
 
     // POSITIONAL: split by mass, a standing man planted
-    const mA = massOf(A) * (speedOf(A) < 0.3 && !pa ? PLANT : 1);
-    const mB = massOf(B) * (speedOf(B) < 0.3 && !pb ? PLANT : 1);
+    const mA = massOf(A) * plant(A, -nx, -nz, pa, pb);
+    const mB = massOf(B) * plant(B, nx, nz, pb, pa);
     let wA = mB / (mA + mB), wB = 1 - wA;
     const remote = A._remote || B._remote;
     if (remote) {
@@ -839,6 +955,10 @@
       if (pa) wA = Math.max(wA, 0.5); else wB = Math.max(wB, 0.5);
       const s = wA + wB; wA /= s; wB /= s;
       blocks++;
+    }
+    if (overlap > 0) { A._bcCon = B; A._bcConT = clock; B._bcCon = A; B._bcConT = clock; }
+    if (touching && !relax && overlap > 0 && !remote) {
+      if (pa && !pb) press(B, nx, nz, m); else if (pb && !pa) press(A, -nx, -nz, m);
     }
     let close = overlap;
     if (!pa && !pb && !remote) {
@@ -1020,6 +1140,7 @@
     opts = opts || {};
     const m = opts.mode || CBZ.game.mode;
     clock += Math.max(0, dt || 0);
+    passDt = Math.max(0, dt || 0);
     hookNet();
     let grid = grids[m];
     if (!grid) grid = grids[m] = CBZ.makeGrid(opts.cell || CELL);
@@ -1030,8 +1151,9 @@
       const a = list[i], p = posOf(a);
       if (!p) continue;
       a._bcSkip = false;
-      if (!a._remote && lying(a)) { a._bcDown = true; continue; }
+      if (!a._remote && lying(a)) { a._bcDown = true; a._bcGoing = false; continue; }
       a._bcDown = false;
+      a._bcGoing = !a._remote && going(a);
       const S = a._remote ? null : sessionOf(a);
       a._bcSess = S;
       if (heldTarget(a, S)) { a._bcSkip = true; a._bcFresh = false; continue; }

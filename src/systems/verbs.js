@@ -1679,6 +1679,24 @@
     return o;
   }
   // THE WORLD PICKS: a shove or a throw goes where the world sends it
+  /* TWO PALMS ON OPEN GROUND. A shoved man used to leave the floor: a hop
+     with a backward tumble, flat in the air at knee height, then lying there
+     knocked out, whatever the shove was. A push in the chest drives a man
+     BACK ON HIS FEET: he reels two or three steps catching his weight; only a
+     shove with a run behind it (or into a much lighter man) puts him down,
+     and then he goes down in his own rig, driven back along the push. Walls,
+     rails, ledges and water keep their own outcomes (launch). */
+  function shovedOnFeet(S, power, hard) {
+    const d = _dirOut(S.dir.x, S.dir.z);
+    try {
+      if (hard) {
+        if (typeof V.knockdown !== "function") return false;
+        return !!V.knockdown(S.t, { dir: d, power: power, travel: 0.7 + 0.9 * power, dur: 1.1, ko: false });
+      }
+      if (typeof V.react !== "function") return false;
+      return !!V.react(S.t, { reaction: "stagger", zone: "body", dir: d, power: 0.45 + 0.5 * power, stagger: true, heavy: true, mass: 1.1 + 0.9 * power });
+    } catch (e) { return false; }
+  }
   function worldOutcome(S, reach) {
     // asked NOW, from where the drive left him (a shove moved him a step)
     const ctx = copyCtx(S, context(S.T.pos, S.dir, reach));
@@ -1699,7 +1717,9 @@
     } else if (ctx.kind === "open" && S.verb === "shove" && power < 0.75) {
       // a stumble, not a fall: grapple's slide takes it, or a short hop here
       if (CBZ.body && CBZ.body.hit && grappleSteps(S.t)) CBZ.body.hit(S.t, { dir: S.dir, force: 4 + 6 * power });
-      else launch(S.t, "open", ctx, S.dir, power * 0.6, S);
+      else if (!shovedOnFeet(S, power, false)) launch(S.t, "open", ctx, S.dir, power * 0.6, S);
+    } else if (ctx.kind === "open" && S.verb === "shove" && !grappleSteps(S.t) && shovedOnFeet(S, power, true)) {
+      // (a full-weight shove on open ground: he goes over in his own rig)
     } else {
       launch(S.t, ctx.kind, ctx, S.dir, power, S);
     }
@@ -2508,7 +2528,7 @@
     if (S.opts.noMove) return true;
     if (S.lunge) return lungeStep(S, dt);
     const A = S.A, T = S.T, def = S.def;
-    let gx, gz, face = null, settling = false;
+    let gx, gz, face = null, settling = false, chase = 0;
     if (S.ground) {
       // beside his back, facing across it (read off where he lies NOW: he
       // may still be going down)
@@ -2536,6 +2556,20 @@
       }
       gx = T.pos.x - dx / d * S.work; gz = T.pos.z - dz / d * S.work;
       face = Math.atan2(dx, dz);
+      /* A GRAB IS HANDS, NOT A PARKING SPOT. The approach used to end only
+         with the grabber's feet inside 4 cm of a point in front of the man,
+         walked at 2.6 m/s with a braking motor: a second and more of
+         shuffling after a man who had not stopped walking, and "missed" at
+         1.6 s if he kept going. The hands go on the moment he is in arm's
+         reach and roughly in front; the align squares the pair up. And a man
+         walking off is run down, not strolled after. */
+      if (S.verb === "grab" || S.verb === "mug") {
+        if (d <= S.work + 0.22 && Math.abs(angDiff(A.yaw(), face)) < 0.75) { S.aSpeed = 0; return true; }
+        const tv = S._apX != null && dt > 1e-4 ? Math.hypot(T.pos.x - S._apX, T.pos.z - S._apZ) / dt : 0;
+        S._apX = T.pos.x; S._apZ = T.pos.z;
+        S._apV = (S._apV || 0) + (Math.min(8, tv) - (S._apV || 0)) * (1 - Math.exp(-10 * dt));
+        chase = Math.min(6.2, Math.max(def.speed || 2.5, S._apV + 2.6, d > S.work + 0.9 ? 4.4 : 0));
+      }
     }
     const rem = Math.hypot(gx - A.pos.x, gz - A.pos.z);
     const turned = face == null || Math.abs(angDiff(A.yaw(), face)) < 0.3;
@@ -2560,7 +2594,7 @@
       S.aSpeed = stepTo(S, A, S.a, gx, gz, near ? face : null, def.speed || 2.5, dt, near);
       return false;
     }
-    S.aSpeed = stepTo(S, A, S.a, gx, gz, face, def.speed || 2.5, dt);
+    S.aSpeed = stepTo(S, A, S.a, gx, gz, face, chase || def.speed || 2.5, dt);
     return false;
   }
 

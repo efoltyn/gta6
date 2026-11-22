@@ -1100,8 +1100,10 @@
     // the body goes down along the BLOW (a strike passes its power; a body
     // set down or dropped by another verb falls where it is)
     if (variant !== "liver" && variant !== "kneel" && B.pos && o.power != null) {
-      const D = 0.15 + 0.25 * (o.power == null ? 0.7 : o.power);
-      const fs = MP.startStep(ch, 0, 0, 0.45, "L");
+      // o.travel (m): the ground his momentum carries him over as he goes down
+      // (a man run into at a sprint is driven back, he does not drop on the spot)
+      const D = o.travel > 0 ? o.travel : 0.15 + 0.25 * (o.power == null ? 0.7 : o.power);
+      const fs = MP.startStep(ch, 0, 0, o.travel > 0.6 ? 0.6 : 0.45, "L");
       fs.gen = (fs.gen || 0) + 1;
       fs.x = 0; fs.z = 0;           // the feet go with the body (the fall owns the legs)
       pushMove(t, B, ch, D, dx, dz, fs.gen);

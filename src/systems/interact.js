@@ -134,7 +134,10 @@
     // by the collar, heels on the ground; you walk slow (handverbs loadScale)
     drag:     { label: "Drag",      fn: (a) => {
       const V = CBZ.verbs, pa = V && V.playerActor ? V.playerActor() : null;
-      const S = V && pa && V.drag ? V.drag(pa, a) : null;
+      // (a few steps off: you walk to his head end, verbs.js opts.far)
+      const gp = a && a.group && a.group.position, pp = CBZ.player && CBZ.player.pos;
+      const dd = gp && pp ? Math.hypot(gp.x - pp.x, gp.z - pp.z) : 0;
+      const S = V && pa && V.drag ? V.drag(pa, a, dd > 1.2 ? { far: dd + 0.6 } : undefined) : null;
       if (!S) return { ok: false, msg: "" };
       handsOn(a);
       return { ok: true, msg: "" };
