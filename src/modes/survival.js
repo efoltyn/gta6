@@ -471,6 +471,78 @@
     }
   });
 
+  /* ---- THE PLAYER IS THE SAME PERSON IN EVERY GAME -------------------------
+     Owner, 2026-11-21: "look at player in nat disaster and it should be same
+     as other games."
+
+     Nothing dressed the player here. entities/player.js builds the rig as the
+     convict (flat orange jumpsuit, three stripes) and each game then puts its
+     own look on it: systems/prisonoutfits.js the painted prison issue,
+     city/outfits.js your street clothes. The island never did, and
+     disaster.html did not even load the wardrobe, so the one person on the
+     island wearing a prison jumpsuit was you.
+
+     Now the island wears what the city wears: your worn fit through the same
+     dresser (city/outfits.js's record when that file is on the page, else the
+     same closet recipe — white tee, jeans — straight through city/clothes.js,
+     which disaster.html now carries). A watcher, not a one-shot at match
+     start, because the rig is handed between games by other files' ticks
+     (outfits.js strips its paint the frame after you leave the city) and
+     whoever goes last must not be the one who undresses you. Leaving the
+     island hands the rig back flat, as the next game expects to find it. */
+  const STREET = { shirt: 0xf2f2f2, legs: 0x39414f };
+  let islandRig = null, islandMat = null;
+  function islandFit() {
+    let rec = null;
+    try { rec = CBZ.cityOutfitGetEffective ? CBZ.cityOutfitGetEffective() : null; } catch (e) { rec = null; }
+    if (rec && rec.colors) return rec;
+    const f = (g.cityFit && typeof g.cityFit === "object") ? g.cityFit : {};
+    const shirt = f.shirt != null ? f.shirt : STREET.shirt, legs = f.legs != null ? f.legs : STREET.legs;
+    return {
+      id: "civvies", colors: { legs: legs, torso: shirt, collar: shirt, arms: shirt, shoes: 0x2b2b2b },
+      composite: { shirt: shirt, legs: legs, items: Array.isArray(f.items) ? f.items.slice() : [] },
+    };
+  }
+  function dressIslandPlayer(ch) {
+    const rec = islandFit(), c = rec.colors, s = ch.skinSlots;
+    const flat = function (list, hex) { if (list && hex != null) for (let i = 0; i < list.length; i++) if (list[i]) CBZ.paintMesh(list[i], hex); };
+    if (CBZ.cityRecolorRig) CBZ.cityRecolorRig(ch, c, rec);                       // the city's own dresser
+    else if (rec.composite && CBZ.cityApplyComposite) {                            // the wardrobe without the city (disaster.html)
+      if (CBZ.footwear) CBZ.footwear.restyle(ch, rec, c);
+      CBZ.cityApplyComposite(ch, rec.composite);
+      flat(s.pelvis, c.legs);                                                      // the hips are the top of the trousers
+    } else {                                                                       // no wardrobe at all: the same clothes, flat
+      flat(s.torso, c.torso); flat(s.collar, c.collar != null ? c.collar : c.torso);
+      flat(s.arms, c.arms != null ? c.arms : c.torso); flat(s.armsLower, ch.skinTone);
+      flat(s.legs, c.legs); flat(s.legsLower, c.legs); flat(s.pelvis, c.legs); flat(s.shoes, c.shoes);
+    }
+    // the convict's own kit comes off with the jumpsuit: the stripes, the role's cap
+    if (s.stripes) for (let i = 0; i < s.stripes.length; i++) if (s.stripes[i]) s.stripes[i].visible = false;
+    if (CBZ.headwear) CBZ.headwear.wear(ch, null, { owner: "player" });
+    islandRig = ch;
+    islandMat = s.torso && s.torso[0] ? s.torso[0].material : null;
+  }
+  CBZ.onUpdate(34.75, function () {            // (just ahead of city/outfits.js's own watcher at 34.8)
+    const ch = CBZ.playerChar;
+    if (!ch || !ch.skinSlots) return;
+    if (g.mode !== "survival") {
+      if (islandRig) {
+        islandRig = null; islandMat = null;
+        if (CBZ.cityClearComposite) CBZ.cityClearComposite(ch);
+        if (CBZ.cityApplyClothes && ch._clothesKey != null) CBZ.cityApplyClothes(ch, null);
+        // the city dresses you itself this same frame; every other game starts from the role's flat look
+        if (g.mode !== "city" && CBZ.applyPlayerRole && CBZ.player) CBZ.applyPlayerRole(CBZ.player.role);
+      }
+      return;
+    }
+    // a body that died keeps how it died on it (systems/gore.js corpseTreat swaps the cloth for ash / frost)
+    if (ch._treated || (CBZ.player && CBZ.player.dead)) return;
+    // still wearing it? (another game's tick repainting or stripping the chest shows as a different material)
+    const t = ch.skinSlots.torso && ch.skinSlots.torso[0];
+    if (islandRig === ch && t && t.material === islandMat) return;
+    dressIslandPlayer(ch);
+  });
+
   // ---- stamina + spectate watcher + last-one-standing check ----
   CBZ.onUpdate(30, function (dt) {
     if (!CBZ.islandModeOn(g.mode)) return;

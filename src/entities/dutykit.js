@@ -531,6 +531,7 @@
     if (!k) return;
     if (k.parent) k.parent.remove(k);
     ch._dutyKit = null;
+    if (CBZ.humanArmGear) CBZ.humanArmGear(ch, "duty-kit", null);
   }
   function wear(ch, rec) {
     if (!ch) return null;
@@ -558,6 +559,9 @@
     mesh.userData.kind = kind; mesh.userData.shirt = shirt; mesh.userData.opts = opts; mesh.userData.torchOut = false;
     if (mesh.parent !== ch.body) ch.body.add(mesh);
     ch._dutyKit = mesh;
+    // the arms hang clear of the holster and the radio (character.js: THE ARMS
+    // HANG CLEAR OF WHAT IS WORN ON THE HIPS)
+    if (CBZ.humanArmGearFit) CBZ.humanArmGearFit(ch, "duty-kit", [mesh], 0.006);
     return mesh;
   }
   // a guard's torch lives in ONE place: in his hand while it is out, else on

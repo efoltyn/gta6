@@ -183,6 +183,21 @@
     return m.prop;
   };
 
+  /* THE ARM HANGS ROUND THE HOLSTER. The hip prop rides where a real arm
+     hangs (entities/character.js: the anatomy pass put the wrist beside the
+     hip), so while it is worn the idle carry opens just enough to clear it
+     (CBZ.humanArmGearFit measures the prop; a claim by name, given back when
+     the hip is bare). Only on a change of prop: nothing per frame. */
+  let hipGearProp = null, hipGearRig = null;
+  function hipGearSync(ch) {
+    const p = mounts.hip.prop && mounts.hip.prop.visible && mounts.hip.prop.parent ? mounts.hip.prop : null;
+    if (p === hipGearProp && ch === hipGearRig) return;
+    if (hipGearRig && hipGearRig !== ch && CBZ.humanArmGear) CBZ.humanArmGear(hipGearRig, "hip-stow", null);
+    hipGearProp = p; hipGearRig = ch;
+    if (!CBZ.humanArmGearFit) return;
+    if (p) CBZ.humanArmGearFit(ch, "hip-stow", [p], 0.006); else CBZ.humanArmGear(ch, "hip-stow", null);
+  }
+
   // ---- STOWED props on the body mounts ------------------------------------
   // A stowed gun is the same physical object as a drawn one, so it wears the
   // same real-dimension scale (weapons/weapon-scale.js); the caller's legacy
@@ -428,6 +443,7 @@
       if (mounts.back.prop) mounts.back.prop.visible = false;
       if (mounts.back2.prop) mounts.back2.prop.visible = false;
       if (mounts.hip.prop) mounts.hip.prop.visible = false;
+      hipGearSync(ch);
       return;
     }
     // What's actually in the hand right now (drawn, not holstered/melee)?
@@ -458,6 +474,7 @@
       if (stow.hip) mountLegacy(mounts.hip, stow.hip, ch.body, placeHipLegacy);
       else if (mounts.hip.prop) mounts.hip.prop.visible = false;
     }
+    hipGearSync(ch);
     updateTransfer(dt);
     // The destination copy yields to the moving copy until contact. There is
     // one gun travelling, never a static gun already on the back underneath it.

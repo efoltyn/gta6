@@ -363,7 +363,7 @@
         _m.copy(neck.parent.matrixWorld).invert();
         _v.copy(st.tgt).applyMatrix4(_m);
         const dx = _v.x - neck.position.x, dz = _v.z - neck.position.z;
-        const dy = _v.y - (neck.position.y + (rig.profile ? rig.profile.headSize * 0.55 : 0.33));
+        const dy = _v.y - (neck.position.y + (rig.profile ? rig.profile.headSize * 0.55 * (rig.profile.headK || 1) : 0.33));   // the eye line, as the head is drawn
         const hz = Math.sqrt(dx * dx + dz * dz) || 1e-4;
         if (dz > -0.2) {
           yawOff = Math.max(-0.6, Math.min(0.6, Math.atan2(dx, dz) * 0.7)) * st.look;

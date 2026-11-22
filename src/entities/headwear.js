@@ -69,9 +69,9 @@
      HEAD_FORMS + jawMul through CBZ.human; this fallback is a copy for pages
      that load this file first. HC is the skull centre every ray starts at. */
   const FORMS_FALLBACK = {
-    m: { jaw: 0.60, brow: 0.026, round: 0.150, neck: [0.140, 0.158], nose: 1.00, ear: 1.00, chin: 0.012 },
-    f: { jaw: 0.52, brow: 0.014, round: 0.165, neck: [0.118, 0.132], nose: 0.84, ear: 0.90, chin: 0.004 },
-    c: { jaw: 0.72, brow: 0.004, round: 0.195, neck: [0.132, 0.142], nose: 0.70, ear: 0.95, chin: 0.000 },
+    m: { jaw: 0.60, brow: 0.026, round: 0.150, neck: [0.176, 0.194], nose: 1.00, ear: 1.00, chin: 0.012 },
+    f: { jaw: 0.50, brow: 0.012, round: 0.170, neck: [0.160, 0.177], nose: 0.84, ear: 0.88, chin: 0.004 },
+    c: { jaw: 0.72, brow: 0.004, round: 0.195, neck: [0.165, 0.180], nose: 0.70, ear: 0.95, chin: 0.000 },
   };
   function formOf(form) {
     const T = (CBZ.human && CBZ.human.headForms) || FORMS_FALLBACK;
@@ -124,9 +124,10 @@
     return boxSdf(w - 0.0175 * s, a, b, 0.0192 * s - r, 0.076 * s - r, 0.0540 * s - r, r);
   }
   function neckSdf(F, x, y, z) {
-    const r = lerp(F.neck[1], F.neck[0], cl01((y + 0.14) / 0.30));
+    // (character.js NECK_RINGS: the column runs 0.28 under the pivot now)
+    const r = lerp(F.neck[1], F.neck[0], cl01((y + 0.22) / 0.38));
     const zz = (z + 0.025) / 0.95;
-    return Math.max(Math.sqrt(x * x + zz * zz) - r, y - 0.16, -0.16 - y);
+    return Math.max(Math.sqrt(x * x + zz * zz) - r, y - 0.16, -0.28 - y);
   }
   // the nose, as a bounding wedge, for the things that pass in front of it
   function noseSdf(F, x, y, z) {

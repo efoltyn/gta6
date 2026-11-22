@@ -955,7 +955,9 @@
     const col = ch.skinSlots && ch.skinSlots.collar && ch.skinSlots.collar[0];
     const S = ch.torsoShape;
     if (!col || !S || !ch.neck || col.parent !== ch.neck.parent) return null;
-    const top = (col.position.y + 0.038 * (S.vs || 1) - ch.neck.position.y) / k;
+    // (a body length into the NECK's frame: over the head's size and over the
+    // scale the head is drawn at — character.js HEAD_DRAW rides the neck pivot)
+    const top = (col.position.y + 0.038 * (S.vs || 1) - ch.neck.position.y) / (k * (ch.neck.scale.y || 1));
     return isFinite(top) ? { top: top } : null;
   }
   function kitMask(kit) { return kit ? ((kit.shades ? 1 : 0) | (kit.earpiece ? 2 : 0)) : 0; }
