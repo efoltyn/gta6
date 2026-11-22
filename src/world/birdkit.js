@@ -1149,11 +1149,53 @@
     rig.group.name = "beast:chicken";
     return rig.group;
   }
+  /* a bird on the ground (the chickens; crows foraging in a field), given
+     d, the ground it covered this frame in its own metres. The walk weight
+     follows the speed (full stride by ~0.45 m/s; faster is cadence); the
+     head-bob holds the head in space through the stance (the body slides
+     under it) and thrusts it forward while the other foot swings, for as long
+     as the neck's reach lets it; it pecks while it forages, looks about
+     while it stands, and a bolting bird beats its wings. A lookout stands
+     tall and turns its head quickly and far. st persists per bird;
+     o: { graze, flee, alert, atk (0..1 a driven peck), rnd }. Writes P. */
+  const _go = { graze: false, flee: false, alert: false, atk: 0, rnd: null };
+  function groundPose(kind, st, d, dt, o, P) {
+    const S = SPECIES[resolveKind(kind)] || SPECIES.hen, D = prep(S.id);
+    const rnd = o.rnd || Math.random;
+    if (st.w == null) { st.step = 0; st.peck = 0; st.peckT = 0.5 + rnd() * 2; st.look = 0; st.lookT = 0; st.flapPh = 0; st.flap = 0; st.w = 0; }
+    const v = d / dt, flee = !!o.flee, graze = !!o.graze && !o.alert;
+    st.w += (clamp(v / 0.45, 0, 1) - st.w) * Math.min(1, dt * 6);
+    const strd = stride(S.id, st.w);
+    st.step = frac(st.step + d / Math.max(0.02, strd));
+    const half = frac(st.step * 2), reach = Math.min(0.045, strd * 0.5 * S.leg.duty);
+    const hold = Math.min(S.leg.duty, reach / Math.max(1e-3, strd * 0.5));
+    const bob = st.w > 0.05 ? (half < hold ? reach * (0.5 - half / hold) : reach * (-0.5 + (half - hold) / (1 - hold))) : 0;
+    st.peckT -= dt;
+    if (graze && st.peckT <= 0 && st.w < 0.4) { st.peck = 1; st.peckT = 0.6 + rnd() * 1.6; }
+    st.peck = Math.max(0, st.peck - dt * 3.2);
+    const pk = st.peck > 0 ? Math.sin(PI * (1 - st.peck)) : 0;
+    st.lookT -= dt;
+    if (st.lookT <= 0) {
+      if (o.alert) { st.look = (rnd() - 0.5) * 2.4; st.lookT = 0.3 + rnd() * 0.9; }
+      else { st.look = (rnd() - 0.5) * 1.4; st.lookT = 0.5 + rnd() * 2.2; }
+    }
+    st.flap += ((flee && v > 1.0 ? 1 : 0) - st.flap) * Math.min(1, dt * 7);
+    st.flapPh += dt * S.flight.hz * (0.5 + 0.5 * st.flap);
+    P.phase = frac(st.flapPh); P.flap = st.flap; P.fold = 1 - st.flap; P.flare = 0;
+    P.step = st.step; P.legs = 1; P.walk = st.w; P.sit = 0;
+    const peckE = Math.max(pk, o.atk || 0);
+    P.pitch = lerp(graze ? 0.2 : (o.alert ? -0.15 : 0), D.peck.neck, peckE) + (flee ? 0.35 : 0);
+    P.head = lerp(graze ? 0.3 : 0, D.peck.head, peckE);
+    P.body = D.peck.body * peckE + (flee ? 0.12 : 0);
+    P.yaw = st.w > 0.4 || peckE > 0.1 ? 0 : st.look;
+    P.bob = bob * (1 - peckE);
+    return v;
+  }
   function animateActor(a, dt) {
     const grp = a.group, rig = grp && grp.userData.birdRig;
     if (!rig) return false;
     if (!(dt > 0)) dt = 0.016;
-    const S = rig.species, P = rig.params, D = prep(rig.kind);
+    const P = rig.params;
     const cam = CBZ.camera && CBZ.camera.position;
     if (cam) rig.lod(Math.hypot(cam.x - grp.position.x, cam.y - grp.position.y, cam.z - grp.position.z));
     const st = a._bk || (a._bk = { px: null, pz: null, step: 0, peck: 0, peckT: 1 + rig.rng() * 2, look: 0, lookT: 0, flapPh: 0, flap: 0, w: 0 });
@@ -1168,7 +1210,6 @@
     let d = Math.hypot(x - st.px, z - st.pz) / Math.max(1e-3, k);
     st.px = x; st.pz = z;
     if (d > 2) d = 0;
-    const v = d / dt;
     if (a.dead) {
       P.walk = 0; P.fold = 0.55; P.flap = 0; P.flare = 0; P.legs = 1; P.sit = 0; P.pitch = 0.9; P.head = 0.9; P.body = 0; P.bob = 0;
       rig.set(P);
@@ -1177,36 +1218,10 @@
     const flee = a.state === "flee" || !!a.routed;
     // grazing, or standing about with nothing to do: foraging
     const graze = a.state === "graze" || (!flee && st.w < 0.15 && !a.tgt && a.state !== "charge");
-    // the walk weight follows the speed (full stride by ~0.45 m/s; faster is cadence)
-    st.w += (clamp(v / 0.45, 0, 1) - st.w) * Math.min(1, dt * 6);
-    const strd = stride(rig.kind, st.w);
-    st.step = frac(st.step + d / Math.max(0.02, strd));
-    // the head-bob: held in space through the stance (the body slides under
-    // it), thrust forward while the other foot swings
-    // (the hold lasts as long as the neck's reach lets the head stay put)
-    const half = frac(st.step * 2), reach = Math.min(0.045, strd * 0.5 * S.leg.duty);
-    const hold = Math.min(S.leg.duty, reach / Math.max(1e-3, strd * 0.5));
-    const bob = st.w > 0.05 ? (half < hold ? reach * (0.5 - half / hold) : reach * (-0.5 + (half - hold) / (1 - hold))) : 0;
-    // pecking while it grazes; looking about while it stands
-    st.peckT -= dt;
-    if (graze && st.peckT <= 0 && st.w < 0.4) { st.peck = 1; st.peckT = 0.6 + rig.rng() * 1.6; }
-    st.peck = Math.max(0, st.peck - dt * 3.2);
-    const pk = st.peck > 0 ? Math.sin(PI * (1 - st.peck)) : 0;
-    st.lookT -= dt;
-    if (st.lookT <= 0) { st.look = (rig.rng() - 0.5) * 1.4; st.lookT = 0.5 + rig.rng() * 2.2; }
     // a strike from the creature seams (_atkAnim 0..1): the same peck, driven
     const atk = a._atkAnim != null && a._atkAnim >= 0 ? Math.sin(PI * clamp(a._atkAnim, 0, 1)) : 0;
-    // bolting: the wings beat, the body low and stretched
-    st.flap += ((flee && v > 1.0 ? 1 : 0) - st.flap) * Math.min(1, dt * 7);
-    st.flapPh += dt * S.flight.hz * (0.5 + 0.5 * st.flap);
-    P.phase = frac(st.flapPh); P.flap = st.flap; P.fold = 1 - st.flap; P.flare = 0;
-    P.step = st.step; P.legs = 1; P.walk = st.w; P.sit = 0;
-    const peckE = Math.max(pk, atk);
-    P.pitch = lerp(graze ? 0.2 : 0, D.peck.neck, peckE) + (flee ? 0.35 : 0);
-    P.head = lerp(graze ? 0.3 : 0, D.peck.head, peckE);
-    P.body = D.peck.body * peckE + (flee ? 0.12 : 0);
-    P.yaw = st.w > 0.4 || peckE > 0.1 ? 0 : st.look;
-    P.bob = bob * (1 - peckE);
+    _go.graze = graze; _go.flee = flee; _go.alert = false; _go.atk = atk; _go.rnd = rig.rng;
+    groundPose(rig.kind, st, d, dt, _go, P);
     rig.set(P);
     // the audit the generic gait keeps (moving along the nose)
     a._motionMoved = d * k > 0.0025 ? d * k : 0;
@@ -1216,7 +1231,7 @@
 
   CBZ.birdKit = {
     SPECIES: SPECIES, build: build, flock: flock, params: params, geometry: geometryOf, material: materialOf, prep: prep,
-    wingHz: wingHz, clock: clock, bank: bank, stride: stride, chickenBuild: chickenBuild, animateActor: animateActor,
+    wingHz: wingHz, clock: clock, bank: bank, stride: stride, chickenBuild: chickenBuild, animateActor: animateActor, groundPose: groundPose,
     GLSL: GLSL, resolveKind: resolveKind,
     // drop every cached shape and material (after editing SPECIES)
     reset: function () { _prep.clear(); _geos.clear(); _mats.clear(); },

@@ -811,24 +811,37 @@
     })();
 
     // ============================================================
-    //  CROWS — loose flocks of American crows working over the wilderness,
-    //  drawn by the bird kit (world/birdkit.js): real size (0.45 m, 0.92 m
-    //  across), black, five fingered primaries, ~4 wingbeats a second with
-    //  short glides, the wingbeat and the fold in the vertex shader; a near
-    //  and a far InstancedMesh, two draws for every crow.
+    //  CROWS — loose flocks of American crows over the country, drawn by the
+    //  bird kit (world/birdkit.js): real size (0.45 m, 0.92 m across), black
+    //  with a blue-violet gloss, five fingered primaries, ~4 wingbeats a
+    //  second with short glides; a near and a far InstancedMesh, two draws
+    //  for every crow.
     //
-    //  Classic boids inside each flock (separation, alignment, cohesion, a
-    //  pull toward the flock's wandering home) at a crow's speed: 7-12 m/s
-    //  cruising, up to 17 m/s when a shot scatters them. The steering is
-    //  amortised (one flock per tick); the flight itself is integrated and
-    //  drawn every frame. Each crow banks into its turn as a turning bird
-    //  must (tan bank = v x turn rate / g), noses up into a climb, beats
-    //  when it climbs or is slow and glides when it can. Placement is
-    //  deterministic on this file's seeded stream.
+    //  IN THE AIR: classic boids inside each flock (separation, alignment,
+    //  cohesion, a pull toward the flock's wandering home) at a crow's speed,
+    //  7-12 m/s cruising, up to 17 m/s when a shot scatters them. The
+    //  steering is amortised (one flock per tick); the flight is integrated
+    //  and drawn every frame. Each crow banks into its turn (tan bank = v x
+    //  turn rate / g), noses up into a climb, beats when it climbs or is slow
+    //  and glides when it can.
+    //
+    //  ON THE GROUND, as crows live: every so often a flock comes down in a
+    //  loose group on open ground (a road, along a wall, a hedge or the
+    //  trees, grass), each bird gliding in on a line it has checked is clear
+    //  of everything solid and flaring onto its own spot. They walk, peck and
+    //  look about; one keeps watch, from a post or a wall top near the group
+    //  when there is one, else standing tall at its edge. Someone on foot or a
+    //  vehicle under way coming close flushes them (sooner with the lookout
+    //  posted): they burst up away from it and come down again further on. A
+    //  shot scatters them a long way. After a while on one patch they move on.
+    //
+    //  Placement is deterministic on this file's seeded stream; the ground
+    //  life runs on each flock's own stream.
     // ============================================================
     (function flockingBirds() {
       const BK = CBZ.birdKit;
       if (!CBZ.onUpdate || !BK || !BK.flock || !CBZ.loftKit || !CBZ.loftKit.sweep) return;
+      const TAU = Math.PI * 2;
 
       const FLOCK_COUNT = 3;                 // "a few flocks"
       const BIRDS_PER_FLOCK_MIN = 8, BIRDS_PER_FLOCK_MAX = 15;
@@ -858,18 +871,26 @@
             vx: Math.cos(heading) * 9, vz: Math.sin(heading) * 9, vy: 0, ax: 0, ay: 0, az: 0,
             clk: {}, P: {}, sc: 0.92 + k2 * 0.16, rs: 1 + Math.floor(k1 * 2147483000),
             yaw: Math.atan2(-Math.sin(heading), Math.cos(heading)), yawRate: 0, roll: 0, pitch: 0,
+            // fly | approach | ground | lookout | takeoff
+            mode: "fly", spot: null, ap: null, delay: 0, lookout: false, gst: {}, T: 0,
           });
         }
         flocks.push({
           birds, homeX, homeZ, alt, wanderR, gy: groundY(homeX, homeZ) || 0,
           // slow independent drift so each flock's centre wanders
           driftAngle: rng() * Math.PI * 2, driftT: 4 + rng() * 6,
+          // the ground life: air -> landing -> ground -> air (its own stream)
+          mode: "air", airT: 0, patch: null, groundT: 0, landT: 0, checkT: 0, heading: 0,
+          hop: false, goX: null, goZ: null, awayX: null, awayZ: null, hopMin: 35, hopMax: 140,
+          rs: 7919 * (f + 1) + 13,
         });
       }
       for (let f = 0; f < flocks.length; f++) for (const b of flocks[f].birds) b.y = flocks[f].gy + flocks[f].alt + b.dy;
       function rndOf(b) {
         return b.rnd || (b.rnd = function () { b.rs = (b.rs * 16807) % 2147483647; return (b.rs - 1) / 2147483646; });
       }
+      // each flock's first landing a little while after the world comes up
+      for (let f = 0; f < flocks.length; f++) flocks[f].airT = 8 + rndOf(flocks[f])() * 30;
 
       // ============================================================
       //  LIVE BIRDS — every crow carries a lightweight record on the shared
@@ -908,6 +929,7 @@
           rec.dead = true; rec.state = "dead";
           b.falling = true; b.vy = Math.min(b.vy || 0, -1);
           b.spin = (Math.random() - 0.5) * 9;
+          b.mode = "fly"; b.spot = null; b.ap = null; b.lookout = false;
           if (CBZ.cityKillFeed) { try { CBZ.cityKillFeed("You", "American Crow", "hunted"); } catch (e) {} }
           return { head: !!(hit && hit.head), down: true, dmg: dmg };
         }
@@ -922,7 +944,7 @@
             // THREE.Group — fpsmode's sphere scan reads .position/.visible,
             // and systems/markers.js adds an overhead marker into every
             // wildlife record's group. The torso sphere sits at group.y + 1.0,
-            // so the proxy rides 1.0 below the bird to land the sphere on it.
+            // so the proxy rides 1.0 below the bird's body to land the sphere on it.
             const gproxy = new THREE.Group();
             gproxy.position.set(b.x, b.y - 1.0, b.z);
             const rec = {
@@ -962,12 +984,425 @@
       }
       installBirdAlarm();
 
+      // ============================================================
+      //  WHERE A CROW CAN BE — the world's own queries: the ground a walking
+      //  body reads, the colliders (walls, fences, cars, trunks, posts), the
+      //  roofs and decks over a point, the water, the roads
+      // ============================================================
+      const _colQ = [], _roads = [], _ray = { hit: false }, _cover = { g: 0 };
+      // what a crow stands on: the ground a walking body reads, near the terrain
+      function landY(x, z) {
+        const g = groundY(x, z);
+        if (CBZ.walkGroundAt) { const y = CBZ.walkGroundAt(x, z, g + 0.6); if (isFinite(y)) return y; }
+        if (CBZ.floorAt) { const y = CBZ.floorAt(x, z); if (isFinite(y)) return y; }
+        return g;
+      }
+      // a collider's ground-plan distance from a point (0 inside)
+      function colliderDist(c, x, z) {
+        let lx = x, lz = z, x0 = c.minX, x1 = c.maxX, z0 = c.minZ, z1 = c.maxZ;
+        if (c.yaw && c.hw != null) {
+          const co = Math.cos(c.yaw), si = Math.sin(c.yaw), rx = x - c.cx, rz = z - c.cz;
+          lx = rx * co - rz * si; lz = rx * si + rz * co; x0 = -c.hw; x1 = c.hw; z0 = -c.hd; z1 = c.hd;
+        }
+        const dx = lx < x0 ? x0 - lx : (lx > x1 ? lx - x1 : 0), dz = lz < z0 ? z0 - lz : (lz > z1 ? lz - z1 : 0);
+        return Math.hypot(dx, dz);
+      }
+      function wet(x, z) {
+        if (!CBZ.cityWaterAt) return false;
+        try { return !!CBZ.cityWaterAt(x, z); } catch (e) { return false; }
+      }
+      // open ground: dry, level, nothing over it, nothing standing within r
+      // that a crow could not walk over (a kerb or a slab is fine)
+      function openGround(x, z, r) {
+        if (wet(x, z)) return false;
+        const y = landY(x, z);
+        if (!isFinite(y)) return false;
+        if (CBZ.surfaceTopAt && CBZ.surfaceTopAt(x, z, 1e6, 0.2) > y + 0.25) return false;
+        if (CBZ.queryCollidersInto) {
+          const n = CBZ.queryCollidersInto(x, z, r + 0.5, _colQ);
+          let hit = false;
+          for (let i = 0; i < n && !hit; i++) {
+            const c = _colQ[i];
+            if (c.minX == null || (c.y1 != null && c.y1 < y + 0.15) || (c.y0 != null && c.y0 > y + 2.5)) continue;
+            if (colliderDist(c, x, z) < r) hit = true;
+          }
+          _colQ.length = 0;
+          if (hit) return false;
+        }
+        const nn = groundN(x, z);
+        return !nn || nn.y > 0.9;
+      }
+      // the places crows choose: a road, the edge of something (a wall, a
+      // hedge, a fence, the trees), grass
+      function onRoad(x, z) {
+        if (!CBZ.roadsNear) return false;
+        const L = CBZ.roadsNear(x, z, 1, _roads);
+        let on = false;
+        for (let i = 0; i < L.length && !on; i++) {
+          const r = L[i];
+          if (!r || r.elevated || !isFinite(r.x)) continue;
+          const w = (r.w != null ? r.w : (r.width != null ? r.width : 18)) / 2 - 0.5, l = (r.len || 0) / 2;
+          if (Math.abs(x - r.x) < (r.vertical ? w : l) && Math.abs(z - r.z) < (r.vertical ? l : w)) on = true;
+        }
+        _roads.length = 0;
+        return on;
+      }
+      function edgeNear(x, z, y, r0, r1) {
+        if (!CBZ.queryCollidersInto) return false;
+        const n = CBZ.queryCollidersInto(x, z, r1, _colQ);
+        let e = false;
+        for (let i = 0; i < n && !e; i++) {
+          const c = _colQ[i];
+          if (c.minX == null || (c.y1 != null && c.y1 < y + 0.7)) continue;
+          const d = colliderDist(c, x, z);
+          if (d > r0 && d < r1) e = true;
+        }
+        _colQ.length = 0;
+        return e;
+      }
+      function grassAt(x, z) {
+        if (!CBZ.continentCoverAt) return false;
+        _cover.g = 0;
+        try { return !!CBZ.continentCoverAt(x, z, _cover) && _cover.g > 0.4; } catch (e) { return false; }
+      }
+      // a straight flight line clear of every collider (bands honoured)
+      function airClear(ax, ay, az, bx, by, bz) {
+        if (!CBZ.rayColliders) return true;
+        return !CBZ.rayColliders(ax, ay, az, bx - ax, by - ay, bz - az, 1, _ray, { any: true });
+      }
+      // a planned flight line, flown by a bird with wings: the line itself and
+      // four more 0.35 m to either side, over and under it
+      function lineClear(ax, ay, az, bx, by, bz) {
+        if (!airClear(ax, ay, az, bx, by, bz)) return false;
+        const dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz);
+        const sx = l > 1e-3 ? -dz / l * 0.35 : 0.35, sz = l > 1e-3 ? dx / l * 0.35 : 0;
+        return airClear(ax + sx, ay, az + sz, bx + sx, by, bz + sz) && airClear(ax - sx, ay, az - sz, bx - sx, by, bz - sz) &&
+          airClear(ax, ay + 0.3, az, bx, by + 0.3, bz) && airClear(ax, ay - 0.25, az, bx, by - 0.25, bz);
+      }
+      // nothing over this point of the air (a roof, a deck, a canopy)
+      function openAbove(x, y, z) {
+        return !CBZ.surfaceTopAt || CBZ.surfaceTopAt(x, z, 1e6, 0.3) < y - 0.5;
+      }
+      // a walk across the ground clear of anything it can't step over
+      function walkClear(ax, az, bx, bz, y) {
+        if (wet(bx, bz)) return false;
+        if (!CBZ.segmentHitsCollider || !CBZ.colliderRayT2) return true;
+        return !CBZ.segmentHitsCollider(ax, az, bx, bz, 0.12, function (c) {
+          if ((c.y1 != null && c.y1 < y + 0.12) || (c.y0 != null && c.y0 > y + 0.45)) return false;
+          return CBZ.colliderRayT2(c, ax, az, bx - ax, bz - az, 0.12, 1) >= 0;
+        });
+      }
+      // who flushes crows: anyone on foot within rp (closer if they creep, further
+      // if they run), a vehicle under way within rv; a parked car is furniture
+      let plX = null, plZ = null, plSpeed = 0;
+      function threatNear(x, z, rp, rv) {
+        let best = null, bd = 1e18;
+        const Pl = CBZ.player;
+        if (Pl && Pl.pos && !Pl.dead) {
+          const car = !!(Pl.inCar || Pl.driving || Pl.vehicle);
+          const r = car ? rv : rp * (Pl.crouch || Pl.prone ? 0.7 : 1) * (plSpeed > 4.5 ? 1.3 : 1);
+          const dx = Pl.pos.x - x, dz = Pl.pos.z - z, d2 = dx * dx + dz * dz;
+          if (d2 < r * r && (!car || plSpeed > 2.5)) { bd = d2; best = Pl.pos; }
+        }
+        const peds = CBZ.cityPeds;
+        if (peds) for (let i = 0; i < peds.length; i++) {
+          const p = peds[i];
+          if (!p || p.dead || p.inCar || !p.pos) continue;
+          const dx = p.pos.x - x, dz = p.pos.z - z;
+          if (dx > rp || dx < -rp || dz > rp || dz < -rp) continue;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < rp * rp && d2 < bd) { bd = d2; best = p.pos; }
+        }
+        const cars = CBZ.cityCars;
+        if (cars) for (let i = 0; i < cars.length; i++) {
+          const c = cars[i];
+          if (!c || c.dead || !c.pos) continue;
+          const dx = c.pos.x - x, dz = c.pos.z - z;
+          if (dx > rv || dx < -rv || dz > rv || dz < -rv) continue;
+          if (Math.max(Math.abs(c.v || 0), Math.hypot(c.vx || 0, c.vz || 0)) < 2.5) continue;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < rv * rv && d2 < bd) { bd = d2; best = c.pos; }
+        }
+        return best;
+      }
+
+      // ============================================================
+      //  COMING DOWN — a patch, the lookout's post, each bird's spot and its
+      //  way in
+      // ============================================================
+      function flockCentre(fl, out) {
+        let x = 0, z = 0, n = 0;
+        for (const b of fl.birds) if (!b.falling && !b.parked) { x += b.x; z += b.z; n++; }
+        out.x = n ? x / n : fl.homeX; out.z = n ? z / n : fl.homeZ;
+        return out;
+      }
+      const _fc = { x: 0, z: 0 };
+      // a loose group's patch: ahead of the flock (or away from what put it
+      // up), inside the world people walk, clear, dry and quiet
+      function pickPatch(fl) {
+        const r = rndOf(fl), c = flockCentre(fl, _fc);
+        let live = 0;
+        for (const b of fl.birds) if (!b.falling && !b.parked) live++;
+        const R = 2.2 + 0.3 * live;                // ~1.5 m between birds
+        const away = fl.awayX != null;
+        let best = null, bs = -1e9;
+        for (let k = 0; k < 18; k++) {
+          const a = (away ? Math.atan2(c.z - fl.awayZ, c.x - fl.awayX) : fl.heading) + (r() - 0.5) * (away ? 2.0 : 3.2);
+          const d = fl.hopMin + r() * (fl.hopMax - fl.hopMin);
+          // inside the world people walk (a point past its edge comes back in)
+          const x = Math.max(pMinX + 15, Math.min(pMaxX - 15, c.x + Math.cos(a) * d));
+          const z = Math.max(pMinZ + 15, Math.min(pMaxZ - 15, c.z + Math.sin(a) * d));
+          if (fl.fromX != null && (x - fl.fromX) * (x - fl.fromX) + (z - fl.fromZ) * (z - fl.fromZ) < 40 * 40) continue;
+          if (!openGround(x, z, 2.5)) continue;
+          let ok = 0;
+          for (let j = 0; j < 6; j++) { const b = j / 6 * TAU + r(); if (openGround(x + Math.cos(b) * R, z + Math.sin(b) * R, 0.5)) ok++; }
+          if (ok < 4) continue;
+          if (threatNear(x, z, 32, 22)) continue;
+          const y = landY(x, z);
+          let s = r() * 0.8 - Math.abs(d - (fl.hopMin + fl.hopMax) / 2) / fl.hopMax;
+          if (grassAt(x, z)) s += 1.3;
+          if (onRoad(x, z)) s += 0.8;
+          if (edgeNear(x, z, y, R + 1, R + 12)) s += 0.6;
+          if (s > bs) { bs = s; best = { x: x, z: z, y: y, r: R, perch: null, look: null }; }
+        }
+        return best;
+      }
+      // the lookout's post: the top of something 1-6 m tall near the group
+      // (a post, a fence, a wall, a shelter) with nothing over it
+      function findPerch(Pt) {
+        if (!CBZ.queryCollidersInto) return null;
+        const r = Math.random;
+        const n = CBZ.queryCollidersInto(Pt.x, Pt.z, Pt.r + 12, _colQ);
+        let best = null, bs = -1e9;
+        for (let i = 0; i < n; i++) {
+          const c = _colQ[i];
+          if (c.y1 == null || c.minX == null) continue;
+          const h = c.y1 - Pt.y;
+          if (h < 0.9 || h > 6) continue;
+          // the point of its top nearest the group, a hand in from the edge
+          let px, pz;
+          if (c.yaw && c.hw != null) {
+            if (c.hw < 0.06 || c.hd < 0.06) continue;
+            const co = Math.cos(c.yaw), si = Math.sin(c.yaw), rx = Pt.x - c.cx, rz = Pt.z - c.cz;
+            const lx = Math.max(-c.hw + 0.05, Math.min(c.hw - 0.05, rx * co - rz * si));
+            const lz = Math.max(-c.hd + 0.05, Math.min(c.hd - 0.05, rx * si + rz * co));
+            px = c.cx + lx * co + lz * si; pz = c.cz - lx * si + lz * co;
+          } else {
+            if (c.maxX - c.minX < 0.12 || c.maxZ - c.minZ < 0.12) continue;
+            px = Math.max(c.minX + 0.05, Math.min(c.maxX - 0.05, Pt.x));
+            pz = Math.max(c.minZ + 0.05, Math.min(c.maxZ - 0.05, Pt.z));
+          }
+          const d = Math.hypot(px - Pt.x, pz - Pt.z);
+          if (d < Pt.r * 0.6 || d > Pt.r + 12) continue;
+          const s = -Math.abs(h - 2.5) * 0.4 - d * 0.08 + r() * 0.3;
+          if (s > bs) { bs = s; best = { x: px, y: c.y1, z: pz }; }
+        }
+        _colQ.length = 0;
+        // nothing over the post, and it really is the top there
+        if (best && CBZ.surfaceTopAt && Math.abs(CBZ.surfaceTopAt(best.x, best.z, 1e6, 0) - best.y) > 0.06) best = null;
+        return best;
+      }
+      // a bird's own spot in the patch, a crow's length or more from the others
+      function placeSpot(fl, b) {
+        const Pt = fl.patch, r = rndOf(b);
+        if (b.lookout && Pt.perch) { b.spot = { x: Pt.perch.x, y: Pt.perch.y, z: Pt.perch.z }; return; }
+        let sx = Pt.x, sz = Pt.z;
+        for (let t = 0; t < 10; t++) {
+          const a = r() * TAU, d = b.lookout ? Pt.r + 1 : Math.sqrt(r()) * Pt.r;
+          const x = Pt.x + Math.cos(a) * d, z = Pt.z + Math.sin(a) * d;
+          let ok = true;
+          for (const o of fl.birds) {
+            const s = o !== b && o.spot;
+            if (s && (s.x - x) * (s.x - x) + (s.z - z) * (s.z - z) < 1.1 * 1.1) { ok = false; break; }
+          }
+          if (ok && openGround(x, z, 0.45)) { sx = x; sz = z; break; }
+        }
+        b.spot = { x: sx, y: landY(sx, sz), z: sz };
+      }
+      const _hp = { x: 0, y: 0, z: 0 };
+      function herm(L, s, o) {
+        const s2 = s * s, s3 = s2 * s;
+        const a0 = 2 * s3 - 3 * s2 + 1, b0 = s3 - 2 * s2 + s, a1 = -2 * s3 + 3 * s2, b1 = s3 - s2;
+        o.x = a0 * L.x0 + b0 * L.mx0 + a1 * L.x1 + b1 * L.mx1;
+        o.y = a0 * L.y0 + b0 * L.my0 + a1 * L.y1 + b1 * L.my1;
+        o.z = a0 * L.z0 + b0 * L.mz0 + a1 * L.z1 + b1 * L.mz1;
+        return o;
+      }
+      // its way in: a curve from its flight onto a glide line that ends on the
+      // spot; the glide and the curve are tested against every collider and
+      // the line is swung round the compass until one is clear
+      const APPROACH_SWING = [0, 0.55, -0.55, 1.1, -1.1, 1.7, -1.7, 2.6];
+      function assignApproach(fl, b) {
+        const S = b.spot, r = rndOf(b);
+        const base = fl.apDir != null ? fl.apDir : Math.atan2(S.z - b.z, S.x - b.x);
+        for (let k = 0; k < APPROACH_SWING.length; k++) {
+          const a = base + APPROACH_SWING[k], ux = Math.cos(a), uz = Math.sin(a);
+          const D = 8 + r() * 4, H = 3 + r() * 2;
+          const ex = S.x - ux * D, ez = S.z - uz * D, ey = S.y + H;
+          // (the glide's last half metre comes down onto the spot: tested thin)
+          const gl = Math.max(0, 1 - 0.5 / Math.hypot(D, H));
+          if (!openAbove(ex, ey, ez) || !lineClear(ex, ey, ez, S.x - ux * D * (1 - gl), S.y + 0.12 + H * (1 - gl), S.z - uz * D * (1 - gl)) ||
+            !airClear(ex, ey, ez, S.x, S.y + 0.12, S.z)) continue;
+          const Lg = Math.hypot(D, H), dist = Math.hypot(ex - b.x, ey - b.y, ez - b.z);
+          const T = Math.max(1.5, Math.min(12, dist / 8.5));
+          const L = { x0: b.x, y0: b.y, z0: b.z, mx0: b.vx * T, my0: b.vy * T, mz0: b.vz * T,
+            x1: ex, y1: ey, z1: ez, mx1: ux * D / Lg * 7 * T, my1: -H / Lg * 7 * T, mz1: uz * D / Lg * 7 * T, t: 0, T: T };
+          let clear = true, px = L.x0, py = L.y0, pz = L.z0;
+          for (let i = 1; i <= 8 && clear; i++) {
+            herm(L, i / 8, _hp);
+            clear = lineClear(px, py, pz, _hp.x, _hp.y, _hp.z);
+            px = _hp.x; py = _hp.y; pz = _hp.z;
+          }
+          if (!clear) continue;
+          if (fl.apDir == null) fl.apDir = a;          // the rest of the flock comes in the same way
+          b.ap = { L: L, ex: ex, ey: ey, ez: ez, u: 0, phase: 0 };
+          b.mode = "approach";
+          return true;
+        }
+        return false;
+      }
+      function startLanding(fl, Pt) {
+        fl.mode = "landing"; fl.patch = Pt; fl.patch0 = Pt; fl.landT = 0; fl.apDir = null; fl.goX = null; fl.goZ = null;
+        fl.hopMin = 35; fl.hopMax = 140; fl.fromX = fl.fromZ = null;
+        Pt.perch = findPerch(Pt);
+        const r = rndOf(fl), live = [];
+        for (const b of fl.birds) { b.spot = null; b.lookout = false; if (!b.falling && !b.parked) live.push(b); }
+        if (!live.length) { fl.mode = "air"; fl.patch = null; return; }
+        const L = live[(r() * live.length) | 0];
+        L.lookout = true; Pt.look = L;
+        // a flock comes down in a trickle, the lookout among the first
+        for (const b of live) b.delay = b.lookout ? r() * 0.6 : 0.3 + r() * 2.6;
+      }
+      function takeOff(b, tx, tz, delay, panic) {
+        const r = rndOf(b);
+        let a = tx != null ? Math.atan2(b.z - tz, b.x - tx) + (r() - 0.5) * 1.1 : -b.yaw + (r() - 0.5) * 1.4;
+        // a clear way up: away from the threat if it can, else round to one,
+        // else straight up first
+        let up = false;
+        const kk = panic ? 1.25 : 1;
+        for (let k = 0; k < 6; k++) {
+          const aa = a + APPROACH_SWING[k] * 1.2, ca = Math.cos(aa), sa = Math.sin(aa);
+          let px = b.x, py = b.y + 0.12, pz = b.z, ok = true;
+          for (let j = 1; j <= 4 && ok; j++) {
+            // the first 1.6 s of the climb-out, as stepTakeoff flies it
+            const T = j * 0.4, d = Math.min(T + 3 * kk * T * T, 9 * kk * T), h = 3.4 * kk * T - 0.6 * T * T;
+            const qx = b.x + ca * d, qy = b.y + 0.12 + h, qz = b.z + sa * d;
+            ok = j === 1 ? airClear(px, py, pz, qx, qy, qz) : lineClear(px, py, pz, qx, qy, qz);
+            px = qx; py = qy; pz = qz;
+          }
+          if (ok) { a = aa; break; }
+          if (k === 5) up = true;
+        }
+        b.mode = "takeoff"; b.T = -(delay || 0); b.panicK = panic ? 1.25 : 1; b.up = up;
+        b.tdx = Math.cos(a); b.tdz = Math.sin(a);
+        b.spot = null; b.ap = null; b.lookout = false; b.delay = 0;
+        b.clk.phase = 0; b.clk.flapping = true; b.clk.flap = 1; b.clk.boutT = 1.5;
+      }
+      // put up: everyone bursts away from it; they come down again further on
+      function flush(fl, tx, tz, panic) {
+        const r = rndOf(fl), c = flockCentre(fl, _fc);
+        for (const b of fl.birds) {
+          if (b.falling || b.parked) continue;
+          if (b.mode === "ground" || b.mode === "lookout" || b.mode === "approach") {
+            takeOff(b, tx, tz, b.mode === "lookout" ? 0 : (panic ? r() * 0.25 : 0.12 + r() * 0.55), panic);
+          } else if (b.mode === "fly") { b.spot = null; b.lookout = false; }
+        }
+        fl.mode = "air"; fl.patch = null; fl.apDir = null;
+        fl.awayX = tx; fl.awayZ = tz;
+        const P0 = fl.patch0; fl.fromX = P0 ? P0.x : c.x; fl.fromZ = P0 ? P0.z : c.z;
+        fl.hopMin = panic ? 90 : 30; fl.hopMax = panic ? 220 : 100;
+        fl.airT = panic ? 18 + r() * 20 : 4 + r() * 5;
+        fl.hop = !panic;                                  // a low hop, not back up to the cruise
+        const a = Math.atan2(c.z - tz, c.x - tx);
+        fl.goX = c.x + Math.cos(a) * 90; fl.goZ = c.z + Math.sin(a) * 90;
+      }
+      // done with this patch: up and away of their own accord
+      function leave(fl) {
+        const r = rndOf(fl);
+        for (const b of fl.birds) {
+          if (b.falling || b.parked) continue;
+          if (b.mode === "ground" || b.mode === "lookout" || b.mode === "approach") takeOff(b, null, null, r() * 1.4, false);
+          else { b.spot = null; b.lookout = false; }
+        }
+        fl.mode = "air"; fl.patch = null; fl.apDir = null; fl.goX = null; fl.goZ = null;
+        fl.awayX = null; fl.hop = false; fl.hopMin = 35; fl.hopMax = 140;
+        if (fl.patch0) { fl.fromX = fl.patch0.x; fl.fromZ = fl.patch0.z; }
+        fl.airT = 25 + r() * 55;
+      }
+
+      // ---- each flock's mind: when to come down, what to watch, when to go
+      function flockBrain(fl, dt) {
+        if (fl.mode === "air") {
+          fl.airT -= dt;
+          if (fl.airT <= 0 && !((fl.panicT || 0) > 0)) {
+            const Pt = pickPatch(fl);
+            if (Pt) startLanding(fl, Pt);
+            else { fl.airT = 6 + rndOf(fl)() * 8; fl.hopMax = Math.min(260, fl.hopMax * 1.4); }
+            fl.awayX = fl.awayZ = null;
+          }
+          return;
+        }
+        if ((fl.panicT || 0) > 0) { flush(fl, fl.panicX, fl.panicZ, true); return; }
+        const Pt = fl.patch;
+        fl.checkT -= dt;
+        if (fl.checkT <= 0) {
+          fl.checkT = 0.25;
+          // the lookout posted sees them coming sooner
+          const watch = Pt.look && Pt.look.mode === "lookout" && !Pt.look.falling && !Pt.look.parked;
+          const t = threatNear(Pt.x, Pt.z, Pt.r + (watch ? 24 : 15), Pt.r + (watch ? 16 : 10));
+          if (t) { flush(fl, t.x, t.z, false); return; }
+        }
+        // birds still in the air: each takes its spot and its way in
+        let up = 0;
+        for (const b of fl.birds) {
+          if (b.falling || b.parked) continue;
+          if (b.mode === "approach") { up++; continue; }
+          if (b.mode !== "fly") continue;
+          up++;
+          b.delay -= dt;
+          if (b.delay > 0) continue;
+          if (!b.spot) placeSpot(fl, b);
+          if (!assignApproach(fl, b)) { b.spot = null; b.delay = 1.5 + rndOf(b)() * 2; }
+        }
+        if (fl.mode === "landing") {
+          fl.landT += dt;
+          if (!up || fl.landT > 25) { fl.mode = "ground"; fl.groundT = 40 + rndOf(fl)() * 110; }
+        } else {
+          fl.groundT -= dt;
+          if (fl.groundT <= 0) leave(fl);
+        }
+      }
+
+      // the highest solid top under a point of the sky: roofs and decks, the
+      // tops of walls, posts and trees within `pad`
+      function skyFloor(x, z, pad) {
+        if (!CBZ.surfaceTopAt) return groundY(x, z);
+        const y = CBZ.surfaceTopAt(x, z, 1e6, pad);
+        return isFinite(y) ? y : groundY(x, z);
+      }
+      // the frame's step of a body (its middle, a hand over its feet) clear of
+      // everything solid
+      function stepClear(b, x, y, z) { return airClear(b.x, b.y + 0.12, b.z, x, y + 0.12, z); }
+      // a step that would go into something solid slides along it and climbs
+      // instead (the hit's face normal is in _ray)
+      function slideUp(b, dt) {
+        const vn = b.vx * _ray.nx + b.vz * _ray.nz;
+        if (vn < 0) { b.vx -= _ray.nx * vn * 1.6; b.vz -= _ray.nz * vn * 1.6; }
+        // stands off the face by a wing's length and turns away from it
+        const so = 0.35;
+        if (_ray.hit && stepClear(b, b.x + _ray.nx * so, b.y, b.z + _ray.nz * so)) { b.x += _ray.nx * so; b.z += _ray.nz * so; }
+        if (_ray.nx || _ray.nz) { b.avX = _ray.nx; b.avZ = _ray.nz; b.avK = 1; }
+        b.vy = Math.max(b.vy, 3);
+        if (stepClear(b, b.x, b.y + b.vy * dt, b.z)) b.y += b.vy * dt;
+      }
+
       // ---- BOIDS (the classic recipe, at a crow's scale and speed) ----------
       const NEIGHBOR_R = 16, NEIGHBOR_R2 = NEIGHBOR_R * NEIGHBOR_R;
       const SEPARATE_R = 3.5, SEPARATE_R2 = SEPARATE_R * SEPARATE_R;
       const W_SEPARATE = 6, W_ALIGN = 0.6, W_COHERE = 0.12, W_HOME = 0.5;
       const MAX_SPEED = 12, MIN_SPEED = 7, PANIC_SPEED = 17;
       let detailed = true;    // shares the tree LOD's near/far read: far away, the crows stop
+      let started = false;
       let nextFlock = 0;
 
       // the steering: one flock per tick, held until its turn comes again
@@ -980,23 +1415,29 @@
           fl.driftAngle += (rng() - 0.5) * 2.4;
           fl.driftT = 3 + rng() * 5;
         }
-        const targetX = fl.homeX + Math.cos(fl.driftAngle) * fl.wanderR;
-        const targetZ = fl.homeZ + Math.sin(fl.driftAngle) * fl.wanderR;
+        // where the flying birds head: circling over the patch they are coming
+        // down on, away from what put them up, else the wandering home
+        let targetX = fl.homeX + Math.cos(fl.driftAngle) * fl.wanderR;
+        let targetZ = fl.homeZ + Math.sin(fl.driftAngle) * fl.wanderR;
+        if (fl.patch) { targetX = fl.patch.x; targetZ = fl.patch.z; }
+        else if (fl.goX != null) { targetX = fl.goX; targetZ = fl.goZ; }
         // the ground under the flock sets its height
-        let cx = 0, cz = 0, cn = 0;
-        for (let i = 0; i < n; i++) { const b = birds[i]; if (!b.falling && !b.parked) { cx += b.x; cz += b.z; cn++; } }
+        let cx = 0, cz = 0, cn = 0, hx = 0, hz = 0;
+        for (let i = 0; i < n; i++) { const b = birds[i]; if (!b.falling && !b.parked && b.mode === "fly") { cx += b.x; cz += b.z; hx += b.vx; hz += b.vz; cn++; } }
         if (cn) { const g = groundY(cx / cn, cz / cn); if (isFinite(g)) fl.gy += (g - fl.gy) * Math.min(1, dt * 0.5); }
-        const homeY = fl.gy + fl.alt;
+        if (hx || hz) fl.heading = Math.atan2(hz, hx);
+        const homeY = fl.patch ? fl.patch.y + 14 : fl.gy + (fl.hop ? 18 : fl.alt);
+        fl.tick = (fl.tick || 0) + 1;
         for (let i = 0; i < n; i++) {
           const bi = birds[i];
-          if (bi.falling || bi.parked) continue;
+          if (bi.falling || bi.parked || bi.mode !== "fly") continue;
           let sepX = 0, sepY = 0, sepZ = 0;
           let aliX = 0, aliY = 0, aliZ = 0, aliN = 0;
           let cohX = 0, cohY = 0, cohZ = 0, cohN = 0;
           for (let j = 0; j < n; j++) {
             if (j === i) continue;
             const bj = birds[j];
-            if (bj.falling || bj.parked) continue;
+            if (bj.falling || bj.parked || bj.mode !== "fly") continue;
             const dx = bj.x - bi.x, dy = bj.y - bi.y, dz = bj.z - bi.z;
             const d2 = dx * dx + dy * dy + dz * dz;
             if (d2 > NEIGHBOR_R2) continue;
@@ -1017,6 +1458,24 @@
           ax += (targetX - bi.x) * W_HOME * 0.01;
           az += (targetZ - bi.z) * W_HOME * 0.01;
           ay += (homeY - bi.y) * W_HOME * 0.04 - bi.vy * 0.3;
+          // over the town, not through it: every fourth tick a bird reads the
+          // tops of things under it and half a second and two seconds ahead;
+          // it climbs to clear what is coming, and never sinks below what is
+          // under it now
+          if (((i + fl.tick) & 3) === 0 || bi.floorY == null) {
+            bi.floorY = Math.max(skyFloor(bi.x, bi.z, 0), skyFloor(bi.x + bi.vx * 0.5, bi.z + bi.vz * 0.5, 0));
+            bi.aheadY = Math.max(bi.floorY, skyFloor(bi.x + bi.vx * 2, bi.z + bi.vz * 2, 1));
+            // the tallest thing within the reach of its next few frames
+            bi.nearY = Math.max(bi.aheadY, skyFloor(bi.x, bi.z, 7));
+            // a wall a second and a half ahead turns it away
+            if (bi.y < bi.aheadY + 3 && !airClear(bi.x, bi.y + 0.12, bi.z, bi.x + bi.vx * 1.5, bi.y + bi.vy * 1.5 + 0.12, bi.z + bi.vz * 1.5)) {
+              bi.avX = _ray.nx; bi.avZ = _ray.nz; bi.avK = 1;
+            } else bi.avK = (bi.avK || 0) * 0.5;
+          }
+          if (bi.y < bi.aheadY + 7) ay += (bi.aheadY + 7 - bi.y) * 1.4 - Math.min(0, bi.vy) * 1.5;
+          // just off the ground (a take-off, a broken-off approach) it climbs out
+          if (bi.y < fl.gy + 12) ay += (fl.gy + 12 - bi.y) * 0.8;
+          if (bi.avK > 0.05) { ax += bi.avX * 30 * bi.avK; az += bi.avZ * 30 * bi.avK; ay += 6 * bi.avK; }
           // a shot: a hard burst up and away; the boids keep it a flock bursting
           if (panicked) {
             const pdx = bi.x - fl.panicX, pdz = bi.z - fl.panicZ;
@@ -1025,6 +1484,125 @@
           }
           bi.ax = ax; bi.ay = ay; bi.az = az; bi.panic = panicked;
         }
+      }
+
+      // ---- one bird's life, every frame --------------------------------------
+      function turnTo(b, yaw, dt, rate) {
+        let d = yaw - b.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+        const m = rate * dt, k = d > m ? m : (d < -m ? -m : d);
+        b.yaw += k;
+      }
+      // a flying move: the velocity from the step, the nose along it, banked
+      // into the turn
+      function flyTo(b, x, y, z, dt) {
+        if (dt > 1e-4) { b.vx = (x - b.x) / dt; b.vy = (y - b.y) / dt; b.vz = (z - b.z) / dt; }
+        b.x = x; b.y = y; b.z = z;
+        const hs = Math.hypot(b.vx, b.vz);
+        let k = 0;
+        if (hs > 0.3) {
+          let d = Math.atan2(-b.vz, b.vx) - b.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+          const m = 5 * dt; k = d > m ? m : (d < -m ? -m : d);
+          b.yaw += k;
+        }
+        b.yawRate += ((dt > 0 ? k / dt : 0) - b.yawRate) * Math.min(1, dt * 4);
+        b.roll += (Math.max(-0.9, Math.min(0.9, -Math.atan(hs * b.yawRate / 9.81))) - b.roll) * Math.min(1, dt * 4);
+        return hs;
+      }
+      function stepApproach(fl, b, dt) {
+        const A = b.ap, P = b.P;
+        if (A.phase === 0) {
+          // the run-in: the curve from its flight onto the glide line
+          A.L.t += dt;
+          const s = Math.min(1, A.L.t / A.L.T);
+          herm(A.L, s, _hp);
+          if (!stepClear(b, _hp.x, _hp.y, _hp.z)) { b.mode = "fly"; b.ap = null; b.spot = null; b.delay = 1.5; slideUp(b, dt); return; }
+          const hs = flyTo(b, _hp.x, _hp.y, _hp.z, dt);
+          b.pitch += (Math.atan2(b.vy, Math.max(1, hs)) * 0.7 - b.pitch) * Math.min(1, dt * 4);
+          BK.clock("crow", b.clk, dt, { climb: b.vy / Math.max(1, hs), slow: hs < 7, rnd: rndOf(b) });
+          BK.params("crow", "flap", b.clk.phase, P); P.flap = b.clk.flap;
+          if (s >= 1) { A.phase = 1; A.u = 0; }
+          return;
+        }
+        // the glide down the checked line, slowing into the flare
+        const S = b.spot, gx = S.x - A.ex, gy = S.y - A.ey, gz = S.z - A.ez, Lg = Math.hypot(gx, gy, gz) || 1;
+        const u1 = Math.min(1, A.u + (7 - 5.8 * A.u) * dt / Lg);
+        if (!stepClear(b, A.ex + gx * u1, A.ey + gy * u1, A.ez + gz * u1)) { b.mode = "fly"; b.ap = null; b.spot = null; b.delay = 1.5; slideUp(b, dt); return; }
+        A.u = u1;
+        const hs = flyTo(b, A.ex + gx * A.u, A.ey + gy * A.u, A.ez + gz * A.u, dt);
+        if ((1 - A.u) * Lg < 2.2) {
+          // the flare: wings up and forward, tail fanned and down, legs out, braking beats
+          b.clk.phase += dt * 4.6;
+          BK.params("crow", "land", b.clk.phase, P);
+          b.pitch += (0.55 - b.pitch) * Math.min(1, dt * 6);
+        } else {
+          BK.params("crow", "glide", 0, P);
+          b.pitch += (Math.atan2(b.vy, Math.max(1, hs)) * 0.6 + 0.1 - b.pitch) * Math.min(1, dt * 4);
+        }
+        if (A.u >= 1) {
+          b.mode = b.lookout ? "lookout" : "ground";
+          b.x = S.x; b.y = S.y; b.z = S.z; b.vx = b.vy = b.vz = 0;
+          b.pitch = 0; b.roll = 0; b.yawRate = 0; b.ap = null;
+          b.settle = 0.35;                                  // the wings fold over a third of a second
+          b.tx = b.x; b.tz = b.z; b.wait = 0.4 + rndOf(b)() * 1.5; b.gsx = b.x; b.gsz = b.z;
+        }
+      }
+      const _gpo = { graze: false, flee: false, alert: false, atk: 0, rnd: null };
+      function stepGround(fl, b, dt) {
+        const P = b.P, Pt = fl.patch, r = rndOf(b);
+        b.roll = 0; b.pitch = 0;
+        let d = 0;
+        if (b.mode === "lookout") {
+          // on watch: facing out from the group
+          if (Pt) turnTo(b, Math.atan2(-(b.z - Pt.z), b.x - Pt.x), dt, 3);
+        } else {
+          const dx = b.tx - b.x, dz = b.tz - b.z, dd = Math.hypot(dx, dz);
+          if (b.walking && dd < 0.08) { b.walking = false; b.wait = 1 + r() * 4; }
+          if (b.wait > 0 || dd < 0.08) {
+            // foraging where it stands: pecks and looks
+            b.wait -= dt;
+            if (b.wait <= 0 && Pt) {
+              b.wait = 0.8 + r() * 2.5;                     // (kept if nowhere to go)
+              for (let k = 0; k < 4; k++) {
+                const a = r() * TAU, dist = 0.4 + r() * 1.6;
+                let tx = b.x + Math.cos(a) * dist, tz = b.z + Math.sin(a) * dist;
+                const ox = tx - Pt.x, oz = tz - Pt.z, od = Math.hypot(ox, oz);
+                if (od > Pt.r) { tx = Pt.x + ox / od * Pt.r * 0.9; tz = Pt.z + oz / od * Pt.r * 0.9; }
+                if (walkClear(b.x, b.z, tx, tz, b.y)) { b.tx = tx; b.tz = tz; b.wait = 0; b.walking = true; break; }
+              }
+            }
+          } else {
+            turnTo(b, Math.atan2(-dz, dx), dt, 5);
+            const fx = Math.cos(b.yaw), fz = -Math.sin(b.yaw);
+            const v = 0.55 * Math.max(0, (fx * dx + fz * dz) / dd);
+            d = Math.min(dd, v * dt);
+            b.x += fx * d; b.z += fz * d;
+            // the ground under it, sampled as it goes
+            if (Math.abs(b.x - b.gsx) + Math.abs(b.z - b.gsz) > 0.3) { b.y = landY(b.x, b.z); b.gsx = b.x; b.gsz = b.z; }
+          }
+        }
+        BK.params("crow", "perch", 0, P);
+        _gpo.graze = b.mode === "ground"; _gpo.alert = b.mode === "lookout"; _gpo.rnd = r;
+        BK.groundPose("crow", b.gst, d / b.sc, dt, _gpo, P);
+        if (b.settle > 0) { b.settle -= dt; P.fold = Math.min(P.fold, 1 - Math.max(0, b.settle) / 0.35); }
+      }
+      function stepTakeoff(fl, b, dt) {
+        const P = b.P;
+        b.T += dt;
+        if (b.T < 0) {
+          // the instant before: head up
+          BK.params("crow", "perch", 0, P); P.pitch = -0.2;
+          return;
+        }
+        const k = b.panicK || 1;
+        const sp = b.up && b.T < 0.7 ? 0.4 : Math.min(9 * k, 1 + 6 * b.T * k), vy = Math.max(1.2, 3.4 * k - 1.2 * b.T);
+        const nx = b.x + b.tdx * sp * dt, ny = b.y + vy * dt, nz = b.z + b.tdz * sp * dt;
+        if (stepClear(b, nx, ny, nz)) flyTo(b, nx, ny, nz, dt);
+        else { b.vx = b.tdx * sp; b.vz = b.tdz * sp; b.vy = vy; slideUp(b, dt); const h = Math.hypot(b.vx, b.vz); if (h > 0.2) { b.tdx = b.vx / h; b.tdz = b.vz / h; } }
+        b.clk.phase += dt * 5 * k;
+        BK.params("crow", "flap", b.clk.phase, P); P.flap = 1;
+        P.legs = Math.max(0, 1 - b.T / 0.5);                 // the legs trail, then tuck
+        b.pitch += (0.35 - b.pitch) * Math.min(1, dt * 5);
+        if (b.T > 1.6) { b.mode = "fly"; b.clk.boutT = 0.6; }
       }
       // the flight, every frame
       function flyFlock(fl, dt, cam) {
@@ -1043,6 +1621,7 @@
               const h2 = Math.random() * Math.PI * 2;
               bi.vx = Math.cos(h2) * 9; bi.vz = Math.sin(h2) * 9; bi.vy = 0; bi.ax = bi.ay = bi.az = 0;
               bi.roll = 0; bi.pitch = 0;
+              bi.mode = "fly"; bi.spot = null; bi.ap = null; bi.delay = 0; bi.lookout = false;
             }
           } else if (bi.falling) {
             // shot: it falls against the air (terminal ~11 m/s), tumbling, the
@@ -1051,19 +1630,26 @@
             bi.vx *= Math.max(0, 1 - dt * 0.6); bi.vz *= Math.max(0, 1 - dt * 0.6);
             bi.x += bi.vx * dt; bi.y += bi.vy * dt; bi.z += bi.vz * dt;
             bi.roll += (bi.spin || 7) * dt; bi.pitch += (bi.spin || 7) * 0.6 * dt;
-            const gy = groundY(bi.x, bi.z) || 0;
+            const gy = landY(bi.x, bi.z);
             if (bi.y <= gy + 0.03) {
               bi.y = gy; bi.falling = false; bi.parked = true;
               bi.roll = bi.spin > 0 ? 1.45 : -1.45; bi.pitch = 0;
               bi.respawnT = 40 + Math.random() * 40;
             }
-          } else {
+          } else if (bi.mode === "approach") stepApproach(fl, bi, dt);
+          else if (bi.mode === "ground" || bi.mode === "lookout") stepGround(fl, bi, dt);
+          else if (bi.mode === "takeoff") stepTakeoff(fl, bi, dt);
+          else {
             bi.vx += bi.ax * dt; bi.vy += bi.ay * dt; bi.vz += bi.az * dt;
             const maxSp = bi.panic ? PANIC_SPEED : MAX_SPEED;
             const sp = Math.hypot(bi.vx, bi.vy, bi.vz) || 0.0001;
             const k = (sp > maxSp ? maxSp : (sp < MIN_SPEED ? MIN_SPEED : sp)) / sp;
             bi.vx *= k; bi.vy *= k; bi.vz *= k;
-            bi.x += bi.vx * dt; bi.y += bi.vy * dt; bi.z += bi.vz * dt;
+            const nx = bi.x + bi.vx * dt, ny = bi.y + bi.vy * dt, nz = bi.z + bi.vz * dt;
+            // low among things, each step is checked: a wall is slid along, never crossed
+            if ((bi.nearY == null || bi.y < bi.nearY + 2 || bi.y < fl.gy + 12) && !stepClear(bi, nx, ny, nz)) slideUp(bi, dt);
+            else { bi.x = nx; bi.y = ny; bi.z = nz; }
+            if (bi.floorY != null && bi.y < bi.floorY + 1.5) { bi.y = bi.floorY + 1.5; if (bi.vy < 0) bi.vy = 0; }
             // nose along the flight; bank into the turn, pitch into the climb
             const hs = Math.hypot(bi.vx, bi.vz) || 0.0001;
             let d = Math.atan2(-bi.vz, bi.vx) - bi.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
@@ -1072,19 +1658,20 @@
             bi.roll += (Math.max(-1, Math.min(1, -Math.atan(hs * bi.yawRate / 9.81))) - bi.roll) * Math.min(1, dt * 5);
             bi.pitch += (Math.atan2(bi.vy, hs) * 0.8 - bi.pitch) * Math.min(1, dt * 5);
             BK.clock("crow", bi.clk, dt, { climb: bi.vy / hs, slow: hs < 8, panic: bi.panic, rnd: rndOf(bi) });
+            BK.params("crow", "flap", bi.clk.phase, bi.P); bi.P.flap = bi.clk.flap;
           }
-          if (bi.rec) {                                   // keep the hit target on the bird
+          const onGround = !bi.falling && (bi.parked || bi.mode === "ground" || bi.mode === "lookout");
+          if (bi.rec) {                                   // keep the hit target on the bird's body
             bi.rec.pos.x = bi.x; bi.rec.pos.y = bi.y; bi.rec.pos.z = bi.z;
             const rp = bi.rec.group.position;
-            rp.x = bi.x; rp.y = bi.y - 1.0; rp.z = bi.z;
+            rp.x = bi.x; rp.y = bi.y + (onGround ? 0.12 : 0) - 1.0; rp.z = bi.z;
+            if (!bi.rec.dead) bi.rec.state = onGround ? "graze" : (bi.mode === "takeoff" ? "flee" : "fly");
           }
-          // the pose: flying, tumbling, or dead on the ground
+          // the pose: flying, coming down, on the ground (written above), or dead
           const P = bi.P;
           if (bi.falling || bi.parked) {
             BK.params("crow", "glide", 0, P);
             P.fold = bi.parked ? 0.55 : 0.3; P.legs = 1; P.pitch = 0.4; P.head = bi.parked ? 0.9 : 0.4;
-          } else {
-            BK.params("crow", "flap", bi.clk.phase, P); P.flap = bi.clk.flap;
           }
           _ce.set(bi.roll, bi.yaw, bi.pitch, "YZX"); _cq.setFromEuler(_ce);
           _cs.setScalar(bi.sc);
@@ -1106,15 +1693,26 @@
           const LOD_FAR = fieldR + RING * 0.65, LOD_NEAR = fieldR + RING * 0.45;
           if (detailed && d > LOD_FAR) { detailed = false; setBirdRecsVisible(false); kit.begin(); kit.end(); }
           else if (!detailed && d < LOD_NEAR) { detailed = true; setBirdRecsVisible(true); }
+          // the player's pace (a runner puts crows up sooner); a jump of more
+          // than 5 m in a frame is a teleport, not a run
+          if (plX != null) {
+            const m = Math.hypot(P.pos.x - plX, P.pos.z - plZ);
+            if (m < 5) plSpeed += (m / dt - plSpeed) * Math.min(1, dt * 4);
+          }
+          plX = P.pos.x; plZ = P.pos.z;
         }
         if (!detailed) return;
+        if (!started) { started = true; for (let f = 0; f < flocks.length; f++) steerFlock(flocks[f], dt); }
         steerFlock(flocks[nextFlock], dt * flocks.length);
         nextFlock = (nextFlock + 1) % flocks.length;
+        for (let f = 0; f < flocks.length; f++) flockBrain(flocks[f], dt);
         const cam = CBZ.camera && CBZ.camera.position;
         kit.begin();
         for (let f = 0; f < flocks.length; f++) flyFlock(flocks[f], dt, cam);
         kit.end();
       });
+      // for tools and tests: the flocks and their minds
+      CBZ.wildCrows = { flocks: flocks, pickPatch: pickPatch, startLanding: startLanding, flush: flush, leave: leave };
     })();
 
     return {
