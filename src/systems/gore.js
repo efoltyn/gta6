@@ -283,9 +283,8 @@
          graded into raspberry: fresh blood keeps green and blue at a few % of
          red (hue 0-2 deg, pure red), dried blood lets a little more green
          than blue through (hue 5-8 deg, dark red-brown);
-       * fresh blood carries a GLINT: a thin wet line off the meniscus at the
-         pool's edge where the blood darkens the floor less, gone once it
-         dries. Never brighter than the floor: the filter never goes above 1.
+       * the 2x headroom is what lets fresh blood carry a GLINT: a thin wet
+         highlight off the meniscus at the pool's edge, gone once it dries.
      Every shape is a noise-edged field in the atlas and the edge is a hard
      threshold on it, so there is no feathered rim to go pink. A pool GROWS
      by lowering that threshold (the edge advances into the lowest ground
@@ -557,26 +556,15 @@
     "    float mb = (1.0 - depth) * (1.0 - depth) * 26.0 + 3.0;",
     "    vec3 N = normalize(N0 - (vTx * gx + vTy * gy) * mb);",
     "    vec3 L = normalize(vec3(0.3, 1.0, 0.22));",
-    // a GLINT is crisp — on or off, a few texels wide — and it lives on the
-    // meniscus, where the surface really tilts: on a pool's flat middle the
-    // highlight was the same for every texel, so a pool seen from the mirror
-    // angle lit up whole.
+    // a GLINT is crisp — on or off, a few texels wide. A soft half-strength
+    // white over red is exactly pink, so there is no soft half-strength.
     "    float spec = smoothstep(0.35, 0.6, pow(max(dot(N, normalize(L + V)), 0.0), 40.0));",
-    "    spec *= 1.0 - smoothstep(0.08, 0.4, depth);",
     "    float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);",
-    /* A STAIN ONLY TAKES LIGHT AWAY. The sheen used to pull the filter toward
-       (1.25, 1.22, 1.2), i.e. ABOVE 1: the 2x multiply then lifted the
-       floor's red by up to 15% wherever it was on, and a fresh pool seen from
-       the mirror angle of its light had it on over most of its area: a pale
-       red-white patch brighter than the sand it lay on. Now the sheen is the
-       blood darkening the floor LESS (at most letting it through), never more
-       light than the floor had. */
-    "    F = mix(F, vec3(1.0), clamp(wet * (spec * 0.8 + fres * 0.2), 0.0, 0.8));",
+    "    F = mix(F, vec3(1.25, 1.22, 1.2), clamp(wet * (spec * 0.8 + fres * 0.2), 0.0, 0.8));",
     "  }",
     "  vec3 k = vec3(1.0 + (F.r - 1.0) * c, vec2(1.0) + (F.gb - vec2(1.0)) * pow(c, 0.3));",
-    // 2x multiply: blend is src*dst + dst*src, so 0.5 = leave the floor alone,
-    // and nothing above 0.5 is ever written: the floor is the brightest a stain gets
-    "  gl_FragColor = vec4(clamp(k * 0.5, 0.0, 0.5), 1.0);",
+    // 2x multiply: blend is src*dst + dst*src, so 0.5 = leave the floor alone
+    "  gl_FragColor = vec4(clamp(k * 0.5, 0.0, 1.0), 1.0);",
     "}",
   ].join("\n");
 
@@ -901,28 +889,29 @@
        • ALPHA: stepped 0.5 -> 0.3 -> 0.12 -> gone. Popped in at full strength,
          popped out at the end, never actually faded.
 
-     What real blood in the sea does, and what this now does:
-       • it is DARK and translucent — a murky maroon, never a saturated red.
-         Fresh 0x220505 renders #6A161B; it DIMS (never shifts hue — the owner
-         banned brown/olive/green blood on 2026-08-30, and absorption only ever
-         takes light away) toward 0x0a0202 (#280708, near black) a few metres
-         down, where red light is gone.
-       • it BLOOMS from the wound: born small and transparent, it opens up and
-         fades in over a quarter second instead of arriving at full size.
-       • it DIFFUSES: radius goes as sqrt(age) to a hard ceiling (a bite wisp
-         tops out near a metre, a kill plume at ~4 m), while its alpha thins
-         and fades smoothly to zero. Nothing pops.
-       • it TRAILS: a bleeding body lays one small puff every ~0.18 s where it
-         IS, so a swimming wound leaves a ribbon behind it that drifts with the
-         current and dissolves — not a pulse of clouds every third of a second.
-       • at the surface it is a thin dark STAIN (goreSlick), not a cloud.
-       • it gets out of the lens: a plume fades out as the camera enters it,
-         so a kill in front of a chase camera never becomes a red screen.
+     What real blood in the sea does, and what this now does (the numbers
+     are in THE CLOUD IS A LEDGER, below):
+       • it is DARK: a deep red where it is dense, a murk where it is thin;
+         it DIMS toward near black a few metres down, where red light is gone
+         (never brown, olive or green: the owner banned those on 2026-08-30).
+       • it BILLOWS from the wound: born small, it opens up in its first
+         second and fades in over a quarter second instead of arriving whole.
+       • it DIFFUSES for tens of seconds: its radius grows and the blood in it
+         spreads thinner, so it fades because it grows. Nothing pops.
+       • it TRAILS: a bleeding body (and the jaws that bit it) lays its flow
+         where it IS, so a swimming wound leaves a ribbon behind it, dark at
+         the wound, that widens, drifts with the current and dissolves.
+       • at the surface heavy bleeding leaves a dark STAIN (goreSlick).
+       • a lens inside it sees murk, not a red screen: a puff thins to a
+         third as the camera enters it, and the whole cloud may filter at
+         most 85% of the view.
 
-     COST: ONE instanced draw call for every puff in the world (was one sprite
-     draw per puff), fixed-size typed arrays allocated once, a hard cap that
-     recycles the most-spent puff instead of refusing the fresh one. Fog-correct
-     (the underwater column fogs it like everything else).
+     COST: TWO instanced draw calls for every puff in the world, the filter and
+     the scatter over one shared geometry (it was one sprite draw per puff),
+     fixed-size typed arrays allocated once, a hard cap (180-440 by quality)
+     that recycles the most-spent puff instead of refusing the fresh one, a
+     bleeder still inside its own young puff feeding it rather than adding
+     one. Fog-correct (the underwater column fogs it like everything else).
      ============================================================ */
   /* COLOUR IS AUTHORED AS THE PIXEL, NOT AS A LIGHT VALUE. The in-game
      chain is not plain ACES: core/renderer.js runs a CustomToneMapping with a
@@ -934,17 +923,16 @@
      sRGB hexes that land on screen (converted to linear once, because the
      output encoding still applies). Fog then mixes toward the scene's own
      already-graded fog colour, so distance and the water column still eat it. */
-  /* BLOOD IN WATER ABSORBS; IT DOES NOT GLOW. Haemoglobin takes the blue
-     and the green out of the light that passes through it, and a cloud of it
-     is a FILTER on the water behind it: dark, murky, red-brown near the top,
-     near black a few metres down where the red has already gone. Drawn as a
-     translucent red PAINT over blue water it averaged to pink and mauve (the
-     owner's "water turns pink"). So the plume and the film are multiplied
-     onto what is behind them: the colours below are what a full-strength
-     cloud lets through (display sRGB), raised to the cloud's density, so a
-     faint wisp is a slight darkening and nothing can ever brighten or pink
-     the sea. */
-  const PLUME_FRESH = 0x8c3a33, PLUME_DEEP = 0x4a4444;   // display sRGB transmittance
+  /* BLOOD IN WATER ABSORBS FIRST. Haemoglobin takes the blue and the green
+     out of the light that passes through it, and a cloud of it is a FILTER
+     on the water behind it: dark, murky, red-brown near the top, near black a
+     few metres down where the red has already gone. Drawn as a translucent
+     red PAINT over blue water it averaged to pink and mauve (the owner's
+     "water turns pink"). So the cloud and the film are multiplied onto what
+     is behind them, and nothing they filter can brighten or pink the sea;
+     the cloud adds only its own dark red, max-blended, where it is dense and
+     lit (see THE CLOUD IS A LEDGER below). The film's colour is the hex here,
+     what a full film lets through (display sRGB), raised to its density. */
   const SLICK_COL = 0x9e4f45;                             // display sRGB transmittance
   /* ...BUT ONLY WHERE IT IS THICK. A little blood in clear water is a faint,
      nearly neutral brown-grey haze: spread thin, the cloud's own turbidity
@@ -952,10 +940,11 @@
      is dense, does it read red. Filtered red at every density, the thin edge
      of a patch (most of its area) took a third of the green and blue out of
      whatever was under it: over bright sand in the clear shallows, salmon
-     pink. So the filter is this grey at the thin end, and the red comes in as
-     the density goes from 0.35 to 0.9. */
-  const PLUME_GREY = 0xdcd2c8, SLICK_GREY = 0xcabaab;     // display sRGB transmittance, the thin end
-  // the one filter both draw with: grey to red by density d, raised to d * k
+     pink. So the film's filter is this grey at the thin end, and the red
+     comes in as the density goes from 0.35 to 0.9 (the cloud's own filter
+     does the same by its optical depth). */
+  const SLICK_GREY = 0xcabaab;                            // display sRGB transmittance, the thin end
+  // the film's filter: grey to red by density d, raised to d * k
   const BLOOD_FILTER_GLSL = [
     "vec3 cbzBloodFilter(vec3 grey, vec3 red, float d, float k) {",
     "  vec3 c = mix(grey, red, smoothstep(0.35, 0.9, d));",
@@ -963,51 +952,192 @@
     "}",
   ].join("\n");
   function displayColor(hex) { return new THREE.Color(hex).convertSRGBToLinear(); }
-  const PLUME_DARK_DEPTH = 6.5;         // metres under the swell to reach PLUME_DEEP
+  const PLUME_DARK_DEPTH = 6.5;         // metres under the swell where the cloud has gone dark neutral
   const PUFF_VIS = 0.4, LID_GAP = 0.18; // drawn rim as a fraction of the quad; lid clearance
-  const PUFF_MAX = 256;                 // hard allocation; the live cap is puffCap()
-  function puffCap() { return CBZ.qScale ? CBZ.qScale(70, 160) : 110; }
+  const PUFF_MAX = 512;                 // hard allocation; the live cap is puffCap()
+  function puffCap() { return CBZ.qScale ? CBZ.qScale(180, 440) : 300; }
 
-  // a soft, lumpy, gaussian-ish blot — NOT bloodTexture(), whose core is 95%
-  // solid out to half its radius: that is a disc, and a disc reads as a ball.
-  let murkTex = null;
-  function murkTexture() {
-    if (murkTex) return murkTex;
-    const c = document.createElement("canvas"); c.width = c.height = 64;
+  /* ============================================================
+     THE CLOUD IS A LEDGER OF BLOOD (owner, 2026-11-22: "attack in water ...
+     aka cloud in water").
+     ------------------------------------------------------------
+     It was a set of authored wisps: a bite a puff or two a metre across for
+     two or three seconds, a kill a 4 m plume gone in nine, and the whole
+     plume capped at 45% of the view. Attack footage is the other thing: a
+     big, dark, deep red cloud billowing out of the wound, trailing behind
+     the victim and the animal that has it, hanging in the water and
+     thinning over tens of seconds. So every puff now carries the BLOOD in
+     it, in litres, and how dark it is follows from that blood spread
+     through the water it has taken in:
+       • haemoglobin takes green light out of whole blood at ~26,500 /m, so
+         a sphere of radius r holding L litres is, through its middle, a
+         green optical depth of 12.65 L / r^2; blue goes about as fast, red
+         hardly at all. 0.1 L in a metre-wide ball is opaque: dark red. The
+         same 0.1 L three metres across is a faint stain.
+       • a puff BILLOWS open off the wound (the jet's own turbulence: most of
+         a metre in its first second), then spreads by eddy diffusion (r
+         grows as sqrt(4 K t), K a few hundredths of m^2/s in the surface
+         layer), and the water slowly takes its blood below seeing (L decays
+         over a couple of minutes). It thins because it grows: nothing is
+         told to fade until the very end of its life.
+       • the flow is a real one: a femoral or carotid artery opened by a bite
+         pours ~1.5 L a minute (0.025 L/s) and falls away as the pressure
+         goes; a bite's first gush is 0.1-0.3 L; a body a shark tears apart
+         puts 1-3 L in the water in its first seconds.
+     What it looks like follows. From under the water a dense cloud is a red
+     filter over the bright surface and its own dark red where the light
+     reaches it; from above, a dark red mass in the water; at depth near
+     black, because the red light is gone a few metres down (never green,
+     never pink: the thin edge is a neutral murk). Two passes, both one
+     instanced draw: the FILTER (multiply: what the blood takes out of the
+     light behind it) and the blood's own SCATTER (max: the dark red a lit
+     cloud sends back), so it reads red against blue water too, where a
+     filter alone would be black. */
+  const TAU_PER_L = 12.65;              // green optical depth through a sphere's middle: per litre, per m^2 of radius^2
+  /* WHAT THE CLOUD LETS THROUGH, per channel, at green optical depth tau:
+     the blood's own filter where it is thick (red passes, haemoglobin takes
+     green and takes blue a little harder, so the bright surface behind it
+     goes orange-brown to red, never pink, and blue water goes dark, never
+     green, once its own red is there), a neutral murk where it is thin (a
+     faint edge over bright sand is a shadow), and deep down a dark neutral,
+     the red light having gone. Measured, per density and background, in the
+     probe that chose 1.45 for blue: no pink from below, no green sideways,
+     no mauve over blue. */
+  const CLOUD_FILTER_GLSL = [
+    "vec3 cbzCloudFilter(float tau, float dark) {",
+    "  vec3 thin = exp(-tau * vec3(0.38, 0.42, 0.44));",
+    "  vec3 thick = exp(-tau * mix(vec3(0.12, 1.0, 1.45), vec3(0.9, 1.0, 1.05), dark));",
+    "  return mix(thin, thick, smoothstep(0.3, 1.2, tau));",
+    "}",
+  ].join("\n");
+  const L_TAU = 140;                    // s: the water taking a cloud's blood below seeing
+  const CHUM_LPS = 0.025;               // L/s at chum rate 1: a femoral or carotid artery opened (1.5 L/min)
+  const SCAT_COL = 0x5a0f0c;            // display sRGB: a dense cloud's own red, lit near the top
+  const LENS_FLOOR = 0.35;              // a cloud the lens is inside still filters this much of itself
+
+  // FOUR BILLOWS, NOT ONE BLOT: a 2x2 atlas of lumpy clusters of soft lobes
+  // round a dense middle, so the puffs of one cloud overlap into a lobed
+  // mass instead of a pile of identical discs
+  let cloudTex = null;
+  function cloudTexture() {
+    if (cloudTex) return cloudTex;
+    const N = 128, C = 64;
+    const c = document.createElement("canvas"); c.width = c.height = N;
     const g = c.getContext("2d");
+    let sd = 977;
+    const rnd = function () { sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0; return sd / 4294967296; };
     const lump = function (x, y, r, a) {
       const gr = g.createRadialGradient(x, y, 0, x, y, r);
       gr.addColorStop(0, "rgba(255,255,255," + a + ")");
-      gr.addColorStop(0.45, "rgba(255,255,255," + (a * 0.5) + ")");
+      gr.addColorStop(0.5, "rgba(255,255,255," + (a * 0.55) + ")");
       gr.addColorStop(1, "rgba(255,255,255,0)");
       g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.fill();
     };
-    lump(32, 32, 26, 0.85);
-    for (let i = 0; i < 9; i++) {
-      const a = i * 2.39996, r = 6 + (i % 3) * 5;
-      lump(32 + Math.cos(a) * r, 32 + Math.sin(a) * r, 9 + (i % 4) * 3, 0.22 + (i % 2) * 0.12);
+    for (let k = 0; k < 4; k++) {
+      const ox = (k & 1) * C, oy = (k >> 1) * C, cx = ox + C * 0.5, cy = oy + C * 0.5;
+      g.save(); g.beginPath(); g.rect(ox + 1, oy + 1, C - 2, C - 2); g.clip();
+      lump(cx, cy, C * 0.34, 0.6);
+      const n = 11 + k * 2;
+      for (let i = 0; i < n; i++) {
+        const a = rnd() * 6.2832, d = Math.sqrt(rnd()) * C * 0.25, r = C * (0.09 + rnd() * 0.12);
+        lump(cx + Math.cos(a) * d, cy + Math.sin(a) * d, r, 0.18 + rnd() * 0.22);
+      }
+      g.restore();
     }
-    murkTex = new THREE.CanvasTexture(c);
-    murkTex.wrapS = murkTex.wrapT = THREE.ClampToEdgeWrapping;
-    return murkTex;
+    cloudTex = new THREE.CanvasTexture(c);
+    cloudTex.wrapS = cloudTex.wrapT = THREE.ClampToEdgeWrapping;
+    return cloudTex;
   }
 
   // ---- state: parallel typed arrays, swap-remove, never reallocated ----------
   const P_X = new Float32Array(PUFF_MAX), P_Y = new Float32Array(PUFF_MAX), P_Z = new Float32Array(PUFF_MAX);
   const P_VX = new Float32Array(PUFF_MAX), P_VY = new Float32Array(PUFF_MAX), P_VZ = new Float32Array(PUFF_MAX);
   const P_T = new Float32Array(PUFF_MAX), P_LIFE = new Float32Array(PUFF_MAX), P_IN = new Float32Array(PUFF_MAX);
-  const P_S0 = new Float32Array(PUFF_MAX), P_S1 = new Float32Array(PUFF_MAX), P_A = new Float32Array(PUFF_MAX);
+  const P_R0 = new Float32Array(PUFF_MAX), P_RB = new Float32Array(PUFF_MAX), P_K = new Float32Array(PUFF_MAX), P_L = new Float32Array(PUFF_MAX);
   const P_DRAG = new Float32Array(PUFF_MAX), P_RISE = new Float32Array(PUFF_MAX);
   const P_PH = new Float32Array(PUFF_MAX), P_PH2 = new Float32Array(PUFF_MAX), P_FQ = new Float32Array(PUFF_MAX), P_WOB = new Float32Array(PUFF_MAX);
   const P_ROT = new Float32Array(PUFF_MAX), P_SPIN = new Float32Array(PUFF_MAX);
   const P_CX = new Float32Array(PUFF_MAX), P_CZ = new Float32Array(PUFF_MAX), P_CT = new Float32Array(PUFF_MAX);
-  const P_SY = new Float32Array(PUFF_MAX), P_SURF = new Uint8Array(PUFF_MAX);
+  const P_SY = new Float32Array(PUFF_MAX), P_SURF = new Uint8Array(PUFF_MAX), P_SH = new Uint8Array(PUFF_MAX), P_ID = new Uint32Array(PUFF_MAX);
   const puffs = { length: 0 };          // goreAudit / clearGore read .length
-  const PUFF_FIELDS = [P_X, P_Y, P_Z, P_VX, P_VY, P_VZ, P_T, P_LIFE, P_IN, P_S0, P_S1, P_A, P_DRAG, P_RISE,
-    P_PH, P_PH2, P_FQ, P_WOB, P_ROT, P_SPIN, P_CX, P_CZ, P_CT, P_SY, P_SURF];
+  const PUFF_FIELDS = [P_X, P_Y, P_Z, P_VX, P_VY, P_VZ, P_T, P_LIFE, P_IN, P_R0, P_RB, P_K, P_L, P_DRAG, P_RISE,
+    P_PH, P_PH2, P_FQ, P_WOB, P_ROT, P_SPIN, P_CX, P_CZ, P_CT, P_SY, P_SURF, P_SH, P_ID];
+  let puffSeq = 0;
+  // a puff's radius at age t: the billow off the wound, then eddy diffusion
+  function puffR(i, t) { return P_R0[i] + P_RB[i] * (1 - Math.exp(-t / 0.9)) + Math.sqrt(4 * P_K[i] * t); }
+  // the blood still in it
+  function puffL(i, t) { return P_L[i] * Math.exp(-t / L_TAU); }
+  function puffIndex(id) { if (!id) return -1; for (let k = puffs.length - 1; k >= 0; k--) if (P_ID[k] === id) return k; return -1; }
+  // the live cloud, for a probe: where each puff is, its radius, the blood in
+  // it, the optical depth through its middle and how dark its depth makes it
+  CBZ._gorePlumeState = function () {
+    const out = [];
+    for (let i = 0; i < puffs.length; i++) {
+      const t = P_T[i], f = t / P_LIFE[i], r = puffR(i, t), L = puffL(i, t);
+      const fin = t < P_IN[i] ? t / P_IN[i] : 1;
+      const depth = P_SY[i] - P_Y[i];
+      let dark = depth > 0 ? depth / PLUME_DARK_DEPTH : 0; dark = Math.min(1, dark * 0.85 + f * 0.2);
+      out.push({ x: P_X[i], y: P_Y[i], z: P_Z[i], r: r, L: L, tau: TAU_PER_L * L / (r * r) * fin * (f > 0.75 ? 1 - (f - 0.75) / 0.25 : 1), dark: dark, t: t });
+    }
+    return out;
+  };
 
   // ---- the one draw call ------------------------------------------------------
-  let plumeMesh = null, plumeGeo = null, aPos = null, aMisc = null;
+  let plumeMesh = null, scatMesh = null, plumeGeo = null, aPos = null, aMisc = null;
+  const PLUME_VS = [
+    "attribute vec4 iPos;",   // xyz centre, w = quad size (m)
+    "attribute vec4 iMisc;",  // x green optical depth through the middle, y darkness 0..1, z rotation, w billow cell 0..3
+    "uniform float uAbove; uniform float uSeaY;",
+    "varying vec2 vUv; varying float vA; varying float vDark; varying float vLit; varying float vLid;",
+    "#include <fog_pars_vertex>",
+    "void main() {",
+    "  vUv = vec2(mod(iMisc.w, 2.0), floor(iMisc.w * 0.5 + 0.01)) * 0.5 + (uv * 0.96 + 0.02) * 0.5;",
+    "  vec4 mvPosition = modelViewMatrix * vec4(iPos.xyz, 1.0);",
+    "  float vz = -mvPosition.z;",
+    "  float w = iPos.w, veil = 1.0;",
+    /* SEEN FROM ABOVE THE SEA. The sea writes depth at the surface and
+       veils what is under it by the column to the SEABED (it reads the
+       opaque depth, and a transparent plume has none), so a plume under
+       it drew either nothing or a ghost. From above, the puff is slid
+       along its own view ray up to where that ray meets the surface and
+       shrunk by the same factor: identical on screen, but now in front
+       of the sea's depth. Its own depth becomes the veil instead, and a
+       grazing look at the sea is the sea's own mirror: a cloud under it
+       shows as the view steepens. */
+    "  if (uAbove > 0.5 && iPos.y < uSeaY) {",
+    "    float k = clamp(0.97 * (cameraPosition.y - uSeaY) / max(0.001, cameraPosition.y - iPos.y), 0.02, 1.0);",
+    "    mvPosition.xyz *= k; w *= k;",
+    "    veil = exp(-(uSeaY - iPos.y) * 0.3);",
+    "    veil *= smoothstep(0.02, 0.15, (cameraPosition.y - iPos.y) / max(0.5, length(iPos.xyz - cameraPosition)));",
+    "  }",
+    "  float c = cos(iMisc.z), s = sin(iMisc.z);",
+    "  vec2 q = position.xy * w;",
+    "  vec2 rq = vec2(c * q.x - s * q.y, s * q.x + c * q.y);",
+    "  mvPosition.xy += rq;",
+    "  vLit = rq.y / max(w, 0.001) + 0.5;",        // how far up the puff this corner is, on screen
+    // how far under the surface this corner stands (seen from below: what
+    // would stand above the water is cut; from above there is no cut)
+    "  vLid = uAbove > 0.5 ? 9.0 : uSeaY - (iPos.y + rq.x * viewMatrix[1][0] + rq.y * viewMatrix[1][1]);",
+    // A LENS INSIDE THE CLOUD sees murk, not a red screen
+    "  vA = iMisc.x * veil * mix(" + LENS_FLOOR.toFixed(3) + ", 1.0, smoothstep(0.35 * iPos.w, 0.9 * iPos.w + 1.2, vz));",
+    "  vDark = iMisc.y;",
+    "  gl_Position = projectionMatrix * mvPosition;",
+    "  #ifdef USE_FOG",
+    "  vFogDepth = vz;",
+    "  #endif",
+    "}",
+  ].join("\n");
+  const PLUME_FOG_GLSL = [
+    "  float wf = 0.0;",
+    "  #ifdef USE_FOG",
+    "    #ifdef FOG_EXP2",
+    "      wf = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);",
+    "    #else",
+    "      wf = smoothstep(fogNear, fogFar, vFogDepth);",
+    "    #endif",
+    "  #endif",
+    "  wf = clamp(wf, 0.0, 1.0);",
+  ].join("\n");
   function plumeReady() {
     const sc = scene();
     if (!sc) return false;
@@ -1023,70 +1153,27 @@
       plumeGeo.setAttribute("iPos", aPos);
       plumeGeo.setAttribute("iMisc", aMisc);
       plumeGeo.instanceCount = 0;
+      // 1 — THE FILTER: what the blood takes out of the light behind it
       const mat = new THREE.ShaderMaterial({
         uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
           map: { value: null },
-          cFresh: { value: displayColor(PLUME_FRESH) },
-          cDeep: { value: displayColor(PLUME_DEEP) },
-          cGrey: { value: displayColor(PLUME_GREY) },
           uAbove: { value: 0 },
           uSeaY: { value: 0 },
         }]),
-        vertexShader: [
-          "attribute vec4 iPos;",   // xyz centre, w = quad size (m)
-          "attribute vec4 iMisc;",  // x alpha, y darkness 0..1, z rotation
-          "uniform float uAbove; uniform float uSeaY;",
-          "varying vec2 vUv; varying float vA; varying float vDark;",
-          "#include <fog_pars_vertex>",
-          "void main() {",
-          "  vUv = uv;",
-          "  vec4 mvPosition = modelViewMatrix * vec4(iPos.xyz, 1.0);",
-          "  float vz = -mvPosition.z;",
-          "  float w = iPos.w, veil = 1.0;",
-          /* SEEN FROM ABOVE THE SEA. The sea writes depth at the surface and
-             veils what is under it by the column to the SEABED (it reads the
-             opaque depth, and a transparent plume has none), so a plume under
-             it drew either nothing or a ghost. From above, the puff is slid
-             along its own view ray up to where that ray meets the surface and
-             shrunk by the same factor: identical on screen, but now in front
-             of the sea's depth. Its own depth becomes the veil instead. */
-          "  if (uAbove > 0.5 && iPos.y < uSeaY) {",
-          "    float k = clamp(0.97 * (cameraPosition.y - uSeaY) / max(0.001, cameraPosition.y - iPos.y), 0.02, 1.0);",
-          "    mvPosition.xyz *= k; w *= k;",
-          "    veil = exp(-(uSeaY - iPos.y) * 0.3);",
-          "  }",
-          "  float c = cos(iMisc.z), s = sin(iMisc.z);",
-          "  vec2 q = position.xy * w;",
-          "  mvPosition.xy += vec2(c * q.x - s * q.y, s * q.x + c * q.y);",
-          // THE LENS IS NOT INSIDE THE CLOUD: fade as the camera enters it.
-          "  vA = iMisc.x * veil * smoothstep(0.35 * iPos.w, 0.9 * iPos.w + 1.2, vz);",
-          "  vDark = iMisc.y;",
-          "  gl_Position = projectionMatrix * mvPosition;",
-          "  #ifdef USE_FOG",
-          "  vFogDepth = vz;",
-          "  #endif",
-          "}",
-        ].join("\n"),
+        vertexShader: PLUME_VS,
         fragmentShader: [
-          "uniform sampler2D map; uniform vec3 cFresh; uniform vec3 cDeep; uniform vec3 cGrey;",
-          "varying vec2 vUv; varying float vA; varying float vDark;",
+          "uniform sampler2D map;",
+          "varying vec2 vUv; varying float vA; varying float vDark; varying float vLit; varying float vLid;",
           "#include <fog_pars_fragment>",
-          BLOOD_FILTER_GLSL,
+          CLOUD_FILTER_GLSL,
           "void main() {",
-          "  float a = texture2D(map, vUv).a * vA;",
-          "  if (a < 0.004) discard;",
-          // what the cloud lets through, raised to its density (Beer-Lambert):
-          // grey where it is thin, the red filter as it thickens
-          "  vec3 m = cbzBloodFilter(cGrey, mix(cFresh, cDeep, vDark), a, 1.6);",
+          // the green optical depth through this column of the cloud
+          "  float tau = texture2D(map, vUv).a * vA * smoothstep(0.0, 0.25, vLid);",
+          "  if (tau < 0.01) discard;",
+          "  vec3 m = cbzCloudFilter(tau, vDark);",
           // the water column in front of it takes the filter away, not tints it
-          "  #ifdef USE_FOG",
-          "    #ifdef FOG_EXP2",
-          "      float wf = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);",
-          "    #else",
-          "      float wf = smoothstep(fogNear, fogFar, vFogDepth);",
-          "    #endif",
-          "    m = mix(m, vec3(1.0), clamp(wf, 0.0, 1.0));",
-          "  #endif",
+          PLUME_FOG_GLSL,
+          "  m = mix(m, vec3(1.0), wf);",
           "  gl_FragColor = vec4(m, 1.0);",
           "  #include <colorspace_fragment>",
           "}",
@@ -1097,27 +1184,72 @@
         blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,
         blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
       });
-      mat.uniforms.map.value = murkTexture();
+      mat.uniforms.map.value = cloudTexture();
       mat._shared = true;
       plumeMesh = new THREE.Mesh(plumeGeo, mat);
       plumeMesh.frustumCulled = false;   // instances span the sea; the quad's own bounds are meaningless
       plumeMesh.renderOrder = 5;
       plumeMesh.name = "gore.plume";
+      // 2 — THE SCATTER: the blood's own dark red where the light reaches it.
+      // MAX, not add: a cloud of a hundred puffs is no brighter than its
+      // densest one, and over anything brighter than that red it is nothing
+      // (the filter has already done that pixel)
+      const smat = new THREE.ShaderMaterial({
+        uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+          map: { value: null },
+          cScat: { value: displayColor(SCAT_COL) },
+        }]),
+        vertexShader: PLUME_VS,
+        fragmentShader: [
+          "uniform sampler2D map; uniform vec3 cScat;",
+          "varying vec2 vUv; varying float vA; varying float vDark; varying float vLit; varying float vLid;",
+          "#include <fog_pars_fragment>",
+          "void main() {",
+          "  float tau = texture2D(map, vUv).a * vA * smoothstep(0.0, 0.25, vLid);",
+          "  if (tau < 0.02) discard;",
+          // the tops of the lobes take the light from the surface; deeper is
+          // darker. Only where the cloud is dense enough to have taken the
+          // blue out of what is behind it: a thin wisp's red over blue water
+          // is mauve. (Max-blended, a dense puff stands for the cloud round it,
+          // so it sends back most of the red at once.)
+          "  float lit = 0.55 + 0.45 * smoothstep(0.1, 0.95, vLit);",
+          "  vec3 sc = cScat * (1.0 - exp(-tau * 2.0)) * smoothstep(0.2, 0.9, tau) * lit * (1.0 - 0.9 * vDark);",
+          PLUME_FOG_GLSL,
+          "  gl_FragColor = vec4(sc * (1.0 - wf), 0.0);",
+          "  #include <colorspace_fragment>",
+          "}",
+        ].join("\n"),
+        transparent: true, depthWrite: false, fog: true, toneMapped: false,
+        blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation,
+        blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+        blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor,
+      });
+      smat.uniforms.map.value = cloudTexture();
+      // one camera state for both passes
+      smat.uniforms.uAbove = mat.uniforms.uAbove; smat.uniforms.uSeaY = mat.uniforms.uSeaY;
+      smat._shared = true;
+      scatMesh = new THREE.Mesh(plumeGeo, smat);
+      scatMesh.frustumCulled = false;
+      scatMesh.renderOrder = 5.5;
+      scatMesh.name = "gore.plume-scatter";
     }
     if (plumeMesh.parent !== sc) sc.add(plumeMesh);
+    if (scatMesh.parent !== sc) sc.add(scatMesh);
     return true;
   }
 
   function copyPuff(d, s) { for (let k = 0; k < PUFF_FIELDS.length; k++) PUFF_FIELDS[k][d] = PUFF_FIELDS[k][s]; }
   function killPuff(i) { const last = --puffs.length; if (i !== last) copyPuff(i, last); }
 
-  /* puff(x,y,z, vx,vy,vz, s0, s1, life, alpha, fadeIn)
-     s0 -> s1 is the quad size in metres from birth to death (sqrt(age) growth).
-     Full: the most-SPENT live puff is recycled, never the fresh one refused —
-     the newest blood is the blood the player is looking at. */
-  function puff(x, y, z, vx, vy, vz, s0, s1, life, alpha, fadeIn) {
-    if (!plumeReady()) return -1;
-    PLUME_AUDIT.puffs++;
+  /* puff(x,y,z, vx,vy,vz, litres, r0, rBillow, K, life, fadeIn) -> id
+     the blood a puff carries (L); the radius it is born at; what the jet's
+     turbulence opens it by in its first second or so; how fast it spreads
+     after that (K, m^2/s). Full: the most-SPENT live puff is recycled, never
+     the fresh one refused — the newest blood is the blood the player is
+     looking at. */
+  function puff(x, y, z, vx, vy, vz, litres, r0, rb, K, life, fadeIn) {
+    if (!plumeReady() || !(litres > 0)) return 0;
+    PLUME_AUDIT.puffs++; PLUME_AUDIT.litres += litres;
     let i = puffs.length;
     const cap = Math.min(PUFF_MAX, puffCap());
     if (i >= cap) {
@@ -1125,22 +1257,23 @@
       for (let k = 0; k < puffs.length; k++) { const f = P_T[k] / P_LIFE[k]; if (f > bf) { bf = f; best = k; } }
       i = best;
     } else puffs.length++;
-    // CLAMP AT SPAWN against this puff's own column, measured on its FINAL rim:
-    // a plume born half out of the water is the "mist over the sea" read.
+    // CLAMP AT SPAWN against this puff's own column: a plume born half out of
+    // the water is the "mist over the sea" read
     const surf = seaY(x, z);
-    const lid = surf - LID_GAP - s0 * PUFF_VIS;
+    const lid = surf - LID_GAP - Math.min(r0, 0.5);
     if (y > lid) y = lid;
     P_X[i] = x; P_Y[i] = y; P_Z[i] = z;
     P_VX[i] = vx; P_VY[i] = vy; P_VZ[i] = vz;
     P_T[i] = 0; P_LIFE[i] = life; P_IN[i] = fadeIn || 0.25;
-    P_S0[i] = s0; P_S1[i] = Math.max(s0, s1); P_A[i] = alpha;
+    P_R0[i] = r0; P_RB[i] = rb; P_K[i] = K; P_L[i] = litres;
     P_DRAG[i] = 0.12 + Math.random() * 0.1;          // water kills momentum in a second
-    P_RISE[i] = 0.03 + Math.random() * 0.07;          // blood is barely buoyant: a slow drift up
+    P_RISE[i] = -0.01 + Math.random() * 0.04;         // blood is a shade denser than the sea: it barely drifts
     P_PH[i] = Math.random() * 6.28; P_PH2[i] = Math.random() * 6.28;
-    P_FQ[i] = 0.5 + Math.random() * 0.7; P_WOB[i] = 0.05 + Math.random() * 0.07;
-    P_ROT[i] = Math.random() * 6.28; P_SPIN[i] = (Math.random() - 0.5) * 0.35;
+    P_FQ[i] = 0.5 + Math.random() * 0.7; P_WOB[i] = 0.04 + Math.random() * 0.06;
+    P_ROT[i] = Math.random() * 6.28; P_SPIN[i] = (Math.random() - 0.5) * 0.25;
     P_CX[i] = 0; P_CZ[i] = 0; P_CT[i] = 0; P_SY[i] = surf; P_SURF[i] = 0;
-    return i;
+    P_SH[i] = (Math.random() * 4) | 0; P_ID[i] = ++puffSeq;
+    return P_ID[i];
   }
 
   // a ballistic droplet reborn in the sea: water kills a drop's momentum in
@@ -1148,7 +1281,7 @@
   // third leave a wisp of their own, or a burst of forty drops is forty clouds.
   function puffFromBit(x, y, z, vx, vy, vz, size, mist) {
     if (Math.random() > (mist ? 0.15 : 0.3)) return;
-    puff(x, y, z, vx * 0.08, 0, vz * 0.08, 0.1, 0.35 + size * 2, 1.8 + Math.random() * 1.2, 0.4, 0.2);
+    puff(x, y, z, vx * 0.08, 0, vz * 0.08, 0.004 + Math.min(0.03, size * 0.05), 0.05, 0.12 + Math.min(0.5, size), 0.015, 8 + Math.random() * 6, 0.2);
   }
 
   function updatePuffs(dt) {
@@ -1160,10 +1293,10 @@
       P_VX[i] *= dg; P_VZ[i] *= dg;
       P_VY[i] = P_RISE[i] + (P_VY[i] - P_RISE[i]) * dg;
       const f = t / P_LIFE[i];
-      const sc = P_S0[i] + (P_S1[i] - P_S0[i]) * Math.sqrt(f);
+      const rr = puffR(i, t);
       // the surface and current are broad slow fields: staggered re-sample,
       // except a puff near the lid, which tracks the moving swell every frame.
-      const nearSurf = P_SURF[i] === 1 || P_Y[i] + sc * PUFF_VIS > P_SY[i] - 1.5;
+      const nearSurf = P_SURF[i] === 1 || P_Y[i] + rr > P_SY[i] - 1.5;
       if (nearSurf) P_SY[i] = seaY(P_X[i], P_Z[i]);
       P_CT[i] -= dt;
       if (P_CT[i] <= 0) {
@@ -1182,18 +1315,19 @@
       P_Z[i] += (P_VZ[i] + P_CZ[i] + Math.cos(ph * 0.83 + P_PH2[i]) * wob) * dt;
       P_Y[i] += (P_VY[i] + Math.sin(ph * 0.61 + P_PH2[i]) * wob * 0.4) * dt;
       P_ROT[i] += P_SPIN[i] * dt;
-      // THE SURFACE IS A LID: blood arriving there stops being a volume and
-      // becomes a film. The puff is held under the swell and thins out fast;
-      // the throttled goreSlick decal is what you see from above.
-      const lid = P_SY[i] - LID_GAP - sc * PUFF_VIS;
+      // THE SURFACE IS A LID: blood arriving there spreads along it. A puff's
+      // middle is held a little under the swell (a big cloud hugs the
+      // surface and widens along it, it is not shoved metres down as it
+      // grows), and the shader cuts what would stand above the water.
+      const lid = P_SY[i] - LID_GAP - Math.min(rr, 0.5);
       if (P_Y[i] > lid) {
         P_Y[i] = lid;
         if (P_VY[i] > 0) P_VY[i] = 0;
         if (!P_SURF[i]) {
+          // what reaches the top spreads there: part of this puff's blood
+          // joins the film over it (the rest hangs on under it)
           P_SURF[i] = 1;
-          // what this puff still carries reaches the top: a few centilitres
-          filmAdd(P_X[i], P_Z[i], 0.02 * P_A[i] * Math.min(1.5, sc) * (1 - f));
-          if (P_LIFE[i] - t > 1.5) P_LIFE[i] = t + 1.5;
+          filmAdd(P_X[i], P_Z[i], puffL(i, t) * 0.3 * (1 - f));
         }
       }
     }
@@ -1212,7 +1346,7 @@
        before it, the sea veiled it by the whole column to the seabed. So it
        draws after the sea and, from above, the vertex shader lifts each puff
        along its view ray onto the surface (see uAbove in the shader). */
-    plumeMesh.renderOrder = 5;
+    plumeMesh.renderOrder = 5; scatMesh.renderOrder = 5.5;
     const U = plumeMesh.material.uniforms;
     U.uAbove.value = (cp && cp.y > camSea + 0.05) ? 1 : 0;
     U.uSeaY.value = camSea;
@@ -1223,12 +1357,12 @@
     let cover = 0;
     for (let i = 0; i < n; i++) {
       const t = P_T[i], f = t / P_LIFE[i];
-      const sc = P_S0[i] + (P_S1[i] - P_S0[i]) * Math.sqrt(f);
-      // fade in over the bloom, then thin as it spreads: (1-f)^1.6 is the
-      // mass conserved over a growing area, near enough, and it reaches 0.
+      const rr = puffR(i, t), sc = rr / PUFF_VIS;
+      // its blood through its middle (green optical depth): it thins
+      // because it grows; it fades in over the bloom, and out only at the
+      // very end of its life
       const fin = t < P_IN[i] ? t / P_IN[i] : 1;
-      // holds its body through mid-life, then thins to nothing
-      let alpha = P_A[i] * fin * (1 - f * Math.sqrt(f));
+      let alpha = TAU_PER_L * puffL(i, t) / (rr * rr) * fin * (f > 0.75 ? 1 - (f - 0.75) / 0.25 : 1);
       const depth = P_SY[i] - P_Y[i];
       /* NO BAND AT THE WATERLINE. Puffs held under the lid all sit at the
          same height, and from a camera at the surface a row of them reads as
@@ -1236,32 +1370,34 @@
          top is the slick's job: a puff fades out as its rim nears the lid,
          and fades harder when the lens itself is at the waterline, looking
          along that row edge-on. */
-      const rimGap = depth - sc * PUFF_VIS - LID_GAP;          // 0 when pinned
+      const rimGap = depth - Math.min(rr, 0.5) - LID_GAP;      // 0 when pinned
       let sf = rimGap / 1.2; sf = sf < 0 ? 0 : (sf > 1 ? 1 : sf);
       alpha *= camAtLine && !(cp.y > camSea) ? 0.45 + 0.55 * sf : 0.7 + 0.3 * sf;
       let dark = depth > 0 ? depth / PLUME_DARK_DEPTH : 0;
       dark = dark * 0.85 + f * 0.2; if (dark > 1) dark = 1;
       const o = i * 4;
       ap[o] = P_X[i]; ap[o + 1] = P_Y[i]; ap[o + 2] = P_Z[i]; ap[o + 3] = sc;
-      am[o] = alpha; am[o + 1] = dark; am[o + 2] = P_ROT[i]; am[o + 3] = 0;
+      am[o] = alpha; am[o + 1] = dark; am[o + 2] = P_ROT[i]; am[o + 3] = P_SH[i];
       if (me) {
         // in front of the lens only, faded as the shader fades it when the
         // lens is inside it
         const rx = P_X[i] - me[12], ry = P_Y[i] - me[13], rz = P_Z[i] - me[14];
         const vz = -(rx * me[8] + ry * me[9] + rz * me[10]);
         if (vz > 0.05) {
-          const inLens = Math.max(0, Math.min(1, (vz - 0.35 * sc) / (0.55 * sc + 1.2)));
-          const half = vz * tanH, disc = Math.PI * (sc * PUFF_VIS) * (sc * PUFF_VIS);
-          cover += alpha * inLens * Math.min(1, disc / (4 * half * half * asp));
+          const inLens = LENS_FLOOR + (1 - LENS_FLOOR) * Math.max(0, Math.min(1, (vz - 0.35 * sc) / (0.55 * sc + 1.2)));
+          const half = vz * tanH, disc = Math.PI * rr * rr;
+          // what it filters, averaged over its disc
+          cover += (1 - Math.exp(-alpha * 0.5)) * inLens * Math.min(1, disc / (4 * half * half * asp));
         }
       }
     }
     /* THE LENS BUDGET. However many puffs a kill puts round the camera, the
        blood they add up to may filter at most LENS_COVER of the view (the
-       sum of each puff's density times the share of the screen it covers):
-       a kill under the lens is a murky cloud in front of you, never a screen
-       gone red. Every puff thins by the same factor, so the cloud keeps its
-       shape and only its density gives. */
+       sum of what each puff filters times the share of the screen it
+       covers). A shark kill right in front of the lens fills most of the
+       view, and that is real; a screen gone solid is not. Every puff thins
+       by the same factor, so the cloud keeps its shape and only its density
+       gives. */
     PLUME_AUDIT.cover = cover;
     if (cover > LENS_COVER) {
       const k = LENS_COVER / cover;
@@ -1270,7 +1406,7 @@
     }
     aPos.needsUpdate = true; aMisc.needsUpdate = true;
   }
-  const LENS_COVER = 0.45;
+  const LENS_COVER = 0.85;
 
   // ONE BITE, ONE CLOUD. Several producers answer the same bite (wounds.js's
   // chunk burst, goreImpact, the fallback in marine_predation...) inside the
@@ -1278,17 +1414,19 @@
   // is cut to a third instead of stacking.
   let lastBloomX = 1e9, lastBloomY = 0, lastBloomZ = 0, lastBloomT = -1;
   let plumeClock = 0;
-  const PLUME_AUDIT = { puffs: 0, blooms: 0, kills: 0, chumPuffs: 0, cover: 0, lensCut: 0 };   // lifetime emit counts (goreAudit)
+  const PLUME_AUDIT = { puffs: 0, blooms: 0, kills: 0, chumPuffs: 0, cover: 0, lensCut: 0, litres: 0, chumLitres: 0 };   // lifetime emit counts (goreAudit)
 
   // public: an UNDERWATER blood bloom at a wound. `amount` 0.3..3: ~0.5 is a
-  // nick, 1 a real bite, 2+ a torn artery. A burst of small puffs thrown out
-  // along `dir` that opens into one murky cloud, plus a faint haze behind it.
+  // nick, 1 a real bite, 2+ a torn artery. THE GUSH: what a bite or a tear
+  // lets out at once (0.05 + 0.09 L an amount, an artery 0.08 L more), thrown
+  // out of the wound along `dir` in a handful of puffs that billow open into
+  // one dark cloud and hang in the water for half a minute.
   CBZ.goreBloom = function (x, y, z, opts) {
     if (!waterOn() || !CBZ.scene) return;
     opts = opts || {};
     const d2 = dist2Cam(x, z);
-    if (CBZ.camera && CBZ.camera.position && d2 > 80 * 80) return;
-    const lod = d2 > 40 * 40 ? 0.5 : 1;
+    if (CBZ.camera && CBZ.camera.position && d2 > 90 * 90) return;
+    const lod = d2 > 45 * 45 ? 0.5 : 1;
     let amt = Math.max(0.3, Math.min(3, opts.amount == null ? 1 : opts.amount));
     {
       const ex = x - lastBloomX, ey = y - lastBloomY, ez = z - lastBloomZ;
@@ -1303,34 +1441,22 @@
       const l = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (l > 0.001) { dx /= l; dy /= l; dz /= l; } else { dx = dy = dz = 0; }
     }
-    const big = Math.min(1.6, 0.55 + amt * 0.4);
-    // the burst: small, pushed out of the wound, opens into the cloud body
-    const nb = Math.max(1, Math.round((2 + amt * 1.6 + (art ? 1 : 0)) * lod));
+    const litres = 0.05 + 0.09 * amt + (art ? 0.08 : 0);
+    const big = Math.min(1.7, 0.6 + amt * 0.4);
+    const nb = Math.max(2, Math.round((2.5 + amt * 1.4 + (art ? 1 : 0)) * lod));
     for (let i = 0; i < nb; i++) {
       const a = Math.random() * 6.28, r = Math.random() * 0.12 * big;
-      const sp = (art ? 0.9 : 0.5) + Math.random() * 0.6;
+      const sp = (art ? 1.0 : 0.6) + Math.random() * 0.6;
       puff(x + Math.cos(a) * r, y + (Math.random() - 0.5) * 0.15, z + Math.sin(a) * r,
         dx * sp + Math.cos(a) * sp * 0.35, dy * sp * 0.5, dz * sp + Math.sin(a) * sp * 0.35,
-        0.1 + Math.random() * 0.08, (0.55 + Math.random() * 0.45) * big,
-        2.2 + Math.random() * 1.3, art ? 0.62 : 0.55, 0.22);
+        litres / nb, 0.1 + Math.random() * 0.08, (0.35 + Math.random() * 0.45) * big,
+        0.025 + Math.random() * 0.02, 24 + Math.random() * 14, 0.18);
     }
-    /* FROM ABOVE, THE STAIN IS THE BLOOD. The sea is translucent only a few
-       metres around the lens and veils everything under it, so a plume half
-       a metre down is nearly invisible from a camera riding the waterline —
-       which is where the chase camera lives. Real footage shows the same
-       thing: what you see from the surface is the dark patch ON it. So a
-       wound near the top stains the water directly (its own budget, not the
-       0.3 s arrival throttle, which a bite would lose to the trail). */
+    /* FROM ABOVE, THE STAIN IS THE BLOOD AS WELL. A wound near the top puts
+       part of what it lets out straight into the top layer (its own budget,
+       not the 0.3 s arrival throttle, which a bite would lose to the trail). */
     const topD = seaY(x, z) - y;
-    if (topD < 2) filmAdd(x, z, (0.35 + amt * 0.35) * FILM_L_PER_AMOUNT * (1 - topD / 2));
-    // the haze: one or two faint, wide, slow puffs that are what is left
-    const nh = Math.max(1, Math.round((0.6 + amt * 0.7) * lod));
-    for (let i = 0; i < nh; i++) {
-      const a = Math.random() * 6.28, r = Math.random() * 0.3 * big;
-      puff(x + Math.cos(a) * r, y + (Math.random() - 0.4) * 0.3, z + Math.sin(a) * r,
-        dx * 0.25 + Math.cos(a) * 0.12, 0, dz * 0.25 + Math.sin(a) * 0.12,
-        0.3, (1.2 + Math.random() * 0.8) * big, 4 + Math.random() * 2, 0.3, 0.6);
-    }
+    if (topD < 2) filmAdd(x, z, litres * 0.35 * (1 - topD / 2));
   };
 
   /* ---- THE FILM ON TOP: BLOOD AT THE SURFACE IS A LEDGER, NOT A TIMER -----
@@ -1447,7 +1573,7 @@
     const m = new THREE.ShaderMaterial({
       name: "gore-film", uniforms: uniforms, vertexShader: vs, fragmentShader: FILM_FS,
       transparent: true, depthWrite: false, depthTest: true, fog: false, toneMapped: false,
-      // a FILTER on the water (see PLUME_FRESH): multiply, canvas alpha kept
+      // a FILTER on the water (like the cloud): multiply, canvas alpha kept
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
       blendSrc: THREE.ZeroFactor, blendDst: THREE.SrcColorFactor,
       blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
@@ -1714,6 +1840,7 @@
     // blood in it still is (what reads as stained water)
     return { films: n, litres: L, area: area, seen: seen, maxR: maxR, maxOpacity: maxA, added: FILM_AUDIT.added, joined: FILM_AUDIT.joined, made: FILM_AUDIT.made,
       cover: PLUME_AUDIT.cover, lensCut: PLUME_AUDIT.lensCut, puffs: puffs.length,
+      plumeLitres: PLUME_AUDIT.litres, chumLitres: PLUME_AUDIT.chumLitres,
       // marks that would have been stamped on ground under standing water, sent into it instead
       intoSea: { pools: SEA_AUDIT.pools, drops: SEA_AUDIT.drops, smearsCut: SEA_AUDIT.smearsCut, wall: SEA_AUDIT.wall } };
   };
@@ -1764,20 +1891,23 @@
     //     burst just fired here, so reset that memory: this one is the kill)
     lastBloomT = -1;
     CBZ.goreBloom(x, y, z, { amount: Math.min(2.4, 0.9 + size * 0.7) * (recent ? 0.6 : 1), arterial: true });
-    // 2 — the plume: a few wide, faint, slow puffs around the body, a little
-    //     taller than wide (it lifts as it spreads), clearing in 6-9 s.
-    const n = Math.max(1, Math.round((2 + size * 2) * lod));
+    // 2 — the body of it: a few big lobes round the body holding most of the
+    //     blood a torn body lets out at once (0.6 + 0.9 L a size: a shark's
+    //     kill on a person is ~1.5-2.5 L), opening for a few seconds and
+    //     hanging there for a minute as they spread and thin.
+    const Lk = (0.6 + 0.9 * size) * (recent ? 0.6 : 1);
+    const n = Math.max(2, Math.round((2 + size * 1.5) * lod));
     const rad = 0.3 + size * 0.35;
-    const top = Math.min(4.5, 1.8 + size * 1.1);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * 6.28, r = rad * (0.3 + Math.random() * 0.7);
       puff(x + Math.cos(a) * r, y + (Math.random() - 0.3) * rad, z + Math.sin(a) * r,
-        Math.cos(a) * 0.12, 0.04, Math.sin(a) * 0.12,
-        0.4 + size * 0.2, top * (0.7 + Math.random() * 0.3), 6 + Math.random() * 3, 0.42, 0.8);
+        Math.cos(a) * 0.25, 0.02, Math.sin(a) * 0.25,
+        Lk * 0.8 / n, 0.25 + size * 0.12, (0.8 + size * 0.5) * (0.7 + Math.random() * 0.3),
+        0.04 + Math.random() * 0.015, 45 + Math.random() * 25, 0.5);
     }
     // 3 — the body keeps leaking while it sinks
     if (opts.trail !== false) {
-      try { CBZ.goreChum(x, y, z, 0.8, 3 + size * 1.5); } catch (e) {}
+      try { CBZ.goreChum(x, y, z, 0.8, 10 + size * 6); } catch (e) {}
     }
     // and the stain overhead: from a boat, that dark patch IS the kill (the
     // litres of it that reach the top layer from this depth)
@@ -2472,8 +2602,7 @@
   // decide it has a reason to come. Positions may be numbers or functions, so
   // a moving swimmer trails from wherever it actually is.
   const chum = [], chumOut = [];
-  const CHUM_CAP = 12;
-  const CHUM_FLOW = 0.12;          // litres a second from a bleeder at rate 1 (a torn artery's order)
+  const CHUM_CAP = 20;             // (the bodies, the mouths that bit them, the swimmer)
   function cval(v) { return typeof v === "function" ? (+v() || 0) : (+v || 0); }
   CBZ.goreChum = function (x, y, z, rate, ttl) {
     if (!waterOn() || chum.length >= CHUM_CAP) return null;
@@ -2494,6 +2623,240 @@
   // returns the LIVE array — rebuilt in place every frame, never a fresh one,
   // because the hunt driver polls this per hunter per frame.
   CBZ.goreChumList = function () { return chumOut; };
+
+  /* ============================================================
+     A BODY THAT GOES ON BLEEDING — CBZ.goreBleed(actor, opts).
+     ------------------------------------------------------------
+     A bite was one event: a spray at the instant (whoever called gore at the
+     jaw) and, in the sea, a trail. On land nothing followed it: a man worried
+     by a dog walked off clean and lay down on clean ground. The jail's blood
+     already knows what follows a wound (vitals.js runs it for every hole a
+     round or a blade makes); this is that, for whatever bleeds and was not
+     opened by a round or a blade, and for the mouth that did it:
+       • the flow is litres a second that falls away (an opened femoral or
+         carotid ~0.02-0.025 L/s, ~1.5 L/min, falling as the pressure goes;
+         torn tissue a few millilitres a second, clotting in a minute; a
+         dead heart pushes nothing and what is left oozes out in seconds)
+       • standing or walking: DRIPS fall from the wound (goreDrip: they fall,
+         land, and mark where they land)
+       • lying: a POOL grows under the wound, a layer each time enough has
+         come out (gorePool, which spreads into the low ground and runs off a
+         slope), to the same sizes the jail's bleeding bodies reach
+       • lying and moving (dragged, carried off by the thing that killed it):
+         the wound SMEARS the ground behind it, for as long as it bleeds or
+         lay in its own pool
+       • an opened artery (opts.vessel neck / thigh / arm) SPURTS: the stream
+         emitter, pulsing with the heart, riding the wound as the body moves
+       • a MOUTH (opts.mouth): the blood on an attacker's jaws drips from them
+         on land, and in the sea trails behind it
+       • the wound in the water: the cloud's trail (a chum handle riding it)
+     opts: { node: the part the wound is on, local: the wound in its space
+       (Vector3), dir: the wound's outward normal in that space, lps: litres a
+       second now, tau: seconds for the flow to fall by e, vessel, mouth,
+       at: function(out) -> bool, a moving point instead of a node }
+     One record a body (and one a mouth): a second wound adds its flow. */
+  const BLEEDS = [];
+  const BLEED_CAP = 18;
+  const BLEED_POOLS = 6;
+  const _bw = new THREE.Vector3(), _bq = new THREE.Quaternion(), _UPV = new THREE.Vector3(0, 1, 0);
+  function bodyDown(a) {
+    if (!a) return false;
+    if (a.dead || a.dying || a.down || a.ko > 0) return true;
+    if (a.hp != null && a.hp <= 0) return true;
+    if ((a.char || a.isPlayer) && CBZ.vitals && CBZ.vitals.state) { try { return CBZ.vitals.state(a) !== "ok"; } catch (e) {} }
+    return false;
+  }
+  function bodyDead(a) { return !!(a && (a.dead || (a.hp != null && a.hp <= 0))); }
+  function bleedGone(b) {
+    const a = b.actor, g = a && a.group;
+    return !a || a.culled || a._despawned || (g && !g.parent);
+  }
+  // where the wound (or the mouth) is now
+  function bleedPoint(b) {
+    if (b.at) { try { if (!b.at(_bw)) return false; } catch (e) { return false; } }
+    else if (b.node) {
+      if (!b.node.parent) return false;
+      b.node.updateWorldMatrix(true, false);
+      _bw.copy(b.local).applyMatrix4(b.node.matrixWorld);
+    } else {
+      const a = b.actor, p = a && (a.pos || (a.group && a.group.position));
+      if (!p) return false;
+      _bw.set(p.x, (p.y || 0) + 0.5, p.z);
+    }
+    if (!isFinite(_bw.x + _bw.y + _bw.z)) return false;
+    b.x = _bw.x; b.y = _bw.y; b.z = _bw.z;
+    return true;
+  }
+  // an opened artery: a pulsing jet out of the wound, riding the part
+  function bleedSpurt(b, vessel, dir) {
+    if (!vessel || b.mouth) return;
+    const neck = vessel === "neck", thigh = vessel === "thigh";
+    const o = { speed: neck ? 3.6 : (thigh ? 3.0 : 2.1), pulses: neck || thigh ? 9 : 5, period: 0.5, len: 0.22, fall: 0.86,
+      rate: neck ? 60 : 50, r0: 0.9, r1: 2.6, spread: 0.12, delay: 0.05 };
+    if (b.node && dir) {
+      if (!b.anchor) { b.anchor = new THREE.Object3D(); b.anchor.name = "gore-wound-jet"; }
+      if (b.anchor.parent !== b.node) b.node.add(b.anchor);
+      b.anchor.position.copy(b.local);
+      _bw.copy(dir).normalize();
+      b.anchor.quaternion.setFromUnitVectors(_UPV, _bw);
+      airStream(2, b.anchor, 0, 0, 0, 0, 1, 0, o);
+    } else if (bleedPoint(b)) airStream(0, null, b.x, b.y, b.z, 0, 0.6, 0, o);
+  }
+  CBZ.goreBleed = function (actor, opts) {
+    if (!CBZ.scene || !actor || !opts) return null;
+    const mouth = !!opts.mouth;
+    const lps = Math.max(0, Math.min(0.05, +opts.lps || 0));
+    for (let i = 0; i < BLEEDS.length; i++) {
+      const b = BLEEDS[i];
+      if (b.actor !== actor || b.mouth !== mouth) continue;
+      b.lps = Math.min(0.06, b.lps + lps);
+      b.tau = Math.max(b.tau, +opts.tau || 0);
+      // the newest wound leads
+      if (opts.node) { b.node = opts.node; b.local.copy(opts.local || _bw.set(0, 0, 0)); }
+      if (opts.at) b.at = opts.at;
+      if (opts.vessel) bleedSpurt(b, opts.vessel, opts.dir);
+      return b;
+    }
+    if (BLEEDS.length >= BLEED_CAP) {
+      let w = 0;
+      for (let i = 1; i < BLEEDS.length; i++) if (BLEEDS[i].lps < BLEEDS[w].lps) w = i;
+      bleedEnd(BLEEDS[w]); BLEEDS.splice(w, 1);
+    }
+    const b = {
+      actor: actor, mouth: mouth, node: opts.node || null, local: new THREE.Vector3(), at: opts.at || null,
+      lps: lps, tau: Math.max(1, +opts.tau || 30), t: 0, x: 0, y: 0, z: 0,
+      dripT: 0, poolLit: 0, poured: 0, poolN: 0, poolT: 0, sx: null, sz: null,
+      wet: false, probeT: 0, chum: null, anchor: null,
+    };
+    if (opts.local) b.local.copy(opts.local);
+    BLEEDS.push(b);
+    BLEED_AUDIT.opened++;
+    if (opts.vessel) { bleedSpurt(b, opts.vessel, opts.dir); BLEED_AUDIT.spurts++; }
+    return b;
+  };
+  CBZ.goreBleedList = function () { return BLEEDS; };
+  const BLEED_AUDIT = { opened: 0, spurts: 0, drips: 0, pools: 0, smears: 0, litres: 0, wetLitres: 0 };
+  CBZ.goreBleedAudit = function () { return Object.assign({ live: BLEEDS.length }, BLEED_AUDIT); };
+  function bleedEnd(b) {
+    if (b.chum && CBZ.goreChumStop) { try { CBZ.goreChumStop(b.chum); } catch (e) {} }
+    b.chum = null;
+    if (b.anchor && b.anchor.parent) b.anchor.parent.remove(b.anchor);
+  }
+  function updateBleeds(dt) {
+    for (let i = BLEEDS.length - 1; i >= 0; i--) {
+      const b = BLEEDS[i], a = b.actor;
+      if (bleedGone(b) || !bleedPoint(b)) { bleedEnd(b); BLEEDS.splice(i, 1); continue; }
+      b.t += dt;
+      // a dead heart pushes nothing: what is left oozes out in seconds
+      const tau = !b.mouth && bodyDead(a) ? Math.min(b.tau, 15) : b.tau;
+      b.lps *= Math.exp(-dt / tau);
+      BLEED_AUDIT.litres += b.lps * dt;
+      if (b.lps < 0.0003 && b.poolLit < 0.01) { bleedEnd(b); BLEEDS.splice(i, 1); continue; }
+      b.probeT -= dt;
+      if (b.probeT <= 0) { b.probeT = 0.3; b.wet = waterOn() && woundInWater(b.x, b.y, b.z); }
+      if (b.wet) {
+        // IN THE SEA: the cloud's trail, riding this wound (or this mouth)
+        BLEED_AUDIT.wetLitres += b.lps * dt;
+        if (!b.chum && CBZ.goreChum) {
+          try { b.chum = CBZ.goreChum(function () { return b.x; }, function () { return b.y; }, function () { return b.z; }, 0.3, 3); } catch (e) { b.chum = null; }
+        }
+        if (b.chum) { b.chum.rate = Math.max(0.05, Math.min(1, Math.pow(b.lps / CHUM_LPS, 1 / 1.2))); b.chum.ttl = Math.max(b.chum.ttl, 3.2); }
+        b.sx = null;
+        continue;
+      }
+      if (b.chum) { bleedEnd(b); }
+      if (dist2Cam(b.x, b.z) > 60 * 60) { b.sx = null; continue; }   // the flow still falls; nobody sees the marks
+      const down = !b.mouth && bodyDown(a);
+      if (!down) {
+        // DRIPS from the wound (or the jaws) as it stands and moves
+        b.dripT -= dt;
+        if (b.dripT <= 0 && b.lps > 0.0005) {
+          b.dripT = Math.max(0.1, Math.min(2.5, 0.008 / b.lps)) * (0.7 + Math.random() * 0.6);
+          BLEED_AUDIT.drips++;
+          // (from the wound itself, or the jaws: where it actually leaves the body)
+          const sy0 = seatY; seatY = b.y + 0.3;
+          try { drip(b.x + (Math.random() - 0.5) * 0.08, b.z + (Math.random() - 0.5) * 0.08, 0.15 + Math.min(0.35, b.lps * 5), b.y); } finally { seatY = sy0; }
+        }
+        b.sx = null;
+        continue;
+      }
+      // THE POOL: a new, bigger layer each time enough has come out
+      b.poolLit += b.lps * dt;
+      b.poolT -= dt;
+      const need = b.poolN === 0 ? 0.04 : 0.09 + b.poolN * 0.03;
+      if (b.poolN < BLEED_POOLS && b.poolT <= 0 && b.poolLit >= need) {
+        b.poured += b.poolLit; b.poolLit = 0; b.poolT = 1.2;
+        // (the jail's own pool sizes: vitals.js lays 0.45 + 3.2 sqrt(lost fraction))
+        const size = Math.min(2.4, 0.45 + Math.sqrt(b.poured / 5) * 3.2);
+        if (CBZ.gorePool(b.x + (Math.random() - 0.5) * 0.12, b.z + (Math.random() - 0.5) * 0.12, size, b.y)) BLEED_AUDIT.pools++;
+        b.poolN++;
+      }
+      // THE SMEAR: a body lying in its blood and moving along the ground
+      if (b.sx == null) { b.sx = b.x; b.sz = b.z; }
+      else {
+        const ddx = b.x - b.sx, ddz = b.z - b.sz, d = Math.sqrt(ddx * ddx + ddz * ddz);
+        if (d > 0.7) {
+          if ((b.lps > 0.0012 || b.poolN > 0) && spawnStreak(b.sx, b.sz, ddx / d, ddz / d, Math.min(4, d))) BLEED_AUDIT.smears++;
+          b.sx = b.x; b.sz = b.z;
+        }
+      }
+    }
+  }
+
+  /* CBZ.goreBite(x, y, z, opts) — THE BITE ITSELF BLEEDS, every closing of
+     the jaws. Whoever calls gore at the jaw (predator.js's seize, creature
+     combat's biteBlood) has already thrown the spray, and a second one on
+     top of it is the double this file refuses everywhere; a bite nobody
+     sprayed for (a dog's, a tame animal's) throws its own: heavy drops and
+     a short stream out of the wound (stabBlood, the jail's blade spray),
+     sized from the wound. In the sea it is the cloud's gush.
+     opts: { dir (world, out of the wound), amount 0.2..2, arterial } */
+  CBZ.goreBite = function (x, y, z, opts) {
+    if (!CBZ.scene) return;
+    opts = opts || {};
+    const d2 = dist2Cam(x, z);
+    if (CBZ.camera && CBZ.camera.position && d2 > 70 * 70) return;
+    const amt = Math.max(0.2, Math.min(2, opts.amount == null ? 0.8 : opts.amount));
+    let dx = opts.dir ? (+opts.dir.x || 0) : 0, dy = opts.dir ? (+opts.dir.y || 0) : 0, dz = opts.dir ? (+opts.dir.z || 0) : 0;
+    const dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (dl > 1e-3) { dx /= dl; dy /= dl; dz /= dl; } else { dx = dy = dz = 0; }
+    if (waterOn() && woundInWater(x, y, z)) {
+      _wdir.x = dx; _wdir.y = dy; _wdir.z = dz;
+      CBZ.goreBloom(x, y, z, { amount: 0.5 + amt, arterial: !!opts.arterial, dir: dl > 1e-3 ? _wdir : null });
+      return;
+    }
+    if (landBledHere(x, z)) return;
+    noteLandBlood(x, z); noteSpray(x, z);
+    biteBX = x; biteBZ = z; biteBT = plumeClock;
+    const hl = Math.sqrt(dx * dx + dz * dz);
+    stabBlood(x, y, z, hl > 1e-3 ? dx / hl : 0, hl > 1e-3 ? dz / hl : 0, amt, airLod(x, z) * (d2 > 40 * 40 ? 0.5 : 1));
+  };
+  // the land blood a kill or an impact threw at a spot: a bite there in the
+  // same instant is the same event (see goreBite)
+  let landBX = 1e9, landBZ = 0, landBT = -9;
+  function noteLandBlood(x, z) { landBX = x; landBZ = z; landBT = plumeClock; }
+  function landBledHere(x, z) { return plumeClock - landBT < 0.35 && Math.abs(x - landBX) < 1.2 && Math.abs(z - landBZ) < 1.2; }
+  // and only a BITE's spray stands an impact's down (a fight's punches in a
+  // quick combo each throw their own, as they always have)
+  let biteBX = 1e9, biteBZ = 0, biteBT = -9;
+  function biteSprayedHere(x, z) { return plumeClock - biteBT < 0.35 && Math.abs(x - biteBX) < 1.2 && Math.abs(z - biteBZ) < 1.2; }
+
+  /* where an animal's mouth is now (marine bodies, the canid kit, the
+     generic jaw creature_combat keeps), for the blood on its jaws */
+  const _mo = { x: 0, y: 0, z: 0, open: 0 };
+  CBZ.goreMouthAt = function (a, out) {
+    const g = a && a.group;
+    if (!g) return false;
+    try {
+      if (g.userData && g.userData.marineBody && g.userData.aquaticMouth && CBZ.marineMouthWorld && CBZ.marineMouthWorld(g, "bite", _mo)) {
+        out.x = _mo.x; out.y = _mo.y; out.z = _mo.z; return true;
+      }
+      const rig = g.userData && g.userData.canidRig;
+      if (rig && CBZ.canid && CBZ.canid.mouthWorld) { CBZ.canid.mouthWorld(rig, _mo); out.x = _mo.x; out.y = _mo.y; out.z = _mo.z; return isFinite(_mo.x + _mo.y + _mo.z); }
+      if (CBZ.creatureJawWorld) { const j = CBZ.creatureJawWorld(a); if (j) { out.x = j.x; out.y = j.y; out.z = j.z; return true; } }
+    } catch (e) {}
+    return false;
+  };
   function updateChum(dt) {
     chumOut.length = 0;
     for (let i = chum.length - 1; i >= 0; i--) {
@@ -2508,32 +2871,42 @@
       o.x = x; o.y = y; o.z = z;
       o.strength = c.rate * Math.min(1, c.ttl / 3);   // the trail thins as it runs out
       chumOut.push(o);
+      /* THE TRAIL IS THE FLOW. A bleeder puts CHUM_LPS x rate^1.2 litres a
+         second into the water (rate 1: an artery opened, 1.5 L/min), falling
+         away as it runs out. While the wound sits inside the puff it is
+         filling, that puff takes the blood and billows (one cloud, not a
+         stack of them); when the body has moved out of it, or it is a few
+         seconds old, a new puff starts where the wound is now. So a still
+         bleeder grows a cloud and a moving one leaves a ribbon behind it that
+         widens and thins, and the line of them IS the trail. */
+      const flow = CHUM_LPS * Math.pow(c.rate, 1.2) * Math.min(1, c.ttl / 3);
+      c.lit = (c.lit || 0) + flow * dt;
       c.acc += dt;
-      if (c.acc >= 0.18) {
+      const mx = c.px == null ? 0 : x - c.px, mz = c.pz == null ? 0 : z - c.pz;
+      if (c.acc >= 0.35 || mx * mx + mz * mz > 0.45 * 0.45) {
         c.acc = 0;
-        /* THE RIBBON. A bleeding body used to fire a whole goreBloom (up to
-           ~10 puffs) every 0.35 s — a string of separate clouds, a pulse of
-           red every third of a second. Real blood leaves a moving wound as one
-           continuous thread that widens and dissolves behind it, so this lays
-           ONE small faint puff where the body is now, often: the body swims
-           on, the puffs stay in the water behind it and spread with the
-           current, and the line of them IS the trail. Severity sets how thick
-           and how long it lingers. */
-        // under load (a feeding frenzy, thirty eaten in forty seconds) the
-        // ribbons thin out rather than filling the cap with trail
-        if (dist2Cam(x, z) < 80 * 80 && (puffs.length < puffCap() * 0.5 || Math.random() < 0.4)) {
-          PLUME_AUDIT.chumPuffs++;
-          puff(x + (Math.random() - 0.5) * 0.2, y + (Math.random() - 0.5) * 0.2, z + (Math.random() - 0.5) * 0.2,
-            0, 0, 0, 0.14 + c.rate * 0.1, 0.55 + c.rate * 0.9, 2.4 + c.rate * 1.8 + Math.random() * 0.6,
-            0.18 + c.rate * 0.22, 0.3);
+        if (dist2Cam(x, z) < 90 * 90) {
+          let k = puffIndex(c.pid);
+          if (k >= 0) {
+            const rr = puffR(k, P_T[k]);
+            const ex = x - P_X[k], ey = y - P_Y[k], ez = z - P_Z[k];
+            if (P_T[k] < 6 && ex * ex + ey * ey + ez * ez < rr * rr * 0.25) P_L[k] += c.lit * Math.exp(P_T[k] / L_TAU);
+            else k = -1;
+          }
+          if (k < 0) {
+            // (shed into the body's wake, not thrown as a jet: born small and
+            // slow to open, so the line is dark at the wound and thins behind)
+            c.pid = puff(x + (Math.random() - 0.5) * 0.1, y + (Math.random() - 0.5) * 0.1, z + (Math.random() - 0.5) * 0.1,
+              0, 0, 0, c.lit, 0.08 + c.rate * 0.05, 0.1 + c.rate * 0.15, 0.015 + c.rate * 0.01, 20 + c.rate * 20 + Math.random() * 6, 0.3);
+            c.px = x; c.pz = z;
+          }
+          PLUME_AUDIT.chumPuffs++; PLUME_AUDIT.chumLitres += c.lit;
         }
-        // a torn artery PUMPS: now and then a small burst, not every tick
-        if (c.rate > 0.75 && Math.random() < 0.12) CBZ.goreBloom(x, y, z, { amount: 0.5, arterial: true });
         // a bleeder near the top puts some of what it bleeds into the top
-        // layer (all of it at the surface, none from 1.5 m down): its flow
-        // over this tick, never a dice roll for a whole new patch
+        // layer (most of it at the surface, none from 1.5 m down)
         const cd = seaY(x, z) - y;
-        if (cd < 1.5) filmAdd(x, z, CHUM_FLOW * c.rate * 0.18 * 0.5 * (1 - Math.max(0, cd) / 1.5));
+        if (cd < 1.5) filmAdd(x, z, c.lit * 0.4 * (1 - Math.max(0, cd) / 1.5));
+        c.lit = 0;
       }
     }
   }
@@ -4401,16 +4774,18 @@
     const sy0 = seatY; if (y != null && isFinite(y)) seatY = y + 0.3;
     try { return drip(x, z, size); } finally { seatY = sy0; }
   };
-  function drip(x, z, size) {
+  function drip(x, z, size, fromY) {
     const d2 = dist2Cam(x, z);
     if (d2 > 55 * 55) return;
     // `size` keeps its old scale (0.1-0.5); a walking drip lands 2-6 cm across
     const g = Math.max(0.1, Math.min(0.5, size == null ? 0.22 : size)) * 0.12;
-    // near the lens you see it FALL: a drop let go at hand height, which
+    // near the lens you see it FALL: a drop let go at hand height (or from
+    // the wound, or the jaws, when the caller knows where they are), which
     // stamps the same mark when it lands. Far off, just the mark.
     if (d2 < 22 * 22 && !wetEvent) {
       const fy = decalFloorAt(x, z);
-      if (airDrop(x, fy + 0.7 + Math.random() * 0.3, z, (Math.random() - 0.5) * 0.2, -0.3, (Math.random() - 0.5) * 0.2,
+      const y0 = fromY != null && fromY > fy + 0.05 ? fromY : fy + 0.7 + Math.random() * 0.3;
+      if (airDrop(x, y0, z, (Math.random() - 0.5) * 0.2, -0.3, (Math.random() - 0.5) * 0.2,
         0.0015 + g * 0.05, -1, 0, 0, g) >= 0) return;
     }
     spawnSplat(x, z, g, BLOOD_D, false, _dotO);
@@ -5163,6 +5538,7 @@
       return;
     }
 
+    noteLandBlood(x, z);
     // --- LAYERS 1+2: THE BLOOD IN THE AIR (see THE AIRBORNE BLOOD) --------
     // `y` arrives chest-high: the chest is ~+0.35 above it, the head ~+1.1.
     // Each cause throws what that cause throws: a round an entry spatter and
@@ -5380,9 +5756,14 @@
     // the fan is wide and the throw is short: blood leaves the wound at the
     // speed the body arrived, not at the speed of a round. opts.blade is a
     // cut: heavy drops and a short stream instead (see THE AIRBORNE BLOOD).
+    // (a bite's own spray at this spot this instant, goreBite, is this one:
+    // the bite throws it, the impact does not throw it again)
     const al = airLod(x, z) * lod;
-    if (opts.blade) stabBlood(x, y, z, hasDir ? dx : 0, hasDir ? dz : 0, amt, al);
-    else bluntBlood(x, y, z, dx, dy, dz, hasDir, amt, al, !!opts.mist);
+    noteLandBlood(x, z);
+    if (!biteSprayedHere(x, z)) {
+      if (opts.blade) stabBlood(x, y, z, hasDir ? dx : 0, hasDir ? dz : 0, amt, al);
+      else bluntBlood(x, y, z, dx, dy, dz, hasDir, amt, al, !!opts.mist);
+    }
     // the pool is the RESTRAINT: only an open wound leaves evidence on the
     // ground, so a bruising hit passes pool:false and stains nothing.
     if (opts.pool) spawnSplat(x + dx * 0.3, z + dz * 0.3, 0.5 + amt * 0.75, BLOOD_D, true);
@@ -5421,6 +5802,7 @@
 
     // water medium: the sustained bleed sources, then every live plume puff
     plumeClock += dt;
+    updateBleeds(dt);
     updateChum(dt);
     updatePuffs(dt);
     // the air: streams lay their drops, every drop and puff flies, lands, stains
@@ -5842,7 +6224,9 @@
     puffs.length = 0;
     if (plumeGeo) plumeGeo.instanceCount = 0;
     if (plumeMesh && plumeMesh.parent) plumeMesh.parent.remove(plumeMesh);   // re-added on the next scene
+    if (scatMesh && scatMesh.parent) scatMesh.parent.remove(scatMesh);
     chum.length = 0; chumOut.length = 0; wetEvent = false;
+    for (const b of BLEEDS) bleedEnd(b); BLEEDS.length = 0;
     later.length = 0; killCtx = null; swashEvents = 0;   // the match total is per match
   };
 
