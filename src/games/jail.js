@@ -1119,14 +1119,9 @@
     if (CBZ.startRun) CBZ.startRun();
     if (isles) {
       if (CBZ.cityEvidenceReturn) CBZ.cityEvidenceReturn();
-      const ist = CBZ.cityPoliceStation && CBZ.cityPoliceStation(), PP = CBZ.player;
-      if (ist && ist.out && PP && PP.pos) {
-        const y = CBZ.floorAt ? CBZ.floorAt(ist.out.x, ist.out.z, 50) : 0;
-        PP.pos.set(ist.out.x, isFinite(y) ? y : 0, ist.out.z); PP.vy = 0;
-        if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(PP.pos);
-        if (CBZ.bodyTeleported) { try { CBZ.bodyTeleported(PP); } catch (e) {} }
-      }
+      isleStep(false);
       if (CBZ.cityWantedReset) { try { CBZ.cityWantedReset(); } catch (e) {} }
+      if (CBZ.cityClearConvict) { try { CBZ.cityClearConvict(); } catch (e) {} }
       if (reason === "served") g.cityOpenCharge = null;
       else if (reason === "bail") {
         const cost = g._bailCost | 0;
@@ -1175,22 +1170,57 @@
   }
   CBZ.cityJailRelease = jailRelease;
 
-  /* OVER THE WALL. A man Gang City sent here who gets out of the prison by
-     playing its escape comes out in the city he was taken from: outside the
-     County Jail's back gate (city/mode.js places a jailbreak entry there),
+  /* OVER THE WALL. A man Gang City (or the islands) sent here who gets out
+     of the prison by playing its escape comes out in the world he was taken
+     from: outside the County Jail's back gate (city/mode.js places a
+     jailbreak entry there; on the islands, beside their police station),
      in the jumpsuit he escaped in, as an escaped convict on three stars, his
      property still in the evidence locker. No end card (systems/state.js
      winGame hands an arrest run straight here). */
   function jailBreakout(reason) {
     if (g.mode !== "escape" || !g.cityWorld) return false;
+    // an island collar comes out on the islands, a Gang City one in the city
+    const isles = g._arrestFrom === "archipelago";
+    g._arrestFrom = null;
     g.escapedConvict = true;
     g.jailSentence = 0; g._jailSentenceIn = 0; g._jailBailIn = 0;
     g._cityArrestRun = false;
-    g._breakoutJumpsuit = true;                 // city/mode.js dresses him in it
+    g._breakoutJumpsuit = !isles;               // city/mode.js dresses him in it
     if (CBZ.arrestCount) CBZ.arrestCount("escapes");
-    if (CBZ.setMode) CBZ.setMode("city");
+    if (CBZ.setMode) CBZ.setMode(isles ? "archipelago" : "city");
     if (CBZ.setRole) CBZ.setRole("inmate");
     if (CBZ.startRun) CBZ.startRun();
+    if (isles) {
+      // THE ISLANDS HAVE NO RUN-START FOR THIS (city/mode.js is Gang City's):
+      // round the side of the station that held him, in the orange, the
+      // manhunt on at three stars, his property still in evidence
+      isleStep(true);
+      g.escapedConvict = true; g.escapedFromJail = true;
+      const HT = (CBZ.CITY && CBZ.CITY.starHeat) || [0, 300, 650, 1100, 3200, 12000];
+      g.heat = Math.max(g.heat || 0, (HT[3] || 1100) + 5);
+      if ((g.wanted | 0) < 3) g.wanted = 3;
+      if (CBZ.cityAddStars) { try { CBZ.cityAddStars(0, "Escaped Convict"); } catch (e) {} }
+      g.cityCrimeLabel = "Escaped Convict";
+      if (CBZ.cityWardrobeHydrate) { try { CBZ.cityWardrobeHydrate(); } catch (e) {} }
+      if (CBZ.cityWearOutfit) { try { CBZ.cityWearOutfit("inmate", { silent: true }); } catch (e) {} }
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    }
+    return true;
+  }
+  /* THE ISLAND STATION'S STEP (a release) or round its side (a breakout):
+     the islands' lockup is their police station (CBZ.cityPoliceStation). */
+  function isleStep(side) {
+    const ist = CBZ.cityPoliceStation && CBZ.cityPoliceStation(), PP = CBZ.player;
+    if (!ist || !ist.out || !PP || !PP.pos) return false;
+    let x = ist.out.x, z = ist.out.z;
+    if (side && isFinite(ist.x) && isFinite(ist.z)) {
+      const ox = ist.out.x - ist.x, oz = ist.out.z - ist.z, m = Math.hypot(ox, oz) || 1;
+      x += (-oz / m) * 9; z += (ox / m) * 9;
+    }
+    const y = CBZ.floorAt ? CBZ.floorAt(x, z, 50) : 0;
+    PP.pos.set(x, isFinite(y) ? y : 0, z); PP.vy = 0; PP.grounded = true;
+    if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(PP.pos);
+    if (CBZ.bodyTeleported) { try { CBZ.bodyTeleported(PP); } catch (e) {} }
     return true;
   }
   CBZ.cityJailBreakout = jailBreakout;
@@ -1279,7 +1309,7 @@
     const s = bag();
     s.wagesEarned += JOB.wage; save();
     if (JOB.escape) homeInmate(JOB.escape.h);        // any live runner goes back inside
-    JOB = null; if (C) C.hud.closePanel(); panelMode = null; menuLock(false);
+    JOB = null; panelMode = null; menuLock(false);
   }
 
   /* ==========================================================
@@ -1370,7 +1400,6 @@
   function abortAll() {
     if (V && V.cells && V.cells[1]) setDoor(V.cells[1], false);
     JOB = null; panelMode = null; menuLock(false);
-    if (C) C.hud.closePanel();
   }
   // core/mission.js's ONE sweeper. A booking desk is a modal that holds the
   // player's body; it must not be able to survive a death or a mode exit.

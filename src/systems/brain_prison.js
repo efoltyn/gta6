@@ -416,11 +416,11 @@
     }
     const b = BR();
     if (!b || !b.authority) { endCase(gd); return false; }
-    const cmd0 = gd._cmd || 0;
+    const cmd0 = gd._walkM || 0;
     let r = null;
     try { r = b.authority.step(gd, dt, suspectState(n, gd)); } catch (e) { r = null; }
     // a screw the ladder did not walk this frame is standing: his rig idles
-    if ((gd._cmd || 0) === cmd0 && CBZ.guardIdle) CBZ.guardIdle(gd, dt);
+    if ((gd._walkM || 0) === cmd0 && CBZ.guardIdle) CBZ.guardIdle(gd, dt);
     const phase = r && r.phase;
     if (!phase || phase === "done") {
       if (n.cuffed) { gd._yardHold = true; return true; }

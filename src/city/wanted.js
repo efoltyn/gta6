@@ -1273,6 +1273,7 @@
   function openCharge(stars, amount, how) {
     const S = CBZ.cityJailSentence ? CBZ.cityJailSentence(stars) : { prison: 84 + 36 * stars };
     g.cityOpenCharge = { label: g.cityCrimeLabel || g._jailCharge || "Charges pending", stars: stars | 0, bail: amount | 0, prison: S.prison | 0, by: how, t: Date.now() };
+    if (g.cityWorld && typeof g.cityWorld === "object") g.cityWorld.cityOpenCharge = Object.assign({}, g.cityOpenCharge);   // on the ledger at once (see below)
   }
   // post it. how: "self" | "bond" | "crew". Returns true if you walk.
   CBZ.cityBail = function (how) {
@@ -1312,6 +1313,24 @@
   };
   // the open charge, read by the charge sheet and the HUD-less world
   CBZ.cityOpenCharge = function () { return g.cityOpenCharge || null; };
+  /* OUT ON BAIL IS SAVED. The open charge (what you were booked for, the bail
+     that was posted and by whom, the time that rides on the next collar)
+     lives on the character's ledger (city/worldstate.js g.cityWorld, which
+     the autosave writes whole), so a reload does not wipe it. A ledger seen
+     for the first time (a load, a character switch, New Life) is read; after
+     that the game's copy is written back to it, null included (served). */
+  let _chargeLedger = null;
+  CBZ.onAlways(33.2, function () {
+    const w = g.cityWorld;
+    if (!w || typeof w !== "object") return;
+    if (w !== _chargeLedger) {
+      _chargeLedger = w;
+      g.cityOpenCharge = w.cityOpenCharge ? Object.assign({}, w.cityOpenCharge) : null;
+      return;
+    }
+    const c = g.cityOpenCharge || null, s = w.cityOpenCharge || null;
+    if (c !== s && JSON.stringify(c) !== JSON.stringify(s)) w.cityOpenCharge = c ? Object.assign({}, c) : null;
+  });
   // out of the booking desk on bail: uncuffed, property kept (nothing was
   // bagged yet), the manhunt off, stood outside the door facing the street
   function bailRelease(sc) {
@@ -2393,7 +2412,7 @@
   // the drive is DRIVEN: only a ride longer than RIDE_LONG is shortened, and
   // then to its last RIDE_TAIL metres (owner: "the car actually drives you to
   // the station")
-  const RIDE_LAT = 3.2, RIDE_BRAKE = 2.6, RIDE_ACC = 4.5, RIDE_TAIL = 260, RIDE_LONG = 520, RIDE_MAX = 75;
+  const RIDE_LAT = 3.2, RIDE_BRAKE = 2.6, RIDE_ACC = 4.5, RIDE_TAIL = 260, RIDE_LONG = 520, RIDE_MAX = 75, PASS_LAT = 3.4;
   function rideWorld() {
     const RG = CBZ.roadGraph;
     if (!RG || !RG.plan) return null;
@@ -2416,21 +2435,33 @@
     P.capC = P.caps(RIDE_SPD, RIDE_LAT, RIDE_BRAKE, 1);
     return P;
   }
-  // the nearest thing in the lane ahead (a car, a person): metres to it, or 1e9
-  function laneAhead(car, cop) {
+  // the nearest thing in the lane ahead (a car, a person): metres to it, or 1e9.
+  // A car that will not move (parked, abandoned, a wreck, nobody driving it)
+  // is not traffic to queue behind: it is reported in _laneStatic instead and
+  // the ride pulls out round it (ride() below). It used to hold the unit
+  // until the ride's 75 s budget ran out, and "arrive" was 70-150 m short of
+  // the jail with the walk-in timing out.
+  const _laneStatic = { d: 1e9 };
+  function stuckCar(o) {
+    return !!(o._husk || o.abandoned || o._propParked || o.parked || o._playerLeft || o.wreckT > 0 || (!o.ai && !o.player && !o._arrestRide && Math.abs(o.v || 0) < 0.3));
+  }
+  function laneAhead(car, cop, lat) {
     const h = car.heading, fx = Math.sin(h), fz = Math.cos(h);
     let best = 1e9;
-    function look(o, half) {
-      if (!o || o === car || o.dead || !o.pos) return;
+    _laneStatic.d = 1e9;
+    const off = lat || 0;
+    function look(o, half, isCar) {
+      if (!o || o === car || (o.dead && !o._husk) || !o.pos) return;
       const dx = o.pos.x - car.pos.x, dz = o.pos.z - car.pos.z;
       const a = dx * fx + dz * fz;
       if (a <= 0 || a > 22) return;
-      if (Math.abs(dx * fz - dz * fx) > 1.3 + half) return;
+      if (Math.abs(dx * fz - dz * fx - off) > 1.3 + half) return;
       const d = a - 2.4 - half;
+      if (isCar && stuckCar(o)) { if (d < _laneStatic.d) _laneStatic.d = d; return; }
       if (d < best) best = d;
     }
     const cars = CBZ.cityCars || [];
-    for (let i = 0; i < cars.length; i++) look(cars[i], 1.0);
+    for (let i = 0; i < cars.length; i++) look(cars[i], 1.0, true);
     const peds = CBZ.cityPeds || [];
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
@@ -2439,11 +2470,13 @@
     }
     return best;
   }
-  function placeOnPath(car, R, s, dt) {
+  // lat: metres to the left of the path (the pass round a stopped car)
+  function placeOnPath(car, R, s, dt, lat) {
     const q = CBZ.roadGraph.pathAt(R, s);
-    car.pos.x = q.x; car.pos.z = q.z;
+    const L = lat || 0, x = q.x + Math.cos(q.h) * L, z = q.z - Math.sin(q.h) * L;
+    car.pos.x = x; car.pos.z = z;
     car.heading = dt > 0 && CBZ.lerpAngle ? CBZ.lerpAngle(car.heading, q.h, 1 - Math.pow(0.0005, dt)) : q.h;
-    if (car.group) { car.group.position.set(q.x, car.group.position.y || 0, q.z); car.group.rotation.y = car.heading; }
+    if (car.group) { car.group.position.set(x, car.group.position.y || 0, z); car.group.rotation.y = car.heading; }
   }
 
   function ride(sc, P, ch, cop, dt) {
@@ -2476,12 +2509,26 @@
         }
       }
       let want = Math.min(CBZ.roadGraph.capAt(R, sc.rs, R.capC), Math.sqrt(2 * RIDE_BRAKE * Math.max(0, R.len - 0.5 - sc.rs)));
-      const ahead = laneAhead(car, cop);
+      // ROUND A CAR THAT IS NOT GOING ANYWHERE: the unit pulls out a lane to
+      // its left (lights on, the oncoming side) at a crawl, passes it and
+      // pulls back in. Traffic and people in the lane are still queued behind.
+      const lane0 = laneAhead(car, cop, 0), stat0 = _laneStatic.d;
+      // (anything that keeps the unit standing in its lane past a few seconds,
+      // a man dawdling down the middle of the road included, is gone round too)
+      sc.blockT = (lane0 < 6 && sc.rv < 0.6) ? (sc.blockT || 0) + dt : 0;
+      const sideClear = sc.blockT > 4 && sc.passT <= 0 ? laneAhead(car, cop, PASS_LAT) > 18 : true;   // (never out into an oncoming car)
+      if ((stat0 < 14 || (sc.blockT > 4 && sideClear)) && R.len - sc.rs > 12) sc.passT = 1.6;
+      else sc.passT = Math.max(0, (sc.passT || 0) - dt);
+      const latWant = sc.passT > 0 ? PASS_LAT : 0;
+      sc.lat = (sc.lat || 0) + Math.max(-2.2 * dt, Math.min(2.2 * dt, latWant - (sc.lat || 0)));
+      const ahead = sc.lat > 0.5 ? laneAhead(car, cop, sc.lat) : lane0;
       if (ahead < 1e8) want = Math.min(want, Math.max(0, ahead - 1.5) * 1.2);
+      if (sc.lat > 0.5 && _laneStatic.d < 1e8) want = Math.min(want, Math.max(0, _laneStatic.d - 1.5) * 1.2);   // (still in the way out there too)
+      if (sc.passT > 0 || sc.lat > 0.3) want = Math.min(want, sc.lat > PASS_LAT - 0.6 ? 6 : 2.5);          // pulling out, a crawl
       sc.rv = want > sc.rv ? Math.min(want, sc.rv + RIDE_ACC * dt) : Math.max(want, sc.rv - RIDE_BRAKE * 3 * dt);
       sc.rs = Math.min(R.len, sc.rs + sc.rv * dt);
       car.v = sc.rv;
-      placeOnPath(car, R, sc.rs, dt);
+      placeOnPath(car, R, sc.rs, dt, sc.lat);
       if ((R.len - sc.rs < 1.2 && sc.rv < 0.8) || sc.rideT >= RIDE_MAX) { car.v = 0; sc.phase = "arrive"; sc.t = 0; return; }
     } else {
       // no road under either end (a map with no streets): straight in, slowly
@@ -2520,10 +2567,11 @@
     arrestScene = null;
     busting = false;
     TALLY.sentences++;
-    // an escape from a Gang City arrest lands back in Gang City (state.js
-    // winGame -> games/jail.js cityJailBreakout); the islands keep the card
-    g._cityArrestRun = g.mode === "city";
-    g._arrestFrom = g.mode;                       // where a release puts him back (games/jail.js)
+    // an escape lands back in the world that sent him, Gang City or the
+    // islands (state.js winGame -> games/jail.js cityJailBreakout), never the
+    // prison game's end card
+    g._cityArrestRun = g.mode === "city" || g.mode === "archipelago";
+    g._arrestFrom = g.mode;                       // where a release or a breakout puts him back (games/jail.js)
     if (CBZ.setMode) CBZ.setMode("escape");
     if (CBZ.setRole) CBZ.setRole("inmate");
     if (CBZ.startRun) CBZ.startRun();

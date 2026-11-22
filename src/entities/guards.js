@@ -808,7 +808,7 @@
     const x0 = p.x, z0 = p.z;
     M.step(m, p, g.group.rotation.y, T.x, T.z, O, dt);
     g.group.rotation.y = m.yaw;
-    g._cmd = (g._cmd || 0) + Math.hypot(p.x - x0, p.z - z0);
+    g._walkM = (g._walkM || 0) + Math.hypot(p.x - x0, p.z - z0);
     animChar(g.char, Math.min(m.gs, m.speed + 0.4), dt);
     return Math.hypot(tx - p.x, tz - p.z);
   }
@@ -1575,7 +1575,7 @@
   const audit = { t: 0, moving: 0, stalled: 0, pushes: 0, frames: 0, per: new Map() };
   const MOVING = { patrol: 1, hunt: 1, search: 1, investigate: 1, "return": 1, social: 1, law: 1 };
   function auditPre() {
-    for (const g of CBZ.guards) { const p = g.group.position; g._auPX = p.x; g._auPZ = p.z; g._auCmd = g._cmd || 0; }
+    for (const g of CBZ.guards) { const p = g.group.position; g._auPX = p.x; g._auPZ = p.z; g._auCmd = g._walkM || 0; }
   }
   CBZ.onUpdate(24.9, function () {
     if (!CBZ.game || CBZ.game.mode !== "escape") return;
@@ -1585,7 +1585,7 @@
     if (!CBZ.game || CBZ.game.mode !== "escape" || CBZ.game.state !== "playing" || !(dt > 0)) return;
     audit.t += dt; audit.frames++;
     for (const g of CBZ.guards) {
-      if (g._auPX == null || !MOVING[g.state] || (g._cmd || 0) === g._auCmd) continue;   // standing on purpose (looking round, at a shut door) is not grinding
+      if (g._auPX == null || !MOVING[g.state] || (g._walkM || 0) === g._auCmd) continue;   // standing on purpose (looking round, at a shut door) is not grinding
       const p = g.group.position;
       const dist = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
       if (g.state === "hunt" && dist < 2) continue;
@@ -1594,7 +1594,7 @@
       if (!rec) { rec = { stalled: 0, pushes: 0, moving: 0 }; audit.per.set(g, rec); }
       rec.moving += dt;
       const gained = Math.hypot(p.x - g._auPX, p.z - g._auPZ);
-      if (gained < Math.min(g.speed * dt, (g._cmd || 0) - g._auCmd) * 0.25) { audit.stalled += dt; rec.stalled += dt; }
+      if (gained < Math.min(g.speed * dt, (g._walkM || 0) - g._auCmd) * 0.25) { audit.stalled += dt; rec.stalled += dt; }
       if (Math.hypot(p.x - g._auCX, p.z - g._auCZ) > 0.002) { audit.pushes++; rec.pushes++; }
     }
   });

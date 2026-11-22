@@ -681,7 +681,13 @@
        world is; it just cannot know it at order 22, which is why this whole
        build step is handed to roadGapAfterRoads and runs at 98.6 instead. The
        authored gate stays as the degrade path. */
-    if (!(CBZ.roadGapAfterRoads && CBZ.roadGapAfterRoads(function () { buildFence(root); }))) buildFence(root);
+    // A STREAMED BUILD (core/citystream.js runs a sliced builder when the
+    // player comes near, handing it the LIVE arena) comes long after that late
+    // pass: a step queued now would never run, and the base stood with no
+    // perimeter at all (no posts, no wire, no wall to stop anyone). Its roads
+    // are already final, so the fence goes up at once.
+    const streamed = !!(CBZ.city && CBZ.city.arena && CBZ.city.arena === city);
+    if (streamed || !(CBZ.roadGapAfterRoads && CBZ.roadGapAfterRoads(function () { buildFence(root); }))) buildFence(root);
     const cw = buildCauseway(root);
 
     /* ======================================================================
