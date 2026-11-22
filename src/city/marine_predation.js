@@ -286,7 +286,10 @@
     if (m.beam > 0) return m.beam;
     let B = 0;
     const g = a && a.group;
-    if (g && _box) {
+    // a skinned marine body publishes its trunk (fins excluded) directly
+    const mbd = g && g.userData && g.userData.marineBody;
+    if (mbd && mbd.beam > 0) B = mbd.beam * ((g.scale && g.scale.z > 0) ? g.scale.z : 1);
+    if (!(B > 0) && g && _box) {
       let hull = null;
       g.traverse(function (o) { if (!hull && o.isMesh && /hull$/i.test(o.name || "")) hull = o; });
       if (hull) {

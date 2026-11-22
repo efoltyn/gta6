@@ -453,9 +453,199 @@
     return _bb3.copy(m.geometry.boundingBox).applyMatrix4(m.matrix);
   }
 
+  /* ============================================================
+     THE SKINNED SWIMMER — every body city/wildlife/aquatic.js builds
+     (group.userData.marineBody: one SkinnedMesh with a spine chain, jaws,
+     eyes and pectorals).
+
+     The body swims as ONE travelling wave. Every spine bone takes the slope
+     of  lateral(xi, t) = A * env(xi) * sin(phase - 2 pi xi / lambda)  at the
+     middle of the stretch of body it owns (xi = 0 at the snout, 1 at the tail
+     tip), so the chain integrates the curve: the head barely yaws, the swing
+     grows toward the tail, and the wave runs backward along the body. Fish
+     and sharks bend sideways; whales and dolphins up and down. Tail-beat
+     frequency rises linearly with body lengths per second (as measured in
+     fish and sharks: f = f0 + fK * U/L), the swing deepens with urgency,
+     and an unhurried animal glides between bursts with the tail settling
+     straight. A turn bends the body into it.
+
+     The bite is the sequence a great white performs: the snout lifts, the
+     lower jaw drops, the upper jaw slides out of the head as the jaws close,
+     and the eyes roll back (or, on requiem sharks and hammerheads, the
+     nictitating membrane comes up) just before contact.
+     ============================================================ */
+  const TH3 = window.THREE;
+  const _mq = TH3 ? new TH3.Quaternion() : null, _mq2 = TH3 ? new TH3.Quaternion() : null;
+  const _mv = TH3 ? new TH3.Vector3() : null, _mv2 = TH3 ? new TH3.Vector3() : null;
+  const AX_X = TH3 ? new TH3.Vector3(1, 0, 0) : null, AX_Y = TH3 ? new TH3.Vector3(0, 1, 0) : null, AX_Z = TH3 ? new TH3.Vector3(0, 0, 1) : null;
+  function sm01(t) { return t <= 0 ? 0 : (t >= 1 ? 1 : t * t * (3 - 2 * t)); }
+
+  function buildMarineRig(a, mb) {
+    const tpl = mb.tpl, spec = tpl.spec, B = mb.bones, ix = mb.ix;
+    const L = spec.L, xN = spec.xNose;
+    const cb = spec.chain.b, J = spec.chain.J;
+    const ends = [xN].concat(J).concat([xN - L]);
+    // each chain bone: the middle of the stretch it owns, and its parent in the chain
+    const chain = cb.map(function (b, k) {
+      const xa = ends[k], xb = ends[k + 1];
+      return { bone: B[b], xi: (xN - (xa + xb) * 0.5) / L, par: -1, th: 0 };
+    });
+    // chain order is head, neck, root, t1..tn: head<-neck<-root, root->t1->t2..
+    const rootK = 2;
+    chain[0].par = 1; chain[1].par = 2;
+    for (let k = 3; k < chain.length; k++) chain[k].par = k - 1;
+    chain[3] && (chain[3].par = rootK);
+    for (let k = 0; k < B.length; k++) B[k].rotation.order = "YZX";
+    const rest = B.map(function (b) { return b.position.clone(); });
+    const w = spec.wave || { lambda: 1, amp: 0.08, env: [0.03, 0, 1], f0: 0.4, fK: 1, fMax: 3 };
+    const e = w.env, eSum = e[0] + e[1] + e[2];
+    const plan = spec.plan || "lateral";
+    a.swim = {
+      marine: mb, plan: plan, chain: chain, rest: rest, wave: w, eSum: eSum,
+      vert: plan === "vertical", len: tpl.len, L: L,
+      amp: w.amp * L, ph: (CBZ.hash01 ? CBZ.hash01(a.group.position.x, a.group.position.z, 71) : 0) * 6.283,
+      k: 0, spd01: 0, vS: -1, acc: 0, burst: 0, brake: 0, glide: 0, gliding: false, nG: 0, turn: 0, vyS: 0,
+      gT: 1 + (CBZ.hash01 ? CBZ.hash01(a.group.position.x, a.group.position.z, 74) : 0.5) * 3.5,
+      seed: (CBZ.hash01 ? CBZ.hash01(a.group.position.x, a.group.position.z, 72) : 0.5) * 997,
+      curl: 0, yawSwing: 0, roll: 0, pitch: 0, px: null, pz: null, py: null, ph0: a.heading,
+      spineY: tpl.bones[ix.root].p[1], jaw: !!tpl.contract, jawK: -1, jawApplied: -1,
+      jawCfg: spec.jaw || null, eyeCfg: spec.eye || null,
+      pecs: [ix.pecR, ix.pecL].filter(function (q) { return q != null; }).map(function (q, n) { return { bone: B[q], s: n === 0 ? 1 : -1 }; }),
+      style: plan === "flap" || plan === "flipper" ? plan : null, sph: 0,
+      lod: 0, lodT: 0, lodD: Math.max(28, 9 * tpl.len * ((a.group.scale && a.group.scale.x) || 1)),
+      xiRoot: chain[rootK].xi,
+    };
+    poseMarine(a.swim, 0, 0, 0, 0);
+  }
+
+  // the lateral (or vertical) offset's slope at xi, per unit L
+  function waveSlope(rig, xi, A, ph, bend) {
+    const e = rig.wave.env, k = 6.283185307 / rig.wave.lambda;
+    const env = (e[0] + e[1] * xi + e[2] * xi * xi) / rig.eSum;
+    const denv = (e[1] + 2 * e[2] * xi) / rig.eSum;
+    const arg = ph - k * xi;
+    // the bend is a C about the root: the root keeps the line of travel and
+    // both ends come round toward the inside of the curve
+    return A * (denv * Math.sin(arg) - k * env * Math.cos(arg)) + bend * 2 * (xi - rig.xiRoot);
+  }
+  /* Pose the spine for a tail amplitude A (model units), phase ph and a
+     static bend (model units at the tail tip; + toward +z / up). */
+  function poseMarine(rig, A, ph, bend, dt) {
+    const ch = rig.chain, L = rig.L;
+    for (let k = 0; k < ch.length; k++) ch[k].th = Math.atan(waveSlope(rig, ch[k].xi, A, ph, bend) / L);
+    for (let k = 0; k < ch.length; k++) {
+      const c = ch[k], rel = c.th - (c.par >= 0 ? ch[c.par].th : 0);
+      if (rig.vert) { c.bone.rotation.y = 0; c.bone.rotation.z = -rel; }
+      else c.bone.rotation.y = rel;
+    }
+    applyMarineJaw(rig, rig.jawK < 0 ? 0 : rig.jawK);
+    void dt;
+  }
+  // the bite on the bones (see the block comment above)
+  function applyMarineJaw(rig, k) {
+    const J = rig.jawCfg, mb = rig.marine, B = mb.bones, ix = mb.ix;
+    if (!J) return;
+    const L = rig.L;
+    const e1 = sm01(k / 0.55), e2 = sm01(k), e3 = sm01((k - 0.35) / 0.65), e4 = sm01((k - 0.55) / 0.40);
+    const head = B[ix.head], jaw = B[ix.jaw], up = B[ix.upperJaw];
+    if (!rig.vert) head.rotation.z = (J.lift || 0) * e1;
+    jaw.rotation.z = -(J.drop || 0.6) * e2;
+    const r = rig.rest[ix.upperJaw], pr = J.protrude || [0, 0];
+    up.position.set(r.x + pr[0] * L * e3, r.y + pr[1] * L * e3, r.z);
+    const roll = J.eyeRoll, rm = (J.rollMax || 1.8) * e4;
+    const eR = B[ix.eyeR], eL = B[ix.eyeL];
+    if (roll === "back") { eR.rotation.set(0, -rm, 0); eL.rotation.set(0, rm, 0); }
+    else if (roll === "membrane") { eR.rotation.set(-rm, 0, 0); eL.rotation.set(rm, 0, 0); }
+    rig.jawApplied = k;
+  }
+  // pectorals: aoa (+ leading edge up), drop (+ tips down), diff (+ the
+  // right tip down, the left up: a turn), sweep (+ tips back)
+  function poseMarinePecs(rig, aoa, drop, diff, sweep) {
+    const P = rig.pecs;
+    if (!P || !_mq) return;
+    for (let i = 0; i < P.length; i++) {
+      const s = P[i].s, b = P[i].bone;
+      _mq.setFromAxisAngle(AX_Y, -sweep * s);
+      _mq2.setFromAxisAngle(AX_X, (drop + diff * s) * s);
+      _mq.multiply(_mq2);
+      _mq2.setFromAxisAngle(AX_Z, aoa);
+      _mq.multiply(_mq2);
+      b.quaternion.copy(_mq);
+    }
+  }
+  // a manta's wings and a turtle's flippers are the stroke (aquatic.js
+  // builds their bones as wing / flipper chains; see their builders)
+  function strokeMarine(a, rig, dt) {
+    const mb = rig.marine, ix = mb.ix, B = mb.bones;
+    const ph0 = CBZ.wildlifeSwimPhase ? CBZ.wildlifeSwimPhase(a) : null;
+    let ph;
+    if (ph0 != null && !a.ridden) ph = ph0;
+    else { rig.sph += dt * (1.6 + 3.0 * rig.spd01) * (1 - 0.6 * rig.glide); ph = rig.sph; }
+    const turn = Math.max(-0.3, Math.min(0.3, rig.turn * 0.25));
+    if (rig.style === "flap") {
+      // a travelling wave out along each wing: root leads, tip follows
+      const amp = (0.42 + 0.22 * rig.spd01 + 0.12 * rig.burst) * (1 - 0.55 * rig.glide);
+      const wings = [["wR1", "wR2", "wR3", 1], ["wL1", "wL2", "wL3", -1]];
+      for (let s = 0; s < 2; s++) {
+        const W = wings[s], sgn = W[3];
+        for (let q = 0; q < 3; q++) {
+          const b = B[ix[W[q]]];
+          if (!b) continue;
+          const lag = q * 0.55;
+          const v = Math.sin(ph - lag);
+          // the downstroke runs a touch deeper than the recovery
+          const ang = amp * (q === 0 ? 0.55 : (q === 1 ? 0.35 : 0.30)) * (v > 0 ? v : v * 0.8) + (q === 0 ? turn * sgn * 0.6 : 0);
+          b.rotation.set(-ang * sgn, 0, 0);
+        }
+      }
+      // the body pitches gently against the stroke
+      const hd = B[ix.head];
+      if (hd) hd.rotation.z = 0.035 * Math.cos(ph) * amp;
+    } else {
+      // a green turtle FLIES with its fore flippers: down and back on the
+      // power stroke with the blade square to the water, up and forward
+      // feathered; the hind flippers trail as rudders
+      const s = Math.sin(ph), c = Math.cos(ph);
+      const fl = [["fR1", "fR2", 1], ["fL1", "fL2", -1]];
+      for (let q = 0; q < 2; q++) {
+        const F = fl[q], sgn = F[2];
+        const b1 = B[ix[F[0]]], b2 = B[ix[F[1]]];
+        if (b1) {
+          _mq.setFromAxisAngle(AX_X, -(0.55 * s + turn * 0.4) * sgn);            // up / down
+          _mq2.setFromAxisAngle(AX_Y, (0.30 * (0.5 - 0.5 * c)) * sgn);           // swept back through the stroke
+          _mq.multiply(_mq2);
+          _mq2.setFromAxisAngle(AX_Z, -0.45 * c);                                 // feathered on the recovery
+          _mq.multiply(_mq2);
+          b1.quaternion.copy(_mq);
+        }
+        if (b2) b2.rotation.set(-(0.28 * Math.sin(ph - 0.6)) * sgn, 0, 0);
+      }
+      const hr = [["hR", 1], ["hL", -1]];
+      for (let q = 0; q < 2; q++) {
+        const b = B[ix[hr[q][0]]];
+        if (b) b.rotation.set(-(0.10 * Math.sin(ph * 0.5) + turn * 0.5) * hr[q][1], 0.12 * hr[q][1], 0);
+      }
+      const hd = B[ix.head];
+      if (hd) hd.rotation.set(0, 0.04 * Math.sin(ph * 0.5), 0.03 * c);
+    }
+  }
+  function marineLod(a, rig) {
+    const cam = CBZ.camera, mesh = rig.marine.mesh;
+    if (!cam || !cam.matrixWorld || !mesh) return;
+    const e = cam.matrixWorld.elements, g = a.group.matrixWorld.elements;
+    const d = Math.hypot(e[12] - g[12], e[13] - g[13], e[14] - g[14]);
+    const want = d > rig.lodD * (rig.lod ? 0.9 : 1.1) ? 1 : 0;
+    if (want !== rig.lod) {
+      const geos = rig.marine.tpl.geo;
+      const gg = geos[Math.min(want, geos.length - 1)];
+      if (gg) { mesh.geometry = gg; rig.lod = want; rig.marine.lod = want; }
+    }
+  }
+
   function buildSwimRig(a) {
     const sp = a.species, grp = a.group;
     if (!sp.aquatic || sp.snake) return;
+    if (grp.userData && grp.userData.marineBody) { buildMarineRig(a, grp.userData.marineBody); return; }
     const kids = grp.children;
     let minX = 0, maxX = 0;
     for (let i = 0; i < kids.length; i++) {
@@ -658,6 +848,13 @@
     const rig = actor && actor.swim;
     if (!rig || (!rig.jaw && !rig.jawGroup)) return;
     let o = openness > 0 ? (openness > 1 ? 1 : openness) : 0;
+    if (rig.marine) {
+      // written now (a seize poses the jaw after the swim pass has run) and
+      // remembered, so the next swim pass re-applies it under the wave
+      rig.jawK = o;
+      if (Math.abs(o - rig.jawApplied) > 1e-4) applyMarineJaw(rig, o);
+      return;
+    }
     if (rig.jawK >= 0 && Math.abs(o - rig.jawK) < 0.01) return;   // nothing changed
     rig.jawK = o;
     if (rig.jawGroup) {
@@ -772,6 +969,56 @@
     }
   }
 
+  // the skinned swimmer's frame (speed, glide and the rest already eased by
+  // animateSwim): beat, bend, pectorals or stroke, then the bank and pitch
+  function animateMarine(a, rig, dt, moved, vy) {
+    const grp = a.group;
+    rig.lodT -= dt;
+    if (rig.lodT <= 0) { rig.lodT = 0.3; marineLod(a, rig); }
+    const w = rig.wave;
+    const blps = Math.max(0, rig.vS);
+    const f = Math.min(w.fMax, w.f0 + w.fK * blps) * (1 + 0.25 * rig.burst);
+    rig.ph += dt * 6.283185307 * f * (1 - 0.75 * rig.glide);
+    if (rig.ph > 1e6) rig.ph -= 1e6;
+    // a hovering body still breathes a slow, shallow beat
+    const swing = moved > 0.002 ? 1 : 0.35;
+    rig.k += (swing - rig.k) * ez(4, dt);
+    const ampMul = (0.55 + 0.45 * rig.spd01) * (1 + 0.35 * rig.burst) * (1 - 0.85 * rig.glide);
+    const A = rig.amp * ampMul * rig.k * (rig.style ? 0.12 : 1);
+    let dh = a.heading - rig.ph0;
+    while (dh > Math.PI) dh -= 6.283185307; while (dh < -Math.PI) dh += 6.283185307;
+    rig.turn += (dh / dt - rig.turn) * ez(6, dt);
+    rig.ph0 = a.heading;
+    // a turn bends the body into it; a poser's curl (breach arc, death) adds its own
+    const curlWant = a._swimCurl ? Math.max(-1, Math.min(1, a._swimCurl)) : 0;
+    rig.curl += (curlWant - rig.curl) * ez(6, dt);
+    const bend = (Math.max(-0.12, Math.min(0.12, rig.turn * 0.09)) * (rig.vert ? 0 : 1) + rig.curl * CURL_AMP) * rig.L;
+    poseMarine(rig, A, rig.ph, bend, dt);
+    if (rig.style) strokeMarine(a, rig, dt);
+    else if (rig.pecs.length) {
+      // trim: leading edge up to climb, down to dive; flare on braking;
+      // swept back at a rush; differential in a turn; a slow scull at rest
+      const trim = Math.max(-0.30, Math.min(0.30, rig.vyS * 0.5));
+      const idle = (1 - rig.spd01) * Math.sin(rig.ph * 0.5) * 0.05;
+      const aoa = trim + 0.45 * rig.brake + idle;
+      const drop = 0.35 * rig.brake - 0.08 * rig.spd01 + idle * 0.6;
+      const diff = Math.max(-0.25, Math.min(0.25, rig.turn * 0.15));
+      const sweep = 0.18 * rig.spd01 - 0.12 * rig.brake;
+      poseMarinePecs(rig, aoa, drop, diff, sweep);
+    }
+    rig.yawSwing = 0;                 // the recoil lives in the bones now
+    if ((a._flinchT || 0) <= 0 && (a._atkAnim == null || a._atkAnim < 0)) {
+      const wantRoll = Math.max(-0.5, Math.min(0.5, rig.turn * 0.25 * (0.5 + 0.5 * rig.k)));
+      const wantPitch = Math.max(-0.5, Math.min(0.5, vy * 0.11));
+      const e = ez(3.2, dt);
+      rig.roll += (wantRoll - rig.roll) * e;
+      rig.pitch += (wantPitch - rig.pitch) * e;
+      const posed = !!a._poseOwn;
+      a._poseOwn = false;
+      if (!posed) { grp.rotation.x = rig.roll; grp.rotation.z = rig.pitch; }
+    }
+  }
+
   function animateSwim(a, dt) {
     const rig = a.swim; if (!rig) return;
     const grp = a.group;
@@ -822,6 +1069,8 @@
       if (rig.gliding) glideWant = Math.max(glideWant, 0.9);
     } else rig.gliding = false;
     rig.glide += (Math.min(1, glideWant) - rig.glide) * ez(rig.glide < glideWant ? 3.5 : 5, dt);
+
+    if (rig.marine) { animateMarine(a, rig, dt, moved, vy); return; }
 
     // ---- THE BEAT ----------------------------------------------------------
     // Frequency rides distance (so it scales with speed), plus the kick of
@@ -992,7 +1241,14 @@
     // THE LAST BEATS: fast and strong at first, each weaker and slower, then
     // slack with a lazy bend. Only when the body is drawn.
     const rig = a.swim;
-    if (rig && grp.visible !== false) {
+    if (rig && rig.marine && grp.visible !== false) {
+      const env = Math.exp(-t * 1.5);
+      D.ph += step * (3 + 11 * Math.exp(-t * 0.9));
+      poseMarine(rig, D.amp0 * env, D.ph, D.curl * Math.min(1, t * 0.5) * CURL_AMP * rig.L, step);
+      if (rig.style) { rig.spd01 = 0; rig.glide = 1; strokeMarine(a, rig, step * env); }
+      else poseMarinePecs(rig, 0.1 * env, 0.30 * Math.min(1, t), 0, 0);
+      if (t < 1.2 && swimJaw) swimJaw(a, 0.25 * Math.min(1, t * 2));
+    } else if (rig && grp.visible !== false) {
       const env = Math.exp(-t * 1.5);
       D.ph += step * (3 + 11 * Math.exp(-t * 0.9));
       if (rig.tspan > 0) poseTail(rig, D.amp0 * env, D.ph, D.curl * Math.min(1, t * 0.5) * CURL_AMP * rig.len);

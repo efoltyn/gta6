@@ -7,6 +7,1278 @@
   const T = window.THREE;
 
   /* ==========================================================================
+     THE MARINE BODY KIT.
+
+     Every sea animal here is ONE SkinnedMesh on ONE shared material: one draw
+     call per animal. The hull is a single continuous loft from the snout tip
+     to the tail stock (no head shell, no tail sleeve, so no rings or seams);
+     the mouth is a cut in that same skin with a cavity (palate, floor,
+     pharynx), gums and rows of teeth inside it; the eyes sit in the head on
+     their own bones so they can roll; gill slits are grooves in the skin; the
+     fins are tapered foil sections grown out of the hull with their roots
+     buried in it. Colour is baked per vertex, and colour boundaries
+     (countershading, fin tips, orca patches, stripes) are CUT through the
+     triangles, so a line is a crisp irregular line, not a staircase of faces.
+
+     The skeleton is a spine chain (head, neck, root, tail bones) plus a lower
+     jaw, an upper jaw that protrudes, eyes, pectorals, and whatever a body
+     plan adds (manta wing bones, turtle flipper bones). city/wildlife_rig.js
+     drives it from group.userData.marineBody.
+
+     Units: model units, nose toward +X, up +Y. A species declares its length
+     L and every other measurement as a fraction of L (how morphometric tables
+     for sharks and fish are written), so proportions read straight off the
+     literature. Geometry is built once per species and LOD and shared by every
+     individual; the skeleton is per animal. No Math.random anywhere: skin
+     noise is a hash of position, so a species always looks the same.
+     ========================================================================== */
+  const MB = (function () {
+    const TAU = Math.PI * 2;
+    function cl(v, a, b) { return v < a ? a : (v > b ? b : v); }
+    function sm(t) { t = cl(t, 0, 1); return t * t * (3 - 2 * t); }
+    function mix(a, b, t) { return a + (b - a) * t; }
+    function hexc(h) { return [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]; }
+    function mixc(a, b, t) { return [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)]; }
+    function mulc(c, k) { return [c[0] * k, c[1] * k, c[2] * k]; }
+    function nrm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+    function crs(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+    function dt3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+    function sub3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+
+    /* A profile is a few [s, value] control points read as a monotone cubic
+       (Fritsch-Carlson): smooth, and it never overshoots between points, so a
+       silhouette has no bumps the table did not ask for. */
+    function curve(pts) {
+      if (typeof pts === "number") { const k = pts; return function () { return k; }; }
+      const n = pts.length, X = [], Y = [], D = [], M = [];
+      for (let i = 0; i < n; i++) { X.push(pts[i][0]); Y.push(pts[i][1]); }
+      if (n === 1) return function () { return Y[0]; };
+      for (let i = 0; i < n - 1; i++) D.push((Y[i + 1] - Y[i]) / (X[i + 1] - X[i]));
+      M[0] = D[0]; M[n - 1] = D[n - 2];
+      for (let i = 1; i < n - 1; i++) M[i] = D[i - 1] * D[i] <= 0 ? 0 : (D[i - 1] + D[i]) / 2;
+      for (let i = 0; i < n - 1; i++) {
+        if (D[i] === 0) { M[i] = 0; M[i + 1] = 0; continue; }
+        const a = M[i] / D[i], b = M[i + 1] / D[i], h = a * a + b * b;
+        if (h > 9) { const t = 3 / Math.sqrt(h); M[i] = t * a * D[i]; M[i + 1] = t * b * D[i]; }
+      }
+      return function (s) {
+        if (s <= X[0]) return Y[0];
+        if (s >= X[n - 1]) return Y[n - 1];
+        let i = 0;
+        while (i < n - 2 && s > X[i + 1]) i++;
+        const h = X[i + 1] - X[i], t = (s - X[i]) / h, t2 = t * t, t3 = t2 * t;
+        return (2 * t3 - 3 * t2 + 1) * Y[i] + (t3 - 2 * t2 + t) * h * M[i] +
+          (-2 * t3 + 3 * t2) * Y[i + 1] + (t3 - t2) * h * M[i + 1];
+      };
+    }
+
+    // ---- deterministic value noise (skin mottling, ragged colour lines) ----
+    // a fixed permutation and value table (built from an integer hash, once),
+    // so a lattice lookup is three array reads, not a multiply chain
+    const PERM = new Uint8Array(512), VAL = new Float32Array(256);
+    (function () {
+      const p = [];
+      for (let i = 0; i < 256; i++) p.push(i);
+      let h = 0x9e3779b9;
+      const rnd = function () { h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d); h = Math.imul(h ^ (h >>> 12), 0x297a2d39); h ^= h >>> 15; return (h >>> 0) / 4294967296; };
+      for (let i = 255; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); const t = p[i]; p[i] = p[j]; p[j] = t; }
+      for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+      for (let i = 0; i < 256; i++) VAL[i] = rnd();
+    })();
+    function hh(i, j, k, s) {
+      return VAL[PERM[PERM[PERM[(i + s * 17) & 255] + (j & 255)] + (k & 255)]];
+    }
+    function vn(x, y, z, s) {
+      const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+      let fx = x - xi, fy = y - yi, fz = z - zi;
+      fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy); fz = fz * fz * (3 - 2 * fz);
+      const a = mix(hh(xi, yi, zi, s), hh(xi + 1, yi, zi, s), fx);
+      const b = mix(hh(xi, yi + 1, zi, s), hh(xi + 1, yi + 1, zi, s), fx);
+      const c = mix(hh(xi, yi, zi + 1, s), hh(xi + 1, yi, zi + 1, s), fx);
+      const d = mix(hh(xi, yi + 1, zi + 1, s), hh(xi + 1, yi + 1, zi + 1, s), fx);
+      return mix(mix(a, b, fy), mix(c, d, fy), fz);
+    }
+    function fbm(x, y, z, s, oct) {
+      let v = 0, a = 1, n = 0, f = 1;
+      for (let o = 0; o < (oct || 3); o++) { v += a * vn(x * f, y * f, z * f, s + o * 31); n += a; a *= 0.5; f *= 2.07; }
+      return v / n;
+    }
+
+    /* ---- THE VERTEX STORE ---------------------------------------------------
+       Positions, bone weights ([bone, w, bone, w, ...]), a region tag and a
+       small lerpable meta array per vertex (the paint and the colour-line
+       fields read it). Colours are not stored: they are evaluated at the end,
+       after the colour lines have been cut. */
+    const TAG = { SKIN: 1, CHIN: 2, PALATE: 3, FLOOR: 4, TOOTH: 5, EYE: 6, FIN: 7, BALEEN: 8 };
+    function Store() { this.p = []; this.w = []; this.tag = []; this.m = []; this.ix = []; this.n = 0; this.forced = new Map(); }
+    Store.prototype.v = function (P, w, tag, m) {
+      this.p.push(P[0], P[1], P[2]); this.w.push(w); this.tag.push(tag); this.m.push(m || ZM);
+      return this.n++;
+    };
+    Store.prototype.pos = function (i) { return [this.p[i * 3], this.p[i * 3 + 1], this.p[i * 3 + 2]]; };
+    Store.prototype.t = function (a, b, c) { if (a !== b && b !== c && a !== c) this.ix.push(a, b, c); };
+    // quad of known winding
+    Store.prototype.qr = function (a, b, c, d) { this.t(a, b, c); this.t(a, c, d); };
+    // a quad wound so its face normal agrees with `out`
+    Store.prototype.q = function (a, b, c, d, out) {
+      const A = this.pos(a), B = this.pos(b), C = this.pos(c), D = this.pos(d);
+      let n = crs(sub3(C, A), sub3(D, B));
+      if (Math.abs(n[0]) + Math.abs(n[1]) + Math.abs(n[2]) < 1e-16) n = crs(sub3(B, A), sub3(C, A));
+      if (dt3(n, out) < 0) { this.t(a, d, c); this.t(a, c, b); } else { this.t(a, b, c); this.t(a, c, d); }
+    };
+    const ZM = [0, 0, 0, 0];
+
+    /* ---- CUTTING A COLOUR LINE THROUGH THE MESH ---------------------------
+       field(ctx) is a signed value per vertex (negative on one side of the
+       line, positive on the other, NaN = no line here). Every triangle the
+       zero crossing passes through is split along it, and each crossing point
+       becomes TWO vertices at the same position — one for each side — so the
+       paint can give the two sides different colours with a hard edge
+       between them. Normals and bone weights are interpolated, so the split
+       is invisible except as the colour line. Shared edges share their
+       crossing vertices: no cracks. */
+    function lerpW(wa, wb, t) {
+      const acc = new Map();
+      for (let k = 0; k < wa.length; k += 2) acc.set(wa[k], (acc.get(wa[k]) || 0) + wa[k + 1] * (1 - t));
+      for (let k = 0; k < wb.length; k += 2) acc.set(wb[k], (acc.get(wb[k]) || 0) + wb[k + 1] * t);
+      const out = [];
+      acc.forEach(function (v, b) { if (v > 1e-5) out.push(b, v); });
+      return out;
+    }
+    // one context per vertex for the whole finalize: field values are
+    // computed once and remembered (the paint asks for them again)
+    function ctxOf(S, N, i, fields) {
+      const CT = S._ctx || (S._ctx = []);
+      let c = CT[i];
+      if (c) return c;
+      const fv = new Array(fields.length);
+      c = CT[i] = {
+        i: i, p: S.pos(i), n: [N[i * 3], N[i * 3 + 1], N[i * 3 + 2]], tag: S.tag[i], m: S.m[i], memo: {},
+        f: function (k) {
+          const fo = S.forced.get(i);
+          if (fo && fo[k] != null) return fo[k];
+          if (fv[k] === undefined) {
+            const v = fields[k] ? fields[k](this) : NaN;
+            fv[k] = (v == null || !isFinite(v)) ? NaN : v;
+          }
+          return fv[k];
+        },
+      };
+      return c;
+    }
+    function splitPass(S, N, fields, k) {
+      const n = S.n, f = new Float64Array(n);
+      for (let i = 0; i < n; i++) f[i] = ctxOf(S, N, i, fields).f(k);
+      const I = S.ix, out = [], E = new Map();
+      function crossing(a, b) {
+        const key = a < b ? a * 16777216 + b : b * 16777216 + a;
+        let X = E.get(key);
+        if (X) return a < b ? X : [X[0], X[1]];
+        const t = f[a] / (f[a] - f[b]);
+        const P = [mix(S.p[a * 3], S.p[b * 3], t), mix(S.p[a * 3 + 1], S.p[b * 3 + 1], t), mix(S.p[a * 3 + 2], S.p[b * 3 + 2], t)];
+        const nn = nrm3([mix(N[a * 3], N[b * 3], t), mix(N[a * 3 + 1], N[b * 3 + 1], t), mix(N[a * 3 + 2], N[b * 3 + 2], t)]);
+        const ma = S.m[a], mb = S.m[b], mm = [];
+        for (let q = 0; q < ma.length; q++) mm.push(mix(ma[q], mb[q] == null ? ma[q] : mb[q], t));
+        const w = lerpW(S.w[a], S.w[b], t);
+        const fa = S.forced.get(a), fb = S.forced.get(b);
+        const ids = [];
+        for (let side = 0; side < 2; side++) {
+          const id = S.v(P, w, S.tag[a], mm);
+          N.push(nn[0], nn[1], nn[2]);
+          const fo = Object.assign({}, fb || {}, fa || {});
+          fo[k] = side === 0 ? -1e-9 : 1e-9;
+          S.forced.set(id, fo);
+          ids.push(id);
+        }
+        X = ids;               // [negative side, positive side]
+        E.set(key, X);
+        return X;
+      }
+      for (let t = 0; t < I.length; t += 3) {
+        const a = I[t], b = I[t + 1], c = I[t + 2];
+        const fa = f[a], fb = f[b], fc = f[c];
+        if (!(isFinite(fa) && isFinite(fb) && isFinite(fc))) { out.push(a, b, c); continue; }
+        const sa = fa >= 0, sb = fb >= 0, sc = fc >= 0;
+        if (sa === sb && sb === sc) { out.push(a, b, c); continue; }
+        let l, m2, n2;
+        if (sb === sc) { l = a; m2 = b; n2 = c; } else if (sa === sc) { l = b; m2 = c; n2 = a; } else { l = c; m2 = a; n2 = b; }
+        const ls = f[l] >= 0 ? 1 : 0;
+        const X1 = crossing(l, m2), X2 = crossing(l, n2);
+        out.push(l, X1[ls], X2[ls]);
+        out.push(X1[1 - ls], m2, n2);
+        out.push(X1[1 - ls], n2, X2[1 - ls]);
+      }
+      S.ix = out;
+    }
+
+    // smooth vertex normals (area weighted) over the shared index buffer
+    function normalsOf(S) {
+      const P = S.p, I = S.ix, N = new Array(S.n * 3).fill(0);
+      for (let t = 0; t < I.length; t += 3) {
+        const a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
+        const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+        const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        N[a] += nx; N[a + 1] += ny; N[a + 2] += nz;
+        N[b] += nx; N[b + 1] += ny; N[b + 2] += nz;
+        N[c] += nx; N[c + 1] += ny; N[c + 2] += nz;
+      }
+      for (let i = 0; i < S.n; i++) {
+        const x = N[i * 3], y = N[i * 3 + 1], z = N[i * 3 + 2], l = Math.hypot(x, y, z);
+        if (l > 1e-20) { N[i * 3] = x / l; N[i * 3 + 1] = y / l; N[i * 3 + 2] = z / l; }
+        else { N[i * 3] = 0; N[i * 3 + 1] = 1; N[i * 3 + 2] = 0; }
+      }
+      return N;
+    }
+
+    /* Normals first (on the welded mesh, so a cut line does not crease the
+       shading), then the colour lines, then the paint, then the buffers. */
+    function finalize(S, paint, fields) {
+      const N = normalsOf(S);
+      for (let k = 0; k < fields.length; k++) splitPass(S, N, fields, k);
+      const n = S.n;
+      const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3);
+      const spe = new Float32Array(n), si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) {
+        pos[i * 3] = S.p[i * 3]; pos[i * 3 + 1] = S.p[i * 3 + 1]; pos[i * 3 + 2] = S.p[i * 3 + 2];
+        nor[i * 3] = N[i * 3]; nor[i * 3 + 1] = N[i * 3 + 1]; nor[i * 3 + 2] = N[i * 3 + 2];
+        const c = paint(ctxOf(S, N, i, fields));
+        col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
+        spe[i] = c[3] == null ? 0.3 : c[3];
+        // four strongest influences, normalised
+        const w = S.w[i], pairs = [];
+        for (let k = 0; k < w.length; k += 2) {
+          let found = false;
+          for (let q = 0; q < pairs.length; q++) if (pairs[q][0] === w[k]) { pairs[q][1] += w[k + 1]; found = true; }
+          if (!found) pairs.push([w[k], w[k + 1]]);
+        }
+        pairs.sort(function (A, B) { return B[1] - A[1]; });
+        let s = 0;
+        for (let q = 0; q < 4 && q < pairs.length; q++) s += pairs[q][1];
+        s = s > 1e-9 ? s : 1;
+        for (let q = 0; q < 4; q++) {
+          si[i * 4 + q] = q < pairs.length ? pairs[q][0] : 0;
+          sw[i * 4 + q] = q < pairs.length ? pairs[q][1] / s : 0;
+        }
+        if (!(pairs.length)) { si[i * 4] = 0; sw[i * 4] = 1; }
+      }
+      const geo = new T.BufferGeometry();
+      geo.setAttribute("position", new T.BufferAttribute(pos, 3));
+      geo.setAttribute("normal", new T.BufferAttribute(nor, 3));
+      geo.setAttribute("color", new T.BufferAttribute(col, 3));
+      geo.setAttribute("mbSpec", new T.BufferAttribute(spe, 1));
+      geo.setAttribute("skinIndex", new T.BufferAttribute(si, 4));
+      geo.setAttribute("skinWeight", new T.BufferAttribute(sw, 4));
+      geo.setIndex(S.ix);
+      geo.computeBoundingBox(); geo.computeBoundingSphere();
+      // which part each vertex is (skin, chin, palate, tooth, eye, fin...):
+      // what a probe or a wound asks of the mesh
+      geo.userData.mbTag = Uint8Array.from(S.tag);
+      geo._shared = true;
+      return geo;
+    }
+
+    /* ---- THE SHARED MATERIAL ---------------------------------------------
+       Phong, so wet skin and eyes catch a highlight. Two additions through
+       onBeforeCompile, one program for every marine body:
+         mbSpec  a per-vertex specular strength (a shark's skin is matte next
+                 to an orca's, a tuna's flank is a mirror, an eye is wet)
+         a fine object-space noise on the diffuse (the dermal grain of a
+                 shark, the scale glitter of a fish) so a hand's breadth of
+                 skin is never one flat colour. It reads the REST position,
+                 so the grain is fixed to the animal and swims with it. */
+    let MAT = null;
+    function material() {
+      if (MAT) return MAT;
+      MAT = new T.MeshPhongMaterial({ vertexColors: true, shininess: 38, specular: new T.Color(0.34, 0.35, 0.36) });
+      MAT.name = "marineBody";
+      MAT.onBeforeCompile = function (sh) {
+        sh.vertexShader = sh.vertexShader
+          .replace("#include <common>", "#include <common>\nattribute float mbSpec;\nvarying float vMbSpec;\nvarying vec3 vMbP;")
+          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvMbSpec = mbSpec;\nvMbP = position;");
+        sh.fragmentShader = sh.fragmentShader
+          .replace("#include <common>", "#include <common>\nvarying float vMbSpec;\nvarying vec3 vMbP;\n" +
+            "float mbH(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }\n" +
+            "float mbN(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);\n" +
+            "  return mix(mix(mix(mbH(i), mbH(i + vec3(1,0,0)), f.x), mix(mbH(i + vec3(0,1,0)), mbH(i + vec3(1,1,0)), f.x), f.y),\n" +
+            "             mix(mix(mbH(i + vec3(0,0,1)), mbH(i + vec3(1,0,1)), f.x), mix(mbH(i + vec3(0,1,1)), mbH(i + vec3(1,1,1)), f.x), f.y), f.z); }")
+          .replace("#include <color_fragment>", "#include <color_fragment>\n" +
+            "diffuseColor.rgb *= 0.94 + 0.08 * mbN(vMbP * 21.0) + 0.04 * mbN(vMbP * 67.0);")
+          .replace("#include <specularmap_fragment>", "#include <specularmap_fragment>\nspecularStrength = vMbSpec;");
+      };
+      MAT.customProgramCacheKey = function () { return "marineBody2"; };
+      MAT._shared = true;
+      return MAT;
+    }
+
+    /* ==================================================================
+       THE SWIMMER BODY — sharks, bony fish, cetaceans.
+
+       s runs from 0 at the snout tip to 1 at the tip of the tail (total
+       length L). A station's cross-section is a superellipse with separate
+       half-heights above (top) and below (bot) its centre line and a
+       half-width (half); exponents shape it (2 = ellipse, higher = boxier,
+       lower = keeled). Ring vertices are indexed so the lower arc between
+       the two mouth corners is a fixed index range [0, mL]: that is what
+       lets the mouth be a CUT in the skin — the chin is the lower arc of the
+       head rings, the upper lip the rest — with one topology for every ring.
+       ================================================================== */
+    function stationsOf(spec, lv) {
+      const out = [];
+      const sb = spec.noseRound;
+      const K = lv.noseRings;
+      for (let k = 1; k <= K; k++) out.push({ s: sb * (1 - Math.cos(Math.PI * 0.5 * k / K)), key: k === K });
+      const s1 = spec.tubeEnd;
+      let s = sb;
+      while (s < s1 - 1e-6) {
+        const step = s < spec.headEnd ? lv.ds * lv.headK : lv.ds;
+        s = Math.min(s1, s + step);
+        out.push({ s: s });
+      }
+      const keep = (spec.keys || []).slice();
+      if (spec.mouth) keep.push({ s: spec.mouth.front, key: "mf" }, { s: spec.mouth.corner, key: "mc" });
+      if (spec.eye && lv.eyeRings) {
+        const r = spec.eye.r;
+        keep.push({ s: spec.eye.s - r * 1.6, key: 1 }, { s: spec.eye.s, key: 1 }, { s: spec.eye.s + r * 1.6, key: 1 });
+      }
+      if (spec.gills && lv.gills) {
+        const G = spec.gills;
+        for (let k = 0; k < G.n; k++) {
+          const sg = G.n > 1 ? mix(G.s0, G.s1, k / (G.n - 1)) : G.s0;
+          keep.push({ s: sg - G.gap, key: "g0", gi: k }, { s: sg, key: "g1", gi: k }, { s: sg + G.gap * 0.8, key: "g2", gi: k });
+        }
+      }
+      // specials win; a plain station closer than a third of a step to one goes
+      const minGap = lv.ds * 0.34;
+      const all = out.filter(function (o) {
+        if (o.key) return true;
+        for (let q = 0; q < keep.length; q++) if (Math.abs(keep[q].s - o.s) < minGap) return false;
+        return true;
+      }).concat(keep);
+      all.sort(function (a, b) { return a.s - b.s; });
+      const res = [];
+      for (let i = 0; i < all.length; i++) {
+        if (res.length && Math.abs(all[i].s - res[res.length - 1].s) < 1e-5) {
+          if (all[i].key) Object.assign(res[res.length - 1], all[i]);
+          continue;
+        }
+        res.push(Object.assign({}, all[i]));
+      }
+      return res;
+    }
+
+    function makeProfile(spec) {
+      const P = spec.profile;
+      return {
+        top: curve(P.top), bot: curve(P.bot), half: curve(P.half), yo: curve(P.yo || 0),
+        nT: curve(P.nT || 2), nB: curve(P.nB || 2), nS: curve(P.nS || 2),
+        keel: curve(P.keel || 0),
+      };
+    }
+    // the cross-section at s, in model units
+    function sectionAt(spec, PF, s) {
+      const L = spec.L;
+      const sb = spec.noseRound;
+      // the snout tip is rounded (an elliptic cap), not a cone point
+      const rk = s < sb ? Math.sqrt(Math.max(0, 1 - Math.pow(1 - s / sb, 2))) : 1;
+      const tail = spec.tubeEnd;
+      const tk = s > tail - 0.012 ? Math.sqrt(Math.max(0.02, 1 - Math.pow((s - (tail - 0.012)) / 0.012, 2))) : 1;
+      return {
+        s: s, x: spec.xNose - s * L, yc: spec.axisY + PF.yo(s) * L,
+        top: Math.max(1e-4, PF.top(s) * L * rk * tk), bot: Math.max(1e-4, PF.bot(s) * L * rk * tk),
+        half: Math.max(1e-4, PF.half(s) * L * rk * tk),
+        eT: 2 / PF.nT(s), eB: 2 / PF.nB(s), eS: 2 / PF.nS(s),
+        keel: PF.keel(s) * L,
+      };
+    }
+    // a point on a section at ring angle phi (0 = ventral midline, pi/2 = +z
+    // flank, pi = dorsal midline, 3pi/2 = -z flank)
+    function ringPoint(R, phi) {
+      const cy = -Math.cos(phi), sz = Math.sin(phi);
+      const yy = cy >= 0 ? R.top * Math.pow(cy, R.eT) : -R.bot * Math.pow(-cy, R.eB);
+      const az = Math.abs(sz);
+      let zz = R.half * Math.pow(az, R.eS) * (sz < 0 ? -1 : 1);
+      if (R.keel > 0) zz += (sz < 0 ? -1 : 1) * R.keel * Math.exp(-(cy * cy) / 0.010) * az;
+      return [R.x, R.yc + yy, zz];
+    }
+    function ringNormal(R, phi) {
+      const e = 1e-3;
+      const a = ringPoint(R, phi - e), b = ringPoint(R, phi + e);
+      const tng = sub3(b, a);
+      // outward in the ring's plane: +x cross the tangent of increasing phi
+      return nrm3(crs([1, 0, 0], tng));
+    }
+
+    /* ---- the skeleton's spine: which bone owns which stretch of body ----
+       chain = { b: [bone ids front to back], J: [x of the boundary between
+       b[k] and b[k+1]] (descending), hw: [half width of each blend] }. A bone
+       owns the stretch between its two boundaries, and every boundary is a
+       linear blend across 2*hw, so the body bends as one smooth curve instead
+       of hinging at the joints. */
+    function chainWeights(C, x) {
+      const J = C.J, n = C.b.length;
+      let r = 0;
+      while (r < n - 1 && x < J[r]) r++;
+      // nearest boundary: the one above (r-1) or below (r)
+      let q = -1, best = Infinity;
+      if (r - 1 >= 0 && Math.abs(x - J[r - 1]) < best) { best = Math.abs(x - J[r - 1]); q = r - 1; }
+      if (r < n - 1 && Math.abs(x - J[r]) < best) { best = Math.abs(x - J[r]); q = r; }
+      if (q >= 0 && best < C.hw[q]) {
+        const t = sm((J[q] + C.hw[q] - x) / (2 * C.hw[q]));
+        return [C.b[q], 1 - t, C.b[q + 1], t];
+      }
+      return [C.b[r], 1];
+    }
+
+    function buildSwimmer(spec, lod) {
+      const lv = spec.lod[lod];
+      const L = spec.L;
+      const PF = makeProfile(spec);
+      const st = stationsOf(spec, lv);
+      const M = lv.M;
+      const mo = spec.mouth;
+      const mL = mo ? Math.max(2, 2 * Math.round(M * mo.alphaC / TAU)) : 2 * Math.round(M * 0.2);
+      const aU = Math.PI * mL / M;
+      const S = new Store();
+      const B = spec.boneIx;
+
+      // stations -> sections
+      const R = st.map(function (o) { const r = sectionAt(spec, PF, o.s); r.key = o.key; r.gi = o.gi; return r; });
+      const nR = R.length;
+      let iF = -1, iC = -1;
+      for (let i = 0; i < nR; i++) { if (R[i].key === "mf") iF = i; if (R[i].key === "mc") iC = i; }
+      const hasMouth = !!(mo && iF >= 0 && iC > iF);
+
+      // the lower-arc half-angle per ring (the mouth's plan shape lives here)
+      function alphaAt(s) {
+        if (!hasMouth) return aU;
+        const sF = mo.front, sC = mo.corner;
+        if (s >= sC) return mix(mo.alphaC, aU, sm((s - sC) / 0.05));
+        if (s >= sF) return mo.alphaF + (mo.alphaC - mo.alphaF) * Math.pow((s - sF) / (sC - sF), mo.shape || 0.6);
+        return mix(aU, mo.alphaF, sm(1 - (sF - s) / Math.max(1e-4, mo.snoutBlend || 0.03)));
+      }
+      function phiOf(j, a) {
+        if (j <= mL) return -a + 2 * a * j / mL;
+        return a + (TAU - 2 * a) * (j - mL) / (M - mL);
+      }
+
+      // the spine chain and the jaw/eye/gill/fin weight rules
+      const chain = spec.chain;   // built by the template (x positions in model units)
+      const xC = hasMouth ? R[iC].x : 0, xFm = hasMouth ? R[iF].x : 0;
+      const mouthLen = hasMouth ? xFm - xC : 0;
+      function bodyW(P, j, i) {
+        let w = chainWeights(chain, P[0]);
+        if (!hasMouth) return w;
+        // the throat skin behind the mouth corners stretches with the jaw
+        const behind = xC - P[0];
+        if (behind >= 0 && behind < mouthLen * (spec.mouth.throat || 0.8)) {
+          const phi = phiOf(j, alphaAt(R[i].s));
+          const low = sm((Math.cos(phi) - 0.15) / 0.6);       // 1 on the ventral midline
+          const k = low * (1 - sm(behind / (mouthLen * (spec.mouth.throat || 0.8)))) * 0.85;
+          if (k > 0.001) w = scaleW(w, 1 - k).concat([B.jaw, k]);
+        }
+        return w;
+      }
+      function scaleW(w, k) { const o = []; for (let q = 0; q < w.length; q += 2) o.push(w[q], w[q + 1] * k); return o; }
+
+      // ---- eyes: the socket depression -----------------------------------
+      const EY = spec.eye ? eyeCentres(spec, PF) : null;
+      function eyeDeform(P, N) {
+        if (!EY) return P;
+        for (let e = 0; e < 2; e++) {
+          const E = EY[e], dx = P[0] - E.skin[0], dy = P[1] - E.skin[1], dz = P[2] - E.skin[2];
+          const d2 = dx * dx + dy * dy + dz * dz, R2 = E.r * E.r * 5.2;
+          if (d2 < R2) {
+            const k = Math.pow(1 - d2 / R2, 2) * E.r * (spec.eye.socket == null ? 0.30 : spec.eye.socket);
+            P = [P[0] - N[0] * k, P[1] - N[1] * k, P[2] - N[2] * k];
+          }
+        }
+        return P;
+      }
+      // ---- gill slits: a groove ring and a flap ring per slit --------------
+      const G = spec.gills;
+      function gillDeform(Ri, phi, P, N) {
+        if (!G || !lv.gills || Ri.gi == null || (Ri.key !== "g1" && Ri.key !== "g2")) return { P: P, g: 0 };
+        // elevation above the lateral midline, either flank
+        const el = Math.asin(cl(-Math.cos(phi), -1, 1));            // -pi/2 bottom .. +pi/2 top
+        const k = Ri.gi, frac = G.n > 1 ? k / (G.n - 1) : 0;
+        const lo = mix(G.lo0, G.lo1, frac), hi = mix(G.hi0, G.hi1, frac);
+        if (el < lo || el > hi) return { P: P, g: 0 };
+        const u = (el - lo) / (hi - lo);
+        const bump = Math.pow(Math.sin(Math.PI * u), 0.55);
+        const d = (Ri.key === "g1" ? -G.depth : G.flap) * L * bump;
+        // the slit leans: its top sits further back than its foot
+        const slant = G.slant * L * (u - 0.5);
+        return { P: [P[0] + N[0] * d - slant, P[1] + N[1] * d, P[2] + N[2] * d], g: Ri.key === "g1" ? bump : -bump };
+      }
+
+      // ---- the hull rings -----------------------------------------------
+      const up = [], lo = [];
+      const lipDrop = hasMouth ? (mo.lipDrop || 0.0012) * L : 0;
+      const chinIn = hasMouth ? (mo.chinInset || 0.0035) * L : 0;
+      for (let i = 0; i < nR; i++) {
+        const Ri = R[i], a = alphaAt(Ri.s);
+        const U = new Array(M), D = new Array(M);
+        for (let j = 0; j < M; j++) {
+          const phi = phiOf(j, a);
+          let P = ringPoint(Ri, phi);
+          const N = ringNormal(Ri, phi);
+          P = eyeDeform(P, N);
+          const gd = gillDeform(Ri, phi, P, N);
+          P = gd.P;
+          // meta: [s, cos phi, sin phi, gill]
+          const meta = [Ri.s, Math.cos(phi), Math.sin(phi), gd.g];
+          const cut = hasMouth && ((i > iF && i < iC && (j === 0 || j === mL)) || (i === iF && j <= mL));
+          if (!cut) {
+            const w = (hasMouth && i >= iF && i < iC && j > 0 && j < mL) ? [B.jaw, 1] : bodyW(P, j, i);
+            const id = S.v(P, w, (hasMouth && i >= iF && i <= iC && j >= 0 && j <= mL) ? TAG.CHIN : TAG.SKIN, meta);
+            U[j] = D[j] = id;
+          } else {
+            // upper lip: a hair lower and proud, so it overhangs the chin's
+            const side = j === 0 ? -1 : (j === mL ? 1 : 0);
+            const Pu = [P[0], P[1] - lipDrop, P[2] + side * lipDrop * 0.6];
+            const wU = i === iF && side === 0
+              ? chainWeights(chain, P[0]).map(function (v, q) { return q % 2 ? v * 0.5 : v; }).concat([B.upperJaw, 0.5])
+              : chainWeights(chain, P[0]).map(function (v, q) { return q % 2 ? v * 0.55 : v; }).concat([B.upperJaw, 0.45]);
+            U[j] = S.v(Pu, wU, TAG.SKIN, [Ri.s, meta[1], meta[2], -2]);
+            // lower lip: inset, so the upper teeth close OUTSIDE it
+            let Pd;
+            if (side !== 0) Pd = ringPoint(Ri, phi - side * chinIn / Math.max(1e-3, Ri.half));
+            else Pd = [P[0] - chinIn, P[1], P[2]];
+            D[j] = S.v(Pd, [B.jaw, 1], TAG.CHIN, [Ri.s, meta[1], meta[2], -3]);
+          }
+        }
+        up.push(U); lo.push(D);
+      }
+      // the corner ring's lips are shared skin: half head, half jaw
+      if (hasMouth) {
+        [0, mL].forEach(function (j) {
+          const id = up[iC][j];
+          S.w[id] = chainWeights(chain, S.p[id * 3]).map(function (v, q) { return q % 2 ? v * 0.5 : v; }).concat([B.jaw, 0.5]);
+        });
+      }
+      for (let i = 0; i < nR - 1; i++) {
+        for (let j = 0; j < M; j++) {
+          const j2 = (j + 1) % M;
+          const chinQuad = hasMouth && j < mL && i >= iF && i + 1 <= iC;
+          const A = chinQuad ? lo : up;
+          S.qr(A[i][j], A[i][j2], A[i + 1][j2], A[i + 1][j]);
+        }
+      }
+      // snout tip and tail end: rounded caps to a point
+      {
+        const R0 = R[0];
+        const tipP = [spec.xNose, spec.axisY + PF.yo(0) * L, 0];
+        const tip = S.v(tipP, chainWeights(chain, tipP[0]), TAG.SKIN, [0, -1, 0, 0]);
+        for (let j = 0; j < M; j++) {
+          const j2 = (j + 1) % M;
+          S.q(tip, up[0][j2], up[0][j], up[0][j], [1, 0, 0]);
+          void R0;
+        }
+        const RL = R[nR - 1];
+        const endP = [RL.x - Math.min(RL.half, RL.top) * 0.6, RL.yc, 0];
+        const end = S.v(endP, chainWeights(chain, endP[0]), TAG.SKIN, [RL.s, -1, 0, 0]);
+        for (let j = 0; j < M; j++) {
+          const j2 = (j + 1) % M;
+          S.q(end, up[nR - 1][j], up[nR - 1][j2], up[nR - 1][j2], [-1, 0, 0]);
+        }
+      }
+
+      // ---- the mouth: cavity, gums, teeth ----------------------------------
+      let mouthInfo = null;
+      if (hasMouth) mouthInfo = buildMouth(S, spec, lv, R, up, lo, iF, iC, mL, chain);
+      // ---- eyes -------------------------------------------------------------
+      if (EY) for (let e = 0; e < 2; e++) buildEye(S, spec, EY[e], e === 0 ? B.eyeR : B.eyeL, lv);
+      // ---- fins -------------------------------------------------------------
+      const finInfo = {};
+      const fins = spec.fins || [];
+      for (let f = 0; f < fins.length; f++) {
+        const fi = buildFin(S, spec, PF, fins[f], lv, chain, f + 1);
+        if (fi) finInfo[fins[f].name] = fi;
+      }
+      // ---- species extras (tubercles, baleen, ...) ---------------------------
+      if (spec.extras) spec.extras(S, { spec: spec, lv: lv, R: R, PF: PF, chain: chain, sectionAt: function (s) { return sectionAt(spec, PF, s); }, ringPoint: ringPoint, ringNormal: ringNormal, mouth: mouthInfo, TAG: TAG });
+
+      const geo = finalize(S, spec.paint, spec.fields || []);
+      return { geo: geo, mouth: mouthInfo, fins: finInfo, eyes: EY, stations: R.length, M: M };
+    }
+
+    // where the two eyes sit: on the skin at (s, elevation), and the centre
+    // of the eyeball a fraction of its radius inside it
+    function eyeCentres(spec, PF) {
+      const E = spec.eye, L = spec.L;
+      const R = sectionAt(spec, PF, E.s);
+      const out = [];
+      [1, -1].forEach(function (side) {
+        // elevation above the lateral midline -> ring angle
+        const phi = side > 0 ? Math.PI / 2 + E.up : 1.5 * Math.PI - E.up;
+        const P = ringPoint(R, phi), N = ringNormal(R, phi);
+        const r = E.r * L;
+        const look = nrm3([N[0] + (E.fwd || 0.12), N[1] + (E.lookUp || 0), N[2]]);
+        const C = [P[0] - N[0] * r * (1 - (E.out == null ? 0.42 : E.out)), P[1] - N[1] * r * (1 - (E.out == null ? 0.42 : E.out)),
+          P[2] - N[2] * r * (1 - (E.out == null ? 0.42 : E.out))];
+        out.push({ side: side, skin: P, n: N, c: C, r: r, look: look });
+      });
+      return out;
+    }
+
+    /* An eyeball: a sphere about its own centre, coloured by the angle from
+       the line of sight — pupil, iris, a dark limbal ring, then the white
+       of the eye on the back half. The roll (city/wildlife_rig.js) turns the
+       back half out: a great white's eye rolling white at the bite. */
+    function buildEye(S, spec, E, bone, lv) {
+      const nU = lv.eyeSeg || 12, nV = lv.eyeRing || 8;
+      const f = E.look;
+      let upv = [0, 1, 0];
+      const rgt = nrm3(crs(f, upv));
+      upv = nrm3(crs(rgt, f));
+      const rows = [];
+      for (let v = 0; v <= nV; v++) {
+        const th = Math.PI * v / nV;                // 0 = pupil centre, pi = back pole
+        const row = [];
+        const ringN = v === 0 || v === nV ? 1 : nU;
+        for (let u = 0; u < ringN; u++) {
+          const ps = TAU * u / nU;
+          const dir = [f[0] * Math.cos(th) + (rgt[0] * Math.cos(ps) + upv[0] * Math.sin(ps)) * Math.sin(th),
+            f[1] * Math.cos(th) + (rgt[1] * Math.cos(ps) + upv[1] * Math.sin(ps)) * Math.sin(th),
+            f[2] * Math.cos(th) + (rgt[2] * Math.cos(ps) + upv[2] * Math.sin(ps)) * Math.sin(th)];
+          const P = [E.c[0] + dir[0] * E.r, E.c[1] + dir[1] * E.r, E.c[2] + dir[2] * E.r];
+          row.push(S.v(P, [bone, 1], TAG.EYE, [th, ps, E.side, 0]));
+        }
+        rows.push(row);
+      }
+      for (let v = 0; v < nV; v++) {
+        const A = rows[v], Bv = rows[v + 1];
+        for (let u = 0; u < nU; u++) {
+          const u2 = (u + 1) % nU;
+          const a = A[A.length === 1 ? 0 : u], b = A[A.length === 1 ? 0 : u2];
+          const c = Bv[Bv.length === 1 ? 0 : u2], d = Bv[Bv.length === 1 ? 0 : u];
+          const mid = S.pos(c);
+          S.q(a, b, c, d, sub3(mid, E.c));
+        }
+      }
+    }
+
+    /* ---- THE MOUTH ---------------------------------------------------------
+       The lips are already cut into the hull (up[] = the head's side of the
+       cut, lo[] = the chin's). This hangs the inside on them: a palate from
+       the upper lip up into the head, a floor from the lower lip over the
+       chin, the two joining at the corners and running back as the pharynx,
+       which closes blind inside the body. Gum bands along both lips carry the
+       rows of teeth. The palate and the upper teeth ride the upper jaw bone
+       (it protrudes), the floor and lower teeth ride the lower jaw. */
+    function buildMouth(S, spec, lv, R, up, lo, iF, iC, mL, chain) {
+      const mo = spec.mouth, L = spec.L, B = spec.boneIx;
+      const rows = iC - iF;
+      const pal = [], flo = [];
+      const cavCentre = [];
+      for (let i = iF; i <= iC; i++) {
+        const Ri = R[i];
+        const lipL = S.pos(up[i][0]), lipR = S.pos(up[i][mL]);
+        const yLip = (lipL[1] + lipR[1]) * 0.5;
+        const yBot = Ri.yc - Ri.bot;
+        cavCentre.push([Ri.x, yLip, 0]);
+        const rowP = [], rowF = [];
+        const front = i === iF, corner = i === iC;
+        const ti = (i - iF) / Math.max(1, rows);
+        for (let k = 0; k <= mL; k++) {
+          const t = k / mL;
+          // ---- palate
+          let ip;
+          if (front) ip = up[i][k];
+          else if (k === 0 || k === mL) ip = up[i][k];
+          else {
+            const hP = Math.max(0.002 * L, (Ri.yc - yLip) * (mo.palate == null ? 0.55 : mo.palate)) * sm(ti * 3.2 + 0.15);
+            const P = [Ri.x, yLip + hP * Math.pow(Math.sin(Math.PI * t), 0.6), mix(lipL[2], lipR[2], t) * (1 - 0.06 * Math.sin(Math.PI * t))];
+            // the gum band nearest the lips protrudes with the upper jaw
+            const gum = Math.min(t, 1 - t) < 0.2 || ti < 0.25;
+            const w = gum ? [B.upperJaw, 0.8].concat(scale(chainWeights(chain, P[0]), 0.2))
+              : [B.upperJaw, 0.25].concat(scale(chainWeights(chain, P[0]), 0.75));
+            ip = S.v(P, w, TAG.PALATE, [ti, t, 0, 0]);
+          }
+          rowP.push(ip);
+          // ---- floor
+          let iflo;
+          if (front) iflo = lo[i][k];
+          else if (k === 0 || k === mL) iflo = lo[i][k];
+          else {
+            const skin = S.pos(lo[i][k]);
+            const lipLL = S.pos(lo[i][0]), lipRR = S.pos(lo[i][mL]);
+            const yL = (lipLL[1] + lipRR[1]) * 0.5;
+            const tJ = Math.max(0.0015 * L, (yL - yBot) * 0.16);
+            const yF = Math.max(skin[1] + tJ, yL - (yL - yBot) * (mo.floor == null ? 0.45 : mo.floor) * Math.pow(Math.sin(Math.PI * t), 0.8));
+            const P = [Ri.x, Math.min(yF, yL + 0.0005 * L), mix(lipLL[2], lipRR[2], t) * 0.97];
+            iflo = S.v(P, [B.jaw, 1], TAG.FLOOR, [ti, t, 0, 0]);
+          }
+          rowF.push(iflo);
+          if (corner && (k === 0 || k === mL)) { /* shared corner */ }
+        }
+        pal.push(rowP); flo.push(rowF);
+      }
+      // the pharynx: behind the corners the roof and floor close into a tube
+      const iCr = iC;
+      const RC = R[iCr];
+      const cornerL = S.pos(up[iCr][0]), cornerR = S.pos(up[iCr][mL]);
+      const yLipC = (cornerL[1] + cornerR[1]) * 0.5;
+      const phLen = (mo.pharynx || 0.07) * L;
+      const nPh = lv.pharynx || 4;
+      let prevP = pal[pal.length - 1], prevF = flo[flo.length - 1];
+      for (let q = 1; q <= nPh; q++) {
+        const tau = q / nPh;
+        const x = RC.x - phLen * tau;
+        const yc = mix(yLipC, RC.yc - RC.bot * 0.25, tau * 0.5);
+        const zH = Math.abs(cornerR[2]) * (1 - 0.55 * tau) * (q === nPh ? 0.02 : 1);
+        const hR = Math.max(0.001 * L, (RC.yc - yLipC) * 0.45 * (1 - 0.6 * tau)) * (q === nPh ? 0.05 : 1);
+        const hF = Math.max(0.001 * L, (yLipC - (RC.yc - RC.bot)) * 0.38 * (1 - 0.6 * tau)) * (q === nPh ? 0.05 : 1);
+        const rowP = [], rowF = [];
+        let eL = -1, eR = -1;
+        for (let k = 0; k <= mL; k++) {
+          const t = k / mL;
+          const z = mix(-zH, zH, t);
+          if (k === 0 || k === mL) {
+            const P = [x, yc, z];
+            // the side walls hang half off the jaw at the corners and none at
+            // the blind end, so the throat opens with the jaw and tapers shut
+            const jw = 0.4 * (1 - tau);
+            const w = [B.jaw, jw].concat(scale(chainWeights(chain, x), 1 - jw));
+            const id = S.v(P, w, TAG.PALATE, [1 + tau, t, 1, 0]);
+            if (k === 0) eL = id; else eR = id;
+            rowP.push(id); rowF.push(id);
+            continue;
+          }
+          const sn = Math.pow(Math.sin(Math.PI * t), 0.6);
+          rowP.push(S.v([x, yc + hR * sn, z], chainWeights(chain, x), TAG.PALATE, [1 + tau, t, 1, 0]));
+          const wF = [B.jaw, 0.8 * (1 - tau)].concat(scale(chainWeights(chain, x), 1 - 0.8 * (1 - tau)));
+          rowF.push(S.v([x, yc - hF * sn, z], wF, TAG.FLOOR, [1 + tau, t, 1, 0]));
+        }
+        void eL; void eR;
+        pal.push(rowP); flo.push(rowF);
+        cavCentre.push([x, yc, 0]);
+        prevP = rowP; prevF = rowF;
+      }
+      void prevP; void prevF;
+      // quads: palate faces down into the cavity, floor faces up into it
+      for (let r = 0; r < pal.length - 1; r++) {
+        const cc = cavCentre[r], cn = cavCentre[r + 1];
+        for (let k = 0; k < mL; k++) {
+          const a = pal[r][k], b = pal[r][k + 1], c = pal[r + 1][k + 1], d = pal[r + 1][k];
+          const mid = S.pos(c), mp = S.pos(a);
+          const ctr = [(cc[0] + cn[0]) * 0.5, (cc[1] + cn[1]) * 0.5 - 0.004 * L, 0];
+          S.q(a, b, c, d, sub3(ctr, [(mid[0] + mp[0]) * 0.5, (mid[1] + mp[1]) * 0.5, (mid[2] + mp[2]) * 0.5]));
+          const fa = flo[r][k], fb = flo[r][k + 1], fc = flo[r + 1][k + 1], fd = flo[r + 1][k];
+          const m1 = S.pos(fc), m0 = S.pos(fa);
+          const ctr2 = [(cc[0] + cn[0]) * 0.5, (cc[1] + cn[1]) * 0.5 + 0.004 * L, 0];
+          S.q(fa, fb, fc, fd, sub3(ctr2, [(m1[0] + m0[0]) * 0.5, (m1[1] + m0[1]) * 0.5, (m1[2] + m0[2]) * 0.5]));
+        }
+      }
+
+      // ---- teeth along both lips -----------------------------------------------
+      const TT = mo.teeth;
+      let upperN = 0, lowerN = 0;
+      const lipPolyU = [], lipPolyD = [];
+      for (let i = iC; i > iF; i--) { lipPolyU.push(S.pos(up[i][0])); lipPolyD.push(S.pos(lo[i][0])); }
+      for (let k = 0; k <= mL; k++) { lipPolyU.push(S.pos(up[iF][k])); lipPolyD.push(S.pos(lo[iF][k])); }
+      for (let i = iF + 1; i <= iC; i++) { lipPolyU.push(S.pos(up[i][mL])); lipPolyD.push(S.pos(lo[i][mL])); }
+      const ctrMouth = [mix(R[iF].x, R[iC].x, 0.55), 0, 0];
+      if (TT && lv.teeth) {
+        const rowsU = TT.upper || [], rowsD = TT.lower || [];
+        for (let r = 0; r < rowsU.length; r++) upperN += teethRow(S, spec, lipPolyU, rowsU[r], 1, B.upperJaw, ctrMouth);
+        for (let r = 0; r < rowsD.length; r++) lowerN += teethRow(S, spec, lipPolyD, rowsD[r], -1, B.jaw, ctrMouth);
+      }
+      if (mo.baleen && lv.teeth) baleenRow(S, spec, lipPolyU, mo.baleen, B.upperJaw, ctrMouth);
+      const front = S.pos(up[iF][mL >> 1]);
+      return {
+        hingeX: R[iC].x, hingeY: yLipC, frontX: R[iF].x, frontY: front[1],
+        width: Math.abs(cornerR[2] - cornerL[2]), upperTeeth: upperN, lowerTeeth: lowerN,
+        lipY: front[1],
+      };
+    }
+    function scale(w, k) { const o = []; for (let q = 0; q < w.length; q += 2) o.push(w[q], w[q + 1] * k); return o; }
+
+    // resample a polyline to n points by arc length, with tangents
+    function resample(poly, n, u0, u1) {
+      const cum = [0];
+      for (let i = 1; i < poly.length; i++) cum.push(cum[i - 1] + Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1], poly[i][2] - poly[i - 1][2]));
+      const tot = cum[cum.length - 1] || 1;
+      const out = [];
+      for (let k = 0; k < n; k++) {
+        const u = n > 1 ? mix(u0, u1, k / (n - 1)) : (u0 + u1) * 0.5;
+        const d = u * tot;
+        let i = 1;
+        while (i < cum.length - 1 && cum[i] < d) i++;
+        const t = (d - cum[i - 1]) / Math.max(1e-9, cum[i] - cum[i - 1]);
+        const a = poly[i - 1], b = poly[i];
+        out.push({ u: u, p: [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)], tg: nrm3(sub3(b, a)) });
+      }
+      return out;
+    }
+    /* One row of teeth: flat blades on the gum, crowns pointing across the
+       gape, tallest in front and smaller and more raked toward the corners.
+       `dir` +1 = upper (crowns down), -1 = lower (crowns up). */
+    function teethRow(S, spec, poly, row, dir, bone, ctr) {
+      const L = spec.L;
+      const pts = resample(poly, row.n, 0.035, 0.965);
+      for (let k = 0; k < pts.length; k++) {
+        const P = pts[k], u = P.u;
+        const centre = 1 - Math.abs(u - 0.5) * 2;           // 1 at the front, 0 at the corners
+        const h = row.h * L * (row.cornerK == null ? 0.42 : row.cornerK) + row.h * L * (1 - (row.cornerK == null ? 0.42 : row.cornerK)) * Math.pow(centre, 0.55);
+        const bw = Math.min(row.w * L * (0.55 + 0.45 * Math.pow(centre, 0.5)), h * 1.1);
+        // inward (toward the mouth's middle, in plan) and the crown direction
+        const inw = nrm3([ctr[0] - P.p[0], 0, ctr[2] - P.p[2]]);
+        const rake = (row.rake || 0) + (row.rakeCorner || 0.35) * (1 - centre);
+        const tilt = row.tilt || 0;
+        let crown = [inw[0] * (Math.sin(rake) + tilt), -dir * Math.cos(rake), inw[2] * (Math.sin(rake) + tilt)];
+        crown = nrm3(crown);
+        const base = [P.p[0] + inw[0] * row.inset * L, P.p[1] + dir * row.sink * L, P.p[2] + inw[2] * row.inset * L];
+        const wdir = P.tg;
+        const thk = nrm3(crs(wdir, crown));
+        const th = bw * (row.thick || 0.18);
+        const tip = [base[0] + crown[0] * h, base[1] + crown[1] * h, base[2] + crown[2] * h];
+        const bl = [base[0] - wdir[0] * bw * 0.5, base[1] - wdir[1] * bw * 0.5, base[2] - wdir[2] * bw * 0.5];
+        const br = [base[0] + wdir[0] * bw * 0.5, base[1] + wdir[1] * bw * 0.5, base[2] + wdir[2] * bw * 0.5];
+        // a shoulder at 40% height gives the blade its triangle-with-shoulders shape
+        const sh = 0.38;
+        const ml = [mix(bl[0], tip[0], sh) + wdir[0] * bw * 0.06, mix(bl[1], tip[1], sh), mix(bl[2], tip[2], sh) + wdir[2] * bw * 0.06];
+        const mr = [mix(br[0], tip[0], sh) - wdir[0] * bw * 0.06, mix(br[1], tip[1], sh), mix(br[2], tip[2], sh) - wdir[2] * bw * 0.06];
+        const outline = [bl, ml, tip, mr, br];
+        const fr = [], bk = [];
+        for (let q = 0; q < outline.length; q++) {
+          const o = outline[q], tq = q === 2 ? 0.25 : 1;
+          const along = q === 0 || q === 4 ? 0 : (q === 2 ? 1 : sh);
+          fr.push(S.v([o[0] + thk[0] * th * tq, o[1] + thk[1] * th * tq, o[2] + thk[2] * th * tq], [bone, 1], TAG.TOOTH, [along, row.age || 0, 0, 0]));
+          bk.push(S.v([o[0] - thk[0] * th * tq, o[1] - thk[1] * th * tq, o[2] - thk[2] * th * tq], [bone, 1], TAG.TOOTH, [along, row.age || 0, 0, 0]));
+        }
+        const cen = [mix(base[0], tip[0], 0.35), mix(base[1], tip[1], 0.35), mix(base[2], tip[2], 0.35)];
+        // two faces fanned from a base corner, and the edges around (the base
+        // edge itself is buried in the gum)
+        S.q(fr[0], fr[1], fr[2], fr[2], thk); S.q(fr[0], fr[2], fr[3], fr[4], thk);
+        S.q(bk[0], bk[1], bk[2], bk[2], [-thk[0], -thk[1], -thk[2]]); S.q(bk[0], bk[2], bk[3], bk[4], [-thk[0], -thk[1], -thk[2]]);
+        for (let q = 0; q < 4; q++) {
+          const mid = S.pos(fr[q]), mid2 = S.pos(fr[q + 1]);
+          S.q(fr[q], bk[q], bk[q + 1], fr[q + 1], sub3([(mid[0] + mid2[0]) * 0.5, (mid[1] + mid2[1]) * 0.5, (mid[2] + mid2[2]) * 0.5], cen));
+        }
+      }
+      return pts.length;
+    }
+    // baleen: a fringe of dark plates hanging inside the upper lip
+    function baleenRow(S, spec, poly, b, bone, ctr) {
+      const L = spec.L;
+      const pts = resample(poly, b.n, 0.08, 0.92);
+      for (let k = 0; k < pts.length; k++) {
+        const P = pts[k], centre = 1 - Math.abs(P.u - 0.5) * 2;
+        const h = b.h * L * (0.5 + 0.5 * (1 - centre));
+        const inw = nrm3([ctr[0] - P.p[0], 0, ctr[2] - P.p[2]]);
+        const base = [P.p[0] + inw[0] * b.inset * L, P.p[1] + 0.002 * L, P.p[2] + inw[2] * b.inset * L];
+        const wdir = P.tg, wd = b.w * L;
+        const a = S.v([base[0] - wdir[0] * wd, base[1], base[2] - wdir[2] * wd], [bone, 1], TAG.BALEEN, [0, 0, 0, 0]);
+        const c = S.v([base[0] + wdir[0] * wd, base[1], base[2] + wdir[2] * wd], [bone, 1], TAG.BALEEN, [0, 0, 0, 0]);
+        const tip = S.v([base[0] + inw[0] * h * 0.3, base[1] - h, base[2] + inw[2] * h * 0.3], [bone, 1], TAG.BALEEN, [1, 0, 0, 0]);
+        S.t(a, c, tip); S.t(a, tip, c);
+      }
+    }
+
+    /* ---- A FIN ---------------------------------------------------------------
+       A planform in its own (chord u, span v) plane: a bowed leading edge
+       swept back by `sweep`, a trailing edge that runs from the base back to
+       the free rear tip and then concave up to the apex, a rounded or pointed
+       tip. Every section is a NACA 00xx foil (closed trailing edge) whose
+       thickness tapers from tc at the root to tcTip, so the blade is thick and
+       round at the leading edge and knife-thin at the trailing edge and tip.
+       The root section is pushed `embed` into the body along -span, so the
+       fin comes OUT of the skin with no visible join. Bone weights: median
+       fins and the caudal follow the spine chain at their own x; a paired fin
+       ramps from the body's weights at its root to its own bone. */
+    function naca(x) { return 5 * (0.2969 * Math.sqrt(x) - 0.1260 * x - 0.3516 * x * x + 0.2843 * x * x * x - 0.1036 * x * x * x * x); }
+    function buildFin(S, spec, PF, F, lv, chain, finId) {
+      const L = spec.L;
+      const span = F.span * L, root = F.root * L;
+      const v = nrm3(F.dir);
+      let u = [1 - v[0] * v[0], -v[0] * v[1], -v[0] * v[2]];
+      if (F.chordDir) u = F.chordDir;
+      const ud = dt3(u, v);
+      u = nrm3([u[0] - v[0] * ud, u[1] - v[1] * ud, u[2] - v[2] * ud]);
+      const w = nrm3(crs(u, v));
+      // which face is "up": + for the sky-facing face of a flat fin (or the
+      // +z face of an upright one), whichever way w happens to point
+      const faceSgn = Math.abs(w[1]) > 0.2 ? Math.sign(w[1]) : (Math.sign(w[2]) || 1);
+      // the root point: on the body at station F.at, at ring angle F.phi
+      const O = finOrigin(spec, PF, F);
+      const tanS = Math.tan(F.sweep || 0);
+      const LE0 = root * 0.5;
+      const conc = F.conc || 0, rear = F.rear || 0, rearH = F.rearH == null ? 0.1 : F.rearH;
+      const tipC = (F.tipC == null ? 0.12 : F.tipC) * root;
+      const bow = (F.bow || 0) * span, round = F.round == null ? 0.12 : F.round;
+      function LE(vv) { return LE0 - vv * tanS + bow * Math.sin(Math.PI * cl(vv / span, 0, 1)); }
+      function TE(vv) {
+        const vr = rearH * span, ute = LE0 - root, urt = ute - rear * root;
+        if (vv <= vr) return vr > 0 ? mix(ute, urt, sm(vv / vr)) : urt;
+        const t = (vv - vr) / Math.max(1e-6, span - vr);
+        let te = mix(urt, LE(span) - tipC, t) + conc * root * Math.sin(Math.PI * t);
+        if (F.notch) {
+          // a subterminal notch: a short step in the trailing edge near the tip
+          const d = (t - F.notch.t) / F.notch.w;
+          if (Math.abs(d) < 1) te += F.notch.d * root * (1 - d * d) * (1 - d * d);
+        }
+        return te;
+      }
+      const nS = lv.finSpan || 7, nC = lv.finChord || 6;
+      const emb = (F.embed == null ? 0.25 : F.embed) * Math.max(span, root) * 0.4;
+      const secs = [];
+      const vs = [-emb, 0];
+      for (let m = 1; m <= nS; m++) vs.push(span * Math.sin(Math.PI * 0.5 * m / nS));
+      const xc = [];
+      for (let k = 0; k <= nC; k++) xc.push((1 - Math.cos(Math.PI * k / nC)) * 0.5);
+      const tc0 = F.tc == null ? 0.12 : F.tc, tc1 = F.tcTip == null ? 0.05 : F.tcTip;
+      const pec = F.bone != null;
+      for (let m = 0; m < vs.length; m++) {
+        const vv = vs[m], vc = Math.max(0, vv);
+        let le = LE(vc), te = TE(vc);
+        const hf = vc / span;
+        // round the apex: the chord collapses on an ellipse over the last `round`
+        if (hf > 1 - round && round > 0) {
+          const q = (hf - (1 - round)) / round, k = Math.sqrt(Math.max(0, 1 - q * q));
+          const mid = (le + te) * 0.5;
+          le = mid + (le - mid) * Math.max(0.04, k); te = mid + (te - mid) * Math.max(0.04, k);
+        }
+        const chord = Math.max(1e-4, le - te);
+        const tc = m === vs.length - 1 ? 0 : mix(tc0, tc1, hf);
+        const ring = [];
+        // LE, upper surface aft, TE, lower surface forward
+        for (let k = 0; k <= nC; k++) ring.push([le - xc[k] * chord, tc * chord * naca(xc[k]), k]);
+        for (let k = nC - 1; k >= 1; k--) ring.push([le - xc[k] * chord, -tc * chord * naca(xc[k]), k]);
+        const ids = [];
+        for (let q = 0; q < ring.length; q++) {
+          const uu = ring[q][0], ww = ring[q][1];
+          const P = [O[0] + u[0] * uu + v[0] * vv + w[0] * ww, O[1] + u[1] * uu + v[1] * vv + w[1] * ww, O[2] + u[2] * uu + v[2] * vv + w[2] * ww];
+          let wt = chainWeights(chain, P[0]);
+          if (pec) {
+            const k = sm((hf - 0.02) / 0.32);
+            const base = chainWeights(chain, O[0]);
+            wt = scale(base, 1 - k).concat([F.bone, k]);
+          }
+          if (F.extraW) wt = F.extraW(P, wt, hf);
+          ids.push(S.v(P, wt, TAG.FIN, [hf, xc[ring[q][2]], faceSgn * ww / Math.max(1e-6, chord), finId]));
+        }
+        secs.push({ ids: ids, mid: [O[0] + u[0] * (le + te) * 0.5 + v[0] * vv, O[1] + u[1] * (le + te) * 0.5 + v[1] * vv, O[2] + u[2] * (le + te) * 0.5 + v[2] * vv] });
+      }
+      const nRing = secs[0].ids.length;
+      for (let m = 0; m < secs.length - 1; m++) {
+        const A = secs[m].ids, Bs = secs[m + 1].ids;
+        const ctr = [(secs[m].mid[0] + secs[m + 1].mid[0]) * 0.5, (secs[m].mid[1] + secs[m + 1].mid[1]) * 0.5, (secs[m].mid[2] + secs[m + 1].mid[2]) * 0.5];
+        for (let q = 0; q < nRing; q++) {
+          const q2 = (q + 1) % nRing;
+          const pa = S.pos(A[q]), pb = S.pos(Bs[q2]);
+          S.q(A[q], A[q2], Bs[q2], Bs[q], sub3([(pa[0] + pb[0]) * 0.5, (pa[1] + pb[1]) * 0.5, (pa[2] + pb[2]) * 0.5], ctr));
+        }
+      }
+      // root cap (buried in the body) so the blade is a closed solid
+      const r0 = secs[0].ids, c0 = S.v(secs[0].mid, chainWeights(chain, secs[0].mid[0]), TAG.FIN, [0, 0.5, 0, finId]);
+      for (let q = 0; q < nRing; q++) S.q(c0, r0[(q + 1) % nRing], r0[q], r0[q], [-v[0], -v[1], -v[2]]);
+      const apex = secs[secs.length - 1].mid;
+      return { origin: O, span: span, root: root, apex: apex, u: u, v: v, w: w, le0: LE(0), te0: TE(0) };
+    }
+
+    // where a fin's root sits on the body (shared by the fin and its bone)
+    function finOrigin(spec, PF, F) {
+      if (F.origin) return [F.origin[0], F.origin[1], F.origin[2]];
+      if (F.originS != null) {
+        const R = sectionAt(spec, PF, F.originS);
+        return [R.x, R.yc + (F.originDy || 0) * spec.L, (F.originDz || 0) * spec.L];
+      }
+      const L = spec.L, root = F.root * L;
+      const Rs = sectionAt(spec, PF, F.at + F.root * 0.5);
+      const O = ringPoint(Rs, F.phi == null ? Math.PI : F.phi);
+      O[0] = spec.xNose - F.at * L - root * 0.5;
+      return O;
+    }
+
+    /* ---- A SPECIES TEMPLATE: skeleton, geometry per LOD, the published
+       measurements. Built once per species spec and shared by every animal. */
+    function template(spec) {
+      if (spec._tpl) return spec._tpl;
+      const L = spec.L, PF = makeProfile(spec);
+      const sec = function (s) { return sectionAt(spec, PF, s); };
+      const axis = function (s) { const R = sec(s); return [R.x, R.yc, 0]; };
+      const bones = [], ix = {};
+      function add(name, parent, p) { ix[name] = bones.length; bones.push({ name: name, parent: parent == null ? -1 : ix[parent], p: p }); return ix[name]; }
+      const bs = spec.bones;
+      add("root", null, axis(bs.root));
+      add("neck", "root", axis(bs.neck));
+      add("head", "neck", axis(bs.head));
+      const mo = spec.mouth;
+      let hinge = axis(bs.head), front = axis(0.02);
+      if (mo) {
+        const Rc = sec(mo.corner), Rf = sec(mo.front);
+        const pc = ringPoint(Rc, mo.alphaC), pf = ringPoint(Rf, 0);
+        hinge = [pc[0], pc[1], 0]; front = [pf[0], pf[1], 0];
+      }
+      add("upperJaw", "head", front);
+      add("jaw", "neck", hinge);
+      const EY = spec.eye ? eyeCentres(spec, PF) : null;
+      add("eyeR", "head", EY ? EY[0].c : axis(bs.head));
+      add("eyeL", "head", EY ? EY[1].c : axis(bs.head));
+      const pecR = (spec.fins || []).filter(function (f) { return f.boneName === "pecR"; })[0];
+      const pecL = (spec.fins || []).filter(function (f) { return f.boneName === "pecL"; })[0];
+      add("pecR", "root", pecR ? finOrigin(spec, PF, pecR) : axis(bs.root));
+      add("pecL", "root", pecL ? finOrigin(spec, PF, pecL) : axis(bs.root));
+      const tailNames = [];
+      let prev = "root";
+      for (let k = 0; k < bs.tail.length; k++) { const nm = "t" + (k + 1); add(nm, prev, axis(bs.tail[k])); tailNames.push(nm); prev = nm; }
+      if (spec.extraBones) spec.extraBones(add, { sec: sec, axis: axis, ix: ix, PF: PF });
+      (spec.fins || []).forEach(function (f) { if (f.boneName) f.bone = ix[f.boneName]; });
+      spec.boneIx = ix;
+      // the spine chain: head, neck, root, then the tail bones
+      const cb = [ix.head, ix.neck, ix.root].concat(tailNames.map(function (n) { return ix[n]; }));
+      const J = [bones[ix.head].p[0], bones[ix.neck].p[0]].concat(tailNames.map(function (n) { return bones[ix[n]].p[0]; }));
+      const xEnds = [spec.xNose].concat(J).concat([spec.xNose - (spec.chainEnd || 1) * L]);
+      const hw = J.map(function (x, q) { return 0.45 * Math.min(xEnds[q] - x, x - xEnds[q + 2]); });
+      spec.chain = { b: cb, J: J, hw: hw };
+      // the paint needs the eyes (the dark orbit), so it is made here
+      if (spec.makePaint) { const pk = spec.makePaint(EY); spec.paint = pk.paint; spec.fields = pk.fields; }
+      // geometry, one per LOD
+      const geo = [], info = [];
+      for (let l = 0; l < spec.lod.length; l++) {
+        const r = buildSwimmer(spec, l);
+        geo.push(r.geo); info.push(r);
+      }
+      const hi = info[0];
+      // the trunk alone (no fins): what contact, beam and saddle questions want
+      let ymin = Infinity, ymax = -Infinity, zmax = 0, xmin = spec.xNose - spec.tubeEnd * L;
+      for (let k = 0; k <= 60; k++) {
+        const s = spec.tubeEnd * k / 60, R = sec(s);
+        ymin = Math.min(ymin, R.yc - R.bot); ymax = Math.max(ymax, R.yc + R.top); zmax = Math.max(zmax, R.half + R.keel);
+      }
+      const trunk = new T.Box3(new T.Vector3(xmin, ymin, -zmax), new T.Vector3(spec.xNose, ymax, zmax));
+      const box = geo[0].boundingBox.clone();
+      const pad = (box.max.x - box.min.x) * 0.06;
+      box.expandByScalar(pad);
+      const sphere = new T.Sphere(); box.getBoundingSphere(sphere);
+      // the dorsal (the blade a surface proxy has to match) and the tail tip
+      const dors = hi.fins[spec.dorsalName || "dorsal1"];
+      let finDesc = null;
+      if (dors) {
+        const backY = sec(spec.fins.filter(function (f) { return f.name === (spec.dorsalName || "dorsal1"); })[0].at + 0.04).yc +
+          sec(spec.fins.filter(function (f) { return f.name === (spec.dorsalName || "dorsal1"); })[0].at + 0.04).top;
+        const cu = hi.fins[spec.caudalName || "caudalU"];
+        finDesc = {
+          height: Math.max(0.05, dors.apex[1] - backY), base: dors.root, x: dors.origin[0], backY: backY,
+          color: spec.finColor || 0x50585e, thickness: 0.5, planLength: box.max.x - box.min.x - 2 * pad,
+          planBeam: zmax * 2, tailHeight: cu ? Math.max(0, cu.apex[1] - backY) : 0, tailX: cu ? cu.apex[0] : xmin,
+        };
+      }
+      let contract = null;
+      if (hi.mouth) {
+        const m = hi.mouth;
+        const mLen = m.frontX - m.hingeX;
+        const gap = Math.max(0.01 * L, (spec.jaw ? spec.jaw.gap : 0.05) * L);
+        contract = {
+          version: 6, shape: "skinned-body",
+          hinge: { x: m.hingeX, y: m.hingeY, z: 0 },
+          bite: { x: m.frontX - mLen * 0.12, y: m.lipY - gap * 0.35, z: 0 },
+          grip: { x: m.frontX - mLen * 0.45, y: m.lipY - gap * 0.45, z: 0 },
+          maxOpen: spec.jaw ? spec.jaw.drop + spec.jaw.lift : 1,
+          travel: spec.jaw ? spec.jaw.drop : 1, restClose: 0,
+          protrude: spec.jaw ? spec.jaw.protrude[0] * L : 0, upperDrop: spec.jaw ? -spec.jaw.protrude[1] * L : 0,
+          width: m.width, length: mLen, gap: gap,
+          upperTeeth: m.upperTeeth, lowerTeeth: m.lowerTeeth, toothRows: spec.mouth.teeth ? (spec.mouth.teeth.upper || []).length : 0,
+          bodySplit: true, articulatedEnvelope: true, lowerShell: "marineBody",
+          upperReachX: m.frontX + (spec.jaw ? spec.jaw.protrude[0] * L : 0),
+        };
+      }
+      // where a rider sits: on the back line just ahead of the dorsal fin
+      const dorsalSpec = (spec.fins || []).filter(function (f) { return f.name === (spec.dorsalName || "dorsal1"); })[0];
+      const sS = spec.saddleS != null ? spec.saddleS : (dorsalSpec && dorsalSpec.at != null ? Math.max(0.1, dorsalSpec.at - 0.05) : 0.32);
+      const Rs = sec(sS);
+      const saddle = { x: Rs.x, y: Rs.yc + Rs.top, width: Rs.half * 2 };
+      const tpl = spec._tpl = {
+        spec: spec, bones: bones, ix: ix, geo: geo, box: box, sphere: sphere, trunk: trunk, saddle: saddle,
+        beam: zmax * 2, height: ymax - ymin, len: box.max.x - box.min.x - 2 * pad, backY: finDesc ? finDesc.backY : ymax,
+        sharkFin: finDesc, contract: contract, mouth: hi.mouth, fins: hi.fins, eyes: EY,
+        tris: geo.map(function (g) { return g.index.count / 3; }),
+      };
+      return tpl;
+    }
+
+    /* ---- ONE ANIMAL: its own skeleton on the species' shared geometry ---- */
+    function instance(tpl) {
+      const g = new T.Group();
+      const bones = tpl.bones.map(function (b) { const o = new T.Bone(); o.name = b.name; return o; });
+      for (let i = 0; i < bones.length; i++) {
+        const b = tpl.bones[i], P = b.parent >= 0 ? tpl.bones[b.parent].p : [0, 0, 0];
+        bones[i].position.set(b.p[0] - P[0], b.p[1] - P[1], b.p[2] - P[2]);
+        if (b.parent >= 0) bones[b.parent].add(bones[i]);
+      }
+      const mesh = new T.SkinnedMesh(tpl.geo[0], material());
+      mesh.name = "marineBody";
+      mesh.add(bones[0]);
+      mesh.updateMatrixWorld(true);
+      const sk = new T.Skeleton(bones);
+      mesh.bind(sk);
+      sk.update();                         // valid matrices before anything measures it
+      // a skinned mesh measures itself by skinning every vertex on first ask;
+      // hand it the rest-pose answer (padded for the swimming bend) instead
+      mesh.boundingBox = tpl.box.clone();
+      mesh.boundingSphere = tpl.sphere.clone();
+      mesh.castShadow = true;
+      g.add(mesh);
+      const sp = tpl.spec;
+      g.userData.marineBody = {
+        mesh: mesh, bones: bones, ix: tpl.ix, tpl: tpl, lod: 0, plan: sp.plan || "lateral",
+        len: tpl.len, beam: tpl.beam, height: tpl.height, backY: tpl.backY, trunk: tpl.trunk,
+        jaw: sp.jaw || null, wave: sp.wave || null, eye: sp.eye || null,
+      };
+      if (tpl.contract) {
+        const c = JSON.parse(JSON.stringify(tpl.contract));
+        g.userData.aquaticMouth = c;
+        g._aquaticMouth = { contract: c, applyGape: null };
+      }
+      if (tpl.sharkFin) g.userData.sharkFin = Object.assign({}, tpl.sharkFin);
+      if (tpl.saddle) g.userData.saddle = Object.assign({}, tpl.saddle);
+      if (sp.sharkLike) {
+        g.userData.sharkShape = {
+          profile: sp.profileName || "torpedo", hullLength: tpl.len, hullWidth: tpl.beam, hullHeight: tpl.height,
+          planRatio: tpl.beam / Math.max(1e-3, tpl.len),
+        };
+      }
+      return g;
+    }
+
+    return {
+      TAG: TAG, curve: curve, fbm: fbm, vn: vn, hexc: hexc, mixc: mixc, mulc: mulc, mix: mix, sm: sm, cl: cl,
+      nrm3: nrm3, crs: crs, sub3: sub3, dt3: dt3, Store: Store, finalize: finalize, material: material,
+      buildSwimmer: buildSwimmer, sectionAt: sectionAt, ringPoint: ringPoint, ringNormal: ringNormal,
+      makeProfile: makeProfile, chainWeights: chainWeights, buildFin: buildFin, buildEye: buildEye,
+      eyeCentres: eyeCentres, scaleW: scale, finOrigin: finOrigin, template: template, instance: instance,
+    };
+  })();
+
+  /* ---- THE PAINT. One factory for every swimmer: countershading with a
+     ragged, irregular line (cut through the mesh, so it is crisp), the back
+     darkest along the spine, a fine mottle, gill grooves, a dark ring round
+     the eye, lips, a wet mouth that goes from gum pink to black down the
+     throat, teeth, eyes, and fins by role and face. A species passes its
+     colours and line, and optional hooks for its own markings. ------------ */
+  function paintKit(o) {
+    const H = MB.hexc, TAG = MB.TAG;
+    const back = H(o.back), belly = H(o.belly), fin = H(o.fin || o.back);
+    const line = MB.curve(o.line);                 // countershade line, -1 belly .. +1 spine
+    const rag = o.rag == null ? 0.10 : o.rag;
+    const L = o.L;
+    const gum = H(o.gum || 0x8a3a3c), gumDeep = H(o.gumDeep || 0x4a1518), throat = H(o.throat || 0x120405);
+    const enamel = H(o.tooth || 0xf0eadb), root = H(o.toothRoot || 0xc99f94);
+    const pupil = H(o.pupil || 0x010203), iris = H(o.iris || 0x0d171c), sclera = H(o.sclera || 0xc8cfcf), orbit = H(o.orbit || 0x14191c);
+    const EY = o.eyes || null;
+    function lineAt(m, c) {
+      if (c && c.memo.line != null) return c.memo.line;
+      // the line wanders with two noises along the body and a finer tooth
+      const s = m[0], side = m[2] >= 0 ? 1 : -1;
+      const n1 = MB.vn(s * 34, side * 3.1, 0.5, 11) - 0.5, n2 = MB.vn(s * 140, side * 5.7, 1.5, 12) - 0.5;
+      const v = line(s) + rag * (n1 * 1.2 + n2 * 0.55);
+      if (c) c.memo.line = v;
+      return v;
+    }
+    function relH(m) { return -m[1]; }                  // -1 ventral .. +1 dorsal (ring meta)
+    const fields = [
+      // 0: the countershade line on the skin and the chin; fin faces
+      function (c) {
+        if (c.tag === TAG.SKIN || c.tag === TAG.CHIN) return (relH(c.m) - lineAt(c.m, c)) * 4;
+        if (c.tag === TAG.FIN) {
+          const role = (o.finRole && o.finRole[c.m[3]]) || "median";
+          if (role === "paired") return c.m[2] * 40;     // upper face grey, lower face white
+          return NaN;
+        }
+        return NaN;
+      },
+      // 1: species markings (fin tips, bars...) through a hook
+      function (c) { return o.mark ? o.mark(c) : NaN; },
+    ];
+    function skin(c) {
+      const m = c.m, rh = relH(m), s = m[0];
+      const up = c.f(0) >= 0;
+      let col;
+      if (up) {
+        // darkest along the spine, lighter toward the line
+        const k = 0.80 + 0.30 * MB.sm((1 - rh) / 1.6);
+        col = MB.mulc(back, k);
+        if (o.tint) col = [col[0] * o.tint[0], col[1] * o.tint[1], col[2] * o.tint[2]];
+      } else {
+        col = belly.slice();
+        // a little grey creeps into the white just under the line
+        const d = lineAt(m, c) - rh;
+        if (d < 0.12) col = MB.mixc(col, MB.mulc(back, 1.35), 0.18 * (1 - d / 0.12));
+      }
+      // mottle
+      const n = MB.fbm(c.p[0] * (9 / L) * 4, c.p[1] * (9 / L) * 4, c.p[2] * (9 / L) * 4, 3, 3);
+      col = MB.mulc(col, 0.93 + 0.14 * n);
+      // gill grooves and flaps
+      if (m[3] > 0) col = MB.mulc(col, 1 - 0.62 * m[3]);
+      else if (m[3] < 0 && m[3] > -1.5) col = MB.mulc(col, 1 + 0.06 * -m[3]);
+      // lips: the upper lip edge darkens into the mouth line
+      if (m[3] === -2) col = MB.mulc(col, 0.55);
+      // the orbit
+      if (EY) for (let e = 0; e < EY.length; e++) {
+        const E = EY[e], dx = c.p[0] - E.skin[0], dy = c.p[1] - E.skin[1], dz = c.p[2] - E.skin[2];
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) / E.r;
+        if (d < 2.6) col = MB.mixc(col, orbit, 0.75 * (1 - MB.sm((d - 1.1) / 1.5)));
+      }
+      if (o.skin) col = o.skin(c, col, up);
+      return col;
+    }
+    return {
+      fields: fields,
+      paint: function (c) {
+        const t = c.tag, m = c.m;
+        if (t === TAG.SKIN || t === TAG.CHIN) return skin(c).concat([up01(c) ? (o.specBack == null ? 0.25 : o.specBack) : (o.specBelly == null ? 0.18 : o.specBelly)]);
+        if (t === TAG.PALATE || t === TAG.FLOOR) {
+          // gum pink at the lips, darker inside, black down the throat
+          const depth = m[0] >= 1 ? 1 : Math.max(m[0], 1 - Math.min(m[1], 1 - m[1]) * 4);
+          const edge = Math.min(m[1], 1 - m[1]);
+          let col = MB.mixc(gum, gumDeep, MB.sm(depth * 1.6 + (edge > 0.18 ? 0.35 : 0)));
+          if (m[0] >= 1) col = MB.mixc(gumDeep, throat, MB.sm((m[0] - 1) * 1.5));
+          if (m[0] < 1 && m[0] > 0.6) col = MB.mixc(col, throat, (m[0] - 0.6) * 1.6);
+          return col.concat([0.55]);
+        }
+        if (t === TAG.TOOTH) {
+          const k = MB.sm(m[0] / 0.35);
+          let col = MB.mixc(root, enamel, k);
+          if (m[1] > 0) col = MB.mulc(col, 0.92);
+          return col.concat([0.6]);
+        }
+        if (t === TAG.BALEEN) return [0.06, 0.055, 0.05, 0.2];
+        if (t === TAG.EYE) {
+          const th = m[0];
+          let col;
+          if (th < 0.30) col = pupil;
+          else if (th < 0.62) col = MB.mixc(iris, MB.mulc(iris, 0.6), MB.sm((th - 0.30) / 0.32));
+          else if (th < 0.85) col = MB.mixc(MB.mulc(iris, 0.5), MB.mulc(sclera, 0.25), MB.sm((th - 0.62) / 0.23));
+          else col = MB.mixc(MB.mulc(sclera, 0.35), sclera, MB.sm((th - 0.85) / 0.9));
+          if (o.eye) col = o.eye(c, col);
+          return col.concat([1.0]);
+        }
+        if (t === TAG.FIN) {
+          const role = (o.finRole && o.finRole[m[3]]) || "median";
+          let col;
+          if (role === "paired") col = c.f(0) >= 0 ? MB.mulc(fin, 0.95) : belly.slice();
+          else col = MB.mulc(fin, 0.92 + 0.10 * (1 - m[0]));
+          const n = MB.fbm(c.p[0] * 30 / L, c.p[1] * 30 / L, c.p[2] * 30 / L, 5, 2);
+          col = MB.mulc(col, 0.95 + 0.10 * n);
+          if (o.fin) col = o.fin(c, col, role);
+          return col.concat([o.specFin == null ? 0.25 : o.specFin]);
+        }
+        return [1, 0, 1, 0];
+      },
+    };
+    function up01(c) { return c.f(0) >= 0; }
+  }
+
+  /* ---- the species' body, as built for every individual ------------------ */
+  function marineBuild(spec) {
+    const tpl = MB.template(spec);
+    return MB.instance(tpl);
+  }
+  CBZ.marineBodyKit = MB;
+
+  /* ==========================================================================
      THE SEA, REBUILT FROM THE REFERENCE SHEET (docs/SHARK-REFERENCE.md).
 
      What was here before was a pile of axis-aligned boxes: every fin in the
@@ -3030,219 +4302,104 @@
   }
 
   /* ============================================================
-     GREAT WHITE SHARK — Carcharodon carcharias. ~4.5 m. THE HERO MODEL.
-     Everything above exists for this animal; every other shark in the
-     catalogue is a deviation from it. Read docs/SHARK-REFERENCE.md alongside.
+     GREAT WHITE SHARK — Carcharodon carcharias.
+     Proportions are fractions of total length (TL), from white shark
+     morphometrics (adult females): preoral length 5% TL, eye at 7% (about
+     1.2% TL across), mouth corners at 11%, five gill slits from 17% to 23%
+     (the first ~7% TL tall), pectoral origin 23.5% (anterior margin ~19%),
+     first dorsal origin 34.5% (base 11.5%, height 10%), pelvics at 55%, the
+     second dorsal and anal tiny at 65-67%, precaudal pit at 74%, a nearly
+     lunate caudal (upper lobe ~25% TL, lower ~19%) on a depressed tail stock
+     with a lateral keel. Deepest (~20% TL) and widest (~17%) at the first
+     dorsal. 4.35 model units at scale 1.08 is a 4.7 m adult.
      ============================================================ */
-  const GW_RINGS = [
-    { x: -1.62, y: 0.860, ry: 0.235, rz: 0.165 },   // THE TAILSTOCK (see weldedSleeve)
-    { x: -1.15, y: 0.855, ry: 0.350, rz: 0.245 },
-    { x: -0.50, y: 0.850, ry: 0.500, rz: 0.375 },
-    { x: 0.20, y: 0.850, ry: 0.600, rz: 0.455 },
-    { x: 0.85, y: 0.860, ry: 0.615, rz: 0.485 },   // MAX GIRTH — the pectoral line
-    /* THE CHEEK KEEPS THE BEAM. This ring used to give up 6% of the animal's
-       width before the head had even started, so the widest thing about a
-       great white seen head-on was its shoulders and the face was a ball
-       hanging off the front of them. In the reference photographs the beam
-       carries forward through the gills and lets go only at the cheek. */
-    { x: 1.45, y: 0.885, ry: 0.530, rz: 0.480 },
-    /* ..and from the weld forward the hull is BURIED INSIDE THE ROSTRUM (see
-       weldedRostrum). These two rings are never seen: they exist to carry the
-       mouth notch and to give the gill and pore fields a cross-section to sit
-       on, and they are kept comfortably inside the shell's own curve. */
-    { x: 1.95, y: 0.935, ry: 0.370, rz: 0.380 },
-    { x: 2.16, y: 0.965, ry: 0.260, rz: 0.280 },
-  ];
-  // The countershading LINE, per ring. It runs low across the cheek and kicks
-  // hard UP behind the pectoral and over the gills — reference sheet §2. The
-  // old single scalar made it a dead-level band all the way down the animal.
-  /* ..AND LOW ACROSS THE CHEEK MEANS LOW. At 0.00 on the cheek ring the
-     line sat at the ring's centre, ten centimetres above the corner of the
-     mouth; in the head-on photograph the grey cap comes down to the
-     corners of the mouth and the white arch is lowest there. -0.17 puts
-     it three centimetres over the corner. */
-  const GW_BELLY = [-0.38, -0.34, -0.26, -0.10, 0.16, -0.17, -0.26, -0.30];
-  /* THE SNOUT IS NOT A SECOND TABLE ANY MORE. Rings and countershading are
-     both solved off the hull at the weld: the species says only where the
-     shell emerges (x1), where the nose ends (x0), how blunt and how flat it is
-     there (tipRy/tipRz — a great white's rostrum is a FLATTENED cone, wider
-     than it is deep, which is why tipRz is the larger of the two), how far the
-     nose lifts (tipY) and how high the white reaches on the nose front
-     (tipLine, world y — see rostrumLine). */
-  /* THE WELD STATION IS THE HULL'S OWN LAST STATION, and it is not a matter
-     of taste: addSharkHull hands the whole head front to the jaw shells at
-     `hingeX + length*0.07` (1.683 here) and caps itself there. A shell whose
-     rim is solved anywhere FORWARD of that is solved against a hull that has
-     already stopped, which is exactly how the old snout table came to stand
-     22 mm proud of nothing. 1.66 puts the rim a hair inside the hull's last
-     ring, where there is still skin for it to match. */
-  const GW_ROSTRUM = rostrumOf(GW_RINGS, GW_BELLY, {
-    /* AND THE HEAD IS A WEDGE, NOT A BALL. tipRz is the LARGER of the two on
-       purpose: a great white's rostrum is flattened top to bottom, so the
-       shell's width has to give up less of itself per metre than its depth
-       does. The body behind it stays deeper than it is wide, which is the
-       contrast the head-on photograph is all about. */
-    x1: 1.66, x0: 2.62, tipRy: 0.090, tipRz: 0.250, tipY: 1.030, tipLine: 0.900, n: 5,
-  });
-  const GW_SNOUT = GW_ROSTRUM.rings;
-  const GW_SNOUT_BELLY = GW_ROSTRUM.belly;
-  const GW_SNOUT_LINE = GW_ROSTRUM.line;
+  const GW_SPEC = {
+    id: "great_white_shark", plan: "lateral", sharkLike: true, profileName: "torpedo-wedge",
+    L: 4.35, xNose: 1.83, axisY: 0.86, noseRound: 0.024, tubeEnd: 0.778, headEnd: 0.27,
+    profile: {
+      top: [[0, 0], [0.02, 0.017], [0.05, 0.034], [0.09, 0.050], [0.14, 0.066], [0.20, 0.081], [0.27, 0.094], [0.34, 0.101], [0.42, 0.099], [0.50, 0.089], [0.58, 0.071], [0.65, 0.051], [0.70, 0.037], [0.735, 0.029], [0.778, 0.023]],
+      bot: [[0, 0], [0.02, 0.013], [0.05, 0.027], [0.09, 0.040], [0.14, 0.054], [0.20, 0.070], [0.27, 0.086], [0.34, 0.095], [0.42, 0.095], [0.50, 0.085], [0.58, 0.066], [0.65, 0.045], [0.70, 0.031], [0.735, 0.024], [0.778, 0.019]],
+      half: [[0, 0], [0.02, 0.019], [0.05, 0.036], [0.09, 0.049], [0.14, 0.061], [0.20, 0.072], [0.27, 0.081], [0.34, 0.085], [0.42, 0.082], [0.50, 0.072], [0.58, 0.056], [0.65, 0.039], [0.70, 0.027], [0.735, 0.021], [0.778, 0.016]],
+      yo: [[0, -0.004], [0.10, 0], [0.62, 0], [0.74, 0.005], [0.78, 0.008]],
+      nB: [[0, 2.5], [0.15, 2.3], [0.30, 2.1], [0.7, 2.0]],
+      nT: 2.0,
+      keel: [[0.66, 0], [0.70, 0.005], [0.74, 0.008], [0.778, 0.006]],
+    },
+    mouth: {
+      front: 0.050, corner: 0.110, alphaF: 0.32, alphaC: 1.18, shape: 0.55, snoutBlend: 0.03,
+      palate: 0.55, floor: 0.45, throat: 0.8, pharynx: 0.07, lipDrop: 0.0012, chinInset: 0.0034,
+      teeth: {
+        upper: [
+          { n: 24, h: 0.0115, w: 0.0072, inset: 0.0012, sink: 0.0052, rake: 0.04, rakeCorner: 0.5, tilt: 0.12, thick: 0.2, cornerK: 0.42 },
+          { n: 22, h: 0.0062, w: 0.0050, inset: 0.0058, sink: 0.0015, rake: 1.05, rakeCorner: 0.2, thick: 0.2, age: 1 },
+        ],
+        lower: [
+          { n: 22, h: 0.0098, w: 0.0050, inset: 0.0014, sink: 0.0040, rake: 0.06, rakeCorner: 0.45, tilt: -0.05, thick: 0.22, cornerK: 0.40 },
+          { n: 20, h: 0.0052, w: 0.0038, inset: 0.0055, sink: 0.0012, rake: 1.05, rakeCorner: 0.2, thick: 0.2, age: 1 },
+        ],
+      },
+    },
+    eye: { s: 0.071, up: 0.30, r: 0.0062, out: 0.40, socket: 0.28, fwd: 0.10 },
+    gills: { n: 5, s0: 0.172, s1: 0.230, lo0: -0.58, hi0: 0.58, lo1: -0.46, hi1: 0.46, depth: 0.0042, flap: 0.0010, gap: 0.0034, slant: 0.010 },
+    bones: { head: 0.165, neck: 0.245, root: 0.40, tail: [0.52, 0.615, 0.695, 0.760, 0.86] },
+    fins: [
+      { name: "dorsal1", role: "median", at: 0.345, root: 0.115, span: 0.100, dir: [0, 1, 0], phi: Math.PI, sweep: 0.66, bow: 0.05, tipC: 0.10, conc: 0.10, rear: 0.10, rearH: 0.06, round: 0.20, tc: 0.13, tcTip: 0.05, embed: 0.4 },
+      { name: "dorsal2", role: "median", at: 0.653, root: 0.030, span: 0.021, dir: [0, 1, 0], phi: Math.PI, sweep: 0.55, tipC: 0.18, conc: 0.08, rear: 0.30, rearH: 0.25, round: 0.3, tc: 0.10, embed: 0.4 },
+      { name: "anal", role: "median", at: 0.672, root: 0.028, span: 0.020, dir: [0, -1, 0], phi: 0, sweep: 0.55, tipC: 0.18, conc: 0.08, rear: 0.30, rearH: 0.25, round: 0.3, tc: 0.10, embed: 0.4 },
+      { name: "pecR", role: "paired", boneName: "pecR", at: 0.235, root: 0.072, span: 0.185, dir: [-0.30, -0.42, 0.86], phi: 0.95, sweep: 0.42, bow: 0.04, tipC: 0.05, conc: 0.14, rear: 0.12, rearH: 0.12, round: 0.06, tc: 0.12, tcTip: 0.05, embed: 0.3 },
+      { name: "pecL", role: "paired", boneName: "pecL", at: 0.235, root: 0.072, span: 0.185, dir: [-0.30, -0.42, -0.86], phi: 2 * Math.PI - 0.95, sweep: 0.42, bow: 0.04, tipC: 0.05, conc: 0.14, rear: 0.12, rearH: 0.12, round: 0.06, tc: 0.12, tcTip: 0.05, embed: 0.3 },
+      { name: "pelvR", role: "paired", at: 0.552, root: 0.042, span: 0.052, dir: [-0.40, -0.80, 0.45], phi: 0.42, sweep: 0.5, tipC: 0.12, conc: 0.10, rear: 0.25, rearH: 0.18, round: 0.12, tc: 0.10, embed: 0.4 },
+      { name: "pelvL", role: "paired", at: 0.552, root: 0.042, span: 0.052, dir: [-0.40, -0.80, -0.45], phi: 2 * Math.PI - 0.42, sweep: 0.5, tipC: 0.12, conc: 0.10, rear: 0.25, rearH: 0.18, round: 0.12, tc: 0.10, embed: 0.4 },
+      { name: "caudalU", role: "median", originS: 0.765, originDy: 0.002, root: 0.100, span: 0.278, dir: [-0.80, 0.60, 0], sweep: 0.10, bow: 0.05, tipC: 0.05, conc: 0.16, rear: 0, rearH: 0, round: 0.05, tc: 0.12, tcTip: 0.06, embed: 0.5 },
+      { name: "caudalL", role: "median", originS: 0.765, originDy: -0.002, root: 0.088, span: 0.190, dir: [-0.74, -0.67, 0], sweep: 0.08, bow: 0.05, tipC: 0.06, conc: 0.14, rear: 0, rearH: 0, round: 0.06, tc: 0.11, tcTip: 0.06, embed: 0.5 },
+    ],
+    // the bite: the snout lifts, the lower jaw drops, the upper jaw slides
+    // out of the head, the eyes roll back white
+    jaw: { lift: 0.20, drop: 0.82, protrude: [0.022, -0.016], gap: 0.05, eyeRoll: "back", rollMax: 2.05 },
+    // thunniform-ish: the head barely yaws, the swing lives in the tail stock
+    wave: { lambda: 0.95, amp: 0.085, env: [0.035, 0.0, 1.0], f0: 0.30, fK: 0.80, fMax: 2.4 },
+    finColor: 0x2a3135,
+    lod: [
+      { M: 32, ds: 0.020, headK: 0.55, noseRings: 5, eyeRings: true, gills: true, teeth: true, finSpan: 8, finChord: 7, eyeSeg: 14, eyeRing: 9, pharynx: 4 },
+      { M: 14, ds: 0.060, headK: 0.6, noseRings: 2, eyeRings: false, gills: false, teeth: false, finSpan: 4, finChord: 3, eyeSeg: 6, eyeRing: 4, pharynx: 2 },
+    ],
+  };
+  GW_SPEC.makePaint = function (EY) {
+    const roles = {};
+    GW_SPEC.fins.forEach(function (f, i) { roles[i + 1] = f.role; });
+    const pecIds = [4, 5];
+    return paintKit({
+      L: GW_SPEC.L, eyes: EY, finRole: roles,
+      back: 0x2c3338, belly: 0xe3e7e6, fin: 0x2a3135, tint: [0.97, 1.0, 1.04],
+      // the white runs up under the eye, drops to the mouth corner, stays
+      // under the gills, kicks up behind the pectoral and slopes away to the tail
+      line: [[0, -0.55], [0.03, -0.30], [0.07, -0.16], [0.105, -0.36], [0.15, -0.30], [0.20, -0.22], [0.25, 0.04], [0.29, 0.14], [0.34, 0.0], [0.44, -0.06], [0.55, -0.12], [0.64, -0.18], [0.72, -0.24], [0.78, -0.28]],
+      rag: 0.10, specBack: 0.22, specBelly: 0.16, specFin: 0.22,
+      iris: 0x0a1216, sclera: 0xbfc6c6,
+      // the black underside tips of the pectorals
+      mark: function (c) {
+        if (c.tag !== MB.TAG.FIN || pecIds.indexOf(c.m[3]) < 0) return NaN;
+        return c.m[0] - (0.80 + (MB.vn(c.m[1] * 6, c.m[3], 0, 21) - 0.5) * 0.08);
+      },
+      fin: function (c, col) {
+        if (pecIds.indexOf(c.m[3]) >= 0 && c.f(1) >= 0) return c.f(0) < 0 ? MB.hexc(0x08090a) : MB.mulc(col, 0.62);
+        if (c.m[3] === 9 && c.m[1] > 0.78) return MB.mulc(col, 0.80);   // the lower lobe's dark trailing edge
+        return col;
+      },
+    });
+  };
 
   S({
     id: "great_white_shark", name: "Great White Shark", biome: "water",
     rarity: "rare", hp: 140, fur: "Shark Fin", furValue: 260,
     meat: "Shark Meat", meatValue: 30, packs: 3, spd: 2.6, danger: 0.6,
-    // REAL SIZE: adults 4.5-6 m, the biggest shark in the water short of the
-    // megalodon. Hull 5.16 units -> 5.6 m mean, ~4.7-6.4 m across individuals.
-    bite: 30, aquatic: true, scale: 1.08, sizeVary: 0.10, color: 0x363c40,
-    build: function (ctx) {
-      const m = ctx.mat, g = new T.Group();
-      const grey = m(0x363c40), white = m(0xf1f4f4);
-      const finDark = m(0x2b3134), finTip = m(0x1b1f22), finPale = m(0x3c4347);
-
-      // ONE mouth definition drives three shells: the notch cut into the
-      // hull, the notch cut into the rostrum, and the chin the lower jaw
-      // actually is. They must share numbers or the closed head leaks.
-      /* THE MOUTH IS AS WIDE AS THE HEAD IS. 0.66 of width against a head
-         whose own half-width at the jaw is 0.449 left the jaw line inboard of
-         the cheek on both sides: head-on, a small mouth in a big face, and in
-         plan the chin was visibly narrower than the skull it hangs under.
-         In the reference photographs the corners of the mouth ARE the widest
-         part of the head. */
-      /* THE MOUTH IS AS WIDE AS THE HEAD CAN CARRY IT, AND NOT ONE
-         MILLIMETRE WIDER. The jaw line's corners sit at hw + railOut from the
-         axis; the head's own half-width where they land is 0.404. At 0.80 the
-         gum band came out past the cheek on both sides — from above, a pink
-         rail running outside the skull. 0.72 with a slimmer outer rail puts
-         the corners just inside the face, which is where a mouth goes. */
-      /* AND THE CORNER OF THE MOUTH WRAPS BACK, which is where the last of
-         the owner's "white chunks" were hiding. The jaw arc stopped at
-         0.49pi — a hair short of a half ellipse — so the gum bands ended at
-         x = 1.805 while the buccal sack behind them ran back to 1.476 and the
-         hull's own skin stopped at 1.683. Between those three numbers was a
-         slot with nothing in it, and a raycast probe through the dark arch in
-         the closed mouth named what was looking out of it: the sack. A real
-         shark's mouth line curves back UNDER the cheek past its widest point;
-         at 0.56pi ours does too, and the band that is the lip is there to
-         cover the hole. */
-      /* AND THE MOUTH STOPS WELL SHORT OF THE NOSE. At 0.90 the jaw's front
-         reached x 2.52 on a nose that ends at 2.62 — the chin came out level
-         with the snout tip and read as a beak under it. On the animal the
-         snout overhangs the mouth by about a quarter of its own length (the
-         head-on reference: the crescent sits in the lower third of the dome,
-         nowhere near the tip). 0.74 puts the front at 2.36. */
-      const MOUTH = { hingeX: 1.62, hingeY: 0.716, length: 0.74, width: 0.72, gap: 0.30, cornerRise: 0.135, snoutShell: true, railOut: 0.72 * 0.055, arcSpan: Math.PI * 0.56 };
-      addSharkHull(g, {
-        // 20, not 16, and only on the hero: head-on, the face is the one part
-        // of this animal a player is ever close enough to count the flats on,
-        // and at 16 the silhouette of the head reads as a drawn polygon.
-        top: grey, belly: white, sides: 20, rings: GW_RINGS,
-        bellyCut: GW_BELLY, ragged: 0.075, seed: 21, profile: "torpedo-wedge",
-        mouth: MOUTH, interior: m(0x3a1518), tint: [0.97, 1.0, 1.045],   // slate
-      });
-      // the mouth goes in BEFORE the rostrum so the snout's matrix is solved
-      // after the upper jaw has told it how far to lift this frame
-      addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
-        rings: GW_RINGS,
-        // BIGGER, AND MEANT TO BE SEEN. A great white's front teeth are a
-        // third of the height of its own gape in the reference photographs;
-        // at 0.145 against a 0.30 gap ours were a comb. Wider too, so the
-        // triangles read as triangles at the distance a player meets one.
-        toothHeight: 0.178, toothWidth: 0.132, rowTeeth: 19,
-        maxOpen: 1.05, skin: 0xf1f4f4,
-      }));
-      const snout = addSharkRostrum(g, [grey, white, m(0x421a1e)], GW_SNOUT, {
-        // MUST be the hull's own side count: the weld ring and the hull ring
-        // are then the same polygon, not two polygons on the same ellipse.
-        pivotX: 1.95, pivotY: 0.950, sides: 20,
-        bellyCut: GW_SNOUT_BELLY, bellyLine: GW_SNOUT_LINE, ragged: 0.055, seed: 22, tuck: 0.90,
-        mouth: MOUTH,
-      });
-      addSharkFaceDetails(g, T, m, {
-        rings: GW_RINGS, snout: snout, snoutRings: GW_SNOUT, mouth: MOUTH,
-        eyeX: 2.10, eyeY: 1.065, eyeZ: 0.335, eyeSize: 0.055, dark: 0x07090a,
-        noseX: 2.36, noseY: 0.782, noseZ: 0.115, nostrilLen: 0.15, nostrilWidth: 0.026,
-        gillX: 1.56, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: 0.08,
-        gillHeight: 0.33, gillStep: 0.115, gillWidth: 0.026, gillAngle: 0.24,
-        pores: 52, poreSize: 0.019, poreX0: 1.98, poreX1: 2.58, poreSpread: 0.95,
-        poreSeed: 31, poreColor: 0x252b2f,
-      });
-      addSharkSkin(g, m, {
-        rings: GW_RINGS, scars: 11, scarLen: 0.42, scarWidth: 0.024, scarColor: 0xa8b1b3,
-        folds: 3, foldX: 1.28, foldStep: 0.17, foldSpan: 0.55, foldWidth: 0.030,
-        foldColor: 0x3f4548, skinSeed: 41, mouth: MOUTH,
-      });
-
-      function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      // FIRST DORSAL — broad triangle, rounded apex leaning back, deeply
-      // concave trailing edge, paler at the base. The Jaws silhouette.
-      fin([finDark, finDark, finDark, finPale], [0.35, 1.36, 0], {
-        span: 1.12, chordRoot: 1.00, chordTip: 0.16, sweep: 0.60, concavity: 0.30,
-        leadBow: 0.07, rearTipH: 0.09, rearTipBack: 0.34, apexRound: 0.34,
-        thick: 0.14, spanSteps: 6, chordSteps: 5, paleBase: 0.18, trailPale: 0.17,
-        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      fin([finDark], [-1.05, 1.12, 0], {
-        span: 0.30, chordRoot: 0.30, chordTip: 0.05, sweep: 0.55, concavity: 0.28,
-        rearTipH: 0.10, rearTipBack: 0.13, apexRound: 0.10, thick: 0.045,
-        spanSteps: 4, chordSteps: 3, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
-      });
-      // PECTORALS — long, swept back ~30° in plan, drooped, dark above with a
-      // dark tip and a white underside.
-      [1, -1].forEach(function (s2) {
-        fin([grey, white, finTip], [0.88, 0.515, s2 * 0.38], {
-          span: 1.25, chordRoot: 0.66, chordTip: 0.05, sweep: 0.66, concavity: 0.24,
-          leadBow: 0.06, rearTipH: 0.09, rearTipBack: 0.20, apexRound: 0.05,
-          thick: 0.085, spanSteps: 6, chordSteps: 4, under: true, tipDark: 0.76,
-          spanDir: [-0.497, -0.200, s2 * 0.845], chordDir: [1, 0.06, s2 * 0.16],
-        });
-        // PELVICS — small, swept, white underneath. A shark seen from a boat
-        // has these; the old model simply did not.
-        fin([grey, white], [-0.62, 0.478, s2 * 0.19], {
-          span: 0.40, chordRoot: 0.34, chordTip: 0.04, sweep: 0.55, concavity: 0.22,
-          rearTipH: 0.10, rearTipBack: 0.11, apexRound: 0.07, thick: 0.045,
-          spanSteps: 4, chordSteps: 3, under: true,
-          spanDir: [-0.160, -0.883, s2 * 0.441], chordDir: [1, 0, s2 * 0.1],
-        });
-        // CAUDAL KEEL — the horizontal ridge that turns a peduncle into a
-        // shark's peduncle.
-        fin([grey], [-1.45, 0.860, s2 * 0.145], {
-          span: 0.15, chordRoot: 0.46, chordTip: 0.10, sweep: 0.12, concavity: 0.05,
-          rearTipH: 0.20, rearTipBack: 0.04, apexRound: 0.50, thick: 0.05,
-          spanSteps: 3, chordSteps: 3, spanDir: [0, 0, s2], chordDir: [1, 0, 0],
-        });
-      });
-      fin([grey], [-1.05, 0.512, 0], {   // anal fin
-        span: 0.26, chordRoot: 0.26, chordTip: 0.04, sweep: 0.55, concavity: 0.25,
-        rearTipH: 0.10, rearTipBack: 0.11, apexRound: 0.08, thick: 0.04,
-        spanSteps: 4, chordSteps: 3, spanDir: [0, -1, 0], chordDir: [1, 0, 0],
-      });
-
-      // PEDUNCLE — a tapered sleeve over the hull's tail, so the swim rig has
-      // a body section to carry the wave instead of a rectangular block.
-      tailSleeve(g, [grey, white], GW_RINGS, {
-        at: [-1.88, 0.860], x0: -0.502, x1: 0.46, tipRy: 0.060, tipRz: 0.038,
-        tint: [0.97, 1.0, 1.045], sides: 16, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 23,
-      });
-
-      // CAUDAL FIN — tall crescent, UPPER LOBE CLEARLY LONGER (§4).
-      fin([grey, white], [-2.10, 0.900, 0], {
-        span: 1.30, chordRoot: 0.52, chordTip: 0.06, sweep: 0.30, concavity: 0.24,
-        leadBow: 0.05, rearTipH: 0.10, rearTipBack: 0.22, apexRound: 0.05,
-        thick: 0.075, spanSteps: 6, chordSteps: 4,
-        spanDir: [-0.588, 0.809, 0], chordDir: [1, 0, 0],
-      });
-      // the LOWER lobe: a great white's tail is nearly lunate, so it is
-      // most of the upper's length, and it is grey on BOTH faces (the old
-      // `under` flag made one face of this vertical blade belly-white)
-      fin([grey], [-2.04, 0.800, 0], {
-        span: 0.90, chordRoot: 0.48, chordTip: 0.05, sweep: 0.30, concavity: 0.22,
-        rearTipH: 0.10, rearTipBack: 0.18, apexRound: 0.06, thick: 0.065,
-        spanSteps: 5, chordSteps: 4,
-        spanDir: [-0.760, -0.650, 0], chordDir: [1, 0, 0],
-      });
-      return g;
-    },
+    // 4.35 model units x 1.08 = 4.7 m (adult females 4.5-5 m); sizeVary
+    // spreads individuals ~4.2-5.2 m
+    bite: 30, aquatic: true, scale: 1.08, sizeVary: 0.10, color: 0x2c3338,
+    // the origin rides this far under the surface: the dorsal tip just
+    // breaks it on a surface cruise, as it did on the old, bigger model
+    swimDepth: 1.6,
+    build: function () { return marineBuild(GW_SPEC); },
   });
 
   /* ============================================================

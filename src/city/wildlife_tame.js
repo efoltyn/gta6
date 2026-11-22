@@ -1316,16 +1316,23 @@
     let hull = target._biteContactHull;
     if (hull === undefined && target.species && target.species.aquatic) {
       hull = null;
-      target.group.traverse(function (o) {
+      // a skinned marine body is one mesh fins and all; its trunk box is
+      // published beside it (aquatic.js), which is the collider wanted here
+      const mbd = target.group.userData && target.group.userData.marineBody;
+      if (mbd && mbd.mesh && mbd.trunk) hull = mbd.mesh;
+      else target.group.traverse(function (o) {
         if (!hull && o && o.isMesh && /hull$/i.test(o.name || "")) hull = o;
       });
       target._biteContactHull = hull || null;
     }
+    const hullBox = hull && hull.geometry
+      ? ((target.group.userData.marineBody && target.group.userData.marineBody.mesh === hull) ? target.group.userData.marineBody.trunk
+        : (hull.geometry.boundingBox || (hull.geometry.computeBoundingBox(), hull.geometry.boundingBox)))
+      : null;
     if (hull && hull.geometry) {
-      if (!hull.geometry.boundingBox) hull.geometry.computeBoundingBox();
-      if (hull.geometry.boundingBox) {
+      if (hullBox) {
         hull.updateMatrixWorld(true);
-        biteHullBox.copy(hull.geometry.boundingBox);
+        biteHullBox.copy(hullBox);
         biteHullInvM.copy(hull.matrixWorld).invert();
         biteHullLocalV.copy(mouth).applyMatrix4(biteHullInvM);
         biteHullBox.clampPoint(biteHullLocalV, biteHullSurfaceV);
