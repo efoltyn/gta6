@@ -371,12 +371,20 @@
       scene.add(line); arcs.push(line);
     }
 
-    const hot = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 10, 8),
-      new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0, depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }));
+    /* THE CONTACT POINT IS LIGHT, NOT AN OBJECT. It was an additive sphere,
+       and a sphere has an edge: it read as a glowing ball sitting on the
+       grass. Now it is a soft glare that faces the lens and a pool of light
+       lying on the ground, both falling off to nothing, neither with a rim. */
+    const glareMat = new THREE.SpriteMaterial({ map: moteTex, color: 0xf4faff, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending });
+    const poolMat = new THREE.MeshBasicMaterial({ map: moteTex, color: 0xcfe6ff, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    const glare = new THREE.Sprite(glareMat); glare.scale.set(3.2, 3.2, 1); glare.renderOrder = 9;
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), poolMat);
+    pool.rotation.x = -Math.PI / 2; pool.scale.set(11, 11, 1); pool.position.y = -0.28; pool.renderOrder = 9;
+    const hot = new THREE.Group(); hot.add(glare, pool);
+    let hotOp = 0;
+    hot.material = { get opacity() { return hotOp; }, set opacity(v) { hotOp = v; glareMat.opacity = v; poolMat.opacity = v * 0.55; } };
     hot.visible = false; hot.renderOrder = 9;
     scene.add(hot);
 

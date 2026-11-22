@@ -437,7 +437,7 @@
           vWindX = length(vw) > 0.001 ? normalize(vw).x : 0.0;
           vAlpha = aAlpha;
           vSeed = aSeed;
-          gl_PointSize = min(220.0, max(0.0, aSize * uScale / max(1.0, -mvPosition.z)));
+          gl_PointSize = min(520.0, max(0.0, aSize * uScale / max(1.0, -mvPosition.z)));
           gl_Position = projectionMatrix * mvPosition;
           #include <fog_vertex>
         }
@@ -448,23 +448,40 @@
         varying float vSeed;
         varying float vWindX;
         #include <fog_pars_fragment>
+        float fh(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+        float fvn(vec2 p) {
+          vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(fh(i), fh(i + vec2(1.0, 0.0)), f.x), mix(fh(i + vec2(0.0, 1.0)), fh(i + vec2(1.0, 1.0)), f.x), f.y);
+        }
         void main() {
           // gl_PointCoord.y runs DOWNWARD; every term is height above the base
+          /* FIRE IS TURBULENCE, NOT A TEARDROP. The old tongue was one smooth
+             candle shape with a sine wobble, so a burning hillside was a row of
+             identical orange commas. This is a sheet of burning gas: noise
+             scrolling UP through it tears the top into separate ragged tongues,
+             the body is brightest low and in the middle, and the colour runs
+             the way a flame's temperature does, pale yellow at the root,
+             orange through the body, dark red at the tips where it thins out. */
           float y = 1.0 - gl_PointCoord.y;
           float x = gl_PointCoord.x * 2.0 - 1.0;
-          float lick = sin(y * 10.0 + vSeed * 17.0 + uTime * 8.5) * (0.035 + y * 0.09);
-          float lean = vWindX * y * y * 0.48;
-          float width = (0.04 + 0.62 * pow(max(0.0, 1.0 - y), 0.76)) *
-            (0.9 + 0.1 * sin(vSeed * 31.0 + uTime * 10.0 - y * 7.0));
-          float q = abs(x - lean - lick) / max(0.04, width);
-          float body = 1.0 - smoothstep(0.58, 1.08, q);
-          body *= 0.90 + 0.10 * sin(y * 18.0 + x * 5.0 + vSeed * 37.0 + uTime * 11.0);
-          body *= smoothstep(0.01, 0.10, y);
-          body *= 1.0 - smoothstep(0.87 + 0.045 * sin(vSeed * 23.0 + uTime * 7.0), 1.0, y);
-          float core = pow(max(0.0, 1.0 - q), 2.1) * pow(max(0.0, 1.0 - y), 0.55);
-          vec3 color = mix(vec3(1.0, 0.075, 0.008), vec3(1.0, 0.38, 0.015), body);
-          color = mix(color, vec3(1.0, 0.78, 0.16), smoothstep(0.15, 0.78, core) * 0.82);
-          float alpha = body * vAlpha * (0.88 + 0.12 * sin(vSeed * 41.0 + uTime * 13.0));
+          x -= vWindX * y * y * 0.55;
+          float t = uTime, sd = vSeed * 40.0;
+          float n1 = fvn(vec2(x * 1.7 + sd, y * 2.1 - t * 2.3));
+          float n2 = fvn(vec2(x * 4.1 - sd, y * 4.6 - t * 4.1));
+          float n3 = fvn(vec2(x * 9.0 + sd * 2.0, y * 8.0 - t * 6.5));
+          float turb = (n1 - 0.5) * 1.0 + (n2 - 0.5) * 0.55 + (n3 - 0.5) * 0.25;
+          x += (n1 - 0.5) * 0.5 * y;
+          // height the gas still burns at across the width, torn by the noise
+          // a rounded body, narrow at the root, widest low, closing to the tip
+          float wid = (0.1 + 0.8 * pow(max(0.0, 1.0 - y), 0.6)) * (0.6 + 0.4 * smoothstep(0.0, 0.25, y));
+          float h = 1.0 - abs(x) / wid - y * 0.2 + turb * (0.4 + 1.25 * y);
+          float body = smoothstep(0.0, 0.42, h);
+          body *= smoothstep(0.0, 0.16, y) * (1.0 - smoothstep(0.86, 1.0, y));
+          float heat = clamp(h * 0.8 + (1.0 - y) * 0.3 - 0.12, 0.0, 1.0);
+          vec3 color = mix(vec3(0.62, 0.05, 0.0), vec3(1.0, 0.33, 0.02), smoothstep(0.0, 0.3, heat));
+          color = mix(color, vec3(1.0, 0.68, 0.12), smoothstep(0.28, 0.6, heat));
+          color = mix(color, vec3(1.0, 0.93, 0.62), smoothstep(0.62, 0.95, heat));
+          float alpha = body * vAlpha * (0.55 + 0.45 * smoothstep(0.0, 0.35, heat));
           if (alpha < 0.008) discard;
           gl_FragColor = vec4(color, alpha);
           #include <fog_fragment>
@@ -754,10 +771,16 @@
           vec3 col = mix(vec3(0.36, 0.27, 0.12), charCol, charA);
           float a = max(charA * (0.93 - 0.45 * uAge), singe * 0.5);
           // the ember bed: glowing where it burns, broken and breathing
-          float g = m.g * smoothstep(0.25, 0.75, n2 + 0.25 * sin(uTime * 6.0 + n1 * 20.0));
-          vec3 hot = mix(vec3(0.85, 0.12, 0.01), vec3(1.0, 0.55, 0.12), g * g);
-          col = mix(col, hot * 1.4, clamp(g * 1.3, 0.0, 1.0));
-          a = max(a, g);
+          /* burning ground is BLACK with coals in it. The glow used to fill
+             the whole burning cell in soft orange blobs, which is lava. Now
+             the cell is char, and what glows is a scatter of small coals that
+             breathe, with a dull red wash only where it burns hardest. */
+          float coal = smoothstep(0.66, 0.9, vn(p * 7.5 + 3.3) * 0.65 + n3 * 0.35 + 0.08 * sin(uTime * 5.0 + n1 * 20.0));
+          float g = m.g * (coal + 0.16 * smoothstep(0.5, 1.0, m.g) * n2);
+          col = mix(col, vec3(0.03, 0.025, 0.02), clamp(m.g * 1.4, 0.0, 1.0) * 0.9);
+          vec3 hot = mix(vec3(0.8, 0.1, 0.01), vec3(1.0, 0.6, 0.15), coal);
+          col = mix(col, hot * 1.5, clamp(g * 1.4, 0.0, 1.0));
+          a = max(a, clamp(m.g * 1.6, 0.0, 0.92));
           if (a < 0.01) discard;
           gl_FragColor = vec4(col, a);
           #include <fog_fragment>
@@ -1951,7 +1974,7 @@
     // the bed: a broken line of low tongues along the front
     if (G.ready && G.flamingN) {
       const budget = MAXFLAME - FX.flameN - 420;
-      const per = G.cs > 2.2 ? 2 : 1;
+      const per = G.cs > 2.2 ? 4 : 2;
       const stride = Math.max(1, Math.ceil((G.flamingN * per) / Math.max(1, budget)));
       const boost = Math.sqrt(stride);
       const windLen = 1 + 0.035 * F.wspd;
@@ -1965,7 +1988,7 @@
         for (let m = 0; m < per; m++) {
           const hx = h01(ix, iz, 0x81 + m), hz = h01(ix, iz, 0x91 + m);
           const x = cellX(i) + (hx - 0.5) * G.cs * 0.9, z = cellZ(i) + (hz - 0.5) * G.cs * 0.9;
-          const size = f.flameH * I * (0.75 + 0.6 * F.mag) * (0.8 + 0.4 * hx) * windLen * boost *
+          const size = f.flameH * 1.5 * I * (0.75 + 0.6 * F.mag) * (0.6 + 0.9 * hx) * windLen * boost *
             (0.88 + 0.12 * Math.sin(F.t * 11 + ix * 1.3 + iz * 0.7 + m * 2));
           pushFlame(x, G.gy[i] + size * 0.4, z, size, Math.min(1, I * 1.3) * 0.9, (hx * 0.37 + hz * 0.61) % 1);
         }

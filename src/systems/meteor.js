@@ -260,14 +260,63 @@
     if (P) return P;
     const add = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending };
     P = {
-      streak: makePool(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial(Object.assign({ color: 0xffffff, opacity: 0.9 }, add)), STREAK_CAP),
-      glow: makePool(new THREE.SphereGeometry(1, 12, 9), new THREE.MeshBasicMaterial(Object.assign({ color: 0xffffff, opacity: 0.95 }, add)), GLOW_CAP),
+      streak: makePool(streakGeo(), new THREE.MeshBasicMaterial(Object.assign({ color: 0xffffff, opacity: 1, map: streakTex(), side: THREE.DoubleSide }, add)), STREAK_CAP),
+      glow: makePool(new THREE.SphereGeometry(1, 20, 14), glowMat(add), GLOW_CAP),
       // a dodecahedron reads as a puff; a cube reads as a crate
       smoke: makePool(new THREE.DodecahedronGeometry(0.62, 0), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.42, depthWrite: false }), SMOKE_CAP, 6),
       ring: makePool((function () { const g = new THREE.RingGeometry(0.93, 1, 72, 1); g.rotateX(-Math.PI / 2); return g; })(),
         new THREE.MeshBasicMaterial(Object.assign({ color: 0xffffff, opacity: 0.8, side: THREE.DoubleSide }, add)), RING_CAP, 5),
     };
     return P;
+  }
+  /* A METEOR IS A TEARDROP OF LIGHT. The streak was a stretched white box
+     and the head a flat-shaded ball, so the sky filled with bars and a moon.
+     The streak is now two crossed blades carrying a painted trail (a hot
+     point at the head, thinning and fading back to nothing, soft across its
+     width), and the head is a glow that fades to nothing at its rim. */
+  function streakGeo() {
+    const g = new THREE.BufferGeometry();
+    // unit trail along +z (the head is at z = +0.5), two blades at right angles
+    const p = [], uv = [], ix = [];
+    for (let b = 0; b < 2; b++) {
+      const ax = b ? 0 : 0.5, ay = b ? 0.5 : 0, o = b * 4;
+      p.push(-ax, -ay, -0.5, ax, ay, -0.5, ax, ay, 0.5, -ax, -ay, 0.5);
+      uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+      ix.push(o, o + 1, o + 2, o, o + 2, o + 3);
+    }
+    g.setAttribute("position", new THREE.Float32BufferAttribute(p, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(ix);
+    return g;
+  }
+  function streakTex() {
+    const c = document.createElement("canvas"); c.width = 32; c.height = 256;
+    const g = c.getContext("2d"), im = g.createImageData(32, 256), d = im.data;
+    for (let y = 0; y < 256; y++) for (let x = 0; x < 32; x++) {
+      const v = 1 - y / 255;                       // 1 at the head (canvas top = uv v 1)
+      const u = Math.abs((x - 15.5) / 15.5);
+      const wid = 0.12 + 0.88 * Math.pow(v, 1.6);  // the trail narrows to a thread behind
+      const across = Math.max(0, 1 - u / wid);
+      const along = Math.pow(v, 2.2) * Math.min(1, (1 - v) * 14 + 0.25);
+      const a = across * across * along;
+      const core = Math.pow(across, 5) * Math.pow(v, 3);
+      const i = (y * 32 + x) * 4;
+      d[i] = 255; d[i + 1] = Math.round(200 + 55 * core); d[i + 2] = Math.round(150 + 105 * core);
+      d[i + 3] = Math.round(255 * Math.min(1, a * 1.25));
+    }
+    g.putImageData(im, 0, 0);
+    return new THREE.CanvasTexture(c);
+  }
+  function glowMat(add) {
+    const m = new THREE.MeshBasicMaterial(Object.assign({ color: 0xffffff, opacity: 0.95 }, add));
+    m.onBeforeCompile = function (sh) {
+      sh.vertexShader = "varying vec3 vGlowN;\nvarying vec3 vGlowV;\n" + sh.vertexShader.replace("#include <project_vertex>",
+        "#include <project_vertex>\n  vGlowN = normalize(normalMatrix * normal);\n  vGlowV = normalize(-mvPosition.xyz);");
+      sh.fragmentShader = "varying vec3 vGlowN;\nvarying vec3 vGlowV;\n" + sh.fragmentShader.replace("#include <color_fragment>",
+        "#include <color_fragment>\n  diffuseColor.a *= pow(max(dot(normalize(vGlowN), normalize(vGlowV)), 0.0), 2.4);");
+    };
+    m.customProgramCacheKey = function () { return "meteor-glow-soft"; };
+    return m;
   }
   const POOL_KEYS = ["streak", "glow", "smoke", "ring"];
 
@@ -1186,7 +1235,7 @@
       if (n >= STREAK_CAP) return;
       dummy.position.set(x, y, z);
       dummy.lookAt(x + vx, y + vy, z + vz);
-      dummy.scale.set(w, w, len);
+      dummy.scale.set(w * 3.2, w * 3.2, len * 1.6);
       dummy.updateMatrix();
       S.setMatrixAt(n, dummy.matrix);
       setColor(S, n, color, k);
@@ -1203,7 +1252,8 @@
     }
     for (const s of ev.trains) {
       const u = s.t / s.life;
-      put(s.x, s.y, s.z, s.vx, s.vy, s.vz, s.len, s.w * (1 + u * 1.8), trainColor(u), (1 - u) * (1 - u) * 0.8);
+      // long enough to overlap its neighbours: one continuous wake, not a chain of beads
+      put(s.x, s.y, s.z, s.vx, s.vy, s.vz, s.len * 3.5, s.w * (1 + u * 1.8), trainColor(u), (1 - u) * (1 - u) * 0.45);
     }
     S.count = n; S.visible = n > 0;
     S.instanceMatrix.needsUpdate = true; S.instanceColor.needsUpdate = true;

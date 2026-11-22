@@ -369,8 +369,8 @@
       // LINEAR (through ACES + sRGB they land much lighter than they read)
       uMud: { value: new THREE.Color(0.060, 0.050, 0.038) },
       uSea: { value: new THREE.Color(0.040, 0.075, 0.066) },
-      uFoamC: { value: new THREE.Color(0.52, 0.53, 0.50) },
-      uFoamM: { value: new THREE.Color(0.33, 0.295, 0.24) },
+      uFoamC: { value: new THREE.Color(0.66, 0.68, 0.68) },
+      uFoamM: { value: new THREE.Color(0.40, 0.40, 0.375) },
     });
     uni.uSunDir = light.uSunDir; uni.uSunCol = light.uSunCol; uni.uSkyCol = light.uSkyCol; uni.uGndCol = light.uGndCol;
 
@@ -571,9 +571,14 @@
       uT: { value: 0 }, uTurb: { value: 0.85 }, uPx: { value: 450 }, uMaxPx: { value: 380 },
       uSunV: { value: new THREE.Vector3(0, 1, 0) },
       // LINEAR: aerated water is grey-white at its cleanest, the mud at its foot
-      uFoamC: { value: new THREE.Color(0.66, 0.67, 0.64) },
-      uFoamM: { value: new THREE.Color(0.40, 0.355, 0.29) },
-      uMist: { value: new THREE.Color(0.62, 0.62, 0.60) },
+      /* WHITE WATER IS WHITE. Foam and mist used to be mixed most of the way to
+         a mud colour by the turbidity, and under a warm sun the whole front
+         read as a bank of beige dust. The mud stays in the body of the bore;
+         what is torn off it is aerated water: grey-white, a little dirty low
+         down, never brown. */
+      uFoamC: { value: new THREE.Color(0.80, 0.82, 0.82) },
+      uFoamM: { value: new THREE.Color(0.50, 0.50, 0.47) },
+      uMist: { value: new THREE.Color(0.74, 0.77, 0.79) },
     });
     uni.uSunDir = light.uSunDir; uni.uSunCol = light.uSunCol; uni.uSkyCol = light.uSkyCol; uni.uGndCol = light.uGndCol;
     const VERT = [
@@ -601,7 +606,7 @@
       "  float x = tau / max( 0.01, aV.w );",
       "  float size = aK.y * ( 1.0 + aK.z * x );",
       "  float a = smoothstep( 0.0, mist ? 0.18 : 0.06, x ) * ( 1.0 - smoothstep( mist ? 0.45 : 0.62, 1.0, x ) );",
-      "  a *= kd < 0.5 ? 0.92 : mist ? 0.30 : kd < 2.5 ? 0.85 : 0.75;",
+      "  a *= kd < 0.5 ? 0.92 : mist ? 0.17 : kd < 2.5 ? 0.85 : 0.75;",
       "  vec4 mvPosition = viewMatrix * vec4( p, 1.0 );",
       "  float dz = -mvPosition.z;",
       // LOD: the sort keeps fewer far away; the survivors grow to cover for them
@@ -649,7 +654,7 @@
       "  float wrap = clamp( ( dot( N, uSunV ) + 0.5 ) / 1.5, 0.0, 1.0 );",
       "  vec3 amb = mix( uGndCol, uSkyCol, 0.55 + 0.45 * N.y );",
       "  float ao = 0.60 + 0.40 * lumpy;",
-      "  vec3 alb = mist ? mix( uMist, uFoamM, vL.y ) : mix( uFoamC, uFoamM, clamp( vL.y, 0.0, 1.0 ) );",
+      "  vec3 alb = mist ? mix( uMist, uFoamM, vL.y * 0.35 ) : mix( uFoamC, uFoamM, clamp( vL.y, 0.0, 1.0 ) );",
       "  vec3 col = mist ? alb * ( amb * 0.95 + uSunCol * 0.45 * vL.x ) : alb * ( amb * 0.80 * ao * ( 0.55 + 0.45 * vL.x ) + uSunCol * wrap * 0.70 * vL.x );",
       "  gl_FragColor = vec4( col, alpha );",
       "  #include <tonemapping_fragment>",

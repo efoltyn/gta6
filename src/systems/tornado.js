@@ -397,7 +397,41 @@
     }
     g.putImageData(nimg, 0, 0);
     const churn = wrap(c);
-    texCache = { dense: wrap(dense), veil: wrap(veil), deck: deck, rain: wrap(rain), scar: wrap(scar), dust: dust, churn: churn };
+    /* THE FUNNEL'S SKIN IS CLOUD. It was a flat fill with ruler-straight
+       rectangles for streaks, so the funnel read as a striped pipe. This is
+       the same fractal noise stretched tall: soft lighter and darker bands
+       that wind round the column, tileable both ways. */
+    {
+      const W = 64, Hh = 256, cc = canvas(W, Hh), gg = cc.getContext("2d");
+      const im = gg.createImageData(W, Hh), dd = im.data;
+      for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) {
+        const u = x / W, w = y / Hh;
+        const n = 0.55 * vn(u * 4, w * 4, 4, 51) + 0.3 * vn(u * 8, w * 4, 8, 67) + 0.15 * vn(u * 16, w * 16, 16, 79);
+        const v = Math.round(118 + 130 * n), i4 = (y * W + x) * 4;
+        dd[i4] = v; dd[i4 + 1] = v; dd[i4 + 2] = Math.min(255, v + 5);
+        dd[i4 + 3] = Math.round(255 * Math.min(1, 0.72 + 0.5 * n));
+      }
+      gg.putImageData(im, 0, 0);
+      dense.getContext("2d").clearRect(0, 0, W, Hh);
+      dense.getContext("2d").drawImage(cc, 0, 0);
+    }
+    /* ONE CLOUD PUFF: a lumpy soft mass, lit from above (paler top, darker
+       belly), no edge anywhere. The storm over the funnel and the funnel's
+       own ragged outline are built from these. */
+    const pc = canvas(128, 128), pg = pc.getContext("2d");
+    const pim = pg.createImageData(128, 128), pd = pim.data;
+    for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) {
+      const dx = (x - 63.5) / 63.5, dy = (y - 63.5) / 63.5, r = Math.hypot(dx, dy);
+      const n = 0.55 * vn(x / 128 * 4, y / 128 * 4, 4, 91) + 0.3 * vn(x / 128 * 8, y / 128 * 8, 8, 93) + 0.15 * vn(x / 128 * 16, y / 128 * 16, 16, 95);
+      const e = Math.max(0, 1 - r * (0.95 + 0.75 * (0.5 - n)));
+      const a = Math.min(1, e * e * 3.2);
+      const v = Math.round(255 * Math.max(0.35, Math.min(1, 0.62 - dy * 0.3 + (n - 0.5) * 0.5)));
+      const i4 = (y * 128 + x) * 4;
+      pd[i4] = pd[i4 + 1] = pd[i4 + 2] = v; pd[i4 + 3] = Math.round(255 * a);
+    }
+    pg.putImageData(pim, 0, 0);
+    const puff = new THREE.CanvasTexture(pc);
+    texCache = { puff: puff, dense: wrap(dense), veil: wrap(veil), deck: deck, rain: wrap(rain), scar: wrap(scar), dust: dust, churn: churn };
     return texCache;
   }
   function cloneTex(t, rx, ry) {
@@ -780,12 +814,46 @@
     const ffd = new THREE.Mesh(new THREE.CylinderGeometry(ffdR * 0.85, ffdR * 1.1, H * 1.05, seg + 14, 6, true, 0, Math.PI * 2), matRainCore);
     ffd.position.y = -H * 0.5;
     for (const m of [wall1, wall2, deck, rainWrap, ffd]) { m.renderOrder = 3; m.castShadow = m.receiveShadow = false; cloud.add(m); }
+    /* THE STORM IS A CLOUD MASS, NOT A LID. The wall cloud and the base were
+       two low-polygon cylinders and a disc: from anywhere but directly below
+       they were a faceted grey saucer with a pipe hanging off it. They are
+       now built from soft puffs (the lowered wall cloud, the shelf round it,
+       the paler body above), and the funnel carries puffs down its length so
+       its outline is ragged condensation instead of a tube's edge. */
+    wall1.visible = wall2.visible = false;
+    const puffMat = function (hex, op) {
+      const m = new THREE.SpriteMaterial({ map: X.puff, color: hex, transparent: true, opacity: op, depthWrite: false, fog: false });
+      m.userData.op = op; return m;
+    };
+    const pMats = [puffMat(0x0d0e12, 0.95), puffMat(0x17191e, 0.9), puffMat(0x2b2e35, 0.85), puffMat(0x1b1d22, 0.5)];
+    const storm = new THREE.Group(); cloud.add(storm);
+    const pr = function (i, s) { return h01(i * 7 + t.id * 13, i * 3 + 1, s); };
+    const addPuff = function (par, mat, x, y, z, size) {
+      const sp = new THREE.Sprite(mat); sp.position.set(x, y, z); sp.scale.set(size, size * 0.72, 1);
+      sp.renderOrder = 3; par.add(sp); return sp;
+    };
+    const nWall = qi(9, 16), nShelf = qi(16, 34), nBody = qi(12, 26);
+    for (let i = 0; i < nWall; i++) {
+      const a = i / nWall * 6.2832 + pr(i, 1) * 0.5, rr = rCl * (0.45 + 0.55 * pr(i, 2));
+      addPuff(storm, pMats[0], Math.cos(a) * rr, -H * (0.02 + 0.07 * pr(i, 3)), Math.sin(a) * rr, rCl * (1.0 + 0.5 * pr(i, 4)));
+    }
+    for (let i = 0; i < nShelf; i++) {
+      const a = i / nShelf * 6.2832 + pr(i, 5) * 0.6, rr = rCl * (1.3 + 2.6 * pr(i, 6));
+      addPuff(storm, pMats[1], Math.cos(a) * rr, H * (0.03 + 0.07 * pr(i, 7)), Math.sin(a) * rr, rCl * (1.5 + 0.9 * pr(i, 8)));
+    }
+    for (let i = 0; i < nBody; i++) {
+      const a = pr(i, 9) * 6.2832, rr = rCl * 3.6 * Math.sqrt(pr(i, 10));
+      addPuff(storm, pMats[2], Math.cos(a) * rr, H * (0.13 + 0.16 * pr(i, 11)), Math.sin(a) * rr, rCl * (2.0 + 1.2 * pr(i, 12)));
+    }
+    const fpuffs = [];
+    const nF = (nR + 1) * 2;
+    for (let i = 0; i < nF; i++) fpuffs.push(addPuff(grp, pMats[3], 0, 0, 0, 1));
 
     grp.position.set(t.x, t.gfn(t.x, t.z), t.z);
     root.add(grp);
     // spine scratch: ring centres for the current frame
     const cen = new Float32Array((nR + 1) * 3);
-    t.mesh = { grp, tubeIn, tubeOut, debrisCloud, dustPts, dust, cloud, wall1, wall2, deck, rainWrap, ffd,
+    t.mesh = { pMats, storm, fpuffs, grp, tubeIn, tubeOut, debrisCloud, dustPts, dust, cloud, wall1, wall2, deck, rainWrap, ffd,
       matIn, matOut, matDebris, matDust, matWall, matDeck, matRain, matRainCore, rainMap, H, nR, nS, cen, skirtH, rCl, ffdR,
       alb, tSoil: 0 };
   }
@@ -798,7 +866,8 @@
       M.grp.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
       for (const m of [M.matIn, M.matOut, M.matWall, M.matRain, M.matRainCore]) { if (m.map) m.map.dispose(); m.dispose(); }
       if (M.rainMap) M.rainMap.dispose();
-      M.matDust.dispose(); M.matDeck.dispose(); M.matDebris.dispose();   // the churn map is the shared cache's
+      M.matDust.dispose(); M.matDeck.dispose(); M.matDebris.dispose();
+      for (const m of M.pMats) m.dispose();                               // the puff map is the shared cache's   // the churn map is the shared cache's
     } catch (e) {}
     t.mesh = null;
   }
@@ -895,6 +964,19 @@
     M.cloud.position.set(cen[nR * 3], H, cen[nR * 3 + 2]);
     const spin = (t.vmax / Math.max(1, t.R)) * 0.5;
     t.spin = (t.spin || 0) + spin * dt;
+    M.storm.rotation.y += spin * 0.06 * dt;
+    // the funnel's ragged outline: two puffs a ring, winding round the spine
+    for (let i = 0; i <= nR; i++) {
+      const s = s0 + (1 - s0) * (i / nR);
+      let r = rB + (rT - rB) * Math.pow(s, pw);
+      if (s0 > 0.02) { const kk = (s - s0) / Math.max(0.05, (1 - s0) * 0.35); r *= kk >= 1 ? 1 : Math.max(0.05, kk * kk * (3 - 2 * kk)); }
+      for (let j = 0; j < 2; j++) {
+        const sp = M.fpuffs[i * 2 + j], a = t.spin * 0.6 + i * 1.9 + j * 3.1416;
+        sp.position.set(cen[i * 3] + Math.cos(a) * r * 0.55, cen[i * 3 + 1], cen[i * 3 + 2] + Math.sin(a) * r * 0.55);
+        const sz = r * (2.1 + 0.5 * Math.sin(i * 2.3 + j));
+        sp.scale.set(sz, sz * 0.8, 1);
+      }
+    }
     M.wall1.rotation.y += spin * 0.18 * dt;
     M.wall2.rotation.y += spin * 0.10 * dt;
     M.deck.rotation.z += spin * 0.05 * dt;
@@ -925,6 +1007,7 @@
     M.matDebris.uniforms.uOpacity.value = 0.9 * fade * Math.min(1, k * 1.3) * (1 - 0.5 * rope);
     M.matDust.opacity = 0.9 * fade * Math.min(1, k * 1.2);
     M.matWall.opacity = 0.92 * fade;
+    for (const pm of M.pMats) pm.opacity = pm.userData.op * fade;
     M.matDeck.opacity = 0.96 * fade;
     const rainA = 0.5 * fade * Math.min(1, t.age / 3) * t.wrap;
     M.matRain.uniforms.uOpacity.value = rainA;
