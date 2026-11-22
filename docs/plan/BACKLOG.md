@@ -1,3 +1,20 @@
+# Backlog, 2026-11-22: left over from the animals pass (dogs, sea life, birds, shark attacks, bites)
+
+Not started; pick what you want.
+1. The phone build of the disaster island (disaster.html) leaves out the predator and wound code, so on that page no shark takes a swimmer and no bite leaves a mark. Only the main page has them.
+2. Crows only fly: they never land or forage. Landing gulls don't steer round obstacles and can clip the pier rail or the sea stack. Flocks cast no shadows (a single bird does).
+3. In plain light the crow reads as a flat black shape: no sheen on the feathers.
+4. A dog or wolf lying on its side puts parts 2-6 cm into the ground (worst: the mastiff's hind leg); the mastiff's sit is 2 cm under.
+5. Bites: a shark's gape reads mostly as a dark hole with little detail from a distance; on the dolphin and the megalodon (coarse meshes) the crater is mostly painted, not dug; torn flaps are flat cards and can cut into concave skin; a big shark bite costs 20-55 ms in node and may hitch on a phone.
+6. Three other blended materials set no alpha factors and may show the same pale patches the bite stains had: world/groundshaft.js:1046, battle/arenas/ground.js:413, city/streetkit.js:568.
+7. A hungry great white now commits about 15 s after it finds a still swimmer; it may feel fast. The hold has only been seen ending on the escape roll; break-free was never pressed. Some shark timing reads the wall clock, so no two runs match.
+8. No bubbles come off a swimmer dragged under (there is no underwater bubble emitter to use).
+9. Whales: breathing dives are shortened, there is no flukes-up when a whale sounds, and the megalodon's colour is a guess.
+10. The survivor bots were lowered to your float line (feet 1.45 m down) but nobody has watched them swim since.
+11. The old per-part branch of the swim rig (city/wildlife_rig.js) may be dead now that every sea animal is one skinned body; check what else aquatic still uses it.
+
+---
+
 # Backlog, 2026-11-22: left over from the water rework (waves, wakes, boats, swimmers, tsunami, impacts)
 
 Not started; pick what you want.
