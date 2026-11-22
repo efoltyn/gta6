@@ -181,3 +181,14 @@ Items marked **[partial]** have unmerged work sitting in a stopped builder's wor
 74. Hands are one size for a given gun: a woman's first-person hands are not smaller.
 75. Unarmed punch pose tables were not re-tuned for the longer (real) first-person arms.
 76. tools/visual-presets/gunpoint-studio.mjs is rotted (cast never reacts, armed men show no gun); gun-hold-reload sometimes stages a subject in first person; gun-hold-check / fp-hands-check / ads-check still expect the old fixed hand poses and pistol distances.
+
+## J. Prison day and disguise leftovers (2026-11-22, after 8bbecbe6 and ab9cd119)
+77. Prison yard move: inmates still dawdling when the move window closes spend that yard in the wing hall. The walk out through the gate rides the existing wander/nav logic.
+78. Prison at the High and Ultra security levels: the evening count is already a lock-in, so no guard comes to fetch you; only the count and guard sight catch you.
+79. Prison blackout: small equipment lights stay lit on purpose (door-reader and camera LEDs, monitors, the lounge TV, kitchen pilots, forge coals, watch lume). A lightning flash during the blackout does not light the world.
+80. Prison cell check: the full sequence (count short, PA, search outward from the cell, found, walked back, resist into the hole) is built but was not watched end to end.
+81. Disguise at the gang house: the close look by the boss and lieutenants was not cleanly measured (the boss sits upstairs).
+82. Fort Brandt: city/basewatch.js has its own 36 m look that runs alongside the disguise's close look. Its owner may want to drop the close-range part of it.
+83. A punch thrown in a police or army uniform is still waved off as "police work" in wanted.js.
+84. Soldiers from the army battle system (CBZ.cityArmy, the alarm squads at the base) cannot be stripped for their uniform.
+85. Capture tooling: `--cams at:x,y,z:...` is split on its commas, and the city now boots with a default slice, so far places (Fort Brandt, the minicities) stream in on approach. A shot or probe of them must go there and build them first.
