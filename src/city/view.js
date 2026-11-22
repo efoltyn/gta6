@@ -270,7 +270,7 @@
     const marine = isHull(car);
     if (!fpOn) {
       if (!fpWant && CFG.CAR_FP_DEFAULT !== true) {
-        if (!fpTold && CBZ.city && CBZ.city.note) {
+        if (!fpTold && !CBZ.touchMode && CBZ.city && CBZ.city.note) {
           fpTold = true;
           CBZ.city.note(marine ? "[V] the wheel view" : "[V] driver's seat", 1.6);
         }

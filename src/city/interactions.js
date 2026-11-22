@@ -474,6 +474,10 @@
     // flagged `anyone` still reaches him: the President's orders about a man
     // (city/orders.js Attack / Detain) work on literally anyone.
     const only = !!(t && t._iOnly);
+    // `_iBout`: a man you are in a sanctioned bout with (games/boxing.js).
+    // Mid-fight he is your opponent and nothing else: not even the `anyone`
+    // verbs (Threaten, Kill) reach him, only what the bout hangs on him.
+    const bout = !!(t && t._iBout);
     // WHAT A PERSON OFFERS IS WHAT HE IS: city/roles.js's table (role ->
     // verbs). A guard is bribed and robbed of his card, a keeper sells and is
     // robbed, a stranger is punched, mugged, dipped. The street layer's
@@ -483,6 +487,7 @@
     for (const ln of cand.layers) {
       const a = layers[ln];
       if (!a) continue;
+      if (bout) continue;
       if (only) { for (let i = 0; i < a.length; i++) if (a[i].anyone) pool.push(a[i]); }
       else if (R) { for (let i = 0; i < a.length; i++) if (R.allows(role, a[i])) pool.push(a[i]); }
       else pool = pool.concat(a);
@@ -1207,6 +1212,16 @@
     }
     return pts;
   }
+  const _occHit = {};
+  function behindWall(c, a) {
+    if (!CBZ.rayColliders) return false;
+    const dx = a.x - c.x, dy = a.y - c.y, dz = a.z - c.z, L = Math.hypot(dx, dy, dz);
+    if (L < 2.5) return false;
+    // the last 1.5 m is the thing's own counter, desk or wall: never the cover
+    return !!CBZ.rayColliders(c.x, c.y, c.z, dx / L, dy / L, dz / L, L - 1.5, _occHit, { noCam: true, filter: wallLike });
+  }
+  // a wall is long: a chair back, a lectern or a pillar box is not what hides a room
+  function wallLike(b) { return Math.max(b.maxX - b.minX, b.maxZ - b.minZ) >= 2.5 && (b.y1 == null || b.y0 == null || b.y1 - b.y0 >= 1.9); }
   function tapPick(sx, sy, o) {
     o = o || {};
     const cam = CBZ.camera, P = CBZ.player;
@@ -1246,6 +1261,13 @@
         const x = (_pp.x * 0.5 + 0.5) * w, y = (-_pp.y * 0.5 + 0.5) * h;
         const dpx = Math.hypot(x - sx, y - sy);
         if (dpx > R) continue;
+        // a far thing behind a wall is not under the finger: from inside the
+        // council chamber a tap on the vote board found the apartment block
+        // across the street (its anchor projects onto the board) and walked
+        // you out of the session to buy a flat
+        // (the physics colliders, not the LOS meshes: an interior partition is
+        // a collider, and the chamber's walls are not LOS blockers)
+        if (!e.live && behindWall(cam.position, a)) continue;
         s = dpx;
       }
       const tp = c.t.pos || (c.t.group && c.t.group.position) || (c.t.x != null ? c.t : { x: c.qx, z: c.qz });

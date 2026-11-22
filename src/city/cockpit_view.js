@@ -359,7 +359,8 @@
     if (!active) {
       if (want || CFG.COCKPIT_VIEW_DEFAULT === true) setActive(true);
       if (!active) {
-        if (!toldOnce && CBZ.city && CBZ.city.note) {
+        // (a phone has the VIEW button on the glass: no key to name)
+        if (!toldOnce && !CBZ.touchMode && CBZ.city && CBZ.city.note) {
           toldOnce = true;
           CBZ.city.note("[V] cockpit view", 1.6);
         }

@@ -1356,38 +1356,181 @@
     if (kind === "guns") shopGunRooms(B, F, y);
   }
 
-  /* THE GUN SHOP'S ROOMS (city/gunstore.js CBZ.gunShopPlan, the same frame as
-     F: u along the door wall, v in from its outer face). The shell is a
-     hall; the shop is a room in it. The partition behind the gun wall with
-     the barred door's opening in it (the steel frame and the gate are
-     gunstore.js's), the back room's rear wall, the side walls where there is
-     hall beyond them (a staff door behind the counter line), carpet tile on
-     the sales floor, and the hall left a bare stock hall: racking down its
-     back wall, pallets of cartons. */
+  /* THE GUN SHOP'S BACK OF HOUSE (city/gunstore.js CBZ.gunShopPlan, the same
+     frame as F: u along the door wall, v in from its outer face). The shell is
+     a hall; the shop is a room in it. The room's partitions are gunstore.js's
+     (built and drawn with the displays, so the room reads as a room from
+     across the street); this pass lays the sales floor's carpet tile and fits
+     the hall round it as a gun shop's back of house: a loading door on the
+     back wall with its apron, racking and pallets of stock either side of it,
+     the owner's office in the front corner by the staff door, and a staff
+     toilet. Each piece only where the hall has the room for it and the stair
+     and the lift are clear of it. */
   function shopGunRooms(B, F, y) {
     const P = CBZ.gunShopPlan ? CBZ.gunShopPlan(B.b) : null;
     if (!P) return;
-    const T = P.T, wo = { tint: 0xcfc9bb, t: T, skirt: 0x3a3d40 };
-    F.wallU(B, P.SD + T / 2, P.ua - (P.wallA ? T : 0), P.ub + (P.wallB ? T : 0), [{ c: P.gateU, w: P.gateW, h: 2.12 }], Object.assign({ noCasing: true }, wo));
-    if (P.backWall) F.wallU(B, P.SD + T + P.BD + T / 2, P.ua - (P.wallA ? T : 0), P.ub + (P.wallB ? T : 0), null, wo);
-    if (P.wallA) F.wallV(B, P.ua - T / 2, P.wt, P.vEnd, null, wo);
-    if (P.wallB) F.wallV(B, P.ub + T / 2, P.wt, P.vEnd, P.staffDoor ? [{ c: P.staffDoor.v, w: P.staffDoor.w, h: 2.1 }] : null, wo);
+    const T = P.T;
     // the sales floor: charcoal carpet tile; the back room keeps the slab
     const SR = F.rect(P.ua, P.wt, P.ub, P.SD);
     B.plane(SR.x0, SR.z0, SR.x1, SR.z1, y + 0.003, "carpet", 0x5a5f58, { cell: 1.0 });
-    // the hall round it: steel racking on the shell's back wall, clear of the stair and the lift
-    const hallU = [];
-    if (P.wallA) hallU.push([-P.Ti + 0.3, P.ua - T - 0.3]);
-    if (P.wallB) hallU.push([P.ub + T + 0.3, P.Ti - 0.3]);
-    if (P.backWall) hallU.push([P.ua, P.ub]);
-    for (let i = 0; i < hallU.length; i++) {
-      const u0 = hallU[i][0], u1 = hallU[i][1], len = Math.min(2.4, u1 - u0 - 0.4);
-      if (len < 1.2) continue;
-      const uc = (u0 + u1) / 2, v = P.Bi - 0.26;
-      const R = F.rect(uc - len / 2 - 0.1, v - 0.4, uc + len / 2 + 0.1, P.Bi);
-      if (!rectFree(B, null, R, 0.05)) continue;
-      shelfUnit(B, F.x(uc, v), F.z(uc, v), F.yaw(0, -1), len, 0x61 + i);
+    if (!P.wallA && !P.wallB && !P.backWall) return;
+    const occ = Occ();
+    // the shop and its back room, and a walkway round their walls and in front of the staff door
+    occ.add(F.rect(P.ua - T - 0.5, P.wt, P.ub + T + 0.5, P.vEnd + 0.5));
+    const free = function (R) { return !occ.hit(R) && rectFree(B, null, R, 0.04); };
+    const top = Math.max(y + 2.6, B.ceil - 0.05);
+
+    // ---- 1. THE LOADING DOOR on the shell's back wall, where the hall meets it ----
+    const runs = [];
+    if (P.backWall) runs.push([-P.Ti, P.Ti]);
+    else { if (P.wallA) runs.push([-P.Ti, P.ua - T]); if (P.wallB) runs.push([P.ub + T, P.Ti]); }
+    runs.sort(function (a, b2) { return (b2[1] - b2[0]) - (a[1] - a[0]); });
+    const DW = 3.0;
+    let dock = null;
+    for (let r = 0; r < runs.length && dock == null; r++) {
+      const m = (runs[r][0] + runs[r][1]) / 2, half = (runs[r][1] - runs[r][0]) / 2 - DW / 2 - 0.4;
+      for (let k = 0; k <= 12 && dock == null; k++) {
+        const off = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.6;
+        if (Math.abs(off) > half) continue;
+        const R = F.rect(m + off - DW / 2 - 0.3, P.Bi - 2.6, m + off + DW / 2 + 0.3, P.Bi);
+        if (free(R)) { dock = m + off; occ.add(R); }
+      }
     }
+    if (dock != null) {
+      const v = P.Bi, dh = Math.min(3.0, top - y - 0.35);
+      F.box(B, dock, v - 0.05, y, DW + 0.3, dh + 0.15, 0.1, 0x3b3f45);                         // the steel frame
+      F.box(B, dock, v - 0.09, y, DW, dh, 0.04, 0xa9adb1);                                       // the roller shutter
+      for (let i = 1; i < Math.floor(dh / 0.1); i++) F.box(B, dock, v - 0.112, y + i * 0.1, DW - 0.02, 0.012, 0.006, 0x8c9095);   // its slats
+      F.box(B, dock, v - 0.13, y + dh - 0.42, DW + 0.2, 0.42, 0.16, 0x50555b);                   // the drum housing
+      F.box(B, dock + DW / 2 - 0.1, v - 0.12, y + 0.02, 0.06, 0.08, 0.03, 0x2b2e33);             // the floor lock
+      F.box(B, dock + DW / 2 + 0.35, v - 0.06, y + 1.1, 0.16, 0.26, 0.08, 0xd8c23a);              // the push-button box
+      F.box(B, dock + DW / 2 + 0.35, v - 0.105, y + 1.2, 0.05, 0.05, 0.01, 0x2f8a3a, { glow: true });
+      F.box(B, dock + DW / 2 + 0.35, v - 0.105, y + 1.1, 0.05, 0.05, 0.01, 0xb3342e, { glow: true });
+      // the apron: hazard striping and a bollard each side
+      for (let i = 0; i < 10; i++) F.box(B, dock - DW / 2 + 0.15 + i * 0.3, v - 1.6, y + 0.004, 0.15, 0.003, 0.12, i % 2 ? 0x1c1d1f : 0xe8c23a);
+      for (const s of [-1, 1]) {
+        const bu = dock + s * (DW / 2 + 0.25);
+        F.box(B, bu, v - 0.5, y, 0.16, 1.0, 0.16, 0xe8c23a, { solid: true });
+        F.box(B, bu, v - 0.5, y + 0.6, 0.165, 0.08, 0.165, 0x1c1d1f);
+      }
+      // a pallet waiting on the apron, cartons strapped on it
+      F.box(B, dock - 0.4, v - 1.2, y, 1.2, 0.14, 1.0, 0x9c7a4c, { solid: true });
+      for (let i = 0; i < 4; i++) F.box(B, dock - 0.4 + (i % 2 ? 0.28 : -0.28), v - 1.2 + (i < 2 ? 0.22 : -0.22), y + 0.14, 0.52, 0.42, 0.42, i === 1 ? C.carton2 : C.carton, { solid: true });
+      F.box(B, dock - 0.4, v - 1.2, y + 0.56, 1.06, 0.32, 0.86, C.carton);
+      F.box(B, dock - 0.4, v - 1.2, y + 0.3, 1.07, 0.025, 0.87, 0x2b2e33);                      // a strap
+      B.light(F.x(dock, v - 1.6), F.z(dock, v - 1.6), { kind: "bulb", r: 4.0, i: 0.5, color: 0xfff0d0, drop: 0.3 });
+    }
+
+    // ---- 2. THE STOCK: racking along the back wall either side of the door, a pallet jack ----
+    let nShelf = 0;
+    for (let r = 0; r < runs.length; r++) {
+      const a = runs[r][0] + 0.3, b2 = runs[r][1] - 0.3;
+      let u = a;
+      while (u < b2 - 1.4 && nShelf < 6) {
+        const len = Math.min(2.4, b2 - u);
+        const v = P.Bi - 0.26, uc = u + len / 2;
+        const R = F.rect(u, v - 0.4, u + len, P.Bi);
+        if (len >= 1.2 && free(R)) { occ.add(F.rect(u, v - 1.3, u + len, P.Bi)); shelfUnit(B, F.x(uc, v), F.z(uc, v), F.yaw(0, -1), len - 0.1, 0x61 + nShelf); nShelf++; u += len + 0.1; }
+        else u += 0.6;
+      }
+    }
+    if (dock != null) {
+      const ju = dock + DW / 2 + 1.0, jv = P.Bi - 2.1;
+      const R = F.rect(ju - 0.4, jv - 0.8, ju + 0.4, jv + 0.8);
+      if (free(R)) {
+        occ.add(R);
+        F.box(B, ju, jv, y + 0.03, 0.52, 0.08, 1.15, 0xc9302c);                                 // the forks
+        F.box(B, ju, jv - 0.62, y, 0.32, 0.32, 0.2, 0xc9302c);                                   // the pump
+        F.box(B, ju, jv - 0.78, y + 0.3, 0.04, 1.0, 0.04, 0x2b2e33);                             // the handle
+        F.box(B, ju, jv - 0.78, y + 1.28, 0.26, 0.04, 0.04, 0x2b2e33);
+      }
+    }
+
+    // ---- 3. THE OFFICE: the front corner of the hall the staff door opens into ----
+    const strips = [];
+    if (P.wallB) strips.push({ s: 1, u0: P.ub + T, u1: P.Ti, staff: true });
+    if (P.wallA) strips.push({ s: -1, u0: -P.Ti, u1: P.ua - T, staff: false });
+    let office = null;
+    for (let i = 0; i < strips.length && !office; i++) {
+      const st = strips[i], W = st.u1 - st.u0;
+      if (W < 2.6) continue;
+      // in front of the staff door, with a passage left to it
+      const vMax = st.staff && P.staffDoor ? P.staffDoor.v - P.staffDoor.w / 2 - 1.0 : P.wt + 4.2;
+      const OD = Math.min(3.6, vMax - P.wt - T);
+      if (OD < 2.4) continue;
+      const R = F.rect(st.u0, P.wt, st.u1, P.wt + OD + T);
+      // (its wall on the shop's partition: the walkway pad round the shop is not its business)
+      if (!rectFree(B, null, R, 0.04) || occ.hit(F.rect(st.s > 0 ? st.u0 + 0.6 : st.u0, P.wt, st.s > 0 ? st.u1 : st.u1 - 0.6, P.wt + OD + T))) continue;
+      occ.add(F.rect(st.u0, P.wt, st.u1, P.wt + OD + T + 0.9));
+      office = { st: st, OD: OD };
+      const vW = P.wt + OD + T / 2;
+      const doorU = st.s > 0 ? st.u0 + 0.6 : st.u1 - 0.6;
+      F.wallU(B, vW, st.u0, st.u1, [{ c: doorU, w: 0.85, h: 2.1, leaf: { hinge: st.s > 0 ? -1 : 1, side: 1 } }], { tint: 0xe6e2d8, t: T });
+      const OR = F.rect(st.u0, P.wt, st.u1, P.wt + OD);
+      B.plane(OR.x0, OR.z0, OR.x1, OR.z1, y + 0.004, "carpet", 0x6a6458, { cell: 1.0 });
+      // the desk against the shell's side wall, its chair, a screen with the cameras on it
+      const du = st.s > 0 ? st.u1 - 0.45 : st.u0 + 0.45, dv = P.wt + OD / 2 + 0.2;
+      const dyaw = F.yaw(-st.s, 0);
+      const desk = B.furn("desk", F.x(du, dv), F.z(du, dv), dyaw, { len: 1.4, deep: 0.7 });
+      if (!desk) F.box(B, du, dv, y, 0.7, 0.74, 1.4, C.laminate, { solid: true });
+      const cu = du - st.s * 0.75;
+      B.furn("chair", F.x(cu, dv), F.z(cu, dv), F.yaw(st.s, 0), {});
+      F.box(B, du + st.s * 0.12, dv, y + 0.76, 0.06, 0.36, 0.56, C.dark);                       // the monitor
+      F.box(B, du + st.s * 0.08, dv, y + 0.8, 0.005, 0.3, 0.5, 0x3f6e58, { glow: true });         // four camera feeds
+      F.box(B, du, dv - 0.45, y + 0.745, 0.3, 0.02, 0.22, C.paper);                              // the transfer book
+      // filing cabinets and a gun safe on the front wall (its windows: low pieces only)
+      const fu = st.s > 0 ? st.u0 + 1.5 : st.u1 - 1.5;
+      for (let k = 0; k < 2; k++) {
+        const u = fu + st.s * k * 0.5;
+        F.box(B, u, P.wt + 0.3, y, 0.46, 1.32, 0.6, 0x7d838a, { solid: true });
+        for (let d = 0; d < 4; d++) F.box(B, u, P.wt + 0.61, y + 0.12 + d * 0.32, 0.14, 0.03, 0.02, 0xc4c8cc);
+      }
+      const gsU = st.s > 0 ? st.u1 - 0.5 : st.u0 + 0.5;
+      F.box(B, gsU, P.wt + OD - 0.35, y, 0.7, 1.55, 0.6, 0x2a2d31, { solid: true });              // a tall gun safe
+      F.box(B, gsU, P.wt + OD - 0.66, y + 0.9, 0.12, 0.12, 0.03, 0xb8963e);                      // its dial
+      B.light(F.x((st.u0 + st.u1) / 2, P.wt + OD / 2), F.z((st.u0 + st.u1) / 2, P.wt + OD / 2), { kind: "panel", r: 3.6, i: 0.55, rect: OR });
+    }
+
+    // ---- 4. THE STAFF TOILET: a WC and a basin in a room on the hall's side wall ----
+    for (let i = 0; i < strips.length; i++) {
+      const st = strips[i], W = st.u1 - st.u0;
+      if (W < 2.9) continue;
+      const RW = 1.6, RD = 1.9;
+      const vStart = office && office.st === st ? P.wt + office.OD + T + 1.0 : P.wt + 0.3;
+      for (let v0 = vStart; v0 + RW + 2 * T < P.Bi - 0.4; v0 += 0.5) {
+        const wu = st.s > 0 ? st.u1 : st.u0;                       // the shell side wall
+        const R = F.rect(wu - st.s * (RD + T + 0.9), v0, wu, v0 + RW + 2 * T);
+        if (!free(R)) continue;
+        occ.add(R);
+        // a frame on the side wall: u' along v, v' off the wall into the hall
+        const Fs = Frame(F.x(wu, v0), F.z(wu, v0), F.nx, F.nz, -st.s * F.ax, -st.s * F.az);
+        staffToilet(B, Fs, RW, RD, y, st.s);
+        i = strips.length;
+        break;
+      }
+    }
+  }
+  // one WC room on a wall (frame Fs: u along the wall 0..RW+2T, v off it 0..RD)
+  function staffToilet(B, Fs, RW, RD, y, s) {
+    const wo = { tint: C.plaster, t: T };
+    const ia = T, ib = T + RW;
+    Fs.wallU(B, RD + T / 2, 0, ib + T, [{ c: ib - 0.5, w: 0.8, h: 2.1, leaf: { hinge: 1, side: -1 } }], wo);
+    Fs.wallV(B, T / 2, 0, RD + T, null, wo);
+    Fs.wallV(B, ib + T / 2, 0, RD + T, null, wo);
+    const R = Fs.rect(ia, 0, ib, RD);
+    B.plane(R.x0, R.z0, R.x1, R.z1, y + 0.004, "tile", 0xffffff, { holes: [], cell: 0.6 });
+    const sp = function (u0, u1, v0, v1, yb, h, col, o) { Fs.span(B, ia + u0, ia + u1, v0, v1, yb, h, col, o); };
+    // the WC
+    sp(0.2, 0.6, 0.0, 0.18, y + 0.42, 0.36, C.porcelain);
+    sp(0.3, 0.5, 0.18, 0.5, y, 0.26, C.porcelain);
+    sp(0.23, 0.57, 0.18, 0.56, y + 0.26, 0.12, C.porcelain);
+    sp(0.22, 0.58, 0.2, 0.72, y + 0.38, 0.03, 0xfafaf6);
+    sp(0.78, 0.88, 0.0, 0.1, y + 0.7, 0.1, C.chrome);
+    // the basin by the door, a mirror over it
+    sp(RW - 0.55, RW - 0.05, 0.0, 0.42, y + 0.8, 0.06, C.porcelain);
+    sp(RW - 0.32, RW - 0.28, 0.0, 0.08, y + 0.86, 0.18, C.chrome);
+    sp(RW - 0.52, RW - 0.08, 0.0, 0.015, y + 1.1, 0.6, C.mirror);
+    B.light(Fs.x(ia + RW / 2, RD / 2), Fs.z(ia + RW / 2, RD / 2), { kind: "dome", r: 2.4, i: 0.6, rect: R, color: 0xf6f8ff });
   }
 
   function buildStockroom(B, F, s, Li, Ti, Bi, SRd, cIn, hIn, rooms) {

@@ -759,6 +759,7 @@
         solid(px, pz, 0.32, 0.32, y0);
       }
     }
+    let pendingBank = null;                                 // a bank whose shell could not hold a vault, waiting for one that can
     for (const lt of lots) {
       // DETERMINISM-SACRED: exactly the same two cfg.rng() draws per lot as the
       // baseline — draw #1 (density roll) then, if not skipped, draw #2 (wpick).
@@ -863,7 +864,21 @@
         // shop's lot.kind must be the real trade key (food/bank/bar/...), or its
         // counter menu won't open. Homes stay kind:"home". Without a shopKind a
         // shop defaults to a buyable 'food' diner — never a typeless lot.
-        const sk = isShop ? (pick.shopKind || inferShopKind(pick.name) || "food") : null;
+        let sk = isShop ? (pick.shopKind || inferShopKind(pick.name) || "food") : null;
+        /* A BANK HAS A VAULT. A shell too small for a strongroom (city/bank.js
+           CBZ.cityVaultFits, the numbers cityVaultRoom refuses on) is not the
+           bank: it trades as the general store, and the bank goes to the next
+           shop shell down the street that can hold one. No rng draw. */
+        if (isShop && CBZ.cityVaultFits) {
+          const vaultOk = CBZ.cityVaultFits(w, d, 0.4, !!lt.door.nz);
+          if (sk === "bank" && !vaultOk) { pendingBank = pendingBank || pick; pick = Object.assign({}, pick, { name: "General Store", shopKind: "hardware" }); sk = "hardware"; }
+          else if (sk !== "bank" && pendingBank && vaultOk && !(anchorPlan && anchorPlan.has(lt)) && sk !== "casino") { pick = pendingBank; pendingBank = null; sk = "bank"; }
+        }
+        /* A FILLING STATION NEEDS ITS FORECOURT. A fuel pick on a lot too
+           small for world/fuel_station.js's smallest was a shop shell with
+           "Basin Filling Station" on the fascia and no pump anywhere. It
+           trades as the general store. No rng draw. */
+        if (isShop && sk === "gas" && CBZ.buildFuelStation && CBZ.FUEL_STATION_MIN && !stationFits(lt)) { pick = Object.assign({}, pick, { name: "General Store", shopKind: "hardware" }); sk = "hardware"; }
         const kind = isShop ? sk : "home";
         /* THE LOT IS DATA NOW, THE BUILDING WHEN IT CAN BE SEEN. Everything a
            system asks of a town lot (its kind, door, shop, owner, home, where the
@@ -960,7 +975,7 @@
             // wall (buildings.js's mainland counter math, slid clear of the stair
             // core the shell reserved) + the full trade-specific interior dresser + dressed
             // upper floors. Town shops were bare boxes before this.
-            if (V2 && b.lbox) {
+            if (V2 && b.lbox && sk !== "bank") {
               const inx = -lt.door.nx, inz = -lt.door.nz;              // inward unit
               let ccx = inx * (w / 2 - 2.8), ccz = inz * (d / 2 - 2.8);
               let cw = inx ? 0.8 : Math.min(w - 2, 4.5);
@@ -1009,6 +1024,8 @@
           if (late) { flushCanopies(); if (isShop && CBZ.storeGoodsPlan) CBZ.storeGoodsPlan(lotRec); }
           // a casino shell that landed after the order-90 dress pass
           if (late && kind === "casino" && CBZ.dressCasino) CBZ.dressCasino(root, lotRec);
+          // a bank shell that landed after the order-90 pass: its strongroom, teller line and staff (city/bank.js)
+          if (late && kind === "bank" && CBZ.cityBankDress) CBZ.cityBankDress(lotRec);
         };
         let lateShell = false;
         if (CBZ.sliceAt) {

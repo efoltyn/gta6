@@ -7766,7 +7766,16 @@
       // one sweep of latency. The banked dt is the same compensation
       // PED_BRAIN_STAGGER's `_dtBank` pays a few lines above, for the same
       // reason: the timers inside think() must see the time that really passed.
-      const _due = (frame + p.slice) % stride === 0;
+      // THE BODY'S OWN CLOCK. Both strides below (think, and the off-screen
+      // move) count the ticks THIS body was actually served, not the global
+      // frame: the far-band stagger above already skips it on (i + frame) % 3
+      // (or % 8 on a phone), and a second global-frame modulus on top only
+      // fires where the two patterns coincide, which for most (i, slice)
+      // pairs is never: a far walker past 95 m off screen was never moved
+      // again. Counted per served tick, every body thinks within `stride` and
+      // moves within `moveStride` of its own ticks, whatever the stagger.
+      const _tick = p._tick = (p._tick | 0) + 1;
+      const _due = (_tick + p.slice) % stride === 0;
       if (_due || p._thinkDue) {
         if (decide) {
           think(p, dt * stride + (p._thinkBank || 0), active);
@@ -7806,8 +7815,8 @@
       // off-screen walker at 60 Hz. Tiered 7.5/12/20/30 Hz remote integration
       // keeps visible and important actors untouched while cutting the city's
       // largest recurring CPU loop on every preset.
-      const moveStride = (active || vis) ? 1 : (q === 0 ? 8 : q === 1 ? 5 : q === 2 ? 3 : 2);
-      if (moveStride === 1 || (frame + p.slice) % moveStride === 0) {
+      const moveStride = ((active && !farQuiet) || vis) ? 1 : (q === 0 ? 8 : q === 1 ? 5 : q === 2 ? 3 : 2);
+      if (moveStride === 1 || (_tick + p.slice) % moveStride === 0) {
         // motor LOD (CBZ.moves): on screen and near = full (avoidance), drawn
         // or important = no avoidance, the unseen mass = bare integration
         move(p, dt * moveStride, visAnim, (near && vis) ? 0 : (vis || active) ? 1 : 2);

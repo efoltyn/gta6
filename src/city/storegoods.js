@@ -379,8 +379,14 @@
   function planLanes(plan, prof, F, b, K) {
     const out = [];
     if (!prof.lanes) return out;
-    const d0 = prof.centreStart || 5.6;
-    const d1 = Math.min(2 * F.halfIn - 6.6, K ? K.cIn - K.hIn - 2.4 : 1e9);
+    // A SHALLOW SHELL STILL HAS A SHOP FLOOR. A town outfitter 24 m wide and
+    // 15 m deep got no gondolas at all (5.6 m in from the door to 6.6 m short
+    // of the back wall left 2.8 m, under the 3 m floor): two short runs of
+    // wall bays by the door and an empty hall to the till. Where the counter
+    // is known, the lanes run to the queue in front of it; a shallow shell
+    // starts them nearer the door.
+    const d0 = prof.centreStart || (2 * F.halfIn < 18 ? 4.2 : 5.6);
+    const d1 = Math.min(2 * F.halfIn - (2 * F.halfIn < 18 ? 4.6 : 6.6), K ? K.cIn - K.hIn - 2.2 : 1e9);
     if (d1 - d0 < 3) return out;
     // the main aisle: door (lat 0) to the till (lat cLat), 1.5 m clear each side
     const aLo = Math.min(0, K ? K.cLat : 0) - 1.5, aHi = Math.max(0, K ? K.cLat : 0) + 1.5;

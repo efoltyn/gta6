@@ -5119,7 +5119,7 @@
   function killNpcDriverInCar(car) {
     const ped = car.npcDriver;
     ejectNpcDriver(car);                                  // body drops out, visible
-    if (ped && !ped.dead && CBZ.cityKillPed) CBZ.cityKillPed(ped, { fromX: car.pos.x, fromZ: car.pos.z, force: 5, fling: 2 }, "killed in the crash");
+    if (ped && !ped.dead && CBZ.cityKillPed) CBZ.cityKillPed(ped, { fromX: car.pos.x, fromZ: car.pos.z, force: 5, fling: 2, byPlayer: !!car._burnByPlayer }, "killed in the crash");
     car.npcWanted = 0; car.stolen = false; car.roadRageTarget = null; car.roadRageT = 0; car.pullover = 0;
     car.abandoned = true;
     car.wreckT = Math.max(car.wreckT || 0, 1.0);

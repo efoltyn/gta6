@@ -599,25 +599,12 @@ body.campaign-active #weaponStrip {
 /* The prison interaction card is character conversation and remains. The city
    registry's floating prose card does not — EXCEPT during ENDLESS free time:
    campaign_ui.js stamps body.campaign-endless there, and the ambient gang game
-   (interact card, turf meta, kill feed, orders) gets its feedback back while
-   scripted phases stay clean. */
+   (the interact card) gets its feedback back while scripted phases stay clean. */
 body.campaign-active.mode-city:not(.campaign-endless) #interact,
-body.campaign-active.mode-city:not(.campaign-endless) #cTurfMeta,
-body.campaign-active.mode-city:not(.campaign-endless) #cKillFeed,
-/* #cpPanel (top-left character card: portrait/level/stars/bounty/net worth)
-   stays VISIBLE in the campaign — owner asked for it back (2026-07-11). */
-body.campaign-active.mode-city:not(.campaign-endless) #cityOrders,
 body.campaign-active.mode-city #cityGigBar,
-body.campaign-active.mode-city #raceHud,
-body.campaign-active.mode-city #raceLights .go,
 body.campaign-active.mode-city #cityFlightHud,
 body.campaign-active.mode-city #modshopHud,
-body.campaign-active.mode-city #realtyPrompt,
-body.campaign-active.mode-city #roofStashChip,
-body.campaign-active.mode-city #beachLootChip,
-body.campaign-active.mode-city #crateChip,
-body.campaign-active.mode-city #citySpectate,
-body.campaign-active.mode-city [title^="Open captives panel"] {
+body.campaign-active.mode-city #citySpectate {
   display: none !important;
 }
 
@@ -625,9 +612,9 @@ body.campaign-active.mode-city [title^="Open captives panel"] {
    show the shared overlay, but its BUSTED/WASTED prose never leaves the phone. */
 body.campaign-active.mode-city #cityWasted > * { display: none !important; }
 
-/* Hide every top-level city instrument except the weapon/ammo anchor and the
-   crosshair. Then remove the weapon-name/loot prose while retaining live ammo. */
-body.campaign-active.mode-city #cityHud #cHud > :not(#cWpn):not(#cCross):not(#cTopRight) {
+/* Hide every top-level city instrument except the crosshair and the
+   top-right column (the stars, below). */
+body.campaign-active.mode-city #cityHud #cHud > :not(#cCross):not(#cTopRight) {
   display: none !important;
 }
 /* WANTED_STARS_V2 (wanted.js stamps body.wanted-stars-v2): the wanted-star
@@ -642,8 +629,6 @@ body.campaign-active.mode-city #cityHud #cHud > #cTopRight > :not(#cStarsWrap) {
 body:not(.wanted-stars-v2).campaign-active.mode-city #cityHud #cHud > #cTopRight {
   display: none !important;
 }
-body.campaign-active.mode-city #cityHud #cWpn { display: block !important; }
-body.campaign-active.mode-city #cityHud #cLoot { display: none !important; }
 /* The bar (#hotbar, systems/inventory.js) is the inventory itself; the rounds
    are the one ammo gauge (#ammo, systems/fpsmode.js). */
 /* PHONE_NOTIS_V2: the bottom-left minimap survives the declutter — it is an

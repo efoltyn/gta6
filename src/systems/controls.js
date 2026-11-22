@@ -256,13 +256,21 @@
        which is when it was any use. */
     if (CBZ.raceLive && CBZ.raceLive()) return;
     cur = now;
+    /* THE CARD LEAVES WITH ITS CONTEXT. Board a jet, tap EXIT before reading
+       the Aeroplane card, and the card stood in the middle of a phone's glass
+       on foot, over the person you walked up to. It goes down unread (the
+       next boarding brings it back), exactly like defer(). */
+    if (openId && openId !== now) { openId = ""; render(); }
     if (!now || !CBZ.CONFIG.CONTROLS_AUTO) return;
     // Only ever ONCE per context per session, and never over a menu.
     if (seen[now] || openId || CBZ.cityMenuOpen) return;
     if (!defs[now]) return;
     // On foot is the one context nobody needs taught — WASD in a third-person
-    // game is not a discovery. It stays reachable on [?] and never pops.
-    if (now === "foot") { seen[now] = true; return; }
+    // game is not a discovery. Riding as a passenger is taught by the seat
+    // itself (the door label and the seat pill, systems/seat_exit.js), so a
+    // sheet over the middle of the screen on every first taxi is noise. Both
+    // stay reachable on [?] and never pop.
+    if (now === "foot" || now === "pax") { seen[now] = true; return; }
     C.show(now);
   });
 

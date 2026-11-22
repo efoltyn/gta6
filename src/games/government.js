@@ -320,26 +320,31 @@
     }
     return "Official";
   }
-  // real officeholders + deputies, in a sensible seniority order, deduped.
+  // THE COUNCIL OF THE CITY THIS HALL STANDS IN: its own people, minted once
+  // by city/officials.js (councilOf) as real ledger identities, the same names
+  // every night. [0] is the council president, who is the Speaker; the rest
+  // sit the bench, one per ward. (This used to seat any officeholder in the
+  // country: foreign presidents, a queen and two governors.)
+  function hallCity() {
+    if (!CBZ.polity) return null;
+    const o = (V && V._venue && V._venue.origin) || null;
+    let rec = null;
+    if (o && CBZ.polity.of) { try { rec = CBZ.polity.of(o.x, o.z); } catch (e) { rec = null; } }
+    if (!rec || rec.kind !== "city") { const L = CBZ.polity.list ? CBZ.polity.list("city") : []; rec = L && L.length ? L[0] : null; }
+    return rec;
+  }
   function gatherOfficials() {
-    const out = [], seen = {};
-    if (!CBZ.polity || !CBZ.officials || !CBZ.officials.identityOf) return out;
-    const recs = [].concat(
-      CBZ.polity.list("country"), CBZ.polity.list("state"),
-      CBZ.polity.list("federal"), CBZ.polity.list("city"));
-    function push(sid, title) {
-      if (!sid || seen[sid]) return;
-      // NEVER cast the player as a councillor. Once city/candidacy.js can put
-      // you in an office, office.holder may literally be the player sentinel —
-      // and seating a second "you" at the bench while you're standing in the
-      // room is the exact fake-identity trap officials.js refuses to fall into.
-      if (sid === PLAYER_SID) { seen[sid] = 1; return; }
-      const idn = CBZ.officials.identityOf(sid);
-      if (!idn || !idn.name || idn.name === "Someone") return;
-      seen[sid] = 1; out.push({ sid: sid, name: idn.name, title: title });
+    const out = [];
+    const O = CBZ.officials;
+    if (!O || !O.councilOf || !O.identityOf) return out;
+    const rec = hallCity();
+    if (!rec) return out;
+    const sids = O.councilOf(rec, COUNCIL_N + 1);
+    for (let i = 0; i < sids.length; i++) {
+      const idn = O.identityOf(sids[i]);
+      if (!idn || !idn.name || idn.name === "Someone") continue;
+      out.push({ sid: sids[i], name: idn.name, title: i ? "Councilmember, Ward " + i + ", " + rec.name : "Council President, " + rec.name });
     }
-    for (let i = 0; i < recs.length; i++) { const r = recs[i]; if (r.office) push(r.office.holder, officeTitle(r) + " of " + r.name); }
-    for (let i = 0; i < recs.length; i++) { const r = recs[i]; if (r.office) push(r.office.deputy, "Deputy " + officeTitle(r) + " of " + r.name); }
     return out;
   }
   function fillName(i) { return FILL_FIRST[Math.floor(C.rand(i, 20, "ff") * FILL_FIRST.length)] + " " + FILL_LAST[Math.floor(C.rand(i, 21, "fl") * FILL_LAST.length)]; }
@@ -358,7 +363,9 @@
   function drainCast() {
     if (!V || V.cast) return;
     V.cast = true;
-    const offs = gatherOfficials();
+    const all = gatherOfficials();
+    const chair = all.length > COUNCIL_N ? all[0] : null;          // the council president is the Speaker
+    const offs = chair ? all.slice(1) : all;
     COUNCIL.length = 0; V.realCount = 0;
     for (let i = 0; i < COUNCIL_N; i++) {
       const seat = V.seats[i], meta = V.seatMeta[i];
@@ -394,7 +401,7 @@
       COUNCIL.push({ i: i, key: key, sid: sid, name: name, title: title, real: real, handle: handle, want: meta.want, fear: meta.fear, baseStance: meta.baseStance, stance: meta.baseStance, flippedBy: null, dirtLine: null, cast: null });
     }
     // the Speaker at the lectern, his back to the bench, facing the room
-    V.speaker = npc({ role: "speaker", name: speakerName(), outfit: { archetype: "exec" }, at: [0, L.zLect - 0.74], face: 0, post: "pinned", pose: "stand" });
+    V.speaker = npc({ role: "speaker", name: chair ? "Speaker " + shortName(chair.name) : speakerName(), outfit: { archetype: "exec" }, at: [0, L.zLect - 0.74], face: 0, post: "pinned", pose: "stand" });
     // the clerk behind his window
     V.clerk = npc({ role: "city clerk", name: "City Clerk", outfit: { archetype: "professional" }, at: [L.clerk.x, L.clerk.z - 0.78], face: 0, post: "pinned", pose: "stand" });
     // the auditor: a controlled ped driven along posted waypoints

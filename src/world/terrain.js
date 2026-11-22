@@ -84,7 +84,7 @@
   // expose the flat extents for tooling / other agents
   CBZ.TERRAIN_FLAT = FLAT;
 
-  // Map-enlargement stage 2: world/layout.js publishes the spread world's
+  // Map-enlargement stage 2: world/worldplan.js publishes the spread world's
   // seed union (nations included) as CBZ.WORLD_ENLARGE_FLAT. Grow-only, so
   // with the flag off (null) today's rect above survives byte-identical.
   // Applied inside syncTerrainFlat (i.e. at BUILD time, after config.js has

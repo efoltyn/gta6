@@ -107,6 +107,17 @@
      "never go coarse". */
   let coarseOver = Infinity;
   let coarse = null, cnx = 0, cnz = 0;
+  /* A COARSE CELL IS NOT ONE PLACE. "Open when any fine cell is open" made a
+     1.6 m square with a park rail (or any thin wall, partition or fence)
+     through it ONE node, entered on one side of the rail and left on the
+     other: every coarse plan past 34 m walked straight through low rails
+     (measured: 8 of 8 long plans across a park railing). So each coarse cell
+     is split into the 4-connected pieces of its open fine cells (`ccomp`,
+     up to four; a fifth merges into the fourth), a coarse node is one PIECE,
+     and two pieces of neighbouring cells are joined only where a fine cell of
+     one touches a fine cell of the other. `crep` is each piece's standing
+     cell, the waypoint the walk is pulled through. */
+  let ccomp = null, crep = null;
   let version = 0, builtCols = -1, builtT = -1e9, buildMs = 0, builds = 0;
   let cx0 = 0, cz0 = 0;                       // centre of the built window
 
@@ -257,6 +268,7 @@
       for (let j = 0; j < job.n; j++) if (!job.buf[row + j]) coarse[crow + ((j / COARSE) | 0)] = 0;
     }
     cnx = cnz = CN;
+    labelCoarse(job.buf, job.n, CN);
     blocked = job.buf; dgrid = job.dbuf; dcols = job.doors; nx = nz = job.n; oX = job.oX; oZ = job.oZ;
     cx0 = job.cx; cz0 = job.cz; half = job.half;
     buildMs = job.ms; builds++; version++;
@@ -264,6 +276,40 @@
     builtT = CBZ.game ? (+CBZ.game.elapsed || 0) : 0;
     job = null;
     return true;
+  }
+
+  // split every coarse cell into its fine-connected pieces (see `ccomp`)
+  const _lq = new Int32Array(COARSE * COARSE);
+  function labelCoarse(buf, N, CN) {
+    if (!ccomp || ccomp.length !== N * N) ccomp = new Uint8Array(N * N);
+    if (!crep || crep.length !== CN * CN * 4) crep = new Int32Array(CN * CN * 4);
+    crep.fill(-1);
+    ccomp.fill(255);
+    for (let ck = 0; ck < CN; ck++) for (let cj = 0; cj < CN; cj++) {
+      const c = ck * CN + cj;
+      const fx0 = cj * COARSE, fz0 = ck * COARSE;
+      const fx1 = Math.min(N, fx0 + COARSE), fz1 = Math.min(N, fz0 + COARSE);
+      const mx = fx0 + COARSE / 2 - 0.5, mz = fz0 + COARSE / 2 - 0.5;
+      let label = 0;
+      for (let fz = fz0; fz < fz1; fz++) for (let fx = fx0; fx < fx1; fx++) {
+        const id0 = fz * N + fx;
+        if (buf[id0] || ccomp[id0] !== 255) continue;
+        const L = label < 4 ? label : 3;
+        if (label < 4) label++;
+        let qh = 0, qt = 0, best = crep[c * 4 + L], bestD = best >= 0 ? (() => { const bx = best % N, bz = (best / N) | 0; return (bx - mx) * (bx - mx) + (bz - mz) * (bz - mz); })() : Infinity;
+        ccomp[id0] = L; _lq[qt++] = id0;
+        while (qh < qt) {
+          const id = _lq[qh++], x = id % N, z = (id / N) | 0;
+          const d = (x - mx) * (x - mx) + (z - mz) * (z - mz);
+          if (d < bestD) { bestD = d; best = id; }
+          if (x > fx0 && !buf[id - 1] && ccomp[id - 1] === 255) { ccomp[id - 1] = L; _lq[qt++] = id - 1; }
+          if (x + 1 < fx1 && !buf[id + 1] && ccomp[id + 1] === 255) { ccomp[id + 1] = L; _lq[qt++] = id + 1; }
+          if (z > fz0 && !buf[id - N] && ccomp[id - N] === 255) { ccomp[id - N] = L; _lq[qt++] = id - N; }
+          if (z + 1 < fz1 && !buf[id + N] && ccomp[id + N] === 255) { ccomp[id + N] = L; _lq[qt++] = id + N; }
+        }
+        crep[c * 4 + L] = best;
+      }
+    }
   }
 
   const REBUILD_BACKSTOP = 8;   // seconds: catches a door that swapped in place
@@ -460,6 +506,174 @@
     planActor = opts.actor;
     try { return planCore(from, to, opts); } finally { planActor = was; }
   }
+  // the coarse tier: A* over coarse PIECES (see `ccomp`), then the same
+  // string-pull against the fine grid. undefined = "ask the fine tier".
+  let pExit = null, pEnter = null;
+  // the fine cells strictly between u and v, walking inside their one piece
+  const _pq = new Int32Array(COARSE * COARSE), _pp = new Map();
+  function inPiece(u, v) {
+    const N = nx, L = ccomp[u];
+    const j0 = ((u % N) / COARSE | 0) * COARSE, k0 = (((u / N) | 0) / COARSE | 0) * COARSE;
+    _pp.clear(); _pp.set(u, -1);
+    let qh = 0, qt = 0; _pq[qt++] = u;
+    while (qh < qt) {
+      const id = _pq[qh++];
+      if (id === v) break;
+      const x = id % N, z = (id / N) | 0;
+      const nb = [x > j0 ? id - 1 : -1, x + 1 < j0 + COARSE && x + 1 < N ? id + 1 : -1, z > k0 ? id - N : -1, z + 1 < k0 + COARSE && z + 1 < N ? id + N : -1];
+      for (let q = 0; q < 4; q++) {
+        const w = nb[q];
+        if (w < 0 || blocked[w] || ccomp[w] !== L || _pp.has(w)) continue;
+        _pp.set(w, id); _pq[qt++] = w;
+      }
+    }
+    const out = [];
+    if (!_pp.has(v)) return out;
+    for (let at = _pp.get(v); at >= 0 && at !== u; at = _pp.get(at)) out.push(at);
+    return out.reverse();
+  }
+  const _ca = new Int32Array(4), _cb = new Int32Array(4);
+  function pieceOf(f) {
+    const j = f % nx, k = (f / nx) | 0;
+    return (((k / COARSE) | 0) * cnx + ((j / COARSE) | 0)) * 4 + ccomp[f];
+  }
+  function planPieces(from, to, t0) {
+    const sF = nearestFree(from.x, from.z, 14, true), gF = nearestFree(to.x, to.z, 14);
+    if (sF < 0 || gF < 0) { planFails++; return null; }
+    const start = pieceOf(sF), goal = pieceOf(gF);
+    if (start === goal) return undefined;
+    const count = nx * nz;
+    if (!gScore || gScore.length !== count) {
+      gScore = new Float32Array(count); parent = new Int32Array(count); seen = new Int32Array(count);
+      heapId = new Int32Array(4096); heapScore = new Float32Array(4096); stamp = 0;
+    }
+    // (indexed by PIECE, cell * 4 + part: a quarter of the fine grid's cells)
+    const pc = cnx * cnz * 4;
+    if (!pExit || pExit.length !== pc) { pExit = new Int32Array(pc); pEnter = new Int32Array(pc); }
+    const CN = cnx, N = nx;
+    stamp++;
+    const gc = goal >> 2, gj = gc % CN, gk = (gc / CN) | 0;
+    heapN = 0;
+    seen[start] = stamp; gScore[start] = 0; parent[start] = -1;
+    heapPush(start, 0);
+    let nodes = 0, found = false, bestNode = start;
+    let bestH = Math.hypot(gj - ((start >> 2) % CN), gk - (((start >> 2) / CN) | 0));
+    const open = (x, z) => x >= 0 && z >= 0 && x < N && z < N && !blocked[z * N + x];
+    while (heapN) {
+      const cur = heapPop();
+      if (cur === goal) { found = true; bestNode = goal; break; }
+      if (++nodes > NODE_BUDGET) break;
+      const c = cur >> 2, q = cur & 3, cj = c % CN, ck = (c / CN) | 0, base = gScore[cur];
+      const h = Math.hypot(gj - cj, gk - ck);
+      if (h < bestH) { bestH = h; bestNode = cur; }
+      for (let d = 0; d < DIRS.length; d += 3) {
+        const dj = DIRS[d], dk = DIRS[d + 1];
+        const nj = cj + dj, nk = ck + dk;
+        if (nj < 0 || nj >= CN || nk < 0 || nk >= CN) continue;
+        const nc = nk * CN + nj;
+        if (coarse[nc]) continue;
+        let m = 0;
+        _ca.fill(-1);
+        const xa = dj > 0 ? cj * COARSE + COARSE - 1 : cj * COARSE, za = dk > 0 ? ck * COARSE + COARSE - 1 : ck * COARSE;
+        if (dj && dk) {
+          // corner to corner, no cutting between two blocked cells
+          if (open(xa, za) && ccomp[za * N + xa] === q && open(xa + dj, za + dk) && open(xa + dj, za) && open(xa, za + dk)) {
+            const bb = (za + dk) * N + xa + dj; m |= 1 << ccomp[bb]; _ca[ccomp[bb]] = za * N + xa; _cb[ccomp[bb]] = bb;
+          }
+        } else if (dj) {
+          for (let t = 0; t < COARSE; t++) {
+            const z = ck * COARSE + t;
+            if (open(xa, z) && ccomp[z * N + xa] === q && open(xa + dj, z)) {
+              const bb = z * N + xa + dj, r = ccomp[bb]; m |= 1 << r;
+              if (_ca[r] < 0 || t === 1 || t === 2) { _ca[r] = z * N + xa; _cb[r] = bb; }
+            }
+          }
+        } else {
+          for (let t = 0; t < COARSE; t++) {
+            const x = cj * COARSE + t;
+            if (open(x, za) && ccomp[za * N + x] === q && open(x, za + dk)) {
+              const bb = (za + dk) * N + x, r = ccomp[bb]; m |= 1 << r;
+              if (_ca[r] < 0 || t === 1 || t === 2) { _ca[r] = za * N + x; _cb[r] = bb; }
+            }
+          }
+        }
+        if (!m) continue;
+        for (let r = 0; r < 4; r++) {
+          if (!(m & (1 << r))) continue;
+          const ni = nc * 4 + r, next = base + DIRS[d + 2] * CSTEP;
+          if (seen[ni] === stamp && next >= gScore[ni]) continue;
+          seen[ni] = stamp; gScore[ni] = next; parent[ni] = cur;
+          pExit[ni] = _ca[r]; pEnter[ni] = _cb[r];
+          heapPush(ni, next + Math.hypot(gj - nj, gk - nk) * CSTEP * HEUR_W);
+        }
+      }
+    }
+    lastNodes = nodes;
+    lastPlanMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - t0;
+    const end = found ? goal : bestNode;
+    const rp = (n) => { const f = crep[n] >= 0 ? crep[n] : sF; return { x: cx(f % nx), z: cz((f / nx) | 0) }; };
+    const bp = rp(bestNode);
+    const sealed = !found && (heapN === 0 || (bestH * CSTEP < 2.5 && lineBlocked(bp.x, bp.z, to.x, to.z, 0)));
+    if (!found) {
+      if (end === start || bestH * CSTEP < 1.2) {
+        if (sealed) {
+          partials++; plans++;
+          const here = [{ x: from.x, z: from.z }];
+          here.partial = true; here.sealed = true;
+          return here;
+        }
+        planFails++; return null;
+      }
+      partials++;
+    }
+    plans++;
+    // the walk crosses from piece to piece at the fine cells that touch
+    // (the last cell of one, the first of the next), so no leg of it is
+    // drawn across whatever split the two
+    const fp = (f) => ({ x: cx(f % nx), z: cz((f / nx) | 0), portal: null });
+    const ids = [];
+    for (let at = end; at >= 0; at = parent[at]) {
+      if (at === start) { ids.push(sF); break; }
+      if (at === end && !found) ids.push(crep[at] >= 0 ? crep[at] : pEnter[at]);
+      ids.push(pEnter[at]); ids.push(pExit[at]);
+    }
+    ids.reverse();
+    if (found) ids.push(gF);
+    // inside one piece the straight line can still clip its corner (a piece
+    // is any shape): there the walk goes cell by cell round it
+    const raw = [];
+    for (let i = 0; i < ids.length; i++) {
+      if (i) {
+        const u = ids[i - 1], v = ids[i];
+        if (u !== v && pieceOf(u) === pieceOf(v)) {
+          const a = fp(u), b = fp(v);
+          if (lineBlocked(a.x, a.z, b.x, b.z)) { const mid = inPiece(u, v); for (let k = 0; k < mid.length; k++) raw.push(fp(mid[k])); }
+        }
+      }
+      raw.push(fp(ids[i]));
+    }
+    return pull(raw, from, to, found, sealed);
+  }
+  // STRING-PULL: keep a waypoint only where the straight line to the next one
+  // is blocked. A grid path is a staircase; a man walks the diagonal.
+  function pull(raw, from, to, found, sealed) {
+    const out = [];
+    let anchorX = from.x, anchorZ = from.z, i = 0;
+    while (i < raw.length) {
+      let j = i;
+      while (j + 1 < raw.length && !raw[j + 1].portal && !lineBlocked(anchorX, anchorZ, raw[j + 1].x, raw[j + 1].z)) j++;
+      const p = raw[j];
+      const w = { x: p.x, z: p.z };
+      if (j + 1 < raw.length && raw[j + 1].portal) { w.teleportToNext = true; w.portalLabel = raw[j + 1].portal; }
+      out.push(w);
+      anchorX = p.x; anchorZ = p.z;
+      i = j + 1;
+    }
+    if (found && !lineBlocked(anchorX, anchorZ, to.x, to.z)) out.push({ x: to.x, z: to.z });
+    out.partial = !found;
+    out.sealed = sealed;
+    return out;
+  }
   function planCore(from, to, opts) {
     if (!blocked) return null;
     const t0 = (window.performance && performance.now) ? performance.now() : Date.now();
@@ -467,10 +681,12 @@
     // past a block gets the coarse one, whose legs are then string-pulled back
     // against the fine grid below, so the answer is never coarser than the
     // walk it describes.
-    const far = coarse && Math.hypot(to.x - from.x, to.z - from.z) > coarseOver;
-    const g = far ? coarse : blocked;
-    const gn = far ? cnx : nx;
-    const gs = far ? CSTEP : STEP;
+    if (coarse && ccomp && !(opts && opts.portals && opts.portals.length) &&
+        Math.hypot(to.x - from.x, to.z - from.z) > coarseOver) {
+      const r = planPieces(from, to, t0);
+      if (r !== undefined) return r;
+    }
+    const g = blocked, gn = nx, gs = STEP;
     const ctrX = (i) => oX + ((i % gn) + 0.5) * gs;
     const ctrZ = (i) => oZ + (((i / gn) | 0) + 0.5) * gs;
     const count = nx * nz;
@@ -516,7 +732,7 @@
         if (a < 0 || a >= gn || b < 0 || b >= gn) continue;
         const ni = b * gn + a;
         if (g[ni]) continue;
-        if (!far && dgrid && dgrid[ni] && !doorOk(dgrid[ni])) continue;   // a door he may not open
+        if (dgrid && dgrid[ni] && !doorOk(dgrid[ni])) continue;   // a door he may not open
         // no cutting a corner between two walls — a body cannot pass diagonally
         // through a doorjamb, and a route that says it can is a route that grinds
         if (DIRS[d] && DIRS[d + 1] && (g[k * gn + a] || g[b * gn + j])) continue;
@@ -587,41 +803,7 @@
       if (at === start) break;
     }
     raw.reverse();
-    /* A COARSE CELL IS OPEN IF ANY FINE CELL IN IT IS — WHICH MEANS ITS CENTRE
-       CAN BE SOLID. Walking a body at the middle of a 1.6 m square that is
-       "open" because one corner of it is open puts him in the wall, and that
-       is not a theory: it took the prison's curfew block from 1% stalled
-       straight back to 29% with fifteen bodies grinding, the whole fault
-       restored, the first time this ran without the next four lines. Every
-       coarse waypoint is snapped onto a fine cell a body can stand on. */
-    if (far) for (let r = 0; r < raw.length; r++) {
-      const id = nearestFree(raw[r].x, raw[r].z, 4);
-      if (id >= 0) { raw[r].x = cx(id % nx); raw[r].z = cz((id / nx) | 0); }
-    }
-    const out = [];
-    let anchorX = from.x, anchorZ = from.z, i = 0;
-    while (i < raw.length) {
-      let j = i;
-      // extend while the straight line from the anchor still clears, but never
-      // across a portal hop (that leg is a teleport, not a walk)
-      while (j + 1 < raw.length && !raw[j + 1].portal && !lineBlocked(anchorX, anchorZ, raw[j + 1].x, raw[j + 1].z)) j++;
-      const p = raw[j];
-      const w = { x: p.x, z: p.z };
-      if (j + 1 < raw.length && raw[j + 1].portal) { w.teleportToNext = true; w.portalLabel = raw[j + 1].portal; }
-      out.push(w);
-      anchorX = p.x; anchorZ = p.z;
-      i = j + 1;
-    }
-    // the true goal, once the last waypoint can see it
-    if (found && !lineBlocked(anchorX, anchorZ, to.x, to.z)) out.push({ x: to.x, z: to.z });
-    /* partial: this walk does not reach the goal. `sealed` says WHY, and the
-       two answers could not be more different — a search that ran DRY means
-       there is no way there at all (a locked wing at curfew: stand at the door
-       and wait), while one that ran out of NODES is simply a long walk seen
-       forty metres at a time (keep walking, replan from where you get to). */
-    out.partial = !found;
-    out.sealed = sealed;
-    return out;
+    return pull(raw, from, to, found, sealed);
   }
 
   // ---- 4. THE FOLLOWER ---------------------------------------------------

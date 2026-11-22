@@ -1036,7 +1036,9 @@
 
   function askable(p) {
     if (!p || p.dead || p.player || p.isPlayer || !p.pos) return false;
-    if (p.vendor || p.staffPost || p.child || p.animal) return false;
+    // (a set's man standing a post on his own turf, city/gangs.js's garrison,
+    // is still his own man: his post is his boss's, not a shop's counter)
+    if (p.vendor || (p.staffPost && !p.gang) || p.child || p.animal) return false;
     if (p.kind === "cop" || p.kind === "security" || p.kind === "staff" || p.kind === "dog") return false;
     if (p.archetype === "soldier" || p.archetype === "official") return false;
     if (p.recruited || p.companion || p.controlled || p.hostage || p.restraint || (p.ko | 0) > 0) return false;
@@ -1076,9 +1078,24 @@
       const ms = CBZ.cityMemberStats ? CBZ.cityMemberStats(p) : { loyalty: 0.6 };
       const tier = tierOf(p.rank);
       out.rival = rec; out.tier = tier;
-      parts.base = -0.45;
-      parts.loyal = -((ms.loyalty != null ? ms.loyalty : 0.6) - 0.5) * 0.9;
-      parts.rank = -tier * 0.07;
+      /* TURNING A MAN OF ANOTHER SET. Hard and risky, never shut: there are
+         four ways in, and each is a real one at starting respect.
+           money     he names a price down to s = -0.35 (dearer the further
+                     he is from yes), and you pay it
+           a favour  run work for him (city/social.js cityDoFavor, the card's
+                     Do a favour): what he owes you counts for more than the
+                     street's opinion of you
+           a grudge  about one man in three has one against his own boss
+                     (passed over, shorted); he says so when he names it
+           fear      lean on him while he is naming a price, with none of
+                     his own people close enough to see him fold */
+      parts.base = -0.28;
+      // what he thinks of a nobody counts less than what he thinks of his boss
+      parts.standing = Math.max(-0.12, parts.standing);
+      parts.loyal = -((ms.loyalty != null ? ms.loyalty : 0.6) - 0.5) * 0.7;
+      parts.rank = -tier * 0.05;
+      parts.favour = Math.min(0.3, Math.max(0, (r.loyalty || 0)) / 100);
+      parts.grievance = grievance(p, rec) ? 0.3 : 0;
       parts.chair = bossGone(rec) ? 0.4 : 0;
       const str = strengthOf(rec);
       parts.losing = str <= 4 ? 0.18 : str >= 12 ? -0.08 : 0;
@@ -1101,9 +1118,9 @@
     out.s = s;
     if (rec) {
       out.free = bossGone(rec) && s >= 0.5;
-      if (!out.free && s >= -0.05) out.price = Math.max(400, Math.round((500 + out.tier * 450) * (1.5 - Math.min(1, s)) / 50) * 50);
+      if (!out.free && s >= -0.35) out.price = Math.max(400, Math.round((500 + out.tier * 450) * (1.5 - Math.min(1, s)) / 50) * 50);
       // a man loyal to his set says so to his set
-      out.snitch = s < -0.25 || (parts.loyal < -0.15 && s < -0.05);
+      out.snitch = !out.price && (s < -0.7 || parts.loyal < -0.1);
     } else {
       out.free = s >= 0.45;
       if (!out.free && s >= -0.3) out.price = Math.max(100, Math.round((150 + (p.wealth || 0.3) * 600 + lvl * 40) * (1.35 - s) / 50) * 50);
@@ -1117,6 +1134,13 @@
     return out;
   }
   CBZ.cityCrewWhy = willing;            // what he would say, and why (a read)
+  // a man with a grudge against his own boss: passed over, shorted, or the
+  // boss's nephew got his corner. A fixed fact about him, about one in three.
+  // (A set whose boss has stopped paying is parts.pay, for all of them.)
+  function grievance(p, rec) {
+    if (!p || !rec) return false;
+    return hash01(p, "boss") < 0.33;
+  }
 
   const NO = {
     life: ["That's not my world.", "No. I'm not built for that."],
@@ -1173,7 +1197,9 @@
     if (w.price) {
       p._pgAsk = { price: w.price, until: T + 35, rival: !!rec };
       facePlayer(p, 8);
-      say(p, rec ? pick([money(w.price) + ". And I never liked him anyway.", money(w.price) + " and I walk today.", "It costs. " + money(w.price) + "."])
+      say(p, rec ? (w.parts.grievance > 0 ? pick([money(w.price) + ". He's been shorting me for a year.", money(w.price) + ". He passed me over. I owe him nothing."])
+                    : w.parts.favour > 0.12 ? pick([money(w.price) + ". I owe you one, so that's a fair number.", "For you? " + money(w.price) + "."])
+                    : pick([money(w.price) + " and I walk today.", "It costs. " + money(w.price) + ".", money(w.price) + ". And you never heard it from me."]))
                  : pick([money(w.price) + " up front and I'm yours.", "I don't move for free. " + money(w.price) + ".", "Make it " + money(w.price) + "."]), 3.2);
       return { answer: "price", price: w.price };
     }
@@ -1255,10 +1281,16 @@
       const res = orig.apply(this, arguments);
       if (had && t && !t.dead && !isMember(t)) {
         const r = relOf(t) || {};
-        const scared = (t.fear || 0) >= 4 || (r.fear || 0) >= 45 || t.surrender;
-        const brave = (t.aggr || 0) >= 0.75 || t.armed;
+        // a gun in your hand is most of a threat; without one, only a man who
+        // is already afraid of you (what you did to him before) folds.
+        // A man of a set folds only where none of his own can see him do it,
+        // and a hard man or one with a piece of his own folds only to a gun.
+        const gunned = !!(CBZ.cityHasGun && CBZ.cityHasGun());
+        const scared = t.surrender || (t.fear || 0) >= (gunned ? 3 : 5) || (r.fear || 0) >= 45;
+        const seen = had.rival && matesNear(t, 18).length > 0;
+        const brave = !gunned && ((t.aggr || 0) >= 0.75 || t.armed);
         t._pgAsk = null;
-        if (scared && !brave && !had.rival) join(t, 0, willing(t), "fear");
+        if (scared && !brave && !seen) join(t, 0, willing(t), "fear");
         else { t._pgNoT = T + 240; if (!t.rage) say(t, pick(["Now it's a no.", "Get out of my face."]), 2.4); }
       }
       return res;
@@ -1664,6 +1696,14 @@
     I.register("ped:civ", { id: "ped-recruit", prio: 40, forceYes: true,
       canShow: function (p) { return askable(p) && !askLive(p); },
       label: "Recruit", onSelect: function (p) { ask(p); } });
+    // a man of another set you mean to turn: run his errand first (city/
+    // social.js cityDoFavor). Once a minute per man: a favour is a day's work.
+    I.register("ped:civ", { id: "pg-favour", prio: 38, forceYes: true,
+      canShow: function (p) {
+        return askable(p) && !!p.gang && !askLive(p) && !(p._pgFavT > T) &&
+          !!(CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor);
+      },
+      label: "Do a favour", onSelect: function (p) { p._pgFavT = T + 60; CBZ.cityDoFavor(p); } });
     I.register("ped:civ", { id: "pg-pay", prio: 75, forceYes: true,
       canShow: function (p) { return askLive(p) && !p._pgAsk.deal && !isMember(p); },
       label: function (p) { return "Pay " + money(p._pgAsk.price); }, onSelect: function (p) { pay(p); } });
@@ -1857,6 +1897,24 @@
     // shared roster before this file sees it, so the count is kept by face)
     for (const m of known) { if (m.dead) { known.delete(m); pg.lost = (pg.lost || 0) + 1; } else if (!isMember(m)) known.delete(m); }
     for (let i = 0; i < mem.length; i++) known.add(mem[i]);
+    // A MAN THE LAW HAS CUFFED is not on your corner any more: off the roster
+    // the moment the cuffs are on (city/custody.js), what he was carrying of
+    // yours goes into the evidence bag with him, and the street hears about it
+    // the way it hears about a death. (He used to stay on the roster, with
+    // his take, sitting in the back of the cruiser.)
+    const CU = CBZ.custody;
+    if (CU && CU.jobOf) {
+      for (let i = mem.length - 1; i >= 0; i--) {
+        const m = mem[i], J = CU.jobOf(m);
+        if (!J || J.key === "gang" || !(J.cuffed || m.restraint)) continue;
+        mem.splice(i, 1); known.delete(m);
+        m._take = 0; m._post = null; m.companion = false; m.guard = null; m._pgTaken = true;
+        pg.lost = (pg.lost || 0) + 1;
+        const P = CBZ.player, mate = mem.find(function (o) { return o && !o.dead && P && dist(o.pos, P.pos) < 30; });
+        if (mate) say(mate, pick(["They took " + (m.name ? m.name.split(" ")[0] : "him") + ".", "Cops got " + (m.name ? m.name.split(" ")[0] : "one of ours") + "."]), 2.6);
+      }
+      g.cityCrew = mem.length;
+    }
     const PA = CBZ.city.playerActor;
     for (let i = 0; i < mem.length; i++) {
       const m = mem[i];

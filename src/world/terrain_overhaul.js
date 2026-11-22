@@ -433,14 +433,14 @@
   // Snow-country footprint (biome_snow.js: authored rect centre (350,-1450),
   // half (420,330)). The backdrop range is confined to this X-span so it
   // stands only behind the white country (owner: mountains snow-only).
-  // FOLLOWS THE SNOW DIAL FULLY (world/layout.js CBZ.worldOff("snow") — both
+  // FOLLOWS THE SNOW DIAL FULLY (world/worldplan.js CBZ.worldOff("snow") — both
   // axes): the window and the north-shore line ride the offset, so moving the
   // snow island drags every backdrop range with it.
   // THE SNOW COUNTRY'S RECT, ASKED FOR RATHER THAN RE-TYPED. These three
   // numbers were biome_snow.js's `CX`, `HX` and `CZ - HZ` copied by hand into
   // this file — the whole backdrop composition is aimed with them, and this
   // file parses ~300 script tags BEFORE biome_snow.js, which is exactly why
-  // the copy existed. world/layout.js (which parses FIRST, and which owns the
+  // the copy existed. world/worldplan.js (which parses FIRST, and which owns the
   // dial and the footprint scale that produce the rect) publishes it instead,
   // so the ranges follow a snow country that moves OR grows. The old literals
   // are the degrade-safe fallback and nothing else reads them.

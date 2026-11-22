@@ -164,7 +164,7 @@
   //  (grep "x3harness" / see the reported output).
   //
   //  STAGE-2 MAP ENLARGEMENT: each nation now rides the world-layout dial
-  //  (world/layout.js) like the biomes do — the per-country offsets below
+  //  (world/worldplan.js) like the biomes do — the per-country offsets below
   //  are added to every settlement's authored cx/cz, so the whole nation
   //  (settlements, pads, regions, work anchors, econ records) translates
   //  as one unit and moves OUTWARD at least as far as the biomes nearest

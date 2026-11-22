@@ -1008,7 +1008,7 @@
     // Refuse it out loud instead: children are not flood casualties.
     if (a.child) return;
     a.hp = (a.hp == null ? 100 : a.hp) - dmg;
-    if (a.hp <= 0 && CBZ.cityKillPed) CBZ.cityKillPed(a, { fromX: a.pos.x, fromZ: a.pos.z, force: 3 }, cause);
+    if (a.hp <= 0 && CBZ.cityKillPed) CBZ.cityKillPed(a, { fromX: a.pos.x, fromZ: a.pos.z, force: 3, byPlayer: false }, cause);
   }
   function eachActor(fn) {
     if (survOn()) {

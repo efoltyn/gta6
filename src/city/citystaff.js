@@ -49,12 +49,35 @@
       if (!OFFICE_KINDS[kindOf(lot)]) continue;
       // the first clear spot just inside the door, a step to one side of the
       // walk in (the fit-out may have a desk or a plant where the first try lands)
-      let at = null;
-      for (const inD of [2.6, 3.4, 1.9, 4.2]) {
-        for (const lat of [1.1, -1.1, 1.9, -1.9, 0]) { at = CBZ.interiorDoorPost(b, inD, lat); if (at) break; }
+      // A FRONT DESK IS A DESK: the receptionist stands behind one, square to
+      // the door, with the desk between her and the people coming in (she
+      // stood on the bare floor 2.6 m inside the door with her hands on a
+      // table that was not there). The desk is the shell's own (b.lbox, solid).
+      let at = null, desk = null;
+      const dr = b.localDoor;
+      for (const inD of [3.6, 4.4, 3.0, 5.2]) {
+        for (const lat of [1.8, -1.8, 2.6, -2.6, 0]) {
+          at = CBZ.interiorDoorPost(b, inD, lat);
+          if (!at) continue;
+          const dx = dr.x + dr.nx * (inD - 0.8) + -dr.nz * lat, dz = dr.z + dr.nz * (inD - 0.8) + dr.nx * lat;
+          if (b.clearFloorPoint && !(b.clearFloorPoint(dx, dz, 0.5) && b.clearFloorPoint(dx - dr.nz * 0.8, dz + dr.nx * 0.8, 0.3) && b.clearFloorPoint(dx + dr.nz * 0.8, dz - dr.nx * 0.8, 0.3))) { at = null; continue; }
+          desk = { x: dx, z: dz };
+          break;
+        }
         if (at) break;
       }
       if (!at) continue;
+      if (desk && typeof b.lbox === "function" && !b._frontDesk) {
+        b._frontDesk = true;
+        const along = Math.abs(dr.nx) > 0.5, fy = (Array.isArray(b.floorTops) && b.floorTops[0] != null) ? b.floorTops[0] : 0.14;
+        const W = 1.9, D = 0.62;
+        const put = function () {
+          b.lbox(desk.x, fy + 0.53, desk.z, along ? D : W, 1.06, along ? W : D, 0x3a3f46, { solid: true });                  // the desk front
+          b.lbox(desk.x - dr.nx * 0.05, fy + 1.08, desk.z - dr.nz * 0.05, along ? D + 0.14 : W + 0.06, 0.04, along ? W + 0.06 : D + 0.14, 0xd9d2c3);   // the visitor ledge
+          b.lbox(desk.x + dr.nx * 0.2, fy + 1.14, desk.z + dr.nz * 0.2, along ? 0.05 : 0.5, 0.3, along ? 0.5 : 0.05, 0x1d2024);   // her screen
+        };
+        if (CBZ.interiorBounded) CBZ.interiorBounded(b, put, "front-desk"); else put();
+      }
       const post = CBZ.cityStaffPost({
         venue: "frontdesk", id: "frontdesk:" + Math.round(lot.cx) + "," + Math.round(lot.cz),
         job: "receptionist", archetype: "worker", x: at.x, z: at.z, face: at.face + Math.PI,
@@ -276,7 +299,10 @@
     // Belt and braces: at the default `near` this is always true (170 > the
     // guard's 150 m auto-allow), but a venue that asks for a short leash still
     // gets the shared "never let the player see a spawn" contract.
-    if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(p.x, p.z)) return false;
+    // An indoor post (a front desk, a teller window) is behind the building's
+    // walls until you are at its door: it may be staffed while the walls hide
+    // it (opts.occlusion), or it never was if you walked up looking at it.
+    if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(p.x, p.z, { occlusion: true, minDistance: 6 })) return false;
 
     // PIN ONLY WHAT STANDS. peds.js's posted-staff brain roots a body at its
     // slot and returns from move() BEFORE the seated branch, so pinning a body

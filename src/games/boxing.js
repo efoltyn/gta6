@@ -67,17 +67,21 @@
     REST_CLEAR: 0.3,       // and this much on the stool
     WEAR: 0.028,           // what one clean blow takes out of a man's legs
     SWING: 6,              // the wind one swing of yours costs in the ring, on top of the street's
+    FLURRY: 1.4,           // s: swings inside this window are one flurry
+    ARM_PUNCH: 3,          // the third swing in a flurry is an arm punch (half the power), and costs more wind
+    READ: 0.12,            // his base chance to have read a punch of yours and caught it, plus his skill
     STOP_HP: 0.12,         // your health, as a fraction: under it the referee stops it
   };
   // boxing is fists: what the engine's fighter would kick, knee or elbow he throws as the nearest punch
   const GLOVED = { kick: "jab", lowKick: "jab", roundKick: "hook", knee: "body", elbow: "hook", headbutt: "jab" };
   /* A FOUL IS A KICK (CBZ.verbs names a landed blow by its family: a push
-     kick is "front", a roundhouse "round", a leg kick "low") or anything in
-     the hand. A kick is a thing you chose: it takes the back key. A knee or
-     an elbow is NOT called: systems/melee.js throws those by itself when you
-     tap chest to chest (its CLOSE_SEQ), and a referee cannot take points for
-     a move the one button picked for you. */
-  const FOUL_KIND = /^(front|round|low|headbutt|butt|bat|slash|stab)$/;
+     kick is "front", a roundhouse "round", a leg kick "low"), a knee, an
+     elbow, a head, or anything in the hand. In the ring your one button
+     throws punches only, chest to chest as well (gloveYourHands below turns
+     systems/melee.js's knee-and-elbow inside sequence into uppercut and hook),
+     so a knee or an elbow that lands is one you went out of your way to
+     throw, and the referee calls it. */
+  const FOUL_KIND = /^(front|round|low|kick|knee|elbow|headbutt|butt|bat|slash|stab)$/;
   function foulBlow(res) { return FOUL_KIND.test(String(res.kind || "")); }
   const CUT = { ice: 150, air: 120, pep: 200 };
 
@@ -247,6 +251,24 @@
     F.strikeAct = function (kind, o, t) { return throwIt.call(this, GLOVED[kind] || kind, o, t); };
     return F;
   }
+  // YOUR HANDS ARE GLOVED IN THE RING. systems/melee.js picks the blow for
+  // the one button; chest to chest it throws knees and elbows. In a round of
+  // your bout those come out as an uppercut and a hook instead (a deliberate
+  // kick, on the back key, is still a kick, and a foul).
+  const GLOVE_CLOSE = { knee: "upper", elbow: "hook" };
+  (function gloveYourHands() {
+    const M = CBZ.melee;
+    if (!M || typeof M.pick !== "function" || M.pick._boxWrap) return;
+    const orig = M.pick;
+    const w = function (c) {
+      const r = orig.apply(this, arguments);
+      const b = BOUT;
+      if (r && b && b.kind === "player" && !b.over && b.phase === "round" && GLOVE_CLOSE[r.kind]) r.kind = GLOVE_CLOSE[r.kind];
+      return r;
+    };
+    w._boxWrap = true;
+    M.pick = w;
+  })();
   function mkSide(corner, ped, name, skill, aggr) {
     return { corner: corner, ped: ped || null, player: !ped, name: name, skill: skill, aggr: aggr,
       pts: 0, kdRound: 0, kdBout: 0, foulRound: 0, fouls: 0, landed: 0, legs: 1, downT: 0, riseAt: 0,
@@ -292,8 +314,11 @@
       if (lost > 6 && zm >= 1) crowd(0.35, 0);
       return;
     }
-    if (res.blocked) { att.pts += 0.15 * pw; return; }           // on the gloves: the judges give it a little
-    att.pts += pw * zm; att.landed++;
+    // on the gloves: the judges give it a little, and the man who caught it a little more
+    if (res.blocked) { att.pts += 0.05 * pw; def.pts += 0.08; return; }
+    // what the judges score is a clean punch: a tired arm punch that lands is
+    // a quarter of one (volume is not the fight)
+    att.pts += pw * zm * (pw < 0.3 ? 0.25 : 1); att.landed++;
     def.legs -= pw * zm * RULES.WEAR / (0.6 + def.skill);
     const VT = CBZ.vitals;
     let r = "none";
@@ -333,9 +358,41 @@
     if (!b || b.kind !== "player" || b.over) { res.reaction = "none"; return; }
     if (res.weapon) { refSay("A weapon! You're disqualified!", 3); finish(b.blue, "DQ"); return; }
     if (b.phase !== "round") { res.reaction = "none"; if (b.phase === "rest" || b.phase === "count") foul(b.phase === "count" ? "He's down!" : "After the bell!"); return; }
-    if (foulBlow(res)) { foul("Fists only!"); res.reaction = "none"; return; }
+    if (foulBlow(res)) { foul(/knee|elbow/.test(String(res.kind || "")) ? "No knees, no elbows!" : "Fists only!"); res.reaction = "none"; return; }
+    // A TIRED MAN AND A MASHER HIT LIKE A CHILD. What a punch of yours carries
+    // is your wind (systems/stamina on CBZ.player) and whether it was set up:
+    // the third swing of a flurry is an arm punch.
+    const P = CBZ.player, st = P.stamina == null ? 100 : P.stamina;
+    const n = flurry(b);
+    const wind = 0.3 + 0.7 * Math.min(1, st / 50);
+    const arm = n >= RULES.ARM_PUNCH + 1 ? 0.45 : n >= RULES.ARM_PUNCH ? 0.7 : 1;
+    res.power = (res.power != null ? res.power : 0.6) * wind * arm;
+    // HE READS YOU. A trained man who is not hurt catches some of what you
+    // throw on the gloves, more of it the more you throw the same way, and
+    // throws back into the hole you leave (systems/melee.js's counter beat).
+    const opp = b.blue, VT = CBZ.vitals, daze = VT && VT.daze ? VT.daze(opp.ped) : 0;
+    if (!res.blocked && opp.ped && !downOf(opp.ped)) {
+      const read = RULES.READ + 0.38 * opp.skill + (n >= RULES.ARM_PUNCH ? 0.22 : 0) + (st < 25 ? 0.12 : 0) - 0.6 * daze - (1 - opp.legs) * 0.25;
+      if (Math.random() < read) {
+        // on the gloves: the rig plays the block, not the hit it was going to
+        res.blocked = true; res.landed = false; res.reaction = "block"; res.stagger = false;
+        const Vb = VB();
+        if (Vb && Vb.block) { try { Vb.block(opp.ped, 0.35); } catch (e) {} }
+        if (opp.F) opp.F.counterT = 0.4;
+        // and he answers it a beat later, into the arm you left out there
+        b.counterAt = b.time + 0.14;
+        b.caught = (b.caught || 0) + 1;
+      }
+    }
     landed(b.red, b.blue, res);
     void dmg; void tier;
+  }
+  // how many of your swings are in this flurry (the window ends at RULES.FLURRY)
+  function flurry(b) {
+    const L = b.sw || [];
+    let n = 0;
+    for (let i = L.length - 1; i >= 0 && b.time - L[i] <= RULES.FLURRY; i--) n++;
+    return n;
   }
 
   /* ==========================================================
@@ -427,14 +484,14 @@
     rb.meleeHit = yourBlow;
     // (the registry's own flag for "a person who is his job": no Threaten / Mug /
     //  Pickpocket card over the man you are boxing)
-    V.blueOnly = rb._iOnly; rb._iOnly = true;
+    V.blueOnly = rb._iOnly; rb._iOnly = true; rb._iBout = true;
     R.event = "box";                                         // the house comes in for it
     drawCards();
     arenaBoard("BOXING" + (b.title ? " TITLE BOUT" : " BOUT"), "YOU  vs  " + opp.name, "purse " + fmt(b.purse));
   }
   function endPlayerBout() {
     const R = RING(), rb = V.fB && V.fB.ped, ra = V.fA && V.fA.ped;
-    if (rb) { rb.meleeHit = null; rb._iOnly = !!V.blueOnly; if (V.blueName) rb.name = V.blueName; }
+    if (rb) { rb.meleeHit = null; rb._iOnly = !!V.blueOnly; rb._iBout = false; if (V.blueName) rb.name = V.blueName; }
     V.blueName = null; V.blueOnly = false;
     if (R) R.event = null;
     if (ra && !ra.dead) { freshen(ra, false); place(ra, CORNER.red[0], CORNER.red[1], R.y, Math.PI / 4); }
@@ -625,10 +682,66 @@
     const ped = s.ped, o = other(b, s), Vb = VB();
     if (!ped || ped.dead || !s.F || !Vb) return;
     if (downOf(ped)) { hold(ped); return; }
+    if (b.kind === "player") s.F.aggr = Math.min(0.98, s.aggr + urgency(b, s));
+    // A TRAINED MAN'S LUNGS. The street fighter's wind (systems/melee.js) is
+    // built for a ten-second scuffle; a boxer paces three rounds. He gets his
+    // breath back between his own combinations, a better man faster.
+    s.F.stam = Math.min(1, s.F.stam + dt * (0.05 + 0.08 * s.skill));
     const tp = posOf(o), d = Math.hypot(tp.x - ped.pos.x, tp.z - ped.pos.z);
+    // THE COUNTER. A punch of yours he caught on the gloves leaves your arm
+    // out there: he throws back into it, a beat later, if he is in range.
+    if (b.counterAt != null && b.time >= b.counterAt && o.player) {
+      b.counterAt = null;
+      if (d > 0.85 && d < 1.25 && !Vb.strikeOf(ped) && s.F.stam > 0.08) {
+        try { s.F.strikeAct(Math.random() < 0.5 ? "cross" : Math.random() < 0.6 ? "hook" : "upper", s.O, actorOf(o)); } catch (e) {}
+      }
+    }
     if (d > 2.7 && !Vb.strikeOf(ped)) { if (!ped.char.fightStance) Vb.guard(ped, true); stepTo(ped, s, tp.x, tp.z, dt, 0.5); }
     else s.F.tick(dt, actorOf(o), s.O);
     hold(ped);
+  }
+  // HE COMES BACK. A man behind on the cards goes looking for it, more so in
+  // the last round; a man who has just been put down and got up comes out
+  // angry; a man who sees you blowing steps on the gas. A man with no legs
+  // left cannot, whatever he wants.
+  function urgency(b, s) {
+    let u = 0;
+    if (b.cards[0].length) {
+      const tot = cardTotals(b);
+      let behind = 0;
+      for (let j = 0; j < 3; j++) behind += (s === b.blue ? tot[j][0] - tot[j][1] : tot[j][1] - tot[j][0]);
+      if (behind > 0) u += b.round >= RULES.ROUNDS ? 0.3 : 0.15;
+    }
+    if (s.kdRound > 0) u += 0.15;
+    const o = other(b, s);
+    if (o.player) { const st = CBZ.player.stamina == null ? 100 : CBZ.player.stamina; if (st < 30) u += 0.2; }
+    return u * Math.max(0.3, s.legs);
+  }
+  // BREAK! Two men chest to chest are not boxing: neither can throw a clean
+  // punch (and the engine's fighter whiffs everything at that range). The
+  // referee steps in, says it, and walks them apart; the man in the house
+  // corner takes the step back.
+  function breakClinch(b, dt) {
+    const a = actorOf(b.red), c = actorOf(b.blue);
+    const pa = posOf(b.red), pc = posOf(b.blue);
+    if (!a || !c || downOf(a) || downOf(c)) { b.clinchT = 0; return; }
+    const d = Math.hypot(pc.x - pa.x, pc.z - pa.z);
+    b.breakCD = Math.max(0, (b.breakCD || 0) - dt);
+    b.clinchT = d < 0.88 ? (b.clinchT || 0) + dt : 0;
+    if (b.clinchT < 1.3 || b.breakCD > 0) return;
+    b.clinchT = 0; b.breakCD = 2.5;
+    refSay("Break!", 1.2);
+    const ux = (pc.x - pa.x) / (d || 1), uz = (pc.z - pa.z) / (d || 1);
+    const Vb = VB();
+    [[b.blue, 1], [b.red, -1]].forEach(function (pr) {
+      const sd = pr[0];
+      if (sd.player || !sd.ped) return;
+      if (Vb) Vb.cancelStrike(sd.ped);
+      const k = b.kind === "player" ? 0.75 : 0.4;
+      sd.ped.pos.x += ux * pr[1] * k; sd.ped.pos.z += uz * pr[1] * k;
+      if (CBZ.bodyTeleported) CBZ.bodyTeleported(sd.ped);
+      hold(sd.ped);
+    });
   }
   // the fight works its way back off the ropes: a pair pinned in a corner cannot
   // step in, and the ropes would eat every lunge (nothing moves a man mid-blow)
@@ -677,6 +790,11 @@
     [b.red, b.blue].forEach(function (s) {
       s.legs = Math.min(1, s.legs + 0.3);
       if (s.F) s.F.stam = Math.min(1, s.F.stam + 0.45);
+      if (s.player) {
+        const P = CBZ.player, mx = P.maxHp || 200;
+        P.stamina = Math.min(100, (P.stamina == null ? 100 : P.stamina) + 45);
+        P.hp = Math.min(mx, P.hp + mx * 0.12);
+      }
       if (!s.player && s.ped) VB().guard(s.ped, true);
     });
     if (b.kind === "player") cutmanDown();
@@ -701,6 +819,10 @@
       return;
     }
 
+    // NO HEALING ON YOUR FEET. The street's out-of-combat regen (city/death.js,
+    // paused while _hurtT runs) does not run in a bout: what you have taken
+    // stays taken. The minute on the stool gives some of it back (startRound).
+    if (b.kind === "player" && !b.over && b.phase !== "wait") P._hurtT = Math.max(P._hurtT || 0, 0.25);
     if (b.phase === "wait") {
       // he is in his corner; the ring is yours to walk into (the steps, the gap in the ropes)
       b.t -= dt;
@@ -738,6 +860,7 @@
       if (BOUT === b && b.phase === "round" && !b.blue.player) fightAI(b, b.blue, dt);
       if (BOUT !== b || b.phase !== "round") return;
       offTheRopes(b, dt);
+      breakClinch(b, dt);
       clearHeads(b, RULES.CLEAR * dt);
       // who is on the floor (a jump is not a knockdown: it has to last)
       const sides = [b.red, b.blue];
@@ -753,7 +876,12 @@
         // empty in ten seconds, and an empty man's hands drop and his punches
         // arrive slow and light (the rig's own `winded`). Pick your shots.
         const Sw = VB() && VB().strikeOf ? VB().strikeOf(playerActor()) : null;
-        if (Sw && Sw.id !== b.swingId) { b.swingId = Sw.id; P.stamina = Math.max(0, (P.stamina == null ? 100 : P.stamina) - RULES.SWING); }
+        if (Sw && Sw.id !== b.swingId) {
+          b.swingId = Sw.id;
+          (b.sw || (b.sw = [])).push(b.time); if (b.sw.length > 12) b.sw.shift();
+          const extra = Math.max(0, flurry(b) - (RULES.ARM_PUNCH - 1)) * 3;
+          P.stamina = Math.max(0, (P.stamina == null ? 100 : P.stamina) - RULES.SWING - extra);
+        }
         // out of the ring with the round on is quitting on your feet
         b.outT = inRing(P.pos) ? 0 : b.outT + dt;
         if (b.outT > 3 || P.dead) { refSay("He's left the ring. It's over!", 2.6); finish(b.blue, "RTD"); return; }
@@ -1281,7 +1409,8 @@
       near: () => near,
       live: () => (BOUT ? { kind: BOUT.kind, phase: BOUT.phase, round: BOUT.round, clock: BOUT.clock, over: BOUT.over, winner: BOUT.winner, method: BOUT.method,
         red: BOUT.red.name, blue: BOUT.blue.name, cards: BOUT.cards, count: BOUT.count ? BOUT.count.n : 0, bet: BOUT.bet,
-        kd: [BOUT.red.kdBout, BOUT.blue.kdBout], pts: [BOUT.red.pts, BOUT.blue.pts], landed: [BOUT.red.landed, BOUT.blue.landed], legs: [BOUT.red.legs, BOUT.blue.legs],
+        kd: [BOUT.red.kdBout, BOUT.blue.kdBout], pts: [BOUT.red.pts, BOUT.blue.pts], landed: [BOUT.red.landed, BOUT.blue.landed], legs: [BOUT.red.legs, BOUT.blue.legs], caught: BOUT.caught || 0, fouls: BOUT.red.fouls,
+        oppF: BOUT.blue.F ? { thrown: BOUT.blue.F.thrown, landed: BOUT.blue.F.landed, blocked: BOUT.blue.F.blocked, whiffs: BOUT.blue.F.whiffs, aggr: +(BOUT.blue.F.aggr || 0).toFixed(2), stam: +(BOUT.blue.F.stam || 0).toFixed(2), skill: BOUT.blue.skill } : null,
         oddsRed: BOUT.oddsRed, oddsBlue: BOUT.oddsBlue, purse: BOUT.purse } : null),
       offer: () => OFFER,
       cast: () => (V ? { fA: pedOf(V.fA), fB: pedOf(V.fB), ref: pedOf(V.ref), judges: V.judges.map(pedOf), bookie: pedOf(V.bookie), cutman: pedOf(V.cutman), promoter: pedOf(V.promoter) } : null),

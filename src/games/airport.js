@@ -182,7 +182,7 @@
   const APRON_REF = RAMP;                                     // airfield reference the run distance is measured from
   const DESTS = [
     // SALT CAY moved west (-40 → -520): the snow island now parks at
-    // z≈-1920..-2580 (world/layout.js snow dial), and the old spot put this
+    // z≈-1920..-2580 (world/worldplan.js snow offset), and the old spot put this
     // "open-water" beacon on the alpine tundra. (-520,-2050) is the permanent
     // sea channel between the forest's north shore and the Greater Mercy
     // envelope — open water at every dial setting.
