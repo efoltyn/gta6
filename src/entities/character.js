@@ -6933,8 +6933,13 @@
     // ---- UPRIGHT (the tread cycle above, verbatim numbers) -----------------
     const tw = Math.sin(st.tread), t2 = Math.sin(st.tread * 2);
     const up = _swU;
-    // treading is upright (a slight lean), the legs in the eggbeater: thighs
-    // out in front as if seated, knees bent, the shins circling out of phase
+    /* treading is upright (a slight lean), the legs in the eggbeater: thighs
+       forward and nearly level as if sitting on a chair, knees spread, the
+       shins hanging under the knees and circling out of phase. On this rig a
+       hip's NEGATIVE rotation.x swings the thigh forward (positive is behind
+       the body: the crawl uses that to lie the legs out along a prone
+       torso), and the left hip spreads with negative rotation.z, the right
+       with positive (measured on the built rig). */
     _swU.bx = 0.20;
     _swU.by = 0;
     _swU.laX = -0.35 + t2 * 0.42;
@@ -6943,12 +6948,13 @@
     _swU.raZ = 0.62;
     _swU.elL = -0.85;
     _swU.elR = -0.85;
-    _swU.llX = 1.05 + t2 * 0.30;
-    _swU.rlX = 1.05 - Math.cos(st.tread * 2) * 0.30;
-    _swU.llZ = 0.06;
-    _swU.rlZ = -0.06;
-    _swU.knL = 1.35 + Math.max(0, tw) * 0.35;
-    _swU.knR = 1.35 + Math.max(0, -tw) * 0.35;
+    const c2 = Math.cos(st.tread * 2);
+    _swU.llX = -1.22 + t2 * 0.14;
+    _swU.rlX = -1.22 - c2 * 0.14;
+    _swU.llZ = -0.32 + c2 * 0.10;
+    _swU.rlZ = 0.32 - t2 * 0.10;
+    _swU.knL = 1.30 + (0.5 + 0.5 * Math.sin(st.tread * 2 + 1.2)) * 0.30;
+    _swU.knR = 1.30 + (0.5 + 0.5 * Math.cos(st.tread * 2 + 1.2)) * 0.30;
     _swU.nX = -0.1;
     _swU.nY = 0;
     _swW.cr = cr; _swW.br = br; _swW.P = P; _swW.U = U;
@@ -6999,8 +7005,10 @@
       if (ch.parts) {
         if (ch.parts.la) { ch.parts.la.rotation.x = Math.max(FLAIL, ch.parts.la.rotation.x + (-1.45 - f * 0.80) * th); ch.parts.la.rotation.z -= 0.50 * th; }
         if (ch.parts.ra) { ch.parts.ra.rotation.x = Math.max(FLAIL, ch.parts.ra.rotation.x + (-1.45 + f * 0.80) * th); ch.parts.ra.rotation.z += 0.50 * th; }
-        if (ch.parts.ll) ch.parts.ll.rotation.x += gg * 0.55 * th;
-        if (ch.parts.rl) ch.parts.rl.rotation.x -= gg * 0.55 * th;
+        // the legs kick harder and lower, never up behind: the thigh swings
+        // round the tread's seat and a little down from it (+ is behind)
+        if (ch.parts.ll) ch.parts.ll.rotation.x += (gg * 0.30 + 0.18) * th;
+        if (ch.parts.rl) ch.parts.rl.rotation.x += (-gg * 0.30 + 0.18) * th;
       }
     } else if (ch.body) ch.body.rotation.z = 0;
     lockCharacterHips(ch);
@@ -7094,15 +7102,16 @@
       if (ch.parts.ra) { ch.parts.ra.rotation.x = raC * (1 - m) + raT * m; ch.parts.ra.rotation.z = 0.28 + 0.34 * m; }
       // crawl: flutter kick. tread: eggbeater — the legs circle out of phase.
       const llC = sw * 0.30, rlC = -sw * 0.30;
-      const llT = 1.05 + Math.sin(st.tread * 2) * 0.30, rlT = 1.05 - Math.cos(st.tread * 2) * 0.30;
+      // (the eggbeater: negative swings the thigh forward on this rig)
+      const llT = -1.22 + Math.sin(st.tread * 2) * 0.14, rlT = -1.22 - Math.cos(st.tread * 2) * 0.14;
       if (ch.parts.ll) ch.parts.ll.rotation.x = llC * (1 - m) + llT * m;
       if (ch.parts.rl) ch.parts.rl.rotation.x = rlC * (1 - m) + rlT * m;
     }
     if (ch.low) {
       if (ch.low.la) ch.low.la.rotation.x = -0.45 * (1 - m) - 0.85 * m;
       if (ch.low.ra) ch.low.ra.rotation.x = -0.45 * (1 - m) - 0.85 * m;
-      if (ch.low.ll) ch.low.ll.rotation.x = (0.35 + Math.max(0, -sw) * 0.25) * (1 - m) + (1.35 + Math.max(0, tw) * 0.35) * m;
-      if (ch.low.rl) ch.low.rl.rotation.x = (0.35 + Math.max(0, sw) * 0.25) * (1 - m) + (1.35 + Math.max(0, -tw) * 0.35) * m;
+      if (ch.low.ll) ch.low.ll.rotation.x = (0.35 + Math.max(0, -sw) * 0.25) * (1 - m) + (1.30 + (0.5 + 0.5 * Math.sin(st.tread * 2 + 1.2)) * 0.30) * m;
+      if (ch.low.rl) ch.low.rl.rotation.x = (0.35 + Math.max(0, sw) * 0.25) * (1 - m) + (1.30 + (0.5 + 0.5 * Math.cos(st.tread * 2 + 1.2)) * 0.30) * m;
     }
     /* PANIC IS NOT A FASTER STROKE. Somebody who thinks they are about to be
        eaten stops swimming: the arms come clear of the water and beat OVER the
@@ -7128,12 +7137,13 @@
         const FLAIL = -2.6;
         if (ch.parts.la) { ch.parts.la.rotation.x = Math.max(FLAIL, ch.parts.la.rotation.x + (-1.45 - f * 0.80) * th); ch.parts.la.rotation.z -= 0.50 * th; }
         if (ch.parts.ra) { ch.parts.ra.rotation.x = Math.max(FLAIL, ch.parts.ra.rotation.x + (-1.45 + f * 0.80) * th); ch.parts.ra.rotation.z += 0.50 * th; }
-        if (ch.parts.ll) ch.parts.ll.rotation.x += gg * 0.55 * th;
-        if (ch.parts.rl) ch.parts.rl.rotation.x -= gg * 0.55 * th;
+        if (ch.parts.ll) ch.parts.ll.rotation.x += (gg * 0.30 + 0.18) * th;
+        if (ch.parts.rl) ch.parts.rl.rotation.x += (-gg * 0.30 + 0.18) * th;
       }
       if (ch.low) {
-        if (ch.low.ll) ch.low.ll.rotation.x = Math.max(0, ch.low.ll.rotation.x + (0.45 + gg * 0.40) * th);
-        if (ch.low.rl) ch.low.rl.rotation.x = Math.max(0, ch.low.rl.rotation.x + (0.45 - gg * 0.40) * th);
+        // the shins kick round the seated bend, never folded up behind
+        if (ch.low.ll) ch.low.ll.rotation.x = Math.min(1.85, Math.max(0, ch.low.ll.rotation.x + gg * 0.30 * th));
+        if (ch.low.rl) ch.low.rl.rotation.x = Math.min(1.85, Math.max(0, ch.low.rl.rotation.x - gg * 0.30 * th));
       }
     } else if (ch.body) ch.body.rotation.z = 0;
     lockCharacterHips(ch);
