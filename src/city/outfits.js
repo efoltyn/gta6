@@ -2402,6 +2402,12 @@
     }
     return null;
   }
+  // IS ANYBODY CLOSE ENOUGH TO SEE WHO IS IN THE UNIFORM? The strip's own
+  // rule (alive, awake, drawn, within 22 m), with nobody to leave out.
+  // city/wanted.js asks it before a violent crime burns a cover: a rifle
+  // fired from a roof two hundred metres off burns nobody's fatigues.
+  const _nobody = {};
+  CBZ.cityDisguiseWitness = function () { return strippingWitness(_nobody); };
   function cancelSwap() {
     _pendingSwap = null;
     g.cityOutfitChanging = 0;

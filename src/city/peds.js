@@ -6989,7 +6989,11 @@
           const held = !!(CBZ.boardingHolds && CBZ.boardingHolds(ped));
           if (ped.state === "fight") {
             if (ped._iqPos) { ped._iqPos = null; ped._iqPlant = false; ped._iqRepoT = 0; }
-          } else if (ped.state !== "flee" && !held) { ped.path = null; pickRoutineGoal(ped); }
+          // (a CONTROLLED body is somebody's errand: a mark on his routine, a
+          // detail man, a companion. Stuck for half a second, it used to be
+          // handed a random routine goal here and walk off across the city
+          // with state still "walk", so its owner never noticed.)
+          } else if (ped.state !== "flee" && !held && !ped.controlled) { ped.path = null; pickRoutineGoal(ped); }
         }
       } else if (ped._stuck) ped._stuck = 0;
     } else if (ped._stuck) ped._stuck = 0;
@@ -7443,7 +7447,13 @@
       // importance only — `renderImportant` below is untouched, so his rig
       // still stops drawing at the same 95 m as everybody else's.
       const important = p.rage || p.guard || p._post || p.controlled || (p.npcWanted | 0) >= 1 || p.armed || p.reportState || p.approach;
-      const renderImportant = p.controlled || p.companion || p.recruited || p.faction === "player" || p === g.cityPartner;
+      // `_farDraw`: a rig somebody has GLASS on (a scope, binoculars) is drawn
+      // at any range while he looks; city/hitman.js sets it on the bodies in
+      // the lens and clears it when the glass comes down.
+      // (`_lodOk`: a scripted body that is happy to stop drawing at the band
+      // like anybody else: the hitman jobs' details and garrisons, thirty men
+      // a job, who were otherwise drawn at any range for being `controlled`)
+      const renderImportant = (p.controlled && !p._lodOk) || p._farDraw || p.companion || p.recruited || p.faction === "player" || p === g.cityPartner;
       const active = near || important;
       // render LOD: peds far from the camera stop drawing entirely (the single
       // biggest GPU saving with ~90 rigs). Simulation proximity is deliberately

@@ -48,9 +48,12 @@
 
   function on() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_NAV_V1 !== false; }
 
+  // (`_navOk`: a body another system steers by errand — set `controlled` so
+  // the street brain leaves it alone, but walking to a point it was given —
+  // still wants the route round a wall: the hitman jobs' soldiers and guards)
   function movable(p) {
     return !!(p && p.pos && p.target && !p.dead && !(p.ko > 0) && !p.inCar
-      && !p.controlled && !p.vendor && !p.staffPost && !p._parked
+      && (!p.controlled || p._navOk) && !p.vendor && !p.staffPost && !p._parked
       && !p._traversal && !(p.enterT > 0) && !(p.char && p.char.sitting)
       && WALKING[p.state]);
   }
