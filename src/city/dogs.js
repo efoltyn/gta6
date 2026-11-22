@@ -137,8 +137,13 @@
       turnT: rng() * 3, idleT: rng() * 1.5, lieT: 0, intrudeT: 0,
       animal: true, external: true, state: "wander", aggro: false, species: sp, ko: 0, escaped: false, dead: false,
     };
+    // the mouth the creature seams read (hit test, seize seat): kept on the
+    // posed jaw every frame by animateDog
     const M = DM.mouth(rig);
     d._jawL = M; d._jawGripL = { x: M.x - 0.03 * D.K, y: M.y - 0.02 * D.K, z: 0 };
+    d.biteId = CBZ.canid ? CBZ.canid.biteId(rig) : "dog:" + breed;
+    // dead, the corpse solver drives the real skeleton (systems/quadruped_ragdoll.js)
+    if (CBZ.canid && CBZ.canid.deathProxy) { try { CBZ.canid.deathProxy(d, rig); } catch (e) {} }
     d.onShot = function (hit, w) { return dogShot(d, hit, w); };
     if (LIVEDOGS() && CBZ.cityWildlife) CBZ.cityWildlife.push(d);
     if (d.tamed) DM.collar(rig, COLLARS[(rng() * COLLARS.length) | 0]);
@@ -358,13 +363,22 @@
     try { if (CBZ.vitals && CBZ.vitals.cuffable && !p.animal && CBZ.vitals.cuffable(p)) return true; } catch (e) {}
     return false;
   }
+  // THE TEETH ON THE BODY: the wound lands where the posed jaw closed on the
+  // victim (the nearest limb or the trunk), through the one bite seam
+  // (CBZ.canid.bite -> CBZ.bodyBite for people, creatureBiteChunk for
+  // animals), and the worry that follows holds the jaw on that spot.
+  function teeth(d, a, sev, loc) {
+    if (!CBZ.canid || !d.rig || !a) return null;
+    let ct = null;
+    try { ct = CBZ.canid.bite(d, d.rig, a, { sev: sev, loc: loc }); } catch (e) { ct = null; }
+    d._grip = ct;
+    return ct;
+  }
   function dogBite(d, a, why) {
     const dmg = d.species.bite * (0.8 + rng() * 0.45);
     d.bite = true; d.shakeT = 0.5;
     sfxDog("growl", d);
-    if (CBZ.bodyBite && a.char && a.pos) {
-      try { CBZ.bodyBite(a, { x: a.pos.x, y: a.pos.y + (rng() < 0.6 ? 0.55 : 0.95), z: a.pos.z }, { jaw: 0.1 * d.dims.K + 0.06, sev: 0.5, fromX: d.pos.x, fromZ: d.pos.z }); } catch (e) {}
-    }
+    teeth(d, a, 0.5, undefined);
     // the player is responsible for what his dog does unprovoked
     const yours = d.owner === "player";
     if (yours && why !== "defend" && !a._dogBilled) {
@@ -572,6 +586,8 @@
       canReach: function () { return d._packRole !== "flank" && d._packRole !== "hold"; },
       onHit: function (dm) {
         d.bite = true; d.shakeT = 0.6;
+        // a police dog is trained onto the arm; anything else takes what it reaches
+        teeth(d, PA() || CBZ.player, 0.6, d.role === "k9" ? "arm" : undefined);
         if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(dm, d.pos.x, d.pos.z, cause, false, d, false); } catch (e) {} }
       },
       cruiseSpeed: RUN * 0.55, rushSpeed: RUN,
@@ -605,7 +621,10 @@
       DTGT.pos = PP; DTGT.group.position = PP; DTGT.dead = false; DTGT.hp = 1e9;
       CBZ.creatureFight(d, DTGT, dt, d._atkOpts || (d._atkOpts = {
         reach: 1.7, rate: 0.95, dmg: d.species.bite, speed: RUN, style: "maul",
-        onHit: function (dm) { if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(dm, d.pos.x, d.pos.z, "mauled by a dog", false, d, false); } catch (e) {} } },
+        onHit: function (dm) {
+          teeth(d, PA() || CBZ.player, 0.55, d.role === "k9" ? "arm" : undefined);
+          if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(dm, d.pos.x, d.pos.z, "mauled by a dog", false, d, false); } catch (e) {} }
+        },
       }));
       d.faceH = d.heading;
     } else { d.heading = Math.atan2(PP.z - d.pos.z, PP.x - d.pos.x); dogMove(d, RUN, dt, true); }
@@ -902,8 +921,32 @@
       if (d.petT > 0) { d.mood.happy = 1; d.look = P; }
       if (d.wagBoost > 0) d.mood.happy = Math.max(d.mood.happy, Math.min(1, d.wagBoost));
       if (d.sniffT > 0) d.mood.sniff = 1;
+      holdGrip(d, dt);
       animateDog(d, dt, P);
     }
+  }
+  // A DOG THAT HAS HOLD STAYS ON: while it worries (shakeT) its jaw stays on
+  // the bitten spot, carried by the victim's limb as he moves; the body is
+  // pulled after the mouth (a rigid shift: the mouth moves as the body does)
+  const _gp = { x: 0, y: 0, z: 0 };
+  function holdGrip(d, dt) {
+    const g = d._grip;
+    if (!g) return;
+    if (!(d.shakeT > 0) || !CBZ.canid || !d.rig || !d.rig.mouthOk) { d._grip = null; return; }
+    const gp = CBZ.canid.gripPoint(g, _gp);
+    if (!gp) { d._grip = null; return; }
+    const mw = d.rig.mouthW;
+    const ex = gp.x - mw.x, ez = gp.z - mw.z, el = Math.hypot(ex, ez);
+    if (el > 0.7) { d._grip = null; return; }            // torn loose
+    if (el > 1e-3) {
+      const step = Math.min(el, RUN * 1.3 * dt);
+      d.pos.x += ex / el * step; d.pos.z += ez / el * step;
+      d.pos.y = groundY(d.pos.x, d.pos.z);
+    }
+    const want = Math.atan2(gp.z - d.pos.z, gp.x - d.pos.x);
+    d.faceH += Math.max(-6 * dt, Math.min(6 * dt, wrapPi(want - d.faceH)));
+    d.heading = d.faceH;
+    if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(d, d.faceH); else d.group.rotation.y = -d.faceH;
   }
 
   // body language -> the model
@@ -932,9 +975,18 @@
     }
     C.bark = d.bark; C.bite = d.bite; C.shake = d.shakeT > 0; C.pant = null; C.tilt = d._beatKind === "tilt" ? 0.8 : 0;
     C.ground = near < 30 ? groundY : null;
+    // a grip: the jaw reaches for the bitten spot on the victim
+    C.mouthTo = (d._grip && d.shakeT > 0 && CBZ.canid) ? CBZ.canid.gripPoint(d._grip, _mt) : null;
+    C.hold = C.mouthTo ? 1 : 0;
     d.bark = false; d.bite = false;
     DM.animate(d.rig, dt, C);
+    // the creature seams read the posed jaw, in the group's units
+    if (CBZ.canid && d.rig.mouthOk) {
+      CBZ.canid.jawLocal(d.rig, grp, C.heading, d._jawL);
+      d._jawGripL.x = d._jawL.x - 0.03 * d.dims.K; d._jawGripL.y = d._jawL.y - 0.02 * d.dims.K; d._jawGripL.z = d._jawL.z;
+    }
   }
+  const _mt = { x: 0, y: 0, z: 0 };
 
   // ============================================================
   //  BUILD
