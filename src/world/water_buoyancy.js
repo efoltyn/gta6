@@ -32,6 +32,7 @@
   }
   function overWater(x, z) { return !!(CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)); }
 
+  const FAR_M = 420;
   CBZ.onUpdate(38.5, function (dt) {
     if (CFG.WATER_V2 === false || !CBZ.hullSeakeep) return;
     const g = CBZ.game;
@@ -47,6 +48,18 @@
       if (!car || car.dead || !car.group || !car.pos || car._airborne) continue;
       if (!isMarine(car)) continue;
       if (arch && car._world !== "archipelago") continue;   // a Gang City boat is not in this sea
+      /* A HULL NOBODY CAN SEE DOES NOT RIDE THE SWELL. Every boat in the world
+         ran the seakeeping solve every frame (1.3 ms of the phone profile's
+         frame at the downtown spawn, the marina and the anchored fleet far
+         out past the fog). An idle hull past FAR_M of the camera and the
+         player keeps its last pose; one somebody is in, or that is moving,
+         is solved as before. */
+      if (!car.player && !car.npcDriver && !(Math.abs(car.v || 0) > 0.2)) {
+        const cam = CBZ.camera && CBZ.camera.position, P = CBZ.player && CBZ.player.pos;
+        const dc = cam ? (car.pos.x - cam.x) * (car.pos.x - cam.x) + (car.pos.z - cam.z) * (car.pos.z - cam.z) : 0;
+        const dp = P ? (car.pos.x - P.x) * (car.pos.x - P.x) + (car.pos.z - P.z) * (car.pos.z - P.z) : 0;
+        if (dc > FAR_M * FAR_M && dp > FAR_M * FAR_M) continue;
+      }
       // a hull on dry land belongs to the road path; one the water carried
       // over a street (a flood) is still the water's while there is water
       if (!overWater(car.pos.x, car.pos.z) &&
