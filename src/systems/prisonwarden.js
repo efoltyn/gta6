@@ -190,6 +190,7 @@
     push: ["I said go.", "Officer. Now."],
     inspect: ["Stand up.", "Bunk's a mess.", "Let me see your hands."],
     arrival: ["Another one. Walk him in."],
+    arrivalCell: ["Another one. Lock him in for the count."],
     paYard: {
       calm: ["Yard's open. Keep it clean."],
       tense: ["Yard's open. Anybody carrying goes to the hole."],
@@ -1595,15 +1596,19 @@
       S.lastBlock = b; S.blockSeq++;
       if (b === "wake") { S.wakeSeq = S.blockSeq; S.morningT = 2.5; }
       S.staffSour *= 0.85;                     // a new shift forgets a little
-      // THE YARD OPENS WITH HIS VOICE: what kind of day it is, from his mood
-      if (b === "yard" && S.yardPaSeq !== S.blockSeq && onShift()) {
-        S.yardPaSeq = S.blockSeq;
-        const md = CORE.moodOf(S.incidents, S.now, hourLen());
-        paSay(LINE.paYard[md] || LINE.paYard.calm);
-      }
+
       // pending business older than two days is dropped
       if (S.pending && S.blockSeq - S.pending.seq > 16) S.pending = null;
       if (S.favor && !S.favor.picked && S.blockSeq - S.favor.seq > 8) { S.favor = null; standing(-2); }
+    }
+    // THE YARD OPENS WITH HIS VOICE: what kind of day it is, from his mood.
+    // Not over a new arrival's intake: a man locked in his cell for the count
+    // hears the yard called when the count is done (systems/capture.js), so
+    // the line waits for it (still the same yard block).
+    if (b === "yard" && S.yardPaSeq !== S.blockSeq && onShift() && !(CBZ.prisonIntakeActive && CBZ.prisonIntakeActive())) {
+      S.yardPaSeq = S.blockSeq;
+      const md = CORE.moodOf(S.incidents, S.now, hourLen());
+      paSay(LINE.paYard[md] || LINE.paYard.calm);
     }
     if (S.morningT > 0) {
       S.morningT -= dt;
@@ -1689,6 +1694,17 @@
     const dI = li ? Math.hypot(li.x - wp.x, li.z - wp.z) : 1e9;
     return CORE.presence(post() || CORE.duty(blockId()), !!w.asleep, onFloor(), dP, dI);
   }
+  // THE INTAKE GREETING (systems/capture.js, the door just locked on a new
+  // arrival): he says it if he is on the wing to say it, and then never again
+  // for this man at the gate. false = he is not there; a screw says his line.
+  CBZ.prisonWardenGreet = function (at) {
+    const w = wardenG();
+    if (!w || w.dead || (w.ko | 0) > 0 || w.asleep || g.mode !== "escape") return false;
+    const p = at || P();
+    if (!p || Math.hypot(p.x - w.group.position.x, p.z - w.group.position.z) > 26) return false;
+    S.arrivalSaid = true;
+    return say(w, pick(LINE.arrivalCell), 2.6);
+  };
   // world/adminwing.js asks this for the post he should be on right now
   function arriving() {
     return S.runT < 55 || (S.arrivalAt != null && S.now - S.arrivalAt < 55);

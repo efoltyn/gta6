@@ -376,9 +376,10 @@
     bar.visible = false;
     V.barrier = { mesh: bar, col: null, y: gy + 1.4, lx: lGateX + 1.4 };
     // THE FIXER STANDS OUTSIDE THE WIRE, on the verge south of the gate road.
-    // (He stood 14 m inside it, in a traffic lane: city/wanted.js makes the
-    // base's whole rect a five-star incursion, so asking him about the job got
-    // you shot.)
+    // (He stood 14 m inside it, in a traffic lane, back when the base's whole
+    // rect was a five-star incursion. city/basewatch.js has sentries who
+    // challenge instead, and stands down while this night runs; outside the
+    // wire is still where a fixer would wait.)
     V.fixerAt = [lGateX + 9, 17];
   }
   function gateLock(on) {
@@ -1275,9 +1276,16 @@
 
     // drive guards + read the ENGINE detection
     let seen = false, seeGuard = null, huntTouch = false;
+    // A UNIFORM WALKS IN. Fatigues taken off one of this garrison (outfits.js
+    // stamps the claim "army") read as a soldier to these sentries and to the
+    // beams for as long as the claim holds; whether a soldier accepts him the
+    // rest of the time is city/basewatch.js's one answer (CBZ.cityBaseStanding).
+    // The moment it is blown this is false again and the ladder below climbs
+    // as it always did.
+    const cover = !!(CBZ.cityDisguiseTrust && CBZ.cityDisguiseTrust("army"));
     for (const gd of V.guards) {
       stepGuard(gd, dt);
-      if (guardSeesPlayer(gd)) {
+      if (!cover && guardSeesPlayer(gd)) {
         seen = true; seeGuard = gd;
         // at ORANGE+ a seer becomes a hunter; contact = grab
         if (RT.tierIdx >= 2) gd.mode = "hunt";
@@ -1288,7 +1296,7 @@
     if (RT.testGuard && guardSeesPoint(RT.testGuard, P.pos.x, P.pos.z, P.pos.y + 1.0, P.crouch)) seen = true;
 
     // searchlight sensor — the SHIPPED CBZ.litBySearchlight over my pools
-    const lit = CBZ.litBySearchlight ? CBZ.litBySearchlight(P.pos, P.crouch) : false;
+    const lit = !cover && CBZ.litBySearchlight ? CBZ.litBySearchlight(P.pos, P.crouch) : false;
     RT.seen = seen;
 
     // ---- ALERT LADDER dynamics ----

@@ -891,6 +891,14 @@
         // the floor above made every breakout a 4-5 star manhunt)
         if (CBZ.cityAddStars) { try { CBZ.cityAddStars(0, "Escaped Convict"); } catch (e) {} }
         game.cityCrimeLabel = "Escaped Convict";
+        // OUT IN WHAT HE ESCAPED IN. The ledger the origin just restored holds
+        // his city clothes; a man over the wall is in the prison orange until
+        // he changes (and the police know that orange: wanted.js convictFloor)
+        if (game._breakoutJumpsuit) {
+          game._breakoutJumpsuit = false;
+          if (CBZ.cityWardrobeHydrate) { try { CBZ.cityWardrobeHydrate(); } catch (e) {} }
+          if (CBZ.cityWearOutfit) { try { CBZ.cityWearOutfit("inmate", { silent: true }); } catch (e) {} }
+        }
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       }
       // Returning characters restore lastPos; a first character gets one-time

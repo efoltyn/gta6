@@ -1580,6 +1580,10 @@
     const sdt = Math.min(0.5, SCAN - LK.scanT);
     LK.scanT = SCAN;
     if (!trusted(c)) { if (LK.who) lookEnd(); return; }
+    // ON FORT BRANDT the soldiers' look is city/basewatch.js's (the held
+    // look, the walk over, the radio): one doubt per man, not two systems
+    // asking him the same question. Off the base this close look stands.
+    if (armyAtBase(c)) { if (LK.who) lookEnd(); return; }
     const px = P.pos.x, pz = P.pos.z, py = P.pos.y || 0;
     const L = LINES[c.kind] || LINES.job;
     // (c) a gun out in a uniform that does not carry one, and somebody near

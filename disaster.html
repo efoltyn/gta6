@@ -897,7 +897,7 @@ document.body.appendChild(b);}}catch(e){}})();
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=day1122"></script>
+<script src="src/systems/prisonwarden.js?v=police2c"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
 <script src="src/systems/facial.js?v=anatomy1122"></script>
@@ -945,7 +945,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=card1122"></script>
+<script src="src/systems/state.js?v=police2c"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1859,6 +1859,15 @@ document.body.appendChild(b);}}catch(e){}})();
      muzzle flash, the round arriving before its sound, a dummy position, a
      new corner after every shot; and a body to go and find when it goes quiet. -->
 <script src="src/city/hitman_m_duel.js?v=duel1122"></script>
+<!-- general: a general who never leaves Fort Brandt. A soldier's fatigues off
+     a body (the strip outfits.js already has) walk you through the gate;
+     whether a soldier accepts you is city/basewatch.js's one answer
+     (CBZ.cityBaseStanding: a held look, a walk over, a radio call, then the
+     alarm), lent what the job knows through CBZ.cityBaseLens; one ladder up a
+     blind wall to a roof with a line to where he stands; and a base that
+     stands to behind the shot (CBZ.cityBaseStandTo). Reads CBZ._militaryBase,
+     CBZ.ladderKit, CBZ.motorcade.kit at run time. -->
+<script src="src/city/hitman_m_general.js?v=general1122j"></script>
 <!-- army / column: a man who is never alone. Thirty armed men organised as a
      detail (a ring that walks with him on the detail brain, a team at each
      site with door, corner and roof posts, three cars on the road graph), a
@@ -2202,6 +2211,8 @@ document.body.appendChild(b);}}catch(e){}})();
      1.3 km beeline island_military.js used to order at 5 stars. Loads after
      island_military (the base publishes its own bounds), garrison (posts own
      their bodies and this file yields to them), squadai and peds. -->
+<!-- A BASE IS GUARDED BY PEOPLE: sentries who see you challenge, warn, order you off, report you, and only then is it hostile; a uniform of the garrison is not trespassing on sight. CBZ.cityBaseStanding(actor) is the one question. Replaces wanted.js's five-star zone. -->
+<script src="src/city/basewatch.js?v=police2c-hm2"></script>
 <!-- PIRACY. Armed skiffs take a vessel, and the crew aboard it are the same
      posted people seacrew.js declared — a hostage is a real actor with a
      family, a ransom is real money, and the buyer of that money is a gang, a

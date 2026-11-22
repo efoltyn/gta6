@@ -878,7 +878,7 @@ document.body.appendChild(b);}}catch(e){}})();
      interactions.js's cameras multiply by, so darkness is priced once.
      After cellblock/guards/searchlight/npc (all read at parse), before the
      detection sweep that consumes the result. -->
-<script src="src/systems/prisonschedule.js?v=day1122"></script>
+<script src="src/systems/prisonschedule.js?v=police2c"></script>
 <script src="src/systems/prisonnight.js?v=day1122"></script>
 <!-- THE PLAYER'S FLASHLIGHT: owning a Guard Torch (prison) or a Flashlight
      (city) buys one shadowless SpotLight + floor pool, toggled through
@@ -971,7 +971,7 @@ document.body.appendChild(b);}}catch(e){}})();
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
-<script src="src/systems/capture.js?v=day1122"></script>
+<script src="src/systems/capture.js?v=police2c"></script>
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
@@ -981,7 +981,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reinforcements.js?v=leave1014"></script>
 <script src="src/systems/lockdown.js?v=outside1122"></script>
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=day1122"></script>
+<script src="src/systems/prisonwarden.js?v=police2c"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
@@ -1038,7 +1038,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=card1122"></script>
+<script src="src/systems/state.js?v=police2c"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1532,17 +1532,17 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=pres1028"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
-<script src="src/city/mode.js?v=prisoncut1122b"></script>
+<script src="src/city/mode.js?v=police2c"></script>
 <script src="src/city/economy.js?v=world1122b"></script>
 <script src="src/city/clothes.js?v=body1122f"></script>
-<script src="src/city/outfits.js?v=disg1122"></script>
+<script src="src/city/outfits.js?v=disg1122b"></script>
 <script src="src/entities/dutykit.js?v=anatomy1122"></script>
 <script src="src/city/hunger.js?v=stam1009"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->
 <script src="src/city/law.js?v=cmd1022o"></script>
-<script src="src/city/wanted.js?v=disg1122"></script>
+<script src="src/city/wanted.js?v=police2i"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=islesave1022"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
@@ -1604,7 +1604,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=isleopen1022"></script>
 <script src="src/city/security.js?v=disg1122"></script>
 <script src="src/city/vips.js?v=mladdervoice1"></script>
-<script src="src/city/police.js?v=disg1122"></script>
+<script src="src/city/police.js?v=police2c-disg"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/aircraft.js?v=fx1102"></script>
 <script src="src/city/traffic.js?v=opensea1029"></script>
@@ -2176,6 +2176,15 @@ document.body.appendChild(b);}}catch(e){}})();
      muzzle flash, the round arriving before its sound, a dummy position, a
      new corner after every shot; and a body to go and find when it goes quiet. -->
 <script src="src/city/hitman_m_duel.js?v=duel1122"></script>
+<!-- general: a general who never leaves Fort Brandt. A soldier's fatigues off
+     a body (the strip outfits.js already has) walk you through the gate;
+     whether a soldier accepts you is city/basewatch.js's one answer
+     (CBZ.cityBaseStanding: a held look, a walk over, a radio call, then the
+     alarm), lent what the job knows through CBZ.cityBaseLens; one ladder up a
+     blind wall to a roof with a line to where he stands; and a base that
+     stands to behind the shot (CBZ.cityBaseStandTo). Reads CBZ._militaryBase,
+     CBZ.ladderKit, CBZ.motorcade.kit at run time. -->
+<script src="src/city/hitman_m_general.js?v=general1122j"></script>
 <!-- army / column: a man who is never alone. Thirty armed men organised as a
      detail (a ring that walks with him on the detail brain, a team at each
      site with door, corner and roof posts, three cars on the road graph), a
@@ -2590,6 +2599,8 @@ document.body.appendChild(b);}}catch(e){}})();
      island_military (the base publishes its own bounds), garrison (posts own
      their bodies and this file yields to them), squadai and peds. -->
 <script src="src/city/fortresponse.js?v=army1013m"></script>
+<!-- A BASE IS GUARDED BY PEOPLE: sentries who see you challenge, warn, order you off, report you, and only then is it hostile; a uniform of the garrison is not trespassing on sight. CBZ.cityBaseStanding(actor) is the one question. Replaces wanted.js's five-star zone. -->
+<script src="src/city/basewatch.js?v=police2c-hm2"></script>
 <!-- PIRACY. Armed skiffs take a vessel, and the crew aboard it are the same
      posted people seacrew.js declared — a hostage is a real actor with a
      family, a ransom is real money, and the buyer of that money is a gang, a
@@ -2769,10 +2780,10 @@ document.body.appendChild(b);}}catch(e){}})();
      scoreboard existed only to host those two rules and are gone with it. -->
 <script src="src/games/boxing.js?v=nopanel1122"></script>
 <script src="src/games/airport.js?v=nopanel1122"></script>
-<script src="src/games/military.js?v=nopanel1122"></script>
+<script src="src/games/military.js?v=police2c"></script>
 <script src="src/games/government.js?v=nopanel1122"></script>
 <script src="src/games/police.js?v=police2c"></script>
-<script src="src/games/jail.js?v=prisoncut1122"></script>
+<script src="src/games/jail.js?v=police2g"></script>
 <script src="src/systems/newlife.js?v=islesave1022"></script>
 
 <!-- 5. quality + loop + boot -->

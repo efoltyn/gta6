@@ -75,7 +75,7 @@
   function beatOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_CELL_BEAT); }
 
   const BODY_R = 0.55;       // player capsule radius (systems/physics.js)
-  const INTAKE_T = 8;        // intake hold when a city arrest lands you here
+  const INTAKE_T = 12;       // intake hold when a city arrest lands you here (lock, line, count)
   let heldDoor = null;       // the ONE cell index this file has locked (or null)
 
   // the wing, or null. Never trust a half-published contract: the list must be
@@ -1967,6 +1967,7 @@
     confineT = INTAKE_T; confineShown = -1;
     g.invuln = Math.max(g.invuln || 0, INTAKE_T + 0.5);
     sealPlayerCell();
+    intakeT = 0; intakeStep = 0;
     // YOU WAKE UP IN A CELL WITH THE DOOR SHUT. That is the intake. The two
     // lines that used to say so are gone; what is left is the room, the bars
     // racking across in front of you (sealPlayerCell, above) and the sentence
@@ -1977,6 +1978,92 @@
     // The fix is not a corrected cue name at this line: a state change does not
     // get to voice hardware. sealPlayerCell() above drives the real leaf
     // through cellblock.setDoor, and that is where the leaf now speaks.
+  }
+
+  /* THE INTAKE, IN ORDER. You are in the cell; the door locks; then the man
+     who brought you in has his line (the warden if he is on the wing to say
+     it, else the nearest screw); then the count is called and cleared; and
+     only after that does the block's day go on: systems/prisonschedule.js's
+     move out to the yard and the warden's "Yard's open" PA both wait on
+     CBZ.prisonIntakeActive. Lines go over the speaker's head, nowhere else. */
+  let intakeT = -1, intakeStep = 0;
+  function nearestGuard(r) {
+    let best = null, bd = r * r;
+    for (const gd of CBZ.guards || []) {
+      if (!gd || gd.dead || gd.ko > 0 || !gd.group || gd.kind === "warden") continue;
+      const dx = gd.group.position.x - player.pos.x, dz = gd.group.position.z - player.pos.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = gd; }
+    }
+    return best;
+  }
+  function guardLine(line, r) {
+    const gd = nearestGuard(r || 40);
+    if (!gd) return false;
+    try { if (CBZ.prisonSay) return !!CBZ.prisonSay(gd, line, { secs: 2.6, force: true }); } catch (e) {}
+    return false;
+  }
+  function intakeTick(dt) {
+    if (intakeT < 0) return;
+    if (player.dead || g.mode !== "escape") { intakeT = -1; return; }
+    intakeT += dt;
+    // 1. the door must actually be shut on him before anybody speaks
+    if (intakeStep === 0) {
+      if (heldDoor == null && intakeT < 4) return;
+      intakeStep = 1; intakeT = 0;
+    }
+    // 2. the greeting, or a screw's line
+    if (intakeStep === 1 && intakeT >= 0.8) {
+      intakeStep = 2;
+      const said = CBZ.prisonWardenGreet ? CBZ.prisonWardenGreet({ x: player.pos.x, z: player.pos.z }) : false;
+      if (!said) guardLine("Fresh one. On your bunk, it's count.");
+    }
+    // 3. the count, called and cleared
+    if (intakeStep === 2 && intakeT >= 3.6) { intakeStep = 3; guardLine("Count! Stand by your bunks!"); }
+    if (intakeStep === 3 && intakeT >= 7.2) { intakeStep = 4; guardLine("Count's clear."); }
+    // 4. the day goes on once the confinement has let him out
+    if (intakeStep >= 4 && confineT <= 0) intakeT = -1;
+  }
+  CBZ.prisonIntakeActive = function () { return intakeT >= 0; };
+
+  /* BAIL ON THE INMATE PHONES. A man Gang City sent here with a bail set
+     (g.jailBail, consumed from the booking by state.js) can make the call
+     from the yard's phone bank (world/yardfurniture.js, three handsets on the
+     back panel at x 11 +/- 1.15, z 17.2): his own money if the street wallet
+     holds it, else Lou's Bonds for the premium, else his crew. The call is
+     city/wanted.js's CBZ.cityBail, the same door the booking desk uses; a
+     posted bail opens the gate (games/jail.js cityJailRelease "bail") with
+     the charge still open. */
+  const PHONES = [{ x: 9.85, z: 17.2 }, { x: 11, z: 17.2 }, { x: 12.15, z: 17.2 }];
+  let phoneBusy = 0;
+  function bailWay() {
+    const T = CBZ.cityBailTerms ? CBZ.cityBailTerms() : null;
+    if (!T || !T.amount) return null;
+    const m = function (n) { return "$" + Math.round(n).toLocaleString(); };
+    if (T.self) return { how: "self", verb: "Call", sub: "post your bail, " + m(T.amount) };
+    if (T.bond) return { how: "bond", verb: "Call", sub: "Lou's Bonds, " + m(T.bondFee) };
+    if (T.crew) return { how: "crew", verb: "Call", sub: "your crew, for the " + m(T.amount) };
+    return { how: null, verb: "Call", sub: "bail " + m(T.amount) + ", nobody to pay it" };
+  }
+  CBZ.cityBailPhone = function () {
+    if (phoneBusy > 0) return false;
+    const w = bailWay();
+    phoneBusy = 1.5;
+    if (!w || !w.how) { if (CBZ.prisonSay) { try { CBZ.prisonSay({ pos: { x: player.pos.x, y: player.pos.y, z: player.pos.z }, kind: "pa", data: { name: "" } }, "No answer.", { secs: 1.6, force: true }); } catch (e) {} } return false; }
+    return !!(CBZ.cityBail && CBZ.cityBail(w.how));
+  };
+  function phoneTick(dt) {
+    if (phoneBusy > 0) phoneBusy -= dt;
+    if (!CBZ.prisonPrompt || (+g.jailBail || 0) <= 0 || !g.cityWorld || player.dead || confineT > 0) return;
+    let best = null, bd = 2.2 * 2.2;
+    for (let i = 0; i < PHONES.length; i++) {
+      const dx = player.pos.x - PHONES[i].x, dz = player.pos.z - (PHONES[i].z + 0.7);
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = PHONES[i]; }
+    }
+    if (!best) return;
+    const w = bailWay(); if (!w) return;
+    if (CBZ.prisonPrompt("bail-phone", "@cityBailPhone", w.verb, { at: { x: best.x, y: 1.4, z: best.z + 0.15 }, d2: bd, sub: w.sub, bind: true, noReach: true }) && CBZ.keys && CBZ.keys.e) CBZ.cityBailPhone();
   }
 
   // ---- HEALING: out of a fight for REGEN_WAIT s you come back slowly to
@@ -2015,7 +2102,7 @@
       dropHelper(false);
       cancelArrest(false); haulEnd(true);
       confineT = 0; confineShown = -1; cellWatchCD = 0; sentShown = -1;
-      intakeDone = false; lastServed = -1;
+      intakeDone = false; lastServed = -1; intakeT = -1; intakeStep = 0;
       arrest = null; down = null; deathT = 0; lawGraceT = 0; holeRelease = false;
       if (CBZ.vitals) CBZ.vitals.reset(player);
       lastHurtT = -1e9; spdPX = null; pSpd = 0;
@@ -2053,6 +2140,9 @@
         if (holeRelease) { holeRelease = false; lawGrace(15); }
       }
     }
+
+    intakeTick(dt);
+    phoneTick(dt);
 
     // ---- strike-2 cell-block watch: guards sweep past your cell more ----
     if (g.cellWatch) {

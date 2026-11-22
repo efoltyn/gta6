@@ -294,6 +294,13 @@
 
   function winGame(reason, actor) {
     if (g.state === "won") return;
+    // BROUGHT HERE FROM GANG CITY, AND BROKE OUT: no end card. You come out
+    // over the wall into the city you were taken from, in the jumpsuit, with
+    // the manhunt on (games/jail.js cityJailBreakout).
+    if (g.mode === "escape" && g.cityWorld && g._cityArrestRun && CBZ.cityJailBreakout) {
+      if (CBZ.cityEvent) { try { CBZ.cityEvent("jail-escape", { respect: 4, panic: 2 }, { noWanted: true }); } catch (e) {} }
+      if (CBZ.cityJailBreakout(reason)) return;
+    }
     setState("won");
     // the prison ends quietly (systems/escapeend.js); the arenas keep their sting
     if (g.mode !== "escape" && CBZ.sfx) CBZ.sfx("win");
@@ -338,6 +345,7 @@
       again.parentNode.insertBefore(streetsBtn, again.nextSibling);
       bindButton("backToStreetsBtn", function () {
         g.escapedConvict = true;
+        g._breakoutJumpsuit = true;                 // out in the orange (city/mode.js)
         // YOU BROKE OUT — you did not walk out. The sentence dies with the wall
         // you went over, and your property stays in the precinct evidence
         // locker (city/wanted.js): only serving it or making bail opens that.
@@ -567,6 +575,8 @@
     // your cell as a new arrival, not on the prison's aerial opening.
     const arrestIntake = g.mode === "escape" && !!g._arrestIntake;
     g._arrestIntake = false;
+    // a prison run that is NOT an arrest from Gang City is the plain escape game
+    if (g.mode === "escape" && !arrestIntake) g._cityArrestRun = false;
     if (!plainCitySandbox && !arrestIntake) CBZ.startIntro(introOpts);
     CBZ.requestLock();
   }
@@ -634,6 +644,15 @@
     // and the first sig() threw, so the card never closed.
     const V2 = CBZ.CONFIG.BOOT_CARD_V2 !== false;
     const info = CBZ.renderer && CBZ.renderer.info;
+    /* WHAT "STILL" MEANS. It counted geometries too, and in the streamed city
+       the geometry count never holds still: the crowd's rigs, the streamer's
+       nearby jobs and the far cells it parks change it every frame for as
+       long as you play (phone profile: 581 -> 740 over the first frames,
+       still climbing when the card hit its cap). The first-draw cost the card
+       hides is the PROGRAMS (a synchronous compile is the long frame) and the
+       textures; a geometry upload is a few ms. So the card waits for those to
+       stop, and on a phone or tablet a 15 s cap (the old 25 s was the whole
+       wait every time, the game drawing behind the card). */
     const sig = function () {
       if (!info) return "";
       return (info.programs ? info.programs.length : 0) + "|" + (V2 ? "" : info.memory.geometries + "|") + info.memory.textures;
@@ -644,15 +663,6 @@
       const t = performance.now(), d = t - prev; prev = t; n++;
       cheap = d < 90 ? cheap + 1 : 0;
       const s = sig();
-    /* WHAT "STILL" MEANS. It counted geometries too, and in the streamed city
-       the geometry count never holds still: the crowd's rigs, the streamer's
-       nearby jobs and the far cells it parks change it every frame for as
-       long as you play (phone profile: 581 -> 740 over the first frames,
-       still climbing when the card hit its cap). The first-draw cost the card
-       hides is the PROGRAMS (a synchronous compile is the long frame) and the
-       textures; a geometry upload is a few ms. So the card waits for those to
-       stop, and on a phone or tablet a 15 s cap (the old 25 s was the whole
-       wait every time, the game drawing behind the card). */
       still = (s === lastSig) ? still + 1 : 0; lastSig = s;
       if ((cheap >= 3 && n >= 4) || (info && (V2 ? still >= 4 && n >= 5 : still >= 5 && n >= 6)) || t > deadline) { done(); return; }
       requestAnimationFrame(tick);
