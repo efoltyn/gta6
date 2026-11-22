@@ -1447,10 +1447,17 @@ document.body.appendChild(b);}}catch(e){}})();
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
 <script src="src/city/bunkers.js?v=fx1029"></script>
+<!-- THE BIRD KIT (world/birdkit.js): every bird is this one kit — the herring
+     gulls of the shark sim's pier, the wilderness crows, the farm chickens —
+     each a species row of real measurements, posed in the vertex shader so a
+     flock is one draw. Before the flocks (wild nature, the sea scene) and the
+     bestiary's chicken; it reads units/kit/loft.js (below) only when a body
+     is built. -->
+<script src="src/world/birdkit.js?v=bird1122b"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
-<script src="src/world/wildnature.js?v=treelod1012"></script>
+<script src="src/world/wildnature.js?v=bird1122a"></script>
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
@@ -1461,15 +1468,15 @@ document.body.appendChild(b);}}catch(e){}})();
      mode is this one body, a breed or a species being a row of real
      measurements. Before the bestiary rows that build it; it reads
      units/kit/loft.js and gait.js (below) only when a body is built. -->
-<script src="src/units/kit/canid.js?v=dog1122a"></script>
-<script src="src/city/wildlife/beast_bodies.js?v=dog1122a"></script>
+<script src="src/units/kit/canid.js?v=dog1122c"></script>
+<script src="src/city/wildlife/beast_bodies.js?v=bird1122a"></script>
 <script src="src/city/wildlife/forest_deer.js?v=dog1122a"></script>
 <script src="src/city/wildlife/bears.js?v=attach1"></script>
 <script src="src/city/wildlife/canines.js?v=dog1122a"></script>
 <script src="src/city/wildlife/apes.js?v=beasts1"></script>
 <script src="src/city/wildlife/bigcats.js?v=attach1"></script>
 <script src="src/city/wildlife/megafauna.js?v=attach1"></script>
-<script src="src/city/wildlife/farm.js?v=attach1"></script>
+<script src="src/city/wildlife/farm.js?v=bird1122a"></script>
 <script src="src/city/wildlife/snow_ungulates.js?v=attach1"></script>
 <script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
@@ -2791,7 +2798,7 @@ document.body.appendChild(b);}}catch(e){}})();
      rules (engulf / bite / tip). After water_hulls + water_float, both of which
      it spends. -->
 <script src="src/world/sea_craft.js?v=wake1122a"></script>
-<script src="src/world/sea_scene.js?v=sharkscene1"></script>
+<script src="src/world/sea_scene.js?v=bird1122a"></script>
 <script src="src/world/water_impact.js?v=wake1122e"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
      citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's

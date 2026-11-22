@@ -410,39 +410,6 @@
       },
     });
   }
-  function chicken(hen) {
-    const P = { parts: {}, order: ["body", "head", "legL", "legR"] };
-    const body = P.parts.body = new K.Part("body");
-    const feather = hen ? 0xb4682e : 0xc8521e, dark = hen ? 0x7a4420 : 0x1e3a2a;
-    const col = function (x, y, z, ca) { return shade(ca > 0.3 ? shade(feather, 1.05) : shade(feather, 0.9), K.grain(x * 20, y * 20, z * 20)); };
-    // the body: a teardrop, breast forward, rump up into the tail
-    body.loft([
-      { x: -0.17, y: 0.33, rt: 0.04, rb: 0.04, w: 0.05, wts: [0, 1] }, { x: -0.12, y: 0.3, rt: 0.08, rb: 0.08, w: 0.085, wts: [0, 1] },
-      { x: -0.02, y: 0.29, rt: 0.1, rb: 0.1, w: 0.1, wts: [0, 1] }, { x: 0.07, y: 0.3, rt: 0.095, rb: 0.1, w: 0.09, wts: [0, 1] },
-      { x: 0.13, y: 0.34, rt: 0.065, rb: 0.07, w: 0.065, wts: [0, 1] },
-    ], 12, col, { capLen: 0.8 });
-    // the tail fan and (the rooster's) sickle feathers, the folded wings
-    body.tube([[-0.14, 0.33, 0, 0.03], [-0.2, 0.42, 0, 0.05], [-0.2, 0.5, 0, 0.02]], 5, 8, hen ? feather : dark, true, { flat: 0.35, side: [0, 0, 1] });
-    if (!hen) body.tube([[-0.16, 0.36, 0, 0.02], [-0.25, 0.47, 0, 0.03], [-0.3, 0.42, 0, 0.012]], 5, 6, dark, true, { flat: 0.4, side: [0, 0, 1] });
-    [-1, 1].forEach(function (s) { body.ellipsoid(-0.02, 0.31, s * 0.085, 0.09, 0.05, 0.022, 10, shade(feather, 0.82), true, 3); });
-    const head = P.parts.head = new K.Part("head");
-    head.tube([[0.11, 0.35, 0, 0.045], [0.15, 0.42, 0, 0.032], [0.16, 0.46, 0, 0.03]], 5, 10, col, true);
-    head.ellipsoid(0.165, 0.475, 0, 0.035, 0.032, 0.03, 10, col, true, 3);
-    head.tube([[0.19, 0.48, 0, 0.012], [0.225, 0.47, 0, 0.002]], 3, 6, 0xd8a84a, true);                   // the beak
-    head.tube([[0.14, 0.5, 0, 0.012], [0.165, 0.525, 0, 0.018], [0.19, 0.505, 0, 0.008]], 5, 6, 0xc8241c, true, { flat: 0.4, side: [0, 0, 1] });   // the comb
-    head.ellipsoid(0.185, 0.445, 0, 0.012, 0.02, 0.008, 6, 0xc8241c, true, 3);                         // the wattle
-    [-1, 1].forEach(function (s) { head.ellipsoid(0.175, 0.485, s * 0.026, 0.006, 0.006, 0.004, 5, 0x1a0e08, true, 3); });
-    head.ud.eyes = [[0.175, 0.485, 0.026, 0.006], [0.175, 0.485, -0.026, 0.006]];
-    [-1, 1].forEach(function (s) {
-      const leg = P.parts[s > 0 ? "legL" : "legR"] = new K.Part("leg");
-      leg.ud.leg = s > 0 ? "L" : "R";
-      leg.tube([[0.0, 0.23, s * 0.04, 0.02], [-0.01, 0.13, s * 0.04, 0.009], [0.0, 0.01, s * 0.04, 0.008]], 5, 6, 0xd8b04a, true);
-      [-0.5, 0, 0.5].forEach(function (a) { leg.tube([[0.0, 0.008, s * 0.04, 0.005], [0.05 * Math.cos(a), 0.004, s * 0.04 + 0.05 * Math.sin(a), 0.003]], 3, 4, 0xd8b04a, true); });
-    });
-    P.saddle = { x: 0, y: 0.38, width: 0.18 };
-    return P;
-  }
-
   // ================================================================ WILD UNGULATES
   function elk(bull) {
     const k = bull ? 1 : 0.9;
@@ -1063,7 +1030,6 @@
     pig: function () { return { key: "p", make: pig }; },
     sheep: function (r) { const b = r() < 0.5; return { key: "s" + b, make: function () { return sheep(b); } }; },
     goat: function (r) { const c = pick(r, ["white", "brown", "pied"]); return { key: c, make: function () { return goat(c); } }; },
-    chicken: function (r) { const h = r() < 0.75; return { key: "c" + h, make: function () { return chicken(h); } }; },
     elk: function (r) { const b = r() < 0.5; return { key: "e" + b, make: function () { return elk(b); } }; },
     moose: function (r) { const b = r() < 0.5; return { key: "m" + b, make: function () { return moose(b); } }; },
     caribou: function (r) { const b = r() < 0.5; return { key: "c" + b, make: function () { return caribou(b); } }; },

@@ -1311,8 +1311,12 @@
     tk(xMr, topAt(xMr), yBr + 0.02 * K, lerp(yBr, yW, 0.58), D.ribW, { wts: [CH, 0.35, RB, 0.65], keel: 0.5, hk: 0.35 });
     tk(xE + 0.025 * K, topAt(xE + 0.025 * K), yBr, lerp(yBr, yW, 0.6), D.ribW * 0.96, { wts: [CH, 0.4, RB, 0.6], keel: 0.62, hk: 0.7 });
     tk(xWt + 0.01 * K, yW - D.skin * 0.25, yBr + 0.012 * K, lerp(yBr, yW, 0.6), D.shW * 0.86, { wts: [CH, 1], keel: 0.6, hk: 1, crest: 0.25 });
-    tk(xS - 0.035 * K, yW - 0.085 * K, yBr + 0.045 * K, lerp(yBr, yW, 0.58), D.shW * 0.9, { wts: [CH, 1], keel: 0.5, hk: 0.6 });
-    tk(xS + 0.03 * K, D.shj.y + 0.06 * K, yBr + 0.11 * K, lerp(yBr + 0.11 * K, D.shj.y + 0.06 * K, 0.45), D.shW * 0.66, { wts: [CH, 1], keel: 0.3 });
+    // the forechest: the sternum rises from the brisket to the prosternum, a
+    // little below the points of shoulder (~62% of the withers), so the chest
+    // fills between the upper arms down to the elbows
+    const yPro = Math.max(yBr + 0.03 * K, 0.62 * Wt);
+    tk(xS - 0.035 * K, yW - 0.085 * K, lerp(yBr, yPro, 0.4), lerp(lerp(yBr, yPro, 0.4), yW - 0.085 * K, 0.55), D.shW * 0.9, { wts: [CH, 1], keel: 0.5, hk: 0.6 });
+    tk(xS + 0.02 * K, D.shj.y + 0.06 * K, yPro, lerp(yPro, D.shj.y + 0.06 * K, 0.45), D.shW * 0.72, { wts: [CH, 1], keel: 0.35 });
     const profTorso = function (Rr, ca, sa, out) {
       const e = Rr.sq || 1;
       const pc = Math.sign(ca) * Math.pow(abs(ca), e), ps = Math.sign(sa) * Math.pow(abs(sa), e);
@@ -1329,7 +1333,10 @@
       if (t > 0.82 && ca < -0.2 && q < 0.6 * tuftK * F.ruff) return { len: flen * 5.2 * F.ruff, w: flen * 1.8, down: 0.7 };
       return null;
     } : null;
-    LK.sweep(G, T, { S: S_T, step: stepT, prof: profTorso, part: "torso", hkBone: BN.hackle, fur: furOf(1, 0.45, 1), tufts: tuftTorso, capLen: 0.9 });
+    // (on the chest's front the hair falls straight down; elsewhere it lies along the body)
+    const furBody = furOf(1, 0.45, 1), furChest = furOf(1, 1, 0.15);
+    LK.sweep(G, T, { S: S_T, step: stepT, prof: profTorso, part: "torso", hkBone: BN.hackle, tufts: tuftTorso, capLen: 0.55,
+      fur: function (Rr, ca, sa, t) { return t > 0.93 ? furChest : furBody; } });
 
     // ---- NECK: from inside the withers up to the back of the skull. The
     //      ruff thickens the crest and the throat (wolves, shepherds); a
@@ -1339,8 +1346,9 @@
     const NK = [];
     const n0 = nk(-0.22), n1 = nk(0.05), n2 = nk(0.4), n3 = nk(0.75), n4 = nk(1.02);
     const dl = R.dewlap || 0;
-    NK.push({ x: n0.x, y: n0.y, rt: nr * 1.25, rb: nr * 1.55, w: nr * 1.35 * ruff, wts: [CH, 1], hk: 0.6 });
-    NK.push({ x: n1.x, y: n1.y, rt: nr * 1.15 * ruff, rb: nr * 1.4 * (1 + dl * 0.1), w: nr * 1.2 * ruff, wts: [CH, 0.5, BN.neck, 0.5], hk: 0.3 });
+    // (the base rings stay inside the shoulders; the ruff widens the neck above them)
+    NK.push({ x: n0.x, y: n0.y, rt: nr * 1.25, rb: nr * 1.55, w: Math.min(nr * 1.35 * ruff, D.shW * 0.82), wts: [CH, 1], hk: 0.6 });
+    NK.push({ x: n1.x, y: n1.y, rt: nr * 1.15 * ruff, rb: nr * 1.4 * (1 + dl * 0.1), w: Math.min(nr * 1.2 * ruff, D.shW * 0.88), wts: [CH, 0.5, BN.neck, 0.5], hk: 0.3 });
     NK.push({ x: n2.x, y: n2.y, rt: nr * 1.04 * ruff, rb: nr * 1.12 * (1 + dl * 0.25), w: nr * 1.02 * ruff, wts: [BN.neck, 0.75, BN.neck1, 0.25] });
     NK.push({ x: n3.x, y: n3.y, rt: nr * 0.95 * (1 + (ruff - 1) * 0.6), rb: nr * 1.0 * (1 + dl * 0.3), w: nr * 0.94 * (1 + (ruff - 1) * 0.8), wts: [BN.neck1, 0.85, BN.head, 0.15] });
     NK.push({ x: n4.x, y: n4.y, rt: nr * 0.72, rb: nr * 0.85, w: nr * 0.8, wts: [BN.neck1, 0.3, BN.head, 0.7] });
@@ -1685,15 +1693,17 @@
       const top = D.scapTop, sp = D.scapPiv, sh = D.shj, el = D.elb, wr = D.wri, mc = D.mcp;
       const ch = BN.chest, sc = ids[0], hu = ids[1], ra = ids[2], m = ids[3], to = ids[4];
       // the scapula: a broad flat blade under the skin of the shoulder
-      add({ x: top.x - 0.005 * K, y: top.y - 0.012 * K }, 0.04 * K, 0.035 * K, 0.022 * K, [ch, 0.55, sc, 0.45], -0.035 * K);
-      add(at(top, sh, 0.35), 0.06 * K, 0.055 * K, 0.03 * K, [ch, 0.2, sc, 0.8], -0.02 * K);
-      add(at(top, sh, 0.75), 0.058 * K, 0.06 * K, 0.04 * K, [sc, 0.85, hu, 0.15], -0.005 * K);
+      // (the arm lies on the chest wall: the points of shoulder sit wider
+      // than the elbows, and the leg converges to the paw)
+      add({ x: top.x - 0.005 * K, y: top.y - 0.012 * K }, 0.04 * K, 0.035 * K, 0.02 * K, [ch, 0.55, sc, 0.45], -0.035 * K);
+      add(at(top, sh, 0.35), 0.06 * K, 0.055 * K, 0.026 * K, [ch, 0.2, sc, 0.8], -0.012 * K);
+      add(at(top, sh, 0.75), 0.058 * K, 0.06 * K, 0.032 * K, [sc, 0.85, hu, 0.15], 0.006 * K);
       // the point of shoulder, then the upper arm with the triceps behind it
-      add({ x: sh.x + 0.004 * K, y: sh.y }, 0.04 * K, 0.065 * K, 0.044 * K, [sc, 0.5, hu, 0.5]);
-      add(at(sh, el, 0.45), 0.032 * K, 0.07 * K, 0.042 * K, [hu, 0.9, ch, 0.1]);
-      add(at(sh, el, 0.82), 0.03 * K, 0.058 * K, 0.036 * K, [hu, 0.85, ra, 0.15]);
+      add({ x: sh.x + 0.004 * K, y: sh.y }, 0.04 * K, 0.065 * K, 0.034 * K, [sc, 0.5, hu, 0.5], 0.012 * K);
+      add(at(sh, el, 0.45), 0.032 * K, 0.07 * K, 0.033 * K, [hu, 0.9, ch, 0.1], 0.01 * K);
+      add(at(sh, el, 0.82), 0.03 * K, 0.058 * K, 0.03 * K, [hu, 0.85, ra, 0.15], 0.006 * K);
       // the elbow: the olecranon stands out behind
-      add({ x: el.x - 0.004 * K, y: el.y + 0.004 * K }, 0.028 * K, 0.05 * K, 0.032 * K, [hu, 0.5, ra, 0.5], 0.002 * K, { elbow: 1 });
+      add({ x: el.x - 0.004 * K, y: el.y + 0.004 * K }, 0.028 * K, 0.05 * K, 0.029 * K, [hu, 0.5, ra, 0.5], 0.004 * K, { elbow: 1 });
       // the forearm, round, its muscle belly high, tapering to the wrist
       add({ x: el.x + 0.006 * K, y: lerp(el.y, wr.y, 0.2) }, 0.03 * K, 0.034 * K, 0.031 * K, [ra, 0.9, hu, 0.1]);
       add({ x: el.x + 0.004 * K, y: lerp(el.y, wr.y, 0.55) }, 0.024 * K, 0.024 * K, 0.024 * K, [ra, 1]);
@@ -1702,6 +1712,8 @@
       add({ x: wr.x + 0.002 * K, y: wr.y }, 0.021 * K, 0.026 * K, 0.023 * K, [ra, 0.5, m, 0.5]);
       add(at(wr, mc, 0.45), 0.017 * K, 0.017 * K, 0.019 * K, [m, 1]);
       add({ x: mc.x - 0.006 * K, y: mc.y + 0.008 * K }, 0.018 * K, 0.016 * K, 0.021 * K, [m, 0.6, to, 0.4]);
+      // on down into the paw's body, so the pastern ends inside the foot
+      add({ x: mc.x + D.toeF * 0.12, y: mc.y - 0.012 * K }, 0.016 * K, 0.015 * K, 0.02 * K, [to, 0.75, m, 0.25]);
       paw(G, D, Lg, z, s, near);
     } else {
       const hip = D.hip, st = D.stf, hk = D.hock, mt = D.mtp;
@@ -1722,6 +1734,7 @@
       add({ x: hk.x - 0.004 * K, y: hk.y + 0.004 * K }, 0.016 * K, 0.026 * K, 0.019 * K, [ti, 0.5, m, 0.5], 0, { hock: 1 });
       add(at(hk, mt, 0.45), 0.015 * K, 0.017 * K, 0.017 * K, [m, 1]);
       add({ x: mt.x - 0.004 * K, y: mt.y + 0.008 * K }, 0.017 * K, 0.016 * K, 0.02 * K, [m, 0.6, to, 0.4]);
+      add({ x: mt.x + D.toeH * 0.12, y: mt.y - 0.012 * K }, 0.015 * K, 0.015 * K, 0.019 * K, [to, 0.75, m, 0.25]);
       paw(G, D, Lg, z, s, near);
     }
     const tuftL = tuftK > 0 ? function (Rr, ca, sa, t) {

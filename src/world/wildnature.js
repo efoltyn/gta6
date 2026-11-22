@@ -811,151 +811,79 @@
     })();
 
     // ============================================================
-    //  FLOCKING BIRDS — small ambient bird flocks wheeling above the
-    //  wilderness backdrop. Classic boids: each bird steers by summing three
-    //  cheap rules against its OWN flock only (separation / alignment /
-    //  cohesion) — no scripted path, no spatial grid needed (a flock is only
-    //  8-15 birds, so the O(n^2) neighbour scan per flock is a few hundred
-    //  ops, not a simulation-heavy system). A handful of flocks total keeps
-    //  this squarely "ambient background wildlife", matching biome_forest's
-    //  deer-wander in spirit: deterministic (same seeded rng as the rest of
-    //  this file, never Math.random), cheap amortized per-frame cost.
+    //  CROWS — loose flocks of American crows working over the wilderness,
+    //  drawn by the bird kit (world/birdkit.js): real size (0.45 m, 0.92 m
+    //  across), black, five fingered primaries, ~4 wingbeats a second with
+    //  short glides, the wingbeat and the fold in the vertex shader; a near
+    //  and a far InstancedMesh, two draws for every crow.
     //
-    //  RENDER: ONE InstancedMesh for every bird everywhere (bodies) + ONE more
-    //  for wings (two wing-plane triangles baked per bird into a single
-    //  instance slot via a merged unit geo) — 2 draw calls total no matter
-    //  how many flocks, same discipline as the tree species above. The wing
-    //  geo is a separate IM (not merged into the body) purely so wings can
-    //  flap: a per-instance flap angle is baked into that instance's matrix
-    //  every update tick, which the body doesn't need.
-    //
-    //  A silhouette this small and this far away never needs to look like a
-    //  real bird up close — two flat wing triangles + a tiny elongated body
-    //  reads correctly at backdrop distance, and it is gated by the SAME
-    //  distance LOD centre used for the trees (birds simply stop updating,
-    //  matrices frozen, once nobody is near enough to notice).
+    //  Classic boids inside each flock (separation, alignment, cohesion, a
+    //  pull toward the flock's wandering home) at a crow's speed: 7-12 m/s
+    //  cruising, up to 17 m/s when a shot scatters them. The steering is
+    //  amortised (one flock per tick); the flight itself is integrated and
+    //  drawn every frame. Each crow banks into its turn as a turning bird
+    //  must (tan bank = v x turn rate / g), noses up into a climb, beats
+    //  when it climbs or is slow and glides when it can. Placement is
+    //  deterministic on this file's seeded stream.
     // ============================================================
     (function flockingBirds() {
-      if (!CBZ.onUpdate || !THREE.InstancedMesh) return;
+      const BK = CBZ.birdKit;
+      if (!CBZ.onUpdate || !BK || !BK.flock || !CBZ.loftKit || !CBZ.loftKit.sweep) return;
 
       const FLOCK_COUNT = 3;                 // "a few flocks"
       const BIRDS_PER_FLOCK_MIN = 8, BIRDS_PER_FLOCK_MAX = 15;
       const fieldCX = (pMinX + pMaxX) / 2, fieldCZ = (pMinZ + pMaxZ) / 2;
       const fieldR = Math.max(pMaxX - pMinX, pMaxZ - pMinZ) / 2;
-
-      // ---- unit bird geo: a tiny flattened body sliver (its own IM) plus a
-      //      wing IM (two thin triangular planes fanned from centre, unit
-      //      span so per-instance scale sets the wingspan). Both start flat
-      //      in the XZ-ish plane so a flap is just a hinge rotation about X. ---
-      const bodyGeo = new THREE.ConeGeometry(0.09, 1, 4);
-      bodyGeo.rotateX(Math.PI / 2);           // point runs along +Z (forward)
-      // wing: a single hand-built flat triangle (3 raw vertices, no THREE.Shape
-      // dependency — matches how crashfx/highways/beach build ad-hoc geo in this
-      // codebase: a plain BufferGeometry + a position attribute). Hinge edge runs
-      // along local X at x=0 so rotation.z is a pure flap hinge; the triangle
-      // sweeps back and out to (1, 0, -0.12) / (0.55, 0, 0.05) — a simple swept
-      // wing silhouette, unit span so per-instance scale sets the wingspan.
-      const wingGeo = (function () {
-        const pos = new Float32Array([
-          0, 0, 0,
-          1, 0, -0.12,
-          0.55, 0, 0.05,
-        ]);
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-        if (g.computeVertexNormals) g.computeVertexNormals();
-        return g;
-      })();
-
-      const birdMat = whiteMat(false);
-      const wingMat = whiteMat(false);
       const totalCap = FLOCK_COUNT * BIRDS_PER_FLOCK_MAX;
-      const bodyIM = new THREE.InstancedMesh(bodyGeo, birdMat, totalCap);
-      // two wing instances per bird (left + right), each independently hinged
-      const wingIM = new THREE.InstancedMesh(wingGeo, wingMat, totalCap * 2);
-      bodyIM.castShadow = false; bodyIM.receiveShadow = false;   // tiny distant silhouettes — no shadow cost
-      wingIM.castShadow = false; wingIM.receiveShadow = false;
-      bodyIM.frustumCulled = false; wingIM.frustumCulled = false;   // r128 instanced cull bug
-      bodyIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      wingIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      const bCol = new Float32Array(totalCap * 3);
-      const wCol = new Float32Array(totalCap * 2 * 3);
+      const kit = BK.flock("crow", totalCap, { name: "wild-crows" });
+      root.add(kit.mesh); root.add(kit.far);
 
+      // the same seeded draws as ever, in the same order (the stream is shared)
       const flocks = [];
       for (let f = 0; f < FLOCK_COUNT; f++) {
         const n = BIRDS_PER_FLOCK_MIN + Math.floor(rng() * (BIRDS_PER_FLOCK_MAX - BIRDS_PER_FLOCK_MIN + 1));
-        // flock home: a random point over the wilderness ring, well above
-        // the canopy so birds read against open sky, not through tree crowns.
         const a = rng() * Math.PI * 2, rr = rng() * fieldR * 0.9;
         const homeX = fieldCX + Math.cos(a) * rr, homeZ = fieldCZ + Math.sin(a) * rr;
-        const homeY = 34 + rng() * 26;
+        // height over the ground under the flock: tree-top work to open sky
+        const alt = 22 + rng() * 26;
         const wanderR = 60 + rng() * 60;      // how far the flock's centre roams from home
-        const col = new THREE.Color();
-        col.setRGB(0.10 + rng() * 0.08, 0.09 + rng() * 0.07, 0.09 + rng() * 0.06);   // near-black silhouette, slight variance
+        rng(); rng(); rng();                  // (three draws that coloured the old silhouettes)
         const birds = [];
         for (let i = 0; i < n; i++) {
-          const bx = homeX + (rng() - 0.5) * 12, bz = homeZ + (rng() - 0.5) * 12, by = homeY + (rng() - 0.5) * 6;
+          const bx = homeX + (rng() - 0.5) * 12, bz = homeZ + (rng() - 0.5) * 12, by = (rng() - 0.5) * 6;
           const heading = rng() * Math.PI * 2;
+          const k1 = rng(), k2 = rng();
           birds.push({
-            x: bx, y: by, z: bz,
-            vx: Math.cos(heading) * 3, vz: Math.sin(heading) * 3, vy: 0,
-            flapPhase: rng() * 6.28, flapSpeed: 7 + rng() * 2.5,
-            wingIdxL: -1, wingIdxR: -1, bodyIdx: -1,
+            x: bx, y: by, z: bz, dy: by,
+            vx: Math.cos(heading) * 9, vz: Math.sin(heading) * 9, vy: 0, ax: 0, ay: 0, az: 0,
+            clk: {}, P: {}, sc: 0.92 + k2 * 0.16, rs: 1 + Math.floor(k1 * 2147483000),
+            yaw: Math.atan2(-Math.sin(heading), Math.cos(heading)), yawRate: 0, roll: 0, pitch: 0,
           });
         }
         flocks.push({
-          birds, homeX, homeZ, homeY, wanderR,
-          // slow independent drift so each flock's centre wanders (own rng stream via shared rng call order — fine, deterministic either way)
+          birds, homeX, homeZ, alt, wanderR, gy: groundY(homeX, homeZ) || 0,
+          // slow independent drift so each flock's centre wanders
           driftAngle: rng() * Math.PI * 2, driftT: 4 + rng() * 6,
-          col,
         });
       }
-
-      // assign flat instance-index ranges once (birds never change flock)
-      let cursor = 0;
-      for (let f = 0; f < flocks.length; f++) {
-        const fl = flocks[f];
-        for (let i = 0; i < fl.birds.length; i++) {
-          const b = fl.birds[i];
-          b.bodyIdx = cursor;
-          b.wingIdxL = cursor * 2;
-          b.wingIdxR = cursor * 2 + 1;
-          bCol[b.bodyIdx * 3] = fl.col.r; bCol[b.bodyIdx * 3 + 1] = fl.col.g; bCol[b.bodyIdx * 3 + 2] = fl.col.b;
-          wCol[b.wingIdxL * 3] = fl.col.r; wCol[b.wingIdxL * 3 + 1] = fl.col.g; wCol[b.wingIdxL * 3 + 2] = fl.col.b;
-          wCol[b.wingIdxR * 3] = fl.col.r; wCol[b.wingIdxR * 3 + 1] = fl.col.g; wCol[b.wingIdxR * 3 + 2] = fl.col.b;
-          cursor++;
-        }
+      for (let f = 0; f < flocks.length; f++) for (const b of flocks[f].birds) b.y = flocks[f].gy + flocks[f].alt + b.dy;
+      function rndOf(b) {
+        return b.rnd || (b.rnd = function () { b.rs = (b.rs * 16807) % 2147483647; return (b.rs - 1) / 2147483646; });
       }
-      // park unused instance slots (flock counts vary below the cap) off-map,
-      // same trick crowd.js uses for its capacity buffer — a zero-scale matrix
-      // at a parked Y keeps them from rendering as stray artifacts at the origin.
-      const dummy2 = new THREE.Object3D();
-      dummy2.scale.set(0.0001, 0.0001, 0.0001);
-      dummy2.position.set(0, -500, 0);
-      dummy2.updateMatrix();
-      for (let i = cursor; i < totalCap; i++) bodyIM.setMatrixAt(i, dummy2.matrix);
-      for (let i = cursor * 2; i < totalCap * 2; i++) wingIM.setMatrixAt(i, dummy2.matrix);
-
-      bodyIM.instanceColor = new THREE.InstancedBufferAttribute(bCol, 3);
-      wingIM.instanceColor = new THREE.InstancedBufferAttribute(wCol, 3);
-      root.add(bodyIM); root.add(wingIM);
 
       // ============================================================
-      //  LIVE BIRDS (ANIMALS_ALL_CONTROLLABLE) — the flocks stop being pure
-      //  scenery: every bird carries a lightweight record on the shared
-      //  CBZ.cityWildlife registry (the dogs-facade pattern: external:true so
-      //  wildlife.js never drives it; onShot routes cityWildlifeHit damage
-      //  back here), which makes each one a REAL hitscan target — shoot one
-      //  and it tumbles out of the sky while its whole flock bursts apart;
-      //  any nearby gunshot scatters them too (standard capture-and-wrap on
-      //  CBZ.cityAlarm, markers copied forward). Placement stays 100%
-      //  deterministic — records add ZERO draws on this file's seeded rng;
-      //  panic + respawn are runtime-only FX (Math.random is legal there).
+      //  LIVE BIRDS — every crow carries a lightweight record on the shared
+      //  CBZ.cityWildlife registry (external: wildlife.js never drives it;
+      //  onShot routes cityWildlifeHit damage back here), so each one is a
+      //  real hitscan target: shoot one and it falls out of the sky while its
+      //  flock bursts apart; any nearby gunshot scatters them too (a wrap on
+      //  CBZ.cityAlarm, markers carried forward). Records add no draws on
+      //  this file's seeded stream; panic and respawn are runtime only.
       // ============================================================
       const CTL = !(CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE === false);
       const BIRD_SPECIES = {
-        id: "songbird", name: "Songbird", rarity: "common", biome: "wilderness",
-        hp: 4, spd: 6.5, danger: 0, scale: 0.35, respawn: false,   // never in the breeding pass
+        id: "crow", name: "American Crow", rarity: "common", biome: "wilderness",
+        hp: 4, spd: 10, danger: 0, scale: 0.35, respawn: false,   // never in the breeding pass
       };
       function scatterFlocks(x, z, r) {
         for (let f = 0; f < flocks.length; f++) {
@@ -980,7 +908,7 @@
           rec.dead = true; rec.state = "dead";
           b.falling = true; b.vy = Math.min(b.vy || 0, -1);
           b.spin = (Math.random() - 0.5) * 9;
-          if (CBZ.cityKillFeed) { try { CBZ.cityKillFeed("You", "Songbird", "hunted"); } catch (e) {} }
+          if (CBZ.cityKillFeed) { try { CBZ.cityKillFeed("You", "American Crow", "hunted"); } catch (e) {} }
           return { head: !!(hit && hit.head), down: true, dmg: dmg };
         }
         return { head: !!(hit && hit.head), down: false, dmg: dmg };
@@ -990,12 +918,11 @@
           const fl = flocks[f];
           for (let i = 0; i < fl.birds.length; i++) {
             const b = fl.birds[i];
-            // proxy "group": a REAL (never-rendered, never-scene-added)
+            // proxy "group": a real (never rendered, never scene-added)
             // THREE.Group — fpsmode's sphere scan reads .position/.visible,
-            // and systems/markers.js eagerly a.group.add()s an overhead
-            // marker into every wildlife record's group (a plain object here
-            // crashed its tick). The torso sphere sits at group.y + 1.0, so
-            // the proxy rides 1.0 BELOW the bird to land the sphere on it.
+            // and systems/markers.js adds an overhead marker into every
+            // wildlife record's group. The torso sphere sits at group.y + 1.0,
+            // so the proxy rides 1.0 below the bird to land the sphere on it.
             const gproxy = new THREE.Group();
             gproxy.position.set(b.x, b.y - 1.0, b.z);
             const rec = {
@@ -1035,31 +962,19 @@
       }
       installBirdAlarm();
 
-      // ---- BOIDS TUNING (small weights summed per rule, exactly the classic
-      //      recipe) — tuned so the emergent motion reads as a loose wheeling
-      //      flock, not a rigid formation or a scatter. --------------------
-      const NEIGHBOR_R = 14, NEIGHBOR_R2 = NEIGHBOR_R * NEIGHBOR_R;
-      const SEPARATE_R = 5, SEPARATE_R2 = SEPARATE_R * SEPARATE_R;
-      const W_SEPARATE = 1.4, W_ALIGN = 0.5, W_COHERE = 0.35, W_HOME = 0.6;
-      const MAX_SPEED = 6.5, MIN_SPEED = 2.5;
-
-      const wm = new THREE.Object3D();
-      let detailed = true;    // shares the tree distanceLOD's near/far read — birds simply stop ticking when far
-
-      // amortized per-flock update: only ONE flock's boids + matrices get
-      // recomputed per call, cycling round-robin — with 3 flocks that's still
-      // every flock refreshed roughly every 3rd tick, an easy amortized cost
-      // ceiling regardless of how many flocks a future tweak adds.
+      // ---- BOIDS (the classic recipe, at a crow's scale and speed) ----------
+      const NEIGHBOR_R = 16, NEIGHBOR_R2 = NEIGHBOR_R * NEIGHBOR_R;
+      const SEPARATE_R = 3.5, SEPARATE_R2 = SEPARATE_R * SEPARATE_R;
+      const W_SEPARATE = 6, W_ALIGN = 0.6, W_COHERE = 0.12, W_HOME = 0.5;
+      const MAX_SPEED = 12, MIN_SPEED = 7, PANIC_SPEED = 17;
+      let detailed = true;    // shares the tree LOD's near/far read: far away, the crows stop
       let nextFlock = 0;
 
-      function updateFlock(fl, dt) {
-        const birds = fl.birds;
-        const n = birds.length;
-        const panicked = (fl.panicT || 0) > 0;           // gunshot scatter window
+      // the steering: one flock per tick, held until its turn comes again
+      function steerFlock(fl, dt) {
+        const birds = fl.birds, n = birds.length;
+        const panicked = (fl.panicT || 0) > 0;
         if (panicked) fl.panicT -= dt;
-
-        // flock-centre wander: occasionally retarget a point within wanderR
-        // of home (deterministic rng-driven heading change, deer-style).
         fl.driftT -= dt;
         if (fl.driftT <= 0) {
           fl.driftAngle += (rng() - 0.5) * 2.4;
@@ -1067,12 +982,14 @@
         }
         const targetX = fl.homeX + Math.cos(fl.driftAngle) * fl.wanderR;
         const targetZ = fl.homeZ + Math.sin(fl.driftAngle) * fl.wanderR;
-
-        // pairwise neighbour scan WITHIN this flock only (n<=15 -> <=105
-        // unordered pairs; trivially cheap, no spatial grid needed at this scale).
+        // the ground under the flock sets its height
+        let cx = 0, cz = 0, cn = 0;
+        for (let i = 0; i < n; i++) { const b = birds[i]; if (!b.falling && !b.parked) { cx += b.x; cz += b.z; cn++; } }
+        if (cn) { const g = groundY(cx / cn, cz / cn); if (isFinite(g)) fl.gy += (g - fl.gy) * Math.min(1, dt * 0.5); }
+        const homeY = fl.gy + fl.alt;
         for (let i = 0; i < n; i++) {
           const bi = birds[i];
-          if (bi.falling || bi.parked) continue;         // shot birds are out of the boids
+          if (bi.falling || bi.parked) continue;
           let sepX = 0, sepY = 0, sepZ = 0;
           let aliX = 0, aliY = 0, aliZ = 0, aliN = 0;
           let cohX = 0, cohY = 0, cohZ = 0, cohN = 0;
@@ -1083,157 +1000,120 @@
             const dx = bj.x - bi.x, dy = bj.y - bi.y, dz = bj.z - bi.z;
             const d2 = dx * dx + dy * dy + dz * dz;
             if (d2 > NEIGHBOR_R2) continue;
-            // ALIGNMENT — steer toward the average heading of nearby flockmates
             aliX += bj.vx; aliY += bj.vy; aliZ += bj.vz; aliN++;
-            // COHESION — steer toward the average position of nearby flockmates
             cohX += bj.x; cohY += bj.y; cohZ += bj.z; cohN++;
-            // SEPARATION — steer away from flockmates that are too close
             if (d2 < SEPARATE_R2 && d2 > 0.0001) {
               const inv = 1 / d2;             // closer birds push harder
               sepX -= dx * inv; sepY -= dy * inv; sepZ -= dz * inv;
             }
           }
-          let ax = 0, ay = 0, az = 0;
-          ax += sepX * W_SEPARATE; ay += sepY * W_SEPARATE; az += sepZ * W_SEPARATE;
+          let ax = sepX * W_SEPARATE, ay = sepY * W_SEPARATE, az = sepZ * W_SEPARATE;
           if (aliN > 0) {
-            ax += (aliX / aliN - bi.vx) * W_ALIGN;
-            ay += (aliY / aliN - bi.vy) * W_ALIGN;
-            az += (aliZ / aliN - bi.vz) * W_ALIGN;
+            ax += (aliX / aliN - bi.vx) * W_ALIGN; ay += (aliY / aliN - bi.vy) * W_ALIGN; az += (aliZ / aliN - bi.vz) * W_ALIGN;
           }
           if (cohN > 0) {
-            ax += (cohX / cohN - bi.x) * W_COHERE;
-            ay += (cohY / cohN - bi.y) * W_COHERE;
-            az += (cohZ / cohN - bi.z) * W_COHERE;
+            ax += (cohX / cohN - bi.x) * W_COHERE; ay += (cohY / cohN - bi.y) * W_COHERE; az += (cohZ / cohN - bi.z) * W_COHERE;
           }
-          // HOME PULL — mild bias back toward the flock's current wander
-          // target (and its cruise altitude) so the flock doesn't drift off
-          // into the horizon forever; kept small next to the boids terms so
-          // it never overrides the emergent flocking motion.
           ax += (targetX - bi.x) * W_HOME * 0.01;
           az += (targetZ - bi.z) * W_HOME * 0.01;
-          ay += (fl.homeY - bi.y) * W_HOME * 0.02;
-
-          // GUNSHOT PANIC — a hard burst up & away from the bang; the boids
-          // terms keep running so the scatter still reads as a FLOCK exploding
-          // outward, then re-knitting itself as the panic decays.
+          ay += (homeY - bi.y) * W_HOME * 0.04 - bi.vy * 0.3;
+          // a shot: a hard burst up and away; the boids keep it a flock bursting
           if (panicked) {
             const pdx = bi.x - fl.panicX, pdz = bi.z - fl.panicZ;
             const pd = Math.hypot(pdx, pdz) || 1;
-            ax += (pdx / pd) * 16; az += (pdz / pd) * 16; ay += 7;
+            ax += (pdx / pd) * 14; az += (pdz / pd) * 14; ay += 5;
           }
-
-          bi.vx += ax * dt; bi.vy += ay * dt; bi.vz += az * dt;
-          const maxSp = panicked ? MAX_SPEED * 1.8 : MAX_SPEED;
-          const sp = Math.hypot(bi.vx, bi.vy, bi.vz) || 0.0001;
-          const clamped = sp > maxSp ? maxSp : (sp < MIN_SPEED ? MIN_SPEED : sp);
-          const scale = clamped / sp;
-          bi.vx *= scale; bi.vy *= scale; bi.vz *= scale;
+          bi.ax = ax; bi.ay = ay; bi.az = az; bi.panic = panicked;
         }
-        for (let i = 0; i < n; i++) {
+      }
+      // the flight, every frame
+      function flyFlock(fl, dt, cam) {
+        const birds = fl.birds;
+        for (let i = 0; i < birds.length; i++) {
           const bi = birds[i];
           if (bi.parked) {
-            // resting where it fell; after a while it "recovers" and rejoins
-            // the flock at altitude (runtime-only FX — Math.random is legal).
+            // lying where it fell; after a while another crow is back in the flock
             bi.respawnT = (bi.respawnT || 40) - dt;
             if (bi.respawnT <= 0 && bi.rec) {
               bi.parked = false; bi.falling = false;
               bi.rec.dead = false; bi.rec.hp = bi.rec.maxHp; bi.rec.state = "fly";
               bi.x = fl.homeX + (Math.random() - 0.5) * 10;
               bi.z = fl.homeZ + (Math.random() - 0.5) * 10;
-              bi.y = fl.homeY + (Math.random() - 0.5) * 4;
+              bi.y = fl.gy + fl.alt + (Math.random() - 0.5) * 4;
               const h2 = Math.random() * Math.PI * 2;
-              bi.vx = Math.cos(h2) * 3; bi.vz = Math.sin(h2) * 3; bi.vy = 0;
+              bi.vx = Math.cos(h2) * 9; bi.vz = Math.sin(h2) * 9; bi.vy = 0; bi.ax = bi.ay = bi.az = 0;
+              bi.roll = 0; bi.pitch = 0;
             }
-            continue;
-          }
-          if (bi.falling) {
-            // shot out of the sky: gravity + tumble until the ground takes it.
-            bi.vy -= 22 * dt;
-            bi.x += bi.vx * dt * 0.3; bi.z += bi.vz * dt * 0.3; bi.y += bi.vy * dt;
-            bi.tumble = (bi.tumble || 0) + (bi.spin || 7) * dt;
-            // module groundY (terrainHeight) — the wilderness ground the trees
-            // use, NOT the city floorAt (which would sink a carcass into hills)
+          } else if (bi.falling) {
+            // shot: it falls against the air (terminal ~11 m/s), tumbling, the
+            // wings half open; its momentum bleeds off
+            bi.vy += (-9.81 - 0.08 * bi.vy * Math.abs(bi.vy)) * dt;
+            bi.vx *= Math.max(0, 1 - dt * 0.6); bi.vz *= Math.max(0, 1 - dt * 0.6);
+            bi.x += bi.vx * dt; bi.y += bi.vy * dt; bi.z += bi.vz * dt;
+            bi.roll += (bi.spin || 7) * dt; bi.pitch += (bi.spin || 7) * 0.6 * dt;
             const gy = groundY(bi.x, bi.z) || 0;
-            if (bi.y <= gy + 0.06) {
-              bi.y = gy + 0.06;
-              bi.falling = false; bi.parked = true;
+            if (bi.y <= gy + 0.03) {
+              bi.y = gy; bi.falling = false; bi.parked = true;
+              bi.roll = bi.spin > 0 ? 1.45 : -1.45; bi.pitch = 0;
               bi.respawnT = 40 + Math.random() * 40;
             }
-            continue;
+          } else {
+            bi.vx += bi.ax * dt; bi.vy += bi.ay * dt; bi.vz += bi.az * dt;
+            const maxSp = bi.panic ? PANIC_SPEED : MAX_SPEED;
+            const sp = Math.hypot(bi.vx, bi.vy, bi.vz) || 0.0001;
+            const k = (sp > maxSp ? maxSp : (sp < MIN_SPEED ? MIN_SPEED : sp)) / sp;
+            bi.vx *= k; bi.vy *= k; bi.vz *= k;
+            bi.x += bi.vx * dt; bi.y += bi.vy * dt; bi.z += bi.vz * dt;
+            // nose along the flight; bank into the turn, pitch into the climb
+            const hs = Math.hypot(bi.vx, bi.vz) || 0.0001;
+            let d = Math.atan2(-bi.vz, bi.vx) - bi.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+            bi.yaw += d; bi.yawRate += ((dt > 0 ? d / dt : 0) - bi.yawRate) * Math.min(1, dt * 4);
+            // (a right turn lowers yaw; a right bank is a positive roll)
+            bi.roll += (Math.max(-1, Math.min(1, -Math.atan(hs * bi.yawRate / 9.81))) - bi.roll) * Math.min(1, dt * 5);
+            bi.pitch += (Math.atan2(bi.vy, hs) * 0.8 - bi.pitch) * Math.min(1, dt * 5);
+            BK.clock("crow", bi.clk, dt, { climb: bi.vy / hs, slow: hs < 8, panic: bi.panic, rnd: rndOf(bi) });
           }
-          bi.x += bi.vx * dt; bi.y += bi.vy * dt; bi.z += bi.vz * dt;
-          bi.flapPhase += bi.flapSpeed * (panicked ? 1.7 : 1) * dt;
-        }
-
-        // ---- write matrices for this flock's birds only ----
-        for (let i = 0; i < n; i++) {
-          const bi = birds[i];
-          if (bi.rec) {                                   // keep the hit target ON the bird
+          if (bi.rec) {                                   // keep the hit target on the bird
             bi.rec.pos.x = bi.x; bi.rec.pos.y = bi.y; bi.rec.pos.z = bi.z;
             const rp = bi.rec.group.position;
             rp.x = bi.x; rp.y = bi.y - 1.0; rp.z = bi.z;
           }
+          // the pose: flying, tumbling, or dead on the ground
+          const P = bi.P;
           if (bi.falling || bi.parked) {
-            // tumbling out of the sky / lying where it fell; wings folded.
-            wm.position.set(bi.x, bi.y, bi.z);
-            wm.rotation.set(bi.parked ? Math.PI / 2 : (bi.tumble || 0),
-              (bi.tumble || 0) * 0.7, bi.parked ? 0.4 : (bi.tumble || 0) * 0.5);
-            wm.scale.set(1, 1, 1.6);
-            wm.updateMatrix();
-            bodyIM.setMatrixAt(bi.bodyIdx, wm.matrix);
-            wm.scale.set(0.25, 1, 0.25);
-            wm.updateMatrix();
-            wingIM.setMatrixAt(bi.wingIdxL, wm.matrix);
-            wingIM.setMatrixAt(bi.wingIdxR, wm.matrix);
-            continue;
+            BK.params("crow", "glide", 0, P);
+            P.fold = bi.parked ? 0.55 : 0.3; P.legs = 1; P.pitch = 0.4; P.head = bi.parked ? 0.9 : 0.4;
+          } else {
+            BK.params("crow", "flap", bi.clk.phase, P); P.flap = bi.clk.flap;
           }
-          const heading = Math.atan2(bi.vx, bi.vz);         // yaw so the body nose follows velocity
-          const pitch = -Math.atan2(bi.vy, Math.hypot(bi.vx, bi.vz) || 0.0001) * 0.6;
-
-          wm.position.set(bi.x, bi.y, bi.z);
-          wm.rotation.set(pitch, heading, 0);
-          wm.scale.set(1, 1, 1.6);                           // fixed elongate — body cone stretched along its forward axis
-          wm.updateMatrix();
-          bodyIM.setMatrixAt(bi.bodyIdx, wm.matrix);
-
-          // WING FLAP — simple sine-wave-driven hinge angle, mirrored L/R.
-          const flap = Math.sin(bi.flapPhase) * 0.9;
-          wm.rotation.set(pitch, heading, flap);
-          wm.scale.set(1.4, 1, 1.4);
-          wm.updateMatrix();
-          wingIM.setMatrixAt(bi.wingIdxL, wm.matrix);
-          wm.rotation.set(pitch, heading, Math.PI - flap);   // mirror across the body for the right wing
-          wm.updateMatrix();
-          wingIM.setMatrixAt(bi.wingIdxR, wm.matrix);
+          _ce.set(bi.roll, bi.yaw, bi.pitch, "YZX"); _cq.setFromEuler(_ce);
+          _cs.setScalar(bi.sc);
+          _cm.compose(_cp.set(bi.x, bi.parked ? bi.y + 0.045 - 0.15 * Math.cos(bi.roll) * bi.sc : bi.y, bi.z), _cq, _cs);
+          const far = !cam || (cam.x - bi.x) * (cam.x - bi.x) + (cam.y - bi.y) * (cam.y - bi.y) + (cam.z - bi.z) * (cam.z - bi.z) > 35 * 35;
+          kit.add(_cm, P, far);
         }
       }
+      const _cq = new THREE.Quaternion(), _ce = new THREE.Euler(0, 0, 0, "YZX"), _cm = new THREE.Matrix4(), _cs = new THREE.Vector3(), _cp = new THREE.Vector3();
 
       CBZ.onUpdate(99.25, function (dt) {
-        if (!dt || dt > 0.5) dt = 0.05;        // clamp pauses / first frame (deer-style)
+        if (!dt || dt > 0.5) dt = 0.05;        // clamp pauses / first frame
         if (!birdAlarmOk) installBirdAlarm();  // retry until the combat hook exists
-
-        // reuse the tree distanceLOD's near/far thresholds so birds freeze
-        // (matrices simply stop being touched — cheapest possible "off")
-        // at the same range shadows already stop resolving at.
+        // the trees' LOD read: far from the wilderness the crows stop (and
+        // cannot be shot)
         const P = CBZ.player;
         if (P && P.pos) {
           const d = Math.hypot(P.pos.x - fieldCX, P.pos.z - fieldCZ);
           const LOD_FAR = fieldR + RING * 0.65, LOD_NEAR = fieldR + RING * 0.45;
-          if (detailed && d > LOD_FAR) { detailed = false; setBirdRecsVisible(false); }   // frozen birds can't be shot
+          if (detailed && d > LOD_FAR) { detailed = false; setBirdRecsVisible(false); kit.begin(); kit.end(); }
           else if (!detailed && d < LOD_NEAR) { detailed = true; setBirdRecsVisible(true); }
         }
         if (!detailed) return;
-
-        // amortize: advance exactly one flock's full boids+matrix update per
-        // tick, round-robin, so total per-frame cost never scales with
-        // FLOCK_COUNT — it's always "one flock's worth" regardless of how
-        // many flocks exist.
-        const fl = flocks[nextFlock];
+        steerFlock(flocks[nextFlock], dt * flocks.length);
         nextFlock = (nextFlock + 1) % flocks.length;
-        updateFlock(fl, dt * flocks.length);   // scale dt so each flock still integrates at ~real-time cadence despite round-robin throttling
-
-        bodyIM.instanceMatrix.needsUpdate = true;
-        wingIM.instanceMatrix.needsUpdate = true;
+        const cam = CBZ.camera && CBZ.camera.position;
+        kit.begin();
+        for (let f = 0; f < flocks.length; f++) flyFlock(flocks[f], dt, cam);
+        kit.end();
       });
     })();
 

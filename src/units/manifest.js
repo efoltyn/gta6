@@ -70,7 +70,8 @@
     sheep: S("sheep", "sheep", "flock"),
     goat: S("goat", "goats", "herd"),
     horse: Object.assign(S("horse", "horses", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
-    chicken: S("chicken", "chickens", "flock"),
+    // the chicken is the bird kit's (world/birdkit.js), lofted with loft.js
+    chicken: Object.assign(S("chicken", "chickens", "flock"), { needs: ["units/kit/loft.js", "world/birdkit.js"] }),
     // the war room's "1000 DOGS": the canid family's dog rows
     dog: Object.assign(S("dog", "dogs", "pack"), { needs: CANID }),
 
