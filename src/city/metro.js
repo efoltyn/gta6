@@ -1480,7 +1480,10 @@
     // shell not built yet (the lot's footprint, height and future colour)
     for (const lot of lots) {
       const b = lot && lot.building;
-      if (!b || b.park) continue;
+      // a filling station is not a shell (world/fuel_station.js): a painted
+      // shell copy would stand on its forecourt for good, since no shell
+      // ever arrives to dissolve it
+      if (!b || b.park || b.fuelStation) continue;
       let rec;
       if (b.group) rec = builtPut(shellRec(b, lot), "lots");
       else {

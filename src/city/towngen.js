@@ -542,6 +542,12 @@
       ["car", "carlot"], ["motors", "carlot"], ["chop", "chop"], ["fuel", "gas"], ["gas", "gas"],
       ["security", "security"], ["sheriff", "security"], ["customs", "bank"], ["realty", "realtor"], ["realtor", "realtor"],
     ];
+    // does this lot take a filling station (world/fuel_station.js's smallest)?
+    function stationFits(lt) {
+      if (!CBZ.buildFuelStation || !CBZ.FUEL_STATION_MIN) return false;
+      const fr = lt.door.nz ? lt.w : lt.d, dp = lt.door.nz ? lt.d : lt.w;
+      return fr - 0.4 >= CBZ.FUEL_STATION_MIN.frontage && dp - 0.4 >= CBZ.FUEL_STATION_MIN.depth;
+    }
     function inferShopKind(name) {
       if (!name) return null;
       const n = String(name).toLowerCase();
@@ -740,6 +746,10 @@
           ? { x: bx + lt.door.nx * (HLOT.hd / 2 + 1.6), z: bz + lt.door.nz * (HLOT.hd / 2 + 1.6), nx: lt.door.nx, nz: lt.door.nz }
           : { x: lt.door.x + lt.door.nx * 1.6, z: lt.door.z + lt.door.nz * 1.6, nx: lt.door.nx, nz: lt.door.nz };
         if (PLAN) {
+          // a fuel lot raises a filling station, not a shell (buildShell
+          // below): no shell is planned, or its far copy would stand on the
+          // forecourt for good, a painted box in front of the pumps
+          if (isShop && (pick.shopKind || inferShopKind(pick.name) || "food") === "gas" && stationFits(lt)) continue;
           // the shell this lot will raise, as cityMakeBuilding will raise it
           // (its colour: buildings.js shellColorway, the shell's own answer)
           const cw = CBZ.cityShellColorway ? CBZ.cityShellColorway(bx, bz, color, shellOpts) : null;
@@ -778,6 +788,9 @@
         // and who lives there
         if (HLOT) { lotRec.parcel = { w: lt.w, d: lt.d }; lotRec.wealth = hWealth; }
         const bb = lotRec.building;
+        // a fuel lot raises a filling station, not a shell: no far copy of a
+        // shell may stand for it (city/metro.js BUILT reads this)
+        if (isShop && sk === "gas" && stationFits(lt)) bb.fuelStation = true;
         // a house on a lot: where it stands and where its own drive runs
         // (city/approach.js lays the drive there instead of on the centreline)
         if (HLOT) { bb.x = bx; bb.z = bz; bb.w = w; bb.d = d; bb.driveAt = HLOT.driveAt; bb.driveHalf = HLOT.driveHalf; }
@@ -803,6 +816,26 @@
         }
         const buildShell = function (late) {
           let b = null;
+          // A TOWN'S FUEL SHOP IS A FILLING STATION (world/fuel_station.js, the
+          // one builder every forecourt in the game comes from, laid out to this
+          // lot): the canopy and the pumps in front, the store across the back,
+          // the price sign at the corner. It was a shop shell with a glass
+          // front and no pump anywhere. The shop keeps its counter and clerk
+          // (the station's), and city/fuel.js finds the pumps by its door.
+          if (sk === "gas" && stationFits(lt)) {
+            const fr = lt.door.nz ? lt.w : lt.d, dp = lt.door.nz ? lt.d : lt.w;
+            {
+              let st = null;
+              try {
+                st = CBZ.buildFuelStation({ parent: root, x: lt.cx, z: lt.cz, y: LOT_Y, rotY: Math.atan2(-lt.door.nx, -lt.door.nz),
+                  frontage: fr - 0.4, depth: dp - 0.4, deck: 0.05, walkRise: 0.15, apron: 0 });
+              } catch (e) { st = null; if (window.console) console.warn("[town fuel]", e); }
+              if (st) {
+                bb.door = st.door; bb.vendorSpot = st.vendor; bb.gas = true; bb.station = st.group;
+                return;
+              }
+            }
+          }
           // a one-storey car dealer or chop shop wears what it is (city/facades/
           // commercial.js); the automatic pick cannot tell them from a fuel depot
           const tradeDress = isShop && storeys < 2 && shellOpts && shellOpts.showroom && !shellOpts.dress && (sk === "carlot" || sk === "chop")

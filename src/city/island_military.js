@@ -716,8 +716,12 @@
       building: function (lx, lz, w, d, storeys, color, door, o) {
         if (!CBZ.cityMakeBuilding) return null;
         try {
+          // the base's own buildings are brick walk-up blocks (city/facades/
+          // brick.js, sash windows, no shop front): they were bare glass
+          // office shells in a coloured rim
           return CBZ.cityMakeBuilding(root, CEN_X + lx, CEN_Z + lz, w, d, storeys, color, door,
-            { facade: o.facade || "office", dress: false, stairs: storeys > 1, houseNumber: 1 });
+            { facade: o.facade || "office", dress: o.facade === "brick" ? { style: "brick", walkup: true, noShop: true } : false,
+              stairs: storeys > 1, houseNumber: 1 });
         } catch (e) { return null; }
       },
     };

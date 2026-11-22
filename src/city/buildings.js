@@ -4386,7 +4386,17 @@
       // mosque) is not a plant deck: world/building_dress.js reads this flag
       // and leaves it alone. Everything else gets its roof plant there, after
       // the lifts, stashes and helipad have claimed their ground.
-      roofCrowned = !!((civicF && civicSpec) || (dressed && dressed.crownsRoof) || opts.garageGround);
+      // A grammar that "crowns the roof" with nothing but its parapet and
+      // cornice (brick, stone, deco: every downtown street) left the whole
+      // roof bare: no plant, no tank, a flat membrane from the air. The roof
+      // is crowned only when the grammar actually stood something on the
+      // field of it, inside a 1.6 m margin from the walls (ctx.crown, the
+      // boxes it laid above the roofline).
+      const crownBoxes = (ctxC.crown && ctxC.crown.boxes) || [];
+      const RM = 1.6, crownInField = crownBoxes.some(function (q) {
+        return q[1] > -w / 2 + RM && q[0] < w / 2 - RM && q[5] > -d / 2 + RM && q[4] < d / 2 - RM && q[3] > rTop + pp + 0.4;
+      });
+      roofCrowned = !!((civicF && civicSpec) || (dressed && dressed.crownsRoof && crownInField) || opts.garageGround);
     }
 
     const dressedKit = kitDressedDef;
@@ -8633,6 +8643,22 @@
         };
         standBack(shopStoreys, shopOpts);
         shopOpts.reach = setback;
+        // THE FUEL TRADE IS A FILLING STATION (world/fuel_station.js, the one
+        // forecourt builder, laid out to this lot): canopy and pumps facing the
+        // street, the store across the back with its counter and clerk. It was
+        // a glass shop shell with no pump. city/fuel.js finds the pumps by the
+        // door; shops.js serves at the vendor spot.
+        if (shop.gas && CBZ.buildFuelStation) {
+          const nOut = [[0, -1], [0, 1], [-1, 0], [1, 0]][side];
+          const fr = nOut[1] ? lot.w : lot.d, dp = nOut[1] ? lot.d : lot.w;
+          const st = CBZ.buildFuelStation({ parent: root, x: lot.cx, z: lot.cz, y: 0, rotY: Math.atan2(-nOut[0], -nOut[1]),
+            frontage: fr - 1.0, depth: dp - 1.0, deck: 0.06, walkRise: 0.15, apron: 0 });
+          lot.kind = shop.kind;
+          lot.building = { shop, name: shop.name, sign: shop.sign, side, door: st.door, vendorSpot: st.vendor,
+            gas: true, station: st.group, fuelStation: true, w: fr - 1.0, d: dp - 1.0 };
+          placed.push(lot);
+          continue;
+        }
         const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, shopOpts);
         if (!porticoLive) signAwning(b, side, w, d, shop.sign, shop.name, shop.kind);
         // Counter toward the back, vendor behind it. The back wall is also
