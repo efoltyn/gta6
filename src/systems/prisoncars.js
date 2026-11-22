@@ -512,9 +512,11 @@
     phone: "Use our phone.",
     shower: "Wait for our turn.",
     share: "We don't share with them.",
+    own: "Not one of ours.",
+    out: "You're done with us.",
   };
   const viol = { kind: "", yardCar: -1, t: 0, warned: 0, warnAt: 0, by: null, hands: false };
-  const strikes = { share: 0, rules: 0 };
+  const strikes = { share: 0, rules: 0, own: 0 };
   function pick(list) { return list[(rnd() * list.length) | 0]; }
   function pdist(n) { const p = CBZ.player.pos, q = n.group.position; return Math.hypot(p.x - q.x, p.z - q.z); }
   // the man of `car` who comes to say it: an active one, close, with nerve
@@ -623,6 +625,34 @@
     if (strikes.share >= 2 && CBZ.requestInmateHunt) { CBZ.requestInmateHunt(own, 4, "rules"); strikes.share = 0; }
   }
 
+  /* YOU TURNED ON ONE OF YOUR OWN (entities/ai.js: leaned on him past what
+     he would take, or threw the first blow at him). The car polices itself
+     the way it already does for sharing: one of yours who saw it says so and
+     the car thinks less of you; twice is a correction from your own (the
+     same short lesson noteShare gives); and a car that has had enough of you
+     puts you out (leave: nobody's man, for the rest of the run). The man who
+     leads the car is not policed by it. */
+  function ownStrike(actor) {
+    const g = CBZ.game;
+    if (!actor || !g || g.mode !== "escape" || g.role === "cop") return;
+    const mine = playerCar();
+    if (mine < 0 || carOf(actor) !== mine) return;
+    if (CBZ.prisonPlayerLeads && CBZ.prisonPlayerLeads(mine)) return;
+    const own = enforcerOf(mine, 16, actor);
+    if (!own) return;                                 // nobody of yours saw it
+    strikes.own++;
+    if (CBZ.addGangStanding) CBZ.addGangStanding(mine, -5);
+    const st = CBZ.gangStanding ? CBZ.gangStanding(mine) : 0;
+    if (g.carClaim === "in" && (st <= -30 || strikes.own >= 4)) {
+      sayOver(own, OWN_LINE.out, 2.8);
+      leave("turned on his own");
+      strikes.own = 0;
+      return;
+    }
+    sayOver(own, OWN_LINE.own, 2.6);
+    if (strikes.own >= 2 && strikes.own % 2 === 0 && CBZ.requestInmateHunt) CBZ.requestInmateHunt(own, 5, "rules");
+  }
+
   /* THE HORN CALLS CHOW. The errand used to be offered only on a man's own
      wander re-think, so a man mid-conversation (a third of the yard at any
      moment) never heard it and chow filled one stool at a time. On the block
@@ -664,7 +694,7 @@
     rejoin();
     holders.phone.fill(null); holders.shower.fill(null);
     viol.kind = ""; viol.t = 0; viol.warned = 0; viol.by = null; viol.hands = false;
-    strikes.share = 0; strikes.rules = 0;
+    strikes.share = 0; strikes.rules = 0; strikes.own = 0;
     for (const n of CBZ.npcs || []) if (n) n._carErrand = null;
     messKey = "";
   }
@@ -688,7 +718,7 @@
   CBZ.prisonCars = {
     CARS, N, IDX,
     carOf, carOfHeritage, heritageOf, playerCar, bloodCar, heritageBySkin,
-    leave, rejoin, isOut, status,
+    leave, rejoin, isOut, status, ownStrike,
     label, phrase,
     tension, addTension, atOdds, rivalOf, incident,
     allotMess, allotYard, seatOwner, maySit, messSpot,
