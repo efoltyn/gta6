@@ -745,7 +745,8 @@
       if (fp) {
         let rooted = false;
         for (let k = 0; k < moves.length; k++) if (moves[k].a === F.a) { rooted = true; break; }
-        if (rooted || F.px == null || (typeof V.held === "function" && V.held(F.a))) { F.px = fp.x; F.pz = fp.z; }
+        // (a man dragging himself along the floor, systems/bodyfall.js drag, is moving himself)
+        if (rooted || F.px == null || F.a._dragT > 0 || (typeof V.held === "function" && V.held(F.a))) { F.px = fp.x; F.pz = fp.z; }
         else {
           const ex = F.px - fp.x, ez = F.pz - fp.z;
           if (ex * ex + ez * ez > 4) { F.px = fp.x; F.pz = fp.z; }          // moved on purpose (a respawn, a teleport)
@@ -1052,7 +1053,7 @@
     } else if (zone === "body") { hr.kind = "fold"; hr.dur = 0.8; }
     else if (zone === "legs") { hr.kind = "buckle"; hr.dur = 0.7; hr.side = o.legSide === "R" ? "R" : "L"; }
     else { hr.kind = "stagger"; hr.dur = 0.7; }
-    hr.shot = false;
+    hr.shot = false; hr.tw = 0;
     // a real step to catch the weight: the foot on the side it is thrown to.
     // The heavier the man behind the blow, the further it carries; a heavy
     // shot that staggers him keeps him going for a second step.
@@ -1149,7 +1150,18 @@
          second put him down (SHOT_KD).
        · MOMENTUM: a man shot at a run stumbles on along it.
        · Never a turn of the whole body: his group yaw is not touched here;
-         the root only ever travels along the round (plus his run).
+         the root only ever travels along the round (plus his run). The
+         SHOULDERS do turn: a round's line across the trunk (the hit point
+         off his centre, crossed with the push) twists the trunk over the
+         hips the way it went, and the reaction lasts as long as the hit was
+         big (a 9 mm a beat, a rifle round longer).
+       · ON THE FLOOR or GOING DOWN already: never a new reaction and never a
+         restarted fall; the part it hit moves (the limp springs of a body
+         out cold, MP.limpKick; a conscious man turns off it, MP.groundHit).
+       · YOU: the same reaction on your own rig (no steps: your feet are
+         yours), and a leg hit heavy enough takes you to that knee for as
+         long as the knee is down (physics.js holds the stick only while the
+         rig's fall is on). systems/capture.js hurtPlayer calls this.
      ============================================================ */
   const SHOT_KD = 2.0;          // stacked load (torso rounds, caliber-weighted) that puts him down
   const SHOT_DECAY = 0.5;       // load bled per second
@@ -1160,7 +1172,7 @@
   function koMode() { const m = CBZ.game && CBZ.game.mode; return m === "city" || m === "escape"; }
   function shotRec(ch) {
     return ch._shotR || (ch._shotR = { a: null, B: null, queued: false, e: 0, dx: 0, dz: 0,
-      head: 0, torso: 0, armL: 0, armR: 0, legL: 0, legR: 0, load: 0, loadT: 0 });
+      head: 0, torso: 0, armL: 0, armR: 0, legL: 0, legR: 0, load: 0, loadT: 0, tq: 0 });
   }
   // which part of him the round found: nearest capsule surface on the live rig
   function shotZone(ch, P) {
@@ -1205,11 +1217,12 @@
   };
   V.shot = function (t, o) {
     o = o || EMPTY;
-    if (!t || isPlayer(t)) return false;
+    if (!t) return false;
     const B = bod(t), ch = B && B.ch, MP = MPf();
     if (!ch || !MP || !B.pos || B.dead() || !ch.parts || !ch.parts.la) return false;
     // a seated / carried / held body is somebody else's to move
     if (t._npcAttached || ch.sitting || (typeof V.held === "function" && V.held(t))) return false;
+    if (B.isPlayer && CBZ.fps && CBZ.fps.active) return false;    // first person: the lens takes it (shake), not a pose
     // knocked flat by something that is not the rig's own fall: grapple's body
     if (!(ch.fall && ch.fall.on) && B.down()) return false;
     let dx = 0, dz = 0;
@@ -1229,12 +1242,21 @@
     if (o !== EMPTY && typeof o === "object") o.exit = V.roundExits({ cal: o.cal, wkey: o.wkey, pellets: o.share > 0 && o.share < 1 ? 2 : 1, head: o.head, zone, dist: o.dist, spent: o.spent });
     const R = shotRec(ch);
     R.e += e; R.dx += dx * e; R.dz += dz * e; R[zone] += e;
+    // the twist it puts in the trunk: (r x F).y in his frame, r = the hit
+    // point off his centre line, F = the round's push
+    if (o.point && o.point.x != null && zone !== "legL" && zone !== "legR") {
+      const yaw = B.yaw(), c = Math.cos(yaw), sn = Math.sin(yaw);
+      const rx = (o.point.x - B.pos.x) * c - (o.point.z - B.pos.z) * sn;
+      const rz = (o.point.x - B.pos.x) * sn + (o.point.z - B.pos.z) * c;
+      const fx = dx * c - dz * sn, fz = dx * sn + dz * c;
+      R.tq += (rz * fx - rx * fz) * e;
+    }
     if (!R.queued) { R.queued = true; R.a = t; R.B = B; shotQ.push(R); }
     return true;
   };
   // the reaction on the rig: a bigger hit takes it over, a smaller one feeds
   // it, the same kind again holds it at its peak and grows it
-  function shotReact(ch, B, kind, px, pz, amt, dur, side) {
+  function shotReact(ch, B, kind, px, pz, amt, dur, side, tw) {
     let hr = ch.hitReact;
     if (!hr) hr = ch.hitReact = { on: false, kind: "snap", t: 0, dur: 0.5, lx: 0, lz: -1, side: "L", amt: 1, blow: "straight" };
     const yaw = B.yaw(), c = Math.cos(yaw), s = Math.sin(yaw);
@@ -1253,6 +1275,7 @@
       hr.t = Math.min(hr.t, 0.06);
     }
     hr.shot = true;
+    hr.tw = Math.max(-0.45, Math.min(0.45, tw || 0));
   }
   function resolveShot(R, MP) {
     const t = R.a, B = R.B, ch = B && B.ch;
@@ -1261,7 +1284,8 @@
     let zone = "torso", ze = -1;
     for (let i = 0; i < ZN.length; i++) if (R[ZN[i]] > ze) { ze = R[ZN[i]]; zone = ZN[i]; }
     const body = R.torso + R.legL + R.legR + 0.5 * (R.armL + R.armR);
-    R.queued = false; R.a = null; R.B = null; R.e = 0; R.dx = 0; R.dz = 0;
+    const tq = R.tq;
+    R.queued = false; R.a = null; R.B = null; R.e = 0; R.dx = 0; R.dz = 0; R.tq = 0;
     for (let i = 0; i < ZN.length; i++) R[ZN[i]] = 0;
     if (!ch || !(E > 0) || B.dead()) return;
     const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
@@ -1269,12 +1293,20 @@
     R.loadT = clock;
     const noKo = !koMode();
     const f = ch.fall;
+    const kk = E > 1.6 ? 1.6 : E;
     if (f && f.on) {
       // already on the knee: enough more and he goes all the way down
-      if (f.variant === "kneel" && R.load >= SHOT_KD) {
+      if (f.variant === "kneel" && R.load >= SHOT_KD && !B.isPlayer) {
         R.load = 0;
         V.knockdown(t, { dir: { x: dx, z: dz }, power: Math.min(1, 0.45 + 0.3 * E), ko: false, dur: 1.2, noKo });
+        return;
       }
+      // going down or down: the part it hit moves, nothing restarts
+      const yaw = B.yaw(), lx = dx * Math.cos(yaw) - dz * Math.sin(yaw), fz = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+      if (f.ko && MP.limpKick) {
+        const part = zone === "armL" ? "la" : zone === "armR" ? "ra" : zone === "legL" ? "rl" : zone === "legR" ? "ll" : zone === "head" ? "head" : "core";
+        MP.limpKick(ch, part, lx >= 0 ? 1 : -1, 0.3 + 0.4 * kk, fz, tq * 8);
+      } else if (MP.groundHit && f.phase === "down") MP.groundHit(ch, lx, 0.4 + 0.4 * kk);
       return;
     }
     // whatever he was throwing is gone
@@ -1290,22 +1322,35 @@
       const pl = Math.hypot(px, pz) || 1; px /= pl; pz /= pl;
     }
     const legHit = zone === "legL" || zone === "legR";
+    const k = kk;
+    // the trunk's turn off the round's line (rad), bigger for a bigger round
+    const tw = Math.max(-0.45, Math.min(0.45, tq * 1.6));
+    if (B.isPlayer) {
+      // YOU: the reaction on your rig, no steps (your feet are yours); a leg
+      // hit heavy enough takes that knee for as long as it is down. Whether
+      // you go to the floor is CBZ.vitals' call (capture.js floors you).
+      if (legHit && E >= 1.15) { V.knockdown(t, { variant: "kneel", side: zone === "legR" ? 1 : -1, dir: { x: dx, z: dz }, ko: false, dur: 0.35 + 0.25 * Math.min(1, E - 1) }); return; }
+      if (zone === "head") shotReact(ch, B, "snap", dx, dz, 0.6 + 0.5 * k, 0.5 + 0.2 * Math.min(1, k), null, 0);
+      else if (zone === "armL" || zone === "armR") shotReact(ch, B, "arm", dx, dz, 0.6 + 0.4 * k, 0.9 + 0.3 * k, zone === "armL" ? "L" : "R", tw);
+      else if (legHit) shotReact(ch, B, "buckle", dx, dz, 0.6 + 0.4 * k, 0.5 + 0.25 * k, zone === "legL" ? "L" : "R", 0);
+      else shotReact(ch, B, "fold", dx, dz, 0.35 + 0.4 * k, 0.5 + 0.3 * k, null, tw);
+      return;
+    }
     if (R.load >= SHOT_KD || (legHit && (E >= SHOT_LEG_DOWN || mv > 0.5))) {
       R.load = 0;
       V.knockdown(t, { dir: { x: px, z: pz }, power: Math.min(1, 0.45 + 0.3 * E), ko: false, dur: 1.2, noKo });
       return;
     }
-    const k = E > 1.6 ? 1.6 : E;
     if (legHit) {
       // that knee gives: down onto it, held about a second, then up
       V.knockdown(t, { variant: "kneel", side: zone === "legR" ? 1 : -1, dir: { x: dx, z: dz }, ko: false, dur: 0.8 + 0.3 * Math.min(1, E), noKo });
       return;
     }
     if (zone === "head") {
-      shotReact(ch, B, "snap", dx, dz, 0.6 + 0.5 * k, 0.55 + 0.2 * Math.min(1, k), null);
+      shotReact(ch, B, "snap", dx, dz, 0.6 + 0.5 * k, 0.55 + 0.2 * Math.min(1, k), null, 0);
       if (E > 1) reel(t, B, ch, px, pz, 1, 0.12 + 0.08 * k, 0.28);
     } else if (zone === "armL" || zone === "armR") {
-      shotReact(ch, B, "arm", dx, dz, 0.6 + 0.4 * k, 1.1, zone === "armL" ? "L" : "R");
+      shotReact(ch, B, "arm", dx, dz, 0.6 + 0.4 * k, 0.9 + 0.35 * k, zone === "armL" ? "L" : "R", tw);
       reel(t, B, ch, px, pz, 1, 0.08 + 0.08 * k, 0.26);
       // the gun hand: the city's own drop (the pickup a cuffed man's gun becomes)
       if (zone === "armR" && t.armed && t.weapon && t.kind !== "cop" && CBZ.cityDropWeapon &&
@@ -1319,11 +1364,12 @@
       }
     } else if (mv > 0.5) {
       // hit at a run: he pitches forward along it and stumbles on
-      shotReact(ch, B, "stagger", px, pz, 0.6 + 0.4 * k, 0.6, null);
+      shotReact(ch, B, "stagger", px, pz, 0.6 + 0.4 * k, 0.45 + 0.2 * k, null, tw);
       reel(t, B, ch, px, pz, 1, 0.22 + 0.12 * k, 0.26);
     } else {
-      // the torso: folds over it and reels back along the line, 1-3 steps
-      shotReact(ch, B, "fold", dx, dz, 0.35 + 0.4 * k, 0.75, null);
+      // the torso: folds over it and reels back along the line, 1-3 steps;
+      // the fold lasts as long as the round was big
+      shotReact(ch, B, "fold", dx, dz, 0.35 + 0.4 * k, 0.55 + 0.35 * Math.min(1.2, k), null, tw);
       const n = E < 0.9 ? 1 : E < 1.45 ? 2 : 3;
       reel(t, B, ch, dx, dz, n, Math.min(0.38, 0.14 + 0.12 * E), 0.28);
     }

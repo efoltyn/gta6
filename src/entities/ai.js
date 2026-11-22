@@ -3203,6 +3203,7 @@
     // started a corpse killed against a wall INSIDE it).
     if (CBZ.prisonCorpsePlace) CBZ.prisonCorpsePlace(victim, killer, {
       force: opts.force != null ? opts.force : (opts.noKnock ? 5 : 8), dirX: opts.dirX, dirZ: opts.dirZ,
+      shot: opts.shot || null, cause: opts.cause || "",     // what killed him decides how he goes down
     });
     if (killer === CBZ.player) addBuzz("fear", 25, actorName(victim));
     if (victim.gang >= 0 && killer && CBZ.playerChar && killer.group === CBZ.playerChar.group) {

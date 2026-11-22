@@ -3573,7 +3573,7 @@
      awake and bleeding (he bleeds out unless someone wraps it). noKill: the
      caller keeps the death (gun game / warlord keep their hp deaths and only
      want the bleed). Returns vitals' { outcome, zone } or null. */
-  const _vwO = { kind: "bullet", point: null, head: false, zone: null, cal: 1, by: null, fromX: 0, fromZ: 0, critical: false, noKill: true };
+  const _vwO = { kind: "bullet", point: null, head: false, zone: null, cal: 1, by: null, fromX: 0, fromZ: 0, dirX: 0, dirZ: 0, critical: false, noKill: true };
   function vitalsRound(a, hit, w, cal, critical) {
     const VT = CBZ.vitals;
     if (!VT || !VT.wound || w.nonlethal || !a || a.dead || a.animal || a.netKind) return null;
@@ -3581,15 +3581,22 @@
     _vwO.point = hit.point || null; _vwO.head = !!hit.head; _vwO.cal = cal;
     _vwO.zone = hit.head ? "head" : (VB && VB.shotZone && hit.point && !hit.occupant ? VB.shotZone(a, hit.point) : null);
     _vwO.by = CBZ.player; _vwO.fromX = CBZ.player.pos.x; _vwO.fromZ = CBZ.player.pos.z;
+    // the round's own line (a man it floors goes down along it, not away from you)
+    _vwO.dirX = hit.dir ? hit.dir.x : 0; _vwO.dirZ = hit.dir ? hit.dir.z : 0;
     _vwO.critical = !!critical; _vwO.noKill = true;
     try { return VT.wound(a, _vwO); } catch (e) { return null; }
   }
   function shotLiving(a, hit, w, shotDir, cal) {
     const V = CBZ.verbs;
     if (!V || !V.shot || w.nonlethal || !a || a.dead || a.animal || a.netKind) return false;
-    // a man already on the floor does not stagger: the round shoves him where he lies
-    if (lyingLiving(a)) {
-      if (a._bf && a._bf.on && CBZ.bodyFall && shotDir) CBZ.bodyFall.poke(a, shotDir.x, shotDir.z, 3 + 2 * cal, hit.point);
+    // a man already on the floor does not stagger: the round moves him where
+    // he lies (bodyfall.js poke: the part it hit, never a restarted fall). A
+    // man down on ONE KNEE is still on his feet's business: CBZ.verbs.shot
+    // decides whether this one takes him the rest of the way.
+    const f = a.char && a.char.fall;
+    const kneeling = !!(f && f.on && f.phase !== "getup" && (f.variant === "kneel" || f.variant === "liver"));
+    if (lyingLiving(a) && !kneeling) {
+      if (CBZ.bodyFall && shotDir) CBZ.bodyFall.poke(a, shotDir.x, shotDir.z, 3 + 2 * cal, hit.point);
       return true;
     }
     _shotO.point = hit.point || null; _shotO.dir = shotDir || null; _shotO.cal = cal;
@@ -3722,6 +3729,8 @@
     else if (def && def.hurt) def.hurt(a, dmg, imp);
     return { head: !!hit.head, down: !was && !!a.dead, dropped: false, dmg: dmg };
   }
+  // what the killing round was, for the body it drops (systems/bodyfall.js)
+  const _killShot = { dirX: 0, dirZ: 0, zone: null, cal: 1, wkey: "", dist: 0, point: null, head: false };
   function gunHit(hit, w, shotDir) {
     const a = hit.actor;
     if (CBZ.game.mode === "city") return cityGunHit(a, hit, w, shotDir);
@@ -3730,6 +3739,7 @@
     if (econWorld()) return cityGunHit(a, hit, w, shotDir);
     const guardish = a.kind === "guard" || a.kind === "warden";
     if (a.hp == null) a.hp = maxHpOf(a);
+    if (shotDir) hit.dir = shotDir;     // the bleed and the fall read the round's own line
     // (e) same shared per-class falloff evaluator as cityGunHit above.
     const fall = CBZ.weaponFalloffMul ? CBZ.weaponFalloffMul(w, hit.dist)
       : (hit.dist <= w.dropStart ? 1 : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage)));
@@ -3771,7 +3781,6 @@
         dist: hit.dist, point: hit.point, byPlayer: true,
       });
     }
-    if (CBZ.knockback) CBZ.knockback(a, CBZ.player.pos.x, CBZ.player.pos.z, w.knock * (hit.head ? 1.25 : 1));
     if (guardish) a.hunt = 3;
     else if (CBZ.provokeGang) CBZ.provokeGang(a, 12);
 
@@ -3798,11 +3807,21 @@
     const vitalsDecides = CBZ.game.mode === "escape";
     const vr = vitalsRound(a, hit, w, caliber(w), vitalsDecides && a.hp <= 0);
     const dies = vitalsDecides && vr ? vr.outcome === "dead" : (lethalHeadshot || a.hp <= 0);
+    // a man the round did not kill is shoved along it (a dead man's shove is
+    // his fall's, below: a step taken by a man already dropping was a second,
+    // contradicting push)
+    if (!dies && CBZ.knockback) CBZ.knockback(a, CBZ.player.pos.x, CBZ.player.pos.z, w.knock * (hit.head ? 1.25 : 1));
     let down = false, dropped = false;
     if (!dies && vr && vitalsDecides && vr.outcome === "down") { a.hp = Math.max(1, a.hp); dropped = true; }
     if (dies && !a.dead) {
       down = true;
-      if (CBZ.aiKill) CBZ.aiKill(a, { group: CBZ.playerChar.group }, { noKnock: true, exit: goreOpts(hit, w, caliber(w)).exit });
+      // HOW the round killed him goes to the body (systems/bodyfall.js): where
+      // it went in, what it was, from how far, along which line
+      const ks = _killShot, VB = CBZ.verbs;
+      ks.dirX = shotDir ? shotDir.x : 0; ks.dirZ = shotDir ? shotDir.z : 0;
+      ks.head = !!hit.head; ks.zone = hit.head ? "head" : (VB && VB.shotZone && hit.point ? VB.shotZone(a, hit.point) : null);
+      ks.cal = caliber(w); ks.wkey = w.key || ""; ks.dist = hit.dist || 0; ks.point = hit.point || null;
+      if (CBZ.aiKill) CBZ.aiKill(a, { group: CBZ.playerChar.group }, { noKnock: true, exit: goreOpts(hit, w, caliber(w)).exit, shot: ks });
       else { a.dead = true; a.ko = 0; a.hp = 0; }
       if (CBZ.game.koLog) CBZ.game.koLog[a.data.name] = true;
       if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(a, w.key);
