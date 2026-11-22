@@ -11,7 +11,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<script src="src/core/nozoom.js?v=nz1121"></script>
 <title>Natural Disaster Survival</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111923'/%3E%3Cpath d='M12 48V28h12v20zm16 0V12h24v36z' fill='%23ffd451'/%3E%3C/svg%3E">
 <!-- The UI typeface is BUNDLED (css/fonts.css) — no CDN on the critical path,
@@ -23,7 +24,7 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=icon1028">
+<link rel="stylesheet" href="css/hud.css?v=btn1121">
 <link rel="stylesheet" href="css/survival_hud.css?v=pace1015">
 <link rel="stylesheet" href="css/screens.css?v=noobj1022">
 <link rel="stylesheet" href="css/shark_title.css?v=noobj1022">
@@ -916,7 +917,7 @@ document.body.appendChild(b);}}catch(e){}})();
      interactions.js: its capture-phase keys must run ahead of the pinned
      prompts' bound keys while you stand in a car. -->
 <script src="src/systems/liftpanel.js?v=lpanel1022"></script>
-<script src="src/systems/interactions.js?v=stall1022"></script>
+<script src="src/systems/interactions.js?v=btn1121"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=jailv1001"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
