@@ -4121,9 +4121,18 @@
      the real cloned limb is seated at the mouth's own `grip` socket, ridden
      for a beat while the jaws close on it, then drawn back into the throat
      and gone — swallowed. The joint it left bleeds exactly as before; the
-     mouth bleeds too, because there is a piece of a person in it. */
+     mouth bleeds too, because there is a piece of a person in it.
+     WHO is an ACTOR. The bite seam's `by` is the attacker's species id (a
+     string) with the attacker beside it as `byActor`; older callers pass the
+     actor itself as `by`. biterActor() reads either, so a string never stands
+     in for the mouth that has to hold the limb. */
   const mouthfuls = [];
   const _mfV = new THREE.Vector3();
+  function biterActor(o) {
+    if (!o) return null;
+    const a = (o.byActor && typeof o.byActor === "object") ? o.byActor : ((o.by && typeof o.by === "object") ? o.by : null);
+    return a && a.group ? a : null;
+  }
   function mouthOf(a) {
     const g = a && a.group, mo = g && g._aquaticMouth;
     return (mo && mo.contract && mo.contract.grip && g.parent) ? mo : null;
@@ -4324,8 +4333,9 @@
     // restore-on-reuse audit below so a recycled rig starts whole.
     if (key === "ll" || key === "rl") { ch.legGone = key === "ll" ? -1 : 1; ch.legHurt = null; }
     // ---- INTO THE MOUTH THAT TOOK IT (see THE MOUTHFUL above) --------------
-    const jaws = !opts.noFly && !opts.boom ? mouthOf(opts.by) : null;
-    if (jaws && holdInMouth(part, opts.by, jaws, key, wetHere)) {
+    const biter = biterActor(opts);
+    const jaws = !opts.noFly && !opts.boom ? mouthOf(biter) : null;
+    if (jaws && holdInMouth(part, biter, jaws, key, wetHere)) {
       // the joint vents in its own medium exactly as the flying path does
       const prevWet0 = wetEvent; wetEvent = wetHere;
       const _pm = part.matrixWorld.elements;
@@ -4596,6 +4606,9 @@
       CBZ.bodyWound(ctx.ped, wp, {
         head, cal: wcal, jaw: opts.jaw, dir: opts.dir,
         melee: blunt ? "blunt" : (blade ? "blade" : (bitten ? "bite" : null)),
+        // the biter, so the death wound is printed by ITS teeth
+        by: bitten ? (opts.by || (ctx.imp && ctx.imp.by) || undefined) : undefined,
+        byActor: bitten ? (biterActor(opts) || biterActor(ctx.imp)) : undefined,
       });
     }
 
@@ -4641,7 +4654,7 @@
         const pool = SEV_LIMBS.slice();
         // A BITE TAKES THE LIMB IT CLOSED ON, and the biter keeps it (THE
         // MOUTHFUL). Every other cause still draws from the pool at random.
-        const biter = bitten ? (opts.by || (ctx.imp && ctx.imp.by) || null) : null;
+        const biter = bitten ? (biterActor(opts) || biterActor(ctx.imp)) : null;
         const bp = bitten && ctx.imp && ctx.imp.point && ctx.imp.point.x != null ? ctx.imp.point : null;
         for (let i = 0; i < want && pool.length; i++) {
           let k = bp ? nearestLimb(actorChar(ctx.ped), bp, pool) : null;
