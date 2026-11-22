@@ -3590,7 +3590,7 @@
     if (opts.dress === false) return false;
     if (opts.dress) return opts.dress;
     return CBZ.facadeAutoDress ? CBZ.facadeAutoDress(ox, oz, storeys,
-      opts.showroom || opts.garageGround ? "showroom" : opts.retail ? "shop" : null) : null;
+      opts.garageGround ? "deck" : opts.showroom ? "showroom" : opts.retail ? "shop" : null) : null;
   }
   /* The volumes a grammar must leave open on this shell (building-local
      {x0,x1,y0,y1,z0,z1}): the caller's own (the mega-tower's executive
@@ -4129,6 +4129,9 @@
     let kitDressedDef = null, kitDoorDrawn = false, kitGlass = null;
     // the grammar's own window decisions (facade_kit F.windowStyle / F.windowFrame)
     let kitWinStyle = null, kitWinFrame = null;
+    // where the grammar built the trade's sign panel (F.signPanel): the shop's
+    // painted name goes there instead of on the generic fascia (signAwning)
+    let kitSign = null;
     // the facade's glass: the colours it declared (F.glass), or a dark cool panel
     const kitIsGlass = function (c) { return (kitGlass && kitGlass.has(c >>> 0)) || FO.isGlassHex(c); };
     let roofCrowned = false, dressedId = null;
@@ -4349,6 +4352,7 @@
       kitGlass = ctxC.__glass || null;
       kitWinStyle = ctxC.__winStyle || null;
       kitWinFrame = ctxC.__winFrame != null ? ctxC.__winFrame : null;
+      kitSign = ctxC.__sign || null;
       if (dressed) dressedId = dressed.id;
       ctxC.dbox = hostDbox; ctxC.lbox = hostLbox;
       if (dressed) {
@@ -4488,6 +4492,7 @@
     // flagship's parking deck: glazed floor to header, built by the same wall
     // and the same window as every other opening on the shell
     const bays = [];                              // open holes with no glass (drive-in)
+    const rollers = [];                           // closed roller shutters: a goods door, a garage's bays
     let sideDoor = null;                          // a showroom's personnel door
     for (const f of FACES) {
       if (!special(f, 0)) continue;
@@ -4510,6 +4515,21 @@
         bays.push({ s: f.s, t0: -GW / 2, t1: GW / 2, y1: HDR });
         flank(-span / 2 + post, -GW / 2 - 0.2, HDR, "garage-front");
         flank(GW / 2 + 0.2, span / 2 - post, HDR, "garage-front");
+      } else if (opts.showroom && DRESS && DRESS.style === "garage") {
+        // A SERVICE GARAGE'S FRONT IS DOORS (facades/commercial.js "garage"):
+        // the drive-in bay open in the middle, a closed roller shutter in a
+        // bay either side where the front is wide enough, the personnel door
+        // at one end. No shop glass: it is a workshop, not a showroom.
+        const GW = Math.min(3.6, span * 0.3), HDR = FH - 0.75, pitch = GW + 1.1;
+        bays.push({ s: f.s, t0: -GW / 2, t1: GW / 2, y1: HDR, rollup: true });
+        const L0 = -span / 2 + 0.7, R1 = span / 2 - 0.7;
+        sideDoor = { s: f.s, t: L0 + DOORW / 2 + 0.5 };
+        for (const sg of [-1, 1]) {
+          const tc = sg * pitch, a = tc - GW / 2, b = tc + GW / 2;
+          // face-fixed (the coil box and guides on the wall face, the wall
+          // whole behind it): no hole, so no extra wall pieces or colliders
+          if (sg < 0 ? a > sideDoor.t + DOORW / 2 + 0.6 : b < R1) rollers.push({ s: f.s, t0: a, t1: b, y1: HDR, face: true });
+        }
       } else if (opts.showroom) {
         const GW = Math.min(3.6, span * 0.42), HDR = FH - 0.9;
         bays.push({ s: f.s, t0: -GW / 2, t1: GW / 2, y1: HDR, rollup: true });
@@ -4530,15 +4550,15 @@
     }
 
     // ---- an industrial building's goods door: a roller shutter on a flank ---
-    let roller = null;
     if (doorKind === "service" && !opts.garageGround) {
       const fsI = (doorSide === 0 || doorSide === 1) ? (h01b(0x7b1) < 0.5 ? 2 : 3) : (h01b(0x7b1) < 0.5 ? 0 : 1);
       const f = FACES[fsI], sp = faceSpan(f);
       const RW = Math.min(4.2, (sp[1] - sp[0]) - 2.4), RH = Math.min(FH - 0.35, 3.2);
-      if (RW > 2.6) {
-        roller = { s: fsI, t0: -RW / 2, t1: RW / 2, y1: RH };
-        for (let i = openings.length - 1; i >= 0; i--) { const op = openings[i]; if (op.s === fsI && op.k === 0 && op.t1 > roller.t0 - 0.6 && op.t0 < roller.t1 + 0.6) openings.splice(i, 1); }
-      }
+      if (RW > 2.6) rollers.push({ s: fsI, t0: -RW / 2, t1: RW / 2, y1: RH });
+    }
+    for (const ro of rollers) {
+      if (ro.face) continue;
+      for (let i = openings.length - 1; i >= 0; i--) { const op = openings[i]; if (op.s === ro.s && op.k === 0 && op.t1 > ro.t0 - 0.6 && op.t0 < ro.t1 + 0.6) openings.splice(i, 1); }
     }
 
     // ---- 3. THE WALL, BUILT ROUND THE OPENINGS ---------------------------------
@@ -4567,7 +4587,7 @@
         const holes = [];
         for (const op of openings) if (op.s === f.s && op.k === k) holes.push({ a0: op.t0, a1: op.t1, y0: op.y0, y1: op.y1 });
         if (doorHole && k === 0 && f.s === doorSide) holes.push({ a0: doorHole.t0, a1: doorHole.t1, y0: -1, y1: doorTop });
-        if (roller && k === 0 && f.s === roller.s) holes.push({ a0: roller.t0, a1: roller.t1, y0: -1, y1: roller.y1 });
+        if (k === 0) for (const ro of rollers) if (ro.s === f.s && !ro.face) holes.push({ a0: ro.t0, a1: ro.t1, y0: -1, y1: ro.y1 });
         if (k === 0) for (const bb of bays) if (bb.s === f.s) holes.push({ a0: bb.t0, a1: bb.t1, y0: -1, y1: bb.y1 });
         if (k > 0) for (const bb of bays) if (bb.tall && bb.s === f.s && bb.y1 > fy0) holes.push({ a0: bb.t0, a1: bb.t1, y0: fy0 - 1, y1: bb.y1 });
         if (k === 0 && sideDoor && sideDoor.s === f.s) holes.push({ a0: sideDoor.t - DOORW / 2, a1: sideDoor.t + DOORW / 2, y0: -1, y1: DOORH });
@@ -4741,20 +4761,22 @@
           lampSide: (h01b(0x1a3) < 0.5 ? 1 : -1),
         });
     }
-    if (roller) {
+    for (const roller of rollers) {
       // the shutter: a closed curtain of slats in the reveal, its guides, a
       // hood box over it, a floodlight and two bollards on the apron
       const f = FACES[roller.s], t0 = roller.t0, t1 = roller.t1, RH = roller.y1;
       const SH = 0x7b8086, SDK = 0x5d6268;
-      const oS0 = -0.26, oS1 = -0.2;
+      // a shutter in its reveal sits back in the hole; a face-fixed one on the wall
+      const oS0 = roller.face ? 0.0 : -0.26, oS1 = roller.face ? 0.06 : -0.2;
       FO.box(E, f, t0, t1, 0.15, RH, oS0, oS1, SH);      // from the slab's top: never in its face
       const nS = Math.max(6, Math.round(RH / 0.22));
       for (let i = 1; i < nS; i++) { const y = RH * i / nS; FO.box(E, f, t0 + 0.02, t1 - 0.02, y - 0.012, y + 0.012, oS1, oS1 + 0.025, SDK); }
-      FO.box(E, f, t0, t0 + 0.1, 0.15, RH, oS1, -0.04, SDK);
-      FO.box(E, f, t1 - 0.1, t1, 0.15, RH, oS1, -0.04, SDK);
+      FO.box(E, f, t0, t0 + 0.1, 0.15, RH, oS1, roller.face ? 0.14 : -0.04, SDK);
+      FO.box(E, f, t1 - 0.1, t1, 0.15, RH, oS1, roller.face ? 0.14 : -0.04, SDK);
       FO.box(E, f, t0 - 0.2, t1 + 0.2, RH, RH + 0.42, 0, 0.36, SDK);
       for (const tb of [t0 - 0.45, t1 + 0.45]) FO.box(E, f, tb - 0.09, tb + 0.09, 0, 1.0, 0.25, 0.43, 0xe0b81e);
       { const bl = FO.at(f, (t0 + t1) / 2, RH + 0.62, 0.2, 0.5, 0.12, 0.2); E.lamp(bl[0], bl[1], bl[2], bl[3], bl[4], bl[5], 0xfff0c8); }
+      if (roller.face) continue;                  // the wall behind it is the body
       const c0 = FO.at(f, (t0 + t1) / 2, RH / 2, (oS0 + oS1) / 2, t1 - t0, RH, 0.3);
       const c = { minX: ox + c0[0] - c0[3] / 2, maxX: ox + c0[0] + c0[3] / 2, minZ: oz + c0[2] - c0[5] / 2, maxZ: oz + c0[2] + c0[5] / 2, y0: 0, y1: RH, ref: null, noBreach: true };
       CBZ.colliders.push(c); cols.push(c);
@@ -4860,7 +4882,7 @@
     if (!opts.garageGround && !(MASONRY && CBZ.bldMasonryDress)) {
       for (const f of FACES) {
         if (f.s === doorSide) continue;
-        if (roller && roller.s === f.s) continue;
+        if (rollers.some(function (ro) { return ro.s === f.s; })) continue;
         let top = 0.66;
         for (const op of openings) if (op.s === f.s && op.k === 0) top = Math.min(top, op.y0 - 0.12);
         if (top < 0.2) continue;
@@ -5010,7 +5032,7 @@
     {
       const holes = openings.map(function (op) { return { s: op.s, t0: op.t0, t1: op.t1, y0: op.y0, y1: op.y1, forced: !!op.forced, reach: op.reach || 0 }; });
       if (doorHole) holes.push({ s: doorSide, t0: doorHole.t0, t1: doorHole.t1, y0: 0, y1: doorTop });
-      if (roller) holes.push({ s: roller.s, t0: roller.t0, t1: roller.t1, y0: 0, y1: roller.y1 });
+      for (const ro of rollers) if (!ro.face) holes.push({ s: ro.s, t0: ro.t0, t1: ro.t1, y0: 0, y1: ro.y1 });
       // THE DRIVE-IN BAYS ARE HOLES TOO. They were never in this list, so a
       // grammar's ground storey (brick's dark storefront "glass", its water
       // table and spandrel panels; stone's plinth ring and sills) was laid
@@ -5067,6 +5089,7 @@
       stairPlan: null,                              // where this shell's stair core goes (cityStairPlan), built lazily by elevators.js
       dress: DRESS || (DRESS === false ? false : null),   // the facade-kit spec this shell was built with (false = opted out); structural.js asks facadePick with it
       dressStyle: dressedId,                         // the grammar actually worn (null = bare shell)
+      kitSign: kitSign,                              // the grammar's sign panel {s, y, h, w, proj} (building-local)
       // THE SKIN (city/facade_openings.js): every opening cut in this shell,
       // the street door's kind and kit, the house number, and the window
       // pattern the distance proxy paints (core/farcull.js)
@@ -7857,8 +7880,8 @@
     const EXECF = !!(CBZ.CONFIG && CBZ.CONFIG.EXEC_TOP_OFFICE);
     const execY = (STOREYS - 2) * FH;
     // THE SUITE HAS TO SEE OUT. The flagship wears a skyline facade grammar
-    // (the city's position-hash pick; megabrace.js's "Braced Tube" on the
-    // current map), and those grammars skin the tower in a CONTINUOUS dark
+    // (megabrace.js's "Braced Tube", named in shellOpts below), and those
+    // grammars skin the tower in a CONTINUOUS dark
     // window field standing 0.04-0.2 m proud of the glass, with X-brace and
     // megacolumn blocks up to ~1.7 m thick whose inner faces reach a metre
     // INTO the rooms. From storey 50 that read as opaque brown panels in
@@ -7887,7 +7910,12 @@
        are on -x, the deck cars stand at |x| 7.6 (outside the 13 m slot). */
     const HB_FACE = (side === 0 || side === 1) ? side : 1;
     const HB = { s: HB_FACE, w: 13, h: 2 * FH - 0.8, slotW: 13, tail: 9.5 };
-    const shellOpts = { garageGround: true, district: "core", keepClear: execClear, reach: (lot.w - w) / 2, hangarBay: HB };
+    // THE FLAGSHIP NAMES ITS GRAMMAR. With no spec it fell to the automatic
+    // pick's drive-in branch, which hands a neighbourhood's SHOP front to
+    // anything with a parking deck: a 52-storey Chicago-loft walk-up in
+    // navy brick, the tallest thing on the map reading as a black window grid.
+    // It is the Braced Tube (city/facades/megabrace.js, the Hancock Center).
+    const shellOpts = { garageGround: true, district: "core", keepClear: execClear, reach: (lot.w - w) / 2, hangarBay: HB, dress: { style: "megabrace" } };
     if (EXECF) shellOpts.glassKind = "clear";
     const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side, shellOpts);
     // storey 1 opens over the bay: from behind the jet's tail out to the door
@@ -8575,10 +8603,12 @@
         // WHICH GRAMMAR: a live portico IS the grammar (no kit on top of it);
         // the bank and the security firm wear the ashlar bank front; every
         // other trade wears its street's storefront style. A one-storey
-        // drive-in stays a clean glass showroom.
+        // drive-in is what it is in a real city: the car dealer a franchise
+        // showroom, the chop shop a block-built service garage
+        // (city/facades/commercial.js), the trade's colour on its brand wall.
         const shopDress = porticoLive ? false
           : (shop.kind === "bank" || shop.kind === "security") ? ({ style: "stone" })
-          : (driveIn && shopStoreys < 2) ? false
+          : (driveIn && shopStoreys < 2) ? (shop.carlot ? { style: "showroom", accent: shop.sign } : shop.chop ? { style: "garage", accent: shop.sign } : false)
           : (streetDress(lot, shopStoreys, true) || false);
         const shopOpts = {
           showroom: driveIn,
@@ -9208,6 +9238,7 @@
   // a real STOREFRONT: a BIG illuminated sign board carrying the shop NAME baked
   // right onto the facade (no freestanding sidewalk sign), plus a canopy awning.
   // `along` = the facade runs perpendicular to the door normal.
+  CBZ.cityShopFront = function (b, side, w, d, color, name, kind) { return signAwning(b, sideIndex(side), w, d, color, name, kind); };
   function signAwning(b, side, w, d, color, name, kind) {
     const di = doorInfo(0, 0, w, d, side);
     const along = Math.abs(di.nx) > 0.5;          // door faces ±X → storefront spans Z
@@ -9267,6 +9298,19 @@
       b.group.add(rail);
     }
     void accent;
+    // A GRAMMAR THAT BUILT ITS OWN SIGN (facades/commercial.js: the dealer's
+    // brand wall, the garage's parapet band) carries the name there; the
+    // generic fascia below would be a second sign under the first.
+    const KS = b.kitSign;
+    if (KS && KS.s === side) {
+      const ksH = Math.max(0.3, KS.h - 0.12), ksW = Math.min(KS.w, ksH * 6);
+      const ks = new THREE.Mesh(new THREE.PlaneGeometry(ksW, ksH), new THREE.MeshBasicMaterial({ map: signFaceTex(name, color), transparent: true }));
+      ks.position.set(di.x + onx * (KS.proj + 0.02), KS.y, di.z + onz * (KS.proj + 0.02));
+      if (along) ks.rotation.y = di.nx > 0 ? -Math.PI / 2 : Math.PI / 2;
+      else if (di.nz > 0) ks.rotation.y = Math.PI;
+      ks.renderOrder = 2; b.group.add(ks);
+      return;
+    }
     // FASCIA: one painted board the width of the shopfront, a dark cap and
     // sill rail framing it, the name centred (never stretched across 20 m).
     const fasY0 = 2.56, fasY1 = 3.12, fasH = fasY1 - fasY0, fasC = (fasY0 + fasY1) / 2;

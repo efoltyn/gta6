@@ -344,7 +344,11 @@
     const driveIn = !!(ctx.showroom || ctx.garageGround);
     return { f: f, t: 0,
       gap: driveIn ? 6.4 : 2.8,          // keep ornament off this tangent band
-      head: driveIn ? (ctx.FH + 0.9) : 3.6,   // nothing hangs below this height
+      // nothing hangs below this height. A showroom's bay is a ground-storey
+      // hole (FH - 0.9 tall) the storefront keep-clear already guards, so a
+      // grammar may run its canopy and fascia straight over it from the floor
+      // line up; the flagship's double-height hangar keeps the deep head.
+      head: driveIn ? (ctx.showroom && !ctx.garageGround ? ctx.FH - 0.2 : ctx.FH + 0.9) : 3.6,
       driveIn: driveIn };
   };
   // true when tangent `t` on face `f` would foul the doorway
@@ -460,6 +464,15 @@
   // own pick). Bronze on a Seagram, black steel on a deco tower, white on a
   // brick loft — part of the style, so the author says it.
   F.windowFrame = function (ctx, hex) { ctx.__winFrame = hex >>> 0; return hex; };
+
+  // WHERE THE TRADE'S NAME GOES. A grammar that builds its own sign panel (a
+  // dealer's brand wall, a garage's painted parapet band) says where it is:
+  // face f, centre height cy, panel h x w, its face `proj` proud of the wall.
+  // buildings.js records it as b.kitSign and the shop front paints the name
+  // there (signAwning) instead of on the generic fascia.
+  F.signPanel = function (ctx, f, cy, h, w, proj) {
+    ctx.__sign = { s: f.s, y: cy, h: h, w: w, proj: proj };
+  };
 
   // The window band of storey k as the HOST will cut it. buildings.js finds
   // openings between 0.55 m and FH - 0.45 m above each floor line and clamps
@@ -780,7 +793,7 @@
      family the grammar is fixed by the building's height band and use. The
      exotic grammars (adobe, desert modern, pagoda, mosque, ziggurat, pyramid,
      gothic, machiya, the supertall set) are in no automatic pool any more:
-     a call site that wants one names it. `use`: "shop" | "showroom" | other. */
+     a call site that wants one names it. `use`: "shop" | "showroom" | "deck" | other. */
   const FAMILIES = [
     { low: "brickhouse", mid: "brick",     tall: "artdeco", shop: "brick" },
     { low: "queenanne",  mid: "victorian", tall: "artdeco", shop: "brick" },
@@ -795,7 +808,10 @@
     const fam = FAMILIES[Math.min(FAMILIES.length - 1, (h * FAMILIES.length) | 0)];
     const st = storeys || 1;
     let id;
-    if (use === "showroom") id = st >= 2 ? fam.shop : null;   // a one-storey drive-in stays a glass showroom
+    // a one-storey drive-in stays bare here: a fuel depot, a fire house and a
+    // car dealer all arrive as "showroom", and only the call site knows which
+    // (buildings.js / towngen.js name commercial.js's showroom / garage)
+    if (use === "showroom" || use === "deck") id = st >= 2 ? fam.shop : null;
     else if (use === "shop") id = st >= 10 ? fam.tall : fam.shop;
     else id = st >= 10 ? fam.tall : st >= 4 ? fam.mid : fam.low;
     const def = id ? REG.get(id) : null;

@@ -128,14 +128,6 @@
       return m;
     }
 
-    function tag(group, text, y, scale) {
-      if (!CBZ.makeLabelSprite) return;
-      const s = CBZ.makeLabelSprite(text);
-      if (!s) return;
-      s.position.set(0, y, 0); s.scale.set(scale || 6, (scale || 6) * 0.24, 1);
-      group.add(s);
-    }
-
     function addPlaced(x, z, w, d) {
       const p = { x, z, w, d };
       placed.push(p);
@@ -392,11 +384,11 @@
     // ---- landmark towers: every former mountain position becomes skyline ----
     const towers = [];
     function tower(x, z, w, d, storeys, color, name) {
+      // (A name board used to hover 2 m over each roof — "TWIN TOWER WEST" in
+      // the sky — with a glowing red brick standing on the parapet beside it.
+      // A tower is read by its facade grammar's crown, not by a caption.)
       const rec = registerBuilding(x, z, w, d, storeys, color, name, "tower");
       towers.push(rec.lot);
-      tag(rec.b.group, name, rec.b.h + 2.2, storeys > 10 ? 8 : 6);
-      // rooftop beacon makes the tower readable from the mainland.
-      rec.b.lbox(0, rec.b.h + 1.0, 0, 0.45, 2.0, 0.45, 0xff5b5b, { emissive: 0xff3b3b, ei: 0.8, cast: false });
       return rec;
     }
 
@@ -413,7 +405,7 @@
     tower(cx + cell(-1), cz + cell(-1), 19, 20, 38, 0x667991, "TWIN TOWER WEST");
     tower(cx + cell(0), cz + cell(-1), 19, 20, 32, 0x71849d, "TWIN TOWER EAST");
     tower(cx + cell(-3), cz + cell(-1), 14, 15, 8, 0x596b82, "NORTHWEST TOWER");
-    tower(cx + cell(2), cz + cell(0), 15, 15, 9, 0x7a6f8c, "SOUTHEAST TOWER");
+    tower(cx + cell(2), cz + cell(0), 15, 15, 9, 0x8f8578, "SOUTHEAST TOWER");
     tower(cx + cell(0), cz + cell(-3), 14, 14, 7, 0x5e7d86, "NORTHEAST TOWER");
 
     // ---- service station: world/fuel_station.js, the SAME builder the
@@ -456,58 +448,46 @@
     }
     annexCarHook = spawnAnnexCars;
 
+    /* THE ISLAND AUTO SHOWROOM is a real dealership: the same shell every
+       building in the city is (city/buildings.js), a double-height franchise
+       showroom (city/facades/commercial.js "showroom": the glazed front, the
+       drive-in bay, the canopy, the brand wall in the dealer's green) with
+       the cars on plinths on its floor. It was three slabs of blue wall, a
+       roof slab, two posts and a green bar, with a name-and-price board
+       floating over every car. */
     function showroom(x, z) {
-      addPlaced(x, z, 18, 13);
-      lots.push({ cx: x, cz: z, w: 18, d: 13, kind: "carlot", district: "island", building: { name: "Island Auto Showroom" } });
-      plane(x, z, 18, 13, 0xd6dade, 0.055);
-      box(x, 3, z + 6.3, 18, 6, 0.35, 0x586a86, { solid: true });
-      box(x - 8.8, 3, z, 0.35, 6, 13, 0x586a86, { solid: true });
-      box(x + 8.8, 3, z, 0.35, 6, 13, 0x586a86, { solid: true });
-      box(x, 6.2, z, 18, 0.4, 13, 0x46566b, { solid: true, y0: 6, y1: 6.4 });
-      box(x - 5.1, 3, z - 6.3, 0.5, 6, 0.35, 0x44506b, { solid: true });
-      box(x + 5.1, 3, z - 6.3, 0.5, 6, 0.35, 0x44506b, { solid: true });
-      box(x, 6.9, z - 6.3, 10, 1.2, 0.3, 0x12c258);
-      // SALES FLOOR dressing: a manager's desk with a lit terminal by the
-      // glass, tyre stacks + a parts shelf along the back wall, and a pale
-      // display plinth under the feature car — a showroom you'd browse (and
-      // a reason to believe the cars are FOR SALE, i.e. worth taking).
-      box(x - 6.6, 0.5, z - 3.4, 2.0, 1.0, 0.9, 0x44505c, { solid: true });            // sales desk
-      box(x - 6.6, 1.06, z - 3.4, 2.1, 0.08, 1.0, 0xe6e8ee, { cast: false });          // desktop
-      box(x - 6.2, 1.4, z - 3.4, 0.5, 0.45, 0.08, 0x39d0c0, { emissive: 0x39d0c0, ei: 0.5, cast: false }); // terminal
-      for (const off of [5.6, 7.2]) for (let i = 0; i < 3; i++)
-        box(x + off, 0.26 + i * 0.45, z + 5.3, 0.9 - i * 0.12, 0.42, 0.9 - i * 0.12, 0x23262b, { cast: false }); // tyre stacks
-      box(x - 7.4, 0.8, z + 5.4, 2.2, 1.6, 0.7, 0x3a352e, { cast: false, solid: true }); // parts shelf (1.6 m, open showroom floor)
-      box(x, 0.1, z + 4.2, 5.2, 0.2, 3.0, 0xc8ccd4, { cast: false });                  // feature-car plinth
-      // A FULL SALES FLOOR: a grid of display cars on pale plinths so the empty
-      // middle reads as inventory you'd browse (not three lonely cars). Real,
-      // stealable cars (parkedCar) + a name/price placard on each plinth.
+      const W = 18, D = 13;
+      addPlaced(x, z, W, D);
+      const b = build(root, x, z, W, D, 1, 0x8c9096, 0,
+        { showroom: true, retail: true, fh: 5.0, glassKind: "clear", dress: { style: "showroom", accent: 0x12a24c } });
+      lots.push({ cx: x, cz: z, w: W, d: D, kind: "carlot", district: "island",
+        building: { name: "Island Auto Showroom", group: b && b.group, door: { x: x, z: z - D / 2 - 1.6, nx: 0, nz: -1 } } });
+      // the name on the brand wall (the city's one shop-front maker), and a
+      // paved forecourt from the glass out to the street
+      if (b && CBZ.cityShopFront) CBZ.cityShopFront(b, 0, W, D, 0x12a24c, "Island Auto", "carlot");
+      plane(x, z - D / 2 - 5, W + 4, 10, 0xb9bdc0, 0.05);
+      // the sales desk by the glass, the feature-car plinths
+      box(x - 6.4, 0.5, z - 3.2, 2.0, 1.0, 0.9, 0x44505c, { solid: true });
+      box(x - 6.4, 1.06, z - 3.2, 2.1, 0.08, 1.0, 0xe6e8ee, { cast: false });
       const showSpots = [
-        { dx: -4.6, dz: 1.6, vert: true,  c: 0xe24b4b },
-        { dx:  4.6, dz: 1.6, vert: true,  c: 0x3c6fd6 },
-        { dx:  0.0, dz: 4.2, vert: false, c: 0xf2c43d },
-        { dx: -4.6, dz: -3.2, vert: true, c: 0x202225 },
-        { dx:  4.6, dz: -3.2, vert: true, c: 0xa8afb2 },
-        { dx:  0.0, dz: -1.0, vert: false, c: 0xf28c28 },
+        { dx: -4.2, dz: 1.8, vert: true,  c: 0xe24b4b },
+        { dx:  4.2, dz: 1.8, vert: true,  c: 0x3c6fd6 },
+        { dx:  0.0, dz: 3.6, vert: false, c: 0xf2c43d },
+        { dx:  4.2, dz: -3.0, vert: true, c: 0xa8afb2 },
       ];
-      const cars = (CBZ.cityEcon && Array.isArray(CBZ.cityEcon.CARS)) ? CBZ.cityEcon.CARS : null;
-      showSpots.forEach((s, i) => {
-        box(x + s.dx, 0.08, z + s.dz, s.vert ? 2.6 : 5.0, 0.16, s.vert ? 5.0 : 2.6, 0xc8ccd4, { cast: false });  // plinth
+      for (const s of showSpots) {
+        box(x + s.dx, 0.08, z + s.dz, s.vert ? 2.6 : 5.0, 0.16, s.vert ? 5.0 : 2.6, 0xc8ccd4, { cast: false });
         parkedCar(x + s.dx, z + s.dz, s.vert, s.c, true);
-        if (CBZ.makeLabelSprite && cars) {
-          try {
-            const m = cars[(i * 4 + 8) % cars.length];   // spread across the catalog
-            const s2 = CBZ.makeLabelSprite(m.name + "  $" + (m.value || 0).toLocaleString(), { color: "#ffd166" });
-            if (s2) { s2.position.set(x + s.dx, 1.4, z + s.dz - (s.vert ? 2.7 : 1.5)); root.add(s2); }
-          } catch (e) {}
-        }
-      });
+      }
     }
 
     gasStation(cx - 60, cz + 80 - ROADW / 2 - 1.2 - 13, Math.PI);   // front edge on the shoulder
     showroom(cx + cell(2), cz + cell(-1));
 
     // ---- enterable low-rise town around the former terrain peaks ----
-    const PALETTE = [0xff7a6b, 0x6bb6ff, 0xffd166, 0x9ad17a, 0xc792ea, 0xff9e6b, 0x66d9c0, 0xf06b9b];
+    // what low-rise walls are made of: buff and red brick, stucco, render,
+    // concrete (it was salmon, sky blue, lemon, mint, lilac: a toy town)
+    const PALETTE = [0xb9a58a, 0x9c5a44, 0xd8cfbf, 0x8e8a83, 0xa8704f, 0xc9b79a, 0x6f6a63, 0xbfa48a];
     function nearRoad(x, z, w, d) {
       for (let k = -2; k <= 2; k++) {
         if (Math.abs(x - (cx + k * GRID)) < w / 2 + ROADW / 2 + 1.2) return true;
@@ -539,7 +519,7 @@
       if (clashes(x, z, w, d, 4)) continue;              // hand-placed anchors only
       const storeys = 1 + ((rng() * 3) | 0);
       const rec = registerBuilding(x, z, w, d, storeys, PALETTE[(rng() * PALETTE.length) | 0], "Island Apartments", "tower");
-      if (rng() < 0.22) tag(rec.b.group, "ISLAND BLOCK", rec.b.h + 1.5, 4.5);
+      rng();   // the old floating "ISLAND BLOCK" board's roll (RNG order preserved)
       made++;
     }
 

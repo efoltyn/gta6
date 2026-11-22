@@ -1359,13 +1359,6 @@
       if (solid) pushCol(x - w / 2, x + w / 2, z - d / 2, z + d / 2, y - h / 2, y + h / 2, me);
       return me;
     }
-    function tag(group, text, y) {
-      if (!CBZ.makeLabelSprite) return;
-      const s = CBZ.makeLabelSprite(text);
-      if (!s) return;
-      s.position.set(0, y, 0); s.scale.set(7, 1.68, 1);
-      group.add(s);
-    }
 
     // ---- PINECREST resort town (T8) ---------------------------------------
     // A real alpine RESORT VILLAGE grown from the reusable generator using the
@@ -2736,8 +2729,7 @@
           building: Object.assign({}, b, { name: "Alpine Ski Lodge",
             door: { x: lx, z: lz - d / 2 + 1.6, nx: 0, nz: 1 } }) });
       }
-      const grp = new THREE.Group(); grp.position.set(lx, storeys * 4 + 4, lz); root.add(grp);
-      tag(grp, "ALPINE LODGE", 0);
+      // (its name used to hang in the air 4 m over the roof on a board)
     })();
 
     // ---- mountain CABIN ---------------------------------------------------
@@ -2760,8 +2752,6 @@
       box(cx + 3, 5.4, cz - 2, 1, 2, 1, mTimberDk, false);  // chimney
       const cabL = new THREE.PointLight(0xffd9a0, 0.4, 14, 2);
       cabL.position.set(cx, 2.4, cz - 3.2); root.add(cabL);
-      const g1 = new THREE.Group(); g1.position.set(cx, 6.6, cz); root.add(g1);
-      tag(g1, "HUNTER'S CABIN", 0);
       if (cb && city.lots) {
         city.lots.push({ cx, cz, w: cw, d: cd, kind: "cabin", district: "snow",
           building: Object.assign({}, cb, { name: "Hunter's Cabin",
