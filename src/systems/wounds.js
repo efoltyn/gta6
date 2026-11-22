@@ -1478,6 +1478,16 @@
         g.setAttribute("wCol", new THREE.Float32BufferAttribute([1, 1, 1, 1, 1, 1, 1, 1, 1], 3));
         const gq = new THREE.Group();
         gq.add(new THREE.Mesh(g, woundMat("mammal")), new THREE.Mesh(g, markMat("w", "mammal")), new THREE.Mesh(g, stainMat()));
+        // and the skinned variants a mark on a one-mesh animal draws with
+        const gs = g.clone();
+        gs.setAttribute("skinIndex", new THREE.Uint16BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 4));
+        gs.setAttribute("skinWeight", new THREE.Float32BufferAttribute([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], 4));
+        const mats = [woundMat("mammal"), markMat("w", "mammal"), stainMat()];
+        for (let i = 0; i < mats.length; i++) {
+          const bone = new THREE.Bone(), sm = new THREE.SkinnedMesh(gs, mats[i]);
+          sm.add(bone); sm.bind(new THREE.Skeleton([bone]));
+          gq.add(sm);
+        }
         CBZ.shaderQueue(gq, {});
       } catch (e) {}
     }
@@ -2249,6 +2259,7 @@
      detached before they are disposed (disposing one would delete the GPU
      buffer the rest of the species draws from). */
   const OWNED = [];
+  function ownCap() { return (CBZ.qScale ? CBZ.qScale(6, 18) : 10) | 0; }
   function ownBody(actor, mesh) {
     if (mesh._cbzOwn) return mesh._cbzOwn;
     const rec = { actor: actor, mesh: mesh, shared: mesh.geometry, cur: null, map: new Map(), ops: [], removed: 0, severed: 0, craters: 0 };
@@ -3179,7 +3190,11 @@
       const thin = isFinite(thickF) && thickF < Lmax * 1.4 && (dent.removes >= 0.3 || dent.shake * sev >= 0.5);
       const engulf = wrap && dent.removes >= 0.5 && sev >= 0.55 && isFinite(thickF) && thickF < dent.gape;
       const scoop = dent.removes * sev >= 0.2 && strikes.length >= 3;
-      if (thin || engulf || scoop) {
+      // the bodies that own a wounded copy of their geometry are bounded: past
+      // the cap a new body takes its marks (the scoop painted) and keeps the
+      // species' geometry
+      const room = !!seatS.mesh._cbzOwn || OWNED.length < ownCap();
+      if (room && (thin || engulf || scoop)) {
         const through = thin || engulf;
         const rS = Math.max(dent.hw * 0.3, Math.max(-aMin, aMax) + Wavg * 0.6);
         const rU = Math.max(dent.hw * 0.25, Math.max(-bMin, bMax) + Wavg * 0.6, wrap ? partU * 0.6 : 0);
@@ -3364,7 +3379,30 @@
     }
     // 7. the cut's own faces where a part came away
     if (cut && cut.loops.length) capFaces(bite, bite.seatS, cut.loops);
-    if (!mid) return;
+    if (mid) bruiseAndBlood(bite, mid, S, spanA, spanB, X, sea, coat, wet, sev, D);
+    // stamp everything, the blood first and the tooth holes last (a later
+    // mark blends over an earlier one in the same mesh)
+    bite.els.sort(function (a, b) { return (PAINT.get(a.cell) || 0) - (PAINT.get(b.cell) || 0); });
+    for (let i = 0; i < bite.els.length; i++) stampEl(bite, bite.els[i]);
+    bite.els.length = 0;
+    if (bite.flapAt) { flap(bite, bite.flapAt); bite.flapAt = null; }
+    // 11. on land, blood runs down the body along its real surface
+    if (!wet && coat !== "fur" && sev > 0.3) {
+      const lows = strikes.slice().sort(function (a, b) { return a.py - b.py; });
+      let made = 0;
+      const used = [];
+      for (let i = 0; i < lows.length && made < 1 + Math.round(sev * 2); i++) {
+        const st = lows[i];
+        if (st.S.cloth) continue;
+        let near = false;
+        for (let j = 0; j < used.length; j++) if (Math.hypot(used[j].px - st.px, used[j].py - st.py, used[j].pz - st.pz) < st.t.W * 2.5) near = true;
+        if (near) continue;
+        if (bloodRun(bite, st, Math.max(0.0035, st.t.W * 0.35), 0.05 + 0.22 * sev)) { used.push(st); made++; }
+      }
+    }
+  }
+  // 8-10: what the bitten skin does round the teeth
+  function bruiseAndBlood(bite, mid, S, spanA, spanB, X, sea, coat, wet, sev, D) {
     const grav = onSkin(0, -1, 0, hN(mid), new THREE.Vector3());
     // 8. bruising between the jaws, darkening over the next twenty seconds
     if (D.crush * sev > 0.15 && coat !== "fur" && !mid.S.cloth) {
@@ -3397,26 +3435,6 @@
       // in the sea the blood leaves the wound: thinner every minute
       bite.els.push(elAt("w", TCELL.blood, hB, upT, bloodR * 2 / 0.72, bloodR * 2.3 / 0.72, Math.max(0.02, bloodR * 0.5), [0, 0, 0, 0.95], null,
         wet ? [grow, { type: "alpha", from: 1, to: 0.3, T: 90, t0: 5 }] : grow, hB.S));
-    }
-    // stamp everything so far, the blood first and the tooth holes last (a
-    // later mark blends over an earlier one in the same mesh)
-    bite.els.sort(function (a, b) { return (PAINT.get(a.cell) || 0) - (PAINT.get(b.cell) || 0); });
-    for (let i = 0; i < bite.els.length; i++) stampEl(bite, bite.els[i]);
-    bite.els.length = 0;
-    if (bite.flapAt) { flap(bite, bite.flapAt); bite.flapAt = null; }
-    // 11. on land, blood runs down the body along its real surface
-    if (!wet && coat !== "fur" && sev > 0.3) {
-      const lows = strikes.slice().sort(function (a, b) { return a.py - b.py; });
-      let made = 0;
-      const used = [];
-      for (let i = 0; i < lows.length && made < 1 + Math.round(sev * 2); i++) {
-        const st = lows[i];
-        if (st.S.cloth) continue;
-        let near = false;
-        for (let j = 0; j < used.length; j++) if (Math.hypot(used[j].px - st.px, used[j].py - st.py, used[j].pz - st.pz) < st.t.W * 2.5) near = true;
-        if (near) continue;
-        if (bloodRun(bite, st, Math.max(0.0035, st.t.W * 0.35), 0.05 + 0.22 * sev)) { used.push(st); made++; }
-      }
     }
   }
 
