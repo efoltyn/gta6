@@ -67,11 +67,14 @@
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
   function lerp(a, b, t) { return a + (b - a) * t; }
   function frac(x) { return x - Math.floor(x); }
+  function sstep(a, b, x) { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
   // sRGB reference colours -> the linear values the renderer expects
   function lin(h) {
     const f = function (v) { return Math.round(Math.pow(v / 255, 2.2) * 255); };
     return (f((h >> 16) & 255) << 16) | (f((h >> 8) & 255) << 8) | f(h & 255);
   }
+  // sRGB -> linear floats (a specular colour)
+  function linRGB(h) { return [Math.pow(((h >> 16) & 255) / 255, 2.2), Math.pow(((h >> 8) & 255) / 255, 2.2), Math.pow((h & 255) / 255, 2.2)]; }
   function mkRng(seed) {
     let s = (seed >>> 0) || 1;
     return function () { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -115,6 +118,12 @@
       leg: { hip: [0.0, 0.125, 0.032], kn: [-0.034, 0.072], an: [0.006, 0.01], toe: 0.055, hal: 0.01, web: true, r: [0.0085, 0.0042, 0.0032],
         stride: 0.19, duty: 0.62, lift: 0.022, bob: 0.004, waddle: 0.07, tuck: [-172, -176, -178], col: 0xe8b0a8, bare: 0.11 },
       col: { body: 0xf2f2ee, back: 0xa9b3bb, wing: 0xa9b3bb, under: 0xe8ebed, head: 0xf5f5f1, black: 0x151515, white: 0xf6f6f2 },
+      // the plumage's gloss (sRGB specular colours; shine = how tight the
+      // highlight is; iri = how far the hue turns at a slant): a gull's faint
+      sheen: { body: 0x262626, feather: 0x303030, shine: 14 },
+      // feather sizes (m): rows along the body / neck / head and how many
+      // round each, the wing coverts' rows and width, the shank's scutes
+      plume: { body: [0.013, 22], neck: [0.008, 16], head: [0.0045, 14], cov: [0.014, 0.013], scute: 0.003 },
       feather: function (grp, fi, t, up, C) {
         if (grp === "pri") {
           // P10 / P9 black with a white mirror; P5-P8 black ends; all white-tipped
@@ -148,6 +157,10 @@
       leg: { hip: [0.0, 0.105, 0.025], kn: [-0.03, 0.06], an: [0.005, 0.008], toe: 0.042, hal: 0.03, web: false, r: [0.007, 0.0036, 0.0026],
         stride: 0.17, duty: 0.62, lift: 0.02, bob: 0.004, waddle: 0.02, tuck: [-12, 172, 168], col: 0x141416, bare: 0.095 },
       col: { body: 0x18181e, back: 0x18181f, wing: 0x1b1c26, under: 0x202128, head: 0x17171d, black: 0x141418, white: 0x1d1e26 },
+      // structural colour: a blue-violet gloss on the back and the wings,
+      // turning violet at a slant
+      sheen: { body: 0x2c2a5e, feather: 0x3a3686, shine: 22, iri: 0.6 },
+      plume: { body: [0.011, 20], neck: [0.007, 16], head: [0.004, 14], cov: [0.012, 0.011], scute: 0.003 },
       feather: function (grp, fi, t, up, C) { return up ? C.wing : C.under; },
       bodyCol: function (x, y, z, ca, C) { return C.body; },
     },
@@ -169,10 +182,16 @@
       leg: { hip: [0.0, 0.175, 0.045], kn: [-0.042, 0.103], an: [0.006, 0.014], toe: 0.065, hal: 0.03, web: false, r: [0.02, 0.0068, 0.0046],
         stride: 0.22, duty: 0.62, lift: 0.03, bob: 0.005, waddle: 0.035, tuck: [-20, 168, 160], col: 0xe4b84a, bare: 0.12, feathered: true },
       col: { body: 0x8c3a1a, back: 0x7a3016, wing: 0x7c3218, under: 0x9a5230, head: 0x963e1c, hackle: 0x9e461e, tail: 0x221612, black: 0x2a1c14, white: 0x8c3a1a },
+      // a soft gloss; the red's tail green-black in the light
+      sheen: { body: 0x261c12, feather: 0x2a2016, tail: 0x22402a, shine: 12, iri: 0.3 },
+      plume: { body: [0.018, 18], neck: [0.012, 22], head: [0.005, 14], cov: [0.016, 0.016], scute: 0.0035 },
       coats: {
         red: {},
-        leghorn: { body: 0xf0ede4, back: 0xebe8df, wing: 0xeeebe2, under: 0xf3f1ea, head: 0xf1eee6, hackle: 0xf3f0e8, tail: 0xeeebe2, black: 0xe4e0d6, white: 0xf3f0e8, combH: 1.7, lobe: 0xf2efe6 },
-        australorp: { body: 0x16191a, back: 0x14181a, wing: 0x171b1c, under: 0x202424, head: 0x191c1d, hackle: 0x1a1f1f, tail: 0x131718, black: 0x111414, white: 0x1a1d1e, legCol: 0x34302e, billCol: 0x2e2a28 },
+        leghorn: { body: 0xf0ede4, back: 0xebe8df, wing: 0xeeebe2, under: 0xf3f1ea, head: 0xf1eee6, hackle: 0xf3f0e8, tail: 0xeeebe2, black: 0xe4e0d6, white: 0xf3f0e8, combH: 1.7, lobe: 0xf2efe6,
+          sheen: { body: 0x202020, feather: 0x262626, tail: 0x262626, iri: 0 } },
+        // the Australorp's black is beetle-green in the light
+        australorp: { body: 0x16191a, back: 0x14181a, wing: 0x171b1c, under: 0x202424, head: 0x191c1d, hackle: 0x1a1f1f, tail: 0x131718, black: 0x111414, white: 0x1a1d1e, legCol: 0x34302e, billCol: 0x2e2a28,
+          sheen: { body: 0x1e4028, feather: 0x24502e, tail: 0x2a5a36, shine: 18, iri: 0.5 } },
       },
       feather: function (grp, fi, t, up, C) {
         if (grp === "pri") return t > 0.35 ? C.black : (up ? C.wing : C.under);
@@ -199,6 +218,9 @@
     R.flight = Object.assign({}, H.flight, { hz: 8.0 });
     R.id = "rooster"; R.name = "rooster"; R.length = 0.6; R.span = 0.88; R.mass = 3.6; R.rooster = true;
     R.col = { body: 0x2a1810, back: 0x8a2a10, wing: 0x7a2410, under: 0x3a2014, head: 0xb8501a, hackle: 0xd4782a, tail: 0x142018, black: 0x1e1812, white: 0x8a2a10 };
+    // the black breast and the sickles green-black in the light, the hackles golden
+    R.sheen = { body: 0x1e3826, back: 0x40240e, feather: 0x2a2012, tail: 0x2c6038, hackle: 0x4a3614, shine: 16, iri: 0.5 };
+    R.plume = { body: [0.019, 18], neck: [0.016, 24], head: [0.005, 14], cov: [0.017, 0.017], scute: 0.0038 };
     delete R.coats;
     R.feather = function (grp, fi, t, up, C) {
       if (grp === "pri") return t > 0.3 ? C.black : (up ? C.wing : C.under);
@@ -370,17 +392,53 @@
   // ==========================================================================
   const CHAIN = { body: 0, wing: 1, leg: 2, neck: 3, tail: 4 };
   function colours(S, coat) {
-    const src = Object.assign({}, S.col, (S.coats && coat && S.coats[coat]) || {});
+    const cs = (S.coats && coat && S.coats[coat]) || {};
+    const src = Object.assign({}, S.col, cs);
     const C = { raw: src };
     for (const k in src) if (typeof src[k] === "number" && k !== "combH") C[k] = lin(src[k]);
+    // the plumage's sheen: linear specular colours; the shininess and the
+    // iridescence travel packed in one number (shine + iri)
+    const sh = Object.assign({}, S.sheen, cs.sheen);
+    C.sh = {};
+    for (const k in sh) if (k !== "shine" && k !== "iri") C.sh[k] = linRGB(sh[k]);
+    C.shW = Math.round(sh.shine || 12) + clamp(sh.iri || 0, 0, 0.95);
     return C;
   }
+  // the bare parts' gloss (linear specular, shininess): a wet eye, keratin
+  // bill and shanks, a waxy comb
+  const GLOSS = { eye: [0.045, 0.045, 0.045, 220], bill: [0.042, 0.042, 0.04, 48], leg: [0.03, 0.03, 0.03, 24], comb: [0.03, 0.026, 0.026, 18] };
+  const NOF = [0, 0, 0, 0];
   function buildBird(kind, coat, far) {
     const LK = CBZ.loftKit, THREE = W.THREE;
     const S = SPECIES[kind], D = prep(kind), C = colours(S, coat);
     const G = LK.geo();
-    const SG = [], FE = [];
+    const SG = [], FE = [], SP = [], FT = [];
     const one = [0, 1];
+    // each sweep's colour callback runs once per vertex, just before that
+    // vertex is added (index G.n); rec() wraps it so the vertex also records
+    // its gloss (sheen: specular rgb + shininess) and where it lies in its
+    // feathers (feat: bft below; the far body has none)
+    function rec(col, sheen, feat) {
+      return function (x, y, z, ca, sa, R, t) {
+        const c = typeof col === "function" ? col(x, y, z, ca, sa, R, t) : col;
+        const i = G.n * 4;
+        const sv = typeof sheen === "function" ? sheen(c, ca) : sheen;
+        SP[i] = sv[0]; SP[i + 1] = sv[1]; SP[i + 2] = sv[2]; SP[i + 3] = sv[3];
+        const f = feat && !far ? feat(x, y, z, ca, sa, R, t) : NOF;
+        FT[i] = f[0]; FT[i + 1] = f[1]; FT[i + 2] = f[2]; FT[i + 3] = f[3];
+        return c;
+      };
+    }
+    // the plumage's gloss: strongest on the back, less on the belly; a
+    // vane's underside duller than its top
+    const PL = S.plume, shW = C.shW;
+    const plumeSh = function (c, ca) {
+      const b = c === C.hackle && C.sh.hackle ? C.sh.hackle : (c === C.back && C.sh.back ? C.sh.back : C.sh.body);
+      const k = 0.55 + 0.45 * sstep(-0.3, 0.6, ca);
+      return [b[0] * k, b[1] * k, b[2] * k, shW];
+    };
+    const vaneSh = function (b) { return function (c, ca) { const k = ca < 0 ? 0.6 : 1; return [b[0] * k, b[1] * k, b[2] * k, shW]; }; };
+    const K = { rec: rec, PL: PL, plumeSh: plumeSh, vaneSh: vaneSh };
     function mark(n0, seg, fe) {
       for (let i = n0; i < G.n; i++) {
         const s = typeof seg === "function" ? seg(G.p[i * 3], G.p[i * 3 + 1], G.p[i * 3 + 2]) : seg;
@@ -395,7 +453,8 @@
         const yc = (b[1] + b[2]) / 2, r = (b[1] - b[2]) / 2;
         return { x: b[0], y: yc, rt: r, rb: r, w: b[3], wts: one, sq: 0.92 };
       });
-      LK.sweep(G, keys, { S: nS(16), n: far ? 1 : 2, part: "body", capLen: 0.9, capRings: far ? 1 : 2, colour: function (x, y, z, ca) { return S.bodyCol(x, y, z, ca, C); } });
+      LK.sweep(G, keys, { S: nS(16), n: far ? 1 : 2, part: "body", capLen: 0.9, capRings: far ? 1 : 2,
+        colour: rec(function (x, y, z, ca) { return S.bodyCol(x, y, z, ca, C); }, plumeSh, function (x, y, z, ca, sa) { return [-x / PL.body[0], ca, sa, PL.body[1]]; }) });
       mark(n0, [0, CHAIN.body, 0, 0]);
     }
     // ---- the neck (its base inside the trunk, its top inside the head)
@@ -406,7 +465,9 @@
         const t = i / 3;
         keys.push({ x: lerp(NK.base[0], NK.top[0], t), y: lerp(NK.base[1], NK.top[1], t), rt: NK.r * (1.12 - 0.3 * t), rb: NK.r * (1.2 - 0.34 * t), w: NK.r * (1.08 - 0.26 * t), wts: one });
       }
-      LK.sweep(G, keys, { S: nS(12), n: 1, part: "neck", capRings: far ? 0 : 2, colour: function () { return C.hackle != null ? C.hackle : C.head; } });
+      const NL = Math.hypot(NK.top[0] - NK.base[0], NK.top[1] - NK.base[1]);
+      LK.sweep(G, keys, { S: nS(12), n: 1, part: "neck", capRings: far ? 0 : 2,
+        colour: rec(C.hackle != null ? C.hackle : C.head, plumeSh, function (x, y, z, ca, sa, R, t) { return [(1 - t) * NL / PL.neck[0], ca, sa, PL.neck[1]]; }) });
       const vx = NK.top[0] - NK.base[0], vy = NK.top[1] - NK.base[1], l2 = vx * vx + vy * vy;
       mark(n0, function (x, y) { return [clamp(((x - NK.base[0]) * vx + (y - NK.base[1]) * vy) / l2, 0, 1), CHAIN.neck, 0, 0]; });
     }
@@ -421,7 +482,8 @@
         { x: hc[0] + H.len * 0.46, y: hc[1] - H.h * 0.08, rt: BL.d * 0.62, rb: BL.d * 0.6, w: BL.w * 0.78 },
       ];
       keys.forEach(function (k) { k.wts = one; });
-      LK.sweep(G, keys, { S: nS(14), n: far ? 1 : 2, part: "head", capRings: far ? 1 : 2, colour: function () { return C.head; } });
+      LK.sweep(G, keys, { S: nS(14), n: far ? 1 : 2, part: "head", capRings: far ? 1 : 2,
+        colour: rec(C.head, plumeSh, function (x, y, z, ca, sa, R, t) { return [(1 - t) * H.len * 0.96 / PL.head[0], ca, sa, PL.head[1]]; }) });
       // the bill: the upper mandible hooked at the tip, the lower angled at the gonys
       const bx0 = hc[0] + H.len * 0.4, by0 = hc[1] - H.h * 0.08;
       const billCol = lin(C.raw.billCol != null ? C.raw.billCol : BL.col);
@@ -430,7 +492,7 @@
         const t = i / 4;
         up.push({ x: bx0 + BL.len * t, y: by0 + BL.d * 0.2 - BL.hook * t * t * 1.3, rt: BL.d * 0.36 * (1 - t * 0.7), rb: BL.d * 0.1 * (1 - t * 0.5), w: BL.w * 0.5 * (1 - t * 0.55), wts: one });
       }
-      LK.sweep(G, up, { S: far ? 4 : 8, n: 1, part: "bill", capLen: 0.5, capRings: 0, colour: function () { return billCol; } });
+      LK.sweep(G, up, { S: far ? 4 : 8, n: 1, part: "bill", capLen: 0.5, capRings: 0, colour: rec(billCol, GLOSS.bill, null) });
       const lo = [];
       for (let i = 0; i < 4; i++) {
         const t = i / 3;
@@ -438,20 +500,20 @@
         lo.push({ x: bx0 + BL.len * 0.9 * t, y: by0 - BL.d * 0.12 - g * BL.d * 0.1, rt: BL.d * 0.08, rb: BL.d * (0.3 + 0.14 * g) * (1 - t * 0.45), w: BL.w * 0.42 * (1 - t * 0.5), wts: one });
       }
       const spot = lin(BL.spot);
-      if (!far) LK.sweep(G, lo, { S: far ? 4 : 8, n: 1, part: "bill", capLen: 0.5, capRings: 0, colour: function (x) {
+      if (!far) LK.sweep(G, lo, { S: far ? 4 : 8, n: 1, part: "bill", capLen: 0.5, capRings: 0, colour: rec(function (x) {
         const t = (x - bx0) / (BL.len * 0.9);
         return Math.abs(t - BL.gonys) < 0.13 ? spot : billCol;
-      } });
+      }, GLOSS.bill, null) });
       if (!far) {
         // eyes: the pupil, the iris round it, the orbital ring where the eye meets the head
         const E = S.eye, iris = lin(E.iris), ring = lin(E.ring), pupil = lin(0x060606);
         for (let s = -1; s <= 1; s += 2) {
           const c = [E.at[0], E.at[1], s * H.w * 0.4], ax = [0.42, 0.08, s * 0.9];
           const al = Math.hypot(ax[0], ax[1], ax[2]);
-          LK.blob(G, c, [E.r, E.r, E.r * 0.85], { fwd: ax, wts: one, part: "eye", S: 10, rings: 3, colour: function (x, y, z) {
+          LK.blob(G, c, [E.r, E.r, E.r * 0.85], { fwd: ax, wts: one, part: "eye", S: 10, rings: 3, colour: rec(function (x, y, z) {
             const d = ((x - c[0]) * ax[0] + (y - c[1]) * ax[1] + (z - c[2]) * ax[2]) / al / E.r;
             return d > 0.9 ? pupil : d > 0.38 ? iris : ring;
-          } });
+          }, GLOSS.eye, null) });
         }
       }
       if (S.comb) {
@@ -461,13 +523,13 @@
         for (let k = 0; k < nP; k++) {
           const t = nP === 1 ? 0.5 : k / (nP - 1), x = cx0 + cb.len * t;
           const hgt = ch * (nP === 1 ? 0.8 : 0.55 + 0.45 * Math.sin(PI * (0.12 + 0.76 * t)));
-          LK.blob(G, [x, hc[1] + H.h * 0.42 + hgt * 0.42, 0], [nP === 1 ? cb.len * 0.5 : cb.len / cb.n * 0.62, hgt * 0.55, 0.0035], { wts: one, part: "comb", S: far ? 4 : 6, rings: 2, colour: function () { return cc; } });
+          LK.blob(G, [x, hc[1] + H.h * 0.42 + hgt * 0.42, 0], [nP === 1 ? cb.len * 0.5 : cb.len / cb.n * 0.62, hgt * 0.55, 0.0035], { wts: one, part: "comb", S: far ? 4 : 6, rings: 2, colour: rec(cc, GLOSS.comb, null) });
         }
-        if (!far) LK.blob(G, [hc[0] + cb.len * 0.08, hc[1] + H.h * 0.44, 0], [cb.len * 0.55, ch * 0.22, 0.0045], { wts: one, part: "comb", S: 8, rings: 2, colour: function () { return cc; } });
+        if (!far) LK.blob(G, [hc[0] + cb.len * 0.08, hc[1] + H.h * 0.44, 0], [cb.len * 0.55, ch * 0.22, 0.0045], { wts: one, part: "comb", S: 8, rings: 2, colour: rec(cc, GLOSS.comb, null) });
         const lobe = lin(C.raw.lobe != null ? C.raw.lobe : S.lobe);
         for (let s = -1; s <= 1; s += 2) {
-          LK.blob(G, [bx0 - 0.004, by0 - BL.d * 0.55 - S.wattle * 0.45, s * 0.0055], [S.wattle * 0.3, S.wattle * 0.55, 0.0035], { wts: one, part: "comb", S: far ? 4 : 8, rings: 2, colour: function () { return cc; } });
-          if (!far) LK.blob(G, [hc[0] - H.len * 0.1, hc[1] - H.h * 0.14, s * H.w * 0.47], [0.0065, 0.0085, 0.002], { wts: one, part: "comb", S: 6, rings: 2, colour: function () { return lobe; } });
+          LK.blob(G, [bx0 - 0.004, by0 - BL.d * 0.55 - S.wattle * 0.45, s * 0.0055], [S.wattle * 0.3, S.wattle * 0.55, 0.0035], { wts: one, part: "comb", S: far ? 4 : 8, rings: 2, colour: rec(cc, GLOSS.comb, null) });
+          if (!far) LK.blob(G, [hc[0] - H.len * 0.1, hc[1] - H.h * 0.14, s * H.w * 0.47], [0.0065, 0.0085, 0.002], { wts: one, part: "comb", S: 6, rings: 2, colour: rec(lobe, GLOSS.comb, null) });
         }
       }
       mark(n0, [2, CHAIN.neck, 0, 0]);
@@ -495,18 +557,32 @@
           const wv = (sickle ? 0.016 : TL.w * (far ? 2.4 : 1)) * (0.7 + 0.4 * Math.sin(PI * (0.2 + 0.7 * t)));
           keys.push({ x: lerp(bx, ex, t), y: lerp(by, ey, t) + arch, z: lerp(bz, ez, t), rt: 0.0016, rb: 0.0016, w: wv, wts: one, up: vUp, ft: t });
         }
-        LK.sweep(G, keys, { S: 4, n: 1, part: "tail", capRings: 0, capLen: 1.0, colour: function () { return tailCol; } });
+        LK.sweep(G, keys, { S: 4, n: 1, part: "tail", capRings: 0, capLen: 1.0,
+          colour: rec(tailCol, vaneSh(C.sh.tail || C.sh.feather), function (x, y, z, ca, sa, R) { return [R.ft * len, sa, R.w, -1]; }) });
         mark(n0, function (x) { return [clamp((TL.root[0] + 0.004 - x) / 0.016, 0, 1), CHAIN.tail, 0, fi]; });
       }
     }
     // ---- the wings and the legs, each side built (not mirrored)
-    for (let s = -1; s <= 1; s += 2) buildWing(G, mark, S, D, C, s, far);
-    for (let s = -1; s <= 1; s += 2) buildLeg(G, mark, S, C, s, far);
+    for (let s = -1; s <= 1; s += 2) buildWing(G, mark, S, D, C, s, far, K);
+    for (let s = -1; s <= 1; s += 2) buildLeg(G, mark, S, C, s, far, K);
+    // the spur (a cone with a fixed colour) records nothing: a shank's gloss
+    for (let i = 0; i < G.n * 4; i++) {
+      if (SP[i] === undefined) SP[i] = GLOSS.leg[i & 3];
+      if (FT[i] === undefined) FT[i] = 0;
+    }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(G.p, 3));
     geo.setAttribute("color", new THREE.Float32BufferAttribute(G.c, 3));
     geo.setAttribute("bseg", new THREE.Float32BufferAttribute(SG, 4));
     geo.setAttribute("bfe", new THREE.Float32BufferAttribute(FE, 4));
+    // bsp: the specular rgb and shininess (+ iridescence in its fraction).
+    // bft: the feather coordinates — rows of contour feathers (x along the
+    // flow in rows, y/z the cos/sin round the part, w = feathers round it;
+    // w = 100: x/y in rows and feathers directly), a vane (x metres along,
+    // y -1..1 across with the shaft at 0, z its half-width, w = -1), the
+    // shank's scutes (as rows round it, w = -2), or nothing (0)
+    geo.setAttribute("bsp", new THREE.Float32BufferAttribute(SP, 4));
+    geo.setAttribute("bft", new THREE.Float32BufferAttribute(FT, 4));
     geo.setIndex(G.ix);
     geo.computeVertexNormals();
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, S.wing.y * 0.8, 0), S.span * 0.55 + 0.1);
@@ -521,7 +597,7 @@
     geo._shared = true;
     return geo;
   }
-  function buildWing(G, mark, S, D, C, s, far) {
+  function buildWing(G, mark, S, D, C, s, far, K) {
     const LK = CBZ.loftKit, WG = S.wing, P = D.P, y = WG.y;
     const upv = [0, 1, 0];
     // the covert band over the bones: round and thick at the leading edge,
@@ -536,12 +612,17 @@
         const ch = WG.cov[seg] * (i === pts.length - 1 ? 0.55 : 1);
         keys.push({ x: pts[i][0] - ch * 0.42, y: y, z: s * pts[i][1], rt: 0.009 * (1 - t * 0.45), rb: 0.006 * (1 - t * 0.45), w: ch * 0.5, wts: [0, 1], up: upv });
       }
+      let bandL = 0;
+      for (let i = 1; i < pts.length; i++) bandL += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
       const prof = function (R, ca, sa, o) {
         const aft = (s > 0 ? sa : -sa) * 0.5 + 0.5;
         const th = 0.22 + 0.78 * Math.pow(1 - aft, 0.8);
         o.u = ca * (ca >= 0 ? R.rt : R.rb) * th; o.s = sa * R.w; o.f = 0;
       };
-      LK.sweep(G, keys, { S: far ? 4 : 8, n: far ? 1 : 2, part: "wing", prof: prof, capLen: 0.4, capRings: 0, colour: function (x, yy, z, ca) { return ca >= 0 ? C.wing : C.under; } });
+      // the coverts lie in rows running out along the wing, each feather aft
+      LK.sweep(G, keys, { S: far ? 4 : 8, n: far ? 1 : 2, part: "wing", prof: prof, capLen: 0.4, capRings: 0,
+        colour: K.rec(function (x, yy, z, ca) { return ca >= 0 ? C.wing : C.under; }, K.vaneSh(C.sh.feather),
+          function (x, yy, z, ca, sa, R, t) { return [(s > 0 ? sa : -sa) * R.w / K.PL.cov[0], t * bandL / K.PL.cov[1], 0, 100]; }) });
       const b = 0.012;
       mark(n0, function (x, yy, z) {
         const az = Math.abs(z);
@@ -564,13 +645,13 @@
         if (f.finger && t > 0.5) w *= 0.5;
         keys.push({ x: lerp(b[0], tip[0], t), y: lerp(b[1], tip[1], t), z: lerp(b[2], tip[2], t), rt: 0.0016, rb: 0.0016, w: w, wts: [0, 1], up: upv, ft: t });
       }
-      LK.sweep(G, keys, { S: 4, n: 1, part: "wing", capRings: 0, capLen: 1.0, colour: function (x, yy, z, ca, sa, R) {
+      LK.sweep(G, keys, { S: 4, n: 1, part: "wing", capRings: 0, capLen: 1.0, colour: K.rec(function (x, yy, z, ca, sa, R) {
         return lin(S.feather(f.grp, f.fi, R.ft, ca >= 0, C.raw));
-      } });
+      }, K.vaneSh(C.sh.feather), function (x, yy, z, ca, sa, R) { return [R.ft * f.len, sa, R.w, -1]; }) });
       mark(n0, [f.lvl, CHAIN.wing, s, f.fi], [f.base[0], f.base[1], f.turn, f.order]);
     }
   }
-  function buildLeg(G, mark, S, C, s, far) {
+  function buildLeg(G, mark, S, C, s, far, K) {
     const LK = CBZ.loftKit, LG = S.leg;
     const legCol = lin(C.raw.legCol != null ? C.raw.legCol : LG.col);
     const z = s * LG.hip[2];
@@ -585,7 +666,8 @@
         { x: kn[0], y: kn[1] + 0.006, z: z, rt: r[1] * 1.25, rb: r[1] * 1.25, w: r[1] * 1.2, wts: [0, 1] },
       ];
       const bodyCol = C.body;
-      LK.sweep(G, keys, { S: Sg, n: far ? 1 : 2, part: "leg", capRings: 0, colour: function (x, y) { return y > LG.bare ? bodyCol : (LG.feathered && y > kn[1] + 0.025 ? bodyCol : legCol); } });
+      LK.sweep(G, keys, { S: Sg, n: far ? 1 : 2, part: "leg", capRings: 0,
+        colour: K.rec(function (x, y) { return y > LG.bare ? bodyCol : (LG.feathered && y > kn[1] + 0.025 ? bodyCol : legCol); }, function (c, ca) { return c === legCol ? GLOSS.leg : K.plumeSh(c, ca); }, null) });
       mark(n0, function (x, y) { return [clamp((hip[1] + 0.012 - y) / 0.024, 0, 1), CHAIN.leg, s, 0]; });
     }
     // the tarsus (shank), with the cock's spur
@@ -596,7 +678,10 @@
         { x: lerp(kn[0], an[0], 0.5), y: lerp(kn[1], an[1], 0.5), z: z, rt: r[1], rb: r[1], w: r[1] * 0.95, wts: [0, 1] },
         { x: an[0], y: an[1] + 0.003, z: z, rt: r[1] * 1.1, rb: r[1] * 1.1, w: r[1] * 1.15, wts: [0, 1] },
       ];
-      LK.sweep(G, far ? [keys[0], keys[2]] : keys, { S: far ? 3 : 6, n: 1, part: "leg", capRings: 0, colour: function () { return legCol; } });
+      // the scutes overlap down the shank
+      const tarL = Math.hypot(kn[0] - an[0], kn[1] - an[1]);
+      LK.sweep(G, far ? [keys[0], keys[2]] : keys, { S: far ? 3 : 6, n: 1, part: "leg", capRings: 0,
+        colour: K.rec(legCol, GLOSS.leg, function (x, y, z, ca, sa, R, t) { return [t * tarL / K.PL.scute, ca, sa, -2]; }) });
       mark(n0, function (x, y) { return [1 + clamp((kn[1] + 0.006 - y) / 0.012, 0, 1), CHAIN.leg, s, 0]; });
       if (LG.spur && !far) {
         const n1 = G.n, sy = lerp(kn[1], an[1], 0.68), sx = lerp(kn[0], an[0], 0.68);
@@ -615,11 +700,11 @@
         tips.push(tip);
         LK.sweep(G, [{ x: an[0] + 0.002, y: an[1], z: z, rt: tr, rb: tr, w: tr, wts: [0, 1] },
           { x: lerp(an[0], tip[0], 0.55), y: 0.0042, z: lerp(z, tip[2], 0.55), rt: tr * 0.8, rb: tr * 0.75, w: tr * 0.85, wts: [0, 1] },
-          { x: tip[0], y: tip[1], z: tip[2], rt: tr * 0.45, rb: tr * 0.45, w: tr * 0.5, wts: [0, 1] }], { S: far ? 3 : 5, n: 1, part: "leg", capRings: 0, capLen: 0.8, colour: function () { return legCol; } });
+          { x: tip[0], y: tip[1], z: tip[2], rt: tr * 0.45, rb: tr * 0.45, w: tr * 0.5, wts: [0, 1] }], { S: far ? 3 : 5, n: 1, part: "leg", capRings: 0, capLen: 0.8, colour: K.rec(legCol, GLOSS.leg, null) });
       }
       if (!far) {
         LK.sweep(G, [{ x: an[0], y: an[1], z: z, rt: tr * 0.8, rb: tr * 0.8, w: tr * 0.8, wts: [0, 1] }, { x: an[0] - LG.hal, y: 0.0035 + (LG.web ? 0.004 : 0), z: z, rt: tr * 0.45, rb: tr * 0.45, w: tr * 0.45, wts: [0, 1] }],
-          { S: 5, n: 1, part: "leg", capRings: 0, capLen: 0.8, colour: function () { return legCol; } });
+          { S: 5, n: 1, part: "leg", capRings: 0, capLen: 0.8, colour: K.rec(legCol, GLOSS.leg, null) });
         if (LG.web) {
           // the web between the front toes
           const keys = [];
@@ -629,7 +714,7 @@
             const half = Math.abs(lerp(0, tips[2][2] - tips[0][2], t * 0.9)) * 0.5 * (t > 0.8 ? 0.85 : 1);
             keys.push({ x: mx, y: 0.0036, z: mz, rt: 0.0009, rb: 0.0009, w: Math.max(0.003, half), wts: [0, 1], up: [0, 1, 0] });
           }
-          LK.sweep(G, keys, { S: 4, n: 1, part: "leg", capRings: 0, capLen: 0.4, colour: function () { return legCol; } });
+          LK.sweep(G, keys, { S: 4, n: 1, part: "leg", capRings: 0, capLen: 0.4, colour: K.rec(legCol, GLOSS.leg, null) });
         }
       }
       mark(n0, function (x, y) { return [2 + clamp((an[1] + 0.003 - y) / 0.004, 0, 1), CHAIN.leg, s, 0]; });
@@ -737,18 +822,116 @@
     "  p.y += bodyY;",
     "}",
   ].join("\n");
+  // the plumage (fragment): the sheen (the per-vertex specular colour and
+  // shininess, its hue turned at a slant where the species is iridescent,
+  // the sky caught in the gloss) and the feathers' structure: rows of
+  // overlapping contour feathers, each rounded so the light runs over it and
+  // shadowed where the row before overlaps it; a flight or tail feather's
+  // vane curved across, with its shaft and barbs. The tangents come from the
+  // screen derivatives of the feather coordinates; the pattern fades out
+  // where a feather is a few pixels, so a far bird is plain gloss
+  const FRAG_DECL = [
+    "varying vec4 vBsp; varying vec4 vBft;",
+    "vec3 bHue( vec3 c, float a ) { vec3 k = vec3( 0.57735027 ); float co = cos( a ); return max( c * co + cross( k, c ) * sin( a ) + k * dot( k, c ) * ( 1.0 - co ), 0.0 ); }",
+    // the feather a point lies on, in rows of overlapping feathers (q.x along
+    // the flow toward the tips in rows, q.y across in feathers, odd rows offset
+    // half a feather, each tip rounded): x = how far the point has come out
+    // from under the row before (0..1), y = across that feather (-0.5..0.5)
+    "vec2 bRows( vec2 q ) {",
+    "  float r = floor( q.x );",
+    "  float fy = fract( q.y + 0.5 * mod( r, 2.0 ) ) - 0.5;",
+    "  float tip = r + 1.0 - 1.6 * fy * fy;",
+    "  if ( q.x >= tip ) { r += 1.0; fy = fract( q.y + 0.5 * mod( r, 2.0 ) ) - 0.5; tip = r + 1.0 - 1.6 * fy * fy; }",
+    "  float py = fract( q.y + 0.5 * mod( r - 1.0, 2.0 ) ) - 0.5;",
+    "  float fr0 = r - 1.6 * py * py;",
+    "  return vec2( clamp( ( q.x - fr0 ) / max( tip - fr0, 1e-3 ), 0.0, 1.0 ), fy );",
+    "}",
+  ].join("\n");
+  const FRAG_NORMAL = [
+    "float bOcc = 1.0; float bShaft = 0.0;",
+    "{",
+    "  float bTyp = vBft.w;",
+    "  float bPer = ( bTyp > 0.5 && bTyp < 99.5 ) ? bTyp : ( bTyp < -1.5 ? 6.0 : 0.0 );",
+    "  vec2 q = bPer > 0.0 ? vec2( vBft.x, atan( vBft.z, vBft.y + 1e-7 ) * 0.15915494 * bPer ) : ( bTyp < -0.5 ? vec2( vBft.x, vBft.y * vBft.z ) : vBft.xy );",
+    // derivatives in uniform control flow; the angle's wrap taken out
+    "  vec2 d1 = dFdx( q ), d2 = dFdy( q );",
+    "  if ( bPer > 0.0 ) { d1.y -= bPer * floor( d1.y / bPer + 0.5 ); d2.y -= bPer * floor( d2.y / bPer + 0.5 ); }",
+    "  vec3 e1 = dFdx( - vViewPosition ), e2 = dFdy( - vViewPosition );",
+    "  if ( abs( bTyp ) > 0.5 ) {",
+    "    vec3 p2 = cross( e2, normal ), p1 = cross( normal, e1 );",
+    "    vec3 Tq = p2 * d1.x + p1 * d2.x, Bq = p2 * d1.y + p1 * d2.y;",
+    "    Tq *= inversesqrt( max( dot( Tq, Tq ), 1e-30 ) ); Bq *= inversesqrt( max( dot( Bq, Bq ), 1e-30 ) );",
+    "    vec2 fw = abs( d1 ) + abs( d2 );",
+    "    vec2 tilt = vec2( 0.0 );",
+    "    if ( bTyp < -0.5 && bTyp > -1.5 ) {",
+    // a vane (metres along, metres across): curved across, the shaft down the
+    // middle, barbs angled out toward the tip
+    "      float a = vBft.y, hw = max( vBft.z, 1e-4 );",
+    "      float kV = smoothstep( 0.75, 2.5, hw / max( fw.y, 1e-7 ) );",
+    "      tilt.y += 0.42 * a * kV;",
+    "      float rw = clamp( 0.0011 / hw, 0.03, 0.3 );",
+    "      bShaft = ( 1.0 - smoothstep( rw * 0.6, rw * 1.4, abs( a ) ) ) * smoothstep( 0.5, 1.2, rw * hw / max( fw.y, 1e-7 ) );",
+    "      float ph = ( q.x - abs( q.y ) * 1.25 ) / 0.0009;",
+    "      float kB = 1.0 - smoothstep( 0.25, 0.6, ( fw.x + fw.y ) / 0.0009 );",
+    "      tilt += sin( 6.2831853 * ph ) * 0.18 * kB * ( 1.0 - bShaft ) * vec2( 0.62, -0.78 * sign( q.y ) );",
+    "      bOcc = 1.0 - 0.18 * kB * ( 0.5 + 0.5 * cos( 6.2831853 * ph ) );",
+    "    } else {",
+    // overlapping rows: each feather rises out of the row before and rounds
+    // off at its tip and sides; its root lies in that row's shadow
+    "      float kS = 1.0 - smoothstep( 0.22, 0.5, max( fw.x, fw.y ) );",
+    "      if ( kS > 0.0 ) {",
+    "        vec2 f = bRows( q );",
+    "        tilt.x += mix( -0.3, 0.2, f.x ) * kS;",
+    "        tilt.y += 0.75 * f.y * kS;",
+    "        bOcc = mix( 1.0, 0.2 + 0.8 * smoothstep( 0.0, 0.45, f.x ), kS );",
+    "      }",
+    "    }",
+    "    normal = normalize( normal + Tq * tilt.x + Bq * tilt.y );",
+    "    diffuseColor.rgb *= mix( 0.72, 1.0, bOcc ) * ( 1.0 + 0.35 * bShaft );",
+    "  }",
+    "}",
+  ].join("\n");
+  const FRAG_SPEC = [
+    "{",
+    "  vec3 bVd = isOrthographic ? vec3( 0.0, 0.0, 1.0 ) : normalize( vViewPosition );",
+    "  float bNV = saturate( dot( normal, bVd ) );",
+    "  material.specularColor = bHue( vBsp.rgb, fract( vBsp.w ) * ( 1.3 * ( 1.0 - bNV ) - 0.3 ) ) * bOcc * ( 1.0 + 1.2 * bShaft );",
+    "  material.specularShininess = max( floor( vBsp.w ), 1.0 ) * ( 1.0 + bShaft );",
+    "}",
+  ].join("\n");
+  // the sky in the gloss: the ambient and hemisphere light seen in the
+  // reflected direction, through a rough surface's Fresnel
+  const FRAG_ENV = [
+    "{",
+    "  vec3 bR = reflect( - geometryViewDir, geometryNormal );",
+    "  vec3 bEnv = ambientLightColor;",
+    "  #if NUM_HEMI_LIGHTS > 0",
+    "  #pragma unroll_loop_start",
+    "  for ( int i = 0; i < NUM_HEMI_LIGHTS; i ++ ) {",
+    "    bEnv += getHemisphereLightIrradiance( hemisphereLights[ i ], bR );",
+    "  }",
+    "  #pragma unroll_loop_end",
+    "  #endif",
+    "  reflectedLight.indirectSpecular += bEnv * RECIPROCAL_PI * F_Schlick( material.specularColor, 0.2, saturate( dot( geometryNormal, geometryViewDir ) ) );",
+    "}",
+  ].join("\n");
   const _mats = new Map();
   function v3(a) { return new W.THREE.Vector3(a[0], a[1], a[2]); }
   function v4(a) { return new W.THREE.Vector4(a[0], a[1], a[2], a[3]); }
   function inject(sh, U, depth) {
     for (const k in U) sh.uniforms[k] = U[k];
-    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\n" + GLSL);
+    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\n" + GLSL + (depth ? "" : "\nattribute vec4 bsp; attribute vec4 bft; varying vec4 vBsp; varying vec4 vBft;"));
     if (depth) {
       sh.vertexShader = sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\n  { vec3 birdN = vec3( 0.0, 1.0, 0.0 ); birdPose( transformed, birdN ); }");
     } else {
       sh.vertexShader = sh.vertexShader
-        .replace("#include <beginnormal_vertex>", "#include <beginnormal_vertex>\n  vec3 birdP = vec3( position );\n  birdPose( birdP, objectNormal );")
+        .replace("#include <beginnormal_vertex>", "#include <beginnormal_vertex>\n  vec3 birdP = vec3( position );\n  birdPose( birdP, objectNormal );\n  vBsp = bsp; vBft = bft;")
         .replace("#include <begin_vertex>", "#include <begin_vertex>\n  transformed = birdP;");
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", "#include <common>\n" + FRAG_DECL)
+        .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" + FRAG_NORMAL)
+        .replace("#include <lights_phong_fragment>", "#include <lights_phong_fragment>\n" + FRAG_SPEC)
+        .replace("#include <lights_fragment_end>", "#include <lights_fragment_end>\n" + FRAG_ENV);
     }
   }
   function materialOf(kind) {
@@ -757,7 +940,7 @@
     const THREE = W.THREE, D = prep(kind);
     const U = {};
     for (const k in D.u) U[k] = { value: D.u[k].length === 3 ? v3(D.u[k]) : v4(D.u[k]) };
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, specular: 0x000000, shininess: 20 });
     mat.name = "bird-" + kind; mat._shared = true;
     mat.onBeforeCompile = function (sh) { inject(sh, U, false); };
     mat.customProgramCacheKey = function () { return "bird|" + kind; };
