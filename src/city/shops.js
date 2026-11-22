@@ -1,63 +1,47 @@
 /* ============================================================
-   city/shops.js — the storefront overlay: buy stock, sell/fence your
-   loot, and use per-shop services (eat, heal, bank, jobs, buy a car).
+   city/shops.js — WHAT A COUNTER IS: the one way goods change hands, what
+   you can ask the person behind it, and the cash a shop holds (CBZ.cityTill).
 
-   Opened by city/interact.js when you walk up to a vendor counter and
-   press E. While it's up, CBZ.cityMenuOpen blocks shooting. Number keys
-   buy the listed items; the lettered actions run services.
+   THE MENU IS GONE (2026-11-22). Every counter in Gang City used to open one
+   panel: a numbered price list, lettered services, a bulk multiplier, a
+   closet. The owner: "No dashboards are needed. Everything can be existing
+   in the world." So a shop is its room. Its goods stand on its shelves, its
+   racks and under its glass and you pick them up (city/storegoods.js,
+   gunstore.js, jewelry.js, pawnshop.js, clothingstore.js, dealership.js),
+   you pay the person behind the counter (CBZ.shopFloor.till), and walking
+   out with them unpaid is a theft. What is left to ask a clerk is asked OF
+   the clerk: the rows below are options on him in the city's one
+   interaction card (city/interactions.js), nothing else.
 
-   DEEPER SHOPPING (GTA-style): clothing/jewelry you can actually WEAR
-   (drip → respect + a "look" you carry), barbers that restyle you, food
-   that heals, hardware tools, BULK buys with a quantity discount,
-   one-shot HAGGLING per visit, and ROBBING THE TILL for risk/reward.
-   Researched against GTA V clothing stores, barbers, tattoo parlors, and
-   GTA Online store-robbery / intimidation mechanics.
+     acquire / CBZ.cityShopAcquire   the one path a bought or pocketed unit
+                                     takes into your bag, your hands, onto
+                                     your body
+     counterRows(v)                  what this clerk can do for you: the
+                                     trade's service (a doctor patches you,
+                                     a trainer trains you, a barber cuts
+                                     your hair, a bartender pours), anything
+                                     he keeps behind the counter and hands
+                                     over, what he will buy off you, a price
+                                     talked down, a civic desk's business
+                                     (city/civic.js), and work
+     CBZ.cityTill                    the ledger: a register, a drop safe, a
+                                     vault are balances, and a take moves one
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  let panel = null, openLot = null, listItems = [];
-  // per-visit transient state (reset every time a shop opens)
-  let qty = 1;                 // buy multiplier (1 / 5 / 10), toggled with [Q]... wait, Q is taken
-  let haggle = 0;             // -% discount earned this visit (0..maxHaggle), one attempt
-  let haggleTried = false;    // only one haggle attempt per visit
-  let closetOpen = false;     // boutique CLOSET sub-view: change clothes from owned wearables
-  let closetItems = [];       // owned wearables you can equip in the closet (index → name)
-
-  // ---- the WARDROBE: wearables you've equipped (worn flex) + your style ----
-  // DRIP is now driven by economy.js's SLOTTED outfit (g.cityOutfit): buying a
-  // wearable EQUIPS it into its slot (CBZ.cityEquip), and a new top REPLACES the
-  // old top in that slot. We never double-count: the drip comes from whatever is
-  // currently WORN, read through CBZ.cityPlayerDrip().
-  //
-  // "isWorn" here means "currently equipped in its slot" — it reads the shared
-  // model (CBZ.cityIsEquipped) so the boutique's ✓worn marks, the no-sell-the-
-  // -last-copy rule, and the ICE-OUT bundle all agree with the club's bouncer.
-  function isWorn(name) {
-    if (CBZ.cityIsEquipped) return !!CBZ.cityIsEquipped(name);
-    return false;
-  }
-  // equip a wearable into its slot via the shared model (replaces that slot).
-  // Returns true if it actually went on. Guarded so a missing economy degrades
-  // to a plain owned-but-unworn item rather than crashing the buy.
-  function equipItem(name) {
-    if (CBZ.cityEquip) return !!CBZ.cityEquip(name);
-    return false;
-  }
-  function unequipItem(slotOrName) {
-    if (CBZ.cityUnequip) return !!CBZ.cityUnequip(slotOrName);
-    return false;
-  }
-  // the slot an item fills (hat/top/outer/…) so the store can show it + the
-  // "buying a new top replaces the old one" hint.
+  // ---- WHAT YOU WEAR. The outfit is economy.js's slotted model (g.cityOutfit):
+  // a wearable EQUIPS into its slot, a new top replaces the old one, and your
+  // drip is whatever is on you (CBZ.cityPlayerDrip, the bouncer's read).
+  function isWorn(name) { return CBZ.cityIsEquipped ? !!CBZ.cityIsEquipped(name) : false; }
+  function equipItem(name) { return CBZ.cityEquip ? !!CBZ.cityEquip(name) : false; }
   function slotOf(name) {
     if (CBZ.cityEcon && CBZ.cityEcon.slotOf) return CBZ.cityEcon.slotOf(name);
     const it = CBZ.cityEcon && CBZ.cityEcon.ITEMS[name];
     return it && it.tag === "wearable" ? (it.slot || null) : null;
   }
-  // what's currently worn in a given slot (its item name), or "" if empty.
   function wornInSlot(slot) {
     const o = (CBZ.cityEcon && CBZ.cityEcon.outfit) ? CBZ.cityEcon.outfit() : (g.cityOutfit || {});
     return (o && o[slot]) || "";
@@ -66,9 +50,6 @@
     g.cityLook = g.cityLook || { hair: "Default", outfit: "Streetwear", swagger: 0 };
     return g.cityLook;
   }
-  // The PLAYER's status number — the bouncer's read. Prefer the shared
-  // equipped-outfit drip (CBZ.cityPlayerDrip); fall back to legacy inv-sum drip
-  // if economy.js's outfit model isn't present yet.
   function playerDrip() {
     if (CBZ.cityPlayerDrip) return CBZ.cityPlayerDrip() | 0;
     if (CBZ.cityEcon && CBZ.cityEcon.drip) return CBZ.cityEcon.drip() | 0;
@@ -76,464 +57,11 @@
   }
   CBZ.cityLook = look;
 
-  // BARBER haircuts & CLOTHING outfits — pure-cosmetic-ish style that nudges
-  // your street swagger (a small standing respect bonus while you keep it).
-  const HAIRCUTS = [
-    { name: "Fresh Fade", cost: 35, swag: 2 },
-    { name: "Cornrows", cost: 45, swag: 3 },
-    { name: "Buzz Cut", cost: 25, swag: 1 },
-    { name: "Slick Back", cost: 55, swag: 3 },
-    { name: "Dreads", cost: 70, swag: 4 },
-    { name: "Mohawk", cost: 60, swag: 4 },
-    { name: "Clean Shave + Lineup", cost: 30, swag: 2 },
-  ];
-  // LEGACY fitting-room list — only used if city/outfits.js (the canonical
-  // wardrobe) isn't loaded. With outfits.js live, the rack is catalog-driven:
-  // street basics up to the MIDNIGHT TUXEDO (the apex status purchase — worn
-  // cloth that opens the Velvet's rope by itself).
-  const OUTFITS = [
-    { name: "Tracksuit", cost: 180, swag: 3 },
-    { name: "Tailored Suit", cost: 900, swag: 8 },
-    { name: "Designer Drip", cost: 1400, swag: 12 },
-    { name: "Goon Hoodie", cost: 120, swag: 2 },
-    { name: "Leather Jacket", cost: 520, swag: 6 },
-    { name: "All Black Tactical", cost: 700, swag: 7 },
-  ];
-  // the boutique RACK from the canonical catalog: every fit with a price tag,
-  // cheapest → the tuxedo. Mapped onto the legacy {name,cost,swag} shape so the
-  // render/keys code stays one path; `id` marks a catalog fit (drip, not swagger).
-  function outfitRack() {
-    const cat = CBZ.cityOutfitCatalog && CBZ.cityOutfitCatalog();
-    if (!cat) return OUTFITS;
-    const out = [];
-    for (const k in cat) { const o = cat[k]; if (o.price > 0) out.push({ name: o.name, cost: o.price, swag: o.drip, id: o.id }); }
-    out.sort((a, b) => a.cost - b.cost);
-    return out.slice(0, 9);
-  }
-
-  function el() {
-    if (panel) return panel;
-    panel = document.createElement("div");
-    panel.id = "cityShop";
-    panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;min-width:340px;max-width:460px;background:rgba(16,18,24,.94);border:2px solid #2c3140;border-radius:16px;padding:16px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.5);pointer-events:auto;max-height:88vh;overflow-y:auto";
-    panel.addEventListener("click", function (e) {
-      const row = e.target && e.target.closest ? e.target.closest("[data-k]") : null;
-      if (!row) return;
-      e.preventDefault(); e.stopPropagation();
-      pressKey(row.getAttribute("data-k"));
-    });
-    document.body.appendChild(panel);
-    return panel;
-  }
-
   function fmt$(n) { return "$" + (n | 0); }
-
-  // the per-shop discount that actually lands on a price: haggle + bulk +
-  // a small loyalty cut if you're a baller (the rich get treated better).
-  function shopDiscount(n) {
-    n = n || 1;
-    let d = haggle;                                 // 0..0.18 earned by haggling
-    if (n >= 10) d += 0.10; else if (n >= 5) d += 0.05;   // bulk
-    const nw = CBZ.cityEcon.netWorth ? CBZ.cityEcon.netWorth() : (g.cash || 0);
-    if (nw > 150000) d += 0.03;                     // VIP/loyalty
-    return Math.min(0.35, d);
-  }
-  // final unit price for an item at this counter, after discounts
-  function unitPrice(it, n) {
-    const base = CBZ.cityEcon.buyPrice(it);
-    return Math.max(1, Math.round(base * (1 - shopDiscount(n))));
-  }
-
-  // is this a store where buying clothing/jewelry should auto-EQUIP it (build
-  // drip)? Boutique/clothing + jewelry + barber accessories all dress you up.
+  // a store where what you buy goes straight on you
   function isBoutique(kind) { return kind === "clothing" || kind === "boutique" || kind === "jewelry" || kind === "barber" || kind === "eyewear"; }
-  // the letter that toggles the CLOSET sub-view, chosen so it never collides
-  // with this shop's restyle letters (a..styles.length) or a service key. Most
-  // boutiques get [G]; the barber (whose haircuts run a..g) falls back to [K].
-  function closetKey(kind) {
-    if (!isBoutique(kind)) return null;
-    const nStyles = styleMenu(kind).length;                 // restyle owns a..(a+nStyles-1)
-    const svc = services(kind);
-    const prefs = ["g", "h", "k", "u"];
-    for (const c of prefs) {
-      const restyleLetter = (c.charCodeAt(0) - 97) < nStyles;
-      const isSvc = svc.some((s) => s.key === c);
-      if (!restyleLetter && !isSvc) return c;
-    }
-    return null;                                             // (won't happen with these prefs)
-  }
-  // the drip the player WOULD have after equipping `name` into its slot:
-  // current total, minus whatever that slot is worth now, plus this piece.
-  function dripAfter(name) {
-    const meta = CBZ.cityEcon.ITEMS[name];
-    if (!meta || meta.tag !== "wearable") return playerDrip();
-    const cur = playerDrip();
-    if (isWorn(name)) return cur;                 // already on — no change
-    const slot = slotOf(name);
-    const prev = slot ? wornInSlot(slot) : "";    // what we'd REPLACE
-    const prevDrip = prev && CBZ.cityEcon.ITEMS[prev] ? (CBZ.cityEcon.ITEMS[prev].drip || 0) : 0;
-    return cur - prevDrip + (meta.drip || 0);
-  }
 
-  // ---- the CLOSET (change-clothes view): equip/unequip what you already OWN --
-  // every wearable in your inventory (de-duped), grouped by slot, with the worn
-  // piece marked. Number keys equip the listed owned pieces; the slot letters
-  // strip the current slot. Light-touch — buying still auto-equips for you.
-  function ownedWearables() {
-    const inv = g.cityInv || {}, it = CBZ.cityEcon.ITEMS, out = [];
-    const SLOTS = (CBZ.cityOutfitSlots && CBZ.cityOutfitSlots()) || ["hat", "top", "outer", "bottom", "shoes", "glasses", "chain", "watch", "ring"];
-    const order = {}; SLOTS.forEach((s, i) => { order[s] = i; });
-    for (const k in inv) { const m = it[k]; if (m && m.tag === "wearable") out.push(k); }
-    // sort by slot order, then by drip desc, so the closet reads head-to-toe.
-    out.sort((a, b) => {
-      const sa = order[slotOf(a)] != null ? order[slotOf(a)] : 99, sb = order[slotOf(b)] != null ? order[slotOf(b)] : 99;
-      if (sa !== sb) return sa - sb;
-      return (it[b].drip || 0) - (it[a].drip || 0);
-    });
-    return out;
-  }
-  function renderCloset() {
-    const it = CBZ.cityEcon.ITEMS;
-    const SLOTS = (CBZ.cityOutfitSlots && CBZ.cityOutfitSlots()) || ["hat", "top", "outer", "bottom", "shoes", "glasses", "chain", "watch", "ring"];
-    let html = "<div style='font-size:12px;color:#9fb0c6;margin:6px 0 2px'>YOUR CLOSET <span class='shopRow' data-k='0' style='color:#7f8794'><b style='color:#ff9e6b'>strip everything</b></span></div>";
-    // CURRENTLY WORN, head-to-toe (so you can see the full fit at a glance)
-    const o = (CBZ.cityEcon.outfit ? CBZ.cityEcon.outfit() : (g.cityOutfit || {}));
-    const wornAny = SLOTS.some((s) => o[s]);
-    html += "<div style='font-size:12px;color:#aeb8c6;margin-bottom:4px'>WEARING: ";
-    if (wornAny) {
-      html += SLOTS.filter((s) => o[s]).map((s) =>
-        "<span style='display:inline-block;margin:1px 6px 1px 0'>" +
-        "<span style='color:#7f8794'>" + s + ":</span> <span style='color:#7ed957'>" + o[s] + "</span> <span style='color:#7f8794'>+" + (it[o[s]].drip || 0) + "</span></span>"
-      ).join("");
-    } else html += "<span style='color:#7f8794'>plain clothes, nothing equipped.</span>";
-    html += "</div>";
-    // OWNED pieces you can put on (number keys). Worn ones marked ✓.
-    closetItems = ownedWearables().slice(0, 9);
-    if (!closetItems.length) {
-      html += "<div style='font-size:12px;color:#7f8794;margin-top:4px'>You don't own any wearables yet, buy a fit to build drip.</div>";
-      return html;
-    }
-    html += "<div style='font-size:12px;color:#9fb0c6;margin:6px 0 2px'>OWN, press the number to wear</div>";
-    closetItems.forEach((nm, i) => {
-      const m = it[nm], worn = isWorn(nm), slot = slotOf(nm);
-      const after = dripAfter(nm), cur = playerDrip();
-      html += "<div class='shopRow' data-k='" + (i + 1) + "' style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + nm +
-        " <span style='color:#7f8794;font-size:11px'>(" + (slot ? slot + " · " : "") + "+" + (m.drip || 0) + " drip)</span>" +
-        (worn ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>"
-          : " <span style='color:#ffd166;font-size:11px'>DRIP " + cur + "→" + after + "</span>") +
-        "</span></div>";
-    });
-    return html;
-  }
-  // equip an OWNED wearable from the closet (no purchase). Mirrors the buy-equip
-  // path's drip surfacing but never charges or re-rewards respect for a re-wear.
-  function closetEquip(i) {
-    const nm = closetItems[i]; if (!nm) return;
-    if (isWorn(nm)) { CBZ.city.note("Already wearing " + nm + ".", 1.2); return; }
-    const before = playerDrip();
-    if (equipItem(nm)) {
-      const after = playerDrip();
-      CBZ.city.note("Put on " + nm + " · sharper already.", 1.6);
-      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    }
-    render();
-  }
-  // take EVERYTHING off (clean slate) — the closet's [0]. Drips back to baseline.
-  function closetStripAll() {
-    const SLOTS = (CBZ.cityOutfitSlots && CBZ.cityOutfitSlots()) || ["hat", "top", "outer", "bottom", "shoes", "glasses", "chain", "watch", "ring"];
-    const o = (CBZ.cityEcon.outfit ? CBZ.cityEcon.outfit() : (g.cityOutfit || {}));
-    const had = SLOTS.some((s) => o[s]);
-    if (!had) { CBZ.city.note("You're already stripped down.", 1.2); render(); return; }
-    const before = playerDrip();
-    SLOTS.forEach((s) => { if (o[s]) unequipItem(s); });
-    const after = playerDrip();
-    CBZ.city.note("Stripped down, back to basics.", 1.6);
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    render();
-  }
-
-  function render() {
-    const econ = CBZ.cityEcon, lot = openLot; if (!lot) return;
-    const kind = lot.kind, name = lot.building.name;
-    const stock = econ.stockFor(kind);
-    // THE GUN WALL (city/gunstore.js): when the walk-in armory is live, the
-    // counter menu stops listing the firearms themselves — every gun hangs on
-    // the wall as its REAL model and is bought eye-to-iron with [E] at the
-    // rack. The clerk's counter keeps the consumables (ammo/armor/grenades/
-    // melee). One price source for both paths: cityEcon.buyPrice. Feature-
-    // detected: no gunstore.js → this menu sells everything, as before.
-    const wallLive = kind === "guns" && CBZ.cityGunWallLive && CBZ.cityGunWallLive(lot);
-    // THE SHELVES (city/storegoods.js): every generic store stands its OWN
-    // stock on its OWN shelves as the real item models, bought eye-to-object
-    // with [E] where it sits. cityGoodsLive returns the names actually standing
-    // on this lot's shelves, and the counter stops listing exactly those — the
-    // clerk keeps the services (heal, refuel, deposit, haircut…), the sell
-    // window and the till. Feature-detected: no storegoods.js and this menu
-    // sells everything, as before.
-    const shelved = (!wallLive && CBZ.cityGoodsLive) ? CBZ.cityGoodsLive(lot) : null;
-    const goodsLive = !!(shelved && shelved.length);
-    let onOffer = wallLive ? stock.filter((n) => !(econ.ITEMS[n] && econ.ITEMS[n].gun)) : stock;
-    if (goodsLive) onOffer = onOffer.filter((n) => shelved.indexOf(n) < 0);
-    listItems = onOffer.slice(0, 9);
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>" + name + "</div>";
-    const disc = shopDiscount(qty);
-    // HEADER: cash/bank + your CURRENT DRIP (the club gate). In a boutique we
-    // spell out where you stand vs the rope so shopping visibly moves you toward
-    // (or past) the velvet rope — the whole money→clothes→drip→club loop.
-    const drip = playerDrip();
-    const CLUB = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30, VIP = (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70;
-    let dripBadge = "Drip <span style='color:#ffd166'>" + drip + "</span>";
-    if (isBoutique(kind)) {
-      const tier = drip >= VIP ? "<span style='color:#c9a8ff'> VIP ✦</span>"
-        : drip >= CLUB ? "<span style='color:#7ed957'> ✓ past the rope</span>"
-        : "<span style='color:#ff9e6b'> need " + CLUB + " for the club</span>";
-      dripBadge += "<span style='color:#7f8794'>/" + CLUB + "</span>" + tier;
-    }
-    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:6px'>Cash " + fmt$(g.cash) + " · " +
-      (g.cityBank ? "Bank " + fmt$(g.cityBank) + " · " : "") +
-      dripBadge + "</div>";
-    html += "<div class='shopRow shopLeave' data-k='escape'>LEAVE</div>";
-
-    // the walk-in routing line: the SHELVES sell the goods, the counter the rest.
-    if (goodsLive) {
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>The stock is <b style='color:#ffd166'>on the shelves</b> \u00b7 " +
-        "walk up to a piece and press <b style='color:#ffd166'>E</b> to buy it off the shelf.</div>";
-    }
-    if (wallLive) {
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>The pieces are <b style='color:#ffd166'>on the wall</b> · " +
-        "walk up to one and press <b style='color:#ffd166'>E</b> to take it off the rack. The counter's got the ammo.</div>";
-    }
-
-    // BOUTIQUE CLOSET: a compact "change clothes" view — equip/unequip from the
-    // wearables you already OWN (separate from buying). Toggled with [G]; while
-    // it's up, the number keys EQUIP owned pieces instead of buying. This is the
-    // light-touch outfit manager (the buy-equips-it path stays the core).
-    const ck = closetKey(kind);
-    if (isBoutique(kind) && ck) {
-      html += "<div class='shopRow' data-k='" + ck + "' style='font-size:11px;color:#7f8794;margin-bottom:4px'><b style='color:#7fd0ff'>[" + ck.toUpperCase() + "]</b> " +
-        (closetOpen ? "back to the store" : "your closet") + "</div>";
-    }
-    if (closetOpen && isBoutique(kind)) {
-      html += renderCloset();
-      el().innerHTML = html;
-      return;
-    }
-
-    // BUY CONTROLS: bulk multiplier + haggle (only show where there's stock)
-    if (listItems.length) {
-      html += "<div style='font-size:11px;color:#7f8794;margin-bottom:6px;display:flex;gap:10px;flex-wrap:wrap'>" +
-        "<span class='shopRow' data-k='x'><b style='color:#7fd0ff'>[X]</b> qty ×" + qty + "</span>" +
-        (haggleTried ? "<span style='color:#9fb0c6'>[V] haggled" + (haggle > 0 ? " −" + Math.round(haggle * 100) + "%" : " (no luck)") + "</span>"
-          : "<span class='shopRow' data-k='v'><b style='color:#7fd0ff'>[V]</b> haggle</span>") +
-        (disc > 0 ? "<span style='color:#7ed957'>deal −" + Math.round(disc * 100) + "%</span>" : "") +
-        "</div>";
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:4px 0'>BUY</div>";
-      listItems.forEach((it, i) => {
-        const each = unitPrice(it, qty);
-        const meta = econ.ITEMS[it];
-        const wear = meta.tag === "wearable";
-        // the per-item tag: food shows heal, guns show their DAMAGE (so paying
-        // the AK premium over the Rifle is a legible upgrade, not a blind flex);
-        // a WEARABLE shows its slot + drip value so its status contribution is
-        // legible at a glance.
-        const slot = wear ? slotOf(it) : null;
-        // a food row reads its FILL, and it is food not hp — the old "+42hp"
-        // label named the wrong meter entirely (heal goes into g.hunger).
-        const tagN = kind === "food" ? "+" + (meta.heal || 0) + " food"
-          : (meta.gun ? "gun" + ((meta.dmg || 0) > 1 ? " · " + meta.dmg + " dmg" : "") : (wear ? (slot ? slot + " · " : "") + "+" + (meta.drip || 0) + " drip" : meta.tag));
-        const worn = wear && isWorn(it);
-        const line = qty > 1 ? (fmt$(each) + " ea · " + fmt$(each * qty) + "/×" + qty) : fmt$(each);
-        // E1: FOOD rows get a live ▲▼ off the shim's trend() (sim/market.js) —
-        // the moving price tag milestone. Guarded/food-only this wave.
-        let trendGlyph = "";
-        if (kind === "food" && CBZ.market) {
-          const tr = CBZ.market.trend("food");
-          trendGlyph = tr === "up" ? " <span style='color:#ff9e6b'>▲</span>"
-            : tr === "down" ? " <span style='color:#7ed957'>▼</span>" : "";
-        }
-        // for a wearable you don't yet wear, preview DRIP x → y (and call out the
-        // piece it REPLACES in that slot) so the drip gain is obvious before you buy.
-        let dripHint = "";
-        if (wear && isBoutique(kind) && !worn) {
-          const after = dripAfter(it), cur = playerDrip();
-          const cur2 = slot ? wornInSlot(slot) : "";
-          dripHint = " <span style='color:#ffd166;font-size:11px'>DRIP " + cur + "→" + after + "</span>" +
-            (cur2 ? " <span style='color:#7f8794;font-size:11px'>(replaces " + cur2 + ")</span>" : "");
-        }
-        html += "<div class='shopRow' data-k='" + (i + 1) + "' style='display:flex;justify-content:space-between;padding:3px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + it +
-          " <span style='color:#7f8794;font-size:11px'>(" + tagN + ")</span>" +
-          (worn ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>" : dripHint) +
-          "</span><span style='color:#7ed957'>" + line + trendGlyph + "</span></div>";
-      });
-    }
-    // BARBER chair / CLOTHING rack. The rack sells whole OUTFITS (the canonical
-    // wardrobe): each shows its DRIP — worn status, the same number the bouncer
-    // reads — and an owned fit re-wears FREE. The tuxedo tops the list: cloth
-    // priced like a car, because the rope opens for it.
-    const styles = styleMenu(kind);
-    if (styles.length) {
-      const label = kind === "barber" ? "BARBER CHAIR" : "FITTING ROOM";
-      const cur = kind === "barber" ? look().hair
-        : ((CBZ.cityOutfitGet && CBZ.cityOutfitGet().name) || look().outfit);
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>" + label +
-        " <span style='color:#7f8794'>· wearing: " + cur + "</span></div>";
-      const letters = styleLetters(kind);
-      const ownedFits = g.cityOutfitsOwned || {};
-      const wornId = g.cityOutfitId || "";
-      styles.forEach((s, i) => {
-        const letter = letters[i]; if (!letter) return;
-        const isFit = !!s.id;                                     // catalog outfit (drip) vs haircut (swagger)
-        const wornNow = isFit && s.id === wornId;
-        const owned = isFit && !!ownedFits[s.id];
-        const tag = isFit ? "+" + s.swag + " drip" : "+" + s.swag + " swagger";
-        const price = wornNow ? "" : (owned ? "<span style='color:#7fd0ff'>owned · wear</span>" : "<span style='color:#7ed957'>" + fmt$(s.cost) + "</span>");
-        html += "<div class='shopRow' data-k='" + letter + "' style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#7fd0ff'>" + letter.toUpperCase() + "</b> " +
-          s.name + " <span style='color:#7f8794;font-size:11px'>(" + tag + ")</span>" +
-          (wornNow ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>" : "") +
-          "</span><span>" + price + "</span></div>";
-      });
-    }
-    // services
-    const svc = services(kind);
-    if (svc.length) {
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>SERVICES</div>";
-      svc.forEach((s) => { html += "<div class='shopRow' data-k='" + s.key + "' style='padding:2px 0'><b style='color:#7fd0ff'>" + s.key.toUpperCase() + "</b> " + s.label + "</div>"; });
-    }
-    // sellables you hold
-    const sell = sellable(kind);
-    if (sell.length) {
-      html += "<div class='shopRow' data-k='0' style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>SELL EVERYTHING <b style='color:#ff9e6b'>" + fmt$(sellTotal(kind)) + "</b></div>";
-      // show what each lot fences for so a luxe piece's JACKPOT value is obvious.
-      html += "<div style='font-size:12px;color:#aeb8c6'>" + sell.map((s) => {
-        const ea = econ.sellPrice(s.name, kind);
-        const meta = econ.ITEMS[s.name];
-        const luxe = meta && meta.luxe;
-        const tag = "<span style='color:" + (luxe ? "#ffd166" : "#7ed957") + "'>" + fmt$(ea) + (s.n > 1 ? "×" + s.n : "") + "</span>";
-        return (luxe ? "" : "") + s.name + " " + tag;
-      }).join(" · ") + "</div>";
-    }
-    // ROB THE TILL — every shop with a register (not banks/services-only) can be
-    // stuck up for the cash drawer: fast money, but it spikes your wanted level.
-    if (canRobTill(kind)) {
-      // A TAKE IS A TRANSFER, so this reads the drawer's REAL balance right
-      // now — not a per-kind constant. It is different at 09:00 and 23:00,
-      // different uptown and in the projects, and zero once you have emptied
-      // it. That difference is the whole reason to move through the world.
-      const held = tillEstimate(openLot);
-      const hits = CBZ.cityTill.hits(openLot);
-      html += "<div class='shopRow' data-k='r' style='font-size:12px;color:#ff7a7a;margin:10px 0 0;border-top:1px solid #2c3140;padding-top:6px'>" +
-        "<b style='color:#ff9e6b'>[R]</b> Rob the till <span style='color:#7f8794'>" +
-        (held > 0 ? fmt$(held) + " in the drawer" : "drawer's empty") + "</span>" +
-        (hits >= 1 ? "<div style='color:#7f8794'>Hit before. The drawer is dropped every " +
-          Math.round(60 * (2 / (1 + hits))) + " min now.</div>" : "") + "</div>";
-    }
-    el().innerHTML = html;
-  }
-
-  // styling menus: the barber chair (swagger) and the clothing rack (whole
-  // OUTFITS — identity/status fits from the canonical wardrobe when present)
-  function styleMenu(kind) {
-    if (kind === "barber") return HAIRCUTS;
-    if (kind === "clothing") {
-      // The WALK-IN store (clothingstore.js) is the sole buy path for cloth:
-      // real racks + mannequins INSIDE the shop, no loose floating "for sale"
-      // ghosts. When that store is live for this lot, retire the redundant
-      // clerk text-sale entirely so there is ONE way to shop here. Keep the
-      // legacy text rack ONLY as a fallback if the store never built (so the
-      // clothing shop is never a dead room with nothing to buy).
-      if (CBZ.cityClothingLive && CBZ.cityClothingLive(openLot)) return [];
-      return outfitRack();
-    }
-    return [];
-  }
-  // letters for the style rows, SKIPPING service keys + the closet key so a
-  // fit can never be shadowed by the job board (the old a..z mapping silently
-  // ate any style whose letter doubled as a service key).
-  function styleLetters(kind) {
-    const used = {};
-    for (const s of services(kind)) used[s.key] = true;
-    const ck = closetKey(kind); if (ck) used[ck] = true;
-    const list = styleMenu(kind), out = [];
-    let c = 97;
-    for (let i = 0; i < list.length && c < 123; i++) {
-      while (used[String.fromCharCode(c)]) c++;
-      if (c >= 123) break;
-      out.push(String.fromCharCode(c)); c++;
-    }
-    return out;
-  }
-
-  // the fight card is fought at Ironjaw Arena: the clerk points you there
-  function fightCard() {
-    const site = CBZ.arenaFightSite;
-    if (site && CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(site.x, site.z, site.name);
-    CBZ.city.note("Fight nights run at " + ((site && site.name) || "Ironjaw Arena") + ", out on its island. Bets are taken ringside.", 3.2);
-  }
-  function services(kind) {
-    const s = [];
-    if (kind === "hospital") s.push({ key: "h", label: "Heal $200", fn: healFull });
-    if (kind === "bank") { s.push({ key: "d", label: "Deposit", fn: deposit }); s.push({ key: "w", label: "Withdraw $500", fn: withdraw }); }
-    if (kind === "gas" && CBZ.player.driving) s.push({ key: "r", label: "Refuel", fn: () => CBZ.city.note("Tank filled.", 1.2) });
-    if (kind === "gym") s.push({ key: "t", label: "Train $100", fn: train });
-    if (kind === "carlot") s.push({ key: "c", label: "Buy $1,500", fn: buyCar });
-    if (kind === "carlot") s.push({ key: "y", label: (g.cityCarBiz && g.cityCarBiz.open) ? "Yard" : "Open yard $2,000", fn: () => CBZ.cityOpenCarBiz && CBZ.cityOpenCarBiz() });
-    if (kind === "realtor") s.push({ key: "h", label: "Homes", fn: () => CBZ.cityHomeMenu && CBZ.cityHomeMenu() });
-    if (kind === "chop") s.push({ key: "c", label: "Sell car", fn: () => CBZ.city.note("Drive a (stolen) car into the chop bay out front to cash it out.", 2.4) });
-    if (kind === "bank") s.push({ key: "p", label: "Bribe", fn: bribe });
-    if (kind === "security") s.push({ key: "j", label: "Apply", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("security") });
-    if (kind === "drugs") s.push({ key: "j", label: "Deal", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("dealer") });
-    if (kind === "bar") s.push({ key: "j", label: "Run crew", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("pimp") });
-    // the OTHER half of the "drinks · run the night crew" verb: an actual round.
-    // The bar has no SHOP_STOCK (so no BUY list) and the food heal path is gated
-    // to kind==="food", so a drink would otherwise do nothing — give it a real,
-    // kind-local effect here (mirrors the food heal+boost, sized for a quick one).
-    // [K] is free at the bar: 'j'/'b' are taken, and the closet's [K] only ever
-    // arms in a boutique (bar isn't one), so it can't collide.
-    if (kind === "bar") s.push({ key: "k", label: "Round $12", fn: buyDrink });
-    // The casino, the tracks and the fight card are VENUES: the counter hands
-    // you to the one game that lives there (games/casino.js, the racepark
-    // windows on city/betslip.js, the Ironjaw Arena card), never to a menu
-    // copy of it. (Racing is not a counter: you drive it, at the Bullring.)
-    if (kind === "casino") s.push({ key: "g", label: "Tables", fn: () => { close(); if (CBZ.cityOpenCasino) CBZ.cityOpenCasino(); } });
-    if (kind === "racepark") {
-      s.push({ key: "r", label: "Horse window", fn: () => CBZ.cityTrackBook && CBZ.cityTrackBook("horses") });
-      s.push({ key: "g", label: "Dog window", fn: () => CBZ.cityTrackBook && CBZ.cityTrackBook("dogs") });
-    }
-    if (kind === "arena" || kind === "gym") s.push({ key: "f", label: "Fight card", fn: fightCard });
-    if (kind === "paintball") s.push({ key: "p", label: "Paintball", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Combat") });
-    if (kind === "transit") s.push({ key: "t", label: "Routes", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Transit") });
-    if (kind === "cityhall") s.push({ key: "p", label: "Civic", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Civic") });
-    if (kind === "airfield") s.push({ key: "w", label: "Contracts", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Emergency") });
-    /* THE PHONE TIER IS DELETED (2026-07-29). It sold four upgrades for
-       $250/$600/$950/$1300 promising "better deals & street intel" and
-       `g.cityPhoneTier` was read by NOTHING in 264k lines except the four
-       lines that sold it, capped it and printed it. That is CLAUDE.md's
-       banned "stat fiction" in its purest form — and the shop row was its
-       storefront, so the row goes with the flag. Killing the fiction without
-       killing the counter that advertises it just hides the lie.
-       The electronics shop keeps its real stock; it no longer sells nothing. */
-    // jewelry: ICE OUT — buy the whole chain+ring+grill set at a bundle discount
-    if (kind === "jewelry") s.push({ key: "u", label: "Ice out", fn: iceOut });
-    // THE CIVIC DESKS (city/civic.js): the seven government trades
-    // (courthouse/federal/library/cityannex/postoffice/dmv/firestation) keep
-    // their service rows next to their own logic and splice in HERE, so this
-    // chain never learns a civic kind. Keys are filtered against everything
-    // already taken — the generic [B]jobs, the buy/haggle/rob letters and any
-    // row above — so a drifting civic key can never shadow an existing verb.
-    // Degrade-safe: no civic.js, no rows, this function is exactly as before.
-    if (CBZ.civic && CBZ.civic.services) {
-      const taken = { b: 1, x: 1, v: 1, r: 1, e: 1 };
-      for (const r0 of s) taken[r0.key] = 1;
-      for (const r of CBZ.civic.services(kind)) {
-        if (!r || !r.key || taken[r.key]) continue;
-        taken[r.key] = 1; s.push(r);
-      }
-    }
-    // every shop offers the job board if careers exist
-    if (CBZ.cityJobBoard) s.push({ key: "b", label: "Jobs", fn: () => CBZ.cityJobBoard() });
-    return s;
-  }
-
+  // ---- what a counter BUYS off you -------------------------------------------
   function sellable(kind) {
     const inv = g.cityInv || {}, econ = CBZ.cityEcon, out = [];
     for (const k in inv) {
@@ -542,10 +70,9 @@
       if ((kind === "jewelry" || kind === "pawn") && isWorn(k) && inv[k] <= 1) continue;
       // pawn buys anything; jewelry buys wearables; others buy their own tags.
       // A GROCER/DINER BUYS YOUR GAME: wild meat and a fresh catch are tag
-      // "food" now (city/wildlife.js — they are things you EAT), so without
-      // this row a hunter could only fence a boar's meat at a pawn shop, which
-      // is nobody's idea of where venison goes. `wild` keeps it to what you
-      // harvested — the counter does not buy back your half-eaten burger.
+      // "food" (city/wildlife.js: they are things you EAT), so a hunter can
+      // sell a boar's meat where venison goes. `wild` keeps it to what you
+      // harvested; the counter does not buy back your half-eaten burger.
       const ok = kind === "pawn" || (kind === "jewelry" && it.tag === "wearable") ||
         (kind === "electronics" && it.tag === "valuable") || it.tag === "valuable" ||
         (kind === "food" && it.tag === "food" && it.wild);
@@ -553,11 +80,10 @@
     }
     return out;
   }
-  function sellTotal(kind) { let t = 0; for (const s of sellable(kind)) t += CBZ.cityEcon.sellPrice(s.name, kind) * s.n; return t; }
+  function sellTotal(kind) { let t = 0; for (const s of sellable(kind)) t += CBZ.cityEcon.sellPrice(s.name, kind) * (isWorn(s.name) ? Math.max(0, s.n - 1) : s.n); return t; }
   function sellAll(kind) {
     const econ = CBZ.cityEcon; let got = 0, n = 0;
-    // track the single fattest fence in this batch so we can fire a JACKPOT
-    // headline (vs. the quiet "sold N for $X" note) when you move a luxe piece.
+    // the single fattest piece in the batch gets the headline when it is a score
     let jackpotItem = null, jackpotEach = 0;
     for (const s of sellable(kind)) {
       // never sell the last copy of something you're flexing
@@ -569,8 +95,6 @@
     }
     if (got > 0) {
       CBZ.city.addCash(got); if (CBZ.sfx) CBZ.sfx("coin");
-      // JACKPOT FENCE: a single piece pawning for a real fortune gets a headline
-      // — pawning a Patek/ring/bonds should FEEL like the score it is.
       if (jackpotItem && jackpotEach >= 50000 && CBZ.city.big) {
         CBZ.city.note(fmt$(jackpotEach) + " received, pawn sale: " + jackpotItem + ".", 2.4, { from: "Liberty Bank", app: "bank" });
         if (n > 1) CBZ.city.note("…plus the rest of the haul · " + fmt$(got) + " total.", 2);
@@ -578,16 +102,15 @@
         CBZ.city.note("Sold " + n + " for " + fmt$(got), 1.8);
       }
     }
-    else CBZ.city.note("Nothing to sell here.", 1.4);
-    render();
+    return got;
   }
 
   // ---- buying -------------------------------------------------------------
-  //  ONE ACQUIRE PATH. The clerk's counter menu and the SHELF (city/storegoods.js
-  //  stands the store's real stock on the real shelves) charge the same price,
-  //  take the same money and put the goods in the same bag — because they call
-  //  the same function. `free` is the shoplift branch: the goods land exactly
-  //  where a bought unit would, no money moves.
+  //  ONE ACQUIRE PATH. A unit off a shelf (city/storegoods.js), a thing handed
+  //  over a counter (counterRows below) and a pocketed one all land through
+  //  this: the same money, the same bag, the same equip-on-buy for a wearable.
+  //  `free` is "no money moves here" (pocketed, or already rung up at the
+  //  shop's till: `bought`).
   function acquire(lot, it, n, each, free, bought) {
     const econ = CBZ.cityEcon, meta = econ.ITEMS[it];
     if (!meta || !CBZ.city) return false;
@@ -599,19 +122,14 @@
         return false;
       }
       // E7: Ironclad Arms books half of every player gun-store purchase as
-      // real revenue (sim/corporations.js's creditRevenue) — a guns lot the
-      // company doesn't even need to have claimed as an outlet.
+      // real revenue (sim/corporations.js's creditRevenue).
       if (kind === "guns" && CBZ.corps && CBZ.corps.creditRevenue) CBZ.corps.creditRevenue("ironclad", total * 0.5);
       if (CBZ.sfx) CBZ.sfx("coin");
     }
     if (kind === "food" && meta.heal) {
-      // YOU BUY FOOD, THEN YOU EAT IT. This used to write g.hunger directly —
-      // a second hunger writer beside city/hunger.js — and swallow the whole
-      // order in one frame, so buying 3 burgers left you with 0 burgers. Now
-      // the counter hands you the goods and you eat ONE at the counter through
-      // the ONE eat path (chew beat, sfx, note and all); the rest ride in your
-      // bag with a real icon and a number key, which is the whole point of
-      // carrying food at all.
+      // YOU BUY FOOD, THEN YOU EAT IT: the counter hands you the goods and you
+      // eat ONE through the one eat path (city/hunger.js: chew beat, sfx,
+      // note); the rest ride in your bag.
       econ.add(it, n);
       const ate = CBZ.cityEat ? CBZ.cityEat(it) : false;
       if (n > 1) CBZ.city.note((n - (ate ? 1 : 0)) + "× " + it + " in the bag", 1.4);
@@ -621,9 +139,8 @@
     else if (meta.rounds) { CBZ.cityAddAmmo(meta.rounds * n); CBZ.city.note("+" + (meta.rounds * n) + " ammo", 1.4); }
     else if (meta.armor) { CBZ.player._armor = Math.min(100, (CBZ.player._armor || 0) + meta.armor); CBZ.city.note("Body Armor on (+" + meta.armor + ")", 1.6); }
     else if (meta.tag === "wearable") {
-      // OWN it first (add to inventory), THEN wear it. A boutique/jewelry/barber
-      // counter auto-EQUIPS the piece into its slot so it's WORN immediately and
-      // counts toward your drip (the club gate). The drip preview becomes real.
+      // OWN it first, THEN wear it: a boutique / jeweller / barber counter puts
+      // the piece on you, so it counts toward your drip at once.
       econ.add(it, n);
       if (isBoutique(kind)) equip(it);
       else CBZ.city.note((free && !bought ? "Pocketed " : "Bought ") + (n > 1 ? n + "× " : "") + it, 1.4);
@@ -632,90 +149,35 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;
   }
-
-  // the counter menu's row press: qty multiplier + haggle discount, then the
-  // shared acquire above.
-  function buy(i) {
-    const it = listItems[i]; if (!it) return;
-    const meta = CBZ.cityEcon.ITEMS[it]; if (!meta) return;
-    // weapons/armor are single-buy (you can't carry a stack of the same gun
-    // meaningfully); everything else respects the qty multiplier.
-    const single = !!(meta.gun || meta.melee || meta.armor);
-    const n = single ? 1 : qty;
-    acquire(openLot, it, n, unitPrice(it, n), false);
-    render();
-  }
-
-  /* THE SHELF'S DOOR INTO THIS FILE. When you lift the store's own stock off
-     its own shelf, the money and the goods move through exactly the path the
-     clerk's menu uses: the same cityEcon.buyPrice, the same CBZ.city.spend, the
-     same inventory, the same equip-on-buy for a wearable. opts.free is the
-     shoplift take. Returns true only if it actually happened — a failed spend
-     returns false and the shelf keeps the item. */
+  /* THE SHELF'S DOOR INTO THIS FILE (city/storegoods.js). opts.free: no money
+     moves here (pocketed, or already rung up at the shop's till: opts.bought).
+     Returns true only if it actually happened. */
   CBZ.cityShopAcquire = function (lot, name, n, opts) {
     const meta = CBZ.cityEcon && CBZ.cityEcon.ITEMS[name];
-    if (!meta || !CBZ.city) return false;
+    if (!meta || !CBZ.city || !lot) return false;
     const single = !!(meta.gun || meta.melee || meta.armor);
     const cnt = single ? 1 : Math.max(1, n | 0);
-    // opts.free: no money moves here (pocketed, or already rung up at the
-    // shop's till: opts.bought, city/storegoods.js through CBZ.shopFloor.till)
     const free = !!(opts && opts.free);
-    return acquire(lot || openLot, name, cnt, free ? 0 : CBZ.cityEcon.buyPrice(name), free, !!(opts && opts.bought));
+    return acquire(lot, name, cnt, free ? 0 : CBZ.cityEcon.buyPrice(name), free, !!(opts && opts.bought));
   };
 
   // Put a wearable you OWN onto your body via the shared outfit model
-  // (CBZ.cityEquip → fills its slot, replacing whatever's there). Surfaces the
-  // DRIP X → Y change and, when buying pushes you past the rope, calls it out so
-  // the money→clothes→drip→club loop is felt. Respect is given ONCE per piece.
+  // (CBZ.cityEquip fills its slot, replacing whatever's there). Respect is
+  // given ONCE per piece; crossing the club's rope by dressing is a moment.
   function equip(name) {
     const meta = CBZ.cityEcon.ITEMS[name]; if (!meta || meta.tag !== "wearable") return;
-    if (isWorn(name)) { CBZ.city.note("Already wearing " + name + ".", 1.4); return; }
+    if (isWorn(name)) return;
     const before = playerDrip();
     const slot = slotOf(name);
-    const replaced = slot ? wornInSlot(slot) : "";   // the old piece in this slot
-    const ok = equipItem(name);                       // CBZ.cityEquip (guarded)
-    if (!ok) {
-      // economy.js outfit model absent — at least mark it as bought.
-      CBZ.city.note("Bought " + name + ".", 1.4);
-      return;
-    }
+    const replaced = slot ? wornInSlot(slot) : "";
+    if (!equipItem(name)) { CBZ.city.note("Bought " + name + ".", 1.4); return; }
     const after = playerDrip();
-    // give respect ONCE per piece you first put on (don't re-reward re-equips)
     g.cityDripRewarded = g.cityDripRewarded || {};
     if (!g.cityDripRewarded[name] && meta.drip) { CBZ.city.addRespect(meta.drip); g.cityDripRewarded[name] = true; }
     const CLUB = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30, VIP = (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70;
-    // crossing a threshold by buying this piece is a moment — headline it.
-    if (before < CLUB && after >= CLUB && after < VIP && CBZ.city.big) {
-      CBZ.city.big("That fit turns heads, the Velvet's rope would open for you.");
-    } else if (before < VIP && after >= VIP && CBZ.city.big) {
-      CBZ.city.big("✦ Dressed like money, the Velvet's elite lounge would wave you up.");
-    } else {
-      CBZ.city.note("Now wearing " + name + (replaced ? " (over " + replaced + ")" : "") + ".", 1.8);
-    }
-  }
-
-  // ---- HAGGLING: one attempt per visit. Higher respect = better odds & cut.
-  // Win → a discount on everything this visit; lose → clerk holds firm (small
-  // chance they're insulted and the deal's slightly worse — risk, not free).
-  function tryHaggle() {
-    if (haggleTried) { CBZ.city.note("You already worked them. " + (haggle > 0 ? "Deal's −" + Math.round(haggle * 100) + "%." : "No discount this trip."), 1.6); return; }
-    haggleTried = true;
-    const rep = (g.respect || 0), swag = playerDrip();
-    const odds = Math.min(0.85, 0.4 + rep / 800 + swag / 120);
-    const roll = Math.random();
-    if (roll < odds) {
-      const cut = 0.05 + Math.random() * 0.13 + Math.min(0.05, swag / 300);
-      haggle = Math.min(0.18, cut);
-      if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city.note("Talked them down −" + Math.round(haggle * 100) + "% on the whole counter.", 2);
-    } else if (roll > 0.93 && rep < 40) {
-      haggle = 0;
-      CBZ.city.note("The clerk's insulted, no deal today.", 1.8);
-    } else {
-      haggle = 0;
-      CBZ.city.note("They won't budge on price.", 1.6);
-    }
-    render();
+    if (before < CLUB && after >= CLUB && after < VIP && CBZ.city.big) CBZ.city.big("That fit turns heads, the Velvet's rope would open for you.");
+    else if (before < VIP && after >= VIP && CBZ.city.big) CBZ.city.big("Dressed like money, the Velvet's elite lounge would wave you up.");
+    else CBZ.city.note("Now wearing " + name + (replaced ? " (over " + replaced + ")" : "") + ".", 1.8);
   }
 
   // ============================================================
@@ -1700,227 +1162,227 @@
       return out;
     },
   });
-  function robTill() {
-    const kind = openLot.kind;
-    if (!canRobTill(kind)) { CBZ.city.note("No register to crack here.", 1.4); return; }
-    const door = openLot.building.door, x = door ? door.x : CBZ.player.pos.x, z = door ? door.z : CBZ.player.pos.z;
-    // clerk resistance: the better-defended shops (guns/jewelry/casino) fight
-    // back more; a high-respect robber intimidates better (GTA intimidation).
-    // The roll now decides HOW MUCH OF THE DRAWER YOU GET, not how much money
-    // exists — the drawer's contents are the place's own balance.
-    const armed = (kind === "jewelry" || kind === "casino" || kind === "security" || kind === "drugs");
-    const intimidation = Math.min(0.9, 0.45 + (g.respect || 0) / 600 + playerDrip() / 150 + (CBZ.cityHasGun && CBZ.cityHasGun() ? 0.2 : 0));
-    const resisted = armed && Math.random() > intimidation;
-    // A TAKE IS A TRANSFER: this MOVES the drawer's real balance. An empty
-    // register pays nothing and says why — that is the anti-farm rule, and it
-    // is why there is no cooldown timer anywhere in this function.
-    const r = CBZ.cityTill.take(openLot, { point: "register", frac: resisted ? (0.3 + Math.random() * 0.3) : 1, by: "player", rob: true });
-    const take = r.taken;
-    if (!(take > 0)) {
-      CBZ.city.note(r.why === "empty" ? "Drawer's empty, they've already dropped it." : ("Nothing in " + (r.name || "the register") + " — " + (r.why || "empty") + "."), 2.2);
-      // it is still an armed robbery even when the score is nothing, and the
-      // clerk still screams: fall through to the crime/alarm/panic beats.
-    } else CBZ.city.addCash(take);
-    if (CBZ.sfx && take > 0) CBZ.sfx("coin");
-    // CRIME: this is armed robbery — big heat, marks your last-known position,
-    // panics the block, and rolls a chance a unit is already responding.
-    if (CBZ.cityCrime) CBZ.cityCrime(resisted ? 220 : 170, { instant: true, x: x, z: z, type: "store robbery" });
-    if (CBZ.cityAlarm) CBZ.cityAlarm(x, z, 22, resisted ? 1.4 : 1, CBZ.city.playerActor);
-    if (CBZ.cityPanic) CBZ.cityPanic(x, z, 1.2, CBZ.city.playerActor);
-    CBZ.city.addRespect(resisted ? 4 : 2);
-    // a real chance the silent alarm already called it in: spawn a responder
-    if (CBZ.citySpawnCop && (resisted || Math.random() < 0.5)) {
-      const ang = Math.random() * Math.PI * 2, r = 26 + Math.random() * 10;
-      const sx = x + Math.cos(ang) * r, sz = z + Math.sin(ang) * r;
-      CBZ.citySpawnCop(sx, sz, false);
-      if (CBZ.sfxAt) CBZ.sfxAt("siren", sx, sz);
-    }
-    if (resisted) CBZ.city.big("Clerk resisted! Grabbed " + fmt$(take) + " · cops rolling!");
-    else CBZ.city.big("Robbed the till: " + fmt$(take) + " · WANTED!");
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    // the store kicks you out after a stick-up
-    close();
-  }
-
-  // ---- styling (barber / clothing fitting room) ------------------------------
-  function restyle(kind, idx) {
-    const list = styleMenu(kind); const s = list[idx]; if (!s) return;
-    // a CATALOG fit routes through the wardrobe: pay once, own it, the rig
-    // recolors on the spot and the drip lands (outfits.js owns the whole beat).
-    if (s.id && CBZ.cityBuyOutfit) { CBZ.cityBuyOutfit(s.id); render(); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); return; }
-    const cur = kind === "barber" ? look().hair : look().outfit;
-    if (cur === s.name) { CBZ.city.note("You're already rocking that.", 1.4); return; }
-    if (!CBZ.city.spend(s.cost)) { CBZ.city.note("Need " + fmt$(s.cost) + " for that.", 1.6); return; }
-    // swagger replaces the prior style's swagger contribution (no stacking)
-    const prevSwag = stylePrevSwag(kind, cur);
-    look().swagger = Math.max(0, (look().swagger || 0) - prevSwag + s.swag);
-    if (kind === "barber") look().hair = s.name; else look().outfit = s.name;
-    CBZ.city.addRespect(Math.max(1, Math.round(s.swag / 2)));
-    if (CBZ.sfx) CBZ.sfx("coin");   // real payment-confirm sound (was a DIY "whoosh" for cuts)
-    CBZ.city.note((kind === "barber" ? "Fresh cut: " : "New fit: ") + s.name, 2);
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    render();
-  }
-  function stylePrevSwag(kind, name) {
-    const list = kind === "barber" ? HAIRCUTS : OUTFITS;
-    const f = list.find((x) => x.name === name);
-    return f ? f.swag : 0;
-  }
-
-  // ---- electronics: the phone-upgrade money sink is DELETED --------------
-  // (phoneUpgCost / phoneUpgrade / g.cityPhoneTier). See the note at the
-  // electronics row above: four paid tiers, zero readers, a stat fiction.
-
-  // ---- jewelry: ICE OUT bundle (buy the full flex set at a discount) ---------
-  // ONE piece per jewelry slot (chain/ring/watch/glasses) so it's a coherent fit
-  // (no two chains fighting for the same slot). You only pay for pieces you don't
-  // already OWN; everything in the set is then EQUIPPED so your drip jumps at once.
-  function iceOut() {
-    const econ = CBZ.cityEcon;
-    const set = ["Gold Chain", "Diamond Ring", "Rolex", "Diamond Grill"];   // chain · ring · watch · glasses
-    const toBuy = set.filter((s) => econ.count(s) <= 0);   // only charge for what you don't own
-    const notWorn = set.filter((s) => !isWorn(s));
-    if (!notWorn.length) { CBZ.city.note("You're already fully iced out.", 1.8); return; }
-    let raw = 0; for (const m of toBuy) raw += econ.buyPrice(m);
-    const price = Math.round(raw * 0.82);   // 18% bundle deal (may be $0 if you already own them)
-    if (price > 0 && !CBZ.city.spend(price)) { CBZ.city.note("The full set runs " + fmt$(price) + " right now.", 2); return; }
-    if (CBZ.sfx) CBZ.sfx("coin");
-    for (const m of toBuy) econ.add(m, 1);
-    for (const m of set) if (!isWorn(m)) equip(m);          // wear the whole set
-    CBZ.city.big("ICED OUT, full set" + (price > 0 ? " for " + fmt$(price) : "") + "!");
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    render();
-  }
-
-  // ---- services impl ----
-  function healFull() { if (CBZ.city.spend(200)) { CBZ.player.hp = CBZ.player.maxHp || 100; CBZ.player._armor = Math.max(CBZ.player._armor || 0, 0); CBZ.city.note("Healed to full.", 1.4); if (CBZ.sfx) CBZ.sfx("coin"); render(); } else CBZ.city.note("Need $200.", 1.4); }
-  function deposit() { const c = g.cash || 0; if (c <= 0) return; g.cityBank = (g.cityBank || 0) + c; g.cash = 0; CBZ.city.note("Deposited " + fmt$(c) + " (bank: " + fmt$(g.cityBank) + ")", 2); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); render(); }
-  function withdraw() { const amt = Math.min(500, g.cityBank || 0); if (amt <= 0) { CBZ.city.note("Bank empty.", 1.2); return; } g.cityBank -= amt; CBZ.city.addCash(amt); CBZ.city.note("Withdrew " + fmt$(amt), 1.6); render(); }
-  function bribe() {
-    const stars = g.wanted | 0;
-    if (stars <= 0) { CBZ.city.note("You're clean, nothing to pay off.", 1.4); return; }
-    const cost = ((CBZ.CITY.econ && CBZ.CITY.econ.bribeBase) || 150) * stars;
-    if (!CBZ.city.spend(cost)) { CBZ.city.note("A bribe costs " + fmt$(cost) + " right now.", 1.8); return; }
-    const T = CBZ.CITY.starHeat; g.heat = Math.max(0, T[Math.max(0, stars - 1)] - 1);
-    if (CBZ.city.addHeat) CBZ.city.addHeat(0);
-    CBZ.city.note("Paid off the cops, down to " + (stars - 1) + "★ (" + fmt$(cost) + ")", 2.2);
-    if (CBZ.sfx) CBZ.sfx("coin"); render();
-  }
-  function train() { if ((CBZ.player.maxHp || 100) >= 240) { CBZ.city.note("You're maxed out, the gym can't take you further.", 1.8); return; } if (CBZ.city.spend(100)) { CBZ.player.maxHp = Math.min(240, (CBZ.player.maxHp || 100) + 10); CBZ.player.hp = CBZ.player.maxHp; CBZ.city.addRespect(1); CBZ.city.note("Trained, max HP " + CBZ.player.maxHp, 1.8); render(); } }
-  // BAR — buy a round. The bar's verb promises "drinks" but it has no stock and
-  // the food heal path is kind-gated; this is the drink. Loosens you up: tops a
-  // little hunger, a short stamina boost, and a small patch-up (mirrors the
-  // food heal+boost at the buy() path, scaled down for a single round) — and,
-  // per city/drinking.js, tips your drunk level: one round is a buzz, several
-  // rounds is a stumble, and the bar can absolutely put you on the floor if
-  // you keep ordering (guarded — the round still pours fine if that file
-  // somehow isn't loaded).
-  function buyDrink() {
-    if (!CBZ.city.spend(12)) { CBZ.city.note("Need $12.", 1.4); return; }
-    if (CBZ.sfx) CBZ.sfx("coin");
-    g.hunger = Math.min(100, (g.hunger || 0) + 15);
-    CBZ.player._boost = 12;
-    if (CBZ.player.hp != null && CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, CBZ.player.hp + 8);
-    if (CBZ.cityDrink) CBZ.cityDrink(1);
-    CBZ.city.note("Drink, loosened up. That's gonna add up...", 1.8);
-    render();
-  }
-  const MAKER_CORP_ID = { KAI: "kaido", VLT: "volante" };   // economy.js CARS .maker -> sim/corporations.js id
-  function buyCar() {
-    if (!CBZ.city.spend(1500)) { CBZ.city.note("Need $1,500 for a car.", 1.6); return; }
-    const A = CBZ.city.arena, door = openLot.building.door;
-    const car = CBZ.citySpawnOwnedCar ? CBZ.citySpawnOwnedCar(door.x + door.nx * 3, door.z + door.nz * 3) : null;
-    // E7: Apex Dealership Holdings books half the sale as dealer-margin
-    // revenue. E10: the OTHER half goes to the model's actual MAKER (economy.js
-    // CARS .maker), boosted by that maker's brandHeat (win-on-Sunday-sell-on-
-    // Monday — sim/motorsport.js). A model with no .maker (e.g. the Yellow
-    // Cab) leaves that half simply uncredited — no manufacturer to book it to.
-    const mkId = car && car.model && MAKER_CORP_ID[car.model.maker];
-    const mkCo = mkId && CBZ.corps ? CBZ.corps.get(mkId) : null;
-    if (CBZ.corps && CBZ.corps.creditRevenue) {
-      CBZ.corps.creditRevenue("apex", 375);
-      if (mkId) CBZ.corps.creditRevenue(mkId, 375 * (mkCo ? (mkCo.brandHeat || 1) : 1));
-    }
-    CBZ.city.note("Your new ride is parked out front!", 2.2);
-    close();
-  }
-
-  // ---- open / close + input ----
-  function open(lot) {
-    if (!lot || lot.demolished) return;        // no counter to walk up to — it's rubble
-    // a clerk you've ROBBED remembers (social.js shopkeeper memory) — the till
-    // stays shut to YOU until the heat of it fades.
-    const _v = lot && lot.building && lot.building.vendor;
-    if (CBZ.cityVendorRefuses && CBZ.cityVendorRefuses(_v)) { if (CBZ.citySay) CBZ.citySay(_v, "Not you. Get out.", null, { secs: 2.2, force: true }); return; }
-    openLot = lot; CBZ.cityMenuOpen = true;
-    qty = 1; haggle = 0; haggleTried = false; closetOpen = false;   // reset per visit
-    el().style.display = "block";
-    render();
-    if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-  }
-  function close() {
-    openLot = null; CBZ.cityMenuOpen = false;
-    if (panel) panel.style.display = "none";
-    if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
-  }
-  CBZ.cityOpenShop = open;
-  CBZ.cityShopOpen = function () { return !!openLot; };
-  CBZ.cityCloseShop = close;
-  // repaint the counter that is ALREADY up (never opens one, never resets the
-  // per-visit haggle/qty state that open() owns). city/civic.js's DMV queue
-  // advances on the sim clock, so the NOW-SERVING line has to move while you
-  // are standing at the window. No-op when no counter is open.
-  CBZ.cityShopRender = function () { if (openLot) render(); };
-  CBZ.cityShopLot = function () { return openLot; };
-
-  /* THE COUNTER HAD NO BUTTONS (owner, 2026-08-18: "figure out what sucks
-     around buttons"). Every shop and every civic desk in the game printed
-     [X] / [V] / [0-9] / [R] key hints and listened ONLY for a keydown — on a
-     tablet, where this game is actually played, that is a wall of text you
-     cannot press. Nothing about the rows changes: each one already named its
-     own key, so it now carries that key as `data-k` and a single delegated
-     click runs the SAME dispatch the keyboard runs. One code path, two inputs;
-     a shop verb can never work on one and not the other. */
-  function pressKey(k) {
-    if (!openLot || !k) return false;
-    k = String(k).toLowerCase();
-    if (k === "escape" || k === "e") { close(); return true; }
-    // the closet toggle (boutique change-clothes view) — its key is chosen to
-    // dodge restyle letters & service keys, so it never steals an existing verb.
-    const ck = closetKey(openLot.kind);
-    if (ck && k === ck) { closetOpen = !closetOpen; render(); return true; }
-    // while the closet is up, number keys EQUIP owned pieces and [0] strips all
-    if (closetOpen && isBoutique(openLot.kind)) {
-      if (k >= "1" && k <= "9") { closetEquip(parseInt(k, 10) - 1); return true; }
-      if (k === "0") { closetStripAll(); return true; }
-      // nothing else: the closet view owns the keys while it is open
-      return false;
-    }
-    if (k >= "1" && k <= "9") { buy(parseInt(k, 10) - 1); return true; }
-    if (k === "0") { sellAll(openLot.kind); return true; }
-    // bulk-quantity toggle (1 → 5 → 10 → 1)
-    if (k === "x") { qty = qty === 1 ? 5 : qty === 5 ? 10 : 1; render(); return true; }
-    // haggle (one attempt this visit)
-    if (k === "v") { tryHaggle(); return true; }
-    // rob the till
-    if (k === "r" && canRobTill(openLot.kind) && !services(openLot.kind).some((s) => s.key === "r")) {
-      robTill(); return true;
-    }
-    // barber / clothing restyle — letters come from styleLetters(), which
-    // already skips service keys + the closet key, so they can't collide.
-    const styles = styleMenu(openLot.kind);
-    if (styles.length && k >= "a" && k <= "z") {
-      const idx = styleLetters(openLot.kind).indexOf(k);
-      if (idx >= 0 && idx < styles.length) { restyle(openLot.kind, idx); return true; }
-    }
-    const svc = services(openLot.kind).find((s) => s.key === k);
-    if (svc) { svc.fn(); return true; }
+  // ============================================================
+  //  WHAT YOU CAN ASK THE PERSON BEHIND THE COUNTER.
+  // ------------------------------------------------------------
+  //  These were the lettered rows of the storefront panel. They are the
+  //  clerk's own options now (the "ped:vendor" layer of the one interaction
+  //  card, registered at the foot of this file): look at him and I J K L are
+  //  the first four, the Q wheel the rest. Each is a thing a person behind a
+  //  counter does: he says it, he hands it over, his hands do the work.
+  // ============================================================
+  function vsay(v, text, secs) {
+    if (v && !v.dead && CBZ.citySay) { try { CBZ.citySay(v, text, null, { secs: secs || 2.4, force: true }); return true; } catch (e) {} }
     return false;
   }
-  addEventListener("keydown", function (e) {
-    if (!openLot) return;
-    if (pressKey(e.key)) e.preventDefault();
-  });
+  function tell(v, text) { if (!vsay(v, text)) CBZ.city.note(text, 2); }
+  // HANDED OVER, NOT MINTED: he holds it out, your hand takes it out of his
+  // (CBZ.verbs.takeFrom at his wrist), and only then is it yours.
+  function handOver(v, kind, then) {
+    const V = CBZ.verbs;
+    let S = null, done = false;
+    const fin = function () { if (done) return; done = true; then(); };
+    v._faceT = Math.max(v._faceT || 0, 1.6);
+    if (V && V.takeFrom) { try { S = V.takeFrom(CBZ.player, v, { at: "wristR", kind: kind || "box", pose: "grip", dur: 0.55, onTaken: fin }); } catch (e) { S = null; } }
+    if (!S) fin();
+  }
+  // HAGGLING. You work the clerk once a visit; what he gives is off everything
+  // he rings up for you (CBZ.shopFloor.till reads the same field) and off what
+  // he hands over. Respect and the clothes on your back are the odds.
+  const HAGGLE_HOLD = 300;                       // seconds a deal (or a refusal) stands
+  function haggleOf(v) {
+    const h = v && v._haggle;
+    if (!h) return null;
+    if ((CBZ.now || 0) / 1000 - h.t > HAGGLE_HOLD) { v._haggle = null; return null; }
+    return h;
+  }
+  function haggle(v) {
+    if (haggleOf(v)) return;
+    const rep = (g.respect || 0), swag = playerDrip();
+    const odds = Math.min(0.85, 0.4 + rep / 800 + swag / 120);
+    const roll = Math.random();
+    let cut = 0;
+    if (roll < odds) cut = Math.min(0.18, 0.05 + Math.random() * 0.13 + Math.min(0.05, swag / 300));
+    v._haggle = { cut: cut, t: (CBZ.now || 0) / 1000 };
+    if (cut > 0) { if (CBZ.sfx) CBZ.sfx("coin"); vsay(v, "Alright. " + Math.round(cut * 100) + " off, for you. Today."); }
+    else if (roll > 0.93 && rep < 40) vsay(v, "You're insulting me. Price is the price.");
+    else vsay(v, "Price is the price.");
+  }
+  function priceAt(v, name) {
+    const h = haggleOf(v);
+    return Math.max(1, Math.round(CBZ.cityEcon.buyPrice(name) * (1 - (h ? h.cut : 0))));
+  }
+
+  // ---- the trades' own services ------------------------------------------------
+  function heal(v) {
+    const P = CBZ.player;
+    if ((P.hp || 0) >= (P.maxHp || 100)) { tell(v, "Nothing wrong with you that I can see."); return; }
+    if (!CBZ.city.spend(200)) { tell(v, "It's two hundred to be seen."); return; }
+    P.hp = P.maxHp || 100;
+    if (CBZ.sfx) CBZ.sfx("coin");
+    v.cash = (v.cash | 0) + 200;
+    tell(v, "Hold still. There. You'll live.");
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+  function train(v) {
+    const P = CBZ.player;
+    if ((P.maxHp || 100) >= 240) { tell(v, "There's nothing left for me to teach you."); return; }
+    if (!CBZ.city.spend(100)) { tell(v, "A session's a hundred."); return; }
+    P.maxHp = Math.min(240, (P.maxHp || 100) + 10); P.hp = P.maxHp;
+    CBZ.city.addRespect(1);
+    if (CBZ.sfx) CBZ.sfx("coin");
+    tell(v, "Good work. Same again tomorrow.");
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+  // the fight card is fought at Ironjaw Arena: he points you there
+  function fightCard(v) {
+    const site = CBZ.arenaFightSite;
+    if (site && CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(site.x, site.z, site.name);
+    tell(v, "Fight nights are out at " + ((site && site.name) || "Ironjaw Arena") + ". Bets are taken ringside.");
+  }
+  // A ROUND. He pours it and slides it over; you drink it. One is a buzz,
+  // several is a stumble (city/drinking.js), and the bar will put you on the
+  // floor if you keep ordering.
+  function drink(v) {
+    if (!CBZ.city.spend(12)) { tell(v, "Twelve a round."); return; }
+    if (CBZ.sfx) CBZ.sfx("coin");
+    v.cash = (v.cash | 0) + 12;
+    handOver(v, "bottle", function () {
+      const P = CBZ.player;
+      g.hunger = Math.min(100, (g.hunger || 0) + 15);
+      P._boost = 12;
+      if (P.hp != null && P.maxHp) P.hp = Math.min(P.maxHp, P.hp + 8);
+      if (CBZ.cityDrink) CBZ.cityDrink(1);
+    });
+  }
+  // THE CHAIR. A cut is the hair on your head (entities/character.js
+  // CBZ.charRestyleHair rebuilds the rig's hair in that style), not a word in
+  // a record.
+  const HAIRCUTS = [
+    { name: "Buzz cut", cost: 25, style: "buzz" },
+    { name: "Fade", cost: 35, style: "crop" },
+    { name: "Short back and sides", cost: 30, style: "short" },
+    { name: "Curls", cost: 55, style: "curly" },
+    { name: "Afro", cost: 60, style: "afro" },
+    { name: "Locs", cost: 70, style: "locs" },
+  ];
+  function cutHair(v, cut) {
+    const rig = CBZ.playerChar || null;
+    if (!CBZ.charRestyleHair || !rig) { tell(v, "Chair's broken. Come back."); return; }
+    if (CBZ.charHairStyle && CBZ.charHairStyle(rig) === cut.style) { tell(v, "That's the cut you've got."); return; }
+    if (!CBZ.city.spend(cut.cost)) { tell(v, "It's " + fmt$(cut.cost) + " for that."); return; }
+    if (!CBZ.charRestyleHair(rig, cut.style)) { CBZ.city.addCash(cut.cost); tell(v, "Nothing there for me to cut."); return; }
+    v.cash = (v.cash | 0) + cut.cost;
+    look().hair = cut.name;
+    g.cityHairStyle = cut.style;
+    CBZ.city.addRespect(2);
+    if (CBZ.sfx) CBZ.sfx("coin");
+    tell(v, "There you go. Sharp.");
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+  // a thing he keeps behind the counter: money to him, the thing out of his hand
+  function overCounter(v, lot, name) {
+    const price = priceAt(v, name);
+    if (!CBZ.city.spend(price)) { tell(v, fmt$(price) + ". You're short."); return; }
+    if (CBZ.sfx) CBZ.sfx("coin");
+    v.cash = (v.cash | 0) + price;
+    handOver(v, "box", function () { acquire(lot, name, 1, 0, true, true); });
+  }
+  function career(kind) { if (CBZ.cityStartCareer) CBZ.cityStartCareer(kind); }
+  function acts(tab) { if (CBZ.cityOpenActivities) CBZ.cityOpenActivities(tab); }
+
+  /* THE ROWS, for the clerk you are looking at. Built from what his counter
+     is: the trade, the stock he keeps behind it (anything his shop sells that
+     is not standing on its floor: a dealer's product, a counter's coffee),
+     what he buys, the civic desk's business. Memoised per clerk for a moment
+     (every option's gate and label asks). */
+  const ROW_MAX = 14;
+  let _rowsOf = null, _rowsAt = -1, _rows = [];
+  // is this lot's floor a flagship file's (its goods are on its own racks)?
+  function flagship(lot) {
+    switch (lot.kind) {
+      case "guns":     return !!(CBZ.cityGunWallLive && CBZ.cityGunWallLive(lot));
+      case "jewelry":  return !!(CBZ.cityJewelryLive && CBZ.cityJewelryLive(lot));
+      case "pawn":     return !!(CBZ.cityPawnLive && CBZ.cityPawnLive(lot));
+      case "clothing": return !!(CBZ.cityClothingLive && CBZ.cityClothingLive(lot));
+      default:         return false;
+    }
+  }
+  function counterRows(v) {
+    const now = CBZ.now || 0;
+    if (v === _rowsOf && now - _rowsAt < 200) return _rows;
+    _rowsOf = v; _rowsAt = now;
+    const R = _rows = [];
+    const lot = v && v.vendor, kind = lot && lot.kind;
+    if (!lot || !kind || lot.demolished || v.dead || v._keepFree || v.surrender || v.rage) return R;
+    if (shopShutSoft(lot)) return R;
+    // a clerk you robbed serves you nothing until it fades (city/social.js)
+    if (CBZ.cityVendorRefuses && CBZ.cityVendorRefuses(v)) return R;
+    const econ = CBZ.cityEcon;
+    // (the authored campaign owns progression while it runs: a counter still
+    //  sells and serves, it starts no side job, bet or bout under the contract)
+    let owned = false;
+    try { owned = !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()); } catch (e) { owned = false; }
+    const SIDE = { tables: 1, horses: 1, dogs: 1, card: 1, match: 1, routes: 1, civic: 1, contracts: 1, yard: 1, guard: 1, corner: 1, crew: 1, work: 1 };
+    // (what you ask a clerk FOR is not the clerk: the row prints as written, not
+    //  cut down to its verb, city/verbword.js)
+    const VW = CBZ.cityVerbWord;
+    const add = function (id, label, fn, sub) {
+      if (R.length >= ROW_MAX || (owned && SIDE[id])) return;
+      if (VW && VW.keep) VW.keep(label);
+      R.push({ id: id, label: label, fn: fn, sub: sub || "" });
+    };
+    // ---- the trade
+    if (kind === "hospital") add("heal", "Get patched up " + fmt$(200), heal);
+    if (kind === "gym") add("train", "Train " + fmt$(100), train);
+    if (kind === "bar") add("round", "A round " + fmt$(12), drink);
+    if (kind === "barber") for (const cut of HAIRCUTS) add("cut-" + cut.style, cut.name + " " + fmt$(cut.cost), function (vv) { cutHair(vv, cut); });
+    if (kind === "casino") add("tables", "The tables", function () { if (CBZ.cityOpenCasino) CBZ.cityOpenCasino(); });
+    if (kind === "racepark") {
+      add("horses", "Bet the horses", function () { if (CBZ.cityTrackBook) CBZ.cityTrackBook("horses"); });
+      add("dogs", "Bet the dogs", function () { if (CBZ.cityTrackBook) CBZ.cityTrackBook("dogs"); });
+    }
+    if (kind === "gym" || kind === "arena") add("card", "Fight card", fightCard);
+    if (kind === "paintball") add("match", "Sign up for a match", function () { acts("Combat"); });
+    if (kind === "transit") add("routes", "Routes", function () { acts("Transit"); });
+    if (kind === "cityhall") add("civic", "Civic business", function () { acts("Civic"); });
+    if (kind === "airfield") add("contracts", "Contracts", function () { acts("Emergency"); });
+    if (kind === "chop") add("chop", "Sell a car", function (vv) { tell(vv, "Drive it into the bay out front. I pay on the hook."); });
+    if (kind === "carlot" && CBZ.cityOpenCarBiz) add("yard", (g.cityCarBiz && g.cityCarBiz.open) ? "Your yard" : "Open a yard " + fmt$(2000), function () { CBZ.cityOpenCarBiz(); });
+    if (kind === "realtor" && CBZ.cityHomeMenu && !(CBZ.cityRealtyLive && CBZ.cityRealtyLive(lot))) add("homes", "Homes", function () { CBZ.cityHomeMenu(); });
+    // ---- the civic desks (city/civic.js keeps its rows next to their logic)
+    if (CBZ.civic && CBZ.civic.services) {
+      for (const r of CBZ.civic.services(kind)) {
+        if (!r || !r.fn) continue;
+        const parts = String(r.label || "").split(/<span[^>]*>/);
+        add("civic-" + r.key, parts[0].trim(), r.fn, parts[1] ? parts[1].replace(/<[^>]+>/g, "").trim() : "");
+      }
+    }
+    // ---- what he keeps behind the counter and hands over
+    if (!flagship(lot)) {
+      const onFloor = (CBZ.cityGoodsLive && CBZ.cityGoodsLive(lot)) || null;
+      const stock = econ.stockFor(kind) || [];
+      for (let i = 0; i < stock.length; i++) {
+        const name = stock[i];
+        if (!econ.ITEMS[name] || (onFloor && onFloor.indexOf(name) >= 0)) continue;
+        add("buy-" + name, name + " " + fmt$(priceAt(v, name)), function (vv) { overCounter(vv, lot, name); });
+      }
+    }
+    // ---- what he buys
+    const sell = sellTotal(kind);
+    if (sell > 0) add("sell", (kind === "pawn" ? "Fence " : "Sell ") + fmt$(sell), function (vv) { if (sellAll(kind) > 0) vsay(vv, "Pleasure."); });
+    // ---- the price, the job, the crew
+    // (a jeweller's pieces are priced on their cards: nothing there is rung up to be talked down)
+    if (canRobTill(kind) && kind !== "jewelry" && !haggleOf(v) && (econ.stockFor(kind) || []).length) add("haggle", "Haggle", haggle);
+    if (kind === "security") add("guard", "Guard work", function () { career("security"); });
+    if (kind === "drugs") add("corner", "Work a corner", function () { career("dealer"); });
+    if (kind === "bar") add("crew", "Run the night crew", function () { career("pimp"); });
+    if (CBZ.cityJobBoard) add("work", "Ask about work", function () { CBZ.cityJobBoard(); });
+    return R;
+  }
+  CBZ.cityCounterRows = function (v) { return counterRows(v).map(function (r) { return { id: r.id, label: r.label }; }); };
+  // (other files' "the shop menu is open" guards: there is no menu to be open)
+  CBZ.cityShopOpen = function () { return false; };
 
   // ---- BREAKING & ENTERING through a shot-out window. buildings.js only
   // reports the route (CBZ.cityWindowEntry fires when the player crosses the
@@ -2096,7 +1558,8 @@
         { id: "till-safe", slot: "f", bad: true,
           label: (t) => { const n = CBZ.cityTill.holds(t.lot, { point: "safe" }).amount;
                           return "Crack " + fmt$(n); },
-          canShow: (t) => CBZ.CONFIG.TILL_SAFE_POINTS && CBZ.cityTill.points(t.lot).indexOf("safe") >= 0 &&
+          // (a shop whose drop safe is a real safe in its back room, city/gunstore.js, is cracked there)
+          canShow: (t) => CBZ.CONFIG.TILL_SAFE_POINTS && !t.lot._realSafe && CBZ.cityTill.points(t.lot).indexOf("safe") >= 0 &&
                           CBZ.cityTill.holds(t.lot, { point: "safe" }).amount > 0,
           onSelect: (t) => crackSafe(t.lot) },
       ],
@@ -2109,19 +1572,19 @@
       };
     });
 
-    // THE KEEPER'S VERBS ARE BUY / ROB / SELL (city/roles.js). Buy opens the
-    // counter's own stock (interact.js vendor-shop -> CBZ.cityOpenShop) and is
-    // simply absent while the shop is shut; the old Knock line, the Eat $15 /
-    // Trim $25 / tool-bag shortcuts (a second price list beside the stock)
-    // are gone.
-    // the pawnbroker: one press fences the whole haul (the haggle's built into
-    // the counter's own sell prices — no second economy)
-    I.register("ped:vendor", {
-      id: "vendor-fence", slot: "k", prio: 10,
-      canShow: (v) => !!v.vendor && v.vendor.kind === "pawn" && sellTotal("pawn") > 0,
-      label: () => "Fence " + fmt$(sellTotal("pawn")),
-      onSelect: () => sellAll("pawn"),
-    });
+    // THE CLERK'S ROWS (counterRows above): what this counter does for you,
+    // as options on the person behind it. One option per row position; each
+    // asks the live row list, so a desk whose business changes while you
+    // stand at it (a queue being called, a drawer emptied) changes its rows.
+    for (let i = 0; i < ROW_MAX; i++) {
+      I.register("ped:vendor", {
+        id: "counter-row-" + i, prio: 86 - i,          // (his trade comes before the street's verbs about him)
+        canShow: (v) => !!v.vendor && !!counterRows(v)[i],
+        label: (v) => { const r = counterRows(v)[i]; return r ? r.label : ""; },
+        sub: (v) => { const r = counterRows(v)[i]; return r ? r.sub : ""; },
+        onSelect: (v) => { const r = counterRows(v)[i]; _rowsAt = -1; if (r) r.fn(v); },
+      });
+    }
     // YOUR trade pays at the counter too: a player working security collects a
     // watch retainer the same way an NPC guard draws a wage. Gated on the role
     // class string — any actor carrying the trade sees the same verb.

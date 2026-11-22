@@ -3,9 +3,9 @@
 
    WHY (the explicit financial loop the rest of the economy was missing):
    the city already had a bank POOL (g.cityBank: deposit it so death can't
-   drop it, withdraw a roll, bribe down a star) buried in the shops.js text
-   menu, and Zillow already KNEW how to finance a house — but there was no
-   place to BORROW, and no engine to service a loan. This module is both:
+   drop it, withdraw a roll), and Zillow already KNEW how to finance a house,
+   but there was no place to BORROW, and no engine to service a loan. This
+   module is both:
 
    • THE LOAN ENGINE (contract [E]) — CBZ.cityBankLoan = {offer,take,list,
      payExtra,tick}. It underwrites by NET WORTH + collateral, books loans
@@ -27,13 +27,18 @@
      borrow against the chain, finance the apartment with a real monthly note.
 
    • THE BRANCH — a real lobby you walk into: a teller line (counter + glass
-     registered as shatterable city glass), an ATM by the door for a quick
-     roll, a loan-officer desk that opens a focused apply panel, and the
-     steel vault at the back. Shared materials/geometry, cached label
-     sprites, the whole display visibility-gated by distance — the gunstore
-     architecture, applied to money. Mode-gated + headless-guarded; the
-     ENGINE itself mounts even headless so the financing chain resolves
-     under the parse harness.
+     registered as shatterable city glass) with a teller at each window, an
+     ATM by the door, the loan officer sitting at his desk, and the steel
+     vault at the back. Nothing here is a panel. You pay in and draw out with
+     a teller: the notes cross the counter in a hand, a withdrawal comes out
+     of that teller's own drawer, and you are handed the slip, a sheet you
+     hold up and read (CBZ.hmHold). You sit down with the loan officer and he
+     turns the offer round to you on the bank's paper; what you can say to it
+     (more, less, longer, shorter, sign, hand it back) are his options in the
+     city's interaction card. Shared materials/geometry, the whole display
+     visibility-gated by distance. Mode-gated + headless-guarded; the ENGINE
+     itself mounts even headless so the financing chain resolves under the
+     parse harness.
 ============================================================ */
 (function () {
   "use strict";
@@ -569,14 +574,15 @@
 
   const S = { lot: null, bk: null, group: null, stations: [], built: false,
               arena: null, noLotArena: null, near: false,
-              cx: 0, cz: 0, panel: null, panelOpen: false, mode: "personal",
-              pAmt: 0, pTerm: TERMS.personal, vault: null, at: null };
+              cx: 0, cz: 0, vault: null, at: null,
+              officer: null, officerPost: null, clientSeat: null, deskSeat: null };
   // THE ISLANDS' BRANCHES (city/islandmoney.js): every bank building on an
   // island stands its own windows, ATM and loan desk and lists them here
   // ({ kind: "teller"|"atm"|"loan", x, y, z, reach, name, box? }). An array on
   // CBZ, so a fit-out's entries leave with its island by themselves.
   const ISTATIONS = CBZ.bankStations = CBZ.bankStations || [];
-  function bankName() { return (S.at && S.at.name) || (S.bk && S.bk.name) || "Meridian Trust"; }
+  // (S.at: the island window or machine you are at; in Gang City the branch's own name)
+  function bankName() { return (S.at && !S.at.pos && S.at.name) || (S.bk && S.bk.name) || "Meridian Trust"; }
 
   // ---- shared materials (one each, _shared) ----------------------------------
   let M = null;
@@ -597,12 +603,6 @@
     return M;
   }
 
-  function tag(text, color, sx, sy) {
-    if (!CBZ.makeLabelSprite) return null;
-    const s = CBZ.makeLabelSprite(text, { color: color || "#bcd0ff" });
-    s.scale.set(sx || 1.8, sy || 0.44, 1);
-    return s;
-  }
   function box(w, h, d, mat) {
     const m = new THREE.Mesh(CBZ.boxGeom(w, h, d), mat);
     m.castShadow = false; m.receiveShadow = false;
@@ -845,9 +845,7 @@
         gl.position.set(rc.x, 1.75, rc.z); group.add(gl);
       }
     }
-    const tlabel = tag(bk.name, "#9fc0ff", 2.4, 0.5);
-    if (tlabel) { tlabel.position.set(cc.x, 2.8, cc.z); group.add(tlabel); }
-    S.stations.push({ kind: "teller", x: cc.x, z: cc.z, reach: REACH + 0.4 });
+    // (no "teller" point in the air: the tellers are people, posted at their windows below)
 
     // ---- THE ATM by the entrance (quick withdraw — a roll for the street).
     // It stands with its back to the near side wall, its face to the room.
@@ -860,8 +858,6 @@
       group.add(atm);
     }
     if (CBZ.colliders) CBZ.colliders.push({ minX: atmPos.x - 0.45, maxX: atmPos.x + 0.45, minZ: atmPos.z - 0.45, maxZ: atmPos.z + 0.45, y0: 0, y1: 1.6 });
-    const atag = tag("ATM", "#9fe0ff", 1.0, 0.36);
-    if (atag) { atag.position.set(atmPos.x, 1.95, atmPos.z); group.add(atag); }
     S.stations.push({ kind: "atm", x: atmPos.x, z: atmPos.z, reach: REACH });
 
     // ---- THE LOAN-OFFICER DESK on the open side (the apply-for-a-loan pod).
@@ -875,9 +871,31 @@
     }
     if (k) k.build(group);
     if (CBZ.colliders) CBZ.colliders.push({ minX: deskPos.x - 0.78, maxX: deskPos.x + 0.78, minZ: deskPos.z - 0.5, maxZ: deskPos.z + 0.5, y0: 0, y1: 0.82 });
-    const dlabel = tag("Loans & Mortgages", "#bcffd0", 1.9, 0.42);
-    if (dlabel) { dlabel.position.set(deskPos.x, 1.55, deskPos.z); group.add(dlabel); }
-    S.stations.push({ kind: "loan", x: deskPos.x, z: deskPos.z, reach: REACH + 0.3 });
+    // THE LOAN OFFICER AND HIS CLIENT. The desk's two chairs are seats (the
+    // officer's swivel on the counter side, the client's facing him), and the
+    // officer is a posted member of staff who sits in his: a whole person on
+    // the roster, with the vault staff's brain (city/keepers.js) under a gun.
+    {
+      const fy = (Array.isArray(lot.building.floorTops) && lot.building.floorTops[0] != null ? lot.building.floorTops[0] : 0.14);
+      const cf = Math.atan2(-inx, -inz);                              // the desk's customer side
+      const offX = deskPos.x - Math.sin(cf) * 0.85, offZ = deskPos.z - Math.cos(cf) * 0.85;
+      const cliX = deskPos.x + Math.sin(cf) * 0.85, cliZ = deskPos.z + Math.cos(cf) * 0.85;
+      if (CBZ.propRegisterSeat) {
+        S.deskSeat = CBZ.propRegisterSeat(offX, fy, offZ, cf, "office", lot, { cushion: 0.51 });
+        S.clientSeat = CBZ.propRegisterSeat(cliX, fy, cliZ, cf + Math.PI, "chair", lot, { cushion: 0.51 });
+      }
+      if (CBZ.cityStaffPost) {
+        S.officerPost = CBZ.cityStaffPost({
+          venue: "bank", id: "bank:loans:" + Math.round(deskPos.x) + "," + Math.round(deskPos.z), job: "loan officer",
+          archetype: "professional", x: offX, z: offZ, face: cf, seat: S.deskSeat || null, pose: S.deskSeat ? null : "table",
+          opts: { wealth: 0.66, outfit: 0x1c2028, aggr: 0.1 },
+          after: function (ped) { if (lot._vaultRoom) ped._vaultStaff = lot._vaultRoom.id; },
+        });
+      }
+      // a brass plate on the desk says what he does (the floating label is gone)
+      const kp = KIT ? KIT.create().frame(deskPos.x, 0, deskPos.z, cf) : null;
+      if (kp) { kp.box(0.42, 0.8, 0.3, 0.3, 0.07, 0.012, 0xc9a24a, "metal", -0.35); kp.build(group); }
+    }
 
     // ---- THE VAULT.
     // This used to be SET DRESSING and the file said so: a 2 m slab, a 1.5 m
@@ -915,27 +933,135 @@
     if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("bank-lobby", lot.building, group);
   }
 
-  // ============================================================
-  //  TELLER + ATM actions (mirror shops.js deposit/withdraw/bribe exactly)
-  // ============================================================
-  function deposit() {
-    const c = num(g.cash, 0);
-    if (c <= 0) { note("No cash on you to deposit.", 1.4); return; }
-    g.cityBank = num(g.cityBank, 0) + c; g.cash = 0;
+  /* ============================================================
+     THE COUNTER AND THE DESK ARE PEOPLE AND PAPER.
+
+     The teller window used to be a point in the air you pressed E at, and the
+     loan desk an HTML panel of plus and minus buttons. Now:
+
+     A TELLER (a posted teller, a branch's own clerk, an island's window) takes
+     your deposit and pays your withdrawal: the notes go across the counter in
+     a hand (CBZ.verbs.takeFrom), a withdrawal comes out of that teller's own
+     drawer (a real balance: a drawer that is empty sends you to the next
+     window), and you are handed the slip, a sheet of paper you hold up and
+     read (CBZ.hmHold), stamped with what moved and what the account holds.
+
+     THE LOAN OFFICER sits at his desk. You sit down opposite him and ask. He
+     turns the offer round to you: the same underwriting the engine above
+     does, written on the bank's paper. What you can say to it is what you
+     can say to a banker: more, less, longer, shorter, sign, or hand it back.
+     Signing puts your signature on the sheet and the money in your hand. He
+     also keeps your statement (what you owe, and paying it down).
+
+     The ATM is a machine and stays one.
+     ============================================================ */
+  function cashNow() { return num(g.cash, 0); }
+  function balNow() { return num(g.cityBank, 0); }
+  // who you are dealing with: the person himself, or the body behind an island window
+  function bodyOf(at) {
+    if (!at) return null;
+    if (at.pos && at.char) return at;
+    const rec = at.teller || at.manager;
+    try { return rec && rec.body ? rec.body() : null; } catch (e) { return null; }
+  }
+  function says(at, text, secs) {
+    const b = bodyOf(at);
+    if (b && !b.dead && CBZ.citySay) { try { CBZ.citySay(b, text, null, { secs: secs || 2.6, force: true }); return; } catch (e) {} }
+    if (b && CBZ.speech && CBZ.speech.say) { try { CBZ.speech.say(b, text, { force: true }); return; } catch (e) {} }
+    note(text, 2.2, { from: bankName(), app: "bank" });
+  }
+  // notes across the counter: out of his hand into yours
+  function across(at, then) {
+    const b = bodyOf(at), V = CBZ.verbs;
+    let S0 = null, done = false;
+    const fin = function () { if (done) return; done = true; then(); };
+    if (b && V && V.takeFrom) { try { S0 = V.takeFrom(CBZ.player, b, { at: "wristR", kind: "cash", pose: "card", dur: 0.55, onTaken: fin }); } catch (e) { S0 = null; } }
+    if (!S0) fin();
+  }
+
+  /* ---- THE BANK'S PAPER -----------------------------------------------------
+     One sheet, drawn on a canvas and held up to your eyes. It stands on the
+     right of the view so the person you are dealing with stays in it. */
+  const PAPER = { cv: null, kind: null };
+  function sheet() {
+    if (!PAPER.cv) { PAPER.cv = document.createElement("canvas"); PAPER.cv.width = 1500; PAPER.cv.height = 1000; }
+    const c = PAPER.cv.getContext("2d");
+    c.clearRect(0, 0, 1500, 1000);
+    return c;
+  }
+  function inWords(n) { return fmt$(n).replace("$", "") + " dollars"; }
+  function stampDay() { const d = CBZ.worldDay ? (CBZ.worldDay() | 0) : 0; return "DAY " + (d + 1); }
+  function acctNo() { const s = String(Math.abs(Math.round((S.cx || 7) * 131 + (S.cz || 3) * 17)) % 100000); return "0041-" + ("00000" + s).slice(-5); }
+  function paperBase(c, x, y, w, h, title, tone) {
+    c.save();
+    c.shadowColor = "rgba(0,0,0,.45)"; c.shadowBlur = 26; c.shadowOffsetY = 10;
+    c.fillStyle = tone || "#f7f3e8"; c.fillRect(x, y, w, h);
+    c.restore();
+    c.fillStyle = "#1d3a5c"; c.fillRect(x, y, w, 74);
+    c.fillStyle = "#f7f3e8"; c.textAlign = "left"; c.textBaseline = "middle";
+    c.font = "700 34px Georgia, 'Times New Roman', serif"; c.fillText(bankName().toUpperCase(), x + 28, y + 38);
+    c.textAlign = "right"; c.font = "600 22px Helvetica, Arial, sans-serif"; c.fillText(title, x + w - 28, y + 39);
+    c.textAlign = "left"; c.fillStyle = "#26231d";
+  }
+  function line(c, x, y, w, label, value, big) {
+    c.fillStyle = "#6a6458"; c.font = "600 21px Helvetica, Arial, sans-serif"; c.textAlign = "left"; c.fillText(label, x, y);
+    c.fillStyle = "#16140f"; c.font = (big ? "700 40px" : "600 28px") + " 'Courier New', Courier, monospace"; c.textAlign = "right"; c.fillText(value, x + w, y);
+    c.strokeStyle = "#b9b2a0"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, y + (big ? 26 : 20)); c.lineTo(x + w, y + (big ? 26 : 20)); c.stroke();
+  }
+  function hold(kind) {
+    PAPER.kind = kind;
+    const H = CBZ.hmHold;
+    if (!H || !H.open) return false;
+    if (H.isOpen() && H.canvas() === PAPER.cv) { H.update(PAPER.cv); return true; }
+    return H.open(PAPER.cv, { kind: "paper", onClose: function () { PAPER.kind = null; } });
+  }
+  function paperUp(kind) { const H = CBZ.hmHold; return !!(H && H.isOpen && H.isOpen() && H.canvas() === PAPER.cv && (!kind || PAPER.kind === kind)); }
+  function paperDown() { const H = CBZ.hmHold; if (paperUp() && H.close) H.close(); PAPER.kind = null; }
+  // a deposit or withdrawal slip, the teller's stamp on it
+  function drawSlip(what, amount, balance) {
+    const c = sheet(), x = 820, y = 250, w = 620, h = 500;
+    paperBase(c, x, y, w, h, what === "deposit" ? "DEPOSIT" : "WITHDRAWAL", what === "deposit" ? "#f7f3e8" : "#f3f0f7");
+    line(c, x + 34, y + 130, w - 68, "ACCOUNT", acctNo());
+    line(c, x + 34, y + 198, w - 68, "DATE", stampDay());
+    line(c, x + 34, y + 282, w - 68, what === "deposit" ? "CASH RECEIVED" : "CASH PAID", fmt$(amount), true);
+    c.fillStyle = "#6a6458"; c.font = "italic 20px Georgia, serif"; c.textAlign = "left"; c.fillText(inWords(amount), x + 34, y + 336);
+    line(c, x + 34, y + 398, w - 68, "BALANCE", fmt$(balance));
+    // the teller's stamp
+    c.save(); c.translate(x + w - 150, y + h - 62); c.rotate(-0.16);
+    c.strokeStyle = "#a3261f"; c.lineWidth = 4; c.strokeRect(-110, -30, 220, 60);
+    c.fillStyle = "#a3261f"; c.font = "800 26px Helvetica, Arial, sans-serif"; c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText(what === "deposit" ? "RECEIVED" : "PAID", 0, 0);
+    c.restore();
+    hold("slip");
+  }
+
+  // ---- THE TELLER -------------------------------------------------------------
+  // the drawer a withdrawal is paid out of: this teller's own window
+  function drawerFor(at) {
+    const b = bodyOf(at);
+    if (!b || !CBZ.cityBankDrawerAt) return null;
+    return CBZ.cityBankDrawerAt(b.pos.x, b.pos.z, 1.7, b.pos.y);
+  }
+  function deposit(at) {
+    const c = cashNow();
+    if (c <= 0) { says(at, "Nothing to pay in today?"); return false; }
+    g.cityBank = balNow() + c; g.cash = 0;
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Deposited " + fmt$(c) + ", balance " + fmt$(g.cityBank) + ".", 2.2, { from: bankName(), app: "bank" });
+    const b = bodyOf(at);
+    if (b) b._faceT = Math.max(b._faceT || 0, 1.6);
+    says(at, "That's " + fmt$(c) + " in. Your slip.");
+    drawSlip("deposit", c, g.cityBank);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+    return true;
   }
   // THE MACHINE HAS TO HAVE THE NOTES. A TAKE IS A TRANSFER (city/shops.js's
   // CBZ.cityTill), and that cuts both ways: an ATM dispensing your OWN money
   // is still a physical box with a cash cassette in it, and cassettes run
   // out. The cassette is a declared cash point on the ledger, so it is one
-  // balance — the machine can be emptied by ordinary withdrawals, it refills
-  // on the branch's own service run, and anything that wants to TAKE it (a
-  // crowbar, a truck and a chain) asks the same ledger every other score in
-  // the game asks. Real cassettes carry $20k-$200k; this one is derived, not
-  // typed — see atmCassette().
+  // balance: the machine can be emptied by ordinary withdrawals, it refills
+  // on the branch's own service run, and anything that wants to TAKE it asks
+  // the same ledger every other score in the game asks.
   function atmCassette() {
     if (!S.lot) return null;
     if (S._atmBox) return S._atmBox;
@@ -943,9 +1069,7 @@
     if (!TL || !TL.declare || !TL.districtCash) return null;
     // a branch's ATM is stocked out of the same district cash the branch's own
     // vault is derived from: one service run's worth (a day) of what this part
-    // of town physically banks, split across the branches serving it. That
-    // puts a downtown machine near the top of the real $20k-$200k band and a
-    // projects machine near the bottom, with no number typed here.
+    // of town physically banks, split across the branches serving it.
     const box = { _atmOf: 0 };
     TL.declare(box, {
       name: "Meridian Trust ATM", kind: "atm", point: "vault",
@@ -960,162 +1084,195 @@
     return box;
   }
   // the service run: a machine is restocked on the same daily cadence the
-  // rest of the ledger banks on. No timer of its own — it reads the clock.
+  // rest of the ledger banks on. No timer of its own: it reads the clock.
   function atmService(box) {
     const day = (CBZ.paceDay ? CBZ.paceDay() : 0) | 0;
     if (box._atmSvc !== day) { box._atmSvc = day; box._atmBal = box._atmOf; }
   }
-  function withdraw(amount, atMachine, cassette) {
-    let amt = Math.min(amount || 500, num(g.cityBank, 0));
-    if (amt <= 0) { note("Bank's empty.", 1.4); return; }
-    if (atMachine) {
-      const box = (CBZ.cityTill && CBZ.cityTill.take) ? (cassette || atmCassette()) : null;
-      if (box) {
-        atmService(box);
-        const got = CBZ.cityTill.take(box, { max: amt, by: "player" });
-        if (!(got.taken > 0)) { note("Out of cash.", 2.2, { from: bankName(), app: "bank" }); return; }
-        if (got.taken < amt) note("Machine could only dispense " + fmt$(got.taken) + ".", 2, { from: bankName(), app: "bank" });
-        amt = got.taken;
-      }
+  // out of the machine (its cassette) or out of a teller's drawer, into your hand
+  function withdraw(amount, at) {
+    let amt = Math.min(amount || 500, balNow());
+    if (amt <= 0) { if (at && at.kind === "atm") note("Insufficient funds.", 1.8, { from: bankName(), app: "bank" }); else says(at, "There's nothing in the account."); return false; }
+    const TL = CBZ.cityTill, machine = !!(at && at.kind === "atm");
+    const box = !(TL && TL.take) ? null : machine ? (at.box || atmCassette()) : drawerFor(at);
+    if (box) {
+      if (machine) atmService(box);
+      const got = TL.take(box, { max: amt, by: "player" });
+      if (!(got.taken > 0)) { if (machine) note("Out of cash.", 2.2, { from: bankName(), app: "bank" }); else says(at, "My drawer's empty. Try the next window."); return false; }
+      if (got.taken < amt) { if (machine) note("Machine could only dispense " + fmt$(got.taken) + ".", 2, { from: bankName(), app: "bank" }); else says(at, "I can do " + fmt$(got.taken) + " out of this drawer."); }
+      amt = got.taken;
     }
-    g.cityBank = num(g.cityBank, 0) - amt;
-    if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(amt); else g.cash = num(g.cash, 0) + amt;
-    if (CBZ.sfx) CBZ.sfx("coin");
-    note("Withdrew " + fmt$(amt) + ".", 1.6, { from: bankName(), app: "bank" });
+    g.cityBank = balNow() - amt;
+    const pay = function () {
+      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(amt); else g.cash = cashNow() + amt;
+      if (CBZ.sfx) CBZ.sfx("coin");
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    };
+    if (machine) pay();
+    else { says(at, fmt$(amt) + ". Count it if you like."); across(at, function () { pay(); drawSlip("withdrawal", amt, g.cityBank); }); }
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
-  }
-  function bribe() {
-    const stars = num(g.wanted, 0) | 0;
-    if (stars <= 0) { note("You're clean, nothing to pay off.", 1.4); return; }
-    const base = (CBZ.CITY && CBZ.CITY.econ && CBZ.CITY.econ.bribeBase) || 150;
-    const cost = base * stars;
-    if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(cost))) { note("A bribe costs " + fmt$(cost) + " in cash right now.", 1.8); return; }
-    const T = CBZ.CITY && CBZ.CITY.starHeat;
-    if (T) g.heat = Math.max(0, T[Math.max(0, stars - 1)] - 1);
-    if (CBZ.city && CBZ.city.addHeat) CBZ.city.addHeat(0);
-    note("Paid off the cops, down to " + (stars - 1) + "★ (" + fmt$(cost) + ").", 2.2);
-    if (CBZ.sfx) CBZ.sfx("coin");
+    return true;
   }
 
-  // ============================================================
-  //  THE LOAN APPLY PANEL (focused DOM, self-managed; gunstore prompt style)
-  // ============================================================
+  // ---- THE LOAN OFFICER ---------------------------------------------------------
+  const LOAN = { amt: 0, term: TERMS.personal, at: null, signed: false };
   function clampPersonalAmt(v) {
     const cap = Math.max(0, personalCapacity());
     v = Math.max(MIN_PRINCIPAL, Math.round(num(v, MIN_PRINCIPAL)));
     return Math.min(v, Math.max(MIN_PRINCIPAL, cap));
   }
-  function panelEl() {
-    if (S.panel) return S.panel;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "bankLoanPanel";
-    d.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;display:none;" +
-      "background:rgba(13,16,21,.96);border:1px solid #3a4150;border-radius:16px;padding:18px 20px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;width:min(420px,86vw);box-shadow:0 18px 60px rgba(0,0,0,.6)";
-    document.body.appendChild(d);
-    S.panel = d;
-    return d;
-  }
-  function openPanel(st) {
-    const el = panelEl(); if (!el) return;
-    S.at = st || null;
-    S.panelOpen = true; CBZ.cityMenuOpen = true;
-    S.mode = "personal"; S.pAmt = clampPersonalAmt(Math.max(PERSONAL_FLOOR, Math.round(personalCapacity() * 0.5)));
-    S.pTerm = TERMS.personal;
-    renderPanel();
-    el.style.display = "block";
-    if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-  }
-  function closePanel() {
-    S.panelOpen = false; CBZ.cityMenuOpen = false;
-    if (S.panel) S.panel.style.display = "none";
-    if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
-  }
-  function renderPanel() {
-    const el = S.panel; if (!el) return;
-    const cap = personalCapacity();
-    const amt = clampPersonalAmt(S.pAmt); S.pAmt = amt;
-    const term = S.pTerm;
+  function loanStep() { const cap = Math.max(1000, personalCapacity()); return cap > 60000 ? 10000 : cap > 12000 ? 2500 : 1000; }
+  function drawOffer(signed) {
+    const amt = LOAN.amt = clampPersonalAmt(LOAN.amt), term = LOAN.term;
     const o = offer("personal", amt, {});
-    const pay = o.approved ? o.payment : 0;
-    const total = o.approved ? pay * term : 0;
+    const pay = o.approved ? paymentFor(o.principal, o.rate, term) : 0;
+    const c = sheet(), x = 800, y = 110, w = 650, h = 780;
+    paperBase(c, x, y, w, h, "PERSONAL LOAN");
+    c.fillStyle = "#6a6458"; c.font = "italic 21px Georgia, serif"; c.fillText("Offered to the bearer on the terms below.", x + 34, y + 110);
+    if (!o.approved) {
+      c.fillStyle = "#a3261f"; c.font = "800 44px Helvetica, Arial, sans-serif"; c.fillText("DECLINED", x + 34, y + 220);
+      c.fillStyle = "#26231d"; c.font = "500 26px Georgia, serif";
+      wrap(c, o.reason || "The bank cannot lend on this application.", x + 34, y + 290, w - 68, 36);
+    } else {
+      line(c, x + 34, y + 190, w - 68, "PRINCIPAL", fmt$(o.principal), true);
+      line(c, x + 34, y + 272, w - 68, "RATE", (o.rate * 100).toFixed(1).replace(/\.0$/, "") + "% A YEAR");
+      line(c, x + 34, y + 340, w - 68, "TERM", term + " CYCLES");
+      line(c, x + 34, y + 408, w - 68, "PAYMENT", fmt$(pay) + " A CYCLE", true);
+      line(c, x + 34, y + 490, w - 68, "TOTAL REPAID", fmt$(pay * term));
+      c.fillStyle = "#6a6458"; c.font = "500 19px Helvetica, Arial, sans-serif"; c.textAlign = "left";
+      wrap(c, "Paid each cycle out of cash, then the account. Net worth on file " + fmt$(netWorth()) + "; the bank will lend up to " + fmt$(Math.max(0, personalCapacity())) + " unsecured.", x + 34, y + 548, w - 68, 26);
+    }
+    // the signature line
+    c.strokeStyle = "#26231d"; c.lineWidth = 2; c.beginPath(); c.moveTo(x + 34, y + h - 90); c.lineTo(x + w - 230, y + h - 90); c.stroke();
+    c.fillStyle = "#6a6458"; c.font = "600 17px Helvetica, Arial, sans-serif"; c.textAlign = "left"; c.fillText("BORROWER", x + 34, y + h - 66);
+    c.textAlign = "right"; c.fillText(stampDay(), x + w - 34, y + h - 66);
+    if (signed) {
+      c.strokeStyle = "#1a2a66"; c.lineWidth = 3.5; c.lineCap = "round"; c.beginPath();
+      let px = x + 60, py = y + h - 100; c.moveTo(px, py);
+      for (let i = 0; i < 9; i++) { const nx = px + 34, ny = y + h - 100 + (i % 2 ? 14 : -26) * (1 - i / 14); c.quadraticCurveTo(px + 10, ny - 16, nx, ny); px = nx; py = ny; }
+      c.stroke();
+      c.save(); c.translate(x + w - 130, y + h - 150); c.rotate(-0.14);
+      c.strokeStyle = "#2e7d4f"; c.lineWidth = 4; c.strokeRect(-96, -28, 192, 56);
+      c.fillStyle = "#2e7d4f"; c.font = "800 26px Helvetica, Arial, sans-serif"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("FUNDED", 0, 0);
+      c.restore();
+    }
+    hold("offer");
+    return o;
+  }
+  function wrap(c, text, x, y, w, lh) {
+    const words = String(text).split(/\s+/); let ln = "";
+    for (let i = 0; i < words.length; i++) {
+      const t = ln ? ln + " " + words[i] : words[i];
+      if (c.measureText(t).width > w && ln) { c.fillText(ln, x, y); y += lh; ln = words[i]; } else ln = t;
+    }
+    if (ln) c.fillText(ln, x, y);
+    return y;
+  }
+  function loanName(r) { return r.kind === "mortgage" ? "MORTGAGE" : r.kind === "auto" ? "AUTO NOTE" : "PERSONAL LOAN"; }
+  function drawStatement() {
     const open = liveLoans();
-    let openRows = "";
-    if (open.length) {
-      openRows = "<div style='margin-top:12px;border-top:1px solid #2a313c;padding-top:10px'>" +
-        "<div style='color:#9fb0c8;font-size:13px;margin-bottom:6px'>Your loans (auto-paid each cycle from cash → bank):</div>";
-      for (const r of open) {
-        openRows += "<div style='display:flex;justify-content:space-between;gap:10px;font-size:13px;margin:3px 0'>" +
-          "<span>" + (r.kind === "mortgage" ? "Mortgage" : r.kind === "auto" ? "Auto" : "Personal") +
-          ", " + fmt$(Math.round(r.balance)) + " left</span>" +
-          "<button data-pay='" + r.id + "' style='cursor:pointer;background:#2b3340;border:1px solid #3a4150;color:#bcffd0;border-radius:8px;padding:2px 8px;font-family:inherit'>Pay $500</button></div>";
-      }
-      openRows += "</div>";
+    const c = sheet(), x = 800, y = 150, w = 650, h = 700;
+    paperBase(c, x, y, w, h, "STATEMENT");
+    line(c, x + 34, y + 130, w - 68, "ACCOUNT " + acctNo(), fmt$(balNow()));
+    if (!open.length) { c.fillStyle = "#26231d"; c.font = "500 28px Georgia, serif"; c.textAlign = "left"; c.fillText("Nothing owing.", x + 34, y + 230); }
+    for (let i = 0; i < Math.min(5, open.length); i++) {
+      const r = open[i], yy = y + 220 + i * 84;
+      line(c, x + 34, yy, w - 68, loanName(r) + "  " + (Math.max(0, (r.termTicks | 0) - (r.paidTicks | 0))) + " CYCLES LEFT", fmt$(Math.round(r.balance)), true);
+      c.fillStyle = "#6a6458"; c.font = "500 18px Helvetica, Arial, sans-serif"; c.textAlign = "left";
+      c.fillText(fmt$(r.payment) + " a cycle at " + Math.round(num(r.rate, 0) * 100) + "%", x + 34, yy + 46);
     }
-    el.innerHTML =
-      "<div style='font-size:20px;font-weight:600;margin-bottom:2px'>" + bankName() + "</div>" +
-      "<div style='color:#7f8794;font-size:13px;margin-bottom:14px'>Net worth " + fmt$(netWorth()) +
-        ", unsecured credit up to <span style='color:#bcffd0'>" + fmt$(cap) + "</span></div>" +
-      "<div style='display:flex;gap:8px;margin-bottom:14px'>" +
-        "<div style='flex:1;background:#161b22;border:1px solid #2a313c;border-radius:10px;padding:10px'>" +
-          "<div style='color:#9fb0c8;font-size:12px'>Personal loan</div>" +
-          "<div style='display:flex;align-items:center;gap:8px;margin-top:8px'>" +
-            "<button data-amt='-1000' style='cursor:pointer;background:#2b3340;border:1px solid #3a4150;color:#e8eef7;border-radius:8px;padding:4px 10px;font-family:inherit'>−</button>" +
-            "<div style='flex:1;text-align:center;font-size:18px;color:#bcd0ff'>" + fmt$(amt) + "</div>" +
-            "<button data-amt='1000' style='cursor:pointer;background:#2b3340;border:1px solid #3a4150;color:#e8eef7;border-radius:8px;padding:4px 10px;font-family:inherit'>+</button>" +
-          "</div>" +
-          "<div style='display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:#9fb0c8'>Term" +
-            "<button data-term='-12' style='cursor:pointer;background:#2b3340;border:1px solid #3a4150;color:#e8eef7;border-radius:8px;padding:2px 8px;font-family:inherit'>−</button>" +
-            "<span style='color:#e8eef7'>" + term + " cycles</span>" +
-            "<button data-term='12' style='cursor:pointer;background:#2b3340;border:1px solid #3a4150;color:#e8eef7;border-radius:8px;padding:2px 8px;font-family:inherit'>+</button>" +
-          "</div>" +
-          "<div style='margin-top:10px;font-size:13px'>Rate <b style='color:#ffd166'>" + Math.round(o.rate * 100) + "%</b>" +
-            ", payment <b style='color:#bcffd0'>" + fmt$(pay) + "</b>/cycle" +
-            "<div style='color:#7f8794;font-size:12px;margin-top:2px'>~" + fmt$(total) + " over the term</div></div>" +
-          "<button data-take='personal' style='cursor:pointer;width:100%;margin-top:10px;background:#1e7a44;border:1px solid #2a9c58;color:#eafff0;border-radius:10px;padding:8px;font-family:inherit;font-size:14px'>Borrow " + fmt$(amt) + "</button>" +
-        "</div>" +
-      "</div>" +
-      "<div style='background:#161b22;border:1px solid #2a313c;border-radius:10px;padding:10px;font-size:13px;color:#9fb0c8'>" +
-        "<b style='color:#bcd0ff'>Mortgage pre-approval:</b> financing a home? The realtor desk or property market books it through us. 20% down, ~6% on the balance, auto-paid each cycle." +
-      "</div>" +
-      openRows +
-      "<div style='display:flex;justify-content:flex-end;gap:8px;margin-top:16px'>" +
-        "<button data-close='1' style='cursor:pointer;background:#2b3340;border:1px solid #3a4150;color:#e8eef7;border-radius:10px;padding:8px 16px;font-family:inherit'>Close</button>" +
-      "</div>";
-    // wire the buttons (delegated each render — the panel is tiny)
-    el.querySelectorAll("[data-amt]").forEach(function (b) { b.onclick = function () { S.pAmt = clampPersonalAmt(S.pAmt + (+b.getAttribute("data-amt"))); renderPanel(); }; });
-    el.querySelectorAll("[data-term]").forEach(function (b) { b.onclick = function () { S.pTerm = Math.max(12, Math.min(120, S.pTerm + (+b.getAttribute("data-term")))); renderPanel(); }; });
-    el.querySelectorAll("[data-pay]").forEach(function (b) { b.onclick = function () { payExtra(b.getAttribute("data-pay"), 500); renderPanel(); }; });
-    const tk = el.querySelector("[data-take]"); if (tk) tk.onclick = function () { takePersonal(); };
-    const cl = el.querySelector("[data-close]"); if (cl) cl.onclick = function () { closePanel(); };
+    line(c, x + 34, y + h - 60, w - 68, "TOTAL OWING", fmt$(totalOwed()), true);
+    hold("statement");
   }
-  function takePersonal() {
-    const amt = clampPersonalAmt(S.pAmt);
+  // sit the player down opposite him (the client's chair at the desk), when there is one
+  function sitDown() {
+    const P = CBZ.player, seat = S.clientSeat;
+    if (!P || !seat || P._propSeat === seat || !CBZ.propSit) return;
+    if (Math.hypot(P.pos.x - seat.x, P.pos.z - seat.z) < 3.2) { try { CBZ.propSit(P, seat, null); } catch (e) {} }
+  }
+  function askLoan(at) {
+    LOAN.at = at; LOAN.signed = false;
+    if (bodyOf(at) === S.officer) sitDown();
+    const refuse = creditRefusal();
+    if (refuse) { says(at, "I can't write you anything today. " + refuse + "."); return; }
+    LOAN.amt = clampPersonalAmt(Math.max(PERSONAL_FLOOR, Math.round(personalCapacity() * 0.5)));
+    LOAN.term = TERMS.personal;
+    const o = drawOffer(false);
+    says(at, o.approved ? "Here's what I can do. Read it over." : "I'm sorry. Not today.");
+  }
+  function loanChange(dAmt, dTerm) {
+    if (LOAN.signed) return;
+    if (dAmt) LOAN.amt = clampPersonalAmt(LOAN.amt + dAmt * loanStep());
+    if (dTerm) LOAN.term = Math.max(12, Math.min(120, LOAN.term + dTerm));
+    const cap = Math.max(MIN_PRINCIPAL, personalCapacity());
+    if (dAmt > 0 && LOAN.amt >= cap) says(LOAN.at, "That's as far as I can go.");
+    drawOffer(false);
+  }
+  function loanSign() {
+    if (LOAN.signed) return;
+    const amt = clampPersonalAmt(LOAN.amt);
     const o = offer("personal", amt, {});
-    if (!o.approved || o.principal < MIN_PRINCIPAL) { note("Declined, " + (o.reason || "not approved") + ".", 2, { from: bankName(), app: "bank" }); return; }
-    o.purpose = "personal"; o.termTicks = S.pTerm; o.payment = paymentFor(o.principal, o.rate, S.pTerm);
+    if (!o.approved || o.principal < MIN_PRINCIPAL) { says(LOAN.at, "I can't fund that. " + (o.reason || "It was declined") + "."); return; }
+    o.purpose = "personal"; o.termTicks = LOAN.term; o.payment = paymentFor(o.principal, o.rate, LOAN.term);
+    // (the engine pays the principal out as it books the note)
     const id = take(o);
-    if (id) {
-      big("Loan funded, " + fmt$(o.principal) + " in your pocket.");
-      note("Borrowed " + fmt$(o.principal) + " at " + Math.round(o.rate * 100) + "%, " + fmt$(o.payment) + " a cycle, auto-paid.", 2.6);
-      renderPanel();
-    }
+    if (!id) { says(LOAN.at, "It didn't go through."); return; }
+    LOAN.signed = true;
+    drawOffer(true);
+    if (CBZ.sfx) CBZ.sfx("coin");
+    says(LOAN.at, "Funded. " + fmt$(o.payment) + " a cycle, starting next cycle.");
+  }
+  function payDown(i, all) {
+    const open = liveLoans(), r = open[i];
+    if (!r) return;
+    const want = all ? Math.ceil(r.balance) : 500;
+    const paid = payExtra(r.id, want);
+    if (!(paid > 0)) says(LOAN.at, "You haven't got it on you, or in the account.");
+    else { if (CBZ.sfx) CBZ.sfx("coin"); says(LOAN.at, fmt$(paid) + " off the " + loanName(r).toLowerCase() + "."); }
+    drawStatement();
   }
 
-  // ---- THE STATIONS ARE CANDIDATES (city/interactions.js registerFixtures) ----
-  // The teller window, the ATM and the loan desk are things in the registry:
-  // E does the obvious one on the station you look at, Q / a tap shows the
-  // rest. No private prompt and no private E listener.
+  /* ---- WHO TAKES WHICH ASK. The same asks, on a person (a posted teller or
+     loan officer, a branch's own clerk) and on an island branch's window
+     (CBZ.bankStations, staffed by city/islandmoney.js). */
+  function isTellerPed(p) { return !!(p && !p.dead && p._venueStaff === "bank" && /teller/i.test(p.job || "")); }
+  function isBankClerk(v) { return !!(v && !v.dead && v.vendor && v.vendor.kind === "bank"); }
+  function isOfficerPed(p) { return !!(p && !p.dead && p._venueStaff === "bank" && /loan officer/i.test(p.job || "")); }
+  function calm(p) { return !(p.surrender || p.poseHandsUp || p.rage || p._keepFree || p.state === "flee"); }
+  function staffed(st) { if (!st || typeof st.ok !== "function") return true; try { return !!st.ok(); } catch (e) { return true; } }
+  const TELLER_ASKS = [
+    { id: "deposit", prio: 84, label: function () { return "Pay in " + fmt$(cashNow()); }, show: function () { return cashNow() > 0; }, run: function (at) { deposit(at); } },
+    { id: "draw500", prio: 83, label: function () { return "Draw out " + fmt$(Math.min(500, balNow())); }, show: function () { return balNow() > 0; }, run: function (at) { withdraw(500, at); } },
+    { id: "draw5000", prio: 82, label: function () { return "Draw out " + fmt$(Math.min(5000, balNow())); }, show: function () { return balNow() > 500; }, run: function (at) { withdraw(5000, at); } },
+    { id: "drawall", prio: 81, label: function () { return "Draw it all, " + fmt$(balNow()); }, show: function () { return balNow() > 5000; }, run: function (at) { withdraw(balNow(), at); } },
+  ];
+  const up = paperUp;
+  const LOAN_ASKS = [
+    // the offer in your hands
+    { id: "sign", prio: 85, label: "Sign it", show: function () { return up("offer") && !LOAN.signed; }, run: loanSign },
+    { id: "back", prio: 84, label: "Hand it back", show: function () { return up("offer") || up("statement"); }, run: paperDown },
+    { id: "more", prio: 83, label: function () { return "Ask for " + fmt$(loanStep()) + " more"; }, show: function () { return up("offer") && !LOAN.signed && LOAN.amt < personalCapacity(); }, run: function () { loanChange(1, 0); } },
+    { id: "less", prio: 82, label: function () { return "Ask for " + fmt$(loanStep()) + " less"; }, show: function () { return up("offer") && !LOAN.signed && LOAN.amt > MIN_PRINCIPAL; }, run: function () { loanChange(-1, 0); } },
+    { id: "longer", prio: 81, label: "Longer to pay", show: function () { return up("offer") && !LOAN.signed && LOAN.term < 120; }, run: function () { loanChange(0, 12); } },
+    { id: "shorter", prio: 80, label: "Shorter", show: function () { return up("offer") && !LOAN.signed && LOAN.term > 12; }, run: function () { loanChange(0, -12); } },
+    // the statement in your hands
+    { id: "pay0", prio: 85, label: function () { const r = liveLoans()[0]; return "Pay " + fmt$(500) + " off the " + (r ? loanName(r).toLowerCase() : "loan"); }, show: function () { return up("statement") && liveLoans().length > 0; }, run: function () { payDown(0, false); } },
+    { id: "clear0", prio: 83, label: function () { const r = liveLoans()[0]; return "Clear it, " + fmt$(r ? Math.ceil(r.balance) : 0); }, show: function () { const r = liveLoans()[0]; return up("statement") && !!r && cashNow() + balNow() >= r.balance; }, run: function () { payDown(0, true); } },
+    { id: "pay1", prio: 82, label: function () { const r = liveLoans()[1]; return "Pay " + fmt$(500) + " off the " + (r ? loanName(r).toLowerCase() : "loan"); }, show: function () { return up("statement") && liveLoans().length > 1; }, run: function () { payDown(1, false); } },
+    // nothing in your hands yet
+    { id: "ask", prio: 85, label: "A loan", show: function () { return !up(); }, run: function (at) { askLoan(at); } },
+    { id: "owe", prio: 84, label: "What I owe", show: function () { return !up() && liveLoans().length > 0; }, run: function (at) { LOAN.at = at; if (bodyOf(at) === S.officer) sitDown(); drawStatement(); says(at, "Your statement."); } },
+    { id: "mortgage", prio: 76, label: "A mortgage", show: function () { return !up(); }, run: function (at) { says(at, "The agent writes those through us when you buy. Twenty down, the rest on a note.", 3.2); } },
+  ];
+
+  // ---- THE ATM IS A FIXTURE; an island's windows and desk are too ---------------
   function inBank(px, pz) {
     const B = S.bk && S.bk.bounds;
     return !!B && px >= B.minX - 1.5 && px <= B.maxX + 1.5 && pz >= B.minZ - 1.5 && pz <= B.maxZ + 1.5;
   }
-  const cash = () => num(g.cash, 0), bal = () => num(g.cityBank, 0), stars = () => num(g.wanted, 0) | 0;
   let fixturesWired = false;
   const _stOut = [];
   function stationsAt(ctx, px, pz) {
-    if (S.panelOpen) return null;
     _stOut.length = 0;
     if (g.mode === "city") {
       if (S.built && S.near && inBank(px, pz)) for (let i = 0; i < S.stations.length; i++) _stOut.push(S.stations[i]);
@@ -1130,29 +1287,54 @@
     }
     return _stOut.length ? _stOut : null;
   }
-  // an island window or desk is open while somebody is behind it
-  // (city/islandmoney.js gives its stations an ok()); the ATM always is
-  function staffed(st) { if (!st || typeof st.ok !== "function") return true; try { return !!st.ok(); } catch (e) { return true; } }
+  // (an ask of a banker prints as written, not cut down to its verb: city/verbword.js)
+  function asIs(a) {
+    const raw = a.label;
+    return function (t, ctx) {
+      const s = typeof raw === "function" ? raw(t, ctx) : raw;
+      const VW = CBZ.cityVerbWord;
+      if (VW && VW.keep) VW.keep(s);
+      return s;
+    };
+  }
   function wireFixtures() {
-    if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
+    const I = CBZ.interactions;
+    if (fixturesWired || !I || !I.registerFixtures || !I.register) return;
     fixturesWired = true;
-    CBZ.interactions.registerFixtures({
+    TELLER_ASKS.concat(LOAN_ASKS).forEach(function (a) { a.label = asIs(a); });
+    const verbs = [
+      { id: "bank-atm-500", slot: "e", prio: 6, label: function () { return "Withdraw " + fmt$(Math.min(500, balNow())); },
+        canShow: function (st) { return st.kind === "atm" && balNow() > 0; }, onSelect: function (st) { S.at = st; withdraw(500, st); } },
+      { id: "bank-atm-100", prio: 4, label: function () { return "Withdraw " + fmt$(Math.min(100, balNow())); },
+        canShow: function (st) { return st.kind === "atm" && balNow() > 100; }, onSelect: function (st) { S.at = st; withdraw(100, st); } },
+    ];
+    // an island window and an island desk: the same asks, of whoever is behind it
+    TELLER_ASKS.forEach(function (a, i) {
+      verbs.push({ id: "bank-window-" + a.id, slot: i === 0 ? "e" : undefined, prio: a.prio - 76, label: a.label,
+        canShow: function (st) { return st.kind === "teller" && staffed(st) && a.show(); }, onSelect: function (st) { S.at = st; a.run(st); } });
+    });
+    LOAN_ASKS.forEach(function (a) {
+      verbs.push({ id: "bank-desk-" + a.id, slot: a.id === "ask" || a.id === "sign" || a.id === "pay0" ? "e" : undefined, prio: a.prio - 76, label: a.label,
+        canShow: function (st) { return st.kind === "loan" && staffed(st) && a.show(); }, onSelect: function (st) { S.at = st; LOAN.at = st; a.run(st); } });
+    });
+    I.registerFixtures({
       id: "bank-station", kind: "bank-station", prio: 9, islands: true,
       list: stationsAt,
       name: function (st) { return st.name || bankName(); },
       reach: function (st) { return st.reach || REACH; },
       dot: function () { return LOOK_DOT; },
-      verbs: [
-        { id: "bank-deposit", slot: "e", prio: 6, label: () => "Deposit " + fmt$(cash()),
-          canShow: (st) => staffed(st) && st.kind === "teller" && cash() > 0, onSelect: (st) => { S.at = st; deposit(); } },
-        { id: "bank-payoff", prio: 5, label: "Pay off the heat",
-          canShow: (st) => staffed(st) && st.kind === "teller" && stars() > 0, onSelect: bribe },
-        { id: "bank-withdraw", slot: "e", prio: 6, label: "Withdraw " + fmt$(500),
-          canShow: (st) => staffed(st) && (st.kind === "atm" || st.kind === "teller") && bal() > 0, onSelect: (st) => { S.at = st; withdraw(500, st.kind === "atm", st.box); } },
-        { id: "bank-withdraw-small", prio: 4, label: "Withdraw " + fmt$(100),
-          canShow: (st) => staffed(st) && (st.kind === "atm" || st.kind === "teller") && bal() > 0, onSelect: (st) => { S.at = st; withdraw(100, st.kind === "atm", st.box); } },
-        { id: "bank-loan", slot: "e", prio: 6, label: "Borrow", canShow: (st) => staffed(st) && st.kind === "loan", onSelect: (st) => openPanel(st) },
-      ],
+      verbs: verbs,
+    });
+    // a person: a posted teller, a branch's own clerk, the loan officer
+    TELLER_ASKS.forEach(function (a) {
+      I.register("ped:civ", { id: "teller-" + a.id, prio: a.prio, label: a.label,
+        canShow: function (p) { return isTellerPed(p) && calm(p) && a.show(); }, onSelect: function (p) { a.run(p); } });
+      I.register("ped:vendor", { id: "bankclerk-" + a.id, prio: a.prio, label: a.label,
+        canShow: function (v) { return isBankClerk(v) && calm(v) && a.show(); }, onSelect: function (v) { a.run(v); } });
+    });
+    LOAN_ASKS.forEach(function (a) {
+      I.register("ped:civ", { id: "banker-" + a.id, prio: a.prio, label: a.label,
+        canShow: function (p) { return isOfficerPed(p) && calm(p) && a.show(); }, onSelect: function (p) { LOAN.at = p; a.run(p); } });
     });
   }
 
@@ -1163,6 +1345,7 @@
       if (S.arena === arena) return true;
       // arena rebuilt (new run) — the old group died with the old root
       S.built = false; S.group = null; S.stations = []; S.near = false; S.lot = null; S.bk = null;
+      S.officer = null; S.officerPost = null; S.clientSeat = null; S.deskSeat = null; S._atmBox = null;
     }
     if (!arena) return false;
     if (S.noLotArena === arena) return false;
@@ -1188,36 +1371,29 @@
     return true;
   }
 
-  // ---- per-frame: vis-gate fixtures + drive the prompt -----------------------
+  // ---- per-frame: vis-gate the fixtures, keep the paper honest ------------------
   CBZ.onUpdate(38.4, function (dt) {
-    if (!g || !econOn()) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; if (S.panelOpen) closePanel(); return; }
+    if (!g || !econOn()) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; if (paperUp()) paperDown(); return; }
     wireFixtures();
-    // the islands: their branches are city/islandmoney.js's (ISTATIONS); the
-    // panel stays open while you stand at the desk you opened it from
+    const P = CBZ.player;
+    // the bank's paper goes back across the desk when you walk off with the deal undone
+    if (paperUp() && P) {
+      const at = LOAN.at || S.at, b = bodyOf(at);
+      const ax = b ? b.pos.x : at ? at.x : null, az = b ? b.pos.z : at ? at.z : null;
+      if (PAPER.kind !== "slip" && (ax == null || Math.hypot(P.pos.x - ax, P.pos.z - az) > 5 || P.dead || P.driving || (b && !calm(b)))) paperDown();
+    }
+    // (the islands' branches are city/islandmoney.js's: CBZ.bankStations)
     if (!(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) {
       if (S.group && S.group.visible) S.group.visible = false; S.near = false;
-      if (S.panelOpen) {
-        const P0 = CBZ.player, at = S.at;
-        const far = !at || !P0 || Math.hypot(P0.pos.x - at.x, P0.pos.z - at.z) > 5 || ISTATIONS.indexOf(at) < 0;
-        if (far || g.state !== "playing" || P0.dead || P0.driving) closePanel();
-      }
       return;
     }
     if (!ensure()) return;
-    const P = CBZ.player;
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
     const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
     if (S.group && S.group.visible !== near) S.group.visible = near;
     S.near = near;
-    if (S.panelOpen && (!near || g.state !== "playing" || P.dead || P.driving)) closePanel();
+    S.officer = S.officerPost && S.officerPost.ped && !S.officerPost.ped.dead ? S.officerPost.ped : null;
   });
-
-  // the loan panel is modal: E or Esc closes it
-  addEventListener("keydown", function (e) {
-    if (!S.panelOpen) return;
-    const k = (e.key || "").toLowerCase();
-    if (k === "escape" || k === "e") { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); e.stopPropagation(); closePanel(); }
-  }, true);
 
   /* ==========================================================================
      BANK_VAULT_V1 — THE VAULT IS A ROOM.   [CBZ.cityVaultRoom]
@@ -2734,8 +2910,10 @@
     try { S.vault.doorMat.emissive.setRGB(r / 255, gC / 255, 0); } catch (e) {}
   };
   // headless/harness handles for the in-world actions
-  CBZ.cityBankDeposit = function () { deposit(); return true; };
-  CBZ.cityBankWithdraw = function (amt) { withdraw(amt || 500); return true; };
+  CBZ.cityBankDeposit = function () { return deposit(null); };
+  CBZ.cityBankWithdraw = function (amt) { return withdraw(amt || 500, null); };
+  // the loan officer's desk (tools): his post, the seats, the sheet in your hand
+  CBZ.cityBankDesk = function () { return { officer: S.officer, client: S.clientSeat, paper: PAPER.kind, amt: LOAN.amt, term: LOAN.term, signed: LOAN.signed }; };
   CBZ.cityBankApply = function (amt, term, purpose) {
     purpose = purpose || "personal";
     const o = offer(purpose, amt, {});

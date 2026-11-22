@@ -91,7 +91,6 @@
   function show(cat) {
     if (g.mode !== "city" || g.state !== "playing") return;
     if (cat) activeCat = cat;
-    if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     render();
     panel.style.display = "block";
     CBZ.cityMenuOpen = true;

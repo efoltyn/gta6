@@ -1353,6 +1353,41 @@
     if (kind === "gym") { shopGymMirror(B, F, Ti, wt, Bi, inSg); shopGymMats(B, F, ept, along, halfIn); }
     if (kind === "hospital") shopWaiting(B, F, S, Ti, wt, occ);
     if (kind === "firestation") shopBayStripes(B, F, ept, along, halfIn, wt);
+    if (kind === "guns") shopGunRooms(B, F, y);
+  }
+
+  /* THE GUN SHOP'S ROOMS (city/gunstore.js CBZ.gunShopPlan, the same frame as
+     F: u along the door wall, v in from its outer face). The shell is a
+     hall; the shop is a room in it. The partition behind the gun wall with
+     the barred door's opening in it (the steel frame and the gate are
+     gunstore.js's), the back room's rear wall, the side walls where there is
+     hall beyond them (a staff door behind the counter line), carpet tile on
+     the sales floor, and the hall left a bare stock hall: racking down its
+     back wall, pallets of cartons. */
+  function shopGunRooms(B, F, y) {
+    const P = CBZ.gunShopPlan ? CBZ.gunShopPlan(B.b) : null;
+    if (!P) return;
+    const T = P.T, wo = { tint: 0xcfc9bb, t: T, skirt: 0x3a3d40 };
+    F.wallU(B, P.SD + T / 2, P.ua - (P.wallA ? T : 0), P.ub + (P.wallB ? T : 0), [{ c: P.gateU, w: P.gateW, h: 2.12 }], Object.assign({ noCasing: true }, wo));
+    if (P.backWall) F.wallU(B, P.SD + T + P.BD + T / 2, P.ua - (P.wallA ? T : 0), P.ub + (P.wallB ? T : 0), null, wo);
+    if (P.wallA) F.wallV(B, P.ua - T / 2, P.wt, P.vEnd, null, wo);
+    if (P.wallB) F.wallV(B, P.ub + T / 2, P.wt, P.vEnd, P.staffDoor ? [{ c: P.staffDoor.v, w: P.staffDoor.w, h: 2.1 }] : null, wo);
+    // the sales floor: charcoal carpet tile; the back room keeps the slab
+    const SR = F.rect(P.ua, P.wt, P.ub, P.SD);
+    B.plane(SR.x0, SR.z0, SR.x1, SR.z1, y + 0.003, "carpet", 0x5a5f58, { cell: 1.0 });
+    // the hall round it: steel racking on the shell's back wall, clear of the stair and the lift
+    const hallU = [];
+    if (P.wallA) hallU.push([-P.Ti + 0.3, P.ua - T - 0.3]);
+    if (P.wallB) hallU.push([P.ub + T + 0.3, P.Ti - 0.3]);
+    if (P.backWall) hallU.push([P.ua, P.ub]);
+    for (let i = 0; i < hallU.length; i++) {
+      const u0 = hallU[i][0], u1 = hallU[i][1], len = Math.min(2.4, u1 - u0 - 0.4);
+      if (len < 1.2) continue;
+      const uc = (u0 + u1) / 2, v = P.Bi - 0.26;
+      const R = F.rect(uc - len / 2 - 0.1, v - 0.4, uc + len / 2 + 0.1, P.Bi);
+      if (!rectFree(B, null, R, 0.05)) continue;
+      shelfUnit(B, F.x(uc, v), F.z(uc, v), F.yaw(0, -1), len, 0x61 + i);
+    }
   }
 
   function buildStockroom(B, F, s, Li, Ti, Bi, SRd, cIn, hIn, rooms) {

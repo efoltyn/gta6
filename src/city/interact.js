@@ -1368,83 +1368,9 @@
   I.register("ped:cop", { id: "cop-punch", wheel: true, bad: true, label: "Sucker-punch", onSelect: (c) => copAssault(c) });
 
   // ---- VENDOR COUNTER ----
-  // CONTEXTUAL VERBS: the old flat "Shop here" said nothing about WHY you'd
-  // walk up to THIS counter. VERB[kind] answers it — the action's verb (E
-  // primary) + a one-line reason the player reads under the cursor — for all
-  // 26 storefront kinds. `rich:true` marks the six trades that get their own
-  // in-world, self-prompting module (jewelry/pawn/bank/clothing/realtor/guns):
-  // when that module is LIVE the counter verb hides (the module owns the
-  // walk-up), but until it's wired the verb still shows and falls back to the
-  // text menu — never a dead counter. Verbs are grounded in what each kind
-  // actually sells (shops.js services()): a pawnbroker offers CASH for your
-  // haul + loans on collateral; the jeweler is RETAIL bling; the gun counter
-  // is the armoury; the bank is the vault; realty is the listings book.
-  // THE VERB IS THE BUTTON, THE COUNTER IS THE NOUN (owner, 2026-09-05: "the
-  // noun should be what the button is on"). One word each; `sub` is the card's
-  // small print under the name, plain words, no dots.
-  const VERB = {
-    guns:        { verb: "Browse",  sub: "pistols, rifles, ammo",            rich: true },
-    jewelry:     { verb: "Browse",  sub: "chains, watches, ice",             rich: true },
-    pawn:        { verb: "Pawn",    sub: "cash for your haul",               rich: true },
-    bank:        { verb: "Bank",    sub: "deposit, withdraw, wire",          rich: true },
-    clothing:    { verb: "Browse",  sub: "fits, change in back",             rich: true },
-    realtor:     { verb: "Browse",  sub: "buy or rent a home",               rich: true },
-
-    gas:         { verb: "Pay",     sub: "snacks, fill the tank",            rich: false },
-    drugs:       { verb: "Buy",     sub: "product",                          rich: false },
-    food:        { verb: "Order",   sub: "hot plate",                        rich: false },
-    bar:         { verb: "Drink",   sub: "drinks, the night crew",           rich: false },
-    hardware:    { verb: "Buy",     sub: "tools, crowbar, picks, medkit",    rich: false },
-    gym:         { verb: "Train",   sub: "get stronger, fight card",         rich: false },
-    security:    { verb: "Apply",   sub: "gear, guard work",                 rich: false },
-    hospital:    { verb: "Heal",    sub: "patch up",                         rich: false },
-    barber:      { verb: "Sit",     sub: "fresh cut",                        rich: false },
-    electronics: { verb: "Browse",  sub: "phones, gadgets",                  rich: false },
-    carlot:      { verb: "Browse",  sub: "buy a ride",                       rich: false },
-    chop:        { verb: "Sell",    sub: "drive a hot car into the bay",     rich: false },
-    modshop:     { verb: "Upgrade", sub: "paint, armor, boost, guns",        rich: false },
-    casino:      { verb: "Gamble",  sub: "blackjack, roulette, slots",       rich: false },
-    raceway:     { verb: "Race",    sub: "a night at the Bullring",           rich: false },
-    arena:       { verb: "Sign up", sub: "fights at Ironjaw Arena",          rich: false },
-    paintball:   { verb: "Play",    sub: "team match",                       rich: false },
-    transit:     { verb: "Ride",    sub: "bus and train",                    rich: false },
-    cityhall:    { verb: "Apply",   sub: "permits, politics, contracts",     rich: false },
-    airfield:    { verb: "Hire",    sub: "air support",                      rich: false },
-    racepark:    { verb: "Bet",     sub: "horses and dogs",                  rich: false },
-  };
-  // is this kind's dedicated self-prompting module live? (mirrors the gun-wall
-  // feature-detect). When live, the counter verb steps aside for that module.
-  function richModuleLive(lot) {
-    if (!lot) return false;
-    switch (lot.kind) {
-      case "guns":     return !!(CBZ.cityGunWallLive  && CBZ.cityGunWallLive(lot));
-      case "jewelry":  return !!(CBZ.cityJewelryLive  && CBZ.cityJewelryLive(lot));
-      case "pawn":     return !!(CBZ.cityPawnLive     && CBZ.cityPawnLive(lot));
-      case "bank":     return !!(CBZ.cityBankLive     && CBZ.cityBankLive(lot));
-      case "clothing": return !!(CBZ.cityClothingLive && CBZ.cityClothingLive(lot));
-      case "realtor":  return !!(CBZ.cityRealtyLive  && CBZ.cityRealtyLive(lot));
-      default:         return false;
-    }
-  }
-  // the kind of the lot a vendor is keeping (lot carries .kind; degrade safe).
-  function vendorKind(v) { return (v && v.vendor && v.vendor.kind) || ""; }
-  // ONE lookup, used by label/sub/HUD alike. The seven CIVIC trades
-  // (courthouse/federal/library/cityannex/postoffice/dmv/firestation) keep
-  // their verb next to their desk in city/civic.js, so a civic counter is
-  // described in exactly one place. Degrade-safe: no civic.js → no row →
-  // the generic "Shop here", exactly as before.
-  function verbFor(kind) { return VERB[kind] || (CBZ.civic && CBZ.civic.verb ? CBZ.civic.verb(kind) : null); }
-  CBZ.cityShopVerb = verbFor;   // shared lookup (HUD / other verbs may want it)
-
-  I.register("ped:vendor", {
-    id: "vendor-shop", slot: "e",
-    // hide ONLY when a rich kind's own in-world module has taken over the
-    // walk-up; otherwise this counter is always offered (text-menu fallback).
-    canShow: (v) => !!v.vendor && !v.vendor.demolished && !richModuleLive(v.vendor) && !(CBZ.cityShopShut && CBZ.cityShopShut(v.vendor)),
-    label: (v) => { const d = verbFor(vendorKind(v)); return d ? d.verb : "Shop"; },
-    sub:   (v) => { const d = verbFor(vendorKind(v)); return d ? d.sub : ""; },
-    onSelect: (v) => CBZ.cityOpenShop(v.vendor),
-  });
+  // (there is no "shop" verb on a clerk: a shop's goods stand in its room,
+  //  and what you can ask the person behind the counter is city/shops.js's
+  //  counter rows, options on him like these)
   I.register("ped:vendor", { id: "vendor-rob", slot: "i", bad: true, canShow: (v) => !!v.vendor && !v.vendor.demolished, label: "Rob", onSelect: (v) => robRegister(v) });
 
   // ---- CORPSE: take the fit (loot is automatic — see the walk-over loop) ----

@@ -508,7 +508,6 @@
   function showBoard() {
     if (g.mode !== "city" || g.state !== "playing") return;
     if (CBZ.player.driving) { note("Get out of the car to plan a score.", 1.6); return; }
-    if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     renderBoard();
     board.style.display = "block";
     CBZ.cityMenuOpen = true;

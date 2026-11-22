@@ -20,7 +20,9 @@
      • the VISUAL: real child meshes bolted onto the held gun (the scope tube on
        the rail, the can on the muzzle, the grip under the barrel) so what you
        bought is what you SEE — first person, third person, every instance.
-     • the GUNSMITH BENCH menu the gun store opens ([E] at the bench).
+     • FITTING: a part is a thing hung on a gun shop's accessory wall
+       (city/gunstore.js); taking it bolts it onto the gun in your hands
+       (CBZ.gunModsFit) and the clerk rings it up. There is no bench menu.
 
    Self-contained + economy-gated (CBZ.economyMode: Gang City and the Isles,
    where every island gun store keeps the bench in its back room): no effect
@@ -752,14 +754,43 @@
      case, a shop wall. null / {} strips it back to factory. */
   CBZ.gunModsDressWith = function (model, id, rec) { if (THREE && model) dressModel(model, id, rec || {}); };
   /* One attachment on its own, in REAL METRES (scale it by a gun's k to put
-     it on that gun): "suppressor" | "brake" | "grip" | "laser" | "reddot" |
-     "reflex" | "holo". opts.nine = the 9 mm can / pistol compensator. */
+     it on that gun): any id in the catalog. The optics with glass are the one
+     riflescope factory (weapons/optics.js); a magazine off the gun is a box
+     magazine or a drum. opts.nine = the 9 mm can / pistol compensator. This
+     is the part that hangs on a gun shop's accessory wall (city/gunstore.js). */
+  function looseMag(drum) {
+    const grp = new THREE.Group();
+    if (drum) {
+      put(grp, cylX(0.062, 0.064, 22), M.dark, 0, 0.062, 0);
+      put(grp, cylX(0.064, 0.012, 22), M.steel, 0, 0.062, 0);
+      put(grp, cylX(0.016, 0.07, 10), M.steel, 0, 0.062, 0);
+      put(grp, boxG(0.03, 0.05, 0.055), M.dark, 0, 0.142, 0);
+    } else {
+      // a curved 40-round stick, in three raked sections
+      for (let i = 0; i < 3; i++) put(grp, boxG(0.024, 0.07, 0.062), M.dark, 0, 0.035 + i * 0.066, i * 0.012, 0.18, 0, 0);
+      put(grp, boxG(0.028, 0.012, 0.066), M.steel, 0, 0.004, -0.004);
+      put(grp, boxG(0.02, 0.008, 0.05), M.steel, 0, 0.212, 0.026);
+    }
+    return grp;
+  }
   CBZ.gunModsPartModel = function (modId, opts) {
     if (!THREE) return null;
     mats();
-    const nine = !!(opts && opts.nine), tint = MODS[modId] && MODS[modId].scope ? MODS[modId].scope.tint : null;
+    const m = MODS[modId];
+    const nine = !!(opts && opts.nine), sp = (m && m.scope) || null, tint = sp ? sp.tint : null;
+    if (sp && sp.overlay !== "dot" && sp.overlay !== "reflex" && sp.overlay !== "holo") {
+      if (!CBZ.createWeaponOptic) return null;
+      const high = !!sp.highMag, tR = high ? 0.0152 : 0.0150, drop = tR + (high ? 0.022 : 0.016);
+      const grp = new THREE.Group();
+      grp.add(CBZ.createWeaponOptic({ name: "part-" + modId, x: 0, y: drop, z: 0,
+        length: high ? (sp.thermal ? 0.26 : 0.33) : 0.165, radius: tR,
+        objectiveRadius: high ? 0.027 : 0.0205, ocularRadius: 0.0195, mountDrop: drop, highMag: high, tint: tint, k: 1,
+        mag: high ? (sp.thermal ? 6 : 8) : 4, materials: { dark: M.dark, steel: M.steel } }));
+      return grp;
+    }
     const make = { suppressor: () => suppressor(nine), brake: () => brake(nine), grip: foregrip, laser: laser,
-      reddot: () => redDot(tint), reflex: () => reflex(tint, false), holo: () => holo(tint) }[modId];
+      reddot: () => redDot(tint), reflex: () => reflex(tint, false), holo: () => holo(tint),
+      extmag: () => looseMag(false), drummag: () => looseMag(true) }[modId];
     return make ? make() : null;
   };
   CBZ.gunModsDressAll = dressAll;
@@ -779,143 +810,62 @@
   }
   function gunLabel(id) { const w = CBZ.weaponById && CBZ.weaponById(id); return (w && w.label) || (id || "weapon"); }
 
-  // buy `modId` for the CURRENTLY equipped gun. Returns true on success.
+  /* FITTING. An attachment bolts onto the gun in your hands. canFit says
+     whether this one can (and why not); fit does it, with no money in it:
+     the part came off a gun shop's wall and the clerk rang it up
+     (city/gunstore.js, CBZ.shopFloor.till). gunModsBuy is the straight
+     purchase (the harness handle). There is no bench menu: the bench is a
+     bench, and the parts are things hung on the wall beside it. */
+  function canFit(modId) {
+    const m = MODS[modId];
+    if (!m) return { ok: false, why: "" };
+    const id = equippedGunId();
+    if (!id) return { ok: false, why: "Have the gun it goes on in your hands." };
+    if (!m.fits(id)) return { ok: false, why: "A " + m.name + " won't fit the " + gunLabel(id) + "." };
+    if (recOf(id)[m.slot] === modId) return { ok: false, why: "The " + gunLabel(id) + " already wears one." };
+    return { ok: true, id: id };
+  }
+  // what a weapon's slot holds, set outright (null: bare). A part put back on
+  // the wall comes off the gun this way, and what it replaced goes back on.
+  function setSlot(id, slot, modId) {
+    if (!id || SLOTS.indexOf(slot) < 0) return false;
+    recOf(id)[slot] = modId && MODS[modId] ? modId : null;
+    dressWeaponId(id);
+    if (CBZ.fpsResyncAmmo) CBZ.fpsResyncAmmo();          // extended/drum mag → new capacity on the HUD
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  }
+  // -> { id, slot, prev } (the gun, the slot, what was in it), or null
+  function fit(modId) {
+    const m = MODS[modId], c = canFit(modId);
+    if (!c.ok) return null;
+    const prev = recOf(c.id)[m.slot] || null;
+    setSlot(c.id, m.slot, modId);
+    return { id: c.id, slot: m.slot, prev: prev };
+  }
+  CBZ.gunModsCanFit = canFit;
+  CBZ.gunModsFit = fit;
+  CBZ.gunModsSet = setSlot;
   CBZ.gunModsBuy = function (modId) {
     const m = MODS[modId];
     if (!m || !CBZ.city) return false;
-    const id = equippedGunId();
-    if (!id) { CBZ.city.note("Draw a firearm first, mods bolt onto the gun in your hands.", 2.2); return false; }
-    if (!m.fits(id)) { CBZ.city.note("A " + m.name + " won't fit the " + gunLabel(id) + ".", 2.2); return false; }
-    const r = recOf(id);
-    if (r[m.slot] === modId) { CBZ.city.note("The " + gunLabel(id) + " already wears a " + m.name + ".", 1.8); return false; }
-    if (!CBZ.city.spend(m.price)) { CBZ.city.note("The " + m.name + " runs " + fmt$(m.price) + " · come back with the money.", 2.2); return false; }
-    const replaced = r[m.slot] ? (MODS[r[m.slot]] || {}).name : null;
-    r[m.slot] = modId;
-    dressWeaponId(id);
-    if (CBZ.fpsResyncAmmo) CBZ.fpsResyncAmmo();          // extended/drum mag → new capacity on the HUD
+    const c = canFit(modId);
+    if (!c.ok) { if (c.why) CBZ.city.note(c.why, 2.2); return false; }
+    if (!CBZ.city.spend(m.price)) { CBZ.city.note(fmt$(m.price), 1.4); return false; }
     if (CBZ.sfx) CBZ.sfx("coin");
-    if (CBZ.city.addRespect) CBZ.city.addRespect(1);
-    CBZ.city.note("Fitted the " + m.name + " to your " + gunLabel(id) + (replaced ? " (swapped the " + replaced + ")" : "") + ".", 2.4);
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    renderBench();
-    return true;
+    return !!fit(modId);
   };
 
-  // the full priced catalog for the store bench (grouped by slot).
+  // the full priced catalog (grouped by slot)
   CBZ.gunModsCatalog = function () {
     return Object.keys(MODS).map((k) => { const m = MODS[k]; return { id: m.id, name: m.name, slot: m.slot, slotLabel: SLOT_LABEL[m.slot], price: m.price, blurb: m.blurb }; });
   };
-
-  // ==========================================================================
-  //  THE GUNSMITH BENCH menu (opened from the gun store)
-  // ==========================================================================
-  let panel = null, benchList = [];
-  function ensurePanel() {
-    if (panel || typeof document === "undefined" || !document.body) return panel;
-    const d = document.createElement("div");
-    d.id = "gunsmithPanel";
-    d.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;display:none;" +
-      "width:min(560px,92vw);max-height:86vh;overflow:auto;background:rgba(13,16,21,.97);border:1px solid #3a4150;" +
-      "border-radius:16px;padding:18px 18px 14px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;" +
-      "box-shadow:0 24px 60px rgba(0,0,0,.55)";
-    document.body.appendChild(d);
-    panel = d;
-    return d;
-  }
-  function slotChip(equippedId) {
-    if (!equippedId) return "<span style='color:#7f8794'>, empty, </span>";
-    const m = MODS[equippedId];
-    return "<span style='color:#7ed957'>" + (m ? m.name : equippedId) + "</span>";
-  }
-  function renderBench() {
-    if (!panel || panel.style.display === "none") return;
-    const id = equippedGunId();
-    const eq = id ? CBZ.gunModsEquipped(id) : null;
-    let html = "<div style='display:flex;justify-content:space-between;align-items:baseline;gap:10px'>" +
-      "<div style='font-size:22px;font-weight:700'>Gunsmith Bench</div>" +
-      "<div style='color:#9fb0c3;cursor:pointer' id='gsmithClose'>Close [Esc]</div></div>";
-    if (!id) {
-      html += "<p style='color:#ffb35b;margin:12px 0 4px'>You're not holding a firearm. Buy a gun off the wall (or draw one with the number keys), then step back to the bench, mods fit the weapon in your hands.</p>";
-      panel.innerHTML = html;
-      wireClose();
-      return;
-    }
-    html += "<div style='color:#9fb0c3;margin:2px 0 12px'>Modding: <b style='color:#e8eef7'>" + gunLabel(id) + "</b></div>";
-    // currently fitted
-    html += "<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;margin-bottom:12px;font-size:13px'>";
-    SLOTS.forEach((sl) => { html += "<div><span style='color:#7f8794'>" + SLOT_LABEL[sl] + ":</span> " + slotChip(eq[sl]) + "</div>"; });
-    html += "</div>";
-    // buyable list (only mods that fit this gun), grouped by slot, numbered 1..9
-    benchList = [];
-    SLOTS.forEach((sl) => {
-      const inSlot = Object.keys(MODS).map((k) => MODS[k]).filter((m) => m.slot === sl && m.fits(id));
-      if (!inSlot.length) return;
-      html += "<div style='margin:10px 0 4px;color:#ffd166;font-weight:600;font-size:13px;letter-spacing:.04em;text-transform:uppercase'>" + SLOT_LABEL[sl] + "</div>";
-      inSlot.forEach((m) => {
-        const owned = eq[sl] === m.id;
-        const n = benchList.length + 1;
-        benchList.push(m.id);
-        const affordable = CBZ.city && CBZ.city.canAfford && CBZ.city.canAfford(m.price);
-        html += "<div class='gsmithRow' data-mod='" + m.id + "' style='display:flex;justify-content:space-between;align-items:center;gap:10px;" +
-          "padding:8px 10px;margin:4px 0;border-radius:10px;cursor:pointer;background:" + (owned ? "rgba(126,217,87,.14)" : "rgba(255,255,255,.03)") + ";border:1px solid " + (owned ? "#3f7a45" : "#2a303a") + "'>" +
-          "<div style='min-width:0'><div style='font-weight:600'>" + (n <= 9 ? "<span style='color:#7f8794'>[" + n + "]</span> " : "") + m.name +
-          (owned ? " <span style='color:#7ed957;font-size:12px'>· fitted</span>" : "") + "</div>" +
-          "<div style='color:#9fb0c3;font-size:12px'>" + m.blurb + "</div></div>" +
-          "<div style='color:" + (affordable || owned ? "#7ed957" : "#ff7a7a") + ";font-weight:700;white-space:nowrap'>" + (owned ? "—" : fmt$(m.price)) + "</div></div>";
-      });
-    });
-    html += "<div style='color:#7f8794;font-size:12px;margin-top:12px'>Click a mod or press its number to fit it. One per slot, a new optic/mag/muzzle swaps the old.</div>";
-    panel.innerHTML = html;
-    wireClose();
-    panel.querySelectorAll(".gsmithRow").forEach((row) => {
-      row.addEventListener("click", () => { const mid = row.getAttribute("data-mod"); if (mid) CBZ.gunModsBuy(mid); });
-    });
-  }
-  function wireClose() {
-    const c = panel.querySelector("#gsmithClose");
-    if (c) c.addEventListener("click", closeBench);
-  }
-  function openBench() {
-    if (!econOn()) return;
-    ensurePanel();
-    if (!panel) return;
-    panel.style.display = "block";
-    CBZ.cityMenuOpen = true;
-    renderBench();
-  }
-  function closeBench() {
-    if (panel) panel.style.display = "none";
-    CBZ.cityMenuOpen = false;
-  }
-  CBZ.gunModsOpenBench = openBench;
-  CBZ.gunModsCloseBench = closeBench;
-  CBZ.gunModsBenchOpen = function () { return !!(panel && panel.style.display === "block"); };
-
-  // bench keyboard: number keys buy, Esc/E close (capture so it wins over the
-  // world). Only live while the panel is open.
-  addEventListener("keydown", function (e) {
-    if (!panel || panel.style.display !== "block") return;
-    const k = (e.key || "").toLowerCase();
-    if (k === "escape" || k === "e") { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); closeBench(); return; }
-    if (/^[1-9]$/.test(k)) {
-      const idx = parseInt(k, 10) - 1;
-      if (idx < benchList.length) { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); CBZ.gunModsBuy(benchList[idx]); }
-    }
-  }, true);
 
   // ---- dress owned guns once the weapon models exist (idempotent) ----------
   let dressed = false;
   CBZ.onUpdate(38, function () {
     if (!econOn()) return;
     if (!dressed && CBZ.fpsWeaponModels && CBZ.fpsWeaponModels.length) { dressAll(); dressed = true; }
-  });
-  // safety: never leave the bench menu (and its cityMenuOpen soft-lock) up if the
-  // player dies, leaves the city, or the run ends while standing at it. onAlways
-  // so it fires even once state leaves "playing".
-  CBZ.onAlways(38, function () {
-    if (panel && panel.style.display === "block") {
-      if (!econOn() || g.state !== "playing" || (CBZ.player && CBZ.player.dead)) closeBench();
-    }
   });
   // a fresh run wipes fitted mods (weapons reset too) — re-dress clean next time
   CBZ.gunModsReset = function () { g.cityGunMods = {}; dressed = false; dressAll(); };

@@ -621,7 +621,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=body1122f"></script>
+  <script src="src/entities/character.js?v=shops1122d"></script>
   <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -1253,7 +1253,7 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=r187a"></script>
-<script src="src/city/buildings.js?v=world1122b"></script>
+<script src="src/city/buildings.js?v=shops1122d"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1398,7 +1398,7 @@ document.body.appendChild(b);}}catch(e){}})();
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
      through it into the betting ledger. Before every venue that uses it. -->
-<script src="src/city/betslip.js?v=onebet1"></script>
+<script src="src/city/betslip.js?v=shops1122d"></script>
 <!-- THE BULLRING: the racing modules (src/race/: circuit, stadium, cars,
      tyre physics, drivers, rules), the SAME ones games/race.html runs. The
      place is city/island_speedway.js; the race is run IN THE WORLD by
@@ -1437,7 +1437,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/army.js?v=inf1028f"></script>
 <!-- ONE UNIT, BUILT FOR THE CITY (city/unitmodels.js): CBZ.milModels, the one path that builds a units/vehicles machine outside the battle (Fort Brandt, the player's F-35, the airbase, The Isles' army). After army.js (its loader), before island_military. -->
 <script src="src/city/unitmodels.js?v=f35one1022"></script>
-<script src="src/city/island_military.js?v=f35one1022"></script>
+<script src="src/city/island_military.js?v=shops1122d"></script>
 <script src="src/city/biome_desert.js?v=sink1011"></script>
 <script src="src/city/biome_forest.js?v=noblock1013"></script>
 <script src="src/city/biome_farmland.js?v=layout2b"></script>
@@ -1759,15 +1759,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/tornado.js?v=fx1121"></script>
 <script src="src/city/aircraftimpact.js?v=jetbound1022"></script>
 <script src="src/city/metro_promote.js?v=mrg10200048"></script>
-<script src="src/city/shops.js?v=isleclose1022"></script>
+<script src="src/city/shops.js?v=shops1122d"></script>
 <!-- city/shopfloor.js: what every counter shop shares (the clerk, the till of
      goods in your hands not yet paid for, hot goods, the islands' shop rooms
      and showcase glass). Before gunstore.js, jewelry.js, pawnshop.js. -->
-<script src="src/city/shopfloor.js?v=keep1122d"></script>
-<script src="src/city/gunstore.js?v=keep1122d"></script>
+<script src="src/city/shopfloor.js?v=shops1122d"></script>
+<script src="src/city/gunstore.js?v=shops1122d"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
-<script src="src/city/gunmods.js?v=isleopen1022"></script>
+<script src="src/city/gunmods.js?v=shops1122d"></script>
 <!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
      person, reticles at infinity on red-dot glass, a real scope (magnified
      second camera in the ocular), sway + breath, the 3P cheek weld. -->
@@ -1776,9 +1776,9 @@ document.body.appendChild(b);}}catch(e){}})();
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
 <script src="src/city/jewelry.js?v=misleclstutte"></script>
-<script src="src/city/careers.js?v=world1122b"></script>
-<script src="src/city/activities.js?v=nored0930"></script>
-<script src="src/city/heists.js?v=ijkl1022"></script>
+<script src="src/city/careers.js?v=shops1122d"></script>
+<script src="src/city/activities.js?v=shops1122d"></script>
+<script src="src/city/heists.js?v=shops1122d"></script>
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
 <script src="src/city/verbword.js?v=btn1011"></script>
@@ -1853,7 +1853,7 @@ document.body.appendChild(b);}}catch(e){}})();
      with real per-segment limits it wins automatically with no edit here.
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <script src="src/city/carcluster.js?v=speedunit1"></script>
-<script src="src/city/interact.js?v=world1122b"></script>
+<script src="src/city/interact.js?v=shops1122d"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
 <script src="src/city/orders.js?v=world1122b"></script>
@@ -1889,7 +1889,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/leaderboard.js?v=world1122b"></script>
 <script src="src/city/zillow.js?v=fac1009"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<script src="src/city/bank.js?v=keep1122d"></script>
+<script src="src/city/bank.js?v=shops1122d"></script>
 <!-- THE PEOPLE BEHIND THE COUNTER (city/keepers.js): the brain a shop vendor
      and a posted bank body run at their post (peds.js think() asks it first),
      and the bank gunpoint rows (Open the vault, Empty the drawer). After
@@ -1902,7 +1902,12 @@ document.body.appendChild(b);}}catch(e){}})();
      near you, plus its real catalog stock as the real item models, buyable
      where they stand. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
-<script src="src/city/storegoods.js?v=r187a"></script>
+<script src="src/city/storegoods.js?v=shops1122d"></script>
+<!-- THE CAR DEALER (city/dealership.js): the cars on a dealer's floor are its
+     stock, each with its price on a sticker in the windscreen, bought (or
+     financed) standing at it. After buildings.js (CBZ.cityShowroomCars),
+     interactions.js and bank.js (the auto note). -->
+<script src="src/city/dealership.js?v=shops1122d"></script>
 <!-- THE ISLANDS' SHOPS (world/island_shops.js): every island outfitter, tailor,
      optician, phone shop and trade fitted with the store systems above, per
      building, through CBZ.islandVenue; a counter and a clerk in each. -->
@@ -1943,7 +1948,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (which declares every floor to it). -->
 <script src="src/city/fitout.js?v=r187a"></script>
 <script src="src/city/fitout_plans.js?v=loose1013"></script>
-<script src="src/city/fitout_work.js?v=loose1013"></script>
+<script src="src/city/fitout_work.js?v=shops1122d"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
 <script src="src/city/family.js?v=ekey2"></script>
 <script src="src/city/swim.js?v=wake1122a"></script>
@@ -2519,7 +2524,7 @@ document.body.appendChild(b);}}catch(e){}})();
      including a curfew that enforces your own law on your own body). -->
 <script src="src/city/officialdom.js?v=cd0929"></script>
 <script src="src/city/candidacy.js?v=cd0929"></script>
-<script src="src/city/civic.js?v=nodash1"></script>
+<script src="src/city/civic.js?v=shops1122d"></script>
 <script src="src/city/statecraft.js?v=garfix1014"></script>
 
 <!-- THE PROTECTION LAYER (owner: "a mob boss and soldiers protecting, or gov

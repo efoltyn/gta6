@@ -110,7 +110,7 @@
   // never onto the phone. The clerk is the vendor ped of the desk you are at.
   let DESK_KIND = null;
   function clerk(kind) {
-    const lot = (CBZ.cityShopLot && CBZ.cityShopLot()) || civicLots()[kind || DESK_KIND];
+    const lot = civicLots()[kind || DESK_KIND];
     return (lot && lot.building && lot.building.vendor) || null;
   }
   function say(words, secs, kind) {
@@ -122,7 +122,9 @@
   function day() { return CBZ.worldDay ? CBZ.worldDay() : 0; }
   function stars() { return g.wanted | 0; }
   function armed() { return !!(CBZ.cityHasGun && CBZ.cityHasGun()); }
-  function repaint() { if (CBZ.cityShopRender) CBZ.cityShopRender(); }
+  // (a desk's rows are options on its clerk, city/shops.js counterRows: they are
+  //  re-asked while you stand there, so nothing here has to repaint them)
+  function repaint() {}
 
   // per-run desk state. Everything here is a POINTER into real systems (a lot
   // ref, a sid, an index) or a clock — never a shadow copy of something a
@@ -583,7 +585,6 @@
       ],
       doneText: "Signed for. Come back when you want another.",
     });
-    if (CBZ.cityCloseShop) CBZ.cityCloseShop();
   }
 
   // ---- COLLECT YOUR MAIL — only ever shown when the box is not empty ------
@@ -966,7 +967,6 @@
       ],
       doneText: "Knocked down. Engine Co. 7 signs you off.",
     });
-    if (CBZ.cityCloseShop) CBZ.cityCloseShop();
   }
 
   // ============================================================
@@ -1132,7 +1132,6 @@
       return serviceRows(kind);
     },
     hours: function (kind) { return (on() && HOURS[kind]) || null; },
-    open: function (kind, lot) { if (on() && lot && CBZ.cityOpenShop) CBZ.cityOpenShop(lot); },
     isCivic: function (kind) { return !!KINDSET[kind]; },
     // THE RATCHET (CLAUDE.md): civic kinds with ZERO live services. Must be 0.
     audit: function () {

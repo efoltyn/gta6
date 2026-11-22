@@ -288,7 +288,13 @@
       hold: function (item) { if (item && T.held.indexOf(item) < 0) T.held.push(item); T.warned = 0; return item; },
       release: function (item) { const i = T.held.indexOf(item); if (i >= 0) T.held.splice(i, 1); return i >= 0; },
       holding: function (slot) { for (const it of T.held) if (it.slot === slot) return it; return null; },
-      total: function () { let n = 0; for (const it of T.held) n += it.price | 0; return n; },
+      // what he rings it up at: the tickets, less whatever you talked him down
+      // (city/shops.js haggle: the deal rides on the clerk for a few minutes)
+      total: function () {
+        let n = 0; for (const it of T.held) n += it.price | 0;
+        const b = T.clerk && T.clerk.body ? T.clerk.body() : null, h = b && b._haggle;
+        return h && h.cut > 0 && (CBZ.now || 0) / 1000 - h.t < 300 ? Math.round(n * (1 - h.cut)) : n;
+      },
       open: function () { return !!(T.clerk && T.clerk.alive() && !T.clerk.busy() && !(T.clerk.cowed && T.clerk.cowed())); },
       // the clerk rings it all up
       pay: function (force) {
@@ -379,7 +385,7 @@
     if (wirePay.done || !I || !I.register) return;
     wirePay.done = true;
     I.register("ped:vendor", {
-      id: "till-pay-clerk", slot: "e", prio: 40,
+      id: "till-pay-clerk", slot: "e", prio: 92,
       label: function (v) { const T = tillOfClerk(v); return "Pay " + fmt$(T ? T.total() : 0); },
       canShow: function (v) { const T = tillOfClerk(v); return !!(T && T.open()); },
       onSelect: function (v) { const T = tillOfClerk(v); if (T) T.pay(); },

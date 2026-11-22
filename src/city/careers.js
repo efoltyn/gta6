@@ -766,7 +766,6 @@
   let offered = [];
   const ICON = { hit: "", delivery: "", heist: "", smuggle: "", getaway: "", protection: "", deaddrop: "" };
   CBZ.cityJobBoard = function () {
-    if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     // (your own set's work is not on this board: a member of the set tells
     // you, CBZ.cityCrewWork)
     offered = rollJobs();
@@ -849,7 +848,6 @@
   // ---- careers ----
   CBZ.cityStartCareer = function (kind) {
     g.career = kind;
-    if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     const msg = {
       dealer: "You're slinging now. Cop wholesale at the trap house, then deal on the street, turn buyers into regulars, keep the heat off your back. · U buy · I deal",
       security: "On the books as a " + securityRankInfo().pip + ". Keep your record clean (0 stars) for the salary, clean shifts earn a promotion (and a better wage).",

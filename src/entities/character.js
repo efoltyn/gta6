@@ -9959,6 +9959,37 @@
   const RIGS = new Set();
   let personN = 0;
   const weak = typeof WeakRef === "function" ? function (o) { return new WeakRef(o); } : function (o) { return { deref: function () { return o; } }; };
+  /* A HAIRCUT (a barber's chair, city/shops.js): the rig's hair rebuilt in
+     another of HAIR_STYLES, on the head it already has. Both LODs, the
+     hanging-length follow, and whatever a hat was doing to the old cut. */
+  CBZ.charHairStyle = function (rig) {
+    const hair = rig && rig.skinSlots && rig.skinSlots.hair;
+    if (hair) for (let i = 0; i < hair.length; i++) if (hair[i] && hair[i].isMesh && hair[i].userData.hairS != null) return hair[i].userData.hairStyle || null;
+    return null;
+  };
+  CBZ.charRestyleHair = function (rig, styleId) {
+    const hair = rig && rig.skinSlots && rig.skinSlots.hair;
+    if (!hair || !HAIR_STYLES[styleId]) return false;
+    let done = false;
+    for (let i = 0; i < hair.length; i++) {
+      const m = hair[i];
+      if (!m || !m.isMesh || m.userData.hairS == null) continue;
+      const ud = m.userData;
+      const near = hairGeometry(styleId, ud.hairS, false, ud.hairYoke), far = hairGeometry(styleId, ud.hairS, true, ud.hairYoke);
+      m.geometry = near;
+      ud.hairStyle = styleId;
+      ud.hairLods = { near: near, far: far };
+      delete ud.hairLods0;                       // (entities/headwear.js's untouched pair: the old cut's)
+      const follow = !!near.userData.hairFollow;
+      if (follow) m.material.morphTargets = true;
+      m.updateMorphTargets();
+      ud.hairFollow = follow;
+      m.onBeforeRender = follow ? hairFollowRender : function () {};
+      done = true;
+    }
+    return done;
+  };
+
   CBZ.makeCharacter = function (c) {
     const ch = makeCharacter(c);
     if (ch) { ch.personId = ++personN; RIGS.add(weak(ch)); }

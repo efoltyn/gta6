@@ -73,6 +73,8 @@
     library: 1, firestation: 1, drugs: 1,
   };
 
+  const TOWN_SHELVED = { guns: 1, pawn: 1, clothing: 1, boutique: 1, jewelry: 1 };
+
   const LIVE_R = 48;        // a store BUILDS this far out (no pop-in at the glass)
   const SHOW_R = 26;        // …and DRAWS its goods only this close
   const MAX_LIVE = 3;       // never more than this many stores standing at once
@@ -111,6 +113,12 @@
     arena:       { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 4, coffee: true, warmer: true },
     paintball:   { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 3, coffee: false },
     airfield:    { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 4, coffee: true },
+    // the towns' small trades (TOWN_SHELVED): wall bays and one run of gondola, no cold case
+    guns:        { walls: [-1, 1], wallStart: 3.4, lanes: 1, cooler: 0, coffee: false },
+    pawn:        { walls: [-1, 1], wallStart: 3.4, lanes: 1, cooler: 0, coffee: false },
+    clothing:    { walls: [-1, 1], wallStart: 3.4, lanes: 2, cooler: 0, coffee: false },
+    boutique:    { walls: [-1, 1], wallStart: 3.4, lanes: 1, cooler: 0, coffee: false },
+    jewelry:     { walls: [-1, 1], wallStart: 3.4, lanes: 1, cooler: 0, coffee: false },
   };
   const DEFAULT_PROFILE = PROFILE.store;
 
@@ -440,7 +448,10 @@
     if (!e || !b) return null;
     if (b.gunstore || b.jewelry) return null;                    // flagship walk-ins
     const kind = (b.shop && b.shop.kind) || lot.kind || "";
-    if (SKIP[kind]) return null;
+    // (a TOWN's gun shop, pawn shop, outfitter or jeweller is a small shell with
+    //  no flagship file standing its floor: its stock goes on shelves like any
+    //  store's. Gang City's own are the walk-ins.)
+    if (SKIP[kind] && !(TOWN_SHELVED[kind] && lot.town)) return null;
     // (an island trade names its own: the chandlery's torches and first aid)
     const stock = (b.stock || e.stockFor(kind) || []).filter(function (n) { return !!e.ITEMS[n]; });
     if (!stock.length) return null;
@@ -1327,8 +1338,8 @@
   /* ============================================================
      5. PUBLIC HOOKS
      ============================================================ */
-  // shops.js reads this to trim the counter menu: the names actually standing
-  // in this store.
+  // the names actually standing in this store (city/shops.js: what a clerk
+  // hands over the counter is the rest of his stock)
   CBZ.cityGoodsLive = function (lot) {
     const p = lot && BY_LOT.get(lot);
     return p ? p.names : null;

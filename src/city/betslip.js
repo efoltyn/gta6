@@ -141,7 +141,6 @@
   function open(c) {
     if (!c || !ensure()) return false;
     if (open_) close(true);
-    if (CBZ.cityCloseShop) CBZ.cityCloseShop();   // opened from a venue counter
     cfg = c; msg = "";
     const picks = cfg.picks || [];
     pickId = cfg.pick != null ? cfg.pick : (picks.length === 1 ? picks[0].id : null);

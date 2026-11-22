@@ -748,46 +748,14 @@
     const hqX = hqW.x, hqZ = hqW.z;
     if (CBZ.flags) CBZ.flags.pole(root, { x: flagW.x, y: 0, z: flagW.z, height: 12, base: true, finial: "eagle" });
 
-    // ARMORY ZONE: a spot just inside the HQ door where the player can browse
-    // weapons. WHY a zone, not a wall-store: the engine's gunstore.js is bound
-    // to a specifically-STAMPED gun-shop lot (buildings.js sets lot.building
-    // .gunstore); this island's HQ isn't that lot, so we surface our own
-    // interaction. If a real city gun store exists, we hand the player off to
-    // it (CBZ.cityOpenShop / the gunstore wall); otherwise it's an in-world note.
+    // THE ARMORY: a spot just inside the HQ door (published in the audit below).
     const armW = PLAN ? W(PLAN.anchors.armory) : { x: hqX, z: hqZ + 6 };
     const armoryX = armW.x, armoryZ = armW.z;           // inside, behind the door
-    let armoryWired = "note";
-    try {
-      if (CBZ.interactions && CBZ.interactions.registerZone) {
-        const tok = { x: armoryX, z: armoryZ, kind: "armory" };
-        CBZ.interactions.registerZone({
-          id: "military-armory", kind: "armory", radius: 4.5,
-          find: function (px, pz) {
-            const dx = tok.x - px, dz = tok.z - pz;
-            return (dx * dx + dz * dz) < 4.5 * 4.5 ? tok : null;
-          },
-          options: [
-            {
-              id: "armory-browse", slot: "e",
-              label: function () { return "Browse"; },
-              onSelect: function () {
-                // prefer a REAL shop if the engine exposes one
-                if (typeof CBZ.cityOpenShop === "function") { CBZ.cityOpenShop("guns", tok); return; }
-                if (typeof CBZ.cityOpenGunStore === "function") { CBZ.cityOpenGunStore(); return; }
-                const msg = "Base armory, racked M4s, sidearms and crates. Quartermaster's out; help yourself at the city gun store.";
-                if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 3.2);
-              },
-            },
-          ],
-        });
-        if (CBZ.interactions.describe) {
-          CBZ.interactions.describe("armory", function () {
-            return { label: "Armory", note: "Weapons, ammo and gear" };
-          });
-        }
-        armoryWired = (typeof CBZ.cityOpenShop === "function" || typeof CBZ.cityOpenGunStore === "function") ? "shop" : "note";
-      }
-    } catch (e) { armoryWired = "note"; }
+    // (The armory had a "Browse" verb that opened the city's shop menu, or
+    //  failing that printed a note sending you to the city gun store: a counter
+    //  with nothing behind it. The menu is gone and so is the verb; the room is
+    //  a room until it racks real weapons the way city/gunstore.js does.)
+    const armoryWired = "none";
 
     // ---- WATCHTOWERS: the kit stood them; the corner decks are published on
     // CBZ._militaryBase.towers (garrison.js stands the corner sentries on

@@ -7669,7 +7669,7 @@
       c.ref = v;
       CBZ.colliders.push(c);
     }
-    return true;
+    return v;
   }
   function pickCarModel(fallbackColor) {
     let model = null;
@@ -7690,6 +7690,9 @@
   // stairwell + door aisle stay walkable; cars are capped per floor for perf
   // (each real-car visual is detailed). Returns how many cars it placed so the
   // caller can advance the catalog index for the next floor.
+  // every car standing on a dealer's floor, by the shell it stands in
+  const SHOWCARS = new WeakMap();
+  CBZ.cityShowroomCars = function (group) { return (group && SHOWCARS.get(group)) || null; };
   function showroomFloor(b, kind, door, baseY, startIdx) {
     return bounded(b, "showroom", function () { return showroomFloorBody(b, kind, door, baseY, startIdx); });
   }
@@ -7724,26 +7727,17 @@
         // alternate the angle row-to-row so the grid doesn't read as parked cars.
         const model = cars ? cars[idx % cars.length] : pickCarModel(kind === "chop" ? 0x8a1f24 : 0xe88a3c);
         const ang = yaw + ((r + c) & 1 ? 0.44 : -0.44);   // ~25° off-aisle showroom angle
-        realCarVisual(b, lx, Y + 0.16, lz, ang, model || pickCarModel(0xe88a3c), false);
-        // a name/price PLACARD on a little stanchion at the front of the pad.
-        const nm = (model && model.name) || "VEHICLE";
-        const val = (model && model.value) || 0;
-        const txt = val ? (nm + "  $" + val.toLocaleString()) : nm;
-        b.lbox(lx, Y + 0.55, lz - 1.5, 0.1, 0.9, 0.1, 0x44505c, { cast: false });   // stanchion post
-        if (CBZ.makeLabelSprite) {
-          try {
-            const s = CBZ.makeLabelSprite(txt, { color: kind === "chop" ? "#ff9a6b" : "#ffd166" });
-            if (s) {
-              const wx = (b.ox != null ? b.ox : 0) + lx;
-              const wz = (b.oz != null ? b.oz : 0) + lz - 1.5;
-              s.position.set(wx, Y + 1.15, wz);
-              if (b.group && b.group.add) b.group.add(s);
-            }
-          } catch (e) {}
-        } else {
-          // headless / no sprite system: a coloured plaque plate stands in.
-          b.lbox(lx, Y + 1.0, lz - 1.5, 1.4, 0.5, 0.06, 0x14181e, { cast: false });
-          b.lbox(lx, Y + 1.0, lz - 1.5, 1.2, 0.36, 0.02, kind === "chop" ? 0xff9a6b : 0xffd166, { cast: false });
+        // THE CAR IS THE STOCK. No placard on a post and no label in the air:
+        // a dealer's car wears its price on the windscreen and is bought
+        // standing at it (city/dealership.js reads these records and prints
+        // the sticker when you walk in).
+        const use = model || pickCarModel(0xe88a3c);
+        const vis = realCarVisual(b, lx, Y + 0.16, lz, ang, use, false);
+        if (vis && kind === "carlot" && b.group) {
+          let L = SHOWCARS.get(b.group);
+          if (!L) SHOWCARS.set(b.group, L = []);
+          // (where it stands, building-local; the visual itself is merged into the shell's batches)
+          L.push({ model: use, lx: vis.position.x, ly: vis.position.y, lz: vis.position.z, ang: ang, floorY: Y, soldT: 0 });
         }
         idx++; placed++;
       }
