@@ -1333,28 +1333,45 @@
       tube(back, 0, fz, back, topY + 1.0, fz, 0.035, galv, { seg: 6, cast: false });                     // rear guard post
     }
     for (const y of [topY + 0.5, topY + 1.0]) stat(new THREE.CylinderGeometry(0.025, 0.025, len, 6), galv, back, y, z, { rx: Math.PI / 2, cast: false });
-    /* WALKABLE, NOT A BLOCK. The whole unit used to be one full-height
-       collider: a 2-3 m steel cube with seats drawn on it. A bleacher is
-       climbed row to row (each row's foot plank is 0.40 over the last, the
-       seats 0.02 under the next foot plank), so its walk surface is one
-       CBZ.stairs flight from the front foot plank up to the back row, the
-       soffit under it keeps bodies from walking into the frame from behind
-       or the ends, and the rear guard rail is a rail. */
+    /* WALKABLE, NOT A BLOCK, AND WALKED ON ITS ROWS. A bleacher is climbed
+       row to row: a row's seat planks and the next row's foot plank are one
+       level, RR above the last, and the front edge of each row's seat is the
+       riser. So the walk surface is a CBZ.stairs flight with one tread per
+       row (`steps: rows`): it starts on the front foot plank's top, tread i
+       runs RD back from row i-1's seat edge, topped at that seat, and the
+       last tread is the back row's seat. It was a straight slope from the
+       front foot plank to the back seat, up to a riser under every plank:
+       feet in the aluminium. The soffit under it keeps bodies from walking
+       into the frame from behind or the ends (no-vault: nobody is hauled up
+       through the rows), and the rear guard rail is a rail. */
     if (CBZ.stairs) {
-      const xb = x + 0.4, xt = x - (rows - 1) * RD - 0.2;
+      const xb = x - 0.03, xt = xb - rows * RD;               // the first seat's front edge; one tread a row
+      const yb = ys0 - 0.3825, yt = topY + 0.02;              // front foot plank top, back seat top
       CBZ.stairs.flight({
-        bottom: { x: xb, y: 0, z: z }, top: { x: xt, y: topY, z: z },
-        width: len, overlap: 0.12, underside: true, link: false,
+        bottom: { x: xb, y: yb, z: z }, top: { x: xt, y: yt, z: z },
+        width: len, overlap: 0.35, underside: true, link: false, steps: rows,
       });
-      // the AI link ends where a body can STAND at the top: just clear of the
-      // rear rail (flight()'s own link would end 0.45 past the back row, i.e.
-      // behind the rail)
-      const xs = back + 0.1 + 0.45, ys = topY * Math.min(1, (xb - xs) / (xb - xt));
+      // the AI link ends where a body can STAND at the top: on the last foot
+      // plank, clear of the rear rail (flight()'s own link would end behind it)
+      const xs = back + 0.1 + 0.45;
+      const ys = yb + (yt - yb) * Math.ceil(Math.min(1, (xb - xs) / (xb - xt)) * rows - 1e-6) / rows;
       CBZ.stairs.link({
-        path: [{ x: xb + 0.45, y: 0, z: z }, { x: xb, y: 0, z: z }, { x: xs, y: ys, z: z }],
+        path: [{ x: xb + 0.6, y: 0, z: z }, { x: xb, y: yb, z: z }, { x: xs, y: ys, z: z }],
         width: len, kind: "bleacher", owner: "bleacher",
       });
-      CBZ.colliders.push({ minX: back - 0.1, maxX: back + 0.1, minZ: z - len / 2, maxZ: z + len / 2, y0: 0, y1: topY + 1.05, rail: true, noBreach: true });
+      CBZ.colliders.push({ minX: back - 0.1, maxX: back + 0.1, minZ: z - len / 2, maxZ: z + len / 2, y0: 0, y1: topY + 1.05, rail: true, noBreach: true, noVault: true });
+      // THE ENDS: a thin no-vault band under each row's end, topped just under
+      // that row, so a man on the floor cannot walk in through the frame from
+      // the side, while a man up on a row can still step off the end
+      const rise = (yt - yb) / rows;
+      for (let i = 1; i <= rows; i++) {
+        const xa = xb - i * RD, xc = xb - (i - 1) * RD, y1 = yb + i * rise - 0.05;
+        for (const e of [-1, 1]) {
+          const ez = z + e * (len / 2 - 0.03);
+          CBZ.colliders.push({ minX: Math.max(xa, back + 0.1), maxX: xc, minZ: ez - 0.03, maxZ: ez + 0.03, y0: 0, y1: y1, noBreach: true, noVault: true });
+        }
+      }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     } else {
       CBZ.colliders.push({ minX: back - 0.1, maxX: x + 0.4, minZ: z - len / 2, maxZ: z + len / 2, noBreach: true });
     }

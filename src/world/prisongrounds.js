@@ -325,18 +325,31 @@
       for (const s of [-1, 1]) stat(new THREE.BoxGeometry(0.12, 4.4, 0.14), steelDark, dx + s * 2.16, 1.2 + 2.2, z1 + 0.32, { cast: false });
     }
     // the dock: 1.2 m high, 4 m deep, rubber bumpers, a grounded stair with a rail at its east end.
-    // Its collider was full height and nothing was ever registered on top,
-    // so the dock was a 1.2 m wall and its six-step stair pure paint. Now the
-    // collider is banded to the dock's own 1.2 m (a body on top is above it),
-    // the deck is a platform, and the stair is a CBZ.stairs flight (6 x 0.20
-    // rise over 3.0 m) landing on its own top step beside the deck.
+    // The collider is banded to the dock's own 1.2 m (a body on top is above
+    // it) and the deck is a platform. THE STAIR IS ITS SIX BLOCKS: a
+    // CBZ.stairs flight with `steps: 6`, so each 0.6 m tread is walked at its
+    // own top (0.2 m risers, the first at z1 + 4.0, the top block level with
+    // the deck). It was a straight slope over 3.0 m that sat up to a riser
+    // under every block, feet in the concrete. The open (east) side is the
+    // handrail: a thin no-vault band the length of the flight, so nobody
+    // walks in through the blocks from the yard or is hauled over the rail.
     const dock = addBox(85, 0.6, z1 + 2.2, 26, 1.2, 4.0, 0x8f959c, { solid: true, y0: 0, y1: 1.2 });
     (CBZ.platforms || (CBZ.platforms = [])).push({ minX: 72, maxX: 98, minZ: z1 + 0.2, maxZ: z1 + 4.2, top: 1.2 });
     if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
-    if (CBZ.stairs) CBZ.stairs.flight({
-      bottom: { x: 98.6, y: 0, z: z1 + 4.0 }, top: { x: 98.6, y: 1.2, z: z1 + 1.0 },
-      width: 1.2, overlap: 0.3, underside: false, owner: "warehouse-dock",
-    });
+    if (CBZ.stairs) {
+      const f = CBZ.stairs.flight({
+        bottom: { x: 98.6, y: 0, z: z1 + 4.0 }, top: { x: 98.6, y: 1.2, z: z1 + 0.4 },
+        width: 1.2, overlap: 0.25, underside: false, owner: "warehouse-dock", steps: 6, link: false,
+      });
+      // the AI walk: up the middle of the treads and off the top block onto the deck
+      if (f) CBZ.stairs.link({
+        path: [{ x: 98.6, y: 0, z: z1 + 4.45 }, { x: 98.6, y: 0, z: z1 + 4.0 }, { x: 98.6, y: 1.2, z: z1 + 0.7 }, { x: 97.4, y: 1.2, z: z1 + 0.9 }],
+        width: 1.2, kind: "stair", owner: "warehouse-dock",
+      });
+      const rail = { minX: 99.12, maxX: 99.2, minZ: z1 + 0.15, maxZ: z1 + 4.0, y0: 0, y1: 2.25, rail: true, noVault: true };
+      (CBZ.colliders || (CBZ.colliders = [])).push(rail);
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
     K.skinBox(dock, "concrete", 0xa0a5aa);
     stat(new THREE.BoxGeometry(26.05, 0.1, 0.1), steelDark, 85, 1.17, z1 + 4.18, { cast: false });   // the nosing angle
     for (const dx of [76, 84, 92]) for (const s of [-1, 1]) stat(new THREE.BoxGeometry(0.25, 0.45, 0.12), rubber, dx + s * 1.6, 0.8, z1 + 4.26, { cast: false });

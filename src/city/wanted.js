@@ -430,11 +430,14 @@
     const _dTrust = CBZ.cityDisguiseTrust;
     const _authority = _dTrust ? (_dTrust("police") || _dTrust("army")) : (CBZ.cityOutfitCopTrust && CBZ.cityOutfitCopTrust());
     if (_authority) {
-      if (amount >= 60) {
+      // a blow thrown in view of the org you wear is no police work: it blows the cover and is the assault it is
+      const _own = amount < 60 && /assault/.test(opts.type || "") && CBZ.cityDisguiseOrgWitness ? CBZ.cityDisguiseOrgWitness() : null;
+      if (amount >= 60 || _own) {
         // (only when somebody is near enough to see WHO did it: outfits.js's
         // own 22 m. A shot from a roof across the base burns nobody's uniform;
         // the men hunting the shooter still have to work out which of them it is.)
-        if (CBZ.cityDisguiseWitness && !CBZ.cityDisguiseWitness()) { /* unseen: the cover holds */ }
+        if (_own && CBZ.cityDisguiseBlow) CBZ.cityDisguiseBlow(_own);
+        else if (CBZ.cityDisguiseWitness && !CBZ.cityDisguiseWitness()) { /* unseen: the cover holds */ }
         else if (CBZ.cityDisguiseBlow) CBZ.cityDisguiseBlow(null, "That's no officer!");
         else if (CBZ.cityOutfitBlow) CBZ.cityOutfitBlow();
         amount = Math.round(amount * (CBZ.cityOutfitHeatMult ? CBZ.cityOutfitHeatMult() : 1.5));

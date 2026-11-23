@@ -664,6 +664,17 @@
     // a step in stretches the reach so the hand is in the pocket once the feet land
     return reachPocket(pc, P.pos, actor.char, at, stepped ? 0.8 : 0.62);
   }
+  /* IS HIS POCKET WITHIN REACH: the one short step in (above) and then an
+     arm, about 1.5 m centre to centre, and on the same floor. Further than
+     that the hand cannot get there, so there is no lift to offer. */
+  function pocketReach(actor) {
+    const at = actor && actor.group && actor.group.position, P = CBZ.player;
+    if (!at || !P || !P.pos) return false;
+    if (Math.abs((at.y || 0) - (P.pos.y || 0)) > 0.9) return false;
+    const R = (P.radius || 0.38) + MARK_R + STEP_IN_GAP + STEP_IN_MAX + 0.06;
+    const dx = at.x - P.pos.x, dz = at.z - P.pos.z;
+    return dx * dx + dz * dz <= R * R;
+  }
 
   /* A KEY YOU TOOK OFF A MAN IS THE SAME KEY THAT WAS LYING ON THE DESK.
      entities/keycard.js's world card sets g.hasKey (the door/AI truth) beside
@@ -1015,6 +1026,7 @@
     return !!(actor && actor.kind === "warden" && !(CBZ.warden && CBZ.warden.exposed && CBZ.warden.exposed()));
   }
   function steal(actor) {
+    if (!pocketReach(actor)) return { ok: false, msg: "" };
     const guardish = actor.kind === "guard" || actor.kind === "warden";
     const load = rollLoadout(actor);
     // the warden on his feet with an officer near is a long shot, never a
@@ -1726,7 +1738,7 @@
     };
   };
 
-  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, dealMod, itemValue, addRespect, addLoyalty, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, rollLoadout, rollDrops, lootActor, armorySergeant, pickArmorySergeant, keyHolders, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed,
+  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, dealMod, itemValue, addRespect, addLoyalty, addCigs, addItem, hasItem, takeItem, pocketReach, itemStore, pickOffer, offerPrice, offerLine, payoffCost, rollLoadout, rollDrops, lootActor, armorySergeant, pickArmorySergeant, keyHolders, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed,
     // the one writer on g.racketDebt (also CBZ.addRacketDebt)
     addRacketDebt, RACKET_DEBT_CEIL,
     // the social layer — read these, never re-derive them

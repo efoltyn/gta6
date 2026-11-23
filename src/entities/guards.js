@@ -1749,6 +1749,8 @@
       if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(g)) continue;   // a body a verb holds is the verb's
       if (CBZ.climb && CBZ.climb.owns(g)) continue;                     // a body on a ladder is the ladder's (systems/climb.js)
       if (CBZ.towerWatch && CBZ.towerWatch.owns(g, dt)) continue;      // an officer on his tower post (entities/towerwatch.js)
+      // getting up out of a chair or a bunk (CBZ.moves' stand): on his feet first, then he reacts
+      if (!g.dead && !(g.ko > 0) && CBZ.moves && CBZ.moves.busy && CBZ.moves.busy(g)) continue;
       updateGuard(g, dt);
     }
   });

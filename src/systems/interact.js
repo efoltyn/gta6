@@ -548,8 +548,10 @@
   // CONDITION for the button, not a word printed on it, so without one there
   // is no Tie at all.
   function hasRope() { return !!(CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Bedsheet Rope")); }
-  function capVerbs(v) {
+  function capVerbs(v, a) {
     if (v.indexOf("restrain") >= 0 && !hasRope()) v = v.filter(function (x) { return x !== "restrain"; });
+    // a pocket is an arm away (economy.js pocketReach): out of reach, no Pickpocket
+    if (a && v.indexOf("steal") >= 0 && CBZ.econ && CBZ.econ.pocketReach && !CBZ.econ.pocketReach(a)) v = v.filter(function (x) { return x !== "steal"; });
     // CUFFED (CBZ.arrest.playerCuffed): only what a mouth can do
     const C = CBZ.cuffedPlayer;
     if (C && C.on()) {
@@ -793,7 +795,7 @@
       if (shownVerbs.length) { shownVerbs = []; shownFor = null; clearCluster(); }
       return;
     }
-    const verbs = capVerbs(verbsFor(a));
+    const verbs = capVerbs(verbsFor(a), a);
     a._verbs = verbs;
     shownVerbs = verbs; shownFor = a;
     render(a, verbs);
@@ -805,7 +807,7 @@
     if (cooldown > 0 || CBZ.game.state !== "playing") return;
     const who = fresh ? (current || shownFor) : (shownFor || current);
     if (!who || !reach(who)) return;
-    const verbs = (!fresh && who === shownFor && shownVerbs.length) ? shownVerbs : capVerbs(verbsFor(who));
+    const verbs = (!fresh && who === shownFor && shownVerbs.length) ? shownVerbs : capVerbs(verbsFor(who), who);
     if (!(idx >= 0) || idx >= verbs.length) return;
     cooldown = 0.35;
     const v = verbs[idx];
@@ -828,7 +830,7 @@
   // indexes into the list CBZ.prisonVerbsFor(current) returns right now
   CBZ.doInteract = function (idx) { doAction(idx, true); };
   CBZ.prisonInteractTarget = function () { return current; };
-  CBZ.prisonVerbsFor = function (a) { return a ? capVerbs(verbsFor(a)) : []; };
+  CBZ.prisonVerbsFor = function (a) { return a ? capVerbs(verbsFor(a), a) : []; };
   // systems/touch.js: a tap on a person selects him (null: tap elsewhere)
   CBZ.prisonPeople = {
     select: function (a) {

@@ -599,6 +599,12 @@
     };
     scan(CBZ.cityPeds);
     scan(CBZ.cityCops);
+    // the war's dead (city/army.js): a soldier's fatigues come off like anybody's
+    const R = CBZ.army && CBZ.army.ready && CBZ.army.realm;
+    if (R && R.corpseNear) {
+      const m = R.corpseNear(px, pz, bd);
+      if (m && m.char.skinSlots) best = m;
+    }
     return best;
   }
   // the WHY line for a fit, read off what it buys you on the street

@@ -425,6 +425,18 @@ const REALM_EXPORT = {
   forces: function () { return CITYWAR.forces; },
   events: function () { const e = CW_EVENTS.slice(); CW_EVENTS.length = 0; return e; },
   list: function () { return CITYWAR.list; },
+  // the nearest dead soldier still lying whole within r of (x, z), clothes
+  // on (city/interact.js: Strip, outfits.js corpse swap)
+  corpseNear: function (x, z, r) {
+    let best = null, bd = r * r;
+    for (let i = 0; i < corpses.length; i++) {
+      const m = corpses[i];
+      if (!m || m.beast || m._clothesTaken || !m.char || !m.pos || !m.group || m.group.visible === false || !m.group.parent) continue;
+      const dx = m.pos.x - x, dz = m.pos.z - z, d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = m; }
+    }
+    return best;
+  },
   you: function (on) { if (on != null) CITYWAR.youOn = !!on; return CITYWAR.youOn; },
   units: function (F) { const out = []; for (let i = 0; i < men.length; i++) if (men[i].force === F) out.push(men[i]); return out; },
   sides: CITYWAR.sides,

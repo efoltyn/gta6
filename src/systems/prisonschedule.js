@@ -1641,11 +1641,15 @@
          hours, the gate shuts for the day. A lockdown cancels it; the
          warden taking your yard leaves you inside.
          IN, the evening return: the muster above walks the men home; if
-         you are still out IN_WAIT seconds after the horn, an officer comes.
+         you are still out IN_WAIT seconds after the horn, an officer comes
+         (at a lock-in count, High and Ultra, he walks you to your cell).
+         THE STRAGGLERS (12b): an inmate still in the wing HAUL_AFTER_H into
+         the move is gone back for, the way you are; the move, and the gate
+         with it, stays open while an officer is walking one out.
      ========================================================== */
   const MOVE_OUT_H = 3, IN_WAIT = 6;
   const YARD_PATCHES = [[-12, -4, 8, 18], [4, 12, 8, 18], [-6, 6, 16, 26], [-12, -4, 26, 36], [4, 12, 26, 36], [-16, -8, 38, 46], [8, 16, 38, 46]];
-  let move = null, outKey = null, lastMove = null, inArmed = false, inT = 0;
+  let move = null, outKey = null, lastMove = null, inArmed = false, inT = 0, inKind = "in", inId = null;
   function dayKey() { return CBZ.dayCount ? (CBZ.dayCount() | 0) : 0; }
   // an open block with a day still in front of it (not the last one before the return)
   function outBlock(b) {
@@ -1670,6 +1674,7 @@
   }
   function endMove(why) {
     if (!move) return;
+    endHauls(why);
     lastMove = { dir: move.dir, why: why, t: Math.round(move.t * 10) / 10, left: move.left };
     move = null;
     drivePosts(live().home !== null);
@@ -1693,7 +1698,9 @@
     if (!move) return;
     move.t += step;
     if (lockdownOn() || b.home !== null) { endMove("cut"); return; }
-    let left = 0;
+    let left = 0, strag = null, sd = Infinity;
+    const haulNow = hauls.length < HAUL_MAX && move.t > HAUL_AFTER_H * secsPerHour();
+    const day = dayKey();
     const list = CBZ.npcs || [];
     for (let i = 0; i < list.length; i++) {
       const n = list[i];
@@ -1701,6 +1708,11 @@
       const q = n.group.position;
       if (!inBlock(q.x, q.z, 0) && !vestibule(q.x, q.z)) continue;
       left++;
+      // the straggler nearest the gate that nobody is fetching yet
+      if (haulNow && !n._haul && haulable(n, day)) {
+        const d = (q.x - GATE_IN.x) * (q.x - GATE_IN.x) + (q.z - GATE_IN.z) * (q.z - GATE_IN.z);
+        if (d < sd) { sd = d; strag = n; }
+      }
       // move along: up off the bunk, no standing about
       n._bunkGiveUp = Math.max(n._bunkGiveUp || 0, 30);
       if (n._propSeat || n._propBed) continue;
@@ -1711,6 +1723,7 @@
       }
     }
     move.left = left;
+    if (strag) startHaul(strag, day);
     if (!move.called && move.t > 0.6) { move.called = true; callIt(); }
     const p = P();
     const youDone = !p || excused() || noYard() || takeArrived("yard");
@@ -1718,17 +1731,229 @@
       const gd = nearestGuard(p.x, p.z, 70, freeGuard);
       if (gd) startTake("yard", gd);
     }
-    if ((left === 0 && youDone && !take) || move.t > MOVE_OUT_H * secsPerHour()) endMove(left === 0 ? "out" : "time");
+    if ((left === 0 && youDone && !take && !hauls.length) || (move.t > MOVE_OUT_H * secsPerHour() && !hauls.length)) endMove(left === 0 ? "out" : "time");
   }
+
+  /* ==========================================================
+     12b. THE STRAGGLERS. The yard move used to shut on whoever was still
+          dawdling in the wing, and he spent the day in the hall. Now an
+          officer goes back for him the way he comes for you (8): he walks up
+          to him, tells him "Yard", and the man decides (CBZ.command: obey, a
+          "Sir?", no, or a swing). Told, he walks out to his patch of yard
+          with the officer a pace behind; stall or say no and he is taken by
+          the arm (CBZ.verbs.escort) and walked through the sally port. The
+          move, and so the gate (gateWanted), stays open while one is on.
+          At most HAUL_MAX at once, at most two goes at any man a day.
+     ========================================================== */
+  const HAUL_AFTER_H = 0.5, HAUL_MAX = 2;
+  const hauls = [];
+  function haulable(n, day) {
+    if (n.dead || n.escaped || n._crowd || !n.group || n.cuffed) return false;
+    if (n.aiState === "fight" || n.aiState === "flee" || n.rage) return false;
+    if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(n)) return false;
+    if (n._haulDay === day && (n._haulN | 0) >= 2) return false;
+    return true;
+  }
+  // his patch of yard (startMoveOut gave him one), else the apron outside the out door
+  function yardSpot(n) {
+    const r = n.region;
+    if (r && r[2] > 4) return { x: (r[0] + r[1]) / 2, z: (r[2] + r[3]) / 2 };
+    return { x: 0, z: 4 };
+  }
+  function haulOut(n) {
+    const p = n.group.position;
+    return !inBlock(p.x, p.z, 0.2) && !vestibule(p.x, p.z);
+  }
+  function startHaul(n, day) {
+    const p = n.group.position;
+    const gd = nearestGuard(p.x, p.z, 90, freeGuard);
+    if (!gd) return false;
+    if (n._haulDay !== day) { n._haulDay = day; n._haulN = 0; }
+    n._haulN = (n._haulN | 0) + 1;
+    const H = { n: n, gd: gd, phase: "fetch", t: 0, pt: 0, orders: 0, again: 0, best: Infinity, stall: 0,
+      goal: yardSpot(n), S: null, esc: false, tries: 0, tryT: 0, path: null, pathT: 0, pi: 0 };
+    hauls.push(H);
+    n._haul = H;
+    gd._duty = { kind: "haul", torch: false, h: H };
+    gd.investigate = null; gd._returning = false;
+    return true;
+  }
+  function endHaul(H, why) {
+    const k = hauls.indexOf(H);
+    if (k < 0) return;
+    hauls.splice(k, 1);
+    const n = H.n, gd = H.gd;
+    if (H.S && !H.S.done && CBZ.verbs && CBZ.verbs.release) { try { CBZ.verbs.release(H.S); } catch (e) {} }
+    if (gd) {
+      if (H.esc) gd._escort = false;
+      if (gd._duty && gd._duty.h === H) gd._duty = null;
+      gd._returning = true;
+    }
+    if (n) {
+      if (n._haul === H) n._haul = null;
+      // out, he walks on to his patch (the errand runs out by itself); otherwise it ends here
+      const e = n._carErrand;
+      if (e && e.kind === "yardMove" && why !== "out") n._carErrand = null;
+    }
+  }
+  function endHauls(why) { while (hauls.length) endHaul(hauls[hauls.length - 1], why); }
+  // THE ORDER, OBEYED: up off whatever he is on and out to his patch. The
+  // errand owns his `target` (entities/npc.js purposefulRoutine leaves it be;
+  // systems/prisonnav.js walks him round the walls and through the port).
+  function sendOut(n, H) {
+    if (n._propSeat && CBZ.propStand) { try { CBZ.propStand(n); } catch (e) {} }
+    else if (n._propBed && CBZ.propWake) { try { CBZ.propWake(n); } catch (e) {} }
+    n.pause = 0; n._lifeActivity = null; n._lifeT = 0;
+    n._bunkGiveUp = Math.max(n._bunkGiveUp || 0, 60);
+    if (n.aiState && n.aiState !== "wander") n.aiState = "wander";
+    const now = (CBZ.game && CBZ.game.elapsed) || 0;
+    n._carErrand = { kind: "yardMove", block: live().id, until: now + 45, x: H.goal.x, z: H.goal.z, yaw: null };
+    if (n.target && n.target.set) n.target.set(H.goal.x, 0, H.goal.z);
+    return true;
+  }
+  function haulOrder(H) {
+    H.orders++;
+    H.phase = "order"; H.pt = H.t; H.again = 0;
+    const n = H.n, gd = H.gd;
+    say(gd, TAKE_LINES.yard[Math.min(H.orders - 1, TAKE_LINES.yard.length - 1)], 1.8);
+    const C = CBZ.command;
+    let ans = "obey";
+    if (C && C.issue) {
+      let r = null;
+      try { r = C.issue(gd, n, "go", null, { at: H.goal, say: false, game: "prison", exec: function (man) { return sendOut(man, H); } }); } catch (e) { r = null; }
+      ans = r ? r.answer : "obey";
+      if (r && ans === "obey" && !r.obey.length) ans = "refuse";     // his body could not carry it
+      if (!r) sendOut(n, H);
+    } else sendOut(n, H);
+    if (hauls.indexOf(H) < 0) return;
+    if (ans === "obey") { H.phase = "walk"; H.best = Infinity; H.stall = 0; return; }
+    if (ans === "turn") { endHaul(H, "turned"); return; }       // he went for the officer: the yard's law has it now
+    // "Sir?": said again in a beat; a no is hands
+    if (ans === "hesitate" && H.orders < 3) { H.phase = "fetch"; H.pt = H.t; H.again = 1.6; return; }
+    haulHands(H);
+  }
+  function haulHands(H) { H.phase = "reach"; H.pt = H.t; H.tryT = 0; H.tries = 0; }
+  function haulGrab(H) {
+    const V = CBZ.verbs;
+    if (!V || !V.escort) { endHaul(H, "no hands"); return; }
+    let S = null;
+    try { S = V.escort(H.gd, H.n, { far: true }); } catch (e) { S = null; }
+    if (!S) { if (++H.tries > 8) endHaul(H, "kept clear"); return; }
+    H.S = S; H.phase = "hands"; H.pt = H.t;
+    H.gd._escort = true; H.esc = true;              // his body is the verb's now (entities/guards.js)
+    H.path = null; H.pathT = 0; H.pi = 0;
+    say(H.gd, "Walk.", 1.4);
+  }
+  // hands on: the officer walks him out the way holdTick walks you
+  function haulHold(H, dt) {
+    const S = H.S, V = CBZ.verbs, n = H.n;
+    if (!S || !V) { endHaul(H, "lost hold"); return; }
+    if (S.done) {
+      const k = S.result && S.result.outcome;
+      if (k === "escaped" || k === "interrupted") { endHaul(H, "broke loose"); return; }
+      H.S = null;
+      if (H.esc) { H.gd._escort = false; H.esc = false; }
+      H.phase = "reach"; H.pt = H.t; H.tryT = 0.5;
+      return;
+    }
+    if (S.phase !== "hold") return;
+    if (haulOut(n)) { endHaul(H, "out"); sendOut(n, H); return; }
+    if (H.t - H.pt > 50) { endHaul(H, "stalled"); return; }
+    const p = n.group.position, goal = H.goal;
+    let tx = goal.x, tz = goal.z;
+    const NG = CBZ.navGrid;
+    if (NG && NG.plan && NG.ready && NG.ready()) {
+      H.pathT -= dt;
+      if (!H.path || H.pathT <= 0) {
+        let path = null;
+        try { path = NG.plan({ x: p.x, z: p.z }, goal, { actor: H.gd }); } catch (e) { path = null; }
+        H.path = path && path.length ? path : null; H.pathT = 2.5; H.pi = 0;
+      }
+      const w = H.path;
+      if (w) {
+        while (H.pi < w.length - 1 && Math.hypot(w[H.pi].x - p.x, w[H.pi].z - p.z) < 0.8) H.pi++;
+        if (H.pi < w.length - 1) { tx = w[H.pi].x; tz = w[H.pi].z; }
+      }
+    }
+    let ux = tx - p.x, uz = tz - p.z;
+    const ul = Math.hypot(ux, uz) || 1;
+    ux /= ul; uz /= ul;
+    V.walk(S, S, tx - ux * S.work, tz - uz * S.work, 1.35, dt, Math.atan2(ux, uz));
+  }
+  // every frame, for the one or two on
+  function haulTick(dt) {
+    for (let i = hauls.length - 1; i >= 0; i--) {
+      const H = hauls[i];
+      if (!H) continue;
+      H.t += dt;
+      const n = H.n, gd = H.gd;
+      if (!move || lockdownOn() || !n || n.dead || n.escaped || !n.group) { endHaul(H, "off"); continue; }
+      if (H.phase === "hands") {
+        if (!gd || gd.dead || gd.ko > 0) { endHaul(H, "officer down"); continue; }
+        haulHold(H, dt);
+        continue;
+      }
+      if (!ableGuard(gd) || (gd.hunt || 0) > 0) { endHaul(H, "officer busy"); continue; }
+      if (n.ko > 0 || n.aiState === "fight" || n.rage) { endHaul(H, "trouble"); continue; }
+      if (haulOut(n)) { endHaul(H, "out"); continue; }
+      const p = n.group.position, gp = gd.group.position;
+      const d = Math.hypot(p.x - gp.x, p.z - gp.z);
+      if (H.phase === "fetch") {
+        if (H.again > 0) { H.again -= dt; if (H.again <= 0) haulOrder(H); continue; }
+        if (d < 2.4) haulOrder(H);
+        else if (H.t > 40) endHaul(H, "never reached");
+        continue;
+      }
+      if (H.phase === "walk") {
+        // the errand holds his target; a brain re-think can rewrite it, so it is held here
+        const e = n._carErrand;
+        if (!e || e.kind !== "yardMove") { if (H.orders < 2) haulOrder(H); else haulHands(H); continue; }
+        if (n.target && n.target.set) n.target.set(e.x, 0, e.z);
+        const left = Math.hypot(p.x - GATE_OUT.x, p.z - GATE_OUT.z);
+        if (left < H.best - 0.4) { H.best = left; H.stall = 0; }
+        else H.stall += dt;
+        if (H.stall > 9) { if (H.orders < 2) haulOrder(H); else haulHands(H); }
+        continue;
+      }
+      if (H.phase === "reach") {
+        if (d < 2.2) { H.tryT -= dt; if (H.tryT <= 0) { H.tryT = 0.5; haulGrab(H); } }
+        if (H.phase === "reach" && H.t - H.pt > 14) endHaul(H, "kept clear");
+      }
+    }
+  }
+  // his legs while he is on one (dutyStep)
+  function stepHaul(gd, D, dt) {
+    const H = D.h, W = CBZ.guardWalkTo, ST = CBZ.guardStand, F = CBZ.guardFaceTo;
+    if (!H || hauls.indexOf(H) < 0 || !W || !ST || !F) return false;
+    const p = H.n.group.position, gp = gd.group.position;
+    const dx = p.x - gp.x, dz = p.z - gp.z, d = Math.hypot(dx, dz);
+    if (H.phase === "fetch" || H.phase === "reach") {
+      const stop = H.phase === "reach" ? 0.8 : 1.8;
+      if (d > stop + 0.25 && !(H.again > 0)) W(gd, p.x, p.z, (gd.speed || 2.4) * (H.phase === "reach" ? 1.5 : 1.15), dt, stop, false, p.y);
+      else { ST(gd, dt); F(gd, p.x, p.z, 0.0001, dt); }
+      return true;
+    }
+    if (H.phase === "walk" && d > 2.8) {
+      // a pace behind him
+      const k = (d - 2.0) / d;
+      W(gd, gp.x + dx * k, gp.z + dz * k, Math.max(gd.speed || 2.4, 2.6), dt, 0.4, false, p.y);
+      return true;
+    }
+    ST(gd, dt); F(gd, p.x, p.z, 0.0001, dt);
+    return true;
+  }
+
+  // the return fetches you into the wing; a lock-in count (High, Ultra: the
+  // count block is home "cell") fetches you to your cell
   function inTick(step) {
     if (!inArmed) return;
     const b = live();
-    if (b.home !== "block" || lockdownOn()) { inArmed = false; return; }
+    if (b.id !== inId || lockdownOn()) { inArmed = false; return; }
     if (inT > 0) { inT -= step; return; }
-    if (take || excused() || orderLive() || takeArrived("in")) return;
+    if (take || excused() || orderLive() || takeArrived(inKind)) return;
     const p = P();
     const gd = p ? nearestGuard(p.x, p.z, 120, freeGuard) : null;
-    if (gd) startTake("in", gd);
+    if (gd) startTake(inKind, gd);
   }
 
   /* ---- THE COUNTS NOBODY ANNOUNCES: one or two a night, rolled per night
@@ -1785,6 +2010,7 @@
     if (!D || !on()) return false;
     if (D.kind === "take") return stepTake(gd, dt);
     if (D.kind === "count") return stepCount(gd, D, dt);
+    if (D.kind === "haul") return stepHaul(gd, D, dt);
     return false;
   }
 
@@ -1823,7 +2049,7 @@
          secure -> night is ONE lock-up: neither timer re-arms inside it. */
       if (prev ? prev.home === null : (!b.lightsOut && b.cells !== "open")) {
         gateT = GATE_HOLD;
-        if (b.home === "block") { inArmed = true; inT = IN_WAIT; }
+        inArmed = true; inT = IN_WAIT; inKind = b.home === "cell" ? "cell" : "in"; inId = b.id;
       }
       if (b.cells === "lock" && (!prev || prev.cells !== "lock")) holdT = CELL_HOLD;
       // the lock-in count walks once the leaves have racked
@@ -1849,7 +2075,7 @@
 
   function reset() {
     PLAN.rearm(); blasts = 0; paLine = null;
-    endTake("reset"); endCount(); search = null; move = null;
+    endTake("reset"); endCount(); endHauls("reset"); search = null; move = null;
     countDue = null; morningHold = false; inArmed = false; outKey = null; surprise.key = null;
     const G = CBZ.guards || [];
     for (let i = 0; i < G.length; i++) if (G[i] && G[i]._duty) G[i]._duty = null;
@@ -1914,6 +2140,7 @@
     }
 
     takeTick(dt);
+    if (hauls.length) haulTick(dt);
     dayAcc += dt;
     if (dayAcc >= 0.25) { const s = dayAcc; dayAcc = 0; dayTick(s); }
     driveDoors(dt);
@@ -2007,6 +2234,7 @@
       gateOpenOffMove: gateOffMove, gateOpenOffCount: gateOffMove,   // (old name, same number)
       heldOpenCells: waiting.length,
       move: move ? { dir: move.dir, t: Math.round(move.t * 10) / 10, left: move.left } : null, lastMove: lastMove,
+      hauls: hauls.map(function (H) { return { phase: H.phase, t: Math.round(H.t * 10) / 10, orders: H.orders, man: (H.n && H.n.data && H.n.data.name) || null }; }),
       take: T ? { kind: T.kind, phase: T.phase, t: Math.round(T.t * 10) / 10, orders: T.orders, toGo: Math.round(toGo(T.kind) * 10) / 10 } : null,
       lastTake: lastTake,
       count: C ? { kind: C.kind, t: Math.round(C.t * 10) / 10, men: C.men.length, checked: C.checked, present: C.present } : null,

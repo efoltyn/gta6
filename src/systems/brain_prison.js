@@ -929,6 +929,8 @@
       return;
     }
     if (isPlayer(perp)) {
+      // he is in custody (cuffed, taken, walked off): the screws have him, nothing to tell
+      if (CBZ.playerInCustody && CBZ.playerInCustody()) return;
       const amount = A && A.amount != null ? A.amount : (w && w.amount) || Math.round(8 + (rep.severity || 0.5) * 16);
       const meta = Object.assign({}, (A && A.meta) || (w && w.meta) || {});
       if (!meta.lastKnown) meta.lastKnown = { x: rep.x, z: rep.z, type: rep.kind, heardOnly: !(w && w.saw) };

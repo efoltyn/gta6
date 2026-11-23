@@ -4329,6 +4329,7 @@
      (systems/brain_prison.js), the one place a witness report becomes heat. */
   function playerReported(n, amount, reportMeta, g) {
     reportMeta = reportMeta || {};
+    if (CBZ.playerInCustody && CBZ.playerInCustody()) return;      // in custody: no sighting to file
     const spot = n.reportedPlayerLastKnown || reportMeta.lastKnown || null;
     const where = spot ? nearestLandmark(spot.x, spot.z) : null;
     if (CBZ.recordWitnessReport) {
@@ -4352,6 +4353,8 @@
 
   function sendNpcToSnitch(n, amount, meta) {
     if (!alive(n) || n.role === "merchant" || n.role === "dealer") return false;
+    // nobody runs to tell on a man the screws already have in hand
+    if (CBZ.playerInCustody && CBZ.playerInCustody()) return false;
     if (tryGangInterceptSnitch(n, amount, meta || {})) return true;
     meta = meta || {};
     if (n._demand) endDemand(n, null);

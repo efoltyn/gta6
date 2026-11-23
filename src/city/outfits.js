@@ -1415,7 +1415,9 @@
 
   // WHOSE IS HE? The same words for a person as claimOf has for cloth.
   function isPolice(p) { return p.kind === "cop" || p._castFit === "precinct" || p._castFit === "detective"; }
-  function isArmy(p) { return !!(p.milRank || p.organization === "military"); }
+  // the garrison's men (milRank), and the war's soldiers (city/army.js: armyUnit;
+  // a civilian or street side's men are not soldiers)
+  function isArmy(p) { return !!(p.milRank || p.organization === "military" || (p.armyUnit && p.tier !== "civ" && p.tier !== "thug")); }
   function orgOf(p) {
     if (!p) return null;
     if (isPolice(p)) return "police";
@@ -2496,6 +2498,7 @@
     // saw (you take "Hospital Scrubs", not "their street clothes")
     const jf = jobFit(p.job);
     if (jf) return jf;
+    if (p.armyUnit && isArmy(p)) return CAT.soldier;          // a war soldier (city/army.js) wears the issue
     const a = p.archetype || "";
     const seed = pedSeed(p);
     if (a === "tycoon" || a === "billionaire" || a === "oldmoney") return (Math.abs(seed) & 1) ? CAT.tuxedo : suitRecord({ archetype: a, seed });
@@ -2587,7 +2590,7 @@
       }
       // re-mirror the corpse's attachments NOW: a magnate stripped of his tux
       // loses the shirt-front/bow on the spot (or gains yours, if you had one).
-      if (CBZ.cityBlingResyncPed) CBZ.cityBlingResyncPed(sw.body);
+      if (CBZ.cityBlingResyncPed && !sw.body.armyUnit) CBZ.cityBlingResyncPed(sw.body);
     }
     // ---- THE ROLE RIDES WITH THE CLOTH -------------------------------------
     // A cop's shirt and a set's colours say who you are by themselves
@@ -2599,8 +2602,9 @@
     const theirs = Object.assign({}, sw.theirs);
     const body = sw.body;
     if (body && !theirs.cop && !theirs.gang) {
-      const tr = CBZ.cityTrueRole ? CBZ.cityTrueRole(body) : null;
       const org = orgOf(body);
+      // a war soldier has no rank on the city's ladder: he is a private
+      const tr = (org === "army" && body.armyUnit && !body.milRank) ? { title: "Private" } : (CBZ.cityTrueRole ? CBZ.cityTrueRole(body) : null);
       const title = (tr && tr.title) || (org === "army" ? "Soldier" : org === "police" ? "Officer" : null);
       if (title) {
         theirs._claimRole = title;
@@ -2615,14 +2619,16 @@
   // anyone ALIVE, awake and close enough to have seen the strip. Cops count
   // double-strength (they are the ones who radio it), but any living witness
   // is enough — a uniform whose provenance was observed is not a disguise.
-  function strippingWitness(body) {
+  // With `claim`, only that org's own people (cityDisguiseOrgWitness).
+  function strippingWitness(body, claim) {
     const P = CBZ.player; if (!P || !body) return null;
     const px = P.pos.x, pz = P.pos.z, py = P.pos.y || 0;
-    for (let q = 0; q < 2; q++) {
-      const arr = q === 0 ? CBZ.cityCops : CBZ.cityPeds; if (!arr) continue;
+    for (let q = 0; q < 3; q++) {
+      const arr = q === 0 ? CBZ.cityCops : q === 1 ? CBZ.cityPeds : CBZ.cityArmy; if (!arr) continue;
       for (let i = 0; i < arr.length; i++) {
         const a = arr[i];
         if (!a || a.dead || a === body || a.isPlayer || a._parked || (a.ko || 0) > 0) continue;
+        if (claim && !memberOf(a, claim)) continue;
         if (a.companion || a.recruited || a.controlled) continue;   // your own people don't tell
         if (a.enterT > 0 || (a.group && !a.group.visible)) continue; // indoors / not rendered
         const dx = a.pos.x - px, dz = a.pos.z - pz;
@@ -2647,6 +2653,9 @@
   // fired from a roof two hundred metres off burns nobody's fatigues.
   const _nobody = {};
   CBZ.cityDisguiseWitness = function () { return strippingWitness(_nobody); };
+  // ...and is one of the org you are dressed as looking? A blow thrown in front
+  // of your own "colleagues" is no police work (city/wanted.js crime()).
+  CBZ.cityDisguiseOrgWitness = function () { const c = disguise(); return c ? strippingWitness(_nobody, c) : null; };
   function cancelSwap() {
     _pendingSwap = null;
     g.cityOutfitChanging = 0;

@@ -1470,11 +1470,11 @@
     }
     return best;
   }
-  // A SEATED MAN STANDS UP WHEN SOMETHING HAPPENS. entities/guards.js's own
-  // branches (approach / hunt / alert / investigate) all move the body, and a
-  // rig held in `sitting` while its owner sprints at you is the exact defect
-  // the propuse arc engine exists to prevent — so the seat is released the
-  // instant he has anything to do, and retaken when he settles again.
+  // A SEATED MAN STANDS UP WHEN SOMETHING HAPPENS. The seat is released the
+  // instant he has anything to do and retaken when he settles again. Getting
+  // up is the one stand everybody uses (CBZ.moves: weight forward, the push,
+  // the rise, about a second); entities/guards.js leaves his body to it until
+  // he is on his feet, and only then does he react.
   function busy(g) {
     return !!(g.hunt > 0 || g.alert > 0 || (g.investigate && g.investigate.t > 0) ||
       g.dead || (g.ko | 0) > 0 || g.asleep);
@@ -1504,10 +1504,7 @@
   }
   function standUp(g) {
     if (!g || !g._propSeat) return;
-    try { CBZ.propStand(g, { instant: true }); } catch (e) {}
-    // propStand writes state="walk" for a ped brain; the warden is a GUARD and
-    // guards.js owns his movement, so all that is owed here is the pose.
-    if (g.char) g.char.sitting = false;
+    try { CBZ.propStand(g); } catch (e) { if (g.char) g.char.sitting = false; }
   }
   function findWarden() {
     const list = CBZ.guards || [];

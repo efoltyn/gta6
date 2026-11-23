@@ -152,6 +152,24 @@
     if (actSpd > LAW.RUN_SPD) return "run";
     return actSpd < LAW.STILL_SPD ? "stopped" : "walk";
   }
+  /* IN CUSTODY: cuffed, taken, tased and being cuffed, carried or walked off
+     by an officer (capture.js, arrest.js, a verb's hands on him). A man the
+     screws already have is not out anywhere to be sighted: nobody reports
+     him and no zone sees him. `full` also asks capture.js's haul, which
+     builds a record, so the per-frame read leaves it out (the hauled man is
+     cuffed anyway). */
+  function inCustody(full) {
+    if (player.dead || g.mode !== "escape") return false;
+    const A = CBZ.arrest, pc = CBZ.playerChar, V = CBZ.verbs;
+    if ((pc && pc.cuffed) || (player.captureState && player.captureState !== "normal")) return true;
+    if (A && A.active && A.active()) return true;
+    if (CBZ.jailEscortPhase && CBZ.jailEscortPhase()) return true;
+    const ph = CBZ.prisonArrestPhase ? CBZ.prisonArrestPhase() : null;
+    if (ph === "take" || ph === "tackle" || ph === "tased") return true;
+    if (V && V.playerHeld && V.playerHeld()) return true;
+    return !!(full && CBZ.prisonHaul && CBZ.prisonHaul());
+  }
+  CBZ.playerInCustody = function () { return inCustody(true); };
   function readStandDown(act) {
     if (act === "run" || act === "fight") return false;
     if (act === "held" || act === "down" || act === "gaveup") return true;
@@ -807,6 +825,8 @@
       CBZ.addComplaint(amount * 0.55);
       return storeLastKnown(amount, meta, reporter);
     }
+    // he is already in custody: a report of where he was is news to nobody
+    if (inCustody(true)) return null;
     if (guard && guard.corrupt) {
       const lk = storeLastKnown(amount, meta, reporter || guard);
       CBZ.addCasePressure(amount, meta, reporter || guard, { corruptHold: true, credibility: witnessCredibility(reporter, meta, { corruptHold: true }) });
@@ -957,7 +977,8 @@
 
     lawPass(dt);
     const resisting = actNow === "run" || actNow === "fight";
-    const zone = zoneOf(player.pos);
+    // a man in custody is where his officer is walking him, not trespassing
+    const zone = inCustody(false) ? null : zoneOf(player.pos);
     let nearestSeer = Infinity, seenByAnyone = false;
 
     for (const gd of CBZ.guards) {
