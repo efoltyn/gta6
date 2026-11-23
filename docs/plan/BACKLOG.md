@@ -50,6 +50,14 @@ Not started; pick what you want.
 
 # Backlog, 2026-11-02 (owner stopped every agent; nothing is running)
 
+## Backlog, 2026-11-22 night: left over from arms and long guns
+
+1. A painted tee (most city people) still draws the upper arm with the smooth sleeve shape below the hem; only flat-coloured and bare arms show the new muscle.
+2. The shotgun at the shoulder holds its firing elbow high and its off arm almost straight on the pump.
+3. Nobody watched the new holds in motion (walking, crouched, prone, the player in third person) or in first person with the longer carbine stock.
+4. Women and untrained men share one arm shape; a woman's could be slimmer at the forearm.
+5. Arm muscle is silhouette only (one loft): no groove between biceps and triceps.
+
 ## three.js r187 (r187 on WebGL is LIVE; the WebGPU parts below are not)
 1. **[partial, unmerged]** WebGPU water: GPU flood/tsunami/flash-flood sim, lava flow, boats/fleet riding the wave. 6 commits on branch `worktree-agent-a52f5e0317f5f9faa`; not reviewed.
 2. **[partial, parked]** WebGPU looks too dark / shaders to TSL: helper ports of ~80 files (trees, islands, prison, ground, vehicles, crowd, FX, other games) parked as a WIP commit on branch `worktree-agent-a2d3cd34ba47c765a`, unreviewed. Known blocker: escape and city render black on WebGPU (null attribute arrays on batched geometry; fxwarm compileAsync throws).
