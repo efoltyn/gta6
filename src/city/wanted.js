@@ -429,6 +429,7 @@
     // of it (cityDisguiseTrust owns that rule for every org at once).
     const _dTrust = CBZ.cityDisguiseTrust;
     const _authority = _dTrust ? (_dTrust("police") || _dTrust("army")) : (CBZ.cityOutfitCopTrust && CBZ.cityOutfitCopTrust());
+    let _ownCop = null;   // the officer who watched "an officer" throw it: he is the witness, whichever way his cone was turned
     if (_authority) {
       // a blow thrown in view of the org you wear is no police work: it blows the cover and is the assault it is
       const _own = amount < 60 && /assault/.test(opts.type || "") && CBZ.cityDisguiseOrgWitness ? CBZ.cityDisguiseOrgWitness() : null;
@@ -436,7 +437,7 @@
         // (only when somebody is near enough to see WHO did it: outfits.js's
         // own 22 m. A shot from a roof across the base burns nobody's uniform;
         // the men hunting the shooter still have to work out which of them it is.)
-        if (_own && CBZ.cityDisguiseBlow) CBZ.cityDisguiseBlow(_own);
+        if (_own && CBZ.cityDisguiseBlow) { CBZ.cityDisguiseBlow(_own); if (_own.kind === "cop" && !_own.dead) _ownCop = _own; }
         else if (CBZ.cityDisguiseWitness && !CBZ.cityDisguiseWitness()) { /* unseen: the cover holds */ }
         else if (CBZ.cityDisguiseBlow) CBZ.cityDisguiseBlow(null, "That's no officer!");
         else if (CBZ.cityOutfitBlow) CBZ.cityOutfitBlow();
@@ -460,7 +461,7 @@
     if (CBZ.cityTagWitnesses) CBZ.cityTagWitnesses(x, z, amount, opts.type);
     // an OFFICER who saw it (brain perception: his cone, his light, no wall)
     // radios it in on the spot and opens the ladder on you himself.
-    const eye = LAW.copWitness(x, z);
+    const eye = LAW.copWitness(x, z) || _ownCop;
     if (eye) { report(amount, opts); if (CBZ.cityCopSawCrime) CBZ.cityCopSawCrime(eye); }
   }
 
