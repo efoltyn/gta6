@@ -36,6 +36,11 @@
    pass: doors, fence and masts take the cranes' grey, lines the boom's
    white); colliders on the crane legs, the stacks, the sheds, the fence and
    the masts. Landmass order 44 (after the metros plan).
+
+   THE HARBOUR KIT (CBZ.harbourKit, the top of this file) is what the quay
+   is built from, and Lowport's fishing harbour (city/lowport_harbour.js)
+   is built from the same pieces: the coast walk, the quay at grade with
+   its face, fender line, cope and bollards, the merged-by-colour batch.
 ============================================================ */
 (function () {
   "use strict";
@@ -45,51 +50,127 @@
   const BGU = THREE.BufferGeometryUtils;
   const cmat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
 
-  const X0 = -3190, X1 = -2740;          // the quay: from just east of where the Kings River fans out (its last meander reaches x -3235) east
-  const ROAD_Z = 4600, ROAD_X = -2705;   // the dock road, and the arterial it leaves
-  const QUAY_Y = 0.1, SETBACK = 4;       // deck top (at grade: the land the yard stands on is y 0); quay face this far inland of the plan's shore
-  // flat ground and big plain faces take the whole sun here: these are the
-  // tones that come out as concrete, paint and steel
-  // (measured against the sun on the quay: 0x2e2d2a comes out a mid concrete
-  // grey on the flat, 0x9c9a94 came out snow)
-  const COL = { deck: 0x2e2d2a, face: 0x1a1a18, fender: 0x111111, rail: 0x2a2a2a, red: 0x6a1a0e, white: 0x8c8c88, grey: 0x2e3034,
-    shed: 0x3b4044, shedRoof: 0x24282b };
-  const BOXC = [0x0c1e3a, 0x3a0e06, 0x0a2412, 0x4a3004, 0x5a5a55, 0x5a1e04];   // six, as before: one draw each
-
-  function shoreZ(x) {
+  // =====================================================================
+  //  THE HARBOUR KIT
+  //    kit.begin(root)               -> H: box / sheet / solid / flush, H.lite
+  //    kit.shore(x, z, dx, dz, max)  -> the plan's coast walked from an inland
+  //                                     point toward the sea, SETBACK short
+  //                                     of it ({x, z}), or null
+  //    kit.quay(H, line, inlandOf, sea, o)
+  //                                  -> the deck at grade from each line
+  //                                     point's inland partner to the line,
+  //                                     the face down into the water, the
+  //                                     fender line, the cope, a bollard every
+  //                                     o.bollard m; returns the segments built
+  //  Colours are ones that come out right under this sun: colour management
+  //  is off, a hex is linear (0x2e2d2a is a mid concrete grey on the flat,
+  //  0x9c9a94 came out snow).
+  // =====================================================================
+  const QUAY_Y = 0.1, SETBACK = 4;       // deck top (at grade: the land a yard stands on is y 0); quay face this far inland of the plan's shore
+  const QCOL = { deck: 0x2e2d2a, face: 0x1a1a18, fender: 0x111111, cope: 0x4c4a45, iron: 0x141516 };
+  function begin(root) {
+    const geo = {}, cols = CBZ.colliders || null;
+    const H = {
+      lite: CBZ.facadeLite ? CBZ.facadeLite() : false,
+      put: function (col, g) { (geo[col] || (geo[col] = [])).push(g); },
+      // a box at (x, y, z), size (w, h, d), turned `rot` about y
+      box: function (col, x, y, z, w, h, d, rot) {
+        const g = new THREE.BoxGeometry(w, h, d);
+        if (rot) g.rotateY(rot);
+        g.translate(x, y, z); H.put(col, g);
+      },
+      // quads [[x,y,z] x4] round their edge, each wound to face (hx, hy, hz)
+      sheet: function (col, quads, hx, hy, hz) {
+        if (!quads.length) return;
+        const pos = [], idx = [];
+        for (const q of quads) {
+          const e1 = [q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]], e2 = [q[2][0] - q[0][0], q[2][1] - q[0][1], q[2][2] - q[0][2]];
+          const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+          const qq = n[0] * hx + n[1] * hy + n[2] * hz < 0 ? [q[0], q[3], q[2], q[1]] : q;
+          const s0 = pos.length / 3; for (const p of qq) pos.push(p[0], p[1], p[2]); idx.push(s0, s0 + 1, s0 + 2, s0, s0 + 2, s0 + 3);
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
+        g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(pos.length / 3 * 2), 2));
+        g.setIndex(idx); g.computeVertexNormals();
+        H.put(col, g);
+      },
+      solid: function (x0, z0, x1, z1, y1, y0) { if (cols) cols.push({ minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1), y0: y0 || 0, y1: y1 }); },
+      flush: function (name) {
+        for (const col in geo) {
+          const list = geo[col];
+          const merge = BGU && (BGU.mergeGeometries || BGU.mergeBufferGeometries);
+          const g = merge ? merge(list) : null;
+          if (!g) { for (const one of list) root.add(new THREE.Mesh(one, cmat(+col))); continue; }
+          const m = new THREE.Mesh(g, cmat(+col));
+          m.castShadow = true; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+          m.name = name; root.add(m);
+        }
+        for (const k in geo) delete geo[k];
+      },
+    };
+    return H;
+  }
+  function shore(x, z, dx, dz, max) {
     const P = CBZ.worldPlan;
     if (!P || !P.landAt) return null;
-    let z = ROAD_Z;
-    while (P.landAt(x, z) > 0 && z < ROAD_Z + 600) z += 2;
-    return z - SETBACK;
+    let t = 0;
+    while (P.landAt(x + dx * t, z + dz * t) > 0 && t < (max || 600)) t += 2;
+    if (t >= (max || 600)) return null;
+    return { x: x + dx * (t - SETBACK), z: z + dz * (t - SETBACK) };
   }
+  function quay(H, line, inlandOf, sea, o) {
+    o = o || {};
+    const top = [], face = [], cope = [], segs = [];
+    const minDepth = o.minDepth == null ? 6 : o.minDepth;
+    for (let i = 0; i + 1 < line.length; i++) {
+      const a = line[i], b = line[i + 1], ia = inlandOf(a), ib = inlandOf(b);
+      if (Math.min(Math.hypot(a.x - ia.x, a.z - ia.z), Math.hypot(b.x - ib.x, b.z - ib.z)) < minDepth) continue;
+      segs.push([a, b]);
+      top.push([[ia.x, QUAY_Y, ia.z], [a.x, QUAY_Y, a.z], [b.x, QUAY_Y, b.z], [ib.x, QUAY_Y, ib.z]]);
+      face.push([[a.x, QUAY_Y, a.z], [a.x, -4.2, a.z], [b.x, -4.2, b.z], [b.x, QUAY_Y, b.z]]);
+      // the cope: the edge stone, a lighter strip along the face
+      cope.push([[a.x - sea.x * 0.6, QUAY_Y + 0.012, a.z - sea.z * 0.6], [a.x, QUAY_Y + 0.012, a.z], [b.x, QUAY_Y + 0.012, b.z], [b.x - sea.x * 0.6, QUAY_Y + 0.012, b.z - sea.z * 0.6]]);
+      // the fender line, just above the water, square to the face
+      const L = Math.hypot(b.x - a.x, b.z - a.z), ang = Math.atan2(b.z - a.z, b.x - a.x);
+      H.box(QCOL.fender, (a.x + b.x) / 2 + sea.x * 0.15, -0.2, (a.z + b.z) / 2 + sea.z * 0.15, L - 1, 0.6, 0.3, -ang);
+    }
+    H.sheet(QCOL.deck, top, 0, 1, 0); H.sheet(QCOL.face, face, sea.x, 0, sea.z);
+    // (o.liteBare: on a phone the cope and the bollards are left out, so a
+    // quay that had neither costs it nothing more)
+    if (H.lite && o.liteBare) return segs;
+    H.sheet(QCOL.cope, cope, 0, 1, 0);
+    // the bollards, a cast-iron post with its cap 0.9 m in from the edge
+    const every = (o.bollard || 12) * (H.lite ? 2 : 1);
+    let run = every / 2;
+    for (const sg of segs) {
+      const a = sg[0], b = sg[1], L = Math.hypot(b.x - a.x, b.z - a.z);
+      for (; run < L; run += every) {
+        const t = run / L, x = a.x + (b.x - a.x) * t - sea.x * 0.9, z = a.z + (b.z - a.z) * t - sea.z * 0.9;
+        H.box(QCOL.iron, x, QUAY_Y + 0.3, z, 0.34, 0.6, 0.34);
+        H.box(QCOL.iron, x, QUAY_Y + 0.62, z, 0.5, 0.1, 0.5);
+      }
+      run -= L;
+    }
+    return segs;
+  }
+  CBZ.harbourKit = { begin: begin, shore: shore, quay: quay, QUAY_Y: QUAY_Y, SETBACK: SETBACK, COL: QCOL };
+
+  // =====================================================================
+  //  KINGSPORT'S CONTAINER TERMINAL
+  // =====================================================================
+  const X0 = -3190, X1 = -2740;          // the quay: from just east of where the Kings River fans out (its last meander reaches x -3235) east
+  const ROAD_Z = 4600, ROAD_X = -2705;   // the dock road, and the arterial it leaves
+  const COL = { rail: 0x2a2a2a, red: 0x6a1a0e, white: 0x8c8c88, grey: 0x2e3034, shed: 0x3b4044, shedRoof: 0x24282b };
+  const BOXC = [0x0c1e3a, 0x3a0e06, 0x0a2412, 0x4a3004, 0x5a5a55, 0x5a1e04];   // six, as before: one draw each
+  function shoreZ(x) { const p = shore(x, ROAD_Z, 0, 1, 600); return p ? p.z : null; }
 
   CBZ.addLandmass(function (city) {
     if (!city || !city.root || !CBZ.worldPlan || !CBZ.worldPlan.landAt) return;
     if (CBZ.worldPlan.landAt(X0, ROAD_Z) < 20) return;        // the coast is not where this file was written for
     const root = city.root;
-    const LITE = CBZ.facadeLite ? CBZ.facadeLite() : false;
-    const geo = {};
-    const put = function (col, g) { (geo[col] || (geo[col] = [])).push(g); };
-    const cols = CBZ.colliders || null;
-    const solid = function (x0, z0, x1, z1, y1) { if (cols) cols.push({ minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1), y0: 0, y1: y1 }); };
-    // a box at (x, y, z), size (w, h, d), turned `rot` about y
-    const box = function (col, x, y, z, w, h, d, rot) {
-      const g = new THREE.BoxGeometry(w, h, d);
-      if (rot) g.rotateY(rot);
-      g.translate(x, y, z); put(col, g);
-    };
-    // quads [[x,y,z] x4] wound to face out -> one geometry (position, normal, uv, like a box)
-    const sheet = function (col, quads) {
-      if (!quads.length) return;
-      const pos = [], idx = [];
-      for (const q of quads) { const s = pos.length / 3; for (const p of q) pos.push(p[0], p[1], p[2]); idx.push(s, s + 1, s + 2, s, s + 2, s + 3); }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
-      g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(pos.length / 3 * 2), 2));
-      g.setIndex(idx); g.computeVertexNormals();
-      put(col, g);
-    };
+    const H = begin(root), LITE = H.lite;
+    const box = H.box, solid = H.solid;
 
     // ---- the quay line, every 10 m
     const line = [];
@@ -105,20 +186,9 @@
     // ---- the apron: the deck from the dock road's kerb to the quay line, at
     //      grade, and the quay face down into the water along that line
     const APRON_Z = ROAD_Z + 6;
-    const top = [], face = [];
-    let ax0 = null, ax1 = null;
-    for (let i = 0; i + 1 < line.length; i++) {
-      const a = line[i], b = line[i + 1];
-      if (Math.min(a.z, b.z) - APRON_Z < 6) continue;
-      if (ax0 == null) ax0 = a.x; ax1 = b.x;
-      top.push([[a.x, QUAY_Y, APRON_Z], [a.x, QUAY_Y, a.z], [b.x, QUAY_Y, b.z], [b.x, QUAY_Y, APRON_Z]]);
-      face.push([[a.x, QUAY_Y, a.z], [a.x, -4.2, a.z], [b.x, -4.2, b.z], [b.x, QUAY_Y, b.z]]);
-      // the fender line, just above the water, square to the face
-      const L = Math.hypot(b.x - a.x, b.z - a.z), ang = Math.atan2(b.z - a.z, b.x - a.x);
-      box(COL.fender, (a.x + b.x) / 2 - Math.sin(ang) * 0.15, -0.2, (a.z + b.z) / 2 + Math.cos(ang) * 0.15, L - 1, 0.6, 0.3, -ang);
-    }
-    sheet(COL.deck, top); sheet(COL.face, face);
-    if (ax0 == null) return;
+    const segs = quay(H, line, function (p) { return { x: p.x, z: APRON_Z }; }, { x: 0, z: 1 }, { bollard: 15, liteBare: true });
+    if (!segs.length) return;
+    const ax0 = segs[0][0].x, ax1 = segs[segs.length - 1][1].x;
     if (CBZ.terrainFlattenUnder) CBZ.terrainFlattenUnder({ minX: X0, maxX: X1, minZ: ROAD_Z - 10, maxZ: maxZ, pad: 8, name: "kingsport docks" });
 
     // ---- the cranes: legs on the quay, the boom out over the water,
@@ -237,14 +307,7 @@
       }
     }
 
-    for (const col in geo) {
-      const list = geo[col];
-      const g = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(list) : null;
-      if (!g) { for (const one of list) root.add(new THREE.Mesh(one, cmat(+col))); continue; }
-      const m = new THREE.Mesh(g, cmat(+col));
-      m.castShadow = true; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
-      m.name = "kingsport-docks"; root.add(m);
-    }
+    H.flush("kingsport-docks");
 
     // ---- the dock road: the arterial to the west end of the terminal
     const ROAD_W = 12;

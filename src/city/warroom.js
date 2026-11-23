@@ -67,6 +67,7 @@
   const RETALIATE_S = 40;        // s from their country burning to their bomber rolling
   const NUKE_MATCH_R = 1600;     // m: a detonation this close to an ordered aimpoint is that order
   const STATION = { w: 170, d: 80 };
+  const STATION_TOWN_PAD = 140;  // m an air station keeps clear of any town's edge
   const BOMBER_SLOTS = [-62, 0, 62], JET_SLOTS = [-72, -36, 0, 36, 72];
 
   let CLOCK = 0;
@@ -256,10 +257,13 @@
      through it, and Veridia City's the same: 170 m of tarmac and a taxi line
      laid over streets. Every settlement's own rect (city/countries.js) and
      every road record of the arena is built land. */
-  function onTownOrRoad(r) {
+  // `townPad`: how far off a town's edge counts as the town's (10 m: a
+  // bunker may stand at the edge of town; an air station keeps STATION_TOWN_PAD)
+  function onTownOrRoad(r, townPad) {
+    const tp = townPad == null ? 10 : townPad;
     for (const cd of CBZ.COUNTRIES || []) for (const st of cd.settlements || []) {
       if (!isFinite(st.cx) || !(st.hx > 0)) continue;
-      if (st.cx + st.hx + 10 > r.minX && st.cx - st.hx - 10 < r.maxX && st.cz + st.hz + 10 > r.minZ && st.cz - st.hz - 10 < r.maxZ) return true;
+      if (st.cx + st.hx + tp > r.minX && st.cx - st.hx - tp < r.maxX && st.cz + st.hz + tp > r.minZ && st.cz - st.hz - tp < r.maxZ) return true;
     }
     const ar = CBZ.city && CBZ.city.arena;
     const RD = (ar && ar.roads) || [];
@@ -273,7 +277,7 @@
     }
     return false;
   }
-  function rectFree(r) {
+  function rectFree(r, townPad) {
     const C = CBZ.colliders || [];
     for (let i = 0; i < C.length; i++) {
       const c = C[i];
@@ -283,7 +287,7 @@
     const S = W();
     for (const k in S.stations) { const s = S.stations[k]; if (Math.abs(s.x - (r.minX + r.maxX) / 2) < (s.w + r.maxX - r.minX) / 2 && Math.abs(s.z - (r.minZ + r.maxZ) / 2) < (s.d + r.maxZ - r.minZ) / 2) return false; }
     for (const k in S.bunkers) { const b = S.bunkers[k]; if (Math.abs(b.cx - (r.minX + r.maxX) / 2) < (b.w + 16 + r.maxX - r.minX) / 2 && Math.abs(b.cz - (r.minZ + r.maxZ) / 2) < (b.d + 16 + r.maxZ - r.minZ) / 2) return false; }
-    if (onTownOrRoad(r)) return false;
+    if (onTownOrRoad(r, townPad)) return false;
     // a planned city's lots are built land even where its tile (and so its
     // colliders) is not streamed in yet: an apron never lands on a block
     const MC = (CBZ.metroCities || []).concat(CBZ.metroCountryside ? [CBZ.metroCountryside] : []);
@@ -308,7 +312,7 @@
         const rr = { minX: cx - w / 2 - 4, maxX: cx + w / 2 + 4, minZ: cz - d / 2 - 4, maxZ: cz + d / 2 + 4 };
         if (!inside(rr.minX, rr.minZ) || !inside(rr.maxX, rr.minZ) || !inside(rr.minX, rr.maxZ) || !inside(rr.maxX, rr.maxZ) || !inside(cx, cz)) continue;
         // and on level ground: an apron is not laid across a hillside
-        if (rectFree(rr)) { const sp = groundSpan(cx, cz, w, d); if (sp[1] - sp[0] <= 1.2) return { x: Math.round(cx), z: Math.round(cz), pier: false }; }
+        if (rectFree(rr, opts.townPad)) { const sp = groundSpan(cx, cz, w, d); if (sp[1] - sp[0] <= 1.2) return { x: Math.round(cx), z: Math.round(cz), pier: false }; }
       }
     }
     // THE PIER: straight out to sea, away from the middle of the world, past
@@ -332,11 +336,14 @@
     // a site a save remembers from before towns and roads were built land
     // is chosen again (unless its apron is already down this session)
     if (had && !had.pier && !(PARK[id] && PARK[id].built) &&
-        onTownOrRoad({ minX: had.x - had.w / 2, maxX: had.x + had.w / 2, minZ: had.z - had.d / 2, maxZ: had.z + had.d / 2 })) delete S.stations[id];
+        onTownOrRoad({ minX: had.x - had.w / 2, maxX: had.x + had.w / 2, minZ: had.z - had.d / 2, maxZ: had.z + had.d / 2 }, STATION_TOWN_PAD)) delete S.stations[id];
     if (S.stations[id]) return S.stations[id];
     const an = stationAnchor(id);
     if (!an) return null;
-    const site = findSite(an, STATION.w, STATION.d, id, { rect: an.rect, r0: 80, r1: 360 });
+    // out in the country past the town, not hard against its last street (it
+    // came down 15-26 m off Keshtown's, Veridia City's, Solara's and Mbeya
+    // City's edges: a pale plate the size of a town block beside the town)
+    const site = findSite(an, STATION.w, STATION.d, id, { rect: an.rect, r0: 120, r1: 900, townPad: STATION_TOWN_PAD });
     S.stations[id] = { x: site.x, z: site.z, w: STATION.w, d: STATION.d, pier: !!site.pier };
     return S.stations[id];
   }
@@ -365,9 +372,68 @@
     // base below the lowest, and a walkable top
     const lo_hi = groundSpan(s.x, s.z, w, d);
     const top = Math.max(0.05, lo_hi[1] + 0.12);
-    list.push(slab(root, s.x, s.z, w, d, Math.min(0, lo_hi[0] - 0.4), top, 0x3a3e43));
+    hardstanding(root, s.x, s.z, w, d, Math.min(0, lo_hi[0] - 0.4), top, list);
     if (top > 0.3) (CBZ.platforms = CBZ.platforms || []).push({ minX: s.x - w / 2, maxX: s.x + w / 2, minZ: s.z - d / 2, maxZ: s.z + d / 2, top: top, _warroom: true });
     return top > 0.06 ? top : 0;
+  }
+  /* THE HARDSTANDING. It was one pale slab 170 x 80 m with a hairline down it:
+     a flat plate laid on the grass. Now it is built as an apron is: concrete
+     bays with their joints, an asphalt shoulder round the edge stepping down
+     to the grass, the yellow edge line and the stands' lead-in lines off the
+     taxi line, two floodlight masts and the crew hut on the back edge. One
+     merged mesh per colour (the slab and its line were two). The tones are
+     the ones that come out as concrete and asphalt under this sun (colour
+     management is off: a hex is linear here, 0x3a3e43 read as pale grey). */
+  function hardstanding(root, cx, cz, w, d, y0, top, list) {
+    const BGU = THREE.BufferGeometryUtils;
+    const geo = {};
+    const put = function (col, bx, by, bz, bw, bh, bd) {
+      const g = new THREE.BoxGeometry(bw, bh, bd); g.translate(bx, by, bz);
+      (geo[col] || (geo[col] = [])).push(g);
+    };
+    const CONC = 0x2b2d2f, ASPH = 0x17181a, JOINT = 0x1d1e20, PAINT = 0x8a6c12, MAST = 0x2e3034, HUT = 0x4a4c48;
+    const SH = 4;                                                    // the shoulder's width
+    put(ASPH, cx, (y0 + top - 0.06) / 2, cz, w + SH * 2, top - 0.06 - y0, d + SH * 2);
+    put(CONC, cx, (y0 + top) / 2, cz, w, top - y0, d);
+    const lite = CBZ.facadeLite ? CBZ.facadeLite() : false;
+    const PY = top + 0.012;
+    if (!lite) {
+      for (let x = cx - w / 2 + 10; x < cx + w / 2 - 1; x += 10) put(JOINT, x, PY - 0.006, cz, 0.08, 0.012, d);
+      for (let z = cz - d / 2 + 10; z < cz + d / 2 - 1; z += 10) put(JOINT, cx, PY - 0.006, z, w, 0.012, 0.08);
+    }
+    // the edge line, 1 m in
+    put(PAINT, cx, PY, cz - d / 2 + 1, w - 2, 0.02, 0.25); put(PAINT, cx, PY, cz + d / 2 - 1, w - 2, 0.02, 0.25);
+    put(PAINT, cx - w / 2 + 1, PY, cz, 0.25, 0.02, d - 2); put(PAINT, cx + w / 2 - 1, PY, cz, 0.25, 0.02, d - 2);
+    // the taxi line (z - 6) and a lead-in line from it to each stand
+    put(PAINT, cx, PY, cz - 6, w - 10, 0.02, 0.3);
+    for (const sx of JET_SLOTS) { put(PAINT, cx + sx, PY, cz - 6 - 10, 0.25, 0.02, 20); put(PAINT, cx + sx, PY, cz - 26 - 6, 4, 0.02, 0.3); }
+    for (const sx of BOMBER_SLOTS) { put(PAINT, cx + sx, PY, cz - 6 + 10, 0.25, 0.02, 20); put(PAINT, cx + sx, PY, cz + 14 + 16, 6, 0.02, 0.3); }
+    // two floodlight masts on the back shoulder and the crew hut behind it (+z)
+    for (const sx of [-w / 2 + 6, w / 2 - 6]) {
+      put(MAST, cx + sx, top + 11, cz + d / 2 + SH / 2, 0.5, 22, 0.5);
+      put(MAST, cx + sx, top + 22.2, cz + d / 2 + SH / 2 - 0.6, 3.2, 0.5, 1.2);
+      if (CBZ.colliders) CBZ.colliders.push({ minX: cx + sx - 0.4, maxX: cx + sx + 0.4, minZ: cz + d / 2 + SH / 2 - 0.4, maxZ: cz + d / 2 + SH / 2 + 0.4, y0: 0, y1: top + 22 });
+    }
+    {
+      const hx = cx + w / 2 - 12, hz = cz + d / 2 + SH + 3.5;          // behind the shoulder, clear of the bombers' wings
+      put(HUT, hx, top + 1.5, hz, 8, 3, 5);
+      put(ASPH, hx, top + 3.1, hz, 8.6, 0.2, 5.6);                          // its roof
+      put(JOINT, hx - 2, top + 1.05, hz - 2.52, 1, 2.1, 0.06);              // the door
+      put(JOINT, hx + 1.5, top + 1.7, hz - 2.52, 2.6, 1, 0.06);             // the window
+      if (CBZ.colliders) CBZ.colliders.push({ minX: hx - 4, maxX: hx + 4, minZ: hz - 2.5, maxZ: hz + 2.5, y0: 0, y1: top + 3.2 });
+    }
+    for (const col in geo) {
+      const L = geo[col];
+      const g = BGU && (BGU.mergeGeometries || BGU.mergeBufferGeometries) ? (BGU.mergeGeometries || BGU.mergeBufferGeometries)(L) : null;
+      const parts = g ? [g] : L;
+      for (const pg of parts) {
+        const m = new THREE.Mesh(pg, mat(+col));
+        m.receiveShadow = true; m.castShadow = +col === MAST || +col === HUT;
+        m.matrixAutoUpdate = false; m.updateMatrix();
+        m.name = "warroom-apron";
+        root.add(m); list.push(m);
+      }
+    }
   }
   // the lowest and highest ground under a w x d rect (a 5 x 5 sample)
   function groundSpan(cx, cz, w, d) {
@@ -388,8 +454,8 @@
     const s = stationOf(id);
     if (!root || !s) return P;
     P.top = groundFor(root, s, s.w, s.d, P.meshes);
-    // painted taxi line and stands
-    P.meshes.push(slab(root, s.x, s.z - 6, s.w - 10, 0.5, P.top, P.top + 0.06, 0xd8b23a));
+    // painted taxi line and stands (on land the hardstanding paints its own)
+    if (s.pier) P.meshes.push(slab(root, s.x, s.z - 6, s.w - 10, 0.5, P.top, P.top + 0.06, 0xd8b23a));
     P.built = true;
     return P;
   }

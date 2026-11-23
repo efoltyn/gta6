@@ -191,6 +191,16 @@
           baseTemplate: "goldspire", densityBase: 0.78,
           // base 13 * wealthFactor(.85)=1.1025 -> round(14.3)=14 (task's own "maxS 14")
           skylineBase: { minStoreys: 5, maxStoreys: 13, towerFrac: 0.5, megaChance: true, townMax: 4 },
+          // THE SEAT OF GOVERNMENT round the square (towngen.js civicCentre),
+          // in rank order: the square-facing parcels go first
+          civic: [
+            { name: "Parliament of Veridia", shopKind: "cityannex", storeys: 4, dress: "greekrev", color: 0xd9d3c6 },
+            { name: "Supreme Court", shopKind: "courthouse", storeys: 5, dress: "stone", color: 0xcfc6b4 },
+            { name: "Ministry of Finance", shopKind: "federal", storeys: 8, dress: "artdeco", color: 0xc9bfac },
+            { name: "Bank of Veridia", shopKind: "bank", storeys: 6, dress: "stone", color: 0xd6cdb8 },
+            { name: "National Library", shopKind: "library", storeys: 4, dress: "greekrev", color: 0xe0d8c8 },
+            { name: "Ministry of State", shopKind: "federal", storeys: 7, dress: "brutalist", color: 0xb8b4aa },
+          ],
         },
         {
           id: "lowport", name: "Veridia Lowport", subtitle: "Harbor Town", capital: false, tier: "town",
@@ -257,6 +267,14 @@
           cols: 4, rows: 4, blockW: 44, blockD: 40, roadW: 13,
           baseTemplate: "capeharbor", densityBase: 0.68,
           skylineBase: { minStoreys: 4, maxStoreys: 9, towerFrac: 0.3, megaChance: true, townMax: 4 },
+          civic: [
+            { name: "Solara Assembly", shopKind: "cityannex", storeys: 4, dress: "greekrev", color: 0xe6dccb },
+            { name: "High Court of Solara", shopKind: "courthouse", storeys: 4, dress: "stone", color: 0xd8cbb2 },
+            { name: "Customs House", shopKind: "federal", storeys: 5, dress: "stone", color: 0xd2c4a6 },
+            { name: "Bank of Solara", shopKind: "bank", storeys: 6, dress: "artdeco", color: 0xd9cfbd },
+            { name: "Harbour Board", shopKind: "federal", storeys: 6, dress: "artdeco", color: 0xcfc8b8 },
+            { name: "State Library", shopKind: "library", storeys: 3, dress: "greekrev", color: 0xe3d9c6 },
+          ],
         },
       ],
       states: [
@@ -404,7 +422,8 @@
     const cx = s.cx, cz = s.cz, hx = s.hx, hz = s.hz;
     const rect = { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz };
     // shopDress: a nation that builds in its own material (towngen.js)
-    return { tpl: tpl, rect: rect, cfg: Object.assign({}, tpl, { cx: cx, cz: cz, rng: rngFor(cx, cz), region: rect, shopDress: cd.shopDress || undefined }) };
+    return { tpl: tpl, rect: rect, cfg: Object.assign({}, tpl, { cx: cx, cz: cz, rng: rngFor(cx, cz), region: rect, shopDress: cd.shopDress || undefined,
+      civicCentre: s.civic || undefined }) };
   }
   (CBZ.farPlans = CBZ.farPlans || []).push(function () {
     if (!CBZ.planTown) return [];

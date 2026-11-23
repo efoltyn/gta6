@@ -509,12 +509,13 @@
       return "residential";
     }
 
-    function subdivide(bx, bz, bw, bd, ring, out) {
+    function subdivide(bx, bz, bw, bd, ring, out, minF, minA) {
       // recursive split across the long axis until frontage/area bottoms out
+      const MF = minF || MIN_FRONT, MA = minA || MIN_AREA;
       const area = bw * bd;
       const longAxisX = bw >= bd;
       const longLen = longAxisX ? bw : bd;
-      if (longLen / 2 < MIN_FRONT || area / 2 < MIN_AREA) {
+      if (longLen / 2 < MF || area / 2 < MA) {
         out.push({ cx: bx, cz: bz, w: bw, d: bd, ring });
         return;
       }
@@ -522,14 +523,27 @@
       const t = lerp(0.4, 0.6, rng());
       if (longAxisX) {
         const w0 = bw * t, w1 = bw - w0;
-        subdivide(bx - bw / 2 + w0 / 2, bz, w0, bd, ring, out);
-        subdivide(bx + bw / 2 - w1 / 2, bz, w1, bd, ring, out);
+        subdivide(bx - bw / 2 + w0 / 2, bz, w0, bd, ring, out, minF, minA);
+        subdivide(bx + bw / 2 - w1 / 2, bz, w1, bd, ring, out, minF, minA);
       } else {
         const d0 = bd * t, d1 = bd - d0;
-        subdivide(bx, bz - bd / 2 + d0 / 2, bw, d0, ring, out);
-        subdivide(bx, bz + bd / 2 - d1 / 2, bw, d1, ring, out);
+        subdivide(bx, bz - bd / 2 + d0 / 2, bw, d0, ring, out, minF, minA);
+        subdivide(bx, bz + bd / 2 - d1 / 2, bw, d1, ring, out, minF, minA);
       }
     }
+
+    /* A CAPITAL'S CIVIC CENTRE (cfg.civicCentre: the buildings of state, in
+       order of rank). A capital was its town grid round a park, the same as
+       a farm town: houses and one-storey shops facing the seat of government.
+       Each of the four blocks across the street from the square is one
+       parcel (40-odd metres of frontage, where a town lot is 11-25) that
+       opens onto the square, and the buildings of state take them, then the
+       nearest lots beyond, square-facing first: their
+       one shell is built 4-8 storeys high in its own grammar (Greek Revival,
+       ashlar, deco, beton brut), with a real ground floor and a door on the
+       square. No tower skyline. Pure geometry: no rng draw is added. */
+    const CIVIC = Array.isArray(cfg.civicCentre) && cfg.civicCentre.length && squareCell ? cfg.civicCentre : null;
+    const civicBlock = function (i, j) { return CIVIC && Math.abs(i - squareCell.i) + Math.abs(j - squareCell.j) === 1; };
 
     for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
       const B = blockOf(i, j);
@@ -539,7 +553,11 @@
         continue;   // square block holds NO building lots
       }
       const inner = [];
-      subdivide(B.cx, B.cz, B.w - FOOTWAY * 2, B.d - FOOTWAY * 2, ring, inner);
+      const civ = civicBlock(i, j);
+      if (civ) inner.push({ cx: B.cx, cz: B.cz, w: B.w - FOOTWAY * 2, d: B.d - FOOTWAY * 2, ring: ring });   // one parcel: the whole block
+      else subdivide(B.cx, B.cz, B.w - FOOTWAY * 2, B.d - FOOTWAY * 2, ring, inner);
+      // (a civic block's side toward the square, as an outward normal)
+      const sqx = civ ? Math.sign(squareCell.i - i) : 0, sqz = civ ? Math.sign(squareCell.j - j) : 0;
       for (const lt of inner) {
         // door faces the nearest road edge of the parent BLOCK
         const dxE = B.maxX - lt.cx, dxW = lt.cx - B.minX;
@@ -547,6 +565,12 @@
         const m = Math.min(dxE, dxW, dzS, dzN);
         let nx = 0, nz = 0;
         if (m === dxE) nx = 1; else if (m === dxW) nx = -1; else if (m === dzS) nz = 1; else nz = -1;
+        // ...unless it is a civic parcel on the square's side: that is its front
+        if (civ) {
+          const edge = sqx > 0 ? B.maxX - (lt.cx + lt.w / 2) : sqx < 0 ? (lt.cx - lt.w / 2) - B.minX : sqz > 0 ? B.maxZ - (lt.cz + lt.d / 2) : (lt.cz - lt.d / 2) - B.minZ;
+          if (edge < FOOTWAY + 0.5) { nx = sqx; nz = sqz; lt.onSquare = true; }
+          lt.civicBlock = true;
+        }
         lt.zone = zoneForRing(ring);
         lt.doorSide = sideFromNormal(nx, nz);
         lt.door = { x: lt.cx + nx * (lt.w / 2), z: lt.cz + nz * (lt.d / 2), nx, nz };
@@ -559,7 +583,24 @@
     // must become which purposeful shop. Deterministic (siteRng only). The fill
     // loop below FORCES these; every one is furnished into a real trade so no
     // anchor is ever a hollow box.
-    if (comp && comp.planAnchors) { try { anchorPlan = comp.planAnchors(lots, cx, cz); } catch (e) { anchorPlan = null; } }
+    // THE CIVIC PLAN: the buildings of state on the civic parcels, square-
+    // facing first, then nearest the square; each has its final storeys
+    const civicPlan = new Map();
+    if (CIVIC) {
+      const sq = blockOf(squareCell.i, squareCell.j);
+      const cand = lots.filter(function (lt) { return lt.civicBlock && Math.min(lt.w, lt.d) >= 14; })
+        .sort(function (a, b) {
+          return (b.onSquare ? 1 : 0) - (a.onSquare ? 1 : 0) || Math.hypot(a.cx - sq.cx, a.cz - sq.cz) - Math.hypot(b.cx - sq.cx, b.cz - sq.cz) || a.cx - b.cx || a.cz - b.cz;
+        });
+      for (let k = 0; k < CIVIC.length && k < cand.length; k++) {
+        const c = CIVIC[k];
+        civicPlan.set(cand[k], {
+          name: c.name, shopKind: c.shopKind, storeys: c.storeys || 5, color: c.color != null ? c.color : 0xcfc6b4, lotKind: "shop", civic: true,
+          opts: { office: true, fh: c.fh || 3.6, dress: c.dress ? { style: c.dress } : false },
+        });
+      }
+    }
+    if (comp && comp.planAnchors) { try { anchorPlan = comp.planAnchors(civicPlan.size ? lots.filter(function (lt) { return !civicPlan.has(lt); }) : lots, cx, cz); } catch (e) { anchorPlan = null; } }
 
     // =====================================================================
     //  4) FILL LOTS — density falls off from the centre; each lot rolls a
@@ -706,6 +747,7 @@
       }
     }
     function storeysFor(base, ring, lot, isShop) {
+      if (civicPlan.has(lot)) return civicPlan.get(lot).storeys;
       if (skylinePlan.has(lot)) return skylinePlan.get(lot);
       const fall = ring <= 0 ? 1 : ring === 1 ? 0.7 : 0.5;
       return Math.min(TOWN_MAX_STOREYS, Math.max(1, Math.round((base || 1) * fall)));
@@ -768,11 +810,12 @@
       // consumes the identical draw count. With no anchorPlan (V2 off) this is
       // byte-identical to the original loop.
       const roll = rng();                                   // draw #1
-      const forced = (anchorPlan && anchorPlan.has(lt)) || skylinePlan.has(lt);
+      const forced = (anchorPlan && anchorPlan.has(lt)) || skylinePlan.has(lt) || civicPlan.has(lt);
       if (roll > buildProbFor(lt.ring) && !forced) continue;
       const recipe = (cfg.prefabs && cfg.prefabs[lt.zone]) || (cfg.prefabs && cfg.prefabs.default) || null;
       let pick = wpick(recipe, rng);                        // draw #2
       if (anchorPlan && anchorPlan.has(lt)) pick = anchorPlan.get(lt) || pick;
+      if (civicPlan.has(lt)) pick = civicPlan.get(lt);
       if (!pick) continue;
       // building shell?  (kind:'building' or no explicit asset key)
       const isBuilding = !pick.asset || pick.building || pick.kind === "building";
@@ -1017,8 +1060,10 @@
           // fence, shrubs, mailbox (city/house_yard.js)
           if (HLOT) { try { CBZ.houseLot.dress(root, Object.assign({}, HLOT, { y: LOT_Y, storeys: bb.storeys, tier: hTier, wealth: hWealth, lot: lotRec })); } catch (e) { if (window.console) console.warn("[house lot]", e); } }
           // the shop's front: fascia, painted name, awning (one maker, the mainland's)
-          if (isShop && pick.name && CBZ.cityShopFront) CBZ.cityShopFront(b, sideArg, w, d, color, pick.name, sk);
-          if (isShop) shopCanopy(lt, w, d, sk);
+          // (a building of state wears its own grammar's entrance: no shop
+          // fascia, no canvas awning on a parliament)
+          if (isShop && pick.name && CBZ.cityShopFront && !pick.civic) CBZ.cityShopFront(b, sideArg, w, d, color, pick.name, sk);
+          if (isShop && !pick.civic) shopCanopy(lt, w, d, sk);
           // a late parcel's canopy is merged with it (the town's merge ran long
           // ago), and a late shop's shelves are planned now (city/storegoods.js)
           if (late) { flushCanopies(); if (isShop && CBZ.storeGoodsPlan) CBZ.storeGoodsPlan(lotRec); }
