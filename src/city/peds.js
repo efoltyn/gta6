@@ -2567,6 +2567,10 @@
     if (p.companion || p.controlled || p.recruited || p.isBoss || p._vip || p.kind === "cop" || p.kind === "gang") return false;
     if ((p.npcWanted | 0) > 0 || p.armed || p.rage || p.reportState || p.approach || p.alarmed > 0 || p.npcHeat > 0) return false;
     if (p.ko > 0 || p._boardOwn || p._climb || p._bumHunt || p._killer || p._fugitive || p.enterT > 0) return false;
+    // the islands' people and regionlife's keep their own ring (they despawn
+    // whoever is on the roster past it and count only the roster: asleep, a
+    // body was never recycled and a new one was minted in his place)
+    if (p._isleRoot || p._regionLife) return false;
     // a seated passenger (entities/npclife.js attach: airliner cabins, ferry
     // decks) sleeps with the rest: measured, 75 of the far bodies at the
     // downtown spawn were cabin passengers kilometres away. Woken, the rig
@@ -2605,6 +2609,294 @@
     if (g && p === g.cityPartner) return 0;
     return (p._occupyY || 0) > 2.5 ? INDOOR_SLEEP_M : OWNED_SLEEP_M;
   }
+  /* ---- THE FAR RECORD: past the drawn band a person is a row of numbers ----
+     (phone tier; CONFIG.PHONE_PERSON_RECORD, ?cfg_PHONE_PERSON_RECORD=0 turns
+     it off, live.) Measured round seven at the downtown spawn on the phone
+     profile, CPU 4x, one session: taking the ~100 quiet people standing past
+     80 m off the roster cut the person loop from 14.0 to 8.6 ms and the whole
+     step from 72 to 57 ms. The person loop was only part of it: some twenty
+     street systems walk CBZ.cityPeds every frame (pedinstance, bodymove,
+     actorweapons, humancontact, reactions, combat, gangs, interactions,
+     squadai, brain_city, traffic ...) and paid for every far body as well.
+
+     That ~100 is the upper bound: it took everybody but the police, the
+     wanted and the fighting. The record takes the ones whose readers it
+     could prove safe (recordable() below), which at the spawn is the far
+     street, the AI gangs and the posts; the power structure's scripted
+     bodies (councillors, details, principals, job crews) stay whole.
+
+     So on a phone the sleepers above stop being only the far ambient crowd
+     and the far posts: ANY person past recM() from both the player and the
+     camera who is in nothing and owned by no script (recordable() below)
+     leaves the roster for the record, and comes back at recWakeM(): outside
+     the farthest a phone can draw a person (its band, held to 1.6x of it
+     while you watch). It is the same sleeper list (CBZ.cityDormantPeds,
+     `_dormant` on the person: the owners that count a post read it as
+     present) with its hot state in typed arrays a row each, index = place
+     in the list: where he stands, which way he faces, his pace, how long
+     he still waits, and up to REC_ROUTE points of the walk he was on (his
+     nav route, its goal, then his errand's path), which the record keeps
+     walking (straight between the points: they are the navigator's own,
+     already round the walls), and at its end he picks his next errand
+     (recErrand, the one read of the person while he is a record). Per frame
+     nothing else reads him: he is off every list built from the roster. The person object is KEPT, cold: a home, a job, a family, a
+     gang roster and every mission hold him by reference, so the identity
+     cannot be dropped and rebuilt (and it is not where the memory is: the
+     rig is, ~60 KB of it, and that goes after RIG_REL_T s as every
+     sleeper's does, THE SLEEPER'S RIG, and is built again identical on
+     waking). Woken he stands where the record walked him, faces its way,
+     holds the rest of his errand, and thinks on his first tick.
+
+     WHAT WAKES A RECORD sooner: an owner putting him back on the roster or
+     killing him (the beat sees it), a scope or the binoculars on him (the
+     lens wakes what it looks at, as city/hitman.js draws it), and any code
+     that needs him whole: CBZ.cityPersonWake(p), CBZ.cityRecordsWakeNear(x,
+     z, r) for a blast or a scene far from the player. */
+  if (CBZ.CONFIG.PHONE_PERSON_RECORD == null) CBZ.CONFIG.PHONE_PERSON_RECORD = DORM_ON && CBZ.deviceClass === "phone";
+  function recOn() { return DORM_ON && CBZ.CONFIG.PHONE_PERSON_RECORD !== false; }
+  // the drawn band (pedLOD: 45 m on a phone) held to 1.6x while watched, and a
+  // margin a fast car does not cross between two frames' wake tests
+  function recWakeM() { return Math.max(76, Math.sqrt(VIS_D2) * 1.6 + 4); }
+  function recM() { return recWakeM() + 12; }
+  const REC_ROUTE = 6, REC_RIG_REL_T = 15;
+  const REC_CLS_AMBIENT = 1, REC_CLS_POST = 2, REC_CLS_FAR = 3;
+  // the rows (struct of arrays; row k is _dorm[k])
+  let rX = new Float32Array(0), rZ = rX, rYaw = rX, rSpd = rX, rWait = rX, rWake = rX, rRX = rX, rRZ = rX;
+  let rRN = new Uint8Array(0), rRI = rRN, rTI = rRN, rCls = rRN, rMoved = rRN, rIn = rRN;
+  function recGrow(need) {
+    if (rX.length >= need) return;
+    const cap = need + 128;
+    const F = function (a, m) { const b = new Float32Array(cap * (m || 1)); b.set(a); return b; };
+    const U = function (a) { const b = new Uint8Array(cap); b.set(a); return b; };
+    rX = F(rX); rZ = F(rZ); rYaw = F(rYaw); rSpd = F(rSpd); rWait = F(rWait); rWake = F(rWake);
+    rRX = F(rRX, REC_ROUTE); rRZ = F(rRZ, REC_ROUTE);
+    rRN = U(rRN); rRI = U(rRI); rTI = U(rTI); rCls = U(rCls); rMoved = U(rMoved); rIn = U(rIn);
+  }
+  function recCopy(from, to) {
+    rX[to] = rX[from]; rZ[to] = rZ[from]; rYaw[to] = rYaw[from]; rSpd[to] = rSpd[from]; rWait[to] = rWait[from]; rWake[to] = rWake[from];
+    rRN[to] = rRN[from]; rRI[to] = rRI[from]; rTI[to] = rTI[from]; rCls[to] = rCls[from]; rMoved[to] = rMoved[from]; rIn[to] = rIn[from];
+    const a = from * REC_ROUTE, b = to * REC_ROUTE;
+    for (let j = 0; j < REC_ROUTE; j++) { rRX[b + j] = rRX[a + j]; rRZ[b + j] = rRZ[a + j]; }
+  }
+  // out of the list: the last row takes the hole (order means nothing here)
+  function recRemove(k) {
+    const last = _dorm.length - 1;
+    if (k !== last) { const q = _dorm[last]; _dorm[k] = q; recCopy(last, k); if (q) q._recK = k; }
+    _dorm.length = last;
+  }
+  function recIndex(p) {
+    const k = p._recK;
+    if (k != null && _dorm[k] === p) return k;
+    return _dorm.indexOf(p);
+  }
+  /* WHO MAY BE A RECORD. Decided from the readers, not from the person: the
+     round-seven census found ~570 places that read CBZ.cityPeds, and the
+     ones a record can break are the owners that read "not on the roster"
+     as GONE (and then re-man, respawn, fail a contract, end a job, dissolve
+     a power) and the jobs that bind a mark. Those owners' people stay whole
+     wherever they stand; the rest is the street: the ordinary crowd, the
+     AI gangs' men (their gang holds them by reference, a war wakes its
+     ground and its raiders, below), and the posts city/occupy.js and
+     city/citystaff.js already count while asleep. So a person is NOT a
+     record while:
+       - anything is happening to him (a fight, a flight, rage, alarm, heat,
+         a report, an approach, a knockout, a bleed, a vault, a ladder, a
+         door, a car, a hunt, a raid, a windup, a scare, a short hold);
+       - anybody else steers him (controlled, an order, a companion, a
+         recruit, the partner, custody, a restraint, the glass on him);
+       - he is the law (a cop, police) or of a faction or organization (the
+         army and its bunkers, a cell, the player's crew; a security firm's
+         or the state's man only while he is not on a post);
+       - he is a principal or a detail (boss, VIP, millionaire, power,
+         protection, an office, a KEEP_SRC post), or posted by an owner that
+         reads the roster (garrison `_post` holders that occupy/citystaff do
+         not own, the islands' posts and walkers, regionlife's ring, a
+         compound crew, a repo crew, a scene, a protest, a fire squad);
+       - he is a mark (hitman, campaign, agency, a contract, a bounty);
+       - he stands inside a hot spot (cityRecordHot: a gang war's ground).
+     `eyes` is where he is measured from (player, camera, a guest's actor). */
+  const HOT = [];
+  // the record's own clock: simulated seconds (holds and hot spots are sim
+  // time, so a throttled or stepped frame does not shorten them)
+  let _recClock = 0;
+  function inHot(x, z) {
+    if (!HOT.length) return false;
+    const now = _recClock;
+    for (let i = HOT.length - 1; i >= 0; i--) {
+      const h = HOT[i];
+      if (now > h.until) { HOT.splice(i, 1); continue; }
+      const a = x - h.x, b = z - h.z;
+      if (a * a + b * b < h.r * h.r) return true;
+    }
+    return false;
+  }
+  function recordableCore(p, x, z) {
+    if (!p || !p.pos || p.dead || p.isPlayer || p._parked || p.inCar || p.culled) return false;
+    // (a seated passenger sleeps as the ambient crowd always did: npclife.js
+    // puts him back on his own seat, and nobody else reads him)
+    if (p._npcAttached && !ambient(p)) return false;
+    if (p.kind === "cop" || p.isCop || p.swat || p.organization || p._cellRank) return false;
+    // an AI gang's man (city/gangs.js stamps faction = his gang) is the street,
+    // and so is a POSTED man of the state or a security firm (occupy.js and
+    // citystaff.js count a post while asleep, garrison.js and power.js keep
+    // his post and his detail); any other faction (police, the army, the
+    // player's crew), a walking detail and the player's own gang stay whole
+    if (p.faction && !(p.gang && p.faction === p.gang) &&
+        !((p.faction === "state" || p.faction === "security") && (p._occupySrc || p.staffPost || p._occupyGarrison))) return false;
+    if (p.gang && (p.gang === "player" || p.gang === playerGangId())) return false;
+    if (p.protectGang === "player") return false;
+    if (p.companion || p.controlled || p.recruited || p.moveOrder || p._farDraw || p.restraint || p._kinHeld) return false;
+    if (p.isBoss || p._vip || p.vip || p._vipGuard || p._milli || p._milliGuard || p._protUnit || p._protect || p._power || p._officeAt || p._presOfficer) return false;
+    if (p._powerOf && !(p._occupySrc || p.staffPost)) return false;
+    if (p._campaignTarget || p._campaignCaptive || p._campaignRole || p._hitMark || p._hmJob || p._hmArmy || p._hmStaff || p._agency || p._agencyMark || p._contractId || p.bounty > 0) return false;
+    if (p._occupySrc && KEEP_SRC.test(p._occupySrc)) return false;
+    if (p._post && !(p._occupySrc || p.staffPost || p._occupyGarrison)) return false;
+    if (p._isleRoot || p._islandPost || p._isleWalk || p._regionLife || p._compoundCrew || p._repo || p._scene || p._sceneRole || p._protest || p._mob || p._fireSquad || p._presRaid || p._crowd || p._hideout) return false;
+    if (g && p === g.cityPartner) return false;
+    return !engaged(p, x, z);
+  }
+  // the moment: something is happening to him, somebody steers him, he is
+  // held, or he stands on a hot spot (every row class re-asks this each beat)
+  function engaged(p, x, z) {
+    if ((p.npcWanted | 0) > 0 || p.rage || p.reportState || p.approach || p.alarmed > 0 || p.npcHeat > 0 || p.raidT > 0) return true;
+    if (p.companion || p.controlled || p.recruited || p.moveOrder || p._farDraw || p.restraint || p._kinHeld) return true;
+    if (p._recKeep || (p._recHold && p._recHold > _recClock)) return true;
+    const st = p.state;
+    if (st === "fight" || st === "flee" || st === "confront" || st === "surrender" || st === "chase" || st === "stalk" || st === "charge" || st === "loot") return true;
+    if (p._occupyAwake || p.rampage || p._windup || p._mugFleeT > 0 || p.offenseT > 0 || p.poseCower > 0 || p._scareT > 0) return true;
+    if (p.ko > 0 || p.ragdoll || (p._vt && (p._vt.live || p._vt.collapsed))) return true;
+    if (p._boardOwn || p._climb || p._bumHunt || p._killer || p._fugitive || p._ladder || p._traversal || p.enterT > 0) return true;
+    if (CBZ.custody && CBZ.custody.holds && CBZ.custody.holds(p)) return true;
+    return inHot(x, z);
+  }
+  function recordable(p) { return !!p && !p._dormant && !!p.pos && recordableCore(p, p.pos.x, p.pos.z); }
+  /* A PLACE THAT MUST RUN WHOLE wherever the player is: the records within
+     r of (x, z) wake now, and for `secs` nobody inside it becomes one
+     (city/gangs.js: a war's contested lot, so its defenders are there when
+     the raiders arrive). */
+  CBZ.cityRecordHot = function (x, z, r, secs) {
+    if (!(r > 0) || !isFinite(x) || !isFinite(z)) return;
+    HOT.push({ x: x, z: z, r: r, until: _recClock + Math.max(1, secs || 30) });
+    if (HOT.length > 24) HOT.shift();
+    // a few now; the rest within REC_RECHECK_S, a rig a frame (the rows are
+    // re-asked, and a hot spot is an answer): a war is ~20 s from its push
+    // to the lot, and twenty rigs built in one frame is a phone's hitch
+    CBZ.cityRecordsWakeNear(x, z, r, "hot", 3);
+  };
+  // the eyes the ring is measured from: the player, the camera, and on a
+  // host each guest's actor (net/networld.js simulates the city for them)
+  const _eyes = [];
+  function eyesNow() {
+    _eyes.length = 0;
+    const P = CBZ.player, cam = CBZ.camera;
+    if (!P || !P.pos) return 0;
+    _eyes.push(P.pos.x, P.pos.z);
+    if (cam) _eyes.push(cam.position.x, cam.position.z);
+    if (CBZ.netRemoteList && CBZ.net && CBZ.net.isHost && CBZ.net.isHost()) {
+      try {
+        const L = CBZ.netRemoteList([]);
+        for (let i = 0; i < L.length && i < 8; i++) {
+          const R = L[i], q = R && (R.pos || (R.group && R.group.position));
+          if (q && isFinite(q.x)) _eyes.push(q.x, q.z);
+        }
+      } catch (e) {}
+    }
+    return _eyes.length;
+  }
+  function eyeD2(x, z) {
+    let m = 1e18;
+    for (let i = 0; i < _eyes.length; i += 2) { const a = x - _eyes[i], b = z - _eyes[i + 1], d = a * a + b * b; if (d < m) m = d; }
+    return m;
+  }
+  // the pace a record walks at: only a body that was walking an errand
+  const REC_WALK = { walk: 1, wander: 1 };
+  function recPace(p) {
+    if (!REC_WALK[p.state] || p.vendor || p.staffPost || p._occupySrc || p._occupyGarrison || p._post || p.guard) return 0;
+    if (p.char && p.char.sitting) return 0;
+    let s = p.baseSpeed || 1.5;
+    if (p._role === "jogger") s *= 1.5;
+    return s;
+  }
+  function recFill(p, k, cls) {
+    rX[k] = p.pos.x; rZ[k] = p.pos.z;
+    rYaw[k] = p.group && p.group.rotation ? p.group.rotation.y : 0;
+    rCls[k] = cls; rMoved[k] = 0; rRI[k] = 0; rRN[k] = 0; rTI[k] = 255; rSpd[k] = 0;
+    rIn[k] = (p._occupyY || 0) > 2.5 ? 1 : 0;
+    rWait[k] = p.pause > 0 ? p.pause : 0;
+    rWake[k] = recWakeOf(k);
+    p._recK = k;
+    if (cls !== REC_CLS_FAR) return;
+    const sp = recPace(p); if (!sp) return;
+    const o = k * REC_ROUTE;
+    let n = 0;
+    const add = function (x, z) {
+      if (n >= REC_ROUTE || !(x === x) || !(z === z)) return;
+      if (n && Math.abs(rRX[o + n - 1] - x) < 0.3 && Math.abs(rRZ[o + n - 1] - z) < 0.3) return;
+      rRX[o + n] = x; rRZ[o + n] = z; n++;
+    };
+    // the navigator's route (its points are already round the walls), then
+    // its goal: the navigator writes its WAYPOINT into p.target, the errand's
+    // own point is S.gx/gz
+    const S = p._nav;
+    let full = false;
+    if (S && S.pts && S.pts.length) {
+      for (let j = S.i | 0; j < S.pts.length; j++) add(S.pts[j].x, S.pts[j].z);
+      full = n >= REC_ROUTE;
+      if (S.wx != null) add(S.gx, S.gz); else if (p.target) add(p.target.x, p.target.z);
+    } else if (p.target) add(p.target.x, p.target.z);
+    // (a route too long for the row never reaches the target: no path point
+    // is spent on waking)
+    rTI[k] = n && !full ? n - 1 : 255;
+    // then the rest of the errand's path (path[0] is that target)
+    const path = p.path;
+    if (path && path.length > 1 && n && !full) for (let j = 1; j < path.length; j++) add(path[j].x, path[j].z);
+    rRN[k] = n;
+    if (n) rSpd[k] = sp;
+  }
+  // the wake ring of a row: the record's own; when the record is switched off
+  // the old rules (a post's ring, the ambient crowd's 160 m) and a far record
+  // wakes now (0 = the beat wakes it)
+  function recWakeOf(k) {
+    const cls = rCls[k];
+    if (cls === REC_CLS_POST && rIn[k]) return INDOOR_WAKE_M;
+    if (recOn()) return recWakeM();
+    return cls === REC_CLS_POST ? OWNED_WAKE_M : cls === REC_CLS_AMBIENT ? WAKE_M : 1e5;
+  }
+  // the row back onto the person (waking, or the beat's sync for readers
+  // that hold him by reference)
+  function recSync(p, k) {
+    if (!rMoved[k] || !p.pos) return;
+    p.pos.x = rX[k]; p.pos.z = rZ[k];
+  }
+  function recRestore(p, k) {
+    if (rWait[k] > 0) p.pause = rWait[k]; else if (p.pause > 0 && rCls[k] === REC_CLS_FAR) p.pause = 0;
+    if (!rMoved[k]) return;
+    recSync(p, k);
+    // the record walked straight between its points; an errand's street hop
+    // can cut a block corner, so a body that wakes inside a footprint steps
+    // out to the nearest open cell (the navigator's grid, 0.4 m)
+    const G = CBZ.navGrid;
+    if (G && G.ready && G.ready() && G.inWindow(p.pos.x, p.pos.z) && !G.standable(p.pos.x, p.pos.z)) {
+      const id = G.nearestFree(p.pos.x, p.pos.z, 40);
+      if (id >= 0) { const c = G.cellCentre(id); p.pos.x = c.x; p.pos.z = c.z; recStats.unstuck++; }
+    }
+    if (p.group && p.group.rotation) p.group.rotation.y = rYaw[k];
+    // the route he was on is the record's now: the navigator plans afresh
+    // from where he stands, toward the errand's own point
+    const S = p._nav;
+    if (S && S.pts) { if (S.wx != null && p.target && p.target.set) p.target.set(S.gx, 0, S.gz); S.pts = null; S.wx = S.wz = null; }
+    const ri = rRI[k], ti = rTI[k];
+    if (p.path && p.path.length && ti !== 255 && ri > ti) {
+      p.path.splice(0, Math.min(p.path.length, ri - ti));
+      if (p.path.length) { if (p.target && p.target.set) p.target.set(p.path[0].x, 0, p.path[0].z); }
+      else p.path = null;
+    }
+    if (ri >= rRN[k] && p.target && p.target.set) { p.target.set(rX[k], 0, rZ[k]); p.pause = Math.max(p.pause || 0, 0.5); }
+    p._feetT = 0; p._feetY = null;
+    if (p._mv && CBZ.moves && CBZ.moves.reset) { try { CBZ.moves.reset(p._mv, p.pos); } catch (e) {} }
+    p._thinkDue = true;
+  }
+  const recStats = CBZ.pedRecordStats = { on: false, rows: 0, far: 0, walking: 0, errands: 0, unstuck: 0, slept: 0, woken: 0, wokeBy: {} };
   /* ---- THE SLEEPER'S RIG: let go while asleep, built again on waking ------
      A sleeper (above) kept his whole three.js rig off the scene: ~55 nodes
      with their matrices, measured ~60 KB of heap a body and ~240 sleepers at
@@ -2632,7 +2924,7 @@
      guards it; the sleeper is off the roster) and p.group a bare group
      standing on p.pos. ?cfg_PHONE_RIG_RELEASE=0 keeps every rig. */
   if (CBZ.CONFIG.PHONE_RIG_RELEASE == null) CBZ.CONFIG.PHONE_RIG_RELEASE = true;
-  const RIG_REL_T = 4, RIG_REL_PER_BEAT = 6, RIG_BUILD_PER_BEAT = 12;
+  const RIG_REL_T = 4, RIG_REL_PER_BEAT = 6;
   let _rigSeedN = 0;
   const rigStats = { released: 0, rebuilt: 0, kept: 0, mismatched: 0, last: null };
   CBZ.pedRigStats = function () { let rel = 0; for (let i = 0; i < _dorm.length; i++) if (_dorm[i]._rigRel) rel++; return Object.assign({ asleep: _dorm.length, releasedNow: rel }, rigStats); };
@@ -2826,71 +3118,277 @@
   }
   // anything that puts a released sleeper back to work builds his rig first
   CBZ.cityPedRigEnsure = function (p) { if (p && p._rigRel) rigRebuild(p); };
-  function sleepPed(p, i) {
+  // cls: REC_CLS_AMBIENT (the budget's far crowd), REC_CLS_POST (a far post),
+  // REC_CLS_FAR (THE FAR RECORD: anybody quiet past recM())
+  function sleepPed(p, i, cls) {
     if (CBZ.cityBrain && CBZ.cityBrain.release) { try { CBZ.cityBrain.release(p); } catch (e) {} }
     CBZ.cityPeds.splice(i, 1);
     _corpseDrop(p); _coverDrop(p);
     p._dormParent = p.group ? p.group.parent : null;
     if (p.group && p.group.parent) p.group.parent.remove(p.group);
     p._dormant = true; p._dtBank = 0; p._dormAt = CBZ.now || performance.now();
+    p._leanAt = null; p._thinkDue = false; p._thinkBank = 0;
+    const k = _dorm.length;
     _dorm.push(p);
+    recGrow(k + 1);
+    recFill(p, k, cls || REC_CLS_AMBIENT);
+    recStats.slept++;
   }
-  function wakePed(p, k) {
-    _dorm.splice(k, 1);
+  // `placed`: an owner already put him back (on the roster, maybe in the
+  // scene) where he wants him: his record's place is not written over it
+  function wakePed(p, k, why, placed) {
+    if (_dorm[k] !== p) { k = _dorm.indexOf(p); if (k < 0) return; }
+    if (!placed) recRestore(p, k);
+    recRemove(k);
+    p._recK = null;
+    const g0 = p.group, gp = g0 && g0.parent;
     if (p._rigRel) rigRebuild(p);
-    p._dormant = false;
+    if (gp && g0 !== p.group) gp.remove(g0);
+    p._dormant = false; p._dormOwned = 0;
     const A = pedArena();
-    const parent = (p._dormParent && p._dormParent.parent) ? p._dormParent : (A && A.root);
-    if (parent && p.group) parent.add(p.group);
+    const parent = gp || ((p._dormParent && p._dormParent.parent) ? p._dormParent : (A && A.root));
+    if (parent && p.group && p.group.parent !== parent) parent.add(p.group);
     p._dormParent = null;
     if (CBZ.cityPeds.indexOf(p) < 0) CBZ.cityPeds.push(p);
+    recStats.woken++;
+    if (why) recStats.wokeBy[why] = (recStats.wokeBy[why] || 0) + 1;
   }
   // an owner took the body out of the world while it slept (city/occupy.js
   // cityUnpostNpc, removeVendor): it leaves the sleepers too, or the next
   // wake would put a disposed rig back on the roster
   CBZ.cityDormDrop = function (p) {
     if (!p || !p._dormant) return;
-    const k = _dorm.indexOf(p); if (k >= 0) _dorm.splice(k, 1);
-    p._dormant = false; p._dormOwned = 0; p._dormParent = null;
+    const k = recIndex(p);
+    if (k >= 0) { recSync(p, k); recRemove(k); }
+    p._dormant = false; p._dormOwned = 0; p._dormParent = null; p._recK = null;
   };
   // a rebuilt or cleared city takes the sleepers with the roster
   // (teardown: a let-go rig is not built only to be disposed; the stand-in goes)
   CBZ.cityDormantReturn = function (teardown) {
-    for (let k = _dorm.length - 1; k >= 0; k--) { const p = _dorm[k]; if (p._rigRel && !teardown) rigRebuild(p); p._dormant = false; p._dormOwned = 0; p._dormParent = null; CBZ.cityPeds.push(p); }
+    for (let k = _dorm.length - 1; k >= 0; k--) {
+      const p = _dorm[k];
+      if (!teardown) recRestore(p, k);
+      if (p._rigRel && !teardown) rigRebuild(p);
+      p._dormant = false; p._dormOwned = 0; p._dormParent = null; p._recK = null;
+      CBZ.cityPeds.push(p);
+    }
     _dorm.length = 0;
   };
+  /* WHOLE AGAIN ON DEMAND. Anything that needs a far person as a full body
+     now (a job binding its mark, a scene casting him, a blast reaching him)
+     wakes him: rig built, back on the roster, his record written back. With
+     `hold` he stays whole until the caller lets go (cityPersonWake(p, false)
+     or p._recKeep = false). Returns the person. */
+  // keep a person whole for `secs` of play (a job that just picked him)
+  CBZ.cityRecordHold = function (p, secs) { if (p) p._recHold = _recClock + (secs > 0 ? secs : 30); return p; };
+  CBZ.cityPersonWake = function (p, hold) {
+    if (!p) return p;
+    if (hold != null) p._recKeep = !!hold;
+    if (p._dormant) { const k = recIndex(p); if (k >= 0) wakePed(p, k, "call"); }
+    return p;
+  };
+  // every record within r of (x, z) wakes (a blast, a crash, a scene that
+  // reaches past the player's ring), at most `max` of them now; returns how many
+  CBZ.cityRecordsWakeNear = function (x, z, r, why, max) {
+    let n = 0; const r2 = r * r, cap = max > 0 ? max : 1e9;
+    for (let k = _dorm.length - 1; k >= 0 && n < cap; k--) {
+      const a = rX[k] - x, b = rZ[k] - z;
+      if (a * a + b * b < r2) { wakePed(_dorm[k], k, why || "near"); n++; }
+    }
+    return n;
+  };
+  /* EVERYBODY, roster and records, for the few readers that look a person
+     up by WHO he is wherever he stands (a gang's men, a mark by name): the
+     record keeps the person, so the answer is the same object either way.
+     fn(p, asleep); return true from fn to stop. */
+  CBZ.cityPersonsEach = function (fn) {
+    const L = CBZ.cityPeds;
+    for (let i = 0; i < L.length; i++) if (fn(L[i], false) === true) return L[i];
+    for (let k = 0; k < _dorm.length; k++) if (fn(_dorm[k], true) === true) return _dorm[k];
+    return null;
+  };
+  // one row as numbers (a reading aid for the measuring tools)
+  CBZ.pedRecordRow = function (k) {
+    if (!(k >= 0 && k < _dorm.length)) return null;
+    const o = k * REC_ROUTE, route = [];
+    for (let j = 0; j < rRN[k]; j++) route.push([+rRX[o + j].toFixed(1), +rRZ[o + j].toFixed(1)]);
+    return { name: _dorm[k] && _dorm[k].name, x: rX[k], z: rZ[k], yaw: rYaw[k], spd: rSpd[k], wait: rWait[k], wake: rWake[k], cls: rCls[k], ri: rRI[k], ti: rTI[k], moved: rMoved[k], route: route };
+  };
+  // where a person is now (a record's row is fresher than his p.pos between beats)
+  CBZ.cityPersonXZ = function (p, out) {
+    out = out || {};
+    const k = p && p._dormant ? recIndex(p) : -1;
+    if (k >= 0) { out.x = rX[k]; out.z = rZ[k]; } else if (p && p.pos) { out.x = p.pos.x; out.z = p.pos.z; }
+    return out;
+  };
+  /* THE RECORD'S FRAME: the rows walk their routes, and the ring wakes the
+     ones the player or the camera comes to (each frame: a car covers 15 m in
+     a beat). Typed arrays only; a person object is touched only to wake. A
+     rig to build costs ~1-2 ms on a phone, so one a frame unless he is
+     already inside the drawn band's hold (then at once). The lens: while a
+     scope or the binoculars are up, what they look at wakes (city/hitman.js
+     marks what is in the lens from the roster to draw it). */
+  let _recLensT = 0, _recCur = 0, _recDue = 0;
+  const REC_RECHECK_S = 2;
+  const _lensDir = { x: 0, y: 0, z: 0 };
+  function glassUp() {
+    try { if (CBZ.hmBinoculars && CBZ.hmBinoculars.active && CBZ.hmBinoculars.active()) return true; } catch (e) {}
+    try { return !!(CBZ.fpsScoped && CBZ.fpsScoped()); } catch (e) { return false; }
+  }
+  /* THE RECORD'S ERRAND. A walker who reached the end of his route stands
+     his pause out and picks his next errand the way he would have on the
+     roster (pickRoutineGoal: a role's spot, the day's schedule, a shop, a
+     corner), a couple a frame: the one moment the person object is read
+     while he is a record. Its path is the two-hop street walk the city
+     always gave a far body; the record walks it straight. */
+  function recErrand(k) {
+    const p = _dorm[k];
+    if (!p || !p.target || !REC_WALK[p.state] || p.vendor || p.staffPost || p._occupySrc || p._post) { rSpd[k] = 0; return; }
+    p.pos.x = rX[k]; p.pos.z = rZ[k]; rMoved[k] = 1;
+    const S = p._nav;
+    if (S && S.pts) { S.pts = null; S.wx = S.wz = null; }
+    p.path = null; p.pause = 0;
+    try { pickRoutineGoal(p); } catch (e) { rSpd[k] = 0; return; }
+    const sp = recPace(p);
+    if (!sp) { rSpd[k] = 0; return; }
+    const o = k * REC_ROUTE;
+    let n = 0;
+    const add = function (x, z) { if (n < REC_ROUTE && x === x && z === z) { rRX[o + n] = x; rRZ[o + n] = z; n++; } };
+    add(p.target.x, p.target.z);
+    if (p.path) for (let j = 1; j < p.path.length; j++) add(p.path[j].x, p.path[j].z);
+    rTI[k] = 0; rRI[k] = 0; rRN[k] = n; rSpd[k] = n ? sp : 0;
+    rWait[k] = p.pause > 0 ? p.pause : 0.5;
+    recStats.errands++;
+  }
+  /* A DEATH WRITTEN TO A RECORD (a gang clipping its dead weight, a script
+     killing a man by name) lands on a whole body: the kill path, every
+     wrapper of it, the ragdoll and the morgue all want his rig. Kept the
+     outermost wrapper: re-hung whenever somebody wraps the kill after it. */
+  let _killWrap = null;
+  function wrapKill() {
+    const f = CBZ.cityKillPed;
+    if (!f || f === _killWrap) return;
+    const w = function (ped) {
+      if (ped && ped._dormant && !ped.dead) CBZ.cityPersonWake(ped);
+      return f.apply(this, arguments);
+    };
+    // carry the other wrappers' markers forward (they test them before they
+    // wrap; without them they would wrap again over this one, every frame)
+    for (const k in f) w[k] = f[k];
+    w._recWrap = true;
+    _killWrap = w;
+    CBZ.cityKillPed = w;
+  }
+  CBZ.onUpdate(35.44, function (dt) {
+    if (dt > 0) _recClock += dt;
+    const n = _dorm.length;
+    if (!n || !econ()) return;
+    if (CBZ.cityKillPed !== _killWrap) wrapKill();
+    const cam = CBZ.camera;
+    if (!eyesNow()) return;
+    const cx = cam ? cam.position.x : _eyes[0], cz = cam ? cam.position.z : _eyes[1];
+    const hold = Math.sqrt(VIS_D2) * 1.6, hold2 = hold * hold;
+    let builds = 0, walking = 0, errands = 0;
+    for (let k = n - 1; k >= 0; k--) {
+      // walk: straight to the next point of his route at his pace
+      if (rSpd[k] > 0) {
+        if (rWait[k] > 0) rWait[k] -= dt;
+        else {
+          const ri = rRI[k];
+          if (ri >= rRN[k]) { if (errands < 2 && rCls[k] === REC_CLS_FAR) { errands++; recErrand(k); } else if (rCls[k] !== REC_CLS_FAR) rSpd[k] = 0; }
+          else {
+            const o = k * REC_ROUTE + ri;
+            const dx = rRX[o] - rX[k], dz = rRZ[o] - rZ[k], d = Math.sqrt(dx * dx + dz * dz), step = rSpd[k] * dt;
+            if (d <= step) { rX[k] = rRX[o]; rZ[k] = rRZ[o]; rRI[k] = ri + 1; }
+            else { rX[k] += dx / d * step; rZ[k] += dz / d * step; rYaw[k] = Math.atan2(dx, dz); }
+            rMoved[k] = 1; walking++;
+          }
+        }
+      }
+      // the ring
+      const w = rWake[k], d2 = eyeD2(rX[k], rZ[k]);
+      if (d2 < w * w) {
+        const p = _dorm[k];
+        if (p._rigRel && d2 > hold2) { if (builds >= 1) continue; builds++; }
+        wakePed(p, k, "ring");
+      }
+    }
+    recStats.walking = walking;
+    /* THE ROWS RE-ASKED, A SLICE A FRAME. Anybody who died or was taken
+       while he was a row (a gang's raid, a job binding him, a hold, a war's
+       ground) wakes: the same test that let him go, asked again. Asking it
+       of every row every beat was the record's own cost (each answer is ~40
+       slow reads of a big person object, ~20 us each on the phone profile:
+       ~0.5 ms a frame), so each frame asks the slice that brings every row
+       round once in REC_RECHECK_S of play. The jobs that need a man NOW
+       wake him themselves (cityPersonWake, cityRecordHot, a blast). */
+    const m = _dorm.length;
+    if (m) {
+      const rec = recOn(), budget = +CBZ.CONFIG.PHONE_PED_BUDGET || 0;
+      _recDue += m * Math.min(0.25, Math.max(0, dt)) / REC_RECHECK_S;
+      let left = _recDue | 0;
+      _recDue -= left;
+      if (_recCur >= m) _recCur = 0;
+      while (left-- > 0 && _dorm.length) {
+        if (_recCur >= _dorm.length) _recCur = 0;
+        const k = _recCur++;
+        const p = _dorm[k];
+        if (!p.pos || p.dead) { _recCur--; wakePed(p, k, "owner"); continue; }
+        const cls = rCls[k];
+        let wr = recWakeOf(k);
+        if (!rec && !budget && cls === REC_CLS_AMBIENT) wr = 1e5;
+        const keep = wr < 1e5 && (cls === REC_CLS_FAR ? recordableCore(p, rX[k], rZ[k])
+          : (cls === REC_CLS_POST ? ownedSleepM(p) > 0 : ambient(p)) && !engaged(p, rX[k], rZ[k]));
+        if (!keep) {
+          if (p._rigRel && builds >= 1) { rWake[k] = wr >= 1e5 ? 0 : wr; continue; }
+          if (p._rigRel) builds++;
+          _recCur--; wakePed(p, k, wr >= 1e5 ? "off" : "engaged"); continue;
+        }
+        rWake[k] = wr;
+      }
+    }
+    // the lens (a few times a second, while the glass is up)
+    if ((_recLensT -= dt) > 0 || !cam || !cam.getWorldDirection) return;
+    _recLensT = 0.2;
+    if (!glassUp()) return;
+    const T3 = window.THREE; if (!T3) return;
+    const dv = _lensDir.v || (_lensDir.v = new T3.Vector3());
+    cam.getWorldDirection(dv);
+    const cy = cam.position.y;
+    let woke = 0;
+    for (let k = _dorm.length - 1; k >= 0 && woke < 3; k--) {
+      const p = _dorm[k];
+      const dx = rX[k] - cx, dy = ((p.pos && p.pos.y) || 0) + 1 - cy, dz = rZ[k] - cz, dd = dx * dx + dy * dy + dz * dz;
+      if (dd > 460 * 460) continue;
+      if ((dx * dv.x + dy * dv.y + dz * dv.z) / Math.sqrt(dd) < 0.93) continue;
+      // (held whole a moment: hitman.js's glass marks him `_farDraw` on its
+      // next look, which keeps him whole until the glass comes down)
+      p._recHold = _recClock + 1.5;
+      wakePed(p, k, "lens"); woke++;
+    }
+  });
   let _dormT = 0;
   CBZ.onUpdate(35.45, function (dt) {
     const budget = +CBZ.CONFIG.PHONE_PED_BUDGET || 0;
-    if (!budget && !_dorm.length) return;
+    const rec = recOn();
+    recStats.on = rec;
+    if (!budget && !_dorm.length && !rec) return;
     if (!econ()) return;
     _dormT -= dt; if (_dormT > 0) return;
     _dormT = 0.5;
-    const P = CBZ.player, cam = CBZ.camera;
-    if (!P || !P.pos) return;
-    const px = P.pos.x, pz = P.pos.z, cx = cam ? cam.position.x : px, cz = cam ? cam.position.z : pz;
-    const near = function (x, z, r) {
-      const a = x - px, b = z - pz, c = x - cx, d = z - cz;
-      return a * a + b * b < r * r || c * c + d * d < r * r;
-    };
-    // wake first: anybody the player is coming to, whatever the budget; and
-    // anybody an owner put back on the roster itself (a biome's resident
-    // re-registering, city/biome_desert.js / biome_snow.js / marina.js), or
-    // who died or was claimed while asleep
-    const roster = CBZ.cityPeds;
-    let builds = 0;
+    if (!eyesNow()) return;
+    const px = _eyes[0], pz = _eyes[1];
+    const near = function (x, z, r) { return eyeD2(x, z) < r * r; };
+    // the beat's row pass is numbers only: a walked row writes its place
+    // back on the person for whoever holds him by reference (the per-row
+    // questions are asked a slice a frame, above; an owner putting a record
+    // back on the roster is seen by the person loop on his first frame)
+    let far = 0;
     for (let k = _dorm.length - 1; k >= 0; k--) {
-      const p = _dorm[k];
-      const wr = p._dormOwned ? p._dormOwned : WAKE_M;
-      const must = !p.pos || p.dead || roster.indexOf(p) >= 0;
-      if (must || near(p.pos.x, p.pos.z, wr) || (!budget && !p._dormOwned)) {
-        // (a rig to build: a few a beat, nearest first next beat; the wake
-        // ring is 50 m past the farthest a phone draws a person)
-        if (p._rigRel && !must && builds >= RIG_BUILD_PER_BEAT) continue;
-        if (p._rigRel) builds++;
-        p._dormOwned = 0; wakePed(p, k);
-      }
+      if (rMoved[k]) recSync(_dorm[k], k);
+      if (rCls[k] === REC_CLS_FAR) far++;
     }
+    recStats.rows = _dorm.length; recStats.far = far;
     const peds = CBZ.cityPeds;
     // THE SLEEPER'S RIG: the ones asleep long enough let theirs go, a few a beat
     if (DORM_ON && CBZ.CONFIG.PHONE_RIG_RELEASE !== false && _dorm.length) {
@@ -2898,10 +3396,34 @@
       let n = 0;
       for (let k = 0; k < _dorm.length && n < RIG_REL_PER_BEAT; k++) {
         const p = _dorm[k];
-        if (p._rigRel || p._rigKeep || now - (p._dormAt || now) < RIG_REL_T * 1000 || !rigReleasable(p)) continue;
+        // (a far record keeps his rig longer: most of the ones that wake, a
+        // war, a draft, the player turning back, wake within seconds, and a
+        // rig built again costs a phone ~2-8 ms)
+        const relT = rCls[k] === REC_CLS_FAR ? REC_RIG_REL_T : RIG_REL_T;
+        if (p._rigRel || p._rigKeep || now - (p._dormAt || now) < relT * 1000 || !rigReleasable(p)) continue;
         try { rigRelease(p); } catch (e) { p._rigKeep = true; rigStats.kept++; }
         n++;
       }
+    }
+    // THE FAR RECORD: anybody quiet past recM() (a post upstairs past its own
+    // closer range: walls hide him), a few dozen a beat. The two rules below
+    // are its old, narrower cases and stand down while it is on.
+    if (rec) {
+      const sm = recM();
+      let n = 0;
+      for (let i = peds.length - 1; i >= 0 && n < 40; i--) {
+        const p = peds[i];
+        // (distance first: it is two typed reads; the tests are forty slow ones)
+        if (!p.pos || near(p.pos.x, p.pos.z, INDOOR_SLEEP_M)) continue;
+        if (ownedSleepM(p) === INDOOR_SLEEP_M) {
+          if (engaged(p, p.pos.x, p.pos.z)) continue;
+          p._dormOwned = INDOOR_WAKE_M; sleepPed(p, i, REC_CLS_POST); n++;
+          continue;
+        }
+        if (near(p.pos.x, p.pos.z, sm) || !recordable(p)) continue;
+        sleepPed(p, i, REC_CLS_FAR); n++;
+      }
+      return;
     }
     // the owned posts past their range, whatever the budget (a few per beat)
     if (DORM_ON) {
@@ -2910,9 +3432,9 @@
         const p = peds[i];
         if (!p.pos) continue;
         const sm = ownedSleepM(p);
-        if (!sm || near(p.pos.x, p.pos.z, sm)) continue;
+        if (!sm || near(p.pos.x, p.pos.z, sm) || engaged(p, p.pos.x, p.pos.z)) continue;
         p._dormOwned = sm === INDOOR_SLEEP_M ? INDOOR_WAKE_M : OWNED_WAKE_M;
-        sleepPed(p, i); n++;
+        sleepPed(p, i, REC_CLS_POST); n++;
       }
     }
     let over = peds.length - budget;
@@ -2921,7 +3443,7 @@
     const cand = [];
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
-      if (!p.pos || near(p.pos.x, p.pos.z, SLEEP_M) || !ambient(p)) continue;
+      if (!p.pos || near(p.pos.x, p.pos.z, SLEEP_M) || !ambient(p) || engaged(p, p.pos.x, p.pos.z)) continue;
       const a = p.pos.x - px, b = p.pos.z - pz;
       cand.push([a * a + b * b, p]);
     }
@@ -2930,7 +3452,7 @@
     const n = Math.min(over, cand.length, 40);
     for (let k = 0; k < n; k++) {
       const p = cand[k][1], i = peds.indexOf(p);
-      if (i >= 0) sleepPed(p, i);
+      if (i >= 0) sleepPed(p, i, REC_CLS_AMBIENT);
     }
   });
   CBZ.onUpdate(35.4, function () {
@@ -7502,6 +8024,9 @@
         }
       }
       dt = dtFrame;              // a prior ped's compensated tick must not leak
+      // a sleeper or a far record an owner put back on the roster himself (a
+      // biome's resident re-registering, a family, a campaign): whole now
+      if (p._dormant) { const rk = recIndex(p); if (rk >= 0) wakePed(p, rk, "owner", true); else p._dormant = false; }
       if (p._rigRel) rigRebuild(p);   // a released sleeper an owner put back on the roster
       // MAY THIS BODY DECIDE THIS FRAME? Settled here, at the top, because the
       // gate block below has to know: a deferred body must HOLD its decision

@@ -216,14 +216,20 @@
     return true;
   }
   function draftBody() {
-    const peds = CBZ.cityPeds || [];
+    // (roster and a phone's far records, city/peds.js THE FAR RECORD: the
+    // records are the far bodies this draft is for; the one drafted is made
+    // whole, his rig built, before he is dressed)
     let best = null, bw = -1;
-    for (let i = 0; i < peds.length; i++) {
-      const p = peds[i];
-      if (!draftableCiv(p)) continue;
+    const look = function (p, asleep) {
+      if (!draftableCiv(p)) return;
+      // (a record past the recycle range would be let go as soon as drafted)
+      if (asleep && camD2(p.pos.x, p.pos.z) > FAR2 * 0.85) return;
       const w = (p.wealth || 0) + rng() * 0.15;     // the well-dressed read as money
       if (w > bw) { bw = w; best = p; }
-    }
+    };
+    if (CBZ.cityPersonsEach) CBZ.cityPersonsEach(look);
+    else { const peds = CBZ.cityPeds || []; for (let i = 0; i < peds.length; i++) look(peds[i], false); }
+    if (best && best._dormant && CBZ.cityPersonWake) CBZ.cityPersonWake(best);
     return best;
   }
 

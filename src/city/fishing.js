@@ -247,6 +247,9 @@
       const p = r.ped;
       // the body left the world (killed, swept, or citystaff gave it back):
       // the rod goes with it, and a dead angler drops his line.
+      // (asleep or a far record on a phone, city/peds.js `_dormant`, is still
+      // the angler: his rod waits for him)
+      if (p && !p.dead && p._dormant) continue;
       if (!p || p.dead || !p.group || !p.group.parent || (CBZ.cityPeds && CBZ.cityPeds.indexOf(p) < 0)) {
         if (r.mesh && r.mesh.parent) r.mesh.parent.remove(r.mesh);
         if (r.spot && r.spot.worker === p) r.spot.worker = null;

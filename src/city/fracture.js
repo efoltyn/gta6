@@ -231,6 +231,13 @@
   function resolve(h) {
     const cols = CBZ.colliders;
     if (!cols || !cols.length) return null;
+    // a far shell on a phone keeps its upper storeys as data (city/buildings.js
+    // DOWNTOWN STREAMS): the building a hole names is made whole (for good,
+    // it is carved) so its walls are in the broadphase to be found
+    if (CBZ.cityShellsWakeNear && typeof h.b === "string") {
+      const k = h.b.split(","), bx = +k[0], bz = +k[1];
+      if (isFinite(bx) && isFinite(bz)) { try { CBZ.cityShellsWakeNear(bx, bz, 1); } catch (e) {} }
+    }
     let best = null, bs = 1e9;
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];

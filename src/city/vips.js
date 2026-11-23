@@ -268,35 +268,42 @@
     if (camD2(p.pos.x, p.pos.z) < OFFSCREEN2) return false;   // never morph anyone in view
     return true;
   }
-  function draftPrincipal() {
+  // EVERYBODY THE DRAFT MAY READ. A phone keeps the street past ~90 m as
+  // records off the roster (city/peds.js THE FAR RECORD) and those are
+  // exactly the far bodies a draft wants (never morphed in view): roster and
+  // records both, and the one drafted is made whole (his rig built) first.
+  // (records no farther than the roster used to reach: 190 m)
+  function eachPerson(fn) {
+    if (CBZ.cityPersonsEach) { CBZ.cityPersonsEach(function (p, asleep) { if (!asleep || (p && p.pos && camD2(p.pos.x, p.pos.z) < 190 * 190)) fn(p); }); return; }
     const peds = CBZ.cityPeds || [];
+    for (let i = 0; i < peds.length; i++) fn(peds[i]);
+  }
+  function whole(p) { if (p && p._dormant && CBZ.cityPersonWake) CBZ.cityPersonWake(p); return p; }
+  function draftPrincipal() {
     let best = null, bw = -1;
-    for (let i = 0; i < peds.length; i++) {
-      const p = peds[i];
-      if (!draftableCiv(p)) continue;
+    eachPerson(function (p) {
+      if (!draftableCiv(p)) return;
       const w = (p.wealth || 0) + rng() * 0.1;   // the well-dressed make believable principals
       if (w > bw) { bw = w; best = p; }
-    }
-    return best;
+    });
+    return whole(best);
   }
   function draftSuitBody() {
-    const peds = CBZ.cityPeds || [];
-    for (let i = 0; i < peds.length; i++) { const p = peds[i]; if (draftableCiv(p)) return p; }
-    return null;
+    let got = null;
+    eachPerson(function (p) { if (!got && draftableCiv(p)) got = p; });
+    return whole(got);
   }
   // the don pulls SOLDIERS off the corner — already set-colored, already armed
   function draftMade(gangId) {
-    const peds = CBZ.cityPeds || [];
     let best = null, bestTier = -1;
-    for (let i = 0; i < peds.length; i++) {
-      const q = peds[i];
-      if (!q || q.dead || q.gang !== gangId || q.isBoss || q.rank === "boss" || q.rank === "lt") continue;
-      if (q.controlled || q.companion || q.ko > 0 || q.rage || q.surrender || (q.npcWanted | 0)) continue;
-      if (q.state === "fight" || q.state === "flee" || q._parked || q.inCar) continue;
+    eachPerson(function (q) {
+      if (!q || q.dead || q.gang !== gangId || q.isBoss || q.rank === "boss" || q.rank === "lt") return;
+      if (q.controlled || q.companion || q.ko > 0 || q.rage || q.surrender || (q.npcWanted | 0)) return;
+      if (q.state === "fight" || q.state === "flee" || q._parked || q.inCar) return;
       const tier = q.rank === "enforcer" ? 3 : q.rank === "soldier" ? 2 : 1;
       if (tier > bestTier) { bestTier = tier; best = q; }
-    }
-    return best;
+    });
+    return whole(best);
   }
   function draftCop(slot) {
     const cops = CBZ.cityCops || [];

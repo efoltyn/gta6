@@ -582,7 +582,8 @@
     // drop stale offers (dead/despawned/claimed heads)
     for (let i = bountyBoard.length - 1; i >= 0; i--) {
       const o = bountyBoard[i];
-      if (!o.ref || o.ref.dead || (CBZ.cityPeds && CBZ.cityPeds.indexOf(o.ref) < 0)) bountyBoard.splice(i, 1);
+      // (a far record on a phone, city/peds.js `_dormant`, is still in the world)
+      if (!o.ref || o.ref.dead || (CBZ.cityPeds && !o.ref._dormant && CBZ.cityPeds.indexOf(o.ref) < 0)) bountyBoard.splice(i, 1);
     }
     if (bountyBoard.length >= 5) return;
     const peds = CBZ.cityPeds || [];
@@ -694,6 +695,9 @@
       else { t.bounty = 0; t.bountyTag = null; failContract("someone else got to them first"); }
       return;
     }
+    // (a mark who is a far record on a phone, city/peds.js, is made whole: the
+    // trail is warm, he is only out of sight)
+    if (t && t._dormant && CBZ.cityPersonWake) CBZ.cityPersonWake(t);
     if (!t || (CBZ.cityPeds && CBZ.cityPeds.indexOf(t) < 0)) { failContract("the trail went cold"); return; }
     if (CBZ.now >= c.expireT) { failContract("the contract expired"); return; }
     c.pingT -= dt;

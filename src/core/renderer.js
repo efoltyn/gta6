@@ -567,6 +567,12 @@
 
   CBZ.renderer = renderer;
   CBZ.canvas = renderer.domElement;
+  // THE RENDER WALK SKIPS HIDDEN SUBTREES (core/matrixskip.js part 2,
+  // STATIC_MATRIX_FREEZE). Installed HERE, before anything else wraps
+  // render(), so it is the innermost wrapper: every visibility flip an outer
+  // wrapper (lightpin, carinstances, profile) makes for a render is in place
+  // before its scan.
+  if (CBZ.walkPruneInstall) CBZ.walkPruneInstall(renderer);
 
   /* ============================================================
      CBZ.setFogAniso(aniso, sil) — TWO FLOATS, EVERY PROGRAM.

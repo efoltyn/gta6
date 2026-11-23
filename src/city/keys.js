@@ -130,6 +130,8 @@
   function holderOf(id) {
     const roster = CBZ.cityPeds;
     if (!roster) return null;
+    // (a manager who is a far record on a phone, city/peds.js, still has it)
+    if (CBZ.cityPersonsEach) return CBZ.cityPersonsEach(function (p) { return !!(p && !p.dead && pedHas(p, id)); });
     for (let i = 0; i < roster.length; i++) {
       const p = roster[i];
       if (p && !p.dead && pedHas(p, id)) return p;

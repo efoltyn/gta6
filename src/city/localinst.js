@@ -181,30 +181,41 @@
       poolCount++;
     });
 
-    // Per-frame frustum cull for the pools — replicates the exact per-object
-    // culling the original individual props got (which is why disabling it
-    // regressed draw calls: all-directions pools vs a view-cone of props).
-    if (!CBZ.__localInstCull) {
-      CBZ.__localInstCull = true;
-      const _fr = new THREE.Frustum(), _pm = new THREE.Matrix4(), _sp = new THREE.Sphere();
-      CBZ.onAlways(3.7, function () {
-        const list = CBZ.__localInstPools;
-        if (!list || !list.length || !CBZ.camera) return;
-        const cam = CBZ.camera;
-        cam.updateMatrixWorld();
-        _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-        _fr.setFromProjectionMatrix(_pm);
-        for (let i = 0; i < list.length; i++) {
-          const p = list[i];
-          _sp.center.set(p.cx, p.cy, p.cz); _sp.radius = p.r;
-          p.im.visible = _fr.intersectsSphere(_sp);
-        }
-      });
-    }
+    armPoolCull();
 
     CBZ.localInstStats = { pools: poolCount, collapsed: collapsed, buckets: buckets.size };
     return CBZ.localInstStats;
   };
+
+  /* Per-frame frustum cull for the pools — replicates the exact per-object
+     culling the original individual props got (which is why disabling it
+     regressed draw calls: all-directions pools vs a view-cone of props).
+     ARMED FROM MODULE SCOPE. It was registered inside instanceStaticUnder,
+     and a closure keeps its whole creating context: the boot city's losSet
+     and refSet (every LOS blocker and collider ref of the boot world, ~48k
+     meshes on the phone profile) and its buckets stayed alive for the
+     session, so every one of those meshes outlived its removal from the
+     world (a freed stream job, a demolished or carved wall, a far shell's
+     unbuilt pieces: city/buildings.js). Measured: 8,250 of 8,250 removed
+     wall meshes still alive after a GC, held by exactly these two Sets. */
+  function armPoolCull() {
+    if (CBZ.__localInstCull) return;
+    CBZ.__localInstCull = true;
+    const _fr = new THREE.Frustum(), _pm = new THREE.Matrix4(), _sp = new THREE.Sphere();
+    CBZ.onAlways(3.7, function () {
+      const list = CBZ.__localInstPools;
+      if (!list || !list.length || !CBZ.camera) return;
+      const cam = CBZ.camera;
+      cam.updateMatrixWorld();
+      _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+      _fr.setFromProjectionMatrix(_pm);
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        _sp.center.set(p.cx, p.cy, p.cz); _sp.radius = p.r;
+        p.im.visible = _fr.intersectsSphere(_sp);
+      }
+    });
+  }
 
   // Test hook: for a top group, how many of its mapped instances are still LIVE
   // (non-zero-scaled). After CBZ.batchHideGroup(group) this must be 0 — the exact

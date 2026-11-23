@@ -1874,6 +1874,11 @@
       // ragdoll (city/ragdoll.js), falling off with distance. Before the kill
       // sweep, so the men this blast kills are launched once, by their kill.
       if (CBZ.ragdollBlast) { try { CBZ.ragdollBlast(x, z, R, power); } catch (e) {} }
+      // a phone keeps far people as records off the roster (city/peds.js THE
+      // FAR RECORD): the ones this blast reaches are made whole first, so a
+      // rocket into a far crowd kills it (a city-sized blast is not: it
+      // would build hundreds of rigs in one frame)
+      if (CBZ.cityRecordsWakeNear && LR <= 60) { try { CBZ.cityRecordsWakeNear(x, z, LR, "blast"); } catch (e) {} }
       for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, cause); }
       for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }
       const PL = CBZ.player;

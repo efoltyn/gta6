@@ -1581,22 +1581,27 @@
        it reads and the derived built-ground grid. Same inputs: last visit's
        arrays. Anything different: computed exactly as before. */
     let PLATE_SIG = null, PLATE_BAKE = null;
+    // the shore field per vertex is read again only by the legacy foam pass
+    const PLATE_KEEP_SHORE = !!(COAST && CFG.SEA_OVERHAUL === false);
     CBZ._plateSig = null;
     if (CBZ.bakeSig && CBZ.bakeGet) {
       try {
-        PLATE_SIG = CBZ.bakeSig("plate|" + PLAN.signature() + "|" + CBZ.bakeHash({ W: W, D: D, SEG: SEG, cx0: cx0, cz0: cz0, COAST: COAST, HARBOR: HARBOR,
+        // (plate2: the record holds the FINISHED plate only, see the put below)
+        PLATE_SIG = CBZ.bakeSig("plate2|" + PLAN.signature() + "|" + CBZ.bakeHash({ W: W, D: D, SEG: SEG, cx0: cx0, cz0: cz0, COAST: COAST, HARBOR: HARBOR,
           regs: regs, water: waterBodies, blends: CBZ._biomeBlendSpecs || null, asb: authoredSurfaceBounds, gr: gradedRegs.slice(0, gradedN),
           annex: city.annex ? { cx: city.annex.cx, cz: city.annex.cz, r: city.annex.radius } : null, cfg: CFG }) + "|" + CBZ.bakeHashArr(dgHas) + CBZ.bakeHashArr(dgBox));
         CBZ._plateSig = PLATE_SIG;            // the backdrop's inputs start here
         PLATE_BAKE = CBZ.bakeGet("continent-plate", PLATE_SIG);
-        if (PLATE_BAKE && !(PLATE_BAKE.y && PLATE_BAKE.y.length === pos.count && PLATE_BAKE.c && PLATE_BAKE.c.length === colors.length && PLATE_BAKE.r && (!COAST || (PLATE_BAKE.s && PLATE_BAKE.s.length === pos.count)))) PLATE_BAKE = null;
+        if (PLATE_BAKE && !(PLATE_BAKE.y && PLATE_BAKE.y.length === pos.count && PLATE_BAKE.r && PLATE_BAKE.r.length === pos.count &&
+          PLATE_BAKE.fc && PLATE_BAKE.fc.length === colors.length && geo.index && PLATE_BAKE.fk && PLATE_BAKE.fk.length === Math.ceil(geo.index.count / 24) && PLATE_BAKE.carved &&
+          (!PLATE_KEEP_SHORE || (PLATE_BAKE.s && PLATE_BAKE.s.length === pos.count)))) PLATE_BAKE = null;
       } catch (e) { PLATE_SIG = null; PLATE_BAKE = null; }
     }
     if (PLATE_BAKE) {
       const Y = PLATE_BAKE.y;
       for (let i = 0; i < pos.count; i++) pos.setY(i, Y[i]);
-      colors.set(PLATE_BAKE.c); rGrid.set(PLATE_BAKE.r);
-      if (sGrid) sGrid.set(PLATE_BAKE.s);
+      rGrid.set(PLATE_BAKE.r);
+      if (sGrid && PLATE_BAKE.s && PLATE_BAKE.s.length === pos.count) sGrid.set(PLATE_BAKE.s);
     }
     for (let i = PLATE_BAKE ? pos.count : 0; i < pos.count; i++) {
       const wx = pos.getX(i) + cx0, wz = pos.getZ(i) + cz0;
@@ -1686,13 +1691,12 @@
       pos.setY(i, y);
       colors[i * 3] = c.r * shade; colors[i * 3 + 1] = c.g * shade; colors[i * 3 + 2] = c.b * shade;
     }
-    // the loop's own outputs, kept for the combined bake below (the passes
-    // after this point change the colours in place)
-    let PLATE_Y = null, PLATE_C = null;
+    // the loop's own heights, kept for the combined bake below (a hit sets
+    // them and then runs every pass the finished record does not cover)
+    let PLATE_Y = null;
     if (!PLATE_BAKE && PLATE_SIG && CBZ.bakePut) {
       PLATE_Y = new Float32Array(pos.count);
       for (let i = 0; i < pos.count; i++) PLATE_Y[i] = pos.getY(i);
-      PLATE_C = colors.slice();
     }
 
     // ==================================================================
@@ -1751,15 +1755,32 @@
        the loop above): the strata tint, the linear decode, the carve of the
        triangles under authored floors and the normals are pure functions of
        what the loop made and of the same inputs. A hit sets them and skips
-       all four passes (~0.5 M triangle tests, ~0.2 M strata samples). */
-    const FIN = PLATE_BAKE && PLATE_BAKE.fc && PLATE_BAKE.fc.length === colors.length && PLATE_BAKE.fi && PLATE_BAKE.fn ? PLATE_BAKE : null;
+       all four passes (~0.5 M triangle tests, ~0.2 M strata samples).
+       The carve is kept as one bit per grid triangle (fk, 58 KB), not as the
+       carved index (5.5 MB): the grid's own index is already here, and the
+       kept triangles are taken from it in the same order. Normals (fn) are
+       optional in a record: tools/ship-bakes.mjs leaves them out of the file
+       it ships (recomputing them is cheaper on a phone than downloading
+       them), and a record without them recomputes them exactly as below. */
+    const FIN_NT = geo.index ? geo.index.count / 3 : 0;
+    const FIN = PLATE_BAKE && PLATE_BAKE.fc && PLATE_BAKE.fc.length === colors.length && geo.index &&
+      PLATE_BAKE.fk && PLATE_BAKE.fk.length === Math.ceil(FIN_NT / 8) ? PLATE_BAKE : null;
     let carvedTriangles = 0;
     if (FIN) {
       colors.set(FIN.fc);
       geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-      geo.setIndex(new THREE.BufferAttribute(FIN.fi, 1));
+      const src = geo.index.array, fk = FIN.fk;
+      let nk = 0;
+      for (let t = 0; t < FIN_NT; t++) if (fk[t >> 3] & (1 << (t & 7))) nk++;
+      const kept = pos.count > 65535 ? new Uint32Array(nk * 3) : new Uint16Array(nk * 3);
+      for (let t = 0, o = 0; t < FIN_NT; t++) {
+        if (!(fk[t >> 3] & (1 << (t & 7)))) continue;
+        kept[o++] = src[t * 3]; kept[o++] = src[t * 3 + 1]; kept[o++] = src[t * 3 + 2];
+      }
+      geo.setIndex(new THREE.BufferAttribute(kept, 1));
       carvedTriangles = FIN.carved ? FIN.carved[0] : 0;
-      if (FIN.fn.length === pos.count * 3) geo.setAttribute("normal", new THREE.BufferAttribute(FIN.fn, 3));
+      if (FIN.fn && FIN.fn.length === pos.count * 3) geo.setAttribute("normal", new THREE.BufferAttribute(FIN.fn, 3));
+      else if (COAST || CFG.CONTINENT_RELIEF_V1 !== false) geo.computeVertexNormals();
     }
     if (!FIN && CFG.CONTINENT_RELIEF_V1 !== false && CBZ.mtnStrataTint) {
       const stride = SEG + 1;
@@ -1827,10 +1848,12 @@
     // beneath every authored edge; its lower Y + polygon offset make the real
     // pad win while guaranteeing continuous earth at the seam.
     const CARVE_SEAM_INSET = Math.min(32, Math.hypot(W / SEG, D / SEG) + 2);
+    let keptMask = null;      // one bit per grid triangle, set = kept (the bake's record of the carve)
     if (!FIN && geo.index) {
       // (kept in a typed array: a plain array of ~1.2 M indices was several
       // MB of boxed garbage on the boot peak; the same Uint32 index results)
       const src = geo.index.array, kept = new Uint32Array(src.length);
+      keptMask = new Uint8Array(Math.ceil(src.length / 3 / 8));
       let nk = 0;
       for (let i = 0; i < src.length; i += 3) {
         const ia = src[i], ib = src[i + 1], ic = src[i + 2];
@@ -1838,17 +1861,23 @@
         const tz = (pos.getZ(ia) + pos.getZ(ib) + pos.getZ(ic)) / 3 + cz0;
         if (insideAuthoredSurface(tx, tz, -CARVE_SEAM_INSET)) { carvedTriangles++; continue; }
         kept[nk++] = ia; kept[nk++] = ib; kept[nk++] = ic;
+        const t = i / 3;
+        keptMask[t >> 3] |= 1 << (t & 7);
       }
       geo.setIndex(pos.count > 65535 ? new THREE.BufferAttribute(kept.slice(0, nk), 1) : new THREE.BufferAttribute(Uint16Array.from(kept.subarray(0, nk)), 1));
     }
     if (!FIN && (COAST || CFG.CONTINENT_RELIEF_V1 !== false)) geo.computeVertexNormals(); // coast + country slopes want real shading
-    if (!FIN && PLATE_SIG && CBZ.bakePut && geo.index) {
-      // the finished plate joins the loop's record (bakePut replaces it whole)
-      const Y2 = new Float32Array(pos.count);
-      for (let i = 0; i < pos.count; i++) Y2[i] = pos.getY(i);
+    if (!FIN && PLATE_SIG && CBZ.bakePut && geo.index && keptMask) {
+      // the finished plate, one record: the loop's heights and relief, the
+      // final colours, the carve and the normals (and the shore field only
+      // where the legacy foam still reads it)
+      const Y2 = PLATE_Y ? null : new Float32Array(pos.count);
+      if (Y2) for (let i = 0; i < pos.count; i++) Y2[i] = pos.getY(i);
       const nrm = geo.attributes.normal;
-      CBZ.bakePut("continent-plate", PLATE_SIG, { y: PLATE_Y || Y2, c: PLATE_C || colors, r: rGrid, s: sGrid || new Float32Array(0),
-        fc: colors, fi: geo.index.array, fn: nrm ? nrm.array : new Float32Array(0), carved: new Float64Array([carvedTriangles]) });
+      const rec = { y: PLATE_Y || Y2, r: rGrid, fc: colors, fk: keptMask,
+        fn: nrm ? nrm.array : new Float32Array(0), carved: new Float64Array([carvedTriangles]) };
+      if (PLATE_KEEP_SHORE && sGrid) rec.s = sGrid;
+      CBZ.bakePut("continent-plate", PLATE_SIG, rec);
     }
     // THE GROUND SKIN (world/textures_surface.js, shared with the disaster
     // island): the land cover above stays the macro albedo; per pixel the
@@ -2448,8 +2477,31 @@
     // altitude gradient is expressed as a fraction of it, so terrain work
     // that raises the country thins the wood in the same PLACES rather than
     // at the same height. Deterministic: a fixed grid over fixed bounds.
-    let reliefTop = 0;
-    if (CARPET) {
+    /* THE PLACEMENT PLAN IS BAKED TOO (core/bakecache.js, "continent-trees").
+       With the plate served from the cache, the 46 m cell pass and the plan
+       below were ~2 s of the ~3 s left in this builder on the phone profile:
+       every cell's biome dominance, closure and slope, every stem's ground
+       gates, river distance and spacing. What they produce is a list of stems
+       and shrubs, a pure function of the plate's inputs (its signature, which
+       carries the forest look's version and knobs) and the city's bounds. A
+       hit refills stemList / scrubList and skips both passes; the planting
+       (transforms, colliders, tree audit, chunks) runs as always. The field
+       stones' cells ride along (rk: the stone pass reads only their x, z).
+       Only the CARPET world is baked. The forest look's audit counters are
+       not replayed. */
+    const TREE_ROLES = ["stand", "riparian", "hedgerow", "avenue", "specimen"];
+    let TREE_SIG = null, TREE_BAKE = null;
+    if (CARPET && PLATE_SIG && CBZ.bakeSig && CBZ.bakeGet) {
+      try {
+        TREE_SIG = CBZ.bakeSig("trees1|" + PLATE_SIG + "|" + CBZ.bakeHash({ city: [city.minX, city.maxX, city.minZ, city.maxZ],
+          vk: !!CBZ.vegetationKit, tr: !!CBZ.treeRegisterTree, bd: !!CBZ.biomeBlendDominantAt, h: !!CBZ.hash01 }));
+        TREE_BAKE = CBZ.bakeGet("continent-trees", TREE_SIG);
+        if (TREE_BAKE && !(TREE_BAKE.st && TREE_BAKE.st.length % 8 === 0 && TREE_BAKE.sc && TREE_BAKE.sc.length % 5 === 0 && TREE_BAKE.m && TREE_BAKE.m.length === 10 &&
+          TREE_BAKE.rk && TREE_BAKE.rk.length === TREE_BAKE.m[1] * 2)) TREE_BAKE = null;
+      } catch (e) { TREE_SIG = null; TREE_BAKE = null; }
+    }
+    let reliefTop = TREE_BAKE ? TREE_BAKE.m[2] : 0;
+    if (CARPET && !TREE_BAKE) {
       for (let i = 0; i <= 64; i++) {
         for (let j = 0; j <= 64; j++) {
           const y = reliefAt(minX + (maxX - minX) * (i / 64), minZ + (maxZ - minZ) * (j / 64));
@@ -2465,7 +2517,7 @@
     const altRef = Math.max(reliefTop, 320);
     const CELL = 46;
     const spots = [];
-    for (let gx = minX + CELL / 2; gx < maxX; gx += CELL) {
+    for (let gx = minX + CELL / 2; !TREE_BAKE && gx < maxX; gx += CELL) {
       for (let gz = minZ + CELL / 2; gz < maxZ; gz += CELL) {
         const h = CBZ.hash01 ? CBZ.hash01(Math.floor(gx), Math.floor(gz), 8803) : 1;
         const coverHit = CBZ.biomeBlendDominantAt ? CBZ.biomeBlendDominantAt(biomeBlends, gx, gz) : null;
@@ -2548,7 +2600,13 @@
           slope: slopeV, curv: curvV });
       }
     }
-    if (spots.length) {
+    if (TREE_BAKE) {
+      // the baked plan's field-stone cells, in their order: bare, not a tree
+      // spot (h 1, no cover), not scrub (the stone pass reads x and z only)
+      const R = TREE_BAKE.rk;
+      for (let i = 0; i < R.length; i += 2) spots.push({ x: R[i], z: R[i + 1], h: 1, cover: null, steep: false, c: 0, storey: "rock", grad: null, bare: true, slope: 0, curv: 0 });
+    }
+    if (spots.length || (TREE_BAKE && TREE_BAKE.m[0] > 0)) {
       const V2 = CFG.CONTINENT_FOREST_V2 !== false;
       const VKIT = CBZ.vegetationKit;
       const SCENERY = !!(V2 && VKIT && CFG.SCENERY_VEGETATION !== false);
@@ -2650,7 +2708,18 @@
       // specimen} and CBZ.CONFIG.TREE_CLUSTER (world/forestlook.js).
       const stemList = [], scrubList = [];
       const planStats = { stand: 0, riparian: 0, hedgerow: 0, avenue: 0, specimen: 0, clump: 0, rejected: 0 };
-      if (CARPET) {
+      if (CARPET && TREE_BAKE) {
+        // the baked plan: the same stems and shrubs in the same order
+        const S = TREE_BAKE.st, K = TREE_BAKE.sc, M = TREE_BAKE.m;
+        for (let i = 0; i < S.length; i += 8) {
+          const f = S[i + 7];
+          stemList.push({ x: S[i], z: S[i + 1], conifer: (f & 1) === 1, c: S[i + 2], sc: S[i + 3],
+            grad: { gx: S[i + 4], gz: S[i + 5], alt: S[i + 6] }, role: TREE_ROLES[f >> 1] });
+        }
+        for (let i = 0; i < K.length; i += 5) scrubList.push({ x: K[i], z: K[i + 1], grad: K[i + 2] !== K[i + 2] ? null : { gx: K[i + 2], gz: K[i + 3], alt: K[i + 4] } });
+        planStats.stand = M[3]; planStats.riparian = M[4]; planStats.hedgerow = M[5]; planStats.avenue = M[6];
+        planStats.specimen = M[7]; planStats.clump = M[8]; planStats.rejected = M[9];
+      } else if (CARPET) {
         const DEN = FLOOK.density, CK = FLOOK.cluster();
         const H01 = CBZ.hash01 || function () { return 0.5; };
         // ---- spacing: an 8 m bucket grid of planted trunks
@@ -2940,8 +3009,26 @@
       }
       const nTree = CARPET ? stemList.length : spots.filter(isTreeSpot).length;
       const nRock = Math.max(1, CARPET
-        ? spots.filter(function (s) { return s.bare && s.storey !== "scrub" && s.storey !== "none" && !isTreeSpot(s); }).length
+        ? (TREE_BAKE ? TREE_BAKE.m[1] : spots.filter(function (s) { return s.bare && s.storey !== "scrub" && s.storey !== "none" && !isTreeSpot(s); }).length)
         : spots.length - nTree);
+      if (TREE_SIG && !TREE_BAKE && CBZ.bakePut) {
+        const S = new Float64Array(stemList.length * 8), K = new Float64Array(scrubList.length * 5);
+        for (let i = 0; i < stemList.length; i++) {
+          const t = stemList[i], g = t.grad, o = i * 8;
+          S[o] = t.x; S[o + 1] = t.z; S[o + 2] = t.c; S[o + 3] = t.sc;
+          S[o + 4] = g ? g.gx : NaN; S[o + 5] = g ? g.gz : NaN; S[o + 6] = g ? g.alt : NaN;
+          S[o + 7] = (t.conifer ? 1 : 0) | (Math.max(0, TREE_ROLES.indexOf(t.role)) << 1);
+        }
+        for (let i = 0; i < scrubList.length; i++) {
+          const s = scrubList[i], g = s.grad, o = i * 5;
+          K[o] = s.x; K[o + 1] = s.z; K[o + 2] = g ? g.gx : NaN; K[o + 3] = g ? g.gz : NaN; K[o + 4] = g ? g.alt : NaN;
+        }
+        const rocks = spots.filter(function (s) { return s.bare && s.storey !== "scrub" && s.storey !== "none" && !isTreeSpot(s); });
+        const RK = new Float64Array(rocks.length * 2);
+        for (let i = 0; i < rocks.length; i++) { RK[i * 2] = rocks[i].x; RK[i * 2 + 1] = rocks[i].z; }
+        CBZ.bakePut("continent-trees", TREE_SIG, { st: S, sc: K, rk: RK, m: new Float64Array([spots.length, rocks.length, reliefTop,
+          planStats.stand, planStats.riparian, planStats.hedgerow, planStats.avenue, planStats.specimen, planStats.clump, planStats.rejected]) });
+      }
       // Backcountry is the kit's landscape consumer: same metre-authored scale
       // and irregular mass as Redhollow, but the lighter landscape archetypes
       // avoid multiplying close-detail roots/limbs across ~10k far cells.

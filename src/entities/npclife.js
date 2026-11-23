@@ -341,6 +341,9 @@
       const i = list.indexOf(actor);
       if (i >= 0) list.splice(i, 1);
     }
+    // asleep or a far record (city/peds.js): off the sleepers too, or a wake
+    // would put this disposed rig back on the roster
+    if (CBZ.cityDormDrop) CBZ.cityDormDrop(actor);
     actor._npcLifeDestroyed = true;
     actor.culled = true;
     return true;
@@ -355,7 +358,7 @@
     if (!pop) return false;
     for (let i = 0; i < pop.actors.length; i++) {
       const a = pop.actors[i];
-      if (a && CBZ.cityPeds && CBZ.cityPeds.indexOf(a) >= 0) destroyCity(a, { force: true });
+      if (a && CBZ.cityPeds && (a._dormant || CBZ.cityPeds.indexOf(a) >= 0)) destroyCity(a, { force: true });
     }
     delete populations[id];
     const k = populationIds.indexOf(id);
@@ -680,7 +683,7 @@
       if (!pop) continue;
       for (let j = 0; j < pop.actors.length; j++) {
         const a = pop.actors[j];
-        if (a && CBZ.cityPeds && CBZ.cityPeds.indexOf(a) >= 0) destroyCity(a, { force: true });
+        if (a && CBZ.cityPeds && (a._dormant || CBZ.cityPeds.indexOf(a) >= 0)) destroyCity(a, { force: true });
         pop.actors[j] = null;
       }
       pop.cursor = 0;

@@ -211,13 +211,13 @@
     }
     // fall back to any office worker whose work lot is this HQ (covers HQs
     // that aren't furnished with the desk registry, e.g. retail/landlord lots)
-    if (CBZ.cityPeds) {
-      for (let i = 0; i < CBZ.cityPeds.length; i++) {
-        const p = CBZ.cityPeds[i];
-        if (!p || p.dead || p === co.owner || seen.has(p)) continue;
-        if (p._work === co.hq) { seen.add(p); out.push(p); }
-      }
-    }
+    // (a phone's far records, city/peds.js THE FAR RECORD, are this HQ's
+    // staff too: everybody, roster and records)
+    const each = CBZ.cityPersonsEach || function (fn) { const L = CBZ.cityPeds || []; for (let i = 0; i < L.length; i++) fn(L[i], false); };
+    each(function (p) {
+      if (!p || p.dead || p === co.owner || seen.has(p)) return;
+      if (p._work === co.hq) { seen.add(p); out.push(p); }
+    });
     return out;
   }
   function rankCandidate(p) {

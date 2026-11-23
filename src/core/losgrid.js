@@ -122,17 +122,9 @@
     return geoOk && sideOk && isIdentityRot(m.matrixWorld) && !isMover(m);
   }
   // bake one gridded blocker into slot n and file it into its cells
-  function fileGrid(m) {
-    const g = m.geometry;
-    if (!g.boundingBox) g.computeBoundingBox();
-    _box.copy(g.boundingBox).applyMatrix4(m.matrixWorld);
-    const j = n++;
-    objs[j] = m;
-    m._losJ = j; m._losB = buildId;
-    minX[j] = _box.min.x; minY[j] = _box.min.y; minZ[j] = _box.min.z;
-    maxX[j] = _box.max.x; maxY[j] = _box.max.y; maxZ[j] = _box.max.z;
-    const cx0 = Math.floor(_box.min.x / CELL), cx1 = Math.floor(_box.max.x / CELL);
-    const cz0 = Math.floor(_box.min.z / CELL), cz1 = Math.floor(_box.max.z / CELL);
+  function fileSlot(j) {
+    const cx0 = Math.floor(minX[j] / CELL), cx1 = Math.floor(maxX[j] / CELL);
+    const cz0 = Math.floor(minZ[j] / CELL), cz1 = Math.floor(maxZ[j] / CELL);
     for (let cx = cx0; cx <= cx1; cx++) {
       for (let cz = cz0; cz <= cz1; cz++) {
         const k = cx * 100003 + cz;
@@ -142,6 +134,38 @@
       }
     }
   }
+  /* A BLOCKER OF MANY BOXES (city/buildings.js, a far shell's unbuilt
+     storeys). `m._losBoxes` is a Float64Array of WORLD boxes, six numbers
+     each (minX, minY, minZ, maxX, maxY, maxZ): the exact boxes of the wall
+     pieces that left the scene. Each is filed as its own slot whose hit
+     object is `m`, so a ray meets the same walls, openings and floors it met
+     before the pieces went, and the hit names the one stand-in mesh. The
+     slots are contiguous (_losJ.._losJ+_losN-1) so a removal nulls them in
+     place. Outside the grid (LOS_GRID off) `m` raycasts as its own box. */
+  function boxCount(m) { const B = m && m._losBoxes; return B ? (B.length / 6) | 0 : 1; }
+  function fileBoxes(m) {
+    const B = m._losBoxes, k = (B.length / 6) | 0;
+    m._losJ = n; m._losN = k; m._losB = buildId; m._losSlots = null;
+    for (let i = 0; i < k; i++) {
+      const j = n++, o = i * 6;
+      objs[j] = m;
+      minX[j] = B[o]; minY[j] = B[o + 1]; minZ[j] = B[o + 2];
+      maxX[j] = B[o + 3]; maxY[j] = B[o + 4]; maxZ[j] = B[o + 5];
+      fileSlot(j);
+    }
+  }
+  function fileGrid(m) {
+    if (m._losBoxes) { fileBoxes(m); return; }
+    const g = m.geometry;
+    if (!g.boundingBox) g.computeBoundingBox();
+    _box.copy(g.boundingBox).applyMatrix4(m.matrixWorld);
+    const j = n++;
+    objs[j] = m;
+    m._losJ = j; m._losN = 1; m._losB = buildId;
+    minX[j] = _box.min.x; minY[j] = _box.min.y; minZ[j] = _box.min.z;
+    maxX[j] = _box.max.x; maxY[j] = _box.max.y; maxZ[j] = _box.max.z;
+    fileSlot(j);
+  }
   // Slots kept free past the built length, so a carve's remnant flanks or a
   // plywood board can be appended in place (losAdd) instead of re-arming a
   // whole-grid rebuild.
@@ -150,13 +174,16 @@
   function build(blk) {
     builtFor = blk; builtLen = blk.length; dirty = false; buildId++;
     n = 0; objs.length = 0; exact.length = 0; cells = new Map();
-    const cap = blk.length + SPARE;
+    let need = 0;
+    for (let i = 0; i < blk.length; i++) need += boxCount(blk[i]);
+    const cap = need + SPARE;
     capN = cap;
     minX = new Float64Array(cap); minY = new Float64Array(cap); minZ = new Float64Array(cap);
     maxX = new Float64Array(cap); maxY = new Float64Array(cap); maxZ = new Float64Array(cap);
     for (let i = 0; i < blk.length; i++) {
       const m = blk[i];
       if (!m || !m.geometry) continue;
+      if (m._losBoxes) { fileBoxes(m); continue; }       // world boxes already: exact by construction
       m.updateWorldMatrix(true, false);
       if (!gridOk(m)) { exact.push(m); continue; }
       fileGrid(m);
@@ -426,12 +453,25 @@
     blk.push(m);
     if (!inSync) return;
     if (m.geometry) {
-      m.updateWorldMatrix(true, false);
-      if (n >= capN || !gridOk(m)) { dirty = true; return; }
-      fileGrid(m);
+      if (m._losBoxes) {
+        if (n + boxCount(m) > capN) { dirty = true; return; }
+        fileBoxes(m);
+      } else {
+        m.updateWorldMatrix(true, false);
+        if (n >= capN || !gridOk(m)) { dirty = true; return; }
+        fileGrid(m);
+      }
     }
     builtLen = blk.length;
   };
+  // the grid slots a blocker holds in the CURRENT build (null: not gridded)
+  function slotsOf(m) {
+    if (!m || m._losB !== buildId || objs[m._losJ] !== m) return null;
+    if (m._losSlots) return m._losSlots;
+    const k = m._losN || 1, s = new Array(k);
+    for (let i = 0; i < k; i++) s[i] = m._losJ + i;
+    return s;
+  }
   CBZ.losRemoveMany = function (list) {
     const blk = CBZ.losBlockers;
     if (!blk || !list || !(list.length || list.size)) return 0;
@@ -443,11 +483,59 @@
       if (!drop.has(m)) { blk[w++] = m; continue; }
       removed++;
       if (!inSync) continue;
-      if (m && m._losB === buildId && objs[m._losJ] === m) objs[m._losJ] = null;
+      const S = slotsOf(m);
+      if (S) { for (let s = 0; s < S.length; s++) objs[S[s]] = null; }
       else dirty = true;                                      // an exact-list member
     }
     blk.length = w;
     if (inSync && !dirty) builtLen = w;
     return removed;
+  };
+
+  /* ONE FOR MANY, IN THE SAME SLOTS (city/buildings.js: a far shell's
+     storeys leave the scene and come back). losSwapOut: the `pieces` leave
+     CBZ.losBlockers and `proxy` (whose _losBoxes are the pieces' own boxes,
+     in the same order) joins it, taking over the pieces' grid slots in
+     place: no rebuild, and the cells hold exactly the boxes they held.
+     losSwapIn: the reverse, the slots handed back one per piece. Anything
+     not gridded in the current build (or a stale grid) just re-arms the
+     lazy rebuild, which files the proxy's boxes from _losBoxes. */
+  CBZ.losSwapOut = function (pieces, proxy) {
+    const blk = CBZ.losBlockers;
+    if (!blk || !proxy) return;
+    const inSync = !dirty && blk === builtFor && blk.length === builtLen;
+    const drop = new Set(pieces);
+    let w = 0;
+    for (let i = 0; i < blk.length; i++) { const m = blk[i]; if (!drop.has(m)) blk[w++] = m; }
+    blk.length = w;
+    blk.push(proxy);
+    if (!inSync) return;
+    const S = new Int32Array(pieces.length);
+    for (let i = 0; i < pieces.length; i++) {
+      const s = slotsOf(pieces[i]);
+      if (!s || s.length !== 1) { for (const m of pieces) { const q = slotsOf(m); if (q) for (const j of q) objs[j] = null; } dirty = true; return; }
+      S[i] = s[0];
+    }
+    for (let i = 0; i < S.length; i++) objs[S[i]] = proxy;
+    proxy._losSlots = S; proxy._losJ = S.length ? S[0] : 0; proxy._losN = S.length; proxy._losB = buildId;
+    builtLen = blk.length;
+  };
+  CBZ.losSwapIn = function (proxy, pieces) {
+    const blk = CBZ.losBlockers;
+    if (!blk || !proxy) return;
+    const inSync = !dirty && blk === builtFor && blk.length === builtLen;
+    const S = inSync ? slotsOf(proxy) : null;
+    let w = 0, had = false;
+    for (let i = 0; i < blk.length; i++) { const m = blk[i]; if (m === proxy) { had = true; continue; } blk[w++] = m; }
+    blk.length = w;
+    for (let i = 0; i < pieces.length; i++) blk.push(pieces[i]);
+    if (!inSync) return;
+    if (!had || !S || S.length !== pieces.length) { if (S) for (const j of S) objs[j] = null; dirty = true; return; }
+    for (let i = 0; i < S.length; i++) {
+      const m = pieces[i], j = S[i];
+      objs[j] = m; m._losJ = j; m._losN = 1; m._losB = buildId; m._losSlots = null;
+    }
+    proxy._losSlots = null; proxy._losB = -1;
+    builtLen = blk.length;
   };
 })();

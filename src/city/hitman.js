@@ -122,17 +122,24 @@
     const px = pp && pp.pos ? pp.pos.x : 0, pz = pp && pp.pos ? pp.pos.z : 0;
     const pr = principalSet();
     const pool = [];
-    for (let i = 0; i < peds.length; i++) {
-      const p = peds[i];
-      if (!p || p.dead || !p.pos || !p.group || !p.group.parent || p.culled || p.ko > 0) continue;
-      if (p.vendor || p.isFamily || p.kid || p.child || p.kind === "cop" || p.swat || p.gang) continue;
-      if (p.companion || p.recruited || p.controlled || p._parked || p._crowd || p._regionLife) continue;
-      if (p._campaignTarget || p._campaignCaptive || p._hitMark || p._contractId) continue;
-      if (p._powerOf || isPrincipal(p, pr)) continue;             // guards/principals are tier 1
-      const d = d2(p.pos.x, p.pos.z, px, pz);
-      if (d < (opts && opts.minDist != null ? opts.minDist : 50) || d > 320) continue;
+    // (a phone keeps the street past ~90 m as records off the roster, city/
+    // peds.js THE FAR RECORD: they are this pool's 90-320 m, so they are
+    // read too, where the record stands, and the chosen one is made whole)
+    const at = {};
+    const take = function (p, asleep) {
+      if (!p || p.dead || !p.pos || p.culled || p.ko > 0) return;
+      if (!asleep && (!p.group || !p.group.parent)) return;
+      if (p.vendor || p.isFamily || p.kid || p.child || p.kind === "cop" || p.swat || p.gang) return;
+      if (p.companion || p.recruited || p.controlled || p._parked || p._crowd || p._regionLife) return;
+      if (p._campaignTarget || p._campaignCaptive || p._hitMark || p._contractId) return;
+      if (p._powerOf || isPrincipal(p, pr)) return;             // guards/principals are tier 1
+      const q = asleep && CBZ.cityPersonXZ ? CBZ.cityPersonXZ(p, at) : p.pos;
+      const d = d2(q.x, q.z, px, pz);
+      if (d < (opts && opts.minDist != null ? opts.minDist : 50) || d > 320) return;
       pool.push(p);
-    }
+    };
+    if (CBZ.cityPersonsEach) CBZ.cityPersonsEach(take);
+    else for (let i = 0; i < peds.length; i++) take(peds[i], false);
     if (!pool.length) return null;
     // prefer a mark whose job the city actually runs — that is what makes the
     // dossier real instead of prose.
@@ -141,6 +148,9 @@
     const day = CBZ.paceDay ? CBZ.paceDay() : 0;
     const r = CBZ.hash01 ? CBZ.hash01(day, ((recs() || {}).completed | 0) + ((opts && opts.salt) | 0), 0x417) : Math.random();
     const ped = from[Math.min(from.length - 1, (r * from.length) | 0)];
+    // whole for the photograph (his rig, as he is dressed); the job's own
+    // stamp (_hitMark) keeps him whole from the bind on
+    if (ped._dormant && CBZ.cityPersonWake) { if (CBZ.cityRecordHold) CBZ.cityRecordHold(ped, 60); CBZ.cityPersonWake(ped); }
     return { tier: 0, ped: ped, name: ped.name || "the mark", facts: streetFacts(ped), pay: TIERS[0].pay };
   }
   function try_(fn, dflt) { try { return fn(); } catch (e) { return dflt; } }
@@ -687,6 +697,8 @@
     if (S.phase === "live" && !j) { JOBS.why = JOBS.why || ("could not stage " + S.id); return; }
     if (j) {
       const m = j.mark;
+      // (a far record on a phone, city/peds.js, is not swept: made whole)
+      if (m && !m.dead && m._dormant && CBZ.cityPersonWake) CBZ.cityPersonWake(m);
       // the world swept him away alive (a rebuild): stage him again
       if (S.phase === "live" && m && !m.dead && (CBZ.cityPeds || []).indexOf(m) < 0) { try { if (j.end) j.end(true); } catch (e) {} JOBS.job = null; return; }
       try { if (j.tick) j.tick(dt); } catch (e) { if (window.console) console.error("[hitman job] tick", e); }

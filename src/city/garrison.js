@@ -799,7 +799,9 @@
         const r = POSTS[i], a = r.actor;
         if (!a || a._post !== r || a.culled) { POSTS.splice(i, 1); continue; }
         if (a.dead) { a._post = null; POSTS.splice(i, 1); continue; }
-        if (live && !live.has(a)) { a._post = null; POSTS.splice(i, 1); continue; }
+        // (asleep or a far record on a phone, city/peds.js `_dormant`, is still
+        // at his post: off the roster is not gone)
+        if (live && !live.has(a) && !a._dormant) { a._post = null; POSTS.splice(i, 1); continue; }
       }
     }
     // BACKWARDS, because cityPostTick's orphan-strike arm calls

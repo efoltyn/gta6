@@ -3042,6 +3042,17 @@
           CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(ped) ? "#ff3b35" : "rgba(232,238,245,.62)",
           CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(ped) ? 3.0 : 1.6);
       }
+      // the people a phone keeps off the roster (city/peds.js: the far crowd
+      // asleep and THE FAR RECORD) are still standing where they are
+      const DP = CBZ.cityDormantPeds;
+      if (DP && DP.length) {
+        const at = {}, stride = Math.max(1, Math.ceil(DP.length / 380));
+        for (let i = 0; i < DP.length; i += stride) {
+          const ped = DP[i]; if (!ped || ped.dead || !ped.pos) continue;
+          const q = CBZ.cityPersonXZ ? CBZ.cityPersonXZ(ped, at) : ped.pos;
+          dot(q.x, q.z, p, "rgba(232,238,245,.62)", 1.6);
+        }
+      }
       for (const car of CBZ.cityCars || []) if (!car.dead) dot(car.pos.x, car.pos.z, p, "rgba(245,245,255,.7)", 2);
       for (const cop of CBZ.cityCops || []) if (!cop.dead) {
         const hot = CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(cop);

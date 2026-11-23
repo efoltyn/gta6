@@ -1225,7 +1225,8 @@
         if (gp.win) gp.win.entry = null;
         if (gp.mesh) gp.mesh.visible = true;
         else paneShow(gp, true);       // pooled pane: restore (honours night state)
-        if (gp.col) {
+        // (a pane whose storey is parked on a phone comes back with it: DOWNTOWN STREAMS)
+        if (gp.col && !parkedCols.has(gp.col)) {
           if (have) { if (!have.has(gp.col)) { CBZ.colliders.push(gp.col); have.add(gp.col); } }
           else if (CBZ.colliders.indexOf(gp.col) === -1) CBZ.colliders.push(gp.col);
         }
@@ -2672,33 +2673,60 @@
     return carveHole(x, y, z, r, opts);
   };
 
-  /* ---- A FAR SHELL'S UPPER STOREYS ARE ONE SHELL, NOT 2,500 BOXES (phone) --
-     Measured at the downtown spawn on the phone profile: ~39k of the city's
-     ~43k colliders stood within 450 m of the player, ~31k of them short,
-     thin, storey-banded pieces of building shells: the facade's piers, sills
-     and lintels between windows and the interior partitions, ~67 a storey
-     (a 38-storey tower: 2,554). Above the street storey nobody reaches them
-     unless he is at that building.
-     So on a phone a shell the player and the eye are both more than PARK_M
-     from keeps its STREET STOREY and its roof whole and swaps everything
-     above the street storey (every collider banded above FH whose stand-in
-     is hidden, glass or ref-less: the static structure; anything drawn, a
-     door, a lift, furniture keeps its own) for its OUTER SHELL: four boxes
-     on its four faces from the top of the street storey to the parapet, so
-     what flies, falls or drives into it from outside still stops at its
-     face. Inside UNPARK_M (or when a carve or a collapse reaches it) the
-     pieces come back exactly as they were and the shell boxes go. The
-     pieces are the same records throughout (taken out of the broadphase
-     and put back, never rebuilt), the line-of-sight blockers and the
-     drawn building are untouched, and a shell that was carved or collapsed
-     is never parked again. ?cfg_PHONE_SHELL_PARK=0 parks nothing.
-     (The pieces' hidden meshes stay: line of sight (core/losgrid.js reads
-     their boxes off the meshes and hands the mesh back as the hit), the
-     carve (core/batch.js keys each wall's slice of the merged shell by its
-     mesh), the collapse (city/collapse.js reads the merged shell's walls
-     and their geometry) and the bullet decals (systems/gore.js raycasts the
-     collider's mesh) all read them.) */
-  const PARK_M = 135, UNPARK_M = 115, SHELL_SCAN = 10;
+  /* ---- DOWNTOWN STREAMS ON A PHONE: A FAR SHELL'S STRUCTURE IS DATA -------
+     Every structural box of a shell (the facade's piers, sills and lintels,
+     the parapets, the partitions: ~67 a storey) is a THREE.Mesh that
+     core/batch.js keeps INVISIBLE once its drawn copy is merged into the
+     shell's buffer: line of sight (core/losgrid.js) reads its box and hands
+     it back as the hit, the carve keys the wall's slice of the merged shell
+     by it (CBZ.batchWallSliceOf), the collapse reads it, the bullet decals
+     ride its collider's ref. ~20.6k of them at the downtown spawn on the
+     phone profile, ~0.9 KB of JS each, every one of them in the scene graph.
+     Round six took the upper storeys' COLLIDERS out of the broadphase for a
+     far shell (four outer boxes stood in); the meshes stayed.
+
+     MEASURED, round seven (phone profile, downtown spawn): the 36 downtown
+     lots all stand within 200 m of the spawn (the core grid is ~440 m
+     across), so streaming them by the 380 m fog unbuilds nothing there. What
+     a far shell holds that nobody can see or reach is its hidden structure,
+     so that is what streams, by distance, both ways, per BAND (0: above the
+     street storey, 1: the street storey):
+
+     OUT (band 0 when the player and the eye are both past PARK_M; band 1
+     past the ground fog's end + FAR_PAD): the band's colliders leave the
+     broadphase (four outer boxes stand in), then its hidden piece meshes
+     leave the scene, a chunk at a time: each piece becomes a row of numbers
+     (geometry, material, transform, flags, parent, its collider records,
+     its merged-shell slice), and the chunk's line-of-sight boxes join ONE
+     invisible stand-in mesh that takes over the pieces' own grid slots
+     (CBZ.losSwapOut): a ray meets exactly the walls, openings and floors it
+     met before; only the hit's object is the stand-in.
+     IN: the pieces are made again from their rows, chunk by chunk from
+     PREWET_M (the same geometry, material, transform, name and flags under
+     the same parent, the same collider records pointing at them, the same
+     merged-shell slice, the same LOS boxes in the same grid slots:
+     CBZ.losSwapIn), and inside UNPARK_M the colliders return. Whatever has
+     to be whole NOW is made whole at once: inside UNPARK_M (checked for
+     every shell every tick: a teleport, a respawn), and whenever a carve, a
+     collapse or a tool asks (CBZ.cityShellWake / cityShellsWakeNear). A
+     shell a carve or a collapse woke stays whole for good (its carved and
+     collapsed state is the real pieces'); one torn down (core/batch.js
+     batchHideGroup: demolition, a strike, a collapse's swap) is left exactly
+     as it is until it is put back (batchShowGroup). While out, b.colliders
+     and b.losMeshes hold the stand-ins in place of what left, so a teardown
+     takes them down and a restore puts them back.
+     Switches (both live): ?cfg_PHONE_DOWNTOWN_STREAM=0 is round six exactly
+     (upper colliders parked, every piece kept); ?cfg_PHONE_SHELL_PARK=0
+     parks nothing. */
+  const PARK_M = 135, PREWET_M = 128, UNPARK_M = 115, SHELL_SCAN = 10, FAR_PAD = 40, FAR_HYST = 20;
+  /* THE WORK IS SPREAD. The plan (who should be what) runs at 4 Hz; what is
+     under way (colliders out a slice at a time, pieces out a chunk at a time,
+     the pre-wet) goes on EVERY frame within FRAME_BUDGET_MS, so a tower's
+     2,800 pieces leave over a couple of seconds of frames, never in one. */
+  const PARK_BUDGET_MS = 4, FRAME_BUDGET_MS = 2.5, COL_CHUNK = 300, PIECE_CHUNK = 120;
+  // (the broadphase edit is paid at the flush, ~16 us a box at CPU 4x: a frame takes out at most DROP_CAP)
+  const DROP_CAP = 400;
+  function room(E, until) { return until === Infinity || (performance.now() < until && E.drop.size < DROP_CAP); }
   const SHELL_UD = Object.freeze({});
   const SHELL_MAT = Object.freeze({ transparent: false, opacity: 1, visible: true });
   function ShellRef(group) { this.parent = group; }
@@ -2707,10 +2735,15 @@
   ShellRef.prototype.name = "shell-proxy";
   ShellRef.prototype.material = SHELL_MAT;
   ShellRef.prototype.userData = SHELL_UD;
-  const shellPark = { root: null, list: [], cursor: 0, idx: null, idxAt: 0, st: new Map(), stats: { parked: 0, unparked: 0, colsOut: 0 } };
+  const shellPark = { root: null, list: [], cursor: 0, st: new Map(), busy: new Set(),
+    stats: { parked: 0, unparked: 0, colsOut: 0, dried: 0, wetted: 0, woken: 0, worstMs: 0, lastMs: 0, maxMs: { plan: 0, dry: 0, wet: 0, cols: 0, flush: 0 } } };
+  function noteMs(k, t0) { const ms = performance.now() - t0, M = shellPark.stats.maxMs; if (ms > M[k]) M[k] = +ms.toFixed(1); }
+  // the colliders out with a parked band (cityGlassReset leaves those to the band)
+  const parkedCols = new WeakSet();
   function shellOn() {
     return !!(CBZ.isMobileDevice && CBZ.CONFIG.PHONE_SHELL_PARK !== false && CBZ.game && CBZ.game.mode === "city" && CBZ.colliderRemoveMany && CBZ.colliderAddMany);
   }
+  function streamOn() { return CBZ.CONFIG.PHONE_DOWNTOWN_STREAM !== false && !!CBZ.losSwapOut && !!CBZ.batchWallSliceSet; }
   function inScene(o) { let r = o; while (r && r.parent) r = r.parent; return r === CBZ.scene; }
   // the shells inside a streamed job are the streamer's to park (core/citystream.js)
   function jobTops() {
@@ -2722,7 +2755,18 @@
     for (let p = ref, n = 0; p && n < 8; p = p.parent, n++) if (p.userData && p.userData.bld) return p.userData.bld;
     return null;
   }
-  // which shell owns each parkable collider: one walk over the broadphase, once
+  // remove the members of `set` from `arr` in place; the removed, in order
+  function takeFrom(arr, set) {
+    const out = [];
+    if (!arr) return out;
+    let w = 0;
+    for (let i = 0; i < arr.length; i++) { const v = arr[i]; if (set.has(v)) out.push(v); else arr[w++] = v; }
+    arr.length = w;
+    return out;
+  }
+  function hasKeys(o) { for (const k in o) return true; return false; }
+  function newBand(cols) { return { cols: cols, outN: 0, inB: [], chunks: [], pend: null, pi: 0, dried: false }; }
+  // which shell owns each parkable collider, by band: one walk over the broadphase, once
   function indexShells() {
     const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
     const shells = (root && root.userData && root.userData.shells) || [];
@@ -2734,9 +2778,10 @@
       let streamed = false;
       for (let p = b.group; p; p = p.parent) if (tops.has(p)) { streamed = true; break; }
       if (streamed || !inScene(b.group)) continue;
-      const e = b.group.rotation;
+      const e = b.group.rotation, s = b.group.scale;
       if (Math.abs(e.y) > 1e-4 || Math.abs(e.x) > 1e-4 || Math.abs(e.z) > 1e-4) continue;   // the outer shell is an axis-aligned box
-      byShell.set(b, []);
+      if (Math.abs(s.x - 1) > 1e-6 || Math.abs(s.y - 1) > 1e-6 || Math.abs(s.z - 1) > 1e-6) continue;
+      byShell.set(b, [[], []]);
       for (const c of b.colliders || []) if (c && !c.ref) owner.set(c, b);
     }
     const doors = new Set();
@@ -2750,16 +2795,22 @@
       else if (c.ref.isGlassRef || (c.ref.isMesh && c.ref.visible === false)) b = shellOfRef(c.ref);
       if (!b) continue;
       const L = byShell.get(b);
-      if (!L || c.y0 < b.FH - 0.05) continue;          // the street storey stays whole
-      L.push(c);
+      if (L) L[c.y0 < b.FH - 0.05 ? 1 : 0].push(c);
     }
-    shellPark.list = [];
-    byShell.forEach(function (L, b) { if (L.length >= 24) { shellPark.list.push(b); shellPark.st.set(b, { b: b, cols: L, shell: null, parked: false, never: false }); } });
+    shellPark.list = []; shellPark.busy.clear();
+    byShell.forEach(function (L, b) {
+      if (L[0].length < 24) return;
+      let g0 = 0;
+      for (const c of L[1]) if (c.y0 < g0) g0 = c.y0;
+      shellPark.list.push(b);
+      shellPark.st.set(b, { b: b, bands: [newBand(L[0]), newBand(L[1])], ground: g0, shell: null, shellY: null,
+        tg: null, never: false, down: false, level: 0 });
+    });
     shellPark.root = root;
   }
-  function outerShell(b) {
+  function outerShell(b, y0) {
     const T = Math.max(0.2, b.wt || 0.3), x0 = b.ox - b.w / 2, x1 = b.ox + b.w / 2, z0 = b.oz - b.d / 2, z1 = b.oz + b.d / 2;
-    const y0 = b.FH, y1 = (b.h || b.storeys * b.FH) + (b.parapetH || 1);
+    const y1 = (b.h || b.storeys * b.FH) + (b.parapetH || 1);
     const ref = new ShellRef(b.group);
     const box = function (a, c, e, f) { return { minX: a, maxX: c, minZ: e, maxZ: f, y0: y0, y1: y1, ref: ref, noBreach: true, noCam: true, noStep: true, _shellProxy: true }; };
     return [box(x0, x1, z0, z0 + T), box(x0, x1, z1 - T, z1), box(x0, x0 + T, z0, z1), box(x1 - T, x1, z0, z1)];
@@ -2768,78 +2819,415 @@
     const dx = Math.max(0, Math.abs(x - b.ox) - b.w / 2), dz = Math.max(0, Math.abs(z - b.oz) - b.d / 2);
     return dx * dx + dz * dz;
   }
-  function unparkShell(S, never) {
-    if (never) S.never = true;
-    if (!S.parked) return;
-    S.parked = false;
-    if (S.shell) { CBZ.colliderRemoveMany(S.shell); S.shell = null; }
-    // the pieces come back as they were: one a carve took down, a collapse
-    // filed, or whose mesh left the shell, stays out
+  // one tick's collider edits, applied together (each bulk edit walks the broadphase once)
+  function newEdit() { return { drop: new Set(), addNew: [], addBack: [], los: null }; }
+  function losAll(E) { return E.los || (E.los = new Set(CBZ.losBlockers || [])); }
+  function flushEdit(E) {
+    const t0 = performance.now();
+    // a collider taken out and put back inside one edit never left
     const back = [];
-    for (let i = 0; i < S.cols.length; i++) {
-      const c = S.cols[i];
-      if (c._cbzGone || c._cbzSub) continue;
+    for (const c of E.addBack) { if (E.drop.has(c)) E.drop.delete(c); else back.push(c); }
+    if (E.drop.size) shellPark.stats.colsOut += CBZ.colliderRemoveMany(E.drop);
+    if (back.length) CBZ.colliderAddMany(back);
+    if (E.addNew.length) CBZ.colliderAddMany(E.addNew.filter(function (c) { return !E.drop.has(c); }));
+    noteMs("flush", t0);
+  }
+  // a slice of a band's colliders leaves the broadphase and the shell's own list
+  function colsOutStep(S, k, E, max) {
+    const t0 = performance.now();
+    const B = S.bands[k], L = B.cols, end = Math.min(L.length, B.outN + max), set = new Set();
+    for (let i = B.outN; i < end; i++) { const c = L[i]; E.drop.add(c); parkedCols.add(c); set.add(c); }
+    const took = takeFrom(S.b.colliders, set);
+    for (const c of took) B.inB.push(c);
+    B.outN = end;
+    noteMs("cols", t0);
+  }
+  // ... and all of them come back as they were: one a carve took down, a
+  // collapse filed, a pane that burst meanwhile, or whose mesh left the
+  // shell, stays out
+  function colsIn(S, k, E) {
+    const B = S.bands[k], b = S.b, dead = new Set();
+    if (!B.outN) return;
+    for (const gp of b.windows || []) if (gp && gp.shattered && gp.col) dead.add(gp.col);
+    for (let i = 0; i < B.outN; i++) {
+      const c = B.cols[i];
+      parkedCols.delete(c);
+      if (c._cbzGone || c._cbzSub || c._out || dead.has(c)) continue;
       const r = c.ref;
       if (r && (r._breached || (r.isMesh && !r.parent))) continue;
-      back.push(c);
+      E.addBack.push(c);
     }
-    CBZ.colliderAddMany(back);
-    shellPark.stats.unparked++;
+    const BC = b.colliders;
+    for (const c of B.inB) BC.push(c);
+    B.inB = []; B.outN = 0;
   }
-  function parkShell(S, drop, add) {
-    if (S.parked || S.never) return;
-    S.parked = true;
-    S.shell = outerShell(S.b);
-    for (let i = 0; i < S.cols.length; i++) drop.add(S.cols[i]);
-    for (let i = 0; i < S.shell.length; i++) add.push(S.shell[i]);
-    shellPark.stats.parked++;
+  // the four outer boxes from y0 (null: none), in place of the old
+  function standIns(S, y0, E) {
+    if (S.shellY === y0) return;
+    const b = S.b;
+    if (S.shell) {
+      const old = new Set(S.shell);
+      old.forEach(function (c) { E.drop.add(c); });
+      takeFrom(b.colliders, old);
+      S.shell = null;
+    }
+    S.shellY = y0;
+    if (y0 == null) return;
+    S.shell = outerShell(b, y0);
+    for (const c of S.shell) { E.addNew.push(c); b.colliders.push(c); }
+  }
+
+  /* THE PIECES AS DATA. A piece is a hidden mesh of the shell's structure:
+     merged into the shell's buffer (it has a slice), nothing interactive on
+     it (no userData), not a floor slab (city/elevators.js carves those by
+     their records), axis-aligned, wholly in the band, every collider that
+     names it out with the band, and, when it blocks sight, a plain box the
+     grid files as such. Anything else stays a mesh. */
+  let _proxyGeo = null;
+  const _pbb = new THREE.Box3();
+  function proxyGeo() { return _proxyGeo || (_proxyGeo = new THREE.BoxGeometry(1, 1, 1)); }
+  function makeProxy(b, boxes, mat, k) {
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < boxes.length; i += 6) {
+      if (boxes[i] < x0) x0 = boxes[i]; if (boxes[i + 1] < y0) y0 = boxes[i + 1]; if (boxes[i + 2] < z0) z0 = boxes[i + 2];
+      if (boxes[i + 3] > x1) x1 = boxes[i + 3]; if (boxes[i + 4] > y1) y1 = boxes[i + 4]; if (boxes[i + 5] > z1) z1 = boxes[i + 5];
+    }
+    const g = b.group, m = new THREE.Mesh(proxyGeo(), mat);
+    m.name = k ? "shell-street-standin" : "shell-storeys-standin";
+    m.visible = false; m.castShadow = false; m.receiveShadow = false;
+    // its own box is the chunk's bounds (what a plain raycast sees with the grid off)
+    m.position.set((x0 + x1) / 2 - g.position.x, (y0 + y1) / 2 - g.position.y, (z0 + z1) / 2 - g.position.z);
+    m.scale.set(Math.max(0.01, x1 - x0), Math.max(0.01, y1 - y0), Math.max(0.01, z1 - z0));
+    m.updateMatrix(); m.matrixAutoUpdate = false;
+    m._losBoxes = boxes;
+    g.add(m);
+    m.matrixWorld.multiplyMatrices(g.matrixWorld, m.matrix);
+    return m;
+  }
+  // which pieces of band k can leave (its colliders all out already)
+  function planDry(S, k, E) {
+    const t0 = performance.now();
+    const b = S.b, g = b.group, cut = b.FH - 0.05, B = S.bands[k];
+    g.updateWorldMatrix(true, true);
+    // every collider record naming a mesh of this shell, and whether all of them are out with this band
+    const parked = new Set(B.cols), byRef = new Map();
+    const note = function (c, ok) {
+      const r = c && c.ref;
+      if (!r || !r.isMesh) return;
+      let e = byRef.get(r);
+      if (!e) byRef.set(r, e = { cols: [], ok: true });
+      if (e.cols.indexOf(c) < 0) e.cols.push(c);
+      if (!ok) e.ok = false;
+    };
+    for (const c of B.cols) note(c, true);
+    for (const c of b.colliders) if (!parked.has(c)) note(c, false);
+    for (const c of S.bands[1 - k].cols) if (!parked.has(c)) note(c, false);
+    const slab = new Set();
+    for (const fs of (b.floorSlabs || []).concat(b.roofSlab ? [b.roofSlab] : [])) for (const pc of (fs && fs.pieces) || []) if (pc.mesh) slab.add(pc.mesh);
+    const carved = g.userData && g.userData.carvedSlabs;
+    if (carved) for (const m of carved) slab.add(m);
+    const own = new Set(b.losMeshes || []), los = losAll(E);
+    const R = CBZ.batchRangesOf ? CBZ.batchRangesOf(g) : null, wallsOf = new Map();
+    if (R) for (const e of R) if (e && e.walls) for (const w of e.walls) { let a = wallsOf.get(w); if (!a) wallsOf.set(w, a = []); a.push(e); }
+    const pend = [];
+    g.traverse(function (m) {
+      if (!m.isMesh || m.isInstancedMesh || m.visible !== false || m._losBoxes) return;
+      if ((m.userData && hasKeys(m.userData)) || slab.has(m) || !CBZ.batchWallSliceOf(m)) return;
+      const e = byRef.get(m), isLos = los.has(m);
+      if (e ? !e.ok : !isLos) return;
+      const me = m.matrixWorld.elements;
+      if (Math.abs(me[1]) > 1e-6 || Math.abs(me[2]) > 1e-6 || Math.abs(me[4]) > 1e-6 || Math.abs(me[6]) > 1e-6 ||
+          Math.abs(me[8]) > 1e-6 || Math.abs(me[9]) > 1e-6 || !(me[0] > 0 && me[5] > 0 && me[10] > 0)) return;
+      const geo = m.geometry;
+      if (!geo || !geo.attributes || !geo.attributes.position) return;
+      if (isLos) {
+        if (!(geo.parameters && geo.parameters.width != null)) return;         // the grid files plain boxes only
+        const mt = Array.isArray(m.material) ? m.material[0] : m.material;
+        if (mt && (mt.side || 0) !== 0) return;
+      }
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      if ((me[13] + geo.boundingBox.min.y * me[5] >= cut) !== (k === 0)) return;
+      for (let p = m.parent; p && p !== g; p = p.parent) if (p.userData && (p.userData.mover || p.userData.dynamic)) return;
+      pend.push({ m: m, cols: e ? e.cols : null, walls: wallsOf.get(m) || null, los: isLos, own: own.has(m) });
+    });
+    B.pend = pend; B.pi = 0; B.dried = false;
+    noteMs("plan", t0);
+  }
+  // the next chunk of planned pieces leaves the scene
+  function dryStep(S, k, E, max) {
+    const t0 = performance.now();
+    const b = S.b, B = S.bands[k], P = B.pend, i0 = B.pi, n = Math.min(P.length - i0, max);
+    B.pi += n;
+    if (B.pi >= P.length) { B.pend = null; B.pi = 0; B.dried = true; }
+    if (n <= 0) return 0;
+    const T = new Float64Array(n * 10), geo = new Array(n), mat = new Array(n), par = new Array(n), name = new Array(n);
+    const fl = new Uint8Array(n), slice = new Array(n), walls = new Array(n), cols = new Array(n);
+    let extra = null;
+    const los = losAll(E), losP = [], boxes = [], vol = new Map(), gone = new Set(), ents = new Set();
+    for (let i = 0; i < n; i++) {
+      const it = P[i0 + i], m = it.m, o = i * 10, p = m.position, q = m.quaternion, s = m.scale;
+      T[o] = p.x; T[o + 1] = p.y; T[o + 2] = p.z; T[o + 3] = q.x; T[o + 4] = q.y; T[o + 5] = q.z; T[o + 6] = q.w;
+      T[o + 7] = s.x; T[o + 8] = s.y; T[o + 9] = s.z;
+      geo[i] = m.geometry; mat[i] = m.material; par[i] = m.parent; name[i] = m.name;
+      fl[i] = (m.castShadow ? 1 : 0) | (m.receiveShadow ? 2 : 0) | (it.los ? 4 : 0) | (m.matrixAutoUpdate ? 8 : 0) |
+        (m.frustumCulled ? 16 : 0) | (m.matrixWorldAutoUpdate !== false ? 32 : 0) | (it.own ? 64 : 0);
+      if (m.renderOrder || m.layers.mask !== 1) (extra || (extra = {}))[i] = [m.renderOrder, m.layers.mask];
+      slice[i] = CBZ.batchWallSliceOf(m);
+      walls[i] = it.walls; cols[i] = it.cols;
+      if (it.walls) for (const e of it.walls) ents.add(e);
+      gone.add(m);
+      if (it.los) {
+        losP.push(m);
+        _pbb.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);
+        boxes.push(_pbb.min.x, _pbb.min.y, _pbb.min.z, _pbb.max.x, _pbb.max.y, _pbb.max.z);
+        vol.set(m.material, (vol.get(m.material) || 0) + (_pbb.max.x - _pbb.min.x) * (_pbb.max.y - _pbb.min.y) * (_pbb.max.z - _pbb.min.z));
+      }
+      P[i0 + i] = null;
+    }
+    // the pieces leave every list that names them
+    let proxy = null;
+    if (losP.length) {
+      let best = null, bv = -1;
+      vol.forEach(function (v, mt) { if (v > bv) { bv = v; best = mt; } });
+      proxy = makeProxy(b, new Float64Array(boxes), Array.isArray(best) ? best[0] : best, k);
+      CBZ.losSwapOut(losP, proxy);
+      for (const m of losP) los.delete(m);
+      los.add(proxy);
+    }
+    if (b.losMeshes) { takeFrom(b.losMeshes, gone); if (proxy) b.losMeshes.push(proxy); }
+    ents.forEach(function (e) { takeFrom(e.walls, gone); });
+    for (let i = 0; i < n; i++) if (cols[i]) for (const c of cols[i]) c.ref = null;
+    new Set(par).forEach(function (p) { p.children = p.children.filter(function (c) { return !gone.has(c); }); });
+    gone.forEach(function (m) { m.parent = null; });
+    B.chunks.push({ n: n, T: T, geo: geo, mat: mat, par: par, name: name, fl: fl, slice: slice, walls: walls, cols: cols, extra: extra, proxy: proxy });
+    shellPark.stats.dried++;
+    noteMs("dry", t0);
+    return n;
+  }
+  // ... and the last chunk out is made again from its rows
+  function wetStep(S, k, E) {
+    const t0 = performance.now();
+    const B = S.bands[k], R = B.chunks.pop();
+    if (!R) return 0;
+    B.dried = false;
+    const b = S.b, n = R.n, T = R.T, losP = [], ownP = [];
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(R.geo[i], R.mat[i]), o = i * 10, f = R.fl[i], p = R.par[i];
+      m.name = R.name[i];
+      m.position.set(T[o], T[o + 1], T[o + 2]);
+      m.quaternion.set(T[o + 3], T[o + 4], T[o + 5], T[o + 6]);
+      m.scale.set(T[o + 7], T[o + 8], T[o + 9]);
+      m.castShadow = !!(f & 1); m.receiveShadow = !!(f & 2); m.frustumCulled = !!(f & 16);
+      const x = R.extra && R.extra[i];
+      if (x) { m.renderOrder = x[0]; m.layers.mask = x[1]; }
+      m.visible = false;
+      // the matrices are set here, never left to a frame (static subtrees may skip the walk)
+      m.updateMatrix();
+      m.matrixAutoUpdate = !!(f & 8);
+      m.matrixWorldAutoUpdate = !!(f & 32);
+      p.add(m);
+      m.matrixWorld.multiplyMatrices(p.matrixWorld, m.matrix);
+      if (R.slice[i]) CBZ.batchWallSliceSet(m, R.slice[i]);
+      if (R.walls[i]) for (const e of R.walls[i]) e.walls.push(m);
+      if (R.cols[i]) for (const c of R.cols[i]) c.ref = m;
+      if (f & 4) losP.push(m);
+      if (f & 64) ownP.push(m);
+    }
+    const proxy = R.proxy;
+    if (proxy) {
+      CBZ.losSwapIn(proxy, losP);
+      if (E && E.los) { E.los.delete(proxy); for (const m of losP) E.los.add(m); }
+      if (proxy.parent) proxy.parent.remove(proxy);
+      proxy._losBoxes = null;
+    }
+    if (b.losMeshes) { if (proxy) takeFrom(b.losMeshes, new Set([proxy])); for (const m of ownP) b.losMeshes.push(m); }
+    shellPark.stats.wetted++;
+    noteMs("wet", t0);
+    return n;
+  }
+
+  /* WHAT A SHELL SHOULD BE at distance d: per band, colliders out? pieces
+     out? (hysteresis on each). The current state is the bands' own. */
+  function bandOut(B) { return B.outN > 0; }
+  function bandDry(B) { return B.chunks.length > 0 || !!B.pend || B.dried; }
+  function targetFor(S, d, farM) {
+    const B0 = S.bands[0], B1 = S.bands[1], on = streamOn();
+    const out0 = d >= UNPARK_M && (bandOut(B0) || d > PARK_M);
+    const dry0 = out0 && on && (d > PARK_M || (bandDry(B0) && d >= PREWET_M));
+    const out1 = out0 && on && (d > farM || (bandOut(B1) && d > farM - FAR_HYST));
+    const dry1 = out1 && (d > farM || (bandDry(B1) && d > farM - FAR_HYST / 2));
+    return [out0, dry0, out1, dry1];
+  }
+  const TG_IN = [false, false, false, false];
+  function settled(S, tg) {
+    for (let k = 0; k < 2; k++) {
+      const B = S.bands[k], out = tg[k * 2], dr = tg[k * 2 + 1];
+      if (out ? B.outN !== B.cols.length : B.outN !== 0) return false;
+      if (dr ? !B.dried : (B.chunks.length || B.pend)) return false;
+    }
+    return S.shellY === shellYFor(S);
+  }
+  function shellYFor(S) { return S.bands[1].outN > 0 ? S.ground : S.bands[0].outN > 0 ? S.b.FH : null; }
+  /* One shell toward its target. Everything coming IN is done first, and
+     done whole when `now` (a band whose colliders must return); what goes
+     OUT and the pre-wet go a step at a time until `until` (performance.now
+     ms; Infinity = all of it). Returns true when the shell is settled. */
+  function advance(S, tg, E, until, now, colsOnly) {
+    for (let k = 1; k >= 0; k--) {
+      const B = S.bands[k];
+      if (!tg[k * 2] && B.outN) {
+        while (B.chunks.length) wetStep(S, k, E);
+        B.pend = null; B.pi = 0; B.dried = false;
+        colsIn(S, k, E);
+      } else if (!tg[k * 2 + 1] && (B.chunks.length || B.pend || B.dried)) {
+        B.pend = null; B.pi = 0; B.dried = false;
+        while (B.chunks.length && (now || performance.now() < until)) wetStep(S, k, E);
+      }
+    }
+    for (let k = 0; k < 2; k++) {
+      const B = S.bands[k];
+      if (!tg[k * 2]) continue;
+      while (B.outN < B.cols.length && room(E, until)) colsOutStep(S, k, E, COL_CHUNK);
+      if (B.outN < B.cols.length || !tg[k * 2 + 1] || colsOnly) continue;
+      if (!B.dried && !B.pend && room(E, until)) planDry(S, k, E);
+      while (B.pend && room(E, until)) dryStep(S, k, E, PIECE_CHUNK);
+    }
+    standIns(S, shellYFor(S), E);
+    const lv = S.bands[1].outN ? 2 : S.bands[0].outN ? 1 : 0;
+    if (lv > S.level) shellPark.stats.parked++; else if (lv < S.level) shellPark.stats.unparked++;
+    S.level = lv;
+    return settled(S, tg);
+  }
+  // whole again, for good (a carve, a collapse, a tool); a torn-down shell is left as it is
+  function wake(S) {
+    S.never = true;
+    shellPark.busy.delete(S);
+    if (S.down || (!S.level && settled(S, TG_IN))) return;
+    const E = newEdit();
+    advance(S, TG_IN, E, Infinity, true);
+    flushEdit(E);
+    shellPark.stats.woken++;
   }
   // wake every parked shell within r of (x, z) for good (a carve, a collapse)
   CBZ.cityShellsWakeNear = function (x, z, r) {
     if (!shellPark.list.length) return;
     const r2 = r * r;
-    for (const b of shellPark.list) { if (rectD2(b, x, z) > r2) continue; const S = shellPark.st.get(b); if (S) unparkShell(S, true); }
+    for (const b of shellPark.list) { if (rectD2(b, x, z) > r2) continue; const S = shellPark.st.get(b); if (S) wake(S); }
   };
-  CBZ.cityShellWake = function (b) { const S = b && shellPark.st.get(b); if (S) unparkShell(S, true); };
+  CBZ.cityShellWake = function (b) { const S = b && shellPark.st.get(b); if (S) wake(S); };
+  // core/batch.js: a building torn down (batchHideGroup) or put back (batchShowGroup)
+  CBZ.cityShellDown = function (top, down) {
+    const b = top && top.userData && top.userData.bld, S = b && shellPark.st.get(b);
+    if (!S) return;
+    S.down = !!down;
+    if (S.down) { for (const B of S.bands) { B.pend = null; B.pi = 0; } shellPark.busy.delete(S); }
+  };
   CBZ.cityShellParkAudit = function () {
-    let parked = 0, out = 0;
-    shellPark.st.forEach(function (S) { if (S.parked) { parked++; out += S.cols.length; } });
-    return Object.assign({ shells: shellPark.list.length, parkedNow: parked, piecesOut: out }, shellPark.stats);
+    let parked = 0, out = 0, lvl2 = 0, dryN = 0, standIn = 0, boxes = 0;
+    shellPark.st.forEach(function (S) {
+      if (S.level) parked++;
+      if (S.level === 2) lvl2++;
+      for (const B of S.bands) {
+        out += B.outN;
+        for (const R of B.chunks) { dryN += R.n; if (R.proxy) { standIn++; boxes += R.proxy._losBoxes.length / 6; } }
+      }
+    });
+    return Object.assign({ shells: shellPark.list.length, parkedNow: parked, level2: lvl2, piecesOut: out, meshesOut: dryN,
+      standIns: standIn, losBoxes: boxes, busy: shellPark.busy.size, stream: streamOn() }, shellPark.stats);
   };
+  // (probes: a shell's stream state, and a level forced now, whole; the next tick re-judges it)
+  CBZ.cityShellStreamDebug = {
+    state: function (b) { return shellPark.st.get(b) || null; },
+    set: function (b, L) {
+      const S = shellPark.st.get(b), on = streamOn();
+      if (!S || S.never || S.down) return false;
+      const E = newEdit();
+      advance(S, [L >= 1, L >= 1 && on, L >= 2 && on, L >= 2 && on], E, Infinity, true);
+      flushEdit(E);
+      return true;
+    },
+  };
+  // a shell that left the world: its stand-ins go, it is never judged again
+  function forget(S, E) {
+    const b = S.b;
+    if (S.shell) { for (const c of S.shell) E.drop.add(c); takeFrom(b.colliders, new Set(S.shell)); S.shell = null; S.shellY = null; }
+    const px = [];
+    for (const B of S.bands) { for (const R of B.chunks) if (R.proxy) px.push(R.proxy); B.chunks = []; B.pend = null; }
+    if (px.length) { CBZ.losRemoveMany(px); takeFrom(b.losMeshes, new Set(px)); }
+    S.never = true; S.level = 0;
+    shellPark.busy.delete(S);
+  }
   let _shellT = 0;
   if (CBZ.onUpdate) CBZ.onUpdate(37.95, function (dt) {
     if (!shellOn()) {
       // (switched off, or not the city: everything parked comes back)
-      if (shellPark.st.size) { shellPark.st.forEach(function (S) { if (S.parked && S.b.group && inScene(S.b.group)) unparkShell(S); }); }
+      if (shellPark.st.size) {
+        const E = newEdit();
+        shellPark.st.forEach(function (S) { if (!S.down && S.b.group && inScene(S.b.group) && !settled(S, TG_IN)) advance(S, TG_IN, E, Infinity, true); });
+        shellPark.busy.clear();
+        flushEdit(E);
+      }
       return;
     }
     const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
-    if (shellPark.root !== root) { shellPark.st.clear(); shellPark.list = []; shellPark.root = null; shellPark.idxAt = 0; }
-    if ((_shellT -= dt) > 0) return;
-    _shellT = 0.25;
+    if (shellPark.root !== root) { shellPark.st.clear(); shellPark.list = []; shellPark.busy.clear(); shellPark.root = null; }
+    const tick = (_shellT -= dt) <= 0;
+    if (tick) _shellT = 0.25;
+    else if (!shellPark.busy.size) return;
     // the index waits for the world to settle (the batch, the street furniture)
     if (!shellPark.root) {
-      if (!(CBZ.game.elapsed > 3) || !root) return;
+      if (!tick || !(CBZ.game.elapsed > 3) || !root) return;
       indexShells();
       return;
     }
     const P = CBZ.player, cam = CBZ.camera;
     if (!P || !P.pos) return;
+    const t0 = performance.now(), until = t0 + (tick ? PARK_BUDGET_MS : FRAME_BUDGET_MS);
     const px = P.pos.x, pz = P.pos.z, cx = cam ? cam.position.x : px, cz = cam ? cam.position.z : pz;
-    const L = shellPark.list;
-    const drop = new Set(), add = [];
-    const n = Math.min(L.length, SHELL_SCAN);
+    const farM = (+CBZ.cityFogFar > 0 ? +CBZ.cityFogFar : 1000) + FAR_PAD;
+    const L = shellPark.list, E = newEdit();
+    const dist = function (b) { return Math.sqrt(Math.min(rectD2(b, px, pz), rectD2(b, cx, cz))); };
+    // 1) a band whose colliders must return returns now, every shell every
+    //    tick (a teleport, a respawn, a fast car): never on the scan's schedule
+    if (tick) for (let i = 0; i < L.length; i++) {
+      const S = shellPark.st.get(L[i]);
+      if (!S || !S.level || S.never || S.down || !S.b.group || !inScene(S.b.group)) continue;
+      const tg = S.tg = targetFor(S, dist(S.b), farM);
+      if ((!tg[0] && S.bands[0].outN) || (!tg[2] && S.bands[1].outN)) {
+        if (!advance(S, tg, E, until, true)) shellPark.busy.add(S); else shellPark.busy.delete(S);
+      }
+    }
+    // 2) the scan finds what changed (it only takes colliders out: the
+    //    pieces go in the busy pass, so one tower's plan never holds it up)
+    const n = tick ? Math.min(L.length, SHELL_SCAN) : 0;
     for (let k = 0; k < n; k++) {
       if (shellPark.cursor >= L.length) shellPark.cursor = 0;
       const b = L[shellPark.cursor++], S = shellPark.st.get(b);
-      if (!S || S.never) continue;
+      if (!S || S.never || S.down || shellPark.busy.has(S)) continue;
       // a shell that left the world (demolished, swapped out) is forgotten
-      if (!b.group || !inScene(b.group)) { if (S.parked) { S.parked = false; if (S.shell) CBZ.colliderRemoveMany(S.shell); S.shell = null; } S.never = true; continue; }
-      const d2 = Math.min(rectD2(b, px, pz), rectD2(b, cx, cz));
-      if (S.parked && d2 < UNPARK_M * UNPARK_M) unparkShell(S);
-      else if (!S.parked && d2 > PARK_M * PARK_M) parkShell(S, drop, add);
+      if (!b.group || !inScene(b.group)) { forget(S, E); continue; }
+      S.tg = targetFor(S, dist(b), farM);
+      if (settled(S, S.tg)) continue;
+      advance(S, S.tg, E, until, false, true);
+      shellPark.busy.add(S);
     }
-    if (drop.size) { shellPark.stats.colsOut += CBZ.colliderRemoveMany(drop); CBZ.colliderAddMany(add); }
+    // 3) what is under way goes on, every shell's colliders first (the
+    //    broadphase is what round six parked, and it parks as fast)
+    shellPark.busy.forEach(function (S) {
+      if (!room(E, until) || S.never || S.down || !S.b.group || !inScene(S.b.group)) return;
+      S.tg = targetFor(S, dist(S.b), farM);
+      advance(S, S.tg, E, until, false, true);
+    });
+    shellPark.busy.forEach(function (S) {
+      if (!room(E, until)) return;
+      if (S.never || S.down || !S.b.group || !inScene(S.b.group)) { shellPark.busy.delete(S); return; }
+      S.tg = targetFor(S, dist(S.b), farM);
+      if (advance(S, S.tg, E, until, false)) shellPark.busy.delete(S);
+    });
+    flushEdit(E);
+    const ms = performance.now() - t0;
+    shellPark.stats.lastMs = +ms.toFixed(2);
+    if (ms > shellPark.stats.worstMs) shellPark.stats.worstMs = +ms.toFixed(1);
   });
   /* THE FACADE LEDGER, in numbers a report can print. carveDbg already existed
      for one-shot debugging; this is the cumulative read a before/after gate

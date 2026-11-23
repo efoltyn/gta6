@@ -930,6 +930,10 @@
       a.warIntensity = Math.min(3, (a.warIntensity || 0) + 1);
       b.warIntensity = Math.min(3, (b.warIntensity || 0) + 0.6);
       a._raidTarget = targetLot;   // contested lot, used for capture resolution
+      // (a phone keeps far people as records, city/peds.js THE FAR RECORD:
+      // the contested ground runs whole for the war, so its defenders are
+      // standing there when the raiders arrive; the raiders wake on their raid)
+      if (CBZ.cityRecordHot) CBZ.cityRecordHot(targetLot.cx, targetLot.cz, 48, a.warRemain + 20);
       // GANG_WAR_EVENTS: arm this war's visible set-pieces (a second attacker
       // wave; the defender's lieutenant stand + car reinforcements). Never on
       // a free push (a second wave must not arm its own second wave), and the

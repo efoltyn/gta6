@@ -649,7 +649,9 @@
       const q = rec.guards[i];
       const lost = !q || q.dead ||
         (q._powerCop && CBZ.cityCops && CBZ.cityCops.indexOf(q) < 0) ||
-        (!q._powerCop && CBZ.cityPeds && CBZ.cityPeds.indexOf(q) < 0);
+        // (a posted detail man who is a far record on a phone, city/peds.js
+        // `_dormant`, is still on his post: off the roster is not lost)
+        (!q._powerCop && CBZ.cityPeds && !q._dormant && CBZ.cityPeds.indexOf(q) < 0);
       if (!lost) continue;
       // NOTE on the cop path: police.js's roadblock teardown branch runs for
       // ANY officer carrying a `_post` and can splice him out of cityCops

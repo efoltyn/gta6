@@ -461,7 +461,12 @@
   /* keep (optional): a Set of this group's entries left as they are — the
      ones city/collapse.js goes on drawing a struck building's coarse storeys
      from (it hides what it cut out of them itself, batchTriHide / batchWallHide) */
+  /* A building torn down or put back (demolition, a strike, a collapse's
+     swap, a restore) says so through these two: city/buildings.js keeps a far
+     shell's unbuilt storeys from coming back into a building that is down. */
+  function shellDown(top, down) { if (CBZ.cityShellDown && top) { try { CBZ.cityShellDown(top, down); } catch (e) {} } }
   CBZ.batchHideGroup = function (top, keep) {
+    shellDown(top, true);
     const arr = groupRanges.get(top);
     if (!arr) return 0;
     let n = 0;
@@ -480,6 +485,7 @@
      the group once it is merged here). */
   CBZ.batchRangesOf = function (top) { return groupRanges.get(top) || null; };
   CBZ.batchShowGroup = function (top) {
+    shellDown(top, false);
     const arr = groupRanges.get(top);
     if (!arr) return 0;
     let n = 0;
@@ -793,6 +799,9 @@
   // the merged shell a wall was baked into (city/collapse.js: a wall whose
   // storey the cut leaves coarse keeps drawing from that shell)
   CBZ.batchWallSliceOf = function (wall) { return wallSlices.get(wall) || null; };
+  // a wall whose mesh is rebuilt takes its slice over (city/buildings.js: a
+  // far shell's storeys leave as data and come back as new meshes)
+  CBZ.batchWallSliceSet = function (wall, rec) { if (wall && rec) wallSlices.set(wall, rec); };
 
   /* TRIANGLES HIDDEN BY THEIR INDICES. city/collapse.js leaves a struck
      tower's untouched storeys drawing from the merged meshes they were baked

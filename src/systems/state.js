@@ -675,19 +675,32 @@
   // after the compositor has PAINTED the card. Handing the thread over on the
   // first frame draws nothing and we are back to a frozen blank page. ~32 ms,
   // so pointer-lock user activation survives it.
-  function present(mode, worldOnly, work) {
+  // `gate` (optional, a promise): waited out BEHIND the card before the work
+  // runs: the city's shipped terrain bakes (core/bakecache.js CBZ.
+  // bakeShipReady, capped), which the one synchronous build cannot use if
+  // they land after it starts. Its wait is the meter's "boot:bakes" step.
+  function present(mode, worldOnly, work, gate) {
     bootBusy = true;
     CBZ.bootMeter.show(mode, worldOnly);
+    const run = function () {
+      try { work(); }
+      finally {
+        waitForCheapFrames(function () {
+          CBZ.bootMeter.finish(function () { bootBusy = false; });
+        });
+      }
+    };
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
-        try { work(); }
-        finally {
-          waitForCheapFrames(function () {
-            CBZ.bootMeter.finish(function () { bootBusy = false; });
-          });
-        }
+        if (!gate) { run(); return; }
+        if (CBZ.bootStep) CBZ.bootStep("boot:bakes");
+        Promise.resolve(gate).then(run, run);
       });
     });
+  }
+  // an unbuilt city's gate: its shipped terrain bakes
+  function cityBakesGate() {
+    return CBZ.bakeShipReady && !(CBZ.city && CBZ.city.built) ? CBZ.bakeShipReady() : null;
   }
 
   // SELECTING the CITY tile builds the whole world too (setMode -> mode.build),
@@ -702,7 +715,7 @@
       // the archipelago stands its spawn island whole on first selection
       || (id === "archipelago" && CBZ.archipelago && !CBZ.archipelago.state().built);
     if (!heavy || !bootMeterOn()) { setMode(id); return; }
-    present(id, true, function () { setMode(id); });
+    present(id, true, function () { setMode(id); }, id === "city" && !prisonHeavy ? cityBakesGate() : null);
   }
   CBZ.presentModeSwitch = presentModeSwitch;
 
@@ -723,11 +736,15 @@
     // before it settled ran on the stale localStorage mirror (city/
     // worldstate.js cityWorldStoreReady). Wait for it, capped, then start.
     // The Isles save to the same ledger (world/isles_save.js): the same wait.
+    // An unbuilt city also waits for its shipped terrain bakes (core/
+    // bakecache.js, capped), behind the card when there is one: the build is
+    // one synchronous task and a file that lands after it starts cannot help.
     if ((g.mode === "city" || g.mode === "archipelago") && CBZ.cityWorldStoreReady) {
       bootBusy = true;
-      CBZ.cityWorldStoreReady(6000).then(function () {
+      const bakes = g.mode === "city" ? cityBakesGate() : null;
+      Promise.all([CBZ.cityWorldStoreReady(6000), bootMeterOn() ? null : bakes]).then(function () {
         bootBusy = false;
-        if (!bootMeterOn()) startRun(); else present(g.mode, false, startRun);
+        if (!bootMeterOn()) startRun(); else present(g.mode, false, startRun, bakes);
       });
       return;
     }

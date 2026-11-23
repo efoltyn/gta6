@@ -239,6 +239,7 @@
     if (!ped) return;
     const arr = CBZ.cityPeds;
     if (arr) { const i = arr.indexOf(ped); if (i >= 0) arr.splice(i, 1); }
+    if (CBZ.cityDormDrop) CBZ.cityDormDrop(ped);   // asleep or a far record (city/peds.js)
     ped._iopts = null;                       // drop the [E] Talk options with the ped
     ped.staffPost = null;
     if (ped.group && ped.group.parent) ped.group.parent.remove(ped.group);

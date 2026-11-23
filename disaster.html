@@ -446,7 +446,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=r187a"></script>
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
-<script src="src/core/bakecache.js?v=beach1020"></script>
+<script src="src/core/bakecache.js?v=beach1020-ph7b"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
 <script src="src/core/slice.js?v=wm2a+bld1122g"></script>
 <!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
@@ -495,7 +495,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treefoot.js?v=sight1011"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/lightpin.js?v=fire1102"></script>
-<script src="src/core/matrixskip.js?v=mskip1"></script>
+<script src="src/core/matrixskip.js?v=mskip1-ph7b"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
      CBZ.INTERFACES list of 16 strings that, measured across src/, index.html,
@@ -511,7 +511,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
 <script src="src/core/prisonlazy.js?v=isleleak1022"></script>
-<script src="src/core/renderer.js?v=day1122"></script>
+<script src="src/core/renderer.js?v=day1122-ph7"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
@@ -945,7 +945,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=police2c"></script>
+<script src="src/systems/state.js?v=police2c-ph7"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1141,7 +1141,7 @@ document.body.appendChild(b);}}catch(e){}})();
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
      and city/interact.js, both of which ask CBZ.cityKeys at parse-adjacent time. -->
-<script src="src/city/keys.js?v=cd0929"></script>
+<script src="src/city/keys.js?v=cd0929-ph7"></script>
 <!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
@@ -1895,7 +1895,7 @@ document.body.appendChild(b);}}catch(e){}})();
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=plan1122"></script>
+<script src="src/systems/fullmap.js?v=plan1122-ph7"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -2369,7 +2369,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=nopanel1122"></script>
+<script src="src/core/packages.js?v=nopanel1122-ph7"></script>
 <!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
      was a dumb idea, but it's really what this whole game's point is: get
      enough people recruited, or get enough money, or enough guns, or somehow
@@ -2455,7 +2455,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/viewscope.js?v=merge1014c"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=r187a"></script>
+<script src="src/core/batch.js?v=r187a-ph7"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder

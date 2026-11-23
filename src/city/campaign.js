@@ -490,20 +490,28 @@
     const peds = CBZ.cityPeds || [];
     let pick = null, best = -1;
     const P = player();
-    for (let i = 0; i < peds.length; i++) {
-      const p = peds[i];
+    // (a phone keeps the street past ~90 m as records off the roster, city/
+    // peds.js THE FAR RECORD: the farthest body is one of them, never seen,
+    // so they are read too and the one recast is made whole first)
+    const at = {};
+    const look = function (p, asleep) {
       // Only recast a stable, live street actor. The crowd promotion pool keeps
       // parked peds in cityPeds at an off-map coordinate, and regionlife owns a
       // separate streaming/despawn ring. Recasting either produces a hidden or
       // subsequently disposed mission target that can never be killed, stranding
       // every later phase that waits on target.dead.
-      if (!p || !p.pos || !p.group || !p.group.parent || p.dead || p.culled || p.ko > 0 ||
+      if (!p || !p.pos || !p.group || (!asleep && !p.group.parent) || p.dead || p.culled || p.ko > 0 ||
           p.vendor || p.isFamily || p._campaignTarget || p._campaignCaptive ||
           p.companion || p.recruited || p.controlled || p.inCar || p.enterT > 0 ||
-          p._parked || p._crowd || p._regionLife) continue;
-      const d = P && P.pos ? Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z) : 0;
+          p._parked || p._crowd || p._regionLife) return;
+      if (asleep && (p.gang || p.staffPost || p._occupySrc || p._post || p._npcAttached)) return;
+      const q = asleep && CBZ.cityPersonXZ ? CBZ.cityPersonXZ(p, at) : p.pos;
+      const d = P && P.pos ? Math.hypot(q.x - P.pos.x, q.z - P.pos.z) : 0;
       if (d > best) { best = d; pick = p; }
-    }
+    };
+    if (CBZ.cityPersonsEach) CBZ.cityPersonsEach(look);
+    else for (let i = 0; i < peds.length; i++) look(peds[i], false);
+    if (pick && pick._dormant && CBZ.cityPersonWake) CBZ.cityPersonWake(pick);
     if (!pick) return spawnPed(name, anchor.x, anchor.z, opts);
     pick.name = name || pick.name;
     pick.pos.set(anchor.x, floorY(anchor.x, anchor.z), anchor.z);
