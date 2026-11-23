@@ -50,6 +50,7 @@
   }
 
   let last = performance.now();
+  const renderErrSeen = Object.create(null);   // (one log per distinct render error)
   let lastTimer = "";   // cache so the timer DOM only writes when it changes
 
   // HIT-STOP: brief near-freeze on impact for weight (the #1 juice trick).
@@ -227,7 +228,16 @@
     // CBZ.drawHeld: a page drawn OVER this one owns the screen (city/
     // frontline.js's battle). Skip the draw but keep the rAF pump, so the
     // clock does not turn into the setTimeout spin RENDER_FRAMES=false gets.
-    if (drawing && !CBZ.drawHeld) CBZ.renderer.render(CBZ.scene, CBZ.camera);
+    // A THROWING DRAW MUST NOT STOP THE CLOCK. The updaters above are each
+    // wrapped; the draw was not, and schedule() comes after it, so one throw
+    // inside render froze the game for good. Logged once per message.
+    if (drawing && !CBZ.drawHeld) {
+      try { CBZ.renderer.render(CBZ.scene, CBZ.camera); }
+      catch (err) {
+        const m = String(err && err.message || err);
+        if (!renderErrSeen[m]) { renderErrSeen[m] = true; console.error("[render] " + m + "\n" + (err && err.stack || "")); }
+      }
+    }
     schedule();
   }
 

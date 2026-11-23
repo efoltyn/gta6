@@ -153,7 +153,9 @@
    off on a desktop; 1 forces it on anywhere, false turns it off). `?cfg_STATIC_MATRIX_
    FREEZE=0` boots without it; setting it false at runtime takes effect on
    the next render call (nothing is swapped any more; the registry idles).
-   CBZ.walkStats counts parents swapped, children dropped and scan time.
+   CBZ.walkStats counts parents swapped, children dropped and scan time,
+   and keeps the first throw in .error (message, stack, whether the whole
+   redraw drew; also on the console once, tagged [walkprune]).
 ------------------------------------------------------------------------- */
 (function () {
   "use strict";
@@ -172,13 +174,33 @@
   let swapping = false;    // inside a pruned render call
   let depth = 0, tick = 0;
   const seen = new WeakSet();   // scenes walked once for wide parents
-  const stats = CBZ.walkStats = { parents: 0, swapped: 0, dropped: 0, kept: 0, scanMs: 0, renders: 0, reconciled: 0, guards: 0, staleMarks: 0 };
+  const stats = CBZ.walkStats = { parents: 0, swapped: 0, dropped: 0, kept: 0, scanMs: 0, renders: 0, reconciled: 0, guards: 0, staleMarks: 0, error: null };
 
   // (a phone only: a desktop draws ~930 calls with time to spare and keeps
   // the stock walk. `?cfg_STATIC_MATRIX_FREEZE=1` forces it on anywhere.
-  // A render that throws while the walk is pruned turns it off for the
-  // session: `broken`, set by the wrapper below.)
+  // A render that throws while the walk is pruned, or a scan that throws,
+  // turns it off for the session: `broken`, set by the wrapper below.)
   let broken = false;
+
+  /* THE FIRST THROW IS WRITTEN DOWN, ONCE. A pruned render threw on one
+     desktop Gang City boot in four (2026-11-22) and its message reached no
+     log anybody kept: the guard handed console.error the Error object, which
+     a tool that keeps the head of each console line (tools/lib/cdp.mjs keeps
+     300 characters) can lose behind the tag. So the first throw goes out as
+     one plain string, message first, then its stack, then which parents were
+     compacted for that frame; and it is kept on CBZ.walkStats.error, where
+     `redraw` says whether the whole (stock) redraw then drew ("drew": the
+     compact view is implicated) or threw too (its message: the prune is
+     not the cause). Never throws itself: an odd thrown value still logs. */
+  function report(where, err, names) {
+    if (stats.error) return;
+    let msg = "?", stack = "(no stack)";
+    try { msg = err && err.message !== undefined ? String(err.message) : String(err); } catch (e) {}
+    try { if (err && err.stack) stack = String(err.stack); } catch (e) {}
+    stats.error = { where: where, message: msg, stack: stack, render: stats.renders, parents: names || [], redraw: null };
+    console.error("[walkprune] " + where + " threw: " + msg + " (the walk is stock for the rest of this session)\n" +
+      stack + (names && names.length ? "\ncompacted parents: " + names.join(", ") : ""));
+  }
   function on() {
     if (broken || CFG.STATIC_MATRIX_FREEZE === false || CFG.MATRIX_SKIP_HIDDEN === false) return false;
     return CFG.STATIC_MATRIX_FREEZE === true || CFG.STATIC_MATRIX_FREEZE === 1 || !!CBZ.isMobileDevice;
@@ -308,17 +330,32 @@
       }
       depth++;
       try {
-        try { prune(scene); } catch (err) { restoreAll(); console.error("[walkprune]", err); }
+        // a scan that throws once would throw every frame: off, logged once
+        try { prune(scene); } catch (err) { restoreAll(); broken = true; report("the walk scan", err, null); }
         swapping = swapped.length !== 0;
         try { return render0.apply(this, arguments); }
         catch (err) {
           if (!swapping) throw err;
           // A FRAME THAT THROWS WITH THE WALK PRUNED is drawn again whole:
           // every child back, the prune off for the rest of the session, and
-          // the error kept on the console so the cause can be found.
+          // the first error on the console with its stack (report, above).
+          const names = [];
+          for (let i = 0; i < swapped.length && names.length < 12; i++) names.push(swapped[i].name || swapped[i].type);
           swapping = false; restoreAll(); broken = true;
-          console.error("[walkprune] render threw with the walk pruned; off for this session", err);
-          return render0.apply(this, arguments);
+          report("a pruned render", err, names);
+          let r;
+          try { r = render0.apply(this, arguments); }
+          catch (err2) {
+            if (stats.error && stats.error.redraw === null) {
+              let m2 = "?";
+              try { m2 = String(err2 && err2.message !== undefined ? err2.message : err2); } catch (e) {}
+              stats.error.redraw = m2;
+              console.error("[walkprune] the whole redraw threw too, so the prune did not cause it: " + m2 + "\n" + (err2 && err2.stack || ""));
+            }
+            throw err2;
+          }
+          if (stats.error && stats.error.redraw === null) stats.error.redraw = "drew";
+          return r;
         }
       } finally {
         swapping = false;
