@@ -135,7 +135,7 @@
   // pool's fixed build split (~48% female), never a per-frame/per-agent
   // outcome. build/longHair reuse character.js's existing fem geometry path.
   function makeFaceEntry(pi) {
-    const fem = Math.random() < 0.48;
+    const fem = false;   // a men's prison (ambientstate.js S.fem is 0 for every inmate)
     const rig = CBZ.makeCharacter({ legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0xd8a177, hair: 0x2a2018, stripes: 0xc85c00, shoes: 0x2b2b2b, build: fem ? "f" : "m", longHair: fem && Math.random() < 0.6 });
     rig.group.position.y = FAR_AWAY;
     root.add(rig.group);                                 // under the crowd root → hides with it off-escape

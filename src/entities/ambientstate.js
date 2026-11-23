@@ -304,7 +304,7 @@
     S.nerve[id] = (rnd(id) * 101) | 0; S.empathy[id] = (rnd(id) * 101) | 0; S.greed[id] = (rnd(id) * 101) | 0;
     S.reactivity[id] = (rnd(id) * 256) | 0;
     S.mood[id] = 50; S.skin[id] = SKIN[(rnd(id) * SKIN.length) | 0]; S.hair[id] = HAIR[(rnd(id) * HAIR.length) | 0];
-    S.fem[id] = rnd(id) < 0.48 ? 1 : 0;
+    rnd(id); S.fem[id] = 0;   // a men's prison: no women among the inmates (the roll is still drawn so every other trait of each inmate stays as it was)
     rollInventory(id);
     S.partner[id] = -1;
     randomPoint(id, zone, point);
