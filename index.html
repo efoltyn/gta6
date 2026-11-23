@@ -623,7 +623,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=pick1122"></script>
+  <script src="src/entities/character.js?v=fight1123b"></script>
   <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -652,7 +652,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/moves.js?v=pick1122"></script>
 <!-- THE FEET PLANT (entities/gait.js): cadence, stride and the planted-foot
      leg solve every human walks with; animChar calls it (after moves.js). -->
-<script src="src/entities/gait.js?v=butt1022"></script>
+<script src="src/entities/gait.js?v=fight1123b"></script>
 <!-- CBZ.bodyDoors: PEOPLE OPEN DOORS, every game. A body walking a route
      through a shut door opens it if cleared (the city door kit, the prison
      door registry), is refused if not, and it shuts behind them. Asked by
@@ -699,9 +699,9 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
 <script src="src/systems/cuffedplayer.js?v=butt1022"></script>
 <script src="src/entities/verbposes.js?v=butt1022"></script>
-<script src="src/entities/meleeposes.js?v=shot1122"></script>
-<script src="src/systems/verbs_strike.js?v=shot1122"></script>
-<script src="src/systems/melee.js?v=butt1022"></script>
+<script src="src/entities/meleeposes.js?v=fight1123b"></script>
+<script src="src/systems/verbs_strike.js?v=fight1123b"></script>
+<script src="src/systems/melee.js?v=fight1123b"></script>
 <script src="src/systems/bodyfall.js?v=shot1122"></script>
 <!-- CBZ.leave: PEOPLE WALK OUT, NOBODY VANISHES. Every game's "his part is over"
      (a staffer, an aide, the dismissed, a crowd going home) walks him out by a
@@ -814,7 +814,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=own1122"></script>
 <script src="src/entities/npc.js?v=race1121"></script>
-<script src="src/entities/ai.js?v=day1122"></script>
+<script src="src/entities/ai.js?v=fight1123b"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -920,7 +920,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=rigid1122"></script>
-<script src="src/systems/physics.js?v=c1122"></script>
+<script src="src/systems/physics.js?v=fight1123b"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- THE ONE MOVER (CBZ.bodyMove) every human body is moved through, and the per-frame net (onUpdate 99.97) that puts back anything that crossed a wall. After physics.js (sweepCircle/collide/walkGroundAt). -->
 <script src="src/systems/bodymove.js?v=bodymove1022-ph5"></script>
@@ -1072,7 +1072,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=pres1028"></script>
-<script src="src/systems/fpsmode.js?v=day1122"></script>
+<script src="src/systems/fpsmode.js?v=fight1123b"></script>
 <script src="src/systems/gunfx.js?v=canvas1029"></script>
 <script src="src/systems/intimidate.js?v=hold1122"></script>
 

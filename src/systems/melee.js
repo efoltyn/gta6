@@ -589,7 +589,7 @@
       const s = this.rng() < 0.5 ? 1 : -1;
       A.type = "step"; A.x = -ux * 0.8 + uz * s * 0.6; A.z = -uz * 0.8 - ux * s * 0.6; A.dir = -1;
       if (this.rng() < 0.5) this.coverT = 0.5;
-    } else if (dist < want - 0.45) { A.type = "step"; A.x = -ux; A.z = -uz; A.dir = -1; }
+    } else if (dist < want - 0.25) { A.type = "step"; A.x = -ux; A.z = -uz; A.dir = -1; A.d = Math.min(0.45, want - dist + 0.05); }   // inside his range: back out to it
     else if (el > 0.25 && el < 3.5) { A.type = "step"; A.x = ex / el; A.z = ez / el; A.dir = (ex * ux + ez * uz) / el > 0.3 ? 1 : 0; A.d = Math.min(0.5, Math.max(0.28, el * 0.6)); }
     else if (el >= 3.5) { A.type = "walk"; A.x = ex / el; A.z = ez / el; A.dir = 1; this.stepCD = 0.2; return A; }
     else if (this.rng() < 0.3) { const s = this.rng() < 0.5 ? 1 : -1; A.type = "step"; A.x = uz * s; A.z = -ux * s; A.dir = 0; }   // circle
@@ -611,6 +611,10 @@
       so.aimErr = (0.16 - 0.13 * this.skill) * (1 + 1.2 * daze + 0.5 * (1 - this.stam));
       so.power = clamp01((typeof V.powerOf === "function" ? V.powerOf(A.kind) : 0.7) * (0.70 + 0.45 * this.skill));
       so.speed = (0.88 + 0.2 * this.skill) * (1 - 0.12 * daze);
+      // a hook is thrown from a step inside jabbing range, and a kick from
+      // outside it: both step in further than a straight does
+      const k = A.kind;
+      so.maxLunge = k === "hook" || k === "body" || k === "kick" || k === "roundKick" || k === "lowKick" ? 0.5 : 0.35;
       const S = V.strike(this.a, target, so);
       if (!S) { this.ci = Math.max(0, this.ci - 1); return null; }
     } else if (A.type === "block") V.block(this.a, A.kind === "cover" ? 0.75 : 0.45);

@@ -3169,6 +3169,32 @@
     // shape and the same breath (systems/pushprops.js is the first reader:
     // furniture moves by the component of your drive that points at it).
     player.moveX = desX; player.moveZ = desZ;
+    /* A BODY HAS MASS. The stick WAS the velocity: a stand to a 6.4 m/s
+       sprint inside one frame, and a dead stop inside one frame, with the
+       legs left to catch up to a root that had already gone. The root now
+       closes on what the stick asks at a rate (about 0.2 s to a walk or a
+       sprint, 0.16 s to stop: 14 cm of give from a walk, half a metre from a
+       flat sprint), so a start leans in and a stop is taken on the feet. A
+       slide keeps its own curve. velX/velZ is what moves the body and what
+       the legs are told; player.speed / moveX stay what the stick WANTS. */
+    let velX = desX, velZ = desZ;
+    {
+      const nowMs = CBZ.now || 0;
+      // not stepped lately, or put somewhere else (a cell, a respawn): from rest
+      const jumped = player._velPx != null && Math.hypot(player.pos.x - player._velPx, player.pos.z - player._velPz) > 1.5;
+      if (!(Math.abs(nowMs - (player._velAt || 0)) < 250) || jumped) { player._velX = 0; player._velZ = 0; }
+      player._velAt = nowMs;
+      if (sliding) { player._velX = desX; player._velZ = desZ; }
+      else {
+        const vdt = (CBZ.feelDt != null ? CBZ.feelDt : dt);
+        const want = Math.hypot(desX, desZ), have = Math.hypot(player._velX || 0, player._velZ || 0);
+        const kv = 1 - Math.exp(-(want >= have ? 11 : 14) * vdt);
+        player._velX = (player._velX || 0) + (desX - (player._velX || 0)) * kv;
+        player._velZ = (player._velZ || 0) + (desZ - (player._velZ || 0)) * kv;
+        if (want === 0 && Math.hypot(player._velX, player._velZ) < 0.06) { player._velX = 0; player._velZ = 0; }
+      }
+      velX = player._velX; velZ = player._velZ;
+    }
     if (stanceOn) {
       // sprint memory: the slide's entry speed + the grace window that lets the
       // touch thumb lift off the stick to tap L3 without losing the sprint.
@@ -3237,8 +3263,8 @@
     const subDt = fdt / nSub;
     for (let s = 0; s < nSub; s++) {
       const px0 = player.pos.x, pz0 = player.pos.z;   // pre-move XZ for the stair seam probe
-      player.pos.x += desX * subDt;
-      player.pos.z += desZ * subDt;
+      player.pos.x += velX * subDt;
+      player.pos.z += velZ * subDt;
 
       // gravity + ground following (terrain, stairs, floors, roofs)
       let support = traversalSurfaceY(
@@ -3277,7 +3303,7 @@
           // snapped height), so a rise is taken the frame it happens; a rig
           // still gliding down from a step it left snaps up with it.
           const dUp = support - player.pos.y;
-          const stepGate = Math.hypot(desX, desZ) * subDt * 1.2;
+          const stepGate = Math.hypot(velX, velZ) * subDt * 1.2;
           if (dUp > 0) {
             if (player._stepLag < 0) player._stepLag = Math.min(0, player._stepLag + dUp);
           } else if (dUp < -0.06 && -dUp > stepGate && dUp >= -SNAP_DOWN) {
@@ -3413,7 +3439,10 @@
     playerChar.group.scale.y += (1 - playerChar.group.scale.y) * (1 - Math.pow(0.001, fdt));
     // get back up after a knockdown (ease the fall-over rotation out)
     if (playerChar.group.rotation.x) playerChar.group.rotation.x = CBZ.damp(playerChar.group.rotation.x, 0, 9, fdt);
-    animChar(playerChar, player.speed, fdt);
+    // (the speed the root is really making: told the stick's, the legs of a
+    // body easing to a stop were "carried" and slid, gait.js pre)
+    player._velPx = player.pos.x; player._velPz = player.pos.z;
+    animChar(playerChar, Math.hypot(velX, velZ), fdt);
   }
 
   CBZ.updatePlayer = updatePlayer;

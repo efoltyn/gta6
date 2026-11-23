@@ -9150,7 +9150,7 @@
         ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, laTarget, armRate, dt);
         // the off arm hangs like the idle one: wide of the ribs and of any vest
         ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, ch.armOutZ != null ? ch.armOutZ : -0.08, 6, dt);
-        const elbBase = moving ? 0.30 + 0.42 * norm + 0.62 * run2 : 0.22 + Math.sin(ch.breath * 2.2) * 0.02;
+        const elbBase = moving ? 0.22 + 0.30 * norm + 0.82 * run2 : 0.22 + Math.sin(ch.breath * 2.2) * 0.02;
         const foldL = moving ? Math.max(0, -laTarget) * 0.8 : 0;
         setElbow(J.la, -(elbBase + foldL), armRate - 2);
       }
@@ -9188,7 +9188,10 @@
       ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, raTarget * (1 - gd) - gd * 0.55, armRate, dt);
       ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, outZ, 6, dt);
       ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -outZ, 6, dt);
-      const elbBase = moving ? 0.30 + 0.42 * norm + 0.62 * run2 : 0.22 + Math.sin(ch.breath * 2.2) * 0.02;
+      // (norm is 1 at the jail's 2 m/s walk: 0.30 + 0.42 held every walker's
+      // elbows at 41 degrees, 61 on the forward swing, a race-walker's arms.
+      // A walking arm hangs: ~30 degrees, ~50 forward; the run is unchanged.)
+      const elbBase = moving ? 0.22 + 0.30 * norm + 0.82 * run2 : 0.22 + Math.sin(ch.breath * 2.2) * 0.02;
       const foldL = moving ? Math.max(0, -laTarget) * 0.8 : 0;   // forward swing folds
       const foldR = moving ? Math.max(0, -raTarget) * 0.8 : 0;
       setElbow(J.la, -(elbBase + foldL + gd * 0.55), armRate - 2);
@@ -9266,7 +9269,8 @@
     // other way, a raised rifle holds the chest still over the hips, and the
     // gait adds the start/stop weight shift and the hill (CBZ.gait.body)
     const backK = GT && ch._gv ? ch._gv.back : 0;
-    let leanTarget = (norm * 0.12 + run2 * 0.10) * (1 - 1.4 * backK) + cb * 0.16;
+    // (a walk leans ~4 degrees, not the 7 it had; a run keeps its 12.5)
+    let leanTarget = (norm * 0.07 + run2 * 0.15) * (1 - 1.4 * backK) + cb * 0.16;
     if (GB) leanTarget = leanTarget * (1 - 0.6 * aimK) + 0.05 * aimK + GB.lean;
     ch.lean = damp(ch.lean, leanTarget, 8, dt);
     ch.body.rotation.x = ch.lean;

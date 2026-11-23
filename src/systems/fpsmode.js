@@ -1231,17 +1231,22 @@
   /* where a given punch kind puts the striking WRIST at full reach (vm space).
      Full reach puts the wrist ~0.70 m from the eye. The hook finishes in
      front of the chin (x -0.02), not across the far guard: it travels on a
-     wide arc and its elbow comes up and out (see HOOK_POLE). */
+     wide arc and its elbow comes up and out (see HOOK_POLE).
+     (2026-11-23: re-measured on the body's own arm, 1.08 vm units from a
+     shoulder at (0.38, -0.51, 0.21) off the eye. The jab stopped at 95% of
+     the arm, its elbow still bent 35 degrees, so it goes 5 cm further; the
+     hook and the uppercut were thrown almost straight (elbows at 136 and
+     146 degrees), so they come in to about 120.) */
   function reachPose(kind, side, out) {
     const s = side;
-    if (kind === "hook") { out.x = -s * 0.02; out.y = 0.15; out.z = 0.02; out.roll = 0.30; out.bend = 0.0; }
-    else if (kind === "upper") { out.x = s * 0.07; out.y = 0.32; out.z = 0.04; out.roll = 2.55; out.bend = 0.15; }
+    if (kind === "hook") { out.x = -s * 0.02; out.y = 0.15; out.z = 0.10; out.roll = 0.30; out.bend = 0.0; }
+    else if (kind === "upper") { out.x = s * 0.07; out.y = 0.27; out.z = 0.13; out.roll = 2.55; out.bend = 0.15; }
     else if (kind === "stab") { out.x = 0.10; out.y = -0.02; out.z = -0.06; out.roll = 1.25; out.bend = 0.0; }   // the body, not the chin
     else if (kind === "cross") { out.x = s * 0.05; out.y = 0.17; out.z = -0.10; out.roll = 0.10; out.bend = 0.05; }
     else if (kind === "gnp") { out.x = s * 0.05; out.y = -0.22; out.z = -0.12; out.roll = 0.30; out.bend = 0.05; }       // down into his face
     else if (kind === "hammer") { out.x = s * 0.03; out.y = -0.24; out.z = -0.06; out.roll = 1.9; out.bend = 0.10; }     // pinky side first
     else if (kind === "gnpElbow") { out.x = -s * 0.04; out.y = 0.02; out.z = 0.16; out.roll = 1.6; out.bend = -0.25; }   // folded: the elbow is what arrives
-    else { out.x = s * 0.07; out.y = 0.16; out.z = -0.04; out.roll = 0.20; out.bend = 0.05; }   // jab / default: the fist corkscrews palm-down
+    else { out.x = s * 0.07; out.y = 0.16; out.z = -0.09; out.roll = 0.20; out.bend = 0.05; }   // jab / default: the fist corkscrews palm-down
     return out;
   }
   // where the wind-up chambers it
@@ -1288,8 +1293,13 @@
     if (swing && punchT > 0) {
       swing.t = punchT;
       prog = 1 - punchT / swing.dur;
-      wind = Math.max(0, 1 - prog / 0.24);
-      drive = Math.sin(Math.min(1, Math.max(0, (prog - 0.16) / 0.54)) * Math.PI);
+      // the chamber is reached, not jumped to (it was 1 on the swing's first
+      // frame: the fist popped a hand's width back before it went anywhere)
+      const wu = Math.min(1, prog / 0.12), wd = Math.min(1, Math.max(0, (prog - 0.12) / 0.2));
+      wind = wu * wu * (3 - 2 * wu) * (1 - wd * wd * (3 - 2 * wd));
+      // the body's own curve (entities/meleeposes.js): out accelerating, back quick, then settling
+      const MPd = CBZ.meleePoses && CBZ.meleePoses.drive;
+      drive = MPd ? MPd(prog) : Math.sin(Math.min(1, Math.max(0, (prog - 0.16) / 0.54)) * Math.PI);
       recover = Math.max(0, (prog - 0.62) / 0.38);
       strikeSide = swing.side;
     } else if (swing) swing = null;

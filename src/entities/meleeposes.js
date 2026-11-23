@@ -73,14 +73,33 @@
   const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
 
   /* ---- THE BEAT — shared with the first-person fist (systems/fpsmode.js
-     animFists runs the identical drive curve off the same punchT/punchDur).
-     The fist is fully out at prog 0.43 in both views. */
-  const BEAT = MP.BEAT = { driveStart: 0.16, driveLen: 0.54, impact: 0.43, recover: 0.62 };
-  function driveOf(p) { return Math.sin(clamp01((p - BEAT.driveStart) / BEAT.driveLen) * Math.PI); }
+     animFists runs MP.drive off the same punchT/punchDur). The fist is fully
+     out at prog 0.43 in both views.
+     THE LIMB IS NOT A SINE. A half sine leaves the guard at its top speed and
+     is slowest where it lands: a punch that floats into the man. A real one
+     is the other way round: it starts from rest, is still accelerating at
+     full reach, snaps back as fast as it went out, and then settles into the
+     guard slowly. And the body goes first: hips and shoulders are half way
+     round when the arm is a fifth of the way out (bodyOf), and they hold a
+     moment after the fist has gone before they come back. */
+  // bounce: where a blocked arm's clock is put (it comes off the guard, it does not hang on it)
+  const BEAT = MP.BEAT = { driveStart: 0.16, driveLen: 0.54, impact: 0.43, recover: 0.62, bounce: 0.50 };
+  const OUT_LEN = BEAT.impact - BEAT.driveStart, BACK_LEN = 0.39;
+  function limbOf(u, r) {            // u: 0..1 going out, r: 0..1 coming back
+    if (u < 1) return u <= 0 ? 0 : u * u * (1.5 - 0.5 * u);
+    if (r >= 1) return 0;
+    const q = 1 - r;
+    return q * q * (0.25 + 0.75 * q);
+  }
+  function driveOf(p) { return limbOf((p - BEAT.driveStart) / OUT_LEN, (p - BEAT.impact) / BACK_LEN); }
   MP.drive = driveOf;
+  // the hips and shoulders: under way before the arm, home after it
+  function bodyOf(p) { return sstep(0.08, BEAT.impact, p) * (1 - sstep(0.50, 0.94, p)); }
+  MP.bodyDrive = bodyOf;
   // kicks: chamber first, so the foot arrives a touch later in the timer
-  const KICK_START = 0.22, KICK_LEN = 0.50;
-  function kickDriveOf(p) { return Math.sin(clamp01((p - KICK_START) / KICK_LEN) * Math.PI); }
+  const KICK_START = 0.22, KICK_LEN = 0.50, KICK_OUT = 0.25, KICK_BACK = 0.30;
+  function kickDriveOf(p) { return limbOf((p - KICK_START) / KICK_OUT, (p - KICK_START - KICK_OUT) / KICK_BACK); }
+  MP.kickDrive = kickDriveOf;
   MP.kickImpactP = KICK_START + KICK_LEN / 2;
   MP.impactP = BEAT.impact;
 
@@ -101,9 +120,9 @@
   const KIND = MP.KINDS = {
     jab:          { dur: 0.30, hand: "lead", path: "straight", level: "head", hip: 0.16, wind: 0.05, fwd: 0.06, lean: 0.06, pro: 0.10, roll: 1.30 },
     cross:        { dur: 0.38, hand: "rear", path: "straight", level: "head", hip: 0.74, wind: 0.14, fwd: 0.12, lean: 0.10, pro: 0.12, roll: 1.30, heel: 1 },
-    hook:         { dur: 0.42, hand: "lead", path: "hook", level: "head", hip: 0.86, wind: 0.26, fwd: 0.03, lean: 0.03, pro: 0.04, roll: 0.25, pivot: 1, ext: -0.85 },
+    hook:         { dur: 0.42, hand: "lead", path: "hook", level: "head", hip: 0.86, wind: 0.26, fwd: 0.03, lean: 0.03, pro: 0.04, roll: 0.25, pivot: 1, ext: -1.30 },
     upper:        { dur: 0.42, hand: "rear", path: "upper", level: "head", hip: 0.44, wind: 0.14, fwd: 0.05, lean: 0.0, pro: 0.05, roll: -0.35, dip: 0.16, heel: 1, ext: -1.0 },
-    body:         { dur: 0.44, hand: "lead", path: "hook", level: "body", hip: 0.78, wind: 0.22, fwd: 0.04, lean: 0.24, pro: 0.04, roll: 0.25, dip: 0.20, pivot: 1, ext: -0.75 },
+    body:         { dur: 0.44, hand: "lead", path: "hook", level: "body", hip: 0.78, wind: 0.22, fwd: 0.04, lean: 0.24, pro: 0.04, roll: 0.25, dip: 0.20, pivot: 1, ext: -1.15 },
     bodyStraight: { dur: 0.40, hand: "rear", path: "straight", level: "body", hip: 0.62, wind: 0.10, fwd: 0.09, lean: 0.24, pro: 0.10, roll: 1.30, dip: 0.20, heel: 1 },
     overhand:     { dur: 0.48, hand: "rear", path: "over", level: "head", hip: 0.86, wind: 0.20, fwd: 0.12, lean: 0.24, pro: 0.12, roll: 1.00, heel: 1 },
     elbow:        { dur: 0.36, hand: "lead", path: "elbow", level: "head", hip: 0.92, wind: 0.34, fwd: 0.06, lean: 0.04, pro: 0.02, roll: 0, ext: -2.2 },
@@ -306,6 +325,9 @@
     let mdt = dt;
     if (ch.freezeT > 0) { ch.freezeT = Math.max(0, ch.freezeT - wall); mdt = 0; }
     ch._mdt = mdt;
+    // last frame this layer solved the legs, or read the gait's feet (see _mFt)
+    const hadFeet = !!(ch._mOwn || ch._mFtS);
+    ch._mOwn = ch._mFtS = false;
     // back out last frame's additive head-snap offsets (added by MP.react)
     if (ch._rNx || ch._rNy || ch._rNz) {
       if (ch.neck) { ch.neck.rotation.x -= ch._rNx; ch.neck.rotation.y -= ch._rNy; ch.neck.rotation.z -= ch._rNz; }
@@ -344,7 +366,20 @@
        cuffs hold them (armK below). Standing in cuffs is still no stance. */
     const cuffStrike = !!ch.cuffed && (punching || kicking) && !ch.verbHold;
     const hard = ch.surrender || ch.handsUp || (ch.cuffed && !cuffStrike) || ch.verbHold || fallActive(ch);
-    const stanceOK = ch.fightStance && !ch.aimingPose && !ch.carryPose && !ch.bladeCarry;
+    /* THE HANDS STAY UP BETWEEN BLOWS. A body nobody had told to guard (the
+       player: his fightStance is only the held block) squared up for the
+       0.3 s of each punch and dropped out of it again before the next: fists
+       to the chin and down to the thighs, feet apart and together, once per
+       tap. A man who has just thrown, or just been hit in a fight he is in,
+       keeps his guard for the same 2.5 s the first-person fists keep theirs
+       (fpsmode guardHold). Walking off drops it in under a second. */
+    if (((punching && ch.punchKind !== "shove") || kicking) && !ch.cuffed) ch._mHold = 2.5;   // (a shove is not a fight)
+    else if (ch._mHold > 0) {
+      if (hr && hr.on && !hr.shot && hr.t < 0.1) ch._mHold = 2.5;
+      ch._mHold -= dt * (moving && (ch._mMv || 0) > 0.9 ? 4 : 1);
+    }
+    const held = ch._mHold > 0 && !ch.cuffed;
+    const stanceOK = (ch.fightStance || held) && !ch.aimingPose && !ch.carryPose && !ch.bladeCarry;
     // THE MOUNT blends in and out on its own clock: on top of a downed man
     // the stance below kneels astride him (ch.mount is written by
     // systems/verbs_strike.js V.groundStrike, cleared when he gets up or you
@@ -364,11 +399,22 @@
        A passive body reacts from the pose it was already in: every channel
        below starts at its current value and the reaction adds deltas. */
     // (latched at rest, so a guard that drops still fades out of its stance)
-    const fighting = ch.fightStance || punching || kicking || ch.blockT > 0 || ch.blockK > 0 || dodging || mounted;
+    const fighting = ch.fightStance || held || punching || kicking || ch.blockT > 0 || ch.blockK > 0 || dodging || mounted;
     if (fighting) ch._mPas = false;
     else if (!(ch._mK > 0.01)) ch._mPas = true;
     const passive = !!ch._mPas;
     const want = !hard && (act || stanceOK) ? 1 : 0;
+    /* THE STANCE'S FEET ARE PLANTED FEET. This layer used to hold both feet
+       at fixed spots in the body's own frame, so every turn to keep facing
+       the other man swung them round on the floor like a compass, and
+       squaring up or standing down slid them 20 cm apart and together. The
+       spots are now where entities/gait.js plants and re-steps the feet
+       (ch._gSt: the lead side's sign; 0 = stand normally): turning or
+       drifting in the stance is taken in steps, a foot at a time. The leg
+       solve below only runs when the gait cannot have the legs (a kick, a
+       footwork step, the mount, a rig with no gait). */
+    ch._gSt = want && !passive && !mounted && !ch.cuffed && (ch.fightStance || held) ? (ch.southpaw ? -1 : 1) : 0;
+    ch._gHeel0 = ch._gHeel1 = ch._gTurn0 = ch._gTurn1 = 0;
     if (want && hr && hr.on && hr.t < 0.05) ch._mK = Math.max(ch._mK || 0, 0.85);   // a hit does not fade in
     ch._mK = damp(ch._mK || 0, want, want ? 16 : 7, dt);
     ch._mMv = damp(ch._mMv || 0, moving ? 1 : 0, 9, dt);
@@ -432,10 +478,35 @@
     rearW.set(-lx * 0.22, D.chinY - 0.02 - gy, D.faceZ + 0.02);
     PL.set(0.55, -1, -0.25); PR.set(-0.55, -1, -0.25);          // elbows down, tucked to the ribs
     // feet (group frame, rig units): lead foot forward, rear back and out, rear heel up
+    // (the same spots gait.js plants: STANCE there)
     leadF.set(lx * (D.hipX + 0.03), D.footY, 0.30);
     rearF.set(-lx * (D.hipX + 0.10), D.footY + 0.025, -0.30);
+    if (lx > 0) ch._gHeel0 = 0.10; else ch._gHeel1 = 0.10;      // the rear heel is light
     QL.set(0.25, 0.1, 1); QR.set(-0.25, 0.1, 1);                 // knees track over the toes
     }
+    /* THE FEET START WHERE THEY STAND. When this layer takes the legs (a
+       kick, a footwork step) it used to put both feet on its own spots at
+       once: a man kicking from a square stand had his plant foot slide 20 cm
+       forward under him during the chamber. While the gait has the legs its
+       planted feet are sampled here every frame (group frame, rig units),
+       and those are the spots this layer works from when it takes over; the
+       gait takes them back where this layer leaves them (gait.js plantInit
+       reads _mFt while _mOwn) and steps them home. */
+    const GV = ch._gv;
+    const FT = ch._mFt || (ch._mFt = new Float32Array(4));       // [Lx, Lz, Rx, Rz], made once per rig
+    // (GV.adopt: the gait has already let go to this layer, its plants are void)
+    if (CBZ.gait && ch._gOn && GV && GV.init && GV.w > 0.5 && !GV.adopt && ch.group) {
+      const g = ch.group, yaw = g.rotation.y, c = Math.cos(yaw), sn = Math.sin(yaw), inv = 1 / D.scale;
+      for (let i = 0; i < 2; i++) {
+        const F = GV.feet[i];
+        const dx = (F.sw ? F.tx : F.x) - g.position.x - (GV.ox || 0), dz = (F.sw ? F.tz : F.z) - g.position.z - (GV.oz || 0);
+        const o = i ? 0 : 2;                                      // gait foot 1 is the leg on +X ("L" here)
+        FT[o] = (dx * c - dz * sn) * inv; FT[o + 1] = (dx * sn + dz * c) * inv;
+      }
+      ch._mFtV = ch._mFtS = true;
+    } else if (!hadFeet) ch._mFtV = false;
+    if (ch._mFtV) { FL.x = FT[0]; FL.z = FT[1]; FR.x = FT[2]; FR.z = FT[3]; }
+    else { FT[0] = FL.x; FT[1] = FL.z; FT[2] = FR.x; FT[3] = FR.z; }   // nobody had them: this layer's own spots
     if (mounted) mountPose(ch, D, ch._mountK);
 
     // ================= PUNCH ===============================================
@@ -447,6 +518,8 @@
       let d = driveOf(p);
       // a blow that landed stops ON the man, it does not go through him
       if (ch.punchLandP >= 0 && p > ch.punchLandP) d = Math.min(d, ch._mLandD != null ? ch._mLandD : d);
+      // db: the body's share (feet, hips, shoulders), ahead of the arm
+      const db = bodyOf(p);
       const w = sstep(0, 0.14, p) * (1 - sstep(0.14, 0.34, p));
       const lvl = sstep(0, 0.30, p) * (1 - sstep(0.66, 1, p));
       const both = k.hand === "both";
@@ -454,41 +527,48 @@
       const sx = side === "L" ? 1 : -1, byDir = -sx;
       aimSide = side;
       // ---- from the ground up ----
-      S.by += byDir * (k.hip * d - k.wind * w);
-      if (both) S.by = lerp(S.by, 0, Math.max(w, d));             // two hands square the shoulders
-      S.mZ += k.fwd * d;                                          // weight rolls onto the lead leg
+      S.by += byDir * (k.hip * db - k.wind * w);
+      if (both) S.by = lerp(S.by, 0, Math.max(w, db));            // two hands square the shoulders
+      S.mZ += k.fwd * db;                                         // weight rolls onto the lead leg
       if (k.level === "ground") {
         // from the mount the hips drive forward and down into him: a punch
         // posts the weight over his face, the elbow DIVES the whole torso on him
         const dive = k.path === "groundElbow";
-        S.mZ += (dive ? 0.40 : 0.12) * d;
-        S.dl += (dive ? 0.0 : 0.04) * d;
+        S.mZ += (dive ? 0.40 : 0.12) * db;
+        S.dl += (dive ? 0.0 : 0.04) * db;
       }
       if (k.path === "upper") {
         const dip = sstep(0, 0.20, p) * (1 - sstep(0.20, 0.46, p));
-        S.dl += (k.dip || 0) * dip - 0.05 * d;                    // sink, then drive up through the legs
-        S.bx += 0.14 * dip - 0.06 * d;
+        S.dl += (k.dip || 0) * dip - 0.05 * db;                   // sink, then drive up through the legs
+        S.bx += 0.14 * dip - 0.06 * db;
         S.bz += -sx * 0.10 * dip;                                 // the punching shoulder drops to load
       } else if (k.dip) {
         S.dl += k.dip * lvl;                                      // level change: the fist goes to rib height
         S.bx += k.lean * lvl;
         S.bz += -sx * 0.16 * lvl * (k.path === "hook" ? 1 : 0.4);
       } else {
-        S.bx += k.lean * d;
+        S.bx += k.lean * db;
       }
       if (k.path === "clinch") {                                  // headbutt: cock back, then through him
         S.bx += -0.36 * sstep(0, 0.25, p) * (1 - d) + 0.50 * d;
         S.nx += -0.45 * sstep(0, 0.25, p) * (1 - d) + 0.70 * d;
       }
       if (k.path === "shove") S.bx += -0.14 * w;                  // rock back before the push
-      // rear heel turns / lead foot pivots: heel up, knee turns in
+      // rear heel turns / lead foot pivots: heel up, knee turns in. A planted
+      // foot does it on its own ball (entities/gait.js reads _gHeel/_gTurn:
+      // 0 = the leg on -X, 1 = the leg on +X); the pole and the lift are for
+      // a frame this layer solves the legs itself.
       if (k.heel) {
-        rearF.y += 0.05 * d;
-        (rear === "L" ? QL : QR).x = lerp((rear === "L" ? QL : QR).x, (rear === "L" ? -0.7 : 0.7), d);
+        rearF.y += 0.05 * db;
+        (rear === "L" ? QL : QR).x = lerp((rear === "L" ? QL : QR).x, (rear === "L" ? -0.7 : 0.7), db);
+        if (rear === "L") { ch._gHeel1 += 0.42 * db; ch._gTurn1 -= 0.55 * db; }
+        else { ch._gHeel0 += 0.42 * db; ch._gTurn0 += 0.55 * db; }
       }
       if (k.pivot) {
-        leadF.y += 0.03 * d;
-        (lead === "L" ? QL : QR).x = lerp((lead === "L" ? QL : QR).x, (lead === "L" ? -0.8 : 0.8), d);
+        leadF.y += 0.03 * db;
+        (lead === "L" ? QL : QR).x = lerp((lead === "L" ? QL : QR).x, (lead === "L" ? -0.8 : 0.8), db);
+        if (lead === "L") { ch._gHeel1 += 0.30 * db; ch._gTurn1 -= 0.60 * db; }
+        else { ch._gHeel0 += 0.30 * db; ch._gTurn0 += 0.60 * db; }
       }
       // ---- the wrist path ----
       const W = side === "L" ? WL : WR, Pp = side === "L" ? PL : PR;
@@ -499,8 +579,8 @@
       S._p = p; S._d = d; S._w = w; S._k = k; S._side = side; S._sx = sx; S._both = both;
       if (!both) {
         // the guard hand stays home at the jaw (a touch tighter on power shots)
-        O.z -= 0.05 * d * (k.hip > 0.5 ? 1 : 0.4);
-        O.y += 0.02 * d;
+        O.z -= 0.05 * db * (k.hip > 0.5 ? 1 : 0.4);
+        O.y += 0.02 * db;
       }
       if (side === "L") { S.pzL = 0.04 + k.pro * d; S.rollL = sx * (k.roll || 0) * d; }
       else { S.pzR = 0.04 + k.pro * d; S.rollR = sx * (k.roll || 0) * d; }
@@ -524,20 +604,46 @@
       S.kickSide = kSide;
       S.legK = 1;                                                 // a kick owns the legs even mid-step
       const sx = kSide === "L" ? 1 : -1;
+      /* THE WEIGHT GOES ONTO THE STANDING LEG, THE STANDING FOOT STAYS PUT.
+         The plant foot used to be dragged back under the hips while it bore
+         the whole body (18 cm along the floor on the chamber, and out again
+         on the way down). The hips travel over the foot instead: `over` is
+         how far the plant foot is in front of them. */
+      const plantZ = (kSide === "L" ? FR : FL).z;
+      const over = plantZ * kch;
+      // the kicking-side hand and the other one (body frame)
+      const kW = kSide === "L" ? WL : WR, oW = kSide === "L" ? WR : WL;
+      const kP = kSide === "L" ? PL : PR;
       if (key === "front") {
         S.bx += -0.26 * ke + 0.06 * kch;                          // lean back as the foot drives out
-        S.mZ += 0.16 * ke;                                        // the hips thrust through the teep
-        S.dl += 0.02;
+        // over the plant foot, then the hips thrust through the teep (from a
+        // square stand there is no foot in front to come over: the thrust is all of it)
+        S.mZ += 0.75 * over + (0.08 + 0.5 * Math.max(0, 0.22 - 0.75 * plantZ)) * ke;
+        S.dl += 0.04 * kch;                                       // the standing knee stays soft
+        // the hands stay home; the kicking side's drops a little to balance the leg
+        kW.y -= 0.14 * ke; kW.x += sx * 0.08 * ke; kW.z -= 0.04 * ke;
       } else if (key === "round" || key === "low") {
+        const high = key === "round";
         const turn = sstep(0.06, 0.42, kp) * (1 - sstep(0.72, 1, kp));
-        S.mYaw = -sx * (key === "round" ? 1.05 : 0.70) * turn;    // the plant foot pivots, the hip turns over
-        S.bz += sx * (key === "round" ? 0.30 : 0.18) * ke;        // counter-lean off the kicking side
-        S.bx += (key === "low" ? -0.18 : -0.10) * ke;
-        S.mZ += 0.06 * ke;
+        const yaw = -sx * (high ? 1.05 : 0.70) * turn;            // the plant foot pivots, the hip turns over
+        S.mYaw = yaw;
+        // the shoulders stay behind the hips and the eyes stay on him: the
+        // whole body used to turn as one block, face and all, 60 degrees off the man
+        S.by += -0.40 * yaw; S.ny += -0.70 * yaw;
+        S.bz += sx * (high ? 0.30 : 0.18) * ke;                   // counter-lean off the kicking side
+        S.bx += (high ? -0.10 : -0.18) * ke;
+        S.mZ += 0.75 * over + (0.06 + 0.5 * Math.max(0, 0.22 - 0.75 * plantZ)) * ke;
+        S.dl += 0.05 * kch;
+        // the arm on the kicking side swings down and back against the leg;
+        // the other glove stays on the jaw
+        _t.set(sx * 0.46, D.shY - 0.46, -0.16);
+        kW.lerp(_t, (high ? 0.85 : 0.55) * ke);
+        kP.lerp(_t2.set(sx * 0.5, -0.3, -1), ke);
+        oW.x += sx * 0.05 * ke; oW.y += 0.03 * ke;
       } else {                                                    // knee: curl over it, rise onto the plant toe
         S.bx += 0.24 * ke;
         S.dl += -0.05 * ke;
-        S.mZ += 0.10 * ke;
+        S.mZ += 0.5 * over + 0.10 * ke;
       }
     }
 
@@ -632,8 +738,11 @@
       solveArm(ch, "R", WR, PR, S.rollR, S.pzR, armK, S._side === "R" ? ext : null);
     }
 
-    // legs: feet planted by IK (group frame → model frame)
-    if (legK > 0.002) {
+    // legs: feet planted by IK (group frame → model frame). Not while the
+    // gait has them outright: it plants the same spots in the world.
+    const gaitLegs = !kickK && !(fs && fs.on) && !mounted && !!CBZ.gait && !!ch._gOn && !!GV && GV.w >= 0.999;
+    if (legK > 0.002 && !gaitLegs) {
+      ch._mOwn = true;
       if (kickK) kickLegs(ch, D, kickK, kSide, kp, ke, kch);
       toModel(ch, FL); toModel(ch, FR);
       _poleYaw = ch._mMr || 0;                                    // knees turn with the pivoting hips
@@ -829,34 +938,46 @@
     const F = side === "L" ? FL : FR, Q = side === "L" ? QL : QR;
     const plant = side === "L" ? FR : FL, PQ = side === "L" ? QR : QL;
     const sx = side === "L" ? 1 : -1;
-    // the plant foot comes under the hips
-    plant.x = lerp(plant.x, -sx * D.hipX * 0.8, ch01); plant.z = lerp(plant.z, 0.04, ch01);
+    // (the plant foot stays where it stands: the hips came over it, MP.strike)
     const aimW = ch.kickAim || null;
     if (key === "front") {
-      _C.set(sx * D.hipX * 0.7, D.footY + 0.55, 0.20);           // knee up, foot under it
+      _C.set(sx * D.hipX * 0.7, D.footY + 0.55, S.mZ + 0.12);    // knee up, foot under it (the hips have come forward)
       if (aimW) { _A.copy(aimW); ch.group.worldToLocal(_A); _A.divideScalar(D.scale); }
       else _A.set(sx * 0.10, D.hipY + 0.10, 1.05);
       F.lerp(_C, ch01); F.lerp(_A, e);
       Q.set(sx * 0.15, 0.7, 1);
     } else if (key === "knee") {
       // the foot comes up behind as the knee drives up and forward
-      _C.set(sx * D.hipX * 0.6, D.footY + 0.20, -0.12);
+      // (measured from the HIPS, which have come forward over the standing
+      // foot: left at fixed spots the foot stayed 15 cm behind them and the
+      // shin was flung up at his own backside)
+      _C.set(sx * D.hipX * 0.6, D.footY + 0.20, S.mZ - 0.20);
       F.lerp(_C, ch01);
-      _A.set(sx * D.hipX * 0.5, D.footY + 0.78, 0.10);
+      _A.set(sx * D.hipX * 0.5, D.footY + 0.78, S.mZ + 0.02);
       F.lerp(_A, e);
       Q.set(0, 0.35, 1);
     } else {
       // round / low: chamber out to the side, then the shin sweeps across
       const high = key === "round";
-      _C.set(sx * 0.62, D.footY + (high ? 0.62 : 0.34), -0.10);
+      _C.set(sx * 0.62, D.footY + (high ? 0.62 : 0.46), -0.10);
       if (aimW) { _A.copy(aimW); ch.group.worldToLocal(_A); _A.divideScalar(D.scale); }
       else _A.set(-sx * 0.05, high ? D.hipY + 0.28 : D.hipY - 0.30, 1.0);
+      // the SHIN lands, so the foot goes on past the point (sent to the
+      // point itself, the knee had to fold to a right angle to get it there)
+      _A.z += high ? 0.12 : 0.10; _A.x -= sx * (high ? 0.10 : 0.06);
       F.lerp(_C, ch01);
       const sweep = e;
       F.set(lerp(F.x, _A.x, sweep), lerp(F.y, _A.y, Math.min(1, sweep * 1.4)), lerp(F.z, _A.z, sweep));
       F.x += sx * 0.25 * Math.sin(Math.PI * sweep);              // the arc
+      // a low kick CHOPS: the shin comes over the top and down into the
+      // thigh (it used to rise into it from shin height)
+      if (!high) F.y += 0.16 * Math.sin(Math.PI * sweep);
       Q.set(-sx * 0.2, 1, 0.35);                                  // the knee turns over
-      PQ.x *= 1 - ch01;
+      // THE STANDING FOOT PIVOTS with the hips, on its ball: toes out the way
+      // the hip turned, heel off the floor while it turns
+      const a = (ch._mMr || 0) * 1.15;
+      PQ.set(Math.sin(a), 0.1, Math.cos(a));
+      plant.y += 0.035 * Math.min(1, Math.abs(a));
     }
   }
 
@@ -907,6 +1028,8 @@
       S.bz += -sgn * 0.16 * amt * f;                              // he dips onto the hurt side
       const F = hr.side === "L" ? FL : FR;
       F.z += 0.06 * f; F.y += 0.03 * f;
+      // (planted by the gait: that knee gives forward over a lifted heel)
+      if (hr.side === "L") ch._gHeel1 += 0.35 * f * amt; else ch._gHeel0 += 0.35 * f * amt;
       S.bx += 0.10 * f;
     } else if (hr.kind === "stagger" || hr.kind === "liver") {
       const s = sstep(0, 0.06, t) * (1 - sstep(0.22, Math.max(0.3, hr.dur), t));

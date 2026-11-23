@@ -107,7 +107,8 @@
     if (!V || !V.strike) return null;
     const blow = { M, swing, stabbing, kind };
     return V.strike(n, playerA(), {
-      kind, arm, weapon: stabbing ? SHANK_W : null, maxLunge: 0.6,
+      kind, arm, weapon: stabbing ? SHANK_W : null,
+      maxLunge: kind === "hook" || kind === "body" ? 0.8 : 0.6,   // a hook is thrown from a step closer (verbs_strike REACH)
       heavy: kind === "headbutt" || kind === "upper",
       onLand: function (res) { if (!landBlow(n, blow, res)) res.reaction = "none"; },
       // a shove is CBZ.verbs.shove when CORE's sessions exist: the world
@@ -3554,8 +3555,16 @@
     if (n.huntPlayer > 0) {
       n.huntPlayer -= dt;
       const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
-      n.target.set(px, 0, pz);
       const d = Math.hypot(px - n.group.position.x, pz - n.group.position.z);
+      /* HE STOPS AT ARM'S LENGTH. His target was your own position, so he
+         walked until the two bodies met and threw everything from chest to
+         chest. He comes to 1.15 m (a jab's distance), facing you, and backs
+         out to it when you close on him. */
+      if (d > 0.05) {
+        const k = 1.15 / d;
+        n.target.set(px + (n.group.position.x - px) * k, 0, pz + (n.group.position.z - pz) * k);
+        if (d < 2.2) { n._faceYaw = Math.atan2(px - n.group.position.x, pz - n.group.position.z); n._faceTTL = 0.3; }
+      } else n.target.set(px, 0, pz);
       n.hitCD -= dt;
       // he SQUARES UP inside striking range — the wind-up is the telegraph, and
       // it is what the printed line used to stand in for.

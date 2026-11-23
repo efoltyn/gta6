@@ -226,7 +226,8 @@
   function footRec() {
     return { sw: false, u: 0, ur: 3, dur: 0.3, x: 0, y: 0, z: 0, yaw: 0,
       ax: 0, ay: 0, az: 0, sx: 0, sy: 0, sz: 0, syaw: 0, spsi: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
-      tyOk: false, psi: 0, psiW: 0, idle: false, tw: 0, gy: null, cl0: null, pcl: null };
+      tyOk: false, psi: 0, psiW: 0, idle: false, tw: 0, gy: null, cl0: null, pcl: null,
+      cx: 0, cz: 0, cyaw: 0 };                       // this frame's contact (a planted foot turned on its ball)
   }
   function state(ch) {
     let G = ch._gv;
@@ -489,17 +490,43 @@
   }
   const _p = { x: 0, y: 0, z: 0 }, _q = { x: 0, y: 0, z: 0 };
 
+  /* ---- WHERE A STANDING FOOT BELONGS (body frame, metres) --------------------
+     Under the hip, a touch of toe-out. In a FIGHTING STANCE (ch._gSt, written
+     by entities/meleeposes.js: the sign of the lead side, 0 = none) the lead
+     foot is a foot's length forward and the rear one back and out, turned
+     out, heel light. They are the same spots meleeposes holds the feet at
+     when it solves the legs itself (a kick, a footwork step), so handing the
+     legs between the two moves nothing. Because they are ordinary rest
+     spots, squaring up, standing down and turning to face a man are all
+     taken in steps by the rest logic in post, never slid. */
+  const _rs = { lat: 0, fore: 0, toe: 0 };
+  function restSpot(ch, G, g, i) {
+    const st = G.moving ? 0 : (ch._gSt || 0);
+    if (st) {
+      const lead = SIDE[i] === st;
+      _rs.lat = SIDE[i] * (g.hipX + (lead ? 0.03 : 0.10)) * g.s;
+      _rs.fore = (lead ? 0.30 : -0.30) * g.s;
+      _rs.toe = SIDE[i] * (lead ? 0.12 : 0.50);
+    } else {
+      _rs.lat = SIDE[i] * neutralLat(ch, G, g); _rs.fore = 0; _rs.toe = SIDE[i] * TOE_OUT;
+    }
+    return _rs;
+  }
+
   function plantInit(ch, G, g) {
     const grp = ch.group, yaw = grp.rotation.y + (G.hy || 0);
     const c = Math.cos(yaw), s = Math.sin(yaw);
-    const lat = neutralLat(ch, G, g);
+    // meleeposes was solving the legs: its feet (group frame, rig units;
+    // [+X leg x, z, -X leg x, z]) are where they are planted, not the rest spots
+    const mf = ch._mOwn && ch._mFt ? ch._mFt : null;
     for (let i = 0; i < 2; i++) {
-      const F = G.feet[i], lx = SIDE[i] * lat;
-      F.x = grp.position.x + G.ox + lx * c;
-      F.z = grp.position.z + G.oz - lx * s;
+      const F = G.feet[i], R = restSpot(ch, G, g, i);
+      const lat = mf ? mf[i ? 0 : 2] * g.s : R.lat, fore = mf ? mf[i ? 1 : 3] * g.s : R.fore;
+      F.x = grp.position.x + G.ox + lat * c + fore * s;
+      F.z = grp.position.z + G.oz - lat * s + fore * c;
       const gy = groundY(F.x, F.z, grp.position.y + 0.6);
       F.y = gy != null && Math.abs(gy - grp.position.y) < 0.6 ? gy : grp.position.y;
-      F.yaw = yaw + (G.hy || 0) + SIDE[i] * TOE_OUT;    // a touch of toe-out
+      F.yaw = yaw + (G.hy || 0) + R.toe;                // a touch of toe-out
       F.sw = false; F.u = 0; F.psi = 0; F.idle = false;
       ankleFrom(g, F.x, F.y, F.z, F.yaw, 0, _ank);
       F.ax = _ank.x; F.ay = _ank.y; F.az = _ank.z;
@@ -519,7 +546,9 @@
     const yaw0 = grp.rotation.y;
     const yawP = yaw0 + clamp(G.yawRate, -4, 4) * Math.min(tRem, 0.5) + (G.hy || 0);
     const c = Math.cos(yawP), s = Math.sin(yawP);
-    const lat = neutralLat(ch, G, g) * SIDE[i];
+    // a foot stepping at rest goes to its rest spot (a stance's is fore or aft)
+    const R = restSpot(ch, G, g, i);
+    const lat = R.lat, fore = R.fore, toe = R.toe;
     let ahead = 0, vx = 0, vz = 0;
     if (G.moving && !F.idle) {
       const tSt = M.duty / M.fc;                        // the stance this foot is about to start
@@ -536,7 +565,7 @@
       const lr = (vx * c - vz * s) * ahead;               // lateral share of the lead
       rx -= lr * 0.35 * c; rz += lr * 0.35 * s;
     }
-    let tx = rx + lat * c, tz = rz - lat * s;
+    let tx = rx + lat * c + fore * s, tz = rz - lat * s + fore * c;
     // NO CROSSOVER: the swing foot lands on its own side of the planted one
     const O = G.feet[1 - i];
     const minSep = Math.max(0.06, g.W * g.s * 0.55);
@@ -545,7 +574,7 @@
     if (SIDE[i] > 0 && tlx < olx + minSep) { const d = olx + minSep - tlx; tx += d * c; tz -= d * s; tlx += d; }
     if (SIDE[i] < 0 && tlx > olx - minSep) { const d = tlx - (olx - minSep); tx -= d * c; tz += d * s; tlx -= d; }
     F.tx = tx; F.tz = tz;
-    F.tyaw = yawP + SIDE[i] * TOE_OUT;
+    F.tyaw = yawP + toe;
     // the ground there: asked once the foot is on its way down (one query a step)
     if (!F.tyOk && F.u > 0.45) {
       const gy = groundY(tx, tz, grp.position.y + 0.6);
@@ -591,7 +620,8 @@
       else if (ch.koT > 0 || ch.koPose || (MP && MP.fallActive && MP.fallActive(ch))) want = 0;
       else if (ch.kickT > 0 || (ch.footStep && ch.footStep.on)) want = 0;
       else if (ch._sKeepLegs) want = 0;                // a soldier move that keys its own legs (a dive, a crawl)
-      else want = 1 - clamp01(ch._mK || 0);             // the fight stance solves its own feet
+      else if (ch._mountK > 0) want = 0;               // kneeling astride a man (meleeposes' mount)
+      // (a fight stance's feet are planted here like any others: restSpot)
       /* DISTANCE LOD. The solve costs ~10 us a body; past ~60 m a planted
          foot's centimetres are under a pixel, so a far body walks the cheap
          sine legs at the same cadence (blended, with hysteresis: no pop). */
@@ -614,6 +644,11 @@
       }
       return;
     }
+    // meleeposes had the legs (a kick, a footwork step, the mount): the old
+    // plants are void, the feet are taken back where it leaves them
+    const mel = ch.kickT > 0 || (ch.footStep && ch.footStep.on) || ch._mountK > 0;
+    if (mel) G.adopt = true;
+    else if (G.adopt) { G.adopt = false; G.init = false; }
     if (!G.init) plantInit(ch, G, g);
     const M = G.M, yaw = grp.rotation.y;
     const c = frac((ch.phase || 0) / TAU);
@@ -682,22 +717,23 @@
     if (!moving) {
       G.restT += dt;
       swinging = (G.feet[0].sw ? 1 : 0) + (G.feet[1].sw ? 1 : 0);
-      if (!swinging && G.restT > 0.07) {
-        const lat = neutralLat(ch, G, g);
+      // (a man squared up moves his feet quicker than one standing about)
+      const stance = !!ch._gSt;
+      if (!swinging && G.restT > (stance ? 0.03 : 0.07)) {
         const yH = yaw + (G.hy || 0);
         const cy = Math.cos(yH), sy = Math.sin(yH);
         let worst = -1, ws = 1;
         for (let i = 0; i < 2; i++) {
-          const F = G.feet[i];
-          const nx = grp.position.x + G.ox + SIDE[i] * lat * cy, nz = grp.position.z + G.oz - SIDE[i] * lat * sy;
+          const F = G.feet[i], R = restSpot(ch, G, g, i);
+          const nx = grp.position.x + G.ox + R.lat * cy + R.fore * sy, nz = grp.position.z + G.oz - R.lat * sy + R.fore * cy;
           const off = Math.hypot(F.x - nx, F.z - nz) / (0.085 * g.Lw / 0.665);
-          const tw = Math.abs(wrap(F.yaw - (yH + SIDE[i] * TOE_OUT))) / 0.40;
+          const tw = Math.abs(wrap(F.yaw - (yH + R.toe))) / 0.40;
           const sc = Math.max(off, tw);
           if (sc > ws) { ws = sc; worst = i; }
         }
         if (worst >= 0) {
           const F = G.feet[worst];
-          liftFoot(F, 0.30 * Math.sqrt(g.Lw / 0.665), 0);
+          liftFoot(F, (stance ? 0.22 : 0.30) * Math.sqrt(g.Lw / 0.665), 0);
           F.idle = true; F.ur = 1 / F.dur;
           G.restT = 0;
         }
@@ -735,13 +771,24 @@
           const bx = F.x + Math.sin(F.yaw) * bf, bz = F.z + Math.cos(F.yaw) * bf;
           F.x = bx - Math.sin(ny) * bf; F.z = bz - Math.cos(ny) * bf; F.yaw = ny;
         }
-        let psi = 0;
+        let psi = 0, cx = F.x, cz = F.z, cyaw = F.yaw;
         if (moving && !F.idle) {
           const cl = frac(c - TD[i]);
           psi = stancePsi(M, clamp01(cl / dutyOf(i)), dir) * alongK;
+        } else if (ch._gSt) {
+          // a punch thrown off this foot: the heel comes up and the foot
+          // turns on its ball (meleeposes asks; the ball stays where it is)
+          psi = (i ? ch._gHeel1 : ch._gHeel0) || 0;
+          const dy = (i ? ch._gTurn1 : ch._gTurn0) || 0;
+          if (dy) {
+            const bf = g.bf * g.s;
+            const bx = F.x + Math.sin(F.yaw) * bf, bz = F.z + Math.cos(F.yaw) * bf;
+            cyaw = F.yaw + dy;
+            cx = bx - Math.sin(cyaw) * bf; cz = bz - Math.cos(cyaw) * bf;
+          }
         }
-        F.psi = psi; F.psiW = 1;
-        ankleFrom(g, F.x, F.y, F.z, F.yaw, psi, _ank);
+        F.psi = psi; F.psiW = 1; F.cx = cx; F.cz = cz; F.cyaw = cyaw;
+        ankleFrom(g, cx, F.y, cz, cyaw, psi, _ank);
         F.ax = _ank.x; F.ay = _ank.y; F.az = _ank.z;
       }
     }
@@ -812,7 +859,7 @@
           const want = lo > hi ? (lo + hi) / 2 : clamp(psi, lo, hi);
           if (Math.abs(want - psi) < 1e-4) break;
           psi = want; F.psi = psi;
-          ankleFrom(g, F.x, F.y, F.z, F.yaw, psi, _ank);
+          ankleFrom(g, F.cx, F.y, F.cz, F.cyaw, psi, _ank);
           F.ax = _ank.x; F.ay = _ank.y; F.az = _ank.z;
           toModel(ch, G, F.ax, F.ay, F.az, _p);
           ik(i);
@@ -842,7 +889,7 @@
       // the ball sideways along the floor. (At partial weight the ankle solve
       // blends it, see footPitch.)
       const foot = leg.userData.foot;
-      if (foot && W0 >= 0.98 && THREE()) footOrient(foot, yaw, leg, low, F.yaw, F.psi);
+      if (foot && W0 >= 0.98 && THREE()) footOrient(foot, yaw, leg, low, F.sw ? F.yaw : F.cyaw, F.psi);
     }
     ch._gFootW = W0;
   }

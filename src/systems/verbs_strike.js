@@ -128,9 +128,24 @@
 
   /* ---- the blow table: natural reach (m, centre to centre, two adults with
      no step), power, and the stagger step a clean one forces ---- */
+  /* (2026-11-23) THE HOOKS CAME IN, THE KICKS WENT OUT. A hook keeps its
+     elbow near a right angle now (meleeposes KIND ext), so the fist is 0.55 m
+     from the shoulder, not 0.65: thrown from the old 1.30 it would stop short
+     of him. The kicks were the other way: a leg is 0.87 m and the hips come
+     over the standing foot, but the table had a man step in to 0.83-0.87 m to
+     kick, closer than he punches, so every kick landed half folded with the
+     knee still bent 90 degrees. They are thrown from where a leg reaches:
+     front 1.15 (the foot can meet his belly out to 1.32, or 1.16 from a
+     square stand with no stance under it), round 1.02, low 1.08.
+     (Same day, after the first capture: still folded. At 1.06 m the foot is
+     sent to a belly 0.99 rig units from the hip of a 1.25 leg, a knee bent
+     62 degrees; main's kicks read as kicks because they met him near 1.2 m.
+     Now front 1.28, round 1.15, low 1.15: the leg is all but straight when
+     it lands. And a strike has a NEAR limit as well as a far one: see RANGE
+     in V.strike.) */
   const REACH = {
-    jab: 1.28, cross: 1.30, hook: 1.30, upper: 0.80, body: 1.32, bodyStraight: 1.12, overhand: 1.42,
-    elbow: 0.92, headbutt: 0.74, stab: 0.95, shove: 1.10, front: 0.95, round: 0.90, low: 0.95, knee: 0.62,
+    jab: 1.28, cross: 1.30, hook: 1.00, upper: 0.80, body: 1.20, bodyStraight: 1.12, overhand: 1.42,
+    elbow: 0.92, headbutt: 0.74, stab: 0.95, shove: 1.10, front: 1.28, round: 1.15, low: 1.15, knee: 0.62,
     gnp: 1.0, gnpElbow: 0.9, hammer: 1.0,
     // with a weapon in the hand the reach is the weapon's (the contact point
     // is carried out along the forearm by weapon.len, see WEAPON below)
@@ -142,6 +157,9 @@
     gnp: 0.62, gnpElbow: 0.86, hammer: 0.72,
     bat: 1.0, slash: 0.42, butt: 0.85,
   };
+  // the nearest a straight is thrown from (m, two adults): inside it he gives ground first
+  const NEAR = { jab: 0.80, cross: 0.82, bodyStraight: 0.72, overhand: 0.88, butt: 0.85 };
+  const _pk0 = { Ba: null, kind: null, att: null };
   const ZONE_MUL = { jaw: 1.3, head: 1.0, liver: 1.25, body: 0.8, legs: 0.6 };
   const FIST_R = 0.05;                      // m: the striking surface (knuckles, elbow point, shin)
   /* WEAPONS: what a held thing adds to a blow. len = how far past the hand
@@ -311,6 +329,34 @@
       finish(prev, true);
     }
     if (live.length >= MAX) return null;
+    /* RANGE, BOTH WAYS. A blow used to step IN to its range and never out:
+       after a hook or a knee had closed the two men up, the next kick was
+       thrown chest to chest, the leg folded between them. A long kick is
+       thrown from its own distance: closer than that the striker takes the
+       ground back first (a step back on his feet, the same root-and-feet
+       step as the lunge, reversed), and with a wall behind him or too much
+       to make up he throws the knee, which is the kick that belongs there.
+       A straight punch has a near limit too (NEAR): inside it he gives a
+       short step back so the arm has room to go out. */
+    let aim0 = tgt || null;
+    if (!aim0 && opts.candidates) { _pk0.Ba = Ba; _pk0.kind = kind; _pk0.att = att; aim0 = pickAim(_pk0, opts); _pk0.Ba = _pk0.att = null; }
+    let backD = 0;
+    if (aim0 && opts.lunge !== false && Ba.pos) {
+      const Bt0 = bod(aim0), tp0 = Bt0 && Bt0.pos, ap0 = Ba.pos;
+      const long = kind === "front" || kind === "round" || kind === "low";
+      const sc0 = ch ? scaleOf(ch) / 0.7 : 1;
+      const want0 = long ? V.reachOf(kind, att) * 0.92 : (NEAR[kind] || 0) * sc0;
+      if (tp0 && want0 > 0) {
+        const dx0 = tp0.x - ap0.x, dz0 = tp0.z - ap0.z, d0 = Math.hypot(dx0, dz0) || 1e-4;
+        const back = want0 - d0;
+        if (back > (long ? 0.08 : 0)) {
+          const cap = long ? 0.55 : 0.30, y0 = (ap0.y || 0) + 0.6, far = Math.min(back, cap) + 0.4;
+          const shut = walled(ap0.x, y0, ap0.z, ap0.x - dx0 / d0 * far, y0, ap0.z - dz0 / d0 * far);
+          if (long && (shut || back > cap) && d0 < 0.95 * sc0) kind = "knee";
+          else if (!shut) backD = Math.min(back + (long ? 0 : 0.08), cap);
+        }
+      }
+    }
     const kick = isKick(kind);
     const S = getSt();
     S.on = true; S.id = ++serial;
@@ -340,7 +386,7 @@
     res.reaction = "none"; res.stagger = false; res.blood = 0; res.kind = kind; res.heavy = S.heavy;
     res.weapon = S.weapon; res.attacker = att; res.target = null; res.power = S.power; res.strike = S;
     // the player swings at whoever is in front: pick the aim among the candidates
-    if (!S.tgt && opts.candidates) S.aimT = pickAim(S, opts); else S.aimT = S.tgt;
+    S.aimT = aim0;
     // ---- the swing on the rig ----
     if (ch) {
       ch._mSwingN = (ch._mSwingN || 0) + 1;
@@ -372,12 +418,17 @@
           // hand further back, and the step has to cover that too
           let chin = 0;
           const tch0 = Bt.ch;
-          if (tch0 && tch0.parts && S.level !== "legs") {
+          if (tch0 && tch0.parts && S.level !== "legs" && !kick) {   // (a kick goes to the body: his chin is not its range)
             const Z = zonesOf(tch0);
             const fwd = -((Z.jaw.c.x - tp.x) * dx + (Z.jaw.c.z - tp.z) * dz) / d;
             chin = Math.max(0, 0.20 * (scaleOf(tch0) / 0.7) - fwd);
           }
-          const need = d + Math.max(0, pend) + chin - V.reachOf(kind, att) * 0.92;
+          if (backD > 0.03) {
+            // too close for this blow: the rear foot goes back first and the root follows
+            S.lunge.D = backD; S.lunge.dx = -dx / d; S.lunge.dz = -dz / d; S.lunge.last = 0;
+            MP.startStep(ch, 0, -backD / scaleOf(ch), S.dur * (kick ? 0.42 : 0.5), MP.leadSide(ch) === "l" ? "R" : "L");
+          }
+          const need = backD > 0.03 ? 0 : d + Math.max(0, pend) + chin - V.reachOf(kind, att) * 0.92;
           const maxL = opts.maxLunge != null ? opts.maxLunge : (Ba.isPlayer ? 0.75 : 0.45);
           const D = Math.max(0, Math.min(maxL, need));
           if (D > 0.03 && !walled(ap.x, (ap.y || 0) + 1.2, ap.z, tp.x, (tp.y || 0) + 1.2, tp.z)) {
@@ -480,10 +531,10 @@
     // the attacker's rig stops ON him (or bounces off the guard)
     const ch = Ba.ch;
     if (ch) {
-      if (S.kick) { ch.kickLandP = S.p; ch._mKLandE = Math.sin(clamp01((S.p - 0.22) / 0.5) * Math.PI); }
+      if (S.kick) { ch.kickLandP = S.p; ch._mKLandE = MP.kickDrive ? MP.kickDrive(S.p) : Math.sin(clamp01((S.p - 0.22) / 0.5) * Math.PI); }
       else {
         ch.punchLandP = S.p; ch._mLandD = MP.drive(S.p);
-        if (blocked) ch.punchT = Math.min(ch.punchT, ch.punchDur * (1 - MP.BEAT.recover));
+        if (blocked) ch.punchT = Math.min(ch.punchT, ch.punchDur * (1 - (MP.BEAT.bounce || MP.BEAT.recover)));
       }
     }
     const o = S.opts;
