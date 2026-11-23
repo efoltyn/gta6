@@ -1009,7 +1009,7 @@
       "|" + (m.roughness != null ? m.roughness : -1) +
       "|" + (m.metalness != null ? m.metalness : -1) +
       "|" + (m.alphaTest || 0) + "|" + (m.side | 0) + "|" + (m.opacity != null ? m.opacity : 1) +
-      "|" + (m.flatShading ? 1 : 0) + "|" + (m.fog === false ? 0 : 1) +
+      "|" + (m.flatShading ? 1 : 0) + (m._cbzLook ? "L" : "") + "|" + (m.fog === false ? 0 : 1) +
       "|" + (m.depthWrite === false ? 0 : 1) +
       "|" + (o.castShadow ? 1 : 0) + (o.receiveShadow ? 1 : 0) +
       "|" + (o.renderOrder | 0);

@@ -1699,7 +1699,7 @@
   const MATS = new Map();
   const MINE = new Set();
   function plainSkin(hex) {
-    return CBZ.cmat ? CBZ.cmat(hex) : new THREE.MeshLambertMaterial({ color: hex });
+    return CBZ.cmat ? (CBZ.bodyMat || CBZ.cmat)(hex) : new THREE.MeshLambertMaterial({ color: hex });
   }
   // one shared material per (skin tone x chart): cmat's own material for the
   // tone (Lambert, or its PBR twin on a PBR tier) with the chart as its map

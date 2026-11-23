@@ -3169,7 +3169,7 @@
     // every body wearing this outfit key. One closure per outfit, ever.
     const _texDispose = tex.dispose;
     tex.dispose = function () { tex._cbzDead = true; return _texDispose.apply(this, arguments); };
-    const m = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5 });
+    const m = lookMat(new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5 }));
     m._shared = true;                               // clearCityPeds must never dispose it
     m._cbzClothKey = key;                           // the audit's "this is painted cloth" mark
     const set = { mat: m, tex, parts, bodyHex: null, neckHex: null, yoke: null, partsY: parts, c: c };
@@ -3214,7 +3214,7 @@
         // and a dead texture on an alphaTest material discards the whole mesh
         // (see THE DEFAULT-LOOK GUARANTEE). A yoke that goes white is a blemish;
         // a yoke that vanishes is a hole in a neck.
-        const ym = new THREE.MeshLambertMaterial({ map: yt });
+        const ym = lookMat(new THREE.MeshLambertMaterial({ map: yt }));
         ym._shared = true;
         ym._cbzClothKey = key + "~yoke";
         set.yoke = { mat: ym, tex: yt, hex: yokeHex };
@@ -3544,7 +3544,7 @@
     if (m && clothMatOk(m)) return m;
     const tex = pelvisMask();
     if (!tex) return null;
-    m = new THREE.MeshLambertMaterial({ map: tex, color: key });
+    m = lookMat(new THREE.MeshLambertMaterial({ map: tex, color: key }));
     m._shared = true;
     m._cbzClothKey = "pelvis~" + key;
     return (pelvisMats[key] = m);
@@ -3806,8 +3806,7 @@
     const k = (hex | 0) & 0xffffff;
     let m = SKIRT_MAT[k];
     if (!m) {
-      const base = CBZ.cmat ? CBZ.cmat(k) : null;
-      m = base ? base.clone() : new THREE.MeshLambertMaterial({ color: k });
+      m = cmat(k).clone();
       m.side = THREE.DoubleSide;
       SKIRT_MAT[k] = m;
     }
@@ -4165,7 +4164,13 @@
   //  CBZ.cityAttachBandana(ch, hex) — pass null/undefined hex to remove it.
   //  ch._bandana is the worn group (null when bare) so callers can test it.
   // ============================================================
-  function cmat(hex) { return CBZ.cmat ? CBZ.cmat(hex) : new THREE.MeshLambertMaterial({ color: hex }); }
+  // Cloth shows its authored colour on screen: every material this file makes
+  // carries the look mark (world/materials.js CBZ.lookMat / CBZ.bodyMat).
+  function lookMat(m) { return CBZ.lookMat ? CBZ.lookMat(m) : m; }
+  function cmat(hex) {
+    const f = CBZ.bodyMat || CBZ.cmat;
+    return f ? f(hex) : new THREE.MeshLambertMaterial({ color: hex });
+  }
   function cityAttachBandana(ch, hex) {
     const HW = CBZ.headwear;
     if (!ch || !HW) return null;

@@ -539,7 +539,8 @@
   }
 
   // ------------------------------------------------------------ materials
-  function trimMat(hex) { return CBZ.cmat ? CBZ.cmat(hex) : new THREE.MeshLambertMaterial({ color: hex }); }
+  // a shoe is cloth on a body: the look-marked shared material (world/materials.js)
+  function trimMat(hex) { const f = CBZ.bodyMat || CBZ.cmat; return f ? f(hex) : new THREE.MeshLambertMaterial({ color: hex }); }
 
   // ------------------------------------------------------------ fitting
   /* Put `style` on a leg character.js built (leg.userData.foot is the ankle
@@ -554,7 +555,7 @@
     const G = geometry(st.id, lod, side);
     let m = leg.userData.cap && leg.userData.cap.name === "shoe" ? leg.userData.cap : null;
     if (!m) {
-      m = new THREE.Mesh(G.upper, CBZ.cmat ? CBZ.cmat(color) : new THREE.MeshLambertMaterial({ color }));
+      m = new THREE.Mesh(G.upper, trimMat(color));
       m.name = "shoe";
       m.castShadow = true; m.receiveShadow = true;
       foot.add(m);

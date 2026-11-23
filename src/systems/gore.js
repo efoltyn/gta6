@@ -4701,13 +4701,14 @@
     const undo = [];
     eachBodyMesh(ch, BODY_SLOTS, function (mesh) {
       undo.push({ m: mesh, mat: mesh.material });
-      mesh.material = lambert(treatHex(mesh.material.color.getHex(), T.to, T.k, T.desat));
+      // still a body: the treated colour shows as authored, like the living one
+      mesh.material = (CBZ.bodyMat || lambert)(treatHex(mesh.material.color.getHex(), T.to, T.k, T.desat));
     });
     const head = ch.skinSlots.head && ch.skinSlots.head[0];
     if (head && head.material && head.material.color) {
       const hx = treatHex(head.material.color.getHex(), T.head, T.hk, T.desat);
       undo.push({ m: head, mat: head.material, tone: ch.skinTone });
-      head.material = lambert(hx);
+      head.material = (CBZ.bodyMat || lambert)(hx);
       ch.skinTone = hx;                 // so normalizeHead re-asserts the DEAD tone
     }
     ch._treated = { kind, undo };

@@ -33,7 +33,13 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const mat = CBZ.mat, cmat = CBZ.cmat, boxGeom = CBZ.boxGeom;
+  const boxGeom = CBZ.boxGeom;
+  // Every material on a body is marked to show its authored colour on screen
+  // (the look curve, world/materials.js). Pages without that file get the
+  // plain materials they always had.
+  const lookMat = CBZ.lookMat || function (m) { return m; };
+  const cmat = CBZ.bodyMat || CBZ.cmat;
+  const mat = function (color, opts) { return lookMat(CBZ.mat(color, opts)); };
   let _headBase = null;
 
   CBZ.CONFIG = CBZ.CONFIG || {};
@@ -1534,7 +1540,7 @@
     if (_hairMats[k]) return _hairMats[k];
     const map = hairTex(kind);
     if (!map) return (_hairMats[k] = cmat(hex));
-    const m = new THREE.MeshLambertMaterial({ color: hex, map: map, alphaTest: kind === "stubble" ? 0 : 0.5 });
+    const m = lookMat(new THREE.MeshLambertMaterial({ color: hex, map: map, alphaTest: kind === "stubble" ? 0 : 0.5 }));
     m._shared = true;
     return (_hairMats[k] = m);
   }
@@ -1924,7 +1930,7 @@
       }
     } catch (e) { map = null; }
     // Phong: the specular highlight off a light is the WET look of a real eye
-    m = new THREE.MeshPhongMaterial({ color: map ? 0xffffff : 0xe6e0d4, map: map, specular: 0x3c3c3c, shininess: 80 });
+    m = lookMat(new THREE.MeshPhongMaterial({ color: map ? 0xffffff : 0xe6e0d4, map: map, specular: 0x3c3c3c, shininess: 80 }));
     m._shared = true;
     _eyeMats[hex] = m;
     return m;
@@ -2092,7 +2098,7 @@
         }
       }
     } catch (e) { map = null; }
-    _farEyeMat = new THREE.MeshLambertMaterial({ color: map ? 0xffffff : 0x9a8f84, map: map });
+    _farEyeMat = lookMat(new THREE.MeshLambertMaterial({ color: map ? 0xffffff : 0x9a8f84, map: map }));
     _farEyeMat._shared = true;
     return _farEyeMat;
   }

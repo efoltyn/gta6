@@ -1924,7 +1924,8 @@
     const r = Math.round(((hex >> 16) & 255) * k), g = Math.round(((hex >> 8) & 255) * k), b = Math.round((hex & 255) * k);
     return (Math.min(255, r) << 16) | (Math.min(255, g) << 8) | Math.min(255, b);
   }
-  const cm = (hex, o) => (CBZ.cmat ? CBZ.cmat(hex, o) : new THREE.MeshLambertMaterial({ color: hex }));
+  // cloth on a body: the look-marked shared material (world/materials.js)
+  const cm = (hex, o) => (CBZ.cmat ? (CBZ.bodyMat || CBZ.cmat)(hex, o) : new THREE.MeshLambertMaterial({ color: hex }));
   const pm = (hex, o) => (CBZ.pbrMat ? CBZ.pbrMat(hex, o) : cm(hex));
   const GLOSSY = { hardhat: 1, ballistic: 0, riot: 1, moto: 1, race: 1, pasgt: 0, b6b47: 0 };
   const DEFAULTS = {

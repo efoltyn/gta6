@@ -38,11 +38,16 @@
     const bore = cyl(g, 0.011, 0.006, mat.bore || mat.black, 0, BORE, -1.320, Math.PI / 2);
     bore.userData.weaponBore = true;
 
-    // OD SYNTHETIC STOCK: beavertail fore-end, near-vertical grip, straight comb
+    // OD SYNTHETIC STOCK: beavertail fore-end, near-vertical grip, straight comb.
+    // The grip runs 2 cm (real) further down than it did and the stock is cut
+    // away behind its top (a wrist, where the web of the hand goes): the stock
+    // used to run straight back from half way up the grip, so the hand had to
+    // sit 3 cm down it to keep its thumb out of the wood, and its ring and
+    // little fingers hung under the end of the grip, 1.5-2.5 cm off anything.
     K.prof(g, "m24.stock", [
       [0.820, 0.032], [0.828, 0.000], [0.812, -0.030], [0.240, -0.040], [0.020, -0.046],
-      [0.012, -0.070], [-0.004, -0.150], [-0.030, -0.162], [-0.070, -0.154], [-0.076, -0.104],
-      [-0.108, -0.082], [-0.466, -0.150], [-0.466, 0.084], [-0.132, 0.088], [-0.104, 0.074],
+      [0.012, -0.070], [-0.015, -0.180], [-0.026, -0.196], [-0.064, -0.196], [-0.073, -0.182], [-0.078, -0.070],
+      [-0.096, -0.044], [-0.130, -0.040], [-0.466, -0.150], [-0.466, 0.084], [-0.132, 0.088], [-0.104, 0.074],
       [-0.084, 0.040], [0.300, 0.040], [0.320, 0.034],
     ], 0.074, stock, { bevel: 0.012 });
     K.prof(g, "m24.pad", [[-0.462, 0.088], [-0.490, 0.088], [-0.490, -0.154], [-0.462, -0.152]], 0.078, K.fin("rubber"), { bevel: 0.004 });
@@ -81,9 +86,9 @@
       K.opticAnchors(sc, { type: "scope", mag: 10, rear: [0, 0, 0.240], front: [0, 0, -0.238], lensR: 0.031, eyeRelief: 0.09, k: 1.66 });
     }
 
-    // the firing hand on the grip
+    // the firing hand on the grip, the web up in the cut behind it
     const R = 14 * Math.PI / 180;
-    K.hand(g, { at: [-0.060, 0.022], rake: R, gripW: 0.074, gripD: 0.080, trigger: [-0.074, -0.074] });
+    K.hand(g, { at: [-0.040, 0.017], rake: R, gripW: 0.074, gripD: 0.080, trigger: [-0.074, -0.074] });
 
     g.userData.muzzle = new THREE.Vector3(0, BORE, -1.323);
     // WHERE THE HANDS GO — see systems/gunhands.js.

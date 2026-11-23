@@ -515,6 +515,9 @@
         .replace("#include <begin_vertex>", "vec3 transformed = cgP;");
     };
     mat.customProgramCacheKey = function () { return "crowdgpu-mesh-3"; };
+    // the far crowd shows the same skin and cloth colours as the near bodies
+    // (the look curve, world/materials.js)
+    if (CBZ.lookMat) CBZ.lookMat(mat);
     GPU.mat = mat;
     // ---- the impostor material (LOD3)
     const imp = new THREE.MeshLambertMaterial({ color: 0xffffff });
@@ -550,9 +553,11 @@
           "else if (sl < 3.5) pc = mod(vGear, 2.0) > 0.5 ? cgPalF(floor(vGear / 256.0)) : cgPalF(vLookA.w);\n" +
           "else if (sl < 4.5) pc = cgPalF(vLookB.x); else if (sl < 5.5) pc = cgPalF(vLookB.y);\n" +
           "else if (sl > 6.5) pc = cgPalF(vLookA.x) * vec3(0.80, 0.60, 0.58);\n" +
+          "#ifdef CBZ_LOOK\npc = cbzLook( pc );\n#endif\n" +
           "diffuseColor.rgb *= pc * im.g * 1.6;");
     };
     imp.customProgramCacheKey = function () { return "crowdgpu-imp-3"; };
+    if (CBZ.lookMat) CBZ.lookMat(imp);
     GPU.impMat = imp;
     // ---- shared base geometry per (body, lod)
     GPU.geos = B.bodies.map(function (bd) {

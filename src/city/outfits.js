@@ -683,7 +683,7 @@
         // tinted to a sleeve colour would print the tattoo on the shirt. The
         // part goes back to plain flat colour; recolorRig's closing refresh
         // puts the ink back on whatever is still bare skin.
-        if (m.material._shared && CBZ.tattoo && CBZ.tattoo.isInk(m.material) && CBZ.cmat) m.material = CBZ.cmat(color);
+        if (m.material._shared && CBZ.tattoo && CBZ.tattoo.isInk(m.material) && CBZ.cmat) m.material = (CBZ.bodyMat || CBZ.cmat)(color);
         else CBZ.paintMesh(m, color);
       }
       if (visible != null) m.visible = visible;
@@ -883,7 +883,7 @@
       for (let i = 0; i < hands.length; i++) {
         const m = hands[i];
         if (!m || !m.material) continue;
-        if (CBZ.cmat) m.material = CBZ.cmat(h);
+        if (CBZ.cmat) m.material = (CBZ.bodyMat || CBZ.cmat)(h);
         else paint([m], h);
       }
     };

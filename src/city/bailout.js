@@ -316,8 +316,10 @@
     // LIT and depth-tested (a jointed hand drawn with depthTest off paints its
     // own fingers over each other); a depth-clear sentinel below keeps the
     // world from cutting into them, the same trick fpsmode's viewmodel uses.
-    const skin = new THREE.MeshLambertMaterial({ color: FP_SKIN_FALLBACK, transparent: true });
-    const sleeve = new THREE.MeshLambertMaterial({ color: FP_SLEEVE_FALLBACK, transparent: true });
+    // skin and cloth show as authored, like the body's (world/materials.js)
+    const lookMat = CBZ.lookMat || function (m) { return m; };
+    const skin = lookMat(new THREE.MeshLambertMaterial({ color: FP_SKIN_FALLBACK, transparent: true }));
+    const sleeve = lookMat(new THREE.MeshLambertMaterial({ color: FP_SLEEVE_FALLBACK, transparent: true }));
     const web = new THREE.MeshBasicMaterial({ color: 0x1e2731, depthTest: false, depthWrite: false });
     const line = new THREE.LineBasicMaterial({ color: 0xe9edf1, transparent: true, opacity: 0.86, depthTest: false, depthWrite: false });
     const brakeLine = new THREE.LineBasicMaterial({ color: 0xe84b3d, transparent: true, opacity: 0.94, depthTest: false, depthWrite: false });

@@ -120,7 +120,7 @@
     polymer: new THREE.MeshLambertMaterial({ color: 0x232a24 }),
     brass: new THREE.MeshLambertMaterial({ color: 0xd6a33b }),
     redShell: new THREE.MeshLambertMaterial({ color: 0x9d2523 }),
-    skin: new THREE.MeshLambertMaterial({ color: 0xf0c39a }),
+    skin: (CBZ.lookMat || function (m) { return m; })(new THREE.MeshLambertMaterial({ color: 0xf0c39a })),   // skin shows as authored (world/materials.js)
     // added for the room build-out; the weapon-appearance builders only ever
     // read the names above, so extra keys are inert to them.
     bar: new THREE.MeshLambertMaterial({ color: 0x39424e }),

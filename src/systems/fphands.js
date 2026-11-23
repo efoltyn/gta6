@@ -1131,6 +1131,18 @@
   /* bodyArmLens(k, ch): the body's upper arm and forearm (shoulder -> elbow,
      elbow -> wrist crease) at hand scale k, for a caller's IK. Falls back to a
      real man's 0.30 / 0.265 m when there is no body. */
+  /* bodyHandK(ch): THIS BODY'S HAND AGAINST THE STANDARD ONE. Every grasp is
+     authored for one life-size hand (k = units per hand metre); a body's own
+     hand is its rig hand (character.js bodyHandFit: sized off its height and
+     its arm) at the rig's scale. 1 = the standard hand; a woman's or a small
+     man's comes out under it. In 2% steps, so near-equal bodies share one
+     solved grip; 1 with no body. */
+  function bodyHandK(ch) {
+    const src = bodyArmSource(ch === undefined ? CBZ.playerChar : ch, 1);
+    if (!src) return 1;
+    const k = src.fit.s * src.mpr;
+    return isFinite(k) && k > 0 ? Math.max(0.8, Math.min(1.15, Math.round(k * 50) / 50)) : 1;
+  }
   function bodyArmLens(k, ch, side) {
     const src = bodyArmSource(ch === undefined ? CBZ.playerChar : ch, side || 1);
     if (!src) return [0.30 * k, 0.265 * k];
@@ -1907,13 +1919,28 @@
     let spec = null, best = null;
     const tries = h.heading ? [0] : [0, -0.1, -0.2, -0.3, -0.4, -0.5];
     for (let t = 0; t < tries.length; t++) {
-      spec = fireGraspAt(h, k, (h.heading ? 0 : GRIP_RISE) + tries[t]);
+      const rise = (h.heading ? 0 : GRIP_RISE) + tries[t];
+      spec = fireGraspAt(h, k, rise);
       if (!h.trigger) break;
       const c = grasp(spec).contacts.trigger;
-      if (c != null && (!best || c < best.c)) best = { c: c, spec: spec };
+      if (c != null && (!best || c < best.c)) best = { c: c, spec: spec, rise: rise };
       if (c != null && c <= 0.009) break;
     }
-    return best && best.c > 0.009 ? best.spec : spec;
+    if (!best || best.c <= 0.009) return spec;
+    /* STILL SHORT OF THE TRIGGER (a straight stock's wrist set back from the
+       guard, or a small hand on any grip): the hand comes forward round
+       the grip, at the same height, 3 mm at a time and no more than 2.4 cm,
+       until the pad is on the blade. A real hand does the same: it takes the
+       grip wherever its trigger finger reaches. */
+    const rise = best.rise;
+    for (let i = 1; i <= 8; i++) {
+      const d = 0.003 * k * i;
+      const h2 = Object.assign({}, h, { at: [h.at[0], h.at[1] - d] });
+      const s2 = fireGraspAt(h2, k, rise), c = grasp(s2).contacts.trigger;
+      if (c != null && c < best.c) best = { c: c, spec: s2, rise: rise };
+      if (c != null && c <= 0.006) break;
+    }
+    return best.spec;
   }
   function fireGraspAt(h, k, rise) {
     const R = h.rake || 0;
@@ -1978,7 +2005,7 @@
   // what a cammed wrist gives a forearm rising from a LOW elbow (ulnar <= 40
   // degrees, fpsmode armSolve keeps the elbow down and out): 0.35, not the
   // 0.62 that only an elbow at eye level could reach
-  const CUP_CANT = 0.35, CUP_AT = 0.040, CUP_NDOWN = -0.40;
+  const CUP_CANT = 0.35, CUP_AT = 0.040, CUP_NDOWN = -0.40, CUP_THUMB_UP = 0.06;
   /* The support hand under a handguard: the back of the hand turned a
      little OUT to the left (GUARD_NX +0.3, was -0.3) and the palm's axis
      raked a little down the guard (GUARD_RISE -0.3, was +0.18), so the
@@ -2054,8 +2081,10 @@
       // under the trigger guard
       at: P.o.clone().addScaledVector(P.axis, -pick("at", CUP_AT) * k),
       palm: [0.006, -PALM.th * 0.5, -0.050],
-      thumbAim: V(0.10, -0.16, -1),
-      thumbAim2: V(0.05, -0.08, -1),
+      // the thumb: forward along the FRAME, just under the slide (it was aimed
+      // forward and down, and lay beside the trigger guard's window, 2 cm low)
+      thumbAim: V(0.10, pick("thumbUp", CUP_THUMB_UP), -1),
+      thumbAim2: V(0.05, pick("thumbUp", CUP_THUMB_UP), -1),
       together: true,
     };
   }
@@ -2195,7 +2224,7 @@
     POSES, PALM, FINGERS, THUMB, PLANT_CONTACT, CARD_PINCH,
     handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre, contactOf,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
-    bodyArmLens, bodyTwin, bodyHandMaterial, bodyArmSource, bodyShoulder,
+    bodyArmLens, bodyHandK, bodyTwin, bodyHandMaterial, bodyArmSource, bodyShoulder,
     grasp, graspHand, regraspWithSolids, graspOnSolids, fireGraspSpec, supportGraspSpec, registerPose,
     solidsOf, solidsSdf, prismSdf, holdPose, HOLD_RADII, TORCH, torchMount,
     math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore, foreHalf, stubRings },

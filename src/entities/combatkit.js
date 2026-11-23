@@ -840,7 +840,7 @@
   function gloves(ch, hex) {
     const hands = ch.skinSlots && ch.skinSlots.hands;
     if (!hands) return;
-    for (const h of hands) if (h && h.material && CBZ.cmat) h.material = hex != null ? cm(hex) : CBZ.cmat(ch.skinTone != null ? ch.skinTone : 0xcf9a72);
+    for (const h of hands) if (h && h.material && CBZ.cmat) h.material = hex != null ? cm(hex) : (CBZ.bodyMat || CBZ.cmat)(ch.skinTone != null ? ch.skinTone : 0xcf9a72);
   }
 
   // militia: what he has (a shemagh, a beanie, a ball cap, or his own hair)

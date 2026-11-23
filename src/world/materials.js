@@ -72,6 +72,52 @@
   // the handful of addBox results it creates into its own arena immediately.
   const scene = CBZ.prisonRoot || CBZ.scene;
 
+  // ---- PEOPLE COLOURS SHOW AS AUTHORED (the look curve) ------------------
+  // A hex here goes to the shader as typed and is lit as if it were linear,
+  // then the tone map (core/renderer.js) and the sRGB encode lift it: fair
+  // skin 0xf0c39a showed as cream (231,218,203), the orange jumpsuit as
+  // yellow (242,190,79). The world is tuned to that; skin and cloth are not,
+  // they were picked as screen colours.
+  // A material marked with CBZ.lookMat carries the define CBZ_LOOK, and its
+  // shader runs the surface colour (colour x map x vertex/instance colour)
+  // through cbzLook before lighting. The curve is the inverse of the display
+  // chain on the grey axis (exposure 1.16, ACES fit, grade, sRGB encode) for a
+  // surface under light 0.7, eased to 1.0 at the top so white stays below 1:
+  // under that light an authored value shows as itself, within a few counts
+  // from 0x20 to 0xf0. material.color keeps the AUTHORED hex, so every reader
+  // (getHex compares, paintMesh, the instancer) works as before.
+  // The mark rides on clones (Material.clone is wrapped below), and it is
+  // part of the program key, so marked and unmarked materials never share.
+  const LOOK_GLSL =
+    "#ifdef CBZ_LOOK\n" +
+    "vec3 cbzLook( vec3 c ) {\n" +
+    "\tc = clamp( c, 0.0, 1.0 );\n" +
+    "\treturn c * ( 0.1091 + c * ( 2.0307 + c * ( -6.4759 + c * ( 9.4101 - 4.0739 * c ) ) ) );\n" +
+    "}\n" +
+    "#endif\n";
+  const lookOn = (function installLook() {
+    const SC = THREE.ShaderChunk;
+    if (!SC || typeof SC.color_pars_fragment !== "string" || typeof SC.color_fragment !== "string") return false;
+    if (SC.color_pars_fragment.indexOf("cbzLook") < 0) {
+      SC.color_pars_fragment += "\n" + LOOK_GLSL;
+      SC.color_fragment += "\n#ifdef CBZ_LOOK\n\tdiffuseColor.rgb = cbzLook( diffuseColor.rgb );\n#endif";
+    }
+    const clone = THREE.Material.prototype.clone;
+    THREE.Material.prototype.clone = function () {
+      const c = clone.call(this);
+      return this._cbzLook ? lookMat(c) : c;
+    };
+    return true;
+  })();
+  function lookMat(m) {
+    if (!m || m._cbzLook || !lookOn || m.isShaderMaterial) return m;
+    m.defines = Object.assign({}, m.defines, { CBZ_LOOK: "" });
+    m._cbzLook = true;
+    m.needsUpdate = true;
+    return m;
+  }
+  CBZ.lookMat = lookMat;
+
   // basic lambert material with optional emissive glow. FRESH every call —
   // for a material its owner will mutate in place. To RECOLOUR something use
   // CBZ.paintMesh below (shared tints), not a private mat() per instance.
@@ -126,6 +172,7 @@
       envMap: CBZ.ENV || null,
       envMapIntensity: 0.55,
     });
+    if (lam._cbzLook) lookMat(std);
     std._shared = true;
     std._cbzPbr = true;
     std._cbzTwin = lam;
@@ -141,16 +188,28 @@
     // opts.vc: the body colour rides a per-vertex `color` attribute (one
     // material for a merged multi-colour part; the geometry MUST carry it)
     const vc = !!opts.vc;
-    const k = color + "|" + em + "|" + ei + (vc ? "|vc" : "");
+    // opts.look: skin or cloth on a person (see the look curve above); its
+    // own cache entry, never the world's material of the same hex
+    const look = !!opts.look;
+    const k = color + "|" + em + "|" + ei + (vc ? "|vc" : "") + (look ? "|look" : "");
     let m = matCache.get(k);
     if (!m) {
       m = new THREE.MeshLambertMaterial({ color: color, emissive: em, emissiveIntensity: ei, vertexColors: vc });
+      if (look) lookMat(m);
       m._shared = true;
       matCache.set(k, m);
     }
     if (!pbrWanted()) return m;
     return m._cbzTwin || makeTwin(m, color, em, ei);
   }
+
+  // The shared material for skin or cloth on a person: cmat with the look mark.
+  const LOOK_OPTS = { look: true };
+  function bodyMat(color, opts) {
+    if (!opts) return cmat(color, LOOK_OPTS);
+    return cmat(color, { emissive: opts.emissive, ei: opts.ei, vc: opts.vc, look: true });
+  }
+  CBZ.bodyMat = bodyMat;
 
   // ---- ONE WAY TO RECOLOUR A MESH: shared tints + copy-on-write ----------
   // CBZ.paintMesh(mesh, hex) gives the mesh the SHARED twin of its current
@@ -179,7 +238,7 @@
       "|" + src.side + "|" + src.alphaTest + "|" + src.blending + "|" + src.colorWrite +
       "|" + (src.polygonOffset ? src.polygonOffsetFactor + "," + src.polygonOffsetUnits : "") +
       "|" + (src.roughness != null ? src.roughness : "") + "|" + (src.metalness != null ? src.metalness : "") +
-      "|" + (src.envMapIntensity != null ? src.envMapIntensity : "") + "|" + src.name;
+      "|" + (src.envMapIntensity != null ? src.envMapIntensity : "") + "|" + src.name + (src._cbzLook ? "|look" : "");
     for (let i = 0; i < TINT_MAPS.length; i++) { const t = src[TINT_MAPS[i]]; if (t) k += "|" + TINT_MAPS[i] + ":" + t.uuid; }
     return k;
   }

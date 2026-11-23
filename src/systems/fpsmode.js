@@ -412,9 +412,24 @@
   // load: declared after that loop it was a use-before-define that killed this
   // whole file on startup (no first person at all).
   const WRIST_LIM = { ext: 60 * Math.PI / 180, flex: 60 * Math.PI / 180, uln: 30 * Math.PI / 180, rad: 20 * Math.PI / 180 };
+  /* THE HANDS ARE THE BODY'S SIZE. Every gun hand was closed at one life-size
+     hand whatever body held it, so a woman's first-person hands were a man's.
+     handKNow() is the player body's own hand against that standard hand
+     (fphands bodyHandK: 1 for the average man, about 0.87 for the average
+     woman). A hand mesh scaled by it carries userData.handK, so the arm that
+     grows out of it still takes the gun's own units per metre
+     (worldScaleInVm). Declared here: fitOffHand reads it while the models are
+     built, at load. */
+  function handKNow() {
+    const H = CBZ.fpHands;
+    return H && H.bodyHandK ? H.bodyHandK() : 1;
+  }
   const weaponModels = new Array(WEAPONS.length);
   const carriedGun = new THREE.Group();
   const carriedModels = new Array(WEAPONS.length);
+  // skin and sleeves in first person show their authored colour, like the
+  // body's own (the look curve, world/materials.js)
+  const lookMat = CBZ.lookMat || function (m) { return m; };
   const mat = {
     dark: new THREE.MeshLambertMaterial({ color: 0x161a20 }),
     black: new THREE.MeshLambertMaterial({ color: 0x080a0c }),
@@ -425,7 +440,7 @@
     polymer: new THREE.MeshLambertMaterial({ color: 0x232a24 }),
     brass: new THREE.MeshLambertMaterial({ color: 0xd6a33b, emissive: 0x2b1600, emissiveIntensity: 0.2 }),
     redShell: new THREE.MeshLambertMaterial({ color: 0x9d2523, emissive: 0x210000, emissiveIntensity: 0.12 }),
-    skin: new THREE.MeshLambertMaterial({ color: 0xde8b52 }),   // the player's skin (entities/player.js)
+    skin: lookMat(new THREE.MeshLambertMaterial({ color: 0xf0c39a })),   // the player's skin (entities/player.js)
   };
 
   function box(parent, sx, sy, sz, mat, x, y, z, rx, ry, rz) {
@@ -507,6 +522,7 @@
     const W = new THREE.Vector3(), hq = new THREE.Quaternion();
     let kM = 1;
     for (let p = fire; p && p !== model; p = p.parent) { p.updateMatrix(); W.applyMatrix4(p.matrix); hq.premultiply(p.quaternion); kM *= p.scale.x; }
+    kM /= fire.userData.handK || 1;                 // the forearm is the arm's size, not the hand's
     const L = (FPH.bodyArmLens ? FPH.bodyArmLens(1)[1] : FORE_REAL) * kM, margin = 0.004 * kM;
     const base = new THREE.Vector3(0, 0, 1).applyQuaternion(hq);
     const side = new THREE.Vector3(1, 0, 0), down = new THREE.Vector3(0, -1, 0);
@@ -538,6 +554,15 @@
   }
   function fitOffHand(model, w) {
     if (!FPH || !mat.skin) return;
+    // (a refit for another body: the off hands of the last fit go first)
+    for (const key of ["fpSupport", "fpReloadHand"]) {
+      const old = model.userData[key];
+      if (old && old.parent) old.parent.remove(old);
+      model.userData[key] = null;
+    }
+    const hk = handKNow();
+    model.userData.fpHandK = hk;
+    model.userData.fpHip = null;
     let fire = null;
     model.traverse((o) => { if (!fire && o.userData && o.userData.fpGripHand) fire = o; });
     if (!fire && w && w.melee) {
@@ -562,7 +587,8 @@
     if (fire && fire.userData.graspSpec && model.userData.unitsPerMetre > 0 && fire.parent && fire.parent.userData.fireGrip) {
       let ps = 1;
       for (let p = fire.parent; p && p !== model; p = p.parent) ps *= p.scale.x || 1;
-      const kWant = model.userData.unitsPerMetre / ps;
+      const kWant = model.userData.unitsPerMetre / ps * hk;
+      fire.userData.handK = hk;
       if (Math.abs(kWant - fire.userData.graspSpec.k) > 1e-4) {
         fire.userData.graspSpec = FPH.fireGraspSpec(fire.parent.userData.fireGrip, kWant);
         fire.scale.setScalar(kWant);
@@ -619,6 +645,7 @@
     // on a pump gun the hand rides the pump (it racks with it)
     const holder = (model.userData.pump && model.userData.pump.parent === model) ? model.userData.pump : model;
     const hand = FPH.graspHand(null, spec, mat.skin);
+    hand.userData.handK = hk;
     if (holder !== model) hand.position.sub(holder.position);
     holder.add(hand);
     // the forearm's natural line, in the hand's own frame (so it rides every rack, dip and kick)
@@ -638,6 +665,7 @@
     const k = fg.k * (fire.parent && fire.parent !== model ? fire.parent.scale.x : 1);
     const h = FPH.makeHand(-1, "relaxed", mat.skin);
     h.scale.setScalar(k);
+    h.userData.handK = fire.userData.handK || 1;
     h.quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
     h.visible = false;
     model.add(h);
@@ -665,6 +693,27 @@
     viewModel.visible = i === curSlot;
     viewModel.scale.setScalar(1.28);
     fitOffHand(viewModel, w);
+    vmDrawFlags(viewModel);
+    weaponModels[i] = viewModel;
+    gun.add(viewModel);
+
+    const carried = buildWeaponModel(w);
+    if (!carried.userData.muzzle) carried.userData.muzzle = new THREE.Vector3(0, 0.05, -0.58);
+    carried.visible = i === curSlot;
+    // REAL-DIMENSION SIZING (weapons/weapon-scale.js): same law as every
+    // other world display of a gun — real researched length × class READ.
+    // The legacy 1.45 (screenshot-tuned so the gun didn't vanish into the
+    // blocky hand) stays as the module-absent fallback.
+    carried.scale.setScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(w.id)) || 1.45);
+    carriedModels[i] = carried;
+    carriedGun.add(carried);
+    // city gun mods (city/gunmods.js) dress what exists when the city starts;
+    // a gun built after that is dressed as it is born
+    if (CBZ.game && CBZ.game.mode === "city" && CBZ.gunModsDress) { try { CBZ.gunModsDress(i); } catch (e) { console.error("[gunmods dress]", e); } }
+    return viewModel;
+  }
+  // how every part of a viewmodel draws (the gun and the hands on it)
+  function vmDrawFlags(viewModel) {
     viewModel.traverse((obj) => {
       obj.renderOrder = 1000;
       if (obj.material) {
@@ -684,23 +733,12 @@
         obj.material.transparent = true;
       }
     });
-    weaponModels[i] = viewModel;
-    gun.add(viewModel);
-
-    const carried = buildWeaponModel(w);
-    if (!carried.userData.muzzle) carried.userData.muzzle = new THREE.Vector3(0, 0.05, -0.58);
-    carried.visible = i === curSlot;
-    // REAL-DIMENSION SIZING (weapons/weapon-scale.js): same law as every
-    // other world display of a gun — real researched length × class READ.
-    // The legacy 1.45 (screenshot-tuned so the gun didn't vanish into the
-    // blocky hand) stays as the module-absent fallback.
-    carried.scale.setScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(w.id)) || 1.45);
-    carriedModels[i] = carried;
-    carriedGun.add(carried);
-    // city gun mods (city/gunmods.js) dress what exists when the city starts;
-    // a gun built after that is dressed as it is born
-    if (CBZ.game && CBZ.game.mode === "city" && CBZ.gunModsDress) { try { CBZ.gunModsDress(i); } catch (e) { console.error("[gunmods dress]", e); } }
-    return viewModel;
+  }
+  // the body changed since this gun's hands were closed: close them again at its size
+  function refitHands(model) {
+    const i = weaponModels.indexOf(model);
+    fitOffHand(model, i >= 0 ? WEAPONS[i] : null);
+    vmDrawFlags(model);
   }
   let curSlot = fps.weapon | 0;
   Object.defineProperty(fps, "weapon", {
@@ -826,9 +864,9 @@
   // the live body every frame by fphands.dressOf (heritage skin comes through
   // the rig). The jumpsuit literals are only the floor with no body at all.
   const FIST_SLEEVE_FALLBACK = 0xff7a1a;
-  const FIST_SKIN_FALLBACK = 0xde8b52;
-  const fistSleeve = new THREE.MeshLambertMaterial({ color: FIST_SLEEVE_FALLBACK });
-  const fistUpper = new THREE.MeshLambertMaterial({ color: FIST_SLEEVE_FALLBACK });
+  const FIST_SKIN_FALLBACK = 0xf0c39a;
+  const fistSleeve = lookMat(new THREE.MeshLambertMaterial({ color: FIST_SLEEVE_FALLBACK }));
+  const fistUpper = lookMat(new THREE.MeshLambertMaterial({ color: FIST_SLEEVE_FALLBACK }));
   const HAND_K = 1.9;                 // FP hand size (the viewmodel world is ~2x real)
   const handR = FPH ? FPH.makeHand(1, "relaxed", mat.skin) : new THREE.Group();
   const handL = FPH ? FPH.makeHand(-1, "fist", mat.skin) : new THREE.Group();
@@ -1451,7 +1489,7 @@
       // the wrist that puts the pose's contact point there
       const pose = pl.pose || "plant";
       if (FPH.contactOf) FPH.contactOf(pose, _fpPC); else _fpPC.fromArray(FPH.PLANT_CONTACT);
-      _fpO.set(_fpPC.x * side, _fpPC.y, _fpPC.z).multiplyScalar(HAND_K).applyQuaternion(_fpQ);
+      _fpO.set(_fpPC.x * side, _fpPC.y, _fpPC.z).multiplyScalar(handR.scale.x).applyQuaternion(_fpQ);
       _fpG.sub(_fpO);
       T.x += (_fpG.x - T.x) * w; T.y += (_fpG.y - T.y) * w; T.z += (_fpG.z - T.z) * w;
       T.vis = true;
@@ -1538,8 +1576,9 @@
     return o === vm;
   }
   const _zeroV = new THREE.Vector3();
+  // (vm units per real METRE: a hand's own body-size factor is left out)
   function worldScaleInVm(obj) {
-    let k = 1, o = obj;
+    let k = 1 / ((obj && obj.userData && obj.userData.handK) || 1), o = obj;
     while (o && o !== vm) { k *= o.scale.x; o = o.parent; }
     return k;
   }
@@ -1617,6 +1656,7 @@
   }
   const _poleArr = [0, 0, 0];
 
+  let _handCh, _handK = 1;          // the body the hands were last sized for, and its hand size
   function poseFpArms(dt) {
     if (!FPH) return;
     if (ddT >= 0) {
@@ -1631,6 +1671,13 @@
     fpArms.visible = !!(showFists || model);
     if (!fpArms.visible) return;
     dressFists();
+    // the hands are this body's size: the fists at once, a gun's solved hands
+    // re-closed the first time it is drawn after the body changed
+    if (CBZ.playerChar !== _handCh) {
+      _handCh = CBZ.playerChar; _handK = handKNow();
+      handR.scale.setScalar(HAND_K * _handK); handL.scale.setScalar(HAND_K * _handK);
+    }
+    if (model && model.userData.fpHandK != null && model.userData.fpHandK !== _handK) refitHands(model);
     vm.updateMatrix();
     _vmInv.copy(vm.matrix).invert();
     if (showFists) {
@@ -1845,14 +1892,21 @@
   const HIP_POS = [0.36, -0.34, -0.72], HIP_PITCH = -0.10;
   // (real metres at the gun's scale: x right, y up, z back toward the eye)
   const HIP_TRY = { dx: [0, -0.05, -0.10, -0.15, 0.05], dy: [0, -0.05, -0.10, -0.15], dz: [0, -0.06, -0.12, 0.06, 0.12, 0.18], pitch: [0, -0.15, 0.15, 0.3] };
+  /* A LONG GUN THE ARMS STILL CANNOT REACH (the pump gun: its fore-end sat 5-7%
+     past the support arm at every spot above) is carried the way one is: drawn
+     further back and across the body, the muzzle swung in toward the middle
+     (yaw). Searched only when the first search leaves an arm out of reach. */
+  const HIP_FAR = { dx: [0, -0.05, -0.10, -0.15, -0.20], dy: [0, -0.05, -0.10, -0.15], dz: [0.06, 0.12, 0.18, 0.24, 0.30], pitch: [0, -0.15, 0.15], yaw: [0.10, 0.20, 0.30] };
   const _hpP = new THREE.Vector3(), _hpQ = new THREE.Quaternion(), _hpE = new THREE.Vector3();
+  let _hipOver = 0;                 // how far past reach the last hipScore's arms were (summed)
   function hipScore(fire, sup) {
     let cost = 0;
+    _hipOver = 0;
     const hands = sup ? [[0, fire, 1], [1, sup, -1]] : [[0, fire, 1]];
     for (const h of hands) {
       const k = armSolve(h[0], h[1]);
       cost += wristOf(h[2], _aW, _aE, _aQ, null, h[1].userData.wristLim).viol * 4;
-      if (_aReach > REACH_MAX) cost += (_aReach - REACH_MAX) * 100;   // an arm out of reach is not a hold
+      if (_aReach > REACH_MAX) { cost += (_aReach - REACH_MAX) * 100; _hipOver += _aReach - REACH_MAX; }   // an arm out of reach is not a hold
       if (!elbowOk(_aE, k)) cost += 0.5;
     }
     return cost;
@@ -1869,19 +1923,29 @@
       vm.rotation.set(HIP_PITCH + pt, 0, 0);
       vm.updateMatrix(); _vmInv.copy(vm.matrix).invert();
       const c = hipScore(fire, sup) + 1.5 * (Math.abs(dx) + Math.abs(dy) + Math.abs(dz)) + 0.15 * Math.abs(pt);
-      if (!best || c < best.c) best = { c: c, dx: dx * km, dy: dy * km, dz: dz * km, pt: pt };
+      if (!best || c < best.c) best = { c: c, dx: dx * km, dy: dy * km, dz: dz * km, pt: pt, yaw: 0, over: _hipOver };
+    }
+    if (best.over > 0) {
+      for (const yw of HIP_FAR.yaw) for (const dx of HIP_FAR.dx) for (const dy of HIP_FAR.dy) for (const dz of HIP_FAR.dz) for (const pt of HIP_FAR.pitch) {
+        vm.position.set(HIP_POS[0] + dx * km, HIP_POS[1] + dy * km, HIP_POS[2] + dz * km);
+        vm.rotation.set(HIP_PITCH + pt, yw, 0);
+        vm.updateMatrix(); _vmInv.copy(vm.matrix).invert();
+        const c = hipScore(fire, sup) + 1.5 * (Math.abs(dx) + Math.abs(dy) + Math.abs(dz)) + 0.15 * Math.abs(pt) + 0.3 * yw;
+        if (c < best.c) best = { c: c, dx: dx * km, dy: dy * km, dz: dz * km, pt: pt, yaw: yw, over: _hipOver };
+      }
     }
     vm.position.copy(_hpP); vm.quaternion.copy(_hpQ);
     vm.updateMatrix(); _vmInv.copy(vm.matrix).invert();
-    ud.fpHip = { sig: sig, off: new THREE.Vector3(best.dx, best.dy, best.dz), pitch: best.pt };
+    ud.fpHip = { sig: sig, off: new THREE.Vector3(best.dx, best.dy, best.dz), pitch: best.pt, yaw: best.yaw };
     return ud.fpHip;
   }
-  const _hipQ = new THREE.Quaternion(), _hipX = new THREE.Vector3(1, 0, 0);
+  const _hipQ = new THREE.Quaternion(), _hipX = new THREE.Vector3(1, 0, 0), _hipY = new THREE.Vector3(0, 1, 0);
   function applyHip(model, fire, sup, adsK) {
     if (!(adsK < 1) || !fire) return;
     const H = fitHip(model, fire, sup), w = 1 - adsK;
     vm.position.addScaledVector(H.off, w);
     if (H.pitch) vm.quaternion.multiply(_hipQ.setFromAxisAngle(_hipX, H.pitch * w));
+    if (H.yaw) vm.quaternion.multiply(_hipQ.setFromAxisAngle(_hipY, H.yaw * w));
     vm.updateMatrix(); _vmInv.copy(vm.matrix).invert();
   }
   // THE TORCH HAND (systems/playerflashlight.js CBZ.fpTorchHold): called right

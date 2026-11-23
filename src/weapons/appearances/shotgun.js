@@ -45,9 +45,14 @@
     K.prof(g, "870.groove", [[0.030, 0.1215], [0.322, 0.1215], [0.322, 0.1245], [0.030, 0.1245]],
       0.010, mat.black, { bevel: 0 });
     // trigger plate + guard with its hole, trigger blade
-    K.tag(K.prof(g, "870.guard", [[-0.030, -0.020], [0.150, -0.020], [0.150, -0.040], [0.134, -0.100], [0.020, -0.100], [-0.010, -0.048]],
+    // (the bow's rear stands nearly upright where it meets the plate: the
+    // middle finger lies against it; it used to slope back under the wrist
+    // and the finger went through it)
+    K.tag(K.prof(g, "870.guard", [[-0.012, -0.020], [0.150, -0.020], [0.150, -0.040], [0.134, -0.100], [0.020, -0.100], [0.004, -0.056]],
       0.040, parker, { bevel: 0.003, holes: [[[0.126, -0.040], [0.120, -0.088], [0.034, -0.088], [0.018, -0.046]]] }), "part_guard");
-    box(g, 0.010, 0.044, 0.010, mat.black, 0, -0.058, -0.066, -0.25);
+    // the blade hangs in the rear half of the bow, as on the real gun (it was
+    // 1 cm further forward, past the reach of a hand on the wrist)
+    box(g, 0.010, 0.044, 0.010, mat.black, 0, -0.058, -0.054, -0.25);
 
     // BARREL over the MAGAZINE TUBE; cap + barrel lug tie them together
     K.tube(g, 0.021, 0.022, 0.760, 14, steel, 0, BORE, -0.725);
@@ -117,7 +122,7 @@
     // finished gun re-closed its thumb (fphands.regraspWithSolids) the thumb
     // went up over the wrist to eye height: a white ball beside the rib.)
     const R = 52 * Math.PI / 180;
-    K.hand(g, { at: [0.025, 0.050], rake: R, gripW: 0.062, gripD: 0.085, trigger: [-0.056, -0.070], heading: [0, -0.45, -1], thumbAim: [0.5, 0.0, -1], thumbAim2: [0.2, -0.2, -1] });
+    K.hand(g, { at: [0.025, 0.035], rake: R, gripW: 0.062, gripD: 0.085, trigger: [-0.056, -0.058], heading: [0, -0.45, -1], thumbAim: [0.5, 0.0, -1], thumbAim2: [0.2, -0.2, -1] });
 
     g.userData.muzzle = new THREE.Vector3(0, BORE, -1.106);
     g.userData.pump = pump;
@@ -153,7 +158,7 @@
     K.anchors(g, {
       k: 1.61,
       grip: { pos: [0, -0.040, 0.135], rake: 26 * Math.PI / 180 },
-      trigger: [0, -0.060, -0.070],
+      trigger: [0, -0.060, -0.058],
       support: { pos: [0, -0.016, PZ], kind: "pump", len: 0.284, node: "870:pump" },
       // shells go up through the loading port (receiver belly, ahead of the
       // guard) and forward into the tube under the barrel

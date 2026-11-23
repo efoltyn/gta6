@@ -757,8 +757,15 @@
        level with the shoulder. A carried long gun's butt rides under the
        collarbone toward the armpit, the fist at the breastbone, the elbow
        down.) */
-    const LOW = { pitch: 0.58, yaw: 0.18, blade: 0.26, drop: 0.20 };
-    const LOW_CROUCH = { pitch: 0.22, yaw: 0.30, blade: 0.26, drop: 0.10 };
+    /* (`inb`: where across the chest the dropped butt rides. A presented gun's
+       butt is in the pocket, 14% of the way to the other shoulder; dropped 14
+       cm below that it landed on the PECTORAL, which stands 4-5 cm further
+       forward than the pocket, and with the muzzle down the plate's toe
+       rested there: the top of the butt stood 9 cm in front of the shoulder.
+       Carried, the butt rides further out, in the hollow between the chest
+       and the arm, where the body is as far back as the pocket itself.) */
+    const LOW = { pitch: 0.58, yaw: 0.18, blade: 0.26, drop: 0.20, inb: 0.04 };
+    const LOW_CROUCH = { pitch: 0.22, yaw: 0.30, blade: 0.26, drop: 0.10, inb: 0.04 };
     /* THE OTHER TWO CARRIES (entities/soldier.js asks for them by name): the
        same hold, the stock still in the pocket and both hands on the gun —
        only where the muzzle goes differs.
@@ -769,7 +776,7 @@
                      body, the hands resting on it, the torso square — a long
                      walk with nothing in front of you yet. */
     const HIGH = { pitch: -0.52, yaw: 0.14, blade: 0.20 };
-    const PATROL = { pitch: 0.95, yaw: 0.62, blade: 0.08, drop: 0.24 };
+    const PATROL = { pitch: 0.95, yaw: 0.62, blade: 0.08, drop: 0.24, inb: 0.04 };
     const CARRY_MODES = { low: LOW, lowc: LOW_CROUCH, high: HIGH, patrol: PATROL };
     function solveReady(ch, prop, spec, C, pitch, mode, force) {
       const low0 = !!CARRY_MODES[mode];
@@ -791,6 +798,7 @@
       _rm.lookAt(_r0, _rd, _rUp);
       _rbq.setFromRotationMatrix(_rm);
       let fireBend = 0;
+      let standOut = 0;              // how far the last attempt's gun was stood off the body (rig units)
       const low = hr.parent;
       const attempt = function (inb, fwd, prot, lift) {
         // every attempt starts from the same hanging arms, so the answer is a
@@ -839,6 +847,7 @@
         // anything else out along the body's facing) before an arm reaches
         // for it.
         _ros.copy(_ro);
+        const z0 = _ros.z;
         body.localToWorld(_ro);
         seatProp(prop, _ro, _rwq);
         for (let i = 0; i < 3; i++) {
@@ -848,6 +857,7 @@
           _ro.copy(_ros); body.localToWorld(_ro);
           seatProp(prop, _ro, _rwq);
         }
+        standOut = _ros.z - z0;
         _ro.copy(_ros);
         _rc.copy(z.fc).multiplyScalar(prop.scale.x || 1).applyQuaternion(_rbq).add(_ro);
         body.localToWorld(_rc);                                   // the grip centre, world
@@ -894,7 +904,7 @@
          rolled forward (prot), and the attempt that leaves the least arm
          inside the body and the support hand on the gun wins. Solved once per body + gun +
          pitch level, so the search costs nothing per frame. */
-      const inb0 = long ? POCKET_IN : 0.10;
+      const inb0 = long ? (low0 && LW.inb != null ? LW.inb : POCKET_IN) : 0.10;
       const inBody = function () {
         // (a one-handed gun's off arm is not this solve's: it goes back after)
         const ar = CBZ.charArmTo.armPen ? Math.max(spec.sup ? CBZ.charArmTo.armPen(ch, "l") : 0, CBZ.charArmTo.armPen(ch, "r")) : 0;
@@ -905,7 +915,9 @@
       // body; then the textbook placement
       const score = function (g, pen, fwd, inb, prot, lift) {
         return (g != null && spec.sup && g > 0.02 ? 10 + g * 20 : 0) + (fireBend > (spec._z && spec._z.fQ ? GRASP_BEND : BEND_MAX) + 0.005 ? 5 : 0) +
-          pen * 12 + Math.abs(fwd) * 0.08 + Math.abs(inb - inb0) * 0.05 + prot * 0.10 + Math.abs(lift) * 0.06;
+          pen * 12 + Math.abs(fwd) * 0.08 + Math.abs(inb - inb0) * 0.05 + prot * 0.10 + Math.abs(lift) * 0.06 +
+          // a carried long gun's butt stays on the body: a spot that stands it off costs
+          (low0 && long ? standOut * 1.5 : 0);
       };
       const place = { inb: inb0, fwd: 0, prot: 0, lift: 0 };
       // `force`: this placement and no search (a split between two levels,
@@ -927,7 +939,9 @@
         // a plate carrier's shoulder)
         const AX = long ? [
           ["fwd", [0, 0.02, 0.04, 0.07]],
-          ["inb", [POCKET_IN, POCKET_IN + 0.08, POCKET_IN + 0.16, POCKET_IN + 0.24]],
+          // (a carry starts further out: it comes inboard in small steps, through the pocket)
+          ["inb", inb0 < POCKET_IN ? [inb0, (inb0 + POCKET_IN) / 2, POCKET_IN, POCKET_IN + 0.08, POCKET_IN + 0.16, POCKET_IN + 0.24]
+            : [POCKET_IN, POCKET_IN + 0.08, POCKET_IN + 0.16, POCKET_IN + 0.24]],
         ] : [
           ["fwd", [0, -0.03, -0.06, 0.02]],
           ["inb", [0.10, 0.04, 0.16, 0.22, 0]],

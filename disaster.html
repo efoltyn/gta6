@@ -547,7 +547,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=r187d"></script>
-<script src="src/world/materials.js?v=r187a"></script>
+<script src="src/world/materials.js?v=look1123"></script>
 <script src="src/world/fuel_station.js?v=r187a+bld1122b+bld1122e"></script>
 <script src="src/world/prisonkit.js?v=left1123"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
@@ -604,13 +604,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=hands1122"></script>
+  <script src="src/systems/fphands.js?v=look1123"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
-  <script src="src/entities/tattoo.js?v=looks1022b"></script>
+  <script src="src/entities/tattoo.js?v=look1123"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
-  <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=fight1123b"></script>
-  <script src="src/entities/headwear.js?v=anatomy1122"></script>
+  <script src="src/entities/footwear.js?v=look1123"></script>
+  <script src="src/entities/character.js?v=look1123"></script>
+  <script src="src/entities/headwear.js?v=look1123"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
   <!-- sunglasses FITTED to the head they are worn on (every pair: bling, the detail kit, the portrait, warlord); after character.js + jewelry_kit.js (its street environment) -->
@@ -650,13 +650,13 @@ document.body.appendChild(b);}}catch(e){}})();
      body; and what the kit stops (systems/armour.js, CBZ.armour.resolve). -->
 <script src="src/warlord/camo.js?v=r187a"></script>
 <script src="src/systems/armour.js?v=inf1028c"></script>
-<script src="src/entities/combatkit.js?v=r187a"></script>
+<script src="src/entities/combatkit.js?v=look1123"></script>
 <script src="src/entities/soldier.js?v=drone1012"></script>
 <!-- THE REAL CROWD (entities/crowdgpu.js): the CBZ.human mesh GPU-instanced
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=stick187"></script>
+<script src="src/entities/crowdgpu.js?v=look1123"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -700,8 +700,8 @@ document.body.appendChild(b);}}catch(e){}})();
      a light red rim, grey colour and a heartbeat; the view never closes while alive (lids are for the dead). -->
 <script src="src/systems/eyes.js?v=rounds1013"></script>
 <script src="src/systems/vitals.js?v=shot1122"></script>
-<script src="src/systems/verbs_pickup.js?v=w09290250"></script>
-<script src="src/entities/player.js?v=hands1122"></script>
+<script src="src/systems/verbs_pickup.js?v=look1123"></script>
+<script src="src/entities/player.js?v=look1123"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
      tense and offer "re-add the tag" as a revert, which no longer works).
@@ -1360,7 +1360,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=pres1028"></script>
 <script src="src/city/economy.js?v=world1122b"></script>
-<script src="src/city/clothes.js?v=body1122f"></script>
+<script src="src/city/clothes.js?v=look1123"></script>
 <script src="src/entities/dutykit.js?v=anatomy1122"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
@@ -1446,7 +1446,7 @@ document.body.appendChild(b);}}catch(e){}})();
      is priced through CBZ.detonate so it damages buildings like any other
      impact of that mass and speed. After playeraircraft.js (uses the exported
      setCraftRotation) and after cockpit_view.js. Revert: ?cfg_BAILOUT=0. -->
-<script src="src/city/bailout.js?v=island1014"></script>
+<script src="src/city/bailout.js?v=look1123"></script>
 <!-- elevator-grammar boarding doors for every flyable aircraft: the door
      visibly opens, you walk in through the opening, it closes, THEN flight
      control hands over (and the reverse on exit). Wired behind the existing
@@ -1902,7 +1902,7 @@ document.body.appendChild(b);}}catch(e){}})();
      always-updater is in the sort -->
 <!-- projected decals: blood cut out of the struck mesh's own triangles (cars) -->
 <script src="src/systems/surfacedecal.js?v=carblood930"></script>
-<script src="src/systems/gore.js?v=soft1122a"></script>
+<script src="src/systems/gore.js?v=look1123"></script>
 <!-- the attackers' teeth (systems/dentition.js): every family's dental arch
      from real anatomy, or the attacker's own built body; wounds.js strikes
      each tooth against the bitten body. Before wounds.js. -->

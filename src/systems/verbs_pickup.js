@@ -1050,9 +1050,11 @@
   function lensBuild() {
     const H = CBZ.fpHands, cam = CBZ.camera;
     if (LENS.vm || !H || !cam) return !!LENS.vm;
-    const skin = new THREE.MeshLambertMaterial({ color: 0xd6a57e });
-    const fore = new THREE.MeshLambertMaterial({ color: 0x3a4048 });
-    const upper = new THREE.MeshLambertMaterial({ color: 0x3a4048 });
+    // skin and cloth show as authored, like the body's (world/materials.js)
+    const lookMat = CBZ.lookMat || function (m) { return m; };
+    const skin = lookMat(new THREE.MeshLambertMaterial({ color: 0xd6a57e }));
+    const fore = lookMat(new THREE.MeshLambertMaterial({ color: 0x3a4048 }));
+    const upper = lookMat(new THREE.MeshLambertMaterial({ color: 0x3a4048 }));
     LENS.mats = { skin: skin, fore: fore, upper: upper };
     const vm = new THREE.Group();
     vm.name = "pickup_lens_vm";
