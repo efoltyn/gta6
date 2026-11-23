@@ -125,10 +125,27 @@
     // is 9.5 x 11.5, and the arm hangs against the chest wall. P.armW is the
     // DEPTH (rz 1 = armW / 2), which is the radius every jacket pad, armhole
     // and sleeve head is cut to, so they still cover it.
+    /* MUSCLE (owner 2026-11-22: "make arms look more real with muscles"). The
+       bare arm was six sections that only got thinner on the way down: a
+       tube with a taper. An arm has parts and they do not line up: the
+       deltoid is fullest a hand below the joint and ENDS half way down the
+       arm in a notch; the triceps fills the back above that notch and the
+       biceps the front below it, so the front and the back of the arm peak at
+       different heights; both run out into tendon above the elbow, which is
+       then wider across (the two epicondyles) than it is deep. The forearm's
+       belly is high, a quarter of the way down and wider than the elbow over
+       it, and from the middle it is tendon: flat, as wide as the hand.
+       `bare` is everybody; `bareM` is a man who trains (athletic, muscular,
+       big), the same parts cut deeper. */
     armUp: {
       bare: { top: 0.80, bot: 1, rows: [
-        [0.00, 0.84, 0.94, 0.00], [0.13, 0.86, 0.98, 0.02], [0.33, 0.77, 0.92, 0.05],
-        [0.56, 0.74, 0.90, 0.08], [0.80, 0.67, 0.74, 0.03], [1.00, 0.64, 0.66, 0.00]] },
+        [0.00, 0.86, 0.94, 0.00], [0.10, 0.92, 0.99, 0.01], [0.22, 0.89, 0.97, 0.02],
+        [0.37, 0.73, 0.88, 0.00], [0.52, 0.78, 0.94, 0.07], [0.66, 0.74, 0.87, 0.07],
+        [0.82, 0.62, 0.71, 0.03], [0.93, 0.68, 0.65, 0.00], [1.00, 0.66, 0.66, 0.00]] },
+      bareM: { top: 0.80, bot: 1, rows: [
+        [0.00, 0.88, 0.94, 0.00], [0.10, 0.98, 1.01, 0.00], [0.22, 0.95, 0.99, 0.01],
+        [0.37, 0.74, 0.87, -0.03], [0.50, 0.85, 0.98, 0.09], [0.64, 0.79, 0.90, 0.09],
+        [0.81, 0.60, 0.68, 0.03], [0.93, 0.69, 0.65, 0.00], [1.00, 0.66, 0.66, 0.00]] },
       cloth: { top: 0.80, bot: 1, rows: [
         [0.00, 0.86, 0.96, 0.00], [0.15, 0.88, 0.99, 0.01], [0.45, 0.80, 0.93, 0.04],
         [0.80, 0.72, 0.80, 0.02], [1.00, 0.70, 0.72, 0.00]] },
@@ -149,8 +166,13 @@
     // belly sits a quarter of the way down, where a forearm's is.)
     armLo: {   // the elbow (t 0) .. the wrist crease (t 1), where the hand's stub enters
       bare: { top: 1, bot: 0.22, rows: [
-        [0.00, 0.71, 0.72, 0.00], [0.22, 0.80, 0.82, 0.02], [0.50, 0.66, 0.72, 0.02],
-        [0.80, 0.46, 0.60, 0.00], [1.00, 0.355, 0.515, 0.00]] },
+        [0.00, 0.71, 0.72, 0.00], [0.12, 0.82, 0.83, 0.03], [0.26, 0.83, 0.86, 0.03],
+        [0.45, 0.68, 0.76, 0.02], [0.65, 0.52, 0.65, 0.01], [0.82, 0.45, 0.595, 0.00],
+        [1.00, 0.355, 0.515, 0.00]] },
+      bareM: { top: 1, bot: 0.22, rows: [
+        [0.00, 0.71, 0.72, 0.00], [0.10, 0.87, 0.87, 0.04], [0.24, 0.91, 0.93, 0.04],
+        [0.42, 0.73, 0.82, 0.02], [0.62, 0.53, 0.66, 0.01], [0.82, 0.45, 0.595, 0.00],
+        [1.00, 0.355, 0.515, 0.00]] },
       cloth: { top: 1, bot: 0.22, rows: [
         [0.00, 0.76, 0.78, 0.00], [0.22, 0.82, 0.84, 0.01], [0.60, 0.70, 0.76, 0.00],
         [0.90, 0.49, 0.635, 0.00], [0.965, 0.49, 0.635, 0.00], [1.00, 0.455, 0.60, 0.00]] },
@@ -279,6 +301,19 @@
     g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
     g.setIndex(new THREE.BufferAttribute(nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
     finishGeo(g);                                // smooth normals welded across the uv seams
+    /* A CUT END IS NOT AN EDGE OF THE ARM. Its cap is nearly flat, so the
+       welded normals of the section ring it closes leaned along the arm and
+       the two pieces of one bare arm met in a shaded ring, an armband half
+       way down every upper arm. The ring at a cut takes the normals of the
+       section next to it: the tube's, as if the loft ran on. */
+    {
+      const N = g.attributes.normal.array, i0 = nd + 1, i1 = nd + rows.length;
+      const copyRing = (to, from) => { for (let k = 0; k < RV * 3; k++) N[to * RV * 3 + k] = N[from * RV * 3 + k]; };
+      if (cut && rows.length > 1) {
+        if (cut[0] > 0) copyRing(i0, i0 + 1);
+        if (cut[1] < 1) copyRing(i1, i1 - 1);
+      }
+    }
     g.computeBoundingBox(); g.computeBoundingSphere();
     g.userData.limbFace = F; g.userData.limbU = Q; g.userData.limbRows = full;   // (the WHOLE segment's: humanLimbHalfAt)
     g.name = "limb~" + key;
@@ -298,11 +333,13 @@
     // its own piece wearing the forearm's colour (limb()). Painted, the atlas
     // draws the sleeve hem itself, so the whole segment bakes.
     const cut = paint ? null : (spec.cut || null);
-    const key = "B|" + spec.kind + "|" + spec.variant + "|" + lod + "|" + aq + "|" +
+    // (spec.shape: a table of its own for the same variant — the trained arm)
+    const shp = spec.shape && LIMB_SHAPES[spec.kind][spec.shape] ? spec.shape : spec.variant;
+    const key = "B|" + spec.kind + "|" + shp + "|" + lod + "|" + aq + "|" +
       [spec.w, spec.d, spec.len, spec.y0, spec.boxH].map((x) => x.toFixed(4)).join(",") + "|" + (paint ? paint.key : "-") + (cut ? "|" + cut.join(",") : "");
     let g = LIMB_GEO[key];
     if (g) return g;
-    const C = limbCanon(spec.kind, spec.variant, lod, aq, cut);
+    const C = limbCanon(spec.kind, shp, lod, aq, cut);
     const sx = spec.w / 2, sy = spec.len, sz = spec.d / 2, y0 = spec.y0;
     const cp = C.attributes.position.array, cn = C.attributes.normal.array, nv = cp.length / 3;
     const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3);
@@ -394,9 +431,10 @@
      the joint; a `low` pivot group sits AT the joint with the lower loft
      inside it. `kind` "arm" | "leg"; vUp / vLo "bare" | "cloth". The boxes
      these replaced are still the spec (w x upperH, 0.9w x lowerH+0.06). */
-  function limb(kind, w, upperH, lowerH, d, color, lowerColor, vUp, vLo, lowK) {
+  function limb(kind, w, upperH, lowerH, d, color, lowerColor, vUp, vLo, lowK, shape) {
     const grp = new THREE.Group();
-    const upper = limbMesh({ kind: kind + "Up", variant: vUp, w, d, len: upperH - LIMB_TUCK, y0: upperH / 2, boxH: upperH }, color);
+    const shOf = (v) => (v === "bare" && shape ? shape : undefined);
+    const upper = limbMesh({ kind: kind + "Up", variant: vUp, shape: shOf(vUp), w, d, len: upperH - LIMB_TUCK, y0: upperH / 2, boxH: upperH }, color);
     upper.position.y = -upperH / 2;
     grp.add(upper);
     grp.userData.main = upper;
@@ -407,7 +445,7 @@
     grp.userData.low = low;
 
     const lw = w * (lowK || 0.9), ld = d * (lowK || 0.9);     // (lowK: a slimmer shin, P.shinK)
-    const lower = limbMesh({ kind: kind + "Lo", variant: vLo, w: lw, d: ld, len: lowerH, y0: (lowerH - LIMB_OVERLAP) / 2, boxH: lowerH + LIMB_OVERLAP },
+    const lower = limbMesh({ kind: kind + "Lo", variant: vLo, shape: shOf(vLo), w: lw, d: ld, len: lowerH, y0: (lowerH - LIMB_OVERLAP) / 2, boxH: lowerH + LIMB_OVERLAP },
       lowerColor != null ? lowerColor : color);
     lower.position.y = (LIMB_OVERLAP - lowerH) / 2;
     low.add(lower);
@@ -431,7 +469,12 @@
     const us = upper.userData.limb;
     us.cut = [0, SLEEVE_T, 1];
     upper.geometry = limbBake(us, us.lod, null);
-    const ps = Object.assign({}, us, { cut: [SLEEVE_T - 0.04, 1, 0.985] });
+    // (skin under skin is one arm: no step where the two pieces meet)
+    const ps = Object.assign({}, us, { cut: [SLEEVE_T - 0.04, 1, us.variant === "bare" ? 1 : 0.985] });
+    // below a short sleeve the arm is an ARM: the bare loft (the sleeve's own
+    // smooth section ran on down to the elbow in skin colour)
+    const ls = lower.userData.limb;
+    if (ls && ls.variant === "bare" && us.variant !== "bare") { ps.variant = "bare"; ps.shape = ls.shape; ps.cut = [SLEEVE_T - 0.04, 1, 1]; }
     const bare = new THREE.Mesh(limbBake(ps, 1, null), lower.material);
     bare.name = "armBare";
     bare.position.copy(upper.position);
@@ -4871,8 +4914,9 @@
     const foreH = P.armLo - P.handH;
     const foreC = c.shortSleeve ? c.skin : null;
     const vFore = vOf(foreC != null ? foreC : c.arms);
-    const la = limb("arm", P.armW, P.armUp, foreH, P.armW, c.arms, foreC, vOf(c.arms), vFore);
-    const ra = limb("arm", P.armW, P.armUp, foreH, P.armW, c.arms, foreC, vOf(c.arms), vFore);
+    const armShape = !P.child && !P.fem && /^(athletic|muscular|big)$/.test(P.physique || "") ? "bareM" : undefined;
+    const la = limb("arm", P.armW, P.armUp, foreH, P.armW, c.arms, foreC, vOf(c.arms), vFore, undefined, armShape);
+    const ra = limb("arm", P.armW, P.armUp, foreH, P.armW, c.arms, foreC, vOf(c.arms), vFore, undefined, armShape);
     // The chase camera sees the old +X "right" socket on the player's visible
     // left flank. Mirror the arm roots so the semantic right hand — and every
     // weapon attached to it — is actually on the player's right in third person.
@@ -5784,6 +5828,8 @@
   const _awDef = new THREE.Vector3(), _awX = new THREE.Vector3(), _awY = new THREE.Vector3();
   const _awZ = new THREE.Vector3(), _awM = new THREE.Matrix4(), _awQ = new THREE.Quaternion();
   const _awPQ = new THREE.Quaternion(), _awW = new THREE.Vector3(), _awFL = new THREE.Vector3(), _awFE = new THREE.Vector3();
+  const _awRef = new THREE.Vector3(), _awOut = new THREE.Vector3();
+  const ELBOW_IN = -0.35, ELBOW_OUT = 1.20, ELBOW_EASE = 0.55;      // rad round the shoulder-to-wrist line, from down-and-back toward the arm's own side
   function perpNorm(v, axis) {
     v.addScaledVector(axis, -v.dot(axis));
     const l = v.length();
@@ -6045,6 +6091,36 @@
       if (defOk) _awP.copy(_awDef);
       else { _awP.set(0, 0, -1); if (!perpNorm(_awP, _awD)) _awP.set(1, 0, 0); }
     }
+    /* AN ELBOW HAS AN ARC (owner 2026-11-22: "arms when holding long guns
+       contort unrealistically"). The pole came straight from the line the
+       HAND asked its forearm to arrive on, and a hand on a raked stock asks
+       for a forearm from above: the shotgun's firing elbow stood 30 cm over
+       the shoulder, beside the ear, and a carried rifle's off elbow rode up
+       in front of the throat. A shoulder does not turn an arm that far: seen
+       down the shoulder-to-wrist line, the elbow lives between a little
+       inboard of straight down-and-back and a little short of level out to
+       its own side. The pole is held to that arc (and the walk round the
+       body below stays inside it); what the hand then wants beyond it is the
+       wrist's to give, and the callers cap that too. Not for a hand reaching
+       steeply overhead (a ledge, a rung): there the elbow leads forward. */
+    let arc = false, arcPhi = 0, arcSign = 1;
+    if (_awD.y < 0.6) {
+      _awRef.set(out * 0.25, -1, -0.30);
+      if (perpNorm(_awRef, _awD)) {
+        _awOut.crossVectors(_awD, _awRef);
+        if (_awOut.x * out - _awOut.z * 0.3 < 0) _awOut.negate();
+        arcPhi = Math.atan2(_awP.dot(_awOut), _awP.dot(_awRef));
+        // (an ask past an end folds back toward a relaxed elbow, the further
+        // past the more: the far side of the circle is not "nearly level")
+        const c = arcPhi > ELBOW_OUT ? ELBOW_OUT - Math.min(ELBOW_OUT - ELBOW_EASE, (arcPhi - ELBOW_OUT) * 0.8)
+          : arcPhi < ELBOW_IN ? ELBOW_IN + Math.min(ELBOW_EASE - ELBOW_IN, (ELBOW_IN - arcPhi) * 0.8) : arcPhi;
+        if (c !== arcPhi) {
+          arcPhi = c;
+          _awP.copy(_awRef).multiplyScalar(Math.cos(c)).addScaledVector(_awOut, Math.sin(c)).normalize();
+        }
+        arc = true;
+      }
+    }
     // the elbow on the reach circle, toward the pole
     const a = (l1 * l1 - l2 * l2 + d * d) / (2 * d);
     const h = Math.sqrt(Math.max(0, l1 * l1 - a * a));
@@ -6076,10 +6152,19 @@
     const pen0 = onBody && h > 1e-4 ? elbowCost(0) : 0;
     if (pen0 > PEN_OK) {
       _awX.crossVectors(_awD, _awP);
+      if (arc) arcSign = _awX.dot(_awOut) >= 0 ? 1 : -1;
       let best = 0, bestPen = pen0, bestI = 0;
       for (let i = 1; i <= 6; i++) {
         for (let s = -1; s <= 1; s += 2) {
-          const th = s * i * Math.PI / 6;
+          let th = s * i * Math.PI / 6;
+          if (arc) {                               // the walk stays on the elbow's arc: its end, once
+            const ph = arcPhi + arcSign * th;
+            if (ph < ELBOW_IN - 1e-6 || ph > ELBOW_OUT + 1e-6) {
+              const end = ph < ELBOW_IN ? ELBOW_IN : ELBOW_OUT;
+              if (Math.abs(ph - end) >= Math.PI / 6) continue;
+              th = arcSign * (end - arcPhi);
+            }
+          }
           const pn = elbowCost(th);
           if (pn < bestPen - 1e-4) { bestPen = pn; best = th; bestI = i; }
         }

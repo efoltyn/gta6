@@ -305,8 +305,8 @@ export async function stagePeople(input) {
     S.mode = "studio"; S.view = null;
     const who = subject.who, n = who.length;
     const frame = subject.frame || "body";
-    const gap = frame === "face" ? 0.46 : frame === "chest" ? 0.86 : frame === "hips" ? 0.78 : frame === "wide" ? 0.74 : 1.06;
-    const yaw = subject.view === "threeq" ? -0.70 : subject.view === "side" ? -Math.PI / 2 : subject.view === "back" ? Math.PI : subject.view === "threeqback" ? Math.PI - 0.75 : 0;
+    const gap = frame === "face" ? 0.46 : frame === "chest" ? 0.86 : frame === "hips" ? 0.78 : frame === "wide" ? 0.74 : frame === "torso" ? 1.0 : 1.06;
+    const yaw = subject.view === "threeq" ? -0.70 : subject.view === "side" ? -Math.PI / 2 : subject.view === "back" ? Math.PI : subject.view === "threeqback" ? Math.PI - 0.75 : subject.view === "threeql" ? 0.70 : subject.view === "sidel" ? Math.PI / 2 : 0;
     for (let i = 0; i < n; i++) {
       const w = who[i];
       const look = lookOf(w, w.wear ? "street" : subject.fit, i);
@@ -322,6 +322,30 @@ export async function stagePeople(input) {
     if (subject.pose === "arms") for (const ch of S.rigs) {
       try { const p = ch.parts; p.la.rotation.z = 1.25; p.ra.rotation.x = -1.35; p.ra.rotation.z = -0.12; } catch (_) {}
     }
+    if (subject.pose === "flex") for (const ch of S.rigs) {
+      try { const p = ch.parts; p.la.rotation.z = 1.45; p.la.userData.low.rotation.x = -1.9; p.ra.rotation.x = -0.5; p.ra.userData.low.rotation.x = -1.5; } catch (_) {}
+    }
+    // a long gun in the hands, through the game's own hold solve (CBZ.gunHold)
+    const holds = [];
+    for (let i = 0; i < n; i++) {
+      const w = who[i], ch = S.rigs[i];
+      if (!w.gun) continue;
+      try {
+        const actor = { char: ch, group: ch.group, armed: true, weapon: w.gun };
+        ch.group.updateMatrixWorld(true);
+        const prop = CBZ.syncActorWeapon(actor), GH = CBZ.gunHold, hold = w.hold || subject.hold || "low";
+        let ok = false;
+        if (prop) {
+          if (hold === "aim") ok = GH.ready(ch, prop, true);
+          else if (hold === "up") ok = GH.pitchNpc(ch, prop, -0.45);
+          else if (hold === "down") ok = GH.pitchNpc(ch, prop, 0.45);
+          else if (hold === "low") ok = GH.lowReady(ch, prop);
+          else ok = GH.carry(ch, prop, hold);
+        }
+        holds.push(w.gun + ":" + hold + ":" + (ok ? "ok" : "FAIL") + (prop && prop.userData._ready ? "" : ""));
+      } catch (e) { holds.push(w.gun + ":ERR " + (e && e.message)); }
+    }
+    if (holds.length) fits.push.apply(fits, holds);
     for (const ch of S.rigs) ch.group.updateMatrixWorld(true);
     // faces line up on the lens whatever the stature
     if (frame === "face" || frame === "chest") for (const ch of S.rigs) {
@@ -335,6 +359,7 @@ export async function stagePeople(input) {
     if (frame === "face") { c.position.set(0, 1.60, 1.95); c.lookAt(0, 1.57, 0.6); }
     else if (frame === "chest") { c.position.set(0, 1.46, 2.85); c.lookAt(0, 1.40, 0.6); }
     else if (frame === "hips") { c.position.set(0, 0.98, 2.75); c.lookAt(0, 0.90, 0.6); }
+    else if (frame === "torso") { c.position.set(0, 1.22, 4.7); c.lookAt(0, 1.16, 0.6); }
     else if (frame === "wide") { c.position.set(0, 1.08, 9.6); c.lookAt(0, 1.0, 0.6); }
     else { c.position.set(0, 1.02, 7.1); c.lookAt(0, 0.96, 0.6); }
     // measurements of the FIRST figure on the page (front pages read true)

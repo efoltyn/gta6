@@ -167,12 +167,15 @@
     K.opticAnchors(holo, { type: "holo", mag: 1, rear: [0, WY, 0.058], front: [0, WY, -0.058], lensR: 0.020, eyeRelief: 0.18, k: 1.8 });
 
     // BUFFER TUBE + six-position stock + rubber pad
-    K.tube(g, 0.023, 0.023, 0.270, 16, parker, 0, BORE + 0.004, 0.200);
-    K.prof(g, "m4.stock", [
-      [-0.128, 0.082], [-0.326, 0.082], [-0.326, -0.100], [-0.302, -0.106], [-0.196, -0.006],
-      [-0.150, 0.004], [-0.134, 0.024],
+    // (the stock is drawn OUT four notches, SX: collapsed, the grip sat 19 cm
+    // from the butt and a grown man's firing arm folded shut to hold it)
+    const SX = 0.10;
+    K.tube(g, 0.023, 0.023, 0.270 + SX, 16, parker, 0, BORE + 0.004, 0.200 + SX / 2);
+    K.prof(g, "m4.stockx", [
+      [-0.128 - SX, 0.082], [-0.326 - SX, 0.082], [-0.326 - SX, -0.100], [-0.302 - SX, -0.106], [-0.196 - SX, -0.006],
+      [-0.150 - SX, 0.004], [-0.134 - SX, 0.024],
     ], 0.058, poly, { bevel: 0.005 });
-    K.prof(g, "m4.pad", [[-0.324, 0.082], [-0.344, 0.080], [-0.348, 0.070], [-0.348, -0.094], [-0.344, -0.104], [-0.324, -0.100]],
+    K.prof(g, "m4.padx", [[-0.324 - SX, 0.082], [-0.344 - SX, 0.080], [-0.348 - SX, 0.070], [-0.348 - SX, -0.094], [-0.344 - SX, -0.104], [-0.324 - SX, -0.100]],
       0.062, K.fin("rubber"), { bevel: 0.003 });
 
     // the firing hand on the A2 grip
@@ -196,7 +199,7 @@
       trigger: [0, -0.060, -0.135],
       support: { pos: [0, BORE, -0.580], kind: "guard", len: 0.32 },
       mag: { pos: [0, -0.170, -0.290], well: [0, -0.030, -0.282] },
-      stock: [0, -0.010, 0.348],
+      stock: [0, -0.010, 0.348 + SX],
       bolt: null,
       charge: [0, 0.078, 0.058],
       optic: { type: "holo", mag: 1 },

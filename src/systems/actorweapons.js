@@ -509,10 +509,21 @@
       _z.copy(lead).applyQuaternion(_hq);
       return Math.acos(Math.max(-1, Math.min(1, _z.dot(_f))));
     }
-    function frameFire(spec, low) {
+    /* A WRIST GIVES SO MUCH. A grasped fist is fixed on the gun, so whatever
+       the forearm could not do was left to the wrist: 60-68 degrees past a
+       lead that is itself a cocked wrist (carbine, AK). Past WRIST_GIVE the
+       fist turns toward its forearm instead, about the grip it is closed on
+       (the callers put the grip centre back in it): the fingers sit a little
+       diagonal on the grip, as a real hand's do, and the wrist stays a wrist.
+       `free`: the caller turns the gun with the fist instead (a carried gun). */
+    const WRIST_GIVE = 0.45;
+    function frameFire(spec, low, free) {
       low.getWorldQuaternion(_lq);
       _f.set(0, 1, 0).applyQuaternion(_lq);
-      if (spec._z && spec._z.fQ && spec._k != null) return graspBend(spec._z.fQ, spec._z.fL);
+      if (spec._z && spec._z.fQ && spec._k != null) {
+        const b = graspBend(spec._z.fQ, spec._z.fL);
+        return free || b <= WRIST_GIVE ? b : clampBend(_hq, _f, WRIST_GIVE, _dq, spec._z.fL);
+      }
       _x0.copy(spec.fire.x0).applyQuaternion(_gq);
       _n.copy(spec.fire.n).applyQuaternion(_gq);
       return solveFrame(_hq, _x0, _n, _f, spec.fire.tilt, ROLL.fire);
@@ -533,7 +544,7 @@
       if (lift) _w.y += lift;
       _s.copy(z.fL).applyQuaternion(_hq);
       CBZ.charArmTo.wrist(ch, _w, "r", _s, 1);
-      let bend = frameFire(spec, low);
+      let bend = frameFire(spec, low, !aimed);
       /* (a GRASPED fist never drags the wrist out: its bend is measured from
          the lead, which is already the cocked wrist, and moving the wrist
          onto that line straightened the arm and carried the gun out to arm's
@@ -657,7 +668,9 @@
            in it; a long gun's off arm is solved onto the handguard / foregrip.
        Per frame this is copies — no solve, for every armed NPC, not a
        budgeted few. */
-    const BLADE = 0.60, BLADE_NECK = 0.85;
+    // (0.60 turned the gun 34 degrees across the chest: the firing fist came
+    // to the breastbone and that forearm folded back over its own upper arm)
+    const BLADE = 0.42, BLADE_NECK = 0.85;
     /* THE BUTT IN THE SHOULDER POCKET. The ready solve sat the butt 38% of
        the way across to the OTHER shoulder, 5 cm (rig) under the joint, and
        let its search walk the gun up to 26 cm out from the chest to buy the
@@ -738,8 +751,14 @@
        the ground rest lifted the whole gun 30 cm up into the chest and the
        off arm, walked back along the receiver after it, went 2 cm into the
        ribs (gun-hold-check, carry-crouch). */
-    const LOW = { pitch: 0.45, yaw: 0.30, blade: 0.26 };
-    const LOW_CROUCH = { pitch: 0.22, yaw: 0.30, blade: 0.26 };
+    /* (`drop`: rig units the butt comes DOWN out of the pocket in a carry. It
+       stayed in the pocket, 6 cm over the joint, so a carried shotgun's stock
+       sat beside the jaw with the firing fist at the chin and that elbow out
+       level with the shoulder. A carried long gun's butt rides under the
+       collarbone toward the armpit, the fist at the breastbone, the elbow
+       down.) */
+    const LOW = { pitch: 0.58, yaw: 0.18, blade: 0.26, drop: 0.20 };
+    const LOW_CROUCH = { pitch: 0.22, yaw: 0.30, blade: 0.26, drop: 0.10 };
     /* THE OTHER TWO CARRIES (entities/soldier.js asks for them by name): the
        same hold, the stock still in the pocket and both hands on the gun —
        only where the muzzle goes differs.
@@ -750,7 +769,7 @@
                      body, the hands resting on it, the torso square — a long
                      walk with nothing in front of you yet. */
     const HIGH = { pitch: -0.52, yaw: 0.14, blade: 0.20 };
-    const PATROL = { pitch: 0.95, yaw: 0.62, blade: 0.08 };
+    const PATROL = { pitch: 0.95, yaw: 0.62, blade: 0.08, drop: 0.24 };
     const CARRY_MODES = { low: LOW, lowc: LOW_CROUCH, high: HIGH, patrol: PATROL };
     function solveReady(ch, prop, spec, C, pitch, mode, force) {
       const low0 = !!CARRY_MODES[mode];
@@ -787,7 +806,7 @@
         // worn (the shaped chest, or the plate carrier strapped over it), not
         // at the shoulder joint's centre inside the torso
         if (long) {
-          _ro.y += POCKET_Y; _ro.z = pocketZ(ch, _ro.x, _ro.y);
+          _ro.y += POCKET_Y - (low0 ? LW.drop || 0 : 0); _ro.z = pocketZ(ch, _ro.x, _ro.y);
           // the butt PLATE'S CENTRE on the pocket: the plate as drawn (its
           // drop below the bore line included) at the gun's drawn scale. (It
           // was the bore line's end at the model's UNSCALED length: with the
@@ -1299,12 +1318,13 @@
       low.updateWorldMatrix(true, false);
       _s.setFromMatrixScale(low.matrixWorld);
       const sw = fit.s * _s.x;
+      const supCap = z.sQ ? WRIST_GIVE + 0.10 : BEND_MAX;        // (a grasp's bend is past its lead: see WRIST_GIVE)
       let bend = 0;
       for (let i = 0, n = rounds || 3; i < n; i++) {
         bend = frameSupport(spec, low);
         // a wrist that would bend past the cap gives at the wrist, and the
         // ARM carries the grip centre back onto the part
-        if (bend > BEND_MAX) bend = clampBend(_hq, _f, BEND_MAX, _dq, z.sL);
+        if (bend > supCap) bend = clampBend(_hq, _f, supCap, _dq, z.sL);
         _w.copy(_gc).multiplyScalar(sw).applyQuaternion(_hq);
         _w.subVectors(_cw, _w);                            // where the wrist must be
         inReach(ch, _w);
@@ -1312,7 +1332,7 @@
         CBZ.charArmTo.wrist(ch, _w, "l", _s, blend == null ? 1 : blend);
       }
       bend = frameSupport(spec, low);
-      if (bend > BEND_MAX) bend = clampBend(_hq, _f, BEND_MAX, _dq, z.sL);
+      if (bend > supCap) bend = clampBend(_hq, _f, supCap, _dq, z.sL);
       hand.quaternion.copy(_lq).invert().multiply(_hq);
       if (CBZ.charWristTwist) CBZ.charWristTwist(ch, "l");          // the forearm pronates with the hand
       hand.position.set(0, fit.wristY, 0);
