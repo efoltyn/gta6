@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "id": "none",
+ "made": "2026-11-22T22:44:45.610Z",
+ "device": "desktop",
+ "base": "seed:90210|src/world/worldplan.js?v=wm2a|src/world/rockscliffs.js?v=rock2|src/world/terrain.js?v=c1122|src/world/terrain_overhaul.js?v=c1122|src/world/mountain_detail.js?v=ph1122|src/world/alpine_skin.js?v=wreal0929|src/config.js?v=c1122|src/core/seed.js?v=w09290242x|src/world/forestlook.js?v=wreal0929|src/world/textures_surface.js?v=r187d|src/city/beach.js?v=plan1122|src/city/worldmap.js?v=plan1122-ph2|src/city/waterfield.js?v=plan1122|src/city/highways.js?v=layout1122|src/city/highwaynet.js?v=wm2a-ph2|src/city/settlements.js?v=pres0929b+bld1122g|src/city/biome_desert.js?v=plan1122-ph2|src/city/biome_forest.js?v=c1122+bld1122a|src/city/biome_farmland.js?v=plan1122+bld1122a|src/city/biome_snow.js?v=plan1122+bld1122a-ph5|src/city/cityground.js?v=r187a+bld1122f+bld1122g|src/city/river.js?v=plan1122|src/city/continent.js?v=plan1122+bld1122g-ph7|src/world/water_survival.js?v=isles1023",
+ "file": null,
+ "raw": 0,
+ "gz": 0,
+ "entries": []
+}
