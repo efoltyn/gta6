@@ -201,3 +201,7 @@ Items marked **[partial]** have unmerged work sitting in a stopped builder's wor
 83. A punch thrown in a police or army uniform is still waved off as "police work" in wanted.js.
 84. Soldiers from the army battle system (CBZ.cityArmy, the alarm squads at the base) cannot be stripped for their uniform.
 85. Capture tooling: `--cams at:x,y,z:...` is split on its commas, and the city now boots with a default slice, so far places (Fort Brandt, the minicities) stream in on approach. A shot or probe of them must go there and build them first.
+86. Jail pickpocket is still offered from up to 3.2 m. Past about 1.5 m your hand cannot reach the pocket even after the short step in, yet the lift still rolls the dice.
+87. A seated warden snaps to standing the instant anything alerts him (world/adminwing.js).
+88. The warehouse dock stair and the bleachers still walk on a straight-line surface under their drawn steps; they need rebuilding as real stairs (systems/stairs.js treads).
+89. Jail cop pile-up after fighting a guard (causes found 2026-11-23, fix awaiting the owner's go): guards hunt and radio "Runner!" on heat alone with no check for surrender, cuffs or an arrest in progress (systems/detection.js:842); backup calls add heat; the case file re-dispatches searches every 6-9 s for minutes; only a finished arrest clears it (systems/capture.js:344); tower M4 posts on the ground at shift change and chow join any fight at heat 25 (entities/towerwatch.js:231).
