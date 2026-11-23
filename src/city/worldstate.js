@@ -156,6 +156,21 @@
     return cached || mirror;
   }
 
+  // THE LEDGER WITHOUT THE PART THAT CANNOT BE WRITTEN: every top-level
+  // field that stringifies on its own is kept, the one that does not is left
+  // out (and named, once). Cutting only the loop was not enough: a live body
+  // hangs the whole scene graph off it, and that is no save either.
+  let cutSaid = false;
+  function jsonCut(w) {
+    const keep = {}, bad = [];
+    for (const k in w) {
+      try { JSON.stringify(w[k]); keep[k] = w[k]; } catch (e) { bad.push(k); }
+    }
+    let out = null;
+    try { out = JSON.stringify(keep); } catch (e) { out = null; }
+    if (!cutSaid) { cutSaid = true; console.error("[worldstate] the ledger held something that cannot be saved; left out: " + bad.join(", ")); }
+    return out;
+  }
   function save(w) {
     if (!w) return;
     // PERMADEATH (city/death.js): once the run is declared over and the slot
@@ -164,7 +179,17 @@
     if (g._cityGameOver || g._citySaveBlocked) return;
     w.lastSaved = now();
     let json = null;
-    try { json = JSON.stringify(w); } catch (e) { return; }
+    try { json = JSON.stringify(w); }
+    catch (e) {
+      // ONE BAD FIELD MUST NOT END EVERY SAVE. A live object on the ledger
+      // (a loop back to itself, a BigInt) made JSON.stringify throw, and
+      // this returned with lastSaved already stamped: the live copy looked
+      // saved every five seconds while neither sqlite nor the mirror was
+      // written again, and a reload came back from the last good save (bail,
+      // an open charge and the cash on it, gone). That field is left out, and named.
+      json = jsonCut(w);
+      if (json == null) return;
+    }
     // sqlite becomes the size-uncapped primary the moment its backend is
     // ready (fire-and-forget — saveWorld() never throws); localStorage
     // keeps riding as a safety mirror UNLESS the blob has grown past what

@@ -69,13 +69,24 @@
   // ---- mark an identity permanently dead. Idempotent (a double-kill report
   //      — e.g. explosion + bleed-out both firing — never double-fires the
   //      death callback or stomps the original killedBy/killedAt). ----
+  // WHO, IN WORDS. The record is saved whole with the character's ledger
+  // (city/worldstate.js), and city/peds.js hands over the killer himself: a
+  // live body, his rig and the scene graph under it. From the first named
+  // death on, the ledger could not be written at all (the save looked made
+  // and was not: a reload came back from before it, bail and cash gone).
+  function who(k) {
+    if (k == null) return null;
+    if (typeof k !== "object") return k;
+    const pa = CBZ.city && CBZ.city.playerActor;
+    return { name: k.name || k.kind || null, isPlayer: !!(k.isPlayer || k === pa || k === CBZ.player), id: k._identityId || k.id || null };
+  }
   function markDead(id, opts) {
     const rec = reg[id];
     if (!rec || rec.status === "dead") return rec || null;
     opts = opts || {};
     rec.status = "dead";
     rec.killedAt = opts.at != null ? opts.at : now();
-    rec.killedBy = opts.killedBy != null ? opts.killedBy : null;
+    rec.killedBy = who(opts.killedBy);
     rec.history.push({ t: "death", at: rec.killedAt, by: rec.killedBy });
     const cbs = deathCbs[rec.kind];
     if (cbs) for (let i = 0; i < cbs.length; i++) {
@@ -144,7 +155,7 @@
           id: e.id, kind: e.kind || "npc", name: e.name || "Unknown",
           status: e.status === "dead" ? "dead" : "alive",
           successorId: e.successorId || null,
-          killedBy: e.killedBy != null ? e.killedBy : null,
+          killedBy: who(e.killedBy),
           killedAt: e.killedAt != null ? e.killedAt : null,
           history: Array.isArray(e.history) ? e.history : [],
         };

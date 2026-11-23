@@ -31,7 +31,7 @@
 <link rel="stylesheet" href="css/mobile.css?v=nopanel1122">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
 <link rel="stylesheet" href="css/city.css?v=nopanel1122">
-<link rel="stylesheet" href="css/campaign.css?v=nopanel1122">
+<link rel="stylesheet" href="css/campaign.css?v=c1122">
 <link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
 <link rel="stylesheet" href="css/title_hub.css?v=rail1031">
 <script>
@@ -712,7 +712,7 @@ document.body.appendChild(b);}}catch(e){}})();
      memory, witnesses, morale, the authority ladder). Pure logic with no
      parse-time dependencies, so it loads before its first consumers
      (entities/security.js, entities/guards.js). -->
-<script src="src/systems/brain.js?v=nopitch1022"></script>
+<script src="src/systems/brain.js?v=nopitch1022+pr4"></script>
 <!-- systems/command.js: CBZ.command, orders obeyed or not (every game). Pure
      logic over CBZ.brain + CBZ.voice; games register their bodies (use). -->
 <script src="src/systems/command.js?v=cmd1022o"></script>
@@ -1211,7 +1211,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
 <script src="src/city/waterfield.js?v=plan1122"></script>
-<!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
+<!-- THE HIGHWAY NETWORK AS DATA: the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
      continent plate reads its relief-corridor gate). -->
@@ -1868,7 +1868,7 @@ document.body.appendChild(b);}}catch(e){}})();
      blind wall to a roof with a line to where he stands; and a base that
      stands to behind the shot (CBZ.cityBaseStandTo). Reads CBZ._militaryBase,
      CBZ.ladderKit, CBZ.motorcade.kit at run time. -->
-<script src="src/city/hitman_m_general.js?v=general1122j+pr3"></script>
+<script src="src/city/hitman_m_general.js?v=general1122j+pr3+pr4"></script>
 <!-- army / column: a man who is never alone. Thirty armed men organised as a
      detail (a ring that walks with him on the detail brain, a team at each
      site with door, corner and roof posts, three cars on the road graph), a
@@ -2257,7 +2257,7 @@ document.body.appendChild(b);}}catch(e){}})();
      open. A prison builder (core/prisonlazy.js); AFTER govcomplex.js (it
      builds the gate from CBZ.govGateKit) and entities/guards.js (its two gate
      officers are CBZ.spawnGuard's). -->
-<script src="src/world/prisonoutside.js?v=outside1122+pr3"></script>
+<script src="src/world/prisonoutside.js?v=outside1122+pr3+pr4"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's

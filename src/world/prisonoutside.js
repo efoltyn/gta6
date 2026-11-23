@@ -94,6 +94,17 @@
     officers: [],           // the two who stand the gate (entities/guards.js records)
   };
 
+  // (section 8, the field: declared up here because the prison may be built
+  // the moment definePrison is called, before the rest of this file has run)
+  const FIELD = {
+    trackZ: EZ + 68, trackX0: WIRE.x0 - 76, trackX1: WIRE.x1 + 76, trackW: 5,
+    farZ: GZ - 40, farX0: GX - 260, farX1: GX + 260,
+    ditchX: GX - 30, ditchZ0: EZ + 18, ditchZ1: GZ - 58,
+    hedgeZ: EZ + 224, hedgeWX: GX - 150, hedgeWZ1: EZ + 632,
+    crop: { x0: GX - 142, x1: GX - 38, z0: EZ + 238, z1: EZ + 572 },
+  };
+  const FW = { lamps: [], patrol: [], caught: 0, hold: null };
+
   function hash01(x, z, salt) {
     let h = (Math.floor(x * 7.31) * 73856093) ^ (Math.floor(z * 3.17) * 19349663) ^ (salt * 83492791);
     h = (h ^ (h >>> 13)) * 1274126177;
@@ -203,8 +214,304 @@
         if (arch) S.officers.push(CBZ.spawnGuard([[arch.x, arch.z], [arch.x, arch.z - 3.5]], 1.6, 16, 0.62, { post: "outergate" }));
       }
     }
+    try { buildField(K, ROOT); } catch (e) { console.error("[prisonoutside] field", e); }
     S.built = true;
   });
+
+  /* ==========================================================
+     8. THE FIELD: SOMETHING TO HIDE BEHIND, AND SOMEBODY LOOKING.
+     It was a kilometre of mown grass between the wire and the outer wall,
+     dark the only cover and nobody watching it past the wire. A county farm
+     prison works its own land, so the field is farmed:
+       · the PERIMETER TRACK, 68 m off the south wire, walked by an officer
+         with a torch; a second walks the road inside the outer wall;
+       · a DRAINAGE DITCH from the wire to the far road between its spoil
+         banks (crouched in it, the towers see the banks); it crosses the
+         track over a concrete culvert, the one stretch of it in the open;
+       · a HEDGEROW across the field with a gate on the spine road, and one
+         down its west side; a field of MAIZE between them, taller than a
+         man; a run of precast pipes laid out beside the ditch for the next
+         stretch of drain; round bales, a tractor and its trailer, a skip;
+       · two LAMPS on the south corner towers sweeping the near field after
+         dark (entities/searchlight.js, screened by all of the above; a man
+         running or driving is caught at the edge of the pool, a man still
+         and low only in it; dark in the 00:00 blackout with every other
+         fixed light). One that catches a man out there holds on him: the
+         gate is sealed, the prison locks down and the patrols are sent.
+     Every piece is a real collider and a real line-of-sight blocker
+     (CBZ.losBlockers): the guards' eyes and the lamps ask the same walls.
+     ========================================================== */
+  function canvasTex(size, paint) {
+    const c = document.createElement("canvas");
+    c.width = c.height = size;
+    const x = c.getContext("2d");
+    paint(x, size);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  }
+  function speckle(x, n, base, cols, seed) {
+    x.fillStyle = base; x.fillRect(0, 0, n, n);
+    for (let i = 0; i < n * n / 6; i++) {
+      const h = hash01(i, seed, 3), k = hash01(seed, i, 5);
+      x.fillStyle = cols[(h * cols.length) | 0];
+      x.fillRect((hash01(i, 1, seed) * n) | 0, (hash01(2, i, seed) * n) | 0, 1 + ((k * 3) | 0), 1 + ((h * 3) | 0));
+    }
+  }
+  function buildField(K, ROOT) {
+    const F = FIELD;
+    const blockMat = new THREE.MeshBasicMaterial();
+    // an invisible axis-aligned box: what the guards' and the lamps' rays hit
+    function screen(x0, x1, z0, z1, y1) {
+      const w = x1 - x0, d = z1 - z0;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, y1, d), blockMat);
+      m.position.set((x0 + x1) / 2, y1 / 2, (z0 + z1) / 2);
+      m.visible = false;
+      ROOT.add(m);
+      m.updateMatrixWorld(true);
+      CBZ.losBlockers.push(m);
+      return m;
+    }
+    function solid(x0, x1, z0, z1, y1, see) {
+      CBZ.colliders.push({ minX: x0, maxX: x1, minZ: z0, maxZ: z1, y0: 0, y1: y1, noBreach: true });
+      if (see !== false) screen(x0, x1, z0, z1, y1);
+    }
+    const hedgeMat = new THREE.MeshLambertMaterial({ map: canvasTex(128, function (x, n) { speckle(x, n, "#2f4a24", ["#3d5c2c", "#26401d", "#4a6b33", "#1f3417", "#55753a"], 11); }) });
+    const bankMat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, map: canvasTex(128, function (x, n) { speckle(x, n, "#5d6438", ["#6b7442", "#4f5530", "#75683f", "#5a4d32", "#7a8048"], 23); }) });
+    // a wall of leaves seen from the side (two rows of stalks per tile,
+    // long broad leaves, the tassels on top)
+    const maizeTex = canvasTex(128, function (x, n) {
+      x.clearRect(0, 0, n, n);
+      for (let i = 0; i < 12; i++) {
+        const sx = (i + 0.5) * n / 12 + (hash01(i, 7, 1) - 0.5) * 6;
+        x.strokeStyle = i % 2 ? "#7f9140" : "#93a04c"; x.lineWidth = 3;
+        x.beginPath(); x.moveTo(sx, n); x.lineTo(sx + (hash01(i, 3, 2) - 0.5) * 4, 12); x.stroke();
+        for (let k = 0; k < 9; k++) {
+          const y = n - 8 - k * 12 - hash01(i, k, 4) * 6, dir = (k + i) % 2 ? 1 : -1;
+          x.strokeStyle = k % 3 === 0 ? "#5d7a30" : k % 3 === 1 ? "#6f8a3a" : "#8f9c48"; x.lineWidth = 4.2;
+          x.beginPath(); x.moveTo(sx, y); x.quadraticCurveTo(sx + dir * 12, y - 9, sx + dir * 22, y + 7); x.stroke();
+        }
+        x.fillStyle = "#c9b46a"; x.fillRect(sx - 1.5, 2, 3, 12);
+      }
+    });
+    const maizeMat = new THREE.MeshLambertMaterial({ map: maizeTex, alphaTest: 0.45, side: THREE.DoubleSide });
+    const strawMat = new THREE.MeshLambertMaterial({ color: 0xc9a95a });
+    const wrapMat = new THREE.MeshStandardMaterial({ color: 0x1c1e20, roughness: 0.45, metalness: 0 });
+    const paintMat = new THREE.MeshLambertMaterial({ color: 0x3f6b2c });
+    const tyreMat = new THREE.MeshLambertMaterial({ color: 0x1a1b1d });
+    const steelMat = K.skin("steel", 0x6c7580);
+    const concrete = K.skin("concrete", 0xa9adb1);
+    const glass = K.skin("glass");
+
+    // ---- the perimeter track and the road inside the outer wall (gravel)
+    K.ground((F.trackX0 + F.trackX1) / 2, F.trackZ, F.trackX1 - F.trackX0, F.trackW, "gravel", { y: 0.012 });
+    K.ground((F.farX0 + F.farX1) / 2, F.farZ, F.farX1 - F.farX0, F.trackW, "gravel", { y: 0.012 });
+
+    // ---- the ditch: a muddy bed between two spoil banks, gaps for the
+    // farm crossings, a culvert under the track
+    const DX = F.ditchX, BANK_OFF = 2.1, BANK_W = 1.6, BANK_TOP = 0.6, BANK_H = 1.4;
+    K.ground(DX, (F.ditchZ0 + F.ditchZ1) / 2, 2.6, F.ditchZ1 - F.ditchZ0, "gravel", { y: 0.01, a: "#3f4636", b: "#363d2f" });
+    const cuts = [[F.trackZ - 3.4, F.trackZ + 3.4]];           // the culvert: no bank over the track
+    for (let z = F.ditchZ0 + 70; z < F.ditchZ1 - 20; z += 72) {
+      if (Math.abs(z - F.hedgeZ) < 14 || Math.abs(z - F.trackZ) < 14) continue;
+      cuts.push([z - 1.6, z + 1.6]);                              // a farm crossing
+    }
+    cuts.sort(function (a, b) { return a[0] - b[0]; });
+    const runs = [];
+    let z0 = F.ditchZ0;
+    for (const c of cuts) { if (c[0] > z0 + 1) runs.push([z0, c[0]]); z0 = Math.max(z0, c[1]); }
+    if (F.ditchZ1 > z0 + 1) runs.push([z0, F.ditchZ1]);
+    function bankGeo(len) {
+      // a spoil bank: a trapezoid along local z, base BANK_W, top BANK_TOP
+      const b = BANK_W / 2, t = BANK_TOP / 2, h = BANK_H, l = len / 2;
+      const g = new THREE.BufferGeometry();
+      const P = [-b, 0, -l, b, 0, -l, t, h, -l, -t, h, -l, -b, 0, l, b, 0, l, t, h, l, -t, h, l];
+      const I = [0, 3, 7, 0, 7, 4, 1, 5, 6, 1, 6, 2, 3, 2, 6, 3, 6, 7, 0, 1, 2, 0, 2, 3, 4, 7, 6, 4, 6, 5];
+      g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+      g.setIndex(I);
+      const ng = g.toNonIndexed(); ng.computeVertexNormals();
+      const uv = []; const p = ng.attributes.position;
+      for (let i = 0; i < p.count; i++) uv.push(p.getZ(i) / 3, p.getY(i) / 3 + p.getX(i) / 3);
+      ng.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+      return ng;
+    }
+    for (const r of runs) {
+      for (let a = r[0]; a < r[1] - 0.5; a += 100) {             // (a stat piece a batch tile can hold)
+        const b = Math.min(r[1], a + 100), len = b - a, zc = (a + b) / 2;
+        for (const s of [-1, 1]) {
+          K.stat(bankGeo(len), bankMat, DX + s * BANK_OFF, 0, zc, { cast: false });
+          solid(DX + s * BANK_OFF - BANK_W / 2 + 0.2, DX + s * BANK_OFF + BANK_W / 2 - 0.2, a, b, BANK_H);
+        }
+      }
+    }
+    // the culvert: a precast headwall each side of the track, the pipe's
+    // mouth in each, the bed running on under the gravel
+    for (const s of [-1, 1]) {
+      const hz = F.trackZ + s * 3.0;
+      K.stat(new THREE.BoxGeometry(5.6, 1.5, 0.35), concrete, DX, 0.75, hz, { uv: 2 });
+      solid(DX - 2.8, DX - 0.75, hz - 0.18, hz + 0.18, 1.5);
+      solid(DX + 0.75, DX + 2.8, hz - 0.18, hz + 0.18, 1.5);
+      K.stat(new THREE.TorusGeometry(0.66, 0.1, 6, 16), concrete, DX, 0.55, hz + s * 0.19, { cast: false });
+      K.stat(new THREE.CircleGeometry(0.62, 16), tyreMat, DX, 0.55, hz + s * 0.12, { ry: s > 0 ? 0 : Math.PI, cast: false });
+    }
+    // the outfall at the far end: a headwall across the ditch's end
+    K.stat(new THREE.BoxGeometry(5.6, 1.5, 0.35), concrete, DX, 0.75, F.ditchZ1 + 0.2, { uv: 2 });
+    solid(DX - 2.8, DX + 2.8, F.ditchZ1 + 0.02, F.ditchZ1 + 0.38, 1.5);
+
+    // ---- hedgerows: 2.5 m of hawthorn, a ragged top, gaps where things go through
+    const HEDGE_H = 2.5, HEDGE_T = 1.8;
+    function hedgeRun(x0, z0, x1, z1) {
+      const alongX = Math.abs(x1 - x0) > Math.abs(z1 - z0);
+      const L = alongX ? Math.abs(x1 - x0) : Math.abs(z1 - z0);
+      for (let a = 0; a < L - 0.2; a += 40) {
+        const b = Math.min(L, a + 40), len = b - a;
+        const cx = alongX ? Math.min(x0, x1) + (a + b) / 2 : x0, cz = alongX ? z0 : Math.min(z0, z1) + (a + b) / 2;
+        const w = alongX ? len : HEDGE_T, d = alongX ? HEDGE_T : len;
+        K.stat(new THREE.BoxGeometry(w, HEDGE_H, d), hedgeMat, cx, HEDGE_H / 2, cz, { uv: 2 });
+        // the ragged top: a few humps along it
+        for (let k = 0.5; k < len / 6; k++) {
+          const t = a + k * 6 + (hash01(cx, k, 31) - 0.5) * 2, hh = 0.35 + hash01(k, cz, 37) * 0.5;
+          const hx = alongX ? Math.min(x0, x1) + t : x0, hz = alongX ? z0 : Math.min(z0, z1) + t;
+          K.stat(new THREE.BoxGeometry(alongX ? 3.2 : HEDGE_T * 0.8, hh, alongX ? HEDGE_T * 0.8 : 3.2), hedgeMat, hx, HEDGE_H + hh / 2 - 0.05, hz, { uv: 2, cast: false });
+        }
+        solid(cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2, HEDGE_H + 0.2);
+      }
+    }
+    const HZ = F.hedgeZ;
+    const gaps = [[DX - 3.6, DX + 3.6], [GX - 7, GX + 7], [GX + 118, GX + 124]].sort(function (a, b) { return a[0] - b[0]; });
+    let hx = F.hedgeWX - 180;
+    for (const gp of gaps) { if (gp[0] > hx + 1) hedgeRun(hx, HZ, gp[0], HZ); hx = gp[1]; }
+    hedgeRun(hx, HZ, GX + 330, HZ);
+    hedgeRun(F.hedgeWX, HZ + HEDGE_T / 2, F.hedgeWX, F.hedgeWZ1);
+    // the field gate on the spine: two posts and a five-bar gate stood open
+    for (const s of [-1, 1]) K.stat(new THREE.BoxGeometry(0.22, 1.4, 0.22), K.skin("wood", 0x7a6248), GX + s * 6.8, 0.7, HZ, {});
+    K.stat(new THREE.BoxGeometry(0.08, 1.1, 3.6), K.skin("wood", 0x8a7254), GX + 6.85, 0.75, HZ + 1.9, { cast: false });
+
+    // ---- the maize: rows north-south, a man's height and more
+    const C = F.crop, ROW = 1.1, CROP_H = 2.3;
+    for (let x = C.x0 + 0.75; x < C.x1; x += ROW) {
+      for (let a = C.z0; a < C.z1 - 1; a += 110) {
+        const b = Math.min(C.z1, a + 110);
+        K.stat(new THREE.PlaneGeometry(b - a, CROP_H), maizeMat, x, CROP_H / 2, (a + b) / 2, { ry: Math.PI / 2, uv: CROP_H, cast: false });
+      }
+    }
+    for (let x = C.x0; x < C.x1 - 1; x += 26) for (let z = C.z0; z < C.z1 - 1; z += 28) screen(x, Math.min(C.x1, x + 26), z, Math.min(C.z1, z + 28), CROP_H - 0.1);
+    K.ground((C.x0 + C.x1) / 2, (C.z0 + C.z1) / 2, C.x1 - C.x0, C.z1 - C.z0, "gravel", { y: 0.008, a: "#4c5a2c", b: "#434f27" });
+
+    // ---- the pipes for the next stretch of drain, laid out beside the ditch
+    const PIPE_R = 0.8, PIPE_L = 2.4, PX = DX - 6.5;
+    for (let z = EZ + 640, i = 0; z < EZ + 880; i++) {
+      if (i % 5 === 4) { z += 3.5; continue; }                    // a gap every fourth pipe
+      K.stat(new THREE.CylinderGeometry(PIPE_R, PIPE_R, PIPE_L, 14), concrete, PX, PIPE_R, z + PIPE_L / 2, { rx: Math.PI / 2, uv: 2 });
+      solid(PX - PIPE_R, PX + PIPE_R, z, z + PIPE_L, PIPE_R * 2);
+      z += PIPE_L + 0.15;
+    }
+
+    // ---- round bales, stacked two high
+    function bales(x, z, n, wrapped) {
+      const R = 0.75, Lb = 1.2;
+      for (let row = 0; row < 2; row++) {
+        const m = row ? n - 1 : n;
+        for (let i = 0; i < m; i++) {
+          const bx = x + (i - (m - 1) / 2) * 1.55;
+          K.stat(new THREE.CylinderGeometry(R, R, Lb, 14), wrapped ? wrapMat : strawMat, bx, R + row * 1.32, z, { rx: Math.PI / 2, cast: true });
+        }
+      }
+      solid(x - n * 0.78, x + n * 0.78, z - Lb / 2, z + Lb / 2, 2.8);
+    }
+    bales(GX - 13, EZ + 432, 5, false);
+    bales(PX - 22, EZ + 730, 4, true);
+    bales(GX + 30, EZ + 872, 5, false);
+
+    // ---- a tractor and its trailer (facing +x)
+    function tractor(x, z, trailer) {
+      K.stat(new THREE.BoxGeometry(2.4, 1.1, 1.05), paintMat, x + 0.9, 1.25, z, {});
+      K.stat(new THREE.BoxGeometry(1.35, 0.15, 1.6), paintMat, x - 0.35, 1.5, z, {});
+      K.stat(new THREE.BoxGeometry(1.25, 1.35, 1.35), glass, x - 0.35, 2.25, z, {});
+      K.stat(new THREE.BoxGeometry(1.4, 0.1, 1.45), paintMat, x - 0.35, 2.98, z, {});
+      K.stat(new THREE.CylinderGeometry(0.07, 0.07, 1.2, 8), steelMat, x + 1.6, 2.1, z + 0.35, {});
+      for (const s of [-1, 1]) {
+        K.stat(new THREE.CylinderGeometry(0.85, 0.85, 0.5, 16), tyreMat, x - 0.45, 0.85, z + s * 0.98, { rx: Math.PI / 2 });
+        K.stat(new THREE.CylinderGeometry(0.5, 0.5, 0.32, 14), tyreMat, x + 1.75, 0.5, z + s * 0.78, { rx: Math.PI / 2 });
+      }
+      solid(x - 1.3, x + 2.15, z - 1.25, z + 1.25, 3.0);
+      if (!trailer) return;
+      const tx = x - 4.6;
+      K.stat(new THREE.BoxGeometry(5.2, 0.22, 2.3), steelMat, tx, 0.95, z, {});
+      K.stat(new THREE.BoxGeometry(1.4, 0.1, 0.1), steelMat, x - 1.65, 0.75, z, { cast: false });
+      for (const s of [-1, 1]) K.stat(new THREE.CylinderGeometry(0.48, 0.48, 0.3, 12), tyreMat, tx, 0.48, z + s * 1.0, { rx: Math.PI / 2 });
+      for (let i = 0; i < 3; i++) K.stat(new THREE.CylinderGeometry(0.75, 0.75, 1.2, 14), strawMat, tx - 1.6 + i * 1.6, 1.81, z, { rx: Math.PI / 2 });
+      solid(tx - 2.6, tx + 2.6, z - 1.15, z + 1.15, 2.6);
+    }
+    tractor(GX + 18, HZ + 9, true);
+    tractor(GX - 64, EZ + 1010, false);
+    // a skip and a stack of fence posts by the outfall, short of the far road
+    K.stat(new THREE.BoxGeometry(3.8, 1.6, 1.9), K.skin("steel", 0xd2a019), GX - 17, 0.8, F.ditchZ1 - 4, {});
+    solid(GX - 18.9, GX - 15.1, F.ditchZ1 - 4.95, F.ditchZ1 - 3.05, 1.6);
+    for (let i = 0; i < 9; i++) K.stat(new THREE.CylinderGeometry(0.09, 0.09, 2.6, 6), K.skin("wood", 0x7a6248), GX - 9 + (i % 3) * 0.2, 0.12 + ((i / 3) | 0) * 0.19, F.ditchZ1 - 6, { rz: Math.PI / 2, cast: false });
+
+    // ---- who watches it: two officers walking the roads with torches
+    if (CBZ.spawnGuard) {
+      FW.patrol.push(CBZ.spawnGuard([[F.trackX0 + 4, F.trackZ], [F.trackX1 - 4, F.trackZ]], 1.5, 30, 0.75, { post: "fieldpatrol", flashlightPatrol: true, flashlightPhase: 0 }));
+      FW.patrol.push(CBZ.spawnGuard([[F.farX1 - 4, F.farZ], [F.farX0 + 4, F.farZ]], 1.5, 30, 0.75, { post: "fieldpatrol", flashlightPatrol: true, flashlightPhase: 3 }));
+    }
+    // ...and the lamps on the two south corner towers, after dark
+    if (CBZ.searchlightAdd) {
+      FW.lamps.push(CBZ.searchlightAdd(WIRE.x0, EZ, { cx: GX - 62, sweep: 95, sweepZ: EZ + 210, sweepZAmp: 140, rate: 0.8, radius: 8.5, occlude: true, spill: 1.8, nightOnly: true, tag: "field" }));
+      FW.lamps.push(CBZ.searchlightAdd(WIRE.x1, EZ, { cx: GX + 62, sweep: 95, sweepZ: EZ + 210, sweepZAmp: 140, rate: 0.72, phase: 2.1, radius: 8.5, occlude: true, spill: 1.8, nightOnly: true, tag: "field" }));
+    }
+    K.program("field", F.trackX0, F.trackX1, EZ, GZ);
+  }
+  // A LAMP THAT FINDS A MAN IN THE FIELD holds him (entities/searchlight.js
+  // sl.aimAt follows him while it can see him; behind a hedge or down in
+  // the crop it loses him and goes back to its sweep), and the first time
+  // says so: the gate is sealed, the prison locks down, the patrols come.
+  function fieldTick(dt) {
+    const P = CBZ.player;
+    if (!P || !P.pos || P.dead) return;
+    const inField = S.out && P.pos.z > EZ + 4 && !pastOuter(P.pos.x, P.pos.z);
+    for (let i = 0; i < FW.lamps.length; i++) {
+      const sl = FW.lamps[i];
+      if (!sl) continue;
+      if (sl._fwHold) {
+        if (inField && sl._hot) {
+          sl._fwLost = 0;
+          const k = Math.min(1, 2.5 * dt);
+          sl.aimAt.x += (P.pos.x - sl.aimAt.x) * k; sl.aimAt.z += (P.pos.z - sl.aimAt.z) * k;
+        } else if ((sl._fwLost = (sl._fwLost || 0) + dt) > 4) { sl._fwHold = false; sl.aimAt = null; }
+        continue;
+      }
+      if (inField && sl._hot && !sl.aimAt) {
+        sl._fwHold = true; sl._fwLost = 0;
+        sl.aimAt = { x: P.pos.x, z: P.pos.z };
+        caught(P);
+      }
+    }
+  }
+  function caught(P) {
+    FW.caught++;
+    S.seen = true;
+    if (CBZ.addHeat) CBZ.addHeat(40);
+    const x = P.pos.x, z = P.pos.z;
+    for (let i = 0; i < FW.patrol.length; i++) {
+      const gd = FW.patrol[i];
+      if (!gd || gd.dead || gd.ko > 0) continue;
+      gd.investigate = { x: x, z: z, t: 12, scan: 0, type: "searchlight", looking: true, player: true };
+      gd._returning = false;
+      if (i === 0 && CBZ.prisonSay) { try { CBZ.prisonSay(gd, "Tower has one in the field!", { force: true }); } catch (e) {} }
+    }
+    if (CBZ.lockdown && CBZ.lockdown.begin && !lockdownOn()) { try { CBZ.lockdown.begin("escape", { hunt: true }); } catch (e) {} }
+  }
+  CBZ.prisonField = {
+    plan: FIELD,
+    audit: function () {
+      return {
+        caught: FW.caught,
+        lamps: FW.lamps.map(function (sl) { return sl ? { x: +sl.target.x.toFixed(1), z: +sl.target.z.toFixed(1), hot: !!sl._hot, hold: !!sl._fwHold, out: !!(sl.nightOnly && (CBZ.nightAmount != null ? CBZ.nightAmount : 1) < 0.35) } : null; }),
+        patrol: FW.patrol.map(function (gd) { const p = gd.group.position; return { x: +p.x.toFixed(1), z: +p.z.toFixed(1), state: gd.state, sus: +(gd.sus || 0).toFixed(2), torch: !!gd.flashlightOn }; }),
+      };
+    },
+  };
 
   /* ==========================================================
      THE HAZE. Every other world writes its own fog every frame; the prison
@@ -644,6 +951,8 @@
     if (S.portExit && CBZ.EXIT && CBZ.EXIT.set) CBZ.EXIT.set(S.portExit.x, 0, S.portExit.z);
     S.out = false; S.outAt = 0; S.how = null; S.reason = null; S.seen = false; S.notice = false;
     gateReset();
+    FW.caught = 0;
+    for (let i = 0; i < FW.lamps.length; i++) { const sl = FW.lamps[i]; if (sl && sl._fwHold) { sl._fwHold = false; sl.aimAt = null; } }
     for (let i = 0; i < S.ways.length; i++) { const w = S.ways[i]; w.made = 0; w.gone = 0; w.crews = {}; w.open = false; w.evalT = 0; }
     resetFleet();
   }
@@ -658,6 +967,7 @@
     buildSome(dt);
     armVerbs();
     gateTick(dt);
+    fieldTick(dt);
     if ((S.beatT -= dt) <= 0) { S.beatT = 0.5; waysBeat(); }
   });
 })();

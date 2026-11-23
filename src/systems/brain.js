@@ -2379,8 +2379,22 @@
       return out;
     }
     out.step = c.step;
-    if (out.say && !c.silent) say(actor, out.say, _sayForce);
+    if (out.say && !c.silent && !dSaidLately(actor, c.said)) say(actor, out.say, _sayForce);
     return out;
+  }
+  // A STEP IS SAID ONCE, NOT ONCE PER CASE. A caller that cancels and begins
+  // the case again (a screen that re-sorts, a post that re-arms) gave every
+  // new case a fresh voice: the same man said "See this?" and "You see
+  // this?" in turn twice a second. The man remembers what he last said and
+  // when: the same step from him inside SAID_AGAIN seconds is not said again.
+  const SAID_AGAIN = 6;
+  function dSaidLately(actor, stepName) {
+    const b = actor && actor._brain;
+    if (!b || !stepName) return false;
+    const t = now();
+    if (b._dStepSaid === stepName && t - (b._dStepSaidT || -1e9) < SAID_AGAIN) return true;
+    b._dStepSaid = stepName; b._dStepSaidT = t;
+    return false;
   }
   function dEndAct(c, act, outcome, topic) {
     const out = dEnd(c, outcome, topic);

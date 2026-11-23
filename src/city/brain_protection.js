@@ -806,7 +806,12 @@
     const B = brain();
     const DM = B && B.demand;
     if (D.phase !== "alert" || !D.screen.length || !D.threat || !DM) { endChallenge(D, B); return; }
-    const q = D.screen[0];
+    // ONE MAN DOES THE TALKING. The screen is re-sorted by distance every
+    // tick, and two agents standing level swapped places in it: the challenge
+    // was cancelled and begun again on the other man every time, and each
+    // new one opened at SHOW ("You see this?" / "See this?" twice a second).
+    let q = D.screen[0];
+    if (D.authorityOn && D.authorityOn !== q && !D.authorityOn.dead && D.screen.indexOf(D.authorityOn) >= 0) q = D.authorityOn;
     if (D.authorityOn !== q) {
       endChallenge(D, B);
       try { DM.begin(q, D.threat, "security", { hold: true, armed: true }); D.authorityOn = q; } catch (e) { return; }

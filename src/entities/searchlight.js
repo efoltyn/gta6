@@ -268,19 +268,21 @@
     for (let i = 0; i < T.length; i++) { const d = Math.hypot(T[i].x - x, T[i].z - z); if (d < bd) { bd = d; best = T[i]; } }
     return best;
   }
-  function makeLight(towerX, towerZ, phase, sweep, sweepZ, sweepZAmp) {
+  function makeLight(towerX, towerZ, phase, sweep, sweepZ, sweepZAmp, noLight) {
     const T0 = towerAt(towerX, towerZ);
     if (T0) { towerX = T0.x; towerZ = T0.z; }
     const head = buildHead(towerX, towerZ);
 
     // a real spotlight for the glow (no shadow: keeps it cheap)
-    const spot = new THREE.SpotLight(COL, 1.4, 60, 0.5, 0.5, 1.2);
-    spot.position.set(towerX, HY + PIVOT, towerZ);
+    // (noLight: the beam and the pool only. A field lamp throws 300 m, past
+    // any SpotLight's reach, and every real light is a cost on every lit
+    // surface of the prison on a phone)
+    const spot = noLight ? null : new THREE.SpotLight(COL, 1.4, 60, 0.5, 0.5, 1.2);
+    if (spot) spot.position.set(towerX, HY + PIVOT, towerZ);
     const tgt = new THREE.Object3D();
     tgt.userData.mover = true;
     scene.add(tgt);
-    spot.target = tgt;
-    scene.add(spot);
+    if (spot) { spot.target = tgt; scene.add(spot); }
 
     // the beam through the air
     const cone = new THREE.Mesh(unitBeamGeometry(0.07), softBeamMaterial(COL, 0));
@@ -302,6 +304,7 @@
       head: head.base, rig: head, spot, tgt, cone, pool, phase, sweep,
       sweepZ: sweepZ != null ? sweepZ : 28, sweepZAmp: sweepZAmp != null ? sweepZAmp : 16,
       gx: towerX, gz: towerZ, poolRadius: 5,
+      cx: 0, rate: 1,                                 // the sweep's centre x and its speed (a field lamp: wide and slow)
       target: new THREE.Vector3(),
       selfLit: true,                                  // core/daynight.js: this file drives its own gain
     };
@@ -324,6 +327,26 @@
   makeLight(-44, 128, Math.PI / 2, 30, 92, 26);
   makeLight(44, 128, -Math.PI / 2, 30, 92, 26);
 
+  /* A LAMP FOR SOMEBODY ELSE'S GROUND (world/prisonoutside.js: the field
+     between the wire and the outer wall). Same head, beam and pool; its own
+     sweep (centre, width, depth, speed). `occlude`: a hedge, a crop or a
+     bank between the lens and a man hides him from it (the yard lamps look
+     straight down into an open yard and never needed asking). `nightOnly`:
+     by day it is dark glass and catches nobody. `spill`: how much wider it
+     catches a man who is running or driving. */
+  CBZ.searchlightAdd = function (x, z, o) {
+    o = o || {};
+    const sl = makeLight(x, z, o.phase || 0, o.sweep != null ? o.sweep : 30, o.sweepZ, o.sweepZAmp, o.noLight !== false);
+    sl.cx = o.cx || 0;
+    sl.rate = o.rate || 1;
+    if (o.radius) sl.poolRadius = o.radius;
+    sl.occlude = !!o.occlude;
+    sl.nightOnly = !!o.nightOnly;
+    sl.spill = o.spill || 0;
+    sl.tag = o.tag || null;
+    return sl;
+  };
+
   /* ==========================================================
      3. THE SWEEP
      ========================================================== */
@@ -344,7 +367,7 @@
       if (black) {
         if (sl.disabled > 0) sl.disabled = Math.max(0, sl.disabled - dt);   // a sabotage still runs its clock
         if (sl._hot) { sl._hot = false; sl.cone.material.color.setHex(COL); sl.pool.material.color.setHex(COL); }
-        sl.spot.intensity = 0;
+        if (sl.spot) sl.spot.intensity = 0;
         sl.cone.material.opacity = 0;
         sl.pool.material.opacity = 0;
         sl.rig.lensMat.color.setRGB(0, 0, 0);       // unlit glass: anything above 0 reads grey on black
@@ -352,13 +375,13 @@
         sl.rig.glare.visible = false;
         continue;
       }
-      const out = sl.disabled > 0;
-      if (out) sl.disabled = Math.max(0, sl.disabled - dt);
+      const out = sl.disabled > 0 || (sl.nightOnly && night < 0.35);
+      if (sl.disabled > 0) sl.disabled = Math.max(0, sl.disabled - dt);
 
       // ground target tracks a slow sine sweep across the yard width
-      const t = CBZ.now * 0.0006 + sl.phase;
+      const t = CBZ.now * 0.0006 * (sl.rate || 1) + sl.phase;
       // (a staged shot or a scripted moment may pin the beam: sl.aimAt = {x, z})
-      const tx = sl.aimAt ? sl.aimAt.x : Math.sin(t) * sl.sweep;
+      const tx = sl.aimAt ? sl.aimAt.x : (sl.cx || 0) + Math.sin(t) * sl.sweep;
       const tz = sl.aimAt ? sl.aimAt.z : sl.sweepZ + Math.cos(t * 0.7) * sl.sweepZAmp;
       // a beam sweeping over a building lands on its ROOF, not on the floor
       // under it (world/roofs.js publishes every lid it laid)
@@ -391,7 +414,7 @@
       sl.cone.quaternion.setFromUnitVectors(_up, _dir);
       sl.cone.scale.set(R, beamLen, R);
       sl.cone.updateMatrixWorld();
-      sl.spot.position.set(ox, oy, oz);
+      if (sl.spot) sl.spot.position.set(ox, oy, oz);
 
       // the pool: a slanted spot throws an ellipse, long along the beam
       const sinE = Math.max(0.3, -_dir.y);
@@ -408,8 +431,11 @@
           CBZ.game.mode === "escape" && CBZ.game.state === "playing" &&
           CBZ.player && CBZ.player.pos && !sl._onRoof) {
         const pdx = CBZ.player.pos.x - tx, pdz = CBZ.player.pos.z - tz;
-        const pr = R * (CBZ.player.crouch ? 0.6 : 1.0);
-        hot = pdx * pdx + pdz * pdz < pr * pr;
+        // (a field lamp's spill: a man moving fast at the edge of the pool is
+        // what the man on the lamp sees at night, and a car is never still)
+        const Pl = CBZ.player, fast = sl.spill && (Pl.driving || (+Pl.speed || 0) > 4);
+        const pr = R * (Pl.crouch ? 0.6 : 1.0) * (fast ? sl.spill : 1);
+        hot = pdx * pdx + pdz * pdz < pr * pr && !screened(sl, Pl.pos);
       }
       if (hot !== !!sl._hot) {
         sl._hot = hot;
@@ -422,7 +448,7 @@
       // shows almost nothing and the pool is a faint warm patch.
       const gain = out ? 0.08 : 1;
       const throb = hot ? 1.25 + 0.2 * Math.sin(CBZ.now * 0.02) : 1;
-      sl.spot.intensity = out ? 0.15 : 0.4 + night * 1.8;
+      if (sl.spot) sl.spot.intensity = out ? 0.15 : 0.4 + night * 1.8;
       sl.cone.material.opacity = gain * throb * (0.03 + night * 0.42);
       sl.pool.material.opacity = gain * throb * (0.08 + night * 0.5);
       // the lens burns at night; by day it is glass
@@ -443,15 +469,34 @@
     }
   }
 
+  // a lamp that asks: is anything solid between its lens and a man's chest
+  // standing at pos? (CBZ.losBlockers: hedges, crops, banks, walls)
+  let _ray = null;
+  const _o = new THREE.Vector3(), _d = new THREE.Vector3();
+  function screened(sl, pos) {
+    if (!sl.occlude || !pos || !CBZ.losBlockers || !CBZ.losBlockers.length) return false;
+    _o.set(sl.gx, HY + PIVOT, sl.gz);
+    _d.set(pos.x - _o.x, (pos.y || 0) + 1.0 - _o.y, pos.z - _o.z);
+    const L = _d.length(); if (L < 3) return false;
+    _d.multiplyScalar(1 / L);
+    _o.addScaledVector(_d, 2.5);                       // past its own tower's roof and rail
+    if (!_ray) _ray = new THREE.Raycaster();
+    _ray.set(_o, _d); _ray.near = 0; _ray.far = Math.max(0.1, L - 2.9);
+    const hits = CBZ.losRaycast ? CBZ.losRaycast(_ray, CBZ.losBlockers) : _ray.intersectObjects(CBZ.losBlockers, false);
+    return !!(hits && hits.length);
+  }
+  CBZ.searchlightScreened = screened;
+
   // detection query: is this position inside any searchlight pool?
   CBZ.litBySearchlight = function (pos, crouch) {
     for (const sl of CBZ.searchlights) {
-      if (!sl || !sl.pool || sl.disabled > 0 || sl._onRoof || sl.dark) continue;   // a foreign record may carry neither; a roof shelters; a dead lamp lights nothing
+      if (!sl || !sl.pool || sl.disabled > 0 || sl._onRoof || sl.dark) continue;
+      if (sl.nightOnly && (CBZ.nightAmount != null ? CBZ.nightAmount : 1) < 0.35) continue;   // a foreign record may carry neither; a roof shelters; a dead lamp lights nothing
       const dx = pos.x - sl.pool.position.x;
       const dz = pos.z - sl.pool.position.z;
       // crouching effectively shrinks how far into the pool you can be caught
       const r = sl.poolRadius * (crouch ? 0.6 : 1.0);
-      if (dx * dx + dz * dz < r * r) return true;
+      if (dx * dx + dz * dz < r * r && !screened(sl, pos)) return true;
     }
     return false;
   };

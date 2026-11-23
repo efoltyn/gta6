@@ -1562,10 +1562,32 @@
      piece at order 98.6, with the piece and its index. Flag off => drawn
      immediately, unsplit, exactly as the caller used to. */
   const pendingRuns = [];
+  /* A BUILDER THAT RUNS AFTER THE LATE PASS. A streamed boot (core/
+     citystream.js) builds a skipped landmass when the player comes near it,
+     long after order 98.6 ran for this world: a run or a step queued then
+     waited for a pass that never comes again (Fort Brandt stood with no
+     perimeter; the snow berms were never drawn). Once the pass has run for
+     the live world, every road is final, so the job runs at once. */
+  // (a world being built has boundCity = itself from order -1e6, so it
+  // queues until its own pass even while CBZ.city.arena is still the old one)
+  let lateCity = null;
+  function lateLive() {
+    const a = CBZ.city && CBZ.city.arena;
+    return lateCity && boundCity === lateCity && a === lateCity ? a : null;
+  }
   CBZ.roadGapDefer = function (x0, z0, x1, z1, opts, draw) {
     if (typeof draw !== "function") return null;
     if (!gapOn()) {
       draw({ x0: x0, z0: z0, x1: x1, z1: z1, len: Math.hypot(x1 - x0, z1 - z0), cx: (x0 + x1) / 2, cz: (z0 + z1) / 2 }, 0);
+      return null;
+    }
+    const live = lateLive();
+    if (live) {
+      const o = opts || {};
+      if (o.city == null) o.city = live;
+      const pieces = splitRun(x0, z0, x1, z1, o);
+      for (let k = 0; k < pieces.length; k++) { try { draw(pieces[k], k); } catch (e) { console.error("[roadrules gap]", e); } }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
       return null;
     }
     gapDeferred++;
@@ -1591,6 +1613,12 @@
   CBZ.roadGapAfterRoads = function (fn) {
     if (typeof fn !== "function") return false;
     if (!gapOn()) { fn(CBZ.city && CBZ.city.arena ? CBZ.city.arena : CBZ.city); return true; }
+    const live = lateLive();
+    if (live) {
+      try { fn(live); } catch (e) { console.error("[roadrules gap step]", e); }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      return true;
+    }
     pendingSteps.push(fn);
     return true;
   };
@@ -1754,6 +1782,7 @@
   }
 
   if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
+    lateCity = city || null;
     if (!gapOn()) { pendingRuns.length = 0; pendingSteps.length = 0; return; }
     // whole build steps first: they may themselves register runs
     let drew = pendingSteps.length;

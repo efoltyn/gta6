@@ -295,6 +295,117 @@
     try { J.town.photo = CBZ.cityMugshot ? (CBZ.cityMugshot({ ped: p }) || "") : ""; } catch (e) { J.town.photo = ""; }
     J.rev++;
   }
+  /* WHERE HE SMOKES. Not on the verge under the diner's side windows, where
+     the cook at her range watched every strip through the glass. A man who
+     wants a quiet cigarette goes where nobody can see him and the pavement is
+     not right there: every place round the building (its sides and back, by
+     the wall and a few paces out) and every alley within fifty metres is
+     tried against THE PEOPLE WHO ARE THERE: everybody standing within reach
+     of seeing him (the cook at her range, the waitress, the man at the bus
+     stop) and every staff post of the places round it, a ray from each to a
+     man's chest at the spot (a window lets it through, a wall does not);
+     and the pavement within six metres of a carriageway is where people
+     walk past. The quiet place nearest the door wins. Asked only with the
+     player near enough for the street to be peopled (a far street has no
+     one in it to ask about), never typed. */
+  function buildingsNear(x, z, r) {
+    const AR = A(); if (!AR) return [];
+    const L = (AR.lots || []).concat(AR.shopLots || []), out = [], seen = new Set();
+    for (let i = 0; i < L.length; i++) {
+      const l = L[i], b = l && l.building;
+      if (!b || b.park || !(b.w > 0) || !(b.d > 0) || l.demolished || seen.has(b)) continue;
+      seen.add(b);
+      const ox = isFinite(b.ox) ? b.ox : l.cx, oz = isFinite(b.oz) ? b.oz : l.cz;
+      if (Math.abs(ox - x) > r + b.w / 2 || Math.abs(oz - z) > r + b.d / 2) continue;
+      out.push({ x0: ox - b.w / 2, x1: ox + b.w / 2, z0: oz - b.d / 2, z1: oz + b.d / 2 });
+    }
+    return out;
+  }
+  function inBuilding(B, x, z, pad) { for (let i = 0; i < B.length; i++) { const b = B[i]; if (x > b.x0 - pad && x < b.x1 + pad && z > b.z0 - pad && z < b.z1 + pad) return true; } return false; }
+  // the eyes round a place: everybody who could witness (outfits.js's own
+  // rule: alive, awake, drawn, not one of yours) and the posts staff stand at
+  function watchersNear(x, z, r, skip) {
+    const out = [];
+    const add = function (a) {
+      if (!a || !a.pos || a === skip || a.dead || a.isPlayer || (a.ko || 0) > 0 || a._parked) return;
+      if (a.companion || a.recruited || a.controlled || (a.group && !a.group.visible)) return;
+      if (Math.abs(a.pos.x - x) > r || Math.abs(a.pos.z - z) > r) return;
+      out.push({ x: a.pos.x, y: (a.pos.y || 0) + 1.55, z: a.pos.z });
+    };
+    const P1 = CBZ.cityPeds || [], P2 = CBZ.cityCops || [];
+    for (let i = 0; i < P1.length; i++) add(P1[i]);
+    for (let i = 0; i < P2.length; i++) add(P2[i]);
+    let SP = null; try { SP = CBZ.cityStaffPosts ? CBZ.cityStaffPosts() : null; } catch (e) { SP = null; }
+    if (SP) for (let i = 0; i < SP.length; i++) { const q = SP[i]; if (q && Math.abs(q.x - x) < r && Math.abs(q.z - z) < r) out.push({ x: q.x, y: floorY(q.x, q.z) + 1.55, z: q.z }); }
+    return out;
+  }
+  function seenBy(W, x, z, cap) {
+    const y = floorY(x, z) + 1.0;
+    let n = 0;
+    for (let k = 0; k < W.length; k++) {
+      const q = W[k];
+      if (Math.abs(q.x - x) > 22 || Math.abs(q.z - z) > 22 || d2(q.x, q.z, x, z) > 22) continue;
+      if (los(q.x, q.y, q.z, x, y, z) && ++n >= cap) return n;
+    }
+    return n;
+  }
+  function pickSmoke(J, T) {
+    const lot = T.lot, b = lot.building;
+    const cx = b.ox != null ? b.ox : lot.cx, cz = b.oz != null ? b.oz : lot.cz;
+    const B = buildingsNear(cx, cz, 75);
+    const W = watchersNear(cx, cz, 75, T.ped);
+    const o = outward(lot);
+    const C = [];
+    const add = function (x, z, kind) {
+      if (inBuilding(B, x, z, 0.6)) return;
+      try { if (CBZ.cityNav && CBZ.cityNav.indoorLotAt && CBZ.cityNav.indoorLotAt(x, z)) return; } catch (e) {}
+      const RS = CBZ.roadSegmentAt;
+      if (RS && RS(x, z, 1)) return;                                             // standing in the road
+      // how near the pavement: on it, beside it, or off it where nobody walks
+      const off = !RS ? 0 : RS(x, z, 6) ? 60 : RS(x, z, 10) ? 25 : RS(x, z, 14) ? 8 : 0;
+      C.push({ x: x, z: z, kind: kind, cost: off + d2(x, z, T.front.x, T.front.z) / 5 });
+    };
+    // round the building: its sides and back, by the wall and a few paces out
+    const hw = (b.w || 16) / 2, hd = (b.d || 16) / 2;
+    const faces = [{ nx: 1, nz: 0, h: hw, s: hd }, { nx: -1, nz: 0, h: hw, s: hd }, { nx: 0, nz: 1, h: hd, s: hw }, { nx: 0, nz: -1, h: hd, s: hw }];
+    for (let f = 0; f < faces.length; f++) {
+      const F = faces[f];
+      if (F.nx * o.x + F.nz * o.z > 0.7) continue;                               // not the street front
+      for (let s = -F.s + 1.5; s <= F.s - 1.5; s += 3) for (const off of [1.5, 4.5]) add(cx + F.nx * (F.h + off) - F.nz * s, cz + F.nz * (F.h + off) + F.nx * s, "wall");
+    }
+    // and the quiet ground near it off the pavement: an alley (a walkable gap
+    // between two buildings), a yard, the back of a car park
+    for (let gx = -54; gx <= 54; gx += 3) for (let gz = -54; gz <= 54; gz += 3) {
+      const x = cx + gx, z = cz + gz;
+      const a = CBZ.alleyGapAt ? CBZ.alleyGapAt(x, z) : null;
+      if (a && a.inside) continue;
+      if (a && a.w <= 9) { add(x, z, "alley"); continue; }
+      if (CBZ.roadSegmentAt && !CBZ.roadSegmentAt(x, z, 10)) add(x, z, "yard");
+    }
+    C.sort(function (a, c) { return a.cost - c.cost; });
+    let best = null, fall = null;
+    for (let i = 0; i < C.length && i < 200; i++) {
+      const c = C[i];
+      const n = seenBy(W, c.x, c.z, fall ? fall.n : 99);
+      if (n === 0) { best = c; break; }
+      if (!fall || n < fall.n) { fall = c; fall.n = n; }
+    }
+    const pick = best || fall;
+    T.picked = true;
+    if (!pick) return;
+    T.smoke = { x: pick.x, z: pick.z };
+    T.quiet = !!best;
+    T.where = pick.kind;
+    // round the nearer front corner of the building, then to it
+    const sx = -o.z, sz = o.x;
+    const side = (pick.x - cx) * sx + (pick.z - cz) * sz >= 0 ? 1 : -1;
+    const along = Math.abs(o.x) > 0.5;
+    const ext = (along ? b.w : b.d) / 2, lat = (along ? b.d : b.w) / 2;
+    T.c1 = { x: cx + o.x * (ext + 1.7) + sx * side * (lat + 1.7), z: cz + o.z * (ext + 1.7) + sz * side * (lat + 1.7) };
+    // his back to the way he came: whoever follows him in comes up behind him
+    T.smokeFace = Math.atan2(pick.x - T.c1.x, pick.z - T.c1.z);
+    T.alley = true;
+  }
   // he stands by the door, walks off to smoke where nobody is, comes back
   function tickTown(J, dt) {
     const T = J.town; if (!T) return;
@@ -305,15 +416,18 @@
     const at = function (pt, r) { return d2(p.pos.x, p.pos.z, pt.x, pt.z) < (r || 1.4); };
     if (T.phase === "front") {
       if (p.state !== "idle") holdAt(p, T.face);
-      if (T.t <= 0) { T.phase = "out1"; T.t = 30; T.walking = true; walkTo(p, T.c1.x, T.c1.z); }
+      if (T.t <= 0) {
+        if (!T.picked && distP(T.front.x, T.front.z) < 90) { try { pickSmoke(J, T); } catch (e) { T.picked = true; } }
+        T.phase = "out1"; T.t = 30; T.walking = true; walkTo(p, T.c1.x, T.c1.z);
+      }
     } else if (T.phase === "out1") {
       if (at(T.c1) || T.t <= 0) { T.phase = "out2"; T.t = 30; walkTo(p, T.smoke.x, T.smoke.z); }
       else go(p, T.c1.x, T.c1.z);
     } else if (T.phase === "out2") {
-      if (at(T.smoke) || T.t <= 0) { T.phase = "smoke"; T.t = 34; holdAt(p, T.face + Math.PI); }
+      if (at(T.smoke) || T.t <= 0) { T.phase = "smoke"; T.t = 34; holdAt(p, T.smokeFace != null ? T.smokeFace : T.face + Math.PI); }
       else go(p, T.smoke.x, T.smoke.z);
     } else if (T.phase === "smoke") {
-      if (p.state !== "idle") holdAt(p, T.face + Math.PI);
+      if (p.state !== "idle") holdAt(p, T.smokeFace != null ? T.smokeFace : T.face + Math.PI);
       if (T.t <= 0) { T.phase = "back1"; T.t = 30; walkTo(p, T.c1.x, T.c1.z); }
     } else if (T.phase === "back1") {
       if (at(T.c1) || T.t <= 0) { T.phase = "back2"; T.t = 30; walkTo(p, T.front.x, T.front.z); }
@@ -322,7 +436,7 @@
       if (at(T.front) || T.t <= 0) { T.phase = "front"; T.t = 42 + h01(J.t | 0, 7) * 20; T.walking = false; holdAt(p, T.face); }
       else go(p, T.front.x, T.front.z);
     }
-    if (!J.S.known || !J.S.known.marshSeen) { if (seesPed(p)) once(J, "marshSeen", "Marsh. Fatigues, no weapon. He walks off " + (T.alley ? "round the side of the building" : "to the corner") + " to smoke."); }
+    if (!J.S.known || !J.S.known.marshSeen) { if (seesPed(p)) once(J, "marshSeen", "Marsh. Fatigues, no weapon. He walks off " + (T.where === "alley" ? "into the alley" : T.where === "yard" ? "away from the street, round the back" : T.alley ? "round the side of the building" : "to the corner") + " to smoke" + (T.quiet ? ", where nobody can see him." : ".")); }
   }
 
   /* ================================================================

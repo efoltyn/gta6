@@ -1128,6 +1128,9 @@
       }
       scanThreat(slot, dt);
       drivePrincipal(slot, dt);
+      // (the shift can end inside drivePrincipal: he went in a doorway and
+      // releaseParty let him go, so there is no principal left to guard)
+      if (slot.state !== "live" || !slot.principal) continue;
       driveGuards(slot, dt);
       driveCops(slot, dt);
       ensureDetail(slot, dt);

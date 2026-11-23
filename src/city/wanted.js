@@ -796,9 +796,24 @@
         if (CBZ.citySay) { try { CBZ.citySay(hh.officer, "He's resisting!", "#9fc3ff", { secs: 1.8, force: true }); } catch (e) {} }
         resisting(P ? P.pos.x : 0, P ? P.pos.z : 0, 60);
       },
-      onBroke: function (hh) {
-        // out of the escort, still in cuffs: the arc is off, the charge is on
+      onBroke: function (hh, why) {
         const sc = arrestScene;
+        // ONLY A STRUGGLE IS BREAKING LOOSE. An escort that ended any other
+        // way (his officer shot dead beside him, the walk verb interrupted or
+        // never started) was the arc quietly dropping a man in cuffs and
+        // filing it as resisting: the collar fell through on the pavement
+        // (and, in a gunfight, the next round found a man stood there with
+        // his hands up). The arc keeps him: its own walk takes over, with
+        // the nearest other officer if his own is down; with nobody near he
+        // is loose in the cuffs, which is not a crime of his.
+        if (why !== "struggle" && sc && !sc.finished && (sc.take === hh || !sc.take)) {
+          sc.take = null; sc._goal = null;
+          const c = sc.cop && !sc.cop.dead ? sc.cop : nearestCop(26);
+          if (c) { sc.cop = c; c._arrestingPlayer = true; return; }
+          abortArc("broke");
+          return;
+        }
+        // out of the escort, still in cuffs: the arc is off, the charge is on
         if (sc && (sc.take === hh || !sc.take)) abortArc("broke");
         resisting(P ? P.pos.x : 0, P ? P.pos.z : 0, 90);
       },

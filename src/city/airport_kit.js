@@ -2826,6 +2826,7 @@
   };
 
   const pending = [];              // fields waiting for their dressing pass this world
+  let dressedFor = null;           // the world whose dressing pass has run
 
   CBZ.buildAirfield = function (city, spec) {
     if (!city || !spec || !city.root || !CBZ.registerAirport) return null;
@@ -3465,8 +3466,14 @@
     }
 
     // ================= (11) THE DRESSING, when near =================
-    if (spec.dressing) pending.push({ ap: ap, spec: spec, city: city });
-    ap.toWorldL = toW;
+    // (a field built after this world's dressing pass, a streamed landmass
+    // the player has just come near, is dressed now: the pass will not run
+    // again and its hangars, fuel farm and fire station never stood)
+    ap.toWorldL = toW;                   // (before the dressing: its steps place by it)
+    if (spec.dressing) {
+      const job = { ap: ap, spec: spec, city: city };
+      if (dressedFor === city) dress(job); else pending.push(job);
+    }
     return ap;
   };
 
@@ -3607,18 +3614,22 @@
     return steps.group();
   }
 
+  function dress(p) {
+    const B = p.ap.bounds;
+    const pad = 800;
+    const rect = { minX: B.minX - pad, maxX: B.maxX + pad, minZ: B.minZ - pad, maxZ: B.maxZ + pad };
+    // (a re-run of the freed job starts again at the first step, which
+    // makes a new field group: the steps share nothing else)
+    if (CBZ.sliceAt) CBZ.sliceAt(rect, dressingSteps(p.ap, p.spec, p.city), { name: "airfield-dressing:" + p.ap.id, pure: true });
+    else buildDressing(p.ap, p.spec, p.city);
+  }
   if (CBZ.addLandmass) {
     CBZ.addLandmass(function (city) {
+      dressedFor = city || null;
       while (pending.length) {
         const p = pending.shift();
         if (p.city !== city) continue;
-        const B = p.ap.bounds;
-        const pad = 800;
-        const rect = { minX: B.minX - pad, maxX: B.maxX + pad, minZ: B.minZ - pad, maxZ: B.maxZ + pad };
-        // (a re-run of the freed job starts again at the first step, which
-        // makes a new field group: the steps share nothing else)
-        if (CBZ.sliceAt) CBZ.sliceAt(rect, dressingSteps(p.ap, p.spec, city), { name: "airfield-dressing:" + p.ap.id, pure: true });
-        else buildDressing(p.ap, p.spec, city);
+        dress(p);
       }
     }, 96);
   }

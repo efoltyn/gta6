@@ -484,6 +484,7 @@
     for (let i = 0; i < list.length; i++) {
       const sl = list[i];
       if (!sl || sl.sweep == null || !sl.pool) continue;    // foreign records (games/military.js) keep out
+      if (sl.tag) continue;                                 // a field lamp (world/prisonoutside.js) sweeps its own ground
       if (!sl._tierBase) sl._tierBase = { poolRadius: sl.poolRadius, sweep: sl.sweep, sweepZAmp: sl.sweepZAmp };
       const b = sl._tierBase;
       sl.poolRadius = t.poolR;
