@@ -29,7 +29,7 @@
       acceleration toward the desired velocity, capped by SWIM_ACCEL — so
       you glide when you let go and you keep the momentum you brought in
       off a bridge. Vertically it is a damped buoyancy oscillator around
-      the live wave surface (`vy += G_WATER * (BUOYANCY * sub - 1) * dt`,
+      the live wave surface (`vy += G_WATER * (buoy * sub - 1) * dt`,
       `vy *= exp(-VDRAG * dt)`), which is unconditionally stable at any dt
       and self-centres on the float line: the head genuinely rides above
       and below the waterline as swells roll under you, and a dive comes
@@ -114,28 +114,12 @@
   // this function that can MOVE, which is why the record it returns carries its
   // own landing height and a hull reference instead of assuming CBZ.floorAt.
   if (CFG.WATER_BOARD_BOATS == null) CFG.WATER_BOARD_BOATS = true;
-  // ---- SWIM_SINK -----------------------------------------------------------
-  // OWNER, verbatim: "WHEN IN WATER, YOU SHOULD SINK UNLESS PRESSING SPACE TO
-  // GO TO SURFACE, LIKE HOW GTA WORKS."
-  //
-  // Everything the sink model needs was ALREADY HERE and is reused untouched:
-  // the damped vertical oscillator, the bathymetry floor clamp, the 28 s breath
-  // meter, the drown routing through cityHurtPlayer("drowned") — which is what
-  // puts a drowning in city/death.js's wound filter and therefore in
-  // killfeed.js's player-death wrap. This flag changes exactly ONE thing: the
-  // sign of the body's resting buoyancy. OFF → the body is positively buoyant
-  // and floats at FLOAT_SUB with its head clear (every prior behaviour). ON →
-  // the body is NEGATIVELY buoyant, so it settles under on its own, and SPACE
-  // is what holds you up.
-  //
-  // WHY THIS IS NOT MERELY CRUEL: the vertical axis was already there (Space
-  // rose, Ctrl dived) but it had nothing to fight, so water had no depth as a
-  // decision. With a sink rate, staying at the surface is an ACT, the breath
-  // meter finally means something (you go under because you stopped swimming,
-  // not only because you chose to), and going down deliberately costs nothing
-  // extra — you just stop pressing. The sink is deliberately slower than the
-  // ascent (0.85 vs 2.0 m/s) so Space always wins, immediately, from any depth.
-  if (CFG.SWIM_SINK == null) CFG.SWIM_SINK = true;
+  // ---- A SWIMMER FLOATS ------------------------------------------------------
+  // A person with air in the lungs floats: stop swimming and you ride at the
+  // tread line (TREAD_DEPTH below) with the waterline at the chin. Space swims
+  // up, Ctrl/C dives, and from under the water with no input the body comes
+  // back up on its own. Only a body that has stopped swimming for good sinks:
+  // the dead and the drowned leave this file, the unconscious go down here.
   // SWIM_CHUM — a wounded swimmer bleeds into the water and sharks smell it.
   // One-line revert: false and the goreChum handle is never opened, which is
   // byte-identical to the behaviour before this existed.
@@ -147,12 +131,6 @@
   const BODY_H = 1.7;          // matches physics.js BODY_H — the submergence unit
   const EYE_H = 1.55;          // head/eye height above P.pos.y (the feet)
   const CHEST_H = 0.95;        // where "depth" is measured from, for predators
-  // Resting depth of the feet below the surface: the body floats with the head
-  // and shoulders clear. 1.275 = 0.75 of a body height, which makes the resting
-  // submergence 0.75 — the equilibrium the buoyancy term below is tuned to.
-  const FLOAT_DEPTH = 1.275;
-  const FLOAT_SUB = FLOAT_DEPTH / BODY_H;          // 0.75
-  const BUOYANCY = 1 / FLOAT_SUB;                  // 1.333 — net lift at full submergence
   // How far ABOVE the live surface you can still be and count as entering.
   // (Kept from the previous implementation: it is the old absolute `y <= 0.6`
   // expressed relative to mean sea level, so calm-water behaviour is unchanged.)
@@ -242,31 +220,9 @@
   const DIVE_SPEED = 2.2, DIVE_ACCEL = 4.5;   // m/s, m/s^2 downward kick
   const RISE_SPEED = 2.0, RISE_ACCEL = 5.0;   // m/s, m/s^2 upward kick
   const DIVE_BUOY = 0.30;      // lungs emptied: buoyancy scale while actively diving
-  // ---- SWIM_SINK numbers ---------------------------------------------------
-  // SINK_BUOY < 1 makes the resting equilibrium UNREACHABLE (buoy*sub can never
-  // reach 1, because sub caps at 1), so the body carries a steady net downward
-  // acceleration instead of oscillating about a float line.
-  //
-  // THE NUMBER IS DERIVED, NOT PICKED. Terminal sink speed is where that
-  // acceleration balances the VDRAG damping this file already runs:
-  //     v_inf = G_WATER * (1 - SINK_BUOY) / VDRAG
-  // A real human body is only slightly denser than water once the lungs are
-  // emptied (~1005-1070 kg/m3 against 1025 for seawater), which is why a
-  // passive body descends at a few tenths of a m/s and a streamlined freediver
-  // in the "free fall" phase below neutral buoyancy reaches about 1.0-1.4 m/s.
-  // 0.85 m/s sits between those: a swimmer who has stopped swimming, not a
-  // stone. Solving for it: SINK_BUOY = 1 - 0.85*VDRAG/G_WATER = 1 - 0.2456
-  // = 0.7544.
-  //
-  // AND IT IS A REACTION BEAT, WHICH MATTERS MORE THAN THE TERMINAL SPEED. The
-  // solve is exponential with time constant 1/VDRAG = 0.38 s, so from the float
-  // line the head (0.28 m of freeboard) does not go under for ~0.85 s, and the
-  // 28 s breath tank starts only then. Sinking is a state you notice and can
-  // answer, not a punishment.
-  const SINK_BUOY = 0.7544;
-  // Holding Space does not merely accelerate you up, it restores POSITIVE
-  // buoyancy — so at the surface you HOLD there instead of porpoising out of
-  // the water and dropping back. Same number the float model always used.
+  // An unconscious body (lungs slack, nothing kicking) is slightly denser than
+  // the water: terminal ~0.85 m/s down against the damping (1 - 0.85*VDRAG/G).
+  const LIMP_BUOY = 0.7544;
   /* THE TREAD LINE. Treading water (Space held at the surface) a body rides
      upright with the waterline at the chin: the feet TREAD_DEPTH down and the
      eyes ~0.1 m clear. The positive-buoyancy body is neutral exactly there and
@@ -317,7 +273,7 @@
     diving: false, headUnder: false, sinking: false,
     hurtT: 0, drownT: 0, gaspAt: -9e9,
   });
-  let drownDeaths = 0;          // SWIM_SINK ratchet: real drownings this session
+  let drownDeaths = 0;          // real drownings this session
   let breath = BREATH_MAX;
   let climbPress = false;              // consumed keydown/tap edge (see below)
   // The live haul-out offer, refreshed by climbStep and read by publish(). ""
@@ -344,7 +300,7 @@
      same three answers the city's waterfield publishes — CBZ.survSeaHeightAt
      (the shared swell table), CBZ.survFloodDepthAt, CBZ.survWaterAt — and the
      four seams below route to them. Everything else (graduated submergence,
-     carried velocity, the buoyancy oscillator, SWIM_SINK, the 28 s breath
+     carried velocity, the buoyancy oscillator, the float, the 28 s breath
      tank, the climb-out) is the code the city already runs, untouched.
 
      SURV_SHARED_SWIM=false restores the old gate: no swimmer on the island.
@@ -1174,14 +1130,14 @@
     // 4. VERTICAL — a damped buoyancy oscillator around the live surface.
     const vin = CFG.WATER_DIVE === false ? 0 : verticalInput();
     S.diving = vin < 0;
-    // SWIM_SINK: the body's RESTING buoyancy is negative — you go under unless
-    // you swim up. Holding Space (vin > 0) restores the positive-buoyancy body
-    // so you rise AND then hold at the surface rather than porpoising. The
-    // whole model is this one branch; the oscillator below is unchanged.
-    const sinkOn = CFG.SWIM_SINK !== false;
-    let buoy = sinkOn ? (vin > 0 ? SURFACE_BUOY : SINK_BUOY) : BUOYANCY;
+    // The body is neutral at the tread line, so with no input it rides there
+    // and from depth it rises back at ~0.6 m/s; Space adds the kick up (it
+    // fades out at the line), Ctrl/C empties the lungs and kicks down. An
+    // unconscious body sinks.
+    const limp = !!(P.unconscious || P.ko);
+    let buoy = limp ? LIMP_BUOY : SURFACE_BUOY;
     if (S.diving) buoy *= DIVE_BUOY;                       // lungs emptied, kicking down
-    S.sinking = sinkOn && vin <= 0 && !S.diving;
+    S.sinking = limp;
     S.vy += G_WATER * (buoy * sub - 1) * fdt;
     if (vin < 0 && S.vy > -DIVE_SPEED) S.vy = Math.max(-DIVE_SPEED, S.vy - DIVE_ACCEL * fdt);
     if (vin > 0 && S.vy < RISE_SPEED) {
@@ -1375,11 +1331,10 @@
     // Only offer (and consume) the haul-out at the surface: deep under a quay
     // the Space press belongs to the ascent. The margin clears the buoyancy
     // oscillator's own overshoot on a passing crest (a bob must not blink the
-    // prompt), but not a deliberate duck under. With SWIM_SINK the resting
-    // depth is no longer FLOAT_SUB, so the window is DERIVED instead of tuned:
-    // the head clears the water while sub < (BODY_H - EYE_H)/BODY_H = 0.912, so
-    // 0.90 is "you can see the quay you are reaching for" and nothing else.
-    const atSurface = sub <= (CFG.SWIM_SINK !== false ? 0.90 : FLOAT_SUB + 0.17);
+    // prompt), but not a deliberate duck under: the head clears the water
+    // while sub < (BODY_H - EYE_H)/BODY_H = 0.912, so 0.90 is "you can see the
+    // quay you are reaching for" and nothing else.
+    const atSurface = sub <= 0.90;
     if (!atSurface) { climbPress = false; climbVerb = ""; hidePrompt(); return; }
     // A hull says "climb aboard", land says "climb out" — the verb tells you
     // WHERE the haul-up is about to put you, which matters when a moored boat
@@ -1515,18 +1470,17 @@
      stat fiction.
   ================================================================== */
   CBZ.swimAudit = function () {
-    const on = CFG.SWIM_SINK !== false;
-    const restBuoy = on ? SINK_BUOY : BUOYANCY;
-    const sinkRate = Math.max(0, G_WATER * (1 - restBuoy) / VDRAG);
-    const buoyUp = on ? SURFACE_BUOY : BUOYANCY;
-    const ascendRate = Math.max(RISE_SPEED, G_WATER * (buoyUp - 1) / VDRAG);
+    // terminal speeds from the constants: G*(buoy*sub - 1)/VDRAG at full submergence
+    const riseRate = Math.max(0, G_WATER * (SURFACE_BUOY - 1) / VDRAG);
+    const sinkRate = Math.max(0, G_WATER * (1 - LIMP_BUOY) / VDRAG);
     return {
-      sinkRate: +sinkRate.toFixed(2),          // m/s downward with no input
-      ascendRate: +ascendRate.toFixed(2),      // m/s upward holding Space
+      floatDepth: TREAD_DEPTH,                 // m of feet under the surface at rest
+      riseRate: +riseRate.toFixed(2),          // m/s back up from depth with no input
+      sinkRate: +sinkRate.toFixed(2),          // m/s down, an unconscious body only
+      ascendRate: +Math.max(RISE_SPEED, riseRate).toFixed(2),   // m/s up holding Space
       breathSec: CFG.WATER_BREATH === false ? 0 : BREATH_MAX,
       drowned: drownDeaths,
       diveRate: DIVE_SPEED,                    // Ctrl/C, the deliberate dive
-      sinkOn: on,
       breath: +(breath / BREATH_MAX).toFixed(3),
       swimming: swimming,
       // BLOOD IN THE WATER. `bleeding` is whether a live chum handle is open
@@ -1543,6 +1497,93 @@
   // that needs to leave a swimmer alone)
   // waterfield.js normally publishes this before swim.js loads. Preserve a
   // standalone fallback for old pages/tests that load only this module.
+  /* ==================================================================
+     AIR UNDER WATER — one instanced pool of bubbles (one draw call).
+     CBZ.waterBubbles(x, y, z, n, r) lets go of n bubbles of about r metres
+     radius at a point under the surface: a diver breathing out, a swimmer
+     dragged under by a shark. Each rises at the terminal speed of an air
+     bubble of its size (about 0.23 m/s for the millimetre bubbles, the
+     Davies-Taylor 0.71*sqrt(g*d) for centimetre caps), wobbles, swells as
+     the water above it thins (radius ~ (P(depth)/P(now))^(1/3), 10 kPa per
+     metre on 101 kPa of air), and breaks at the surface with a ring.
+  ================================================================== */
+  const BUB_MAX = 192;
+  const bubbles = [];
+  let bubMesh = null;
+  const _bm4 = window.THREE ? new window.THREE.Matrix4() : null;
+  function bubEnsure() {
+    if (bubMesh || !window.THREE || !CBZ.scene) return bubMesh;
+    const T = window.THREE;
+    const geo = new T.IcosahedronGeometry(1, 1);
+    const mat = new T.MeshPhongMaterial({ color: 0xdff2f8, specular: 0xffffff, shininess: 90, transparent: true, opacity: 0.55, depthWrite: false });
+    bubMesh = new T.InstancedMesh(geo, mat, BUB_MAX);
+    bubMesh.count = 0; bubMesh.frustumCulled = false; bubMesh.renderOrder = 5;
+    bubMesh.name = "waterBubbles";
+    CBZ.scene.add(bubMesh);
+    return bubMesh;
+  }
+  function bubRise(r) {
+    // terminal rise speed of an air bubble of radius r (m) in sea water
+    if (r < 0.0007) return 0.10 + r * 150;            // small spheres, Stokes-like
+    if (r < 0.006) return 0.23;                       // the wobbling plateau
+    return Math.min(0.9, 0.71 * Math.sqrt(9.81 * r * 2));   // spherical caps
+  }
+  CBZ.waterBubbles = function (x, y, z, n, r) {
+    if (!(n > 0) || !Number.isFinite(x + y + z)) return 0;
+    const surf = surfAt(x, z);
+    if (y > surf - 0.15) return 0;                    // air only goes up from under water
+    let made = 0;
+    for (let i = 0; i < n && bubbles.length < BUB_MAX; i++) {
+      const rr = Math.max(0.0015, (r || 0.004) * (0.45 + Math.random() * 1.1));
+      bubbles.push({
+        x: x + (Math.random() - 0.5) * 0.12, y: y + (Math.random() - 0.5) * 0.08, z: z + (Math.random() - 0.5) * 0.12,
+        r0: rr, d0: Math.max(0, surf - y), r: rr, ph: Math.random() * 6.283, age: 0,
+      });
+      made++;
+    }
+    return made;
+  };
+  CBZ.waterBubbleCount = function () { return bubbles.length; };
+  CBZ.onUpdate(47.6, function (dt) {
+    if (!bubbles.length) { if (bubMesh) bubMesh.count = 0; return; }
+    const m = bubEnsure();
+    let n = 0;
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      b.age += dt;
+      const surf = surfAt(b.x, b.z), depth = Math.max(0, surf - b.y);
+      // the air swells as the water above it thins
+      b.r = b.r0 * Math.cbrt((101 + 10 * b.d0) / (101 + 10 * depth));
+      b.y += bubRise(b.r) * dt;
+      b.ph += dt * (6 + 40 * Math.min(0.02, b.r));
+      const wob = Math.min(0.02, b.r * 0.8);
+      b.x += Math.sin(b.ph) * wob * dt * 6; b.z += Math.cos(b.ph * 1.3) * wob * dt * 6;
+      if (b.y >= surf - b.r || b.age > 40) {
+        if (b.r > 0.004 && CBZ.waterRippleAt) { try { CBZ.waterRippleAt(b.x, b.z, Math.min(0.6, b.r * 12)); } catch (e) {} }
+        bubbles.splice(i, 1);
+        continue;
+      }
+      if (m && _bm4) {
+        _bm4.makeScale(b.r, b.r * 0.85, b.r).setPosition(b.x, b.y, b.z);
+        m.setMatrixAt(n++, _bm4);
+      }
+    }
+    if (m) { m.count = n; m.instanceMatrix.needsUpdate = true; }
+  });
+  // A DIVER BREATHES OUT. Under the surface the player lets go of a few
+  // bubbles every second or so from the mouth (more when diving hard)
+  let exhaleT = 1;
+  CBZ.onUpdate(46.0, function (dt) {
+    const P = CBZ.player;
+    if (!swimming || !P || P.dead || !P.pos || !(dt > 0)) return;
+    const mouthY = P.pos.y + EYE_H - 0.08, surf = surfAt(P.pos.x, P.pos.z);
+    if (mouthY > surf - 0.25) return;
+    exhaleT -= dt * (S.diving ? 1.6 : 1);
+    if (exhaleT > 0) return;
+    exhaleT = 0.9 + Math.random() * 1.4;
+    CBZ.waterBubbles(P.pos.x, mouthY, P.pos.z, 3 + Math.floor(Math.random() * 5), 0.003);
+  });
+
   if (!CBZ.waterField) CBZ.cityWaterAt = function (x, z) {
     const A = arena();
     return !!(A && A.minX != null && waterAt(A, x, z));

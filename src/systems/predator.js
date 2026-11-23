@@ -1025,6 +1025,9 @@
   //      "no real decision" failure the mash meter was rejected for.
   let pressStamp = -999;
   function markPress() { pressStamp = nowS(); }
+  // the break-free press, for any input layer that is not a window key event
+  // (a gamepad, a test driving the real loop)
+  CBZ.predatorPress = markPress;
   // ...but a POINTER press is only an escape attempt while a window is actually
   // open. These are capture-phase listeners on window, so without this gate any
   // click anywhere — a HUD button, the map, the phone — stamped a press, and a
@@ -1066,8 +1069,17 @@
     if (v === P || v.isPlayer === true) return true;
     return !!(P && P.pos && v.pos === P.pos);
   }
+  // the body a bite on the player marks: the city's player actor, capture.js's
+  // wound actor, or (the island page loads neither) the player's own rig
+  const _pwa = {
+    isPlayer: true,
+    get char() { return CBZ.playerChar || null; },
+    get group() { return CBZ.playerChar ? CBZ.playerChar.group : null; },
+    get pos() { return CBZ.player ? CBZ.player.pos : null; },
+    get dead() { return !!(CBZ.player && CBZ.player.dead); },
+  };
   function playerRagdollTarget() {
-    return (CBZ.city && CBZ.city.playerActor) || null;
+    return (CBZ.city && CBZ.city.playerActor) || CBZ.playerWoundActor || (CBZ.playerChar ? _pwa : null);
   }
 
   function predatorSeized(victim) {
@@ -1102,6 +1114,8 @@
     if (!g) { out.x = out.y = out.z = 0; return false; }
     // a skinned sea animal: between its own teeth, carried by the jaw bones
     if (h.marine) return CBZ.marineMouthWorld(g, h.marine.engulf ? "grip" : "bite", out);
+    // a land animal holding a person: its posed mouth
+    if (h.land) return landMouth(h, out);
     const lx = h.jawX != null ? h.jawX : 1.15;
     const ly = h.jawY != null ? h.jawY : 0.25;
     const lz = h.jawZ != null ? h.jawZ : 0;
@@ -1301,7 +1315,8 @@
       _woundOpts.by = sid; _woundOpts.byActor = h.attacker || null;
       _woundDir.x = tx; _woundDir.y = ty; _woundDir.z = tz;
       _woundOpts.dir = _woundDir;
-      _woundOpts.part = h.marine ? (h.mst.part === "leg" ? (h.mst.side > 0 ? "legL" : "legR") : "torso") : null;
+      _woundOpts.part = h.marine ? (h.mst.part === "leg" ? (h.mst.side > 0 ? "legL" : "legR") : "torso")
+        : (h.land ? (h.lst.part === "leg" ? "calf" : "forearm") : null);
       try { if (CBZ.bodyBite) CBZ.bodyBite(target, _woundP, _woundOpts); else CBZ.bodyWound(target, _woundP, _woundOpts); } catch (e) {}
       _woundOpts.byActor = null;
     }
@@ -1366,6 +1381,10 @@
       marine: null,
       mst: { t: 0, ph: 0, gap: 0, vx: 0, vy: 0, vz: 0, k: 0.6, part: "torso", side: 1, D: 0.3, yaw0: 0, lenM: 4.5,
         rollT: 0, rollPh: 1, rollDir: 1, splashed: false, lastS: 0, dx: 1, dy: 0, dz: 0, pitch: 0 },
+      // a land animal's hold on a person (see THE BITE ON LAND)
+      land: null,
+      lst: { t: 0, ct: 0, part: "arm", side: 1, ux: 1, uz: 0, down: 0, fall: 0, pullT: 0, shakeT: 0, twist: 0, twistV: 0,
+        lean: 0, gap: 1, rx: 0, ry: 0, rz: 0, yaw: 0, inc: 0 },
     };
     // the ragdoll pin callback, bound to THIS handle for the handle's whole
     // life. It closes over `h`, not over a module scratch, so a pooled reuse
@@ -1406,6 +1425,7 @@
     h.nonLethal = !!opts.nonLethal;
     h.style = opts.style || "shake";
     h.marine = marineProfile(attacker, h.medium);
+    h.land = null;
     h.onEnd = typeof opts.onEnd === "function" ? opts.onEnd : null;
     h.mode0 = (CBZ.game && CBZ.game.mode) || "";
     h.result = "";
@@ -1451,6 +1471,10 @@
       marineBegin(h);
       // a fish that bites once and lets go has no window to beat
       if (h.marine.once) { h.hold = h.marine.once; h.qteMax = 0; }
+    } else {
+      // a land animal with a mouth we can read, holding a person
+      h.land = landProfile(h);
+      if (h.land) landBegin(h);
     }
 
     // A NON-FINITE JAW IS A POISONED ANCHOR — anchorVictim would write it
@@ -1509,8 +1533,13 @@
       if (ch && ch.group && ch.group.rotation) { ch.group.rotation.x = 0; ch.group.rotation.z = 0; }
     }
     if (h.marine && a && CBZ.swimJaw) { try { CBZ.swimJaw(a, 0); } catch (e) {} }
+    // a person let go by a land animal stands back up, or stays down a moment
+    const braced = !!(h.land && h.land.kind === "beast" && h.lst.feet);
+    if (h.land) { landRelease(h); h.land = null; }
     // release the limb/jaw layer too, or a bear walks away mid-rear.
     if (CBZ.predatorPose && a) { try { CBZ.predatorPose(a, h.style, 0, 0, 0); } catch (e) {} }
+    // (and a bestiary body's planted legs ease back into its gait)
+    if (braced) landUnbrace(a);
     // AND HAND THE STRIKE CLOCK BACK. creature_combat sets `_atkAnim` at the
     // strike frame; if that strike won a seize, predatorHunt stops calling
     // creatureFight and its endAttack never runs, so the flag stayed latched
@@ -1828,6 +1857,18 @@
     if (g.position.y > sea + 0.1) g.position.y = sea + 0.1;
     M.pitch += ((down > 0 ? -0.32 : -0.04) - M.pitch) * (1 - Math.exp(-2.5 * dt));
     g.rotation.z = h.baseRotZ + M.pitch;
+    // AIR GOES UP: a swimmer dragged under loses the breath in their lungs in
+    // gulps, from the mouth (a corpse, the last of it, in a trickle)
+    M.bubT = (M.bubT || 0) - dt;
+    if (M.bubT <= 0 && CBZ.waterBubbles) {
+      const dead = !h.isPlayer && h.victim && h.victim.dead;
+      M.bubT = dead ? 0.9 + Math.random() * 1.2 : 0.22 + Math.random() * 0.35;
+      const ch = victimChar(h);
+      let bx = h.jaw.x, by = h.jaw.y + 0.5, bz = h.jaw.z;
+      if (ch && ch.body && _mv) { ch.body.localToWorld(_mv[3].set(0, 1.55, 0.08)); bx = _mv[3].x; by = _mv[3].y; bz = _mv[3].z; }
+      else if (h.isPlayer && CBZ.player && CBZ.player.pos) { bx = CBZ.player.pos.x; by = CBZ.player.pos.y + 1.47; bz = CBZ.player.pos.z; }
+      try { CBZ.waterBubbles(bx, by, bz, dead ? 2 : 4 + Math.floor(Math.random() * 6), dead ? 0.003 : 0.008); } catch (e) {}
+    }
     // the roll: over onto its side and back, now and then
     M.rollT -= dt;
     if (M.rollT <= 0 && P.roll > 0.05) { M.rollT = P.rollEvery * (0.7 + 0.6 * Math.random()); M.rollPh = 0; M.rollDir = -M.rollDir; }
@@ -1896,12 +1937,935 @@
     if (v.group && v.group.position !== p) v.group.position.set(G.x, G.y - 0.1, G.z);
   }
 
+  // ============================================================
+  //  THE BITE ON LAND. A land animal taking a person works the way the
+  //  shark does: the bitten part sits between the posed teeth, and the two
+  //  bodies stay two bodies.
+  //    wind    the last lunge: the head goes to the part (a forearm, or the
+  //            near calf when the jaws cannot reach an arm), the person turns
+  //            to face it
+  //    strike  the jaws shut across the part
+  //    hold    the worry: braced on its planted feet it hauls back in pulls,
+  //            the head shaking the part side to side in bursts; the person
+  //            is yanked off balance, goes down on the side facing it and is
+  //            dragged along the ground by the held limb, the trunk twisting
+  //            with every shake
+  //  Every frame the attacker is moved and posed first (its paws plant
+  //  against that motion), then the person is solved from its mouth: the
+  //  held limb (shoulder/hip, elbow/knee) is set so the bitten segment's
+  //  centre is exactly between the teeth and lies across the mouth, the body
+  //  behind it on the far side from the animal, standing on its feet or
+  //  lying on its side on the ground. The body follows the limb only when
+  //  the limb cannot reach any further: that is the drag.
+  //  A canid (units/kit/canid.js) reaches its jaw for the part and its legs
+  //  step. A bestiary body (bears, big cats: city/wildlife/beast_kit.js) is
+  //  rigid parts on rigid leg columns, so it works differently:
+  //    wind    it lunges and knocks the person down as it comes (its head
+  //            cannot come up to a standing arm); the limb is thrown up at
+  //            the jaws, and they shut when it is there
+  //    hold    it does not haul (rigid legs cannot step): its feet stay
+  //            planted where they stood (landPlantFeet; let go, the legs
+  //            ease back into the gait, landUnbrace) and it works the
+  //            person with its head and weight: a bear rears and slams, a
+  //            cat holds still, shudders and yanks. Held up toward jaws above
+  //            their reach, the person comes up off the ground about their
+  //            feet (by an arm) or hangs from the leg, shoulders down
+  //  and the two bodies are kept apart as capsules (landClear): its lunge
+  //  stops where its head or chest meets the person, and a person pressed
+  //  into it is pushed back out.
+  // ============================================================
+  const LAND_BITE = {
+    // pull: peak m/s of a haul for a 40 kg animal (x mass^0.25), pullOn /
+    // pullOff: s of a haul and of the brace between; shakeOn / shakeOff: s
+    // of a worry burst and the pause; fallAt: s into the hold the person goes
+    // down; fallT: s the fall takes
+    worry: { pull: 0.62, pullOn: 0.44, pullOff: 0.36, shakeOn: 0.55, shakeOff: 0.35, fallAt: 0.15, fallT: 0.55 },
+    // a bestiary body (bears: maul, big cats: pin, the rest) does not haul
+    // (landMove): it knocks the person down as it comes, in a fall no faster
+    // than a shoved body topples (~4 m/s at the chest), and works them with
+    // its head and its weight; only the worry bursts are timed here
+    maul: { pull: 0, pullOn: 0.4, pullOff: 0.4, shakeOn: 0.4, shakeOff: 0.6, fallAt: 0, fallT: 0.75 },
+    pin: { pull: 0, pullOn: 0.5, pullOff: 0.7, shakeOn: 0.3, shakeOff: 0.9, fallAt: 0, fallT: 0.75 },
+    beast: { pull: 0, pullOn: 0.44, pullOff: 0.4, shakeOn: 0.5, shakeOff: 0.4, fallAt: 0, fallT: 0.75 },
+  };
+  // a part of a bestiary body by its name (city/wildlife/beast_kit.js names
+  // them "<id>:<part>")
+  function landPartMesh(g, part) {
+    const kids = g.children;
+    for (let i = 0; i < kids.length; i++) {
+      const n = kids[i].name;
+      if (n && n.length > part.length && n.charCodeAt(n.length - part.length - 1) === 58 && n.endsWith(part)) return kids[i];
+    }
+    return null;
+  }
+  const _lA = { x: 0, y: 0, z: 0 }, _lB = { x: 0, y: 0, z: 0 }, _lC = { x: 0, y: 0, z: 0 };
+  const _lQ = THREE ? [new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion()] : null;
+  const _lV = THREE ? [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] : null;
+  const _lM = THREE ? new THREE.Matrix4() : null;
+  const _gPose = { t: 0, k: 1, down: 0, part: "arm", side: 1, lean: 0, twist: 0 };
+
+  // what can hold a person this way: an animal whose mouth we can read off
+  // its posed body (the canid family: CBZ.canid.mouthWorld)
+  function landProfile(h) {
+    if (h.marine || h.medium === "water" || !_lV) return null;
+    // a snake coils and a crocodilian rolls: neither stands on its feet
+    // worrying a limb, so both keep their own holds
+    if (h.style === "roll" || h.style === "constrict") return null;
+    const sp0 = (h.attacker && h.attacker.species) || {};
+    if ((h.attacker && h.attacker.snake) || sp0.snake) return null;
+    if (/croc|alligator|gator|caiman/i.test(String(sp0.id || sp0.name || ""))) return null;
+    const ch = victimChar(h);
+    if (!ch || !ch.group || !ch.body || !ch.model || !ch.neck || !ch.parts || !ch.low || !ch.profile) return null;
+    if (!ch.parts.la || !ch.parts.ra || !ch.parts.ll || !ch.parts.rl) return null;
+    if (!ch.low.la || !ch.low.ra || !ch.low.ll || !ch.low.rl) return null;
+    if (typeof CBZ.poseSeizedOnGround !== "function") return null;
+    const a = h.attacker, g = a && a.group, ud = g && g.userData;
+    const cn = ud && ud.canid;
+    if (cn && cn.rig && CBZ.canid && typeof CBZ.canid.mouthWorld === "function" && typeof CBZ.canid.animateActor === "function") {
+      const rig = cn.rig, D = rig.D, wsc = rig.mesh.scale.x * ((g.scale && g.scale.x) || 1);
+      const wH = D.withers * wsc;
+      // the heights the posed mouth gets to, measured on the kit's own grip
+      // (rearing to a raised arm; the head down to a leg on the ground)
+      return { kind: "canid", rig: rig, P: LAND_BITE.worry, reach: D.mouth.x * wsc * 0.9, hi: wH * 1.44, lo: Math.max(0.28, wH * 0.41), mass: Math.max(5, D.mass || 30) };
+    }
+    // a bestiary body (bears, big cats: city/wildlife/beast_kit.js): rigid
+    // lofted parts. The mouth is the tip of the lower jaw, where the upper
+    // teeth close on it.
+    const jawM = g && landPartMesh(g, "jaw"), headM = g && landPartMesh(g, "head");
+    const mouthM = jawM || headM;
+    if (mouthM && mouthM.geometry) {
+      const geo = mouthM.geometry;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      const bb = geo.boundingBox, len = bb.max.x - bb.min.x, ht = bb.max.y - bb.min.y;
+      const tip = jawM ? { x: bb.max.x - 0.06 * len, y: bb.max.y - 0.12 * ht, z: 0 } : { x: bb.max.x - 0.06 * len, y: bb.min.y + 0.22 * ht, z: 0 };
+      const sp = a.species || {}, sc = (g.scale && g.scale.x) || 1;
+      return { kind: "beast", mouth: mouthM, tip: tip, P: LAND_BITE[h.style] || LAND_BITE.beast,
+        jawW: (bb.max.z - bb.min.z) * 0.5 * sc, reach: 0, hi: 9, lo: 0, mass: Math.max(10, sp.mass || 80 * Math.pow(actorScale(a), 3)) };
+    }
+    return null;
+  }
+  function landMouth(h, out) {
+    const L = h.land;
+    if (L && L.kind === "canid") {
+      CBZ.canid.mouthWorld(L.rig, out);
+      return isFinite(out.x) && isFinite(out.y) && isFinite(out.z);
+    }
+    if (L && L.kind === "beast") {
+      L.mouth.updateWorldMatrix(true, false);
+      L.mouth.localToWorld(_lV[0].set(L.tip.x, L.tip.y, L.tip.z));
+      out.x = _lV[0].x; out.y = _lV[0].y; out.z = _lV[0].z;
+      return isFinite(out.x) && isFinite(out.y) && isFinite(out.z);
+    }
+    return false;
+  }
+  function landRoot(h) { return h.isPlayer ? (CBZ.player && CBZ.player.pos) : actorPos(h.victim); }
+  function landGround(x, z, y) {
+    let g = null;
+    if (CBZ.walkGroundAt) { try { g = CBZ.walkGroundAt(x, z, y + 0.6); } catch (e) { g = null; } }
+    if ((g == null || !isFinite(g)) && CBZ.floorAt) { try { g = CBZ.floorAt(x, z); } catch (e) { g = null; } }
+    return (g != null && isFinite(g)) ? g : y;
+  }
+  function landAnimalGround(x, z, y) {
+    let g = null;
+    if (CBZ.floorAt) { try { g = CBZ.floorAt(x, z); } catch (e) { g = null; } }
+    return (g != null && isFinite(g)) ? g : y;
+  }
+  // the held limb: its root (shoulder / hip), joint and the bitten segment
+  function landLimb(h) {
+    const ch = victimChar(h), L = h.lst, s = L.side;
+    const arm = L.part !== "leg";
+    const part = arm ? (s > 0 ? ch.parts.la : ch.parts.ra) : (s > 0 ? ch.parts.rl : ch.parts.ll);
+    const low = arm ? (s > 0 ? ch.low.la : ch.low.ra) : (s > 0 ? ch.low.rl : ch.low.ll);
+    const P = ch.profile;
+    // the bitten segment in the joint's own units: the forearm to the wrist
+    // crease, the shin to the ankle
+    const seg = arm ? Math.max(0.1, (P.armLo || 0.57) - (P.handH || 0.2)) : (P.legLo || 0.67);
+    // where on it the teeth are: mid-forearm, nearer the wrist in a jaw as
+    // wide as a bear's (the elbow is not inside it too); low on a canid's
+    // calf (bitten from beside, the knee stays clear of the skull); at a
+    // bear's or a cat's the ankle (its rigid head cannot come down to a calf:
+    // the leg is held up out of its mouth, and the foot past the jaws must
+    // not be in its chest)
+    const wide = h.land && h.land.jawW > 0.075, beast = h.land && h.land.kind === "beast";
+    return { part: part, low: low, arm: arm, seg: seg, at: arm ? (wide ? 0.72 : 0.5) : (beast ? 0.85 : 0.65) };
+  }
+  // the bitten point of the held segment, in the world
+  function landPartWorld(h, out) {
+    const ch = victimChar(h);
+    if (!ch || !h.lst) { out.x = h.jaw.x; out.y = h.jaw.y; out.z = h.jaw.z; return out; }
+    const lb = landLimb(h);
+    ch.group.updateMatrixWorld(true);
+    lb.low.localToWorld(_lV[0].set(0, -lb.seg * lb.at, 0));
+    out.x = _lV[0].x; out.y = _lV[0].y; out.z = _lV[0].z;
+    return out;
+  }
+  // how high the mouth should hold the part for the person's posture:
+  // upright, a forearm the arm can bring down to it, or the calf where it
+  // stands; down, the held limb a little off the ground
+  function landPartHeight(h) {
+    const L = h.lst, ch = victimChar(h), Lp = h.land;
+    const hs = (ch && ch.model && ch.model.scale) ? ch.model.scale.y : 0.7;
+    const P = ch && ch.profile;
+    const shY = P ? (P.legUp + P.legLo + (P.torsoH || 0.95) * 0.85) * hs : 1.39;
+    const up = L.part === "leg" ? (P ? P.legLo * hs * 0.55 : 0.26) : shY - 0.42;
+    const dn = L.part === "leg" ? 0.40 : 0.42;
+    let y = up + (dn - up) * L.down;
+    // an arm comes down with the shoulder it hangs from as they fall: the
+    // jaws stay where the arm can reach them, no lower
+    if (L.part !== "leg" && L.pOk && L.py != null) y = Math.max(y, L.py - (h.land.ground || 0) - 0.34);
+    return clamp(y, Lp.lo, Lp.hi);
+  }
+
+  function landBegin(h) {
+    const L = h.lst, a = h.attacker, g = a.group, ch = victimChar(h), Lp = h.land;
+    const vp = landRoot(h);
+    let ux = g.position.x - vp.x, uz = g.position.z - vp.z;
+    const ul = Math.hypot(ux, uz);
+    if (ul < 1e-3) { const hd = a.heading || 0; ux = -Math.cos(hd); uz = -Math.sin(hd); } else { ux /= ul; uz /= ul; }
+    L.ux = ux; L.uz = uz;
+    // a forearm when the jaws can reach one held up, else the near calf;
+    // the calf when it comes from behind (running from it, nobody turns
+    // round to offer an arm)
+    const yaw = ch.group.rotation ? ch.group.rotation.y : 0;
+    const behind = ux * Math.sin(yaw) + uz * Math.cos(yaw) < -0.35;
+    L.part = Lp.hi >= 0.97 && !behind && Math.random() < 0.65 ? "arm" : "leg";
+    // the limb on the side the animal is on, seen from the person
+    const lx = ux * Math.cos(yaw) - uz * Math.sin(yaw);
+    L.side = lx > 0.15 ? 1 : (lx < -0.15 ? -1 : (Math.random() < 0.5 ? 1 : -1));
+    const P = CBZ.player;
+    const down0 = h.isPlayer ? !!(P && ((P.ko > 0) || (P._phys && P._phys.down > 0))) : !!(h.victim && (h.victim.ko > 0 || (ch.fall && ch.fall.on)));
+    L.down = down0 ? 1 : 0; L.fall = down0 ? 1 : 0;
+    L.t = 0; L.ct = 0; L.pullT = 0; L.shakeT = 0; L.twist = 0; L.twistV = 0; L.lean = 0; L.gap = 1; L.latM = null; L.sl = 0; L.pOk = false;
+    L.bx = null; L.bz = null; L.feet = null;
+    // the person turns to it from where they were facing
+    L.rx = vp.x; L.rz = vp.z; L.ry = vp.y; L.yaw = yaw;
+    L.inc = 0;
+    // the strike's latched clock would keep the chest lunging through the hold
+    if (a._atkAnim != null && a._atkAnim >= 0) { a._atkAnim = -1; a._atkStyle = null; }
+    a.faceH = null;
+  }
+
+  // the attacker: moved and posed (paws planted against the move), mouth to the part
+  function landMove(h, dt) {
+    const L = h.lst, a = h.attacker, g = a.group, Lp = h.land, P = Lp.P;
+    L.t += dt;
+    if (g.rotation) { g.rotation.x = h.baseRotX; g.rotation.z = h.baseRotZ; }
+    // the pull line follows where the held shoulder (hip) actually is, slowly
+    // (lying, the root is out at the feet: it is no line to pull along)
+    const vp = L.pOk ? null : landRoot(h);
+    if (vp || L.pOk) {
+      let wx = g.position.x - (L.pOk ? L.px : vp.x), wz = g.position.z - (L.pOk ? L.pz : vp.z);
+      const wl = Math.hypot(wx, wz);
+      if (wl > 0.3) {
+        wx /= wl; wz /= wl;
+        const k = 1 - Math.exp(-1.2 * dt);
+        L.ux += (wx - L.ux) * k; L.uz += (wz - L.uz) * k;
+        const ul = Math.hypot(L.ux, L.uz) || 1; L.ux /= ul; L.uz /= ul;
+      }
+    }
+    let v = 0;
+    if (h.phase === "wind") {
+      // the last lunge: close what is left between the mouth and the part
+      // (an eased close, so the paws are under it when it stops)
+      landPartWorld(h, _lB);
+      landMouth(h, _lA);
+      const dx = _lB.x - _lA.x, dz = _lB.z - _lA.z, along = -(dx * L.ux + dz * L.uz);
+      // (a bestiary mouth cannot come up or down to the part: the teeth wait
+      // for the falling person's limb to reach them)
+      L.gap = Lp.kind === "beast" ? Math.hypot(dx, _lB.y - _lA.y, dz) : Math.hypot(dx, dz);
+      v = -clamp(along * 6, -2.5, 2.5);
+    } else if ((h.phase === "hold" || h.phase === "carry") && Lp.kind !== "beast") {
+      // THE HAUL: pulls and braces. A heavier animal hauls harder; upright
+      // the person takes the first pulls on their feet. (A bestiary body's
+      // legs are rigid columns that cannot step: moving it would skate all
+      // four feet, so a bear or a cat works the person with its head and
+      // its weight where it stands: the rear and slam, the pin's yank)
+      L.pullT += dt;
+      const cyc = P.pullOn + P.pullOff;
+      if (L.pullT >= cyc) L.pullT -= cyc;
+      const mk = Math.pow(Lp.mass / 40, 0.25);
+      v = L.pullT < P.pullOn ? P.pull * mk * Math.sin(Math.PI * L.pullT / P.pullOn) : 0;
+      v *= 0.25 + 0.75 * L.down;
+      if (h.phase === "carry") v *= 0.6;
+    }
+    if (Lp.kind === "beast") {
+      // a rigid body: the lunge moves its base, and stops where its head or
+      // chest meets the person (it does not drive on through them)
+      if (L.bx == null) { L.bx = g.position.x; L.bz = g.position.z; }
+      if (v < 0) {
+        const ch = victimChar(h);
+        if (ch && _pc) {
+          const gap = -landPen(h, ch, landBeastCapsWorld(h));
+          v = Math.max(v, -Math.max(0, gap - 0.01) / dt);
+        }
+      }
+      L.bx += L.ux * v * dt; L.bz += L.uz * v * dt;
+    } else {
+      g.position.x += L.ux * v * dt; g.position.z += L.uz * v * dt;
+      g.position.y = landAnimalGround(g.position.x, g.position.z, g.position.y);
+    }
+    // face the person. A rigid body stops turning once its teeth are in:
+    // turning it would skid all four feet (a canid's legs step round instead)
+    const hd = Math.atan2(-L.uz, -L.ux);
+    if (Lp.kind !== "beast" || h.phase === "wind") a.heading = turnToward(a.heading != null ? a.heading : hd, hd, 6 * dt);
+    a.faceH = a.heading;
+    if (g.rotation) g.rotation.y = -a.heading;
+    // the worry, in bursts (a bear's beat is its slam)
+    L.shakeT += dt;
+    const sc = P.shakeOn + P.shakeOff;
+    if (L.shakeT >= sc) { L.shakeT -= sc; if (h.phase === "hold" && h.style !== "maul") h.beatHit = 1; }
+    const shake = h.phase === "hold" && L.shakeT < P.shakeOn;
+    if (Lp.kind === "beast") { landBeastPose(h, dt, shake, v); g.updateMatrixWorld(true); return; }
+    // the grip: the mouth's own reach in front of the feet, at the part's height
+    const G = a._landGrip || (a._landGrip = { on: true, now: false, shake: false, lunge: 0, gape: 0, to: { x: 0, y: 0, z: 0 } });
+    G.on = true; G.shake = shake;
+    // the gape opens through the lunge; the drive of the chest eases out
+    // through the strike rather than snapping back (the paws stay planted)
+    G.gape = h.phase === "wind" ? clamp(h.t / (S_WIND * 0.6), 0, 1) : 0;
+    G.lunge = h.phase === "wind" ? 0.3 * G.gape : (G.lunge || 0) * Math.exp(-8 * dt);
+    if (h.phase === "wind") {
+      landPartWorld(h, _lB);
+      G.to.x = _lB.x; G.to.y = _lB.y; G.to.z = _lB.z;
+    } else {
+      G.to.x = g.position.x - L.ux * Lp.reach; G.to.z = g.position.z - L.uz * Lp.reach;
+      G.to.y = g.position.y + landPartHeight(h);
+    }
+    if (Lp.kind === "canid") {
+      G.now = true;
+      try { CBZ.canid.animateActor(a, dt); } catch (e) {}
+      G.now = false;
+    }
+    g.updateMatrixWorld(true);
+  }
+
+  // a bestiary body holding a person: its own style's rhythm on the head and
+  // limbs (predator_anim's layer, which also rears the body and lifts it by
+  // the rear's sagitta so the hind feet stay on the ground), no roll (that
+  // would lift its feet), a lower rear than a free one (it has hold of
+  // somebody: a full rear would lift them off the ground by the arm), and the
+  // bear's slam still the beat of the pain
+  function landBeastPose(h, dt, shake, v) {
+    const L = h.lst, a = h.attacker, g = a.group;
+    const s = Math.max(0.35, actorScale(a) || 1), sq = Math.sqrt(s);
+    let p = 0, k = 0.85;
+    if (h.style === "maul") {
+      if (h.phase === "hold" || h.phase === "carry") {
+        const per = MAUL_CYCLE * sq;
+        h.styT += dt;
+        if (h.styT >= per) { h.styT -= per; h.styN++; h.styBeat = -1; }
+        p = h.styT / per;
+        if (p >= MAUL_REAR_END && p < MAUL_SLAM_END && h.styBeat !== h.styN && (p - MAUL_REAR_END) / (MAUL_SLAM_END - MAUL_REAR_END) > 0.55) {
+          h.styBeat = h.styN; h.beatHit = 1;
+          predatorTrauma(0.8);
+          if (CBZ.doHitstop) { try { CBZ.doHitstop(0.05); } catch (e) {} }
+          if (CBZ.sfx) { try { CBZ.sfx("punch", _sfxOpts); } catch (e) {} }
+        }
+      }
+      k = 0.4;
+    } else if (h.style === "pin") {
+      p = h.hold > 0.1 ? Math.min(1, h.t / h.hold) : 0;
+      if (p > PIN_YANK_A && p < PIN_YANK_B && h.styBeat < 0) { h.styBeat = 0; h.beatHit = 1; predatorTrauma(0.65); }
+    } else {
+      h.styT += dt;
+      p = (h.styT / (WORRY_CYCLE * sq)) % 1;
+      k = shake ? 0.85 : 0.5;
+    }
+    g.rotation.x = h.baseRotX;
+    g.rotation.z = h.baseRotZ;
+    g.position.set(L.bx, landAnimalGround(L.bx, L.bz, g.position.y), L.bz);
+    // the pose takes the limbs over from the gait across a fifth of a second
+    // (the lunge leaves them mid-stride; a snap would skid the feet)
+    if (h.phase !== "wind") poseAttacker(h, p, k * h.thrash * smooth((L.ct || 0) / 0.22), dt);
+    // (the feet plant as soon as the lunge has stopped carrying it)
+    landPlantFeet(h, h.phase !== "wind" || Math.abs(v || 0) < 0.08);
+  }
+
+  // ---- planted feet. A bestiary leg is a rigid column that turns about its
+  // top (city/wildlife_rig.js's gait walks it the same way). Once the teeth
+  // are in, each foot stays where it stood: every frame, after the gait and
+  // the pose have written the leg, the column is turned about its top until
+  // its foot is back over that spot (the stride the lunge left it in, the
+  // settle the gait would slide it through, the trunk crouching, shuddering
+  // and rearing above it). A foot the pose lifts (the rear, the swat) is let
+  // go, and plants again where it comes down.
+  function landPlantFeet(h, on) {
+    const a = h.attacker, gt = a.gait, g = a.group, L = h.lst;
+    if (!gt || !gt.cols || !g || !_lV) return;
+    g.updateMatrixWorld(true);
+    const sc = (g.scale && g.scale.x) || 1;
+    const inv = g.getWorldQuaternion(_lQ[0]).invert();
+    if (!L.feet) L.feet = [];
+    for (let c = 0; c < gt.cols.length; c++) {
+      const col = gt.cols[c];
+      // the foot: the bottom of the column's lowest part
+      let fm = null, fy = 1e9;
+      for (let p = 0; p < col.parts.length; p++) {
+        const m = col.parts[p].m, geo = m.geometry;
+        if (!geo) continue;
+        if (!geo.boundingBox) geo.computeBoundingBox();
+        const yb = m.position.y + geo.boundingBox.min.y * (m.scale ? m.scale.y : 1);
+        if (yb < fy) { fy = yb; fm = m; }
+      }
+      if (!fm) continue;
+      const bb = fm.geometry.boundingBox;
+      const W = fm.localToWorld(_lV[4].set((bb.min.x + bb.max.x) * 0.5, bb.min.y, (bb.min.z + bb.max.z) * 0.5));
+      const F = L.feet[c] || (L.feet[c] = { on: false, x: 0, z: 0, px: 0, pz: 0, pOn: false });
+      const down = W.y - landAnimalGround(W.x, W.z, W.y) <= 0.035;
+      if (!on || !down) { F.on = false; F.pOn = down; F.px = W.x; F.pz = W.z; continue; }
+      // (planting, a foot that was down a frame ago plants where it was: the
+      // gait reads the body's motion a frame late, and would take one more
+      // stride after the body has stopped)
+      if (!F.on) { F.on = true; F.x = F.pOn ? F.px : W.x; F.z = F.pOn ? F.pz : W.z; }
+      // the error along the body, in the group's own units, and the foot's
+      // offset (rx, ry) from the column top: the turn d that moves the foot
+      // forward by ex, rx cos d - ry sin d = rx + ex (the stride's
+      // small-angle form, then one Newton step)
+      const ex = _lV[5].set(F.x - W.x, 0, F.z - W.z).applyQuaternion(inv).x / sc;
+      g.worldToLocal(W);
+      const rx = W.x - col.x, ry = W.y - col.top;
+      if (ry > -0.05) continue;
+      let d = ex / -ry;
+      d -= (rx * Math.cos(d) - ry * Math.sin(d) - rx - ex) / (-rx * Math.sin(d) - ry * Math.cos(d));
+      if (!isFinite(d)) continue;
+      landColTurn(col, col.parts[0].m.rotation.z + clamp(d, -0.45, 0.45));
+    }
+    g.updateMatrixWorld(true);
+  }
+
+  // turn a leg column about its top to angle `z` (its own rotation.z)
+  function landColTurn(col, z) {
+    const d = z - col.parts[0].m.rotation.z;
+    if (Math.abs(d) < 1e-6) return;
+    const cd = Math.cos(d), sd = Math.sin(d);
+    for (let p = 0; p < col.parts.length; p++) {
+      const m = col.parts[p].m, px = m.position.x - col.x, py = m.position.y - col.top;
+      m.position.x = col.x + px * cd - py * sd;
+      m.position.y = col.top + px * sd + py * cd;
+      m.rotation.z += d;
+    }
+  }
+  // let go, a bestiary body's legs are still where they planted. They ease
+  // back into its gait over a third of a second, on top of whatever the
+  // gait writes meanwhile (walking off, the stride grows under them; standing,
+  // they settle), rather than snapping to it the frame it starts walking
+  const UNBRACE = [], UNBRACE_T = 0.3;
+  function landUnbrace(a) {
+    const gt = a && a.gait;
+    if (!gt || !gt.cols) return;
+    let e = null;
+    for (let i = 0; i < UNBRACE.length; i++) if (UNBRACE[i].a === a) { e = UNBRACE[i]; break; }
+    if (!e) { e = { a: a, t: 0, w0: 1, off: [], last: [] }; UNBRACE.push(e); }
+    e.t = 0; e.w0 = 1;
+    for (let c = 0; c < gt.cols.length; c++) {
+      const col = gt.cols[c], z = col.parts[0].m.rotation.z;
+      e.off[c] = z - col.parts[0].rz; e.last[c] = z;
+    }
+  }
+  function landUnbraceTick(dt) {
+    for (let i = UNBRACE.length - 1; i >= 0; i--) {
+      const e = UNBRACE[i], gt = e.a.gait;
+      e.t += dt;
+      const w = e.t >= UNBRACE_T || !gt || e.a.dead || e.a._seizing ? 0 : 1 - smooth(e.t / UNBRACE_T);
+      if (gt && gt.cols && !e.a._seizing) {
+        for (let c = 0; c < gt.cols.length && c < e.off.length; c++) {
+          const col = gt.cols[c], z = col.parts[0].m.rotation.z;
+          // the gait's own angle this frame: fresh if it wrote one, else
+          // ours less the brace we added
+          const base = z !== e.last[c] ? z : z - e.off[c] * e.w0;
+          landColTurn(col, base + e.off[c] * w);
+          e.last[c] = col.parts[0].m.rotation.z;
+        }
+      }
+      e.w0 = w;
+      if (w <= 0) UNBRACE.splice(i, 1);
+    }
+  }
+
+  // the held limb solved so the bitten point of its lower segment is at T,
+  // the joint bending toward `pole` (both world); returns how far it fell
+  // short. An ARM keeps to its range (character.js draws the shoulder and
+  // elbow through their anatomical limits, so an out-of-range solve would be
+  // drawn somewhere else): the joint is chosen round its circle about the
+  // shoulder-target line, nearest the pole among the in-range solutions.
+  const _ikQ = THREE ? new THREE.Quaternion() : null;
+  function landIKCandidate(lb, S, n, d, L1, L2, ca, sa, m, inv, out) {
+    const E = _lV[3].copy(S).addScaledVector(n, L1 * ca).addScaledVector(m, L1 * sa);
+    const Tc = _lV[4].copy(S).addScaledVector(n, d);
+    const av = _lV[5].copy(E).sub(S).normalize();
+    const fv = Tc.sub(E).normalize();
+    av.applyQuaternion(inv); fv.applyQuaternion(inv);
+    const bend = lb.arm ? 1 : -1;
+    const yx = -av.x, yy = -av.y, yz = -av.z;
+    const dotAF = av.x * fv.x + av.y * fv.y + av.z * fv.z;
+    let zx = (fv.x - av.x * dotAF) * bend, zy = (fv.y - av.y * dotAF) * bend, zz = (fv.z - av.z * dotAF) * bend;
+    let zl = Math.hypot(zx, zy, zz);
+    if (zl < 1e-5) {
+      // a straight limb: keep the bend plane facing the pole
+      const pq = _lV[2].copy(m).applyQuaternion(inv);
+      zx = pq.x * bend; zy = pq.y * bend; zz = pq.z * bend;
+      const pd = zx * yx + zy * yy + zz * yz; zx -= yx * pd; zy -= yy * pd; zz -= yz * pd;
+      zl = Math.hypot(zx, zy, zz) || 1;
+    }
+    zx /= zl; zy /= zl; zz /= zl;
+    const xx = yy * zz - yz * zy, xy = yz * zx - yx * zz, xz = yx * zy - yy * zx;
+    _lM.set(xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0, 0, 0, 0, 1);
+    out.setFromRotationMatrix(_lM);
+    return Math.acos(clamp(dotAF, -1, 1));
+  }
+  // how far outside the arm's anatomical range (0 = inside)
+  function landArmOut(q, sg, th) {
+    const LM = (CBZ.human && CBZ.human.armLimits) || null;
+    if (!LM) return 0;
+    const dx = -2 * (q.x * q.y - q.w * q.z), dy = -(1 - 2 * (q.x * q.x + q.z * q.z)), dz = -2 * (q.y * q.z + q.w * q.x);
+    let tw = 2 * Math.atan2(q.y, q.w);
+    while (tw > Math.PI) tw -= Math.PI * 2; while (tw < -Math.PI) tw += Math.PI * 2;
+    const o = dx * sg, lim = -(LM.across + LM.acrossFwd * Math.max(0, dz) + 0.5 * Math.max(0, dy));
+    let bad = 0;
+    if (dz < -LM.back) bad += -LM.back - dz;
+    if (o < lim) bad += lim - o;
+    if (dy <= 0.9 && Math.abs(tw) > LM.twist * 0.97) bad += Math.abs(tw) - LM.twist * 0.97;
+    if (th > LM.elFlex) bad += th - LM.elFlex;
+    return bad;
+  }
+  function landLimbIK(h, lb, T, pole) {
+    const part = lb.part, low = lb.low, par = part.parent;
+    if (lb.arm && part.userData) part.position.z = part.userData._armRestZ || 0;
+    part.updateMatrixWorld(true);
+    const S = _lV[0].copy(part.getWorldPosition(_lV[0]));
+    const ws = part.matrixWorld.getMaxScaleOnAxis() || 1;
+    const L1 = Math.abs(low.position.y) * ws, L2 = lb.seg * lb.at * ws;
+    const nx = T.x - S.x, ny = T.y - S.y, nz = T.z - S.z;
+    const d0 = Math.hypot(nx, ny, nz) || 1e-6;
+    const dmin = Math.abs(L1 - L2) + 0.01, dmax = (L1 + L2) * 0.995;
+    const d = clamp(d0, dmin, dmax);
+    const n = _lV[1].set(nx / d0, ny / d0, nz / d0);
+    const ca = clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1), sa = Math.sqrt(1 - ca * ca);
+    // the pole, square to the line; and a second axis round it
+    const m0 = _lV[2].set(pole.x, pole.y, pole.z);
+    m0.addScaledVector(n, -m0.dot(n));
+    if (m0.lengthSq() < 1e-8) m0.set(0, 1, 0).addScaledVector(n, -n.y);
+    m0.normalize();
+    const m0x = m0.x, m0y = m0.y, m0z = m0.z;
+    const k0x = n.y * m0z - n.z * m0y, k0y = n.z * m0x - n.x * m0z, k0z = n.x * m0y - n.y * m0x;
+    // into the parent's frame (uniform scale: directions only rotate)
+    const inv = par.getWorldQuaternion(_lQ[0]).invert();
+    let th = landIKCandidate(lb, S, n, d, L1, L2, ca, sa, _lV[2].set(m0x, m0y, m0z), inv, part.quaternion);
+    if (lb.arm) {
+      const sg = part.position.x >= 0 ? 1 : -1;
+      let bad = landArmOut(part.quaternion, sg, th);
+      if (bad > 0) {
+        // round the circle, both ways, nearest first
+        let best = bad, bq = _ikQ.copy(part.quaternion), bth = th;
+        for (let i = 1; i <= 12 && best > 0; i++) {
+          for (let sgn = -1; sgn <= 1; sgn += 2) {
+            const a = sgn * i * Math.PI / 12, c = Math.cos(a), s = Math.sin(a);
+            const m = _lV[2].set(m0x * c + k0x * s, m0y * c + k0y * s, m0z * c + k0z * s);
+            const t2 = landIKCandidate(lb, S, n, d, L1, L2, ca, sa, m, inv, _lQ[1]);
+            const b2 = landArmOut(_lQ[1], sg, t2);
+            if (b2 < best - 1e-4) { best = b2; bq.copy(_lQ[1]); bth = t2; if (b2 <= 0) break; }
+          }
+        }
+        part.quaternion.copy(bq); th = bth;
+      }
+    }
+    low.rotation.set(lb.arm ? -th : th, 0, 0);
+    return d0 - d;
+  }
+
+  // the lowest skin of a posed person: the trunk (its half width round the
+  // spine at the hips and the chest), the head, the joints of the limbs
+  const _lowPts = [[0, 0, 0.17], [0, 0.55, 0.17], [0, 0.95, 0.11]];
+  function landLowest(ch) {
+    let low = 1e9;
+    const P = ch.profile, hy = ch.hipY || (P.legUp + P.legLo), th = P.torsoH || 0.95;
+    for (let i = 0; i < _lowPts.length; i++) {
+      const q = _lowPts[i];
+      ch.body.localToWorld(_lV[1].set(0, hy + q[1] * th + (i === 2 ? 0.2 : 0), 0));
+      if (_lV[1].y - q[2] < low) low = _lV[1].y - q[2];
+    }
+    const k = ["la", "ra", "ll", "rl"];
+    for (let i = 0; i < 4; i++) {
+      const arm = i < 2, part = ch.parts[k[i]], lo = ch.low[k[i]];
+      if (!part || !lo) continue;
+      part.getWorldPosition(_lV[1]);
+      if (_lV[1].y - (arm ? 0.08 : 0.1) < low) low = _lV[1].y - (arm ? 0.08 : 0.1);
+      lo.getWorldPosition(_lV[1]);
+      if (_lV[1].y - 0.065 < low) low = _lV[1].y - 0.065;
+      lo.localToWorld(_lV[1].set(0, arm ? -(P.armLo || 0.57) : -(P.legLo || 0.67), 0));
+      if (_lV[1].y - 0.05 < low) low = _lV[1].y - 0.05;
+      // and the toes, out in front of the ankle
+      if (!arm) {
+        const ms = (ch.model && ch.model.scale) ? ch.model.scale.x : 0.689;
+        lo.localToWorld(_lV[1].set(0, -(P.legLo || 0.67) + 0.045 / ms, 0.19 / ms));
+        if (_lV[1].y - 0.045 < low) low = _lV[1].y - 0.045;
+      }
+    }
+    return low;
+  }
+  // ---- the two bodies as capsules. A bestiary body's lofted parts, each
+  // along its longest axis from its own geometry (local, measured once);
+  // the person's trunk, head, upper arms and thighs from its bones
+  const _cP = { x: 0, y: 0, z: 0 }, _cQ = { x: 0, y: 0, z: 0 };
+  // closest points of segments p1-q1 and p2-q2 (into _cP, _cQ); the distance
+  function landSegSeg(p1, q1, p2, q2) {
+    const d1x = q1.x - p1.x, d1y = q1.y - p1.y, d1z = q1.z - p1.z;
+    const d2x = q2.x - p2.x, d2y = q2.y - p2.y, d2z = q2.z - p2.z;
+    const rx = p1.x - p2.x, ry = p1.y - p2.y, rz = p1.z - p2.z;
+    const a = d1x * d1x + d1y * d1y + d1z * d1z, e = d2x * d2x + d2y * d2y + d2z * d2z;
+    const f = d2x * rx + d2y * ry + d2z * rz;
+    let s = 0, t = 0;
+    if (a <= 1e-9 && e <= 1e-9) { s = 0; t = 0; }
+    else if (a <= 1e-9) { s = 0; t = clamp(f / e, 0, 1); }
+    else {
+      const c = d1x * rx + d1y * ry + d1z * rz;
+      if (e <= 1e-9) { t = 0; s = clamp(-c / a, 0, 1); }
+      else {
+        const b = d1x * d2x + d1y * d2y + d1z * d2z, den = a * e - b * b;
+        s = den > 1e-12 ? clamp((b * f - c * e) / den, 0, 1) : 0;
+        t = (b * s + f) / e;
+        if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); } else if (t > 1) { t = 1; s = clamp((b - c) / a, 0, 1); }
+      }
+    }
+    _cP.x = p1.x + d1x * s; _cP.y = p1.y + d1y * s; _cP.z = p1.z + d1z * s;
+    _cQ.x = p2.x + d2x * t; _cQ.y = p2.y + d2y * t; _cQ.z = p2.z + d2z * t;
+    return Math.hypot(_cP.x - _cQ.x, _cP.y - _cQ.y, _cP.z - _cQ.z);
+  }
+  function landBeastCaps(Lp, g) {
+    if (Lp.caps) return Lp.caps;
+    const caps = [];
+    const kids = g.children;
+    for (let i = 0; i < kids.length; i++) {
+      const m = kids[i];
+      if (!m.isMesh || !m.geometry) continue;
+      const geo = m.geometry;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      const bb = geo.boundingBox;
+      const hx = (bb.max.x - bb.min.x) / 2, hy = (bb.max.y - bb.min.y) / 2, hz = (bb.max.z - bb.min.z) / 2;
+      const cx = (bb.max.x + bb.min.x) / 2, cy = (bb.max.y + bb.min.y) / 2, cz = (bb.max.z + bb.min.z) / 2;
+      let r, a, b;
+      if (hx >= hy && hx >= hz) { r = (hy + hz) * 0.425; a = new THREE.Vector3(cx - hx + r, cy, cz); b = new THREE.Vector3(cx + hx - r, cy, cz); }
+      else if (hy >= hz) { r = (hx + hz) * 0.425; a = new THREE.Vector3(cx, cy - hy + r, cz); b = new THREE.Vector3(cx, cy + hy - r, cz); }
+      else { r = (hx + hy) * 0.425; a = new THREE.Vector3(cx, cy, cz - hz + r); b = new THREE.Vector3(cx, cy, cz + hz - r); }
+      if (!(r > 0.01)) continue;
+      caps.push({ m: m, a: a, b: b, r: r, wa: new THREE.Vector3(), wb: new THREE.Vector3(), wr: 0 });
+    }
+    Lp.caps = caps;
+    return caps;
+  }
+  const _pc = THREE ? [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ a: new THREE.Vector3(), b: new THREE.Vector3(), r: 0 })) : null;
+  const _pcK = ["la", "ra", "ll", "rl"];
+  function landPersonCaps(h, ch) {
+    const P = ch.profile, s = (ch.model && ch.model.scale) ? ch.model.scale.x : 0.689, L = h.lst;
+    const hy = ch.hipY || ((P.legUp || 0.45) + (P.legLo || 0.67));
+    const hk = L.part === "leg" ? (L.side > 0 ? "rl" : "ll") : (L.side > 0 ? "la" : "ra");
+    let n = 0;
+    // the trunk, hips to the neck; the head
+    ch.body.localToWorld(_pc[n].a.set(0, hy, 0)); ch.neck.getWorldPosition(_pc[n].b);
+    _pc[n++].r = Math.min(P.torsoW || 0.36, P.torsoD || 0.24) * 0.5 * s;
+    ch.neck.localToWorld(_pc[n].a.set(0, 0.12 / s * 0.6, 0)); ch.neck.localToWorld(_pc[n].b.set(0, 0.30 / s * 0.6, 0));
+    _pc[n++].r = 0.105;
+    // every limb but the bitten segment (and the hand or foot past it, in
+    // the jaws): upper arms and thighs, the free forearms, shins and feet
+    for (let i = 0; i < 4; i++) {
+      const part = ch.parts[_pcK[i]], lo = ch.low[_pcK[i]], arm = i < 2;
+      if (!part || !lo) continue;
+      const r = (arm ? (P.armW || 0.13) : (P.legW || 0.17)) * 0.45 * s;
+      part.getWorldPosition(_pc[n].a); lo.getWorldPosition(_pc[n].b);
+      _pc[n++].r = r;
+      if (_pcK[i] === hk) continue;
+      lo.getWorldPosition(_pc[n].a);
+      lo.localToWorld(_pc[n].b.set(0, -(arm ? (P.armLo || 0.57) : (P.legLo || 0.67)), 0));
+      _pc[n++].r = r * 0.9;
+    }
+    return n;
+  }
+  // the animal's capsules where it stands now
+  function landBeastCapsWorld(h) {
+    const ag = h.attacker && h.attacker.group;
+    const caps = landBeastCaps(h.land, ag);
+    ag.updateMatrixWorld(true);
+    for (let i = 0; i < caps.length; i++) {
+      const c = caps[i], mw = c.m.matrixWorld;
+      c.wa.copy(c.a).applyMatrix4(mw); c.wb.copy(c.b).applyMatrix4(mw);
+      c.wr = c.r * mw.getMaxScaleOnAxis();
+    }
+    return caps;
+  }
+  // the deepest the person is into the animal (negative: the gap between
+  // them), with the way out across the ground in _cOut
+  const _cOut = { x: 0, z: 0 };
+  function landPen(h, ch, caps) {
+    const n = landPersonCaps(h, ch), ag = h.attacker.group;
+    let best = -9;
+    for (let j = 0; j < n; j++) {
+      const pc = _pc[j];
+      for (let i = 0; i < caps.length; i++) {
+        const c = caps[i];
+        const pen = c.wr + pc.r - landSegSeg(c.wa, c.wb, pc.a, pc.b);
+        if (pen <= best) continue;
+        let dx = _cQ.x - _cP.x, dz = _cQ.z - _cP.z, dl = Math.hypot(dx, dz);
+        if (dl < 1e-4) { dx = (pc.a.x + pc.b.x) * 0.5 - ag.position.x; dz = (pc.a.z + pc.b.z) * 0.5 - ag.position.z; dl = Math.hypot(dx, dz) || 1; }
+        best = pen; _cOut.x = dx / dl; _cOut.z = dz / dl;
+      }
+    }
+    return best;
+  }
+  // push the person out of the animal, no faster than a shove (`vmax` m/s);
+  // true when it moved them
+  function landClear(h, ch, g, dt, vmax) {
+    if (!_pc || !h.attacker || !h.attacker.group) return false;
+    const caps = landBeastCapsWorld(h);
+    let left = vmax * dt, moved = false;
+    for (let it = 0; it < 3 && left > 1e-4; it++) {
+      const pen = landPen(h, ch, caps);
+      if (pen <= 0.002) break;
+      const st = Math.min(pen + 0.005, left);
+      g.position.x += _cOut.x * st; g.position.z += _cOut.z * st;
+      g.updateMatrixWorld(true);
+      left -= st; moved = true;
+    }
+    return moved;
+  }
+  // which way the joint bends: toward where it is meant to be. A knee held
+  // by a bear or a cat is also turned up and back toward the person (the
+  // foot past the jaws points the way the knee does: away from the animal,
+  // not into its neck and chest); `knee` is how hard, 0 for none
+  function landPole(E, S, J, knee, out, ux, uz) {
+    out.x = E.x - (S.x + J.x) * 0.5; out.y = E.y - (S.y + J.y) * 0.5; out.z = E.z - (S.z + J.z) * 0.5;
+    if (knee) {
+      const m = Math.hypot(out.x, out.y, out.z) * knee;
+      out.y += m * 2; out.x -= ux * m * 3; out.z -= uz * m * 3;
+    }
+    return out;
+  }
+  // the person's frame: facing the animal (an arm up at it), or side-on with
+  // the held leg the near one (its knee bends across the pull, never over
+  // the head), rolled onto the side away from the held limb as it goes down
+  // (the fall pivots on the feet, across the pull, never toward the
+  // animal), less the incline; the root where the drag left it, and lying,
+  // the side it lies on resting on the ground
+  function landFrame(L, ch, g, gy) {
+    _lQ[1].setFromAxisAngle(_lV[0].set(0, 1, 0), L.yaw);
+    _lQ[2].setFromAxisAngle(_lV[0].set(0, 0, 1), L.side * (L.down * Math.PI * 0.5 + (L.part === "leg" ? 1 : -1) * (L.inc || 0)));
+    g.quaternion.copy(_lQ[1]).multiply(_lQ[2]);
+    g.position.set(L.rx, gy, L.rz);
+    g.updateMatrixWorld(true);
+    if (L.down > 0.01) {
+      const low = landLowest(ch);
+      if (low < gy) { g.position.y += gy - low; g.updateMatrixWorld(true); }
+    }
+  }
+  // the person, solved from the mouth. `lunge`: the teeth are not on them
+  // yet, but a bear or a big cat knocks them down as it comes (its mouth
+  // cannot come up to a standing arm the way a wolf's can): they go down in
+  // place, and the solve below waits for the bite
+  function landAnchor(h, dt, lunge) {
+    const L = h.lst, ch = victimChar(h);
+    if (!ch) return;
+    const J = h.jaw, g = ch.group;
+    // ---- going down: yanked off the feet a beat after the teeth close (at
+    //      once by a leg: nobody stands on a leg an animal is hauling on)
+    if (h.phase !== "wind") L.ct = (L.ct || 0) + dt;
+    if (L.fall < 1 && (lunge || (h.phase !== "wind" && L.ct >= (L.part === "leg" ? 0 : h.land.P.fallAt)))) {
+      L.fall = Math.min(1, L.fall + dt / h.land.P.fallT);
+    }
+    L.down = smooth(L.fall);
+    // the trunk: hauled forward on a pull, braced back between; the shake
+    // twists it through the held limb
+    const pull = h.phase === "hold" && h.land.kind !== "beast" && L.pullT < h.land.P.pullOn ? 1 : 0;
+    L.lean += ((pull ? -0.8 : 0.5) - L.lean) * (1 - Math.exp(-6 * dt));
+    const arm = L.part !== "leg";
+    L.yaw = turnToward(L.yaw, arm ? Math.atan2(L.ux, L.uz) : Math.atan2(-L.side * L.uz, L.side * L.ux), 9 * dt);
+    // ---- the joints
+    const hpK = h.isPlayer ? 1 : (h.victim && h.victim.hp != null && h.victim.maxHp ? clamp(h.victim.hp / h.victim.maxHp, 0.2, 1) : 1);
+    _gPose.t = L.t; _gPose.k = hpK; _gPose.down = L.down; _gPose.part = L.part; _gPose.side = L.side;
+    _gPose.lean = L.lean; _gPose.twist = L.twist;
+    try { CBZ.poseSeizedOnGround(ch, _gPose); } catch (e) {}
+    // ---- the frame and the root (landFrame)
+    const gy = landGround(L.rx, L.rz, L.ry);
+    landFrame(L, ch, g, gy);
+    // ---- the held limb to the teeth. The bitten segment lies ACROSS the
+    //      mouth: hanging (upright) and level, square to the snout (down).
+    //      Its joint (elbow, knee) is off the teeth that way by as much of
+    //      the segment as lies above the bite, and the shoulder or hip one
+    //      upper segment from that joint,
+    //      behind it on the person's own side. The body eases there, so a
+    //      shake swings the limb before the trunk, and is hauled along with
+    //      it: that is the drag.
+    const lb = landLimb(h);
+    g.updateMatrixWorld(true);
+    const ws = lb.part.matrixWorld.getMaxScaleOnAxis() || 1;
+    const L1 = Math.abs(lb.low.position.y) * ws, L2 = lb.seg * lb.at * ws;
+    lb.part.getWorldPosition(_lV[3]);
+    // across the mouth: the lateral side the pivot is on, fixed once. A leg
+    // is yanked out sideways from the first frame (a shin hanging straight
+    // up from the teeth puts the knee on the skull of an animal biting low)
+    const lx = -L.uz, lz = L.ux;
+    if (!L.sl) L.sl = ((_lV[3].x - J.x) * lx + (_lV[3].z - J.z) * lz) >= 0 ? 1 : -1;
+    const across = arm ? L.down : Math.max(L.down, 0.6);
+    // in a jaw as wide as a bear's the limb goes in at the corner of the
+    // mouth, the joint out in front of the muzzle, clear of the skull
+    const fwd = h.land.jawW > 0.075 ? 0.6 * across : 0;
+    let ex = L.sl * lx * across - L.ux * fwd, ey = 1 - across, ez = L.sl * lz * across - L.uz * fwd;
+    const el = Math.hypot(ex, ey, ez) || 1;
+    const E = _lB; E.x = J.x + ex / el * L2; E.y = J.y + ey / el * L2; E.z = J.z + ez / el * L2;
+    let dy = _lV[3].y - E.y;
+    const lim = L1 * 0.96;
+    // down, a shoulder (hip) too low for the jaws is not lifted clear of the
+    // ground: the body inclines up until it is in reach, and lies back down
+    // as the jaws come down. Held by an arm it comes up about its feet; by a
+    // leg it hangs from it, shoulders on the ground (the roll goes past
+    // flat, and the head end is what rests on the ground). A Newton step on
+    // the joint's height, solved again in the same frame: a slam takes the
+    // body down with the limb, never a frame behind it
+    const incOn = L.down > 0.05;
+    if (incOn) {
+      if (!arm && ch.neck) ch.neck.getWorldPosition(_lV[4]);
+      const px = arm ? g.position.x : _lV[4].x, pz = arm ? g.position.z : _lV[4].z;
+      const lev = Math.max(0.4, Math.hypot(_lV[3].x - px, _lV[3].z - pz));
+      const i0 = L.inc || 0;
+      // (by a leg the incline turns the same way as the fall: together no
+      // faster than a body topples)
+      const fallW = !arm && L.fall < 1 ? 6 * L.fall * (1 - L.fall) / h.land.P.fallT * Math.PI * 0.5 : 0;
+      const rate = Math.max(0.5, 3 - fallW);
+      L.inc = clamp(i0 + clamp((-lim * 0.9 - dy) / lev, -3 * dt, rate * dt), 0, 0.9 * L.down * L.down * L.down);
+      if (Math.abs(L.inc - i0) > 1e-4) {
+        landFrame(L, ch, g, gy);
+        lb.part.getWorldPosition(_lV[3]);
+        dy = _lV[3].y - E.y;
+      }
+    } else L.inc = 0;
+    let lift = 0;
+    if (dy > lim) { lift = (lim - dy) * L.down; dy = lim; } else if (dy < -lim) { lift = (-lim - dy) * (incOn ? 1 - L.down : 1); dy = -lim; }
+    const hd = Math.sqrt(Math.max(0, L1 * L1 - dy * dy));
+    const tx = E.x - L.ux * hd - _lV[3].x, tz = E.z - L.uz * hd - _lV[3].z;
+    const beast = h.land.kind === "beast";
+    // the teeth closing put the body where the bite has it (the first
+    // frame), then it follows the jaws a beat behind. Knocked down in the
+    // lunge, it is already going there as it falls, so the bite is no jump
+    const ke = (L.ct <= dt * 1.5 && !beast && !lunge) ? 1 : 1 - Math.exp(-dt / (lunge || (beast && h.phase === "strike") ? 0.08 : h.phase === "strike" ? 0.035 : 0.07));
+    const w = lunge ? smooth(h.t / S_WIND) : 1;
+    g.position.x += tx * ke * w; g.position.z += tz * ke * w;
+    g.position.y += clamp(lift, -0.25, 0.25) * ke * w;
+    g.updateMatrixWorld(true);
+    // the limb itself: the joint bends toward where it is meant to be. In
+    // the lunge it is thrown up at the jaws as they come (an arm to fend the
+    // animal off, a leg kicked at it), so the teeth close on it there
+    lb.part.getWorldPosition(_lV[3]);
+    const knee = !arm && h.land.kind === "beast" ? 1 : 0;
+    const pole = landPole(E, _lV[3], J, knee, _lA, L.ux, L.uz);
+    // (in the lunge, by `w`: from where the fall has it to on the jaws by
+    // the time they shut)
+    const q0 = lunge ? _lQ[2].copy(lb.part.quaternion) : null, r0 = lb.low.rotation.x;
+    landLimbIK(h, lb, J, pole);
+    if (lunge) {
+      lb.part.quaternion.copy(q0.slerp(lb.part.quaternion, w));
+      lb.low.rotation.x = r0 + (lb.low.rotation.x - r0) * w;
+    }
+    g.updateMatrixWorld(true);
+    // exact: whatever the limb could not close, the body does (never down
+    // into the ground: the jaws come down to it instead)
+    landPartWorld(h, _lC);
+    let sink = J.y - _lC.y;
+    if (sink < 0) sink = Math.max(sink, -Math.max(0, landLowest(ch) - gy) * L.down);
+    g.position.x += (J.x - _lC.x) * w; g.position.y += Math.min(sink, 0.12) * w; g.position.z += (J.z - _lC.z) * w;
+    // (before the teeth are in, the animal comes to the person, not the
+    // person to it: knocked about no faster than a shove)
+    if (lunge) {
+      const mx = g.position.x - L.rx, mz = g.position.z - L.rz, ml = Math.hypot(mx, mz), cap = 2 * dt;
+      if (ml > cap) { g.position.x = L.rx + mx / ml * cap; g.position.z = L.rz + mz / ml * cap; }
+    }
+    g.updateMatrixWorld(true);
+    // the two bodies stay two bodies: a person pressed into a bestiary
+    // body's head, legs or trunk is pushed back out of it, and the limb
+    // reaches the jaws again from there
+    if (beast && landClear(h, ch, g, dt, 2.5) && !lunge) {
+      lb.part.getWorldPosition(_lV[3]);
+      landLimbIK(h, lb, J, landPole(E, _lV[3], J, knee, _lA, L.ux, L.uz));
+      g.updateMatrixWorld(true);
+    }
+    // the pull line runs from the held shoulder (hip), not the root
+    lb.part.getWorldPosition(_lV[3]);
+    L.px = _lV[3].x; L.pz = _lV[3].z; L.py = _lV[3].y; L.pOk = true;
+    h.land.ground = gy;
+    // the shake twists the trunk: a spring driven by the teeth swinging off
+    // their own running mean across the pull (the shake, not where it holds)
+    if (!lunge) {
+      const lat = J.x * L.uz - J.z * L.ux;
+      if (L.latM == null) L.latM = lat;
+      L.latM += (lat - L.latM) * (1 - Math.exp(-2.5 * dt));
+      const tw = clamp((lat - L.latM) * 3.2, -0.4, 0.4);
+      L.twistV += ((tw - L.twist) * 140 - L.twistV * 16) * dt;
+      L.twist += L.twistV * dt;
+    }
+    L.rx = g.position.x; L.rz = g.position.z; L.ry = g.position.y;
+    landActorFollow(h, g);
+  }
+  // the actor's own position follows the posed body
+  function landActorFollow(h, g) {
+    if (h.isPlayer) {
+      const P = CBZ.player;
+      if (P && P.pos) {
+        P.pos.x = g.position.x; P.pos.y = g.position.y; P.pos.z = g.position.z;
+        P.vy = 0; P.speed = 0; P.grounded = true;
+        if (P._phys) { P._phys.vx = P._phys.vz = 0; P._phys.vy = 0; P._phys.air = false; P._phys.down = 0; }
+      }
+    } else {
+      const v = h.victim, p = actorPos(v);
+      if (p && p !== g.position) { p.x = g.position.x; p.y = g.position.y; p.z = g.position.z; }
+      if (v && v.group && v.group !== g && v.group.position !== g.position) v.group.position.copy(g.position);
+    }
+  }
+  // the lunge's beat: the person sees it coming and turns to it (an arm up
+  // at it, or side-on with the near leg) before the teeth arrive
+  function landTurn(h, dt) {
+    const L = h.lst, ch = victimChar(h);
+    if (!ch || !ch.group) return;
+    const want = L.part !== "leg" ? Math.atan2(L.ux, L.uz) : Math.atan2(-L.side * L.uz, L.side * L.ux);
+    L.yaw = turnToward(L.yaw, want, 9 * dt);
+    ch.group.quaternion.setFromAxisAngle(_lV[0].set(0, 1, 0), L.yaw);
+    if (h.isPlayer && CBZ.player) { const P = CBZ.player; P.speed = 0; if (P._phys) { P._phys.vx = P._phys.vz = 0; } }
+  }
+  // a person let go: stands back up if still on their feet, or stays down
+  function landRelease(h) {
+    const L = h.lst, ch = victimChar(h), a = h.attacker;
+    if (a && a._landGrip) { a._landGrip.on = false; a._landGrip.now = false; }
+    if (a) a.faceH = null;
+    // a rigid body stands where it held
+    if (a && a.group && h.land && h.land.kind === "beast" && L.bx != null) {
+      a.group.position.x = L.bx; a.group.position.z = L.bz;
+      a.group.position.y = landAnimalGround(L.bx, L.bz, a.group.position.y);
+    }
+    if (!ch || !ch.group) return;
+    const yaw = L.yaw || 0;
+    if (L.down < 0.5) {
+      ch.group.quaternion.setFromAxisAngle(_lV[0].set(0, 1, 0), yaw);
+      return;
+    }
+    // down: they stay down a moment, on the ground they were dragged over
+    if (h.isPlayer) {
+      const P = CBZ.player;
+      if (P && !P.dead) {
+        ch.group.rotation.set(0, yaw, 0);
+        P._phys = P._phys || {};
+        if (!P._phys.air) { P._phys.down = Math.max(P._phys.down || 0, 1.1); P._phys.kx = P._phys.kx || 0; P._phys.kz = P._phys.kz || 0; }
+      }
+    } else if (h.victim && !h.victim.dead) {
+      ch.group.rotation.set(0, yaw, 0);
+      if (CBZ.verbs && CBZ.verbs.knockdown) {
+        try { CBZ.verbs.knockdown(h.victim, { dir: { x: -L.ux, z: -L.uz }, power: 0.4, dur: 1.4 }); } catch (e) {}
+      }
+    }
+  }
+
   // ---- the thrash. Big things thrash SLOWER — that 1/sqrt(scale) is what
   //      makes a megalodon read as a megalodon instead of a fast fish.
   function thrashAttacker(h, dt) {
     const g = h.attacker && h.attacker.group;
     if (!g || !g.rotation) return;
     if (h.marine) { marineMove(h, dt); return; }
+    // a land hold moves and poses the body itself, then re-solves the teeth
+    if (h.land) { landMove(h, dt); jawWorld(h, h.jaw); return; }
     const s = Math.max(0.35, actorScale(h.attacker) || 1);
     const sq = Math.sqrt(s);
     const F = (22 - 8 * clamp(s / 4, 0, 1)) / sq;
@@ -2074,11 +3038,13 @@
     if (v.animal && CBZ.quadRagdollUnpin) { try { CBZ.quadRagdollUnpin(v); } catch (e) {} }
   }
 
-  function anchorVictim(h) {
+  function anchorVictim(h, dt) {
     const _jaw = h.jaw;
     // a live body in a sea animal's jaws is held at the bitten part; a corpse
     // goes to the ragdoll pin below like any other
     if (h.marine && (h.isPlayer || !(h.victim && h.victim.dead))) { marineAnchor(h); return; }
+    // ...and so is one in a land animal's (THE BITE ON LAND)
+    if (h.land && (h.isPlayer || !(h.victim && h.victim.dead))) { landAnchor(h, dt > 0 ? dt : 1 / 60); return; }
     if (h.isPlayer) {
       const P = CBZ.player;
       if (!P || !P.pos) return;
@@ -2159,6 +3125,7 @@
   }
 
   function seizeTick(dt) {
+    if (UNBRACE.length) landUnbraceTick(dt);
     if (!SEIZES.length) return;
     if (!on()) { for (let i = SEIZES.length - 1; i >= 0; i--) endSeize(SEIZES[i], "aborted"); return; }
     for (let i = SEIZES.length - 1; i >= 0; i--) {
@@ -2190,12 +3157,22 @@
         // whip the lens toward the attacker; no damage yet. A sea animal
         // spends it on the last lunge, jaws opening, onto the part it takes.
         if (h.marine) marineWind(h, dt);
+        else if (h.land) {
+          landMove(h, dt); jawWorld(h, h.jaw);
+          // a bear or a cat takes them off their feet as it comes; a canid
+          // finds them still standing, turned to it
+          if (h.land.kind === "beast") landAnchor(h, dt, true); else landTurn(h, dt);
+        }
         // the teeth close when they are ON the part (a lunge that still has
-        // ground to cover gets a few more frames, never a jump)
-        const ready = h.marine ? (h.t >= S_WIND && (h.mst.gap < 0.06 || h.t >= S_WIND + 0.4)) : h.t >= S_WIND;
+        // ground to cover gets a few more frames, never a jump; a bestiary
+        // mouth waits longer, for the falling person's limb to come to it)
+        const ready = h.marine ? (h.t >= S_WIND && (h.mst.gap < 0.06 || h.t >= S_WIND + 0.4))
+          : h.land ? (h.t >= S_WIND && (h.lst.gap < (h.land.kind === "beast" ? 0.04 : 0.12) || h.t >= S_WIND + (h.land.kind === "beast" ? 0.7 : 0.35))) : h.t >= S_WIND;
         if (ready) {
           h.phase = "strike"; h.t = 0;
           if (h.marine) { marineContact(h); anchorVictim(h); }
+          // (a body already placed by the lunge this frame is not stepped twice)
+          if (h.land && h.land.kind !== "beast") anchorVictim(h, dt);
           enterStrike(h);
         }
         continue;
@@ -2203,14 +3180,14 @@
 
       if (h.phase === "strike") {
         thrashAttacker(h, dt);
-        anchorVictim(h);
+        anchorVictim(h, dt);
         if (h.t >= (h.marine ? M_STRIKE : S_STRIKE)) { h.phase = "hold"; h.t = 0; scheduleQTE(h); }
         continue;
       }
 
       if (h.phase === "hold") {
         thrashAttacker(h, dt);
-        anchorVictim(h);
+        anchorVictim(h, dt);
         // damage lands in CHUNKS, not per frame. cityHurtPlayer is an EVENT
         // sink (it stamps the killer, flashes, plays a hurt cue, wakes armor) —
         // calling it sixty times a second turns a maul into a strobing siren
@@ -2276,7 +3253,7 @@
         // working. Player victims never reach this phase — the death cam owns
         // the lens the instant they die.
         thrashAttacker(h, dt);
-        anchorVictim(h);
+        anchorVictim(h, dt);
         if (h.t >= (h.marine ? h.marine.carry : CARRY_T)) { endSeize(h, "killed"); }
         continue;
       }

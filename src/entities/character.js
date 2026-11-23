@@ -7065,6 +7065,95 @@
     return true;
   }
 
+  /* HELD BY A LAND ANIMAL (systems/predator.js, THE BITE ON LAND). The seize
+     turns and places ch.group every frame (upright, or rolled onto the side
+     away from the held limb as st.down goes 0 -> 1) and solves the bitten
+     limb itself; this writes everything else. st.part "arm": taken by the
+     forearm they put up, facing it; "leg": taken by the calf, side-on to
+     it. st.side +1 the limb on the rig's +x side (la / rl), -1 the other;
+     st.lean -1 hauled toward it .. +1 straining away; st.twist the yaw the
+     shake puts through the trunk; st.t the clock, st.k how hard they fight
+     (0..1). Upright: braced, the free arm beating at the head (or both arms
+     out for balance, a leg held). Down: on the side, the free arm over the
+     head, the legs kicking along the ground (an arm held) or the free leg
+     drawn up out of the way (a leg held). */
+  function poseSeizedOnGround(ch, st) {
+    if (!ch || !ch.group || !st) return false;
+    ch.swimming = false;
+    legRootsHome(ch);
+    beginCharacterHipFrame(ch);
+    const t = st.t || 0, k = Math.max(0, Math.min(1, st.k == null ? 1 : st.k));
+    const dn = Math.max(0, Math.min(1, st.down || 0)), up = 1 - dn;
+    const lean = Math.max(-1, Math.min(1, st.lean || 0)), tw = st.twist || 0;
+    const f1 = Math.sin(t * 6.1), f2 = Math.sin(t * 4.3 + 1.1), f3 = Math.sin(t * 8.9 + 0.5);
+    const arm = st.part !== "leg", s = st.side === -1 ? -1 : 1;
+    if (ch.body) {
+      // upright: straining away from the pull (back from an animal in front,
+      // forward from one behind), lurching with each haul; down: curled
+      ch.body.rotation.x = up * (0.10 + (arm ? -0.22 : 0.30) * lean) + dn * (0.30 + 0.12 * k * f2);
+      ch.body.rotation.y = tw + 0.10 * k * f1;
+      ch.body.rotation.z = up * (-0.10 * s * (arm ? 1 : 0.5)) + dn * 0.08 * k * f3;
+      ch.body.position.set(0, 0, 0);
+    }
+    if (ch.parts) {
+      // the free arm: beating at the head (upright); down, over the head
+      // (facing the animal, an arm forward would be in its legs)
+      const free = s > 0 ? ch.parts.ra : ch.parts.la, fs = s > 0 ? -1 : 1;
+      if (free) {
+        free.rotation.x = arm ? up * (-1.15 + 0.55 * k * f1) + dn * (-2.65 + 0.2 * k * f2)
+          : up * (-1.0 - 0.45 * k * f2) + dn * (-1.9 + 0.35 * k * f1);
+        free.rotation.y = 0;
+        free.rotation.z = fs * (up * (0.25 + 0.15 * k * f3) + dn * 0.15);
+      }
+      // a held leg leaves both arms free: out for balance, then clawing
+      if (!arm) {
+        const other = s > 0 ? ch.parts.la : ch.parts.ra;
+        if (other) { other.rotation.x = up * (-0.9 - 0.4 * k * f1) + dn * (-2.1 + 0.3 * k * f2); other.rotation.y = 0; other.rotation.z = s * (0.3 + 0.1 * dn); }
+      }
+      // the legs: braced and split along the pull upright; drawn up and
+      // kicking down. A held leg is the seize's; the free one steps away
+      // Down, an arm held: lying facing it, the legs kick out along the
+      // ground, not up at it. A leg held: dragged feet first, the free leg
+      // is drawn up out of its way, kicking.
+      const bit = s > 0 ? ch.parts.rl : ch.parts.ll;
+      const leg = function (p, ph) {
+        if (!p || (!arm && p === bit)) return;
+        const kick = Math.sin(t * 5.2 + ph);
+        const stand = arm ? (ph ? 0.18 + 0.12 * lean : -0.28 - 0.10 * lean) : -0.30 - 0.15 * lean;
+        const lie = arm ? -0.35 + 0.30 * k * kick : -1.45 + 0.30 * k * kick;
+        p.rotation.x = up * stand + dn * lie;
+        p.rotation.y = 0;
+        p.rotation.z = (p === ch.parts.ll ? 1 : -1) * (ch.stanceZ || 0.04) * (1 + up);
+      };
+      leg(ch.parts.ll, 0); leg(ch.parts.rl, 2.1);
+    }
+    if (ch.low) {
+      const lowFree = s > 0 ? ch.low.ra : ch.low.la;
+      if (lowFree) lowFree.rotation.x = -(0.55 + 0.45 * k * Math.max(0, f2)) * up - (arm ? 1.5 + 0.3 * k * Math.max(0, f1) : 0.9 + 0.3 * k * Math.max(0, f1)) * dn;
+      if (!arm) { const lo = s > 0 ? ch.low.la : ch.low.ra; if (lo) lo.rotation.x = -(0.5 + 0.4 * k * Math.max(0, f3)); }
+      const bitK = s > 0 ? ch.low.rl : ch.low.ll;
+      const knee = function (lo, ph) {
+        if (!lo || (!arm && lo === bitK)) return;
+        // (dragged feet first, the free leg folds heel to buttock: a bent
+        // knee alone points the shin down the body, at the animal)
+        const kk = Math.max(0, Math.sin(t * 5.2 + ph));
+        lo.rotation.x = up * (0.22 + 0.15 * Math.max(0, lean)) + dn * (arm ? 0.55 + 0.5 * k * kk : 2.45 - 0.2 * k * kk);
+      };
+      knee(ch.low.ll, 0); knee(ch.low.rl, 2.1);
+    }
+    // the head: turned off the bite (an arm), back over the shoulder at it
+    // (a leg); held up off the ground, down
+    if (ch.neck) {
+      ch.neck.rotation.x = up * (arm ? 0.25 : -0.1) - dn * 0.35;
+      ch.neck.rotation.y = (arm ? up * (-s * 0.45) + dn * (s * 0.25) : s * 0.9) + 0.12 * k * f3;
+      ch.neck.rotation.z = 0;
+    }
+    if (ch.model) ch.model.position.y = 0;
+    lockCharacterHips(ch);
+    legRootsFollow(ch);
+    return true;
+  }
+
   function poseSwimmer(ch, st, opts) {
     if (!ch || !ch.group || !st) return false;
     const o = opts || {};
@@ -10368,6 +10457,7 @@
   CBZ.swimAnimStep = swimAnimStep;
   CBZ.poseSwimmer = poseSwimmer;
   CBZ.poseSeizedSwimmer = poseSeizedSwimmer;
+  CBZ.poseSeizedOnGround = poseSeizedOnGround;
   CBZ.lockCharacterHips = lockCharacterHips;
   CBZ.gaitPhaseDelta = gaitPhaseDelta;
   CBZ.deathPose = deathPose;

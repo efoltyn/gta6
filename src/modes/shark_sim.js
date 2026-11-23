@@ -644,7 +644,14 @@
     // from castaway to shark reads instantly
     const ang = Math.atan2(P.pos.z - A.center.z, P.pos.x - A.center.x) || 0;
     const r = sim.waterline + 26;
-    const x = A.center.x + Math.cos(ang) * r, z = A.center.z + Math.sin(ang) * r;
+    let x = A.center.x + Math.cos(ang) * r, z = A.center.z + Math.sin(ang) * r;
+    /* ...in CLEAR water: the castaway's bearing can put that point on a sea
+       stack, a rock, the pier or a moored hull, and a shark spawned into one
+       is wedged from its first frame. Same test the ride moves by. */
+    if (CBZ.aquaticRideNearestClear) {
+      const c = CBZ.aquaticRideNearestClear(a, x, z, 140);
+      if (c) { x = c.x; z = c.z; }
+    }
     a.pos.x = x; a.pos.z = z;
     a.pos.y = seaYAt(x, z) - (a.swimDepth || 1.2);
     a.home = { x: x, z: z };
@@ -938,6 +945,16 @@
      ceremony interrupted by a death or a mode change cannot leave a shark
      stuck half-size — teardown/setup clear it too. */
   function evolveBeat(S1, x, z) {
+    // the bigger body re-binds where the smaller one was: move it to clear
+    // water if that spot is too tight for it
+    if (CBZ.aquaticRideNearestClear && S1 && S1.pos) {
+      const c = CBZ.aquaticRideNearestClear(S1, S1.pos.x, S1.pos.z, 60);
+      if (c && (c.x !== S1.pos.x || c.z !== S1.pos.z)) {
+        S1.pos.x = c.x; S1.pos.z = c.z; x = c.x; z = c.z;
+        if (CBZ.player && CBZ.player.pos) { CBZ.player.pos.x = c.x; CBZ.player.pos.z = c.z; }
+        if (S1._waterMove) { S1._waterMove.x = c.x; S1._waterMove.z = c.z; }
+      }
+    }
     const gsc = S1.group && S1.group.scale;
     if (gsc) {
       const prev = LADDER[sim.tier - 1];
@@ -967,14 +984,17 @@
       growWrite(sim.grow, sim.grow.from);
     }
     const y = seaYAt(x, z);
-    if (CBZ.waterSplashAt) {
-      try {
-        CBZ.waterSplashAt(x, y, z, 4.6);
-        for (let i = 0; i < 5; i++) {
-          const ang = (i / 5) * 6.283 + 0.4, r = 3.4;
-          CBZ.waterSplashAt(x + Math.cos(ang) * r, y, z + Math.sin(ang) * r, 2.4);
-        }
-      } catch (e) {}
+    /* The water the new body shoves aside, from its real mass: the body that
+       swells (about 11 kg per cubic metre of length, a shark's density over
+       its own volume) rising through the surface at a few m/s. It was a
+       strength-4.6 hit plus five strength-2.4 hits in a ring 3.4 m out, a
+       sheet of spray thrown far round a fish's last bite. */
+    if (CBZ.waterHit) {
+      const mb = S1 && S1.group && S1.group.userData && S1.group.userData.marineBody;
+      const len = mb ? mb.len * ((S1.group.scale && S1.group.scale.x) || 1) : 4;
+      try { CBZ.waterHit(x, y, z, { kind: "body", mass: Math.max(60, 11 * len * len * len * 0.3), speed: 3.2 }); } catch (e) {}
+    } else if (CBZ.waterSplashAt) {
+      try { CBZ.waterSplashAt(x, y, z, 2.2); } catch (e) {}
     }
     if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(x, z, 4); } catch (e) {} }
     /* A BEAT, NOT A SLAM. Owner, 2026-08-29: the lens is for what is being
@@ -1533,6 +1553,7 @@
     if (!S && CBZ.cityWildlifeSpawnAt) S = CBZ.cityWildlifeSpawnAt("bull_shark", A.center.x + sim.waterline + 26, A.center.z);
     if (!S) { sim.lastSetup = "no-shark"; return; }   // wildlife absent — no shark to be; retry next frame
     placeShark(S);
+    sim.spawnClear = false;
     claim(S);
     sim.shark = S;
     mountShark();
@@ -1589,6 +1610,21 @@
     // after setup; hold the opening lens on the beach until it settles
     if (sim.clock < 0.5 && sim.spawnYaw != null && CBZ.cam && !(CBZ.keys && (CBZ.keys.w || CBZ.keys.a || CBZ.keys.s || CBZ.keys.d))) CBZ.cam.yaw = sim.spawnYaw;
     sim.clock += dt;
+    /* THE ROCKS ARRIVE A FRAME LATE. The sea scene (stacks, rocks, pier,
+       moorings) builds on the first frame of the match, after the spawn was
+       chosen; once it is there, a shark sitting in one is moved to clear water
+       before you ever press a key. */
+    if (!sim.spawnClear && CBZ.sharkSeaScene && CBZ.sharkSeaScene.built && CBZ.aquaticRideNearestClear) {
+      sim.spawnClear = true;
+      if (CBZ.aquaticRideClearAt && !CBZ.aquaticRideClearAt(S, S.pos.x, S.pos.z)) {
+        const c = CBZ.aquaticRideNearestClear(S, S.pos.x, S.pos.z, 140);
+        if (c) {
+          S.pos.x = c.x; S.pos.z = c.z;
+          if (CBZ.player && CBZ.player.pos) { CBZ.player.pos.x = c.x; CBZ.player.pos.z = c.z; }
+          if (S._waterMove) { S._waterMove.x = c.x; S._waterMove.z = c.z; }
+        }
+      }
+    }
     // the pod may only hunt you once you have had the grace period to learn to eat
     S.huntable = sim.clock >= POD_GRACE;
     hungerTick(dt);

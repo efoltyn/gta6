@@ -261,11 +261,8 @@ const SINKERS = /shark|megalodon|ray|sawfish/;
 const BLUBBER = /orca|whale|dolphin|porpoise|seal|sea_lion|walrus|manatee|dugong|otter/;
 function floatCorpse(m) {
   if (!CBZ.waterFloat || !m.group) return false;
-  // the float block asks three questions of the world; on this map the
-  // answers are "everywhere", "the swell" and "the bed" (sea.js)
-  if (!CBZ.cityWaterAt) CBZ.cityWaterAt = function () { return !!(HOST && HOST.water); };
-  if (!CBZ.waterModeOn) CBZ.waterModeOn = function () { return !!(HOST && HOST.water); };
-  if (!CBZ.cityWaterDepthAt) CBZ.cityWaterDepthAt = function () { return typeof SEA !== "undefined" && SEA.seabed != null ? -SEA.seabed : 14; };
+  // the float block asks the world where the water is; this map answers
+  // with its swell and its bed (sea.js seaWorldWater)
   const id = (m.species && m.species.id) || "";
   let buoy = 1, log = 0, tilt = Math.PI / 2, ride = -0.1;
   if (!m.beast) { log = 0.02; }

@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 424
+     Natural Disaster Survival, standing alone: index.html minus the 420
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -609,7 +609,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=sea1122c-ph5"></script>
+  <script src="src/entities/character.js?v=landbite1122b"></script>
   <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -1024,7 +1024,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
-<script src="src/world/groundshaft.js?v=r187a"></script>
+<script src="src/world/groundshaft.js?v=alpha1122"></script>
 <!-- THE SINKHOLE EVENT (warning, cover collapse, calving, what goes in) reads
      the shaft through CBZ.groundShaftKit, so it loads right after it. -->
 <script src="src/world/sinkhole.js?v=norim1020"></script>
@@ -1123,7 +1123,7 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=water1122g"></script>
+<script src="src/world/water_spec.js?v=sea1122g"></script>
 <!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_runup.js?v=tsu1122"></script>
 <!-- where the water is brown: the silt the run-up scoured off the land, carried out to sea by the backwash, spread and settled (the sea shader's turbidity mask), and CBZ.waterTurbidAt, the one turbidity + current query the underwater medium and the swimmer read -->
@@ -1134,7 +1134,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/tsunami_flow.js?v=water1122a"></script>
 <script src="src/world/tsunami_scene.js?v=water1122d"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
-<script src="src/city/streetkit.js?v=r187a"></script>
+<script src="src/city/streetkit.js?v=alpha1122"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
 <script src="src/city/flags.js?v=r187a"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
@@ -1304,28 +1304,28 @@ document.body.appendChild(b);}}catch(e){}})();
      flock is one draw. Before the flocks (wild nature, the sea scene) and the
      bestiary's chicken; it reads units/kit/loft.js (below) only when a body
      is built. -->
-<script src="src/world/birdkit.js?v=bird1122b"></script>
+<script src="src/world/birdkit.js?v=bird1122e"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
-<script src="src/city/wildlife_rig.js?v=sea1122a"></script>
+<script src="src/city/wildlife_rig.js?v=sea1122c"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
 <script src="src/city/wildlife/beast_kit.js?v=r187a"></script>
 <!-- THE DOG FAMILY (units/kit/canid.js): every dog and wild canid in every
      mode is this one body, a breed or a species being a row of real
      measurements. Before the bestiary rows that build it; it reads
      units/kit/loft.js and gait.js (below) only when a body is built. -->
-<script src="src/units/kit/canid.js?v=dog1122e"></script>
+<script src="src/units/kit/canid.js?v=landbite1122b"></script>
 <script src="src/city/wildlife/beast_bodies.js?v=bird1122a"></script>
 <script src="src/city/wildlife/aquatic.js?v=sea1122b"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
-<script src="src/city/wildlife.js?v=sea1122b"></script>
+<script src="src/city/wildlife.js?v=sea1122c"></script>
 <!-- THE ONE DOG: city/dogmodel.js is the dog API (CBZ.dogModel) over the dog
      family's body (units/kit/canid.js, above); city/dogbrain.js is the loyal
      dog's protector rulebook (pure); dogs.js is the actor (pet / stray /
@@ -1345,6 +1345,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (predatorKit, marineGape, marineHurt) is asked for at CALL time, so its
      position here is about readability, not load order. -->
 <script src="src/systems/bite_angles.js?v=biteangles1"></script>
+<script src="src/city/creature_combat.js?v=sea1122b"></script>
 <!-- IRONJAW ARENA. arena_venue.js is the BUILDING (raked bowl, concourse,
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
@@ -1705,7 +1706,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/fitout_house.js?v=house1122"></script>
 <script src="src/city/fitout_work.js?v=fixB2"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
-<script src="src/city/swim.js?v=sea1122b"></script>
+<script src="src/city/swim.js?v=sea1122d"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage
@@ -1901,10 +1902,12 @@ document.body.appendChild(b);}}catch(e){}})();
      always-updater is in the sort -->
 <!-- projected decals: blood cut out of the struck mesh's own triangles (cars) -->
 <script src="src/systems/surfacedecal.js?v=carblood930"></script>
-<script src="src/systems/gore.js?v=bite1122a"></script>
+<script src="src/systems/gore.js?v=soft1122a"></script>
 <!-- the attackers' teeth (systems/dentition.js): every family's dental arch
      from real anatomy, or the attacker's own built body; wounds.js strikes
      each tooth against the bitten body. Before wounds.js. -->
+<script src="src/systems/dentition.js?v=bite1122b"></script>
+<script src="src/systems/wounds.js?v=bite1122j"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused
@@ -1918,6 +1921,7 @@ document.body.appendChild(b);}}catch(e){}})();
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
      same brain. After wounds.js (routes through CBZ.bodyBite). -->
+<script src="src/systems/predator.js?v=landbite1122a"></script>
 <!-- The LAND sibling of the swim rig. Land animals had no jaw articulation and
      no spine bend at all — a bear grabbing you moved nothing. Discovery is
      geometric (no species table), so all 45 species animate from one change.
@@ -1938,7 +1942,7 @@ document.body.appendChild(b);}}catch(e){}})();
      full) and the caller falls back to CBZ.wildlifeDeathTumble. -->
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=sea1122b"></script>
+<script src="src/city/wildlife_shark.js?v=sea1122c"></script>
 <!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
      (defineSpecies is last-write-wins) so the markings that actually identify
      the animal exist: the white post-ocular eye patch, the grey saddle, the
@@ -2427,7 +2431,7 @@ document.body.appendChild(b);}}catch(e){}})();
      rules (engulf / bite / tip). After water_hulls + water_float, both of which
      it spends. -->
 <script src="src/world/sea_craft.js?v=wake1122a"></script>
-<script src="src/world/sea_scene.js?v=bird1122a"></script>
+<script src="src/world/sea_scene.js?v=gull1122a"></script>
 <script src="src/world/water_impact.js?v=wake1122e"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
      citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's

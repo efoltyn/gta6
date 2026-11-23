@@ -1,17 +1,18 @@
-# Backlog, 2026-11-22: left over from the animals pass (dogs, sea life, birds, shark attacks, bites)
+# Backlog, 2026-11-22: left over from the open-items round (Shark Sim, swimming, animals, bites)
 
-Not started; pick what you want.
-1. The phone build of the disaster island (disaster.html) leaves out the predator and wound code, so on that page no shark takes a swimmer and no bite leaves a mark. Only the main page has them.
-2. Crows only fly: they never land or forage. Landing gulls don't steer round obstacles and can clip the pier rail or the sea stack. Flocks cast no shadows (a single bird does).
-3. In plain light the crow reads as a flat black shape: no sheen on the feathers.
-4. A dog or wolf lying on its side puts parts 2-6 cm into the ground (worst: the mastiff's hind leg); the mastiff's sit is 2 cm under.
-5. Bites: a shark's gape reads mostly as a dark hole with little detail from a distance; on the dolphin and the megalodon (coarse meshes) the crater is mostly painted, not dug; torn flaps are flat cards and can cut into concave skin; a big shark bite costs 20-55 ms in node and may hitch on a phone.
-6. Three other blended materials set no alpha factors and may show the same pale patches the bite stains had: world/groundshaft.js:1046, battle/arenas/ground.js:413, city/streetkit.js:568.
-7. A hungry great white now commits about 15 s after it finds a still swimmer; it may feel fast. The hold has only been seen ending on the escape roll; break-free was never pressed. Some shark timing reads the wall clock, so no two runs match.
-8. No bubbles come off a swimmer dragged under (there is no underwater bubble emitter to use).
-9. Whales: breathing dives are shortened, there is no flukes-up when a whale sounds, and the megalodon's colour is a guess.
-10. The survivor bots were lowered to your float line (feet 1.45 m down) but nobody has watched them swim since.
-11. The old per-part branch of the swim rig (city/wildlife_rig.js) may be dead now that every sea animal is one skinned body; check what else aquatic still uses it.
+The animals pass's eleven items are done: the phone island page loads the shark hunt and the bite marks; crows land and forage and gulls fly clear lines; flocks cast shadows; the crow has its sheen; dogs and wolves rest on the ground and swim; bite gapes, dug craters, flaps and bite cost are fixed; the three overlays keep the canvas alpha; break-free works and the shark runs on sim time; bubbles; whales dive and fluke; bots float; the old swim rig is deleted. Swimmers no longer sink. Not started; pick what you want.
+1. The first bite of a session still hitches about 20-25 ms (the bite code isn't compiled yet); every later bite is about 2 ms a frame. Fix: compile it before play starts.
+2. Rocks are circles to the ridden shark: lumps stick out up to about 2 m beyond them, so the shark can graze into one (the lens can't). Fix: per-rock outlines in world/sea_scene.js.
+3. Holding W in Shark Sim lets a stranded shark crawl up the dry beach to the crowd (the aground branch drops the shore fence, city/wildlife_tame.js:3399-3405); shark_sim.js treats that as intended. Your call.
+4. Shark Sim bites for you whenever prey is in front of the mouth (shark_sim.js:1648-1656), with no click. Your call whether that stays.
+5. On a phone held upright, the megalodon overflows the frame in hard turns and chases (44-55% framed).
+6. A lying shepherd's elbows sit about 12 mm into the ground after settling; the side, sit and dead rests are within 3 mm.
+7. The ragdoll often rolls dead canids onto their backs; crows climb over tall towers instead of flying round them.
+8. Wound textures are painted slowly at the start of play, so a bite in the first few seconds may show its marks late.
+9. Bites bleed on screen (sprays, pools, a water cloud from real litres) but do not drain the victim's blood in systems/vitals.js, so a bitten man does not weaken or collapse from blood loss. A gameplay change: your call.
+10. The blood film on the water's surface still uses a grey-to-red filter; under a cloud the red covers it, but a film alone over turquoise reads grey-brown.
+11. Land holds: a wolf's foreleg can touch the held man's free arm (up to 6.6 cm) and a coyote's the held foot (about 6 cm) for a frame or two; the knockdown fall is fast (up to 7 m/s at the chest); a bear that lets go mid-rear snaps level in one frame.
+12. The sea near the lens: a bed deeper than about 3.5 m seen steeply down within a few metres reads grey-green instead of deep teal (the water is kept clear there so swimmers stay visible); the fix is the seabed darkening itself by its own depth.
 
 ---
 

@@ -411,6 +411,9 @@ CBZ.battleGround = (function () {
       transparent: true, depthWrite: false,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
       blendSrc: THREE.DstColorFactor, blendDst: THREE.SrcColorFactor,
+      // keep the canvas's own alpha (the WebGL canvas has one): without these the
+      // colour factors run on alpha too and the page shows through as a pale patch
+      blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
     });
     const m = new THREE.InstancedMesh(geo, mat, MK.cap);

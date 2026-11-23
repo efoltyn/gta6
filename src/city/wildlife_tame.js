@@ -1255,6 +1255,18 @@
         !wf.isNavigableWater(x, z, Math.max(1.2, Math.max(0.35, scale || 1) * 0.9))) return false;
     return true;
   }
+  // the shark sim's sea scene while it is standing (it hides itself in every
+  // other mode, and its rocks go with it)
+  function seaSceneLive() {
+    const sea = CBZ.sharkSeaScene;
+    return sea && sea.built && sea.group && sea.group.visible && typeof sea.blockedAt === "function" ? sea : null;
+  }
+  // its solids at the ride's own fence pad (the clearance rideCanSwim hands
+  // the wrapped navigator, times its 0.35)
+  function rideRockAt(x, z, scale) {
+    const sea = seaSceneLive();
+    return !!(sea && sea.blockedAt(x, z, Math.max(1.2, Math.max(0.35, scale || 1) * 0.9) * 0.35));
+  }
   /* Blocked head-on: slide ALONG the shore instead of dead-stopping into it.
      The old step handed the whole heading to the navigator, so hitting the
      shallows spun the animal; a wall slide keeps the player's aim and just
@@ -1275,6 +1287,41 @@
     }
     return null;
   }
+  /* ---- CLEAR WATER FOR A RIDDEN BODY -------------------------------------
+     Water for the belly and the back plus a clearance, and nothing solid
+     within a body length, by the very test the ride's own movement uses
+     (rideCanSwim: the depth oracle and the navigable-water fence, which in
+     Shark Sim carries the sea scene's rocks, stacks, pilings and moorings),
+     plus the sea scene's obstacle circles at a body length. modes/shark_sim.js
+     spawns and re-binds in it; the unstick below resolves a held body to it. */
+  function rideClearAt(a, x, z) {
+    const sc = Math.max(0.35, liveScale(a)), gd = rideGroundDepth(sc);
+    const len = Math.max(1, bodyLenLive(a));
+    if (waterDepth(x, z) < Math.max(gd, a.swimDepth || 1.2) + 1.0 + len * 0.15) return false;
+    if (!rideCanSwim(x, z, gd, sc)) return false;
+    for (let k = 0; k < 8; k++) {
+      const h = k * Math.PI / 4;
+      if (!rideCanSwim(x + Math.cos(h) * len, z + Math.sin(h) * len, gd, sc)) return false;
+    }
+    const sea = seaSceneLive();
+    if (sea && sea.blockedAt(x, z, len)) return false;
+    return true;
+  }
+  // the nearest clear place, rings outward from (x, z)
+  function rideNearestClear(a, x, z, maxR) {
+    if (rideClearAt(a, x, z)) return { x: x, z: z };
+    const step = Math.max(2, bodyLenLive(a) * 0.5);
+    for (let r = step; r <= (maxR || 80); r += step) {
+      const n = Math.max(8, Math.round(6.283 * r / step));
+      for (let i = 0; i < n; i++) {
+        const h = i / n * 6.283185307, px = x + Math.cos(h) * r, pz = z + Math.sin(h) * r;
+        if (rideClearAt(a, px, pz)) return { x: px, z: pz };
+      }
+    }
+    return null;
+  }
+  CBZ.aquaticRideClearAt = rideClearAt;
+  CBZ.aquaticRideNearestClear = rideNearestClear;
   function shortestAngle(d) {
     while (d > Math.PI) d -= Math.PI * 2;
     while (d < -Math.PI) d += Math.PI * 2;
@@ -2020,25 +2067,32 @@
       try { a.group.rotation.order = "YXZ"; } catch (e) { ride.clampOrder = ""; }
     }
     const j = clampJawWorld(a);
-    if (CBZ.goreChum) {
-      const at = { x: j.x, y: j.y, z: j.z };
-      ride._clampAt = at;
-      try {
-        /* 1.3, not 2.6. Twice this rate on top of the per-beat blooms put so
-           much chum in front of a chase camera that the roll photographed as a
-           red screen (caught in the preset's own captures, both columns). The
-           water still clouds; you can still see what is doing it. */
-        ride.clampChum = CBZ.goreChum(function () { return at.x; }, function () { return at.y; },
-          function () { return at.z; }, 1.3, dur + 2);
-      } catch (e) { ride.clampChum = null; }
-    }
+    /* NO CHUM HANDLE AT THE GRAB. A chum source near the top of the water
+       lays a fresh surface slick every few ticks (systems/gore.js's chum
+       update), each lingering for tens of seconds, so a kill at the surface
+       painted a flat red sheet metres wide over the sea that grew frame by
+       frame. The victim's own wounds bleed into the water; the beats below
+       put the cloud round the jaws. */
+    ride._clampAt = null; ride.clampChum = null;
     if (CBZ.goreBloom) { try { CBZ.goreBloom(j.x, j.y, j.z, { amount: 0.8 }); } catch (e) {} }
-    if (CBZ.waterSplashAt) { try { CBZ.waterSplashAt(j.x, seaY(j.x, j.z), j.z, 4.2); } catch (e) {} }
+    // the grab breaks the surface with the mass that actually hits it (the
+    // head and the forequarters, about a quarter of the body) at the speed it
+    // arrived: a fixed strength-4.2 splash threw a megalodon's sheet of spray
+    // round a bull shark's bite
+    clampSplash(a, j, 0.25, Math.max(1.5, (ride.water && ride.water.v) || 2));
     if (CBZ.shake) CBZ.shake(0.30);   // the grab lands; the roll below no longer kicks
     if (CBZ.doSlowmo) CBZ.doSlowmo(0.5);
     if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: 1 }); } catch (e) {} }
     AQUATIC_AUDIT.clamps = (AQUATIC_AUDIT.clamps || 0) + 1;
     return true;
+  }
+  function clampSplash(a, j, share, speed) {
+    const y = seaY(j.x, j.z);
+    if (CBZ.waterHit) {
+      try { CBZ.waterHit(j.x, y, j.z, { kind: "body", mass: Math.max(20, bodyKg(a) * share), speed: speed }); } catch (e) {}
+    } else if (CBZ.waterSplashAt) {
+      try { CBZ.waterSplashAt(j.x, y, j.z, Math.sqrt(Math.max(20, bodyKg(a) * share) / 78)); } catch (e) {}
+    }
   }
   function endClamp(a) {
     const v = ride.clampVictim;
@@ -2102,7 +2156,8 @@
         if ((beat & 1) === 0 && CBZ.goreBloom) {
           try { CBZ.goreBloom(j.x, j.y, j.z, { amount: 0.5 }); } catch (er) {}
         }
-        if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(j.x, j.z, 2.4); } catch (er) {} }
+        // each half turn breaks the surface with the flank that rolls through it
+        if ((beat & 1) === 0) clampSplash(a, j, 0.12, 2.4);
         /* NO KICK PER HALF TURN. CLAMP_HZ is 1.15, so this fired ~2.3 times a
            second for the whole roll — the most literal earthquake in the game,
            and it was YOU doing the shaking. The half-turn beat is the piece
@@ -3338,13 +3393,16 @@
       }
       let nx = P.pos.x + Math.cos(travelHead) * stepLen;
       let nz = P.pos.z + Math.sin(travelHead) * stepLen;
+      // a rock, stack or piling of the sea scene is solid at any speed
+      const rock = !W.airborne && rideRockAt(nx, nz, bodyScale);
       // An airborne body lands where physics puts it (a breach that cannot
       // cross the block line is not a breach), and a beached one must be free
       // to work itself back out over ground it is already lying on.
-      if (!W.airborne && !aground && !rideCanSwim(nx, nz, groundD, bodyScale)) {
+      if (rock || (!W.airborne && !aground && !rideCanSwim(nx, nz, groundD, bodyScale))) {
         // A COMMITTED SPRINT BEACHES. Cruising into the sand does not: that is
-        // the difference between an accident and an orca.
-        if (!(sprint && W.v > (R.cruise || 6) * 0.85)) {
+        // the difference between an accident and an orca. A sprint into a
+        // rock is neither: it stops or slides like any other stroke.
+        if (rock || !(sprint && W.v > (R.cruise || 6) * 0.85)) {
           const slid = rideShoreSlide(P.pos.x, P.pos.z, ride.head, stepLen, groundD, bodyScale);
           if (slid) {
             nx = slid.x; nz = slid.z;
@@ -3353,6 +3411,29 @@
         }
       }
       P.pos.x = nx; P.pos.z = nz;
+    }
+    /* UNSTICK. Asked to swim and going nowhere for 0.6 s (wedged on a rock, a
+       piling, a hull, or spawned into one): slide out to the nearest clear
+       water over a third of a second instead of grinding there forever. */
+    {
+      const moved = Math.hypot(P.pos.x - (W.lastX != null ? W.lastX : P.pos.x), P.pos.z - (W.lastZ != null ? W.lastZ : P.pos.z));
+      W.lastX = P.pos.x; W.lastZ = P.pos.z;
+      const pushing = len > 0.001 && !W.airborne && !W.unstick;
+      W.stuckT = pushing && moved < 0.01 ? (W.stuckT || 0) + fdt : 0;
+      if (W.stuckT > 0.6) {
+        W.stuckT = 0;
+        const c = rideNearestClear(a, P.pos.x, P.pos.z, 60);
+        if (c) W.unstick = { x0: P.pos.x, z0: P.pos.z, x: c.x, z: c.z, t: 0 };
+        AQUATIC_AUDIT.unsticks = (AQUATIC_AUDIT.unsticks || 0) + 1;
+      }
+      if (W.unstick) {
+        const U = W.unstick;
+        U.t = Math.min(1, U.t + fdt / 0.35);
+        const k = U.t * U.t * (3 - 2 * U.t);
+        P.pos.x = U.x0 + (U.x - U.x0) * k; P.pos.z = U.z0 + (U.z - U.z0) * k;
+        W.lastX = P.pos.x; W.lastZ = P.pos.z;
+        if (U.t >= 1) W.unstick = null;
+      }
     }
 
     const surf = seaY(P.pos.x, P.pos.z);
@@ -3502,17 +3583,11 @@
           W.vy += Math.max(-va * fdt, Math.min(va * fdt,
             (wantVy - W.vy) * 2.1 * fdt));
         } else {
-          /* Natural recovery after a shallow dive. Cetaceans carry lung
-             buoyancy; sharks are slightly negative at rest but at swimming
-             speed their body/pectoral lift supplies the same gentle upward
-             tendency. It is deliberately weak: a deep dive remains a dive, a
-             released tap bends smoothly back toward the surface. */
-          const sid = (a.species && a.species.id) || "";
-          const cetacean = /dolphin|orca|whale/.test(sid);
-          const swimK = Math.max(0, Math.min(1.25, W.v / Math.max(1, R.cruise || 6)));
-          const liftA = cetacean ? (0.58 + swimK * 0.24) : (0.12 + swimK * 0.42);
-          W.vy += liftA * fdt;
-          W.vy *= Math.exp(-(0.36 + Math.min(0.65, Math.abs(W.vy) * 0.045)) * fdt);
+          /* A CONTROLLED BODY HOLDS ITS DEPTH. Let go of the vertical and the
+             animal levels off where it is (the momentum bleeds out over about
+             half a second) instead of drifting up or down on its own: the
+             depth you chose is the depth you keep. */
+          W.vy *= Math.exp(-2.2 * fdt);
         }
         // Section drag grows quadratically but is softened by body scale: a
         // megalodon does not stop in the same metre as a five-metre shark.
@@ -4024,13 +4099,18 @@
      The eye is then composed EXACTLY from those, so a fast mouse swing is an
      arc around the animal, never a chord through it.
 
-     THE WATERLINE is a side, not a clamp. The eye is either ABOVE or BELOW
-     the sea, chosen from the depth of the animal's BACK with hysteresis
-     (dive past 1.5 m to go under, come up past 0.55 m to come out; airborne
-     is always above). Each side is a soft floor/ceiling a clear margin off
-     the surface under the EYE, and a side change blends between the two
-     solutions on a smoothstep — so the lens crosses the water once, fast,
-     and never sits in the band where the underwater grade flickers.
+     THE WATERLINE is a side, not a clamp. The sea hides what is under it
+     from above, so the eye is BELOW the sea whenever the animal's back is
+     under it, and ABOVE only with the back at the top or in the air (or in
+     water too shallow to put a lens in). Each side is a soft floor/ceiling a
+     clear margin off the surface under the EYE, and a side change blends
+     between the two solutions on a smoothstep — so the lens crosses the
+     water once, fast, and never sits in the band where the underwater grade
+     flickers.
+
+     ROCK. The boom keeps a clear line to the animal: a rock closing on that
+     line draws it in along the line, smoothly, and lets it out again slowly
+     once the line is clear (scRockClear).
 
      IMPACT. The owner's rule from shark_sim.js stands: a beat, not a slam,
      and your own mouth gets no shake. A bite is a lens LEAN — the boom tucks
@@ -4058,7 +4138,8 @@
     px: 0, py: 0, pz: 0, pxV: 0, pyV: 0, pzV: 0,
     yaw: 0, yawV: 0, pitch: 0.3, pitchV: 0, boom: 8, boomV: 0,
     fov: 62, fovV: 0, roll: 0, rollV: 0, bodyP: 0, bodyPV: 0,
-    side: 1, sideK: 1, surf: 0, surfV: 0,
+    side: 1, sideK: 1, surf: 0, surfV: 0, hd: 0, hdV: 0, busyT: 0, surfM: 0, rockK: 1, rockKV: 0,
+    qx: 0, qy: 0, qz: 0, qxV: 0, qyV: 0, qzV: 0, lift: 0, liftV: 0,
     kx: 0, ky: 0, kz: 0, kvx: 0, kvy: 0, kvz: 0,
     punch: 0, hits: 0, ship: 0, shipCd: 0, slowCd: 0, wasAir: false, breachCd: 0,
     look: new THREE.Vector3(),
@@ -4078,6 +4159,86 @@
     if (CBZ.citySeaBedYAt) { const b = +CBZ.citySeaBedYAt(x, z); if (Number.isFinite(b)) f = Math.max(f, b); }
     if (CBZ.floorAt) { const g2 = +CBZ.floorAt(x, z); if (Number.isFinite(g2)) f = Math.max(f, g2); }
     return f;
+  }
+  /* THE CLEAR LINE. The sea scene's rocks, stack and pontoon are circles at
+     the waterline (world/sea_scene.js groups). For the line from the animal
+     (ax, az) along the unit (ux, uz), L metres long, returns the share of L
+     the lens may use. Each rock is kept a margin off (0.2 x its radius
+     + 0.6 m for the lumps and the bulge under water, less for a rock the
+     body is pressed against: never more than 60% of the body's own gap). As
+     seen from the animal the margin circle covers a sector of directions; in
+     it the clear length is where the line meets the circle, at its edge the
+     tangent length, and over SC_BAND radians outside it the boom eases from
+     full to that tangent length. So the pull-in starts before the rock is
+     between them, follows it continuously through the sector, and never
+     jumps, however close the body is to the rock. A submerged rock counts by
+     `wetK` (the lens's share under the water). Pilings and buoys never hide
+     the animal (scEyePush keeps the eye off them); the pontoon floats, so
+     the lens rides over it or under it. */
+  const SC_BAND = 0.6;
+  function scThin(o) { return o.r < 0.6 || o.kind === "piling" || o.kind === "buoy"; }
+  function scRockClear(G, ax, az, ux, uz, L, wetK) {
+    let f = 1;
+    if (!(L > 0.05)) return f;
+    for (let gi = 0; gi < G.length; gi++) {
+      const g = G[gi], gx = g.x - ax, gz = g.z - az, gr = L + g.r * 1.2 + 1;
+      if (gx * gx + gz * gz > gr * gr) continue;
+      const list = g.list;
+      for (let k = 0; k < list.length; k++) {
+        const o = list[k];
+        if (scThin(o) || o.kind === "pontoon") continue;
+        const wk = o.under ? wetK : 1;
+        if (wk <= 0.001) continue;
+        const cx = o.x - ax, cz = o.z - az, dA = Math.sqrt(cx * cx + cz * cz);
+        if (dA <= o.r + 0.05) continue;
+        const rm = Math.min(o.r * 1.2 + 0.6, o.r + 0.6 * (dA - o.r));
+        if (dA - rm > L + 0.3) continue;                     // the eye stops short of it
+        const cth = Math.max(-1, Math.min(1, (cx * ux + cz * uz) / dA)), th = Math.acos(cth);
+        const al = Math.asin(Math.min(1, rm / dA));
+        let tl;
+        if (th < al) {
+          const sn = dA * Math.sin(th);
+          tl = Math.min(L, dA * cth - Math.sqrt(Math.max(0, rm * rm - sn * sn)) - 0.3);
+        } else if (th < al + SC_BAND) {
+          const x = (al + SC_BAND - th) / SC_BAND, w = x * x * (3 - 2 * x);
+          const edge = Math.min(L, Math.sqrt(Math.max(0, dA * dA - rm * rm)) - 0.3);
+          tl = L + (edge - L) * w;
+        } else continue;
+        const fo = 1 - wk * (1 - Math.max(0, tl) / L);
+        if (fo < f) f = fo;
+      }
+    }
+    return f < 0 ? 0 : f;
+  }
+  /* THE EYE IS NEVER IN ANYTHING. Whatever the eased boom is doing, the eye
+     itself is pushed out radially from every solid it comes near, on a soft
+     maximum that fades to nothing a little further out, so it slides along
+     the outside instead of entering: a piling or buoy cleared by 0.9 m, a
+     rock past its outermost lump (1.12 x the waterline radius) by 0.35 m. A
+     push is a continuous function of where the eye was, so it never jumps. */
+  const _scE = { x: 0, z: 0 };
+  function scEyePush(G, e, px, pz, wetK) {
+    for (let gi = 0; gi < G.length; gi++) {
+      const g = G[gi], gx = e.x - g.x, gz = e.z - g.z, gr = g.r * 1.2 + 3;
+      if (gx * gx + gz * gz > gr * gr) continue;
+      const list = g.list;
+      for (let k = 0; k < list.length; k++) {
+        const o = list[k];
+        if (o.kind === "pontoon") continue;
+        const thin = scThin(o), wk = !thin && o.under ? wetK : 1;
+        if (wk <= 0.001) continue;
+        const rho = thin ? o.r + 0.9 : o.r * 1.12 + 0.35, fadeW = thin ? 2 : 1.5;
+        let dx = e.x - o.x, dz = e.z - o.z, d = Math.sqrt(dx * dx + dz * dz);
+        if (d >= rho + fadeW) continue;
+        if (d < 1e-3) {
+          const qx = e.x - px, qz = e.z - pz, ql = Math.sqrt(qx * qx + qz * qz) || 1;
+          dx = qx / ql * 1e-3; dz = qz / ql * 1e-3; d = 1e-3;
+        }
+        const fade = Math.min(1, (rho + fadeW - d) / (fadeW * 0.5)), k2 = fade * fade * (3 - 2 * fade) * wk;
+        const want = softMax(d, rho, 0.6), nd = d + (want - d) * k2;
+        e.x = o.x + dx * (nd / d); e.z = o.z + dz * (nd / d);
+      }
+    }
   }
   function sharkCamActive(a, W, P) {
     if (!a || !W || !P || a.dead || P.dead || !aquaticMounted(a)) return false;
@@ -4122,6 +4283,9 @@
       SC.side = cam.position.y >= seaY(cam.position.x, cam.position.z) ? 1 : -1;
       SC.sideK = SC.side > 0 ? 1 : 0;
       SC.surf = surfB; SC.surfV = 0;
+      SC.surfM = surfB; SC.rockK = 1; SC.rockKV = 0;
+      SC.qx = pvx; SC.qy = pvy; SC.qz = pvz; SC.qxV = SC.qyV = SC.qzV = 0; SC.lift = SC.liftV = 0;
+      SC.hd = hd; SC.hdV = 0; SC.busyT = 0;
       SC.kx = SC.ky = SC.kz = SC.kvx = SC.kvy = SC.kvz = 0;
       SC.punch = 0; SC.hits = AQUATIC_AUDIT.hits; SC.ship = AQUATIC_AUDIT.shipBites;
       SC.wasAir = air;
@@ -4158,15 +4322,34 @@
       SC.kvz += (-k * SC.kz - c * SC.kvz) * dt; SC.kz += SC.kvz * dt;
     }
 
-    // ---- pivot: lag grows with speed (the burst pull-back); slow in the air
-    const Txz = 0.07 + 0.08 * Math.min(1, spd);
+    /* ---- pivot: the body's SMOOTHED path, never its jolts. A turn at speed
+       is a few m/s^2 of centripetal pull, a bite lunge and a hold's tug are
+       tens: a pivot on a 0.07 s spring handed every one of them straight to
+       the eye (measured, before: 29 m/s^2 RMS through a hard turn, 40 through
+       a lunge-and-seize). On a quarter-second spring the lens follows where
+       the animal is going and lets the strike happen in front of it; through
+       a strike or a hold it eases further still. Slow in the air. */
+    const busy = ride.attackT > 0 || ride.clampT > 0 || !!ride.gripTarget;
+    SC.busyT = busy ? 0.8 : Math.max(0, SC.busyT - dt);     // a strike and a moment after it
+    // the heading the lens leads along: smoothed, so a bite's homing snap or a
+    // hold's tug turns the view over a third of a second, never in a frame
+    {
+      let dh = hd - SC.hd;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      SC.hd = scDamp(SC.hd, SC.hd + dh, "hdV", SC.busyT > 0 ? 0.5 : 0.3, dt);
+    }
+    const lfx = Math.cos(SC.hd), lfz = Math.sin(SC.hd);
+    const Txz = (busy ? 0.34 : 0.22) + 0.06 * Math.min(1, spd);
     SC.px = scDamp(SC.px, pvx, "pxV", Txz, dt);
     SC.pz = scDamp(SC.pz, pvz, "pzV", Txz, dt);
-    SC.py = scDamp(SC.py, pvy, "pyV", air ? 0.34 : 0.16, dt);
-    // never let the lag outgrow a third of the boom (a teleport or respawn)
+    SC.py = scDamp(SC.py, pvy, "pyV", air ? 0.34 : (busy ? 0.3 : 0.22), dt);
+    // a teleport or a respawn is caught up at once; an ordinary strike is not:
+    // the old limit (a third of the boom) was inside a bite lunge's own lag,
+    // so every lunge hit it and the pivot jumped a little every frame of it
     {
       const ex = pvx - SC.px, ey = pvy - SC.py, ez = pvz - SC.pz, e = Math.hypot(ex, ey, ez);
-      const lim = Math.max(1.5, SC.boom * 0.33);
+      const lim = Math.max(4, SC.boom * 0.75);
       if (e > lim) { const s = 1 - lim / e; SC.px += ex * s; SC.py += ey * s; SC.pz += ez * s; }
     }
 
@@ -4189,9 +4372,16 @@
       (shipNear ? 1.08 : 1) * (1 - 0.06 * SC.punch);
     SC.boom = scDamp(SC.boom, boomT, "boomV", air ? 0.45 : 0.32, dt);
 
-    // ---- fov
+    // ---- fov. A boom a rock has cut short opens the lens by what holds the
+    // framing (tan(fov/2) x distance), to the same 78 degrees as the murk
     const rideF = (CBZ.cityRideFov && CBZ.cityRideFov(61)) || 0;
-    const fovT = Math.max(61, rideF) + 6 * Math.min(1, spd) + (air ? 5 : 0) - 2.2 * SC.punch;
+    const rockF = SC.rockK < 0.999
+      ? Math.min(78, 2 * Math.atan(Math.tan(61 * Math.PI / 360) / Math.max(0.2, SC.rockK)) * 180 / Math.PI) : 0;
+    // a phone held upright: the vertical lens opens until the view is at
+    // least 52 degrees across, or a big animal's fins leave the frame
+    const asp = cam.aspect > 0 ? cam.aspect : 1.78;
+    const tallF = asp < 1 ? 2 * Math.atan(Math.tan(26 * Math.PI / 180) / asp) * 180 / Math.PI : 0;
+    const fovT = Math.max(61, rideF, rockF, tallF) + 6 * Math.min(1, spd) + (air ? 5 : 0) - 2.2 * SC.punch;
     SC.fov = scDamp(SC.fov, Math.min(84, fovT), "fovV", 0.28, dt);
 
     // ---- compose the eye exactly on the orbit
@@ -4199,6 +4389,42 @@
     let ex = SC.px + Math.sin(SC.yaw) * cp * SC.boom;
     let ey = SC.py + sp * SC.boom;
     let ez = SC.pz + Math.cos(SC.yaw) * cp * SC.boom;
+    /* ---- AND THE ROCK BETWEEN THEM. The line that must stay clear runs from
+       the animal (a 0.08 s ease of the body, so a jolt does not reach the
+       lens through it) to that eye — not from the pivot, which trails a
+       sprinting body by metres. Its clear share is eased in fast and out
+       slowly, and the eye is drawn in along that line. Cut short, it keeps a
+       body's distance by rising over the back (or dropping under the belly
+       on the underwater side), never by sitting in the animal. */
+    SC.qx = scDamp(SC.qx, pvx, "qxV", 0.08, dt);
+    SC.qy = scDamp(SC.qy, pvy, "qyV", 0.08, dt);
+    SC.qz = scDamp(SC.qz, pvz, "qzV", 0.08, dt);
+    const sea = seaSceneLive();
+    const G = sea && sea.groups && sea.groups.length ? sea.groups : null;
+    let kWant = 1;
+    if (G) {
+      const lx = ex - SC.qx, lz = ez - SC.qz, Lq = Math.sqrt(lx * lx + lz * lz);
+      if (Lq > 0.05) kWant = scRockClear(G, SC.qx, SC.qz, lx / Lq, lz / Lq, Lq, 1 - SC.sideK);
+    }
+    SC.rockK = scDamp(SC.rockK, kWant, "rockKV", kWant < SC.rockK ? 0.1 : 0.55, dt);
+    if (SC.rockK > 1) { SC.rockK = 1; SC.rockKV = Math.min(0, SC.rockKV); }
+    if (SC.rockK < 0) { SC.rockK = 0; SC.rockKV = Math.max(0, SC.rockKV); }
+    let liftT = 0;
+    if (SC.rockK < 0.9999) {
+      const k = SC.rockK;
+      const rx0 = (ex - SC.qx) * k, rz0 = (ez - SC.qz) * k, ry0 = (ey - SC.qy) * k;
+      // the height a short reach needs (x(2-x): the full body distance once
+      // the reach is gone), up above the water and down below it
+      const Lmin = Math.min(SC.boom, Math.max(1.6, hull * 0.4));
+      const x = 1 - Math.sqrt(rx0 * rx0 + rz0 * rz0) / Lmin;
+      if (x > 0) {
+        const sgn = SC.sideK * 2 - 1, xx = Math.min(1, x);
+        liftT = sgn * Math.max(0, Lmin * xx * (2 - xx) - Math.max(0, sgn * ry0));
+      }
+      ex = SC.qx + rx0; ey = SC.qy + ry0; ez = SC.qz + rz0;
+    }
+    SC.lift = scDamp(SC.lift, liftT, "liftV", 0.12, dt);
+    ey += SC.lift;
     // camera.js's shake envelope, spent as a smooth sway (hurt, beaching, rams)
     const shk = CBZ.camShakeLevel ? +CBZ.camShakeLevel() || 0 : 0;
     const rx = Math.cos(SC.yaw), rz = -Math.sin(SC.yaw);
@@ -4209,31 +4435,52 @@
       ex += rx * nx * s; ez += rz * nx * s; ey += ny * s * 0.8;
     }
     ex += SC.kx; ey += SC.ky; ez += SC.kz;
-
-    // ---- the waterline: a side with hysteresis, blended, never straddled
+    if (G) { _scE.x = ex; _scE.z = ez; scEyePush(G, _scE, SC.qx, SC.qz, 1 - SC.sideK); ex = _scE.x; ez = _scE.z; }
+    // ---- the waterline: a side with hysteresis, blended, never straddled.
+    // Against the SMOOTHED sea (0.7 s) plus a crest margin: the eye does not
+    // ride each wave under it up and down
     const surfE = seaY(ex, ez);
-    SC.surf = scDamp(SC.surf, surfE, "surfV", 0.2, dt);
+    SC.surf = scDamp(SC.surf, surfE, "surfV", 0.7, dt);
     const flr = scFloorAt(ex, ez);
     const clr = 0.4 + SC.boom * 0.02;
     const shallow = flr > -1e8 && (surfE - flr) < clr * 2 + 0.6;
+    /* WHICH SIDE OF THE WATER. You must see the animal you are, and from
+       above the sea hides it. The back's depth is read twice: against the
+       sea over it now, and against that sea's 2.5 s mean, which the swell
+       passing over a body that holds its depth does not move. The lens goes
+       under when the back is 12 cm under the mean or 15 cm under the water
+       over it, and comes up only when it is out of both (6 cm over the mean,
+       above the water now) or in the air — so a body cruising at the top
+       rides above, one a crest can cover rides below, and the swell never
+       flips it. A strike keeps its side unless the body is plainly on the
+       other one: a side change is a big move of the eye. */
+    SC.surfM += (surfB - SC.surfM) * (1 - Math.exp(-dt / 2.5));
+    const subM = SC.surfM - (W.y + back), strike = ride.attackT > 0;
     if (air || shallow) SC.side = 1;
-    else if (SC.side > 0 && sub > 1.5) SC.side = -1;
-    else if (SC.side < 0 && sub < 0.55) SC.side = 1;
+    else if (SC.side > 0 && (strike ? sub > 0.25 : (subM > 0.12 || sub > 0.15))) SC.side = -1;
+    else if (SC.side < 0 && (strike ? sub < -0.3 : (subM < -0.06 && sub < 0))) SC.side = 1;
     const sideT = SC.side > 0 ? 1 : 0;
     const step = dt / 0.3;
     SC.sideK = SC.sideK < sideT ? Math.min(sideT, SC.sideK + step) : Math.max(sideT, SC.sideK - step);
     const sk = SC.sideK * SC.sideK * (3 - 2 * SC.sideK);
-    const yA = softMax(ey, Math.max(surfE, SC.surf) + clr, 0.5);
-    const yB = softMin(ey, Math.min(surfE, SC.surf) - clr, 0.5);
+    // above the water the lens rides LOW behind the dorsal, so the back and
+    // the fin cutting the surface are in the frame, not just water
+    const yA = softMin(softMax(ey, SC.surf + clr + 0.25, 0.5), SC.surf + 0.9 + SC.boom * 0.08, 0.4);
+    const yB = softMin(ey, SC.surf - clr - 0.25, 0.5);
     ey = yB + (yA - yB) * sk;
     if (flr > -1e8 && ey < flr + 0.5) ey = flr + 0.5;
     cam.position.set(ex, ey, ez);
 
-    // ---- look: ahead of the animal with its speed, the body a touch low
-    const lead = hull * (0.12 + 0.3 * Math.min(1, spd));
-    SC.look.set(SC.px + fx * lead + SC.kx * 0.4,
-      SC.py + SC.boom * 0.07 + SC.ky * 0.4,
-      SC.pz + fz * lead + SC.kz * 0.4);
+    // ---- look: ahead of the animal with its speed, as far as the view runs
+    // along its heading (seen broadside, a lead would push the tail out of
+    // the frame). Under the water the body sits a touch low, so the surface
+    // and what is on it are in the frame; above it the lens is held low over
+    // the water, so it looks at the body
+    const along = Math.abs(Math.sin(SC.yaw + SC.hd));
+    const lead = hull * (0.12 + 0.3 * Math.min(1, spd)) * (0.2 + 0.8 * along);
+    SC.look.set(SC.px + lfx * lead + SC.kx * 0.4,
+      SC.py + SC.boom * 0.07 * (1 - sk) + SC.ky * 0.4,
+      SC.pz + lfz * lead + SC.kz * 0.4);
     cam.lookAt(SC.look);
     // bank a little with the body's turn roll (never the breach barrel roll)
     const rollT = air ? 0 : Math.max(-0.42, Math.min(0.42, W.roll || 0)) * -0.22;

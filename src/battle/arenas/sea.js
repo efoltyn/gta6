@@ -309,6 +309,22 @@ function seaFleet(cx, cz, side, n) {
     SCENERY.push({ kind: "boat", x: g.position.x, y: 1, z: g.position.z });
   }
 }
+/* THE WATER, AS THE ENGINE ASKS FOR IT. Whatever swims or floats on this
+   page asks the engine's own questions — is this water, how deep, where is
+   the top, all of it at once — by the names the city answers from its water
+   field and the one water door: a dog swims (units/kit/canid.js), a corpse
+   floats (world/water_float.js), a splash lands, all on this swell. The
+   marine pack brings city/waterfield.js, whose answers are the city's coast
+   (on a page with no city: nowhere is water), and adopting the sea sheet
+   tells the door the sheet is flat; so the map, once built, answers for its
+   own sea. */
+function seaWorldWater() {
+  CBZ.citySeaHeightAt = function (x, z) { return swellAt(x, z); };
+  CBZ.cityWaterAt = function () { return true; };
+  CBZ.cityWaterDepthAt = function (x, z) { return swellAt(x, z) - SEA.seabed; };
+  CBZ.waterModeOn = function () { return true; };
+  if (CBZ.waterPageSurface) CBZ.waterPageSurface(swellAt, SEA.seabed);
+}
 /* HOW DEEP A BODY SWIMS, and the bestiary already answered it. aquatic.js
    declares `swimDepth` per row — how far the model origin rides below the
    surface — because the alternative was a hard-coded name table in two files
@@ -332,7 +348,10 @@ const DIVE_RATE = 2.4;         // m/s a body can change depth by
 function stepDepth(m, sdt) {
   let want = cruiseDepth(m);
   const t = m.tgt;
-  if (t && !t.dead) {
+  // a land animal swims at the top and cannot dive: whatever hunts it comes
+  // up to it (a dog's body floats at the surface whatever its depth says)
+  const floats = !!(m.beast && !(m.species && m.species.aquatic));
+  if (t && !t.dead && !floats) {
     const d = Math.hypot(t.pos.x - m.pos.x, t.pos.z - m.pos.z);
     const k = Math.max(0, Math.min(1, (30 - d) / 20));
     want += ((t.swimD == null ? cruiseDepth(t) : t.swimD) - want) * k;
