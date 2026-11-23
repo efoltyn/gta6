@@ -86,6 +86,23 @@
   // Set up performance metrics
   CBZ.crowdPerformance = { simTimeMs: 0, renderTimeMs: 0 };
 
+  /* THE VALUABLE HE WEARS. It was one 24 x 8 cm box at a fixed height and
+     depth off the body's centre, coloured by the item — placed for the old
+     toy torso, where that spot was the chest. On the real-proportioned body
+     it hung in the air in front of the waist (6 cm clear of a woman's), and a
+     Cash Roll made it a green slab. Now the chain is a real chain round the
+     neck and the watch a real watch on the wrist (the kits every other game
+     uses, fitted to this body); a gold tooth and a roll of cash are in his
+     mouth and his pocket and show nothing. */
+  function wearValuable(a, rig, item) {
+    const want = item === 1 ? "chain" : item === 2 ? "watch" : null;
+    if (a._worn === want) return;
+    if (a._chainGrp) { if (CBZ.jewel) CBZ.jewel.release(a._chainGrp); a._chainGrp = null; }
+    if (a._worn === "watch" && CBZ.wristwatch) CBZ.wristwatch.wear(rig, null);
+    a._worn = want;
+    if (want === "chain" && CBZ.jewel) a._chainGrp = CBZ.jewel.necklace(rig, "curb");
+    else if (want === "watch" && CBZ.wristwatch) CBZ.wristwatch.wear(rig, "steel");
+  }
   // ============================================================
   // STANDARD ACTOR TIER — every visible agent is a REAL makeCharacter rig
   // registered in CBZ.npcs, so EVERY existing system lets you hold them at
@@ -122,11 +139,9 @@
     const rig = CBZ.makeCharacter({ legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0xd8a177, hair: 0x2a2018, stripes: 0xc85c00, shoes: 0x2b2b2b, build: fem ? "f" : "m", longHair: fem && Math.random() < 0.6 });
     rig.group.position.y = FAR_AWAY;
     root.add(rig.group);                                 // under the crowd root → hides with it off-escape
-    const chain = new THREE.Mesh(CBZ.boxGeom(0.34, 0.12, 0.07), CBZ.cmat(0xffd451));
-    chain.position.set(0, 1.46, 0.26); chain.visible = false; rig.body.add(chain);
     const actor = {
       _crowd: true, _id: -1, _synced: false, _pi: pi, _corpseT: 0, gang: null,
-      kind: "inmate", role: "inmate", char: rig, group: rig.group, _chain: chain,
+      kind: "inmate", role: "inmate", char: rig, group: rig.group, _worn: null,
       data: { name: "an inmate", pool: "goods", offer: null },
       personality: { nerve: 0.5, greed: 0.5, loyalty: 0.5, snitch: 0.3 },
       ratings: { fighting: 45, toughness: 45 }, behavior: "defensive",
@@ -162,7 +177,7 @@
     a.loadout = { cigs: S.cigs[id], items: S.item[id] ? [S.itemName(id)] : [] };
     if (CBZ.econ && CBZ.econ.pickOffer && !a.data.offer) a.data.offer = CBZ.econ.pickOffer("goods");
     setRigSkin(rig, S.skin[id], S.hair[id]);
-    const vcol = S.itemColor(id); a._chain.visible = !!vcol; if (vcol) a._chain.material = CBZ.cmat(vcol);
+    wearValuable(a, rig, S.item[id]);
     rig.group.rotation.set(0, S.heading[id], 0);
     rig.group.position.set(S.posX[id], 0, S.posZ[id]);
     rig.phase = S.phase[id];
@@ -179,7 +194,7 @@
     }
     e.id = -1; a._id = -1; a.dead = true; a.intimidMode = null; a.poseHandsUp = false; a.poseAimBack = false;
     a.aiState = "wander"; a.foe = null;
-    a._chain.visible = false; a.group.position.y = FAR_AWAY; a.group.visible = true;
+    wearValuable(a, a.char, 0); a.group.position.y = FAR_AWAY; a.group.visible = true;
   }
   // a dead agent's face rig is his body: held while it could be seen (5 s
   // minimum for the fall), released to the pool only under the corpse law
@@ -239,7 +254,7 @@
       const e = facePool[i]; if (e.id < 0) continue;
       const id = e.id, a = e.actor, rig = e.rig;
       S.grudge[id] = Math.max(S.grudge[id], Math.min(255, ((a.playerGrudge || 0) * 32) | 0));
-      if (a.looted && !a._synced) { S.cigs[id] = 0; S.item[id] = 0; a._chain.visible = false; a._synced = true; }
+      if (a.looted && !a._synced) { S.cigs[id] = 0; S.item[id] = 0; wearValuable(a, a.char, 0); a._synced = true; }
       if (a.dead) {                                   // KILLED — drop loot, remove from the live crowd, ragdoll briefly
         if (!S.dead[id]) {
           // his pockets fall to the floor where he lies (systems/prisondrops.js)
@@ -249,7 +264,7 @@
             if (CBZ.prisonDrop && CBZ.CONFIG.PRISON_DROPS_V1 !== false) CBZ.prisonDrop(a);
             else if (CBZ.econ && CBZ.econ.lootActor) CBZ.econ.lootActor(a);
           }
-          S.cigs[id] = 0; S.item[id] = 0; S.dead[id] = 1; a._chain.visible = false; a._corpseT = 5;
+          S.cigs[id] = 0; S.item[id] = 0; S.dead[id] = 1; wearValuable(a, a.char, 0); a._corpseT = 5;
         }
         a._corpseT -= dt; if (CBZ.animChar) CBZ.animChar(rig, 0, dt);
         if (!corpseHeld(e)) freeRig(e);
