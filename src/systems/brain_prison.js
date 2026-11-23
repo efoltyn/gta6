@@ -215,6 +215,12 @@
       // A man on his feet who has not given up is taken down first.
       const AR = CBZ.arrest;
       if (cuffing && !isPlayer(b) && AR && AR.cuffable && !AR.cuffable(b)) return false;
+      // AN INMATE'S CUFFS ARE THE PLAYER'S: systems/arrest.js's take (the cuff
+      // verb, then his hand on the arm and the walk to the man's cell). The
+      // ladder reads the handle (done / result.outcome) like any verb session.
+      // No take, no cuffs: this used to fall through to cuffs with nobody's
+      // hands on him.
+      if (cuffing && !isPlayer(b)) return (AR && AR.take ? takeInmate(a, b) : null) || false;
       const f = V && (typeof V[name] === "function" ? V[name] : typeof V[VALIAS[name]] === "function" ? V[VALIAS[name]] : null);
       if (f) {
         let r = false;
@@ -263,16 +269,75 @@
   }
   PB.cuff = cuffInmate;       // (n, by, quiet) the cuffed hold, whoever closed them (a screw, the officer player)
   PB.uncuff = uncuffInmate;
+  /* THE TASER ON AN INMATE IS THE PLAYER'S (systems/arrest.js A.tase with a
+     target): it can miss (range, a man on the move, the officer's tier), the
+     probes fly, a hit locks him and drops him along the shot. Returns the
+     result ({ hit }) so the ladder reloads on a miss. */
   function taseInmate(n, gd) {
     if (!n || n.dead || isPlayer(n)) return false;
-    // the legs go and the muscles lock (CBZ.vitals: conscious, cuffable, down)
-    if (CBZ.vitals && CBZ.vitals.tase) CBZ.vitals.tase(n, 2.4 + rng() * 1.2, { by: gd || null });
-    else n.ko = Math.max(n.ko || 0, 2.4);
-    n.aiState = "wander"; n.foe = null; n._blow = null;
-    if (CBZ.taserFx && CBZ.taserFx.actorTaseActor) { try { CBZ.taserFx.actorTaseActor(gd, n); } catch (e) {} }
-    if (CBZ.worldSfx && n.group) { try { CBZ.worldSfx("tase", n.group.position.x, n.group.position.z, {}); } catch (e) {} }
     if (CBZ.prisonLawCount) CBZ.prisonLawCount("tases");
-    return true;
+    const AR = CBZ.arrest;
+    let r = null;
+    if (AR && AR.tase) { try { r = AR.tase(gd, { target: n }); } catch (e) { r = null; } }
+    if (!r) {
+      if (CBZ.vitals && CBZ.vitals.tase) CBZ.vitals.tase(n, 4, { by: gd || null });
+      else n.ko = Math.max(n.ko || 0, 2.4);
+      r = { hit: true };
+    }
+    if (r.hit) { n.aiState = "wander"; n.foe = null; n._blow = null; }
+    return r;
+  }
+
+  /* ---- HIS HAND ON THE ARM, AND THE WALK TO THE CELL ----------------------
+     The cuffs close (onCuffed), the screw is on escort duty (guards.js leaves
+     his body to the verbs, and he is nobody's backup meanwhile), and the man
+     is walked to his own bunk. There: the cuffs come off and he is kept in
+     his cell for CONFINE_S. Torn loose or the screw put down: the case ends
+     and the cuffed hold runs out on its own (inmateThink). */
+  const CONFINE_S = 120;
+  function homeSpot(n) {
+    const R = CBZ.prisonRest;
+    const bed = R && R.place ? R.place(n) : null;
+    if (bed && CBZ.rest && CBZ.rest.approach) { const p = CBZ.rest.approach(bed); if (p && isFinite(p.x) && isFinite(p.z)) return { x: p.x, z: p.z }; }
+    if (n.region) { const r = n.region; return { x: (r[0] + r[1]) * 0.5, z: (r[2] + r[3]) * 0.5 }; }
+    return null;
+  }
+  function takeLive(n) { const h = n && n._lawTake; return !!(h && !h.done); }
+  function takeInmate(gd, n) {
+    const AR = CBZ.arrest;
+    let h = null;
+    try {
+      h = AR.take(gd, {
+        target: n, walk: 1.25, arrive: 0.9,
+        to: function () { return n._lawHome || null; },
+        onCuffed: function () {
+          cuffInmate(n, gd, true);
+          n._lawHome = homeSpot(n);
+          gd._escort = true;
+        },
+        onArrived: function (hh) { hh.finish(); lockedUp(n, gd); },
+        onStall: function (hh) { hh.finish(); lockedUp(n, gd); },
+        onBroke: function () { gd._escort = false; n._lawTake = null; if (gd._yardCase === n) endCase(gd); },
+      });
+    } catch (e) { h = null; }
+    if (h) n._lawTake = h;
+    return h;
+  }
+  function lockedUp(n, gd) {
+    gd._escort = false;
+    n._lawTake = null;
+    if (gd._yardCase === n) endCase(gd);
+    // out of the cuffs at his bunk (the uncuff verb, his hands), then kept in
+    const V = CBZ.verbs;
+    let S = null;
+    if (V && V.uncuff && !n.dead) {
+      try { S = V.uncuff(gd, n, { far: true, onOutcome: function () { if (n.cuffed) uncuffInmate(n); } }); } catch (e) { S = null; }
+    }
+    if (!S) {
+      if (V && V.setCuffs) { try { V.setCuffs(n, false); } catch (e) {} }
+      uncuffInmate(n);
+    } else n._cuffT = Math.min(n._cuffT || 0, 3);    // the verb's outcome lets him up; this is the backstop
+    n._confineT = CONFINE_S;
   }
   // the stick: blunt trauma (CBZ.vitals.blunt). A screw aims at the arms and
   // the legs (it is a compliance tool); now and then one catches the head.
@@ -341,7 +406,7 @@
   /* ==========================================================
      3. YARD LAW — a screw who sees a fight runs the ladder on its starter
      ========================================================== */
-  const LAW_OPTS = { roe: "nonlethal", warnRange: 11, orderRange: 5.0, cuffRange: 1.35, patience: 2.6 };
+  const LAW_OPTS = { roe: "nonlethal", warnRange: 11, orderRange: 5.0, cuffRange: 1.35, patience: 3.4 };
   const LAW_LOSE_R = 26;
   function freeScrew(gd) {
     // the warden never runs the ladder himself: he orders an officer to (prisonwarden.js)
@@ -361,6 +426,9 @@
   PB.beginCase = beginCase;
   function endCase(gd) {
     const n = gd._yardCase;
+    // the walk to the cell ends with the case (he lets go of the arm)
+    if (n && takeLive(n) && n._lawTake.officer === gd) { try { n._lawTake.cancel(); } catch (e) {} n._lawTake = null; }
+    if (gd._escort && n && n.cuffed) gd._escort = false;
     const b = BR();
     if (b && b.authority) { try { b.authority.cancel(gd); } catch (e) {} }
     gd._yardCase = null; gd._yardHold = false;
@@ -380,7 +448,7 @@
       speed: Math.hypot(vx, vz),
       handsUp: !!ch.handsUp,
       kneeling: !!ch.surrender,
-      prone: !!(n.ko > 0),
+      prone: !!(n.ko > 0) || !!(CBZ.arrest && CBZ.arrest.downState && CBZ.arrest.downState(n)),
       armed: !!(n._shankOut || n.hasGun),
       aiming: false,
       // still swinging once he has had a beat to hear it (the first shout
@@ -448,11 +516,16 @@
     const gs = CBZ.guards || [];
     for (let i = 0; i < npcs.length; i++) {
       const n = npcs[i];
-      if (!n || n.aiState !== "fight" || !alive(n) || !n.foe || n._lawBy || n.cuffed) continue;
-      const f = n.foe;
-      if (isStaff(f)) continue;                          // a man swinging at a screw is the screw's problem
-      const starter = n._fightStarter && n._fightStarter.group && alive(n._fightStarter) ? n._fightStarter : n;
-      if (starter._lawBy) continue;
+      if (!n || !alive(n) || n._lawBy || n.cuffed || !n.group) continue;
+      let starter = null, reason = "fight";
+      if (n.aiState === "fight" && n.foe) {
+        if (isStaff(n.foe)) continue;                    // a man swinging at a screw is the screw's problem
+        starter = n._fightStarter && n._fightStarter.group && alive(n._fightStarter) ? n._fightStarter : n;
+      } else if (n.aiState === "escape" || (CBZ.prisonSterileAt && CBZ.prisonSterileAt(n.group.position.x, n.group.position.z))) {
+        // a man running for the gate or on the wire road: the same ladder
+        starter = n; reason = "escape";
+      } else continue;
+      if (starter._lawBy || starter.cuffed) continue;
       const p = n.group.position;
       let best = null, bd = Infinity;
       for (let k = 0; k < gs.length; k++) {
@@ -464,7 +537,7 @@
         try { sees = b.perception.seesPoint(gd, p.x, p.y || 0, p.z, null); } catch (e) { sees = false; }
         if (sees) { bd = d; best = gd; }
       }
-      if (best) beginCase(best, starter, "fight");
+      if (best) beginCase(best, starter, reason);
     }
   }
 
@@ -567,6 +640,8 @@
     if (n.cuffed) {
       // cuffs put on by another hand (the VERBS seam) start the same hold
       if (!n._cuffHeld) { n._cuffHeld = true; n._cuffT = CUFF_SECS; n._cuffBy = n._cuffBy || n._lawBy || null; }
+      // on the walk to his cell: the escort verb has his body
+      if (takeLive(n)) { n.foe = null; n.huntPlayer = 0; if (n.char) n.char.cuffed = true; return 0; }
       n._cuffT = (n._cuffT || 0) - dt;
       if (n.char) { n.char.cuffed = true; n.char.surrender = true; }
       n.foe = null; n.huntPlayer = 0;
@@ -579,6 +654,19 @@
       return 0;
     }
     if ((n._lawHeldT || 0) > 0) n._lawHeldT -= dt;
+    // KEPT IN: walked to his cell by a screw, he stays there a while
+    if ((n._confineT || 0) > 0) {
+      n._confineT -= dt;
+      n.foe = null; n.huntPlayer = 0;
+      if (n.aiState === "fight" || n.aiState === "escape") n.aiState = "wander";
+      const hs = n._lawHome;
+      if (hs && n.target) {
+        const q = n.group.position;
+        if (Math.hypot(hs.x - q.x, hs.z - q.z) > 1.0) { n.target.set(hs.x, 0, hs.z); n.pause = 0; return n.baseSpeed || n.speed || 2; }
+        n.target.set(q.x, 0, q.z);
+        return 0;
+      }
+    }
     // ROUT: running for his house, not fighting
     if ((n._routT || 0) > 0) {
       n._routT -= dt;
@@ -1528,6 +1616,7 @@
     for (const n of CBZ.npcs || []) {
       if (n.cuffed) { n.cuffed = false; if (n.char) { n.char.cuffed = false; n.char.surrender = false; } }
       n._cuffT = 0; n._lawBy = null; n._lawAns = null; n._routT = 0; n._lawHeldT = 0; n._restCD = 0;
+      n._lawTake = null; n._lawHome = null; n._confineT = 0;
       n._gunResp = null; n._gunUntil = 0; n._gunPose = null; n._hideCell = null;
       // (the crouch itself too: dropping only the flag left the knees folded)
       if (n._medicCrouch && CBZ.moves && CBZ.moves.crouch) { try { CBZ.moves.crouch(n, false); } catch (e) {} }

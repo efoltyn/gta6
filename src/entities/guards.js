@@ -604,7 +604,11 @@
   ============================================================ */
   // Short, the way a screw actually talks. Most state changes say nothing.
   const BARKS = {
-    hunt: ["Hey!", "Stop!", "Runner!"],
+    // the shout on a new hunt is what the man is DOING (detection.js
+    // CBZ.lawPlayerAct): a runner, a man swinging, a man walking off
+    huntRun: ["Stop!", "Runner!", "Hey! Stop!"],
+    huntFight: ["Hey! Knock it off!", "Stop fighting!"],
+    hunt: ["Hey!", "You. Stop."],
     huntWarden: ["Stop him."],
     suspicious: ["Hey. You.", "Who's that?"],
     search: ["Where'd he go?", "Lost him."],
@@ -625,7 +629,12 @@
     let pool = null;
     // most state changes say nothing: a screw who turns his head does not
     // announce it, and a search that starts is a man walking, not a line
-    if (s === "hunt" && prev !== "capture" && prev !== "search") pool = g.kind === "warden" ? BARKS.huntWarden : BARKS.hunt;
+    if (s === "hunt" && prev !== "capture" && prev !== "search") {
+      const act = CBZ.lawPlayerAct ? CBZ.lawPlayerAct() : "run";
+      // down, in hand or on his knees: nothing to shout (the arresting screw talks)
+      if (act === "down" || act === "held" || act === "gaveup") return;
+      pool = g.kind === "warden" ? BARKS.huntWarden : act === "run" ? BARKS.huntRun : act === "fight" ? BARKS.huntFight : BARKS.hunt;
+    }
     else if (s === "suspicious" && Math.random() < 0.25) pool = BARKS.suspicious;
     else if (s === "search" && prev === "hunt" && Math.random() < 0.4) pool = BARKS.search;
     else if (s === "investigate" && Math.random() < 0.15) pool = BARKS.investigate;
@@ -675,6 +684,7 @@
   const ORDER_R = 4.2;         // m: where he gives the order (capture.js ARREST.ORDER_R)
   const RADIO_FIX_EVERY = 3;   // s between a blind pursuer adopting the block's newest fix
   const GIVE_UP_STALL = 3.5;   // s without closing on a search point: skip it
+  const HUNT_RUN = 1.5;        // x walk pace on a chase (was 1.7: a screw in boots and a belt is not a sprinter)
 
   // ---- the per-frame read of the player, shared by every guard ---------------
   let wardenSharp = 1;          // 1..1.15, the warden's presence on the cone
@@ -1341,7 +1351,7 @@
         }
         if (dist > hold) {
           noteState(g, "hunt");
-          walkTo(g, player.pos.x, player.pos.z, g.speed * (hold > CAPTURE_R && dist < ORDER_R ? 1.0 : 1.7), dt, Math.max(0.3, hold - 0.1), false, player.pos.y);
+          walkTo(g, player.pos.x, player.pos.z, g.speed * (hold > CAPTURE_R && dist < ORDER_R ? 1.0 : HUNT_RUN), dt, Math.max(0.3, hold - 0.1), false, player.pos.y);
         } else {
           noteState(g, "capture");
           faceTo(g, player.pos.x, player.pos.z, 0.0001, dt);
@@ -1354,7 +1364,7 @@
         const S = g._chase || seedChase(g);
         radioFix(g, S);
         noteState(g, S.phase === "goto" ? "hunt" : "search");
-        searchStep(g, S, dt, g.speed * 1.7, g.speed * 1.35, true);
+        searchStep(g, S, dt, g.speed * HUNT_RUN, g.speed * 1.3, true);
       }
       updateFlashlight(g, dt);
       return true;
@@ -1421,8 +1431,10 @@
       const nearNoise = S.player && g.lkX != null && Math.hypot(g.lkX - S.x, g.lkZ - S.z) < 9;
       const wanted = ((CBZ.game && CBZ.game.detection) || 0) > 12 || ((CBZ.game && CBZ.game.witnessReportT) || 0) > 0;
       if (g.spotted && (lost || wanted || nearNoise || ctx.reason > 0)) {
-        g.hunt = 3.2;
-        g.alert = 1.0;
+        // he joins the hunt only if the act is worth one more man
+        // (detection.js); else he stops where he is and watches
+        if (!CBZ.lawMayHunt || CBZ.lawMayHunt(g)) g.hunt = 3.2;
+        g.alert = Math.max(g.alert || 0, 1.0);
         g.investigate = null;
         updateFlashlight(g, dt);
         return true;

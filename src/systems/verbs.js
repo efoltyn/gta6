@@ -1238,8 +1238,9 @@
     work: (S) => S.A.depth + S.T.depth + 0.27 * S.A.arm,
     dur(S, ph) {
       if (S.verb === "uncuff") return ph === "align" ? 0.45 : ph === "contact" ? 0.32 : ph === "drive" ? 0.6 : ph === "outcome" ? 0.12 : ph === "release" ? 0.35 : 0;
-      if (S.ground) return ph === "align" ? 0.6 : ph === "contact" ? 0.6 : ph === "drive" ? 1.6 : ph === "outcome" ? 0.1 : ph === "release" ? (lifting(S) ? liftDur(S) : 0.5) : 0;
-      return ph === "align" ? 0.45 : ph === "contact" ? 0.5 : ph === "drive" ? 1.45 : ph === "outcome" ? 0.12 : ph === "release" ? 0.35 : 0;
+      // (2026-11: ~25% longer than it was; a pair of cuffs is not a snap of the fingers)
+      if (S.ground) return ph === "align" ? 0.75 : ph === "contact" ? 0.75 : ph === "drive" ? 2.0 : ph === "outcome" ? 0.1 : ph === "release" ? (lifting(S) ? liftDur(S) : 0.5) : 0;
+      return ph === "align" ? 0.55 : ph === "contact" ? 0.6 : ph === "drive" ? 1.8 : ph === "outcome" ? 0.12 : ph === "release" ? 0.35 : 0;
     },
     poseA: (S) => S.ground ? "a.kneelCuff" : S.phase === "approach" || S.phase === "align" ? "a.reach" : "a.cuff",
     // on the floor his body is STRIKE's own face-down lie (meleeposes.js

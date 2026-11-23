@@ -92,18 +92,198 @@
     "the admin wing": ["Wrong wing. Out.", "Turn around. Now."],
   };
 
-  /* ---- BACKUP (a hunting guard's radio) ------------------------------------
-     A clean screw who has eyes on a wanted man opens the same radio window
-     the zone call uses (silence him inside it and it never lands). When it
-     lands, the nearest one or two free officers are sent to HIS last-known
-     spot for you, the one he had when he keyed the mic, never your live
-     position. BACKUP_CD keeps one man from calling it in every few seconds. */
-  const BACKUP_CALL_T = 2.0, BACKUP_CD = 9, BACKUP_HEAT = 4;
-  const BACKUP_LINES = [
-    "Control, need backup.",
-    "Runner! Anybody close?",
-    "I've got him. Send someone.",
-  ];
+  /* ---- BACKUP (the radio of the screw dealing with you) --------------------
+     Owner, 2026-11: "after I fight an officer they keep saying 'Runner!
+     Anybody close?' long after I stopped resisting, a whole mob rings me,
+     and men with rifles show up for a fist fight." Every guard who saw a
+     wanted man keyed his radio, the line was picked by his id, and each call
+     added heat that kept the next one coming.
+
+     Now ONE call per incident, by the screw dealing with you, and only while
+     you are running or swinging when it lands. The line is what you are
+     doing: running, fighting, armed. Stopped, down, cuffed: no call. It adds
+     no heat. It sends only as many officers as the response has room for
+     (LAW.CAP for a fist fight or a runner). Silence him inside the window and
+     it never lands (another man can call it then). */
+  const BACKUP_CALL_T = 2.0, BACKUP_CD = 9;
+  const BACKUP_RUN = ["Runner! Anybody close?", "He's running!", "Got a runner, need a hand."];
+  const BACKUP_FIGHT = ["He's fighting! Need help here.", "Need help here, he's swinging!", "Inmate fighting staff, need a hand."];
+  const BACKUP_ARMED = ["He's armed! Need backup!", "Weapon! Need bodies here!"];
+
+  /* ---- WHAT HE IS DOING NOW, AND WHO HAS HIM --------------------------------
+     The hunt, the radio and the case file used to read the heat NUMBER, and a
+     fight pins that high for a minute after it is over. They read the man:
+       act        "run" | "fight" | "walk" | "stopped" | "gaveup" | "down" | "held"
+       standDown  he stopped resisting (gave up, down, cuffed, or an arrest is
+                  on him and he is not running or swinging): the screw dealing
+                  with him finishes it, every other one stops hunting and goes
+                  back to his round. The offense stays on file (g.offense).
+                  Swing or run again and it flares straight back up.
+       serious    a weapon, an escape, a riot, a lockdown, a dead screw: the
+                  only things that bring the whole block. A fist fight or a
+                  runner gets the two nearest; the rest watch from their posts.
+     CBZ.lawPlayerAct / lawStandDown / lawSerious / lawMayHunt are what
+     guards.js, towerwatch.js, reinforcements.js and lockdown.js ask. */
+  const LAW = { FIGHT_S: 1.6, RUN_SPD: 2.4, STILL_SPD: 0.7, CALM_S: 8, CAP: 2, SERIOUS_EVERY: 0.5, KILL_S: 180, RIOT_N: 4, LOST_S: 3 };
+  let actSpd = 0, actPX = null, actPZ = null, actNow = "walk";
+  let standDownNow = false, wasStandDown = false, seriousNow = null, seriousT = 0, lastStaffDeathT = -1e9;
+  let huntN = 0, unseenT = 0, leadNow = null;
+  const riotAt = { x: 0, z: 0 };
+  const inc = { open: false, n: 0, caller: null, called: false, calmT: 0 };
+  const _hG = [], _hD = [];   // this frame's hunters and their distances (reused)
+
+  function readAct(dt) {
+    const px = player.pos.x, pz = player.pos.z;
+    if (actPX != null && dt > 0) {
+      const v = Math.min(12, Math.hypot(px - actPX, pz - actPZ) / dt);
+      actSpd += (v - actSpd) * Math.min(1, dt * 8);
+    }
+    actPX = px; actPZ = pz;
+    const A = CBZ.arrest, pc = CBZ.playerChar;
+    if (player.dead) return "down";
+    if ((pc && pc.cuffed) || (player.captureState && player.captureState !== "normal")) return "held";
+    if (A && A.active && A.active()) return "held";
+    if (A && A.downState && A.downState(player)) return "down";
+    const swung = A && A.playerFighting ? A.playerFighting()
+      : (g._lawSwingT != null && (g.elapsed || 0) - g._lawSwingT < LAW.FIGHT_S);
+    if (swung) return "fight";
+    if (pc && (pc.handsUp || pc.surrender)) return "gaveup";
+    if (player.crouch && actSpd < LAW.STILL_SPD) return "gaveup";
+    if (actSpd > LAW.RUN_SPD) return "run";
+    return actSpd < LAW.STILL_SPD ? "stopped" : "walk";
+  }
+  function readStandDown(act) {
+    if (act === "run" || act === "fight") return false;
+    if (act === "held" || act === "down" || act === "gaveup") return true;
+    const ph = CBZ.prisonArrestPhase ? CBZ.prisonArrestPhase() : null;
+    return ph != null && ph !== "chase";
+  }
+  function readSerious() {
+    if (CBZ.lockdownActive && CBZ.lockdownActive()) return "lockdown";
+    const PB = CBZ.prisonBrain;
+    if (PB && PB.shooter) { try { const S = PB.shooter(); if (S && S.weapon && S.weapon !== "none") return "weapon"; } catch (e) {} }
+    const off = g.offense && g.offense.t > 0 ? g.offense : null;
+    if (off && off.kind === "escape") return "escape";
+    if (CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture()) return "escape";
+    if (off && off.severity >= 4) return "weapon";       // steel or rounds on file
+    if ((g.elapsed || 0) - lastStaffDeathT < LAW.KILL_S) return "killing";
+    // a riot: several men fighting at once (their middle is where it is)
+    let n = 0, sx = 0, sz = 0;
+    const npcs = CBZ.npcs || [];
+    for (let i = 0; i < npcs.length; i++) {
+      const a = npcs[i];
+      if (!a || a.dead || a.ko > 0 || a.aiState !== "fight" || !a.foe || !a.group) continue;
+      n++; sx += a.group.position.x; sz += a.group.position.z;
+    }
+    if (n >= LAW.RIOT_N) { riotAt.x = sx / n; riotAt.z = sz / n; return "riot"; }
+    return null;
+  }
+  // the one screw dealing with you: capture.js's (the order, the cuffs, the
+  // walk, the man coming to your body), else the nearest hunter
+  function readLead() {
+    const L = CBZ.prisonLawLead ? CBZ.prisonLawLead() : null;
+    if (L && !L.dead) return L;
+    let best = null, bd = Infinity;
+    for (let i = 0; i < _hG.length; i++) if (_hD[i] < bd && _hG[i].kind !== "warden") { bd = _hD[i]; best = _hG[i]; }
+    return best;
+  }
+  // a cause that is about HIM (a riot among inmates is not: it does not put
+  // more screws on a man in a fist fight)
+  function againstHim() { return !!seriousNow && seriousNow !== "riot"; }
+  // he walks off the job: no hunt, no search for you, a look, then his round
+  function standBack(gd) {
+    gd.hunt = 0; gd._chase = null; gd._huntRanOut = false;
+    const inv = gd.investigate;
+    if (inv && (inv.looking || inv.type === "search" || inv.type === "visual" || inv.player)) gd.investigate = null;
+    if (gd.radioKind === "backup") { gd.radioT = null; gd.radioKind = null; if (inc.caller === gd) inc.caller = null; }
+    gd.alert = Math.max(gd.alert || 0, 1.5);
+    gd._returning = true;
+  }
+  // may this screw join a hunt on the player right now?
+  function mayHunt(gd) {
+    if (!gd || gd.dead || gd.ko > 0) return false;
+    if (gd === leadNow) return true;
+    if (gd._yardCase || gd._escort) return false;          // he has a man of his own
+    if (standDownNow) return false;
+    if (gd.hunt > 0 || againstHim()) return true;
+    if (huntN < LAW.CAP) { huntN++; return true; }
+    return false;
+  }
+  CBZ.lawMayHunt = function (gd) { return !prisonSim() || g.role === "cop" ? true : mayHunt(gd); };
+  CBZ.lawPlayerAct = function () { return actNow; };
+  CBZ.lawStandDown = function () { return prisonSim() && standDownNow; };
+  CBZ.lawSerious = function (fresh) {
+    if (!prisonSim()) return null;
+    if (fresh) { seriousNow = readSerious(); seriousT = LAW.SERIOUS_EVERY; }
+    return seriousNow;
+  };
+  CBZ.lawRiotAt = function () { return seriousNow === "riot" ? riotAt : null; };
+
+  /* One pass a frame: what he is doing, who is dealing with him, and every
+     hunter past what the act is worth stood back (nearest kept). */
+  function lawPass(dt) {
+    actNow = readAct(dt);
+    standDownNow = readStandDown(actNow);
+    seriousT -= dt;
+    if (seriousT <= 0) { seriousT = LAW.SERIOUS_EVERY; seriousNow = readSerious(); }
+    if (lastStaffDeathT > (g.elapsed || 0)) lastStaffDeathT = -1e9;   // a new run
+    _hG.length = 0; _hD.length = 0;
+    const px = player.pos.x, pz = player.pos.z;
+    for (const gd of CBZ.guards) {
+      if (gd.dead) {
+        if (!gd._lawDeadSeen) { gd._lawDeadSeen = true; if ((g.elapsed || 0) > 2 && !gd._reinf) lastStaffDeathT = g.elapsed || 0; }
+        continue;
+      }
+      if (gd._lawDeadSeen) gd._lawDeadSeen = false;
+      if (!(gd.hunt > 0) || gd.ko > 0 || gd._escort) continue;
+      _hG.push(gd); _hD.push(Math.hypot(px - gd.group.position.x, pz - gd.group.position.z));
+    }
+    leadNow = readLead();
+    // the incident: opens when he runs or swings, closes when he stops for good
+    const resisting = actNow === "run" || actNow === "fight";
+    if (resisting) {
+      if (!inc.open) { inc.open = true; inc.n++; inc.called = false; inc.caller = null; }
+      inc.calmT = 0;
+      // FLARE: up and fighting (or off) again after giving up, with it on file
+      if (wasStandDown && CBZ.prisonOffenseNow && CBZ.prisonOffenseNow()) g.detection = Math.max(g.detection || 0, 30);
+    } else {
+      inc.calmT += dt;
+      if (standDownNow || inc.calmT > LAW.CALM_S) inc.open = false;
+    }
+    wasStandDown = standDownNow;
+    if (standDownNow) {
+      // the one man finishes it; nobody else is hunting, searching or radioing
+      for (const gd of CBZ.guards) {
+        if (gd === leadNow || gd.dead || gd._escort) continue;
+        const inv = gd.investigate;
+        if (gd.hunt > 0 || gd.radioKind === "backup" || (inv && (inv.looking || inv.type === "search" || inv.type === "visual"))) standBack(gd);
+      }
+      // a man who gave up with it on file: his screw keeps coming for him
+      if (leadNow && !leadNow._escort && CBZ.prisonOffenseNow && CBZ.prisonOffenseNow()) leadNow.hunt = Math.max(leadNow.hunt || 0, 2);
+      g.witnessReportT = 0;
+      if (g.lastKnown) g.lastKnown = null;
+      g.caseSearchCD = Math.max(g.caseSearchCD || 0, 4);
+      huntN = leadNow ? 1 : 0;
+      return;
+    }
+    if (againstHim() || _hG.length <= LAW.CAP) { huntN = _hG.length; return; }
+    // more men on him than a fist fight or a runner is worth: the nearest stay
+    for (let i = 1; i < _hG.length; i++) {
+      const gd = _hG[i], d = _hD[i];
+      let k = i - 1;
+      while (k >= 0 && _hD[k] > d) { _hG[k + 1] = _hG[k]; _hD[k + 1] = _hD[k]; k--; }
+      _hG[k + 1] = gd; _hD[k + 1] = d;
+    }
+    let kept = 0;
+    if (leadNow && _hG.indexOf(leadNow) >= 0) kept = 1;
+    for (let i = 0; i < _hG.length; i++) {
+      const gd = _hG[i];
+      if (gd === leadNow) continue;
+      if (kept < LAW.CAP) { kept++; continue; }
+      standBack(gd);
+    }
+    huntN = kept;
+  }
 
   /* ---- NOISE ---------------------------------------------------------------
      What a crime SOUNDS like, and how far. entities/guards.js's guardHear
@@ -549,9 +729,11 @@
 
   function decayCase(dt) {
     const cf = caseFile();
-    const rate = (g.detection || 0) > 25 || (g.witnessReportT || 0) > 0 ? 0.16 : 0.34;
+    // the file is "active" (cools slowly) only while they are out LOOKING for
+    // you; a man in hand, or one who gave up, is not being searched for
+    const active = !standDownNow && !!(g.lastKnown && g.lastKnown.t > 0);
+    const rate = active ? 0.16 : 0.34;
     cf.corrupt = Math.max(0, (cf.corrupt || 0) - 0.28 * dt);
-    const active = (g.detection || 0) > 25 || (g.witnessReportT || 0) > 0 || (g.lastKnown && g.lastKnown.t > 0);
     let liveTotal = 0;
     for (const r of cf.reports) {
       const credibility = reportCredibility(r);
@@ -590,18 +772,19 @@
     return g.lastKnown;
   }
 
-  function dispatchSearch(amount, meta, reporter, focusGuard) {
+  function dispatchSearch(amount, meta, reporter, focusGuard, maxSend) {
     const lk = storeLastKnown(amount, meta, reporter);
     const guards = [];
     for (const gd of CBZ.guards) {
       // a man asleep, on escort, tied or staring down a muzzle cannot answer a
-      // radio: sending him burned one of the two slots on nobody
-      if (!gd || gd.dead || gd.ko > 0 || gd.corrupt || gd.bribed > 0 || gd.asleep || gd._escort || gd.tied || gd.intimidMode === "scared") continue;
+      // radio: sending him burned one of the two slots on nobody. Nor can a
+      // man with an inmate of his own on the floor (brain_prison.js's case).
+      if (!gd || gd.dead || gd.ko > 0 || gd.corrupt || gd.bribed > 0 || gd.asleep || gd._escort || gd.tied || gd.intimidMode === "scared" || gd._yardCase) continue;
       const dx = lk.x - gd.group.position.x, dz = lk.z - gd.group.position.z;
       guards.push({ gd, d2: dx * dx + dz * dz });
     }
     guards.sort((a, b) => a.d2 - b.d2);
-    const count = Math.min(guards.length, focusGuard ? 3 : 2);
+    const count = Math.min(guards.length, (focusGuard ? 1 : 0) + (maxSend != null ? maxSend : (focusGuard ? 2 : 2)));
     // `looking`: they are out looking for YOU (guards.js: suspicion fills even
     // with no other reason, and sighting you there is a chase)
     if (focusGuard && !focusGuard.dead && !(focusGuard.ko > 0) && !focusGuard.corrupt) {
@@ -720,7 +903,9 @@
       storeLastKnown(amount, meta, gd);
       CBZ.addCasePressure(amount, meta, gd, { guardSeen: true, credibility: 0.94 });
       CBZ.addHeat(amount);
-      gd.hunt = Math.max(gd.hunt || 0, 3.5); gd.alert = 1.0;
+      // he comes for you if the response has room for him; else he watches
+      if (mayHunt(gd)) { gd.hunt = Math.max(gd.hunt || 0, 3.5); gd.alert = 1.0; }
+      else if (!gd._yardCase) gd.alert = Math.max(gd.alert || 0, 1.5);
       // gunfire in front of a screw is an assault on file
       if (meta.type === "gunfire" && CBZ.prisonOffense) CBZ.prisonOffense("assault", { seenBy: gd, severity: 4 });
       return;
@@ -770,6 +955,8 @@
     }
     el.detectLabel.textContent = "Wanted";
 
+    lawPass(dt);
+    const resisting = actNow === "run" || actNow === "fight";
     const zone = zoneOf(player.pos);
     let nearestSeer = Infinity, seenByAnyone = false;
 
@@ -802,7 +989,8 @@
           } else if (!gd.corrupt) {
             if (gd._radioed || g.detection > 18 || (g.witnessReportT || 0) > 0) {
               // the block already knows — he radios your position live
-              CBZ.addHeat(18 * dt);
+              // (not a man on his knees or in hand: that is the arrest)
+              if (!standDownNow) CBZ.addHeat(18 * dt);
             } else if (gd.radioT == null && zone !== "the armory" && d > WARN_DIST * 0.6 &&
                 (gd.warnT == null ? !(gd._warnedZone === zone && (g.elapsed || 0) - (gd._warnedAt || -1e9) < WARN_MEMORY) : gd.warnT > 0)) {
               // THE WARNING: first time, at a distance. He stands and tells you.
@@ -833,19 +1021,26 @@
                 CBZ.prisonOffense(run ? "escape" : "restricted",
                   { seenBy: gd, severity: run ? 4 : zone === "the armory" ? 3 : 2 });
               }
-            } else {
+            } else if (mayHunt(gd)) {
               gd.hunt = Math.max(gd.hunt || 0, 2.2);   // still coming while he has eyes on you
             }
           }
         }
-        if ((g.witnessReportT || 0) > 0 && !gd.corrupt) CBZ.addHeat(8 * dt);
-        // already wanted + spotted → this guard joins the hunt
+        // a sighting while the word is out is heat only while he is still at it
+        if ((g.witnessReportT || 0) > 0 && !gd.corrupt && resisting) CBZ.addHeat(8 * dt);
+        // already wanted + spotted → this guard joins the hunt, if the act is
+        // worth one more man (mayHunt); else he stops and watches
         if ((g.detection > 18 || (g.witnessReportT || 0) > 0) && !gd.corrupt && !(CBZ.prisonLawGrace && CBZ.prisonLawGrace())) {
-          storeLastKnown(10, { type: "visual" }, gd);
-          gd.hunt = Math.max(gd.hunt || 0, 3.0); gd.alert = 1.0; gd.investigate = null; gd.warnT = null;
-          // ...and reaches for his radio (BACKUP above)
-          if (witnessReportOn() && gd.radioT == null && !((gd._backupCD || 0) > 0)) {
-            gd.radioT = BACKUP_CALL_T; gd.radioKind = "backup";
+          if (mayHunt(gd)) {
+            storeLastKnown(10, { type: "visual" }, gd);
+            gd.hunt = Math.max(gd.hunt || 0, 3.0); gd.alert = 1.0; gd.investigate = null; gd.warnT = null;
+            // ...and the man dealing with you calls it in, once, while you run or swing
+            if (witnessReportOn() && resisting && inc.open && !inc.called && !inc.caller &&
+                (!leadNow || leadNow === gd) && gd.radioT == null && !((gd._backupCD || 0) > 0)) {
+              gd.radioT = BACKUP_CALL_T; gd.radioKind = "backup"; inc.caller = gd;
+            }
+          } else if (!gd._yardCase && !gd._escort && !(gd.hunt > 0)) {
+            gd.alert = Math.max(gd.alert || 0, 1.0);
           }
         }
       }
@@ -860,18 +1055,27 @@
         if (calm && gd._radioed && !(gd.hunt > 0)) gd._radioed = false;   // old calls go stale once the block cools
         if ((gd._backupCD || 0) > 0) gd._backupCD -= dt;
         if (gd.radioT == null) continue;
-        if (gd.dead || gd.ko > 0 || gd.tied || gd.bribed > 0) { gd.radioT = null; gd.radioKind = null; continue; }   // silenced — the call never lands
+        if (gd.dead || gd.ko > 0 || gd.tied || gd.bribed > 0) {   // silenced — the call never lands
+          if (gd.radioKind === "backup" && inc.caller === gd) inc.caller = null;
+          gd.radioT = null; gd.radioKind = null; continue;
+        }
         if (gd.intimidMode === "scared") continue;   // a muzzle HOLDS the call; it does not erase it
         gd.radioT -= dt;
         if (gd.radioT > 0) continue;
         if (gd.radioKind === "backup") {
-          // BACKUP LANDS: the nearest free officers go to where HE last had you
           gd.radioT = null; gd.radioKind = null; gd._backupCD = BACKUP_CD;
+          if (inc.caller === gd) inc.caller = null;
+          // he stopped before the mic keyed: there is nothing to call in
+          if (actNow !== "run" && actNow !== "fight") continue;
+          // BACKUP LANDS: as many free officers as the act is worth go to where
+          // HE last had you. No heat: a call is not a new crime.
+          inc.called = true;
           const bx = gd.lkX != null ? gd.lkX : player.pos.x, bz = gd.lkZ != null ? gd.lkZ : player.pos.z;
-          CBZ.addHeat(BACKUP_HEAT);
-          dispatchSearch(10, { type: "visual", lastKnown: { x: bx, z: bz, type: "visual" } }, { data: { name: "a sighting" } }, null);
+          const room = againstHim() ? 3 : Math.max(0, LAW.CAP - huntN);
+          if (room > 0) dispatchSearch(10, { type: "visual", lastKnown: { x: bx, z: bz, type: "visual" } }, { data: { name: "a sighting" } }, null, room);
           if (CBZ.worldSfx) { try { CBZ.worldSfx("switch", gd.group.position.x, gd.group.position.z, { y: 1.6, ref: 6, volume: 0.5, gap: 0.4 }); } catch (e) {} }
-          if (CBZ.prisonSay) { try { CBZ.prisonSay(gd, BACKUP_LINES[(gd.id || 0) % BACKUP_LINES.length]); } catch (e) {} }
+          const lines = seriousNow === "weapon" ? BACKUP_ARMED : actNow === "run" ? BACKUP_RUN : BACKUP_FIGHT;
+          if (CBZ.prisonSay) { try { CBZ.prisonSay(gd, lines[inc.n % lines.length]); } catch (e) {} }
           continue;
         }
         gd.radioKind = null;
@@ -913,8 +1117,14 @@
     } else litNow = false;
     if (litPingT > 0) litPingT -= dt;
 
+    // THE CASE FILE SENDS A SEARCH ONLY WHEN THEY HAVE LOST YOU: nobody has had
+    // eyes on you for LOST_S, and you are not in hand or on your knees. It used
+    // to re-send one every 6-9 s while a screw stood looking at you, and each
+    // one re-armed witnessReportT, which kept every screw who saw you hunting.
+    unseenT = seenByAnyone ? 0 : unseenT + dt;
     const csum = CBZ.caseSummary && CBZ.caseSummary();
-    if (csum && csum.heat > 18 && csum.lastKnown && (!g.lastKnown || g.lastKnown.t <= 0) && (g.caseSearchCD || 0) <= 0 && !(CBZ.prisonLawGrace && CBZ.prisonLawGrace())) {
+    if (csum && csum.heat > 18 && csum.lastKnown && !standDownNow && unseenT > LAW.LOST_S &&
+        (!g.lastKnown || g.lastKnown.t <= 0) && (g.caseSearchCD || 0) <= 0 && !(CBZ.prisonLawGrace && CBZ.prisonLawGrace())) {
       g.caseSearchCD = csum.weak ? 9.0 : 6.0;
       dispatchSearch(
         Math.max(8, Math.min(18, csum.heat * (csum.weak ? 0.26 : 0.36))),

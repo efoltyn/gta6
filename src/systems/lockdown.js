@@ -1,12 +1,11 @@
 /* ============================================================
    systems/lockdown.js — FACILITY LOCKDOWN.
 
-   THE WARDEN ORDERS IT (systems/prisonwarden.js). An assault on staff, an
-   escape, a riot, or the alarm (heat maxed out) on top of other trouble:
-   he calls CBZ.lockdown.begin(reason, {hunt, max}). Heat topping out on its
-   own no longer seals the block; it is reported to him as an "alarm"
-   incident and he decides (a first alarm is a shakedown). With no warden
-   module loaded the old heat trigger still fires. A lockdown is:
+   THE WARDEN ORDERS IT (systems/prisonwarden.js): he calls
+   CBZ.lockdown.begin(reason, {hunt, max}). begin() takes only a real cause:
+   an escape, a weapon, a dead man, a riot, a short count. Heat topping out
+   is not one (a fist fight with a screw is two officers and the hole). A
+   lockdown is:
      • "LOCKDOWN" toast + screen shake (NO red flash, NO red overlay: the
        owner, 2026-09-30, "the screen gets all red ... it's stupid"; the
        siren, the doors racking and the screws running are the lockdown)
@@ -55,7 +54,6 @@
   if (!g) return;
 
   // ---- tunables ----
-  const TRIGGER_HEAT = 99;     // detection at/above this arms the lockdown
   const COOL_HEAT    = 25;     // heat must fall below this to start cooling
   const CLEAR_SECS   = 6.0;    // continuous unseen+cool seconds needed to lift
   const SIREN_EVERY  = 1.2;    // seconds between siren re-fires
@@ -71,7 +69,6 @@
   let huntPlayer = true;       // is the player the reason for this one?
   let maxT = 0;                // the order's own clock (0 = none)
   let reason = "";
-  let alarmArmed = true;       // heat must fall back before it reports again
   // boosted-guard bases live in the shared CBZ.jailBoost ledger (tag
   // "lockdown"); new-run detection shares its elapsed watcher too. The tight
   // 0.001 epsilon is this module's original threshold, kept verbatim.
@@ -104,7 +101,8 @@
       // lockdown ran. entities/guards.js now reads a hunt honestly: chase
       // what he sees, otherwise sweep outward from the last fix the block
       // has (his own sighting, a radio call, a lens). Hiding works.
-      if (huntPlayer && !grace && !(gd.hunt > HUNT_TOPUP)) gd.hunt = HUNT_TOPUP;
+      // (not on a man who has given up or is in hand: one screw finishes that)
+      if (huntPlayer && !grace && !(gd.hunt > HUNT_TOPUP) && !(CBZ.lawStandDown && CBZ.lawStandDown()) && !gd._yardCase) gd.hunt = HUNT_TOPUP;
       // a riot lockdown racks the block; it does not freeze every screw staring
       if (huntPlayer) gd.alert = Math.max(gd.alert || 0, grace ? 0.6 : 1.0);
       // apply the boost once per guard; the ledger remembers its real base
@@ -385,8 +383,21 @@
   let graceSaid = false;
 
   // ---- begin / end ----
+  /* A LOCKDOWN NEEDS A REAL CAUSE (owner, 2026-11: a headbutt on an officer
+     sealed the block and sent every screw at him). An escape, a weapon, a
+     dead man, a riot, a short count. A fist fight with a screw, however hot
+     the heat bar reads, is two officers and the hole, not the whole prison. */
+  function realCause(why) {
+    if (why === "escape" || why === "riot" || why === "gun" || why === "count" || why === "killing") return true;
+    if (why === "assault") {
+      const s = CBZ.lawSerious ? CBZ.lawSerious(true) : "weapon";
+      return s === "weapon" || s === "killing" || s === "escape";
+    }
+    return false;
+  }
   function begin(why, opts) {
     if (active) return false;
+    if (!realCause(why)) return false;
     opts = opts || {};
     active = true;
     reason = why || "heat";
@@ -438,7 +449,7 @@
     graceSaid = false;
     active = false;
     sirenT = 0; clearT = 0; elapsedT = 0;
-    maxT = 0; reason = ""; huntPlayer = true; alarmArmed = true;
+    maxT = 0; reason = ""; huntPlayer = true;
   }
   // leaving play must also hand the block back — the live driver below only
   // runs while playing, so it cannot be the thing that releases.
@@ -467,17 +478,9 @@
     // re-asserted every frame or ai.js's next think walks him back to the yard.
     musterDrive(d);
 
-    if (!active) {
-      // heat topping out is an ALARM, and the warden decides what it is worth
-      const heat = typeof g.detection === "number" ? g.detection : 0;
-      if (heat < TRIGGER_HEAT - 20) alarmArmed = true;
-      if (alarmArmed && heat >= TRIGGER_HEAT) {
-        alarmArmed = false;
-        if (CBZ.warden && CBZ.warden.incident) CBZ.warden.incident("alarm", { player: true, seen: true });
-        else begin("heat", { hunt: true });
-      }
-      return;
-    }
+    // heat topping out is NOT a cause: a lockdown is ordered for what
+    // happened (begin's realCause), never off the bar
+    if (!active) return;
 
     elapsedT += d;
 

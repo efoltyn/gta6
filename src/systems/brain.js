@@ -1807,7 +1807,10 @@
      then he is blown and jogs until he has his breath back. The cuff rung
      waits on the REAL verb (a session or an arrest take: done + outcome):
      cuffs that were fought off are an escalation, not a "cuffed". */
-  const ARREST = { COMPLY_SPD: 0.6, COMPLY_HOLD: 0.6, FLEE_SPD: 2.2, FLEE_HOLD: 0.55, TASE_R: 5.5, TACKLE_R: 2.6, GRAB_R: 1.5, AFTER_TASE: 3.0, LOSE_R: 15, CUFF_T: 1.5, CUFF_MAX: 14, FRISK_T: 1.1, ESC_T: 0.4, TASE_RELOAD: 2.6, RUN_FOR: 9 };
+  // (2026-11, owner: "make the cops a little less fast to arrest": the hold
+  // that reads as compliance, the run that reads as fleeing, the beat from
+  // "he is resisting" to the taser and the calm cuffs each ~30% longer)
+  const ARREST = { COMPLY_SPD: 0.6, COMPLY_HOLD: 0.8, FLEE_SPD: 2.2, FLEE_HOLD: 0.75, TASE_R: 5.5, TACKLE_R: 2.6, GRAB_R: 1.5, AFTER_TASE: 3.0, LOSE_R: 15, CUFF_T: 1.9, CUFF_MAX: 14, FRISK_T: 1.1, ESC_T: 0.6, TASE_RELOAD: 2.6, RUN_FOR: 9 };
   // the cop's rung as a ladder step, for the voice book (systems/voice.js)
   const COP_STEP = { observe: "demand", warn: "demand", order: "warn", approach: "comply", cuff: "comply", frisk: "comply",
     escalate: "show", force: "act", lethal: "show", done: "comply", released: "comply", warned: "comply", orderArmed: "warn" };

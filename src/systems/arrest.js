@@ -585,6 +585,9 @@
   };
   A.tase = function (officer, opts) {
     opts = opts || {};
+    // anybody else (an inmate the yard law is taking): the same probes, the
+    // same odds, the same lock and fall (taseActor below)
+    if (opts.target && !isPlayerA(opts.target)) return taseActor(officer, opts.target, opts);
     const P = CBZ.player, op = posOf(officer);
     if (!P || !op || P.dead) return { hit: false, d: 99 };
     const d = Math.hypot(P.pos.x - op.x, P.pos.z - op.z);
@@ -684,6 +687,7 @@
     return o;
   }
   A.take = function (officer, opts) {
+    if (opts && opts.target && !isPlayerA(opts.target)) return takeActor(officer, opts.target, opts);
     const Vb = V();
     if (!Vb || !officer || officer.dead || !CBZ.player || CBZ.player.dead) return null;
     if (playerInVehicle()) return null;              // pulled out first, or nothing
@@ -923,43 +927,7 @@
       }
       h._crouch = crouch;
       // THE MARCH: he walks, you go where his hands send you
-      const goal = typeof h.opts.to === "function" ? h.opts.to(h) : h.opts.to;
-      if (goal && isFinite(goal.x) && isFinite(goal.z)) {
-        const dx = goal.x - P.pos.x, dz = goal.z - P.pos.z, d = Math.hypot(dx, dz);
-        if (d <= (h.opts.arrive || 0.6)) {
-          h.phase = "arrived";
-          h.result = { outcome: "arrived" };
-          cb(h, "onArrived");
-          return;
-        }
-        // round the walls, not through them: the nav grid's path, re-planned
-        // as he goes (the next corner is where he steers you)
-        let tx = goal.x, tz = goal.z;
-        const NG = CBZ.navGrid;
-        if (NG && NG.plan && NG.ready && NG.ready() && (!NG.inWindow || NG.inWindow(P.pos.x, P.pos.z))) {
-          h.pathT = (h.pathT || 0) - dt;
-          const key = goal.x.toFixed(1) + "," + goal.z.toFixed(1);
-          if (!h.path || h.pathKey !== key || h.pathT <= 0) {
-            let path = null;
-            try { path = NG.plan({ x: P.pos.x, z: P.pos.z }, { x: goal.x, z: goal.z }); } catch (e) { path = null; }
-            h.path = path && path.length ? path : null; h.pathKey = key; h.pathT = 2.5; h.pi = 0;
-          }
-          if (h.path) {
-            while (h.pi < h.path.length - 1 && Math.hypot(h.path[h.pi].x - P.pos.x, h.path[h.pi].z - P.pos.z) < 0.8) h.pi++;
-            const wp = h.path[h.pi];
-            if (wp && h.pi < h.path.length - 1) { tx = wp.x; tz = wp.z; }
-          }
-        }
-        let ux = tx - P.pos.x, uz = tz - P.pos.z;
-        const ul = Math.hypot(ux, uz) || 1; ux /= ul; uz /= ul;
-        const pace = (h.opts.walk || 1.35) * (crouch ? 0.3 : 1) * (S.cst && S.cst.pullNow > 0 ? 0.6 : 1);
-        Vb.walk(S, S, tx - ux * S.work, tz - uz * S.work, pace, dt, Math.atan2(ux, uz));
-        const lp = h.lastP || (h.lastP = { x: P.pos.x, z: P.pos.z });
-        const moved = Math.hypot(P.pos.x - lp.x, P.pos.z - lp.z);
-        lp.x = P.pos.x; lp.z = P.pos.z;
-        h.stall = moved < pace * dt * 0.2 && !crouch ? h.stall + dt : 0;
-        if (h.stall > 2.5 && typeof h.opts.onStall === "function") { h.stall = 0; cb(h, "onStall"); }
-      }
+      if (march(h, S, P.pos, dt, (crouch ? 0.3 : 1) * (S.cst && S.cst.pullNow > 0 ? 0.6 : 1), crouch)) return;
       // A CREWMATE JUMPS HIM: your people near you, the odds of them trying
       h.crewT -= dt;
       if (h.crewT <= 0 && typeof h.opts.crew === "function") {
@@ -988,6 +956,228 @@
     }
   }
   A.release = function () { if (live) end(live, "arrived"); };
+
+  /* THE MARCH, for any held body at `tp`: to the take's goal round the walls
+     (the nav grid's path, re-planned as he goes: the next corner is where he
+     steers him), the officer a work-length behind. true = arrived (the
+     onArrived callback has run). */
+  function march(h, S, tp, dt, paceK, dragging) {
+    const Vb = V();
+    const goal = typeof h.opts.to === "function" ? h.opts.to(h) : h.opts.to;
+    if (!goal || !isFinite(goal.x) || !isFinite(goal.z)) return false;
+    const dx = goal.x - tp.x, dz = goal.z - tp.z, d = Math.hypot(dx, dz);
+    if (d <= (h.opts.arrive || 0.6)) {
+      h.phase = "arrived";
+      h.result = { outcome: "arrived" };
+      cb(h, "onArrived");
+      return true;
+    }
+    let tx = goal.x, tz = goal.z;
+    const NG = CBZ.navGrid;
+    if (NG && NG.plan && NG.ready && NG.ready() && (!NG.inWindow || NG.inWindow(tp.x, tp.z))) {
+      h.pathT = (h.pathT || 0) - dt;
+      const key = goal.x.toFixed(1) + "," + goal.z.toFixed(1);
+      if (!h.path || h.pathKey !== key || h.pathT <= 0) {
+        let path = null;
+        try { path = NG.plan({ x: tp.x, z: tp.z }, { x: goal.x, z: goal.z }); } catch (e) { path = null; }
+        h.path = path && path.length ? path : null; h.pathKey = key; h.pathT = 2.5; h.pi = 0;
+      }
+      if (h.path) {
+        while (h.pi < h.path.length - 1 && Math.hypot(h.path[h.pi].x - tp.x, h.path[h.pi].z - tp.z) < 0.8) h.pi++;
+        const wp = h.path[h.pi];
+        if (wp && h.pi < h.path.length - 1) { tx = wp.x; tz = wp.z; }
+      }
+    }
+    let ux = tx - tp.x, uz = tz - tp.z;
+    const ul = Math.hypot(ux, uz) || 1; ux /= ul; uz /= ul;
+    const pace = (h.opts.walk || 1.35) * (paceK > 0 ? paceK : 1);
+    Vb.walk(S, S, tx - ux * S.work, tz - uz * S.work, pace, dt, Math.atan2(ux, uz));
+    const lp = h.lastP || (h.lastP = { x: tp.x, z: tp.z });
+    const moved = Math.hypot(tp.x - lp.x, tp.z - lp.z);
+    lp.x = tp.x; lp.z = tp.z;
+    h.stall = moved < pace * dt * 0.2 && !dragging ? h.stall + dt : 0;
+    if (h.stall > 2.5 && typeof h.opts.onStall === "function") { h.stall = 0; cb(h, "onStall"); }
+    return false;
+  }
+
+  /* ============================================================
+     THE SAME HANDS ON ANYBODY ELSE. Owner, 2026-11: "make it so non players
+     can get arrested and tased too, not just my player." This file's taser
+     and take were the player's alone: every clock and every position in
+     them was CBZ.player's, so the prison's yard law (systems/brain_prison.js)
+     shot inmates with a private always-hits taser and cuffed them on the
+     spot with nobody walking them anywhere. Now the same calls take a
+     `target`:
+       A.tase(officer, { target })  the same odds (range, how fast he is
+             moving, the officer's tier), the same probes, a miss is a miss;
+             a hit locks him (CBZ.vitals) and drops him along the line of the
+             shot once the darts land.
+       A.take(officer, { target, to, onCuffed, onArrived, onBroke, ... })
+             the cuff verb (on the floor if he is down), then the escort
+             verb walked to `to` by march() above. What is the player's
+             alone stays his: the input contest, his wind, his crew.
+     One officer, one man: an officer (or a man) already in a take is refused.
+     ============================================================ */
+  const others = [];       // live takes on bodies that are not the player
+  const otherTases = [];   // probes in the air at somebody else
+  function taseActor(officer, t, opts) {
+    const op = posOf(officer), tp = posOf(t);
+    if (!op || !tp || !t || t.dead) return { hit: false, d: 99 };
+    const d = Math.hypot(tp.x - op.x, tp.z - op.z);
+    if (!(d <= TASE.RANGE)) return { hit: false, d: d };
+    let riding = false;
+    const Vt = vitalsTase();
+    if (Vt) { try { riding = Vt.state(t) === "tased"; } catch (e) { riding = false; } }
+    for (let i = 0; i < otherTases.length && !riding; i++) if (otherTases[i].t === t) riding = true;
+    if (riding) return { hit: true, d: d, busy: true };
+    const sp = Math.hypot(t._vx || 0, t._vz || 0);
+    const p = opts.chance != null ? opts.chance : A.taseChance(d, sp, A.tier(officer).taseHit);
+    const hit = (opts.rng ? opts.rng() : Math.random()) < p;
+    const fly = Math.min(0.2, Math.max(0.05, d / TASE.PROBE_SPEED));
+    if (CBZ.taserFx && CBZ.taserFx.actorTaseActor) { try { CBZ.taserFx.actorTaseActor(officer, t, { hit: hit, fly: fly }); } catch (e) {} }
+    if (CBZ.worldSfx) { try { CBZ.worldSfx("tase", tp.x, tp.z, {}); } catch (e) {} }
+    if (!hit) return { hit: false, d: d };
+    const l = d || 1;
+    otherTases.push({ t: t, by: officer, at: 0, fly: fly, dx: (tp.x - op.x) / l, dz: (tp.z - op.z) / l });
+    return { hit: true, d: d };
+  }
+  function stepOtherTases(dt) {
+    for (let i = otherTases.length - 1; i >= 0; i--) {
+      const T = otherTases[i];
+      T.at += dt;
+      if (T.at < T.fly) continue;
+      otherTases.splice(i, 1);
+      const a = T.t;
+      if (!a || a.dead) continue;
+      // the darts are in: every muscle locks and the legs go, along the shot
+      const Vt = vitalsTase();
+      if (Vt) { try { Vt.tase(a, TASE.STUN, { by: T.by || null, dirX: T.dx, dirZ: T.dz, cause: "taser" }); } catch (e) {} }
+      else a.ko = Math.max(a.ko || 0, TASE.DOWN);
+    }
+  }
+  A.takeOn = function (t) {
+    for (let i = 0; i < others.length; i++) if (others[i].target === t && !others[i].done) return others[i];
+    return null;
+  };
+  function takeActor(officer, t, opts) {
+    const Vb = V();
+    opts = opts || {};
+    if (!Vb || !officer || officer.dead || !t || t.dead || !posOf(t)) return null;
+    for (let i = 0; i < others.length; i++) {
+      const o = others[i];
+      if (o.done) continue;
+      if (o.officer === officer && o.target === t) return o;
+      if (o.officer === officer || o.target === t) return null;   // one officer, one man
+    }
+    const h = {
+      officer: officer, target: t, opts: opts, phase: "reach", done: false, result: null,
+      t: 0, reachT: 0, cuffS: null, escS: null, backupN: 0, said: {}, stall: 0, lastP: null, onGround: false,
+      cancel: function () { end(h, "cancelled"); },
+      finish: function () { end(h, h.result && h.result.outcome ? h.result.outcome : "arrived"); },
+      resume: function () { if (!h.done && h.phase === "arrived") { h.phase = "escort"; h.result = { outcome: "cuffed" }; } },
+    };
+    officer._arresting = true;
+    others.push(h);
+    const ch = rigOfA(t);
+    if (ch && ch.cuffed) {
+      // already in cuffs: a hand on his arm and the walk
+      h.result = { outcome: "cuffed" };
+      cb(h, "onCuffed");
+      if (!h.done) startEscortActor(h);
+      return h;
+    }
+    if (!opts.force && !A.cuffable(t)) { end(h, "refused", "on his feet"); return null; }
+    startCuffActor(h);
+    return h;
+  }
+  function startCuffActor(h) {
+    const Vb = V();
+    const o = { far: 6, onOutcome: function (S, k) { if (k === "cuffed") h._tied = true; } };
+    if (A.downState(h.target)) o.lift = true;          // cuffed on the floor, then up by the arm
+    let S = null;
+    try { S = Vb.cuff(h.officer, h.target, o); } catch (e) { S = null; }
+    h.cuffS = S || null;
+    h.onGround = !!(S && S.ground);
+  }
+  function startEscortActor(h) {
+    const Vb = V();
+    h.phase = "escort"; h.t = 0;
+    if (h.escS && !h.escS.done) return;
+    let S = null;
+    try { S = Vb.escort(h.officer, h.target, { far: true }); } catch (e) { S = null; }
+    h.escS = S || null;
+    h._escTry = (h._escTry || 0) + 1;
+    h.officer._arresting = true;
+  }
+  function stepActorTake(h, dt) {
+    const Vb = V(), off = h.officer, t = h.target;
+    h.t += dt;
+    if (!Vb || !t || t.dead) { end(h, "cancelled", "dead"); return; }
+    const ch = rigOfA(t);
+    if (!off || off.dead || !usable(off)) {
+      const cuffed = !!(ch && ch.cuffed);
+      end(h, cuffed ? "broke" : "escaped", "officer down");
+      cb(h, cuffed ? "onBroke" : "onEscaped", "officer down");
+      return;
+    }
+    if (h.phase === "reach") {
+      const S = h.cuffS;
+      if (!S) {
+        h.reachT += dt;
+        if (h.reachT > 2.4) { end(h, "missed", "out of reach"); cb(h, "onMissed"); return; }
+        if (((h.reachT * 8) | 0) !== (((h.reachT - dt) * 8) | 0)) startCuffActor(h);
+        return;
+      }
+      if (!S.done) return;
+      const k = S.result && S.result.outcome;
+      if (k === "cuffed" || h._tied || (ch && ch.cuffed)) {
+        h.result = { outcome: "cuffed" };
+        // the trigger is off: the taser's lock ends with the cuffs
+        const Vt = vitalsTase();
+        if (Vt && Vt.peek) { try { const R = Vt.peek(t); if (R && R.tasedT > 0) R.tasedT = 0; } catch (e) {} }
+        cb(h, "onCuffed");
+        if (h.done) return;
+        if (h.opts.noEscort) { end(h, "cuffed"); return; }
+        if (A.downState(t)) { h.phase = "rising"; h.t = 0; return; }
+        startEscortActor(h);
+        return;
+      }
+      end(h, k === "escaped" ? "escaped" : "missed", k || "cancelled");
+      cb(h, k === "escaped" ? "onEscaped" : "onMissed");
+      return;
+    }
+    if (h.phase === "rising") {
+      // the lift off the floor is the cuff verb's own get-up; a stall is hurried
+      if (!A.downState(t) || h.t > 3.5) startEscortActor(h);
+      return;
+    }
+    if (h.phase === "escort") {
+      const S = h.escS;
+      if (!S) {
+        if ((h._escTry | 0) < 12 && ((h.t * 6) | 0) !== (((h.t - dt) * 6) | 0)) { startEscortActor(h); return; }
+        if (h.t > 2.5) { end(h, "broke", "no escort"); cb(h, "onBroke", "no escort"); }
+        return;
+      }
+      if (S.done) {
+        const k = S.result && S.result.outcome;
+        end(h, "broke", k || "let go");
+        cb(h, "onBroke", k || "let go");
+        return;
+      }
+      if (S.phase !== "hold") return;
+      // a walk that will not end (a door he cannot open) is handed back to the game
+      if (h.t > (h.opts.walkMax || 40) && typeof h.opts.onStall === "function") { h.t = 0; cb(h, "onStall"); return; }
+      march(h, S, posOf(t), dt, 1, false);
+    }
+  }
+  function tickOthers(dt) {
+    if (otherTases.length) stepOtherTases(dt);
+    for (let i = others.length - 1; i >= 0; i--) {
+      const h = others[i];
+      if (!h.done) stepActorTake(h, dt);
+      if (h.done) others.splice(i, 1);
+    }
+  }
 
   /* ============================================================
      CUFFED AND LOOSE. Tore out of the escort (or his partner was jumped):
@@ -1031,7 +1221,12 @@
     if (dt > 0.1) dt = 0.1;
     clock += dt;
     const m = mode();
-    if (m !== lastMode) { if (live) end(live, "cancelled", "mode"); A.unsubdue(); lastMode = m; looseT = 0; }
+    if (m !== lastMode) {
+      if (live) end(live, "cancelled", "mode");
+      for (let i = 0; i < others.length; i++) end(others[i], "cancelled", "mode");
+      others.length = 0; otherTases.length = 0;
+      A.unsubdue(); lastMode = m; looseT = 0;
+    }
     const P = CBZ.player;
     if (P) {
       // the wind comes back on its own (the prison has no stamina loop)
@@ -1040,6 +1235,7 @@
     }
     if (pendingTase) stepTase(dt);
     if (live && !live.done) stepTake(live, dt);
+    if (others.length || otherTases.length) tickOthers(dt);
     tickLoose(dt);
     // THE BODY RIDES THE TASER: while the one taser clock says tased (or a
     // man is kneeling on him to cuff him), a player on the floor stays on

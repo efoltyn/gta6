@@ -145,6 +145,25 @@
     CBZ.guardWalkTo(g, T.post.x, T.post.z, 3.0, dt, 0.3, false, T.floor);
   }
 
+  /* ---- THE RIFLE STAYS SLUNG ON THE GROUND --------------------------------
+     Owner, 2026-11: "men with rifles show up for a fist fight." A post
+     officer down at chow or roll is a screw like any other: hands, a taser,
+     cuffs. The carbine stays on his back unless it is a carbine's business:
+     a gun or a blade on the floor, a dead officer, a man over the wire, a
+     lockdown, or somebody shooting at him. Up on his deck it is in his hands.
+     (climb.js slings it for the ladder and would draw it again at the foot:
+     when it should stay slung we tell the climb not to.) */
+  function riflePolicy(P, up, lock) {
+    const g = P.g;
+    if (!CBZ.actorHolster || !g.armed || !g.weapon || g.weapon === "Taser") return;
+    const ser = CBZ.lawSerious ? CBZ.lawSerious() : null;
+    const hot = up || lock || P.provokedT > 0 || ser === "weapon" || ser === "escape" || ser === "killing" || ser === "lockdown";
+    const C = CBZ.climb && CBZ.climb.climbing ? CBZ.climb.climbing(g) : null;
+    if (C) { if (!hot) C.redraw = false; return; }
+    if (!hot && !g._holstered) { try { CBZ.actorHolster(g, true); } catch (e) {} }
+    else if (hot && g._holstered) { try { CBZ.actorHolster(g, false); } catch (e) {} }
+  }
+
   /* ---- his rifle from the glass ------------------------------------------ */
   const _m = new THREE.Vector3();
   function aimUp(P, dt) {
@@ -229,10 +248,13 @@
       g.hunt = Math.max(g.hunt || 0, 8); g.alert = 1;
     }
     // down on the ground (at chow, at roll, walking back) he is a screw like
-    // any other: a wanted man in front of him gets run down
+    // any other: a wanted man in front of him gets run down, if the act is
+    // worth one more man (systems/detection.js); else he watches
     if (!up && !player.dead && ((CBZ.game.detection || 0) > 25 || P.provokedT > 0) && CBZ.guardSees && CBZ.guardSees(g)) {
-      g.hunt = Math.max(g.hunt || 0, 4); g.alert = 1;
+      if (P.provokedT > 0 || !CBZ.lawMayHunt || CBZ.lawMayHunt(g)) g.hunt = Math.max(g.hunt || 0, 4);
+      g.alert = 1;
     }
+    riflePolicy(P, up, lock);
     const busy = (g.hunt || 0) > 0 || (g.investigate && g.investigate.t > 0) || g._yardCase || g._doorCase || (g.warnT != null && g.warnT > 0);
     if (busy) {
       // up on the post he does not run down for every noise in the yard: a

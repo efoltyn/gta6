@@ -823,7 +823,7 @@
   function nearestScrew(px, pz, excl, maxR) {
     let best = null, bd = maxR != null ? maxR : Infinity;
     for (const gd of CBZ.guards || []) {
-      if (!arrestGuardOk(gd) || gd.kind === "warden" || gd._escort) continue;
+      if (!arrestGuardOk(gd) || gd.kind === "warden" || gd._escort || gd._yardCase) continue;   // (a man with an inmate of his own stays with him)
       if (excl && excl.indexOf(gd) >= 0) continue;
       if (CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(gd)) continue;
       const d = Math.hypot(px - gd.group.position.x, pz - gd.group.position.z);
@@ -1297,7 +1297,7 @@
   const ARREST = {
     ORDER_R: 4.2,        // m: where the order is given (guards.js reads it)
     STANDOFF: 1.9,       // m: where he stands while you decide
-    WINDOW: 2.2,         // s: the comply window
+    WINDOW: 3.0,         // s: the comply window (was 2.2: a man needs a real beat to hear it and go down)
     COMPLY_SPD: 0.6,     // m/s: under this you are standing still
     COMPLY_HOLD: 0.6,    // s of standing still that reads as "complied"
     FLEE_SPD: 2.2,       // m/s: over this, moving away, is running
@@ -1305,6 +1305,8 @@
     TASE_R: 5.5,         // m: the taser's reach
     LUNGE_R: 2.5,        // m: the tackle is a dive from here, not a sprint from across the yard
     AFTER_TASE: 3.0,     // s after the probes wear off to see what you do
+    DRAW: 0.6,           // s from "he is resisting" to the probes: the taser has to come off the belt
+    BACK_OFF: 2.6,       // m past STANDOFF where a second screw waits while another has you
     LOSE_R: 15,          // m: the order is void, it is a chase again
     WALK_MAX: 28,        // s: a walk to a cell that long is finished off-screen (the elevator law)
   };
@@ -1349,6 +1351,16 @@
     arrest = null;
   }
   CBZ.prisonArrestPhase = function () { return arrest ? arrest.phase : null; };
+  // the one screw dealing with you right now: giving the order, cuffing you,
+  // walking you, or coming to your body (systems/detection.js keeps him on it
+  // and stands every other screw down)
+  CBZ.prisonLawLead = function () {
+    if (arrest && arrest.gd) return arrest.gd;
+    if (haul && haul.gd) return haul.gd;
+    if (down && down.lead) return down.lead;
+    const A = AR(), h = A && A.active ? A.active() : null;
+    return h && h.officer ? h.officer : null;
+  };
   CBZ.lawOrderRange = ARREST.ORDER_R;
 
   function startArrest(gd) {
@@ -1401,9 +1413,11 @@
     if (!off && CBZ.prisonOffense) off = CBZ.prisonOffense("minor", { severity: 2, seenBy: gd });
     if (off) { off.resisted = true; off.severity = Math.max(off.severity, 2); }
     if (gdDist(gd) > ARREST.TASE_R) { cancelArrest(true); return; }
+    // the chase rung fires once the taser is out (DRAW): a man who goes down
+    // on his knees inside that beat is cuffed instead
     a.phase = "chase"; a.t = 0; a.after = 0;
+    a.taseCD = Math.max(a.taseCD || 0, ARREST.DRAW);
     gd._escort = false;
-    tase();
   }
   function tase() {
     const a = arrest, gd = a.gd;
@@ -1806,8 +1820,8 @@
       if (!swinging && d <= ARREST.LUNGE_R && pSpd > 0.8 && a.tackles < 3 && !seizedBy) { tackle(); return; }
       // he went down on his knees for it (or is on the floor): compliance
       // after all. Standing there with his hands down is not: the taser.
-      if (!swinging && pSpd < ARREST.COMPLY_SPD && d <= ESC.REACH + 0.6 && a.t > 0.6 && gaveUp()) { cuffs(false); return; }
-      if (!swinging && pSpd < ARREST.COMPLY_SPD && a.taseCD <= 0 && d <= ARREST.TASE_R && a.t > 1.2) { tase(); return; }
+      if (!swinging && pSpd < ARREST.COMPLY_SPD && d <= ESC.REACH + 0.6 && a.t > 0.8 && gaveUp()) { cuffs(false); return; }
+      if (!swinging && pSpd < ARREST.COMPLY_SPD && a.taseCD <= 0 && d <= ARREST.TASE_R && a.t > 1.6 && !gaveUp()) { tase(); return; }
       return;
     }
     // "tackle": the lunge owns the hold until its onEnd
@@ -1823,7 +1837,7 @@
       // body and, in reach with nothing between, kneels on him for the cuffs
       if (!down.law || gd.kind === "warden" || !arrestGuardOk(gd) || down.excl.indexOf(gd) >= 0) return null;
       if (!down.lead || !arrestGuardOk(down.lead) || down.lead._escort) down.lead = gd;
-      if (down.lead !== gd) return ARREST.STANDOFF + 1.2;
+      if (down.lead !== gd) return ARREST.STANDOFF + ARREST.BACK_OFF;
       if (down.t >= LAW.BEAT && gdDist(gd) <= LAW.NEAR && lineTo(gd) && floorTake(gd)) return ESC.REACH;
       return ESC.REACH;
     }
@@ -1838,7 +1852,7 @@
       if (player.driving) return ARREST.STANDOFF;
     }
     if (arrest) {
-      if (arrest.gd !== gd) return ARREST.STANDOFF + 1.2;
+      if (arrest.gd !== gd) return ARREST.STANDOFF + ARREST.BACK_OFF;   // a second man stands back, he does not ring you
       return arrest.phase === "order" ? ARREST.STANDOFF : arrest.phase === "chase" ? 1.2 : ESC.REACH;
     }
     if (player.captureState && player.captureState !== "normal" && player.captureT > 0) return null;

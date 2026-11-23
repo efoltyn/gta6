@@ -1,17 +1,17 @@
 /* ============================================================
    systems/reinforcements.js — "Guard reinforcements".
 
-   When the block goes loud — HEAT (game.detection) pinned above
-   ~70 for a sustained beat — the towers radio it in and extra
-   officers come pouring down from the corner watchtowers to run
-   you down. We spawn at most ~3 of them, one at a time on a short
-   cooldown, each entering from a tower corner ([-30,-8],[30,-8],
-   [30,52]) with a patrol route bent toward your half of the yard
-   and their HUNT primed so they make a beeline for you.
+   When the block goes loud for a REAL reason (systems/detection.js
+   CBZ.lawSerious: a weapon, an escape, a dead officer, a riot of several
+   men, a lockdown) for a sustained beat, the towers radio it in and
+   extra officers come down from the corner watchtowers. Never off the
+   heat number alone (owner, 2026-11: a fist fight with one screw is not
+   a riot). Against you they hunt you; against a riot they go to it.
+   We spawn at most ~3 of them, one at a time on a short cooldown,
+   each entering from a tower corner ([-30,-8],[30,-8],[30,52]).
 
-   When the heat finally cools — under ~20 for a sustained beat —
-   the call is stood down and the reinforcements we summoned peel
-   off and disappear (group pulled from the scene, geometry/material
+   When the cause is gone for a sustained beat the call is stood
+   down and the reinforcements we summoned peel off and disappear (group pulled from the scene, geometry/material
    freed, spliced out of CBZ.guards). We ONLY ever touch guards we
    spawned ourselves (tagged ._reinf); the regular patrol roster is
    never disturbed.
@@ -30,10 +30,8 @@
   if (!g) return;
 
   // ---- tuning ----------------------------------------------------------
-  const HEAT_CALL = 70;      // heat at/above which the "call it in" timer builds
-  const HEAT_STAND = 20;     // heat at/below which the "stand down" timer builds
-  const CALL_HOLD = 1.6;     // seconds of sustained high heat before the FIRST wave
-  const STAND_HOLD = 4.0;    // seconds of sustained low heat before we recall them
+  const CALL_HOLD = 1.6;     // seconds of a live cause before the FIRST wave
+  const STAND_HOLD = 4.0;    // seconds with no cause before we recall them
   const MAX_REINF = 3;       // never field more than this many of OUR guards
   const MAX_GUARDS = 16;     // hard ceiling on the whole roster (keep phones happy)
   const SPAWN_CD = 3.2;      // min seconds between successive reinforcement spawns
@@ -55,8 +53,8 @@
 
   // ---- run-local state -------------------------------------------------
   const mine = [];           // ONLY the guards we spawned, in spawn order
-  let callT = 0;             // accumulates while heat is high
-  let standT = 0;            // accumulates while heat is low
+  let callT = 0;             // accumulates while the cause is live
+  let standT = 0;            // accumulates while there is none
   let spawnCd = 0;           // cooldown gate between spawns
   let reprimeCd = 0;         // cooldown gate for topping up hunt timers
   let nextSlot = 0;          // round-robins through SPAWNS so waves fan out
@@ -165,8 +163,10 @@
     }
     if (gd.start && gd.start.set) gd.start.set(slot.start[0], 0, slot.start[1]);
     gd.wi = 0;
-    // prime the chase — guards.js reads gd.hunt and runs the player down
-    gd.hunt = HUNT_SECS;
+    // prime the chase when it is you (guards.js reads gd.hunt); a riot is
+    // walked to on the next re-prime
+    const why = CBZ.lawSerious ? CBZ.lawSerious() : null;
+    if (why !== "riot" && !(CBZ.lawStandDown && CBZ.lawStandDown())) gd.hunt = HUNT_SECS;
     gd.alert = 0.8;
 
     mine.push(gd);
@@ -204,7 +204,11 @@
     if (spawnCd > 0) spawnCd -= dt;
     if (reprimeCd > 0) reprimeCd -= dt;
 
-    const heat = g.detection || 0;
+    // what they are called for (detection.js); a fist fight is not on the list
+    const why = CBZ.lawSerious ? CBZ.lawSerious() : null;
+    const hot = why === "weapon" || why === "escape" || why === "killing" || why === "riot" || why === "lockdown";
+    const riot = why === "riot" && CBZ.lawRiotAt ? CBZ.lawRiotAt() : null;
+    const onPlayer = hot && !riot && !(CBZ.lawStandDown && CBZ.lawStandDown());
     const live = countLive();             // also prunes dead/removed refs
 
     // ---- decay arrival-grace timers ----
@@ -215,8 +219,8 @@
       }
     }
 
-    // ---- HIGH HEAT: build the call timer, then send waves ----
-    if (heat >= HEAT_CALL) {
+    // ---- A REAL CAUSE: build the call timer, then send waves ----
+    if (hot) {
       standT = 0;                          // any high reading cancels stand-down
       callT += dt;
       if (callT >= CALL_HOLD) {
@@ -235,33 +239,38 @@
         }
       }
     } else {
-      // heat dipped below the call threshold: stop building toward new waves
+      // the cause is gone: stop building toward new waves
       callT = 0;
     }
 
-    // ---- keep the squad on the hunt while heat is still elevated ----
+    // ---- keep the squad on it while the cause is live ----
     // detection.js only re-primes guards it can see; our responders should
     // doggedly converge even around corners, so we top up their hunt timer
     // on a cheap cooldown as long as the situation is still hot.
-    if (live && heat >= HEAT_STAND && reprimeCd <= 0) {
+    if (live && hot && reprimeCd <= 0) {
       reprimeCd = REPRIME_CD;
       for (let i = 0; i < mine.length; i++) {
         const gd = mine[i];
-        if (!gd || gd.dead || gd.ko > 0) continue;
-        if (gd.hunt <= HUNT_SECS * 0.4) gd.hunt = HUNT_SECS; // refresh before it lapses
+        if (!gd || gd.dead || gd.ko > 0 || gd._yardCase || gd._escort) continue;
+        if (riot) {
+          // a riot is not you: they go to it, and the yard law takes the men
+          if (!(gd.investigate && gd.investigate.type === "riot")) {
+            gd.investigate = { x: riot.x, z: riot.z, t: 8, scan: 0, type: "riot", looking: false, npts: 2 };
+          }
+        } else if (onPlayer && gd.hunt <= HUNT_SECS * 0.4) gd.hunt = HUNT_SECS; // refresh before it lapses
       }
     }
 
     // ---- LOW HEAT: build the stand-down timer, then recall everyone ----
     if (live) {
-      if (heat <= HEAT_STAND) {
+      if (!hot) {
         standT += dt;
         if (standT >= STAND_HOLD) {
           recallAll(true);
           // NO HINT either — the squad walking off IS the stand-down.
         }
       } else {
-        standT = 0;                        // still warm — hold the line
+        standT = 0;                        // still live — hold the line
       }
     } else {
       // nobody fielded: nothing to recall, and let the surge announce again
