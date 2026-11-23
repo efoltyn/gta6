@@ -49,7 +49,13 @@
       if (a.char) { a.char.sitting = false; a.char.lying = false; }
       a._propLie = false;
       a.asleep = false;
-      a.group.position.y = 0;
+      // the floor UNDER him, asked from where he lay (bodyfall's own ground):
+      // y = 0 dropped a man killed in an upper-tier bunk through the deck
+      // into the cell below
+      const gp = a.group.position;
+      let fy = 0;
+      if (CBZ.groundAt) { const f = CBZ.groundAt(gp.x, gp.z, gp.y + 0.1); if (Number.isFinite(f)) fy = f; }
+      gp.y = fy;
     }
     const kg = killer && killer.group ? killer.group.position : (killer && killer.pos) || null;
     // the killing round (fpsmode.js gunHit): where it went in, what it was,

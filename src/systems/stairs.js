@@ -183,6 +183,9 @@
         const hd = (s1 - s0) / 2;
         const c = orientedBox(cx, cz, hw, hd, yaw, Math.min(B.y, T.y) - 0.05, B.y + h);
         c.stairSoffit = true;
+        // the band sits UNDER the treads: a vault or mantle "over" it is a
+        // body carried through the steps above it (physics.js traversal)
+        c.noVault = true;
         CBZ.colliders.push(c); cols.push(c);
         if (spec.cols) spec.cols.push(c);
       }

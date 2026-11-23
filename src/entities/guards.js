@@ -835,6 +835,17 @@
     const m = CBZ.moves.motor(g);
     g.group.rotation.y = CBZ.moves.faceAt(m, g.group.rotation.y, p, x, z, dt, k >= 0.005 ? 2.2 : 0);
   }
+  /* TURNING ROUND TO THE HAND IN HIS POCKET (systems/reactions.js
+     npcFeltHand). Quick, but a man's half-turn (~0.9 s), not the 0.55 s
+     standing snap every "face him" order uses: his head is already on you
+     (the stare), the body follows it round. */
+  const FELT_TURN = 3.6;   // rad/s
+  function feltTurn(g, dt) {
+    const p = g.group.position;
+    const dx = player.pos.x - p.x, dz = player.pos.z - p.z;
+    if (dx * dx + dz * dz < 1e-4) return;
+    g.group.rotation.y = CBZ.moves.faceAt(CBZ.moves.motor(g), g.group.rotation.y, p, player.pos.x, player.pos.z, dt, FELT_TURN);
+  }
   function wrapA(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
   // the head leads the body: a yaw offset on the neck, ADDITIVE (facial.js and
   // reactions.js add and remove their own offsets on the same channel)
@@ -1427,10 +1438,16 @@
     if (g.investigate) g.investigate = null;
 
     // ---- SUSPICIOUS ----------------------------------------------------------
+    // (a hand he felt in his pocket, systems/reactions.js npcFeltHand: he turns
+    // round to the man it belonged to, seen or not — he knows where it came from)
+    const felt = (g._feltT || 0) > 0;
     const sus = g.sus || 0;
     if (sus >= SUS_ON || (g.state === "suspicious" && sus > SUS_OFF)) {
       // head first, then the body comes round
-      if (g.susX != null) {
+      if (felt) {
+        lookAtPoint(g, player.pos.x, player.pos.z);
+        feltTurn(g, dt);
+      } else if (g.susX != null) {
         lookAtPoint(g, g.susX, g.susZ);
         faceTo(g, g.susX, g.susZ, 0.08, dt);
       }
@@ -1448,7 +1465,8 @@
     if (g.alert > 0) {
       // stop and watch: the man if he can see him, else where he last had him
       noteState(g, "alert");
-      if (g.seesPlayer) faceTo(g, player.pos.x, player.pos.z, 0.0001, dt);
+      if (felt) feltTurn(g, dt);
+      else if (g.seesPlayer) faceTo(g, player.pos.x, player.pos.z, 0.0001, dt);
       else if (g.susX != null && (g.susHold || 0) > -4) faceTo(g, g.susX, g.susZ, 0.01, dt);
       g.alert -= dt;
       stand(g, dt);

@@ -616,17 +616,53 @@
     if (!ch || CBZ.game.mode !== "escape" || !CBZ.charReach) return 0;
     return CBZ.charReach(ch, opts || {});
   }
-  function playerReach(actor, high) {
-    const a = actor && (actor.group && actor.group.position);
-    const P = CBZ.player;
-    let side = -1;
-    if (a && P && P.pos && CBZ.playerChar && CBZ.playerChar.group) {
-      // reach across the body or out to the side, whichever the mark is on
-      const yaw = CBZ.playerChar.group.rotation.y || 0;
-      const dx = a.x - P.pos.x, dz = a.z - P.pos.z;
-      side = (dx * Math.cos(yaw) - dz * -Math.sin(yaw)) >= 0 ? 1 : -1;
+  /* THE HAND GOES INTO HIS POCKET. The reach used to be one fixed arm pose,
+     picked by a side test with the wrong sign (+dz·sin for -dz·sin), played
+     wherever the mark stood: from three metres away it was a hand groping
+     air beside a man who then flinched. Now the near arm is SOLVED onto the
+     mark's hip on the side you stand at (character.js reach kind "pocket"),
+     live, so the hand slips in at the pocket and back out, and stays on it if
+     he moves while it is in there. */
+  let _hipA = null, _hipB = null;
+  function nearHip(markCh, fx, fz) {
+    const P = markCh && markCh.parts;
+    if (!P || !P.ll || !P.rl || !P.ll.parent || typeof THREE === "undefined") return null;
+    if (!_hipA) { _hipA = new THREE.Vector3(); _hipB = new THREE.Vector3(); }
+    P.ll.getWorldPosition(_hipA); P.rl.getWorldPosition(_hipB);
+    const da = (_hipA.x - fx) * (_hipA.x - fx) + (_hipA.z - fz) * (_hipA.z - fz);
+    const db = (_hipB.x - fx) * (_hipB.x - fx) + (_hipB.z - fz) * (_hipB.z - fz);
+    return da <= db ? P.ll : P.rl;
+  }
+  // `ch` (standing at `from`) puts a hand in the pocket of the rig `markCh` (at `at`)
+  function reachPocket(ch, from, markCh, at, dur) {
+    if (!ch || !ch.group || !from || !at) return 0;
+    const yaw = ch.group.rotation.y || 0;
+    const dx = at.x - from.x, dz = at.z - from.z;
+    // which side of me he is on, in my own frame (+x is the rig's left arm)
+    const lx = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+    const hip = nearHip(markCh, from.x, from.z);
+    return showReach(ch, { arm: lx >= 0 ? "l" : "r", side: 1, high: 0, dur: dur || 0.62,
+      kind: hip ? "pocket" : "", target: hip });
+  }
+  /* A HAND IS AN ARM LONG. Pickpocket is offered from a few metres; a hand
+     in a pocket happens at arm's length. So the player takes one step in
+     (CBZ.verbs.step: his feet move, the root follows through the one mover,
+     never a wall), to just outside the contact solver's two bodies
+     (systems/humancontact.js) so the step is never read as walking into him. */
+  const STEP_IN_MAX = 0.6, MARK_R = 0.36, STEP_IN_GAP = 0.1;
+  function playerReach(actor) {
+    const at = actor && actor.group && actor.group.position;
+    const P = CBZ.player, pc = CBZ.playerChar;
+    if (!at || !P || !P.pos || !pc) return 0;
+    const dx = at.x - P.pos.x, dz = at.z - P.pos.z, d = Math.hypot(dx, dz);
+    const go = Math.min(STEP_IN_MAX, d - ((P.radius || 0.38) + MARK_R + STEP_IN_GAP));
+    const V = CBZ.verbs;
+    let stepped = false;
+    if (go > 0.08 && d > 1e-3 && V && V.step && !(P.vy > 0.5)) {
+      try { stepped = !!V.step(V.playerActor ? V.playerActor() : P, dx / d, dz / d, go, 0.3); } catch (e) { stepped = false; }
     }
-    return showReach(CBZ.playerChar, { arm: side > 0 ? "r" : "l", side: side, high: high || 0, dur: 0.62 });
+    // a step in stretches the reach so the hand is in the pocket once the feet land
+    return reachPocket(pc, P.pos, actor.char, at, stepped ? 0.8 : 0.62);
   }
 
   /* A KEY YOU TOOK OFF A MAN IS THE SAME KEY THAT WAS LYING ON THE DESK.
@@ -984,7 +1020,7 @@
     // the warden on his feet with an officer near is a long shot, never a
     // locked pocket: a hand that gets caught is the guards' business
     const chance = wardenShielded(actor) ? Math.max(0.05, stealOdds(actor) * 0.25) : stealOdds(actor);
-    playerReach(actor, guardish ? 0 : 0.15);     // the hand moves either way
+    const rdur = playerReach(actor);             // the hand moves either way
     if (rng() < chance) {
       // the grab is bounded by the ROLL and by his actual pockets
       const grab = 3 + Math.floor(rng() * (guardish ? 12 : 6));
@@ -1003,11 +1039,6 @@
         if (CBZ.addRacketStanding) CBZ.addRacketStanding(-5);
       }
       noteRead(guardish ? "badge" : "wealth", guardish ? 8 + loot * 0.35 : 4 + loot * 0.7, nm(actor), guardish ? 15 : 12);
-      // A POCKET IS NOT A TILL. `coin` is handleCoins — right for the payoff
-      // above, wrong for a hand going into a guard's belt pouch and coming
-      // back with his keys. `loot` IS that recording (beltHandle/drop, 45 dB),
-      // and it is the only physical tell a successful lift has: there is no
-      // pickpocket ARM ANIMATION on the rig — see the note in the failure leg.
       // A POCKET IS NOT A TILL. `coin` is handleCoins — right for the payoff
       // above, wrong for a hand going into a guard's belt pouch and coming
       // back with his keys. `loot` IS that recording (beltHandle/drop, 45 dB).
@@ -1041,7 +1072,7 @@
         addLoyalty(actor, -30);
         actor.alert = Math.max(actor.alert || 0, 0.5);
         addRespect(actor, -4);
-        caughtBody(actor);
+        caughtBody(actor, rdur);
         return { ok: false, msg: pick(VOICE.guardCaughtBought) };
       }
       CBZ.reportCrime(55, { type: "steal", actorRole: g.role });
@@ -1050,7 +1081,7 @@
       actor.bribed = 0;
       addLoyalty(actor, -40);
       addRespect(actor, -8);
-      caughtBody(actor);
+      caughtBody(actor, rdur);
       return { ok: false, msg: caughtLine(actor) };
     }
     CBZ.reportCrime(16, { type: "steal", actorRole: g.role });
@@ -1060,7 +1091,7 @@
     if (actor.gang >= 0) nudgeGang(actor, -5, 1);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "steal", 5, { source: "failed theft" });
     noteRead("snitch", 10, nm(actor), 14);
-    caughtBody(actor);
+    caughtBody(actor, rdur);
     return { ok: false, msg: caughtLine(actor) };
   }
   // a hand caught in his pocket: the one picker (systems/voice.js), his role's words
@@ -1070,12 +1101,14 @@
   /* A MAN WHO FEELS YOUR HAND IN HIS POCKET. This used to be an "!" over his
      head (CBZ.npcEmote, and systems/markers.js's disc once his grudge sent
      him to the screws). OWNER: "no emojis over heads, it should be bodily
-     movement." So: one step off you, his hand clamped over the pocket, body
-     turned that side away, eyes on your hands. systems/reactions.js owns all
-     three, and systems/markers.js re-arms the clamp whenever you come back
-     inside reach of a man whose grudgeWhy is his pockets. */
-  function caughtBody(actor) {
-    if (CBZ.npcStepBack) CBZ.npcStepBack(actor);
+     movement." So, once the hand is actually in there (`rdur`: the reach's
+     extend), he turns round to you, takes a half step off you if you were
+     already in front of him, clamps his hand over the pocket and keeps his
+     eyes on you. systems/reactions.js CBZ.npcFeltHand owns the body; his own
+     mover turns him. systems/markers.js re-arms the clamp whenever you come
+     back inside reach of a man whose grudgeWhy is his pockets. */
+  function feltDelay(rdur) { return rdur > 0 ? Math.max(0.15, rdur * 0.34) : 0.2; }
+  function caughtBody(actor, rdur) {
     /* THE SECOND CATCH IS A FIST. (OWNER: "what about punching in the face.")
        The first time he feels your hand he covers his pocket. Catch him going
        back in and a man whose temperament retaliates comes at you — the real
@@ -1092,10 +1125,12 @@
         rng() < 0.3 + retaliate * 0.65) {
       actor.huntPlayer = Math.max(actor.huntPlayer || 0, 3.5);
       actor.pocketGuardT = 0;                       // fists, not pockets
-      if (CBZ.npcStare) CBZ.npcStare(actor, 1.2);
+      if (CBZ.npcFeltHand) CBZ.npcFeltHand(actor, { delay: feltDelay(rdur), fists: true });
+      else if (CBZ.npcStare) CBZ.npcStare(actor, 1.2);
       return;
     }
-    if (CBZ.npcGuardPockets) CBZ.npcGuardPockets(actor, 4);
+    if (CBZ.npcFeltHand) CBZ.npcFeltHand(actor, { delay: feltDelay(rdur), secs: 4 });
+    else if (CBZ.npcGuardPockets) CBZ.npcGuardPockets(actor, 4);
     else if (CBZ.npcStare) CBZ.npcStare(actor, 1.7);
   }
 
@@ -1251,10 +1286,12 @@
     actor._loot = (actor._loot || 0) + taken;
     actor.playerGrudge = (actor.playerGrudge || 0) + 0.7;
     noteRead("wealth", Math.min(8, 2 + taken * 1.4), nm(actor), 10);
-    // SHOW THE HAND — the same reach layer the player's lift plays, on him.
-    // You see an arm come out of your pocket; the counter drops; the sleeve
-    // cue sells it. There is nothing left for a caption to add.
-    showReach(actor.char, { arm: rng() < 0.5 ? "l" : "r", side: -1, high: 0.1, dur: 0.55 });
+    // SHOW THE HAND — the same reach the player's lift plays, on him, into
+    // YOUR pocket. You see an arm come out of it; the counter drops; the
+    // sleeve cue sells it. There is nothing left for a caption to add.
+    if (CBZ.player && CBZ.player.pos && actor.group) {
+      reachPocket(actor.char, actor.group.position, CBZ.playerChar, CBZ.player.pos, 0.55);
+    }
     CBZ.sfx("whoosh");
     return "";
   }

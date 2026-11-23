@@ -5609,18 +5609,33 @@
     }
     return on;
   }
-  const _reachMountGrip = new THREE.Vector3();
+  const _reachMountGrip = new THREE.Vector3(), _reachMountSh = new THREE.Vector3();
+  // a hand in a pocket: the solve aims this far (m) short of the mark's hip
+  // joint along the line from the shoulder, so the hand meets his side and
+  // does not sink into his pelvis
+  const POCKET_SHORT = 0.08;
   // The holster target already exists as a live rig mount. Solve the same
   // shoulder/elbow chain used by mantle grips against that point instead of
   // guessing one pose for every torso and arm length. Because the mount and
   // shoulder are siblings under `body`, body lean/bob cancels out naturally.
-  function reachMountArmSolve(ch, target, arm) {
+  // The same solve serves a target on ANOTHER rig (kind "pocket"); `short`
+  // stops the hand that far before it.
+  function reachMountArmSolve(ch, target, arm, short) {
     const P = ch && ch.profile;
     const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
     if (!P || !part || !target || !target.parent || !ch.body || !ch.group ||
         typeof target.getWorldPosition !== "function" || typeof ch.body.worldToLocal !== "function") return null;
     ch.group.updateMatrixWorld(true);
     target.getWorldPosition(_reachMountGrip);
+    if (short > 0) {
+      part.getWorldPosition(_reachMountSh);
+      const sx = _reachMountSh.x - _reachMountGrip.x, sy = _reachMountSh.y - _reachMountGrip.y, sz = _reachMountSh.z - _reachMountGrip.z;
+      const sl = Math.hypot(sx, sy, sz);
+      if (sl > 1e-4) {
+        const k = Math.min(short, sl * 0.5) / sl;
+        _reachMountGrip.x += sx * k; _reachMountGrip.y += sy * k; _reachMountGrip.z += sz * k;
+      }
+    }
     ch.body.worldToLocal(_reachMountGrip);
     const dx = _reachMountGrip.x - part.position.x;
     let dy = _reachMountGrip.y - part.position.y;
@@ -9319,7 +9334,9 @@
          ch.reachArm          "l" | "r" (default "r")
          ch.reachSide         -1 across the body / +1 out to the side / 0 front
          ch.reachHigh         0 hip pocket (default) .. 1 chest/collar
-         ch.reachAmt          0..1 how far the body commits (default 1) */
+         ch.reachAmt          0..1 how far the body commits (default 1)
+         ch.reachKind/Target  "pocket" + an Object3D on another rig (his hip):
+                              the arm is solved onto it, live, every frame */
     if (ch.reachT > 0) {
       ch.reachT -= dt;
       const rdur = ch.reachDur || 0.62;
@@ -9335,8 +9352,18 @@
       const rsgn = rleft ? 1 : -1;
       const high = ch.reachHigh || 0;               // 0 = hip pocket, 1 = collar
       const across = ch.reachSide == null ? -1 : ch.reachSide;
-      const mountReach = (ch.reachKind === "holster-back" || ch.reachKind === "holster-hip")
-        ? reachMountArmSolve(ch, ch.reachTarget, ch.reachArm) : null;
+      // torso turns a little INTO the reach and leans in; nothing dramatic.
+      // Written BEFORE the solve below: a pocket is on ANOTHER body, so the
+      // shoulder has to be where this frame's lean puts it (a holster mount
+      // rides the torso with the shoulder and does not care either way)
+      ch.body.rotation.y = rsgn * across * 0.22 * renv;
+      ch.body.rotation.x = ch.lean + (0.13 + 0.06 * high) * renv;
+      ch.body.position.y -= 0.05 * renv * (1 - high);
+      // "pocket": the hand solved onto a live point of the mark (his hip,
+      // systems/economy.js reachPocket), stopped a hand's depth short of it
+      const pocket = ch.reachKind === "pocket";
+      const mountReach = (ch.reachKind === "holster-back" || ch.reachKind === "holster-hip" || pocket)
+        ? reachMountArmSolve(ch, ch.reachTarget, ch.reachArm, pocket ? POCKET_SHORT : 0) : null;
       if (rarm && mountReach) {
         // Exact target solve for this body's real arm lengths and live mount.
         // The gun remains welded to this hand during the extend/dwell phase.
@@ -9379,7 +9406,7 @@
         rarm.rotation.z = rsgn * (0.20 - 0.26 * high) * renv;
         rarm.position.z = 0.16 * renv;
       }
-      if (rarmJ && ch.reachKind !== "holster-back" && ch.reachKind !== "holster-hip") {
+      if (rarmJ && !mountReach && ch.reachKind !== "holster-back" && ch.reachKind !== "holster-hip") {
         rarmJ.rotation.x = -(0.85 - 0.30 * high) * renv;
       }
       // the OTHER hand drifts up and out — the distraction, the friendly touch
@@ -9387,10 +9414,6 @@
         rother.rotation.x = -0.34 * renv;
         rother.rotation.z = -rsgn * 0.22 * renv;
       }
-      // torso turns a little INTO the reach and leans in; nothing dramatic
-      ch.body.rotation.y = rsgn * across * 0.22 * renv;
-      ch.body.rotation.x = ch.lean + (0.13 + 0.06 * high) * renv;
-      ch.body.position.y -= 0.05 * renv * (1 - high);
       // and the head looks the other way. This is the whole animation.
       if (ch.neck) {
         ch.neck.rotation.y = -rsgn * across * 0.42 * renv;

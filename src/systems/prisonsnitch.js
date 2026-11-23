@@ -739,6 +739,7 @@
         n.foe = null; n.huntPlayer = 0; n.aiState = "wander";
         n.group.visible = false;
         n.group.position.set(SEG_AT.x, 0, SEG_AT.z);
+        if (CBZ.bodyTeleported) CBZ.bodyTeleported(n);        // a relocation, not a walk: never swept back to a wall
         if (n.target && n.target.set) n.target.set(SEG_AT.x, 0, SEG_AT.z);
         S.log.segs++;
         continue;
@@ -748,7 +749,11 @@
       n._seg = false; n.escaped = false; n.group.visible = true;
       const r = n.region;
       const x = r ? (r[0] + r[1]) * 0.5 : 0, z = r ? (r[2] + r[3]) * 0.5 : -26;
-      n.group.position.set(x, 0, z);
+      // on HIS floor: an upper-tier man's region is on the deck, and y = 0
+      // stood him on the hall floor under it
+      const CB = CBZ.cellblock, cell = CB && CB.cells && n._cellIdx >= 0 ? CB.cells[n._cellIdx] : null;
+      n.group.position.set(x, cell && cell.fy ? cell.fy : 0, z);
+      if (CBZ.bodyTeleported) CBZ.bodyTeleported(n);
       if (n.target && n.target.set) n.target.set(x, 0, z);
       S.seg.splice(i, 1);
     }

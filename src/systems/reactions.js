@@ -66,7 +66,8 @@
   "use strict";
   const CBZ = window.CBZ;
   // a knocked-back body's slide (systems/bodymove.js), cleared at the old 0.5
-  const _kbO = { posture: "stand", radius: 0.3, clearRadius: 0.5, out: { hit: false, nx: 0, nz: 0, c: null, pushed: false, landed: false, y: 0, floor: 0 } };
+  // (floor: a slide across a stair stands on the tread it ends on, this frame)
+  const _kbO = { posture: "stand", radius: 0.3, clearRadius: 0.5, floor: true, out: { hit: false, nx: 0, nz: 0, c: null, pushed: false, landed: false, y: 0, floor: 0 } };
   if (!CBZ) return;
 
   const damp = CBZ.damp || function (c, t, r, dt) { return c + (t - c) * (1 - Math.exp(-r * dt)); };
@@ -149,10 +150,10 @@
   // and his body turns that side off you. Hard-assigned through a clean
   // weight (the guardK pattern below) because animChar re-damps the arm
   // toward its idle every frame and an additive offset cannot HOLD.
-  const POCKET_ARM = -0.42, POCKET_ELBOW = -1.35, POCKET_YAW = 0.5;
-  // STEP BACK (CBZ.npcStepBack): a shove off the player through the shared
-  // _phys knockback slide; 3.2 m/s decays to ~0.45 m of ground.
-  const STEP_BACK_SPEED = 3.2;
+  const POCKET_ARM = -0.42, POCKET_ELBOW = -1.35, POCKET_YAW = 0.4;
+  // STEP BACK (CBZ.npcStepBack): one real footwork step off the player
+  // (CBZ.verbs.step: the feet move, the root follows them, walls respected)
+  const STEP_BACK_DIST = 0.32, STEP_BACK_DUR = 0.36;
   const AIM_ELEV = 0.55;        // max gun-arm elevation correction (rad)
 
   // per-actor reaction record, keyed by the actor object.
@@ -196,7 +197,7 @@
         jailHitT: 0, jailHitX: 0, jailHitZ: 1, jailHitAmp: 0,
         stK: 0, stOff: 0,                          // STARE (CBZ.npcStare) — eased neck yaw + last frame's offset
         avSide: 0, avSeed: (R.size % 7) * 0.37,    // AVERT: which way he turns off you (fixed per bout) + glance phase
-        pkK: 0, px: null, pz: null,                // POCKET GUARD weight (CBZ.npcGuardPockets) + last ground position (walking gate)
+        pkK: 0, pkTw: 0,                           // POCKET GUARD weight (CBZ.npcGuardPockets) + the torso turn it put on this frame
         aimK: 0, aimY: 0, aimP: 0, aimA: 0, hyOff: 0,
         dazeK: 0,
         // seed the detector from the CURRENT value so an actor first seen
@@ -453,6 +454,14 @@
           r.hp = hp;
         }
 
+        // ---- a hand he FELT in his pocket: he answers once it is in there
+        //      (CBZ.npcFeltHand below), not the instant the verb was pressed
+        if (a._feltIn > 0 && !isCity) {
+          a._feltIn -= dt;
+          if (a._feltIn <= 0) { a._feltIn = 0; feltHand(a); }
+        }
+        if (a._feltT > 0) a._feltT -= dt;
+
         // ---- BACK OUT last frame's additive ARM offset so we read the
         //      clean damped base animChar wrote this frame (the body is
         //      assigned outright by animChar, so it needs no back-out). ----
@@ -497,7 +506,10 @@
           if (looking && neck && me && tp && !tgt.dead) {
             const sdx = tp.x - me.x, sdz = tp.z - me.z;
             if (sdx * sdx + sdz * sdz < STARE_RANGE2) {
-              let rel = Math.atan2(sdx, sdz) - a.group.rotation.y;
+              // (minus the torso turn the pocket guard put on last frame: the
+              // neck rides the torso, so the gaze stays on you while he turns
+              // his pocket away)
+              let rel = Math.atan2(sdx, sdz) - a.group.rotation.y - (r.pkTw || 0);
               rel = ((rel + Math.PI) % (Math.PI * 2)) - Math.PI;
               if (rel < -Math.PI) rel += Math.PI * 2;
               // a neck only turns so far; past that he would have to step round
@@ -553,18 +565,40 @@
           if ((a.pocketGuardT || 0) > 0) a.pocketGuardT -= dt;
           // A WALKING MAN DOES NOT HOLD HIS POCKET (owner: "it gets glitchy" —
           // the first cut locked the arm and twisted the torso side-on while
-          // the gait swung the legs). Ground speed from the group position,
-          // minus the knockback slide so a step back does not read as a walk.
-          const gp = a.group.position, kph = a._phys;
-          const mvx = r.px == null ? 0 : (gp.x - r.px) / Math.max(dt, 1e-3) - (kph ? kph.kx || 0 : 0);
-          const mvz = r.pz == null ? 0 : (gp.z - r.pz) / Math.max(dt, 1e-3) - (kph ? kph.kz || 0 : 0);
-          r.px = gp.x; r.pz = gp.z;
-          const walking = mvx * mvx + mvz * mvz > 0.35 * 0.35;
+          // the gait swung the legs). Walking is what his LEGS are doing: the
+          // motor's own speed. It used to be his position change minus the
+          // knockback, which never cancelled cleanly (the slide decays and
+          // the wall clamp moves him too), so a man stepped back by a caught
+          // hand flickered between "walking" and not and his arm flapped.
+          const gp = a.group.position, amv = a._mv;
+          const walking = !!amv && amv.speed > 0.35;
+          // NOR WHILE HE IS TURNING ROUND. The clamp used to blend in on the
+          // frame he felt the hand, i.e. in the middle of his half-turn to you:
+          // the forearm was being folded up while the torso swung under it,
+          // and for a few frames the arm stood out from his side. The hand
+          // goes to the pocket once his body has come round (the gait's own
+          // measured yaw rate, entities/gait.js: no new state here).
+          const gv = a.char && a.char._gv;
+          const turning = !!gv && Math.abs(gv.yawRate || 0) > 1.2;
+          /* AND ONLY AGAINST A MAN IN FRONT OF HIM. The hand covers the pocket
+             from YOU: with you behind him (or at his side) the pose had
+             nothing to answer and the folded forearm stood out at whatever
+             was in front of him. That is what the warden did 0.2 s after a
+             caught lift, before he had even felt it: the steal makes him
+             alert, systems/markers.js covers the pocket of any screw with
+             alert > 0.45 within 7 m, and with you at his back his forearm
+             went out horizontal at the stair rail ahead of him, "reaching for
+             it". cr = cos of your bearing off his nose (only asked while the
+             pocket guard is live). */
+          const PP = CBZ.player && CBZ.player.pos;
+          const pkLive = (a.pocketGuardT || 0) > 0 || r.pkK > 0.001;
+          const cr = pkLive && PP ? Math.cos(Math.atan2(PP.x - gp.x, PP.z - gp.z) - a.group.rotation.y) : 1;
           // and a man coming at you squares up instead (ai.js's huntPlayer /
           // fight own the arms through fightStance)
           const squaring = (a.huntPlayer || 0) > 0 || a.aiState === "fight" || !!(a.char && a.char.fightStance);
-          const pkWant = (a.pocketGuardT || 0) > 0 && !walking && !squaring && !a.dead && !(a.ko > 0) && !(a.koT > 0) &&
+          const pkWant = (a.pocketGuardT || 0) > 0 && cr > 0.45 && !walking && !turning && !squaring && !a.dead && !(a.ko > 0) && !(a.koT > 0) &&
             !a.surrender && !(a.char.handsUp || a.char.surrender) && !(a.armed && !a._holstered) ? 1 : 0;   // a drawn weapon owns the arms
+          r.pkTw = 0;
           if (pkWant || r.pkK > 0.001) {
             r.pkK = damp(r.pkK, pkWant, pkWant ? 12 : 5, dt);
             if (r.pkK < 0.002) r.pkK = 0;
@@ -573,7 +607,16 @@
             if (k && low && low.la) low.la.rotation.x += (POCKET_ELBOW - low.la.rotation.x) * k;
             // body yaw is a channel animChar damps toward 0 every frame, so an
             // additive byOff can never hold the turn — lerp the bone itself.
-            if (k && body) body.rotation.y += (POCKET_YAW - body.rotation.y) * k;
+            // The covered side (the left hand's, +x) turns OFF you, eased in
+            // as you come round in front of him. A fixed +0.5 turned his
+            // pocket INTO a man standing behind him.
+            if (k && body) {
+              const c = (cr - 0.3) * 2;
+              const tw = POCKET_YAW * (c > 1 ? 1 : c < 0 ? 0 : c);
+              const b0 = body.rotation.y;
+              body.rotation.y += (tw - b0) * k;
+              r.pkTw = body.rotation.y - b0;
+            }
           }
 
           if (isCity) {
@@ -1198,11 +1241,14 @@
     CBZ.npcStare(actor, Math.min(1.2, secs || 3));
   };
 
-  /* CBZ.npcStepBack(actor, from, speed) — one step off `from` (default the
-     player) through the shared _phys knockback slide the jail passes above
-     already integrate. Rate-limited per actor so a held state re-arming it
-     every frame reads as one step, not a moonwalk. */
-  CBZ.npcStepBack = function (actor, from, speed) {
+  /* CBZ.npcStepBack(actor, from, dist) — one step off `from` (default the
+     player): a real footwork step (CBZ.verbs.step), his feet moving and his
+     root following them through the one mover (systems/bodymove.js: swept,
+     never through a wall). It was a 3.2 m/s kick into the knockback slide:
+     the ground slid half a metre under a man whose legs stood still, and the
+     vault probe read that slide as a sprint (systems/actorcollide.js).
+     Rate-limited per actor: a held state re-arming it is one step. */
+  CBZ.npcStepBack = function (actor, from, dist) {
     if (!actor || !actor.group || actor.dead || (actor.ko || 0) > 0) return;
     const now = CBZ.now || 0;
     if (now - (actor._stepBackAt || -1e9) < 1400) return;
@@ -1214,10 +1260,47 @@
     let dx = me.x - fp.x, dz = me.z - fp.z;
     const d = Math.hypot(dx, dz) || 1e-4;
     dx /= d; dz /= d;
-    const ph = actor._phys || (actor._phys = { kx: 0, kz: 0 });
-    const v = speed || STEP_BACK_SPEED;
-    ph.kx = (ph.kx || 0) + dx * v; ph.kz = (ph.kz || 0) + dz * v;
+    const D = dist || STEP_BACK_DIST;
+    const V = CBZ.verbs;
+    let stepped = false;
+    if (V && V.step) { try { stepped = !!V.step(actor, dx, dz, D, STEP_BACK_DUR); } catch (e) { stepped = false; } }
+    if (!stepped && CBZ.bodyMove) CBZ.bodyMove(actor, dx * D, 0, dz * D, _kbO);
   };
+
+  /* CBZ.npcFeltHand(actor, opts) — a hand in his pocket that he FELT (the
+     failed lift, systems/economy.js caughtBody). Nothing happens on the press;
+     it happens once the hand is in there (opts.delay: the reach's extend),
+     and then it is what a man does, each channel with one owner:
+       · he stops and turns round to you at a standing man's rate (his own
+         mover turns him: guards.js reads _feltT, npc.js its face order),
+       · you already in front of him: a half step back off the hand,
+       · his hand goes over the pocket, his eyes on you (opts.fists: the man
+         who is about to hit you squares up instead; ai.js owns that). */
+  CBZ.npcFeltHand = function (actor, opts) {
+    if (!actor || !actor.group) return;
+    opts = opts || {};
+    actor._feltIn = opts.delay > 0 ? opts.delay : 0.001;
+    actor._feltFists = !!opts.fists;
+    actor._feltSecs = opts.secs > 0 ? opts.secs : 4;
+  };
+  function feltHand(a) {
+    if (a.dead || (a.ko || 0) > 0 || a.asleep || a.escaped || !a.group) return;
+    const pp = CBZ.player && CBZ.player.pos;
+    if (!pp) return;
+    const me = a.group.position;
+    const bearing = Math.atan2(pp.x - me.x, pp.z - me.z);
+    const rel = bearing - a.group.rotation.y;
+    const ahead = Math.cos(rel) > 0.45;          // within ~63 degrees of his nose
+    a._feltT = 1.8;
+    CBZ.npcStare(a, 1.8);
+    if (a.kind === "guard" || a.kind === "warden") a.alert = Math.max(a.alert || 0, 1.2);
+    else if (a._feltFists) return;                // his hunt turns him and walks him at you
+    else { a._faceYaw = bearing; a._faceTTL = 1.8; a.pause = Math.max(a.pause || 0, 1.2); }
+    // (a screw the noise already sent at you walks to you: no step away first)
+    const coming = (a.hunt || 0) > 0 || !!(a.investigate && a.investigate.t > 0);
+    if (ahead && !coming) CBZ.npcStepBack(a);
+    CBZ.npcGuardPockets(a, a._feltSecs || 4);
+  }
 
   // LATE (89): after animChar (20/22) and facial.js (88) have posed the
   // rig this frame, so our additive offsets sit on a fresh base.

@@ -247,6 +247,7 @@
     const accel = o.accel || DEF.accel, decel = o.decel || DEF.decel;
     const radius = o.radius || DEF.radius;
     m.radius = radius;
+    m.at = CBZ.now;            // stepped this sim step (a stale motor is not a walking body)
     if (m.yaw == null || yaw != null) m.yaw = yaw != null ? yaw : (m.yaw || 0);
 
     // ---- measured ground speed (what the body ACTUALLY did since last step)

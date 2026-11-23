@@ -1003,6 +1003,9 @@
   }
   // move a screw toward (tx,tz), stopping `stop` short of it, facing (fx,fz).
   // Returns the distance still to go.
+  const SCREW_MV = { speed: 3, stop: 0.3, lod: 1, leg: false };
+  const SCREW_NAV = { speed: 3, arrive: 0.55, goalY: 0 };
+  let _screwT = null;
   function screwStep(gd, tx, tz, stop, fx, fz, run, dt) {
     // a screw holding the man (CBZ.verbs) is walked by the verb, not here
     if (CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(gd)) return Math.hypot(tx - gd.group.position.x, tz - gd.group.position.z);
@@ -1015,16 +1018,38 @@
       // THE ONE LOCOMOTION LAYER: arrival, turn rate, the stride the legs get
       const ox = gp.x, oz = gp.z;
       const m = M.motor(gd);
-      M.step(m, gp, gd.group.rotation.y, tx, tz, { speed: sp, stop: stop, lod: 1 }, dt);
+      /* THE WAY THERE (systems/navgrid.js): round the wall, through the door,
+         and up the stair when the man is on the gallery. This walked straight
+         at him and then LIFTED the screw to his height wherever he stood
+         (gp.y damped to the player's y inside 3 m): a screw under the flight
+         or the deck rose through the steel to work on a man above him, and
+         his raised collision band let him walk through the stair's side. His
+         feet are the floor's now (systems/actorcollide.js settleFeet). */
+      let wx = tx, wz = tz, routed = false;
+      // up a tower the way is its ladder (systems/climb.js, as guards.js walkTo)
+      const CL = CBZ.climb;
+      const Dc = CL && CL.list && CL.list.length ? CL.detour(gd, tx, player.pos.y, tz) : null;
+      if (Dc && Dc.climbing) return Math.max(0, d - stop);
+      if (Dc) { wx = Dc.x; wz = Dc.z; routed = true; }
+      const NG = CBZ.navGrid;
+      if (!Dc && NG && NG.step && NG.ready && NG.ready()) {
+        const T = _screwT || (_screwT = new THREE.Vector3());
+        T.set(tx, 0, tz);
+        SCREW_NAV.speed = sp; SCREW_NAV.goalY = player.pos.y;
+        if (NG.step(gd, gp, T, dt, SCREW_NAV)) { wx = T.x; wz = T.z; routed = Math.hypot(wx - tx, wz - tz) > 0.3; }
+      }
+      SCREW_MV.speed = sp; SCREW_MV.stop = routed ? 0.3 : stop; SCREW_MV.leg = routed;
+      M.step(m, gp, gd.group.rotation.y, wx, wz, SCREW_MV, dt);
       step = Math.hypot(gp.x - ox, gp.z - oz);
     } else if (step > 0 && d > 1e-4) { gp.x += dx / d * step; gp.z += dz / d * step; }
-    // a body on the gallery is worked on at the gallery's height
-    if (d < 3) gp.y = CBZ.damp(gp.y, player.pos.y, 8, dt);
     const ax = fx - gp.x, az = fz - gp.z;
     if (Math.abs(ax) + Math.abs(az) > 1e-3) gd.group.rotation.y = lerpAng(gd.group.rotation.y, Math.atan2(ax, az), 1 - Math.pow(0.0005, dt));
     if (gd.group.rotation.z !== 0) gd.group.rotation.z = CBZ.damp(gd.group.rotation.z, 0, 9, dt);
     if (CBZ.animChar && gd.char) CBZ.animChar(gd.char, step / Math.max(dt, 1e-4), dt);
-    return Math.max(0, d - stop);
+    // a man a storey above or below is not in reach however close he stands
+    // over the screw's head: the height counts (as guards.js's hunt counts it)
+    const lift = Math.max(0, Math.abs(player.pos.y - (gp.y || 0)) - 0.9) * 3;
+    return Math.max(0, (lift > 0 ? Math.hypot(d, lift) : d) - stop);
   }
   /* NO RED SCREEN. This file used to fire the full-screen #flash (a #ff2a3a
      wash at 55%) on every blow, fall, tase, tower round, haul and death, so a

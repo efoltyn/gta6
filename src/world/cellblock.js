@@ -1922,17 +1922,23 @@
       pushBox(gal, x, y - 0.08, WZ - 0.006, 0.08, 0.12, 0.012);
     }
     // the handrail's collider: a stepped band the rail's own 6 cm thick, on
-    // the flight's north edge (outside the walk lane, never across it)
+    // the flight's north edge (outside the walk lane, never across it). It is
+    // the flight's SIDE: nobody vaults or mantles across it, onto the treads
+    // or off them (a shoved man used to be read as a runner and hauled over)
     for (let i = 0; i < NP; i++) {
       const xa = xB + side * run * (i / NP), xb = xB + side * run * ((i + 1) / NP);
       const y = FY * (i / NP);
-      solid(Math.min(xa, xb), SZ0, Math.max(xa, xb), SZ0 + 0.06, y, y + FY / NP + 1.0);
+      solid(Math.min(xa, xb), SZ0, Math.max(xa, xb), SZ0 + 0.06, y, y + FY / NP + 1.0).noVault = true;
     }
-    // the walk surface + soffit + AI link: the one stair system
+    // the walk surface + soffit + AI link: the one stair system. `steps: N`
+    // makes the surface the N plates drawn above (tread i over the i-th N-th
+    // of the run, top i * rise): the straight nosing line lay up to a riser
+    // under every plate, so everybody on this flight walked with his feet in
+    // the steel.
     if (CBZ.stairs) {
       const f = CBZ.stairs.flight({
         bottom: { x: xB, y: LIFT, z: zc }, top: { x: xT, y: FY + LIFT, z: zc },
-        width: STAIR_W, underside: true, owner: "cellblock", kind: "stair",
+        width: STAIR_W, underside: true, owner: "cellblock", kind: "stair", steps: N,
       });
       if (f) { for (const c of f.cols) mine.push(c); if (f.link) stairLinks.push(f.link); }
     }

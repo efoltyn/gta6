@@ -532,7 +532,7 @@ document.body.appendChild(b);}}catch(e){}})();
      must load before any mode registers its base (city/mode.js, modes/*). -->
 <script src="src/systems/solidground.js?v=ric0929"></script>
 <!-- THE ONE STAIR SYSTEM: flight walk surfaces + level links + AI routes. Before any world builder (the prison builds at parse time). -->
-<script src="src/systems/stairs.js?v=fixA1122b"></script>
+<script src="src/systems/stairs.js?v=pick1122"></script>
 <!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
 <script src="src/systems/craters.js?v=norim1020"></script>
 <!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
@@ -595,7 +595,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/pushables.js?v=ph1122"></script>
 <script src="src/world/carfx.js?v=r187a"></script>
 <script src="src/world/ground.js?v=outside1122"></script>
-<script src="src/world/cellblock.js?v=outside1122"></script>
+<script src="src/world/cellblock.js?v=pick1122"></script>
 <script src="src/world/yard.js?v=tow929"></script>
 <script src="src/world/razorwire.js?v=dsl3"></script>
 <script src="src/world/towers.js?v=tow929"></script>
@@ -623,7 +623,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=arms1122"></script>
+  <script src="src/entities/character.js?v=pick1122"></script>
   <script src="src/entities/headwear.js?v=anatomy1122"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=r187a"></script>
@@ -649,7 +649,7 @@ document.body.appendChild(b);}}catch(e){}})();
      avoidance, stuck recovery, foot-matched stride, formations). Pure math;
      every AI mover in every game steps through it. Before poses.js so the
      rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
-<script src="src/entities/moves.js?v=jailai1020"></script>
+<script src="src/entities/moves.js?v=pick1122"></script>
 <!-- THE FEET PLANT (entities/gait.js): cadence, stride and the planted-foot
      leg solve every human walks with; animChar calls it (after moves.js). -->
 <script src="src/entities/gait.js?v=butt1022"></script>
@@ -738,7 +738,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=silt1020"></script>
 <script src="src/systems/hud.js?v=noobj1022"></script>
-<script src="src/systems/economy.js?v=day1122"></script>
+<script src="src/systems/economy.js?v=pick1122"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=hold1122"></script>
@@ -800,7 +800,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=day1122+pr3"></script>
+<script src="src/entities/guards.js?v=pick1122"></script>
 <script src="src/entities/searchlight.js?v=day1122+pr4"></script>
 <script src="src/entities/keycard.js?v=day1122"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
@@ -940,13 +940,13 @@ document.body.appendChild(b);}}catch(e){}})();
      Next adopters are one line each — elevators.js (the teleporting cab is
      the reason this exists) and the airliner cabin deck. -->
 <script src="src/systems/platforms_moving.js?v=pres0929b"></script>
-<script src="src/systems/actorcollide.js?v=bodymove1022"></script>
+<script src="src/systems/actorcollide.js?v=pick1122"></script>
 <!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
      transform: clear lie direction, wall depenetration at both ends of the
      body, limb sprawl. entities/npc.js + entities/guards.js call its tick
      from their dead branches; ai.js kill() places. PRISON_CORPSE_V1=false
      restores the legacy feet-pivot flop. -->
-<script src="src/systems/prisoncorpse.js?v=shot1122"></script>
+<script src="src/systems/prisoncorpse.js?v=pick1122"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=worn1123"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
@@ -971,7 +971,7 @@ document.body.appendChild(b);}}catch(e){}})();
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
-<script src="src/systems/capture.js?v=police2c"></script>
+<script src="src/systems/capture.js?v=pick1122"></script>
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
@@ -983,9 +983,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
 <script src="src/systems/prisonwarden.js?v=police2c"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
-<script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
+<script src="src/systems/prisonsnitch.js?v=pick1122"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
-<script src="src/systems/reactions.js?v=hold1122-ph5"></script>
+<script src="src/systems/reactions.js?v=pick1122"></script>
 <script src="src/systems/facial.js?v=anatomy1122"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=c1122"></script>

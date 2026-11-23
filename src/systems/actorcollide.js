@@ -20,8 +20,9 @@
    cast every frame right after they move, with the express job of stopping
    them walking through things — this file. So the vault is wired here: one
    hook, and guards, inmates and any bot roster borrowing the prison get it at
-   once, with no edit to a single mover. Heading is measured from the frame's
-   real displacement (no mover has to publish one), and a body the traversal
+   once, with no edit to a single mover. Speed and heading are the body's own
+   walking motor (CBZ.moves `_mv`), never its displacement (a shove is not a
+   run: see traverse() below), and a body the traversal
    owns is dropped from the separation/clamp lists so the shared wall resolver
    cannot shove it back off the table it is crossing.
 ============================================================ */
@@ -110,7 +111,6 @@
      since the last frame crossed a face: stopped on it, the rest slid along
      it. Relocations (CBZ.bodyTeleported, a jump past the net's 6 m) are
      left alone, as everywhere. */
-  let tick = 0;
   function clampOut(a) {
     const p = posOf(a);
     const feet = (p.y || 0) + FOOT_CLEAR, head = (p.y || 0) + BODY_H;
@@ -122,18 +122,24 @@
   const list = [];
   const playerEntry = { _p: true, pos: null, r: 0 };
 
-  // THE MEASUREMENT THAT MATTERS IS THE ATTEMPTED STEP, NOT THE ACHIEVED ONE.
-  // A body grinding a table face is exactly the body that should vault it, and
-  // it is also the body whose achieved displacement is ZERO — the mover pushes
-  // it into the box and the clamp at the bottom of this file pushes it straight
-  // back out. So the reference sample is taken AFTER the clamp (stampRest, end
-  // of the updater) and read BEFORE the next frame's clamp, which makes the
-  // difference the full step the mover tried to take. Measuring it the obvious
-  // way instead (pre-clamp to pre-clamp) reads ~0 for precisely the actors this
-  // exists for, and the probe never fires. That cost one probe round to find.
-  function stampRest(a) {
-    const p = a._p ? a.pos : a.group.position;
-    a._acX = p.x; a._acZ = p.z; a._acF = tick;
+  /* A VAULT IS SOMETHING A RUNNER DOES, NOT SOMETHING THAT HAPPENS TO A MAN
+     WHO IS PUSHED. The probe used to read the body's DISPLACEMENT since the
+     last frame as its running speed. Displacement includes everything that
+     moves a body without its legs: the knockback slide of a punch, the step
+     back of a man who felt a hand in his pocket (3.2 m/s), a shove, a reel.
+     So the warden, caught being robbed beside the cell-block stair, was read
+     as a sprinter, the probe found the flight's side rail and the band under
+     its treads in the push direction, and he mantled over them: a parkour
+     move out of a pickpocket, with collision off for the whole of it, through
+     the steel. The speed and the heading are now the legs' own: the motor
+     (entities/moves.js) carries the velocity the body is walking at, the
+     attempted step even while a table face holds it back. A body somebody
+     else is moving is not running. */
+  function pushed(a) {
+    const ph = a._phys;
+    if (ph && ((ph.kx || 0) * (ph.kx || 0) + (ph.kz || 0) * (ph.kz || 0) > 0.25 || ph.down > 0 || ph.air)) return true;
+    const ch = a.char;
+    return !!(ch && ((ch.footStep && ch.footStep.on) || (ch.fall && ch.fall.on) || ch.staggerT > 0 || ch.koPose));
   }
 
   // Run/finish a vault for one prison actor. Returns true when the traversal
@@ -141,25 +147,22 @@
   function traverse(a, dt) {
     const T = CBZ.characterTraversal;
     if (!T || !a.char || !a.group) return false;
-    const p = a.group.position;
     a._acProbeT = (a._acProbeT || 0) - dt;
     if (a._traversal) {
       // A knockdown, a death or a capture takes the body back mid-flight.
       if (a.dead || (a.ko || 0) > 0 || a.escaped) { T.cancel(a, a.char, false, "interrupted"); return false; }
       const owned = T.step(a, a.char, dt, true);
-      // landing refreshes the sample AND buys a beat before the next probe, so
-      // one obstacle is never crossed twice in a row.
-      stampRest(a);
+      // a beat after landing before the next probe: one obstacle is never
+      // crossed twice in a row
       if (!a._traversal) a._acProbeT = TRAV_PROBE_CD * 3;
       return owned;
     }
-    const lx = a._acX, lz = a._acZ;
-    if (lx == null || dt <= 0 || a._acProbeT > 0) return false;
-    let dx = p.x - lx, dz = p.z - lz;
-    const len = Math.hypot(dx, dz);
-    const spd = len / dt;
-    if (spd < TRAV_SPEED) return false;
-    dx /= len; dz /= len;             // probeTraversal wants a UNIT heading
+    // (a motor nobody stepped this frame belongs to a body something else
+    // owns — a ladder, a tower post — and its last speed is history)
+    const m = a._mv;
+    if (!m || m.at !== CBZ.now || dt <= 0 || a._acProbeT > 0 || !(m.speed >= TRAV_SPEED) || pushed(a)) return false;
+    const spd = m.speed;
+    const dx = m.vx / spd, dz = m.vz / spd;   // probeTraversal wants a UNIT heading
     a._acProbeT = TRAV_PROBE_CD;
     const started = T.start(a, a.char, dx, dz, {
       speed: spd,
@@ -179,23 +182,21 @@
 
   CBZ.onUpdate(25, function (dt) {
     if (CBZ.game.mode !== "escape") return; // survival uses its own grid separation
-    tick++;
 
     const vaultOn = CBZ.modeHas ? CBZ.modeHas("traverse") : false;
     list.length = 0;
     for (let i = 0; i < CBZ.guards.length; i++) {
       const g = CBZ.guards[i];
       if (!standing(g)) continue;
-      // furniture-held: neither shoved nor clamped; keep the traversal sample
-      // fresh so standing up is never read back as a sprint by the vault probe
-      if (furnitureHeld(g)) { stampRest(g); continue; }
+      // furniture-held: neither shoved nor clamped
+      if (furnitureHeld(g)) continue;
       if (vaultOn && !inVerb(g) && traverse(g, dt)) continue;   // the vault owns this body
       list.push(g);
     }
     for (let i = 0; i < CBZ.npcs.length; i++) {
       const n = CBZ.npcs[i];
       if (!standing(n) || n._crowd) continue;
-      if (furnitureHeld(n)) { stampRest(n); continue; }
+      if (furnitureHeld(n)) continue;
       if (vaultOn && !inVerb(n) && traverse(n, dt)) continue;
       list.push(n);
     }
@@ -224,8 +225,5 @@
     // clamp runs inside it, after the bodies are pushed apart.
     if (!CBZ.humanContact) { for (let i = 0; i < list.length; i++) clampOut(list[i]); return; }
     CBZ.humanContact.resolve(list, dt, { mode: "escape", clamp: clampOut });
-    // AFTER the clamp: this settled position is next frame's reference, so the
-    // difference the vault probe reads is the step the mover TRIED to take.
-    for (let i = 0; i < list.length; i++) if (!list[i]._p) stampRest(list[i]);
   });
 })();
