@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "ceb4be7674e235731a1097a6f9f2be8579b5d294",
-  "createdAt": "2026-11-23T22:56:49.543Z",
+  "sourceCommit": "59b959c95e7c1dbea96027e128434d7aff61f900",
+  "createdAt": "2026-11-24T01:10:55.694Z",
   "fileCount": 1649,
-  "totalBytes": 95752823,
+  "totalBytes": 95760742,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -2708,8 +2708,8 @@
     },
     {
       "file": "src/lab/deps.json",
-      "bytes": 375781,
-      "sha256": "a26cfbfac3fd14e0334c2323e8c3d4b6ddf7e38c12c3816bbebb0814a1beac6b"
+      "bytes": 375836,
+      "sha256": "e73108b42c88bb36d6f049dacccf5fb26c322ca5faab2c92b9bdbc98655c96dc"
     },
     {
       "file": "src/lab/ingredients/building.js",
@@ -3438,8 +3438,8 @@
     },
     {
       "file": "src/systems/escapeplan.js",
-      "bytes": 13391,
-      "sha256": "1f9f74a48559e4ca35aa1818671a79df89ede14266138ea4f229a07dbc594639"
+      "bytes": 13455,
+      "sha256": "6b1b728dfef97458fd13e72c322a5ddc31a38d4b5b985fd0ffeb3578fff22008"
     },
     {
       "file": "src/systems/eyes.js",
@@ -3498,8 +3498,8 @@
     },
     {
       "file": "src/systems/gore.js",
-      "bytes": 134863,
-      "sha256": "bcb91fe942bdb431698b5dbe3019347db1130191832e994fe18837046aa454cd"
+      "bytes": 139966,
+      "sha256": "c823b9599b6c8caecc4248d5248cfefcc05752783f3b072d72154dac81392e57"
     },
     {
       "file": "src/systems/gpufx.js",
@@ -3588,8 +3588,8 @@
     },
     {
       "file": "src/systems/interactions.js",
-      "bytes": 40094,
-      "sha256": "e55e98195aaddbbe93ef0eea9d8451309daf38bbc796557b8aa6a3ba6c4f84a6"
+      "bytes": 41181,
+      "sha256": "2fcc9cfca063ef6a340c140d49f64546c49920c30b8843c070bc0c5c70c15972"
     },
     {
       "file": "src/systems/intimidate.js",
@@ -3738,8 +3738,8 @@
     },
     {
       "file": "src/systems/prisondrops.js",
-      "bytes": 12539,
-      "sha256": "ee675628cf67e73579ade9c367df02eb2abbd3c0714c62e328c6a44212337f8f"
+      "bytes": 14163,
+      "sha256": "7ea5269db4d31df3b108f06718919598977aa0a5a46d8750322da99d522d3f2a"
     },
     {
       "file": "src/systems/prisonfriends.js",
@@ -8168,38 +8168,38 @@
     },
     {
       "file": "the-isles.html",
-      "bytes": 68356,
-      "sha256": "2de810a4049d327c59cd3bb82177936ce19ecb507476a8d6a45b90b6dc7cecc9"
+      "bytes": 68354,
+      "sha256": "4ac105bd88312bafe40aa5cd296c6888a3a7bed5579b2194c910cd055bf547da"
     },
     {
       "file": "shark-sim.html",
-      "bytes": 68297,
-      "sha256": "4256adb48ed3184068b846fceaede411ea51f45efcf76fe8167b8b3e8e237a1a"
+      "bytes": 68295,
+      "sha256": "f93b4b120644fc1d44a4a0f0d57b275dbf2b8564c4956141464f06fe2fdb42c2"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 68340,
-      "sha256": "1ff4e28de36435a30dc4aab6e10911e7d11760380c3f65cf5823ffbecae2cba0"
+      "bytes": 68338,
+      "sha256": "1b35a967d6a2ddedefb3232abe01f457241e60abaf7176831ffeaa8156e3dfa2"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 68309,
-      "sha256": "6e99237f037843fd4720afe4b0e29f96718a02d1baba90001d911daa49c3b7bd"
+      "bytes": 68307,
+      "sha256": "89b6242993af7acbcde2dce0697fa42efb3f4dda75d1b204da1661e382ac3168"
     },
     {
       "file": "gang-city.html",
-      "bytes": 68264,
-      "sha256": "2f703df6ca2de3c74560bfecfb8c5ba445b71abb4a5dc58cebe8b353a0c0fa99"
+      "bytes": 68262,
+      "sha256": "e3e25ec01b28a8fe33a8730aaf6ace9b9be5f5175534f38101cd95c5d49c7f79"
     },
     {
       "file": "stick-city.html",
-      "bytes": 68346,
-      "sha256": "fe73b4909b20f68e341338d979544e032c8459777e45f05d16ca2ed807144b72"
+      "bytes": 68344,
+      "sha256": "6c59606b884e338e5ed33b59038f91f4a560a6417113516c797818077e56f78b"
     },
     {
       "file": "gun-game.html",
-      "bytes": 68286,
-      "sha256": "fa6c6487d2b7e8cfe14c88df096184d9e60774f149b2d56e9028e33a250559ef"
+      "bytes": 68284,
+      "sha256": "3d9fa90977320d14d20720e4b0f25667fc8a701f949297ba8062024c14304006"
     },
     {
       "file": "games/battle.html",
