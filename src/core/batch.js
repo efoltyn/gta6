@@ -1430,6 +1430,10 @@
   CBZ.batchStaticUnder = function (root) {
     if (!root || root.userData._batched) return null;
     root.userData._batched = true;
+    // the drawn boxes no collider stands for (door frames, sills, rails) are
+    // written down for the blood's sweep BEFORE they merge into buffers that
+    // keep no CPU copy (systems/gore.js THE DRAWN BOXES)
+    if (CBZ.goreNoteStatics) { try { CBZ.goreNoteStatics(root); } catch (e) { console.error("[gore statics]", e); } }
     return run(root, true);
   };
 

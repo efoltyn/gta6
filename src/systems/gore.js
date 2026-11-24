@@ -5,15 +5,16 @@
      • BLOOD IN THE AIR shaped by the cause (see THE AIRBORNE BLOOD): a
        round's entry back-spatter and exit spray of real-size drops drawn as
        motion streaks, a short soft mist down the shot line, a blade's heavy
-       drops and stream, an artery's pulsing jet; every drop that lands is a
-       spatter mark on the floor or the wall it hit
+       drops and stream, an artery's pulsing jet; every drop is swept against
+       what is really there and leaves its own mark where it stops: the
+       floor, a wall, a door frame, the top of a wall, a sill, a ceiling
      • chunky flying GIBS (limbs/torso, gravity + tumble + settle as debris)
      • lingering ground POOLS that spread from the body and stop, then dry
        from deep glossy red to matte red-brown, soaked into the floor — every
        land mark is a stain FILTERING the drawn floor, one instanced draw
        call (see BLOOD ON THE GROUND IS A STAIN IN THE FLOOR)
-     • WALL SPLATTER: if a surface sits just behind the victim along the shot
-       line, an impact splat with drips running down is stamped on it
+     • WALL BLOOD is nothing but those drops' marks (WHERE A DROP STOPS):
+       where many land they overlap into a stain, and a heavy one runs
    plus a short red jolt + shake (+ optional slow-mo). Headshots and explosions
    get a bigger mist + spray + pool. Self-contained: shared geometry/materials,
    pooled, hard-capped, distance-LOD'd, driven by one always-updater so prison
@@ -23,8 +24,8 @@
    points — they must land hard, read directional, and leave evidence):
      • a lazy tap on CBZ.cityKillPed reads the CAUSE of every city kill, so
        gore knows HOW someone died without any caller changing a line:
-       - HEADSHOT  → a distinct tighter/faster exit spray and an instant wall
-         splat behind the head. In CITY, only a muzzle-close SHOTGUN can cause
+       - HEADSHOT  → a bigger exit spray (more blood, more drops) out of the
+         head, onto whatever is behind it. In CITY, only a muzzle-close SHOTGUN can cause
          a full decapitation — the head mesh comes OFF, a flying head tumbles and
          settles, and the neck STUMP geysers a heavy arterial spurt (the
          restore-on-reuse audit regrows the head on any rig recycle). A
@@ -40,8 +41,8 @@
        soaks dark — one cheap shared-material swap, never a per-frame tint.
 
    THE WATER MEDIUM (CBZ.CONFIG.GORE_WATER, default on): every layer above is
-   AIR physics — ballistic droplets under gravity that land on floorAt, wall
-   splats found by a collider ray, mist that rises. Fire any of it under the
+   AIR physics — ballistic droplets under gravity that land on floorAt or
+   mark the wall they meet, mist that rises. Fire any of it under the
    sea and it is silently WRONG: the spray sinks to the seabed and stamps
    pools nobody will ever see, and the wall scan paints a decal on the hull of
    a passing boat. So gore() and gore.spray() ask CBZ.goreMedium() where the
@@ -307,7 +308,9 @@
      their own pooled meshes + bloodTexture(), and every water branch below
      runs exactly as before.
   ============================================================ */
-  const LD_CAP = 400;                       // slots: 300 ground max + walls, with room
+  // slots: ground marks (landCap, up to 360) + wall/top marks (wallCap, up to
+  // 300: one kill's spray lays 40-130 drop marks on a wall), with room
+  const LD_CAP = 720;
   const LD_CELL_W = 0.25, LD_CELL_H = 0.5;  // 4 x 2 atlas cells
   // atlas cells: [col,row] — row 0 is the TOP of the canvas (uv.y 1)
   const CELL_POOL = [[0, 0], [1, 0]], CELL_SPLAT = [[2, 0], [3, 0]];
@@ -431,7 +434,7 @@
     return function (u, v) {
       if (v < -0.95 || v > 0.97) return 0;
       const xc = 0.1 * Math.sin(v * 2.6 + seed);
-      const w = 0.42 + (ldFbm(0, v * 3.5, seed, 2) - 0.5) * 0.3;
+      const w = (0.42 + (ldFbm(0, v * 3.5, seed, 2) - 0.5) * 0.3) * Math.min(1, 0.25 + (0.97 - v) / 0.3);
       let m = 1 - Math.abs(u - xc) / w;
       const bead = 1 - Math.hypot((u - xc) / 0.7, (v + 0.82) / 0.1);
       m = Math.max(m, bead);
@@ -499,12 +502,13 @@
   // Partial coverage keeps green/blue falling faster than red (pow 0.3), so an
   // antialiased edge or a fading mark goes (167,53,49) salmon-red, never pink.
   const LD_VS = [
-    "attribute vec4 aCell;",   // xy atlas offset, z unused, w 1 = wall
+    "attribute vec4 aCell;",   // xy atlas offset, z unused, w 0 = floor, 1 = wall face, 2 = clipped flat (a top, an underside)
     "attribute vec4 aTime;",   // birth, grow seconds, dry seconds, revealed at birth
     "attribute vec4 aFx;",     // alpha, thickness, edge shrink, final threshold
-    // wall marks only: the solid surface's extent round the mark's centre, in
-    // metres along the face's horizontal tangent (N.z, -N.x) and world up:
-    // s0, s1, v0, v1. A wall mark is drawn only where there is wall under it.
+    // the solid surface's extent round the mark's centre, in metres: on a
+    // wall face along its horizontal tangent (N.z, -N.x) and world up (s0, s1,
+    // v0, v1); on a clipped flat along world x and z (x0, x1, z0, z1). A drop's
+    // mark that overhangs the edge of what it landed on is cut at that edge.
     "attribute vec4 aClip;",
     "uniform float uTime;",
     "varying vec2 vUv;",
@@ -530,8 +534,11 @@
     "  vC = aClip; vF = vec2(0.0);",
     "  if (aCell.w > 0.5) {",
     "    vec3 d = wp.xyz - (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;",
-    "    vec2 th = vec2(vN.z, -vN.x); float tl = length(th);",
-    "    vF = vec2(tl > 1e-4 ? dot(d.xz, th / tl) : 0.0, d.y);",
+    "    if (aCell.w > 1.5) vF = d.xz;",
+    "    else {",
+    "      vec2 th = vec2(vN.z, -vN.x); float tl = length(th);",
+    "      vF = vec2(tl > 1e-4 ? dot(d.xz, th / tl) : 0.0, d.y);",
+    "    }",
     "  }",
     "  gl_Position = projectionMatrix * viewMatrix * wp;",
     "}",
@@ -1966,7 +1973,7 @@
       return;
     }
     if (slickN >= slickCap()) recycleFarSlick();
-    if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
+    if (splats.length > landCap()) recycleFarSplat();
     const o = opts || {};
     const floorY = isFinite(+o.floorY) ? +o.floorY : null;
     const m = new THREE.Mesh(filmGeo(), filmSync());
@@ -2131,14 +2138,17 @@
      px, with its alpha paying for the difference), and the fragment shader
      cuts a soft capsule out of it. A streak smeared over more pixels is
      fainter, as a photographed one is. Nothing has a facet or a lit face.
-       * DROPS are real sizes: 0.25-2.5 mm radius in a gunshot's spray, 1.5-5
-         mm for a blade's heavy drops. Gravity, plus quadratic air drag with
-         the terminal speed a drop that size really has. What lands becomes a
-         spatter mark through the stain layer (spawnSplat's "drop"/"dot" on a
-         floor, the same atlas cells on a wall face), sized by the drop and
-         stretched by its impact angle, tail pointing the way it was going.
+       * DROPS are real sizes: 0.3-4.6 mm radius in a gunshot's exit spray
+         (heavy, medium, fine: see shotBlood), 1.5-5 mm for a blade's heavy
+         drops. Gravity, plus quadratic air drag with the terminal speed a
+         drop that size really has. Every drop is swept against the world
+         and marks what it meets (WHERE A DROP STOPS, WHAT A DROP LEAVES):
+         the floor, a wall face, a frame, a top, an underside, sized by the
+         drop and its impact speed, stretched by its impact angle, tail
+         pointing the way it was going.
        * MIST is a soft gaussian puff thrown down the shot line, dragged to a
-         stop in centimetres and gone in 0.2-0.4 s. Gunshots only.
+         stop in centimetres and gone in 0.2-0.4 s. Gunshots only. A puff
+         that reaches a surface stops at it and leaves a fine speckle.
        * STREAMS (a blade, an artery, an open neck or joint) are EMITTERS that
          lay drops along a jet, 45-70 a second. Near the source each drop's
          streak is stretched to meet the next one, so it reads as one
@@ -2167,7 +2177,6 @@
   // (screen-space, the framebuffer's own sRGB values): pale concrete
   // (190,188,182) -> (95,7,8) under a drop, (152,84,80) under a puff's core
   const AIR_T_CORE = [0.50, 0.035, 0.045], AIR_T_MIST = [0.60, 0.09, 0.10];
-  const AIR_LAND_FRAME = 14;                       // marks stamped per frame, at most
   const AX = new Float32Array(AIR_MAX), AY = new Float32Array(AIR_MAX), AZ = new Float32Array(AIR_MAX);
   const AVX = new Float32Array(AIR_MAX), AVY = new Float32Array(AIR_MAX), AVZ = new Float32Array(AIR_MAX);
   const AR = new Float32Array(AIR_MAX);            // drop radius / puff start size (m)
@@ -2179,25 +2188,38 @@
   const ASEA = new Float32Array(AIR_MAX), AMG = new Float32Array(AIR_MAX);   // sea timer, mark-size override
   const AMK = new Float32Array(AIR_MAX);           // mark-size multiplier (drops that merge on landing)
   const AKIND = new Uint8Array(AIR_MAX), AMARK = new Uint8Array(AIR_MAX);    // 0 drop / 1 mist; leaves a mark
-  const AWP = new Int8Array(AIR_MAX), AWG = new Uint16Array(AIR_MAX);        // wall plane + its generation
   const AVV = new Int8Array(AIR_MAX), AVG = new Uint16Array(AIR_MAX);        // the car volume it stops in + its generation
-  // THE SWEEP: where the drop was when its path was last tested against the
-  // solids (APX..APZ) and how long until the next test (ASW). Every drop
-  // without a proved wall plane traces the chord it flew since then through
-  // wallFace, so no drop ever passes through a wall, a jamb, a door leaf or a
-  // crate, and a drop through an opening flies on to what is beyond it.
+  // THE SWEEP: where the drop (or puff) was when its path was last tested
+  // against the solids (APX..APZ) and how long until the next test (ASW).
+  // Every drop traces the chord it flew since then through sweepHit, so no
+  // drop ever passes through a wall, a jamb, a door frame, a leaf or a crate,
+  // and a drop through an opening (a doorway, a vent, between bars) flies on
+  // to what is beyond it. A test the frame's budget could not afford is not
+  // lost: the drop keeps flying, the chord grows, and the next test covers
+  // all of it; a drop about to touch the floor is always tested first.
   const APX = new Float32Array(AIR_MAX), APY = new Float32Array(AIR_MAX), APZ = new Float32Array(AIR_MAX);
   const ASW = new Float32Array(AIR_MAX);
-  const AIR_FIELDS = [AX, AY, AZ, AVX, AVY, AVZ, AR, AS1, AT, AL, AA, AK, ATR, ABRK, AFL, AFT, ASEA, AMG, AMK, AKIND, AMARK, AWP, AWG, AVV, AVG, APX, APY, APZ, ASW];
-  const AIR_SWEEP_FRAME = 64;                      // path tests per frame, at most (a skipped one lengthens the next chord)
-  let airN = 0, airCursor = 0, airShutter = 1 / 120, airLands = 0;
+  const AIR_FIELDS = [AX, AY, AZ, AVX, AVY, AVZ, AR, AS1, AT, AL, AA, AK, ATR, ABRK, AFL, AFT, ASEA, AMG, AMK, AKIND, AMARK, AVV, AVG, APX, APY, APZ, ASW];
+  // path tests per frame, at most
+  function sweepBudget() { return Math.round(CBZ.qScale ? CBZ.qScale(72, 220) : 140); }
+  let airN = 0, airCursor = 0, airShutter = 1 / 120;
   // A STREAM LANDS AS A FEW BIGGER MARKS, NOT SIXTY SMALL ONES: drops that
   // arrive on top of each other merge. An emitter (or a blast) sets these
   // around its own drops — the chance a drop leaves its own mark, and how
   // much bigger that mark is for the ones it absorbed.
   let airMarkP = 1, airMarkK = 1;
-  // lifetime emit counts (goreAudit)
-  const AIR_AUDIT = { drops: 0, mist: 0, lands: 0, wallLands: 0, water: 0, recycled: 0, streams: 0, skippedMarks: 0, sweeps: 0, swept: 0, edgeDrops: 0 };
+  // lifetime counts (goreAudit). drops/mist: emitted; sweeps: chord tests run;
+  // swept: chords that met a surface; lands: floor marks; wallMarks: marks on
+  // a side face; topMarks: on a top (wallTopMarks: the top of a wall-high
+  // solid); underMarks: on an underside; drawnHits: drops stopped by a drawn
+  // box no collider stands for; mistStopped / mistSpeckle: puffs a surface
+  // stopped and the fine marks they left; drips: runs down a face;
+  // marksRefused: hits that found no slot or queue room; marksFar: hits past
+  // 40 m that lay no wall mark; wallRecycled: old wall marks given up for new;
+  // skippedMarks: floor marks too small to see from where the camera is.
+  const AIR_AUDIT = { drops: 0, mist: 0, lands: 0, wallMarks: 0, topMarks: 0, wallTopMarks: 0, underMarks: 0, drawnHits: 0,
+    mistStopped: 0, mistSpeckle: 0, drips: 0, marksRefused: 0, marksFar: 0, wallRecycled: 0,
+    water: 0, recycled: 0, streams: 0, skippedMarks: 0, sweeps: 0, swept: 0 };
 
   let airMesh = null, airGeo = null, aiPos = null, aiVel = null, aiMisc = null;
   function airReady() {
@@ -2345,12 +2367,12 @@
     return _cv;
   }
 
-  /* airDrop(x,y,z, vx,vy,vz, r, wp, trail0, brk, markR)
-     r: radius in metres. wp: a wall plane from airWall() (-1: none). trail0 /
-     brk: a stream drop's stretched streak (seconds of velocity) and how long
-     it takes to break up. markR: the landing mark's radius, when the caller
-     knows it better than the drop does (a walking bleeder's drip). */
-  function airDrop(x, y, z, vx, vy, vz, r, wp, trail0, brk, markR) {
+  /* airDrop(x,y,z, vx,vy,vz, r, trail0, brk, markR)
+     r: radius in metres. trail0 / brk: a stream drop's stretched streak
+     (seconds of velocity) and how long it takes to break up. markR: the
+     landing mark's size, when the caller knows it better than the drop does
+     (a walking bleeder's drip). */
+  function airDrop(x, y, z, vx, vy, vz, r, trail0, brk, markR) {
     // a wound under the sea does not throw drops: it blooms (THE WATER MEDIUM)
     if (wetEvent) { AIR_AUDIT.water++; puffFromBit(x, y, z, vx, vy, vz, r * 20, false); return -1; }
     if (!airReady()) return -1;
@@ -2364,7 +2386,6 @@
     AK[i] = AIR_G / (vt * vt);
     ATR[i] = trail0 || 0; ABRK[i] = brk || 0.12;
     AKIND[i] = 0; AMARK[i] = airMarkP >= 1 || Math.random() < airMarkP ? 1 : 0; AMG[i] = markR || 0; AMK[i] = airMarkK;
-    AWP[i] = wp == null || wp < 0 ? -1 : wp; AWG[i] = wp == null || wp < 0 ? 0 : WP_GEN[wp];
     AVV[i] = airVV; AVG[i] = airVV < 0 ? 0 : VV_GEN[airVV];
     AFL[i] = decalFloorAt(x, z, y, true); AFT[i] = 0.02 + Math.random() * 0.06; ASEA[i] = Math.random() * 0.18;
     APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 0;
@@ -2381,98 +2402,183 @@
     AX[i] = x; AY[i] = y; AZ[i] = z; AVX[i] = vx; AVY[i] = vy; AVZ[i] = vz;
     AR[i] = s0; AS1[i] = Math.max(s0, s1); AT[i] = 0; AL[i] = life; AA[i] = alpha;
     AK[i] = 7 + Math.random() * 4;                      // aerosol stops in centimetres
-    ATR[i] = 0; ABRK[i] = 0; AKIND[i] = 1; AMARK[i] = 0; AMG[i] = 0; AMK[i] = 1; AWP[i] = -1; AWG[i] = 0; AVV[i] = -1; AVG[i] = 0;
-    AFL[i] = 0; AFT[i] = 0; ASEA[i] = 0; APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 1e9;
+    ATR[i] = 0; ABRK[i] = 0; AKIND[i] = 1; AMARK[i] = 0; AMG[i] = 0; AMK[i] = 1; AVV[i] = -1; AVG[i] = 0;
+    // swept like a drop while it still moves: aerosol that reaches a wall
+    // stops there (mistStop) instead of drifting through it
+    AFL[i] = 0; AFT[i] = 0; ASEA[i] = 0; APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 0;
     AIR_AUDIT.mist++;
     return i;
   }
 
-  // ---- WALL PLANES: a spray headed for a wall lands ON it ---------------------
-  // One scan per EVENT (the same opaque/wall-sized gate a kill's wall splat
-  // passes), shared by every drop of it: a drop tests one plane per frame,
-  // never the collider list. Generation-stamped so a recycled slot can never
-  // catch a drop from an older event on a different wall.
-  const WP_MAX = 16;
-  const WP_NX = new Float32Array(WP_MAX), WP_NZ = new Float32Array(WP_MAX), WP_D = new Float32Array(WP_MAX);
-  const WP_T0 = new Float32Array(WP_MAX), WP_T1 = new Float32Array(WP_MAX);
-  const WP_Y0 = new Float32Array(WP_MAX), WP_Y1 = new Float32Array(WP_MAX);
-  const WP_GEN = new Uint16Array(WP_MAX);
-  const WP_C = new Array(WP_MAX).fill(null);         // the collider struck: its mesh is what the drops ride
-  let wpCursor = 0, airWallT = 3.4;
-  function airWall(x, y, z, dx, dz) {
-    _vehNoted.length = 0;
-    const hl = Math.hypot(dx, dz);
-    if (!(hl > 1e-4)) return -1;
-    dx /= hl; dz /= hl;
-    let f = wallFace(x, y, z, dx, 0, dz, 3.4);
-    if (f && (f.top || f.stop)) f = null;
-    airWallT = f ? f.t : 3.4;
-    if (!f) return -1;
-    const k = wpCursor; wpCursor = (wpCursor + 1) % WP_MAX;
-    // the plane of the face the ray proved, any yaw: d along its normal,
-    // t0..t1 along its tangent (-nz, nx)
-    const nx = f.nx, nz = f.nz;
-    WP_NX[k] = nx; WP_NZ[k] = nz; WP_D[k] = nx * f.x + nz * f.z;
-    WP_T0[k] = f.t0; WP_T1[k] = f.t1;
-    WP_Y0[k] = f.y0; WP_Y1[k] = f.y1; WP_C[k] = f.c;
-    WP_GEN[k] = (WP_GEN[k] + 1) & 0xffff;
-    return k;
+  // ---- WHAT A DROP LEAVES WHERE IT STOPS ---------------------------------------
+  /* A drop that met a surface (sweepHit) queues ONE mark, from the drop alone:
+       * SIZE: the stain is wider than the drop by the spread factor, which
+         grows with the speed it hits at across the surface's normal (a blood
+         drop at 2 m/s spreads ~2x, at 8 m/s ~4x; capped at 5.5).
+       * SHAPE: length / width = 1 / sin(impact angle) (the forensic rule),
+         the long axis along its travel across the surface, the tail the way
+         it was going. A square hit is round.
+       * PLANE: the surface's own — a side face, a top, an underside — and cut
+         at that surface's edge (ldClip), so a drop 1 cm from a jamb leaves the
+         part of its mark that is on the jamb.
+       * A RUN: a drop with more blood than a vertical face holds in a bead
+         (~1.8 mm radius) runs down it; the run is as long as its spare volume
+         spread over a film ~0.2 mm thick and the run's width, and it stops at
+         the face's lower edge or the floor. A fine drop never runs.
+     Marks are laid from a queue, a frame's budget at a time, oldest first, so
+     forty drops reaching a wall in one frame cost no frame spike and none is
+     dropped; the queue only refuses when it is full (marksRefused). */
+  const MQ_MAX = 512, MQ_W = 20;
+  const MQ = new Float32Array(MQ_MAX * MQ_W);
+  const MQC = new Array(MQ_MAX).fill(null);         // the collider struck: its mesh is what the mark rides
+  let mqHead = 0, mqN = 0;
+  function markBudget() { return Math.round(CBZ.qScale ? CBZ.qScale(28, 96) : 56); }
+  // kind 0 a side face, 1 a top, 2 an underside, 3 the floor (seated by decalFloorAt)
+  function queueMark(kind, x, y, z, nx, ny, nz, vx, vy, vz, r, D, a0, a1, b0, b1, col, off, mist) {
+    if (mqN >= MQ_MAX) { AIR_AUDIT.marksRefused++; return false; }
+    const k = (mqHead + mqN) % MQ_MAX, o = k * MQ_W;
+    MQ[o] = kind; MQ[o + 1] = x; MQ[o + 2] = y; MQ[o + 3] = z;
+    MQ[o + 4] = nx; MQ[o + 5] = ny; MQ[o + 6] = nz;
+    MQ[o + 7] = vx; MQ[o + 8] = vy; MQ[o + 9] = vz;
+    MQ[o + 10] = r; MQ[o + 11] = D;
+    MQ[o + 12] = a0; MQ[o + 13] = a1; MQ[o + 14] = b0; MQ[o + 15] = b1;
+    MQ[o + 16] = off; MQ[o + 17] = mist ? 1 : 0;
+    MQC[k] = col || null;
+    mqN++;
+    return true;
   }
-  // a drop's mark on a wall face: the stain layer's drop/dot cells, laid in
-  // the face's plane, tail pointing along the drop's in-plane travel, and cut
-  // to the face's extent (ta0..ta1 along the face tangent (-nz, nx), ya0..ya1
-  // up, both absolute, as wallFace reports them): a drop that lands 1 cm from
-  // a jamb leaves the part of its mark that is on the jamb, not a dot in air
-  function wallDrop(px, py, pz, nx, nz, vx, vy, vz, g, col, ta0, ta1, ya0, ya1) {
-    if (walls.length > 34) return false;             // the kills' own wall splats come first
-    if (seaColumn(px, pz)) {
-      const w = submRaw(px, py, pz);
-      if (w !== DRY && w > 0.02) { SEA_AUDIT.wall++; puffFromBit(px, py, pz, vx, vy, vz, g, false); return true; }
+  function flushMarks() {
+    let n = markBudget();
+    while (mqN > 0 && n-- > 0) {
+      const k = mqHead, col = MQC[k];
+      MQC[k] = null;
+      mqHead = (mqHead + 1) % MQ_MAX; mqN--;
+      layMark(k * MQ_W, col);
     }
+  }
+  // a wall / top / underside mark needs a slot: past the wall budget the
+  // oldest wall mark gives its up (claimLand then takes it)
+  function wallSlot() {
+    const cap = wallCap();
+    while (walls.length >= cap) { ldRelease(walls.shift()); AIR_AUDIT.wallRecycled++; }
     const c = claimLand();
-    if (!c) return false;
+    if (!c) AIR_AUDIT.marksRefused++;
+    return c;
+  }
+  function layMark(o, col) {
+    const kind = MQ[o], x = MQ[o + 1], y = MQ[o + 2], z = MQ[o + 3];
+    const vx = MQ[o + 7], vy = MQ[o + 8], vz = MQ[o + 9], D = MQ[o + 11], mist = MQ[o + 17] > 0;
+    if (kind === 3) { floorMark(x, y, z, vx, vy, vz, D); return; }
+    // the kill's camera gate: no wall mark past 40 m (nothing there reads)
+    if (dist2Cam(x, z) > 40 * 40) { AIR_AUDIT.marksFar++; return; }
+    if (seaColumn(x, z)) {
+      const w = submRaw(x, y, z);
+      if (w !== DRY && w > 0.02) { SEA_AUDIT.wall++; puffFromBit(x, y, z, vx, vy, vz, D, false); return; }
+    }
+    if (kind === 0) faceMark(x, y, z, MQ[o + 4], MQ[o + 6], vx, vy, vz, MQ[o + 10], D, MQ[o + 12], MQ[o + 13], MQ[o + 14], MQ[o + 15], col, MQ[o + 16], mist);
+    else flatMark(kind === 1, x, y, z, vx, vy, vz, D, MQ[o + 12], MQ[o + 13], MQ[o + 14], MQ[o + 15], col, MQ[o + 16], mist);
+  }
+  // the cells' shapes in their quads (see the atlas): the DOT's edge sits at
+  // 0.46 of the half-quad (diameter 0.46 x the quad), the DROP's body is 0.3
+  // of the quad wide and 0.33 of it long, its tail and bead ahead of it
+  function faceMark(px, py, pz, nx, nz, vx, vy, vz, r, D, ta0, ta1, ya0, ya1, col, off, mist) {
+    const c = wallSlot();
+    if (!c) return;
     const m = c.m;
     const ry = Math.atan2(nx, nz);
     const tx = Math.cos(ry), tz = -Math.sin(ry);     // the face's local +x in world
     const u = vx * tx + vz * tz, w = vy;
     const sp = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
     const sinA = Math.abs(vx * nx + vz * nz) / sp;
-    const drop = sinA < 0.9 && Math.hypot(u, w) > 0.3;
-    let sx = (g * 2) / (drop ? 0.6 : 0.92);
-    const sy = sx * (drop ? Math.max(1, Math.min(3.4, 1 / Math.max(0.3, sinA))) : 1);
-    if (Math.random() < 0.5) sx = -sx;
-    m.position.set(px + nx * 0.021, py, pz + nz * 0.021);
+    const drop = sinA < 0.94 && Math.hypot(u, w) > 0.3;
+    const e = drop ? Math.min(5, 1 / Math.max(0.2, sinA)) : 1;
+    let sx = drop ? D / 0.3 : D / 0.46;
+    const sy = drop ? D * e / 0.33 : sx;
+    if (Math.random() < 0.5) sx = -sx;               // mirror: satellites either side
+    m.position.set(px + nx * off, py, pz + nz * off);
     m.rotation.set(0, ry, drop ? Math.atan2(-u, w) : Math.random() * 6.28);
     m.scale.set(sx, sy, 1);
-    ldWrite(c.slot, m, drop ? CELL_DROP : CELL_DOT, 1, 0.08, 5 + Math.random() * 5, 0.35, 0.55, 0.1, 1, 0);
-    if (ta0 != null) {
-      const th = nx * pz - nz * px;                  // this point along (-nz, nx); the mark's s runs the other way
-      ldClip(c.slot, th - ta1, th - ta0, ya0 - py, ya1 - py);
-    }
+    // a heavy drop lies thick and stays wet longer than a fleck
+    const thick = Math.min(0.95, 0.45 + D * 14);
+    ldWrite(c.slot, m, drop ? CELL_DROP : CELL_DOT, 1, 0.06, 6 + D * 300 + Math.random() * 5, 0.35, thick, 0.1, 1, 0);
+    const th = nx * pz - nz * px;                    // this point along (-nz, nx); the mark's s runs the other way
+    ldClip(c.slot, th - ta1, th - ta0, ya0 - py, ya1 - py);
     const near = dist2Cam(px, pz) < 24 * 24;
-    walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 40 : 14, fade: 8 }, col));
-    return true;
+    walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 60 : 20, fade: 10 }, col));
+    if (mist) { AIR_AUDIT.mistSpeckle++; return; }
+    AIR_AUDIT.wallMarks++;
+    if (r > 0.0018) dripFrom(px, py, pz, nx, nz, r, D, th, ta0, ta1, ya0, col, off, near);
   }
-  // how big a mark a drop leaves: a few times its own size, more the faster
-  // it hits (the forensic spread factor), unless the caller said otherwise
-  function markOf(i, sp) { return AMG[i] || AR[i] * AMK[i] * Math.min(4.5, 1.7 + sp * 0.3); }
-  function floorLand(i) {
-    if (!AMARK[i]) return;
-    const vx = AVX[i], vy = AVY[i], vz = AVZ[i];
+  // a top (up) or an underside: the mark lies flat, cut to that surface's
+  // extent in world x (x0..x1) and z (z0..z1)
+  function flatMark(up, px, py, pz, vx, vy, vz, D, x0, x1, z0, z1, col, off, mist) {
+    const c = wallSlot();
+    if (!c) return;
+    const m = c.m;
+    const hs = Math.hypot(vx, vz), sp = Math.hypot(hs, vy) || 1;
+    const sinA = Math.abs(vy) / sp;
+    const drop = sinA < 0.94 && hs > 0.3;
+    const e = drop ? Math.min(5, 1 / Math.max(0.2, sinA)) : 1;
+    let sx = drop ? D / 0.3 : D / 0.46;
+    const sy = drop ? D * e / 0.33 : sx;
+    if (Math.random() < 0.5) sx = -sx;
+    const dx = hs > 0 ? vx / hs : 0, dz = hs > 0 ? vz / hs : 0;
+    m.position.set(px, py + (up ? off : -off), pz);
+    // the quad's +z onto the surface's normal, its +y (the tail) along the travel
+    if (up) m.rotation.set(-Math.PI / 2, 0, drop ? Math.atan2(-dx, -dz) : Math.random() * 6.28);
+    else m.rotation.set(Math.PI / 2, 0, drop ? Math.atan2(-dx, dz) : Math.random() * 6.28);
+    m.scale.set(sx, sy, 1);
+    ldWrite(c.slot, m, drop ? CELL_DROP : CELL_DOT, 2, 0.06, 6 + D * 300 + Math.random() * 5, 0.35, Math.min(0.95, 0.45 + D * 14), 0.1, 1, 0);
+    if (x0 > -1e3) ldClip(c.slot, x0 - px, x1 - px, z0 - pz, z1 - pz);
+    const near = dist2Cam(px, pz) < 24 * 24;
+    walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 60 : 20, fade: 10 }, col));
+    if (mist) { AIR_AUDIT.mistSpeckle++; return; }
+    if (!up) { AIR_AUDIT.underMarks++; return; }
+    AIR_AUDIT.topMarks++;
+    if (col && col.y1 != null && col.y1 - (col.y0 || 0) >= 1) AIR_AUDIT.wallTopMarks++;
+  }
+  // THE RUN of a heavy drop down a side face (see above), from the mark's
+  // centre down, at a few cm a second, cut to the face
+  const DRIP_HOLD = 4.18879 * 0.0018 * 0.0018 * 0.0018;   // m^3 a vertical face holds in one bead
+  function dripFrom(px, py, pz, nx, nz, r, D, th, ta0, ta1, ya0, col, off, near) {
+    const V = 4.18879 * r * r * r;
+    if (V <= DRIP_HOLD) return;
+    const w = Math.min(0.005, Math.max(0.002, r * 1.6));
+    let L = (V - DRIP_HOLD) / (w * 0.0002);
+    const floorY = decalFloorAt(px + nx * 0.1, pz + nz * 0.1, py, true);
+    L = Math.min(L, 0.7, py - ya0 - 0.005, py - floorY - 0.01);
+    if (!(L > 0.03)) return;
+    const c = wallSlot();
+    if (!c) return;
+    const m = c.m, yc = py - L * 0.5;
+    m.position.set(px + nx * (off + 0.001), yc, pz + nz * (off + 0.001));
+    m.rotation.set(0, Math.atan2(nx, nz), 0);         // local +y is world up: it runs DOWN
+    // the run's field spans 0.84 of the quad's width and 0.96 of its height
+    m.scale.set(w / 0.42, L / 0.96, 1);
+    ldWrite(c.slot, m, CELL_DRIP, 1, L / (0.04 + Math.random() * 0.06), 18 + Math.random() * 10, 0, 0.9, 0.05, 1,
+      0.15 + Math.random() * 0.35);
+    ldClip(c.slot, th - ta1, th - ta0, ya0 - yc, 1e4);
+    walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 60 : 20, fade: 10 }, col));
+    AIR_AUDIT.drips++;
+  }
+  // a drop's mark on the floor (or a deck, a step: decalFloorAt), through the
+  // ground stain layer
+  function floorMark(x, y, z, vx, vy, vz, D) {
+    // a 3 mm mark is real, and invisible from across the room: no stain slot
+    // for one nobody can see
+    if (D < 0.0035 && dist2Cam(x, z) > 8 * 8) { AIR_AUDIT.skippedMarks++; return; }
     const hs = Math.hypot(vx, vz), sp = Math.hypot(hs, vy);
-    const g = markOf(i, sp);
-    // a 3 mm mark is real, and invisible from across the room: don't spend a
-    // stain slot on one nobody can see, or on the fifteenth in one frame
-    if ((g < 0.0035 && dist2Cam(AX[i], AZ[i]) > 8 * 8) || airLands >= AIR_LAND_FRAME) { AIR_AUDIT.skippedMarks++; return; }
-    airLands++;
     const sinA = Math.abs(vy) / (sp || 1);
-    _dropO.kind = sinA > 0.9 || hs < 0.3 ? "dot" : "drop";
+    _dropO.kind = sinA > 0.94 || hs < 0.3 ? "dot" : "drop";
     _dropO.dirX = hs > 0 ? vx / hs : 0; _dropO.dirZ = hs > 0 ? vz / hs : 0;
-    _dropO.elong = 1 / Math.max(0.3, sinA);
-    // the mark seats on the surface the drop came down on (AFL), not the street under it
-    const sy0 = seatY, ss0 = seatSolid; seatY = AY[i] + 0.02; seatSolid = true;
-    try { if (spawnSplat(AX[i], AZ[i], g, BLOOD_D, false, _dropO)) AIR_AUDIT.lands++; } finally { seatY = sy0; seatSolid = ss0; }
+    _dropO.elong = 1 / Math.max(0.2, sinA);
+    // the mark seats on the surface the drop came down on, not the street under it
+    const sy0 = seatY, ss0 = seatSolid; seatY = y + 0.02; seatSolid = true;
+    try { if (spawnSplat(x, z, D, BLOOD_D, false, _dropO)) AIR_AUDIT.lands++; } finally { seatY = sy0; seatSolid = ss0; }
   }
+  // the size of the mark a drop leaves: its diameter times the spread factor
+  // for the speed it hits at across the surface (vn), unless the caller set it
+  function markD(i, vn) { return AMG[i] || 2 * AR[i] * AMK[i] * Math.min(5.5, 1.5 + 0.3 * vn); }
 
   // ---- STREAMS: a jet that pulses, laid down drop by drop ---------------------
   const EM_MAX = 12;
@@ -2559,26 +2665,61 @@
         const v = cone(jx, jy, jz, E_SPR[e]);
         const sp = E_SP[e] * E_K[e] * (0.3 + 0.7 * surge) * (0.93 + Math.random() * 0.14);
         airDrop(sx + (Math.random() - 0.5) * 0.012, sy + (Math.random() - 0.5) * 0.012, sz + (Math.random() - 0.5) * 0.012,
-          v.x * sp, v.y * sp, v.z * sp, rMM(E_R0[e], E_R1[e]), -1, trail, 0.13 + Math.random() * 0.07, 0);
+          v.x * sp, v.y * sp, v.z * sp, rMM(E_R0[e], E_R1[e]), trail, 0.13 + Math.random() * 0.07, 0);
       }
       airMarkP = 1; airMarkK = 1;
     }
   }
 
   // ---- THE EVENTS --------------------------------------------------------------
+  // a unit vector round (dx,dy,dz), off it by a 2-D gaussian of `sd` radians
+  // per axis (cut at 3 sd) → _cv: a spray is densest down its line and
+  // thins out, as a real one does
+  function gcone(dx, dy, dz, sd) {
+    let l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    dx /= l; dy /= l; dz /= l;
+    let ux, uy, uz;
+    if (Math.abs(dy) < 0.9) { ux = -dz; uy = 0; uz = dx; } else { ux = 0; uy = dz; uz = -dy; }
+    l = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1; ux /= l; uy /= l; uz /= l;
+    const vx = dy * uz - dz * uy, vy = dz * ux - dx * uz, vz = dx * uy - dy * ux;
+    const th = Math.min(3 * sd, sd * Math.sqrt(-2 * Math.log(1 - Math.random() * 0.9999))), ph = Math.random() * 6.2832;
+    const ct = Math.cos(th), st = Math.sin(th), cp = Math.cos(ph) * st, sp = Math.sin(ph) * st;
+    _cv.x = dx * ct + ux * cp + vx * sp; _cv.y = dy * ct + uy * cp + vy * sp; _cv.z = dz * ct + uz * cp + vz * sp;
+    return _cv;
+  }
+  // how far along (dx,dy,dz) from (x,y,z) the first real surface is, up to
+  // len (the same surfaces a drop's sweep meets). Notes the cars on the line
+  // for vehicleSpray.
+  function lineWallT(x, y, z, dx, dy, dz, len) {
+    _vehNoted.length = 0;
+    const f = wallFace(x, y, z, dx, dy, dz, len);
+    const b = drawnBoxHit(x, y, z, dx, dy, dz, f ? f.t : len);
+    return b ? b.t : (f ? f.t : len);
+  }
   /* A ROUND THROUGH FLESH. (dx,dy,dz): the shot line, shooter -> victim.
        entry: a small cone of FINE drops thrown back toward the shooter (back
               spatter), and a wisp of mist at the hole
-       exit (`through`): a bigger, faster cone out the far side along the
-              bullet path, a mist puff down the line, and the wall behind it
-              catches whatever reaches it
-     `amt` ~0.3 a pellet .. ~1 a head. */
+       exit (`through`): the blood the round carries out of the far side,
+              as real drops down the bullet's line, and a mist puff
+     THE EXIT SPRAY is three populations of the same blood, by how it left:
+       heavy   the bulk of it, torn off whole: 2.4-4.6 mm drops in a tight
+               cone (sd ~3 deg) at 4.5-8.5 m/s. They carry most of the
+               volume (~3 ml for a body, more for a head) and make the core.
+       medium  0.9-2.2 mm at 6.5-12 m/s, sd ~7 deg: the ring round the core.
+       fine    0.3-0.9 mm at 9-15 m/s, sd ~14 deg out to ~40 deg: the
+               satellites and the long, glancing outliers. Drag slows them
+               within a metre or two (their terminal speed is 2-5 m/s).
+     Nothing is aimed at a wall. Each drop flies on its own under gravity and
+     drag and marks whatever it meets (WHERE A DROP STOPS); at a metre from a
+     wall a body's exit lays a core ~15-25 cm across, darker where the heavy
+     marks overlap, with satellites and outliers further out. `amt` ~0.3 a
+     pellet .. ~1 a body .. 1.3+ a head (head/pop scale it further). */
   function shotBlood(x, y, z, dx, dy, dz, amt, through, head, lod, pop) {
-    const nE = Math.round((3 + 7 * amt) * lod);
+    const nE = Math.round((4 + 8 * amt) * lod);
     for (let i = 0; i < nE; i++) {
       const v = cone(-dx, -dy + 0.2, -dz, 0.62);
       const sp = 1.2 + Math.random() * 3.8;
-      airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.25, 1.3), -1, 0, 0, 0);
+      airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.25, 1.4), 0, 0, 0);
     }
     const nEM = lod < 0.5 ? 0 : (amt >= 0.5 ? 2 : 1);
     for (let i = 0; i < nEM; i++) {
@@ -2587,20 +2728,26 @@
         0.02, 0.07 + 0.07 * amt, 0.18 + Math.random() * 0.08, 0.26);
     }
     if (!through) return;
-    const T = head ? 0.17 : 0.26;
+    // the exit hole: through the body along the line, but never past a wall
+    // the body is up against (a drop born inside a wall would fly out of it)
+    let T = head ? 0.17 : 0.26;
+    const tw = lineWallT(x, y, z, dx, dy, dz, T + 0.03);
+    if (tw < T + 0.03) T = Math.max(0, tw - 0.04);
     const ex = x + dx * T, ey = y + dy * T, ez = z + dz * T;
-    let wp = lod >= 0.6 ? airWall(ex, ey, ez, dx, dz) : -1;
-    // a car on the line before the wall takes the spray ON its body
-    const vv = lod >= 0.6 ? vehicleSpray(ex, ey, ez, dx, dy, dz, amt, head, wp >= 0 ? airWallT : 3.4) : -1;
-    if (vv >= 0) wp = -1;
+    // a car on the line before the wall takes the spray ON its body: one
+    // spatter where the line meets it, and its drops stop in its volume
+    const vv = lod >= 0.6 ? vehicleSpray(ex, ey, ez, dx, dy, dz, amt, head, lineWallT(ex, ey, ez, dx, dy, dz, 3.4)) : -1;
     airVV = vv;
-    const nX = Math.round((8 + 20 * amt) * (head ? 1.3 : 1) * (pop ? 1.5 : 1) * lod);
-    const k = 0.7 + 0.45 * Math.min(1.4, amt);
-    for (let i = 0; i < nX; i++) {
-      const v = cone(dx, dy + 0.08, dz, head ? 0.42 : 0.32);
-      const sp = (3 + Math.random() * Math.random() * 10) * k;
-      airDrop(ex + (Math.random() - 0.5) * 0.04, ey + (Math.random() - 0.5) * 0.04, ez + (Math.random() - 0.5) * 0.04,
-        v.x * sp, v.y * sp, v.z * sp, rMM(0.3, head ? 2.6 : 2.2), wp, 0, 0, 0);
+    const K = Math.min(2.6, amt * (head ? 1.6 : 1) * (pop ? 1.6 : 1)) * lod;
+    const nH = Math.round(10 * K), nM = Math.round(44 * K), nF = Math.round(34 * K);
+    for (let i = 0, n = nH + nM + nF; i < n; i++) {
+      let sd, sp, r;
+      if (i < nH) { const q = Math.random(); sd = 0.06; sp = 4.5 + Math.random() * 4; r = (1.3 + q * q * 1.9) * 0.001; }   // 2.6-6.4 mm across, few of the big ones
+      else if (i < nH + nM) { sd = 0.12; sp = 6.5 + Math.random() * 5.5; r = (0.7 + Math.random() * 1.0) * 0.001; }
+      else { sd = 0.24; sp = 9 + Math.random() * 6; r = (0.3 + Math.random() * 0.6) * 0.001; }
+      const v = gcone(dx, dy + 0.02, dz, sd);
+      airDrop(ex + (Math.random() - 0.5) * 0.03, ey + (Math.random() - 0.5) * 0.03, ez + (Math.random() - 0.5) * 0.03,
+        v.x * sp, v.y * sp, v.z * sp, r, 0, 0, 0);
     }
     airVV = -1;
     const nXM = lod < 0.35 ? 1 : (head ? 4 : 2) + (amt > 0.8 ? 1 : 0) + (pop ? 3 : 0);
@@ -2612,13 +2759,32 @@
         0.03, (0.16 + Math.random() * 0.12) * big, 0.22 + Math.random() * 0.16, head ? 0.34 : 0.27);
     }
   }
+  /* A BODY DRIVEN INTO A SURFACE (goreImpact opts.wall): the wound meets it
+     at the speed the body arrived, so the blood leaves short and slow, a
+     wide cone of heavy drops thrown at the surface (dx,dy,dz) from a few
+     centimetres off it, each marking where it lands. */
+  function contactBlood(x, y, z, dx, dy, dz, amt, lod) {
+    // born in the air in front of the surface, never inside it
+    const tw = lineWallT(x, y, z, dx, dy, dz, 3.4);
+    if (tw < 0.08) { x -= dx * (0.08 - tw); y -= dy * (0.08 - tw); z -= dz * (0.08 - tw); }
+    const vv = lod >= 0.6 ? vehicleSpray(x, y, z, dx, dy, dz, amt * 0.6, false, Math.max(0.08, tw)) : -1;
+    airVV = vv;
+    const n = Math.round((10 + 16 * Math.min(2, amt)) * lod);
+    for (let i = 0; i < n; i++) {
+      const v = gcone(dx, dy, dz, 0.32);
+      const sp = 1.2 + Math.random() * 3.2;
+      airDrop(x + (Math.random() - 0.5) * 0.06, y + (Math.random() - 0.5) * 0.06, z + (Math.random() - 0.5) * 0.06,
+        v.x * sp, v.y * sp, v.z * sp, rMM(0.8, 3.6), 0, 0, 0);
+    }
+    airVV = -1;
+  }
   // no shot line (a fall, a disaster, an unknown cause): a short burst all round
   function omniBlood(x, y, z, amt, lod) {
     const n = Math.round((4 + 6 * amt) * lod);
     for (let i = 0; i < n; i++) {
       const v = cone(0, 1, 0, 1.25);
       const sp = 0.8 + Math.random() * 2.6;
-      airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.4, 3), -1, 0, 0, 0);
+      airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.4, 3), 0, 0, 0);
     }
   }
   // a blast: drops out in every direction, fast, and one wide dark puff
@@ -2629,7 +2795,7 @@
       const v = cone(0, 1, 0, 1.45);
       const sp = 3 + Math.random() * 7;
       airDrop(x + (Math.random() - 0.5) * 0.4, y + (Math.random() - 0.5) * 0.6, z + (Math.random() - 0.5) * 0.4,
-        v.x * sp, v.y * sp + 1.5, v.z * sp, rMM(0.4, 3.5), -1, 0, 0, 0);
+        v.x * sp, v.y * sp + 1.5, v.z * sp, rMM(0.4, 3.5), 0, 0, 0);
     }
     airMarkP = 1; airMarkK = 1;
     const nm = Math.max(1, Math.round(5 * lod));
@@ -2645,7 +2811,7 @@
     for (let i = 0; i < n; i++) {
       const v = cone(dx, 0.45, dz, 0.6);
       const sp = 0.8 + Math.random() * 1.8;
-      airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(1.5, 5), -1, 0, 0, 0);
+      airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(1.5, 5), 0, 0, 0);
     }
     if (lod >= 0.35) {
       airStream(0, null, x + dx * 0.04, y, z + dz * 0.04, dx, 0.35, dz, {
@@ -2665,7 +2831,7 @@
       const v = hasDir ? cone(dx, dy + 0.35, dz, 0.75) : cone(0, 1, 0, 1.2);
       const sp = 0.8 + Math.random() * (1.4 + amt * 1.6);
       airDrop(x + (Math.random() - 0.5) * 0.08, y + (Math.random() - 0.5) * 0.08, z + (Math.random() - 0.5) * 0.08,
-        v.x * sp, v.y * sp, v.z * sp, rMM(0.4, amt < 0.5 ? 1.6 : 3), -1, 0, 0, 0);
+        v.x * sp, v.y * sp, v.z * sp, rMM(0.4, amt < 0.5 ? 1.6 : 3), 0, 0, 0);
     }
     if (mist && lod >= 0.35) {
       const nm = amt > 1.2 ? 2 : 1;
@@ -2684,35 +2850,76 @@
   }
 
   // ---- the frame ----------------------------------------------------------------
-  // one swept chord for drop i, from where it was last tested to (x,y,z).
-  // true = it met a solid on the way and is finished (a mark where it hit,
-  // when it leaves one).
+  // the first real surface on the chord (ox,oy,oz) -> (x,y,z): a collider
+  // (wallFace) or a drawn box no collider stands for (drawnBoxHit), whichever
+  // is nearer -> a HIT record (see wallFace) or null
   let airSweeps = 0;
-  function sweepDrop(i, x, y, z, vx, vy, vz) {
-    const ox = APX[i], oy = APY[i], oz = APZ[i];
+  function sweepHit(ox, oy, oz, x, y, z) {
     const sx = x - ox, sy = y - oy, sz = z - oz, sl = Math.sqrt(sx * sx + sy * sy + sz * sz);
-    if (!(sl > 1e-4)) return false;
-    const f = wallFace(ox, oy, oz, sx / sl, sy / sl, sz / sl, sl);
-    if (!f) return false;
+    if (!(sl > 1e-4)) return null;
+    const ux = sx / sl, uy = sy / sl, uz = sz / sl;
+    _vehNoted.length = 0;
+    const f = wallFace(ox, oy, oz, ux, uy, uz, sl);
+    const b = drawnBoxHit(ox, oy, oz, ux, uy, uz, f ? f.t : sl);
+    return b || f;
+  }
+  // drop i's chord since its last test. true = it met a surface on the way
+  // and is finished (its mark is queued where it hit, when it leaves one)
+  function sweepDrop(i, x, y, z, vx, vy, vz) {
+    airSweeps++; AIR_AUDIT.sweeps++;
+    const h = sweepHit(APX[i], APY[i], APZ[i], x, y, z);
+    if (!h) return false;
     AIR_AUDIT.swept++;
-    if (f.stop) return true;                         // a pole, a rail, a sign's edge: taken, no mark worth a slot
-    const sp = Math.sqrt(vx * vx + vy * vy + vz * vz);
-    if (f.top) {
-      // came down on a solid's top (a crate, a step, a sill): a floor mark there
-      AX[i] = f.x; AY[i] = f.y; AZ[i] = f.z;
-      floorLand(i);
-      return true;
-    }
-    if (AMARK[i] && airLands < AIR_LAND_FRAME) {
-      airLands++;
-      if (wallDrop(f.x, f.y, f.z, f.nx, f.nz, vx, vy, vz, markOf(i, sp), f.c, f.t0, f.t1, f.y0, f.y1)) AIR_AUDIT.wallLands++;
+    if (h.drawn) AIR_AUDIT.drawnHits++;
+    if (AMARK[i]) {
+      const vn = Math.abs(vx * h.nx + vy * h.ny + vz * h.nz);
+      // a top that IS the floor (a slab, a deck: wide both ways, where the
+      // ground layer seats) is the ground layer's: snow, rain and the sea
+      // treat it as floor. The top of a wall, a sill, a crate keeps its own
+      // clipped mark.
+      if (h.kind === 1 && h.a1 - h.a0 > 1.2 && h.b1 - h.b0 > 1.2 &&
+          Math.abs(h.y - decalFloorAt(h.x, h.z, h.y + 0.05, true)) < 0.03) {
+        queueMark(3, h.x, h.y, h.z, 0, 1, 0, vx, vy, vz, AR[i], markD(i, vn), 0, 0, 0, 0, null, 0, false);
+        return true;
+      }
+      queueMark(h.kind, h.x, h.y, h.z, h.nx, h.ny, h.nz, vx, vy, vz, AR[i], markD(i, vn),
+        h.a0, h.a1, h.b0, h.b1, h.c, h.drawn || h.proved ? 0.004 : 0.02, false);
     }
     return true;
   }
+  /* AEROSOL AT A WALL. A puff that reaches a surface while it still moves
+     stops there (it is a cloud of droplets, and they are now on the wall),
+     hangs and fades in front of it, and leaves a fine speckle: a few 1-3 mm
+     flecks over the part of the face the puff covered, cut to the face. */
+  function mistStop(i, h) {
+    const k = 0.03;
+    AX[i] = h.x + h.nx * k; AY[i] = h.y + h.ny * k; AZ[i] = h.z + h.nz * k;
+    const vx = AVX[i], vy = AVY[i], vz = AVZ[i];
+    AVX[i] = 0; AVY[i] = 0; AVZ[i] = 0; ASW[i] = 1e9;
+    AIR_AUDIT.mistStopped++;
+    const f = AT[i] / AL[i], q = 1 - f;
+    const s = AR[i] + (AS1[i] - AR[i]) * (1 - q * q * q);
+    const n = 3 + Math.round(6 * Math.min(1, AA[i] / 0.3) * Math.min(1, s / 0.15));
+    // in the surface's plane: a side face along (-nz, nx) and up, a flat along x and z
+    const flat = h.kind !== 0;
+    const t1x = flat ? 1 : -h.nz, t1z = flat ? 0 : h.nx;
+    const off = h.drawn || h.proved ? 0.004 : 0.02;
+    for (let j = 0; j < n; j++) {
+      const a = (Math.random() - 0.5) * 1.4 * s, b = (Math.random() - 0.5) * 1.4 * s;
+      const px = h.x + t1x * a, pz = h.z + t1z * a + (flat ? b : 0), py = h.y + (flat ? 0 : b);
+      // a fleck past the surface's edge is in the air: nothing to lay
+      if (flat) { if (px < h.a0 || px > h.a1 || pz < h.b0 || pz > h.b1) continue; }
+      else { const th = h.nx * pz - h.nz * px; if (th < h.a0 || th > h.a1 || py < h.b0 || py > h.b1) continue; }
+      const r = (0.5 + Math.random()) * 0.001;
+      queueMark(h.kind, px, py, pz, h.nx, h.ny, h.nz, vx * 0.3, vy * 0.3, vz * 0.3, r, 2 * r * 2.2,
+        h.a0, h.a1, h.b0, h.b1, h.c, off, true);
+    }
+  }
   function updateAir(dt) {
-    airLands = 0; airSweeps = 0;
+    airSweeps = 0; dbFrame++;
     updateStreams(dt);
-    if (!airGeo) return;
+    if (!airGeo) { flushMarks(); return; }
+    const sb = sweepBudget();
     // a 180-degree shutter: a drop smears across half the frame's time
     airShutter = Math.min(1 / 45, Math.max(1 / 240, dt * 0.5));
     const sea = waterOn();
@@ -2723,6 +2930,20 @@
         const dg = Math.exp(-AK[i] * dt);
         AVX[i] *= dg; AVZ[i] *= dg; AVY[i] = AVY[i] * dg - 0.5 * dt;
         AX[i] += AVX[i] * dt; AY[i] += AVY[i] * dt; AZ[i] += AVZ[i] * dt;
+        // the puff's sweep, while it still travels
+        if (ASW[i] < 1e8) {
+          ASW[i] -= dt;
+          if (ASW[i] <= 0 && airSweeps < sb) {
+            airSweeps++; AIR_AUDIT.sweeps++;
+            const h = sweepHit(APX[i], APY[i], APZ[i], AX[i], AY[i], AZ[i]);
+            if (h) mistStop(i, h);
+            else {
+              APX[i] = AX[i]; APY[i] = AY[i]; APZ[i] = AZ[i];
+              const v2 = AVX[i] * AVX[i] + AVY[i] * AVY[i] + AVZ[i] * AVZ[i];
+              ASW[i] = v2 < 0.09 ? 1e9 : 0.03;     // hanging in the air: it goes nowhere now
+            }
+          }
+        }
         continue;
       }
       // quadratic drag (implicit, so a fast fine drop can never overshoot), then gravity
@@ -2753,47 +2974,24 @@
         if (AVG[i] !== VV_GEN[vv]) AVV[i] = -1;
         else if (inVolume(vv, x, y, z)) { killAir(i); continue; }
       }
-      // the wall its spray was headed for
-      const wp = AWP[i];
-      if (wp >= 0) {
-        if (AWG[i] !== WP_GEN[wp]) { AWP[i] = -1; ASW[i] = 0; }
-        else {
-          const s = WP_NX[wp] * x + WP_NZ[wp] * z - WP_D[wp];
-          if (s <= 0.01) {
-            const tan = WP_NX[wp] * z - WP_NZ[wp] * x;   // along the face (-nz, nx)
-            if (tan >= WP_T0[wp] && tan <= WP_T1[wp] && y >= WP_Y0[wp] && y <= WP_Y1[wp]) {
-              if (AMARK[i] && airLands < AIR_LAND_FRAME) {
-                airLands++;
-                const sp = Math.sqrt(vx * vx + vy * vy + vz * vz);
-                if (wallDrop(x - WP_NX[wp] * s, y, z - WP_NZ[wp] * s, WP_NX[wp], WP_NZ[wp], vx, vy, vz, markOf(i, sp), WP_C[wp],
-                  WP_T0[wp], WP_T1[wp], WP_Y0[wp], WP_Y1[wp])) AIR_AUDIT.wallLands++;
-              }
-              killAir(i); continue;
-            }
-            // it went past the end of that wall (through the doorway beside
-            // it, over its top): from here the sweep tests its path, starting
-            // with the chord it just flew, so a jamb on the far side of the
-            // opening still catches it
-            AWP[i] = -1; ASW[i] = 0;
-          } else { APX[i] = x; APY[i] = y; APZ[i] = z; }   // still in front of its face: nothing between
-        }
-      }
-      // THE SWEEP (every drop without a live plane): the chord flown since the
-      // last test, through the same gate a wall splat passes
-      if (AWP[i] < 0) {
-        ASW[i] -= dt;
-        if (ASW[i] <= 0 && airSweeps < AIR_SWEEP_FRAME) {
-          airSweeps++; AIR_AUDIT.sweeps++;
-          const r = sweepDrop(i, x, y, z, vx, vy, vz);
-          if (r) { killAir(i); continue; }
-          APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 0.03 + Math.random() * 0.02;
-        }
-      }
       // the floor: a slow field, re-read on a stagger, every frame near it
       AFT[i] -= dt;
       if (AFT[i] <= 0 || y < AFL[i] + 0.3) { AFT[i] = 0.08; AFL[i] = decalFloorAt(x, z, y, true); }
-      if (y <= AFL[i] && vy < 0) { AY[i] = AFL[i]; floorLand(i); killAir(i); continue; }
+      const landing = y <= AFL[i] && vy < 0;
+      // THE SWEEP: the chord flown since the last test. Over the frame's
+      // budget it waits (the chord grows); a drop touching down never waits,
+      // so the floor beyond a wall can never take a drop the wall should have
+      ASW[i] -= dt;
+      if (landing || (ASW[i] <= 0 && airSweeps < sb)) {
+        if (sweepDrop(i, x, y, z, vx, vy, vz)) { killAir(i); continue; }
+        APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 0.025 + Math.random() * 0.02;
+      }
+      if (landing) {
+        if (AMARK[i]) queueMark(3, x, AFL[i], z, 0, 1, 0, vx, vy, vz, AR[i], markD(i, -vy), 0, 0, 0, 0, null, 0, false);
+        killAir(i); continue;
+      }
     }
+    flushMarks();
     // ---- the instance buffers (live count only) ----
     const n = airN;
     airGeo.instanceCount = n;
@@ -3351,7 +3549,9 @@
   }
 
   // the land decal budget (read live; the quality tier can move mid-run)
-  function landCap() { return CBZ.qScale ? CBZ.qScale(85, 300) : 170; }
+  function landCap() { return CBZ.qScale ? CBZ.qScale(120, 360) : 220; }
+  // the wall/top mark budget: past it the oldest wall mark gives up its slot
+  function wallCap() { return Math.round(CBZ.qScale ? CBZ.qScale(110, 300) : 200); }
 
   /* BLOOD UNDER THE SEA IS NOT A STAIN ON THE SEA FLOOR. (Shark Sim: the
      automatic bite kills a wader in the clear shallows.) A wader's wound is
@@ -3593,70 +3793,52 @@
     return !!(mat && mat.transparent && (mat.opacity == null || mat.opacity < 0.95));
   }
 
-  // stamp a vertical blood decal on a wall/surface that sits just behind the
-  // victim along the impact direction (dir points AWAY from shooter). Cheap:
-  // a single AABB scan of CBZ.colliders, no raycaster, capped + distance-gated.
-  // `instant` (headshot): the decal arrives pre-grown — the brain hits the wall
-  // the same frame as the shot, it doesn't bloom politely afterwards.
-  //
-  // OWNER-FILMED FIX (floating splats): a raw nearest-face scan stamped blood on
-  // ANYTHING — see-through glass curtain-walls, shot-open window holes, and tiny
-  // hydrant/pole/sign colliders — so the red plane hung in mid-air on nothing
-  // solid. A wall splat now requires a REAL, close, OPAQUE, WALL-SIZED solid
-  // face: glass faces are skipped, an open/shattered window (cityShotHole) is
-  // skipped (the bullet flew through a hole — keep scanning for a wall behind
-  // it), and the struck face must span a true wall (>= MIN_FACE wide, tall
-  // enough, with the splat seat inside the solid height band). No qualifying
-  // opaque wall → NO splat (the wound decal + ground pool still convey the hit;
-  // a missing splat beats a floating one).
-  const MIN_FACE = 1.2;   // min in-plane horizontal face span for a "wall" (rejects hydrant/pole/meter/sign)
-  const MIN_DOOR = 0.7;   // ...unless it is a door: door-high (>= 1.8 m, see wallFace) and at least this wide
-  const MIN_WALL_H = 1.0; // min height of a height-gated band to count as wall (rejects low curbs/ledges)
+  /* ============================================================
+     WHERE A DROP STOPS. (OWNER, a guard shot by the armoury doorway: the
+     blood "doesn't have good physics" ... "why is it so fake instead of just
+     physics".)
+
+     Blood on a wall used to be ONE pre-drawn starburst picture, stood on the
+     face where an imaginary "slug" landed and then cut to a measured
+     rectangle. A sticker: it ignored a vent inside it, missed the door trim,
+     never touched the top 45 cm of a wall, and owed its shape to nothing
+     that flew. It is gone. Blood on a wall is now only the marks of the drops
+     that actually hit it (THE AIRBORNE BLOOD): each drop is swept, chord by
+     chord, against what is really there, and where it stops it leaves its own
+     small mark, sized by the drop and its impact speed, stretched by its
+     impact angle along its travel, on the plane it hit. A dense hit reads as a
+     stain because many marks overlap in the core.
+
+     WHAT A CHORD CAN MEET (sweepHit):
+       * a COLLIDER (wallFace, below), when the face is opaque (glass lets
+         the drop through), not a shot-out hole, not a vehicle (the car's own
+         meshes take its blood: vehicleSpray), inside the solid's height band
+         (declared, or measured off the drawn mesh: drawnBand), and, when the
+         collider names its drawn mesh (c.ref), the chord meets THAT MESH: a
+         box whose mesh is not under the chord (a fence between its posts, a
+         vent cut in a wall, a group's envelope) is air and the drop flies
+         on. Any size of solid takes a drop: a pole, a sill, a table's edge,
+         the top of a wall. A side face, a top and an underside each keep the
+         mark on their own plane.
+       * a DRAWN BOX NO COLLIDER STANDS FOR (THE DRAWN BOXES, below): a door
+         frame, an architrave, a sill, a rail.
+     ============================================================ */
 
   /* A BAND-LESS COLLIDER IS NOT A FULL-HEIGHT WALL — IT IS A PROP NOBODY GAVE
      A HEIGHT TO. (OWNER, filming the cell house: "look how blood shows on
-     table as if there's an invisible wall.")
-
-     He was reading the collider ledger correctly. physics.js's contract is
-     that a collider with no y0/y1 blocks at EVERY height, and world/*.js is
-     full of waist-high furniture drawn `{ solid: true }` with no band — a
-     2.2 m mess table registers as a 2.2 m-wide box that reaches the ceiling.
-     The gates above are written against `c.y1`, so on those records BOTH of
-     them were skipped: the "is the splat seat inside the solid band" test and
-     the MIN_WALL_H test. The scan then found a wall-sized opaque face 2.2 m
-     across, and stamped a floor-to-head blood plane down the side of a table.
-     That plane is the invisible wall made visible — the splat is drawn exactly
-     where the collider says a wall is, and the collider is lying.
-
-     So ask the thing that is actually drawn. `c.ref` is the Mesh addBox
-     registered with the collider (world/materials.js:210), and its world
-     bounds are the honest height of the prop. This is the same read
-     systems/physics.js's `colliderVerticalBand` and city/buildings.js's
-     `wallBandOf` already make for the same reason, and the same degrade: a
-     collider with NO ref is anonymous, stays full-height, and behaves exactly
-     as it did before.
-
-     `visible` IS NOT CONSULTED, AND THAT IS THE ONE PLACE THIS DIVERGES FROM
-     THE TWO PRIOR READS. Both of those bail on `ref.visible === false`,
-     correctly for what they do — physics.js will not vault a prop that is not
-     drawn. Here it would delete the fix outright: core/batch.js:495 merges the
-     compound's static boxes into one buffer and sets EVERY original
-     `visible = false`, keeping it in the graph purely as a raycast target. So
-     in a batched prison almost every table's ref is invisible, and bailing
-     would hand back "no band" — which is exactly the full-height lie this is
-     here to stop. We are not asking whether the prop is drawn this frame, we
-     are asking how tall it IS, and its geometry answers that either way.
-
-     COST, AND WHY THERE IS NO CACHE. The derive runs only for a collider the
-     ray actually HIT inside 3.4 m — the call site is placed AFTER the slab
-     test, not before it — so a kill event pays for a handful of Box3 reads,
-     during a frame that is already spawning thirty meshes. Memoising the
-     answer onto the collider was the obvious optimisation and is the wrong
-     one: CBZ.colliders is walked every frame by systems/physics.js, and
-     stamping a new field onto a few records mid-run splits their hidden class
-     and makes that loop pay for this one. Both prior readers (physics.js,
-     buildings.js) recompute for the same reason; so does this. The shared Box3
-     and the reused return record keep it allocation-free either way. */
+     table as if there's an invisible wall.") physics.js's contract is that a
+     collider with no y0/y1 blocks at EVERY height, and world/*.js is full of
+     waist-high furniture drawn `{ solid: true }` with no band: a 2.2 m mess
+     table registers as a box that reaches the ceiling. So the band is asked of
+     the thing that is actually drawn: `c.ref` is the Mesh addBox registered
+     with the collider, and its world bounds are the honest height of the
+     prop (the same read systems/physics.js's colliderVerticalBand and
+     city/buildings.js's wallBandOf make). A collider with NO ref stays
+     full-height. `visible` is not consulted: core/batch.js keeps the merged
+     originals in the graph with visible = false purely as raycast targets,
+     and we are asking how tall the prop IS, not whether it is drawn this
+     frame. No cache: CBZ.colliders is walked every frame by physics.js, and a
+     field stamped onto a few records mid-run splits their hidden class. */
   let splatBounds = null;
   const splatBand = { y0: 0, y1: 0 };
   function drawnBand(c) {
@@ -3671,50 +3853,6 @@
       return splatBand;
     } catch (e) { return null; }
   }
-  // the three height gates, run against whichever band we have. Split out so
-  // the declared-band path (free) and the derived path (a bounds read) cannot
-  // drift apart — a table must fail the same test a window sill fails.
-  function bandRejects(y0, y1, y) {
-    if (y < y0 - 0.1 || y > y1 + 0.1) return true;   // splat seat outside the solid band
-    if (y1 - y0 < MIN_WALL_H) return true;           // too short a band to be a wall (curb/ledge/table)
-    if (y1 - y < 0.45) return true;                  // face too short above the splat seat
-    return false;
-  }
-  /* ============================================================
-     BLOOD LANDS ONLY WHERE IT LANDS. (OWNER, on the President's helipad
-     lawn: a dark-red splat hanging upright in the air beside a guard, no
-     wall anywhere: "fix floating blood so it splashes with physics either
-     onto a surface or onto the ground farther away if no wall.")
-
-     ROOT CAUSE. The wall test was a level ray against every collider's
-     AXIS-ALIGNED min/max box, and the splat was stood on that box's face at
-     a guessed height. Two kinds of record lie about where their surface is:
-       * a box round something that is not a box. Executive One's collider
-         (motorcade.js) and every parked aircraft's (playeraircraft.js) is
-         the AABB of a yawed fuselage, ref-less, so it was not recognised as
-         a vehicle; at the pad's heading that box's face stands metres clear
-         of the hull, over open lawn. The splat went on the face.
-       * an ORIENTED collider (c.yaw) read as its min/max envelope, whose
-         faces are not the wall's faces at all.
-     And the slug never flew: it was stamped along a level line, so blood
-     "reached" a wall 3 m away at head height without ever falling.
-
-     NOW. The blood is a slug thrown from the wound along the hit at a real
-     speed, falling under AIR_G, marched in short chords. Each chord is a
-     CBZ.rayColliders ray (the broadphase grid, oriented boxes in their own
-     frame, bands, the same mode gate as every walker), and a face it enters
-     must pass the gates: opaque, wall-sized, the hit height inside the
-     solid band, not a shot-open hole, not a vehicle (a ref-less one says so
-     with c.veh; its drawn meshes take the blood, vehicleSplat), and, when
-     the collider names the mesh it stands for (c.ref), THAT MESH MUST BE
-     THERE: the chord is raycast against the drawn triangles, and a box
-     whose mesh is not under the hit (a fence run between its posts, a
-     group's envelope) is air, so the slug flies on. The splat goes where
-     the slug actually meets the face, at the height it has fallen to. If
-     it meets no face it comes down on the ground (decalFloorAt: the drawn
-     ground or the platform floor under it) further along its arc, and the
-     mark lies there, stretched the way it was going.
-     ============================================================ */
   // a collider that names the vehicle it is round (militaryvehicles.js,
   // playeraircraft.js tag their ref-less boxes with c.veh)
   function vehOfCol(c) {
@@ -3722,13 +3860,13 @@
     return c.ref ? vehicleRootOf(c.ref) : null;
   }
   // IS THE DRAWN THING THERE? Raycast the collider's own mesh along the
-  // chord near the box's face. 1 = yes (FACEHIT.d: distance along the
-  // chord), 0 = the mesh is not there (air inside the box), -1 = cannot
-  // tell (geometry freed after upload, too big a group): the box is
-  // trusted, as before.
-  const _fRay = new THREE.Raycaster(), _fO = new THREE.Vector3(), _fD = new THREE.Vector3();
+  // chord near the box's face. 1 = yes (FACEHIT.d: distance along the chord;
+  // FACEHIT.n*: the drawn triangle's world normal, facing the chord), 0 = the
+  // mesh is not there (air inside the box), -1 = cannot tell (geometry freed
+  // after upload, too big a group): the box is trusted.
+  const _fRay = new THREE.Raycaster(), _fO = new THREE.Vector3(), _fD = new THREE.Vector3(), _fN = new THREE.Vector3();
   const _fHits = [], _fMeshes = [];
-  const FACEHIT = { d: 0 };
+  const FACEHIT = { d: 0, nx: 0, ny: 0, nz: 0, hasN: false };
   function drawnFace(ref, ox, oy, oz, dx, dy, dz, t, len) {
     _fMeshes.length = 0;
     let unknown = false;
@@ -3746,28 +3884,36 @@
     _fO.set(ox + dx * t0, oy + dy * t0, oz + dz * t0); _fD.set(dx, dy, dz);
     _fRay.set(_fO, _fD); _fRay.near = 0; _fRay.far = Math.max(0.05, Math.min(len, t + 0.9) - t0);
     if (CBZ.camera) _fRay.camera = CBZ.camera;
-    let best = Infinity;
+    let best = Infinity, bh = null;
     try { ref.updateWorldMatrix(true, true); } catch (e) { /* matrices as they are */ }
     for (let i = 0; i < _fMeshes.length; i++) {
       _fHits.length = 0;
       try { _fMeshes[i].raycast(_fRay, _fHits); } catch (e) { _fMeshes.length = 0; _fHits.length = 0; return -1; }
-      for (let k = 0; k < _fHits.length; k++) if (_fHits[k].distance < best) best = _fHits[k].distance;
+      for (let k = 0; k < _fHits.length; k++) if (_fHits[k].distance < best) { best = _fHits[k].distance; bh = _fHits[k]; }
     }
     _fHits.length = 0; _fMeshes.length = 0;
     if (!(best < Infinity)) return 0;
     FACEHIT.d = t0 + best;
+    FACEHIT.hasN = false;
+    if (bh && bh.face && bh.object) {
+      _fN.copy(bh.face.normal).transformDirection(bh.object.matrixWorld);
+      if (_fN.x * dx + _fN.y * dy + _fN.z * dz > 0) _fN.negate();
+      FACEHIT.nx = _fN.x; FACEHIT.ny = _fN.y; FACEHIT.nz = _fN.z; FACEHIT.hasN = true;
+    }
     return 1;
   }
-  /* wallFace(x,y,z, dx,dy,dz, len) — the nearest REAL wall face on the
-     segment (x,y,z) + (dx,dy,dz)*t, t in [0,len], (dx,dy,dz) unit. Shared by
-     the kill's wall splat (per chord of its arc) and the airborne spray
-     (airWall), so both obey the one gate. -> a reused record
-     { c, t, x,y,z, nx,nz, y0,y1, t0,t1, top } (t0..t1: the face's extent
-     along its tangent (-nz, nx)); top:true when the chord came down on top
-     of a solid; null when it met nothing. Vehicles met on the way are noted
-     for the caller's vehicleSplat (_vehNoted; the caller clears it per
-     event). */
-  const _wf = { c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, nz: 0, y0: 0, y1: 0, t0: 0, t1: 0, top: false, stop: false };
+  /* wallFace(x,y,z, dx,dy,dz, len) — the nearest real surface on the segment
+     (x,y,z) + (dx,dy,dz)*t, t in [0,len], (dx,dy,dz) unit, among the
+     colliders. -> a reused record (HIT shape):
+       { kind: 0 a side face, 1 a top, 2 an underside,
+         c: the collider (its mesh is what the mark rides), t, x,y,z,
+         nx,ny,nz: the surface normal (a side face's is horizontal),
+         a0,a1,b0,b1: the surface's extent, absolute — a side face along its
+           tangent (-nz, nx) and up; a top / underside along world x and z,
+         proved: the drawn mesh was found under the hit, drawn: false }
+     null when it met nothing. Vehicles met on the way are noted for
+     vehicleSpray (_vehNoted; the caller clears it). */
+  const _wf = { kind: 0, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, a0: 0, a1: 0, b0: 0, b1: 0, proved: false, drawn: false };
   const _wfHit = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
   const _wfOpts = { minT: 0 };
   function wallFace(x, y, z, dx, dy, dz, len) {
@@ -3782,299 +3928,218 @@
       const vr = vehOfCol(c);
       if (vr) { noteVehicle(vr); continue; }   // the car's own meshes take it
       if (isSeeThroughCol(c)) continue;          // intact glass pane / door vision: flies through
-      if (H.ny > 0.5) {
-        // came down ON a solid's top (a crate, a step, a deck): it has landed
-        if (c.ref && drawnFace(c.ref, x, y, z, dx, dy, dz, t, len) === 0) continue;
-        // a post's or a rail's cap is too small to hold a splat: it just takes the slug
-        const narrow = c.yaw && c.hw != null ? (c.hw < 0.2 || c.hd < 0.2) : (c.maxX - c.minX < 0.4 || c.maxZ - c.minZ < 0.4);
-        _wf.top = !narrow; _wf.stop = narrow; _wf.c = c; _wf.t = t; _wf.x = H.x; _wf.y = H.y; _wf.z = H.z;
-        return _wf;
-      }
-      if (H.ny < -0.5) continue;                 // an underside: not where a slug stops
-      const nx = H.nx, nz = H.nz, hy = H.y;
-      // the face's span along its tangent, and its centre on that line
-      const tx = -nz, tz = nx;
-      let span, tc;
-      if (c.yaw && c.hw != null) {
-        const co = Math.cos(c.yaw), si = Math.sin(c.yaw);
-        span = 2 * (c.hw * Math.abs(tx * co - tz * si) + c.hd * Math.abs(tx * si + tz * co));
-        tc = tx * c.cx + tz * c.cz;
-      } else {
-        span = (c.maxX - c.minX) * Math.abs(tx) + (c.maxZ - c.minZ) * Math.abs(tz);
-        tc = tx * (c.minX + c.maxX) * 0.5 + tz * (c.minZ + c.maxZ) * 0.5;
-      }
       // the solid height band: declared, else measured off the drawn mesh
       let y0 = c.y1 != null ? (c.y0 || 0) : -1e9, y1 = c.y1 != null ? c.y1 : 1e9;
       if (c.y1 == null) { const band = drawnBand(c); if (band) { y0 = band.y0; y1 = band.y1; } }
-      if (hy < y0 - 0.1 || hy > y1 + 0.1) continue;  // over / under what is drawn: air
-      // OPEN / SHATTERED WINDOW: the round flew through a hole
-      if (CBZ.cityShotHole && CBZ.cityShotHole(H.x, hy, H.z, nx, nz)) continue;
-      let hx = H.x, hz = H.z, hyy = hy, ht = t, proved = false;
+      if (H.y < y0 - 0.01 || H.y > y1 + 0.01) continue;   // over / under what is drawn: air
+      // OPEN / SHATTERED WINDOW: the drop flies through the hole
+      if (Math.abs(H.ny) < 0.5 && CBZ.cityShotHole && CBZ.cityShotHole(H.x, H.y, H.z, H.nx, H.nz)) continue;
+      let hx = H.x, hy = H.y, hz = H.z, ht = t, nx = H.nx, ny = H.ny, nz = H.nz, proved = false;
       if (c.ref) {
         const r = drawnFace(c.ref, x, y, z, dx, dy, dz, t, len);
         if (r === 0) continue;                   // the box is there, the thing is not: air
-        if (r === 1) { ht = FACEHIT.d; hx = x + dx * ht; hyy = y + dy * ht; hz = z + dz * ht; proved = true; }
+        if (r === 1) {
+          ht = FACEHIT.d; hx = x + dx * ht; hy = y + dy * ht; hz = z + dz * ht; proved = true;
+          if (FACEHIT.hasN) { nx = FACEHIT.nx; ny = FACEHIT.ny; nz = FACEHIT.nz; }
+        }
       }
-      // IT HIT SOMETHING SOLID. Not every solid wears a wall splat: a pole,
-      // a sign, a table's edge, the last few cm under a wall's top take the
-      // slug and show nothing (the drops leave their own marks). The slug
-      // stops there either way; it never flies on through a solid.
-      _wf.stop = (span < MIN_DOOR) ||
-        (y1 < 1e8 && (y1 - y0 < MIN_WALL_H || y1 - hyy < 0.45)) ||
-        // a DOOR is narrower than a wall run (a 0.9 m leaf) but a full
-        // door-height opaque face; anything else that narrow is a prop
-        (span < MIN_FACE && !(y1 - y0 >= 1.8 && y1 - y0 < 50));
-      const th = tx * hx + tz * hz;
-      _wf.top = false; _wf.c = c; _wf.t = ht; _wf.x = hx; _wf.y = hyy; _wf.z = hz; _wf.nx = nx; _wf.nz = nz;
-      _wf.y0 = y0; _wf.y1 = y1;
-      _wf.t0 = tc - span / 2; _wf.t1 = tc + span / 2;
-      // a face proved at one point by its mesh is only trusted near that point
-      if (proved) { if (_wf.t0 < th - 0.8) _wf.t0 = th - 0.8; if (_wf.t1 > th + 0.8) _wf.t1 = th + 0.8; }
+      const kind = ny > 0.7 ? 1 : (ny < -0.7 ? 2 : 0);
+      _wf.kind = kind; _wf.c = c; _wf.t = ht; _wf.x = hx; _wf.y = hy; _wf.z = hz;
+      _wf.proved = proved; _wf.drawn = false;
+      const ori = !!(c.yaw && c.hw != null);
+      if (kind === 0) {
+        const hl = Math.hypot(nx, nz) || 1; nx /= hl; nz /= hl;
+        _wf.nx = nx; _wf.ny = 0; _wf.nz = nz;
+        // the face's span along its tangent, read off the box face the ray
+        // entered; a drawn normal well off that face (a round post) has no
+        // flat edge to cut at, so the mark is not cut along it
+        const bx = H.nx, bz = H.nz, tx = -bz, tz = bx;
+        let span, tc;
+        if (ori) {
+          const co = Math.cos(c.yaw), si = Math.sin(c.yaw);
+          span = 2 * (c.hw * Math.abs(tx * co - tz * si) + c.hd * Math.abs(tx * si + tz * co));
+          tc = tx * c.cx + tz * c.cz;
+        } else {
+          span = (c.maxX - c.minX) * Math.abs(tx) + (c.maxZ - c.minZ) * Math.abs(tz);
+          tc = tx * (c.minX + c.maxX) * 0.5 + tz * (c.minZ + c.maxZ) * 0.5;
+        }
+        const al = nx * bx + nz * bz;
+        if (al > 0.97) { _wf.a0 = tc - span / 2; _wf.a1 = tc + span / 2; }
+        else if (al < -0.97) { _wf.a0 = -tc - span / 2; _wf.a1 = -tc + span / 2; }
+        else { _wf.a0 = -1e4; _wf.a1 = 1e4; }
+        _wf.b0 = Math.max(-1e4, y0); _wf.b1 = Math.min(1e4, y1);
+      } else {
+        _wf.nx = 0; _wf.ny = kind === 1 ? 1 : -1; _wf.nz = 0;
+        if (ori) { _wf.a0 = -1e4; _wf.a1 = 1e4; _wf.b0 = -1e4; _wf.b1 = 1e4; }
+        else { _wf.a0 = c.minX; _wf.a1 = c.maxX; _wf.b0 = c.minZ; _wf.b1 = c.maxZ; }
+      }
       return _wf;
-    }
-    return null;
-  }
-  /* slugArc(x,y,z, dx,dz, sp, up, reach) — a slug of blood thrown from the
-     wound along (dx,dz) at sp m/s (plus `up` m/s), falling under AIR_G,
-     marched in chords until it meets a face (SLUG.wall = the wallFace
-     record), comes down on the ground or a solid's top (SLUG.ground, at
-     SLUG.x/y/z), or has gone `reach` metres (null). */
-  const SLUG = { ground: false, x: 0, y: 0, z: 0, run: 0, wall: null, vx: 0, vy: 0, vz: 0 };
-  function slugArc(x, y, z, dx, dz, sp, up, reach) {
-    let px = x, py = y, pz = z, vy = up, run = 0;
-    const vx = dx * sp, vz = dz * sp, DT = 0.035;
-    SLUG.ground = false; SLUG.wall = null; SLUG.run = 0; SLUG.vx = vx; SLUG.vy = vy; SLUG.vz = vz;
-    for (let s = 0; s < 40 && run < reach; s++) {
-      const nx = px + vx * DT, ny = py + vy * DT - 0.5 * AIR_G * DT * DT, nz = pz + vz * DT;
-      const sx = nx - px, sy = ny - py, sz = nz - pz, sl = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1e-6;
-      const f = wallFace(px, py, pz, sx / sl, sy / sl, sz / sl, sl);
-      if (f && f.stop) return null;             // taken by a solid that wears no splat
-      // the velocity it arrives with (gravity over the part of the chord flown)
-      if (f) SLUG.vy = vy - AIR_G * DT * (f.t / sl);
-      if (f && !f.top) { SLUG.wall = f; SLUG.run = run + Math.hypot(sx, sz) * (f.t / sl); return SLUG; }
-      if (f && f.top) { SLUG.ground = true; SLUG.x = f.x; SLUG.y = f.y; SLUG.z = f.z; SLUG.run = run; return SLUG; }
-      const fl = decalFloorAt(nx, nz, ny + 0.3, true);
-      if (ny <= fl) { SLUG.ground = true; SLUG.x = nx; SLUG.y = fl; SLUG.z = nz; SLUG.run = run; SLUG.vy = vy - AIR_G * DT; return SLUG; }
-      run += Math.hypot(sx, sz);
-      vy -= AIR_G * DT; px = nx; py = ny; pz = nz;
     }
     return null;
   }
 
   /* ============================================================
-     A WALL STAIN LIES ONLY ON WALL. (OWNER, escape mode, a guard shot in the
-     armoury doorway: "blood ... doesn't have good physics" — a big symmetric
-     starburst on the door pier, half of it hanging in the open doorway with
-     its dots floating in the air.)
-
-     ROOT CAUSE. spawnWallSplat stood ONE flat quad on the struck face,
-     centred on the hit, ~1.7 m across for an ordinary kill (2.2 m for a
-     head), spun at random, the all-round starburst cell. wallFace already
-     knew the face's extent (t0..t1, y0..y1) and nothing used it: the armoury
-     door's pier (world/gunroom.js, CK.infill) is 0.9 m wide, so a hit near
-     the jamb put half the sticker over the 1.2 m opening. Its shape owed
-     nothing to the slug: same size at any speed, same starburst at any
-     angle, no relation to the way the blood was going.
-
-     NOW.
-       * The slug's arrival velocity (slugArc) sets the stain: its in-plane
-         travel turns the directional cell (rays thrown downstream), the
-         impact angle stretches it (length/width = 1/sin a, capped at 3), the
-         speed and the distance flown set its size. Only a square hit is
-         round. It appears when the slug arrives (time of flight), not at the
-         shot.
-       * The struck face's real extent round the hit is MEASURED: short rays
-         into the plane (wallUnder, the same wallFace gate: drawn mesh there,
-         not a shot-out hole, coplanar, same rigid surface) walk out from the
-         hit in four directions and bisect onto each edge, then the corners
-         of that cross are tested and pulled in. The result is the mark's
-         clip rectangle (aClip), cut in the shader on the face: past a jamb,
-         a corner, a window's edge, a wall's top, nothing is drawn.
-       * The part of the slug that the wall was not there to catch flies on
-         as drops (airDrop at the slug's own velocity) through the opening,
-         and the sweep lands them on what is beyond: the yard's floor, the
-         reveal of the jamb, the open leaf.
-       * Drips run down only from a heavy stain, only inside the measured
-         face, never below its edge or the floor.
+     THE DRAWN BOXES NO COLLIDER STANDS FOR. A door's frame and architrave,
+     a sill, a dado rail, a shelf's edge are drawn and have no collider, so a
+     drop swept against the colliders alone flew straight through them. The
+     static batch (core/batch.js batchStaticUnder) then merges them into tile
+     buffers that keep no CPU copy (core/citystream.js freeStaticArrays), so
+     they cannot be raycast afterwards. Just before it merges a root it hands
+     it here (CBZ.goreNoteStatics), and every thin, axis-aligned, opaque box
+     mesh that is not a collider's own mesh and does not move is written down
+     as its world box (6 floats) in a 2 m grid. A chord tests the boxes in the
+     cells it crosses: a slab test each, no raycast, no allocation. A box
+     counts only while the group it was built under is drawn (refShown), so a
+     hidden prison or a pulled building leaves no invisible trim catching
+     blood. Cost: one pass over the root's meshes at batch time (box meshes
+     read their 24 corners), ~24 bytes a box plus its grid entries, capped
+     per root by the quality tier.
      ============================================================ */
-  function moverCol(c) {
-    for (let o = c && c.ref, k = 0; o && k < 12; o = o.parent, k++) if (o.userData && o.userData.mover) return true;
-    return false;
+  const DB_CELL = 2;
+  let dbN = 0, dbB = new Float32Array(6 * 512), dbQ = new Uint32Array(512), dbO = new Uint16Array(512);
+  const dbOwners = [], dbOwnT = [], dbOwnShown = [];   // owners held weakly: a pulled building is not pinned by its trim
+  const dbGrid = new Map();
+  let dbQid = 0, dbFrame = 1;
+  const dbSeen = new WeakSet();
+  function dbKey(ix, iz) { return (ix + 40000) * 80000 + (iz + 40000); }
+  function dbGrow() {
+    const n = dbQ.length * 2;
+    const B = new Float32Array(n * 6); B.set(dbB); dbB = B;
+    const Q = new Uint32Array(n); Q.set(dbQ); dbQ = Q;
+    const O = new Uint16Array(n); O.set(dbO); dbO = O;
   }
-  // IS THERE WALL HERE? A 20 cm ray into the struck face at (s along the
-  // face's tangent (nz, -nx), v up) from the hit: a solid, facing the same
-  // way, within 4 cm of the struck plane, and either the very collider that
-  // was struck or another one that never moves (the next block of the same
-  // wall; never a door leaf on one side and a pier on the other).
-  let wallProbes = 0;
-  function wallUnder(hx, hy, hz, nx, nz, col, colMoves, s, v) {
-    wallProbes++;
-    const f = wallFace(hx + nz * s + nx * 0.1, hy + v, hz - nx * s + nz * 0.1, -nx, 0, -nz, 0.2);
-    if (!f || f.top) return false;
-    if (f.nx * nx + f.nz * nz < 0.9 || Math.abs(f.t - 0.1) > 0.04) return false;
-    if (f.c !== col && (colMoves || moverCol(f.c))) return false;
-    return true;
-  }
-  // walk out from the hit along (ds, dv) a quarter of `reach` at a time; at
-  // the first miss, halve twice onto the edge. -> the solid distance.
-  function edgeOut(hx, hy, hz, nx, nz, col, mv, ds, dv, reach) {
-    let ok = 0;
-    for (let k = 1; k <= 4; k++) {
-      const r = reach * k / 4;
-      if (wallUnder(hx, hy, hz, nx, nz, col, mv, ds * r, dv * r)) { ok = r; continue; }
-      let lo = ok, hi = r;
-      for (let b = 0; b < 2; b++) {
-        const mid = (lo + hi) / 2;
-        if (wallUnder(hx, hy, hz, nx, nz, col, mv, ds * mid, dv * mid)) lo = mid; else hi = mid;
+  CBZ.goreNoteStatics = function (root) {
+    if (!root || !root.traverse) return 0;
+    const cap = Math.round(CBZ.qScale ? CBZ.qScale(12000, 40000) : 24000);
+    const refs = new Set();
+    const C = CBZ.colliders || [];
+    for (let i = 0; i < C.length; i++) { const r = C[i] && C[i].ref; if (r) refs.add(r); }
+    try { root.updateMatrixWorld(true); } catch (e) { /* as they are */ }
+    const owners = new Map();
+    let added = 0;
+    root.traverse(function (o) {
+      if (added >= cap || !o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || refs.has(o) || dbSeen.has(o)) return;
+      const g = o.geometry, p = g && g.parameters;
+      if (!p || g.type !== "BoxGeometry") return;
+      const P = g.attributes && g.attributes.position;
+      if (!P || !P.array || P.isInterleavedBufferAttribute || P.itemSize !== 3) return;
+      const mat = o.material;
+      if (!mat || Array.isArray(mat) || mat.transparent || mat.visible === false) return;
+      // what swings or rides is not a box in the world; `top` is the group
+      // directly under the root that the piece was built in
+      let top = o;
+      for (let a = o; a && a !== root; a = a.parent) {
+        if (a.userData && (a.userData.mover || a.userData.dynamic)) return;
+        top = a;
       }
-      return lo;
-    }
-    return reach;
-  }
-  // the struck face's solid rectangle round the hit, out to rs (along the
-  // face) and rv (up/down) -> CLIP {s0 <= 0 <= s1, v0 <= 0 <= v1}, metres
-  const CLIP = { s0: 0, s1: 0, v0: 0, v1: 0 };
-  const _fc = [0, 0, 0, 0];
-  function faceClip(hx, hy, hz, nx, nz, col, rs, rv) {
-    const mv = moverCol(col), c = _fc;
-    c[0] = -edgeOut(hx, hy, hz, nx, nz, col, mv, -1, 0, rs); c[1] = edgeOut(hx, hy, hz, nx, nz, col, mv, 1, 0, rs);
-    c[2] = -edgeOut(hx, hy, hz, nx, nz, col, mv, 0, -1, rv); c[3] = edgeOut(hx, hy, hz, nx, nz, col, mv, 0, 1, rv);
-    // the corners of the cross: a window's corner or the L of a pier and its
-    // head is solid along both arms and open between them
-    for (let q = 0; q < 4; q++) {
-      const is = q & 1, iv = 2 + ((q >> 1) & 1);
-      let ok = false;
-      for (let tries = 0; tries < 3 && !ok; tries++) {
-        const cs = c[is], cv = c[iv];
-        if (Math.abs(cs) < 0.01 || Math.abs(cv) < 0.01) { ok = true; break; }
-        if (wallUnder(hx, hy, hz, nx, nz, col, mv, cs * 0.97, cv * 0.97)) { ok = true; break; }
-        if (Math.abs(cs) >= Math.abs(cv)) c[is] *= 0.5; else c[iv] *= 0.5;   // pull the longer arm in
+      const e = o.matrixWorld.elements, A = P.array, n = P.count;
+      let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+      for (let v = 0, q = 0; v < n; v++, q += 3) {
+        const ax = A[q], ay = A[q + 1], az = A[q + 2];
+        const wx = e[0] * ax + e[4] * ay + e[8] * az + e[12];
+        const wy = e[1] * ax + e[5] * ay + e[9] * az + e[13];
+        const wz = e[2] * ax + e[6] * ay + e[10] * az + e[14];
+        if (wx < x0) x0 = wx; if (wx > x1) x1 = wx;
+        if (wy < y0) y0 = wy; if (wy > y1) y1 = wy;
+        if (wz < z0) z0 = wz; if (wz > z1) z1 = wz;
       }
-      if (!ok) { if (Math.abs(c[is]) >= Math.abs(c[iv])) c[is] = 0; else c[iv] = 0; }
-    }
-    CLIP.s0 = c[0]; CLIP.s1 = c[1]; CLIP.v0 = c[2]; CLIP.v1 = c[3];
-    return CLIP;
-  }
-
-  function spawnWallSplat(x, y, z, dx, dz, amt, instant) {
-    if (walls.length > 48) return;
-    const hl = Math.hypot(dx, dz);
-    if (!(hl > 1e-4)) return;
-    dx /= hl; dz /= hl;
-    _vehNoted.length = 0;
-    // the heavy slug leaves the wound at the speed of the hit: a round's exit
-    // (or a body driven into the wall, `instant`) fast and flat, else slower
-    const sp = instant ? 9 + Math.random() * 3 : 5.5 + Math.random() * 2.5;
-    const S0 = slugArc(x, y, z, dx, dz, sp, 0.5, 3.4);
-    const best = S0 && S0.wall;
-    // a car between the wound and the wall wears it, where the slug lands
-    if (vehicleSplat(x, y, z, dx, 0.1, dz, best ? S0.run : 3.4, amt, instant)) return;
-    if (!S0) return;
-    if (!best) {
-      // NO WALL: it comes down on the ground (or the top it fell on) further
-      // along its arc, a torn splat stretched the way it was going
-      const g = (0.1 + Math.random() * 0.08) * (0.7 + amt * 0.4);
-      _splatO.dirX = dx; _splatO.dirZ = dz; _splatO.radial = false;
-      const sy0 = seatY, ss0 = seatSolid; seatY = S0.y + 0.05; seatSolid = true;
-      try { spawnSplat(S0.x, S0.z, g, BLOOD, false, _splatO); } finally { seatY = sy0; seatSolid = ss0; }
-      return;
-    }
-    // best is wallFace's reused record and the probes below reuse it: hold it all now
-    const col = best.c;
-    const nx = best.nx, nz = best.nz, hx = best.x, hz = best.z, cy = best.y;
-    const svx = S0.vx, svy = S0.vy, svz = S0.vz, run = S0.run;
-    if (seaColumn(hx, hz)) {
-      const w = submRaw(hx, cy, hz);
-      if (w !== DRY && w > 0.02) { SEA_AUDIT.wall++; CBZ.goreBloom(hx, cy, hz, { amount: Math.max(0.3, Math.min(2, amt)) }); return; }
-    }
-    // THE IMPACT: speed, angle to the face, and which way it was going across it
-    const V = Math.sqrt(svx * svx + svy * svy + svz * svz) || 1;
-    const sinA = Math.max(0.05, Math.min(1, -(svx * nx + svz * nz) / V));
-    const tx = nz, tz = -nx;                              // the face's tangent: the quad's +x before its spin
-    const u = svx * tx + svz * tz, w = svy;               // in-plane travel
-    const glance = sinA < 0.94 && Math.hypot(u, w) > 0.5;
-    // SIZE: a pistol exit slug at a metre leaves a torn core ~15-20 cm across
-    // with spines to ~35 cm downstream; more blood, a faster slug and a longer
-    // flight (it spreads as it goes) make it bigger
-    const S = (0.34 + 0.2 * Math.min(2, amt)) * (0.85 + Math.random() * 0.3)
-      * Math.min(1.3, 0.75 + V * 0.035) * (1 + 0.2 * Math.min(2.5, run));
-    // a glancing slug is drawn out along its travel: length / width = 1 / sin(angle)
-    const e = glance ? Math.min(3, 1 / sinA) : 1;
-    const sxq = S * (e > 1.5 ? 0.85 : 1), syq = S * e;
-    const rot = glance ? Math.atan2(-u, w) : Math.random() * 6.28;
-    const ca = Math.abs(Math.cos(rot)), sa = Math.abs(Math.sin(rot));
-    const rs = 0.5 * (sxq * ca + syq * sa), rv = 0.5 * (sxq * sa + syq * ca);
-    // WHERE THE WALL IS round the hit (measured, not assumed)
-    const K = faceClip(hx, cy, hz, nx, nz, col, rs, rv);
-    const floorY = decalFloorAt(hx + nx * 0.1, hz + nz * 0.1, cy, true);
-    if (K.v0 < floorY + 0.005 - cy) K.v0 = Math.min(0, floorY + 0.005 - cy);
-    const s0 = K.s0, s1 = K.s1, v0 = K.v0, v1 = K.v1;
-    // time of flight: the stain appears when the slug gets there
-    const delay = Math.min(0.4, run / Math.max(1, Math.hypot(svx, svz)));
-    // THE PART THAT MISSED: where the face ends inside the stain's reach, that
-    // share of the slug met nothing and flies on, past the jamb, over the top,
-    // round the corner, as heavy drops at the slug's own velocity
-    const full = 4 * rs * rv, kept = Math.max(0, (s1 - s0) * (v1 - v0));
-    const miss = full > 1e-4 ? Math.max(0, 1 - kept / full) : 0;
-    if (miss > 0.08) {
-      const nm = Math.round(Math.min(14, 18 * miss * Math.min(1.5, amt)) * airLod(hx, hz));
-      for (let k = 0; k < nm; k++) {
-        let ps = 0, pv = 0, found = false;
-        for (let tr = 0; tr < 5 && !found; tr++) {
-          ps = (Math.random() * 2 - 1) * rs; pv = (Math.random() * 2 - 1) * rv;
-          found = ps < s0 || ps > s1 || pv < v0 || pv > v1;
+      const sx = x1 - x0, sy = y1 - y0, sz = z1 - z0;
+      const mn = Math.min(sx, sy, sz), mx = Math.max(sx, sy, sz);
+      if (!(mn > 0.003) || mn > 0.3 || mx > 16) return;
+      // axis-aligned only: a yawed box's envelope is not its surface
+      const det = Math.abs(e[0] * (e[5] * e[10] - e[6] * e[9]) - e[4] * (e[1] * e[10] - e[2] * e[9]) + e[8] * (e[1] * e[6] - e[2] * e[5]));
+      const vol = p.width * p.height * p.depth * det;
+      if (!(vol > 0) || sx * sy * sz > vol * 1.03) return;
+      const own = top === o ? root : top;
+      let oi = owners.get(own);
+      if (oi === undefined) {
+        if (dbOwners.length >= 65535) return;
+        oi = dbOwners.length; dbOwners.push(typeof WeakRef === "function" ? new WeakRef(own) : own); dbOwnT.push(0); dbOwnShown.push(0); owners.set(own, oi);
+      }
+      if (dbN >= dbQ.length) dbGrow();
+      const b = dbN * 6;
+      dbB[b] = x0; dbB[b + 1] = y0; dbB[b + 2] = z0; dbB[b + 3] = x1; dbB[b + 4] = y1; dbB[b + 5] = z1;
+      dbO[dbN] = oi; dbQ[dbN] = 0;
+      const ix0 = Math.floor(x0 / DB_CELL), ix1 = Math.floor(x1 / DB_CELL);
+      const iz0 = Math.floor(z0 / DB_CELL), iz1 = Math.floor(z1 / DB_CELL);
+      for (let ix = ix0; ix <= ix1; ix++) for (let iz = iz0; iz <= iz1; iz++) {
+        const k = dbKey(ix, iz);
+        let L = dbGrid.get(k);
+        if (!L) { L = []; dbGrid.set(k, L); }
+        L.push(dbN);
+      }
+      dbSeen.add(o);
+      dbN++; added++;
+    });
+    return added;
+  };
+  // the nearest drawn box the segment enters before `len` -> a HIT record
+  // (drawn: true, c: null) or null. A segment that starts inside a box (a
+  // drop born in the trim) does not hit it.
+  const _dbh = { kind: 0, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, a0: 0, a1: 0, b0: 0, b1: 0, proved: true, drawn: true };
+  function drawnBoxHit(ox, oy, oz, dx, dy, dz, len) {
+    if (!dbN || !(len > 0)) return null;
+    const ex = ox + dx * len, ez = oz + dz * len;
+    const ix0 = Math.floor(Math.min(ox, ex) / DB_CELL), ix1 = Math.floor(Math.max(ox, ex) / DB_CELL);
+    const iz0 = Math.floor(Math.min(oz, ez) / DB_CELL), iz1 = Math.floor(Math.max(oz, ez) / DB_CELL);
+    if ((ix1 - ix0 + 1) * (iz1 - iz0 + 1) > 25) return null;    // a chord is centimetres to a metre long
+    const q = ++dbQid, B = dbB;
+    let best = len, bi = -1, bax = 0, bsg = 0;
+    for (let ix = ix0; ix <= ix1; ix++) for (let iz = iz0; iz <= iz1; iz++) {
+      const L = dbGrid.get(dbKey(ix, iz));
+      if (!L) continue;
+      for (let j = 0; j < L.length; j++) {
+        const k = L[j];
+        if (dbQ[k] === q) continue;
+        dbQ[k] = q;
+        const b = k * 6;
+        let tn = -Infinity, tf = best, ax = -1, sg = 0;
+        if (dx > -1e-9 && dx < 1e-9) { if (ox < B[b] || ox > B[b + 3]) continue; }
+        else {
+          let ta = (B[b] - ox) / dx, tb = (B[b + 3] - ox) / dx;
+          if (ta > tb) { const w = ta; ta = tb; tb = w; }
+          if (ta > tn) { tn = ta; ax = 0; sg = dx > 0 ? -1 : 1; }
+          if (tb < tf) tf = tb;
+          if (tn > tf) continue;
         }
-        if (!found) continue;
-        // from just in front of the face's plane, past its edge (open air)
-        const kk = 0.85 + Math.random() * 0.2;
-        airDrop(hx + tx * ps + nx * 0.04, Math.max(floorY + 0.05, cy + pv), hz + tz * ps + nz * 0.04,
-          svx * kk + (Math.random() - 0.5) * 0.6, svy * kk + (Math.random() - 0.5) * 0.6, svz * kk + (Math.random() - 0.5) * 0.6,
-          rMM(0.8, 3), -1, 0, 0, 0);
-        AIR_AUDIT.edgeDrops++;
+        if (dy > -1e-9 && dy < 1e-9) { if (oy < B[b + 1] || oy > B[b + 4]) continue; }
+        else {
+          let ta = (B[b + 1] - oy) / dy, tb = (B[b + 4] - oy) / dy;
+          if (ta > tb) { const w = ta; ta = tb; tb = w; }
+          if (ta > tn) { tn = ta; ax = 1; sg = dy > 0 ? -1 : 1; }
+          if (tb < tf) tf = tb;
+          if (tn > tf) continue;
+        }
+        if (dz > -1e-9 && dz < 1e-9) { if (oz < B[b + 2] || oz > B[b + 5]) continue; }
+        else {
+          let ta = (B[b + 2] - oz) / dz, tb = (B[b + 5] - oz) / dz;
+          if (ta > tb) { const w = ta; ta = tb; tb = w; }
+          if (ta > tn) { tn = ta; ax = 2; sg = dz > 0 ? -1 : 1; }
+          if (tb < tf) tf = tb;
+          if (tn > tf) continue;
+        }
+        if (ax < 0 || tn < 0 || tn >= best) continue;
+        const oi = dbO[k];
+        if (dbOwnT[oi] !== dbFrame) { dbOwnT[oi] = dbFrame; const ow = dbOwners[oi], o = ow && ow.deref ? ow.deref() : ow; dbOwnShown[oi] = o && refShown(o) === 1 ? 1 : 0; }
+        if (!dbOwnShown[oi]) continue;
+        best = tn; bi = k; bax = ax; bsg = sg;
       }
     }
-    // nothing of the face under the core: no stain (the drops above carry it on)
-    if (s1 - s0 < 0.03 || v1 - v0 < 0.03) return;
-    const c = claimLand();
-    if (!c) return;
-    // 2 cm off the struck face: the collider box IS the drawn wall in the
-    // prison (addBox registers both), polygonOffset wins the rest
-    const off = 0.02, ry = Math.atan2(nx, nz);
-    const m = c.m;
-    m.position.set(hx + nx * off, cy, hz + nz * off);
-    m.rotation.set(0, ry, rot);
-    m.scale.set(Math.random() < 0.5 ? -sxq : sxq, syq, 1);
-    ldWrite(c.slot, m, glance ? CELL_SPLAT[0] : CELL_SPLAT[1], 1, instant ? 0.05 : 0.12, 20 + Math.random() * 15,
-      instant ? 1 : 0.3, 0.85, 0.07, 1, delay);
-    ldClip(c.slot, s0, s1, v0, v1);
-    const near = dist2Cam(hx, hz) < 24 * 24;
-    walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 60 : 26, fade: 12 }, col));
-    // THE HEAVY PART RUNS: only a heavy stain has the volume to run, 1-3
-    // drips out of the core crawling down a few cm a second, stopping where
-    // the blood runs out, never past the face's measured edge or the floor
-    if (amt < 0.5) return;
-    const drips = Math.min(3, 1 + Math.round(amt - 0.5));
-    const core = sxq * 0.12;
-    for (let d = 0; d < drips; d++) {
-      const wd = 0.03 + Math.random() * 0.03;
-      const lo = Math.max(s0 + wd, -core), hi = Math.min(s1 - wd, core);
-      if (!(hi > lo)) break;
-      const along = lo + Math.random() * (hi - lo);
-      const top = cy - Math.random() * core * 0.6;
-      if (top <= cy + v0 + 0.05) break;
-      const L = Math.min(0.15 + Math.random() * 0.45 * Math.min(1.5, amt), top - (cy + v0) - 0.01, top - floorY - 0.02);
-      if (!(L > 0.05)) break;
-      const dc = claimLand();
-      if (!dc) break;
-      const dm = dc.m, yc = top - L * 0.5;
-      dm.position.set(hx + nx * (off + 0.002) + tx * along, yc, hz + nz * (off + 0.002) + tz * along);
-      dm.rotation.set(0, ry, 0);                          // local +y is world up: it runs DOWN
-      dm.scale.set(wd / 0.42, L / 1.92, 1);
-      ldWrite(dc.slot, dm, CELL_DRIP, 1, L / (0.06 + Math.random() * 0.1), 18 + Math.random() * 10, 0, 0.9, 0.05, 1,
-        delay + (instant ? 0.1 : 0.25) + Math.random() * 0.5);
-      ldClip(dc.slot, s0 - along, s1 - along, cy + v0 - yc, cy + v1 - yc);
-      walls.push(anchorTo({ m: dm, slot: dc.slot, t: 0, hold: near ? 60 : 26, fade: 12 }, col));
+    if (bi < 0) return null;
+    const b = bi * 6, h = _dbh;
+    h.t = best; h.x = ox + dx * best; h.y = oy + dy * best; h.z = oz + dz * best;
+    if (bax === 1) {
+      h.kind = bsg > 0 ? 1 : 2; h.nx = 0; h.ny = bsg; h.nz = 0;
+      h.a0 = B[b]; h.a1 = B[b + 3]; h.b0 = B[b + 2]; h.b1 = B[b + 5];
+    } else {
+      h.kind = 0; h.ny = 0;
+      h.nx = bax === 0 ? bsg : 0; h.nz = bax === 2 ? bsg : 0;
+      // along the tangent (-nz, nx): a face across x runs along z, and back
+      const u0 = bax === 0 ? h.nx * B[b + 2] : -h.nz * B[b], u1 = bax === 0 ? h.nx * B[b + 5] : -h.nz * B[b + 3];
+      h.a0 = Math.min(u0, u1); h.a1 = Math.max(u0, u1);
+      h.b0 = B[b + 1]; h.b1 = B[b + 4];
     }
+    return h;
   }
 
   /* ============================================================
@@ -4539,24 +4604,6 @@
     }
   }
 
-  /* vehicleSplat — a kill's / a hard impact's heavy slug toward (dx,dy,dz)
-     reaching a vehicle before maxT (the wall wallFace found, if any). True
-     when it landed on one. */
-  function vehicleSplat(x, y, z, dx, dy, dz, maxT, amt, instant) {
-    if (!CBZ.surfaceDecal) return false;
-    const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
-    const reach = Math.min(3.4, maxT);
-    const roots = vehicleCandidates(x, y, z, dx, dy, dz, reach + 0.5);
-    const h = vehicleArc(x, y, z, dx, dy, dz, 7, reach, roots);
-    if (!h || h.run > maxT) return false;
-    const g = (0.7 + amt * 0.7) * 0.55 * 0.55 * (0.85 + Math.random() * 0.3);
-    const S = g * 4 * 0.85;
-    vehicleStamp(h, S, S, CELL_SPLAT[0], {
-      tx: dx, ty: dy, tz: dz, growT: instant ? 0.05 : 0.12, grow0: instant ? 1 : 0.3,
-      dryT: 20 + Math.random() * 15, delay: h.t,
-    });
-    return true;
-  }
   /* RUN OVER: the body meets the car's nose (or tail, reversing) at the
      bumper, and at speed folds onto the bonnet and into the windscreen.
      Rays come in from outside the car at the victim's side offset, so they
@@ -4680,8 +4727,8 @@
   }
   /* a spray's exit cone toward a car: one spatter where the cone's centre
      line meets the body, flight-delayed, sized by the burst; its drops are
-     swallowed by the car's volume. -> the car volume index (or -1) and,
-     when the car is nearer than the wall, the wall plane is dropped. */
+     swallowed by the car's volume. -> the car volume index (or -1). A car
+     behind the first wall on the line (wallT) is not reached. */
   function vehicleSpray(ex, ey, ez, dx, dy, dz, amt, head, wallT) {
     if (!CBZ.surfaceDecal) return -1;
     const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
@@ -4783,7 +4830,7 @@
     for (let i = 0; i < ns; i++) {
       const v = hasDir ? cone(dx, 0.5, dz, 0.55) : cone(0, 1, 0, 1.0);
       const sp = 1.6 + Math.random() * 1.8;
-      airDrop(x, y + 1.05, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.6, 2.4), -1, 0, 0, 0);
+      airDrop(x, y + 1.05, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.6, 2.4), 0, 0, 0);
     }
   }
 
@@ -5220,7 +5267,7 @@
       const fy = decalFloorAt(x, z);
       const y0 = fromY != null && fromY > fy + 0.05 ? fromY : fy + 0.7 + Math.random() * 0.3;
       if (airDrop(x, y0, z, (Math.random() - 0.5) * 0.2, -0.3, (Math.random() - 0.5) * 0.2,
-        0.0015 + g * 0.05, -1, 0, 0, g) >= 0) return;
+        0.0015 + g * 0.05, 0, 0, g) >= 0) return;
     }
     spawnSplat(x, z, g, BLOOD_D, false, _dotO);
   }
@@ -5456,7 +5503,7 @@
         else {
           for (let k = 0; k < 2; k++) {
             airDrop(_mfV.x, _mfV.y - 0.05, _mfV.z, (Math.random() - 0.5) * 0.5, -0.2 - Math.random() * 0.6,
-              (Math.random() - 0.5) * 0.5, rMM(1.2, 3.4), -1, 0, 0, 0);
+              (Math.random() - 0.5) * 0.5, rMM(1.2, 3.4), 0, 0, 0);
           }
         }
       }
@@ -5589,7 +5636,7 @@
       const _pm = part.matrixWorld.elements;
       for (let i = 0; i < 5; i++) {
         const v = cone(0, 1, 0, 0.9), sp = 1.5 + Math.random() * 2;
-        airDrop(_pm[12], _pm[13], _pm[14], v.x * sp, v.y * sp, v.z * sp, rMM(1, 3), -1, 0, 0, 0);
+        airDrop(_pm[12], _pm[13], _pm[14], v.x * sp, v.y * sp, v.z * sp, rMM(1, 3), 0, 0, 0);
       }
       wetEvent = prevWet0;
       return true;
@@ -5650,7 +5697,7 @@
       const prevWet = wetEvent; wetEvent = wetHere;
       for (let i = 0; i < 6; i++) {
         const v = cone(dx, 0.9, dz, 0.7), sp = 1.8 + Math.random() * 2.2;
-        airDrop(fly.position.x, fly.position.y, fly.position.z, v.x * sp, v.y * sp, v.z * sp, rMM(1, 3), -1, 0, 0, 0);
+        airDrop(fly.position.x, fly.position.y, fly.position.z, v.x * sp, v.y * sp, v.z * sp, rMM(1, 3), 0, 0, 0);
       }
       wetEvent = prevWet;
     }
@@ -5980,7 +6027,8 @@
     // puff, a blade heavy drops and a stream (its arterial beats come with the
     // cause beats below), a beating nothing here (the split lip is bluntBurst).
     // A player's round has usually just sprayed this body through
-    // CBZ.gore.spray, so the kill adds a lighter second burst, not a double.
+    // CBZ.gore.spray: that WAS this round's spray (its entry spatter, its exit
+    // drops and mist), so the kill throws no second one. One round, one spray.
     {
       const al = airLod(x, z) * (far ? 0.6 : 1);
       if (boom) blastBlood(x, y + 0.35, z, amt, al);
@@ -5992,7 +6040,7 @@
         // opts.exit: the fire path's own answer (verbs_strike V.roundExits);
         // absent = the old assumption that a killing round went through
         const through = opts.exit != null ? !!opts.exit : true;
-        shotBlood(x - dx * 0.12, y + hy, z - dz * 0.12, dx, 0, dz, amt * (sprayedHere(x, z) ? 0.4 : 1), through, head, al, popHead);
+        if (!sprayedHere(x, z)) shotBlood(x - dx * 0.12, y + hy, z - dz * 0.12, dx, 0, dz, amt, through, head, al, popHead);
       }
     }
 
@@ -6068,9 +6116,9 @@
     }
     if (!blunt) restingPool(pgx, pgz, amt);   // blunt already drains in waves below
 
-    // --- LAYER 5: WALL SPLATTER — vertical decal on a surface behind the body -
-    // headshots paint the wall INSTANTLY (pre-grown decal) and half-again bigger.
-    if (hasDir && !far) spawnWallSplat(x, y + 0.5, z, dx, dz, head ? amt * 1.6 : amt, head);
+    // (THE WALL BEHIND HIM wears what the exit spray of LAYERS 1+2 throws at
+    // it, drop by drop, where each drop lands: see WHERE A DROP STOPS. Past
+    // 40 m no wall mark is laid, layMark.)
 
     // --- CAUSE BEATS: the kill's signature (skipped at distance — pure LOD) ---
     if (!far) {
@@ -6151,8 +6199,9 @@
          (a shove that splits a lip does not aerosolise)
        • a GROUND POOL only once the wound is genuinely open (opts.pool) —
          a bruise leaves nothing behind, and that restraint is the whole point
-       • the WALL SPLAT you earn by being driven INTO the wall (opts.wall),
-         which reuses the same opaque/wall-sized scan a headshot does
+       • blood on the wall you were driven INTO (opts.wall): the wound
+         meets the surface and throws its drops onto it (contactBlood), each
+         marking where it lands
      No gibs, no dismemberment, no kill-context consumption, no slow-mo, and
      the lens jolt only for the player. Water-aware for free: a wound taken
      under the sea blooms instead of raining droplets on the seabed.
@@ -6201,8 +6250,8 @@
     // the pool is the RESTRAINT: only an open wound leaves evidence on the
     // ground, so a bruising hit passes pool:false and stains nothing.
     if (opts.pool) spawnSplat(x + dx * 0.3, z + dz * 0.3, 0.5 + amt * 0.75, BLOOD_D, true);
-    // driven INTO something → it wears the hit. Same wall-sized/opaque gate.
-    if (opts.wall && hasDir && lod === 1) spawnWallSplat(x, y, z, -dx, -dz, amt * 0.85, true);
+    // driven INTO something → it wears the hit: drops thrown at the surface
+    if (opts.wall && hasDir && lod === 1) contactBlood(x, y, z, -dx, -dy, -dz, amt * 0.85, al);
     // (the player's own hit is a flinch, systems/eyes.js: never a red rim)
     if (opts.sfx && CBZ.sfx) CBZ.sfx(typeof opts.sfx === "string" ? opts.sfx : "hit");
   };
@@ -6346,7 +6395,7 @@
             airMarkP = 0.5;
             airDrop(m.position.x, m.position.y, m.position.z,
               b.vx * 0.85 + (Math.random() - 0.5) * 0.6, b.vy * 0.85 + (Math.random() - 0.5) * 0.6, b.vz * 0.85 + (Math.random() - 0.5) * 0.6,
-              rMM(0.8, b.limb ? 2.8 : 2), -1, 0, 0, 0);
+              rMM(0.8, b.limb ? 2.8 : 2), 0, 0, 0);
             airMarkP = 1;
           }
         }
@@ -6612,7 +6661,7 @@
     }
     return {
       bits: bits.length + airN, pools, streaks, slicks: water, walls: walls.length,
-      air: airN, airDrawCalls: airMesh && airMesh.parent ? 1 : 0, streams, airEmits: AIR_AUDIT, wallProbes,
+      air: airN, airDrawCalls: airMesh && airMesh.parent ? 1 : 0, streams, airEmits: AIR_AUDIT, marksQueued: mqN, drawnBoxes: dbN,
       realism: realism(), debrisLaw: debrisLaw(), mode: (CBZ.game && CBZ.game.mode) || null,
       boxGibs, drops, mist,
       maxGibCm: Math.round(maxGib * 100), maxDropCm: +(fatDrop * 100).toFixed(2),
