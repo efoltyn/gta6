@@ -205,3 +205,9 @@ Items marked **[partial]** have unmerged work sitting in a stopped builder's wor
 87. A seated warden snaps to standing the instant anything alerts him (world/adminwing.js).
 88. The warehouse dock stair and the bleachers still walk on a straight-line surface under their drawn steps; they need rebuilding as real stairs (systems/stairs.js treads).
 89. Jail cop pile-up after fighting a guard (causes found 2026-11-23, fix awaiting the owner's go): guards hunt and radio "Runner!" on heat alone with no check for surrender, cuffs or an arrest in progress (systems/detection.js:842); backup calls add heat; the case file re-dispatches searches every 6-9 s for minutes; only a finished arrest clears it (systems/capture.js:344); tower M4 posts on the ground at shift change and chow join any fight at heat 25 (entities/towerwatch.js:231).
+
+## Blood and Take button leftovers (2026-11-24, after 59b959c9)
+90. Wall blood: a hole wholly inside a stain (a small vent) is not cut out; the cut is one rectangle.
+91. Wall blood: door trim with no collider sits over the stain instead of catching blood.
+92. Blood drops hitting the top 45 cm of a wall stop without leaving a mark; mist puffs are not tested against walls.
+93. Take button on dropped things, desk keycard with a guard near, tapped-person + Take on touch: shipped, only the dropped-baton case was checked by numbers. Watch on the phone.
