@@ -502,22 +502,37 @@
     "attribute vec4 aCell;",   // xy atlas offset, z unused, w 1 = wall
     "attribute vec4 aTime;",   // birth, grow seconds, dry seconds, revealed at birth
     "attribute vec4 aFx;",     // alpha, thickness, edge shrink, final threshold
+    // wall marks only: the solid surface's extent round the mark's centre, in
+    // metres along the face's horizontal tangent (N.z, -N.x) and world up:
+    // s0, s1, v0, v1. A wall mark is drawn only where there is wall under it.
+    "attribute vec4 aClip;",
     "uniform float uTime;",
     "varying vec2 vUv;",
     "varying vec4 vS;",        // threshold, dry, alpha, thickness
     "varying vec3 vN; varying vec3 vTx; varying vec3 vTy; varying vec3 vView;",
+    "varying vec2 vF; varying vec4 vC;",
     "void main() {",
     "  vUv = aCell.xy + vec2(" + LD_CELL_W.toFixed(4) + ", " + LD_CELL_H.toFixed(4) + ") * uv;",
     "  float age = max(0.0, uTime - aTime.x);",
     "  float g = aTime.y > 0.0 ? clamp(age / aTime.y, 0.0, 1.0) : 1.0;",
     "  g = aTime.w + (1.0 - aTime.w) * (1.0 - pow(1.0 - g, 2.2));",   // gush, then a slow creep, then stop
     "  vS = vec4(mix(1.0, aFx.w, g) + aFx.z, clamp(age / aTime.z, 0.0, 1.0), aFx.x, aFx.y);",
+    "  if (uTime < aTime.x) vS.x = 2.0;",               // still in the air: nothing on the wall yet
     "  mat3 m3 = mat3(modelMatrix) * mat3(instanceMatrix);",
     "  vN = normalize(m3 * vec3(0.0, 0.0, 1.0));",
     "  vTx = normalize(m3 * vec3(1.0, 0.0, 0.0));",
     "  vTy = normalize(m3 * vec3(0.0, 1.0, 0.0));",
     "  vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);",
     "  vView = cameraPosition - wp.xyz;",
+    // the vertex's place on the face, measured from the mark's centre: linear
+    // across the quad, so the interpolated value is exact per fragment, and it
+    // rides with the mark when the host (a door leaf) swings about vertical
+    "  vC = aClip; vF = vec2(0.0);",
+    "  if (aCell.w > 0.5) {",
+    "    vec3 d = wp.xyz - (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;",
+    "    vec2 th = vec2(vN.z, -vN.x); float tl = length(th);",
+    "    vF = vec2(tl > 1e-4 ? dot(d.xz, th / tl) : 0.0, d.y);",
+    "  }",
     "  gl_Position = projectionMatrix * viewMatrix * wp;",
     "}",
   ].join("\n");
@@ -525,6 +540,7 @@
     "uniform sampler2D uMap;",
     "varying vec2 vUv; varying vec4 vS;",
     "varying vec3 vN; varying vec3 vTx; varying vec3 vTy; varying vec3 vView;",
+    "varying vec2 vF; varying vec4 vC;",
     "void main() {",
     "  vec4 t = texture2D(uMap, vUv);",
     // every lookup before the discard/branches: implicit-lod reads want uniform flow
@@ -533,6 +549,8 @@
     "  float thr = vS.x;",
     "  float cov = smoothstep(thr, thr + 0.02, t.r);",
     "  float c = cov * vS.z;",
+    // no wall under this texel (past a jamb, a corner, a window's edge): nothing
+    "  if (vF.x < vC.x || vF.x > vC.y || vF.y < vC.z || vF.y > vC.w) c = 0.0;",
     "  float dist = length(vView);",
     "  c *= 1.0 - smoothstep(48.0, 72.0, dist);",
     "  if (c < 0.004) discard;",
@@ -568,7 +586,7 @@
     "}",
   ].join("\n");
 
-  let ldMesh = null, ldGeo = null, ldMat = null, ldCell = null, ldTime = null, ldFx = null;
+  let ldMesh = null, ldGeo = null, ldMat = null, ldCell = null, ldTime = null, ldFx = null, ldClipA = null;
   let ldClock = 0, ldMatDirty = false, ldFxDirty = false;
   const ldFree = [];                       // free slot indices
   const ldProxies = [];                    // pooled Object3D transforms (records' `m`)
@@ -581,6 +599,9 @@
       ldFx = new THREE.InstancedBufferAttribute(new Float32Array(LD_CAP * 4), 4);
       ldCell.setUsage(THREE.DynamicDrawUsage); ldTime.setUsage(THREE.DynamicDrawUsage); ldFx.setUsage(THREE.DynamicDrawUsage);
       ldGeo.setAttribute("aCell", ldCell); ldGeo.setAttribute("aTime", ldTime); ldGeo.setAttribute("aFx", ldFx);
+      ldClipA = new THREE.InstancedBufferAttribute(new Float32Array(LD_CAP * 4), 4);
+      ldClipA.setUsage(THREE.DynamicDrawUsage);
+      ldGeo.setAttribute("aClip", ldClipA);
       ldMat = new THREE.ShaderMaterial({
         uniforms: { uMap: { value: landAtlas() }, uTime: { value: 0 } },
         vertexShader: LD_VS, fragmentShader: LD_FS,
@@ -627,7 +648,17 @@
     ldCell.array[i + 2] = 0; ldCell.array[i + 3] = kind;
     ldTime.array[i] = ldClock + (delay || 0); ldTime.array[i + 1] = growT; ldTime.array[i + 2] = Math.max(0.5, dryT); ldTime.array[i + 3] = grow0;
     ldFx.array[i] = alpha; ldFx.array[i + 1] = thick; ldFx.array[i + 2] = 0; ldFx.array[i + 3] = thrEnd;
-    ldMatDirty = true; ldCell.needsUpdate = true; ldTime.needsUpdate = true; ldFxDirty = true;
+    // unclipped until a wall mark says where its surface ends (ldClip)
+    const a = ldClipA.array;
+    a[i] = -1e4; a[i + 1] = 1e4; a[i + 2] = -1e4; a[i + 3] = 1e4;
+    ldMatDirty = true; ldCell.needsUpdate = true; ldTime.needsUpdate = true; ldFxDirty = true; ldClipA.needsUpdate = true;
+  }
+  // a wall mark's solid surface, metres from the mark's centre: s along the
+  // face's tangent (nz, -nx), v up (see aClip). Once, at spawn, after ldWrite.
+  function ldClip(slot, s0, s1, v0, v1) {
+    const i = slot * 4, a = ldClipA.array;
+    a[i] = s0; a[i + 1] = s1; a[i + 2] = v0; a[i + 3] = v1;
+    ldClipA.needsUpdate = true;
   }
   // per-frame: only when a mark's fade/burial/wash actually moved it
   function ldSetFx(slot, alpha, shrink) {
@@ -2150,7 +2181,15 @@
   const AKIND = new Uint8Array(AIR_MAX), AMARK = new Uint8Array(AIR_MAX);    // 0 drop / 1 mist; leaves a mark
   const AWP = new Int8Array(AIR_MAX), AWG = new Uint16Array(AIR_MAX);        // wall plane + its generation
   const AVV = new Int8Array(AIR_MAX), AVG = new Uint16Array(AIR_MAX);        // the car volume it stops in + its generation
-  const AIR_FIELDS = [AX, AY, AZ, AVX, AVY, AVZ, AR, AS1, AT, AL, AA, AK, ATR, ABRK, AFL, AFT, ASEA, AMG, AMK, AKIND, AMARK, AWP, AWG, AVV, AVG];
+  // THE SWEEP: where the drop was when its path was last tested against the
+  // solids (APX..APZ) and how long until the next test (ASW). Every drop
+  // without a proved wall plane traces the chord it flew since then through
+  // wallFace, so no drop ever passes through a wall, a jamb, a door leaf or a
+  // crate, and a drop through an opening flies on to what is beyond it.
+  const APX = new Float32Array(AIR_MAX), APY = new Float32Array(AIR_MAX), APZ = new Float32Array(AIR_MAX);
+  const ASW = new Float32Array(AIR_MAX);
+  const AIR_FIELDS = [AX, AY, AZ, AVX, AVY, AVZ, AR, AS1, AT, AL, AA, AK, ATR, ABRK, AFL, AFT, ASEA, AMG, AMK, AKIND, AMARK, AWP, AWG, AVV, AVG, APX, APY, APZ, ASW];
+  const AIR_SWEEP_FRAME = 64;                      // path tests per frame, at most (a skipped one lengthens the next chord)
   let airN = 0, airCursor = 0, airShutter = 1 / 120, airLands = 0;
   // A STREAM LANDS AS A FEW BIGGER MARKS, NOT SIXTY SMALL ONES: drops that
   // arrive on top of each other merge. An emitter (or a blast) sets these
@@ -2158,7 +2197,7 @@
   // much bigger that mark is for the ones it absorbed.
   let airMarkP = 1, airMarkK = 1;
   // lifetime emit counts (goreAudit)
-  const AIR_AUDIT = { drops: 0, mist: 0, lands: 0, wallLands: 0, water: 0, recycled: 0, streams: 0, skippedMarks: 0 };
+  const AIR_AUDIT = { drops: 0, mist: 0, lands: 0, wallLands: 0, water: 0, recycled: 0, streams: 0, skippedMarks: 0, sweeps: 0, swept: 0, edgeDrops: 0 };
 
   let airMesh = null, airGeo = null, aiPos = null, aiVel = null, aiMisc = null;
   function airReady() {
@@ -2328,6 +2367,7 @@
     AWP[i] = wp == null || wp < 0 ? -1 : wp; AWG[i] = wp == null || wp < 0 ? 0 : WP_GEN[wp];
     AVV[i] = airVV; AVG[i] = airVV < 0 ? 0 : VV_GEN[airVV];
     AFL[i] = decalFloorAt(x, z, y, true); AFT[i] = 0.02 + Math.random() * 0.06; ASEA[i] = Math.random() * 0.18;
+    APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 0;
     AIR_AUDIT.drops++;
     return i;
   }
@@ -2342,7 +2382,7 @@
     AR[i] = s0; AS1[i] = Math.max(s0, s1); AT[i] = 0; AL[i] = life; AA[i] = alpha;
     AK[i] = 7 + Math.random() * 4;                      // aerosol stops in centimetres
     ATR[i] = 0; ABRK[i] = 0; AKIND[i] = 1; AMARK[i] = 0; AMG[i] = 0; AMK[i] = 1; AWP[i] = -1; AWG[i] = 0; AVV[i] = -1; AVG[i] = 0;
-    AFL[i] = 0; AFT[i] = 0; ASEA[i] = 0;
+    AFL[i] = 0; AFT[i] = 0; ASEA[i] = 0; APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 1e9;
     AIR_AUDIT.mist++;
     return i;
   }
@@ -2379,8 +2419,11 @@
     return k;
   }
   // a drop's mark on a wall face: the stain layer's drop/dot cells, laid in
-  // the face's plane, tail pointing along the drop's in-plane travel
-  function wallDrop(px, py, pz, nx, nz, vx, vy, vz, g, col) {
+  // the face's plane, tail pointing along the drop's in-plane travel, and cut
+  // to the face's extent (ta0..ta1 along the face tangent (-nz, nx), ya0..ya1
+  // up, both absolute, as wallFace reports them): a drop that lands 1 cm from
+  // a jamb leaves the part of its mark that is on the jamb, not a dot in air
+  function wallDrop(px, py, pz, nx, nz, vx, vy, vz, g, col, ta0, ta1, ya0, ya1) {
     if (walls.length > 34) return false;             // the kills' own wall splats come first
     if (seaColumn(px, pz)) {
       const w = submRaw(px, py, pz);
@@ -2402,6 +2445,10 @@
     m.rotation.set(0, ry, drop ? Math.atan2(-u, w) : Math.random() * 6.28);
     m.scale.set(sx, sy, 1);
     ldWrite(c.slot, m, drop ? CELL_DROP : CELL_DOT, 1, 0.08, 5 + Math.random() * 5, 0.35, 0.55, 0.1, 1, 0);
+    if (ta0 != null) {
+      const th = nx * pz - nz * px;                  // this point along (-nz, nx); the mark's s runs the other way
+      ldClip(c.slot, th - ta1, th - ta0, ya0 - py, ya1 - py);
+    }
     const near = dist2Cam(px, pz) < 24 * 24;
     walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 40 : 14, fade: 8 }, col));
     return true;
@@ -2637,8 +2684,33 @@
   }
 
   // ---- the frame ----------------------------------------------------------------
+  // one swept chord for drop i, from where it was last tested to (x,y,z).
+  // true = it met a solid on the way and is finished (a mark where it hit,
+  // when it leaves one).
+  let airSweeps = 0;
+  function sweepDrop(i, x, y, z, vx, vy, vz) {
+    const ox = APX[i], oy = APY[i], oz = APZ[i];
+    const sx = x - ox, sy = y - oy, sz = z - oz, sl = Math.sqrt(sx * sx + sy * sy + sz * sz);
+    if (!(sl > 1e-4)) return false;
+    const f = wallFace(ox, oy, oz, sx / sl, sy / sl, sz / sl, sl);
+    if (!f) return false;
+    AIR_AUDIT.swept++;
+    if (f.stop) return true;                         // a pole, a rail, a sign's edge: taken, no mark worth a slot
+    const sp = Math.sqrt(vx * vx + vy * vy + vz * vz);
+    if (f.top) {
+      // came down on a solid's top (a crate, a step, a sill): a floor mark there
+      AX[i] = f.x; AY[i] = f.y; AZ[i] = f.z;
+      floorLand(i);
+      return true;
+    }
+    if (AMARK[i] && airLands < AIR_LAND_FRAME) {
+      airLands++;
+      if (wallDrop(f.x, f.y, f.z, f.nx, f.nz, vx, vy, vz, markOf(i, sp), f.c, f.t0, f.t1, f.y0, f.y1)) AIR_AUDIT.wallLands++;
+    }
+    return true;
+  }
   function updateAir(dt) {
-    airLands = 0;
+    airLands = 0; airSweeps = 0;
     updateStreams(dt);
     if (!airGeo) return;
     // a 180-degree shutter: a drop smears across half the frame's time
@@ -2684,7 +2756,7 @@
       // the wall its spray was headed for
       const wp = AWP[i];
       if (wp >= 0) {
-        if (AWG[i] !== WP_GEN[wp]) AWP[i] = -1;
+        if (AWG[i] !== WP_GEN[wp]) { AWP[i] = -1; ASW[i] = 0; }
         else {
           const s = WP_NX[wp] * x + WP_NZ[wp] * z - WP_D[wp];
           if (s <= 0.01) {
@@ -2693,12 +2765,28 @@
               if (AMARK[i] && airLands < AIR_LAND_FRAME) {
                 airLands++;
                 const sp = Math.sqrt(vx * vx + vy * vy + vz * vz);
-                if (wallDrop(x - WP_NX[wp] * s, y, z - WP_NZ[wp] * s, WP_NX[wp], WP_NZ[wp], vx, vy, vz, markOf(i, sp), WP_C[wp])) AIR_AUDIT.wallLands++;
+                if (wallDrop(x - WP_NX[wp] * s, y, z - WP_NZ[wp] * s, WP_NX[wp], WP_NZ[wp], vx, vy, vz, markOf(i, sp), WP_C[wp],
+                  WP_T0[wp], WP_T1[wp], WP_Y0[wp], WP_Y1[wp])) AIR_AUDIT.wallLands++;
               }
               killAir(i); continue;
             }
-            AWP[i] = -1;                                  // it went past the end of that wall
-          }
+            // it went past the end of that wall (through the doorway beside
+            // it, over its top): from here the sweep tests its path, starting
+            // with the chord it just flew, so a jamb on the far side of the
+            // opening still catches it
+            AWP[i] = -1; ASW[i] = 0;
+          } else { APX[i] = x; APY[i] = y; APZ[i] = z; }   // still in front of its face: nothing between
+        }
+      }
+      // THE SWEEP (every drop without a live plane): the chord flown since the
+      // last test, through the same gate a wall splat passes
+      if (AWP[i] < 0) {
+        ASW[i] -= dt;
+        if (ASW[i] <= 0 && airSweeps < AIR_SWEEP_FRAME) {
+          airSweeps++; AIR_AUDIT.sweeps++;
+          const r = sweepDrop(i, x, y, z, vx, vy, vz);
+          if (r) { killAir(i); continue; }
+          APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 0.03 + Math.random() * 0.02;
         }
       }
       // the floor: a slow field, re-read on a stagger, every frame near it
@@ -3751,25 +3839,123 @@
      marched in chords until it meets a face (SLUG.wall = the wallFace
      record), comes down on the ground or a solid's top (SLUG.ground, at
      SLUG.x/y/z), or has gone `reach` metres (null). */
-  const SLUG = { ground: false, x: 0, y: 0, z: 0, run: 0, wall: null };
+  const SLUG = { ground: false, x: 0, y: 0, z: 0, run: 0, wall: null, vx: 0, vy: 0, vz: 0 };
   function slugArc(x, y, z, dx, dz, sp, up, reach) {
     let px = x, py = y, pz = z, vy = up, run = 0;
     const vx = dx * sp, vz = dz * sp, DT = 0.035;
-    SLUG.ground = false; SLUG.wall = null; SLUG.run = 0;
+    SLUG.ground = false; SLUG.wall = null; SLUG.run = 0; SLUG.vx = vx; SLUG.vy = vy; SLUG.vz = vz;
     for (let s = 0; s < 40 && run < reach; s++) {
       const nx = px + vx * DT, ny = py + vy * DT - 0.5 * AIR_G * DT * DT, nz = pz + vz * DT;
       const sx = nx - px, sy = ny - py, sz = nz - pz, sl = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1e-6;
       const f = wallFace(px, py, pz, sx / sl, sy / sl, sz / sl, sl);
       if (f && f.stop) return null;             // taken by a solid that wears no splat
+      // the velocity it arrives with (gravity over the part of the chord flown)
+      if (f) SLUG.vy = vy - AIR_G * DT * (f.t / sl);
       if (f && !f.top) { SLUG.wall = f; SLUG.run = run + Math.hypot(sx, sz) * (f.t / sl); return SLUG; }
       if (f && f.top) { SLUG.ground = true; SLUG.x = f.x; SLUG.y = f.y; SLUG.z = f.z; SLUG.run = run; return SLUG; }
       const fl = decalFloorAt(nx, nz, ny + 0.3, true);
-      if (ny <= fl) { SLUG.ground = true; SLUG.x = nx; SLUG.y = fl; SLUG.z = nz; SLUG.run = run; return SLUG; }
+      if (ny <= fl) { SLUG.ground = true; SLUG.x = nx; SLUG.y = fl; SLUG.z = nz; SLUG.run = run; SLUG.vy = vy - AIR_G * DT; return SLUG; }
       run += Math.hypot(sx, sz);
       vy -= AIR_G * DT; px = nx; py = ny; pz = nz;
     }
     return null;
   }
+
+  /* ============================================================
+     A WALL STAIN LIES ONLY ON WALL. (OWNER, escape mode, a guard shot in the
+     armoury doorway: "blood ... doesn't have good physics" — a big symmetric
+     starburst on the door pier, half of it hanging in the open doorway with
+     its dots floating in the air.)
+
+     ROOT CAUSE. spawnWallSplat stood ONE flat quad on the struck face,
+     centred on the hit, ~1.7 m across for an ordinary kill (2.2 m for a
+     head), spun at random, the all-round starburst cell. wallFace already
+     knew the face's extent (t0..t1, y0..y1) and nothing used it: the armoury
+     door's pier (world/gunroom.js, CK.infill) is 0.9 m wide, so a hit near
+     the jamb put half the sticker over the 1.2 m opening. Its shape owed
+     nothing to the slug: same size at any speed, same starburst at any
+     angle, no relation to the way the blood was going.
+
+     NOW.
+       * The slug's arrival velocity (slugArc) sets the stain: its in-plane
+         travel turns the directional cell (rays thrown downstream), the
+         impact angle stretches it (length/width = 1/sin a, capped at 3), the
+         speed and the distance flown set its size. Only a square hit is
+         round. It appears when the slug arrives (time of flight), not at the
+         shot.
+       * The struck face's real extent round the hit is MEASURED: short rays
+         into the plane (wallUnder, the same wallFace gate: drawn mesh there,
+         not a shot-out hole, coplanar, same rigid surface) walk out from the
+         hit in four directions and bisect onto each edge, then the corners
+         of that cross are tested and pulled in. The result is the mark's
+         clip rectangle (aClip), cut in the shader on the face: past a jamb,
+         a corner, a window's edge, a wall's top, nothing is drawn.
+       * The part of the slug that the wall was not there to catch flies on
+         as drops (airDrop at the slug's own velocity) through the opening,
+         and the sweep lands them on what is beyond: the yard's floor, the
+         reveal of the jamb, the open leaf.
+       * Drips run down only from a heavy stain, only inside the measured
+         face, never below its edge or the floor.
+     ============================================================ */
+  function moverCol(c) {
+    for (let o = c && c.ref, k = 0; o && k < 12; o = o.parent, k++) if (o.userData && o.userData.mover) return true;
+    return false;
+  }
+  // IS THERE WALL HERE? A 20 cm ray into the struck face at (s along the
+  // face's tangent (nz, -nx), v up) from the hit: a solid, facing the same
+  // way, within 4 cm of the struck plane, and either the very collider that
+  // was struck or another one that never moves (the next block of the same
+  // wall; never a door leaf on one side and a pier on the other).
+  let wallProbes = 0;
+  function wallUnder(hx, hy, hz, nx, nz, col, colMoves, s, v) {
+    wallProbes++;
+    const f = wallFace(hx + nz * s + nx * 0.1, hy + v, hz - nx * s + nz * 0.1, -nx, 0, -nz, 0.2);
+    if (!f || f.top) return false;
+    if (f.nx * nx + f.nz * nz < 0.9 || Math.abs(f.t - 0.1) > 0.04) return false;
+    if (f.c !== col && (colMoves || moverCol(f.c))) return false;
+    return true;
+  }
+  // walk out from the hit along (ds, dv) a quarter of `reach` at a time; at
+  // the first miss, halve twice onto the edge. -> the solid distance.
+  function edgeOut(hx, hy, hz, nx, nz, col, mv, ds, dv, reach) {
+    let ok = 0;
+    for (let k = 1; k <= 4; k++) {
+      const r = reach * k / 4;
+      if (wallUnder(hx, hy, hz, nx, nz, col, mv, ds * r, dv * r)) { ok = r; continue; }
+      let lo = ok, hi = r;
+      for (let b = 0; b < 2; b++) {
+        const mid = (lo + hi) / 2;
+        if (wallUnder(hx, hy, hz, nx, nz, col, mv, ds * mid, dv * mid)) lo = mid; else hi = mid;
+      }
+      return lo;
+    }
+    return reach;
+  }
+  // the struck face's solid rectangle round the hit, out to rs (along the
+  // face) and rv (up/down) -> CLIP {s0 <= 0 <= s1, v0 <= 0 <= v1}, metres
+  const CLIP = { s0: 0, s1: 0, v0: 0, v1: 0 };
+  const _fc = [0, 0, 0, 0];
+  function faceClip(hx, hy, hz, nx, nz, col, rs, rv) {
+    const mv = moverCol(col), c = _fc;
+    c[0] = -edgeOut(hx, hy, hz, nx, nz, col, mv, -1, 0, rs); c[1] = edgeOut(hx, hy, hz, nx, nz, col, mv, 1, 0, rs);
+    c[2] = -edgeOut(hx, hy, hz, nx, nz, col, mv, 0, -1, rv); c[3] = edgeOut(hx, hy, hz, nx, nz, col, mv, 0, 1, rv);
+    // the corners of the cross: a window's corner or the L of a pier and its
+    // head is solid along both arms and open between them
+    for (let q = 0; q < 4; q++) {
+      const is = q & 1, iv = 2 + ((q >> 1) & 1);
+      let ok = false;
+      for (let tries = 0; tries < 3 && !ok; tries++) {
+        const cs = c[is], cv = c[iv];
+        if (Math.abs(cs) < 0.01 || Math.abs(cv) < 0.01) { ok = true; break; }
+        if (wallUnder(hx, hy, hz, nx, nz, col, mv, cs * 0.97, cv * 0.97)) { ok = true; break; }
+        if (Math.abs(cs) >= Math.abs(cv)) c[is] *= 0.5; else c[iv] *= 0.5;   // pull the longer arm in
+      }
+      if (!ok) { if (Math.abs(c[is]) >= Math.abs(c[iv])) c[is] = 0; else c[iv] = 0; }
+    }
+    CLIP.s0 = c[0]; CLIP.s1 = c[1]; CLIP.v0 = c[2]; CLIP.v1 = c[3];
+    return CLIP;
+  }
+
   function spawnWallSplat(x, y, z, dx, dz, amt, instant) {
     if (walls.length > 48) return;
     const hl = Math.hypot(dx, dz);
@@ -3793,49 +3979,100 @@
       try { spawnSplat(S0.x, S0.z, g, BLOOD, false, _splatO); } finally { seatY = sy0; seatSolid = ss0; }
       return;
     }
-    const col = best.c;                                   // best is a reused record: hold it all now
+    // best is wallFace's reused record and the probes below reuse it: hold it all now
+    const col = best.c;
     const nx = best.nx, nz = best.nz, hx = best.x, hz = best.z, cy = best.y;
+    const svx = S0.vx, svy = S0.vy, svz = S0.vz, run = S0.run;
     if (seaColumn(hx, hz)) {
       const w = submRaw(hx, cy, hz);
       if (w !== DRY && w > 0.02) { SEA_AUDIT.wall++; CBZ.goreBloom(hx, cy, hz, { amount: Math.max(0.3, Math.min(2, amt)) }); return; }
     }
+    // THE IMPACT: speed, angle to the face, and which way it was going across it
+    const V = Math.sqrt(svx * svx + svy * svy + svz * svz) || 1;
+    const sinA = Math.max(0.05, Math.min(1, -(svx * nx + svz * nz) / V));
+    const tx = nz, tz = -nx;                              // the face's tangent: the quad's +x before its spin
+    const u = svx * tx + svz * tz, w = svy;               // in-plane travel
+    const glance = sinA < 0.94 && Math.hypot(u, w) > 0.5;
+    // SIZE: a pistol exit slug at a metre leaves a torn core ~15-20 cm across
+    // with spines to ~35 cm downstream; more blood, a faster slug and a longer
+    // flight (it spreads as it goes) make it bigger
+    const S = (0.34 + 0.2 * Math.min(2, amt)) * (0.85 + Math.random() * 0.3)
+      * Math.min(1.3, 0.75 + V * 0.035) * (1 + 0.2 * Math.min(2.5, run));
+    // a glancing slug is drawn out along its travel: length / width = 1 / sin(angle)
+    const e = glance ? Math.min(3, 1 / sinA) : 1;
+    const sxq = S * (e > 1.5 ? 0.85 : 1), syq = S * e;
+    const rot = glance ? Math.atan2(-u, w) : Math.random() * 6.28;
+    const ca = Math.abs(Math.cos(rot)), sa = Math.abs(Math.sin(rot));
+    const rs = 0.5 * (sxq * ca + syq * sa), rv = 0.5 * (sxq * sa + syq * ca);
+    // WHERE THE WALL IS round the hit (measured, not assumed)
+    const K = faceClip(hx, cy, hz, nx, nz, col, rs, rv);
+    const floorY = decalFloorAt(hx + nx * 0.1, hz + nz * 0.1, cy, true);
+    if (K.v0 < floorY + 0.005 - cy) K.v0 = Math.min(0, floorY + 0.005 - cy);
+    const s0 = K.s0, s1 = K.s1, v0 = K.v0, v1 = K.v1;
+    // time of flight: the stain appears when the slug gets there
+    const delay = Math.min(0.4, run / Math.max(1, Math.hypot(svx, svz)));
+    // THE PART THAT MISSED: where the face ends inside the stain's reach, that
+    // share of the slug met nothing and flies on, past the jamb, over the top,
+    // round the corner, as heavy drops at the slug's own velocity
+    const full = 4 * rs * rv, kept = Math.max(0, (s1 - s0) * (v1 - v0));
+    const miss = full > 1e-4 ? Math.max(0, 1 - kept / full) : 0;
+    if (miss > 0.08) {
+      const nm = Math.round(Math.min(14, 18 * miss * Math.min(1.5, amt)) * airLod(hx, hz));
+      for (let k = 0; k < nm; k++) {
+        let ps = 0, pv = 0, found = false;
+        for (let tr = 0; tr < 5 && !found; tr++) {
+          ps = (Math.random() * 2 - 1) * rs; pv = (Math.random() * 2 - 1) * rv;
+          found = ps < s0 || ps > s1 || pv < v0 || pv > v1;
+        }
+        if (!found) continue;
+        // from just in front of the face's plane, past its edge (open air)
+        const kk = 0.85 + Math.random() * 0.2;
+        airDrop(hx + tx * ps + nx * 0.04, Math.max(floorY + 0.05, cy + pv), hz + tz * ps + nz * 0.04,
+          svx * kk + (Math.random() - 0.5) * 0.6, svy * kk + (Math.random() - 0.5) * 0.6, svz * kk + (Math.random() - 0.5) * 0.6,
+          rMM(0.8, 3), -1, 0, 0, 0);
+        AIR_AUDIT.edgeDrops++;
+      }
+    }
+    // nothing of the face under the core: no stain (the drops above carry it on)
+    if (s1 - s0 < 0.03 || v1 - v0 < 0.03) return;
     const c = claimLand();
     if (!c) return;
     // 2 cm off the struck face: the collider box IS the drawn wall in the
     // prison (addBox registers both), polygonOffset wins the rest
     const off = 0.02, ry = Math.atan2(nx, nz);
-    const tx = -nz, tz = nx;                              // along the face
     const m = c.m;
     m.position.set(hx + nx * off, cy, hz + nz * off);
-    m.rotation.set(0, ry, Math.random() * 6.28);
-    // a wall is hit square-on, so the splat throws rays all round: a torn core
-    // ~40 cm across for an ordinary kill, spatter out to a metre and more
-    const g = (0.7 + amt * 0.7) * 0.55 * 0.55 * (0.85 + Math.random() * 0.3);
-    const S = g * 4;
-    m.scale.set(Math.random() < 0.5 ? -S : S, S, 1);
-    ldWrite(c.slot, m, CELL_SPLAT[1], 1, instant ? 0.05 : 0.12, 20 + Math.random() * 15, instant ? 1 : 0.3, 0.85, 0.07, 1, 0);
+    m.rotation.set(0, ry, rot);
+    m.scale.set(Math.random() < 0.5 ? -sxq : sxq, syq, 1);
+    ldWrite(c.slot, m, glance ? CELL_SPLAT[0] : CELL_SPLAT[1], 1, instant ? 0.05 : 0.12, 20 + Math.random() * 15,
+      instant ? 1 : 0.3, 0.85, 0.07, 1, delay);
+    ldClip(c.slot, s0, s1, v0, v1);
     const near = dist2Cam(hx, hz) < 24 * 24;
     walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 60 : 26, fade: 12 }, col));
-    // the heavy part runs: 1-3 drips out of the core, each crawling down at a
-    // few cm a second and stopping where the blood runs out, never below the
-    // floor the wall stands on
-    const drips = Math.min(3, 1 + Math.round(amt));
-    const core = S * 0.18;
-    const floorY = decalFloorAt(hx + nx * 0.1, hz + nz * 0.1, cy, true);
+    // THE HEAVY PART RUNS: only a heavy stain has the volume to run, 1-3
+    // drips out of the core crawling down a few cm a second, stopping where
+    // the blood runs out, never past the face's measured edge or the floor
+    if (amt < 0.5) return;
+    const drips = Math.min(3, 1 + Math.round(amt - 0.5));
+    const core = sxq * 0.12;
     for (let d = 0; d < drips; d++) {
+      const wd = 0.03 + Math.random() * 0.03;
+      const lo = Math.max(s0 + wd, -core), hi = Math.min(s1 - wd, core);
+      if (!(hi > lo)) break;
+      const along = lo + Math.random() * (hi - lo);
       const top = cy - Math.random() * core * 0.6;
-      const L = Math.min(0.2 + Math.random() * 0.6, top - floorY - 0.02);
+      if (top <= cy + v0 + 0.05) break;
+      const L = Math.min(0.15 + Math.random() * 0.45 * Math.min(1.5, amt), top - (cy + v0) - 0.01, top - floorY - 0.02);
       if (!(L > 0.05)) break;
       const dc = claimLand();
       if (!dc) break;
-      const dm = dc.m;
-      const wd = 0.03 + Math.random() * 0.03;
-      const along = (Math.random() - 0.5) * core * 2;
-      dm.position.set(hx + nx * (off + 0.002) + tx * along, top - L * 0.5, hz + nz * (off + 0.002) + tz * along);
+      const dm = dc.m, yc = top - L * 0.5;
+      dm.position.set(hx + nx * (off + 0.002) + tx * along, yc, hz + nz * (off + 0.002) + tz * along);
       dm.rotation.set(0, ry, 0);                          // local +y is world up: it runs DOWN
       dm.scale.set(wd / 0.42, L / 1.92, 1);
       ldWrite(dc.slot, dm, CELL_DRIP, 1, L / (0.06 + Math.random() * 0.1), 18 + Math.random() * 10, 0, 0.9, 0.05, 1,
-        (instant ? 0.1 : 0.25) + Math.random() * 0.5);
+        delay + (instant ? 0.1 : 0.25) + Math.random() * 0.5);
+      ldClip(dc.slot, s0 - along, s1 - along, cy + v0 - yc, cy + v1 - yc);
       walls.push(anchorTo({ m: dm, slot: dc.slot, t: 0, hold: near ? 60 : 26, fade: 12 }, col));
     }
   }
@@ -4053,7 +4290,10 @@
     "uniform vec3 uTx; uniform vec3 uTy; uniform float uTime;",
     "varying vec2 vUv; varying vec4 vS;",
     "varying vec3 vN; varying vec3 vTx; varying vec3 vTy; varying vec3 vView;",
+    // LD_FS's wall clip: a projected piece is already cut to its host's triangles
+    "varying vec2 vF; varying vec4 vC;",
     "void main() {",
+    "  vF = vec2(0.0); vC = vec4(-1e4, 1e4, -1e4, 1e4);",
     "  vUv = uCell.xy + vec2(" + LD_CELL_W.toFixed(4) + ", " + LD_CELL_H.toFixed(4) + ") * uv;",
     "  float age = max(0.0, uTime - uT.x);",
     "  float g = uT.y > 0.0 ? clamp(age / uT.y, 0.0, 1.0) : 1.0;",
@@ -6372,7 +6612,7 @@
     }
     return {
       bits: bits.length + airN, pools, streaks, slicks: water, walls: walls.length,
-      air: airN, airDrawCalls: airMesh && airMesh.parent ? 1 : 0, streams, airEmits: AIR_AUDIT,
+      air: airN, airDrawCalls: airMesh && airMesh.parent ? 1 : 0, streams, airEmits: AIR_AUDIT, wallProbes,
       realism: realism(), debrisLaw: debrisLaw(), mode: (CBZ.game && CBZ.game.mode) || null,
       boxGibs, drops, mist,
       maxGibCm: Math.round(maxGib * 100), maxDropCm: +(fatDrop * 100).toFixed(2),

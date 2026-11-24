@@ -73,9 +73,13 @@
                              // not have a thing blink out from under your feet.
   const KEEP_R2 = KEEP_R * KEEP_R;
   const EVICT_R2 = 12 * 12;  // the cap prefers to evict something far away
-  // Floor loot is collected only when the player's feet actually cross it.
-  // One close radius for every shape: no long invisible reach and no pickup UI.
+  // Floor loot is collected when the player's feet actually cross it, AND
+  // anything lying within an arm and a step carries a Take pill (CBZ.prisonPrompt)
+  // so a thing beside a body, under a bunk edge or past the corpse you are
+  // standing over can be taken without treading on the dead man.
   const AUTO_R = 1.15;       // m — tight walk-over radius for every floor item
+  const TAKE_R = 2.0;        // m — the Take pill's reach (a lean and a step)
+  const TAKE_R2 = TAKE_R * TAKE_R;
   const BLINK = 1.6;         // s of flicker before an expired drop is gone
   const GRAV = 19.0;         // m/s² for the small-prop ballistic
   const SPAWN_Y = 1.06;      // m — pockets are at the chest, not at the feet
@@ -395,12 +399,11 @@
       // Subway Surfers; the object is the signal, and a settled body that goes
       // on rotating is not settled. Findability is the walk-over radius's job.
 
-      // PROXIMITY. Every floor item uses the same close walk-over collection;
-      // there is no reach prompt and no device-specific button. The lifetime
+      // PROXIMITY. Every floor item uses the same close walk-over collection
+      // (and, a step further out, the Take pill: offerTick below). The lifetime
       // law above already needs this exact squared distance, so one measurement
       // owns both answers. You still cannot catch a thing in mid-air. Without
-      // that guard, a
-      // point-blank kill puts the pile inside the pickup radius on the frame
+      // that guard, a point-blank kill puts the pile inside the pickup radius on the frame
       // it spawns and the whole toss is swallowed — which is the invisible
       // frisk again, wearing a mesh.
       if (!d.rest) return;
@@ -695,6 +698,71 @@
   };
 
   /* ============================================================
+     TAKE, ON THE THING. Owner (iPhone, first person, pistol out, standing
+     over a guard he had just shot in the armoury doorway): "The take button
+     over things like keycard goes away." The card his pocket dropped lay a
+     step past the body and there was nothing on it: the floor had no Take at
+     all (the August pass made every drop walk-over only, 1.15 m from your
+     feet), so anything you could not tread on was untakeable on a phone.
+
+     Every frame the nearest rested drop you can reach (TAKE_R, same floor,
+     nothing solid between your eyes and it: prisonReach) wears ONE Take pill
+     through the shared prompt system. E (bound) or a tap takes exactly the
+     drop under the pill. Several in reach: the one you look at, then the
+     nearest; take it and the next one wears the pill. Gun out or not, first
+     person or third: nothing here reads the weapon or the camera mode.
+     ============================================================ */
+  let offered = null;
+  const _cands = [];
+  function takeable(inst) {
+    const d = inst && inst.data;
+    if (!d || d.taken || !d.rest || !d.mesh || !d.mesh.parent) return false;
+    if (d.far > d.life) return false;                // blinking out (far away anyway)
+    return true;
+  }
+  function offerTick() {
+    offered = null;
+    const g = CBZ.game, P = CBZ.player;
+    if (!CBZ.prisonPrompt || !g || g.mode !== "escape" || g.state !== "playing") return;
+    if (!P || !P.pos || P.dead || P.driving) return;
+    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    _cands.length = 0;
+    for (let i = 0; i < live.length; i++) {
+      const inst = live[i];
+      if (!takeable(inst)) continue;
+      const d2 = planarD2(inst);
+      if (d2 > TAKE_R2) continue;
+      const d = Math.sqrt(d2) || 0.001;
+      const face = d < 0.4 ? 1 : Math.max(0, ((inst.pos.x - P.pos.x) / d) * fx + ((inst.pos.z - P.pos.z) / d) * fz);
+      _cands.push({ inst: inst, d2: d2, w: d2 * (1.6 - face) });
+    }
+    if (!_cands.length) return;
+    _cands.sort(function (a, b) { return a.w - b.w; });
+    for (let i = 0; i < _cands.length; i++) {
+      const c = _cands[i], m = c.inst.data.mesh;
+      const at = { x: m.position.x, y: m.position.y + 0.04, z: m.position.z };
+      if (CBZ.prisonReach && !CBZ.prisonReach(at, {})) continue;
+      // reach already proven above, so the pill skips its own second test
+      if (CBZ.prisonPrompt("prisondrop", "@prisonDropTake", "Take",
+        { at: at, d2: c.d2, key: "e", bind: true, floor: true, noReach: true })) offered = c.inst;
+      return;
+    }
+  }
+  // the pill's act: the drop under the pill, if it is still there and in reach
+  CBZ.prisonDropTake = function () {
+    const inst = offered;
+    if (!inst || !takeable(inst) || planarD2(inst) > TAKE_R2 * 1.1) return false;
+    if (CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) return false;
+    takeDrop(inst);
+    offered = null;
+    if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("prisondrop");
+    return true;
+  };
+  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
+    { id: "prisondrop", act: "@prisonDropTake", was: "walk-over only (no way to take a thing you could not tread on)", now: "Take, over the dropped thing" }
+  );
+
+  /* ============================================================
      THE TICK — notice a new run. Pickup itself stays on each prop's 40.05
      update so walking over an item collects it in the same simulation frame.
      ============================================================ */
@@ -713,7 +781,7 @@
       replaceWorldItems();      // a placed tool is part of the world, not of the run
     }
     lastEl = el;
-
+    offerTick();
   });
 
   /* ============================================================
@@ -758,7 +826,8 @@
       expired: expired, evicted: evicted, bodies: bodies,
       physicalGuns: gunsDropped, physicalTorches: torchesDropped, resting: resting,
       gunSolver: !!(CBZ.weaponPhysics && CBZ.weaponPhysics.drop && C.PRISON_DROPS_PHYSICS !== false),
-      pickupMode: "walkover", pickupRadius: AUTO_R, pickupPrompt: false,
+      pickupMode: "walkover+take", pickupRadius: AUTO_R, pickupPrompt: true, takeRadius: TAKE_R,
+      offered: offered ? (offered.data.item || (offered.data.cigs ? "Cigarettes" : "")) : null,
       // PRISON_GUN_PROVENANCE: guns that reached an inmate's hand off the
       // floor. Nobody spawns armed any more, so this number IS the armed
       // population's origin story — if it is 0, every gun in the yard is

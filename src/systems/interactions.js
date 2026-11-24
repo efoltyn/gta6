@@ -275,6 +275,11 @@
     p.quote = !!opts.quote;
     p.side = !!opts.side;
     p.label = !!opts.label;
+    // `floor`: a thing lying at your feet (a dropped card, a gun by a body).
+    // Looking level in first person it sits just under the bottom of the
+    // frame; its pill then waits at the bottom edge over it (placePrompt)
+    // instead of vanishing, which on a phone was the only way to take it.
+    p.floor = !!opts.floor;
     // `box`: () => world AABBs of the thing (a man's body, a door's leaf +
     // frame); the pill is laid out BESIDE their screen rect, never on it.
     // `dock`: on touch this group sits in the dock by the thumb instead.
@@ -332,14 +337,35 @@
     const face = Math.max(0, (dx / d) * -Math.sin(cam.yaw) + (dz / d) * -Math.cos(cam.yaw));
     return 1.6 - face;
   }
-  function arbitrate() {
+  /* ON TOUCH THE DOCK IS ITS OWN PLACE. A person's verbs on a phone are not
+     on him at all: they sit in the dock by the thumb (layoutDock below), and
+     they used to enter this contest at d2 = 0, so the man you had tapped beat
+     every pill on every thing for as long as he stayed selected: tap the man
+     beside the dropped keycard and its Take was gone until you walked off.
+     They cannot cover a pill pinned on a thing (the dock is laid out clear of
+     the thumb cluster, the pin rides the thing), so on touch the dock group
+     and the best pill on a thing are chosen separately and both show. On a
+     keyboard they share the keys, so there it is still one contest. */
+  function pick(filter) {
     let best = null, bestW = Infinity;
     pills.forEach(function (p) {
+      if (filter && !filter(p)) return;
       const w = p.d2 * lookWeight(p);
       if (!best || w < bestW - 1e-6 || (w <= bestW + 1e-6 && p.seq > best.seq)) { best = p; bestW = w; }
     });
+    return best;
+  }
+  const isDock = function (p) { return p.dock; };
+  const notDock = function (p) { return !p.dock; };
+  function arbitrate() {
+    let best, dockBest = null;
+    if (onTouch()) {
+      dockBest = pick(isDock);
+      best = pick(notDock) || dockBest;
+    } else best = pick(null);
     pills.forEach(function (p) {
-      const show = p === best || !!(best && best.group && p.group === best.group);
+      const show = p === best || p === dockBest || !!(best && best.group && p.group === best.group) ||
+        !!(dockBest && dockBest.group && p.group === dockBest.group);
       if (p.shown !== show) { p.shown = show; p.wrap.style.display = show ? "" : "none"; }
     });
     return best;
@@ -399,7 +425,10 @@
     // Camera.updateMatrixWorld refreshes the inverse too.
     cam.updateMatrixWorld();
     _pv.set(p.at.x, p.at.y, p.at.z).project(cam);
-    if (_pv.z > 1 || Math.abs(_pv.x) > SLIVER || Math.abs(_pv.y) > SLIVER) { p.wrap.style.visibility = "hidden"; return; }
+    // a floor thing just under the frame (in front of you, inside the frame's
+    // width) holds at the bottom edge straight above where it lies
+    const underFoot = p.floor && _pv.z <= 1 && _pv.y < -SLIVER && Math.abs(_pv.x) <= SLIVER && inFront(cam, p.at);
+    if (!underFoot && (_pv.z > 1 || Math.abs(_pv.x) > SLIVER || Math.abs(_pv.y) > SLIVER)) { p.wrap.style.visibility = "hidden"; return; }
     const w = window.innerWidth || 800, h = window.innerHeight || 600;
     const nx = Math.max(-1 + EDGE * 2, Math.min(1 - EDGE * 2, _pv.x));
     const ny = Math.max(-1 + EDGE * 4, Math.min(1 - EDGE * 2, _pv.y));
@@ -416,6 +445,36 @@
       if (p._flip !== flip) { p._flip = flip; p.wrap.classList.toggle("flip", flip); }
     }
     moveTo(p, sx, sy);
+    if (!p.group) clearHud(p, sx, sy);
+  }
+  // the point is ahead of the lens (not behind your head): project() of a
+  // point behind the camera can land anywhere, z alone is not enough below
+  // the near plane's corners
+  const _cf = new THREE.Vector3();
+  function inFront(cam, at) {
+    cam.getWorldDirection(_cf);
+    const e = cam.matrixWorld.elements;
+    return (at.x - e[12]) * _cf.x + (at.y - e[13]) * _cf.y + (at.z - e[14]) * _cf.z > 0.05;
+  }
+  /* NEVER UNDER A CONTROL. A lone pill pinned low on the glass (a thing on
+     the floor in first person) could land under the weapon bar, the fire
+     cluster or the hotbar and be there but untappable and unseen. It lifts
+     straight up, just clear of whatever it would sit under. */
+  function clearHud(p, sx, sy) {
+    const obs = hudObstacles(onTouch());
+    if (!obs.length) return;
+    for (let k = 0; k < 4; k++) {
+      const r = p.wrap.getBoundingClientRect();
+      if (r.width < 2) return;
+      let lift = 0;
+      for (let i = 0; i < obs.length; i++) {
+        const o = obs[i];
+        if (r.left < o.r + 4 && r.right > o.l - 4 && r.top < o.b + 4 && r.bottom > o.t - 4) lift = Math.max(lift, r.bottom - o.t + 6);
+      }
+      if (lift <= 0 || sy - lift < 8) return;
+      sy -= Math.ceil(lift);
+      moveTo(p, sx, sy);
+    }
   }
   function moveTo(p, x, y) {
     x = Math.round(x); y = Math.round(y);
@@ -675,7 +734,7 @@
   // run (a prison prompt must never survive into the city, a pause or a death
   // screen — a pause stops the updaters, so nothing re-arms and it clears).
   let frameNo = 0;
-  const _grp = [];
+  const _grp = [], _dockGrp = [];
   CBZ.onAlways(96, function () {
     frameNo++;
     if (!pills.size) { dockState.rect = null; besideState.rect = null; beside.key = null; return; }
@@ -690,12 +749,16 @@
     if (!pills.size) { beside.key = null; return; }
     const best = arbitrate();
     if (!best) return;
-    // the shown set: the best pill and (a panel) everything in its group
-    _grp.length = 0;
-    pills.forEach(function (p) { if (p.shown) _grp.push(p); });
-    const boxFn = best.box || (_grp.filter(function (p) { return p.box; })[0] || {}).box;
-    const docked = onTouch() && _grp.some(function (p) { return p.dock; });
-    if (docked) { beside.key = null; layoutDock(_grp); return; }
+    // the shown set: the best pill and (a panel) everything in its group;
+    // on touch the dock's group goes to the dock and the rest is laid out on
+    // its thing as usual
+    _grp.length = 0; _dockGrp.length = 0;
+    const touch = onTouch();
+    pills.forEach(function (p) { if (p.shown) (touch && p.dock ? _dockGrp : _grp).push(p); });
+    if (_dockGrp.length) layoutDock(_dockGrp);
+    if (!_grp.length) { beside.key = null; return; }
+    const lead = _grp.indexOf(best) >= 0 ? best : _grp[0];
+    const boxFn = lead.box || (_grp.filter(function (p) { return p.box; })[0] || {}).box;
     if (boxFn) {
       let boxes = null;
       try { boxes = boxFn(); } catch (e) { boxes = null; }

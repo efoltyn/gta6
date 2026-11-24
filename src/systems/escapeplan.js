@@ -13,9 +13,9 @@
    what the next one is.
 
      GATE      1 Keycard     lifted off a senior screw (economy.js steal),
-                             taken off the block desk while its officer is
-                             away (one grab, here; do it seen and it is a
-                             witnessed theft), or bought
+                             taken off the block desk (one grab, here; do
+                             it seen, or with a screw stood at the desk,
+                             and it is a witnessed theft), or bought
                              from the Old Timer (quests.js asks fixerTalk)
                2 Gate Key    the board in the gate booth (a Keycard door)
                              or the gate officer's belt
@@ -48,7 +48,7 @@
 
   const PRICE = { "Keycard": 40, "Hacksaw Blade": 15 };
   const PRICE_WORD = { 40: "Forty", 15: "Fifteen" };
-  const DESK_ATTEND_R = 6.0;          // a screw this close to the desk is AT it
+  const DESK_ATTEND_R = 1.6;          // a screw this close to the card is AT the desk: he sees the hand
   const DESK_REACH2 = 1.9 * 1.9;
   const GRATE_REACH2 = 1.6;           // the vents' own reach (interactions.js)
   const WORK_NEED = { grate: 3.6 };  // the cut is the only timed beat; the card is a grab
@@ -155,9 +155,17 @@
   }
   function stopWork() { if (S.work) { S.work = null; dirty = true; } }
 
+  /* THE CARD ON THE DESK IS ALWAYS TAKEABLE WHILE IT IS THERE. Its Take
+     used to vanish in two states where the card plainly still lay on the
+     desk: (1) any upright screw within 6 m of it, through a wall or across
+     the corridor, hid the button and made E do nothing; (2) already holding
+     a keycard (g.hasKey, from a dead guard's pocket or the Old Timer) hid it
+     for good. A card you can see within reach is a card you can take. What
+     the screw used to stand for is a consequence, not a missing button: take
+     it in his sight, or with him stood at the desk, and he saw you steal it. */
   function deskState() {
     const kc = CBZ.keycard;
-    if (!kc || !kc.group || kc.collected || g.hasKey) return null;
+    if (!kc || !kc.group || kc.collected || S.deskTaken) return null;
     const p = kc.group.position;
     const officer = nearestUpright(p.x, p.z, DESK_ATTEND_R);
     return { at: { x: p.x, y: p.y + 0.3, z: p.z }, officer: officer, d2: d2(player.pos.x, player.pos.z, p.x, p.z) };
@@ -168,7 +176,7 @@
   function deskTake() {
     const d = deskState();
     if (!d || d.d2 > DESK_REACH2 || S.deskTaking) return;
-    if (d.officer) return;               // he is standing at it; you can see him
+    const atDesk = d.officer;            // a screw stood at the desk sees the hand whatever his cone says
     S.deskTaking = true;
     const taken = function () {
       if (!S.deskTaking) return;         // a reset got here first
@@ -176,9 +184,12 @@
       if (S.deskTaken || !escape()) return;
       S.deskTaken = true;
       deskCardShown(false);
-      grantKeycard();                    // the "Keycard" beat fires from the bag watcher
+      // the card that left the desk is in your bag, even beside one you had
+      const e = econ();
+      if (e && e.addItem) e.addItem("Keycard", 1);
+      syncKey();                         // the "Keycard" beat fires from the bag watcher
       sfx("pickup", { volume: 0.6 });
-      if (seenBy()) {                    // lifted in plain sight: he comes for you
+      if (seenBy() || (atDesk && upright(atDesk))) {   // lifted in plain sight, or under his hands: he comes for you
         if (CBZ.reportCrime) { try { CBZ.reportCrime(45, { type: "steal" }); } catch (e) {} }
         if (CBZ.addHeat) CBZ.addHeat(30);
       }
@@ -231,8 +242,11 @@
   function promptTick() {
     if (!CBZ.prisonPrompt) return;
     const d = deskState();
-    if (d && d.d2 < DESK_REACH2 && !d.officer && !S.deskTaking) {
-      if (CBZ.prisonPrompt("plan-desk", "@escapePlanDesk", "Take", { at: d.at, d2: d.d2 }) && CBZ.keys && CBZ.keys.e) deskTake();
+    // BOUND, not polled: E takes the card only while its Take is the pill
+    // shown (a polled E also fired here when a door pill beside the desk had
+    // won the screen, and the card left under somebody else's button)
+    if (d && d.d2 < DESK_REACH2 && !S.deskTaking) {
+      CBZ.prisonPrompt("plan-desk", "@escapePlanDesk", "Take", { at: d.at, d2: d.d2, key: "e", bind: true });
     }
     const v = CBZ.culvertGrate;
     if (v && !S.grateCut) {
