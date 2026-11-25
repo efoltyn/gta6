@@ -371,7 +371,7 @@
     let aim0 = tgt || null;
     if (!aim0 && opts.candidates) { _pk0.Ba = Ba; _pk0.kind = kind; _pk0.att = att; aim0 = pickAim(_pk0, opts); _pk0.Ba = _pk0.att = null; }
     let backD = 0;
-    if (aim0 && opts.lunge !== false && Ba.pos) {
+    if (aim0 && opts.lunge !== false && Ba.pos && !opts.standAt) {
       const Bt0 = bod(aim0), tp0 = opts.aimAt || (Bt0 && Bt0.pos), ap0 = Ba.pos;
       const floorK = isFloorKick(kind);
       const long = kind === "front" || kind === "round" || kind === "low" || floorK;
@@ -494,15 +494,22 @@
              / V.groundStrike), but it still took its step to its range of
              his ROOT: a knee stepped 0.7 m in and stood the attacker's
              thigh in a kneeling man's chest. Thrown from where he stands.) */
-          const D = Bt.down() && !isFloorKick(kind) && S.level !== "ground" ? 0 : Math.max(0, Math.min(maxL, need));
+          let D = Bt.down() && !isFloorKick(kind) && S.level !== "ground" ? 0 : Math.max(0, Math.min(maxL, need));
+          // (opts.standAt: the caller has chosen the spot on the floor he throws it from: the step goes THERE)
+          let lx = dx / d, lz = dz / d;
+          if (opts.standAt) {
+            const qx = opts.standAt.x - ap.x, qz = opts.standAt.z - ap.z, ql = Math.hypot(qx, qz);
+            D = Math.min(ql, maxL + 0.35);
+            if (ql > 1e-4) { lx = qx / ql; lz = qz / ql; }
+          }
           if (D > 0.03 && !walled(ap.x, (ap.y || 0) + 1.2, ap.z, tp.x, (tp.y || 0) + 1.2, tp.z)) {
-            S.lunge.D = D; S.lunge.dx = dx / d; S.lunge.dz = dz / d; S.lunge.last = 0;
+            S.lunge.D = D; S.lunge.dx = lx; S.lunge.dz = lz; S.lunge.last = 0;
             const lead = MP.leadSide(ch) === "l" ? "L" : "R";
             // the lead foot goes first; the root arrives by the impact beat
             const stepT = kick ? 0.22 + 0.30 * D : S.dur * 0.62;
             const fs1 = MP.startStep(ch, 0, D / scaleOf(ch), stepT, lead);
             // (the step is a line on the floor: the root is still turning to face him as it is taken)
-            fs1.world = true; fs1.wx = dx / d * D / scaleOf(ch); fs1.wz = dz / d * D / scaleOf(ch);
+            fs1.world = true; fs1.wx = lx * D / scaleOf(ch); fs1.wz = lz * D / scaleOf(ch);
             kickWait(stepT, 0.5);                                 // the lead foot has landed (meleeposes: s1 is down by 0.55)
           }
         }
@@ -880,6 +887,9 @@
       if (ko > 0 && ko === F.lastKo) { ko = Math.max(0, ko - dt); F.a.ko = ko; F.counted = true; }
       F.lastKo = ko;
       if (f.phase === "fall" || f.phase === "down") f.hold = ko > F.gt + 0.05;
+      // (PINNED: a man with a rider on him, or stepping across him, stays down until the rider is off.
+      // He used to sit up and rise THROUGH the man kneeling on him: a trunk in a trunk, an arm at the rider's thigh.)
+      if (ridden(F.a)) f.hold = true;
       if (f.phase === "down" && !f.hold) MP.getUp(ch);
     }
   }
@@ -1655,6 +1665,10 @@
      ============================================================ */
   const mounts = [];
   const GNP_SEQ = ["gnp", "gnp", "gnpElbow", "gnp", "gnp", "hammer"];
+  function ridden(a) {
+    for (let i = 0; i < mounts.length; i++) { const M = mounts[i]; if (M.t === a && (M.slide >= 1 || M.stage === 2 || M.leaving)) return true; }
+    return false;
+  }
   function mountOf(a) { for (let i = 0; i < mounts.length; i++) if (mounts[i].a === a) return mounts[i]; return null; }
   V.mountOf = mountOf;
   function dismount(M) {
@@ -1678,6 +1692,8 @@
     if (!tch.head || !tch.body) return null;
     let M = mountOf(att);
     if (M && M.t !== tgt) { dismount(M); M = null; }
+    // (he was getting off: still on his knees or just up, he goes back down; already stepping off, the blow has to wait)
+    if (M && M.leaving) { if (M.leaving === 1) M.leaving = 0; else return null; }
     if (!M) {
       const d = Math.hypot(Bt.pos.x - Ba.pos.x, Bt.pos.z - Ba.pos.z);
       if (d > (opts.reach || 2.2)) return null;
@@ -1738,7 +1754,38 @@
     const d = Math.hypot(_gk.x - Ba.pos.x, _gk.z - Ba.pos.z);
     const maxL = opts.maxLunge != null ? opts.maxLunge : (Ba.isPlayer ? 0.75 : 0.45);
     if (d - V.reachOf(kind, att) * 0.92 > maxL + 0.12) return null;          // too far to step to: walk up first
-    return V.strike(att, tgt, { kind, heavy: !!opts.heavy, power: opts.power, rng: opts.rng, maxLunge: maxL,
+    /* WHERE HE STANDS TO DO IT, chosen before the kick. He used to step
+       straight toward the spot on the man to the kick's range and plant
+       there, whatever of the man lay under him: the standing shin in an
+       outflung forearm, and the part pass moving that foot about during
+       the kick. The place is on the circle of the kick's range round the
+       spot: where he already is on it if both feet are on clear floor
+       there (each foot probed heel, middle and toe against the man's
+       parts, with a shin's clearance), else the nearest bearing to either
+       side that is, out to a quarter turn. He steps to it, then kicks. */
+    let standAt = null;
+    const BP = CBZ.bodyParts, kch = Ba.ch;
+    if (BP && BP.topAt && BP.near && BP.near(kch)) {
+      const R = V.reachOf(kind, att) * 0.92, fy = (Ba.pos.y || 0) + 0.05, sc = scaleOf(kch) / 0.7;
+      const b0 = Math.atan2(Ba.pos.x - _gk.x, Ba.pos.z - _gk.z);
+      for (let q = 0; q < 7 && !standAt; q++) {
+        const a = b0 + (q === 0 ? 0 : (q & 1 ? 1 : -1) * 0.5 * ((q + 1) >> 1));
+        const qx = _gk.x + Math.sin(a) * R, qz = _gk.z + Math.cos(a) * R;
+        if (Math.hypot(qx - Ba.pos.x, qz - Ba.pos.z) > maxL + 0.3) continue;
+        const fx = -Math.sin(a), fz = -Math.cos(a), rx = fz, rz = -fx;   // facing the spot from there; his own left
+        let clear = true;
+        for (let k = 0; k < 4 && clear; k++) {
+          // the two feet of a stance (lead forward and in, rear back and out) and of a square stand
+          const lat = (k === 0 ? 0.115 : k === 1 ? -0.164 : k === 2 ? 0.09 : -0.09) * sc, fore = (k === 0 ? 0.21 : k === 1 ? -0.21 : 0) * sc;
+          for (let e = -1; e <= 1 && clear; e++) {
+            const o = fore + (e < 0 ? -0.07 : e > 0 ? 0.13 : 0.03) * sc;
+            if (BP.topAt(kch, qx + rx * lat + fx * o, qz + rz * lat + fz * o) > fy) clear = false;
+          }
+        }
+        if (clear) standAt = { x: qx, z: qz };
+      }
+    }
+    return V.strike(att, tgt, { kind, heavy: !!opts.heavy, power: opts.power, rng: opts.rng, maxLunge: maxL, standAt: standAt,
       aimAt: { x: _gk.x, y: _gk.y, z: _gk.z }, onWhiff: opts.onWhiff || null,
       onBeat: function (St) { floorKickLand(St, tgt, opts); } });
   };
@@ -1802,9 +1849,20 @@
       M.idle += dt;
       const busy = !!strikeOf(M.a);
       // walking off him: your own feet moved you since the mount placed you
-      if (p) { const mv = Math.hypot(p.x - M.lastX, p.z - M.lastZ); if (M.slide >= 1 && mv > 0.012) M.drift += mv; }
-      if (!p || Ba.dead() || Ba.down() || !Bt.pos || !tch || !tch.head || !Bt.down() ||
-          (!busy && M.idle > (Ba.isPlayer ? 1.7 : 1.2)) || M.drift > 0.22) { dismount(M); continue; }
+      if (p) { const mv = Math.hypot(p.x - M.lastX, p.z - M.lastZ); if (M.slide >= 1 && !M.leaving && mv > 0.012) M.drift += mv; }
+      if (!p || Ba.dead() || Ba.down() || !Bt.pos || !tch || !tch.head || !Bt.down() || M.drift > 0.22) { dismount(M); continue; }
+      /* HE GETS OFF THE WAY HE GOT ON. When the mount is over (no blow for a
+         while; the man under him is coming round) he used to be let go
+         where he knelt: he stood up in place on top of the man, a leg
+         either side or through him, and the contact rules shoved him off.
+         From the seat he rises, the leg that crossed is stepped back over
+         to the side he came from, his root goes back to the stand point
+         with it, and only then is he free. */
+      const fl = tch.fall;
+      if (!M.leaving && ((!busy && M.idle > (Ba.isPlayer ? 1.7 : 1.2)) || (fl && fl.on && fl.phase === "getup"))) {
+        if (M.slide >= 1 && Ba.ch && M.flank != null) { M.leaving = 1; M.leaveT = 0; }
+        else { if (busy) V.cancelStrike(M.a); dismount(M); continue; }
+      }
       // astride his belly, facing his head
       tch.head.getWorldPosition(_mh); tch.body.getWorldPosition(_mb);
       let ux = _mh.x - _mb.x, uz = _mh.z - _mb.z;
@@ -1911,12 +1969,51 @@
       const rc = Ba.ch;
       const ddx = tx - p.x, ddz = tz - p.z, dd = Math.hypot(ddx, ddz);
       const yawAlong = Math.atan2(ux, uz);
+      if (M.leaving && rc && rc.group) {
+        M.leaveT += dt;
+        const sd = M.flank, perpX = uz, perpZ = -ux, rs = scaleOf(rc), fy = p.y || 0;
+        const off = seatW + 0.28 * rs / 0.7, sa = M.standA != null ? M.standA : along;
+        const qx = bx0 + ux * sa + perpX * off * sd, qz = bz0 + uz * sa + perpZ * off * sd;      // where he stood before he stepped over
+        rc.mount = false; rc._mountGo = true; rc._mountOn = tch;
+        if (M.leaving === 1) {
+          // up off his knees first (the kneel lets go of the legs; the feet come back to where they stood astride)
+          if ((rc._mountK || 0) < 0.02 || M.leaveT > 1.2) {
+            const g = rc.group, yaw = g.rotation.y, cy = Math.cos(yaw), sy = Math.sin(yaw);
+            const G = rc._gv, useG = !!(G && G.init && G.w > 0.5 && G.feet && !G.adopt), FTm = rc._mFt;
+            const gi = sd > 0 ? 0 : 1;                              // the leg that crossed him
+            let fx = p.x, fz = p.z, ok = false;
+            if (useG) { fx = G.feet[gi].x; fz = G.feet[gi].z; ok = !G.feet[0].sw && !G.feet[1].sw; }
+            else if (FTm) { const o = gi ? 0 : 2; fx = g.position.x + (FTm[o] * cy + FTm[o + 1] * sy) * rs; fz = g.position.z + (-FTm[o] * sy + FTm[o + 1] * cy) * rs; ok = true; }
+            if (ok || M.leaveT > 1.6) {
+              // down beside the other foot, on the side he came from, a foot's width toward the man's hips
+              let lx2 = qx - ux * 0.14 * rs / 0.7, lz2 = qz - uz * 0.14 * rs / 0.7;
+              if (BPm && BPm.footSpot && BPm.footSpot(rc, lx2, fy, lz2, yaw, _mfs)) { lx2 = _mfs.x; lz2 = _mfs.z; }
+              let top = 0;
+              if (BPm && BPm.topAt) for (let k = 1; k <= 5; k++) { const tq = BPm.topAt(rc, fx + (lx2 - fx) * k / 6, fz + (lz2 - fz) * k / 6) - fy; if (tq > top) top = tq; }
+              const st = rc._mStep || (rc._mStep = { on: false, init: false, t: 0, dur: 0.5, leg: 0, sx: 0, sz: 0, tx: 0, tz: 0, h: 0, ox: 0, oz: 0 });
+              st.on = true; st.init = false; st.t = 0; st.leg = gi ? 0 : 1; st.sx = fx; st.sz = fz; st.tx = lx2; st.tz = lz2;
+              st.h = Math.min(0.62 * rs / 0.7, Math.max(0.12, top + 0.09));
+              st.dur = 0.55;
+              M.leaving = 2; M.rx0 = p.x; M.rz0 = p.z;
+            }
+          }
+        } else {
+          // the step back over: his root goes back to the stand point as the foot travels
+          const st = rc._mStep, u = st && st.on ? clamp01(st.t / st.dur) : 1, e = clamp01((u - 0.15) / 0.85), e2 = e * e * (3 - 2 * e);
+          moveBy(Ba, M.rx0 + (qx - M.rx0) * e2 - p.x, M.rz0 + (qz - M.rz0) * e2 - p.z);
+          if (!st || !st.on) { dismount(M); continue; }
+        }
+        M.lastX = p.x; M.lastZ = p.z;
+        continue;
+      }
       if (M.slide < 1 && bodyOK && rc && rc.group) {
         // (may end this frame at once: a man already at the seat, see below; the seated branch takes him next frame)
         const perpX = uz, perpZ = -ux;                               // to the rider's LEFT of the trunk's line, once he faces the head
         const ra = (p.x - bx0) * ux + (p.z - bz0) * uz, rl = (p.x - bx0) * perpX + (p.z - bz0) * perpZ;
         const rs = scaleOf(rc), fy = p.y || 0;
-        const off = seatW + 0.17 * rs / 0.7, lane = off + 0.12;
+        // (0.28 out from his side: standing across him the rider's toes point AT him, a foot's length
+        // ahead of the ankle; at 0.17 they were 5 cm in his ribs while he stood there)
+        const off = seatW + 0.28 * rs / 0.7, lane = off + 0.10;
         if (M.flank == null) {
           /* WHERE HE STANDS. Beside the trunk, on floor that nothing of the
              man lies on: both of the rider's feet go there (three probes,
