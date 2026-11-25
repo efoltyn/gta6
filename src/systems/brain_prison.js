@@ -352,10 +352,13 @@
       const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
     }
     const baton = kind === "baton" || kind === "strike";
+    const zone = BATON_ZONES[(rng() * BATON_ZONES.length) | 0];
     const out = CBZ.vitals && CBZ.vitals.blunt ? CBZ.vitals.blunt(n, {
-      zone: BATON_ZONES[(rng() * BATON_ZONES.length) | 0], power: 0.55 + rng() * 0.3,
+      zone, power: 0.55 + rng() * 0.3,
       weapon: baton ? "baton" : "fist", by: gd || null, dirX: dx, dirZ: dz,
     }) : "none";
+    // what the stick throws: the blood already on him where it landed, and off the stick
+    if (CBZ.goreBlow) CBZ.goreBlow(n, gd || null, null, { dir: { x: dx, z: dz }, zone, force: 0.9 });
     if (out === "none" || out === "stagger") {
       if (CBZ.knockback && gd && gd.group) CBZ.knockback(n, gd.group.position.x, gd.group.position.z, 0.7);
     } else if (out === "knockdown" && CBZ.verbs && CBZ.verbs.knockdown) {

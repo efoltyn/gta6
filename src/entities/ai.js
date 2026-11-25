@@ -3174,10 +3174,12 @@
         dir: kg ? { x: vp.x - kg.position.x, z: vp.z - kg.position.z } : null,
         amount: playerKill ? 1.2 : 0.85, player: false, sfx: playerKill ? "hit" : false,
         // How he was killed, forwarded rather than guessed. gore.js already
-        // branches on this ("blade" → arterial arcs, "blunt" → a slow well);
+        // branches on this ("blade" → no round's spray, "blunt" → teeth);
         // this choke point simply never passed it, so every death in the
         // prison — shanking included — sprayed like a gunshot.
         melee: opts.melee || null,
+        // and the cause vitals named ("bled out" throws nothing as he dies)
+        cause: opts.cause || null,
         // WHO: the body the blood belongs to, so a blade kill's arterial
         // pulse rides the falling body instead of the spot he stood on
         actor: victim,
@@ -3389,7 +3391,6 @@
       // THE POINT GOES IN: a bleed where it went in; out of hp he goes down
       // bleeding, and he dies only of what it hit or of the blood
       if (CBZ.bodyWound) { try { CBZ.bodyWound(f, res.point, { melee: "blade", cal: 0.7, fromX: n.group.position.x, fromZ: n.group.position.z }); } catch (e) {} }
-      if (CBZ.goreImpact) CBZ.goreImpact(res.point.x, res.point.y, res.point.z, { amount: 0.7, blade: true, dir: { x: res.dir.x, y: 0.35, z: res.dir.z } });
       const W = VT.wound(f, { kind: "stab", zone: res.zone, point: res.point, by: n,
         dirX: res.dir.x, dirZ: res.dir.z, fromX: n.group.position.x, fromZ: n.group.position.z, critical: f.hp <= 0 });
       if (f.hp <= 0) f.hp = 1;

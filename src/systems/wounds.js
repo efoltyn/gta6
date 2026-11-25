@@ -10,15 +10,15 @@
        "there's a hole in his back as if he got shot" from a punch): blunt
        trauma is systems/vitals.js's daze, never a decal.
        Per-wound scale jitter so no two holes are identical.
-     • NO SOAK. THE CLOTHES KEEP THEIR COLOUR (owner 2026-10-09: "I don't
-       really like clothes changing colours because of blood. Instead it
-       should just be the blood holes, like when you just get shot"). Each
-       hole carries ONE small tight blood ring, a few cm, stamped at its
-       final size on the frame of the hit; it never grows, never creeps and
-       never runs down to the collar. The spreading stain (bloom + a 40 s
-       creep to two-thirds of the panel) and the headshot collar run-down
-       are DELETED; gore.js's corpse-in-a-pool material swap is deleted
-       too. Blood lives in the drips and pools on the ground.
+     • THE CLOTHES KEEP THEIR COLOUR (owner 2026-10-09: "I don't really
+       like clothes changing colours because of blood. Instead it should
+       just be the blood holes, like when you just get shot"): no garment is
+       ever tinted. Each hole carries ONE wet patch, a few cm on the frame
+       of the hit, that is as big as the blood the cloth round it has
+       actually soaked (CBZ.woundSoak, from gore.js's wound: ml / 0.4 per
+       cm^2), sagging down the panel on a man who is up, never past the
+       face it is on. Blood that the cloth cannot hold drips and pools on
+       the ground (gore.js).
      • HOLES NEVER TIME OUT. A hole stays as long as the body exists, alive
        or dead (owner: "bullet holes disappear after a while, which is
        dumb"). Only a cap recycles one, and the global cap picks the hole
@@ -446,7 +446,10 @@
   const RO_RING = 0.1, RO_WOUND = 0.2;   // see the renderOrder note in unlit()
   const MAT_FRESH = unlit(0x4e070b);   // fresh entry wound: near-black red
   const MAT_DRY = unlit(0x351409);     // dried: dark brown scab
-  const MAT_RING = unlit(0x310609, -1); // the wet ring round a hole: near-black red
+  // the wet cloth round a hole: wet blood in fabric is a deep red, clearly
+  // darker than any garment it is in (and darker still where it is thick:
+  // the blob's own ramp), not a black that vanishes into a dark seam
+  const MAT_RING = unlit(0x5a0a0d, -1);
   // TORN flesh (a bite) is WETTER and brighter than a bullet's cauterised-looking
   // entry hole — a tooth tears the skin open rather than punching through it.
   const MAT_TORN = unlit(0x6b0d10);
@@ -930,11 +933,14 @@
   // the same size, on the same cloth. (It used to be re-stamped onto a
   // separate lathe arm by hand, with its own size guess and cap.)
 
-  // ---- THE BLOOD RING: a small tight ring of blood round a hole --------------
-  // a child of the SAME part, seated on the SAME face, under the hole; stamped
-  // at its FINAL size on the frame of the hit. It never grows and never
-  // spreads: the clothes keep their colour, the blood is in the hole's ring
-  // and on the ground. `holeR` = the outer radius of what it rings.
+  // ---- THE BLOOD RING: the wet cloth round a hole ----------------------------
+  // a child of the SAME part, seated on the SAME face, under the hole, a few
+  // cm on the frame of the hit. From then on its size is the blood the cloth
+  // round that hole has actually soaked up (CBZ.woundSoak, fed by gore.js's
+  // wound: area = soaked ml / the cloth's ~0.4 ml per cm^2), sagging down the
+  // panel on a man who is up, and never past the face it is on. It is the
+  // patch round the hole, never the garment's colour. `holeR` = the outer
+  // radius of what it rings.
   // o (optional): { spin, kx, ky } — a ring laid ALONG something (a slit).
   function spawnRing(actor, part, lp, ax, holeR, pad, o) {
     const m = meshFor(actor);
@@ -951,10 +957,68 @@
     hugDecal(m, part, PROUD_SOAK_V2);
     m.scale.set(gx, gy, 1);
     part.add(m);
-    wounds.push({ m, actor, age: 0, kind: "ring", dried: true });
+    // how big the wet patch may get: most of the face it is on (a lofted limb
+    // is round under a flat patch, so it keeps nearer its hole there)
+    const round = !!(CBZ.humanLimbHalfAt && ax !== "y" && CBZ.humanLimbHalfAt(part.geometry, lp.y));
+    const soakCap = Math.max(Math.max(gx, gy), Math.min(capR(geo, mh, round ? 0.5 : 0.9), fitR(geo, mh, mh)));
+    wounds.push({ m, actor, age: 0, kind: "ring", dried: true, part, ax, kx: gx, ky: gy, soakCap,
+      p0: m.position.clone(), soakR: 0 });
     actor._woundN = (actor._woundN || 0) + 1;
     return m;
   }
+
+  /* CBZ.woundSoak(actor, x, y, z, ml) — the cloth round the hole nearest the
+     world point (x,y,z) on this body has soaked `ml` of blood: its wet patch
+     becomes that big (area = ml / SOAK_ML_CM2), never smaller than the ring
+     it started as, never past its face. On a body that is up the patch sags:
+     its middle moves down the panel (in the part's own space) by a share of
+     how much it grew. -> true when a patch took it. */
+  const SOAK_ML_CM2 = 0.4;            // a cotton jumpsuit holds ~0.3-0.5 ml a cm^2
+  const SOAK_FEATHER = 1.3;
+  const _sw = new THREE.Vector3(), _sl = new THREE.Vector3(), _sg = new THREE.Vector3();
+  CBZ.woundSoak = function (actor, x, y, z, ml, up) {
+    if (!actor || !(ml > 0)) return false;
+    let best = null, bd = 0.5 * 0.5;
+    for (let i = 0; i < wounds.length; i++) {
+      const r = wounds[i];
+      if (r.kind !== "ring" || r.gone || !r.part || !r.m.parent) continue;
+      if (r.actor !== actor && !(actor.isPlayer && r.actor && r.actor.isPlayer)) continue;
+      r.m.getWorldPosition(_sw);
+      const d = (_sw.x - x) * (_sw.x - x) + (_sw.y - y) * (_sw.y - y) + (_sw.z - z) * (_sw.z - z);
+      if (d < bd) { bd = d; best = r; }
+    }
+    if (!best) return false;
+    const part = best.part;
+    part.getWorldScale(_sg);
+    const ws = Math.max(1e-4, (Math.abs(_sg.x) + Math.abs(_sg.y) + Math.abs(_sg.z)) / 3);
+    // the wet area's radius (m); the blob's ramp feathers its outer ~quarter
+    // to nothing, so it is drawn that much wider for the wet part to be that big
+    const Rw = Math.sqrt(ml / SOAK_ML_CM2 / Math.PI) * 0.01 * SOAK_FEATHER;
+    const base = Math.max(best.kx, best.ky);
+    const R = Math.max(base, Math.min(best.soakCap, Rw / ws));        // part units
+    if (Math.abs(R - best.soakR) < base * 0.04) return true;
+    best.soakR = R;
+    const k = R / base;
+    best.m.scale.set(best.kx * k, best.ky * k, 1);
+    // the sag: world down, in the part's space, along the face
+    best.m.position.copy(best.p0);
+    if (up !== false && R > base) {
+      part.updateWorldMatrix(true, false);
+      _sl.copy(best.p0); part.localToWorld(_sl);
+      _sw.copy(_sl); _sw.y -= 1; part.worldToLocal(_sw); _sw.sub(best.p0);
+      if (best.ax === "x") _sw.x = 0; else if (best.ax === "y") _sw.y = 0; else _sw.z = 0;
+      const l = _sw.length();
+      if (l > 1e-5) best.m.position.addScaledVector(_sw, ((R - base) * 0.45) / l);
+      // kept on the face it is on
+      const prm = part.geometry && part.geometry.parameters || {};
+      const hx = (prm.width || 0.6) * 0.5, hy = (prm.height || 0.9) * 0.5, hz = (prm.depth || 0.45) * 0.5;
+      const P = best.m.position;
+      if (best.ax !== "x") P.x = Math.max(-hx + R, Math.min(hx - R, P.x));
+      if (best.ax !== "y") P.y = Math.max(-hy + R, Math.min(hy - R, P.y));
+      if (best.ax !== "z") P.z = Math.max(-hz + R, Math.min(hz - R, P.z));
+    }
+    return true;
+  };
 
   // ---- ENTRY vs EXIT: where was the round GOING? ----------------------------
   //

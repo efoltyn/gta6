@@ -15,9 +15,11 @@
        gut; it decays slowly, so a man already rocked goes out on the next
        good one. Past the line he is KNOCKED OUT: he collapses in his own rig
        (bodyfall / the keyed fall), lies there breathing for a real 12-30 s,
-       and comes to GROGGY (he stumbles for a while). A punch opens no wound
-       and leaves no hole. Fists kill only one way: keep beating a man who is
-       already out, for a long time (BRAIN).
+       and comes to GROGGY (he stumbles for a while). A punch leaves no hole;
+       a hard one to the face can SPLIT it (a lip, the nose, a brow; a stick
+       the scalp): a small bleed that drips and clots (lacerate). Fists kill
+       only one way: keep beating a man who is already out, for a long time
+       (BRAIN).
 
      · BLOOD (0..1 of his volume). A bullet or a blade opens a BLEED whose rate
        depends on where it went in (a thigh artery empties a man in under a
@@ -32,8 +34,12 @@
        player needs a roll (a real item found in the world); an NPC who is
        safe tears his shirt and does it himself, slower and worse.
 
+   Every bleed is a wound in gore.js (CBZ.goreWound), which moves its blood
+   out of the body (drops, an artery's beats, the pool under it): this file
+   keeps the volume and the flow, gore.js keeps where it goes.
+
    Corpses keep taking it: every round or stab into a dead man is another
-   hole (wounds.js) and another ooze that grows the pool under him (to a cap).
+   hole (wounds.js) and another ooze into the pool under it.
 
    API (CBZ.vitals):
      state(a)        -> "ok" | "down" | "ko" | "tased" | "dead"
@@ -55,6 +61,8 @@
                         o = { kind: bullet|stab|slash|blast|bite, zone, point,
                               head, cal, by, dirX, dirZ, critical (the game's hp
                               ran out: he goes down bleeding instead of dying) }
+     lacerate(a, o)  -> the split it opened (or null): o = { zone, weapon,
+                        hit, force: true to split for certain }
      tase(a, secs, o)· ko(a, secs, o)
      bandage(medic, patient?, o) -> bool (starts it) · cancelBandage(a)
      bandaging(a)    -> progress 0..1 or -1
@@ -90,8 +98,7 @@
     CRIT_BOOST: 2.2,         // a man whose hp ran out bleeds this much faster
     BAND_SELF: 4.2, BAND_OTHER: 3.4, BAND_CLOTH: 6.0,
     SAFE_T: 7,               // s since his last hit before an NPC bandages himself
-    POOL_CAP: 22,            // pool decals one body may lay
-    POOL_MAX: 2.4,           // the biggest a pool decal grows (gore grow units)
+    BLOOD_ML: 5000,          // a body's blood: `blood` is a fraction of this, and gore.js draws it in ml
   };
   VT.K = K;
 
@@ -141,8 +148,8 @@
       R = a._vt = {
         a, blood: 1, bleeds: [], daze: 0, brain: 0, koT: 0, koN: 0, groggyT: 0, stumbleT: 0,
         tasedT: 0, collapsed: false, critical: false, riseT: 0, dead: false, lastHitT: -1e9,
-        riddle: 0, riddleT: 0, band: null, wraps: [], pour: 0, poured: 0, poolN: 0, poolAt: 0,
-        dripT: 0, cause: "", by: null, live: false, holdKo: false,
+        riddle: 0, riddleT: 0, band: null, wraps: [], faceHits: 0, faceT: 0,
+        cause: "", by: null, live: false, holdKo: false,
       };
     }
     return R;
@@ -351,6 +358,8 @@
     if (o.by) R.by = o.by;
     if (R.band) cancel(R);
     wake(R);
+    // the face may split (a small bleed: VT.lacerate); nothing else opens
+    lacerate(a, R, zone, o.weapon || "fist", hit);
     // HE IS ALREADY OUT: every blow now is damage to a man who cannot defend
     // himself. That is the only way fists kill, and it takes a long time.
     if (R.koT > 0 || R.collapsed || R.critical) {
@@ -379,6 +388,70 @@
     if (hit >= 0.22) return "stagger";
     return "none";
   };
+  /* ---- A BLOW THAT SPLITS THE SKIN (VT.lacerate) ----
+     Skin over bone splits under a hard enough blow: the lip against the
+     teeth, the bridge of the nose, the brow ridge, the scalp under a stick.
+     A blow to the body, the arms or the legs splits nothing outside. The
+     chance grows with how hard it landed (`hit`, this file's daze units) and
+     with how worked over that face already is (swollen skin splits easier:
+     faceHits, fading over a couple of minutes); the flow is small and clots
+     on its own: drops a second, not a spray. A split that is already there
+     opens up again instead of splitting twice. The bleed sits on the head
+     mesh at the site (character.js's head is a 0.6 m box about its origin,
+     the face toward +z), so gore.js bleeds it from there and it runs to the
+     chin.
+       site    from              flow ml/s    clots (tau s)
+       lip     jaw               0.04-0.12    70
+       nose    jaw / head        0.08-0.25    100
+       brow    head              0.08-0.30    80
+       scalp   head, a stick     0.30-1.20    150 (the scalp bleeds freely) */
+  const LAC = {
+    lip:   { at: [0.03, -0.17, 0.29], n: [0, -0.2, 1], ml: [0.04, 0.12], tau: 70 },
+    nose:  { at: [0, -0.06, 0.32], n: [0, -0.3, 1], ml: [0.08, 0.25], tau: 100 },
+    brow:  { at: [0.11, 0.10, 0.27], n: [0.35, 0.2, 0.9], ml: [0.08, 0.3], tau: 80 },
+    scalp: { at: [0.08, 0.27, 0.06], n: [0.2, 1, 0.2], ml: [0.3, 1.2], tau: 150 },
+  };
+  const STICK = { baton: 1, blunt: 1, bat: 1, pipe: 1 };
+  function lacerate(a, R, zone, weapon, hit) {
+    if (zone !== "jaw" && zone !== "head") return null;
+    // the swelling: recent blows to this face
+    R.faceHits = R.faceHits * Math.exp(-(clock - R.faceT) / 120) + 1; R.faceT = clock;
+    const stick = !!STICK[weapon];
+    const thr = stick ? 0.12 : 0.14;
+    const p = Math.min(stick ? 0.75 : 0.45, Math.max(0, (hit - thr) * (stick ? 2.6 : 1.4)) + 0.05 * Math.min(6, R.faceHits - 1));
+    if (!(rng() < p)) return null;
+    const site = stick && zone === "head" ? "scalp" : zone === "jaw" ? (rng() < 0.6 ? "lip" : "nose") : (rng() < 0.7 ? "brow" : "nose");
+    const L = LAC[site];
+    for (let i = 0; i < R.bleeds.length; i++) {
+      const b = R.bleeds[i];
+      if (b.kind === "lac" && b.site === site) { b.rate = Math.max(b.rate, b.rate0) * 1.25; b.rate0 = b.rate; b.tau = L.tau; return b; }
+    }
+    const ml = L.ml[0] + (L.ml[1] - L.ml[0]) * clamp01((hit - thr) * 3 + rng() * 0.3);
+    const ch = rigOf(a), head = ch ? (ch.head || null) : null;
+    const b = { zone: "head", kind: "lac", site, rate: ml / K.BLOOD_ML, rate0: ml / K.BLOOD_ML, band: 0, t: 0,
+      artery: false, tau: L.tau, obj: head, lp: null, ln: null };
+    if (head && window.THREE) {
+      const side = rng() < 0.5 ? -1 : 1, sx = site === "nose" ? 1 : side;
+      b.lp = new window.THREE.Vector3(L.at[0] * sx, L.at[1], L.at[2]);
+      b.ln = new window.THREE.Vector3(L.n[0] * sx, L.n[1], L.n[2]).normalize();
+    }
+    R.lastHitT = clock;
+    R.bleeds.push(b);
+    goreOf(R, b);
+    trimBleeds(R);
+    wake(R);
+    return b;
+  }
+  // a caller (or a capture) that knows the face split: o = { zone, weapon, hit }
+  VT.lacerate = function (a, o) {
+    a = real(a); o = o || _bo;
+    if (!a || deadOf(a)) return null;
+    const R = of(a);
+    const save = VT.rng;
+    if (o.force) VT.rng = function () { return 0; };
+    try { return lacerate(a, R, o.zone || "jaw", o.weapon || "fist", o.hit != null ? o.hit : 0.3); } finally { VT.rng = save; }
+  };
+
   function goKo(a, R, secs, o) {
     R.koT = secs; R.koN++;
     R.daze = 0.55;
@@ -488,6 +561,26 @@
     const du = (V3.x - point.x) ** 2 + (V3.y - point.y) ** 2 + (V3.z - point.z) ** 2;
     return dl < du ? lo : up;
   }
+  /* A HOLE IN THE TRUNK IS IN THE TRUNK. The trunk part (ch.body) has its
+     origin at the rig's FEET (the trunk itself spans hipY..the shoulders in
+     its space: humancontact.js reads it the same way), so a caller that hands
+     the trunk's own position as "the point" (or no point) put a belly wound
+     at his soles. The hole is kept inside the span its zone names: the belly
+     from the hips up a third of the way, the chest above that to the
+     shoulders, and inside the torso's width and depth. */
+  function trunkPoint(ch, b, zone) {
+    if (!ch || b.obj !== ch.body || (zone !== "abdomen" && zone !== "chest") || !window.THREE) return;
+    const pf = ch.profile || {};
+    const hipY = ch.hipY > 0 ? ch.hipY : (pf.legUp || 0.585) + (pf.legLo || 0.655);
+    const shY = ch.parts && ch.parts.la ? ch.parts.la.position.y : hipY + 0.6;
+    const span = Math.max(0.2, shY - hipY);
+    const lo = zone === "abdomen" ? hipY : hipY + span * 0.35, hi = zone === "abdomen" ? hipY + span * 0.35 : shY - 0.05;
+    const hw = (pf.torsoW || 0.412) * 0.5, hd = (pf.torsoD || 0.29) * 0.5;
+    if (!b.lp) b.lp = new window.THREE.Vector3(0, (lo + hi) * 0.5, hd);   // no point: the front
+    const p = b.lp;
+    if (p.y < lo || p.y > hi) p.y = (lo + hi) * 0.5;
+    p.x = Math.max(-hw, Math.min(hw, p.x)); p.z = Math.max(-hd, Math.min(hd, p.z));
+  }
   VT.wound = function (a, o) {
     a = real(a);
     o = o || _bo;
@@ -508,22 +601,24 @@
     if (b.obj && o.point && b.obj.worldToLocal && window.THREE) {
       b.lp = b.obj.worldToLocal(new window.THREE.Vector3(o.point.x, o.point.y, o.point.z));
     }
+    trunkPoint(ch, b, zone);
     R.lastHitT = clock;
     if (o.by) R.by = o.by;
     if (R.band && R.band.medic === a) cancel(R);
     wake(R);
     // A DEAD MAN: the heart has stopped, but a new hole still lets out what is
-    // in him, so the pool under him grows with every one (to a cap)
+    // in him by gravity, so the blood under him grows with every one
     if (deadOf(a) || R.dead) {
-      b.rate *= 0.6; b.tau = 22; b.dead = true;
+      b.rate *= 0.4; b.tau = 90; b.dead = true; b.drain = true;
       R.bleeds.push(b);
-      R.pour += 0.02;
+      goreOf(R, b);
       trimBleeds(R);
       res.outcome = "dead"; res.rate = b.rate;
       return res;
     }
     if (o.critical) b.rate *= K.CRIT_BOOST;
     R.bleeds.push(b);
+    goreOf(R, b);
     trimBleeds(R);
     res.rate = b.rate;
     // TRULY LETHAL: the head, the heart, a body riddled with rounds
@@ -552,7 +647,7 @@
     if (R.bleeds.length <= 24) return;
     R.bleeds.sort((x, y) => (y.rate * (1 - y.band)) - (x.rate * (1 - x.band)));
     const gone = R.bleeds.splice(20);
-    for (let i = 0; i < gone.length; i++) R.bleeds[19].rate += gone[i].rate * (1 - gone[i].band);
+    for (let i = 0; i < gone.length; i++) { R.bleeds[19].rate += gone[i].rate * (1 - gone[i].band); gone[i].closed = true; }
   }
 
   /* ============================================================
@@ -797,83 +892,62 @@
   /* ============================================================
      THE TICK
      ============================================================ */
-  const _wp = { x: 0, y: 0, z: 0 };
-  let _v3b = null;
-  function bleedPoint(R, b) {
-    const obj = b && b.obj;
-    if (obj && obj.getWorldPosition && window.THREE) {
-      const V3 = _v3b || (_v3b = new window.THREE.Vector3());
-      obj.getWorldPosition(V3);
-      _wp.x = V3.x; _wp.y = V3.y; _wp.z = V3.z;
-      return _wp;
-    }
-    const p = posOf(R.a);
-    if (!p) return null;
-    _wp.x = p.x; _wp.y = p.y || 0; _wp.z = p.z;
-    return _wp;
+  /* ---- THE BLEEDS LEAVE THE BODY THROUGH gore.js ----
+     Every bleed is a wound there (CBZ.goreWound: the part it is on and the
+     point on it), and every tick this writes the bleed's flow to it in ml/s
+     (rate x the band's leak x K.BLOOD_ML). gore.js moves that blood out of
+     the wound — drops while he stands, a jet from an artery, a pool under
+     the wound once he lies there — and draws only what leaves the skin.
+     What comes off `blood` here is exactly that flow: one volume, one
+     ledger. A bleed that clots below its floor, or is merged or reset away,
+     is marked closed and its wound stops. */
+  function goreOf(R, b) {
+    if (b.gw || !CBZ.goreWound) return b.gw || null;
+    try {
+      b.gw = CBZ.goreWound(R.a, { vb: b, node: b.obj || null, local: b.lp || null, dir: b.ln || null,
+        zone: b.zone, kind: b.kind, site: b.site || b.zone, artery: !!b.artery });
+    } catch (e) { b.gw = null; }
+    return b.gw;
   }
-  function lying(R) {
-    const a = R.a;
-    if (R.dead || R.koT > 0 || R.collapsed || R.critical) return true;
-    if (deadOf(a)) return true;
-    const ch = rigOf(a);
-    return !!(ch && ch.fall && ch.fall.on && ch.fall.phase === "down");
-  }
+  // the rate (fraction/s) under which a bleed has stopped: a hole's is a
+  // trickle of 0.6 ml/s; a split lip's own flow is far below that, so it
+  // keeps going until it really clots (0.02 ml/s)
+  function stopRate(b) { return b.kind === "lac" ? 0.000004 : 0.00012; }
+  /* A LIVING HOLE FLOWS AT THE PRESSURE BEHIND IT. The rate a hole was
+     opened at is what it lets out at full blood; as the blood goes the
+     pressure falls with it, and so does the flow (to a fifth of it at the
+     edge of death). Clotting (tau) is for small vessels: a graze ~2 min, a
+     hole that runs a few % a minute ~4 min, a big one ~8 min, an artery
+     ~15 min; a dead man's holes drain by gravity (see below). */
+  function pressure(R) { return Math.max(0.2, Math.min(1, (R.blood - 0.35) / 0.65)); }
   function blood(R, dt) {
     const a = R.a;
     let r = 0;
+    const press = R.dead || deadOf(a) ? 1 : pressure(R);
     for (let i = R.bleeds.length - 1; i >= 0; i--) {
       const b = R.bleeds[i];
       b.t += dt;
-      // clotting: slow for an artery, fast for a graze, fast once wrapped;
-      // a dead heart stops pushing and the ooze runs down in seconds
-      const tau = b.dead || R.dead ? Math.min(b.tau, 22) : b.band > 0 ? Math.min(b.tau, 70) : b.tau;
+      // clotting: slow for an artery, fast for a graze, fast once wrapped.
+      // A DEAD HEART stops pushing: from then on a hole only drains by
+      // gravity, at ~0.4 of what the pressure drove, falling off over a
+      // minute and a half (a body empties by hundreds of ml over minutes)
+      if ((b.dead || R.dead) && !b.drain) { b.drain = true; if (!b.dead) b.rate *= 0.4; }
+      const tau = b.dead || R.dead ? Math.min(b.tau, 90) : b.band > 0 ? Math.min(b.tau, 70) : b.tau;
       b.rate *= Math.exp(-dt / tau);
-      if (b.rate < 0.00012) {
+      if (b.rate < stopRate(b)) {
+        b.closed = true;
         R.bleeds.splice(i, 1);
         continue;
       }
-      r += b.rate * (1 - b.band);
-    }
-    // the ground: drips while he moves, a pool once he lies in it
-    const lie = lying(R);
-    if (r > 0.0002) {
-      if (lie) {
-        R.pour += r * dt;
-      } else {
-        R.dripT -= dt;
-        if (R.dripT <= 0) {
-          R.dripT = Math.max(0.12, Math.min(2.5, 0.003 / r)) * (0.7 + rng() * 0.6);
-          const b = R.bleeds.length ? R.bleeds[(rng() * R.bleeds.length) | 0] : null;
-          const p = bleedPoint(R, b);
-          if (p && CBZ.goreDrip) { try { CBZ.goreDrip(p.x + (rng() - 0.5) * 0.12, p.z + (rng() - 0.5) * 0.12, 0.15 + Math.min(0.35, r * 25), p.y); } catch (e) { /* gore off */ } }
-        }
-      }
-    }
-    if (lie && R.pour > 0 && R.poolN < K.POOL_CAP) {
-      R.poolAt -= dt;
-      // a new, bigger layer of the pool each time enough has come out of him
-      const need = R.poolN === 0 ? 0.004 : 0.012 + R.poolN * 0.002;
-      if (R.poolAt <= 0 && R.pour >= need) {
-        R.poured += R.pour; R.pour = 0;
-        R.poolAt = 1.4;
-        const worst = worstAny(R);
-        const p = bleedPoint(R, worst);
-        const size = Math.min(K.POOL_MAX, 0.45 + Math.sqrt(R.poured) * 3.2);
-        if (p && CBZ.gorePool) {
-          try { CBZ.gorePool(p.x + (rng() - 0.5) * 0.15, p.z + (rng() - 0.5) * 0.15, size, p.y); R.poolN++; } catch (e) { /* gore off */ }
-        } else R.poolN++;
-      }
+      const v = b.rate * (1 - b.band) * press;
+      r += v;
+      const gw = b.gw || goreOf(R, b);
+      if (gw) gw.mlps = v * K.BLOOD_ML;
     }
     if (R.dead || deadOf(a)) return r;
     R.blood -= r * dt;
     if (r < 0.0004 && R.blood < 1) R.blood = Math.min(1, R.blood + K.REGEN * dt);
     return r;
-  }
-  function worstAny(R) {
-    let best = null, br = -1;
-    for (let i = 0; i < R.bleeds.length; i++) { const b = R.bleeds[i]; const v = b.rate * (1 - b.band); if (v > br) { br = v; best = b; } }
-    return best;
   }
   function safe(R) {
     const a = R.a;
@@ -889,7 +963,7 @@
     if (R.dead && !deadOf(a)) { reset(a); return false; }
     if (!R.dead && deadOf(a)) { R.dead = true; R.koT = 0; R.collapsed = false; R.critical = false; if (R.band) cancel(R); }
     const r = blood(R, dt);
-    if (R.dead) { hurtOff(a); return R.bleeds.length > 0 || R.pour > 0.002; }
+    if (R.dead) { hurtOff(a); return R.bleeds.length > 0; }
     hurtOf(R, a);
 
     R.daze = Math.max(0, R.daze - K.DAZE_DECAY * dt);
@@ -975,7 +1049,7 @@
       if (down && CBZ.player && !hook("playerDown")) CBZ.player.stun = Math.max(CBZ.player.stun || 0, 0.3);
     }
     return r > 0.0002 || R.koT > 0 || R.collapsed || R.critical || R.groggyT > 0 || R.tasedT > 0 || !!R.band || !!R.medicOf ||
-      R.blood < 1 || R.daze > 0.01 || R.riseT > 0 || R.pour > 0.002;
+      R.blood < 1 || R.daze > 0.01 || R.riseT > 0 || R.bleeds.length > 0;
   }
   /* ---- THE HURT BODY: what his open holes do to how he stands and moves,
      handed to the rig every tick (entities/meleeposes.js hurtPose reads
@@ -1014,6 +1088,7 @@
     if (!R) return;
     if (R.band) cancel(R);
     clearWraps(R);
+    for (let k = 0; k < R.bleeds.length; k++) R.bleeds[k].closed = true;   // their wounds in gore.js stop
     const i = LIST.indexOf(R);
     if (i >= 0) LIST.splice(i, 1);
     a._vt = null;

@@ -763,7 +763,8 @@
          warlord, the city's cheap path) takes it as a shove and a jolt
          (poke) and wears the wound (systems/wounds.js).
      And every one of them is another hole that lets out what is in him:
-     CBZ.vitals.wound on a dead man grows the pool under him (to its cap).
+     CBZ.vitals.wound on a dead man opens a wound that drains into the pool
+     under it (gore.js).
      dir is the round's travel ({x,z}, y ignored), force on the ragdoll's
      scale (~6 pistol, ~14 shotgun). o = { cal, head, by } (optional).
      False = nothing here could take it.
@@ -795,8 +796,8 @@
      CBZ.corpseStab(target, point, dir, o) -> bool: A BLADE INTO A BODY.
      The knife does not stop working because he stopped breathing: a small
      push where it went in, a cut on the part it went into (wounds.js blade
-     mark), a little blood out of it, and another ooze into the pool
-     (vitals). A fist or a boot into a corpse is CBZ.bodyFall.poke alone:
+     mark), the blood the blade carries out, and another ooze into the pool
+     (vitals, gore.js). A fist or a boot into a corpse is CBZ.bodyFall.poke alone:
      no mark. o = { by, force } (optional).
    ============================================================ */
   CBZ.corpseStab = function (target, point, dir, o) {
@@ -811,10 +812,9 @@
       point = { x: gp.x, y: (gp.y || 0) + 0.3, z: gp.z };
     }
     if (CBZ.bodyWound) { try { CBZ.bodyWound(target, point, { melee: "blade", dir: dir || null }); } catch (e) { /* wounds off */ } }
-    // what comes out of the cut: a short wet spatter along the blade, then
-    // the drip where it lands (gore.js's own drops, never a painted blob)
-    if (CBZ.gore && CBZ.gore.spray) { try { CBZ.gore.spray(point, 0.3, dir || null, { exit: false }); } catch (e) { /* gore off */ } }
-    else if (CBZ.goreDrip) { try { CBZ.goreDrip(point.x, point.z, 0.25, point.y); } catch (e) { /* gore off */ } }
+    // what comes out of the cut: the blade comes out wet and loses some of it
+    // on the way (gore.js goreBlow); the hole drains into the pool under it
+    if (CBZ.goreBlow) { try { CBZ.goreBlow(target, o.by || null, point, { dir: dir || null, dy: 0.3, blade: true, force: 0.5 }); } catch (e) { /* gore off */ } }
     ooze(target, "stab", point, o);
     return true;
   };

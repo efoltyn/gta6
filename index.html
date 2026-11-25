@@ -677,7 +677,7 @@ document.body.appendChild(b);}}catch(e){}})();
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
      one damage path, and counts the dead for the news. After crowdgpu. -->
-<script src="src/entities/crowdstore.js?v=looks1022b"></script>
+<script src="src/entities/crowdstore.js?v=wound1125e"></script>
 <!-- CBZ.verbs: THE ONE library of what two people do to each other with their
      hands, for every game: grab, carry, throw, shove, tackle, cuff, frisk,
      drag, escort, choke, shield, mug (verbs.js), the bodies both of them wear
@@ -688,7 +688,7 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=mc5ae55"></script>
-<script src="src/systems/verbs.js?v=cops1123"></script>
+<script src="src/systems/verbs.js?v=wound1125e"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
@@ -700,9 +700,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/cuffedplayer.js?v=butt1022"></script>
 <script src="src/entities/verbposes.js?v=butt1022"></script>
 <script src="src/entities/meleeposes.js?v=parts1125b"></script>
-<script src="src/systems/verbs_strike.js?v=parts1125b"></script>
+<script src="src/systems/verbs_strike.js?v=wound1125e"></script>
 <script src="src/systems/melee.js?v=anim1125"></script>
-<script src="src/systems/bodyfall.js?v=shot1122"></script>
+<script src="src/systems/bodyfall.js?v=wound1125e"></script>
 <!-- CBZ.leave: PEOPLE WALK OUT, NOBODY VANISHES. Every game's "his part is over"
      (a staffer, an aide, the dismissed, a crowd going home) walks him out by a
      door or away from the camera and takes him off the world only when nobody
@@ -715,7 +715,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CBZ.eyes: how a hurt body sees. No red screen anywhere: near death the
      a light red rim, grey colour and a heartbeat; the view never closes while alive (lids are for the dead). -->
 <script src="src/systems/eyes.js?v=rounds1013"></script>
-<script src="src/systems/vitals.js?v=shot1122"></script>
+<script src="src/systems/vitals.js?v=wound1125e"></script>
 <script src="src/systems/verbs_pickup.js?v=look1123"></script>
 <script src="src/entities/player.js?v=look1123"></script>
 <script src="src/entities/coins.js"></script>
@@ -814,7 +814,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=own1122"></script>
 <script src="src/entities/npc.js?v=race1121"></script>
-<script src="src/entities/ai.js?v=left1123"></script>
+<script src="src/entities/ai.js?v=wound1125e"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -975,7 +975,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
-<script src="src/systems/brain_prison.js?v=left1123"></script>
+<script src="src/systems/brain_prison.js?v=wound1125e"></script>
 <script src="src/systems/markers.js?v=day1122"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=cops1123"></script>
@@ -990,7 +990,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=c1122"></script>
 <script src="src/systems/compass.js"></script>
-<script src="src/systems/combat.js?v=anim1125"></script>
+<script src="src/systems/combat.js?v=wound1125e"></script>
 <script src="src/systems/killstreaks.js?v=jailv1001"></script>
 <script src="src/systems/interact.js?v=left1123"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
@@ -1888,7 +1888,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the trunk: a lid that opens, a body that rides in it (restrain.js's stow puts him there) -->
 <script src="src/city/cartrunk.js?v=trunk1022"></script>
 <script src="src/city/custody.js?v=people1022"></script>
-<script src="src/city/combat.js?v=keep1122d"></script>
+<script src="src/city/combat.js?v=wound1125e"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
      entries above). Loads right after city/combat.js, whose lightAttack/
@@ -2225,12 +2225,12 @@ document.body.appendChild(b);}}catch(e){}})();
      always-updater is in the sort -->
 <!-- projected decals: blood cut out of the struck mesh's own triangles (cars) -->
 <script src="src/systems/surfacedecal.js?v=carblood930"></script>
-<script src="src/systems/gore.js?v=drops1124b"></script>
+<script src="src/systems/gore.js?v=wound1125e"></script>
 <!-- the attackers' teeth (systems/dentition.js): every family's dental arch
      from real anatomy, or the attacker's own built body; wounds.js strikes
      each tooth against the bitten body. Before wounds.js. -->
 <script src="src/systems/dentition.js?v=bite1122b"></script>
-<script src="src/systems/wounds.js?v=bite1122j"></script>
+<script src="src/systems/wounds.js?v=wound1125e"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused
@@ -2239,7 +2239,7 @@ document.body.appendChild(b);}}catch(e){}})();
      nothing itself. After gore.js + wounds.js (routes through CBZ.goreImpact,
      CBZ.gore and CBZ.bodyWound), before core/loop.js so its clock makes the
      boot sort. Consumers: grapple.js, physics.js, modes/survival.js. -->
-<script src="src/systems/trauma.js?v=landblood1022"></script>
+<script src="src/systems/trauma.js?v=wound1125e"></script>
 <!-- PREDATOR GRAMMAR — the shared answer to "a thing hunts you and takes you":
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the

@@ -2308,7 +2308,7 @@
   const _bh = new THREE.Vector3(), _bf = new THREE.Vector3();
   const _bres = { landed: false, blocked: false, slipped: false, zone: "head", dmgMul: 1, reaction: "stagger", point: null,
     dir: { x: 0, z: 0 }, power: 0.85, kind: "headbutt", target: null, attacker: null, heavy: true, weapon: null, stagger: true,
-    blood: 0, force: 0, counter: false, blind: true, parried: false, guardBroken: false, ko: false };
+    force: 0, counter: false, blind: true, parried: false, guardBroken: false, ko: false };
   function stepButt(S, dt) {
     const b = S.butt, A = S.A, T = S.T;
     const was = b.t;
@@ -2330,7 +2330,7 @@
       r.landed = true; r.zone = "head"; r.dmgMul = 1; r.reaction = "stagger"; r.point = _bf;
       const yaw = T.yaw();
       r.dir.x = -Math.sin(yaw); r.dir.z = -Math.cos(yaw);
-      r.target = S.a; r.attacker = S.t; r.blood = 0;
+      r.target = S.a; r.attacker = S.t;
       if (o.onLand) { try { o.onLand(r); } catch (e) { if (CBZ.CONFIG && CBZ.CONFIG.DEBUG) console.error("[verbs] butt", e); } }
       if (S.done) return;
       const off = S.a;

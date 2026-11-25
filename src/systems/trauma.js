@@ -42,8 +42,8 @@
 
      2. THE CAUSE TABLE. What a given death does to a body, so the kill's gore
         follows its physics: torn apart by a tornado is the goriest thing on the
-        island, crushed under rubble bursts and pools, a long fall SPLATS, a
-        beating bleeds out slow, a MAULING tears a limb off and floods the
+        island, crushed under rubble bursts and bleeds, a long fall SPLATS, a
+        beating bleeds from what it split, a MAULING tears a limb off and floods the
         water — and frozen / drowned / choked / irradiated /
         incinerated / vaporized draw NO BLOOD AT ALL. An unrecognised cause
         draws no blood either: the default is now silence, which is the whole
@@ -84,8 +84,8 @@
 
   // ---- the ledger's units ---------------------------------------------------
   // 1.0 trauma unit ≈ "enough to open a person up on its own". A solid punch is
-  // a fifth of that, but fists no longer bleed through this ledger: T.strike
-  // keeps its own blunt memory (nosebleed, light spatter, never a pool). A landing is measured in the speed it happened
+  // a fifth of that, but fists never bleed through this ledger (a split face
+  // is vitals.js's call). A landing is measured in the speed it happened
   // at, because that is the number physics already has.
   const FIRST_BLOOD = 0.6;     // ledger value at which skin actually opens
   const DECAY = 0.033;         // units/sec — a beating lands inside ~30s, older hits don't count
@@ -103,13 +103,6 @@
   // one impact this severe opens you up on its own, no history required —
   // this is the clause that makes "fall from far" bleed the first time.
   const LONE_HIT = 0.42;
-  // A FIST (T.strike). Units are the same flesh units: a jab is ~0.2, a
-  // full-power hook ~0.36.
-  const BLUNT_DECAY = 0.02;    // units/sec off the blunt memory
-  const NOSE_AT = 1.0;         // head-blow total that opens a nose (~4-5 clean head shots)
-  const HARD_HIT = 0.33;       // one blow at least this hard can split skin...
-  const HARD_AFTER = 0.7;      // ...on a man who has already taken a few
-  const BLUNT_CD = 2.5;        // s between any two blunt bleeds on one body
 
   // ---- THE CAUSE TABLE ------------------------------------------------------
   // First match wins, so the bloodless rows come FIRST: "crushed by a volcanic
@@ -193,8 +186,8 @@
     [/sinkhole|crater|\bfell\b|\bfall\b|\bfalls\b/, { amount: 1.35, limbs: 0, style: "splat" }],
     // struck by something thrown fast: directional, off the impact side
     [/debris|hurricane|impaled|struck|thrown|hit by/, { amount: 1.1, limbs: 0, style: "burst" }],
-    // beaten: bruise, split, then a slow bleed-out under the body. Fists take
-    // nothing off a person.
+    // beaten: bruises and the splits the blows opened, bleeding where they
+    // are. Fists take nothing off a person.
     [/beaten|punch|melee|fists/, { amount: 1.0, limbs: 0, style: "blunt" }],
     // ordnance proper (never reached by the nuke rows above)
     [/explosion|ordnance|\bbomb\b|\bblast\b|shell/, { amount: 1.3, limbs: 1, style: "boom", slowmo: 0 }],   // a blast is fast: no slow-mo on your death
@@ -240,8 +233,9 @@
       CBZ.goreImpact(p.x, y, p.z, {
         dir: o.dir, amount: amt,
         mist: sev > 0.8,                  // only a real crunch atomises anything
-        pool: sev > 0.55,                 // only an open wound stains the ground
+        pool: sev > 0.55,                 // the skin opened: a wound on him that bleeds from now on
         wall: !!o.wall,
+        actor: a.isPlayer ? null : a,
         player: !!a.isPlayer,
         sfx: sev > 0.7 ? "hit" : false,
       });
@@ -274,64 +268,7 @@
     // hit. A sixth punch trickles; a twenty-six-metre fall does not.
     const sev = Math.min(2, (r.v - FIRST_BLOOD) * 0.9 + lone * 1.15);
     bleed(a, sev, o);
-    openWound(a, r, sev);
     return sev;
-  }
-
-  /* ---- AN OPEN WOUND FOLLOWS YOU -------------------------------------------
-     A survivor who has just been opened up should not walk away spotless. The
-     wound bleeds for a while and marks the ground it crosses, so you can read
-     where a beaten man ran to, and the player can look back at their own trail
-     after taking a fall. It stops on its own — the wound closes — which is
-     what keeps it from becoming a permanent paint-roller behind every bot.
-
-     Cost is bounded three ways and none of them is a per-frame sweep of the
-     roster: only actors that have actually BLED are ever in the list, the list
-     is hard-capped, and a drip is spent on DISTANCE MOVED rather than on time,
-     so someone standing still costs one vector subtraction a tick. */
-  const TRAIL_CAP = 8;             // simultaneous bleeders
-  const DRIP_EVERY = 0.85;         // metres of travel per mark
-  const bleeders = [];
-  function openWound(a, r, sev) {
-    if (sev < 0.45) return;                       // a graze does not trail
-    r.bleedFor = Math.max(r.bleedFor || 0, 4 + Math.min(9, sev * 5.5));
-    r.drop = 0;
-    r.dripMul = 1;                                // a real wound runs at full size
-    if (r.trailing) return;
-    if (bleeders.length >= TRAIL_CAP) {
-      // evict the driest — never the man who was just opened up
-      let worst = 0;
-      for (let i = 1; i < bleeders.length; i++) if ((rec(bleeders[i]) || { bleedFor: 0 }).bleedFor < (rec(bleeders[worst]) || { bleedFor: 0 }).bleedFor) worst = i;
-      const drop = rec(bleeders[worst]); if (drop) drop.trailing = false;
-      bleeders.splice(worst, 1);
-    }
-    r.trailing = true;
-    r.lx = a.pos.x; r.lz = a.pos.z;
-    bleeders.push(a);
-  }
-  function updateTrails(dt) {
-    for (let i = bleeders.length - 1; i >= 0; i--) {
-      const a = bleeders[i];
-      const r = a && (a.isPlayer ? CBZ.player : a)._trauma;
-      const p = a && a.pos;
-      if (!r || !p || (!a.isPlayer && a.culled)) { if (r) r.trailing = false; bleeders.splice(i, 1); continue; }
-      r.bleedFor -= dt;
-      if (r.bleedFor <= 0) { r.trailing = false; bleeders.splice(i, 1); continue; }
-      const dx = p.x - r.lx, dz = p.z - r.lz;
-      const moved = Math.sqrt(dx * dx + dz * dz);
-      if (moved < 0.05) continue;                 // standing still: no trail, no cost
-      r.lx = p.x; r.lz = p.z;
-      r.drop += moved;
-      if (r.drop < DRIP_EVERY) continue;
-      r.drop = 0;
-      // a fresh wound runs; a closing one only spots. Jittered off the exact
-      // footfall line so the trail wanders the way a real one does.
-      const heavy = Math.min(1, r.bleedFor / 6);
-      if (CBZ.goreDrip) {
-        CBZ.goreDrip(p.x + (Math.random() - 0.5) * 0.5, p.z + (Math.random() - 0.5) * 0.5,
-          (0.12 + heavy * 0.24 + Math.random() * 0.08) * (r.dripMul || 1), p.y);
-      }
-    }
   }
 
   const T = {
@@ -340,15 +277,12 @@
        scale. A shove is a big number that barely breaks skin, so the flesh
        weight is separate from the knockback weight: opts.flesh scales it. */
     /* A FIST IS NOT A WOUND (owner: "blood's coming out way too fast when
-       punching someone"). This used to run the same accrue() a fall does, so
-       the ledger crossed FIRST_BLOOD on the second punch and every punch after
-       it sprayed (0.22 s cooldown), pooled and trailed. It was also fed TWICE
-       per survival punch (verbs_strike's landing and grapple.js's landPunch).
-       Blunt blows now keep their own memory and draw blood the way real ones
-       do: a bare-knuckle beating opens a nose after a run of head shots, a
-       genuinely hard blow on a man already worked over throws a light spatter,
-       and neither ever pools. Pools are for falls, slams and real wounds
-       (slam() and the gun/blade paths are untouched). */
+       punching someone"). A blow keeps its share on the ledger (a beaten man
+       who is then thrown off a ledge opens sooner, and a beating carries its
+       toll into deathGore) and draws no blood here: whether it split his
+       face is vitals.blunt's call (VT.lacerate, from grapple.js's landing),
+       the split bleeds where it is (gore.js A WOUND BLEEDS), and what flies
+       at the blow is the blood already on him (gore.js goreBlow). */
     strike(a, force, opts) {
       if (!on() || !alive(a) || sealed(a)) return 0;
       opts = opts || {};
@@ -356,47 +290,8 @@
       const add = f * 0.036 * (opts.flesh == null ? 1 : opts.flesh);
       if (add <= 0) return 0;
       const r = rec(a); if (!r) return 0;
-      // half of it still counts on the shared ledger: a beaten man who is
-      // then thrown off a ledge opens sooner, and a beating to death carries
-      // its toll into deathGore. It can never cross the bar on its own here.
       r.v = Math.min(MAX, r.v + add * 0.5);
       r.hits++;
-      const bdt = clock - (r.bt == null ? clock : r.bt);
-      r.bt = clock;
-      r.bb = Math.max(0, (r.bb || 0) - BLUNT_DECAY * bdt) + add;
-      const zone = opts.zone ? ("" + opts.zone) : "";
-      const head = zone ? /head|jaw|face|nose|chin/.test(zone) : (opts.y != null && opts.y > 1.4);
-      if (head) r.bh = Math.max(0, (r.bh || 0) - BLUNT_DECAY * bdt) + add;
-      else if (r.bh) r.bh = Math.max(0, r.bh - BLUNT_DECAY * bdt);
-      if (r.bcd != null && r.bcd > clock) return 0;
-      const p = a.pos;
-      // THE NOSEBLEED: a run of head shots inside a minute. Once open it drips
-      // where he walks for a few seconds, small drops, then stops.
-      if (head && r.bh >= NOSE_AT && !(r.noseT > clock)) {
-        r.bcd = clock + BLUNT_CD;
-        r.noseT = clock + 25;
-        if (CBZ.goreImpact) CBZ.goreImpact(p.x, p.y + (opts.y != null ? opts.y : 1.55), p.z, {
-          dir: { x: (opts.dir && opts.dir.x) || 0, y: -0.8, z: (opts.dir && opts.dir.z) || 0 },
-          amount: 0.25, mist: false, pool: false, player: !!a.isPlayer });
-        r.bleedFor = Math.max(r.bleedFor || 0, 5);
-        r.dripMul = 0.45;
-        r.drop = 0;
-        if (!r.trailing && bleeders.length < TRAIL_CAP) { r.trailing = true; r.lx = p.x; r.lz = p.z; bleeders.push(a); }
-        return 0.3;
-      }
-      // an open nose hit again keeps dripping (no new spray)
-      if (head && r.noseT > clock && !(add >= HARD_HIT)) {
-        r.bleedFor = Math.max(r.bleedFor || 0, 4);
-        if (!r.trailing && bleeders.length < TRAIL_CAP) { r.dripMul = 0.45; r.drop = 0; r.trailing = true; r.lx = p.x; r.lz = p.z; bleeders.push(a); }
-        return 0;
-      }
-      // A HARD BLOW ON A MAN ALREADY WORKED OVER: a light spatter, no pool
-      if (add >= HARD_HIT && r.bb >= HARD_AFTER) {
-        r.bcd = clock + BLUNT_CD;
-        if (CBZ.goreImpact) CBZ.goreImpact(p.x, p.y + (opts.y != null ? opts.y : 1.4), p.z, {
-          dir: opts.dir, amount: 0.22, mist: false, pool: false, player: !!a.isPlayer });
-        return 0.2;
-      }
       return 0;
     },
 
@@ -472,28 +367,23 @@
         // exactly the "no preferred direction, everything leaves at once" read.
         case "tear": opts.explosion = true; opts.dir = null; break;
         case "boom": opts.explosion = true; break;
-        // BEATEN: gore()'s blunt beat — teeth and spit now, the bleed-out pool
-        // spreading under the body a couple of seconds later.
+        // BEATEN: gore()'s blunt beat — teeth; the splits bleed where they are.
         case "blunt": opts.melee = "blunt"; break;
         /* BITTEN: gore.js's own bite path. It stamps the tooth-row wound on the
-           real body (CBZ.bodyBite) and fires NEITHER the arterial arcs nor the
-           slow bleed-out pool — a maul is not a knife and it is not a beating.
+           real body (CBZ.bodyBite); the torn wound bleeds from there.
            Said with opts.melee rather than left to gore()'s cause regex,
            because the opts.actor route below hands it an EMPTY cause string:
            gore() only ever sees the cause on the city's kill tap, so an island
            bite would have arrived anonymous and been drawn as a bullet. */
         case "bite": opts.melee = "bite"; break;
         // A LONG FALL: radial and LOW. Killing the direction gives the ring
-        // spray; the wide extra pool below is the part that reads as a splat.
+        // spray; the pool is what his wound drains onto the ground after.
         case "splat": opts.dir = null; break;
         default: break;                      // "burst" / "crush" keep the impact line
       }
+      // the blood on the ground after it is what the wound he drains from
+      // puts there (gore.js killWound), under the wound, once he is down
       CBZ.gore(p.x, p.y + (pr.style === "splat" ? 0.45 : 1.0), p.z, opts);
-      // CRUSH and SPLAT put most of the volume on the GROUND, not in the air —
-      // a second, wider, later-spreading pool is what sells both.
-      if ((pr.style === "crush" || pr.style === "splat") && CBZ.goreImpact) {
-        CBZ.goreImpact(p.x, p.y + 0.25, p.z, { amount: amount * 0.8, pool: true, mist: true });
-      }
       if (r) { r.v = MAX; r.open = true; }
       return true;
     },
@@ -503,28 +393,28 @@
        needs to know (a corpse the disasters recycle, a test) can ask. */
     mark(cause) { const p = profile(cause); return (p && p.mark) || null; },
     of(a) { const r = rec(a); return r ? r.v : 0; },
-    bleeding(a) { const r = a && (a.isPlayer ? CBZ.player : a)._trauma; return !!(r && r.trailing); },
+    bleeding(a) {
+      const L = CBZ.goreBleedList ? CBZ.goreBleedList() : null;
+      if (L) for (let i = 0; i < L.length; i++) if (L[i].actor === a) return true;
+      return false;
+    },
     reset(a) {
       const o = a && a.isPlayer ? CBZ.player : a;
       if (o) { o._trauma = null; o._noBlood = false; }
-      const i = bleeders.indexOf(a);
-      if (i >= 0) bleeders.splice(i, 1);
       // the player's rig SURVIVES a match reset (the bots are rebuilt), so a
       // charred or frost-white body would carry its death into the next round.
       if (CBZ.corpseUntreat) { try { CBZ.corpseUntreat(a); } catch (e) {} }
     },
     audit() {
-      return { on: on(), bleeders: bleeders.length, mark: CBZ.corpseMark ? CBZ.corpseMark(CBZ.surv && CBZ.surv.playerActor) : null };
+      const L = CBZ.goreBleedList ? CBZ.goreBleedList() : [];
+      return { on: on(), bleeders: L.length, mark: CBZ.corpseMark ? CBZ.corpseMark(CBZ.surv && CBZ.surv.playerActor) : null };
     },
   };
   CBZ.trauma = T;
 
-  // the module clock the lazy decay reads, plus the bleed trails. One updater,
-  // no per-actor sweep — only bodies that have actually bled are in the list.
+  // the module clock the lazy decay reads (a wound's bleeding is gore.js's)
   if (CBZ.onAlways) CBZ.onAlways(7.5, function (dt) {
     if (dt <= 0) return;
     clock += dt;
-    if (bleeders.length && on()) updateTrails(dt);
-    else if (bleeders.length) bleeders.length = 0;      // left survival → drop the list
   });
 })();

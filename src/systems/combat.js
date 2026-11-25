@@ -183,8 +183,8 @@
          off, and the animation is `punchKind:"stab"` (entities/character.js) —
          a chambered piston, not a swing;
        · it OPENS people: `melee:"blade"` makes wounds.js draw the slit instead
-         of the bruise, and a blade kill hands gore.js the "stabbed" cause that
-         throws its arterial arcs. Both of those have been in this engine for
+         of the bruise, and vitals.wound opens a bleed that gore.js bleeds
+         (and spurts, if it found an artery). Both of those have been in this engine for
          months with nothing in the prison able to reach them;
        · you cannot forearm-block a point the way you can block a fist, so the
          block roll drops from 0.16 to 0.06;
@@ -370,10 +370,10 @@
     const out = V ? V.blunt(actor, { zone: res.zone || "head", power: res.power, weapon: BLUNT_W[res.kind] || "fist", heavy,
       by: CBZ.player, dirX: res.dir.x, dirZ: res.dir.z, mul: attack.fresh * scale * moment,
       fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z }) : "none";
-    /* BLOOD IS EARNED, AND IT IS NOT A DICE ROLL (owner: "blood flying if it's
-       a hard enough punch but no fake shit blood on every punch"). A HEAVY
-       blow on a man already rocked splits him, at the point the fist landed. */
-    if (heavy && V && V.daze(actor) > 0.5) res.blood = 0.45;
+    /* BLOOD IS EARNED (owner: "no fake shit blood on every punch"): whether
+       this one split his face is vitals.blunt's call (VT.lacerate), and the
+       split bleeds from then on; what flies at the blow is only what was
+       already wet on him (gore.js goreBlow, from verbs_strike's landing). */
     if (out === "ko") {
       // OUT COLD: vitals already put him on the floor for 12-30 s
       res.reaction = "none";
@@ -461,19 +461,19 @@
     if (blade) {
       stabHits++; bladeWounds++;
       if (CBZ.bodyWound) { try { CBZ.bodyWound(actor, pt, { melee: "blade", cal: 0.7, fromX: P.x, fromZ: P.z }); } catch (e) { /* wounds off */ } }
-      if (CBZ.goreImpact) CBZ.goreImpact(pt.x, pt.y, pt.z, { amount: 0.7, blade: true, dir: { x: dx, y: -0.4, z: dz } });
+      // (the mount's own landing throws the blood; the plain boot-or-blade path has no landing of its own)
+      if (!res && CBZ.goreBlow) CBZ.goreBlow(actor, playerActor(), pt, { dir: { x: dx, z: dz }, dy: -0.4, force: 0.7, blade: true });
       const W = V ? V.wound(actor, { kind: "stab", point: pt, by: CBZ.player, dirX: dx, dirZ: dz, fromX: P.x, fromZ: P.z, critical: !wasDead }) : null;
       if (!wasDead && (actor.dead || (W && W.outcome === "dead"))) finishFx(actor, guardish, true);
       return;
     }
     if (wasDead) return;                                      // a boot into a corpse moves nothing but the air
     // from the mount: a fist, an elbow or a hammerfist into a head with the
-    // floor behind it; a hard one splits him (and the blood goes on the floor)
+    // floor behind it; a hard one can split him (vitals), and it bleeds there
     const heavyG = !!(res && (res.kind === "gnpElbow" || res.kind === "hammer"));
     const out = V ? V.blunt(actor, { zone: "head", power: (res ? res.power * (res.dmgMul || 1) : 0.7) * fresh,
       weapon: res ? (res.kind === "gnpElbow" ? "elbow" : "fist") : "kick", heavy: res ? heavyG : true, by: CBZ.player,
       dirX: dx, dirZ: dz, fromX: P.x, fromZ: P.z }) : "none";
-    if (res && heavyG && V && V.daze && V.daze(actor) > 0.4) res.blood = 0.4;
     if (out === "dead" || actor.dead) finishFx(actor, guardish, false);
   }
   // his forearms took it: a chip through the guard, and you eat the rebound
@@ -525,7 +525,6 @@
   // the beat: hitstop, a breath of slow motion, the ledger.
   function execute(actor, guardish, blade, res) {
     res.reaction = "dead";                           // prisoncorpse / aiKill own the body now
-    if (!blade) res.blood = 1.1;
     finishFx(actor, guardish, blade);
   }
   function finishFx(actor, guardish, blade) {

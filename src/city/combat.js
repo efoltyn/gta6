@@ -564,8 +564,7 @@
     const out = blade
       ? meleeHurt(t, base * 1.6, res, true, feel, { stab: true, zone: Math.random() < 0.3 ? "neck" : "chest", critical: wasDown })
       : meleeHurt(t, base * (heavy ? 1.25 : 0.85) * (res.dmgMul || 1), res, heavy, feel, { zone: "head", mul: heavy ? 1.3 : 1 });
-    // a hard one into a head with the floor behind it splits him
-    if (!blade && heavy && CBZ.vitals && CBZ.vitals.daze && CBZ.vitals.daze(t) > 0.4) res.blood = 0.4;
+    // (whether a hard one split his face is vitals.blunt's call: VT.lacerate)
     if (out === "dead") res.reaction = "dead";
     if (CBZ.sfx) CBZ.sfx(heavy ? "hit" : "punch");
     if (CBZ.fpsHitMarker) CBZ.fpsHitMarker(!!t.dead, false);

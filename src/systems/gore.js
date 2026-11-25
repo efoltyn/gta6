@@ -9,36 +9,44 @@
        what is really there and leaves its own mark where it stops: the
        floor, a wall, a door frame, the top of a wall, a sill, a ceiling
      • chunky flying GIBS (limbs/torso, gravity + tumble + settle as debris)
-     • lingering ground POOLS that spread from the body and stop, then dry
-       from deep glossy red to matte red-brown, soaked into the floor — every
-       land mark is a stain FILTERING the drawn floor, one instanced draw
-       call (see BLOOD ON THE GROUND IS A STAIN IN THE FLOOR)
+     • GROUND BLOOD IS ONLY WHAT LANDED (see BLOOD COLLECTS WHERE IT LANDS):
+       every drop that reaches the floor carries its own volume; drops that
+       land on wet blood join it, and a spot that keeps being fed becomes a
+       pool whose area is its volume over a film ~1.5 mm deep. Nothing stamps
+       a pool. Every land mark is a stain FILTERING the drawn floor, one
+       instanced draw call (see BLOOD ON THE GROUND IS A STAIN IN THE FLOOR)
      • WALL BLOOD is nothing but those drops' marks (WHERE A DROP STOPS):
        where many land they overlap into a stain, and a heavy one runs
-   plus a short red jolt + shake (+ optional slow-mo). Headshots and explosions
-   get a bigger mist + spray + pool. Self-contained: shared geometry/materials,
-   pooled, hard-capped, distance-LOD'd, driven by one always-updater so prison
-   shootouts, survival deaths and city murders all end bloody.
+     • WOUNDS BLEED (see A WOUND BLEEDS): a wound is a place on a body with a
+       flow in ml/s. It leaves the body where the wound is, wherever that part
+       is this frame: dripping from the chin, the fingertips or the hem while
+       he stands or walks, spurting at heart rate from an opened artery, and
+       running straight onto the floor under the wound once he lies there.
+       vitals.js decides which wounds a blow opens and how fast they flow;
+       this file moves the blood.
+   plus a short jolt + shake (+ optional slow-mo). Self-contained: shared
+   geometry/materials, pooled, hard-capped, distance-LOD'd, driven by one
+   always-updater so prison fights, survival deaths and city murders all end
+   bloody the same way.
 
-   THE KILL TELLS ITS OWN STORY (why: deaths are the game's exclamation
-   points — they must land hard, read directional, and leave evidence):
+   THE KILL TELLS ITS OWN STORY:
      • a lazy tap on CBZ.cityKillPed reads the CAUSE of every city kill, so
        gore knows HOW someone died without any caller changing a line:
        - HEADSHOT  → a bigger exit spray (more blood, more drops) out of the
          head, onto whatever is behind it. In CITY, only a muzzle-close SHOTGUN can cause
          a full decapitation — the head mesh comes OFF, a flying head tumbles and
-         settles, and the neck STUMP geysers a heavy arterial spurt (the
-         restore-on-reuse audit regrows the head on any rig recycle). A
-         pistol/SMG headshot never decapitates.
-       - BLUNT melee (beaten) → teeth + spit fly, then a DELAYED bleed-out
-         pool spreads under the body a couple of seconds later
-       - BLADE melee (stabbed/executed) → 2-3 timed ARTERIAL spurts arc out
-         of the corpse as the heart dies
+         settles, and the neck STUMP is an open wound that spurts while the
+         heart still beats (the restore-on-reuse audit regrows the head on any
+         rig recycle). A pistol/SMG headshot never decapitates.
+       - BLUNT melee (beaten) → teeth fly; the blood is whatever the blows
+         opened (vitals.js lacerations), bleeding where they are
+       - BLADE melee (stabbed) → the drops off the blade as it comes out; the
+         wound it opened bleeds (and spurts, if it found an artery)
        - RUN OVER  → a long tire-smear streak decal drawn along the car's
          travel line (the wheel drags the blood with it)
-     • ground pools GROW over a few seconds and linger MUCH longer near the
-       player (evidence you walk past), and a corpse lying in a pool slowly
-       soaks dark — one cheap shared-material swap, never a per-frame tint.
+     • a kill always leaves the body a wound to drain from: the one the
+       killing blow opened (vitals.js), or, when nothing tracks one, a hole
+       at the struck part (killWound). It pours only once the body is down.
 
    THE WATER MEDIUM (CBZ.CONFIG.GORE_WATER, default on): every layer above is
    AIR physics — ballistic droplets under gravity that land on floorAt or
@@ -59,7 +67,9 @@
    PRESERVED public API: CBZ.gore(x,y,z,opts), CBZ.clearGore().
    ADDED public API: CBZ.goreMedium(x,y,z), CBZ.goreBloom(x,y,z,opts),
    CBZ.goreSlick(x,z,amount), CBZ.goreChum/goreChumStop/goreChumList,
-   CBZ.goreAudit().
+   CBZ.goreWound / goreBleed / goreBleedAt (a wound), CBZ.goreBlow (a blow
+   landed), CBZ.goreImpact (a body hurt at a point), CBZ.goreAudit(),
+   CBZ.goreBleedAudit().
 
    opts: { dir:{x,z}, amount:0.5..2, skin, cloth, slowmo:secs,
            player:bool, sfx:bool|string, head:bool, explosion:bool,
@@ -109,11 +119,6 @@
   //                settles, fades and clears instead of decorating the yard.
   function realism() { return !CBZ.CONFIG || CBZ.CONFIG.GORE_REALISM_V2 !== false; }
   function debrisLaw() { return cityMode() || realism(); }
-  // Body-drain pools have the same unit bug as the droplets: spawnSplat's
-  // `grow` is a RADIUS, so the authored 1.87 for an ordinary kill stamped a
-  // 3.7 m lake under one man. Measured against the rig it lies next to, a
-  // bled-out body owns something closer to a metre and a half.
-  const POOL_K = 0.42;
   function survMode() { return !!(CBZ.game && CBZ.islandModeOn(CBZ.game.mode)); }
   const GRAV = 24;
   // What flies is drawn by THE AIRBORNE BLOOD block below (its own colours,
@@ -124,16 +129,13 @@
   const bits = [];     // flying gibs + severed parts (blood in the air is the AIR pool)
   const splats = [];   // ground blood pools + tire-smear streaks
   const walls = [];    // vertical wall/surface splatter decals
-  const later = [];    // delayed gore beats (arterial spurts, bleed-out pools)
   // the height of the event being drawn — what decalFloorAt seats its marks
   // FROM (the floor under it, not the street below it). null: ground level.
   let seatY = null, seatSolid = false;
-  // ARMED FOR THE DURATION OF ONE WET EVENT (and, via after(), of the delayed
-  // beats it queues) — see THE WATER MEDIUM block. Declared up here with the
-  // other module state so after() can never read it from the temporal dead
-  // zone. Read by spawnBit; cleared at both gore() exits, at the top of every
-  // frame, and around every delayed callback, so the worst a thrown handler
-  // can do is misroute droplets for a single frame.
+  // ARMED FOR THE DURATION OF ONE WET EVENT — see THE WATER MEDIUM block.
+  // Read by airDrop/airMist/spawnBit; cleared at both gore() exits and at the
+  // top of every frame, so the worst a thrown handler can do is misroute
+  // droplets for a single frame.
   let wetEvent = false;
 
   // ---- KILL-CONTEXT TAP -----------------------------------------------------
@@ -161,12 +163,6 @@
     CBZ.cityKillPed._goreTap = true;
     killTapped = true;
   }
-
-  // schedule a delayed gore beat; hard-capped so spam can't queue a flood.
-  // The beat remembers WHICH MEDIUM its kill happened in (see the water block
-  // below) so a stump that keeps pumping two seconds after a drowning still
-  // blooms instead of firing ballistic droplets at the seabed.
-  function after(t, fn) { if (later.length > 24) return; later.push({ t, fn, wet: wetEvent, sy: seatY }); }
 
   function scene() { return CBZ.scene; }
   function floorAt(x, z) { return CBZ.floorAt ? CBZ.floorAt(x, z) : 0; }
@@ -287,21 +283,22 @@
        * the 2x headroom is what lets fresh blood carry a GLINT: a thin wet
          highlight off the meniscus at the pool's edge, gone once it dries.
      Every shape is a noise-edged field in the atlas and the edge is a hard
-     threshold on it, so there is no feathered rim to go pink. A pool GROWS
-     by lowering that threshold (the edge advances into the lowest ground
-     first, fingers and all), spreads for ~6-14 s and STOPS. Over tens of
-     seconds it dries from the thin edge inward: deep glossy red -> matte dark
-     red-brown with a darker coffee ring, soaked patchily into the pores.
-     Spatter lands the size of the drop that made it, stretched along its
-     flight by the impact angle (length = width / sin(angle), the forensic
-     rule), tail pointing away from the wound. A kill throws one or two big
-     impact splats, a pool, and a scatter of small marks, not two dozen equal
-     discs. Everything sits 1.5 cm off the surface with polygonOffset.
+     threshold on it, so there is no feathered rim to go pink. A pool is
+     drawn at the size its blood covers and redrawn bigger as more blood
+     reaches it (BLOOD COLLECTS WHERE IT LANDS); a drop's mark opens over a
+     few hundredths of a second. From the last time blood reached it, it
+     dries from the thin edge inward over tens of seconds: deep glossy red ->
+     matte dark red-brown with a darker coffee ring, soaked patchily into the
+     pores. Spatter lands the size of the drop that made it, stretched along
+     its flight by the impact angle (length = width / sin(angle), the
+     forensic rule), tail pointing away from the wound. Everything sits
+     1.5 cm off the surface with polygonOffset.
 
      COST: one draw call, one 512x256 texture baked once at load, a fixed
      pool of instance slots (hard cap, recycled far-first), no per-decal
-     material, no per-frame allocation. Growth and drying run on the GPU from
-     one clock; the CPU writes a slot's matrix once at spawn and its alpha only
+     material, no per-frame allocation. Drying runs on the GPU from one
+     clock; the CPU writes a slot's matrix at spawn (and a pool's again when
+     its blood has grown it a few per cent), and its alpha only
      when a fade actually changes it.
 
      The WATER blood (plume / slick / kill cloud) is untouched: slicks keep
@@ -762,7 +759,7 @@
   //  Nothing outside this file changes to get it. gore()/gore.spray() ask
   //  goreMedium() where the wound is and branch themselves, and airDrop() /
   //  airMist() — which EVERY incidental emitter in this file funnels through
-  //  (stump vents, arterial streams, blunt spit, both spray layers) —
+  //  (wounds' drips and beats, cast-off, flung blood, both spray layers) —
   //  redirect blood/mist into a bloom puff while a wet event is in flight.
   //  So the whole file gains the medium, not just the shark that prompted it.
   //
@@ -2149,12 +2146,13 @@
        * MIST is a soft gaussian puff thrown down the shot line, dragged to a
          stop in centimetres and gone in 0.2-0.4 s. Gunshots only. A puff
          that reaches a surface stops at it and leaves a fine speckle.
-       * STREAMS (a blade, an artery, an open neck or joint) are EMITTERS that
-         lay drops along a jet, 45-70 a second. Near the source each drop's
-         streak is stretched to meet the next one, so it reads as one
-         continuous stream; the stretch relaxes over ~0.12 s, so the jet
-         breaks into drops as it flies. An artery PULSES: a few beats, each
-         weaker than the last.
+       * A JET (an opened artery's beat, A WOUND BLEEDS) is a run of drops
+         left in one beat; each drop's streak is stretched to meet the next
+         (trail0), so it reads as one stream, and the stretch relaxes over
+         ~0.12 s as the jet breaks into drops in flight.
+       * Every drop CARRIES ITS BLOOD (AVOL, ml): what lands on the floor is
+         what left the body, and the floor adds it up (BLOOD COLLECTS WHERE
+         IT LANDS).
      COLOUR is a FILTER, exactly as the stain's is: the air layer MULTIPLIES
      the drawn frame, per channel, with green/blue falling faster than red
      at partial coverage. Worked through core/renderer.js's grade and the
@@ -2189,6 +2187,10 @@
   const AMK = new Float32Array(AIR_MAX);           // mark-size multiplier (drops that merge on landing)
   const AKIND = new Uint8Array(AIR_MAX), AMARK = new Uint8Array(AIR_MAX);    // 0 drop / 1 mist; leaves a mark
   const AVV = new Int8Array(AIR_MAX), AVG = new Uint16Array(AIR_MAX);        // the car volume it stops in + its generation
+  // THE BLOOD IT CARRIES (ml). A drop is a sphere of its radius unless it is
+  // a piece of a stream that carries more than it is drawn as (a heavy flow
+  // leaves a wound as fewer, fuller drops): what lands is what it carried.
+  const AVOL = new Float32Array(AIR_MAX);
   // THE SWEEP: where the drop (or puff) was when its path was last tested
   // against the solids (APX..APZ) and how long until the next test (ASW).
   // Every drop traces the chord it flew since then through sweepHit, so no
@@ -2199,7 +2201,7 @@
   // all of it; a drop about to touch the floor is always tested first.
   const APX = new Float32Array(AIR_MAX), APY = new Float32Array(AIR_MAX), APZ = new Float32Array(AIR_MAX);
   const ASW = new Float32Array(AIR_MAX);
-  const AIR_FIELDS = [AX, AY, AZ, AVX, AVY, AVZ, AR, AS1, AT, AL, AA, AK, ATR, ABRK, AFL, AFT, ASEA, AMG, AMK, AKIND, AMARK, AVV, AVG, APX, APY, APZ, ASW];
+  const AIR_FIELDS = [AX, AY, AZ, AVX, AVY, AVZ, AR, AS1, AT, AL, AA, AK, ATR, ABRK, AFL, AFT, ASEA, AMG, AMK, AKIND, AMARK, AVV, AVG, APX, APY, APZ, ASW, AVOL];
   // path tests per frame, at most
   function sweepBudget() { return Math.round(CBZ.qScale ? CBZ.qScale(72, 220) : 140); }
   let airN = 0, airCursor = 0, airShutter = 1 / 120;
@@ -2219,7 +2221,14 @@
   // skippedMarks: floor marks too small to see from where the camera is.
   const AIR_AUDIT = { drops: 0, mist: 0, lands: 0, wallMarks: 0, topMarks: 0, wallTopMarks: 0, underMarks: 0, drawnHits: 0,
     mistStopped: 0, mistSpeckle: 0, drips: 0, marksRefused: 0, marksFar: 0, wallRecycled: 0,
-    water: 0, recycled: 0, streams: 0, skippedMarks: 0, sweeps: 0, swept: 0 };
+    water: 0, recycled: 0, skippedMarks: 0, sweeps: 0, swept: 0, carDrops: 0, carMarks: 0, glassMarks: 0, wallJoined: 0 };
+  // WHY each drop left a body (goreBleedAudit): a round's spray, a blast,
+  // blood already on the skin flung off by a blow, cast-off from a swinging
+  // bloody fist or blade, a drip from a wound, an artery's spurt, a torn
+  // open wound (goreImpact), a severed piece in flight. Set by the emitter
+  // round its own drops (airCause), counted in airDrop.
+  const DROP_CAUSE = { spray: 0, blast: 0, flung: 0, castOff: 0, drip: 0, spurt: 0, torn: 0, piece: 0 };
+  let airCause = "spray";
 
   let airMesh = null, airGeo = null, aiPos = null, aiVel = null, aiMisc = null;
   function airReady() {
@@ -2370,9 +2379,9 @@
   /* airDrop(x,y,z, vx,vy,vz, r, trail0, brk, markR)
      r: radius in metres. trail0 / brk: a stream drop's stretched streak
      (seconds of velocity) and how long it takes to break up. markR: the
-     landing mark's size, when the caller knows it better than the drop does
-     (a walking bleeder's drip). */
-  function airDrop(x, y, z, vx, vy, vz, r, trail0, brk, markR) {
+     landing mark's size, when the caller knows it better than the drop does.
+     ml: the blood it carries, when that is more than its drawn sphere. */
+  function airDrop(x, y, z, vx, vy, vz, r, trail0, brk, markR, ml) {
     // a wound under the sea does not throw drops: it blooms (THE WATER MEDIUM)
     if (wetEvent) { AIR_AUDIT.water++; puffFromBit(x, y, z, vx, vy, vz, r * 20, false); return -1; }
     if (!airReady()) return -1;
@@ -2389,7 +2398,9 @@
     AVV[i] = airVV; AVG[i] = airVV < 0 ? 0 : VV_GEN[airVV];
     AFL[i] = decalFloorAt(x, z, y, true); AFT[i] = 0.02 + Math.random() * 0.06; ASEA[i] = Math.random() * 0.18;
     APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 0;
+    AVOL[i] = ml > 0 ? ml : 4188790 * r * r * r;   // 4/3 pi r^3 (m^3) in ml
     AIR_AUDIT.drops++;
+    DROP_CAUSE[airCause]++;
     return i;
   }
   /* airMist(x,y,z, vx,vy,vz, s0, s1, life, alpha) — one soft puff; s0 -> s1
@@ -2405,7 +2416,7 @@
     ATR[i] = 0; ABRK[i] = 0; AKIND[i] = 1; AMARK[i] = 0; AMG[i] = 0; AMK[i] = 1; AVV[i] = -1; AVG[i] = 0;
     // swept like a drop while it still moves: aerosol that reaches a wall
     // stops there (mistStop) instead of drifting through it
-    AFL[i] = 0; AFT[i] = 0; ASEA[i] = 0; APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 0;
+    AFL[i] = 0; AFT[i] = 0; ASEA[i] = 0; APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 0; AVOL[i] = 0;
     AIR_AUDIT.mist++;
     return i;
   }
@@ -2421,10 +2432,15 @@
        * PLANE: the surface's own — a side face, a top, an underside — and cut
          at that surface's edge (ldClip), so a drop 1 cm from a jamb leaves the
          part of its mark that is on the jamb.
-       * A RUN: a drop with more blood than a vertical face holds in a bead
+       * WET ON WET: a drop that lands on a mark still wet on the same face
+         joins it (wallWet), so the blood there is the sum of every drop in
+         that spot.
+       * A RUN: a spot with more blood than a vertical face holds in a bead
          (~1.8 mm radius) runs down it; the run is as long as its spare volume
          spread over a film ~0.2 mm thick and the run's width, and it stops at
-         the face's lower edge or the floor. A fine drop never runs.
+         the face's lower edge or the floor. A spot that keeps taking drops
+         runs further. A lone fine drop never runs.
+       * ON THE FLOOR the drop's blood goes into BLOOD COLLECTS WHERE IT LANDS.
      Marks are laid from a queue, a frame's budget at a time, oldest first, so
      forty drops reaching a wall in one frame cost no frame spike and none is
      dropped; the queue only refuses when it is full (marksRefused). */
@@ -2434,7 +2450,7 @@
   let mqHead = 0, mqN = 0;
   function markBudget() { return Math.round(CBZ.qScale ? CBZ.qScale(28, 96) : 56); }
   // kind 0 a side face, 1 a top, 2 an underside, 3 the floor (seated by decalFloorAt)
-  function queueMark(kind, x, y, z, nx, ny, nz, vx, vy, vz, r, D, a0, a1, b0, b1, col, off, mist) {
+  function queueMark(kind, x, y, z, nx, ny, nz, vx, vy, vz, r, D, a0, a1, b0, b1, col, off, mist, ml) {
     if (mqN >= MQ_MAX) { AIR_AUDIT.marksRefused++; return false; }
     const k = (mqHead + mqN) % MQ_MAX, o = k * MQ_W;
     MQ[o] = kind; MQ[o + 1] = x; MQ[o + 2] = y; MQ[o + 3] = z;
@@ -2442,7 +2458,7 @@
     MQ[o + 7] = vx; MQ[o + 8] = vy; MQ[o + 9] = vz;
     MQ[o + 10] = r; MQ[o + 11] = D;
     MQ[o + 12] = a0; MQ[o + 13] = a1; MQ[o + 14] = b0; MQ[o + 15] = b1;
-    MQ[o + 16] = off; MQ[o + 17] = mist ? 1 : 0;
+    MQ[o + 16] = off; MQ[o + 17] = mist ? 1 : 0; MQ[o + 18] = ml > 0 ? ml : 4188790 * r * r * r;
     MQC[k] = col || null;
     mqN++;
     return true;
@@ -2467,21 +2483,46 @@
   }
   function layMark(o, col) {
     const kind = MQ[o], x = MQ[o + 1], y = MQ[o + 2], z = MQ[o + 3];
-    const vx = MQ[o + 7], vy = MQ[o + 8], vz = MQ[o + 9], D = MQ[o + 11], mist = MQ[o + 17] > 0;
-    if (kind === 3) { floorMark(x, y, z, vx, vy, vz, D); return; }
+    const vx = MQ[o + 7], vy = MQ[o + 8], vz = MQ[o + 9], D = MQ[o + 11], mist = MQ[o + 17] > 0, ml = MQ[o + 18];
+    if (kind === 3) { floorMark(x, y, z, vx, vy, vz, D, ml); return; }
     // the kill's camera gate: no wall mark past 40 m (nothing there reads)
     if (dist2Cam(x, z) > 40 * 40) { AIR_AUDIT.marksFar++; return; }
     if (seaColumn(x, z)) {
       const w = submRaw(x, y, z);
       if (w !== DRY && w > 0.02) { SEA_AUDIT.wall++; puffFromBit(x, y, z, vx, vy, vz, D, false); return; }
     }
-    if (kind === 0) faceMark(x, y, z, MQ[o + 4], MQ[o + 6], vx, vy, vz, MQ[o + 10], D, MQ[o + 12], MQ[o + 13], MQ[o + 14], MQ[o + 15], col, MQ[o + 16], mist);
+    if (kind === 0) faceMark(x, y, z, MQ[o + 4], MQ[o + 6], vx, vy, vz, MQ[o + 10], D, MQ[o + 12], MQ[o + 13], MQ[o + 14], MQ[o + 15], col, MQ[o + 16], mist, ml);
     else flatMark(kind === 1, x, y, z, vx, vy, vz, D, MQ[o + 12], MQ[o + 13], MQ[o + 14], MQ[o + 15], col, MQ[o + 16], mist);
+  }
+  /* WET ON WET, ON A WALL. A drop that lands on a mark still wet on the same
+     face joins it: the blood there is the sum of both, and it is that sum
+     that decides whether it holds as a bead or runs, and how far. One record
+     per wet spot (a ring; a spot stops taking more once it has dried). Its
+     run is laid again, longer, each time the spot gets enough more to lengthen
+     it; the old run's slot goes back. */
+  const WW_MAX = 64, WW_WET = 30;                 // spots tracked; s a spot stays wet enough to join
+  const WW = [];
+  for (let i = 0; i < WW_MAX; i++) WW.push({ on: false, x: 0, y: 0, z: 0, nx: 0, nz: 0, v: 0, t: 0, run: null, ran: 0 });
+  let wwCursor = 0;
+  function wallWet(px, py, pz, nx, nz, reach, V) {
+    let best = null, bd = Infinity;
+    for (let i = 0; i < WW_MAX; i++) {
+      const e = WW[i];
+      if (!e.on || plumeClock - e.t > WW_WET || e.nx * nx + e.nz * nz < 0.9) continue;
+      // on the same plane (a few mm), within the spot's reach
+      if (Math.abs((px - e.x) * nx + (pz - e.z) * nz) > 0.01) continue;
+      const dx = px - e.x, dy = py - e.y, dz = pz - e.z, d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < reach * reach && d2 < bd) { bd = d2; best = e; }
+    }
+    if (best) { best.v += V; best.t = plumeClock; AIR_AUDIT.wallJoined++; return best; }
+    const e = WW[wwCursor]; wwCursor = (wwCursor + 1) % WW_MAX;
+    e.on = true; e.x = px; e.y = py; e.z = pz; e.nx = nx; e.nz = nz; e.v = V; e.t = plumeClock; e.run = null; e.ran = 0;
+    return e;
   }
   // the cells' shapes in their quads (see the atlas): the DOT's edge sits at
   // 0.46 of the half-quad (diameter 0.46 x the quad), the DROP's body is 0.3
   // of the quad wide and 0.33 of it long, its tail and bead ahead of it
-  function faceMark(px, py, pz, nx, nz, vx, vy, vz, r, D, ta0, ta1, ya0, ya1, col, off, mist) {
+  function faceMark(px, py, pz, nx, nz, vx, vy, vz, r, D, ta0, ta1, ya0, ya1, col, off, mist, ml) {
     const c = wallSlot();
     if (!c) return;
     const m = c.m;
@@ -2507,7 +2548,9 @@
     walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 60 : 20, fade: 10 }, col));
     if (mist) { AIR_AUDIT.mistSpeckle++; return; }
     AIR_AUDIT.wallMarks++;
-    if (r > 0.0018) dripFrom(px, py, pz, nx, nz, r, D, th, ta0, ta1, ya0, col, off, near);
+    // the spot this drop is now part of, and what it holds all together
+    const spot = wallWet(px, py, pz, nx, nz, D * 0.5 + 0.004, (ml > 0 ? ml : 4188790 * r * r * r) * 1e-6);
+    dripFrom(spot, D, ta0, ta1, ya0, col, off, near);
   }
   // a top (up) or an underside: the mark lies flat, cut to that surface's
   // extent in world x (x0..x1) and z (z0..z1)
@@ -2537,17 +2580,28 @@
     AIR_AUDIT.topMarks++;
     if (col && col.y1 != null && col.y1 - (col.y0 || 0) >= 1) AIR_AUDIT.wallTopMarks++;
   }
-  // THE RUN of a heavy drop down a side face (see above), from the mark's
-  // centre down, at a few cm a second, cut to the face
+  // THE RUN of a wet spot down a side face: what the spot holds past one bead
+  // (~1.8 mm radius) runs down from it as a film ~0.2 mm thick and the run's
+  // width, at a few cm a second, cut to the face, stopping at its lower edge
+  // or the floor. A spot that grows lays its run again, longer.
   const DRIP_HOLD = 4.18879 * 0.0018 * 0.0018 * 0.0018;   // m^3 a vertical face holds in one bead
-  function dripFrom(px, py, pz, nx, nz, r, D, th, ta0, ta1, ya0, col, off, near) {
-    const V = 4.18879 * r * r * r;
+  function dripFrom(spot, D, ta0, ta1, ya0, col, off, near) {
+    const V = spot.v;
     if (V <= DRIP_HOLD) return;
-    const w = Math.min(0.005, Math.max(0.002, r * 1.6));
+    const rEq = Math.cbrt(V / 4.18879);
+    const w = Math.min(0.005, Math.max(0.002, rEq * 1.6));
     let L = (V - DRIP_HOLD) / (w * 0.0002);
+    const px = spot.x, py = spot.y, pz = spot.z, nx = spot.nx, nz = spot.nz;
     const floorY = decalFloorAt(px + nx * 0.1, pz + nz * 0.1, py, true);
     L = Math.min(L, 0.7, py - ya0 - 0.005, py - floorY - 0.01);
     if (!(L > 0.03)) return;
+    if (spot.run && L < spot.ran * 1.15 + 0.01) return;     // not enough more to lengthen what is there
+    // the run it had goes back; this one is the whole spot's
+    if (spot.run) {
+      const k = walls.indexOf(spot.run);
+      if (k >= 0) { ldRelease(spot.run); walls.splice(k, 1); }
+      spot.run = null;
+    }
     const c = wallSlot();
     if (!c) return;
     const m = c.m, yc = py - L * 0.5;
@@ -2556,120 +2610,24 @@
     // the run's field spans 0.84 of the quad's width and 0.96 of its height
     m.scale.set(w / 0.42, L / 0.96, 1);
     ldWrite(c.slot, m, CELL_DRIP, 1, L / (0.04 + Math.random() * 0.06), 18 + Math.random() * 10, 0, 0.9, 0.05, 1,
-      0.15 + Math.random() * 0.35);
+      spot.ran > 0 ? 0 : 0.15 + Math.random() * 0.35);
+    const th = nx * pz - nz * px;
     ldClip(c.slot, th - ta1, th - ta0, ya0 - yc, 1e4);
-    walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 60 : 20, fade: 10 }, col));
+    const rec = anchorTo({ m, slot: c.slot, t: 0, hold: near ? 60 : 20, fade: 10 }, col);
+    walls.push(rec);
+    spot.run = rec; spot.ran = L;
     AIR_AUDIT.drips++;
   }
-  // a drop's mark on the floor (or a deck, a step: decalFloorAt), through the
-  // ground stain layer
-  function floorMark(x, y, z, vx, vy, vz, D) {
-    // a 3 mm mark is real, and invisible from across the room: no stain slot
-    // for one nobody can see
-    if (D < 0.0035 && dist2Cam(x, z) > 8 * 8) { AIR_AUDIT.skippedMarks++; return; }
-    const hs = Math.hypot(vx, vz), sp = Math.hypot(hs, vy);
-    const sinA = Math.abs(vy) / (sp || 1);
-    _dropO.kind = sinA > 0.94 || hs < 0.3 ? "dot" : "drop";
-    _dropO.dirX = hs > 0 ? vx / hs : 0; _dropO.dirZ = hs > 0 ? vz / hs : 0;
-    _dropO.elong = 1 / Math.max(0.2, sinA);
-    // the mark seats on the surface the drop came down on, not the street under it
+  // a drop's mark on the floor (or a deck, a step: decalFloorAt): its blood
+  // goes into BLOOD COLLECTS WHERE IT LANDS, which joins it to wet blood
+  // already there or lays its own mark
+  function floorMark(x, y, z, vx, vy, vz, D, ml) {
     const sy0 = seatY, ss0 = seatSolid; seatY = y + 0.02; seatSolid = true;
-    try { if (spawnSplat(x, z, D, BLOOD_D, false, _dropO)) AIR_AUDIT.lands++; } finally { seatY = sy0; seatSolid = ss0; }
+    try { landVol(x, y, z, ml, vx, vy, vz, D); } finally { seatY = sy0; seatSolid = ss0; }
   }
   // the size of the mark a drop leaves: its diameter times the spread factor
   // for the speed it hits at across the surface (vn), unless the caller set it
   function markD(i, vn) { return AMG[i] || 2 * AR[i] * AMK[i] * Math.min(5.5, 1.5 + 0.3 * vn); }
-
-  // ---- STREAMS: a jet that pulses, laid down drop by drop ---------------------
-  const EM_MAX = 12;
-  const E_ON = new Uint8Array(EM_MAX), E_SRC = new Uint8Array(EM_MAX), E_WET = new Uint8Array(EM_MAX);
-  const E_REF = new Array(EM_MAX).fill(null);   // the body / stump it rides (0 = a fixed point)
-  const E_X = new Float32Array(EM_MAX), E_Y = new Float32Array(EM_MAX), E_Z = new Float32Array(EM_MAX);
-  const E_Y1 = new Float32Array(EM_MAX);
-  const E_DX = new Float32Array(EM_MAX), E_DY = new Float32Array(EM_MAX), E_DZ = new Float32Array(EM_MAX);
-  const E_SP = new Float32Array(EM_MAX), E_DEL = new Float32Array(EM_MAX), E_T = new Float32Array(EM_MAX);
-  const E_TT = new Float32Array(EM_MAX), E_PER = new Float32Array(EM_MAX), E_PL = new Float32Array(EM_MAX);
-  const E_N = new Float32Array(EM_MAX), E_K = new Float32Array(EM_MAX), E_FALL = new Float32Array(EM_MAX);
-  const E_ACC = new Float32Array(EM_MAX), E_RATE = new Float32Array(EM_MAX), E_SPR = new Float32Array(EM_MAX);
-  const E_R0 = new Float32Array(EM_MAX), E_R1 = new Float32Array(EM_MAX);
-  const _emBloom = { amount: 0.5, arterial: true };
-  /* airStream(src, ref, x, y, z, dx, dy, dz, o)
-     src 0: a fixed point (x,y,z). src 1: an actor — rides ref.pos, at a
-     height sliding from y to o.y1 over ~0.9 s as the body goes down. src 2:
-     an Object3D (a stump) — rides its world position and jets along its
-     world +Y, which is the way a cut face looks out.
-     o: speed (m/s at the top of a beat), pulses, period (s between beats),
-     len (s a beat lasts), fall (each beat's strength vs the last), rate
-     (drops/s), r0/r1 (drop radius, mm), spread (cone half-angle), delay. */
-  function airStream(src, ref, x, y, z, dx, dy, dz, o) {
-    let e = -1;
-    for (let k = 0; k < EM_MAX; k++) if (!E_ON[k]) { e = k; break; }
-    if (e < 0) return -1;
-    const l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-    E_ON[e] = 1; E_SRC[e] = src; E_REF[e] = ref || null; E_WET[e] = 0;
-    E_X[e] = x; E_Y[e] = y; E_Z[e] = z; E_Y1[e] = o.y1 != null ? o.y1 : y;
-    E_DX[e] = dx / l; E_DY[e] = dy / l; E_DZ[e] = dz / l;
-    E_SP[e] = o.speed; E_N[e] = o.pulses || 1; E_PER[e] = o.period || 0.5; E_PL[e] = o.len || 0.22;
-    E_FALL[e] = o.fall || 0.7; E_RATE[e] = o.rate || 55; E_R0[e] = o.r0 || 1; E_R1[e] = o.r1 || 2.5;
-    E_SPR[e] = o.spread || 0.12; E_DEL[e] = o.delay || 0; E_K[e] = 1;
-    E_T[e] = 0; E_TT[e] = 0; E_ACC[e] = 0.999;           // the first drop leaves on the first frame
-    AIR_AUDIT.streams++;
-    return e;
-  }
-  function stopStream(e) { E_ON[e] = 0; E_REF[e] = null; }
-  const _esp = new THREE.Vector3();
-  function updateStreams(dt) {
-    for (let e = 0; e < EM_MAX; e++) {
-      if (!E_ON[e]) continue;
-      if (E_DEL[e] > 0) { E_DEL[e] -= dt; continue; }
-      const ref = E_REF[e];
-      let sx, sy, sz, jx = E_DX[e], jy = E_DY[e], jz = E_DZ[e];
-      if (E_SRC[e] === 1) {
-        const p = ref && !ref.culled ? (ref.pos || (ref.group && ref.group.position)) : null;
-        if (!p) { stopStream(e); continue; }
-        const k = Math.min(1, E_TT[e] / 0.9);
-        sx = p.x + E_X[e]; sz = p.z + E_Z[e]; sy = (p.y || 0) + E_Y[e] + (E_Y1[e] - E_Y[e]) * k;
-      } else if (E_SRC[e] === 2) {
-        if (!ref || !ref.parent) { stopStream(e); continue; }
-        ref.updateWorldMatrix(true, false);
-        const me = ref.matrixWorld.elements;
-        sx = me[12]; sy = me[13]; sz = me[14];
-        const al = Math.sqrt(me[4] * me[4] + me[5] * me[5] + me[6] * me[6]) || 1;
-        jx = me[4] / al; jy = me[5] / al; jz = me[6] / al;
-      } else { sx = E_X[e]; sy = E_Y[e]; sz = E_Z[e]; }
-      const first = E_TT[e] === 0;
-      E_TT[e] += dt;
-      E_T[e] += dt;
-      if (E_T[e] >= E_PER[e]) {
-        E_T[e] -= E_PER[e];
-        if (--E_N[e] <= 0) { stopStream(e); continue; }
-        E_K[e] *= E_FALL[e];
-        E_ACC[e] = 0.999;
-      }
-      // each BEAT decides its own medium (a body can fall in the water between them)
-      if (first || E_T[e] < dt) {
-        E_WET[e] = waterOn() && woundInWater(sx, sy, sz) ? 1 : 0;
-        if (E_WET[e]) { _emBloom.amount = 0.3 + 0.4 * E_K[e]; CBZ.goreBloom(sx, sy, sz, _emBloom); }
-      }
-      if (E_WET[e]) continue;
-      const ph = E_T[e] / E_PL[e];
-      if (ph >= 1) continue;                               // between beats
-      // a beat SURGES and collapses; the stream never quite stops inside one
-      const surge = Math.pow(Math.sin(Math.PI * Math.min(1, ph + 0.08)), 0.7);
-      const rate = E_RATE[e] * (dist2Cam(sx, sz) > 30 * 30 ? 0.5 : 1);
-      E_ACC[e] += dt * rate;
-      const trail = 1.15 / rate;
-      airMarkP = 0.3; airMarkK = 1.6;
-      while (E_ACC[e] >= 1) {
-        E_ACC[e] -= 1;
-        const v = cone(jx, jy, jz, E_SPR[e]);
-        const sp = E_SP[e] * E_K[e] * (0.3 + 0.7 * surge) * (0.93 + Math.random() * 0.14);
-        airDrop(sx + (Math.random() - 0.5) * 0.012, sy + (Math.random() - 0.5) * 0.012, sz + (Math.random() - 0.5) * 0.012,
-          v.x * sp, v.y * sp, v.z * sp, rMM(E_R0[e], E_R1[e]), trail, 0.13 + Math.random() * 0.07, 0);
-      }
-      airMarkP = 1; airMarkK = 1;
-    }
-  }
 
   // ---- THE EVENTS --------------------------------------------------------------
   // a unit vector round (dx,dy,dz), off it by a 2-D gaussian of `sd` radians
@@ -2759,80 +2717,70 @@
         0.03, (0.16 + Math.random() * 0.12) * big, 0.22 + Math.random() * 0.16, head ? 0.34 : 0.27);
     }
   }
-  /* A BODY DRIVEN INTO A SURFACE (goreImpact opts.wall): the wound meets it
-     at the speed the body arrived, so the blood leaves short and slow, a
-     wide cone of heavy drops thrown at the surface (dx,dy,dz) from a few
-     centimetres off it, each marking where it lands. */
-  function contactBlood(x, y, z, dx, dy, dz, amt, lod) {
-    // born in the air in front of the surface, never inside it
-    const tw = lineWallT(x, y, z, dx, dy, dz, 3.4);
-    if (tw < 0.08) { x -= dx * (0.08 - tw); y -= dy * (0.08 - tw); z -= dz * (0.08 - tw); }
-    const vv = lod >= 0.6 ? vehicleSpray(x, y, z, dx, dy, dz, amt * 0.6, false, Math.max(0.08, tw)) : -1;
-    airVV = vv;
-    const n = Math.round((10 + 16 * Math.min(2, amt)) * lod);
-    for (let i = 0; i < n; i++) {
-      const v = gcone(dx, dy, dz, 0.32);
-      const sp = 1.2 + Math.random() * 3.2;
-      airDrop(x + (Math.random() - 0.5) * 0.06, y + (Math.random() - 0.5) * 0.06, z + (Math.random() - 0.5) * 0.06,
-        v.x * sp, v.y * sp, v.z * sp, rMM(0.8, 3.6), 0, 0, 0);
-    }
-    airVV = -1;
-  }
   // no shot line (a fall, a disaster, an unknown cause): a short burst all round
   function omniBlood(x, y, z, amt, lod) {
     const n = Math.round((4 + 6 * amt) * lod);
+    airCause = "torn";
     for (let i = 0; i < n; i++) {
       const v = cone(0, 1, 0, 1.25);
       const sp = 0.8 + Math.random() * 2.6;
       airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.4, 3), 0, 0, 0);
     }
+    airCause = "spray";
   }
   // a blast: drops out in every direction, fast, and one wide dark puff
   function blastBlood(x, y, z, amt, lod) {
     const n = Math.round(26 * amt * lod);
-    airMarkP = 0.4; airMarkK = 1.3;
+    airMarkP = 0.4; airMarkK = 1.3; airCause = "blast";
     for (let i = 0; i < n; i++) {
       const v = cone(0, 1, 0, 1.45);
       const sp = 3 + Math.random() * 7;
       airDrop(x + (Math.random() - 0.5) * 0.4, y + (Math.random() - 0.5) * 0.6, z + (Math.random() - 0.5) * 0.4,
         v.x * sp, v.y * sp + 1.5, v.z * sp, rMM(0.4, 3.5), 0, 0, 0);
     }
-    airMarkP = 1; airMarkK = 1;
+    airMarkP = 1; airMarkK = 1; airCause = "spray";
     const nm = Math.max(1, Math.round(5 * lod));
     for (let i = 0; i < nm; i++) {
       const v = cone(0, 1, 0, 1.4), sp = 2 + Math.random() * 3;
       airMist(x, y, z, v.x * sp, v.y * sp, v.z * sp, 0.08, 0.4 + Math.random() * 0.4, 0.3 + Math.random() * 0.15, 0.3);
     }
   }
-  /* A BLADE: no aerosol. A few HEAVY drops flicked off along the cut, and a
-     short stream out of the wound (two beats when it went deep). */
-  function stabBlood(x, y, z, dx, dz, amt, lod) {
-    const n = Math.round((3 + 3 * Math.min(1.5, amt)) * lod);
+  /* CAST-OFF. Blood on something that moves leaves it along the way it moves:
+     a bloody fist or a blade on the swing, a blade pulled out of a wound, a
+     tooth row letting go. `ml` is what is on it to lose; (dx,dy,dz) the way
+     it is moving, `sp` how fast. A few drops, 1-3 mm, each carrying its share;
+     nothing on it, nothing thrown. */
+  function castOff(x, y, z, dx, dy, dz, sp, ml, lod) {
+    if (!(ml > 0.01)) return 0;
+    const n = Math.max(1, Math.min(6, Math.round(ml / 0.06 * lod)));
+    const each = ml / n;
+    airCause = "castOff";
     for (let i = 0; i < n; i++) {
-      const v = cone(dx, 0.45, dz, 0.6);
-      const sp = 0.8 + Math.random() * 1.8;
-      airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(1.5, 5), 0, 0, 0);
+      const v = cone(dx, dy, dz, 0.35);
+      const s = sp * (0.55 + Math.random() * 0.6);
+      const r = Math.min(0.0028, Math.cbrt(each * 2.387e-7));      // the sphere that holds `each` ml
+      airDrop(x + (Math.random() - 0.5) * 0.05, y + (Math.random() - 0.5) * 0.05, z + (Math.random() - 0.5) * 0.05,
+        v.x * s, v.y * s, v.z * s, r, 0, 0, 0, each);
     }
-    if (lod >= 0.35) {
-      airStream(0, null, x + dx * 0.04, y, z + dz * 0.04, dx, 0.35, dz, {
-        speed: 1.9 + 0.6 * Math.min(1.5, amt), pulses: amt > 1 ? 2 : 1, period: 0.42, len: 0.2 + Math.random() * 0.1,
-        fall: 0.6, rate: 55, r0: 1.0, r1: 2.6, spread: 0.12,
-      });
-    }
+    airCause = "spray";
+    return ml;
   }
-  /* BLUNT: a split lip or a brow. A punch throws little or nothing — a light
-     hit is 0-2 fine drops, a real crunch a handful, and only a hard one
-     atomises anything (opts.mist). */
-  function bluntBlood(x, y, z, dx, dy, dz, hasDir, amt, lod, mist) {
-    let n;
-    if (amt < 0.5) n = Math.min(2, (Math.random() * amt * 5) | 0);
-    else n = Math.round((2 + 5 * (amt - 0.5)) * lod);
+  /* A WOUND TORN OPEN BY FORCE (goreImpact on a body opened there: a bite, a
+     claw, a round in a mode that hands no shot line, a fall onto rock). Torn
+     tissue lets go of the blood in it as the tear happens: a short wide fan
+     of drops off the struck side, and a puff only when it was hard enough to
+     atomise anything (opts.mist). A blow that opened nothing throws nothing
+     from here (see goreBlow / fling). */
+  function tornBlood(x, y, z, dx, dy, dz, hasDir, amt, lod, mist) {
+    const n = Math.round((2 + 5 * Math.max(0, amt - 0.3)) * lod);
+    airCause = "torn";
     for (let i = 0; i < n; i++) {
       const v = hasDir ? cone(dx, dy + 0.35, dz, 0.75) : cone(0, 1, 0, 1.2);
       const sp = 0.8 + Math.random() * (1.4 + amt * 1.6);
       airDrop(x + (Math.random() - 0.5) * 0.08, y + (Math.random() - 0.5) * 0.08, z + (Math.random() - 0.5) * 0.08,
         v.x * sp, v.y * sp, v.z * sp, rMM(0.4, amt < 0.5 ? 1.6 : 3), 0, 0, 0);
     }
+    airCause = "spray";
     if (mist && lod >= 0.35) {
       const nm = amt > 1.2 ? 2 : 1;
       for (let i = 0; i < nm; i++) {
@@ -2868,6 +2816,8 @@
   function sweepDrop(i, x, y, z, vx, vy, vz) {
     airSweeps++; AIR_AUDIT.sweeps++;
     const h = sweepHit(APX[i], APY[i], APZ[i], x, y, z);
+    // a car on the chord, nearer than any wall on it, takes the drop ON its body
+    if (nearCarN && carOnChord(i, x, y, z, vx, vy, vz, h ? h.t : -1)) return true;
     if (!h) return false;
     AIR_AUDIT.swept++;
     if (h.drawn) AIR_AUDIT.drawnHits++;
@@ -2879,11 +2829,74 @@
       // clipped mark.
       if (h.kind === 1 && h.a1 - h.a0 > 1.2 && h.b1 - h.b0 > 1.2 &&
           Math.abs(h.y - decalFloorAt(h.x, h.z, h.y + 0.05, true)) < 0.03) {
-        queueMark(3, h.x, h.y, h.z, 0, 1, 0, vx, vy, vz, AR[i], markD(i, vn), 0, 0, 0, 0, null, 0, false);
+        queueMark(3, h.x, h.y, h.z, 0, 1, 0, vx, vy, vz, AR[i], markD(i, vn), 0, 0, 0, 0, null, 0, false, AVOL[i]);
         return true;
       }
+      if (h.glass) AIR_AUDIT.glassMarks++;
       queueMark(h.kind, h.x, h.y, h.z, h.nx, h.ny, h.nz, vx, vy, vz, AR[i], markD(i, vn),
-        h.a0, h.a1, h.b0, h.b1, h.c, h.drawn || h.proved ? 0.004 : 0.02, false);
+        h.a0, h.a1, h.b0, h.b1, h.c, h.drawn || h.proved ? 0.004 : 0.02, false, AVOL[i]);
+    }
+    return true;
+  }
+  /* A DROP THAT MEETS A CAR. The cars near the lens (a short list made once a
+     frame while anything is in the air) are tested against each chord: the
+     car's bounding sphere first, then its drawn meshes (vehicleRay). A drop
+     that reaches the paint or the glass before any wall stops there, and its
+     mark goes on the body through the car decal path (vehicleStamp), within
+     its budgets: the car's own cap (VD_PER_CAR, never pushing out a mark it
+     already wears), the global cap, and two new car marks a frame. Past a
+     budget the drop still stops on the car; it is just not drawn. */
+  const NEAR_CARS = [];
+  let nearCarN = 0, carMarksFrame = 0;
+  const _ccRoots = [];
+  function nearCars() {
+    nearCarN = 0; carMarksFrame = 0;
+    const L = CBZ.cityCars, cam = CBZ.camera && CBZ.camera.position;
+    if (!airN || !L || !L.length || !cam || !CBZ.surfaceDecal) return;
+    for (let i = 0; i < L.length && nearCarN < 6; i++) {
+      const c = L[i], g = c && c.group;
+      if (!g || !g.parent || c._sleep) continue;
+      const dx = g.position.x - cam.x, dz = g.position.z - cam.z;
+      if (dx * dx + dz * dz > 35 * 35) continue;
+      NEAR_CARS[nearCarN++] = g;
+    }
+  }
+  function carOnChord(i, x, y, z, vx, vy, vz, wallT) {
+    const ox = APX[i], oy = APY[i], oz = APZ[i];
+    const sx = x - ox, sy = y - oy, sz = z - oz, sl = Math.sqrt(sx * sx + sy * sy + sz * sz);
+    if (!(sl > 1e-4)) return false;
+    const ux = sx / sl, uy = sy / sl, uz = sz / sl;
+    const len = wallT >= 0 ? Math.min(sl, wallT) : sl;
+    _ccRoots.length = 0;
+    for (let k = 0; k < nearCarN; k++) {
+      const g = NEAR_CARS[k];
+      if (!g.parent) continue;
+      const b = vehBounds(g);
+      _vc.copy(b.c).applyMatrix4(g.matrixWorld);
+      const px = _vc.x - ox, py = _vc.y - oy, pz = _vc.z - oz;
+      let t = px * ux + py * uy + pz * uz; t = t < 0 ? 0 : (t > len ? len : t);
+      const qx = px - ux * t, qy = py - uy * t, qz = pz - uz * t;
+      if (qx * qx + qy * qy + qz * qz <= (b.r + 0.1) * (b.r + 0.1)) _ccRoots.push(g);
+    }
+    if (!_ccRoots.length) return false;
+    gatherMeshes(_ccRoots);
+    const hit = vehicleRay(ox, oy, oz, ux, uy, uz, len);
+    _vMeshes.length = 0; _vRoots.length = 0; _ccRoots.length = 0;
+    if (!hit) return false;
+    AIR_AUDIT.carDrops++;
+    if (AMARK[i] && carMarksFrame < 2 && vehRecs.length < vdCap()) {
+      let mine = 0;
+      for (let k = 0; k < vehRecs.length; k++) if (vehRecs[k].root === hit.root) mine++;
+      if (mine < VD_PER_CAR) {
+        const vn = Math.abs(vx * hit.n.x + vy * hit.n.y + vz * hit.n.z);
+        const sp = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
+        const D = markD(i, vn), sinA = vn / sp;
+        const el = sinA < 0.94 ? Math.min(4, 1 / Math.max(0.25, sinA)) : 1;
+        if (vehicleStamp(hit, D * 1.15, D * 1.15 * el, el > 1 ? CELL_DROP : CELL_DOT,
+          { tx: vx, ty: vy, tz: vz, growT: 0.06, grow0: 0.35, dryT: 8 + D * 300, thick: 0.6, thrEnd: 0.1 })) {
+          carMarksFrame++; AIR_AUDIT.carMarks++;
+        }
+      }
     }
     return true;
   }
@@ -2917,8 +2930,8 @@
   }
   function updateAir(dt) {
     airSweeps = 0; dbFrame++;
-    updateStreams(dt);
     if (!airGeo) { flushMarks(); return; }
+    nearCars();
     const sb = sweepBudget();
     // a 180-degree shutter: a drop smears across half the frame's time
     airShutter = Math.min(1 / 45, Math.max(1 / 240, dt * 0.5));
@@ -2987,7 +3000,8 @@
         APX[i] = x; APY[i] = y; APZ[i] = z; ASW[i] = 0.025 + Math.random() * 0.02;
       }
       if (landing) {
-        if (AMARK[i]) queueMark(3, x, AFL[i], z, 0, 1, 0, vx, vy, vz, AR[i], markD(i, -vy), 0, 0, 0, 0, null, 0, false);
+        if (AMARK[i]) queueMark(3, x, AFL[i], z, 0, 1, 0, vx, vy, vz, AR[i], markD(i, -vy), 0, 0, 0, 0, null, 0, false, AVOL[i]);
+        else joinWet(x, AFL[i], z, AVOL[i], 0);     // a drop merged into the others: its blood still lands
         killAir(i); continue;
       }
     }
@@ -3026,15 +3040,13 @@
     aiPos.needsUpdate = true; aiVel.needsUpdate = true; aiMisc.needsUpdate = true;
   }
 
-  // where a gib comes to rest it bleeds. On the seabed that must NOT be a
-  // ground pool — a decal lying in the dark under 30m of water is the exact
-  // "invisible gore at the bottom of the ocean" bug this whole block exists to
-  // stop — so a wet gib puffs where it settles instead.
+  // where a severed piece comes to rest it bleeds: what is in it lets go from
+  // its cut face, a small wound riding the piece (A WOUND BLEEDS), so the
+  // blood under it is what came out of it, where it lies. On the seabed it
+  // blooms instead (a decal in the dark under the sea is nobody's).
   function landBleed(b, m) {
-    if (b.wet) CBZ.goreBloom(m.position.x, m.position.y, m.position.z, { amount: 0.4 });
-    // a chunk bleeds where it stops, but `grow` is a RADIUS: the authored
-    // 0.4-0.8 was a 1.6 m pool under a piece of forearm.
-    else spawnSplat(m.position.x, m.position.z, 0.16 + Math.random() * 0.16, BLOOD_D, false, _poolO);
+    if (b.wet) { CBZ.goreBloom(m.position.x, m.position.y, m.position.z, { amount: 0.4 }); return; }
+    openWound(null, { node: m, site: "piece", exposed: true, lps: b.limb ? 0.006 : 0.002, tau: b.limb ? 10 : 6 });
   }
 
   // ---- CHUM: a sustained bleed source, and the seam the shark AI reads ------
@@ -3067,191 +3079,672 @@
   CBZ.goreChumList = function () { return chumOut; };
 
   /* ============================================================
-     A BODY THAT GOES ON BLEEDING — CBZ.goreBleed(actor, opts).
+     A WOUND BLEEDS — one model for every body: the player, an inmate, a
+     guard, a ped, a corpse, a bitten swimmer, a severed stump or piece.
      ------------------------------------------------------------
-     A bite was one event: a spray at the instant (whoever called gore at the
-     jaw) and, in the sea, a trail. On land nothing followed it: a man worried
-     by a dog walked off clean and lay down on clean ground. The jail's blood
-     already knows what follows a wound (vitals.js runs it for every hole a
-     round or a blade makes); this is that, for whatever bleeds and was not
-     opened by a round or a blade, and for the mouth that did it:
-       • the flow is litres a second that falls away (an opened femoral or
-         carotid ~0.02-0.025 L/s, ~1.5 L/min, falling as the pressure goes;
-         torn tissue a few millilitres a second, clotting in a minute; a
-         dead heart pushes nothing and what is left oozes out in seconds)
-       • standing or walking: DRIPS fall from the wound (goreDrip: they fall,
-         land, and mark where they land)
-       • lying: a POOL grows under the wound, a layer each time enough has
-         come out (gorePool, which spreads into the low ground and runs off a
-         slope), to the same sizes the jail's bleeding bodies reach
-       • lying and moving (dragged, carried off by the thing that killed it):
-         the wound SMEARS the ground behind it, for as long as it bleeds or
-         lay in its own pool
-       • an opened artery (opts.vessel neck / thigh / arm) SPURTS: the stream
-         emitter, pulsing with the heart, riding the wound as the body moves
-       • a MOUTH (opts.mouth): the blood on an attacker's jaws drips from them
-         on land, and in the sea trails behind it
-       • the wound in the water: the cloud's trail (a chum handle riding it)
-     opts: { node: the part the wound is on, local: the wound in its space
-       (Vector3), dir: the wound's outward normal in that space, lps: litres a
-       second now, tau: seconds for the flow to fall by e, vessel, mouth,
-       at: function(out) -> bool, a moving point instead of a node }
-     One record a body (and one a mouth): a second wound adds its flow. */
-  const BLEEDS = [];
-  const BLEED_CAP = 18;
-  const BLEED_POOLS = 6;
-  const _bw = new THREE.Vector3(), _bq = new THREE.Quaternion(), _UPV = new THREE.Vector3(0, 1, 0);
-  function bodyDown(a) {
-    if (!a) return false;
-    if (a.dead || a.dying || a.down || a.ko > 0) return true;
-    if (a.hp != null && a.hp <= 0) return true;
-    if ((a.char || a.isPlayer) && CBZ.vitals && CBZ.vitals.state) { try { return CBZ.vitals.state(a) !== "ok"; } catch (e) {} }
+     A wound is a place on a body (a rig part and a point in its space, a
+     moving point, or a fixed one) with a FLOW in ml/s. Who sets the flow:
+       • systems/vitals.js, for every hole and split it opens (a round, a
+         blade, a split lip, nose, brow or scalp). It hands this file each
+         bleed (CBZ.goreWound) and writes its flow every tick; it keeps the
+         body's blood, so what flows here is what came off his volume there,
+         over vitals' own clock. Only what leaves the skin is drawn: a hole in
+         the gut or the chest bleeds into its cavity first, and how much comes
+         out depends on where the hole is (his low side lets nearly all of it
+         out) and how full the cavity is; the inside part is counted, not drawn.
+       • this file, for wounds nothing else tracks (CBZ.goreBleed: a bite, a
+         stump, a piece of a body, a corpse's killing hole when no vitals
+         record holds one): a flow that falls by e every `tau` seconds (clot,
+         or a dead heart's ooze running down), taken from the body's own
+         volume (takeBlood: vitals' when he has a record, else 5 L on him);
+         when that runs out, so does the flow.
+     WHERE THE BLOOD GOES, every frame, from where the wound IS this frame:
+       • it wets what is over the wound first: bare skin holds ~0.3 ml as a
+         film before a drop forms (the film is what a blow flings off:
+         CBZ.goreBlow); clothing soaks 25-40 ml before any comes through and
+         then keeps wicking a quarter of what passes, outward from the hole,
+         until the panel is wet through. That soaked cloth is drawn: the wet
+         patch round the hole grows with it (wounds.js CBZ.woundSoak).
+       • STANDING, WALKING, FALLING (the wound more than LIE_H above the floor
+         under it): what comes through runs to the lowest point it can — the
+         chin for the face and scalp, the hand for an arm, the hem for the
+         trunk, the shoe for a leg — and leaves there as drops of ~0.05 ml
+         (fuller ones when the flow is heavy) with that point's own velocity.
+         So a walking bleeder's drops land (speed / drip rate) apart and
+         stretched the way he walks, and a man standing still drips onto one
+         spot, which becomes a pool (BLOOD COLLECTS WHERE IT LANDS).
+       • AN OPENED ARTERY (neck, limb, stump) spurts at heart rate while the
+         heart beats, and for a few agonal beats after death: each beat throws
+         most of that beat's blood out along the wound's normal as a jet whose
+         speed is the pressure left (falling as the blood goes).
+       • LYING (the wound within LIE_H of the floor): it runs over the body to
+         where the body meets the floor, comes out from under his outline at
+         the edge nearest the wound (bodyEdge) and spreads out from there
+         (edgePour), growing at the flow. A man killed on his feet bleeds into
+         the air as he goes down and pools only once he is down. A corpse
+         drains by gravity: faster from a low hole than a high one.
+       • dragged while lying, a wet wound smears the floor behind it.
+       • in the sea: the cloud's trail (a chum handle riding the wound).
+     Bounded: a cap of live wounds (the weakest gives way), a cap of drops a
+     frame across all of them (the quality tier), the floor fed a few times a
+     second per wound, nothing allocated per frame.
+  ============================================================ */
+  const BODY_ML = 5000;                 // a body's blood (vitals keeps it as a fraction of this)
+  // the part of a wound's flow that comes out through the skin, by where it is
+  // (the trunk's share is worked out live from the hole and the cavity: updateWounds)
+  const EXT_FRAC = { head: 1, neck: 0.9, chest: 0.35, abdomen: 0.3, armL: 0.95, armR: 0.95, legL: 0.95, legR: 0.95 };
+  const LIE_H = 0.4;                    // m: a wound this close to the floor under it is lying on it
+  const DRIP_ML = 0.05;                 // a drop that lets go of a chin or a fingertip
+  const WOUNDS = [];
+  function woundCap() { return Math.round(CBZ.qScale ? CBZ.qScale(16, 40) : 28); }
+  function dropBudget() { return Math.round(CBZ.qScale ? CBZ.qScale(24, 64) : 40); }
+  const WOUND_AUDIT = { opened: 0, ended: 0, outMl: 0, internalMl: 0, dripMl: 0, spurtMl: 0, pouredMl: 0,
+    unseenMl: 0, wetMl: 0, beats: 0, smears: 0, flungMl: 0, castOffMl: 0, takenMl: 0 };
+  const _bw = new THREE.Vector3(), _bn = new THREE.Vector3(), _bd = new THREE.Vector3();
+  let woundSeq = 0, dropsLeft = 0;
+  function bodyDead(a) { return !!(a && (a.dead || (a.hp != null && a.hp <= 0))); }
+  // one record per body: the player's adapters all mean CBZ.player (as in vitals.js)
+  function who(a) { return a && a.isPlayer === true && CBZ.player ? CBZ.player : (a || null); }
+  function bodyPos(a) { return a ? (a.isPlayer && CBZ.player ? CBZ.player.pos : (a.pos || (a.group && a.group.position) || null)) : null; }
+  // the blood a body still has to lose: vitals' number when he has a record
+  // (one body, one volume), else 5 L kept on the actor. -> what was taken.
+  function takeBlood(a, ml) {
+    if (!a || !(ml > 0)) return ml > 0 ? ml : 0;
+    const VT = CBZ.vitals, R = VT && VT.peek ? VT.peek(a) : null;
+    if (R) {
+      const t = Math.min(ml, Math.max(0, R.blood * BODY_ML));
+      R.blood -= t / BODY_ML;
+      return t;
+    }
+    const v = a._goreML != null ? a._goreML : BODY_ML;
+    const t = Math.min(ml, Math.max(0, v));
+    a._goreML = v - t;
+    return t;
+  }
+  function bloodLeft(a) {
+    const VT = CBZ.vitals, R = a && VT && VT.peek ? VT.peek(a) : null;
+    if (R) return R.blood;
+    return a && a._goreML != null ? a._goreML / BODY_ML : 1;
+  }
+  // what is over a wound: bare skin's film, or the clothes' soak (ml)
+  function coverOf(site, zone) {
+    if (site === "lip" || site === "nose" || site === "brow" || site === "scalp" || site === "stump" || site === "piece" ||
+        site === "mouth" || site === "fixed" || zone === "head" || zone === "neck") return { exposed: true, cap: 0.3, wick: 0 };
+    if (zone === "armL" || zone === "armR" || zone === "legL" || zone === "legR") return { exposed: false, cap: 25, wick: 120 };
+    return { exposed: false, cap: 40, wick: 260 };
+  }
+  /* openWound(actor, o) — o: { node, local (Vector3 in node space), dir
+     (outward normal in node space), at (function(out) -> bool: a moving
+     point), x,y,z (a fixed point), site, zone, kind, artery,
+     vb (a vitals bleed: its flow comes from vitals), lps (L/s, own flow),
+     tau (s), mouth, exposed } */
+  function openWound(actor, o) {
+    if (!CBZ.scene) return null;
+    actor = who(actor);
+    if (WOUNDS.length >= woundCap()) {
+      let k = 0, least = Infinity;
+      for (let i = 0; i < WOUNDS.length; i++) {
+        const w = WOUNDS[i], f = (w.vb ? w.mlps : w.lps * 1000) + w.res * 0.01;
+        if (f < least) { least = f; k = i; }
+      }
+      endWound(WOUNDS[k]); WOUNDS.splice(k, 1);
+    }
+    const zone = o.zone || "", site = o.site || zone || "body";
+    const cov = coverOf(site, zone);
+    const w = {
+      id: ++woundSeq, actor: actor || null, node: o.node || null, local: new THREE.Vector3(), dirL: null,
+      at: o.at || null, fixed: o.x != null && !o.node && !o.at, fx: +o.x || 0, fy0: +o.y || 0, fz: +o.z || 0,
+      site, zone, kind: o.kind || "", artery: !!o.artery, mouth: !!o.mouth,
+      vb: o.vb || null, mlps: 0, vtLast: -1, cav: 0, extNow: 1,
+      lps: Math.max(0, Math.min(0.06, +o.lps || 0)), tau: Math.max(1, +o.tau || 30),
+      ext: o.vb ? (EXT_FRAC[zone] != null ? EXT_FRAC[zone] : 1) : 1,
+      exposed: o.exposed != null ? !!o.exposed : cov.exposed, resCap: cov.cap, res: 0,
+      out: 0, internal: 0, t: 0, deadT: -1, peak: 0, openDead: bodyDead(actor),
+      x: 0, y: 0, z: 0, have: false, nx: 0, nz: 1,
+      dpx: 0, dpy: 0, dpz: 0, dvx: 0, dvy: 0, dvz: 0, dpHave: false,
+      floorY: 0, floorT: 0, lying: false,
+      pend: 0, pour: 0, pourT: 0, jet: 0, beatT: Math.random() * 0.4,
+      wick: 0, wickCap: cov.wick, soakT: 0, soakShown: 0, side: Math.random() < 0.5 ? -1 : 1,
+      entry: null, sx: null, sz: 0, wet: false, probeT: 0, chum: null,
+      drips: 0, spurts: 0, chin: null, hand: null,
+    };
+    if (o.local) w.local.copy(o.local);
+    if (o.dir) { const l = Math.hypot(o.dir.x || 0, o.dir.y || 0, o.dir.z || 0); if (l > 1e-6) w.dirL = new THREE.Vector3(o.dir.x / l, o.dir.y / l, o.dir.z / l); }
+    // where the blood off the face runs to (the head mesh: see DRIP POINTS)
+    const ch = actor ? actorChar(actor) : null;
+    if (zone === "head" && w.node && w.node.name === "head") w.chin = w.node;
+    else if (ch && zone === "head" && site !== "stump") w.chin = ch.head || null;
+    if (ch && ch.parts && (zone === "armL" || zone === "armR")) {
+      const up = zone === "armL" ? ch.parts.la : ch.parts.ra;
+      w.hand = (up && up.userData && up.userData.cap) || null;
+    }
+    WOUNDS.push(w);
+    WOUND_AUDIT.opened++;
+    return w;
+  }
+  function endWound(w) {
+    if (w.chum && CBZ.goreChumStop) { try { CBZ.goreChumStop(w.chum); } catch (e) {} }
+    w.chum = null; w.entry = null; w.node = null; w.at = null; w.chin = null; w.hand = null;
+    if (w.vb && w.vb.gw === w) w.vb.gw = null;
+    w.vb = null;
+    WOUND_AUDIT.ended++;
+  }
+  function woundGone(w) {
+    const a = w.actor, g = a && a.group;
+    if (a && (a.culled || a._despawned || (g && !g.parent))) return true;
+    if (w.node && !w.node.parent) return true;
     return false;
   }
-  function bodyDead(a) { return !!(a && (a.dead || (a.hp != null && a.hp <= 0))); }
-  function bleedGone(b) {
-    const a = b.actor, g = a && a.group;
-    return !a || a.culled || a._despawned || (g && !g.parent);
-  }
-  // where the wound (or the mouth) is now
-  function bleedPoint(b) {
-    if (b.at) { try { if (!b.at(_bw)) return false; } catch (e) { return false; } }
-    else if (b.node) {
-      if (!b.node.parent) return false;
-      b.node.updateWorldMatrix(true, false);
-      _bw.copy(b.local).applyMatrix4(b.node.matrixWorld);
-    } else {
-      const a = b.actor, p = a && (a.pos || (a.group && a.group.position));
+  // where the wound is now -> w.x/y/z (false: nowhere to be)
+  function woundPoint(w) {
+    if (w.at) { try { if (!w.at(_bw)) return false; } catch (e) { return false; } }
+    else if (w.node) { w.node.updateWorldMatrix(true, false); _bw.copy(w.local).applyMatrix4(w.node.matrixWorld); }
+    else if (w.fixed) _bw.set(w.fx, w.fy0, w.fz);
+    else {
+      const p = bodyPos(w.actor);
       if (!p) return false;
-      _bw.set(p.x, (p.y || 0) + 0.5, p.z);
+      _bw.set(p.x, (p.y || 0) + 1.0, p.z);
     }
     if (!isFinite(_bw.x + _bw.y + _bw.z)) return false;
-    b.x = _bw.x; b.y = _bw.y; b.z = _bw.z;
+    w.x = _bw.x; w.y = _bw.y; w.z = _bw.z; w.have = true;
+    // the outward normal, level: the wound's own, else out from the body's middle
+    let nx = 0, nz = 0;
+    if (w.dirL && w.node) { _bn.copy(w.dirL).transformDirection(w.node.matrixWorld); nx = _bn.x; nz = _bn.z; }
+    else { const p = bodyPos(w.actor); if (p) { nx = w.x - p.x; nz = w.z - p.z; } }
+    const l = Math.hypot(nx, nz);
+    if (l > 1e-4) { w.nx = nx / l; w.nz = nz / l; }
     return true;
   }
-  // an opened artery: a pulsing jet out of the wound, riding the part
-  function bleedSpurt(b, vessel, dir) {
-    if (!vessel || b.mouth) return;
-    const neck = vessel === "neck", thigh = vessel === "thigh";
-    const o = { speed: neck ? 3.6 : (thigh ? 3.0 : 2.1), pulses: neck || thigh ? 9 : 5, period: 0.5, len: 0.22, fall: 0.86,
-      rate: neck ? 60 : 50, r0: 0.9, r1: 2.6, spread: 0.12, delay: 0.05 };
-    if (b.node && dir) {
-      if (!b.anchor) { b.anchor = new THREE.Object3D(); b.anchor.name = "gore-wound-jet"; }
-      if (b.anchor.parent !== b.node) b.node.add(b.anchor);
-      b.anchor.position.copy(b.local);
-      _bw.copy(dir).normalize();
-      b.anchor.quaternion.setFromUnitVectors(_UPV, _bw);
-      airStream(2, b.anchor, 0, 0, 0, 0, 1, 0, o);
-    } else if (bleedPoint(b)) airStream(0, null, b.x, b.y, b.z, 0, 0.6, 0, o);
+  /* DRIP POINTS: the lowest point the blood over a wound can run to while he
+     is up. In the head mesh's own space (character.js: a 0.6 m skull box
+     centred on its origin, the face toward +z) the chin is (0, -0.29, 0.24). */
+  const CHIN_L = new THREE.Vector3(0, -0.29, 0.24);
+  function dripPoint(w, out) {
+    const a = w.actor, p = bodyPos(a);
+    if (w.chin && w.chin.parent) { w.chin.updateWorldMatrix(true, false); out.copy(CHIN_L).applyMatrix4(w.chin.matrixWorld); return out; }
+    if (w.hand && w.hand.parent) { w.hand.getWorldPosition(out); return out; }
+    if (p && (w.zone === "legL" || w.zone === "legR")) { out.set(w.x + w.nx * 0.03, w.floorY + 0.07, w.z + w.nz * 0.03); return out; }
+    if (p && !w.exposed) {
+      // the trunk: down inside the shirt to the hem, about at the hips
+      const s = (a.group && a.group.userData && a.group.userData.humanScale) || 0.7;
+      const hem = (p.y || 0) + 0.95 * s / 0.7;
+      out.set(w.x + w.nx * 0.05, Math.max(w.floorY + 0.05, Math.min(w.y - 0.12, hem)), w.z + w.nz * 0.05);
+      return out;
+    }
+    out.set(w.x + w.nx * 0.02, w.y - (w.exposed ? 0.02 : 0.1), w.z + w.nz * 0.02);
+    return out;
   }
+  function dropR(ml) { return Math.min(0.0028, Math.cbrt(ml * 2.387e-7)); }   // the drop that holds `ml`, drawn at most 2.8 mm
+  // the blood that came through, leaving a body that is up: drops off the drip point
+  function dripOut(w, flowOut, dt) {
+    if (w.pend <= 0) return;
+    const dv = flowOut > 1.2 ? Math.min(0.6, flowOut / 24) : DRIP_ML;
+    if (w.pend < dv) return;
+    dripPoint(w, _bd);
+    // the point's own velocity (an arm's swing throws a hand's drop forward)
+    if (w.dpHave && dt > 0) {
+      const k = Math.min(1, dt * 10);
+      w.dvx += ((_bd.x - w.dpx) / dt - w.dvx) * k; w.dvy += ((_bd.y - w.dpy) / dt - w.dvy) * k; w.dvz += ((_bd.z - w.dpz) / dt - w.dvz) * k;
+    }
+    w.dpx = _bd.x; w.dpy = _bd.y; w.dpz = _bd.z; w.dpHave = true;
+    if (dist2Cam(_bd.x, _bd.z) > 55 * 55) { WOUND_AUDIT.unseenMl += w.pend; w.pend = 0; return; }
+    airCause = "drip";
+    while (w.pend >= dv && dropsLeft > 0) {
+      dropsLeft--;
+      airDrop(_bd.x + (Math.random() - 0.5) * 0.01, _bd.y, _bd.z + (Math.random() - 0.5) * 0.01,
+        w.dvx + (Math.random() - 0.5) * 0.06, Math.min(0, w.dvy) - 0.05, w.dvz + (Math.random() - 0.5) * 0.06,
+        dropR(dv), 0, 0, 0, dv);
+      w.pend -= dv; w.drips++; WOUND_AUDIT.dripMl += dv;
+    }
+    airCause = "spray";
+  }
+  // an artery's beat: most of the beat's blood out along the wound's normal
+  function spurt(w, p) {
+    const ml = w.jet;
+    w.jet = 0;
+    if (!(ml > 0.01)) return;
+    if (dist2Cam(w.x, w.z) > 55 * 55) { WOUND_AUDIT.unseenMl += ml; return; }
+    let jx = w.nx, jy = 0.25, jz = w.nz;
+    if (w.dirL && w.node) { _bn.copy(w.dirL).transformDirection(w.node.matrixWorld); jx = _bn.x; jy = _bn.y + 0.15; jz = _bn.z; }
+    const n = Math.max(3, Math.min(12, Math.round(ml / 0.12), dropsLeft));
+    if (n <= 0 || dropsLeft <= 0) { w.res += ml; return; }
+    const each = ml / n, sp0 = 1.2 + 3.3 * p;
+    airCause = "spurt";
+    for (let i = 0; i < n; i++) {
+      dropsLeft--;
+      const v = cone(jx, jy, jz, 0.1);
+      const sp = sp0 * (0.75 + 0.25 * (i / n)) * (0.93 + Math.random() * 0.14);
+      airDrop(w.x + (Math.random() - 0.5) * 0.01, w.y + (Math.random() - 0.5) * 0.01, w.z + (Math.random() - 0.5) * 0.01,
+        v.x * sp, v.y * sp, v.z * sp, dropR(each), 0.025, 0.13 + Math.random() * 0.06, 0, each);
+    }
+    airCause = "spray";
+    w.spurts++; WOUND_AUDIT.beats++; WOUND_AUDIT.spurtMl += ml;
+  }
+  // the floor under the wound (re-read on a stagger, at once when it moved far)
+  function woundFloor(w, dt) {
+    w.floorT -= dt;
+    // the floor (platforms and terrain): a man on a bunk or a crate is not
+    // lying on the floor, and what runs off him drips to it
+    if (w.floorT <= 0) { w.floorT = 0.12; w.floorY = decalFloorAt(w.x, w.z, w.y, false); }
+    return w.floorY;
+  }
+  function updateWounds(dt) {
+    dropsLeft = dropBudget();
+    for (let i = WOUNDS.length - 1; i >= 0; i--) {
+      const w = WOUNDS[i], a = w.actor;
+      if (woundGone(w) || !woundPoint(w)) { endWound(w); WOUNDS.splice(i, 1); continue; }
+      w.t += dt;
+      const dead = !w.mouth && bodyDead(a);
+      // a dead body that is alive again (a respawn, a pooled rig handed to a
+      // living man) does not carry the dead man's wound
+      if (a && !dead && !w.mouth && (w.openDead || w.deadT >= 0)) { endWound(w); WOUNDS.splice(i, 1); continue; }
+      if (dead && w.deadT < 0) w.deadT = w.t;
+      const fy = woundFloor(w, dt);
+      const lying = w.y - fy < LIE_H;
+      // A CORPSE DRAINS BY GRAVITY: lying, a hole on the down side (low on the
+      // body) empties faster than one on top (x1.4 at the floor .. x0.6 at
+      // 26 cm up)
+      const grav = dead && lying ? Math.max(0.6, Math.min(1.4, 1.5 - 3.5 * (w.y - fy))) : 1;
+      // THE FLOW NOW (ml/s, all of it), over the clock that drives it: a
+      // vitals wound flows for exactly the time vitals' own clock ran (its
+      // tick and this frame need not line up; paused, it does not run)
+      let total, fdt = dt;
+      if (w.vb) {
+        const VT = CBZ.vitals, now = VT && VT.now ? VT.now() : 0;
+        if (w.vtLast < 0) w.vtLast = now;
+        fdt = Math.max(0, Math.min(0.25, now - w.vtLast)); w.vtLast = now;
+        total = w.vb.closed ? 0 : w.mlps * grav;
+      } else {
+        // a heart that stops under a wound opened in a living man: what is
+        // left runs out in seconds (a wound opened on the dead keeps its own)
+        const tau = dead && !w.openDead ? Math.min(w.tau, 20) : w.tau;
+        w.lps *= Math.exp(-dt / tau);
+        total = w.lps * 1000 * grav;
+        // what this body still has to give (pieces and jaws are not a body)
+        if (a && !w.mouth && w.site !== "piece" && total > 0) {
+          const want = total * dt, got = takeBlood(a, want);
+          WOUND_AUDIT.takenMl += got;
+          if (got < want) { total = got / dt; w.lps = total / 1000 / grav; }
+        }
+      }
+      /* WHAT OF IT COMES OUT THROUGH THE SKIN. A hole in a limb, the neck or
+         the head: nearly all of it. A hole in the trunk opens a cavity, and the
+         blood goes where gravity takes it: into the cavity (the belly holds
+         ~1.5 L, the chest ~1.2 L before it is full) or out of the hole. Out
+         of a hole that is HIGH on the body (upright, or on top of a man lying
+         down) comes ~30% at first, more as the cavity fills (~90% when it is
+         full); out of a hole on his LOW side, lying on it or level with the
+         floor, comes ~90% whatever the cavity holds. */
+      let ext = w.ext;
+      if (w.vb && (w.zone === "chest" || w.zone === "abdomen")) {
+        const fill = Math.min(1, w.cav / (w.zone === "chest" ? 1200 : 1500));
+        const high = 0.3 + 0.6 * fill;
+        const up = lying ? Math.max(0, Math.min(1, (w.y - fy) / 0.3)) : 1;   // 0 = his low side, 1 = on top
+        ext = 0.9 + (high - 0.9) * up;
+      }
+      const outF = total * ext;
+      if (total > w.peak) w.peak = total;
+      w.cav += (total - outF) * fdt;
+      w.internal += (total - outF) * fdt; WOUND_AUDIT.internalMl += (total - outF) * fdt;
+      const ml = outF * fdt;
+      w.extNow = ext;
+      w.out += ml; WOUND_AUDIT.outMl += ml;
+      const done = (w.vb ? w.vb.closed : w.lps < 0.00001) &&
+        w.pend < DRIP_ML && w.pour < 0.05 && w.jet < 0.05;
+      if (done) { endWound(w); WOUNDS.splice(i, 1); continue; }
+      // IN THE SEA: the cloud's trail, riding this wound
+      w.probeT -= dt;
+      if (w.probeT <= 0) { w.probeT = 0.3; w.wet = seaWound(w.x, w.y, w.z); }
+      if (w.wet) {
+        WOUND_AUDIT.wetMl += ml + w.pend + w.pour + w.jet; w.pend = w.pour = w.jet = 0;
+        if (!w.chum && CBZ.goreChum) {
+          try { w.chum = CBZ.goreChum(function () { return w.x; }, function () { return w.y; }, function () { return w.z; }, 0.3, 3); } catch (e) { w.chum = null; }
+        }
+        if (w.chum) { w.chum.rate = Math.max(0.05, Math.min(1, Math.pow(outF / 1000 / CHUM_LPS, 1 / 1.2))); w.chum.ttl = Math.max(w.chum.ttl, 3.2); }
+        w.sx = null;
+        continue;
+      }
+      if (w.chum) { if (CBZ.goreChumStop) { try { CBZ.goreChumStop(w.chum); } catch (e) {} } w.chum = null; }
+      // AN ARTERY'S BEATS, while there is a heart to beat them: the jet goes
+      // through the hole, so it does not wait for the clothes to soak
+      const spurts = w.artery && !lying && w.zone !== "chest" && w.zone !== "abdomen";
+      let jetShare = 0, pres = 0;
+      if (spurts && outF > 0.3) {
+        if (!dead) pres = Math.max(0.15, Math.min(1, (bloodLeft(a) - 0.45) / 0.5));
+        else { const td = w.t - w.deadT; pres = td < 5 ? 0.5 * (1 - td / 5) : 0; }
+        if (pres > 0) jetShare = 0.7;
+      }
+      w.jet += ml * jetShare;
+      // the rest wets what is over the wound, and what it cannot hold comes through
+      let thru = ml * (1 - jetShare);
+      const room = w.resCap - w.res;
+      if (room > 0) { const k = Math.min(room, thru); w.res += k; thru -= k; }
+      // a soaked garment keeps wicking a share of what comes through,
+      // outward from the hole, until the panel is wet through
+      if (!w.exposed && thru > 0 && w.wick < w.wickCap) { const k = Math.min(w.wickCap - w.wick, thru * 0.25); w.wick += k; thru -= k; }
+      // THE WET CLOTH is the first blood anyone sees: the patch round the
+      // hole (wounds.js's ring) is as big as what the cloth holds
+      if (!w.exposed && a && CBZ.woundSoak) {
+        w.soakT -= dt;
+        const held = w.res + w.wick;
+        if (w.soakT <= 0 && held > w.soakShown * 1.04 + 0.2) {
+          w.soakT = 0.3;
+          let ok = false;
+          try { ok = CBZ.woundSoak(a, w.x, w.y, w.z, held, !lying); } catch (e) { ok = false; }
+          if (ok) w.soakShown = held; else w.soakT = 2;   // no hole drawn there (yet): ask again later
+        }
+      }
+      if (jetShare > 0) {
+        const hr = 1.2 + 1.0 * (1 - pres);              // the heart races as the pressure goes
+        w.beatT -= dt;
+        if (w.beatT <= 0) { w.beatT += 1 / hr; spurt(w, pres); }
+      } else if (w.jet > 0) { thru += w.jet; w.jet = 0; }
+      if (lying) {
+        // ON THE FLOOR: off the body and onto the floor under the wound
+        w.pour += thru + w.pend; w.pend = 0;
+        w.pourT -= dt;
+        if (w.pour > 0 && (w.pourT <= 0 || w.pour > 3)) {
+          w.pourT = 0.25;
+          if (dist2Cam(w.x, w.z) > 70 * 70) { WOUND_AUDIT.unseenMl += w.pour; w.pour = 0; }
+          else {
+            // seated on the DRAWN ground beside him, the one a falling drop
+            // lands on (decalFloorAt with solids: a yard's surface box, a
+            // floor's finish), not the bare floor height under it
+            const sy0 = seatY, ss0 = seatSolid; seatY = fy + 0.05; seatSolid = true;
+            try {
+              // it reaches the floor where the body meets it, at the edge of
+              // his outline nearest the wound (bodyEdge), and spreads out from
+              // there; a wound with no body round it pours where it is
+              if (bodyEdge(w)) w.entry = edgePour(w, EDGE.x, EDGE.z, EDGE.nx, EDGE.nz, fy, w.pour);
+              else w.entry = landPour(w.x + w.nx * 0.04, fy, w.z + w.nz * 0.04, w.pour, w.entry);
+            } finally { seatY = sy0; seatSolid = ss0; }
+            WOUND_AUDIT.pouredMl += w.pour;
+            w.pour = 0;
+          }
+        }
+        // THE SMEAR: lying in it and moving along the floor (dragged)
+        if (w.sx == null) { w.sx = w.x; w.sz = w.z; }
+        else {
+          const ddx = w.x - w.sx, ddz = w.z - w.sz, d = Math.sqrt(ddx * ddx + ddz * ddz);
+          if (d > 0.7) {
+            if ((outF > 1 || (w.entry && w.entry.on && w.entry.v > 20)) && spawnStreak(w.sx, w.sz, ddx / d, ddz / d, Math.min(4, d))) WOUND_AUDIT.smears++;
+            w.sx = w.x; w.sz = w.z; w.entry = null;
+          }
+        }
+      } else {
+        // UP: it runs to the drip point and leaves there, drop by drop
+        w.sx = null; w.entry = null;
+        if (w.pour > 0) { w.pend += w.pour; w.pour = 0; }
+        w.pend += thru;
+        dripOut(w, outF * (1 - jetShare), dt);
+      }
+    }
+  }
+  /* CBZ.goreWound(actor, o) — a wound whose flow someone else keeps (vitals).
+     Returns the record; the owner writes w.mlps (ml/s, all of it) each
+     tick and it flows over the owner's clock (CBZ.vitals.now()); w.vb.closed
+     ends it. */
+  CBZ.goreWound = function (actor, o) { return o ? openWound(actor, o) : null; };
+  /* CBZ.goreBleed(actor, opts) — a wound this file keeps the flow of.
+     opts: { node, local, dir (outward normal, node space), lps (L/s now),
+     tau (s to fall by e), vessel (neck|thigh|arm: an opened artery), mouth
+     (the blood on a biter's jaws: opts.at is where the mouth is), at,
+     site, zone } */
   CBZ.goreBleed = function (actor, opts) {
     if (!CBZ.scene || !actor || !opts) return null;
-    const mouth = !!opts.mouth;
-    const lps = Math.max(0, Math.min(0.05, +opts.lps || 0));
-    for (let i = 0; i < BLEEDS.length; i++) {
-      const b = BLEEDS[i];
-      if (b.actor !== actor || b.mouth !== mouth) continue;
-      b.lps = Math.min(0.06, b.lps + lps);
-      b.tau = Math.max(b.tau, +opts.tau || 0);
-      // the newest wound leads
-      if (opts.node) { b.node = opts.node; b.local.copy(opts.local || _bw.set(0, 0, 0)); }
-      if (opts.at) b.at = opts.at;
-      if (opts.vessel) bleedSpurt(b, opts.vessel, opts.dir);
-      return b;
-    }
-    if (BLEEDS.length >= BLEED_CAP) {
-      let w = 0;
-      for (let i = 1; i < BLEEDS.length; i++) if (BLEEDS[i].lps < BLEEDS[w].lps) w = i;
-      bleedEnd(BLEEDS[w]); BLEEDS.splice(w, 1);
-    }
-    const b = {
-      actor: actor, mouth: mouth, node: opts.node || null, local: new THREE.Vector3(), at: opts.at || null,
-      lps: lps, tau: Math.max(1, +opts.tau || 30), t: 0, x: 0, y: 0, z: 0,
-      dripT: 0, poolLit: 0, poured: 0, poolN: 0, poolT: 0, sx: null, sz: null,
-      wet: false, probeT: 0, chum: null, anchor: null,
-    };
-    if (opts.local) b.local.copy(opts.local);
-    BLEEDS.push(b);
-    BLEED_AUDIT.opened++;
-    if (opts.vessel) { bleedSpurt(b, opts.vessel, opts.dir); BLEED_AUDIT.spurts++; }
-    return b;
+    const v = opts.vessel;
+    return openWound(actor, {
+      node: opts.node || null, local: opts.local || null, dir: opts.dir || null, at: opts.at || null,
+      lps: opts.lps, tau: opts.tau, mouth: !!opts.mouth, artery: !!v,
+      zone: opts.zone || (v === "neck" ? "neck" : v === "thigh" ? "legL" : v === "arm" ? "armL" : ""),
+      site: opts.site || (opts.mouth ? "mouth" : (v || "")), exposed: opts.mouth ? true : undefined,
+    });
   };
-  CBZ.goreBleedList = function () { return BLEEDS; };
-  const BLEED_AUDIT = { opened: 0, spurts: 0, drips: 0, pools: 0, smears: 0, litres: 0, wetLitres: 0 };
-  CBZ.goreBleedAudit = function () { return Object.assign({ live: BLEEDS.length }, BLEED_AUDIT); };
-  function bleedEnd(b) {
-    if (b.chum && CBZ.goreChumStop) { try { CBZ.goreChumStop(b.chum); } catch (e) {} }
-    b.chum = null;
-    if (b.anchor && b.anchor.parent) b.anchor.parent.remove(b.anchor);
-  }
-  function updateBleeds(dt) {
-    for (let i = BLEEDS.length - 1; i >= 0; i--) {
-      const b = BLEEDS[i], a = b.actor;
-      if (bleedGone(b) || !bleedPoint(b)) { bleedEnd(b); BLEEDS.splice(i, 1); continue; }
-      b.t += dt;
-      // a dead heart pushes nothing: what is left oozes out in seconds
-      const tau = !b.mouth && bodyDead(a) ? Math.min(b.tau, 15) : b.tau;
-      b.lps *= Math.exp(-dt / tau);
-      BLEED_AUDIT.litres += b.lps * dt;
-      if (b.lps < 0.0003 && b.poolLit < 0.01) { bleedEnd(b); BLEEDS.splice(i, 1); continue; }
-      b.probeT -= dt;
-      if (b.probeT <= 0) { b.probeT = 0.3; b.wet = seaWound(b.x, b.y, b.z); }
-      if (b.wet) {
-        // IN THE SEA: the cloud's trail, riding this wound (or this mouth)
-        BLEED_AUDIT.wetLitres += b.lps * dt;
-        if (!b.chum && CBZ.goreChum) {
-          try { b.chum = CBZ.goreChum(function () { return b.x; }, function () { return b.y; }, function () { return b.z; }, 0.3, 3); } catch (e) { b.chum = null; }
-        }
-        if (b.chum) { b.chum.rate = Math.max(0.05, Math.min(1, Math.pow(b.lps / CHUM_LPS, 1 / 1.2))); b.chum.ttl = Math.max(b.chum.ttl, 3.2); }
-        b.sx = null;
-        continue;
-      }
-      if (b.chum) { bleedEnd(b); }
-      if (dist2Cam(b.x, b.z) > 60 * 60) { b.sx = null; continue; }   // the flow still falls; nobody sees the marks
-      const down = !b.mouth && bodyDown(a);
-      if (!down) {
-        // DRIPS from the wound (or the jaws) as it stands and moves
-        b.dripT -= dt;
-        if (b.dripT <= 0 && b.lps > 0.0005) {
-          b.dripT = Math.max(0.1, Math.min(2.5, 0.008 / b.lps)) * (0.7 + Math.random() * 0.6);
-          BLEED_AUDIT.drips++;
-          // (from the wound itself, or the jaws: where it actually leaves the body)
-          const sy0 = seatY; seatY = b.y + 0.3;
-          try { drip(b.x + (Math.random() - 0.5) * 0.08, b.z + (Math.random() - 0.5) * 0.08, 0.15 + Math.min(0.35, b.lps * 5), b.y); } finally { seatY = sy0; }
-        }
-        b.sx = null;
-        continue;
-      }
-      // THE POOL: a new, bigger layer each time enough has come out
-      b.poolLit += b.lps * dt;
-      b.poolT -= dt;
-      const need = b.poolN === 0 ? 0.04 : 0.09 + b.poolN * 0.03;
-      if (b.poolN < BLEED_POOLS && b.poolT <= 0 && b.poolLit >= need) {
-        b.poured += b.poolLit; b.poolLit = 0; b.poolT = 1.2;
-        // (the jail's own pool sizes: vitals.js lays 0.45 + 3.2 sqrt(lost fraction))
-        const size = Math.min(2.4, 0.45 + Math.sqrt(b.poured / 5) * 3.2);
-        if (CBZ.gorePool(b.x + (Math.random() - 0.5) * 0.12, b.z + (Math.random() - 0.5) * 0.12, size, b.y)) BLEED_AUDIT.pools++;
-        b.poolN++;
-      }
-      // THE SMEAR: a body lying in its blood and moving along the ground
-      if (b.sx == null) { b.sx = b.x; b.sz = b.z; }
-      else {
-        const ddx = b.x - b.sx, ddz = b.z - b.sz, d = Math.sqrt(ddx * ddx + ddz * ddz);
-        if (d > 0.7) {
-          if ((b.lps > 0.0012 || b.poolN > 0) && spawnStreak(b.sx, b.sz, ddx / d, ddz / d, Math.min(4, d))) BLEED_AUDIT.smears++;
-          b.sx = b.x; b.sz = b.z;
-        }
+  // a wound at a fixed point (a body this file has no rig for: a crowd row)
+  CBZ.goreBleedAt = function (x, y, z, opts) {
+    if (!CBZ.scene) return null;
+    opts = opts || NO_OPTS;
+    return openWound(opts.actor || null, { x, y, z, lps: opts.lps, tau: opts.tau, site: "fixed", exposed: true });
+  };
+  CBZ.goreBleedList = function () { return WOUNDS; };
+
+  /* THE BODY AS IT IS DRAWN. A rig's pivots (the hip groups, the neck group,
+     the trunk group) are not where its flesh is: a chest-high point is
+     nearer the hip pivots than the trunk's, and a lying man's hips-to-neck
+     line is not his outline. So everything here is read off the DRAWN body
+     meshes (the rig's skinSlots: torso, pelvis, collar, legs, shins, shoes,
+     arms, forearms, hands, head): each is a capsule, its centre the middle of
+     its geometry's box in the world, its axis the mesh's own long (local Y)
+     axis, its half-length and half-width the box's, scaled as drawn. Read at
+     most twice a second per body, into fixed arrays (BC_*). */
+  const BC_MAX = 24;
+  const BC_X = new Float32Array(BC_MAX), BC_Y = new Float32Array(BC_MAX), BC_Z = new Float32Array(BC_MAX);
+  const BC_AX = new Float32Array(BC_MAX), BC_AY = new Float32Array(BC_MAX), BC_AZ = new Float32Array(BC_MAX);
+  const BC_HL = new Float32Array(BC_MAX), BC_HW = new Float32Array(BC_MAX);
+  const BC_M = new Array(BC_MAX).fill(null), BC_Z0 = new Array(BC_MAX).fill("");
+  let bcN = 0, bcCh = null, bcT = -9;
+  const BC_SLOTS = [["torso", "chest"], ["collar", "chest"], ["pelvis", "abdomen"], ["head", "head"],
+    ["legs", "leg"], ["legsLower", "leg"], ["shoes", "leg"], ["arms", "arm"], ["armsLower", "arm"], ["hands", "arm"]];
+  const _bcV = new THREE.Vector3();
+  function bodyCaps(ch) {
+    if (ch === bcCh && plumeClock - bcT < 0.5) return bcN;
+    bcCh = ch; bcT = plumeClock; bcN = 0;
+    const S = ch && ch.skinSlots;
+    if (!S) return 0;
+    for (let k = 0; k < BC_SLOTS.length; k++) {
+      const L = S[BC_SLOTS[k][0]];
+      if (!L) continue;
+      for (let j = 0; j < L.length && bcN < BC_MAX; j++) {
+        const m = L[j], g = m && m.geometry;
+        if (!g || !m.parent || m.visible === false) continue;
+        if (!g.boundingBox) g.computeBoundingBox();
+        const bb = g.boundingBox;
+        if (!bb) continue;
+        m.updateWorldMatrix(true, false);
+        const e = m.matrixWorld.elements;
+        _bcV.set((bb.min.x + bb.max.x) * 0.5, (bb.min.y + bb.max.y) * 0.5, (bb.min.z + bb.max.z) * 0.5).applyMatrix4(m.matrixWorld);
+        const sx = Math.hypot(e[0], e[1], e[2]), sy = Math.hypot(e[4], e[5], e[6]), sz = Math.hypot(e[8], e[9], e[10]);
+        const i = bcN++;
+        BC_X[i] = _bcV.x; BC_Y[i] = _bcV.y; BC_Z[i] = _bcV.z;
+        BC_AX[i] = e[4] / (sy || 1); BC_AY[i] = e[5] / (sy || 1); BC_AZ[i] = e[6] / (sy || 1);
+        BC_HL[i] = (bb.max.y - bb.min.y) * 0.5 * sy;
+        BC_HW[i] = Math.max((bb.max.x - bb.min.x) * sx, (bb.max.z - bb.min.z) * sz) * 0.5;
+        BC_M[i] = m;
+        // which side a limb is: left meshes are listed first in every slot
+        const z = BC_SLOTS[k][1];
+        BC_Z0[i] = z === "leg" ? (j === 0 ? "legL" : "legR") : z === "arm" ? (j === 0 ? "armL" : "armR") : z;
       }
     }
+    return bcN;
+  }
+  // distance from (x,y,z) to capsule i's axis segment, minus its half-width
+  // (in 3-D for picking a part; on the floor plane for the outline)
+  function capDist(i, x, y, z, flat) {
+    let ax = BC_AX[i], ay = flat ? 0 : BC_AY[i], az = BC_AZ[i];
+    let hl = BC_HL[i];
+    if (flat) { const l = Math.hypot(ax, az); hl *= l; if (l > 1e-4) { ax /= l; az /= l; } else { ax = 0; az = 0; } }
+    const dx = x - BC_X[i], dy = flat ? 0 : y - BC_Y[i], dz = z - BC_Z[i];
+    let t = dx * ax + dy * ay + dz * az; t = t < -hl ? -hl : (t > hl ? hl : t);
+    const qx = dx - ax * t, qy = dy - ay * t, qz = dz - az * t;
+    return Math.sqrt(qx * qx + qy * qy + qz * qz) - BC_HW[i];
+  }
+  // a wound opened at (x,y,z) on this body: on the drawn part nearest it
+  const _pl = new THREE.Vector3();
+  function woundOn(actor, x, y, z, o) {
+    const ch = rigOf(actor);
+    const n = ch ? bodyCaps(ch) : 0;
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < n; i++) { const d = capDist(i, x, y, z, false); if (d < bd) { bd = d; best = i; } }
+    const node = best >= 0 ? BC_M[best] : null;
+    if (node) { _pl.set(x, y, z); node.worldToLocal(_pl); }
+    const zone = best >= 0 ? BC_Z0[best] : "";
+    return openWound(actor, { node, local: node ? _pl : null, zone, site: o.site || zone, lps: o.lps, tau: o.tau, artery: !!o.artery });
+  }
+  // is this body already bleeding from a real hole (more than a split lip's
+  // trickle: over 1 ml/s out through the skin)?
+  function bleedsAlready(actor) {
+    actor = who(actor);
+    for (let i = 0; i < WOUNDS.length; i++) {
+      const w = WOUNDS[i];
+      if (w.actor === actor && !w.mouth && w.site !== "piece" && (w.vb ? (w.vb.rate || 0) * BODY_ML * w.ext > 1 : w.lps > 0.001)) return true;
+    }
+    return false;
+  }
+  // the bodies near a point (any game's lists, and the player)
+  const BODY_LISTS = ["guards", "npcs", "cityPeds", "cityCops", "bots"];
+  function bodyNear(x, y, z, r, deadOnly) {
+    let best = null, bd = r * r;
+    for (let L = 0; L < BODY_LISTS.length; L++) {
+      const list = CBZ[BODY_LISTS[L]];
+      if (!list || !list.length) continue;
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!a || a.culled || (deadOnly && !a.dead)) continue;
+        const p = bodyPos(a);
+        if (!p || Math.abs((p.y || 0) + 1 - y) > 1.6) continue;
+        const d = (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z);
+        if (d < bd) { bd = d; best = a; }
+      }
+    }
+    const P = CBZ.player;
+    if (!deadOnly && P && P.pos && !P.dead) {
+      const d = (P.pos.x - x) * (P.pos.x - x) + (P.pos.z - z) * (P.pos.z - z);
+      if (d < bd && Math.abs((P.pos.y || 0) + 1 - y) < 1.6) best = P;
+    }
+    return best;
   }
 
-  /* CBZ.goreBite(x, y, z, opts) — THE BITE ITSELF BLEEDS, every closing of
-     the jaws. Whoever calls gore at the jaw (predator.js's seize, creature
-     combat's biteBlood) has already thrown the spray, and a second one on
-     top of it is the double this file refuses everywhere; a bite nobody
-     sprayed for (a dog's, a tame animal's) throws its own: heavy drops and
-     a short stream out of the wound (stabBlood, the jail's blade spray),
-     sized from the wound. In the sea it is the cloud's gush.
+  /* ============================================================
+     BLOOD AT THE MOMENT OF A BLOW — CBZ.goreBlow(target, attacker, point, o).
+     ------------------------------------------------------------
+     A blow does not make blood appear. What can leave at the instant of
+     impact is only blood that is already there to throw:
+       • FLUNG: the wet film on his skin where the blow lands (a face already
+         bleeding, the film over a split lip or brow) is thrown off in
+         the direction of the blow, as a small fan of drops, more of it the
+         harder the blow. A clean face throws nothing: the first punch that
+         splits a lip throws nothing, because the blood is not out yet.
+       • CAST-OFF: blood on the fist or the blade that swung (it picked some
+         up off the last face it hit, or out of the last wound it went into)
+         leaves it along the swing, a few drops.
+       • A BLADE going in comes out wet: it carries ~0.5 ml out and loses part
+         of it on the way out, and the rest on its next swing.
+     Whether the blow OPENED anything (a split lip, nose, brow, scalp; a stab)
+     is vitals.js's call, made before this runs (the caller's onLand); the
+     wound it opened bleeds from the next frame (A WOUND BLEEDS).
+     o: { dir {x,z} the blow's travel, dy (lift of the throw), force (~0..2),
+          zone, blade, weapon }
+  ============================================================ */
+  const FLING_R = 0.22;                 // m: the wet surface a blow can take blood off round where it lands
+  function handOf(a) {
+    if (!a) return null;
+    const o = a.isPlayer && CBZ.player ? CBZ.player : a;
+    let H = o._gHand;
+    if (!H) H = o._gHand = { ml: 0, blade: 0, t: plumeClock };
+    // it dries and wipes off over half a minute or so
+    const k = Math.exp(-(plumeClock - H.t) / 35);
+    H.ml *= k; H.blade *= k; H.t = plumeClock;
+    return H;
+  }
+  function flingFrom(w, px, py, pz, dx, dy, dz, F, lod) {
+    const wet = w.exposed ? w.res : w.res * 0.05;        // soaked cloth gives little up
+    const take = wet * Math.min(0.85, 0.3 + 0.35 * F);
+    if (!(take > 0.015)) return 0;
+    w.res -= w.exposed ? take : take * 20;
+    if (w.res < 0) w.res = 0;
+    const n = Math.max(1, Math.min(14, Math.round(take / 0.03 * lod)));
+    const each = take / n;
+    airCause = "flung";
+    for (let i = 0; i < n; i++) {
+      const v = cone(dx, dy, dz, 0.55);
+      const sp = (1.4 + Math.random() * 2.6) * (0.6 + 0.5 * F);
+      airDrop(px + (Math.random() - 0.5) * 0.04, py + (Math.random() - 0.5) * 0.04, pz + (Math.random() - 0.5) * 0.04,
+        v.x * sp, v.y * sp, v.z * sp, dropR(each), 0, 0, 0, each);
+    }
+    airCause = "spray";
+    WOUND_AUDIT.flungMl += take;
+    return take;
+  }
+  // a blow at (px,py,pz) on `target` (or on whatever wounds are there, when
+  // the body is not known): the wet blood within reach is flung along (dx,dy,dz)
+  function flingAt(target, px, py, pz, dx, dy, dz, F, lod) {
+    let got = 0;
+    for (let i = 0; i < WOUNDS.length; i++) {
+      const w = WOUNDS[i];
+      if (!w.have || w.mouth || (target && w.actor !== target)) continue;
+      const d2 = (w.x - px) * (w.x - px) + (w.y - py) * (w.y - py) + (w.z - pz) * (w.z - pz);
+      // the face is one wet surface: a blow anywhere on it takes the film off it
+      const r = w.zone === "head" ? FLING_R * 1.4 : FLING_R;
+      if (d2 > r * r) continue;
+      got += flingFrom(w, w.x, w.y, w.z, dx, dy, dz, F, lod);
+    }
+    return got;
+  }
+  let blowActor = null, blowT = -9, bladeKillActor = null, bladeKillT = -9;
+  CBZ.goreBlow = function (target, attacker, point, o) {
+    target = who(target);
+    if (!CBZ.scene || !target) return;
+    o = o || NO_OPTS;
+    let dx = o.dir ? (+o.dir.x || 0) : (+o.dirX || 0), dz = o.dir ? (+o.dir.z || 0) : (+o.dirZ || 0);
+    const hl = Math.hypot(dx, dz);
+    if (hl > 1e-4) { dx /= hl; dz /= hl; } else { dx = 0; dz = 0; }
+    const dy = o.dy != null ? o.dy : 0.3;
+    // where it landed: the caller's contact, else the wound on the struck zone, else his face
+    let px, py, pz, faceOnly = false;
+    if (point && point.x != null) { px = point.x; py = point.y; pz = point.z; }
+    else {
+      let w = null;
+      for (let i = 0; i < WOUNDS.length; i++) if (WOUNDS[i].actor === target && WOUNDS[i].have && (!o.zone || WOUNDS[i].zone === o.zone || (o.zone === "jaw" && WOUNDS[i].zone === "head"))) { w = WOUNDS[i]; break; }
+      if (w) { px = w.x; py = w.y; pz = w.z; }
+      else {
+        // no contact point and nothing open where it landed: his face, but
+        // only a blow that landed on the face can take blood off it
+        const p = bodyPos(target); if (!p) return;
+        px = p.x; py = (p.y || 0) + 1.55; pz = p.z;
+        faceOnly = !!o.zone && o.zone !== "head" && o.zone !== "jaw";
+      }
+    }
+    if (dist2Cam(px, pz) > 60 * 60 || seaWound(px, py, pz)) return;
+    blowActor = target; blowT = plumeClock;
+    const F = Math.max(0.2, Math.min(2, o.force != null ? +o.force : 0.7));
+    const lod = airLod(px, pz);
+    const H = attacker ? handOf(attacker) : null;
+    // CAST-OFF of what was on the fist / blade before this blow, along the
+    // swing's follow-through and back off it
+    if (H) {
+      const on = o.blade ? H.blade : H.ml;
+      if (on > 0.03) {
+        const thrown = castOff(px - dx * 0.12, py + 0.05, pz - dz * 0.12, -dx * 0.6, 0.8, -dz * 0.6, 2.2 + 1.2 * F, on * 0.5, lod);
+        if (o.blade) H.blade -= thrown; else H.ml -= thrown;
+        WOUND_AUDIT.castOffMl += thrown;
+      }
+    }
+    // FLUNG off him where it landed
+    const flung = faceOnly ? 0 : flingAt(target, px, py, pz, dx, dy, dz, F, lod);
+    // what the fist or the blade carries away from this one
+    if (H) {
+      if (o.blade) {
+        // the blade comes out wet, and loses part of it on the way out (unless
+        // the kill this blade just made already threw that)
+        const pick = 0.5 + 0.3 * Math.random();
+        const killed = target === bladeKillActor && plumeClock - bladeKillT < 0.3;
+        const lost = killed ? pick * 0.4 : castOff(px - dx * 0.05, py, pz - dz * 0.05, -dx, 0.3, -dz, 1.6, pick * 0.4, lod);
+        H.blade += pick - lost;
+        WOUND_AUDIT.castOffMl += lost;
+      } else H.ml = Math.min(0.8, H.ml + flung * 0.3);
+    }
+  };
+  // a blow was just resolved on this body (the kill that follows it in the same
+  // instant throws nothing of its own: it is the same blow)
+  function blowJustHit(a) { return !!a && a === blowActor && plumeClock - blowT < 0.3; }
+
+  /* CBZ.goreBite(x, y, z, opts) — THE BITE ITSELF. Whoever calls gore at the
+     jaw (predator.js's seize, creature combat's biteBlood) has already
+     thrown what flies; a bite nobody sprayed for (a dog's, a tame animal's)
+     throws what teeth tearing out of flesh throw: the blood on them,
+     cast off along the way the wound faces as they let go. The wound itself
+     bleeds from then on (wounds.js opens it: goreBleed). In the sea it is the
+     cloud's gush.
      opts: { dir (world, out of the wound), amount 0.2..2, arterial } */
   CBZ.goreBite = function (x, y, z, opts) {
     if (!CBZ.scene) return;
@@ -3271,15 +3764,15 @@
     noteLandBlood(x, z); noteSpray(x, z);
     biteBX = x; biteBZ = z; biteBT = plumeClock;
     const hl = Math.sqrt(dx * dx + dz * dz);
-    stabBlood(x, y, z, hl > 1e-3 ? dx / hl : 0, hl > 1e-3 ? dz / hl : 0, amt, airLod(x, z) * (d2 > 40 * 40 ? 0.5 : 1));
+    castOff(x, y, z, hl > 1e-3 ? dx / hl : 0, 0.5, hl > 1e-3 ? dz / hl : 0, 1.4 + 0.8 * amt, 0.3 + 0.6 * amt,
+      airLod(x, z) * (d2 > 40 * 40 ? 0.5 : 1));
   };
   // the land blood a kill or an impact threw at a spot: a bite there in the
   // same instant is the same event (see goreBite)
   let landBX = 1e9, landBZ = 0, landBT = -9;
   function noteLandBlood(x, z) { landBX = x; landBZ = z; landBT = plumeClock; }
   function landBledHere(x, z) { return plumeClock - landBT < 0.35 && Math.abs(x - landBX) < 1.2 && Math.abs(z - landBZ) < 1.2; }
-  // and only a BITE's spray stands an impact's down (a fight's punches in a
-  // quick combo each throw their own, as they always have)
+  // and only a BITE's throw stands an impact's down
   let biteBX = 1e9, biteBZ = 0, biteBT = -9;
   function biteSprayedHere(x, z) { return plumeClock - biteBT < 0.35 && Math.abs(x - biteBX) < 1.2 && Math.abs(z - biteBZ) < 1.2; }
 
@@ -3377,7 +3870,7 @@
 
   /* spawnBit — a SOLID piece in flight: a torn chunk (explosions only), a
      tooth, a skull fragment. Blood in the air is not a bit any more; it is
-     THE AIRBORNE BLOOD's pool (airDrop / airMist / airStream). `kind` is
+     THE AIRBORNE BLOOD's pool (airDrop / airMist). `kind` is
      kept in the signature for the callers, and is always "gib". */
   function spawnBit(x, y, z, vx, vy, vz, size, color, kind) {
     // Standing gibs are FADING debris now, not permanent evidence, so the pool
@@ -3454,9 +3947,10 @@
   //  local +Z is exactly the old `rotation.x = -PI/2` — so streets, roads, jail
   //  floors and the ocean slick are byte-identical, and only terrain changes.
   //
-  //  And blood on a real slope does not pool: it RUNS. Past STEEP the disc is
-  //  cut back and a downhill TRICKLE is drawn out of its low edge, reusing the
-  //  run-over streak record, which already knows how to draw a growing smear.
+  //  And blood on a slope does not sit where it landed: a pool slides down
+  //  the fall line as it grows and draws out along it, and past STEEP what
+  //  the slope will not hold leaves as a run (BLOOD COLLECTS WHERE IT LANDS,
+  //  glShape), drawn with the run-over streak record.
   //
   //  COST: two extra floorAt() samples per decal SPAWN. The gradient is memoised
   //  on a 4 m grid for one frame — the droplet layer stamps ~20 splats per kill
@@ -3532,7 +4026,7 @@
   //  FLOOR_FINISH: an interior's finish (fitout.js: boards, tile, carpet) is
   //  laid up to ~1.8 cm proud of the slab top it stands on.
   const FLOOR_FINISH = 0.012;
-  // (seatY: declared at the top of the file, beside `later`)
+  // (seatY: declared at the top of the file)
   function decalFloorAt(x, z, fromY, solids) {
     const A = cityMode() && CBZ.city ? CBZ.city.arena : null;
     let g = NaN;
@@ -3664,48 +4158,37 @@
   // on terrain a flat quad spans a curved hill, so it keeps the old clearance.
   function landLift(s) { return s && s.grade >= FLATISH ? 0.05 : 0.015; }
 
-  /* spawnSplat(x, z, grow, color, linger, o) — one ground mark.
-     `grow` is the mark's final RADIUS in metres (unchanged contract), `linger`
-     a body's pool. o.kind picks the shape:
-       "pool"  spreads from its middle over seconds and stops (default when linger)
-       "splat" an impact splat, rays thrown toward o.dir (or all round, o.radial)
+  /* spawnSplat(x, z, grow, color, linger, o) — one ground mark. `grow` is its
+     RADIUS in metres. o.kind picks the shape:
+       "wet"   blood lying in a spot that is being fed (BLOOD COLLECTS WHERE IT
+               LANDS): drawn at once at the size its volume covers, and made
+               bigger by the ledger as more arrives (glShape), never by a clock
        "drop"  a droplet that landed at an angle: tail toward o.dir, stretched
                by o.elong (= 1 / sin(impact angle))
-       "dot"   a droplet that fell straight down (default otherwise)
-     `color` is ignored: the shade is the blood's age and depth, not the caller's. */
+       "dot"   a droplet that fell straight down (default)
+     `color` and `linger` are ignored: the shade is the blood's age and depth. */
   function spawnSplat(x, z, grow, color, linger, o) {
     o = o || NO_OPTS;
-    const kind = o.kind || (linger ? "pool" : "dot");
+    const kind = o.kind || "dot";
     const sea = seaFloorDepth(x, z);
-    if (sea > 0) { bleedIntoSea(x, z, sea, kind, grow); return null; }
+    if (sea > 0) { bleedIntoSea(x, z, sea, kind === "wet" && grow < 0.12 ? "dot" : kind, grow); return null; }
     if (splats.length > landCap()) recycleFarSplat();
     const s = slopeOn() ? groundGrad(x, z) : null;
-    // a slope cannot hold a pool — the steeper it is, the less stays put (and
-    // the rest leaves as the trickle below).
-    const steep = !!(s && s.grade > STEEP);
-    const g = steep ? grow * (0.42 + 0.28 * (STEEP / s.grade)) : grow;
+    const g = grow;
     const c = claimLand();
     if (!c) return null;
     const m = c.m;
     const near = dist2Cam(x, z) < 24 * 24;
     const hasDir = o.dirX != null && (o.dirX || o.dirZ);
-    let cell, sx, sy, spin = Math.random() * 6.28, growT, grow0, dryT, thick, thrEnd, hold, fade, rim;
-    if (kind === "pool") {
+    let cell, sx, sy, spin = o.spin != null ? o.spin : Math.random() * 6.28, growT, grow0, dryT, thick, thrEnd, hold, fade, rim;
+    if (kind === "wet") {
       // the field's edge sits at ~0.58 of the half-quad, so the quad is 3.45x
-      // the radius; satellites reach a little past it
+      // the radius; satellites reach a little past it. No growth clock: the
+      // shape is its volume's, and the ledger rewrites it as volume arrives.
       cell = CELL_POOL[(Math.random() * 2) | 0];
-      sy = g * 3.45; sx = sy * (0.82 + Math.random() * 0.36);
-      growT = linger ? 5 + g * 6 + Math.random() * 3 : 1.2 + g * 2;
-      grow0 = linger ? 0.28 : 0.4;
-      dryT = linger ? 26 + g * 26 : 14 + g * 20;
-      thick = linger ? 1 : 0.8; thrEnd = 0.06 + Math.random() * 0.04;
-      hold = linger ? (near ? 90 : 30) : (near ? 45 : 16); fade = linger ? 16 : 10; rim = 0.29;
-    } else if (kind === "splat") {
-      cell = o.radial || !hasDir ? CELL_SPLAT[1] : CELL_SPLAT[0];
-      sx = sy = g * 4;
-      if (hasDir) spin = Math.atan2(-o.dirX, -o.dirZ);   // rays run away from the wound
-      growT = 0.16; grow0 = 0.25; dryT = 12 + g * 30; thick = 0.8; thrEnd = 0.07;
-      hold = near ? 70 : 24; fade = 12; rim = 0.25;
+      sy = g * 3.45 * (o.elong || 1); sx = g * 3.45;
+      growT = 0; grow0 = 1; dryT = 70 + Math.random() * 20; thick = 1; thrEnd = 0.06 + Math.random() * 0.04;
+      hold = near ? 120 : 40; fade = 16; rim = 0.29;
     } else {
       // a droplet's mark, `2g` across; an angled one is longer than it is wide
       // by 1/sin(angle) and throws its tail the way it was going
@@ -3722,26 +4205,388 @@
     m.scale.set(sx, sy, 1);
     ldWrite(c.slot, m, cell, 0, growT, dryT, grow0, thick, thrEnd, 1, 0);
     const rec = {
-      m, slot: c.slot, land: kind, t: 0, grow: g, max: g, hold, fade, rim,
+      m, slot: c.slot, land: kind, t: 0, grow: g, max: g, hold, fade, rim, spin,
       // snow that falls FROM NOW buries it; a big pool takes more of it than a
       // droplet mark, and the jitter is what makes a field go under raggedly.
       snow0: snowCover(), snowNeed: 0.22 + Math.min(0.30, g * 0.12) + Math.random() * 0.22,
     };
     splats.push(rec);
-    // THE RUN-OFF: what the hillside wouldn't hold leaves down the fall line.
-    // The threshold is above every droplet mark and below every real pool, so
-    // a body bleeding on a slope trails ONE streak instead of twenty.
-    if (steep && grow > 0.9) {
-      const dl = Math.hypot(s.gx, s.gz) || 1;
-      spawnStreak(x, z, -s.gx / dl, -s.gz / dl, Math.min(5.5, grow * (0.9 + s.grade * 1.9)));
-    }
     return rec;
   }
   // reused option records (no allocation per mark)
-  const NO_OPTS = {}, _poolO = { kind: "pool" }, _dotO = { kind: "dot" };
+  const NO_OPTS = {};
   const _dropO = { kind: "drop", dirX: 0, dirZ: 0, elong: 1 };
-  const _splatO = { kind: "splat", dirX: null, dirZ: null, radial: false };
+  const _wetO = { kind: "wet", spin: 0, elong: 1 };
 
+  /* ============================================================
+     BLOOD COLLECTS WHERE IT LANDS.
+     ------------------------------------------------------------
+     Every drop that reaches the floor, and every pour off a body lying on it,
+     arrives here with its volume (ml). The floor keeps a ledger of the wet
+     spots on it (GL): where each is, how much blood is in it, how long since
+     it was last fed.
+       • an arrival that lands on a spot still wet (inside its edge, or
+         touching it) JOINS it: the spot's blood is the sum, and its centre
+         moves toward where the blood comes in, weighted by volume. No new
+         mark, no new slot.
+       • otherwise a drop lays its own mark (sized by its impact: markD) and
+         becomes a spot of its own; a pour starts a pool.
+       • a spot that has been joined is a POOL: drawn at the area its volume
+         covers on a sealed floor, a film FILM_H deep (area = volume / depth:
+         10 ml ~ 9 cm across, 100 ml ~ 29 cm, 1 L ~ 92 cm), and redrawn bigger
+         as more arrives. It grows at the rate blood reaches it and stops when
+         that stops; it dries from its last feed.
+       • on a slope a pool slides down the fall line as it grows and draws
+         out along it (groundGrad); past STEEP, what the slope will not hold
+         leaves as a run (spawnStreak) for every ~150 ml it takes in.
+     So a man dripping where he stands makes one spot that becomes a pool, a
+     man bleeding on the floor makes a pool that comes out from under his
+     outline beside the wound and grows away from him (edgePour), a
+     walking man makes a line of separate drops, and a hundred drops into one
+     pool cost one slot, not a hundred.
+  ============================================================ */
+  // m: the depth blood spreads to on a flat sealed floor. One depth for every
+  // floor: nothing in the world says cheaply whether a spot is sealed
+  // concrete or the yard's dirt (where some would soak in: a smaller, darker
+  // patch), so dirt is drawn as concrete for now.
+  const FILM_H = 0.0015;
+  const M2_PER_ML = 1e-6 / FILM_H;     // floor one millilitre covers (~6.7 cm^2)
+  const GL_MAX = 192;
+  const GL = [];
+  for (let i = 0; i < GL_MAX; i++) GL.push({ on: false, pool: false, x: 0, y: 0, z: 0, cx: 0, cz: 0, v: 0, r: 0, k: 1,
+    rec: null, t0: 0, tf: 0, dryAt: 0, run: 0, edge: false, ax: 0, az: 0, enx: 0, enz: 1, ro: 0 });
+  const GROUND_AUDIT = { landedMl: 0, joined: 0, marks: 0, pools: 0, promoted: 0, pouredMl: 0, resized: 0, unseenMl: 0, runs: 0 };
+  function rOfMl(ml) { return Math.sqrt(Math.max(0, ml) * M2_PER_ML / Math.PI); }
+  function glLive(e) { return e.on && e.rec && e.rec.slot >= 0; }
+  function glWet(e) { return plumeClock - e.tf < (e.pool ? 150 : 30); }
+  // the wet spot an arrival at (x,y,z) reaching `reach` touches
+  function glFind(x, y, z, reach) {
+    let best = null, bd = Infinity;
+    for (let i = 0; i < GL_MAX; i++) {
+      const e = GL[i];
+      if (!e.on) continue;
+      if (!glLive(e)) { e.on = false; e.rec = null; continue; }
+      if (!glWet(e) || Math.abs(e.y - y) > 0.2) continue;
+      const dx = x - e.cx, dz = z - e.cz, R = e.r * e.k + reach, d2 = dx * dx + dz * dz;
+      if (d2 < R * R && d2 < bd) { bd = d2; best = e; }
+    }
+    return best;
+  }
+  // a free ledger entry, else the spot that has been dry longest (its mark stays; it is just not fed any more)
+  function glEntry() {
+    let pick = GL[0], old = Infinity;
+    for (let i = 0; i < GL_MAX; i++) {
+      const e = GL[i];
+      if (!e.on || !glLive(e)) { e.on = false; e.rec = null; return e; }
+      if (e.tf < old) { old = e.tf; pick = e; }
+    }
+    return pick;
+  }
+  // a spot's drawn shape from its volume (and the slope it is on)
+  function glShape(e) {
+    if (e.edge) return edgeShape(e);
+    const R = Math.max(e.r, rOfMl(e.v));
+    const rec = e.rec;
+    // keep it wet while it is fed, and keep it on the ground
+    rec.t = 0;
+    if (plumeClock - e.dryAt > 0.5 && ldTime) { ldTime.array[rec.slot * 4] = ldClock; ldTime.needsUpdate = true; e.dryAt = plumeClock; }
+    if (!e.pool) return;
+    const s = slopeOn() ? groundGrad(e.x, e.z) : null;
+    let cx = e.x, cz = e.z, k = 1, spin = rec.spin || 0, fx = 0, fz = 0;
+    if (s && s.grade >= FLATISH) {
+      const gl = Math.hypot(s.gx, s.gz) || 1;
+      fx = -s.gx / gl; fz = -s.gz / gl;
+      const off = Math.min(0.8, R * s.grade * 1.2);
+      cx += fx * off; cz += fz * off;
+      k = 1 + Math.min(1.2, s.grade * 1.6);
+      spin = Math.atan2(-fx, -fz);
+    }
+    if (R < e.r * 1.03 + 0.0015 && Math.abs(cx - e.cx) + Math.abs(cz - e.cz) < 0.004 && Math.abs(k - e.k) < 0.02) return;
+    const m = rec.m;
+    const sy0 = seatY, ss0 = seatSolid; seatY = e.y + 0.05; seatSolid = true;
+    try { seatDecal(m, cx, cz, spin, landLift(s), s); } finally { seatY = sy0; seatSolid = ss0; }
+    m.scale.set(R * 3.45, R * 3.45 * k, 1);
+    m.updateMatrix();
+    if (ldMesh && rec.slot >= 0) { ldMesh.setMatrixAt(rec.slot, m.matrix); ldMatDirty = true; }
+    rec.grow = rec.max = R;
+    e.r = R; e.cx = cx; e.cz = cz; e.k = k;
+    GROUND_AUDIT.resized++;
+    // past STEEP the slope does not hold it: what it will not hold runs on down
+    if (s && s.grade > STEEP && e.v - e.run > 150) {
+      spawnStreak(cx, cz, fx, fz, Math.min(5.5, (e.v - e.run) / 150));
+      e.run = e.v; GROUND_AUDIT.runs++;
+    }
+  }
+  // an EDGE pool (edgePour): its visible area out from the body's edge is its
+  // volume's; it runs downhill like any other
+  function edgeShape(e) {
+    const rec = e.rec;
+    rec.t = 0;
+    if (plumeClock - e.dryAt > 0.5 && ldTime) { ldTime.array[rec.slot * 4] = ldClock; ldTime.needsUpdate = true; e.dryAt = plumeClock; }
+    const R = Math.max(0.006, Math.sqrt(e.v * M2_PER_ML / EDGE_VIS));
+    const ro = R / EDGE_LONG, along = R * EDGE_LONG;
+    let cx = e.ax + e.enx * EDGE_OFF * ro, cz = e.az + e.enz * EDGE_OFF * ro;
+    const s = slopeOn() ? groundGrad(cx, cz) : null;
+    if (s && s.grade >= FLATISH) {
+      const gl = Math.hypot(s.gx, s.gz) || 1, off = Math.min(0.8, R * s.grade * 1.2);
+      cx += -s.gx / gl * off; cz += -s.gz / gl * off;
+    }
+    if (Math.abs(R - e.r) < e.r * 0.03 + 0.0015 && Math.abs(cx - e.cx) + Math.abs(cz - e.cz) < 0.004) return;
+    const m = rec.m;
+    const sy0 = seatY, ss0 = seatSolid; seatY = e.y + 0.02; seatSolid = true;
+    // local +y out from the edge, local +x along it
+    try { seatDecal(m, cx, cz, Math.atan2(-e.enx, -e.enz), landLift(s), s); } finally { seatY = sy0; seatSolid = ss0; }
+    m.scale.set(along * 3.45, ro * 3.45, 1);
+    m.updateMatrix();
+    if (ldMesh && rec.slot >= 0) { ldMesh.setMatrixAt(rec.slot, m.matrix); ldMatDirty = true; }
+    rec.grow = rec.max = R;
+    e.r = R; e.ro = ro; e.k = EDGE_LONG; e.cx = cx; e.cz = cz;
+    GROUND_AUDIT.resized++;
+  }
+  // turn a single drop's spot into a pool (its mark's slot goes back, the pool takes one)
+  function glPromote(e) {
+    const old = e.rec;
+    _wetO.spin = Math.random() * 6.28; _wetO.elong = 1;
+    const sy0 = seatY, ss0 = seatSolid; seatY = e.y + 0.05; seatSolid = true;
+    let rec = null;
+    try { rec = spawnSplat(e.x, e.z, Math.max(e.r, rOfMl(e.v)), BLOOD_D, false, _wetO); } finally { seatY = sy0; seatSolid = ss0; }
+    if (!rec) return;
+    const k = splats.indexOf(old);
+    if (k >= 0) { freeSlick(old); splats.splice(k, 1); }
+    e.rec = rec; e.pool = true; e.cx = e.x; e.cz = e.z; e.k = 1; e.r = rec.grow;
+    GROUND_AUDIT.promoted++;
+  }
+  function glFeed(e, ml, x, z) {
+    const f = ml / (e.v + ml);
+    if (!e.edge) { e.x += (x - e.x) * f; e.z += (z - e.z) * f; }
+    e.v += ml; e.tf = plumeClock;
+    GROUND_AUDIT.joined++;
+    if (!e.pool) glPromote(e);
+    if (glLive(e)) glShape(e);
+  }
+  // join wet blood at (x,y,z) if there is any within `reach`: true = joined
+  function joinWet(x, y, z, ml, reach) {
+    if (!(ml > 0)) return false;
+    const e = glFind(x, y, z, reach + 0.012);     // + the splash's own spread
+    if (!e) return false;
+    glFeed(e, ml, x, z);
+    return true;
+  }
+  // a drop's blood reaching the floor at (x,y,z), moving (vx,vy,vz), its mark D across
+  // the last few drops that reached the floor (goreBleedAudit's `lastLands`:
+  // where, how much, when, and whether it joined wet blood) — a trail's spacing
+  const LR_N = 48, LR = new Float32Array(LR_N * 5);
+  let lrHead = 0, lrN = 0;
+  function noteLand(x, z, ml, joined) {
+    const o = lrHead * 5;
+    LR[o] = x; LR[o + 1] = z; LR[o + 2] = ml; LR[o + 3] = plumeClock; LR[o + 4] = joined ? 1 : 0;
+    lrHead = (lrHead + 1) % LR_N; if (lrN < LR_N) lrN++;
+  }
+  function landVol(x, y, z, ml, vx, vy, vz, D) {
+    GROUND_AUDIT.landedMl += ml;
+    const joined = joinWet(x, y, z, ml, D * 0.5);
+    noteLand(x, z, ml, joined);
+    if (joined) return;
+    // a 3 mm mark is real, and invisible from across the room: no stain slot
+    // for one nobody can see
+    if (D < 0.0035 && dist2Cam(x, z) > 8 * 8) { AIR_AUDIT.skippedMarks++; GROUND_AUDIT.unseenMl += ml; return; }
+    const hs = Math.hypot(vx, vz), sp = Math.hypot(hs, vy);
+    const sinA = Math.abs(vy) / (sp || 1);
+    // a drop that had any way on it lands longer than wide, tail the way it went
+    _dropO.kind = sinA > 0.985 || hs < 0.25 ? "dot" : "drop";
+    _dropO.dirX = hs > 0 ? vx / hs : 0; _dropO.dirZ = hs > 0 ? vz / hs : 0;
+    _dropO.elong = 1 / Math.max(0.2, sinA);
+    const rec = spawnSplat(x, z, D * 0.5, BLOOD_D, false, _dropO);
+    if (!rec) return;
+    AIR_AUDIT.lands++; GROUND_AUDIT.marks++;
+    const e = glEntry();
+    e.on = true; e.pool = false; e.edge = false; e.x = e.cx = x; e.z = e.cz = z; e.y = y; e.v = ml; e.r = D * 0.5; e.k = 1;
+    e.rec = rec; e.t0 = e.tf = e.dryAt = plumeClock; e.run = 0;
+  }
+  // blood running off a body lying on the floor, onto the floor at (x,fy,z).
+  // `last` is the spot this wound fed last time (the fast path) -> the spot fed
+  function landPour(x, fy, z, ml, last) {
+    GROUND_AUDIT.landedMl += ml; GROUND_AUDIT.pouredMl += ml;
+    let e = last && last.on && glLive(last) && glWet(last) ? last : null;
+    if (e) {
+      const dx = x - e.cx, dz = z - e.cz, R = e.r * e.k + 0.03;
+      if (dx * dx + dz * dz > R * R) e = null;
+    }
+    if (!e) e = glFind(x, fy, z, 0.03);
+    if (e) { glFeed(e, ml, x, z); return e; }
+    _wetO.spin = Math.random() * 6.28; _wetO.elong = 1;
+    const rec = spawnSplat(x, z, Math.max(0.006, rOfMl(ml)), BLOOD_D, false, _wetO);
+    if (!rec) return null;
+    GROUND_AUDIT.pools++;
+    e = glEntry();
+    e.on = true; e.pool = true; e.edge = false; e.x = e.cx = x; e.z = e.cz = z; e.y = decalFloorAt(x, z, fy + 0.05, true); e.v = ml; e.r = rec.grow; e.k = 1;
+    e.rec = rec; e.t0 = e.tf = e.dryAt = plumeClock; e.run = 0;
+    glShape(e);
+    return e;
+  }
+  /* ---- WHERE A LYING BODY'S BLOOD REACHES THE FLOOR ------------------------
+     Blood cannot spread between a body and the floor it lies on. From a wound
+     on a man lying down it runs over him, under gravity, to where he meets
+     the floor, and comes out from under him THERE, at the edge of his
+     outline, and spreads outward away from it; his footprint takes none.
+     The outline is the drawn body (bodyCaps: a capsule per body mesh,
+     flattened onto the floor). Which way it runs: across the part the wound
+     is on (its capsule's axis), toward the side the wound sits on (a flank
+     wound out of that flank); a wound in the middle of the belly or the back
+     (on top, or on the side he lies on) runs to the side the ground falls
+     away to, else to one side picked once per wound. Where it comes out: the
+     first point along that way from the wound that is outside every capsule
+     of his outline, plus a centimetre. EDGE <- where (x,z) and which way out
+     (nx,nz). False = no drawn body to go round (a crowd row, a severed piece). */
+  const EDGE = { x: 0, z: 0, nx: 0, nz: 1 };
+  function rigOf(a) { return a === CBZ.player && CBZ.playerChar ? CBZ.playerChar : actorChar(a); }
+  function insideBody(n, x, z) {
+    for (let i = 0; i < n; i++) if (capDist(i, x, 0, z, true) < 0) return true;
+    return false;
+  }
+  /* HIS OUTLINE, from the body's own live part colliders when the contact
+     pass keeps them (humancontact.js CBZ.bodyParts.partsOf: 13 capsules read
+     off the pose every frame — two trunk halves, head, upper arms, forearms,
+     thighs, shins, feet), else from the drawn meshes (bodyCaps). Written into
+     the same BC_* arrays (the mesh cache is dropped when it is). */
+  const FP_ZONE = ["chest", "chest", "head", "armL", "armL", "armR", "armR", "legL", "legL", "legR", "legR", "legL", "legR"];
+  let fpSrc = "";
+  function footCaps(ch) {
+    const BP = CBZ.bodyParts;
+    let P = null;
+    if (BP && BP.partsOf) { try { P = BP.partsOf(ch, 0); } catch (e) { P = null; } }
+    if (P && P.ok && P.f && P.f.length >= 13 * 7) {
+      const f = P.f;
+      bcCh = null; bcN = 0;
+      for (let i = 0, q = 0; i < 13; i++, q += 7) {
+        const ax = f[q + 3] - f[q], ay = f[q + 4] - f[q + 1], az = f[q + 5] - f[q + 2];
+        const l = Math.sqrt(ax * ax + ay * ay + az * az);
+        BC_X[i] = (f[q] + f[q + 3]) * 0.5; BC_Y[i] = (f[q + 1] + f[q + 4]) * 0.5; BC_Z[i] = (f[q + 2] + f[q + 5]) * 0.5;
+        if (l > 1e-5) { BC_AX[i] = ax / l; BC_AY[i] = ay / l; BC_AZ[i] = az / l; } else { BC_AX[i] = 0; BC_AY[i] = 1; BC_AZ[i] = 0; }
+        BC_HL[i] = l * 0.5; BC_HW[i] = f[q + 6]; BC_M[i] = null; BC_Z0[i] = FP_ZONE[i];
+      }
+      fpSrc = "contact";
+      return 13;
+    }
+    fpSrc = "meshes";
+    return bodyCaps(ch);
+  }
+  function bodyEdge(w) {
+    const a = w.actor;
+    const ch = a ? rigOf(a) : null;
+    const n = ch ? footCaps(ch) : 0;
+    if (!n) return false;
+    // the part the wound is on: its own capsule, else the nearest one
+    let pi = -1, bd = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (BC_M[i] === w.node) { pi = i; break; }
+      const d = capDist(i, w.x, w.y, w.z, false);
+      if (d < bd) { bd = d; pi = i; }
+    }
+    let ax = BC_AX[pi], az = BC_AZ[pi];
+    const al = Math.hypot(ax, az);
+    const round = BC_Z0[pi] === "head" || al < 0.35;
+    const sl = slopeOn() ? groundGrad(w.x, w.z) : null;
+    const down = !!(sl && sl.grade > 0.05);
+    let nx, nz;
+    if (!round) {
+      ax /= al; az /= al;
+      const px = -az, pz = ax;
+      const lat = (w.x - BC_X[pi]) * px + (w.z - BC_Z[pi]) * pz;
+      let side;
+      if (down) side = (px * -sl.gx + pz * -sl.gz) >= 0 ? 1 : -1;     // downhill wins
+      else if (Math.abs(lat) > 0.03) side = lat >= 0 ? 1 : -1;
+      else side = w.side;
+      nx = px * side; nz = pz * side;
+    } else {
+      nx = w.x - BC_X[pi]; nz = w.z - BC_Z[pi];
+      if (down) { nx = -sl.gx; nz = -sl.gz; }
+      const l = Math.hypot(nx, nz);
+      if (l > 0.01) { nx /= l; nz /= l; } else { nx = w.nx; nz = w.nz; }
+    }
+    // out from under him: the first point along (nx,nz) outside his outline
+    let s = 0;
+    w.fpIn = insideBody(n, w.x, w.z); w.fpN = n; w.fpSrc = fpSrc;
+    while (s < 1.2 && insideBody(n, w.x + nx * s, w.z + nz * s)) s += 0.02;
+    s += 0.01;
+    w.fpExit = s;
+    EDGE.nx = nx; EDGE.nz = nz; EDGE.x = w.x + nx * s; EDGE.z = w.z + nz * s;
+    return true;
+  }
+  /* edgePour: blood coming out from under a body at (ex,ez), spreading out
+     along (nx,nz). The spot it feeds is an EDGE pool: an ellipse 1.25x
+     longer along his edge than out from it, whose near rim sits AT the edge
+     (5% of it tucked under him so it hugs the outline) and which grows
+     outward from there; none of it is spent under the body. Its area is its
+     volume over the film depth (pi R^2 for the R it is drawn at). -> the
+     spot fed */
+  const EDGE_VIS = Math.PI, EDGE_LONG = 1.25, EDGE_OFF = 0.95;
+  function edgePour(w, ex, ez, nx, nz, fy, ml) {
+    GROUND_AUDIT.landedMl += ml; GROUND_AUDIT.pouredMl += ml;
+    let e = w.entry;
+    if (e && (!e.on || !glLive(e) || !glWet(e) || !e.edge || (ex - e.ax) * (ex - e.ax) + (ez - e.az) * (ez - e.az) > 0.15 * 0.15)) e = null;
+    if (!e) {
+      _wetO.spin = Math.atan2(-nx, -nz); _wetO.elong = 1;
+      const rec = spawnSplat(ex, ez, Math.max(0.006, rOfMl(ml)), BLOOD_D, false, _wetO);
+      if (!rec) return null;
+      GROUND_AUDIT.pools++;
+      e = glEntry();
+      e.on = true; e.pool = true; e.edge = true; e.x = e.cx = e.ax = ex; e.z = e.cz = e.az = ez; e.enx = nx; e.enz = nz;
+      // the surface it lies on, read the way a drop's landing is (AFL)
+      e.y = decalFloorAt(ex, ez, fy + 0.05, true); e.v = 0; e.r = rec.grow; e.k = 1; e.rec = rec; e.t0 = e.tf = e.dryAt = plumeClock; e.run = 0;
+    } else {
+      // the body settles: the edge follows it a little
+      e.ax += (ex - e.ax) * 0.2; e.az += (ez - e.az) * 0.2;
+      let mx = e.enx + (nx - e.enx) * 0.2, mz = e.enz + (nz - e.enz) * 0.2;
+      const l = Math.hypot(mx, mz) || 1; e.enx = mx / l; e.enz = mz / l;
+    }
+    e.v += ml; e.tf = plumeClock;
+    GROUND_AUDIT.joined++;
+    glShape(e);
+    return e;
+  }
+  /* WHAT THE GPU HAS FOR A MARK: read back from the instance matrix and the
+     per-instance values actually written for its slot (not from the model).
+     sx/sy: the quad's world size along its local x / y (m); the visible
+     blood reaches ~0.58 of each half (radius ~ 0.29 x size); rotY: the
+     heading of its local +y on the ground (atan2(x, z)); up: its normal's y
+     (1 = lying flat face up); alpha / thr: what the shader is given;
+     visible: a live slot, a non-zero quad, alpha > 0, in the scene. */
+  const _dm = new THREE.Matrix4(), _dp = new THREE.Vector3(), _dq = new THREE.Quaternion(), _ds = new THREE.Vector3();
+  function drawnOf(rec) {
+    if (!rec || !ldMesh || rec.slot == null || rec.slot < 0) return { slot: rec ? rec.slot : null, visible: false };
+    ldMesh.getMatrixAt(rec.slot, _dm);
+    const el = _dm.elements;
+    _dm.decompose(_dp, _dq, _ds);
+    const i = rec.slot * 4;
+    const alpha = ldFx.array[i], thr = ldFx.array[i + 3] + ldFx.array[i + 2];
+    const ny = el[9] / (Math.hypot(el[8], el[9], el[10]) || 1);
+    return {
+      slot: rec.slot, x: +_dp.x.toFixed(3), y: +_dp.y.toFixed(3), z: +_dp.z.toFixed(3),
+      sx: +Math.abs(_ds.x).toFixed(3), sy: +Math.abs(_ds.y).toFixed(3),
+      rotY: +Math.atan2(el[4], el[6]).toFixed(3), up: +ny.toFixed(2), alpha: +alpha.toFixed(2), thr: +thr.toFixed(3),
+      born: +ldTime.array[i].toFixed(2), clock: +ldClock.toFixed(2),
+      visible: !!(ldMesh.parent && Math.abs(_ds.x) > 1e-4 && Math.abs(_ds.y) > 1e-4 && alpha > 0.004 && thr < 1 && ldTime.array[i] <= ldClock + 1e-3),
+    };
+  }
+  // the live pools, for goreBleedAudit
+  function poolList() {
+    const out = [];
+    for (let i = 0; i < GL_MAX; i++) {
+      const e = GL[i];
+      if (!e.on || !glLive(e) || !e.pool) continue;
+      // an edge pool: visible area = volume / film depth; how far it reaches
+      // out beyond the body's outline, and how long it runs along it
+      out.push({ x: +e.cx.toFixed(2), y: +e.y.toFixed(2), z: +e.cz.toFixed(2), ml: +e.v.toFixed(1),
+        areaM2: +(e.edge ? e.v * M2_PER_ML : Math.PI * e.r * e.r * e.k).toFixed(4), radiusM: +e.r.toFixed(3),
+        edge: !!e.edge, beyondBodyM: e.edge ? +((1 + EDGE_OFF) * e.ro).toFixed(3) : null,
+        alongBodyM: e.edge ? +(2 * e.r * EDGE_LONG).toFixed(3) : null,
+        edgeAt: e.edge ? [+e.ax.toFixed(2), +e.az.toFixed(2)] : null,
+        ageS: +(plumeClock - e.t0).toFixed(1), fedAgoS: +(plumeClock - e.tf).toFixed(1), wet: glWet(e),
+        drawn: drawnOf(e.rec) });
+    }
+    return out;
+  }
   // a long blood smear dragged along a travel line (run-over kills, and the
   // downhill run-off above). It is laid at its final length and DRAWN by the
   // shader from the start (under the body) to the end over ~half a second,
@@ -3782,11 +4627,11 @@
     return rec;
   }
 
-  // is this collider's struck face SEE-THROUGH (intact glass pane / door vision
-  // glass / water) rather than an opaque wall? The showroom-solid glass panes
-  // push a collider whose .ref is the pane mesh on the shared transparent
-  // glassMat — a blood plane on those would float on visible-through glass. A
-  // genuine wall box is opaque. Cheap: one material flag read, no allocation.
+  // is this collider's struck face a PANE (intact glass, a door's vision
+  // glass): a collider whose .ref is a transparent mesh. A drop stops on it
+  // like on a wall; the mark is laid at the pane's own face (drawnFace finds
+  // it), so it is on the glass, not floating in front of it. Cheap: one
+  // material flag read, no allocation.
   function isSeeThroughCol(c) {
     const r = c && c.ref;
     const mat = r && r.material;
@@ -3810,9 +4655,9 @@
      stain because many marks overlap in the core.
 
      WHAT A CHORD CAN MEET (sweepHit):
-       * a COLLIDER (wallFace, below), when the face is opaque (glass lets
-         the drop through), not a shot-out hole, not a vehicle (the car's own
-         meshes take its blood: vehicleSpray), inside the solid's height band
+       * a COLLIDER (wallFace, below): an opaque face or an intact pane of
+         glass (the mark lies on the glass), not a shot-out hole, not a
+         vehicle (the car's own meshes take its blood: carOnChord), inside the solid's height band
          (declared, or measured off the drawn mesh: drawnBand), and, when the
          collider names its drawn mesh (c.ref), the chord meets THAT MESH: a
          box whose mesh is not under the chord (a fence between its posts, a
@@ -3913,7 +4758,7 @@
          proved: the drawn mesh was found under the hit, drawn: false }
      null when it met nothing. Vehicles met on the way are noted for
      vehicleSpray (_vehNoted; the caller clears it). */
-  const _wf = { kind: 0, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, a0: 0, a1: 0, b0: 0, b1: 0, proved: false, drawn: false };
+  const _wf = { kind: 0, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, a0: 0, a1: 0, b0: 0, b1: 0, proved: false, drawn: false, glass: false };
   const _wfHit = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
   const _wfOpts = { minT: 0 };
   function wallFace(x, y, z, dx, dy, dz, len) {
@@ -3926,8 +4771,10 @@
       const H = _wfHit, t = H.t;
       minT = t + 1e-4;
       const vr = vehOfCol(c);
-      if (vr) { noteVehicle(vr); continue; }   // the car's own meshes take it
-      if (isSeeThroughCol(c)) continue;          // intact glass pane / door vision: flies through
+      if (vr) { noteVehicle(vr); continue; }   // the car's own meshes take it (carOnChord)
+      // an intact pane (a window, a door's vision glass) is a surface like
+      // any other: the drop stops on the glass and its mark is on the glass
+      const glass = isSeeThroughCol(c);
       // the solid height band: declared, else measured off the drawn mesh
       let y0 = c.y1 != null ? (c.y0 || 0) : -1e9, y1 = c.y1 != null ? c.y1 : 1e9;
       if (c.y1 == null) { const band = drawnBand(c); if (band) { y0 = band.y0; y1 = band.y1; } }
@@ -3945,7 +4792,7 @@
       }
       const kind = ny > 0.7 ? 1 : (ny < -0.7 ? 2 : 0);
       _wf.kind = kind; _wf.c = c; _wf.t = ht; _wf.x = hx; _wf.y = hy; _wf.z = hz;
-      _wf.proved = proved; _wf.drawn = false;
+      _wf.proved = proved; _wf.drawn = false; _wf.glass = glass;
       const ori = !!(c.yaw && c.hw != null);
       if (kind === 0) {
         const hl = Math.hypot(nx, nz) || 1; nx /= hl; nz /= hl;
@@ -3980,7 +4827,8 @@
 
   /* ============================================================
      THE DRAWN BOXES NO COLLIDER STANDS FOR. A door's frame and architrave,
-     a sill, a dado rail, a shelf's edge are drawn and have no collider, so a
+     a sill, a dado rail, a shelf's edge, a round bar or a pipe (a thin
+     cylinder along an axis) are drawn and have no collider, so a
      drop swept against the colliders alone flew straight through them. The
      static batch (core/batch.js batchStaticUnder) then merges them into tile
      buffers that keep no CPU copy (core/citystream.js freeStaticArrays), so
@@ -4020,7 +4868,11 @@
     root.traverse(function (o) {
       if (added >= cap || !o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || refs.has(o) || dbSeen.has(o)) return;
       const g = o.geometry, p = g && g.parameters;
-      if (!p || g.type !== "BoxGeometry") return;
+      // a box, or a ROUND BAR / PIPE (a thin cylinder along a world axis:
+      // its box is its square envelope, a few mm off the round on the
+      // diagonals, which is the bar for a drop that hits it)
+      const cyl = !!(p && g.type === "CylinderGeometry" && Math.max(p.radiusTop, p.radiusBottom) <= 0.08);
+      if (!p || (g.type !== "BoxGeometry" && !cyl)) return;
       const P = g.attributes && g.attributes.position;
       if (!P || !P.array || P.isInterleavedBufferAttribute || P.itemSize !== 3) return;
       const mat = o.material;
@@ -4048,7 +4900,8 @@
       if (!(mn > 0.003) || mn > 0.3 || mx > 16) return;
       // axis-aligned only: a yawed box's envelope is not its surface
       const det = Math.abs(e[0] * (e[5] * e[10] - e[6] * e[9]) - e[4] * (e[1] * e[10] - e[2] * e[9]) + e[8] * (e[1] * e[6] - e[2] * e[5]));
-      const vol = p.width * p.height * p.depth * det;
+      const cr = cyl ? Math.max(p.radiusTop, p.radiusBottom) : 0;
+      const vol = (cyl ? 4 * cr * cr * p.height : p.width * p.height * p.depth) * det;
       if (!(vol > 0) || sx * sy * sz > vol * 1.03) return;
       const own = top === o ? root : top;
       let oi = owners.get(own);
@@ -4076,7 +4929,7 @@
   // the nearest drawn box the segment enters before `len` -> a HIT record
   // (drawn: true, c: null) or null. A segment that starts inside a box (a
   // drop born in the trim) does not hit it.
-  const _dbh = { kind: 0, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, a0: 0, a1: 0, b0: 0, b1: 0, proved: true, drawn: true };
+  const _dbh = { kind: 0, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, a0: 0, a1: 0, b0: 0, b1: 0, proved: true, drawn: true, glass: false };
   function drawnBoxHit(ox, oy, oz, dx, dy, dz, len) {
     if (!dbN || !(len > 0)) return null;
     const ex = ox + dx * len, ez = oz + dz * len;
@@ -4178,6 +5031,9 @@
          clearcoat and lighting come through. Glass: a thin translucent film
          that runs DOWN the pane (a shader smear along the projected gravity),
          drawn after the glass.
+       * A SINGLE DROP that meets a car in flight stops on it and marks it the
+         same way, a drop-sized piece (carOnChord), within the budgets: never
+         pushing out a mark the car already wears, two new ones a frame.
        * Rain washes it, speed thins it. Per car cap 5, global cap rides the
          quality tier (10 phone .. 36), pooled meshes, materials and buffers.
   ============================================================ */
@@ -4770,32 +5626,18 @@
     const d = imp && imp.dist != null ? imp.dist : 99;
     return k.indexOf("shotgun") >= 0 && d <= 5.5;
   }
-  // HEAVY NECK-STUMP SPURT: a real decapitation pumps from the open neck —
-  // three beats of an arterial jet up out of the stump (it rides the stump,
-  // so it follows the body down), each weaker than the last, and one dark
-  // puff over it the moment the head leaves. Falls back to the neck's seat
-  // when the stump is missing (a far/culled rig).
+  // the open neck of a severed head is the stump's wound (severBody opens it:
+  // the carotids spurt while the heart has beats in it, then it pours); the
+  // blast that took the head off throws its mist now
   function neckStumpSpurt(actor, x, y, z, dx, dz, lod) {
-    const st = stumpOf(actor, "head");
-    const o = { speed: 4.6, pulses: 3, period: 0.46, len: 0.26, fall: 0.7, rate: 70, r0: 1.2, r1: 3.5, spread: 0.16 };
     const ny = y + STUMPS.head.py - 0.06;   // y arrives chest-high; lift to the neck
-    // the joint's own two-beat pump on this stump is superseded by the neck's
-    if (st) { for (let e = 0; e < EM_MAX; e++) if (E_ON[e] && E_REF[e] === st) stopStream(e); airStream(2, st, 0, 0, 0, 0, 1, 0, o); }
-    else airStream(0, null, x, ny, z, dx * 0.4, 1, dz * 0.4, o);
     const nm = lod < 0.5 ? 1 : 3;
     for (let i = 0; i < nm; i++) {
       const v = cone(dx * 0.5, 1, dz * 0.5, 0.6), sp = 1.2 + Math.random() * 1.6;
       airMist(x, ny + 0.08, z, v.x * sp, v.y * sp, v.z * sp, 0.04, 0.22 + Math.random() * 0.14, 0.28 + Math.random() * 0.1, 0.3);
     }
   }
-  function stumpOf(actor, key) {
-    for (let i = 0; i < severed.length; i++) {
-      if (severed[i].actor !== actor) continue;
-      const it = severed[i].items;
-      for (let j = 0; j < it.length; j++) if (it[j].key === key) return it[j].stump;
-    }
-    return null;
-  }
+  const _UPY = new THREE.Vector3(0, 1, 0);
 
   // ---- HEADSHOT: dry skull fragments riding the exit line --------------------
   // bone doesn't bleed — fragments are flagged "bled" so landing leaves no pool,
@@ -4812,9 +5654,10 @@
     }
   }
 
-  // ---- BLUNT KILL: teeth + spit knocked loose by the killing blow ------------
-  // tiny dry gibs (teeth scatter and STAY — they're the receipt of a beating)
-  // plus a couple of bright spit-blood droplets; the pool comes LATER, below.
+  // ---- BLUNT KILL: teeth knocked loose by the killing blow -------------------
+  // tiny dry pieces (teeth scatter and STAY — they're the receipt of a
+  // beating). The blood is whatever the blows opened (vitals' lacerations),
+  // bleeding where it is; the blow itself threw what was already on his face.
   function bluntBurst(x, y, z, dx, dz, hasDir) {
     const n = 4 + ((Math.random() * 3) | 0);
     for (let i = 0; i < n; i++) {
@@ -4823,73 +5666,29 @@
       const b = spawnBit(x, y + 1.1, z,        // y already arrives chest-high — +1.1 = the mouth
         fx + (Math.random() - 0.5) * 2, 2.5 + Math.random() * 3, fz + (Math.random() - 0.5) * 2,
         0.045 + Math.random() * 0.035, TOOTH, "gib");
-      if (b) b.bled = true;          // teeth are dry — no pool where one lands
-    }
-    // and the mouth bleeds: a few drops of spit and blood off the split lip
-    const ns = 3 + ((Math.random() * 3) | 0);
-    for (let i = 0; i < ns; i++) {
-      const v = hasDir ? cone(dx, 0.5, dz, 0.55) : cone(0, 1, 0, 1.0);
-      const sp = 1.6 + Math.random() * 1.8;
-      airDrop(x, y + 1.05, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.6, 2.4), 0, 0, 0);
+      if (b) b.bled = true;          // teeth are dry — nothing bleeds where one lands
     }
   }
 
-  // ---- WHERE THE BODY ACTUALLY LIES ----------------------------------------
-  // The kill pool is stamped where the ROUND landed, but a ragdoll slides a
-  // metre or two before it stops — so a corpse routinely ends up sitting NEXT
-  // TO its own blood, which is the other half of "it looks fake". A second,
-  // later pool seated under wherever the body came to rest ties the scene back
-  // into one event (and it is what actually happens: a man bleeds where he was
-  // hit, then keeps bleeding where he falls).
-  //
-  // Deliberately actor-LESS: gore() is positional and only city kills carry a
-  // victim through the kill tap, so this finds the nearest corpse itself. Every
-  // mode's actor list publishes a position, so no caller changes.
-  const CORPSE_LISTS = ["guards", "npcs", "cityPeds", "cityCops", "bots"];
-  const _rp = { x: 0, z: 0 };
-  function corpsePos(a, out) {
-    if (!a || !a.dead || a.culled) return null;
-    if (a.group && a.group.position) { out.x = a.group.position.x; out.z = a.group.position.z; return out; }
-    if (a.pos) { out.x = a.pos.x; out.z = a.pos.z; return out; }
-    return null;
-  }
-  function restingPool(x, z, amt) {
-    if (!realism()) return;
-    after(1.5, function () {
-      let bx = 0, bz = 0, best = 3.6 * 3.6, found = false;
-      for (let L = 0; L < CORPSE_LISTS.length; L++) {
-        const list = CBZ[CORPSE_LISTS[L]];
-        if (!list || !list.length) continue;
-        for (let i = 0; i < list.length; i++) {
-          const p = corpsePos(list[i], _rp);
-          if (!p) continue;
-          const dx = p.x - x, dz = p.z - z, d2 = dx * dx + dz * dz;
-          if (d2 < best) { best = d2; bx = p.x; bz = p.z; found = true; }
-        }
-      }
-      // only worth a second decal if the body genuinely travelled away from it
-      if (found && best > 0.18) spawnSplat(bx, bz, (0.55 + amt * 0.3) * POOL_K * 1.35, BLOOD_D, true);
-    });
-  }
-
-  // a beaten body doesn't gush — it BLEEDS OUT: the pool arrives in waves a
-  // couple of seconds after the body drops, spreading under wherever it lies.
-  function delayedBleedPool(ped) {
-    const pk = realism() ? POOL_K : 1;
-    after(1.5, function () { if (ped && ped.pos && !ped.culled) spawnSplat(ped.pos.x, ped.pos.z, 0.9 * pk, BLOOD_D, true); });
-    after(3.3, function () { if (ped && ped.pos && !ped.culled) spawnSplat(ped.pos.x, ped.pos.z, 1.5 * pk, BLOOD_D, true); });
-  }
-
-  // ---- BLADE KILL: the ARTERIAL beats as the heart dies ----------------------
-  // A jet out of the wound that rides the body as it goes down (chest-high at
-  // the first beat, lying at the last), four beats, each weaker; every drop
-  // that lands leaves its own mark. With no body to ride (the prison's kill
-  // path is positional) it pumps from where the blow landed.
-  function arterialArcs(ped, x, y, z, dx, dz) {
-    const o = { speed: 3.4, pulses: 4, period: 0.5, len: 0.24, fall: 0.72, rate: 60, r0: 1.0, r1: 3.0, spread: 0.1, delay: 0.12, y1: 0.35 };
-    const jx = dx * 0.8 + (Math.random() - 0.5) * 0.3, jz = dz * 0.8 + (Math.random() - 0.5) * 0.3;
-    if (ped && (ped.pos || ped.group)) { o.y1 = 0.35; airStream(1, ped, 0, 1.15, 0, jx, 0.75, jz, o); }
-    else { o.y1 = y + 0.15; airStream(0, null, x, y + 0.15, z, jx, 0.75, jz, o); }
+  /* ---- THE HOLE HE DRAINS FROM ---------------------------------------------
+     A kill leaves the body a wound to empty through. When the killing blow
+     opened one that something already keeps (vitals.js: the round, the blade,
+     the split scalp), that is it, and nothing is added. When nothing does
+     (CBZ.aiKill with no cause, an NPC shot by an NPC in a mode with no
+     vitals record, a blast, a fall, the island's causes), the hole is opened
+     HERE, on the part that was hit, at the point that was hit (no point:
+     the kill's own height, chest-high, or the head for a headshot). A dead
+     heart pushes nothing, so it is a drain: what a hole of that kind lets
+     out by gravity over a few minutes (KILL_DRAIN: ml in all, falling off
+     with tau 90 s; a lying body's low holes drain faster than its high ones,
+     see A WOUND BLEEDS). It drips while the body falls, soaks his clothes,
+     and comes out from under his outline once he is down. */
+  const KILL_DRAIN = { shot: 600, head: 500, blast: 1200, blade: 800, blunt: 100, bite: 800, fall: 700 };
+  const KILL_TAU = 90;
+  function killWound(actor, x, y, z, how) {
+    if (!actor || bleedsAlready(actor)) return null;
+    const ml = KILL_DRAIN[how] || KILL_DRAIN.shot;
+    return woundOn(actor, x, y, z, { lps: ml / KILL_TAU / 1000, tau: KILL_TAU, site: how === "head" ? "head" : "" });
   }
 
   // ---- NO CORPSE STAIN (owner 2026-10-09: "I don't really like clothes
@@ -5237,41 +6036,6 @@
     return k > 1 ? 1 : k;
   }
 
-  // A SINGLE DRIP. Deliberately not goreImpact: a man walking with an open
-  // wound leaves marks, not a spray and a pool at every footfall. One tiny
-  // short-lived splat, seated on the terrain like every other ground decal.
-  // A POOL LAYER under a body that is still bleeding (systems/vitals.js calls
-  // this as blood leaves a lying man: each call a bigger layer, to its cap).
-  // `grow` is spawnSplat's own pool size (0.3 small .. 2.4 a man bled out).
-  // y (optional): the height of the body it comes out of, so it lands on the
-  // floor he is on (an upper storey, a deck), not on the street under it
-  CBZ.gorePool = function (x, z, grow, y) {
-    if (!CBZ.scene || dist2Cam(x, z) > 60 * 60) return null;
-    const sy0 = seatY; if (y != null && isFinite(y)) seatY = y + 0.3;
-    try { return spawnSplat(x, z, Math.max(0.2, Math.min(2.4, grow || 0.6)) * POOL_K * 1.35, BLOOD_D, true); } finally { seatY = sy0; }
-  };
-  CBZ.goreDrip = function (x, z, size, y) {
-    if (!CBZ.scene) return;
-    const sy0 = seatY; if (y != null && isFinite(y)) seatY = y + 0.3;
-    try { return drip(x, z, size); } finally { seatY = sy0; }
-  };
-  function drip(x, z, size, fromY) {
-    const d2 = dist2Cam(x, z);
-    if (d2 > 55 * 55) return;
-    // `size` keeps its old scale (0.1-0.5); a walking drip lands 2-6 cm across
-    const g = Math.max(0.1, Math.min(0.5, size == null ? 0.22 : size)) * 0.12;
-    // near the lens you see it FALL: a drop let go at hand height (or from
-    // the wound, or the jaws, when the caller knows where they are), which
-    // stamps the same mark when it lands. Far off, just the mark.
-    if (d2 < 22 * 22 && !wetEvent) {
-      const fy = decalFloorAt(x, z);
-      const y0 = fromY != null && fromY > fy + 0.05 ? fromY : fy + 0.7 + Math.random() * 0.3;
-      if (airDrop(x, y0, z, (Math.random() - 0.5) * 0.2, -0.3, (Math.random() - 0.5) * 0.2,
-        0.0015 + g * 0.05, 0, 0, g) >= 0) return;
-    }
-    spawnSplat(x, z, g, BLOOD_D, false, _dotO);
-  }
-
   // ============================================================
   //  REAL DISMEMBERMENT — the body that hits the ground is genuinely MISSING
   //  what came off. WHY: spraying generic red cubes while the rig keeps all
@@ -5401,7 +6165,6 @@
     rl: { px: 0.23, py: 0.9, pz: 0, r: 0.18, onBody: false, ay: -1 },
   };
   const SEV_LIMBS = ["ll", "rl", "la", "ra"];
-  const _svp = new THREE.Vector3();        // scratch for the stump's live world position
   function actorChar(a) { return a ? (a.char || (a.isPlayer ? CBZ.playerChar : null)) : null; }
   // "head" = the whole neck group so the face/hair/cap fly WITH the skull
   function partOf(ch, key) { return key === "head" ? ch.neck : (ch.parts ? ch.parts[key] : null); }
@@ -5601,26 +6364,13 @@
       }
     }
     r.items.push({ key, part, stump });
-    // The open joint pumps a couple of diminishing pulses while the corpse is
-    // still present. This is tied to the real stump transform and stops the
-    // instant the part is restored/recycled; it never creates free-floating FX.
-    // an open joint pumps wherever it happens — the island tears limbs off now
-    // too (opts.limbs), and a stump that just sits there is the tell.
+    // THE OPEN JOINT IS A WOUND: the stump (its +Y is the way the cut faces)
+    // spurts while the heart has beats in it and then drains (A WOUND
+    // BLEEDS), riding the body wherever it goes, and stops the instant the
+    // part is restored or the rig recycled (the stump leaves the graph).
     if (stump && (debrisLaw() || survMode())) {
-      // the jet rides the stump itself (its +Y is the way the cut looks out),
-      // decides its medium per beat, and stops the instant the stump goes
-      airStream(2, stump, 0, 0, 0, 0, 1, 0, {
-        speed: 2.6, pulses: 2, period: 0.54, len: 0.2, fall: 0.6, rate: 45, r0: 1.0, r1: 2.6, spread: 0.22, delay: 0.38,
-      });
-      // and the pool the second beat leaves is a GROUND pool. Under the sea
-      // that decal lands on the seabed in the dark; the surface slick is the
-      // thing anyone can actually see, so wet bleeds go there instead.
-      after(0.92, function () {
-        if (!stump.parent || part.visible !== false || (actor && actor.culled)) return;
-        const wp = _svp; stump.getWorldPosition(wp);
-        if (waterOn() && woundInWater(wp.x, wp.y, wp.z)) surfaceSlick(wp.x, wp.z, 0.4);
-        else spawnSplat(wp.x, wp.z, 0.32, BLOOD_D, true);
-      });
+      openWound(actor, { node: stump, dir: _UPY, site: "stump", zone: key === "head" ? "neck" : (key === "la" ? "armL" : key === "ra" ? "armR" : key === "ll" ? "legL" : "legR"),
+        artery: true, lps: key === "head" ? 0.03 : (key === "ll" || key === "rl" ? 0.025 : 0.015), tau: 25, exposed: true });
     }
     // a severed LEG = the rig can't stand: flag the char so entities/character.js
     // drops it into a one-legged collapse/crawl (limpSpeedMul → 0) instead of
@@ -5850,7 +6600,7 @@
        survival death arrived anonymous. That is why the island's deaths could
        only ever be drawn with generic flying boxes — there was no body to take
        anything off. A caller that knows its victim now simply says so. */
-    if (!ctx && opts.actor) ctx = { ped: opts.actor, imp: opts.imp || null, cause: "", used: true };
+    if (!ctx && opts.actor) ctx = { ped: opts.actor, imp: opts.imp || null, cause: opts.cause || "", used: true };
     const cause = ctx ? ("" + (ctx.cause || "")).toLowerCase() : "";
     // headshot / explosion get a heavier, mistier, gorier treatment. Callers
     // signal a headshot either explicitly (opts.head) or with a fat amount(>=1.3).
@@ -6022,18 +6772,27 @@
     noteLandBlood(x, z);
     // --- LAYERS 1+2: THE BLOOD IN THE AIR (see THE AIRBORNE BLOOD) --------
     // `y` arrives chest-high: the chest is ~+0.35 above it, the head ~+1.1.
-    // Each cause throws what that cause throws: a round an entry spatter and
-    // an exit spray + mist down its line, a blast a ring of drops and a dark
-    // puff, a blade heavy drops and a stream (its arterial beats come with the
-    // cause beats below), a beating nothing here (the split lip is bluntBurst).
-    // A player's round has usually just sprayed this body through
-    // CBZ.gore.spray: that WAS this round's spray (its entry spatter, its exit
-    // drops and mist), so the kill throws no second one. One round, one spray.
+    // Only what the killing event itself throws: a round its entry spatter
+    // and exit spray + mist down its line, a blast a ring of drops and a dark
+    // puff, a fall or an unknown cause a short burst. A BLOW (a fist, a boot,
+    // a blade) threw what it threw when it landed (CBZ.goreBlow: blood on his
+    // skin flung off, blood off the fist or the blade), and a man who bled
+    // out throws nothing at all as he dies. A player's round has usually just
+    // sprayed this body through CBZ.gore.spray: that WAS this round's spray,
+    // so the kill throws no second one. One round, one spray.
+    const victim = ctx && ctx.ped ? ctx.ped : null;
     {
       const al = airLod(x, z) * (far ? 0.6 : 1);
       if (boom) blastBlood(x, y + 0.35, z, amt, al);
-      else if (blade) stabBlood(x + dx * 0.15, y + 0.35, z + dz * 0.15, dx, dz, amt, al);
-      else if (blunt) { /* bluntBurst, below */ }
+      else if (blade) {
+        // a blade kill nobody's blow already threw for: the drops off the
+        // blade as it comes out of him
+        if (!blowJustHit(victim)) {
+          castOff(x + dx * 0.15, y + 0.35, z + dz * 0.15, -dx, 0.4, -dz, 1.8, 0.4 + 0.3 * Math.min(1.5, amt), al);
+          bladeKillActor = victim; bladeKillT = plumeClock;     // the landing that follows is this same blade
+        }
+      }
+      else if (blunt || bledOut || bitten) { /* the blows and the wounds already did it */ }
       else if (!hasDir) omniBlood(x, y + 0.35, z, amt, al);
       else {
         const hy = head ? 1.1 : 0.35;
@@ -6043,7 +6802,6 @@
         if (!sprayedHere(x, z)) shotBlood(x - dx * 0.12, y + hy, z - dz * 0.12, dx, 0, dz, amt, through, head, al, popHead);
       }
     }
-
     // --- LAYER 3: chunky GIBS — limbs/torso, heavier, tumble then settle ------
     // THE DEBRIS LAW: a normal gunshot DROPS the person (ragdoll.js leaves an
     // intact body) — it does not blow them into clothing cubes. So reserve the
@@ -6096,25 +6854,23 @@
         0.2 + Math.random() * 0.3, cols[i % cols.length], "gib");
     }
 
-    // --- LAYER 4: ground POOL — lingers, spreads, biased forward of the body --
-    // a blunt kill barely pools NOW (the bleed-out arrives in waves, below);
-    // everything else drains immediately and forward of the body.
-    const pgx = hasDir ? x + dx * 0.4 : x, pgz = hasDir ? z + dz * 0.4 : z;
-    const pk = realism() ? POOL_K : 1;
-    spawnSplat(pgx, pgz, (blunt ? 0.45 : (1.1 + amt * 0.9 + (big ? 0.6 : 0))) * pk, BLOOD_D, true);
-    if (big) spawnSplat(x - dx * 0.5, z - dz * 0.5, (0.6 + amt * 0.4) * pk, BLOOD, true);
-    // A FEW BIG SPLATS, not two dozen equal blobs: the heavy slugs of blood
-    // that leave the wound first land as one or two torn impact splats down
-    // the shot line; the fine spray (LAYER 1) lands as small marks around them.
-    if (!blunt) {
-      const nbig = (head || big) ? 2 : 1;
-      for (let i = 0; i < nbig; i++) {
-        const r = hasDir ? 0.5 + Math.random() * 1.2 : Math.random() * 0.6, sd = (Math.random() - 0.5) * 0.6;
-        _splatO.dirX = hasDir ? dx : null; _splatO.dirZ = hasDir ? dz : null; _splatO.radial = !hasDir;
-        spawnSplat(x + dx * r + px * sd, z + dz * r + pz * sd, (0.1 + Math.random() * 0.1) * (0.7 + amt * 0.4), BLOOD, false, _splatO);
-      }
+    // --- LAYER 4: THE HOLE HE DRAINS FROM (no pool is stamped) -------------
+    // The floor under a kill is what landed there: the spray's drops (each
+    // marks where it lands, joining wet blood already there) and the wound
+    // he drains from, which drips while he goes down and pools under itself
+    // once he is down (killWound / A WOUND BLEEDS). A man shot dead on his
+    // feet has no pool until he is on the floor.
+    if (victim && !victim.isPlayer) {
+      const wp = (ctx.imp && ctx.imp.point && ctx.imp.point.x != null) ? ctx.imp.point : null;
+      const how = boom ? "blast" : blade ? "blade" : blunt ? "blunt" : bitten ? "bite" : head ? "head" : (!hasDir ? "fall" : "shot");
+      // at the hole the body now carries (the same point bodyWound marked above)
+      // (a beating bleeds from the face: with no contact point, the head)
+      if (!bledOut) killWound(victim, wp ? wp.x : x, wp ? wp.y : y + (head || blunt ? 0.5 : 0), wp ? wp.z : z, how);
+    } else if (!victim && !bledOut) {
+      // positional: the body lying nearest this point, if there is one
+      const b = bodyNear(x, y, z, 0.7, true);
+      if (b) killWound(b, x, y + (head ? 0.5 : 0), z, boom ? "blast" : blade ? "blade" : blunt ? "blunt" : head ? "head" : "shot");
     }
-    if (!blunt) restingPool(pgx, pgz, amt);   // blunt already drains in waves below
 
     // (THE WALL BEHIND HIM wears what the exit spray of LAYERS 1+2 throws at
     // it, drop by drop, where each drop lands: see WHERE A DROP STOPS. Past
@@ -6125,11 +6881,7 @@
       // bone only flies when the head actually came apart — a pistol/SMG
       // headshot is a snap + blood, never skull fragments
       if (popHead && hasDir) skullFrags(x, y, z, dx, dz, lod);
-      if (blade) arterialArcs(ctx && ctx.ped, x, y, z, dx, dz);
-      if (blunt) {
-        bluntBurst(x, y, z, dx, dz, hasDir);
-        if (ctx && ctx.ped) delayedBleedPool(ctx.ped);
-      }
+      if (blunt) bluntBurst(x, y, z, dx, dz, hasDir);
     }
     // run-over smear: the streak starts under the body and is dragged down-range
     // along the car's travel line. Length scales with the impact fling (≈speed).
@@ -6183,32 +6935,33 @@
   };
 
   /* ============================================================
-     CBZ.goreImpact(x, y, z, opts) — BLUNT TRAUMA. NOT A DEATH.
+     CBZ.goreImpact(x, y, z, opts) — A BODY HURT AT A POINT. NOT A DEATH.
 
-     Everything above this line is a KILL event: it pools, gibs, dismembers,
-     flashes the lens, consumes the kill context and can trip slow-mo. There
-     was no way to say "this body is BLEEDING, not dying", so every caller who
-     wanted blood had to fire a kill — which is precisely how the disaster
-     island ended up opening the same red faucet for a man who FROZE TO DEATH,
-     and never once for the man you threw off the mountain on the way there.
-
-     So trauma gets its own emitter and its own physics:
-       • a WET SPRAY off the struck side, thrown along the surface normal —
-         the direction you were driven, mirrored back out of the flesh
-       • a MIST puff only when the impact was hard enough to atomise anything
-         (a shove that splits a lip does not aerosolise)
-       • a GROUND POOL only once the wound is genuinely open (opts.pool) —
-         a bruise leaves nothing behind, and that restraint is the whole point
-       • blood on the wall you were driven INTO (opts.wall): the wound
-         meets the surface and throws its drops onto it (contactBlood), each
-         marking where it lands
-     No gibs, no dismemberment, no kill-context consumption, no slow-mo, and
-     the lens jolt only for the player. Water-aware for free: a wound taken
-     under the sea blooms instead of raining droplets on the seabed.
+     Everything above this line is a KILL event. This is a body that is HURT
+     at (x,y,z): a fall, a slam into a wall, a bite, a claw, a round in a mode
+     that keeps no shot line. What blood there is follows the same rules as
+     a fist fight's:
+       • what was already wet on him there is flung along opts.dir (the way
+         he was driven, out of the flesh): flingAt. Driven INTO a surface
+         (opts.wall), it is thrown at that surface and marks it.
+       • a cut (opts.blade): what the blade, claw or tooth carries off as it
+         leaves (castOff). The wound the cut opened is its owner's to open
+         (vitals.js for the prison's blades) or opened here when nothing
+         keeps one.
+       • the skin OPENED here (opts.pool — the callers' own "only an open
+         wound stains the ground"): torn tissue lets go of the blood in it as
+         the tear happens (tornBlood), and the body now has a WOUND there
+         that bleeds at a rate from the amount, on the body found at the
+         point (opts.actor, else the nearest body), or at the point itself
+         when there is none. It is that wound's blood, landing, that makes
+         any pool: nothing is stamped.
+       • a bruise (none of the above) leaves nothing.
+     No gibs, no dismemberment, no kill-context consumption, no slow-mo.
+     Water-aware: a wound taken under the sea blooms.
 
      opts: { dir:{x,y,z} (away from the surface), amount:0.2..2, mist:bool,
-             pool:bool, wall:bool, player:bool, sfx:bool|string,
-             blade:bool (a cut: heavy drops + a short stream, no mist) }
+             pool:bool, wall:bool, blade:bool, actor, player:bool,
+             sfx:bool|string }
   ============================================================ */
   CBZ.goreImpact = function (x, y, z, opts) {
     if (!CBZ.scene) return;
@@ -6217,7 +6970,6 @@
     if (CBZ.camera && CBZ.camera.position && d2 > 70 * 70) return;
     const lod = d2 > 40 * 40 ? 0.5 : 1;
     const amt = Math.max(0.2, Math.min(2, opts.amount == null ? 0.7 : opts.amount));
-
     let dx = opts.dir ? (+opts.dir.x || 0) : 0;
     let dy = opts.dir ? (+opts.dir.y || 0) : 0;
     let dz = opts.dir ? (+opts.dir.z || 0) : 0;
@@ -6234,29 +6986,32 @@
       if (opts.sfx && CBZ.sfx) CBZ.sfx(typeof opts.sfx === "string" ? opts.sfx : "hit");
       return;
     }
-
-    // THE SPRAY. A blunt impact does not have a shot line to exit along, so
-    // the fan is wide and the throw is short: blood leaves the wound at the
-    // speed the body arrived, not at the speed of a round. opts.blade is a
-    // cut: heavy drops and a short stream instead (see THE AIRBORNE BLOOD).
-    // (a bite's own spray at this spot this instant, goreBite, is this one:
-    // the bite throws it, the impact does not throw it again)
     const al = airLod(x, z) * lod;
     noteLandBlood(x, z);
-    if (!biteSprayedHere(x, z)) {
-      if (opts.blade) stabBlood(x, y, z, hasDir ? dx : 0, hasDir ? dz : 0, amt, al);
-      else bluntBlood(x, y, z, dx, dy, dz, hasDir, amt, al, !!opts.mist);
+    const body = opts.actor || bodyNear(x, y, z, 0.9, false) || bodyNear(x, y, z, 0.9, true);
+    // what was wet on him there, flung (into the wall he met, when he met one)
+    const F = Math.min(2, 0.3 + amt * 0.7);
+    if (hasDir) {
+      if (opts.wall) flingAt(body, x, y, z, -dx, -dy, -dz, F, al);
+      else flingAt(body, x, y, z, dx, dy + 0.2, dz, F, al);
     }
-    // the pool is the RESTRAINT: only an open wound leaves evidence on the
-    // ground, so a bruising hit passes pool:false and stains nothing.
-    if (opts.pool) spawnSplat(x + dx * 0.3, z + dz * 0.3, 0.5 + amt * 0.75, BLOOD_D, true);
-    // driven INTO something → it wears the hit: drops thrown at the surface
-    if (opts.wall && hasDir && lod === 1) contactBlood(x, y, z, -dx, -dy, -dz, amt * 0.85, al);
+    // (a bite's own throw at this spot this instant, goreBite, is this one)
+    if (!biteSprayedHere(x, z)) {
+      if (opts.blade) castOff(x, y, z, hasDir ? dx : 0, 0.35, hasDir ? dz : 0, 1.6 + amt, 0.3 + 0.4 * amt, al);
+      else if (opts.pool) tornBlood(x, y, z, dx, dy, dz, hasDir, amt, al, !!opts.mist);
+    }
+    // THE WOUND it opened (unless something that keeps wounds opened one here
+    // this instant: a vitals stab already bleeds)
+    if (opts.pool || (opts.blade && !(body && bleedsAlready(body)))) {
+      const lps = (opts.blade ? 0.004 : 0.002) + 0.006 * Math.max(0, amt - 0.3);
+      if (body && !body.isPlayer) woundOn(body, x, y, z, { lps, tau: opts.blade ? 40 : 35 });
+      else if (!body) openWound(null, { x, y, z, lps: lps * 0.5, tau: 8, site: "fixed", exposed: true });
+    }
     // (the player's own hit is a flinch, systems/eyes.js: never a red rim)
     if (opts.sfx && CBZ.sfx) CBZ.sfx(typeof opts.sfx === "string" ? opts.sfx : "hit");
   };
 
-  // one always-updater drives gibs + mist + pools + wall splats + the red jolt
+  // one always-updater drives wounds + gibs + drops + pools + wall marks
   CBZ.onAlways(8, function (dt) {
     if (dt <= 0) return;
     wetEvent = false;                    // bound any leaked wet event to one frame
@@ -6278,19 +7033,13 @@
     // NOTHING PAINTS THE VIEW RED (owner: "the screen turning red ... is
     // dumb"): a kill beside you is the blood on the floor and on the walls.
 
-    // delayed gore beats (arterial spurts / bleed-out pools)
-    for (let i = later.length - 1; i >= 0; i--) {
-      const L = later[i]; L.t -= dt;
-      // the beat runs in the medium its kill happened in (see after())
-      if (L.t <= 0) { later.splice(i, 1); wetEvent = L.wet; seatY = L.sy; try { L.fn(); } catch (e) {} wetEvent = false; seatY = null; }
-    }
-
-    // water medium: the sustained bleed sources, then every live plume puff
+    // every wound bleeds (drips, beats, pours), the water's bleed sources,
+    // then every live plume puff
     plumeClock += dt;
-    updateBleeds(dt);
+    updateWounds(dt);
     updateChum(dt);
     updatePuffs(dt);
-    // the air: streams lay their drops, every drop and puff flies, lands, stains
+    // the air: every drop and puff flies, lands, stains
     if (CBZ.scene && airMesh && airMesh.parent !== CBZ.scene) airReady();
     updateAir(dt);
 
@@ -6392,11 +7141,11 @@
           b.trlT = (b.trlT || 0) - dt;
           if (b.trlT <= 0) {
             b.trlT = b.limb ? 0.04 + Math.random() * 0.03 : 0.07 + Math.random() * 0.05;
-            airMarkP = 0.5;
+            airMarkP = 0.5; airCause = "piece";
             airDrop(m.position.x, m.position.y, m.position.z,
               b.vx * 0.85 + (Math.random() - 0.5) * 0.6, b.vy * 0.85 + (Math.random() - 0.5) * 0.6, b.vz * 0.85 + (Math.random() - 0.5) * 0.6,
               rMM(0.8, b.limb ? 2.8 : 2), 0, 0, 0);
-            airMarkP = 1;
+            airMarkP = 1; airCause = "spray";
           }
         }
       }
@@ -6586,9 +7335,8 @@
      Populations come along for free (a live budget read during a shootout). */
   const _RIM = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   const _rv = new THREE.Vector3();
-  // EVERY EVENT SEATS FROM ITS OWN HEIGHT: a kill or a blow at (x,y,z) lays
-  // its pools and splats on the floor under y (decalFloorAt), and the beats
-  // it schedules (after()) carry that height with them.
+  // EVERY EVENT SEATS FROM ITS OWN HEIGHT: what a kill or a blow at (x,y,z)
+  // lays is seated on the floor under y (decalFloorAt), not the street below.
   function seated(fn) {
     const w = function (x, y, z, opts) {
       const sy0 = seatY; seatY = (y != null && isFinite(y)) ? y : null;
@@ -6642,8 +7390,8 @@
       if (AKIND[i] === 1) mist++;
       else { drops++; if (AR[i] * 2 > fatDrop) fatDrop = AR[i] * 2; }
     }
-    let streams = 0;
-    for (let e = 0; e < EM_MAX; e++) if (E_ON[e]) streams++;
+    let wetPools = 0, wetMarks = 0;
+    for (let i = 0; i < GL_MAX; i++) { const e = GL[i]; if (e.on && glLive(e)) { if (e.pool) wetPools++; else wetMarks++; } }
     const cov = snowCover();
     let visible = 0, buried = 0, washes = 0, diluted = 0, candidates = 0;
     for (let i = 0; i < splats.length; i++) {
@@ -6661,7 +7409,13 @@
     }
     return {
       bits: bits.length + airN, pools, streaks, slicks: water, walls: walls.length,
-      air: airN, airDrawCalls: airMesh && airMesh.parent ? 1 : 0, streams, airEmits: AIR_AUDIT, marksQueued: mqN, drawnBoxes: dbN,
+      air: airN, airDrawCalls: airMesh && airMesh.parent ? 1 : 0, airEmits: AIR_AUDIT, dropCause: DROP_CAUSE, marksQueued: mqN, drawnBoxes: dbN,
+      // the floor's ledger: spots being fed as pools, single drop marks still
+      // wet, and what landed (GROUND_AUDIT: joined = arrivals that went into
+      // wet blood already there instead of taking a slot of their own)
+      wetPools, wetMarks, ground: GROUND_AUDIT, landSlots: splats.length, wallSlots: walls.length,
+      // a stamped pool, splat or drip placed because an event fired: none are left
+      fiatCalls: 0,
       realism: realism(), debrisLaw: debrisLaw(), mode: (CBZ.game && CBZ.game.mode) || null,
       boxGibs, drops, mist,
       maxGibCm: Math.round(maxGib * 100), maxDropCm: +(fatDrop * 100).toFixed(2),
@@ -6673,7 +7427,7 @@
       // LIMBS off, not rigs affected — one body missing an arm and a leg is two
       severed: (function () { let n = 0; for (let i = 0; i < severed.length; i++) n += severed[i].items.length; return n; })(),
       severedRigs: severed.length,
-      puffs: puffs.length, plumeEmits: PLUME_AUDIT, pending: later.length,
+      puffs: puffs.length, plumeEmits: PLUME_AUDIT,
       float: +worst.toFixed(3), floatAt: worstAt,
       slopeDecals: slopeOn(),
       snowCover: +cov.toFixed(3), buried,
@@ -6692,12 +7446,65 @@
     };
   };
 
+  /* ---- CBZ.goreBleedAudit() — THE BLOOD BY NUMBERS -------------------------
+     wounds: every live wound — whose, where (site, zone, world point, height
+       over the floor, lying), its flow now (ml/s: all of it, and what leaves
+       the skin), what has left the skin (outMl) and bled inside (internalMl),
+       what sits in the clothes / on the skin (heldMl), drops and beats so far,
+       and who keeps its flow (vitals or this file).
+     pools: every spot on the floor being fed as a pool: centre, ml, area,
+       radius, age, seconds since it was last fed.
+     drops: drops that left a body, by cause (dropCause: spray, blast, flung,
+       castOff, drip, spurt, torn, piece).
+     totals (WOUND_AUDIT): ml out, inside, dripped, spurted, poured onto the
+       floor, flung, cast off, taken from bodies' volumes, not drawn (too far).
+     ground (GROUND_AUDIT): what landed, what joined wet blood, marks, pools.
+     lastLands: the last 48 drops that reached the floor (x, z, ml, t on
+       `now`'s clock, joined = it went into wet blood already there).
+     fiatCalls: pools, splats or drips stamped because an event fired. 0. */
+  CBZ.goreBleedAudit = function () {
+    const wounds = [];
+    for (let i = 0; i < WOUNDS.length; i++) {
+      const w = WOUNDS[i], total = w.vb ? (w.vb.closed ? 0 : w.mlps) : w.lps * 1000;
+      const a = w.actor;
+      wounds.push({
+        id: w.id, who: a ? (a.isPlayer ? "player" : (a.name || (a.data && a.data.name) || a.kind || "actor")) : null,
+        site: w.site, zone: w.zone, artery: w.artery, keeper: w.vb ? "vitals" : "gore",
+        at: w.have ? [+w.x.toFixed(2), +w.y.toFixed(2), +w.z.toFixed(2)] : null,
+        overFloorM: w.have ? +(w.y - w.floorY).toFixed(2) : null, lying: w.have ? w.y - w.floorY < LIE_H : null,
+        flowMlps: +total.toFixed(3), outMlps: +(total * w.extNow).toFixed(3), outShare: +w.extNow.toFixed(2),
+        cavityMl: +w.cav.toFixed(0), clothMl: +(w.res + w.wick).toFixed(1), peakMlps: +w.peak.toFixed(2),
+        outMl: +w.out.toFixed(1), internalMl: +w.internal.toFixed(1), heldMl: +w.res.toFixed(2),
+        drips: w.drips, beats: w.spurts, ageS: +w.t.toFixed(1),
+        // lying: the outline it came out round (how many parts, from what),
+        // whether the wound was inside it, and how far out the blood came
+        footprintParts: w.fpN != null ? w.fpN : null, footprintFrom: w.fpSrc || null,
+        insideAtWound: w.fpIn != null ? w.fpIn : null, exitDistM: w.fpExit != null ? +w.fpExit.toFixed(3) : null,
+        bloodLeft: a ? +bloodLeft(a).toFixed(3) : null,
+      });
+    }
+    return {
+      now: +plumeClock.toFixed(2), live: WOUNDS.length, cap: woundCap(), wounds, pools: poolList(),
+      dropCause: Object.assign({}, DROP_CAUSE), totals: Object.assign({}, WOUND_AUDIT),
+      ground: Object.assign({}, GROUND_AUDIT), wallJoined: AIR_AUDIT.wallJoined,
+      cars: { drops: AIR_AUDIT.carDrops, marks: AIR_AUDIT.carMarks }, glassMarks: AIR_AUDIT.glassMarks,
+      lastLands: (function () {
+        const out = [];
+        for (let k = 0; k < lrN; k++) {
+          const o = ((lrHead - lrN + k + LR_N) % LR_N) * 5;
+          out.push({ x: +LR[o].toFixed(3), z: +LR[o + 1].toFixed(3), ml: +LR[o + 2].toFixed(3), t: +LR[o + 3].toFixed(2), joined: LR[o + 4] > 0 });
+        }
+        return out;
+      })(),
+      fiatCalls: 0,
+    };
+  };
+
   // wipe all gore (called on a match reset / scene swap)
   CBZ.clearGore = function () {
     for (const r of severed) restoreRecord(r); severed.length = 0;   // every rig leaves whole
     for (const b of bits) rm(b.m); bits.length = 0;
     airN = 0; if (airGeo) airGeo.instanceCount = 0;
-    for (let e = 0; e < EM_MAX; e++) stopStream(e);
     if (airMesh && airMesh.parent) airMesh.parent.remove(airMesh);       // re-added on the next frame
     for (const s of splats) freeSlick(s); splats.length = 0; slickN = 0;
     filmSeaDrop(); filmSeaNo = null; filmCpuDear = false;
@@ -6711,8 +7518,10 @@
     if (plumeMesh && plumeMesh.parent) plumeMesh.parent.remove(plumeMesh);   // re-added on the next scene
     if (scatMesh && scatMesh.parent) scatMesh.parent.remove(scatMesh);
     chum.length = 0; chumOut.length = 0; wetEvent = false;
-    for (const b of BLEEDS) bleedEnd(b); BLEEDS.length = 0;
-    later.length = 0; killCtx = null; swashEvents = 0;   // the match total is per match
+    for (const w of WOUNDS) endWound(w); WOUNDS.length = 0;
+    for (let i = 0; i < GL_MAX; i++) { GL[i].on = false; GL[i].rec = null; }
+    for (let i = 0; i < WW_MAX; i++) { WW[i].on = false; WW[i].run = null; }
+    killCtx = null; swashEvents = 0;   // the match total is per match
   };
 
   // FIRST-BLOOD PREWARM: bake the shared blood texture at load instead of on

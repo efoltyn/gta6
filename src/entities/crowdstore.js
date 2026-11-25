@@ -511,10 +511,15 @@
     }
     S.own[r] = 0;                     // the hurt and the dead are this file's
     G.dirty = true; hashAge = 1e9;
-    // blood where they fell, near the lens, pooled (systems/gore.js)
-    if (to === DEAD && CBZ.gorePool && _gore.n < 40) {
+    // a body down near the lens drains from where it lies: a wound at the
+    // body's middle on the floor (this store draws no rig to put it on), that
+    // pours into a pool there over the next half minute (systems/gore.js)
+    if (to === DEAD && CBZ.goreBleedAt && _gore.n < 40) {
       const cam = CBZ.camera && CBZ.camera.position;
-      if (cam && Math.hypot(S.wx[r] - cam.x, S.wz[r] - cam.z) < 60) { _gore.n++; try { CBZ.gorePool(S.wx[r], S.wz[r], 0.8 + h01(r, 3, 9) * 0.9); } catch (e) {} }
+      if (cam && Math.hypot(S.wx[r] - cam.x, S.wz[r] - cam.z) < 60) {
+        _gore.n++;
+        try { CBZ.goreBleedAt(S.wx[r], (S.wy[r] || 0) + 0.12, S.wz[r], { lps: 0.006 + h01(r, 3, 9) * 0.006, tau: 30 }); } catch (e) {}
+      }
     }
     if (G.onLife) { try { G.onLife(r, to, cause); } catch (e) {} }
     return true;

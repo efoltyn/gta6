@@ -28,8 +28,8 @@
        A high guard stops head shots from the front (the forearms take it and
        give; the attacker's arm bounces back); body shots go under it.
      · The caller's onLand(res) applies HP and the game's consequences and may
-       overrule the reaction (res.reaction = "dead" | "knockdown" | "none" | ...,
-       res.blood = amount for a split). Then the reaction plays, both rigs
+       overrule the reaction (res.reaction = "dead" | "knockdown" | "none" | ...;
+       whether the skin split is vitals.js's call). Then the reaction plays, both rigs
        freeze together for the hitstop, and the player's lens shakes only if
        the player is in it.
 
@@ -228,7 +228,7 @@
   function newRes() {
     return { landed: false, blocked: false, slipped: false, zone: null, dmgMul: 1, reaction: "none",
       point: new THREE.Vector3(), dir: { x: 0, z: 1 }, power: 0.5, kind: "jab", target: null, attacker: null,
-      heavy: false, weapon: null, stagger: false, blood: 0, strike: null,
+      heavy: false, weapon: null, stagger: false, strike: null,
       parried: false, guardBroken: false, ko: false, force: 0, counter: false, blind: false };
   }
   function getSt() {
@@ -411,7 +411,7 @@
     const res = S.res;
     res.landed = false; res.blocked = false; res.slipped = false; res.zone = null; res.dmgMul = 1;
     res.parried = false; res.guardBroken = false; res.ko = false; res.force = 0; res.counter = false; res.blind = false;
-    res.reaction = "none"; res.stagger = false; res.blood = 0; res.kind = kind; res.heavy = S.heavy;
+    res.reaction = "none"; res.stagger = false; res.kind = kind; res.heavy = S.heavy;
     res.weapon = S.weapon; res.attacker = att; res.target = null; res.power = S.power; res.strike = S;
     // the player swings at whoever is in front: pick the aim among the candidates
     S.aimT = aim0;
@@ -656,12 +656,9 @@
         // contact point 45 cm toward the attacker and scatters it)
         try { CBZ.bodyWound(c, res.point, { melee: "blade", cal: 0.7, dir: { x: res.dir.x, y: 0, z: res.dir.z } }); } catch (e) { /* wounds off */ }
       }
-      // a blade that lands CUTS, and a cut bleeds into the air (gore.js: heavy
-      // drops + a short stream); a fist bleeds only when combat says it split
-      const cut = !!(S.weapon && S.weapon.blade);
-      if ((res.blood > 0 || cut) && CBZ.goreImpact) {
-        CBZ.goreImpact(res.point.x, res.point.y, res.point.z, { amount: res.blood || 0.8, blade: cut, dir: { x: res.dir.x, y: 0.35, z: res.dir.z } });
-      }
+      // the blood a landed blow throws (gore.js goreBlow: what was already
+      // wet on him there, and off the fist or blade that swung)
+      if (CBZ.goreBlow) CBZ.goreBlow(c, S.att, res.point, { dir: res.dir, dy: 0.35, force: res.force, zone: res.zone, blade: !!(S.weapon && S.weapon.blade) });
       // you beat him to the punch: whatever he was throwing is gone
       const his = strikeOf(c);
       if (his) finish(his, true);
@@ -1725,7 +1722,7 @@
     // a man covering up under you takes some of it on his forearms
     const covering = tch && tch.gHit && tch.gHit.on && tch.fall && !tch.fall.ko && tch.gHit.t < 1.2;
     res.dmgMul = (res.zone === "head" ? 1 : 0.8) * (covering ? 0.7 : 1);
-    res.reaction = "none"; res.stagger = false; res.blood = 0;
+    res.reaction = "none"; res.stagger = false;
     if (opts.onLand) opts.onLand(res);
     if (!S.Ba) return;
     const bothP = Ba.isPlayer || Bt.isPlayer;
@@ -1740,10 +1737,7 @@
           y: res.point.y - ((Bt.pos && Bt.pos.y) || 0), zone: res.zone, flesh: 1 });
       } catch (e) { /* trauma off in this mode */ }
     }
-    const cut = !!(S.weapon && S.weapon.blade);
-    if ((res.blood > 0 || cut) && CBZ.goreImpact) {
-      CBZ.goreImpact(res.point.x, res.point.y, res.point.z, { amount: res.blood || 0.8, blade: cut, dir: { x: res.dir.x, y: -0.5, z: res.dir.z } });
-    }
+    if (CBZ.goreBlow) CBZ.goreBlow(M.t, S.att, res.point, { dir: res.dir, dy: -0.5, force: res.power, zone: res.zone, blade: !!(S.weapon && S.weapon.blade) });
   }
   const _mh = new THREE.Vector3(), _mb = new THREE.Vector3();
   function stepMounts(dt) {
