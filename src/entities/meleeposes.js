@@ -392,7 +392,8 @@
     if (ch._mountK < 0.004 && !ch.mount) ch._mountK = 0;
     const mounted = ch._mountK > 0;
     const act = punching || kicking || ch.blockT > 0 || ch.blockK > 0 || dodging || (fs && fs.on) ||
-      (hr && hr.on) || ch.staggerT > 0 || mounted;
+      (hr && hr.on) || ch.staggerT > 0 || mounted || !!(ch._mStep && ch._mStep.on);
+    let mStepOn = false;
     /* A MAN WHO IS NOT FIGHTING DOES NOT SQUARE UP TO BE HIT. A reaction or
        a step on a body with no guard up (a bystander shot in the street, a
        guard shoved by an inmate) used to pull the whole boxing stance in
@@ -583,6 +584,41 @@
     }
     if (ch._mFtV) { FL.x = FT[0]; FL.z = FT[1]; FR.x = FT[2]; FR.z = FT[3]; }
     else { FT[0] = FL.x; FT[1] = FL.z; FT[2] = FR.x; FT[3] = FR.z; }   // nobody had them: this layer's own spots
+    /* STEPPING OVER A MAN (ch._mStep, written by systems/verbs_strike.js for
+       the climb onto a downed man): one foot is carried from where it
+       stands (sx, sz) to a spot on the far side of him (tx, tz), world
+       metres, and the whole way it is `h` above the floor (his highest
+       part under the path, and a hand's width): up in the first quarter,
+       across at that height, down in the last. The knee leads, high; the
+       weight goes onto the foot that stays. When it is down the foot
+       belongs where it landed (this layer's spot for it). */
+    const ms = ch._mStep;
+    if (ms && ms.on && ch.group) {
+      ms.t += mdt;
+      const u = clamp01(ms.t / ms.dur), e = sstep(0.12, 0.88, u);
+      const g = ch.group, yaw = g.rotation.y, c = Math.cos(yaw), sn = Math.sin(yaw);
+      const wx = lerp(ms.sx, ms.tx, e) - g.position.x, wz = lerp(ms.sz, ms.tz, e) - g.position.z;
+      const F = ms.leg ? FR : FL, Q = ms.leg ? QR : QL, O = ms.leg ? FL : FR, o = ms.leg ? 2 : 0, oo = ms.leg ? 0 : 2;
+      // (the root comes across and turns during this step: the foot that is
+      // not stepping is a spot on the floor, not a spot under the body)
+      if (!ms.init) {
+        ms.init = true;
+        ms.ox = g.position.x + (FT[oo] * c + FT[oo + 1] * sn) * D.scale;
+        ms.oz = g.position.z + (-FT[oo] * sn + FT[oo + 1] * c) * D.scale;
+      }
+      {
+        const qx = ms.ox - g.position.x, qz = ms.oz - g.position.z;
+        O.x = (qx * c - qz * sn) / D.scale; O.z = (qx * sn + qz * c) / D.scale;
+        FT[oo] = O.x; FT[oo + 1] = O.z;
+      }
+      F.x = (wx * c - wz * sn) / D.scale; F.z = (wx * sn + wz * c) / D.scale;
+      F.y = D.footY + (ms.h / D.scale) * (sstep(0, 0.25, u) * (1 - sstep(0.75, 1, u)));
+      Q.set((ms.leg ? -1 : 1) * 0.3, 0.55, 1);
+      S.legK = 1;
+      S.mX += clamp(O.x, -0.3, 0.3) * 0.45 * Math.sin(Math.PI * u);
+      mStepOn = true;
+      if (u >= 1) { ms.on = false; FT[o] = F.x; FT[o + 1] = F.z; }
+    }
     if (mounted) mountPose(ch, D, ch._mountK);
 
     // ================= PUNCH ===============================================
@@ -887,7 +923,7 @@
 
     // legs: feet planted by IK (group frame → model frame). Not while the
     // gait has them outright: it plants the same spots in the world.
-    const gaitLegs = !kickK && !(fs && fs.on) && !mounted && !!CBZ.gait && !!ch._gOn && !!GV && GV.w >= 0.999;
+    const gaitLegs = !kickK && !(fs && fs.on) && !mounted && !mStepOn && !!CBZ.gait && !!ch._gOn && !!GV && GV.w >= 0.999;
     if (legK > 0.002 && !gaitLegs) {
       ch._mOwn = true;
       if (kickK) kickLegs(ch, D, kickK, kSide, kp, ke, kch);

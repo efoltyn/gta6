@@ -1156,10 +1156,49 @@
     if (!B || !B.pos || B.down()) return false;
     return stepAlong(a, B, B.ch, dx, dz, dist == null ? 0.35 : dist, dur || 0.34);
   };
+  /* A MAN WHO IS KNOCKED BACK STEPS WHERE THERE IS FLOOR. A stagger, a reel,
+     a shove all take their step straight along the blow, and the root goes
+     with it: into whoever stands or lies there. The part pass put him back
+     out, the next frame of the step put him back in, for the length of the
+     step (two or three root pushes a frame, ~280 limb re-solves, 2-7 cm
+     left). The step is chosen ONCE, before it is taken: along the blow if
+     the place it ends is clear; else turned 30 or 60 degrees to either
+     side, the first that is; else a quarter of the length. Clear = not
+     nearer than 62 cm to another man than he already is, and nobody lying
+     under it. (Feet and root still move on the one curve: nothing is
+     corrected mid-step.) */
+  const _cs = { dx: 0, dz: 0, D: 0 };
+  function clearStep(ch, p, dx, dz, D) {
+    _cs.dx = dx; _cs.dz = dz; _cs.D = D;
+    const BP = CBZ.bodyParts;
+    if (!ch || !p || !BP || !BP.near || !BP.near(ch) || !ch._bpN || !BP.topAt) return _cs;
+    const fy = p.y || 0;
+    for (let k = 0; k < 6; k++) {
+      let ex = dx, ez = dz, dd = D;
+      if (k === 5) dd = D * 0.25;
+      else if (k > 0) {
+        const a = (k & 1 ? 1 : -1) * 0.55 * ((k + 1) >> 1), ca = Math.cos(a), sa = Math.sin(a);
+        ex = dx * ca + dz * sa; ez = -dx * sa + dz * ca;
+      }
+      const qx = p.x + ex * dd, qz = p.z + ez * dd;
+      let ok = true;
+      for (let n = 0; n < (ch._bpNn || 0) && ok; n++) {
+        const o = ch._bpN[n];
+        if (!o || !o.group || o.group.visible === false) continue;
+        const g = o.group.position;
+        const d1 = Math.hypot(qx - g.x, qz - g.z), d0 = Math.hypot(p.x - g.x, p.z - g.z);
+        if (d1 < 0.62 && d1 < d0 - 0.01) ok = false;
+      }
+      if (ok && BP.topAt(ch, qx, qz) > fy + 0.06) ok = false;
+      if (ok || k === 5) { _cs.dx = ex; _cs.dz = ez; _cs.D = dd; return _cs; }
+    }
+    return _cs;
+  }
   function stepAlong(a, B, ch, dx, dz, D, dur) {
     const MP = MPf();
     const l = Math.hypot(dx, dz) || 1;
     dx /= l; dz /= l;
+    if (ch && B.pos) { clearStep(ch, B.pos, dx, dz, D); dx = _cs.dx; dz = _cs.dz; D = _cs.D; }
     if (!ch || !MP) { moveBy(B, dx * D, dz * D); return true; }
     const yaw = B.yaw(), c = Math.cos(yaw), s = Math.sin(yaw);
     const lx = dx * c - dz * s, lz = dx * s + dz * c;          // world → his frame
@@ -1262,13 +1301,16 @@
     // shot that staggers him keeps him going for a second step.
     const mass = o.mass > 0 ? o.mass : 1;
     if (o.stagger && B.pos) {
-      const D = (0.16 + 0.34 * power) * mass;
+      // (the step goes where there is floor: clearStep; the reaction's own lean stays along the blow)
+      clearStep(ch, B.pos, dx, dz, (0.16 + 0.34 * power) * mass);
+      const D = _cs.D, sdx = _cs.dx, sdz = _cs.dz;
+      const slx = sdx * c - sdz * s, slz = sdx * s + sdz * c;
       const sc = scaleOf(ch);
-      const lead = Math.abs(hr.lx) > Math.abs(hr.lz) ? (hr.lx > 0 ? "L" : "R") : (MP.leadSide(ch) === "l" ? "R" : "L");
-      const fs = MP.startStep(ch, hr.lx * D / sc, hr.lz * D / sc, 0.38 + 0.12 * power, lead);
+      const lead = Math.abs(slx) > Math.abs(slz) ? (slx > 0 ? "L" : "R") : (MP.leadSide(ch) === "l" ? "R" : "L");
+      const fs = MP.startStep(ch, slx * D / sc, slz * D / sc, 0.38 + 0.12 * power, lead);
       fs.gen = (fs.gen || 0) + 1;
-      pushMove(t, B, ch, D, dx, dz, fs.gen);
-      if ((o.heavy || power >= 0.9) && !B.isPlayer) reel(t, B, ch, dx, dz, 1, D * 0.55, 0.32);
+      pushMove(t, B, ch, D, sdx, sdz, fs.gen);
+      if ((o.heavy || power >= 0.9) && !B.isPlayer) reel(t, B, ch, sdx, sdz, 1, D * 0.55, 0.32);
     } else if (B.pos && !B.isPlayer && power > 0.3 && !(ch.footStep && ch.footStep.on)) {
       // a clean one that does not stagger him still moves his weight: a short
       // give along the blow, the feet going with it
@@ -1615,6 +1657,7 @@
     if (i >= 0) mounts.splice(i, 1);
     if (M.a) M.a._gnpOn = null;
     const ch = M.Ba && M.Ba.ch;
+    if (ch && ch._mStep) ch._mStep.on = false;
     if (ch) { ch.mount = false; ch._mountGo = false; ch._mountTop = null; ch._mountHalfW = 0; ch._mountR = 0; ch._mountOn = null; }
     if (M.Ba && M.Ba.isPlayer && CBZ.player) {
       CBZ.player._gnpOn = null;
@@ -1695,6 +1738,7 @@
       onBeat: function (St) { floorKickLand(St, tgt, opts); } });
   };
   const _fkM = { t: null };
+  const _mfs = { x: 0, z: 0 };
   function floorKickLand(S, tgt, opts) {
     const MP = MPf(), Ba = S.Ba, ch = Ba && Ba.ch, Bt = bod(tgt);
     if (!MP || !ch || !Bt || !Bt.pos) return;
@@ -1770,7 +1814,7 @@
          (CBZ.bodyParts: pelvis end to shoulder end): the rider's hips are
          45% of the way up it, over the low ribs, his knees on the floor
          outside the trunk above the hips and below the arms' roots. */
-      let bx0 = _mb.x, bz0 = _mb.z, along = 0.38 * s, seatW = 0;
+      let bx0 = _mb.x, bz0 = _mb.z, along = 0.38 * s, seatW = 0, bodyOK = false, aMin = 0, aMax = 0;
       const BPm = CBZ.bodyParts, PT = BPm && BPm.partsOf ? BPm.partsOf(tch, 0) : null;
       if (PT && PT.ok) {
         const f = PT.f, px = (f[0] + f[7]) * 0.5, pz = (f[2] + f[9]) * 0.5;
@@ -1817,55 +1861,129 @@
             Ba.ch._mountHalfW = halfW; Ba.ch._mountR = f[6];
           }
           seatW = halfW;
+          // how far he reaches along his own line, heels to crown (from the pelvis end of the trunk)
+          aMin = 1e9; aMax = -1e9;
+          for (let o = 0; o < 13 * 7; o += 7) {
+            for (let e = 0; e < 6; e += 3) {
+              const a = (f[o + e] - px) * ux + (f[o + e + 2] - pz) * uz;
+              if (a - f[o + 6] < aMin) aMin = a - f[o + 6];
+              if (a + f[o + 6] > aMax) aMax = a + f[o + 6];
+            }
+          }
+          bodyOK = true;
         }
       }
       const tx = bx0 + ux * along, tz = bz0 + uz * along;
-      /* HE WALKS ONTO HIM. The root used to be slid to the seat in 0.3 s
-         with the legs told to stand: a root that moves under a standing
-         body is "carried" (a deck, a lift), so the planted feet rode along
-         with it, through the man's ribs, and then the kneel folded a thigh
-         down through his trunk. He goes at a walk (1.7 m/s) and the legs
-         are told so (ch._verbWalk: the gait walks the ground covered):
-         real steps, each landing tested against the man's parts and put
-         down beside him, the swinging leg lifted over what it crosses
-         (entities/gait.js footSpot / topAt). Over the seat, feet either
-         side of the trunk, he goes down onto his knees. The blow he asked
-         for waits, its clock held, until he is down. */
+      /* THE CLIMB ON (seen from the side and from above: he ran in from the
+         man's feet straight up the length of him, standing on his shins,
+         his thighs, his belly; stood there turned sideways with a leg held
+         out across his arm; then snapped round and was kneeling).
+         Nothing took him ROUND the man: the walk went to the seat, which
+         is on the man. It goes in three parts, and at no time is a foot
+         put on him or his root over him while he stands on both feet.
+           1. THE WALK, round him. To a STAND POINT on the floor beside his
+              trunk at the seat's station, on the nearer side (the other
+              one if something of his lies on that spot and not on the
+              other). If the rider is not already out on that side he
+              first goes out to a lane beside the body: sideways, when he
+              is past the man's feet or head (or is standing on him); round
+              the nearer end when he is alongside on the far side. Then
+              down the lane. An ordinary walk (1.7 m/s, the legs told so):
+              each footfall is tested against the man's parts and a
+              swinging foot is lifted over a limb it crosses (the gait).
+           2. He turns to face ACROSS the man.
+           3. ONE STEP OVER. The far leg is carried over the trunk at the
+              height of the highest thing under its path and 9 cm, to the
+              kneel's foot spot on the far side (tested, moved to free
+              floor); the near foot stays where it stands; over that same
+              step his root comes across to the seat and he turns to face
+              the head. When the foot is down he lowers onto his knees.
+         If the stand point is not reached in time (2 s and the walk's own
+         length) he does not kneel through him: the mount is off and the
+         blow that was waiting on it is dropped. NPC riders take the same
+         path. A man with no parts to read (no rig): straight to the seat,
+         as before. */
+      const rc = Ba.ch;
       const ddx = tx - p.x, ddz = tz - p.z, dd = Math.hypot(ddx, ddz);
-      if (M.slide < 1) {
+      const yawAlong = Math.atan2(ux, uz);
+      if (M.slide < 1 && bodyOK && rc && rc.group) {
+        const perpX = uz, perpZ = -ux;                               // to the rider's LEFT of the trunk's line, once he faces the head
+        const ra = (p.x - bx0) * ux + (p.z - bz0) * uz, rl = (p.x - bx0) * perpX + (p.z - bz0) * perpZ;
+        const rs = scaleOf(rc), fy = p.y || 0;
+        const off = seatW + 0.17 * rs / 0.7, lane = off + 0.12;
+        if (M.flank == null) {
+          let sd = rl >= 0 ? 1 : -1;
+          if (BPm && BPm.topAt) {
+            const b1 = BPm.topAt(rc, tx + perpX * off * sd, tz + perpZ * off * sd) > fy + 0.06;
+            const b2 = BPm.topAt(rc, tx - perpX * off * sd, tz - perpZ * off * sd) > fy + 0.06;
+            if (b1 && !b2) sd = -sd;
+          }
+          M.flank = sd; M.stage = 0; M.walkT = 0;      // (M.side is the punching hand: this is which side of him)
+          M.budget = 2.0 + (Math.abs(rl - sd * off) + Math.abs(ra - along) + (rl * sd < 0 ? 2 * off : 0)) / 1.4;
+        }
+        const sd = M.flank;
+        const yawAcross = Math.atan2(-perpX * sd, -perpZ * sd);
+        if (M.stage === 0) {
+          M.walkT += dt;
+          // where to next: the stand point, or the way round to it
+          let ga = along, gl = sd * off, last = true;
+          if (rl * sd < off - 0.04) {
+            last = false;
+            if (ra < aMin - 0.15 || ra > aMax + 0.15 || Math.abs(rl) < off) { ga = ra; gl = sd * lane; }   // clear of his ends, or on him: straight out to the lane
+            else { ga = ra - aMin < aMax - ra ? aMin - 0.35 : aMax + 0.35; gl = rl; }                    // alongside on the far side: round the nearer end
+          }
+          const gx = bx0 + ux * ga + perpX * gl - p.x, gz = bz0 + uz * ga + perpZ * gl - p.z, gd = Math.hypot(gx, gz);
+          const stp = Math.min(gd, 1.7 * dt);
+          if (gd > 1e-4) moveBy(Ba, gx / gd * stp, gz / gd * stp);
+          rc._verbWalk = CBZ.now || 0;
+          if (gd > 0.15) Ba.face(Math.atan2(gx, gz), Math.min(1, dt * 8));
+          if (last && gd - stp < 0.06) M.stage = 1;
+          else if (M.walkT > M.budget) { V.cancelStrike(M.a); dismount(M); continue; }
+        } else if (M.stage === 1) {
+          // across him, both feet down, then the step
+          M.walkT += dt;
+          Ba.face(yawAcross, Math.min(1, dt * 9));
+          let dyw = (yawAcross - rc.group.rotation.y) % TAU;
+          if (dyw > Math.PI) dyw -= TAU; else if (dyw < -Math.PI) dyw += TAU;
+          const G = rc._gv, useG = !!(G && G.init && G.w > 0.5 && G.feet && !G.adopt), FTm = rc._mFt;
+          const gi = sd > 0 ? 0 : 1;                                // the leg that crosses: his right (gait foot 0) from the left side, his left from the right
+          const swing = useG && (G.feet[0].sw || G.feet[1].sw);
+          if (Math.abs(dyw) < 0.2 && !swing && (useG || FTm)) {
+            const g = rc.group, yaw = g.rotation.y, cy = Math.cos(yaw), sy = Math.sin(yaw);
+            let fx, fz;
+            if (useG) { fx = G.feet[gi].x; fz = G.feet[gi].z; }
+            else { const o = gi ? 0 : 2; fx = g.position.x + (FTm[o] * cy + FTm[o + 1] * sy) * rs; fz = g.position.z + (-FTm[o] * sy + FTm[o + 1] * cy) * rs; }
+            const wFoot = Math.max(seatW + 0.16, 0.33 * rs / 0.7);
+            let lx2 = tx - perpX * wFoot * sd, lz2 = tz - perpZ * wFoot * sd;
+            if (BPm && BPm.footSpot && BPm.footSpot(rc, lx2, fy, lz2, yawAlong, _mfs)) { lx2 = _mfs.x; lz2 = _mfs.z; }
+            let top = 0;
+            if (BPm && BPm.topAt) for (let k = 1; k <= 5; k++) { const tq = BPm.topAt(rc, fx + (lx2 - fx) * k / 6, fz + (lz2 - fz) * k / 6) - fy; if (tq > top) top = tq; }
+            const st = rc._mStep || (rc._mStep = { on: false, init: false, t: 0, dur: 0.5, leg: 0, sx: 0, sz: 0, tx: 0, tz: 0, h: 0, ox: 0, oz: 0 });
+            st.on = true; st.init = false; st.t = 0; st.leg = gi ? 0 : 1; st.sx = fx; st.sz = fz; st.tx = lx2; st.tz = lz2;
+            st.h = Math.min(0.62 * rs / 0.7, Math.max(0.12, top + 0.09));
+            st.dur = 0.55;
+            M.stage = 2; M.rx0 = p.x; M.rz0 = p.z; M.yaw0 = yaw;
+          } else if (M.walkT > M.budget + 1.2) { V.cancelStrike(M.a); dismount(M); continue; }
+        } else {
+          // the step over: the root comes across to the seat and he turns to the head as the foot travels
+          const st = rc._mStep, u = st && st.on ? clamp01(st.t / st.dur) : 1, e = clamp01((u - 0.15) / 0.85), e2 = e * e * (3 - 2 * e);
+          moveBy(Ba, M.rx0 + (tx - M.rx0) * e2 - p.x, M.rz0 + (tz - M.rz0) * e2 - p.z);
+          Ba.face(lerpAngle(M.yaw0, yawAlong, e2), 1);
+          if (!st || !st.on) M.slide = 1;
+        }
+      } else if (M.slide < 1) {
+        // (no parts to plan round: to the seat)
         const stp = Math.min(dd, 1.7 * dt);
         if (dd > 1e-4) moveBy(Ba, ddx / dd * stp, ddz / dd * stp);
-        if (Ba.ch) Ba.ch._verbWalk = CBZ.now || 0;
+        if (rc) rc._verbWalk = CBZ.now || 0;
         M.walkT = (M.walkT || 0) + dt;
-        /* ...ASTRIDE HIM FIRST. He used to go down the moment his root was
-           over the seat, with both feet still on the side he came from:
-           the kneel then carried the far leg down THROUGH the trunk to its
-           knee spot on the other side (thigh in trunk, every run). Over
-           the seat he stands until each foot is on its own side of the
-           man, outside his width, and down: the gait steps the far foot
-           over to its rest spot (the landing is put beside him and the
-           swing is lifted over him, entities/gait.js), and only then does
-           he kneel, each knee going down on the side its foot is on. */
-        if (dd - stp < 0.05 || M.walkT > 1.8) M.arr = true;
-        if (M.arr) {
-          M.waitT = (M.waitT || 0) + dt;
-          let astride = true;
-          const G = Ba.ch && Ba.ch._gv;
-          if (seatW > 0 && G && G.init && G.feet) {
-            for (let i = 0; i < 2; i++) {
-              const F = G.feet[i];
-              // (the rig's +X leg, gait foot 1, is his left: +X in the world is (uz, -ux) when he faces along the trunk)
-              const lat = (F.x - tx) * uz - (F.z - tz) * ux;
-              if (F.sw || (i ? lat < seatW * 0.85 : lat > -seatW * 0.85)) astride = false;
-            }
-          }
-          if (astride || M.waitT > 1.2) M.slide = 1;
-        }
+        Ba.face(yawAlong, Math.min(1, dt * 7));
+        if (dd - stp < 0.05 || M.walkT > 1.8) M.slide = 1;
       } else {
         const k = 1 - Math.exp(-dt * 30);
         moveBy(Ba, ddx * k, ddz * k);
+        Ba.face(yawAlong, Math.min(1, dt * 12));
       }
-      Ba.face(Math.atan2(ux, uz), Math.min(1, dt * (M.slide >= 1 ? 12 : 7)));
       M.lastX = p.x; M.lastZ = p.z;
       if (Ba.ch) {
         Ba.ch._mountGo = true; Ba.ch.mount = M.slide >= 1; Ba.ch._mountOn = tch;

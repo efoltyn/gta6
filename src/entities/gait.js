@@ -733,7 +733,7 @@
       else if (Math.abs(mdl.rotation.x) + Math.abs(mdl.rotation.z) > 0.05) want = 0;
       // (ch._gFeetNow: the last beat of a get-up, see plantInit)
       else if (ch.koT > 0 || ch.koPose || (MP && MP.fallActive && MP.fallActive(ch) && !ch._gFeetNow)) want = 0;
-      else if (ch.kickT > 0 || (ch.footStep && ch.footStep.on)) want = 0;
+      else if (ch.kickT > 0 || (ch.footStep && ch.footStep.on) || (ch._mStep && ch._mStep.on)) want = 0;
       else if (ch._sKeepLegs) want = 0;                // a soldier move that keys its own legs (a dive, a crawl)
       else if (ch._mountK > 0) want = 0;               // kneeling astride a man (meleeposes' mount)
       // (a fight stance's feet are planted here like any others: restSpot)
@@ -761,7 +761,7 @@
     }
     // meleeposes had the legs (a kick, a footwork step, the mount): the old
     // plants are void, the feet are taken back where it leaves them
-    const mel = ch.kickT > 0 || (ch.footStep && ch.footStep.on) || ch._mountK > 0;
+    const mel = ch.kickT > 0 || (ch.footStep && ch.footStep.on) || ch._mountK > 0 || (ch._mStep && ch._mStep.on);
     if (mel) G.adopt = true;
     else if (G.adopt) { G.adopt = false; G.init = false; }
     if (!G.init) plantInit(ch, G, g);

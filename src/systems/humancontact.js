@@ -1000,10 +1000,8 @@
        man of a pair is mid-blow (and for a moment after, easing back) the
        barrel shrinks to the trunks' own depth and the part pass keeps what
        is actually solid apart. */
-    {
-      const tg = Math.min(tightT(A), tightT(B));
-      if (tg < TIGHT_EASE) min = TIGHT_MIN + Math.max(0, min - TIGHT_MIN) * smooth01(tg / TIGHT_EASE);
-    }
+    const tg = Math.min(tightT(A), tightT(B)), inFight = tg < TIGHT_EASE;
+    if (inFight) min = TIGHT_MIN + Math.max(0, min - TIGHT_MIN) * smooth01(tg / TIGHT_EASE);
     const d2 = dx * dx + dz * dz;
     let nx = 0, nz = 0, overlap = 0, found = false;
     // where they stood at the end of the last pass: already touching then =
@@ -1083,7 +1081,12 @@
       if (pa && !pb) press(B, nx, nz, m); else if (pb && !pa) press(A, -nx, -nz, m);
     }
     let close = overlap;
-    if (!pa && !pb && !remote) {
+    /* (TWO NPCs IN A FIGHT ARE CLOSED IN FULL, like a pair the player is in.
+       The soft 60%-past-2-cm correction is for a queue or a crowd, so it
+       does not buzz; on two men trading blows, with the barrel already
+       shrunk to let the blows in, it let their roots sit inside even
+       that: 43 cm apart, a trunk in a forearm.) */
+    if (!pa && !pb && !remote && !inFight) {
       if (overlap <= SLOP) close = 0;
       else close = (overlap - SLOP) * SOFT;
     }
@@ -1484,6 +1487,7 @@
     let sc = d2;
     const P = CBZ.player && CBZ.player.pos, ap = posOf(A), bp = posOf(B);
     if (isPlayer(A) || isPlayer(B)) sc = -1 + d2 * 0.01;
+    else if (ca.punchT > 0 || ca.kickT > 0 || cb.punchT > 0 || cb.kickT > 0 || (ca.hitReact && ca.hitReact.on) || (cb.hitReact && cb.hitReact.on)) sc = -0.5 + d2 * 0.01;
     else if (P && ap && bp) { const mx = (ap.x + bp.x) * 0.5 - P.x, mz = (ap.z + bp.z) * 0.5 - P.z; sc = mx * mx + mz * mz + d2 * 0.01; }
     candA[candN] = A; candB[candN] = B; candS[candN] = sc; candN++;
     return true;
@@ -1789,7 +1793,11 @@
       if (nh < 0.25) { const gp = chX.group.position; hx = gp.x - _d.qx; hz = gp.z - _d.qz; const l = Math.hypot(hx, hz) || 1; hx /= l; hz /= l; nh = 0.4; }
       else { hx /= nh; hz /= nh; }
       const t = onFoot ? 1 : Math.max(_d.s, 0.4);
-      const dist = Math.min(0.3, dep / Math.max(nh, 0.4) / t);
+      // (a foot ON a part, the contact pointing up, has to come off it sideways by the
+      // distance at which a foot at that height clears it, not by the overlap: the root rule's own sum)
+      const dc = _d.rr - _d.depth, dyc = dc * _d.ny, hc = dc * Math.hypot(_d.nx, _d.nz);
+      const sideOff = Math.sqrt(Math.max(0, _d.rr * _d.rr - dyc * dyc)) - hc + 0.004;
+      const dist = Math.min(0.3, Math.max(dep / Math.max(nh, 0.4), sideOff) / t);
       ex = hx * dist; ez = hz * dist; mx = ex * 0.5; mz = ez * 0.5;
       movePlant(chX, k, ex, ez);
       AU.feetReplaced++; FRB[_d.i * NP + _d.j]++;
@@ -1919,8 +1927,8 @@
          a thigh 6 cm into the top of a man's trunk stayed in it.) */
       const dc = _d2.rr - _d2.depth, dyc = dc * _d2.ny, hc = dc * Math.hypot(_d2.nx, _d2.nz);
       const side = Math.sqrt(Math.max(0, _d2.rr * _d2.rr - dyc * dyc)) - hc;
-      // (what the limbs could not clear is closed a hand's width and a half a frame, not a stride)
-      const push = Math.min(all ? 0.15 : 0.3, Math.max(_d2.depth, side) + 0.003);
+      // (the whole of it, the frame it is found: 15 cm a frame left an 11-17 cm jam between two NPCs there for the eye)
+      const push = Math.min(0.3, Math.max(_d2.depth, side) + 0.003);
       const pa = isPlayer(A), pb = isPlayer(B);
       let wA, wB;
       if (dA && dB) return;
