@@ -148,10 +148,15 @@
      the belly zone, a 16 cm sphere whose front is 17 cm ahead of his
      centre), and from 1.18 m that happens 13 cm before the leg is out. From
      1.24 m (1.35 x 0.92) it happens with the knee at ~30 degrees and 2.5 cm
-     of leg still in hand; any further and a man leaning back is missed.) */
+     of leg still in hand; any further and a man leaning back is missed.)
+     (11-25: contact is his real surface now, CBZ.bodyParts, not the zone
+     sphere. The front of his shirt is 7 cm behind where the belly and liver
+     spheres stood, so every blow to the trunk has 7 cm further to go: the
+     trunk blows are thrown from 7 cm (x 1/0.92) nearer. The front kick is
+     back at 1.28: the same ~25-30 degree knee at contact, on the shirt.) */
   const REACH = {
-    jab: 1.28, cross: 1.30, hook: 1.00, upper: 0.80, body: 1.20, bodyStraight: 1.12, overhand: 1.42,
-    elbow: 0.92, headbutt: 0.74, stab: 0.95, shove: 1.10, front: 1.35, round: 1.15, low: 1.15, knee: 0.62,
+    jab: 1.28, cross: 1.30, hook: 1.00, upper: 0.80, body: 1.05, bodyStraight: 1.05, overhand: 1.42,
+    elbow: 0.92, headbutt: 0.74, stab: 0.90, shove: 1.10, front: 1.28, round: 1.09, low: 1.15, knee: 0.57,
     gnp: 1.0, gnpElbow: 0.9, hammer: 1.0,
     // a man on the floor (V.groundKick): measured to the spot on him the foot
     // goes to, not to his root. The stomp comes down just in front of the
@@ -273,9 +278,10 @@
       // comes down on its upper surface, a soccer kick goes into the side
       // of it that faces the kicker
       out.copy(Z.cA).add(Z.dA).add(Z.cB).add(Z.dB).multiplyScalar(0.25);
-      if (kind === "stomp") { out.y += Z.chestR * 0.85; return out; }
+      // (ON the trunk, not in it: the sole on its top, the instep on its side)
+      if (kind === "stomp") { out.y += Z.chestR * 0.95; return out; }
       const dx = from.x - out.x, dz = from.z - out.z, d = Math.hypot(dx, dz) || 1;
-      out.x += (dx / d) * Z.chestR * 0.8; out.z += (dz / d) * Z.chestR * 0.8;
+      out.x += (dx / d) * Z.chestR * 1.3; out.z += (dz / d) * Z.chestR * 1.3;
       return out;
     }
     if (level === "legs") { out.copy(Z.lA).lerp(Z.lB, 0.55); r = Z.legR; c = out; }
@@ -391,7 +397,7 @@
     S.dur = MP.durOf(kind, S.heavy) * (1 + 0.25 * gas) * (opts.speed ? 1 / opts.speed : 1);
     S.power = clamp01((opts.power != null ? opts.power : (POWER[kind] || 0.6) + (S.heavy ? 0.18 : 0)) * (1 - 0.35 * gas));
     S.t = 0; S.p = 0; S.landed = false; S.whiffed = false; S.aimLocked = false; S.hasAim = false; S.beat = false;
-    S.lastPT = -1; S.stall = 0; S.walled = false; S.turn = 0; S.faceYaw = null;
+    S.lastPT = -1; S.stall = 0; S.walled = false; S.turn = 0; S.faceYaw = null; S.pvOk = false; S._hd = 0; S._hOn = false;
     S.rng = opts.rng || Math.random;
     // opts.aimErr (m): how far off the line this hand throws (a novice ~0.1,
     // a pro ~0.02); lateral and vertical, fixed for the blow
@@ -960,6 +966,7 @@
     if (!B || !B.ch || !B.pos || B.dead() || B.down()) return null;
     const dx = P.x - B.pos.x, dz = P.z - B.pos.z;
     if (dx * dx + dz * dz > 1.44) return null;
+    S._hd = 0; S._hOn = false;
     const Z = zonesOf(B.ch);
     // a raised guard takes it on the forearms
     const tch = B.ch;
@@ -972,8 +979,39 @@
        head still snapping from the last one, are all open. */
     const stance = !guarding && tch.fightStance && (tch._mK || 0) > 0.6 && !(tch.punchT > 0) && !(tch.kickT > 0) && !(tch.dodgeT > 0) &&
       !(tch.hitReact && tch.hitReact.on && tch.hitReact.t < 0.35) && !((tch.winded || 0) > 0.7);
-    if ((guarding || (stance && S.level === "head")) && S.level !== "legs" && forearmTouch(Z, P, r)) return "block";
-    const zone = hitZone(Z, P, r, S.level === "legs");
+    /* THE BLOW MEETS THE PART IT TOUCHES (systems/humancontact.js
+       CBZ.bodyParts: his drawn limbs, trunk and head as posed this frame).
+       It used to be tested against zone spheres that are not his surface
+       (the belly's stood 7 cm proud of his shirt, nothing at all covered an
+       arm that was not "guarding") once a frame, so a fist moving 12 cm a
+       frame was found up to 12 cm inside him and stopped THERE. The part
+       says what was touched, how deep, and the surface point; contact()
+       backs the limb out to that surface. The zones only NAME the result
+       now (chin or skull, liver or ribs). An arm in the way is met first:
+       it is a block if he is guarding, and a blow on the arm if he is not. */
+    const BP = CBZ.bodyParts;
+    let zone;
+    if (BP && BP.strikeHit) {
+      // (the whole striking segment, not only its point: a round kick's foot
+      // wrapping round his guard, a forearm crossing a forearm, are contacts)
+      const h = BP.strikeHit(tch, S.Ba && S.Ba.ch, strikeSegs(S), P.x, P.y, P.z, r, HIT_SKIN);
+      if (!h) return null;
+      const pi = h.part;
+      _w.set(h.sx, h.sy, h.sz);
+      if (pi === 2) { const jr = Z.jaw.r + r; zone = _w.distanceToSquared(Z.jaw.c) <= 2.1 * jr * jr ? "jaw" : "head"; }
+      else if (pi <= 1) { const lr = Z.liver.r + r; zone = _w.distanceToSquared(Z.liver.c) <= lr * lr ? "liver" : "body"; }
+      else if (pi <= 6) {
+        if (S.level === "legs") { _legSide = pi <= 4 ? "L" : "R"; zone = "legs"; }       // a hand hanging by the thigh: the kick goes on into the leg
+        else zone = guarding || (stance && S.level === "head") ? "block" : "body";
+      }
+      else { _legSide = (pi === 7 || pi === 8 || pi === 11) ? "L" : "R"; zone = "legs"; }
+      S._hOn = true; S._hd = Math.max(0, h.depth); S._hnx = h.nx; S._hny = h.ny; S._hnz = h.nz; S._hsx = h.sx; S._hsy = h.sy; S._hsz = h.sz;
+      if (zone === "block") return zone;
+    } else {
+      // (a page without the part solver: the old spheres)
+      if ((guarding || (stance && S.level === "head")) && S.level !== "legs" && forearmTouch(Z, P, r)) return "block";
+      zone = hitZone(Z, P, r, S.level === "legs");
+    }
     // a head moving off the line that the fist only finds at the rim of the
     // skull: it slides off — that is what a slip is
     if (zone === "head" && tch.dodgeT > 0) {
@@ -983,8 +1021,26 @@
     return zone;
   }
   const _el = new THREE.Vector3();
+  // the attacker's own parts that carry this blow (systems/humancontact.js
+  // PART order: 3/5 upper arms, 4/6 forearm + fist, 7/9 thighs, 8/10 shins,
+  // 11/12 feet, 2 head; the first of each pair is his left)
+  function strikeSegs(S) {
+    const L = S.arm === "l";
+    switch (S.kind) {
+      case "front": case "stomp": return 1 << (L ? 11 : 12);
+      case "round": case "low": case "soccer": return (1 << (L ? 8 : 10)) | (1 << (L ? 11 : 12));
+      case "knee": return 1 << (L ? 7 : 9);
+      case "headbutt": return 4;
+      case "elbow": case "gnpElbow": return (1 << (L ? 3 : 5)) | (1 << (L ? 4 : 6));
+      case "shove": return (1 << 4) | (1 << 6);
+      default: return 1 << (L ? 4 : 6);
+    }
+  }
+  const HIT_SKIN = 0.015;   // m: how near a surface counts as touching it (the limb is backed out by the same)
   function contact(S, ch, MP) {
     MP.strikePoint(ch, S.kind, S.arm, _v);
+    const drv = S.kick ? (MP.kickDrive ? MP.kickDrive(S.p) : 1) : MP.drive(S.p);
+    S._hd = 0; S._hOn = false;
     let r = FIST_R * (scaleOf(ch) / 0.7) * (S.kick ? 1.3 : 1);
     if (S.wrow && !S.kick && S.wrow.len > 0) {
       // the weapon meets him, not the hand: carry the point out along the
@@ -1007,7 +1063,23 @@
       for (let i = 0; !hit && i < CAND.length; i++) { zone = testTarget(S, CAND[i], _v, r); if (zone) hit = CAND[i]; }
       CAND.length = 0;
     }
-    if (!hit) return;
+    if (!hit) { S.pvx = _v.x; S.pvy = _v.y; S.pvz = _v.z; S.pd = drv; S.pvOk = true; return; }
+    /* IT STOPS AT HIS SURFACE. The limb is found S._hd inside the part on
+       this frame; last frame it was outside, at drive S.pd. How far the
+       striking point moves per unit of drive is known from those two
+       frames, so the drive at which it first touched is solved, and that is
+       where the limb is held (meleeposes: _mLandD / _mKLandE). The point
+       the blow is resolved at is the point on his surface. (This frame's
+       pose is put right by the part pass, which pushes the hand or foot
+       out and re-solves the limb.) */
+    let landD = -1;
+    if (S._hOn) {
+      if (S._hd > 0 && S.pvOk && drv > S.pd + 1e-4) {
+        const sp = Math.hypot(_v.x - S.pvx, _v.y - S.pvy, _v.z - S.pvz) / (drv - S.pd);
+        if (sp > 1e-3) landD = Math.max(S.pd, drv - S._hd / sp);
+      }
+      _v.set(S._hsx, S._hsy, S._hsz);
+    }
     // nothing lands through a wall
     const ap = S.Ba.pos;
     if (!S.walled && walled(ap.x, (ap.y || 0) + 1.15, ap.z, _v.x, _v.y, _v.z)) { S.walled = true; whiff(S); return; }
@@ -1021,6 +1093,10 @@
       if ((ax * fx + az * fz) / al > 0.2) blocked = true;
     }
     resolveOn(S, hit, zone, _v, blocked);
+    if (S._hOn && S.landed && CBZ.bodyParts) {
+      if (landD >= 0) { if (S.kick) ch._mKLandE = landD; else ch._mLandD = landD; }
+      CBZ.bodyParts.count("strike");
+    }
   }
   function riglessMark(S) {
     const T = S.aimT;
@@ -1624,6 +1700,7 @@
     if (!S.hasAim || !Bt.down() || _gkp.distanceToSquared(S.aim) > tol * tol) { S.landed = false; whiff(S); return; }
     // it stops on him
     ch.kickLandP = S.p; ch._mKLandE = MP.kickDrive ? MP.kickDrive(S.p) : 1;
+    if (CBZ.bodyParts) CBZ.bodyParts.count("strike");
     _fkM.t = tgt;
     groundLand(S, _fkM, opts);
     _fkM.t = null;
@@ -1685,7 +1762,21 @@
       if (L < 0.2) { ux = Bt.pos.x - p.x; uz = Bt.pos.z - p.z; }
       const l2 = Math.hypot(ux, uz) || 1; ux /= l2; uz /= l2;
       const s = scaleOf(tch) / 0.7;
-      const tx = _mb.x + ux * 0.38 * s, tz = _mb.z + uz * 0.38 * s;
+      /* ON HIS TRUNK AS IT LIES. The seat was measured 0.38 m from the
+         origin of his body group toward his head, and that origin is at
+         his hip joints: the rider knelt across his pelvis with his knees
+         in the man's thighs. It is taken off his drawn trunk instead
+         (CBZ.bodyParts: pelvis end to shoulder end): the rider's hips are
+         45% of the way up it, over the low ribs, his knees on the floor
+         outside the trunk above the hips and below the arms' roots. */
+      let bx0 = _mb.x, bz0 = _mb.z, along = 0.38 * s;
+      const BPm = CBZ.bodyParts, PT = BPm && BPm.partsOf ? BPm.partsOf(tch, 0) : null;
+      if (PT && PT.ok) {
+        const f = PT.f, px = (f[0] + f[7]) * 0.5, pz = (f[2] + f[9]) * 0.5;
+        const dx = (f[3] + f[10]) * 0.5 - px, dz = (f[5] + f[12]) * 0.5 - pz, l = Math.hypot(dx, dz);
+        if (l > 0.2) { ux = dx / l; uz = dz / l; bx0 = px; bz0 = pz; along = 0.45 * l; }
+      }
+      const tx = bx0 + ux * along, tz = bz0 + uz * along;
       M.slide = Math.min(1, M.slide + dt / 0.3);
       const k = 1 - Math.exp(-dt * (M.slide >= 1 ? 30 : 12));
       moveBy(Ba, (tx - p.x) * k, (tz - p.z) * k);

@@ -559,6 +559,7 @@
      spots, squaring up, standing down and turning to face a man are all
      taken in steps by the rest logic in post, never slid. */
   const _rs = { lat: 0, fore: 0, toe: 0 };
+  const _bs = { x: 0, z: 0 };
   function restSpot(ch, G, g, i) {
     const st = G.moving ? 0 : (ch._gSt || 0);
     if (st) {
@@ -597,6 +598,7 @@
         // has it somewhere else is not a foot to stand on)
         if (Math.hypot(e[12] - grp.position.x, e[14] - grp.position.z) < 0.7 * g.Lw && e[13] - grp.position.y < 0.35 * g.Lw) { F.x = e[12]; F.z = e[14]; }
       }
+      if (CBZ.bodyParts && CBZ.bodyParts.near(ch) && CBZ.bodyParts.footSpot(ch, F.x, grp.position.y, F.z, yaw + R.toe, _bs)) { F.x = _bs.x; F.z = _bs.z; }
       const gy = groundY(F.x, F.z, grp.position.y + 0.6);
       F.y = gy != null && Math.abs(gy - grp.position.y) < 0.6 ? gy : grp.position.y;
       F.yaw = yaw + (G.hy || 0) + R.toe;                // a touch of toe-out
@@ -610,7 +612,7 @@
   function liftFoot(F, dur, psi) {
     F.sw = true; F.u = 0; F.dur = Math.max(0.12, dur);
     F.sx = F.ax; F.sy = F.ay; F.sz = F.az; F.syaw = F.yaw; F.spsi = psi;
-    F.tyOk = false; F.gy = null; F.over = false;
+    F.tyOk = false; F.gy = null; F.over = false; F.bp = false; F.top = null;
   }
 
   // the landing: contact under the predicted hip, half a stance ahead of it
@@ -653,6 +655,12 @@
     let tlx = (tx - (grp.position.x + G.ox)) * c - (tz - (grp.position.z + G.oz)) * s;
     if (SIDE[i] > 0 && tlx < olx + minSep) { const d = olx + minSep - tlx; tx += d * c; tz -= d * s; tlx += d; }
     if (SIDE[i] < 0 && tlx > olx - minSep) { const d = tlx - (olx - minSep); tx -= d * c; tz += d * s; tlx -= d; }
+    /* NOT IN A MAN. The landing is tested against the drawn parts of whoever
+       is near (systems/humancontact.js CBZ.bodyParts: a lying man's arm, a
+       standing man's foot) and moved to the nearest floor where the sole is
+       in nobody; the stride comes out shorter, longer or wider by that. */
+    const BP = CBZ.bodyParts;
+    if (BP && BP.near(ch) && BP.footSpot(ch, tx, F.gy != null ? F.gy : grp.position.y, tz, yawP + toe, _bs)) { tx = _bs.x; tz = _bs.z; F.bp = true; }
     F.tx = tx; F.tz = tz;
     F.tyaw = yawP + toe;
     // the ground there: asked once the foot is on its way down (one query a step)
@@ -833,7 +841,9 @@
         let worst = -1, ws = 1;
         for (let i = 0; i < 2; i++) {
           const F = G.feet[i], R = restSpot(ch, G, g, i);
-          const nx = grp.position.x + G.ox + R.lat * cy + R.fore * sy, nz = grp.position.z + G.oz - R.lat * sy + R.fore * cy;
+          let nx = grp.position.x + G.ox + R.lat * cy + R.fore * sy, nz = grp.position.z + G.oz - R.lat * sy + R.fore * cy;
+          // (where it would be put down: beside a body that lies on its rest spot, not stepping at it for ever)
+          if (CBZ.bodyParts && CBZ.bodyParts.near(ch) && CBZ.bodyParts.footSpot(ch, nx, grp.position.y, nz, yH + R.toe, _bs)) { nx = _bs.x; nz = _bs.z; }
           const off = Math.hypot(F.x - nx, F.z - nz) / (0.085 * g.Lw / 0.665);
           const tw = Math.abs(wrap(F.yaw - (yH + R.toe))) / 0.40;
           const sc = Math.max(off, tw);
@@ -871,9 +881,23 @@
            nosing. The foot is up to the height of a higher landing by ~60%
            of the swing, and holds the height it left until ~40% before it
            starts down to a lower one. On the flat the two are the same. */
+        /* ...AND OVER WHOEVER IS LYING IN THE WAY: the top of any body
+           under the foot's path (looked up once a swing, a little after it
+           leaves) is cleared by the sole, a step over him, not through. */
+        if (F.top == null && F.u > 0.08) {
+          F.top = 0;
+          const BPs = CBZ.bodyParts;
+          if (BPs && BPs.near(ch)) {
+            for (let q = 1; q <= 3; q++) {
+              const tp = BPs.topAt(ch, lerp(F.sx, F.tx, q * 0.25), lerp(F.sz, F.tz, q * 0.25)) - grp.position.y;
+              if (tp > F.top) F.top = tp;
+            }
+          }
+        }
+        const over = F.top > 0.02 ? Math.min(F.top + 0.05, 0.55 * g.Lw) : 0;
         const dyv = _ank.y - F.sy, kv = clamp01((Math.abs(dyv) - 0.03) / 0.06);
         const ev = lerp(ease(F.u), dyv > 0 ? ease(clamp01(F.u * 1.6)) : ease(clamp01((F.u - 0.375) * 1.6)), kv);
-        F.ay = lerp(F.sy, _ank.y, ev) + (F.idle ? 0.045 * g.Lw / 0.665 : lift) * arc;
+        F.ay = lerp(F.sy, _ank.y, ev) + Math.max(F.idle ? 0.045 * g.Lw / 0.665 : lift, over) * arc;
         F.yaw = F.syaw + wrap(F.tyaw - F.syaw) * e;
         F.psi = swingPsi(M, F, F.u, dir * alongK);
         F.psiW = F.idle ? 0.6 : 1;
@@ -1080,6 +1104,7 @@
   function touchdown(ch, G, g, F, i) {
     // the swing's own last target is the contact (no pop)
     F.sw = false; F.u = 0; F.idle = false; F.over = false;
+    if (F.bp) { F.bp = false; if (CBZ.bodyParts) CBZ.bodyParts.count("feet"); }
     F.x = F.tx; F.z = F.tz; F.y = F.ty; F.yaw = F.tyaw;
   }
   // the foot pitch for ankleSolve: { psi (world, + toes down), w } or null

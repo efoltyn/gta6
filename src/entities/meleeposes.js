@@ -564,6 +564,23 @@
         FT[o] = px; FT[o + 1] = pz;
       }
     } else PLn.on = false;
+    /* ...AND NEVER IN ANOTHER MAN. The spots this layer holds (a kick's
+       standing foot, where a lunge or a stagger step comes down) are tested
+       against the drawn parts of whoever is near (CBZ.bodyParts) and moved
+       to the nearest free floor: the kicker stood in the arm of the man he
+       was stomping. */
+    const BPm = CBZ.bodyParts;
+    if (BPm && ch._mFtV && !ch._mFtS && ch.group && BPm.near(ch)) {
+      const g = ch.group, yaw = g.rotation.y, c = Math.cos(yaw), sn = Math.sin(yaw);
+      for (let o = 0; o < 4; o += 2) {
+        const wx = g.position.x + (FT[o] * c + FT[o + 1] * sn) * D.scale, wz = g.position.z + (-FT[o] * sn + FT[o + 1] * c) * D.scale;
+        if (!BPm.footSpot(ch, wx, g.position.y, wz, yaw, _bfs)) continue;
+        const dx = _bfs.x - g.position.x, dz = _bfs.z - g.position.z;
+        FT[o] = (dx * c - dz * sn) / D.scale; FT[o + 1] = (dx * sn + dz * c) / D.scale;
+        if (PLn.on && o === (ch.kickLeg === "l" ? 2 : 0)) { PLn.x = _bfs.x; PLn.z = _bfs.z; }
+        BPm.count("feet");
+      }
+    }
     if (ch._mFtV) { FL.x = FT[0]; FL.z = FT[1]; FR.x = FT[2]; FR.z = FT[3]; }
     else { FT[0] = FL.x; FT[1] = FL.z; FT[2] = FR.x; FT[3] = FR.z; }   // nobody had them: this layer's own spots
     if (mounted) mountPose(ch, D, ch._mountK);
@@ -877,6 +894,7 @@
     if (r) { const c = Math.cos(r), sn = Math.sin(r), x = v.x, z = v.z; v.x = x * c + z * sn; v.z = -x * sn + z * c; }
     return v;
   }
+  const _bfs = { x: 0, z: 0 };
   let _poleYaw = 0;
   function rotPole(v) {
     const r = -_poleYaw;

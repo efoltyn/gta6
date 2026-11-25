@@ -980,12 +980,30 @@
   }
   function playerOf(m) { for (let i = 0; i < _live.length; i++) if (isPlayer(_live[i])) return _live[i]; return cityPlayer; }
   /* where the pair touches and how they are pushed apart */
+  const TIGHT_MIN = 0.46, TIGHT_EASE = 0.6;
+  function tightT(a) {
+    const ch = (isPlayer(a) && !a._remote) ? CBZ.playerChar : (a.char || a.ch);
+    if (ch && (ch.punchT > 0 || ch.kickT > 0)) a._bcTight = clock;
+    return a._bcTight != null ? clock - a._bcTight : 9;
+  }
   function separatePair(A, B, m, relax) {
     const ap = posOf(A), bp = posOf(B); if (!ap || !bp) return;
     let dx = bp.x - ap.x, dz = bp.z - ap.z;
     let min = radiusOf(A) + radiusOf(B);
     const pa = isPlayer(A), pb = isPlayer(B);
     if (m === "escape" && (pa ? fightingYou(B) : (pb && fightingYou(A)))) min += FIGHT_GAP;
+    /* IN A BLOW THE PARTS DECIDE, NOT THE BARREL. The root capsule is 72 cm
+       across two men (88 for the player in a fight); a knee is thrown from
+       52, an uppercut from 74. The lunge put the striker inside the barrel
+       and the barrel put him back out, every frame: he was shoved off the
+       man he was hitting and the close blows could not reach. While either
+       man of a pair is mid-blow (and for a moment after, easing back) the
+       barrel shrinks to the trunks' own depth and the part pass keeps what
+       is actually solid apart. */
+    {
+      const tg = Math.min(tightT(A), tightT(B));
+      if (tg < TIGHT_EASE) min = TIGHT_MIN + Math.max(0, min - TIGHT_MIN) * smooth01(tg / TIGHT_EASE);
+    }
     const d2 = dx * dx + dz * dz;
     let nx = 0, nz = 0, overlap = 0, found = false;
     // where they stood at the end of the last pass: already touching then =
@@ -1196,7 +1214,13 @@
         const bucket = downGrid.bucket(cx, cz); if (!bucket) continue;
         for (let k = 0; k < bucket.length; k++) {
           const D = bucket[k];
-          if (D === S || S._gnpOn === D || (isPlayer(S) && CBZ.player && CBZ.player._gnpOn === D)) continue;
+          if (D === S) continue;
+          // (his real limbs and trunk, wherever they lie, are what a standing
+          // man is kept off: partPass. The line below is only for a pair the
+          // part solver cannot take: no rig, or over its cap.)
+          const dq = posOf(D), qx = dq.x - p.x, qz = dq.z - p.z, q2 = qx * qx + qz * qz;
+          const byParts = q2 < 4.4 && Math.abs((dq.y || 0) - (p.y || 0)) <= 1.2 && notePair(S, D, q2);
+          if (S._gnpOn === D || (isPlayer(S) && CBZ.player && CBZ.player._gnpOn === D)) continue;
           // the officer walking in to kneel on him (the same verb, still in
           // its approach) is going to him on purpose: never pushed off him
           if (S._bcSess && S._bcSess === sessionOf(D)) continue;
@@ -1212,6 +1236,7 @@
           const ux = sp > 1e-3 ? (S._bcVx || 0) / sp : 0, uz = sp > 1e-3 ? (S._bcVz || 0) / sp : 0;
           const across = sp >= 0.6 && Math.abs(ux * n.x + uz * n.z) > 0.45;
           if (!across) {
+            if (byParts) continue;
             // put the foot down beside him, quickly but not as a snap
             const push = Math.min(min - n.d, Math.max(0.03, 3.2 * (dt || 0.016)));
             p.x += n.x * push; p.z += n.z * push;
@@ -1237,6 +1262,631 @@
   }
 
   /* ============================================================
+     BODY PARTS - a person is solid part by part (CBZ.bodyParts).
+
+   Owner, 2026-11-24, looking at a stomp: "one guy is literally standing
+   through another guy with their foot phased through the other guy... Why
+   are there not mesh colliders with people?"
+
+   Because a person was ONE vertical capsule at the root (and one line on
+   the floor when down). Nothing below the root existed for contact: no
+   foot, shin, thigh, forearm, fist or head. A foot was planted, a lunge
+   stepped and a fist driven by the pose code with no test against the
+   other man, and a blow "landed" on a zone sphere, not on him.
+
+   Now every rig has its drawn parts as colliders, read live off its own
+   joints in whatever pose it is in (standing, crouched, falling, lying,
+   seated, carried): 13 capsules fitted to the drawn limbs.
+       trunk (two side by side, pelvis to shoulders: the box's width and
+       depth), head, upper arm and forearm+hand x2, thigh and shin x2,
+       foot x2 (heel to toe along the sole)
+   A rig's set is rebuilt at most once a frame, on demand, only when
+   something near it asks. One service, used by everything:
+     - the pass above finds who is near whom (the root capsule stays as the
+       cheap broad phase and is all the instanced crowd ever gets) and
+       hands the nearest pairs to partPass (order 92, after every pose
+       writer), which
+         . tests every limb of each man, segment against segment, against
+           every part of the other, and re-solves a limb found in him (the
+           elbow or knee swung out, the hand or foot moved off him): no
+           source can leave a limb in somebody. A standing foot is moved
+           along the floor and keeps its new spot;
+         . moves the two ROOTS apart for what only the root can clear
+           (trunk, head, the thighs at the hip).
+     - footSpot / topAt: where a foot may come down. entities/gait.js asks
+       for every landing, rest step and plant; entities/meleeposes.js for the
+       feet it holds (a kick's standing foot, a lunge, a stagger step). A
+       landing inside somebody is moved to the nearest free floor, and the
+       swing clears what it crosses.
+     - strikeHit: what a fist, elbow, knee, shin or foot is touching, how
+       deep, and the surface normal there (systems/verbs_strike.js: the
+       contact test of every blow; the zone spheres only name the result).
+   People with their hands ON each other by a verb (a hold, a carry, an
+   escort: one session) keep their arms and their roots where the verb put
+   them: a gripping hand is in the thing it grips. Their legs, trunks and
+   heads are tested like anyone's.
+
+   Cost: nothing for a body with nobody within 1.6 m. A near pair that is
+   not touching: 169 segment tests. One that is: ~600, at worst ~1,150
+   (pure arithmetic, no allocation) plus an IK solve for each limb moved;
+   at most PAIR_MAX pairs a frame, the ones nearest the player first. CBZ.bodyPartAudit() reports
+   what it did and the deepest overlap it left.
+     ============================================================ */
+  const NP = 13, ST = 7;
+  const PART = ["trunkL", "trunkR", "head", "upperArmL", "forearmL", "upperArmR", "forearmR", "thighL", "shinL", "thighR", "shinR", "footL", "footR"];
+  const M_ALL = (1 << NP) - 1;
+  const M_SELF = 1 | 2 | 4;
+  const M_ARMS = (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6);
+  const PAIR_MAX = 16, CAND_MAX = 64, NEAR = 1.6;
+  let bpFrame = 1;
+  if (CBZ.onUpdate) CBZ.onUpdate(0.2, function () { bpFrame++; });
+  function rigOf(a) {
+    if (!a) return null;
+    if (isPlayer(a) && !a._remote) return CBZ.playerChar || a.char || null;
+    const ch = a.char || a.ch;
+    return ch && ch.parts && ch.group ? ch : null;
+  }
+  function wp(o, f, i) { const e = o.matrixWorld.elements; f[i] = e[12]; f[i + 1] = e[13]; f[i + 2] = e[14]; }
+  function lp(o, x, y, z, f, i) {
+    const e = o.matrixWorld.elements;
+    f[i] = e[0] * x + e[4] * y + e[8] * z + e[12];
+    f[i + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+    f[i + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+  }
+  // fresh: 0 = the matrices as last drawn (a frame old at worst), 1 = bring
+  // this rig's world matrices up to date first, 2 = the caller just did
+  function partsOf(ch, fresh) {
+    let P = ch._bp;
+    if (!P) P = ch._bp = { f: new Float32Array(NP * ST), frame: -1, mf: -1, x0: 0, x1: 0, y0: 0, y1: 0, z0: 0, z1: 0, s: 0.7, ok: false, ch: ch };
+    if (P.frame === bpFrame && (!fresh || P.mf === bpFrame)) return P;
+    const pr = ch.parts, lo = ch.low, body = ch.body, g = ch.group, sk = ch.sockets;
+    P.ok = false;
+    if (!pr || !lo || !body || !g || !sk || !pr.la || !pr.ra || !pr.ll || !pr.rl || !lo.la || !lo.ra || !lo.ll || !lo.rl || !sk.leftHand || !sk.rightHand) return P;
+    if (fresh === 1 && P.mf !== bpFrame) g.updateMatrixWorld(true);
+    if (fresh) P.mf = bpFrame;
+    P.frame = bpFrame;
+    const pf = ch.profile || {}, f = P.f;
+    const be = body.matrixWorld.elements;
+    const s = Math.hypot(be[0], be[1], be[2]) || 0.7;
+    P.s = s;
+    const tW = pf.torsoW || 0.412, tD = pf.torsoD || 0.29, lW = pf.legW || 0.268, aW = pf.armW || 0.174;
+    const hipY = ch.hipY > 0 ? ch.hipY : (pf.legUp || 0.585) + (pf.legLo || 0.655);
+    const shY = pr.la.position.y;
+    const x1 = Math.max(0, tW * 0.5 - tD * 0.5);
+    // trunk: his left half, his right half
+    lp(body, x1, hipY - 0.06, 0, f, 0); lp(body, x1, shY - 0.10, 0, f, 3); f[6] = tD * 0.5 * s;
+    lp(body, -x1, hipY - 0.06, 0, f, ST); lp(body, -x1, shY - 0.10, 0, f, ST + 3); f[ST + 6] = tD * 0.5 * s;
+    // head
+    let o = 2 * ST;
+    if (ch.head) { wp(ch.head, f, o); wp(ch.head, f, o + 3); }
+    else { lp(body, 0, shY + 0.34, 0, f, o); lp(body, 0, shY + 0.34, 0, f, o + 3); }
+    f[o + 6] = 0.47 * (pf.headSize || 0.55) * (pf.headK || 1) * s;
+    // arms: shoulder -> elbow, elbow -> past the wrist into the hand
+    for (let k = 0; k < 2; k++) {
+      const up = k ? pr.ra : pr.la, el = k ? lo.ra : lo.la, hd = k ? sk.rightHand : sk.leftHand;
+      o = (3 + 2 * k) * ST;
+      wp(up, f, o); wp(el, f, o + 3); f[o + 6] = aW * 0.5 * s;
+      o += ST;
+      wp(el, f, o); wp(hd, f, o + 3);
+      const vx = f[o + 3] - f[o], vy = f[o + 4] - f[o + 1], vz = f[o + 5] - f[o + 2], vl = Math.hypot(vx, vy, vz) || 1, ex = 0.09 * s / vl;
+      f[o + 3] += vx * ex; f[o + 4] += vy * ex; f[o + 5] += vz * ex;
+      f[o + 6] = aW * 0.45 * s;
+    }
+    // legs: hip -> knee, knee -> ankle, the foot heel to toe
+    for (let k = 0; k < 2; k++) {
+      const th = k ? pr.ll : pr.rl, kn = k ? lo.ll : lo.rl, ft = th.userData && th.userData.foot;
+      o = (7 + 2 * k) * ST;
+      wp(th, f, o); wp(kn, f, o + 3); f[o + 6] = lW * 0.5 * s;
+      o += ST;
+      wp(kn, f, o);
+      if (ft) wp(ft, f, o + 3); else lp(kn, 0, -(pf.legLo || 0.655), 0, f, o + 3);
+      f[o + 6] = lW * (pf.shinK || 0.9) * 0.5 * s;
+      const fo = (11 + k) * ST;
+      const d = ft && ft.userData && ft.userData.dims;
+      if (d) {
+        const ha = ft.position.y - d.sole, rf = Math.min(d.W, d.H) * 0.5;
+        lp(ft, 0, -ha + rf, -0.30 * d.D + rf, f, fo); lp(ft, 0, -ha + rf, 0.70 * d.D - rf, f, fo + 3);
+        f[fo + 6] = rf * s;
+      } else {
+        f[fo] = f[fo + 3] = f[o + 3]; f[fo + 1] = f[fo + 4] = f[o + 4]; f[fo + 2] = f[fo + 5] = f[o + 5];
+        f[fo + 6] = 0.06 * s / 0.7;
+      }
+    }
+    let x0 = 1e9, y0 = 1e9, z0 = 1e9, xm = -1e9, ym = -1e9, zm = -1e9;
+    for (let i = 0, q = 0; i < NP; i++, q += ST) {
+      const r = f[q + 6];
+      for (let e = 0; e < 6; e += 3) {
+        const x = f[q + e], y = f[q + e + 1], z = f[q + e + 2];
+        if (!(x === x)) return P;                                  // a rig not placed yet
+        if (x - r < x0) x0 = x - r; if (x + r > xm) xm = x + r;
+        if (y - r < y0) y0 = y - r; if (y + r > ym) ym = y + r;
+        if (z - r < z0) z0 = z - r; if (z + r > zm) zm = z + r;
+      }
+    }
+    P.x0 = x0; P.x1 = xm; P.y0 = y0; P.y1 = ym; P.z0 = z0; P.z1 = zm;
+    P.ok = true;
+    return P;
+  }
+  // ---- the two tests (pure arithmetic) ----
+  // out: depth (m, > 0 = inside), n (out of the part), s (the point on the
+  // part's surface), part, d (centre to axis), rr (the two radii)
+  function hitRec() { return { depth: 0, nx: 0, ny: 1, nz: 0, sx: 0, sy: 0, sz: 0, part: -1, d: 0, rr: 0, cx: 0, cy: 0, cz: 0 }; }
+  const _h = hitRec(), _h2 = hitRec(), _fh = hitRec();
+  let tests = 0;
+  function sphVsParts(P, px, py, pz, r, mask, out) {
+    out.depth = 0; out.part = -1;
+    if (!P.ok || px + r < P.x0 || px - r > P.x1 || py + r < P.y0 || py - r > P.y1 || pz + r < P.z0 || pz - r > P.z1) return false;
+    const f = P.f;
+    for (let i = 0, o = 0; i < NP; i++, o += ST) {
+      if (!((mask >> i) & 1)) continue;
+      tests++;
+      const ax = f[o], ay = f[o + 1], az = f[o + 2], ex = f[o + 3] - ax, ey = f[o + 4] - ay, ez = f[o + 5] - az;
+      const rr = f[o + 6] + r, l2 = ex * ex + ey * ey + ez * ez;
+      let t = l2 > 1e-10 ? ((px - ax) * ex + (py - ay) * ey + (pz - az) * ez) / l2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const cx = ax + ex * t, cy = ay + ey * t, cz = az + ez * t;
+      const dx = px - cx, dy = py - cy, dz = pz - cz, d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 >= rr * rr) continue;
+      const d = Math.sqrt(d2), dep = rr - d;
+      if (dep <= out.depth) continue;
+      out.depth = dep; out.part = i; out.d = d; out.rr = rr;
+      if (d > 1e-5) { out.nx = dx / d; out.ny = dy / d; out.nz = dz / d; } else { out.nx = 0; out.ny = 1; out.nz = 0; }
+      out.cx = cx; out.cy = cy; out.cz = cz;
+      out.sx = cx + out.nx * f[o + 6]; out.sy = cy + out.ny * f[o + 6]; out.sz = cz + out.nz * f[o + 6];
+    }
+    return out.depth > 0;
+  }
+  // capsule i of A against capsule j of B: depth and the normal from B to A
+  const _cc = { depth: 0, nx: 0, ny: 0, nz: 0, bx: 0, by: 0, bz: 0, s: 0 };
+  function capVsCap(fa, oa, fb, ob) {
+    tests++;
+    const p1x = fa[oa], p1y = fa[oa + 1], p1z = fa[oa + 2], d1x = fa[oa + 3] - p1x, d1y = fa[oa + 4] - p1y, d1z = fa[oa + 5] - p1z;
+    const p2x = fb[ob], p2y = fb[ob + 1], p2z = fb[ob + 2], d2x = fb[ob + 3] - p2x, d2y = fb[ob + 4] - p2y, d2z = fb[ob + 5] - p2z;
+    const rx = p1x - p2x, ry = p1y - p2y, rz = p1z - p2z;
+    const a = d1x * d1x + d1y * d1y + d1z * d1z, e = d2x * d2x + d2y * d2y + d2z * d2z, ff = d2x * rx + d2y * ry + d2z * rz;
+    let s = 0, t = 0;
+    if (a <= 1e-10 && e <= 1e-10) { s = 0; t = 0; }
+    else if (a <= 1e-10) { t = ff / e; t = t < 0 ? 0 : t > 1 ? 1 : t; }
+    else {
+      const c = d1x * rx + d1y * ry + d1z * rz;
+      if (e <= 1e-10) { s = -c / a; s = s < 0 ? 0 : s > 1 ? 1 : s; }
+      else {
+        const b = d1x * d2x + d1y * d2y + d1z * d2z, den = a * e - b * b;
+        s = den > 1e-12 ? (b * ff - c * e) / den : 0;
+        s = s < 0 ? 0 : s > 1 ? 1 : s;
+        t = (b * s + ff) / e;
+        if (t < 0) { t = 0; s = -c / a; s = s < 0 ? 0 : s > 1 ? 1 : s; }
+        else if (t > 1) { t = 1; s = (b - c) / a; s = s < 0 ? 0 : s > 1 ? 1 : s; }
+      }
+    }
+    const qx = p2x + d2x * t, qy = p2y + d2y * t, qz = p2z + d2z * t;
+    const nx = p1x + d1x * s - qx, ny = p1y + d1y * s - qy, nz = p1z + d1z * s - qz;
+    const d = Math.sqrt(nx * nx + ny * ny + nz * nz), rr = fa[oa + 6] + fb[ob + 6];
+    _cc.depth = rr - d; _cc.bx = qx; _cc.by = qy; _cc.bz = qz; _cc.s = s;
+    if (d > 1e-5) { _cc.nx = nx / d; _cc.ny = ny / d; _cc.nz = nz / d; } else { _cc.nx = 0; _cc.ny = 1; _cc.nz = 0; }
+    return _cc.depth;
+  }
+
+  // ---- who is near whom (filled by resolve, used by partPass and the gait) ----
+  const candA = new Array(CAND_MAX), candB = new Array(CAND_MAX), candS = new Float32Array(CAND_MAX);
+  const pairA = new Array(PAIR_MAX), pairB = new Array(PAIR_MAX);
+  let candN = 0, pairN = 0, pairsDropped = 0, bpClamp = null;
+  function nearRig(ch, other) {
+    if (ch._bpNf !== bpFrame) { ch._bpNf = bpFrame; ch._bpNn = 0; if (!ch._bpN) ch._bpN = [null, null, null, null]; }
+    if (ch._bpNn < 4) ch._bpN[ch._bpNn++] = other;
+  }
+  function notePair(A, B, d2) {
+    const ca = rigOf(A), cb = rigOf(B);
+    if (!ca || !cb || ca === cb) return false;
+    nearRig(ca, cb); nearRig(cb, ca);
+    if (candN >= CAND_MAX) { pairsDropped++; return false; }
+    // nearest the player first (a pair the player is in: first of all)
+    let sc = d2;
+    const P = CBZ.player && CBZ.player.pos, ap = posOf(A), bp = posOf(B);
+    if (isPlayer(A) || isPlayer(B)) sc = -1 + d2 * 0.01;
+    else if (P && ap && bp) { const mx = (ap.x + bp.x) * 0.5 - P.x, mz = (ap.z + bp.z) * 0.5 - P.z; sc = mx * mx + mz * mz + d2 * 0.01; }
+    candA[candN] = A; candB[candN] = B; candS[candN] = sc; candN++;
+    return true;
+  }
+  function selectPairs() {
+    pairN = 0;
+    const n = Math.min(PAIR_MAX, candN);
+    for (let k = 0; k < n; k++) {
+      let bi = -1, bs = 1e18;
+      for (let i = 0; i < candN; i++) if (candS[i] < bs) { bs = candS[i]; bi = i; }
+      if (bi < 0) break;
+      pairA[pairN] = candA[bi]; pairB[pairN] = candB[bi]; pairN++;
+      candS[bi] = 1e19;
+    }
+    if (candN > PAIR_MAX) pairsDropped += candN - PAIR_MAX;
+    for (let i = 0; i < candN; i++) { candA[i] = null; candB[i] = null; }
+    candN = 0;
+  }
+
+  // ---- the audit ----
+  const AU = { frames: 0, pairs: 0, tests: 0, deepest: 0, deepestA: "", deepestB: "", deepestPartA: "", deepestPartB: "",
+    deepestBefore: 0, rootPushes: 0, feetReplaced: 0, limbsPushed: 0, limbFrames: 0, strikesStopped: 0, heldPairs: 0, pairsDropped: 0 };
+  function nameOf(a) { return a ? (isPlayer(a) ? "player" : String(a.name || a.id || a.kind || "actor")) : ""; }
+  function seen(depth, A, B, pa, pb) {
+    if (depth > AU.deepest) { AU.deepest = depth; AU.deepestA = nameOf(A); AU.deepestB = nameOf(B); AU.deepestPartA = pa; AU.deepestPartB = pb; }
+  }
+  /* CBZ.bodyPartAudit(keep): what the part solver did since the last call
+     (keep = true: do not reset the window).
+       frames          part passes run
+       pairs           pairs of people narrow-tested
+       tests           segment tests made
+       deepest         the deepest overlap LEFT between any part of one
+                       man and any part of another after the pass acted
+                       (m, segment against segment), with who and which
+                       parts (for two people in one hold: all but the arms)
+       deepestBefore   the deepest overlap FOUND before anything was moved
+       rootPushes      times two roots were moved apart by their parts
+       feetReplaced    standing feet put down somewhere else (each move
+                       stays: it is not repeated)
+       limbsPushed     times a limb STARTED being held off a body (it was
+                       not the frame before)
+       limbFrames      limb re-solves in all (a limb held off a body it is
+                       posed into is re-solved every frame it is)
+       strikesStopped  blows stopped at the surface they met
+       heldPairs       pairs in one hold whose gripping hands were left alone
+       pairsDropped    near pairs not tested (over the per-frame cap) */
+  CBZ.bodyPartAudit = function (keep) {
+    const r = { frames: AU.frames, pairs: AU.pairs, tests: AU.tests, deepest: AU.deepest,
+      deepestActors: [AU.deepestA, AU.deepestB], deepestParts: [AU.deepestPartA, AU.deepestPartB], deepestBefore: AU.deepestBefore,
+      rootPushes: AU.rootPushes, feetReplaced: AU.feetReplaced, limbsPushed: AU.limbsPushed, limbFrames: AU.limbFrames, strikesStopped: AU.strikesStopped,
+      heldPairs: AU.heldPairs, pairsDropped: AU.pairsDropped };
+    if (!keep) {
+      AU.frames = AU.pairs = AU.tests = AU.rootPushes = AU.feetReplaced = AU.limbsPushed = AU.limbFrames = AU.strikesStopped = AU.heldPairs = AU.pairsDropped = 0;
+      AU.deepest = AU.deepestBefore = 0; AU.deepestA = AU.deepestB = AU.deepestPartA = AU.deepestPartB = "";
+    }
+    return r;
+  };
+
+  // ---- re-solving a limb (entities/meleeposes.js's two-bone IK) ----
+  let _T = null, _Pv = null;
+  function scratch() { const T3 = window.THREE; if (!_T && T3) { _T = new T3.Vector3(); _Pv = new T3.Vector3(); } return !!_T; }
+  function mounted(A, B) {
+    const P = CBZ.player;
+    return A._gnpOn === B || B._gnpOn === A || (P && ((isPlayer(A) && P._gnpOn === B) || (isPlayer(B) && P._gnpOn === A)));
+  }
+  // the horizontal way out of a part, and how far (a point at height: the
+  // sideways distance at which a sphere clears a capsule it is over)
+  const _esc = { x: 0, z: 0, d: 0 };
+  function escape(h, fromX, fromZ) {
+    let nx = h.nx, nz = h.nz;
+    const nh = Math.hypot(nx, nz);
+    if (nh < 0.2) { nx = fromX - h.cx; nz = fromZ - h.cz; const l = Math.hypot(nx, nz); if (l > 1e-4) { nx /= l; nz /= l; } else { nx = 1; nz = 0; } }
+    else { nx /= nh; nz /= nh; }
+    const dy = h.d * h.ny, h0 = h.d * nh;
+    const need = Math.sqrt(Math.max(0, h.rr * h.rr - dy * dy));
+    _esc.x = nx; _esc.z = nz; _esc.d = Math.max(0, need - h0);
+    return _esc;
+  }
+  /* WHERE A FOOT MAY COME DOWN. (x, z) on the floor at height y, the foot
+     heading yaw; out.x / out.z = the nearest spot where the foot and the
+     ankle over it (heel and ball, each a sphere the width of the shin) are
+     in nobody. False when nothing had to move. */
+  const _fs = { x: 0, z: 0 };
+  function footSpot(ch, x, y, z, yaw, out) {
+    out = out || _fs;
+    out.x = x; out.z = z;
+    if (!ch || !(ch._bpNf >= bpFrame - 1) || !ch._bpNn) return false;
+    const sc = ((ch._bp && ch._bp.s) || 0.7) / 0.7, r = 0.088 * sc;
+    const fx = Math.sin(yaw), fz = Math.cos(yaw), g = ch.group.position;
+    let moved = false;
+    for (let it = 0; it < 3; it++) {
+      let best = 0.002, ex = 0, ez = 0;
+      for (let n = 0; n < ch._bpNn; n++) {
+        const o = ch._bpN[n];
+        if (!o || !o.group || o.group.visible === false) continue;
+        const P = partsOf(o, 0);
+        if (!P.ok) continue;
+        for (let e = 0; e < 2; e++) {
+          const off = e ? 0.12 * sc : -0.05 * sc;
+          if (sphVsParts(P, out.x + fx * off, y + r, out.z + fz * off, r, M_ALL, _fh) && _fh.depth > best) {
+            const q = escape(_fh, g.x, g.z);
+            best = _fh.depth; ex = q.x * (q.d + 0.012); ez = q.z * (q.d + 0.012);
+          }
+        }
+      }
+      if (best <= 0.002) break;
+      out.x += ex; out.z += ez; moved = true;
+    }
+    // (never further than a stride from where it was asked: past that it is asked again next step)
+    if (moved) { const dx = out.x - x, dz = out.z - z, d = Math.hypot(dx, dz), lim = 0.45 * sc; if (d > lim) { out.x = x + dx / d * lim; out.z = z + dz / d * lim; } }
+    return moved;
+  }
+  // the top of whatever body lies over (x, z): world y, or -1e9 for bare floor
+  function topAt(ch, x, z) {
+    let top = -1e9;
+    if (!ch || !(ch._bpNf >= bpFrame - 1) || !ch._bpNn) return top;
+    for (let n = 0; n < ch._bpNn; n++) {
+      const o = ch._bpN[n];
+      if (!o || !o.group || o.group.visible === false) continue;
+      const P = partsOf(o, 0);
+      if (!P.ok || x < P.x0 || x > P.x1 || z < P.z0 || z > P.z1) continue;
+      const f = P.f;
+      for (let i = 0, q = 0; i < NP; i++, q += ST) {
+        const ax = f[q], az = f[q + 2], ex = f[q + 3] - ax, ez = f[q + 5] - az, l2 = ex * ex + ez * ez;
+        let t = l2 > 1e-10 ? ((x - ax) * ex + (z - az) * ez) / l2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const dx = x - (ax + ex * t), dz = z - (az + ez * t), rr = f[q + 6] + 0.07;
+        if (dx * dx + dz * dz > rr * rr) continue;
+        const y = f[q + 1] + (f[q + 4] - f[q + 1]) * t + f[q + 6];
+        if (y > top) top = y;
+      }
+    }
+    return top;
+  }
+  // the deepest overlap of X's parts in mx against Y's parts in my (the
+  // record: i, j, depth, the normal out of Y, where along X's part, the
+  // point on Y's axis and Y's radius there)
+  function dRec() { return { depth: 0, i: -1, j: -1, nx: 0, ny: 1, nz: 0, s: 0, qx: 0, qy: 0, qz: 0, rb: 0 }; }
+  const _d = dRec(), _d2 = dRec(), _d3 = dRec();
+  function deepest(PX, mx, PY, my, out, floor) {
+    out.depth = floor; out.i = -1; out.j = -1;
+    const fa = PX.f, fb = PY.f;
+    for (let i = 0; i < NP; i++) {
+      if (!((mx >> i) & 1)) continue;
+      for (let j = 0; j < NP; j++) {
+        if (!((my >> j) & 1)) continue;
+        const d = capVsCap(fa, i * ST, fb, j * ST);
+        if (d > out.depth) {
+          out.depth = d; out.i = i; out.j = j; out.nx = _cc.nx; out.ny = _cc.ny; out.nz = _cc.nz;
+          out.s = _cc.s; out.qx = _cc.bx; out.qy = _cc.by; out.qz = _cc.bz; out.rb = fb[j * ST + 6];
+        }
+      }
+    }
+    return out.i >= 0;
+  }
+  /* WHAT A BLOW IS TOUCHING. The striking SEGMENT of the attacker (segs: his
+     forearm and fist, his shin and foot, his thigh to the knee, his head: a
+     mask of his own parts) and the striking point (a sphere, r: a weapon's
+     tip, the knuckles) against the target's parts as posed this frame. A
+     round kick's foot wrapping round a guard, a forearm crossing a forearm,
+     are contacts like the fist's own. An arm in the way is met first.
+     Returns { part, depth (m; > 0 inside, down to -skin = touching), n (out
+     of him), s (the point on his surface) } or null. */
+  const _sh = { part: -1, depth: 0, nx: 0, ny: 1, nz: 0, sx: 0, sy: 0, sz: 0 };
+  function strikeHit(tch, ach, segs, px, py, pz, r, skin) {
+    const PY = partsOf(tch, 2);
+    if (!PY.ok) return null;
+    return shTake(PY, ach, segs, px, py, pz, r, skin, M_ARMS) || shTake(PY, ach, segs, px, py, pz, r, skin, M_ALL & ~M_ARMS) ? _sh : null;
+  }
+  function shTake(PY, ach, segs, px, py, pz, r, skin, my) {
+    {
+      let dep = -skin, src = 0;
+      if (ach && segs) {
+        const PX = partsOf(ach, 1);
+        if (PX.ok && deepest(PX, segs, PY, my, _d3, -skin)) { dep = _d3.depth; src = 1; }
+      }
+      if (sphVsParts(PY, px, py, pz, r + skin, my, _h2) && _h2.depth - skin > dep) { dep = _h2.depth - skin; src = 2; }
+      if (!src) return false;
+      _sh.depth = dep;
+      if (src === 1) {
+        _sh.part = _d3.j; _sh.nx = _d3.nx; _sh.ny = _d3.ny; _sh.nz = _d3.nz;
+        _sh.sx = _d3.qx + _d3.nx * _d3.rb; _sh.sy = _d3.qy + _d3.ny * _d3.rb; _sh.sz = _d3.qz + _d3.nz * _d3.rb;
+      } else {
+        _sh.part = _h2.part; _sh.nx = _h2.nx; _sh.ny = _h2.ny; _sh.nz = _h2.nz; _sh.sx = _h2.sx; _sh.sy = _h2.sy; _sh.sz = _h2.sz;
+      }
+      return true;
+    }
+  }
+
+  /* ---- THE PASS (order 92, after every pose writer) ----------------------
+     For each near pair, in this order:
+       1. every LIMB of each man (upper and lower segment, and the foot)
+          against every part of the other, segment against segment. A limb
+          found in him is re-solved: the contact is on the forearm or the
+          shin -> the elbow / knee and the hand / foot are both moved off
+          him, in the share that moves the touching point out; on the upper
+          arm or the thigh -> the elbow / knee swings out round the limb's
+          own line (the IK's pole), and if that cannot clear it the hand or
+          foot gives too. A foot that is STANDING is moved along the floor
+          and stays where it is put (the gait's plant, the strike layer's
+          spot, a kick's anchor): placed once, not pushed every frame.
+       2. what only the ROOT can clear (trunk, head, the thighs at the hip)
+          moves the roots apart, the whole overlap, the same frame.
+     The overlap left after both is what the audit calls `deepest`.
+     People in one hold keep their arms where the hold put them (a gripping
+     hand is in what it grips) and their roots where the verb put them;
+     their legs, trunks and heads are tested like anyone's. */
+  const M_TRUNK = 1 | 2 | 4 | (1 << 7) | (1 << 9);
+  const M_LIMB = [(1 << 3) | (1 << 4), (1 << 5) | (1 << 6), (1 << 7) | (1 << 8) | (1 << 11), (1 << 9) | (1 << 10) | (1 << 12)];
+  function plantedFoot(ch, k) {
+    if (ch._mountK > 0 || ch.sitting || ch.lying) return false;
+    if (ch.fall && ch.fall.on) return false;
+    if (ch.kickT > 0 && ((ch.kickLeg === "l") === !k)) return false;
+    const fs = ch.footStep;
+    if (fs && fs.on) return false;
+    const G = ch._gv;
+    if (G && G.init && G.w > 0.5 && G.feet) return !G.feet[k ? 0 : 1].sw;
+    return !!(ch._mOwn && ch._mFt);
+  }
+  function movePlant(ch, k, dx, dz) {
+    const G = ch._gv, g = ch.group;
+    if (G && G.init && G.w > 0.5 && G.feet) { const F = G.feet[k ? 0 : 1]; if (F && !F.sw) { F.x += dx; F.z += dz; } }
+    if (ch._mFt && g) {
+      const MP = CBZ.meleePoses, sc = (MP && MP.dims ? MP.dims(ch).scale : 0.7) || 0.7;
+      const yaw = g.rotation.y, c = Math.cos(yaw), sn = Math.sin(yaw), i = k ? 2 : 0;
+      ch._mFt[i] += (dx * c - dz * sn) / sc; ch._mFt[i + 1] += (dx * sn + dz * c) / sc;
+      const A = ch._mPl;
+      if (A && A.on && ((ch.kickLeg === "l") === !!k)) { A.x += dx; A.z += dz; }
+    }
+  }
+  function pushed(ch, li) {
+    let st = ch._bpLp;
+    if (!st) st = ch._bpLp = new Int32Array(4);
+    if (st[li] < bpFrame - 1) AU.limbsPushed++;
+    st[li] = bpFrame;
+    AU.limbFrames++;
+  }
+  // li: 0 left arm, 1 right arm, 2 left leg, 3 right leg (his own left / right)
+  function fixLimb(X, chX, PX, li, PY, round) {
+    const MP = CBZ.meleePoses;
+    if (!MP || !MP.solveArm || !MP.solveLeg || !MP.dims || !scratch() || !chX.model) return false;
+    if (!deepest(PX, M_LIMB[li], PY, M_ALL, _d, 0.003)) return false;
+    const f = PX.f, arm = li < 2, k = li & 1;
+    const iU = arm ? 3 + 2 * k : 7 + 2 * k, oW = (iU + 1) * ST;
+    const dep = _d.depth + 0.002;
+    const dx = _d.nx * dep, dy = _d.ny * dep, dz = _d.nz * dep;
+    let mx = 0, my = 0, mz = 0, ex = 0, ey = 0, ez = 0;
+    const onUpper = _d.i === iU, onFoot = !arm && _d.i === 11 + k;
+    const planted = !arm && plantedFoot(chX, k);
+    if (planted && !onUpper) {
+      // a standing foot: along the floor, and it stays there
+      let hx = _d.nx, hz = _d.nz, nh = Math.hypot(hx, hz);
+      if (nh < 0.25) { const gp = chX.group.position; hx = gp.x - _d.qx; hz = gp.z - _d.qz; const l = Math.hypot(hx, hz) || 1; hx /= l; hz /= l; nh = 0.4; }
+      else { hx /= nh; hz /= nh; }
+      const t = onFoot ? 1 : Math.max(_d.s, 0.4);
+      const dist = Math.min(0.3, dep / Math.max(nh, 0.4) / t);
+      ex = hx * dist; ez = hz * dist; mx = ex * 0.5; mz = ez * 0.5;
+      movePlant(chX, k, ex, ez);
+      AU.feetReplaced++;
+    } else if (onUpper) {
+      const tt = Math.max(_d.s, 0.35), q = 1 / tt;
+      mx = dx * q; my = dy * q; mz = dz * q;
+      const ml = Math.hypot(mx, my, mz);
+      if (ml > 0.25) { mx *= 0.25 / ml; my *= 0.25 / ml; mz *= 0.25 / ml; }
+      if (round > 0 && !planted) { ex = dx * 0.6; ey = dy * 0.6; ez = dz * 0.6; }
+      pushed(chX, li);
+    } else {
+      const t = onFoot ? 1 : _d.s, S = (1 - t) * (1 - t) + t * t, a = (1 - t) / S, b = t / S;
+      mx = dx * a; my = dy * a; mz = dz * a; ex = dx * b; ey = dy * b; ez = dz * b;
+      pushed(chX, li);
+    }
+    let part;
+    if (arm) {
+      part = k ? chX.parts.ra : chX.parts.la;
+      const low = k ? chX.low.ra : chX.low.la, sock = k ? chX.sockets.rightHand : chX.sockets.leftHand;
+      const e = sock.matrixWorld.elements;
+      _T.set(e[12] + ex, e[13] + ey, e[14] + ez); chX.body.worldToLocal(_T);
+      _Pv.set(f[oW] + mx, f[oW + 1] + my, f[oW + 2] + mz); chX.body.worldToLocal(_Pv); _Pv.sub(part.position);
+      MP.solveArm(chX, k ? "R" : "L", _T, _Pv, low.rotation.y, part.position.z, 1, null);
+    } else {
+      part = k ? chX.parts.ll : chX.parts.rl;
+      const D = MP.dims(chX);
+      // the leg solve's end: g2 down the shin from the knee
+      const vx = f[oW + 3] - f[oW], vy = f[oW + 4] - f[oW + 1], vz = f[oW + 5] - f[oW + 2], vl = Math.hypot(vx, vy, vz) || 1, q = D.g2 * PX.s / vl;
+      _T.set(f[oW] + vx * q + ex, f[oW + 1] + vy * q + ey, f[oW + 2] + vz * q + ez); chX.model.worldToLocal(_T);
+      _Pv.set(f[oW] + mx, f[oW + 1] + my, f[oW + 2] + mz); chX.model.worldToLocal(_Pv); _Pv.sub(part.position);
+      MP.solveLeg(chX, k ? "R" : "L", _T, _Pv, 1);
+    }
+    // the limb as it now is
+    part.updateMatrixWorld(true);
+    PX.frame = -1; partsOf(chX, 2);
+    return true;
+  }
+  // a fighter's own fists out of his own trunk and head
+  function ownHands(X, chX, PX) {
+    if (!((chX._mK || 0) > 0.05) || chX.cuffed) return;
+    const MP = CBZ.meleePoses;
+    if (!MP || !MP.solveArm || !scratch()) return;
+    const f = PX.f, sc = PX.s / 0.7;
+    for (let k = 0; k < 2; k++) {
+      const o = (4 + 2 * k) * ST;
+      if (!sphVsParts(PX, f[o + 3], f[o + 4], f[o + 5], 0.045 * sc, M_SELF, _h) || _h.depth <= 0.004) continue;
+      const part = k ? chX.parts.ra : chX.parts.la, low = k ? chX.low.ra : chX.low.la, sock = k ? chX.sockets.rightHand : chX.sockets.leftHand;
+      const e = sock.matrixWorld.elements, dp = _h.depth + 0.002;
+      _T.set(e[12] + _h.nx * dp, e[13] + _h.ny * dp, e[14] + _h.nz * dp); chX.body.worldToLocal(_T);
+      _Pv.set(f[o], f[o + 1], f[o + 2]); chX.body.worldToLocal(_Pv); _Pv.sub(part.position);
+      MP.solveArm(chX, k ? "R" : "L", _T, _Pv, low.rotation.y, part.position.z, 1, null);
+      part.updateMatrixWorld(true);
+      PX.frame = -1; partsOf(chX, 2);
+      pushed(chX, k);
+    }
+  }
+  function shiftParts(P, dx, dz) {
+    const f = P.f;
+    for (let o = 0; o < NP * ST; o += ST) { f[o] += dx; f[o + 2] += dz; f[o + 3] += dx; f[o + 5] += dz; }
+    P.x0 += dx; P.x1 += dx; P.z0 += dz; P.z1 += dz;
+  }
+  function moveRoot(a, ch, P, dx, dz) {
+    const p = posOf(a);
+    if (!p) return;
+    p.x += dx; p.z += dz;
+    if (bpClamp) { const x0 = p.x, z0 = p.z; bpClamp(a); dx += p.x - x0; dz += p.z - z0; }
+    // (the player's rig is placed from his position next frame: it goes now, so what is drawn is what was solved)
+    if (ch.group.position !== p) { ch.group.position.x += dx; ch.group.position.z += dz; }
+    shiftParts(P, dx, dz);
+  }
+  function rootStage(A, B, PA, PB, chA, chB) {
+    let mA = M_TRUNK, mB = M_TRUNK;
+    if (chA.kickT > 0) mA &= ~(chA.kickLeg === "l" ? 1 << 7 : 1 << 9);
+    if (chB.kickT > 0) mB &= ~(chB.kickLeg === "l" ? 1 << 7 : 1 << 9);
+    for (let it = 0; it < 2; it++) {
+      if (!deepest(PA, mA, PB, mB, _d2, 0.006)) return;
+      let nx = _d2.nx, nz = _d2.nz, nh = Math.hypot(nx, nz);
+      const ap = posOf(A), bp = posOf(B);
+      if (!ap || !bp) return;
+      if (nh < 0.3) { nx = ap.x - _d2.qx; nz = ap.z - _d2.qz; nh = Math.hypot(nx, nz); if (nh < 1e-4) { nx = ap.x - bp.x; nz = ap.z - bp.z; nh = Math.hypot(nx, nz) || 1; } nx /= nh; nz /= nh; nh = 0.5; }
+      else { nx /= nh; nz /= nh; }
+      const push = Math.min(0.3, (_d2.depth + 0.002) / Math.max(nh, 0.5));
+      const pa = isPlayer(A), pb = isPlayer(B);
+      let wA, wB;
+      if (A._bcDown && B._bcDown) return;
+      if (A._bcDown) { wA = 0; wB = 1; } else if (B._bcDown) { wA = 1; wB = 0; }
+      else {
+        const ma = massOf(A), mb = massOf(B);
+        wA = mb / (ma + mb); wB = 1 - wA;
+        if (pa) wA = Math.max(wA, 0.5); else if (pb) wB = Math.max(wB, 0.5);
+        const sm = wA + wB; wA /= sm; wB /= sm;
+      }
+      if (A._remote) wA = 0;
+      if (B._remote) wB = 0;
+      if (wA <= 0 && wB <= 0) return;
+      if (wA > 0) moveRoot(A, chA, PA, nx * push * wA, nz * push * wA);
+      if (wB > 0) moveRoot(B, chB, PB, -nx * push * wB, -nz * push * wB);
+      AU.rootPushes++;
+    }
+  }
+  function partPass() {
+    if (!pairN) return;
+    AU.frames++;
+    const t0 = tests;
+    for (let p = 0; p < pairN; p++) {
+      let A = pairA[p], B = pairB[p];
+      pairA[p] = pairB[p] = null;
+      // (the man on his feet answers first: his legs move off a lying man's limbs, not the limbs off his legs)
+      if (A._bcDown && !B._bcDown) { const t = A; A = B; B = t; }
+      const chA = rigOf(A), chB = rigOf(B);
+      if (!chA || !chB || chA === chB || chA.group.visible === false || chB.group.visible === false) continue;
+      const PA = partsOf(chA, 1), PB = partsOf(chB, 1);
+      if (!PA.ok || !PB.ok) continue;
+      if (PA.x0 > PB.x1 + 0.03 || PB.x0 > PA.x1 + 0.03 || PA.z0 > PB.z1 + 0.03 || PB.z0 > PA.z1 + 0.03 || PA.y0 > PB.y1 + 0.03 || PB.y0 > PA.y1 + 0.03) continue;
+      AU.pairs++;
+      const sa = sessionOf(A), grip = !!sa && sa === sessionOf(B);
+      // what is tested and reported: everything, but the arms of two people in one hold
+      const mm = grip ? M_ALL & ~M_ARMS : M_ALL;
+      if (grip) AU.heldPairs++;
+      const any = deepest(PA, mm, PB, mm, _d, 0);
+      if (any && _d.depth > AU.deepestBefore) AU.deepestBefore = _d.depth;
+      if (any && _d.depth > 0.003) {
+        for (let round = 0; round < 3; round++) {
+          let did = false;
+          for (let li = grip ? 2 : 0; li < 4; li++) {
+            if (fixLimb(A, chA, PA, li, PB, round)) did = true;
+            if (fixLimb(B, chB, PB, li, PA, round)) did = true;
+          }
+          if (!did) break;
+        }
+        if (!grip && !mounted(A, B) && !A._bcSkip && !B._bcSkip) rootStage(A, B, PA, PB, chA, chB);
+        if (deepest(PA, mm, PB, mm, _d, 0)) seen(_d.depth, A, B, PART[_d.i], PART[_d.j]);
+      }
+      if (!grip) { ownHands(A, chA, PA); ownHands(B, chB, PB); }
+    }
+    pairN = 0;
+    AU.tests += tests - t0;
+    AU.pairsDropped += pairsDropped; pairsDropped = 0;
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(92, partPass);
+  CBZ.bodyParts = {
+    NAMES: PART, partsOf, strikeHit, footSpot, topAt,
+    near(ch) { return !!(ch && ch._bpNf >= bpFrame - 1 && ch._bpNn); },
+    count(what) { if (what === "feet") AU.feetReplaced++; else if (what === "strike") AU.strikesStopped++; },
+  };
+
+  /* ============================================================
      THE PASS
      ============================================================ */
   const _live = [];
@@ -1245,6 +1895,7 @@
     const m = opts.mode || CBZ.game.mode;
     clock += Math.max(0, dt || 0);
     passDt = Math.max(0, dt || 0);
+    bpClamp = opts.clamp || null;
     hookNet();
     let grid = grids[m];
     if (!grid) grid = grids[m] = CBZ.makeGrid(opts.cell || CELL);
@@ -1260,7 +1911,13 @@
       a._bcGoing = !a._remote && going(a);
       const S = a._remote ? null : sessionOf(a);
       a._bcSess = S;
-      if (heldTarget(a, S)) { a._bcSkip = true; a._bcFresh = false; continue; }
+      if (heldTarget(a, S)) {
+        a._bcSkip = true; a._bcFresh = false; a._bcDown = false;
+        // (he is the verb's to place, but his parts and his holder's are still
+        // tested, all but the arms that have hold of each other: partPass)
+        if (S.a && S.a !== a) notePair(a, S.a, 0);
+        continue;
+      }
       measure(a, p);
       a._bcX0 = p.x; a._bcZ0 = p.z;     // where this pass found him (the city clamp skips the unmoved)
       a._contactIndex = _live.length;
@@ -1276,8 +1933,12 @@
           const B = bucket[k];
           if (B._contactIndex <= i) continue;
           if (A._remote && B._remote) continue;
+          const bq = posOf(B);
+          if (Math.abs((bq.y || 0) - (ap.y || 0)) > Y_BAND) continue;
+          // near enough to touch: their PARTS are tested after the poses (partPass)
+          const ndx = bq.x - ap.x, ndz = bq.z - ap.z, nd2 = ndx * ndx + ndz * ndz;
+          if (nd2 < NEAR * NEAR) notePair(A, B, nd2);
           if (A._bcSess && A._bcSess === B._bcSess) continue;
-          if (Math.abs((posOf(B).y || 0) - (ap.y || 0)) > Y_BAND) continue;
           separatePair(A, B, m, false);
         }
       }
@@ -1347,6 +2008,7 @@
       break;
     }
     if (opts.downed !== false) stepOver(list, m, dt, opts.clamp || null);
+    selectPairs();
     for (let i = 0; i < list.length; i++) { const a = list[i], p = posOf(a); if (p) stamp(a, p); }
   }
 
