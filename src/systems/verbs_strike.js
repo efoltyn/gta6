@@ -173,7 +173,31 @@
     bat: 1.0, slash: 0.42, butt: 0.85,
   };
   // the nearest a straight is thrown from (m, two adults): inside it he gives ground first
-  const NEAR = { jab: 0.80, cross: 0.82, bodyStraight: 0.72, overhand: 0.88, butt: 0.85 };
+  // (the bent-arm blows have one too: two trunks and a folded arm do not fit in less. A hook thrown
+  // from 46 cm put the upper arm 14 cm through the other man's guard)
+  const NEAR = { jab: 0.80, cross: 0.82, bodyStraight: 0.72, overhand: 0.88, butt: 0.85,
+    hook: 0.56, body: 0.56, upper: 0.50, elbow: 0.50 };
+  /* WHERE HE WILL BE WHEN IT LANDS. A blow's step (in to its reach, or back
+     to its near limit) was measured to where the other man stands NOW. He is
+     often on his way somewhere: the rest of a stagger step (that was
+     counted, and only when it took him away), or HIS OWN step in behind a
+     blow of his own, which was not. Two inmates throwing at each other from
+     1.3 m each stepped the whole way in to hooking range of where the other
+     had been, and met 40-60 cm apart: chest to chest, arms and heads in
+     each other, for the part pass to pull apart every frame. The player's
+     exchanges did not show it only because the man he hits is mostly
+     reeling, not stepping in. Returns metres along (ux, uz), the line from
+     the striker to him: negative = he is coming nearer. */
+  function closing(T, ux, uz) {
+    let pend = 0;
+    for (let i = 0; i < moves.length; i++) {
+      const m = moves[i];
+      if (m.a === T) pend += m.D * (1 - m.last) * (m.dx * ux + m.dz * uz);
+    }
+    const ts = strikeOf(T);
+    if (ts && ts.lunge.D > 0.03) pend += ts.lunge.D * (1 - ts.lunge.last) * (ts.lunge.dx * ux + ts.lunge.dz * uz);
+    return pend;
+  }
   const _pk0 = { Ba: null, kind: null, att: null };
   const ZONE_MUL = { jaw: 1.3, head: 1.0, liver: 1.25, body: 0.8, legs: 0.6 };
   const FIST_R = 0.05;                      // m: the striking surface (knuckles, elbow point, shin)
@@ -379,7 +403,8 @@
       const want0 = long ? V.reachOf(kind, att) * 0.92 : (NEAR[kind] || 0) * sc0;
       if (tp0 && want0 > 0) {
         const dx0 = tp0.x - ap0.x, dz0 = tp0.z - ap0.z, d0 = Math.hypot(dx0, dz0) || 1e-4;
-        const back = want0 - d0;
+        // (measured to where he will be: see closing)
+        const back = want0 - (d0 + closing(aim0, dx0 / d0, dz0 / d0));
         if (back > (long ? 0.08 : 0)) {
           const cap = long ? 0.55 : 0.30, y0 = (ap0.y || 0) + 0.6, far = Math.min(back, cap) + 0.4;
           const shut = walled(ap0.x, y0, ap0.z, ap0.x - dx0 / d0 * far, y0, ap0.z - dz0 / d0 * far);
@@ -450,11 +475,8 @@
         else if (snap > 0) S.turn = 1;
         if (opts.lunge !== false && ch) {
           // follow a man you have backed up: the rest of his stagger step counts
-          let pend = 0;
-          for (let i = 0; i < moves.length; i++) {
-            const m = moves[i];
-            if (m.a === T) pend += m.D * (1 - m.last) * ((m.dx * dx + m.dz * dz) / d);
-          }
+          // (and a man stepping in behind a blow of his own is that much nearer when this lands: closing)
+          const pend = closing(T, dx / d, dz / d);
           // the reach table is measured against a man in his stance, chin
           // out over the lead foot; one standing square carries his head a
           // hand further back, and the step has to cover that too
@@ -487,7 +509,7 @@
             fs0.world = true; fs0.wx = -dx / d * backD / scaleOf(ch); fs0.wz = -dz / d * backD / scaleOf(ch);
             kickWait(stepT, 0.9);                                 // both feet are back and down
           }
-          const need = backD > 0.03 ? 0 : d + Math.max(0, pend) + chin - V.reachOf(kind, att) * 0.92;
+          const need = backD > 0.03 ? 0 : d + pend + chin - V.reachOf(kind, att) * 0.92;
           const maxL = opts.maxLunge != null ? opts.maxLunge : (Ba.isPlayer ? 0.75 : 0.45);
           /* (NOT INTO A MAN WHO IS DOWN. A standing blow at a man on the floor
              or on one knee cannot land (he is kicked or mounted, V.groundKick

@@ -1521,7 +1521,7 @@
   // the worst frame of the window: what the two men were doing when the pass left the most overlap
   const WORST = { depth: 0, frame: 0, parts: ["", ""], actors: ["", ""], attackerState: "", targetState: "", bothStriking: false,
     rootDist: 0, rigDist: 0, at: [0, 0, 0, 0, 0, 0], capsuleR: [0, 0], capsuleShrunk: false, firstToYield: "", solvesThatFrame: 0, rootPushesThatFrame: 0, before: 0,
-    poses: ["", ""], rootTakenBack: 0 };
+    poses: ["", ""], rootTakenBack: 0, detail: [null, null] };
   function stateOf(a, ch) {
     const f = ch.fall, knee = f && f.on && (f.variant === "liver" || f.variant === "kneel");
     if (lying(a)) return knee ? "kneeling" : f && f.on && f.ko ? "down (out cold)" : "down";
@@ -1546,6 +1546,39 @@
     const r = a._react || a.reaction;
     add(!!(r && (r.kind || r.name)), "react:" + (r && (r.kind || r.name)));
     return s || "none";
+  }
+  /* EVERYTHING ABOUT ONE MAN ON THE WORST FRAME (the audit's worst.detail[0|1],
+     same order as worst.actors). Metres, world. part = the two ends of the
+     axis of his part that is in the other man, partR its radius; root = his
+     position, rig = his drawn group's (they differ for the player until the
+     next frame); knee/ankle = the ends of each shin; trunkL/trunkR = the two
+     ends of each half of his trunk. mountK = how far down the kneel is
+     (0 standing .. 1 seated), mountStage = the climb-on (stage 0 walk, 1
+     turn, 2 step over; slide 1 = at the seat; flank = which side he came
+     from; pre = feet stepped back first; leaving), step = the leg being
+     carried over (leg 0 = his left, u = 0..1). stanceFeet = the gait is
+     planting a fighting stance (sign of the lead side; 0 = square).
+     hold = the hold he is in: verb, phase, k, work (the table's distance),
+     fit (how far the clearance moved the held man this frame). */
+  function r3(v) { return v == null || v !== v ? null : +(+v).toFixed(3); }
+  function seg(f, o) { return [r3(f[o]), r3(f[o + 1]), r3(f[o + 2]), r3(f[o + 3]), r3(f[o + 4]), r3(f[o + 5])]; }
+  function rigDetail(a, ch, P, pi) {
+    const f = P.f, g = ch.group, p = posOf(a), st = ch._mStep, G = ch._gv, S = sessionOf(a);
+    let M = null;
+    try { const V = CBZ.verbs; M = V && V.mountOf ? V.mountOf(isPlayer(a) ? realPlayerActor() : a) : null; } catch (e) { M = null; }
+    return {
+      part: seg(f, pi * ST), partR: r3(f[pi * ST + 6]),
+      root: p ? [r3(p.x), r3(p.y || 0), r3(p.z)] : null, rig: [r3(g.position.x), r3(g.position.y), r3(g.position.z)], yaw: r3(g.rotation.y),
+      kneeL: seg(f, 8 * ST).slice(0, 3), ankleL: seg(f, 8 * ST).slice(3), kneeR: seg(f, 10 * ST).slice(0, 3), ankleR: seg(f, 10 * ST).slice(3),
+      shinR: r3(f[8 * ST + 6]), trunkL: seg(f, 0), trunkR: seg(f, ST), trunkRad: r3(f[6]),
+      mountK: r3(ch._mountK || 0), mount: !!ch.mount, mountGo: !!ch._mountGo,
+      mountStage: M ? { stage: M.stage == null ? null : M.stage, slide: M.slide, flank: M.flank == null ? null : M.flank, pre: M.pre || 0, leaving: M.leaving || 0, frac: r3(M.frac), standA: r3(M.standA) } : null,
+      step: st && st.on ? { leg: st.leg, u: r3(st.t / st.dur), h: r3(st.h) } : null,
+      stanceFeet: ch._gSt || 0, gaitW: G ? r3(G.w) : null, gaitAdopt: !!(G && G.adopt), legsOwnedByPose: !!ch._mOwn,
+      punchT: r3(ch.punchT || 0), punchDur: r3(ch.punchDur || 0), kickT: r3(ch.kickT || 0), lean: r3(ch.body ? ch.body.rotation.x : 0),
+      hold: S ? { verb: S.verb, phase: S.phase, k: r3(S.k), holder: S.a === a || (isPlayer(a) && S.A && S.A.isPlayer), work: r3(S.work),
+        fit: S._hc ? [r3(S._hc.x), r3(S._hc.y), r3(S._hc.z)] : null, done: !!S.done } : null,
+    };
   }
   function seen(depth, A, B, pa, pb) {
     if (depth > AU.deepest) { AU.deepest = depth; AU.deepestA = nameOf(A); AU.deepestB = nameOf(B); AU.deepestPartA = pa; AU.deepestPartB = pb; }
@@ -1600,7 +1633,7 @@
         rigDist: WORST.rigDist, at: WORST.at.slice(),
         capsuleR: WORST.capsuleR.slice(), capsuleShrunk: WORST.capsuleShrunk, firstToYield: WORST.firstToYield,
         solvesThatFrame: WORST.solvesThatFrame, rootPushesThatFrame: WORST.rootPushesThatFrame,
-        poses: WORST.poses.slice(), rootTakenBack: +WORST.rootTakenBack.toFixed(3) } : null };
+        poses: WORST.poses.slice(), rootTakenBack: +WORST.rootTakenBack.toFixed(3), detail: WORST.detail.slice() } : null };
     if (!keep) {
       WORST.depth = 0;
       LFB.fill(0); FRB.fill(0); strikeLog.length = 0;
@@ -1958,7 +1991,17 @@
     shift3(PT, bx, by, bz);
     if (deepest(PT, mT, PA, HC_A, _d2, -HC_GAP)) {
       let ax = _d2.nx, ay = carried ? _d2.ny : 0, az = _d2.nz, al = Math.hypot(ax, ay, az);
-      if (!carried && al < 0.35) { ax = awayX; az = awayZ; al = Math.hypot(ax, az); }
+      /* (A MAN HELD ON HIS FEET GOES OUT ALONG THE HOLD'S OWN LINE, always.
+         It was the line of the deepest contact, and the hold's line only
+         when that contact pointed up. Behind a man for the cuffs, the
+         holder's forward thigh and the held man's thigh on the same side
+         CROSS, in two planes a few centimetres apart: the contact between
+         them points sideways. He was moved sideways off that thigh, onto
+         the other one, and the search along that line ended wherever it
+         ended: the standing cuff sat with the two left thighs 21 cm in
+         each other, 31 cm between the roots. Straight away from the holder
+         always ends clear.) */
+      if (!carried) { ax = awayX; az = awayZ; al = Math.hypot(ax, az); }
       if (al > 1e-4) {
         ax /= al; ay /= al; az /= al;
         _hcCur = 0;
@@ -2211,6 +2254,7 @@
           WORST.solvesThatFrame = AU.limbFrames - lf0; WORST.rootPushesThatFrame = AU.rootPushes - rp0;
           // (actors[0], actors[1] order; how much of this frame's root pushes the wall clamp undid, m)
           WORST.poses[0] = poseOf(A, chA); WORST.poses[1] = poseOf(B, chB); WORST.rootTakenBack = rootBack - rb0;
+          WORST.detail[0] = rigDetail(A, chA, PA, _d.i); WORST.detail[1] = rigDetail(B, chB, PB, _d.j);
         }
       }
       if (!grip) { ownHands(A, chA, PA); ownHands(B, chB, PB); }
