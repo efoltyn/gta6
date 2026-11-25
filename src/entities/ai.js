@@ -3186,6 +3186,12 @@
         // a round through him sprays out of the far side (the gun paths say
         // so, V.roundExits); a blade or a fist never exits
         exit: opts.melee ? false : (opts.exit != null ? !!opts.exit : undefined),
+        // WHERE the round went in and what it was (fpsmode's kill shot): the
+        // hole the corpse carries goes there, not at a guessed chest-high
+        // point in the middle of him (a headshot used to leave its only hole
+        // in his belly). No weapon key: the prison's kills never sever.
+        imp: opts.shot && opts.shot.point ? { point: opts.shot.point, cal: opts.shot.cal, dist: opts.shot.dist } : null,
+        head: !!(opts.shot && opts.shot.head) || opts.cause === "headshot",
       });
     }
     victim.aiState = "dead";

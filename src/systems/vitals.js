@@ -333,7 +333,7 @@
         else { a.dead = true; a.hp = 0; a.ko = 0; }
       }
     }
-    if (deadOf(a)) { R.dead = true; R.koT = 0; R.collapsed = false; R.critical = false; R.band = null; wake(R); }
+    if (deadOf(a)) { died(R); R.dead = true; R.koT = 0; R.collapsed = false; R.critical = false; R.band = null; wake(R); }
     return deadOf(a);
   }
   VT.kill = kill;
@@ -609,7 +609,7 @@
     // A DEAD MAN: the heart has stopped, but a new hole still lets out what is
     // in him by gravity, so the blood under him grows with every one
     if (deadOf(a) || R.dead) {
-      b.rate *= 0.4; b.tau = 90; b.dead = true; b.drain = true;
+      b.rate *= DEAD_DRAIN; b.tau = 90; b.dead = true; b.drain = true;
       R.bleeds.push(b);
       goreOf(R, b);
       trimBleeds(R);
@@ -920,26 +920,47 @@
      hole that runs a few % a minute ~4 min, a big one ~8 min, an artery
      ~15 min; a dead man's holes drain by gravity (see below). */
   function pressure(R) { return Math.max(0.2, Math.min(1, (R.blood - 0.35) / 0.65)); }
+  /* THE MOMENT OF DEATH, once per body: when, and the pressure his blood was
+     at. A fatal round does not stop the heart: after a shot through the
+     brain or the chest it goes on beating, weaker and weaker, for tens of
+     seconds to minutes (agonal), so the holes he already had keep pouring at
+     what that heart still pushes, falling toward the gravity drain a still
+     heart leaves (DEAD_DRAIN of the living flow) with AGONAL_TAU. A hole
+     opened in him after that (a round into the corpse) starts at the drain. */
+  const DEAD_DRAIN = 0.4, AGONAL_TAU = 15;
+  function died(R) { if (R.deadAt == null) { R.deadAt = clock; R.pd = pressure(R); } }
+  function agonal(R) {
+    const pd = R.pd != null ? R.pd : 1;
+    if (!(pd > DEAD_DRAIN)) return DEAD_DRAIN;
+    return DEAD_DRAIN + (pd - DEAD_DRAIN) * Math.exp(-Math.max(0, clock - R.deadAt) / AGONAL_TAU);
+  }
   function blood(R, dt) {
     const a = R.a;
     let r = 0;
-    const press = R.dead || deadOf(a) ? 1 : pressure(R);
+    const isDead = R.dead || deadOf(a);
+    if (isDead) died(R);
+    const press = isDead ? 1 : pressure(R);
+    const heart = isDead ? agonal(R) : 1;
     for (let i = R.bleeds.length - 1; i >= 0; i--) {
       const b = R.bleeds[i];
       b.t += dt;
       // clotting: slow for an artery, fast for a graze, fast once wrapped.
-      // A DEAD HEART stops pushing: from then on a hole only drains by
-      // gravity, at ~0.4 of what the pressure drove, falling off over a
-      // minute and a half (a body empties by hundreds of ml over minutes)
-      if ((b.dead || R.dead) && !b.drain) { b.drain = true; if (!b.dead) b.rate *= 0.4; }
-      const tau = b.dead || R.dead ? Math.min(b.tau, 90) : b.band > 0 ? Math.min(b.tau, 70) : b.tau;
+      // A DEAD MAN'S HOLES: what his failing heart still pushes through the
+      // ones he had alive (agonal: from the pressure he died at down to the
+      // gravity drain), and the drain alone through a hole opened in the
+      // corpse (VT.wound took its rate down to DEAD_DRAIN already), falling
+      // off over a minute and a half: a body empties by hundreds of ml over
+      // minutes
+      if (isDead && !b.drain) b.drain = true;
+      const tau = b.dead || isDead ? Math.min(b.tau, 90) : b.band > 0 ? Math.min(b.tau, 70) : b.tau;
       b.rate *= Math.exp(-dt / tau);
-      if (b.rate < stopRate(b)) {
+      const now = b.dead ? 1 : heart;
+      if (b.rate * now < stopRate(b)) {
         b.closed = true;
         R.bleeds.splice(i, 1);
         continue;
       }
-      const v = b.rate * (1 - b.band) * press;
+      const v = b.rate * (1 - b.band) * press * now;
       r += v;
       const gw = b.gw || goreOf(R, b);
       if (gw) gw.mlps = v * K.BLOOD_ML;
@@ -961,7 +982,7 @@
     const a = R.a;
     // came back (a respawn, a pooled rig reused for a living man): fresh body
     if (R.dead && !deadOf(a)) { reset(a); return false; }
-    if (!R.dead && deadOf(a)) { R.dead = true; R.koT = 0; R.collapsed = false; R.critical = false; if (R.band) cancel(R); }
+    if (!R.dead && deadOf(a)) { died(R); R.dead = true; R.koT = 0; R.collapsed = false; R.critical = false; if (R.band) cancel(R); }
     const r = blood(R, dt);
     if (R.dead) { hurtOff(a); return R.bleeds.length > 0; }
     hurtOf(R, a);

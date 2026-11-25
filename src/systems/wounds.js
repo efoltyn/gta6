@@ -15,7 +15,7 @@
        just be the blood holes, like when you just get shot"): no garment is
        ever tinted. Each hole carries ONE wet patch, a few cm on the frame
        of the hit, that is as big as the blood the cloth round it has
-       actually soaked (CBZ.woundSoak, from gore.js's wound: ml / 0.4 per
+       actually soaked (CBZ.woundSoak, from gore.js's wound: ml / 0.1 per
        cm^2), sagging down the panel on a man who is up, never past the
        face it is on. Blood that the cloth cannot hold drips and pools on
        the ground (gore.js).
@@ -229,19 +229,6 @@
   //  bullet path already proved out, so the bite finally gets the dark bore
   //  and the raw margin the comment has been promising since July.
   //  (discGeo is a hoisted function declaration; it is defined below.)
-  //
-  //  The TRUE outer radius of a jittered disc (the rim wobble pushes vertices
-  //  past 1.0). Every size clamp and the audit measure against THIS, not the
-  //  nominal 1.0, or a stain could still overhang by its own wobble.
-  function maxRadiusOf(g) {
-    const p = g.attributes.position;
-    let mx = 0;
-    for (let i = 0; i < p.count; i++) {
-      const r = Math.hypot(p.getX(i), p.getY(i));
-      if (r > mx) mx = r;
-    }
-    return mx || 1;
-  }
   // THE BITE / BLADE / BRUISE DISC. Dark bore, ONE bright raw margin, and an
   // outermost ring at ALPHA ZERO so the mark dissolves into skin instead of
   // ending in a cut edge. 14 segments reads as round at contact range; the
@@ -272,36 +259,23 @@
   //  under a comment claiming it was fixed. The ramp now drives ALPHA as well
   //  as brightness (r128 takes a 4-component `color` attribute — see the note
   //  on unlit() below), so the stain genuinely ends in nothing.
+  //
+  //  AND IT WAS STILL TOO FAINT TO SEE (2026-11-25: a man shot through the
+  //  chest showed no red on his jumpsuit from 2.5 m). A two-radius circle
+  //  interpolates its alpha straight from the centre to the rim, so only the
+  //  middle ~45% of its radius was more than half covered: the soaked area
+  //  drew as a faint smudge a fifth of its size. Wet cloth is wet right to
+  //  where the blood has got to and fades only at the wicking front, so the
+  //  ramp has rings now (discGeo): solid red-black to ~0.7 of the radius,
+  //  feathered to nothing over the outer third.
   function blobGeo() {
-    const g = new THREE.CircleGeometry(1, 14);
-    g._shared = true;
-    const pos = g.attributes.position;
-    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
-    const col = new Float32Array(pos.count * 4);
-    for (let i = 0; i < pos.count; i++) {
-      let x = pos.getX(i), y = pos.getY(i);
-      if (x * x + y * y >= 0.25) {                   // centre vertex stays put
-        const a = Math.atan2(y, x);
-        const k = 1 + 0.18 * Math.sin(a * 3 + p1) + 0.14 * Math.sin(a * 5 + p2) + 0.09 * Math.sin(a * 7 + p3);
-        x *= k; y *= k;
-        pos.setXY(i, x, y);
-      }
-      // 1 at the pooled centre → 0.18 at the feathered rim. Multiplied against
-      // MAT_RING, the edge all but vanishes into the cloth.
-      const r = Math.min(1, Math.sqrt(x * x + y * y));
-      const v = 1 - 0.82 * (r * r);
-      col[i * 4] = v; col[i * 4 + 1] = v * 0.94; col[i * 4 + 2] = v * 0.94;
-      // A STAIN IS A GRADIENT, so a plain linear alpha is exactly right here
-      // and the two-radii CircleGeometry is not a defect for this one shape:
-      // opaque where the blood pooled, gone at the wicking edge. 0.92 rather
-      // than 1.0 at the centre so even the darkest soak lets a little cloth
-      // through — wet fabric, not paint.
-      col[i * 4 + 3] = 0.92 * (1 - r);
-    }
-    pos.needsUpdate = true;
-    g.setAttribute("color", new THREE.BufferAttribute(col, 4));
-    g._maxR = maxRadiusOf(g);
-    return g;
+    return discGeo([
+      [0.00, 1.00, 0.94, 0.94],
+      [0.45, 0.95, 0.94, 0.92],
+      [0.70, 0.80, 0.95, 0.82],
+      [0.86, 0.60, 0.96, 0.40],
+      [1.00, 0.45, 0.97, 0.00],
+    ], 18, 0.32);
   }
   const G_RING = [blobGeo(), blobGeo(), blobGeo()];
 
@@ -937,7 +911,7 @@
   // a child of the SAME part, seated on the SAME face, under the hole, a few
   // cm on the frame of the hit. From then on its size is the blood the cloth
   // round that hole has actually soaked up (CBZ.woundSoak, fed by gore.js's
-  // wound: area = soaked ml / the cloth's ~0.4 ml per cm^2), sagging down the
+  // wound: area = soaked ml / the cloth's ~0.1 ml per cm^2), running down the
   // panel on a man who is up, and never past the face it is on. It is the
   // patch round the hole, never the garment's colour. `holeR` = the outer
   // radius of what it rings.
@@ -961,62 +935,107 @@
     // is round under a flat patch, so it keeps nearer its hole there)
     const round = !!(CBZ.humanLimbHalfAt && ax !== "y" && CBZ.humanLimbHalfAt(part.geometry, lp.y));
     const soakCap = Math.max(Math.max(gx, gy), Math.min(capR(geo, mh, round ? 0.5 : 0.9), fitR(geo, mh, mh)));
-    wounds.push({ m, actor, age: 0, kind: "ring", dried: true, part, ax, kx: gx, ky: gy, soakCap,
-      p0: m.position.clone(), soakR: 0 });
+    // ...and how far DOWN it may run on a man who is up: the face's height
+    // (world up is the part's y on a side, front or back face)
+    const prm = part.geometry.parameters || {};
+    const hy = (prm.height || 0.9) * 0.5;
+    const soakCapV = ax === "y" ? soakCap : Math.max(soakCap, (hy * 0.96) / ((geo && geo._maxR) || 1));
+    const rec = { m, actor, age: 0, kind: "ring", dried: true, part, ax, kx: gx, ky: gy, soakCap, soakCapV,
+      p0: m.position.clone(), q0: m.quaternion.clone(), soakR: 0, pair: null };
+    wounds.push(rec);
     actor._woundN = (actor._woundN || 0) + 1;
-    return m;
+    return rec;
   }
 
-  /* CBZ.woundSoak(actor, x, y, z, ml) — the cloth round the hole nearest the
-     world point (x,y,z) on this body has soaked `ml` of blood: its wet patch
-     becomes that big (area = ml / SOAK_ML_CM2), never smaller than the ring
-     it started as, never past its face. On a body that is up the patch sags:
-     its middle moves down the panel (in the part's own space) by a share of
-     how much it grew. -> true when a patch took it. */
-  const SOAK_ML_CM2 = 0.4;            // a cotton jumpsuit holds ~0.3-0.5 ml a cm^2
-  const SOAK_FEATHER = 1.3;
+  /* CBZ.woundSoak(actor, x, y, z, ml, up) — the cloth round the hole nearest
+     the world point (x,y,z) on this body has soaked `ml` of blood. A round
+     that went through has two holes, and the blood leaves by both: the
+     soaked ml is shared between the entry's patch and the exit's. Each
+     patch's area is its ml over what the cloth holds a cm^2 (SOAK_ML_CM2),
+     never smaller than the ring it started as. On a man who is up the blood
+     runs down inside the cloth: the patch hangs from the hole, SOAK_RUN
+     times as tall as it is wide, down to the bottom of the face it is on,
+     and widens only once it can run no further. Lying, it spreads round.
+     -> true when a patch took it. */
+  // A cotton twill jumpsuit (~0.3 kg/m^2) holds ~0.05 ml a cm^2 wet through,
+  // the shirt under it about as much: 0.1 for the two. (It was 0.4, which
+  // drew the patch a quarter of the area the blood really wets.)
+  const SOAK_ML_CM2 = 0.1;
+  // the ring's ramp is solid to ~0.7 of its radius and fades out past it:
+  // drawn this much wider so the wet part is the area the blood covers
+  const SOAK_FEATHER = 1.15;
+  const SOAK_RUN = 1.8;
   const _sw = new THREE.Vector3(), _sl = new THREE.Vector3(), _sg = new THREE.Vector3();
+  const _skq = new THREE.Quaternion(), _skz = new THREE.Vector3(0, 0, 1);
+  function ringLive(r) { return !!r && r.kind === "ring" && !r.gone && !!r.part && !!r.m.parent; }
+  function soakRing(best, ml, up) {
+    const part = best.part;
+    part.getWorldScale(_sg);
+    const ws = Math.max(1e-4, (Math.abs(_sg.x) + Math.abs(_sg.y) + Math.abs(_sg.z)) / 3);
+    // the wet area, in the part's own units squared
+    const A = (ml / SOAK_ML_CM2) * 1e-4 / (ws * ws);
+    const base = Math.max(best.kx, best.ky);
+    const upright = up !== false;
+    const capH = best.soakCap, capV = upright ? (best.soakCapV || capH) : capH;
+    let rx, ry;
+    if (upright) {
+      rx = Math.min(capH, Math.sqrt(A / (Math.PI * SOAK_RUN)));
+      ry = Math.min(capV, A / (Math.PI * rx));
+      if (ry >= capV) rx = Math.min(capH, A / (Math.PI * ry));
+    } else {
+      rx = ry = Math.min(capH, Math.sqrt(A / Math.PI));
+    }
+    rx = Math.min(Math.max(best.kx, rx * SOAK_FEATHER), Math.max(best.kx, capH));
+    ry = Math.min(Math.max(best.ky, ry * SOAK_FEATHER), Math.max(best.ky, capV));
+    const R = Math.max(rx, ry);
+    if (Math.abs(R - best.soakR) < base * 0.04 && best.soakUp === upright) return true;
+    best.soakR = R; best.soakUp = upright;
+    const m = best.m;
+    m.position.copy(best.p0);
+    if (best.q0) m.quaternion.copy(best.q0);
+    if (upright && best.q0 && ry > rx * 1.05) {
+      // world down, in the part's space, along the face it is on
+      part.updateWorldMatrix(true, false);
+      _sl.copy(best.p0); part.localToWorld(_sl);
+      _sw.copy(_sl); _sw.y -= 1; part.worldToLocal(_sw); _sw.sub(best.p0);
+      if (best.ax === "x") _sw.x = 0; else if (best.ax === "y") _sw.y = 0; else _sw.z = 0;
+      const l = _sw.length();
+      if (l > 1e-5) {
+        _sw.multiplyScalar(1 / l);
+        // the patch's long axis (its local y) turned to point down the face
+        _sl.copy(_sw).applyQuaternion(_skq.copy(best.q0).invert());
+        _skq.setFromAxisAngle(_skz, Math.atan2(_sl.x, -_sl.y));
+        m.quaternion.multiply(_skq);
+        // it hangs from the hole: its top about level with the hole
+        m.position.addScaledVector(_sw, Math.max(0, ry - rx) * 0.85);
+      }
+    }
+    m.scale.set(rx, ry, 1);
+    // kept on the face it is on
+    const prm = part.geometry && part.geometry.parameters || {};
+    const hx = (prm.width || 0.6) * 0.5, hy = (prm.height || 0.9) * 0.5, hz = (prm.depth || 0.45) * 0.5;
+    const P = m.position, mr = (m.geometry && m.geometry._maxR) || 1;
+    const rv = ry * mr * 0.8, rh = rx * mr * 0.8;
+    const cl = (v, h, r) => { const lim = Math.max(0, h - r); return Math.max(-lim, Math.min(lim, v)); };
+    if (best.ax !== "x") P.x = cl(P.x, hx, rh);
+    if (best.ax !== "y") P.y = cl(P.y, hy, upright ? rv : rh);
+    if (best.ax !== "z") P.z = cl(P.z, hz, rh);
+    return true;
+  }
   CBZ.woundSoak = function (actor, x, y, z, ml, up) {
     if (!actor || !(ml > 0)) return false;
     let best = null, bd = 0.5 * 0.5;
     for (let i = 0; i < wounds.length; i++) {
       const r = wounds[i];
-      if (r.kind !== "ring" || r.gone || !r.part || !r.m.parent) continue;
+      if (!ringLive(r)) continue;
       if (r.actor !== actor && !(actor.isPlayer && r.actor && r.actor.isPlayer)) continue;
       r.m.getWorldPosition(_sw);
       const d = (_sw.x - x) * (_sw.x - x) + (_sw.y - y) * (_sw.y - y) + (_sw.z - z) * (_sw.z - z);
       if (d < bd) { bd = d; best = r; }
     }
     if (!best) return false;
-    const part = best.part;
-    part.getWorldScale(_sg);
-    const ws = Math.max(1e-4, (Math.abs(_sg.x) + Math.abs(_sg.y) + Math.abs(_sg.z)) / 3);
-    // the wet area's radius (m); the blob's ramp feathers its outer ~quarter
-    // to nothing, so it is drawn that much wider for the wet part to be that big
-    const Rw = Math.sqrt(ml / SOAK_ML_CM2 / Math.PI) * 0.01 * SOAK_FEATHER;
-    const base = Math.max(best.kx, best.ky);
-    const R = Math.max(base, Math.min(best.soakCap, Rw / ws));        // part units
-    if (Math.abs(R - best.soakR) < base * 0.04) return true;
-    best.soakR = R;
-    const k = R / base;
-    best.m.scale.set(best.kx * k, best.ky * k, 1);
-    // the sag: world down, in the part's space, along the face
-    best.m.position.copy(best.p0);
-    if (up !== false && R > base) {
-      part.updateWorldMatrix(true, false);
-      _sl.copy(best.p0); part.localToWorld(_sl);
-      _sw.copy(_sl); _sw.y -= 1; part.worldToLocal(_sw); _sw.sub(best.p0);
-      if (best.ax === "x") _sw.x = 0; else if (best.ax === "y") _sw.y = 0; else _sw.z = 0;
-      const l = _sw.length();
-      if (l > 1e-5) best.m.position.addScaledVector(_sw, ((R - base) * 0.45) / l);
-      // kept on the face it is on
-      const prm = part.geometry && part.geometry.parameters || {};
-      const hx = (prm.width || 0.6) * 0.5, hy = (prm.height || 0.9) * 0.5, hz = (prm.depth || 0.45) * 0.5;
-      const P = best.m.position;
-      if (best.ax !== "x") P.x = Math.max(-hx + R, Math.min(hx - R, P.x));
-      if (best.ax !== "y") P.y = Math.max(-hy + R, Math.min(hy - R, P.y));
-      if (best.ax !== "z") P.z = Math.max(-hz + R, Math.min(hz - R, P.z));
-    }
+    if (ringLive(best.pair)) { soakRing(best, ml * 0.5, up); soakRing(best.pair, ml * 0.5, up); }
+    else soakRing(best, ml, up);
     return true;
   };
 
@@ -5302,7 +5321,17 @@
     //  a real direction available (never guessed — see throughDir), and at
     //  least EXIT_MIN_TRAVEL of part crossed rather than a graze.
     let exitAt = null, exitR = 0, exitPad = 0;
-    if (shotV2 && cal > EXIT_MIN_CAL) {
+    // THROUGH OR NOT is one rule (verbs_strike V.roundExits, the one the exit
+    // spray already uses), so a 9 mm that sprays out of a man's back also
+    // leaves the hole it sprayed out of. The caller's own answer wins; a
+    // caller that never named a round (no cal / mm) has not said it went
+    // through.
+    const VB = CBZ.verbs, named = opts.cal != null || opts.caliber != null || opts.mm != null;
+    const through = opts.exit != null ? !!opts.exit
+      : !named ? false
+      : VB && VB.roundExits ? VB.roundExits({ cal, head: !!opts.head, wkey: opts.wkey || "" })
+      : cal > EXIT_MIN_CAL;
+    if (shotV2 && through) {
       const dir = throughDir(opts, wp);
       const dl = dir ? localDir(part, wp, dir) : null;
       const ex = dl ? boxExit(part, lp, dl) : null;
@@ -5342,8 +5371,9 @@
     // ---- THE BLOOD RING (no soak, no collar run-down) ----
     // One small tight ring round each hole, at its final size on this frame.
     // The clothes keep their colour; the blood is on the ground (gore.js).
-    spawnRing(actor, part, lp, ax, Math.max(rad * geo._maxR, cr * G_CLOTH_HOLE._maxR), padE);
-    if (exitAt) spawnRing(actor, part, exitAt, exitAt.ax, exitR, exitPad);
+    const rin = spawnRing(actor, part, lp, ax, Math.max(rad * geo._maxR, cr * G_CLOTH_HOLE._maxR), padE);
+    // the two holes of one round soak together: blood leaves by both
+    if (exitAt) { const rex = spawnRing(actor, part, exitAt, exitAt.ax, exitR, exitPad); if (rin && rex) { rin.pair = rex; rex.pair = rin; } }
   };
 
   // ---- RATCHET: CBZ.woundDecalAudit() ---------------------------------------
@@ -5381,10 +5411,20 @@
       _sn.set(0, 0, 1).applyQuaternion(m.quaternion);
       const anx = Math.abs(_sn.x), any = Math.abs(_sn.y), anz = Math.abs(_sn.z);
       const ax = anx >= any && anx >= anz ? "x" : (any >= anz ? "y" : "z");
-      const tan = ax === "x" ? Math.min(hz, hy) : (ax === "y" ? Math.min(hx, hz) : Math.min(hx, hy));
+      // its reach along each of the face's two in-plane axes (the support of
+      // the ellipse its scale makes, turned as it is turned: a round mark is
+      // its radius both ways; a soak running down a front is tall, not wide)
+      // against that axis's half-span: a mark longer than the face along an
+      // axis is wider than the face
       const mr = (m.geometry && m.geometry._maxR) || 1;
-      const rad = Math.max(Math.abs(m.scale.x), Math.abs(m.scale.y)) * mr;
-      if (rad > tan) oversized++;     // its diameter meets/exceeds the face's width
+      const sx = Math.abs(m.scale.x) * mr, sy = Math.abs(m.scale.y) * mr;
+      _sx.set(1, 0, 0).applyQuaternion(m.quaternion); _sy.set(0, 1, 0).applyQuaternion(m.quaternion);
+      const reach = (k) => Math.hypot(_sx.getComponent(k) * sx, _sy.getComponent(k) * sy);
+      let over = false;
+      if (ax !== "x" && reach(0) > hx) over = true;
+      if (ax !== "y" && reach(1) > hy) over = true;
+      if (ax !== "z" && reach(2) > hz) over = true;
+      if (over) oversized++;     // its diameter meets/exceeds the face's width
     }
     return {
       decals: decals, oversized: oversized, cameraFacing: cameraFacing,

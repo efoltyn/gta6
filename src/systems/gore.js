@@ -2627,7 +2627,14 @@
   }
   // the size of the mark a drop leaves: its diameter times the spread factor
   // for the speed it hits at across the surface (vn), unless the caller set it
-  function markD(i, vn) { return AMG[i] || 2 * AR[i] * AMK[i] * Math.min(5.5, 1.5 + 0.3 * vn); }
+  // A drop drawn at its 2.8 mm cap can carry more (a heavy flow leaves a wound
+  // as fewer, fuller drops: AVOL); it lands as the sphere that holds what it
+  // carries, so a 0.6 ml drip off a chin marks the floor ~3 cm across, not 1.5.
+  function markD(i, vn) {
+    if (AMG[i]) return AMG[i];
+    const r = Math.max(AR[i], Math.cbrt(AVOL[i] * 2.387e-7));
+    return 2 * r * AMK[i] * Math.min(5.5, 1.5 + 0.3 * vn);
+  }
 
   // ---- THE EVENTS --------------------------------------------------------------
   // a unit vector round (dx,dy,dz), off it by a 2-D gaussian of `sd` radians
@@ -3210,6 +3217,14 @@
     };
     if (o.local) w.local.copy(o.local);
     if (o.dir) { const l = Math.hypot(o.dir.x || 0, o.dir.y || 0, o.dir.z || 0); if (l > 1e-6) w.dirL = new THREE.Vector3(o.dir.x / l, o.dir.y / l, o.dir.z / l); }
+    // A HOLE THROUGH THE SKULL drains, on a man lying down, out of the low side
+    // of the head, which touches the floor at a spot a few cm across: the
+    // blood comes out there and spreads all round under and beside the head
+    // (see the lying branch of updateWounds). A cut on the face, the lip, the
+    // brow or the scalp is on top of the head and runs off the skin to the
+    // floor beside it like any other wound (bodyEdge).
+    w.underHead = zone === "head" && site !== "lip" && site !== "nose" && site !== "brow" && site !== "scalp" &&
+      site !== "mouth" && site !== "stump" && w.kind !== "lac";
     // where the blood off the face runs to (the head mesh: see DRIP POINTS)
     const ch = actor ? actorChar(actor) : null;
     if (zone === "head" && w.node && w.node.name === "head") w.chin = w.node;
@@ -3454,8 +3469,13 @@
             try {
               // it reaches the floor where the body meets it, at the edge of
               // his outline nearest the wound (bodyEdge), and spreads out from
-              // there; a wound with no body round it pours where it is
-              if (bodyEdge(w)) w.entry = edgePour(w, EDGE.x, EDGE.z, EDGE.nx, EDGE.nz, fy, w.pour);
+              // there; a wound with no body round it pours where it is. A
+              // hole through the skull lets it out where the head touches the
+              // floor: it spreads round the head from under it
+              if (w.underHead && w.chin && w.chin.parent) {
+                w.chin.getWorldPosition(_bd);
+                w.entry = landPour(_bd.x, fy, _bd.z, w.pour, w.entry);
+              } else if (bodyEdge(w)) w.entry = edgePour(w, EDGE.x, EDGE.z, EDGE.nx, EDGE.nz, fy, w.pour);
               else w.entry = landPour(w.x + w.nx * 0.04, fy, w.z + w.nz * 0.04, w.pour, w.entry);
             } finally { seatY = sy0; seatSolid = ss0; }
             WOUND_AUDIT.pouredMl += w.pour;
@@ -3921,12 +3941,32 @@
 
   // recycle the oldest pool that is FAR from the lens (never one underfoot).
   // With the debris law off, jail/survival keep the original drop-the-oldest shift.
+  /* WHICH MARK GIVES UP ITS SLOT when the budget is full. It used to be the
+     OLDEST mark near the lens, whatever it was: a pool still being fed from a
+     body is old by the time a walking bleeder's drip trail and two exit
+     sprays have filled the budget, so it was the one recycled, and the next
+     pour from the same wound started a new pool from nothing. A headshot's
+     pool that should be half a metre across at 45 s read as a fresh 10-20 cm
+     patch. Now: a far mark first, then the smallest drop mark (the fine
+     satellites of a spray, the oldest of them first), then the oldest pool
+     nothing has fed for 20 s, and only then (nothing else left) the oldest
+     of all. -> index into splats, or -1 */
+  function splatVictim(slotted) {
+    let drop = -1, minR = Infinity, dry = -1, any = -1;
+    for (let i = 0; i < splats.length; i++) {
+      const s = splats[i];
+      if (slotted && (s.slot == null || s.slot < 0)) continue;
+      if (any < 0) any = i;
+      if (dist2Cam(s.m.position.x, s.m.position.z) > 50 * 50) return i;
+      if (s.land !== "wet") { const g = s.grow || 0; if (g < minR * 0.8) { minR = g; drop = i; } }
+      else if (dry < 0 && s.t > 20) dry = i;
+    }
+    return drop >= 0 ? drop : dry >= 0 ? dry : any;
+  }
   function recycleFarSplat() {
     if (!debrisLaw()) { freeSlick(splats.shift()); return; }
-    for (let i = 0; i < splats.length; i++) {
-      if (dist2Cam(splats[i].m.position.x, splats[i].m.position.z) > 50 * 50) { freeSlick(splats.splice(i, 1)[0]); return; }
-    }
-    freeSlick(splats.shift());
+    const i = splatVictim(false);
+    if (i >= 0) freeSlick(splats.splice(i, 1)[0]);
   }
   // ============================================================
   //  GROUND DECALS FOLLOW THE GROUND  (CBZ.CONFIG.GORE_SLOPE_DECALS, default on)
@@ -4143,13 +4183,7 @@
   function claimLand() {
     let c = ldAlloc();
     if (c) return c;
-    let pick = -1;
-    for (let i = 0; i < splats.length; i++) {
-      const s = splats[i];
-      if (s.slot == null || s.slot < 0) continue;
-      if (pick < 0) pick = i;
-      if (dist2Cam(s.m.position.x, s.m.position.z) > 50 * 50) { pick = i; break; }
-    }
+    const pick = splatVictim(true);
     if (pick >= 0) freeSlick(splats.splice(pick, 1)[0]);
     else if (walls.length) ldRelease(walls.shift());
     return ldAlloc();
@@ -4191,15 +4225,21 @@
       hold = near ? 120 : 40; fade = 16; rim = 0.29;
     } else {
       // a droplet's mark, `2g` across; an angled one is longer than it is wide
-      // by 1/sin(angle) and throws its tail the way it was going
+      // by 1/sin(angle) and throws its tail the way it was going. The cells'
+      // shapes in their quads (the atlas spans -1..1 across a quad): the DOT's
+      // edge sits at 0.46 of the half-quad, so it is 0.46 of the quad across;
+      // the DROP's body is 0.3 of the quad wide and 0.33 of it long (faceMark
+      // sizes a wall mark the same way). This divided by twice those, so every
+      // floor drop was drawn at half its width: a quarter of its area.
       const drop = kind === "drop" && hasDir;
       cell = drop ? CELL_DROP : CELL_DOT;
-      sx = (g * 2) / (drop ? 0.6 : 0.92);
-      sy = sx * (drop ? Math.max(1, Math.min(3.4, o.elong || 1)) : 1);
+      sx = (g * 2) / (drop ? 0.3 : 0.46);
+      sy = drop ? (g * 2) * Math.max(1, Math.min(3.4, o.elong || 1)) / 0.33 : sx;
       if (drop) spin = Math.atan2(-o.dirX, -o.dirZ);
       if (Math.random() < 0.5) sx = -sx;                   // mirror: satellites either side
       growT = 0.08; grow0 = 0.35; dryT = 5 + Math.random() * 5; thick = 0.55; thrEnd = 0.1;
-      hold = near ? 40 : 14; fade = 8; rim = 0.2;
+      // dried blood stays where it fell; only the decal budget gives a mark up
+      hold = near ? 180 : 60; fade = 12; rim = 0.2;
     }
     seatDecal(m, x, z, spin, landLift(s), s);
     m.scale.set(sx, sy, 1);
@@ -4407,6 +4447,10 @@
   // `last` is the spot this wound fed last time (the fast path) -> the spot fed
   function landPour(x, fy, z, ml, last) {
     GROUND_AUDIT.landedMl += ml; GROUND_AUDIT.pouredMl += ml;
+    // the pool this wound fed lost its decal slot (the budget gave it up): its
+    // blood is still on the floor, so the pool laid in its place starts with it
+    const carry = last && !glLive(last) && last.pool && !last.edge && last.v > 0 &&
+      (x - last.cx) * (x - last.cx) + (z - last.cz) * (z - last.cz) < 0.3 * 0.3 ? last.v : 0;
     let e = last && last.on && glLive(last) && glWet(last) ? last : null;
     if (e) {
       const dx = x - e.cx, dz = z - e.cz, R = e.r * e.k + 0.03;
@@ -4415,11 +4459,11 @@
     if (!e) e = glFind(x, fy, z, 0.03);
     if (e) { glFeed(e, ml, x, z); return e; }
     _wetO.spin = Math.random() * 6.28; _wetO.elong = 1;
-    const rec = spawnSplat(x, z, Math.max(0.006, rOfMl(ml)), BLOOD_D, false, _wetO);
+    const rec = spawnSplat(x, z, Math.max(0.006, rOfMl(ml + carry)), BLOOD_D, false, _wetO);
     if (!rec) return null;
     GROUND_AUDIT.pools++;
     e = glEntry();
-    e.on = true; e.pool = true; e.edge = false; e.x = e.cx = x; e.z = e.cz = z; e.y = decalFloorAt(x, z, fy + 0.05, true); e.v = ml; e.r = rec.grow; e.k = 1;
+    e.on = true; e.pool = true; e.edge = false; e.x = e.cx = x; e.z = e.cz = z; e.y = decalFloorAt(x, z, fy + 0.05, true); e.v = ml + carry; e.r = rec.grow; e.k = 1;
     e.rec = rec; e.t0 = e.tf = e.dryAt = plumeClock; e.run = 0;
     glShape(e);
     return e;
@@ -4524,7 +4568,10 @@
   function edgePour(w, ex, ez, nx, nz, fy, ml) {
     GROUND_AUDIT.landedMl += ml; GROUND_AUDIT.pouredMl += ml;
     let e = w.entry;
-    if (e && (!e.on || !glLive(e) || !glWet(e) || !e.edge || (ex - e.ax) * (ex - e.ax) + (ez - e.az) * (ez - e.az) > 0.15 * 0.15)) e = null;
+    const near = e && e.edge && (ex - e.ax) * (ex - e.ax) + (ez - e.az) * (ez - e.az) <= 0.15 * 0.15;
+    // its pool lost its decal slot to the budget: the blood is still there
+    const carry = near && !glLive(e) && e.v > 0 ? e.v : 0;
+    if (e && (!e.on || !glLive(e) || !glWet(e) || !near)) e = null;
     if (!e) {
       _wetO.spin = Math.atan2(-nx, -nz); _wetO.elong = 1;
       const rec = spawnSplat(ex, ez, Math.max(0.006, rOfMl(ml)), BLOOD_D, false, _wetO);
@@ -4533,7 +4580,7 @@
       e = glEntry();
       e.on = true; e.pool = true; e.edge = true; e.x = e.cx = e.ax = ex; e.z = e.cz = e.az = ez; e.enx = nx; e.enz = nz;
       // the surface it lies on, read the way a drop's landing is (AFL)
-      e.y = decalFloorAt(ex, ez, fy + 0.05, true); e.v = 0; e.r = rec.grow; e.k = 1; e.rec = rec; e.t0 = e.tf = e.dryAt = plumeClock; e.run = 0;
+      e.y = decalFloorAt(ex, ez, fy + 0.05, true); e.v = carry; e.r = rec.grow; e.k = 1; e.rec = rec; e.t0 = e.tf = e.dryAt = plumeClock; e.run = 0;
     } else {
       // the body settles: the edge follows it a little
       e.ax += (ex - e.ax) * 0.2; e.az += (ez - e.az) * 0.2;
@@ -6650,6 +6697,9 @@
       // simply was not handed to the thing that stamps the body.
       CBZ.bodyWound(ctx.ped, wp, {
         head, cal: wcal, jaw: opts.jaw, dir: opts.dir,
+        // the fire path's own through-or-not (V.roundExits), so the corpse's
+        // exit hole and the exit spray are the same answer
+        exit: opts.exit,
         melee: blunt ? "blunt" : (blade ? "blade" : (bitten ? "bite" : null)),
         // the biter, so the death wound is printed by ITS teeth
         by: bitten ? (opts.by || (ctx.imp && ctx.imp.by) || undefined) : undefined,
