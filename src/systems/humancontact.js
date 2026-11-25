@@ -1462,7 +1462,7 @@
     const qx = p2x + d2x * t, qy = p2y + d2y * t, qz = p2z + d2z * t;
     const nx = p1x + d1x * s - qx, ny = p1y + d1y * s - qy, nz = p1z + d1z * s - qz;
     const d = Math.sqrt(nx * nx + ny * ny + nz * nz), rr = fa[oa + 6] + fb[ob + 6];
-    _cc.depth = rr - d; _cc.bx = qx; _cc.by = qy; _cc.bz = qz; _cc.s = s;
+    _cc.depth = rr - d; _cc.bx = qx; _cc.by = qy; _cc.bz = qz; _cc.s = s; _cc.rr = rr;
     if (d > 1e-5) { _cc.nx = nx / d; _cc.ny = ny / d; _cc.nz = nz / d; } else { _cc.nx = 0; _cc.ny = 1; _cc.nz = 0; }
     return _cc.depth;
   }
@@ -1671,7 +1671,7 @@
   // the deepest overlap of X's parts in mx against Y's parts in my (the
   // record: i, j, depth, the normal out of Y, where along X's part, the
   // point on Y's axis and Y's radius there)
-  function dRec() { return { depth: 0, i: -1, j: -1, nx: 0, ny: 1, nz: 0, s: 0, qx: 0, qy: 0, qz: 0, rb: 0 }; }
+  function dRec() { return { depth: 0, i: -1, j: -1, nx: 0, ny: 1, nz: 0, s: 0, qx: 0, qy: 0, qz: 0, rb: 0, rr: 0 }; }
   const _d = dRec(), _d2 = dRec(), _d3 = dRec();
   function deepest(PX, mx, PY, my, out, floor) {
     out.depth = floor; out.i = -1; out.j = -1;
@@ -1683,7 +1683,7 @@
         const d = capVsCap(fa, i * ST, fb, j * ST);
         if (d > out.depth) {
           out.depth = d; out.i = i; out.j = j; out.nx = _cc.nx; out.ny = _cc.ny; out.nz = _cc.nz;
-          out.s = _cc.s; out.qx = _cc.bx; out.qy = _cc.by; out.qz = _cc.bz; out.rb = fb[j * ST + 6];
+          out.s = _cc.s; out.qx = _cc.bx; out.qy = _cc.by; out.qz = _cc.bz; out.rb = fb[j * ST + 6]; out.rr = _cc.rr;
         }
       }
     }
@@ -1884,15 +1884,16 @@
   }
   // all: every part of both (what the limbs could not clear is the roots' to
   // clear); else only what a limb never can (trunk, head, the thighs at the hip)
-  // the limb a man is striking with (its contact is the blow's: it stops on
-  // him by the strike's own rule, it is never a reason to move the roots)
-  function strikeLimb(ch) {
-    if (ch.kickT > 0) return ch.kickLeg === "l" ? M_LIMB[2] : M_LIMB[3];
-    if (ch.punchT > 0) return ch.punchKind === "headbutt" ? 4 : ch.punchKind === "shove" ? M_LIMB[0] | M_LIMB[1] : ch.punchArm === "l" ? M_LIMB[0] : M_LIMB[1];
-    return 0;
-  }
+  /* (THE STRIKING LIMB IS NOT LEFT OUT of the `all` stage. It was, on the
+     thought that a blow's own contact must never move the roots; but the
+     jammed cases ARE a striking limb: a jab's upper arm against a
+     staggering man's flung forearm, a hook's forearm in his trunk as he
+     reels into it, two men both throwing with an upper arm across a
+     forearm. Left out, nothing was allowed to clear them: 2-11 cm stayed.
+     A blow that lands is already on his surface (the strike holds it
+     there), so it leaves nothing for this stage to act on.) */
   function rootStage(A, B, PA, PB, chA, chB, all, dA, dB) {
-    let mA = all ? M_ALL & ~strikeLimb(chA) : M_TRUNK, mB = all ? M_ALL & ~strikeLimb(chB) : M_TRUNK;
+    let mA = all ? M_ALL : M_TRUNK, mB = all ? M_ALL : M_TRUNK;
     if (!all && chA.kickT > 0) mA &= ~(chA.kickLeg === "l" ? 1 << 7 : 1 << 9);
     if (!all && chB.kickT > 0) mB &= ~(chB.kickLeg === "l" ? 1 << 7 : 1 << 9);
     for (let it = 0; it < 2; it++) {
@@ -1909,8 +1910,17 @@
         if (nh < 1e-4) { nx = ap.x - bp.x; nz = ap.z - bp.z; nh = Math.hypot(nx, nz) || 1; }
         nx /= nh; nz /= nh; nh = 0.5;
       } else { nx /= nh; nz /= nh; }
-      // (what the limbs could not clear is closed a hand's width a frame, not a stride)
-      const push = Math.min(all ? 0.10 : 0.3, (_d2.depth + 0.002) / Math.max(nh, 0.5));
+      /* HOW FAR: when the two parts are side by side, the overlap itself.
+         When one is ON the other (a thigh over a trunk, a forearm across a
+         shoulder: the contact points mostly up), moving the roots apart by
+         the overlap does not clear it: the upper part has to come off the
+         lower one sideways, by the distance at which a part at that height
+         clears it. (The trunk stage used to move by overlap / 0.5 and stop:
+         a thigh 6 cm into the top of a man's trunk stayed in it.) */
+      const dc = _d2.rr - _d2.depth, dyc = dc * _d2.ny, hc = dc * Math.hypot(_d2.nx, _d2.nz);
+      const side = Math.sqrt(Math.max(0, _d2.rr * _d2.rr - dyc * dyc)) - hc;
+      // (what the limbs could not clear is closed a hand's width and a half a frame, not a stride)
+      const push = Math.min(all ? 0.15 : 0.3, Math.max(_d2.depth, side) + 0.003);
       const pa = isPlayer(A), pb = isPlayer(B);
       let wA, wB;
       if (dA && dB) return;
@@ -2071,6 +2081,21 @@
     count(what) { if (what === "feet") AU.feetReplaced++; else if (what === "strike") AU.strikesStopped++; },
     // what became of a blow (systems/verbs_strike.js): kept for the audit
     note(kind, what) { if (strikeLog.length < 24) strikeLog.push(kind + ": " + what); },
+    // a point out of everybody near this rig (the hand of a man reeling, about to be flung into the man who hit him)
+    clearPoint(ch, v, r) {
+      if (!ch || !(ch._bpNf >= bpFrame - 1) || !ch._bpNn) return false;
+      let moved = false;
+      for (let n = 0; n < ch._bpNn; n++) {
+        const o = ch._bpN[n];
+        if (!o || !o.group || o.group.visible === false) continue;
+        const P = partsOf(o, 0);
+        if (!P.ok || !sphVsParts(P, v.x, v.y, v.z, r, M_ALL, _h)) continue;
+        const d = _h.depth + 0.004;
+        v.x += _h.nx * d; v.y += _h.ny * d; v.z += _h.nz * d;
+        moved = true;
+      }
+      return moved;
+    },
     // a point (a hand a pose is about to place) out of a body's parts, to its surface: true if it moved
     pushOut(tch, v, r) {
       const P = partsOf(tch, 0);

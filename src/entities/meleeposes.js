@@ -864,6 +864,20 @@
       WR.set(-0.22, WL.y, WL.z);
       PL.set(0.5, -1, 0); PR.set(-0.5, -1, 0);
     }
+    /* A REELING MAN'S HANDS GO OUT, NOT INTO THE MAN WHO HIT HIM. A
+       stagger throws the arms out for balance and a fold brings them in to
+       cover, to spots in his own frame; with the other man a forearm away
+       those spots are inside him, every frame of the reaction, and the
+       part pass pushed them out again every frame (85-157 re-solves a
+       blow, 2-5 cm left on the worst frame). The spot is taken to the
+       surface of whoever is there before the arm is solved. Not the arm
+       that is punching: its hand is aimed, and stops, by the strike. */
+    const BPc = CBZ.bodyParts;
+    if (BPc && BPc.clearPoint && BPc.near(ch) && !ch.cuffed && ((hr && hr.on) || ch.staggerT > 0)) {
+      const rH = 0.07 * D.scale / 0.7;
+      if (!(S._k && S._side === "L")) { _t.copy(WL); b.localToWorld(_t); if (BPc.clearPoint(ch, _t, rH)) { b.worldToLocal(_t); WL.copy(_t); } }
+      if (!(S._k && S._side === "R")) { _t.copy(WR); b.localToWorld(_t); if (BPc.clearPoint(ch, _t, rH)) { b.worldToLocal(_t); WR.copy(_t); } }
+    }
     const armK = ch.cuffed ? 0 : K * S.armK;     // wrists locked behind him: the strike never moves them
     if (armK > 0.002) {
       const ext = S._k && S._k.ext != null && !S._both ? S._k.ext : null;
@@ -1067,7 +1081,9 @@
       const top = (ch._mountTop - ch.group.position.y) / D.scale, rT = ch._mountR / D.scale;
       const cT = Math.max(0, ch._mountHalfW / D.scale - rT), yT = top - rT;           // his trunk's nearer axis, in the rider's frame
       hipH = Math.max(hipH, top + 0.06 + D.torsoD * 0.5 + 0.012);
-      const rr = rT + D.legW * 0.5 + 0.015;
+      // (4 cm, not 1.5: measured 2 cm IN him at 1.5. The hips ride his breathing, the trunk
+      // under the seat is not level, the rider's pelvis turns with each punch: the sum is that much)
+      const rr = rT + D.legW * 0.5 + 0.057;
       for (let y = D.footY + 0.09; y <= hipH - 0.12; y += 0.02) {
         const out = Math.sqrt(Math.max(0.0004, D.g1 * D.g1 - (hipH - y) * (hipH - y) - kz * kz));
         // the trunk's axis to the thigh's line, hip joint -> knee, in the plane across him
@@ -1079,8 +1095,15 @@
         if (qx * qx + qy * qy >= rr * rr) { clear = true; break; }
       }
     }
+    /* OUT, THEN DOWN. Hips, knees and feet all went to the kneel on one
+       blend, so half way down the knees were half way out: inside his
+       width, at the height of his ribs, and the shins came down through
+       the side of his trunk (9 cm, every time). The knees and feet go out
+       to their final width over the first half; the hips come down and
+       the feet go back over the second, with the legs already outside him. */
+    const mOut = sstep(0, 0.5, m), mDn = sstep(0.35, 1, m);
     const breath = 0.012 * Math.sin((ch.breath || 0) * 3.1);
-    S.dl = lerp(S.dl, D.hipY - hipH + breath, m);
+    S.dl = lerp(S.dl, D.hipY - hipH + breath, mDn);
     S.mZ = lerp(S.mZ, 0, m); S.mX = lerp(S.mX, 0, m); S.mYaw = lerp(S.mYaw, 0, m);
     S.bx = lerp(S.bx, 0.40, m); S.by = lerp(S.by, 0, m); S.bz = lerp(S.bz, 0, m);
     S.nx = lerp(S.nx, 0.55, m); S.ny = lerp(S.ny, 0, m);
@@ -1093,9 +1116,12 @@
       // the knee is where it was solved to be: the foot a shin's length from
       // it, on the floor behind; the leg's pole is the knee itself, from the hip
       const drop = Math.max(0, kneeY - (D.footY + 0.06)), back = Math.sqrt(Math.max(0.01, D.g2 * D.g2 - drop * drop));
-      _t.set(kx + 0.03, D.footY + 0.06, kz - back); FL.lerp(_t, m);
-      _t.x = -(kx + 0.03); FR.lerp(_t, m);
-      QL.lerp(_t2.set(kx - D.hipX, kneeY - hipH, kz), m); QR.lerp(_t2.set(-(kx - D.hipX), kneeY - hipH, kz), m);
+      const fx = kx + 0.03, fy = D.footY + 0.06, fz = kz - back;
+      FL.set(lerp(FL.x, fx, mOut), lerp(FL.y, fy, mDn), lerp(FL.z, fz, mDn));
+      FR.set(lerp(FR.x, -fx, mOut), lerp(FR.y, fy, mDn), lerp(FR.z, fz, mDn));
+      // (the knee turns out first: its pole goes sideways with the feet, and down with the hips)
+      QL.set(lerp(QL.x, kx - D.hipX, mOut), lerp(QL.y, kneeY - hipH, mDn), lerp(QL.z, kz, mDn));
+      QR.set(lerp(QR.x, -(kx - D.hipX), mOut), lerp(QR.y, kneeY - hipH, mDn), lerp(QR.z, kz, mDn));
     } else {
     // feet: behind the knees, shins on the floor, toes pointed back
     _t.set(kx + 0.04, D.footY + 0.06, kz - D.g2 * 0.96); FL.lerp(_t, m);
