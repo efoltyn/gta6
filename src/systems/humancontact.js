@@ -1514,6 +1514,21 @@
     for (let i = 0; i < NP; i++) for (let j = 0; j < NP; j++) if (T[i * NP + j]) o[PART[i] + ">" + PART[j]] = T[i * NP + j];
     return o;
   }
+  // the worst frame of the window: what the two men were doing when the pass left the most overlap
+  const WORST = { depth: 0, frame: 0, parts: ["", ""], actors: ["", ""], attackerState: "", targetState: "", bothStriking: false,
+    rootDist: 0, rigDist: 0, at: [0, 0, 0, 0, 0, 0], capsuleR: [0, 0], capsuleShrunk: false, firstToYield: "", solvesThatFrame: 0, rootPushesThatFrame: 0, before: 0 };
+  function stateOf(a, ch) {
+    const f = ch.fall, knee = f && f.on && (f.variant === "liver" || f.variant === "kneel");
+    if (lying(a)) return knee ? "kneeling" : f && f.on && f.ko ? "down (out cold)" : "down";
+    if (f && f.on) return f.phase === "getup" ? "getting up" : knee ? "kneeling" : "falling";
+    if (ch.punchT > 0) return "striking (" + (ch.punchKind || "punch") + ")";
+    if (ch.kickT > 0) return "striking (" + (ch.kickKind || "kick") + " kick)";
+    if (ch.mount) return "mounted";
+    if (ch._mountGo) return "getting on";
+    if ((ch.blockK || 0) > 0.55) return "blocking";
+    if ((ch.hitReact && ch.hitReact.on) || (ch.footStep && ch.footStep.on) || ch.staggerT > 0) return "staggering";
+    return ch.fightStance ? "guard" : "standing";
+  }
   function nameOf(a) { return a ? (isPlayer(a) ? "player" : String(a.name || a.id || a.kind || "actor")) : ""; }
   function seen(depth, A, B, pa, pb) {
     if (depth > AU.deepest) { AU.deepest = depth; AU.deepestA = nameOf(A); AU.deepestB = nameOf(B); AU.deepestPartA = pa; AU.deepestPartB = pb; }
@@ -1541,6 +1556,20 @@
                        one with the big number
        feetReplacedBy  the standing-foot moves, by the same key
        strikes         what became of each blow in the window ("kind: ...")
+       worst           the frame of the window that was left with the most
+                       overlap: depth (after) and before, frame (the pass
+                       number in the window), parts, actors [first, second],
+                       attackerState / targetState (striking (kind), blocking,
+                       staggering, guard, standing, falling, down, kneeling,
+                       getting up, getting on, mounted; the attacker is the
+                       one striking, else the first), bothStriking, rootDist
+                       (m, between the two positions), rigDist (between the
+                       two rigs the parts are read from), at (the middle of
+                       each of the two parts, world x y z, x y z),
+                       capsuleR [each], capsuleShrunk (the pair's root
+                       capsules are at their mid-blow 0.46 m), firstToYield
+                       (whose limbs were solved first), solvesThatFrame,
+                       rootPushesThatFrame
        heldPairs       pairs in one hold whose gripping hands were left alone
        pairsDropped    near pairs not tested (over the per-frame cap) */
   CBZ.bodyPartAudit = function (keep) {
@@ -1548,8 +1577,14 @@
       deepestActors: [AU.deepestA, AU.deepestB], deepestParts: [AU.deepestPartA, AU.deepestPartB], deepestBefore: AU.deepestBefore,
       rootPushes: AU.rootPushes, feetReplaced: AU.feetReplaced, limbsPushed: AU.limbsPushed, limbFrames: AU.limbFrames, strikesStopped: AU.strikesStopped,
       heldPairs: AU.heldPairs, pairsDropped: AU.pairsDropped,
-      limbFramesBy: byTable(LFB), feetReplacedBy: byTable(FRB), strikes: strikeLog.slice() };
+      limbFramesBy: byTable(LFB), feetReplacedBy: byTable(FRB), strikes: strikeLog.slice(),
+      worst: WORST.depth > 0 ? { depth: WORST.depth, before: WORST.before, frame: WORST.frame, parts: WORST.parts.slice(), actors: WORST.actors.slice(),
+        attackerState: WORST.attackerState, targetState: WORST.targetState, bothStriking: WORST.bothStriking, rootDist: WORST.rootDist,
+        rigDist: WORST.rigDist, at: WORST.at.slice(),
+        capsuleR: WORST.capsuleR.slice(), capsuleShrunk: WORST.capsuleShrunk, firstToYield: WORST.firstToYield,
+        solvesThatFrame: WORST.solvesThatFrame, rootPushesThatFrame: WORST.rootPushesThatFrame } : null };
     if (!keep) {
+      WORST.depth = 0;
       LFB.fill(0); FRB.fill(0); strikeLog.length = 0;
       AU.frames = AU.pairs = AU.tests = AU.rootPushes = AU.feetReplaced = AU.limbsPushed = AU.limbFrames = AU.strikesStopped = AU.heldPairs = AU.pairsDropped = 0;
       AU.deepest = AU.deepestBefore = 0; AU.deepestA = AU.deepestB = AU.deepestPartA = AU.deepestPartB = "";
@@ -1847,22 +1882,39 @@
     if (ch.group.position !== p) { ch.group.position.x += dx; ch.group.position.z += dz; }
     shiftParts(P, dx, dz);
   }
-  function rootStage(A, B, PA, PB, chA, chB) {
-    let mA = M_TRUNK, mB = M_TRUNK;
-    if (chA.kickT > 0) mA &= ~(chA.kickLeg === "l" ? 1 << 7 : 1 << 9);
-    if (chB.kickT > 0) mB &= ~(chB.kickLeg === "l" ? 1 << 7 : 1 << 9);
+  // all: every part of both (what the limbs could not clear is the roots' to
+  // clear); else only what a limb never can (trunk, head, the thighs at the hip)
+  // the limb a man is striking with (its contact is the blow's: it stops on
+  // him by the strike's own rule, it is never a reason to move the roots)
+  function strikeLimb(ch) {
+    if (ch.kickT > 0) return ch.kickLeg === "l" ? M_LIMB[2] : M_LIMB[3];
+    if (ch.punchT > 0) return ch.punchKind === "headbutt" ? 4 : ch.punchKind === "shove" ? M_LIMB[0] | M_LIMB[1] : ch.punchArm === "l" ? M_LIMB[0] : M_LIMB[1];
+    return 0;
+  }
+  function rootStage(A, B, PA, PB, chA, chB, all, dA, dB) {
+    let mA = all ? M_ALL & ~strikeLimb(chA) : M_TRUNK, mB = all ? M_ALL & ~strikeLimb(chB) : M_TRUNK;
+    if (!all && chA.kickT > 0) mA &= ~(chA.kickLeg === "l" ? 1 << 7 : 1 << 9);
+    if (!all && chB.kickT > 0) mB &= ~(chB.kickLeg === "l" ? 1 << 7 : 1 << 9);
     for (let it = 0; it < 2; it++) {
       if (!deepest(PA, mA, PB, mB, _d2, 0.006)) return;
       let nx = _d2.nx, nz = _d2.nz, nh = Math.hypot(nx, nz);
       const ap = posOf(A), bp = posOf(B);
       if (!ap || !bp) return;
-      if (nh < 0.3) { nx = ap.x - _d2.qx; nz = ap.z - _d2.qz; nh = Math.hypot(nx, nz); if (nh < 1e-4) { nx = ap.x - bp.x; nz = ap.z - bp.z; nh = Math.hypot(nx, nz) || 1; } nx /= nh; nz /= nh; nh = 0.5; }
-      else { nx /= nh; nz /= nh; }
-      const push = Math.min(0.3, (_d2.depth + 0.002) / Math.max(nh, 0.5));
+      if (nh < 0.3) {
+        // (a contact that is one part ON the other: apart along the line between the two men;
+        // for the trunk stage, as it was, away from the point of the other man that is touched)
+        if (all) { nx = ap.x - bp.x; nz = ap.z - bp.z; }
+        else { nx = ap.x - _d2.qx; nz = ap.z - _d2.qz; }
+        nh = Math.hypot(nx, nz);
+        if (nh < 1e-4) { nx = ap.x - bp.x; nz = ap.z - bp.z; nh = Math.hypot(nx, nz) || 1; }
+        nx /= nh; nz /= nh; nh = 0.5;
+      } else { nx /= nh; nz /= nh; }
+      // (what the limbs could not clear is closed a hand's width a frame, not a stride)
+      const push = Math.min(all ? 0.10 : 0.3, (_d2.depth + 0.002) / Math.max(nh, 0.5));
       const pa = isPlayer(A), pb = isPlayer(B);
       let wA, wB;
-      if (A._bcDown && B._bcDown) return;
-      if (A._bcDown) { wA = 0; wB = 1; } else if (B._bcDown) { wA = 1; wB = 0; }
+      if (dA && dB) return;
+      if (dA) { wA = 0; wB = 1; } else if (dB) { wA = 1; wB = 0; }
       else {
         const ma = massOf(A), mb = massOf(B);
         wA = mb / (ma + mb); wB = 1 - wA;
@@ -1877,6 +1929,7 @@
       AU.rootPushes++;
     }
   }
+  let rigSeq = 0;
   function partPass() {
     if (!pairN) return;
     AU.frames++;
@@ -1884,8 +1937,16 @@
     for (let p = 0; p < pairN; p++) {
       let A = pairA[p], B = pairB[p];
       pairA[p] = pairB[p] = null;
+      /* WHO IS ON THE FLOOR IS ASKED HERE. It was read off `_bcDown`, which
+         the contact pass writes only on the bodies in the list it is handed,
+         and the prison hands it the STANDING cast: a knocked-out man never
+         got the flag. To this pass he was a man on his feet (the audit
+         called him "falling"): the limp-arm rule under a rider never ran,
+         "the man on his feet answers first" never applied, and the roots
+         of a standing man and a lying one were split by mass. */
+      let dA = lying(A), dB = lying(B);
       // (the man on his feet answers first: his legs move off a lying man's limbs, not the limbs off his legs)
-      if (A._bcDown && !B._bcDown) { const t = A; A = B; B = t; }
+      if (dA && !dB) { const t = A; A = B; B = t; dA = false; dB = true; }
       const chA = rigOf(A), chB = rigOf(B);
       if (!chA || !chB || chA === chB || chA.group.visible === false || chB.group.visible === false) continue;
       const PA = partsOf(chA, 1), PB = partsOf(chB, 1);
@@ -1899,17 +1960,103 @@
       const any = deepest(PA, mm, PB, mm, _d, 0);
       if (any && _d.depth > AU.deepestBefore) AU.deepestBefore = _d.depth;
       if (any && _d.depth > 0.003) {
-        if (B._bcDown && !A._bcDown && mounted(A, B)) limpYield(B, chB, PB, PA);
-        for (let round = 0; round < 3; round++) {
-          let did = false;
-          for (let li = grip ? 2 : 0; li < 4; li++) {
-            if (fixLimb(A, chA, PA, li, PB, round)) did = true;
-            if (fixLimb(B, chB, PB, li, PA, round)) did = true;
+        const before = _d.depth, lf0 = AU.limbFrames, rp0 = AU.rootPushes;
+        const ride = dB && !dA && mounted(A, B);
+        /* ONE MAN GIVES WAY, THEN THE OTHER, THEN THE ROOTS. It used to take
+           turns limb by limb (his arm, the other's arm, his leg, the
+           other's leg, three times round): with both men moving, each
+           re-solve of one man's limb was made against a pose of the other
+           that the very next call changed, an elbow swung out of a forearm
+           went into the trunk behind it, and which man was "first" was
+           whichever the grid happened to list first that frame. Two men
+           both throwing, or one throwing while the other flinched or
+           stepped, never settled: 100-500 re-solves a move and 5-17 cm
+           left at the end of them.
+             WHO YIELDS is fixed for the pair and does not change from
+           frame to frame: a man on his feet before a man on the floor
+           (his feet are placed once and kept); of two on their feet, the
+           one who is striking when only one is (the blow stops on the
+           other man, the other man is not moved by it); otherwise the one
+           whose rig was built first (an order that never flips).
+             HE IS SOLVED TO THE END FIRST: all four limbs against the other
+           man as he stands, up to four passes, until nothing of his is in
+           him. Only then is what is still left solved on the other man.
+             WHAT IS STILL LEFT AFTER BOTH is something no limb can clear
+           (an upper arm in an upper arm with the shoulders too close, a
+           thigh in a trunk): the two ROOTS go apart by it, the whole of
+           it, the same frame. That is the case that never converged: two
+           men both mid-blow, their root capsules both shrunk to let the
+           blows in, chest to chest with their arms jammed. */
+        let X = A, chX = chA, PX = PA, Y = B, chY = chB, PY = PB;
+        if (ride) {
+          /* A RIDER AND THE MAN UNDER HIM. The seat places the rider: his
+             hips over the trunk, his thighs down its sides, his knees out
+             past its width (entities/meleeposes.js mountPose, solved from
+             the man's own trunk). Those legs are not this pass's to move:
+             solved first, "to the end", against a trunk they are placed
+             ON, four re-solves each bent them off the seat and into him
+             (that was the regression: 3-7 cm of thigh in trunk, 180-545
+             re-solves). Under a rider the man on the floor gives: a limp
+             arm is moved aside and stays (limpYield), then whatever of his
+             is still in the rider is solved; of the rider only the arms
+             (and, until he is down on his knees, the feet he is still
+             standing on). */
+          limpYield(B, chB, PB, PA);
+          for (let it = 0; it < 4; it++) {
+            let did = false;
+            for (let li = 0; li < 4; li++) if (fixLimb(B, chB, PB, li, PA, it)) did = true;
+            if (!did) break;
           }
-          if (!did) break;
+          for (let it = 0; it < 4; it++) {
+            let did = false;
+            for (let li = 0; li < (chA.mount ? 2 : 4); li++) if (fixLimb(A, chA, PA, li, PB, it)) did = true;
+            if (!did) break;
+          }
+        } else {
+        if (!dA && !dB) {
+          const sA = chA.punchT > 0 || chA.kickT > 0, sB = chB.punchT > 0 || chB.kickT > 0;
+          const idA = chA._bpId || (chA._bpId = ++rigSeq), idB = chB._bpId || (chB._bpId = ++rigSeq);
+          if (sA !== sB ? sB : idB < idA) { X = B; chX = chB; PX = PB; Y = A; chY = chA; PY = PA; }
         }
-        if (!grip && !mounted(A, B) && !A._bcSkip && !B._bcSkip) rootStage(A, B, PA, PB, chA, chB);
-        if (deepest(PA, mm, PB, mm, _d, 0)) seen(_d.depth, A, B, PART[_d.i], PART[_d.j]);
+        for (let side = 0; side < 2; side++) {
+          for (let it = 0; it < 4; it++) {
+            let did = false;
+            for (let li = grip ? 2 : 0; li < 4; li++) if (fixLimb(X, chX, PX, li, PY, it)) did = true;
+            if (!did) break;
+          }
+          const t = X; X = Y; Y = t;
+          const tc = chX; chX = chY; chY = tc;
+          const tp = PX; PX = PY; PY = tp;
+        }
+        }
+        if (!grip && !mounted(A, B) && !A._bcSkip && !B._bcSkip) {
+          rootStage(A, B, PA, PB, chA, chB, false, dA, dB);
+          if (deepest(PA, mm, PB, mm, _d, 0) && _d.depth > 0.008) rootStage(A, B, PA, PB, chA, chB, true, dA, dB);
+        }
+        let left = 0;
+        if (deepest(PA, mm, PB, mm, _d, 0)) { left = _d.depth; seen(left, A, B, PART[_d.i], PART[_d.j]); }
+        if (left > WORST.depth) {
+          const sA = chA.punchT > 0 || chA.kickT > 0, sB = chB.punchT > 0 || chB.kickT > 0;
+          const atkB = sB && !sA, ap = posOf(A), bp = posOf(B);
+          WORST.depth = left; WORST.before = before; WORST.frame = AU.frames;
+          WORST.parts[0] = PART[_d.i]; WORST.parts[1] = PART[_d.j];
+          WORST.actors[0] = nameOf(A); WORST.actors[1] = nameOf(B);
+          WORST.attackerState = (atkB ? nameOf(B) : nameOf(A)) + ": " + (atkB ? stateOf(B, chB) : stateOf(A, chA));
+          WORST.targetState = (atkB ? nameOf(A) : nameOf(B)) + ": " + (atkB ? stateOf(A, chA) : stateOf(B, chB));
+          WORST.bothStriking = sA && sB;
+          WORST.rootDist = ap && bp ? Math.hypot(ap.x - bp.x, ap.z - bp.z) : 0;
+          // (the two RIGS, which is what the parts are read from, and the middle of each of the two parts, world x y z:
+          // a record whose rootDist says the men are apart and whose rigDist says they are not has found a body
+          // whose position and whose rig disagree)
+          const ga = chA.group.position, gb = chB.group.position, fa = PA.f, fb = PB.f, oa = _d.i * ST, ob = _d.j * ST;
+          WORST.rigDist = Math.hypot(ga.x - gb.x, ga.z - gb.z);
+          WORST.at[0] = (fa[oa] + fa[oa + 3]) * 0.5; WORST.at[1] = (fa[oa + 1] + fa[oa + 4]) * 0.5; WORST.at[2] = (fa[oa + 2] + fa[oa + 5]) * 0.5;
+          WORST.at[3] = (fb[ob] + fb[ob + 3]) * 0.5; WORST.at[4] = (fb[ob + 1] + fb[ob + 4]) * 0.5; WORST.at[5] = (fb[ob + 2] + fb[ob + 5]) * 0.5;
+          WORST.capsuleR[0] = radiusOf(A); WORST.capsuleR[1] = radiusOf(B);
+          WORST.capsuleShrunk = Math.min(A._bcTight != null ? clock - A._bcTight : 9, B._bcTight != null ? clock - B._bcTight : 9) < TIGHT_EASE;
+          WORST.firstToYield = nameOf(X);          // (swapped twice above: X is again the one solved first)
+          WORST.solvesThatFrame = AU.limbFrames - lf0; WORST.rootPushesThatFrame = AU.rootPushes - rp0;
+        }
       }
       if (!grip) { ownHands(A, chA, PA); ownHands(B, chB, PB); }
     }

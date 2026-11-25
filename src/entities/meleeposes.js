@@ -1041,21 +1041,43 @@
      knees, and the knees here are out wide. Root placement (where the actor
      is on him, which way he faces) is verbs_strike.js's job. */
   function mountPose(ch, D, m) {
-    /* THE SEAT IS HIS TRUNK. systems/verbs_strike.js reads the downed man's
-       drawn trunk where the rider sits and publishes its top (ch._mountTop,
-       world y) and its half width on the floor (ch._mountHalfW, m): the
-       knees go down outside that width, and the hips are never lower than
-       puts the bottom of the rider's pelvis a little over that top (the
-       thighs run down and out past the corner of his trunk: 3 cm higher
-       they clear it). */
-    let kx = D.hipX + 0.26;
+    /* THE SEAT IS HIS TRUNK, AND THE KNEEL IS SOLVED ROUND IT.
+       systems/verbs_strike.js reads the downed man's drawn trunk where the
+       rider sits and publishes its top (ch._mountTop, world y), its half
+       width on the floor (ch._mountHalfW) and its radius (ch._mountR), m.
+         - the hips: the bottom of the rider's pelvis on that top;
+         - each knee: the thigh is a fixed length, so from that hip the
+           knee can only be so far out for a given height. It is put as
+           low as it goes with the thigh still CLEAR of the side of the
+           trunk (the thigh's own thickness and 1.5 cm), and the foot is
+           put where the shin then reaches the floor behind it.
+       On this body (a 40 cm thigh, 19 cm thick, over a trunk 29 cm wide
+       and 29 cm high) the knee cannot be on the floor without the thigh
+       cutting the corner of his ribs by ~4 cm: that corner was what the
+       limb pass was re-solving on every frame of the mount. The knee
+       comes out wider and rides about 10 cm higher than it did (its
+       underside just off the floor), beside him, the shin running down
+       and back to a foot on the floor. With no trunk published (a body with
+       no rig): the old kneel, knees on the floor. */
+    let kx = D.hipX + 0.26, kneeY = D.footY + 0.07, clear = false;
     const kz = 0.12;
-    if (ch._mountHalfW > 0) kx = Math.min(D.hipX + 0.42, Math.max(kx, ch._mountHalfW / D.scale + D.legW * 0.5 + 0.02));
-    const thighY = Math.sqrt(Math.max(0.03, D.g1 * D.g1 - (kx - D.hipX) * (kx - D.hipX) - kz * kz));
+    let thighY = Math.sqrt(Math.max(0.03, D.g1 * D.g1 - (kx - D.hipX) * (kx - D.hipX) - kz * kz));
     let hipH = D.footY + 0.07 + thighY + 0.04;               // knee pad + thigh, posted a touch up
-    if (ch._mountTop != null && ch.group) {
-      const need = (ch._mountTop - ch.group.position.y) / D.scale + 0.06 + D.torsoD * 0.5 + 0.012 + 0.045;
-      hipH = Math.min(hipH + 0.30, Math.max(hipH, need));
+    if (ch._mountTop != null && ch._mountR > 0 && ch.group) {
+      const top = (ch._mountTop - ch.group.position.y) / D.scale, rT = ch._mountR / D.scale;
+      const cT = Math.max(0, ch._mountHalfW / D.scale - rT), yT = top - rT;           // his trunk's nearer axis, in the rider's frame
+      hipH = Math.max(hipH, top + 0.06 + D.torsoD * 0.5 + 0.012);
+      const rr = rT + D.legW * 0.5 + 0.015;
+      for (let y = D.footY + 0.09; y <= hipH - 0.12; y += 0.02) {
+        const out = Math.sqrt(Math.max(0.0004, D.g1 * D.g1 - (hipH - y) * (hipH - y) - kz * kz));
+        // the trunk's axis to the thigh's line, hip joint -> knee, in the plane across him
+        const ex = out, ey = y - hipH, l2 = ex * ex + ey * ey;
+        let t = l2 > 1e-8 ? ((cT - D.hipX) * ex + (yT - hipH) * ey) / l2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const qx = cT - D.hipX - ex * t, qy = yT - hipH - ey * t;
+        kx = D.hipX + out; kneeY = y;
+        if (qx * qx + qy * qy >= rr * rr) { clear = true; break; }
+      }
     }
     const breath = 0.012 * Math.sin((ch.breath || 0) * 3.1);
     S.dl = lerp(S.dl, D.hipY - hipH + breath, m);
@@ -1067,10 +1089,19 @@
     _t.set(0.20, D.shY - 0.18, 0.30); WL.lerp(_t, m);
     _t.x = -0.20; WR.lerp(_t, m);
     PL.lerp(_t2.set(0.6, -1, -0.2), m); PR.lerp(_t2.set(-0.6, -1, -0.2), m);
+    if (clear) {
+      // the knee is where it was solved to be: the foot a shin's length from
+      // it, on the floor behind; the leg's pole is the knee itself, from the hip
+      const drop = Math.max(0, kneeY - (D.footY + 0.06)), back = Math.sqrt(Math.max(0.01, D.g2 * D.g2 - drop * drop));
+      _t.set(kx + 0.03, D.footY + 0.06, kz - back); FL.lerp(_t, m);
+      _t.x = -(kx + 0.03); FR.lerp(_t, m);
+      QL.lerp(_t2.set(kx - D.hipX, kneeY - hipH, kz), m); QR.lerp(_t2.set(-(kx - D.hipX), kneeY - hipH, kz), m);
+    } else {
     // feet: behind the knees, shins on the floor, toes pointed back
     _t.set(kx + 0.04, D.footY + 0.06, kz - D.g2 * 0.96); FL.lerp(_t, m);
     _t.x = -(kx + 0.04); FR.lerp(_t, m);
     QL.lerp(_t2.set(0.55, -0.1, 1), m); QR.lerp(_t2.set(-0.55, -0.1, 1), m);
+    }
   }
   // the other hand on a ground strike: posted on his chest, pinning him
   function postHand(ch, D, side, aim, d) {

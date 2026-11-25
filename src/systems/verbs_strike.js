@@ -1615,7 +1615,7 @@
     if (i >= 0) mounts.splice(i, 1);
     if (M.a) M.a._gnpOn = null;
     const ch = M.Ba && M.Ba.ch;
-    if (ch) { ch.mount = false; ch._mountGo = false; ch._mountTop = null; ch._mountHalfW = 0; ch._mountOn = null; }
+    if (ch) { ch.mount = false; ch._mountGo = false; ch._mountTop = null; ch._mountHalfW = 0; ch._mountR = 0; ch._mountOn = null; }
     if (M.Ba && M.Ba.isPlayer && CBZ.player) {
       CBZ.player._gnpOn = null;
       if (M.crouchSet) CBZ.player.crouch = false;
@@ -1770,7 +1770,7 @@
          (CBZ.bodyParts: pelvis end to shoulder end): the rider's hips are
          45% of the way up it, over the low ribs, his knees on the floor
          outside the trunk above the hips and below the arms' roots. */
-      let bx0 = _mb.x, bz0 = _mb.z, along = 0.38 * s;
+      let bx0 = _mb.x, bz0 = _mb.z, along = 0.38 * s, seatW = 0;
       const BPm = CBZ.bodyParts, PT = BPm && BPm.partsOf ? BPm.partsOf(tch, 0) : null;
       if (PT && PT.ok) {
         const f = PT.f, px = (f[0] + f[7]) * 0.5, pz = (f[2] + f[9]) * 0.5;
@@ -1789,8 +1789,10 @@
              aside and stays there (humancontact limpYield). */
           if (M.frac == null || M.slide < 1) {
             const fy = (Bt.pos.y || 0) + 0.09 * rs / 0.7;
-            let pick = 0.24;
-            for (let q = 0; q < 4; q++) {
+            // (no lower than 0.38: sat nearer his hips, as it was allowed to be
+            // when his arms lay along his ribs, the rider's shins lay across his thighs)
+            let pick = 0.45;
+            for (let q = 0; q < 2; q++) {
               const fr = 0.45 - 0.07 * q, cx = px + ux * (fr * l + kneeZ), cz = pz + uz * (fr * l + kneeZ);
               let ok = true;
               for (let sd = -1; sd <= 1 && ok; sd += 2) {
@@ -1812,8 +1814,9 @@
           if (Ba.ch) {
             const yl = f[1] + (f[4] - f[1]) * M.frac, yr = f[8] + (f[11] - f[8]) * M.frac;
             Ba.ch._mountTop = Math.max(yl, yr) + f[6];
-            Ba.ch._mountHalfW = halfW;
+            Ba.ch._mountHalfW = halfW; Ba.ch._mountR = f[6];
           }
+          seatW = halfW;
         }
       }
       const tx = bx0 + ux * along, tz = bz0 + uz * along;
@@ -1834,7 +1837,30 @@
         if (dd > 1e-4) moveBy(Ba, ddx / dd * stp, ddz / dd * stp);
         if (Ba.ch) Ba.ch._verbWalk = CBZ.now || 0;
         M.walkT = (M.walkT || 0) + dt;
-        if (dd - stp < 0.05 || M.walkT > 1.8) M.slide = 1;
+        /* ...ASTRIDE HIM FIRST. He used to go down the moment his root was
+           over the seat, with both feet still on the side he came from:
+           the kneel then carried the far leg down THROUGH the trunk to its
+           knee spot on the other side (thigh in trunk, every run). Over
+           the seat he stands until each foot is on its own side of the
+           man, outside his width, and down: the gait steps the far foot
+           over to its rest spot (the landing is put beside him and the
+           swing is lifted over him, entities/gait.js), and only then does
+           he kneel, each knee going down on the side its foot is on. */
+        if (dd - stp < 0.05 || M.walkT > 1.8) M.arr = true;
+        if (M.arr) {
+          M.waitT = (M.waitT || 0) + dt;
+          let astride = true;
+          const G = Ba.ch && Ba.ch._gv;
+          if (seatW > 0 && G && G.init && G.feet) {
+            for (let i = 0; i < 2; i++) {
+              const F = G.feet[i];
+              // (the rig's +X leg, gait foot 1, is his left: +X in the world is (uz, -ux) when he faces along the trunk)
+              const lat = (F.x - tx) * uz - (F.z - tz) * ux;
+              if (F.sw || (i ? lat < seatW * 0.85 : lat > -seatW * 0.85)) astride = false;
+            }
+          }
+          if (astride || M.waitT > 1.2) M.slide = 1;
+        }
       } else {
         const k = 1 - Math.exp(-dt * 30);
         moveBy(Ba, ddx * k, ddz * k);
