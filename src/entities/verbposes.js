@@ -55,7 +55,9 @@
   // THE FIREMAN CARRY: how far his torso folds down the carrier's back, the
   // whole-body pitch over the shoulder, and where on the shoulder his belt sits
   // (metres back of / above the shoulder top). verbs.js places him by it.
-  const CARRY = { fold: 0.9, pitch: 1.6, back: 0.26, up: 0.03, lean: 0.25 };
+  // (fold 0.49: his trunk 30 degrees below level behind the carrier. It was 0.9, 52 degrees, which
+  // hung his head at the carrier's hip. systems/verbs.js works the angle out per pair and passes p.fold.)
+  const CARRY = { fold: 0.49, pitch: 1.6, back: 0.26, up: 0.03, lean: 0.25 };
   function groupOf(c) {
     if (c === DROP) return 3;
     if (c <= N_RZ) return 0;
@@ -440,7 +442,8 @@
       const br = Math.sin(p.t * 1.9) * 0.01;
       stance(ch, T, 0.06, 0.12, 0.15, -0.10, 0.15);
       torso(T, CARRY.lean + br, 0.05, -0.10);
-      head(T, 0.02, 0, 0.05);
+      // (the head goes over to the side away from the load: there is a man's hips where it was)
+      head(T, 0.02, 0, -0.38);
       armsReady(T, 0.4);
       return p.moving ? (G_BODY | G_ARML | G_ARMR) : G_ALL;
     },
@@ -581,11 +584,20 @@
     // this folds the torso down the carrier's back and hangs the legs in front
     "t.draped": function (ch, T, p) {
       const sw = Math.sin(p.t * 3.1) * 0.10 * (p.moving ? 1 : 0.25);
-      legs(T, -1.05 + sw * 0.3, 1.25, -0.95 - sw * 0.3, 1.1, 0.08);
-      torso(T, CARRY.fold, 0, 0);
-      head(T, 0.35, 0.15);
-      arm(T, 1, -1.3 + sw, 0.12, -0.25);
-      arm(T, -1, -1.2 - sw, 0.18, -0.35);
+      /* (THE LEGS HANG, THE ARMS HANG. The knees were bent 70 degrees, which
+         on a man lying belly-down over a shoulder points the shins straight
+         out in front of the carrier at chest height; nearly straight they
+         hang down his front with the thighs. The arms were 75 degrees
+         forward of a trunk that points back and down, which is INTO the
+         carrier's back; straight down from the shoulders is the trunk's
+         own angle past a right angle, and a touch toward his head so they
+         hang clear of the back and of the thigh that swings behind.) */
+      const fold = p.fold != null ? p.fold : CARRY.fold, hang = -(fold + CARRY.pitch) + 0.14;
+      legs(T, -1.05 + sw * 0.3, 0.15, -0.95 - sw * 0.3, 0.25, 0.08);
+      torso(T, fold, 0, 0);
+      head(T, 0.10, 0.15);
+      arm(T, 1, hang + sw * 0.6, 0.12, -0.15);
+      arm(T, -1, hang + 0.05 - sw * 0.6, 0.18, -0.20);
       return G_ALL;
     },
     // IN FLIGHT: one rigid articulated piece (grapple.js's hard-won lesson —

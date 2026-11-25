@@ -1779,8 +1779,14 @@
           const lat = (k === 0 ? 0.115 : k === 1 ? -0.164 : k === 2 ? 0.09 : -0.09) * sc, fore = (k === 0 ? 0.21 : k === 1 ? -0.21 : 0) * sc;
           for (let e = -1; e <= 1 && clear; e++) {
             const o = fore + (e < 0 ? -0.07 : e > 0 ? 0.13 : 0.03) * sc;
-            if (BP.topAt(kch, qx + rx * lat + fx * o, qz + rz * lat + fz * o) > fy) clear = false;
+            // (a SHIN's clearance, 11 cm, not a sole's 7: the shin above the foot is thicker than the foot)
+            if (BP.topAt(kch, qx + rx * lat + fx * o, qz + rz * lat + fz * o, 0.11 * sc) > fy) clear = false;
           }
+          /* ...AND WHERE THE SHIN LEANS TO. In the kick the hips go across over
+             the standing foot and forward: the knee of that leg ends a hand's
+             width in toward the middle and ahead of its ankle, and the shin
+             between them was in a thigh the foot itself had cleared. */
+          if (clear && BP.topAt(kch, qx + rx * lat * 0.35 + fx * (fore + 0.10 * sc), qz + rz * lat * 0.35 + fz * (fore + 0.10 * sc), 0.11 * sc) > fy) clear = false;
         }
         if (clear) standAt = { x: qx, z: qz };
       }

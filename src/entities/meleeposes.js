@@ -1160,8 +1160,18 @@
       FL.set(lerp(FL.x, fx, mOut) + wide, lerp(FL.y, fy, mDn), lerp(FL.z, fz, mDn));
       FR.set(lerp(FR.x, -fx, mOut) - wide, lerp(FR.y, fy, mDn), lerp(FR.z, fz, mDn));
       // (the knee turns out first: its pole goes sideways with the feet, and down with the hips)
-      QL.set(lerp(QL.x, kx - D.hipX, mOut) + wide, lerp(QL.y, kneeY - hipH, mDn), lerp(QL.z, kz, mDn));
-      QR.set(lerp(QR.x, -(kx - D.hipX), mOut) - wide, lerp(QR.y, kneeY - hipH, mDn), lerp(QR.z, kz, mDn));
+      /* (THE KNEE IS OUT BEFORE IT IS DOWN. The knee goes where the leg's
+         pole points, and the pole's forward part came round with the DROP:
+         half way down it still pointed mostly ahead, so the knee was in
+         front of the hip, 21 cm out, inside his width (his trunk's half
+         width and the shin's own thickness are 23), and the shin from it
+         back to the foot ran through the near side of his trunk. Widening
+         the foot did not move the knee. The pole swings out sideways with
+         the FEET, in the first half: by the time the hips start down the
+         knee is over its own spot, 35 cm out, and the whole shin comes
+         down outside him.) */
+      QL.set(lerp(QL.x, kx - D.hipX, mOut) + wide, lerp(QL.y, kneeY - hipH, mDn), lerp(QL.z, kz, mOut));
+      QR.set(lerp(QR.x, -(kx - D.hipX), mOut) - wide, lerp(QR.y, kneeY - hipH, mDn), lerp(QR.z, kz, mOut));
     } else {
     // feet: behind the knees, shins on the floor, toes pointed back
     _t.set(kx + 0.04, D.footY + 0.06, kz - D.g2 * 0.96); FL.lerp(_t, m);

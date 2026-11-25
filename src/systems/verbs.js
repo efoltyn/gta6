@@ -2546,6 +2546,7 @@
     _pp.writhe = B === S.T ? S.writhe : 0;
     _pp.moving = B === S.A ? S.aSpeed > 0.4 : S.tSpeed > 0.4;
     _pp.knee = null;
+    _pp.fold = B === S.T && S.carryFold != null ? S.carryFold : null;      // (how far a carried man's trunk hangs: placeTarget, from the two bodies)
     _pp.buttF = 0; _pp.buttS = 0;
     if (S.butt && B === S.T) { _pp.buttF = buttCock(S.butt); _pp.buttS = buttSnap(S.butt); }
     if (S.ground && B === S.A && S.gs) { _pp.knee = groundKnee(S); _pp.kneeSide = S.gs.side; _pp.twist = S.gs.twist; }
@@ -2749,6 +2750,11 @@
     }
 
     if (o.anchor && o.anchorK > 0) {
+      // (his parts as last drawn are taken NOW: the measuring below stands his rig at the
+      // origin for a moment, and a set built after that, by the fit test further down,
+      // was a set of parts at the origin: it compared the carrier with nothing)
+      const BPk = CBZ.bodyParts;
+      if (BPk && BPk.partsOf) BPk.partsOf(T.ch, 0);
       // closed loop: put HIS contact point on the grabber's shoulder
       contactPoint(A.ch, "shoulderTopR", _W, false);
       const CY = (VP() && VP().CARRY) || { back: 0.24, up: 0.03 };
@@ -2761,7 +2767,57 @@
       T.ch.group.position.set(0, 0, 0);
       T.ch.group.updateMatrixWorld(true);
       contactPoint(T.ch, o.anchor, _C, true);
+      /* THE FIREMAN CARRY, FROM THE TWO BODIES. The table put the front of
+         his belt 26 cm BEHIND the top of the shoulder and folded his trunk
+         52 degrees further down the back. So his hips hung behind the
+         shoulder and his thighs came forward THROUGH the carrier's shoulder
+         and chest to reach the front; his arms (75 degrees forward of a
+         trunk that points back and down) went into the carrier's back; and
+         his head ended at the height of the carrier's hip, where the thigh
+         swings back. All of it re-solved every frame of the carry.
+           He is a V folded at the HIPS over the carrier's shoulder: trunk
+         down the back, legs down the front, a right angle between them.
+         The round top of the carrier's trunk on that side (its drawn
+         capsule: centre c, radius rA) sits inside the V, touching both
+         arms of it: the hip joints are on the V's own middle line at
+         (rA + his thickness + 1 cm) x sqrt 2 from c. The V leans so the
+         trunk is 30 degrees below level behind and the legs 60 below
+         level in front. Sideways his hips are far enough out that they
+         clear the carrier's head (its radius, half his width, 1.5 cm).
+         How far the trunk hangs is cut back if his head would come down
+         to the carrier's hip height (a tall man on a short one): it stays
+         above it, out behind, clear of the thighs' swing. On the way up
+         the same construction is walked from "belly against the front of
+         the shoulder" to this. */
+      let fit = false, ax0 = 0, az0 = 0, rxw = 0, rzw = 0;
+      const PAk = o.anchor === "belt" && BPk && BPk.partsOf && T.ch.parts && T.ch.parts.ll && T.ch.parts.rl ? BPk.partsOf(A.ch, 0) : null;
+      if (PAk && PAk.ok) {
+        const fa = PAk.f, tp = T.ch.profile || {}, ts = T.scale || 0.7;
+        const mAx = S._ax != null ? A.pos.x - S._ax : 0, mAz = S._az != null ? A.pos.z - S._az : 0;
+        const cx = fa[10] + mAx, cy = fa[11], cz = fa[12] + mAz, rA = fa[13];           // the top of his right trunk half, as drawn
+        const rT = Math.max((tp.torsoD || 0.29) * 0.5, (tp.legW || 0.268) * 0.5) * ts, halfT = (tp.torsoW || 0.412) * 0.5 * ts;
+        const CP0 = (VP() && VP().CARRY) || { pitch: 1.6 };
+        const sk = smooth((ap - 0.35) / Math.max(0.2, CP0.pitch - 0.35));               // 0 standing in front .. 1 over the shoulder
+        const D = (rA + rT + 0.012) * lerp(1, 1.414, sk);
+        let dF = lerp(0.98, 0.259, sk), dU = lerp(0.2, 0.966, sk);
+        const dl = Math.hypot(dF, dU); dF /= dl; dU /= dl;
+        rxw = -Math.cos(yawA); rzw = Math.sin(yawA);                                     // the carrier's right
+        const latC = (cx - A.pos.x) * rxw + (cz - A.pos.z) * rzw;
+        const latH = (fa[14] + mAx - A.pos.x) * rxw + (fa[16] + mAz - A.pos.z) * rzw;
+        const lat = lerp(latC, Math.max(latC + 0.03, latH + fa[20] + halfT + 0.015), sk);
+        const wx = cx + rxw * (lat - latC) + fx * dF * D, wy = cy + dU * D + 0.4 * o.liftUp, wz = cz + rzw * (lat - latC) + fz * dF * D;
+        // his hip joints, on the rig stood at the origin above
+        const e1 = T.ch.parts.ll.matrixWorld.elements, e2 = T.ch.parts.rl.matrixWorld.elements;
+        _C.set((e1[12] + e2[12]) * 0.5, (e1[13] + e2[13]) * 0.5, (e1[14] + e2[14]) * 0.5);
+        _W.set(wx, wy, wz);
+        // how far his trunk hangs: 30 degrees below level, less if his head would reach the carrier's hips
+        const Lth = Math.max(0.3, (T.shoulderY - T.hipY) + 0.30 * ts / 0.7), rHt = 0.2 * ts / 0.7;
+        const sn = Math.max(0.09, Math.min(0.5, (wy - (A.pos.y + A.hipY + rHt + 0.03)) / Lth));
+        S.carryFold = PI / 2 + Math.asin(sn) - CP0.pitch;
+        fit = true;
+      }
       let ax = _W.x - _C.x, ay = _W.y - _C.y, az = _W.z - _C.z;
+      ax0 = ax; az0 = az;
       /* HIS LEGS COME TO YOUR HANDS. The shoulder rest is tuned on the
          average body, but a heavy or muscular carrier's arms hang further out
          (a wider chest) and the far hand reaches across to the far thigh: 7 cm
@@ -2785,6 +2841,8 @@
           ax -= lx * sh; az -= lz * sh;
         }
       }
+      // (the hands may draw the load ALONG the shoulder to close a grip, never in toward the carrier's head)
+      if (fit && (ax - ax0) * rxw + (az - az0) * rzw < 0) { ax = ax0; az = az0; }
       const k = smooth(o.anchorK);
       x = lerp(x, ax, k); y = lerp(y, ay, k); z = lerp(z, az, k);
       pitch = lerp(pitch, ap, k);

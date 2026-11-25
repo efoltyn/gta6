@@ -1651,7 +1651,9 @@
     return moved;
   }
   // the top of whatever body lies over (x, z): world y, or -1e9 for bare floor
-  function topAt(ch, x, z) {
+  // pad: how far beyond a part's own radius still counts as over it (7 cm: a sole's width; a caller
+  // asking for a standing SHIN's clearance passes more)
+  function topAt(ch, x, z, pad) {
     let top = -1e9;
     if (!ch || !(ch._bpNf >= bpFrame - 1) || !ch._bpNn) return top;
     for (let n = 0; n < ch._bpNn; n++) {
@@ -1664,7 +1666,7 @@
         const ax = f[q], az = f[q + 2], ex = f[q + 3] - ax, ez = f[q + 5] - az, l2 = ex * ex + ez * ez;
         let t = l2 > 1e-10 ? ((x - ax) * ex + (z - az) * ez) / l2 : 0;
         t = t < 0 ? 0 : t > 1 ? 1 : t;
-        const dx = x - (ax + ex * t), dz = z - (az + ez * t), rr = f[q + 6] + 0.07;
+        const dx = x - (ax + ex * t), dz = z - (az + ez * t), rr = f[q + 6] + (pad > 0 ? pad : 0.07);
         if (dx * dx + dz * dz > rr * rr) continue;
         const y = f[q + 1] + (f[q + 4] - f[q + 1]) * t + f[q + 6];
         if (y > top) top = y;
