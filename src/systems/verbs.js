@@ -2764,8 +2764,23 @@
       const ap = o.anchorPitch;
       // orient first, then measure the offset root -> anchor on the posed rig
       orient(T, yaw, ap, 0);
-      T.ch.group.position.set(0, 0, 0);
+      /* THE 20 m JUMP. To measure root -> anchor the held man's rig is stood
+         at the origin for a moment. For an NPC, T.pos IS that rig's
+         position (one object), and it was left there: a dozen lines on,
+         the wall sweep takes him "from where he is to where the hold puts
+         him", and where he was had just become (0, 0, 0). Every frame of a
+         carry in the hall swept a body 24 m down the block from the world's
+         origin to the carrier's shoulder. While he was low the way was
+         open; once the lift had him a metre up the sweep's band met the
+         head of the cell-block doorway, stopped there, and "the pair moves
+         as one" moved the CARRIER by the 20 m the sweep fell short. The
+         position is put back as soon as the rig has been measured (the
+         measuring reads the matrices, which keep the origin pose until
+         the next update, as before). */
+      const gp0 = T.ch.group.position, gx0 = gp0.x, gy0 = gp0.y, gz0 = gp0.z;
+      gp0.set(0, 0, 0);
       T.ch.group.updateMatrixWorld(true);
+      gp0.set(gx0, gy0, gz0);
       contactPoint(T.ch, o.anchor, _C, true);
       /* THE FIREMAN CARRY, FROM THE TWO BODIES. The table put the front of
          his belt 26 cm BEHIND the top of the shoulder and folded his trunk
@@ -2804,7 +2819,14 @@
         rxw = -Math.cos(yawA); rzw = Math.sin(yawA);                                     // the carrier's right
         const latC = (cx - A.pos.x) * rxw + (cz - A.pos.z) * rzw;
         const latH = (fa[14] + mAx - A.pos.x) * rxw + (fa[16] + mAz - A.pos.z) * rzw;
-        const lat = lerp(latC, Math.max(latC + 0.03, latH + fa[20] + halfT + 0.015), sk);
+        /* (SIDEWAYS FROM THE START. The offset that clears the carrier's head
+           came in with the roll, so for the first half of the lift he was
+           still centred on the carrier and went up and over with his trunk
+           where the carrier's head is: 19 cm of head in trunk. It is the
+           carrier's SHOULDER that goes into his belly: he is drawn across to
+           it while he is still upright in front (the first fifth of the
+           lift, the blend onto the anchor), and comes up beside the head.) */
+        const lat = Math.max(latC + 0.03, latH + fa[20] + halfT + 0.015);
         const wx = cx + rxw * (lat - latC) + fx * dF * D, wy = cy + dU * D + 0.4 * o.liftUp, wz = cz + rzw * (lat - latC) + fz * dF * D;
         // his hip joints, on the rig stood at the origin above
         const e1 = T.ch.parts.ll.matrixWorld.elements, e2 = T.ch.parts.rl.matrixWorld.elements;

@@ -433,7 +433,8 @@
       const low = sq * (1 - up);
       stance(ch, T, 0.05 + 0.34 * low + 0.03 * up, 0.24, 0.16, -0.16, 0.16);
       torso(T, 0.15 + 0.55 * low + 0.05 * up, -0.1 * low, -0.10 * up);
-      head(T, -0.25 * low);
+      // (the head goes to the side away from the shoulder that takes him, from the squat on: as in the carry)
+      head(T, -0.25 * low, 0, -0.38 * Math.max(low, up));
       armsReady(T, 0.3);
       return G_ALL;
     },
