@@ -159,14 +159,18 @@
     round: { dur: 0.65, leg: "rear", level: "body" },
     low:   { dur: 0.55, leg: "rear", level: "legs" },
     knee:  { dur: 0.50, leg: "rear", level: "body" },
+    // at a man on the floor (systems/verbs_strike.js V.groundKick; level
+    // "floor" = his trunk where it lies)
+    stomp:  { dur: 0.72, leg: "rear", level: "floor" },
+    soccer: { dur: 0.62, leg: "rear", level: "floor" },
   };
-  function kickKey(k) { return k === "round" || k === "roundKick" ? "round" : k === "low" ? "low" : k === "knee" ? "knee" : "front"; }
+  function kickKey(k) { return k === "round" || k === "roundKick" ? "round" : k === "low" ? "low" : k === "knee" ? "knee" : k === "stomp" ? "stomp" : k === "soccer" ? "soccer" : "front"; }
   MP.kickKey = kickKey;
   MP.durOf = function (kind, heavy) {
     const kk = KICK[kind] ? KICK[kind] : (kind === "kick" || kind === "roundKick") ? KICK[kickKey(kind)] : KIND[kindKey(kind)];
     return kk.dur * (heavy ? 1.15 : 1);
   };
-  MP.isKick = function (kind) { return kind === "kick" || kind === "roundKick" || kind === "knee" || kind === "front" || kind === "round" || kind === "low" || kind === "lowKick"; };
+  MP.isKick = function (kind) { return kind === "kick" || kind === "roundKick" || kind === "knee" || kind === "front" || kind === "round" || kind === "low" || kind === "lowKick" || kind === "stomp" || kind === "soccer"; };
   // "l" | "r" (the rig's arm/leg letters). Orthodox by default: lead = left.
   MP.leadSide = function (ch) { return ch && ch.southpaw ? "r" : "l"; };
   MP.armFor = function (ch, kind) {
@@ -505,6 +509,27 @@
       }
       ch._mFtV = ch._mFtS = true;
     } else if (!hadFeet) ch._mFtV = false;
+    /* ...AND THEY STAY THERE WHEN THE ROOT TURNS. The spots are kept in the
+       body's frame, so a root turning while this layer has the legs (the
+       turn to face a man now takes the wind-up, systems/verbs_strike.js)
+       swung both feet round with it like the legs of a compass. The turn is
+       taken back out of them: they stay where they are on the floor and
+       the body turns over them; the gait steps them round afterward. */
+    {
+      const gyaw = ch.group ? ch.group.rotation.y : 0;
+      if (ch._mFtV && !ch._mFtS && hadFeet && ch._mYawP != null) {
+        let da = (gyaw - ch._mYawP) % (Math.PI * 2);
+        if (da > Math.PI) da -= Math.PI * 2; else if (da < -Math.PI) da += Math.PI * 2;
+        if (da && Math.abs(da) < 1.2) {
+          const c = Math.cos(da), sn = Math.sin(da);
+          for (let o = 0; o < 4; o += 2) {
+            const lx = FT[o], lz = FT[o + 1];
+            FT[o] = lx * c - lz * sn; FT[o + 1] = lx * sn + lz * c;
+          }
+        }
+      }
+      ch._mYawP = gyaw;
+    }
     /* THE STANDING FOOT OF A KICK IS A SPOT ON THE FLOOR, not a spot under
        the body. The feet above are kept in the body's frame, so anything
        that moved or turned the root while the leg was out (the last of a
@@ -651,14 +676,14 @@
          leg with his weight where there was no leg. They go across until
          the standing hip is over its foot (a round kick, whose trunk leans
          away over that foot as well, goes a little less far). */
-      S.mX += plantF.x * (key === "front" || key === "knee" ? 0.75 : 0.55) * kch;
+      S.mX += plantF.x * (key === "round" || key === "low" ? 0.55 : 0.75) * kch;
       /* HE STANDS UP ON THE LEG HE STANDS ON. The stance's own crouch (7% of
          the hip height) plus a "soft knee" stayed on through the kick; with
          the hips brought over the foot there is nothing left for that drop
          to be but knee, and the standing knee was bent 50 degrees: a kick
          thrown from a half squat. A standing leg is all but straight (about
          15 to 20 degrees); a low kick sits into it a little more. */
-      const standDl = key === "low" ? 0.05 : 0.025;
+      const standDl = key === "low" || key === "soccer" ? 0.05 : 0.025;
       S.dl = lerp(S.dl, standDl, kch);
       // the kicking-side hand and the other one (body frame)
       const kW = kSide === "L" ? WL : WR, oW = kSide === "L" ? WR : WL;
@@ -687,6 +712,33 @@
         kW.lerp(_t, (high ? 0.85 : 0.55) * ke);
         kP.lerp(_t2.set(sx * 0.5, -0.3, -1), ke);
         oW.x += sx * 0.05 * ke; oW.y += 0.03 * ke;
+      } else if (key === "stomp") {
+        /* THE STOMP: the knee comes up over him, he looks down at where it
+           is going, and the heel is driven straight down with the body's
+           weight dropping behind it (the standing knee gives as it lands).
+           The arms come out and down: a man on one leg over a body. */
+        S.bx += 0.14 * kch + 0.10 * ke;
+        S.nx += 0.32 * kch;
+        S.mZ += 0.75 * over + 0.04 * kch;
+        S.dl += 0.05 * ke;
+        kW.y -= 0.18 * kch; kW.x += sx * 0.16 * kch; kW.z += 0.04 * kch;
+        oW.y -= 0.12 * kch; oW.x -= sx * 0.14 * kch;
+      } else if (key === "soccer") {
+        /* THE SOCCER KICK: the leg goes back from the hip with the knee
+           folding (the trunk a little over him, the kicking side's
+           shoulder forward), then swings through low and straightens into
+           his side; the trunk rocks back off it and the shoulders turn
+           against the leg, the opposite arm coming across. */
+        const bsw = kch * (1 - ke);
+        S.bx += 0.12 * bsw - 0.14 * ke;
+        S.nx += 0.26 * kch;
+        S.by += sx * (0.26 * ke - 0.16 * bsw);
+        S.bz += sx * 0.08 * ke;
+        S.mZ += 0.75 * over + 0.06 * ke;
+        _t.set(sx * 0.44, D.shY - 0.44, -0.18);
+        kW.lerp(_t, 0.7 * ke);
+        kP.lerp(_t2.set(sx * 0.5, -0.3, -1), ke);
+        oW.x += sx * 0.10 * ke; oW.z += 0.10 * ke; oW.y -= 0.06 * ke;
       } else {                                                    // knee: curl over it, rise onto the plant toe
         S.bx += 0.24 * ke;
         S.dl += -0.02 * ke;                                       // (the standing leg is nearly straight already: see standDl)
@@ -736,8 +788,15 @@
       const sr = stepRootOf(p);
       const s1 = sstep(0, 0.55, p), s2 = sstep(0.40, 1, p);
       const first = fs.lead === "L" ? FL : FR, second = fs.lead === "L" ? FR : FL;
-      first.x += fs.x * (s1 - sr); first.z += fs.z * (s1 - sr); first.y += 0.08 * Math.sin(Math.PI * s1);
-      second.x += fs.x * (s2 - sr); second.z += fs.z * (s2 - sr); second.y += 0.06 * Math.sin(Math.PI * s2);
+      // (a step given as a line on the floor, fs.world, is read in the body's
+      // frame as it is THIS frame: the root may be turning while it steps)
+      let stx = fs.x, stz = fs.z;
+      if (fs.world && ch.group) {
+        const gy = ch.group.rotation.y, c = Math.cos(gy), sn = Math.sin(gy);
+        stx = fs.wx * c - fs.wz * sn; stz = fs.wx * sn + fs.wz * c;
+      }
+      first.x += stx * (s1 - sr); first.z += stz * (s1 - sr); first.y += 0.08 * Math.sin(Math.PI * s1);
+      second.x += stx * (s2 - sr); second.z += stz * (s2 - sr); second.y += 0.06 * Math.sin(Math.PI * s2);
     }
     if (kicking) {
       // the standing leg of a kick is nearly straight (standDl), but never so
@@ -1003,6 +1062,30 @@
       else _A.set(sx * 0.10, D.hipY + 0.10, 1.05);
       F.lerp(_C, ch01); F.lerp(_A, e);
       Q.set(sx * 0.15, 0.7, 1);
+    } else if (key === "stomp") {
+      // the leg's end (this solve's foot point is 2 cm above the sole) goes
+      // to the spot, heel first; the chamber is over it, knee to the chest
+      if (aimW) { _A.copy(aimW); ch.group.worldToLocal(_A); _A.divideScalar(D.scale); }
+      else _A.set(sx * D.hipX * 0.6, D.footY + 0.22, 0.62);
+      _A.y += 0.02; _A.z -= 0.03;
+      _C.set(lerp(sx * D.hipX * 0.8, _A.x, 0.6), D.footY + 0.85, lerp(S.mZ + 0.30, _A.z, 0.6));
+      F.lerp(_C, ch01); F.lerp(_A, e);
+      Q.set(sx * 0.2, 0.6, 1);
+    } else if (key === "soccer") {
+      // back behind the hip with the knee folded, then through, low, to a
+      // foot's length short of the spot (the instep is what lands)
+      if (aimW) { _A.copy(aimW); ch.group.worldToLocal(_A); _A.divideScalar(D.scale); }
+      else _A.set(sx * D.hipX * 0.5, D.footY + 0.16, 0.95);
+      // (the instep is 14 cm ahead of and above the leg's end with the shin
+      // raked forward as it is at contact: MP.strikePoint)
+      const al = Math.hypot(_A.x, _A.z) || 1;
+      _A.x -= _A.x / al * 0.14; _A.z -= _A.z / al * 0.14;
+      _A.y = Math.max(_A.y - 0.14, D.footY + 0.04);
+      _C.set(sx * D.hipX * 0.9, D.footY + 0.50, S.mZ - 0.50);
+      F.lerp(_C, ch01); F.lerp(_A, e);
+      // the foot comes through low, under the hip, clear of the floor
+      F.y = Math.max(F.y - 0.06 * Math.sin(Math.PI * e), Math.min(_A.y, D.footY + 0.07));
+      Q.set(sx * 0.1, 0.3, 1);
     } else if (key === "knee") {
       // the foot comes up behind as the knee drives up and forward
       // (measured from the HIPS, which have come forward over the standing
@@ -1136,6 +1219,7 @@
     let fs = ch.footStep;
     if (!fs) fs = ch.footStep = { on: false, t: 0, dur: 0.4, x: 0, z: 0, lead: "L" };
     fs.on = true; fs.t = 0; fs.dur = dur || 0.4; fs.x = x; fs.z = z; fs.lead = lead || "L";
+    fs.world = false; fs.wx = 0; fs.wz = 0;
     return fs;
   };
 
@@ -1433,11 +1517,19 @@
     const t = g.on ? g.t : 9;
     const h = impulse(t, 0.035, 9) * (g.amt || 1);
     const back = f.variant !== "face";
+    if (g.trunk) {
+      // a boot into the body: the trunk rocks off it and curls round it, the
+      // head only follows
+      if (ch.neck && h) { ch.neck.rotation.y += g.lx * 0.18 * h; ch.neck.rotation.x += 0.16 * Math.abs(h); }
+      ch.body.rotation.z += g.lx * 0.12 * h;
+      ch.body.rotation.x += (back ? 0.10 : -0.06) * Math.abs(h);
+    } else {
     if (ch.neck && h) {
       ch.neck.rotation.y += g.lx * 0.70 * h;                   // turned by it
       ch.neck.rotation.x += (back ? -0.22 : 0.18) * Math.abs(h); // into the floor and back up
     }
     ch.body.rotation.x += (back ? 0.05 : -0.05) * Math.abs(h);
+    }
     // covering up: decays over a second and a half after the last one
     const cover = f.ko ? 0 : clamp01(1.6 - t) * Math.min(1, t * 12);
     if (cover > 0) {
@@ -1448,10 +1540,10 @@
       if (L.ra) L.ra.rotation.x = lerp(L.ra.rotation.x, -2.1, cover);
     }
   }
-  MP.groundHit = function (ch, lx, amt) {
+  MP.groundHit = function (ch, lx, amt, trunk) {
     let g = ch.gHit;
-    if (!g) g = ch.gHit = { on: false, t: 0, lx: 0, amt: 1 };
-    g.on = true; g.t = 0; g.lx = lx < 0 ? -1 : 1; g.amt = amt == null ? 1 : amt;
+    if (!g) g = ch.gHit = { on: false, t: 0, lx: 0, amt: 1, trunk: false };
+    g.on = true; g.t = 0; g.lx = lx < 0 ? -1 : 1; g.amt = amt == null ? 1 : amt; g.trunk = !!trunk;
   };
 
   /* ============================================================
@@ -1798,6 +1890,9 @@
           mirrorInto(keys[seq[seq.length - 2][0]], side, KA);
           for (let c = 0; c < CH; c++) OUT[c] = KA[c];
           w = 1 - sstep(seq[seq.length - 2][1], seq[seq.length - 1][1], f.gt);
+          // he is on his feet: the gait plants them where they are drawn and
+          // solves the legs over them while this pose lets go (gait.js plantInit)
+          ch._gFeetNow = true;
         }
       }
       if (f.on || w > 0) writePose(ch, OUT, f.on ? w : 0);
@@ -1912,7 +2007,9 @@
     if (MP.isKick(kind)) {
       const leg = L ? ch.parts.rl : ch.parts.ll, low = leg && leg.userData.low;
       const kk = kickKey(kind === "lowKick" ? "low" : kind);
-      if (kk === "knee") out.set(0, 0, D.legW * 0.4);
+      if (kk === "stomp") out.set(0, -D.g2 - 0.02, 0.03);         // the heel side of the sole
+      else if (kk === "soccer") out.set(0, -D.g2 + 0.03, 0.20);   // the instep
+      else if (kk === "knee") out.set(0, 0, D.legW * 0.4);
       else if (kk === "front") out.set(0, -D.g2 + 0.02, 0.10);
       else out.set(0, -D.g2 * 0.72, 0.06);                      // the shin
       return at(low, out);

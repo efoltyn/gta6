@@ -237,7 +237,7 @@
     // already on top of him: every press is the next blow on him
     const onHim = CBZ.player._gnpOn && floored(CBZ.player._gnpOn) && !CBZ.player._gnpOn.escaped ? CBZ.player._gnpOn : null;
     const low = onHim || (actor ? (floored(actor) && actor.group && !actor.escaped ? actor : null) : floorTarget());
-    if (low) return groundBlow(low, !!(opts && opts.blade) && shankOn());
+    if (low) return groundBlow(low, !!(opts && opts.blade) && shankOn(), opts && opts.floorKick);
     const hasTarget = punchable(actor);
     if (actor && !hasTarget) return { ok: false, msg: "" };
     // Fists never stop working. Tired means WEAKER, not blocked — the damage
@@ -269,9 +269,9 @@
       : blade ? "stab" : (heavy ? (close ? "headbutt" : "hook") : (next % 2 ? "jab" : "cross"));
     // no man named: square up to where you are looking; the swing finds
     // whoever is actually there
-    if (!hasTarget && CBZ.playerChar && CBZ.lerpAngle) {
-      CBZ.playerChar.group.rotation.y = CBZ.lerpAngle(CBZ.playerChar.group.rotation.y, cameraFacingYaw(), 0.85);
-    }
+    // (he TURNS there over the wind-up, verbs_strike faceYaw: he used to be
+    // put 85% of the way round in the frame the button went down)
+    const lookYaw = !hasTarget && CBZ.playerChar ? cameraFacingYaw() : null;
     /* THE BAG BUFF, RETIRED. A shiv in your pocket does not make your KNUCKLES
        harder; a shiv in the bag lets you DRAW it (systems/inventory.js hands
        the weapon row over on pickup). Bare fists are an honest 11.
@@ -293,6 +293,7 @@
       kind, heavy, arm: blade ? "r" : (picked && opts.arm) || undefined, speed: cuffs ? 0.8 : undefined,
       weapon: blade ? BLADE_W : null,
       candidates: hasTarget ? null : candidates,
+      faceYaw: lookYaw,
       maxLunge,
       onLand: function (res) { landPunch(res, attack); if (butt) hurtSelf(); },
       onBlocked: function (res) { blockedPunch(res, attack); },
@@ -409,15 +410,26 @@
     }
     return _gp;
   }
-  function groundBlow(actor, blade) {
+  function groundBlow(actor, blade, floorKick) {
     const V = CBZ.verbs;
     const next = CBZ.now - lastPunch < 980 ? combo + 1 : 1;
-    const cost = blade ? 0.16 : 0.26;
+    const cost = blade ? 0.16 : floorKick === "stomp" ? 0.32 : 0.26;
     const stam = Math.max(0, stamina - cost);
     const fresh = blade ? (0.66 + 0.34 * stam) : (0.35 + 0.65 * stam);
+    // STANDING OVER HIM, the stick pulled back: the boot (V.groundKick: a
+    // soccer kick on the tap, the stomp on the power release). Anything
+    // else, or once you are on him, is the mount below.
+    let S = null;
+    if (floorKick && !blade && V.groundKick && !(V.mountOf && V.mountOf(playerActor()))) {
+      S = V.groundKick(playerActor(), actor, {
+        kind: floorKick, heavy: floorKick === "stomp",
+        onLand: function (res) { landOnFloor(actor, false, fresh * (floorKick === "stomp" ? 1.5 : 1.15), res); },
+        onWhiff: whiffPunch,
+      });
+    }
     // a man down is MOUNTED and pounded (verbs_strike V.groundStrike); a body
     // the mount cannot take (no rig) still gets the boot or the blade
-    let S = V.groundStrike ? V.groundStrike(playerActor(), actor, {
+    if (!S) S = V.groundStrike ? V.groundStrike(playerActor(), actor, {
       weapon: blade ? BLADE_W : null,
       onLand: function (res) { landOnFloor(actor, blade, fresh, res); },
     }) : null;
@@ -667,7 +679,7 @@
           if (S) { stamina = Math.max(0, stamina - 0.3); CBZ.game._lawSwingT = CBZ.game.elapsed || 0; theLaw(t, false, t.kind === "guard" || t.kind === "warden"); }
           return !!S;
         }
-        return punch(null, spec.verb === "ground" ? null : spec).ok;
+        return punch(null, spec.verb === "ground" ? (spec.kind === "stomp" || spec.kind === "soccer" ? { floorKick: spec.kind } : null) : spec).ok;
       },
       guard(on) { CBZ.player._blocking = on ? 1 : 0; if (CBZ.playerChar) CBZ.playerChar.fightStance = !!on; },
       // walked in cuffs: the back of the head into the screw holding you

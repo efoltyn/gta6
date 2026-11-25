@@ -142,11 +142,21 @@
      62 degrees; main's kicks read as kicks because they met him near 1.2 m.
      Now front 1.28, round 1.15, low 1.15: the leg is all but straight when
      it lands. And a strike has a NEAR limit as well as a far one: see RANGE
-     in V.strike.) */
+     in V.strike.)
+     (11-24: the front kick still met him with the knee bent ~50 degrees.
+     The foot stops when it touches (contact: the ball of the foot against
+     the belly zone, a 16 cm sphere whose front is 17 cm ahead of his
+     centre), and from 1.18 m that happens 13 cm before the leg is out. From
+     1.24 m (1.35 x 0.92) it happens with the knee at ~30 degrees and 2.5 cm
+     of leg still in hand; any further and a man leaning back is missed.) */
   const REACH = {
     jab: 1.28, cross: 1.30, hook: 1.00, upper: 0.80, body: 1.20, bodyStraight: 1.12, overhand: 1.42,
-    elbow: 0.92, headbutt: 0.74, stab: 0.95, shove: 1.10, front: 1.28, round: 1.15, low: 1.15, knee: 0.62,
+    elbow: 0.92, headbutt: 0.74, stab: 0.95, shove: 1.10, front: 1.35, round: 1.15, low: 1.15, knee: 0.62,
     gnp: 1.0, gnpElbow: 0.9, hammer: 1.0,
+    // a man on the floor (V.groundKick): measured to the spot on him the foot
+    // goes to, not to his root. The stomp comes down just in front of the
+    // standing foot; the soccer kick meets him with the leg nearly out.
+    stomp: 0.52, soccer: 0.74,
     // with a weapon in the hand the reach is the weapon's (the contact point
     // is carried out along the forearm by weapon.len, see WEAPON below)
     bat: 1.80, slash: 1.30, butt: 1.40,
@@ -154,7 +164,7 @@
   const POWER = {
     jab: 0.35, cross: 0.75, hook: 0.82, upper: 0.82, body: 0.70, bodyStraight: 0.62, overhand: 0.92,
     elbow: 0.80, headbutt: 0.85, stab: 0.55, shove: 0.55, front: 0.72, round: 0.95, low: 0.62, knee: 0.88,
-    gnp: 0.62, gnpElbow: 0.86, hammer: 0.72,
+    gnp: 0.62, gnpElbow: 0.86, hammer: 0.72, stomp: 0.95, soccer: 0.85,
     bat: 1.0, slash: 0.42, butt: 0.85,
   };
   // the nearest a straight is thrown from (m, two adults): inside it he gives ground first
@@ -196,7 +206,8 @@
     if (!kind || kind === "straight") return "cross";
     return kind;
   }
-  function isKick(k) { return k === "front" || k === "round" || k === "low" || k === "knee"; }
+  function isKick(k) { return k === "front" || k === "round" || k === "low" || k === "knee" || k === "stomp" || k === "soccer"; }
+  function isFloorKick(k) { return k === "stomp" || k === "soccer"; }
   V.powerOf = function (kind) { return POWER[kindOf(kind)] || 0.6; };
   V.reachOf = function (kind, a) {
     const k = kindOf(kind), B = a ? bod(a) : null;
@@ -255,6 +266,16 @@
       out.copy(Z.head.c); out.y += Z.head.r * 0.55;
       const dx = from.x - out.x, dz = from.z - out.z, d = Math.hypot(dx, dz) || 1;
       out.x += (dx / d) * Z.head.r * 0.25; out.z += (dz / d) * Z.head.r * 0.25;
+      return out;
+    }
+    if (level === "floor") {
+      // the middle of his trunk where it lies, whichever way up: a stomp
+      // comes down on its upper surface, a soccer kick goes into the side
+      // of it that faces the kicker
+      out.copy(Z.cA).add(Z.dA).add(Z.cB).add(Z.dB).multiplyScalar(0.25);
+      if (kind === "stomp") { out.y += Z.chestR * 0.85; return out; }
+      const dx = from.x - out.x, dz = from.z - out.z, d = Math.hypot(dx, dz) || 1;
+      out.x += (dx / d) * Z.chestR * 0.8; out.z += (dz / d) * Z.chestR * 0.8;
       return out;
     }
     if (level === "legs") { out.copy(Z.lA).lerp(Z.lB, 0.55); r = Z.legR; c = out; }
@@ -342,8 +363,9 @@
     if (!aim0 && opts.candidates) { _pk0.Ba = Ba; _pk0.kind = kind; _pk0.att = att; aim0 = pickAim(_pk0, opts); _pk0.Ba = _pk0.att = null; }
     let backD = 0;
     if (aim0 && opts.lunge !== false && Ba.pos) {
-      const Bt0 = bod(aim0), tp0 = Bt0 && Bt0.pos, ap0 = Ba.pos;
-      const long = kind === "front" || kind === "round" || kind === "low";
+      const Bt0 = bod(aim0), tp0 = opts.aimAt || (Bt0 && Bt0.pos), ap0 = Ba.pos;
+      const floorK = isFloorKick(kind);
+      const long = kind === "front" || kind === "round" || kind === "low" || floorK;
       const sc0 = ch ? scaleOf(ch) / 0.7 : 1;
       const want0 = long ? V.reachOf(kind, att) * 0.92 : (NEAR[kind] || 0) * sc0;
       if (tp0 && want0 > 0) {
@@ -352,7 +374,7 @@
         if (back > (long ? 0.08 : 0)) {
           const cap = long ? 0.55 : 0.30, y0 = (ap0.y || 0) + 0.6, far = Math.min(back, cap) + 0.4;
           const shut = walled(ap0.x, y0, ap0.z, ap0.x - dx0 / d0 * far, y0, ap0.z - dz0 / d0 * far);
-          if (long && (shut || back > cap) && d0 < 0.95 * sc0) kind = "knee";
+          if (long && !floorK && (shut || back > cap) && d0 < 0.95 * sc0) kind = "knee";
           else if (!shut) backD = Math.min(back + (long ? 0 : 0.08), cap);
         }
       }
@@ -369,7 +391,7 @@
     S.dur = MP.durOf(kind, S.heavy) * (1 + 0.25 * gas) * (opts.speed ? 1 / opts.speed : 1);
     S.power = clamp01((opts.power != null ? opts.power : (POWER[kind] || 0.6) + (S.heavy ? 0.18 : 0)) * (1 - 0.35 * gas));
     S.t = 0; S.p = 0; S.landed = false; S.whiffed = false; S.aimLocked = false; S.hasAim = false; S.beat = false;
-    S.lastPT = -1; S.stall = 0; S.walled = false;
+    S.lastPT = -1; S.stall = 0; S.walled = false; S.turn = 0; S.faceYaw = null;
     S.rng = opts.rng || Math.random;
     // opts.aimErr (m): how far off the line this hand throws (a novice ~0.1,
     // a pro ~0.02); lateral and vertical, fixed for the blow
@@ -402,10 +424,21 @@
     // ---- square up, and step in if he is out of reach ----
     const T = S.aimT;
     if (T) {
-      const Bt = bod(T), tp = Bt && Bt.pos, ap = Ba.pos;
+      const Bt = bod(T), tp = opts.aimAt || (Bt && Bt.pos), ap = Ba.pos;
       if (tp && ap) {
         const dx = tp.x - ap.x, dz = tp.z - ap.z, d = Math.hypot(dx, dz) || 1e-4;
-        Ba.face(Math.atan2(dx, dz), opts.snap != null ? opts.snap : 0.85);
+        /* HE TURNS TO FACE HIM, HE IS NOT TURNED. The root used to be put
+           85% of the way round on the frame the blow began: up to 60
+           degrees in one frame, the whole body spun like a figure on a
+           pole. He turns at the rate a man pivots (stepStrike, TURN_RATE)
+           while the blow winds up; the fist or foot is aimed at a point in
+           the world, so it goes to the man whether or not the chest has
+           finished coming round, and the feet are planted feet that step
+           round after him. snap >= 1 still faces at once (a caller that
+           has already placed him), snap 0 does not turn him at all. */
+        const snap = opts.snap != null ? opts.snap : 0.85;
+        if (snap >= 1) Ba.face(Math.atan2(dx, dz), 1);
+        else if (snap > 0) S.turn = 1;
         if (opts.lunge !== false && ch) {
           // follow a man you have backed up: the rest of his stagger step counts
           let pend = 0;
@@ -441,7 +474,8 @@
             // too close for this blow: the rear foot goes back first and the root follows
             S.lunge.D = backD; S.lunge.dx = -dx / d; S.lunge.dz = -dz / d; S.lunge.last = 0;
             const stepT = kick ? 0.20 + 0.30 * backD : S.dur * 0.5;
-            MP.startStep(ch, 0, -backD / scaleOf(ch), stepT, MP.leadSide(ch) === "l" ? "R" : "L");
+            const fs0 = MP.startStep(ch, 0, -backD / scaleOf(ch), stepT, MP.leadSide(ch) === "l" ? "R" : "L");
+            fs0.world = true; fs0.wx = -dx / d * backD / scaleOf(ch); fs0.wz = -dz / d * backD / scaleOf(ch);
             kickWait(stepT, 0.9);                                 // both feet are back and down
           }
           const need = backD > 0.03 ? 0 : d + Math.max(0, pend) + chin - V.reachOf(kind, att) * 0.92;
@@ -452,12 +486,15 @@
             const lead = MP.leadSide(ch) === "l" ? "L" : "R";
             // the lead foot goes first; the root arrives by the impact beat
             const stepT = kick ? 0.22 + 0.30 * D : S.dur * 0.62;
-            MP.startStep(ch, 0, D / scaleOf(ch), stepT, lead);
+            const fs1 = MP.startStep(ch, 0, D / scaleOf(ch), stepT, lead);
+            // (the step is a line on the floor: the root is still turning to face him as it is taken)
+            fs1.world = true; fs1.wx = dx / d * D / scaleOf(ch); fs1.wz = dz / d * D / scaleOf(ch);
             kickWait(stepT, 0.5);                                 // the lead foot has landed (meleeposes: s1 is down by 0.55)
           }
         }
       }
     }
+    if (!T && opts.faceYaw != null) { S.turn = 1; S.faceYaw = opts.faceYaw; }
     live.push(S);
     return S;
   };
@@ -472,7 +509,8 @@
   function pickAim(S, opts) {
     CAND.length = 0;
     try { opts.candidates(CAND); } catch (e) { CAND.length = 0; }
-    const Ba = S.Ba, ap = Ba.pos, yaw = Ba.yaw();
+    // (opts.faceYaw: where he is LOOKING, when the body has not turned there yet)
+    const Ba = S.Ba, ap = Ba.pos, yaw = opts.faceYaw != null ? opts.faceYaw : Ba.yaw();
     const fx = Math.sin(yaw), fz = Math.cos(yaw);
     const range = V.reachOf(S.kind, S.att) + (opts.maxLunge != null ? opts.maxLunge : 0.75) + 0.15;
     let best = null, bs = 1e9;
@@ -768,6 +806,7 @@
      THE PASS (order 86): after every rig is posed, before reactions (89),
      grapple's late write (90) and CORE's holds (91).
      ============================================================ */
+  const TURN_RATE = 7.5;   // rad/s: a man pivoting to face someone (60 degrees in 0.14 s)
   const moves = [];     // root motion riding a rig's footStep: { a, B, ch, D, dx, dz, last, on }
   let clock = 0;        // this pass's own seconds (the shot load bleeds on it)
   const falls = [];     // fallen actors whose ko timer the rig's get-up follows
@@ -859,11 +898,30 @@
       S.lunge.last = sr;
       if (dd > 0) moveBy(Ba, S.lunge.dx * S.lunge.D * dd, S.lunge.dz * S.lunge.D * dd);
     }
+    // ---- the turn to face him (see V.strike): a pivot's rate, until the blow has gone ----
+    if (S.turn && ch && ch.group) {
+      let want = S.faceYaw;
+      const Tt = S.aimT, Btt = Tt ? bod(Tt) : null;
+      const tq = S.level === "floor" && S.hasAim ? S.aim : (S.opts.aimAt || (Btt && Btt.pos));
+      if (tq && Ba.pos) {
+        const tdx = tq.x - Ba.pos.x, tdz = tq.z - Ba.pos.z;
+        if (tdx * tdx + tdz * tdz > 0.01) want = Math.atan2(tdx, tdz);
+      }
+      if (want == null || p >= (S.kick ? MP.kickImpactP : MP.BEAT.impact) || S.landed) S.turn = 0;
+      else {
+        const cur = ch.group.rotation.y;
+        let dy = (want - cur) % TAU;
+        if (dy > Math.PI) dy -= TAU; else if (dy < -Math.PI) dy += TAU;
+        const stp = TURN_RATE * dt;
+        if (Math.abs(dy) <= stp) { Ba.face(want, 1); if (!tq) S.turn = 0; }
+        else Ba.face(cur + (dy > 0 ? stp : -stp), 1);
+      }
+    }
     // ---- the aim: tracked through the wind-up, committed on the drive ----
     const T = S.aimT;
     if (T && ch && !S.landed) {
       const Bt = bod(T), tch = Bt && Bt.ch;
-      if (tch && !Bt.dead()) {
+      if (tch && (!Bt.dead() || S.level === "floor")) {
         if (!S.aimLocked) {
           const Z = zonesOf(tch);
           aimPoint(Z, S.level, S.kind, S.arm, Ba.pos, S.aim);
@@ -1524,6 +1582,58 @@
     M.n++;
     return S;
   };
+  /* ============================================================
+     THE BOOT — a standing man's kicks at a man on the floor.
+     There was no kick for him: a standing kick's contact test skips a
+     downed body, so the only thing a man on his feet could do to one on
+     the floor was get down on him. V.groundKick(att, tgt, opts) throws
+       "stomp"   the knee comes up over him and the heel is driven down
+                 onto his trunk with the weight behind it
+       "soccer"  the leg swings back and through, low, into his side
+     from where the kicker stands (he steps in or back to the range the
+     leg needs, the same step a standing kick takes, measured to the SPOT
+     on the body, not to its root). It resolves on its beat like the
+     mounted blows, but only if the foot is actually at the spot then:
+     kicked from too far, or at a man who has been dragged off, it is a
+     miss. Not from the mount (you are kneeling on him). opts: kind,
+     heavy, power, onLand(res), onWhiff(res), maxLunge, rng.
+     ============================================================ */
+  const _gk = new THREE.Vector3(), _gkp = new THREE.Vector3();
+  V.groundKick = function (att, tgt, opts) {
+    opts = opts || EMPTY;
+    const MP = MPf(), Ba = bod(att), Bt = bod(tgt);
+    if (!MP || !Ba || !Bt || !Bt.ch || !Ba.ch || !Bt.pos || !Ba.pos || Ba.dead() || Ba.down() || !Bt.down()) return null;
+    if (!Bt.ch.body || !MP.KICKS || !MP.KICKS.stomp) return null;
+    if (mountOf(att)) return null;
+    const kind = opts.kind === "stomp" ? "stomp" : "soccer";
+    aimPoint(zonesOf(Bt.ch), "floor", kind, null, Ba.pos, _gk);
+    const d = Math.hypot(_gk.x - Ba.pos.x, _gk.z - Ba.pos.z);
+    const maxL = opts.maxLunge != null ? opts.maxLunge : (Ba.isPlayer ? 0.75 : 0.45);
+    if (d - V.reachOf(kind, att) * 0.92 > maxL + 0.12) return null;          // too far to step to: walk up first
+    return V.strike(att, tgt, { kind, heavy: !!opts.heavy, power: opts.power, rng: opts.rng, maxLunge: maxL,
+      aimAt: { x: _gk.x, y: _gk.y, z: _gk.z }, onWhiff: opts.onWhiff || null,
+      onBeat: function (St) { floorKickLand(St, tgt, opts); } });
+  };
+  const _fkM = { t: null };
+  function floorKickLand(S, tgt, opts) {
+    const MP = MPf(), Ba = S.Ba, ch = Ba && Ba.ch, Bt = bod(tgt);
+    if (!MP || !ch || !Bt || !Bt.pos) return;
+    // is the foot there? (the leg is at full reach on this beat)
+    MP.strikePoint(ch, S.kind, S.arm, _gkp);
+    const tol = 0.26 * (scaleOf(ch) / 0.7);
+    if (!S.hasAim || !Bt.down() || _gkp.distanceToSquared(S.aim) > tol * tol) { S.landed = false; whiff(S); return; }
+    // it stops on him
+    ch.kickLandP = S.p; ch._mKLandE = MP.kickDrive ? MP.kickDrive(S.p) : 1;
+    _fkM.t = tgt;
+    groundLand(S, _fkM, opts);
+    _fkM.t = null;
+    // a body with nothing holding it up is moved by it
+    const tch = Bt.ch, f = tch && tch.fall;
+    if (f && f.on && f.ko && MP.limpKick && S.res) {
+      const yaw = Bt.yaw(), lx = S.res.dir.x * Math.cos(yaw) - S.res.dir.z * Math.sin(yaw);
+      MP.limpKick(tch, "core", lx >= 0 ? 1 : -1, 0.5 + 0.6 * S.res.power, S.kind === "stomp" ? 0 : 0.6, 0);
+    }
+  }
   function groundLand(S, M, opts) {
     const Ba = S.Ba, Bt = bod(M.t);
     if (!Ba || !Bt || !Bt.pos) return;
@@ -1546,7 +1656,7 @@
     if (bothP && CBZ.shake) CBZ.shake(0.12 + 0.32 * res.power);
     if (Ba.isPlayer && CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(S.kind, S.heavy || res.power > 0.8);
     const MP = MPf();
-    if (tch && MP && MP.groundHit && !Bt.dead()) MP.groundHit(tch, S.arm === "l" ? 1 : -1, 0.55 + 0.6 * res.power);
+    if (tch && MP && MP.groundHit && !Bt.dead()) MP.groundHit(tch, S.arm === "l" ? 1 : -1, 0.55 + 0.6 * res.power, S.level === "floor");
     if (CBZ.trauma && CBZ.trauma.strike) {
       try {
         CBZ.trauma.strike(M.t, 3 + 7 * res.power, { dir: { x: res.dir.x, y: -0.6, z: res.dir.z }, fromX: Ba.pos.x, fromZ: Ba.pos.z,

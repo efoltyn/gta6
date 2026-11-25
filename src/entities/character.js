@@ -6587,7 +6587,10 @@
     const hy = hipYOf(ch);
     for (const leg of [ch.parts.ll, ch.parts.rl]) {
       const sx = leg.userData._rootX != null ? leg.userData._rootX : (leg.userData._rootX = leg.position.x);
-      _lrP.set(sx, hy, 0).applyMatrix4(ch.body.matrix);
+      // (the pelvis's own turn against the chest, animChar: the hip joint on
+      // the side of the leading leg goes forward with it)
+      const pa = ch._pelvYaw || 0;
+      _lrP.set(pa ? sx * Math.cos(pa) : sx, hy, pa ? -sx * Math.sin(pa) : 0).applyMatrix4(ch.body.matrix);
       leg.position.copy(_lrP);
     }
     ch._legRootsMoved = true;
@@ -7450,7 +7453,28 @@
   const _gaitBody = {};
   function animChar(ch, speed, dt) {
     ch._animAt = CBZ.now;              // this rig's legs were stepped this frame (systems/verbs.js asks)
+    ch._pelvT = 0;
     animCharBody(ch, speed, dt);
+    /* THE PELVIS TURNS AGAINST THE CHEST. The pelvis, chest, arms and neck
+       are one rigid block (`body`), so the stride's counter-rotation turned
+       the hips WITH the shoulders: the hip on the side of the leading leg
+       went back as that leg went forward. There is no waist joint, and
+       splitting the torso would re-seat every garment, wound and mount that
+       hangs on `body`. The pelvis is its own mesh on that block, though:
+       it takes a small yaw of its own about the spine (the locomotion
+       branch sets ch._pelvT; any other pose leaves it 0 and it eases home
+       here), and the leg roots turn with it (legRootsFollow). Seen from
+       above the chest turns ~4 degrees one way and the hips ~4 the other
+       at a walk, more at a run. What does NOT turn with it: things hung on
+       `body` over the hips (a belt band, a holster, a jacket's skirt) stay
+       with the chest, and the pelvis slides ~1.5 cm under them. */
+    if (ch._pelvT || ch._pelvYaw) {
+      const pv = ch._pelv !== undefined ? ch._pelv : (ch._pelv = (ch.skinSlots && ch.skinSlots.pelvis && ch.skinSlots.pelvis[0]) || null);
+      let a = dt > 0 ? damp(ch._pelvYaw || 0, ch._pelvT, 12, dt) : (ch._pelvYaw || 0);
+      if (!ch._pelvT && Math.abs(a) < 0.002) a = 0;
+      ch._pelvYaw = a;
+      if (pv) pv.rotation.y = a;
+    }
     // THE THIGHS HANG FROM THE PELVIS, IN EVERY POSE: the walk's bob, the
     // crouch's drop, the counter-rotation and every posed branch move `body`
     // (the pelvis is on it) while the legs ride `model` — a sprint's bob put
@@ -7661,7 +7685,8 @@
     const moving = speed > 0.2;
     const walkRef = (CBZ.TUNE && CBZ.TUNE.walkSpeed) || 6.4;
     const norm = Math.min(speed / walkRef, 1);          // 0..1 stand→brisk
-    const run2 = clamp01((speed - walkRef) / (walkRef * 0.7)); // sprint layer
+    const run2 = clamp01((speed - walkRef) / (walkRef * 0.7)); // run layer (full at a jog)
+    const run3 = clamp01((speed - walkRef * 1.7) / (walkRef * 1.5)); // sprint layer (jog -> flat out)
     ch.breath += dt;
     const J = ch.low || {};
     const setKnee = (j, x, rate) => { if (j) { j.rotation.x = damp(j.rotation.x, Math.max(0, x), rate, dt); j.rotation.y = damp(j.rotation.y, 0, 12, dt); j.rotation.z = damp(j.rotation.z, 0, 12, dt); } };
@@ -9179,7 +9204,10 @@
       // quieter and let the pelvis do the work (Bruening 2015). GA.armAmp
       // carries that, and it is also what silences a new walker's arms —
       // reciprocal arm swing does not appear until ~18 months.
-      const armAmp = hipAmp * (0.95 + 0.25 * run2) * GA.armAmp;
+      // (run2 is full at a 3.4 m/s jog: with nothing above it a jogger pumped
+      // his arms +-43 degrees, exactly as a 6.4 m/s sprinter did. A jog
+      // carries them ~30 degrees, a sprint drives them ~50.)
+      const armAmp = hipAmp * (0.95 - 0.05 * run2 + 0.50 * run3) * GA.armAmp;
       const laTarget = moving ? swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
       const raTarget = moving ? -swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
       // HIGH GUARD: before a toddler can balance, the arms ride up and out to
@@ -9236,7 +9264,9 @@
     const bobTarget = GB ? GB.bob * GA.bob - cb * (0.38 - 0.11 * Math.min(1, speed / 2.6))
       : (moving ? -Math.abs(sinP) * (0.03 + 0.05 * norm + 0.03 * run2) * GA.bob : 0) - cb * 0.38;
     const idleBreath = moving ? 0 : Math.sin(ch.breath * 2.2) * 0.012;
-    ch.bob = damp(ch.bob, bobTarget, 12, dt);
+    // (a run's stance is 0.13-0.26 s: at the walk's 12/s the drawn hips lagged
+    // the bounce by a third of it and halved it; the target is already smooth)
+    ch.bob = damp(ch.bob, bobTarget, 12 + 30 * (GB ? GB.run : 0), dt);
     ch.body.position.y = ch.bob + idleBreath;
     // The upper-body group is authored in model space with its origin at the
     // feet, while the legs pivot at the hips.  Pitching that group to create a
@@ -9276,7 +9306,9 @@
     // gait adds the start/stop weight shift and the hill (CBZ.gait.body)
     const backK = GT && ch._gv ? ch._gv.back : 0;
     // (a walk leans ~4 degrees, not the 7 it had; a run keeps its 12.5)
-    let leanTarget = (norm * 0.07 + run2 * 0.15) * (1 - 1.4 * backK) + cb * 0.16;
+    // (...which every pace from a 3.4 m/s jog up shared: a jog leans ~7, a
+    // flat sprint ~13; the start's extra lean is the measured acceleration's)
+    let leanTarget = (norm * 0.07 + run2 * 0.06 + run3 * 0.10) * (1 - 1.4 * backK) + cb * 0.16;
     if (GB) leanTarget = leanTarget * (1 - 0.6 * aimK) + 0.05 * aimK + GB.lean;
     ch.lean = damp(ch.lean, leanTarget, 8, dt);
     ch.body.rotation.x = ch.lean;
@@ -9286,7 +9318,10 @@
     // (zero under a raised rifle: the gun hold owns the chest's yaw; a body
     // turning on the spot leads with the shoulders)
     const yTurn = !moving && GT && ch._gv ? Math.max(-0.16, Math.min(0.16, ch._gv.yawRate * 0.05)) : 0;
-    const yGait = (moving ? sinP * (0.05 + 0.05 * norm + 0.05 * run2) * GA.yaw * (1 - aimK) : 0) + yTurn;
+    const yGait = (moving ? sinP * (0.04 + 0.03 * norm + 0.05 * run2) * GA.yaw * (1 - aimK) : 0) + yTurn;
+    // the pelvis's own turn, relative to the chest: the hip of the leading leg
+    // forward (see animChar). Not under a fight stance, a crouch or a raised gun.
+    if (moving) ch._pelvT = -sinP * (0.07 + 0.07 * norm + 0.09 * run2) * GA.yaw * (1 - aimK) * (1 - cb) * (1 - Math.min(1, ch._mK || 0));
 
     // ---- LIMP: the body dips toward the hurt leg as it bears weight ----
     if (sev > 0.02 && moving && !legGone) {

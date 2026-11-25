@@ -138,7 +138,10 @@
     const crouch = clamp01(o.crouch || 0), aim = clamp01(o.aim || 0);
     const lat = clamp01(o.lat || 0), back = clamp01(o.back || 0);
     // a crouch, a raised rifle, sideways and backward all RUN later
-    const tr = 2.1 + 0.5 * crouch + 0.6 * aim + 0.5 * lat + 0.6 * back;
+    // (...except backward: a backward WALK runs out of leg early, the front
+    // foot can only leave off its heel, so a quick backpedal is a short
+    // bounding step sooner than a forward walk would break into a run)
+    const tr = 2.1 + 0.5 * crouch + 0.6 * aim + 0.5 * lat - 0.4 * back;
     const wRun = sstep(tr, tr + 0.6, vr);
     // natural cadence (steps/s on the reference leg)
     const vw = Math.min(vr, 2.6);
@@ -163,7 +166,7 @@
        this leg sweeps about 1.1 of it, gives up double support before it
        gives up cadence (the walk that is nearly a run), and the trailing
        foot rolls up onto its toe to make the reach (ankleFrom, post). */
-    const sMax = L * (lerp(1.02 + 0.09 * sstep(1.4, 2.3, vr) + 0.20 * crouch, 1.00 - 0.08 * crouch, wRun)) * (1 - 0.72 * lat);
+    const sMax = L * (lerp(1.02 + 0.09 * sstep(1.4, 2.3, vr) + 0.20 * crouch, 1.00 - 0.08 * crouch, wRun)) * (1 - 0.60 * lat) * (1 - 0.30 * back);
     let fc = steps / 2;
     if (v > 1e-3) {
       let sweep = duty * Math.abs(v) / fc;
@@ -179,6 +182,24 @@
       out.sweep = sweep;
     } else out.sweep = 0;
     out.wRun = wRun; out.duty = duty; out.fc = fc; out.steps = fc * 2;
+    /* THE RUN IS A BOUNCE, AND ITS SIZE IS NOT A STYLE. The hips used to ride
+       a cosine with stance and flight given equal halves: highest a moment
+       before the foot came down, so the foot was reached for with a locked
+       leg (the hips dropping 4-6 cm onto it at the instant of landing), and
+       HIGHER at mid-stance than at touchdown. A runner is a mass on a
+       spring: in the air he is a projectile (the rise is g t^2 / 8 for the
+       time he is off the ground), he lands at the height he left at with
+       the knee already bent, sinks to mid-stance and is thrown back up; the
+       sink that matches the flight (same vertical speed at the two ends of
+       the stance) is g t_flight t_stance / 2 pi. Both come out of the
+       cadence and ground time above: ~4 cm of sink at a 3 m/s jog with 1 cm
+       of flight, ~3 cm with 3 cm of flight at a sprint. */
+    {
+      const tSt = duty / fc, tFl = Math.max(0, 0.5 - duty) / fc;
+      const q = wRun * (1 - 0.6 * aim) * (1 - 0.4 * crouch);
+      out.runF = q * 9.81 * tFl * tFl / 8;
+      out.runA = q * 9.81 * tFl * tSt / TAU;
+    }
     out.step = v > 1e-3 ? Math.abs(v) / (fc * 2) : 0;
     const sprint = sstep(4.5, 7.0, vr);
     // swing clearance at the ankle: a walk barely clears, a sprint folds the
@@ -191,13 +212,30 @@
     // (on this leg every centimetre of hip drop is ~10 degrees of knee: a walk
     // gets its dip from the planted geometry alone and a hair of softness)
     out.bobW = 0;
-    out.bobR = (0.016 + 0.003 * vr) * wRun * (1 - 0.6 * aim);
-    out.soft = lerp(0.005 + 0.004 * clamp01(vr / 1.6), 0.030 + 0.004 * Math.min(vr, 8), wRun);
+    out.bobR = 0;                                    // (the run's bounce is runA / runF above)
+    /* how far under standing height a runner's hips are AT FOOT STRIKE: far
+       enough that the leg meets the ground bent (15 degrees at a jog, 23 at
+       a sprint) with the foot where it lands (share: the part of the stance
+       sweep that is ahead of the hip at touchdown). Solved on this leg
+       (thigh 0.456, shin 0.464, ankle 0.09 of the hip height). */
+    const share = lerp(0.36, 0.33, wRun);
+    const kTD = 0.26 + 0.14 * sprint;
+    const xf = Math.max(0, share * out.sweep - 0.02 * L);
+    const dk2 = (0.2076 + 0.2158 + 2 * 0.4556 * 0.4645 * Math.cos(kTD)) * L * L;
+    const hTD = clamp(L - (Math.sqrt(Math.max(0.05 * L * L, dk2 - xf * xf)) + 0.09 * L), 0.02 * L, 0.075 * L);
+    out.runA = Math.min(out.runA, Math.max(0, 0.092 * L - hTD));   // (mid-stance knee stays under ~50 degrees)
+    out.share = share;
+    out.soft = lerp(0.005 + 0.004 * clamp01(vr / 1.6), hTD, wRun);
     // the foot's rockers (+ toes down): heel strike / midfoot / forefoot
     const a = clamp01(vr / 1.4);
     out.psiTD = lerp(-0.24 * a, lerp(-0.10, 0.12, sprint), wRun) * (1 - 0.5 * crouch);
     // (toe-off: the foot is pitched ~50 degrees at a walk, heel well up; it was 31)
     out.psiLO = lerp(0.16 + 0.74 * a, 0.80, wRun);
+    // going BACKWARD the toe lands first (heel up ~17 degrees) and the foot
+    // leaves flat off its heel, toes barely up: not the forward roll mirrored
+    // (that pitched the toes up 50 degrees on a foot out in front)
+    out.psiTDb = 0.30 * a * (1 - 0.5 * crouch);
+    out.psiLOb = -0.14 * a;
     out.heelRise = lerp(0.52, 0.30, wRun);            // stance share where a free heel would rise
     out.vr = vr; out.k = k;
     return out;
@@ -397,17 +435,22 @@
   function body(ch, out) {
     out = out || {};
     const G = ch._gv, g = geo(ch);
-    out.bob = 0; out.lean = 0; out.roll = 0; out.yaw = 0; out.aim = 0; out.c = 0;
+    out.bob = 0; out.lean = 0; out.roll = 0; out.yaw = 0; out.aim = 0; out.c = 0; out.run = 0;
     if (!G || !g) return out;
     const M = G.M, c = frac((ch.phase || 0) / TAU);
     out.c = c;
     const s = g.s;
+    out.run = M.wRun;
     if (G.moving) {
-      // mid-stance of each leg: a walking body vaults over it (highest), a
-      // running one sinks into it (lowest)
-      const cms = TD[1] + M.duty * 0.5;
-      const w = Math.cos(4 * PI * (c - cms));
-      out.bob = (M.bobW * w - M.bobR * w - M.soft) / s;
+      // a walk's dip is the planted legs' geometry (post); a run sinks into
+      // each stance and flies between them (mix: runA / runF)
+      let y = -M.soft;
+      if (M.wRun > 0 && M.duty < 0.5) {
+        const x = frac((c - TD[1]) * 2), d2 = 2 * M.duty;     // through the half cycle that starts at a touchdown
+        if (x < d2) y -= M.runA * Math.sin(PI * x / d2);
+        else { const u = (x - d2) / (1 - d2); y += M.runF * 4 * u * (1 - u); }
+      }
+      out.bob = y / s;
     }
     // a raised rifle walks soft: the hips ride lower, the knees take the bumps
     out.bob -= 0.025 * G.aimK * (G.moving ? 1 : 0.5) / s;
@@ -535,11 +578,25 @@
     // meleeposes was solving the legs: its feet (group frame, rig units;
     // [+X leg x, z, -X leg x, z]) are where they are planted, not the rest spots
     const mf = ch._mOwn && ch._mFt ? ch._mFt : null;
+    /* STANDING UP OFF THE FLOOR (entities/meleeposes.js sets ch._gFeetNow for
+       the last beat of a get-up): the feet are planted where the get-up has
+       them, one forward and one back, read off the drawn legs. They used to
+       be planted side by side under him while the keyed pose faded out, so
+       both feet slid ~15 cm together along the floor as he straightened. Now
+       he stands up over the feet he rose on and steps them in. */
+    const drawn = ch._gFeetNow && W.THREE && ch.parts.ll.userData.foot && ch.parts.rl.userData.foot;
+    if (drawn) grp.updateMatrixWorld(true);
     for (let i = 0; i < 2; i++) {
       const F = G.feet[i], R = restSpot(ch, G, g, i);
       const lat = mf ? mf[i ? 0 : 2] * g.s : R.lat, fore = mf ? mf[i ? 1 : 3] * g.s : R.fore;
       F.x = grp.position.x + G.ox + lat * c + fore * s;
       F.z = grp.position.z + G.oz - lat * s + fore * c;
+      if (drawn) {
+        const e = (i ? ch.parts.rl : ch.parts.ll).userData.foot.matrixWorld.elements;
+        // (only a foot that is near the body and near the floor: a pose that
+        // has it somewhere else is not a foot to stand on)
+        if (Math.hypot(e[12] - grp.position.x, e[14] - grp.position.z) < 0.7 * g.Lw && e[13] - grp.position.y < 0.35 * g.Lw) { F.x = e[12]; F.z = e[14]; }
+      }
       const gy = groundY(F.x, F.z, grp.position.y + 0.6);
       F.y = gy != null && Math.abs(gy - grp.position.y) < 0.6 ? gy : grp.position.y;
       F.yaw = yaw + (G.hy || 0) + R.toe;                // a touch of toe-out
@@ -573,7 +630,12 @@
       // up onto its ball) than a stiff-ankled heel strike can in front
       // (0.42 put a walking heel 43 cm out in front of the hip, further than
       // the straight front leg reaches without the hips coming down for it)
-      ahead = lerp(0.36, 0.5, M.wRun) * tSt;
+      // (...and a run's symmetric 0.5 put a sprinter's foot 43 cm out in
+      // front of him, braking on a locked leg: a runner lands a third of the
+      // sweep ahead of his hips and leaves the rest behind. Backward the
+      // toe-first landing reaches well and the foot in front does not, so
+      // more of the sweep is behind the hips at the start.)
+      ahead = lerp(M.share || 0.36, 0.56, G.back) * tSt;
     }
     // the predicted root, plus the Raibert lead along the velocity
     let rx = grp.position.x + G.ox + G.vx * (G.moving ? tRem : 0) + vx * ahead;
@@ -605,7 +667,13 @@
 
   /* the stance foot's pitch at stance progress sp (0 touchdown .. 1 toe-off),
      forward travel; mirrored for a body going backward */
+  function tdPsi(M, dirK) { return dirK >= 0 ? M.psiTD * dirK : -M.psiTDb * dirK; }
   function stancePsi(M, sp, dir) {
+    if (dir < 0) {
+      if (sp < 0.22) return M.psiTDb * (1 - ease(sp / 0.22));
+      if (sp < 0.70) return 0;
+      return M.psiLOb * Math.pow((sp - 0.70) / 0.30, 1.5);
+    }
     let p;
     if (sp < 0.14) p = M.psiTD * (1 - ease(sp / 0.14));
     else if (sp < M.heelRise) p = 0;
@@ -615,7 +683,7 @@
   function swingPsi(M, F, u, dir) {
     const mid = -0.10 * dir;
     if (u < 0.4) return lerp(F.spsi, mid, ease(u / 0.4));
-    return lerp(mid, M.psiTD * dir * (F.idle ? 0 : 1), ease((u - 0.4) / 0.6));
+    return lerp(mid, F.idle ? 0 : tdPsi(M, dir), ease((u - 0.4) / 0.6));
   }
 
   /* ---- POST: plant, swing, solve --------------------------------------------
@@ -628,12 +696,15 @@
   // how far the hips must come down for foot i's ankle to be in the straight
   // leg's reach (model units; <= 0: it reaches). _nz: the ankle's fore/aft
   // from its hip (model frame, - = behind)
-  let _nz = 0;
+  let _nz = 0, _nyaw = 0;
   function needOf(ch, G, g, i, F) {
     toModel(ch, G, F.ax, F.ay, F.az, _p);
     const tx = _p.x - _hip[i].x, ty = _p.y - _hip[i].y, tz = _p.z - _hip[i].z;
     const R = g.dmax * g.dmax - tx * tx - tz * tz;
-    _nz = tz;
+    // (along the FOOT's heading: rolling up on the toe only brings the ankle
+    // toward a hip that is ahead of the foot the way the foot points)
+    const fa = (F.sw ? F.yaw : F.cyaw) - _nyaw;
+    _nz = tx * Math.sin(fa) + tz * Math.cos(fa);
     return R > 0 ? -ty - Math.sqrt(R) : -ty - 0.05;
   }
   // pitch a planted foot about this frame's contact and re-place its ankle
@@ -652,7 +723,8 @@
     if (want) {
       if (Math.abs(grp.rotation.x) + Math.abs(grp.rotation.z) > 0.25 || Math.abs(grp.scale.y - 1) > 0.02) want = 0;
       else if (Math.abs(mdl.rotation.x) + Math.abs(mdl.rotation.z) > 0.05) want = 0;
-      else if (ch.koT > 0 || ch.koPose || (MP && MP.fallActive && MP.fallActive(ch))) want = 0;
+      // (ch._gFeetNow: the last beat of a get-up, see plantInit)
+      else if (ch.koT > 0 || ch.koPose || (MP && MP.fallActive && MP.fallActive(ch) && !ch._gFeetNow)) want = 0;
       else if (ch.kickT > 0 || (ch.footStep && ch.footStep.on)) want = 0;
       else if (ch._sKeepLegs) want = 0;                // a soldier move that keys its own legs (a dive, a crawl)
       else if (ch._mountK > 0) want = 0;               // kneeling astride a man (meleeposes' mount)
@@ -672,7 +744,7 @@
     if (want === 0 && G.w < 0.02) G.w = 0;
     const W0 = G.w;
     if (W0 <= 0) {
-      G.init = false; ch._gFootW = 0;
+      G.init = false; ch._gFootW = 0; ch._gFeetNow = false;
       for (const k of LEGS) {
         const leg = ch.parts[k];
         if (leg && leg.rotation.order !== "XYZ") { leg.rotation.y = 0; leg.rotation.order = "XYZ"; }
@@ -783,7 +855,7 @@
       if (F.sw) {
         const tRem = F.idle ? (1 - F.u) * F.dur : (1 - F.u) * (1 - (F.cl0 != null ? F.cl0 : M.duty)) / Math.max(0.2, M.fc);
         swingTarget(ch, G, g, i, F, tRem);
-        const psiT = F.idle ? 0 : M.psiTD * dir * alongK;
+        const psiT = F.idle ? 0 : tdPsi(M, dir * alongK);
         ankleFrom(g, F.tx, F.ty, F.tz, F.tyaw, psiT, _ank);
         // a run's foot stays back early in the swing (the heel folds up
         // behind) and whips through late; a walk carries it evenly
@@ -792,7 +864,16 @@
         F.ax = lerp(F.sx, _ank.x, e); F.az = lerp(F.sz, _ank.z, e);
         const pk = F.idle ? 0.5 : M.liftPeak;
         const arc = Math.sin(PI * Math.pow(clamp01(F.u), Math.log(0.5) / Math.log(pk)));
-        F.ay = lerp(F.sy, _ank.y, ease(F.u)) + (F.idle ? 0.045 * g.Lw / 0.665 : lift) * arc;
+        /* A STEP UP IS TAKEN EARLY, A STEP DOWN LATE. Height went with
+           distance on one ease: half way across to a tread 18 cm up the
+           ankle was only half way up, toes through the riser; half way to a
+           tread below it was already half way down, heel through the
+           nosing. The foot is up to the height of a higher landing by ~60%
+           of the swing, and holds the height it left until ~40% before it
+           starts down to a lower one. On the flat the two are the same. */
+        const dyv = _ank.y - F.sy, kv = clamp01((Math.abs(dyv) - 0.03) / 0.06);
+        const ev = lerp(ease(F.u), dyv > 0 ? ease(clamp01(F.u * 1.6)) : ease(clamp01((F.u - 0.375) * 1.6)), kv);
+        F.ay = lerp(F.sy, _ank.y, ev) + (F.idle ? 0.045 * g.Lw / 0.665 : lift) * arc;
         F.yaw = F.syaw + wrap(F.tyaw - F.syaw) * e;
         F.psi = swingPsi(M, F, F.u, dir * alongK);
         F.psiW = F.idle ? 0.6 : 1;
@@ -834,8 +915,10 @@
     }
 
     // ---- the hips come down as far as the planted legs need ----
-    // (forward travel, or stopped with a foot left behind: its heel stays up until it steps in)
-    const canRoll = moving ? dir > 0 && alongK > 0.6 : true;
+    // (any travel: a side-step's and a backpedal's trailing foot comes up on
+    // its toe like a walk's, where the foot points the way the hips went)
+    const canRoll = true;
+    _nyaw = yaw;
     for (let i = 0; i < 2; i++) {
       const leg = i ? ch.parts.rl : ch.parts.ll;
       _hip[i].x = leg.position.x; _hip[i].y = leg.position.y; _hip[i].z = leg.position.z;
@@ -876,7 +959,7 @@
         if (p0 < pMax) {
           rollTo(g, F, pMax);
           dn = needOf(ch, G, g, rollI, F);
-          if (dn > allow) F.over = dn > allow + 0.012 * g.hipY;
+          if (dn > allow) F.over = dir > 0 && dn > allow + 0.012 * g.hipY;
           else {
             // the least pitch that makes the reach (the need falls as the heel rises)
             let lo = p0, hi = pMax;
@@ -888,7 +971,7 @@
             rollTo(g, F, hi);
             dn = needOf(ch, G, g, rollI, F);
           }
-        } else F.over = dn > allow + 0.012 * g.hipY;
+        } else F.over = dir > 0 && dn > allow + 0.012 * g.hipY;
       }
       if (dn > 0) need = Math.max(need, dn);
     }
@@ -975,6 +1058,7 @@
       if (foot && W0 >= 0.98 && THREE()) footOrient(foot, yaw, leg, low, F.sw ? F.yaw : F.cyaw, F.psi);
     }
     ch._gFootW = W0;
+    ch._gFeetNow = false;
   }
   // foot local = (shin world)^-1 * (heading, pitch); the rig's group and
   // model carry only a yaw and a scale while the gait owns the legs

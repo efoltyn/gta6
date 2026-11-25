@@ -294,25 +294,41 @@
       // forward axis (+z local). Hit from the front → lean back.
       const fwd = Math.cos(facing) * dz + Math.sin(facing) * dx;
       dir = fwd >= 0 ? 1 : -1;
+      /* ONLY IF THE PLAYER COULD HAVE DONE IT. This fires on any loss of hp
+         the rig did not already react to: another inmate's blow, a wound
+         bleeding, a fall. Every one of them made the man take a step and
+         rock AWAY FROM THE PLAYER, wherever the player was: a man bleeding
+         in the yard backed off from you across forty metres. The player is
+         the source only inside the reach of something in his hand; past
+         that the body gives along the impulse it was really dealt
+         (a._phys, if one is fresh), or just winces where it stands. */
+      r.srcNear = dx * dx + dz * dz < 6.25;
       // tiny physical shove away from the player on this frame. NEVER for a
       // seated-in-parent body (aircraft cabin): knockback writes group
       // position directly, and that group is PLANE-LOCAL with the seat as its
       // only position authority — each hit would permanently walk the rig
       // sideways out of its chair. (CHAR_SEATED_HITTABLE)
-      if (CBZ.knockback && !a._npcAttached) CBZ.knockback(a, p.x, p.z, SHOVE);
-    }
+      if (CBZ.knockback && !a._npcAttached && r.srcNear) CBZ.knockback(a, p.x, p.z, SHOVE);
+    } else r.srcNear = false;
     r.dir = dir;
     if (CBZ.game && CBZ.game.mode === "escape") {
       const ph = a._phys;
       let hx = ph && Number.isFinite(ph.fdx) ? ph.fdx : 0;
       let hz = ph && Number.isFinite(ph.fdz) ? ph.fdz : 0;
-      if (Math.hypot(hx, hz) < 0.01 && p) {
-        hx = a.group.position.x - p.x;
-        hz = a.group.position.z - p.z;
+      let wince = false;
+      if (Math.hypot(hx, hz) < 0.01) {
+        if (p && r.srcNear) {
+          hx = a.group.position.x - p.x;
+          hz = a.group.position.z - p.z;
+        } else {
+          // nobody's blow: he folds a little over it, along his own facing
+          const fy = a.group.rotation.y || 0;
+          hx = -Math.sin(fy); hz = -Math.cos(fy); wince = true;
+        }
       }
       const hd = Math.hypot(hx, hz) || 1;
       r.jailHitX = hx / hd; r.jailHitZ = hz / hd;
-      r.jailHitAmp = Math.min(1.15, 0.62 + ((ph && ph.shock) || 0) * 0.34);
+      r.jailHitAmp = wince ? 0.3 : Math.min(1.15, 0.62 + ((ph && ph.shock) || 0) * 0.34);
       r.jailHitT = JAIL_HIT_DUR;
     }
     // alertCrowd drives the JAIL ambient crowd; in city mode peds run their own

@@ -340,6 +340,17 @@
       if (this.gnpLeft <= 0 || typeof V.groundStrike !== "function") return this.footwork(dt, dist, ux, uz, 1.3, o, target, ring, slot);
       if (dist > 2.0) { this.goal.on = true; this.goal.x = tp.x; this.goal.z = tp.z; return this.footwork(dt, dist, ux, uz, 1.2, o, target, ring, slot); }
       if (this.rng() > (1.6 + 2.4 * this.aggr) * dt) return null;
+      // on his feet over him: some men put the boot in before (or instead
+      // of) getting down on him; a kicker mostly does
+      if (!this.weapon && typeof V.groundKick === "function" && !(V.mountOf && V.mountOf(a)) && this.rng() < (this.style === "kicker" ? 0.8 : 0.4)) {
+        const fk = this.rng() < 0.45 ? "stomp" : "soccer";
+        if (V.groundKick(a, target, { kind: fk, heavy: fk === "stomp", onLand: this.landFn(o), rng: this.rng })) {
+          this.gnpLeft--; this.thrown++;
+          this.stam = Math.max(0, this.stam - 0.07);
+          A.type = "ground"; A.kind = fk;
+          return A;
+        }
+      }
       if (!V.groundStrike(a, target, { onLand: this.landFn(o), rng: this.rng, weapon: this.weapon })) return this.footwork(dt, dist, ux, uz, 1.3, o, target, ring, slot);
       this.gnpLeft--; this.thrown++;
       this.stam = Math.max(0, this.stam - 0.06);
@@ -698,7 +709,14 @@
     // hands behind the back: a man chest to chest gets the forehead, further
     // out the foot is all there is
     if (c.cuffed) { P.kind = (c.dist != null ? c.dist : 99) < BUTT_D ? "headbutt" : "kick"; P.heavy = P.kind === "headbutt"; return P; }
-    if (c.down) { P.verb = "ground"; P.kind = power ? "gnpElbow" : "gnp"; P.heavy = power; return P; }
+    // a man on the floor: the mount and its blows, or, with the stick pulled
+    // back (the kick's direction standing, too), the boot from your feet:
+    // a soccer kick on the tap, the stomp on the power release
+    if (c.down) {
+      P.verb = "ground"; P.heavy = power;
+      P.kind = c.back > 0.5 ? (power ? "stomp" : "soccer") : power ? "gnpElbow" : "gnp";
+      return P;
+    }
     const fwd = c.fwd > 0.5, back = c.back > 0.5, side = Math.abs(c.side || 0) > 0.5 ? (c.side > 0 ? 1 : -1) : 0;
     const dist = c.dist != null ? c.dist : 99;
     const wc = weaponClass(c.weapon);
@@ -863,7 +881,10 @@
     };
     const go = function (spec, c) {
       if (spec.verb === "ground") {
-        if (!c.who || typeof V.groundStrike !== "function") return null;
+        if (!c.who) return null;
+        if ((spec.kind === "stomp" || spec.kind === "soccer") && typeof V.groundKick === "function" &&
+            V.groundKick(actor, c.who, { kind: spec.kind, heavy: spec.kind === "stomp", onLand: o.onLand })) return spec;
+        if (typeof V.groundStrike !== "function") return null;
         return V.groundStrike(actor, c.who, { onLand: o.onLand, heavy: spec.heavy, weapon: o.weapon || null }) ? spec : null;
       }
       if (spec.verb === "tackle") return c.who && typeof V.tackle === "function" && V.tackle(actor, c.who, {}) ? spec : null;

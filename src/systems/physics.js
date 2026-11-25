@@ -3426,7 +3426,10 @@
       player._stepLag = stepLag;
     }
     playerChar.group.position.set(player.pos.x, player.pos.y - sink * proneB - stepLag, player.pos.z);
-    if (len > 0 || sliding) {
+    // (not while a blow is in flight: the strike is turning him to face the
+    // man it is thrown at, systems/verbs_strike.js; the stick has him back
+    // when the hand or the foot is home)
+    if ((len > 0 && !(playerChar.punchT > 0 || playerChar.kickT > 0)) || sliding) {
       // mid-slide the body faces the LOCKED slide heading, not the stick — the
       // feet-first pose must travel feet-first even while you pre-steer the exit.
       const tYaw = sliding ? Math.atan2(st.dirX, st.dirZ) : Math.atan2(mx, mz);
