@@ -2134,9 +2134,33 @@
             let fx, fz;
             if (useG) { fx = G.feet[gi].x; fz = G.feet[gi].z; }
             else { const o = gi ? 0 : 2; fx = g.position.x + (FTm[o] * cy + FTm[o + 1] * sy) * rs; fz = g.position.z + (-FTm[o] * sy + FTm[o + 1] * cy) * rs; }
-            const wFoot = Math.max(seatW + 0.16, 0.33 * rs / 0.7);
+            /* WHERE THE LEG COMES DOWN. On the far side at the kneel's own
+               foot spot (entities/meleeposes.js mountFootOut: the foot lands
+               once and kneels there), never nearer his side than a shin's
+               thickness and 4 cm. If something of his lies there (the arm
+               along his far side), further OUT from him, then a hand toward
+               his hips or his head; never back in.
+               It used to be handed to the foot-spot finder, which moves a
+               foot off a body toward the stepper's own ROOT: and the root
+               was still on the near side. A spot on his far arm was moved
+               back across him, and the ankle came down 14 cm from his
+               centre line, inside his trunk (measured: 13 cm deep), to be
+               slid out again during the kneel. */
+            const MPk = MPf();
+            const wMin = seatW + 0.125 * rs / 0.7;
+            const wFoot = Math.max(wMin + 0.035, MPk && MPk.mountFootOut ? MPk.mountFootOut(rc) : 0.33 * rs / 0.7);
             let lx2 = tx - perpX * wFoot * sd, lz2 = tz - perpZ * wFoot * sd;
-            if (BPm && BPm.footSpot && BPm.footSpot(rc, lx2, fy, lz2, yawAlong, _mfs)) { lx2 = _mfs.x; lz2 = _mfs.z; }
+            if (BPm && BPm.topAt) {
+              let found = false;
+              for (let q = 0; q < 12 && !found; q++) {
+                const w = wFoot + 0.06 * ((q / 3) | 0), da = q % 3 === 0 ? 0 : q % 3 === 1 ? -0.12 : 0.12;
+                const cx = tx + ux * da - perpX * w * sd, cz = tz + uz * da - perpZ * w * sd;
+                // (the ankle and the ball of the foot, as it will point once he faces the head; a shin's clearance)
+                if (BPm.topAt(rc, cx, cz, 0.11 * rs / 0.7) > fy + 0.05) continue;
+                if (BPm.topAt(rc, cx + ux * 0.12 * rs / 0.7, cz + uz * 0.12 * rs / 0.7, 0.07 * rs / 0.7) > fy + 0.05) continue;
+                lx2 = cx; lz2 = cz; found = true;
+              }
+            }
             let top = 0;
             if (BPm && BPm.topAt) for (let k = 1; k <= 5; k++) { const tq = BPm.topAt(rc, fx + (lx2 - fx) * k / 6, fz + (lz2 - fz) * k / 6) - fy; if (tq > top) top = tq; }
             const st = rc._mStep || (rc._mStep = { on: false, init: false, t: 0, dur: 0.5, leg: 0, sx: 0, sz: 0, tx: 0, tz: 0, h: 0, ox: 0, oz: 0 });

@@ -1089,6 +1089,36 @@
     }
   }
 
+  const _ks = { kx: 0, kneeY: 0, hipH: 0, clear: false, kz: 0.12 };
+  function kneelSolve(ch, D) {
+    let kx = D.hipX + 0.26, kneeY = D.footY + 0.07, clear = false;
+    const kz = 0.12;
+    let thighY = Math.sqrt(Math.max(0.03, D.g1 * D.g1 - (kx - D.hipX) * (kx - D.hipX) - kz * kz));
+    let hipH = D.footY + 0.07 + thighY + 0.04;               // knee pad + thigh, posted a touch up
+    if (ch._mountTop != null && ch._mountR > 0 && ch.group) {
+      const top = (ch._mountTop - ch.group.position.y) / D.scale, rT = ch._mountR / D.scale;
+      const cT = Math.max(0, ch._mountHalfW / D.scale - rT), yT = top - rT;           // his trunk's nearer axis, in the rider's frame
+      hipH = Math.max(hipH, top + 0.06 + D.torsoD * 0.5 + 0.012);
+      // (4 cm, not 1.5: measured 2 cm IN him at 1.5. The hips ride his breathing, the trunk
+      // under the seat is not level, the rider's pelvis turns with each punch: the sum is that much)
+      const rr = rT + D.legW * 0.5 + 0.057;
+      for (let y = D.footY + 0.09; y <= hipH - 0.12; y += 0.02) {
+        const out = Math.sqrt(Math.max(0.0004, D.g1 * D.g1 - (hipH - y) * (hipH - y) - kz * kz));
+        // the trunk's axis to the thigh's line, hip joint -> knee, in the plane across him
+        const ex = out, ey = y - hipH, l2 = ex * ex + ey * ey;
+        let t = l2 > 1e-8 ? ((cT - D.hipX) * ex + (yT - hipH) * ey) / l2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const qx = cT - D.hipX - ex * t, qy = yT - hipH - ey * t;
+        kx = D.hipX + out; kneeY = y;
+        if (qx * qx + qy * qy >= rr * rr) { clear = true; break; }
+      }
+    }
+    _ks.kx = kx; _ks.kneeY = kneeY; _ks.hipH = hipH; _ks.clear = clear; _ks.kz = kz;
+    return _ks;
+  }
+  /* how far out from the middle of the man the kneel's foot is (m): systems/verbs_strike.js
+     lands the leg that steps over him there, so the foot comes down once, where it kneels */
+  MP.mountFootOut = function (ch) { const D = dims(ch); return (kneelSolve(ch, D).kx + 0.03) * D.scale; };
   /* ---- THE MOUNT: kneeling astride a man on his back ---------------------
      Knees on the floor either side of his ribs, shins lying back along the
      floor, hips posted over his belly, torso over him, chin down on him,
@@ -1116,28 +1146,7 @@
        underside just off the floor), beside him, the shin running down
        and back to a foot on the floor. With no trunk published (a body with
        no rig): the old kneel, knees on the floor. */
-    let kx = D.hipX + 0.26, kneeY = D.footY + 0.07, clear = false;
-    const kz = 0.12;
-    let thighY = Math.sqrt(Math.max(0.03, D.g1 * D.g1 - (kx - D.hipX) * (kx - D.hipX) - kz * kz));
-    let hipH = D.footY + 0.07 + thighY + 0.04;               // knee pad + thigh, posted a touch up
-    if (ch._mountTop != null && ch._mountR > 0 && ch.group) {
-      const top = (ch._mountTop - ch.group.position.y) / D.scale, rT = ch._mountR / D.scale;
-      const cT = Math.max(0, ch._mountHalfW / D.scale - rT), yT = top - rT;           // his trunk's nearer axis, in the rider's frame
-      hipH = Math.max(hipH, top + 0.06 + D.torsoD * 0.5 + 0.012);
-      // (4 cm, not 1.5: measured 2 cm IN him at 1.5. The hips ride his breathing, the trunk
-      // under the seat is not level, the rider's pelvis turns with each punch: the sum is that much)
-      const rr = rT + D.legW * 0.5 + 0.057;
-      for (let y = D.footY + 0.09; y <= hipH - 0.12; y += 0.02) {
-        const out = Math.sqrt(Math.max(0.0004, D.g1 * D.g1 - (hipH - y) * (hipH - y) - kz * kz));
-        // the trunk's axis to the thigh's line, hip joint -> knee, in the plane across him
-        const ex = out, ey = y - hipH, l2 = ex * ex + ey * ey;
-        let t = l2 > 1e-8 ? ((cT - D.hipX) * ex + (yT - hipH) * ey) / l2 : 0;
-        t = t < 0 ? 0 : t > 1 ? 1 : t;
-        const qx = cT - D.hipX - ex * t, qy = yT - hipH - ey * t;
-        kx = D.hipX + out; kneeY = y;
-        if (qx * qx + qy * qy >= rr * rr) { clear = true; break; }
-      }
-    }
+    const KS = kneelSolve(ch, D), kx = KS.kx, kneeY = KS.kneeY, hipH = KS.hipH, clear = KS.clear, kz = KS.kz;
     /* OUT, THEN DOWN. Hips, knees and feet all went to the kneel on one
        blend, so half way down the knees were half way out: inside his
        width, at the height of his ribs, and the shins came down through
