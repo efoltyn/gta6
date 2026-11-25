@@ -423,10 +423,26 @@
             const fwd = -((Z.jaw.c.x - tp.x) * dx + (Z.jaw.c.z - tp.z) * dz) / d;
             chin = Math.max(0, 0.20 * (scaleOf(tch0) / 0.7) - fwd);
           }
+          /* A KICK IS THROWN OFF A FOOT THAT IS ON THE FLOOR. The step and
+             the kick used to start on the same frame: the standing foot was
+             in the air making the step while the kicking foot was already
+             coming up to the chamber, and the root slid the whole distance
+             (up to 0.75 m in a quarter of a second) with nothing under it.
+             The step is taken first, at a step's pace for its length; the
+             kick's own clock starts as the standing foot comes down
+             (ch.kickT above its duration is the wait: meleeposes and the
+             contact pass both read that as "not begun"), and the hips are
+             still arriving over that foot when the leg goes out. */
+          const kickWait = function (stepT, share) {
+            if (!kick) return;
+            ch.kickT = S.dur + stepT * share;
+          };
           if (backD > 0.03) {
             // too close for this blow: the rear foot goes back first and the root follows
             S.lunge.D = backD; S.lunge.dx = -dx / d; S.lunge.dz = -dz / d; S.lunge.last = 0;
-            MP.startStep(ch, 0, -backD / scaleOf(ch), S.dur * (kick ? 0.42 : 0.5), MP.leadSide(ch) === "l" ? "R" : "L");
+            const stepT = kick ? 0.20 + 0.30 * backD : S.dur * 0.5;
+            MP.startStep(ch, 0, -backD / scaleOf(ch), stepT, MP.leadSide(ch) === "l" ? "R" : "L");
+            kickWait(stepT, 0.9);                                 // both feet are back and down
           }
           const need = backD > 0.03 ? 0 : d + Math.max(0, pend) + chin - V.reachOf(kind, att) * 0.92;
           const maxL = opts.maxLunge != null ? opts.maxLunge : (Ba.isPlayer ? 0.75 : 0.45);
@@ -435,7 +451,9 @@
             S.lunge.D = D; S.lunge.dx = dx / d; S.lunge.dz = dz / d; S.lunge.last = 0;
             const lead = MP.leadSide(ch) === "l" ? "L" : "R";
             // the lead foot goes first; the root arrives by the impact beat
-            MP.startStep(ch, 0, D / scaleOf(ch), S.dur * (kick ? 0.5 : 0.62), lead);
+            const stepT = kick ? 0.22 + 0.30 * D : S.dur * 0.62;
+            MP.startStep(ch, 0, D / scaleOf(ch), stepT, lead);
+            kickWait(stepT, 0.5);                                 // the lead foot has landed (meleeposes: s1 is down by 0.55)
           }
         }
       }

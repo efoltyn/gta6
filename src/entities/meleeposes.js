@@ -505,6 +505,40 @@
       }
       ch._mFtV = ch._mFtS = true;
     } else if (!hadFeet) ch._mFtV = false;
+    /* THE STANDING FOOT OF A KICK IS A SPOT ON THE FLOOR, not a spot under
+       the body. The feet above are kept in the body's frame, so anything
+       that moved or turned the root while the leg was out (the last of a
+       walk the kick was thrown from, a shove, the turn to face him) dragged
+       the one foot that was on the ground along with it. While a kick has
+       the legs and no footwork step is moving the root on purpose, the
+       plant foot is held where it stands in the world and the hips ride
+       over it; a root that has gone further than the leg can stand on
+       drags it (that is a slide, and it is one). */
+    const PLn = ch._mPl || (ch._mPl = { on: false, x: 0, z: 0, n: -1, at: 0 });
+    if (ch.kickT > 0 && ch._mFtV && ch.group && !(fs && fs.on)) {
+      const g = ch.group, yaw = g.rotation.y, c = Math.cos(yaw), sn = Math.sin(yaw);
+      const o = ch.kickLeg === "l" ? 2 : 0;                       // kicking with the +X leg: the -X foot stands
+      // (a spot kept from another kick, or from before this rig sat out some
+      // frames on the floor, is not this kick's foot)
+      const nowMs = CBZ.now || 0, swingN = ch._mSwingN || 0;
+      if (PLn.n !== swingN || Math.abs(nowMs - PLn.at) > 250) PLn.on = false;
+      PLn.n = swingN; PLn.at = nowMs;
+      if (!PLn.on) {
+        PLn.on = true;
+        PLn.x = g.position.x + (FT[o] * c + FT[o + 1] * sn) * D.scale;
+        PLn.z = g.position.z + (-FT[o] * sn + FT[o + 1] * c) * D.scale;
+      } else {
+        const dx = PLn.x - g.position.x, dz = PLn.z - g.position.z;
+        let px = (dx * c - dz * sn) / D.scale, pz = (dx * sn + dz * c) / D.scale;
+        const far = Math.hypot(px, pz), lim = 0.62 * (D.g1 + D.g2);
+        if (far > lim) {
+          px *= lim / far; pz *= lim / far;
+          PLn.x = g.position.x + (px * c + pz * sn) * D.scale;
+          PLn.z = g.position.z + (-px * sn + pz * c) * D.scale;
+        }
+        FT[o] = px; FT[o + 1] = pz;
+      }
+    } else PLn.on = false;
     if (ch._mFtV) { FL.x = FT[0]; FL.z = FT[1]; FR.x = FT[2]; FR.z = FT[3]; }
     else { FT[0] = FL.x; FT[1] = FL.z; FT[2] = FR.x; FT[3] = FR.z; }   // nobody had them: this layer's own spots
     if (mounted) mountPose(ch, D, ch._mountK);
@@ -609,8 +643,23 @@
          the whole body (18 cm along the floor on the chamber, and out again
          on the way down). The hips travel over the foot instead: `over` is
          how far the plant foot is in front of them. */
-      const plantZ = (kSide === "L" ? FR : FL).z;
+      const plantF = kSide === "L" ? FR : FL;
+      const plantZ = plantF.z;
       const over = plantZ * kch;
+      /* ...AND SIDEWAYS OVER IT TOO. The hips stayed on the centre line, a
+         hand's width inside the one foot that was on the floor: a man on one
+         leg with his weight where there was no leg. They go across until
+         the standing hip is over its foot (a round kick, whose trunk leans
+         away over that foot as well, goes a little less far). */
+      S.mX += plantF.x * (key === "front" || key === "knee" ? 0.75 : 0.55) * kch;
+      /* HE STANDS UP ON THE LEG HE STANDS ON. The stance's own crouch (7% of
+         the hip height) plus a "soft knee" stayed on through the kick; with
+         the hips brought over the foot there is nothing left for that drop
+         to be but knee, and the standing knee was bent 50 degrees: a kick
+         thrown from a half squat. A standing leg is all but straight (about
+         15 to 20 degrees); a low kick sits into it a little more. */
+      const standDl = key === "low" ? 0.05 : 0.025;
+      S.dl = lerp(S.dl, standDl, kch);
       // the kicking-side hand and the other one (body frame)
       const kW = kSide === "L" ? WL : WR, oW = kSide === "L" ? WR : WL;
       const kP = kSide === "L" ? PL : PR;
@@ -619,7 +668,6 @@
         // over the plant foot, then the hips thrust through the teep (from a
         // square stand there is no foot in front to come over: the thrust is all of it)
         S.mZ += 0.75 * over + (0.08 + 0.5 * Math.max(0, 0.22 - 0.75 * plantZ)) * ke;
-        S.dl += 0.04 * kch;                                       // the standing knee stays soft
         // the hands stay home; the kicking side's drops a little to balance the leg
         kW.y -= 0.14 * ke; kW.x += sx * 0.08 * ke; kW.z -= 0.04 * ke;
       } else if (key === "round" || key === "low") {
@@ -633,7 +681,6 @@
         S.bz += sx * (high ? 0.30 : 0.18) * ke;                   // counter-lean off the kicking side
         S.bx += (high ? -0.10 : -0.18) * ke;
         S.mZ += 0.75 * over + (0.06 + 0.5 * Math.max(0, 0.22 - 0.75 * plantZ)) * ke;
-        S.dl += 0.05 * kch;
         // the arm on the kicking side swings down and back against the leg;
         // the other glove stays on the jaw
         _t.set(sx * 0.46, D.shY - 0.46, -0.16);
@@ -642,7 +689,7 @@
         oW.x += sx * 0.05 * ke; oW.y += 0.03 * ke;
       } else {                                                    // knee: curl over it, rise onto the plant toe
         S.bx += 0.24 * ke;
-        S.dl += -0.05 * ke;
+        S.dl += -0.02 * ke;                                       // (the standing leg is nearly straight already: see standDl)
         S.mZ += 0.5 * over + 0.10 * ke;
       }
     }
@@ -691,6 +738,16 @@
       const first = fs.lead === "L" ? FL : FR, second = fs.lead === "L" ? FR : FL;
       first.x += fs.x * (s1 - sr); first.z += fs.z * (s1 - sr); first.y += 0.08 * Math.sin(Math.PI * s1);
       second.x += fs.x * (s2 - sr); second.z += fs.z * (s2 - sr); second.y += 0.06 * Math.sin(Math.PI * s2);
+    }
+    if (kicking) {
+      // the standing leg of a kick is nearly straight (standDl), but never so
+      // straight that it cannot reach its foot (the hips still arriving off
+      // the step in, a root that has drifted): the hips stay as low as the
+      // leg needs, and the sole stays on the floor
+      const pf = kSide === "L" ? FR : FL;
+      const phx = (kSide === "L" ? -1 : 1) * D.hipX + S.mX - pf.x, phz = S.mZ - pf.z;
+      const pr = (D.g1 + D.g2) * 0.985;
+      S.dl = Math.max(S.dl, D.hipY - pf.y - Math.sqrt(Math.max(0.01, pr * pr - phx * phx - phz * phz)));
     }
 
     // ================= APPLY ==============================================

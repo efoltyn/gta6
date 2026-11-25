@@ -154,14 +154,24 @@
     // what THIS leg can sweep under the hip while planted (contact to
     // contact). Sideways the hip abducts/adducts, which reaches far less far
     // than it swings fore and aft: a side-step is a short step.
-    const sMax = L * (lerp(1.02 + 0.20 * sstep(1.4, 2.3, vr) + 0.20 * crouch, 1.00 - 0.08 * crouch, wRun)) * (1 - 0.72 * lat);
+    /* (2026-11-24) THE WALK PLUNGED. The cap was 1.22 leg lengths at the
+       jail's 2 m/s walk: a foot 43 cm ahead of the hip at heel strike and
+       60 cm behind it at toe-off, on a leg that is 80 cm hip to ankle. A
+       straight leg only spans that with the hip 17 cm lower, so every step
+       dropped the body into a 60 degree knee bend on the front leg and
+       popped it back up (11 cm at an inmate's 1.4 m/s). A brisk walk on
+       this leg sweeps about 1.1 of it, gives up double support before it
+       gives up cadence (the walk that is nearly a run), and the trailing
+       foot rolls up onto its toe to make the reach (ankleFrom, post). */
+    const sMax = L * (lerp(1.02 + 0.09 * sstep(1.4, 2.3, vr) + 0.20 * crouch, 1.00 - 0.08 * crouch, wRun)) * (1 - 0.72 * lat);
     let fc = steps / 2;
     if (v > 1e-3) {
       let sweep = duty * Math.abs(v) / fc;
       if (sweep > sMax) {
         // a run gives up ground time first (more flight), a walk can't (it
         // would stop being a walk): it steps quicker
-        const dMin = wRun > 0.5 ? 0.20 : duty;
+        // (a fast walk's double support shrinks to a few percent before the step quickens)
+        const dMin = wRun > 0.5 ? 0.20 : Math.min(duty, 0.56);
         duty = Math.max(dMin, sMax * fc / Math.abs(v));
         sweep = duty * Math.abs(v) / fc;
         if (sweep > sMax) { fc = duty * Math.abs(v) / sMax; sweep = sMax; }
@@ -186,7 +196,8 @@
     // the foot's rockers (+ toes down): heel strike / midfoot / forefoot
     const a = clamp01(vr / 1.4);
     out.psiTD = lerp(-0.24 * a, lerp(-0.10, 0.12, sprint), wRun) * (1 - 0.5 * crouch);
-    out.psiLO = lerp(0.50 * a + 0.05, 0.80, wRun);
+    // (toe-off: the foot is pitched ~50 degrees at a walk, heel well up; it was 31)
+    out.psiLO = lerp(0.16 + 0.74 * a, 0.80, wRun);
     out.heelRise = lerp(0.52, 0.30, wRun);            // stance share where a free heel would rise
     out.vr = vr; out.k = k;
     return out;
@@ -212,6 +223,7 @@
       foot, T, S, ha, D,
       hb: 0.27 * D,                 // heel contact behind the ankle (footwear: ankle at -0.20 D, heel at -0.50 D, rounded)
       bf: 0.40 * D,                 // the ball ahead of it
+      tf: 0.60 * D,                 // the front edge of the sole the shoe rolls up onto (it is rigid: no toe joint)
       W: dims.W || 0.3,
       hipX: Math.abs(ll.userData._rootX != null ? ll.userData._rootX : ll.position.x) || (P.hipX || 0.23),
       hipY, s,
@@ -226,7 +238,7 @@
   function footRec() {
     return { sw: false, u: 0, ur: 3, dur: 0.3, x: 0, y: 0, z: 0, yaw: 0,
       ax: 0, ay: 0, az: 0, sx: 0, sy: 0, sz: 0, syaw: 0, spsi: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
-      tyOk: false, psi: 0, psiW: 0, idle: false, tw: 0, gy: null, cl0: null, pcl: null,
+      tyOk: false, psi: 0, psiW: 0, idle: false, tw: 0, gy: null, cl0: null, pcl: null, over: false,
       cx: 0, cz: 0, cyaw: 0 };                       // this frame's contact (a planted foot turned on its ball)
   }
   function state(ch) {
@@ -416,7 +428,11 @@
   /* ---- FOOT GEOMETRY ---------------------------------------------------------
      The ankle from a contact. (px, py, pz): the sole point under the ankle when
      the foot lies flat; yaw: the foot's heading; psi: its pitch (+ toes down).
-     Toes up rolls about the heel, toes down about the ball. World metres. */
+     Toes up rolls about the heel, toes down about the FRONT EDGE of the
+     sole (g.tf). The shoe is one rigid piece: pitched about the ball, as it
+     was, the 7 cm of sole ahead of the ball went 4 cm under the floor at
+     toe-off, and the pivot being that far back cost the trailing leg 5 cm
+     of reach, which the hips paid for. World metres. */
   const _ank = { x: 0, y: 0, z: 0 };
   function ankleFrom(g, px, py, pz, yaw, psi, out) {
     const fx = Math.sin(yaw), fz = Math.cos(yaw);
@@ -424,7 +440,7 @@
     const c = Math.cos(psi), sn = Math.sin(psi);
     let up, fw, ox;
     if (psi < 0) { const hb = g.hb * s; ox = -hb; up = ha * c - hb * sn; fw = ha * sn + hb * c; }
-    else { const bf = g.bf * s; ox = bf; up = ha * c + bf * sn; fw = ha * sn - bf * c; }
+    else { const tf = g.tf * s; ox = tf; up = ha * c + tf * sn; fw = ha * sn - tf * c; }
     out.x = px + fx * (ox + fw); out.z = pz + fz * (ox + fw); out.y = py + up;
     return out;
   }
@@ -527,7 +543,7 @@
       const gy = groundY(F.x, F.z, grp.position.y + 0.6);
       F.y = gy != null && Math.abs(gy - grp.position.y) < 0.6 ? gy : grp.position.y;
       F.yaw = yaw + (G.hy || 0) + R.toe;                // a touch of toe-out
-      F.sw = false; F.u = 0; F.psi = 0; F.idle = false;
+      F.sw = false; F.u = 0; F.psi = 0; F.idle = false; F.over = false;
       ankleFrom(g, F.x, F.y, F.z, F.yaw, 0, _ank);
       F.ax = _ank.x; F.ay = _ank.y; F.az = _ank.z;
     }
@@ -537,7 +553,7 @@
   function liftFoot(F, dur, psi) {
     F.sw = true; F.u = 0; F.dur = Math.max(0.12, dur);
     F.sx = F.ax; F.sy = F.ay; F.sz = F.az; F.syaw = F.yaw; F.spsi = psi;
-    F.tyOk = false; F.gy = null;
+    F.tyOk = false; F.gy = null; F.over = false;
   }
 
   // the landing: contact under the predicted hip, half a stance ahead of it
@@ -555,7 +571,9 @@
       vx = G.vx; vz = G.vz;
       // a little short of half: the trailing foot reaches further (it rolls
       // up onto its ball) than a stiff-ankled heel strike can in front
-      ahead = lerp(0.42, 0.5, M.wRun) * tSt;
+      // (0.42 put a walking heel 43 cm out in front of the hip, further than
+      // the straight front leg reaches without the hips coming down for it)
+      ahead = lerp(0.36, 0.5, M.wRun) * tSt;
     }
     // the predicted root, plus the Raibert lead along the velocity
     let rx = grp.position.x + G.ox + G.vx * (G.moving ? tRem : 0) + vx * ahead;
@@ -607,6 +625,23 @@
      claims them (a fight stance's own foot IK, a fall, a kick). */
   const _t = [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }];
   const _hip = [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }];
+  // how far the hips must come down for foot i's ankle to be in the straight
+  // leg's reach (model units; <= 0: it reaches). _nz: the ankle's fore/aft
+  // from its hip (model frame, - = behind)
+  let _nz = 0;
+  function needOf(ch, G, g, i, F) {
+    toModel(ch, G, F.ax, F.ay, F.az, _p);
+    const tx = _p.x - _hip[i].x, ty = _p.y - _hip[i].y, tz = _p.z - _hip[i].z;
+    const R = g.dmax * g.dmax - tx * tx - tz * tz;
+    _nz = tz;
+    return R > 0 ? -ty - Math.sqrt(R) : -ty - 0.05;
+  }
+  // pitch a planted foot about this frame's contact and re-place its ankle
+  function rollTo(g, F, psi) {
+    F.psi = psi;
+    ankleFrom(g, F.cx, F.y, F.cz, F.cyaw, psi, _ank);
+    F.ax = _ank.x; F.ay = _ank.y; F.az = _ank.z;
+  }
   function post(ch, dt) {
     const G = ch && ch._gv, g = ch && geo(ch);
     if (!G || !g || !ch.group || !ch.model || !ch.body) return;
@@ -700,7 +735,8 @@
           const leg = i ? ch.parts.rl : ch.parts.ll;
           const knee = leg.userData.low ? leg.userData.low.rotation.x : 0;
           const other = G.feet[1 - i];
-          if ((F.psi > 1.12 || knee > 1.95) && (!other.sw || other.u > 0.82 || M.wRun > 0.5)) {
+          // (F.over: up on its toe and the leg still cannot reach it, see REACH below)
+          if ((F.psi > 1.12 || knee > 1.95 || F.over) && (!other.sw || other.u > 0.82 || M.wRun > 0.5)) {
             liftFoot(F, (1 - cl) / M.fc, F.psi);
             F.idle = false; F.cl0 = cl; F.u = 0;
           }
@@ -781,11 +817,15 @@
           psi = (i ? ch._gHeel1 : ch._gHeel0) || 0;
           const dy = (i ? ch._gTurn1 : ch._gTurn0) || 0;
           if (dy) {
-            const bf = g.bf * g.s;
+            const bf = g.tf * g.s;                      // (the point the raised heel pivots on: ankleFrom)
             const bx = F.x + Math.sin(F.yaw) * bf, bz = F.z + Math.cos(F.yaw) * bf;
             cyaw = F.yaw + dy;
             cx = bx - Math.sin(cyaw) * bf; cz = bz - Math.cos(cyaw) * bf;
           }
+        } else if (Math.abs(F.psi) > 0.004) {
+          // STOPPED MID-STRIDE: the heel that was up comes down, it does not
+          // snap flat the frame the body stops (the hips dropped with it)
+          psi = dt > 0 ? damp(F.psi, 0, 12, dt) : F.psi;
         }
         F.psi = psi; F.psiW = 1; F.cx = cx; F.cz = cz; F.cyaw = cyaw;
         ankleFrom(g, cx, F.y, cz, cyaw, psi, _ank);
@@ -794,20 +834,63 @@
     }
 
     // ---- the hips come down as far as the planted legs need ----
+    // (forward travel, or stopped with a foot left behind: its heel stays up until it steps in)
+    const canRoll = moving ? dir > 0 && alongK > 0.6 : true;
     for (let i = 0; i < 2; i++) {
       const leg = i ? ch.parts.rl : ch.parts.ll;
       _hip[i].x = leg.position.x; _hip[i].y = leg.position.y; _hip[i].z = leg.position.z;
     }
-    let need = 0;
+    /* REACH: THE HEEL COMES UP BEFORE THE HIPS COME DOWN. A trailing foot
+       the straight leg can no longer reach used to be reached by lowering
+       the whole body to it. A person's trailing foot rolls up onto its toe
+       instead (that is what the heel rise is for) and, when even that runs
+       out, it leaves the ground. So: the feet that cannot help themselves
+       (the front foot, a foot coming in to land) say how far the hips must
+       drop; the planted trailing foot is rolled up just far enough to need
+       no more than that or a small allowance (5% of the leg: the dip a walk
+       really has at double support); if it cannot make it at full pitch it
+       is marked `over` and the clock above lifts it early. */
+    let need = 0, rollI = -1, rollN = 0;
     for (let i = 0; i < 2; i++) {
       const F = G.feet[i];
       const wgt = F.sw ? sstep(0.55, 0.85, F.u) : 1;
+      F.over = false;
       if (wgt <= 0) continue;
-      toModel(ch, G, F.ax, F.ay, F.az, _p);
-      const tx = _p.x - _hip[i].x, ty = _p.y - _hip[i].y, tz = _p.z - _hip[i].z;
-      const R = g.dmax * g.dmax - tx * tx - tz * tz;
-      const dn = R > 0 ? -ty - Math.sqrt(R) : -ty - 0.05;
+      const dn = needOf(ch, G, g, i, F);
+      // (the planted foot furthest behind the hip, flat or already rolling up)
+      if (canRoll && !F.sw && !F.idle && F.psi >= 0 && _nz < -0.10 * g.hipY && dn > rollN) {
+        if (rollI >= 0) need = Math.max(need, rollN);
+        rollI = i; rollN = dn;
+        continue;
+      }
       if (dn > 0) need = Math.max(need, dn * wgt);
+    }
+    if (rollI >= 0) {
+      const F = G.feet[rollI], leg = rollI ? ch.parts.rl : ch.parts.ll;
+      const allow = Math.max(0.05 * g.hipY, need);
+      let dn = rollN;
+      if (dn > allow) {
+        const fl = (leg.userData.foot && leg.userData.foot.userData.flex) || [-0.35, 0.7];
+        const pMax = Math.min(1.15, Math.max(fl[1], 0.30) + 0.45);
+        const p0 = F.psi;
+        if (p0 < pMax) {
+          rollTo(g, F, pMax);
+          dn = needOf(ch, G, g, rollI, F);
+          if (dn > allow) F.over = dn > allow + 0.012 * g.hipY;
+          else {
+            // the least pitch that makes the reach (the need falls as the heel rises)
+            let lo = p0, hi = pMax;
+            for (let it = 0; it < 7; it++) {
+              const mid = (lo + hi) * 0.5;
+              rollTo(g, F, mid);
+              if (needOf(ch, G, g, rollI, F) > allow) lo = mid; else hi = mid;
+            }
+            rollTo(g, F, hi);
+            dn = needOf(ch, G, g, rollI, F);
+          }
+        } else F.over = dn > allow + 0.012 * g.hipY;
+      }
+      if (dn > 0) need = Math.max(need, dn);
     }
     need = Math.min(need, g.hipY * 0.45);
     if (need > G.drop) G.drop = need; else G.drop = damp(G.drop, need, 16, dt);
@@ -912,7 +995,7 @@
   }
   function touchdown(ch, G, g, F, i) {
     // the swing's own last target is the contact (no pop)
-    F.sw = false; F.u = 0; F.idle = false;
+    F.sw = false; F.u = 0; F.idle = false; F.over = false;
     F.x = F.tx; F.z = F.tz; F.y = F.ty; F.yaw = F.tyaw;
   }
   // the foot pitch for ankleSolve: { psi (world, + toes down), w } or null

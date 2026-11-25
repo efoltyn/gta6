@@ -3177,6 +3177,13 @@
        flat sprint), so a start leans in and a stop is taken on the feet. A
        slide keeps its own curve. velX/velZ is what moves the body and what
        the legs are told; player.speed / moveX stay what the stick WANTS. */
+    /* ON ONE LEG NOBODY WALKS. A kick thrown with the stick held kept the
+       root walking under it: the standing foot (the only thing on the floor)
+       was dragged along the ground for the whole kick. While the kicking
+       foot is up the stick is not obeyed; what speed the body already had
+       runs out on the ordinary stop below, over the planted foot (meleeposes holds
+       that foot where it stands), and the walk resumes when the foot is down. */
+    if (!sliding && playerChar && playerChar.kickT > 0) { desX = 0; desZ = 0; }
     let velX = desX, velZ = desZ;
     {
       const nowMs = CBZ.now || 0;
