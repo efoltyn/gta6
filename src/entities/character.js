@@ -8949,7 +8949,10 @@
     // (a held pose can be a crouch: poses.js coverHead, a civilian taking
     // cover, folds the legs the same way while he stays put)
     const _pc = !moving && ch.pose && CBZ.charPoses && CBZ.charPoses[ch.pose];
-    ch._cb = damp(ch._cb || 0, ch.crouch || (_pc && _pc.crouch) ? 1 : 0, 12, dt);
+    // (not while he is getting on or sitting on a downed man: the player's
+    // crouch flag is only there to bring the eye down, and the crouch pose
+    // dropped his hips another 27 cm THROUGH the man he was kneeling on)
+    ch._cb = damp(ch._cb || 0, (ch.crouch && !ch.mount && !ch._mountGo) || (_pc && _pc.crouch) ? 1 : 0, 12, dt);
     const cb = ch._cb;
     const hipAmp = (0.30 + 0.26 * norm + 0.16 * run2) * (1 - 0.35 * cb) * GA.hipAmp;
     const swing = sinP * hipAmp;

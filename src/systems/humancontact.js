@@ -1506,6 +1506,14 @@
   // ---- the audit ----
   const AU = { frames: 0, pairs: 0, tests: 0, deepest: 0, deepestA: "", deepestB: "", deepestPartA: "", deepestPartB: "",
     deepestBefore: 0, rootPushes: 0, feetReplaced: 0, limbsPushed: 0, limbFrames: 0, strikesStopped: 0, heldPairs: 0, pairsDropped: 0 };
+  // limb re-solves and standing-foot moves by contact (his part * NP + the other's part)
+  const LFB = new Int32Array(NP * NP), FRB = new Int32Array(NP * NP);
+  const strikeLog = [];
+  function byTable(T) {
+    const o = {};
+    for (let i = 0; i < NP; i++) for (let j = 0; j < NP; j++) if (T[i * NP + j]) o[PART[i] + ">" + PART[j]] = T[i * NP + j];
+    return o;
+  }
   function nameOf(a) { return a ? (isPlayer(a) ? "player" : String(a.name || a.id || a.kind || "actor")) : ""; }
   function seen(depth, A, B, pa, pb) {
     if (depth > AU.deepest) { AU.deepest = depth; AU.deepestA = nameOf(A); AU.deepestB = nameOf(B); AU.deepestPartA = pa; AU.deepestPartB = pb; }
@@ -1528,14 +1536,21 @@
        limbFrames      limb re-solves in all (a limb held off a body it is
                        posed into is re-solved every frame it is)
        strikesStopped  blows stopped at the surface they met
+       limbFramesBy    the same, by contact: "his part>the other's part":
+                       the contact that is re-solved every frame is the
+                       one with the big number
+       feetReplacedBy  the standing-foot moves, by the same key
+       strikes         what became of each blow in the window ("kind: ...")
        heldPairs       pairs in one hold whose gripping hands were left alone
        pairsDropped    near pairs not tested (over the per-frame cap) */
   CBZ.bodyPartAudit = function (keep) {
     const r = { frames: AU.frames, pairs: AU.pairs, tests: AU.tests, deepest: AU.deepest,
       deepestActors: [AU.deepestA, AU.deepestB], deepestParts: [AU.deepestPartA, AU.deepestPartB], deepestBefore: AU.deepestBefore,
       rootPushes: AU.rootPushes, feetReplaced: AU.feetReplaced, limbsPushed: AU.limbsPushed, limbFrames: AU.limbFrames, strikesStopped: AU.strikesStopped,
-      heldPairs: AU.heldPairs, pairsDropped: AU.pairsDropped };
+      heldPairs: AU.heldPairs, pairsDropped: AU.pairsDropped,
+      limbFramesBy: byTable(LFB), feetReplacedBy: byTable(FRB), strikes: strikeLog.slice() };
     if (!keep) {
+      LFB.fill(0); FRB.fill(0); strikeLog.length = 0;
       AU.frames = AU.pairs = AU.tests = AU.rootPushes = AU.feetReplaced = AU.limbsPushed = AU.limbFrames = AU.strikesStopped = AU.heldPairs = AU.pairsDropped = 0;
       AU.deepest = AU.deepestBefore = 0; AU.deepestA = AU.deepestB = AU.deepestPartA = AU.deepestPartB = "";
     }
@@ -1742,7 +1757,7 @@
       const dist = Math.min(0.3, dep / Math.max(nh, 0.4) / t);
       ex = hx * dist; ez = hz * dist; mx = ex * 0.5; mz = ez * 0.5;
       movePlant(chX, k, ex, ez);
-      AU.feetReplaced++;
+      AU.feetReplaced++; FRB[_d.i * NP + _d.j]++;
     } else if (onUpper) {
       const tt = Math.max(_d.s, 0.35), q = 1 / tt;
       mx = dx * q; my = dy * q; mz = dz * q;
@@ -1755,6 +1770,7 @@
       mx = dx * a; my = dy * a; mz = dz * a; ex = dx * b; ey = dy * b; ez = dz * b;
       pushed(chX, li);
     }
+    if (!(planted && !onUpper)) LFB[_d.i * NP + _d.j]++;
     let part;
     if (arm) {
       part = k ? chX.parts.ra : chX.parts.la;
@@ -1794,6 +1810,27 @@
       part.updateMatrixWorld(true);
       PX.frame = -1; partsOf(chX, 2);
       pushed(chX, k);
+    }
+  }
+  /* UNDER A RIDER, THE LIMP ARM GIVES, ONCE. A knocked-out man's arm lying
+     where the rider's thigh or shin comes down was re-solved off the leg
+     and the leg off the arm, both, every frame (the fall keys the arm
+     back, the mount keys the leg back). The arm has no muscle in it: it is
+     the one that moves, and it stays moved (entities/meleeposes.js
+     limpNudge shifts where it rests); the rider's leg is then not touched.
+     A conscious man's arms are his own and are left to the limb pass. */
+  function limpYield(B, chB, PB, PA) {
+    const MP = CBZ.meleePoses, fl = chB.fall;
+    if (!MP || !MP.limpNudge || !fl || !fl.on || !fl.ko) return;
+    const f = PB.f;
+    const cx = (f[0] + f[3] + f[7] + f[10]) * 0.25, cy = (f[1] + f[4] + f[8] + f[11]) * 0.25, cz = (f[2] + f[5] + f[9] + f[12]) * 0.25;
+    for (let k = 0; k < 2; k++) {
+      if (!deepest(PB, M_LIMB[k], PA, M_ALL, _d, 0.003)) continue;
+      const o = (4 + 2 * k) * ST;
+      // out from his body, or in toward it: whichever way the contact pushes his elbow
+      const out = _d.nx * (f[o] - cx) + _d.ny * (f[o + 1] - cy) + _d.nz * (f[o + 2] - cz) >= 0 ? 1 : -1;
+      MP.limpNudge(chB, k, out * 0.08);
+      fixLimb(B, chB, PB, k, PA, 0);
     }
   }
   function shiftParts(P, dx, dz) {
@@ -1862,6 +1899,7 @@
       const any = deepest(PA, mm, PB, mm, _d, 0);
       if (any && _d.depth > AU.deepestBefore) AU.deepestBefore = _d.depth;
       if (any && _d.depth > 0.003) {
+        if (B._bcDown && !A._bcDown && mounted(A, B)) limpYield(B, chB, PB, PA);
         for (let round = 0; round < 3; round++) {
           let did = false;
           for (let li = grip ? 2 : 0; li < 4; li++) {
@@ -1884,6 +1922,16 @@
     NAMES: PART, partsOf, strikeHit, footSpot, topAt,
     near(ch) { return !!(ch && ch._bpNf >= bpFrame - 1 && ch._bpNn); },
     count(what) { if (what === "feet") AU.feetReplaced++; else if (what === "strike") AU.strikesStopped++; },
+    // what became of a blow (systems/verbs_strike.js): kept for the audit
+    note(kind, what) { if (strikeLog.length < 24) strikeLog.push(kind + ": " + what); },
+    // a point (a hand a pose is about to place) out of a body's parts, to its surface: true if it moved
+    pushOut(tch, v, r) {
+      const P = partsOf(tch, 0);
+      if (!P.ok || !sphVsParts(P, v.x, v.y, v.z, r, M_ALL, _h)) return false;
+      const d = _h.depth + 0.004;
+      v.x += _h.nx * d; v.y += _h.ny * d; v.z += _h.nz * d;
+      return true;
+    },
   };
 
   /* ============================================================

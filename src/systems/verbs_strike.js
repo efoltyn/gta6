@@ -268,9 +268,12 @@
     let c, r;
     if (level === "ground") {
       // his face where it lies: the skull's centre, lifted to its upper surface
-      out.copy(Z.head.c); out.y += Z.head.r * 0.55;
+      // (ON the skull, and a fist's length off it: the WRIST is what is sent
+      // to the aim, and the fist is 11 cm of hand past it. Sent to a point
+      // inside the head, as it was, every mounted punch ended 7 cm in his face.)
+      out.copy(Z.head.c); out.y += Z.head.r * 0.9 + 0.11 * (Z.scale / 0.7);
       const dx = from.x - out.x, dz = from.z - out.z, d = Math.hypot(dx, dz) || 1;
-      out.x += (dx / d) * Z.head.r * 0.25; out.z += (dz / d) * Z.head.r * 0.25;
+      out.x += (dx / d) * Z.head.r * 0.45; out.z += (dz / d) * Z.head.r * 0.45;
       return out;
     }
     if (level === "floor") {
@@ -1612,7 +1615,7 @@
     if (i >= 0) mounts.splice(i, 1);
     if (M.a) M.a._gnpOn = null;
     const ch = M.Ba && M.Ba.ch;
-    if (ch) ch.mount = false;
+    if (ch) { ch.mount = false; ch._mountGo = false; ch._mountTop = null; ch._mountHalfW = 0; ch._mountOn = null; }
     if (M.Ba && M.Ba.isPlayer && CBZ.player) {
       CBZ.player._gnpOn = null;
       if (M.crouchSet) CBZ.player.crouch = false;
@@ -1638,7 +1641,11 @@
         CBZ.player._gnpOn = tgt;
         if (!CBZ.player.crouch) { CBZ.player.crouch = true; M.crouchSet = true; }   // the eye comes down with you
       }
-      if (Ba.ch) Ba.ch.mount = true;
+      /* HE GETS ON HIM, HE IS NOT SLID THROUGH HIM. The kneel used to begin
+         the frame the button went down, while the root was still sliding
+         across the floor to the seat. He walks to the seat, kneels when
+         he is over it, and the first blow waits for that (stepMounts). */
+      if (Ba.ch) { Ba.ch.mount = false; Ba.ch._mountGo = true; }
     }
     M.idle = 0;
     const blade = !!(opts.weapon && opts.weapon.blade);
@@ -1768,15 +1775,79 @@
       if (PT && PT.ok) {
         const f = PT.f, px = (f[0] + f[7]) * 0.5, pz = (f[2] + f[9]) * 0.5;
         const dx = (f[3] + f[10]) * 0.5 - px, dz = (f[5] + f[12]) * 0.5 - pz, l = Math.hypot(dx, dz);
-        if (l > 0.2) { ux = dx / l; uz = dz / l; bx0 = px; bz0 = pz; along = 0.45 * l; }
+        if (l > 0.2) {
+          ux = dx / l; uz = dz / l; bx0 = px; bz0 = pz;
+          const rs = Ba.ch ? scaleOf(Ba.ch) : 0.7;
+          // his trunk across the floor, and where the rider's knees come down beside it
+          const halfW = Math.hypot(f[0] - f[7], f[2] - f[9]) * 0.5 + f[6];
+          const kneeX = Math.max(0.39 * rs, halfW + 0.094 * rs / 0.7 + 0.015), kneeZ = 0.085 * rs / 0.7;
+          /* ...CLEAR OF HIS ARMS. The seat starts 45% of the way up his
+             trunk and comes down toward his hips until neither knee is on
+             one of his arms as they lie (chosen while getting on, then
+             kept: a seat that followed his arms would crawl). If no seat
+             is clear the knee comes down on the arm: a limp one is moved
+             aside and stays there (humancontact limpYield). */
+          if (M.frac == null || M.slide < 1) {
+            const fy = (Bt.pos.y || 0) + 0.09 * rs / 0.7;
+            let pick = 0.24;
+            for (let q = 0; q < 4; q++) {
+              const fr = 0.45 - 0.07 * q, cx = px + ux * (fr * l + kneeZ), cz = pz + uz * (fr * l + kneeZ);
+              let ok = true;
+              for (let sd = -1; sd <= 1 && ok; sd += 2) {
+                const kx0 = cx + uz * kneeX * sd, kz0 = cz - ux * kneeX * sd;
+                for (let a = 3; a <= 6 && ok; a++) {
+                  const o = a * 7, ex = f[o + 3] - f[o], ey = f[o + 4] - f[o + 1], ez = f[o + 5] - f[o + 2], l2 = ex * ex + ey * ey + ez * ez;
+                  let t = l2 > 1e-10 ? ((kx0 - f[o]) * ex + (fy - f[o + 1]) * ey + (kz0 - f[o + 2]) * ez) / l2 : 0;
+                  t = t < 0 ? 0 : t > 1 ? 1 : t;
+                  const qx = kx0 - f[o] - ex * t, qy = fy - f[o + 1] - ey * t, qz = kz0 - f[o + 2] - ez * t, rr = f[o + 6] + 0.10 * rs / 0.7;
+                  if (qx * qx + qy * qy + qz * qz < rr * rr) ok = false;
+                }
+              }
+              if (ok) { pick = fr; break; }
+            }
+            M.frac = pick;
+          }
+          along = M.frac * l;
+          // the top of his trunk under the seat (meleeposes: the rider's pelvis rests over it)
+          if (Ba.ch) {
+            const yl = f[1] + (f[4] - f[1]) * M.frac, yr = f[8] + (f[11] - f[8]) * M.frac;
+            Ba.ch._mountTop = Math.max(yl, yr) + f[6];
+            Ba.ch._mountHalfW = halfW;
+          }
+        }
       }
       const tx = bx0 + ux * along, tz = bz0 + uz * along;
-      M.slide = Math.min(1, M.slide + dt / 0.3);
-      const k = 1 - Math.exp(-dt * (M.slide >= 1 ? 30 : 12));
-      moveBy(Ba, (tx - p.x) * k, (tz - p.z) * k);
-      Ba.face(Math.atan2(ux, uz), Math.min(1, dt * 12));
+      /* HE WALKS ONTO HIM. The root used to be slid to the seat in 0.3 s
+         with the legs told to stand: a root that moves under a standing
+         body is "carried" (a deck, a lift), so the planted feet rode along
+         with it, through the man's ribs, and then the kneel folded a thigh
+         down through his trunk. He goes at a walk (1.7 m/s) and the legs
+         are told so (ch._verbWalk: the gait walks the ground covered):
+         real steps, each landing tested against the man's parts and put
+         down beside him, the swinging leg lifted over what it crosses
+         (entities/gait.js footSpot / topAt). Over the seat, feet either
+         side of the trunk, he goes down onto his knees. The blow he asked
+         for waits, its clock held, until he is down. */
+      const ddx = tx - p.x, ddz = tz - p.z, dd = Math.hypot(ddx, ddz);
+      if (M.slide < 1) {
+        const stp = Math.min(dd, 1.7 * dt);
+        if (dd > 1e-4) moveBy(Ba, ddx / dd * stp, ddz / dd * stp);
+        if (Ba.ch) Ba.ch._verbWalk = CBZ.now || 0;
+        M.walkT = (M.walkT || 0) + dt;
+        if (dd - stp < 0.05 || M.walkT > 1.8) M.slide = 1;
+      } else {
+        const k = 1 - Math.exp(-dt * 30);
+        moveBy(Ba, ddx * k, ddz * k);
+      }
+      Ba.face(Math.atan2(ux, uz), Math.min(1, dt * (M.slide >= 1 ? 12 : 7)));
       M.lastX = p.x; M.lastZ = p.z;
-      if (Ba.ch) Ba.ch.mount = true;
+      if (Ba.ch) {
+        Ba.ch._mountGo = true; Ba.ch.mount = M.slide >= 1; Ba.ch._mountOn = tch;
+        if (M.slide < 1 || (Ba.ch._mountK || 0) < 0.85) {
+          const st = strikeOf(M.a);
+          if (st && !st.kick && Ba.ch.punchT > 0) Ba.ch.punchT = Math.max(Ba.ch.punchT, st.dur + 0.001);
+        }
+      }
     }
   }
 

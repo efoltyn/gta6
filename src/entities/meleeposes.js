@@ -611,7 +611,7 @@
         // posts the weight over his face, the elbow DIVES the whole torso on him
         const dive = k.path === "groundElbow";
         S.mZ += (dive ? 0.40 : 0.12) * db;
-        S.dl += (dive ? 0.0 : 0.04) * db;
+        // (the hips stay ON him: they used to drop 3 cm into his chest with each punch)
       }
       if (k.path === "upper") {
         const dip = sstep(0, 0.20, p) * (1 - sstep(0.20, 0.46, p));
@@ -994,7 +994,7 @@
         _C.copy(W).lerp(_t, chamber * (1 - d));
         W.copy(_C).lerp(aim, d);
         P.set(sx * 0.75, 0.55 - 0.45 * d, -0.55 - 0.35 * d);
-        postHand(side, aim, d);
+        postHand(ch, D, side, aim, d);
         break;
       }
       case "groundElbow": {
@@ -1007,7 +1007,7 @@
         _t2.set(aim.x - sx * 0.04, aim.y + 0.30, aim.z - 0.04);
         W.lerp(_t2, d);
         P.set(sx * 0.4 * (1 - d), 1 - 1.5 * d, 0.2 + 1.1 * d);
-        postHand(side, aim, d);
+        postHand(ch, D, side, aim, d);
         break;
       }
       case "hammer": {
@@ -1017,7 +1017,7 @@
         W.copy(_C).lerp(aim, d);
         W.y += 0.10 * Math.sin(Math.PI * d);
         P.set(sx * 0.85, 0.35 - 0.5 * d, -0.45);
-        postHand(side, aim, d);
+        postHand(ch, D, side, aim, d);
         break;
       }
       case "clinch": {
@@ -1041,9 +1041,22 @@
      knees, and the knees here are out wide. Root placement (where the actor
      is on him, which way he faces) is verbs_strike.js's job. */
   function mountPose(ch, D, m) {
-    const kx = D.hipX + 0.26, kz = 0.12;
+    /* THE SEAT IS HIS TRUNK. systems/verbs_strike.js reads the downed man's
+       drawn trunk where the rider sits and publishes its top (ch._mountTop,
+       world y) and its half width on the floor (ch._mountHalfW, m): the
+       knees go down outside that width, and the hips are never lower than
+       puts the bottom of the rider's pelvis a little over that top (the
+       thighs run down and out past the corner of his trunk: 3 cm higher
+       they clear it). */
+    let kx = D.hipX + 0.26;
+    const kz = 0.12;
+    if (ch._mountHalfW > 0) kx = Math.min(D.hipX + 0.42, Math.max(kx, ch._mountHalfW / D.scale + D.legW * 0.5 + 0.02));
     const thighY = Math.sqrt(Math.max(0.03, D.g1 * D.g1 - (kx - D.hipX) * (kx - D.hipX) - kz * kz));
-    const hipH = D.footY + 0.07 + thighY + 0.04;             // knee pad + thigh, posted a touch up
+    let hipH = D.footY + 0.07 + thighY + 0.04;               // knee pad + thigh, posted a touch up
+    if (ch._mountTop != null && ch.group) {
+      const need = (ch._mountTop - ch.group.position.y) / D.scale + 0.06 + D.torsoD * 0.5 + 0.012 + 0.045;
+      hipH = Math.min(hipH + 0.30, Math.max(hipH, need));
+    }
     const breath = 0.012 * Math.sin((ch.breath || 0) * 3.1);
     S.dl = lerp(S.dl, D.hipY - hipH + breath, m);
     S.mZ = lerp(S.mZ, 0, m); S.mX = lerp(S.mX, 0, m); S.mYaw = lerp(S.mYaw, 0, m);
@@ -1060,10 +1073,22 @@
     QL.lerp(_t2.set(0.55, -0.1, 1), m); QR.lerp(_t2.set(-0.55, -0.1, 1), m);
   }
   // the other hand on a ground strike: posted on his chest, pinning him
-  function postHand(side, aim, d) {
+  function postHand(ch, D, side, aim, d) {
     const O = side === "L" ? WR : WL, OP = side === "L" ? PR : PL, ox = side === "L" ? -1 : 1;
     _t2.set(aim.x + ox * 0.16, aim.y - 0.05, aim.z - 0.30);
     O.lerp(_t2, 0.55 + 0.35 * d);
+    /* ON HIM, NOT IN HIM. The spot is measured off his face (a hand's
+       breadth to the side, a forearm toward the rider), which on most
+       bodies is inside the top of his chest or the root of his arm: the
+       posting hand was authored 5 cm into him and pushed out again by the
+       part pass on every frame of the mount. It is put on the surface of
+       whatever of his is there (CBZ.bodyParts.pushOut; ch._mountOn is the
+       man under him, written by systems/verbs_strike.js). */
+    const BP = CBZ.bodyParts, on = ch._mountOn;
+    if (BP && BP.pushOut && on && on.group && on.group.visible !== false) {
+      _t2.copy(O); ch.body.localToWorld(_t2);
+      if (BP.pushOut(on, _t2, 0.065 * D.scale / 0.7)) { ch.body.worldToLocal(_t2); O.copy(_t2); }
+    }
     OP.set(ox * 0.7, -0.6, -0.3);
   }
 
@@ -1761,6 +1786,19 @@
     return true;
   };
   // true while the limp springs are still moving (bodyfall.js does not let a body sleep under them)
+  /* a limp arm moved aside and LEFT there: where it comes to rest is shifted
+     (arm 0 = his left; d radians, + = out from the body), so the springs
+     carry it out of the way and it lies where it was put. For the rider's
+     knee coming down on it (systems/humancontact.js): pushed off every
+     frame and keyed back every frame, it never settled. */
+  MP.limpNudge = function (ch, arm, d) {
+    const L = ch && ch._limp;
+    if (!L || !L.init) return false;
+    const i = arm ? 3 : 1;
+    L.r[i] = clamp(L.r[i] + d, LMIN[i], LMAX[i]);
+    L.sleep = false; L.quiet = 0;
+    return true;
+  };
   MP.limpBusy = function (ch) { const L = ch && ch._limp; return !!(L && L.init && !L.sleep); };
 
   /* ---- DRAGGING HIMSELF (bodyfall.js moves the root; ch._drag = { on, t }):
