@@ -489,7 +489,12 @@
           }
           const need = backD > 0.03 ? 0 : d + Math.max(0, pend) + chin - V.reachOf(kind, att) * 0.92;
           const maxL = opts.maxLunge != null ? opts.maxLunge : (Ba.isPlayer ? 0.75 : 0.45);
-          const D = Math.max(0, Math.min(maxL, need));
+          /* (NOT INTO A MAN WHO IS DOWN. A standing blow at a man on the floor
+             or on one knee cannot land (he is kicked or mounted, V.groundKick
+             / V.groundStrike), but it still took its step to its range of
+             his ROOT: a knee stepped 0.7 m in and stood the attacker's
+             thigh in a kneeling man's chest. Thrown from where he stands.) */
+          const D = Bt.down() && !isFloorKick(kind) && S.level !== "ground" ? 0 : Math.max(0, Math.min(maxL, need));
           if (D > 0.03 && !walled(ap.x, (ap.y || 0) + 1.2, ap.z, tp.x, (tp.y || 0) + 1.2, tp.z)) {
             S.lunge.D = D; S.lunge.dx = dx / d; S.lunge.dz = dz / d; S.lunge.last = 0;
             const lead = MP.leadSide(ch) === "l" ? "L" : "R";
@@ -1907,26 +1912,50 @@
       const ddx = tx - p.x, ddz = tz - p.z, dd = Math.hypot(ddx, ddz);
       const yawAlong = Math.atan2(ux, uz);
       if (M.slide < 1 && bodyOK && rc && rc.group) {
+        // (may end this frame at once: a man already at the seat, see below; the seated branch takes him next frame)
         const perpX = uz, perpZ = -ux;                               // to the rider's LEFT of the trunk's line, once he faces the head
         const ra = (p.x - bx0) * ux + (p.z - bz0) * uz, rl = (p.x - bx0) * perpX + (p.z - bz0) * perpZ;
         const rs = scaleOf(rc), fy = p.y || 0;
         const off = seatW + 0.17 * rs / 0.7, lane = off + 0.12;
         if (M.flank == null) {
-          let sd = rl >= 0 ? 1 : -1;
+          /* WHERE HE STANDS. Beside the trunk, on floor that nothing of the
+             man lies on: both of the rider's feet go there (three probes,
+             a foot's width apart along him). The nearer side at the seat's
+             station first, then a hand's length toward his hips or his
+             head on that side, then the same on the other side; an
+             outflung arm on the nearer side sends him to a clear station
+             or round to the other. (It used to probe one point, and stood
+             him on the arm.) If nowhere is clear: the nearer side, and
+             his feet are put down beside what lies there. */
+          let sd = rl >= 0 ? 1 : -1, sa = along, found = false;
           if (BPm && BPm.topAt) {
-            const b1 = BPm.topAt(rc, tx + perpX * off * sd, tz + perpZ * off * sd) > fy + 0.06;
-            const b2 = BPm.topAt(rc, tx - perpX * off * sd, tz - perpZ * off * sd) > fy + 0.06;
-            if (b1 && !b2) sd = -sd;
+            for (let q = 0; q < 6 && !found; q++) {
+              const sg = q < 3 ? sd : -sd, da = q % 3 === 0 ? 0 : q % 3 === 1 ? -0.16 : 0.16;
+              let clear = true;
+              for (let k = -1; k <= 1 && clear; k++) {
+                const a1 = along + da + k * 0.12;
+                if (BPm.topAt(rc, bx0 + ux * a1 + perpX * off * sg, bz0 + uz * a1 + perpZ * off * sg) > fy + 0.06) clear = false;
+              }
+              if (clear) { sd = sg; sa = along + da; found = true; }
+            }
           }
-          M.flank = sd; M.stage = 0; M.walkT = 0;      // (M.side is the punching hand: this is which side of him)
-          M.budget = 2.0 + (Math.abs(rl - sd * off) + Math.abs(ra - along) + (rl * sd < 0 ? 2 * off : 0)) / 1.4;
+          M.flank = sd; M.standA = sa; M.stage = 0; M.walkT = 0;      // (M.side is the punching hand: this is which side of him)
+          M.budget = 2.0 + (Math.abs(rl - sd * off) + Math.abs(ra - sa) + (rl * sd < 0 ? 2 * off : 0)) / 1.4;
+          /* ALREADY AT THE SEAT (he was on him a moment ago: the mount lapsed
+             between two blows and this is the next one): he goes back down
+             where he is. Starting the walk again from on top of the man
+             took him off sideways through the man's ribs and arm and round
+             again. */
+          if (Math.abs(rl) < off * 0.6 && Math.abs(ra - along) < 0.3) M.slide = 1;
         }
         const sd = M.flank;
         const yawAcross = Math.atan2(-perpX * sd, -perpZ * sd);
-        if (M.stage === 0) {
+        if (M.slide >= 1) {
+          // (already there)
+        } else if (M.stage === 0) {
           M.walkT += dt;
           // where to next: the stand point, or the way round to it
-          let ga = along, gl = sd * off, last = true;
+          let ga = M.standA, gl = sd * off, last = true;
           if (rl * sd < off - 0.04) {
             last = false;
             if (ra < aMin - 0.15 || ra > aMax + 0.15 || Math.abs(rl) < off) { ga = ra; gl = sd * lane; }   // clear of his ends, or on him: straight out to the lane

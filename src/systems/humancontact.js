@@ -1776,7 +1776,8 @@
     AU.limbFrames++;
   }
   // li: 0 left arm, 1 right arm, 2 left leg, 3 right leg (his own left / right)
-  function fixLimb(X, chX, PX, li, PY, round) {
+  // flat: he is lying on the floor: his limb gives along the floor, never up off it
+  function fixLimb(X, chX, PX, li, PY, round, flat) {
     const MP = CBZ.meleePoses;
     if (!MP || !MP.solveArm || !MP.solveLeg || !MP.dims || !scratch() || !chX.model) return false;
     if (!deepest(PX, M_LIMB[li], PY, M_ALL, _d, 0.003)) return false;
@@ -1787,7 +1788,35 @@
     let mx = 0, my = 0, mz = 0, ex = 0, ey = 0, ez = 0;
     const onUpper = _d.i === iU, onFoot = !arm && _d.i === 11 + k;
     const planted = !arm && plantedFoot(chX, k);
-    if (planted && !onUpper) {
+    if (flat) {
+      /* A LIMB LYING ON THE FLOOR SLIDES, IT DOES NOT RISE. A lying man's
+         arm in a standing man's shin was solved like any limb: out along
+         the contact, and for a contact on the upper arm by swinging the
+         elbow round the line from shoulder to hand. For an arm flat on
+         the floor that swing has only one way to go, UP: the elbow tented
+         off the floor, the rider's leg met it higher, pushed it higher,
+         and a knocked-out man's arm stood straight up beside the rider
+         (thigh in upper arm, half a metre off the floor). On the floor
+         the whole limb is moved SIDEWAYS, elbow and hand (knee and foot)
+         by the same amount, away from what is in it, by the distance at
+         which it clears at its own height. */
+      let hx = _d.nx, hz = _d.nz;
+      const nh0 = Math.hypot(hx, hz);
+      let nh = nh0;
+      if (nh < 0.25) {
+        // (something is ON it: off to the side its own middle is on, from the other part's axis)
+        const o = _d.i * ST;
+        hx = (f[o] + f[o + 3]) * 0.5 - _d.qx; hz = (f[o + 2] + f[o + 5]) * 0.5 - _d.qz;
+        nh = Math.hypot(hx, hz);
+        if (nh < 1e-3) { const gp = chX.group.position; hx = gp.x - _d.qx; hz = gp.z - _d.qz; nh = Math.hypot(hx, hz) || 1; }
+      }
+      hx /= nh; hz /= nh;
+      const dc = _d.rr - _d.depth, dyc = dc * _d.ny, hc = dc * nh0;
+      const sideOff = Math.sqrt(Math.max(0, _d.rr * _d.rr - dyc * dyc)) - hc + 0.004;
+      const dist = Math.min(0.25, Math.max(dep / Math.max(nh0, 0.4), sideOff));
+      mx = ex = hx * dist; mz = ez = hz * dist;
+      pushed(chX, li);
+    } else if (planted && !onUpper) {
       // a standing foot: along the floor, and it stays there
       let hx = _d.nx, hz = _d.nz, nh = Math.hypot(hx, hz);
       if (nh < 0.25) { const gp = chX.group.position; hx = gp.x - _d.qx; hz = gp.z - _d.qz; const l = Math.hypot(hx, hz) || 1; hx /= l; hz /= l; nh = 0.4; }
@@ -1813,7 +1842,7 @@
       mx = dx * a; my = dy * a; mz = dz * a; ex = dx * b; ey = dy * b; ez = dz * b;
       pushed(chX, li);
     }
-    if (!(planted && !onUpper)) LFB[_d.i * NP + _d.j]++;
+    if (flat || !(planted && !onUpper)) LFB[_d.i * NP + _d.j]++;
     let part;
     if (arm) {
       part = k ? chX.parts.ra : chX.parts.la;
@@ -1873,7 +1902,7 @@
       // out from his body, or in toward it: whichever way the contact pushes his elbow
       const out = _d.nx * (f[o] - cx) + _d.ny * (f[o + 1] - cy) + _d.nz * (f[o + 2] - cz) >= 0 ? 1 : -1;
       MP.limpNudge(chB, k, out * 0.08);
-      fixLimb(B, chB, PB, k, PA, 0);
+      fixLimb(B, chB, PB, k, PA, 0, true);
     }
   }
   function shiftParts(P, dx, dz) {
@@ -1904,7 +1933,7 @@
     let mA = all ? M_ALL : M_TRUNK, mB = all ? M_ALL : M_TRUNK;
     if (!all && chA.kickT > 0) mA &= ~(chA.kickLeg === "l" ? 1 << 7 : 1 << 9);
     if (!all && chB.kickT > 0) mB &= ~(chB.kickLeg === "l" ? 1 << 7 : 1 << 9);
-    for (let it = 0; it < 2; it++) {
+    for (let it = 0; it < 3; it++) {
       if (!deepest(PA, mA, PB, mB, _d2, 0.006)) return;
       let nx = _d2.nx, nz = _d2.nz, nh = Math.hypot(nx, nz);
       const ap = posOf(A), bp = posOf(B);
@@ -1979,7 +2008,13 @@
       if (any && _d.depth > AU.deepestBefore) AU.deepestBefore = _d.depth;
       if (any && _d.depth > 0.003) {
         const before = _d.depth, lf0 = AU.limbFrames, rp0 = AU.rootPushes;
-        const ride = dB && !dA && mounted(A, B);
+        /* (A RIDER is one who is over the man: stepping across him or down on
+           his knees. While he is still WALKING to his place beside the man
+           he is a man on his feet next to a man on the floor like any
+           other: his feet are placed clear of the limbs and his root is
+           kept off them, and nothing of the lying man is moved for him.) */
+        const over = mounted(A, B) && (chA.mount || !!(chA._mStep && chA._mStep.on));
+        const ride = dB && !dA && over;
         /* ONE MAN GIVES WAY, THEN THE OTHER, THEN THE ROOTS. It used to take
            turns limb by limb (his arm, the other's arm, his leg, the
            other's leg, three times round): with both men moving, each
@@ -2022,7 +2057,7 @@
           limpYield(B, chB, PB, PA);
           for (let it = 0; it < 4; it++) {
             let did = false;
-            for (let li = 0; li < 4; li++) if (fixLimb(B, chB, PB, li, PA, it)) did = true;
+            for (let li = 0; li < 4; li++) if (fixLimb(B, chB, PB, li, PA, it, true)) did = true;
             if (!did) break;
           }
           for (let it = 0; it < 4; it++) {
@@ -2039,7 +2074,7 @@
         for (let side = 0; side < 2; side++) {
           for (let it = 0; it < 4; it++) {
             let did = false;
-            for (let li = grip ? 2 : 0; li < 4; li++) if (fixLimb(X, chX, PX, li, PY, it)) did = true;
+            for (let li = grip ? 2 : 0; li < 4; li++) if (fixLimb(X, chX, PX, li, PY, it, X === B ? dB : dA)) did = true;
             if (!did) break;
           }
           const t = X; X = Y; Y = t;
@@ -2047,7 +2082,7 @@
           const tp = PX; PX = PY; PY = tp;
         }
         }
-        if (!grip && !mounted(A, B) && !A._bcSkip && !B._bcSkip) {
+        if (!grip && !over && !A._bcSkip && !B._bcSkip) {
           rootStage(A, B, PA, PB, chA, chB, false, dA, dB);
           if (deepest(PA, mm, PB, mm, _d, 0) && _d.depth > 0.008) rootStage(A, B, PA, PB, chA, chB, true, dA, dB);
         }

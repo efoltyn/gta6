@@ -910,7 +910,8 @@
        that is punching: its hand is aimed, and stops, by the strike. */
     const BPc = CBZ.bodyParts;
     if (BPc && BPc.clearPoint && BPc.near(ch) && !ch.cuffed && ((hr && hr.on) || ch.staggerT > 0)) {
-      const rH = 0.07 * D.scale / 0.7;
+      // (12 cm, not 7: the hand cleared him and the forearm behind it still lay across the arm that hit him)
+      const rH = 0.12 * D.scale / 0.7;
       if (!(S._k && S._side === "L")) { _t.copy(WL); b.localToWorld(_t); if (BPc.clearPoint(ch, _t, rH)) { b.worldToLocal(_t); WL.copy(_t); } }
       if (!(S._k && S._side === "R")) { _t.copy(WR); b.localToWorld(_t); if (BPc.clearPoint(ch, _t, rH)) { b.worldToLocal(_t); WR.copy(_t); } }
     }
