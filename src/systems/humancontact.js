@@ -1905,6 +1905,59 @@
       fixLimb(B, chB, PB, k, PA, 0, true);
     }
   }
+  /* WHERE A HELD MAN FITS (CBZ.bodyParts.holdClear, asked by systems/verbs.js
+     placeTarget each time it places him). A hold's table says where the
+     held man goes (a grab: so far in front; a carry: belly on the shoulder,
+     so far behind it), tuned on one pair of bodies; on another pair, or
+     with the holder's thigh forward, that spot is inside the holder. This
+     answers, from the two men's drawn parts, how far along which line the
+     held man has to be moved from the table's spot for his trunk and head
+     (and, standing, his thighs) to be clear of the holder's trunk, head and
+     thighs by a finger's width: nothing if he already is; else the
+     shortest distance along the line of the deepest contact (kept on the
+     floor's plane for a man who is standing; any way, up included, for a
+     man who is carried), found by halving. No memory: the same two poses
+     give the same answer.
+       b: the move from where his parts were last drawn to the table's spot
+       (the holder's own move since then taken off). out: the extra move. */
+  function shift3(P, dx, dy, dz) {
+    const f = P.f;
+    for (let o = 0; o < NP * ST; o += ST) { f[o] += dx; f[o + 1] += dy; f[o + 2] += dz; f[o + 3] += dx; f[o + 4] += dy; f[o + 5] += dz; }
+    P.x0 += dx; P.x1 += dx; P.y0 += dy; P.y1 += dy; P.z0 += dz; P.z1 += dz;
+  }
+  const HC_A = 1 | 2 | 4 | (1 << 7) | (1 << 9), HC_GAP = 0.008;
+  let _hcCur = 0;
+  function hcAt(PT, mT, PA, ax, ay, az, d) {
+    shift3(PT, ax * (d - _hcCur), ay * (d - _hcCur), az * (d - _hcCur));
+    _hcCur = d;
+    return deepest(PT, mT, PA, HC_A, _d2, -HC_GAP);
+  }
+  function holdClear(chA, chT, bx, by, bz, carried, awayX, awayZ, out) {
+    out.x = out.y = out.z = 0;
+    if (!chA || !chT || !chA.group || !chT.group) return false;
+    const PA = partsOf(chA, 0), PT = partsOf(chT, 0);
+    if (!PA.ok || !PT.ok) return false;
+    const mT = carried ? 1 | 2 | 4 : HC_A;
+    let moved = false;
+    shift3(PT, bx, by, bz);
+    if (deepest(PT, mT, PA, HC_A, _d2, -HC_GAP)) {
+      let ax = _d2.nx, ay = carried ? _d2.ny : 0, az = _d2.nz, al = Math.hypot(ax, ay, az);
+      if (!carried && al < 0.35) { ax = awayX; az = awayZ; al = Math.hypot(ax, az); }
+      if (al > 1e-4) {
+        ax /= al; ay /= al; az /= al;
+        _hcCur = 0;
+        let lo = 0, hi = 0.4;
+        if (hcAt(PT, mT, PA, ax, ay, az, hi)) lo = hi;
+        else for (let it = 0; it < 6; it++) { const mid = (lo + hi) * 0.5; if (hcAt(PT, mT, PA, ax, ay, az, mid)) lo = mid; else hi = mid; }
+        const d = lo >= 0.4 ? 0.4 : hi;
+        shift3(PT, -ax * _hcCur, -ay * _hcCur, -az * _hcCur);
+        out.x = ax * d; out.y = ay * d; out.z = az * d;
+        moved = true;
+      }
+    }
+    shift3(PT, -bx, -by, -bz);
+    return moved;
+  }
   function shiftParts(P, dx, dz) {
     const f = P.f;
     for (let o = 0; o < NP * ST; o += ST) { f[o] += dx; f[o + 2] += dz; f[o + 3] += dx; f[o + 5] += dz; }
@@ -2119,7 +2172,7 @@
   }
   if (CBZ.onUpdate) CBZ.onUpdate(92, partPass);
   CBZ.bodyParts = {
-    NAMES: PART, partsOf, strikeHit, footSpot, topAt,
+    NAMES: PART, partsOf, strikeHit, footSpot, topAt, holdClear,
     near(ch) { return !!(ch && ch._bpNf >= bpFrame - 1 && ch._bpNn); },
     count(what) { if (what === "feet") AU.feetReplaced++; else if (what === "strike") AU.strikesStopped++; },
     // what became of a blow (systems/verbs_strike.js): kept for the audit

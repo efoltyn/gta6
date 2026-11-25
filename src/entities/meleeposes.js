@@ -1154,11 +1154,14 @@
       // it, on the floor behind; the leg's pole is the knee itself, from the hip
       const drop = Math.max(0, kneeY - (D.footY + 0.06)), back = Math.sqrt(Math.max(0.01, D.g2 * D.g2 - drop * drop));
       const fx = kx + 0.03, fy = D.footY + 0.06, fz = kz - back;
-      FL.set(lerp(FL.x, fx, mOut), lerp(FL.y, fy, mDn), lerp(FL.z, fz, mDn));
-      FR.set(lerp(FR.x, -fx, mOut), lerp(FR.y, fy, mDn), lerp(FR.z, fz, mDn));
+      // (a hand's width wider on the way down than where they end: a shin coming down
+      // beside his trunk clipped its far side by 3-4 cm half way)
+      const wide = 0.08 * Math.sin(Math.PI * mDn);
+      FL.set(lerp(FL.x, fx, mOut) + wide, lerp(FL.y, fy, mDn), lerp(FL.z, fz, mDn));
+      FR.set(lerp(FR.x, -fx, mOut) - wide, lerp(FR.y, fy, mDn), lerp(FR.z, fz, mDn));
       // (the knee turns out first: its pole goes sideways with the feet, and down with the hips)
-      QL.set(lerp(QL.x, kx - D.hipX, mOut), lerp(QL.y, kneeY - hipH, mDn), lerp(QL.z, kz, mDn));
-      QR.set(lerp(QR.x, -(kx - D.hipX), mOut), lerp(QR.y, kneeY - hipH, mDn), lerp(QR.z, kz, mDn));
+      QL.set(lerp(QL.x, kx - D.hipX, mOut) + wide, lerp(QL.y, kneeY - hipH, mDn), lerp(QL.z, kz, mDn));
+      QR.set(lerp(QR.x, -(kx - D.hipX), mOut) - wide, lerp(QR.y, kneeY - hipH, mDn), lerp(QR.z, kz, mDn));
     } else {
     // feet: behind the knees, shins on the floor, toes pointed back
     _t.set(kx + 0.04, D.footY + 0.06, kz - D.g2 * 0.96); FL.lerp(_t, m);

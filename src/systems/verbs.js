@@ -2657,6 +2657,7 @@
     return false;
   }
 
+  const _hcO = { x: 0, y: 0, z: 0 };
   function placeTarget(S, A, T, dt, yawA) {
     if (S.opts.noMove) {
       // the caller owns both roots (a cutscene, a netted body): poses and hands only
@@ -2805,6 +2806,29 @@
       }
       yaw = yb;
       pitch = lerp(S.x0.pitch, pitch, k);
+    }
+    /* HE IS PLACED WHERE THE TWO BODIES FIT. The table above puts a grabbed
+       man 0.44 m in front (the holder's thigh was in his trunk) and a
+       carried man's belly on the shoulder (his head was in the carrier's
+       trunk on the way up, and against the carrier's thigh on the walk),
+       whatever the two bodies are. The part solver is asked, on the two
+       rigs as drawn, how far along which line that spot has to move for
+       his trunk and head (standing: his thighs too) to clear the holder's
+       trunk, head and thighs (systems/humancontact.js holdClear), and he
+       is placed there. Out at once; back in no faster than 12 cm/s, so a
+       carrier's swinging thigh does not pump him. Not a man on the floor
+       (the pin, the drag): those are placed off the floor's own points. */
+    if (!o.ground && !o.drag && CBZ.bodyParts && CBZ.bodyParts.holdClear && T.pos && T.ch && A.ch) {
+      const HV = S._hc || (S._hc = { x: 0, y: 0, z: 0 });
+      const mAx = S._ax != null ? A.pos.x - S._ax : 0, mAz = S._az != null ? A.pos.z - S._az : 0;
+      let wx = x - A.pos.x, wz = z - A.pos.z;
+      const wl = Math.hypot(wx, wz);
+      if (wl > 1e-3) { wx /= wl; wz /= wl; } else { wx = fx; wz = fz; }
+      const moved = CBZ.bodyParts.holdClear(A.ch, T.ch, x - T.pos.x - mAx, y - T.pos.y, z - T.pos.z - mAz, !!(o.anchor && o.anchorK > 0), wx, wz, _hcO);
+      const nl = moved ? Math.hypot(_hcO.x, _hcO.y, _hcO.z) : 0, pl = Math.hypot(HV.x, HV.y, HV.z);
+      if (nl >= pl) { HV.x = _hcO.x; HV.y = _hcO.y; HV.z = _hcO.z; }
+      else if (pl > 1e-5) { const k = Math.max(nl / pl, 1 - 0.12 * dt / pl); HV.x *= k; HV.y *= k; HV.z *= k; }
+      x += HV.x; y += HV.y; z += HV.z;
     }
     // bodies do not go through walls: THE ONE MOVER takes him from where he
     // is to where the hold puts him, swept (a wall or a shut door between
