@@ -1520,7 +1520,8 @@
   }
   // the worst frame of the window: what the two men were doing when the pass left the most overlap
   const WORST = { depth: 0, frame: 0, parts: ["", ""], actors: ["", ""], attackerState: "", targetState: "", bothStriking: false,
-    rootDist: 0, rigDist: 0, at: [0, 0, 0, 0, 0, 0], capsuleR: [0, 0], capsuleShrunk: false, firstToYield: "", solvesThatFrame: 0, rootPushesThatFrame: 0, before: 0 };
+    rootDist: 0, rigDist: 0, at: [0, 0, 0, 0, 0, 0], capsuleR: [0, 0], capsuleShrunk: false, firstToYield: "", solvesThatFrame: 0, rootPushesThatFrame: 0, before: 0,
+    poses: ["", ""], rootTakenBack: 0 };
   function stateOf(a, ch) {
     const f = ch.fall, knee = f && f.on && (f.variant === "liver" || f.variant === "kneel");
     if (lying(a)) return knee ? "kneeling" : f && f.on && f.ko ? "down (out cold)" : "down";
@@ -1534,6 +1535,18 @@
     return ch.fightStance ? "guard" : "standing";
   }
   function nameOf(a) { return a ? (isPlayer(a) ? "player" : String(a.name || a.id || a.kind || "actor")) : ""; }
+  // what else has this rig's arms (the audit: "standing" says nothing about a held pose)
+  function poseOf(a, ch) {
+    let s = ch.pose ? String(ch.pose) : "";
+    const add = function (on, w) { if (on) s += (s ? "+" : "") + w; };
+    add(ch.sitting, "sit"); add(ch.aimingPose, "aim"); add(ch.carryPose, "carry"); add(ch.bladeCarry, "blade"); add(ch.cuffed, "cuffed");
+    add(ch.reachT > 0, "reach"); add((ch._mK || 0) > 0.05, "stanceK" + (ch._mK || 0).toFixed(2)); add(ch.koPose, "ko");
+    const S = sessionOf(a);
+    add(!!S, "hold:" + ((S && (S.kind || S.verb)) || "?") + (S && S.a === a ? "(holder)" : "(held)"));
+    const r = a._react || a.reaction;
+    add(!!(r && (r.kind || r.name)), "react:" + (r && (r.kind || r.name)));
+    return s || "none";
+  }
   function seen(depth, A, B, pa, pb) {
     if (depth > AU.deepest) { AU.deepest = depth; AU.deepestA = nameOf(A); AU.deepestB = nameOf(B); AU.deepestPartA = pa; AU.deepestPartB = pb; }
   }
@@ -1586,7 +1599,8 @@
         attackerState: WORST.attackerState, targetState: WORST.targetState, bothStriking: WORST.bothStriking, rootDist: WORST.rootDist,
         rigDist: WORST.rigDist, at: WORST.at.slice(),
         capsuleR: WORST.capsuleR.slice(), capsuleShrunk: WORST.capsuleShrunk, firstToYield: WORST.firstToYield,
-        solvesThatFrame: WORST.solvesThatFrame, rootPushesThatFrame: WORST.rootPushesThatFrame } : null };
+        solvesThatFrame: WORST.solvesThatFrame, rootPushesThatFrame: WORST.rootPushesThatFrame,
+        poses: WORST.poses.slice(), rootTakenBack: +WORST.rootTakenBack.toFixed(3) } : null };
     if (!keep) {
       WORST.depth = 0;
       LFB.fill(0); FRB.fill(0); strikeLog.length = 0;
@@ -1965,11 +1979,12 @@
     for (let o = 0; o < NP * ST; o += ST) { f[o] += dx; f[o + 2] += dz; f[o + 3] += dx; f[o + 5] += dz; }
     P.x0 += dx; P.x1 += dx; P.z0 += dz; P.z1 += dz;
   }
+  let rootBack = 0;                          // m of root push the wall clamp took back (the audit's worst record)
   function moveRoot(a, ch, P, dx, dz) {
     const p = posOf(a);
     if (!p) return;
     p.x += dx; p.z += dz;
-    if (bpClamp) { const x0 = p.x, z0 = p.z; bpClamp(a); dx += p.x - x0; dz += p.z - z0; }
+    if (bpClamp) { const x0 = p.x, z0 = p.z; bpClamp(a); dx += p.x - x0; dz += p.z - z0; rootBack += Math.hypot(p.x - x0, p.z - z0); }
     // (the player's rig is placed from his position next frame: it goes now, so what is drawn is what was solved)
     if (ch.group.position !== p) { ch.group.position.x += dx; ch.group.position.z += dz; }
     shiftParts(P, dx, dz);
@@ -1984,6 +1999,7 @@
      forearm. Left out, nothing was allowed to clear them: 2-11 cm stayed.
      A blow that lands is already on his surface (the strike holds it
      there), so it leaves nothing for this stage to act on.) */
+  const _dr = { depth: 0, i: -1, j: -1, nx: 0, ny: 1, nz: 0, s: 0, qx: 0, qy: 0, qz: 0, rb: 0, rr: 0 };
   function rootStage(A, B, PA, PB, chA, chB, all, dA, dB) {
     let mA = all ? M_ALL : M_TRUNK, mB = all ? M_ALL : M_TRUNK;
     if (!all && chA.kickT > 0) mA &= ~(chA.kickLeg === "l" ? 1 << 7 : 1 << 9);
@@ -2012,7 +2028,36 @@
       const dc = _d2.rr - _d2.depth, dyc = dc * _d2.ny, hc = dc * Math.hypot(_d2.nx, _d2.nz);
       const side = Math.sqrt(Math.max(0, _d2.rr * _d2.rr - dyc * dyc)) - hc;
       // (the whole of it, the frame it is found: 15 cm a frame left an 11-17 cm jam between two NPCs there for the eye)
-      const push = Math.min(0.3, Math.max(_d2.depth, side) + 0.003);
+      let push = Math.min(0.3, Math.max(_d2.depth, side) + 0.003);
+      /* TWO TRUNKS LEANING INTO EACH OTHER GO APART ALONG THE LINE BETWEEN
+         THE MEN. Both mid-blow, both leaning in, the two trunks cross like
+         an X seen from the side: their axes all but meet (19 cm deep of a
+         possible 20), and the direction "out of the other part" is then
+         SIDEWAYS, across the line between the men, or whatever the last
+         millimetre makes it. The roots were shoved sideways by the depth,
+         which brought the other half of each trunk into the other man, and
+         again, three times a stage: four pushes and 7 cm still in. When
+         the trunks' own contact does not point along the line between the
+         two men, they are moved along that line, by the distance at which
+         the two trunks as posed this frame no longer touch (found by
+         halving, 5 mm). */
+      if (!all && !dA && !dB && _d2.i < 2 && _d2.j < 2) {
+        let lx = ap.x - bp.x, lz = ap.z - bp.z;
+        const ll = Math.hypot(lx, lz);
+        if (ll > 0.06) {
+          lx /= ll; lz /= ll;
+          if (nx * lx + nz * lz < 0.8) {
+            let lo = 0, hi = 0.3, cur = 0;
+            for (let k = 0; k < 6; k++) {
+              const mid = (lo + hi) * 0.5;
+              shiftParts(PA, lx * (mid - cur), lz * (mid - cur)); cur = mid;
+              if (deepest(PA, 3, PB, 3, _dr, 0.002)) lo = mid; else hi = mid;
+            }
+            shiftParts(PA, -lx * cur, -lz * cur);
+            nx = lx; nz = lz; push = Math.min(0.3, hi + 0.003);
+          }
+        }
+      }
       const pa = isPlayer(A), pb = isPlayer(B);
       let wA, wB;
       if (dA && dB) return;
@@ -2062,7 +2107,7 @@
       const any = deepest(PA, mm, PB, mm, _d, 0);
       if (any && _d.depth > AU.deepestBefore) AU.deepestBefore = _d.depth;
       if (any && _d.depth > 0.003) {
-        const before = _d.depth, lf0 = AU.limbFrames, rp0 = AU.rootPushes;
+        const before = _d.depth, lf0 = AU.limbFrames, rp0 = AU.rootPushes, rb0 = rootBack;
         /* (A RIDER is one who is over the man: stepping across him or down on
            his knees. While he is still WALKING to his place beside the man
            he is a man on his feet next to a man on the floor like any
@@ -2164,6 +2209,8 @@
           WORST.capsuleShrunk = Math.min(A._bcTight != null ? clock - A._bcTight : 9, B._bcTight != null ? clock - B._bcTight : 9) < TIGHT_EASE;
           WORST.firstToYield = nameOf(X);          // (swapped twice above: X is again the one solved first)
           WORST.solvesThatFrame = AU.limbFrames - lf0; WORST.rootPushesThatFrame = AU.rootPushes - rp0;
+          // (actors[0], actors[1] order; how much of this frame's root pushes the wall clamp undid, m)
+          WORST.poses[0] = poseOf(A, chA); WORST.poses[1] = poseOf(B, chB); WORST.rootTakenBack = rootBack - rb0;
         }
       }
       if (!grip) { ownHands(A, chA, PA); ownHands(B, chB, PB); }

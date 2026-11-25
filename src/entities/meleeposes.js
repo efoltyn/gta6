@@ -418,7 +418,13 @@
        drifting in the stance is taken in steps, a foot at a time. The leg
        solve below only runs when the gait cannot have the legs (a kick, a
        footwork step, the mount, a rig with no gait). */
-    ch._gSt = want && !passive && !mounted && !ch.cuffed && (ch.fightStance || held) ? (ch.southpaw ? -1 : 1) : 0;
+    /* (NOT WHILE HE IS GETTING ON A DOWNED MAN, ch._mountGo. He stands
+       across the man at a distance worked out for feet under the hips
+       (systems/verbs_strike.js, 28 cm off his side). Squared up, the lead
+       foot is 21 cm AHEAD of the root: toward the man, its ankle 7 cm from
+       his side, and that shin leaned into his ribs as the hips went over.
+       Always the lead leg, so always the left.) */
+    ch._gSt = want && !passive && !mounted && !ch._mountGo && !ch.cuffed && (ch.fightStance || held) ? (ch.southpaw ? -1 : 1) : 0;
     ch._gHeel0 = ch._gHeel1 = ch._gTurn0 = ch._gTurn1 = 0;
     if (want && hr && hr.on && hr.t < 0.05) ch._mK = Math.max(ch._mK || 0, 0.85);   // a hit does not fade in
     ch._mK = damp(ch._mK || 0, want, want ? 16 : 7, dt);

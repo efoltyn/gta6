@@ -2080,7 +2080,34 @@
           const G = rc._gv, useG = !!(G && G.init && G.w > 0.5 && G.feet && !G.adopt), FTm = rc._mFt;
           const gi = sd > 0 ? 0 : 1;                                // the leg that crosses: his right (gait foot 0) from the left side, his left from the right
           const swing = useG && (G.feet[0].sw || G.feet[1].sw);
-          if (Math.abs(dyw) < 0.2 && !swing && (useG || FTm)) {
+          const stepping = !!(rc._mStep && rc._mStep.on);
+          /* BOTH FEET STAND CLEAR OF HIM FIRST. The stand point is the
+             root's; a foot left ahead of it (the lead foot of a stance, the
+             last stride of the walk in) is nearer the man than that, and
+             the shin over it leans into his side when the hips cross. A
+             foot whose ankle is less than a shin's thickness and 4 cm from
+             his side is stepped back level with the root, one at a time,
+             before the leg goes over. */
+          let early = false;
+          if (Math.abs(dyw) < 0.2 && !swing && !stepping && (useG || FTm) && (M.pre || 0) < 2) {
+            const g = rc.group, yaw = g.rotation.y, cy = Math.cos(yaw), sy = Math.sin(yaw);
+            const need = seatW + 0.125 * rs / 0.7;
+            for (let j = 0; j < 2 && !early; j++) {
+              let ax, az;
+              if (useG) { ax = G.feet[j].x; az = G.feet[j].z; }
+              else { const o = j ? 0 : 2; ax = g.position.x + (FTm[o] * cy + FTm[o + 1] * sy) * rs; az = g.position.z + (-FTm[o] * sy + FTm[o + 1] * cy) * rs; }
+              const fa2 = (ax - bx0) * ux + (az - bz0) * uz, fl2 = ((ax - bx0) * perpX + (az - bz0) * perpZ) * sd;
+              if (fl2 >= need) continue;
+              const st = rc._mStep || (rc._mStep = { on: false, init: false, t: 0, dur: 0.5, leg: 0, sx: 0, sz: 0, tx: 0, tz: 0, h: 0, ox: 0, oz: 0 });
+              st.on = true; st.init = false; st.t = 0; st.leg = j ? 0 : 1; st.sx = ax; st.sz = az;
+              st.tx = bx0 + ux * fa2 + perpX * off * sd; st.tz = bz0 + uz * fa2 + perpZ * off * sd;
+              st.h = 0.07 * rs / 0.7; st.dur = 0.28;
+              M.pre = (M.pre || 0) + 1; early = true;
+            }
+          }
+          if (early || stepping) {
+            // (a foot is on its way back)
+          } else if (Math.abs(dyw) < 0.2 && !swing && (useG || FTm)) {
             const g = rc.group, yaw = g.rotation.y, cy = Math.cos(yaw), sy = Math.sin(yaw);
             let fx, fz;
             if (useG) { fx = G.feet[gi].x; fz = G.feet[gi].z; }
